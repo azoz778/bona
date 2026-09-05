@@ -96,8 +96,8 @@ const arForms = JSON.stringify(countForms_('residence').ar);
         c.hidden = !show; if (show) n++;
       }
       const ar = root.dataset.countAr ? JSON.parse(root.dataset.countAr) as Record<string, string> : null;
-      const cat = ar ? new Intl.PluralRules('ar').select(n) : (n === 1 ? 'one' : 'other');
-      countEl.textContent = ar ? (ar[cat] ?? ar.other).replace('{n}', String(n)) : (n === 1 ? (root.dataset.countOne || '1') : (root.dataset.countMany || '{n}').replace('{n}', String(n)));
+      const pluralCat = ar ? new Intl.PluralRules('ar').select(n) : (n === 1 ? 'one' : 'other');
+      countEl.textContent = ar ? (ar[pluralCat] ?? ar.other).replace('{n}', String(n)) : (n === 1 ? (root.dataset.countOne || '1') : (root.dataset.countMany || '{n}').replace('{n}', String(n)));
       emptyEl.hidden = n > 0;
     };
     const setCat = (c: string) => {
