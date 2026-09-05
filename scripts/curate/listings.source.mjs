@@ -24,7 +24,7 @@ export const LISTINGS = [
     price: { amount: 8000000, currency: 'SAR', from: false, period: null, onRequest: false },
     specs: { beds: 5, baths: 8, areaSqm: 537, plotSqm: 537, yearBuilt: null, floors: 3 },
     folder: 'private-beach-villa-durrat-al-arous-jeddah',
-    images: [[13, 'pool'], [10, 'pool'], [14, 'beach'], [6, 'sea'], [0, 'terrace'], [25, 'pool_night'], [3, 'living'], [20, 'living'], [2, 'aerial']],
+    images: [[23, 'facade_night'], [13, 'pool'], [14, 'beach'], [12, 'exterior'], [6, 'sea'], [0, 'terrace'], [19, 'living'], [5, 'staircase'], [8, 'living'], [25, 'pool_night']],
     description: {
       en: [
         'Set directly on the shore at Durrat Al Arous, north of Jeddah, this five-bedroom villa opens onto its own stretch of beach and a private pool that looks straight out to sea. Full-height glazing carries the horizon through the ground floor, where the living room, dining area and kitchen face the water.',
@@ -50,7 +50,7 @@ export const LISTINGS = [
     price: { amount: 18000000, currency: 'SAR', from: false, period: null, onRequest: false },
     specs: { beds: 4, baths: 8, areaSqm: 2300, plotSqm: 2227.5, yearBuilt: null, floors: 2 },
     folder: 'exclusive-classic-mansion-al-shati-6',
-    images: [[27, 'pool'], [38, 'exterior'], [2, 'hall'], [21, 'living'], [20, 'dining'], [22, 'majlis'], [33, 'kitchen'], [26, 'bathroom'], [37, 'bedroom'], [28, 'pool']],
+    images: [[27, 'pool'], [38, 'exterior'], [18, 'hall'], [36, 'living'], [32, 'majlis'], [29, 'dining'], [33, 'kitchen'], [11, 'master'], [26, 'bathroom'], [28, 'pool']],
     description: {
       en: [
         'A classic mansion on a plot of 2,227.5 square metres in Al Shati 6, one of the most established addresses on Jeddah\'s northern waterfront. The house is arranged around a garden with a swimming pool, jacuzzi and cascading water features, with a three-car garage and a rear terrace for outdoor seating.',
@@ -76,7 +76,7 @@ export const LISTINGS = [
     price: { amount: 12000000, currency: 'SAR', from: false, period: null, onRequest: false },
     specs: { beds: 5, baths: 8, areaSqm: 750, plotSqm: 2500, yearBuilt: null, floors: null },
     folder: 'majestic-andalus-mansion',
-    images: [[6, 'pool'], [7, 'pool'], [8, 'exterior'], [2, 'living'], [3, 'majlis'], [1, 'entrance'], [9, 'garden'], [0, 'exterior']],
+    images: [[6, 'pool'], [7, 'pool'], [8, 'exterior'], [1, 'entrance'], [9, 'courtyard'], [2, 'living'], [3, 'majlis'], [5, 'living'], [4, 'dining']],
     description: {
       en: [
         'A mansion on a 2,500-square-metre corner plot in Al Andalus, with frontage on two roads and three separate entrances. The residence is built around a swimming pool and gardens to the front and rear, with a large upper terrace and marble flooring throughout.',
@@ -102,7 +102,7 @@ export const LISTINGS = [
     price: { amount: 8499000, currency: 'SAR', from: false, period: null, onRequest: false },
     specs: { beds: 5, baths: 8, areaSqm: 900, plotSqm: 550, yearBuilt: null, floors: 3 },
     folder: 'al-morjan-jeddah',
-    images: [[6, 'exterior'], [0, 'exterior'], [2, 'facade_night'], [16, 'pool'], [3, 'living'], [11, 'living'], [12, 'staircase'], [9, 'living'], [10, 'courtyard']],
+    images: [[2, 'facade_night'], [6, 'exterior'], [16, 'pool'], [8, 'entrance'], [4, 'living'], [12, 'staircase'], [11, 'living'], [9, 'living']],
     description: {
       en: [
         'A private residence in Al Murjan, moments from King Road and the Corniche. The villa offers 900 square metres of built space on a 550-square-metre plot, arranged over two floors and an independent roof-level annex, with a private pool, a landscaped garden and two internal courtyards that bring light into the centre of the house.',
@@ -128,7 +128,7 @@ export const LISTINGS = [
     price: { amount: 6700000, currency: 'SAR', from: false, period: null, onRequest: false },
     specs: { beds: 5, baths: 8, areaSqm: 640, plotSqm: 375, yearBuilt: null, floors: 3 },
     folder: 'ultra-modern-luxury-villa-al-khalidiyah',
-    images: [[8, 'pool'], [16, 'facade_night'], [24, 'pool_night'], [78, 'living'], [32, 'kitchen'], [40, 'staircase'], [53, 'bathroom'], [88, 'terrace'], [2, 'entrance'], [57, 'bedroom']],
+    images: [[16, 'facade_night'], [25, 'pool_night'], [8, 'pool'], [2, 'entrance'], [74, 'hall'], [78, 'living'], [82, 'kitchen'], [96, 'staircase'], [45, 'bathroom'], [88, 'terrace']],
     description: {
       en: [
         'A newly built contemporary villa in Al Khalidiyah, a few steps from Sari Street and Prince Sultan Road. Behind a restrained façade, the house is organised around a private pool with tiered water features and an outdoor seating area, visible from the two open-plan lounges and the fully fitted kitchen on the ground floor.',
@@ -154,7 +154,7 @@ export const LISTINGS = [
     price: { amount: 7400000, currency: 'SAR', from: false, period: null, onRequest: false },
     specs: { beds: 3, baths: 8, areaSqm: 850, plotSqm: 375, yearBuilt: null, floors: 4 },
     folder: 'modren-villa-al-zahra',
-    images: [[0, 'pool'], [1, 'exterior'], [27, 'pool'], [3, 'kitchen'], [13, 'living'], [22, 'bathroom'], [16, 'terrace'], [26, 'terrace'], [36, 'staircase'], [9, 'facade_night']],
+    images: [[27, 'pool'], [34, 'exterior'], [0, 'pool'], [5, 'entrance'], [38, 'living'], [11, 'kitchen'], [12, 'dining'], [36, 'staircase'], [23, 'bathroom'], [26, 'terrace']],
     description: {
       en: [
         'A modern villa in Al Zahra, positioned behind Stars Avenue and a few steps from King Road, Sari Street and Prince Sultan Road. The house spans 850 square metres of built area on a 375-square-metre plot, over three floors and a basement, with an outdoor pool and waterfall and an elevator connecting every level.',
@@ -180,7 +180,7 @@ export const LISTINGS = [
     price: { amount: 5499000, currency: 'SAR', from: false, period: null, onRequest: false },
     specs: { beds: 4, baths: 7, areaSqm: 600, plotSqm: 407, yearBuilt: null, floors: 3 },
     folder: 'luxury-modren-villa-al-mohamadyah-jeddah',
-    images: [[6, 'exterior'], [8, 'pool'], [5, 'exterior'], [15, 'living'], [17, 'living'], [38, 'living'], [42, 'terrace'], [43, 'skyline'], [45, 'pool_night'], [0, 'entrance']],
+    images: [[8, 'pool'], [46, 'pool_night'], [6, 'exterior'], [21, 'living'], [38, 'view'], [17, 'living'], [22, 'staircase'], [35, 'bathroom'], [42, 'terrace'], [43, 'skyline']],
     description: {
       en: [
         'A modern villa in Al Mohammadiyah with direct access to King Road and Prince Sultan Road. The house offers 600 square metres of built space on a 407-square-metre plot, with a private pool, a small garden, a one-car garage, an elevator, ducted air conditioning and smart-home controls.',
@@ -204,7 +204,7 @@ export const LISTINGS = [
     price: { amount: 5000000, currency: 'SAR', from: false, period: null, onRequest: false },
     specs: { beds: 5, baths: 8, areaSqm: null, plotSqm: 402, yearBuilt: null, floors: 3 },
     folder: 'modren-villa-al-mohammadiyyah',
-    images: [[9, 'exterior'], [45, 'exterior'], [34, 'facade_night'], [31, 'pool_night'], [13, 'living'], [18, 'living'], [17, 'bedroom'], [21, 'bathroom'], [29, 'kitchen'], [8, 'terrace']],
+    images: [[34, 'facade_night'], [45, 'exterior'], [32, 'pool_night'], [12, 'entrance'], [26, 'living'], [13, 'gallery'], [29, 'kitchen'], [17, 'master'], [21, 'bathroom'], [39, 'staircase']],
     description: {
       en: [
         'A villa in Al Mohammadiyah, close to King Road and Prince Sultan Road, finished in a warm palette of timber-clad walls, parquet flooring and marble. The house sits on a 402-square-metre plot with a swimming pool that connects directly to the living area, a garden seating area and a one-car garage.',
@@ -230,7 +230,7 @@ export const LISTINGS = [
     price: { amount: 3800000, currency: 'SAR', from: false, period: null, onRequest: false },
     specs: { beds: 5, baths: 8, areaSqm: 1200, plotSqm: 450, yearBuilt: null, floors: 3 },
     folder: 'modren-villa-al-shera-a-north-obhur',
-    images: [[38, 'pool'], [39, 'facade_night'], [15, 'pool'], [9, 'staircase'], [5, 'living'], [14, 'bathroom'], [24, 'bathroom'], [37, 'terrace'], [47, 'pool_night'], [1, 'entrance']],
+    images: [[38, 'pool'], [39, 'facade_night'], [2, 'exterior'], [1, 'entrance'], [9, 'staircase'], [5, 'living'], [41, 'courtyard'], [11, 'living'], [23, 'bathroom'], [47, 'pool_night']],
     description: {
       en: [
         'A south-facing villa in the Al Shera\'a scheme of North Obhur, overlooking a large public garden and close to daily services. The house offers 1,200 square metres of built space on a 450-square-metre plot, with ceilings up to 4.3 metres, marble floors, a marble staircase with glass balustrades and a large private pool with waterfalls.',
@@ -256,7 +256,7 @@ export const LISTINGS = [
     price: { amount: 3600000, currency: 'SAR', from: false, period: null, onRequest: false },
     specs: { beds: 5, baths: 8, areaSqm: 620, plotSqm: 375, yearBuilt: null, floors: 3 },
     folder: 'modren-duplex',
-    images: [[3, 'facade_night'], [11, 'courtyard'], [0, 'exterior'], [9, 'living'], [6, 'living'], [4, 'bathroom'], [7, 'staircase'], [10, 'garden']],
+    images: [[3, 'facade_night'], [13, 'exterior'], [2, 'entrance'], [9, 'living'], [7, 'staircase'], [6, 'living'], [11, 'courtyard'], [4, 'bathroom']],
     description: {
       en: [
         'A modern villa within the Marafi development in South Obhur, minutes from the Corniche and the main roads. The 375-square-metre plot fronts a 25-metre-wide street, and the house offers roughly 620 square metres of built space with full Italian marble flooring, an Italian elevator and separate ducted air-conditioning units.',
@@ -280,7 +280,7 @@ export const LISTINGS = [
     price: { amount: 2900000, currency: 'SAR', from: false, period: null, onRequest: false },
     specs: { beds: 5, baths: 7, areaSqm: 550, plotSqm: 383, yearBuilt: null, floors: 3 },
     folder: 'modren-villa-north-obhur',
-    images: [[5, 'pool'], [4, 'pool'], [51, 'facade_night'], [47, 'pool_night'], [6, 'living'], [18, 'living'], [8, 'staircase'], [10, 'bathroom'], [34, 'terrace'], [25, 'bedroom']],
+    images: [[39, 'exterior'], [51, 'facade_night'], [4, 'pool'], [11, 'entrance'], [7, 'living'], [8, 'staircase'], [25, 'view'], [23, 'bathroom'], [34, 'terrace']],
     description: {
       en: [
         'A villa in the Al Lulu district of Obhur, a short walk from the Corniche and the Red Sea shore. The house offers 550 square metres of built space on a 383-square-metre plot, with marble floors, a marble staircase with glass balustrades, ceilings of around three metres, an elevator and parking for two cars.',
@@ -306,7 +306,7 @@ export const LISTINGS = [
     price: { amount: 3150000, currency: 'SAR', from: true, period: null, onRequest: false },
     specs: { beds: 6, baths: 8, areaSqm: 300, plotSqm: null, yearBuilt: null, floors: 3 },
     folder: 'modern-villas-for-sale-in-al-bandar-north-obhur',
-    images: [[20, 'pool'], [8, 'pool'], [41, 'exterior'], [11, 'living'], [19, 'living'], [26, 'bathroom'], [23, 'bedroom'], [36, 'terrace'], [44, 'pool_night'], [15, 'staircase']],
+    images: [[20, 'pool'], [44, 'pool_night'], [1, 'entrance'], [2, 'courtyard'], [19, 'living'], [15, 'staircase'], [11, 'living'], [23, 'bedroom'], [26, 'bathroom'], [36, 'terrace']],
     description: {
       en: [
         'A collection of contemporary villas in Al Bandar, North Obhur, each with six master bedrooms and eight bathrooms on a 300-square-metre footprint. Every villa has a private pool and an elevator, with the latest home technology throughout.',
@@ -332,7 +332,7 @@ export const LISTINGS = [
     price: { amount: 1550000, currency: 'SAR', from: true, period: null, onRequest: false },
     specs: { beds: 3, baths: 6, areaSqm: 214, plotSqm: null, yearBuilt: null, floors: 2 },
     folder: 'penthouse-al-salama',
-    images: [[0, 'exterior'], [5, 'living'], [4, 'living'], [11, 'staircase'], [16, 'staircase'], [21, 'bathroom'], [23, 'bedroom'], [13, 'bathroom'], [32, 'exterior']],
+    images: [[5, 'living'], [32, 'exterior'], [10, 'view'], [1, 'entrance'], [9, 'living'], [16, 'staircase'], [23, 'bedroom'], [21, 'bathroom'], [12, 'living']],
     description: {
       en: [
         'A two-storey penthouse of 214 square metres in Al Salamah, with private entrances on both levels, insulated windows and a smart-home installation that includes lighting control, built-in speakers and a central vacuum system.',
@@ -356,7 +356,7 @@ export const LISTINGS = [
     price: { amount: 1800000, currency: 'SAR', from: false, period: null, onRequest: false },
     specs: { beds: 3, baths: 5, areaSqm: 307, plotSqm: null, yearBuilt: null, floors: null },
     folder: 'nobal-5',
-    images: [[0, 'exterior'], [1, 'facade_night'], [9, 'living'], [5, 'living'], [11, 'staircase'], [16, 'bathroom'], [18, 'bathroom'], [14, 'exterior']],
+    images: [[1, 'facade_night'], [0, 'exterior'], [10, 'lobby'], [9, 'living'], [12, 'staircase'], [5, 'living'], [16, 'bathroom'], [18, 'bathroom']],
     description: {
       en: [
         'NOBAL Five is a building of five residences in Al Rawdah, one apartment per floor, each occupying its entire level with a private elevator. The apartment measures 307 square metres and holds three master bedrooms, five bathrooms, a maid\'s room, a large living room and a modern kitchen.',
@@ -380,7 +380,7 @@ export const LISTINGS = [
     price: { amount: 1450000, currency: 'SAR', from: true, period: null, onRequest: false },
     specs: { beds: 3, baths: null, areaSqm: 200, plotSqm: null, yearBuilt: null, floors: null },
     folder: 'al-zahrah-apartment',
-    images: [[10, 'exterior'], [21, 'facade_night'], [25, 'living'], [14, 'balcony'], [19, 'terrace'], [12, 'living'], [4, 'bathroom'], [3, 'bathroom'], [0, 'facade_night']],
+    images: [[21, 'facade_night'], [10, 'exterior'], [11, 'lobby'], [25, 'living'], [14, 'balcony'], [12, 'living'], [18, 'view'], [4, 'bathroom'], [19, 'terrace']],
     virtualTourUrl: 'https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0',
     description: {
       en: [
@@ -405,7 +405,7 @@ export const LISTINGS = [
     price: { amount: 7500000, currency: 'SAR', from: false, period: null, onRequest: false },
     specs: { beds: 5, baths: 8, areaSqm: 750, plotSqm: 660, yearBuilt: null, floors: 3 },
     folder: 'villa-al-shati-1',
-    images: [[9, 'pool'], [57, 'facade_night'], [3, 'entrance'], [16, 'living'], [20, 'staircase'], [21, 'kitchen'], [27, 'bathroom'], [50, 'pool_night']],
+    images: [[9, 'pool'], [5, 'exterior'], [3, 'entrance'], [33, 'hall'], [16, 'living'], [21, 'kitchen'], [20, 'staircase'], [52, 'pool_night']],
     description: {
       en: [
         'A villa a few steps from the Corniche in Al Shati 1, set on 660 square metres with 750 square metres of built space and entrances from two wide streets. The house has a private pool, a marble-finished American kitchen, all-marble floors and a northern façade overlooking a large garden.',
@@ -431,7 +431,7 @@ export const LISTINGS = [
     price: { amount: 4600000, currency: 'SAR', from: false, period: null, onRequest: false },
     specs: { beds: 5, baths: 7, areaSqm: 420, plotSqm: null, yearBuilt: null, floors: 3 },
     folder: 'villa-al-khalidiyah',
-    images: [[85, 'exterior'], [92, 'facade_night'], [96, 'pool'], [17, 'living'], [61, 'kitchen'], [26, 'bedroom'], [42, 'bathroom'], [3, 'terrace']],
+    images: [[102, 'facade_night'], [96, 'pool'], [85, 'exterior'], [17, 'living'], [66, 'hall'], [60, 'living'], [64, 'kitchen'], [33, 'bedroom'], [42, 'bathroom'], [5, 'terrace']],
     description: {
       en: [
         'A villa of 420 square metres directly opposite a park on Prince Sultan Street, a few steps from Sari Road in Al Khalidiyah. The house has two entrances, indoor parking for two cars, a pool with front and rear gardens, a large upper terrace and marble flooring throughout.',
@@ -459,7 +459,7 @@ export const LISTINGS = [
     price: { amount: 150000, currency: 'SAR', from: false, period: 'year', onRequest: false },
     specs: { beds: 4, baths: 5, areaSqm: null, plotSqm: null, yearBuilt: null, floors: 3 },
     folder: 'villa-for-rent-al-shati-2',
-    images: [[0, 'exterior'], [14, 'sea'], [25, 'facade_night'], [4, 'living'], [1, 'staircase'], [16, 'kitchen'], [22, 'bathroom'], [27, 'exterior']],
+    images: [[25, 'facade_night'], [28, 'exterior'], [24, 'entrance'], [4, 'living'], [9, 'staircase'], [20, 'kitchen'], [8, 'living'], [12, 'bathroom']],
     description: {
       en: [
         'A four-bedroom villa in Al Shati 2, behind the Rosewood Hotel and the Damac tower, a three-minute walk from the Corniche. The house has a living room, a main kitchen and a kitchenette, five bathrooms and a surveillance system that can be viewed from the television.',
@@ -483,7 +483,7 @@ export const LISTINGS = [
     price: { amount: 250000, currency: 'SAR', from: false, period: 'year', onRequest: false },
     specs: { beds: 5, baths: 7, areaSqm: 518, plotSqm: 364, yearBuilt: null, floors: 3 },
     folder: 'modern-luxury-villas-al-murjan',
-    images: [[13, 'exterior'], [0, 'facade_night'], [6, 'pool'], [7, 'living'], [8, 'living'], [3, 'staircase'], [1, 'bathroom'], [19, 'terrace']],
+    images: [[0, 'facade_night'], [21, 'exterior'], [6, 'pool'], [14, 'entrance'], [7, 'living'], [3, 'staircase'], [17, 'living'], [10, 'skyline']],
     description: {
       en: [
         'A contemporary villa for rent in Al Murjan, behind King Road and steps from the Corniche. The house has 518 square metres of built space on a 364-square-metre plot, with a private pool, an internal elevator, central air conditioning and two independent entrances.',
@@ -507,7 +507,7 @@ export const LISTINGS = [
     price: { amount: 165000, currency: 'SAR', from: false, period: 'year', onRequest: false },
     specs: { beds: 4, baths: 7, areaSqm: 500, plotSqm: 350, yearBuilt: null, floors: 3 },
     folder: 'fully-renovated-villa-al-murjan',
-    images: [[1, 'pool'], [0, 'exterior'], [8, 'living'], [2, 'living'], [4, 'kitchen'], [14, 'bathroom'], [12, 'bathroom'], [16, 'exterior']],
+    images: [[1, 'pool'], [0, 'exterior'], [8, 'living'], [5, 'kitchen'], [3, 'living'], [10, 'bedroom'], [7, 'living'], [12, 'bathroom']],
     description: {
       en: [
         'A fully renovated villa for rent in the heart of Al Murjan, moments from the Corniche and King Road. The house offers 500 square metres of built space on a 350-square-metre plot, with a private pool, two independent entrances and high-quality finishing throughout.',
@@ -531,7 +531,7 @@ export const LISTINGS = [
     price: { amount: 160000, currency: 'SAR', from: false, period: 'year', onRequest: false },
     specs: { beds: 4, baths: 6, areaSqm: 500, plotSqm: null, yearBuilt: null, floors: 3 },
     folder: 'villa-al-mohamediya',
-    images: [[2, 'entrance'], [22, 'facade_night'], [0, 'exterior'], [16, 'living'], [5, 'staircase'], [10, 'bathroom'], [13, 'living'], [18, 'staircase']],
+    images: [[4, 'entrance'], [0, 'exterior'], [3, 'courtyard'], [16, 'living'], [5, 'staircase'], [13, 'living'], [10, 'bathroom'], [18, 'staircase']],
     description: {
       en: [
         'A 500-square-metre villa for rent in Al Mohammadiyah, finished in marble with a smart-home installation. Four master bedrooms, six bathrooms and three living rooms are arranged over three floors.',
@@ -557,7 +557,7 @@ export const LISTINGS = [
     price: { amount: 3200000, currency: 'SAR', from: true, period: null, onRequest: false },
     specs: { beds: null, baths: null, areaSqm: null, plotSqm: null, yearBuilt: null, floors: null },
     folder: 'trump-tower-jeddah',
-    images: [[9, 'tower'], [11, 'facade_night'], [10, 'sea'], [3, 'living'], [0, 'bedroom'], [6, 'dining'], [4, 'lounge'], [7, 'lobby'], [8, 'bar']],
+    images: [[9, 'tower'], [11, 'facade_night'], [10, 'sea'], [7, 'lobby'], [3, 'living'], [6, 'dining'], [0, 'master'], [4, 'lounge'], [8, 'bar'], [5, 'gym']],
     description: {
       en: [
         'Trump Tower Jeddah rises on the Corniche in Al Shati, a residential landmark overlooking the Red Sea. The tower offers one- to four-bedroom residences from 70 to 365 square metres and three- and four-bedroom penthouses, all with uninterrupted sea views.',
@@ -583,7 +583,7 @@ export const LISTINGS = [
     price: { amount: 1750000, currency: 'SAR', from: true, period: null, onRequest: false },
     specs: { beds: null, baths: null, areaSqm: null, plotSqm: null, yearBuilt: null, floors: null },
     folder: 'trump-plaza-jeddah',
-    images: [[6, 'exterior'], [2, 'entrance'], [0, 'courtyard'], [4, 'living'], [5, 'bedroom'], [3, 'dining'], [8, 'spa'], [12, 'indoor_pool'], [17, 'gym'], [15, 'lounge']],
+    images: [[6, 'exterior'], [2, 'entrance'], [7, 'courtyard'], [4, 'living'], [3, 'dining'], [5, 'master'], [12, 'indoor_pool'], [10, 'spa'], [17, 'gym'], [15, 'bar']],
     description: {
       en: [
         'Trump Plaza Jeddah offers fully furnished, Trump-branded residences in one-, two- and three-bedroom layouts from 70 to 147 square metres, across seven floors in Al Shati. Interiors are finished to hotel standard and delivered ready to move in, with à la carte services.',
@@ -609,7 +609,7 @@ export const LISTINGS = [
     price: { amount: 5000000, currency: 'SAR', from: false, period: null, onRequest: false },
     specs: { beds: 4, baths: 7, areaSqm: 304, plotSqm: null, yearBuilt: null, floors: 3 },
     folder: 'nobal-arista',
-    images: [[1, 'render'], [0, 'render'], [2, 'entrance'], [4, 'living'], [5, 'living'], [3, 'dining'], [6, 'bedroom'], [7, 'bathroom'], [8, 'living']],
+    images: [[2, 'entrance'], [0, 'render'], [9, 'living'], [3, 'dining'], [4, 'living'], [6, 'master'], [8, 'living'], [7, 'bathroom']],
     description: {
       en: [
         'NOBAL Arista is a limited collection of six villas in Al Khalidiyah, each with 304 square metres of built space over three floors, four bedrooms and seven bathrooms, a private garden and pool, and rooms for driver and maid.',
@@ -636,7 +636,7 @@ export const LISTINGS = [
     specs: { beds: null, baths: 3, areaSqm: 136, plotSqm: null, yearBuilt: 2024, floors: null },
     project: KAYAN_PROJECT, // parent project page; units share its developer renders
     folder: 'kian-residence',
-    images: [[17, 'exterior'], [13, 'facade_night'], [16, 'lobby'], [0, 'living'], [2, 'kitchen'], [3, 'living'], [10, 'cafe'], [14, 'gym'], [1, 'bathroom']],
+    images: [[17, 'exterior'], [13, 'facade_night'], [16, 'lobby'], [0, 'living'], [2, 'kitchen'], [3, 'living'], [10, 'cafe'], [14, 'gym'], [11, 'terrace']],
     description: {
       en: [
         'Kayan Residence brings hotel-style living to Al Nahda, minutes from Jeddah\'s principal destinations. Apartments of about 136 square metres offer two to three bedrooms, three bathrooms, a large living room and a modern kitchen, each served by its own private elevator; individual units are listed separately with their exact layout and price.',
@@ -660,7 +660,7 @@ export const LISTINGS = [
     price: { amount: 1600000, currency: 'SAR', from: true, period: null, onRequest: false },
     specs: { beds: null, baths: null, areaSqm: null, plotSqm: null, yearBuilt: null, floors: null },
     folder: 'dari-2',
-    images: [[7, 'aerial'], [19, 'rooftop_pool'], [0, 'entrance'], [13, 'pool_night'], [5, 'living'], [1, 'living'], [4, 'lobby'], [8, 'gym'], [11, 'event_hall'], [30, 'exterior']],
+    images: [[7, 'aerial'], [19, 'rooftop_pool'], [14, 'pool_night'], [4, 'lobby'], [25, 'lounge'], [5, 'living'], [6, 'kitchen'], [11, 'event_hall'], [8, 'gym'], [30, 'exterior']],
     description: {
       en: [
         'Dari II is a residential community in Al Salamah, central Jeddah, designed around minimalist architecture and warm natural finishes. Three- and four-bedroom apartments and a penthouse range from 164 to 383 square metres across five floors.',
@@ -684,7 +684,7 @@ export const LISTINGS = [
     price: { amount: 1900000, currency: 'SAR', from: true, period: null, onRequest: false },
     specs: { beds: null, baths: null, areaSqm: null, plotSqm: null, yearBuilt: null, floors: null },
     folder: 'marriott-residences-aida-oman',
-    images: [[0, 'render'], [4, 'render'], [8, 'living'], [1, 'balcony'], [5, 'pool'], [6, 'kitchen'], [7, 'dining'], [3, 'golf']],
+    images: [[5, 'pool'], [4, 'render'], [1, 'balcony'], [8, 'living'], [7, 'dining'], [6, 'kitchen'], [3, 'golf'], [2, 'view']],
     description: {
       en: [
         'Fully furnished residences under the Marriott name within AIDA, the coastal community at Muscat. One-, two- and three-bedroom apartments range from 60 to 194 square metres, with interiors delivered complete.',
@@ -712,7 +712,7 @@ export const LISTINGS = [
     price: { amount: 38000000, currency: 'EUR', from: false, period: null, onRequest: false },
     specs: { beds: 8, baths: 16, areaSqm: 1769, plotSqm: 7000, yearBuilt: null, floors: 3 },
     folder: 'palais-rose',
-    images: [[10, 'exterior'], [1, 'aerial'], [7, 'winter_garden'], [22, 'living'], [20, 'dining'], [19, 'indoor_pool'], [15, 'bedroom'], [9, 'kitchen'], [0, 'cinema'], [13, 'grounds']],
+    images: [[10, 'exterior'], [1, 'aerial'], [7, 'winter_garden'], [18, 'living'], [20, 'dining'], [22, 'living'], [9, 'kitchen'], [15, 'master'], [19, 'indoor_pool'], [6, 'grounds']],
     description: {
       en: [
         'Twenty minutes from Porte Maillot, within the Parc des Ibis in Le Vésinet, Palais Rose is a private estate inspired by the Grand Trianon. The main residence offers 1,769 square metres across the lower ground, garden and ground floors, set in 7,000 square metres of landscaped grounds with a Japanese garden, a rose garden, a central fountain, a greenhouse and a private football pitch.',
@@ -738,7 +738,7 @@ export const LISTINGS = [
     price: { amount: 120000000, currency: 'EUR', from: false, period: null, onRequest: false },
     specs: { beds: 12, baths: 16, areaSqm: 3000, plotSqm: 30000, yearBuilt: null, floors: 3 },
     folder: 'palais-venitien',
-    images: [[27, 'pool'], [2, 'aerial'], [1, 'pool_night'], [20, 'aerial'], [17, 'hall'], [13, 'winter_garden'], [10, 'indoor_pool'], [15, 'dining'], [21, 'cinema'], [6, 'tennis']],
+    images: [[27, 'pool'], [1, 'pool_night'], [5, 'terrace'], [17, 'hall'], [14, 'living'], [15, 'dining'], [10, 'indoor_pool'], [13, 'winter_garden'], [21, 'cinema'], [2, 'aerial']],
     description: {
       en: [
         'Palais Vénitien is a palatial residence above Cannes, inspired by the architecture of Byzantium and Venice and looking out over the town and the Mediterranean. The interior spans more than 2,000 square metres of monumental columns and mouldings, within an estate of three hectares.',
@@ -764,7 +764,7 @@ export const LISTINGS = [
     price: { amount: 6800000, currency: 'AED', from: true, period: null, onRequest: false },
     specs: { beds: null, baths: null, areaSqm: null, plotSqm: null, yearBuilt: null, floors: 19 },
     folder: 'da-vinci-tower-interiors-by-pagani',
-    images: [[17, 'tower'], [19, 'aerial'], [5, 'rooftop_pool'], [6, 'living'], [10, 'living'], [11, 'kitchen'], [14, 'bedroom'], [12, 'pool'], [9, 'gym']],
+    images: [[17, 'tower'], [5, 'rooftop_pool'], [13, 'pool'], [6, 'living'], [15, 'lounge'], [11, 'kitchen'], [14, 'master'], [9, 'gym'], [19, 'aerial']],
     description: {
       en: [
         'Da Vinci Tower is the first residential building with interiors by Pagani. Nineteen storeys rise above the Dubai Canal in Downtown Dubai, moments from Marasi Business Bay, with views of the Burj Khalifa; a suspended sphere, the \'pearl\', sits at the heart of the geometric façade.',
@@ -790,7 +790,7 @@ export const LISTINGS = [
     price: { amount: null, currency: 'EUR', from: false, period: null, onRequest: true },
     specs: { beds: 6, baths: null, areaSqm: null, plotSqm: null, yearBuilt: null, floors: null },
     folder: 'painite-villas-by-lamborghini',
-    images: [[1, 'render'], [4, 'render'], [3, 'living'], [5, 'living'], [6, 'car_lift'], [2, 'aerial'], [0, 'grounds']],
+    images: [[1, 'render'], [4, 'render'], [3, 'living'], [2, 'aerial'], [5, 'living'], [6, 'car_lift']],
     description: {
       en: [
         'Within Tierra Viva, a gated community in the hills of Benahavís designed in partnership with Automobili Lamborghini, the Painite Villas are the only villas in southern Spain with a private Sky Car Lift. The lift carries a car through a glass dome into the living space, where floor-to-ceiling glazing frames the Mediterranean and the Andalusian hills.',
@@ -816,7 +816,7 @@ export const LISTINGS = [
     price: { amount: 4000000, currency: 'SAR', from: true, period: null, onRequest: false },
     specs: { beds: 3, baths: null, areaSqm: null, plotSqm: null, yearBuilt: null, floors: null },
     folder: 'trump-golf-villas',
-    images: [[6, 'render'], [0, 'aerial'], [1, 'bedroom'], [7, 'living'], [8, 'terrace'], { folder: 'aida', i: 2, room: 'pool' }, [2, 'lounge'], [5, 'pool'], { folder: 'aida', i: 9, room: 'golf' }, [4, 'bar']],
+    images: [[6, 'render'], { folder: 'aida', i: 2, room: 'pool' }, [5, 'pool'], [7, 'living'], [8, 'terrace'], [1, 'master'], [2, 'lounge'], [4, 'bar'], { folder: 'aida', i: 9, room: 'golf' }, [0, 'aerial']],
     description: {
       en: [
         'The Trump Cliff Villas sit 130 metres above sea level beside the Trump International Hotel within AIDA, on the coast at Muscat. Each three-bedroom villa is delivered fully furnished with a private pool overlooking the sea, in 128 to 166 square metres.',
@@ -849,7 +849,7 @@ export const LISTINGS = [
     project: KAYAN_PROJECT,
     unit: { floor: '1st, 2nd or 3rd', block: '128', unitRef: 'KIA-128A' },
     folder: 'kian-residence',
-    images: [[18, 'exterior'], [0, 'living'], [2, 'kitchen'], [5, 'bedroom'], [1, 'bathroom'], [16, 'lobby'], [10, 'cafe'], [13, 'facade_night']],
+    images: [[18, 'exterior'], [13, 'facade_night'], [16, 'lobby'], [0, 'living'], [2, 'kitchen'], [5, 'bedroom'], [10, 'cafe'], [1, 'bathroom']],
     description: {
       en: [
         'A four-room apartment of 136 square metres in Kayan Residence, Al Nahda, a short distance from the Jeddah waterfront. The plan holds two bedrooms, three bathrooms, a large living room and a modern kitchen, and each apartment is served by its own private elevator.',
@@ -877,7 +877,7 @@ export const LISTINGS = [
     project: KAYAN_PROJECT,
     unit: { floor: '1st or 3rd', block: '127', unitRef: 'KIA-127A' },
     folder: 'kian-residence',
-    images: [[13, 'facade_night'], [3, 'living'], [4, 'kitchen'], [6, 'bedroom'], [1, 'bathroom'], [12, 'cafe'], [14, 'gym']],
+    images: [[13, 'facade_night'], [17, 'exterior'], [16, 'lobby'], [3, 'living'], [4, 'kitchen'], [6, 'bedroom'], [12, 'cafe'], [1, 'bathroom']],
     description: {
       en: [
         'The three-room plan at Kayan Residence, Al Nahda: 120 square metres with two bedrooms, three bathrooms, a living room and a fitted kitchen, served by a private elevator. The building was completed in 2024 by Kian Al-Masiah.',
@@ -905,7 +905,7 @@ export const LISTINGS = [
     project: kianBuilding('113', AL_NUZHAH),
     unit: { floor: null, block: '113', unitRef: 'KIA-113A' },
     folder: 'kian-residence',
-    images: [[0, 'living'], [2, 'kitchen'], [7, 'bedroom'], [1, 'bathroom'], [16, 'lobby'], [17, 'exterior']],
+    images: [[16, 'lobby'], [17, 'exterior'], [0, 'living'], [2, 'kitchen'], [6, 'bedroom'], [11, 'terrace'], [1, 'bathroom']],
     description: {
       en: [
         'A five-room apartment of 174 square metres in Building 113, Al Nuzhah, on a commercial street with shops and services on the doorstep. Three bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.',
@@ -931,7 +931,7 @@ export const LISTINGS = [
     project: kianBuilding('113', AL_NUZHAH),
     unit: { floor: null, block: '113', unitRef: 'KIA-113B' },
     folder: 'kian-residence',
-    images: [[3, 'living'], [4, 'kitchen'], [5, 'bedroom'], [8, 'bedroom'], [1, 'bathroom'], [11, 'terrace'], [18, 'exterior']],
+    images: [[0, 'living'], [18, 'exterior'], [16, 'lobby'], [4, 'kitchen'], [5, 'bedroom'], [11, 'terrace'], [1, 'bathroom']],
     description: {
       en: [
         'The largest plan in Building 113, Al Nuzhah: 182 square metres over five rooms, with three bedrooms and three bathrooms, on a commercial street close to everyday shops and services. Completed in 2024 by Kian Al-Masiah.',
@@ -957,7 +957,7 @@ export const LISTINGS = [
     project: kianBuilding('113', AL_NUZHAH),
     unit: { floor: null, block: '113', unitRef: 'KIA-113C' },
     folder: 'kian-residence',
-    images: [[16, 'lobby'], [0, 'living'], [2, 'kitchen'], [6, 'bedroom'], [1, 'bathroom'], [15, 'parking']],
+    images: [[10, 'cafe'], [17, 'exterior'], [16, 'lobby'], [0, 'living'], [2, 'kitchen'], [6, 'bedroom'], [1, 'bathroom']],
     description: {
       en: [
         'A corner apartment of 174 square metres in Building 113, Al Nuzhah, with frontage on two streets and daylight from two sides. Five rooms in all: three bedrooms, three bathrooms and the living spaces. Completed in 2024 by Kian Al-Masiah.',
@@ -983,7 +983,7 @@ export const LISTINGS = [
     project: kianBuilding('114', AL_NUZHAH),
     unit: { floor: null, block: '114', unitRef: 'KIA-114B' },
     folder: 'kian-residence',
-    images: [[2, 'kitchen'], [3, 'living'], [7, 'bedroom'], [1, 'bathroom'], [14, 'gym'], [17, 'exterior']],
+    images: [[11, 'terrace'], [18, 'exterior'], [16, 'lobby'], [3, 'living'], [2, 'kitchen'], [8, 'bedroom'], [1, 'bathroom']],
     description: {
       en: [
         'A five-room apartment of 169 square metres at the rear of Building 114, Al Nuzhah, set back from the commercial street the building fronts, so the bedrooms sit on the quieter side. Three bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.',
@@ -1009,7 +1009,7 @@ export const LISTINGS = [
     project: kianBuilding('114', AL_NUZHAH),
     unit: { floor: '4th', block: '114', unitRef: 'KIA-114C' },
     folder: 'kian-residence',
-    images: [[4, 'kitchen'], [0, 'living'], [8, 'bedroom'], [1, 'bathroom'], [10, 'cafe'], [13, 'facade_night']],
+    images: [[14, 'gym'], [17, 'exterior'], [16, 'lobby'], [0, 'living'], [4, 'kitchen'], [8, 'bedroom'], [1, 'bathroom']],
     description: {
       en: [
         'A four-room apartment of 151 square metres on the fourth floor of Building 114, Al Nuzhah, facing the commercial street. Two bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.',
@@ -1035,7 +1035,7 @@ export const LISTINGS = [
     project: kianBuilding('117', AL_NUZHAH),
     unit: { floor: null, block: '117', unitRef: 'KIA-117B' },
     folder: 'kian-residence',
-    images: [[10, 'cafe'], [3, 'living'], [2, 'kitchen'], [5, 'bedroom'], [1, 'bathroom'], [9, 'entrance'], [18, 'exterior']],
+    images: [[12, 'cafe'], [18, 'exterior'], [16, 'lobby'], [3, 'living'], [2, 'kitchen'], [5, 'bedroom'], [11, 'terrace'], [1, 'bathroom']],
     description: {
       en: [
         'A five-room apartment of 169 square metres at the rear of Building 117, Al Nuzhah, away from the commercial street on which the building stands. Three bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.',
@@ -1061,7 +1061,7 @@ export const LISTINGS = [
     project: kianBuilding('117', AL_NUZHAH),
     unit: { floor: null, block: '117', unitRef: 'KIA-117C' },
     folder: 'kian-residence',
-    images: [[11, 'terrace'], [0, 'living'], [4, 'kitchen'], [6, 'bedroom'], [1, 'bathroom'], [16, 'lobby']],
+    images: [[7, 'view'], [17, 'exterior'], [16, 'lobby'], [0, 'living'], [4, 'kitchen'], [6, 'bedroom'], [10, 'cafe']],
     description: {
       en: [
         'A four-room apartment of 151 square metres in Building 117, Al Nuzhah, facing the commercial street. Two bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.',
@@ -1087,7 +1087,7 @@ export const LISTINGS = [
     project: kianBuilding('115', AL_RAYYAN),
     unit: { floor: null, block: '115', unitRef: 'KIA-115A' },
     folder: 'kian-residence',
-    images: [[7, 'bedroom'], [3, 'living'], [2, 'kitchen'], [1, 'bathroom'], [12, 'cafe'], [17, 'exterior']],
+    images: [[9, 'entrance'], [18, 'exterior'], [16, 'lobby'], [3, 'living'], [2, 'kitchen'], [5, 'bedroom'], [14, 'gym']],
     description: {
       en: [
         'A four-room apartment of 140 square metres on the front of Building 115 in Al Rayyan, with the main façade and its windows to the street. Two bedrooms and three bathrooms, completed in 2023 by Kian Al-Masiah.',
@@ -1112,7 +1112,7 @@ export const LISTINGS = [
     price: { amount: 1200000, currency: 'SAR', from: true, period: null, onRequest: false },
     specs: { beds: 3, baths: 3, areaSqm: 160.5, plotSqm: null, yearBuilt: null, floors: null },
     folder: 'dari-q-luxury-apartment',
-    images: [[1, 'exterior'], [0, 'rooftop_pool'], [39, 'aerial'], [12, 'lobby'], [24, 'living'], [17, 'kitchen'], [19, 'bedroom'], [27, 'bathroom'], [2, 'courtyard'], [8, 'gym']],
+    images: [[6, 'rooftop_pool'], [15, 'exterior'], [12, 'lobby'], [20, 'living'], [17, 'kitchen'], [24, 'living'], [27, 'bathroom'], [8, 'gym'], [34, 'courtyard'], [39, 'aerial']],
     description: {
       en: [
         'Dari Q is a completed apartment building in Al Salamah, north Jeddah, with a Starbucks at street level and a landscaped courtyard at its centre. The three-bedroom apartments measure 160.5 square metres with three bathrooms, and are offered from SAR 1,200,000.',
@@ -1136,7 +1136,7 @@ export const LISTINGS = [
     price: { amount: 4600000, currency: 'SAR', from: true, period: null, onRequest: false },
     specs: { beds: 5, baths: null, areaSqm: null, plotSqm: null, yearBuilt: null, floors: null },
     folder: 'neptune-interiors-by-mouawad',
-    images: [[0, 'exterior'], [1, 'aerial'], [2, 'render'], [3, 'terrace']],
+    images: [[2, 'exterior'], [3, 'terrace'], [0, 'render'], [1, 'aerial']],
     description: {
       en: [
         'Neptune Villas is a villa community under construction in north Riyadh, with interiors by the jeweller Mouawad. Each villa has five bedrooms, in sizes from 300 to 420 square metres; the renders show roof terraces and covered parking.',
@@ -1160,7 +1160,7 @@ export const LISTINGS = [
     price: { amount: 1700000, currency: 'SAR', from: true, period: null, onRequest: false },
     specs: { beds: 1, baths: null, areaSqm: null, plotSqm: null, yearBuilt: null, floors: null },
     folder: 'trump-international-hotel-oman',
-    images: [[0, 'pool'], [4, 'living'], [7, 'bedroom'], [5, 'lounge'], [3, 'bathroom'], [11, 'aerial'], [12, 'entrance'], [15, 'facade_night'], [13, 'pool'], [1, 'lounge']],
+    images: [[0, 'pool'], [13, 'pool_night'], [8, 'lobby'], [6, 'living'], [7, 'master'], [5, 'event_hall'], [1, 'lounge'], [4, 'terrace'], [3, 'bathroom'], [11, 'aerial']],
     description: {
       en: [
         'Serviced residences within the Trump International Hotel at AIDA, on the cliffs above the sea at Muscat. Apartments range from 43 to 138 square metres with one to three bedrooms, delivered fully furnished.',

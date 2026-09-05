@@ -467,11 +467,6 @@
         },
         {
           "folder": "al-morjan-jeddah",
-          "i": 3,
-          "room": "living"
-        },
-        {
-          "folder": "al-morjan-jeddah",
           "i": 9,
           "room": "living"
         }
@@ -1230,7 +1225,7 @@
       "newHero": {
         "folder": "modren-villa-north-obhur",
         "i": 39,
-        "room": "pool"
+        "room": "exterior"
       },
       "heroChanged": true,
       "orderChanged": true,
@@ -1290,7 +1285,7 @@
         {
           "folder": "modren-villa-north-obhur",
           "i": 39,
-          "room": "pool"
+          "room": "exterior"
         },
         {
           "folder": "modren-villa-north-obhur",
@@ -1301,11 +1296,6 @@
           "folder": "modren-villa-north-obhur",
           "i": 4,
           "room": "pool"
-        },
-        {
-          "folder": "modren-villa-north-obhur",
-          "i": 43,
-          "room": "exterior"
         },
         {
           "folder": "modren-villa-north-obhur",
