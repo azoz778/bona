@@ -7,13 +7,13 @@ import { ClientRouter } from 'astro:transitions';
 import Head from '../components/seo/Head.astro';
 import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
-import WhatsAppFloat from '../components/WhatsAppFloat.astro';
+import Concierge from '../components/concierge/Concierge.astro';
 import { dir, t, ui, type Locale } from '../lib/i18n';
 interface Props {
   title: string; description: string; locale: Locale; path: string; image?: string; noindex?: boolean; jsonLd?: object | object[];
   /** Page opens with a full-bleed hero: header floats transparent over it until scroll. */
   hero?: boolean;
-  /** Pre-filled message for the floating WhatsApp button (listing pages). */
+  /** Pre-filled message for the WhatsApp button in the concierge cluster (listing pages). */
   waMessage?: string;
 }
 const { locale, hero = false, waMessage, ...head } = Astro.props;
@@ -32,7 +32,7 @@ const { locale, hero = false, waMessage, ...head } = Astro.props;
       <slot />
     </main>
     <Footer locale={locale} />
-    <WhatsAppFloat locale={locale} message={waMessage} />
+    <Concierge locale={locale} waMessage={waMessage} />
     <script>
       /* Site-wide motion: reveals (with stagger), count-up stats, cursor "View" pill on listing cards. Idempotent. */
       const reduce = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;

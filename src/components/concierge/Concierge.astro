@@ -1,0 +1,172 @@
+---
+/* The Bona concierge — a floating cluster (WhatsApp circle + "Concierge" pill) and the panel it opens.
+   Two tabs: Chat with Dana (text, inline listing cards) and Call Dana (browser voice call, Retell web SDK).
+   Everything the visitor reads is server-rendered here in the page locale; the client script only fills in
+   messages, cards and call state. Switch the whole thing off with site.json → concierge.enabled = false. */
+import Icon from '../Icon.astro';
+import WhatsAppFloat from '../WhatsAppFloat.astro';
+import site from '../../data/site.json';
+import { localePath, t, ui, waLink, countForms_, type Locale } from '../../lib/i18n';
+
+interface Props { locale: Locale; waMessage?: string }
+const { locale, waMessage } = Astro.props;
+
+const cfgSite = (site as { concierge?: { enabled?: boolean; apiBase?: string; name?: { en: string; ar: string } } }).concierge;
+const enabled = cfgSite?.enabled !== false;
+const name = cfgSite?.name ? t(cfgSite.name, locale) : 'Dana';
+const waHref = waLink(site.whatsapp.wa, t(ui.formGreeting, locale));
+const privacyHref = localePath(locale, '/privacy/');
+
+const config = {
+  enabled,
+  apiBase: cfgSite?.apiBase ?? '',
+  locale,
+  name,
+  waHref,
+  propertiesBase: localePath(locale, '/properties/'),
+  strings: {
+    opening: t(ui.conciergeOpening, locale),
+    view: t(ui.viewPill, locale),
+    you: t(ui.conciergeYou, locale),
+    agent: name,
+    sqm: t(ui.sqm, locale),
+    whatsapp: t(ui.chatOnWhatsApp, locale),
+    micDenied: t(ui.conciergeMicDenied, locale),
+    callFailed: t(ui.conciergeCallFailed, locale),
+    callUnsupported: t(ui.conciergeCallUnsupported, locale),
+  },
+  plurals: { bed: countForms_('bed'), bath: countForms_('bath') },
+};
+
+const quick = [
+  { label: t(ui.navHouses, locale), text: t(ui.conciergeQuickHousesMsg, locale) },
+  { label: t(ui.navApartments, locale), text: t(ui.conciergeQuickApartmentsMsg, locale) },
+  { label: t(ui.conciergeQuickViewing, locale), text: t(ui.conciergeQuickViewingMsg, locale) },
+  { label: t(ui.conciergeQuickHuman, locale), text: t(ui.conciergeQuickHumanMsg, locale) },
+];
+---
+{!enabled && <WhatsAppFloat locale={locale} message={waMessage} />}
+
+{enabled && (
+  <div class="concierge" data-concierge data-config={JSON.stringify(config)}>
+    <div class="cg-cluster">
+      <WhatsAppFloat locale={locale} message={waMessage} floating={false} />
+      <button type="button" class="cg-pill" data-cg-open aria-expanded="false" aria-controls="concierge-panel">
+        <span class="cg-pill-dot" aria-hidden="true"></span>
+        <span>{t(ui.conciergeOpen, locale)}</span>
+      </button>
+    </div>
+
+    <div class="cg-scrim" data-cg-scrim aria-hidden="true"></div>
+
+    <section id="concierge-panel" class="cg-panel" data-cg-panel role="dialog" aria-labelledby="cg-title" aria-hidden="true" tabindex="-1">
+      <header class="cg-head">
+        <span class="cg-head-dot" aria-hidden="true"></span>
+        <div class="cg-head-id">
+          <p class="cg-name display-sm" id="cg-title">{name}</p>
+          <p class="cg-role">{t(ui.conciergeRole, locale)}</p>
+        </div>
+        <button type="button" class="cg-icon-btn" data-cg-close aria-label={t(ui.conciergeClose, locale)}>
+          <Icon name="close" size={18} />
+        </button>
+      </header>
+
+      <div class="cg-tabs" role="tablist" aria-label={t(ui.conciergeTabs, locale)}>
+        <button type="button" role="tab" id="cg-tab-chat" class="cg-tab" data-cg-tab="chat" aria-controls="cg-pane-chat" aria-selected="true">{t(ui.conciergeTabChat, locale)}</button>
+        <button type="button" role="tab" id="cg-tab-call" class="cg-tab" data-cg-tab="call" aria-controls="cg-pane-call" aria-selected="false" tabindex="-1">{t(ui.conciergeTabCall, locale)}</button>
+      </div>
+
+      {/* ---------------------------------------------------------- Chat */}
+      <div id="cg-pane-chat" class="cg-pane" data-cg-pane="chat" role="tabpanel" aria-labelledby="cg-tab-chat">
+        <div class="cg-scroll" data-cg-scroll>
+          <div class="cg-log" data-cg-log role="log" aria-live="polite" aria-label={t(ui.conciergeConversation, locale)}></div>
+
+          <div class="cg-typing" data-cg-typing hidden>
+            <span class="cg-dot" aria-hidden="true"></span><span class="cg-dot" aria-hidden="true"></span><span class="cg-dot" aria-hidden="true"></span>
+            <span class="cg-sr">{t(ui.conciergeTyping, locale)}</span>
+          </div>
+
+          <div class="cg-quick" data-cg-quick hidden>
+            {quick.map(q => (
+              <button type="button" class="cg-chip" data-cg-quick-btn data-text={q.text}>{q.label}</button>
+            ))}
+          </div>
+
+          <div class="cg-fallback" data-cg-fallback hidden>
+            <p class="cg-fallback-title">{t(ui.conciergeOfflineTitle, locale)}</p>
+            <p class="cg-fallback-text">{t(ui.conciergeOfflineText, locale)}</p>
+            <a class="cg-wa-btn" href={waHref} target="_blank" rel="noopener">{t(ui.chatOnWhatsApp, locale)}</a>
+            <button type="button" class="cg-link" data-cg-retry>{t(ui.conciergeRetry, locale)}</button>
+          </div>
+        </div>
+
+        <form class="cg-composer" data-cg-form novalidate>
+          <label class="cg-sr" for="cg-input">{t(ui.conciergeInputLabel, locale)}</label>
+          <textarea id="cg-input" class="cg-input" data-cg-input rows="1" autocomplete="off" placeholder={t(ui.conciergePlaceholder, locale)}></textarea>
+          <button type="submit" class="cg-send" data-cg-send aria-label={t(ui.conciergeSend, locale)}>
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" class="cg-send-icon" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15m0 0l-6-6m6 6l-6 6" /></svg>
+          </button>
+        </form>
+
+        <p class="cg-foot">
+          <button type="button" class="cg-link" data-cg-new>{t(ui.conciergeNewConversation, locale)}</button>
+          <span aria-hidden="true">·</span>
+          <a class="cg-link" href={privacyHref}>{t(ui.navPrivacy, locale)}</a>
+        </p>
+      </div>
+
+      {/* ---------------------------------------------------------- Call */}
+      <div id="cg-pane-call" class="cg-pane" data-cg-pane="call" role="tabpanel" aria-labelledby="cg-tab-call" data-state="idle" hidden>
+        <div class="cg-scroll">
+          <div class="cg-call">
+            <button type="button" class="cg-orb" data-cg-call-start aria-describedby="cg-call-status">
+              <span class="cg-orb-ring" aria-hidden="true"></span>
+              <span class="cg-orb-ring cg-orb-ring-2" aria-hidden="true"></span>
+              <Icon name="phone" size={26} />
+              <span class="cg-sr">{t(ui.conciergeCallStart, locale)}</span>
+            </button>
+
+            <p class="cg-call-status" id="cg-call-status" data-cg-call-status aria-live="polite"
+               data-idle={t(ui.conciergeCallIdle, locale)}
+               data-permission={t(ui.conciergeCallPermission, locale)}
+               data-connecting={t(ui.conciergeCallConnecting, locale)}
+               data-live={t(ui.conciergeCallLive, locale)}
+               data-speaking={t(ui.conciergeCallSpeaking, locale)}
+               data-ended={t(ui.conciergeCallEnded, locale)}>{t(ui.conciergeCallIdle, locale)}</p>
+
+            <p class="cg-call-timer" data-cg-timer dir="ltr" hidden><span class="cg-sr">{t(ui.conciergeCallTimer, locale)}: </span>0:00</p>
+            <p class="cg-call-intro" data-cg-call-intro>{t(ui.conciergeCallIntro, locale)}</p>
+
+            <div class="cg-call-actions" data-cg-call-actions hidden>
+              <button type="button" class="cg-ghost" data-cg-mute aria-pressed="false" data-mute={t(ui.conciergeCallMute, locale)} data-unmute={t(ui.conciergeCallUnmute, locale)}>{t(ui.conciergeCallMute, locale)}</button>
+              <button type="button" class="cg-ghost cg-ghost-end" data-cg-end>{t(ui.conciergeCallEnd, locale)}</button>
+            </div>
+
+            <p class="cg-call-error" data-cg-call-error hidden></p>
+            <div class="cg-call-fallback" data-cg-call-fallback hidden>
+              <a class="cg-ghost" href={`tel:${site.phone.e164}`} dir="ltr">{site.phone.display}</a>
+              <a class="cg-wa-btn" href={waHref} target="_blank" rel="noopener">{t(ui.chatOnWhatsApp, locale)}</a>
+            </div>
+
+            <p class="cg-captions" data-cg-captions hidden></p>
+          </div>
+
+          <section class="cg-mentioned" data-cg-mentioned hidden>
+            <h3 class="cg-sub">{t(ui.conciergeCallMentioned, locale)}</h3>
+            <div data-cg-mentioned-list></div>
+          </section>
+        </div>
+
+        <p class="cg-foot cg-foot-note">
+          <span>{t(ui.conciergeAiNote, locale)}</span>
+          <a class="cg-link" href={privacyHref}>{t(ui.navPrivacy, locale)}</a>
+        </p>
+      </div>
+    </section>
+  </div>
+)}
+
+<script>
+  /* Hoisted once per page. The controller no-ops when the widget is switched off (no [data-concierge] in the DOM). */
+  import './client';
+</script>

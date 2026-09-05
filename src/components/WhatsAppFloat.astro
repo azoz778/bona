@@ -1,12 +1,15 @@
 ---
+/* The WhatsApp deep-link button. Rendered standalone (`floating`) when the concierge is switched off, and as the
+   secondary circle inside the concierge cluster when it is on. The link and its `message` prop never change. */
 import Icon from './Icon.astro';
 import site from '../data/site.json';
 import { t, ui, waLink, type Locale } from '../lib/i18n';
-interface Props { locale: Locale; message?: string }
-const { locale, message } = Astro.props;
+interface Props { locale: Locale; message?: string; floating?: boolean }
+const { locale, message, floating = true } = Astro.props;
 const href = waLink(site.whatsapp.wa, message ?? t(ui.formGreeting, locale));
 ---
 <a href={href} target="_blank" rel="noopener" aria-label={t(ui.chatOnWhatsApp, locale)} title={t(ui.chatOnWhatsApp, locale)} transition:name="wa-float" transition:animate="none"
-   class="fixed bottom-5 z-30 grid h-13 w-13 place-items-center bg-ink text-ivory shadow-[0_10px_30px_-10px_rgba(15,18,20,.6)] ring-1 ring-champagne/40 transition-colors duration-300 hover:bg-ink-3 end-5 md:bottom-7 md:end-7">
+   class:list={['grid h-13 w-13 place-items-center bg-ink text-ivory shadow-[0_10px_30px_-10px_rgba(15,18,20,.6)] ring-1 ring-champagne/40 transition-colors duration-300 hover:bg-ink-3',
+                floating && 'fixed bottom-5 end-5 z-30 md:bottom-7 md:end-7']}>
   <Icon name="whatsapp" size={24} />
 </a>

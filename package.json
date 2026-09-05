@@ -14,10 +14,15 @@
     "@astrojs/sitemap": "^3.7.4",
     "@tailwindcss/vite": "^4.3.3",
     "astro": "^7.3.1",
+    "retell-client-js-sdk": "2.0.8",
     "sharp": "^0.35.4",
     "tailwindcss": "^4.3.3"
   },
   "allowScripts": {
     "esbuild@0.28.2": true
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "typescript": "^6.0.3"
   }
 }
