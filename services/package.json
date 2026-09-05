@@ -1,0 +1,15 @@
+{
+  "name": "bona-services",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Bona back-office services: concierge API (Dana) and WhatsApp listing intake.",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node api/index.mjs",
+    "test": "node --test api/test",
+    "provision": "node api/retell/provision.mjs",
+    "provision:dry": "node api/retell/provision.mjs --dry-run"
+  },
+  "dependencies": {}
+}

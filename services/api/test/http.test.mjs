@@ -1,0 +1,407 @@
+/**
+ * End-to-end tests of every HTTP route with a mocked Retell client.
+ * The real Retell API and the real Evolution API are never contacted.
+ */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createApp } from '../index.mjs';
+import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
+import { DEFAULT_ORIGINS } from '../lib/cors.mjs';
+
+const TOKEN = 'a'.repeat(32);
+const inventory = createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk' });
+const KHALIDIYAH = inventory.all().find((l) => l.location.district.en === 'Al Khalidiyah');
+
+/** A scripted Retell double: records every call, replies with realistic message shapes. */
+function fakeRetell({ failOn = null } = {}) {
+  const calls = [];
+  let n = 0;
+  return {
+    calls,
+    async createChat(body) {
+      calls.push(['createChat', body]);
+      if (failOn === 'createChat') throw new Error('retell down');
+      return { chat_id: `chat_${++n}`, agent_id: body.agent_id, chat_status: 'ongoing' };
+    },
+    async createChatCompletion(body) {
+      calls.push(['createChatCompletion', body]);
+      if (failOn === 'createChatCompletion') throw new Error('retell down');
+      if (/khalidiyah|الخالدية/i.test(body.content)) {
+        return {
+          messages: [
+            { role: 'tool_call_invocation', tool_call_id: 't1', name: 'search_properties', arguments: JSON.stringify({ district: 'Al Khalidiyah' }) },
+            { role: 'tool_call_result', tool_call_id: 't1', content: JSON.stringify({ count: 1, results: [{ id: KHALIDIYAH.id }] }) },
+            { role: 'agent', content: 'One home matches. [[navigate:/properties/houses/]]', message_id: 'm1' },
+          ],
+        };
+      }
+      if (/lead|call me|كلمني/i.test(body.content)) {
+        return {
+          messages: [
+            { role: 'tool_call_invocation', tool_call_id: 't2', name: 'create_lead', arguments: '{"phone":"+966500000000"}' },
+            { role: 'tool_call_result', tool_call_id: 't2', content: '{"saved":true}' },
+            { role: 'agent', content: 'Noted.', message_id: 'm2' },
+          ],
+        };
+      }
+      if (/silent/i.test(body.content)) return { messages: [] };
+      return { messages: [{ role: 'agent', content: 'Which district are you considering?', message_id: 'm3' }] };
+    },
+    async endChat(chatId) { calls.push(['endChat', chatId]); return null; },
+    async createWebCall(body) {
+      calls.push(['createWebCall', body]);
+      if (failOn === 'createWebCall') throw new Error('retell down');
+      return { call_id: `call_${++n}`, access_token: 'tok_abc', agent_id: body.agent_id };
+    },
+    async ping() { return { ok: true }; },
+  };
+}
+
+async function withServer(overrides, fn) {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-http-'));
+  const sent = [];
+  const retell = overrides.retell ?? fakeRetell();
+  const app = createApp({
+    config: {
+      port: 0, host: '127.0.0.1', siteUrl: 'https://bona.azoz.uk', publicApi: 'https://api.bona.azoz.uk',
+      dataDir, inventoryFile: WORKTREE_LISTINGS, origins: DEFAULT_ORIGINS, toolToken: TOKEN,
+      retellApiKey: 'test', retellMock: false, chatAgentId: 'agent_chat', voiceAgentId: 'agent_voice',
+      maxBodyBytes: 16 * 1024, chatRatePerMin: 30, tokenRatePerMin: 6, env: {}, ids: {}, version: '1.0.0',
+      ...(overrides.config ?? {}),
+    },
+    inventory,
+    retell,
+    probeRetell: overrides.probeRetell ?? (async () => 'ok'),
+    sendWhatsApp: async (text) => { sent.push(text); return { ok: true }; },
+    log: () => {},
+  });
+  await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
+  const { port } = app.server.address();
+  const base = `http://127.0.0.1:${port}`;
+  const call = (p, init = {}) => fetch(base + p, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', Origin: 'https://bona.azoz.uk', ...(init.headers ?? {}) },
+  });
+  try {
+    await fn({ call, base, app, retell, sent, dataDir });
+  } finally {
+    await new Promise((resolve) => app.server.close(resolve));
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+}
+
+/* ---------------- health ---------------- */
+
+test('GET /health reports the service, inventory and Retell reachability', async () => {
+  await withServer({}, async ({ call }) => {
+    const res = await call('/health');
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.service, 'bona-api');
+    assert.equal(body.version, '1.0.0');
+    assert.equal(body.retell, 'ok');
+    assert.ok(body.inventory >= 20);
+    assert.equal(typeof body.uptimeS, 'number');
+  });
+});
+
+test('/health reports retell: "error" when Retell is unreachable, and still answers 200', async () => {
+  await withServer({ probeRetell: async () => 'error' }, async ({ call }) => {
+    const body = await (await call('/health')).json();
+    assert.equal(body.ok, true);
+    assert.equal(body.retell, 'error');
+  });
+});
+
+/* ---------------- chat ---------------- */
+
+test('POST /v1/chat/session opens a Retell chat and returns a greeting', async () => {
+  await withServer({}, async ({ call, retell }) => {
+    const res = await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale: 'ar', page: { url: 'https://bona.azoz.uk/ar/', title: 'بونا' } }) });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.match(body.sessionId, /^[0-9a-f]{32}$/);
+    assert.match(body.greeting, /دانة/);
+    const [, sent] = retell.calls.find(([name]) => name === 'createChat');
+    assert.equal(sent.agent_id, 'agent_chat');
+    assert.equal(sent.retell_llm_dynamic_variables.locale, 'ar');
+    assert.equal(sent.retell_llm_dynamic_variables.page_title, 'بونا');
+    assert.match(sent.retell_llm_dynamic_variables.session_id, /^[0-9a-f]{32}$/);
+  });
+});
+
+test('a chat turn returns agent text plus a show_listing action', async () => {
+  await withServer({}, async ({ call }) => {
+    const { sessionId } = await (await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale: 'en' }) })).json();
+    const res = await call('/v1/chat/message', { method: 'POST', body: JSON.stringify({ sessionId, text: 'a villa in Al Khalidiyah' }) });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.messages[0].role, 'agent');
+    assert.equal(body.messages[0].text, 'One home matches.', 'the [[…]] marker must be stripped');
+    const show = body.actions.find((a) => a.type === 'show_listing');
+    assert.ok(show, 'expected a show_listing action');
+    assert.equal(show.listing.id, KHALIDIYAH.id);
+    assert.equal(show.listing.url.en, `https://bona.azoz.uk/properties/${KHALIDIYAH.slug}/`);
+    assert.ok(body.actions.some((a) => a.type === 'navigate' && a.path === '/properties/houses/'));
+  });
+});
+
+test('a lead captured mid-conversation is reported to the widget', async () => {
+  await withServer({}, async ({ call }) => {
+    const { sessionId } = await (await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale: 'en' }) })).json();
+    const body = await (await call('/v1/chat/message', { method: 'POST', body: JSON.stringify({ sessionId, text: 'please call me' }) })).json();
+    assert.equal(body.leadCaptured, true);
+  });
+});
+
+test('an empty completion still gives the visitor something to read', async () => {
+  await withServer({}, async ({ call }) => {
+    const { sessionId } = await (await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale: 'ar' }) })).json();
+    const body = await (await call('/v1/chat/message', { method: 'POST', body: JSON.stringify({ sessionId, text: 'silent' }) })).json();
+    assert.equal(body.messages.length, 1);
+    assert.match(body.messages[0].text, /عذرا|عذراً/);
+  });
+});
+
+test('an unknown session is 404, and empty text is 400', async () => {
+  await withServer({}, async ({ call }) => {
+    assert.equal((await call('/v1/chat/message', { method: 'POST', body: JSON.stringify({ sessionId: 'nope', text: 'hi' }) })).status, 404);
+    const { sessionId } = await (await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({}) })).json();
+    assert.equal((await call('/v1/chat/message', { method: 'POST', body: JSON.stringify({ sessionId, text: '   ' }) })).status, 400);
+  });
+});
+
+test('POST /v1/chat/end closes the Retell chat and records the conversation', async () => {
+  await withServer({}, async ({ call, retell, dataDir }) => {
+    const { sessionId } = await (await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale: 'en' }) })).json();
+    await call('/v1/chat/message', { method: 'POST', body: JSON.stringify({ sessionId, text: 'hello' }) });
+    const res = await call('/v1/chat/end', { method: 'POST', body: JSON.stringify({ sessionId }) });
+    assert.deepEqual(await res.json(), { ok: true });
+    assert.ok(retell.calls.some(([name]) => name === 'endChat'));
+    const line = JSON.parse(fs.readFileSync(path.join(dataDir, 'chats.jsonl'), 'utf8').trim());
+    assert.equal(line.turns, 1);
+    assert.equal((await call('/v1/chat/message', { method: 'POST', body: JSON.stringify({ sessionId, text: 'hi' }) })).status, 404);
+  });
+});
+
+test('ending an unknown session is still ok (the widget may retry)', async () => {
+  await withServer({}, async ({ call }) => {
+    assert.deepEqual(await (await call('/v1/chat/end', { method: 'POST', body: JSON.stringify({ sessionId: 'nope' }) })).json(), { ok: true });
+  });
+});
+
+test('a Retell outage surfaces as 502, not as a stack trace', async () => {
+  await withServer({ retell: fakeRetell({ failOn: 'createChat' }) }, async ({ call }) => {
+    const res = await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale: 'en' }) });
+    assert.equal(res.status, 500);
+    assert.deepEqual(await res.json(), { error: 'internal_error' });
+  });
+});
+
+test('before provisioning, chat and call answer 503 with a clear reason', async () => {
+  await withServer({ config: { chatAgentId: null, voiceAgentId: null } }, async ({ call }) => {
+    const res = await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({}) });
+    assert.equal(res.status, 503);
+    assert.equal((await res.json()).error, 'not_provisioned');
+    assert.equal((await call('/v1/call/token', { method: 'POST', body: JSON.stringify({}) })).status, 503);
+  });
+});
+
+/* ---------------- calls ---------------- */
+
+test('POST /v1/call/token returns a web-call access token', async () => {
+  await withServer({}, async ({ call, retell }) => {
+    const res = await call('/v1/call/token', { method: 'POST', body: JSON.stringify({ locale: 'ar', page: { url: 'https://bona.azoz.uk/ar/properties/x/' } }) });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.accessToken, 'tok_abc');
+    assert.match(body.callId, /^call_/);
+    const [, sent] = retell.calls.find(([name]) => name === 'createWebCall');
+    assert.equal(sent.agent_id, 'agent_voice');
+    assert.equal(sent.metadata.locale, 'ar');
+  });
+});
+
+test('the call context fills as tools fire, and is empty for an unknown call', async () => {
+  await withServer({}, async ({ call }) => {
+    const { callId } = await (await call('/v1/call/token', { method: 'POST', body: JSON.stringify({ locale: 'en' }) })).json();
+    const before = await (await call(`/v1/call/${callId}/context`)).json();
+    assert.deepEqual(before.listings, []);
+
+    await call(`/v1/tools/show_property?token=${TOKEN}`, {
+      method: 'POST',
+      body: JSON.stringify({ call: { call_id: callId }, name: 'show_property', args: { id: KHALIDIYAH.id } }),
+    });
+    const after = await (await call(`/v1/call/${callId}/context`)).json();
+    assert.equal(after.listings.length, 1);
+    assert.equal(after.listings[0].id, KHALIDIYAH.id);
+    assert.ok(Date.parse(after.updatedAt) > 0);
+
+    const missing = await (await call('/v1/call/call_nope/context')).json();
+    assert.deepEqual(missing, { listings: [], updatedAt: null });
+  });
+});
+
+/* ---------------- tools + webhook auth ---------------- */
+
+test('tool routes require the token', async () => {
+  await withServer({}, async ({ call }) => {
+    const body = JSON.stringify({ call: { call_id: 'c1' }, args: { district: 'Al Nuzhah' } });
+    assert.equal((await call('/v1/tools/search_properties', { method: 'POST', body })).status, 401);
+    assert.equal((await call('/v1/tools/search_properties?token=wrong', { method: 'POST', body })).status, 401);
+    assert.equal((await call(`/v1/tools/search_properties?token=${TOKEN}`, { method: 'POST', body })).status, 200);
+    assert.equal((await call('/v1/tools/search_properties', { method: 'POST', body, headers: { 'X-Bona-Token': TOKEN } })).status, 200);
+  });
+});
+
+test('a tool result is a JSON string, exactly what Retell expects', async () => {
+  await withServer({}, async ({ call }) => {
+    const res = await call(`/v1/tools/search_properties?token=${TOKEN}`, {
+      method: 'POST',
+      body: JSON.stringify({ call: { call_id: 'c1' }, name: 'search_properties', args: { district: 'Al Nuzhah' } }),
+    });
+    assert.equal(res.status, 200);
+    const outer = await res.json();
+    assert.equal(typeof outer, 'string', 'Retell reads the body as the tool result value');
+    const payload = JSON.parse(outer);
+    assert.ok(payload.count > 0);
+    assert.ok(payload.results[0].price_ar);
+  });
+});
+
+test('an unknown tool name is 404 even with a good token', async () => {
+  await withServer({}, async ({ call }) => {
+    const res = await call(`/v1/tools/drop_tables?token=${TOKEN}`, { method: 'POST', body: '{}' });
+    assert.equal(res.status, 404);
+  });
+});
+
+test('create_lead through HTTP writes the lead and messages the owner', async () => {
+  await withServer({}, async ({ call, sent, dataDir }) => {
+    const res = await call(`/v1/tools/create_lead?token=${TOKEN}`, {
+      method: 'POST',
+      body: JSON.stringify({ chat: { chat_id: 'chat_1' }, name: 'create_lead', args: { phone: '+966500000000', name: 'Sara' } }),
+    });
+    assert.equal(JSON.parse(await res.json()).saved, true);
+    assert.match(fs.readFileSync(path.join(dataDir, 'leads.jsonl'), 'utf8'), /Sara/);
+    assert.equal(sent.length, 1);
+  });
+});
+
+test('the Retell webhook is token-gated and appends to calls.jsonl / chats.jsonl', async () => {
+  await withServer({}, async ({ call, dataDir }) => {
+    const event = JSON.stringify({ event: 'call_ended', call: { call_id: 'c1', agent_id: 'a1', call_status: 'ended', metadata: { locale: 'ar' }, transcript: 'Agent: hi' } });
+    assert.equal((await call('/v1/retell/webhook', { method: 'POST', body: event })).status, 401);
+    assert.equal((await call(`/v1/retell/webhook?token=${TOKEN}`, { method: 'POST', body: event })).status, 200);
+    const line = JSON.parse(fs.readFileSync(path.join(dataDir, 'calls.jsonl'), 'utf8').trim());
+    assert.equal(line.event, 'call_ended');
+    assert.equal(line.callId, 'c1');
+    assert.equal(line.locale, 'ar');
+
+    await call(`/v1/retell/webhook?token=${TOKEN}`, { method: 'POST', body: JSON.stringify({ event: 'chat_ended', chat: { chat_id: 'h1' } }) });
+    assert.match(fs.readFileSync(path.join(dataDir, 'chats.jsonl'), 'utf8'), /chat_ended/);
+  });
+});
+
+/* ---------------- CORS, limits, hygiene ---------------- */
+
+test('CORS: the site is allowed, an unknown origin gets no allow header', async () => {
+  await withServer({}, async ({ call }) => {
+    const ok = await call('/health', { headers: { Origin: 'https://bona.azoz.uk' } });
+    assert.equal(ok.headers.get('access-control-allow-origin'), 'https://bona.azoz.uk');
+    const bad = await call('/health', { headers: { Origin: 'https://evil.example' } });
+    assert.equal(bad.headers.get('access-control-allow-origin'), null);
+    assert.equal(bad.headers.get('vary'), 'Origin');
+  });
+});
+
+test('a preflight is answered 204 with the allowed methods', async () => {
+  await withServer({}, async ({ call }) => {
+    const res = await call('/v1/chat/session', { method: 'OPTIONS' });
+    assert.equal(res.status, 204);
+    assert.ok(res.headers.get('access-control-allow-methods').includes('POST'));
+  });
+});
+
+test('tool responses are never CORS-readable from a browser', async () => {
+  await withServer({}, async ({ call }) => {
+    const res = await call(`/v1/tools/show_property?token=${TOKEN}`, {
+      method: 'POST', body: JSON.stringify({ call: { call_id: 'c1' }, args: { id: KHALIDIYAH.id } }),
+    });
+    assert.equal(res.headers.get('access-control-allow-origin'), null);
+  });
+});
+
+test('every response is no-store', async () => {
+  await withServer({}, async ({ call }) => {
+    for (const p of ['/health', '/v1/nope']) {
+      assert.equal((await call(p)).headers.get('cache-control'), 'no-store');
+    }
+  });
+});
+
+test('bodies over 16 KB are refused with 413', async () => {
+  await withServer({}, async ({ call }) => {
+    const res = await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale: 'en', pad: 'x'.repeat(20_000) }) });
+    assert.equal(res.status, 413);
+  });
+});
+
+test('malformed JSON is 400, not 500', async () => {
+  await withServer({}, async ({ call }) => {
+    assert.equal((await call('/v1/chat/session', { method: 'POST', body: '{oops' })).status, 400);
+    assert.equal((await call('/v1/chat/session', { method: 'POST', body: '[1,2,3]' })).status, 400);
+  });
+});
+
+test('the chat rate limit closes after its budget, with Retry-After', async () => {
+  await withServer({ config: { chatRatePerMin: 3 } }, async ({ call }) => {
+    const body = JSON.stringify({ locale: 'en' });
+    for (let i = 0; i < 3; i += 1) {
+      assert.equal((await call('/v1/chat/session', { method: 'POST', body })).status, 200);
+    }
+    const blocked = await call('/v1/chat/session', { method: 'POST', body });
+    assert.equal(blocked.status, 429);
+    assert.ok(Number(blocked.headers.get('retry-after')) >= 1);
+  });
+});
+
+test('the call-token budget is separate and tighter than chat', async () => {
+  await withServer({ config: { tokenRatePerMin: 2, chatRatePerMin: 30 } }, async ({ call }) => {
+    const body = JSON.stringify({ locale: 'en' });
+    assert.equal((await call('/v1/call/token', { method: 'POST', body })).status, 200);
+    assert.equal((await call('/v1/call/token', { method: 'POST', body })).status, 200);
+    assert.equal((await call('/v1/call/token', { method: 'POST', body })).status, 429);
+    assert.equal((await call('/v1/chat/session', { method: 'POST', body })).status, 200, 'chat must not be starved by call attempts');
+  });
+});
+
+test('tool routes are not rate limited — Retell may call them freely', async () => {
+  await withServer({ config: { chatRatePerMin: 1, tokenRatePerMin: 1 } }, async ({ call }) => {
+    for (let i = 0; i < 8; i += 1) {
+      const res = await call(`/v1/tools/show_property?token=${TOKEN}`, {
+        method: 'POST', body: JSON.stringify({ call: { call_id: 'c1' }, args: { id: KHALIDIYAH.id } }),
+      });
+      assert.equal(res.status, 200);
+    }
+  });
+});
+
+test('unknown routes and wrong methods are handled without leaking internals', async () => {
+  await withServer({}, async ({ call }) => {
+    assert.equal((await call('/v1/nope')).status, 404);
+    assert.equal((await call('/v1/chat/session')).status, 404);
+    assert.equal((await call('/health', { method: 'POST' })).status, 404);
+  });
+});
+
+test('a trailing slash resolves to the same route', async () => {
+  await withServer({}, async ({ call }) => {
+    assert.equal((await call('/v1/chat/session/', { method: 'POST', body: JSON.stringify({ locale: 'en' }) })).status, 200);
+  });
+});
