@@ -1,0 +1,5013 @@
+{
+  "generated": "2026-09-05",
+  "workstream": "C — hero curation",
+  "rubric": "scripts/curate/IMAGE-RUBRIC.md",
+  "note": "Land listings (kind: land) are untouched by design. Entries are { folder, i, room }; i indexes scripts/tk-gallery-data.json filtered to that folder.",
+  "listings": [
+    {
+      "id": "BONA-001",
+      "slug": "private-beach-villa-durrat-al-arous",
+      "folder": "private-beach-villa-durrat-al-arous-jeddah",
+      "featured": true,
+      "status": "available",
+      "category": "buy",
+      "type": "villa",
+      "oldHero": {
+        "folder": "private-beach-villa-durrat-al-arous-jeddah",
+        "i": 13,
+        "room": "pool"
+      },
+      "newHero": {
+        "folder": "private-beach-villa-durrat-al-arous-jeddah",
+        "i": 23,
+        "room": "facade_night"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "private-beach-villa-durrat-al-arous-jeddah",
+          "i": 13,
+          "room": "pool"
+        },
+        {
+          "folder": "private-beach-villa-durrat-al-arous-jeddah",
+          "i": 10,
+          "room": "pool"
+        },
+        {
+          "folder": "private-beach-villa-durrat-al-arous-jeddah",
+          "i": 14,
+          "room": "beach"
+        },
+        {
+          "folder": "private-beach-villa-durrat-al-arous-jeddah",
+          "i": 6,
+          "room": "sea"
+        },
+        {
+          "folder": "private-beach-villa-durrat-al-arous-jeddah",
+          "i": 0,
+          "room": "terrace"
+        },
+        {
+          "folder": "private-beach-villa-durrat-al-arous-jeddah",
+          "i": 25,
+          "room": "pool_night"
+        },
+        {
+          "folder": "private-beach-villa-durrat-al-arous-jeddah",
+          "i": 3,
+          "room": "living"
+        },
+        {
+          "folder": "private-beach-villa-durrat-al-arous-jeddah",
+          "i": 20,
+          "room": "living"
+        },
+        {
+          "folder": "private-beach-villa-durrat-al-arous-jeddah",
+          "i": 2,
+          "room": "aerial"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "private-beach-villa-durrat-al-arous-jeddah",
+          "i": 23,
+          "room": "facade_night"
+        },
+        {
+          "folder": "private-beach-villa-durrat-al-arous-jeddah",
+          "i": 13,
+          "room": "pool"
+        },
+        {
+          "folder": "private-beach-villa-durrat-al-arous-jeddah",
+          "i": 14,
+          "room": "beach"
+        },
+        {
+          "folder": "private-beach-villa-durrat-al-arous-jeddah",
+          "i": 12,
+          "room": "exterior"
+        },
+        {
+          "folder": "private-beach-villa-durrat-al-arous-jeddah",
+          "i": 6,
+          "room": "sea"
+        },
+        {
+          "folder": "private-beach-villa-durrat-al-arous-jeddah",
+          "i": 0,
+          "room": "terrace"
+        },
+        {
+          "folder": "private-beach-villa-durrat-al-arous-jeddah",
+          "i": 19,
+          "room": "living"
+        },
+        {
+          "folder": "private-beach-villa-durrat-al-arous-jeddah",
+          "i": 5,
+          "room": "staircase"
+        },
+        {
+          "folder": "private-beach-villa-durrat-al-arous-jeddah",
+          "i": 8,
+          "room": "living"
+        },
+        {
+          "folder": "private-beach-villa-durrat-al-arous-jeddah",
+          "i": 25,
+          "room": "pool_night"
+        }
+      ],
+      "reason": "Twilight frame of the villa seen from its own beach, lit steps dead centre — beats the hazy day pool (13), whose deck carries a drone and a water jet cutting the right edge."
+    },
+    {
+      "id": "BONA-002",
+      "slug": "classic-mansion-al-shati-6",
+      "folder": "exclusive-classic-mansion-al-shati-6",
+      "featured": true,
+      "status": "available",
+      "category": "buy",
+      "type": "mansion",
+      "oldHero": {
+        "folder": "exclusive-classic-mansion-al-shati-6",
+        "i": 27,
+        "room": "pool"
+      },
+      "newHero": {
+        "folder": "exclusive-classic-mansion-al-shati-6",
+        "i": 27,
+        "room": "pool"
+      },
+      "heroChanged": false,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "exclusive-classic-mansion-al-shati-6",
+          "i": 27,
+          "room": "pool"
+        },
+        {
+          "folder": "exclusive-classic-mansion-al-shati-6",
+          "i": 38,
+          "room": "exterior"
+        },
+        {
+          "folder": "exclusive-classic-mansion-al-shati-6",
+          "i": 2,
+          "room": "hall"
+        },
+        {
+          "folder": "exclusive-classic-mansion-al-shati-6",
+          "i": 21,
+          "room": "living"
+        },
+        {
+          "folder": "exclusive-classic-mansion-al-shati-6",
+          "i": 20,
+          "room": "dining"
+        },
+        {
+          "folder": "exclusive-classic-mansion-al-shati-6",
+          "i": 22,
+          "room": "majlis"
+        },
+        {
+          "folder": "exclusive-classic-mansion-al-shati-6",
+          "i": 33,
+          "room": "kitchen"
+        },
+        {
+          "folder": "exclusive-classic-mansion-al-shati-6",
+          "i": 26,
+          "room": "bathroom"
+        },
+        {
+          "folder": "exclusive-classic-mansion-al-shati-6",
+          "i": 37,
+          "room": "bedroom"
+        },
+        {
+          "folder": "exclusive-classic-mansion-al-shati-6",
+          "i": 28,
+          "room": "pool"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "exclusive-classic-mansion-al-shati-6",
+          "i": 27,
+          "room": "pool"
+        },
+        {
+          "folder": "exclusive-classic-mansion-al-shati-6",
+          "i": 38,
+          "room": "exterior"
+        },
+        {
+          "folder": "exclusive-classic-mansion-al-shati-6",
+          "i": 18,
+          "room": "hall"
+        },
+        {
+          "folder": "exclusive-classic-mansion-al-shati-6",
+          "i": 36,
+          "room": "living"
+        },
+        {
+          "folder": "exclusive-classic-mansion-al-shati-6",
+          "i": 32,
+          "room": "majlis"
+        },
+        {
+          "folder": "exclusive-classic-mansion-al-shati-6",
+          "i": 29,
+          "room": "dining"
+        },
+        {
+          "folder": "exclusive-classic-mansion-al-shati-6",
+          "i": 33,
+          "room": "kitchen"
+        },
+        {
+          "folder": "exclusive-classic-mansion-al-shati-6",
+          "i": 11,
+          "room": "master"
+        },
+        {
+          "folder": "exclusive-classic-mansion-al-shati-6",
+          "i": 26,
+          "room": "bathroom"
+        },
+        {
+          "folder": "exclusive-classic-mansion-al-shati-6",
+          "i": 28,
+          "room": "pool"
+        }
+      ],
+      "reason": "Kept: pool, palms and the arcaded façade in one clean daylight frame is already the best in the folder; the gallery below it was rebuilt (a piano close-up was labelled majlis, a staircase was labelled bedroom)."
+    },
+    {
+      "id": "BONA-003",
+      "slug": "andalus-mansion-jeddah",
+      "folder": "majestic-andalus-mansion",
+      "featured": false,
+      "status": "available",
+      "category": "buy",
+      "type": "mansion",
+      "oldHero": {
+        "folder": "majestic-andalus-mansion",
+        "i": 6,
+        "room": "pool"
+      },
+      "newHero": {
+        "folder": "majestic-andalus-mansion",
+        "i": 6,
+        "room": "pool"
+      },
+      "heroChanged": false,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "majestic-andalus-mansion",
+          "i": 6,
+          "room": "pool"
+        },
+        {
+          "folder": "majestic-andalus-mansion",
+          "i": 7,
+          "room": "pool"
+        },
+        {
+          "folder": "majestic-andalus-mansion",
+          "i": 8,
+          "room": "exterior"
+        },
+        {
+          "folder": "majestic-andalus-mansion",
+          "i": 2,
+          "room": "living"
+        },
+        {
+          "folder": "majestic-andalus-mansion",
+          "i": 3,
+          "room": "majlis"
+        },
+        {
+          "folder": "majestic-andalus-mansion",
+          "i": 1,
+          "room": "entrance"
+        },
+        {
+          "folder": "majestic-andalus-mansion",
+          "i": 9,
+          "room": "garden"
+        },
+        {
+          "folder": "majestic-andalus-mansion",
+          "i": 0,
+          "room": "exterior"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "majestic-andalus-mansion",
+          "i": 6,
+          "room": "pool"
+        },
+        {
+          "folder": "majestic-andalus-mansion",
+          "i": 7,
+          "room": "pool"
+        },
+        {
+          "folder": "majestic-andalus-mansion",
+          "i": 8,
+          "room": "exterior"
+        },
+        {
+          "folder": "majestic-andalus-mansion",
+          "i": 1,
+          "room": "entrance"
+        },
+        {
+          "folder": "majestic-andalus-mansion",
+          "i": 9,
+          "room": "courtyard"
+        },
+        {
+          "folder": "majestic-andalus-mansion",
+          "i": 2,
+          "room": "living"
+        },
+        {
+          "folder": "majestic-andalus-mansion",
+          "i": 3,
+          "room": "majlis"
+        },
+        {
+          "folder": "majestic-andalus-mansion",
+          "i": 5,
+          "room": "living"
+        },
+        {
+          "folder": "majestic-andalus-mansion",
+          "i": 4,
+          "room": "dining"
+        }
+      ],
+      "reason": "Kept: pool with the mansion and palms behind is the only wide exterior that sells the house; dropped the street frame with the road in the foreground."
+    },
+    {
+      "id": "BONA-004",
+      "slug": "private-villa-al-murjan",
+      "folder": "al-morjan-jeddah",
+      "featured": true,
+      "status": "available",
+      "category": "buy",
+      "type": "villa",
+      "oldHero": {
+        "folder": "al-morjan-jeddah",
+        "i": 6,
+        "room": "exterior"
+      },
+      "newHero": {
+        "folder": "al-morjan-jeddah",
+        "i": 2,
+        "room": "facade_night"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "al-morjan-jeddah",
+          "i": 6,
+          "room": "exterior"
+        },
+        {
+          "folder": "al-morjan-jeddah",
+          "i": 0,
+          "room": "exterior"
+        },
+        {
+          "folder": "al-morjan-jeddah",
+          "i": 2,
+          "room": "facade_night"
+        },
+        {
+          "folder": "al-morjan-jeddah",
+          "i": 16,
+          "room": "pool"
+        },
+        {
+          "folder": "al-morjan-jeddah",
+          "i": 3,
+          "room": "living"
+        },
+        {
+          "folder": "al-morjan-jeddah",
+          "i": 11,
+          "room": "living"
+        },
+        {
+          "folder": "al-morjan-jeddah",
+          "i": 12,
+          "room": "staircase"
+        },
+        {
+          "folder": "al-morjan-jeddah",
+          "i": 9,
+          "room": "living"
+        },
+        {
+          "folder": "al-morjan-jeddah",
+          "i": 10,
+          "room": "courtyard"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "al-morjan-jeddah",
+          "i": 2,
+          "room": "facade_night"
+        },
+        {
+          "folder": "al-morjan-jeddah",
+          "i": 6,
+          "room": "exterior"
+        },
+        {
+          "folder": "al-morjan-jeddah",
+          "i": 16,
+          "room": "pool"
+        },
+        {
+          "folder": "al-morjan-jeddah",
+          "i": 8,
+          "room": "entrance"
+        },
+        {
+          "folder": "al-morjan-jeddah",
+          "i": 4,
+          "room": "living"
+        },
+        {
+          "folder": "al-morjan-jeddah",
+          "i": 12,
+          "room": "staircase"
+        },
+        {
+          "folder": "al-morjan-jeddah",
+          "i": 11,
+          "room": "living"
+        },
+        {
+          "folder": "al-morjan-jeddah",
+          "i": 3,
+          "room": "living"
+        },
+        {
+          "folder": "al-morjan-jeddah",
+          "i": 9,
+          "room": "living"
+        }
+      ],
+      "reason": "Blue-hour façade with lit boundary wall and glowing pool — the day frame (6) is lower resolution, has a blown sky and a car at the edge."
+    },
+    {
+      "id": "BONA-005",
+      "slug": "contemporary-villa-al-khalidiyah",
+      "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+      "featured": true,
+      "status": "available",
+      "category": "buy",
+      "type": "villa",
+      "oldHero": {
+        "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+        "i": 8,
+        "room": "pool"
+      },
+      "newHero": {
+        "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+        "i": 16,
+        "room": "facade_night"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+          "i": 8,
+          "room": "pool"
+        },
+        {
+          "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+          "i": 16,
+          "room": "facade_night"
+        },
+        {
+          "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+          "i": 24,
+          "room": "pool_night"
+        },
+        {
+          "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+          "i": 78,
+          "room": "living"
+        },
+        {
+          "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+          "i": 32,
+          "room": "kitchen"
+        },
+        {
+          "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+          "i": 40,
+          "room": "staircase"
+        },
+        {
+          "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+          "i": 53,
+          "room": "bathroom"
+        },
+        {
+          "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+          "i": 88,
+          "room": "terrace"
+        },
+        {
+          "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+          "i": 2,
+          "room": "entrance"
+        },
+        {
+          "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+          "i": 57,
+          "room": "bedroom"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+          "i": 16,
+          "room": "facade_night"
+        },
+        {
+          "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+          "i": 25,
+          "room": "pool_night"
+        },
+        {
+          "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+          "i": 8,
+          "room": "pool"
+        },
+        {
+          "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+          "i": 2,
+          "room": "entrance"
+        },
+        {
+          "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+          "i": 74,
+          "room": "hall"
+        },
+        {
+          "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+          "i": 78,
+          "room": "living"
+        },
+        {
+          "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+          "i": 82,
+          "room": "kitchen"
+        },
+        {
+          "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+          "i": 96,
+          "room": "staircase"
+        },
+        {
+          "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+          "i": 45,
+          "room": "bathroom"
+        },
+        {
+          "folder": "ultra-modern-luxury-villa-al-khalidiyah",
+          "i": 88,
+          "room": "terrace"
+        }
+      ],
+      "reason": "The whole villa lit at night, centred and crop-safe, states \"ultra-modern villa\" instantly; the old hero was a tight daylight crop of the courtyard pool wall."
+    },
+    {
+      "id": "BONA-006",
+      "slug": "modern-villa-al-zahra",
+      "folder": "modren-villa-al-zahra",
+      "featured": true,
+      "status": "available",
+      "category": "buy",
+      "type": "villa",
+      "oldHero": {
+        "folder": "modren-villa-al-zahra",
+        "i": 0,
+        "room": "pool"
+      },
+      "newHero": {
+        "folder": "modren-villa-al-zahra",
+        "i": 27,
+        "room": "pool"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "modren-villa-al-zahra",
+          "i": 0,
+          "room": "pool"
+        },
+        {
+          "folder": "modren-villa-al-zahra",
+          "i": 1,
+          "room": "exterior"
+        },
+        {
+          "folder": "modren-villa-al-zahra",
+          "i": 27,
+          "room": "pool"
+        },
+        {
+          "folder": "modren-villa-al-zahra",
+          "i": 3,
+          "room": "kitchen"
+        },
+        {
+          "folder": "modren-villa-al-zahra",
+          "i": 13,
+          "room": "living"
+        },
+        {
+          "folder": "modren-villa-al-zahra",
+          "i": 22,
+          "room": "bathroom"
+        },
+        {
+          "folder": "modren-villa-al-zahra",
+          "i": 16,
+          "room": "terrace"
+        },
+        {
+          "folder": "modren-villa-al-zahra",
+          "i": 26,
+          "room": "terrace"
+        },
+        {
+          "folder": "modren-villa-al-zahra",
+          "i": 36,
+          "room": "staircase"
+        },
+        {
+          "folder": "modren-villa-al-zahra",
+          "i": 9,
+          "room": "facade_night"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "modren-villa-al-zahra",
+          "i": 27,
+          "room": "pool"
+        },
+        {
+          "folder": "modren-villa-al-zahra",
+          "i": 34,
+          "room": "exterior"
+        },
+        {
+          "folder": "modren-villa-al-zahra",
+          "i": 0,
+          "room": "pool"
+        },
+        {
+          "folder": "modren-villa-al-zahra",
+          "i": 5,
+          "room": "entrance"
+        },
+        {
+          "folder": "modren-villa-al-zahra",
+          "i": 38,
+          "room": "living"
+        },
+        {
+          "folder": "modren-villa-al-zahra",
+          "i": 11,
+          "room": "kitchen"
+        },
+        {
+          "folder": "modren-villa-al-zahra",
+          "i": 12,
+          "room": "dining"
+        },
+        {
+          "folder": "modren-villa-al-zahra",
+          "i": 36,
+          "room": "staircase"
+        },
+        {
+          "folder": "modren-villa-al-zahra",
+          "i": 23,
+          "room": "bathroom"
+        },
+        {
+          "folder": "modren-villa-al-zahra",
+          "i": 26,
+          "room": "terrace"
+        }
+      ],
+      "reason": "Rooftop pool at dusk with the lit waterfall — golden hour beats the flat midday pool (0) with its patchy deck."
+    },
+    {
+      "id": "BONA-007",
+      "slug": "rooftop-view-villa-al-mohammadiyah",
+      "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+      "featured": false,
+      "status": "available",
+      "category": "buy",
+      "type": "villa",
+      "oldHero": {
+        "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+        "i": 6,
+        "room": "exterior"
+      },
+      "newHero": {
+        "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+        "i": 8,
+        "room": "pool"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+          "i": 6,
+          "room": "exterior"
+        },
+        {
+          "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+          "i": 8,
+          "room": "pool"
+        },
+        {
+          "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+          "i": 5,
+          "room": "exterior"
+        },
+        {
+          "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+          "i": 15,
+          "room": "living"
+        },
+        {
+          "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+          "i": 17,
+          "room": "living"
+        },
+        {
+          "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+          "i": 38,
+          "room": "living"
+        },
+        {
+          "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+          "i": 42,
+          "room": "terrace"
+        },
+        {
+          "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+          "i": 43,
+          "room": "skyline"
+        },
+        {
+          "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+          "i": 45,
+          "room": "pool_night"
+        },
+        {
+          "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+          "i": 0,
+          "room": "entrance"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+          "i": 8,
+          "room": "pool"
+        },
+        {
+          "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+          "i": 46,
+          "room": "pool_night"
+        },
+        {
+          "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+          "i": 6,
+          "room": "exterior"
+        },
+        {
+          "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+          "i": 21,
+          "room": "living"
+        },
+        {
+          "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+          "i": 38,
+          "room": "view"
+        },
+        {
+          "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+          "i": 17,
+          "room": "living"
+        },
+        {
+          "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+          "i": 22,
+          "room": "staircase"
+        },
+        {
+          "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+          "i": 35,
+          "room": "bathroom"
+        },
+        {
+          "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+          "i": 42,
+          "room": "terrace"
+        },
+        {
+          "folder": "luxury-modren-villa-al-mohamadyah-jeddah",
+          "i": 43,
+          "room": "skyline"
+        }
+      ],
+      "reason": "Pool filling the courtyard with the glazed façade above and no cars in frame; the old hero (6) was a low water-level angle with barely any sky."
+    },
+    {
+      "id": "BONA-008",
+      "slug": "timber-villa-al-mohammadiyah",
+      "folder": "modren-villa-al-mohammadiyyah",
+      "featured": false,
+      "status": "available",
+      "category": "buy",
+      "type": "villa",
+      "oldHero": {
+        "folder": "modren-villa-al-mohammadiyyah",
+        "i": 9,
+        "room": "exterior"
+      },
+      "newHero": {
+        "folder": "modren-villa-al-mohammadiyyah",
+        "i": 34,
+        "room": "facade_night"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "modren-villa-al-mohammadiyyah",
+          "i": 9,
+          "room": "exterior"
+        },
+        {
+          "folder": "modren-villa-al-mohammadiyyah",
+          "i": 45,
+          "room": "exterior"
+        },
+        {
+          "folder": "modren-villa-al-mohammadiyyah",
+          "i": 34,
+          "room": "facade_night"
+        },
+        {
+          "folder": "modren-villa-al-mohammadiyyah",
+          "i": 31,
+          "room": "pool_night"
+        },
+        {
+          "folder": "modren-villa-al-mohammadiyyah",
+          "i": 13,
+          "room": "living"
+        },
+        {
+          "folder": "modren-villa-al-mohammadiyyah",
+          "i": 18,
+          "room": "living"
+        },
+        {
+          "folder": "modren-villa-al-mohammadiyyah",
+          "i": 17,
+          "room": "bedroom"
+        },
+        {
+          "folder": "modren-villa-al-mohammadiyyah",
+          "i": 21,
+          "room": "bathroom"
+        },
+        {
+          "folder": "modren-villa-al-mohammadiyyah",
+          "i": 29,
+          "room": "kitchen"
+        },
+        {
+          "folder": "modren-villa-al-mohammadiyyah",
+          "i": 8,
+          "room": "terrace"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "modren-villa-al-mohammadiyyah",
+          "i": 34,
+          "room": "facade_night"
+        },
+        {
+          "folder": "modren-villa-al-mohammadiyyah",
+          "i": 45,
+          "room": "exterior"
+        },
+        {
+          "folder": "modren-villa-al-mohammadiyyah",
+          "i": 32,
+          "room": "pool_night"
+        },
+        {
+          "folder": "modren-villa-al-mohammadiyyah",
+          "i": 12,
+          "room": "entrance"
+        },
+        {
+          "folder": "modren-villa-al-mohammadiyyah",
+          "i": 26,
+          "room": "living"
+        },
+        {
+          "folder": "modren-villa-al-mohammadiyyah",
+          "i": 13,
+          "room": "gallery"
+        },
+        {
+          "folder": "modren-villa-al-mohammadiyyah",
+          "i": 29,
+          "room": "kitchen"
+        },
+        {
+          "folder": "modren-villa-al-mohammadiyyah",
+          "i": 17,
+          "room": "master"
+        },
+        {
+          "folder": "modren-villa-al-mohammadiyyah",
+          "i": 21,
+          "room": "bathroom"
+        },
+        {
+          "folder": "modren-villa-al-mohammadiyyah",
+          "i": 39,
+          "room": "staircase"
+        }
+      ],
+      "reason": "Warm-lit timber façade at dusk — the signature of a \"timber-detailed\" villa; the old day frame was a snapshot with wires."
+    },
+    {
+      "id": "BONA-009",
+      "slug": "garden-facing-villa-al-sheraa-north-obhur",
+      "folder": "modren-villa-al-shera-a-north-obhur",
+      "featured": true,
+      "status": "available",
+      "category": "buy",
+      "type": "villa",
+      "oldHero": {
+        "folder": "modren-villa-al-shera-a-north-obhur",
+        "i": 38,
+        "room": "pool"
+      },
+      "newHero": {
+        "folder": "modren-villa-al-shera-a-north-obhur",
+        "i": 38,
+        "room": "pool"
+      },
+      "heroChanged": false,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "modren-villa-al-shera-a-north-obhur",
+          "i": 38,
+          "room": "pool"
+        },
+        {
+          "folder": "modren-villa-al-shera-a-north-obhur",
+          "i": 39,
+          "room": "facade_night"
+        },
+        {
+          "folder": "modren-villa-al-shera-a-north-obhur",
+          "i": 15,
+          "room": "pool"
+        },
+        {
+          "folder": "modren-villa-al-shera-a-north-obhur",
+          "i": 9,
+          "room": "staircase"
+        },
+        {
+          "folder": "modren-villa-al-shera-a-north-obhur",
+          "i": 5,
+          "room": "living"
+        },
+        {
+          "folder": "modren-villa-al-shera-a-north-obhur",
+          "i": 14,
+          "room": "bathroom"
+        },
+        {
+          "folder": "modren-villa-al-shera-a-north-obhur",
+          "i": 24,
+          "room": "bathroom"
+        },
+        {
+          "folder": "modren-villa-al-shera-a-north-obhur",
+          "i": 37,
+          "room": "terrace"
+        },
+        {
+          "folder": "modren-villa-al-shera-a-north-obhur",
+          "i": 47,
+          "room": "pool_night"
+        },
+        {
+          "folder": "modren-villa-al-shera-a-north-obhur",
+          "i": 1,
+          "room": "entrance"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "modren-villa-al-shera-a-north-obhur",
+          "i": 38,
+          "room": "pool"
+        },
+        {
+          "folder": "modren-villa-al-shera-a-north-obhur",
+          "i": 39,
+          "room": "facade_night"
+        },
+        {
+          "folder": "modren-villa-al-shera-a-north-obhur",
+          "i": 2,
+          "room": "exterior"
+        },
+        {
+          "folder": "modren-villa-al-shera-a-north-obhur",
+          "i": 1,
+          "room": "entrance"
+        },
+        {
+          "folder": "modren-villa-al-shera-a-north-obhur",
+          "i": 9,
+          "room": "staircase"
+        },
+        {
+          "folder": "modren-villa-al-shera-a-north-obhur",
+          "i": 5,
+          "room": "living"
+        },
+        {
+          "folder": "modren-villa-al-shera-a-north-obhur",
+          "i": 41,
+          "room": "courtyard"
+        },
+        {
+          "folder": "modren-villa-al-shera-a-north-obhur",
+          "i": 11,
+          "room": "living"
+        },
+        {
+          "folder": "modren-villa-al-shera-a-north-obhur",
+          "i": 23,
+          "room": "bathroom"
+        },
+        {
+          "folder": "modren-villa-al-shera-a-north-obhur",
+          "i": 47,
+          "room": "pool_night"
+        }
+      ],
+      "reason": "Kept: dusk pool with the lit entrance canopy behind is the strongest frame in a 49-photo folder; the two back-to-back bathrooms and the bare roof deck were replaced."
+    },
+    {
+      "id": "BONA-010",
+      "slug": "modern-villa-south-obhur",
+      "folder": "modren-duplex",
+      "featured": false,
+      "status": "available",
+      "category": "buy",
+      "type": "villa",
+      "oldHero": {
+        "folder": "modren-duplex",
+        "i": 3,
+        "room": "facade_night"
+      },
+      "newHero": {
+        "folder": "modren-duplex",
+        "i": 3,
+        "room": "facade_night"
+      },
+      "heroChanged": false,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "modren-duplex",
+          "i": 3,
+          "room": "facade_night"
+        },
+        {
+          "folder": "modren-duplex",
+          "i": 11,
+          "room": "courtyard"
+        },
+        {
+          "folder": "modren-duplex",
+          "i": 0,
+          "room": "exterior"
+        },
+        {
+          "folder": "modren-duplex",
+          "i": 9,
+          "room": "living"
+        },
+        {
+          "folder": "modren-duplex",
+          "i": 6,
+          "room": "living"
+        },
+        {
+          "folder": "modren-duplex",
+          "i": 4,
+          "room": "bathroom"
+        },
+        {
+          "folder": "modren-duplex",
+          "i": 7,
+          "room": "staircase"
+        },
+        {
+          "folder": "modren-duplex",
+          "i": 10,
+          "room": "garden"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "modren-duplex",
+          "i": 3,
+          "room": "facade_night"
+        },
+        {
+          "folder": "modren-duplex",
+          "i": 13,
+          "room": "exterior"
+        },
+        {
+          "folder": "modren-duplex",
+          "i": 2,
+          "room": "entrance"
+        },
+        {
+          "folder": "modren-duplex",
+          "i": 9,
+          "room": "living"
+        },
+        {
+          "folder": "modren-duplex",
+          "i": 7,
+          "room": "staircase"
+        },
+        {
+          "folder": "modren-duplex",
+          "i": 6,
+          "room": "living"
+        },
+        {
+          "folder": "modren-duplex",
+          "i": 11,
+          "room": "courtyard"
+        },
+        {
+          "folder": "modren-duplex",
+          "i": 4,
+          "room": "bathroom"
+        }
+      ],
+      "reason": "Kept: dusk façade; added a cleaner daylight architectural frame (13) as the second image."
+    },
+    {
+      "id": "BONA-011",
+      "slug": "villa-near-the-corniche-al-lulu-obhur",
+      "folder": "modren-villa-north-obhur",
+      "featured": false,
+      "status": "available",
+      "category": "buy",
+      "type": "villa",
+      "oldHero": {
+        "folder": "modren-villa-north-obhur",
+        "i": 5,
+        "room": "pool"
+      },
+      "newHero": {
+        "folder": "modren-villa-north-obhur",
+        "i": 39,
+        "room": "pool"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "modren-villa-north-obhur",
+          "i": 5,
+          "room": "pool"
+        },
+        {
+          "folder": "modren-villa-north-obhur",
+          "i": 4,
+          "room": "pool"
+        },
+        {
+          "folder": "modren-villa-north-obhur",
+          "i": 51,
+          "room": "facade_night"
+        },
+        {
+          "folder": "modren-villa-north-obhur",
+          "i": 47,
+          "room": "pool_night"
+        },
+        {
+          "folder": "modren-villa-north-obhur",
+          "i": 6,
+          "room": "living"
+        },
+        {
+          "folder": "modren-villa-north-obhur",
+          "i": 18,
+          "room": "living"
+        },
+        {
+          "folder": "modren-villa-north-obhur",
+          "i": 8,
+          "room": "staircase"
+        },
+        {
+          "folder": "modren-villa-north-obhur",
+          "i": 10,
+          "room": "bathroom"
+        },
+        {
+          "folder": "modren-villa-north-obhur",
+          "i": 34,
+          "room": "terrace"
+        },
+        {
+          "folder": "modren-villa-north-obhur",
+          "i": 25,
+          "room": "bedroom"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "modren-villa-north-obhur",
+          "i": 39,
+          "room": "pool"
+        },
+        {
+          "folder": "modren-villa-north-obhur",
+          "i": 51,
+          "room": "facade_night"
+        },
+        {
+          "folder": "modren-villa-north-obhur",
+          "i": 4,
+          "room": "pool"
+        },
+        {
+          "folder": "modren-villa-north-obhur",
+          "i": 43,
+          "room": "exterior"
+        },
+        {
+          "folder": "modren-villa-north-obhur",
+          "i": 11,
+          "room": "entrance"
+        },
+        {
+          "folder": "modren-villa-north-obhur",
+          "i": 7,
+          "room": "living"
+        },
+        {
+          "folder": "modren-villa-north-obhur",
+          "i": 8,
+          "room": "staircase"
+        },
+        {
+          "folder": "modren-villa-north-obhur",
+          "i": 25,
+          "room": "view"
+        },
+        {
+          "folder": "modren-villa-north-obhur",
+          "i": 23,
+          "room": "bathroom"
+        },
+        {
+          "folder": "modren-villa-north-obhur",
+          "i": 34,
+          "room": "terrace"
+        }
+      ],
+      "reason": "Dusk courtyard with the pool and a warm-lit double-height glazed wall — far stronger than the flat daylight pool."
+    },
+    {
+      "id": "BONA-012",
+      "slug": "al-bandar-villas-north-obhur",
+      "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+      "featured": false,
+      "status": "available",
+      "category": "buy",
+      "type": "villa",
+      "oldHero": {
+        "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+        "i": 20,
+        "room": "pool"
+      },
+      "newHero": {
+        "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+        "i": 20,
+        "room": "pool"
+      },
+      "heroChanged": false,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+          "i": 20,
+          "room": "pool"
+        },
+        {
+          "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+          "i": 8,
+          "room": "pool"
+        },
+        {
+          "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+          "i": 41,
+          "room": "exterior"
+        },
+        {
+          "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+          "i": 11,
+          "room": "living"
+        },
+        {
+          "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+          "i": 19,
+          "room": "living"
+        },
+        {
+          "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+          "i": 26,
+          "room": "bathroom"
+        },
+        {
+          "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+          "i": 23,
+          "room": "bedroom"
+        },
+        {
+          "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+          "i": 36,
+          "room": "terrace"
+        },
+        {
+          "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+          "i": 44,
+          "room": "pool_night"
+        },
+        {
+          "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+          "i": 15,
+          "room": "staircase"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+          "i": 20,
+          "room": "pool"
+        },
+        {
+          "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+          "i": 44,
+          "room": "pool_night"
+        },
+        {
+          "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+          "i": 1,
+          "room": "entrance"
+        },
+        {
+          "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+          "i": 2,
+          "room": "courtyard"
+        },
+        {
+          "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+          "i": 19,
+          "room": "living"
+        },
+        {
+          "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+          "i": 15,
+          "room": "staircase"
+        },
+        {
+          "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+          "i": 11,
+          "room": "living"
+        },
+        {
+          "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+          "i": 23,
+          "room": "bedroom"
+        },
+        {
+          "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+          "i": 26,
+          "room": "bathroom"
+        },
+        {
+          "folder": "modern-villas-for-sale-in-al-bandar-north-obhur",
+          "i": 36,
+          "room": "terrace"
+        }
+      ],
+      "reason": "Kept: pool with the stone waterfall wall. Removed the street frame carrying the developer's \"ayan\" advertising banner."
+    },
+    {
+      "id": "BONA-013",
+      "slug": "duplex-penthouse-al-salamah",
+      "folder": "penthouse-al-salama",
+      "featured": false,
+      "status": "available",
+      "category": "buy",
+      "type": "penthouse",
+      "oldHero": {
+        "folder": "penthouse-al-salama",
+        "i": 0,
+        "room": "exterior"
+      },
+      "newHero": {
+        "folder": "penthouse-al-salama",
+        "i": 5,
+        "room": "living"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "penthouse-al-salama",
+          "i": 0,
+          "room": "exterior"
+        },
+        {
+          "folder": "penthouse-al-salama",
+          "i": 5,
+          "room": "living"
+        },
+        {
+          "folder": "penthouse-al-salama",
+          "i": 4,
+          "room": "living"
+        },
+        {
+          "folder": "penthouse-al-salama",
+          "i": 11,
+          "room": "staircase"
+        },
+        {
+          "folder": "penthouse-al-salama",
+          "i": 16,
+          "room": "staircase"
+        },
+        {
+          "folder": "penthouse-al-salama",
+          "i": 21,
+          "room": "bathroom"
+        },
+        {
+          "folder": "penthouse-al-salama",
+          "i": 23,
+          "room": "bedroom"
+        },
+        {
+          "folder": "penthouse-al-salama",
+          "i": 13,
+          "room": "bathroom"
+        },
+        {
+          "folder": "penthouse-al-salama",
+          "i": 32,
+          "room": "exterior"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "penthouse-al-salama",
+          "i": 5,
+          "room": "living"
+        },
+        {
+          "folder": "penthouse-al-salama",
+          "i": 32,
+          "room": "exterior"
+        },
+        {
+          "folder": "penthouse-al-salama",
+          "i": 10,
+          "room": "view"
+        },
+        {
+          "folder": "penthouse-al-salama",
+          "i": 1,
+          "room": "entrance"
+        },
+        {
+          "folder": "penthouse-al-salama",
+          "i": 9,
+          "room": "living"
+        },
+        {
+          "folder": "penthouse-al-salama",
+          "i": 16,
+          "room": "staircase"
+        },
+        {
+          "folder": "penthouse-al-salama",
+          "i": 23,
+          "room": "bedroom"
+        },
+        {
+          "folder": "penthouse-al-salama",
+          "i": 21,
+          "room": "bathroom"
+        },
+        {
+          "folder": "penthouse-al-salama",
+          "i": 12,
+          "room": "living"
+        }
+      ],
+      "reason": "Penthouse rule: the widest reception with corner glazing and the city view; the real building photo (32) replaces the CGI render at slot two."
+    },
+    {
+      "id": "BONA-014",
+      "slug": "nobal-five-al-rawdah",
+      "folder": "nobal-5",
+      "featured": false,
+      "status": "available",
+      "category": "buy",
+      "type": "apartment",
+      "oldHero": {
+        "folder": "nobal-5",
+        "i": 0,
+        "room": "exterior"
+      },
+      "newHero": {
+        "folder": "nobal-5",
+        "i": 1,
+        "room": "facade_night"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "nobal-5",
+          "i": 0,
+          "room": "exterior"
+        },
+        {
+          "folder": "nobal-5",
+          "i": 1,
+          "room": "facade_night"
+        },
+        {
+          "folder": "nobal-5",
+          "i": 9,
+          "room": "living"
+        },
+        {
+          "folder": "nobal-5",
+          "i": 5,
+          "room": "living"
+        },
+        {
+          "folder": "nobal-5",
+          "i": 11,
+          "room": "staircase"
+        },
+        {
+          "folder": "nobal-5",
+          "i": 16,
+          "room": "bathroom"
+        },
+        {
+          "folder": "nobal-5",
+          "i": 18,
+          "room": "bathroom"
+        },
+        {
+          "folder": "nobal-5",
+          "i": 14,
+          "room": "exterior"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "nobal-5",
+          "i": 1,
+          "room": "facade_night"
+        },
+        {
+          "folder": "nobal-5",
+          "i": 0,
+          "room": "exterior"
+        },
+        {
+          "folder": "nobal-5",
+          "i": 10,
+          "room": "lobby"
+        },
+        {
+          "folder": "nobal-5",
+          "i": 9,
+          "room": "living"
+        },
+        {
+          "folder": "nobal-5",
+          "i": 12,
+          "room": "staircase"
+        },
+        {
+          "folder": "nobal-5",
+          "i": 5,
+          "room": "living"
+        },
+        {
+          "folder": "nobal-5",
+          "i": 16,
+          "room": "bathroom"
+        },
+        {
+          "folder": "nobal-5",
+          "i": 18,
+          "room": "bathroom"
+        }
+      ],
+      "reason": "Building at dusk with warm-lit windows — the daylight frame (0) is flattened by a neighbouring older block."
+    },
+    {
+      "id": "BONA-015",
+      "slug": "al-zahra-residences",
+      "folder": "al-zahrah-apartment",
+      "featured": false,
+      "status": "available",
+      "category": "buy",
+      "type": "apartment",
+      "oldHero": {
+        "folder": "al-zahrah-apartment",
+        "i": 10,
+        "room": "exterior"
+      },
+      "newHero": {
+        "folder": "al-zahrah-apartment",
+        "i": 21,
+        "room": "facade_night"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "al-zahrah-apartment",
+          "i": 10,
+          "room": "exterior"
+        },
+        {
+          "folder": "al-zahrah-apartment",
+          "i": 21,
+          "room": "facade_night"
+        },
+        {
+          "folder": "al-zahrah-apartment",
+          "i": 25,
+          "room": "living"
+        },
+        {
+          "folder": "al-zahrah-apartment",
+          "i": 14,
+          "room": "balcony"
+        },
+        {
+          "folder": "al-zahrah-apartment",
+          "i": 19,
+          "room": "terrace"
+        },
+        {
+          "folder": "al-zahrah-apartment",
+          "i": 12,
+          "room": "living"
+        },
+        {
+          "folder": "al-zahrah-apartment",
+          "i": 4,
+          "room": "bathroom"
+        },
+        {
+          "folder": "al-zahrah-apartment",
+          "i": 3,
+          "room": "bathroom"
+        },
+        {
+          "folder": "al-zahrah-apartment",
+          "i": 0,
+          "room": "facade_night"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "al-zahrah-apartment",
+          "i": 21,
+          "room": "facade_night"
+        },
+        {
+          "folder": "al-zahrah-apartment",
+          "i": 10,
+          "room": "exterior"
+        },
+        {
+          "folder": "al-zahrah-apartment",
+          "i": 11,
+          "room": "lobby"
+        },
+        {
+          "folder": "al-zahrah-apartment",
+          "i": 25,
+          "room": "living"
+        },
+        {
+          "folder": "al-zahrah-apartment",
+          "i": 14,
+          "room": "balcony"
+        },
+        {
+          "folder": "al-zahrah-apartment",
+          "i": 12,
+          "room": "living"
+        },
+        {
+          "folder": "al-zahrah-apartment",
+          "i": 18,
+          "room": "view"
+        },
+        {
+          "folder": "al-zahrah-apartment",
+          "i": 4,
+          "room": "bathroom"
+        },
+        {
+          "folder": "al-zahrah-apartment",
+          "i": 19,
+          "room": "terrace"
+        }
+      ],
+      "reason": "The stacked window frames glowing at blue hour — the single best architectural frame; the daylight version moves to second."
+    },
+    {
+      "id": "BONA-016",
+      "slug": "villa-al-shati-1",
+      "folder": "villa-al-shati-1",
+      "featured": false,
+      "status": "sold",
+      "category": "buy",
+      "type": "villa",
+      "oldHero": {
+        "folder": "villa-al-shati-1",
+        "i": 9,
+        "room": "pool"
+      },
+      "newHero": {
+        "folder": "villa-al-shati-1",
+        "i": 9,
+        "room": "pool"
+      },
+      "heroChanged": false,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "villa-al-shati-1",
+          "i": 9,
+          "room": "pool"
+        },
+        {
+          "folder": "villa-al-shati-1",
+          "i": 57,
+          "room": "facade_night"
+        },
+        {
+          "folder": "villa-al-shati-1",
+          "i": 3,
+          "room": "entrance"
+        },
+        {
+          "folder": "villa-al-shati-1",
+          "i": 16,
+          "room": "living"
+        },
+        {
+          "folder": "villa-al-shati-1",
+          "i": 20,
+          "room": "staircase"
+        },
+        {
+          "folder": "villa-al-shati-1",
+          "i": 21,
+          "room": "kitchen"
+        },
+        {
+          "folder": "villa-al-shati-1",
+          "i": 27,
+          "room": "bathroom"
+        },
+        {
+          "folder": "villa-al-shati-1",
+          "i": 50,
+          "room": "pool_night"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "villa-al-shati-1",
+          "i": 9,
+          "room": "pool"
+        },
+        {
+          "folder": "villa-al-shati-1",
+          "i": 5,
+          "room": "exterior"
+        },
+        {
+          "folder": "villa-al-shati-1",
+          "i": 3,
+          "room": "entrance"
+        },
+        {
+          "folder": "villa-al-shati-1",
+          "i": 33,
+          "room": "hall"
+        },
+        {
+          "folder": "villa-al-shati-1",
+          "i": 16,
+          "room": "living"
+        },
+        {
+          "folder": "villa-al-shati-1",
+          "i": 21,
+          "room": "kitchen"
+        },
+        {
+          "folder": "villa-al-shati-1",
+          "i": 20,
+          "room": "staircase"
+        },
+        {
+          "folder": "villa-al-shati-1",
+          "i": 52,
+          "room": "pool_night"
+        }
+      ],
+      "reason": "Kept: pool with the mansion and palms. Removed the night street frame whose subject is a parked Mercedes."
+    },
+    {
+      "id": "BONA-017",
+      "slug": "park-facing-villa-al-khalidiyah",
+      "folder": "villa-al-khalidiyah",
+      "featured": false,
+      "status": "sold",
+      "category": "buy",
+      "type": "villa",
+      "oldHero": {
+        "folder": "villa-al-khalidiyah",
+        "i": 85,
+        "room": "exterior"
+      },
+      "newHero": {
+        "folder": "villa-al-khalidiyah",
+        "i": 102,
+        "room": "facade_night"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "villa-al-khalidiyah",
+          "i": 85,
+          "room": "exterior"
+        },
+        {
+          "folder": "villa-al-khalidiyah",
+          "i": 92,
+          "room": "facade_night"
+        },
+        {
+          "folder": "villa-al-khalidiyah",
+          "i": 96,
+          "room": "pool"
+        },
+        {
+          "folder": "villa-al-khalidiyah",
+          "i": 17,
+          "room": "living"
+        },
+        {
+          "folder": "villa-al-khalidiyah",
+          "i": 61,
+          "room": "kitchen"
+        },
+        {
+          "folder": "villa-al-khalidiyah",
+          "i": 26,
+          "room": "bedroom"
+        },
+        {
+          "folder": "villa-al-khalidiyah",
+          "i": 42,
+          "room": "bathroom"
+        },
+        {
+          "folder": "villa-al-khalidiyah",
+          "i": 3,
+          "room": "terrace"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "villa-al-khalidiyah",
+          "i": 102,
+          "room": "facade_night"
+        },
+        {
+          "folder": "villa-al-khalidiyah",
+          "i": 96,
+          "room": "pool"
+        },
+        {
+          "folder": "villa-al-khalidiyah",
+          "i": 85,
+          "room": "exterior"
+        },
+        {
+          "folder": "villa-al-khalidiyah",
+          "i": 17,
+          "room": "living"
+        },
+        {
+          "folder": "villa-al-khalidiyah",
+          "i": 66,
+          "room": "hall"
+        },
+        {
+          "folder": "villa-al-khalidiyah",
+          "i": 60,
+          "room": "living"
+        },
+        {
+          "folder": "villa-al-khalidiyah",
+          "i": 64,
+          "room": "kitchen"
+        },
+        {
+          "folder": "villa-al-khalidiyah",
+          "i": 33,
+          "room": "bedroom"
+        },
+        {
+          "folder": "villa-al-khalidiyah",
+          "i": 42,
+          "room": "bathroom"
+        },
+        {
+          "folder": "villa-al-khalidiyah",
+          "i": 5,
+          "room": "terrace"
+        }
+      ],
+      "reason": "Twilight façade, warm lit, clean street — the old hero was a daylight frame with a wet road and a lamp post through the roofline."
+    },
+    {
+      "id": "BONA-018",
+      "slug": "villa-for-rent-al-shati-2",
+      "folder": "villa-for-rent-al-shati-2",
+      "featured": false,
+      "status": "available",
+      "category": "rent",
+      "type": "villa",
+      "oldHero": {
+        "folder": "villa-for-rent-al-shati-2",
+        "i": 0,
+        "room": "exterior"
+      },
+      "newHero": {
+        "folder": "villa-for-rent-al-shati-2",
+        "i": 25,
+        "room": "facade_night"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "villa-for-rent-al-shati-2",
+          "i": 0,
+          "room": "exterior"
+        },
+        {
+          "folder": "villa-for-rent-al-shati-2",
+          "i": 14,
+          "room": "sea"
+        },
+        {
+          "folder": "villa-for-rent-al-shati-2",
+          "i": 25,
+          "room": "facade_night"
+        },
+        {
+          "folder": "villa-for-rent-al-shati-2",
+          "i": 4,
+          "room": "living"
+        },
+        {
+          "folder": "villa-for-rent-al-shati-2",
+          "i": 1,
+          "room": "staircase"
+        },
+        {
+          "folder": "villa-for-rent-al-shati-2",
+          "i": 16,
+          "room": "kitchen"
+        },
+        {
+          "folder": "villa-for-rent-al-shati-2",
+          "i": 22,
+          "room": "bathroom"
+        },
+        {
+          "folder": "villa-for-rent-al-shati-2",
+          "i": 27,
+          "room": "exterior"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "villa-for-rent-al-shati-2",
+          "i": 25,
+          "room": "facade_night"
+        },
+        {
+          "folder": "villa-for-rent-al-shati-2",
+          "i": 28,
+          "room": "exterior"
+        },
+        {
+          "folder": "villa-for-rent-al-shati-2",
+          "i": 24,
+          "room": "entrance"
+        },
+        {
+          "folder": "villa-for-rent-al-shati-2",
+          "i": 4,
+          "room": "living"
+        },
+        {
+          "folder": "villa-for-rent-al-shati-2",
+          "i": 9,
+          "room": "staircase"
+        },
+        {
+          "folder": "villa-for-rent-al-shati-2",
+          "i": 20,
+          "room": "kitchen"
+        },
+        {
+          "folder": "villa-for-rent-al-shati-2",
+          "i": 8,
+          "room": "living"
+        },
+        {
+          "folder": "villa-for-rent-al-shati-2",
+          "i": 12,
+          "room": "bathroom"
+        }
+      ],
+      "reason": "Classical façade lit at night. Also removed a city/car-park view mislabelled \"sea view\" and two frames dominated by parked cars."
+    },
+    {
+      "id": "BONA-019",
+      "slug": "villa-for-rent-al-murjan",
+      "folder": "modern-luxury-villas-al-murjan",
+      "featured": false,
+      "status": "available",
+      "category": "rent",
+      "type": "villa",
+      "oldHero": {
+        "folder": "modern-luxury-villas-al-murjan",
+        "i": 13,
+        "room": "exterior"
+      },
+      "newHero": {
+        "folder": "modern-luxury-villas-al-murjan",
+        "i": 0,
+        "room": "facade_night"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "modern-luxury-villas-al-murjan",
+          "i": 13,
+          "room": "exterior"
+        },
+        {
+          "folder": "modern-luxury-villas-al-murjan",
+          "i": 0,
+          "room": "facade_night"
+        },
+        {
+          "folder": "modern-luxury-villas-al-murjan",
+          "i": 6,
+          "room": "pool"
+        },
+        {
+          "folder": "modern-luxury-villas-al-murjan",
+          "i": 7,
+          "room": "living"
+        },
+        {
+          "folder": "modern-luxury-villas-al-murjan",
+          "i": 8,
+          "room": "living"
+        },
+        {
+          "folder": "modern-luxury-villas-al-murjan",
+          "i": 3,
+          "room": "staircase"
+        },
+        {
+          "folder": "modern-luxury-villas-al-murjan",
+          "i": 1,
+          "room": "bathroom"
+        },
+        {
+          "folder": "modern-luxury-villas-al-murjan",
+          "i": 19,
+          "room": "terrace"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "modern-luxury-villas-al-murjan",
+          "i": 0,
+          "room": "facade_night"
+        },
+        {
+          "folder": "modern-luxury-villas-al-murjan",
+          "i": 21,
+          "room": "exterior"
+        },
+        {
+          "folder": "modern-luxury-villas-al-murjan",
+          "i": 6,
+          "room": "pool"
+        },
+        {
+          "folder": "modern-luxury-villas-al-murjan",
+          "i": 14,
+          "room": "entrance"
+        },
+        {
+          "folder": "modern-luxury-villas-al-murjan",
+          "i": 7,
+          "room": "living"
+        },
+        {
+          "folder": "modern-luxury-villas-al-murjan",
+          "i": 3,
+          "room": "staircase"
+        },
+        {
+          "folder": "modern-luxury-villas-al-murjan",
+          "i": 17,
+          "room": "living"
+        },
+        {
+          "folder": "modern-luxury-villas-al-murjan",
+          "i": 10,
+          "room": "skyline"
+        }
+      ],
+      "reason": "Modern villa lit at blue hour from the street; the old hero was a flat daylight frame of a boundary wall and gates."
+    },
+    {
+      "id": "BONA-020",
+      "slug": "renovated-villa-for-rent-al-murjan",
+      "folder": "fully-renovated-villa-al-murjan",
+      "featured": false,
+      "status": "available",
+      "category": "rent",
+      "type": "villa",
+      "oldHero": {
+        "folder": "fully-renovated-villa-al-murjan",
+        "i": 1,
+        "room": "pool"
+      },
+      "newHero": {
+        "folder": "fully-renovated-villa-al-murjan",
+        "i": 1,
+        "room": "pool"
+      },
+      "heroChanged": false,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "fully-renovated-villa-al-murjan",
+          "i": 1,
+          "room": "pool"
+        },
+        {
+          "folder": "fully-renovated-villa-al-murjan",
+          "i": 0,
+          "room": "exterior"
+        },
+        {
+          "folder": "fully-renovated-villa-al-murjan",
+          "i": 8,
+          "room": "living"
+        },
+        {
+          "folder": "fully-renovated-villa-al-murjan",
+          "i": 2,
+          "room": "living"
+        },
+        {
+          "folder": "fully-renovated-villa-al-murjan",
+          "i": 4,
+          "room": "kitchen"
+        },
+        {
+          "folder": "fully-renovated-villa-al-murjan",
+          "i": 14,
+          "room": "bathroom"
+        },
+        {
+          "folder": "fully-renovated-villa-al-murjan",
+          "i": 12,
+          "room": "bathroom"
+        },
+        {
+          "folder": "fully-renovated-villa-al-murjan",
+          "i": 16,
+          "room": "exterior"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "fully-renovated-villa-al-murjan",
+          "i": 1,
+          "room": "pool"
+        },
+        {
+          "folder": "fully-renovated-villa-al-murjan",
+          "i": 0,
+          "room": "exterior"
+        },
+        {
+          "folder": "fully-renovated-villa-al-murjan",
+          "i": 8,
+          "room": "living"
+        },
+        {
+          "folder": "fully-renovated-villa-al-murjan",
+          "i": 5,
+          "room": "kitchen"
+        },
+        {
+          "folder": "fully-renovated-villa-al-murjan",
+          "i": 3,
+          "room": "living"
+        },
+        {
+          "folder": "fully-renovated-villa-al-murjan",
+          "i": 10,
+          "room": "bedroom"
+        },
+        {
+          "folder": "fully-renovated-villa-al-murjan",
+          "i": 7,
+          "room": "living"
+        },
+        {
+          "folder": "fully-renovated-villa-al-murjan",
+          "i": 12,
+          "room": "bathroom"
+        }
+      ],
+      "reason": "Kept: the pool is the only outdoor asset in a thin 17-photo folder; replaced the dated corner-jacuzzi and the street snapshot at the tail."
+    },
+    {
+      "id": "BONA-021",
+      "slug": "villa-for-rent-al-mohammadiyah",
+      "folder": "villa-al-mohamediya",
+      "featured": false,
+      "status": "available",
+      "category": "rent",
+      "type": "villa",
+      "oldHero": {
+        "folder": "villa-al-mohamediya",
+        "i": 2,
+        "room": "entrance"
+      },
+      "newHero": {
+        "folder": "villa-al-mohamediya",
+        "i": 4,
+        "room": "entrance"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "villa-al-mohamediya",
+          "i": 2,
+          "room": "entrance"
+        },
+        {
+          "folder": "villa-al-mohamediya",
+          "i": 22,
+          "room": "facade_night"
+        },
+        {
+          "folder": "villa-al-mohamediya",
+          "i": 0,
+          "room": "exterior"
+        },
+        {
+          "folder": "villa-al-mohamediya",
+          "i": 16,
+          "room": "living"
+        },
+        {
+          "folder": "villa-al-mohamediya",
+          "i": 5,
+          "room": "staircase"
+        },
+        {
+          "folder": "villa-al-mohamediya",
+          "i": 10,
+          "room": "bathroom"
+        },
+        {
+          "folder": "villa-al-mohamediya",
+          "i": 13,
+          "room": "living"
+        },
+        {
+          "folder": "villa-al-mohamediya",
+          "i": 18,
+          "room": "staircase"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "villa-al-mohamediya",
+          "i": 4,
+          "room": "entrance"
+        },
+        {
+          "folder": "villa-al-mohamediya",
+          "i": 0,
+          "room": "exterior"
+        },
+        {
+          "folder": "villa-al-mohamediya",
+          "i": 3,
+          "room": "courtyard"
+        },
+        {
+          "folder": "villa-al-mohamediya",
+          "i": 16,
+          "room": "living"
+        },
+        {
+          "folder": "villa-al-mohamediya",
+          "i": 5,
+          "room": "staircase"
+        },
+        {
+          "folder": "villa-al-mohamediya",
+          "i": 13,
+          "room": "living"
+        },
+        {
+          "folder": "villa-al-mohamediya",
+          "i": 10,
+          "room": "bathroom"
+        },
+        {
+          "folder": "villa-al-mohamediya",
+          "i": 18,
+          "room": "staircase"
+        }
+      ],
+      "reason": "Symmetrical dusk elevation with the timber door lit — the old second image was a night street shot with two parked cars."
+    },
+    {
+      "id": "BONA-022",
+      "slug": "trump-tower-jeddah",
+      "folder": "trump-tower-jeddah",
+      "featured": true,
+      "status": "available",
+      "category": "off-plan",
+      "type": "apartment",
+      "oldHero": {
+        "folder": "trump-tower-jeddah",
+        "i": 9,
+        "room": "tower"
+      },
+      "newHero": {
+        "folder": "trump-tower-jeddah",
+        "i": 9,
+        "room": "tower"
+      },
+      "heroChanged": false,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "trump-tower-jeddah",
+          "i": 9,
+          "room": "tower"
+        },
+        {
+          "folder": "trump-tower-jeddah",
+          "i": 11,
+          "room": "facade_night"
+        },
+        {
+          "folder": "trump-tower-jeddah",
+          "i": 10,
+          "room": "sea"
+        },
+        {
+          "folder": "trump-tower-jeddah",
+          "i": 3,
+          "room": "living"
+        },
+        {
+          "folder": "trump-tower-jeddah",
+          "i": 0,
+          "room": "bedroom"
+        },
+        {
+          "folder": "trump-tower-jeddah",
+          "i": 6,
+          "room": "dining"
+        },
+        {
+          "folder": "trump-tower-jeddah",
+          "i": 4,
+          "room": "lounge"
+        },
+        {
+          "folder": "trump-tower-jeddah",
+          "i": 7,
+          "room": "lobby"
+        },
+        {
+          "folder": "trump-tower-jeddah",
+          "i": 8,
+          "room": "bar"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "trump-tower-jeddah",
+          "i": 9,
+          "room": "tower"
+        },
+        {
+          "folder": "trump-tower-jeddah",
+          "i": 11,
+          "room": "facade_night"
+        },
+        {
+          "folder": "trump-tower-jeddah",
+          "i": 10,
+          "room": "sea"
+        },
+        {
+          "folder": "trump-tower-jeddah",
+          "i": 7,
+          "room": "lobby"
+        },
+        {
+          "folder": "trump-tower-jeddah",
+          "i": 3,
+          "room": "living"
+        },
+        {
+          "folder": "trump-tower-jeddah",
+          "i": 6,
+          "room": "dining"
+        },
+        {
+          "folder": "trump-tower-jeddah",
+          "i": 0,
+          "room": "master"
+        },
+        {
+          "folder": "trump-tower-jeddah",
+          "i": 4,
+          "room": "lounge"
+        },
+        {
+          "folder": "trump-tower-jeddah",
+          "i": 8,
+          "room": "bar"
+        },
+        {
+          "folder": "trump-tower-jeddah",
+          "i": 5,
+          "room": "gym"
+        }
+      ],
+      "reason": "Kept: the tower above the Red Sea shoreline is the money shot; the lobby now precedes the interiors and the gym closes the set."
+    },
+    {
+      "id": "BONA-023",
+      "slug": "trump-plaza-jeddah",
+      "folder": "trump-plaza-jeddah",
+      "featured": false,
+      "status": "available",
+      "category": "off-plan",
+      "type": "apartment",
+      "oldHero": {
+        "folder": "trump-plaza-jeddah",
+        "i": 6,
+        "room": "exterior"
+      },
+      "newHero": {
+        "folder": "trump-plaza-jeddah",
+        "i": 6,
+        "room": "exterior"
+      },
+      "heroChanged": false,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "trump-plaza-jeddah",
+          "i": 6,
+          "room": "exterior"
+        },
+        {
+          "folder": "trump-plaza-jeddah",
+          "i": 2,
+          "room": "entrance"
+        },
+        {
+          "folder": "trump-plaza-jeddah",
+          "i": 0,
+          "room": "courtyard"
+        },
+        {
+          "folder": "trump-plaza-jeddah",
+          "i": 4,
+          "room": "living"
+        },
+        {
+          "folder": "trump-plaza-jeddah",
+          "i": 5,
+          "room": "bedroom"
+        },
+        {
+          "folder": "trump-plaza-jeddah",
+          "i": 3,
+          "room": "dining"
+        },
+        {
+          "folder": "trump-plaza-jeddah",
+          "i": 8,
+          "room": "spa"
+        },
+        {
+          "folder": "trump-plaza-jeddah",
+          "i": 12,
+          "room": "indoor_pool"
+        },
+        {
+          "folder": "trump-plaza-jeddah",
+          "i": 17,
+          "room": "gym"
+        },
+        {
+          "folder": "trump-plaza-jeddah",
+          "i": 15,
+          "room": "lounge"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "trump-plaza-jeddah",
+          "i": 6,
+          "room": "exterior"
+        },
+        {
+          "folder": "trump-plaza-jeddah",
+          "i": 2,
+          "room": "entrance"
+        },
+        {
+          "folder": "trump-plaza-jeddah",
+          "i": 7,
+          "room": "courtyard"
+        },
+        {
+          "folder": "trump-plaza-jeddah",
+          "i": 4,
+          "room": "living"
+        },
+        {
+          "folder": "trump-plaza-jeddah",
+          "i": 3,
+          "room": "dining"
+        },
+        {
+          "folder": "trump-plaza-jeddah",
+          "i": 5,
+          "room": "master"
+        },
+        {
+          "folder": "trump-plaza-jeddah",
+          "i": 12,
+          "room": "indoor_pool"
+        },
+        {
+          "folder": "trump-plaza-jeddah",
+          "i": 10,
+          "room": "spa"
+        },
+        {
+          "folder": "trump-plaza-jeddah",
+          "i": 17,
+          "room": "gym"
+        },
+        {
+          "folder": "trump-plaza-jeddah",
+          "i": 15,
+          "room": "bar"
+        }
+      ],
+      "reason": "Kept: the branded glass façade is the identity shot; swapped the café courtyard (people in frame) for the landscaped courtyard."
+    },
+    {
+      "id": "BONA-024",
+      "slug": "nobal-arista-al-khalidiyah",
+      "folder": "nobal-arista",
+      "featured": false,
+      "status": "available",
+      "category": "off-plan",
+      "type": "villa",
+      "oldHero": {
+        "folder": "nobal-arista",
+        "i": 1,
+        "room": "render"
+      },
+      "newHero": {
+        "folder": "nobal-arista",
+        "i": 2,
+        "room": "entrance"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "nobal-arista",
+          "i": 1,
+          "room": "render"
+        },
+        {
+          "folder": "nobal-arista",
+          "i": 0,
+          "room": "render"
+        },
+        {
+          "folder": "nobal-arista",
+          "i": 2,
+          "room": "entrance"
+        },
+        {
+          "folder": "nobal-arista",
+          "i": 4,
+          "room": "living"
+        },
+        {
+          "folder": "nobal-arista",
+          "i": 5,
+          "room": "living"
+        },
+        {
+          "folder": "nobal-arista",
+          "i": 3,
+          "room": "dining"
+        },
+        {
+          "folder": "nobal-arista",
+          "i": 6,
+          "room": "bedroom"
+        },
+        {
+          "folder": "nobal-arista",
+          "i": 7,
+          "room": "bathroom"
+        },
+        {
+          "folder": "nobal-arista",
+          "i": 8,
+          "room": "living"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "nobal-arista",
+          "i": 2,
+          "room": "entrance"
+        },
+        {
+          "folder": "nobal-arista",
+          "i": 0,
+          "room": "render"
+        },
+        {
+          "folder": "nobal-arista",
+          "i": 9,
+          "room": "living"
+        },
+        {
+          "folder": "nobal-arista",
+          "i": 3,
+          "room": "dining"
+        },
+        {
+          "folder": "nobal-arista",
+          "i": 4,
+          "room": "living"
+        },
+        {
+          "folder": "nobal-arista",
+          "i": 6,
+          "room": "master"
+        },
+        {
+          "folder": "nobal-arista",
+          "i": 8,
+          "room": "living"
+        },
+        {
+          "folder": "nobal-arista",
+          "i": 7,
+          "room": "bathroom"
+        }
+      ],
+      "reason": "Developer render rule — cleanest exterior render wins: the old hero had a silver SUV parked across the foreground."
+    },
+    {
+      "id": "BONA-025",
+      "slug": "kayan-residence-al-nahda",
+      "folder": "kian-residence",
+      "featured": false,
+      "status": "available",
+      "category": "off-plan",
+      "type": "apartment",
+      "oldHero": {
+        "folder": "kian-residence",
+        "i": 17,
+        "room": "exterior"
+      },
+      "newHero": {
+        "folder": "kian-residence",
+        "i": 17,
+        "room": "exterior"
+      },
+      "heroChanged": false,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "kian-residence",
+          "i": 17,
+          "room": "exterior"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 13,
+          "room": "facade_night"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 16,
+          "room": "lobby"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 0,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 2,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 3,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 10,
+          "room": "cafe"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 14,
+          "room": "gym"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 1,
+          "room": "bathroom"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "kian-residence",
+          "i": 17,
+          "room": "exterior"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 13,
+          "room": "facade_night"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 16,
+          "room": "lobby"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 0,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 2,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 3,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 10,
+          "room": "cafe"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 14,
+          "room": "gym"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 11,
+          "room": "terrace"
+        }
+      ],
+      "reason": "Kept: the building by day is the right cover for the project page; the dark bathroom at the tail is replaced by the rooftop terrace."
+    },
+    {
+      "id": "BONA-026",
+      "slug": "dari-ii-al-salamah",
+      "folder": "dari-2",
+      "featured": false,
+      "status": "available",
+      "category": "off-plan",
+      "type": "apartment",
+      "oldHero": {
+        "folder": "dari-2",
+        "i": 7,
+        "room": "aerial"
+      },
+      "newHero": {
+        "folder": "dari-2",
+        "i": 7,
+        "room": "aerial"
+      },
+      "heroChanged": false,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "dari-2",
+          "i": 7,
+          "room": "aerial"
+        },
+        {
+          "folder": "dari-2",
+          "i": 19,
+          "room": "rooftop_pool"
+        },
+        {
+          "folder": "dari-2",
+          "i": 0,
+          "room": "entrance"
+        },
+        {
+          "folder": "dari-2",
+          "i": 13,
+          "room": "pool_night"
+        },
+        {
+          "folder": "dari-2",
+          "i": 5,
+          "room": "living"
+        },
+        {
+          "folder": "dari-2",
+          "i": 1,
+          "room": "living"
+        },
+        {
+          "folder": "dari-2",
+          "i": 4,
+          "room": "lobby"
+        },
+        {
+          "folder": "dari-2",
+          "i": 8,
+          "room": "gym"
+        },
+        {
+          "folder": "dari-2",
+          "i": 11,
+          "room": "event_hall"
+        },
+        {
+          "folder": "dari-2",
+          "i": 30,
+          "room": "exterior"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "dari-2",
+          "i": 7,
+          "room": "aerial"
+        },
+        {
+          "folder": "dari-2",
+          "i": 19,
+          "room": "rooftop_pool"
+        },
+        {
+          "folder": "dari-2",
+          "i": 14,
+          "room": "pool_night"
+        },
+        {
+          "folder": "dari-2",
+          "i": 4,
+          "room": "lobby"
+        },
+        {
+          "folder": "dari-2",
+          "i": 25,
+          "room": "lounge"
+        },
+        {
+          "folder": "dari-2",
+          "i": 5,
+          "room": "living"
+        },
+        {
+          "folder": "dari-2",
+          "i": 6,
+          "room": "kitchen"
+        },
+        {
+          "folder": "dari-2",
+          "i": 11,
+          "room": "event_hall"
+        },
+        {
+          "folder": "dari-2",
+          "i": 8,
+          "room": "gym"
+        },
+        {
+          "folder": "dari-2",
+          "i": 30,
+          "room": "exterior"
+        }
+      ],
+      "reason": "Kept: the aerial of the courtyard pool is the distinctive frame; the very dark night pool (13) is replaced by the lit one (14)."
+    },
+    {
+      "id": "BONA-027",
+      "slug": "marriott-residences-aida-muscat",
+      "folder": "marriott-residences-aida-oman",
+      "featured": false,
+      "status": "available",
+      "category": "off-plan",
+      "type": "apartment",
+      "oldHero": {
+        "folder": "marriott-residences-aida-oman",
+        "i": 0,
+        "room": "render"
+      },
+      "newHero": {
+        "folder": "marriott-residences-aida-oman",
+        "i": 5,
+        "room": "pool"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "marriott-residences-aida-oman",
+          "i": 0,
+          "room": "render"
+        },
+        {
+          "folder": "marriott-residences-aida-oman",
+          "i": 4,
+          "room": "render"
+        },
+        {
+          "folder": "marriott-residences-aida-oman",
+          "i": 8,
+          "room": "living"
+        },
+        {
+          "folder": "marriott-residences-aida-oman",
+          "i": 1,
+          "room": "balcony"
+        },
+        {
+          "folder": "marriott-residences-aida-oman",
+          "i": 5,
+          "room": "pool"
+        },
+        {
+          "folder": "marriott-residences-aida-oman",
+          "i": 6,
+          "room": "kitchen"
+        },
+        {
+          "folder": "marriott-residences-aida-oman",
+          "i": 7,
+          "room": "dining"
+        },
+        {
+          "folder": "marriott-residences-aida-oman",
+          "i": 3,
+          "room": "golf"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "marriott-residences-aida-oman",
+          "i": 5,
+          "room": "pool"
+        },
+        {
+          "folder": "marriott-residences-aida-oman",
+          "i": 4,
+          "room": "render"
+        },
+        {
+          "folder": "marriott-residences-aida-oman",
+          "i": 1,
+          "room": "balcony"
+        },
+        {
+          "folder": "marriott-residences-aida-oman",
+          "i": 8,
+          "room": "living"
+        },
+        {
+          "folder": "marriott-residences-aida-oman",
+          "i": 7,
+          "room": "dining"
+        },
+        {
+          "folder": "marriott-residences-aida-oman",
+          "i": 6,
+          "room": "kitchen"
+        },
+        {
+          "folder": "marriott-residences-aida-oman",
+          "i": 3,
+          "room": "golf"
+        },
+        {
+          "folder": "marriott-residences-aida-oman",
+          "i": 2,
+          "room": "view"
+        }
+      ],
+      "reason": "Tower with the pool and palms, clean and crop-safe; the old hero carried the developer's \"Marriott AIDA Oman\" text overlay."
+    },
+    {
+      "id": "BONA-028",
+      "slug": "palais-rose-le-vesinet",
+      "folder": "palais-rose",
+      "featured": true,
+      "status": "available",
+      "category": "international",
+      "type": "mansion",
+      "oldHero": {
+        "folder": "palais-rose",
+        "i": 10,
+        "room": "exterior"
+      },
+      "newHero": {
+        "folder": "palais-rose",
+        "i": 10,
+        "room": "exterior"
+      },
+      "heroChanged": false,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "palais-rose",
+          "i": 10,
+          "room": "exterior"
+        },
+        {
+          "folder": "palais-rose",
+          "i": 1,
+          "room": "aerial"
+        },
+        {
+          "folder": "palais-rose",
+          "i": 7,
+          "room": "winter_garden"
+        },
+        {
+          "folder": "palais-rose",
+          "i": 22,
+          "room": "living"
+        },
+        {
+          "folder": "palais-rose",
+          "i": 20,
+          "room": "dining"
+        },
+        {
+          "folder": "palais-rose",
+          "i": 19,
+          "room": "indoor_pool"
+        },
+        {
+          "folder": "palais-rose",
+          "i": 15,
+          "room": "bedroom"
+        },
+        {
+          "folder": "palais-rose",
+          "i": 9,
+          "room": "kitchen"
+        },
+        {
+          "folder": "palais-rose",
+          "i": 0,
+          "room": "cinema"
+        },
+        {
+          "folder": "palais-rose",
+          "i": 13,
+          "room": "grounds"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "palais-rose",
+          "i": 10,
+          "room": "exterior"
+        },
+        {
+          "folder": "palais-rose",
+          "i": 1,
+          "room": "aerial"
+        },
+        {
+          "folder": "palais-rose",
+          "i": 7,
+          "room": "winter_garden"
+        },
+        {
+          "folder": "palais-rose",
+          "i": 18,
+          "room": "living"
+        },
+        {
+          "folder": "palais-rose",
+          "i": 20,
+          "room": "dining"
+        },
+        {
+          "folder": "palais-rose",
+          "i": 22,
+          "room": "living"
+        },
+        {
+          "folder": "palais-rose",
+          "i": 9,
+          "room": "kitchen"
+        },
+        {
+          "folder": "palais-rose",
+          "i": 15,
+          "room": "master"
+        },
+        {
+          "folder": "palais-rose",
+          "i": 19,
+          "room": "indoor_pool"
+        },
+        {
+          "folder": "palais-rose",
+          "i": 6,
+          "room": "grounds"
+        }
+      ],
+      "reason": "Kept: the entrance façade with the fountain and parterre. The grand salon is promoted over a lesser one and the cinema drops for the indoor pool."
+    },
+    {
+      "id": "BONA-029",
+      "slug": "palais-venitien-cannes",
+      "folder": "palais-venitien",
+      "featured": false,
+      "status": "sold",
+      "category": "international",
+      "type": "mansion",
+      "oldHero": {
+        "folder": "palais-venitien",
+        "i": 27,
+        "room": "pool"
+      },
+      "newHero": {
+        "folder": "palais-venitien",
+        "i": 27,
+        "room": "pool"
+      },
+      "heroChanged": false,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "palais-venitien",
+          "i": 27,
+          "room": "pool"
+        },
+        {
+          "folder": "palais-venitien",
+          "i": 2,
+          "room": "aerial"
+        },
+        {
+          "folder": "palais-venitien",
+          "i": 1,
+          "room": "pool_night"
+        },
+        {
+          "folder": "palais-venitien",
+          "i": 20,
+          "room": "aerial"
+        },
+        {
+          "folder": "palais-venitien",
+          "i": 17,
+          "room": "hall"
+        },
+        {
+          "folder": "palais-venitien",
+          "i": 13,
+          "room": "winter_garden"
+        },
+        {
+          "folder": "palais-venitien",
+          "i": 10,
+          "room": "indoor_pool"
+        },
+        {
+          "folder": "palais-venitien",
+          "i": 15,
+          "room": "dining"
+        },
+        {
+          "folder": "palais-venitien",
+          "i": 21,
+          "room": "cinema"
+        },
+        {
+          "folder": "palais-venitien",
+          "i": 6,
+          "room": "tennis"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "palais-venitien",
+          "i": 27,
+          "room": "pool"
+        },
+        {
+          "folder": "palais-venitien",
+          "i": 1,
+          "room": "pool_night"
+        },
+        {
+          "folder": "palais-venitien",
+          "i": 5,
+          "room": "terrace"
+        },
+        {
+          "folder": "palais-venitien",
+          "i": 17,
+          "room": "hall"
+        },
+        {
+          "folder": "palais-venitien",
+          "i": 14,
+          "room": "living"
+        },
+        {
+          "folder": "palais-venitien",
+          "i": 15,
+          "room": "dining"
+        },
+        {
+          "folder": "palais-venitien",
+          "i": 10,
+          "room": "indoor_pool"
+        },
+        {
+          "folder": "palais-venitien",
+          "i": 13,
+          "room": "winter_garden"
+        },
+        {
+          "folder": "palais-venitien",
+          "i": 21,
+          "room": "cinema"
+        },
+        {
+          "folder": "palais-venitien",
+          "i": 2,
+          "room": "aerial"
+        }
+      ],
+      "reason": "Kept: the palais reflected in the long pool. The two aerials no longer sit at positions 2 and 4 — one closes the set, per the rubric."
+    },
+    {
+      "id": "BONA-030",
+      "slug": "da-vinci-tower-by-pagani-dubai",
+      "folder": "da-vinci-tower-interiors-by-pagani",
+      "featured": false,
+      "status": "available",
+      "category": "international",
+      "type": "apartment",
+      "oldHero": {
+        "folder": "da-vinci-tower-interiors-by-pagani",
+        "i": 17,
+        "room": "tower"
+      },
+      "newHero": {
+        "folder": "da-vinci-tower-interiors-by-pagani",
+        "i": 17,
+        "room": "tower"
+      },
+      "heroChanged": false,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "da-vinci-tower-interiors-by-pagani",
+          "i": 17,
+          "room": "tower"
+        },
+        {
+          "folder": "da-vinci-tower-interiors-by-pagani",
+          "i": 19,
+          "room": "aerial"
+        },
+        {
+          "folder": "da-vinci-tower-interiors-by-pagani",
+          "i": 5,
+          "room": "rooftop_pool"
+        },
+        {
+          "folder": "da-vinci-tower-interiors-by-pagani",
+          "i": 6,
+          "room": "living"
+        },
+        {
+          "folder": "da-vinci-tower-interiors-by-pagani",
+          "i": 10,
+          "room": "living"
+        },
+        {
+          "folder": "da-vinci-tower-interiors-by-pagani",
+          "i": 11,
+          "room": "kitchen"
+        },
+        {
+          "folder": "da-vinci-tower-interiors-by-pagani",
+          "i": 14,
+          "room": "bedroom"
+        },
+        {
+          "folder": "da-vinci-tower-interiors-by-pagani",
+          "i": 12,
+          "room": "pool"
+        },
+        {
+          "folder": "da-vinci-tower-interiors-by-pagani",
+          "i": 9,
+          "room": "gym"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "da-vinci-tower-interiors-by-pagani",
+          "i": 17,
+          "room": "tower"
+        },
+        {
+          "folder": "da-vinci-tower-interiors-by-pagani",
+          "i": 5,
+          "room": "rooftop_pool"
+        },
+        {
+          "folder": "da-vinci-tower-interiors-by-pagani",
+          "i": 13,
+          "room": "pool"
+        },
+        {
+          "folder": "da-vinci-tower-interiors-by-pagani",
+          "i": 6,
+          "room": "living"
+        },
+        {
+          "folder": "da-vinci-tower-interiors-by-pagani",
+          "i": 15,
+          "room": "lounge"
+        },
+        {
+          "folder": "da-vinci-tower-interiors-by-pagani",
+          "i": 11,
+          "room": "kitchen"
+        },
+        {
+          "folder": "da-vinci-tower-interiors-by-pagani",
+          "i": 14,
+          "room": "master"
+        },
+        {
+          "folder": "da-vinci-tower-interiors-by-pagani",
+          "i": 9,
+          "room": "gym"
+        },
+        {
+          "folder": "da-vinci-tower-interiors-by-pagani",
+          "i": 19,
+          "room": "aerial"
+        }
+      ],
+      "reason": "Kept: the tower through its sculptural frame is the brand. Removed a near-duplicate living room and a near-duplicate pool; the aerial closes."
+    },
+    {
+      "id": "BONA-031",
+      "slug": "painite-villas-by-lamborghini-benahavis",
+      "folder": "painite-villas-by-lamborghini",
+      "featured": true,
+      "status": "available",
+      "category": "international",
+      "type": "mansion",
+      "oldHero": {
+        "folder": "painite-villas-by-lamborghini",
+        "i": 1,
+        "room": "render"
+      },
+      "newHero": {
+        "folder": "painite-villas-by-lamborghini",
+        "i": 1,
+        "room": "render"
+      },
+      "heroChanged": false,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "painite-villas-by-lamborghini",
+          "i": 1,
+          "room": "render"
+        },
+        {
+          "folder": "painite-villas-by-lamborghini",
+          "i": 4,
+          "room": "render"
+        },
+        {
+          "folder": "painite-villas-by-lamborghini",
+          "i": 3,
+          "room": "living"
+        },
+        {
+          "folder": "painite-villas-by-lamborghini",
+          "i": 5,
+          "room": "living"
+        },
+        {
+          "folder": "painite-villas-by-lamborghini",
+          "i": 6,
+          "room": "car_lift"
+        },
+        {
+          "folder": "painite-villas-by-lamborghini",
+          "i": 2,
+          "room": "aerial"
+        },
+        {
+          "folder": "painite-villas-by-lamborghini",
+          "i": 0,
+          "room": "grounds"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "painite-villas-by-lamborghini",
+          "i": 1,
+          "room": "render"
+        },
+        {
+          "folder": "painite-villas-by-lamborghini",
+          "i": 4,
+          "room": "render"
+        },
+        {
+          "folder": "painite-villas-by-lamborghini",
+          "i": 3,
+          "room": "living"
+        },
+        {
+          "folder": "painite-villas-by-lamborghini",
+          "i": 2,
+          "room": "aerial"
+        },
+        {
+          "folder": "painite-villas-by-lamborghini",
+          "i": 5,
+          "room": "living"
+        },
+        {
+          "folder": "painite-villas-by-lamborghini",
+          "i": 6,
+          "room": "car_lift"
+        }
+      ],
+      "reason": "Kept: golden-hour villa with the infinity pool over the valley. Removed a frame carrying a \"tkestate.sa\" watermark and a duplicate car-lift render."
+    },
+    {
+      "id": "BONA-032",
+      "slug": "trump-cliff-villas-aida-muscat",
+      "folder": "trump-golf-villas",
+      "featured": false,
+      "status": "available",
+      "category": "international",
+      "type": "villa",
+      "oldHero": {
+        "folder": "trump-golf-villas",
+        "i": 6,
+        "room": "render"
+      },
+      "newHero": {
+        "folder": "trump-golf-villas",
+        "i": 6,
+        "room": "render"
+      },
+      "heroChanged": false,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "trump-golf-villas",
+          "i": 6,
+          "room": "render"
+        },
+        {
+          "folder": "trump-golf-villas",
+          "i": 0,
+          "room": "aerial"
+        },
+        {
+          "folder": "trump-golf-villas",
+          "i": 1,
+          "room": "bedroom"
+        },
+        {
+          "folder": "trump-golf-villas",
+          "i": 7,
+          "room": "living"
+        },
+        {
+          "folder": "trump-golf-villas",
+          "i": 8,
+          "room": "terrace"
+        },
+        {
+          "folder": "aida",
+          "i": 2,
+          "room": "pool"
+        },
+        {
+          "folder": "trump-golf-villas",
+          "i": 2,
+          "room": "lounge"
+        },
+        {
+          "folder": "trump-golf-villas",
+          "i": 5,
+          "room": "pool"
+        },
+        {
+          "folder": "aida",
+          "i": 9,
+          "room": "golf"
+        },
+        {
+          "folder": "trump-golf-villas",
+          "i": 4,
+          "room": "bar"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "trump-golf-villas",
+          "i": 6,
+          "room": "render"
+        },
+        {
+          "folder": "aida",
+          "i": 2,
+          "room": "pool"
+        },
+        {
+          "folder": "trump-golf-villas",
+          "i": 5,
+          "room": "pool"
+        },
+        {
+          "folder": "trump-golf-villas",
+          "i": 7,
+          "room": "living"
+        },
+        {
+          "folder": "trump-golf-villas",
+          "i": 8,
+          "room": "terrace"
+        },
+        {
+          "folder": "trump-golf-villas",
+          "i": 1,
+          "room": "master"
+        },
+        {
+          "folder": "trump-golf-villas",
+          "i": 2,
+          "room": "lounge"
+        },
+        {
+          "folder": "trump-golf-villas",
+          "i": 4,
+          "room": "bar"
+        },
+        {
+          "folder": "aida",
+          "i": 9,
+          "room": "golf"
+        },
+        {
+          "folder": "trump-golf-villas",
+          "i": 0,
+          "room": "aerial"
+        }
+      ],
+      "reason": "Kept: the cliff villa lit at dusk above the sea. The aerial moves to the end and the crowded \"golden cube\" landmark stays out."
+    },
+    {
+      "id": "BONA-033",
+      "slug": "kayan-residence-al-nahda-unit-128a",
+      "folder": "kian-residence",
+      "featured": false,
+      "status": "available",
+      "category": "buy",
+      "type": "apartment",
+      "oldHero": {
+        "folder": "kian-residence",
+        "i": 18,
+        "room": "exterior"
+      },
+      "newHero": {
+        "folder": "kian-residence",
+        "i": 18,
+        "room": "exterior"
+      },
+      "heroChanged": false,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "kian-residence",
+          "i": 18,
+          "room": "exterior"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 0,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 2,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 5,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 1,
+          "room": "bathroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 16,
+          "room": "lobby"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 10,
+          "room": "cafe"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 13,
+          "room": "facade_night"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "kian-residence",
+          "i": 18,
+          "room": "exterior"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 13,
+          "room": "facade_night"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 16,
+          "room": "lobby"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 0,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 2,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 5,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 10,
+          "room": "cafe"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 1,
+          "room": "bathroom"
+        }
+      ],
+      "reason": "Kept: the developer's building by day. Night façade and lobby move up so the first five are arrival, not kitchen and bathroom."
+    },
+    {
+      "id": "BONA-034",
+      "slug": "kayan-residence-al-nahda-unit-127a",
+      "folder": "kian-residence",
+      "featured": false,
+      "status": "available",
+      "category": "buy",
+      "type": "apartment",
+      "oldHero": {
+        "folder": "kian-residence",
+        "i": 13,
+        "room": "facade_night"
+      },
+      "newHero": {
+        "folder": "kian-residence",
+        "i": 13,
+        "room": "facade_night"
+      },
+      "heroChanged": false,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "kian-residence",
+          "i": 13,
+          "room": "facade_night"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 3,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 4,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 6,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 1,
+          "room": "bathroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 12,
+          "room": "cafe"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 14,
+          "room": "gym"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "kian-residence",
+          "i": 13,
+          "room": "facade_night"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 17,
+          "room": "exterior"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 16,
+          "room": "lobby"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 3,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 4,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 6,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 12,
+          "room": "cafe"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 1,
+          "room": "bathroom"
+        }
+      ],
+      "reason": "Kept: the building at night. Added the daylight exterior and the lobby so the card and the first five read as a building, not a kitchen."
+    },
+    {
+      "id": "BONA-035",
+      "slug": "kian-building-113-unit-a-al-nuzhah",
+      "folder": "kian-residence",
+      "featured": false,
+      "status": "available",
+      "category": "buy",
+      "type": "apartment",
+      "oldHero": {
+        "folder": "kian-residence",
+        "i": 0,
+        "room": "living"
+      },
+      "newHero": {
+        "folder": "kian-residence",
+        "i": 16,
+        "room": "lobby"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "kian-residence",
+          "i": 0,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 2,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 7,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 1,
+          "room": "bathroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 16,
+          "room": "lobby"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 17,
+          "room": "exterior"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "kian-residence",
+          "i": 16,
+          "room": "lobby"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 17,
+          "room": "exterior"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 0,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 2,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 6,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 11,
+          "room": "terrace"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 1,
+          "room": "bathroom"
+        }
+      ],
+      "reason": "Lobby with its chandelier — a distinct hero for this unit; the old hero was a plain double-height void shared with the sister units."
+    },
+    {
+      "id": "BONA-036",
+      "slug": "kian-building-113-unit-b-al-nuzhah",
+      "folder": "kian-residence",
+      "featured": false,
+      "status": "available",
+      "category": "buy",
+      "type": "apartment",
+      "oldHero": {
+        "folder": "kian-residence",
+        "i": 3,
+        "room": "living"
+      },
+      "newHero": {
+        "folder": "kian-residence",
+        "i": 0,
+        "room": "living"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "kian-residence",
+          "i": 3,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 4,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 5,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 8,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 1,
+          "room": "bathroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 11,
+          "room": "terrace"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 18,
+          "room": "exterior"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "kian-residence",
+          "i": 0,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 18,
+          "room": "exterior"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 16,
+          "room": "lobby"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 4,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 5,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 11,
+          "room": "terrace"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 1,
+          "room": "bathroom"
+        }
+      ],
+      "reason": "The double-height living void, the most architectural interior in the folder, given to the largest unit (182 sqm)."
+    },
+    {
+      "id": "BONA-037",
+      "slug": "kian-building-113-unit-c-al-nuzhah",
+      "folder": "kian-residence",
+      "featured": false,
+      "status": "available",
+      "category": "buy",
+      "type": "apartment",
+      "oldHero": {
+        "folder": "kian-residence",
+        "i": 16,
+        "room": "lobby"
+      },
+      "newHero": {
+        "folder": "kian-residence",
+        "i": 10,
+        "room": "cafe"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "kian-residence",
+          "i": 16,
+          "room": "lobby"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 0,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 2,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 6,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 1,
+          "room": "bathroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 15,
+          "room": "parking"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "kian-residence",
+          "i": 10,
+          "room": "cafe"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 17,
+          "room": "exterior"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 16,
+          "room": "lobby"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 0,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 2,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 6,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 1,
+          "room": "bathroom"
+        }
+      ],
+      "reason": "Rooftop café terrace — the amenity that sells this development; the old hero (the lobby) now belongs to unit 113A."
+    },
+    {
+      "id": "BONA-038",
+      "slug": "kian-building-114-unit-b-al-nuzhah",
+      "folder": "kian-residence",
+      "featured": false,
+      "status": "available",
+      "category": "buy",
+      "type": "apartment",
+      "oldHero": {
+        "folder": "kian-residence",
+        "i": 2,
+        "room": "kitchen"
+      },
+      "newHero": {
+        "folder": "kian-residence",
+        "i": 11,
+        "room": "terrace"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "kian-residence",
+          "i": 2,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 3,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 7,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 1,
+          "room": "bathroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 14,
+          "room": "gym"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 17,
+          "room": "exterior"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "kian-residence",
+          "i": 11,
+          "room": "terrace"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 18,
+          "room": "exterior"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 16,
+          "room": "lobby"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 3,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 2,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 8,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 1,
+          "room": "bathroom"
+        }
+      ],
+      "reason": "Rooftop pergola terrace. Rubric: a kitchen is never a hero — this unit led with one."
+    },
+    {
+      "id": "BONA-039",
+      "slug": "kian-building-114-unit-c-al-nuzhah",
+      "folder": "kian-residence",
+      "featured": false,
+      "status": "available",
+      "category": "buy",
+      "type": "apartment",
+      "oldHero": {
+        "folder": "kian-residence",
+        "i": 4,
+        "room": "kitchen"
+      },
+      "newHero": {
+        "folder": "kian-residence",
+        "i": 14,
+        "room": "gym"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "kian-residence",
+          "i": 4,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 0,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 8,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 1,
+          "room": "bathroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 10,
+          "room": "cafe"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 13,
+          "room": "facade_night"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "kian-residence",
+          "i": 14,
+          "room": "gym"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 17,
+          "room": "exterior"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 16,
+          "room": "lobby"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 0,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 4,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 8,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 1,
+          "room": "bathroom"
+        }
+      ],
+      "reason": "The fitness hub. Rubric: a kitchen is never a hero — this unit led with one."
+    },
+    {
+      "id": "BONA-040",
+      "slug": "kian-building-117-unit-b-al-nuzhah",
+      "folder": "kian-residence",
+      "featured": false,
+      "status": "available",
+      "category": "buy",
+      "type": "apartment",
+      "oldHero": {
+        "folder": "kian-residence",
+        "i": 10,
+        "room": "cafe"
+      },
+      "newHero": {
+        "folder": "kian-residence",
+        "i": 12,
+        "room": "cafe"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "kian-residence",
+          "i": 10,
+          "room": "cafe"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 3,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 2,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 5,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 1,
+          "room": "bathroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 9,
+          "room": "entrance"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 18,
+          "room": "exterior"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "kian-residence",
+          "i": 12,
+          "room": "cafe"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 18,
+          "room": "exterior"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 16,
+          "room": "lobby"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 3,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 2,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 5,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 11,
+          "room": "terrace"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 1,
+          "room": "bathroom"
+        }
+      ],
+      "reason": "The coffee bar counter, so this unit does not repeat 113C's café terrace."
+    },
+    {
+      "id": "BONA-041",
+      "slug": "kian-building-117-unit-c-al-nuzhah",
+      "folder": "kian-residence",
+      "featured": false,
+      "status": "available",
+      "category": "buy",
+      "type": "apartment",
+      "oldHero": {
+        "folder": "kian-residence",
+        "i": 11,
+        "room": "terrace"
+      },
+      "newHero": {
+        "folder": "kian-residence",
+        "i": 7,
+        "room": "view"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "kian-residence",
+          "i": 11,
+          "room": "terrace"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 0,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 4,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 6,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 1,
+          "room": "bathroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 16,
+          "room": "lobby"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "kian-residence",
+          "i": 7,
+          "room": "view"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 17,
+          "room": "exterior"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 16,
+          "room": "lobby"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 0,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 4,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 6,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 10,
+          "room": "cafe"
+        }
+      ],
+      "reason": "The room with the full-height window and the outlook — the only \"view\" frame in the folder."
+    },
+    {
+      "id": "BONA-042",
+      "slug": "kian-building-115-unit-a-al-rayyan",
+      "folder": "kian-residence",
+      "featured": false,
+      "status": "available",
+      "category": "buy",
+      "type": "apartment",
+      "oldHero": {
+        "folder": "kian-residence",
+        "i": 7,
+        "room": "bedroom"
+      },
+      "newHero": {
+        "folder": "kian-residence",
+        "i": 9,
+        "room": "entrance"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "kian-residence",
+          "i": 7,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 3,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 2,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 1,
+          "room": "bathroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 12,
+          "room": "cafe"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 17,
+          "room": "exterior"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "kian-residence",
+          "i": 9,
+          "room": "entrance"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 18,
+          "room": "exterior"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 16,
+          "room": "lobby"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 3,
+          "room": "living"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 2,
+          "room": "kitchen"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 5,
+          "room": "bedroom"
+        },
+        {
+          "folder": "kian-residence",
+          "i": 14,
+          "room": "gym"
+        }
+      ],
+      "reason": "The building's covered entrance. Rubric: a bedroom is never a hero — this unit led with one."
+    },
+    {
+      "id": "BONA-043",
+      "slug": "dari-q-al-salamah",
+      "folder": "dari-q-luxury-apartment",
+      "featured": false,
+      "status": "available",
+      "category": "buy",
+      "type": "apartment",
+      "oldHero": {
+        "folder": "dari-q-luxury-apartment",
+        "i": 1,
+        "room": "exterior"
+      },
+      "newHero": {
+        "folder": "dari-q-luxury-apartment",
+        "i": 6,
+        "room": "rooftop_pool"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "dari-q-luxury-apartment",
+          "i": 1,
+          "room": "exterior"
+        },
+        {
+          "folder": "dari-q-luxury-apartment",
+          "i": 0,
+          "room": "rooftop_pool"
+        },
+        {
+          "folder": "dari-q-luxury-apartment",
+          "i": 39,
+          "room": "aerial"
+        },
+        {
+          "folder": "dari-q-luxury-apartment",
+          "i": 12,
+          "room": "lobby"
+        },
+        {
+          "folder": "dari-q-luxury-apartment",
+          "i": 24,
+          "room": "living"
+        },
+        {
+          "folder": "dari-q-luxury-apartment",
+          "i": 17,
+          "room": "kitchen"
+        },
+        {
+          "folder": "dari-q-luxury-apartment",
+          "i": 19,
+          "room": "bedroom"
+        },
+        {
+          "folder": "dari-q-luxury-apartment",
+          "i": 27,
+          "room": "bathroom"
+        },
+        {
+          "folder": "dari-q-luxury-apartment",
+          "i": 2,
+          "room": "courtyard"
+        },
+        {
+          "folder": "dari-q-luxury-apartment",
+          "i": 8,
+          "room": "gym"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "dari-q-luxury-apartment",
+          "i": 6,
+          "room": "rooftop_pool"
+        },
+        {
+          "folder": "dari-q-luxury-apartment",
+          "i": 15,
+          "room": "exterior"
+        },
+        {
+          "folder": "dari-q-luxury-apartment",
+          "i": 12,
+          "room": "lobby"
+        },
+        {
+          "folder": "dari-q-luxury-apartment",
+          "i": 20,
+          "room": "living"
+        },
+        {
+          "folder": "dari-q-luxury-apartment",
+          "i": 17,
+          "room": "kitchen"
+        },
+        {
+          "folder": "dari-q-luxury-apartment",
+          "i": 24,
+          "room": "living"
+        },
+        {
+          "folder": "dari-q-luxury-apartment",
+          "i": 27,
+          "room": "bathroom"
+        },
+        {
+          "folder": "dari-q-luxury-apartment",
+          "i": 8,
+          "room": "gym"
+        },
+        {
+          "folder": "dari-q-luxury-apartment",
+          "i": 34,
+          "room": "courtyard"
+        },
+        {
+          "folder": "dari-q-luxury-apartment",
+          "i": 39,
+          "room": "aerial"
+        }
+      ],
+      "reason": "The rooftop pool, clean and blue — the amenity that sells the building; the old hero was the beige tower with a row of parked cars along the bottom."
+    },
+    {
+      "id": "BONA-044",
+      "slug": "neptune-villas-north-riyadh",
+      "folder": "neptune-interiors-by-mouawad",
+      "featured": false,
+      "status": "available",
+      "category": "off-plan",
+      "type": "villa",
+      "oldHero": {
+        "folder": "neptune-interiors-by-mouawad",
+        "i": 0,
+        "room": "exterior"
+      },
+      "newHero": {
+        "folder": "neptune-interiors-by-mouawad",
+        "i": 2,
+        "room": "exterior"
+      },
+      "heroChanged": true,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "neptune-interiors-by-mouawad",
+          "i": 0,
+          "room": "exterior"
+        },
+        {
+          "folder": "neptune-interiors-by-mouawad",
+          "i": 1,
+          "room": "aerial"
+        },
+        {
+          "folder": "neptune-interiors-by-mouawad",
+          "i": 2,
+          "room": "render"
+        },
+        {
+          "folder": "neptune-interiors-by-mouawad",
+          "i": 3,
+          "room": "terrace"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "neptune-interiors-by-mouawad",
+          "i": 2,
+          "room": "exterior"
+        },
+        {
+          "folder": "neptune-interiors-by-mouawad",
+          "i": 3,
+          "room": "terrace"
+        },
+        {
+          "folder": "neptune-interiors-by-mouawad",
+          "i": 0,
+          "room": "render"
+        },
+        {
+          "folder": "neptune-interiors-by-mouawad",
+          "i": 1,
+          "room": "aerial"
+        }
+      ],
+      "reason": "The golden-hour street of villas; the old hero had two cars parked under the carport."
+    },
+    {
+      "id": "BONA-045",
+      "slug": "trump-international-hotel-residences-aida-muscat",
+      "folder": "trump-international-hotel-oman",
+      "featured": true,
+      "status": "available",
+      "category": "international",
+      "type": "apartment",
+      "oldHero": {
+        "folder": "trump-international-hotel-oman",
+        "i": 0,
+        "room": "pool"
+      },
+      "newHero": {
+        "folder": "trump-international-hotel-oman",
+        "i": 0,
+        "room": "pool"
+      },
+      "heroChanged": false,
+      "orderChanged": true,
+      "oldImages": [
+        {
+          "folder": "trump-international-hotel-oman",
+          "i": 0,
+          "room": "pool"
+        },
+        {
+          "folder": "trump-international-hotel-oman",
+          "i": 4,
+          "room": "living"
+        },
+        {
+          "folder": "trump-international-hotel-oman",
+          "i": 7,
+          "room": "bedroom"
+        },
+        {
+          "folder": "trump-international-hotel-oman",
+          "i": 5,
+          "room": "lounge"
+        },
+        {
+          "folder": "trump-international-hotel-oman",
+          "i": 3,
+          "room": "bathroom"
+        },
+        {
+          "folder": "trump-international-hotel-oman",
+          "i": 11,
+          "room": "aerial"
+        },
+        {
+          "folder": "trump-international-hotel-oman",
+          "i": 12,
+          "room": "entrance"
+        },
+        {
+          "folder": "trump-international-hotel-oman",
+          "i": 15,
+          "room": "facade_night"
+        },
+        {
+          "folder": "trump-international-hotel-oman",
+          "i": 13,
+          "room": "pool"
+        },
+        {
+          "folder": "trump-international-hotel-oman",
+          "i": 1,
+          "room": "lounge"
+        }
+      ],
+      "newImages": [
+        {
+          "folder": "trump-international-hotel-oman",
+          "i": 0,
+          "room": "pool"
+        },
+        {
+          "folder": "trump-international-hotel-oman",
+          "i": 13,
+          "room": "pool_night"
+        },
+        {
+          "folder": "trump-international-hotel-oman",
+          "i": 8,
+          "room": "lobby"
+        },
+        {
+          "folder": "trump-international-hotel-oman",
+          "i": 6,
+          "room": "living"
+        },
+        {
+          "folder": "trump-international-hotel-oman",
+          "i": 7,
+          "room": "master"
+        },
+        {
+          "folder": "trump-international-hotel-oman",
+          "i": 5,
+          "room": "event_hall"
+        },
+        {
+          "folder": "trump-international-hotel-oman",
+          "i": 1,
+          "room": "lounge"
+        },
+        {
+          "folder": "trump-international-hotel-oman",
+          "i": 4,
+          "room": "terrace"
+        },
+        {
+          "folder": "trump-international-hotel-oman",
+          "i": 3,
+          "room": "bathroom"
+        },
+        {
+          "folder": "trump-international-hotel-oman",
+          "i": 11,
+          "room": "aerial"
+        }
+      ],
+      "reason": "Kept: the infinity pool at sunset over the sea is exactly the rubric's first choice. A bathroom sat at position 5 — it now sits at 9, and the aerial closes."
+    }
+  ]
+}
