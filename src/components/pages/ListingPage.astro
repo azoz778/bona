@@ -1,6 +1,7 @@
 ---
 import Base from '../../layouts/Base.astro';
 import Gallery from '../Gallery.astro';
+import TourEmbed from '../TourEmbed.astro';
 import Breadcrumb from '../Breadcrumb.astro';
 import ListingCard from '../ListingCard.astro';
 import SectionHead from '../SectionHead.astro';
@@ -8,7 +9,7 @@ import EnquiryForm from '../EnquiryForm.astro';
 import Icon from '../Icon.astro';
 import site from '../../data/site.json';
 import { localePath, formatPrice, formatNumber, t, ui, fill, waLink, type Locale } from '../../lib/i18n';
-import { localeTitle, categoryLabel, categorySlug, typeLabel, similar, type Listing } from '../../lib/listings';
+import { localeTitle, categoryLabel, categorySlug, typeLabel, similar, kindOf, kindLabel, kindLabelPlural, kindSlug, matterportId, type Listing } from '../../lib/listings';
 import { listingJsonLd, breadcrumbJsonLd } from '../../lib/seo';
 interface Props { locale: Locale; listing: Listing }
 const { locale, listing: l } = Astro.props;
@@ -17,10 +18,11 @@ const title = localeTitle(l, locale);
 const absUrl = new URL(path, site.url).href;
 const waMessage = fill(t(ui.listingWaMessage, locale), { title, id: l.id, url: absUrl });
 const wa = waLink(site.whatsapp.wa, waMessage);
+const kind = kindOf(l);
 const crumbs = [
   { name: t(ui.home, locale), path: localePath(locale, '/') },
   { name: t(ui.properties, locale), path: localePath(locale, '/properties/') },
-  { name: t(categoryLabel[l.category], locale), path: localePath(locale, `/properties/${categorySlug[l.category]}/`) },
+  { name: t(kindLabelPlural[kind], locale), path: localePath(locale, `/properties/${kindSlug[kind]}/`) },
   { name: title, path },
 ];
 const specs = [
@@ -30,6 +32,8 @@ const specs = [
   l.specs?.plotSqm ? { k: t(ui.plot, locale), v: `${formatNumber(l.specs.plotSqm)} ${t(ui.sqm, locale)}` } : null,
   l.specs?.yearBuilt ? { k: t(ui.yearBuilt, locale), v: String(l.specs.yearBuilt) } : null,
   l.specs?.floors ? { k: t(ui.floors, locale), v: String(l.specs.floors) } : null,
+  l.unit?.floor != null && l.unit.floor !== '' ? { k: t(ui.floor, locale), v: String(l.unit.floor) } : null,
+  l.unit?.block ? { k: t(ui.block, locale), v: String(l.unit.block) } : null,
 ].filter(Boolean) as { k: string; v: string }[];
 const paragraphs = (t(l.description, locale) || '').split(/\n\s*\n|\n/).map(p => p.trim()).filter(Boolean);
 const highlights = l.highlights?.[locale] ?? l.highlights?.en ?? [];
@@ -37,23 +41,37 @@ const badge = l.status === 'sold' ? t(ui.sold, locale) : l.status === 'reserved'
 const related = similar(l, 3);
 const description = paragraphs[0]?.slice(0, 155) || `${title} — ${t(l.location.district, locale)}, ${t(l.location.city, locale)}. ${formatPrice(l.price, locale)}.`;
 const locationLine = [t(l.location.district, locale), t(l.location.city, locale), t(l.location.country, locale)].filter(Boolean).join(locale === 'ar' ? '، ' : ', ');
+const project = l.project?.name ? t(l.project.name, locale) : '';
+const developer = l.project?.developer ? t(l.project.developer, locale) : '';
+const hasMatterport = matterportId(l.virtualTourUrl) !== null;
+const mapLink = l.map && Number.isFinite(l.map.lat) && Number.isFinite(l.map.lng) ? `https://www.google.com/maps/search/?api=1&query=${l.map.lat},${l.map.lng}` : null;
+const typeText = typeLabel(l.type, locale);
+const kindText = t(kindLabel[kind], locale);
 ---
 <Base title={`${title} — ${locale === 'ar' ? site.nameAr : site.name}`} description={description} locale={locale} path={path} image={l.images?.[0]?.src} waMessage={waMessage}
       jsonLd={[listingJsonLd(l, locale), breadcrumbJsonLd(crumbs)]}>
   <article class="pt-6 lg:pt-8">
     <div class="wrap">
       <Breadcrumb locale={locale} items={crumbs.map(c => ({ name: c.name, href: c.path }))} />
-      <div class="mt-6"><Gallery listing={l} locale={locale} /></div>
+    </div>
+    <div class="mt-6"><Gallery listing={l} locale={locale} /></div>
 
+    <div class="wrap">
       <div class="mt-12 grid gap-14 lg:mt-16 lg:grid-cols-12 lg:gap-10">
         <div class="lg:col-span-7 xl:col-span-8">
           <header>
             <div class="flex flex-wrap items-center gap-4">
-              <p class="label text-stone-2">{t(categoryLabel[l.category], locale)} — {typeLabel(l.type, locale)}</p>
+              <p class="label flex flex-wrap items-center gap-x-2.5 text-stone-2">
+                <span class="kind-tag">{kindText}</span>
+                <span>{t(categoryLabel[l.category], locale)}{typeText && typeText.toLowerCase() !== kindText.toLowerCase() ? ` — ${typeText}` : ''}</span>
+              </p>
               {badge && <span class="badge bg-ink text-ivory">{badge}</span>}
             </div>
             <h1 class="display-lg mt-4">{title}</h1>
-            <p class="mt-4 flex items-center gap-2 text-sm text-stone-2"><Icon name="pin" size={16} class="shrink-0 text-champagne" />{locationLine}</p>
+            {project && (
+              <p class="mt-3 text-sm text-stone-2"><span class="font-semibold text-ink">{project}</span>{developer && <span> · {t(ui.developer, locale)}: {developer}</span>}{l.unit?.unitRef && <span> · {t(ui.unit, locale)} <span dir="ltr">{l.unit.unitRef}</span></span>}</p>
+            )}
+            <p class="mt-4 flex items-center gap-2 text-sm text-stone-2"><Icon name="pin" size={16} class="shrink-0 text-champagne" />{locationLine}{mapLink && <a href={mapLink} target="_blank" rel="noopener" class="link ms-2 text-ink">{t(ui.openMap, locale)}</a>}</p>
             <p class="mt-6 font-sans text-xl font-semibold">{formatPrice(l.price, locale)}</p>
           </header>
 
@@ -86,10 +104,12 @@ const locationLine = [t(l.location.district, locale), t(l.location.city, locale)
             </section>
           )}
 
-          {(l.brochureUrl || l.virtualTourUrl) && (
+          {hasMatterport && <TourEmbed listing={l} locale={locale} class="mt-14" />}
+
+          {(l.brochureUrl || (l.virtualTourUrl && !hasMatterport)) && (
             <div class="mt-12 flex flex-wrap gap-4">
               {l.brochureUrl && <a href={l.brochureUrl} target="_blank" rel="noopener" class="btn btn-outline"><Icon name="download" size={16} />{t(ui.brochure, locale)}</a>}
-              {l.virtualTourUrl && <a href={l.virtualTourUrl} target="_blank" rel="noopener" class="btn btn-outline"><Icon name="tour" size={16} />{t(ui.virtualTour, locale)}</a>}
+              {l.virtualTourUrl && !hasMatterport && <a href={l.virtualTourUrl} target="_blank" rel="noopener" class="btn btn-outline"><Icon name="tour" size={16} />{t(ui.virtualTour, locale)}</a>}
             </div>
           )}
 
@@ -107,6 +127,7 @@ const locationLine = [t(l.location.district, locale), t(l.location.city, locale)
             <p class="mt-3 text-sm text-stone-2">{t(ui.enquiryPanelText, locale)}</p>
             <a href={wa} target="_blank" rel="noopener" class="btn btn-ink mt-7 w-full"><Icon name="whatsapp" size={17} />{t(ui.enquireWhatsApp, locale)}</a>
             <a href={`tel:${site.phone.e164}`} class="btn btn-outline mt-3 w-full"><Icon name="phone" size={16} /><span dir="ltr">{site.phone.display}</span></a>
+            {hasMatterport && <a href="#tour" class="link-label mt-6 inline-flex items-center gap-2 text-ink" data-tour-jump><Icon name="cube" size={14} />{t(ui.tour3dTitle, locale)}</a>}
             <span class="rule-long mt-7"></span>
             <dl class="mt-5 flex items-baseline justify-between text-xs text-stone-2">
               <dt class="label">{t(ui.reference, locale)}</dt>
@@ -121,8 +142,8 @@ const locationLine = [t(l.location.district, locale), t(l.location.city, locale)
       <section class="section">
         <div class="wrap">
           <SectionHead title={t(ui.similarResidences, locale)} link={{ href: localePath(locale, `/properties/${categorySlug[l.category]}/`), label: t(categoryLabel[l.category], locale) }} />
-          <div class="mt-12 grid gap-x-8 gap-y-14 sm:grid-cols-2 lg:grid-cols-3">
-            {related.map((r, i) => <div data-reveal data-reveal-delay={String(i)}><ListingCard listing={r} locale={locale} index={i} /></div>)}
+          <div class="mt-12 grid gap-x-8 gap-y-14 sm:grid-cols-2 lg:grid-cols-3" data-stagger>
+            {related.map((r, i) => <div data-reveal><ListingCard listing={r} locale={locale} index={i} /></div>)}
           </div>
         </div>
       </section>

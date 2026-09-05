@@ -64,7 +64,14 @@ export const ui = {
   navProperties: s('Properties', 'العقارات'),
   navOffPlan: s('Off-Plan', 'على الخارطة'),
   navInternational: s('International', 'عقارات دولية'),
-  navAbout: s('About', 'عن بونا'),
+  navAbout: s('About us', 'من نحن'),
+  navHouses: s('Houses', 'منازل'),
+  navApartments: s('Apartments', 'شقق'),
+  navLand: s('Land', 'أراضٍ'),
+  navBuildings: s('Buildings', 'عمارات'),
+  navAllProperties: s('All properties', 'جميع العقارات'),
+  navTours: s('Virtual tours', 'جولات افتراضية'),
+  navPrivacy: s('Privacy policy', 'سياسة الخصوصية'),
   navSell: s('Sell', 'بِع معنا'),
   navContact: s('Contact', 'تواصل'),
   languageSwitch: s('العربية', 'English'),
@@ -102,7 +109,7 @@ export const ui = {
     'Bona is a private boutique, not a portal. We take on a handful of homes at a time and handle each one at principal level, from pricing and presentation to the quiet introductions that close.',
     'بونا بوتيك خاص، لا منصة إعلانات. نتولّى عدداً محدوداً من المنازل في كل مرة، ونعالج كلّاً منها على مستوى الشركاء: من التسعير والعرض إلى التعريفات الهادئة التي تُتمّ الصفقة.'
   ),
-  aboutBona: s('About Bona', 'عن بونا'),
+  aboutBona: s('About us', 'من نحن'),
   sellWithBona: s('Sell with Bona', 'بِع مع بونا'),
   sellBandText: s(
     'Discreet marketing, qualified buyers and one point of contact from the first conversation to the handover.',
@@ -220,6 +227,73 @@ export const ui = {
   labelRef: s('Reference', 'المرجع'),
   labelMessage: s('Message', 'الرسالة'),
   sentFrom: s('Sent from', 'مُرسَلة من'),
+
+  // Home — kind sections
+  housesTitle: s('Houses', 'منازل'),
+  housesIntro: s('Villas, mansions and private houses we are representing at the moment.', 'فلل وقصور ومنازل خاصة نمثّلها حالياً.'),
+  viewAllHouses: s('All houses', 'جميع المنازل'),
+  apartmentsTitle: s('Apartments', 'شقق'),
+  apartmentsIntro: s('Penthouses, branded residences and apartments, in Jeddah and beyond.', 'بنتهاوس ومساكن بعلامات عالمية وشقق، في جدة وخارجها.'),
+  viewAllApartments: s('All apartments', 'جميع الشقق'),
+  landTitle: s('Land', 'أراضٍ'),
+  landIntro: s('Residential and development plots in and around Jeddah.', 'أراضٍ سكنية وتطويرية في جدة وما حولها.'),
+  viewAllLand: s('All land', 'جميع الأراضي'),
+  scrollCue: s('Scroll', 'مرّر'),
+  heroSlideshow: s('Featured residences', 'مساكن مميّزة'),
+
+  // Properties — kind pages
+  housesPageTitle: s('Houses', 'المنازل'),
+  housesPageIntro: s('Villas, mansions, duplexes and private houses represented by Bona: for sale, for rent and off-plan.', 'فلل وقصور ودوبلكس ومنازل خاصة تمثّلها بونا: للبيع وللإيجار وعلى الخارطة.'),
+  apartmentsPageTitle: s('Apartments', 'الشقق'),
+  apartmentsPageIntro: s('Apartments, penthouses and units in branded developments, in Jeddah, Riyadh and abroad.', 'شقق وبنتهاوس ووحدات في مشاريع بعلامات عالمية، في جدة والرياض وخارج المملكة.'),
+  landPageTitle: s('Land', 'الأراضي'),
+  landPageIntro: s('Plots for private houses and development projects, with aerial views and location maps.', 'قطع أراضٍ للمنازل الخاصة ومشاريع التطوير، مع صور جوية وخرائط للموقع.'),
+  buildingsPageTitle: s('Buildings', 'العمارات'),
+  buildingsPageIntro: s('Residential and mixed-use buildings offered as whole assets.', 'عمارات سكنية ومتعددة الاستخدام تُعرض كأصول كاملة.'),
+  viewPill: s('View', 'عرض'),
+  project: s('Project', 'المشروع'),
+  developer: s('Developer', 'المطوّر'),
+  unit: s('Unit', 'الوحدة'),
+  floor: s('Floor', 'الدور'),
+  block: s('Block', 'المبنى'),
+  openMap: s('Open location in Google Maps', 'فتح الموقع في خرائط جوجل'),
+
+  // Matterport / tours
+  tour3dTitle: s('Walk through in 3D', 'تجوّل في المنزل ثلاثي الأبعاد'),
+  tour3dIntro: s('A Matterport scan of the residence. Move from room to room, look around and measure, before you visit.', 'مسح ماتربورت للمسكن. تنقّل بين الغرف وانظر حولك وقِس الأبعاد، قبل الزيارة.'),
+  playTour: s('Start the 3D tour', 'ابدأ الجولة ثلاثية الأبعاد'),
+  openInMatterport: s('Open in Matterport', 'فتح في ماتربورت'),
+  tourFrameTitle: s('3D tour of {title}', 'جولة ثلاثية الأبعاد في {title}'),
+  badge3d: s('3D tour', 'جولة ثلاثية الأبعاد'),
+  toursTitle: s('Virtual tours', 'جولات افتراضية'),
+  toursIntro: s('Walk through these residences in 3D before you visit. New tours are added as homes are scanned.', 'تجوّل في هذه المساكن ثلاثي الأبعاد قبل زيارتها. تُضاف جولات جديدة كلما صُوّر منزل.'),
+  toursMetaTitle: s('Virtual 3D tours of homes in Jeddah', 'جولات افتراضية ثلاثية الأبعاد لمنازل في جدة'),
+  toursMetaDesc: s('Matterport 3D walkthroughs of villas, apartments and residences represented by Bona in Jeddah. Explore room by room before you visit.', 'جولات ماتربورت ثلاثية الأبعاد في فلل وشقق ومساكن تمثّلها بونا في جدة. استكشف غرفةً غرفة قبل الزيارة.'),
+  toursEmpty: s('No virtual tours are available at the moment. New scans are added regularly.', 'لا تتوفر جولات افتراضية حالياً. تُضاف جولات جديدة بانتظام.'),
+
+  // Privacy
+  privacyMetaDesc: s('How Bona handles the personal information you share with us, on this site and on WhatsApp.', 'كيف تتعامل بونا مع المعلومات الشخصية التي تشاركها معنا، على هذا الموقع وعبر واتساب.'),
+  lastUpdated: s('Last updated', 'آخر تحديث'),
+  onThisPage: s('On this page', 'في هذه الصفحة'),
+  privacyContactTitle: s('Questions about your data', 'أسئلة حول بياناتك'),
+  privacyEmpty: s('The full policy is being finalised. Until then: we store nothing on this site; enquiries open in WhatsApp and are handled personally.', 'يجري إعداد السياسة الكاملة. حتى ذلك الحين: لا نخزّن شيئاً على هذا الموقع؛ تُفتح الاستفسارات في واتساب وتُعالَج شخصياً.'),
+
+  // About us (data-driven)
+  aboutH1: s('A private house for exceptional homes', 'دار خاصة للمنازل الاستثنائية'),
+  aboutStatementFallback: s('Bona takes its name from the Latin for good things: property, in the oldest sense of the word. We are an independent real estate boutique in Jeddah, deliberately small, representing a handful of homes at a time.', 'تستمدّ بونا اسمها من الكلمة اللاتينية Bona، أي «الأشياء الطيّبة»: الملكية بمعناها الأقدم. نحن بوتيك عقاري مستقل في جدة، صغير عن قصد، يمثّل عدداً محدوداً من المنازل في كل مرة.'),
+  ourStory: s('Our story', 'قصتنا'),
+  ourValues: s('What we stand for', 'ما نؤمن به'),
+  thePrincipals: s('The principals', 'الشركاء'),
+  principalsIntro: s('The people who will answer your message.', 'الأشخاص الذين سيردّون على رسالتك.'),
+  falLicence: s('FAL licence', 'رخصة فال'),
+  inNumbers: s('In numbers', 'بالأرقام'),
+  aboutClosing: s('If you are thinking about a home, or about selling one, the conversation costs nothing and stays between us.', 'إن كنت تفكّر في منزل، أو في بيع منزل، فالمحادثة لا تكلّف شيئاً وتبقى بيننا.'),
+  contactUs: s('Contact us', 'تواصل معنا'),
+
+  // Gallery strip / lightbox
+  galleryProgress: s('Gallery position', 'موضع المعرض'),
+  thumbnails: s('Thumbnails', 'الصور المصغّرة'),
+  goToImage: s('Go to image {n}', 'الانتقال إلى الصورة {n}'),
 
   // 404
   notFoundTitle: s('This page has moved on', 'هذه الصفحة لم تعد هنا'),

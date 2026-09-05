@@ -176,3 +176,131 @@ body.drawer-open { overflow: hidden; }
 .lightbox .slide img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; }
 .lightbox .lb-btn { position: absolute; z-index: 2; display: grid; place-items: center; width: 3rem; height: 3rem; border: 1px solid color-mix(in oklab, var(--color-ivory) 30%, transparent); background: color-mix(in oklab, var(--color-ink) 60%, transparent); color: var(--color-ivory); cursor: pointer; transition: border-color .3s var(--ease-luxe), background-color .3s var(--ease-luxe); }
 .lightbox .lb-btn:hover { border-color: var(--color-champagne); }
+
+/* =====================================================================
+   Round 2 — immersive layer. Vanilla CSS, no libraries. Every motion rule
+   has a prefers-reduced-motion fallback at the end of this block.
+   ===================================================================== */
+
+/* Stagger: children of [data-stagger] reveal one after another */
+html.js [data-stagger] > [data-reveal]:nth-child(2) { transition-delay: .1s; }
+html.js [data-stagger] > [data-reveal]:nth-child(3) { transition-delay: .2s; }
+html.js [data-stagger] > [data-reveal]:nth-child(4) { transition-delay: .3s; }
+html.js [data-stagger] > [data-reveal]:nth-child(5) { transition-delay: .4s; }
+html.js [data-stagger] > [data-reveal]:nth-child(n+6) { transition-delay: .5s; }
+
+/* Full-bleed helper: escape .wrap without horizontal scroll */
+.bleed { width: 100%; }
+
+/* ---- Home hero: crossfade slideshow + Ken Burns ---- */
+.hero-slides { z-index: 0; }
+.hero-slide { position: absolute; inset: 0; opacity: 0; transition: opacity 1.6s var(--ease-luxe); will-change: opacity; }
+.hero-slide.is-active { opacity: 1; z-index: 1; }
+.hero-slide.was-active { opacity: 1; z-index: 0; }
+.hero-slide img { transform: scale(1.02); }
+html.js .hero-slide.is-active img { animation: kenburns 18s linear both; }
+@keyframes kenburns { from { transform: scale(1.02) translate3d(0, 0, 0); } to { transform: scale(1.12) translate3d(1.5%, -1.5%, 0); } }
+html[dir="rtl"] .hero-slide.is-active img { animation-name: kenburns-rtl; }
+@keyframes kenburns-rtl { from { transform: scale(1.02) translate3d(0, 0, 0); } to { transform: scale(1.12) translate3d(-1.5%, -1.5%, 0); } }
+
+/* Headline words + hero copy fade up in sequence (--i = order) */
+.hero-words .hw { display: inline-block; margin-inline-end: .28em; }
+html.js .hero-words .hw, html.js .hero-in { opacity: 0; transform: translateY(.45em); animation: hero-up 1s var(--ease-luxe) forwards; animation-delay: calc(.15s + var(--i, 0) * .11s); }
+@keyframes hero-up { to { opacity: 1; transform: none; } }
+
+/* Scroll cue: tracked label + a line with a travelling dot */
+.scroll-cue { position: absolute; bottom: 1.5rem; inset-inline-end: clamp(1.25rem, 4vw, 3rem); z-index: 3; display: none; flex-direction: column; align-items: center; gap: .75rem; color: color-mix(in oklab, var(--color-ivory) 70%, transparent); text-decoration: none; }
+@media (min-width: 768px) { .scroll-cue { display: flex; } }
+.scroll-cue .label { writing-mode: vertical-rl; font-size: 10px; }
+html[dir="rtl"] .scroll-cue .label { writing-mode: horizontal-tb; }
+.scroll-cue-line { position: relative; width: 1px; height: 3.5rem; background: color-mix(in oklab, var(--color-ivory) 25%, transparent); overflow: hidden; }
+.scroll-cue-line::after { content: ""; position: absolute; inset-inline: 0; top: -40%; height: 40%; background: var(--color-champagne); animation: cue 2.2s var(--ease-luxe) infinite; }
+@keyframes cue { to { top: 100%; } }
+
+/* ---- Markets marquee ---- */
+.marquee { display: flex; overflow: hidden; width: 100%; mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); }
+.marquee-track { display: flex; flex: 0 0 auto; align-items: center; width: max-content; padding-inline-start: 2.5rem; animation: marquee 38s linear infinite; }
+.marquee-track li { white-space: nowrap; }
+.marquee:hover .marquee-track, .marquee:focus-within .marquee-track { animation-play-state: paused; }
+@keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+html[dir="rtl"] .marquee-track { animation-name: marquee-rtl; }
+@keyframes marquee-rtl { from { transform: translateX(0); } to { transform: translateX(100%); } }
+
+/* ---- Parallax on editorial images (scroll-driven, CSS only). Falls back to a plain framed image. ---- */
+.parallax { overflow: hidden; background: var(--color-ivory-2); }
+.parallax img { height: 100%; width: 100%; object-fit: cover; }
+@supports (animation-timeline: view()) {
+  .parallax img { height: 118%; margin-top: -9%; animation: parallax linear both; animation-timeline: view(); animation-range: entry 0% exit 100%; }
+  @keyframes parallax { from { transform: translateY(-5%); } to { transform: translateY(5%); } }
+}
+
+/* ---- Nav links: underline draws in from the start edge; magnetic drift is set inline by JS ---- */
+.site-header .nav-link { display: inline-block; transition: opacity .3s var(--ease-luxe), transform .35s var(--ease-luxe); will-change: transform; }
+.site-header .nav-link > span { position: relative; display: inline-block; }
+.site-header .nav-link > span::after { content: ""; position: absolute; inset-inline-start: 0; bottom: -3px; height: 1px; width: 100%; background: currentColor; transform: scaleX(0); transform-origin: var(--nav-origin, left); transition: transform .4s var(--ease-luxe); }
+html[dir="rtl"] .site-header .nav-link > span::after { --nav-origin: right; }
+.site-header .nav-link:hover > span::after, .site-header .nav-link:focus-visible > span::after { transform: scaleX(1); }
+.site-header .nav-link[aria-current="page"]::after { display: none; }
+.site-header .nav-link[aria-current="page"] > span::after { transform: scaleX(1); background: var(--color-champagne); }
+
+/* ---- Cursor-following "View" pill (desktop; created by JS) ---- */
+.view-pill { position: fixed; left: 0; top: 0; z-index: 35; pointer-events: none; padding: .7rem 1.1rem; background: var(--color-ink); color: var(--color-ivory); font-family: var(--font-sans); font-size: 10px; letter-spacing: var(--tracking-luxe); text-transform: uppercase; font-weight: 600; line-height: 1; opacity: 0; scale: .8; transition: opacity .25s var(--ease-luxe), scale .25s var(--ease-luxe); will-change: transform; }
+html[dir="rtl"] .view-pill { font-family: var(--font-arabic); font-size: 12px; letter-spacing: 0; text-transform: none; font-weight: 500; }
+.view-pill.is-on { opacity: 1; scale: 1; }
+@media (hover: hover) and (pointer: fine) { [data-listing][data-view] a { cursor: none; } }
+
+/* ---- Kind tag + 3D badge ---- */
+.kind-tag { display: inline-block; padding: .3rem .5rem; border: 1px solid color-mix(in oklab, var(--color-ink) 18%, transparent); font-size: 9.5px; letter-spacing: var(--tracking-luxe); line-height: 1; color: var(--color-ink); }
+html[dir="rtl"] .kind-tag { font-size: 12px; letter-spacing: 0; }
+.badge-3d { display: inline-flex; align-items: center; gap: .35rem; background: var(--color-ink); color: var(--color-champagne-2); }
+
+/* ---- Matterport facade ---- */
+.tour-frame { position: relative; aspect-ratio: 16 / 9; width: 100%; overflow: hidden; background: var(--color-ink); }
+@media (max-width: 767px) { .tour-frame { width: 100vw; margin-inline-start: calc(50% - 50vw); aspect-ratio: 16 / 10; } }
+.tour-facade { position: absolute; inset: 0; display: block; width: 100%; height: 100%; padding: 0; border: 0; cursor: pointer; background: var(--color-ink); color: var(--color-ivory); text-align: center; }
+.tour-facade img { transition: transform 1.2s var(--ease-luxe), opacity .6s var(--ease-luxe); opacity: .85; }
+.tour-facade:hover img { transform: scale(1.03); opacity: .7; }
+.tour-shade { position: absolute; inset: 0; background: linear-gradient(to top, color-mix(in oklab, var(--color-ink) 70%, transparent), transparent 55%); }
+.tour-play { position: absolute; left: 50%; top: 50%; translate: -50% -50%; display: grid; place-items: center; width: 5rem; height: 5rem; border: 1px solid color-mix(in oklab, var(--color-ivory) 60%, transparent); border-radius: 999px; background: color-mix(in oklab, var(--color-ink) 45%, transparent); backdrop-filter: blur(6px); transition: background-color .35s var(--ease-luxe), border-color .35s var(--ease-luxe), scale .35s var(--ease-luxe); }
+.tour-play svg { margin-inline-start: 3px; }
+.tour-facade:hover .tour-play, .tour-facade:focus-visible .tour-play { background: var(--color-champagne); border-color: var(--color-champagne); color: var(--color-ink); scale: 1.06; }
+.tour-caption { position: absolute; left: 50%; bottom: 1.5rem; translate: -50% 0; color: color-mix(in oklab, var(--color-ivory) 85%, transparent); white-space: nowrap; }
+.tour-frame.is-live { box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-ink) 10%, transparent); }
+
+/* ---- Gallery strip (listing page) ---- */
+.strip { display: flex; gap: 1rem; overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; padding-inline: clamp(1.25rem, 4vw, 3rem); scroll-padding-inline: clamp(1.25rem, 4vw, 3rem); -webkit-overflow-scrolling: touch; }
+.strip-slide { flex: 0 0 auto; height: clamp(240px, min(68vh, 58vw), 720px); aspect-ratio: 3 / 2; scroll-snap-align: start; scroll-snap-stop: normal; padding: 0; border: 0; cursor: zoom-in; background: var(--color-ivory-2); }
+@media (max-width: 639px) { .strip-slide { height: auto; width: 88vw; aspect-ratio: 4 / 3; } }
+.strip:focus-visible { outline-offset: -3px; }
+.strip-progress { position: relative; flex: 1 1 auto; height: 1px; background: color-mix(in oklab, var(--color-ink) 12%, transparent); }
+.strip-progress i { position: absolute; inset: 0; background: var(--color-champagne); transform-origin: left; transform: scaleX(0); transition: transform .25s var(--ease-luxe); }
+html[dir="rtl"] .strip-progress i { transform-origin: right; }
+.strip-btn { display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border: 1px solid color-mix(in oklab, var(--color-ink) 20%, transparent); color: var(--color-ink); cursor: pointer; background: transparent; transition: border-color .3s var(--ease-luxe), background-color .3s var(--ease-luxe), color .3s var(--ease-luxe); }
+.strip-btn:hover { background: var(--color-ink); color: var(--color-ivory); border-color: var(--color-ink); }
+
+/* ---- Lightbox thumbnail rail ---- */
+.lightbox .slide { padding-bottom: 6.5rem; }
+.lb-rail { position: absolute; inset-inline: 0; bottom: 0; z-index: 2; display: flex; gap: .4rem; overflow-x: auto; padding: .75rem 1rem 1rem; scroll-snap-type: x proximity; background: linear-gradient(to top, color-mix(in oklab, var(--color-ink) 90%, transparent), transparent); }
+.lb-thumb { flex: 0 0 auto; width: 4.5rem; aspect-ratio: 4 / 3; padding: 0; border: 1px solid transparent; background: var(--color-ink-2); opacity: .55; cursor: pointer; scroll-snap-align: center; transition: opacity .3s var(--ease-luxe), border-color .3s var(--ease-luxe); }
+.lb-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.lb-thumb:hover, .lb-thumb[aria-current="true"] { opacity: 1; }
+.lb-thumb[aria-current="true"] { border-color: var(--color-champagne); }
+
+/* ---- Reduced motion: everything above degrades to static ---- */
+@media (prefers-reduced-motion: reduce) {
+  html.js [data-stagger] > [data-reveal] { transition-delay: 0s; }
+  .hero-slide { transition: none; }
+  .hero-slide img, html.js .hero-slide.is-active img { animation: none; transform: none; }
+  html.js .hero-words .hw, html.js .hero-in { opacity: 1; transform: none; animation: none; }
+  .scroll-cue-line::after { animation: none; top: 30%; }
+  .marquee { mask-image: none; -webkit-mask-image: none; }
+  .marquee-track { animation: none; width: auto; flex-wrap: wrap; }
+  .marquee-track[aria-hidden="true"] { display: none; }
+  .parallax img { animation: none; height: 100%; margin-top: 0; transform: none; }
+  .site-header .nav-link { transition: opacity .3s var(--ease-luxe); transform: none !important; }
+  .site-header .nav-link > span::after { transition: none; }
+  .view-pill { transition: none; }
+  .tour-facade img, .tour-play { transition: none; }
+  .strip-progress i { transition: none; }
+  .lb-thumb { transition: none; }
+}

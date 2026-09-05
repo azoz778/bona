@@ -1,40 +1,55 @@
 ---
+/* Listing index. Three modes: all (/properties/), category (/properties/for-sale/ …) and kind (/properties/houses/ …).
+   In kind mode the category chips filter client-side (buy / rent / off-plan …) and mirror to ?category= in the URL. */
 import Base from '../../layouts/Base.astro';
 import ListingCard from '../ListingCard.astro';
 import SectionHead from '../SectionHead.astro';
 import site from '../../data/site.json';
-import { localePath, t, ui, fill, type Locale , count, countForms_ } from '../../lib/i18n';
-import { listings, ordered, categories, categoryLabel, categorySlug, typesIn, typeLabel, type Listing } from '../../lib/listings';
+import { localePath, t, ui, type Locale, count, countForms_ } from '../../lib/i18n';
+import { listings, ordered, categories, categoryLabel, categorySlug, typesIn, typeLabel, kindOf, kindSlug, categoriesIn, type Listing, type Kind } from '../../lib/listings';
 import { breadcrumbJsonLd } from '../../lib/seo';
-interface Props { locale: Locale; category?: Listing['category'] }
-const { locale, category } = Astro.props;
-const all = !category;
-const items = ordered(all ? listings : listings.filter(l => l.category === category));
-const path = localePath(locale, all ? '/properties/' : `/properties/${categorySlug[category!]}/`);
+interface Props { locale: Locale; category?: Listing['category']; kind?: Kind }
+const { locale, category, kind } = Astro.props;
+const all = !category && !kind;
+const items = ordered(listings.filter(l => (!category || l.category === category) && (!kind || kindOf(l) === kind)));
+const path = localePath(locale, kind ? `/properties/${kindSlug[kind]}/` : all ? '/properties/' : `/properties/${categorySlug[category!]}/`);
 const copy = {
   buy: { title: ui.forSaleTitle, intro: ui.forSaleIntro }, rent: { title: ui.forRentTitle, intro: ui.forRentIntro },
   'off-plan': { title: ui.offPlanTitle, intro: ui.offPlanIntro }, international: { title: ui.internationalTitle, intro: ui.internationalIntro },
 } as const;
-const title = all ? t(ui.properties, locale) : t(copy[category!].title, locale);
-const intro = all ? t(ui.propertiesIntro, locale) : t(copy[category!].intro, locale);
+const kindCopy = {
+  house: { title: ui.housesPageTitle, intro: ui.housesPageIntro }, apartment: { title: ui.apartmentsPageTitle, intro: ui.apartmentsPageIntro },
+  land: { title: ui.landPageTitle, intro: ui.landPageIntro }, building: { title: ui.buildingsPageTitle, intro: ui.buildingsPageIntro },
+} as const;
+const title = kind ? t(kindCopy[kind].title, locale) : all ? t(ui.properties, locale) : t(copy[category!].title, locale);
+const intro = kind ? t(kindCopy[kind].intro, locale) : all ? t(ui.propertiesIntro, locale) : t(copy[category!].intro, locale);
 const types = typesIn(items);
+const chipCats = kind ? categoriesIn(items) : categories;
 const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { name: t(ui.properties, locale), path: localePath(locale, '/properties/') }];
 if (!all) crumbs.push({ name: title, path });
 const countText = (n: number) => count(n, 'residence', locale);
 const arForms = JSON.stringify(countForms_('residence').ar);
+const chipCls = 'chip';
 ---
 <Base title={`${title} — ${locale === 'ar' ? site.nameAr : site.name}`} description={intro} locale={locale} path={path} image={items[0]?.images?.[0]?.src} jsonLd={breadcrumbJsonLd(crumbs)}>
-  <section class="section-tight pt-12 lg:pt-16" data-properties data-all={String(all)} data-category={category ?? ''} data-count-many={t(ui.residencesCount, locale)} data-count-one={t(ui.residenceCountOne, locale)} data-count-ar={locale === 'ar' ? arForms : undefined}>
+  <section class="section-tight pt-12 lg:pt-16" data-properties data-mode={kind ? 'kind' : all ? 'all' : 'category'} data-category={category ?? ''} data-count-many={t(ui.residencesCount, locale)} data-count-one={t(ui.residenceCountOne, locale)} data-count-ar={locale === 'ar' ? arForms : undefined}>
     <div class="wrap">
       <SectionHead as="h1" title={title} intro={intro} />
 
       <div class="mt-12 flex flex-col gap-5 border-y border-ink/10 py-3 lg:flex-row lg:items-center lg:justify-between">
-        <nav aria-label={locale === 'ar' ? 'الفئة' : 'Category'} class="flex flex-wrap gap-x-7 gap-y-1">
-          <a href={localePath(locale, '/properties/')} class="chip" data-cat="" aria-current={all ? 'true' : undefined}>{t(ui.all, locale)}</a>
-          {categories.map(c => (
-            <a href={localePath(locale, `/properties/${categorySlug[c]}/`)} class="chip" data-cat={c} aria-current={category === c ? 'true' : undefined}>{t(categoryLabel[c], locale)}</a>
-          ))}
-        </nav>
+        {kind ? (
+          <div role="group" aria-label={locale === 'ar' ? 'الفئة' : 'Category'} class="flex flex-wrap gap-x-7 gap-y-1">
+            <button type="button" class={chipCls} data-cat="" aria-pressed="true">{t(ui.all, locale)}</button>
+            {chipCats.map(c => <button type="button" class={chipCls} data-cat={c} aria-pressed="false">{t(categoryLabel[c], locale)}</button>)}
+          </div>
+        ) : (
+          <nav aria-label={locale === 'ar' ? 'الفئة' : 'Category'} class="flex flex-wrap gap-x-7 gap-y-1">
+            <a href={localePath(locale, '/properties/')} class={chipCls} data-cat="" aria-current={all ? 'true' : undefined}>{t(ui.all, locale)}</a>
+            {chipCats.map(c => (
+              <a href={localePath(locale, `/properties/${categorySlug[c]}/`)} class={chipCls} data-cat={c} aria-current={category === c ? 'true' : undefined}>{t(categoryLabel[c], locale)}</a>
+            ))}
+          </nav>
+        )}
         <div class="flex flex-wrap items-center gap-x-8 gap-y-3">
           <label class="label flex items-center gap-3 text-stone-2">
             <span>{t(ui.type, locale)}</span>
@@ -56,8 +71,8 @@ const arForms = JSON.stringify(countForms_('residence').ar);
 
       <p class="mt-6 text-xs text-stone" data-count aria-live="polite">{countText(items.length)}</p>
 
-      <div class="mt-8 grid gap-x-8 gap-y-14 sm:grid-cols-2 lg:grid-cols-3" data-grid>
-        {items.map((l, i) => <ListingCard listing={l} locale={locale} index={i} eager={i < 3} headingLevel="h2" />)}
+      <div class="mt-8 grid gap-x-8 gap-y-14 sm:grid-cols-2 lg:grid-cols-3" data-grid data-stagger>
+        {items.map((l, i) => <div data-reveal><ListingCard listing={l} locale={locale} index={i} eager={i < 3} headingLevel="h2" /></div>)}
       </div>
 
       <div class="py-24 text-center" data-empty hidden={items.length > 0}>
@@ -69,31 +84,37 @@ const arForms = JSON.stringify(countForms_('residence').ar);
 </Base>
 
 <script>
-  const root = document.querySelector<HTMLElement>('[data-properties]');
-  if (root) {
+  function init() {
+    const root = document.querySelector<HTMLElement>('[data-properties]');
+    if (!root || root.dataset.ready) return;
+    root.dataset.ready = '1';
     const grid = root.querySelector<HTMLElement>('[data-grid]')!;
-    const cards = Array.from(grid.querySelectorAll<HTMLElement>('[data-listing]'));
-    const chips = Array.from(root.querySelectorAll<HTMLAnchorElement>('[data-cat]'));
+    const cells = Array.from(grid.children) as HTMLElement[]; // each cell wraps one [data-listing]
+    const cardOf = (cell: HTMLElement) => cell.querySelector<HTMLElement>('[data-listing]') ?? cell;
+    const chips = Array.from(root.querySelectorAll<HTMLElement>('[data-cat]'));
     const typeSel = root.querySelector<HTMLSelectElement>('[data-type-select]')!;
     const sortSel = root.querySelector<HTMLSelectElement>('[data-sort-select]')!;
     const countEl = root.querySelector<HTMLElement>('[data-count]')!;
     const emptyEl = root.querySelector<HTMLElement>('[data-empty]')!;
-    const allMode = root.dataset.all === 'true';
+    const mode = root.dataset.mode;
     const MAX = Number.MAX_SAFE_INTEGER;
     let cat = root.dataset.category || '';
+    let interacted = false; // after the first user change, re-sorted cells show immediately instead of waiting for the reveal observer
 
-    const price = (c: HTMLElement) => Number(c.dataset.price) || MAX;
+    const price = (c: HTMLElement) => Number(cardOf(c).dataset.price) || MAX;
+    const idx = (c: HTMLElement) => Number(cardOf(c).dataset.index);
     const apply = () => {
       const type = typeSel.value, sort = sortSel.value;
-      const list = cards.slice();
+      const list = cells.slice();
       if (sort === 'price-desc') list.sort((a, b) => (price(b) === MAX ? -1 : price(b)) - (price(a) === MAX ? -1 : price(a)));
       else if (sort === 'price-asc') list.sort((a, b) => price(a) - price(b));
-      else list.sort((a, b) => Number(a.dataset.index) - Number(b.dataset.index));
+      else list.sort((a, b) => idx(a) - idx(b));
       list.forEach(c => grid.appendChild(c));
       let n = 0;
-      for (const c of cards) {
+      for (const cell of cells) {
+        const c = cardOf(cell);
         const show = (!cat || c.dataset.category === cat) && (!type || c.dataset.type === type);
-        c.hidden = !show; if (show) n++;
+        cell.hidden = !show; if (show) { n++; if (interacted) cell.classList.add('is-visible'); }
       }
       const ar = root.dataset.countAr ? JSON.parse(root.dataset.countAr) as Record<string, string> : null;
       const pluralCat = ar ? new Intl.PluralRules('ar').select(n) : (n === 1 ? 'one' : 'other');
@@ -102,21 +123,34 @@ const arForms = JSON.stringify(countForms_('residence').ar);
     };
     const setCat = (c: string) => {
       cat = c;
-      chips.forEach(ch => { if ((ch.dataset.cat || '') === c) ch.setAttribute('aria-current', 'true'); else ch.removeAttribute('aria-current'); });
+      for (const ch of chips) {
+        const on = (ch.dataset.cat || '') === c;
+        if (ch.tagName === 'BUTTON') ch.setAttribute('aria-pressed', String(on));
+        else if (on) ch.setAttribute('aria-current', 'true'); else ch.removeAttribute('aria-current');
+      }
+    };
+    const syncUrl = () => {
+      const u = new URL(location.href);
+      if (cat) u.searchParams.set('category', cat); else u.searchParams.delete('category');
+      history.replaceState(history.state, '', u); // keep Astro's router state intact
     };
 
-    // Category chips are plain links to the static category pages (canonical URLs, modifier-clicks and the language switch all work).
-    if (allMode) {
+    // Category chips: links to the static category pages in "all" mode; client-side buttons on kind pages.
+    if (mode !== 'category') {
       const fromUrl = new URLSearchParams(location.search).get('category') || '';
       if (fromUrl && chips.some(ch => ch.dataset.cat === fromUrl)) setCat(fromUrl);
     }
-    typeSel.addEventListener('change', apply);
-    sortSel.addEventListener('change', apply);
+    if (mode === 'kind') chips.forEach(ch => ch.addEventListener('click', () => { interacted = true; setCat(ch.dataset.cat || ''); syncUrl(); apply(); }));
+    const onChange = () => { interacted = true; apply(); };
+    typeSel.addEventListener('change', onChange);
+    sortSel.addEventListener('change', onChange);
     root.querySelector('[data-clear]')?.addEventListener('click', () => {
+      interacted = true;
       typeSel.value = ''; sortSel.value = 'newest';
-      if (allMode) setCat('');
+      if (mode !== 'category') { setCat(''); if (mode === 'kind') syncUrl(); }
       apply();
     });
     apply();
   }
+  document.addEventListener('astro:page-load', init);
 </script>

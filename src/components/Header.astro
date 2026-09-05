@@ -7,15 +7,15 @@ interface Props { locale: Locale; path: string; overHero?: boolean }
 const { locale, path, overHero = false } = Astro.props;
 const other = otherLocale(locale);
 const nav = [
-  { href: localePath(locale, '/properties/'), label: t(ui.navProperties, locale), exact: false },
-  { href: localePath(locale, '/properties/off-plan/'), label: t(ui.navOffPlan, locale), exact: true },
-  { href: localePath(locale, '/properties/international/'), label: t(ui.navInternational, locale), exact: true },
-  { href: localePath(locale, '/about/'), label: t(ui.navAbout, locale), exact: true },
-  { href: localePath(locale, '/sell/'), label: t(ui.navSell, locale), exact: true },
-  { href: localePath(locale, '/contact/'), label: t(ui.navContact, locale), exact: true },
+  { href: localePath(locale, '/properties/houses/'), label: t(ui.navHouses, locale) },
+  { href: localePath(locale, '/properties/apartments/'), label: t(ui.navApartments, locale) },
+  { href: localePath(locale, '/properties/off-plan/'), label: t(ui.navOffPlan, locale) },
+  { href: localePath(locale, '/properties/international/'), label: t(ui.navInternational, locale) },
+  { href: localePath(locale, '/about/'), label: t(ui.navAbout, locale) },
+  { href: localePath(locale, '/sell/'), label: t(ui.navSell, locale) },
+  { href: localePath(locale, '/contact/'), label: t(ui.navContact, locale) },
 ];
-const special = new Set([localePath(locale, '/properties/off-plan/'), localePath(locale, '/properties/international/')]);
-const isCurrent = (item: typeof nav[number]) => item.exact ? path === item.href : (path.startsWith(item.href) && !special.has(path));
+const isCurrent = (item: typeof nav[number]) => path === item.href;
 const wa = waLink(site.whatsapp.wa, t(ui.formGreeting, locale));
 
 /* Language switch: only link to the mirrored route if that route file actually exists (404, dashboard etc. are single-locale). */
@@ -31,22 +31,22 @@ function routeExists(p: string): boolean {
 const mirrored = switchLocalePath(path, other);
 const switchHref = routeExists(mirrored) ? mirrored : localePath(other, '/');
 ---
-<header class:list={['site-header', overHero && 'is-over-hero']} data-header>
-  <div class="wrap flex h-16 items-center justify-between gap-6 lg:h-20">
+<header class:list={['site-header', overHero && 'is-over-hero']} data-header transition:name="site-header" transition:animate="none">
+  <div class="wrap flex h-16 items-center justify-between gap-5 lg:h-20">
     <a href={localePath(locale, '/')} class="flex shrink-0 items-center" aria-label={locale === 'ar' ? site.nameAr : site.name}>
       <Logo locale={locale} height={locale === 'ar' ? 24 : 21} class="block" />
     </a>
 
-    <nav aria-label={locale === 'ar' ? 'التنقل الرئيسي' : 'Primary'} class="hidden items-center gap-7 xl:gap-9 lg:flex">
+    <nav aria-label={locale === 'ar' ? 'التنقل الرئيسي' : 'Primary'} class="hidden items-center gap-5 lg:flex xl:gap-8">
       {nav.map(item => (
-        <a href={item.href} class="nav-link" aria-current={isCurrent(item) ? 'page' : undefined}>{item.label}</a>
+        <a href={item.href} class="nav-link" data-magnetic aria-current={isCurrent(item) ? 'page' : undefined}><span>{item.label}</span></a>
       ))}
     </nav>
 
-    <div class="flex items-center gap-5 lg:gap-6">
+    <div class="flex items-center gap-4 lg:gap-5">
       <a href={switchHref} lang={other} hreflang={other} dir={other === 'ar' ? 'rtl' : 'ltr'}
          class:list={['nav-link', other === 'ar' && 'font-arabic !tracking-normal !normal-case !font-medium !text-[13px]']}
-         aria-label={t(ui.languageSwitchAria, locale)}>{t(ui.languageSwitch, locale)}</a>
+         aria-label={t(ui.languageSwitchAria, locale)}><span>{t(ui.languageSwitch, locale)}</span></a>
       <a href={wa} target="_blank" rel="noopener" class="hidden opacity-85 transition-opacity hover:opacity-100 sm:block" aria-label={t(ui.chatOnWhatsApp, locale)} title={t(ui.chatOnWhatsApp, locale)}>
         <Icon name="whatsapp" size={21} />
       </a>
@@ -66,6 +66,8 @@ const switchHref = routeExists(mirrored) ? mirrored : localePath(other, '/');
     {nav.map(item => (
       <a href={item.href} class="display-md border-b border-ink/10 py-4" aria-current={isCurrent(item) ? 'page' : undefined}>{item.label}</a>
     ))}
+    <a href={localePath(locale, '/properties/')} class="label mt-6 text-stone-2" aria-current={path === localePath(locale, '/properties/') ? 'page' : undefined}>{t(ui.navAllProperties, locale)}</a>
+    <a href={localePath(locale, '/tours/')} class="label mt-4 text-stone-2" aria-current={path === localePath(locale, '/tours/') ? 'page' : undefined}>{t(ui.navTours, locale)}</a>
   </nav>
   <div class="wrap mt-10 flex flex-col gap-6 pb-16">
     <a href={wa} target="_blank" rel="noopener" class="btn btn-ink w-full sm:w-auto"><Icon name="whatsapp" size={18} />{t(ui.chatOnWhatsApp, locale)}</a>
@@ -75,29 +77,49 @@ const switchHref = routeExists(mirrored) ? mirrored : localePath(other, '/');
 </div>
 
 <script>
-  const header = document.querySelector<HTMLElement>('[data-header]');
-  const drawer = document.querySelector<HTMLElement>('[data-drawer]');
-  const openBtn = document.querySelector<HTMLButtonElement>('[data-menu-open]');
-  const closeBtn = document.querySelector<HTMLButtonElement>('[data-menu-close]');
+  /* Header: solid-on-scroll, mobile drawer, magnetic nav links. Re-initialised on every page load; window/document
+     listeners are bound once and look the current elements up on demand (the DOM is replaced on navigation). */
+  let bound = false;
+  const header = () => document.querySelector<HTMLElement>('[data-header]');
+  const drawer = () => document.querySelector<HTMLElement>('[data-drawer]');
+  const solid = () => header()?.classList.toggle('is-solid', window.scrollY > 24);
 
-  if (header) {
-    const update = () => header.classList.toggle('is-solid', window.scrollY > 24);
-    update();
-    window.addEventListener('scroll', update, { passive: true });
-  }
+  const setOpen = (open: boolean) => {
+    const d = drawer(), openBtn = document.querySelector<HTMLButtonElement>('[data-menu-open]'), closeBtn = d?.querySelector<HTMLButtonElement>('[data-menu-close]');
+    if (!d || !openBtn) return;
+    d.classList.toggle('is-open', open);
+    document.body.classList.toggle('drawer-open', open);
+    for (const el of [document.querySelector('main'), document.querySelector('footer')]) el?.toggleAttribute('inert', open);
+    openBtn.setAttribute('aria-expanded', String(open));
+    if (open) window.setTimeout(() => closeBtn?.focus(), 60); else openBtn.focus();
+  };
 
-  if (drawer && openBtn && closeBtn) {
-    const setOpen = (open: boolean) => {
-      drawer.classList.toggle('is-open', open);
-      document.body.classList.toggle('drawer-open', open);
-      for (const el of [document.querySelector('main'), document.querySelector('footer')]) el?.toggleAttribute('inert', open);
-      openBtn.setAttribute('aria-expanded', String(open));
-      if (open) window.setTimeout(() => closeBtn.focus(), 60); else openBtn.focus();
-    };
-    openBtn.addEventListener('click', () => setOpen(true));
-    closeBtn.addEventListener('click', () => setOpen(false));
-    drawer.querySelectorAll('a').forEach(a => a.addEventListener('click', () => setOpen(false)));
-    document.addEventListener('keydown', e => { if (e.key === 'Escape' && drawer.classList.contains('is-open')) setOpen(false); });
-    window.matchMedia('(min-width: 1024px)').addEventListener('change', e => { if (e.matches) setOpen(false); });
+  function init() {
+    solid();
+    const d = drawer();
+    if (d && !d.dataset.ready) {
+      d.dataset.ready = '1';
+      document.querySelector('[data-menu-open]')?.addEventListener('click', () => setOpen(true));
+      d.querySelector('[data-menu-close]')?.addEventListener('click', () => setOpen(false));
+      d.querySelectorAll('a').forEach(a => a.addEventListener('click', () => setOpen(false)));
+    }
+    // Magnetic hover: the link drifts a few px toward the cursor (fine pointers only, never under reduced motion).
+    if (window.matchMedia('(hover: hover) and (pointer: fine)').matches && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      document.querySelectorAll<HTMLElement>('[data-magnetic]:not([data-ready])').forEach(a => {
+        a.dataset.ready = '1';
+        a.addEventListener('pointermove', e => {
+          const r = a.getBoundingClientRect();
+          const dx = (e.clientX - (r.left + r.width / 2)) / r.width, dy = (e.clientY - (r.top + r.height / 2)) / r.height;
+          a.style.transform = `translate(${(dx * 6).toFixed(1)}px, ${(dy * 4).toFixed(1)}px)`;
+        }, { passive: true });
+        a.addEventListener('pointerleave', () => { a.style.transform = ''; });
+      });
+    }
+    if (bound) return;
+    bound = true;
+    window.addEventListener('scroll', solid, { passive: true });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && drawer()?.classList.contains('is-open')) setOpen(false); });
+    window.matchMedia('(min-width: 1024px)').addEventListener('change', e => { if (e.matches && drawer()?.classList.contains('is-open')) setOpen(false); });
   }
+  document.addEventListener('astro:page-load', init);
 </script>

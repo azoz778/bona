@@ -6,7 +6,8 @@
    plus whatever the page passes), preconnects, GA4 / Meta Pixel hooks (only when configured). */
 import site from '../../data/site.json';
 import type { Locale } from '../../lib/i18n';
-import { absoluteUrl, alternates, defaultOgImage, ogLocale, orgJsonLd, pageTitle, websiteJsonLd, compact } from '../../lib/seo';
+import privacy from '../../data/privacy.json';
+import { absoluteUrl, alternates, defaultOgImage, ogLocale, orgJsonLd, pageTitle, websiteJsonLd, compact, personJsonLd, webPageJsonLd, pageKindFromPath } from '../../lib/seo';
 
 interface Props {
   title: string;
@@ -31,24 +32,44 @@ const robots = noindex
   ? 'noindex, nofollow'
   : 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1';
 
-// ---- JSON-LD: one @graph with org + website injected once, deduped by @id ----
+// ---- JSON-LD: one @graph — org + website + founder injected once, then the page's nodes, then an automatic
+//      WebPage-family node (WebPage / AboutPage / ContactPage / CollectionPage / ItemPage) unless the page supplied
+//      one with the same @id (<canonical>#webpage). Everything is deduped by @id; first occurrence wins. ----
 type Node = Record<string, unknown>;
 const pageNodes: Node[] = (Array.isArray(jsonLd) ? jsonLd : jsonLd ? [jsonLd] : []).filter(Boolean) as Node[];
-const baseNodes: Node[] = [orgJsonLd(locale) as Node, websiteJsonLd(locale) as Node];
+const baseNodes: Node[] = [orgJsonLd(locale) as Node, websiteJsonLd(locale) as Node, personJsonLd(locale) as Node];
 const seen = new Set<string>();
 const graph: Node[] = [];
-for (const raw of [...baseNodes, ...pageNodes]) {
+const push = (raw: Node) => {
   const node = compact({ ...raw }) as Node;
   delete node['@context'];
   const id = typeof node['@id'] === 'string' ? (node['@id'] as string) : undefined;
   if (id) {
-    if (seen.has(id)) continue;
+    if (seen.has(id)) return;
     seen.add(id);
   }
   graph.push(node);
-}
+};
+for (const raw of [...baseNodes, ...pageNodes]) push(raw);
 // Listing pages: og:type article-ish + published time
 const listingNode = graph.find((n) => n['@type'] === 'RealEstateListing');
+const breadcrumbNode = graph.find((n) => n['@type'] === 'BreadcrumbList');
+const strippedPath = (path || '/').replace(/^\/ar(?=\/|$)/, '') || '/';
+const isPrivacy = strippedPath === '/privacy/';
+if (!noindex) {
+  push(webPageJsonLd({
+    locale,
+    path,
+    title: fullTitle,
+    description: desc,
+    type: pageKindFromPath(path),
+    image: ogImage,
+    mainEntityId: listingNode && typeof listingNode['@id'] === 'string' ? (listingNode['@id'] as string) : undefined,
+    breadcrumbId: breadcrumbNode && typeof breadcrumbNode['@id'] === 'string' ? (breadcrumbNode['@id'] as string) : undefined,
+    datePublished: isPrivacy ? privacy.updated : undefined,
+    dateModified: isPrivacy ? privacy.updated : undefined,
+  }) as Node);
+}
 const ogType = listingNode ? 'article' : 'website';
 const publishedTime = listingNode && typeof listingNode.datePosted === 'string' ? listingNode.datePosted : undefined;
 const jsonLdText = JSON.stringify({ '@context': 'https://schema.org', '@graph': graph }).replace(/</g, '\\u003c');

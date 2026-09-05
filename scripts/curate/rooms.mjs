@@ -43,4 +43,7 @@ export const ROOMS = {
   hall: { en: 'Great hall', ar: 'القاعة الكبرى' },
   tower: { en: 'The tower', ar: 'البرج' },
   render: { en: "Artist's impression", ar: 'تصور معماري' },
+  parking: { en: 'Covered parking', ar: 'المواقف المغطاة' },
+  satellite: { en: 'Satellite view of the plot', ar: 'صورة جوية للقطعة' },
+  satellite_wide: { en: 'Satellite view of the surrounding area', ar: 'صورة جوية للمنطقة المحيطة' },
 };

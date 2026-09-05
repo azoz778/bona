@@ -19,14 +19,23 @@ for (const p of gallery) {
   byFolder.get(p.folder).push(p);
 }
 
+// kind is derived from type (LISTING-SCHEMA.md, Round 2): the site's Houses/Apartments sections key on it.
+const KIND_OF = { villa: 'house', mansion: 'house', duplex: 'house', palais: 'house', apartment: 'apartment', penthouse: 'apartment', land: 'land', building: 'building' };
+
 function resolveImage(listing, entry) {
   const spec = Array.isArray(entry) ? { folder: listing.folder, i: entry[0], room: entry[1] } : entry;
+  const room = ROOMS[spec.room];
+  if (!room) throw new Error(`${listing.slug}: unknown room key "${spec.room}"`);
+  if (spec.local) {
+    // Site-hosted still (land satellite frames under public/land, produced by land-stills.mjs).
+    if (!/^\/land\/[A-Za-z0-9-]+\.jpg$/.test(spec.local)) throw new Error(`${listing.slug}: local image must be /land/<name>.jpg, got ${spec.local}`);
+    if (!fs.existsSync(path.join(ROOT, 'public', spec.local))) throw new Error(`${listing.slug}: missing public${spec.local}`);
+    return { src: spec.local, thumb: null, alt: { en: `${room.en} — ${listing.title.en}`, ar: `${room.ar} — ${listing.title.ar}` } };
+  }
   const photos = byFolder.get(spec.folder);
   if (!photos) throw new Error(`${listing.slug}: unknown gallery folder "${spec.folder}"`);
   const p = photos[spec.i];
   if (!p) throw new Error(`${listing.slug}: index ${spec.i} out of range for folder "${spec.folder}" (${photos.length} photos)`);
-  const room = ROOMS[spec.room];
-  if (!room) throw new Error(`${listing.slug}: unknown room key "${spec.room}"`);
   return {
     src: p.url,
     thumb: p.thumb || null,
@@ -41,13 +50,16 @@ const out = LISTINGS.map((l, idx) => {
     if (seen.has(im.src)) throw new Error(`${l.slug}: duplicate image ${im.src}`);
     seen.add(im.src);
   }
+  const kind = KIND_OF[l.type];
+  if (!kind) throw new Error(`${l.slug}: no kind mapping for type "${l.type}"`);
   return {
-    id: `BONA-${String(idx + 1).padStart(3, '0')}`,
+    id: `BONA-${String(idx + 1).padStart(3, '0')}`, // positional: append new listings at the END of LISTINGS, never insert
     slug: l.slug,
     sourceRef: l.sourceRef ?? null,
     status: l.status,
     category: l.category,
     type: l.type,
+    kind,
     featured: Boolean(l.featured),
     title: l.title,
     location: l.location,
@@ -58,11 +70,15 @@ const out = LISTINGS.map((l, idx) => {
     highlights: l.highlights,
     virtualTourUrl: l.virtualTourUrl ?? null,
     brochureUrl: l.brochureUrl ?? null,
+    project: l.project ?? null,
+    unit: l.unit ?? null,
+    map: l.map ?? null,
     listedAt: l.listedAt,
   };
 });
 
 fs.writeFileSync(OUT, JSON.stringify(out, null, 2) + '\n');
 const counts = out.reduce((a, l) => ((a[l.category] = (a[l.category] || 0) + 1), a), {});
+const kinds = out.reduce((a, l) => ((a[l.kind] = (a[l.kind] || 0) + 1), a), {});
 const imgs = out.reduce((n, l) => n + l.images.length, 0);
-console.log(`wrote ${path.relative(ROOT, OUT)}: ${out.length} listings, ${imgs} images, featured ${out.filter((l) => l.featured).length}, ${JSON.stringify(counts)}`);
+console.log(`wrote ${path.relative(ROOT, OUT)}: ${out.length} listings, ${imgs} images, featured ${out.filter((l) => l.featured).length}, ${JSON.stringify(counts)}, kinds ${JSON.stringify(kinds)}`);

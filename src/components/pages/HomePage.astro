@@ -5,82 +5,127 @@ import SectionHead from '../SectionHead.astro';
 import Icon from '../Icon.astro';
 import site from '../../data/site.json';
 import { localePath, t, ui, waLink, type Locale } from '../../lib/i18n';
-import { featured, heroListing, editorialImage, imageAlt, ordered, listings } from '../../lib/listings';
+import { heroListings, editorialImage, imageAlt, ordered, listings, featuredByKind, kindsPresent, kindSlug, kindLabelPlural, withTours, type Kind } from '../../lib/listings';
 import { orgJsonLd } from '../../lib/seo';
 interface Props { locale: Locale }
 const { locale } = Astro.props;
 const path = localePath(locale, '/');
-const hero = heroListing();
-const heroImg = hero?.images?.[0];
-const feats = featured().slice(0, 6);
+const heroes = heroListings(3);
+const heroImg = heroes[0]?.images?.[0];
+const houses = featuredByKind('house', 6);
+const apartments = featuredByKind('apartment', 6);
+const present = kindsPresent();
+const land = present.includes('land') ? featuredByKind('land', 3, 3) : [];
+const buildings = present.includes('building') ? featuredByKind('building', 3, 3) : [];
+const tours = withTours().length;
 const markets = site.markets[locale];
+const pool = ordered(listings).filter(l => l.images?.length);
 const aboutImg = editorialImage(1, 2);
-const aboutImgListing = ordered(listings).filter(l => l.images?.length)[1 % Math.max(1, ordered(listings).filter(l => l.images?.length).length)];
+const aboutImgListing = pool[1 % Math.max(1, pool.length)];
 const wa = waLink(site.whatsapp.wa, t(ui.formGreeting, locale));
 const title = `${locale === 'ar' ? site.nameAr : site.name} — ${t(site.tagline, locale)}`;
+const words = t(site.tagline, locale).split(/\s+/).filter(Boolean);
+const strips: { kind: Kind; items: typeof land }[] = [{ kind: 'land', items: land }, { kind: 'building', items: buildings }].filter(s => s.items.length > 0);
 ---
 <Base title={title} description={t(site.description, locale)} locale={locale} path={path} image={heroImg?.src} hero jsonLd={orgJsonLd(locale)}>
-  <!-- Hero: the one bold moment. Full-bleed photograph, headline set at display scale. -->
-  <section class="relative flex min-h-[92svh] items-end bg-ink text-ivory">
-    <div class="absolute inset-0 overflow-hidden">
-      {heroImg && <img src={heroImg.src} alt={hero ? imageAlt(heroImg, hero, locale) : ''} fetchpriority="high" decoding="async" class="h-full w-full object-cover" />}
-      <div class="absolute inset-0 bg-linear-to-t from-ink/85 via-ink/20 to-ink/55"></div>
+  <!-- Hero: full-bleed photograph(s) with a slow Ken Burns drift and an 8s crossfade between the top featured homes. -->
+  <section class="hero relative flex min-h-[92svh] items-end bg-ink text-ivory">
+    <div class="hero-slides absolute inset-0 overflow-hidden" data-hero-slides role="group" aria-roledescription="carousel" aria-label={t(ui.heroSlideshow, locale)}>
+      {heroes.map((h, i) => {
+        const img = h.images[0];
+        return (
+          <div class:list={['hero-slide', i === 0 && 'is-active']} data-slide aria-hidden={i === 0 ? undefined : 'true'}>
+            <img src={img.src} alt={i === 0 ? imageAlt(img, h, locale) : ''} fetchpriority={i === 0 ? 'high' : 'low'} loading={i === 0 ? 'eager' : 'lazy'} decoding="async" class="h-full w-full object-cover" />
+          </div>
+        );
+      })}
+      <div class="absolute inset-0 z-[2] bg-linear-to-t from-ink/85 via-ink/20 to-ink/55"></div>
     </div>
-    <div class="wrap relative pb-16 pt-44 lg:pb-24">
-      <p class="label text-champagne-2">{t(ui.privateRealEstate, locale)}</p>
-      <h1 class="display-xl mt-6 max-w-[13ch]">{t(site.tagline, locale)}</h1>
-      <p class="mt-7 max-w-[50ch] text-[15px] leading-relaxed text-ivory/80 md:text-base">{t(ui.heroSubline, locale)}</p>
-      <div class="mt-10 flex flex-wrap gap-4">
-        <a href={localePath(locale, '/properties/')} class="btn btn-light">{t(ui.exploreProperties, locale)}</a>
+    <div class="wrap relative z-[3] pb-20 pt-44 lg:pb-28">
+      <p class="label text-champagne-2 hero-in" style="--i:0">{t(ui.privateRealEstate, locale)}</p>
+      <h1 class="display-xl hero-words mt-6 max-w-[13ch]">
+        {words.map((w, i) => <span class="hw" style={`--i:${i + 1}`}>{w}</span>)}
+      </h1>
+      <p class="hero-in mt-7 max-w-[50ch] text-[15px] leading-relaxed text-ivory/80 md:text-base" style={`--i:${words.length + 1}`}>{t(ui.heroSubline, locale)}</p>
+      <div class="hero-in mt-10 flex flex-wrap gap-4" style={`--i:${words.length + 2}`}>
+        <a href={localePath(locale, '/properties/houses/')} class="btn btn-light">{t(ui.exploreProperties, locale)}</a>
         <a href={wa} target="_blank" rel="noopener" class="btn btn-outline-light"><Icon name="whatsapp" size={16} />{t(ui.privateEnquiry, locale)}</a>
       </div>
     </div>
+    <a href="#houses" class="scroll-cue" aria-label={t(ui.scrollCue, locale)}><span class="label">{t(ui.scrollCue, locale)}</span><span class="scroll-cue-line" aria-hidden="true"></span></a>
   </section>
 
-  <!-- Selected residences -->
-  {feats.length > 0 && (
-    <section class="section">
+  <!-- Houses -->
+  {houses.length > 0 && (
+    <section class="section" id="houses">
       <div class="wrap">
-        <SectionHead title={t(ui.selectedResidences, locale)} intro={t(ui.selectedResidencesIntro, locale)} link={{ href: localePath(locale, '/properties/'), label: t(ui.viewAllProperties, locale) }} />
-        <div class="mt-14 grid gap-x-8 gap-y-14 md:grid-cols-2">
-          {feats.map((l, i) => <div data-reveal data-reveal-delay={String(i % 2)}><ListingCard listing={l} locale={locale} index={i} ratio="3/2" /></div>)}
+        <SectionHead title={t(ui.housesTitle, locale)} intro={t(ui.housesIntro, locale)} link={{ href: localePath(locale, '/properties/houses/'), label: t(ui.viewAllHouses, locale) }} />
+        <div class="mt-14 grid gap-x-8 gap-y-14 md:grid-cols-2" data-stagger>
+          {houses.map((l, i) => <div data-reveal><ListingCard listing={l} locale={locale} index={i} ratio="3/2" /></div>)}
         </div>
       </div>
     </section>
   )}
 
-  <!-- Markets -->
+  <!-- Markets: a slow marquee -->
   <section class="border-y border-ink/10">
-    <div class="wrap section-tight">
-      <div class="flex flex-col gap-8 lg:flex-row lg:items-baseline lg:justify-between" data-reveal>
-        <div class="lg:w-72 shrink-0">
+    <div class="section-tight">
+      <div class="wrap flex flex-col gap-6" data-reveal>
+        <div class="flex flex-wrap items-baseline justify-between gap-4">
           <p class="label text-stone-2">{t(ui.markets, locale)}</p>
-          <p class="mt-3 text-sm text-stone-2">{t(ui.marketsIntro, locale)}</p>
+          <p class="text-sm text-stone-2">{t(ui.marketsIntro, locale)}</p>
         </div>
-        <ul class="flex flex-wrap gap-y-3">
-          {markets.map((m, i) => (
-            <li class="display-md flex items-center">
-              {i > 0 && <span aria-hidden="true" class="mx-5 inline-block h-6 w-px bg-champagne md:mx-7"></span>}
-              <span>{m}</span>
-            </li>
-          ))}
+      </div>
+      <div class="marquee mt-8" data-reveal>
+        <ul class="marquee-track">
+          {markets.map(m => <li class="display-md flex items-center"><span>{m}</span><span aria-hidden="true" class="mx-7 inline-block h-6 w-px bg-champagne md:mx-10"></span></li>)}
+        </ul>
+        <ul class="marquee-track" aria-hidden="true">
+          {markets.map(m => <li class="display-md flex items-center"><span>{m}</span><span aria-hidden="true" class="mx-7 inline-block h-6 w-px bg-champagne md:mx-10"></span></li>)}
         </ul>
       </div>
     </div>
   </section>
 
-  <!-- The house -->
+  <!-- Apartments -->
+  {apartments.length > 0 && (
+    <section class="section" id="apartments">
+      <div class="wrap">
+        <SectionHead title={t(ui.apartmentsTitle, locale)} intro={t(ui.apartmentsIntro, locale)} link={{ href: localePath(locale, '/properties/apartments/'), label: t(ui.viewAllApartments, locale) }} />
+        <div class:list={['mt-14 grid gap-x-8 gap-y-14 sm:grid-cols-2', apartments.length >= 3 && 'lg:grid-cols-3']} data-stagger>
+          {apartments.map((l, i) => <div data-reveal><ListingCard listing={l} locale={locale} index={i} ratio={apartments.length >= 3 ? '4/3' : '3/2'} /></div>)}
+        </div>
+      </div>
+    </section>
+  )}
+
+  <!-- Land / Buildings strips: only when such listings exist -->
+  {strips.map(s => (
+    <section class="border-t border-ink/10">
+      <div class="wrap section-tight">
+        <SectionHead title={t(kindLabelPlural[s.kind], locale)} intro={s.kind === 'land' ? t(ui.landIntro, locale) : t(ui.buildingsPageIntro, locale)} link={{ href: localePath(locale, `/properties/${kindSlug[s.kind]}/`), label: s.kind === 'land' ? t(ui.viewAllLand, locale) : t(kindLabelPlural[s.kind], locale) }} />
+        <div class="mt-12 grid gap-x-8 gap-y-12 sm:grid-cols-2 lg:grid-cols-3" data-stagger>
+          {s.items.map((l, i) => <div data-reveal><ListingCard listing={l} locale={locale} index={i} /></div>)}
+        </div>
+      </div>
+    </section>
+  ))}
+
+  <!-- About us -->
   <section class="section">
     <div class="wrap grid gap-12 lg:grid-cols-12 lg:gap-8">
       <div class="lg:col-span-6 lg:self-center" data-reveal>
         <span class="rule"></span>
-        <p class="label mt-6 text-stone-2">{t(ui.theHouse, locale)}</p>
+        <p class="label mt-6 text-stone-2">{t(ui.navAbout, locale)}</p>
         <p class="statement mt-6">{t(ui.homeAboutStatement, locale)}</p>
-        <a href={localePath(locale, '/about/')} class="link-label mt-10 inline-block text-ink">{t(ui.aboutBona, locale)}</a>
+        <div class="mt-10 flex flex-wrap items-center gap-8">
+          <a href={localePath(locale, '/about/')} class="link-label inline-block text-ink">{t(ui.aboutBona, locale)}</a>
+          {tours > 0 && <a href={localePath(locale, '/tours/')} class="link-label inline-flex items-center gap-2 text-ink"><Icon name="cube" size={14} />{t(ui.navTours, locale)}</a>}
+        </div>
       </div>
       {aboutImg && aboutImgListing && (
         <div class="lg:col-span-5 lg:col-start-8" data-reveal data-reveal-delay="1">
-          <div class="img-zoom aspect-[4/5]">
+          <div class="parallax aspect-[4/5]">
             <img src={aboutImg.src} alt={imageAlt(aboutImg, aboutImgListing, locale)} loading="lazy" decoding="async" class="h-full w-full object-cover" />
           </div>
         </div>
@@ -128,3 +173,25 @@ const title = `${locale === 'ar' ? site.nameAr : site.name} — ${t(site.tagline
     </div>
   </section>
 </Base>
+
+<script>
+  /* Hero slideshow: crossfade every 8s between the featured heroes. Cleared before every navigation. */
+  let timer = 0, fade = 0;
+  function init() {
+    window.clearInterval(timer); window.clearTimeout(fade);
+    const root = document.querySelector<HTMLElement>('[data-hero-slides]');
+    if (!root) return;
+    const slides = Array.from(root.querySelectorAll<HTMLElement>('[data-slide]'));
+    if (slides.length < 2 || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    let i = 0;
+    timer = window.setInterval(() => {
+      if (document.hidden) return;
+      const prev = slides[i]; i = (i + 1) % slides.length; const next = slides[i];
+      prev.classList.replace('is-active', 'was-active'); prev.setAttribute('aria-hidden', 'true');
+      next.classList.add('is-active'); next.removeAttribute('aria-hidden');
+      fade = window.setTimeout(() => prev.classList.remove('was-active'), 1800);
+    }, 8000);
+  }
+  document.addEventListener('astro:page-load', init);
+  document.addEventListener('astro:before-swap', () => { window.clearInterval(timer); window.clearTimeout(fade); });
+</script>

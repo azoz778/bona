@@ -1,9 +1,14 @@
 ---
+/* Listing detail pages, plus the optional kind indexes (/properties/land/, /properties/buildings/) that only exist
+   when the data has such listings. Houses and apartments have their own static route files. */
 import ListingPage from '../../components/pages/ListingPage.astro';
-import { listings } from '../../lib/listings';
+import PropertiesPage from '../../components/pages/PropertiesPage.astro';
+import { listings, kindsPresent, kindSlug, reservedSlugs, type Kind, type Listing } from '../../lib/listings';
 export function getStaticPaths() {
-  return listings.map(listing => ({ params: { slug: listing.slug }, props: { listing } }));
+  const kindPages = kindsPresent().filter(k => k === 'land' || k === 'building').map(k => ({ params: { slug: kindSlug[k] }, props: { kind: k } }));
+  const listingPages = listings.filter(l => !reservedSlugs.has(l.slug)).map(listing => ({ params: { slug: listing.slug }, props: { listing } }));
+  return [...kindPages, ...listingPages];
 }
-const { listing } = Astro.props;
+const { listing, kind } = Astro.props as { listing?: Listing; kind?: Kind };
 ---
-<ListingPage locale="en" listing={listing} />
+{kind ? <PropertiesPage locale="en" kind={kind} /> : <ListingPage locale="en" listing={listing!} />}

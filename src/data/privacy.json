@@ -1,0 +1,240 @@
+{
+  "updated": "2026-09-05",
+  "title": {
+    "en": "Privacy policy",
+    "ar": "سياسة الخصوصية"
+  },
+  "intro": {
+    "en": "What Bona collects when you use this site or contact us, why, and your rights under the Saudi Personal Data Protection Law (PDPL) and its Implementing Regulations. Written to be read, not filed. The Arabic text is the authoritative version.",
+    "ar": "توضّح هذه السياسة ما تجمعه بونا عند استخدامك لهذا الموقع أو تواصلك معنا، وسبب جمعه، وحقوقك بموجب نظام حماية البيانات الشخصية في المملكة العربية السعودية ولائحته التنفيذية. كتبناها لتُقرأ، لا لتُحفظ في الأدراج. النص العربي هو النص المعتمد."
+  },
+  "sections": [
+    {
+      "id": "who-we-are",
+      "heading": {
+        "en": "Who we are",
+        "ar": "من نحن"
+      },
+      "body": {
+        "en": [
+          "Bona (بونا) is a private real estate brokerage in Jeddah, Saudi Arabia, operating under REGA FAL licence 1100313556, with its office in Al Rawdah District, Jeddah 23432. For the purposes of the PDPL, Bona is the controller of the personal data described here.",
+          "Reach us on WhatsApp at +966 59 329 6933. An email address will be added once our bona.com.sa mailbox is live."
+        ],
+        "ar": [
+          "بونا وساطة عقارية خاصة في جدة، المملكة العربية السعودية، تعمل بموجب رخصة فال رقم 1100313556 الصادرة عن الهيئة العامة للعقار. مكتبنا في حي الروضة، جدة 23432. ولأغراض نظام حماية البيانات الشخصية، تُعدّ بونا جهة التحكم في البيانات الشخصية الموصوفة في هذه السياسة.",
+          "يمكنك التواصل معنا عبر واتساب على الرقم +966 59 329 6933. وسيُضاف بريد إلكتروني مخصص هنا فور تفعيل بريد نطاق bona.com.sa."
+        ]
+      }
+    },
+    {
+      "id": "what-this-site-collects",
+      "heading": {
+        "en": "What this website collects",
+        "ar": "ما يجمعه هذا الموقع"
+      },
+      "body": {
+        "en": [
+          "Almost nothing. This site is a set of static pages: no accounts, no server-side forms, no database, no login. Browsing it creates no record of you with Bona.",
+          "We set no cookies and run no analytics or advertising tags. Google Analytics 4 and the Meta Pixel are built in but switched off; if we ever enable them, this policy will be updated first and you will be able to decline.",
+          "As with any website, the pages are served by a hosting provider (GitHub Pages) and the photographs by our own image storage. They may keep short-lived technical logs (IP address, browser type, page requested) to keep their service secure. We do not receive those logs or use them to identify you."
+        ],
+        "ar": [
+          "لا شيء تقريباً. هذا الموقع مجموعة صفحات ثابتة: لا حسابات مستخدمين، ولا نماذج تُرسل إلى خادم، ولا قاعدة بيانات، ولا تسجيل دخول. تصفّحك له لا يُنشئ أي سجل عنك لدى بونا.",
+          "لا نضع ملفات تعريف الارتباط (الكوكيز)، ولا نشغّل أدوات تحليل أو تتبّع إعلاني. أداتا Google Analytics 4 وMeta Pixel مدمجتان في بنية الموقع لكنهما معطّلتان. وإن قررنا تفعيلهما يوماً، فسنحدّث هذه السياسة أولاً وسيكون بإمكانك الرفض.",
+          "وكأي موقع إلكتروني، تُقدَّم الصفحات عبر مزوّد استضافة (GitHub Pages) وتُقدَّم الصور من مساحة التخزين الخاصة بنا. وقد يحتفظ هؤلاء المزوّدون بسجلات تقنية قصيرة الأمد، مثل عنوان IP ونوع المتصفح والصفحة المطلوبة، لحماية خدماتهم. ونحن لا نتلقّى هذه السجلات ولا نستخدمها للتعرّف عليك."
+        ]
+      }
+    },
+    {
+      "id": "whatsapp-enquiries",
+      "heading": {
+        "en": "Enquiries through WhatsApp",
+        "ar": "الاستفسارات عبر واتساب"
+      },
+      "body": {
+        "en": [
+          "Every enquiry form on this site composes a message from what you type, then opens WhatsApp on your device. The website itself sends and stores nothing; the message travels from your WhatsApp account to our WhatsApp Business number only when you press send.",
+          "WhatsApp is operated by Meta. Once you message us, Meta's WhatsApp Terms of Service and Privacy Policy govern how the conversation is transmitted and stored on their side, including on servers outside Saudi Arabia."
+        ],
+        "ar": [
+          "تعمل جميع نماذج الاستفسار في هذا الموقع بالطريقة نفسها: يُنشئ النموذج رسالة ممّا تكتبه، ثم يفتح تطبيق واتساب على جهازك. الموقع نفسه لا يُرسل شيئاً ولا يخزّن شيئاً. ولا تنتقل الرسالة من حساب واتساب الخاص بك إلى رقم واتساب للأعمال الخاص بنا إلا حين تضغط زر الإرسال.",
+          "تُشغّل شركة Meta تطبيق واتساب. وبمجرد مراسلتك لنا، تخضع طريقة نقل المحادثة وتخزينها من جهة Meta لشروط خدمة واتساب وسياسة الخصوصية الخاصة بها، بما في ذلك التخزين على خوادم خارج المملكة."
+        ]
+      }
+    },
+    {
+      "id": "data-we-hold",
+      "heading": {
+        "en": "The data we hold, and why",
+        "ar": "البيانات التي نحتفظ بها، ولماذا"
+      },
+      "body": {
+        "en": [
+          "When you contact us we keep what you give us: name, phone number, the property or area you are interested in, your budget or requirements if you share them, and the messages exchanged. If we arrange a viewing or act for you in a transaction, we also hold the documents it requires, such as a copy of your national ID or iqama, the title deed and the terms agreed.",
+          "We use this data to answer your enquiry; to arrange and record viewings; to represent you as buyer, seller, landlord or tenant; to prepare brokerage and lease agreements; and to meet our obligations as a licensed broker, including REGA record-keeping, Ejar registration of tenancies and anti-money-laundering checks where the law requires them.",
+          "We do not sell personal data, we do not build marketing profiles, and we will not add you to any mailing list without asking."
+        ],
+        "ar": [
+          "عندما تتواصل معنا، نحتفظ بما تقدّمه لنا: اسمك، ورقم جوالك، والعقار أو المنطقة التي تهتم بها، وميزانيتك أو متطلباتك إن شاركتها معنا، والرسائل المتبادلة بيننا. وإذا رتّبنا معاينة أو مثّلناك في صفقة، فنحتفظ أيضاً بالمستندات التي تقتضيها الصفقة، مثل صورة الهوية الوطنية أو الإقامة، والصك، والشروط المتفق عليها.",
+          "نستخدم هذه البيانات للرد على استفسارك ومتابعة المحادثة؛ ولترتيب المعاينات وتوثيقها؛ ولتمثيلك بصفتك مشترياً أو بائعاً أو مؤجراً أو مستأجراً؛ ولإعداد عقود الوساطة والإيجار؛ وللوفاء بالتزاماتنا النظامية بصفتنا وسيطاً مرخّصاً، بما في ذلك حفظ السجلات وفق متطلبات الهيئة العامة للعقار، وتوثيق عقود الإيجار في منصة إيجار، وإجراءات مكافحة غسل الأموال حين يقتضيها النظام.",
+          "لا نبيع البيانات الشخصية، ولا ننشئ ملفات تسويقية عنك، ولن نضيفك إلى أي قائمة بريدية دون أن نسألك."
+        ]
+      }
+    },
+    {
+      "id": "legal-basis",
+      "heading": {
+        "en": "Legal basis",
+        "ar": "الأساس النظامي للمعالجة"
+      },
+      "body": {
+        "en": [
+          "Under the PDPL we rely on: your consent, given when you choose to contact us and withdrawable at any time; the steps you ask us to take before a contract, and the performance of a contract with you; our legal obligations as a REGA-licensed broker; and, for basic non-sensitive contact details only, our legitimate interest in replying to people who write to us, never applied in a way that overrides your rights.",
+          "We do not ask for sensitive data (health, religion, biometrics and the like); please do not send it to us."
+        ],
+        "ar": [
+          "نستند بموجب نظام حماية البيانات الشخصية إلى: موافقتك، التي تمنحها باختيارك التواصل معنا ويمكنك سحبها في أي وقت؛ والخطوات التي تطلبها منا قبل إبرام عقد، وتنفيذ العقد المبرم معك؛ والتزاماتنا النظامية بصفتنا وسيطاً مرخّصاً من الهيئة العامة للعقار؛ وبالنسبة لبيانات التواصل الأساسية غير الحساسة فقط، مصلحتنا المشروعة في الرد على من يراسلنا، على نحو لا يمسّ حقوقك أبداً.",
+          "لا نطلب بيانات حساسة (كالبيانات الصحية أو الدينية أو الحيوية ونحوها) ونرجو منك عدم إرسالها إلينا."
+        ]
+      }
+    },
+    {
+      "id": "retention",
+      "heading": {
+        "en": "How long we keep it",
+        "ar": "مدة الاحتفاظ بالبيانات"
+      },
+      "body": {
+        "en": [
+          "Enquiries that do not lead to a viewing or a transaction are deleted within 24 months of the last message between us. Records of viewings and of transactions we have brokered are kept for as long as REGA and Saudi commercial and tax rules require, normally ten years from the end of the transaction, then destroyed.",
+          "You can ask us to delete your data sooner at any time. We will, unless a law requires us to keep it, in which case we will tell you which law and for how long."
+        ],
+        "ar": [
+          "تُحذف الاستفسارات التي لا تؤدي إلى معاينة أو صفقة خلال أربعة وعشرين شهراً من آخر رسالة بيننا. أما سجلات المعاينات والصفقات التي توسّطنا فيها فنحتفظ بها للمدة التي تقتضيها أنظمة الهيئة العامة للعقار والأنظمة التجارية والضريبية في المملكة، وهي عادةً عشر سنوات من انتهاء الصفقة، ثم تُتلف.",
+          "يمكنك أن تطلب منا حذف بياناتك قبل ذلك في أي وقت. وسنفعل، ما لم يُلزمنا نظام بالاحتفاظ بها، وعندها سنخبرك بالنظام والمدة."
+        ]
+      }
+    },
+    {
+      "id": "sharing",
+      "heading": {
+        "en": "Who we share it with",
+        "ar": "مع من نشارك البيانات"
+      },
+      "body": {
+        "en": [
+          "Property owners and developers: only with your consent, and only what is needed to progress a viewing or an offer, such as your name and when you can visit. We never pass your number to an owner or developer without telling you.",
+          "Service providers: GitHub (hosting of these pages), our image storage provider (property photographs) and Meta (WhatsApp Business), each processing data only to provide its service to us. We currently use no analytics, advertising or email-marketing provider.",
+          "Authorities: REGA, the courts or other Saudi authorities when the law requires it, and only to the extent required."
+        ],
+        "ar": [
+          "مُلّاك العقارات والمطوّرون: بموافقتك فقط، وبالقدر اللازم لإتمام المعاينة أو تقديم العرض، مثل اسمك والوقت الذي يناسبك للزيارة. ولا نعطي رقمك لمالك أو مطوّر دون إخبارك.",
+          "مزوّدو الخدمات الذين يساعدوننا في تشغيل الموقع والعمل: GitHub (استضافة هذه الصفحات)، ومزوّد تخزين الصور (صور العقارات)، وMeta (واتساب للأعمال). ويعالج كل منهم البيانات لتقديم خدمته لنا فقط. ولا نستخدم حالياً أي مزوّد لخدمات التحليل أو الإعلان أو التسويق عبر البريد.",
+          "الجهات الرسمية: الهيئة العامة للعقار أو المحاكم أو الجهات السعودية الأخرى حين يقتضي النظام ذلك، وبالقدر المطلوب فقط."
+        ]
+      }
+    },
+    {
+      "id": "internal-dashboard",
+      "heading": {
+        "en": "The internal dashboard",
+        "ar": "اللوحة الداخلية"
+      },
+      "body": {
+        "en": [
+          "The /dashboard/ page is an internal working page for Bona staff, not linked from the site and excluded from search engines. Anything entered into it, such as a note about an enquiry, is stored only in the browser of the staff member using it, on their own device. It is not uploaded to any server and is not visible to anyone else."
+        ],
+        "ar": [
+          "صفحة /dashboard/ صفحة عمل داخلية لفريق بونا. لا يُشار إليها من صفحات الموقع وهي مستثناة من محركات البحث. وأي شيء يُدخَل فيها، كملاحظة عن استفسار، يُحفظ فقط في متصفح الموظف الذي يستخدمها وعلى جهازه. ولا يُرفع إلى أي خادم ولا يراه أحد غيره."
+        ]
+      }
+    },
+    {
+      "id": "international-transfers",
+      "heading": {
+        "en": "Transfers outside Saudi Arabia",
+        "ar": "نقل البيانات خارج المملكة"
+      },
+      "body": {
+        "en": [
+          "Some of the providers above store data outside the Kingdom: GitHub hosts these pages in the United States, and Meta stores WhatsApp messages on its own infrastructure abroad. A WhatsApp conversation with us, and the technical logs of your visit, may therefore be processed outside Saudi Arabia.",
+          "The PDPL permits such transfers where they are necessary to provide a service you have asked for and appropriate safeguards are in place. We keep what leaves the Kingdom to the minimum, keep no client records on those platforms beyond the conversation itself, and keep our own files under our control in Saudi Arabia."
+        ],
+        "ar": [
+          "يخزّن بعض المزوّدين المذكورين البيانات خارج المملكة: فـ GitHub تستضيف هذه الصفحات في الولايات المتحدة، وMeta تخزّن رسائل واتساب على بنيتها التحتية في الخارج. ولذلك قد تُعالَج محادثتك معنا عبر واتساب، والسجلات التقنية لزيارتك، خارج المملكة العربية السعودية.",
+          "يجيز نظام حماية البيانات الشخصية هذا النقل حين يكون ضرورياً لتقديم خدمة طلبتها، ومع وجود ضمانات مناسبة. ونحن نُبقي ما يخرج من المملكة في حدّه الأدنى، ولا نحتفظ بسجلات عملائنا على تلك المنصات بما يتجاوز المحادثة نفسها، وتبقى ملفاتنا تحت سيطرتنا داخل المملكة."
+        ]
+      }
+    },
+    {
+      "id": "your-rights",
+      "heading": {
+        "en": "Your rights",
+        "ar": "حقوقك"
+      },
+      "body": {
+        "en": [
+          "Under the PDPL you have the right to know what personal data we hold about you and how we use it; to receive a copy in a clear, readable form; to have it corrected, completed or updated; to have it deleted or destroyed; and to withdraw any consent you have given, at any time, without affecting what was done before.",
+          "To use any of these rights, message us on WhatsApp. We will confirm your identity and respond within 30 days, at no charge.",
+          "If you are not satisfied with our answer, you may complain to the competent authority for personal data protection in Saudi Arabia, the Saudi Data & AI Authority (SDAIA), through its published channels."
+        ],
+        "ar": [
+          "يمنحك نظام حماية البيانات الشخصية الحق في: معرفة البيانات الشخصية التي نحتفظ بها عنك وكيف نستخدمها؛ والحصول على نسخة منها بصيغة واضحة ومقروءة؛ وطلب تصحيحها أو إكمالها أو تحديثها؛ وطلب حذفها أو إتلافها؛ وسحب أي موافقة منحتها، في أي وقت، دون أن يؤثر ذلك على ما تمّ قبل السحب.",
+          "لممارسة أي من هذه الحقوق، راسلنا على واتساب. سنتحقق من هويتك ونرد خلال ثلاثين يوماً، ودون أي رسوم.",
+          "وإن لم يُرضِك ردّنا، فلك تقديم شكوى إلى الجهة المختصة بحماية البيانات الشخصية في المملكة، وهي الهيئة السعودية للبيانات والذكاء الاصطناعي (سدايا)، عبر قنواتها المعلنة."
+        ]
+      }
+    },
+    {
+      "id": "children",
+      "heading": {
+        "en": "Children",
+        "ar": "الأطفال"
+      },
+      "body": {
+        "en": [
+          "Our services and this site are intended for adults. We do not knowingly collect data from anyone under 18. If you believe a minor has sent us personal data, tell us and we will delete it."
+        ],
+        "ar": [
+          "خدماتنا وهذا الموقع موجّهان للبالغين. ولا نجمع عن قصد بيانات من أي شخص دون الثامنة عشرة. وإن كنت تعتقد أن قاصراً أرسل إلينا بيانات شخصية، فأخبرنا وسنحذفها."
+        ]
+      }
+    },
+    {
+      "id": "security",
+      "heading": {
+        "en": "Security",
+        "ar": "الأمن"
+      },
+      "body": {
+        "en": [
+          "Client records are kept on access-controlled devices and accounts used only by Bona principals, with two-step verification on our WhatsApp Business account and our hosting. Property documents are shared only through channels we control, and copies of ID documents are deleted once the transaction they were needed for is complete, unless the law requires us to keep them.",
+          "No method of transmission is perfectly secure. If we learn of a breach affecting your data, we will notify you and the competent authority as the PDPL requires."
+        ],
+        "ar": [
+          "تُحفظ سجلات العملاء على أجهزة وحسابات محمية بصلاحيات وصول لا يستخدمها إلا شركاء بونا، مع تفعيل التحقق بخطوتين على حساب واتساب للأعمال وعلى منصة الاستضافة. ولا نتبادل مستندات العقارات إلا عبر قنوات نتحكم بها، وتُحذف نسخ وثائق الهوية فور اكتمال الصفقة التي احتجناها من أجلها، ما لم يُلزمنا النظام بالاحتفاظ بها.",
+          "لا توجد وسيلة نقل آمنة تماماً. وإن علمنا بأي اختراق يمسّ بياناتك، فسنبلغك ونبلغ الجهة المختصة وفق ما يقتضيه النظام."
+        ]
+      }
+    },
+    {
+      "id": "changes",
+      "heading": {
+        "en": "Changes to this policy",
+        "ar": "التغييرات على هذه السياسة"
+      },
+      "body": {
+        "en": [
+          "We will update this page when our practices change, for example if we enable analytics, add an email address or move to bona.com.sa. The date at the top shows the current version; material changes will be flagged here for 30 days."
+        ],
+        "ar": [
+          "سنحدّث هذه الصفحة عند تغيّر ممارساتنا، مثلاً إذا فعّلنا أدوات التحليل، أو أضفنا بريداً إلكترونياً، أو انتقلنا إلى نطاق bona.com.sa. ويُبيّن التاريخ في أعلى الصفحة الإصدار الحالي. وسنشير إلى التغييرات الجوهرية في هذه الصفحة لمدة ثلاثين يوماً."
+        ]
+      }
+    }
+  ],
+  "contact": {
+    "en": "Questions about this policy or your data: WhatsApp +966 59 329 6933, Sunday to Thursday, 10:00–19:00. Bona, Al Rawdah District, Jeddah 23432, Saudi Arabia. Email: to be added when bona.com.sa is live.",
+    "ar": "للاستفسار عن هذه السياسة أو عن بياناتك: واتساب +966 59 329 6933، من الأحد إلى الخميس، 10:00–19:00. بونا، حي الروضة، جدة 23432، المملكة العربية السعودية. البريد الإلكتروني: سيُضاف عند تفعيل نطاق bona.com.sa."
+  }
+}

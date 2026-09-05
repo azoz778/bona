@@ -1,7 +1,10 @@
 ---
+/* /about/ — "About us". Driven by src/data/about.json (content agent): story paragraphs, values, principals, stats.
+   Defensive: empty story/values fall back to the house copy; team and stats render only what the JSON contains. */
 import Base from '../../layouts/Base.astro';
 import Icon from '../Icon.astro';
 import site from '../../data/site.json';
+import about from '../../data/about.json';
 import { localePath, t, ui, waLink, type Locale } from '../../lib/i18n';
 import { editorialImage, ordered, listings, imageAlt } from '../../lib/listings';
 import { breadcrumbJsonLd, orgJsonLd } from '../../lib/seo';
@@ -14,94 +17,146 @@ const img1 = editorialImage(2, 1), img1L = pool[2 % Math.max(1, pool.length)];
 const img2 = editorialImage(4, 3), img2L = pool[4 % Math.max(1, pool.length)];
 const markets = site.markets[locale];
 
-const c = {
-  h1: { en: 'A private house for exceptional homes', ar: 'دار خاصة للمنازل الاستثنائية' },
-  statement: {
-    en: 'Bona takes its name from the Latin for good things: property, in the oldest sense of the word. We are an independent real estate boutique in Jeddah, deliberately small, representing a handful of homes at a time.',
-    ar: 'تستمدّ بونا اسمها من الكلمة اللاتينية Bona، أي «الأشياء الطيّبة»: الملكية بمعناها الأقدم. نحن بوتيك عقاري مستقل في جدة، صغير عن قصد، يمثّل عدداً محدوداً من المنازل في كل مرة.',
-  },
-  pillars: [
-    { h: { en: 'A small portfolio, by design', ar: 'محفظة صغيرة، عن قصد' },
-      p: { en: 'We represent villas, penthouses, waterfront residences and off-market houses that rarely reach the portals. Each is chosen because we would stand behind it ourselves.',
-           ar: 'نمثّل فللاً وبنتهاوس ومساكن واجهية وبيوتاً خارج السوق قلّما تصل إلى المنصات. نختار كل واحد منها لأننا مستعدون أن نقف خلفه بأنفسنا.' } },
-    { h: { en: 'Principal-level handling', ar: 'تعامل على مستوى الشركاء' },
-      p: { en: 'You deal with a principal from the first call to the handover. No hand-offs, no call centre; one person who knows the house, the street and the seller.',
-           ar: 'تتعامل مع أحد شركاء الدار من أول اتصال حتى التسليم. لا تحويل بين موظفين ولا مركز اتصال؛ شخص واحد يعرف البيت والشارع والبائع.' } },
-    { h: { en: 'Jeddah roots, a wider network', ar: 'جذور في جدة، وشبكة أوسع' },
-      p: { en: 'Our home is Jeddah: Al Shati, Al Khalidiyah, Obhur and the coast north of the city. Through partners we have worked with for years, we also act in Riyadh, Dubai, the Côte d’Azur, the Costa del Sol and Oman.',
-           ar: 'بيتنا جدة: الشاطئ والخالدية وأبحر والساحل شمال المدينة. وعبر شركاء نعمل معهم منذ سنوات، نعمل أيضاً في الرياض ودبي والريفييرا الفرنسية وكوستا ديل سول وعُمان.' } },
-  ],
-  howTitle: { en: 'How we work', ar: 'كيف نعمل' },
-  how: [
-    { h: { en: 'Representation', ar: 'التمثيل' },
-      p: { en: 'For owners, we prepare the house properly, price it honestly and present it to the right people first, often before it is ever advertised.',
-           ar: 'للمُلّاك: نجهّز البيت كما ينبغي، ونسعّره بصدق، ونعرضه على الأشخاص المناسبين أولاً، وغالباً قبل أن يُعلن عنه.' } },
-    { h: { en: 'Acquisition', ar: 'الاستحواذ' },
-      p: { en: 'For buyers, we search on and off the market, verify title and licensing, and negotiate as if the money were our own.',
-           ar: 'للمشترين: نبحث داخل السوق وخارجه، ونتحقق من الصكوك والتراخيص، ونتفاوض كأن المال مالنا.' } },
-    { h: { en: 'Discretion', ar: 'التحفّظ' },
-      p: { en: 'Nothing is shared without consent. Some of our best work never appears on this site.',
-           ar: 'لا يُشارك شيء دون إذن. بعض أفضل أعمالنا لا يظهر على هذا الموقع أبداً.' } },
-  ],
-  closing: { en: 'If you are thinking about a home, or about selling one, the conversation costs nothing and stays between us.',
-             ar: 'إن كنت تفكّر في منزل، أو في بيع منزل، فالمحادثة لا تكلّف شيئاً وتبقى بيننا.' },
+type L = { en: string; ar: string };
+type About = {
+  story?: { en: string[]; ar: string[] };
+  values?: { title: L; text: L }[];
+  team?: { name: L; role: L; licence?: string | null; photo?: string | null }[];
+  stats?: { label: L; value: string }[];
 };
-const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { name: t(ui.aboutTitle, locale), path }];
+const data = about as About;
+const storyAll = ((data.story?.[locale] ?? data.story?.en) ?? []).map(s => (s || '').trim()).filter(Boolean);
+const statement = storyAll[0] || t(ui.aboutStatementFallback, locale);
+const story = storyAll.slice(1);
+const fallbackValues = [
+  { title: { en: 'A small portfolio, by design', ar: 'محفظة صغيرة، عن قصد' }, text: { en: 'We represent villas, penthouses, waterfront residences and off-market houses that rarely reach the portals. Each is chosen because we would stand behind it ourselves.', ar: 'نمثّل فللاً وبنتهاوس ومساكن واجهية وبيوتاً خارج السوق قلّما تصل إلى المنصات. نختار كل واحد منها لأننا مستعدون أن نقف خلفه بأنفسنا.' } },
+  { title: { en: 'Principal-level handling', ar: 'تعامل على مستوى الشركاء' }, text: { en: 'You deal with a principal from the first call to the handover. No hand-offs, no call centre; one person who knows the house, the street and the seller.', ar: 'تتعامل مع أحد شركاء الدار من أول اتصال حتى التسليم. لا تحويل بين موظفين ولا مركز اتصال؛ شخص واحد يعرف البيت والشارع والبائع.' } },
+  { title: { en: 'Discretion', ar: 'التحفّظ' }, text: { en: 'Nothing is shared without consent. Some of our best work never appears on this site.', ar: 'لا يُشارك شيء دون إذن. بعض أفضل أعمالنا لا يظهر على هذا الموقع أبداً.' } },
+];
+const values = (data.values ?? []).filter(v => v?.title && v?.text);
+const valueItems = values.length ? values : fallbackValues;
+const team = (data.team ?? []).filter(m => m?.name && (m.name.en || m.name.ar));
+const stats = (data.stats ?? []).filter(s => s?.label && s?.value);
+/** Split "SAR 2.4bn+" into prefix / number / suffix for the count-up; non-numeric values render as plain text. */
+const parseStat = (v: string) => {
+  const m = String(v).trim().match(/^([^\d]*)([\d][\d,]*(?:\.\d+)?)(.*)$/);
+  if (!m) return null;
+  const num = m[2].replace(/,/g, '');
+  if (!m[1] && !m[3] && /^(19|20)\d{2}$/.test(num)) return null; // a year ("Founded 2026") is not a quantity
+  return { prefix: m[1], num, sep: m[2].includes(',') ? '1' : '0', suffix: m[3] };
+};
+const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('');
+const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { name: t(ui.navAbout, locale), path }];
 ---
 <Base title={`${t(ui.aboutMetaTitle, locale)} — ${locale === 'ar' ? site.nameAr : site.name}`} description={t(ui.aboutMetaDesc, locale)} locale={locale} path={path} image={img1?.src} jsonLd={[orgJsonLd(locale), breadcrumbJsonLd(crumbs)]}>
   <section class="section-tight pt-12 lg:pt-16">
     <div class="wrap grid gap-12 lg:grid-cols-12 lg:gap-8">
       <div class="lg:col-span-7" data-reveal>
         <span class="rule"></span>
-        <p class="label mt-6 text-stone-2">{t(ui.aboutTitle, locale)}</p>
-        <h1 class="display-lg mt-4">{t(c.h1, locale)}</h1>
-        <p class="statement mt-10 max-w-[30ch]">{t(c.statement, locale)}</p>
+        <p class="label mt-6 text-stone-2">{t(ui.navAbout, locale)}</p>
+        <h1 class="display-lg mt-4">{t(ui.aboutH1, locale)}</h1>
+        <p class="statement mt-10 max-w-[34ch]">{statement}</p>
       </div>
       {img1 && img1L && (
         <div class="lg:col-span-5 lg:pt-16" data-reveal data-reveal-delay="1">
-          <div class="img-zoom aspect-[4/5]"><img src={img1.src} alt={imageAlt(img1, img1L, locale)} loading="lazy" decoding="async" class="h-full w-full object-cover" /></div>
+          <div class="parallax aspect-[4/5]"><img src={img1.src} alt={imageAlt(img1, img1L, locale)} loading="lazy" decoding="async" class="h-full w-full object-cover" /></div>
         </div>
       )}
     </div>
   </section>
 
-  <section class="section-tight">
-    <div class="wrap grid gap-12 md:grid-cols-3 md:gap-10">
-      {c.pillars.map((p, i) => (
-        <div data-reveal data-reveal-delay={String(i)}>
-          <span class="rule"></span>
-          <h2 class="display-md mt-6">{t(p.h, locale)}</h2>
-          <p class="mt-4 text-[15px] leading-relaxed text-stone-2">{t(p.p, locale)}</p>
+  {story.length > 0 && (
+    <section class="section-tight">
+      <div class="wrap grid gap-10 lg:grid-cols-12">
+        <div class="lg:col-span-3" data-reveal><span class="rule"></span><h2 class="label mt-6 text-stone-2">{t(ui.ourStory, locale)}</h2></div>
+        <div class="prose-bona text-[15px] leading-relaxed text-ink/85 md:text-base lg:col-span-8 lg:col-start-5" data-reveal data-reveal-delay="1">
+          {story.map(p => <p>{p}</p>)}
         </div>
-      ))}
+      </div>
+    </section>
+  )}
+
+  <section class="section-tight">
+    <div class="wrap">
+      <div data-reveal><span class="rule"></span><h2 class="label mt-6 text-stone-2">{t(ui.ourValues, locale)}</h2></div>
+      <div class:list={['mt-10 grid gap-12 md:gap-10', valueItems.length === 4 ? 'sm:grid-cols-2 lg:grid-cols-4' : 'md:grid-cols-3']} data-stagger>
+        {valueItems.map(v => (
+          <div data-reveal>
+            <span class="rule"></span>
+            <h3 class="display-md mt-6">{t(v.title, locale)}</h3>
+            <p class="mt-4 text-[15px] leading-relaxed text-stone-2">{t(v.text, locale)}</p>
+          </div>
+        ))}
+      </div>
     </div>
   </section>
 
   {img2 && img2L && (
-    <section class="wrap section-tight">
-      <div class="img-zoom aspect-[16/8]" data-reveal><img src={img2.src} alt={imageAlt(img2, img2L, locale)} loading="lazy" decoding="async" class="h-full w-full object-cover" /></div>
+    <section class="section-tight pt-0">
+      <div class="parallax bleed aspect-[16/9] md:aspect-[21/9]" data-reveal><img src={img2.src} alt={imageAlt(img2, img2L, locale)} loading="lazy" decoding="async" class="h-full w-full object-cover" /></div>
+    </section>
+  )}
+
+  {team.length > 0 && (
+    <section class="section-tight">
+      <div class="wrap">
+        <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between" data-reveal>
+          <div><span class="rule"></span><h2 class="display-lg mt-6">{t(ui.thePrincipals, locale)}</h2></div>
+          <p class="text-sm text-stone-2">{t(ui.principalsIntro, locale)}</p>
+        </div>
+        <ul class:list={['mt-12 grid gap-x-8 gap-y-12 sm:grid-cols-2', team.length >= 3 && 'lg:grid-cols-3']} data-stagger>
+          {team.map(m => {
+            const name = t(m.name, locale) || m.name.en || m.name.ar;
+            return (
+              <li data-reveal>
+                <div class="img-zoom aspect-[4/5] bg-ivory-2">
+                  {m.photo
+                    ? <img src={m.photo} alt={name} loading="lazy" decoding="async" class="h-full w-full object-cover" />
+                    : <div class="grid h-full w-full place-items-center font-display text-6xl text-champagne" aria-hidden="true">{initials(m.name.en || name)}</div>}
+                </div>
+                <h3 class="display-sm mt-5">{name}</h3>
+                {m.role && <p class="mt-1 text-sm text-stone-2">{t(m.role, locale)}</p>}
+                {m.licence && <p class="label mt-3 text-stone">{t(ui.falLicence, locale)} <span dir="ltr">{m.licence}</span></p>}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
     </section>
   )}
 
   <section class="on-dark bg-ink text-ivory">
     <div class="wrap section">
-      <div data-reveal><span class="rule"></span><h2 class="display-lg mt-6">{t(c.howTitle, locale)}</h2></div>
-      <div class="mt-14 grid gap-12 md:grid-cols-3 md:gap-10">
-        {c.how.map((p, i) => (
-          <div data-reveal data-reveal-delay={String(i)}>
-            <h3 class="display-md">{t(p.h, locale)}</h3>
-            <p class="mt-4 text-[15px] leading-relaxed text-ivory/70">{t(p.p, locale)}</p>
-          </div>
-        ))}
+      {stats.length > 0 && (
+        <div data-reveal>
+          <span class="rule"></span>
+          <h2 class="label mt-6 text-champagne">{t(ui.inNumbers, locale)}</h2>
+          <dl class:list={['mt-10 grid gap-x-8 gap-y-10 sm:grid-cols-2', stats.length >= 4 ? 'lg:grid-cols-4' : 'lg:grid-cols-3']}>
+            {stats.map(s => {
+              const p = parseStat(s.value);
+              return (
+                <div>
+                  <dd class="font-display text-[clamp(2.75rem,5vw,4.5rem)] leading-none" dir="ltr">
+                    {p ? <span data-count-to={p.num} data-count-prefix={p.prefix} data-count-suffix={p.suffix} data-count-sep={p.sep}>{s.value}</span> : <span>{s.value}</span>}
+                  </dd>
+                  <dt class="mt-3 text-sm text-ivory/70">{t(s.label, locale)}</dt>
+                </div>
+              );
+            })}
+          </dl>
+          <span class="rule-long mt-16"></span>
+        </div>
+      )}
+      <div class:list={[stats.length > 0 ? 'mt-8' : '', 'flex flex-col gap-6 md:flex-row md:items-baseline md:justify-between']} data-reveal>
+        <p class="label text-champagne">{t(ui.markets, locale)}</p>
+        <ul class="flex flex-wrap gap-y-3">
+          {markets.map((m, i) => (
+            <li class="display-sm flex items-center text-ivory/85">
+              {i > 0 && <span aria-hidden="true" class="mx-5 inline-block h-4 w-px bg-champagne"></span>}<span>{m}</span>
+            </li>
+          ))}
+        </ul>
       </div>
-      <span class="rule-long mt-16"></span>
-      <ul class="mt-8 flex flex-wrap gap-y-3" data-reveal>
-        {markets.map((m, i) => (
-          <li class="display-sm flex items-center text-ivory/85">
-            {i > 0 && <span aria-hidden="true" class="mx-5 inline-block h-4 w-px bg-champagne"></span>}<span>{m}</span>
-          </li>
-        ))}
-      </ul>
     </div>
   </section>
 
@@ -109,10 +164,10 @@ const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { n
     <div class="wrap-narrow text-center" data-reveal>
       <span class="rule mx-auto"></span>
       <h2 class="display-lg mt-6">{t(ui.speakWithUs, locale)}</h2>
-      <p class="mx-auto mt-6 max-w-[46ch] text-stone-2">{t(c.closing, locale)}</p>
+      <p class="mx-auto mt-6 max-w-[46ch] text-stone-2">{t(ui.aboutClosing, locale)}</p>
       <div class="mt-10 flex flex-wrap justify-center gap-4">
-        <a href={wa} target="_blank" rel="noopener" class="btn btn-ink"><Icon name="whatsapp" size={17} />{t(ui.chatOnWhatsApp, locale)}</a>
-        <a href={localePath(locale, '/properties/')} class="btn btn-outline">{t(ui.exploreProperties, locale)}</a>
+        <a href={localePath(locale, '/contact/')} class="btn btn-ink">{t(ui.contactUs, locale)}</a>
+        <a href={wa} target="_blank" rel="noopener" class="btn btn-outline"><Icon name="whatsapp" size={17} />{t(ui.chatOnWhatsApp, locale)}</a>
       </div>
     </div>
   </section>

@@ -2,7 +2,7 @@
 
 > Bona is a private luxury real estate boutique in Jeddah, representing a curated portfolio of villas, penthouses, waterfront residences and off-market homes across Saudi Arabia and select international destinations.
 
-Bona is a REGA-licensed real estate brokerage (FAL licence 1100313556) based in Al Rawdah District, Jeddah, Saudi Arabia. Bilingual site: English at https://bona.azoz.uk/ and Arabic at https://bona.azoz.uk/ar/. Enquiries are handled on WhatsApp +966 59 329 6933 (https://wa.me/966593296933). Prices shown are the seller's asking prices — Bona never publishes valuations or automated estimates.
+Bona is a REGA-licensed real estate brokerage (FAL licence 1100313556) based in Al Rawdah District, Jeddah, Saudi Arabia, founded in 2026 by Abdulaziz Zidan (Founder & Principal). Bilingual site: English at https://bona.azoz.uk/ and Arabic at https://bona.azoz.uk/ar/. Enquiries are handled on WhatsApp +966 59 329 6933 (https://wa.me/966593296933). Prices shown are the seller's asking prices — Bona never publishes valuations or automated estimates.
 
 Markets: Jeddah, Riyadh, Dubai, Côte d'Azur, Costa del Sol, Oman.
 Services: buying, selling, letting, off-plan and international acquisitions, off-market introductions.
@@ -13,15 +13,22 @@ Instagram: https://www.instagram.com/bona.com.sa/
 
 - [Bona — Private Luxury Real Estate in Jeddah](https://bona.azoz.uk/): Curated villas, penthouses and waterfront homes in Jeddah, Riyadh and abroad. A REGA-licensed boutique brokerage — homes shown by appointment. WhatsApp +966 59 329 6933.
 - [Luxury Villas & Apartments for Sale in Jeddah](https://bona.azoz.uk/properties/): Browse Bona's portfolio: luxury villas, penthouses and apartments for sale and rent in Al Khalidiyah, North Obhur, Al Shati, Al Rawdah and Durrat Al Arous. Asking prices, no estimates.
+- [Luxury Houses & Villas in Jeddah](https://bona.azoz.uk/properties/houses/): Villas, mansions and duplexes represented by Bona in Al Shati, Al Khalidiyah, North Obhur and Durrat Al Arous, for sale and rent. Viewings by appointment.
+- [Luxury Apartments & Penthouses in Jeddah](https://bona.azoz.uk/properties/apartments/): Apartments, penthouses and branded residences in Al Rawdah, Al Zahra, Al Salamah and on the Corniche, ready and off-plan. Floor plans and terms on request.
+- [Land & Plots for Sale in Jeddah](https://bona.azoz.uk/properties/land/): Residential plots and land represented by Bona in Jeddah, with plot size, zoning notes and satellite view. Asking prices only. Enquire with the reference.
 - [Villas & Homes for Sale in Jeddah](https://bona.azoz.uk/properties/for-sale/): Luxury villas, mansions, penthouses and apartments for sale in Jeddah's finest districts. Private viewings with Bona, a REGA-licensed brokerage.
 - [Luxury Villas & Apartments for Rent in Jeddah](https://bona.azoz.uk/properties/for-rent/): Long-term luxury rentals in Jeddah — villas in North Obhur and Al Shati, apartments in Al Salamah and Al Nahdah. Ejar-registered contracts, viewings by appointment.
 - [Off-Plan Villas & Residences — Jeddah & Riyadh](https://bona.azoz.uk/properties/off-plan/): Selected off-plan villas and branded residences in Jeddah and Riyadh, including Wadi Safar. Developer allocations, Wafi-licensed projects, payment plans on request.
 - [International Homes — Dubai, Oman, Riviera, Marbella](https://bona.azoz.uk/properties/international/): Bona's international portfolio for Saudi buyers: villas in Cannes and Marbella, residences in Muscat's AIDA, and Dubai homes — sourced through partner brokerages.
+- [3D Virtual Tours of Homes in Jeddah](https://bona.azoz.uk/tours/): Walk through Bona's homes in 3D before you visit: Matterport tours of villas and apartments in Jeddah, room by room, on any device. Then book a viewing.
 - [About Bona — Licensed Luxury Brokerage in Jeddah](https://bona.azoz.uk/about/): Bona is a private real-estate boutique in Jeddah (REGA FAL 1100313556). How we work, the districts we cover, and why the best homes sell quietly.
 - [Sell or Let Your Home Discreetly in Jeddah](https://bona.azoz.uk/sell/): List your villa or apartment with Bona: professional photography, off-market introductions to qualified buyers, REGA-compliant marketing and Najiz transfer handled.
 - [Contact Bona — WhatsApp +966 59 329 6933](https://bona.azoz.uk/contact/): Reach Bona on WhatsApp or by phone, Sunday to Thursday 10:00–19:00. Al Rawdah District, Jeddah. Viewings and owner consultations by appointment.
+- [Privacy Policy](https://bona.azoz.uk/privacy/): How Bona handles your personal data under the Saudi PDPL: what this site collects (almost nothing), WhatsApp enquiries, retention, sharing and your rights.
 
-## Properties (29 live listings)
+## Properties (44 live listings)
+
+### Houses (21) — https://bona.azoz.uk/properties/houses/
 
 - [Private Beach Villa, Durrat Al Arous](https://bona.azoz.uk/properties/private-beach-villa-durrat-al-arous/): Villa, Durrat Al Arous, Jeddah — For sale, SAR 8,000,000, 5 bed, 8 bath, 537 m² built, 537 m² plot
 - [Classic Mansion, Al Shati 6](https://bona.azoz.uk/properties/classic-mansion-al-shati-6/): Mansion, Al Shati 6, Jeddah — For sale, SAR 18,000,000, 4 bed, 8 bath, 2300 m² built, 2227.5 m² plot
@@ -35,23 +42,49 @@ Instagram: https://www.instagram.com/bona.com.sa/
 - [Modern Villa, South Obhur](https://bona.azoz.uk/properties/modern-villa-south-obhur/): Villa, South Obhur, Jeddah — For sale, SAR 3,600,000, 5 bed, 8 bath, 620 m² built, 375 m² plot
 - [Villa near the Corniche, Al Lulu, Obhur](https://bona.azoz.uk/properties/villa-near-the-corniche-al-lulu-obhur/): Villa, Al Lulu, North Obhur, Jeddah — For sale, SAR 2,900,000, 5 bed, 7 bath, 550 m² built, 383 m² plot
 - [Al Bandar Villas, North Obhur](https://bona.azoz.uk/properties/al-bandar-villas-north-obhur/): Villa, Al Bandar, North Obhur, Jeddah — For sale, From SAR 3,150,000, 6 bed, 8 bath, 300 m² built
-- [Duplex Penthouse, Al Salamah](https://bona.azoz.uk/properties/duplex-penthouse-al-salamah/): Penthouse, Al Salamah, Jeddah — For sale, From SAR 1,550,000, 3 bed, 6 bath, 214 m² built
-- [NOBAL Five, Al Rawdah](https://bona.azoz.uk/properties/nobal-five-al-rawdah/): Apartment, Al Rawdah, Jeddah — For sale, SAR 1,800,000, 3 bed, 5 bath, 307 m² built
-- [Al Zahra Residences](https://bona.azoz.uk/properties/al-zahra-residences/): Apartment, Al Zahra, Jeddah — For sale, From SAR 1,450,000, 3 bed, 200 m² built
 - [Villa for Rent, Al Shati 2](https://bona.azoz.uk/properties/villa-for-rent-al-shati-2/): Villa, Al Shati 2, Jeddah — For rent, SAR 150,000 / year, 4 bed, 5 bath
 - [Villa for Rent, Al Murjan](https://bona.azoz.uk/properties/villa-for-rent-al-murjan/): Villa, Al Murjan, Jeddah — For rent, SAR 250,000 / year, 5 bed, 7 bath, 518 m² built, 364 m² plot
 - [Renovated Villa for Rent, Al Murjan](https://bona.azoz.uk/properties/renovated-villa-for-rent-al-murjan/): Villa, Al Murjan, Jeddah — For rent, SAR 165,000 / year, 4 bed, 7 bath, 500 m² built, 350 m² plot
 - [Villa for Rent, Al Mohammadiyah](https://bona.azoz.uk/properties/villa-for-rent-al-mohammadiyah/): Villa, Al Mohammadiyah, Jeddah — For rent, SAR 160,000 / year, 4 bed, 6 bath, 500 m² built
-- [Trump Tower Jeddah](https://bona.azoz.uk/properties/trump-tower-jeddah/): Apartment, Al Shati, Corniche, Jeddah — Off-plan, From SAR 3,200,000
-- [Trump Plaza Jeddah](https://bona.azoz.uk/properties/trump-plaza-jeddah/): Apartment, Al Shati, Jeddah — Off-plan, From SAR 1,750,000
 - [NOBAL Arista, Al Khalidiyah](https://bona.azoz.uk/properties/nobal-arista-al-khalidiyah/): Villa, Al Khalidiyah, Jeddah — Off-plan, SAR 5,000,000, 4 bed, 7 bath, 304 m² built
-- [Kayan Residence, Al Nahda](https://bona.azoz.uk/properties/kayan-residence-al-nahda/): Apartment, Al Nahda, Jeddah — Off-plan, SAR 980,000, 3 bed, 3 bath, 136 m² built
-- [Dari II, Al Salamah](https://bona.azoz.uk/properties/dari-ii-al-salamah/): Apartment, Al Salamah, Jeddah — Off-plan, From SAR 1,600,000
-- [Marriott Residences, AIDA, Muscat](https://bona.azoz.uk/properties/marriott-residences-aida-muscat/): Apartment, AIDA, Muscat — Off-plan, From SAR 1,900,000
 - [Palais Rose, Le Vésinet](https://bona.azoz.uk/properties/palais-rose-le-vesinet/): Mansion, Parc des Ibis, Île-de-France, Le Vésinet — International, EUR 38,000,000, 8 bed, 16 bath, 1769 m² built, 7000 m² plot
-- [Da Vinci Tower by Pagani, Dubai](https://bona.azoz.uk/properties/da-vinci-tower-by-pagani-dubai/): Apartment, Downtown Dubai, Dubai Canal, Dubai — International, From AED 6,800,000
 - [Painite Villas by Lamborghini, Benahavís](https://bona.azoz.uk/properties/painite-villas-by-lamborghini-benahavis/): Mansion, Benahavís, Costa del Sol, Marbella — International, Price on request, 6 bed
 - [Trump Cliff Villas, AIDA, Muscat](https://bona.azoz.uk/properties/trump-cliff-villas-aida-muscat/): Villa, AIDA, Muscat — International, From SAR 4,000,000, 3 bed
+- [Neptune Villas, Interiors by Mouawad, North Riyadh](https://bona.azoz.uk/properties/neptune-villas-north-riyadh/): Villa, North Riyadh, Riyadh — Off-plan, From SAR 4,600,000, 5 bed
+
+### Apartments (21) — https://bona.azoz.uk/properties/apartments/
+
+- [Duplex Penthouse, Al Salamah](https://bona.azoz.uk/properties/duplex-penthouse-al-salamah/): Penthouse, Al Salamah, Jeddah — For sale, From SAR 1,550,000, 3 bed, 6 bath, 214 m² built
+- [NOBAL Five, Al Rawdah](https://bona.azoz.uk/properties/nobal-five-al-rawdah/): Apartment, Al Rawdah, Jeddah — For sale, SAR 1,800,000, 3 bed, 5 bath, 307 m² built
+- [Al Zahra Residences](https://bona.azoz.uk/properties/al-zahra-residences/): Apartment, Al Zahra, Jeddah — For sale, From SAR 1,450,000, 3 bed, 200 m² built, 3D tour available
+- [Trump Tower Jeddah](https://bona.azoz.uk/properties/trump-tower-jeddah/): Apartment, Al Shati, Corniche, Jeddah — Off-plan, From SAR 3,200,000
+- [Trump Plaza Jeddah](https://bona.azoz.uk/properties/trump-plaza-jeddah/): Apartment, Al Shati, Jeddah — Off-plan, From SAR 1,750,000
+- [Kayan Residence, Al Nahda](https://bona.azoz.uk/properties/kayan-residence-al-nahda/): Apartment, Al Nahda, Jeddah — Off-plan, SAR 980,000, in Kayan Residence, Al Nahda, 3 bed, 3 bath, 136 m² built
+- [Dari II, Al Salamah](https://bona.azoz.uk/properties/dari-ii-al-salamah/): Apartment, Al Salamah, Jeddah — Off-plan, From SAR 1,600,000
+- [Marriott Residences, AIDA, Muscat](https://bona.azoz.uk/properties/marriott-residences-aida-muscat/): Apartment, AIDA, Muscat — Off-plan, From SAR 1,900,000
+- [Da Vinci Tower by Pagani, Dubai](https://bona.azoz.uk/properties/da-vinci-tower-by-pagani-dubai/): Apartment, Downtown Dubai, Dubai Canal, Dubai — International, From AED 6,800,000
+- [Kayan Residence, 136 sqm Apartment, Al Nahda](https://bona.azoz.uk/properties/kayan-residence-al-nahda-unit-128a/): Apartment, Al Nahda, Jeddah — For sale, SAR 990,000, in Kayan Residence, Al Nahda, floor 1st, 2nd or 3rd, block 128, unit KIA-128A, 2 bed, 3 bath, 136 m² built, built 2024
+- [Kayan Residence, 120 sqm Apartment, Al Nahda](https://bona.azoz.uk/properties/kayan-residence-al-nahda-unit-127a/): Apartment, Al Nahda, Jeddah — For sale, SAR 940,000, in Kayan Residence, Al Nahda, floor 1st or 3rd, block 127, unit KIA-127A, 2 bed, 3 bath, 120 m² built, built 2024
+- [Three-Bedroom Apartment, Building 113, Al Nuzhah](https://bona.azoz.uk/properties/kian-building-113-unit-a-al-nuzhah/): Apartment, Al Nuzhah, Jeddah — For sale, SAR 750,000, in Kian Al-Masiah — Building 113, Al Nuzhah, block 113, unit KIA-113A, 3 bed, 3 bath, 174 m² built, built 2024
+- [Three-Bedroom Apartment of 182 sqm, Building 113, Al Nuzhah](https://bona.azoz.uk/properties/kian-building-113-unit-b-al-nuzhah/): Apartment, Al Nuzhah, Jeddah — For sale, SAR 790,000, in Kian Al-Masiah — Building 113, Al Nuzhah, block 113, unit KIA-113B, 3 bed, 3 bath, 182 m² built, built 2024
+- [Corner Three-Bedroom Apartment, Building 113, Al Nuzhah](https://bona.azoz.uk/properties/kian-building-113-unit-c-al-nuzhah/): Apartment, Al Nuzhah, Jeddah — For sale, SAR 760,000, in Kian Al-Masiah — Building 113, Al Nuzhah, block 113, unit KIA-113C, 3 bed, 3 bath, 174 m² built, built 2024
+- [Rear Three-Bedroom Apartment, Building 114, Al Nuzhah](https://bona.azoz.uk/properties/kian-building-114-unit-b-al-nuzhah/): Apartment, Al Nuzhah, Jeddah — For sale, SAR 660,000, in Kian Al-Masiah — Building 114, Al Nuzhah, block 114, unit KIA-114B, 3 bed, 3 bath, 169 m² built, built 2024
+- [Fourth-Floor Two-Bedroom Apartment, Building 114, Al Nuzhah](https://bona.azoz.uk/properties/kian-building-114-unit-c-al-nuzhah/): Apartment, Al Nuzhah, Jeddah — For sale, SAR 595,000, in Kian Al-Masiah — Building 114, Al Nuzhah, floor 4th, block 114, unit KIA-114C, 2 bed, 3 bath, 151 m² built, built 2024
+- [Rear Three-Bedroom Apartment, Building 117, Al Nuzhah](https://bona.azoz.uk/properties/kian-building-117-unit-b-al-nuzhah/): Apartment, Al Nuzhah, Jeddah — For sale, SAR 660,000, in Kian Al-Masiah — Building 117, Al Nuzhah, block 117, unit KIA-117B, 3 bed, 3 bath, 169 m² built, built 2024
+- [Two-Bedroom Apartment, Building 117, Al Nuzhah](https://bona.azoz.uk/properties/kian-building-117-unit-c-al-nuzhah/): Apartment, Al Nuzhah, Jeddah — For sale, SAR 595,000, in Kian Al-Masiah — Building 117, Al Nuzhah, block 117, unit KIA-117C, 2 bed, 3 bath, 151 m² built, built 2024
+- [Front-Facing Two-Bedroom Apartment, Building 115, Al Rayyan](https://bona.azoz.uk/properties/kian-building-115-unit-a-al-rayyan/): Apartment, Al Rayyan, Jeddah — For sale, SAR 550,000, in Kian Al-Masiah — Building 115, Al Rayyan, block 115, unit KIA-115A, 2 bed, 3 bath, 140 m² built, built 2023
+- [Dari Q Apartments, Al Salamah](https://bona.azoz.uk/properties/dari-q-al-salamah/): Apartment, Al Salamah, Jeddah — For sale, From SAR 1,200,000, 3 bed, 3 bath, 160.5 m² built
+- [Trump International Hotel Residences, AIDA, Muscat](https://bona.azoz.uk/properties/trump-international-hotel-residences-aida-muscat/): Apartment, AIDA, Muscat — International, From SAR 1,700,000, 1 bed
+
+### Land (2) — https://bona.azoz.uk/properties/land/
+
+- [Residential Plot 285, Al Shati](https://bona.azoz.uk/properties/plot-285-al-shati/): Land, Al Shati, Jeddah — For sale, SAR 3,816,000, 636 m² plot
+- [Corner Plot, Al Shati](https://bona.azoz.uk/properties/corner-plot-al-shati/): Land, Al Shati, Jeddah — For sale, SAR 4,200,000, 625 m² plot
+
+## 3D virtual tours (1)
+
+- [Al Zahra Residences — 3D tour](https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0): Matterport walkthrough; listing page https://bona.azoz.uk/properties/al-zahra-residences/
+- All tours: https://bona.azoz.uk/tours/
 
 ## Optional
 

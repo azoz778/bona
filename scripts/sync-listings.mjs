@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-// Refreshes status + price.amount in src/data/listings.json from the TK public API.
+// Refreshes status + price.amount + virtualTourUrl in src/data/listings.json from the TK public API.
 // Node 22+, ESM, no dependencies. Safe to run in CI: network failure => exit 0 ("sync skipped").
-// Only listings with a `sourceRef` matching an API `id` are touched; only `status` and
-// `price.amount` are ever written, and the file is rewritten only if something changed.
+// Only listings with a `sourceRef` matching an API `id` are touched; only `status`, `price.amount`
+// and `virtualTourUrl` are ever written, and the file is rewritten only if something changed.
+// virtualTourUrl is filled from the API's `virtual_tour_url` only when the local value is null
+// (a non-null local value is never overwritten, and an empty API value never clears ours).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +27,13 @@ export function parsePrice(text) {
   const amount = Number(num[0].replace(/,/g, ''));
   if (!Number.isFinite(amount) || amount <= 0) return null;
   return { amount, currency: cur ? cur.toUpperCase() : null };
+}
+
+/** Accepts only a full https Matterport URL (the site embeds it inline); anything else -> null. */
+export function parseTourUrl(value) {
+  if (typeof value !== 'string') return null;
+  const v = value.trim();
+  return /^https:\/\/my\.matterport\.com\/show\/\?m=[A-Za-z0-9]+/.test(v) ? v : null;
 }
 
 async function fetchApi() {
@@ -78,6 +87,12 @@ async function main() {
         changes.push(`${l.id} price ${l.price.amount ?? 'null'} -> ${parsed.amount}`);
         l.price.amount = parsed.amount;
       }
+    }
+
+    const tour = parseTourUrl(api.virtual_tour_url);
+    if (tour && (l.virtualTourUrl === null || l.virtualTourUrl === undefined)) {
+      changes.push(`${l.id} virtualTourUrl null -> ${tour}`);
+      l.virtualTourUrl = tour;
     }
   }
 

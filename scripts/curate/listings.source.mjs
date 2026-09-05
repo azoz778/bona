@@ -7,6 +7,13 @@
 const SA = { en: 'Saudi Arabia', ar: 'المملكة العربية السعودية' };
 const JEDDAH = { en: 'Jeddah', ar: 'جدة' };
 const loc = (district, city = JEDDAH, country = SA, countryCode = 'SA') => ({ district, city, country, countryCode });
+// Round 2 helpers (Kian Al-Masiah units)
+const AL_NAHDA = { en: 'Al Nahda', ar: 'النهضة' };
+const AL_NUZHAH = { en: 'Al Nuzhah', ar: 'النزهة' };
+const AL_RAYYAN = { en: 'Al Rayyan', ar: 'الريان' };
+const KIAN = { en: 'Kian Al-Masiah', ar: 'كيان الماسية' };
+const KAYAN_PROJECT = { name: { en: 'Kayan Residence, Al Nahda', ar: 'كيان ريزيدنس، النهضة' }, developer: KIAN }; // name === title of kayan-residence-al-nahda
+const kianBuilding = (n, district) => ({ name: { en: `Kian Al-Masiah — Building ${n}, ${district.en}`, ar: `كيان الماسية — مبنى ${n}، ${district.ar}` }, developer: KIAN });
 
 export const LISTINGS = [
   // ───────────────────────────── BUY ─────────────────────────────
@@ -627,6 +634,7 @@ export const LISTINGS = [
     location: loc({ en: 'Al Nahda', ar: 'النهضة' }),
     price: { amount: 980000, currency: 'SAR', from: false, period: null, onRequest: false },
     specs: { beds: 3, baths: 3, areaSqm: 136, plotSqm: null, yearBuilt: null, floors: null },
+    project: KAYAN_PROJECT, // parent project page; units share its developer renders
     folder: 'kian-residence',
     images: [[17, 'exterior'], [13, 'facade_night'], [16, 'lobby'], [0, 'living'], [2, 'kitchen'], [3, 'living'], [10, 'cafe'], [14, 'gym'], [1, 'bathroom']],
     description: {
@@ -826,5 +834,396 @@ export const LISTINGS = [
       ar: ['على ارتفاع 130 متراً فوق البحر', 'مفروشة بالكامل مع مسبح خاص', 'بإدارة ترامب، للسكن أو التأجير', 'ملعب جولف بثماني عشرة حفرة', 'تملك حر لجميع الجنسيات', 'ابتداءً من 4,000,000 ريال سعودي'],
     },
     listedAt: '2026-03-21',
+  },
+  // ───────────────────────────── ROUND 2 (2026-09-05) ─────────────────────────────
+  // Append only — ids are positional (BONA-033 onwards). Facts come from the TK public API rows
+  // (sourceRef = API id; scripts/sync-listings.mjs keeps status/price/tour fresh).
+  // Kian Al-Masiah units. Photographs: gallery folder kian-residence = the developer's completed
+  // Kayan Residence building in Al Nahda; units in Buildings 113/114/115/117 say so in their copy.
+  {
+    slug: 'kayan-residence-al-nahda-unit-128a', sourceRef: 'KIA-128A', status: 'available', category: 'buy', type: 'apartment', featured: false,
+    title: { en: 'Kayan Residence, 136 sqm Apartment, Al Nahda', ar: 'كيان ريزيدنس، شقة 136 م²، النهضة' },
+    location: loc(AL_NAHDA),
+    price: { amount: 990000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: 2, baths: 3, areaSqm: 136, plotSqm: null, yearBuilt: 2024, floors: null },
+    project: KAYAN_PROJECT,
+    unit: { floor: '1st, 2nd or 3rd', block: '128', unitRef: 'KIA-128A' },
+    folder: 'kian-residence',
+    images: [[18, 'exterior'], [0, 'living'], [2, 'kitchen'], [5, 'bedroom'], [1, 'bathroom'], [16, 'lobby'], [10, 'cafe'], [13, 'facade_night']],
+    description: {
+      en: [
+        'A four-room apartment of 136 square metres in Kayan Residence, Al Nahda, a short distance from the Jeddah waterfront. The plan holds two bedrooms, three bathrooms, a large living room and a modern kitchen, and each apartment is served by its own private elevator.',
+        'The building was completed in 2024 by Kian Al-Masiah and is run on a hotel model: a coffee-shop area, a children\'s play area, a gym, smart access and covered parking, with a smart-home system and central air conditioning in every residence.',
+        'Units of this plan are offered on the first, second and third floors at SAR 990,000.',
+      ],
+      ar: [
+        'شقة من أربع غرف بمساحة 136 متراً مربعاً في كيان ريزيدنس بحي النهضة، على مسافة قصيرة من الواجهة البحرية لجدة. يضم المخطط غرفتي نوم وثلاث دورات مياه وصالة واسعة ومطبخاً حديثاً، ويخدم كل شقة مصعد خاص بها.',
+        'اكتمل بناء المبنى عام 2024 على يد كيان الماسية، ويُدار بأسلوب فندقي: منطقة مقهى ومنطقة ألعاب للأطفال ونادٍ رياضي ودخول ذكي ومواقف مغطاة، مع نظام منزل ذكي وتكييف مركزي في كل مسكن.',
+        'تُعرض وحدات هذا المخطط في الأدوار الأول والثاني والثالث بسعر 990,000 ريال سعودي.',
+      ],
+    },
+    highlights: {
+      en: ['136 sqm, two bedrooms and three bathrooms', 'Private elevator to the apartment', 'Completed 2024', 'Hotel-style building with coffee shop and gym', 'First, second or third floor', 'SAR 990,000'],
+      ar: ['136 متراً مربعاً، غرفتا نوم وثلاث دورات مياه', 'مصعد خاص للشقة', 'اكتمل البناء عام 2024', 'مبنى بأسلوب فندقي مع مقهى ونادٍ رياضي', 'الدور الأول أو الثاني أو الثالث', '990,000 ريال سعودي'],
+    },
+    listedAt: '2026-09-01',
+  },
+  {
+    slug: 'kayan-residence-al-nahda-unit-127a', sourceRef: 'KIA-127A', status: 'available', category: 'buy', type: 'apartment', featured: false,
+    title: { en: 'Kayan Residence, 120 sqm Apartment, Al Nahda', ar: 'كيان ريزيدنس، شقة 120 م²، النهضة' },
+    location: loc(AL_NAHDA),
+    price: { amount: 940000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: 2, baths: 3, areaSqm: 120, plotSqm: null, yearBuilt: 2024, floors: null },
+    project: KAYAN_PROJECT,
+    unit: { floor: '1st or 3rd', block: '127', unitRef: 'KIA-127A' },
+    folder: 'kian-residence',
+    images: [[13, 'facade_night'], [3, 'living'], [4, 'kitchen'], [6, 'bedroom'], [1, 'bathroom'], [12, 'cafe'], [14, 'gym']],
+    description: {
+      en: [
+        'The three-room plan at Kayan Residence, Al Nahda: 120 square metres with two bedrooms, three bathrooms, a living room and a fitted kitchen, served by a private elevator. The building was completed in 2024 by Kian Al-Masiah.',
+        'Residents share the hotel-style ground floor with its coffee-shop area and children\'s play area, a gym, smart access and covered parking. Every apartment has a smart-home system and central air conditioning.',
+        'Offered on the first and third floors at SAR 940,000.',
+      ],
+      ar: [
+        'مخطط الغرف الثلاث في كيان ريزيدنس بحي النهضة: 120 متراً مربعاً بغرفتي نوم وثلاث دورات مياه وصالة ومطبخ مجهز، ويخدمه مصعد خاص. اكتمل بناء المبنى عام 2024 على يد كيان الماسية.',
+        'يتشارك السكان الطابق الأرضي ذا الطابع الفندقي بمنطقة المقهى ومنطقة ألعاب الأطفال، إلى جانب نادٍ رياضي ودخول ذكي ومواقف مغطاة. وفي كل شقة نظام منزل ذكي وتكييف مركزي.',
+        'تُعرض في الدورين الأول والثالث بسعر 940,000 ريال سعودي.',
+      ],
+    },
+    highlights: {
+      en: ['120 sqm, two bedrooms and three bathrooms', 'Private elevator to the apartment', 'Completed 2024', 'Coffee shop, gym and children\'s area', 'First or third floor', 'SAR 940,000'],
+      ar: ['120 متراً مربعاً، غرفتا نوم وثلاث دورات مياه', 'مصعد خاص للشقة', 'اكتمل البناء عام 2024', 'مقهى ونادٍ رياضي ومنطقة للأطفال', 'الدور الأول أو الثالث', '940,000 ريال سعودي'],
+    },
+    listedAt: '2026-09-01',
+  },
+  {
+    slug: 'kian-building-113-unit-a-al-nuzhah', sourceRef: 'KIA-113A', status: 'available', category: 'buy', type: 'apartment', featured: false,
+    title: { en: 'Three-Bedroom Apartment, Building 113, Al Nuzhah', ar: 'شقة بثلاث غرف نوم، مبنى 113، النزهة' },
+    location: loc(AL_NUZHAH),
+    price: { amount: 750000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: 3, baths: 3, areaSqm: 174, plotSqm: null, yearBuilt: 2024, floors: null },
+    project: kianBuilding('113', AL_NUZHAH),
+    unit: { floor: null, block: '113', unitRef: 'KIA-113A' },
+    folder: 'kian-residence',
+    images: [[0, 'living'], [2, 'kitchen'], [7, 'bedroom'], [1, 'bathroom'], [16, 'lobby'], [17, 'exterior']],
+    description: {
+      en: [
+        'A five-room apartment of 174 square metres in Building 113, Al Nuzhah, on a commercial street with shops and services on the doorstep. Three bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.',
+        'Asking price SAR 750,000. The photographs show the developer\'s completed Kayan Residence building in Al Nahda and illustrate its standard of finish; a viewing of the unit itself can be arranged.',
+      ],
+      ar: [
+        'شقة من خمس غرف بمساحة 174 متراً مربعاً في مبنى 113 بحي النزهة، على شارع تجاري تتوفر فيه المحال والخدمات على مقربة. ثلاث غرف نوم وثلاث دورات مياه، واكتمل البناء عام 2024 على يد كيان الماسية.',
+        'السعر المطلوب 750,000 ريال سعودي. الصور من مبنى كيان ريزيدنس المكتمل للمطور نفسه في حي النهضة وتوضح مستوى التشطيب المعتمد لديه، ويمكن ترتيب معاينة الوحدة نفسها.',
+      ],
+    },
+    highlights: {
+      en: ['174 sqm, three bedrooms', 'Three bathrooms', 'Completed 2024', 'Commercial street frontage', 'SAR 750,000'],
+      ar: ['174 متراً مربعاً، ثلاث غرف نوم', 'ثلاث دورات مياه', 'اكتمل البناء عام 2024', 'على شارع تجاري', '750,000 ريال سعودي'],
+    },
+    listedAt: '2026-09-01',
+  },
+  {
+    slug: 'kian-building-113-unit-b-al-nuzhah', sourceRef: 'KIA-113B', status: 'available', category: 'buy', type: 'apartment', featured: false,
+    title: { en: 'Three-Bedroom Apartment of 182 sqm, Building 113, Al Nuzhah', ar: 'شقة بثلاث غرف نوم بمساحة 182 م²، مبنى 113، النزهة' },
+    location: loc(AL_NUZHAH),
+    price: { amount: 790000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: 3, baths: 3, areaSqm: 182, plotSqm: null, yearBuilt: 2024, floors: null },
+    project: kianBuilding('113', AL_NUZHAH),
+    unit: { floor: null, block: '113', unitRef: 'KIA-113B' },
+    folder: 'kian-residence',
+    images: [[3, 'living'], [4, 'kitchen'], [5, 'bedroom'], [8, 'bedroom'], [1, 'bathroom'], [11, 'terrace'], [18, 'exterior']],
+    description: {
+      en: [
+        'The largest plan in Building 113, Al Nuzhah: 182 square metres over five rooms, with three bedrooms and three bathrooms, on a commercial street close to everyday shops and services. Completed in 2024 by Kian Al-Masiah.',
+        'Asking price SAR 790,000. The photographs show the developer\'s completed Kayan Residence building in Al Nahda and illustrate its standard of finish; a viewing of the unit itself can be arranged.',
+      ],
+      ar: [
+        'أكبر مخططات مبنى 113 بحي النزهة: 182 متراً مربعاً موزعة على خمس غرف، منها ثلاث غرف نوم وثلاث دورات مياه، على شارع تجاري قريب من المحال والخدمات اليومية. اكتمل البناء عام 2024 على يد كيان الماسية.',
+        'السعر المطلوب 790,000 ريال سعودي. الصور من مبنى كيان ريزيدنس المكتمل للمطور نفسه في حي النهضة وتوضح مستوى التشطيب المعتمد لديه، ويمكن ترتيب معاينة الوحدة نفسها.',
+      ],
+    },
+    highlights: {
+      en: ['182 sqm, the largest plan in the building', 'Three bedrooms, three bathrooms', 'Completed 2024', 'Commercial street frontage', 'SAR 790,000'],
+      ar: ['182 متراً مربعاً، أكبر مخططات المبنى', 'ثلاث غرف نوم وثلاث دورات مياه', 'اكتمل البناء عام 2024', 'على شارع تجاري', '790,000 ريال سعودي'],
+    },
+    listedAt: '2026-09-01',
+  },
+  {
+    slug: 'kian-building-113-unit-c-al-nuzhah', sourceRef: 'KIA-113C', status: 'available', category: 'buy', type: 'apartment', featured: false,
+    title: { en: 'Corner Three-Bedroom Apartment, Building 113, Al Nuzhah', ar: 'شقة زاوية بثلاث غرف نوم، مبنى 113، النزهة' },
+    location: loc(AL_NUZHAH),
+    price: { amount: 760000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: 3, baths: 3, areaSqm: 174, plotSqm: null, yearBuilt: 2024, floors: null },
+    project: kianBuilding('113', AL_NUZHAH),
+    unit: { floor: null, block: '113', unitRef: 'KIA-113C' },
+    folder: 'kian-residence',
+    images: [[16, 'lobby'], [0, 'living'], [2, 'kitchen'], [6, 'bedroom'], [1, 'bathroom'], [15, 'parking']],
+    description: {
+      en: [
+        'A corner apartment of 174 square metres in Building 113, Al Nuzhah, with frontage on two streets and daylight from two sides. Five rooms in all: three bedrooms, three bathrooms and the living spaces. Completed in 2024 by Kian Al-Masiah.',
+        'Asking price SAR 760,000. The photographs show the developer\'s completed Kayan Residence building in Al Nahda and illustrate its standard of finish; a viewing of the unit itself can be arranged.',
+      ],
+      ar: [
+        'شقة زاوية بمساحة 174 متراً مربعاً في مبنى 113 بحي النزهة، بواجهتين على شارعين وإضاءة طبيعية من جهتين. خمس غرف في المجموع: ثلاث غرف نوم وثلاث دورات مياه ومساحات المعيشة. اكتمل البناء عام 2024 على يد كيان الماسية.',
+        'السعر المطلوب 760,000 ريال سعودي. الصور من مبنى كيان ريزيدنس المكتمل للمطور نفسه في حي النهضة وتوضح مستوى التشطيب المعتمد لديه، ويمكن ترتيب معاينة الوحدة نفسها.',
+      ],
+    },
+    highlights: {
+      en: ['Corner unit on two streets', '174 sqm, three bedrooms', 'Three bathrooms', 'Completed 2024', 'SAR 760,000'],
+      ar: ['وحدة زاوية على شارعين', '174 متراً مربعاً، ثلاث غرف نوم', 'ثلاث دورات مياه', 'اكتمل البناء عام 2024', '760,000 ريال سعودي'],
+    },
+    listedAt: '2026-09-01',
+  },
+  {
+    slug: 'kian-building-114-unit-b-al-nuzhah', sourceRef: 'KIA-114B', status: 'available', category: 'buy', type: 'apartment', featured: false,
+    title: { en: 'Rear Three-Bedroom Apartment, Building 114, Al Nuzhah', ar: 'شقة خلفية بثلاث غرف نوم، مبنى 114، النزهة' },
+    location: loc(AL_NUZHAH),
+    price: { amount: 660000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: 3, baths: 3, areaSqm: 169, plotSqm: null, yearBuilt: 2024, floors: null },
+    project: kianBuilding('114', AL_NUZHAH),
+    unit: { floor: null, block: '114', unitRef: 'KIA-114B' },
+    folder: 'kian-residence',
+    images: [[2, 'kitchen'], [3, 'living'], [7, 'bedroom'], [1, 'bathroom'], [14, 'gym'], [17, 'exterior']],
+    description: {
+      en: [
+        'A five-room apartment of 169 square metres at the rear of Building 114, Al Nuzhah, set back from the commercial street the building fronts, so the bedrooms sit on the quieter side. Three bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.',
+        'Asking price SAR 660,000. The photographs show the developer\'s completed Kayan Residence building in Al Nahda and illustrate its standard of finish; a viewing of the unit itself can be arranged.',
+      ],
+      ar: [
+        'شقة من خمس غرف بمساحة 169 متراً مربعاً في الجهة الخلفية من مبنى 114 بحي النزهة، بعيداً عن الشارع التجاري الذي يطل عليه المبنى، فتقع غرف النوم على الجانب الأهدأ. ثلاث غرف نوم وثلاث دورات مياه، واكتمل البناء عام 2024 على يد كيان الماسية.',
+        'السعر المطلوب 660,000 ريال سعودي. الصور من مبنى كيان ريزيدنس المكتمل للمطور نفسه في حي النهضة وتوضح مستوى التشطيب المعتمد لديه، ويمكن ترتيب معاينة الوحدة نفسها.',
+      ],
+    },
+    highlights: {
+      en: ['169 sqm, three bedrooms', 'Rear unit on the quieter side', 'Three bathrooms', 'Completed 2024', 'SAR 660,000'],
+      ar: ['169 متراً مربعاً، ثلاث غرف نوم', 'وحدة خلفية على الجانب الأهدأ', 'ثلاث دورات مياه', 'اكتمل البناء عام 2024', '660,000 ريال سعودي'],
+    },
+    listedAt: '2026-09-01',
+  },
+  {
+    slug: 'kian-building-114-unit-c-al-nuzhah', sourceRef: 'KIA-114C', status: 'available', category: 'buy', type: 'apartment', featured: false,
+    title: { en: 'Fourth-Floor Two-Bedroom Apartment, Building 114, Al Nuzhah', ar: 'شقة بغرفتي نوم في الدور الرابع، مبنى 114، النزهة' },
+    location: loc(AL_NUZHAH),
+    price: { amount: 595000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: 2, baths: 3, areaSqm: 151, plotSqm: null, yearBuilt: 2024, floors: null },
+    project: kianBuilding('114', AL_NUZHAH),
+    unit: { floor: '4th', block: '114', unitRef: 'KIA-114C' },
+    folder: 'kian-residence',
+    images: [[4, 'kitchen'], [0, 'living'], [8, 'bedroom'], [1, 'bathroom'], [10, 'cafe'], [13, 'facade_night']],
+    description: {
+      en: [
+        'A four-room apartment of 151 square metres on the fourth floor of Building 114, Al Nuzhah, facing the commercial street. Two bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.',
+        'Asking price SAR 595,000. The photographs show the developer\'s completed Kayan Residence building in Al Nahda and illustrate its standard of finish; a viewing of the unit itself can be arranged.',
+      ],
+      ar: [
+        'شقة من أربع غرف بمساحة 151 متراً مربعاً في الدور الرابع من مبنى 114 بحي النزهة، تطل على الشارع التجاري. غرفتا نوم وثلاث دورات مياه، واكتمل البناء عام 2024 على يد كيان الماسية.',
+        'السعر المطلوب 595,000 ريال سعودي. الصور من مبنى كيان ريزيدنس المكتمل للمطور نفسه في حي النهضة وتوضح مستوى التشطيب المعتمد لديه، ويمكن ترتيب معاينة الوحدة نفسها.',
+      ],
+    },
+    highlights: {
+      en: ['151 sqm, two bedrooms', 'Fourth floor', 'Three bathrooms', 'Completed 2024', 'SAR 595,000'],
+      ar: ['151 متراً مربعاً، غرفتا نوم', 'الدور الرابع', 'ثلاث دورات مياه', 'اكتمل البناء عام 2024', '595,000 ريال سعودي'],
+    },
+    listedAt: '2026-09-01',
+  },
+  {
+    slug: 'kian-building-117-unit-b-al-nuzhah', sourceRef: 'KIA-117B', status: 'available', category: 'buy', type: 'apartment', featured: false,
+    title: { en: 'Rear Three-Bedroom Apartment, Building 117, Al Nuzhah', ar: 'شقة خلفية بثلاث غرف نوم، مبنى 117، النزهة' },
+    location: loc(AL_NUZHAH),
+    price: { amount: 660000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: 3, baths: 3, areaSqm: 169, plotSqm: null, yearBuilt: 2024, floors: null },
+    project: kianBuilding('117', AL_NUZHAH),
+    unit: { floor: null, block: '117', unitRef: 'KIA-117B' },
+    folder: 'kian-residence',
+    images: [[10, 'cafe'], [3, 'living'], [2, 'kitchen'], [5, 'bedroom'], [1, 'bathroom'], [9, 'entrance'], [18, 'exterior']],
+    description: {
+      en: [
+        'A five-room apartment of 169 square metres at the rear of Building 117, Al Nuzhah, away from the commercial street on which the building stands. Three bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.',
+        'Asking price SAR 660,000. The photographs show the developer\'s completed Kayan Residence building in Al Nahda and illustrate its standard of finish; a viewing of the unit itself can be arranged.',
+      ],
+      ar: [
+        'شقة من خمس غرف بمساحة 169 متراً مربعاً في الجهة الخلفية من مبنى 117 بحي النزهة، بعيداً عن الشارع التجاري الذي يقوم عليه المبنى. ثلاث غرف نوم وثلاث دورات مياه، واكتمل البناء عام 2024 على يد كيان الماسية.',
+        'السعر المطلوب 660,000 ريال سعودي. الصور من مبنى كيان ريزيدنس المكتمل للمطور نفسه في حي النهضة وتوضح مستوى التشطيب المعتمد لديه، ويمكن ترتيب معاينة الوحدة نفسها.',
+      ],
+    },
+    highlights: {
+      en: ['169 sqm, three bedrooms', 'Rear unit away from the street', 'Three bathrooms', 'Completed 2024', 'SAR 660,000'],
+      ar: ['169 متراً مربعاً، ثلاث غرف نوم', 'وحدة خلفية بعيداً عن الشارع', 'ثلاث دورات مياه', 'اكتمل البناء عام 2024', '660,000 ريال سعودي'],
+    },
+    listedAt: '2026-09-01',
+  },
+  {
+    slug: 'kian-building-117-unit-c-al-nuzhah', sourceRef: 'KIA-117C', status: 'available', category: 'buy', type: 'apartment', featured: false,
+    title: { en: 'Two-Bedroom Apartment, Building 117, Al Nuzhah', ar: 'شقة بغرفتي نوم، مبنى 117، النزهة' },
+    location: loc(AL_NUZHAH),
+    price: { amount: 595000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: 2, baths: 3, areaSqm: 151, plotSqm: null, yearBuilt: 2024, floors: null },
+    project: kianBuilding('117', AL_NUZHAH),
+    unit: { floor: null, block: '117', unitRef: 'KIA-117C' },
+    folder: 'kian-residence',
+    images: [[11, 'terrace'], [0, 'living'], [4, 'kitchen'], [6, 'bedroom'], [1, 'bathroom'], [16, 'lobby']],
+    description: {
+      en: [
+        'A four-room apartment of 151 square metres in Building 117, Al Nuzhah, facing the commercial street. Two bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.',
+        'Asking price SAR 595,000. The photographs show the developer\'s completed Kayan Residence building in Al Nahda and illustrate its standard of finish; a viewing of the unit itself can be arranged.',
+      ],
+      ar: [
+        'شقة من أربع غرف بمساحة 151 متراً مربعاً في مبنى 117 بحي النزهة، تطل على الشارع التجاري. غرفتا نوم وثلاث دورات مياه، واكتمل البناء عام 2024 على يد كيان الماسية.',
+        'السعر المطلوب 595,000 ريال سعودي. الصور من مبنى كيان ريزيدنس المكتمل للمطور نفسه في حي النهضة وتوضح مستوى التشطيب المعتمد لديه، ويمكن ترتيب معاينة الوحدة نفسها.',
+      ],
+    },
+    highlights: {
+      en: ['151 sqm, two bedrooms', 'Three bathrooms', 'Completed 2024', 'Commercial street frontage', 'SAR 595,000'],
+      ar: ['151 متراً مربعاً، غرفتا نوم', 'ثلاث دورات مياه', 'اكتمل البناء عام 2024', 'على شارع تجاري', '595,000 ريال سعودي'],
+    },
+    listedAt: '2026-09-01',
+  },
+  {
+    slug: 'kian-building-115-unit-a-al-rayyan', sourceRef: 'KIA-115A', status: 'available', category: 'buy', type: 'apartment', featured: false,
+    title: { en: 'Front-Facing Two-Bedroom Apartment, Building 115, Al Rayyan', ar: 'شقة أمامية بغرفتي نوم، مبنى 115، الريان' },
+    location: loc(AL_RAYYAN),
+    price: { amount: 550000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: 2, baths: 3, areaSqm: 140, plotSqm: null, yearBuilt: 2023, floors: null },
+    project: kianBuilding('115', AL_RAYYAN),
+    unit: { floor: null, block: '115', unitRef: 'KIA-115A' },
+    folder: 'kian-residence',
+    images: [[7, 'bedroom'], [3, 'living'], [2, 'kitchen'], [1, 'bathroom'], [12, 'cafe'], [17, 'exterior']],
+    description: {
+      en: [
+        'A four-room apartment of 140 square metres on the front of Building 115 in Al Rayyan, with the main façade and its windows to the street. Two bedrooms and three bathrooms, completed in 2023 by Kian Al-Masiah.',
+        'Asking price SAR 550,000, the most accessible entry to the developer\'s portfolio. The photographs show the developer\'s completed Kayan Residence building in Al Nahda and illustrate its standard of finish; a viewing of the unit itself can be arranged.',
+      ],
+      ar: [
+        'شقة من أربع غرف بمساحة 140 متراً مربعاً في الواجهة الأمامية لمبنى 115 بحي الريان، بنوافذها المطلة على الشارع. غرفتا نوم وثلاث دورات مياه، واكتمل البناء عام 2023 على يد كيان الماسية.',
+        'السعر المطلوب 550,000 ريال سعودي، وهو المدخل الأيسر إلى مشاريع المطور. الصور من مبنى كيان ريزيدنس المكتمل للمطور نفسه في حي النهضة وتوضح مستوى التشطيب المعتمد لديه، ويمكن ترتيب معاينة الوحدة نفسها.',
+      ],
+    },
+    highlights: {
+      en: ['140 sqm, two bedrooms', 'Front-facing unit', 'Three bathrooms', 'Completed 2023', 'SAR 550,000'],
+      ar: ['140 متراً مربعاً، غرفتا نوم', 'وحدة أمامية', 'ثلاث دورات مياه', 'اكتمل البناء عام 2023', '550,000 ريال سعودي'],
+    },
+    listedAt: '2026-09-01',
+  },
+  // Further API listings with enough photographs in the gallery.
+  {
+    slug: 'dari-q-al-salamah', sourceRef: 'APT-021', status: 'available', category: 'buy', type: 'apartment', featured: false,
+    title: { en: 'Dari Q Apartments, Al Salamah', ar: 'شقق داري كيو، السلامة' },
+    location: loc({ en: 'Al Salamah', ar: 'السلامة' }),
+    price: { amount: 1200000, currency: 'SAR', from: true, period: null, onRequest: false },
+    specs: { beds: 3, baths: 3, areaSqm: 160.5, plotSqm: null, yearBuilt: null, floors: null },
+    folder: 'dari-q-luxury-apartment',
+    images: [[1, 'exterior'], [0, 'rooftop_pool'], [39, 'aerial'], [12, 'lobby'], [24, 'living'], [17, 'kitchen'], [19, 'bedroom'], [27, 'bathroom'], [2, 'courtyard'], [8, 'gym']],
+    description: {
+      en: [
+        'Dari Q is a completed apartment building in Al Salamah, north Jeddah, with a Starbucks at street level and a landscaped courtyard at its centre. The three-bedroom apartments measure 160.5 square metres with three bathrooms, and are offered from SAR 1,200,000.',
+        'Residents have a rooftop pool, a fully equipped gym, a basketball court and shaded seating in the courtyard, with dedicated parking, a basement, a driver\'s room and 24-hour security.',
+      ],
+      ar: [
+        'داري كيو مبنى سكني مكتمل في حي السلامة شمال جدة، يضم فرعاً لستاربكس في الطابق الأرضي وفناءً منسقاً في قلبه. تبلغ مساحة الشقق ذات الغرف الثلاث 160.5 متراً مربعاً مع ثلاث دورات مياه، وتُعرض ابتداءً من 1,200,000 ريال سعودي.',
+        'يتوفر للسكان مسبح على السطح ونادٍ رياضي مجهز بالكامل وملعب كرة سلة وجلسات مظللة في الفناء، مع مواقف مخصصة وقبو وغرفة للسائق وحراسة على مدار الساعة.',
+      ],
+    },
+    highlights: {
+      en: ['160.5 sqm, three bedrooms and three bathrooms', 'Rooftop pool and gym', 'Landscaped courtyard and basketball court', 'Dedicated parking, basement and driver\'s room', '24-hour security', 'From SAR 1,200,000'],
+      ar: ['160.5 متراً مربعاً، ثلاث غرف نوم وثلاث دورات مياه', 'مسبح على السطح ونادٍ رياضي', 'فناء منسق وملعب كرة سلة', 'مواقف مخصصة وقبو وغرفة للسائق', 'حراسة على مدار الساعة', 'ابتداءً من 1,200,000 ريال سعودي'],
+    },
+    listedAt: '2026-03-21',
+  },
+  {
+    slug: 'neptune-villas-north-riyadh', sourceRef: 'VIL-029', status: 'available', category: 'off-plan', type: 'villa', featured: false,
+    title: { en: 'Neptune Villas, Interiors by Mouawad, North Riyadh', ar: 'فلل نبتون بتصميم داخلي من معوض، شمال الرياض' },
+    location: loc({ en: 'North Riyadh', ar: 'شمال الرياض' }, { en: 'Riyadh', ar: 'الرياض' }),
+    price: { amount: 4600000, currency: 'SAR', from: true, period: null, onRequest: false },
+    specs: { beds: 5, baths: null, areaSqm: null, plotSqm: null, yearBuilt: null, floors: null },
+    folder: 'neptune-interiors-by-mouawad',
+    images: [[0, 'exterior'], [1, 'aerial'], [2, 'render'], [3, 'terrace']],
+    description: {
+      en: [
+        'Neptune Villas is a villa community under construction in north Riyadh, with interiors by the jeweller Mouawad. Each villa has five bedrooms, in sizes from 300 to 420 square metres; the renders show roof terraces and covered parking.',
+        'The masterplan sets the houses along tree-lined streets around a central park and pool. Prices start from SAR 4,600,000.',
+      ],
+      ar: [
+        'فلل نبتون مشروع فلل قيد الإنشاء في شمال الرياض، بتصميم داخلي من دار معوض للمجوهرات. تضم كل فيلا خمس غرف نوم بمساحات من 300 إلى 420 متراً مربعاً، وتُظهر التصاميم تراسات علوية ومواقف مغطاة.',
+        'يوزع المخطط العام المنازل على شوارع تظللها الأشجار حول حديقة مركزية ومسبح. تبدأ الأسعار من 4,600,000 ريال سعودي.',
+      ],
+    },
+    highlights: {
+      en: ['Interiors by Mouawad', 'Five bedrooms', '300 to 420 sqm', 'Under construction in north Riyadh', 'From SAR 4,600,000'],
+      ar: ['تصميم داخلي من معوض', 'خمس غرف نوم', 'من 300 إلى 420 متراً مربعاً', 'قيد الإنشاء في شمال الرياض', 'ابتداءً من 4,600,000 ريال سعودي'],
+    },
+    listedAt: '2026-03-21',
+  },
+  {
+    slug: 'trump-international-hotel-residences-aida-muscat', sourceRef: 'APT-035', status: 'available', category: 'international', type: 'apartment', featured: false,
+    title: { en: 'Trump International Hotel Residences, AIDA, Muscat', ar: 'مساكن فندق ترامب الدولي، آيدا، مسقط' },
+    location: loc({ en: 'AIDA', ar: 'آيدا' }, { en: 'Muscat', ar: 'مسقط' }, { en: 'Oman', ar: 'سلطنة عُمان' }, 'OM'),
+    price: { amount: 1700000, currency: 'SAR', from: true, period: null, onRequest: false },
+    specs: { beds: 1, baths: null, areaSqm: null, plotSqm: null, yearBuilt: null, floors: null },
+    folder: 'trump-international-hotel-oman',
+    images: [[0, 'pool'], [4, 'living'], [7, 'bedroom'], [5, 'lounge'], [3, 'bathroom'], [11, 'aerial'], [12, 'entrance'], [15, 'facade_night'], [13, 'pool'], [1, 'lounge']],
+    description: {
+      en: [
+        'Serviced residences within the Trump International Hotel at AIDA, on the cliffs above the sea at Muscat. Apartments range from 43 to 138 square metres with one to three bedrooms, delivered fully furnished.',
+        'Owners use the hotel\'s pool, gym, lounges and restaurants, within the wider AIDA community with its golf course and beach. Prices start from SAR 1,700,000.',
+      ],
+      ar: [
+        'مساكن فندقية ضمن فندق ترامب الدولي في آيدا، على المرتفعات المطلة على البحر في مسقط. تتراوح مساحات الشقق بين 43 و138 متراً مربعاً، بغرفة نوم واحدة إلى ثلاث غرف، وتُسلم مفروشة بالكامل.',
+        'يستفيد الملاك من مسبح الفندق وناديه الرياضي وصالاته ومطاعمه، ضمن مجتمع آيدا الأوسع بملعب الجولف والشاطئ. تبدأ الأسعار من 1,700,000 ريال سعودي.',
+      ],
+    },
+    highlights: {
+      en: ['Within the Trump International Hotel, AIDA', 'One to three bedrooms, 43 to 138 sqm', 'Fully furnished', 'Hotel pool, gym and restaurants', 'From SAR 1,700,000'],
+      ar: ['ضمن فندق ترامب الدولي في آيدا', 'من غرفة إلى ثلاث غرف نوم، 43 إلى 138 متراً مربعاً', 'مفروشة بالكامل', 'مسبح الفندق وناديه الرياضي ومطاعمه', 'ابتداءً من 1,700,000 ريال سعودي'],
+    },
+    listedAt: '2026-03-21',
+  },
+  // Land — only plots with an exact pin (Google Maps links in the API descriptions). Stills: scripts/curate/land-stills.mjs.
+  {
+    slug: 'plot-285-al-shati', sourceRef: 'LND-006', status: 'available', category: 'buy', type: 'land', featured: false,
+    title: { en: 'Residential Plot 285, Al Shati', ar: 'قطعة أرض رقم 285، الشاطئ' },
+    location: loc({ en: 'Al Shati', ar: 'الشاطئ' }),
+    price: { amount: 3816000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: null, baths: null, areaSqm: null, plotSqm: 636, yearBuilt: null, floors: null },
+    map: { lat: 21.6011128, lng: 39.1195974 },
+    images: [{ local: '/land/LND-006.jpg', room: 'satellite' }, { local: '/land/LND-006-z15.jpg', room: 'satellite_wide' }],
+    description: {
+      en: [
+        'Plot 285 in Al Shati, moments from King Road and a few minutes from the Corniche. The plot measures 636 square metres with a north-facing frontage of 21.25 metres on a 16-metre street.',
+        'Offered directly by the owner at SAR 6,000 per square metre net, a total of SAR 3,816,000. The satellite frames show the plot\'s position and its surroundings.',
+      ],
+      ar: [
+        'القطعة رقم 285 في حي الشاطئ، على مقربة من طريق الملك ودقائق من الكورنيش. تبلغ مساحتها 636 متراً مربعاً بواجهة شمالية بطول 21.25 متراً على شارع بعرض 16 متراً.',
+        'تُعرض من المالك مباشرة بسعر 6,000 ريال للمتر المربع صافياً، بإجمالي 3,816,000 ريال سعودي. توضح الصور الجوية موقع القطعة ومحيطها.',
+      ],
+    },
+    highlights: {
+      en: ['636 sqm', 'North-facing, 21.25 m frontage', '16-metre street', 'SAR 6,000 per sqm net', 'Direct from the owner'],
+      ar: ['636 متراً مربعاً', 'واجهة شمالية بطول 21.25 متراً', 'شارع بعرض 16 متراً', '6,000 ريال للمتر صافياً', 'من المالك مباشرة'],
+    },
+    listedAt: '2026-04-10',
+  },
+  {
+    slug: 'corner-plot-al-shati', sourceRef: 'LND-004', status: 'available', category: 'buy', type: 'land', featured: false,
+    title: { en: 'Corner Plot, Al Shati', ar: 'أرض زاوية، الشاطئ' },
+    location: loc({ en: 'Al Shati', ar: 'الشاطئ' }),
+    price: { amount: 4200000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: null, baths: null, areaSqm: null, plotSqm: 625, yearBuilt: null, floors: null },
+    map: { lat: 21.613996, lng: 39.1172 },
+    images: [{ local: '/land/LND-004.jpg', room: 'satellite' }, { local: '/land/LND-004-z15.jpg', room: 'satellite_wide' }],
+    description: {
+      en: [
+        'A corner plot of 625 square metres in Al Shati, on two 12-metre streets to the north and east, measuring 24 metres wide by 26 metres deep. It sits on the second block from King Road, north of Heraa Street, close to the district\'s commercial centres and the Jeddah waterfront.',
+        'Asking price SAR 4,200,000, about SAR 6,800 per square metre. The satellite frames show the plot\'s position and its surroundings.',
+      ],
+      ar: [
+        'أرض زاوية بمساحة 625 متراً مربعاً في حي الشاطئ، على شارعين بعرض 12 متراً من الجهتين الشمالية والشرقية، بأبعاد 24 متراً عرضاً و26 متراً عمقاً. تقع في المربع الثاني من طريق الملك شمال شارع حراء، على مقربة من المراكز التجارية والواجهة البحرية لجدة.',
+        'السعر المطلوب 4,200,000 ريال سعودي، أي نحو 6,800 ريال للمتر المربع. توضح الصور الجوية موقع القطعة ومحيطها.',
+      ],
+    },
+    highlights: {
+      en: ['625 sqm corner plot', 'Two 12-metre streets, north and east', '24 m by 26 m', 'Second block from King Road', 'Near the Jeddah waterfront', 'SAR 4,200,000'],
+      ar: ['أرض زاوية بمساحة 625 متراً مربعاً', 'شارعان بعرض 12 متراً شمالاً وشرقاً', '24 في 26 متراً', 'المربع الثاني من طريق الملك', 'قرب الواجهة البحرية لجدة', '4,200,000 ريال سعودي'],
+    },
+    listedAt: '2026-04-09',
   },
 ];

@@ -2,11 +2,13 @@ import raw from '../data/listings.json';
 import type { Locale } from './i18n';
 
 export type Localised = { en: string; ar: string };
+/** Round-2 section key. REQUIRED in the schema; derived from `type` here when a row is missing it. */
+export type Kind = 'house' | 'apartment' | 'land' | 'building';
 export interface Listing {
   id: string; slug: string; sourceRef?: string | null;
   status: 'available' | 'reserved' | 'sold';
   category: 'buy' | 'rent' | 'off-plan' | 'international';
-  type: string; featured?: boolean;
+  type: string; kind?: Kind; featured?: boolean;
   title: Localised;
   location: { district: Localised; city: Localised; country: Localised; countryCode: string };
   price: { amount: number | null; currency: string; from?: boolean; period?: string | null; onRequest?: boolean };
@@ -15,6 +17,11 @@ export interface Listing {
   description: Localised;
   highlights?: { en: string[]; ar: string[] };
   virtualTourUrl?: string | null; brochureUrl?: string | null; listedAt?: string;
+  /** Units inside a development (e.g. Kian Residence). */
+  project?: { name: Localised; developer?: Localised | null } | null;
+  unit?: { floor?: string | number | null; block?: string | null; unitRef?: string | null } | null;
+  /** Land plots: pin for a map link. */
+  map?: { lat: number; lng: number } | null;
 }
 
 export const listings: Listing[] = raw as Listing[];
@@ -91,6 +98,70 @@ export function editorialImage(index = 0, pick = 1): Listing['images'][number] |
   if (!pool.length) return undefined;
   const l = pool[index % pool.length];
   return l.images[Math.min(pick, l.images.length - 1)] ?? l.images[0];
+}
+
+/* ---- Round 2: kinds (Houses / Apartments / Land / Buildings) ---- */
+
+export const kinds: Kind[] = ['house', 'apartment', 'land', 'building'];
+const kindByType: Record<string, Kind> = {
+  villa: 'house', mansion: 'house', duplex: 'house', palais: 'house', townhouse: 'house', chalet: 'house', house: 'house',
+  apartment: 'apartment', penthouse: 'apartment', residence: 'apartment', studio: 'apartment', flat: 'apartment',
+  land: 'land', plot: 'land', building: 'building', tower: 'building',
+};
+/** Section of a listing. Uses `kind` when present and valid, else derives it from `type` (schema rule). */
+export function kindOf(l: Pick<Listing, 'kind' | 'type'>): Kind {
+  if (l.kind && (kinds as string[]).includes(l.kind)) return l.kind;
+  return kindByType[(l.type || '').toLowerCase()] ?? 'house';
+}
+/** URL segment for each kind (/properties/<segment>/). */
+export const kindSlug: Record<Kind, string> = { house: 'houses', apartment: 'apartments', land: 'land', building: 'buildings' };
+export const kindFromSlug = (slug: string): Kind | undefined => kinds.find(k => kindSlug[k] === slug);
+export const kindLabel: Record<Kind, Localised> = {
+  house: { en: 'House', ar: 'منزل' }, apartment: { en: 'Apartment', ar: 'شقة' }, land: { en: 'Land', ar: 'أرض' }, building: { en: 'Building', ar: 'عمارة' },
+};
+export const kindLabelPlural: Record<Kind, Localised> = {
+  house: { en: 'Houses', ar: 'منازل' }, apartment: { en: 'Apartments', ar: 'شقق' }, land: { en: 'Land', ar: 'أراضٍ' }, building: { en: 'Buildings', ar: 'عمارات' },
+};
+export const byKind = (k: Kind): Listing[] => listings.filter(l => kindOf(l) === k);
+/** Kinds that actually have listings today (drives optional pages/sections such as Land). */
+export const kindsPresent = (): Kind[] => kinds.filter(k => byKind(k).length > 0);
+/** Featured listings of one kind (up to n). If fewer than `min` are flagged featured, tops up with the newest available ones. */
+export function featuredByKind(k: Kind, n = 6, min = 3): Listing[] {
+  const pool = ordered(byKind(k)).filter(l => l.status !== 'sold');
+  const feats = pool.filter(l => l.featured);
+  const rest = pool.filter(l => !l.featured).slice(0, Math.max(0, min - feats.length));
+  return [...feats, ...rest].slice(0, n);
+}
+/** Distinct categories present in a set of listings (for chip filters on kind pages). */
+export function categoriesIn(list: Listing[]): Listing['category'][] {
+  return categories.filter(c => list.some(l => l.category === c));
+}
+/** Slugs that are routes of their own and can never be used by a listing. */
+export const reservedSlugs = new Set<string>([...Object.values(kindSlug), ...Object.values(categorySlug)]);
+
+/* ---- Round 2: Matterport tours ---- */
+
+/** Matterport model id when `virtualTourUrl` is a my.matterport.com/show/?m=<id> link, else null. */
+export function matterportId(url?: string | null): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    if (!/^(my\.)?matterport\.com$/i.test(u.hostname) || !/^\/show\/?$/.test(u.pathname)) return null;
+    const id = u.searchParams.get('m');
+    return id && /^[A-Za-z0-9_-]{4,64}$/.test(id) ? id : null;
+  } catch { return null; }
+}
+export const hasTour = (l: Listing): boolean => matterportId(l.virtualTourUrl) !== null;
+export function tourEmbedUrl(id: string): string {
+  return `https://my.matterport.com/show/?m=${encodeURIComponent(id)}&brand=0&play=1&qs=1&help=0`;
+}
+/** Every listing with an embeddable tour, newest first. */
+export const withTours = (): Listing[] => ordered(listings).filter(hasTour);
+
+/** Top featured listings with a hero image, for the home slideshow. */
+export function heroListings(n = 3): Listing[] {
+  const pool = featured().filter(l => l.images?.length);
+  return (pool.length ? pool : listings.filter(l => l.images?.length)).slice(0, n);
 }
 
 /** Alt text for an image in a locale, falling back to the listing title. */

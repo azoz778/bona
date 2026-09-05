@@ -1,6 +1,9 @@
 ---
-/* Base layout — owned by the site agent. The Head import and its props API are fixed (seo agent fills Head in). */
+/* Base layout — owned by the site agent. The Head import and its props API are fixed (seo agent fills Head in).
+   Round 2: Astro <ClientRouter /> (view transitions). Every <script> in the site is idempotent and (re)initialised on
+   `astro:page-load`; window/document-level listeners are bound exactly once per module. */
 import '../styles/global.css';
+import { ClientRouter } from 'astro:transitions';
 import Head from '../components/seo/Head.astro';
 import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
@@ -17,9 +20,12 @@ const { locale, hero = false, waMessage, ...head } = Astro.props;
 ---
 <!doctype html>
 <html lang={locale} dir={dir(locale)}>
-  <head><Head locale={locale} {...head} /></head>
+  <head>
+    <Head locale={locale} {...head} />
+    <ClientRouter />
+  </head>
   <body class:list={[!hero && 'pt-16 lg:pt-20']}>
-    <script is:inline>document.documentElement.classList.add('js');</script>
+    <script is:inline data-astro-rerun>document.documentElement.classList.add('js');</script>
     <a href="#main" class="label fixed start-4 top-4 z-[60] -translate-y-24 bg-ink px-4 py-3 text-ivory transition-transform focus:translate-y-0">{t(ui.skipToContent, locale)}</a>
     <Header locale={locale} path={head.path} overHero={hero} />
     <main id="main" tabindex="-1" class="outline-none">
@@ -28,16 +34,73 @@ const { locale, hero = false, waMessage, ...head } = Astro.props;
     <Footer locale={locale} />
     <WhatsAppFloat locale={locale} message={waMessage} />
     <script>
-      // Single reveal system: elements with [data-reveal] fade/translate in once, when 12% visible.
-      const items = document.querySelectorAll<HTMLElement>('[data-reveal]');
-      if (!('IntersectionObserver' in window) || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        items.forEach(el => el.classList.add('is-visible'));
-      } else {
+      /* Site-wide motion: reveals (with stagger), count-up stats, cursor "View" pill on listing cards. Idempotent. */
+      const reduce = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      function reveal() {
+        const items = document.querySelectorAll<HTMLElement>('[data-reveal]:not(.is-visible)');
+        if (!items.length) return;
+        if (!('IntersectionObserver' in window) || reduce()) { items.forEach(el => el.classList.add('is-visible')); return; }
         const io = new IntersectionObserver(entries => {
           for (const e of entries) if (e.isIntersecting) { e.target.classList.add('is-visible'); io.unobserve(e.target); }
         }, { threshold: 0.12, rootMargin: '0px 0px -6% 0px' });
         items.forEach(el => io.observe(el));
       }
+
+      function counters() {
+        const els = document.querySelectorAll<HTMLElement>('[data-count-to]:not([data-counted])');
+        if (!els.length) return;
+        const fmt = (el: HTMLElement, v: number) => {
+          const raw = el.dataset.countTo || '0';
+          const dec = (raw.split('.')[1] || '').length;
+          const num = el.dataset.countSep === '1' ? v.toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec }) : v.toFixed(dec);
+          return (el.dataset.countPrefix || '') + num + (el.dataset.countSuffix || '');
+        };
+        const run = (el: HTMLElement) => {
+          el.dataset.counted = '1';
+          const to = parseFloat(el.dataset.countTo || '0') || 0;
+          if (reduce() || !to) { el.textContent = fmt(el, to); return; }
+          const t0 = performance.now(), dur = 1500;
+          const step = (now: number) => {
+            const p = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+            el.textContent = fmt(el, to * e);
+            if (p < 1) requestAnimationFrame(step);
+          };
+          requestAnimationFrame(step);
+        };
+        if (!('IntersectionObserver' in window) || reduce()) { els.forEach(run); return; }
+        els.forEach(el => { el.textContent = fmt(el, 0); });
+        const io = new IntersectionObserver(entries => {
+          for (const e of entries) if (e.isIntersecting) { run(e.target as HTMLElement); io.unobserve(e.target); }
+        }, { threshold: 0.4 });
+        els.forEach(el => io.observe(el));
+      }
+
+      /* Cursor-following "View" pill over listing cards — desktop, fine pointer only. One document listener, bound once. */
+      let pillBound = false;
+      function viewPill() {
+        if (pillBound || !window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+        pillBound = true;
+        const pill = () => {
+          let p = document.querySelector<HTMLElement>('.view-pill');
+          if (!p) { p = document.createElement('div'); p.className = 'view-pill'; p.setAttribute('aria-hidden', 'true'); document.body.appendChild(p); }
+          return p;
+        };
+        document.addEventListener('pointermove', e => {
+          const card = (e.target as Element | null)?.closest?.('[data-listing][data-view]') as HTMLElement | null;
+          const p = pill();
+          if (!card) { p.classList.remove('is-on'); return; }
+          if (p.textContent !== card.dataset.view) p.textContent = card.dataset.view || '';
+          p.style.transform = `translate(${e.clientX}px, ${e.clientY}px) translate(-50%, -50%)`;
+          p.classList.add('is-on');
+        }, { passive: true });
+        document.addEventListener('pointerleave', () => pill().classList.remove('is-on'));
+      }
+
+      const init = () => { reveal(); counters(); viewPill(); };
+      document.addEventListener('astro:page-load', init);
+      // Restore the JS flag before the swapped-in page paints (html attributes are replaced on navigation).
+      document.addEventListener('astro:after-swap', () => document.documentElement.classList.add('js'));
     </script>
   </body>
 </html>

@@ -38,3 +38,20 @@ Array of listing objects:
 ```
 
 Rules: prices are asking prices from TK only (never an estimate — TAQEEM rule). Arabic must be real Arabic, not transliteration. Every listing needs at least 4 images with working URLs (HEAD 200).
+
+## Round 2 additions (2026-09-05 17:00)
+- `kind`: `"house" | "apartment" | "land" | "building"` — REQUIRED on every listing. Derived from `type`: villa/mansion/duplex/palais → house; apartment/penthouse → apartment; land → land; building → building. The site has separate Houses and Apartments sections driven by this field.
+- `virtualTourUrl`: full Matterport URL (`https://my.matterport.com/show/?m=<modelId>`); the site embeds it inline. `scripts/sync-listings.mjs` also syncs this field from TK's API (`virtual_tour_url`).
+- Optional `project`: `{ "name": {en,ar}, "developer": {en,ar} }` for units inside a development (e.g. Kian Residence units).
+- Optional `unit`: `{ "floor": "1st" | number | null, "block": string | null, "unitRef": string | null }`.
+- Optional `map`: `{ "lat": number, "lng": number }` (land plots); land images may be satellite stills.
+
+### Round 2 as implemented (2026-09-05, data agent)
+- `kind` is emitted by `scripts/curate/build.mjs` from `type` and enforced by `validate.mjs` (a `kind` that disagrees with `type` fails).
+- `project`, `unit`, `map` are always present in the JSON, `null` when not applicable (consumers can test truthiness).
+- **Land listings** (`kind: "land"`): `map` is REQUIRED and must be the exact plot pin (never a district-level pin); `specs.plotSqm` required; `images` may be 1–10 and each `src` may be a site-local still `"/land/<PLOT-ID>.jpg"` (served from `public/land/`, `thumb: null`) produced by `scripts/curate/land-stills.mjs` from TK's Esri tile proxy — `images[0]` is z=17 (the plot), `images[1]` is z=15 (context). The z=17 frame carries a small ring at the pin. Consumers must not prefix these with a CDN host.
+- **Image sharing**: images are unique across listings EXCEPT between listings that share the same `project.developer.en` (units of one development legitimately reuse the developer's renders). `images[0]` (the hero) is unique across the whole file, so a project's units never render identical cards.
+- **Units**: `project.name` matches the parent project page's `title` when the unit belongs to that named project (Kian Residence units in Al Nahda → `kayan-residence-al-nahda`). Units in the same developer's other buildings carry their own `project.name` (e.g. "Kian Al-Masiah — Building 113, Al Nuzhah") and link by `project.developer`. `unit.unitRef` is the TK unit id (also `sourceRef`), `unit.block` the building number, `unit.floor` the floor(s) offered as a string (e.g. `"1st, 2nd or 3rd"`).
+- `virtualTourUrl` must be a full `https://my.matterport.com/show/?m=<id>` URL; `scripts/sync-listings.mjs` fills it from the API when local is null and never clears a local value.
+- IDs are positional (`BONA-###` = index+1 in `listings.source.mjs`): new listings are appended at the END of the array, never inserted.
+- Curation helpers: `node scripts/curate/contact-sheet.mjs <gallery-folder> <out.jpg>` (labelled index sheet) and `node scripts/curate/land-stills.mjs <PLOT-ID> <lat> <lng>`.

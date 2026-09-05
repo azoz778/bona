@@ -1,0 +1,71 @@
+---
+/* /privacy/ — renders src/data/privacy.json (content agent). Defensive: empty sections/intro fall back to a short notice. */
+import Base from '../../layouts/Base.astro';
+import Breadcrumb from '../Breadcrumb.astro';
+import Icon from '../Icon.astro';
+import site from '../../data/site.json';
+import privacy from '../../data/privacy.json';
+import { localePath, t, ui, waLink, type Locale } from '../../lib/i18n';
+import { breadcrumbJsonLd } from '../../lib/seo';
+interface Props { locale: Locale }
+const { locale } = Astro.props;
+const path = localePath(locale, '/privacy/');
+type L = { en: string; ar: string };
+type Section = { id: string; heading: L; body: { en: string[]; ar: string[] } };
+const data = privacy as { updated?: string; title?: L; intro?: L; sections?: Section[]; contact?: L };
+const title = (data.title && t(data.title, locale)) || t(ui.navPrivacy, locale);
+const intro = (data.intro && t(data.intro, locale)) || '';
+const sections = (data.sections ?? []).filter(s => s && s.id && s.heading).map(s => ({
+  id: String(s.id).replace(/[^\w-]+/g, '-'),
+  heading: t(s.heading, locale),
+  body: ((s.body?.[locale] ?? s.body?.en) ?? []).filter(Boolean),
+}));
+const contact = (data.contact && t(data.contact, locale)) || '';
+const updatedIso = data.updated && /^\d{4}-\d{2}-\d{2}$/.test(data.updated) ? data.updated : null;
+const updatedText = updatedIso ? new Intl.DateTimeFormat(locale === 'ar' ? 'ar-u-nu-latn-ca-gregory' : 'en-GB', { dateStyle: 'long', timeZone: 'UTC' }).format(new Date(`${updatedIso}T00:00:00Z`)) : null;
+const wa = waLink(site.whatsapp.wa, t(ui.formGreeting, locale));
+const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { name: title, path }];
+const description = intro ? intro.slice(0, 155) : t(ui.privacyMetaDesc, locale);
+---
+<Base title={`${title} — ${locale === 'ar' ? site.nameAr : site.name}`} description={description} locale={locale} path={path} noindex={false} jsonLd={breadcrumbJsonLd(crumbs)}>
+  <section class="section-tight pt-8 lg:pt-10">
+    <div class="wrap-narrow">
+      <Breadcrumb locale={locale} items={crumbs.map(c => ({ name: c.name, href: c.path }))} />
+      <div class="mt-10" data-reveal>
+        <span class="rule"></span>
+        <h1 class="display-lg mt-6">{title}</h1>
+        {updatedText && <p class="label mt-5 text-stone-2">{t(ui.lastUpdated, locale)}: <time datetime={updatedIso} dir="ltr">{updatedText}</time></p>}
+        {intro ? <p class="statement mt-8">{intro}</p> : <p class="mt-8 max-w-[60ch] text-stone-2">{t(ui.privacyEmpty, locale)}</p>}
+      </div>
+
+      {sections.length > 1 && (
+        <nav aria-label={t(ui.onThisPage, locale)} class="mt-12 border-y border-ink/10 py-6" data-reveal>
+          <p class="label text-stone-2">{t(ui.onThisPage, locale)}</p>
+          <ol class="mt-4 grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
+            {sections.map((s, i) => <li class="flex gap-3"><span class="font-display text-champagne" dir="ltr">{String(i + 1).padStart(2, '0')}</span><a href={`#${s.id}`} class="link">{s.heading}</a></li>)}
+          </ol>
+        </nav>
+      )}
+
+      <div class="mt-4 divide-y divide-ink/10">
+        {sections.map((s, i) => (
+          <section id={s.id} class="scroll-mt-28 py-10" data-reveal>
+            <h2 class="display-md flex items-baseline gap-4"><span class="font-display text-lg text-champagne" dir="ltr">{String(i + 1).padStart(2, '0')}</span>{s.heading}</h2>
+            <div class="prose-bona mt-5 text-[15px] leading-relaxed text-ink/85 md:text-base">
+              {s.body.map(p => <p>{p}</p>)}
+            </div>
+          </section>
+        ))}
+      </div>
+
+      <div class="mt-12 border border-champagne/60 bg-ivory-2 p-8" data-reveal>
+        <p class="label text-stone-2">{t(ui.privacyContactTitle, locale)}</p>
+        {contact && <p class="mt-4 max-w-[60ch] text-[15px] leading-relaxed">{contact}</p>}
+        <div class="mt-6 flex flex-wrap gap-4">
+          <a href={wa} target="_blank" rel="noopener" class="btn btn-ink"><Icon name="whatsapp" size={17} />{t(ui.chatOnWhatsApp, locale)}</a>
+          <a href={`tel:${site.phone.e164}`} class="btn btn-outline" dir="ltr">{site.phone.display}</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</Base>

@@ -6,6 +6,7 @@
     "status": "available",
     "category": "buy",
     "type": "villa",
+    "kind": "house",
     "featured": true,
     "title": {
       "en": "Private Beach Villa, Durrat Al Arous",
@@ -139,6 +140,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-03-21"
   },
   {
@@ -148,6 +152,7 @@
     "status": "available",
     "category": "buy",
     "type": "mansion",
+    "kind": "house",
     "featured": true,
     "title": {
       "en": "Classic Mansion, Al Shati 6",
@@ -289,6 +294,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-03-21"
   },
   {
@@ -298,6 +306,7 @@
     "status": "available",
     "category": "buy",
     "type": "mansion",
+    "kind": "house",
     "featured": false,
     "title": {
       "en": "Andalus Mansion, Jeddah",
@@ -423,6 +432,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-09-05"
   },
   {
@@ -432,6 +444,7 @@
     "status": "available",
     "category": "buy",
     "type": "villa",
+    "kind": "house",
     "featured": true,
     "title": {
       "en": "Private Villa, Al Murjan",
@@ -565,6 +578,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-09-05"
   },
   {
@@ -574,6 +590,7 @@
     "status": "available",
     "category": "buy",
     "type": "villa",
+    "kind": "house",
     "featured": true,
     "title": {
       "en": "Contemporary Villa, Al Khalidiyah",
@@ -715,6 +732,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-03-21"
   },
   {
@@ -724,6 +744,7 @@
     "status": "available",
     "category": "buy",
     "type": "villa",
+    "kind": "house",
     "featured": true,
     "title": {
       "en": "Modern Villa, Al Zahra",
@@ -865,6 +886,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-09-05"
   },
   {
@@ -874,6 +898,7 @@
     "status": "available",
     "category": "buy",
     "type": "villa",
+    "kind": "house",
     "featured": false,
     "title": {
       "en": "Rooftop-View Villa, Al Mohammadiyah",
@@ -1015,6 +1040,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-09-05"
   },
   {
@@ -1024,6 +1052,7 @@
     "status": "available",
     "category": "buy",
     "type": "villa",
+    "kind": "house",
     "featured": false,
     "title": {
       "en": "Timber-Detailed Villa, Al Mohammadiyah",
@@ -1165,6 +1194,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-09-05"
   },
   {
@@ -1174,6 +1206,7 @@
     "status": "available",
     "category": "buy",
     "type": "villa",
+    "kind": "house",
     "featured": true,
     "title": {
       "en": "Garden-Facing Villa, Al Shera'a, North Obhur",
@@ -1315,6 +1348,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-09-05"
   },
   {
@@ -1324,6 +1360,7 @@
     "status": "available",
     "category": "buy",
     "type": "villa",
+    "kind": "house",
     "featured": false,
     "title": {
       "en": "Modern Villa, South Obhur",
@@ -1449,6 +1486,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-09-05"
   },
   {
@@ -1458,6 +1498,7 @@
     "status": "available",
     "category": "buy",
     "type": "villa",
+    "kind": "house",
     "featured": false,
     "title": {
       "en": "Villa near the Corniche, Al Lulu, Obhur",
@@ -1599,6 +1640,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-09-05"
   },
   {
@@ -1608,6 +1652,7 @@
     "status": "available",
     "category": "buy",
     "type": "villa",
+    "kind": "house",
     "featured": false,
     "title": {
       "en": "Al Bandar Villas, North Obhur",
@@ -1749,6 +1794,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-09-05"
   },
   {
@@ -1758,6 +1806,7 @@
     "status": "available",
     "category": "buy",
     "type": "penthouse",
+    "kind": "apartment",
     "featured": false,
     "title": {
       "en": "Duplex Penthouse, Al Salamah",
@@ -1891,6 +1940,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-09-05"
   },
   {
@@ -1900,6 +1952,7 @@
     "status": "available",
     "category": "buy",
     "type": "apartment",
+    "kind": "apartment",
     "featured": false,
     "title": {
       "en": "NOBAL Five, Al Rawdah",
@@ -2025,6 +2078,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-03-21"
   },
   {
@@ -2034,6 +2090,7 @@
     "status": "available",
     "category": "buy",
     "type": "apartment",
+    "kind": "apartment",
     "featured": false,
     "title": {
       "en": "Al Zahra Residences",
@@ -2167,6 +2224,9 @@
     },
     "virtualTourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-07-04"
   },
   {
@@ -2176,6 +2236,7 @@
     "status": "sold",
     "category": "buy",
     "type": "villa",
+    "kind": "house",
     "featured": false,
     "title": {
       "en": "Villa Al Shati 1",
@@ -2301,6 +2362,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-03-21"
   },
   {
@@ -2310,6 +2374,7 @@
     "status": "sold",
     "category": "buy",
     "type": "villa",
+    "kind": "house",
     "featured": false,
     "title": {
       "en": "Park-Facing Villa, Al Khalidiyah",
@@ -2435,6 +2500,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-03-21"
   },
   {
@@ -2444,6 +2512,7 @@
     "status": "available",
     "category": "rent",
     "type": "villa",
+    "kind": "house",
     "featured": false,
     "title": {
       "en": "Villa for Rent, Al Shati 2",
@@ -2569,6 +2638,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-09-05"
   },
   {
@@ -2578,6 +2650,7 @@
     "status": "available",
     "category": "rent",
     "type": "villa",
+    "kind": "house",
     "featured": false,
     "title": {
       "en": "Villa for Rent, Al Murjan",
@@ -2703,6 +2776,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-09-05"
   },
   {
@@ -2712,6 +2788,7 @@
     "status": "available",
     "category": "rent",
     "type": "villa",
+    "kind": "house",
     "featured": false,
     "title": {
       "en": "Renovated Villa for Rent, Al Murjan",
@@ -2837,6 +2914,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-09-05"
   },
   {
@@ -2846,6 +2926,7 @@
     "status": "available",
     "category": "rent",
     "type": "villa",
+    "kind": "house",
     "featured": false,
     "title": {
       "en": "Villa for Rent, Al Mohammadiyah",
@@ -2971,6 +3052,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-09-05"
   },
   {
@@ -2980,6 +3064,7 @@
     "status": "available",
     "category": "off-plan",
     "type": "apartment",
+    "kind": "apartment",
     "featured": true,
     "title": {
       "en": "Trump Tower Jeddah",
@@ -3113,6 +3198,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-03-21"
   },
   {
@@ -3122,6 +3210,7 @@
     "status": "available",
     "category": "off-plan",
     "type": "apartment",
+    "kind": "apartment",
     "featured": false,
     "title": {
       "en": "Trump Plaza Jeddah",
@@ -3263,6 +3352,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-03-21"
   },
   {
@@ -3272,6 +3364,7 @@
     "status": "available",
     "category": "off-plan",
     "type": "villa",
+    "kind": "house",
     "featured": false,
     "title": {
       "en": "NOBAL Arista, Al Khalidiyah",
@@ -3405,6 +3498,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-03-21"
   },
   {
@@ -3414,6 +3510,7 @@
     "status": "available",
     "category": "off-plan",
     "type": "apartment",
+    "kind": "apartment",
     "featured": false,
     "title": {
       "en": "Kayan Residence, Al Nahda",
@@ -3547,6 +3644,18 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": {
+      "name": {
+        "en": "Kayan Residence, Al Nahda",
+        "ar": "كيان ريزيدنس، النهضة"
+      },
+      "developer": {
+        "en": "Kian Al-Masiah",
+        "ar": "كيان الماسية"
+      }
+    },
+    "unit": null,
+    "map": null,
     "listedAt": "2026-09-05"
   },
   {
@@ -3556,6 +3665,7 @@
     "status": "available",
     "category": "off-plan",
     "type": "apartment",
+    "kind": "apartment",
     "featured": false,
     "title": {
       "en": "Dari II, Al Salamah",
@@ -3697,6 +3807,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-04-14"
   },
   {
@@ -3706,6 +3819,7 @@
     "status": "available",
     "category": "off-plan",
     "type": "apartment",
+    "kind": "apartment",
     "featured": false,
     "title": {
       "en": "Marriott Residences, AIDA, Muscat",
@@ -3831,6 +3945,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-03-21"
   },
   {
@@ -3840,6 +3957,7 @@
     "status": "available",
     "category": "international",
     "type": "mansion",
+    "kind": "house",
     "featured": true,
     "title": {
       "en": "Palais Rose, Le Vésinet",
@@ -3981,6 +4099,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-03-21"
   },
   {
@@ -3990,6 +4111,7 @@
     "status": "sold",
     "category": "international",
     "type": "mansion",
+    "kind": "house",
     "featured": false,
     "title": {
       "en": "Palais Vénitien, Cannes",
@@ -4131,6 +4253,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-03-21"
   },
   {
@@ -4140,6 +4265,7 @@
     "status": "available",
     "category": "international",
     "type": "apartment",
+    "kind": "apartment",
     "featured": false,
     "title": {
       "en": "Da Vinci Tower by Pagani, Dubai",
@@ -4273,6 +4399,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-09-05"
   },
   {
@@ -4282,6 +4411,7 @@
     "status": "available",
     "category": "international",
     "type": "mansion",
+    "kind": "house",
     "featured": false,
     "title": {
       "en": "Painite Villas by Lamborghini, Benahavís",
@@ -4399,6 +4529,9 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-04-18"
   },
   {
@@ -4408,6 +4541,7 @@
     "status": "available",
     "category": "international",
     "type": "villa",
+    "kind": "house",
     "featured": false,
     "title": {
       "en": "Trump Cliff Villas, AIDA, Muscat",
@@ -4549,6 +4683,1977 @@
     },
     "virtualTourUrl": null,
     "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
     "listedAt": "2026-03-21"
+  },
+  {
+    "id": "BONA-033",
+    "slug": "kayan-residence-al-nahda-unit-128a",
+    "sourceRef": "KIA-128A",
+    "status": "available",
+    "category": "buy",
+    "type": "apartment",
+    "kind": "apartment",
+    "featured": false,
+    "title": {
+      "en": "Kayan Residence, 136 sqm Apartment, Al Nahda",
+      "ar": "كيان ريزيدنس، شقة 136 م²، النهضة"
+    },
+    "location": {
+      "district": {
+        "en": "Al Nahda",
+        "ar": "النهضة"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 990000,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": 2,
+      "baths": 3,
+      "areaSqm": 136,
+      "plotSqm": null,
+      "yearBuilt": 2024,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/uwq4bakpspm7gkozgcli_video_project_25_1_1_.v2.0000000-0ee6d0.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/uwq4bakpspm7gkozgcli_video_project_25_1_1_.v2.0000000-0ee6d0.webp",
+        "alt": {
+          "en": "Exterior — Kayan Residence, 136 sqm Apartment, Al Nahda",
+          "ar": "الواجهة الخارجية — كيان ريزيدنس، شقة 136 م²، النهضة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-10-48a86949-850b20.webp",
+        "alt": {
+          "en": "Living room — Kayan Residence, 136 sqm Apartment, Al Nahda",
+          "ar": "غرفة المعيشة — كيان ريزيدنس، شقة 136 م²، النهضة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-19-cfd1be.webp",
+        "alt": {
+          "en": "Kitchen — Kayan Residence, 136 sqm Apartment, Al Nahda",
+          "ar": "المطبخ — كيان ريزيدنس، شقة 136 م²، النهضة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-36-e5e9aa.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-36-e5e9aa.webp",
+        "alt": {
+          "en": "Bedroom — Kayan Residence, 136 sqm Apartment, Al Nahda",
+          "ar": "غرفة النوم — كيان ريزيدنس، شقة 136 م²، النهضة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-18-fd9332.webp",
+        "alt": {
+          "en": "Bathroom — Kayan Residence, 136 sqm Apartment, Al Nahda",
+          "ar": "الحمام — كيان ريزيدنس، شقة 136 م²، النهضة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-9-b8d887.webp",
+        "alt": {
+          "en": "Lobby — Kayan Residence, 136 sqm Apartment, Al Nahda",
+          "ar": "البهو — كيان ريزيدنس، شقة 136 م²، النهضة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-46-1bc2ec.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-46-1bc2ec.webp",
+        "alt": {
+          "en": "Café terrace — Kayan Residence, 136 sqm Apartment, Al Nahda",
+          "ar": "تراس المقهى — كيان ريزيدنس، شقة 136 م²، النهضة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-52-1c9679.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-52-1c9679.webp",
+        "alt": {
+          "en": "Façade at night — Kayan Residence, 136 sqm Apartment, Al Nahda",
+          "ar": "الواجهة ليلاً — كيان ريزيدنس، شقة 136 م²، النهضة"
+        }
+      }
+    ],
+    "description": {
+      "en": "A four-room apartment of 136 square metres in Kayan Residence, Al Nahda, a short distance from the Jeddah waterfront. The plan holds two bedrooms, three bathrooms, a large living room and a modern kitchen, and each apartment is served by its own private elevator.\n\nThe building was completed in 2024 by Kian Al-Masiah and is run on a hotel model: a coffee-shop area, a children's play area, a gym, smart access and covered parking, with a smart-home system and central air conditioning in every residence.\n\nUnits of this plan are offered on the first, second and third floors at SAR 990,000.",
+      "ar": "شقة من أربع غرف بمساحة 136 متراً مربعاً في كيان ريزيدنس بحي النهضة، على مسافة قصيرة من الواجهة البحرية لجدة. يضم المخطط غرفتي نوم وثلاث دورات مياه وصالة واسعة ومطبخاً حديثاً، ويخدم كل شقة مصعد خاص بها.\n\nاكتمل بناء المبنى عام 2024 على يد كيان الماسية، ويُدار بأسلوب فندقي: منطقة مقهى ومنطقة ألعاب للأطفال ونادٍ رياضي ودخول ذكي ومواقف مغطاة، مع نظام منزل ذكي وتكييف مركزي في كل مسكن.\n\nتُعرض وحدات هذا المخطط في الأدوار الأول والثاني والثالث بسعر 990,000 ريال سعودي."
+    },
+    "highlights": {
+      "en": [
+        "136 sqm, two bedrooms and three bathrooms",
+        "Private elevator to the apartment",
+        "Completed 2024",
+        "Hotel-style building with coffee shop and gym",
+        "First, second or third floor",
+        "SAR 990,000"
+      ],
+      "ar": [
+        "136 متراً مربعاً، غرفتا نوم وثلاث دورات مياه",
+        "مصعد خاص للشقة",
+        "اكتمل البناء عام 2024",
+        "مبنى بأسلوب فندقي مع مقهى ونادٍ رياضي",
+        "الدور الأول أو الثاني أو الثالث",
+        "990,000 ريال سعودي"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": {
+      "name": {
+        "en": "Kayan Residence, Al Nahda",
+        "ar": "كيان ريزيدنس، النهضة"
+      },
+      "developer": {
+        "en": "Kian Al-Masiah",
+        "ar": "كيان الماسية"
+      }
+    },
+    "unit": {
+      "floor": "1st, 2nd or 3rd",
+      "block": "128",
+      "unitRef": "KIA-128A"
+    },
+    "map": null,
+    "listedAt": "2026-09-01"
+  },
+  {
+    "id": "BONA-034",
+    "slug": "kayan-residence-al-nahda-unit-127a",
+    "sourceRef": "KIA-127A",
+    "status": "available",
+    "category": "buy",
+    "type": "apartment",
+    "kind": "apartment",
+    "featured": false,
+    "title": {
+      "en": "Kayan Residence, 120 sqm Apartment, Al Nahda",
+      "ar": "كيان ريزيدنس، شقة 120 م²، النهضة"
+    },
+    "location": {
+      "district": {
+        "en": "Al Nahda",
+        "ar": "النهضة"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 940000,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": 2,
+      "baths": 3,
+      "areaSqm": 120,
+      "plotSqm": null,
+      "yearBuilt": 2024,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-52-1c9679.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-52-1c9679.webp",
+        "alt": {
+          "en": "Façade at night — Kayan Residence, 120 sqm Apartment, Al Nahda",
+          "ar": "الواجهة ليلاً — كيان ريزيدنس، شقة 120 م²، النهضة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-33-792ba2.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-33-792ba2.webp",
+        "alt": {
+          "en": "Living room — Kayan Residence, 120 sqm Apartment, Al Nahda",
+          "ar": "غرفة المعيشة — كيان ريزيدنس، شقة 120 م²، النهضة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-35-fd1ebb.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-35-fd1ebb.webp",
+        "alt": {
+          "en": "Kitchen — Kayan Residence, 120 sqm Apartment, Al Nahda",
+          "ar": "المطبخ — كيان ريزيدنس، شقة 120 م²، النهضة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-37-7cead7.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-37-7cead7.webp",
+        "alt": {
+          "en": "Bedroom — Kayan Residence, 120 sqm Apartment, Al Nahda",
+          "ar": "غرفة النوم — كيان ريزيدنس، شقة 120 م²، النهضة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-18-fd9332.webp",
+        "alt": {
+          "en": "Bathroom — Kayan Residence, 120 sqm Apartment, Al Nahda",
+          "ar": "الحمام — كيان ريزيدنس، شقة 120 م²، النهضة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-49-3dbda5.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-49-3dbda5.webp",
+        "alt": {
+          "en": "Café terrace — Kayan Residence, 120 sqm Apartment, Al Nahda",
+          "ar": "تراس المقهى — كيان ريزيدنس، شقة 120 م²، النهضة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-63-3dfc0b.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-63-3dfc0b.webp",
+        "alt": {
+          "en": "Gym — Kayan Residence, 120 sqm Apartment, Al Nahda",
+          "ar": "النادي الرياضي — كيان ريزيدنس، شقة 120 م²، النهضة"
+        }
+      }
+    ],
+    "description": {
+      "en": "The three-room plan at Kayan Residence, Al Nahda: 120 square metres with two bedrooms, three bathrooms, a living room and a fitted kitchen, served by a private elevator. The building was completed in 2024 by Kian Al-Masiah.\n\nResidents share the hotel-style ground floor with its coffee-shop area and children's play area, a gym, smart access and covered parking. Every apartment has a smart-home system and central air conditioning.\n\nOffered on the first and third floors at SAR 940,000.",
+      "ar": "مخطط الغرف الثلاث في كيان ريزيدنس بحي النهضة: 120 متراً مربعاً بغرفتي نوم وثلاث دورات مياه وصالة ومطبخ مجهز، ويخدمه مصعد خاص. اكتمل بناء المبنى عام 2024 على يد كيان الماسية.\n\nيتشارك السكان الطابق الأرضي ذا الطابع الفندقي بمنطقة المقهى ومنطقة ألعاب الأطفال، إلى جانب نادٍ رياضي ودخول ذكي ومواقف مغطاة. وفي كل شقة نظام منزل ذكي وتكييف مركزي.\n\nتُعرض في الدورين الأول والثالث بسعر 940,000 ريال سعودي."
+    },
+    "highlights": {
+      "en": [
+        "120 sqm, two bedrooms and three bathrooms",
+        "Private elevator to the apartment",
+        "Completed 2024",
+        "Coffee shop, gym and children's area",
+        "First or third floor",
+        "SAR 940,000"
+      ],
+      "ar": [
+        "120 متراً مربعاً، غرفتا نوم وثلاث دورات مياه",
+        "مصعد خاص للشقة",
+        "اكتمل البناء عام 2024",
+        "مقهى ونادٍ رياضي ومنطقة للأطفال",
+        "الدور الأول أو الثالث",
+        "940,000 ريال سعودي"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": {
+      "name": {
+        "en": "Kayan Residence, Al Nahda",
+        "ar": "كيان ريزيدنس، النهضة"
+      },
+      "developer": {
+        "en": "Kian Al-Masiah",
+        "ar": "كيان الماسية"
+      }
+    },
+    "unit": {
+      "floor": "1st or 3rd",
+      "block": "127",
+      "unitRef": "KIA-127A"
+    },
+    "map": null,
+    "listedAt": "2026-09-01"
+  },
+  {
+    "id": "BONA-035",
+    "slug": "kian-building-113-unit-a-al-nuzhah",
+    "sourceRef": "KIA-113A",
+    "status": "available",
+    "category": "buy",
+    "type": "apartment",
+    "kind": "apartment",
+    "featured": false,
+    "title": {
+      "en": "Three-Bedroom Apartment, Building 113, Al Nuzhah",
+      "ar": "شقة بثلاث غرف نوم، مبنى 113، النزهة"
+    },
+    "location": {
+      "district": {
+        "en": "Al Nuzhah",
+        "ar": "النزهة"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 750000,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": 3,
+      "baths": 3,
+      "areaSqm": 174,
+      "plotSqm": null,
+      "yearBuilt": 2024,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-10-48a86949-850b20.webp",
+        "alt": {
+          "en": "Living room — Three-Bedroom Apartment, Building 113, Al Nuzhah",
+          "ar": "غرفة المعيشة — شقة بثلاث غرف نوم، مبنى 113، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-19-cfd1be.webp",
+        "alt": {
+          "en": "Kitchen — Three-Bedroom Apartment, Building 113, Al Nuzhah",
+          "ar": "المطبخ — شقة بثلاث غرف نوم، مبنى 113، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-38-e33ac8.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-38-e33ac8.webp",
+        "alt": {
+          "en": "Bedroom — Three-Bedroom Apartment, Building 113, Al Nuzhah",
+          "ar": "غرفة النوم — شقة بثلاث غرف نوم، مبنى 113، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-18-fd9332.webp",
+        "alt": {
+          "en": "Bathroom — Three-Bedroom Apartment, Building 113, Al Nuzhah",
+          "ar": "الحمام — شقة بثلاث غرف نوم، مبنى 113، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-9-b8d887.webp",
+        "alt": {
+          "en": "Lobby — Three-Bedroom Apartment, Building 113, Al Nuzhah",
+          "ar": "البهو — شقة بثلاث غرف نوم، مبنى 113، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9b5e8f.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-9b5e8f.webp",
+        "alt": {
+          "en": "Exterior — Three-Bedroom Apartment, Building 113, Al Nuzhah",
+          "ar": "الواجهة الخارجية — شقة بثلاث غرف نوم، مبنى 113، النزهة"
+        }
+      }
+    ],
+    "description": {
+      "en": "A five-room apartment of 174 square metres in Building 113, Al Nuzhah, on a commercial street with shops and services on the doorstep. Three bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.\n\nAsking price SAR 750,000. The photographs show the developer's completed Kayan Residence building in Al Nahda and illustrate its standard of finish; a viewing of the unit itself can be arranged.",
+      "ar": "شقة من خمس غرف بمساحة 174 متراً مربعاً في مبنى 113 بحي النزهة، على شارع تجاري تتوفر فيه المحال والخدمات على مقربة. ثلاث غرف نوم وثلاث دورات مياه، واكتمل البناء عام 2024 على يد كيان الماسية.\n\nالسعر المطلوب 750,000 ريال سعودي. الصور من مبنى كيان ريزيدنس المكتمل للمطور نفسه في حي النهضة وتوضح مستوى التشطيب المعتمد لديه، ويمكن ترتيب معاينة الوحدة نفسها."
+    },
+    "highlights": {
+      "en": [
+        "174 sqm, three bedrooms",
+        "Three bathrooms",
+        "Completed 2024",
+        "Commercial street frontage",
+        "SAR 750,000"
+      ],
+      "ar": [
+        "174 متراً مربعاً، ثلاث غرف نوم",
+        "ثلاث دورات مياه",
+        "اكتمل البناء عام 2024",
+        "على شارع تجاري",
+        "750,000 ريال سعودي"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": {
+      "name": {
+        "en": "Kian Al-Masiah — Building 113, Al Nuzhah",
+        "ar": "كيان الماسية — مبنى 113، النزهة"
+      },
+      "developer": {
+        "en": "Kian Al-Masiah",
+        "ar": "كيان الماسية"
+      }
+    },
+    "unit": {
+      "floor": null,
+      "block": "113",
+      "unitRef": "KIA-113A"
+    },
+    "map": null,
+    "listedAt": "2026-09-01"
+  },
+  {
+    "id": "BONA-036",
+    "slug": "kian-building-113-unit-b-al-nuzhah",
+    "sourceRef": "KIA-113B",
+    "status": "available",
+    "category": "buy",
+    "type": "apartment",
+    "kind": "apartment",
+    "featured": false,
+    "title": {
+      "en": "Three-Bedroom Apartment of 182 sqm, Building 113, Al Nuzhah",
+      "ar": "شقة بثلاث غرف نوم بمساحة 182 م²، مبنى 113، النزهة"
+    },
+    "location": {
+      "district": {
+        "en": "Al Nuzhah",
+        "ar": "النزهة"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 790000,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": 3,
+      "baths": 3,
+      "areaSqm": 182,
+      "plotSqm": null,
+      "yearBuilt": 2024,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-33-792ba2.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-33-792ba2.webp",
+        "alt": {
+          "en": "Living room — Three-Bedroom Apartment of 182 sqm, Building 113, Al Nuzhah",
+          "ar": "غرفة المعيشة — شقة بثلاث غرف نوم بمساحة 182 م²، مبنى 113، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-35-fd1ebb.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-35-fd1ebb.webp",
+        "alt": {
+          "en": "Kitchen — Three-Bedroom Apartment of 182 sqm, Building 113, Al Nuzhah",
+          "ar": "المطبخ — شقة بثلاث غرف نوم بمساحة 182 م²، مبنى 113، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-36-e5e9aa.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-36-e5e9aa.webp",
+        "alt": {
+          "en": "Bedroom — Three-Bedroom Apartment of 182 sqm, Building 113, Al Nuzhah",
+          "ar": "غرفة النوم — شقة بثلاث غرف نوم بمساحة 182 م²، مبنى 113، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-39-34403a.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-39-34403a.webp",
+        "alt": {
+          "en": "Bedroom — Three-Bedroom Apartment of 182 sqm, Building 113, Al Nuzhah",
+          "ar": "غرفة النوم — شقة بثلاث غرف نوم بمساحة 182 م²، مبنى 113، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-18-fd9332.webp",
+        "alt": {
+          "en": "Bathroom — Three-Bedroom Apartment of 182 sqm, Building 113, Al Nuzhah",
+          "ar": "الحمام — شقة بثلاث غرف نوم بمساحة 182 م²، مبنى 113، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-47-f7e11d.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-47-f7e11d.webp",
+        "alt": {
+          "en": "Roof terrace — Three-Bedroom Apartment of 182 sqm, Building 113, Al Nuzhah",
+          "ar": "التراس العلوي — شقة بثلاث غرف نوم بمساحة 182 م²، مبنى 113، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/uwq4bakpspm7gkozgcli_video_project_25_1_1_.v2.0000000-0ee6d0.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/uwq4bakpspm7gkozgcli_video_project_25_1_1_.v2.0000000-0ee6d0.webp",
+        "alt": {
+          "en": "Exterior — Three-Bedroom Apartment of 182 sqm, Building 113, Al Nuzhah",
+          "ar": "الواجهة الخارجية — شقة بثلاث غرف نوم بمساحة 182 م²، مبنى 113، النزهة"
+        }
+      }
+    ],
+    "description": {
+      "en": "The largest plan in Building 113, Al Nuzhah: 182 square metres over five rooms, with three bedrooms and three bathrooms, on a commercial street close to everyday shops and services. Completed in 2024 by Kian Al-Masiah.\n\nAsking price SAR 790,000. The photographs show the developer's completed Kayan Residence building in Al Nahda and illustrate its standard of finish; a viewing of the unit itself can be arranged.",
+      "ar": "أكبر مخططات مبنى 113 بحي النزهة: 182 متراً مربعاً موزعة على خمس غرف، منها ثلاث غرف نوم وثلاث دورات مياه، على شارع تجاري قريب من المحال والخدمات اليومية. اكتمل البناء عام 2024 على يد كيان الماسية.\n\nالسعر المطلوب 790,000 ريال سعودي. الصور من مبنى كيان ريزيدنس المكتمل للمطور نفسه في حي النهضة وتوضح مستوى التشطيب المعتمد لديه، ويمكن ترتيب معاينة الوحدة نفسها."
+    },
+    "highlights": {
+      "en": [
+        "182 sqm, the largest plan in the building",
+        "Three bedrooms, three bathrooms",
+        "Completed 2024",
+        "Commercial street frontage",
+        "SAR 790,000"
+      ],
+      "ar": [
+        "182 متراً مربعاً، أكبر مخططات المبنى",
+        "ثلاث غرف نوم وثلاث دورات مياه",
+        "اكتمل البناء عام 2024",
+        "على شارع تجاري",
+        "790,000 ريال سعودي"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": {
+      "name": {
+        "en": "Kian Al-Masiah — Building 113, Al Nuzhah",
+        "ar": "كيان الماسية — مبنى 113، النزهة"
+      },
+      "developer": {
+        "en": "Kian Al-Masiah",
+        "ar": "كيان الماسية"
+      }
+    },
+    "unit": {
+      "floor": null,
+      "block": "113",
+      "unitRef": "KIA-113B"
+    },
+    "map": null,
+    "listedAt": "2026-09-01"
+  },
+  {
+    "id": "BONA-037",
+    "slug": "kian-building-113-unit-c-al-nuzhah",
+    "sourceRef": "KIA-113C",
+    "status": "available",
+    "category": "buy",
+    "type": "apartment",
+    "kind": "apartment",
+    "featured": false,
+    "title": {
+      "en": "Corner Three-Bedroom Apartment, Building 113, Al Nuzhah",
+      "ar": "شقة زاوية بثلاث غرف نوم، مبنى 113، النزهة"
+    },
+    "location": {
+      "district": {
+        "en": "Al Nuzhah",
+        "ar": "النزهة"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 760000,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": 3,
+      "baths": 3,
+      "areaSqm": 174,
+      "plotSqm": null,
+      "yearBuilt": 2024,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-9-b8d887.webp",
+        "alt": {
+          "en": "Lobby — Corner Three-Bedroom Apartment, Building 113, Al Nuzhah",
+          "ar": "البهو — شقة زاوية بثلاث غرف نوم، مبنى 113، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-10-48a86949-850b20.webp",
+        "alt": {
+          "en": "Living room — Corner Three-Bedroom Apartment, Building 113, Al Nuzhah",
+          "ar": "غرفة المعيشة — شقة زاوية بثلاث غرف نوم، مبنى 113، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-19-cfd1be.webp",
+        "alt": {
+          "en": "Kitchen — Corner Three-Bedroom Apartment, Building 113, Al Nuzhah",
+          "ar": "المطبخ — شقة زاوية بثلاث غرف نوم، مبنى 113، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-37-7cead7.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-37-7cead7.webp",
+        "alt": {
+          "en": "Bedroom — Corner Three-Bedroom Apartment, Building 113, Al Nuzhah",
+          "ar": "غرفة النوم — شقة زاوية بثلاث غرف نوم، مبنى 113، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-18-fd9332.webp",
+        "alt": {
+          "en": "Bathroom — Corner Three-Bedroom Apartment, Building 113, Al Nuzhah",
+          "ar": "الحمام — شقة زاوية بثلاث غرف نوم، مبنى 113، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-65-967710.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-65-967710.webp",
+        "alt": {
+          "en": "Covered parking — Corner Three-Bedroom Apartment, Building 113, Al Nuzhah",
+          "ar": "المواقف المغطاة — شقة زاوية بثلاث غرف نوم، مبنى 113، النزهة"
+        }
+      }
+    ],
+    "description": {
+      "en": "A corner apartment of 174 square metres in Building 113, Al Nuzhah, with frontage on two streets and daylight from two sides. Five rooms in all: three bedrooms, three bathrooms and the living spaces. Completed in 2024 by Kian Al-Masiah.\n\nAsking price SAR 760,000. The photographs show the developer's completed Kayan Residence building in Al Nahda and illustrate its standard of finish; a viewing of the unit itself can be arranged.",
+      "ar": "شقة زاوية بمساحة 174 متراً مربعاً في مبنى 113 بحي النزهة، بواجهتين على شارعين وإضاءة طبيعية من جهتين. خمس غرف في المجموع: ثلاث غرف نوم وثلاث دورات مياه ومساحات المعيشة. اكتمل البناء عام 2024 على يد كيان الماسية.\n\nالسعر المطلوب 760,000 ريال سعودي. الصور من مبنى كيان ريزيدنس المكتمل للمطور نفسه في حي النهضة وتوضح مستوى التشطيب المعتمد لديه، ويمكن ترتيب معاينة الوحدة نفسها."
+    },
+    "highlights": {
+      "en": [
+        "Corner unit on two streets",
+        "174 sqm, three bedrooms",
+        "Three bathrooms",
+        "Completed 2024",
+        "SAR 760,000"
+      ],
+      "ar": [
+        "وحدة زاوية على شارعين",
+        "174 متراً مربعاً، ثلاث غرف نوم",
+        "ثلاث دورات مياه",
+        "اكتمل البناء عام 2024",
+        "760,000 ريال سعودي"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": {
+      "name": {
+        "en": "Kian Al-Masiah — Building 113, Al Nuzhah",
+        "ar": "كيان الماسية — مبنى 113، النزهة"
+      },
+      "developer": {
+        "en": "Kian Al-Masiah",
+        "ar": "كيان الماسية"
+      }
+    },
+    "unit": {
+      "floor": null,
+      "block": "113",
+      "unitRef": "KIA-113C"
+    },
+    "map": null,
+    "listedAt": "2026-09-01"
+  },
+  {
+    "id": "BONA-038",
+    "slug": "kian-building-114-unit-b-al-nuzhah",
+    "sourceRef": "KIA-114B",
+    "status": "available",
+    "category": "buy",
+    "type": "apartment",
+    "kind": "apartment",
+    "featured": false,
+    "title": {
+      "en": "Rear Three-Bedroom Apartment, Building 114, Al Nuzhah",
+      "ar": "شقة خلفية بثلاث غرف نوم، مبنى 114، النزهة"
+    },
+    "location": {
+      "district": {
+        "en": "Al Nuzhah",
+        "ar": "النزهة"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 660000,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": 3,
+      "baths": 3,
+      "areaSqm": 169,
+      "plotSqm": null,
+      "yearBuilt": 2024,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-19-cfd1be.webp",
+        "alt": {
+          "en": "Kitchen — Rear Three-Bedroom Apartment, Building 114, Al Nuzhah",
+          "ar": "المطبخ — شقة خلفية بثلاث غرف نوم، مبنى 114، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-33-792ba2.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-33-792ba2.webp",
+        "alt": {
+          "en": "Living room — Rear Three-Bedroom Apartment, Building 114, Al Nuzhah",
+          "ar": "غرفة المعيشة — شقة خلفية بثلاث غرف نوم، مبنى 114، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-38-e33ac8.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-38-e33ac8.webp",
+        "alt": {
+          "en": "Bedroom — Rear Three-Bedroom Apartment, Building 114, Al Nuzhah",
+          "ar": "غرفة النوم — شقة خلفية بثلاث غرف نوم، مبنى 114، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-18-fd9332.webp",
+        "alt": {
+          "en": "Bathroom — Rear Three-Bedroom Apartment, Building 114, Al Nuzhah",
+          "ar": "الحمام — شقة خلفية بثلاث غرف نوم، مبنى 114، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-63-3dfc0b.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-63-3dfc0b.webp",
+        "alt": {
+          "en": "Gym — Rear Three-Bedroom Apartment, Building 114, Al Nuzhah",
+          "ar": "النادي الرياضي — شقة خلفية بثلاث غرف نوم، مبنى 114، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9b5e8f.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-9b5e8f.webp",
+        "alt": {
+          "en": "Exterior — Rear Three-Bedroom Apartment, Building 114, Al Nuzhah",
+          "ar": "الواجهة الخارجية — شقة خلفية بثلاث غرف نوم، مبنى 114، النزهة"
+        }
+      }
+    ],
+    "description": {
+      "en": "A five-room apartment of 169 square metres at the rear of Building 114, Al Nuzhah, set back from the commercial street the building fronts, so the bedrooms sit on the quieter side. Three bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.\n\nAsking price SAR 660,000. The photographs show the developer's completed Kayan Residence building in Al Nahda and illustrate its standard of finish; a viewing of the unit itself can be arranged.",
+      "ar": "شقة من خمس غرف بمساحة 169 متراً مربعاً في الجهة الخلفية من مبنى 114 بحي النزهة، بعيداً عن الشارع التجاري الذي يطل عليه المبنى، فتقع غرف النوم على الجانب الأهدأ. ثلاث غرف نوم وثلاث دورات مياه، واكتمل البناء عام 2024 على يد كيان الماسية.\n\nالسعر المطلوب 660,000 ريال سعودي. الصور من مبنى كيان ريزيدنس المكتمل للمطور نفسه في حي النهضة وتوضح مستوى التشطيب المعتمد لديه، ويمكن ترتيب معاينة الوحدة نفسها."
+    },
+    "highlights": {
+      "en": [
+        "169 sqm, three bedrooms",
+        "Rear unit on the quieter side",
+        "Three bathrooms",
+        "Completed 2024",
+        "SAR 660,000"
+      ],
+      "ar": [
+        "169 متراً مربعاً، ثلاث غرف نوم",
+        "وحدة خلفية على الجانب الأهدأ",
+        "ثلاث دورات مياه",
+        "اكتمل البناء عام 2024",
+        "660,000 ريال سعودي"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": {
+      "name": {
+        "en": "Kian Al-Masiah — Building 114, Al Nuzhah",
+        "ar": "كيان الماسية — مبنى 114، النزهة"
+      },
+      "developer": {
+        "en": "Kian Al-Masiah",
+        "ar": "كيان الماسية"
+      }
+    },
+    "unit": {
+      "floor": null,
+      "block": "114",
+      "unitRef": "KIA-114B"
+    },
+    "map": null,
+    "listedAt": "2026-09-01"
+  },
+  {
+    "id": "BONA-039",
+    "slug": "kian-building-114-unit-c-al-nuzhah",
+    "sourceRef": "KIA-114C",
+    "status": "available",
+    "category": "buy",
+    "type": "apartment",
+    "kind": "apartment",
+    "featured": false,
+    "title": {
+      "en": "Fourth-Floor Two-Bedroom Apartment, Building 114, Al Nuzhah",
+      "ar": "شقة بغرفتي نوم في الدور الرابع، مبنى 114، النزهة"
+    },
+    "location": {
+      "district": {
+        "en": "Al Nuzhah",
+        "ar": "النزهة"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 595000,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": 2,
+      "baths": 3,
+      "areaSqm": 151,
+      "plotSqm": null,
+      "yearBuilt": 2024,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-35-fd1ebb.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-35-fd1ebb.webp",
+        "alt": {
+          "en": "Kitchen — Fourth-Floor Two-Bedroom Apartment, Building 114, Al Nuzhah",
+          "ar": "المطبخ — شقة بغرفتي نوم في الدور الرابع، مبنى 114، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-10-48a86949-850b20.webp",
+        "alt": {
+          "en": "Living room — Fourth-Floor Two-Bedroom Apartment, Building 114, Al Nuzhah",
+          "ar": "غرفة المعيشة — شقة بغرفتي نوم في الدور الرابع، مبنى 114، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-39-34403a.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-39-34403a.webp",
+        "alt": {
+          "en": "Bedroom — Fourth-Floor Two-Bedroom Apartment, Building 114, Al Nuzhah",
+          "ar": "غرفة النوم — شقة بغرفتي نوم في الدور الرابع، مبنى 114، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-18-fd9332.webp",
+        "alt": {
+          "en": "Bathroom — Fourth-Floor Two-Bedroom Apartment, Building 114, Al Nuzhah",
+          "ar": "الحمام — شقة بغرفتي نوم في الدور الرابع، مبنى 114، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-46-1bc2ec.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-46-1bc2ec.webp",
+        "alt": {
+          "en": "Café terrace — Fourth-Floor Two-Bedroom Apartment, Building 114, Al Nuzhah",
+          "ar": "تراس المقهى — شقة بغرفتي نوم في الدور الرابع، مبنى 114، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-52-1c9679.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-52-1c9679.webp",
+        "alt": {
+          "en": "Façade at night — Fourth-Floor Two-Bedroom Apartment, Building 114, Al Nuzhah",
+          "ar": "الواجهة ليلاً — شقة بغرفتي نوم في الدور الرابع، مبنى 114، النزهة"
+        }
+      }
+    ],
+    "description": {
+      "en": "A four-room apartment of 151 square metres on the fourth floor of Building 114, Al Nuzhah, facing the commercial street. Two bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.\n\nAsking price SAR 595,000. The photographs show the developer's completed Kayan Residence building in Al Nahda and illustrate its standard of finish; a viewing of the unit itself can be arranged.",
+      "ar": "شقة من أربع غرف بمساحة 151 متراً مربعاً في الدور الرابع من مبنى 114 بحي النزهة، تطل على الشارع التجاري. غرفتا نوم وثلاث دورات مياه، واكتمل البناء عام 2024 على يد كيان الماسية.\n\nالسعر المطلوب 595,000 ريال سعودي. الصور من مبنى كيان ريزيدنس المكتمل للمطور نفسه في حي النهضة وتوضح مستوى التشطيب المعتمد لديه، ويمكن ترتيب معاينة الوحدة نفسها."
+    },
+    "highlights": {
+      "en": [
+        "151 sqm, two bedrooms",
+        "Fourth floor",
+        "Three bathrooms",
+        "Completed 2024",
+        "SAR 595,000"
+      ],
+      "ar": [
+        "151 متراً مربعاً، غرفتا نوم",
+        "الدور الرابع",
+        "ثلاث دورات مياه",
+        "اكتمل البناء عام 2024",
+        "595,000 ريال سعودي"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": {
+      "name": {
+        "en": "Kian Al-Masiah — Building 114, Al Nuzhah",
+        "ar": "كيان الماسية — مبنى 114، النزهة"
+      },
+      "developer": {
+        "en": "Kian Al-Masiah",
+        "ar": "كيان الماسية"
+      }
+    },
+    "unit": {
+      "floor": "4th",
+      "block": "114",
+      "unitRef": "KIA-114C"
+    },
+    "map": null,
+    "listedAt": "2026-09-01"
+  },
+  {
+    "id": "BONA-040",
+    "slug": "kian-building-117-unit-b-al-nuzhah",
+    "sourceRef": "KIA-117B",
+    "status": "available",
+    "category": "buy",
+    "type": "apartment",
+    "kind": "apartment",
+    "featured": false,
+    "title": {
+      "en": "Rear Three-Bedroom Apartment, Building 117, Al Nuzhah",
+      "ar": "شقة خلفية بثلاث غرف نوم، مبنى 117، النزهة"
+    },
+    "location": {
+      "district": {
+        "en": "Al Nuzhah",
+        "ar": "النزهة"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 660000,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": 3,
+      "baths": 3,
+      "areaSqm": 169,
+      "plotSqm": null,
+      "yearBuilt": 2024,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-46-1bc2ec.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-46-1bc2ec.webp",
+        "alt": {
+          "en": "Café terrace — Rear Three-Bedroom Apartment, Building 117, Al Nuzhah",
+          "ar": "تراس المقهى — شقة خلفية بثلاث غرف نوم، مبنى 117، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-33-792ba2.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-33-792ba2.webp",
+        "alt": {
+          "en": "Living room — Rear Three-Bedroom Apartment, Building 117, Al Nuzhah",
+          "ar": "غرفة المعيشة — شقة خلفية بثلاث غرف نوم، مبنى 117، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-19-cfd1be.webp",
+        "alt": {
+          "en": "Kitchen — Rear Three-Bedroom Apartment, Building 117, Al Nuzhah",
+          "ar": "المطبخ — شقة خلفية بثلاث غرف نوم، مبنى 117، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-36-e5e9aa.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-36-e5e9aa.webp",
+        "alt": {
+          "en": "Bedroom — Rear Three-Bedroom Apartment, Building 117, Al Nuzhah",
+          "ar": "غرفة النوم — شقة خلفية بثلاث غرف نوم، مبنى 117، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-18-fd9332.webp",
+        "alt": {
+          "en": "Bathroom — Rear Three-Bedroom Apartment, Building 117, Al Nuzhah",
+          "ar": "الحمام — شقة خلفية بثلاث غرف نوم، مبنى 117، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-4-cc60535e-95d3df.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-4-cc60535e-95d3df.webp",
+        "alt": {
+          "en": "Entrance — Rear Three-Bedroom Apartment, Building 117, Al Nuzhah",
+          "ar": "المدخل — شقة خلفية بثلاث غرف نوم، مبنى 117، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/uwq4bakpspm7gkozgcli_video_project_25_1_1_.v2.0000000-0ee6d0.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/uwq4bakpspm7gkozgcli_video_project_25_1_1_.v2.0000000-0ee6d0.webp",
+        "alt": {
+          "en": "Exterior — Rear Three-Bedroom Apartment, Building 117, Al Nuzhah",
+          "ar": "الواجهة الخارجية — شقة خلفية بثلاث غرف نوم، مبنى 117، النزهة"
+        }
+      }
+    ],
+    "description": {
+      "en": "A five-room apartment of 169 square metres at the rear of Building 117, Al Nuzhah, away from the commercial street on which the building stands. Three bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.\n\nAsking price SAR 660,000. The photographs show the developer's completed Kayan Residence building in Al Nahda and illustrate its standard of finish; a viewing of the unit itself can be arranged.",
+      "ar": "شقة من خمس غرف بمساحة 169 متراً مربعاً في الجهة الخلفية من مبنى 117 بحي النزهة، بعيداً عن الشارع التجاري الذي يقوم عليه المبنى. ثلاث غرف نوم وثلاث دورات مياه، واكتمل البناء عام 2024 على يد كيان الماسية.\n\nالسعر المطلوب 660,000 ريال سعودي. الصور من مبنى كيان ريزيدنس المكتمل للمطور نفسه في حي النهضة وتوضح مستوى التشطيب المعتمد لديه، ويمكن ترتيب معاينة الوحدة نفسها."
+    },
+    "highlights": {
+      "en": [
+        "169 sqm, three bedrooms",
+        "Rear unit away from the street",
+        "Three bathrooms",
+        "Completed 2024",
+        "SAR 660,000"
+      ],
+      "ar": [
+        "169 متراً مربعاً، ثلاث غرف نوم",
+        "وحدة خلفية بعيداً عن الشارع",
+        "ثلاث دورات مياه",
+        "اكتمل البناء عام 2024",
+        "660,000 ريال سعودي"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": {
+      "name": {
+        "en": "Kian Al-Masiah — Building 117, Al Nuzhah",
+        "ar": "كيان الماسية — مبنى 117، النزهة"
+      },
+      "developer": {
+        "en": "Kian Al-Masiah",
+        "ar": "كيان الماسية"
+      }
+    },
+    "unit": {
+      "floor": null,
+      "block": "117",
+      "unitRef": "KIA-117B"
+    },
+    "map": null,
+    "listedAt": "2026-09-01"
+  },
+  {
+    "id": "BONA-041",
+    "slug": "kian-building-117-unit-c-al-nuzhah",
+    "sourceRef": "KIA-117C",
+    "status": "available",
+    "category": "buy",
+    "type": "apartment",
+    "kind": "apartment",
+    "featured": false,
+    "title": {
+      "en": "Two-Bedroom Apartment, Building 117, Al Nuzhah",
+      "ar": "شقة بغرفتي نوم، مبنى 117، النزهة"
+    },
+    "location": {
+      "district": {
+        "en": "Al Nuzhah",
+        "ar": "النزهة"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 595000,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": 2,
+      "baths": 3,
+      "areaSqm": 151,
+      "plotSqm": null,
+      "yearBuilt": 2024,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-47-f7e11d.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-47-f7e11d.webp",
+        "alt": {
+          "en": "Roof terrace — Two-Bedroom Apartment, Building 117, Al Nuzhah",
+          "ar": "التراس العلوي — شقة بغرفتي نوم، مبنى 117، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-10-48a86949-850b20.webp",
+        "alt": {
+          "en": "Living room — Two-Bedroom Apartment, Building 117, Al Nuzhah",
+          "ar": "غرفة المعيشة — شقة بغرفتي نوم، مبنى 117، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-35-fd1ebb.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-35-fd1ebb.webp",
+        "alt": {
+          "en": "Kitchen — Two-Bedroom Apartment, Building 117, Al Nuzhah",
+          "ar": "المطبخ — شقة بغرفتي نوم، مبنى 117، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-37-7cead7.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-37-7cead7.webp",
+        "alt": {
+          "en": "Bedroom — Two-Bedroom Apartment, Building 117, Al Nuzhah",
+          "ar": "غرفة النوم — شقة بغرفتي نوم، مبنى 117، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-18-fd9332.webp",
+        "alt": {
+          "en": "Bathroom — Two-Bedroom Apartment, Building 117, Al Nuzhah",
+          "ar": "الحمام — شقة بغرفتي نوم، مبنى 117، النزهة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-9-b8d887.webp",
+        "alt": {
+          "en": "Lobby — Two-Bedroom Apartment, Building 117, Al Nuzhah",
+          "ar": "البهو — شقة بغرفتي نوم، مبنى 117، النزهة"
+        }
+      }
+    ],
+    "description": {
+      "en": "A four-room apartment of 151 square metres in Building 117, Al Nuzhah, facing the commercial street. Two bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.\n\nAsking price SAR 595,000. The photographs show the developer's completed Kayan Residence building in Al Nahda and illustrate its standard of finish; a viewing of the unit itself can be arranged.",
+      "ar": "شقة من أربع غرف بمساحة 151 متراً مربعاً في مبنى 117 بحي النزهة، تطل على الشارع التجاري. غرفتا نوم وثلاث دورات مياه، واكتمل البناء عام 2024 على يد كيان الماسية.\n\nالسعر المطلوب 595,000 ريال سعودي. الصور من مبنى كيان ريزيدنس المكتمل للمطور نفسه في حي النهضة وتوضح مستوى التشطيب المعتمد لديه، ويمكن ترتيب معاينة الوحدة نفسها."
+    },
+    "highlights": {
+      "en": [
+        "151 sqm, two bedrooms",
+        "Three bathrooms",
+        "Completed 2024",
+        "Commercial street frontage",
+        "SAR 595,000"
+      ],
+      "ar": [
+        "151 متراً مربعاً، غرفتا نوم",
+        "ثلاث دورات مياه",
+        "اكتمل البناء عام 2024",
+        "على شارع تجاري",
+        "595,000 ريال سعودي"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": {
+      "name": {
+        "en": "Kian Al-Masiah — Building 117, Al Nuzhah",
+        "ar": "كيان الماسية — مبنى 117، النزهة"
+      },
+      "developer": {
+        "en": "Kian Al-Masiah",
+        "ar": "كيان الماسية"
+      }
+    },
+    "unit": {
+      "floor": null,
+      "block": "117",
+      "unitRef": "KIA-117C"
+    },
+    "map": null,
+    "listedAt": "2026-09-01"
+  },
+  {
+    "id": "BONA-042",
+    "slug": "kian-building-115-unit-a-al-rayyan",
+    "sourceRef": "KIA-115A",
+    "status": "available",
+    "category": "buy",
+    "type": "apartment",
+    "kind": "apartment",
+    "featured": false,
+    "title": {
+      "en": "Front-Facing Two-Bedroom Apartment, Building 115, Al Rayyan",
+      "ar": "شقة أمامية بغرفتي نوم، مبنى 115، الريان"
+    },
+    "location": {
+      "district": {
+        "en": "Al Rayyan",
+        "ar": "الريان"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 550000,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": 2,
+      "baths": 3,
+      "areaSqm": 140,
+      "plotSqm": null,
+      "yearBuilt": 2023,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-38-e33ac8.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-38-e33ac8.webp",
+        "alt": {
+          "en": "Bedroom — Front-Facing Two-Bedroom Apartment, Building 115, Al Rayyan",
+          "ar": "غرفة النوم — شقة أمامية بغرفتي نوم، مبنى 115، الريان"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-33-792ba2.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-33-792ba2.webp",
+        "alt": {
+          "en": "Living room — Front-Facing Two-Bedroom Apartment, Building 115, Al Rayyan",
+          "ar": "غرفة المعيشة — شقة أمامية بغرفتي نوم، مبنى 115، الريان"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-19-cfd1be.webp",
+        "alt": {
+          "en": "Kitchen — Front-Facing Two-Bedroom Apartment, Building 115, Al Rayyan",
+          "ar": "المطبخ — شقة أمامية بغرفتي نوم، مبنى 115، الريان"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-18-fd9332.webp",
+        "alt": {
+          "en": "Bathroom — Front-Facing Two-Bedroom Apartment, Building 115, Al Rayyan",
+          "ar": "الحمام — شقة أمامية بغرفتي نوم، مبنى 115، الريان"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-49-3dbda5.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-49-3dbda5.webp",
+        "alt": {
+          "en": "Café terrace — Front-Facing Two-Bedroom Apartment, Building 115, Al Rayyan",
+          "ar": "تراس المقهى — شقة أمامية بغرفتي نوم، مبنى 115، الريان"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9b5e8f.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk2-9b5e8f.webp",
+        "alt": {
+          "en": "Exterior — Front-Facing Two-Bedroom Apartment, Building 115, Al Rayyan",
+          "ar": "الواجهة الخارجية — شقة أمامية بغرفتي نوم، مبنى 115، الريان"
+        }
+      }
+    ],
+    "description": {
+      "en": "A four-room apartment of 140 square metres on the front of Building 115 in Al Rayyan, with the main façade and its windows to the street. Two bedrooms and three bathrooms, completed in 2023 by Kian Al-Masiah.\n\nAsking price SAR 550,000, the most accessible entry to the developer's portfolio. The photographs show the developer's completed Kayan Residence building in Al Nahda and illustrate its standard of finish; a viewing of the unit itself can be arranged.",
+      "ar": "شقة من أربع غرف بمساحة 140 متراً مربعاً في الواجهة الأمامية لمبنى 115 بحي الريان، بنوافذها المطلة على الشارع. غرفتا نوم وثلاث دورات مياه، واكتمل البناء عام 2023 على يد كيان الماسية.\n\nالسعر المطلوب 550,000 ريال سعودي، وهو المدخل الأيسر إلى مشاريع المطور. الصور من مبنى كيان ريزيدنس المكتمل للمطور نفسه في حي النهضة وتوضح مستوى التشطيب المعتمد لديه، ويمكن ترتيب معاينة الوحدة نفسها."
+    },
+    "highlights": {
+      "en": [
+        "140 sqm, two bedrooms",
+        "Front-facing unit",
+        "Three bathrooms",
+        "Completed 2023",
+        "SAR 550,000"
+      ],
+      "ar": [
+        "140 متراً مربعاً، غرفتا نوم",
+        "وحدة أمامية",
+        "ثلاث دورات مياه",
+        "اكتمل البناء عام 2023",
+        "550,000 ريال سعودي"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": {
+      "name": {
+        "en": "Kian Al-Masiah — Building 115, Al Rayyan",
+        "ar": "كيان الماسية — مبنى 115، الريان"
+      },
+      "developer": {
+        "en": "Kian Al-Masiah",
+        "ar": "كيان الماسية"
+      }
+    },
+    "unit": {
+      "floor": null,
+      "block": "115",
+      "unitRef": "KIA-115A"
+    },
+    "map": null,
+    "listedAt": "2026-09-01"
+  },
+  {
+    "id": "BONA-043",
+    "slug": "dari-q-al-salamah",
+    "sourceRef": "APT-021",
+    "status": "available",
+    "category": "buy",
+    "type": "apartment",
+    "kind": "apartment",
+    "featured": false,
+    "title": {
+      "en": "Dari Q Apartments, Al Salamah",
+      "ar": "شقق داري كيو، السلامة"
+    },
+    "location": {
+      "district": {
+        "en": "Al Salamah",
+        "ar": "السلامة"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 1200000,
+      "currency": "SAR",
+      "from": true,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": 3,
+      "baths": 3,
+      "areaSqm": 160.5,
+      "plotSqm": null,
+      "yearBuilt": null,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/ktvxailerz6r8cc7lmec_tk_1_.v2.0000000-d36513.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/ktvxailerz6r8cc7lmec_tk_1_.v2.0000000-d36513.webp",
+        "alt": {
+          "en": "Exterior — Dari Q Apartments, Al Salamah",
+          "ar": "الواجهة الخارجية — شقق داري كيو، السلامة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/aiease_1760965320481-e8cec2.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/aiease_1760965320481-e8cec2.webp",
+        "alt": {
+          "en": "Rooftop pool — Dari Q Apartments, Al Salamah",
+          "ar": "مسبح السطح — شقق داري كيو، السلامة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-9-8a5aa3.jpeg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk_pics-9-8a5aa3.webp",
+        "alt": {
+          "en": "Aerial view — Dari Q Apartments, Al Salamah",
+          "ar": "منظر جوي — شقق داري كيو، السلامة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-18-926465.jpeg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk_pics-18-926465.webp",
+        "alt": {
+          "en": "Lobby — Dari Q Apartments, Al Salamah",
+          "ar": "البهو — شقق داري كيو، السلامة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-30-d9a124.jpeg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk_pics-30-d9a124.webp",
+        "alt": {
+          "en": "Living room — Dari Q Apartments, Al Salamah",
+          "ar": "غرفة المعيشة — شقق داري كيو، السلامة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-21-06e049.jpeg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk_pics-21-06e049.webp",
+        "alt": {
+          "en": "Kitchen — Dari Q Apartments, Al Salamah",
+          "ar": "المطبخ — شقق داري كيو، السلامة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-25-e90f37.jpeg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk_pics-25-e90f37.webp",
+        "alt": {
+          "en": "Bedroom — Dari Q Apartments, Al Salamah",
+          "ar": "غرفة النوم — شقق داري كيو، السلامة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-33-f61e45.jpeg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk_pics-33-f61e45.webp",
+        "alt": {
+          "en": "Bathroom — Dari Q Apartments, Al Salamah",
+          "ar": "الحمام — شقق داري كيو، السلامة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-0acacb.jpeg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk_pics-0acacb.webp",
+        "alt": {
+          "en": "Courtyard — Dari Q Apartments, Al Salamah",
+          "ar": "الفناء الداخلي — شقق داري كيو، السلامة"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-14-18f656b7-ad5bb3.jpeg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/tk_pics-14-18f656b7-ad5bb3.webp",
+        "alt": {
+          "en": "Gym — Dari Q Apartments, Al Salamah",
+          "ar": "النادي الرياضي — شقق داري كيو، السلامة"
+        }
+      }
+    ],
+    "description": {
+      "en": "Dari Q is a completed apartment building in Al Salamah, north Jeddah, with a Starbucks at street level and a landscaped courtyard at its centre. The three-bedroom apartments measure 160.5 square metres with three bathrooms, and are offered from SAR 1,200,000.\n\nResidents have a rooftop pool, a fully equipped gym, a basketball court and shaded seating in the courtyard, with dedicated parking, a basement, a driver's room and 24-hour security.",
+      "ar": "داري كيو مبنى سكني مكتمل في حي السلامة شمال جدة، يضم فرعاً لستاربكس في الطابق الأرضي وفناءً منسقاً في قلبه. تبلغ مساحة الشقق ذات الغرف الثلاث 160.5 متراً مربعاً مع ثلاث دورات مياه، وتُعرض ابتداءً من 1,200,000 ريال سعودي.\n\nيتوفر للسكان مسبح على السطح ونادٍ رياضي مجهز بالكامل وملعب كرة سلة وجلسات مظللة في الفناء، مع مواقف مخصصة وقبو وغرفة للسائق وحراسة على مدار الساعة."
+    },
+    "highlights": {
+      "en": [
+        "160.5 sqm, three bedrooms and three bathrooms",
+        "Rooftop pool and gym",
+        "Landscaped courtyard and basketball court",
+        "Dedicated parking, basement and driver's room",
+        "24-hour security",
+        "From SAR 1,200,000"
+      ],
+      "ar": [
+        "160.5 متراً مربعاً، ثلاث غرف نوم وثلاث دورات مياه",
+        "مسبح على السطح ونادٍ رياضي",
+        "فناء منسق وملعب كرة سلة",
+        "مواقف مخصصة وقبو وغرفة للسائق",
+        "حراسة على مدار الساعة",
+        "ابتداءً من 1,200,000 ريال سعودي"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
+    "listedAt": "2026-03-21"
+  },
+  {
+    "id": "BONA-044",
+    "slug": "neptune-villas-north-riyadh",
+    "sourceRef": "VIL-029",
+    "status": "available",
+    "category": "off-plan",
+    "type": "villa",
+    "kind": "house",
+    "featured": false,
+    "title": {
+      "en": "Neptune Villas, Interiors by Mouawad, North Riyadh",
+      "ar": "فلل نبتون بتصميم داخلي من معوض، شمال الرياض"
+    },
+    "location": {
+      "district": {
+        "en": "North Riyadh",
+        "ar": "شمال الرياض"
+      },
+      "city": {
+        "en": "Riyadh",
+        "ar": "الرياض"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 4600000,
+      "currency": "SAR",
+      "from": true,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": 5,
+      "baths": null,
+      "areaSqm": null,
+      "plotSqm": null,
+      "yearBuilt": null,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/neptune-interiors-by-mouawad/1-b42395.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/1-b42395.webp",
+        "alt": {
+          "en": "Exterior — Neptune Villas, Interiors by Mouawad, North Riyadh",
+          "ar": "الواجهة الخارجية — فلل نبتون بتصميم داخلي من معوض، شمال الرياض"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/neptune-interiors-by-mouawad/14-b96487.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/14-b96487.webp",
+        "alt": {
+          "en": "Aerial view — Neptune Villas, Interiors by Mouawad, North Riyadh",
+          "ar": "منظر جوي — فلل نبتون بتصميم داخلي من معوض، شمال الرياض"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/neptune-interiors-by-mouawad/6-ea4d23.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/6-ea4d23.webp",
+        "alt": {
+          "en": "Artist's impression — Neptune Villas, Interiors by Mouawad, North Riyadh",
+          "ar": "تصور معماري — فلل نبتون بتصميم داخلي من معوض، شمال الرياض"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/neptune-interiors-by-mouawad/8-ddced5.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/8-ddced5.webp",
+        "alt": {
+          "en": "Roof terrace — Neptune Villas, Interiors by Mouawad, North Riyadh",
+          "ar": "التراس العلوي — فلل نبتون بتصميم داخلي من معوض، شمال الرياض"
+        }
+      }
+    ],
+    "description": {
+      "en": "Neptune Villas is a villa community under construction in north Riyadh, with interiors by the jeweller Mouawad. Each villa has five bedrooms, in sizes from 300 to 420 square metres; the renders show roof terraces and covered parking.\n\nThe masterplan sets the houses along tree-lined streets around a central park and pool. Prices start from SAR 4,600,000.",
+      "ar": "فلل نبتون مشروع فلل قيد الإنشاء في شمال الرياض، بتصميم داخلي من دار معوض للمجوهرات. تضم كل فيلا خمس غرف نوم بمساحات من 300 إلى 420 متراً مربعاً، وتُظهر التصاميم تراسات علوية ومواقف مغطاة.\n\nيوزع المخطط العام المنازل على شوارع تظللها الأشجار حول حديقة مركزية ومسبح. تبدأ الأسعار من 4,600,000 ريال سعودي."
+    },
+    "highlights": {
+      "en": [
+        "Interiors by Mouawad",
+        "Five bedrooms",
+        "300 to 420 sqm",
+        "Under construction in north Riyadh",
+        "From SAR 4,600,000"
+      ],
+      "ar": [
+        "تصميم داخلي من معوض",
+        "خمس غرف نوم",
+        "من 300 إلى 420 متراً مربعاً",
+        "قيد الإنشاء في شمال الرياض",
+        "ابتداءً من 4,600,000 ريال سعودي"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
+    "listedAt": "2026-03-21"
+  },
+  {
+    "id": "BONA-045",
+    "slug": "trump-international-hotel-residences-aida-muscat",
+    "sourceRef": "APT-035",
+    "status": "available",
+    "category": "international",
+    "type": "apartment",
+    "kind": "apartment",
+    "featured": false,
+    "title": {
+      "en": "Trump International Hotel Residences, AIDA, Muscat",
+      "ar": "مساكن فندق ترامب الدولي، آيدا، مسقط"
+    },
+    "location": {
+      "district": {
+        "en": "AIDA",
+        "ar": "آيدا"
+      },
+      "city": {
+        "en": "Muscat",
+        "ar": "مسقط"
+      },
+      "country": {
+        "en": "Oman",
+        "ar": "سلطنة عُمان"
+      },
+      "countryCode": "OM"
+    },
+    "price": {
+      "amount": 1700000,
+      "currency": "SAR",
+      "from": true,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": 1,
+      "baths": null,
+      "areaSqm": null,
+      "plotSqm": null,
+      "yearBuilt": null,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/aida_04_lounge_copy_2_ae1e9ac626_e8bc687dfe-bae44b.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/aida_04_lounge_copy_2_ae1e9ac626_e8bc687dfe-bae44b.webp",
+        "alt": {
+          "en": "Swimming pool — Trump International Hotel Residences, AIDA, Muscat",
+          "ar": "المسبح — مساكن فندق ترامب الدولي، آيدا، مسقط"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/oth_01_main_lobby_ef_copy-287095.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/oth_01_main_lobby_ef_copy-287095.webp",
+        "alt": {
+          "en": "Living room — Trump International Hotel Residences, AIDA, Muscat",
+          "ar": "غرفة المعيشة — مساكن فندق ترامب الدولي، آيدا، مسقط"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/oth_05_deluxe_suite_master_bedroom_ef_copy-240d74.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/oth_05_deluxe_suite_master_bedroom_ef_copy-240d74.webp",
+        "alt": {
+          "en": "Bedroom — Trump International Hotel Residences, AIDA, Muscat",
+          "ar": "غرفة النوم — مساكن فندق ترامب الدولي، آيدا، مسقط"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/oth_02_all_day_dining_ef_copy-90e12d.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/oth_02_all_day_dining_ef_copy-90e12d.webp",
+        "alt": {
+          "en": "Lounge — Trump International Hotel Residences, AIDA, Muscat",
+          "ar": "الصالة — مساكن فندق ترامب الدولي، آيدا، مسقط"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/master_bathroom-67aba7.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/master_bathroom-67aba7.webp",
+        "alt": {
+          "en": "Bathroom — Trump International Hotel Residences, AIDA, Muscat",
+          "ar": "الحمام — مساكن فندق ترامب الدولي، آيدا، مسقط"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/umo_02_aerial_ef2_v3_copy-9ff535.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/umo_02_aerial_ef2_v3_copy-9ff535.webp",
+        "alt": {
+          "en": "Aerial view — Trump International Hotel Residences, AIDA, Muscat",
+          "ar": "منظر جوي — مساكن فندق ترامب الدولي، آيدا، مسقط"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/umo_05_hotel_entrance_ef2_v2-ff03c2.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/umo_05_hotel_entrance_ef2_v2-ff03c2.webp",
+        "alt": {
+          "en": "Entrance — Trump International Hotel Residences, AIDA, Muscat",
+          "ar": "المدخل — مساكن فندق ترامب الدولي، آيدا، مسقط"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/umo_15_pods_ef2_copy-440031.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/umo_15_pods_ef2_copy-440031.webp",
+        "alt": {
+          "en": "Façade at night — Trump International Hotel Residences, AIDA, Muscat",
+          "ar": "الواجهة ليلاً — مساكن فندق ترامب الدولي، آيدا، مسقط"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/umo_10_hotel_balcony_ef2_copy-568a76.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/umo_10_hotel_balcony_ef2_copy-568a76.webp",
+        "alt": {
+          "en": "Swimming pool — Trump International Hotel Residences, AIDA, Muscat",
+          "ar": "المسبح — مساكن فندق ترامب الدولي، آيدا، مسقط"
+        }
+      },
+      {
+        "src": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/business_center-c60ad5.jpg",
+        "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/business_center-c60ad5.webp",
+        "alt": {
+          "en": "Lounge — Trump International Hotel Residences, AIDA, Muscat",
+          "ar": "الصالة — مساكن فندق ترامب الدولي، آيدا، مسقط"
+        }
+      }
+    ],
+    "description": {
+      "en": "Serviced residences within the Trump International Hotel at AIDA, on the cliffs above the sea at Muscat. Apartments range from 43 to 138 square metres with one to three bedrooms, delivered fully furnished.\n\nOwners use the hotel's pool, gym, lounges and restaurants, within the wider AIDA community with its golf course and beach. Prices start from SAR 1,700,000.",
+      "ar": "مساكن فندقية ضمن فندق ترامب الدولي في آيدا، على المرتفعات المطلة على البحر في مسقط. تتراوح مساحات الشقق بين 43 و138 متراً مربعاً، بغرفة نوم واحدة إلى ثلاث غرف، وتُسلم مفروشة بالكامل.\n\nيستفيد الملاك من مسبح الفندق وناديه الرياضي وصالاته ومطاعمه، ضمن مجتمع آيدا الأوسع بملعب الجولف والشاطئ. تبدأ الأسعار من 1,700,000 ريال سعودي."
+    },
+    "highlights": {
+      "en": [
+        "Within the Trump International Hotel, AIDA",
+        "One to three bedrooms, 43 to 138 sqm",
+        "Fully furnished",
+        "Hotel pool, gym and restaurants",
+        "From SAR 1,700,000"
+      ],
+      "ar": [
+        "ضمن فندق ترامب الدولي في آيدا",
+        "من غرفة إلى ثلاث غرف نوم، 43 إلى 138 متراً مربعاً",
+        "مفروشة بالكامل",
+        "مسبح الفندق وناديه الرياضي ومطاعمه",
+        "ابتداءً من 1,700,000 ريال سعودي"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": null,
+    "listedAt": "2026-03-21"
+  },
+  {
+    "id": "BONA-046",
+    "slug": "plot-285-al-shati",
+    "sourceRef": "LND-006",
+    "status": "available",
+    "category": "buy",
+    "type": "land",
+    "kind": "land",
+    "featured": false,
+    "title": {
+      "en": "Residential Plot 285, Al Shati",
+      "ar": "قطعة أرض رقم 285، الشاطئ"
+    },
+    "location": {
+      "district": {
+        "en": "Al Shati",
+        "ar": "الشاطئ"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 3816000,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": null,
+      "baths": null,
+      "areaSqm": null,
+      "plotSqm": 636,
+      "yearBuilt": null,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "/land/LND-006.jpg",
+        "thumb": null,
+        "alt": {
+          "en": "Satellite view of the plot — Residential Plot 285, Al Shati",
+          "ar": "صورة جوية للقطعة — قطعة أرض رقم 285، الشاطئ"
+        }
+      },
+      {
+        "src": "/land/LND-006-z15.jpg",
+        "thumb": null,
+        "alt": {
+          "en": "Satellite view of the surrounding area — Residential Plot 285, Al Shati",
+          "ar": "صورة جوية للمنطقة المحيطة — قطعة أرض رقم 285، الشاطئ"
+        }
+      }
+    ],
+    "description": {
+      "en": "Plot 285 in Al Shati, moments from King Road and a few minutes from the Corniche. The plot measures 636 square metres with a north-facing frontage of 21.25 metres on a 16-metre street.\n\nOffered directly by the owner at SAR 6,000 per square metre net, a total of SAR 3,816,000. The satellite frames show the plot's position and its surroundings.",
+      "ar": "القطعة رقم 285 في حي الشاطئ، على مقربة من طريق الملك ودقائق من الكورنيش. تبلغ مساحتها 636 متراً مربعاً بواجهة شمالية بطول 21.25 متراً على شارع بعرض 16 متراً.\n\nتُعرض من المالك مباشرة بسعر 6,000 ريال للمتر المربع صافياً، بإجمالي 3,816,000 ريال سعودي. توضح الصور الجوية موقع القطعة ومحيطها."
+    },
+    "highlights": {
+      "en": [
+        "636 sqm",
+        "North-facing, 21.25 m frontage",
+        "16-metre street",
+        "SAR 6,000 per sqm net",
+        "Direct from the owner"
+      ],
+      "ar": [
+        "636 متراً مربعاً",
+        "واجهة شمالية بطول 21.25 متراً",
+        "شارع بعرض 16 متراً",
+        "6,000 ريال للمتر صافياً",
+        "من المالك مباشرة"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": {
+      "lat": 21.6011128,
+      "lng": 39.1195974
+    },
+    "listedAt": "2026-04-10"
+  },
+  {
+    "id": "BONA-047",
+    "slug": "corner-plot-al-shati",
+    "sourceRef": "LND-004",
+    "status": "available",
+    "category": "buy",
+    "type": "land",
+    "kind": "land",
+    "featured": false,
+    "title": {
+      "en": "Corner Plot, Al Shati",
+      "ar": "أرض زاوية، الشاطئ"
+    },
+    "location": {
+      "district": {
+        "en": "Al Shati",
+        "ar": "الشاطئ"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 4200000,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": null,
+      "baths": null,
+      "areaSqm": null,
+      "plotSqm": 625,
+      "yearBuilt": null,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "/land/LND-004.jpg",
+        "thumb": null,
+        "alt": {
+          "en": "Satellite view of the plot — Corner Plot, Al Shati",
+          "ar": "صورة جوية للقطعة — أرض زاوية، الشاطئ"
+        }
+      },
+      {
+        "src": "/land/LND-004-z15.jpg",
+        "thumb": null,
+        "alt": {
+          "en": "Satellite view of the surrounding area — Corner Plot, Al Shati",
+          "ar": "صورة جوية للمنطقة المحيطة — أرض زاوية، الشاطئ"
+        }
+      }
+    ],
+    "description": {
+      "en": "A corner plot of 625 square metres in Al Shati, on two 12-metre streets to the north and east, measuring 24 metres wide by 26 metres deep. It sits on the second block from King Road, north of Heraa Street, close to the district's commercial centres and the Jeddah waterfront.\n\nAsking price SAR 4,200,000, about SAR 6,800 per square metre. The satellite frames show the plot's position and its surroundings.",
+      "ar": "أرض زاوية بمساحة 625 متراً مربعاً في حي الشاطئ، على شارعين بعرض 12 متراً من الجهتين الشمالية والشرقية، بأبعاد 24 متراً عرضاً و26 متراً عمقاً. تقع في المربع الثاني من طريق الملك شمال شارع حراء، على مقربة من المراكز التجارية والواجهة البحرية لجدة.\n\nالسعر المطلوب 4,200,000 ريال سعودي، أي نحو 6,800 ريال للمتر المربع. توضح الصور الجوية موقع القطعة ومحيطها."
+    },
+    "highlights": {
+      "en": [
+        "625 sqm corner plot",
+        "Two 12-metre streets, north and east",
+        "24 m by 26 m",
+        "Second block from King Road",
+        "Near the Jeddah waterfront",
+        "SAR 4,200,000"
+      ],
+      "ar": [
+        "أرض زاوية بمساحة 625 متراً مربعاً",
+        "شارعان بعرض 12 متراً شمالاً وشرقاً",
+        "24 في 26 متراً",
+        "المربع الثاني من طريق الملك",
+        "قرب الواجهة البحرية لجدة",
+        "4,200,000 ريال سعودي"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": {
+      "lat": 21.613996,
+      "lng": 39.1172
+    },
+    "listedAt": "2026-04-09"
   }
 ]

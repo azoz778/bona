@@ -1,0 +1,34 @@
+---
+/* /tours/ — every listing with an embeddable Matterport tour. Data-driven: grows as the daily sync adds tours. */
+import Base from '../../layouts/Base.astro';
+import ListingCard from '../ListingCard.astro';
+import SectionHead from '../SectionHead.astro';
+import Icon from '../Icon.astro';
+import site from '../../data/site.json';
+import { localePath, t, ui, type Locale } from '../../lib/i18n';
+import { withTours } from '../../lib/listings';
+import { breadcrumbJsonLd } from '../../lib/seo';
+interface Props { locale: Locale }
+const { locale } = Astro.props;
+const path = localePath(locale, '/tours/');
+const items = withTours();
+const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { name: t(ui.toursTitle, locale), path }];
+---
+<Base title={`${t(ui.toursMetaTitle, locale)} — ${locale === 'ar' ? site.nameAr : site.name}`} description={t(ui.toursMetaDesc, locale)} locale={locale} path={path} image={items[0]?.images?.[0]?.src} jsonLd={breadcrumbJsonLd(crumbs)}>
+  <section class="section-tight pt-12 lg:pt-16">
+    <div class="wrap">
+      <SectionHead as="h1" title={t(ui.toursTitle, locale)} intro={t(ui.toursIntro, locale)} />
+      {items.length > 0 ? (
+        <div class="mt-14 grid gap-x-8 gap-y-14 sm:grid-cols-2 lg:grid-cols-3" data-stagger>
+          {items.map((l, i) => <div data-reveal><ListingCard listing={l} locale={locale} index={i} eager={i < 3} headingLevel="h2" /></div>)}
+        </div>
+      ) : (
+        <div class="mt-14 border border-ink/10 bg-ivory-2 p-10 text-center" data-reveal>
+          <Icon name="cube" size={28} class="mx-auto text-champagne" />
+          <p class="display-md mt-5">{t(ui.toursEmpty, locale)}</p>
+          <a href={localePath(locale, '/properties/')} class="btn btn-outline mt-8">{t(ui.browseProperties, locale)}</a>
+        </div>
+      )}
+    </div>
+  </section>
+</Base>

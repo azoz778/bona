@@ -266,6 +266,62 @@ const STORIES = [
   { en: 'New week, new refs. Link in bio.', ar: 'أسبوع جديد، مراجع جديدة. الرابط في البايو.' },
 ];
 
+// ---------- 3D tours & project units (round 2) ----------
+const tourOf = (l) => { const u = String(l.virtualTourUrl ?? '').trim(); return /^https?:\/\//i.test(u) ? u : null; };
+const tourPool = live.filter(tourOf);
+const TOURS_URL = `${base}/tours/`;
+const TOUR_STORIES = [
+  { en: (l) => `Walk through it before you visit — 3D tour of ${t(l.title, 'en')}. Link sticker → tour. Ref. ${l.id}`, ar: (l) => `تجوّل فيه قبل الزيارة — جولة ثلاثية الأبعاد في ${t(l.title, 'ar')}. ملصق الرابط ← الجولة. المرجع ${l.id}` },
+  { en: (l) => `Tap, turn, walk: ${t(l.title, 'en')} in 3D. Which room would you change first?`, ar: (l) => `اضغط، أدِر، امشِ: ${t(l.title, 'ar')} بتقنية ثلاثية الأبعاد. أي غرفة ستغيّرها أولاً؟` },
+  { en: (l) => `Same home, no traffic. The Matterport tour of ${t(l.title, 'en')} — link sticker.`, ar: (l) => `المنزل نفسه، بلا زحام. جولة Matterport في ${t(l.title, 'ar')} — ملصق الرابط.` },
+  { en: () => 'Poll: have you tried a 3D tour yet? Yes / Show me one', ar: () => 'استطلاع: جرّبت جولة ثلاثية الأبعاد من قبل؟ نعم / أرِني واحدة' },
+  { en: (l) => `Measure it yourself — the 3D tour has a measuring tool. ${t(l.title, 'en')}, ref. ${l.id}.`, ar: (l) => `قِسها بنفسك — الجولة ثلاثية الأبعاد فيها أداة قياس. ${t(l.title, 'ar')}، المرجع ${l.id}.` },
+  { en: () => `All our 3D tours in one place → ${TOURS_URL}`, ar: () => `كل جولاتنا ثلاثية الأبعاد في مكان واحد ← ${TOURS_URL}` },
+];
+let tsi = 0;
+function tourStory(date) {
+  if (!tourPool.length) return null;
+  const l = tourPool[tsi % tourPool.length];
+  const st = TOUR_STORIES[tsi % TOUR_STORIES.length];
+  tsi++;
+  return { date, platform: 'instagram', format: 'story', pillar: 'listings', topic: { en: `3D tour story — ${t(l.title, 'en')}`, ar: `قصة جولة ثلاثية الأبعاد — ${t(l.title, 'ar')}` }, caption: { en: st.en(l), ar: st.ar(l) }, hashtags: [], image: l.images?.[1]?.src || heroOf(l), listingId: l.id, url: tourOf(l), tourUrl: tourOf(l), adLicenceRequired: false, status: 'planned' };
+}
+function tourCaption(l, lang) {
+  const ar = lang === 'ar';
+  const lines = [ar ? 'تجوّل قبل أن تزور.' : 'Walk through it before you visit.', t(l.title, lang), `${t(l.location.district, lang)}${ar ? '،' : ','} ${t(l.location.city, lang)}`];
+  const sp = spec(l, lang); if (sp) lines.push(sp);
+  lines.push('', ar ? 'جولة Matterport ثلاثية الأبعاد: كل غرفة بزاويتها الحقيقية، مع أداة قياس. الرابط في البايو ← «الجولات».' : 'A Matterport 3D tour: every room at its true angle, with a measuring tool. Link in bio → “Tours”.', ar ? 'ثم نرتّب المعاينة الخاصة.' : 'Then we arrange the private viewing.', '', price(l.price, lang), CTA[lang](l), AD[lang]);
+  return lines.join('\n');
+}
+const tourReel = (l) => ({ format: 'reel', pillar: 'listings', topic: { en: `3D tour — ${t(l.title, 'en')}`, ar: `جولة ثلاثية الأبعاد — ${t(l.title, 'ar')}` }, caption: { en: tourCaption(l, 'en'), ar: tourCaption(l, 'ar') }, hashtags: uniq([...tagsFor(l).slice(0, 14), '#3dtour', '#virtualtour', '#matterport', '#جولة_افتراضية', '#جولة_ثلاثية_الأبعاد']).slice(0, 20), image: heroOf(l), images: [heroOf(l)], alt: { en: altOf(l, 'en'), ar: altOf(l, 'ar') }, listingId: l.id, url: url(l, 'en'), tourUrl: tourOf(l), note: 'Screen-record the Matterport walkthrough (15–30 s, 9:16, captions on, ambient audio only); end card = listing hero + ref.', adLicenceRequired: true });
+
+// Project units (e.g. Kian Residence): grouped by `project.name`; falls back to the title while the data agent back-fills `project`.
+const projectKey = (l) => (l.project?.name?.en || l.project?.name?.ar || '').trim() || (/k(i|ay)an\s+residence/i.test(t(l.title, 'en')) ? 'Kian Residence' : '');
+const projects = (() => { const m = new Map(); for (const l of live) { const k = projectKey(l); if (!k) continue; if (!m.has(k)) m.set(k, []); m.get(k).push(l); } return [...m.entries()].map(([name, units]) => ({ name, units })); })();
+const projectNameAr = (p) => p.units[0].project?.name?.ar || (p.name === 'Kian Residence' ? 'كيان ريزيدنس' : (t(p.units[0].title, 'ar').split('،')[0] || p.name));
+const unitLine = (l, lang) => {
+  const ar = lang === 'ar'; const u = l.unit || {}; const bits = [];
+  bits.push(u.unitRef ? (ar ? `وحدة ${u.unitRef}` : `Unit ${u.unitRef}`) : t(l.title, lang));
+  if (u.floor != null && u.floor !== '') bits.push(ar ? `الدور ${u.floor}` : `floor ${u.floor}`);
+  if (l.specs?.beds) bits.push(ar ? `${l.specs.beds} غرف` : `${l.specs.beds} bed`);
+  if (l.specs?.areaSqm) bits.push(`${l.specs.areaSqm} ${ar ? 'م²' : 'm²'}`);
+  bits.push(price(l.price, lang));
+  if (tourOf(l)) bits.push(ar ? 'جولة ثلاثية الأبعاد' : '3D tour');
+  return `• ${bits.join(' · ')}`;
+};
+function projectCaption(p, lang) {
+  const ar = lang === 'ar'; const first = p.units[0]; const name = ar ? projectNameAr(p) : p.name;
+  const lines = [ar ? `داخل ${name}، ${t(first.location.district, 'ar')} — الوحدات.` : `Inside ${name}, ${t(first.location.district, 'en')} — the units.`, ''];
+  p.units.slice(0, 8).forEach((u) => lines.push(unitLine(u, lang)));
+  lines.push('');
+  const para = firstPara(t(first.description, lang)); if (para && !/PLACEHOLDER|مؤقت/.test(para)) lines.push(para);
+  const dev = first.project?.developer?.[lang] || first.project?.developer?.en; if (dev) lines.push(ar ? `المطوّر: ${dev}` : `Developer: ${dev}`);
+  lines.push('', ar ? `المراجع ${p.units.map((u) => u.id).join('، ')} — واتساب ${WA} أو الرابط في البايو.` : `Refs ${p.units.map((u) => u.id).join(', ')} — WhatsApp ${WA} or the link in bio.`, AD[lang]);
+  return lines.join('\n');
+}
+const projectPost = (p) => { const first = p.units[0]; const images = uniq(p.units.flatMap((u) => imgs(u, 3))).slice(0, 8); return { format: 'carousel', pillar: 'listings', topic: { en: `Inside ${p.name} — the units`, ar: `داخل ${projectNameAr(p)} — الوحدات` }, caption: { en: projectCaption(p, 'en'), ar: projectCaption(p, 'ar') }, hashtags: uniq([...tagsFor(first).slice(0, 15), '#مشاريع_جدة', '#وحدات_سكنية', '#newdevelopment', '#offplan']).slice(0, 20), image: heroOf(first), images: images.length ? images : [heroOf(first)], alt: { en: altOf(first, 'en'), ar: altOf(first, 'ar') }, listingId: first.id, listingIds: p.units.map((u) => u.id), url: url(first, 'en'), adLicenceRequired: true }; };
+let pi = 0, tri = 0;
+
 // ---------- listing pools ----------
 const score = (l) => (l.featured ? 100 : 0) + (l.images?.length || 0) * 2 + (l.price?.amount ? Math.log10(l.price.amount) : 0) + (l.category === 'buy' ? 5 : 0);
 const pool = [...live].sort((a, b) => score(b) - score(a));
@@ -318,6 +374,7 @@ for (let n = 0; n < DAYS; n++) {
   // daily story
   const st = STORIES[si++ % STORIES.length];
   items.push({ date, platform: 'instagram', format: 'story', pillar: w === 5 || w === 6 ? 'behind the house' : 'listings', topic: st, caption: st, hashtags: [], image: (pool[n % Math.max(1, pool.length)] ? heroOf(pool[n % pool.length]) : OG), adLicenceRequired: false, status: 'planned' });
+  if (n > 0 && n % 5 === 2) { const ts = tourStory(date); if (ts) items.push(ts); } // 3D-tour story every ~5 days
   if (n === 0) continue; // launch day feed = the 9 grid posts
   if (w === 5 || w === 6) continue; // Fri/Sat: stories only
   if (date === '2026-09-23') {
@@ -325,7 +382,11 @@ for (let n = 0; n < DAYS; n++) {
     continue;
   }
   let it;
-  if (w === 0 || w === 4) { // Sun / Thu: listing
+  if (w === 0 && projects.length && n >= 7 && Math.floor(n / 7) % 2 === 1) { // alternate Sundays: project units carousel
+    it = projectPost(projects[pi++ % projects.length]);
+  } else if (w === 4 && tourPool.length && n >= 7 && Math.floor(n / 7) % 2 === 1 && tri < tourPool.length) { // alternate Thursdays: 3D-tour reel
+    it = tourReel(tourPool[tri++]);
+  } else if (w === 0 || w === 4) { // Sun / Thu: listing
     const l = nextListing();
     if (l) {
       const fmt = w === 0 ? 'carousel' : 'reel';
@@ -363,13 +424,14 @@ md.push(`# Content calendar — Instagram @bona.com.sa (${START} → ${iso(addDa
   '**Rhythm**: 5 feed posts/week (Sun–Thu, publish 18:30–20:30 KSA) + 1 story every day (weekends = quiet lifestyle stories only). Launch day = 9-post grid (see `launch-posts.md`).',
   '**Pillars**: listings · Jeddah district guides · market insight (facts only — no price forecasts, no valuations: TAQEEM/REGA rule) · behind the house · buyer/seller education.',
   '**Cultural calendar**: Saudi National Day Wed 23 Sep (brand post, office closed); weekends Fri–Sat; school year already started → relocation season; no Ramadan/Eid in window. Hijri: Rabiʿ I–II 1448.',
-  '**Compliance**: every *listing* post needs the REGA ad-licence number in the caption before it goes live (`adLicenceRequired: true` in JSON; placeholder line in captions). Brand/education posts do not.', '',
+  '**Compliance**: every *listing* post needs the REGA ad-licence number in the caption before it goes live (`adLicenceRequired: true` in JSON; placeholder line in captions). Brand/education posts do not.',
+  `**3D tours & projects**: listings with a Matterport tour (${tourPool.length} now) get a "3D tour" story every ~5 days (link sticker → the tour; `tourUrl` in JSON) and a reel on alternate Thursdays (screen-record the walkthrough, 15–30 s, 9:16). Project units (${projects.map((p) => `${p.name}: ${p.units.length}`).join(', ') || 'none yet'}) are grouped into one carousel on alternate Sundays with a unit-by-unit caption ('listingIds' in JSON). Tours hub: ${TOURS_URL}`, '',
   '| Date | Day | Format | Pillar | Topic (EN) | الموضوع | Image | Ad licence |', '|---|---|---|---|---|---|---|---|');
 for (const it of items) {
   md.push(`| ${it.date} | ${weekday(it.date)} | ${it.format}${it.launch ? ` (launch #${it.launch})` : ''} | ${it.pillar} | ${it.topic.en} | ${it.topic.ar} | ${it.image ? `[img](${it.image})` : ''} | ${it.adLicenceRequired ? 'required' : '—'} |`);
 }
 md.push('', '## Captions', '', 'Feed-post captions (EN + AR + hashtags) are in `content-calendar.json` → `caption`. Launch captions are also in `marketing/captions/launch-0N.txt` for `scripts/instagram-post.mjs --caption-file`.', '',
-  '## Weekly checklist', '- Sun: schedule the week in Meta Business Suite (Planner) or post via `scripts/instagram-post.mjs`.', '- Daily 30 min: reply to every comment/DM; comment on 5 Jeddah accounts (architects, interior studios, Jeddah Season, Saudi Sotheby\'s/Knight Frank KSA).', '- Thu: note top/bottom 3 posts of the week in the dashboard; swap next week\'s listing if one went under offer.', '- Re-run `node scripts/og/gen-social.mjs` after listings change; edit captions by hand in the JSON if needed (the generator overwrites — copy edits into `marketing/captions/` first).');
+  '## Weekly checklist', '- Sun: schedule the week in Meta Business Suite (Planner) or post via `scripts/instagram-post.mjs`.', '- Daily 30 min: reply to every comment/DM; comment on 5 Jeddah accounts (architects, interior studios, Jeddah Season, Saudi Sotheby\'s/Knight Frank KSA).', '- Thu: note top/bottom 3 posts of the week in the dashboard; swap next week\'s listing if one went under offer.', '- Tours & projects: when a new Matterport link or a `project` block lands in listings.json, re-run the generator — the 3D-tour stories/reels and the unit carousels pick it up automatically.', '- Re-run `node scripts/og/gen-social.mjs` after listings change; edit captions by hand in the JSON if needed (the generator overwrites — copy edits into `marketing/captions/` first).');
 fs.writeFileSync(path.join(root, 'marketing/content-calendar.md'), md.join('\n') + '\n');
 
 // launch-posts.md + caption files
@@ -402,4 +464,4 @@ lp.push('## Stories on launch day', '- 10:00 — "Today." (wordmark, countdown s
 fs.writeFileSync(path.join(root, 'marketing/launch-posts.md'), lp.join('\n') + '\n');
 
 const feed = items.filter((i) => i.format !== 'story').length;
-console.log(`wrote src/data/content-calendar.json (${items.length} items: ${feed} feed posts incl. 9 launch, ${items.length - feed} stories), marketing/content-calendar.md, marketing/launch-posts.md, marketing/captions/launch-01..09.{txt,en.txt,ar.txt}`);
+console.log(`wrote src/data/content-calendar.json (${items.length} items: ${feed} feed posts incl. 9 launch, ${items.length - feed} stories; ${items.filter((i) => i.tourUrl).length} tour items, ${items.filter((i) => i.listingIds).length} project carousels), marketing/content-calendar.md, marketing/launch-posts.md, marketing/captions/launch-01..09.{txt,en.txt,ar.txt}`);

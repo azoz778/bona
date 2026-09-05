@@ -1,35 +1,36 @@
 ---
-/* Listing gallery: hero + thumbnails, and a <dialog> lightbox built on a scroll-snap track
-   (native swipe on touch, keyboard arrows, Escape). Images lazy-load as they come into view. */
+/* Listing gallery (round 2): a full-bleed horizontal scroll-snap strip with a progress bar, and a <dialog> lightbox
+   built on a scroll-snap track (native swipe on touch, keyboard arrows, Escape) with a thumbnail rail.
+   The first image carries the shared-element transition name from the listing cards. */
 import Icon from './Icon.astro';
-import { t, ui, type Locale , count } from '../lib/i18n';
+import { t, ui, fill, type Locale, count } from '../lib/i18n';
 import { imageAlt, type Listing } from '../lib/listings';
 interface Props { listing: Listing; locale: Locale }
 const { listing: l, locale } = Astro.props;
 const images = l.images ?? [];
-const hero = images[0];
-const maxThumbs = 5;
-const thumbs = images.slice(1, 1 + maxThumbs);
-const extra = images.length - 1 - thumbs.length;
 const rtl = locale === 'ar';
 ---
-<div data-gallery>
-  {hero && (
-    <button type="button" class="img-zoom relative block w-full cursor-zoom-in aspect-[4/3] md:aspect-[3/2] lg:max-h-[78vh]" data-lb-open="0" aria-label={t(ui.openGallery, locale)}>
-      <img src={hero.src} alt={imageAlt(hero, l, locale)} fetchpriority="high" decoding="async" class="h-full w-full object-cover" />
-      {images.length > 1 && <span class="badge absolute bottom-4 end-4 bg-ink/85 text-ivory backdrop-blur-sm">{count(images.length, 'photo', locale)}</span>}
-    </button>
-  )}
-  {thumbs.length > 0 && (
-    <div class="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-5">
-      {thumbs.map((img, i) => (
-        <button type="button" class="img-zoom relative aspect-[4/3] cursor-zoom-in" data-lb-open={i + 1} aria-label={`${t(ui.openGallery, locale)} ${i + 2}`}>
-          <img src={img.thumb ?? img.src} srcset={img.thumb ? `${img.thumb} 400w, ${img.src} 1920w` : undefined} sizes="(min-width: 640px) 20vw, 33vw" alt={imageAlt(img, l, locale)} loading="lazy" decoding="async" class="h-full w-full object-cover" />
-          {i === thumbs.length - 1 && extra > 0 && (
-            <span class="absolute inset-0 grid place-items-center bg-ink/55 font-display text-2xl text-ivory">+{extra}</span>
-          )}
+<div data-gallery class="gallery">
+  {images.length > 0 && (
+    <div class="strip no-scrollbar" data-strip tabindex="0" role="region" aria-label={t(ui.gallery, locale)}>
+      {images.map((img, i) => (
+        <button type="button" class="strip-slide img-zoom" data-lb-open={i} aria-label={`${t(ui.openGallery, locale)} ${i + 1}`}>
+          {i === 0
+            ? <img src={img.src} alt={imageAlt(img, l, locale)} fetchpriority="high" decoding="async" transition:name={`listing-${l.slug}`} class="h-full w-full object-cover" />
+            : <img src={img.thumb ?? img.src} srcset={img.thumb ? `${img.thumb} 400w, ${img.src} 1920w` : undefined} sizes="(min-width: 1024px) 60vw, 88vw" alt={imageAlt(img, l, locale)} loading="lazy" decoding="async" class="h-full w-full object-cover" />}
         </button>
       ))}
+    </div>
+  )}
+  {images.length > 1 && (
+    <div class="wrap mt-4 flex items-center gap-6">
+      <div class="strip-progress" data-strip-progress role="progressbar" aria-label={t(ui.galleryProgress, locale)} aria-valuemin="1" aria-valuemax={images.length} aria-valuenow="1"><i></i></div>
+      <p class="label shrink-0 text-stone" dir="ltr"><span data-strip-current>1</span> / {images.length}</p>
+      <div class="hidden shrink-0 gap-2 md:flex">
+        <button type="button" class="strip-btn" data-strip-prev aria-label={t(ui.previousImage, locale)}><Icon name={rtl ? 'chevron-right' : 'chevron-left'} size={18} /></button>
+        <button type="button" class="strip-btn" data-strip-next aria-label={t(ui.nextImage, locale)}><Icon name={rtl ? 'chevron-left' : 'chevron-right'} size={18} /></button>
+      </div>
+      <p class="label ms-auto hidden text-stone sm:block">{count(images.length, 'photo', locale)}</p>
     </div>
   )}
 
@@ -47,17 +48,57 @@ const rtl = locale === 'ar';
         </figure>
       ))}
     </div>
+    {images.length > 1 && (
+      <div class="lb-rail no-scrollbar" data-lb-rail role="group" aria-label={t(ui.thumbnails, locale)}>
+        {images.map((img, i) => (
+          <button type="button" class="lb-thumb" data-lb-go={i} aria-label={fill(t(ui.goToImage, locale), { n: i + 1 })} aria-current={i === 0 ? 'true' : undefined}>
+            <img src={img.thumb ?? img.src} alt="" loading="lazy" decoding="async" />
+          </button>
+        ))}
+      </div>
+    )}
   </dialog>
 </div>
 
 <script>
-  document.querySelectorAll<HTMLElement>('[data-gallery]').forEach(root => {
+  function initGallery(root: HTMLElement) {
+    if (root.dataset.ready) return;
+    root.dataset.ready = '1';
+    const rtl = document.documentElement.dir === 'rtl';
+
+    /* ---- Strip: progress + arrows ---- */
+    const strip = root.querySelector<HTMLElement>('[data-strip]');
+    if (strip) {
+      const slides = Array.from(strip.querySelectorAll<HTMLElement>('.strip-slide'));
+      const fill = root.querySelector<HTMLElement>('[data-strip-progress] i');
+      const bar = root.querySelector<HTMLElement>('[data-strip-progress]');
+      const cur = root.querySelector<HTMLElement>('[data-strip-current]');
+      const update = () => {
+        const max = strip.scrollWidth - strip.clientWidth;
+        const x = Math.abs(strip.scrollLeft);
+        const p = max > 0 ? Math.min(1, x / max) : 1;
+        if (fill) fill.style.transform = `scaleX(${Math.max(p, 1 / Math.max(1, slides.length))})`;
+        const i = Math.round(p * (slides.length - 1));
+        if (cur) cur.textContent = String(i + 1);
+        bar?.setAttribute('aria-valuenow', String(i + 1));
+      };
+      strip.addEventListener('scroll', update, { passive: true });
+      update();
+      const step = (dir: 1 | -1) => {
+        const w = (slides[0]?.offsetWidth || strip.clientWidth) + 16;
+        strip.scrollBy({ left: dir * w * (rtl ? -1 : 1), behavior: 'smooth' });
+      };
+      root.querySelector('[data-strip-prev]')?.addEventListener('click', () => step(-1));
+      root.querySelector('[data-strip-next]')?.addEventListener('click', () => step(1));
+    }
+
+    /* ---- Lightbox ---- */
     const dialog = root.querySelector<HTMLDialogElement>('[data-lightbox]');
     const track = root.querySelector<HTMLElement>('[data-lb-track]');
     if (!dialog || !track || typeof dialog.showModal !== 'function') return;
     const slides = Array.from(track.querySelectorAll<HTMLElement>('[data-lb-slide]'));
+    const thumbs = Array.from(root.querySelectorAll<HTMLElement>('[data-lb-go]'));
     const current = root.querySelector<HTMLElement>('[data-lb-current]');
-    const rtl = document.documentElement.dir === 'rtl';
     let index = 0;
 
     const load = (i: number) => {
@@ -66,11 +107,15 @@ const rtl = locale === 'ar';
         if (img) { img.src = img.dataset.src!; img.removeAttribute('data-src'); }
       }
     };
+    const mark = (i: number) => {
+      if (current) current.textContent = String(i + 1);
+      thumbs.forEach((th, j) => { if (j === i) { th.setAttribute('aria-current', 'true'); th.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' }); } else th.removeAttribute('aria-current'); });
+    };
     const go = (i: number, smooth = true) => {
       index = (i + slides.length) % slides.length;
       load(index);
       slides[index].scrollIntoView({ inline: 'start', block: 'nearest', behavior: smooth ? 'smooth' : 'auto' });
-      if (current) current.textContent = String(index + 1);
+      mark(index);
     };
     const open = (i: number) => {
       dialog.showModal();
@@ -81,6 +126,7 @@ const rtl = locale === 'ar';
     dialog.addEventListener('close', () => { document.body.style.overflow = ''; });
 
     root.querySelectorAll<HTMLElement>('[data-lb-open]').forEach(btn => btn.addEventListener('click', () => open(Number(btn.dataset.lbOpen) || 0)));
+    thumbs.forEach(th => th.addEventListener('click', () => go(Number(th.dataset.lbGo) || 0)));
     root.querySelector('[data-lb-close]')?.addEventListener('click', close);
     root.querySelector('[data-lb-prev]')?.addEventListener('click', () => go(index - 1));
     root.querySelector('[data-lb-next]')?.addEventListener('click', () => go(index + 1));
@@ -91,14 +137,16 @@ const rtl = locale === 'ar';
       else if (e.key === prev) { e.preventDefault(); go(index - 1); }
     });
 
-    // Keep the counter in sync with native swipe/scroll.
+    // Keep the counter and rail in sync with native swipe/scroll.
     const io = new IntersectionObserver(entries => {
       for (const en of entries) if (en.isIntersecting) {
         index = Number((en.target as HTMLElement).dataset.lbSlide) || 0;
         load(index);
-        if (current) current.textContent = String(index + 1);
+        mark(index);
       }
     }, { root: track, threshold: 0.6 });
     slides.forEach(s => io.observe(s));
-  });
+  }
+  const init = () => document.querySelectorAll<HTMLElement>('[data-gallery]').forEach(initGallery);
+  document.addEventListener('astro:page-load', init);
 </script>

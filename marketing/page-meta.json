@@ -1,77 +1,160 @@
 {
-  "_note": "Per-page <title>/<meta description> copy for the site agent. Titles ≤60 chars (brand suffix ' | Bona' / ' | بونا' is appended automatically by Head.astro unless the title already contains the brand). Descriptions ≤155 chars. Arabic keys are for the /ar/ mirror of the same path. Listing pages: use the '/properties/[slug]/' template.",
+  "_note": "Per-page <title>/<meta description> copy for the site agent. Titles ≤60 chars (brand suffix ' | Bona' / ' | بونا' is appended automatically by Head.astro unless the title already contains the brand). Descriptions ≤155 chars. Arabic keys are for the /ar/ mirror of the same path. Listing pages: use the '/properties/[slug]/' template. Round 2: /properties/houses/, /properties/apartments/, /properties/land/ (kind sections), /tours/ (Matterport), /privacy/ (PDPL policy, content in src/data/privacy.json).",
   "/": {
-    "title": { "en": "Bona — Private Luxury Real Estate in Jeddah", "ar": "بونا — عقارات فاخرة خاصة في جدة" },
+    "title": {
+      "en": "Bona — Private Luxury Real Estate in Jeddah",
+      "ar": "بونا — عقارات فاخرة خاصة في جدة"
+    },
     "description": {
       "en": "Curated villas, penthouses and waterfront homes in Jeddah, Riyadh and abroad. A REGA-licensed boutique brokerage — homes shown by appointment. WhatsApp +966 59 329 6933.",
       "ar": "فلل وبنتهاوس ومنازل واجهية منتقاة في جدة والرياض والخارج. بوتيك وساطة مرخّص من الهيئة العامة للعقار — المعاينة بموعد. واتساب +966 59 329 6933."
     }
   },
   "/properties/": {
-    "title": { "en": "Luxury Villas & Apartments for Sale in Jeddah", "ar": "فلل وشقق فاخرة للبيع في جدة" },
+    "title": {
+      "en": "Luxury Villas & Apartments for Sale in Jeddah",
+      "ar": "فلل وشقق فاخرة للبيع في جدة"
+    },
     "description": {
       "en": "Browse Bona's portfolio: luxury villas, penthouses and apartments for sale and rent in Al Khalidiyah, North Obhur, Al Shati, Al Rawdah and Durrat Al Arous. Asking prices, no estimates.",
       "ar": "تصفّح محفظة بونا: فلل وبنتهاوس وشقق فاخرة للبيع والإيجار في الخالدية وأبحر الشمالية والشاطئ والروضة ودرة العروس. أسعار الطلب فقط، بلا تقديرات."
     }
   },
   "/properties/for-sale/": {
-    "title": { "en": "Villas & Homes for Sale in Jeddah", "ar": "فلل ومنازل للبيع في جدة" },
+    "title": {
+      "en": "Villas & Homes for Sale in Jeddah",
+      "ar": "فلل ومنازل للبيع في جدة"
+    },
     "description": {
       "en": "Luxury villas, mansions, penthouses and apartments for sale in Jeddah's finest districts. Private viewings with Bona, a REGA-licensed brokerage.",
       "ar": "فلل وقصور وبنتهاوس وشقق فاخرة للبيع في أرقى أحياء جدة. معاينات خاصة مع بونا، وساطة مرخّصة من الهيئة العامة للعقار."
     }
   },
   "/properties/for-rent/": {
-    "title": { "en": "Luxury Villas & Apartments for Rent in Jeddah", "ar": "فلل وشقق فاخرة للإيجار في جدة" },
+    "title": {
+      "en": "Luxury Villas & Apartments for Rent in Jeddah",
+      "ar": "فلل وشقق فاخرة للإيجار في جدة"
+    },
     "description": {
       "en": "Long-term luxury rentals in Jeddah — villas in North Obhur and Al Shati, apartments in Al Salamah and Al Nahdah. Ejar-registered contracts, viewings by appointment.",
       "ar": "إيجارات فاخرة طويلة الأجل في جدة — فلل في أبحر الشمالية والشاطئ، وشقق في السلامة والنهضة. عقود موثّقة في إيجار، والمعاينة بموعد."
     }
   },
   "/properties/off-plan/": {
-    "title": { "en": "Off-Plan Villas & Residences — Jeddah & Riyadh", "ar": "فلل ومساكن على الخارطة — جدة والرياض" },
+    "title": {
+      "en": "Off-Plan Villas & Residences — Jeddah & Riyadh",
+      "ar": "فلل ومساكن على الخارطة — جدة والرياض"
+    },
     "description": {
       "en": "Selected off-plan villas and branded residences in Jeddah and Riyadh, including Wadi Safar. Developer allocations, Wafi-licensed projects, payment plans on request.",
       "ar": "فلل ومساكن على الخارطة منتقاة في جدة والرياض، من ضمنها وادي صفار. تخصيصات من المطوّر، مشاريع مرخّصة من وافي، وخطط سداد عند الطلب."
     }
   },
   "/properties/international/": {
-    "title": { "en": "International Homes — Dubai, Oman, Riviera, Marbella", "ar": "عقارات دولية — دبي، عُمان، الريفييرا، ماربيا" },
+    "title": {
+      "en": "International Homes — Dubai, Oman, Riviera, Marbella",
+      "ar": "عقارات دولية — دبي، عُمان، الريفييرا، ماربيا"
+    },
     "description": {
       "en": "Bona's international portfolio for Saudi buyers: villas in Cannes and Marbella, residences in Muscat's AIDA, and Dubai homes — sourced through partner brokerages.",
       "ar": "محفظة بونا الدولية للمشترين السعوديين: فلل في كان وماربيا، ومساكن في مشروع AIDA بمسقط، ومنازل في دبي — عبر شركاء وساطة معتمدين."
     }
   },
+  "/properties/houses/": {
+    "title": {
+      "en": "Luxury Houses & Villas in Jeddah",
+      "ar": "فلل وبيوت فاخرة في جدة"
+    },
+    "description": {
+      "en": "Villas, mansions and duplexes represented by Bona in Al Shati, Al Khalidiyah, North Obhur and Durrat Al Arous, for sale and rent. Viewings by appointment.",
+      "ar": "كل البيوت التي تمثّلها بونا: فلل وقصور ودوبلكس في الشاطئ والخالدية وأبحر الشمالية والمرجان ودرة العروس، للبيع والإيجار. أسعار الطلب، والمعاينة بموعد."
+    }
+  },
+  "/properties/apartments/": {
+    "title": {
+      "en": "Luxury Apartments & Penthouses in Jeddah",
+      "ar": "شقق وبنتهاوس فاخرة في جدة"
+    },
+    "description": {
+      "en": "Apartments, penthouses and branded residences in Al Rawdah, Al Zahra, Al Salamah and on the Corniche, ready and off-plan. Floor plans and terms on request.",
+      "ar": "شقق وبنتهاوس ومساكن بعلامات عالمية تمثّلها بونا في الروضة والزهراء والسلامة والنهضة وعلى الكورنيش، جاهزة وعلى الخارطة. الدور والإطلالة وخطة السداد عند الطلب."
+    }
+  },
+  "/properties/land/": {
+    "title": {
+      "en": "Land & Plots for Sale in Jeddah",
+      "ar": "أراضٍ وقطع للبيع في جدة"
+    },
+    "description": {
+      "en": "Residential plots and land represented by Bona in Jeddah, with plot size, zoning notes and satellite view. Asking prices only. Enquire with the reference.",
+      "ar": "أراضٍ وقطع سكنية تمثّلها بونا في جدة، مع المساحة وملاحظات الاستخدام وصورة الأقمار الصناعية. أسعار الطلب فقط، بلا تقديرات. استفسر عبر واتساب برقم المرجع."
+    }
+  },
   "/properties/[slug]/": {
-    "title": { "en": "{title} — {district}, Jeddah", "ar": "{title} — {district}، جدة" },
+    "title": {
+      "en": "{title} — {district}, Jeddah",
+      "ar": "{title} — {district}، جدة"
+    },
     "description": {
       "en": "{type} in {district}, {city}: {beds} bedrooms, {baths} bathrooms, {area} m². {price}. Viewings by appointment — WhatsApp Bona, Ref. {id}.",
       "ar": "{type} في {district}، {city}: {beds} غرف نوم، {baths} دورات مياه، {area} م². {price}. المعاينة بموعد — واتساب بونا، المرجع {id}."
     }
   },
+  "/tours/": {
+    "title": {
+      "en": "3D Virtual Tours of Homes in Jeddah",
+      "ar": "جولات افتراضية ثلاثية الأبعاد لمنازل في جدة"
+    },
+    "description": {
+      "en": "Walk through Bona's homes in 3D before you visit: Matterport tours of villas and apartments in Jeddah, room by room, on any device. Then book a viewing.",
+      "ar": "تجوّل داخل منازل بونا بتقنية ثلاثية الأبعاد قبل الزيارة: جولات Matterport لفلل وشقق في جدة، غرفة غرفة، على أي جهاز. ثم احجز معاينة خاصة عبر واتساب."
+    }
+  },
   "/about/": {
-    "title": { "en": "About Bona — Licensed Luxury Brokerage in Jeddah", "ar": "عن بونا — وساطة عقارية فاخرة مرخّصة في جدة" },
+    "title": {
+      "en": "About Bona — Licensed Luxury Brokerage in Jeddah",
+      "ar": "عن بونا — وساطة عقارية فاخرة مرخّصة في جدة"
+    },
     "description": {
       "en": "Bona is a private real-estate boutique in Jeddah (REGA FAL 1100313556). How we work, the districts we cover, and why the best homes sell quietly.",
       "ar": "بونا بوتيك عقاري خاص في جدة (رخصة فال 1100313556). كيف نعمل، والأحياء التي نغطيها، ولماذا تُباع أفضل المنازل بهدوء."
     }
   },
   "/sell/": {
-    "title": { "en": "Sell or Let Your Home Discreetly in Jeddah", "ar": "بِع أو أجّر منزلك بخصوصية في جدة" },
+    "title": {
+      "en": "Sell or Let Your Home Discreetly in Jeddah",
+      "ar": "بِع أو أجّر منزلك بخصوصية في جدة"
+    },
     "description": {
       "en": "List your villa or apartment with Bona: professional photography, off-market introductions to qualified buyers, REGA-compliant marketing and Najiz transfer handled.",
       "ar": "اعرض فيلتك أو شقتك مع بونا: تصوير احترافي، عروض خارج السوق لمشترين جادّين، تسويق متوافق مع أنظمة الهيئة، وإتمام النقل عبر ناجز."
     }
   },
   "/contact/": {
-    "title": { "en": "Contact Bona — WhatsApp +966 59 329 6933", "ar": "تواصل مع بونا — واتساب +966 59 329 6933" },
+    "title": {
+      "en": "Contact Bona — WhatsApp +966 59 329 6933",
+      "ar": "تواصل مع بونا — واتساب +966 59 329 6933"
+    },
     "description": {
       "en": "Reach Bona on WhatsApp or by phone, Sunday to Thursday 10:00–19:00. Al Rawdah District, Jeddah. Viewings and owner consultations by appointment.",
       "ar": "تواصل مع بونا عبر واتساب أو الهاتف، من الأحد إلى الخميس 10:00–19:00. حي الروضة، جدة. المعاينات واستشارات المُلّاك بموعد مسبق."
     }
   },
+  "/privacy/": {
+    "title": {
+      "en": "Privacy Policy",
+      "ar": "سياسة الخصوصية"
+    },
+    "description": {
+      "en": "How Bona handles your personal data under the Saudi PDPL: what this site collects (almost nothing), WhatsApp enquiries, retention, sharing and your rights.",
+      "ar": "كيف تتعامل بونا مع بياناتك الشخصية وفق نظام حماية البيانات الشخصية السعودي: ما يجمعه الموقع (لا شيء تقريباً)، استفسارات واتساب، الاحتفاظ، المشاركة، وحقوقك."
+    }
+  },
   "/404/": {
-    "title": { "en": "Page not found", "ar": "الصفحة غير موجودة" },
+    "title": {
+      "en": "Page not found",
+      "ar": "الصفحة غير موجودة"
+    },
     "description": {
       "en": "That page has moved or never existed. Browse Bona's current portfolio or message us on WhatsApp.",
       "ar": "هذه الصفحة انتقلت أو غير موجودة. تصفّح محفظة بونا الحالية أو راسلنا على واتساب."
