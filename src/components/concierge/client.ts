@@ -6,7 +6,7 @@
    Chat state is mirrored into sessionStorage so a hard reload restores it too. */
 
 import { navigate } from 'astro:transitions/client';
-import { getJson, postBeacon, postJson, resolveApiBase, type Card, type ChatAction, type ChatMessageResponse, type ChatSessionResponse } from './api';
+import { postBeacon, postJson, resolveApiBase, type Card, type ChatAction, type ChatMessageResponse, type ChatSessionResponse } from './api';
 import { bubble, el, listingCard, note, type ConciergeConfig } from './render';
 import { browserSupportsCall, CallSession } from './call';
 
@@ -54,6 +54,8 @@ class Concierge {
   private open = false;
   private tab: 'chat' | 'call' = 'chat';
   private busy = false;
+  private typing = false;
+  private offline = false;
   private lastSent = '';
   private modal = false;
   private timer = 0;
@@ -355,15 +357,27 @@ class Concierge {
   private setTyping(on: boolean) {
     const t = this.q('[data-cg-typing]');
     if (t) t.hidden = !on;
-    const send = this.q<HTMLButtonElement>('[data-cg-send]');
-    if (send) send.disabled = on;
+    this.typing = on;
+    this.updateComposer();
     if (on) this.scrollLog(true);
   }
 
   private setOffline(on: boolean) {
+    this.offline = on;
     const f = this.q('[data-cg-fallback]');
     if (f) f.hidden = !on;
+    this.updateComposer();
     if (on) this.scrollLog(true);
+  }
+
+  /** The composer is dead while Dana is typing, and while the API is unreachable. */
+  private updateComposer() {
+    const send = this.q<HTMLButtonElement>('[data-cg-send]');
+    const input = this.q<HTMLTextAreaElement>('[data-cg-input]');
+    const off = this.offline;
+    if (send) send.disabled = this.typing || off;
+    if (input) input.disabled = off;
+    this.q('[data-cg-pane="chat"]')?.classList.toggle('is-offline', off);
   }
 
   private scrollLog(smooth: boolean) {
@@ -402,7 +416,7 @@ class Concierge {
     pane?.setAttribute('data-state', s.status);
     this.q('[data-cg-open]')?.classList.toggle('is-live', this.call.active);
 
-    if (status) status.textContent = status.dataset[s.status === 'error' ? 'ended' : s.status] || '';
+    if (status) status.textContent = status.dataset[s.status] || '';
     if (orb) {
       orb.disabled = this.call.active;
       orb.classList.toggle('is-speaking', s.status === 'speaking');
@@ -484,19 +498,3 @@ function init() {
 
 document.addEventListener('astro:page-load', init);
 document.addEventListener('astro:before-swap', () => { if (bound) { widget.unbind(); bound = null; } });
-
-/* Warm the API on idle so the first message is not the first DNS lookup. Never blocks anything. */
-document.addEventListener('astro:page-load', () => {
-  const root = document.querySelector<HTMLElement>('[data-concierge]');
-  if (!root || root.dataset.warmed) return;
-  root.dataset.warmed = '1';
-  const run = () => {
-    let base = '';
-    try { base = (JSON.parse(root.dataset.config || '{}') as ConciergeConfig).apiBase || ''; } catch { return; }
-    base = resolveApiBase(base);
-    if (base) void getJson(base, '/health', 4000).catch(() => {});
-  };
-  const idle = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: object) => void }).requestIdleCallback;
-  if (typeof idle === 'function') idle.call(window, run, { timeout: 4000 });
-  else window.setTimeout(run, 2500);
-}, { once: true });

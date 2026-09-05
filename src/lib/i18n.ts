@@ -331,6 +331,7 @@ export const ui = {
   conciergeCallLive: s('Dana is listening', 'دانة تستمع إليك'),
   conciergeCallSpeaking: s('Dana is speaking', 'دانة تتحدّث'),
   conciergeCallEnded: s('Call ended', 'انتهت المكالمة'),
+  conciergeCallNotConnected: s('We could not connect', 'تعذّر الاتصال'),
   conciergeCallEnd: s('End call', 'إنهاء المكالمة'),
   conciergeCallMute: s('Mute', 'كتم الصوت'),
   conciergeCallUnmute: s('Unmute', 'إلغاء الكتم'),
