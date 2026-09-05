@@ -1,0 +1,52 @@
+---
+import type { ChecklistItem } from '../../lib/dashboard/types';
+interface Props { items: ChecklistItem[] }
+const { items } = Astro.props;
+const order = ['Site', 'SEO', 'Social', 'Legal & licences', 'Operations'];
+const groups = [...new Set([...order.filter(g => items.some(i => i.group === g)), ...items.map(i => i.group)])]
+  .map(g => ({ name: g, items: items.filter(i => i.group === g) }));
+---
+<section id="checklist" class="dash-section" data-section aria-labelledby="checklist-title">
+  <div class="dash-section-head">
+    <div>
+      <h2 id="checklist-title" class="dash-h2">Launch checklist</h2>
+      <p class="dash-lede">{items.length} items from <code>src/data/launch-checklist.json</code>. Ticks are saved in this browser under <code>bona.checklist.v1</code>.</p>
+    </div>
+    <button type="button" class="dash-btn dash-btn--ghost dash-btn--sm" data-action="checklist-reset">Clear ticks</button>
+  </div>
+
+  <div class="dash-panel" style="padding:14px 16px;margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:8px">
+      <span id="checklist-count" class="dash-strong">0 of {items.length} done</span>
+      <span id="checklist-pct" class="dash-num dash-muted">0%</span>
+    </div>
+    <div id="checklist-meter" class="dash-meter" role="progressbar" aria-label="Launch progress" aria-valuemin="0" aria-valuemax={items.length} aria-valuenow="0">
+      <div id="checklist-fill" class="dash-meter-fill"></div>
+    </div>
+  </div>
+
+  <div class="dash-check-groups">
+    {groups.map(g => (
+      <div class="dash-panel">
+        <div class="dash-panel-head">
+          <h3 class="dash-h3">{g.name}</h3>
+          <span class="dash-num dash-muted" data-group-count={g.name}>0/{g.items.length}</span>
+        </div>
+        <ul style="list-style:none;margin:0;padding:0">
+          {g.items.map(i => (
+            <li class="dash-check" data-check-item data-done="false">
+              <label>
+                <input type="checkbox" data-check-id={i.id} data-group={g.name} />
+                <span class="dash-check-text">{i.text}</span>
+              </label>
+              <span class="dash-check-side">
+                {i.link && <a class="dash-link" href={i.link} target="_blank" rel="noopener" style="font-size:11px">Open</a>}
+                <span class:list={['dash-tag', { 'dash-tag--owner': i.owner === 'owner' }]}>{i.owner}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ))}
+  </div>
+</section>

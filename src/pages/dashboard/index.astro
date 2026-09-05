@@ -1,0 +1,106 @@
+---
+/* /dashboard/ — internal operations page. noindex, no auth (test domain), zero
+   backend: listings/calendar/integrations/checklist are baked in at build time,
+   leads/ticks/statuses live in localStorage, live checks run in the browser.
+
+   This page renders its own <html> document instead of layouts/Base.astro:
+   Base now wraps every page in the public header, footer and WhatsApp float,
+   which an internal ops screen must not carry. It still uses the SEO agent's
+   Head.astro with the same props (title, description, locale, path, noindex),
+   so canonical/robots/GA4 handling stays identical to the rest of the site. */
+import '../../styles/global.css';
+import Head from '../../components/seo/Head.astro';
+import site from '../../data/site.json';
+import integrationsRaw from '../../data/integrations.json';
+import checklistRaw from '../../data/launch-checklist.json';
+import calendarRaw from '../../data/content-calendar.json';
+import { listings } from '../../lib/listings';
+import { listingStats, summaries } from '../../lib/dashboard/stats';
+import type { CalendarEntry, Integration, ChecklistItem, QuickLink, Section } from '../../lib/dashboard/types';
+import Shell from '../../components/dashboard/Shell.astro';
+import Overview from '../../components/dashboard/Overview.astro';
+import Leads from '../../components/dashboard/Leads.astro';
+import Inventory from '../../components/dashboard/Inventory.astro';
+import ContentCalendar from '../../components/dashboard/ContentCalendar.astro';
+import Integrations from '../../components/dashboard/Integrations.astro';
+import Checklist from '../../components/dashboard/Checklist.astro';
+import QuickLinks from '../../components/dashboard/QuickLinks.astro';
+
+const integrations = integrationsRaw as Integration[];
+const checklist = checklistRaw as ChecklistItem[];
+const calendar = (Array.isArray(calendarRaw) ? calendarRaw : []) as unknown as CalendarEntry[];
+
+const stats = listingStats(listings);
+const builtAt = new Date().toISOString();
+
+const checks = [
+  { label: 'Home page', url: `${site.url}/` },
+  { label: 'Sitemap', url: `${site.url}/sitemap-index.xml` },
+  { label: 'robots.txt', url: `${site.url}/robots.txt` },
+  { label: 'llms.txt', url: `${site.url}/llms.txt` },
+  { label: 'Share image', url: `${site.url}/og-default.png` },
+];
+
+const sections: Section[] = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'leads', label: 'Leads' },
+  { id: 'inventory', label: 'Inventory' },
+  { id: 'content', label: 'Content calendar' },
+  { id: 'integrations', label: 'Integrations' },
+  { id: 'checklist', label: 'Launch checklist' },
+  { id: 'links', label: 'Quick links' },
+];
+
+const host = site.url.replace(/^https?:\/\//, '');
+const quickLinks: QuickLink[] = [
+  { label: 'Public site, English', url: `${site.url}/`, note: host },
+  { label: 'Public site, Arabic', url: `${site.url}/ar/`, note: `${host}/ar/` },
+  { label: `Instagram @${site.instagram.handle}`, url: site.instagram.url, note: 'Profile and DMs' },
+  { label: `WhatsApp ${site.whatsapp.display}`, url: `https://wa.me/${site.whatsapp.wa}`, note: 'Open a chat with the business number' },
+  { label: 'GitHub repository', url: 'https://github.com/azoz778/bona', note: 'azoz778/bona' },
+  { label: 'Deploys (GitHub Actions)', url: 'https://github.com/azoz778/bona/actions', note: 'Build and deploy runs, daily 06:00 KSA' },
+  { label: 'Cloudflare DNS', url: 'https://dash.cloudflare.com/', note: 'azoz.uk zone, CNAME bona' },
+  { label: 'Google Search Console', url: 'https://search.google.com/search-console?resource_id=sc-domain:azoz.uk', note: 'azoz.uk domain property' },
+];
+
+const payload = {
+  site: { name: site.name, nameAr: site.nameAr, url: site.url, wa: site.whatsapp.wa },
+  builtAt,
+  listings: summaries(listings),
+  calendar: calendar.map((c, index) => ({
+    index,
+    key: `${c.date}|${c.topic?.en ?? ''}`,
+    date: c.date ?? '',
+    platform: c.platform ?? '',
+    format: c.format ?? '',
+    pillar: c.pillar ?? '',
+    topic: c.topic?.en ?? '',
+    status: c.status ?? 'planned',
+  })),
+  checks,
+};
+// `<` is escaped so a topic like "</script>" can't break out of the JSON block.
+const payloadJson = JSON.stringify(payload).replace(/</g, '\\u003c');
+---
+<!doctype html>
+<html lang="en" dir="ltr">
+  <head>
+    <Head title={`${site.name} operations`} description={`Internal operations dashboard for ${site.name}.`} locale="en" path="/dashboard/" noindex={true} />
+  </head>
+  <body>
+    <Shell sections={sections} builtAt={builtAt} siteUrl={site.url} siteName={site.name}>
+      <Overview stats={stats} checklistTotal={checklist.length} checksTotal={checks.length} />
+      <Leads />
+      <Inventory listings={listings} siteUrl={site.url} />
+      <ContentCalendar items={calendar} />
+      <Integrations rows={integrations} checks={checks} />
+      <Checklist items={checklist} />
+      <QuickLinks links={quickLinks} />
+    </Shell>
+    <script type="application/json" id="dash-data" set:html={payloadJson} />
+    <script>
+      import { initDashboard } from '../../lib/dashboard/client';
+      initDashboard();
+    </script>
+  </body>
+</html>

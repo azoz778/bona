@@ -1,0 +1,94 @@
+---
+import Pill from './Pill.astro';
+import { formatPrice } from '../../lib/i18n';
+import { categoryLabel, type Listing } from '../../lib/listings';
+interface Props { listings: Listing[]; siteUrl: string }
+const { listings, siteUrl } = Astro.props;
+
+const types = [...new Set(listings.map(l => l.type))].sort();
+const rows = listings.map(l => {
+  const url = `${siteUrl}/properties/${l.slug}/`;
+  const share = `https://wa.me/?text=${encodeURIComponent(`${l.title.en}\n${l.title.ar}\n${url}`)}`;
+  const thumb = l.images?.[0]?.thumb || l.images?.[0]?.src || '';
+  const priceText = formatPrice(l.price, 'en');
+  const search = [l.id, l.title.en, l.title.ar, l.type, l.location?.district?.en, l.location?.district?.ar, l.location?.city?.en, l.status, l.category].join(' ').toLowerCase();
+  return { l, url, share, thumb, priceText, search, priceSort: l.price?.amount ?? -1, images: l.images?.length ?? 0, district: l.location?.district?.en ?? '' };
+});
+---
+<section id="inventory" class="dash-section" data-section aria-labelledby="inventory-title">
+  <div class="dash-section-head">
+    <div>
+      <h2 id="inventory-title" class="dash-h2">Inventory</h2>
+      <p class="dash-lede">What the public site is showing right now. Edit listings in <code>src/data/listings.json</code>; the site rebuilds daily and on every push.</p>
+    </div>
+  </div>
+
+  <div class="dash-filters">
+    <label class="sr-only" for="inv-search">Search listings</label>
+    <input id="inv-search" class="dash-input" type="search" placeholder="Search title, district, type, id" autocomplete="off" />
+    <select id="inv-category" class="dash-input" aria-label="Filter by category">
+      <option value="">All categories</option>
+      {Object.entries(categoryLabel).map(([k, v]) => <option value={k}>{v.en}</option>)}
+    </select>
+    <select id="inv-status" class="dash-input" aria-label="Filter by status">
+      <option value="">Any status</option>
+      <option value="available">Available</option>
+      <option value="reserved">Reserved</option>
+      <option value="sold">Sold</option>
+    </select>
+    <span id="inv-count" class="dash-count">{listings.length} listings</span>
+  </div>
+
+  <div class="dash-panel">
+    {listings.length === 0 ? (
+      <div class="dash-empty"><p>No listings in listings.json yet.</p></div>
+    ) : (
+      <div class="dash-table-wrap">
+        <table class="dash-table" id="inventory-table" style="min-width:1040px">
+          <thead>
+            <tr>
+              <th scope="col">Photo</th>
+              <th scope="col" data-sort="id" aria-sort="ascending"><button type="button">ID</button></th>
+              <th scope="col" data-sort="title" aria-sort="none"><button type="button">Title</button></th>
+              <th scope="col" data-sort="category" aria-sort="none"><button type="button">Category</button></th>
+              <th scope="col" data-sort="type" aria-sort="none"><button type="button">Type</button></th>
+              <th scope="col" data-sort="district" aria-sort="none"><button type="button">District</button></th>
+              <th scope="col" data-sort="price" aria-sort="none"><button type="button">Price</button></th>
+              <th scope="col" data-sort="status" aria-sort="none"><button type="button">Status</button></th>
+              <th scope="col" data-sort="featured" aria-sort="none"><button type="button">Featured</button></th>
+              <th scope="col" data-sort="images" aria-sort="none"><button type="button">Images</button></th>
+              <th scope="col">Links</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ l, url, share, thumb, priceText, search, priceSort, images, district }) => (
+              <tr data-id={l.id} data-title={l.title.en} data-category={l.category} data-type={l.type} data-district={district} data-price={priceSort} data-status={l.status} data-featured={l.featured ? '1' : '0'} data-images={images} data-search={search}>
+                <td><div class="dash-thumb">{thumb && <img src={thumb} alt="" loading="lazy" width="56" height="40" onerror="this.remove()" />}</div></td>
+                <td class="dash-num dash-muted">{l.id}</td>
+                <td>
+                  <div class="dash-strong">{l.title.en}</div>
+                  <div class="dash-muted dash-ar" style="font-size:12px;text-align:left">{l.title.ar}</div>
+                </td>
+                <td>{categoryLabel[l.category]?.en ?? l.category}</td>
+                <td style="text-transform:capitalize">{l.type}</td>
+                <td>{district}{l.location?.countryCode && l.location.countryCode !== 'SA' ? <span class="dash-muted">, {l.location.country?.en}</span> : null}</td>
+                <td class="dash-num" style="white-space:nowrap">{priceText}</td>
+                <td><Pill state={l.status} /></td>
+                <td>{l.featured ? <span class="dash-tag dash-tag--owner">Featured</span> : <span class="dash-muted">—</span>}</td>
+                <td class="dash-num">{images}{images < 4 && <span class="dash-muted" title="Schema minimum is 4 images"> (min 4)</span>}</td>
+                <td class="dash-nowrap">
+                  <div class="dash-actions">
+                    <a class="dash-btn dash-btn--sm dash-btn--ghost" href={url} target="_blank" rel="noopener">View</a>
+                    <a class="dash-btn dash-btn--sm" href={share} target="_blank" rel="noopener" aria-label={`Share ${l.title.en} on WhatsApp`} title="Share on WhatsApp">WhatsApp</a>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+    <div id="inv-empty" class="dash-empty" hidden><p>No listings match those filters.</p></div>
+  </div>
+  {types.length > 0 && <p class="dash-muted" style="margin:10px 0 0;font-size:12px">Types in inventory: {types.join(', ')}.</p>}
+</section>

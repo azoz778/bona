@@ -1,0 +1,11 @@
+---
+/* Stat tile: label, value, optional secondary line. `kpi` / `subKpi` mark the
+   nodes the browser updates (leads, content, checks, checklist). */
+interface Props { label: string; value: string | number; sub?: string; kpi?: string; subKpi?: string }
+const { label, value, sub, kpi, subKpi } = Astro.props;
+---
+<div class="dash-tile">
+  <span class="dash-label">{label}</span>
+  <span class="dash-tile-value" data-kpi={kpi}>{value}</span>
+  {(sub !== undefined || subKpi) && <span class="dash-tile-sub" data-kpi={subKpi}>{sub ?? ''}</span>}
+</div>

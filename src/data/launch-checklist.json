@@ -1,0 +1,35 @@
+[
+  { "id": "site-home", "group": "Site", "text": "Home page live with featured listings and both languages", "owner": "agent", "link": "https://bona.azoz.uk/" },
+  { "id": "site-listings", "group": "Site", "text": "24 to 32 listings, each with 4 or more real photos and Arabic copy", "owner": "agent", "link": "https://bona.azoz.uk/properties/" },
+  { "id": "site-arabic", "group": "Site", "text": "Arabic mirror at /ar/ read through by a native speaker", "owner": "owner", "link": "https://bona.azoz.uk/ar/" },
+  { "id": "site-whatsapp", "group": "Site", "text": "WhatsApp button on every listing pre-fills the property reference", "owner": "agent" },
+  { "id": "site-contact", "group": "Site", "text": "Contact and sell-with-us forms hand off to WhatsApp", "owner": "agent", "link": "https://bona.azoz.uk/contact/" },
+  { "id": "site-404", "group": "Site", "text": "404 page in place; link check passes with zero broken links", "owner": "agent" },
+  { "id": "site-mobile", "group": "Site", "text": "Mobile QA in a real browser: no horizontal scroll, tap targets 44px", "owner": "agent" },
+  { "id": "site-https", "group": "Site", "text": "GitHub Pages certificate issued and Enforce HTTPS switched on", "owner": "agent", "link": "https://github.com/azoz778/bona/settings/pages" },
+
+  { "id": "seo-meta", "group": "SEO", "text": "Title, description, canonical and hreflang on every page", "owner": "agent" },
+  { "id": "seo-jsonld", "group": "SEO", "text": "RealEstateAgent and per-listing JSON-LD pass the Rich Results test", "owner": "agent", "link": "https://search.google.com/test/rich-results" },
+  { "id": "seo-sitemap", "group": "SEO", "text": "sitemap-index.xml, robots.txt and llms.txt reachable", "owner": "agent", "link": "https://bona.azoz.uk/sitemap-index.xml" },
+  { "id": "seo-gsc", "group": "SEO", "text": "Sitemap submitted in Search Console (azoz.uk domain property)", "owner": "agent", "link": "https://search.google.com/search-console?resource_id=sc-domain:azoz.uk" },
+  { "id": "seo-ga4", "group": "SEO", "text": "GA4 property created and the Measurement ID pasted into site.json", "owner": "owner", "link": "https://analytics.google.com/" },
+  { "id": "seo-og", "group": "SEO", "text": "Link previews show the Bona image in WhatsApp and Instagram", "owner": "agent", "link": "https://bona.azoz.uk/og-default.png" },
+
+  { "id": "social-bio", "group": "Social", "text": "Instagram bio written and link set to bona.azoz.uk", "owner": "owner", "link": "https://www.instagram.com/bona.com.sa/" },
+  { "id": "social-business", "group": "Social", "text": "Instagram switched to a Business account and linked to a Facebook Page", "owner": "owner", "link": "https://business.facebook.com/" },
+  { "id": "social-posts", "group": "Social", "text": "Nine launch posts published from the marketing kit", "owner": "agent" },
+  { "id": "social-calendar", "group": "Social", "text": "30-day content calendar loaded and first week drafted", "owner": "agent" },
+  { "id": "social-wa-business", "group": "Social", "text": "WhatsApp Business profile: name, hours, address, catalogue", "owner": "owner" },
+  { "id": "social-gbp", "group": "Social", "text": "Google Business Profile claimed for Bona, Jeddah", "owner": "owner", "link": "https://business.google.com/" },
+
+  { "id": "legal-cr", "group": "Legal & licences", "text": "Commercial registration issued for Bona", "owner": "owner", "link": "https://mc.gov.sa/" },
+  { "id": "legal-fal", "group": "Legal & licences", "text": "REGA FAL licence in the company name (site shows personal FAL 1100313556 until then)", "owner": "owner", "link": "https://rega.gov.sa/" },
+  { "id": "legal-ads", "group": "Legal & licences", "text": "REGA advertising licence number on each listing before any paid promotion", "owner": "owner" },
+  { "id": "legal-domain", "group": "Legal & licences", "text": "bona.com.sa registered; site.url and DNS switched over", "owner": "owner", "link": "https://nic.sa/" },
+  { "id": "legal-privacy", "group": "Legal & licences", "text": "Privacy notice and terms pages published (PDPL)", "owner": "agent" },
+
+  { "id": "ops-leads", "group": "Operations", "text": "Leads logged here as they arrive; CSV backup taken weekly", "owner": "owner" },
+  { "id": "ops-cron", "group": "Operations", "text": "Daily 06:00 rebuild and health check green in GitHub Actions", "owner": "agent", "link": "https://github.com/azoz778/bona/actions" },
+  { "id": "ops-email", "group": "Operations", "text": "Mailbox on bona.com.sa once the domain exists", "owner": "owner" },
+  { "id": "ops-review", "group": "Operations", "text": "Claude and Codex review both passed on the launch commit", "owner": "agent" }
+]

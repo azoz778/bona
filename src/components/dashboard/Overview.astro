@@ -1,0 +1,51 @@
+---
+import StatTile from './StatTile.astro';
+import DistrictChart from './DistrictChart.astro';
+import type { ListingStats } from '../../lib/dashboard/stats';
+import { compact } from '../../lib/dashboard/stats';
+interface Props { stats: ListingStats; checklistTotal: number; checksTotal: number }
+const { stats, checklistTotal, checksTotal } = Astro.props;
+const cat = (k: string) => stats.byCategory.find(c => c.key === k)?.count ?? 0;
+---
+<section id="overview" class="dash-section" data-section aria-labelledby="overview-title">
+  <div class="dash-section-head">
+    <div>
+      <h1 id="overview-title" class="dash-h1">Operations</h1>
+      <p class="dash-lede">Inventory from listings.json, leads and ticks from this browser, content from the calendar file. Everything here is internal.</p>
+    </div>
+  </div>
+
+  <div class="dash-tile-group">
+    <span class="dash-label">Inventory</span>
+    <div class="dash-tiles"><div class="dash-tiles-grid">
+      <StatTile label="Listings" value={compact(stats.total)} sub={`${stats.available} available${stats.reserved ? `, ${stats.reserved} reserved` : ''}${stats.sold ? `, ${stats.sold} sold` : ''}`} />
+      <StatTile label="Available" value={compact(stats.available)} sub={stats.total ? `${Math.round((stats.available / stats.total) * 100)}% of inventory` : 'no listings yet'} />
+      <StatTile label="Featured" value={compact(stats.featured)} sub="shown on the home page" />
+      <StatTile label="For sale" value={compact(cat('buy'))} sub="buy" />
+      <StatTile label="For rent" value={compact(cat('rent'))} sub="rent" />
+      <StatTile label="Off-plan" value={compact(cat('off-plan'))} sub="developments" />
+      <StatTile label="International" value={compact(cat('international'))} sub="outside Saudi Arabia" />
+    </div></div>
+  </div>
+
+  <div class="dash-tile-group">
+    <span class="dash-label">Pipeline, content and launch</span>
+    <div class="dash-tiles"><div class="dash-tiles-grid">
+      <StatTile label="Leads, last 7 days" value="0" kpi="leads-week" sub="0 open" subKpi="leads-open" />
+      <StatTile label="Leads, total" value="0" kpi="leads-total" sub="0 won" subKpi="leads-won" />
+      <StatTile label="Posts, next 7 days" value="0" kpi="content-next7" sub="planned or drafted" />
+      <StatTile label="Posts published" value="0" kpi="content-published" sub="0 in calendar" subKpi="content-total" />
+      <StatTile label="Launch checklist" value={`0/${checklistTotal}`} kpi="checklist" sub="ticks saved in this browser" />
+      <StatTile label="Live checks" value={`0/${checksTotal} live`} kpi="checks" sub="site, sitemap, robots, llms, OG" />
+    </div></div>
+  </div>
+
+  <DistrictChart rows={stats.byDistrict} total={stats.total} />
+
+  {(stats.missingImages > 0 || stats.priceOnRequest > 0) && (
+    <p class="dash-muted" style="margin:12px 0 0;font-size:12px">
+      {stats.missingImages > 0 && <span>{stats.missingImages} {stats.missingImages === 1 ? 'listing has' : 'listings have'} fewer than 4 images (schema minimum). </span>}
+      {stats.priceOnRequest > 0 && <span>{stats.priceOnRequest} {stats.priceOnRequest === 1 ? 'listing is' : 'listings are'} price on request.</span>}
+    </p>
+  )}
+</section>

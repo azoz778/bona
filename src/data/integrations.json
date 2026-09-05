@@ -1,0 +1,129 @@
+[
+  {
+    "id": "website",
+    "name": "Website bona.azoz.uk",
+    "status": "pending-agent",
+    "owner": "agent",
+    "action": "First GitHub Pages deploy: push main, then set the custom domain in Settings → Pages. Rebuilds daily at 06:00 KSA.",
+    "link": "https://bona.azoz.uk/",
+    "detail": "Returns 404 until the first deploy lands."
+  },
+  {
+    "id": "dns",
+    "name": "DNS (Cloudflare)",
+    "status": "live",
+    "owner": "agent",
+    "action": "CNAME bona → azoz778.github.io, DNS-only (grey cloud) so GitHub can issue the certificate.",
+    "link": "https://dash.cloudflare.com/",
+    "detail": "Resolves to GitHub Pages IPs."
+  },
+  {
+    "id": "https",
+    "name": "HTTPS certificate",
+    "status": "pending-agent",
+    "owner": "agent",
+    "action": "GitHub issues a Let's Encrypt cert once the custom domain is saved and DNS is verified; then switch on Enforce HTTPS.",
+    "link": "https://github.com/azoz778/bona/settings/pages",
+    "detail": "Currently serving the *.github.io certificate, so browsers show a name mismatch."
+  },
+  {
+    "id": "pages-deploy",
+    "name": "GitHub Pages deploy",
+    "status": "pending-agent",
+    "owner": "agent",
+    "action": "Workflow deploy.yml builds on push to main and on the daily schedule.",
+    "link": "https://github.com/azoz778/bona/actions",
+    "detail": "Needs Pages source set to GitHub Actions in repo settings."
+  },
+  {
+    "id": "instagram",
+    "name": "Instagram @bona.com.sa",
+    "status": "pending-owner",
+    "owner": "owner",
+    "action": "Switch the account to Business, link it to a Facebook Page under the TK Meta Business, then the posting script can publish unattended.",
+    "link": "https://www.instagram.com/bona.com.sa/",
+    "detail": "Profile exists and the site links to it. API posting waits on the account link."
+  },
+  {
+    "id": "whatsapp",
+    "name": "WhatsApp +966 59 329 6933",
+    "status": "pending-owner",
+    "owner": "owner",
+    "action": "Install WhatsApp Business on this number and fill the profile: name, hours, address, catalogue.",
+    "link": "https://wa.me/966593296933",
+    "detail": "Deep links with pre-filled property references are live on every listing."
+  },
+  {
+    "id": "ga4",
+    "name": "Google Analytics 4",
+    "status": "pending-owner",
+    "owner": "owner",
+    "action": "Create a GA4 property for bona.azoz.uk and paste the Measurement ID (G-XXXX) into site.json → analytics.ga4.",
+    "link": "https://analytics.google.com/"
+  },
+  {
+    "id": "meta-pixel",
+    "name": "Meta Pixel",
+    "status": "pending-owner",
+    "owner": "owner",
+    "action": "Create a dataset in Events Manager and paste the Pixel ID into site.json → analytics.metaPixel.",
+    "link": "https://business.facebook.com/events_manager"
+  },
+  {
+    "id": "gsc",
+    "name": "Google Search Console",
+    "status": "pending-agent",
+    "owner": "agent",
+    "action": "azoz.uk domain property is verified via DNS. Submit https://bona.azoz.uk/sitemap-index.xml once the site is live.",
+    "link": "https://search.google.com/search-console?resource_id=sc-domain:azoz.uk"
+  },
+  {
+    "id": "indexnow",
+    "name": "IndexNow",
+    "status": "live",
+    "owner": "agent",
+    "action": "Key file is in the site; CI submits changed URLs after each deploy.",
+    "link": "https://bona.azoz.uk/b0na7c3f9e2d4a1b8f6e5c4d3b2a1908.txt"
+  },
+  {
+    "id": "gbp",
+    "name": "Google Business Profile",
+    "status": "pending-owner",
+    "owner": "owner",
+    "action": "Claim a profile for Bona, Al Rawdah, Jeddah. Postcard or phone verification takes a few days.",
+    "link": "https://business.google.com/"
+  },
+  {
+    "id": "domain",
+    "name": "Domain bona.com.sa",
+    "status": "pending-owner",
+    "owner": "owner",
+    "action": "A .com.sa needs a Saudi CR or registered trade name. Register through a SaudiNIC-accredited registrar, then flip site.url and DNS.",
+    "link": "https://nic.sa/"
+  },
+  {
+    "id": "cr",
+    "name": "Commercial registration",
+    "status": "pending-owner",
+    "owner": "owner",
+    "action": "Issue the CR for Bona Real Estate on the Ministry of Commerce portal. Unlocks the domain, company FAL licence and bank account.",
+    "link": "https://mc.gov.sa/"
+  },
+  {
+    "id": "rega",
+    "name": "REGA FAL licence and ad licences",
+    "status": "pending-owner",
+    "owner": "owner",
+    "action": "Apply for the company FAL licence, then an advertising licence per listing before any paid promotion.",
+    "link": "https://rega.gov.sa/",
+    "detail": "The site currently shows the owner's personal FAL licence 1100313556."
+  },
+  {
+    "id": "email",
+    "name": "Email",
+    "status": "planned",
+    "owner": "owner",
+    "action": "No mailbox until bona.com.sa exists. Then Google Workspace or Zoho Mail on the domain; add the address to site.json.",
+    "link": null
+  }
+]

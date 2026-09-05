@@ -1,0 +1,105 @@
+---
+/* Leads section. The table body is rendered in the browser from
+   localStorage (client/leads.ts); this file owns the static frame, filters,
+   empty state and the <dialog> form. Stage/source option lists here must
+   match STAGES / SOURCES / INTERESTS in client/leads.ts. */
+const STAGES = ['New', 'Contacted', 'Viewing', 'Offer', 'Won', 'Lost'];
+const SOURCES = ['WhatsApp', 'Instagram', 'Website', 'Referral', 'Walk-in'];
+const INTERESTS = [['buy', 'Buy'], ['rent', 'Rent'], ['sell', 'Sell']];
+---
+<section id="leads" class="dash-section" data-section aria-labelledby="leads-title">
+  <div class="dash-section-head">
+    <div>
+      <h2 id="leads-title" class="dash-h2">Leads</h2>
+      <p class="dash-lede">Every enquiry, its stage and the property it is about. Saved in this browser under <code>bona.leads.v1</code>; export a CSV or JSON backup regularly.</p>
+    </div>
+    <div class="dash-toolbar">
+      <button type="button" class="dash-btn" data-action="lead-add">New lead</button>
+      <button type="button" class="dash-btn dash-btn--ghost" data-action="lead-export-csv">Export CSV</button>
+      <button type="button" class="dash-btn dash-btn--ghost" data-action="lead-import-csv">Import CSV</button>
+      <button type="button" class="dash-btn dash-btn--ghost" data-action="lead-backup-json">Backup JSON</button>
+      <button type="button" class="dash-btn dash-btn--ghost" data-action="lead-restore-json">Restore JSON</button>
+    </div>
+  </div>
+
+  <div class="dash-filters">
+    <label class="sr-only" for="lead-search">Search leads</label>
+    <input id="lead-search" class="dash-input" type="search" placeholder="Search name, phone, notes, property" autocomplete="off" />
+    <label class="sr-only" for="lead-stage-filter">Filter by stage</label>
+    <select id="lead-stage-filter" class="dash-input" aria-label="Filter by stage">
+      <option value="">All stages</option>
+      {STAGES.map(s => <option value={s}>{s}</option>)}
+    </select>
+    <span id="lead-count" class="dash-count">0 leads</span>
+  </div>
+
+  <div class="dash-panel">
+    <div class="dash-table-wrap" hidden>
+      <table class="dash-table" id="leads-table">
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Source</th>
+            <th scope="col">Interest</th>
+            <th scope="col">Property</th>
+            <th scope="col">Budget</th>
+            <th scope="col">Stage</th>
+            <th scope="col">Added</th>
+            <th scope="col">Notes</th>
+            <th scope="col">Actions</th>
+          </tr>
+        </thead>
+        <tbody data-leads-body></tbody>
+      </table>
+    </div>
+    <div id="leads-empty" class="dash-empty">
+      <p>No leads yet. Add the first enquiry, or import a CSV with the columns name, phone, source, interest, budget, stage, notes.</p>
+      <button type="button" class="dash-btn" data-action="lead-add">New lead</button>
+    </div>
+  </div>
+
+  <dialog id="lead-dialog" class="dash-dialog" aria-labelledby="lead-dialog-title">
+    <form id="lead-form" method="dialog" novalidate>
+      <h2 id="lead-dialog-title" class="dash-h2">New lead</h2>
+      <input type="hidden" name="id" />
+      <input type="hidden" name="createdAt" />
+      <label class="dash-field">
+        <span class="dash-label">Name</span>
+        <input class="dash-input" name="name" required autocomplete="off" />
+      </label>
+      <label class="dash-field">
+        <span class="dash-label">Phone</span>
+        <input class="dash-input" name="phone" type="tel" inputmode="tel" placeholder="+966 5x xxx xxxx" required autocomplete="off" />
+        <span class="dash-hint">With country code (E.164), so the WhatsApp link works.</span>
+      </label>
+      <label class="dash-field">
+        <span class="dash-label">Source</span>
+        <select class="dash-input" name="source">{SOURCES.map(s => <option value={s}>{s}</option>)}</select>
+      </label>
+      <label class="dash-field">
+        <span class="dash-label">Interest</span>
+        <select class="dash-input" name="interest">{INTERESTS.map(([v, l]) => <option value={v}>{l}</option>)}</select>
+      </label>
+      <label class="dash-field dash-field--full">
+        <span class="dash-label">Property</span>
+        <select class="dash-input" name="propertyId"><option value="">None yet</option></select>
+      </label>
+      <label class="dash-field">
+        <span class="dash-label">Budget</span>
+        <input class="dash-input" name="budget" placeholder="SAR 4,000,000" autocomplete="off" />
+      </label>
+      <label class="dash-field">
+        <span class="dash-label">Stage</span>
+        <select class="dash-input" name="stage">{STAGES.map(s => <option value={s}>{s}</option>)}</select>
+      </label>
+      <label class="dash-field dash-field--full">
+        <span class="dash-label">Notes</span>
+        <textarea class="dash-input" name="notes" rows="3"></textarea>
+      </label>
+      <div class="dash-dialog-actions">
+        <button type="button" class="dash-btn dash-btn--ghost" data-act="cancel">Cancel</button>
+        <button type="submit" class="dash-btn">Save lead</button>
+      </div>
+    </form>
+  </dialog>
+</section>

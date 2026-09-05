@@ -1,0 +1,21 @@
+---
+import type { QuickLink } from '../../lib/dashboard/types';
+interface Props { links: QuickLink[] }
+const { links } = Astro.props;
+---
+<section id="links" class="dash-section" data-section aria-labelledby="links-title">
+  <div class="dash-section-head">
+    <div>
+      <h2 id="links-title" class="dash-h2">Quick links</h2>
+      <p class="dash-lede">The places you open every day.</p>
+    </div>
+  </div>
+  <div class="dash-links">
+    {links.map(l => (
+      <a class="dash-linkcard" href={l.url} target="_blank" rel="noopener">
+        <strong>{l.label}</strong>
+        <span>{l.note}</span>
+      </a>
+    ))}
+  </div>
+</section>

@@ -1,0 +1,65 @@
+---
+import Pill from './Pill.astro';
+import type { Integration } from '../../lib/dashboard/types';
+interface Props { rows: Integration[]; checks: { label: string; url: string }[] }
+const { rows, checks } = Astro.props;
+const statusText: Record<string, string> = { 'live': 'live', 'pending-owner': 'pending owner', 'pending-agent': 'pending agent', 'planned': 'planned' };
+const counts = { live: rows.filter(r => r.status === 'live').length, owner: rows.filter(r => r.status === 'pending-owner').length, agent: rows.filter(r => r.status === 'pending-agent').length };
+---
+<section id="integrations" class="dash-section" data-section aria-labelledby="integrations-title">
+  <div class="dash-section-head">
+    <div>
+      <h2 id="integrations-title" class="dash-h2">Integrations</h2>
+      <p class="dash-lede">{counts.live} live, {counts.owner} waiting on the owner, {counts.agent} on the agent. Statuses come from <code>src/data/integrations.json</code>; the live checks on the right run in your browser.</p>
+    </div>
+  </div>
+
+  <div class="dash-grid-2">
+    <div class="dash-panel">
+      <div class="dash-table-wrap" style="max-height:none">
+        <table class="dash-table" style="min-width:0">
+          <thead>
+            <tr><th scope="col">Service</th><th scope="col">Status</th><th scope="col">Owner</th><th scope="col">Next action</th><th scope="col">Link</th></tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr data-integration={r.id}>
+                <td>
+                  <div class="dash-int-name">{r.name}</div>
+                  {r.detail && <div class="dash-int-detail">{r.detail}</div>}
+                </td>
+                <td><Pill state={r.status} text={statusText[r.status] ?? r.status} /></td>
+                <td><span class:list={['dash-tag', { 'dash-tag--owner': r.owner === 'owner' }]}>{r.owner}</span></td>
+                <td class="dash-int-action">{r.action}</td>
+                <td>{r.link ? <a class="dash-link" href={r.link} target="_blank" rel="noopener">Open</a> : <span class="dash-muted">—</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="dash-panel">
+      <div class="dash-panel-head">
+        <div>
+          <h3 class="dash-h3">Live checks</h3>
+          <div id="checks-time" class="dash-muted" style="font-size:12px">Not checked yet</div>
+        </div>
+        <button type="button" class="dash-btn dash-btn--ghost dash-btn--sm" data-action="recheck">Re-check</button>
+      </div>
+      <div>
+        {checks.map(c => (
+          <div class="dash-check-row" data-check-url={c.url}>
+            <div style="min-width:0">
+              <div class="dash-strong">{c.label}</div>
+              <div class="dash-muted">{c.url}</div>
+            </div>
+            <span class="dash-pill" data-check-pill data-state="unknown">unknown</span>
+            <div data-check-note></div>
+          </div>
+        ))}
+      </div>
+      <p class="dash-muted" style="margin:0;padding:10px 16px;font-size:11px;border-top:1px solid var(--color-ivory-2)">Each URL is fetched with a 5 second timeout. If the browser can see the status it shows live or down; if CORS hides it, unknown means the host answered.</p>
+    </div>
+  </div>
+</section>

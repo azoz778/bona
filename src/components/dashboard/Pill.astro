@@ -1,0 +1,8 @@
+---
+/* Status pill. The dot (::before) carries the colour; text stays ink so state
+   is never colour-alone. States: live | down | unknown | checking |
+   pending-owner | pending-agent | planned | available | reserved | sold. */
+interface Props { state: string; text?: string; class?: string }
+const { state, text = state, class: cls } = Astro.props;
+---
+<span class:list={['dash-pill', cls]} data-state={state}>{text}</span>

@@ -1,0 +1,63 @@
+---
+import type { CalendarEntry } from '../../lib/dashboard/types';
+interface Props { items: CalendarEntry[] }
+const { items } = Astro.props;
+const monthShort = new Intl.DateTimeFormat('en-US', { month: 'short' });
+const dayOf = (d: string) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ''); return m ? { day: Number(m[3]), mon: monthShort.format(new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))) } : { day: '?', mon: '' }; };
+const sorted = items.map((it, index) => ({ it, index })).sort((a, b) => (a.it.date || '').localeCompare(b.it.date || ''));
+const keyOf = (it: CalendarEntry) => `${it.date}|${it.topic?.en ?? ''}`;
+---
+<section id="content" class="dash-section" data-section aria-labelledby="content-title">
+  <div class="dash-section-head">
+    <div>
+      <h2 id="content-title" class="dash-h2">Content calendar</h2>
+      <p class="dash-lede">Posts from <code>src/data/content-calendar.json</code>. Copy a caption with its hashtags, then tick the status through planned, drafted and published.</p>
+    </div>
+    <div class="dash-toolbar" role="group" aria-label="Month">
+      <button type="button" id="cal-prev" class="dash-btn dash-btn--ghost dash-btn--sm" aria-label="Previous month">Previous</button>
+      <span id="cal-month-label" class="dash-strong" style="min-width:130px;text-align:center" aria-live="polite"></span>
+      <button type="button" id="cal-next" class="dash-btn dash-btn--ghost dash-btn--sm" aria-label="Next month">Next</button>
+      <button type="button" id="cal-today" class="dash-btn dash-btn--ghost dash-btn--sm">Today</button>
+    </div>
+  </div>
+
+  <div class="dash-panel" style="margin-bottom:16px">
+    <div id="cal-grid" class="dash-cal" role="grid" aria-label="Month view of planned posts"></div>
+  </div>
+
+  <div class="dash-panel dash-post-list">
+    {sorted.length === 0 ? (
+      <div class="dash-empty">
+        <p>The calendar is empty. When the content agent fills content-calendar.json, each post appears here with EN and AR captions, copy buttons and a status you can tick through.</p>
+      </div>
+    ) : sorted.map(({ it, index }) => {
+      const d = dayOf(it.date);
+      const status = it.status || 'planned';
+      const tags = (it.hashtags || []).map(h => (h.startsWith('#') ? h : `#${h}`)).join(' ');
+      return (
+        <article class="dash-post" id={`cal-item-${index}`} data-cal-key={keyOf(it)} data-cal-index={index} data-status={status}>
+          <div class="dash-post-date">
+            <div class="dash-post-day dash-num">{d.day}</div>
+            <div class="dash-post-mon">{d.mon}</div>
+          </div>
+          <div style="min-width:0">
+            <div class="dash-post-meta">
+              <span>{it.platform}</span><span>{it.format}</span>{it.pillar && <span>{it.pillar}</span>}
+            </div>
+            <h3 class="dash-post-topic">{it.topic?.en}</h3>
+            {it.topic?.ar && <p class="dash-post-topic-ar">{it.topic.ar}</p>}
+            {it.caption?.en && <p class="dash-caption" data-caption="en" lang="en">{it.caption.en}</p>}
+            {it.caption?.ar && <p class="dash-caption dash-caption--ar" data-caption="ar" lang="ar">{it.caption.ar}</p>}
+            {tags && <p class="dash-hashtags" data-hashtags title={tags}>{tags}</p>}
+            <div class="dash-post-actions">
+              <button type="button" class="dash-status-btn" data-act="cal-status" title="Change status"><span data-cal-status-label>{status}</span></button>
+              {it.caption?.en && <button type="button" class="dash-btn dash-btn--sm dash-btn--ghost" data-act="copy" data-lang="en">Copy EN caption</button>}
+              {it.caption?.ar && <button type="button" class="dash-btn dash-btn--sm dash-btn--ghost" data-act="copy" data-lang="ar">Copy AR caption</button>}
+            </div>
+          </div>
+          <div class="dash-post-media">{it.image && <img src={it.image} alt="" loading="lazy" width="112" height="112" onerror="this.remove()" />}</div>
+        </article>
+      );
+    })}
+  </div>
+</section>
