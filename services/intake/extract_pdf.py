@@ -35,6 +35,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 
 MIN_SIDE_DEFAULT = 700
 MIN_SHORT_SIDE = 420

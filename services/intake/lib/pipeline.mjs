@@ -104,10 +104,12 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   report.picks = picks;
   report.excluded = (ai.images || []).filter((im) => im.exclude).map((im) => ({ index: im.index, reason: im.reason }));
   if (picks.length < cfg.minImages) {
-    throw new RejectError(
-      `not enough usable photos — ${picks.length} of ${cfg.minImages} needed (${extraction.rendered ? 'the PDF has no extractable photographs, only page renders' : 'the rest were floor plans, logos or duplicates'})`,
-      'images',
-    );
+    const reason = `not enough usable photos — ${picks.length} of ${cfg.minImages} needed (${extraction.rendered ? 'the PDF has no extractable photographs, only page renders' : 'the rest were floor plans, logos or duplicates'})`;
+    // A dry run is a preview: show the owner what WOULD have been published and why it
+    // cannot be, instead of hiding the listing behind an early exit.
+    if (!dryRun) throw new RejectError(reason, 'images');
+    report.blocked = reason;
+    report.warnings.push(reason);
   }
 
   const index = readIndex(cfg.repo);

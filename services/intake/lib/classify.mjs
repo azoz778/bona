@@ -36,6 +36,11 @@ export const PROPERTY_RE = new RegExp(
 
 const MIN_PAGES = 2;
 
+/** Fold Arabic presentation forms back to base letters (see extract_pdf.py::collapse). */
+export function normaliseArabic(s) {
+  return String(s ?? '').normalize('NFKC').replace(/\u0640/g, '');
+}
+
 /**
  * @param {object} extraction  output of extract_pdf.py
  * @param {object} [opts]      { fileName, minPages }
@@ -46,9 +51,9 @@ export function classifyPdf(extraction, opts = {}) {
   if (!extraction || extraction.ok === false) {
     return { ok: false, reason: extraction?.error || 'unreadable PDF' };
   }
-  const text = String(extraction.text || '');
+  const text = normaliseArabic(extraction.text || '');
   const pages = Number(extraction.pages || 0);
-  const name = String(opts.fileName || '');
+  const name = normaliseArabic(opts.fileName || '');
 
   const sensitive = SENSITIVE_RE.exec(text) || SENSITIVE_RE.exec(name);
   if (sensitive) return { ok: false, reason: `looks like a private document ("${sensitive[0]}") — not published` };

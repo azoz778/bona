@@ -4,8 +4,11 @@
 // Flags verified against claude 2.x on this box (2026-09-05):
 //   env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT claude -p
 //     --model sonnet --output-format json --allowedTools Read
-//     --permission-mode bypassPermissions --add-dir <workdir>
-//     --strict-mcp-config --disable-slash-commands
+//     --permission-mode bypassPermissions --safe-mode --strict-mcp-config
+//     --disable-slash-commands --add-dir <workdir>
+//   `--safe-mode` is what makes this reproducible: it drops the owner's CLAUDE.md, skills,
+//   plugins, hooks and MCP servers (auth, model and built-in tools still work), so the
+//   pipeline sees only this prompt. Measured: 0.036 USD/call vs 0.105 without it.
 //   `--json-schema` exists too but constrains the FINAL message only and is brittle with
 //   nested oneOf; we validate the contract ourselves in validateAiResult() instead, and
 //   retry once with a repair prompt when the model returns something off-contract.
@@ -107,6 +110,7 @@ export function runClaudeOnce({ prompt, cwd, model, bin = 'claude', addDirs = []
     '--output-format', 'json',
     '--allowedTools', 'Read',
     '--permission-mode', 'bypassPermissions',
+    '--safe-mode',
     '--disable-slash-commands',
     '--strict-mcp-config',
     ...addDirs.flatMap((d) => ['--add-dir', d]),
