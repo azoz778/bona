@@ -42,6 +42,7 @@ async function fetchTile(z, x, y) {
       if (r.status < 500 && r.status !== 429) throw new Error(`HTTP ${r.status}`);
     } catch (e) { if (attempt === 2) throw new Error(`${url}: ${e.message}`); }
   }
+  throw new Error(`${url}: still failing (429/5xx) after 3 attempts`);
 }
 
 async function still(z, out) {

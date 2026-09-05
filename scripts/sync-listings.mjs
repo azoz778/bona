@@ -29,11 +29,20 @@ export function parsePrice(text) {
   return { amount, currency: cur ? cur.toUpperCase() : null };
 }
 
-/** Accepts only a full https Matterport URL (the site embeds it inline); anything else -> null. */
+function matterportIdOf(value) {
+  if (typeof value !== 'string') return null;
+  try {
+    const u = new URL(value.trim());
+    if (!/^(my\.)?matterport\.com$/i.test(u.hostname) || !/^\/show\/?$/.test(u.pathname)) return null;
+    const id = u.searchParams.get('m');
+    return id && /^[A-Za-z0-9_-]{4,64}$/.test(id) ? id : null;
+  } catch { return null; }
+}
+/** Accepts only a full https Matterport URL whose m= id parses exactly like the site's matterportId(); anything else -> null. */
 export function parseTourUrl(value) {
   if (typeof value !== 'string') return null;
   const v = value.trim();
-  return /^https:\/\/my\.matterport\.com\/show\/\?m=[A-Za-z0-9]+/.test(v) ? v : null;
+  return v.startsWith('https://') && matterportIdOf(v) ? v : null;
 }
 
 async function fetchApi() {

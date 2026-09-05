@@ -124,6 +124,13 @@ const rtl = locale === 'ar';
     };
     const close = () => { dialog.close(); };
     dialog.addEventListener('close', () => { document.body.style.overflow = ''; });
+    if (!(window as any).__bonaLbSwap) {
+      (window as any).__bonaLbSwap = true;
+      document.addEventListener('astro:before-swap', () => {
+        document.querySelectorAll<HTMLDialogElement>('dialog[open]').forEach(d => { try { d.close(); } catch {} });
+        document.body.style.overflow = '';
+      });
+    }
 
     root.querySelectorAll<HTMLElement>('[data-lb-open]').forEach(btn => btn.addEventListener('click', () => open(Number(btn.dataset.lbOpen) || 0)));
     thumbs.forEach(th => th.addEventListener('click', () => go(Number(th.dataset.lbGo) || 0)));

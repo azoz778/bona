@@ -8,6 +8,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+function matterportIdOf(value) {
+  if (typeof value !== 'string') return null;
+  try {
+    const u = new URL(value.trim());
+    if (!/^(my\.)?matterport\.com$/i.test(u.hostname) || !/^\/show\/?$/.test(u.pathname)) return null;
+    const id = u.searchParams.get('m');
+    return id && /^[A-Za-z0-9_-]{4,64}$/.test(id) ? id : null;
+  } catch { return null; }
+}
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const FILE = path.join(ROOT, 'src', 'data', 'listings.json');
 const HEAD = process.argv.includes('--head');
@@ -124,7 +134,7 @@ for (const l of data) {
   if (Array.isArray(h.en) && Array.isArray(h.ar) && h.en.length !== h.ar.length) err(id, 'highlights.en and .ar must have the same length');
 
   for (const k of ['virtualTourUrl', 'brochureUrl']) if (!(l[k] === null || /^https:\/\//.test(l[k] ?? ''))) err(id, `${k} must be null or https URL`);
-  if (l.virtualTourUrl && !/^https:\/\/my\.matterport\.com\/show\/\?m=[A-Za-z0-9]+/.test(l.virtualTourUrl)) err(id, `virtualTourUrl must be a full Matterport URL: ${l.virtualTourUrl}`);
+  if (l.virtualTourUrl && !(l.virtualTourUrl.startsWith('https://') && matterportIdOf(l.virtualTourUrl))) err(id, `virtualTourUrl must be a full Matterport URL with a valid m= id: ${l.virtualTourUrl}`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(l.listedAt ?? '') || Number.isNaN(Date.parse(l.listedAt))) err(id, `bad listedAt ${l.listedAt}`);
 
   // Round 2 optional objects
