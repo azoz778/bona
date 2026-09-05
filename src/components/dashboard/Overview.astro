@@ -1,11 +1,15 @@
 ---
 import StatTile from './StatTile.astro';
 import DistrictChart from './DistrictChart.astro';
+import BarChart from './BarChart.astro';
 import type { ListingStats } from '../../lib/dashboard/stats';
 import { compact } from '../../lib/dashboard/stats';
 interface Props { stats: ListingStats; checklistTotal: number; checksTotal: number }
 const { stats, checklistTotal, checksTotal } = Astro.props;
 const cat = (k: string) => stats.byCategory.find(c => c.key === k)?.count ?? 0;
+const kind = (k: string) => stats.byKind.find(c => c.key === k)?.count ?? 0;
+const pct = (n: number) => (stats.total ? `${Math.round((n / stats.total) * 100)}% of inventory` : 'no listings yet');
+const kindRows = stats.byKind.filter(k => k.count > 0 || k.key !== 'other').map(k => ({ label: k.label, count: k.count }));
 ---
 <section id="overview" class="dash-section" data-section aria-labelledby="overview-title">
   <div class="dash-section-head">
@@ -19,8 +23,18 @@ const cat = (k: string) => stats.byCategory.find(c => c.key === k)?.count ?? 0;
     <span class="dash-label">Inventory</span>
     <div class="dash-tiles"><div class="dash-tiles-grid">
       <StatTile label="Listings" value={compact(stats.total)} sub={`${stats.available} available${stats.reserved ? `, ${stats.reserved} reserved` : ''}${stats.sold ? `, ${stats.sold} sold` : ''}`} />
-      <StatTile label="Available" value={compact(stats.available)} sub={stats.total ? `${Math.round((stats.available / stats.total) * 100)}% of inventory` : 'no listings yet'} />
+      <StatTile label="Available" value={compact(stats.available)} sub={pct(stats.available)} />
       <StatTile label="Featured" value={compact(stats.featured)} sub="shown on the home page" />
+      <StatTile label="Houses" value={compact(kind('house'))} sub="villas, mansions, duplexes" />
+      <StatTile label="Apartments" value={compact(kind('apartment'))} sub="apartments and penthouses" />
+      <StatTile label="Land" value={compact(kind('land'))} sub="plots" />
+      <StatTile label="3D tours" value={compact(stats.tours)} sub={stats.toursMissing ? `${stats.toursMissing} without a tour` : 'every listing has a tour'} />
+    </div></div>
+  </div>
+
+  <div class="dash-tile-group">
+    <span class="dash-label">By category</span>
+    <div class="dash-tiles"><div class="dash-tiles-grid">
       <StatTile label="For sale" value={compact(cat('buy'))} sub="buy" />
       <StatTile label="For rent" value={compact(cat('rent'))} sub="rent" />
       <StatTile label="Off-plan" value={compact(cat('off-plan'))} sub="developments" />
@@ -36,16 +50,31 @@ const cat = (k: string) => stats.byCategory.find(c => c.key === k)?.count ?? 0;
       <StatTile label="Posts, next 7 days" value="0" kpi="content-next7" sub="planned or drafted" />
       <StatTile label="Posts published" value="0" kpi="content-published" sub="0 in calendar" subKpi="content-total" />
       <StatTile label="Launch checklist" value={`0/${checklistTotal}`} kpi="checklist" sub="ticks saved in this browser" />
-      <StatTile label="Live checks" value={`0/${checksTotal} live`} kpi="checks" sub="site, sitemap, robots, llms, OG" />
+      <StatTile label="Live checks" value={`0/${checksTotal} live`} kpi="checks" sub="site, SEO files, sections, tours, privacy" />
     </div></div>
   </div>
 
-  <DistrictChart rows={stats.byDistrict} total={stats.total} />
+  <div class="dash-charts">
+    <DistrictChart rows={stats.byDistrict} total={stats.total} />
+    <BarChart
+      id="kinds"
+      title="Inventory by kind"
+      subtitle={`${stats.total} listings; kind derives from type when the field is missing`}
+      rows={kindRows}
+      total={stats.total}
+      labelWidth={120}
+      width={480}
+      emptyText="No listings yet."
+    >
+      <Fragment slot="column">Kind</Fragment>
+    </BarChart>
+  </div>
 
-  {(stats.missingImages > 0 || stats.priceOnRequest > 0) && (
+  {(stats.missingImages > 0 || stats.priceOnRequest > 0 || stats.toursMissing > 0) && (
     <p class="dash-muted" style="margin:12px 0 0;font-size:12px">
       {stats.missingImages > 0 && <span>{stats.missingImages} {stats.missingImages === 1 ? 'listing has' : 'listings have'} fewer than 4 images (schema minimum). </span>}
-      {stats.priceOnRequest > 0 && <span>{stats.priceOnRequest} {stats.priceOnRequest === 1 ? 'listing is' : 'listings are'} price on request.</span>}
+      {stats.priceOnRequest > 0 && <span>{stats.priceOnRequest} {stats.priceOnRequest === 1 ? 'listing is' : 'listings are'} price on request. </span>}
+      {stats.toursMissing > 0 && <span>{stats.toursMissing} {stats.toursMissing === 1 ? 'listing has' : 'listings have'} no 3D tour — <a class="dash-link" href="#inventory" data-action="filter-tour-missing">show them</a>.</span>}
     </p>
   )}
 </section>

@@ -1,21 +1,20 @@
-/* Hover/focus tooltip for the inline-SVG district bars. Values are also
-   labelled on the marks and repeated in the table view, so the tooltip
-   enhances and never gates. */
+/* Hover/focus tooltip for every inline-SVG bar chart ([data-chart] panels:
+   districts, kinds). Values are also labelled on the marks and repeated in the
+   table view, so the tooltip enhances and never gates. */
 import { $, $$ } from './dom';
 
-export function initChart(): void {
-  const wrap = $('[data-chart="districts"]');
-  if (!wrap) return;
+function wire(wrap: HTMLElement): void {
   const tip = $('[data-chart-tip]', wrap);
   const bars = $$<SVGGElement>('g.bar', wrap);
   if (!tip || !bars.length) return;
+  const noun = wrap.dataset.noun || 'listing';
 
   const show = (bar: SVGGElement, x: number, y: number) => {
     const value = bar.dataset.value ?? '';
     const label = bar.dataset.label ?? '';
     tip.replaceChildren();
     const strong = document.createElement('strong');
-    strong.textContent = `${value} ${value === '1' ? 'listing' : 'listings'}`;
+    strong.textContent = `${value} ${value === '1' ? noun : `${noun}s`}`;
     const span = document.createElement('span');
     span.textContent = label;
     tip.append(strong, span);
@@ -33,4 +32,8 @@ export function initChart(): void {
     bar.addEventListener('focus', () => { const b = bar.getBoundingClientRect(); show(bar, b.left + b.width / 2, b.top); });
     bar.addEventListener('blur', hide);
   }
+}
+
+export function initChart(): void {
+  for (const wrap of $$<HTMLElement>('[data-chart]')) wire(wrap);
 }

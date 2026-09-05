@@ -39,6 +39,10 @@ const checks = [
   { label: 'robots.txt', url: `${site.url}/robots.txt` },
   { label: 'llms.txt', url: `${site.url}/llms.txt` },
   { label: 'Share image', url: `${site.url}/og-default.png` },
+  { label: 'Houses section', url: `${site.url}/properties/houses/` },
+  { label: 'Apartments section', url: `${site.url}/properties/apartments/` },
+  { label: '3D tours', url: `${site.url}/tours/` },
+  { label: 'Privacy policy', url: `${site.url}/privacy/` },
 ];
 
 const sections: Section[] = [
@@ -55,6 +59,11 @@ const host = site.url.replace(/^https?:\/\//, '');
 const quickLinks: QuickLink[] = [
   { label: 'Public site, English', url: `${site.url}/`, note: host },
   { label: 'Public site, Arabic', url: `${site.url}/ar/`, note: `${host}/ar/` },
+  { label: 'Houses', url: `${site.url}/properties/houses/`, arUrl: `${site.url}/ar/properties/houses/`, note: 'kind = house: villas, mansions, duplexes' },
+  { label: 'Apartments', url: `${site.url}/properties/apartments/`, arUrl: `${site.url}/ar/properties/apartments/`, note: 'kind = apartment, incl. Kian units' },
+  { label: '3D tours', url: `${site.url}/tours/`, arUrl: `${site.url}/ar/tours/`, note: 'Listings with a Matterport tour' },
+  { label: 'Privacy policy', url: `${site.url}/privacy/`, arUrl: `${site.url}/ar/privacy/`, note: 'PDPL notice' },
+  { label: 'About', url: `${site.url}/about/`, arUrl: `${site.url}/ar/about/`, note: 'Brand story, licences' },
   { label: `Instagram @${site.instagram.handle}`, url: site.instagram.url, note: 'Profile and DMs' },
   { label: `WhatsApp ${site.whatsapp.display}`, url: `https://wa.me/${site.whatsapp.wa}`, note: 'Open a chat with the business number' },
   { label: 'GitHub repository', url: 'https://github.com/azoz778/bona', note: 'azoz778/bona' },

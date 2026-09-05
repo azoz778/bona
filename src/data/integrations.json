@@ -6,7 +6,7 @@
     "owner": "agent",
     "action": "Live since 2026-09-05 16:50 KSA. Daily rebuild 06:00 KSA.",
     "link": "https://bona.azoz.uk/",
-    "detail": "Returns 404 until the first deploy lands."
+    "detail": "Astro static site on GitHub Pages; sections: for sale, rent, off-plan, international, houses, apartments, tours."
   },
   {
     "id": "dns",
@@ -36,6 +36,23 @@
     "detail": "Needs Pages source set to GitHub Actions in repo settings."
   },
   {
+    "id": "matterport",
+    "name": "Matterport 3D tours",
+    "status": "live",
+    "owner": "owner",
+    "action": "1 tour live (Al Zahra Residences); paste more links into TK's virtual_tour_url or send them to the agent",
+    "link": "https://bona.azoz.uk/tours/",
+    "detail": "Synced from TK by the 06:00 rebuild (listings.json → virtualTourUrl); the site embeds each tour inline and lists them at /tours/."
+  },
+  {
+    "id": "privacy",
+    "name": "Privacy policy",
+    "status": "live",
+    "owner": "agent",
+    "action": "Published at /privacy/ (PDPL notice, EN + AR) and linked from the footer.",
+    "link": "https://bona.azoz.uk/privacy/"
+  },
+  {
     "id": "instagram",
     "name": "Instagram @bona.com.sa",
     "status": "pending-owner",
@@ -43,6 +60,15 @@
     "action": "Switch the account to Business, link it to a Facebook Page under the TK Meta Business, then the posting script can publish unattended.",
     "link": "https://www.instagram.com/bona.com.sa/",
     "detail": "Profile exists and the site links to it. API posting waits on the account link."
+  },
+  {
+    "id": "instagram-api",
+    "name": "Instagram API access",
+    "status": "pending-owner",
+    "owner": "owner",
+    "action": "see marketing/instagram-access.md — switch @bona.com.sa to a Business account and link it into the Meta Business, or provide credentials",
+    "link": "https://business.facebook.com/settings/instagram-account-v2s",
+    "detail": "Unblocks unattended posting from the content calendar and the Meta MCP."
   },
   {
     "id": "whatsapp",

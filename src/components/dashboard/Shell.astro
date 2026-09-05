@@ -264,6 +264,28 @@ const host = siteUrl.replace(/^https?:\/\//, '');
   .dash-linkcard strong { font-weight: 600; font-size: 13px; }
   .dash-linkcard span { color: var(--color-stone); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+  /* overview charts side by side, kind chart narrower */
+  .dash-charts { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 1180px) { .dash-charts { grid-template-columns: minmax(0, 1fr); } }
+
+  /* inventory: quick-filter toggle, 3D tour badge, note under the table */
+  .dash-toggle { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 10px; border: 1px solid var(--color-sand); border-radius: 3px; background: #fff; font-size: 12.5px; cursor: pointer; white-space: nowrap; user-select: none; }
+  .dash-toggle:hover { border-color: var(--color-stone); }
+  .dash-toggle:has(input:checked) { border-color: var(--color-ink); background: var(--color-ivory-2); }
+  .dash-toggle input { margin: 0; width: 14px; height: 14px; accent-color: var(--color-ink); }
+  a.dash-tag--tour { color: var(--color-ink); border-color: var(--dash-info); text-decoration: none; }
+  a.dash-tag--tour::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: var(--dash-info); vertical-align: 1px; }
+  a.dash-tag--tour:hover { background: rgba(42, 120, 214, .1); }
+  .dash-note { margin: 10px 0 0; font-size: 12px; color: var(--color-ink-2); max-width: 90ch; }
+  .dash-note code { font-size: 11.5px; }
+
+  /* quick-link cards with an Arabic mirror */
+  .dash-linkcard--pair a { text-decoration: none; color: inherit; }
+  .dash-linkcard--pair > a:hover strong { text-decoration: underline; text-decoration-color: var(--color-champagne); text-underline-offset: 3px; }
+  .dash-linkcard-langs { display: flex; gap: 10px; margin-top: 2px; }
+  .dash-linkcard-langs a { font-size: 10px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--color-stone); border: 1px solid var(--color-sand); padding: 1px 6px; border-radius: 2px; }
+  .dash-linkcard-langs a:hover { color: var(--color-ink); border-color: var(--color-ink); }
+
   /* dialog + toast */
   /* margin:auto restores centring — the global preflight zeroes margins on every element, dialog included */
   .dash-dialog { margin: auto; border: 1px solid var(--color-sand); border-radius: 6px; padding: 0; width: min(600px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; background: var(--dash-surface); color: var(--color-ink); }

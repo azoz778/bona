@@ -1,5 +1,6 @@
 /* Inventory table: client-side sort (click a column header) and filter over
-   the server-rendered rows. Row data lives in data-* attributes. */
+   the server-rendered rows. Row data lives in data-* attributes:
+   category, status, kind, tour ("1" when a virtualTourUrl exists), search. */
 import { $, $$ } from './dom';
 
 const NUMERIC = new Set(['price', 'images']);
@@ -14,6 +15,8 @@ export function initInventory(): void {
   const search = $<HTMLInputElement>('#inv-search', root);
   const category = $<HTMLSelectElement>('#inv-category', root);
   const status = $<HTMLSelectElement>('#inv-status', root);
+  const kind = $<HTMLSelectElement>('#inv-kind', root);
+  const tourMissing = $<HTMLInputElement>('#inv-tour-missing', root);
   const count = $('#inv-count', root);
   const empty = $('#inv-empty', root);
   let sortKey = 'id';
@@ -23,9 +26,15 @@ export function initInventory(): void {
     const q = (search?.value ?? '').trim().toLowerCase();
     const cat = category?.value ?? '';
     const st = status?.value ?? '';
+    const kd = kind?.value ?? '';
+    const noTour = tourMissing?.checked ?? false;
     let shown = 0;
     for (const r of rows) {
-      const ok = (!cat || r.dataset.category === cat) && (!st || r.dataset.status === st) && (!q || (r.dataset.search ?? '').includes(q));
+      const ok = (!cat || r.dataset.category === cat)
+        && (!st || r.dataset.status === st)
+        && (!kd || r.dataset.kind === kd)
+        && (!noTour || r.dataset.tour !== '1')
+        && (!q || (r.dataset.search ?? '').includes(q));
       r.hidden = !ok;
       if (ok) shown++;
     }
@@ -54,5 +63,12 @@ export function initInventory(): void {
   search?.addEventListener('input', apply);
   category?.addEventListener('change', apply);
   status?.addEventListener('change', apply);
+  kind?.addEventListener('change', apply);
+  tourMissing?.addEventListener('change', apply);
+  // Overview "3D tours" tile and the table note deep-link here with the filter pre-armed.
+  $$<HTMLElement>('[data-action="filter-tour-missing"]').forEach(btn => btn.addEventListener('click', () => {
+    if (tourMissing) tourMissing.checked = true;
+    apply();
+  }));
   apply();
 }

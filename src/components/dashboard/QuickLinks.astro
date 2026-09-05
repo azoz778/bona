@@ -7,11 +7,20 @@ const { links } = Astro.props;
   <div class="dash-section-head">
     <div>
       <h2 id="links-title" class="dash-h2">Quick links</h2>
-      <p class="dash-lede">The places you open every day.</p>
+      <p class="dash-lede">The places you open every day. Site pages carry an Arabic link for the /ar/ mirror.</p>
     </div>
   </div>
   <div class="dash-links">
-    {links.map(l => (
+    {links.map(l => l.arUrl ? (
+      <div class="dash-linkcard dash-linkcard--pair">
+        <a href={l.url} target="_blank" rel="noopener"><strong>{l.label}</strong></a>
+        <span>{l.note}</span>
+        <span class="dash-linkcard-langs">
+          <a href={l.url} target="_blank" rel="noopener" aria-label={`${l.label}, English`}>English</a>
+          <a href={l.arUrl} target="_blank" rel="noopener" aria-label={`${l.label}, Arabic`}>Arabic</a>
+        </span>
+      </div>
+    ) : (
       <a class="dash-linkcard" href={l.url} target="_blank" rel="noopener">
         <strong>{l.label}</strong>
         <span>{l.note}</span>

@@ -31,5 +31,6 @@ export interface ChecklistItem {
   link?: string | null;
 }
 
-export interface QuickLink { label: string; url: string; note: string }
+/** `arUrl` adds a second "Arabic" link on the card for pages with an /ar/ mirror. */
+export interface QuickLink { label: string; url: string; note: string; arUrl?: string }
 export interface Section { id: string; label: string }

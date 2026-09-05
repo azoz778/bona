@@ -4,6 +4,7 @@
 
 export interface ListingSummary {
   id: string; slug: string; title: string; titleAr: string; district: string; status: string; category: string;
+  kind?: string; tour?: boolean;   // round 2: derived kind, has virtualTourUrl
 }
 
 export interface CalendarItem {

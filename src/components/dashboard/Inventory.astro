@@ -2,18 +2,26 @@
 import Pill from './Pill.astro';
 import { formatPrice } from '../../lib/i18n';
 import { categoryLabel, type Listing } from '../../lib/listings';
+import { KINDS, deriveKind, kindLabel, tourUrl, projectName, unitLine, type ListingExt } from '../../lib/dashboard/kind';
 interface Props { listings: Listing[]; siteUrl: string }
 const { listings, siteUrl } = Astro.props;
 
 const types = [...new Set(listings.map(l => l.type))].sort();
-const rows = listings.map(l => {
+const rows = (listings as ListingExt[]).map(l => {
   const url = `${siteUrl}/properties/${l.slug}/`;
   const share = `https://wa.me/?text=${encodeURIComponent(`${l.title.en}\n${l.title.ar}\n${url}`)}`;
   const thumb = l.images?.[0]?.thumb || l.images?.[0]?.src || '';
   const priceText = formatPrice(l.price, 'en');
-  const search = [l.id, l.title.en, l.title.ar, l.type, l.location?.district?.en, l.location?.district?.ar, l.location?.city?.en, l.status, l.category].join(' ').toLowerCase();
-  return { l, url, share, thumb, priceText, search, priceSort: l.price?.amount ?? -1, images: l.images?.length ?? 0, district: l.location?.district?.en ?? '' };
+  const kind = deriveKind(l);
+  const tour = tourUrl(l);
+  const project = projectName(l);
+  const unit = unitLine(l);
+  const search = [l.id, l.title.en, l.title.ar, l.type, kind, project, l.project?.name?.ar, unit, l.location?.district?.en, l.location?.district?.ar, l.location?.city?.en, l.status, l.category, tour ? '3d tour matterport' : 'tour missing'].join(' ').toLowerCase();
+  return { l, url, share, thumb, priceText, search, kind, tour, project, unit, priceSort: l.price?.amount ?? -1, images: l.images?.length ?? 0, district: l.location?.district?.en ?? '' };
 });
+const kindCounts = KINDS.map(k => ({ ...k, count: rows.filter(r => r.kind === k.key).length })).filter(k => k.count > 0);
+const otherKinds = rows.filter(r => r.kind === 'other').length;
+const toursMissing = rows.filter(r => !r.tour).length;
 ---
 <section id="inventory" class="dash-section" data-section aria-labelledby="inventory-title">
   <div class="dash-section-head">
@@ -25,7 +33,11 @@ const rows = listings.map(l => {
 
   <div class="dash-filters">
     <label class="sr-only" for="inv-search">Search listings</label>
-    <input id="inv-search" class="dash-input" type="search" placeholder="Search title, district, type, id" autocomplete="off" />
+    <input id="inv-search" class="dash-input" type="search" placeholder="Search title, district, project, type, id" autocomplete="off" />
+    <select id="inv-kind" class="dash-input" aria-label="Filter by kind">
+      <option value="">All kinds</option>
+      {KINDS.map(k => <option value={k.key}>{k.label}</option>)}
+    </select>
     <select id="inv-category" class="dash-input" aria-label="Filter by category">
       <option value="">All categories</option>
       {Object.entries(categoryLabel).map(([k, v]) => <option value={k}>{v.en}</option>)}
@@ -36,6 +48,10 @@ const rows = listings.map(l => {
       <option value="reserved">Reserved</option>
       <option value="sold">Sold</option>
     </select>
+    <label class="dash-toggle" title="Only listings without a virtualTourUrl">
+      <input type="checkbox" id="inv-tour-missing" />
+      Tour missing{toursMissing > 0 && <span class="dash-muted">({toursMissing})</span>}
+    </label>
     <span id="inv-count" class="dash-count">{listings.length} listings</span>
   </div>
 
@@ -44,37 +60,46 @@ const rows = listings.map(l => {
       <div class="dash-empty"><p>No listings in listings.json yet.</p></div>
     ) : (
       <div class="dash-table-wrap">
-        <table class="dash-table" id="inventory-table" style="min-width:1040px">
+        <table class="dash-table" id="inventory-table" style="min-width:1280px">
           <thead>
             <tr>
               <th scope="col">Photo</th>
               <th scope="col" data-sort="id" aria-sort="ascending"><button type="button">ID</button></th>
               <th scope="col" data-sort="title" aria-sort="none"><button type="button">Title</button></th>
-              <th scope="col" data-sort="category" aria-sort="none"><button type="button">Category</button></th>
+              <th scope="col" data-sort="kind" aria-sort="none"><button type="button">Kind</button></th>
               <th scope="col" data-sort="type" aria-sort="none"><button type="button">Type</button></th>
+              <th scope="col" data-sort="category" aria-sort="none"><button type="button">Category</button></th>
+              <th scope="col" data-sort="project" aria-sort="none"><button type="button">Project</button></th>
               <th scope="col" data-sort="district" aria-sort="none"><button type="button">District</button></th>
               <th scope="col" data-sort="price" aria-sort="none"><button type="button">Price</button></th>
               <th scope="col" data-sort="status" aria-sort="none"><button type="button">Status</button></th>
               <th scope="col" data-sort="featured" aria-sort="none"><button type="button">Featured</button></th>
+              <th scope="col" data-sort="tour" aria-sort="none"><button type="button">3D</button></th>
               <th scope="col" data-sort="images" aria-sort="none"><button type="button">Images</button></th>
               <th scope="col">Links</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ l, url, share, thumb, priceText, search, priceSort, images, district }) => (
-              <tr data-id={l.id} data-title={l.title.en} data-category={l.category} data-type={l.type} data-district={district} data-price={priceSort} data-status={l.status} data-featured={l.featured ? '1' : '0'} data-images={images} data-search={search}>
+            {rows.map(({ l, url, share, thumb, priceText, search, kind, tour, project, unit, priceSort, images, district }) => (
+              <tr data-id={l.id} data-title={l.title.en} data-kind={kind} data-category={l.category} data-type={l.type} data-project={project} data-district={district} data-price={priceSort} data-status={l.status} data-featured={l.featured ? '1' : '0'} data-tour={tour ? '1' : '0'} data-images={images} data-search={search}>
                 <td><div class="dash-thumb">{thumb && <img src={thumb} alt="" loading="lazy" width="56" height="40" onerror="this.remove()" />}</div></td>
                 <td class="dash-num dash-muted">{l.id}</td>
                 <td>
                   <div class="dash-strong">{l.title.en}</div>
                   <div class="dash-muted dash-ar" style="font-size:12px;text-align:left">{l.title.ar}</div>
                 </td>
-                <td>{categoryLabel[l.category]?.en ?? l.category}</td>
+                <td>{kindLabel(kind)}{!l.kind && <span class="dash-muted" title="kind field missing in listings.json; derived from type"> *</span>}</td>
                 <td style="text-transform:capitalize">{l.type}</td>
+                <td>{categoryLabel[l.category]?.en ?? l.category}</td>
+                <td>
+                  {project ? <div>{project}</div> : <span class="dash-muted">—</span>}
+                  {unit && <div class="dash-muted" style="font-size:11.5px">{unit}</div>}
+                </td>
                 <td>{district}{l.location?.countryCode && l.location.countryCode !== 'SA' ? <span class="dash-muted">, {l.location.country?.en}</span> : null}</td>
                 <td class="dash-num" style="white-space:nowrap">{priceText}</td>
                 <td><Pill state={l.status} /></td>
                 <td>{l.featured ? <span class="dash-tag dash-tag--owner">Featured</span> : <span class="dash-muted">—</span>}</td>
+                <td>{tour ? <a class="dash-tag dash-tag--tour" href={tour} target="_blank" rel="noopener" title={tour} aria-label={`Open 3D tour of ${l.title.en}`}>3D</a> : <span class="dash-muted" title="No virtualTourUrl">—</span>}</td>
                 <td class="dash-num">{images}{images < 4 && <span class="dash-muted" title="Schema minimum is 4 images"> (min 4)</span>}</td>
                 <td class="dash-nowrap">
                   <div class="dash-actions">
@@ -90,5 +115,13 @@ const rows = listings.map(l => {
     )}
     <div id="inv-empty" class="dash-empty" hidden><p>No listings match those filters.</p></div>
   </div>
-  {types.length > 0 && <p class="dash-muted" style="margin:10px 0 0;font-size:12px">Types in inventory: {types.join(', ')}.</p>}
+  <p class="dash-note">Add Matterport links in the TK dashboard (<code>virtual_tour_url</code>) — the 06:00 sync copies them here. {toursMissing > 0 && <span>{toursMissing} {toursMissing === 1 ? 'listing is' : 'listings are'} still without a tour; tick <em>Tour missing</em> above to list them.</span>}</p>
+  {types.length > 0 && (
+    <p class="dash-muted" style="margin:6px 0 0;font-size:12px">
+      Types in inventory: {types.join(', ')}.
+      {kindCounts.length > 0 && <span> Kinds: {kindCounts.map(k => `${k.count} ${k.count === 1 ? k.label.toLowerCase() : k.plural.toLowerCase()}`).join(', ')}.</span>}
+      {otherKinds > 0 && <span> {otherKinds} with an unrecognised type (shown as Other).</span>}
+      {rows.some(r => !r.l.kind) && <span> * kind derived from type until listings.json carries the field.</span>}
+    </p>
+  )}
 </section>
