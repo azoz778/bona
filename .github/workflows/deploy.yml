@@ -25,6 +25,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - run: npm ci
       - name: Sync listings from TK (non-fatal)
         run: node scripts/sync-listings.mjs || echo "sync skipped"
