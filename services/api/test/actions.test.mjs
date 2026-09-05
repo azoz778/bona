@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractActions, stripMarkers, safePath } from '../lib/actions.mjs';
+import { extractActions, stripMarkers, safePath, plainText } from '../lib/actions.mjs';
 import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
 
 const inventory = createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk' });
@@ -138,4 +138,17 @@ test('malformed tool arguments do not throw', () => {
 test('an empty completion yields no messages (the route supplies the fallback)', () => {
   assert.deepEqual(extractActions([], { inventory }), { messages: [], actions: [] });
   assert.deepEqual(extractActions(null, { inventory }), { messages: [], actions: [] });
+});
+
+test('plainText flattens the markdown Retell models emit into plain text', () => {
+  const md = '**فيلا عصرية، الخالدية — BONA-005**\n5 غرف · 8 حمامات\nالسعر: **6,700,000 ريال**\n\n### Why\n- Private pool\n- *Glass* lift\n1. first\nSee [the page](https://bona.azoz.uk/properties/x/).';
+  const out = plainText(md);
+  assert.equal(out.includes('**'), false);
+  assert.equal(out.includes('###'), false);
+  assert.match(out, /^فيلا عصرية، الخالدية — BONA-005$/m);
+  assert.match(out, /^• Private pool$/m);
+  assert.match(out, /^• Glass lift$/m);
+  assert.match(out, /^1\. first$/m);
+  assert.match(out, /the page \(https:\/\/bona\.azoz\.uk\/properties\/x\/\)/);
+  assert.equal(plainText('4 * 5 = 20 and a_b_c stay'), '4 * 5 = 20 and a_b_c stay');
 });

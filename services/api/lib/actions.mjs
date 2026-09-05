@@ -52,7 +52,29 @@ export function stripMarkers(text) {
     }
     return '';
   });
-  return { text: cleaned.replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim(), actions };
+  return { text: plainText(cleaned), actions };
+}
+
+/**
+ * The widget renders agent text with textContent (never HTML), so markdown the model emits
+ * (**bold**, *italic*, `code`, ### headings, - bullets) must be flattened to plain text here.
+ * Bullets become "• ", emphasis markers are dropped, headings lose their hashes.
+ */
+export function plainText(text) {
+  return String(text ?? '')
+    .replace(/\r/g, '')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s*[-*•]\s+/gm, '• ')
+    .replace(/^\s*(\d+)[.)]\s+/gm, '$1. ')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/__(.+?)__/g, '$1')
+    .replace(/(^|[^\w*])\*(?!\s)([^*\n]+?)\*(?!\w)/g, '$1$2')
+    .replace(/(^|[^\w_])_(?!\s)([^_\n]+?)_(?!\w)/g, '$1$2')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, '$1 ($2)')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function parseArgs(raw) {
