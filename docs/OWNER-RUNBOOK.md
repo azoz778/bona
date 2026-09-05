@@ -36,5 +36,21 @@ Create a GA4 property and (optionally) a Meta Pixel, then put the IDs in `src/da
 - bona.com.sa needs a Saudi CR or registered trade name (`nic.sa`). When bought: set `url` in `site.json`, add the Cloudflare/GoDaddy CNAME, update `public/CNAME`, push.
 - Bona CR number → `site.json.licences.cr`. REGA per-listing advertising licences are required before promoting individual listings (each launch caption has a placeholder line).
 
+## 7. Dana — the AI concierge on the website (chat + call)  — ONE COMMAND to go live
+Every page now carries a "Concierge" pill (bottom corner) with two tabs: **Chat** with Dana and **Call** Dana in the browser. Dana runs on your Retell AI account (agents "Bona Dana (voice)" and "Bona Dana (chat)", one Retell LLM on Claude Sonnet 4.6, knowledge base = the site's own `llms-full.txt`, auto-refreshed daily). The small backend she needs (`~/bona/services/api`) runs on this PC (WSL) and must be reachable as `https://api.bona.azoz.uk` through a Cloudflare Tunnel. The agent's permission classifier refuses to create tunnels, so **you** run, once, in a WSL terminal:
+```
+bash ~/bona/services/deploy/install.sh
+```
+That creates the tunnel `bona`, points `api.bona.azoz.uk` at it, installs and starts the user services `cloudflared-bona` + `bona-api`, and prints the health check. Until then the pill shows a calm "Dana is resting — reach us on WhatsApp" card, and Dana (if reached) answers from the knowledge base only.
+- Costs: Retell bills your balance per call-minute (ElevenLabs voice + LLM) and per chat message; check the Retell dashboard weekly. Leads Dana captures land in `~/bona-data/leads.jsonl` and are WhatsApp'd to your number.
+- Ops: `systemctl --user status bona-api cloudflared-bona`, logs `journalctl --user -u bona-api -n 50`. Full contract and runbook: `services/README.md`. Persona text: `services/api/retell/prompt.md` (edit → `node services/api/retell/provision.mjs` to push).
+- Off switch: `site.json → concierge.enabled: false` (push) removes the pill; `systemctl --user stop bona-api` stops the backend.
+
+## 8. Publish a property from WhatsApp (PDF → live listing)
+1. Create (or rename) a WhatsApp group whose name contains **"Bona"** (e.g. "Bona Listings") — you can be the only member. Within ~5 minutes the intake service posts "Bona intake connected".
+2. Drop a property brochure **PDF** in the group. Optional caption hints: `rent`, `SAR 4,500,000`, `#test` (dry run — summary only), `#brochure` (also publish the PDF). Within a minute it replies "Reading…", then "✅ Live: … https://bona.azoz.uk/properties/<slug>/" once the page is on the site (deploy takes ~3 min).
+3. Fix-ups by replying in the group: `remove BONA-W003` · `hero BONA-W003 4` (make photo 4 the cover) · `price BONA-W003 4500000` · `sold BONA-W003`.
+Rules baked in: only PDFs *you* send are processed; prices are taken only if printed in the PDF (otherwise "Price on request" — TAQEEM); invoices/IDs/contracts are rejected and never stored; the cover photo is chosen by the AI against `scripts/curate/IMAGE-RUBRIC.md`. The service (`bona-intake`) runs on this PC — if the PC is off, PDFs wait in the group and are processed when it is back. Ops: `systemctl --user status bona-intake`, `journalctl --user -u bona-intake -f`, manual run: `node ~/bona/services/intake/run-once.mjs <file.pdf> --dry-run`.
+
 ## Daily loop (already running once the repo is public)
 `.github/workflows/deploy.yml`: every push and every day at 06:00 KSA it re-syncs listing status/prices from TK, regenerates llms.txt, rebuilds, deploys, and pings IndexNow. The dashboard's Integrations board shows live health of the five key URLs.
