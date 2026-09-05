@@ -1,143 +1,149 @@
 # Launch-day grid — 9 posts, 2026-09-06 (Sunday)
 
-Post in order #1 → #9 (about 20 minutes apart, 17:30 → 20:30 KSA) so the grid reads top-left = #9. Then pin #5 (manifesto), #9 (welcome) and #8 (sell). Generated from `src/data/listings.json` by `node scripts/og/gen-social.mjs` — **listings.json was still a placeholder when this was generated; re-run after the data agent lands real listings.**.
+Post in order #1 → #9 (about 20 minutes apart, 17:30 → 20:30 KSA) so the grid reads top-left = #9. Then pin #5 (manifesto), #9 (welcome) and #8 (sell). Generated from `src/data/listings.json` by `node scripts/og/gen-social.mjs`.
 
 **Before publishing listing posts (#1, #2, #3, #6, #7):** obtain the REGA advertising licence number for each property (منصة الإعلانات العقارية / عقار) and replace the `[add number before publishing]` line. Image URLs must be JPEG for the Graph API; the site's hero images are JPEG unless noted.
 
 | # | Grid slot | Format | Type | Listing | Image |
 |---|---|---|---|---|---|
-| 1 | bottom-right | carousel | listings | BONA-001 | https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg |
-| 2 | bottom-centre | post | listings | BONA-001 | https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg |
-| 3 | bottom-left | carousel | listings | BONA-001 | https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg |
-| 4 | middle-right | post | behind the house | BONA-001 | https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg |
+| 1 | bottom-right | carousel | listings | BONA-002 | https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagerirx2b-b051b3.jpg |
+| 2 | bottom-centre | post | listings | BONA-006 | https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-zahra/1741989999716-9c5c4f.jpg |
+| 3 | bottom-left | carousel | listings | BONA-005 | https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-107-45a677.jpg |
+| 4 | middle-right | post | behind the house | BONA-009 | https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-shera-a-north-obhur/img_8317-9248d2.jpg |
 | 5 | centre | post | behind the house | — | https://bona.azoz.uk/og-default.png |
-| 6 | middle-left | carousel | listings | BONA-001 | https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg |
-| 7 | top-right | post | listings | BONA-001 | https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg |
-| 8 | top-centre | post | buyer/seller education | BONA-001 | https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg |
-| 9 | top-left | post | behind the house | BONA-001 | https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg |
+| 6 | middle-left | carousel | listings | BONA-009 | https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-shera-a-north-obhur/img_8317-9248d2.jpg |
+| 7 | top-right | post | listings | BONA-004 | https://tk-storage.azoz.uk/tk-estate-media/media/al-morjan-jeddah/screenshot_2026-05-26_123157-2c6508.png |
+| 8 | top-centre | post | buyer/seller education | BONA-006 | https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-zahra/1741990836500-a2256a.jpg |
+| 9 | top-left | post | behind the house | BONA-001 | https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04810-34922b.jpeg |
 
-## Post #1 — Launch #1 — Private Beach Villa, Durrat Al Arous / الإطلاق #1 — فيلا بشاطئ خاص، درة العروس
+## Post #1 — Launch #1 — Classic Mansion, Al Shati 6 / الإطلاق #1 — قصر كلاسيكي، الشاطئ 6
 
-- **Grid slot**: bottom-right · **Format**: carousel · **Pillar**: listings · **Ref**: BONA-001 · **Page**: https://bona.azoz.uk/properties/private-beach-villa-durrat-al-arous/
-- **Image**: `https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg`
-- **Alt text (EN)**: Beach villa exterior
-- **Alt text (AR)**: واجهة الفيلا
+- **Grid slot**: bottom-right · **Format**: carousel · **Pillar**: listings · **Ref**: BONA-002 · **Page**: https://bona.azoz.uk/properties/classic-mansion-al-shati-6/
+- **Images**: `https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagerirx2b-b051b3.jpg`, `https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagezjtser-6fa95f.jpg`, `https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/20241016_110539737_ios-4f079b.jpg`, `https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimageipbc0w-a397a6.jpg`, `https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagehe70em-1e0d7e.jpg`, `https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagemtwhek-ffa560fe-58cd9a.jpg`
+- **Alt text (EN)**: Swimming pool — Classic Mansion, Al Shati 6
+- **Alt text (AR)**: المسبح — قصر كلاسيكي، الشاطئ 6
 - **Ad licence**: REQUIRED — add number to caption
 
 **Caption — EN**
 ```
-Private Beach Villa, Durrat Al Arous
-Durrat Al Arous, Jeddah
-5 bedrooms · 6 bathrooms · 537 m²
+Classic Mansion, Al Shati 6
+Al Shati 6, Jeddah
+4 bedrooms · 8 bathrooms · 2300 m² · 2227.5 m² plot
 
-Private beach
+A classic mansion on a plot of 2,227.5 square metres in Al Shati 6, one of the most established addresses on Jeddah's northern waterfront. The house is arranged around a garden with a swimming pool, jacuzzi and cascading water features, with a three-car garage and a rear terrace for outdoor seating.
+2,227.5 sqm plot · Pool with jacuzzi and waterfalls · Four master bedrooms, eight bathrooms · Four reception rooms
 
-SAR 8,000,000
-Ref. BONA-001 — WhatsApp +966 59 329 6933 or the link in bio.
+SAR 18,000,000
+Ref. BONA-002 — WhatsApp +966 59 329 6933 or the link in bio.
 REGA ad licence: [add number before publishing]
 ```
 **Caption — AR**
 ```
-فيلا بشاطئ خاص، درة العروس
-درة العروس، جدة
-5 غرف نوم · 6 دورات مياه · 537 م²
+قصر كلاسيكي، الشاطئ 6
+الشاطئ 6، جدة
+4 غرف نوم · 8 دورات مياه · 2300 م² · أرض 2227.5 م²
 
-شاطئ خاص
+قصر كلاسيكي على أرض بمساحة 2,227.5 متر مربع في حي الشاطئ 6، أحد أعرق العناوين على الواجهة البحرية الشمالية لجدة. يلتف المنزل حول حديقة تضم مسبحاً وجاكوزي وشلالات مائية، مع مرآب لثلاث سيارات وتراس خلفي للجلسات الخارجية.
+أرض بمساحة 2,227.5 متر مربع · مسبح مع جاكوزي وشلالات · أربع غرف نوم رئيسية وثماني دورات مياه · أربع صالات استقبال
 
-8,000,000 ر.س
-المرجع BONA-001 — واتساب +966 59 329 6933 أو الرابط في البايو.
+18,000,000 ر.س
+المرجع BONA-002 — واتساب +966 59 329 6933 أو الرابط في البايو.
 رقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]
 ```
-**Hashtags (18)**
+**Hashtags (19)**
 ```
-#بونا #عقارات_جدة #جدة #عقارات_السعودية #jeddahrealestate #luxuryrealestate #فلل_جدة #فلل_للبيع_في_جدة #فلل_فاخرة_جدة #فيلا_للبيع #luxuryvilla #villaforsale #درة_العروس #durratalarous #عقارات_الشاطئ #واجهة_بحرية #waterfrontliving #bona
+#بونا #عقارات_جدة #جدة #عقارات_السعودية #jeddahrealestate #luxuryrealestate #قصور_جدة #قصر_للبيع #فلل_فاخرة_جدة #mansion #luxuryvilla #luxuryhomes #الشاطئ #حي_الشاطئ #alshati #عقارات_الشاطئ #واجهة_بحرية #waterfrontliving #bona
 ```
-**Publish**: `node scripts/instagram-post.mjs post-image --image-url https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg --caption-file marketing/captions/launch-01.txt`
+**Publish**: `node scripts/instagram-post.mjs post-carousel --image-urls https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagerirx2b-b051b3.jpg,https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagezjtser-6fa95f.jpg,https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/20241016_110539737_ios-4f079b.jpg,https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimageipbc0w-a397a6.jpg,https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagehe70em-1e0d7e.jpg,https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagemtwhek-ffa560fe-58cd9a.jpg --caption-file marketing/captions/launch-01.txt`
 
-## Post #2 — Launch #2 — Private Beach Villa, Durrat Al Arous / الإطلاق #2 — فيلا بشاطئ خاص، درة العروس
+## Post #2 — Launch #2 — Modern Villa, Al Zahra / الإطلاق #2 — فيلا حديثة، الزهراء
 
-- **Grid slot**: bottom-centre · **Format**: post · **Pillar**: listings · **Ref**: BONA-001 · **Page**: https://bona.azoz.uk/properties/private-beach-villa-durrat-al-arous/
-- **Image**: `https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg`
-- **Alt text (EN)**: Beach villa exterior
-- **Alt text (AR)**: واجهة الفيلا
+- **Grid slot**: bottom-centre · **Format**: post · **Pillar**: listings · **Ref**: BONA-006 · **Page**: https://bona.azoz.uk/properties/modern-villa-al-zahra/
+- **Image**: `https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-zahra/1741989999716-9c5c4f.jpg`
+- **Alt text (EN)**: Swimming pool — Modern Villa, Al Zahra
+- **Alt text (AR)**: المسبح — فيلا حديثة، الزهراء
 - **Ad licence**: REQUIRED — add number to caption
 
 **Caption — EN**
 ```
 Quietly available.
-Private Beach Villa, Durrat Al Arous
-Durrat Al Arous, Jeddah
-5 bedrooms · 6 bathrooms · 537 m²
+Modern Villa, Al Zahra
+Al Zahra, Jeddah
+3 bedrooms · 8 bathrooms · 850 m² · 375 m² plot
 
-Private beach
+A modern villa in Al Zahra, positioned behind Stars Avenue and a few steps from King Road, Sari Street and Prince Sultan Road. The house spans 850 square metres of built area on a 375-square-metre plot, over three floors and a basement, with an outdoor pool and waterfall and an elevator connecting every level.
+850 sqm built-up over three floors and a basement · Pool with waterfall · Three master suites, eight bathrooms · Elevator to all floors
 
-SAR 8,000,000
-Ref. BONA-001 — WhatsApp +966 59 329 6933 or the link in bio.
+SAR 7,400,000
+Ref. BONA-006 — WhatsApp +966 59 329 6933 or the link in bio.
 REGA ad licence: [add number before publishing]
 ```
 **Caption — AR**
 ```
 متاح بهدوء.
-فيلا بشاطئ خاص، درة العروس
-درة العروس، جدة
-5 غرف نوم · 6 دورات مياه · 537 م²
+فيلا حديثة، الزهراء
+الزهراء، جدة
+3 غرف نوم · 8 دورات مياه · 850 م² · أرض 375 م²
 
-شاطئ خاص
+فيلا حديثة في حي الزهراء، خلف ستارز أفينيو وعلى خطوات من طريق الملك وشارع صاري وطريق الأمير سلطان. تمتد على 850 متراً مربعاً من المساحة المبنية على أرض بمساحة 375 متراً مربعاً، عبر ثلاثة طوابق وقبو، مع مسبح خارجي بشلال ومصعد يربط جميع المستويات.
+850 متراً مربعاً مبنية على ثلاثة طوابق وقبو · مسبح بشلال · ثلاثة أجنحة رئيسية وثماني دورات مياه · مصعد لجميع الطوابق
 
-8,000,000 ر.س
-المرجع BONA-001 — واتساب +966 59 329 6933 أو الرابط في البايو.
+7,400,000 ر.س
+المرجع BONA-006 — واتساب +966 59 329 6933 أو الرابط في البايو.
 رقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]
 ```
 **Hashtags (18)**
 ```
-#بونا #عقارات_جدة #جدة #عقارات_السعودية #jeddahrealestate #luxuryrealestate #فلل_جدة #فلل_للبيع_في_جدة #فلل_فاخرة_جدة #فيلا_للبيع #luxuryvilla #villaforsale #درة_العروس #durratalarous #عقارات_الشاطئ #واجهة_بحرية #waterfrontliving #bona
+#بونا #عقارات_جدة #جدة #عقارات_السعودية #jeddahrealestate #luxuryrealestate #فلل_جدة #فلل_للبيع_في_جدة #فلل_فاخرة_جدة #فيلا_للبيع #luxuryvilla #villaforsale #الزهراء #alzahra #عقارات_الشاطئ #واجهة_بحرية #waterfrontliving #bona
 ```
-**Publish**: `node scripts/instagram-post.mjs post-image --image-url https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg --caption-file marketing/captions/launch-02.txt`
+**Publish**: `node scripts/instagram-post.mjs post-image --image-url https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-zahra/1741989999716-9c5c4f.jpg --caption-file marketing/captions/launch-02.txt`
 
-## Post #3 — Launch #3 — Private Beach Villa, Durrat Al Arous / الإطلاق #3 — فيلا بشاطئ خاص، درة العروس
+## Post #3 — Launch #3 — Contemporary Villa, Al Khalidiyah / الإطلاق #3 — فيلا عصرية، الخالدية
 
-- **Grid slot**: bottom-left · **Format**: carousel · **Pillar**: listings · **Ref**: BONA-001 · **Page**: https://bona.azoz.uk/properties/private-beach-villa-durrat-al-arous/
-- **Image**: `https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg`
-- **Alt text (EN)**: Beach villa exterior
-- **Alt text (AR)**: واجهة الفيلا
+- **Grid slot**: bottom-left · **Format**: carousel · **Pillar**: listings · **Ref**: BONA-005 · **Page**: https://bona.azoz.uk/properties/contemporary-villa-al-khalidiyah/
+- **Images**: `https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-107-45a677.jpg`, `https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-119-1f59b7.jpg`, `https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-129-8a2c83.jpg`, `https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-67-4286b0.jpg`, `https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-135-18ea62.jpg`, `https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-142-994c9c.jpg`
+- **Alt text (EN)**: Swimming pool — Contemporary Villa, Al Khalidiyah
+- **Alt text (AR)**: المسبح — فيلا عصرية، الخالدية
 - **Ad licence**: REQUIRED — add number to caption
 
 **Caption — EN**
 ```
 Now available through Bona.
-Private Beach Villa, Durrat Al Arous
-Durrat Al Arous, Jeddah
-5 bedrooms · 6 bathrooms · 537 m²
+Contemporary Villa, Al Khalidiyah
+Al Khalidiyah, Jeddah
+5 bedrooms · 8 bathrooms · 640 m² · 375 m² plot
 
-Private beach
+A newly built contemporary villa in Al Khalidiyah, a few steps from Sari Street and Prince Sultan Road. Behind a restrained façade, the house is organised around a private pool with tiered water features and an outdoor seating area, visible from the two open-plan lounges and the fully fitted kitchen on the ground floor.
+Steps from Sari Street and Prince Sultan Road · Private pool with water features · Glass elevator to all floors · Five master bedrooms and a dedicated office
 
-SAR 8,000,000
-Ref. BONA-001 — WhatsApp +966 59 329 6933 or the link in bio.
+SAR 6,700,000
+Ref. BONA-005 — WhatsApp +966 59 329 6933 or the link in bio.
 REGA ad licence: [add number before publishing]
 ```
 **Caption — AR**
 ```
 متاح الآن عبر بونا.
-فيلا بشاطئ خاص، درة العروس
-درة العروس، جدة
-5 غرف نوم · 6 دورات مياه · 537 م²
+فيلا عصرية، الخالدية
+الخالدية، جدة
+5 غرف نوم · 8 دورات مياه · 640 م² · أرض 375 م²
 
-شاطئ خاص
+فيلا عصرية حديثة البناء في حي الخالدية، على خطوات من شارع صاري وطريق الأمير سلطان. خلف واجهة هادئة، ينتظم المنزل حول مسبح خاص بشلالات متدرجة ومنطقة جلوس خارجية، تظهر من الصالتين المفتوحتين والمطبخ المجهز بالكامل في الطابق الأرضي.
+على خطوات من شارع صاري وطريق الأمير سلطان · مسبح خاص بشلالات · مصعد زجاجي لجميع الطوابق · خمس غرف نوم رئيسية ومكتب مستقل
 
-8,000,000 ر.س
-المرجع BONA-001 — واتساب +966 59 329 6933 أو الرابط في البايو.
+6,700,000 ر.س
+المرجع BONA-005 — واتساب +966 59 329 6933 أو الرابط في البايو.
 رقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]
 ```
 **Hashtags (18)**
 ```
-#بونا #عقارات_جدة #جدة #عقارات_السعودية #jeddahrealestate #luxuryrealestate #فلل_جدة #فلل_للبيع_في_جدة #فلل_فاخرة_جدة #فيلا_للبيع #luxuryvilla #villaforsale #درة_العروس #durratalarous #عقارات_الشاطئ #واجهة_بحرية #waterfrontliving #bona
+#بونا #عقارات_جدة #جدة #عقارات_السعودية #jeddahrealestate #luxuryrealestate #فلل_جدة #فلل_للبيع_في_جدة #فلل_فاخرة_جدة #فيلا_للبيع #luxuryvilla #villaforsale #الخالدية #alkhalidiyah #عقارات_الشاطئ #واجهة_بحرية #waterfrontliving #bona
 ```
-**Publish**: `node scripts/instagram-post.mjs post-image --image-url https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg --caption-file marketing/captions/launch-03.txt`
+**Publish**: `node scripts/instagram-post.mjs post-carousel --image-urls https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-107-45a677.jpg,https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-119-1f59b7.jpg,https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-129-8a2c83.jpg,https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-67-4286b0.jpg,https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-135-18ea62.jpg,https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-142-994c9c.jpg --caption-file marketing/captions/launch-03.txt`
 
 ## Post #4 — Where we work — Jeddah districts / أين نعمل — أحياء جدة
 
-- **Grid slot**: middle-right · **Format**: post · **Pillar**: behind the house · **Ref**: BONA-001 · **Page**: https://bona.azoz.uk/properties/
-- **Image**: `https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg`
+- **Grid slot**: middle-right · **Format**: post · **Pillar**: behind the house · **Ref**: BONA-009 · **Page**: https://bona.azoz.uk/properties/
+- **Image**: `https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-shera-a-north-obhur/img_8317-9248d2.jpg`
 - **Alt text (EN)**: Exterior of a contemporary villa in Jeddah at dusk
 - **Alt text (AR)**: واجهة فيلا عصرية في جدة عند الغروب
 - **Ad licence**: not required (brand/education)
@@ -166,7 +172,7 @@ Tell us the district; we'll tell you what's quietly available. WhatsApp +966 59 
 ```
 #بونا #عقارات_جدة #جدة #عقارات_السعودية #jeddahrealestate #luxuryrealestate #الخالدية #أبحر #الشاطئ #الروضة #درة_العروس #alkhalidiyah #obhur #alshati #alrawdah #jeddahdistricts #bona
 ```
-**Publish**: `node scripts/instagram-post.mjs post-image --image-url https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg --caption-file marketing/captions/launch-04.txt`
+**Publish**: `node scripts/instagram-post.mjs post-image --image-url https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-shera-a-north-obhur/img_8317-9248d2.jpg --caption-file marketing/captions/launch-04.txt`
 
 ## Post #5 — Launch manifesto — why "quietly" / بيان الإطلاق — لماذا «بهدوء»
 
@@ -204,88 +210,92 @@ WhatsApp +966 59 329 6933 · link in bio.
 ```
 **Publish**: `node scripts/instagram-post.mjs post-image --image-url https://bona.azoz.uk/og-default.png --caption-file marketing/captions/launch-05.txt`
 
-## Post #6 — Launch #6 — Private Beach Villa, Durrat Al Arous / الإطلاق #6 — فيلا بشاطئ خاص، درة العروس
+## Post #6 — Launch #6 — Garden-Facing Villa, Al Shera'a, North Obhur / الإطلاق #6 — فيلا مطلة على حديقة، الشراع، أبحر الشمالية
 
-- **Grid slot**: middle-left · **Format**: carousel · **Pillar**: listings · **Ref**: BONA-001 · **Page**: https://bona.azoz.uk/properties/private-beach-villa-durrat-al-arous/
-- **Image**: `https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg`
-- **Alt text (EN)**: Beach villa exterior
-- **Alt text (AR)**: واجهة الفيلا
+- **Grid slot**: middle-left · **Format**: carousel · **Pillar**: listings · **Ref**: BONA-009 · **Page**: https://bona.azoz.uk/properties/garden-facing-villa-al-sheraa-north-obhur/
+- **Images**: `https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-shera-a-north-obhur/img_8317-9248d2.jpg`, `https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-shera-a-north-obhur/img_8328-d7d60a.jpg`, `https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-shera-a-north-obhur/img_8235-d4ea6b.jpg`, `https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-shera-a-north-obhur/img_8201-655d8c.jpg`, `https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-shera-a-north-obhur/img_8196-597548.jpg`, `https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-shera-a-north-obhur/img_8208-bf70ff.jpg`
+- **Alt text (EN)**: Swimming pool — Garden-Facing Villa, Al Shera'a, North Obhur
+- **Alt text (AR)**: المسبح — فيلا مطلة على حديقة، الشراع، أبحر الشمالية
 - **Ad licence**: REQUIRED — add number to caption
 
 **Caption — EN**
 ```
-Private Beach Villa, Durrat Al Arous
-Durrat Al Arous, Jeddah
-5 bedrooms · 6 bathrooms · 537 m²
+Garden-Facing Villa, Al Shera'a, North Obhur
+Al Shera'a, North Obhur, Jeddah
+5 bedrooms · 8 bathrooms · 1200 m² · 450 m² plot
 
-Private beach
+A south-facing villa in the Al Shera'a scheme of North Obhur, overlooking a large public garden and close to daily services. The house offers 1,200 square metres of built space on a 450-square-metre plot, with ceilings up to 4.3 metres, marble floors, a marble staircase with glass balustrades and a large private pool with waterfalls.
+1,200 sqm built-up area · Ceilings up to 4.3 metres · Large pool with waterfalls · Five bedrooms, eight bathrooms
 
-SAR 8,000,000
-Ref. BONA-001 — WhatsApp +966 59 329 6933 or the link in bio.
+SAR 3,800,000
+Ref. BONA-009 — WhatsApp +966 59 329 6933 or the link in bio.
 REGA ad licence: [add number before publishing]
 ```
 **Caption — AR**
 ```
-فيلا بشاطئ خاص، درة العروس
-درة العروس، جدة
-5 غرف نوم · 6 دورات مياه · 537 م²
+فيلا مطلة على حديقة، الشراع، أبحر الشمالية
+الشراع، أبحر الشمالية، جدة
+5 غرف نوم · 8 دورات مياه · 1200 م² · أرض 450 م²
 
-شاطئ خاص
+فيلا بواجهة جنوبية في مخطط الشراع بأبحر الشمالية، تطل على حديقة عامة واسعة وقريبة من الخدمات اليومية. يوفر المنزل 1,200 متر مربع من المساحة المبنية على أرض بمساحة 450 متراً مربعاً، بأسقف يصل ارتفاعها إلى 4.3 أمتار وأرضيات رخامية ودرج رخامي بدرابزين زجاجي ومسبح خاص كبير بشلالات.
+مساحة بناء 1,200 متر مربع · أسقف بارتفاع يصل إلى 4.3 أمتار · مسبح كبير بشلالات · خمس غرف نوم وثماني دورات مياه
 
-8,000,000 ر.س
-المرجع BONA-001 — واتساب +966 59 329 6933 أو الرابط في البايو.
+3,800,000 ر.س
+المرجع BONA-009 — واتساب +966 59 329 6933 أو الرابط في البايو.
 رقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]
 ```
-**Hashtags (18)**
+**Hashtags (19)**
 ```
-#بونا #عقارات_جدة #جدة #عقارات_السعودية #jeddahrealestate #luxuryrealestate #فلل_جدة #فلل_للبيع_في_جدة #فلل_فاخرة_جدة #فيلا_للبيع #luxuryvilla #villaforsale #درة_العروس #durratalarous #عقارات_الشاطئ #واجهة_بحرية #waterfrontliving #bona
+#بونا #عقارات_جدة #جدة #عقارات_السعودية #jeddahrealestate #luxuryrealestate #فلل_جدة #فلل_للبيع_في_جدة #فلل_فاخرة_جدة #فيلا_للبيع #luxuryvilla #villaforsale #أبحر #ابحر_الشمالية #obhur #عقارات_الشاطئ #واجهة_بحرية #waterfrontliving #bona
 ```
-**Publish**: `node scripts/instagram-post.mjs post-image --image-url https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg --caption-file marketing/captions/launch-06.txt`
+**Publish**: `node scripts/instagram-post.mjs post-carousel --image-urls https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-shera-a-north-obhur/img_8317-9248d2.jpg,https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-shera-a-north-obhur/img_8328-d7d60a.jpg,https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-shera-a-north-obhur/img_8235-d4ea6b.jpg,https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-shera-a-north-obhur/img_8201-655d8c.jpg,https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-shera-a-north-obhur/img_8196-597548.jpg,https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-shera-a-north-obhur/img_8208-bf70ff.jpg --caption-file marketing/captions/launch-06.txt`
 
-## Post #7 — Launch #7 — Private Beach Villa, Durrat Al Arous / الإطلاق #7 — فيلا بشاطئ خاص، درة العروس
+## Post #7 — Launch #7 — Private Villa, Al Murjan / الإطلاق #7 — فيلا خاصة، المرجان
 
-- **Grid slot**: top-right · **Format**: post · **Pillar**: listings · **Ref**: BONA-001 · **Page**: https://bona.azoz.uk/properties/private-beach-villa-durrat-al-arous/
-- **Image**: `https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg`
-- **Alt text (EN)**: Beach villa exterior
-- **Alt text (AR)**: واجهة الفيلا
+- **Grid slot**: top-right · **Format**: post · **Pillar**: listings · **Ref**: BONA-004 · **Page**: https://bona.azoz.uk/properties/private-villa-al-murjan/
+- **Image**: `https://tk-storage.azoz.uk/tk-estate-media/media/al-morjan-jeddah/screenshot_2026-05-26_123157-2c6508.png`
+- **Alt text (EN)**: Exterior — Private Villa, Al Murjan
+- **Alt text (AR)**: الواجهة الخارجية — فيلا خاصة، المرجان
 - **Ad licence**: REQUIRED — add number to caption
 
 **Caption — EN**
 ```
 Quietly available.
-Private Beach Villa, Durrat Al Arous
-Durrat Al Arous, Jeddah
-5 bedrooms · 6 bathrooms · 537 m²
+Private Villa, Al Murjan
+Al Murjan, Jeddah
+5 bedrooms · 8 bathrooms · 900 m² · 550 m² plot
 
-Private beach
+A private residence in Al Murjan, moments from King Road and the Corniche. The villa offers 900 square metres of built space on a 550-square-metre plot, arranged over two floors and an independent roof-level annex, with a private pool, a landscaped garden and two internal courtyards that bring light into the centre of the house.
+900 sqm built on a 550 sqm plot · Five master suites · Private pool and landscaped garden · Two internal courtyards
 
-SAR 8,000,000
-Ref. BONA-001 — WhatsApp +966 59 329 6933 or the link in bio.
+SAR 8,499,000
+Ref. BONA-004 — WhatsApp +966 59 329 6933 or the link in bio.
 REGA ad licence: [add number before publishing]
 ```
 **Caption — AR**
 ```
 متاح بهدوء.
-فيلا بشاطئ خاص، درة العروس
-درة العروس، جدة
-5 غرف نوم · 6 دورات مياه · 537 م²
+فيلا خاصة، المرجان
+المرجان، جدة
+5 غرف نوم · 8 دورات مياه · 900 م² · أرض 550 م²
 
-شاطئ خاص
+مسكن خاص في حي المرجان، على مقربة من طريق الملك والكورنيش. توفر الفيلا 900 متر مربع من المساحة المبنية على أرض بمساحة 550 متراً مربعاً، موزعة على طابقين وملحق علوي مستقل، مع مسبح خاص وحديقة منسقة وفناءين داخليين يدخلان الضوء إلى قلب المنزل.
+900 متر مربع مبنية على أرض 550 متراً مربعاً · خمسة أجنحة رئيسية · مسبح خاص وحديقة منسقة · فناءان داخليان
 
-8,000,000 ر.س
-المرجع BONA-001 — واتساب +966 59 329 6933 أو الرابط في البايو.
+8,499,000 ر.س
+المرجع BONA-004 — واتساب +966 59 329 6933 أو الرابط في البايو.
 رقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]
 ```
 **Hashtags (18)**
 ```
-#بونا #عقارات_جدة #جدة #عقارات_السعودية #jeddahrealestate #luxuryrealestate #فلل_جدة #فلل_للبيع_في_جدة #فلل_فاخرة_جدة #فيلا_للبيع #luxuryvilla #villaforsale #درة_العروس #durratalarous #عقارات_الشاطئ #واجهة_بحرية #waterfrontliving #bona
+#بونا #عقارات_جدة #جدة #عقارات_السعودية #jeddahrealestate #luxuryrealestate #فلل_جدة #فلل_للبيع_في_جدة #فلل_فاخرة_جدة #فيلا_للبيع #luxuryvilla #villaforsale #المرجان #almurjan #عقارات_الشاطئ #واجهة_بحرية #waterfrontliving #bona
 ```
-**Publish**: `node scripts/instagram-post.mjs post-image --image-url https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg --caption-file marketing/captions/launch-07.txt`
+**Publish**: `node scripts/instagram-post.mjs post-image --image-url https://tk-storage.azoz.uk/tk-estate-media/media/al-morjan-jeddah/screenshot_2026-05-26_123157-2c6508.png --caption-file marketing/captions/launch-07.txt`
 
 ## Post #8 — Sell with Bona — discreet marketing for owners / بِع مع بونا — تسويق بخصوصية للمُلّاك
 
-- **Grid slot**: top-centre · **Format**: post · **Pillar**: buyer/seller education · **Ref**: BONA-001 · **Page**: https://bona.azoz.uk/sell/
-- **Image**: `https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg`
+- **Grid slot**: top-centre · **Format**: post · **Pillar**: buyer/seller education · **Ref**: BONA-006 · **Page**: https://bona.azoz.uk/sell/
+- **Image**: `https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-zahra/1741990836500-a2256a.jpg`
 - **Alt text (EN)**: Living room interior with natural light in a Jeddah villa
 - **Alt text (AR)**: غرفة معيشة بإضاءة طبيعية في فيلا بجدة
 - **Ad licence**: not required (brand/education)
@@ -318,12 +328,12 @@ One conversation to start. WhatsApp +966 59 329 6933 or the link in bio.
 ```
 #بونا #عقارات_جدة #جدة #عقارات_السعودية #jeddahrealestate #luxuryrealestate #بيع_عقار #تسويق_عقاري #بيع_فيلا #sellmyhome #offmarket #listwithus #homeselling #jeddahproperty #luxuryhomes #bona
 ```
-**Publish**: `node scripts/instagram-post.mjs post-image --image-url https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg --caption-file marketing/captions/launch-08.txt`
+**Publish**: `node scripts/instagram-post.mjs post-image --image-url https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-zahra/1741990836500-a2256a.jpg --caption-file marketing/captions/launch-08.txt`
 
 ## Post #9 — Launch announcement — Bona is open / إعلان الإطلاق — بونا تفتح أبوابها
 
 - **Grid slot**: top-left · **Format**: post · **Pillar**: behind the house · **Ref**: BONA-001 · **Page**: https://bona.azoz.uk/
-- **Image**: `https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg`
+- **Image**: `https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04810-34922b.jpeg`
 - **Alt text (EN)**: Hero view of a luxury villa in Jeddah
 - **Alt text (AR)**: لقطة رئيسية لفيلا فاخرة في جدة
 - **Ad licence**: not required (brand/education)
@@ -352,7 +362,7 @@ WhatsApp +966 59 329 6933 · link in bio.
 ```
 #بونا #عقارات_جدة #جدة #عقارات_السعودية #jeddahrealestate #luxuryrealestate #jeddah #saudirealestate #bona #فلل_جدة #فلل_للبيع_في_جدة #فلل_فاخرة_جدة #فيلا_للبيع #luxuryvilla #launch #افتتاح
 ```
-**Publish**: `node scripts/instagram-post.mjs post-image --image-url https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg --caption-file marketing/captions/launch-09.txt`
+**Publish**: `node scripts/instagram-post.mjs post-image --image-url https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04810-34922b.jpeg --caption-file marketing/captions/launch-09.txt`
 
 ## Stories on launch day
 - 10:00 — "Today." (wordmark, countdown sticker to 17:30)
