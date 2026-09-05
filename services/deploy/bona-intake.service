@@ -1,0 +1,42 @@
+; Bona WhatsApp intake — systemd USER unit (no root anywhere).
+;
+;   install -Dm644 ~/bona/services/deploy/bona-intake.service ~/.config/systemd/user/bona-intake.service
+;   systemctl --user daemon-reload && systemctl --user enable --now bona-intake
+;   journalctl --user -u bona-intake -f -o cat | jq .
+;
+; The service RUNS from ~/bona (the working checkout) and WRITES to $BONA_REPO
+; (~/bona-bot, a dedicated clone) so a `git pull --rebase` during a publish can never
+; rewrite the code of the process performing it.
+;
+; PATH must carry both the node bin dir (for `node` itself and `npx`) and ~/.local/bin
+; (for `claude` and `uv`, which the pipeline shells out to). A user unit inherits almost
+; nothing from the login shell, so an incomplete PATH here shows up as
+; "spawn claude ENOENT" at the AI step and nowhere earlier.
+
+[Unit]
+Description=Bona WhatsApp PDF -> website listing intake
+Documentation=file:%h/bona/services/intake/README.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=%h/bona
+Environment=NODE_ENV=production
+Environment=PATH=%h/.nvm/versions/node/v24.19.0/bin:%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+; BONA_* settings; the service reads ~/.secrets/evolution-api.env itself.
+EnvironmentFile=%h/.secrets/bona-services.env
+ExecStart=%h/.nvm/versions/node/v24.19.0/bin/node %h/bona/services/intake/index.mjs
+Restart=always
+RestartSec=10
+; SIGTERM lets the current job finish its reply before the process exits.
+KillSignal=SIGTERM
+TimeoutStopSec=45
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bona-intake
+
+[Install]
+WantedBy=default.target

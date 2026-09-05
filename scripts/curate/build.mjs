@@ -90,7 +90,38 @@ const apiById = new Map(API.map((r) => [String(r.id), r]));
 const LAND_PUBLIC = false;
 const live = out.filter((l) => l.sourceRef && apiById.has(String(l.sourceRef)) && !/sold|reserved|rented|inactive|withdrawn/i.test(String(apiById.get(String(l.sourceRef)).status || '')) && (LAND_PUBLIC || l.kind !== 'land'));
 console.log(`TK live list: kept ${live.length}, dropped ${out.length - live.length} (no sourceRef in the API, or not available there)`);
-fs.writeFileSync(OUT, JSON.stringify(live, null, 2) + '\n');
+
+// ---- WhatsApp intake (services/intake) --------------------------------------------------
+// Listings the owner published from his phone by dropping a brochure PDF into the Bona
+// WhatsApp group. They are OWNER-AUTHORED, not TK stock, so they are EXEMPT from the TK
+// live-list rule above; their images live in this repo under public/listings/<slug>/.
+// `hidden: true` keeps one off the site without deleting it; `status: "sold"` publishes it
+// with a Sold badge. `hidden` and `_intake` are intake bookkeeping and never reach the site.
+const INBOX = path.join(ROOT, 'scripts', 'curate', 'inbox');
+const inbox = [];
+let inboxHidden = 0;
+if (fs.existsSync(INBOX)) {
+  for (const name of fs.readdirSync(INBOX).filter((n) => n.endsWith('.json') && n !== '_index.json').sort()) {
+    const file = path.join(INBOX, name);
+    let l;
+    try { l = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { throw new Error(`inbox/${name}: invalid JSON (${e.message})`); }
+    if (l.hidden === true) { inboxHidden++; continue; }
+    const { hidden, _intake, ...clean } = l;
+    if (!KIND_OF[clean.type]) throw new Error(`inbox/${name}: no kind mapping for type "${clean.type}"`);
+    clean.kind = KIND_OF[clean.type];
+    clean.featured = Boolean(clean.featured);
+    for (const im of clean.images ?? []) {
+      if (typeof im.src === 'string' && im.src.startsWith('/') && !fs.existsSync(path.join(ROOT, 'public', im.src))) {
+        throw new Error(`inbox/${name}: missing public${im.src}`);
+      }
+    }
+    inbox.push(clean);
+  }
+}
+if (inbox.length || inboxHidden) console.log(`WhatsApp intake: appended ${inbox.length} listing(s), ${inboxHidden} hidden`);
+
+const published = [...live, ...inbox];
+fs.writeFileSync(OUT, JSON.stringify(published, null, 2) + '\n');
 const counts = out.reduce((a, l) => ((a[l.category] = (a[l.category] || 0) + 1), a), {});
 const kinds = out.reduce((a, l) => ((a[l.kind] = (a[l.kind] || 0) + 1), a), {});
 const imgs = out.reduce((n, l) => n + l.images.length, 0);
