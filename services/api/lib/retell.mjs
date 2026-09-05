@@ -132,17 +132,18 @@ export function createRetellClient({ apiKey, baseUrl = RETELL_BASE, fetchImpl = 
 
     listKnowledgeBases: () => request('GET', '/list-knowledge-bases'),
     getKnowledgeBase: (kbId) => request('GET', `/get-knowledge-base/${encodeURIComponent(kbId)}`),
-    /** create-knowledge-base is multipart/form-data; array values repeat the same field name. */
+    /** create-knowledge-base is multipart/form-data. Verified 2026-09-06 against the live API: array fields must be
+     *  sent as ONE field holding a JSON-encoded array (repeating the field name → 500, JSON body → 500). */
     createKnowledgeBase: ({ knowledge_base_name, knowledge_base_urls = [], enable_auto_refresh = true }) => {
       const form = new FormData();
       form.set('knowledge_base_name', knowledge_base_name);
       form.set('enable_auto_refresh', String(Boolean(enable_auto_refresh)));
-      for (const u of knowledge_base_urls) form.append('knowledge_base_urls', u);
+      if (knowledge_base_urls.length) form.set('knowledge_base_urls', JSON.stringify(knowledge_base_urls));
       return request('POST', '/create-knowledge-base', { form });
     },
     addKnowledgeBaseSources: (kbId, { knowledge_base_urls = [] }) => {
       const form = new FormData();
-      for (const u of knowledge_base_urls) form.append('knowledge_base_urls', u);
+      if (knowledge_base_urls.length) form.set('knowledge_base_urls', JSON.stringify(knowledge_base_urls));
       return request('POST', `/add-knowledge-base-sources/${encodeURIComponent(kbId)}`, { form });
     },
 

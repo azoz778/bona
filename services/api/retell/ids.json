@@ -1,14 +1,14 @@
 {
-  "knowledgeBaseId": null,
-  "llmId": null,
-  "voiceAgentId": null,
-  "chatAgentId": null,
-  "model": null,
+  "knowledgeBaseId": "knowledge_base_29fa8a06ce87d0d3",
+  "llmId": "llm_e978e39556e56a661a08fcdf0a22",
+  "voiceAgentId": "agent_00ccf63b9fd9800da7d40d344c",
+  "chatAgentId": "agent_c435e260fdd645681b5b6a07d3",
+  "model": "claude-4.6-sonnet",
   "voiceId": "11labs-Nyla",
   "publicApi": "https://api.bona.azoz.uk",
   "siteUrl": "https://bona.azoz.uk",
   "separateChatAgent": true,
   "published": false,
-  "note": "Placeholder. Ids are not secrets. Run `node services/api/retell/provision.mjs` to fill this in; re-running updates the same objects in place.",
-  "updatedAt": null
+  "note": "Ids are not secrets. Regenerate with: node services/api/retell/provision.mjs",
+  "updatedAt": "2026-09-05T23:30:23.973Z"
 }
