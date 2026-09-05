@@ -784,7 +784,7 @@ export const LISTINGS = [
     listedAt: '2026-09-05',
   },
   {
-    slug: 'painite-villas-by-lamborghini-benahavis', sourceRef: 'VIL-044', status: 'available', category: 'international', type: 'mansion', featured: false,
+    slug: 'painite-villas-by-lamborghini-benahavis', sourceRef: 'VIL-044', status: 'available', category: 'international', type: 'mansion', featured: true,
     title: { en: 'Painite Villas by Lamborghini, Benahavís', ar: 'فلل باينايت بتوقيع لامبورغيني، بيناهابيس' },
     location: loc({ en: 'Benahavís, Costa del Sol', ar: 'بيناهابيس، كوستا ديل سول' }, { en: 'Marbella', ar: 'ماربيا' }, { en: 'Spain', ar: 'إسبانيا' }, 'ES'),
     price: { amount: null, currency: 'EUR', from: false, period: null, onRequest: true },
@@ -1154,7 +1154,7 @@ export const LISTINGS = [
     listedAt: '2026-03-21',
   },
   {
-    slug: 'trump-international-hotel-residences-aida-muscat', sourceRef: 'APT-035', status: 'available', category: 'international', type: 'apartment', featured: false,
+    slug: 'trump-international-hotel-residences-aida-muscat', sourceRef: 'APT-035', status: 'available', category: 'international', type: 'apartment', featured: true,
     title: { en: 'Trump International Hotel Residences, AIDA, Muscat', ar: 'مساكن فندق ترامب الدولي، آيدا، مسقط' },
     location: loc({ en: 'AIDA', ar: 'آيدا' }, { en: 'Muscat', ar: 'مسقط' }, { en: 'Oman', ar: 'سلطنة عُمان' }, 'OM'),
     price: { amount: 1700000, currency: 'SAR', from: true, period: null, onRequest: false },
@@ -1225,5 +1225,320 @@ export const LISTINGS = [
       ar: ['أرض زاوية بمساحة 625 متراً مربعاً', 'شارعان بعرض 12 متراً شمالاً وشرقاً', '24 في 26 متراً', 'المربع الثاني من طريق الملك', 'قرب الواجهة البحرية لجدة', '4,200,000 ريال سعودي'],
     },
     listedAt: '2026-04-09',
+  },
+  // Round 3 (2026-09-05): every available plot in TK's live list with an exact pin. Pins come from the saved land-register
+  // source page (C:\Users\ASUS\TK-LAND-REGISTER-source-2026-08-25.html, `const PROPS` lat/lng — the same values the register
+  // imported into properties.amenities.land). LND-016, LND-019 and LND-021 have no pin there (empty lat/lng) and are left out.
+  {
+    slug: 'four-deed-land-king-abdulaziz-road', sourceRef: 'LND-007', status: 'available', category: 'buy', type: 'land', featured: false,
+    title: { en: 'Four-Deed Land, King Abdulaziz Road', ar: 'أرض بأربعة صكوك، طريق الملك عبدالعزيز' },
+    location: loc({ en: 'King Abdulaziz Road', ar: 'طريق الملك عبدالعزيز' }),
+    price: { amount: 198000000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: null, baths: null, areaSqm: null, plotSqm: 12000, yearBuilt: null, floors: null },
+    map: { lat: 21.676273027428692, lng: 39.10955018232159 },
+    images: [{ local: '/land/LND-007.jpg', room: 'satellite' }, { local: '/land/LND-007-z15.jpg', room: 'satellite_wide' }],
+    description: {
+      en: [
+        'Twelve thousand square metres on King Abdulaziz Road, held as four separate deeds of 3,000 square metres each. The land presents a 50-metre frontage to the road with a depth of 60 metres.',
+        'Offered below market at SAR 198,000,000, which is SAR 16,500 per square metre. The four deeds can be taken together or considered separately. The satellite frames show the position of the land and its surroundings.',
+      ],
+      ar: [
+        'اثنا عشر ألف متر مربع على طريق الملك عبدالعزيز، مقسّمة إلى أربعة صكوك منفصلة بمساحة 3,000 متر مربع لكل منها. تطل الأرض على الطريق بواجهة بطول 50 متراً وبعمق 60 متراً.',
+        'تُعرض بسعر أقل من السوق بقيمة 198,000,000 ريال سعودي، أي 16,500 ريال للمتر المربع. يمكن شراء الصكوك الأربعة معاً أو النظر في كل صك على حدة. توضح الصور الجوية موقع الأرض ومحيطها.',
+      ],
+    },
+    highlights: {
+      en: ['12,000 sqm in total', 'Four separate deeds of 3,000 sqm', '50 m frontage on King Abdulaziz Road', '60 m depth', 'SAR 16,500 per sqm', 'Offered below market'],
+      ar: ['12,000 متر مربع إجمالاً', 'أربعة صكوك منفصلة بمساحة 3,000 متر مربع', 'واجهة 50 متراً على طريق الملك عبدالعزيز', 'عمق 60 متراً', '16,500 ريال للمتر المربع', 'بسعر أقل من السوق'],
+    },
+    listedAt: '2026-08-26',
+  },
+  {
+    slug: 'three-street-plot-al-shati-2', sourceRef: 'LND-008', status: 'available', category: 'buy', type: 'land', featured: false,
+    title: { en: 'Three-Street Plot, Al Shati 2', ar: 'أرض على ثلاثة شوارع، الشاطئ 2' },
+    location: loc({ en: 'Al Shati 2', ar: 'الشاطئ 2' }),
+    price: { amount: 145314000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: null, baths: null, areaSqm: null, plotSqm: 24219, yearBuilt: null, floors: null },
+    map: { lat: 21.58758602662076, lng: 39.120119218923584 },
+    images: [{ local: '/land/LND-008.jpg', room: 'satellite' }, { local: '/land/LND-008-z15.jpg', room: 'satellite_wide' }],
+    description: {
+      en: [
+        'A plot of 24,219 square metres in Al Shati 2, bounded by three 32-metre streets to the east, north and south. The scale and the three open frontages suit a single large scheme.',
+        'The asking price is SAR 145,314,000, calculated at SAR 6,000 per square metre. The satellite frames show the plot and the surrounding district.',
+      ],
+      ar: [
+        'قطعة أرض بمساحة 24,219 متراً مربعاً في حي الشاطئ 2، تحدّها ثلاثة شوارع بعرض 32 متراً من الجهات الشرقية والشمالية والجنوبية. تناسب مساحتها وواجهاتها الثلاث المفتوحة مشروعاً واحداً كبيراً.',
+        'السعر المطلوب 145,314,000 ريال سعودي، محسوباً على أساس 6,000 ريال للمتر المربع. توضح الصور الجوية القطعة والحي المحيط بها.',
+      ],
+    },
+    highlights: {
+      en: ['24,219 sqm', 'Three frontages: east, north and south', 'Each street 32 m wide', 'SAR 6,000 per sqm', 'Al Shati 2'],
+      ar: ['24,219 متراً مربعاً', 'ثلاث واجهات: شرقية وشمالية وجنوبية', 'عرض كل شارع 32 متراً', '6,000 ريال للمتر المربع', 'حي الشاطئ 2'],
+    },
+    listedAt: '2026-08-26',
+  },
+  {
+    slug: 'development-land-north-abhur-jeddah-tower', sourceRef: 'LND-010', status: 'available', category: 'buy', type: 'land', featured: false,
+    title: { en: 'Development Land north of Jeddah Tower, North Abhur', ar: 'أرض تطوير شمال برج جدة، أبحر الشمالية' },
+    location: loc({ en: 'North Abhur', ar: 'أبحر الشمالية' }),
+    price: { amount: 100937500, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: null, baths: null, areaSqm: null, plotSqm: 11875.69, yearBuilt: null, floors: null },
+    map: { lat: 21.7373889, lng: 39.0723056 },
+    images: [{ local: '/land/LND-010.jpg', room: 'satellite' }, { local: '/land/LND-010-z15.jpg', room: 'satellite_wide' }],
+    description: {
+      en: [
+        'A block of 11,875.69 square metres on Prince Abdullah Al-Faisal Street in North Abhur, just north of Jeddah Tower. The land is open on four sides: a 15-metre street to the north, the 52-metre Prince Mishal Street to the south, a 32-metre street to the east and the 52-metre Prince Abdullah Al-Faisal Street to the west.',
+        'The asking price is SAR 100,937,500, at SAR 8,500 per square metre. The satellite frames show the block and its position on the two principal streets.',
+      ],
+      ar: [
+        'قطعة بمساحة 11,875.69 متراً مربعاً على شارع الأمير عبدالله الفيصل في أبحر الشمالية، شمال برج جدة مباشرة. الأرض مفتوحة من جهاتها الأربع: شارع بعرض 15 متراً شمالاً، وشارع الأمير مشعل بعرض 52 متراً جنوباً، وشارع بعرض 32 متراً شرقاً، وشارع الأمير عبدالله الفيصل بعرض 52 متراً غرباً.',
+        'السعر المطلوب 100,937,500 ريال سعودي، بواقع 8,500 ريال للمتر المربع. توضح الصور الجوية القطعة وموقعها على الشارعين الرئيسيين.',
+      ],
+    },
+    highlights: {
+      en: ['11,875.69 sqm', 'Four street frontages', 'Prince Abdullah Al-Faisal Street, 52 m', 'Prince Mishal Street, 52 m', 'Just north of Jeddah Tower', 'SAR 8,500 per sqm'],
+      ar: ['11,875.69 متراً مربعاً', 'أربع واجهات على الشوارع', 'شارع الأمير عبدالله الفيصل بعرض 52 متراً', 'شارع الأمير مشعل بعرض 52 متراً', 'شمال برج جدة مباشرة', '8,500 ريال للمتر المربع'],
+    },
+    listedAt: '2026-08-26',
+  },
+  {
+    slug: 'corniche-road-waterfront-land', sourceRef: 'LND-011', status: 'available', category: 'buy', type: 'land', featured: true,
+    title: { en: 'Waterfront Land on Corniche Road', ar: 'أرض على الواجهة البحرية، طريق الكورنيش' },
+    location: loc({ en: 'Jeddah Corniche', ar: 'كورنيش جدة' }),
+    price: { amount: 578784000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: null, baths: null, areaSqm: null, plotSqm: 36174, yearBuilt: null, floors: null },
+    map: { lat: 21.61218999611435, lng: 39.10883716393323 },
+    images: [{ local: '/land/LND-011.jpg', room: 'satellite' }, { local: '/land/LND-011-z15.jpg', room: 'satellite_wide' }],
+    description: {
+      en: [
+        'A site of 36,174 square metres with a long frontage on Corniche Road and direct exposure to the Jeddah waterfront. Zoned for commercial and residential use, it is one of the largest single holdings offered on the Corniche.',
+        'The asking price is SAR 578,784,000, calculated at SAR 16,000 per square metre. The satellite frames show the site between the road and the shore.',
+      ],
+      ar: [
+        'موقع بمساحة 36,174 متراً مربعاً بواجهة طويلة على طريق الكورنيش وإطلالة مباشرة على الواجهة البحرية لجدة. مخصص للاستخدام التجاري والسكني، وهو من أكبر المواقع المفردة المعروضة على الكورنيش.',
+        'السعر المطلوب 578,784,000 ريال سعودي، محسوباً على أساس 16,000 ريال للمتر المربع. توضح الصور الجوية الموقع بين الطريق والشاطئ.',
+      ],
+    },
+    highlights: {
+      en: ['36,174 sqm', 'Frontage on Corniche Road', 'Direct waterfront exposure', 'Commercial and residential use', 'SAR 16,000 per sqm'],
+      ar: ['36,174 متراً مربعاً', 'واجهة على طريق الكورنيش', 'إطلالة مباشرة على الواجهة البحرية', 'استخدام تجاري وسكني', '16,000 ريال للمتر المربع'],
+    },
+    listedAt: '2026-08-26',
+  },
+  {
+    slug: 'corniche-plot-four-streets', sourceRef: 'LND-012', status: 'available', category: 'buy', type: 'land', featured: false,
+    title: { en: 'Corniche Plot on Four Streets', ar: 'أرض على الكورنيش بأربعة شوارع' },
+    location: loc({ en: 'Jeddah Corniche', ar: 'كورنيش جدة' }),
+    price: { amount: 123737500, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: null, baths: null, areaSqm: null, plotSqm: 9899, yearBuilt: null, floors: null },
+    map: { lat: 21.56158454023218, lng: 39.1116602857581 },
+    images: [{ local: '/land/LND-012.jpg', room: 'satellite' }, { local: '/land/LND-012-z15.jpg', room: 'satellite_wide' }],
+    description: {
+      en: [
+        'A Corniche-side plot of 9,899 square metres, open on four streets and directly exposed to the Jeddah waterfront. It is zoned for commercial and residential use.',
+        'The asking price is SAR 123,737,500, calculated at SAR 12,500 per square metre. The satellite frames show the plot and its four street boundaries.',
+      ],
+      ar: [
+        'قطعة أرض بجانب الكورنيش بمساحة 9,899 متراً مربعاً، مفتوحة على أربعة شوارع وبإطلالة مباشرة على الواجهة البحرية لجدة. مخصصة للاستخدام التجاري والسكني.',
+        'السعر المطلوب 123,737,500 ريال سعودي، محسوباً على أساس 12,500 ريال للمتر المربع. توضح الصور الجوية القطعة وحدودها على الشوارع الأربعة.',
+      ],
+    },
+    highlights: {
+      en: ['9,899 sqm', 'Open on four streets', 'Beside the Corniche', 'Commercial and residential use', 'SAR 12,500 per sqm'],
+      ar: ['9,899 متراً مربعاً', 'مفتوحة على أربعة شوارع', 'بجانب الكورنيش', 'استخدام تجاري وسكني', '12,500 ريال للمتر المربع'],
+    },
+    listedAt: '2026-08-26',
+  },
+  {
+    slug: 'commercial-residential-land-abdullah-al-faisal-road', sourceRef: 'LND-013', status: 'available', category: 'buy', type: 'land', featured: false,
+    title: { en: 'Commercial-Residential Land on Abdullah Al Faisal Road', ar: 'أرض تجارية سكنية على طريق عبدالله الفيصل' },
+    location: loc({ en: 'North Abhur', ar: 'أبحر الشمالية' }),
+    price: { amount: 50000000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: null, baths: null, areaSqm: null, plotSqm: 8800, yearBuilt: null, floors: null },
+    map: { lat: 21.768665307588044, lng: 39.13062949365097 },
+    images: [{ local: '/land/LND-013.jpg', room: 'satellite' }, { local: '/land/LND-013-z15.jpg', room: 'satellite_wide' }],
+    description: {
+      en: [
+        'A plot of 8,800 square metres directly on Abdullah Al Faisal Road in North Abhur, permitted for commercial use and residential villas. It has four frontages: 60 metres on a 52-metre road, 148 metres on a 36-metre road, 148 metres on a 20-metre road and 60 metres on a 15-metre road.',
+        'The net asking price is SAR 50,000,000, about SAR 5,680 per square metre. The satellite frames show the plot and its position on the road.',
+      ],
+      ar: [
+        'قطعة أرض بمساحة 8,800 متر مربع على طريق عبدالله الفيصل مباشرة في أبحر الشمالية، مسموح فيها بالاستخدام التجاري والفلل السكنية. لها أربع واجهات: 60 متراً على طريق بعرض 52 متراً، و148 متراً على طريق بعرض 36 متراً، و148 متراً على طريق بعرض 20 متراً، و60 متراً على طريق بعرض 15 متراً.',
+        'السعر المطلوب صافياً 50,000,000 ريال سعودي، أي نحو 5,680 ريالاً للمتر المربع. توضح الصور الجوية القطعة وموقعها على الطريق.',
+      ],
+    },
+    highlights: {
+      en: ['8,800 sqm', 'Directly on Abdullah Al Faisal Road', 'Four frontages, 15 m to 52 m roads', 'Commercial and residential villas permitted', 'SAR 50,000,000 net'],
+      ar: ['8,800 متر مربع', 'على طريق عبدالله الفيصل مباشرة', 'أربع واجهات على طرق من 15 إلى 52 متراً', 'مسموح بالاستخدام التجاري والفلل السكنية', '50,000,000 ريال سعودي صافياً'],
+    },
+    listedAt: '2026-08-26',
+  },
+  {
+    slug: 'land-al-hamra-street', sourceRef: 'LND-014', status: 'available', category: 'buy', type: 'land', featured: false,
+    title: { en: 'Land on Al Hamra Street', ar: 'أرض على شارع الحمراء' },
+    location: loc({ en: 'Al Hamra', ar: 'الحمراء' }),
+    price: { amount: 50000000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: null, baths: null, areaSqm: null, plotSqm: 9950.39, yearBuilt: null, floors: null },
+    map: { lat: 21.530123603246512, lng: 39.16459296552526 },
+    images: [{ local: '/land/LND-014.jpg', room: 'satellite' }, { local: '/land/LND-014-z15.jpg', room: 'satellite_wide' }],
+    description: {
+      en: [
+        'A city-centre block of 9,950.39 square metres in Al Hamra, open on four sides: the 30-metre Al Hamra Street to the north, the 20-metre Hail Street to the west, and 10-metre streets to the south and east. A surveying decision has already been issued for the licensing process.',
+        'The asking price is SAR 50,000,000, about SAR 5,025 per square metre. The satellite frames show the block within the district.',
+      ],
+      ar: [
+        'قطعة في قلب المدينة بمساحة 9,950.39 متراً مربعاً في حي الحمراء، مفتوحة من جهاتها الأربع: شارع الحمراء بعرض 30 متراً شمالاً، وشارع حائل بعرض 20 متراً غرباً، وشارعان بعرض 10 أمتار جنوباً وشرقاً. صدر قرار مساحي بالفعل لإجراءات الترخيص.',
+        'السعر المطلوب 50,000,000 ريال سعودي، أي نحو 5,025 ريالاً للمتر المربع. توضح الصور الجوية القطعة داخل الحي.',
+      ],
+    },
+    highlights: {
+      en: ['9,950.39 sqm', '30 m Al Hamra Street to the north', '20 m Hail Street to the west', 'Four street frontages', 'Surveying decision issued', 'About SAR 5,025 per sqm'],
+      ar: ['9,950.39 متراً مربعاً', 'شارع الحمراء بعرض 30 متراً شمالاً', 'شارع حائل بعرض 20 متراً غرباً', 'أربع واجهات على الشوارع', 'قرار مساحي صادر', 'نحو 5,025 ريالاً للمتر المربع'],
+    },
+    listedAt: '2026-08-26',
+  },
+  {
+    slug: 'plot-1200-sqm-al-shati', sourceRef: 'LND-015', status: 'available', category: 'buy', type: 'land', featured: false,
+    title: { en: 'Plot of 1,200 sqm behind the Corniche, Al Shati', ar: 'أرض بمساحة 1,200 متر مربع خلف الكورنيش، الشاطئ' },
+    location: loc({ en: 'Al Shati', ar: 'الشاطئ' }),
+    price: { amount: 10200000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: null, baths: null, areaSqm: null, plotSqm: 1200, yearBuilt: null, floors: null },
+    map: { lat: 21.562684543496626, lng: 39.11201582272763 },
+    images: [{ local: '/land/LND-015.jpg', room: 'satellite' }, { local: '/land/LND-015-z15.jpg', room: 'satellite_wide' }],
+    description: {
+      en: [
+        'A residential plot of 1,200 square metres in Al Shati, in the row behind the Corniche. The rear of the plot faces toward the Corniche, and access is from a 20-metre street.',
+        'The asking price is SAR 10,200,000, at SAR 8,500 per square metre. The satellite frames show the plot and its distance from the shore.',
+      ],
+      ar: [
+        'قطعة أرض سكنية بمساحة 1,200 متر مربع في حي الشاطئ، في الصف الواقع خلف الكورنيش. تتجه الجهة الخلفية للقطعة نحو الكورنيش، والوصول إليها من شارع بعرض 20 متراً.',
+        'السعر المطلوب 10,200,000 ريال سعودي، بواقع 8,500 ريال للمتر المربع. توضح الصور الجوية القطعة ومسافتها من الشاطئ.',
+      ],
+    },
+    highlights: {
+      en: ['1,200 sqm', 'Rear faces toward the Corniche', 'Access from a 20 m street', 'SAR 8,500 per sqm', 'Al Shati'],
+      ar: ['1,200 متر مربع', 'الجهة الخلفية نحو الكورنيش', 'الوصول من شارع بعرض 20 متراً', '8,500 ريال للمتر المربع', 'حي الشاطئ'],
+    },
+    listedAt: '2026-08-26',
+  },
+  {
+    slug: 'plot-980-sqm-durrat-al-basateen', sourceRef: 'LND-017', status: 'available', category: 'buy', type: 'land', featured: false,
+    title: { en: 'Plot of 980 sqm, Durrat Al Basateen', ar: 'أرض بمساحة 980 متراً مربعاً، درة البساتين' },
+    location: loc({ en: 'Durrat Al Basateen', ar: 'درة البساتين' }),
+    price: { amount: 8330000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: null, baths: null, areaSqm: null, plotSqm: 980, yearBuilt: null, floors: null },
+    map: { lat: 21.63689519443776, lng: 39.12082236721488 },
+    images: [{ local: '/land/LND-017.jpg', room: 'satellite' }, { local: '/land/LND-017-z15.jpg', room: 'satellite_wide' }],
+    description: {
+      en: [
+        'A residential plot of 980 square metres in Durrat Al Basateen, north Jeddah, on a 16-metre south-facing street. The district is a low-rise villa neighbourhood close to the coast.',
+        'The asking price is SAR 8,330,000, at SAR 8,500 per square metre. The satellite frames show the plot and the surrounding blocks.',
+      ],
+      ar: [
+        'قطعة أرض سكنية بمساحة 980 متراً مربعاً في درة البساتين شمال جدة، على شارع بعرض 16 متراً بواجهة جنوبية. الحي منطقة فلل منخفضة الارتفاع قريبة من الساحل.',
+        'السعر المطلوب 8,330,000 ريال سعودي، بواقع 8,500 ريال للمتر المربع. توضح الصور الجوية القطعة والمربعات المحيطة بها.',
+      ],
+    },
+    highlights: {
+      en: ['980 sqm', 'South-facing on a 16 m street', 'Villa district near the coast', 'SAR 8,500 per sqm'],
+      ar: ['980 متراً مربعاً', 'واجهة جنوبية على شارع بعرض 16 متراً', 'حي فلل قريب من الساحل', '8,500 ريال للمتر المربع'],
+    },
+    listedAt: '2026-08-26',
+  },
+  {
+    slug: 'plot-450-sqm-al-shati-1', sourceRef: 'LND-020', status: 'available', category: 'buy', type: 'land', featured: false,
+    title: { en: 'Plot of 450 sqm, Al Shati 1', ar: 'أرض بمساحة 450 متراً مربعاً، الشاطئ 1' },
+    location: loc({ en: 'Al Shati 1', ar: 'الشاطئ 1' }),
+    price: { amount: 3825000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: null, baths: null, areaSqm: null, plotSqm: 450, yearBuilt: null, floors: null },
+    map: { lat: 21.563638942028028, lng: 39.11882520750281 },
+    images: [{ local: '/land/LND-020.jpg', room: 'satellite' }, { local: '/land/LND-020-z15.jpg', room: 'satellite_wide' }],
+    description: {
+      en: [
+        'A residential plot of 450 square metres in Al Shati 1, on a 32-metre street, a short walk from the sea and the amenities of the district.',
+        'The asking price is SAR 3,825,000, at SAR 8,500 per square metre. The satellite frames show the plot and its street.',
+      ],
+      ar: [
+        'قطعة أرض سكنية بمساحة 450 متراً مربعاً في حي الشاطئ 1، على شارع بعرض 32 متراً، على مسافة قصيرة سيراً من البحر ومرافق الحي.',
+        'السعر المطلوب 3,825,000 ريال سعودي، بواقع 8,500 ريال للمتر المربع. توضح الصور الجوية القطعة وشارعها.',
+      ],
+    },
+    highlights: {
+      en: ['450 sqm', 'On a 32 m street', 'Close to the sea', 'SAR 8,500 per sqm'],
+      ar: ['450 متراً مربعاً', 'على شارع بعرض 32 متراً', 'قريبة من البحر', '8,500 ريال للمتر المربع'],
+    },
+    listedAt: '2026-08-26',
+  },
+  {
+    slug: 'plot-500-sqm-durrat-al-basateen', sourceRef: 'LND-022', status: 'available', category: 'buy', type: 'land', featured: false,
+    title: { en: 'North-Facing Plot of 500.8 sqm, Durrat Al Basateen', ar: 'أرض بواجهة شمالية بمساحة 500.8 متر مربع، درة البساتين' },
+    location: loc({ en: 'Durrat Al Basateen', ar: 'درة البساتين' }),
+    price: { amount: 4256800, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: null, baths: null, areaSqm: null, plotSqm: 500.8, yearBuilt: null, floors: null },
+    map: { lat: 21.637311611993507, lng: 39.12081632967131 },
+    images: [{ local: '/land/LND-022.jpg', room: 'satellite' }, { local: '/land/LND-022-z15.jpg', room: 'satellite_wide' }],
+    description: {
+      en: [
+        'A residential plot of 500.8 square metres in Durrat Al Basateen, north Jeddah, with a north-facing frontage on a 30-metre street. The district is a villa neighbourhood close to the coast.',
+        'The asking price is SAR 4,256,800, at SAR 8,500 per square metre. The satellite frames show the plot and the surrounding blocks.',
+      ],
+      ar: [
+        'قطعة أرض سكنية بمساحة 500.8 متر مربع في درة البساتين شمال جدة، بواجهة شمالية على شارع بعرض 30 متراً. الحي منطقة فلل قريبة من الساحل.',
+        'السعر المطلوب 4,256,800 ريال سعودي، بواقع 8,500 ريال للمتر المربع. توضح الصور الجوية القطعة والمربعات المحيطة بها.',
+      ],
+    },
+    highlights: {
+      en: ['500.8 sqm', 'North-facing on a 30 m street', 'Villa district near the coast', 'SAR 8,500 per sqm'],
+      ar: ['500.8 متر مربع', 'واجهة شمالية على شارع بعرض 30 متراً', 'حي فلل قريب من الساحل', '8,500 ريال للمتر المربع'],
+    },
+    listedAt: '2026-08-26',
+  },
+  {
+    slug: 'corner-plot-al-khalidiyah', sourceRef: 'LND-023', status: 'available', category: 'buy', type: 'land', featured: false,
+    title: { en: 'Corner Plot, Al Khalidiyah', ar: 'أرض زاوية، الخالدية' },
+    location: loc({ en: 'Al Khalidiyah', ar: 'الخالدية' }),
+    price: { amount: 3937500, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: null, baths: null, areaSqm: null, plotSqm: 625, yearBuilt: null, floors: null },
+    map: { lat: 21.560239915427147, lng: 39.136093577749236 },
+    images: [{ local: '/land/LND-023.jpg', room: 'satellite' }, { local: '/land/LND-023-z15.jpg', room: 'satellite_wide' }],
+    description: {
+      en: [
+        'A corner plot of 625 square metres in Al Khalidiyah, on two streets, measuring 25 metres on the south side and 25 metres on the west. The district is an established central neighbourhood with schools, shops and quick access to the main roads.',
+        'The total price is SAR 3,937,500, at SAR 6,300 per square metre. The satellite frames show the corner and its two streets.',
+      ],
+      ar: [
+        'أرض زاوية بمساحة 625 متراً مربعاً في حي الخالدية، على شارعين، بطول 25 متراً من الجهة الجنوبية و25 متراً من الجهة الغربية. الحي منطقة مركزية راسخة تضم مدارس ومتاجر مع وصول سريع إلى الطرق الرئيسية.',
+        'السعر الإجمالي 3,937,500 ريال سعودي، بواقع 6,300 ريال للمتر المربع. توضح الصور الجوية الزاوية وشارعيها.',
+      ],
+    },
+    highlights: {
+      en: ['625 sqm corner plot', 'Two streets, south and west', '25 m by 25 m', 'SAR 6,300 per sqm', 'Al Khalidiyah'],
+      ar: ['أرض زاوية بمساحة 625 متراً مربعاً', 'شارعان جنوباً وغرباً', '25 في 25 متراً', '6,300 ريال للمتر المربع', 'حي الخالدية'],
+    },
+    listedAt: '2026-08-26',
+  },
+  {
+    slug: 'plots-300-sqm-al-khalidiyah', sourceRef: 'LND-024', status: 'available', category: 'buy', type: 'land', featured: false,
+    title: { en: 'Plots of 300 sqm, Al Khalidiyah', ar: 'قطع أراضٍ بمساحة 300 متر مربع، الخالدية' },
+    location: loc({ en: 'Al Khalidiyah', ar: 'الخالدية' }),
+    price: { amount: 2150000, currency: 'SAR', from: false, period: null, onRequest: false },
+    specs: { beds: null, baths: null, areaSqm: null, plotSqm: 300, yearBuilt: null, floors: null },
+    map: { lat: 21.560999987056363, lng: 39.1362687553322 },
+    images: [{ local: '/land/LND-024.jpg', room: 'satellite' }, { local: '/land/LND-024-z15.jpg', room: 'satellite_wide' }],
+    description: {
+      en: [
+        'A subdivision of twelve residential plots of 300 square metres each in Al Khalidiyah. Two plots have already sold and ten remain available, individually or in groups.',
+        'The price is SAR 2,150,000 per plot, about SAR 7,167 per square metre. The satellite frames show the subdivision and its surroundings.',
+      ],
+      ar: [
+        'مخطط من اثنتي عشرة قطعة سكنية بمساحة 300 متر مربع لكل منها في حي الخالدية. بيعت قطعتان بالفعل وتبقّت عشر قطع متاحة، منفردة أو مجتمعة.',
+        'السعر 2,150,000 ريال سعودي للقطعة، أي نحو 7,167 ريالاً للمتر المربع. توضح الصور الجوية المخطط ومحيطه.',
+      ],
+    },
+    highlights: {
+      en: ['300 sqm per plot', 'Twelve plots, ten remaining', 'SAR 2,150,000 per plot', 'About SAR 7,167 per sqm', 'Al Khalidiyah'],
+      ar: ['300 متر مربع للقطعة', 'اثنتا عشرة قطعة، تبقّت عشر', '2,150,000 ريال سعودي للقطعة', 'نحو 7,167 ريالاً للمتر المربع', 'حي الخالدية'],
+    },
+    listedAt: '2026-08-26',
   },
 ];

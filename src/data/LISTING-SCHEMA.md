@@ -58,3 +58,12 @@ Rules: prices are asking prices from TK only (never an estimate — TAQEEM rule)
 
 ## Publication rule (owner, 2026-09-05 20:45)
 Only listings whose `sourceRef` exists in TK's live public API (scripts/tk-public-properties.snapshot.json, refreshed from https://dashboard.azoz.uk/api/public/properties) AND whose API status is available are written to listings.json. `scripts/curate/build.mjs` enforces it; anything from the old TK website that is not in the live list is excluded.
+
+### Round 3 as implemented (2026-09-05, data agent)
+- Land plots: every `available` LND in the live list that has an exact pin is published (15 plots). Pins for LND-007…024 come from the saved land-register source page `C:\Users\ASUS\TK-LAND-REGISTER-source-2026-08-25.html` (`const PROPS` lat/lng — the values `scripts/import-land-register.js` in the TK repo wrote into `properties.amenities.land`, which the register's gated `/api/public/land/details` serves). LND-004/006 keep their Google-Maps-link pins. **Skipped for lack of a pin: LND-016, LND-019, LND-021** (empty lat/lng at source → null in prod); LND-009/018 are sold.
+- Land copy uses only the API `description`/`description_ar` plus the register's tiles (frontages, deeds, street widths, permitted use). LND-024 is priced per 300 sqm plot (`price.amount` = per-plot price, `specs.plotSqm` = 300).
+- VIL-043 (Wadi Safar / Rayana mansions) is NOT published: only 2 tk-storage images exist (gallery folder `wadi-safar-trump-mansions-rayana-mansions`); the API/TK-page images are on `le-de.cdn-website.com`, which the MEDIA rule rejects.
+- Featured = exactly 8 published listings: 5 houses, 2 apartments, 1 land plot (LND-011, the Corniche waterfront still).
+
+## Land (owner decision 2026-09-05 21:00)
+Land plots are curated (13 in listings.source.mjs, stills in public/land/) but NOT published: `LAND_PUBLIC = false` in build.mjs. Share plot details only on enquiry. The /properties/land/ route is not generated while there are no land listings.

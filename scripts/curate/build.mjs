@@ -85,7 +85,10 @@ for (const l of out) {
 // Owner rule (2026-09-05): the site publishes ONLY listings that exist in TK's live public list and are available there.
 const API = JSON.parse(fs.readFileSync(new URL('../tk-public-properties.snapshot.json', import.meta.url), 'utf8')).data || [];
 const apiById = new Map(API.map((r) => [String(r.id), r]));
-const live = out.filter((l) => l.sourceRef && apiById.has(String(l.sourceRef)) && !/sold|reserved|rented|inactive|withdrawn/i.test(String(apiById.get(String(l.sourceRef)).status || '')));
+// Owner decision 2026-09-05 21:00: land plots are NOT published on the site (their exact locations are gated in TK's land register);
+// they stay curated here so the team can share them on enquiry. Flip LAND_PUBLIC to true to publish.
+const LAND_PUBLIC = false;
+const live = out.filter((l) => l.sourceRef && apiById.has(String(l.sourceRef)) && !/sold|reserved|rented|inactive|withdrawn/i.test(String(apiById.get(String(l.sourceRef)).status || '')) && (LAND_PUBLIC || l.kind !== 'land'));
 console.log(`TK live list: kept ${live.length}, dropped ${out.length - live.length} (no sourceRef in the API, or not available there)`);
 fs.writeFileSync(OUT, JSON.stringify(live, null, 2) + '\n');
 const counts = out.reduce((a, l) => ((a[l.category] = (a[l.category] || 0) + 1), a), {});

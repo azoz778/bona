@@ -1637,7 +1637,7 @@
     "category": "international",
     "type": "mansion",
     "kind": "house",
-    "featured": false,
+    "featured": true,
     "title": {
       "en": "Painite Villas by Lamborghini, Benahavís",
       "ar": "فلل باينايت بتوقيع لامبورغيني، بيناهابيس"
@@ -3553,7 +3553,7 @@
     "category": "international",
     "type": "apartment",
     "kind": "apartment",
-    "featured": false,
+    "featured": true,
     "title": {
       "en": "Trump International Hotel Residences, AIDA, Muscat",
       "ar": "مساكن فندق ترامب الدولي، آيدا، مسقط"
@@ -3696,189 +3696,5 @@
     "unit": null,
     "map": null,
     "listedAt": "2026-03-21"
-  },
-  {
-    "id": "BONA-046",
-    "slug": "plot-285-al-shati",
-    "sourceRef": "LND-006",
-    "status": "available",
-    "category": "buy",
-    "type": "land",
-    "kind": "land",
-    "featured": false,
-    "title": {
-      "en": "Residential Plot 285, Al Shati",
-      "ar": "قطعة أرض رقم 285، الشاطئ"
-    },
-    "location": {
-      "district": {
-        "en": "Al Shati",
-        "ar": "الشاطئ"
-      },
-      "city": {
-        "en": "Jeddah",
-        "ar": "جدة"
-      },
-      "country": {
-        "en": "Saudi Arabia",
-        "ar": "المملكة العربية السعودية"
-      },
-      "countryCode": "SA"
-    },
-    "price": {
-      "amount": 3816000,
-      "currency": "SAR",
-      "from": false,
-      "period": null,
-      "onRequest": false
-    },
-    "specs": {
-      "beds": null,
-      "baths": null,
-      "areaSqm": null,
-      "plotSqm": 636,
-      "yearBuilt": null,
-      "floors": null
-    },
-    "images": [
-      {
-        "src": "/land/LND-006.jpg",
-        "thumb": null,
-        "alt": {
-          "en": "Satellite view of the plot — Residential Plot 285, Al Shati",
-          "ar": "صورة جوية للقطعة — قطعة أرض رقم 285، الشاطئ"
-        }
-      },
-      {
-        "src": "/land/LND-006-z15.jpg",
-        "thumb": null,
-        "alt": {
-          "en": "Satellite view of the surrounding area — Residential Plot 285, Al Shati",
-          "ar": "صورة جوية للمنطقة المحيطة — قطعة أرض رقم 285، الشاطئ"
-        }
-      }
-    ],
-    "description": {
-      "en": "Plot 285 in Al Shati, moments from King Road and a few minutes from the Corniche. The plot measures 636 square metres with a north-facing frontage of 21.25 metres on a 16-metre street.\n\nOffered directly by the owner at SAR 6,000 per square metre net, a total of SAR 3,816,000. The satellite frames show the plot's position and its surroundings.",
-      "ar": "القطعة رقم 285 في حي الشاطئ، على مقربة من طريق الملك ودقائق من الكورنيش. تبلغ مساحتها 636 متراً مربعاً بواجهة شمالية بطول 21.25 متراً على شارع بعرض 16 متراً.\n\nتُعرض من المالك مباشرة بسعر 6,000 ريال للمتر المربع صافياً، بإجمالي 3,816,000 ريال سعودي. توضح الصور الجوية موقع القطعة ومحيطها."
-    },
-    "highlights": {
-      "en": [
-        "636 sqm",
-        "North-facing, 21.25 m frontage",
-        "16-metre street",
-        "SAR 6,000 per sqm net",
-        "Direct from the owner"
-      ],
-      "ar": [
-        "636 متراً مربعاً",
-        "واجهة شمالية بطول 21.25 متراً",
-        "شارع بعرض 16 متراً",
-        "6,000 ريال للمتر صافياً",
-        "من المالك مباشرة"
-      ]
-    },
-    "virtualTourUrl": null,
-    "brochureUrl": null,
-    "project": null,
-    "unit": null,
-    "map": {
-      "lat": 21.6011128,
-      "lng": 39.1195974
-    },
-    "listedAt": "2026-04-10"
-  },
-  {
-    "id": "BONA-047",
-    "slug": "corner-plot-al-shati",
-    "sourceRef": "LND-004",
-    "status": "available",
-    "category": "buy",
-    "type": "land",
-    "kind": "land",
-    "featured": false,
-    "title": {
-      "en": "Corner Plot, Al Shati",
-      "ar": "أرض زاوية، الشاطئ"
-    },
-    "location": {
-      "district": {
-        "en": "Al Shati",
-        "ar": "الشاطئ"
-      },
-      "city": {
-        "en": "Jeddah",
-        "ar": "جدة"
-      },
-      "country": {
-        "en": "Saudi Arabia",
-        "ar": "المملكة العربية السعودية"
-      },
-      "countryCode": "SA"
-    },
-    "price": {
-      "amount": 4200000,
-      "currency": "SAR",
-      "from": false,
-      "period": null,
-      "onRequest": false
-    },
-    "specs": {
-      "beds": null,
-      "baths": null,
-      "areaSqm": null,
-      "plotSqm": 625,
-      "yearBuilt": null,
-      "floors": null
-    },
-    "images": [
-      {
-        "src": "/land/LND-004.jpg",
-        "thumb": null,
-        "alt": {
-          "en": "Satellite view of the plot — Corner Plot, Al Shati",
-          "ar": "صورة جوية للقطعة — أرض زاوية، الشاطئ"
-        }
-      },
-      {
-        "src": "/land/LND-004-z15.jpg",
-        "thumb": null,
-        "alt": {
-          "en": "Satellite view of the surrounding area — Corner Plot, Al Shati",
-          "ar": "صورة جوية للمنطقة المحيطة — أرض زاوية، الشاطئ"
-        }
-      }
-    ],
-    "description": {
-      "en": "A corner plot of 625 square metres in Al Shati, on two 12-metre streets to the north and east, measuring 24 metres wide by 26 metres deep. It sits on the second block from King Road, north of Heraa Street, close to the district's commercial centres and the Jeddah waterfront.\n\nAsking price SAR 4,200,000, about SAR 6,720 per square metre. The satellite frames show the plot's position and its surroundings.",
-      "ar": "أرض زاوية بمساحة 625 متراً مربعاً في حي الشاطئ، على شارعين بعرض 12 متراً من الجهتين الشمالية والشرقية، بأبعاد 24 متراً عرضاً و26 متراً عمقاً. تقع في المربع الثاني من طريق الملك شمال شارع حراء، على مقربة من المراكز التجارية والواجهة البحرية لجدة.\n\nالسعر المطلوب 4,200,000 ريال سعودي، أي نحو 6,720 ريالاً للمتر المربع. توضح الصور الجوية موقع القطعة ومحيطها."
-    },
-    "highlights": {
-      "en": [
-        "625 sqm corner plot",
-        "Two 12-metre streets, north and east",
-        "24 m by 26 m",
-        "Second block from King Road",
-        "Near the Jeddah waterfront",
-        "SAR 4,200,000"
-      ],
-      "ar": [
-        "أرض زاوية بمساحة 625 متراً مربعاً",
-        "شارعان بعرض 12 متراً شمالاً وشرقاً",
-        "24 في 26 متراً",
-        "المربع الثاني من طريق الملك",
-        "قرب الواجهة البحرية لجدة",
-        "4,200,000 ريال سعودي"
-      ]
-    },
-    "virtualTourUrl": null,
-    "brochureUrl": null,
-    "project": null,
-    "unit": null,
-    "map": {
-      "lat": 21.613996,
-      "lng": 39.1172
-    },
-    "listedAt": "2026-04-09"
   }
 ]
