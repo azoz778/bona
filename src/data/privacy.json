@@ -63,6 +63,21 @@
       }
     },
     {
+      "id": "ai-concierge",
+      "heading": {
+        "en": "The AI concierge",
+        "ar": "الكونسيرج الذكي"
+      },
+      "body": {
+        "en": [
+          "The concierge on this site — the chat panel and the browser voice call with Dana, our AI assistant — is provided by Retell AI, Inc. (United States). When you open it, what you write or say, the page you are on and your language are sent to Retell and to the AI model behind it so that Dana can answer, and conversations and calls may be recorded and transcribed to check the quality of the service. If you leave a name and a number to arrange a viewing, it reaches us as an enquiry and is handled exactly like a WhatsApp enquiry. Dana is not a person, gives no valuation and quotes no price that is not published on this site; a principal is always one WhatsApp message away instead."
+        ],
+        "ar": [
+          "الكونسيرج في هذا الموقع — لوحة المحادثة والمكالمة الصوتية مع دانة، مساعدتنا التي تعمل بالذكاء الاصطناعي — تُقدَّم عبر شركة Retell AI (الولايات المتحدة). وعند فتحه، يُرسَل ما تكتبه أو تقوله، والصفحة التي تتصفّحها، ولغتك، إلى Retell وإلى النموذج الذكي الذي يقف خلفها كي تتمكّن دانة من الإجابة، وقد تُسجَّل المحادثات والمكالمات وتُفرَّغ نصياً للتحقق من جودة الخدمة. وإن تركت اسماً ورقماً لترتيب معاينة، وصلنا ذلك بوصفه استفساراً، ونتعامل معه تماماً كما نتعامل مع استفسارات واتساب. ودانة ليست شخصاً، ولا تُقدّم تقييماً سعرياً، ولا تذكر سعراً غير منشور على هذا الموقع؛ ويبقى الوصول إلى أحد شركاء الدار على بُعد رسالة واتساب واحدة."
+        ]
+      }
+    },
+    {
       "id": "data-we-hold",
       "heading": {
         "en": "The data we hold, and why",

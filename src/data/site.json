@@ -24,6 +24,11 @@
     "en": ["Jeddah", "Riyadh", "Dubai", "Côte d'Azur", "Costa del Sol", "Oman"],
     "ar": ["جدة", "الرياض", "دبي", "الريفييرا الفرنسية", "كوستا ديل سول", "عُمان"]
   },
+  "concierge": {
+    "enabled": true,
+    "apiBase": "https://api.bona.azoz.uk",
+    "name": { "en": "Dana", "ar": "دانة" }
+  },
   "analytics": { "ga4": null, "metaPixel": null },
   "indexNowKey": "b0na7c3f9e2d4a1b8f6e5c4d3b2a1908"
 }

@@ -46,6 +46,8 @@ const developer = l.project?.developer ? t(l.project.developer, locale) : '';
 const hasMatterport = matterportId(l.virtualTourUrl) !== null;
 const mapLink = l.map && Number.isFinite(l.map.lat) && Number.isFinite(l.map.lng) ? `https://www.google.com/maps/search/?api=1&query=${l.map.lat},${l.map.lng}` : null;
 const typeText = typeLabel(l.type, locale);
+const conciergeOn = site.concierge?.enabled !== false;
+const danaMessage = fill(t(ui.conciergeAskAboutHomeMsg, locale), { title, id: l.id });
 const kindText = t(kindLabel[kind], locale);
 ---
 <Base title={`${title} — ${locale === 'ar' ? site.nameAr : site.name}`} description={description} locale={locale} path={path} image={l.images?.[0]?.src} waMessage={waMessage}
@@ -128,6 +130,9 @@ const kindText = t(kindLabel[kind], locale);
             <a href={wa} target="_blank" rel="noopener" class="btn btn-ink mt-7 w-full"><Icon name="whatsapp" size={17} />{t(ui.enquireWhatsApp, locale)}</a>
             <a href={`tel:${site.phone.e164}`} class="btn btn-outline mt-3 w-full"><Icon name="phone" size={16} /><span dir="ltr">{site.phone.display}</span></a>
             {hasMatterport && <a href="#tour" class="link-label mt-6 inline-flex items-center gap-2 text-ink" data-tour-jump><Icon name="cube" size={14} />{t(ui.tour3dTitle, locale)}</a>}
+            {conciergeOn && (
+              <p class="mt-6"><button type="button" class="link-label text-ink" data-concierge-trigger data-concierge-message={danaMessage}>{t(ui.conciergeAskAboutHome, locale)}</button></p>
+            )}
             <span class="rule-long mt-7"></span>
             <dl class="mt-5 flex items-baseline justify-between text-xs text-stone-2">
               <dt class="label">{t(ui.reference, locale)}</dt>
