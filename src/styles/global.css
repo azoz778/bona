@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+/* ---- Bona design tokens (Tailwind 4 theme) ---- */
+@theme {
+  --color-ivory: #f5f1ea;
+  --color-ivory-2: #ede7dc;
+  --color-sand: #d9d0c1;
+  --color-stone: #8a857c;
+  --color-ink: #0f1214;
+  --color-ink-2: #1b1f22;
+  --color-champagne: #c8a96a;
+  --color-champagne-2: #e2c98f;
+
+  --font-display: "Cormorant Garamond", "Cormorant", Georgia, "Times New Roman", serif;
+  --font-sans: "Montserrat", ui-sans-serif, system-ui, sans-serif;
+  --font-arabic: "IBM Plex Arabic", "Amiri", "Noto Naskh Arabic", system-ui, sans-serif;
+  --font-arabic-display: "Amiri", "IBM Plex Arabic", serif;
+
+  --tracking-luxe: 0.18em;
+}
+
+@font-face { font-family: "Cormorant Garamond"; src: url("/fonts/cormorant-600.woff2") format("woff2"); font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: "Montserrat"; src: url("/fonts/montserrat-400.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Montserrat"; src: url("/fonts/montserrat-600.woff2") format("woff2"); font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: "IBM Plex Arabic"; src: url("/fonts/plex-arabic-400.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "IBM Plex Arabic"; src: url("/fonts/plex-arabic-500.woff2") format("woff2"); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: "Amiri"; src: url("/fonts/amiri-700.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+
+@layer base {
+  html { scroll-behavior: smooth; }
+  body { @apply bg-ivory text-ink font-sans antialiased; }
+  html[dir="rtl"] body { font-family: var(--font-arabic); }
+  html[dir="rtl"] .font-display { font-family: var(--font-arabic-display); }
+  ::selection { background: var(--color-champagne); color: var(--color-ink); }
+}

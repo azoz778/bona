@@ -1,0 +1,13 @@
+[
+  {
+    "id": "BONA-001", "slug": "private-beach-villa-durrat-al-arous", "sourceRef": null, "status": "available", "category": "buy", "type": "villa", "featured": true,
+    "title": { "en": "Private Beach Villa, Durrat Al Arous", "ar": "فيلا بشاطئ خاص، درة العروس" },
+    "location": { "district": { "en": "Durrat Al Arous", "ar": "درة العروس" }, "city": { "en": "Jeddah", "ar": "جدة" }, "country": { "en": "Saudi Arabia", "ar": "المملكة العربية السعودية" }, "countryCode": "SA" },
+    "price": { "amount": 8000000, "currency": "SAR", "from": false, "period": null, "onRequest": false },
+    "specs": { "beds": 5, "baths": 6, "areaSqm": 537, "plotSqm": null, "yearBuilt": null, "floors": null },
+    "images": [ { "src": "https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/placeholder.jpg", "thumb": null, "alt": { "en": "Beach villa exterior", "ar": "واجهة الفيلا" } } ],
+    "description": { "en": "PLACEHOLDER — the data agent replaces this file.", "ar": "نص مؤقت." },
+    "highlights": { "en": ["Private beach"], "ar": ["شاطئ خاص"] },
+    "virtualTourUrl": null, "brochureUrl": null, "listedAt": "2026-06-01"
+  }
+]

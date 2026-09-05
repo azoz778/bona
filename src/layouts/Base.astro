@@ -1,0 +1,15 @@
+---
+/* SKELETON — owned by the site agent (header, footer, nav, WhatsApp float, etc.). Keep the Head import. */
+import '../styles/global.css';
+import Head from '../components/seo/Head.astro';
+import { dir, type Locale } from '../lib/i18n';
+interface Props { title: string; description: string; locale: Locale; path: string; image?: string; noindex?: boolean; jsonLd?: object | object[] }
+const { locale, ...head } = Astro.props;
+---
+<!doctype html>
+<html lang={locale} dir={dir(locale)}>
+  <head><Head locale={locale} {...head} /></head>
+  <body>
+    <slot />
+  </body>
+</html>

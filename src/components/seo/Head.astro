@@ -1,0 +1,17 @@
+---
+/* STUB — owned by the seo-social agent, who will replace this with the full implementation
+   (meta, OG/Twitter, canonical, hreflang, JSON-LD, GA4 hook). Keep the props API stable. */
+import site from '../../data/site.json';
+import type { Locale } from '../../lib/i18n';
+interface Props { title: string; description: string; locale: Locale; path: string; image?: string; noindex?: boolean; jsonLd?: object | object[] }
+const { title, description, locale, path, image, noindex = false, jsonLd } = Astro.props;
+const canonical = new URL(path, site.url).href;
+---
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{title}</title>
+<meta name="description" content={description} />
+<link rel="canonical" href={canonical} />
+{noindex && <meta name="robots" content="noindex, nofollow" />}
+{image && <meta property="og:image" content={image} />}
+{jsonLd && <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
