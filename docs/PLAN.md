@@ -34,3 +34,8 @@ Owner brief: new luxury real-estate company **Bona** (بونا). Reuse TK Estate
 - Built, reviewed and pushed to `main` (commit 0a69426): 84 pages (EN+AR), /dashboard/, SEO layer, Instagram kit, daily CI loop.
 - Reviews: Codex #1 (SEO/data/dashboard) 4 findings fixed · Claude reviewer (site) 1 critical + 8 important fixed · Codex #2 (site) 1 high (regression from the plural fix) fixed. Browser QA: filters/sort EN+AR, gallery, Arabic-digit form, zero console errors.
 - Blocked on owner: repo visibility → see docs/OWNER-RUNBOOK.md §1.
+
+## Round 2 — 2026-09-05 20:20 KSA (owner request: more properties, houses vs apartments, about us, privacy, immersive, Matterport)
+- LIVE (main @ 66bccff): 47 listings (24 houses, 21 apartments incl. 10 Kian Residence units, 2 land plots with Esri satellite stills), sections /properties/houses/ · /apartments/ · /land/, /tours/ (Matterport inline embed; 1 tour today, more arrive via the 06:00 sync of TK's virtual_tour_url), /about/ from src/data/about.json (story, values, founder, stats), /privacy/ (PDPL policy AR/EN, 13 sections), immersive layer (hero slideshow + Ken Burns, view transitions, reveals, parallax, marquee, gallery strip), dashboard kind/tour views. 124 pages, 0 broken links, 0 console errors.
+- Instagram: @bona.com.sa is still a personal account (business_discovery: not found) → owner brief in marketing/instagram-access.md (Path A no password / Path B password).
+- Reviews: Claude reviewer + Codex on the round-2 diff in progress; findings applied in follow-up commits.
