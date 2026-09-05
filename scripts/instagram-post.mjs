@@ -129,8 +129,13 @@ async function main() {
     await waitForContainer(c.id);
     console.log('3/3 publishing…');
     const p = await call('POST', `${igId()}/media_publish`, { creation_id: c.id });
-    const info = dryRun ? { permalink: '(dry-run)' } : await call('GET', p.id, { fields: 'permalink' });
-    out(`published media ${p.id} → ${info.permalink}`);
+    let permalink = '(dry-run)';
+    if (!dryRun) {
+      // Best-effort: the post is already live once media_publish returns; never fail the command here.
+      try { permalink = (await call('GET', p.id, { fields: 'permalink' })).permalink || '(permalink unavailable)'; }
+      catch (e) { permalink = `(permalink lookup failed: ${e.message}; media is published)`; }
+    }
+    out(`published media ${p.id} → ${permalink}`);
     return;
   }
   if (cmd === 'post-carousel') {

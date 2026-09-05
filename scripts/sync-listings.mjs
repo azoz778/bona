@@ -70,7 +70,10 @@ async function main() {
     }
 
     const parsed = parsePrice(api.price ?? api.price_text);
-    if (parsed && (!parsed.currency || parsed.currency === l.price.currency)) {
+    const apiCurrency = (parsed && parsed.currency) || (api.currency ? String(api.currency).toUpperCase() : null);
+    if (parsed && apiCurrency && apiCurrency !== l.price.currency) {
+      console.log(`sync: ${l.id} currency mismatch (API ${apiCurrency} vs local ${l.price.currency}) — price left unchanged`);
+    } else if (parsed && apiCurrency === l.price.currency) {
       if (l.price.amount !== parsed.amount) {
         changes.push(`${l.id} price ${l.price.amount ?? 'null'} -> ${parsed.amount}`);
         l.price.amount = parsed.amount;
@@ -79,7 +82,11 @@ async function main() {
   }
 
   if (changes.length) {
-    fs.writeFileSync(FILE, JSON.stringify(listings, null, 2) + '\n');
+    // Atomic replace: write a temp file next to the target, fsync, then rename over it.
+    const tmp = `${FILE}.${process.pid}.tmp`;
+    const fd = fs.openSync(tmp, 'w');
+    try { fs.writeSync(fd, JSON.stringify(listings, null, 2) + '\n'); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    fs.renameSync(tmp, FILE);
   }
   const extra = missing.length ? `, ${missing.length} sourceRef(s) not in API: ${missing.join(' ')}` : '';
   console.log(`sync: ${rows.length} API rows, ${matched} matched, ${changes.length} change(s)${changes.length ? ' — ' + changes.join('; ') : ''}${extra}`);

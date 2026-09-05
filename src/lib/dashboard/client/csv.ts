@@ -3,7 +3,9 @@
 
 export function toCsv(columns: string[], rows: Record<string, unknown>[]): string {
   const esc = (v: unknown) => {
-    const s = v == null ? '' : String(v);
+    let s = v == null ? '' : String(v);
+    // Spreadsheet formula-injection guard: neutralise leading = + - @ \t \r so Excel/Sheets treat the cell as text.
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
     return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const lines = [columns.join(','), ...rows.map(r => columns.map(c => esc(r[c])).join(','))];
