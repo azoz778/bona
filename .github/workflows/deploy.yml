@@ -31,6 +31,7 @@ jobs:
       - run: npm ci
       - name: Sync listings from TK (non-fatal)
         run: node scripts/sync-listings.mjs || echo "sync skipped"
+      - run: node scripts/og/gen-llms.mjs
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
@@ -44,3 +45,11 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: node scripts/og/gen-llms.mjs && npm run build
+      - name: IndexNow ping (non-fatal)
+        run: node scripts/indexnow.mjs --dir dist || true

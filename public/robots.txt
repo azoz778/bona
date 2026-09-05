@@ -1,0 +1,13 @@
+# Bona — private luxury real estate, Jeddah
+# https://bona.azoz.uk (future: https://bona.com.sa)
+
+User-agent: *
+Allow: /
+Disallow: /dashboard/
+
+# AI search / answer engines are welcome to read and cite (Google-Extended, GPTBot, ClaudeBot, PerplexityBot, Bingbot).
+# Training-only crawlers stay out.
+User-agent: CCBot
+Disallow: /
+
+Sitemap: https://bona.azoz.uk/sitemap-index.xml

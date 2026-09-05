@@ -1,17 +1,148 @@
 ---
-/* STUB — owned by the seo-social agent, who will replace this with the full implementation
-   (meta, OG/Twitter, canonical, hreflang, JSON-LD, GA4 hook). Keep the props API stable. */
+/* <Head> — owned by the seo-social agent.
+   Props API (stable): title, description, locale, path, image?, noindex?, jsonLd? (object | object[])
+   Emits: charset/viewport, title (+ brand suffix), description, canonical, hreflang en/ar/x-default,
+   robots, theme-color, favicons/manifest, Open Graph + Twitter, JSON-LD @graph (org + website once,
+   plus whatever the page passes), preconnects, GA4 / Meta Pixel hooks (only when configured). */
 import site from '../../data/site.json';
 import type { Locale } from '../../lib/i18n';
-interface Props { title: string; description: string; locale: Locale; path: string; image?: string; noindex?: boolean; jsonLd?: object | object[] }
+import { absoluteUrl, alternates, defaultOgImage, ogLocale, orgJsonLd, pageTitle, websiteJsonLd, compact } from '../../lib/seo';
+
+interface Props {
+  title: string;
+  description: string;
+  locale: Locale;
+  path: string;
+  image?: string;
+  noindex?: boolean;
+  jsonLd?: object | object[];
+}
+
 const { title, description, locale, path, image, noindex = false, jsonLd } = Astro.props;
-const canonical = new URL(path, site.url).href;
+const ar = locale === 'ar';
+const brand = ar ? site.nameAr : site.name;
+const fullTitle = pageTitle(title, locale);
+const desc = (description ?? '').trim().replace(/\s+/g, ' ');
+const canonical = absoluteUrl(path);
+const alt = alternates(path);
+const ogImage = absoluteUrl(image || defaultOgImage);
+const isDefaultImage = !image || image === defaultOgImage;
+const robots = noindex
+  ? 'noindex, nofollow'
+  : 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1';
+
+// ---- JSON-LD: one @graph with org + website injected once, deduped by @id ----
+type Node = Record<string, unknown>;
+const pageNodes: Node[] = (Array.isArray(jsonLd) ? jsonLd : jsonLd ? [jsonLd] : []).filter(Boolean) as Node[];
+const baseNodes: Node[] = [orgJsonLd(locale) as Node, websiteJsonLd(locale) as Node];
+const seen = new Set<string>();
+const graph: Node[] = [];
+for (const raw of [...baseNodes, ...pageNodes]) {
+  const node = compact({ ...raw }) as Node;
+  delete node['@context'];
+  const id = typeof node['@id'] === 'string' ? (node['@id'] as string) : undefined;
+  if (id) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+  }
+  graph.push(node);
+}
+// Listing pages: og:type article-ish + published time
+const listingNode = graph.find((n) => n['@type'] === 'RealEstateListing');
+const ogType = listingNode ? 'article' : 'website';
+const publishedTime = listingNode && typeof listingNode.datePosted === 'string' ? listingNode.datePosted : undefined;
+const jsonLdText = JSON.stringify({ '@context': 'https://schema.org', '@graph': graph }).replace(/</g, '\\u003c');
+
+const analytics = site.analytics as { ga4: string | null; metaPixel: string | null };
+const ga4 = analytics.ga4 || null;
+const metaPixel = analytics.metaPixel || null;
 ---
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>{title}</title>
-<meta name="description" content={description} />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>{fullTitle}</title>
+<meta name="description" content={desc} />
+<meta name="robots" content={robots} />
+<meta name="format-detection" content="telephone=no" />
+<meta name="theme-color" content="#f5f1ea" />
+<meta name="color-scheme" content="light" />
+<meta name="author" content={site.legalName} />
+<meta name="generator" content={Astro.generator} />
+<meta name="geo.region" content="SA-02" />
+<meta name="geo.placename" content={ar ? site.address.ar.city : site.address.en.city} />
+<meta name="geo.position" content={`${site.geo.lat};${site.geo.lng}`} />
+<meta name="ICBM" content={`${site.geo.lat}, ${site.geo.lng}`} />
+
 <link rel="canonical" href={canonical} />
-{noindex && <meta name="robots" content="noindex, nofollow" />}
-{image && <meta property="og:image" content={image} />}
-{jsonLd && <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
+{!noindex && (
+  <>
+    <link rel="alternate" hreflang="en" href={alt.en} />
+    <link rel="alternate" hreflang="ar" href={alt.ar} />
+    <link rel="alternate" hreflang="x-default" href={alt.xDefault} />
+  </>
+)}
+<link rel="sitemap" type="application/xml" href="/sitemap-index.xml" />
+
+<link rel="icon" href="/favicon.ico" sizes="32x32" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<link rel="manifest" href="/site.webmanifest" />
+
+<link rel="preconnect" href="https://tk-storage.azoz.uk" crossorigin />
+<link rel="dns-prefetch" href="https://tk-storage.azoz.uk" />
+{ar ? (
+  <>
+    <link rel="preload" as="font" type="font/woff2" href="/fonts/plex-arabic-400.woff2" crossorigin />
+    <link rel="preload" as="font" type="font/woff2" href="/fonts/amiri-700.woff2" crossorigin />
+  </>
+) : (
+  <>
+    <link rel="preload" as="font" type="font/woff2" href="/fonts/cormorant-600.woff2" crossorigin />
+    <link rel="preload" as="font" type="font/woff2" href="/fonts/montserrat-400.woff2" crossorigin />
+  </>
+)}
+
+<meta property="og:type" content={ogType} />
+<meta property="og:site_name" content={brand} />
+<meta property="og:locale" content={ogLocale(locale)} />
+<meta property="og:locale:alternate" content={ogLocale(ar ? 'en' : 'ar')} />
+<meta property="og:url" content={canonical} />
+<meta property="og:title" content={fullTitle} />
+<meta property="og:description" content={desc} />
+<meta property="og:image" content={ogImage} />
+<meta property="og:image:secure_url" content={ogImage} />
+{isDefaultImage && <meta property="og:image:width" content="1200" />}
+{isDefaultImage && <meta property="og:image:height" content="630" />}
+{isDefaultImage && <meta property="og:image:type" content="image/png" />}
+<meta property="og:image:alt" content={isDefaultImage ? (ar ? 'بونا — عقارات فاخرة خاصة، جدة' : 'Bona — private luxury real estate, Jeddah') : fullTitle} />
+{publishedTime && <meta property="article:published_time" content={publishedTime} />}
+{listingNode && <meta property="article:section" content={ar ? 'العقارات' : 'Properties'} />}
+
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content={fullTitle} />
+<meta name="twitter:description" content={desc} />
+<meta name="twitter:image" content={ogImage} />
+<meta name="twitter:image:alt" content={isDefaultImage ? (ar ? 'بونا — عقارات فاخرة خاصة، جدة' : 'Bona — private luxury real estate, Jeddah') : fullTitle} />
+
+<script type="application/ld+json" set:html={jsonLdText} />
+
+{ga4 && (
+  <>
+    <script is:inline async src={`https://www.googletagmanager.com/gtag/js?id=${ga4}`}></script>
+    <script is:inline define:vars={{ ga4 }}>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){ dataLayer.push(arguments); }
+      gtag('js', new Date());
+      gtag('config', ga4, { anonymize_ip: true });
+    </script>
+  </>
+)}
+{metaPixel && (
+  <>
+    <script is:inline define:vars={{ metaPixel }}>
+      !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
+      fbq('init', metaPixel);
+      fbq('track', 'PageView');
+    </script>
+    <noscript><img height="1" width="1" style="display:none" alt="" src={`https://www.facebook.com/tr?id=${metaPixel}&ev=PageView&noscript=1`} /></noscript>
+  </>
+)}

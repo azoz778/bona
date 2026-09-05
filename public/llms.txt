@@ -1,0 +1,35 @@
+# Bona (بونا)
+
+> Bona is a private luxury real estate boutique in Jeddah, representing a curated portfolio of villas, penthouses, waterfront residences and off-market homes across Saudi Arabia and select international destinations.
+
+Bona is a REGA-licensed real estate brokerage (FAL licence 1100313556) based in Al Rawdah District, Jeddah, Saudi Arabia. Bilingual site: English at https://bona.azoz.uk/ and Arabic at https://bona.azoz.uk/ar/. Enquiries are handled on WhatsApp +966 59 329 6933 (https://wa.me/966593296933). Prices shown are the seller's asking prices — Bona never publishes valuations or automated estimates.
+
+Markets: Jeddah, Riyadh, Dubai, Côte d'Azur, Costa del Sol, Oman.
+Services: buying, selling, letting, off-plan and international acquisitions, off-market introductions.
+Hours: Sunday – Thursday, 10:00 – 19:00 (Asia/Riyadh).
+Instagram: https://www.instagram.com/bona.com.sa/
+
+## Pages
+
+- [Bona — Private Luxury Real Estate in Jeddah](https://bona.azoz.uk/): Curated villas, penthouses and waterfront homes in Jeddah, Riyadh and abroad. A REGA-licensed boutique brokerage — homes shown by appointment. WhatsApp +966 59 329 6933.
+- [Luxury Villas & Apartments for Sale in Jeddah](https://bona.azoz.uk/properties/): Browse Bona's portfolio: luxury villas, penthouses and apartments for sale and rent in Al Khalidiyah, North Obhur, Al Shati, Al Rawdah and Durrat Al Arous. Asking prices, no estimates.
+- [Villas & Homes for Sale in Jeddah](https://bona.azoz.uk/properties/for-sale/): Luxury villas, mansions, penthouses and apartments for sale in Jeddah's finest districts. Private viewings with Bona, a REGA-licensed brokerage.
+- [Luxury Villas & Apartments for Rent in Jeddah](https://bona.azoz.uk/properties/for-rent/): Long-term luxury rentals in Jeddah — villas in North Obhur and Al Shati, apartments in Al Salamah and Al Nahdah. Ejar-registered contracts, viewings by appointment.
+- [Off-Plan Villas & Residences — Jeddah & Riyadh](https://bona.azoz.uk/properties/off-plan/): Selected off-plan villas and branded residences in Jeddah and Riyadh, including Wadi Safar. Developer allocations, Wafi-licensed projects, payment plans on request.
+- [International Homes — Dubai, Oman, Riviera, Marbella](https://bona.azoz.uk/properties/international/): Bona's international portfolio for Saudi buyers: villas in Cannes and Marbella, residences in Muscat's AIDA, and Dubai homes — sourced through partner brokerages.
+- [About Bona — Licensed Luxury Brokerage in Jeddah](https://bona.azoz.uk/about/): Bona is a private real-estate boutique in Jeddah (REGA FAL 1100313556). How we work, the districts we cover, and why the best homes sell quietly.
+- [Sell or Let Your Home Discreetly in Jeddah](https://bona.azoz.uk/sell/): List your villa or apartment with Bona: professional photography, off-market introductions to qualified buyers, REGA-compliant marketing and Najiz transfer handled.
+- [Contact Bona — WhatsApp +966 59 329 6933](https://bona.azoz.uk/contact/): Reach Bona on WhatsApp or by phone, Sunday to Thursday 10:00–19:00. Al Rawdah District, Jeddah. Viewings and owner consultations by appointment.
+
+## Properties (1 live listings)
+
+- [Private Beach Villa, Durrat Al Arous](https://bona.azoz.uk/properties/private-beach-villa-durrat-al-arous/): Villa, Durrat Al Arous, Jeddah — For sale, SAR 8,000,000, 5 bed, 6 bath, 537 m² built
+
+## Optional
+
+- [Full knowledge file](https://bona.azoz.uk/llms-full.txt): every listing with full descriptions (EN + AR), highlights and image URLs.
+- [Sitemap](https://bona.azoz.uk/sitemap-index.xml)
+- [Arabic site](https://bona.azoz.uk/ar/)
+- [WhatsApp](https://wa.me/966593296933)
+
+Last generated: 2026-09-05
