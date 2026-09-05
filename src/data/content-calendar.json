@@ -588,6 +588,27 @@
     "status": "planned"
   },
   {
+    "date": "2026-09-08",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "listings",
+    "topic": {
+      "en": "3D tour story — Al Zahra Residences",
+      "ar": "قصة جولة ثلاثية الأبعاد — شقق الزهراء"
+    },
+    "caption": {
+      "en": "Walk through it before you visit — 3D tour of Al Zahra Residences. Link sticker → tour. Ref. BONA-015",
+      "ar": "تجوّل فيه قبل الزيارة — جولة ثلاثية الأبعاد في شقق الزهراء. ملصق الرابط ← الجولة. المرجع BONA-015"
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-25-3d6349.jpg",
+    "listingId": "BONA-015",
+    "url": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
+    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
     "date": "2026-09-09",
     "platform": "instagram",
     "format": "post",
@@ -755,12 +776,12 @@
     "format": "carousel",
     "pillar": "listings",
     "topic": {
-      "en": "Trump Tower Jeddah",
-      "ar": "برج ترامب جدة"
+      "en": "Inside Kayan Residence, Al Nahda — the units",
+      "ar": "داخل كيان ريزيدنس، النهضة — الوحدات"
     },
     "caption": {
-      "en": "Quietly available.\nTrump Tower Jeddah\nAl Shati, Corniche, Jeddah\n\nTrump Tower Jeddah rises on the Corniche in Al Shati, a residential landmark overlooking the Red Sea. The tower offers one- to four-bedroom residences from 70 to 365 square metres and three- and four-bedroom penthouses, all with uninterrupted sea views.\nOn the Corniche, Al Shati · Uninterrupted Red Sea views · 1–4 bedroom residences and penthouses · Trump Private Club and 24/7 concierge\n\nFrom SAR 3,200,000\nRef. BONA-022 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
-      "ar": "متاح بهدوء.\nبرج ترامب جدة\nالشاطئ، الكورنيش، جدة\n\nيرتفع برج ترامب جدة على الكورنيش في حي الشاطئ، معلماً سكنياً يطل على البحر الأحمر. يقدم البرج مساكن من غرفة إلى أربع غرف نوم بمساحات من 70 إلى 365 متراً مربعاً، وبنتهاوس من ثلاث وأربع غرف نوم، جميعها بإطلالات بحرية غير محجوبة.\nعلى الكورنيش في حي الشاطئ · إطلالات غير محجوبة على البحر الأحمر · مساكن من غرفة إلى أربع غرف وبنتهاوس · نادي ترامب الخاص وكونسيرج على مدار الساعة\n\nابتداءً من 3,200,000 ر.س\nالمرجع BONA-022 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
+      "en": "Inside Kayan Residence, Al Nahda, Al Nahda — the units.\n\n• Kayan Residence, Al Nahda · 3 bed · 136 m² · SAR 980,000\n• Unit KIA-128A · floor 1st, 2nd or 3rd · 2 bed · 136 m² · SAR 990,000\n• Unit KIA-127A · floor 1st or 3rd · 2 bed · 120 m² · SAR 940,000\n\nKayan Residence brings hotel-style living to Al Nahda, minutes from Jeddah's principal destinations. Each apartment of 136 square metres holds a master bedroom, two further bedrooms, three bathrooms, a large living room and a modern kitchen, served by its own private elevator.\nDeveloper: Kian Al-Masiah\n\nRefs BONA-025, BONA-033, BONA-034 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
+      "ar": "داخل كيان ريزيدنس، النهضة، النهضة — الوحدات.\n\n• كيان ريزيدنس، النهضة · 3 غرف · 136 م² · 980,000 ر.س\n• وحدة KIA-128A · الدور 1st, 2nd or 3rd · 2 غرف · 136 م² · 990,000 ر.س\n• وحدة KIA-127A · الدور 1st or 3rd · 2 غرف · 120 م² · 940,000 ر.س\n\nيقدم كيان ريزيدنس أسلوب سكن فندقياً في حي النهضة، على دقائق من أبرز وجهات جدة. تضم كل شقة بمساحة 136 متراً مربعاً غرفة نوم رئيسية وغرفتي نوم وثلاث دورات مياه وصالة واسعة ومطبخاً حديثاً، ويخدمها مصعد خاص.\nالمطوّر: كيان الماسية\n\nالمراجع BONA-025، BONA-033، BONA-034 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
     },
     "hashtags": [
       "#بونا",
@@ -775,29 +796,36 @@
       "#luxuryapartment",
       "#jeddahapartments",
       "#apartmentforsale",
-      "#الشاطئ",
-      "#حي_الشاطئ",
-      "#alshati",
-      "#عقارات_الشاطئ",
-      "#واجهة_بحرية",
-      "#waterfrontliving",
-      "#bona"
+      "#النهضة",
+      "#alnahdah",
+      "#bona",
+      "#مشاريع_جدة",
+      "#وحدات_سكنية",
+      "#newdevelopment",
+      "#offplan"
     ],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_4-1078483b-cd44eb.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9b5e8f.jpg",
     "images": [
-      "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_4-1078483b-cd44eb.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_8-87ea62.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_5-15f2dc.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/trump_penthouse-ad9886.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/trump_apartment_masterbedroom-46b7eb58-4af645.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/trump_private_club_meeting_room-7e5efc.jpg"
+      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9b5e8f.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-52-1c9679.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/uwq4bakpspm7gkozgcli_video_project_25_1_1_.v2.0000000-0ee6d0.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-33-792ba2.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-35-fd1ebb.jpg"
     ],
     "alt": {
-      "en": "The tower — Trump Tower Jeddah",
-      "ar": "البرج — برج ترامب جدة"
+      "en": "Exterior — Kayan Residence, Al Nahda",
+      "ar": "الواجهة الخارجية — كيان ريزيدنس، النهضة"
     },
-    "listingId": "BONA-022",
-    "url": "https://bona.azoz.uk/properties/trump-tower-jeddah/",
+    "listingId": "BONA-025",
+    "listingIds": [
+      "BONA-025",
+      "BONA-033",
+      "BONA-034"
+    ],
+    "url": "https://bona.azoz.uk/properties/kayan-residence-al-nahda/",
     "adLicenceRequired": true,
     "status": "planned"
   },
@@ -816,6 +844,27 @@
     },
     "hashtags": [],
     "image": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_4-1078483b-cd44eb.jpg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "date": "2026-09-13",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "listings",
+    "topic": {
+      "en": "3D tour story — Al Zahra Residences",
+      "ar": "قصة جولة ثلاثية الأبعاد — شقق الزهراء"
+    },
+    "caption": {
+      "en": "Tap, turn, walk: Al Zahra Residences in 3D. Which room would you change first?",
+      "ar": "اضغط، أدِر، امشِ: شقق الزهراء بتقنية ثلاثية الأبعاد. أي غرفة ستغيّرها أولاً؟"
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-25-3d6349.jpg",
+    "listingId": "BONA-015",
+    "url": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
+    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
     "adLicenceRequired": false,
     "status": "planned"
   },
@@ -1016,12 +1065,12 @@
     "format": "reel",
     "pillar": "listings",
     "topic": {
-      "en": "Rooftop-View Villa, Al Mohammadiyah",
-      "ar": "فيلا بإطلالة علوية، المحمدية"
+      "en": "3D tour — Al Zahra Residences",
+      "ar": "جولة ثلاثية الأبعاد — شقق الزهراء"
     },
     "caption": {
-      "en": "Now available through Bona.\nRooftop-View Villa, Al Mohammadiyah\nAl Mohammadiyah, Jeddah\n4 bedrooms · 7 bathrooms · 600 m² · 407 m² plot\n\nA modern villa in Al Mohammadiyah with direct access to King Road and Prince Sultan Road. The house offers 600 square metres of built space on a 407-square-metre plot, with a private pool, a small garden, a one-car garage, an elevator, ducted air conditioning and smart-home controls.\nRoof terrace with skyline views · Four master suites, seven bathrooms · Private pool and garden · Elevator and smart-home system\n\nSAR 5,499,000\nRef. BONA-007 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
-      "ar": "متاح الآن عبر بونا.\nفيلا بإطلالة علوية، المحمدية\nالمحمدية، جدة\n4 غرف نوم · 7 دورات مياه · 600 م² · أرض 407 م²\n\nفيلا حديثة في حي المحمدية بوصول مباشر إلى طريق الملك وطريق الأمير سلطان. يوفر المنزل 600 متر مربع من المساحة المبنية على أرض بمساحة 407 أمتار مربعة، مع مسبح خاص وحديقة صغيرة ومرآب لسيارة ومصعد وتكييف مخفي ونظام منزل ذكي.\nتراس علوي بإطلالة على أفق المدينة · أربعة أجنحة رئيسية وسبع دورات مياه · مسبح خاص وحديقة · مصعد ونظام منزل ذكي\n\n5,499,000 ر.س\nالمرجع BONA-007 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
+      "en": "Walk through it before you visit.\nAl Zahra Residences\nAl Zahra, Jeddah\n3 bedrooms · 200 m²\n\nA Matterport 3D tour: every room at its true angle, with a measuring tool. Link in bio → “Tours”.\nThen we arrange the private viewing.\n\nFrom SAR 1,450,000\nRef. BONA-015 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
+      "ar": "تجوّل قبل أن تزور.\nشقق الزهراء\nالزهراء، جدة\n3 غرف نوم · 200 م²\n\nجولة Matterport ثلاثية الأبعاد: كل غرفة بزاويتها الحقيقية، مع أداة قياس. الرابط في البايو ← «الجولات».\nثم نرتّب المعاينة الخاصة.\n\nابتداءً من 1,450,000 ر.س\nالمرجع BONA-015 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
     },
     "hashtags": [
       "#بونا",
@@ -1030,26 +1079,32 @@
       "#عقارات_السعودية",
       "#jeddahrealestate",
       "#luxuryrealestate",
-      "#فلل_جدة",
-      "#فلل_للبيع_في_جدة",
-      "#فلل_فاخرة_جدة",
-      "#فيلا_للبيع",
-      "#luxuryvilla",
-      "#villaforsale",
-      "#المحمدية",
-      "#almohammadiyah",
-      "#bona"
+      "#شقق_جدة",
+      "#شقق_فاخرة_جدة",
+      "#شقق_للبيع",
+      "#luxuryapartment",
+      "#jeddahapartments",
+      "#apartmentforsale",
+      "#الزهراء",
+      "#alzahra",
+      "#3dtour",
+      "#virtualtour",
+      "#matterport",
+      "#جولة_افتراضية",
+      "#جولة_ثلاثية_الأبعاد"
     ],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/luxury-modren-villa-al-mohamadyah-jeddah/img_8555-f3ade7.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg",
     "images": [
-      "https://tk-storage.azoz.uk/tk-estate-media/media/luxury-modren-villa-al-mohamadyah-jeddah/img_8555-f3ade7.jpg"
+      "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg"
     ],
     "alt": {
-      "en": "Exterior — Rooftop-View Villa, Al Mohammadiyah",
-      "ar": "الواجهة الخارجية — فيلا بإطلالة علوية، المحمدية"
+      "en": "Exterior — Al Zahra Residences",
+      "ar": "الواجهة الخارجية — شقق الزهراء"
     },
-    "listingId": "BONA-007",
-    "url": "https://bona.azoz.uk/properties/rooftop-view-villa-al-mohammadiyah/",
+    "listingId": "BONA-015",
+    "url": "https://bona.azoz.uk/properties/al-zahra-residences/",
+    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
+    "note": "Screen-record the Matterport walkthrough (15–30 s, 9:16, captions on, ambient audio only); end card = listing hero + ref.",
     "adLicenceRequired": true,
     "status": "planned"
   },
@@ -1085,7 +1140,28 @@
       "ar": "نهاية الأسبوع: مسبح عند الغروب، أبحر الشمالية."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/penthouse-al-salama/1743972023044-c91e7a.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/ktvxailerz6r8cc7lmec_tk_1_.v2.0000000-d36513.jpg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "date": "2026-09-18",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "listings",
+    "topic": {
+      "en": "3D tour story — Al Zahra Residences",
+      "ar": "قصة جولة ثلاثية الأبعاد — شقق الزهراء"
+    },
+    "caption": {
+      "en": "Same home, no traffic. The Matterport tour of Al Zahra Residences — link sticker.",
+      "ar": "المنزل نفسه، بلا زحام. جولة Matterport في شقق الزهراء — ملصق الرابط."
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-25-3d6349.jpg",
+    "listingId": "BONA-015",
+    "url": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
+    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
     "adLicenceRequired": false,
     "status": "planned"
   },
@@ -1103,7 +1179,7 @@
       "ar": "نهاية الأسبوع: ركن القراءة، فيلا في الخالدية."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/penthouse-al-salama/1743972023044-c91e7a.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   },
@@ -1113,12 +1189,12 @@
     "format": "carousel",
     "pillar": "listings",
     "topic": {
-      "en": "Timber-Detailed Villa, Al Mohammadiyah",
-      "ar": "فيلا بتفاصيل خشبية، المحمدية"
+      "en": "Trump Tower Jeddah",
+      "ar": "برج ترامب جدة"
     },
     "caption": {
-      "en": "By private appointment.\nTimber-Detailed Villa, Al Mohammadiyah\nAl Mohammadiyah, Jeddah\n5 bedrooms · 8 bathrooms · 402 m² plot\n\nA villa in Al Mohammadiyah, close to King Road and Prince Sultan Road, finished in a warm palette of timber-clad walls, parquet flooring and marble. The house sits on a 402-square-metre plot with a swimming pool that connects directly to the living area, a garden seating area and a one-car garage.\nTimber, parquet and marble finishes · Pool connected to the living area · Five bedrooms, eight bathrooms · Glass elevator\n\nSAR 5,000,000\nRef. BONA-008 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
-      "ar": "المعاينة بموعد خاص.\nفيلا بتفاصيل خشبية، المحمدية\nالمحمدية، جدة\n5 غرف نوم · 8 دورات مياه · أرض 402 م²\n\nفيلا في حي المحمدية، قريبة من طريق الملك وطريق الأمير سلطان، بتشطيبات دافئة من الجدران المكسوة بالخشب وأرضيات الباركيه واللمسات الرخامية. تقع على أرض بمساحة 402 متر مربع مع مسبح يتصل مباشرة بمنطقة المعيشة ومنطقة جلوس في الحديقة ومرآب لسيارة.\nتشطيبات من الخشب والباركيه والرخام · مسبح متصل بمنطقة المعيشة · خمس غرف نوم وثماني دورات مياه · مصعد زجاجي\n\n5,000,000 ر.س\nالمرجع BONA-008 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
+      "en": "Quietly available.\nTrump Tower Jeddah\nAl Shati, Corniche, Jeddah\n\nTrump Tower Jeddah rises on the Corniche in Al Shati, a residential landmark overlooking the Red Sea. The tower offers one- to four-bedroom residences from 70 to 365 square metres and three- and four-bedroom penthouses, all with uninterrupted sea views.\nOn the Corniche, Al Shati · Uninterrupted Red Sea views · 1–4 bedroom residences and penthouses · Trump Private Club and 24/7 concierge\n\nFrom SAR 3,200,000\nRef. BONA-022 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
+      "ar": "متاح بهدوء.\nبرج ترامب جدة\nالشاطئ، الكورنيش، جدة\n\nيرتفع برج ترامب جدة على الكورنيش في حي الشاطئ، معلماً سكنياً يطل على البحر الأحمر. يقدم البرج مساكن من غرفة إلى أربع غرف نوم بمساحات من 70 إلى 365 متراً مربعاً، وبنتهاوس من ثلاث وأربع غرف نوم، جميعها بإطلالات بحرية غير محجوبة.\nعلى الكورنيش في حي الشاطئ · إطلالات غير محجوبة على البحر الأحمر · مساكن من غرفة إلى أربع غرف وبنتهاوس · نادي ترامب الخاص وكونسيرج على مدار الساعة\n\nابتداءً من 3,200,000 ر.س\nالمرجع BONA-022 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
     },
     "hashtags": [
       "#بونا",
@@ -1127,31 +1203,35 @@
       "#عقارات_السعودية",
       "#jeddahrealestate",
       "#luxuryrealestate",
-      "#فلل_جدة",
-      "#فلل_للبيع_في_جدة",
-      "#فلل_فاخرة_جدة",
-      "#فيلا_للبيع",
-      "#luxuryvilla",
-      "#villaforsale",
-      "#المحمدية",
-      "#almohammadiyah",
+      "#شقق_جدة",
+      "#شقق_فاخرة_جدة",
+      "#شقق_للبيع",
+      "#luxuryapartment",
+      "#jeddahapartments",
+      "#apartmentforsale",
+      "#الشاطئ",
+      "#حي_الشاطئ",
+      "#alshati",
+      "#عقارات_الشاطئ",
+      "#واجهة_بحرية",
+      "#waterfrontliving",
       "#bona"
     ],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-mohammadiyyah/img_7266-a48e4b.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_4-1078483b-cd44eb.jpg",
     "images": [
-      "https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-mohammadiyyah/img_7266-a48e4b.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-mohammadiyyah/sshpaivgrpyz9zexf5we_img_6575.v2.0000000-88d4cc.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-mohammadiyyah/img_7291-26ed2c.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-mohammadiyyah/img_7288-c3acfd.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-mohammadiyyah/img_7270-5ac707.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-mohammadiyyah/img_7275-b0be09.jpg"
+      "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_4-1078483b-cd44eb.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_8-87ea62.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_5-15f2dc.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/trump_penthouse-ad9886.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/trump_apartment_masterbedroom-46b7eb58-4af645.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/trump_private_club_meeting_room-7e5efc.jpg"
     ],
     "alt": {
-      "en": "Exterior — Timber-Detailed Villa, Al Mohammadiyah",
-      "ar": "الواجهة الخارجية — فيلا بتفاصيل خشبية، المحمدية"
+      "en": "The tower — Trump Tower Jeddah",
+      "ar": "البرج — برج ترامب جدة"
     },
-    "listingId": "BONA-008",
-    "url": "https://bona.azoz.uk/properties/timber-villa-al-mohammadiyah/",
+    "listingId": "BONA-022",
+    "url": "https://bona.azoz.uk/properties/trump-tower-jeddah/",
     "adLicenceRequired": true,
     "status": "planned"
   },
@@ -1169,7 +1249,7 @@
       "ar": "للمُلّاك: 3 أشياء نحتاجها لبدء تسويق منزلك (الصك، المخططات، الصور). راسلنا."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/majestic-andalus-mansion/tk_ibraheem_pic-2-fc15e2.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   },
@@ -1235,7 +1315,7 @@
       "ar": "استطلاع: الخور أم الكورنيش أم الشاطئ الخاص؟"
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/modren-duplex/img_4305-283e07.jpeg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/majestic-andalus-mansion/tk_ibraheem_pic-2-fc15e2.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   },
@@ -1297,7 +1377,7 @@
       "ar": "ليلة اليوم الوطني: العلم على شرفة في جدة."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/8y00u361s6sg9wdlbmw3_al_rawdah_-_apartment_5_1_.v2.0000000-56f287.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/modren-duplex/img_4305-283e07.jpeg",
     "adLicenceRequired": false,
     "status": "planned"
   },
@@ -1349,7 +1429,28 @@
       "ar": "اليوم الوطني — المكتب مغلق. نعود الخميس."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-golf-villas/ott_02_rear_view_ef_9704209c3d_37a210f5bb-e9d829.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/8y00u361s6sg9wdlbmw3_al_rawdah_-_apartment_5_1_.v2.0000000-56f287.jpg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "date": "2026-09-23",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "listings",
+    "topic": {
+      "en": "3D tour story — Al Zahra Residences",
+      "ar": "قصة جولة ثلاثية الأبعاد — شقق الزهراء"
+    },
+    "caption": {
+      "en": "Poll: have you tried a 3D tour yet? Yes / Show me one",
+      "ar": "استطلاع: جرّبت جولة ثلاثية الأبعاد من قبل؟ نعم / أرِني واحدة"
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-25-3d6349.jpg",
+    "listingId": "BONA-015",
+    "url": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
+    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
     "adLicenceRequired": false,
     "status": "planned"
   },
@@ -1359,12 +1460,12 @@
     "format": "reel",
     "pillar": "listings",
     "topic": {
-      "en": "Al Bandar Villas, North Obhur",
-      "ar": "فلل البندر، أبحر الشمالية"
+      "en": "Rooftop-View Villa, Al Mohammadiyah",
+      "ar": "فيلا بإطلالة علوية، المحمدية"
     },
     "caption": {
-      "en": "Off the portals, on our list.\nAl Bandar Villas, North Obhur\nAl Bandar, North Obhur, Jeddah\n6 bedrooms · 8 bathrooms · 300 m²\n\nA collection of contemporary villas in Al Bandar, North Obhur, each with six master bedrooms and eight bathrooms on a 300-square-metre footprint. Every villa has a private pool and an elevator, with the latest home technology throughout.\nSix master bedrooms, eight bathrooms · Private pool in every villa · Elevator in every villa · Separate preparation kitchen\n\nFrom SAR 3,150,000\nRef. BONA-012 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
-      "ar": "خارج المنصات، ضمن قائمتنا.\nفلل البندر، أبحر الشمالية\nالبندر، أبحر الشمالية، جدة\n6 غرف نوم · 8 دورات مياه · 300 م²\n\nمجموعة من الفلل العصرية في حي البندر بأبحر الشمالية، تضم كل منها ست غرف نوم رئيسية وثماني دورات مياه على مساحة 300 متر مربع. لكل فيلا مسبح خاص ومصعد، مع أحدث التقنيات المنزلية.\nست غرف نوم رئيسية وثماني دورات مياه · مسبح خاص في كل فيلا · مصعد في كل فيلا · مطبخ تحضير منفصل\n\nابتداءً من 3,150,000 ر.س\nالمرجع BONA-012 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
+      "en": "Now available through Bona.\nRooftop-View Villa, Al Mohammadiyah\nAl Mohammadiyah, Jeddah\n4 bedrooms · 7 bathrooms · 600 m² · 407 m² plot\n\nA modern villa in Al Mohammadiyah with direct access to King Road and Prince Sultan Road. The house offers 600 square metres of built space on a 407-square-metre plot, with a private pool, a small garden, a one-car garage, an elevator, ducted air conditioning and smart-home controls.\nRoof terrace with skyline views · Four master suites, seven bathrooms · Private pool and garden · Elevator and smart-home system\n\nSAR 5,499,000\nRef. BONA-007 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
+      "ar": "متاح الآن عبر بونا.\nفيلا بإطلالة علوية، المحمدية\nالمحمدية، جدة\n4 غرف نوم · 7 دورات مياه · 600 م² · أرض 407 م²\n\nفيلا حديثة في حي المحمدية بوصول مباشر إلى طريق الملك وطريق الأمير سلطان. يوفر المنزل 600 متر مربع من المساحة المبنية على أرض بمساحة 407 أمتار مربعة، مع مسبح خاص وحديقة صغيرة ومرآب لسيارة ومصعد وتكييف مخفي ونظام منزل ذكي.\nتراس علوي بإطلالة على أفق المدينة · أربعة أجنحة رئيسية وسبع دورات مياه · مسبح خاص وحديقة · مصعد ونظام منزل ذكي\n\n5,499,000 ر.س\nالمرجع BONA-007 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
     },
     "hashtags": [
       "#بونا",
@@ -1379,24 +1480,20 @@
       "#فيلا_للبيع",
       "#luxuryvilla",
       "#villaforsale",
-      "#أبحر",
-      "#ابحر_الشمالية",
-      "#obhur",
-      "#عقارات_الشاطئ",
-      "#واجهة_بحرية",
-      "#waterfrontliving",
+      "#المحمدية",
+      "#almohammadiyah",
       "#bona"
     ],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/modern-villas-for-sale-in-al-bandar-north-obhur/img_8862-5466c0.jpeg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/luxury-modren-villa-al-mohamadyah-jeddah/img_8555-f3ade7.jpg",
     "images": [
-      "https://tk-storage.azoz.uk/tk-estate-media/media/modern-villas-for-sale-in-al-bandar-north-obhur/img_8862-5466c0.jpeg"
+      "https://tk-storage.azoz.uk/tk-estate-media/media/luxury-modren-villa-al-mohamadyah-jeddah/img_8555-f3ade7.jpg"
     ],
     "alt": {
-      "en": "Swimming pool — Al Bandar Villas, North Obhur",
-      "ar": "المسبح — فلل البندر، أبحر الشمالية"
+      "en": "Exterior — Rooftop-View Villa, Al Mohammadiyah",
+      "ar": "الواجهة الخارجية — فيلا بإطلالة علوية، المحمدية"
     },
-    "listingId": "BONA-012",
-    "url": "https://bona.azoz.uk/properties/al-bandar-villas-north-obhur/",
+    "listingId": "BONA-007",
+    "url": "https://bona.azoz.uk/properties/rooftop-view-villa-al-mohammadiyah/",
     "adLicenceRequired": true,
     "status": "planned"
   },
@@ -1414,7 +1511,7 @@
       "ar": "عدنا إلى المكتب. مرجع جديد أُضيف — اسأل."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-plaza-jeddah/dgxtrump_plaza_front-entrance-02daae.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/uwq4bakpspm7gkozgcli_video_project_25_1_1_.v2.0000000-0ee6d0.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   },
@@ -1432,7 +1529,7 @@
       "ar": "نهاية الأسبوع: مطبخ لم يطبخ فيه أحد بعد (تسليم على الخارطة)."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776158984069-652361.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-golf-villas/ott_02_rear_view_ef_9704209c3d_37a210f5bb-e9d829.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   },
@@ -1450,7 +1547,7 @@
       "ar": "نهاية الأسبوع: الضوء في بئر الدرج."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/da-vinci-tower-interiors-by-pagani/dvt_sunset_close_up-1497a6.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-plaza-jeddah/dgxtrump_plaza_front-entrance-02daae.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   },
@@ -1460,12 +1557,12 @@
     "format": "carousel",
     "pillar": "listings",
     "topic": {
-      "en": "Villa near the Corniche, Al Lulu, Obhur",
-      "ar": "فيلا قرب الكورنيش، اللؤلؤ، أبحر"
+      "en": "Inside Kian Al-Masiah — Building 113, Al Nuzhah — the units",
+      "ar": "داخل كيان الماسية — مبنى 113، النزهة — الوحدات"
     },
     "caption": {
-      "en": "Villa near the Corniche, Al Lulu, Obhur\nAl Lulu, North Obhur, Jeddah\n5 bedrooms · 7 bathrooms · 550 m² · 383 m² plot\n\nA villa in the Al Lulu district of Obhur, a short walk from the Corniche and the Red Sea shore. The house offers 550 square metres of built space on a 383-square-metre plot, with marble floors, a marble staircase with glass balustrades, ceilings of around three metres, an elevator and parking for two cars.\nShort walk to the Corniche · Rooftop terrace with sea views · Pool with waterfalls · Two master suites with dressing rooms\n\nSAR 2,900,000\nRef. BONA-011 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
-      "ar": "فيلا قرب الكورنيش، اللؤلؤ، أبحر\nاللؤلؤ، أبحر الشمالية، جدة\n5 غرف نوم · 7 دورات مياه · 550 م² · أرض 383 م²\n\nفيلا في حي اللؤلؤ بأبحر، على مسافة قصيرة سيراً من الكورنيش وشاطئ البحر الأحمر. يوفر المنزل 550 متراً مربعاً من المساحة المبنية على أرض بمساحة 383 متراً مربعاً، بأرضيات رخامية ودرج رخامي بدرابزين زجاجي وأسقف بارتفاع نحو ثلاثة أمتار ومصعد ومواقف لسيارتين.\nعلى مسافة قصيرة سيراً من الكورنيش · تراس علوي بإطلالة على البحر · مسبح بشلالات · جناحان رئيسيان بغرف ملابس\n\n2,900,000 ر.س\nالمرجع BONA-011 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
+      "en": "Inside Kian Al-Masiah — Building 113, Al Nuzhah, Al Nuzhah — the units.\n\n• Unit KIA-113A · 3 bed · 174 m² · SAR 750,000\n• Unit KIA-113B · 3 bed · 182 m² · SAR 790,000\n• Unit KIA-113C · 3 bed · 174 m² · SAR 760,000\n\nA five-room apartment of 174 square metres in Building 113, Al Nuzhah, on a commercial street with shops and services on the doorstep. Three bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.\nDeveloper: Kian Al-Masiah\n\nRefs BONA-035, BONA-036, BONA-037 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
+      "ar": "داخل كيان الماسية — مبنى 113، النزهة، النزهة — الوحدات.\n\n• وحدة KIA-113A · 3 غرف · 174 م² · 750,000 ر.س\n• وحدة KIA-113B · 3 غرف · 182 م² · 790,000 ر.س\n• وحدة KIA-113C · 3 غرف · 174 م² · 760,000 ر.س\n\nشقة من خمس غرف بمساحة 174 متراً مربعاً في مبنى 113 بحي النزهة، على شارع تجاري تتوفر فيه المحال والخدمات على مقربة. ثلاث غرف نوم وثلاث دورات مياه، واكتمل البناء عام 2024 على يد كيان الماسية.\nالمطوّر: كيان الماسية\n\nالمراجع BONA-035، BONA-036، BONA-037 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
     },
     "hashtags": [
       "#بونا",
@@ -1474,35 +1571,39 @@
       "#عقارات_السعودية",
       "#jeddahrealestate",
       "#luxuryrealestate",
-      "#فلل_جدة",
-      "#فلل_للبيع_في_جدة",
-      "#فلل_فاخرة_جدة",
-      "#فيلا_للبيع",
-      "#luxuryvilla",
-      "#villaforsale",
-      "#أبحر",
-      "#ابحر_الشمالية",
-      "#obhur",
-      "#عقارات_الشاطئ",
-      "#واجهة_بحرية",
-      "#waterfrontliving",
-      "#bona"
+      "#شقق_جدة",
+      "#شقق_فاخرة_جدة",
+      "#شقق_للبيع",
+      "#luxuryapartment",
+      "#jeddahapartments",
+      "#apartmentforsale",
+      "#bona",
+      "#مشاريع_جدة",
+      "#وحدات_سكنية",
+      "#newdevelopment",
+      "#offplan"
     ],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-north-obhur/img_8016-8701e21d-eaa461.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg",
     "images": [
-      "https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-north-obhur/img_8016-8701e21d-eaa461.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-north-obhur/img_8015-037e9627-187e84.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-north-obhur/img_8166-ae8a2f06-813ba0.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-north-obhur/img_8155-3501f875-4be170.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-north-obhur/img_8038-8fe2bf.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-north-obhur/img_8063-20d3b42b-1e556f.jpg"
+      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-38-e33ac8.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-33-792ba2.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-35-fd1ebb.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-36-e5e9aa.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg"
     ],
     "alt": {
-      "en": "Swimming pool — Villa near the Corniche, Al Lulu, Obhur",
-      "ar": "المسبح — فيلا قرب الكورنيش، اللؤلؤ، أبحر"
+      "en": "Living room — Three-Bedroom Apartment, Building 113, Al Nuzhah",
+      "ar": "غرفة المعيشة — شقة بثلاث غرف نوم، مبنى 113، النزهة"
     },
-    "listingId": "BONA-011",
-    "url": "https://bona.azoz.uk/properties/villa-near-the-corniche-al-lulu-obhur/",
+    "listingId": "BONA-035",
+    "listingIds": [
+      "BONA-035",
+      "BONA-036",
+      "BONA-037"
+    ],
+    "url": "https://bona.azoz.uk/properties/kian-building-113-unit-a-al-nuzhah/",
     "adLicenceRequired": true,
     "status": "planned"
   },
@@ -1520,7 +1621,7 @@
       "ar": "صندوق الأسئلة: اسألنا أي شيء عن الشراء في جدة. نجيب في القصص غداً."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/aiease_1761747411967-2819c7.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/aida_04_lounge_copy_2_ae1e9ac626_e8bc687dfe-bae44b.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   },
@@ -1587,7 +1688,28 @@
       "ar": "إجابات أسئلتكم (الجزء الأول)."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9b5e8f.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776158984069-652361.jpg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "date": "2026-09-28",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "listings",
+    "topic": {
+      "en": "3D tour story — Al Zahra Residences",
+      "ar": "قصة جولة ثلاثية الأبعاد — شقق الزهراء"
+    },
+    "caption": {
+      "en": "Measure it yourself — the 3D tour has a measuring tool. Al Zahra Residences, ref. BONA-015.",
+      "ar": "قِسها بنفسك — الجولة ثلاثية الأبعاد فيها أداة قياس. شقق الزهراء، المرجع BONA-015."
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-25-3d6349.jpg",
+    "listingId": "BONA-015",
+    "url": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
+    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
     "adLicenceRequired": false,
     "status": "planned"
   },
@@ -1649,7 +1771,7 @@
       "ar": "إجابات أسئلتكم (الجزء الثاني)."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/marriott-residences-aida-oman/grp8o0h6sa2qtmdw99od_marriott_revealer_16x9.v2.0000000-befaf9.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-52-1c9679.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   },
@@ -1712,7 +1834,7 @@
       "ar": "قيد التفاوض: أحد منازل الإطلاق. المرجع محجوب؛ يبقى 8."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/modern-luxury-villas-al-murjan/tk_pics-147e35.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-33-792ba2.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   },
@@ -1722,12 +1844,12 @@
     "format": "reel",
     "pillar": "listings",
     "topic": {
-      "en": "Duplex Penthouse, Al Salamah",
-      "ar": "بنتهاوس دوبلكس، السلامة"
+      "en": "Timber-Detailed Villa, Al Mohammadiyah",
+      "ar": "فيلا بتفاصيل خشبية، المحمدية"
     },
     "caption": {
-      "en": "Quietly available.\nDuplex Penthouse, Al Salamah\nAl Salamah, Jeddah\n3 bedrooms · 6 bathrooms · 214 m²\n\nA two-storey penthouse of 214 square metres in Al Salamah, with private entrances on both levels, insulated windows and a smart-home installation that includes lighting control, built-in speakers and a central vacuum system.\nTwo floors, 214 sqm · Private entrance on each level · Smart lighting and built-in speakers · Central vacuum system\n\nFrom SAR 1,550,000\nRef. BONA-013 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
-      "ar": "متاح بهدوء.\nبنتهاوس دوبلكس، السلامة\nالسلامة، جدة\n3 غرف نوم · 6 دورات مياه · 214 م²\n\nبنتهاوس من طابقين بمساحة 214 متراً مربعاً في حي السلامة، بمدخلين خاصين على المستويين ونوافذ معزولة ونظام منزل ذكي يشمل التحكم في الإضاءة وسماعات مدمجة ونظام تنظيف مركزي.\nطابقان بمساحة 214 متراً مربعاً · مدخل خاص لكل مستوى · إضاءة ذكية وسماعات مدمجة · نظام تنظيف مركزي\n\nابتداءً من 1,550,000 ر.س\nالمرجع BONA-013 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
+      "en": "By private appointment.\nTimber-Detailed Villa, Al Mohammadiyah\nAl Mohammadiyah, Jeddah\n5 bedrooms · 8 bathrooms · 402 m² plot\n\nA villa in Al Mohammadiyah, close to King Road and Prince Sultan Road, finished in a warm palette of timber-clad walls, parquet flooring and marble. The house sits on a 402-square-metre plot with a swimming pool that connects directly to the living area, a garden seating area and a one-car garage.\nTimber, parquet and marble finishes · Pool connected to the living area · Five bedrooms, eight bathrooms · Glass elevator\n\nSAR 5,000,000\nRef. BONA-008 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
+      "ar": "المعاينة بموعد خاص.\nفيلا بتفاصيل خشبية، المحمدية\nالمحمدية، جدة\n5 غرف نوم · 8 دورات مياه · أرض 402 م²\n\nفيلا في حي المحمدية، قريبة من طريق الملك وطريق الأمير سلطان، بتشطيبات دافئة من الجدران المكسوة بالخشب وأرضيات الباركيه واللمسات الرخامية. تقع على أرض بمساحة 402 متر مربع مع مسبح يتصل مباشرة بمنطقة المعيشة ومنطقة جلوس في الحديقة ومرآب لسيارة.\nتشطيبات من الخشب والباركيه والرخام · مسبح متصل بمنطقة المعيشة · خمس غرف نوم وثماني دورات مياه · مصعد زجاجي\n\n5,000,000 ر.س\nالمرجع BONA-008 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
     },
     "hashtags": [
       "#بونا",
@@ -1736,26 +1858,26 @@
       "#عقارات_السعودية",
       "#jeddahrealestate",
       "#luxuryrealestate",
-      "#بنتهاوس_جدة",
-      "#بنتهاوس",
-      "#شقق_فاخرة_جدة",
-      "#penthouse",
-      "#penthouselife",
-      "#luxuryapartment",
-      "#السلامة",
-      "#alsalamah",
+      "#فلل_جدة",
+      "#فلل_للبيع_في_جدة",
+      "#فلل_فاخرة_جدة",
+      "#فيلا_للبيع",
+      "#luxuryvilla",
+      "#villaforsale",
+      "#المحمدية",
+      "#almohammadiyah",
       "#bona"
     ],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/penthouse-al-salama/1743972023044-c91e7a.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-mohammadiyyah/img_7266-a48e4b.jpg",
     "images": [
-      "https://tk-storage.azoz.uk/tk-estate-media/media/penthouse-al-salama/1743972023044-c91e7a.jpg"
+      "https://tk-storage.azoz.uk/tk-estate-media/media/modren-villa-al-mohammadiyyah/img_7266-a48e4b.jpg"
     ],
     "alt": {
-      "en": "Exterior — Duplex Penthouse, Al Salamah",
-      "ar": "الواجهة الخارجية — بنتهاوس دوبلكس، السلامة"
+      "en": "Exterior — Timber-Detailed Villa, Al Mohammadiyah",
+      "ar": "الواجهة الخارجية — فيلا بتفاصيل خشبية، المحمدية"
     },
-    "listingId": "BONA-013",
-    "url": "https://bona.azoz.uk/properties/duplex-penthouse-al-salamah/",
+    "listingId": "BONA-008",
+    "url": "https://bona.azoz.uk/properties/timber-villa-al-mohammadiyah/",
     "adLicenceRequired": true,
     "status": "planned"
   },
@@ -1773,7 +1895,7 @@
       "ar": "نهاية الأسبوع: البحر من شرفة في درة العروس."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/fully-renovated-villa-al-murjan/img_1693-09eaf8.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/da-vinci-tower-interiors-by-pagani/dvt_sunset_close_up-1497a6.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   },
@@ -1791,7 +1913,7 @@
       "ar": "نهاية الأسبوع: مجلس مهيّأ لاثني عشر ضيفاً."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/villa-al-mohamediya/img_8642-4325d7.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-46-1bc2ec.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   },
@@ -1809,7 +1931,28 @@
       "ar": "الشهر الأول، شكراً. أكثر ما طلبتموه: فلل أبحر الشمالية. سُجّل."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/villa-for-rent-al-shati-2/20240917_101127870_ios-219afaa8-c2876f.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/aiease_1761747411967-2819c7.jpg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "date": "2026-10-03",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "listings",
+    "topic": {
+      "en": "3D tour story — Al Zahra Residences",
+      "ar": "قصة جولة ثلاثية الأبعاد — شقق الزهراء"
+    },
+    "caption": {
+      "en": "All our 3D tours in one place → https://bona.azoz.uk/tours/",
+      "ar": "كل جولاتنا ثلاثية الأبعاد في مكان واحد ← https://bona.azoz.uk/tours/"
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-25-3d6349.jpg",
+    "listingId": "BONA-015",
+    "url": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
+    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
     "adLicenceRequired": false,
     "status": "planned"
   },
@@ -1819,12 +1962,12 @@
     "format": "carousel",
     "pillar": "listings",
     "topic": {
-      "en": "Al Zahra Residences",
-      "ar": "شقق الزهراء"
+      "en": "Al Bandar Villas, North Obhur",
+      "ar": "فلل البندر، أبحر الشمالية"
     },
     "caption": {
-      "en": "Now available through Bona.\nAl Zahra Residences\nAl Zahra, Jeddah\n3 bedrooms · 200 m²\n\nA new low-density building of nine residences in Al Zahra, between King Road and Prince Sultan Street, with two apartments per floor over five floors. The standard residence measures 200 square metres and holds three master bedrooms, a large lounge, an open kitchen, a maid's room with bathroom and a balcony.\nTwo apartments per floor · Three master bedrooms in 200 sqm · 400 sqm rooftop residence with terrace · Private parking for each unit\n\nFrom SAR 1,450,000\nRef. BONA-015 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
-      "ar": "متاح الآن عبر بونا.\nشقق الزهراء\nالزهراء، جدة\n3 غرف نوم · 200 م²\n\nمبنى جديد منخفض الكثافة من تسعة مساكن في حي الزهراء، بين طريق الملك وشارع الأمير سلطان، بشقتين في كل طابق على خمسة طوابق. تبلغ مساحة الشقة القياسية 200 متر مربع وتضم ثلاث غرف نوم رئيسية وصالة واسعة ومطبخاً مفتوحاً وغرفة خادمة بحمام وشرفة.\nشقتان في كل طابق · ثلاث غرف نوم رئيسية في 200 متر مربع · مسكن سطح بمساحة 400 متر مربع مع تراس · موقف خاص لكل وحدة\n\nابتداءً من 1,450,000 ر.س\nالمرجع BONA-015 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
+      "en": "Off the portals, on our list.\nAl Bandar Villas, North Obhur\nAl Bandar, North Obhur, Jeddah\n6 bedrooms · 8 bathrooms · 300 m²\n\nA collection of contemporary villas in Al Bandar, North Obhur, each with six master bedrooms and eight bathrooms on a 300-square-metre footprint. Every villa has a private pool and an elevator, with the latest home technology throughout.\nSix master bedrooms, eight bathrooms · Private pool in every villa · Elevator in every villa · Separate preparation kitchen\n\nFrom SAR 3,150,000\nRef. BONA-012 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
+      "ar": "خارج المنصات، ضمن قائمتنا.\nفلل البندر، أبحر الشمالية\nالبندر، أبحر الشمالية، جدة\n6 غرف نوم · 8 دورات مياه · 300 م²\n\nمجموعة من الفلل العصرية في حي البندر بأبحر الشمالية، تضم كل منها ست غرف نوم رئيسية وثماني دورات مياه على مساحة 300 متر مربع. لكل فيلا مسبح خاص ومصعد، مع أحدث التقنيات المنزلية.\nست غرف نوم رئيسية وثماني دورات مياه · مسبح خاص في كل فيلا · مصعد في كل فيلا · مطبخ تحضير منفصل\n\nابتداءً من 3,150,000 ر.س\nالمرجع BONA-012 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
     },
     "hashtags": [
       "#بونا",
@@ -1833,31 +1976,35 @@
       "#عقارات_السعودية",
       "#jeddahrealestate",
       "#luxuryrealestate",
-      "#شقق_جدة",
-      "#شقق_فاخرة_جدة",
-      "#شقق_للبيع",
-      "#luxuryapartment",
-      "#jeddahapartments",
-      "#apartmentforsale",
-      "#الزهراء",
-      "#alzahra",
+      "#فلل_جدة",
+      "#فلل_للبيع_في_جدة",
+      "#فلل_فاخرة_جدة",
+      "#فيلا_للبيع",
+      "#luxuryvilla",
+      "#villaforsale",
+      "#أبحر",
+      "#ابحر_الشمالية",
+      "#obhur",
+      "#عقارات_الشاطئ",
+      "#واجهة_بحرية",
+      "#waterfrontliving",
       "#bona"
     ],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/modern-villas-for-sale-in-al-bandar-north-obhur/img_8862-5466c0.jpeg",
     "images": [
-      "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-25-3d6349.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-483899.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-8-0007dc.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-22-070a8e.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-6-c1ed71.jpg"
+      "https://tk-storage.azoz.uk/tk-estate-media/media/modern-villas-for-sale-in-al-bandar-north-obhur/img_8862-5466c0.jpeg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/modern-villas-for-sale-in-al-bandar-north-obhur/img_8843-a16f78.jpeg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/modern-villas-for-sale-in-al-bandar-north-obhur/img_8982-23349d.jpeg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/modern-villas-for-sale-in-al-bandar-north-obhur/img_8846-d9a246.jpeg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/modern-villas-for-sale-in-al-bandar-north-obhur/img_8860-89715a.jpeg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/modern-villas-for-sale-in-al-bandar-north-obhur/img_8923-dc6b95.jpeg"
     ],
     "alt": {
-      "en": "Exterior — Al Zahra Residences",
-      "ar": "الواجهة الخارجية — شقق الزهراء"
+      "en": "Swimming pool — Al Bandar Villas, North Obhur",
+      "ar": "المسبح — فلل البندر، أبحر الشمالية"
     },
-    "listingId": "BONA-015",
-    "url": "https://bona.azoz.uk/properties/al-zahra-residences/",
+    "listingId": "BONA-012",
+    "url": "https://bona.azoz.uk/properties/al-bandar-villas-north-obhur/",
     "adLicenceRequired": true,
     "status": "planned"
   },
@@ -1875,7 +2022,7 @@
       "ar": "استطلاع: دليل الحي القادم — المحمدية أم الأندلس؟"
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/painite-villas-by-lamborghini/dg.al_esmeralda_villa_ext_3-9df3c4.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9b5e8f.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   },
@@ -1941,7 +2088,7 @@
       "ar": "أسبوع جديد، مراجع جديدة. الرابط في البايو."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagerirx2b-b051b3.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   }
