@@ -145,8 +145,17 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   const images = await writeListingImages(extraction.candidates, picks, publicDir, slug);
   report.images = images.map((im) => ({ n: im.n, candidate: im.index, room: im.room, src: im.src, w: im.width, h: im.height, reason: im.reason }));
 
-  const brochureUrl = caption.publishBrochure ? `${cfg.site}/listings/${slug}/brochure.pdf` : null;
-  if (brochureUrl) writeBrochure(cfg.repo, slug, pdfPath);
+  // #brochure commits the PDF itself. Cap it: the repo is cloned on every CI run, and a
+  // 10 MB developer brochure per listing adds up fast.
+  let brochureUrl = null;
+  if (caption.publishBrochure) {
+    if (stat.size <= cfg.maxBrochureMb * 1024 * 1024) {
+      brochureUrl = `${cfg.site}/listings/${slug}/brochure.pdf`;
+      writeBrochure(cfg.repo, slug, pdfPath);
+    } else {
+      report.warnings.push(`the PDF is ${(stat.size / 1048576).toFixed(1)} MB, over the ${cfg.maxBrochureMb} MB limit for #brochure — the listing was published without it`);
+    }
+  }
 
   const listing = buildListing({
     ai, images, slug, id, repo: cfg.repo, caption, site: cfg.site,

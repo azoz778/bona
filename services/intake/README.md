@@ -124,6 +124,7 @@ default, so only the ones you want to change need to be present.
 | `BONA_MIN_IMAGES` / `BONA_MAX_IMAGES` | `4` / `10` | publishable photo count |
 | `BONA_MIN_IMAGE_SIDE` | `700` | smallest long side of a candidate photo |
 | `BONA_MAX_PDF_MB` / `BONA_MAX_PDF_PAGES` | `40` / `60` | input limits |
+| `BONA_MAX_BROCHURE_MB` | `8` | largest PDF `#brochure` will commit into the repo |
 | `BONA_SEND_REPLIES` | `true` | set `false` to run completely silent |
 | `BONA_DEBUG` | — | any value adds debug logs and stack traces |
 
@@ -158,7 +159,7 @@ is the first place to look when a listing comes out wrong.
 | `scripts/curate/inbox/_index.json` | the `BONA-W###` counter |
 | `public/listings/<slug>/NN.jpg` | photo, max 1920 px, q82, EXIF stripped |
 | `public/listings/<slug>/NN-thumb.webp` | 640 px thumbnail |
-| `public/listings/<slug>/brochure.pdf` | only with `#brochure` |
+| `public/listings/<slug>/brochure.pdf` | only with `#brochure`, and only up to `BONA_MAX_BROCHURE_MB` |
 | `$BONA_DATA/intake/<date>/<msgid>.pdf` | the downloaded PDF (outside the repo) |
 | `$BONA_DATA/intake-state.json` | seen message ids, greeted groups, published PDF hashes |
 
