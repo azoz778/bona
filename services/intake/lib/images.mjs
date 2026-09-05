@@ -31,7 +31,7 @@ export async function writeListingImages(candidates, picks, outDir, slug) {
     const info = await sharp(cand.abs)
       .rotate()
       .resize({ width: MAX_SIDE, height: MAX_SIDE, fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: JPEG_QUALITY, mozjpeg: true, chromaSubsampling: '4:4:4' })
+      .jpeg({ quality: JPEG_QUALITY, mozjpeg: true })  // sharp's 4:2:0 default: ~30% smaller, invisible on photos
       .toFile(file); // sharp drops EXIF/ICC unless withMetadata() is called
     await sharp(file)
       .resize({ width: THUMB_SIDE, height: THUMB_SIDE, fit: 'inside', withoutEnlargement: true })

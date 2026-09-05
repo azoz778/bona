@@ -130,10 +130,19 @@ export function runClaudeOnce({ prompt, cwd, model, bin = 'claude', addDirs = []
     child.on('error', (e) => { clearTimeout(timer); reject(e); });
     child.on('close', (code) => {
       clearTimeout(timer);
-      if (code !== 0) return reject(new Error(`claude -p exited ${code}: ${(err || out).trim().slice(-500)}`));
-      let envelope;
-      try { envelope = JSON.parse(out); } catch { return reject(new Error(`claude -p returned non-JSON: ${out.slice(0, 300)}`)); }
-      if (envelope.is_error) return reject(new Error(`claude -p error: ${String(envelope.result).slice(0, 400)}`));
+      // A failing `claude -p` still prints its JSON envelope, and the useful part is
+      // `result` (e.g. "You've hit your session limit"). Parse before giving up so the
+      // owner never sees a slice of the middle of a JSON blob.
+      let envelope = null;
+      try { envelope = JSON.parse(out); } catch { /* not JSON */ }
+      if (envelope?.is_error || (code !== 0 && envelope)) {
+        const e = new Error(`claude -p failed: ${String(envelope.result ?? 'unknown error').slice(0, 300)}`);
+        e.apiErrorStatus = envelope.api_error_status ?? null;
+        e.fatal = envelope.api_error_status === 429 || /session limit|usage limit|rate limit/i.test(String(envelope.result ?? ''));
+        return reject(e);
+      }
+      if (code !== 0) return reject(new Error(`claude -p exited ${code}: ${(err || out).trim().slice(-300)}`));
+      if (!envelope) return reject(new Error(`claude -p returned non-JSON: ${out.slice(0, 300)}`));
       try {
         resolve({ result: extractJson(envelope.result), meta: { costUsd: envelope.total_cost_usd, durationMs: envelope.duration_ms, numTurns: envelope.num_turns, sessionId: envelope.session_id } });
       } catch (e) {
@@ -261,6 +270,9 @@ export async function runListingAi({ prompt, cwd, model, fallbackModel, bin, add
       attempts.push([err.message]);
       logger?.warn('ai.call_failed', { attempt: i + 1, model: m, error: err.message });
       lastErr = err;
+      // A quota/session limit will not clear in the next second — stop burning attempts
+      // and let the caller tell the owner to try again later.
+      if (err.fatal) throw err;
     }
   }
   throw lastErr;

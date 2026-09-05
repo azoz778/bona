@@ -3,16 +3,24 @@
 
 export const CURRENCIES = ['SAR', 'AED', 'EUR', 'USD', 'OMR'];
 
+// JavaScript's \b is ASCII-only, so Arabic alternatives must live in their own patterns
+// without word boundaries — "للإيجار" would never match inside a \b(...)\b group.
 const CATEGORY_HINTS = [
-  [/#?\b(for[- ]?rent|rent|rental|إيجار|للإيجار|للايجار)\b/i, 'rent'],
-  [/#?\b(off[- ]?plan|under[- ]?construction|على[ -]?الخارطة|تحت الإنشاء)\b/i, 'off-plan'],
-  [/#?\b(international|overseas|خارج المملكة|دولي)\b/i, 'international'],
-  [/#?\b(for[- ]?sale|sale|buy|للبيع|بيع)\b/i, 'buy'],
+  [/#?\b(for[- ]?rent|rent|rental)\b/i, 'rent'],
+  [/(إيجار|للإيجار|للايجار|ايجار)/, 'rent'],
+  [/#?\b(off[- ]?plan|under[- ]?construction)\b/i, 'off-plan'],
+  [/(على ?الخارطة|تحت الإنشاء|على الخريطة)/, 'off-plan'],
+  [/#?\b(international|overseas)\b/i, 'international'],
+  [/(خارج المملكة|عقار دولي)/, 'international'],
+  [/#?\b(for[- ]?sale|sale|buy)\b/i, 'buy'],
+  [/(للبيع)/, 'buy'],
 ];
 
 const PERIOD_HINTS = [
-  [/\b(per|\/)\s*(year|yr|annum|سنة|سنوي|سنويا|سنوياً)\b/i, 'year'],
-  [/\b(per|\/)\s*(month|mo|شهر|شهري|شهريا|شهرياً)\b/i, 'month'],
+  [/\b(per|\/)\s*(year|yr|annum)\b/i, 'year'],
+  [/(سنوي|سنويا|سنوياً|\/ ?سنة|في السنة)/, 'year'],
+  [/\b(per|\/)\s*(month|mo)\b/i, 'month'],
+  [/(شهري|شهريا|شهرياً|\/ ?شهر|في الشهر)/, 'month'],
 ];
 
 const ARABIC_DIGITS = { '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9' };

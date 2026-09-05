@@ -16,7 +16,7 @@ import { buildPrompt, runListingAi } from './claude.mjs';
 import { writeListingImages } from './images.mjs';
 import {
   buildListing, checkListing, nextListingId, orderedPicks, readIndex, slugify,
-  takenSlugs, uniqueSlug, writeIndex, writeInboxListing,
+  takenSlugs, todayRiyadh, uniqueSlug, writeIndex, writeInboxListing,
 } from './listing.mjs';
 import { log } from './log.mjs';
 import { extractPdf } from './pdf.mjs';
@@ -120,9 +120,9 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   report.slug = slug;
   report.url = `${cfg.site}/properties/${slug}/`;
 
-  const sourceRef = meta.messageId
-    ? `WA-${(meta.listedAt || new Date().toISOString().slice(0, 10)).replace(/-/g, '')}-${String(meta.messageId).replace(/[^A-Za-z0-9]/g, '').slice(0, 6).toUpperCase()}`
-    : `WA-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${report.sha256.slice(0, 6).toUpperCase()}`;
+  const day = (meta.listedAt || todayRiyadh()).replace(/-/g, '');
+  const tail = meta.messageId ? String(meta.messageId).replace(/[^A-Za-z0-9]/g, '').slice(0, 6) : report.sha256.slice(0, 6);
+  const sourceRef = `WA-${day}-${tail.toUpperCase()}`;
 
   if (dryRun) {
     report.stage = 'dry-run';

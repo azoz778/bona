@@ -11,7 +11,7 @@ export const SENSITIVE_RE = new RegExp(
     'الرقم الضريبي', 'رخصة', 'جواز سفر', 'راتب', 'شيك', 'اتفاقية', 'عقد إيجار', 'عقد بيع',
     'صك', 'وكالة شرعية', 'كشف الحساب',
     // English
-    'tax invoice', 'vat certificate', 'vat registration', 'invoice no', 'receipt',
+    'invoice', 'vat certificate', 'vat registration', 'receipt',
     'bank statement', 'account statement', 'estatement', 'iban', 'swift code',
     'passport', 'national id', 'identity card', 'commercial registration',
     'payslip', 'salary', 'cheque', 'purchase agreement', 'lease agreement',
@@ -53,7 +53,8 @@ export function classifyPdf(extraction, opts = {}) {
   }
   const text = normaliseArabic(extraction.text || '');
   const pages = Number(extraction.pages || 0);
-  const name = normaliseArabic(opts.fileName || '');
+  // File names use hyphens/underscores where the phrases use spaces ("bank-statement.pdf").
+  const name = normaliseArabic(opts.fileName || '').replace(/[-_.]+/g, ' ');
 
   const sensitive = SENSITIVE_RE.exec(text) || SENSITIVE_RE.exec(name);
   if (sensitive) return { ok: false, reason: `looks like a private document ("${sensitive[0]}") — not published` };
@@ -63,9 +64,11 @@ export function classifyPdf(extraction, opts = {}) {
   const hit = PROPERTY_RE.exec(text);
   if (hit) return { ok: true, reason: `property brochure signals found ("${hit[0]}")` };
 
-  // Image-heavy design PDF (Canva/Illustrator) with no extractable text.
+  // Image-heavy design PDF (Canva/Illustrator) with no extractable text layer at all.
+  // Deliberately narrow: a document that HAS readable text but no property words is a
+  // document about something else, and default-deny means it stays off the website.
   const images = Number(extraction.embeddedImageCount || 0);
-  if (text.length < 200 && images >= pages) {
+  if (text.length < 40 && images >= pages * 2) {
     return { ok: true, reason: `image-heavy design PDF (${images} images / ${pages} pages)` };
   }
 

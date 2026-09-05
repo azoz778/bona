@@ -1,0 +1,124 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import { HELP_TEXT, parseCaption, parseCommand, parsePriceHint } from '../lib/commands.mjs';
+
+describe('parseCaption', () => {
+  it('reads an empty caption', () => {
+    const c = parseCaption('');
+    assert.equal(c.dryRun, false);
+    assert.equal(c.publishBrochure, false);
+    assert.equal(c.hidden, false);
+    assert.equal(c.category, null);
+    assert.equal(c.price, null);
+    assert.equal(c.period, null);
+  });
+
+  it('detects #test, #brochure and #hidden', () => {
+    const c = parseCaption('villa #test #brochure #hidden');
+    assert.equal(c.dryRun, true);
+    assert.equal(c.publishBrochure, true);
+    assert.equal(c.hidden, true);
+    assert.deepEqual(c.tags.sort(), ['brochure', 'hidden', 'test']);
+  });
+
+  it('maps rent hints in both languages and defaults the period to year', () => {
+    assert.equal(parseCaption('for rent').category, 'rent');
+    assert.equal(parseCaption('للإيجار').category, 'rent');
+    assert.equal(parseCaption('for rent').period, 'year');
+    assert.equal(parseCaption('for rent 250000 per month').period, 'month');
+  });
+
+  it('never sets a period on a sale', () => {
+    const c = parseCaption('for sale 4,500,000 SAR per year');
+    assert.equal(c.category, 'buy');
+    assert.equal(c.period, null);
+  });
+
+  it('maps off-plan and international', () => {
+    assert.equal(parseCaption('off-plan').category, 'off-plan');
+    assert.equal(parseCaption('international listing').category, 'international');
+  });
+});
+
+describe('parsePriceHint', () => {
+  const cases = [
+    ['SAR 4,500,000', 4500000, 'SAR'],
+    ['4.5m SAR', 4500000, 'SAR'],
+    ['price 750000', 750000, 'SAR'],
+    ['AED 2,000,000', 2000000, 'AED'],
+    ['٤٥٠٠٠٠٠ ريال', 4500000, 'SAR'],
+    ['990,000 ر.س', 990000, 'SAR'],
+    ['1.2 million', 1200000, 'SAR'],
+    ['850k SAR', 850000, 'SAR'],
+  ];
+  for (const [input, amount, currency] of cases) {
+    it(`reads ${JSON.stringify(input)}`, () => {
+      const p = parsePriceHint(input);
+      assert.ok(p, `expected a price from ${input}`);
+      assert.equal(p.amount, amount);
+      assert.equal(p.currency, currency);
+    });
+  }
+
+  it('ignores small bare numbers so specs are not read as prices', () => {
+    assert.equal(parsePriceHint('3 bedrooms 4 bathrooms 174 sqm'), null);
+  });
+
+  it('never invents a price from an empty caption (TAQEEM)', () => {
+    assert.equal(parsePriceHint(''), null);
+    assert.equal(parsePriceHint('villa in Al Khalidiyah'), null);
+  });
+
+  it('takes the largest figure when several appear', () => {
+    assert.equal(parsePriceHint('was 3,000,000 now SAR 4,500,000').amount, 4500000);
+  });
+});
+
+describe('parseCommand', () => {
+  it('stays silent on ordinary chatter', () => {
+    for (const text of ['hello', 'شكرا', 'when is the viewing?', '']) {
+      assert.equal(parseCommand(text).cmd, null, text);
+    }
+  });
+
+  it('parses remove', () => {
+    assert.deepEqual(parseCommand('remove BONA-W003'), { cmd: 'remove', id: 'BONA-W003' });
+    assert.deepEqual(parseCommand('remove bona-w003'), { cmd: 'remove', id: 'BONA-W003' });
+    assert.equal(parseCommand('remove').cmd, 'error');
+    assert.equal(parseCommand('remove BONA-003').cmd, 'error', 'curated ids are not editable from WhatsApp');
+  });
+
+  it('parses hero with a 1-based photo number', () => {
+    assert.deepEqual(parseCommand('hero BONA-W003 4'), { cmd: 'hero', id: 'BONA-W003', index: 4 });
+    assert.equal(parseCommand('hero BONA-W003 0').cmd, 'error');
+    assert.equal(parseCommand('hero BONA-W003').cmd, 'error');
+  });
+
+  it('parses price, including on-request', () => {
+    assert.deepEqual(parseCommand('price BONA-W003 4500000'), { cmd: 'price', id: 'BONA-W003', amount: 4500000, currency: 'SAR', onRequest: false });
+    assert.deepEqual(parseCommand('price BONA-W003 onrequest'), { cmd: 'price', id: 'BONA-W003', onRequest: true });
+    assert.deepEqual(parseCommand('price BONA-W003 on request'), { cmd: 'price', id: 'BONA-W003', onRequest: true });
+    assert.equal(parseCommand('price BONA-W003').cmd, 'error');
+  });
+
+  it('parses the status verbs', () => {
+    assert.deepEqual(parseCommand('sold BONA-W003'), { cmd: 'status-set', id: 'BONA-W003', status: 'sold' });
+    assert.deepEqual(parseCommand('reserved BONA-W003'), { cmd: 'status-set', id: 'BONA-W003', status: 'reserved' });
+    assert.deepEqual(parseCommand('available BONA-W003'), { cmd: 'status-set', id: 'BONA-W003', status: 'available' });
+    assert.deepEqual(parseCommand('hide BONA-W003'), { cmd: 'hidden-set', id: 'BONA-W003', hidden: true });
+    assert.deepEqual(parseCommand('show BONA-W003'), { cmd: 'hidden-set', id: 'BONA-W003', hidden: false });
+  });
+
+  it('parses help / status / retry, with or without a leading slash', () => {
+    assert.equal(parseCommand('help').cmd, 'help');
+    assert.equal(parseCommand('/help').cmd, 'help');
+    assert.equal(parseCommand('status').cmd, 'status');
+    assert.equal(parseCommand('retry').cmd, 'retry');
+  });
+
+  it('documents every command it accepts', () => {
+    for (const verb of ['remove', 'hero', 'price', 'sold', 'hide', 'status']) {
+      assert.ok(HELP_TEXT.includes(verb), `HELP_TEXT should mention ${verb}`);
+    }
+  });
+});
