@@ -6,7 +6,7 @@ import ListingCard from '../ListingCard.astro';
 import SectionHead from '../SectionHead.astro';
 import site from '../../data/site.json';
 import { localePath, t, ui, type Locale, count, countForms_ } from '../../lib/i18n';
-import { listings, ordered, categories, categoryLabel, categorySlug, typesIn, typeLabel, kindOf, kindSlug, categoriesIn, type Listing, type Kind } from '../../lib/listings';
+import { listings, ordered, categories, categoryLabel, categorySlug, typesIn, typeLabel, kindOf, kindSlug, categoriesIn, type Listing, type Kind , nonEmptyCategories } from '../../lib/listings';
 import { breadcrumbJsonLd , collectionPageJsonLd } from '../../lib/seo';
 interface Props { locale: Locale; category?: Listing['category']; kind?: Kind }
 const { locale, category, kind } = Astro.props;
@@ -24,7 +24,7 @@ const kindCopy = {
 const title = kind ? t(kindCopy[kind].title, locale) : all ? t(ui.properties, locale) : t(copy[category!].title, locale);
 const intro = kind ? t(kindCopy[kind].intro, locale) : all ? t(ui.propertiesIntro, locale) : t(copy[category!].intro, locale);
 const types = typesIn(items);
-const chipCats = kind ? categoriesIn(items) : categories;
+const chipCats = kind ? categoriesIn(items) : nonEmptyCategories();
 const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { name: t(ui.properties, locale), path: localePath(locale, '/properties/') }];
 if (!all) crumbs.push({ name: title, path });
 const countText = (n: number) => count(n, 'residence', locale);

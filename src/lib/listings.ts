@@ -173,3 +173,7 @@ export function imageAlt(img: { alt?: Localised } | undefined, l: Listing, local
   const a = img?.alt?.[locale] ?? img?.alt?.en;
   return a || localeTitle(l, locale);
 }
+
+/** Categories that currently have at least one listing (empty sections are hidden from nav, chips and footer). */
+export const nonEmptyCategories = (): Listing['category'][] => categories.filter(c => byCategory(c).some(l => l.status !== 'sold'));
+export const hasCategory = (c: Listing['category']): boolean => nonEmptyCategories().includes(c);

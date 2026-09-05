@@ -3,7 +3,7 @@ import Logo from './Logo.astro';
 import Icon from './Icon.astro';
 import site from '../data/site.json';
 import { localePath, t, ui, waLink, type Locale } from '../lib/i18n';
-import { kindsPresent, kindSlug, kindLabelPlural } from '../lib/listings';
+import { kindsPresent, kindSlug, kindLabelPlural , hasCategory } from '../lib/listings';
 interface Props { locale: Locale }
 const { locale } = Astro.props;
 const year = new Date().getFullYear();
@@ -14,8 +14,8 @@ const nav: [string, string][] = [
   [localePath(locale, '/properties/houses/'), t(ui.navHouses, locale)],
   [localePath(locale, '/properties/apartments/'), t(ui.navApartments, locale)],
   ...extraKinds.map(k => [localePath(locale, `/properties/${kindSlug[k]}/`), t(kindLabelPlural[k], locale)] as [string, string]),
-  [localePath(locale, '/properties/off-plan/'), t(ui.navOffPlan, locale)],
-  [localePath(locale, '/properties/international/'), t(ui.navInternational, locale)],
+  ...(hasCategory('off-plan') ? [[localePath(locale, '/properties/off-plan/'), t(ui.navOffPlan, locale)]] : []),
+  ...(hasCategory('international') ? [[localePath(locale, '/properties/international/'), t(ui.navInternational, locale)]] : []),
   [localePath(locale, '/properties/'), t(ui.navAllProperties, locale)],
   [localePath(locale, '/tours/'), t(ui.navTours, locale)],
   [localePath(locale, '/about/'), t(ui.navAbout, locale)],

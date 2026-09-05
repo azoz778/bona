@@ -55,3 +55,6 @@ Rules: prices are asking prices from TK only (never an estimate — TAQEEM rule)
 - `virtualTourUrl` must be a full `https://my.matterport.com/show/?m=<id>` URL; `scripts/sync-listings.mjs` fills it from the API when local is null and never clears a local value.
 - IDs are positional (`BONA-###` = index+1 in `listings.source.mjs`): new listings are appended at the END of the array, never inserted.
 - Curation helpers: `node scripts/curate/contact-sheet.mjs <gallery-folder> <out.jpg>` (labelled index sheet) and `node scripts/curate/land-stills.mjs <PLOT-ID> <lat> <lng>`.
+
+## Publication rule (owner, 2026-09-05 20:45)
+Only listings whose `sourceRef` exists in TK's live public API (scripts/tk-public-properties.snapshot.json, refreshed from https://dashboard.azoz.uk/api/public/properties) AND whose API status is available are written to listings.json. `scripts/curate/build.mjs` enforces it; anything from the old TK website that is not in the live list is excluded.
