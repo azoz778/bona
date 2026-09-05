@@ -67,3 +67,38 @@ Only listings whose `sourceRef` exists in TK's live public API (scripts/tk-publi
 
 ## Land (owner decision 2026-09-05 21:00)
 Land plots are curated (13 in listings.source.mjs, stills in public/land/) but NOT published: `LAND_PUBLIC = false` in build.mjs. Share plot details only on enquiry. The /properties/land/ route is not generated while there are no land listings.
+
+## WhatsApp intake (2026-09-05, `services/intake`)
+The owner publishes a listing by dropping a property brochure PDF into a WhatsApp group whose
+subject contains "Bona". `services/intake` reads it from his own Evolution instance, extracts the
+text and photos, has `claude -p` write the copy and rank the photos, and writes the result into
+this repo. Nothing else in the pipeline changes.
+
+- **Where the listing lives**: `scripts/curate/inbox/<slug>.json` — one file per listing, holding
+  the FINAL listing object (not a `listings.source.mjs` entry). `scripts/curate/build.mjs` appends
+  every inbox file to `listings.json` **after** the TK live-list filter. Intake listings are
+  owner-authored, not TK stock, so they are **exempt from the TK publication rule** above.
+  `scripts/curate/inbox/_index.json` holds `{ nextSeq, listings }` — the `BONA-W###` counter.
+- **`id`**: `BONA-W###` (W = WhatsApp), allocated from `_index.json` and never reused. Curated
+  listings keep their positional `BONA-###`. `validate.mjs` accepts both.
+- **Two intake-only fields, stripped by `build.mjs` and never present in `listings.json`**:
+  - `hidden: true` — keep the listing out of the site without deleting it (`hide`/`show` commands).
+  - `_intake: { source, messageId, groupJid, pdfSha256, pdfFileName, caption, model, confidence,
+    warnings, images[], createdAt, site }` — provenance, so a listing can always be traced back to
+    the WhatsApp message and the PDF that produced it.
+  A `status: "sold"` intake listing stays published and renders with the Sold badge.
+- **Images**: stored in this repo at `public/listings/<slug>/<nn>.jpg` (max 1920 px, q82, EXIF
+  stripped) with `<nn>-thumb.webp` (640 px). `src` and `thumb` are therefore site-local paths, and
+  `validate.mjs` accepts `/^\/(land|listings)\/[A-Za-z0-9-]+(?:\/[A-Za-z0-9-]+)?\.(jpg|webp)$/`
+  for both (`/land/` stills remain land-only). Consumers must not prefix them with a CDN host —
+  `ListingCard`, `Gallery` and `Head` already pass them through, and `lib/seo.ts::absoluteUrl`
+  turns `/listings/<slug>/01.jpg` into a full `https://bona.azoz.uk/...` OG image.
+  `images[0]` is the hero, exactly as for curated listings. 4–10 images; a PDF that yields fewer
+  than 4 usable photographs is rejected rather than published thin.
+- **`sourceRef`**: `WA-<yyyymmdd>-<6 chars of the WhatsApp message id>`. It is deliberately NOT a
+  TK reference, and `build.mjs` never looks it up in the TK API.
+- **`brochureUrl`**: set to `https://bona.azoz.uk/listings/<slug>/brochure.pdf` only when the owner
+  captioned the PDF with `#brochure`; the PDF is then committed alongside the photos.
+- **Price**: TAQEEM still applies. The price is used only when it is printed in the PDF or typed in
+  the caption; otherwise `price.onRequest = true` and `price.amount = null`. The intake never
+  estimates.

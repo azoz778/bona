@@ -1,0 +1,155 @@
+// Caption hints (sent with the PDF) and text commands (sent afterwards).
+// Everything here is pure — the unit tests own this file.
+
+export const CURRENCIES = ['SAR', 'AED', 'EUR', 'USD', 'OMR'];
+
+const CATEGORY_HINTS = [
+  [/#?\b(for[- ]?rent|rent|rental|إيجار|للإيجار|للايجار)\b/i, 'rent'],
+  [/#?\b(off[- ]?plan|under[- ]?construction|على[ -]?الخارطة|تحت الإنشاء)\b/i, 'off-plan'],
+  [/#?\b(international|overseas|خارج المملكة|دولي)\b/i, 'international'],
+  [/#?\b(for[- ]?sale|sale|buy|للبيع|بيع)\b/i, 'buy'],
+];
+
+const PERIOD_HINTS = [
+  [/\b(per|\/)\s*(year|yr|annum|سنة|سنوي|سنويا|سنوياً)\b/i, 'year'],
+  [/\b(per|\/)\s*(month|mo|شهر|شهري|شهريا|شهرياً)\b/i, 'month'],
+];
+
+const ARABIC_DIGITS = { '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9' };
+const westernise = (s) => String(s).replace(/[٠-٩]/g, (d) => ARABIC_DIGITS[d]);
+
+/**
+ * A price the OWNER typed in the caption. Never an estimate — this only reads an
+ * explicit figure. Returns null when the caption carries no number.
+ */
+export function parsePriceHint(caption) {
+  const s = westernise(caption || '');
+  // "SAR 4,500,000" | "4.5m sar" | "٤٥٠٠٠٠٠ ريال" | "price 750000"
+  const re = /(?:^|[\s(])(?:(SAR|AED|EUR|USD|OMR|ر\.س|ريال)\s*)?([0-9][0-9,،.\s]*)\s*(m|mn|million|k|مليون|ألف|الف)?\s*(SAR|AED|EUR|USD|OMR|ر\.س|ريال)?/gi;
+  let best = null;
+  for (const m of s.matchAll(re)) {
+    const rawNum = m[2].replace(/[,،\s]/g, '');
+    if (!rawNum || !/^\d+(\.\d+)?$/.test(rawNum)) continue;
+    let amount = Number(rawNum);
+    if (!Number.isFinite(amount)) continue;
+    const mult = (m[3] || '').toLowerCase();
+    if (/^(m|mn|million|مليون)$/.test(mult)) amount *= 1e6;
+    else if (/^(k|ألف|الف)$/.test(mult)) amount *= 1e3;
+    const cur = (m[1] || m[4] || '').toUpperCase();
+    const currency = cur === 'ر.س' || cur === 'ريال' ? 'SAR' : CURRENCIES.includes(cur) ? cur : null;
+    // A bare number only counts as a price when it is plausibly one (>= 10,000) —
+    // otherwise "3 bedrooms" would become a price.
+    if (!currency && amount < 10000) continue;
+    if (amount < 1000) continue;
+    if (!best || amount > best.amount) best = { amount, currency: currency || 'SAR', explicitCurrency: Boolean(currency) };
+  }
+  return best;
+}
+
+/**
+ * Parse the caption sent with the PDF.
+ * @returns {{dryRun:boolean, publishBrochure:boolean, hidden:boolean, category:string|null,
+ *            price:{amount:number,currency:string}|null, period:'year'|'month'|null,
+ *            tags:string[], text:string}}
+ */
+export function parseCaption(caption) {
+  const text = String(caption || '').trim();
+  const tags = [...text.matchAll(/#([A-Za-z0-9_-]{1,32})/g)].map((m) => m[1].toLowerCase());
+  const has = (t) => tags.includes(t);
+  let category = null;
+  for (const [re, value] of CATEGORY_HINTS) {
+    if (re.test(text)) { category = value; break; }
+  }
+  let period = null;
+  for (const [re, value] of PERIOD_HINTS) {
+    if (re.test(text)) { period = value; break; }
+  }
+  if (category === 'rent' && !period) period = 'year';
+  if (category !== 'rent') period = null;
+  const price = parsePriceHint(text);
+  return {
+    text,
+    tags,
+    dryRun: has('test') || has('dry') || has('draft'),
+    publishBrochure: has('brochure') || has('pdf'),
+    hidden: has('hidden') || has('private'),
+    category,
+    price: price ? { amount: price.amount, currency: price.currency } : null,
+    period,
+  };
+}
+
+export const LISTING_ID_RE = /^BONA-W\d{3}$/i;
+
+/**
+ * Parse a text message as a command. Returns { cmd: null } for ordinary chatter so the
+ * daemon stays silent instead of replying to everything.
+ * Supported: remove <id> | hero <id> <n> | price <id> <amount> [currency] | price <id> onrequest
+ *            sold <id> | available <id> | hide <id> | show <id> | retry | help | status
+ */
+export function parseCommand(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return { cmd: null };
+  const parts = raw.split(/\s+/);
+  const verb = parts[0].toLowerCase().replace(/^[/!]/, '');
+  const arg = (i) => parts[i] ?? '';
+  const idAt = (i) => (LISTING_ID_RE.test(arg(i)) ? arg(i).toUpperCase() : null);
+
+  switch (verb) {
+    case 'help':
+    case 'commands':
+      return { cmd: 'help' };
+    case 'status':
+      return { cmd: 'status' };
+    case 'retry':
+      return { cmd: 'retry' };
+    case 'remove':
+    case 'delete':
+    case 'unpublish': {
+      const id = idAt(1);
+      return id ? { cmd: 'remove', id } : { cmd: 'error', message: 'usage: remove BONA-W001' };
+    }
+    case 'hero': {
+      const id = idAt(1);
+      const n = Number(arg(2));
+      if (!id || !Number.isInteger(n) || n < 1) return { cmd: 'error', message: 'usage: hero BONA-W001 4  (4 = the photo number to promote)' };
+      return { cmd: 'hero', id, index: n };
+    }
+    case 'price': {
+      const id = idAt(1);
+      if (!id) return { cmd: 'error', message: 'usage: price BONA-W001 4500000  |  price BONA-W001 onrequest' };
+      const rest = parts.slice(2).join(' ');
+      if (/^\s*(on ?request|onrequest|عند الطلب)\s*$/i.test(rest)) return { cmd: 'price', id, onRequest: true };
+      const p = parsePriceHint(rest);
+      if (!p) return { cmd: 'error', message: 'usage: price BONA-W001 4500000  |  price BONA-W001 onrequest' };
+      return { cmd: 'price', id, amount: p.amount, currency: p.currency, onRequest: false };
+    }
+    case 'sold':
+      return idAt(1) ? { cmd: 'status-set', id: idAt(1), status: 'sold' } : { cmd: 'error', message: 'usage: sold BONA-W001' };
+    case 'reserved':
+      return idAt(1) ? { cmd: 'status-set', id: idAt(1), status: 'reserved' } : { cmd: 'error', message: 'usage: reserved BONA-W001' };
+    case 'available':
+      return idAt(1) ? { cmd: 'status-set', id: idAt(1), status: 'available' } : { cmd: 'error', message: 'usage: available BONA-W001' };
+    case 'hide':
+      return idAt(1) ? { cmd: 'hidden-set', id: idAt(1), hidden: true } : { cmd: 'error', message: 'usage: hide BONA-W001' };
+    case 'show':
+    case 'publish':
+      return idAt(1) ? { cmd: 'hidden-set', id: idAt(1), hidden: false } : { cmd: 'error', message: 'usage: show BONA-W001' };
+    default:
+      return { cmd: null };
+  }
+}
+
+export const HELP_TEXT = [
+  'Bona intake — commands',
+  '',
+  'Send a property brochure PDF here to publish it.',
+  'Caption hints: rent · off-plan · SAR 4,500,000 · #test (dry run) · #brochure (also publish the PDF) · #hidden',
+  '',
+  'remove BONA-W001        take the listing off the site',
+  'hero BONA-W001 4        make photo 4 the cover',
+  'price BONA-W001 4500000 set the asking price (or: price BONA-W001 onrequest)',
+  'sold BONA-W001          mark it sold   (also: reserved / available)',
+  'hide BONA-W001          keep it off the site  (show BONA-W001 puts it back)',
+  'status                  what the intake is doing',
+].join('\n');
