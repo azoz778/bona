@@ -396,7 +396,7 @@ test('unknown routes and wrong methods are handled without leaking internals', a
   await withServer({}, async ({ call }) => {
     assert.equal((await call('/v1/nope')).status, 404);
     assert.equal((await call('/v1/chat/session')).status, 404);
-    assert.equal((await call('/health', { method: 'POST' })).status, 404);
+    assert.equal((await call('/health', { method: 'POST' })).status, 405, 'a known route with the wrong method is 405');
   });
 });
 

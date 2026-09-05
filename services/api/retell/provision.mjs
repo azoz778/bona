@@ -230,17 +230,17 @@ async function withModelFallback(fn, { preferred, fallback, log }) {
   }
 }
 
-export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE, log = console.log, clientFactory = createRetellClient } = {}) {
+export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE, home = os.homedir(), log = console.log, clientFactory = createRetellClient } = {}) {
   const dryRun = argv.includes('--dry-run');
   const publish = argv.includes('--publish') || truthy(env.BONA_RETELL_PUBLISH, false);
   const separateChatAgent = truthy(env.BONA_RETELL_SEPARATE_CHAT_AGENT, true);
 
-  const envInfo = ensureEnvFile({ env });
+  const envInfo = ensureEnvFile({ home, env });
   if (envInfo.created) log(`~ created ${envInfo.file} (${envInfo.keys.length} keys, 0600) — values not printed`);
   else if (envInfo.added.length) log(`~ topped up ${envInfo.file} with: ${envInfo.added.join(', ')}`);
 
   // Re-read: the file may have just been created with a fresh BONA_TOOL_TOKEN.
-  const merged = { ...loadEnv(), ...(env === process.env ? {} : env) };
+  const merged = { ...loadEnv({ home }), ...(env === process.env ? {} : env) };
   const siteUrl = String(merged.BONA_SITE ?? 'https://bona.azoz.uk').replace(/\/+$/, '');
   const publicApi = String(merged.BONA_PUBLIC_API ?? 'https://api.bona.azoz.uk').replace(/\/+$/, '');
   const toolToken = merged.BONA_TOOL_TOKEN ?? '';
@@ -253,7 +253,6 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
 
   const prompt = fs.readFileSync(PROMPT_FILE, 'utf8');
   const ids = readIds(idsFile);
-  const client = clientFactory({ apiKey: merged.RETELL_API_KEY, mock: dryRun && !merged.RETELL_API_KEY });
 
   const kbBody = knowledgeBasePayload({ siteUrl });
   const llmBody = (model, kbIds) => llmPayload({ prompt, model, knowledgeBaseIds: kbIds, publicApi, toolToken });
@@ -271,6 +270,7 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
   }
 
   if (!merged.RETELL_API_KEY) throw new Error('RETELL_API_KEY is missing — expected in ~/.secrets/retell.env');
+  const client = clientFactory({ apiKey: merged.RETELL_API_KEY });
 
   /* 1. Knowledge base ------------------------------------------------ */
   let knowledgeBaseId = ids.knowledgeBaseId ?? null;

@@ -1,0 +1,14 @@
+{
+  "knowledgeBaseId": null,
+  "llmId": null,
+  "voiceAgentId": null,
+  "chatAgentId": null,
+  "model": null,
+  "voiceId": "11labs-Nyla",
+  "publicApi": "https://api.bona.azoz.uk",
+  "siteUrl": "https://bona.azoz.uk",
+  "separateChatAgent": true,
+  "published": false,
+  "note": "Placeholder. Ids are not secrets. Run `node services/api/retell/provision.mjs` to fill this in; re-running updates the same objects in place.",
+  "updatedAt": null
+}

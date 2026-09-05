@@ -75,8 +75,9 @@ export async function readBody(req, maxBytes) {
     req.on('data', (chunk) => {
       size += chunk.length;
       if (size > maxBytes) {
+        // Stop reading but leave the socket alive long enough to answer 413.
+        req.pause();
         reject(Object.assign(new Error('body too large'), { code: 'BODY_TOO_LARGE' }));
-        req.destroy();
         return;
       }
       chunks.push(chunk);
@@ -306,7 +307,10 @@ export function createApp(options = {}) {
     try {
       body = parseJsonBody(await readBody(req, cfg.maxBodyBytes));
     } catch (err) {
-      if (err?.code === 'BODY_TOO_LARGE') return sendJson(res, 413, { error: 'payload_too_large' }, cors);
+      if (err?.code === 'BODY_TOO_LARGE') {
+        res.on('finish', () => req.destroy());
+        return sendJson(res, 413, { error: 'payload_too_large' }, { ...cors, Connection: 'close' });
+      }
       return sendJson(res, 400, { error: 'invalid_json' }, cors);
     }
 
@@ -322,7 +326,7 @@ export function createApp(options = {}) {
       const name = toolMatch[1];
       if (!TOOL_NAMES.includes(name)) return sendJson(res, 404, { error: 'unknown_tool' });
       try {
-        return sendRaw(res, 200, await tools.run(name, body));
+        return sendRaw(res, 200, JSON.stringify(await tools.run(name, body)));
       } catch (err) {
         log({ level: 'error', evt: 'tool.failed', tool: name, error: String(err?.message ?? err) });
         return sendRaw(res, 200, JSON.stringify(JSON.stringify({ error: 'tool_failed', note: 'Tell the visitor you cannot check that right now and offer WhatsApp +966 59 329 6933.' })));

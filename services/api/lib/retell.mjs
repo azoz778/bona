@@ -30,7 +30,10 @@ export class RetellError extends Error {
 }
 
 /** True for 4xx other than 429 — a payload/config problem, not a transient one. */
-export const isClientError = (err) => err instanceof RetellError && err.status >= 400 && err.status < 500 && err.status !== 429;
+export const isClientError = (err) => {
+  const status = Number(err?.status);
+  return Number.isFinite(status) && status >= 400 && status < 500 && status !== 429;
+};
 
 export function createRetellClient({ apiKey, baseUrl = RETELL_BASE, fetchImpl = globalThis.fetch, mock = false, timeoutMs = 30_000 } = {}) {
   if (!mock && !apiKey) throw new Error('RETELL_API_KEY is required (set it in ~/.secrets/retell.env)');

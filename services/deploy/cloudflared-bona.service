@@ -1,0 +1,23 @@
+[Unit]
+Description=Cloudflare tunnel "bona" — api.bona.azoz.uk -> localhost:4102
+Documentation=https://github.com/azoz778/bona/blob/main/services/README.md
+After=network-online.target bona-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/cloudflared --no-autoupdate --config %h/.cloudflared/bona.yml tunnel run bona
+Restart=always
+RestartSec=10
+TimeoutStopSec=15
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cloudflared-bona
+
+NoNewPrivileges=true
+MemoryMax=256M
+
+[Install]
+WantedBy=default.target
