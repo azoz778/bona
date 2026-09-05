@@ -259,14 +259,14 @@ export const ui = {
   openMap: s('Open location in Google Maps', 'فتح الموقع في خرائط جوجل'),
 
   // Matterport / tours
-  tour3dTitle: s('Walk through in 3D', 'تجوّل في المنزل ثلاثي الأبعاد'),
+  tour3dTitle: s('Walk through in 3D', 'تجوّل في العقار بتقنية ثلاثية الأبعاد'),
   tour3dIntro: s('A Matterport scan of the residence. Move from room to room, look around and measure, before you visit.', 'مسح ماتربورت للمسكن. تنقّل بين الغرف وانظر حولك وقِس الأبعاد، قبل الزيارة.'),
   playTour: s('Start the 3D tour', 'ابدأ الجولة ثلاثية الأبعاد'),
   openInMatterport: s('Open in Matterport', 'فتح في ماتربورت'),
   tourFrameTitle: s('3D tour of {title}', 'جولة ثلاثية الأبعاد في {title}'),
   badge3d: s('3D tour', 'جولة ثلاثية الأبعاد'),
   toursTitle: s('Virtual tours', 'جولات افتراضية'),
-  toursIntro: s('Walk through these residences in 3D before you visit. New tours are added as homes are scanned.', 'تجوّل في هذه المساكن ثلاثي الأبعاد قبل زيارتها. تُضاف جولات جديدة كلما صُوّر منزل.'),
+  toursIntro: s('Walk through these residences in 3D before you visit. New tours are added as homes are scanned.', 'تجوّل في هذه المساكن بتقنية ثلاثية الأبعاد قبل زيارتها. تُضاف جولات جديدة كلما صُوّر منزل.'),
   toursMetaTitle: s('Virtual 3D tours of homes in Jeddah', 'جولات افتراضية ثلاثية الأبعاد لمنازل في جدة'),
   toursMetaDesc: s('Matterport 3D walkthroughs of villas, apartments and residences represented by Bona in Jeddah. Explore room by room before you visit.', 'جولات ماتربورت ثلاثية الأبعاد في فلل وشقق ومساكن تمثّلها بونا في جدة. استكشف غرفةً غرفة قبل الزيارة.'),
   toursEmpty: s('No virtual tours are available at the moment. New scans are added regularly.', 'لا تتوفر جولات افتراضية حالياً. تُضاف جولات جديدة بانتظام.'),
@@ -310,11 +310,11 @@ export function fill(template: string, vars: Record<string, string | number>): s
 }
 
 /** Arabic-aware count phrases. Forms: one/two/few(3–10)/many(11+)/other; falls back to EN "{n} unit(s)". */
-const countForms: Record<string, { en: [string, string]; ar: { one: string; two: string; few: string; many: string; other: string } }> = {
-  residence: { en: ['residence', 'residences'], ar: { one: 'عقار واحد', two: 'عقاران', few: '{n} عقارات', many: '{n} عقاراً', other: '{n} عقار' } },
-  bed: { en: ['bd', 'bd'], ar: { one: 'غرفة واحدة', two: 'غرفتان', few: '{n} غرف', many: '{n} غرفة', other: '{n} غرفة' } },
-  bath: { en: ['ba', 'ba'], ar: { one: 'حمّام واحد', two: 'حمّامان', few: '{n} حمّامات', many: '{n} حمّاماً', other: '{n} حمّام' } },
-  photo: { en: ['photo', 'photos'], ar: { one: 'صورة واحدة', two: 'صورتان', few: '{n} صور', many: '{n} صورة', other: '{n} صورة' } },
+const countForms: Record<string, { en: [string, string]; ar: { zero: string; one: string; two: string; few: string; many: string; other: string } }> = {
+  residence: { en: ['residence', 'residences'], ar: { zero: 'لا توجد عقارات', one: 'عقار واحد', two: 'عقاران', few: '{n} عقارات', many: '{n} عقاراً', other: '{n} عقار' } },
+  bed: { en: ['bd', 'bd'], ar: { zero: 'بلا غرف', one: 'غرفة واحدة', two: 'غرفتان', few: '{n} غرف', many: '{n} غرفة', other: '{n} غرفة' } },
+  bath: { en: ['ba', 'ba'], ar: { zero: 'بلا حمّامات', one: 'حمّام واحد', two: 'حمّامان', few: '{n} حمّامات', many: '{n} حمّاماً', other: '{n} حمّام' } },
+  photo: { en: ['photo', 'photos'], ar: { zero: 'لا توجد صور', one: 'صورة واحدة', two: 'صورتان', few: '{n} صور', many: '{n} صورة', other: '{n} صورة' } },
 };
 export function count(n: number, unit: keyof typeof countForms, locale: Locale): string {
   const f = countForms[unit];

@@ -15,35 +15,50 @@
   },
   "values": [
     {
-      "title": { "en": "Discretion", "ar": "التحفّظ" },
+      "title": {
+        "en": "Discretion",
+        "ar": "التحفّظ"
+      },
       "text": {
         "en": "Nothing about you or your home is shared without consent. Some of our best work is never advertised.",
         "ar": "لا يُشارك شيء عنك أو عن منزلك دون إذن. وبعض أفضل أعمالنا لا يُعلن عنه أبداً."
       }
     },
     {
-      "title": { "en": "Judgement", "ar": "حسن التقدير" },
+      "title": {
+        "en": "Judgement",
+        "ar": "حسن التقدير"
+      },
       "text": {
         "en": "We would rather decline a listing than misprice it. Asking prices only, never estimates, and honest advice even when it costs us the instruction.",
         "ar": "نفضّل أن نعتذر عن عقار على أن نسعّره خطأً. أسعار الطلب فقط لا التقديرات، ورأي صريح حتى حين يكلّفنا التوكيل."
       }
     },
     {
-      "title": { "en": "Access", "ar": "الوصول" },
+      "title": {
+        "en": "Access",
+        "ar": "الوصول"
+      },
       "text": {
         "en": "Off-market homes, developer allocations and partners abroad: the introductions that do not come from a search bar.",
         "ar": "منازل خارج السوق، وتخصيصات من المطوّرين، وشركاء في الخارج: تعريفات لا تأتي من شريط بحث."
       }
     },
     {
-      "title": { "en": "Care", "ar": "العناية" },
+      "title": {
+        "en": "Care",
+        "ar": "العناية"
+      },
       "text": {
         "en": "One principal from the first message to the handover, in Arabic or English, at the pace you set.",
         "ar": "شريك واحد من أول رسالة حتى التسليم، بالعربية أو الإنجليزية، وبالوتيرة التي تحدّدها أنت."
       }
     },
     {
-      "title": { "en": "Independence", "ar": "الاستقلالية" },
+      "title": {
+        "en": "Independence",
+        "ar": "الاستقلالية"
+      },
       "text": {
         "en": "We are not tied to a developer, a portal or a franchise. The advice you get is ours.",
         "ar": "لسنا مرتبطين بمطوّر أو منصة أو امتياز تجاري. الرأي الذي تحصل عليه رأينا نحن."
@@ -52,16 +67,47 @@
   ],
   "team": [
     {
-      "name": { "en": "Abdulaziz Zidan", "ar": "عبدالعزيز زيدان" },
-      "role": { "en": "Founder & Principal", "ar": "المؤسس والشريك الرئيسي" },
+      "name": {
+        "en": "Abdulaziz Zidan",
+        "ar": "عبدالعزيز زيدان"
+      },
+      "role": {
+        "en": "Founder & Principal",
+        "ar": "المؤسس والشريك الرئيسي"
+      },
       "licence": "1100313556",
       "photo": null
     }
   ],
   "stats": [
-    { "label": { "en": "Residences represented", "ar": "مساكن نمثّلها" }, "value": "29" },
-    { "label": { "en": "Jeddah districts", "ar": "أحياء في جدة" }, "value": "12" },
-    { "label": { "en": "Countries", "ar": "دول" }, "value": "5" },
-    { "label": { "en": "Founded", "ar": "تأسست" }, "value": "2026" }
-  ]
+    {
+      "label": {
+        "en": "Residences represented",
+        "ar": "مساكن نمثّلها"
+      },
+      "value": "29"
+    },
+    {
+      "label": {
+        "en": "Jeddah districts",
+        "ar": "أحياء في جدة"
+      },
+      "value": "12"
+    },
+    {
+      "label": {
+        "en": "Countries",
+        "ar": "دول"
+      },
+      "value": "5"
+    },
+    {
+      "label": {
+        "en": "Founded",
+        "ar": "تأسست"
+      },
+      "value": "2026"
+    }
+  ],
+  "founded": "2026"
 }

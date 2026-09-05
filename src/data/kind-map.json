@@ -1,0 +1,19 @@
+{
+  "villa": "house",
+  "mansion": "house",
+  "duplex": "house",
+  "palais": "house",
+  "townhouse": "house",
+  "chalet": "house",
+  "house": "house",
+  "apartment": "apartment",
+  "penthouse": "apartment",
+  "residence": "apartment",
+  "studio": "apartment",
+  "flat": "apartment",
+  "land": "land",
+  "plot": "land",
+  "building": "building",
+  "tower": "building",
+  "office": "building"
+}

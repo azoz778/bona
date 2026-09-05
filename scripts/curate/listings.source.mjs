@@ -632,24 +632,24 @@ export const LISTINGS = [
     slug: 'kayan-residence-al-nahda', sourceRef: null, status: 'available', category: 'off-plan', type: 'apartment', featured: false,
     title: { en: 'Kayan Residence, Al Nahda', ar: 'كيان ريزيدنس، النهضة' },
     location: loc({ en: 'Al Nahda', ar: 'النهضة' }),
-    price: { amount: 980000, currency: 'SAR', from: false, period: null, onRequest: false },
-    specs: { beds: 3, baths: 3, areaSqm: 136, plotSqm: null, yearBuilt: null, floors: null },
+    price: { amount: 940000, currency: 'SAR', from: true, period: null, onRequest: false },
+    specs: { beds: null, baths: 3, areaSqm: 136, plotSqm: null, yearBuilt: 2024, floors: null },
     project: KAYAN_PROJECT, // parent project page; units share its developer renders
     folder: 'kian-residence',
     images: [[17, 'exterior'], [13, 'facade_night'], [16, 'lobby'], [0, 'living'], [2, 'kitchen'], [3, 'living'], [10, 'cafe'], [14, 'gym'], [1, 'bathroom']],
     description: {
       en: [
-        'Kayan Residence brings hotel-style living to Al Nahda, minutes from Jeddah\'s principal destinations. Each apartment of 136 square metres holds a master bedroom, two further bedrooms, three bathrooms, a large living room and a modern kitchen, served by its own private elevator.',
+        'Kayan Residence brings hotel-style living to Al Nahda, minutes from Jeddah\'s principal destinations. Apartments of about 136 square metres offer two to three bedrooms, three bathrooms, a large living room and a modern kitchen, each served by its own private elevator; individual units are listed separately with their exact layout and price.',
         'The building offers a coffee-shop area, a children\'s play area, smart access and private parking, with a smart-home system, central air conditioning and quality finishes in every residence. Priced at SAR 980,000.',
       ],
       ar: [
-        'يقدم كيان ريزيدنس أسلوب سكن فندقياً في حي النهضة، على دقائق من أبرز وجهات جدة. تضم كل شقة بمساحة 136 متراً مربعاً غرفة نوم رئيسية وغرفتي نوم وثلاث دورات مياه وصالة واسعة ومطبخاً حديثاً، ويخدمها مصعد خاص.',
+        'يقدم كيان ريزيدنس أسلوب سكن فندقياً في حي النهضة، على دقائق من أبرز وجهات جدة. تضم الشقق، بمساحة نحو 136 متراً مربعاً، غرفتي نوم إلى ثلاث غرف وثلاث دورات مياه وصالة واسعة ومطبخاً حديثاً، ويخدم كل شقة مصعد خاص؛ وتُعرض الوحدات منفردةً بمخططها وسعرها الدقيقين.',
         'يوفر المبنى منطقة مقهى ومنطقة ألعاب للأطفال ودخولاً ذكياً ومواقف خاصة، مع نظام منزل ذكي وتكييف مركزي وتشطيبات عالية الجودة في كل مسكن. السعر 980,000 ريال سعودي.',
       ],
     },
     highlights: {
-      en: ['Private elevator for each apartment', 'Hotel-style residence', 'Coffee-shop and children\'s areas', 'Smart access and smart-home system', '136 sqm, three bedrooms', 'SAR 980,000'],
-      ar: ['مصعد خاص لكل شقة', 'سكن بأسلوب فندقي', 'مقهى ومنطقة للأطفال', 'دخول ذكي ونظام منزل ذكي', '136 متراً مربعاً وثلاث غرف نوم', '980,000 ريال سعودي'],
+      en: ['Private elevator for each apartment', 'Hotel-style residence', 'Coffee-shop and children\'s areas', 'Smart access and smart-home system', 'About 136 sqm, two to three bedrooms', 'From SAR 940,000'],
+      ar: ['مصعد خاص لكل شقة', 'سكن بأسلوب فندقي', 'مقهى ومنطقة للأطفال', 'دخول ذكي ونظام منزل ذكي', 'نحو 136 متراً مربعاً، غرفتا نوم إلى ثلاث', 'ابتداءً من 940,000 ريال سعودي'],
     },
     listedAt: '2026-09-05',
   },
@@ -1213,11 +1213,11 @@ export const LISTINGS = [
     description: {
       en: [
         'A corner plot of 625 square metres in Al Shati, on two 12-metre streets to the north and east, measuring 24 metres wide by 26 metres deep. It sits on the second block from King Road, north of Heraa Street, close to the district\'s commercial centres and the Jeddah waterfront.',
-        'Asking price SAR 4,200,000, about SAR 6,800 per square metre. The satellite frames show the plot\'s position and its surroundings.',
+        'Asking price SAR 4,200,000, about SAR 6,720 per square metre. The satellite frames show the plot\'s position and its surroundings.',
       ],
       ar: [
         'أرض زاوية بمساحة 625 متراً مربعاً في حي الشاطئ، على شارعين بعرض 12 متراً من الجهتين الشمالية والشرقية، بأبعاد 24 متراً عرضاً و26 متراً عمقاً. تقع في المربع الثاني من طريق الملك شمال شارع حراء، على مقربة من المراكز التجارية والواجهة البحرية لجدة.',
-        'السعر المطلوب 4,200,000 ريال سعودي، أي نحو 6,800 ريال للمتر المربع. توضح الصور الجوية موقع القطعة ومحيطها.',
+        'السعر المطلوب 4,200,000 ريال سعودي، أي نحو 6,720 ريالاً للمتر المربع. توضح الصور الجوية موقع القطعة ومحيطها.',
       ],
     },
     highlights: {

@@ -36,7 +36,16 @@ const fallbackValues = [
 const values = (data.values ?? []).filter(v => v?.title && v?.text);
 const valueItems = values.length ? values : fallbackValues;
 const team = (data.team ?? []).filter(m => m?.name && (m.name.en || m.name.ar));
-const stats = (data.stats ?? []).filter(s => s?.label && s?.value);
+const stats = (data.stats ?? []).filter(s => s?.label && s?.value).map(s => ({ ...s }));
+// Numbers that describe the inventory are computed from listings.json so the About page can never go stale.
+const live = listings.filter(l => l.status !== 'sold');
+const jeddahDistricts = new Set(live.filter(l => l.location.city.en === 'Jeddah').map(l => l.location.district.en)).size;
+const countries = new Set(live.map(l => l.location.countryCode)).size;
+for (const s of stats) {
+  if (/residences/i.test(s.label.en)) s.value = String(live.length);
+  else if (/districts/i.test(s.label.en)) s.value = String(jeddahDistricts);
+  else if (/countries/i.test(s.label.en)) s.value = String(countries);
+}
 /** Split "SAR 2.4bn+" into prefix / number / suffix for the count-up; non-numeric values render as plain text. */
 const parseStat = (v: string) => {
   const m = String(v).trim().match(/^([^\d]*)([\d][\d,]*(?:\.\d+)?)(.*)$/);

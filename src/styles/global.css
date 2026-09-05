@@ -247,7 +247,7 @@ html[dir="rtl"] .site-header .nav-link > span::after { --nav-origin: right; }
 .view-pill { position: fixed; left: 0; top: 0; z-index: 35; pointer-events: none; padding: .7rem 1.1rem; background: var(--color-ink); color: var(--color-ivory); font-family: var(--font-sans); font-size: 10px; letter-spacing: var(--tracking-luxe); text-transform: uppercase; font-weight: 600; line-height: 1; opacity: 0; scale: .8; transition: opacity .25s var(--ease-luxe), scale .25s var(--ease-luxe); will-change: transform; }
 html[dir="rtl"] .view-pill { font-family: var(--font-arabic); font-size: 12px; letter-spacing: 0; text-transform: none; font-weight: 500; }
 .view-pill.is-on { opacity: 1; scale: 1; }
-@media (hover: hover) and (pointer: fine) { [data-listing][data-view] a { cursor: none; } }
+@media (hover: hover) and (pointer: fine) { html.js [data-listing][data-view] a { cursor: none; } }
 
 /* ---- Kind tag + 3D badge ---- */
 .kind-tag { display: inline-block; padding: .3rem .5rem; border: 1px solid color-mix(in oklab, var(--color-ink) 18%, transparent); font-size: 9.5px; letter-spacing: var(--tracking-luxe); line-height: 1; color: var(--color-ink); }

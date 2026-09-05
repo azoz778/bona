@@ -82,11 +82,14 @@ export function sortablePrice(l: Listing): number {
 /** Similar residences: same category, then same city, excluding the listing itself. */
 export function similar(l: Listing, n = 3): Listing[] {
   const pool = listings.filter(x => x.slug !== l.slug && x.status !== 'sold');
-  const sameCat = pool.filter(x => x.category === l.category);
+  const k = kindOf(l);
+  const sameKind = pool.filter(x => kindOf(x) === k);
+  const sameCat = sameKind.filter(x => x.category === l.category);
   const sameCity = sameCat.filter(x => x.location.city.en === l.location.city.en);
   const rest = sameCat.filter(x => !sameCity.includes(x));
-  const others = pool.filter(x => !sameCat.includes(x));
-  return [...sameCity, ...rest, ...others].slice(0, n);
+  const kindOnly = sameKind.filter(x => !sameCat.includes(x));
+  const others = pool.filter(x => !sameKind.includes(x));
+  return [...sameCity, ...rest, ...kindOnly, ...others].slice(0, n);
 }
 
 /** The hero image of the home page = first featured listing's first image. */
@@ -103,11 +106,9 @@ export function editorialImage(index = 0, pick = 1): Listing['images'][number] |
 /* ---- Round 2: kinds (Houses / Apartments / Land / Buildings) ---- */
 
 export const kinds: Kind[] = ['house', 'apartment', 'land', 'building'];
-const kindByType: Record<string, Kind> = {
-  villa: 'house', mansion: 'house', duplex: 'house', palais: 'house', townhouse: 'house', chalet: 'house', house: 'house',
-  apartment: 'apartment', penthouse: 'apartment', residence: 'apartment', studio: 'apartment', flat: 'apartment',
-  land: 'land', plot: 'land', building: 'building', tower: 'building',
-};
+import kindMapJson from '../data/kind-map.json';
+/** Single type→kind map shared with seo.ts, the dashboard and the curate scripts (src/data/kind-map.json). */
+export const kindByType: Record<string, Kind> = kindMapJson as Record<string, Kind>;
 /** Section of a listing. Uses `kind` when present and valid, else derives it from `type` (schema rule). */
 export function kindOf(l: Pick<Listing, 'kind' | 'type'>): Kind {
   if (l.kind && (kinds as string[]).includes(l.kind)) return l.kind;
@@ -156,11 +157,14 @@ export function tourEmbedUrl(id: string): string {
   return `https://my.matterport.com/show/?m=${encodeURIComponent(id)}&brand=0&play=1&qs=1&help=0`;
 }
 /** Every listing with an embeddable tour, newest first. */
-export const withTours = (): Listing[] => ordered(listings).filter(hasTour);
+/** Listings with a live 3D tour (sold homes excluded). Shared by /tours/ and the SEO layer. */
+export const withTours = (): Listing[] => ordered(listings).filter(l => hasTour(l) && l.status !== 'sold');
 
 /** Top featured listings with a hero image, for the home slideshow. */
 export function heroListings(n = 3): Listing[] {
-  const pool = featured().filter(l => l.images?.length);
+  // Photographs only: renders/screenshots (PNG) are never hero material.
+  const photo = (l: Listing) => l.images?.length && !/\.png(\?|$)|screenshot/i.test(l.images[0].src);
+  const pool = featured().filter(photo);
   return (pool.length ? pool : listings.filter(l => l.images?.length)).slice(0, n);
 }
 

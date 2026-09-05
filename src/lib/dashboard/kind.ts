@@ -25,12 +25,8 @@ export const KINDS: { key: Kind; label: string; plural: string }[] = [
 const VALID = new Set<string>(KINDS.map(k => k.key));
 
 /** type -> kind, mirroring LISTING-SCHEMA.md "Round 2 additions". */
-const TYPE_TO_KIND: Record<string, Kind> = {
-  villa: 'house', mansion: 'house', duplex: 'house', palais: 'house', townhouse: 'house', chalet: 'house',
-  apartment: 'apartment', penthouse: 'apartment', residence: 'apartment',
-  land: 'land', plot: 'land',
-  building: 'building', office: 'building',
-};
+import kindMapJson from '../../data/kind-map.json';
+const TYPE_TO_KIND: Record<string, Kind> = kindMapJson as Record<string, Kind>;
 
 /** The listing's kind: the explicit field when valid, else derived from `type`. */
 export function deriveKind(l: Pick<ListingExt, 'kind' | 'type'>): KindOrOther {

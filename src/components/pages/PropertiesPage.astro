@@ -7,7 +7,7 @@ import SectionHead from '../SectionHead.astro';
 import site from '../../data/site.json';
 import { localePath, t, ui, type Locale, count, countForms_ } from '../../lib/i18n';
 import { listings, ordered, categories, categoryLabel, categorySlug, typesIn, typeLabel, kindOf, kindSlug, categoriesIn, type Listing, type Kind } from '../../lib/listings';
-import { breadcrumbJsonLd } from '../../lib/seo';
+import { breadcrumbJsonLd , collectionPageJsonLd } from '../../lib/seo';
 interface Props { locale: Locale; category?: Listing['category']; kind?: Kind }
 const { locale, category, kind } = Astro.props;
 const all = !category && !kind;
@@ -31,7 +31,7 @@ const countText = (n: number) => count(n, 'residence', locale);
 const arForms = JSON.stringify(countForms_('residence').ar);
 const chipCls = 'chip';
 ---
-<Base title={`${title} — ${locale === 'ar' ? site.nameAr : site.name}`} description={intro} locale={locale} path={path} image={items[0]?.images?.[0]?.src} jsonLd={breadcrumbJsonLd(crumbs)}>
+<Base title={`${title} — ${locale === 'ar' ? site.nameAr : site.name}`} description={intro} locale={locale} path={path} image={items[0]?.images?.[0]?.src} jsonLd={[breadcrumbJsonLd(crumbs), collectionPageJsonLd({ locale, path, title, description: intro, listings: items })]}>
   <section class="section-tight pt-12 lg:pt-16" data-properties data-mode={kind ? 'kind' : all ? 'all' : 'category'} data-category={category ?? ''} data-count-many={t(ui.residencesCount, locale)} data-count-one={t(ui.residenceCountOne, locale)} data-count-ar={locale === 'ar' ? arForms : undefined}>
     <div class="wrap">
       <SectionHead as="h1" title={title} intro={intro} />

@@ -27,7 +27,8 @@ const CATEGORY = new Set(['buy', 'rent', 'off-plan', 'international']);
 const TYPE = new Set(['villa', 'apartment', 'penthouse', 'mansion', 'land', 'building', 'duplex']);
 const KIND = new Set(['house', 'apartment', 'land', 'building']);
 // kind is derived from type (schema, Round 2) — a listing whose kind disagrees with its type is an error.
-const KIND_OF = { villa: 'house', mansion: 'house', duplex: 'house', palais: 'house', apartment: 'apartment', penthouse: 'apartment', land: 'land', building: 'building' };
+const KIND_OF = JSON.parse(fs.readFileSync(new URL('../../src/data/kind-map.json', import.meta.url), 'utf8'));
+const RESERVED_SLUGS = new Set(['houses', 'apartments', 'land', 'buildings', 'for-sale', 'for-rent', 'off-plan', 'international']);
 const CURRENCY = new Set(['SAR', 'AED', 'EUR', 'USD', 'OMR']);
 const PERIOD = new Set([null, 'year', 'month']);
 const MEDIA = /^https:\/\/tk-storage\.azoz\.uk\/tk-estate-media\/media\/[^/]+\/[^/]+$/;
@@ -76,6 +77,8 @@ for (const l of data) {
   if (!STATUS.has(l.status)) err(id, `bad status ${l.status}`);
   if (!CATEGORY.has(l.category)) err(id, `bad category ${l.category}`);
   if (!TYPE.has(l.type)) err(id, `bad type ${l.type}`);
+  if (!KIND_OF[l.type]) err(id, `type "${l.type}" is not in src/data/kind-map.json`);
+  if (RESERVED_SLUGS.has(l.slug)) err(id, `slug "${l.slug}" collides with a section route`);
   if (!KIND.has(l.kind)) err(id, `kind is required and must be one of ${[...KIND].join('|')}, got ${l.kind}`);
   else if (KIND_OF[l.type] && KIND_OF[l.type] !== l.kind) err(id, `kind "${l.kind}" does not match type "${l.type}" (expected ${KIND_OF[l.type]})`);
   if (typeof l.featured !== 'boolean') err(id, 'featured must be boolean');

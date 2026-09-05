@@ -36,7 +36,7 @@
         "en": [
           "Almost nothing. This site is a set of static pages: no accounts, no server-side forms, no database, no login. Browsing it creates no record of you with Bona.",
           "We set no cookies and run no analytics or advertising tags. Google Analytics 4 and the Meta Pixel are built in but switched off; if we ever enable them, this policy will be updated first and you will be able to decline.",
-          "As with any website, the pages are served by a hosting provider (GitHub Pages) and the photographs by our own image storage. They may keep short-lived technical logs (IP address, browser type, page requested) to keep their service secure. We do not receive those logs or use them to identify you."
+          "As with any website, the pages are served by a hosting provider (GitHub Pages) and the photographs by a server operated for us and delivered through Cloudflare. They may keep short-lived technical logs (IP address, browser type, page requested) to keep their service secure. We do not receive those logs or use them to identify you."
         ],
         "ar": [
           "لا شيء تقريباً. هذا الموقع مجموعة صفحات ثابتة: لا حسابات مستخدمين، ولا نماذج تُرسل إلى خادم، ولا قاعدة بيانات، ولا تسجيل دخول. تصفّحك له لا يُنشئ أي سجل عنك لدى بونا.",
@@ -124,12 +124,12 @@
       "body": {
         "en": [
           "Property owners and developers: only with your consent, and only what is needed to progress a viewing or an offer, such as your name and when you can visit. We never pass your number to an owner or developer without telling you.",
-          "Service providers: GitHub (hosting of these pages), our image storage provider (property photographs) and Meta (WhatsApp Business), each processing data only to provide its service to us. We currently use no analytics, advertising or email-marketing provider. When you choose to open a 3D tour, the tour is served by Matterport, Inc. (United States), which then receives your IP address and may set its own cookies; nothing from Matterport loads until you press play.",
+          "Service providers: GitHub (hosting of these pages), our image storage provider (property photographs) and Meta (WhatsApp Business), each processing data only to provide its service to us. We currently use no analytics, advertising or email-marketing provider. When you choose to open a 3D tour, the tour is served by Matterport, Inc. (United States), which then receives your IP address and may set its own cookies; nothing from Matterport loads until you press play. Property photographs are stored on a server operated for us and delivered through Cloudflare, whose network receives your IP address and technical request logs and may set security cookies.",
           "Authorities: REGA, the courts or other Saudi authorities when the law requires it, and only to the extent required."
         ],
         "ar": [
           "مُلّاك العقارات والمطوّرون: بموافقتك فقط، وبالقدر اللازم لإتمام المعاينة أو تقديم العرض، مثل اسمك والوقت الذي يناسبك للزيارة. ولا نعطي رقمك لمالك أو مطوّر دون إخبارك.",
-          "مزوّدو الخدمات الذين يساعدوننا في تشغيل الموقع والعمل: GitHub (استضافة هذه الصفحات)، ومزوّد تخزين الصور (صور العقارات)، وMeta (واتساب للأعمال). ويعالج كل منهم البيانات لتقديم خدمته لنا فقط. ولا نستخدم حالياً أي مزوّد لخدمات التحليل أو الإعلان أو التسويق عبر البريد. وعند اختيارك فتح جولة ثلاثية الأبعاد، تُعرض الجولة عبر شركة Matterport (الولايات المتحدة) التي تتلقى حينها عنوان IP الخاص بك وقد تضع ملفات تعريف الارتباط الخاصة بها؛ ولا يُحمَّل أي شيء من Matterport قبل الضغط على زر التشغيل.",
+          "مزوّدو الخدمات الذين يساعدوننا في تشغيل الموقع والعمل: GitHub (استضافة هذه الصفحات)، ومزوّد تخزين الصور (صور العقارات)، وMeta (واتساب للأعمال). ويعالج كل منهم البيانات لتقديم خدمته لنا فقط. ولا نستخدم حالياً أي مزوّد لخدمات التحليل أو الإعلان أو التسويق عبر البريد. وعند اختيارك فتح جولة ثلاثية الأبعاد، تُعرض الجولة عبر شركة Matterport (الولايات المتحدة) التي تتلقى حينها عنوان IP الخاص بك وقد تضع ملفات تعريف الارتباط الخاصة بها؛ ولا يُحمَّل أي شيء من Matterport قبل الضغط على زر التشغيل. وتُخزَّن صور العقارات على خادم يُشغَّل لصالحنا وتُقدَّم عبر شبكة Cloudflare التي تتلقى عنوان IP الخاص بك وسجلات الطلبات التقنية وقد تضع ملفات تعريف ارتباط أمنية.",
           "الجهات الرسمية: الهيئة العامة للعقار أو المحاكم أو الجهات السعودية الأخرى حين يقتضي النظام ذلك، وبالقدر المطلوب فقط."
         ]
       }
@@ -157,11 +157,11 @@
       },
       "body": {
         "en": [
-          "Some of the providers above store data outside the Kingdom: GitHub hosts these pages in the United States, and Meta stores WhatsApp messages on its own infrastructure abroad. A WhatsApp conversation with us, and the technical logs of your visit, may therefore be processed outside Saudi Arabia. Matterport (3D tours, loaded only on request) is also based in the United States.",
+          "Some of the providers above store data outside the Kingdom: GitHub hosts these pages in the United States, and Meta stores WhatsApp messages on its own infrastructure abroad. A WhatsApp conversation with us, and the technical logs of your visit, may therefore be processed outside Saudi Arabia. Matterport (3D tours, loaded only on request) is also based in the United States. These pages are hosted by GitHub and delivered through its global content-delivery network, and photographs are delivered through Cloudflare’s global network, so both may process your data on servers outside the Kingdom.",
           "The PDPL permits such transfers where they are necessary to provide a service you have asked for and appropriate safeguards are in place. We keep what leaves the Kingdom to the minimum, keep no client records on those platforms beyond the conversation itself, and keep our own files under our control in Saudi Arabia."
         ],
         "ar": [
-          "يخزّن بعض المزوّدين المذكورين البيانات خارج المملكة: فـ GitHub تستضيف هذه الصفحات في الولايات المتحدة، وMeta تخزّن رسائل واتساب على بنيتها التحتية في الخارج. ولذلك قد تُعالَج محادثتك معنا عبر واتساب، والسجلات التقنية لزيارتك، خارج المملكة العربية السعودية. كما أن شركة Matterport (الجولات ثلاثية الأبعاد، التي لا تُحمَّل إلا عند طلبك) تعمل من الولايات المتحدة.",
+          "يخزّن بعض المزوّدين المذكورين البيانات خارج المملكة: فـ GitHub تستضيف هذه الصفحات في الولايات المتحدة، وMeta تخزّن رسائل واتساب على بنيتها التحتية في الخارج. ولذلك قد تُعالَج محادثتك معنا عبر واتساب، والسجلات التقنية لزيارتك، خارج المملكة العربية السعودية. كما أن شركة Matterport (الجولات ثلاثية الأبعاد، التي لا تُحمَّل إلا عند طلبك) تعمل من الولايات المتحدة. وتُستضاف هذه الصفحات لدى GitHub وتُقدَّم عبر شبكة توزيع محتوى عالمية، كما تُقدَّم الصور عبر شبكة Cloudflare العالمية، ولذلك قد يعالج كلاهما بياناتك على خوادم خارج المملكة.",
           "يجيز نظام حماية البيانات الشخصية هذا النقل حين يكون ضرورياً لتقديم خدمة طلبتها، ومع وجود ضمانات مناسبة. ونحن نُبقي ما يخرج من المملكة في حدّه الأدنى، ولا نحتفظ بسجلات عملائنا على تلك المنصات بما يتجاوز المحادثة نفسها، وتبقى ملفاتنا تحت سيطرتنا داخل المملكة."
         ]
       }

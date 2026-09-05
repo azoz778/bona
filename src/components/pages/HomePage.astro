@@ -35,7 +35,7 @@ const strips: { kind: Kind; items: typeof land }[] = [{ kind: 'land', items: lan
         const img = h.images[0];
         return (
           <div class:list={['hero-slide', i === 0 && 'is-active']} data-slide aria-hidden={i === 0 ? undefined : 'true'}>
-            <img src={img.src} alt={i === 0 ? imageAlt(img, h, locale) : ''} fetchpriority={i === 0 ? 'high' : 'low'} loading={i === 0 ? 'eager' : 'lazy'} decoding="async" class="h-full w-full object-cover" />
+            <img src={i === 0 ? img.src : undefined} data-src={i === 0 ? undefined : img.src} srcset={i === 0 && img.thumb ? `${img.thumb} 400w, ${img.src} 1920w` : undefined} data-srcset={i !== 0 && img.thumb ? `${img.thumb} 400w, ${img.src} 1920w` : undefined} sizes="100vw" alt={imageAlt(img, h, locale)} fetchpriority={i === 0 ? 'high' : undefined} decoding="async" class="h-full w-full object-cover" />
           </div>
         );
       })}
@@ -48,7 +48,7 @@ const strips: { kind: Kind; items: typeof land }[] = [{ kind: 'land', items: lan
       </h1>
       <p class="hero-in mt-7 max-w-[50ch] text-[15px] leading-relaxed text-ivory/80 md:text-base" style={`--i:${words.length + 1}`}>{t(ui.heroSubline, locale)}</p>
       <div class="hero-in mt-10 flex flex-wrap gap-4" style={`--i:${words.length + 2}`}>
-        <a href={localePath(locale, '/properties/houses/')} class="btn btn-light">{t(ui.exploreProperties, locale)}</a>
+        <a href={localePath(locale, '/properties/')} class="btn btn-light">{t(ui.exploreProperties, locale)}</a>
         <a href={wa} target="_blank" rel="noopener" class="btn btn-outline-light"><Icon name="whatsapp" size={16} />{t(ui.privateEnquiry, locale)}</a>
       </div>
     </div>
@@ -184,9 +184,13 @@ const strips: { kind: Kind; items: typeof land }[] = [{ kind: 'land', items: lan
     const slides = Array.from(root.querySelectorAll<HTMLElement>('[data-slide]'));
     if (slides.length < 2 || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     let i = 0;
+    // Deferred slides: assign src ~5s before they are shown so the LCP image never competes with them.
+    const hydrate = (s?: HTMLElement) => { const im = s?.querySelector<HTMLImageElement>('img[data-src]'); if (!im) return; if (im.dataset.srcset) im.srcset = im.dataset.srcset; im.src = im.dataset.src!; im.removeAttribute('data-src'); im.removeAttribute('data-srcset'); };
+    fade = window.setTimeout(() => hydrate(slides[1]), 3000);
     timer = window.setInterval(() => {
       if (document.hidden) return;
       const prev = slides[i]; i = (i + 1) % slides.length; const next = slides[i];
+      hydrate(next); hydrate(slides[(i + 1) % slides.length]);
       prev.classList.replace('is-active', 'was-active'); prev.setAttribute('aria-hidden', 'true');
       next.classList.add('is-active'); next.removeAttribute('aria-hidden');
       fade = window.setTimeout(() => prev.classList.remove('was-active'), 1800);

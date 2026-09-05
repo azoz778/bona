@@ -86,12 +86,8 @@ type ListingExt = Listing & {
   map?: { lat: number; lng: number } | null;
 };
 const KIND_SET = new Set<string>(['house', 'apartment', 'land', 'building']);
-const TYPE_TO_KIND: Record<string, Kind> = {
-  villa: 'house', mansion: 'house', duplex: 'house', palais: 'house', townhouse: 'house', chalet: 'house',
-  apartment: 'apartment', penthouse: 'apartment', residence: 'apartment',
-  land: 'land', plot: 'land',
-  building: 'building', office: 'building',
-};
+import kindMapJson from '../data/kind-map.json';
+const TYPE_TO_KIND: Record<string, Kind> = kindMapJson as Record<string, Kind>;
 
 /** The listing's kind: explicit `kind` when valid, else derived from `type` (mirrors LISTING-SCHEMA.md). */
 export function kindOf(listing: Pick<Listing, 'type'> & { kind?: string | null }): Kind | 'other' {
@@ -114,7 +110,7 @@ export function tourUrl(listing: Pick<Listing, 'virtualTourUrl'>): string | unde
 
 /** Listings that have a tour (for /tours/). Sold homes excluded. */
 export function withTours(list: Listing[]): Listing[] {
-  return list.filter((l) => tourUrl(l) && l.status !== 'sold');
+  return list.filter((l) => tourUrl(l) && l.status !== 'sold'); // same rule as listings.withTours()
 }
 
 // ---------- Organization / RealEstateAgent / Person ----------
@@ -154,7 +150,7 @@ export function orgJsonLd(locale: Locale): object {
   const l = L(locale);
   const ar = l === 'ar';
   const licences = site.licences as { fal: string | null; cr: string | null };
-  const founded = (about.stats ?? []).find((s) => /^\d{4}$/.test(String(s.value)))?.value;
+  const founded = ((about as unknown as { founded?: string }).founded) ?? ((about.stats ?? []).find((s) => /^\d{4}$/.test(String(s.value)))?.value);
   return compact({
     '@context': 'https://schema.org',
     '@type': ['RealEstateAgent', 'Organization'],

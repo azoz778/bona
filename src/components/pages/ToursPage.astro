@@ -7,14 +7,14 @@ import Icon from '../Icon.astro';
 import site from '../../data/site.json';
 import { localePath, t, ui, type Locale } from '../../lib/i18n';
 import { withTours } from '../../lib/listings';
-import { breadcrumbJsonLd } from '../../lib/seo';
+import { breadcrumbJsonLd , collectionPageJsonLd } from '../../lib/seo';
 interface Props { locale: Locale }
 const { locale } = Astro.props;
 const path = localePath(locale, '/tours/');
 const items = withTours();
 const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { name: t(ui.toursTitle, locale), path }];
 ---
-<Base title={`${t(ui.toursMetaTitle, locale)} — ${locale === 'ar' ? site.nameAr : site.name}`} description={t(ui.toursMetaDesc, locale)} locale={locale} path={path} image={items[0]?.images?.[0]?.src} jsonLd={breadcrumbJsonLd(crumbs)}>
+<Base title={`${t(ui.toursMetaTitle, locale)} — ${locale === 'ar' ? site.nameAr : site.name}`} description={t(ui.toursMetaDesc, locale)} locale={locale} path={path} image={items[0]?.images?.[0]?.src} jsonLd={[breadcrumbJsonLd(crumbs), collectionPageJsonLd({ locale, path, title: t(ui.toursMetaTitle, locale), description: t(ui.toursMetaDesc, locale), listings: items, tours: true })]}>
   <section class="section-tight pt-12 lg:pt-16">
     <div class="wrap">
       <SectionHead as="h1" title={t(ui.toursTitle, locale)} intro={t(ui.toursIntro, locale)} />

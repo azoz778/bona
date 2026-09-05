@@ -20,7 +20,7 @@ for (const p of gallery) {
 }
 
 // kind is derived from type (LISTING-SCHEMA.md, Round 2): the site's Houses/Apartments sections key on it.
-const KIND_OF = { villa: 'house', mansion: 'house', duplex: 'house', palais: 'house', apartment: 'apartment', penthouse: 'apartment', land: 'land', building: 'building' };
+const KIND_OF = JSON.parse(fs.readFileSync(new URL('../../src/data/kind-map.json', import.meta.url), 'utf8'));
 
 function resolveImage(listing, entry) {
   const spec = Array.isArray(entry) ? { folder: listing.folder, i: entry[0], room: entry[1] } : entry;
@@ -77,6 +77,11 @@ const out = LISTINGS.map((l, idx) => {
   };
 });
 
+for (const l of out) {
+  if (l.project && l.unit) {
+    l.images = l.images.map((im) => ({ ...im, alt: { en: `Illustrative — developer's finished unit at ${l.project.name.en}: ${im.alt.en}`, ar: `صورة توضيحية — وحدة منجزة من المطوّر في ${l.project.name.ar}: ${im.alt.ar}` } }));
+  }
+}
 fs.writeFileSync(OUT, JSON.stringify(out, null, 2) + '\n');
 const counts = out.reduce((a, l) => ((a[l.category] = (a[l.category] || 0) + 1), a), {});
 const kinds = out.reduce((a, l) => ((a[l.kind] = (a[l.kind] || 0) + 1), a), {});

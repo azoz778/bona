@@ -21,6 +21,7 @@ const [id, latArg, lngArg] = process.argv.slice(2);
 const force = process.argv.includes('--force');
 const lat = Number(latArg), lng = Number(lngArg);
 if (!/^[A-Z]+-\d+$/.test(id || '') || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+if (Math.abs(lat) > 85 || Math.abs(lng) > 180) { console.error('lat must be within ±85 and lng within ±180 (Web Mercator)'); process.exit(1); }
   console.error('usage: land-stills.mjs <PLOT-ID> <lat> <lng> [--force]');
   process.exit(1);
 }
