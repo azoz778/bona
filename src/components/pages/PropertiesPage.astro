@@ -3,7 +3,7 @@ import Base from '../../layouts/Base.astro';
 import ListingCard from '../ListingCard.astro';
 import SectionHead from '../SectionHead.astro';
 import site from '../../data/site.json';
-import { localePath, t, ui, fill, type Locale } from '../../lib/i18n';
+import { localePath, t, ui, fill, type Locale , count, countForms_ } from '../../lib/i18n';
 import { listings, ordered, categories, categoryLabel, categorySlug, typesIn, typeLabel, type Listing } from '../../lib/listings';
 import { breadcrumbJsonLd } from '../../lib/seo';
 interface Props { locale: Locale; category?: Listing['category'] }
@@ -20,10 +20,11 @@ const intro = all ? t(ui.propertiesIntro, locale) : t(copy[category!].intro, loc
 const types = typesIn(items);
 const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { name: t(ui.properties, locale), path: localePath(locale, '/properties/') }];
 if (!all) crumbs.push({ name: title, path });
-const countText = (n: number) => n === 1 ? t(ui.residenceCountOne, locale) : fill(t(ui.residencesCount, locale), { n });
+const countText = (n: number) => count(n, 'residence', locale);
+const arForms = JSON.stringify(countForms_('residence').ar);
 ---
-<Base title={`${title} — ${site.name}`} description={intro} locale={locale} path={path} image={items[0]?.images?.[0]?.src} jsonLd={breadcrumbJsonLd(crumbs)}>
-  <section class="section-tight pt-12 lg:pt-16" data-properties data-all={String(all)} data-category={category ?? ''} data-count-many={t(ui.residencesCount, locale)} data-count-one={t(ui.residenceCountOne, locale)}>
+<Base title={`${title} — ${locale === 'ar' ? site.nameAr : site.name}`} description={intro} locale={locale} path={path} image={items[0]?.images?.[0]?.src} jsonLd={breadcrumbJsonLd(crumbs)}>
+  <section class="section-tight pt-12 lg:pt-16" data-properties data-all={String(all)} data-category={category ?? ''} data-count-many={t(ui.residencesCount, locale)} data-count-one={t(ui.residenceCountOne, locale)} data-count-ar={locale === 'ar' ? arForms : undefined}>
     <div class="wrap">
       <SectionHead as="h1" title={title} intro={intro} />
 
@@ -94,7 +95,9 @@ const countText = (n: number) => n === 1 ? t(ui.residenceCountOne, locale) : fil
         const show = (!cat || c.dataset.category === cat) && (!type || c.dataset.type === type);
         c.hidden = !show; if (show) n++;
       }
-      countEl.textContent = n === 1 ? (root.dataset.countOne || '1') : (root.dataset.countMany || '{n}').replace('{n}', String(n));
+      const ar = root.dataset.countAr ? JSON.parse(root.dataset.countAr) as Record<string, string> : null;
+      const cat = ar ? new Intl.PluralRules('ar').select(n) : (n === 1 ? 'one' : 'other');
+      countEl.textContent = ar ? (ar[cat] ?? ar.other).replace('{n}', String(n)) : (n === 1 ? (root.dataset.countOne || '1') : (root.dataset.countMany || '{n}').replace('{n}', String(n)));
       emptyEl.hidden = n > 0;
     };
     const setCat = (c: string) => {
@@ -102,21 +105,16 @@ const countText = (n: number) => n === 1 ? t(ui.residenceCountOne, locale) : fil
       chips.forEach(ch => { if ((ch.dataset.cat || '') === c) ch.setAttribute('aria-current', 'true'); else ch.removeAttribute('aria-current'); });
     };
 
+    // Category chips are plain links to the static category pages (canonical URLs, modifier-clicks and the language switch all work).
     if (allMode) {
       const fromUrl = new URLSearchParams(location.search).get('category') || '';
       if (fromUrl && chips.some(ch => ch.dataset.cat === fromUrl)) setCat(fromUrl);
-      chips.forEach(ch => ch.addEventListener('click', e => {
-        e.preventDefault();
-        setCat(ch.dataset.cat || '');
-        history.replaceState(null, '', cat ? `?category=${cat}` : location.pathname);
-        apply();
-      }));
     }
     typeSel.addEventListener('change', apply);
     sortSel.addEventListener('change', apply);
     root.querySelector('[data-clear]')?.addEventListener('click', () => {
       typeSel.value = ''; sortSel.value = 'newest';
-      if (allMode) { setCat(''); history.replaceState(null, '', location.pathname); }
+      if (allMode) setCat('');
       apply();
     });
     apply();

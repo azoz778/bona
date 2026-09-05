@@ -48,7 +48,7 @@ const c = {
 };
 const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { name: t(ui.aboutTitle, locale), path }];
 ---
-<Base title={`${t(ui.aboutMetaTitle, locale)} — ${site.name}`} description={t(ui.aboutMetaDesc, locale)} locale={locale} path={path} image={img1?.src} jsonLd={[orgJsonLd(locale), breadcrumbJsonLd(crumbs)]}>
+<Base title={`${t(ui.aboutMetaTitle, locale)} — ${locale === 'ar' ? site.nameAr : site.name}`} description={t(ui.aboutMetaDesc, locale)} locale={locale} path={path} image={img1?.src} jsonLd={[orgJsonLd(locale), breadcrumbJsonLd(crumbs)]}>
   <section class="section-tight pt-12 lg:pt-16">
     <div class="wrap grid gap-12 lg:grid-cols-12 lg:gap-8">
       <div class="lg:col-span-7" data-reveal>

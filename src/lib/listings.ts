@@ -62,9 +62,14 @@ export function ordered(list: Listing[] = listings): Listing[] {
 }
 
 /** Comparable price for client-side sorting; on-request prices sort last. */
+/** Approximate SAR conversion used ONLY for sorting (never displayed). */
+const SAR_RATE: Record<string, number> = { SAR: 1, AED: 1.02, USD: 3.75, EUR: 4.05, GBP: 4.75, OMR: 9.75 };
+/** Sort key: price normalised to SAR; monthly rents annualised; unknown/on-request sorts last. */
 export function sortablePrice(l: Listing): number {
   if (!l.price || l.price.onRequest || l.price.amount == null) return Number.MAX_SAFE_INTEGER;
-  return l.price.amount;
+  const rate = SAR_RATE[l.price.currency] ?? 1;
+  const annual = l.price.period === 'month' ? l.price.amount * 12 : l.price.amount;
+  return Math.round(annual * rate);
 }
 
 /** Similar residences: same category, then same city, excluding the listing itself. */

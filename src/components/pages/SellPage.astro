@@ -30,7 +30,7 @@ const c = {
 };
 const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { name: t(ui.sellTitle, locale), path }];
 ---
-<Base title={`${t(ui.sellMetaTitle, locale)} — ${site.name}`} description={t(ui.sellMetaDesc, locale)} locale={locale} path={path} image={img?.src} jsonLd={breadcrumbJsonLd(crumbs)}>
+<Base title={`${t(ui.sellMetaTitle, locale)} — ${locale === 'ar' ? site.nameAr : site.name}`} description={t(ui.sellMetaDesc, locale)} locale={locale} path={path} image={img?.src} jsonLd={breadcrumbJsonLd(crumbs)}>
   <section class="section-tight pt-12 lg:pt-16">
     <div class="wrap grid gap-12 lg:grid-cols-12 lg:gap-8">
       <div class="lg:col-span-7" data-reveal>
@@ -82,7 +82,7 @@ const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { n
         <h2 class="display-lg mt-6">{t(ui.sellerEnquiry, locale)}</h2>
         <p class="mt-4 max-w-[52ch] text-stone-2">{t(c.formIntro, locale)}</p>
       </div>
-      <div class="mt-12"><EnquiryForm locale={locale} variant="sell" id="enquiry-sell" /></div>
+      <div class="mt-12"><EnquiryForm path={path} locale={locale} variant="sell" id="enquiry-sell" /></div>
     </div>
   </section>
 </Base>

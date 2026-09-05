@@ -21,7 +21,7 @@ const nav = [
   <div class="wrap section-tight">
     <div class="grid gap-12 md:grid-cols-2 lg:grid-cols-12 lg:gap-8">
       <div class="lg:col-span-5">
-        <a href={localePath(locale, '/')} class="inline-block" aria-label={site.name}><Logo locale={locale} height={locale === 'ar' ? 30 : 26} /></a>
+        <a href={localePath(locale, '/')} class="inline-block" aria-label={locale === 'ar' ? site.nameAr : site.name}><Logo locale={locale} height={locale === 'ar' ? 30 : 26} /></a>
         <p class="mt-6 max-w-[44ch] text-sm leading-relaxed text-ivory/70">{t(site.description, locale)}</p>
       </div>
       <div class="lg:col-span-2">

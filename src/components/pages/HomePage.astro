@@ -17,14 +17,14 @@ const markets = site.markets[locale];
 const aboutImg = editorialImage(1, 2);
 const aboutImgListing = ordered(listings).filter(l => l.images?.length)[1 % Math.max(1, ordered(listings).filter(l => l.images?.length).length)];
 const wa = waLink(site.whatsapp.wa, t(ui.formGreeting, locale));
-const title = `${site.name} — ${t(site.tagline, locale)}`;
+const title = `${locale === 'ar' ? site.nameAr : site.name} — ${t(site.tagline, locale)}`;
 ---
 <Base title={title} description={t(site.description, locale)} locale={locale} path={path} image={heroImg?.src} hero jsonLd={orgJsonLd(locale)}>
   <!-- Hero: the one bold moment. Full-bleed photograph, headline set at display scale. -->
   <section class="relative flex min-h-[92svh] items-end bg-ink text-ivory">
     <div class="absolute inset-0 overflow-hidden">
       {heroImg && <img src={heroImg.src} alt={hero ? imageAlt(heroImg, hero, locale) : ''} fetchpriority="high" decoding="async" class="h-full w-full object-cover" />}
-      <div class="absolute inset-0 bg-linear-to-t from-ink/85 via-ink/20 to-ink/35"></div>
+      <div class="absolute inset-0 bg-linear-to-t from-ink/85 via-ink/20 to-ink/55"></div>
     </div>
     <div class="wrap relative pb-16 pt-44 lg:pb-24">
       <p class="label text-champagne-2">{t(ui.privateRealEstate, locale)}</p>

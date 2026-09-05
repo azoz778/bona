@@ -14,7 +14,7 @@ const mapsEmbed = `https://www.google.com/maps?q=${site.geo.lat},${site.geo.lng}
 const mapsLink = `https://www.google.com/maps/search/?api=1&query=${site.geo.lat},${site.geo.lng}`;
 const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { name: t(ui.contactTitle, locale), path }];
 ---
-<Base title={`${t(ui.contactMetaTitle, locale)} — ${site.name}`} description={t(ui.contactMetaDesc, locale)} locale={locale} path={path} jsonLd={[orgJsonLd(locale), breadcrumbJsonLd(crumbs)]}>
+<Base title={`${t(ui.contactMetaTitle, locale)} — ${locale === 'ar' ? site.nameAr : site.name}`} description={t(ui.contactMetaDesc, locale)} locale={locale} path={path} jsonLd={[orgJsonLd(locale), breadcrumbJsonLd(crumbs)]}>
   <section class="section-tight pt-12 lg:pt-16">
     <div class="wrap">
       <div class="max-w-3xl" data-reveal>
@@ -65,7 +65,7 @@ const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { n
         <span class="rule"></span>
         <h2 class="display-lg mt-6">{t(ui.sendMessage, locale)}</h2>
       </div>
-      <div class="mt-12"><EnquiryForm locale={locale} variant="contact" id="enquiry-contact" /></div>
+      <div class="mt-12"><EnquiryForm path={path} locale={locale} variant="contact" id="enquiry-contact" /></div>
     </div>
   </section>
 </Base>

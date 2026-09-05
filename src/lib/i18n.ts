@@ -88,7 +88,7 @@ export const ui = {
   // Home
   heroSubline: s(
     'A private boutique representing a small, curated portfolio of villas, penthouses and waterfront residences in Jeddah and beyond.',
-    'بوتيك خاص يمثّل محفظة صغيرة منتقاة من الفلل والبنتهاوس والمساكن الواجهية في جدة وما وراءها.'
+    'بوتيك خاص يمثّل محفظة صغيرة منتقاة من الفلل والبنتهاوس ومساكن الواجهة البحرية في جدة وخارجها.'
   ),
   exploreProperties: s('Explore properties', 'استعرض العقارات'),
   privateEnquiry: s('Private enquiry', 'استفسار خاص'),
@@ -100,7 +100,7 @@ export const ui = {
   theHouse: s('The house', 'الدار'),
   homeAboutStatement: s(
     'Bona is a private boutique, not a portal. We take on a handful of homes at a time and handle each one at principal level, from pricing and presentation to the quiet introductions that close.',
-    'بونا بوتيك خاص، لا منصة إعلانات. نتولّى عدداً محدوداً من المنازل في كل مرة، ونعالج كلّاً منها على مستوى الشريك المؤسس: من التسعير والعرض إلى التعريفات الهادئة التي تُتمّ الصفقة.'
+    'بونا بوتيك خاص، لا منصة إعلانات. نتولّى عدداً محدوداً من المنازل في كل مرة، ونعالج كلّاً منها على مستوى الشركاء: من التسعير والعرض إلى التعريفات الهادئة التي تُتمّ الصفقة.'
   ),
   aboutBona: s('About Bona', 'عن بونا'),
   sellWithBona: s('Sell with Bona', 'بِع مع بونا'),
@@ -124,7 +124,7 @@ export const ui = {
   sortNewest: s('Newest', 'الأحدث'),
   sortPriceHigh: s('Price, high to low', 'السعر: من الأعلى'),
   sortPriceLow: s('Price, low to high', 'السعر: من الأدنى'),
-  residencesCount: s('{n} residences', '{n} عقار'),
+  residencesCount: s('{n} residences', '{n} عقار'), // AR: use arCount(n, 'residence') instead
   residenceCountOne: s('1 residence', 'عقار واحد'),
   noMatches: s('No residences match these filters.', 'لا توجد عقارات تطابق هذه الخيارات.'),
   clearFilters: s('Clear filters', 'مسح الخيارات'),
@@ -146,8 +146,8 @@ export const ui = {
   yearBuilt: s('Year built', 'سنة البناء'),
   floors: s('Floors', 'الأدوار'),
   sqm: s('sqm', 'م²'),
-  bedsShort: s('bd', 'غرف'),
-  bathsShort: s('ba', 'حمام'),
+  bedsShort: s('bd', 'غرفة'),
+  bathsShort: s('ba', 'حمّام'),
   highlights: s('Highlights', 'المميزات'),
   brochure: s('Download brochure', 'تحميل الكتيّب'),
   virtualTour: s('Virtual tour', 'جولة افتراضية'),
@@ -234,3 +234,19 @@ export type UiKey = keyof typeof ui;
 export function fill(template: string, vars: Record<string, string | number>): string {
   return template.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? ''));
 }
+
+/** Arabic-aware count phrases. Forms: one/two/few(3–10)/many(11+)/other; falls back to EN "{n} unit(s)". */
+const countForms: Record<string, { en: [string, string]; ar: { one: string; two: string; few: string; many: string; other: string } }> = {
+  residence: { en: ['residence', 'residences'], ar: { one: 'عقار واحد', two: 'عقاران', few: '{n} عقارات', many: '{n} عقاراً', other: '{n} عقار' } },
+  bed: { en: ['bd', 'bd'], ar: { one: 'غرفة واحدة', two: 'غرفتان', few: '{n} غرف', many: '{n} غرفة', other: '{n} غرفة' } },
+  bath: { en: ['ba', 'ba'], ar: { one: 'حمّام واحد', two: 'حمّامان', few: '{n} حمّامات', many: '{n} حمّاماً', other: '{n} حمّام' } },
+  photo: { en: ['photo', 'photos'], ar: { one: 'صورة واحدة', two: 'صورتان', few: '{n} صور', many: '{n} صورة', other: '{n} صورة' } },
+};
+export function count(n: number, unit: keyof typeof countForms, locale: Locale): string {
+  const f = countForms[unit];
+  if (locale !== 'ar') return `${n} ${n === 1 ? f.en[0] : f.en[1]}`;
+  const cat = new Intl.PluralRules('ar').select(n) as keyof typeof f.ar;
+  return (f.ar[cat] ?? f.ar.other).replace('{n}', String(n));
+}
+/** Serialisable AR plural forms for client scripts (data-attributes). */
+export function countForms_(unit: keyof typeof countForms) { return countForms[unit]; }

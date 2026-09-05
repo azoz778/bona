@@ -2,7 +2,7 @@
 /* Listing gallery: hero + thumbnails, and a <dialog> lightbox built on a scroll-snap track
    (native swipe on touch, keyboard arrows, Escape). Images lazy-load as they come into view. */
 import Icon from './Icon.astro';
-import { t, ui, type Locale } from '../lib/i18n';
+import { t, ui, type Locale , count } from '../lib/i18n';
 import { imageAlt, type Listing } from '../lib/listings';
 interface Props { listing: Listing; locale: Locale }
 const { listing: l, locale } = Astro.props;
@@ -17,14 +17,14 @@ const rtl = locale === 'ar';
   {hero && (
     <button type="button" class="img-zoom relative block w-full cursor-zoom-in aspect-[4/3] md:aspect-[3/2] lg:max-h-[78vh]" data-lb-open="0" aria-label={t(ui.openGallery, locale)}>
       <img src={hero.src} alt={imageAlt(hero, l, locale)} fetchpriority="high" decoding="async" class="h-full w-full object-cover" />
-      {images.length > 1 && <span class="badge absolute bottom-4 end-4 bg-ink/85 text-ivory backdrop-blur-sm">{images.length} {locale === 'ar' ? (images.length <= 10 ? 'صور' : 'صورة') : 'photos'}</span>}
+      {images.length > 1 && <span class="badge absolute bottom-4 end-4 bg-ink/85 text-ivory backdrop-blur-sm">{count(images.length, 'photo', locale)}</span>}
     </button>
   )}
   {thumbs.length > 0 && (
     <div class="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-5">
       {thumbs.map((img, i) => (
         <button type="button" class="img-zoom relative aspect-[4/3] cursor-zoom-in" data-lb-open={i + 1} aria-label={`${t(ui.openGallery, locale)} ${i + 2}`}>
-          <img src={img.thumb ?? img.src} alt={imageAlt(img, l, locale)} loading="lazy" decoding="async" class="h-full w-full object-cover" />
+          <img src={img.thumb ?? img.src} srcset={img.thumb ? `${img.thumb} 400w, ${img.src} 1920w` : undefined} sizes="(min-width: 640px) 20vw, 33vw" alt={imageAlt(img, l, locale)} loading="lazy" decoding="async" class="h-full w-full object-cover" />
           {i === thumbs.length - 1 && extra > 0 && (
             <span class="absolute inset-0 grid place-items-center bg-ink/55 font-display text-2xl text-ivory">+{extra}</span>
           )}
@@ -84,7 +84,7 @@ const rtl = locale === 'ar';
     root.querySelector('[data-lb-close]')?.addEventListener('click', close);
     root.querySelector('[data-lb-prev]')?.addEventListener('click', () => go(index - 1));
     root.querySelector('[data-lb-next]')?.addEventListener('click', () => go(index + 1));
-    dialog.addEventListener('click', e => { if (e.target === dialog) close(); });
+    dialog.addEventListener('click', e => { const el = e.target as HTMLElement; if (el === dialog || (el.closest('figure') && el.tagName !== 'IMG' && !el.closest('button'))) close(); });
     dialog.addEventListener('keydown', e => {
       const next = rtl ? 'ArrowLeft' : 'ArrowRight', prev = rtl ? 'ArrowRight' : 'ArrowLeft';
       if (e.key === next) { e.preventDefault(); go(index + 1); }

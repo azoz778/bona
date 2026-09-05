@@ -42,6 +42,7 @@
   }
   html[dir="rtl"] body { font-family: var(--font-arabic); font-size: 16px; line-height: 1.8; }
   html[dir="rtl"] .font-display { font-family: var(--font-arabic-display); font-weight: 700; }
+  html[dir="rtl"] .font-sans { font-family: var(--font-arabic); }
   html[dir="rtl"] .tracking-luxe,
   html[dir="rtl"] .label { letter-spacing: 0; text-transform: none; font-weight: 500; }
   html[dir="rtl"] h1, html[dir="rtl"] h2, html[dir="rtl"] h3 { line-height: 1.4; }
@@ -106,7 +107,7 @@ html[dir="rtl"] .label, html[dir="rtl"] .link-label, html[dir="rtl"] .field-labe
 
   /* Image zoom on hover (1.03) */
   .img-zoom { overflow: hidden; background: var(--color-ivory-2); }
-  .img-zoom img { transition: transform 1.1s var(--ease-luxe); will-change: transform; }
+  .img-zoom img { transition: transform 1.1s var(--ease-luxe); }
   .group:hover .img-zoom img, .img-zoom:hover img { transform: scale(1.03); }
   .on-dark .img-zoom { background: var(--color-ink-2); }
 

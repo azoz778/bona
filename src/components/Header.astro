@@ -33,7 +33,7 @@ const switchHref = routeExists(mirrored) ? mirrored : localePath(other, '/');
 ---
 <header class:list={['site-header', overHero && 'is-over-hero']} data-header>
   <div class="wrap flex h-16 items-center justify-between gap-6 lg:h-20">
-    <a href={localePath(locale, '/')} class="flex shrink-0 items-center" aria-label={site.name}>
+    <a href={localePath(locale, '/')} class="flex shrink-0 items-center" aria-label={locale === 'ar' ? site.nameAr : site.name}>
       <Logo locale={locale} height={locale === 'ar' ? 24 : 21} class="block" />
     </a>
 
@@ -59,7 +59,7 @@ const switchHref = routeExists(mirrored) ? mirrored : localePath(other, '/');
 
 <div id="site-drawer" class="drawer" data-drawer>
   <div class="wrap flex h-16 items-center justify-between">
-    <a href={localePath(locale, '/')} class="flex items-center" aria-label={site.name}><Logo locale={locale} height={locale === 'ar' ? 24 : 21} /></a>
+    <a href={localePath(locale, '/')} class="flex items-center" aria-label={locale === 'ar' ? site.nameAr : site.name}><Logo locale={locale} height={locale === 'ar' ? 24 : 21} /></a>
     <button type="button" class="-me-2 grid h-10 w-10 place-items-center" data-menu-close aria-label={t(ui.closeMenu, locale)}><Icon name="close" size={24} /></button>
   </div>
   <nav aria-label={t(ui.menu, locale)} class="wrap mt-8 flex flex-col">
@@ -90,6 +90,7 @@ const switchHref = routeExists(mirrored) ? mirrored : localePath(other, '/');
     const setOpen = (open: boolean) => {
       drawer.classList.toggle('is-open', open);
       document.body.classList.toggle('drawer-open', open);
+      for (const el of [document.querySelector('main'), document.querySelector('footer')]) el?.toggleAttribute('inert', open);
       openBtn.setAttribute('aria-expanded', String(open));
       if (open) window.setTimeout(() => closeBtn.focus(), 60); else openBtn.focus();
     };

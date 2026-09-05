@@ -11,8 +11,10 @@ interface Props {
   listing?: { id: string; title: string; path: string };
   class?: string;
   id?: string;
+  /** Current page path (for lead attribution when there is no listing). */
+  path?: string;
 }
-const { locale, variant = 'contact', listing, class: cls = '', id = `enquiry-${variant}` } = Astro.props;
+const { locale, variant = 'contact', listing, class: cls = '', id = `enquiry-${variant}`, path } = Astro.props;
 const types = ['villa', 'apartment', 'penthouse', 'mansion', 'land', 'building', 'duplex'];
 const labels = {
   greeting: t(ui.formGreeting, locale), name: t(ui.labelName, locale), phone: t(ui.labelPhone, locale), interest: t(ui.labelInterest, locale),
@@ -20,7 +22,7 @@ const labels = {
   message: t(ui.labelMessage, locale), sentFrom: t(ui.sentFrom, locale),
   errName: t(ui.formErrName, locale), errPhone: t(ui.formErrPhone, locale),
 };
-const pageUrl = new URL(listing?.path ?? '/', site.url).href;
+const pageUrl = new URL(listing?.path ?? path ?? '/', site.url).href;
 const fallbackHref = waLink(site.whatsapp.wa, labels.greeting);
 ---
 <form class:list={['enquiry', cls]} id={id} data-enquiry data-wa={site.whatsapp.wa} data-labels={JSON.stringify(labels)} data-page={pageUrl} data-variant={variant} novalidate>
@@ -28,13 +30,13 @@ const fallbackHref = waLink(site.whatsapp.wa, labels.greeting);
   <div class="grid gap-x-8 gap-y-7 sm:grid-cols-2">
     <div>
       <label class="field-label" for={`${id}-name`}>{t(ui.formName, locale)}</label>
-      <input class="field" id={`${id}-name`} name="name" type="text" autocomplete="name" required />
-      <p class="field-error" data-error-for="name" hidden></p>
+      <input class="field" id={`${id}-name`} name="name" type="text" autocomplete="name" required aria-describedby={`${id}-name-error`} />
+      <p class="field-error" id={`${id}-name-error`} data-error-for="name" aria-live="polite" hidden></p>
     </div>
     <div>
       <label class="field-label" for={`${id}-phone`}>{t(ui.formPhone, locale)}</label>
-      <input class="field" id={`${id}-phone`} name="phone" type="tel" inputmode="tel" autocomplete="tel" dir="ltr" placeholder="+966 5x xxx xxxx" required class:list={[locale === 'ar' && 'text-end']} />
-      <p class="field-error" data-error-for="phone" hidden></p>
+      <input class="field" id={`${id}-phone`} name="phone" type="tel" inputmode="tel" autocomplete="tel" dir="ltr" placeholder={locale === 'ar' ? '+966 5٠ ٠٠٠ ٠٠٠٠' : '+966 5x xxx xxxx'} required aria-describedby={`${id}-phone-error`} class:list={[locale === 'ar' && 'text-end']} />
+      <p class="field-error" id={`${id}-phone-error`} data-error-for="phone" aria-live="polite" hidden></p>
     </div>
 
     {variant === 'contact' && (
@@ -94,13 +96,14 @@ const fallbackHref = waLink(site.whatsapp.wa, labels.greeting);
     const field = (n: string) => form.elements.namedItem(n) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null;
     const setError = (n: string, msg: string) => {
       const el = field(n); const p = form.querySelector<HTMLElement>(`[data-error-for="${n}"]`);
-      if (el) el.classList.toggle('is-invalid', !!msg);
+      if (el) { el.classList.toggle('is-invalid', !!msg); if (msg) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid'); }
       if (p) { p.textContent = msg; p.hidden = !msg; }
     };
     form.addEventListener('submit', e => {
       e.preventDefault();
       const name = field('name')?.value.trim() || '';
-      const phoneRaw = field('phone')?.value.trim() || '';
+      // Normalise Arabic-Indic (٠-٩) and Persian (۰-۹) digits so AR keyboards validate.
+      const phoneRaw = (field('phone')?.value.trim() || '').replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660)).replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x6F0));
       const phone = phoneRaw.replace(/[\s\-().]/g, '');
       let ok = true;
       setError('name', ''); setError('phone', '');
@@ -122,8 +125,10 @@ const fallbackHref = waLink(site.whatsapp.wa, labels.greeting);
       if (thanksLink) thanksLink.href = url;
       if (thanks) { thanks.hidden = false; thanks.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
       if (isMobile) { window.location.href = url; return; }
-      const win = window.open(url, '_blank', 'noopener');
-      if (!win) window.location.href = url;
+      // window.open() returns null whenever 'noopener' is passed, so never use it as a success signal.
+      // Keep the visitor on the site: WhatsApp opens in a new tab; if blocked, the thanks panel carries the link.
+      const win = window.open(url, '_blank');
+      if (win) { try { win.opener = null; } catch {} } else { thanksLink?.focus(); }
     });
   });
 </script>

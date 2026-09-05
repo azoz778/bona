@@ -38,11 +38,11 @@ const related = similar(l, 3);
 const description = paragraphs[0]?.slice(0, 155) || `${title} — ${t(l.location.district, locale)}, ${t(l.location.city, locale)}. ${formatPrice(l.price, locale)}.`;
 const locationLine = [t(l.location.district, locale), t(l.location.city, locale), t(l.location.country, locale)].filter(Boolean).join(locale === 'ar' ? '، ' : ', ');
 ---
-<Base title={`${title} — ${site.name}`} description={description} locale={locale} path={path} image={l.images?.[0]?.src} waMessage={waMessage}
+<Base title={`${title} — ${locale === 'ar' ? site.nameAr : site.name}`} description={description} locale={locale} path={path} image={l.images?.[0]?.src} waMessage={waMessage}
       jsonLd={[listingJsonLd(l, locale), breadcrumbJsonLd(crumbs)]}>
   <article class="pt-6 lg:pt-8">
     <div class="wrap">
-      <Breadcrumb items={crumbs.map(c => ({ name: c.name, href: c.path }))} />
+      <Breadcrumb locale={locale} items={crumbs.map(c => ({ name: c.name, href: c.path }))} />
       <div class="mt-6"><Gallery listing={l} locale={locale} /></div>
 
       <div class="mt-12 grid gap-14 lg:mt-16 lg:grid-cols-12 lg:gap-10">

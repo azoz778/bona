@@ -1,5 +1,5 @@
 ---
-import { localePath, formatPrice, formatNumber, t, ui, type Locale } from '../lib/i18n';
+import { localePath, formatPrice, formatNumber, t, ui, count, type Locale } from '../lib/i18n';
 import { localeTitle, imageAlt, sortablePrice, typeLabel, type Listing } from '../lib/listings';
 interface Props { listing: Listing; locale: Locale; index?: number; ratio?: '4/3' | '3/2'; eager?: boolean; headingLevel?: 'h2' | 'h3' }
 const { listing: l, locale, index = 0, ratio = '4/3', eager = false, headingLevel: H = 'h3' } = Astro.props;
@@ -7,8 +7,8 @@ const img = l.images?.[0];
 const href = localePath(locale, `/properties/${l.slug}/`);
 const title = localeTitle(l, locale);
 const specs: string[] = [];
-if (l.specs?.beds) specs.push(`${l.specs.beds} ${t(ui.bedsShort, locale)}`);
-if (l.specs?.baths) specs.push(`${l.specs.baths} ${t(ui.bathsShort, locale)}`);
+if (l.specs?.beds) specs.push(count(l.specs.beds, 'bed', locale));
+if (l.specs?.baths) specs.push(count(l.specs.baths, 'bath', locale));
 if (l.specs?.areaSqm) specs.push(`${formatNumber(l.specs.areaSqm)} ${t(ui.sqm, locale)}`);
 const badge = l.status === 'sold' ? t(ui.sold, locale) : l.status === 'reserved' ? t(ui.reserved, locale) : null;
 ---
@@ -16,7 +16,7 @@ const badge = l.status === 'sold' ? t(ui.sold, locale) : l.status === 'reserved'
   <a href={href} class="block">
     <div class:list={['img-zoom relative', ratio === '3/2' ? 'aspect-[3/2]' : 'aspect-[4/3]']}>
       {img && (
-        <img src={img.thumb ?? img.src} alt={imageAlt(img, l, locale)} loading={eager ? 'eager' : 'lazy'} decoding="async" fetchpriority={eager ? 'high' : undefined}
+        <img src={img.thumb ?? img.src} srcset={img.thumb ? `${img.thumb} 400w, ${img.src} 1920w` : undefined} sizes={ratio === '3/2' ? '(min-width: 768px) 50vw, 100vw' : '(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw'} alt={imageAlt(img, l, locale)} loading={eager ? 'eager' : 'lazy'} decoding="async" fetchpriority={eager ? 'high' : undefined}
              class:list={['h-full w-full object-cover', l.status === 'sold' && 'opacity-80 saturate-50']} />
       )}
       {badge && <span class="badge absolute start-3 top-3">{badge}</span>}
