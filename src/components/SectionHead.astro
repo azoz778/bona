@@ -1,0 +1,13 @@
+---
+/* Section heading with the champagne hairline motif at the start edge. */
+interface Props { title: string; intro?: string; label?: string; link?: { href: string; label: string }; as?: 'h1' | 'h2'; class?: string; center?: boolean }
+const { title, intro, label, link, as: Tag = 'h2', class: cls = '', center = false } = Astro.props as Props;
+---
+<div class:list={['flex flex-col gap-6 md:flex-row md:items-end md:justify-between', center && 'md:flex-col md:items-center md:text-center', cls]} data-reveal>
+  <div class:list={['max-w-3xl', center && 'flex flex-col items-center']}>
+    {label ? <p class="label text-stone-2">{label}</p> : <span class="rule mb-6"></span>}
+    <Tag class:list={['display-lg', label && 'mt-4']}>{title}</Tag>
+    {intro && <p class="mt-5 max-w-[58ch] text-[15px] leading-relaxed text-stone-2">{intro}</p>}
+  </div>
+  {link && <a href={link.href} class="link-label shrink-0 text-ink">{link.label}</a>}
+</div>

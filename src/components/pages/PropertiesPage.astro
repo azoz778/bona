@@ -1,0 +1,124 @@
+---
+import Base from '../../layouts/Base.astro';
+import ListingCard from '../ListingCard.astro';
+import SectionHead from '../SectionHead.astro';
+import site from '../../data/site.json';
+import { localePath, t, ui, fill, type Locale } from '../../lib/i18n';
+import { listings, ordered, categories, categoryLabel, categorySlug, typesIn, typeLabel, type Listing } from '../../lib/listings';
+import { breadcrumbJsonLd } from '../../lib/seo';
+interface Props { locale: Locale; category?: Listing['category'] }
+const { locale, category } = Astro.props;
+const all = !category;
+const items = ordered(all ? listings : listings.filter(l => l.category === category));
+const path = localePath(locale, all ? '/properties/' : `/properties/${categorySlug[category!]}/`);
+const copy = {
+  buy: { title: ui.forSaleTitle, intro: ui.forSaleIntro }, rent: { title: ui.forRentTitle, intro: ui.forRentIntro },
+  'off-plan': { title: ui.offPlanTitle, intro: ui.offPlanIntro }, international: { title: ui.internationalTitle, intro: ui.internationalIntro },
+} as const;
+const title = all ? t(ui.properties, locale) : t(copy[category!].title, locale);
+const intro = all ? t(ui.propertiesIntro, locale) : t(copy[category!].intro, locale);
+const types = typesIn(items);
+const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { name: t(ui.properties, locale), path: localePath(locale, '/properties/') }];
+if (!all) crumbs.push({ name: title, path });
+const countText = (n: number) => n === 1 ? t(ui.residenceCountOne, locale) : fill(t(ui.residencesCount, locale), { n });
+---
+<Base title={`${title} — ${site.name}`} description={intro} locale={locale} path={path} image={items[0]?.images?.[0]?.src} jsonLd={breadcrumbJsonLd(crumbs)}>
+  <section class="section-tight pt-12 lg:pt-16" data-properties data-all={String(all)} data-category={category ?? ''} data-count-many={t(ui.residencesCount, locale)} data-count-one={t(ui.residenceCountOne, locale)}>
+    <div class="wrap">
+      <SectionHead as="h1" title={title} intro={intro} />
+
+      <div class="mt-12 flex flex-col gap-5 border-y border-ink/10 py-3 lg:flex-row lg:items-center lg:justify-between">
+        <nav aria-label={locale === 'ar' ? 'الفئة' : 'Category'} class="flex flex-wrap gap-x-7 gap-y-1">
+          <a href={localePath(locale, '/properties/')} class="chip" data-cat="" aria-current={all ? 'true' : undefined}>{t(ui.all, locale)}</a>
+          {categories.map(c => (
+            <a href={localePath(locale, `/properties/${categorySlug[c]}/`)} class="chip" data-cat={c} aria-current={category === c ? 'true' : undefined}>{t(categoryLabel[c], locale)}</a>
+          ))}
+        </nav>
+        <div class="flex flex-wrap items-center gap-x-8 gap-y-3">
+          <label class="label flex items-center gap-3 text-stone-2">
+            <span>{t(ui.type, locale)}</span>
+            <select class="field !min-w-[9.5rem] !py-1.5 !text-[13px] !normal-case !tracking-normal !font-normal text-ink" data-type-select>
+              <option value="">{t(ui.allTypes, locale)}</option>
+              {types.map(ty => <option value={ty}>{typeLabel(ty, locale)}</option>)}
+            </select>
+          </label>
+          <label class="label flex items-center gap-3 text-stone-2">
+            <span>{t(ui.sortBy, locale)}</span>
+            <select class="field !min-w-[10.5rem] !py-1.5 !text-[13px] !normal-case !tracking-normal !font-normal text-ink" data-sort-select>
+              <option value="newest">{t(ui.sortNewest, locale)}</option>
+              <option value="price-desc">{t(ui.sortPriceHigh, locale)}</option>
+              <option value="price-asc">{t(ui.sortPriceLow, locale)}</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <p class="mt-6 text-xs text-stone" data-count aria-live="polite">{countText(items.length)}</p>
+
+      <div class="mt-8 grid gap-x-8 gap-y-14 sm:grid-cols-2 lg:grid-cols-3" data-grid>
+        {items.map((l, i) => <ListingCard listing={l} locale={locale} index={i} eager={i < 3} headingLevel="h2" />)}
+      </div>
+
+      <div class="py-24 text-center" data-empty hidden={items.length > 0}>
+        <p class="display-md">{t(ui.noMatches, locale)}</p>
+        <button type="button" class="link-label mt-8 text-ink" data-clear>{t(ui.clearFilters, locale)}</button>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<script>
+  const root = document.querySelector<HTMLElement>('[data-properties]');
+  if (root) {
+    const grid = root.querySelector<HTMLElement>('[data-grid]')!;
+    const cards = Array.from(grid.querySelectorAll<HTMLElement>('[data-listing]'));
+    const chips = Array.from(root.querySelectorAll<HTMLAnchorElement>('[data-cat]'));
+    const typeSel = root.querySelector<HTMLSelectElement>('[data-type-select]')!;
+    const sortSel = root.querySelector<HTMLSelectElement>('[data-sort-select]')!;
+    const countEl = root.querySelector<HTMLElement>('[data-count]')!;
+    const emptyEl = root.querySelector<HTMLElement>('[data-empty]')!;
+    const allMode = root.dataset.all === 'true';
+    const MAX = Number.MAX_SAFE_INTEGER;
+    let cat = root.dataset.category || '';
+
+    const price = (c: HTMLElement) => Number(c.dataset.price) || MAX;
+    const apply = () => {
+      const type = typeSel.value, sort = sortSel.value;
+      const list = cards.slice();
+      if (sort === 'price-desc') list.sort((a, b) => (price(b) === MAX ? -1 : price(b)) - (price(a) === MAX ? -1 : price(a)));
+      else if (sort === 'price-asc') list.sort((a, b) => price(a) - price(b));
+      else list.sort((a, b) => Number(a.dataset.index) - Number(b.dataset.index));
+      list.forEach(c => grid.appendChild(c));
+      let n = 0;
+      for (const c of cards) {
+        const show = (!cat || c.dataset.category === cat) && (!type || c.dataset.type === type);
+        c.hidden = !show; if (show) n++;
+      }
+      countEl.textContent = n === 1 ? (root.dataset.countOne || '1') : (root.dataset.countMany || '{n}').replace('{n}', String(n));
+      emptyEl.hidden = n > 0;
+    };
+    const setCat = (c: string) => {
+      cat = c;
+      chips.forEach(ch => { if ((ch.dataset.cat || '') === c) ch.setAttribute('aria-current', 'true'); else ch.removeAttribute('aria-current'); });
+    };
+
+    if (allMode) {
+      const fromUrl = new URLSearchParams(location.search).get('category') || '';
+      if (fromUrl && chips.some(ch => ch.dataset.cat === fromUrl)) setCat(fromUrl);
+      chips.forEach(ch => ch.addEventListener('click', e => {
+        e.preventDefault();
+        setCat(ch.dataset.cat || '');
+        history.replaceState(null, '', cat ? `?category=${cat}` : location.pathname);
+        apply();
+      }));
+    }
+    typeSel.addEventListener('change', apply);
+    sortSel.addEventListener('change', apply);
+    root.querySelector('[data-clear]')?.addEventListener('click', () => {
+      typeSel.value = ''; sortSel.value = 'newest';
+      if (allMode) { setCat(''); history.replaceState(null, '', location.pathname); }
+      apply();
+    });
+    apply();
+  }
+</script>

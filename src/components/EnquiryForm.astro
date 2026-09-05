@@ -1,0 +1,129 @@
+---
+/* Static-site enquiry form: builds a localised message and opens WhatsApp. No backend, nothing stored. */
+import Icon from './Icon.astro';
+import site from '../data/site.json';
+import { t, ui, waLink, type Locale } from '../lib/i18n';
+import { typeLabel } from '../lib/listings';
+interface Props {
+  locale: Locale;
+  variant?: 'contact' | 'sell' | 'listing';
+  /** Listing context for the 'listing' variant. */
+  listing?: { id: string; title: string; path: string };
+  class?: string;
+  id?: string;
+}
+const { locale, variant = 'contact', listing, class: cls = '', id = `enquiry-${variant}` } = Astro.props;
+const types = ['villa', 'apartment', 'penthouse', 'mansion', 'land', 'building', 'duplex'];
+const labels = {
+  greeting: t(ui.formGreeting, locale), name: t(ui.labelName, locale), phone: t(ui.labelPhone, locale), interest: t(ui.labelInterest, locale),
+  type: t(ui.labelType, locale), budget: t(ui.labelBudget, locale), location: t(ui.labelLocation, locale), ref: t(ui.labelRef, locale),
+  message: t(ui.labelMessage, locale), sentFrom: t(ui.sentFrom, locale),
+  errName: t(ui.formErrName, locale), errPhone: t(ui.formErrPhone, locale),
+};
+const pageUrl = new URL(listing?.path ?? '/', site.url).href;
+const fallbackHref = waLink(site.whatsapp.wa, labels.greeting);
+---
+<form class:list={['enquiry', cls]} id={id} data-enquiry data-wa={site.whatsapp.wa} data-labels={JSON.stringify(labels)} data-page={pageUrl} data-variant={variant} novalidate>
+  {listing && <input type="hidden" name="ref" value={`${listing.title} (${listing.id})`} />}
+  <div class="grid gap-x-8 gap-y-7 sm:grid-cols-2">
+    <div>
+      <label class="field-label" for={`${id}-name`}>{t(ui.formName, locale)}</label>
+      <input class="field" id={`${id}-name`} name="name" type="text" autocomplete="name" required />
+      <p class="field-error" data-error-for="name" hidden></p>
+    </div>
+    <div>
+      <label class="field-label" for={`${id}-phone`}>{t(ui.formPhone, locale)}</label>
+      <input class="field" id={`${id}-phone`} name="phone" type="tel" inputmode="tel" autocomplete="tel" dir="ltr" placeholder="+966 5x xxx xxxx" required class:list={[locale === 'ar' && 'text-end']} />
+      <p class="field-error" data-error-for="phone" hidden></p>
+    </div>
+
+    {variant === 'contact' && (
+      <div>
+        <label class="field-label" for={`${id}-interest`}>{t(ui.formInterest, locale)}</label>
+        <select class="field" id={`${id}-interest`} name="interest">
+          <option value={t(ui.interestBuy, locale)}>{t(ui.interestBuy, locale)}</option>
+          <option value={t(ui.interestSell, locale)}>{t(ui.interestSell, locale)}</option>
+          <option value={t(ui.interestRent, locale)}>{t(ui.interestRent, locale)}</option>
+        </select>
+      </div>
+    )}
+    {variant !== 'listing' && (
+      <div>
+        <label class="field-label" for={`${id}-type`}>{t(ui.formPropertyType, locale)}</label>
+        <select class="field" id={`${id}-type`} name="type">
+          <option value="">{t(ui.allTypes, locale)}</option>
+          {types.map(ty => <option value={typeLabel(ty, locale)}>{typeLabel(ty, locale)}</option>)}
+        </select>
+      </div>
+    )}
+    {variant === 'contact' && (
+      <div class="sm:col-span-2">
+        <label class="field-label" for={`${id}-budget`}>{t(ui.formBudget, locale)} <span class="normal-case tracking-normal text-stone">({t(ui.formOptional, locale)})</span></label>
+        <input class="field" id={`${id}-budget`} name="budget" type="text" />
+      </div>
+    )}
+    {variant === 'sell' && (
+      <div class="sm:col-span-2">
+        <label class="field-label" for={`${id}-location`}>{t(ui.formLocation, locale)}</label>
+        <input class="field" id={`${id}-location`} name="location" type="text" autocomplete="off" />
+      </div>
+    )}
+    <div class="sm:col-span-2">
+      <label class="field-label" for={`${id}-message`}>{t(ui.formMessage, locale)} <span class="normal-case tracking-normal text-stone">({t(ui.formOptional, locale)})</span></label>
+      <textarea class="field min-h-[6rem] resize-y" id={`${id}-message`} name="message" rows="3"></textarea>
+    </div>
+  </div>
+  <div class="mt-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <button type="submit" class="btn btn-ink"><Icon name="whatsapp" size={17} />{t(ui.formSubmit, locale)}</button>
+    <p class="text-xs text-stone">{t(ui.formNote, locale)}</p>
+  </div>
+  <div class="mt-8 border border-champagne/60 bg-ivory-2 p-6" data-thanks hidden>
+    <p class="flex items-start gap-3 text-sm"><Icon name="check" size={18} class="mt-0.5 shrink-0 text-champagne" /><span>{t(ui.formThanks, locale)} {t(ui.formThanksFallback, locale)}</span></p>
+    <a class="btn btn-outline mt-5" data-thanks-link href={fallbackHref} target="_blank" rel="noopener">{t(ui.formOpenWhatsApp, locale)}</a>
+  </div>
+</form>
+
+<script>
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  document.querySelectorAll<HTMLFormElement>('form[data-enquiry]').forEach(form => {
+    const labels = JSON.parse(form.dataset.labels || '{}') as Record<string, string>;
+    const wa = form.dataset.wa || '';
+    const page = form.dataset.page || '';
+    const thanks = form.querySelector<HTMLElement>('[data-thanks]');
+    const thanksLink = form.querySelector<HTMLAnchorElement>('[data-thanks-link]');
+    const field = (n: string) => form.elements.namedItem(n) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null;
+    const setError = (n: string, msg: string) => {
+      const el = field(n); const p = form.querySelector<HTMLElement>(`[data-error-for="${n}"]`);
+      if (el) el.classList.toggle('is-invalid', !!msg);
+      if (p) { p.textContent = msg; p.hidden = !msg; }
+    };
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const name = field('name')?.value.trim() || '';
+      const phoneRaw = field('phone')?.value.trim() || '';
+      const phone = phoneRaw.replace(/[\s\-().]/g, '');
+      let ok = true;
+      setError('name', ''); setError('phone', '');
+      if (name.length < 2) { setError('name', labels.errName); ok = false; }
+      if (!/^\+?\d{7,15}$/.test(phone)) { setError('phone', labels.errPhone); ok = false; }
+      if (!ok) { (form.querySelector('.is-invalid') as HTMLElement | null)?.focus(); return; }
+
+      const lines: string[] = [labels.greeting, ''];
+      const ref = field('ref')?.value;
+      if (ref) lines.push(`${labels.ref}: ${ref}`);
+      lines.push(`${labels.name}: ${name}`, `${labels.phone}: ${phoneRaw}`);
+      const pairs: [string, string][] = [['interest', labels.interest], ['type', labels.type], ['budget', labels.budget], ['location', labels.location]];
+      for (const [n, l] of pairs) { const v = field(n)?.value.trim(); if (v) lines.push(`${l}: ${v}`); }
+      const msg = field('message')?.value.trim();
+      if (msg) lines.push('', `${labels.message}:`, msg);
+      lines.push('', `${labels.sentFrom} ${page}`);
+
+      const url = `https://wa.me/${wa}?text=${encodeURIComponent(lines.join('\n'))}`;
+      if (thanksLink) thanksLink.href = url;
+      if (thanks) { thanks.hidden = false; thanks.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+      if (isMobile) { window.location.href = url; return; }
+      const win = window.open(url, '_blank', 'noopener');
+      if (!win) window.location.href = url;
+    });
+  });
+</script>

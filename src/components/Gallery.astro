@@ -1,0 +1,104 @@
+---
+/* Listing gallery: hero + thumbnails, and a <dialog> lightbox built on a scroll-snap track
+   (native swipe on touch, keyboard arrows, Escape). Images lazy-load as they come into view. */
+import Icon from './Icon.astro';
+import { t, ui, type Locale } from '../lib/i18n';
+import { imageAlt, type Listing } from '../lib/listings';
+interface Props { listing: Listing; locale: Locale }
+const { listing: l, locale } = Astro.props;
+const images = l.images ?? [];
+const hero = images[0];
+const maxThumbs = 5;
+const thumbs = images.slice(1, 1 + maxThumbs);
+const extra = images.length - 1 - thumbs.length;
+const rtl = locale === 'ar';
+---
+<div data-gallery>
+  {hero && (
+    <button type="button" class="img-zoom relative block w-full cursor-zoom-in aspect-[4/3] md:aspect-[3/2] lg:max-h-[78vh]" data-lb-open="0" aria-label={t(ui.openGallery, locale)}>
+      <img src={hero.src} alt={imageAlt(hero, l, locale)} fetchpriority="high" decoding="async" class="h-full w-full object-cover" />
+      {images.length > 1 && <span class="badge absolute bottom-4 end-4 bg-ink/85 text-ivory backdrop-blur-sm">{images.length} {locale === 'ar' ? (images.length <= 10 ? 'صور' : 'صورة') : 'photos'}</span>}
+    </button>
+  )}
+  {thumbs.length > 0 && (
+    <div class="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-5">
+      {thumbs.map((img, i) => (
+        <button type="button" class="img-zoom relative aspect-[4/3] cursor-zoom-in" data-lb-open={i + 1} aria-label={`${t(ui.openGallery, locale)} ${i + 2}`}>
+          <img src={img.thumb ?? img.src} alt={imageAlt(img, l, locale)} loading="lazy" decoding="async" class="h-full w-full object-cover" />
+          {i === thumbs.length - 1 && extra > 0 && (
+            <span class="absolute inset-0 grid place-items-center bg-ink/55 font-display text-2xl text-ivory">+{extra}</span>
+          )}
+        </button>
+      ))}
+    </div>
+  )}
+
+  <dialog class="lightbox" data-lightbox aria-label={t(ui.gallery, locale)}>
+    <div class="absolute inset-x-0 top-0 z-[2] flex items-center justify-between px-4 py-4">
+      <p class="label text-ivory/80" dir="ltr"><span data-lb-current>1</span> / {images.length}</p>
+      <button type="button" class="lb-btn !static" data-lb-close aria-label={t(ui.close, locale)}><Icon name="close" size={22} /></button>
+    </div>
+    <button type="button" class="lb-btn top-1/2 -translate-y-1/2 start-3" data-lb-prev aria-label={t(ui.previousImage, locale)}><Icon name={rtl ? 'chevron-right' : 'chevron-left'} size={22} /></button>
+    <button type="button" class="lb-btn top-1/2 -translate-y-1/2 end-3" data-lb-next aria-label={t(ui.nextImage, locale)}><Icon name={rtl ? 'chevron-left' : 'chevron-right'} size={22} /></button>
+    <div class="track no-scrollbar" data-lb-track tabindex="0">
+      {images.map((img, i) => (
+        <figure class="slide m-0" data-lb-slide={i}>
+          <img data-src={img.src} alt={imageAlt(img, l, locale)} decoding="async" loading="lazy" />
+        </figure>
+      ))}
+    </div>
+  </dialog>
+</div>
+
+<script>
+  document.querySelectorAll<HTMLElement>('[data-gallery]').forEach(root => {
+    const dialog = root.querySelector<HTMLDialogElement>('[data-lightbox]');
+    const track = root.querySelector<HTMLElement>('[data-lb-track]');
+    if (!dialog || !track || typeof dialog.showModal !== 'function') return;
+    const slides = Array.from(track.querySelectorAll<HTMLElement>('[data-lb-slide]'));
+    const current = root.querySelector<HTMLElement>('[data-lb-current]');
+    const rtl = document.documentElement.dir === 'rtl';
+    let index = 0;
+
+    const load = (i: number) => {
+      for (const j of [i - 1, i, i + 1]) {
+        const img = slides[j]?.querySelector<HTMLImageElement>('img[data-src]');
+        if (img) { img.src = img.dataset.src!; img.removeAttribute('data-src'); }
+      }
+    };
+    const go = (i: number, smooth = true) => {
+      index = (i + slides.length) % slides.length;
+      load(index);
+      slides[index].scrollIntoView({ inline: 'start', block: 'nearest', behavior: smooth ? 'smooth' : 'auto' });
+      if (current) current.textContent = String(index + 1);
+    };
+    const open = (i: number) => {
+      dialog.showModal();
+      document.body.style.overflow = 'hidden';
+      requestAnimationFrame(() => go(i, false));
+    };
+    const close = () => { dialog.close(); };
+    dialog.addEventListener('close', () => { document.body.style.overflow = ''; });
+
+    root.querySelectorAll<HTMLElement>('[data-lb-open]').forEach(btn => btn.addEventListener('click', () => open(Number(btn.dataset.lbOpen) || 0)));
+    root.querySelector('[data-lb-close]')?.addEventListener('click', close);
+    root.querySelector('[data-lb-prev]')?.addEventListener('click', () => go(index - 1));
+    root.querySelector('[data-lb-next]')?.addEventListener('click', () => go(index + 1));
+    dialog.addEventListener('click', e => { if (e.target === dialog) close(); });
+    dialog.addEventListener('keydown', e => {
+      const next = rtl ? 'ArrowLeft' : 'ArrowRight', prev = rtl ? 'ArrowRight' : 'ArrowLeft';
+      if (e.key === next) { e.preventDefault(); go(index + 1); }
+      else if (e.key === prev) { e.preventDefault(); go(index - 1); }
+    });
+
+    // Keep the counter in sync with native swipe/scroll.
+    const io = new IntersectionObserver(entries => {
+      for (const en of entries) if (en.isIntersecting) {
+        index = Number((en.target as HTMLElement).dataset.lbSlide) || 0;
+        load(index);
+        if (current) current.textContent = String(index + 1);
+      }
+    }, { root: track, threshold: 0.6 });
+    slides.forEach(s => io.observe(s));
+  });
+</script>

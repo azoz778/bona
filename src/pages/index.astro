@@ -1,9 +1,4 @@
 ---
-import Base from '../layouts/Base.astro';
-import site from '../data/site.json';
+import HomePage from '../components/pages/HomePage.astro';
 ---
-<Base title={`${site.name} — ${site.tagline.en}`} description={site.description.en} locale="en" path="/">
-  <main class="min-h-screen grid place-items-center">
-    <h1 class="font-display text-6xl tracking-luxe uppercase">Bona</h1>
-  </main>
-</Base>
+<HomePage locale="en" />

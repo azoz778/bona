@@ -1,0 +1,131 @@
+---
+import Base from '../../layouts/Base.astro';
+import Gallery from '../Gallery.astro';
+import Breadcrumb from '../Breadcrumb.astro';
+import ListingCard from '../ListingCard.astro';
+import SectionHead from '../SectionHead.astro';
+import EnquiryForm from '../EnquiryForm.astro';
+import Icon from '../Icon.astro';
+import site from '../../data/site.json';
+import { localePath, formatPrice, formatNumber, t, ui, fill, waLink, type Locale } from '../../lib/i18n';
+import { localeTitle, categoryLabel, categorySlug, typeLabel, similar, type Listing } from '../../lib/listings';
+import { listingJsonLd, breadcrumbJsonLd } from '../../lib/seo';
+interface Props { locale: Locale; listing: Listing }
+const { locale, listing: l } = Astro.props;
+const path = localePath(locale, `/properties/${l.slug}/`);
+const title = localeTitle(l, locale);
+const absUrl = new URL(path, site.url).href;
+const waMessage = fill(t(ui.listingWaMessage, locale), { title, id: l.id, url: absUrl });
+const wa = waLink(site.whatsapp.wa, waMessage);
+const crumbs = [
+  { name: t(ui.home, locale), path: localePath(locale, '/') },
+  { name: t(ui.properties, locale), path: localePath(locale, '/properties/') },
+  { name: t(categoryLabel[l.category], locale), path: localePath(locale, `/properties/${categorySlug[l.category]}/`) },
+  { name: title, path },
+];
+const specs = [
+  l.specs?.beds ? { k: t(ui.bedrooms, locale), v: String(l.specs.beds) } : null,
+  l.specs?.baths ? { k: t(ui.bathrooms, locale), v: String(l.specs.baths) } : null,
+  l.specs?.areaSqm ? { k: t(ui.builtArea, locale), v: `${formatNumber(l.specs.areaSqm)} ${t(ui.sqm, locale)}` } : null,
+  l.specs?.plotSqm ? { k: t(ui.plot, locale), v: `${formatNumber(l.specs.plotSqm)} ${t(ui.sqm, locale)}` } : null,
+  l.specs?.yearBuilt ? { k: t(ui.yearBuilt, locale), v: String(l.specs.yearBuilt) } : null,
+  l.specs?.floors ? { k: t(ui.floors, locale), v: String(l.specs.floors) } : null,
+].filter(Boolean) as { k: string; v: string }[];
+const paragraphs = (t(l.description, locale) || '').split(/\n\s*\n|\n/).map(p => p.trim()).filter(Boolean);
+const highlights = l.highlights?.[locale] ?? l.highlights?.en ?? [];
+const badge = l.status === 'sold' ? t(ui.sold, locale) : l.status === 'reserved' ? t(ui.reserved, locale) : null;
+const related = similar(l, 3);
+const description = paragraphs[0]?.slice(0, 155) || `${title} — ${t(l.location.district, locale)}, ${t(l.location.city, locale)}. ${formatPrice(l.price, locale)}.`;
+const locationLine = [t(l.location.district, locale), t(l.location.city, locale), t(l.location.country, locale)].filter(Boolean).join(locale === 'ar' ? '، ' : ', ');
+---
+<Base title={`${title} — ${site.name}`} description={description} locale={locale} path={path} image={l.images?.[0]?.src} waMessage={waMessage}
+      jsonLd={[listingJsonLd(l, locale), breadcrumbJsonLd(crumbs)]}>
+  <article class="pt-6 lg:pt-8">
+    <div class="wrap">
+      <Breadcrumb items={crumbs.map(c => ({ name: c.name, href: c.path }))} />
+      <div class="mt-6"><Gallery listing={l} locale={locale} /></div>
+
+      <div class="mt-12 grid gap-14 lg:mt-16 lg:grid-cols-12 lg:gap-10">
+        <div class="lg:col-span-7 xl:col-span-8">
+          <header>
+            <div class="flex flex-wrap items-center gap-4">
+              <p class="label text-stone-2">{t(categoryLabel[l.category], locale)} — {typeLabel(l.type, locale)}</p>
+              {badge && <span class="badge bg-ink text-ivory">{badge}</span>}
+            </div>
+            <h1 class="display-lg mt-4">{title}</h1>
+            <p class="mt-4 flex items-center gap-2 text-sm text-stone-2"><Icon name="pin" size={16} class="shrink-0 text-champagne" />{locationLine}</p>
+            <p class="mt-6 font-sans text-xl font-semibold">{formatPrice(l.price, locale)}</p>
+          </header>
+
+          {specs.length > 0 && (
+            <dl class="mt-10 flex flex-wrap gap-x-12 gap-y-6 border-y border-ink/10 py-7">
+              {specs.map(s => (
+                <div class="min-w-[6.5rem]">
+                  <dt class="label text-stone-2">{s.k}</dt>
+                  <dd class="display-sm mt-1.5">{s.v}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+
+          {paragraphs.length > 0 && (
+            <section class="mt-12">
+              <h2 class="label text-stone-2">{t(ui.aboutThisResidence, locale)}</h2>
+              <div class="prose-bona mt-5 text-[15px] leading-relaxed text-ink/85 md:text-base">
+                {paragraphs.map(p => <p>{p}</p>)}
+              </div>
+            </section>
+          )}
+
+          {highlights.length > 0 && (
+            <section class="mt-12">
+              <h2 class="label text-stone-2">{t(ui.highlights, locale)}</h2>
+              <ul class="mt-5 grid gap-x-10 gap-y-3 sm:grid-cols-2">
+                {highlights.map(h => <li class="flex items-start gap-3 text-[15px]"><span class="rule mt-3 !w-4 shrink-0"></span><span>{h}</span></li>)}
+              </ul>
+            </section>
+          )}
+
+          {(l.brochureUrl || l.virtualTourUrl) && (
+            <div class="mt-12 flex flex-wrap gap-4">
+              {l.brochureUrl && <a href={l.brochureUrl} target="_blank" rel="noopener" class="btn btn-outline"><Icon name="download" size={16} />{t(ui.brochure, locale)}</a>}
+              {l.virtualTourUrl && <a href={l.virtualTourUrl} target="_blank" rel="noopener" class="btn btn-outline"><Icon name="tour" size={16} />{t(ui.virtualTour, locale)}</a>}
+            </div>
+          )}
+
+          <section class="mt-16 border-t border-ink/10 pt-12">
+            <h2 class="display-md">{t(ui.privateEnquiry, locale)}</h2>
+            <p class="mt-3 max-w-[52ch] text-sm text-stone-2">{t(ui.enquiryPanelText, locale)}</p>
+            <div class="mt-8"><EnquiryForm locale={locale} variant="listing" listing={{ id: l.id, title, path }} id="enquiry-listing" /></div>
+          </section>
+        </div>
+
+        <aside class="lg:col-span-5 xl:col-span-4">
+          <div class="border border-ink/10 bg-ivory-2 p-7 lg:sticky lg:top-28">
+            <p class="label text-stone-2">{t(ui.privateEnquiry, locale)}</p>
+            <p class="display-md mt-3">{formatPrice(l.price, locale)}</p>
+            <p class="mt-3 text-sm text-stone-2">{t(ui.enquiryPanelText, locale)}</p>
+            <a href={wa} target="_blank" rel="noopener" class="btn btn-ink mt-7 w-full"><Icon name="whatsapp" size={17} />{t(ui.enquireWhatsApp, locale)}</a>
+            <a href={`tel:${site.phone.e164}`} class="btn btn-outline mt-3 w-full"><Icon name="phone" size={16} /><span dir="ltr">{site.phone.display}</span></a>
+            <span class="rule-long mt-7"></span>
+            <dl class="mt-5 flex items-baseline justify-between text-xs text-stone-2">
+              <dt class="label">{t(ui.reference, locale)}</dt>
+              <dd class="font-semibold text-ink" dir="ltr">{l.id}</dd>
+            </dl>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    {related.length > 0 && (
+      <section class="section">
+        <div class="wrap">
+          <SectionHead title={t(ui.similarResidences, locale)} link={{ href: localePath(locale, `/properties/${categorySlug[l.category]}/`), label: t(categoryLabel[l.category], locale) }} />
+          <div class="mt-12 grid gap-x-8 gap-y-14 sm:grid-cols-2 lg:grid-cols-3">
+            {related.map((r, i) => <div data-reveal data-reveal-delay={String(i)}><ListingCard listing={r} locale={locale} index={i} /></div>)}
+          </div>
+        </div>
+      </section>
+    )}
+  </article>
+</Base>

@@ -1,0 +1,58 @@
+---
+import Logo from './Logo.astro';
+import Icon from './Icon.astro';
+import site from '../data/site.json';
+import { localePath, t, ui, waLink, type Locale } from '../lib/i18n';
+interface Props { locale: Locale }
+const { locale } = Astro.props;
+const year = new Date().getFullYear();
+const addr = site.address[locale];
+const wa = waLink(site.whatsapp.wa, t(ui.formGreeting, locale));
+const nav = [
+  [localePath(locale, '/properties/'), t(ui.navProperties, locale)],
+  [localePath(locale, '/properties/off-plan/'), t(ui.navOffPlan, locale)],
+  [localePath(locale, '/properties/international/'), t(ui.navInternational, locale)],
+  [localePath(locale, '/about/'), t(ui.navAbout, locale)],
+  [localePath(locale, '/sell/'), t(ui.navSell, locale)],
+  [localePath(locale, '/contact/'), t(ui.navContact, locale)],
+];
+---
+<footer class="on-dark bg-ink text-ivory">
+  <div class="wrap section-tight">
+    <div class="grid gap-12 md:grid-cols-2 lg:grid-cols-12 lg:gap-8">
+      <div class="lg:col-span-5">
+        <a href={localePath(locale, '/')} class="inline-block" aria-label={site.name}><Logo locale={locale} height={locale === 'ar' ? 30 : 26} /></a>
+        <p class="mt-6 max-w-[44ch] text-sm leading-relaxed text-ivory/70">{t(site.description, locale)}</p>
+      </div>
+      <div class="lg:col-span-2">
+        <p class="label text-champagne">{t(ui.footerNav, locale)}</p>
+        <ul class="mt-5 space-y-3">
+          {nav.map(([href, label]) => <li><a href={href} class="link text-sm text-ivory/85 hover:text-ivory">{label}</a></li>)}
+        </ul>
+      </div>
+      <div class="lg:col-span-2">
+        <p class="label text-champagne">{t(ui.footerContact, locale)}</p>
+        <ul class="mt-5 space-y-3 text-sm">
+          <li><a href={wa} target="_blank" rel="noopener" class="link inline-flex items-center gap-2 text-ivory/85 hover:text-ivory"><Icon name="whatsapp" size={16} />{t(ui.whatsapp, locale)}</a></li>
+          <li><a href={`tel:${site.phone.e164}`} class="link text-ivory/85 hover:text-ivory" dir="ltr">{site.phone.display}</a></li>
+          <li><a href={site.instagram.url} target="_blank" rel="noopener" class="link inline-flex items-center gap-2 text-ivory/85 hover:text-ivory"><Icon name="instagram" size={16} />@{site.instagram.handle}</a></li>
+        </ul>
+      </div>
+      <div class="lg:col-span-3">
+        <p class="label text-champagne">{t(ui.footerVisit, locale)}</p>
+        <address class="mt-5 text-sm not-italic leading-relaxed text-ivory/85">
+          {addr.street}<br />{addr.city} {addr.postalCode}<br />{addr.country}
+        </address>
+        <p class="mt-4 text-sm text-ivory/60">{t(site.hours, locale)}</p>
+      </div>
+    </div>
+    <span class="rule-long mt-14"></span>
+    <div class="mt-6 flex flex-col gap-3 text-xs text-ivory/55 md:flex-row md:items-center md:justify-between">
+      <p>
+        {t(ui.regaLicence, locale)} <span dir="ltr">{site.licences.fal}</span>
+        {site.licences.cr && <span> · {t(ui.crNumber, locale)} <span dir="ltr">{site.licences.cr}</span></span>}
+      </p>
+      <p>© {year} {site.name}{locale === 'ar' ? ` ${site.nameAr}` : ''}. {t(ui.allRightsReserved, locale)}</p>
+    </div>
+  </div>
+</footer>

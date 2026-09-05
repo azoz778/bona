@@ -1,0 +1,119 @@
+---
+import Base from '../../layouts/Base.astro';
+import Icon from '../Icon.astro';
+import site from '../../data/site.json';
+import { localePath, t, ui, waLink, type Locale } from '../../lib/i18n';
+import { editorialImage, ordered, listings, imageAlt } from '../../lib/listings';
+import { breadcrumbJsonLd, orgJsonLd } from '../../lib/seo';
+interface Props { locale: Locale }
+const { locale } = Astro.props;
+const path = localePath(locale, '/about/');
+const wa = waLink(site.whatsapp.wa, t(ui.formGreeting, locale));
+const pool = ordered(listings).filter(l => l.images?.length);
+const img1 = editorialImage(2, 1), img1L = pool[2 % Math.max(1, pool.length)];
+const img2 = editorialImage(4, 3), img2L = pool[4 % Math.max(1, pool.length)];
+const markets = site.markets[locale];
+
+const c = {
+  h1: { en: 'A private house for exceptional homes', ar: 'دار خاصة للمنازل الاستثنائية' },
+  statement: {
+    en: 'Bona takes its name from the Latin for good things: property, in the oldest sense of the word. We are an independent real estate boutique in Jeddah, deliberately small, representing a handful of homes at a time.',
+    ar: 'تستمدّ بونا اسمها من الكلمة اللاتينية Bona، أي «الأشياء الطيّبة»: الملكية بمعناها الأقدم. نحن بوتيك عقاري مستقل في جدة، صغير عن قصد، يمثّل عدداً محدوداً من المنازل في كل مرة.',
+  },
+  pillars: [
+    { h: { en: 'A small portfolio, by design', ar: 'محفظة صغيرة، عن قصد' },
+      p: { en: 'We represent villas, penthouses, waterfront residences and off-market houses that rarely reach the portals. Each is chosen because we would stand behind it ourselves.',
+           ar: 'نمثّل فللاً وبنتهاوس ومساكن واجهية وبيوتاً خارج السوق قلّما تصل إلى المنصات. نختار كل واحد منها لأننا مستعدون أن نقف خلفه بأنفسنا.' } },
+    { h: { en: 'Principal-level handling', ar: 'تعامل على مستوى الشركاء' },
+      p: { en: 'You deal with a principal from the first call to the handover. No hand-offs, no call centre; one person who knows the house, the street and the seller.',
+           ar: 'تتعامل مع أحد شركاء الدار من أول اتصال حتى التسليم. لا تحويل بين موظفين ولا مركز اتصال؛ شخص واحد يعرف البيت والشارع والبائع.' } },
+    { h: { en: 'Jeddah roots, a wider network', ar: 'جذور في جدة، وشبكة أوسع' },
+      p: { en: 'Our home is Jeddah: Al Shati, Al Khalidiyah, Obhur and the coast north of the city. Through partners we have worked with for years, we also act in Riyadh, Dubai, the Côte d’Azur, the Costa del Sol and Oman.',
+           ar: 'بيتنا جدة: الشاطئ والخالدية وأبحر والساحل شمال المدينة. وعبر شركاء نعمل معهم منذ سنوات، نعمل أيضاً في الرياض ودبي والريفييرا الفرنسية وكوستا ديل سول وعُمان.' } },
+  ],
+  howTitle: { en: 'How we work', ar: 'كيف نعمل' },
+  how: [
+    { h: { en: 'Representation', ar: 'التمثيل' },
+      p: { en: 'For owners, we prepare the house properly, price it honestly and present it to the right people first, often before it is ever advertised.',
+           ar: 'للمُلّاك: نجهّز البيت كما ينبغي، ونسعّره بصدق، ونعرضه على الأشخاص المناسبين أولاً، وغالباً قبل أن يُعلن عنه.' } },
+    { h: { en: 'Acquisition', ar: 'الاستحواذ' },
+      p: { en: 'For buyers, we search on and off the market, verify title and licensing, and negotiate as if the money were our own.',
+           ar: 'للمشترين: نبحث داخل السوق وخارجه، ونتحقق من الصكوك والتراخيص، ونتفاوض كأن المال مالنا.' } },
+    { h: { en: 'Discretion', ar: 'التحفّظ' },
+      p: { en: 'Nothing is shared without consent. Some of our best work never appears on this site.',
+           ar: 'لا يُشارك شيء دون إذن. بعض أفضل أعمالنا لا يظهر على هذا الموقع أبداً.' } },
+  ],
+  closing: { en: 'If you are thinking about a home, or about selling one, the conversation costs nothing and stays between us.',
+             ar: 'إن كنت تفكّر في منزل، أو في بيع منزل، فالمحادثة لا تكلّف شيئاً وتبقى بيننا.' },
+};
+const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { name: t(ui.aboutTitle, locale), path }];
+---
+<Base title={`${t(ui.aboutMetaTitle, locale)} — ${site.name}`} description={t(ui.aboutMetaDesc, locale)} locale={locale} path={path} image={img1?.src} jsonLd={[orgJsonLd(locale), breadcrumbJsonLd(crumbs)]}>
+  <section class="section-tight pt-12 lg:pt-16">
+    <div class="wrap grid gap-12 lg:grid-cols-12 lg:gap-8">
+      <div class="lg:col-span-7" data-reveal>
+        <span class="rule"></span>
+        <p class="label mt-6 text-stone-2">{t(ui.aboutTitle, locale)}</p>
+        <h1 class="display-lg mt-4">{t(c.h1, locale)}</h1>
+        <p class="statement mt-10 max-w-[30ch]">{t(c.statement, locale)}</p>
+      </div>
+      {img1 && img1L && (
+        <div class="lg:col-span-5 lg:pt-16" data-reveal data-reveal-delay="1">
+          <div class="img-zoom aspect-[4/5]"><img src={img1.src} alt={imageAlt(img1, img1L, locale)} loading="lazy" decoding="async" class="h-full w-full object-cover" /></div>
+        </div>
+      )}
+    </div>
+  </section>
+
+  <section class="section-tight">
+    <div class="wrap grid gap-12 md:grid-cols-3 md:gap-10">
+      {c.pillars.map((p, i) => (
+        <div data-reveal data-reveal-delay={String(i)}>
+          <span class="rule"></span>
+          <h2 class="display-md mt-6">{t(p.h, locale)}</h2>
+          <p class="mt-4 text-[15px] leading-relaxed text-stone-2">{t(p.p, locale)}</p>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  {img2 && img2L && (
+    <section class="wrap section-tight">
+      <div class="img-zoom aspect-[16/8]" data-reveal><img src={img2.src} alt={imageAlt(img2, img2L, locale)} loading="lazy" decoding="async" class="h-full w-full object-cover" /></div>
+    </section>
+  )}
+
+  <section class="on-dark bg-ink text-ivory">
+    <div class="wrap section">
+      <div data-reveal><span class="rule"></span><h2 class="display-lg mt-6">{t(c.howTitle, locale)}</h2></div>
+      <div class="mt-14 grid gap-12 md:grid-cols-3 md:gap-10">
+        {c.how.map((p, i) => (
+          <div data-reveal data-reveal-delay={String(i)}>
+            <h3 class="display-md">{t(p.h, locale)}</h3>
+            <p class="mt-4 text-[15px] leading-relaxed text-ivory/70">{t(p.p, locale)}</p>
+          </div>
+        ))}
+      </div>
+      <span class="rule-long mt-16"></span>
+      <ul class="mt-8 flex flex-wrap gap-y-3" data-reveal>
+        {markets.map((m, i) => (
+          <li class="display-sm flex items-center text-ivory/85">
+            {i > 0 && <span aria-hidden="true" class="mx-5 inline-block h-4 w-px bg-champagne"></span>}<span>{m}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap-narrow text-center" data-reveal>
+      <span class="rule mx-auto"></span>
+      <h2 class="display-lg mt-6">{t(ui.speakWithUs, locale)}</h2>
+      <p class="mx-auto mt-6 max-w-[46ch] text-stone-2">{t(c.closing, locale)}</p>
+      <div class="mt-10 flex flex-wrap justify-center gap-4">
+        <a href={wa} target="_blank" rel="noopener" class="btn btn-ink"><Icon name="whatsapp" size={17} />{t(ui.chatOnWhatsApp, locale)}</a>
+        <a href={localePath(locale, '/properties/')} class="btn btn-outline">{t(ui.exploreProperties, locale)}</a>
+      </div>
+    </div>
+  </section>
+</Base>

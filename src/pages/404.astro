@@ -1,0 +1,31 @@
+---
+import Base from '../layouts/Base.astro';
+import site from '../data/site.json';
+import { localePath, t, ui } from '../lib/i18n';
+---
+<Base title={`404 — ${site.name}`} description={t(ui.notFoundText, 'en')} locale="en" path="/404/" noindex>
+  <section class="section">
+    <div class="wrap grid gap-16 lg:grid-cols-2 lg:gap-10">
+      <div data-reveal>
+        <span class="rule"></span>
+        <p class="label mt-6 text-stone-2">404</p>
+        <h1 class="display-lg mt-4">{t(ui.notFoundTitle, 'en')}</h1>
+        <p class="mt-6 max-w-[46ch] text-stone-2">{t(ui.notFoundText, 'en')}</p>
+        <div class="mt-10 flex flex-wrap gap-4">
+          <a href={localePath('en', '/')} class="btn btn-ink">{t(ui.backHome, 'en')}</a>
+          <a href={localePath('en', '/properties/')} class="btn btn-outline">{t(ui.browseProperties, 'en')}</a>
+        </div>
+      </div>
+      <div lang="ar" dir="rtl" class="font-arabic leading-[1.8] lg:border-s lg:border-ink/10 lg:ps-10" data-reveal data-reveal-delay="1">
+        <span class="rule"></span>
+        <p class="mt-6 text-[13px] font-medium text-stone-2">404</p>
+        <h2 class="mt-4 font-arabic-display text-[clamp(2rem,3.6vw,3rem)] font-bold leading-[1.35]">{t(ui.notFoundTitle, 'ar')}</h2>
+        <p class="mt-6 max-w-[46ch] text-stone-2">{t(ui.notFoundText, 'ar')}</p>
+        <div class="mt-10 flex flex-wrap gap-4">
+          <a href={localePath('ar', '/')} class="btn btn-ink !font-arabic !text-[13px] !font-medium !normal-case !tracking-normal">{t(ui.backHome, 'ar')}</a>
+          <a href={localePath('ar', '/properties/')} class="btn btn-outline !font-arabic !text-[13px] !font-medium !normal-case !tracking-normal">{t(ui.browseProperties, 'ar')}</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</Base>

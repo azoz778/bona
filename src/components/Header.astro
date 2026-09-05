@@ -1,0 +1,102 @@
+---
+import Logo from './Logo.astro';
+import Icon from './Icon.astro';
+import site from '../data/site.json';
+import { localePath, switchLocalePath, otherLocale, t, ui, waLink, type Locale } from '../lib/i18n';
+interface Props { locale: Locale; path: string; overHero?: boolean }
+const { locale, path, overHero = false } = Astro.props;
+const other = otherLocale(locale);
+const nav = [
+  { href: localePath(locale, '/properties/'), label: t(ui.navProperties, locale), exact: false },
+  { href: localePath(locale, '/properties/off-plan/'), label: t(ui.navOffPlan, locale), exact: true },
+  { href: localePath(locale, '/properties/international/'), label: t(ui.navInternational, locale), exact: true },
+  { href: localePath(locale, '/about/'), label: t(ui.navAbout, locale), exact: true },
+  { href: localePath(locale, '/sell/'), label: t(ui.navSell, locale), exact: true },
+  { href: localePath(locale, '/contact/'), label: t(ui.navContact, locale), exact: true },
+];
+const special = new Set([localePath(locale, '/properties/off-plan/'), localePath(locale, '/properties/international/')]);
+const isCurrent = (item: typeof nav[number]) => item.exact ? path === item.href : (path.startsWith(item.href) && !special.has(path));
+const wa = waLink(site.whatsapp.wa, t(ui.formGreeting, locale));
+
+/* Language switch: only link to the mirrored route if that route file actually exists (404, dashboard etc. are single-locale). */
+const routeFiles = Object.keys(import.meta.glob('/src/pages/**/*.astro'));
+function routeExists(p: string): boolean {
+  const segs = p.replace(/^\/|\/$/g, '').split('/').filter(Boolean);
+  if (segs.length === 0) return routeFiles.includes('/src/pages/index.astro');
+  const base = '/src/pages/' + segs.join('/');
+  if (routeFiles.includes(`${base}.astro`) || routeFiles.includes(`${base}/index.astro`)) return true;
+  const parent = '/src/pages/' + segs.slice(0, -1).join('/');
+  return routeFiles.some(f => f.startsWith(`${parent}/[`) && f.split('/').length === parent.split('/').length + 1);
+}
+const mirrored = switchLocalePath(path, other);
+const switchHref = routeExists(mirrored) ? mirrored : localePath(other, '/');
+---
+<header class:list={['site-header', overHero && 'is-over-hero']} data-header>
+  <div class="wrap flex h-16 items-center justify-between gap-6 lg:h-20">
+    <a href={localePath(locale, '/')} class="flex shrink-0 items-center" aria-label={site.name}>
+      <Logo locale={locale} height={locale === 'ar' ? 24 : 21} class="block" />
+    </a>
+
+    <nav aria-label={locale === 'ar' ? 'التنقل الرئيسي' : 'Primary'} class="hidden items-center gap-7 xl:gap-9 lg:flex">
+      {nav.map(item => (
+        <a href={item.href} class="nav-link" aria-current={isCurrent(item) ? 'page' : undefined}>{item.label}</a>
+      ))}
+    </nav>
+
+    <div class="flex items-center gap-5 lg:gap-6">
+      <a href={switchHref} lang={other} hreflang={other} dir={other === 'ar' ? 'rtl' : 'ltr'}
+         class:list={['nav-link', other === 'ar' && 'font-arabic !tracking-normal !normal-case !font-medium !text-[13px]']}
+         aria-label={t(ui.languageSwitchAria, locale)}>{t(ui.languageSwitch, locale)}</a>
+      <a href={wa} target="_blank" rel="noopener" class="hidden opacity-85 transition-opacity hover:opacity-100 sm:block" aria-label={t(ui.chatOnWhatsApp, locale)} title={t(ui.chatOnWhatsApp, locale)}>
+        <Icon name="whatsapp" size={21} />
+      </a>
+      <button type="button" class="-me-2 grid h-10 w-10 place-items-center lg:hidden" data-menu-open aria-expanded="false" aria-controls="site-drawer" aria-label={t(ui.openMenu, locale)}>
+        <Icon name="menu" size={24} />
+      </button>
+    </div>
+  </div>
+</header>
+
+<div id="site-drawer" class="drawer" data-drawer>
+  <div class="wrap flex h-16 items-center justify-between">
+    <a href={localePath(locale, '/')} class="flex items-center" aria-label={site.name}><Logo locale={locale} height={locale === 'ar' ? 24 : 21} /></a>
+    <button type="button" class="-me-2 grid h-10 w-10 place-items-center" data-menu-close aria-label={t(ui.closeMenu, locale)}><Icon name="close" size={24} /></button>
+  </div>
+  <nav aria-label={t(ui.menu, locale)} class="wrap mt-8 flex flex-col">
+    {nav.map(item => (
+      <a href={item.href} class="display-md border-b border-ink/10 py-4" aria-current={isCurrent(item) ? 'page' : undefined}>{item.label}</a>
+    ))}
+  </nav>
+  <div class="wrap mt-10 flex flex-col gap-6 pb-16">
+    <a href={wa} target="_blank" rel="noopener" class="btn btn-ink w-full sm:w-auto"><Icon name="whatsapp" size={18} />{t(ui.chatOnWhatsApp, locale)}</a>
+    <a href={switchHref} lang={other} hreflang={other} dir={other === 'ar' ? 'rtl' : 'ltr'} class:list={['link self-start', other === 'ar' ? 'font-arabic' : 'label']}>{t(ui.languageSwitch, locale)}</a>
+    <p class="text-sm text-stone">{site.whatsapp.display}</p>
+  </div>
+</div>
+
+<script>
+  const header = document.querySelector<HTMLElement>('[data-header]');
+  const drawer = document.querySelector<HTMLElement>('[data-drawer]');
+  const openBtn = document.querySelector<HTMLButtonElement>('[data-menu-open]');
+  const closeBtn = document.querySelector<HTMLButtonElement>('[data-menu-close]');
+
+  if (header) {
+    const update = () => header.classList.toggle('is-solid', window.scrollY > 24);
+    update();
+    window.addEventListener('scroll', update, { passive: true });
+  }
+
+  if (drawer && openBtn && closeBtn) {
+    const setOpen = (open: boolean) => {
+      drawer.classList.toggle('is-open', open);
+      document.body.classList.toggle('drawer-open', open);
+      openBtn.setAttribute('aria-expanded', String(open));
+      if (open) window.setTimeout(() => closeBtn.focus(), 60); else openBtn.focus();
+    };
+    openBtn.addEventListener('click', () => setOpen(true));
+    closeBtn.addEventListener('click', () => setOpen(false));
+    drawer.querySelectorAll('a').forEach(a => a.addEventListener('click', () => setOpen(false)));
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && drawer.classList.contains('is-open')) setOpen(false); });
+    window.matchMedia('(min-width: 1024px)').addEventListener('change', e => { if (e.matches) setOpen(false); });
+  }
+</script>

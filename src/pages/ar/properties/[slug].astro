@@ -1,0 +1,9 @@
+---
+import ListingPage from '../../../components/pages/ListingPage.astro';
+import { listings } from '../../../lib/listings';
+export function getStaticPaths() {
+  return listings.map(listing => ({ params: { slug: listing.slug }, props: { listing } }));
+}
+const { listing } = Astro.props;
+---
+<ListingPage locale="ar" listing={listing} />

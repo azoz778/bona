@@ -1,0 +1,130 @@
+---
+import Base from '../../layouts/Base.astro';
+import ListingCard from '../ListingCard.astro';
+import SectionHead from '../SectionHead.astro';
+import Icon from '../Icon.astro';
+import site from '../../data/site.json';
+import { localePath, t, ui, waLink, type Locale } from '../../lib/i18n';
+import { featured, heroListing, editorialImage, imageAlt, ordered, listings } from '../../lib/listings';
+import { orgJsonLd } from '../../lib/seo';
+interface Props { locale: Locale }
+const { locale } = Astro.props;
+const path = localePath(locale, '/');
+const hero = heroListing();
+const heroImg = hero?.images?.[0];
+const feats = featured().slice(0, 6);
+const markets = site.markets[locale];
+const aboutImg = editorialImage(1, 2);
+const aboutImgListing = ordered(listings).filter(l => l.images?.length)[1 % Math.max(1, ordered(listings).filter(l => l.images?.length).length)];
+const wa = waLink(site.whatsapp.wa, t(ui.formGreeting, locale));
+const title = `${site.name} — ${t(site.tagline, locale)}`;
+---
+<Base title={title} description={t(site.description, locale)} locale={locale} path={path} image={heroImg?.src} hero jsonLd={orgJsonLd(locale)}>
+  <!-- Hero: the one bold moment. Full-bleed photograph, headline set at display scale. -->
+  <section class="relative flex min-h-[92svh] items-end bg-ink text-ivory">
+    <div class="absolute inset-0 overflow-hidden">
+      {heroImg && <img src={heroImg.src} alt={hero ? imageAlt(heroImg, hero, locale) : ''} fetchpriority="high" decoding="async" class="h-full w-full object-cover" />}
+      <div class="absolute inset-0 bg-linear-to-t from-ink/85 via-ink/20 to-ink/35"></div>
+    </div>
+    <div class="wrap relative pb-16 pt-44 lg:pb-24">
+      <p class="label text-champagne-2">{t(ui.privateRealEstate, locale)}</p>
+      <h1 class="display-xl mt-6 max-w-[13ch]">{t(site.tagline, locale)}</h1>
+      <p class="mt-7 max-w-[50ch] text-[15px] leading-relaxed text-ivory/80 md:text-base">{t(ui.heroSubline, locale)}</p>
+      <div class="mt-10 flex flex-wrap gap-4">
+        <a href={localePath(locale, '/properties/')} class="btn btn-light">{t(ui.exploreProperties, locale)}</a>
+        <a href={wa} target="_blank" rel="noopener" class="btn btn-outline-light"><Icon name="whatsapp" size={16} />{t(ui.privateEnquiry, locale)}</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Selected residences -->
+  {feats.length > 0 && (
+    <section class="section">
+      <div class="wrap">
+        <SectionHead title={t(ui.selectedResidences, locale)} intro={t(ui.selectedResidencesIntro, locale)} link={{ href: localePath(locale, '/properties/'), label: t(ui.viewAllProperties, locale) }} />
+        <div class="mt-14 grid gap-x-8 gap-y-14 md:grid-cols-2">
+          {feats.map((l, i) => <div data-reveal data-reveal-delay={String(i % 2)}><ListingCard listing={l} locale={locale} index={i} ratio="3/2" /></div>)}
+        </div>
+      </div>
+    </section>
+  )}
+
+  <!-- Markets -->
+  <section class="border-y border-ink/10">
+    <div class="wrap section-tight">
+      <div class="flex flex-col gap-8 lg:flex-row lg:items-baseline lg:justify-between" data-reveal>
+        <div class="lg:w-72 shrink-0">
+          <p class="label text-stone-2">{t(ui.markets, locale)}</p>
+          <p class="mt-3 text-sm text-stone-2">{t(ui.marketsIntro, locale)}</p>
+        </div>
+        <ul class="flex flex-wrap gap-y-3">
+          {markets.map((m, i) => (
+            <li class="display-md flex items-center">
+              {i > 0 && <span aria-hidden="true" class="mx-5 inline-block h-6 w-px bg-champagne md:mx-7"></span>}
+              <span>{m}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- The house -->
+  <section class="section">
+    <div class="wrap grid gap-12 lg:grid-cols-12 lg:gap-8">
+      <div class="lg:col-span-6 lg:self-center" data-reveal>
+        <span class="rule"></span>
+        <p class="label mt-6 text-stone-2">{t(ui.theHouse, locale)}</p>
+        <p class="statement mt-6">{t(ui.homeAboutStatement, locale)}</p>
+        <a href={localePath(locale, '/about/')} class="link-label mt-10 inline-block text-ink">{t(ui.aboutBona, locale)}</a>
+      </div>
+      {aboutImg && aboutImgListing && (
+        <div class="lg:col-span-5 lg:col-start-8" data-reveal data-reveal-delay="1">
+          <div class="img-zoom aspect-[4/5]">
+            <img src={aboutImg.src} alt={imageAlt(aboutImg, aboutImgListing, locale)} loading="lazy" decoding="async" class="h-full w-full object-cover" />
+          </div>
+        </div>
+      )}
+    </div>
+  </section>
+
+  <!-- Sell with Bona -->
+  <section class="on-dark bg-ink text-ivory">
+    <div class="wrap section grid gap-10 lg:grid-cols-12 lg:items-center" data-reveal>
+      <div class="lg:col-span-7">
+        <span class="rule"></span>
+        <h2 class="display-lg mt-6">{t(ui.sellWithBona, locale)}</h2>
+        <p class="mt-6 max-w-[52ch] text-ivory/75">{t(ui.sellBandText, locale)}</p>
+      </div>
+      <div class="lg:col-span-5 lg:flex lg:justify-end">
+        <a href={localePath(locale, '/sell/')} class="btn btn-champagne">{t(ui.listYourProperty, locale)}</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Instagram -->
+  <section class="bg-ivory-2">
+    <div class="wrap section-tight flex flex-col items-start gap-6 md:flex-row md:items-center md:justify-between" data-reveal>
+      <div>
+        <p class="label text-stone-2">{t(ui.instagram, locale)}</p>
+        <a href={site.instagram.url} target="_blank" rel="noopener" class="display-md mt-3 inline-flex items-center gap-4 hover:text-stone-2 transition-colors">
+          <Icon name="instagram" size={26} class="text-champagne" /><span dir="ltr">@{site.instagram.handle}</span>
+        </a>
+      </div>
+      <p class="max-w-[40ch] text-sm text-stone-2">{t(ui.instagramBandText, locale)}</p>
+    </div>
+  </section>
+
+  <!-- Contact -->
+  <section class="section">
+    <div class="wrap-narrow text-center" data-reveal>
+      <span class="rule mx-auto"></span>
+      <h2 class="display-lg mt-6">{t(ui.speakWithUs, locale)}</h2>
+      <p class="mx-auto mt-6 max-w-[48ch] text-stone-2">{t(ui.contactBandText, locale)}</p>
+      <div class="mt-10 flex flex-wrap justify-center gap-4">
+        <a href={wa} target="_blank" rel="noopener" class="btn btn-ink"><Icon name="whatsapp" size={17} />{t(ui.chatOnWhatsApp, locale)}</a>
+        <a href={`tel:${site.phone.e164}`} class="btn btn-outline" dir="ltr">{site.phone.display}</a>
+      </div>
+    </div>
+  </section>
+</Base>
