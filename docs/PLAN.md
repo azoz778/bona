@@ -29,3 +29,8 @@ Owner brief: new luxury real-estate company **Bona** (بونا). Reuse TK Estate
 - Buy bona.com.sa (Saudi .com.sa needs a CR / trade name), then flip `site.url` and DNS.
 - GA4 property + Meta Pixel IDs → `site.json.analytics`.
 - Bona CR + FAL company licence + REGA ad licences before paid promotion.
+
+## Status 2026-09-05 16:40 KSA
+- Built, reviewed and pushed to `main` (commit 0a69426): 84 pages (EN+AR), /dashboard/, SEO layer, Instagram kit, daily CI loop.
+- Reviews: Codex #1 (SEO/data/dashboard) 4 findings fixed · Claude reviewer (site) 1 critical + 8 important fixed · Codex #2 (site) 1 high (regression from the plural fix) fixed. Browser QA: filters/sort EN+AR, gallery, Arabic-digit form, zero console errors.
+- Blocked on owner: repo visibility → see docs/OWNER-RUNBOOK.md §1.
