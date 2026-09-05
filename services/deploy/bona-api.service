@@ -1,0 +1,34 @@
+[Unit]
+Description=Bona concierge API (Dana) — chat, web calls, Retell tools
+Documentation=https://github.com/azoz778/bona/blob/main/services/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Secrets are read by the process itself from ~/.secrets/*.env; this file only
+# carries non-secret configuration. Both are optional so the unit starts either way.
+EnvironmentFile=-%h/.secrets/bona-services.env
+Environment=NODE_ENV=production
+Environment=PATH=%h/.nvm/versions/node/v24.19.0/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=%h/bona/services
+ExecStart=%h/.nvm/versions/node/v24.19.0/bin/node %h/bona/services/api/index.mjs
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+KillSignal=SIGTERM
+
+# Structured JSON logs, one object per line.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bona-api
+
+# The service only ever reads the repo and writes ~/bona-data.
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+MemoryMax=512M
+
+[Install]
+WantedBy=default.target
