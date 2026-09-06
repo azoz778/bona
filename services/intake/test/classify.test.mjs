@@ -19,10 +19,11 @@ describe('classifyPdf — default deny', () => {
     assert.match(v.reason, /default-deny/);
   });
 
-  it('rejects anything short', () => {
+  it('accepts a one-page flyer with property signals (the AI gate decides) and still rejects an empty document', () => {
     const v = classifyPdf(pdf({ pages: 1, text: 'Villa for sale, 5 bedrooms' }));
-    assert.equal(v.ok, false);
-    assert.match(v.reason, /1 page/);
+    assert.equal(v.ok, true);
+    const z = classifyPdf(pdf({ pages: 0, text: '' }));
+    assert.equal(z.ok, false);
   });
 
   const privateDocs = [
@@ -82,10 +83,10 @@ describe('classifyPdf — brochures with no text layer', () => {
     assert.equal(v.imageOnly, false);
   });
 
-  it('still refuses a text-free PDF that is too short to be a brochure', () => {
+  it('defers a one-page text-free PDF to the AI gate instead of refusing it locally', () => {
     const v = classifyPdf(pdf({ text: '', pages: 1, embeddedImageCount: 40 }));
-    assert.equal(v.ok, false);
-    assert.match(v.reason, /1 page/);
+    assert.equal(v.ok, true);
+    assert.equal(v.imageOnly, true);
   });
 
   it('still refuses a text-free document whose few words are a hard deny', () => {

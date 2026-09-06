@@ -191,7 +191,7 @@ default, so only the ones you want to change need to be present.
 | `BONA_SITE` | `https://bona.azoz.uk` | used for URLs and `brochureUrl` |
 | `BONA_MIN_IMAGES` / `BONA_MAX_IMAGES` | `4` / `10` | publishable photo count |
 | `BONA_MIN_IMAGE_SIDE` | `700` | smallest long side of a candidate photo |
-| `BONA_MAX_PDF_MB` / `BONA_MAX_PDF_PAGES` | `40` / `60` | input limits |
+| `BONA_MAX_PDF_MB` / `BONA_MAX_PDF_PAGES` | `150` / `120` | input limits (developer brochures run 50–80 MB) |
 | `BONA_PAGE_READ_LONG_SIDE` | `1600` | long side of the page renders the AI reads (text-free PDFs) |
 | `BONA_LOCK_WAIT_MS` | `900000` | how long a job waits for `$BONA_DATA/intake.lock` |
 | `BONA_PY_CMD` | `uv run --with pymupdf python` | argv for the extractor; split on spaces, never shelled |
@@ -250,7 +250,7 @@ live-list filter; intake listings are exempt from that filter because they are o
 | symptom | cause | what to do |
 |---|---|---|
 | `✋ Not published — looks like a private document ("IBAN")` | the default-deny gate | correct: that PDF is not a brochure |
-| `✋ … only 1 page — too short for a brochure` | a scan or a certificate | send the real brochure |
+| `✋ … not a property brochure` (AI gate) | a scan, certificate or site plan without property details | send the real brochure |
 | `✋ … not enough usable photos — 0 of 4` | the PDF has no extractable photographs (only page renders) or they are all plans/logos | send a brochure with real photos, or the photos themselves |
 | `⚠️ … You've hit your session limit` | Claude Code quota | wait for the reset; the PDF stays in `$BONA_DATA`, send `retry` |
 | `⚠️ Something went wrong …` | any failure: git, build, model | the reason is in the journal — the reply deliberately quotes none of it. The repo is rolled back. |

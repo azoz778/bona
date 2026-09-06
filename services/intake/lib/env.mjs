@@ -80,8 +80,8 @@ export function loadConfig(overrides = {}) {
       ? String(raw.BONA_PY_CMD).trim().split(/\s+/)
       : ['uv', 'run', '--with', 'pymupdf', 'python'],
     site: (raw.BONA_SITE || 'https://bona.azoz.uk').replace(/\/+$/, ''),
-    maxPdfMb: num(raw.BONA_MAX_PDF_MB, 40),
-    maxPdfPages: num(raw.BONA_MAX_PDF_PAGES, 60),
+    maxPdfMb: num(raw.BONA_MAX_PDF_MB, 150), // real developer brochures are 50–80 MB (owner's files 2026-09-06)
+    maxPdfPages: num(raw.BONA_MAX_PDF_PAGES, 120),
     maxBrochureMb: num(raw.BONA_MAX_BROCHURE_MB, 8),
     minImages: num(raw.BONA_MIN_IMAGES, 4),
     maxImages: num(raw.BONA_MAX_IMAGES, 10),

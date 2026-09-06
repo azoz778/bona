@@ -86,9 +86,13 @@ Everything between `<<<BONA-UNTRUSTED-DATA: …>>>` and `<<<END BONA-UNTRUSTED-D
 {{ROOM_KEYS}}
 - `reason` is one short clause, in English, explaining the placement — it goes into the log the owner reads.
 
+### Project brochures (several units, one development)
+
+A developer brochure that markets a whole project — a building, a compound, several unit types — is a **valid listing**: publish it as ONE project listing. Title = the project name (e.g. "Nuzul Khayala Residences, Al Rawdah" / "نزل خيالة، الروضة"); `type` = the dominant unit type (apartment for residential towers, villa for compounds, land for plotted developments); `category` = `off-plan` if still under construction, else `buy`; `price` = the lowest printed starting price with `from: true` (or `onRequest: true` when no price is printed); `specs` = null for anything that varies by unit; the description covers the location, the unit mix (types, sizes, bedroom counts), amenities and delivery date exactly as printed; `project` = `{ "name": {en,ar}, "developer": {en,ar} }` — both required, developer = the developer's name as printed (if only a brand is printed, use it for both name and developer); `unit` = null. Never invent a unit or a price.
+
 ### When to reject
 
-Set `reject: true` when the PDF is not an owner-authored property brochure: an invoice, receipt, ID, contract, bank or account statement, tax certificate, commercial registration, price list with no property, a marketing deck about a company rather than a property, or a document you cannot confidently read as one specific property for sale or rent. When in doubt, reject — a wrong page on a public website is far worse than a missed one.
+Set `reject: true` only when the PDF is not a property brochure at all: an invoice, receipt, ID, contract, bank or account statement, tax certificate, commercial registration, a company deck with no property, or a document you cannot read as a property offer. A one-page site plan or master plan with no unit or price information is rejected with the reason "site plan only — send the project brochure". When in doubt about privacy, reject — a wrong page on a public site is worse than a missed one.
 
 ---
 

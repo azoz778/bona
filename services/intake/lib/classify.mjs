@@ -57,7 +57,7 @@ const PROPERTY_TOKENS = [
 ];
 export const PROPERTY_RE = join(PROPERTY_TOKENS);
 
-const MIN_PAGES = 2;
+const MIN_PAGES = 1; // one-page flyers and site plans go to the AI gate, which decides (owner sent one 2026-09-06)
 /** Below this many characters per page there is effectively no text layer to read. */
 export const SPARSE_CHARS_PER_PAGE = 40;
 /** How many DISTINCT property words make a document's own property signal "strong". */
