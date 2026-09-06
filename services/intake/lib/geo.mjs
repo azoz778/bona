@@ -113,6 +113,26 @@ export async function resolveShortLink(url, { timeoutMs = 8000, fetchImpl = fetc
 /** Max links we will follow over the network for one brochure. */
 const MAX_RESOLVE = 6;
 
+// Per-share decoration Google hangs off a Maps URL. Two links that differ only here are one
+// link shared twice, and must not count as two opinions in pickPin.
+const TRACKING_PARAMS = ['entry', 'g_ep', 'g_st', 'lucs', 'skid', 'ttu', 'shorturl', 'hl', 'gl', 'ucbcb', 'coh', 'source'];
+
+/**
+ * A stable identity for a map URL: host + path + the params that carry meaning, with the
+ * tracking noise stripped. Used only to tell links apart, never to read coordinates.
+ */
+export function mapUrlIdentity(url) {
+  try {
+    const u = new URL(url);
+    for (const k of TRACKING_PARAMS) u.searchParams.delete(k);
+    u.hash = '';
+    u.searchParams.sort();
+    return `${u.hostname.replace(/^www\./i, '').toLowerCase()}${decodeURIComponent(u.pathname).replace(/\/+$/, '')}?${u.searchParams}`;
+  } catch {
+    return String(url ?? '');
+  }
+}
+
 /**
  * The property pin from a brochure's link annotations, or null.
  *
@@ -124,16 +144,30 @@ const MAX_RESOLVE = 6;
  * @param {{resolve?: (url:string)=>Promise<string>}} [opts]  injectable for tests
  */
 export async function pinFromLinks(links, { resolve = resolveShortLink } = {}) {
-  const uris = [...new Set((Array.isArray(links) ? links : []).map((l) => l?.uri).filter(isGeoUrl))];
+  // Dedupe twice. Once on the annotation itself, so the same link on five pages is one
+  // source; and again on what it RESOLVES to, so two shortlinks that land on one target —
+  // or one URL wearing two sets of tracking params — cannot corroborate each other.
+  const seenSource = new Set();
+  const seenTarget = new Set();
   const candidates = [];
   let resolved = 0;
-  for (const uri of uris) {
+  for (const l of Array.isArray(links) ? links : []) {
+    const uri = l?.uri;
+    if (!isGeoUrl(uri)) continue;
+    const sourceId = mapUrlIdentity(uri);
+    if (seenSource.has(sourceId)) continue;
+    seenSource.add(sourceId);
+
     let target = uri;
     if (isShortLink(uri) && resolved < MAX_RESOLVE) {
       resolved += 1;
       // A dead shortlink is normal (expired, offline, rate-limited): drop it, never throw.
       try { target = await resolve(uri); } catch { continue; }
     }
+    const targetId = mapUrlIdentity(target);
+    if (seenTarget.has(targetId)) continue;
+    seenTarget.add(targetId);
+
     const p = parseMapUrl(target);
     if (p) candidates.push(p);
   }

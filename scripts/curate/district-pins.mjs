@@ -65,10 +65,26 @@ async function nominatim(q, cc) {
   return res.json();
 }
 
-/** Is this Nominatim row an actual district, rather than something standing inside one? */
-export function isDistrictRow(r) {
+const norm = (s) => String(s ?? '').trim().toLowerCase().replace(/^(al|el)[\s-]+/, '').replace(/[\u200f\u200e]/g, '');
+
+/**
+ * Is this Nominatim row an actual district, rather than something standing inside one —
+ * or the city itself?
+ *
+ * When Nominatim cannot match a district it happily answers with the city that contains it,
+ * and a city row passes every type check. Pinning "Khayala Suburb" to the middle of Jeddah
+ * would look like an answer and be none, so a row whose own name is the city is refused.
+ *
+ * @param {object} r            a Nominatim jsonv2 row
+ * @param {string} [city]       the city we are looking inside
+ * @param {string} [cityAr]     its Arabic name (OSM names Saudi places in Arabic)
+ */
+export function isDistrictRow(r, city, cityAr) {
   if (!r || !PLACE_CLASSES.has(r.category ?? r.class)) return false;
-  return PLACE_TYPES.has(r.addresstype) || PLACE_TYPES.has(r.type);
+  if (!PLACE_TYPES.has(r.addresstype) && !PLACE_TYPES.has(r.type)) return false;
+  const name = norm(r.name);
+  if (name && [city, cityAr].filter(Boolean).some((c) => norm(c) === name)) return false;
+  return true;
 }
 
 /** Resolve one district, or null when nothing trustworthy comes back. */
@@ -87,7 +103,7 @@ export async function resolveDistrict({ district, city, country, districtAr, cit
     try { rows = await nominatim(q, anchor?.cc); } catch { await sleep(1100); continue; }
     await sleep(1100);   // Nominatim asks for <= 1 request/second. Be a good citizen.
     for (const r of rows) {
-      if (!isDistrictRow(r)) continue;
+      if (!isDistrictRow(r, city, cityAr)) continue;
       const lat = Number(r.lat), lng = Number(r.lon);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
       if (anchor && km(anchor, { lat, lng }) > MAX_KM_FROM_CITY) continue;
@@ -105,7 +121,11 @@ export async function resolveDistrict({ district, city, country, districtAr, cit
 export function districtsNeeded(listings) {
   const out = new Map();
   for (const l of listings) {
-    if (l.map) continue;                        // already pinned exactly
+    // Only an EXACT pin means this listing needs no district entry. `listings.json` is
+    // written with the district pins ALREADY applied by build.mjs, so treating any `map` as
+    // "done" would make every pinned district look unused — and the prune below would
+    // delete the very entries the build depends on.
+    if (l.map && l.mapPrecision === 'exact') continue;
     const loc = l.location || {};
     const district = loc.district?.en, city = loc.city?.en, country = loc.country?.en;
     if (!district || !city) continue;
