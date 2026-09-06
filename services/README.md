@@ -5,7 +5,7 @@ static Astro build on GitHub Pages, so anything that needs a server lives here.
 
 | Service | Directory | Unit | What it does |
 |---|---|---|---|
-| Concierge API (Dana) | `api/` | `bona-api.service` | Chat + voice concierge backend, Retell tool webhooks, leads |
+| Concierge API (Dana) | `api/` | `bona-api.service` | Chat + voice concierge backend, Retell tool webhooks, first-party events, leads |
 | Public HTTPS | — | `cloudflared-bona.service` | Cloudflare tunnel `bona`: `bona-api.azoz.uk` → `localhost:4102` |
 | WhatsApp intake | `intake/` | `bona-intake.service` | PDF brochure → published listing (separate workstream) |
 
@@ -32,6 +32,13 @@ Retell hosts the model, so there is no LLM API key here — usage bills to the o
 Retell balance. The API's job is to broker sessions, answer the three tool webhooks
 from Bona's own inventory, and record leads and calls.
 
+The same process is also the site's first-party tracking backend: the site posts one
+small event per visitor action to `/v1/events`, the enquiry forms post to
+`/v1/enquiry`, and every lead — from WhatsApp, a form, or Dana — lands in one SQLite
+store (`bona.db`) with the campaign that brought the visitor. The WhatsApp poller,
+the ad-platform fan-out worker and the owner dashboard (`/dashboard`, `/v1/admin/*`)
+build on that store and arrive in their own workstreams.
+
 ---
 
 ## 2. HTTP contract
@@ -42,17 +49,84 @@ deliberately **not** CORS-readable.
 
 | Route | Body → Response |
 |---|---|
-| `GET /health` | → `{ ok, service:"bona-api", version, uptimeS, retell:"ok"\|"error", inventory:<count>, budget }` — 503 when `inventory` is 0 |
-| `POST /v1/chat/session` | `{ locale, page? }` → `{ sessionId, greeting }` |
+| `GET /health` | → `{ ok, service:"bona-api", version, uptimeS, retell:"ok"\|"error", db:"ok"\|"error", inventory:<count>, budget }` — 503 when `inventory` is 0 |
+| `POST /v1/chat/session` | `{ locale, page?, attr? }` → `{ sessionId, greeting }` |
 | `POST /v1/chat/message` | `{ sessionId, text, locale?, page? }` → `{ messages, actions, leadCaptured? }` |
 | `POST /v1/chat/end` | `{ sessionId }` → `{ ok: true }` |
-| `POST /v1/call/token` | `{ locale, page? }` → `{ accessToken, callId }` |
+| `POST /v1/call/token` | `{ locale, page?, attr? }` → `{ accessToken, callId }` |
 | `GET /v1/call/:callId/context` | → `{ listings: Card[], updatedAt }` |
 | `POST /v1/tools/<name>` | Retell custom tool (`X-Bona-Token:`) → a JSON string result |
 | `POST /v1/retell/webhook?token=` | Retell agent events → `calls.jsonl` / `chats.jsonl` |
+| `POST /v1/events` | one first-party event (`text/plain` or JSON, ≤ 8 KB) → `204`, or `400 { error:"bad_event", reason }` |
+| `POST /v1/enquiry` | `{ form, name, phone, … }` from the site's forms → `{ lead_id }` |
+| `GET /dashboard/*`, `/v1/admin/*` | *coming* — the owner dashboard (cookie login by WhatsApp code) and its JSON |
 
 `page` is `{ url, title }` and becomes the dynamic variables `{{page_url}}` and
-`{{page_title}}`; `locale` becomes `{{locale}}`.
+`{{page_title}}`; `locale` becomes `{{locale}}`. `attr` is the optional
+`{ anon_id, session_id, ref, listing_id }` the widget reads from the site's
+attribution script; the ids ride to Retell as `metadata`, come back on every tool
+call, and are how a lead Dana saves inherits the campaign that brought the visitor.
+Malformed ids are dropped, never a 400.
+
+### Events
+
+The site's `attribution.js` posts one object per visitor action:
+
+```jsonc
+{ "v": 1, "event_id": "mf3k2a1b-9c4e7f21", "ts": 1757150000000, "event": "whatsapp_click",
+  "anon_id": "9f1c…32 hex", "session_id": "mf3k2a-7b1c", "ref": "K7Q2XR",
+  "page": "/properties/bona-w003/", "locale": "en", "listing_id": "BONA-W003",
+  "props": { "cta": "listing_whatsapp", "href": "https://wa.me/…" },
+  "attr": { "first": { /* touch */ }, "last": { /* touch */ }, "fbp": "fb.1.…", "fbc": "fb.1.…",
+            "ga": { "client_id": "123.456", "session_id": "1757149000" }, "scid": null, "ttp": null },
+  "consent": { "analytics": true, "ads": true } }
+```
+
+A *touch* is `{ ts, landing, referrer, utm_source, utm_medium, utm_campaign,
+utm_content, utm_term, utm_id, click_ids: { fbclid, gclid, … } }`. Browser event
+names: `page_view listing_view gallery_open tour_open video_play brochure_download
+whatsapp_click call_click form_submit consent_update concierge_open`. The server-only
+names `concierge_chat_start concierge_call_start lead_created lead_stage` are refused
+from a browser. Shapes: `anon_id` 32 hex, `session_id` `[a-z0-9-]{6,24}`, `ref`
+`[A-HJ-NP-Z2-9]{5,6}`, `event_id` `[a-z0-9-]{8,40}`, `listing_id` `BONA-W?\d{3}`;
+strings are capped at 300 characters, `props` at 2 KB, the body at 8 KB; unknown keys
+are dropped; a `ts` more than a week from now is replaced by now. Each event upserts
+the session (first touch kept from the first event, last touch and consent moved) and
+stores the event with the server's view: client IP, user agent, and Cloudflare's
+`CF-IPCountry` (believed only from the tunnel, like the IP). A `whatsapp_click` is
+queued for Meta's Conversions API under the same `event_id` the browser pixel sends,
+so Meta de-duplicates the pair.
+
+### Ref line
+
+The site appends `Ref BONA-W003 · K7Q2XR` to every prefilled WhatsApp message —
+the listing and the session's six-character code (alphabet
+`ABCDEFGHJKLMNPQRSTUVWXYZ23456789`, no 0/O/1/I). `lib/attribution.mjs` reads it
+back out of an inbound message, in any spelling a phone keyboard produces, and
+ties the sender to the exact session that produced the click.
+
+### Enquiry
+
+`{ form: "contact"|"sell"|"listing", name, phone, interest, type, budget, location,
+message, listing_id, page, locale, event_id, attr, consent }`. Name (≥ 2 characters)
+and a phone that normalises (7–15 digits after Arabic digits and punctuation are
+folded) are the only hard requirements; everything else is optional and capped. The
+route records a `form_submit` event under the browser's own `event_id` (a no-op when
+the site already sent it), creates or merges the lead (`channel: "form"`), messages
+the owner, and answers `{ lead_id }`. The form posts here *before* it opens WhatsApp,
+so a lead lands even when the visitor never sends the message.
+
+### Leads
+
+Every enquiry — WhatsApp, form, or Dana's `create_lead` — goes through one write
+path (`createOrMergeLead` in `lib/leads.mjs`). A lead merges on the normalised phone
+(`966593296933`, whatever the spelling), or failing that on the WhatsApp jid; a merge
+fills what is empty and appends notes, never blanks a name, and leaves a touchpoint.
+Source, medium and campaign are resolved once, at creation, from the visitor's
+session's **last** touch (UTMs, else a click id, else the referrer host); the first
+touch is kept alongside. Stages: `new contacted qualified viewing offer negotiation
+won lost`. A new lead also writes a `lead_created` event queued for Meta, GA4 and
+Snap, and still appends its line to `leads.jsonl`.
 
 ### Card
 
@@ -93,13 +167,13 @@ stripped from the text before it reaches `messages`, so the widget never renders
 
 | Status | Meaning |
 |---|---|
-| 400 | malformed JSON, or empty `text` |
+| 400 | malformed JSON, or empty `text`; `bad_event` on `/v1/events`; `bad_request` with a message on `/v1/enquiry` |
 | 401 | wrong or missing tool token |
 | 403 | `forbidden_origin` — an `Origin` header that is not on the allowlist |
 | 404 | unknown route, unknown tool, expired `sessionId` |
 | 405 | known route, wrong method |
-| 413 | body over 16 KB |
-| 415 | a browser POST that is not `application/json` |
+| 413 | body over 16 KB (8 KB on `/v1/events`) |
+| 415 | a browser POST that is not `application/json` (`/v1/events` also takes `text/plain`) |
 | 429 | `rate_limited` (`Retry-After` in seconds), or `session_limit` — this chat hit its turn cap |
 | 500 | unexpected failure |
 | 502 | `upstream_error` — Retell unreachable or broken |
@@ -110,9 +184,11 @@ is refused with 403 *before* Retell is contacted — CORS alone only stops the b
 *reading* the answer, and the call would already have cost money. A request with no
 `Origin` at all (curl, the widget's own server-side probes) is allowed through.
 
-**Rate limits**, per IP, per minute: chat 30, `/v1/call/token` 6, call context 120,
-tool routes 600, and *failed* tool authentications 10 — so Retell can call tools as
-freely as a conversation needs while guessing the token gets you nowhere. Tool routes
+**Rate limits**, per IP, per minute: chat 30, `/v1/call/token` 6, `/v1/enquiry` 6,
+`/v1/events` 240, call context 120, tool routes 600, and *failed* tool
+authentications 10 — so Retell can call tools as freely as a conversation needs while
+guessing the token gets you nowhere. Events and enquiries are never charged to the
+daily Retell ceilings. Tool routes
 authenticate before the body is read, so an unauthenticated caller never gets this
 process to parse its JSON.
 
@@ -150,6 +226,15 @@ curl -s -X POST $API/v1/call/token -H 'Content-Type: application/json' \
 # what Dana has shown during that call
 curl -s $API/v1/call/<callId>/context | jq
 
+# a first-party event, exactly as the site sends it (text/plain, no preflight) -> 204
+curl -s -o /dev/null -w '%{http_code}\n' -X POST $API/v1/events \
+  -H 'Content-Type: text/plain' -H 'Origin: https://bona.azoz.uk' \
+  --data '{"v":1,"event_id":"mf3k2a1b-9c4e7f21","ts":1757150000000,"event":"whatsapp_click","anon_id":"9f1c9f1c9f1c9f1c9f1c9f1c9f1c9f1c","session_id":"mf3k2a-7b1c","ref":"K7Q2XR","page":"/properties/bona-w003/","locale":"en","listing_id":"BONA-W003","props":{"cta":"listing_whatsapp"},"attr":{"first":{"utm_source":"meta","utm_medium":"paid"},"last":{"utm_source":"meta","utm_medium":"paid"}},"consent":{"analytics":true,"ads":true}}'
+
+# an enquiry form -> { lead_id }
+curl -s -X POST $API/v1/enquiry -H 'Content-Type: application/json' -H 'Origin: https://bona.azoz.uk' \
+  -d '{"form":"listing","name":"Sara","phone":"0500000000","listing_id":"BONA-W003","message":"Still available?","attr":{"anon_id":"9f1c9f1c9f1c9f1c9f1c9f1c9f1c9f1c","session_id":"mf3k2a-7b1c","ref":"K7Q2XR"}}'
+
 # a tool webhook, exactly as Retell sends it
 TOKEN=$(grep '^BONA_TOOL_TOKEN=' ~/.secrets/bona-services.env | cut -d= -f2)
 curl -s -X POST "$API/v1/tools/search_properties" \
@@ -173,6 +258,7 @@ never logged. `process.env` always wins over a file.
 | `~/.secrets/retell.env` | `RETELL_API_KEY` |
 | `~/.secrets/evolution-api.env` | `EVOLUTION_API_URL`, `EVOLUTION_API_KEY` |
 | `~/.secrets/bona-services.env` | everything below |
+| `~/.secrets/bona-marketing.env` | `META_PIXEL_ID`, `META_CAPI_TOKEN`, `META_TEST_EVENT_CODE`, `GA4_MEASUREMENT_ID`, `GA4_API_SECRET`, `SNAP_PIXEL_ID`, `SNAP_CAPI_TOKEN` — read last, so it wins among files; every key optional (a missing one skips that destination) |
 
 | Variable | Default | Notes |
 |---|---|---|
@@ -183,7 +269,8 @@ never logged. `process.env` always wins over a file.
 | `BONA_TOOL_TOKEN` | *(generated)* | 32 hex; gates `/v1/tools/*` and the webhook |
 | `BONA_ALLOW_QUERY_TOKEN` | `0` | `1` also accepts `?token=` on `/v1/tools/*` (the webhook always does) |
 | `BONA_TRUSTED_PROXY` | — | comma separated; addresses allowed to set `CF-Connecting-IP` |
-| `BONA_DATA` | `~/bona-data` | `leads.jsonl`, `calls.jsonl`, `chats.jsonl` |
+| `BONA_DATA` | `~/bona-data` | `bona.db`, `leads.jsonl`, `calls.jsonl`, `chats.jsonl` |
+| `BONA_DB_FILE` | `$BONA_DATA/bona.db` | the SQLite store (WAL; created 0600) |
 | `BONA_REPO` | `~/bona-bot` | checkout whose `src/data/listings.json` is served |
 | `BONA_INVENTORY_FILE` | — | overrides the two rules above outright |
 | `BONA_CORS_ORIGINS` | site, Pages, localhost:4321 | comma separated |
@@ -196,6 +283,10 @@ never logged. `process.env` always wins over a file.
 | `BONA_RATE_TOOL` / `BONA_RATE_TOOL_AUTH_FAIL` | `600` / `10` | per IP per minute |
 | `BONA_MAX_CHATS_PER_DAY` / `BONA_MAX_CALLS_PER_DAY` | `300` / `60` | reset at midnight Asia/Riyadh |
 | `BONA_MAX_TURNS_PER_SESSION` | `40` | one chat cannot run for ever |
+| `BONA_RATE_EVENTS` / `BONA_RATE_ENQUIRY` | `240` / `6` | per IP per minute |
+| `BONA_WA_POLL` / `BONA_WA_POLL_MS` | `1` / `45000` | WhatsApp inbound poller (its own workstream) |
+| `BONA_FANOUT_MS` | `20000` | ad-platform fan-out worker interval (its own workstream) |
+| `BONA_DASH_COOKIE_DAYS` | `30` | dashboard login cookie life (its own workstream) |
 
 Inventory resolution order: `BONA_INVENTORY_FILE` → `$BONA_REPO/src/data/listings.json`
 → the checkout the service is running from. The file's mtime is checked with one cheap
@@ -294,13 +385,17 @@ BONA_RETELL_MOCK=1 node api/index.mjs      # no Retell traffic at all
 cd ~/bona/services && node --test api/test/*.test.mjs
 ```
 
-184 tests, no network and no Retell: search and Card formatting in EN and AR, price
+261 tests, no network and no Retell: search and Card formatting in EN and AR, price
 parsing ("4.5m", "٤ ملايين"), token buckets and the trusted-proxy rules for client IPs,
 the CORS allowlist and the origin refusal, tool authentication (header, bearer, and the
 auth-failure throttle), the navigation allowlist, lead de-duplication, the daily
 budgets and their Riyadh-midnight reset, inventory hot-reload and degraded health,
 action extraction from mocked Retell messages, every HTTP route against a scripted
-Retell double, and the provisioning payloads including the model fallback.
+Retell double, the provisioning payloads including the model fallback, the phone
+normaliser, the SQLite store and its migrations, the Ref parser and source
+resolution, the event validator and intake, the lead model (create, merge by phone
+or jid, touchpoints, stages, fan-out), the enquiry route, the Retell metadata
+plumbing, and the one-time JSONL import.
 
 ---
 
@@ -322,9 +417,13 @@ Retell double, and the provisioning payloads including the model fallback.
 
 Logs are one JSON object per line: `journalctl --user -u bona-api -f`.
 
-Data files, all append-only JSON lines under `~/bona-data`:
-`leads.jsonl` (every enquiry), `calls.jsonl` (voice events and transcripts),
-`chats.jsonl` (one line per finished chat).
+Data files under `~/bona-data` (owner-only, mode 0600):
+
+| File | What |
+|---|---|
+| `bona.db` (+ `-wal`, `-shm`) | the SQLite store: sessions, events, leads, touchpoints, stage history, WhatsApp poller cursor, ad spend, fan-out queue, dashboard logins. Migrations run on start (`PRAGMA user_version`). Back it up with `sqlite3 bona.db ".backup …"`, not `cp`, while the service runs |
+| `leads.jsonl` | the append-only raw log: one line per **new** lead, same `id` as the store's `lead_id`. Imported into `bona.db` once at startup (`import.legacy` in the log; a rerun is a no-op) |
+| `calls.jsonl`, `chats.jsonl` | Retell webhook events and transcripts, one line per finished conversation |
 
 ---
 
