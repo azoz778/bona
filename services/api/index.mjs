@@ -15,6 +15,7 @@
  *   POST /v1/tools/<name>?token=   (Retell custom tools)
  *   POST /v1/retell/webhook?token= (Retell agent events)
  *   POST /v1/events                { v:1, event, event_id, … }  -> 204   (text/plain or JSON, ≤ 8 KB)
+ *   POST /v1/enquiry               { form, name, phone, … }    -> { lead_id }
  *
  * Everything is JSON, `Cache-Control: no-store`, CORS-allowlisted, per-IP rate
  * limited, and bodies are capped at 16 KB (8 KB for events).
@@ -26,13 +27,14 @@ import { corsHeaders, isAllowedOrigin } from './lib/cors.mjs';
 import { createLimiter, clientIp, trustedPeer } from './lib/ratelimit.mjs';
 import { openDb } from './lib/db.mjs';
 import { validateEvent, recordEvent, MAX_BODY_BYTES as MAX_EVENT_BYTES } from './lib/events.mjs';
+import { validateEnquiry } from './lib/enquiry.mjs';
 import { createBudget } from './lib/budget.mjs';
 import { createInventory } from './lib/inventory.mjs';
 import { createStore } from './lib/store.mjs';
 import { createRetellClient, createHealthProbe, RetellError } from './lib/retell.mjs';
 import { createToolHandlers, extractToken, tokenMatches, TOOL_NAMES } from './lib/tools.mjs';
 import { extractActions } from './lib/actions.mjs';
-import { appendJsonl } from './lib/leads.mjs';
+import { appendJsonl, createOrMergeLead, leadNote } from './lib/leads.mjs';
 import { sendText } from './lib/wa.mjs';
 
 const GREETING = {
@@ -114,7 +116,7 @@ export const asPageTitle = (v, max = 80) =>
   String(v ?? '').replace(/[[\]{}<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, max);
 
 /** POST routes the browser widget may call. Anything else is 404 before any budget is spent. */
-export const BROWSER_ROUTES = new Set(['/v1/chat/session', '/v1/chat/message', '/v1/chat/end', '/v1/call/token']);
+export const BROWSER_ROUTES = new Set(['/v1/chat/session', '/v1/chat/message', '/v1/chat/end', '/v1/call/token', '/v1/enquiry']);
 
 /** The two routes that open something Retell bills for, and the day counter each one spends. */
 export const BILLABLE_ROUTES = new Map([['/v1/chat/session', 'chats'], ['/v1/call/token', 'calls']]);
@@ -336,6 +338,45 @@ export function createApp(options = {}) {
     return { listings: entry.cards, updatedAt: new Date(entry.updatedAt).toISOString() };
   }
 
+  /**
+   * The site's contact / sell / listing forms. Records a `form_submit` event under the
+   * browser's own `event_id` (a no-op when the site already sent it), creates or
+   * merges the lead, and tells the owner. Nothing here is billable.
+   */
+  async function enquiry(body, server) {
+    const checked = validateEnquiry(body);
+    if (!checked.ok) throw Object.assign(new Error(checked.message), { code: 'BAD_BODY' });
+    const q = checked.enquiry;
+    const now = server.received ?? Date.now();
+
+    if (q.ids.anon_id && q.ids.session_id) {
+      const ev = validateEvent({
+        v: 1, event_id: q.event_id, ts: now, event: 'form_submit', anon_id: q.ids.anon_id, session_id: q.ids.session_id, ref: q.ids.ref,
+        page: q.page, locale: q.locale, listing_id: q.listing_id, props: { form: q.form, cta: 'enquiry' }, attr: q.attr, consent: q.consent,
+      }, { now });
+      if (ev.ok) recordEvent(db, ev.event, server);
+    }
+
+    const notes = [q.message, q.type ? `Type: ${q.type}` : null, q.location ? `Location: ${q.location}` : null].filter(Boolean).join('\n') || null;
+    const { lead, created } = createOrMergeLead(db, {
+      name: q.name, phone: q.phone, interest: q.interest, budget: q.budget, listingId: q.listing_id, language: q.locale, district: q.location, notes,
+    }, {
+      channel: 'form', matchMethod: 'form', sessionId: q.ids.session_id, anonId: q.ids.anon_id, ref: q.ids.ref, eventId: q.event_id,
+      now, dataDir: cfg.dataDir, raw: { form: q.form, page: q.page },
+    });
+    log({ evt: 'enquiry', leadId: lead.lead_id, created, form: q.form, source: lead.source, listingId: lead.listing_id });
+
+    if (sendWhatsApp) {
+      try {
+        const res = await sendWhatsApp(leadNote(lead, { siteUrl: cfg.siteUrl }));
+        if (!res?.ok) log({ evt: 'lead.wa_failed', id: lead.lead_id, error: res?.error ?? 'unknown' });
+      } catch (err) {
+        log({ evt: 'lead.wa_error', id: lead.lead_id, error: String(err?.message ?? err) });
+      }
+    }
+    return { lead_id: lead.lead_id };
+  }
+
   function retellWebhook(body) {
     const event = String(body.event ?? body.event_type ?? 'unknown');
     const call = body.call ?? body.chat ?? body.data ?? {};
@@ -500,7 +541,7 @@ export function createApp(options = {}) {
       return sendJson(res, 415, { error: 'unsupported_media_type' }, cors);
     }
 
-    const limiterKey = p === '/v1/call/token' ? 'token' : 'chat';
+    const limiterKey = p === '/v1/call/token' ? 'token' : p === '/v1/enquiry' ? 'enquiry' : 'chat';
     const gate = limiters[limiterKey].take(`${limiterKey}:${ip}`);
     if (!gate.ok) return sendJson(res, 429, { error: 'rate_limited' }, { ...cors, 'Retry-After': String(gate.retryAfterS) });
 
@@ -525,6 +566,7 @@ export function createApp(options = {}) {
         case '/v1/chat/message': payload = await chatMessage(body); break;
         case '/v1/chat/end': payload = await chatEnd(body); break;
         case '/v1/call/token': payload = await callToken(body); break;
+        case '/v1/enquiry': payload = await enquiry(body, serverContext(req, ip)); break;
         default: return sendJson(res, 404, { error: 'not_found' }, cors);
       }
       charged = null;
