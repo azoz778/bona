@@ -25,8 +25,8 @@ import path from 'node:path';
 import { loadConfig, redacted } from './lib/config.mjs';
 import { corsHeaders, isAllowedOrigin } from './lib/cors.mjs';
 import { createLimiter, clientIp, trustedPeer } from './lib/ratelimit.mjs';
-import { openDb } from './lib/db.mjs';
-import { validateEvent, recordEvent, MAX_BODY_BYTES as MAX_EVENT_BYTES } from './lib/events.mjs';
+import { openDb, newId } from './lib/db.mjs';
+import { validateEvent, recordEvent, cleanAttrIds, MAX_BODY_BYTES as MAX_EVENT_BYTES } from './lib/events.mjs';
 import { validateEnquiry } from './lib/enquiry.mjs';
 import { createBudget } from './lib/budget.mjs';
 import { createInventory } from './lib/inventory.mjs';
@@ -162,7 +162,7 @@ export function createApp(options = {}) {
   const probeRetell = options.probeRetell ?? createHealthProbe(retell);
   const sendWhatsApp = options.sendWhatsApp ?? ((text) => sendText(text, { env: cfg.env }));
   const tools = createToolHandlers({
-    inventory, store, dataDir: cfg.dataDir, siteUrl: cfg.siteUrl, env: cfg.env, sendWhatsApp, log,
+    inventory, store, db, dataDir: cfg.dataDir, siteUrl: cfg.siteUrl, env: cfg.env, sendWhatsApp, log,
   });
 
   const perMin = 60_000;
@@ -209,6 +209,37 @@ export function createApp(options = {}) {
     return { ip, ua, country, received: Date.now() };
   }
 
+  /**
+   * Retell `metadata` for a chat or call: the page and locale as before, plus the
+   * visitor's attribution ids from the widget's optional `attr`. Retell hands the
+   * object back on every tool call, which is how `create_lead` learns which session —
+   * and so which campaign — the conversation belongs to. Malformed ids are simply
+   * absent; a bad `attr` is never a reason to refuse a conversation.
+   */
+  function retellMetadata({ locale, page, attr }) {
+    return { locale, page: page?.url ?? null, source: 'bona-web', ...cleanAttrIds(attr) };
+  }
+
+  /**
+   * The server-side record that a concierge conversation opened, tied to the
+   * visitor's session when the widget said which one. Best effort: a store failure
+   * is logged and the conversation goes ahead.
+   */
+  function recordConciergeStart(name, { attr, page, locale, conversationId, server }) {
+    try {
+      const session = attr.session_id ? db.getSession(attr.session_id) : null;
+      db.insertEvent({
+        event_id: newId('ev'), ts: server?.received ?? Date.now(), name,
+        anon_id: attr.anon_id ?? session?.anon_id ?? null, session_id: attr.session_id, lead_id: null, listing_id: attr.listing_id,
+        path: page?.url ?? null, props: { conversation_id: conversationId, locale, ref: attr.ref },
+        src_first: session?.first_touch ?? null, src_last: session?.last_touch ?? null,
+        ip: server?.ip ?? null, ua: server?.ua ?? null, country: server?.country ?? null,
+      });
+    } catch (err) {
+      log({ level: 'error', evt: 'event.write_failed', name, error: String(err?.message ?? err) });
+    }
+  }
+
   /* -------------------- route handlers -------------------- */
 
   async function health() {
@@ -231,7 +262,7 @@ export function createApp(options = {}) {
     };
   }
 
-  async function chatSession(body) {
+  async function chatSession(body, server = {}) {
     const locale = asLocale(body.locale);
     const page = body.page && typeof body.page === 'object' ? body.page : null;
     if (!cfg.chatAgentId) {
@@ -239,17 +270,19 @@ export function createApp(options = {}) {
       err.code = 'NOT_PROVISIONED';
       throw err;
     }
+    const metadata = retellMetadata({ locale, page, attr: body.attr });
     const session = store.createSession({ chatId: null, locale, page });
     const chat = await retell.createChat({
       agent_id: cfg.chatAgentId,
       retell_llm_dynamic_variables: dynamicVariables({ locale, page, sessionId: session.sessionId }),
-      metadata: { locale, page: page?.url ?? null, source: 'bona-web' },
+      metadata,
     });
     session.chatId = chat.chat_id;
     store.link(chat.chat_id, session.sessionId);
     const greeting = asText(chat.begin_message ?? chat.greeting ?? GREETING[locale], 500) || GREETING[locale];
     session.greeting = greeting;
-    log({ evt: 'chat.session', sessionId: session.sessionId, locale });
+    log({ evt: 'chat.session', sessionId: session.sessionId, locale, visitorSession: metadata.session_id });
+    recordConciergeStart('concierge_chat_start', { attr: metadata, page, locale, conversationId: chat.chat_id, server });
     return { sessionId: session.sessionId, greeting };
   }
 
@@ -314,7 +347,7 @@ export function createApp(options = {}) {
     return { ok: true };
   }
 
-  async function callToken(body) {
+  async function callToken(body, server = {}) {
     const locale = asLocale(body.locale);
     const page = body.page && typeof body.page === 'object' ? body.page : null;
     if (!cfg.voiceAgentId) {
@@ -322,13 +355,15 @@ export function createApp(options = {}) {
       err.code = 'NOT_PROVISIONED';
       throw err;
     }
+    const metadata = retellMetadata({ locale, page, attr: body.attr });
     const call = await retell.createWebCall({
       agent_id: cfg.voiceAgentId,
       retell_llm_dynamic_variables: dynamicVariables({ locale, page }),
-      metadata: { locale, page: page?.url ?? null, source: 'bona-web' },
+      metadata,
     });
     store.createCall({ callId: call.call_id, locale, page });
-    log({ evt: 'call.token', callId: call.call_id, locale });
+    log({ evt: 'call.token', callId: call.call_id, locale, visitorSession: metadata.session_id });
+    recordConciergeStart('concierge_call_start', { attr: metadata, page, locale, conversationId: call.call_id, server });
     return { accessToken: call.access_token, callId: call.call_id };
   }
 
@@ -562,10 +597,10 @@ export function createApp(options = {}) {
       }
       let payload;
       switch (p) {
-        case '/v1/chat/session': payload = await chatSession(body); break;
+        case '/v1/chat/session': payload = await chatSession(body, serverContext(req, ip)); break;
         case '/v1/chat/message': payload = await chatMessage(body); break;
         case '/v1/chat/end': payload = await chatEnd(body); break;
-        case '/v1/call/token': payload = await callToken(body); break;
+        case '/v1/call/token': payload = await callToken(body, serverContext(req, ip)); break;
         case '/v1/enquiry': payload = await enquiry(body, serverContext(req, ip)); break;
         default: return sendJson(res, 404, { error: 'not_found' }, cors);
       }

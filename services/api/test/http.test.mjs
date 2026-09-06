@@ -766,6 +766,75 @@ test('events cost the day nothing and /health reports the store', async () => {
   });
 });
 
+/* ---------------- concierge attribution ---------------- */
+
+test('chat and call sessions pass the visitor\'s ids to Retell as metadata and record the start', async () => {
+  await withServer({}, async ({ call, retell, app }) => {
+    assert.equal((await postEvent(call, sampleEvent({ event: 'page_view' }))).status, 204);
+    const attr = { anon_id: ANON, session_id: 'mf3k2a-7b1c', ref: 'k7q2xr', listing_id: 'bona-w003' };
+    const chat = await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale: 'ar', page: { url: 'https://bona.azoz.uk/ar/properties/x/', title: 'x' }, attr }) });
+    assert.equal(chat.status, 200);
+    const [, sentChat] = retell.calls.find(([name]) => name === 'createChat');
+    assert.deepEqual(sentChat.metadata, { locale: 'ar', page: 'https://bona.azoz.uk/ar/properties/x/', source: 'bona-web', anon_id: ANON, session_id: 'mf3k2a-7b1c', ref: 'K7Q2XR', listing_id: 'BONA-W003' });
+
+    const voice = await call('/v1/call/token', { method: 'POST', body: JSON.stringify({ locale: 'en', attr }) });
+    assert.equal(voice.status, 200);
+    const [, sentCall] = retell.calls.find(([name]) => name === 'createWebCall');
+    assert.equal(sentCall.metadata.session_id, 'mf3k2a-7b1c');
+    assert.equal(sentCall.metadata.source, 'bona-web');
+
+    const events = app.db.eventsForSession('mf3k2a-7b1c').map((e) => e.name);
+    assert.deepEqual(events, ['page_view', 'concierge_chat_start', 'concierge_call_start']);
+    const start = app.db.recentEvents({ name: 'concierge_chat_start' })[0];
+    assert.equal(start.anon_id, ANON);
+    assert.equal(start.listing_id, 'BONA-W003');
+    assert.match(start.props.conversation_id, /^chat_/);
+    assert.equal(start.src_last.utm_campaign, 'villas_sep', 'the visitor\'s touch is copied from the session');
+    const spent = (await (await call('/health')).json()).budget;
+    assert.equal(spent.chats, 1);
+    assert.equal(spent.calls, 1);
+  });
+});
+
+test('a malformed attr is dropped, never a 400, and the start is still recorded without a session', async () => {
+  await withServer({}, async ({ call, retell, app }) => {
+    for (const attr of [{ anon_id: 'nope', session_id: 42, ref: 'K7Q2XRZZ', listing_id: 'TK-1' }, 'garbage', [1], null]) {
+      const res = await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale: 'en', attr }) });
+      assert.equal(res.status, 200, JSON.stringify(attr));
+    }
+    for (const [, sent] of retell.calls.filter(([name]) => name === 'createChat')) {
+      assert.deepEqual(sent.metadata, { locale: 'en', page: null, source: 'bona-web', anon_id: null, session_id: null, ref: null, listing_id: null });
+    }
+    const starts = app.db.recentEvents({ name: 'concierge_chat_start' });
+    assert.equal(starts.length, 4);
+    assert.equal(starts[0].session_id, null);
+    // …and a body without attr at all is exactly what the widget sends today.
+    assert.equal((await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale: 'en' }) })).status, 200);
+  });
+});
+
+test('a lead Dana saves during an attributed call carries the campaign that brought the visitor', async () => {
+  await withServer({}, async ({ call, tool, app, sent }) => {
+    assert.equal((await postEvent(call, sampleEvent({ event: 'page_view' }))).status, 204);
+    const { callId } = await (await call('/v1/call/token', { method: 'POST', body: JSON.stringify({ locale: 'en', attr: { anon_id: ANON, session_id: 'mf3k2a-7b1c', ref: 'K7Q2XR', listing_id: 'BONA-W003' } }) })).json();
+    // Retell echoes the metadata we set on every tool call.
+    const res = await tool('/v1/tools/create_lead', {
+      call: { call_id: callId, metadata: { locale: 'en', page: null, source: 'bona-web', anon_id: ANON, session_id: 'mf3k2a-7b1c', ref: 'K7Q2XR', listing_id: 'BONA-W003' } },
+      name: 'create_lead', args: { phone: '+966500000000', name: 'Sara' },
+    });
+    const payload = JSON.parse(await res.json());
+    assert.equal(payload.saved, true);
+    const lead = app.db.getLead(payload.id);
+    assert.equal(lead.channel, 'concierge_voice');
+    assert.equal(lead.source, 'meta');
+    assert.equal(lead.campaign, 'villas_sep');
+    assert.equal(lead.session_id, 'mf3k2a-7b1c');
+    assert.equal(lead.listing_id, 'BONA-W003');
+    assert.match(sent[0], /Source: meta \/ paid · villas_sep/);
+    assert.equal(app.db.getSession('mf3k2a-7b1c').ref, 'K7Q2XR');
+  });
+});
+
 /* ---------------- enquiry ---------------- */
 
 const enquiryBody = (over = {}) => ({
