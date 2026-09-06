@@ -16,9 +16,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { loadConfig } from './lib/env.mjs';
 import { parseCaption } from './lib/commands.mjs';
+import { withLock } from './lib/lock.mjs';
 import { say } from './lib/log.mjs';
 import { processPdf, RejectError } from './lib/pipeline.mjs';
-import { gitCommitPush, gitPull } from './lib/publish.mjs';
+import { assertCleanTree, gitCommitPush, gitPull, resetTree } from './lib/publish.mjs';
 
 function parseArgs(argv) {
   const out = { flags: new Set(), opts: {}, positional: [] };
@@ -115,18 +116,36 @@ async function main() {
     : path.join(cfg.intakeDir, 'manual', `${new Date().toISOString().replace(/[:.]/g, '-')}-${path.basename(pdfPath, '.pdf').slice(0, 40)}`);
 
   try {
-    const report = await processPdf({
-      pdfPath,
-      cfg,
-      caption,
-      workDir: work,
-      dryRun: dryRun || caption.dryRun,
-      meta: { pdfFileName: path.basename(pdfPath) },
-    });
-    if (!report.dryRun && !noGit) {
-      await gitPull(cfg.repo, { remote: cfg.gitRemote, branch: cfg.gitBranch });
-      report.push = await gitCommitPush(cfg.repo, `intake: ${report.listing.title.en} (${report.id})`, { remote: cfg.gitRemote, branch: cfg.gitBranch });
-    }
+    // Same order as the daemon: clean tree + pull BEFORE anything is written, because
+    // build.mjs rewrites a tracked file and `git rebase` refuses to run over that.
+    // --no-git / --dry-run never touch git at all, so a working checkout with other
+    // people's uncommitted changes in it is safe to point at.
+    const report = await withLock(cfg.lockPath, async () => {
+      if (!noGit) {
+        await assertCleanTree(cfg.repo);
+        await gitPull(cfg.repo, { remote: cfg.gitRemote, branch: cfg.gitBranch });
+      }
+      const r = await processPdf({
+        pdfPath,
+        cfg,
+        caption,
+        workDir: work,
+        dryRun: dryRun || caption.dryRun,
+        meta: { pdfFileName: path.basename(pdfPath) },
+      });
+      if (r.dryRun || noGit) return r;
+      try {
+        r.push = await gitCommitPush(cfg.repo, `intake: ${r.listing.title.en} (${r.id})`, {
+          remote: cfg.gitRemote, branch: cfg.gitBranch,
+          paths: [`public/listings/${r.slug}`, 'scripts/curate/inbox', 'src/data/listings.json'],
+        });
+      } catch (err) {
+        await resetTree(cfg.repo, { dirs: [`public/listings/${r.slug}`] }).catch(() => false);
+        err.rolledBack = true;
+        throw err;
+      }
+      return r;
+    }, { timeoutMs: cfg.lockWaitMs, label: `run-once ${path.basename(pdfPath)}` });
     if (args.flags.has('json')) say(JSON.stringify(report, null, 2));
     else printReport(report);
     say(`work dir: ${work}`);
@@ -140,6 +159,8 @@ async function main() {
       process.exit(1);
     }
     say(`FAILED: ${err.message}`);
+    if (err.detail) say(err.detail);
+    if (err.rolledBack) say('The repo was rolled back — nothing of this run is left in it.');
     if (process.env.BONA_DEBUG) say(err.stack);
     say(`work dir: ${work}`);
     process.exit(1);

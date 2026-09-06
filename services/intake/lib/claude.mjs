@@ -1,14 +1,24 @@
 // The AI step: one `claude -p` call that reads the contact sheets and the PDF text and
 // returns the listing contract as JSON.
 //
-// Flags verified against claude 2.x on this box (2026-09-05):
+// Flags verified against claude 2.x on this box (2026-09-06):
 //   env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT claude -p
 //     --model sonnet --output-format json --allowedTools Read
-//     --permission-mode bypassPermissions --safe-mode --strict-mcp-config
-//     --disable-slash-commands --add-dir <workdir>
+//     --permission-prompts none --safe-mode --strict-mcp-config
+//     --disable-slash-commands --settings <workdir>/claude-settings.json --add-dir <workdir>
 //   `--safe-mode` is what makes this reproducible: it drops the owner's CLAUDE.md, skills,
 //   plugins, hooks and MCP servers (auth, model and built-in tools still work), so the
 //   pipeline sees only this prompt. Measured: 0.036 USD/call vs 0.105 without it.
+//   There is NO `--permission-mode bypassPermissions` any more: it granted the model the
+//   whole filesystem for no benefit. Measured on this CLI, no permission mode gates Read at
+//   all, so confinement comes from the generated deny rules in lib/confine.mjs (--settings),
+//   which were verified to turn `Read /etc/hostname` into a refusal while the work dir stays
+//   readable. `--permission-prompts none` denies anything that would otherwise prompt, since
+//   a daemon has nobody to ask.
+//   EVERYTHING the model returns is untrusted text. Only fields that survive
+//   validateAiResult() + copyProblems() + checkListing() are ever written or echoed; free
+//   text like `warnings` stays in the work dir's ai.json and never reaches the repo or the
+//   WhatsApp reply.
 //   `--json-schema` exists too but constrains the FINAL message only and is brittle with
 //   nested oneOf; we validate the contract ourselves in validateAiResult() instead, and
 //   retry once with a repair prompt when the model returns something off-contract.
@@ -18,6 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOMS } from '../../../scripts/curate/rooms.mjs';
+import { FORBIDDEN as COPY_FORBIDDEN, HYPE_WORDS as SHARED_HYPE_WORDS } from '../../../scripts/curate/rules.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PROMPT_TEMPLATE = path.join(HERE, 'prompt.md');
@@ -26,8 +37,8 @@ export const TYPES = ['villa', 'apartment', 'penthouse', 'mansion', 'land', 'bui
 export const CATEGORIES = ['buy', 'rent', 'off-plan', 'international'];
 export const CURRENCIES = ['SAR', 'AED', 'EUR', 'USD', 'OMR'];
 export const ROOM_KEYS = Object.keys(ROOMS);
-// Mirrors the HYPE regex in scripts/curate/validate.mjs — kept in sync by test.
-export const HYPE_WORDS = ['amazing', 'stunning', 'breathtaking', 'unparalleled', "don't miss", 'dream home'];
+// One definition, shared with scripts/curate/validate.mjs (scripts/curate/copy-rules.mjs).
+export const HYPE_WORDS = SHARED_HYPE_WORDS;
 
 const DEFAULT_RUBRIC = `A house rubric file (scripts/curate/IMAGE-RUBRIC.md) was not found, so use this default.
 
@@ -55,17 +66,35 @@ function fillTemplate(tpl, vars) {
 }
 
 /**
+ * Everything lifted out of the PDF or typed by whoever sent it is DATA, not instruction.
+ * It goes inside a fence, and the fence marker is stripped from the data itself so nothing
+ * inside can close it early and start giving orders.
+ */
+export const FENCE = 'BONA-UNTRUSTED-DATA';
+export function fence(label, body) {
+  // Replace the marker with something that does NOT contain it — appending to it would
+  // still leave `<<<END BONA-UNTRUSTED-DATA…` intact inside the data.
+  const clean = String(body ?? '').split(FENCE).join('[fence marker removed]');
+  return [
+    `<<<${FENCE}: ${label}>>>`,
+    clean,
+    `<<<END ${FENCE}: ${label}>>>`,
+  ].join('\n');
+}
+
+/**
  * @param {{extraction:object, sheets:Array<{file:string,from:number,to:number}>, caption:object,
+ *          pageImages?:Array<{page:number,abs:string,width:number,height:number}>,
  *          rubricPath?:string}} input
  */
-export function buildPrompt({ extraction, sheets, caption, rubricPath }) {
+export function buildPrompt({ extraction, sheets, caption, pageImages = [], rubricPath }) {
   let rubric = DEFAULT_RUBRIC;
   if (rubricPath) {
     try { rubric = fs.readFileSync(rubricPath, 'utf8').trim() || DEFAULT_RUBRIC; } catch { /* default */ }
   }
   const captionLines = [];
   const c = caption || {};
-  captionLines.push(c.text ? `"${c.text}"` : '(no caption)');
+  captionLines.push(fence('the caption the owner typed', c.text ? c.text : '(no caption)'));
   if (c.category) captionLines.push(`- The owner says the category is: ${c.category}${c.period ? ` (per ${c.period})` : ''}. Use it.`);
   if (c.price) captionLines.push(`- The owner gave the price explicitly: ${c.price.amount} ${c.price.currency}. Use it, it overrides the PDF.`);
   if (c.dryRun) captionLines.push('- #test: this is a dry run; produce the listing anyway.');
@@ -80,15 +109,31 @@ export function buildPrompt({ extraction, sheets, caption, rubricPath }) {
     .join('\n\n')
     .slice(0, 60000);
 
+  const pageBlock = pageImages.length
+    ? [
+      `This PDF has **no usable text layer**, so all ${pageImages.length} of its pages were rendered as images.`,
+      '**Read every one of them with the Read tool** and take the specs, the price, the district, the',
+      'developer and the project name from what is printed on the pages. If a fact is not printed on any',
+      'page, it stays `null` — the rendered pages do not license a guess. If, having read them, this is not',
+      'one specific property offered for sale or rent, set `reject: true` with a one-sentence reason.',
+      '',
+      ...pageImages.map((p) => `  - page ${p.page}: ${p.abs}  (${p.width}x${p.height})`),
+      '',
+      'A price you take from a page image MUST come with `priceEvidence: { "page": <n>, "quote": "<the',
+      'exact printed text>" }`. Without it the listing is published as "price on request".',
+    ].join('\n')
+    : '(the PDF has a readable text layer — it is reproduced below)';
+
   return fillTemplate(fs.readFileSync(PROMPT_TEMPLATE, 'utf8'), {
     SHEET_COUNT: sheets.length,
     SHEET_LIST: sheets.map((s) => `  - ${s.file}  (candidates #${s.from}–#${s.to})`).join('\n') || '  (none — no image candidates)',
     RUBRIC: rubric,
     ROOM_KEYS: `  ${ROOM_KEYS.join(', ')}`,
     CAPTION: captionLines.join('\n'),
-    META: meta,
+    META: fence('PDF metadata', meta),
     CANDIDATE_LIST: candidateList,
-    PAGE_TEXT: pageText,
+    PAGE_IMAGES: pageBlock,
+    PAGE_TEXT: fence('the text layer of the PDF, page by page', pageText),
   });
 }
 
@@ -103,16 +148,17 @@ function extractJson(text) {
 }
 
 /** Run one `claude -p` and return the parsed contract object. */
-export function runClaudeOnce({ prompt, cwd, model, bin = 'claude', addDirs = [], timeoutMs = 600000, spawnImpl = spawn }) {
+export function runClaudeOnce({ prompt, cwd, model, bin = 'claude', addDirs = [], settingsPath = null, timeoutMs = 600000, spawnImpl = spawn }) {
   const args = [
     '-p',
     '--model', model,
     '--output-format', 'json',
     '--allowedTools', 'Read',
-    '--permission-mode', 'bypassPermissions',
+    '--permission-prompts', 'none',
     '--safe-mode',
     '--disable-slash-commands',
     '--strict-mcp-config',
+    ...(settingsPath ? ['--settings', settingsPath] : []),
     ...addDirs.flatMap((d) => ['--add-dir', d]),
   ];
   const env = { ...process.env };
@@ -226,13 +272,52 @@ export function validateAiResult(result, { candidateCount = 0 } = {}) {
     }
   }
   if (typeof result.confidence !== 'number' || result.confidence < 0 || result.confidence > 1) e.push('confidence must be a number between 0 and 1');
+  // Optional, and only meaningful for a PDF with no text layer. Shape-checked here; whether
+  // the evidence is TRUE is decided by pipeline.mjs, which looks at the page itself.
+  const ev = result.priceEvidence;
+  if (ev !== null && ev !== undefined) {
+    if (!(typeof ev === 'object' && Number.isInteger(ev.page) && ev.page >= 1 && isStr(ev.quote))) {
+      e.push('priceEvidence must be null or { page: <1-based page number>, quote: "<printed text>" }');
+    }
+  }
   return e;
+}
+
+/**
+ * Second opinion on ONE page render: is the price the model claimed actually printed there?
+ * Used only for brochures with no text layer, where nothing local can corroborate a number
+ * and TAQEEM says we may not publish one we cannot see.
+ * @returns {Promise<{confirmed:boolean, error?:string}>}
+ */
+export async function confirmPriceEvidence({
+  pageImage, amount, currency, quote, bin = 'claude', model = 'sonnet', cwd,
+  addDirs = [], settingsPath = null, timeoutMs = 300000, spawnImpl = spawn,
+}) {
+  const prompt = [
+    'Read the image file below with the Read tool. It is one page of a property brochure.',
+    '',
+    `  ${pageImage}`,
+    '',
+    `Question: does that page VISIBLY PRINT the price ${amount} ${currency} for the property?`,
+    'A number you have to compute, infer or assume does not count. A price for a different unit',
+    'on the same page does not count unless the page makes clear it is this property\'s price.',
+    '',
+    fence('what the first pass claimed it saw', quote ?? '(nothing quoted)'),
+    '',
+    'Answer with one JSON object and nothing else: {"confirmed": true|false}',
+  ].join('\n');
+  try {
+    const { result } = await runClaudeOnce({ prompt, cwd, model, bin, addDirs, settingsPath, timeoutMs, spawnImpl });
+    return { confirmed: result?.confirmed === true };
+  } catch (err) {
+    return { confirmed: false, error: err.message };
+  }
 }
 
 /** Copy hygiene: no other agency's brand, no phone numbers, no hype. */
 export function copyProblems(listing) {
   const bad = [];
-  const FORBIDDEN = [/\bTK\b/i, /tk[- ]?estates?/i, /tk-estates\.com/i, /\+?966 ?5[0-9] ?\d{3} ?\d{4}/, /\bwhatsapp\b/i];
+  const FORBIDDEN = [...COPY_FORBIDDEN, /\bwhatsapp\b/i];
   const fields = [
     ['title.en', listing?.title?.en], ['title.ar', listing?.title?.ar],
     ['project.name.en', listing?.project?.name?.en], ['project.name.ar', listing?.project?.name?.ar],
@@ -250,7 +335,7 @@ export function copyProblems(listing) {
 }
 
 /** Run the AI step with one repair retry, then one model fallback. */
-export async function runListingAi({ prompt, cwd, model, fallbackModel, bin, addDirs, timeoutMs, candidateCount, spawnImpl, logger }) {
+export async function runListingAi({ prompt, cwd, model, fallbackModel, bin, addDirs, settingsPath, timeoutMs, candidateCount, spawnImpl, logger }) {
   const attempts = [];
   const models = fallbackModel && fallbackModel !== model ? [model, model, fallbackModel] : [model, model];
   let lastErr;
@@ -259,7 +344,7 @@ export async function runListingAi({ prompt, cwd, model, fallbackModel, bin, add
       ? prompt
       : `${prompt}\n\n---\nYour previous answer was rejected. Fix EXACTLY these problems and answer again with the complete JSON object only:\n${attempts[attempts.length - 1].join('\n')}`;
     try {
-      const { result, meta } = await runClaudeOnce({ prompt: text, cwd, model: m, bin, addDirs, timeoutMs, spawnImpl });
+      const { result, meta } = await runClaudeOnce({ prompt: text, cwd, model: m, bin, addDirs, settingsPath, timeoutMs, spawnImpl });
       const problems = validateAiResult(result, { candidateCount });
       if (!result.reject) problems.push(...copyProblems(result.listing));
       if (!problems.length) return { result, meta, attempt: i + 1 };

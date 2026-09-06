@@ -25,15 +25,18 @@ const coverOf = (listing) => {
   return room && ROOMS[room] ? ROOMS[room].en : 'first photo';
 };
 
-/** Success reply after a real publish. */
-export function published(report, { live }) {
+/**
+ * Success reply, sent the moment the push lands — the owner does not wait three minutes for
+ * a HEAD check to come back. The live check runs detached and only speaks up if the page is
+ * STILL missing after BONA_LIVE_CHECK_MS (see `notLive`).
+ */
+export function published(report) {
   const l = report.listing;
   const lines = [
     `✅ *${l.title.en}*`,
-    `${report.url}`,
+    `Published — live in about 3 minutes: ${report.url}`,
     `${l.images.length} photos · cover: ${coverOf(l)} · ${priceText(l.price)}`,
   ];
-  if (!live) lines.push('_Published — the page goes live a few minutes after the deploy._');
   if (l.hidden) lines.push('_Hidden: it is in the repo but not on the site (`show ' + l.id + '` publishes it)._');
   const warn = (report.warnings || []).filter(Boolean).slice(0, 3);
   if (warn.length) lines.push('', ...warn.map((w) => `⚠️ ${w}`));
@@ -62,7 +65,15 @@ export function dryRunSummary(report) {
 }
 
 export const rejected = (reason) => `✋ Not published — ${reason}`;
-export const failed = (message) => `⚠️ Something went wrong — ${message}`;
+
+/**
+ * Deliberately says nothing about WHY: the detail is git/build/model output, which can quote
+ * file contents and secrets. It goes to the journal, where only the owner can read it.
+ */
+export const failed = () => '⚠️ Something went wrong — nothing was published and the repo was left clean. The details are in the journal (`journalctl --user -u bona-intake -e`).';
+
+/** Follow-up, sent ONLY when the page is still missing long after the push. */
+export const notLive = (url, minutes) => `⚠️ The page is still not answering ${minutes} minutes after the push: ${url}\nThe listing is committed — check the GitHub Pages deploy.`;
 export const alreadyLive = (info) => `Already published: ${info.url}\n(${info.id})`;
 export const notFound = (id) => `No listing called ${id}. Send \`status\` to see what is live.`;
 export const removed = (id, title) => `🗑️ Removed *${title}* (${id}). It comes off the site with the next deploy.`;

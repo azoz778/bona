@@ -27,13 +27,37 @@ WorkingDirectory=%h/bona
 Environment=NODE_ENV=production
 Environment=PATH=%h/.nvm/versions/node/v24.19.0/bin:%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ; BONA_* settings; the service reads ~/.secrets/evolution-api.env itself.
-EnvironmentFile=%h/.secrets/bona-services.env
+; Leading "-": a missing secrets file must not stop the unit from starting — the daemon
+; itself reports exactly which settings are missing, which is a far better error.
+EnvironmentFile=-%h/.secrets/bona-services.env
 ExecStart=%h/.nvm/versions/node/v24.19.0/bin/node %h/bona/services/intake/index.mjs
 Restart=always
 RestartSec=10
-; SIGTERM lets the current job finish its reply before the process exits.
+; SIGTERM makes the daemon stop taking work and wait up to 40 s for the job in flight
+; (lib/shutdown.mjs) — never a process.exit() in the middle of a git push or a sharp encode.
 KillSignal=SIGTERM
 TimeoutStopSec=45
+
+; ---- sandbox -----------------------------------------------------------------------
+; This service reads PDFs from the internet and hands them to a model. Give it as little
+; of the machine as it can still work with.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectControlGroups=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+LockPersonality=true
+; Everything the pipeline legitimately writes. ~/.claude* and the caches are the CLI's and
+; uv's own state — without them `claude -p` and `uv run --with pymupdf` fail at startup.
+; A "-" prefix means "only if it exists", so a fresh box still starts.
+ReadWritePaths=%h/bona-data %h/bona-bot
+ReadWritePaths=-%h/.claude -%h/.claude.json -%h/.cache -%h/.local/share -%h/.local/state -%h/.config
+; RAM ceiling. The AI step spawns `claude`, which is another node process; if the journal
+; shows the job being OOM-killed at the "ai" stage, raise this rather than removing it.
+MemoryMax=1G
+
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=bona-intake

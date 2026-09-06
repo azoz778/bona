@@ -66,13 +66,23 @@ export function createEvolutionClient({ baseUrl, apiKey, instance, fetchImpl = f
   return {
     request,
 
-    /** @returns {Promise<Array<{id:string,subject:string,size:number}>>} */
+    /**
+     * `owner` / `subjectOwner` are KEPT: a group is only trusted when the owner created it
+     * (or last set its subject). Anyone can name a group "Bona".
+     * @returns {Promise<Array<{id:string,subject:string,size:number,owner:string|null,subjectOwner:string|null}>>}
+     */
     async fetchAllGroups() {
       const json = await request('GET', `/group/fetchAllGroups/${instance}?getParticipants=false`);
       const arr = Array.isArray(json) ? json : json?.groups || [];
       return arr
         .filter((g) => g && typeof g.id === 'string')
-        .map((g) => ({ id: g.id, subject: String(g.subject ?? ''), size: g.size ?? null }));
+        .map((g) => ({
+          id: g.id,
+          subject: String(g.subject ?? ''),
+          size: g.size ?? null,
+          owner: g.owner ?? null,
+          subjectOwner: g.subjectOwner ?? null,
+        }));
     },
 
     /**
@@ -117,16 +127,34 @@ export function createEvolutionClient({ baseUrl, apiKey, instance, fetchImpl = f
   };
 }
 
-/** documentMessage | documentWithCaptionMessage -> the inner documentMessage, else null. */
+/**
+ * Baileys wraps the real message when a chat is on disappearing messages or the sender used
+ * view-once. Unwrapped here so a PDF sent into an ephemeral group is still seen — without
+ * this, `documentOf`/`textOf` return null/'' and the daemon silently ignores it.
+ */
+export function unwrapMessage(message, depth = 0) {
+  const m = message;
+  if (!m || typeof m !== 'object' || depth > 6) return m ?? null;
+  const inner = m.ephemeralMessage?.message
+    ?? m.viewOnceMessage?.message
+    ?? m.viewOnceMessageV2?.message
+    ?? m.viewOnceMessageV2Extension?.message
+    ?? m.documentWithCaptionMessage?.message
+    ?? m.editedMessage?.message
+    ?? null;
+  return inner ? unwrapMessage(inner, depth + 1) : m;
+}
+
+/** documentMessage | documentWithCaptionMessage | ephemeral/view-once wrappers -> documentMessage. */
 export function documentOf(record) {
-  const m = record?.message;
+  const m = unwrapMessage(record?.message);
   if (!m) return null;
   return m.documentMessage || m.documentWithCaptionMessage?.message?.documentMessage || null;
 }
 
 /** Caption / body text of any record shape we care about. */
 export function textOf(record) {
-  const m = record?.message;
+  const m = unwrapMessage(record?.message);
   if (!m) return '';
   return (
     m.conversation ||
@@ -148,13 +176,37 @@ export function fileLengthOf(doc) {
   return null;
 }
 
+/** `966593296933:12@s.whatsapp.net` -> `966593296933`. Empty string for anything unusable. */
+export const bareJid = (jid) => String(jid || '').split(':')[0].split('@')[0].replace(/[^0-9]/g, '');
+
 /**
  * Owner-only gate. Anything the owner did not author is ignored outright — this service
  * publishes to a public website, so a group member must never be able to drive it.
+ *
+ * In a LID group the participant is an opaque `…@lid` that never equals the phone JID, so
+ * Baileys/Evolution also carry the real number as `participantAlt` / `senderPn`. Both are
+ * accepted; when none of them resolves to the owner's number the message is ignored.
  */
 export function isFromOwner(record, ownerJid) {
   if (record?.key?.fromMe === true) return true;
-  const bare = (jid) => String(jid || '').split(':')[0].split('@')[0];
-  const participant = record?.key?.participant || record?.participant;
-  return Boolean(participant) && bare(participant) === bare(ownerJid);
+  const want = bareJid(ownerJid);
+  if (!want) return false;
+  const claims = [
+    record?.key?.participant, record?.participant,
+    record?.key?.participantAlt, record?.participantAlt,
+    record?.key?.senderPn, record?.senderPn,
+  ];
+  return claims.some((c) => c && bareJid(c) === want);
+}
+
+/**
+ * Venue check: is this group the OWNER's? A group matched only by its subject regex is
+ * trusted only when the owner created it or last set its subject — otherwise anyone who can
+ * add the owner's number to a group called "Bona something" could publish to the website.
+ * Fails closed: no owner field, no trust.
+ */
+export function isOwnerGroup(group, ownerJid) {
+  const want = bareJid(ownerJid);
+  if (!want) return false;
+  return [group?.owner, group?.subjectOwner].some((c) => c && bareJid(c) === want);
 }

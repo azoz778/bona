@@ -7,6 +7,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
 
+// Decompression-bomb cap, matching extract_pdf.py::MAX_PIXELS and images.mjs.
+const MAX_INPUT_PIXELS = 50_000_000;
+
 const TILE_W = 440;
 const TILE_H = 320;
 const COLS = 5;
@@ -29,7 +32,7 @@ export async function buildContactSheets(candidates, outDir) {
     for (const [i, c] of chunk.entries()) {
       let body;
       try {
-        body = await sharp(c.abs)
+        body = await sharp(c.abs, { limitInputPixels: MAX_INPUT_PIXELS })
           .resize(TILE_W, TILE_H, { fit: 'contain', background: { r: 24, g: 24, b: 24 } })
           .toBuffer();
       } catch {
@@ -44,7 +47,7 @@ export async function buildContactSheets(candidates, outDir) {
         '</svg>',
       );
       tiles.push({
-        input: await sharp(body).composite([{ input: label, top: 0, left: 0 }]).toBuffer(),
+        input: await sharp(body, { limitInputPixels: MAX_INPUT_PIXELS }).composite([{ input: label, top: 0, left: 0 }]).toBuffer(),
         top: Math.floor(i / COLS) * TILE_H,
         left: (i % COLS) * TILE_W,
       });

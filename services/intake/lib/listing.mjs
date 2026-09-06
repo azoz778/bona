@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOMS } from '../../../scripts/curate/rooms.mjs';
+import { INTAKE_ID_RE, LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB } from '../../../scripts/curate/rules.mjs';
 
 export const INBOX_DIR = path.join('scripts', 'curate', 'inbox');
 export const INDEX_FILE = '_index.json';
@@ -85,9 +86,44 @@ export function takenSlugs(repo) {
   return taken;
 }
 
-export function nextListingId(index) {
-  return `BONA-W${String(index.nextSeq ?? 1).padStart(3, '0')}`;
+/** Every BONA-W id already present in the inbox. */
+export function inboxIds(repo) {
+  return listInbox(repo).map((x) => x.listing?.id).filter(Boolean);
 }
+
+/**
+ * The next free id. `_index.json` is the counter, but it is a file in a repo that other
+ * clones also push to: if a listing with a HIGHER number is already in the inbox (a pull
+ * brought it in, or the counter was rolled back), that wins. Ids are never reused.
+ */
+export function nextListingId(index, existingIds = []) {
+  const seqOf = (id) => {
+    const m = /^BONA-W(\d{1,5})$/i.exec(String(id ?? ''));
+    return m ? Number(m[1]) : 0;
+  };
+  const highest = existingIds.reduce((max, id) => Math.max(max, seqOf(id)), 0);
+  const seq = Math.max(Number(index?.nextSeq) || 1, highest + 1);
+  return `BONA-W${String(seq).padStart(3, '0')}`;
+}
+
+/** The counter value to store after `id` has been allocated. */
+export function seqAfter(id) {
+  const m = /^BONA-W(\d{1,5})$/i.exec(String(id ?? ''));
+  return (m ? Number(m[1]) : 0) + 1;
+}
+
+/**
+ * The ONLY values `_intake.warnings` may hold. The model's free-text `warnings` are never
+ * committed — they are model output, they end up in a public repo, and nothing downstream
+ * needs them; they stay in the run's ai.json instead.
+ */
+export const WARNING_CODES = new Set([
+  'not-enough-photos',      // fewer publishable photographs than BONA_MIN_IMAGES (dry run only)
+  'price-not-printed',      // the model's price was not in the PDF or the caption -> on request
+  'brochure-too-large',     // #brochure was asked for but the PDF is over the cap
+  'images-skipped',         // sharp could not decode one or more candidates
+  'model-flagged',          // the model returned warnings; read them in the work dir's ai.json
+]);
 
 const kindMap = (repo) => JSON.parse(fs.readFileSync(path.join(repo, 'src', 'data', 'kind-map.json'), 'utf8'));
 
@@ -165,7 +201,8 @@ export function buildListing({ ai, images, slug, id, repo, caption = {}, meta = 
       caption: caption.text ?? null,
       model: meta.model ?? null,
       confidence: ai.confidence ?? null,
-      warnings: ai.warnings ?? [],
+      // Codes only — never the model's free text (see WARNING_CODES).
+      warnings: [...new Set(meta.warningCodes ?? [])].filter((c) => WARNING_CODES.has(c)),
       images: images.map((im) => ({ n: im.n, candidate: im.index, room: im.room, reason: im.reason })),
       createdAt: new Date(now).toISOString(),
       site: site ?? null,
@@ -185,7 +222,7 @@ export function checkListing(listing, { minImages = 4, maxImages = 10 } = {}) {
   const ARABIC = /[؀-ۿ]/;
   const isStr = (v) => typeof v === 'string' && v.trim().length > 0;
   const isPair = (v) => v && isStr(v.en) && isStr(v.ar) && ARABIC.test(v.ar);
-  if (!/^BONA-W\d{3}$/.test(listing.id || '')) e.push(`id must match BONA-W### (got ${listing.id})`);
+  if (!INTAKE_ID_RE.test(listing.id || '')) e.push(`id must match BONA-W### (got ${listing.id})`);
   if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(listing.slug || '')) e.push(`slug must be lowercase-hyphenated (got ${listing.slug})`);
   if (RESERVED_SLUGS.has(listing.slug)) e.push(`slug "${listing.slug}" collides with a section route`);
   if (!isPair(listing.title)) e.push('title.en/ar required');
@@ -193,8 +230,9 @@ export function checkListing(listing, { minImages = 4, maxImages = 10 } = {}) {
     e.push(`not enough usable photos (${listing.images?.length ?? 0} of ${minImages} needed)`);
   } else if (listing.images.length > maxImages) e.push(`too many photos (${listing.images.length} > ${maxImages})`);
   for (const [i, im] of (listing.images || []).entries()) {
-    if (!/^\/listings\/[A-Za-z0-9-]+\/[A-Za-z0-9-]+\.jpg$/.test(im.src || '')) e.push(`images[${i}].src is not /listings/<slug>/<nn>.jpg`);
-    if (!(im.thumb === null || /^\/listings\/[A-Za-z0-9-]+\/[A-Za-z0-9-]+\.webp$/.test(im.thumb || ''))) e.push(`images[${i}].thumb is not /listings/<slug>/<nn>-thumb.webp`);
+    // The SAME regexes the site validator uses (scripts/curate/rules.mjs), not a copy.
+    if (!LOCAL_LISTING_SRC.test(im.src || '')) e.push(`images[${i}].src is not /listings/<slug>/<nn>.jpg`);
+    if (!(im.thumb === null || LOCAL_LISTING_THUMB.test(im.thumb || ''))) e.push(`images[${i}].thumb is not /listings/<slug>/<nn>-thumb.webp`);
     if (!isPair(im.alt)) e.push(`images[${i}].alt.en/ar required`);
   }
   if (!listing.price?.onRequest && !(typeof listing.price?.amount === 'number' && listing.price.amount > 0)) {

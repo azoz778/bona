@@ -24,6 +24,15 @@ stdout:
       ]
     }
 
+With `--mode pages` it does something else entirely: it renders EVERY page as a readable
+JPEG (long side <= 1600 px) into <outdir>/pages/ and prints
+{"ok": true, "pages": n, "mode": "pages", "pageImages": [{page, file, abs, width, height}]}.
+That mode exists for brochures with no text layer — the AI reads the page images instead.
+
+Decompression-bomb caps: an embedded bitmap over MAX_PIXELS (50 MP) is dropped in usable()
+BEFORE any Pixmap is built, and every page render is clamped to a long side in pixels
+(RENDER_LONG_SIDE) whatever DPI is asked for.
+
 Never raises for a bad PDF: prints {"ok": false, "error": "..."} and exits 1.
 The caller (lib/pdf.mjs) is responsible for the default-deny classification.
 """
@@ -40,12 +49,15 @@ import unicodedata
 MIN_SIDE_DEFAULT = 700
 MIN_SHORT_SIDE = 420
 MIN_PIXELS = 700 * 450          # drop banners/strips that pass one side but carry no scene
+MAX_PIXELS = 50_000_000         # decompression-bomb cap: never build a Pixmap bigger than this
 FLAT_RATIO = 0.015              # below this a bitmap is a logo/wordmark, never a photograph
 FLAT_MIN_COLOURS = 32
 MAX_CANDIDATES = 40
 MAX_PAGES = 60
 RENDER_DPI = 150
 RENDER_THRESHOLD = 3            # < this many usable embedded images -> rasterise pages
+RENDER_LONG_SIDE = 2000         # hard cap on a rendered page's long side, in pixels
+PAGE_READ_LONG_SIDE = 1600      # page renders handed to the AI to READ (--mode pages)
 
 
 def collapse(s: str) -> str:
@@ -59,9 +71,24 @@ def usable(width: int, height: int, min_side: int) -> bool:
         return False
     if width * height < MIN_PIXELS:
         return False
+    # Decompression bomb: a 60000x60000 "image" would be 10 GB once PyMuPDF builds the
+    # Pixmap. Checked HERE, before colour_ratio() or extract_image() ever touch it.
+    if width * height > MAX_PIXELS:
+        return False
     ar = width / height if height else 0
     # Logos/banners/rules: absurdly wide or tall crops are never property photos.
     return 0.28 <= ar <= 4.0
+
+
+def render_matrix(page, dpi: int, long_side: int):
+    """Zoom for `dpi`, clamped so the rendered page never exceeds `long_side` pixels."""
+    import pymupdf
+    rect = page.rect
+    long_pt = max(rect.width, rect.height) or 1.0
+    zoom = dpi / 72.0
+    if long_pt * zoom > long_side:
+        zoom = long_side / long_pt
+    return pymupdf.Matrix(zoom, zoom)
 
 
 def colour_ratio(doc, xref: int):
@@ -97,6 +124,9 @@ def main() -> int:
     ap.add_argument("--max-candidates", type=int, default=MAX_CANDIDATES)
     ap.add_argument("--max-pages", type=int, default=MAX_PAGES)
     ap.add_argument("--render-dpi", type=int, default=RENDER_DPI)
+    ap.add_argument("--render-long-side", type=int, default=RENDER_LONG_SIDE)
+    ap.add_argument("--mode", choices=("full", "pages"), default="full",
+                    help="full = text + candidate photos; pages = render every page for the AI to read")
     args = ap.parse_args()
 
     try:
@@ -129,6 +159,34 @@ def main() -> int:
             page_text.append(collapse(doc[i].get_text()))
         except Exception:
             page_text.append("")
+
+    if args.mode == "pages":
+        # Every page as a readable JPEG, for a brochure with no text layer. Nothing is
+        # classified here: the caller hands these to the AI gate, which decides.
+        page_dir = os.path.join(args.outdir, "pages")
+        os.makedirs(page_dir, exist_ok=True)
+        page_images = []
+        long_side = min(args.render_long_side, PAGE_READ_LONG_SIDE) if args.render_long_side else PAGE_READ_LONG_SIDE
+        for i in range(pages):
+            try:
+                page = doc[i]
+                pix = page.get_pixmap(matrix=render_matrix(page, args.render_dpi, long_side), alpha=False)
+                name = f"{i + 1:03d}.jpg"
+                path = os.path.join(page_dir, name)
+                with open(path, "wb") as fh:
+                    fh.write(pix.tobytes("jpg"))
+                page_images.append({
+                    "page": i + 1,
+                    "file": os.path.join("pages", name),
+                    "abs": os.path.abspath(path),
+                    "width": pix.width,
+                    "height": pix.height,
+                })
+            except Exception:
+                continue
+        doc.close()
+        print(json.dumps({"ok": True, "pages": pages, "mode": "pages", "pageImages": page_images}, ensure_ascii=False))
+        return 0
 
     seen: set[str] = set()
     candidates = []
@@ -190,11 +248,10 @@ def main() -> int:
         rendered = True
         candidates = []
         seen.clear()
-        zoom = args.render_dpi / 72.0
-        matrix = pymupdf.Matrix(zoom, zoom)
         for i in range(min(pages, args.max_candidates)):
             try:
-                pix = doc[i].get_pixmap(matrix=matrix, alpha=False)
+                page = doc[i]
+                pix = page.get_pixmap(matrix=render_matrix(page, args.render_dpi, args.render_long_side), alpha=False)
                 add(pix.tobytes("jpg"), "jpg", pix.width, pix.height, i + 1, "render")
             except Exception:
                 continue

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  buildListing, checkListing, nextListingId, orderedPicks, readIndex, slugify,
+  buildListing, checkListing, inboxIds, nextListingId, orderedPicks, readIndex, seqAfter, slugify,
   takenSlugs, todayRiyadh, uniqueSlug, writeIndex, writeInboxListing, findInbox, listInbox,
 } from '../lib/listing.mjs';
 import * as edits from '../lib/edits.mjs';
@@ -76,6 +76,23 @@ describe('nextListingId', () => {
     assert.equal(nextListingId({ nextSeq: 1 }), 'BONA-W001');
     assert.equal(nextListingId({ nextSeq: 42 }), 'BONA-W042');
     assert.equal(nextListingId({}), 'BONA-W001');
+  });
+
+  // Finding 13 — _index.json is a file in a repo other clones push to. A listing already in
+  // the inbox with a higher number wins, so an id is never handed out twice.
+  it('never reuses an id that is already in the inbox', () => {
+    assert.equal(nextListingId({ nextSeq: 1 }, ['BONA-W001', 'BONA-W004', 'BONA-W002']), 'BONA-W005');
+    assert.equal(nextListingId({ nextSeq: 3 }, ['BONA-W007']), 'BONA-W008');
+    assert.equal(nextListingId({ nextSeq: 9 }, ['BONA-W004']), 'BONA-W009', 'a higher counter still wins');
+  });
+
+  it('ignores anything that is not an intake id', () => {
+    assert.equal(nextListingId({ nextSeq: 1 }, ['BONA-004', null, undefined, 'nonsense']), 'BONA-W001');
+  });
+
+  it('stores the counter one past whatever was allocated', () => {
+    assert.equal(seqAfter('BONA-W004'), 5);
+    assert.equal(seqAfter('BONA-W0120'), 121);
   });
 });
 
@@ -150,14 +167,24 @@ describe('buildListing', () => {
   it('carries provenance in _intake and the hidden flag at the top level', () => {
     const l = buildListing({
       ai: structuredClone(AI), images: imagesFor(slug, picks), slug, id: 'BONA-W011', repo: REPO,
-      caption: { text: 'rent #hidden' }, meta: { hidden: true, messageId: 'MSG1', pdfSha256: 'abc', model: 'sonnet' },
+      caption: { text: 'rent #hidden' },
+      meta: { hidden: true, messageId: 'MSG1', pdfSha256: 'abc', model: 'sonnet', warningCodes: ['price-not-printed', 'nonsense'] },
     });
     assert.equal(l.hidden, true);
     assert.equal(l._intake.source, 'whatsapp');
     assert.equal(l._intake.messageId, 'MSG1');
     assert.equal(l._intake.model, 'sonnet');
-    assert.deepEqual(l._intake.warnings, ['check the floor']);
     assert.equal(l._intake.images.length, 4);
+    // Finding 5: the model's free-text warnings are NEVER committed — only known codes.
+    assert.deepEqual(l._intake.warnings, ['price-not-printed'], 'unknown codes and model prose are dropped');
+    assert.ok(!JSON.stringify(l).includes('check the floor'), 'no model free text anywhere in the listing');
+  });
+
+  it('commits no model free text at all when no codes are passed', () => {
+    const l = buildListing({
+      ai: structuredClone(AI), images: imagesFor(slug, picks), slug, id: 'BONA-W012', repo: REPO, meta: {},
+    });
+    assert.deepEqual(l._intake.warnings, []);
   });
 
   it('dates the listing in Riyadh', () => {
@@ -219,7 +246,11 @@ describe('inbox + edits', () => {
 
   it('reads the index back', () => {
     assert.equal(readIndex(tmp).nextSeq, 2);
-    assert.equal(nextListingId(readIndex(tmp)), 'BONA-W002');
+    assert.equal(nextListingId(readIndex(tmp), inboxIds(tmp)), 'BONA-W002');
+  });
+
+  it('reads the ids actually present in the inbox', () => {
+    assert.deepEqual(inboxIds(tmp), ['BONA-W001']);
   });
 
   it('lists and finds by id, case-insensitively', () => {

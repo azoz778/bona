@@ -8,6 +8,9 @@ import sharp from 'sharp';
 export const MAX_SIDE = 1920;
 export const THUMB_SIDE = 640;
 export const JPEG_QUALITY = 82;
+// Decompression-bomb cap, matching MAX_PIXELS in extract_pdf.py. sharp's own default is
+// ~268 MP, which is enough to exhaust this box's RAM from a hostile PDF.
+export const MAX_INPUT_PIXELS = 50_000_000;
 
 const pad = (n) => String(n).padStart(2, '0');
 
@@ -21,22 +24,35 @@ export async function writeListingImages(candidates, picks, outDir, slug) {
   const byIndex = new Map(candidates.map((c) => [c.index, c]));
   fs.mkdirSync(outDir, { recursive: true });
   const out = [];
-  for (const [i, pick] of picks.entries()) {
+  const skipped = [];
+  let n = 0;
+  for (const pick of picks) {
     const cand = byIndex.get(pick.index);
     if (!cand) continue;
-    const n = i + 1;
-    const base = pad(n);
+    const base = pad(n + 1);
     const file = path.join(outDir, `${base}.jpg`);
     const thumbFile = path.join(outDir, `${base}-thumb.webp`);
-    const info = await sharp(cand.abs)
-      .rotate()
-      .resize({ width: MAX_SIDE, height: MAX_SIDE, fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: JPEG_QUALITY, mozjpeg: true })  // sharp's 4:2:0 default: ~30% smaller, invisible on photos
-      .toFile(file); // sharp drops EXIF/ICC unless withMetadata() is called
-    await sharp(file)
-      .resize({ width: THUMB_SIDE, height: THUMB_SIDE, fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: 78 })
-      .toFile(thumbFile);
+    let info;
+    try {
+      // A candidate that sharp cannot decode (truncated, hostile, or over the pixel cap)
+      // is SKIPPED, not fatal: the listing is still publishable if enough others survive,
+      // and checkListing() refuses it when they do not.
+      info = await sharp(cand.abs, { limitInputPixels: MAX_INPUT_PIXELS })
+        .rotate()
+        .resize({ width: MAX_SIDE, height: MAX_SIDE, fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: JPEG_QUALITY, mozjpeg: true })  // sharp's 4:2:0 default: ~30% smaller, invisible on photos
+        .toFile(file); // sharp drops EXIF/ICC unless withMetadata() is called
+      await sharp(file, { limitInputPixels: MAX_INPUT_PIXELS })
+        .resize({ width: THUMB_SIDE, height: THUMB_SIDE, fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 78 })
+        .toFile(thumbFile);
+    } catch (err) {
+      fs.rmSync(file, { force: true });
+      fs.rmSync(thumbFile, { force: true });
+      skipped.push({ index: pick.index, error: err.message });
+      continue;
+    }
+    n += 1;
     out.push({
       n,
       index: pick.index,
@@ -50,6 +66,7 @@ export async function writeListingImages(candidates, picks, outDir, slug) {
       height: info.height,
     });
   }
+  out.skipped = skipped;
   return out;
 }
 

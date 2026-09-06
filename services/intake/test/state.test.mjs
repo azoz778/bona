@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { createState } from '../lib/state.mjs';
+import { createState, MAX_JOB_ATTEMPTS } from '../lib/state.mjs';
 import { parseEnv, loadConfig } from '../lib/env.mjs';
 import { redact } from '../lib/log.mjs';
 import * as msg from '../lib/messages.mjs';
@@ -126,14 +126,30 @@ describe('reply messages', () => {
     assert.match(text, /hero BONA-W001 4/);
   });
 
-  it('says so when the page is not live yet', () => {
-    assert.match(msg.published(report, { live: false }), /goes live a few minutes/);
+  // Finding 14: the reply goes out the moment the push lands, not after a 3-minute poll.
+  it('promises the page in about three minutes instead of waiting for it', () => {
+    assert.match(msg.published(report), /live in about 3 minutes/);
+    assert.match(msg.published(report), /https:\/\/bona\.azoz\.uk\/properties\/villa\//);
+  });
+
+  it('has a separate follow-up for a page that never appeared', () => {
+    const late = msg.notLive('https://bona.azoz.uk/properties/villa/', 10);
+    assert.match(late, /still not answering 10 minutes/);
+    assert.match(late, /committed/);
+  });
+
+  // Finding 15: a failure reply never quotes git/build/model output.
+  it('never echoes raw command output into the group', () => {
+    const line = msg.failed();
+    assert.match(line, /journal/);
+    assert.ok(line.length < 220);
+    assert.equal(msg.failed.length, 0, 'failed() takes no message argument any more');
   });
 
   it('never prints a price it does not have', () => {
     const onRequest = structuredClone(report);
     onRequest.listing.price = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true };
-    assert.match(msg.published(onRequest, { live: true }), /Price on request/);
+    assert.match(msg.published(onRequest), /Price on request/);
   });
 
   it('the dry-run reply publishes nothing and says why it would fail', () => {
@@ -151,5 +167,57 @@ describe('reply messages', () => {
 
   it('the announcement documents the caption hints', () => {
     for (const hint of ['#test', '#brochure', 'rent', 'help']) assert.ok(msg.ANNOUNCE.includes(hint), hint);
+  });
+});
+
+// Finding 11 — a crash between "seen" and "published" must not lose a brochure.
+describe('durable jobs', () => {
+  let dir;
+  let file;
+  before(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-jobs-')); file = path.join(dir, 'state.json'); });
+  after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('survives a restart as pending, in arrival order', () => {
+    const s = createState(file);
+    s.addJob({ id: 'M1', jid: 'g@g.us', key: { id: 'M1' }, caption: 'rent', fileName: 'a.pdf' });
+    s.markSeen('M1');
+    s.addJob({ id: 'M2', jid: 'g@g.us', key: { id: 'M2' }, caption: '', fileName: 'b.pdf' });
+    s.markSeen('M2');
+    const reloaded = createState(file);
+    assert.deepEqual(reloaded.pendingJobs().map((j) => j.id), ['M1', 'M2']);
+    assert.equal(reloaded.hasSeen('M1'), true, 'the id is seen, so polling will not re-enqueue it');
+    assert.equal(reloaded.getJob('M1').caption, 'rent');
+  });
+
+  it('remembers where the PDF was downloaded so a replay does not re-download it', () => {
+    const s = createState(file);
+    s.updateJob('M1', { pdfPath: '/data/intake/2026-09-06/M1.pdf' });
+    assert.equal(createState(file).getJob('M1').pdfPath, '/data/intake/2026-09-06/M1.pdf');
+  });
+
+  it('stops replaying a job once the pipeline has answered', () => {
+    const s = createState(file);
+    s.finishJob('M1', 'done');
+    s.finishJob('M2', 'rejected');
+    assert.deepEqual(createState(file).pendingJobs(), []);
+    assert.equal(s.getJob('M2').status, 'rejected');
+  });
+
+  it('gives up on a job that keeps failing instead of looping on every boot', () => {
+    const s = createState(file);
+    s.addJob({ id: 'M3', jid: 'g@g.us' });
+    for (let i = 0; i < MAX_JOB_ATTEMPTS - 1; i += 1) {
+      s.failJob('M3', 'git push failed');
+      assert.equal(s.pendingJobs().length, 1, `still retryable after ${i + 1} attempt(s)`);
+    }
+    s.failJob('M3', 'git push failed');
+    assert.deepEqual(s.pendingJobs(), []);
+    assert.equal(s.getJob('M3').status, 'failed');
+  });
+
+  it('does not grow without bound', () => {
+    const s = createState(file);
+    for (let i = 0; i < 400; i += 1) { s.addJob({ id: `X${i}` }); s.finishJob(`X${i}`); }
+    assert.ok(Object.keys(createState(file).raw.jobs).length <= 200);
   });
 });

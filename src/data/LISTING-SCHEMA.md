@@ -85,7 +85,10 @@ this repo. Nothing else in the pipeline changes.
   - `hidden: true` — keep the listing out of the site without deleting it (`hide`/`show` commands).
   - `_intake: { source, messageId, groupJid, pdfSha256, pdfFileName, caption, model, confidence,
     warnings, images[], createdAt, site }` — provenance, so a listing can always be traced back to
-    the WhatsApp message and the PDF that produced it.
+    the WhatsApp message and the PDF that produced it. `warnings` is an array of **codes** from a
+    fixed vocabulary (`not-enough-photos`, `price-not-printed`, `brochure-too-large`,
+    `images-skipped`, `model-flagged`) and never free text: the model's own `warnings` are model
+    output about an untrusted document, so they stay in the run's `ai.json` and are not committed.
   A `status: "sold"` intake listing stays published and renders with the Sold badge.
 - **Images**: stored in this repo at `public/listings/<slug>/<nn>.jpg` (max 1920 px, q82, EXIF
   stripped) with `<nn>-thumb.webp` (640 px). `src` and `thumb` are therefore site-local paths, and
@@ -99,6 +102,9 @@ this repo. Nothing else in the pipeline changes.
   TK reference, and `build.mjs` never looks it up in the TK API.
 - **`brochureUrl`**: set to `https://bona.azoz.uk/listings/<slug>/brochure.pdf` only when the owner
   captioned the PDF with `#brochure`; the PDF is then committed alongside the photos.
-- **Price**: TAQEEM still applies. The price is used only when it is printed in the PDF or typed in
-  the caption; otherwise `price.onRequest = true` and `price.amount = null`. The intake never
-  estimates.
+- **Price**: TAQEEM still applies, and the model's word is not enough. The number must appear in
+  the PDF's text layer or in the caption (`services/intake/lib/price.mjs` allows thousands
+  separators, Arabic-Indic digits and the `4.5m` / `مليون` forms); for a PDF with no text layer
+  the model must cite `priceEvidence: { page, quote }` and a second `claude -p` must confirm it on
+  that page image. Anything else becomes `price.onRequest = true`, `price.amount = null`. The
+  intake never estimates.

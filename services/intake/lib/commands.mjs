@@ -87,7 +87,9 @@ export function parseCaption(caption) {
   };
 }
 
-export const LISTING_ID_RE = /^BONA-W\d{3}$/i;
+// Same shape the site validator accepts (scripts/curate/rules.mjs::INTAKE_ID_RE), so a
+// listing the intake can publish is always a listing the owner can then command.
+export const LISTING_ID_RE = /^BONA-W\d{3,5}$/i;
 
 /**
  * Parse a text message as a command. Returns { cmd: null } for ordinary chatter so the

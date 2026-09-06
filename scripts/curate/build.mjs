@@ -110,9 +110,14 @@ if (fs.existsSync(INBOX)) {
     if (!KIND_OF[clean.type]) throw new Error(`inbox/${name}: no kind mapping for type "${clean.type}"`);
     clean.kind = KIND_OF[clean.type];
     clean.featured = Boolean(clean.featured);
-    for (const im of clean.images ?? []) {
-      if (typeof im.src === 'string' && im.src.startsWith('/') && !fs.existsSync(path.join(ROOT, 'public', im.src))) {
-        throw new Error(`inbox/${name}: missing public${im.src}`);
+    for (const [i, im] of (clean.images ?? []).entries()) {
+      // BOTH src and thumb: a listing whose thumbnail is missing renders a broken card,
+      // and the site never regenerates one at build time.
+      for (const field of ['src', 'thumb']) {
+        const v = im[field];
+        if (typeof v === 'string' && v.startsWith('/') && !fs.existsSync(path.join(ROOT, 'public', v))) {
+          throw new Error(`inbox/${name}: images[${i}].${field} missing: public${v}`);
+        }
       }
     }
     inbox.push(clean);
@@ -121,8 +126,23 @@ if (fs.existsSync(INBOX)) {
 if (inbox.length || inboxHidden) console.log(`WhatsApp intake: appended ${inbox.length} listing(s), ${inboxHidden} hidden`);
 
 const published = [...live, ...inbox];
+
+// Every site-local image must actually exist in public/ — src AND thumb, for the curated
+// set as well as the intake set. A missing file is a broken page, so it fails the build.
+for (const l of published) {
+  for (const [i, im] of (l.images ?? []).entries()) {
+    for (const field of ['src', 'thumb']) {
+      const v = im[field];
+      if (typeof v === 'string' && v.startsWith('/') && !fs.existsSync(path.join(ROOT, 'public', v))) {
+        throw new Error(`${l.id} (${l.slug}): images[${i}].${field} missing: public${v}`);
+      }
+    }
+  }
+}
+
 fs.writeFileSync(OUT, JSON.stringify(published, null, 2) + '\n');
-const counts = out.reduce((a, l) => ((a[l.category] = (a[l.category] || 0) + 1), a), {});
-const kinds = out.reduce((a, l) => ((a[l.kind] = (a[l.kind] || 0) + 1), a), {});
-const imgs = out.reduce((n, l) => n + l.images.length, 0);
-console.log(`wrote ${path.relative(ROOT, OUT)}: ${out.length} listings, ${imgs} images, featured ${out.filter((l) => l.featured).length}, ${JSON.stringify(counts)}, kinds ${JSON.stringify(kinds)}`);
+// The summary describes what was WRITTEN, not the pre-filter candidate list.
+const counts = published.reduce((a, l) => ((a[l.category] = (a[l.category] || 0) + 1), a), {});
+const kinds = published.reduce((a, l) => ((a[l.kind] = (a[l.kind] || 0) + 1), a), {});
+const imgs = published.reduce((n, l) => n + l.images.length, 0);
+console.log(`wrote ${path.relative(ROOT, OUT)}: ${published.length} listings (${live.length} curated + ${inbox.length} intake), ${imgs} images, featured ${published.filter((l) => l.featured).length}, ${JSON.stringify(counts)}, kinds ${JSON.stringify(kinds)}`);

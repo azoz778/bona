@@ -68,13 +68,17 @@ export function loadConfig(overrides = {}) {
     data,
     intakeDir: path.join(data, 'intake'),
     statePath: path.join(data, 'intake-state.json'),
+    lockPath: path.join(data, 'intake.lock'),
     pollMs: num(raw.BONA_POLL_MS, 20000),
     groupScanMs: num(raw.BONA_GROUP_SCAN_MS, 300000),
     claudeModel: raw.BONA_CLAUDE_MODEL || 'sonnet',
     claudeFallbackModel: raw.BONA_CLAUDE_FALLBACK_MODEL || 'opus',
     claudeBin: raw.BONA_CLAUDE_BIN || 'claude',
     claudeTimeoutMs: num(raw.BONA_CLAUDE_TIMEOUT_MS, 600000),
-    pyCmd: raw.BONA_PY_CMD || 'uv run --with pymupdf python',
+    // argv ARRAY, never a shell string: nothing here is ever handed to a shell.
+    pyCmd: String(raw.BONA_PY_CMD || '').trim()
+      ? String(raw.BONA_PY_CMD).trim().split(/\s+/)
+      : ['uv', 'run', '--with', 'pymupdf', 'python'],
     site: (raw.BONA_SITE || 'https://bona.azoz.uk').replace(/\/+$/, ''),
     maxPdfMb: num(raw.BONA_MAX_PDF_MB, 40),
     maxPdfPages: num(raw.BONA_MAX_PDF_PAGES, 60),
@@ -85,6 +89,8 @@ export function loadConfig(overrides = {}) {
     gitRemote: raw.BONA_GIT_REMOTE || 'origin',
     gitBranch: raw.BONA_GIT_BRANCH || 'main',
     liveCheckMs: num(raw.BONA_LIVE_CHECK_MS, 600000),
+    lockWaitMs: num(raw.BONA_LOCK_WAIT_MS, 900000),
+    pageReadLongSide: num(raw.BONA_PAGE_READ_LONG_SIDE, 1600),
     sendReplies: bool(raw.BONA_SEND_REPLIES, true),
     ...overrides,
   };

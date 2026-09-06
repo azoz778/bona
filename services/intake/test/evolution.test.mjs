@@ -2,7 +2,7 @@
 // (verified 2026-09-05). If Evolution changes them, these tests fail before production does.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { createEvolutionClient, documentOf, fileLengthOf, isFromOwner, textOf } from '../lib/evolution.mjs';
+import { bareJid, createEvolutionClient, documentOf, fileLengthOf, isFromOwner, isOwnerGroup, textOf, unwrapMessage } from '../lib/evolution.mjs';
 
 const OWNER = '966593296933@s.whatsapp.net';
 
@@ -84,7 +84,11 @@ describe('fetchAllGroups', () => {
     const { evo, calls } = client([['/group/fetchAllGroups/', { status: 200, body: FETCH_GROUPS_RESPONSE }]]);
     const groups = await evo.fetchAllGroups();
     assert.equal(groups.length, 3);
-    assert.deepEqual(groups[1], { id: '120363999999999999@g.us', subject: 'Bona Listings', size: 1 });
+    assert.equal(groups[1].id, '120363999999999999@g.us');
+    assert.equal(groups[1].subject, 'Bona Listings');
+    assert.equal(groups[1].size, 1);
+    // Finding 9: the owner fields must survive — the venue check needs them.
+    assert.ok('owner' in groups[1] && 'subjectOwner' in groups[1]);
     assert.match(calls[0].url, /getParticipants=false/);
     assert.equal(calls[0].method, 'GET');
   });
@@ -160,5 +164,84 @@ describe('owner-only filter', () => {
     assert.equal(isFromOwner({ key: { fromMe: false } }, OWNER), false);
     assert.equal(isFromOwner({}, OWNER), false);
     assert.equal(isFromOwner({ key: { fromMe: 'true' } }, OWNER), false, 'only a real boolean counts');
+  });
+});
+
+// Finding 9 — the venue. A message is only acted on when BOTH the group and the author are
+// the owner's, and Baileys' wrappers must not be able to hide either from us.
+describe('venue check — only the owner\'s own groups', () => {
+  const OWNER = '966593296933@s.whatsapp.net';
+
+  it('trusts a group the owner created', () => {
+    assert.equal(isOwnerGroup({ id: 'g@g.us', subject: 'Bona Listings', owner: OWNER }, OWNER), true);
+  });
+
+  it('trusts a group whose subject the owner last set', () => {
+    assert.equal(isOwnerGroup({ subject: 'Bona', owner: '966500000000@s.whatsapp.net', subjectOwner: '966593296933:7@s.whatsapp.net' }, OWNER), true);
+  });
+
+  it('refuses a stranger\'s group however it is named', () => {
+    assert.equal(isOwnerGroup({ subject: 'Bona Listings', owner: '966500000000@s.whatsapp.net' }, OWNER), false);
+  });
+
+  it('fails closed when the API reports no owner at all', () => {
+    assert.equal(isOwnerGroup({ subject: 'Bona Listings' }, OWNER), false);
+    assert.equal(isOwnerGroup({ owner: null, subjectOwner: null }, OWNER), false);
+    assert.equal(isOwnerGroup({ owner: OWNER }, ''), false);
+  });
+
+  it('compares the bare number, so a device suffix or a lid domain does not matter', () => {
+    assert.equal(bareJid('966593296933:41@s.whatsapp.net'), '966593296933');
+    assert.equal(bareJid('966593296933@lid'), '966593296933');
+    assert.equal(bareJid(undefined), '');
+  });
+});
+
+describe('message unwrapping — ephemeral and view-once', () => {
+  const doc = { mimetype: 'application/pdf', fileName: 'villa.pdf', caption: 'rent' };
+
+  it('sees a PDF inside an ephemeralMessage', () => {
+    const record = { key: { id: '1', fromMe: true }, message: { ephemeralMessage: { message: { documentMessage: doc } } } };
+    assert.equal(documentOf(record).fileName, 'villa.pdf');
+    assert.equal(textOf(record), 'rent');
+  });
+
+  it('sees a PDF inside viewOnceMessageV2 wrapped in an ephemeralMessage', () => {
+    const record = { key: { id: '1', fromMe: true }, message: { ephemeralMessage: { message: { viewOnceMessageV2: { message: { documentWithCaptionMessage: { message: { documentMessage: doc } } } } } } } };
+    assert.equal(documentOf(record).mimetype, 'application/pdf');
+    assert.equal(textOf(record), 'rent');
+  });
+
+  it('sees a command inside a disappearing text message', () => {
+    const record = { message: { ephemeralMessage: { message: { extendedTextMessage: { text: 'remove BONA-W001' } } } } };
+    assert.equal(textOf(record), 'remove BONA-W001');
+  });
+
+  it('does not loop on a self-referential wrapper', () => {
+    const m = {};
+    m.ephemeralMessage = { message: m };
+    assert.doesNotThrow(() => unwrapMessage(m));
+  });
+});
+
+describe('owner-only filter — LID groups', () => {
+  const OWNER = '966593296933@s.whatsapp.net';
+
+  it('accepts participantAlt when the participant is an opaque lid', () => {
+    const record = { key: { id: '1', fromMe: false, participant: '18927349827349@lid', participantAlt: OWNER } };
+    assert.equal(isFromOwner(record, OWNER), true);
+  });
+
+  it('accepts senderPn', () => {
+    assert.equal(isFromOwner({ key: { id: '1' }, senderPn: '966593296933@s.whatsapp.net' }, OWNER), true);
+  });
+
+  it('still refuses a stranger in a lid group', () => {
+    const record = { key: { id: '1', participant: '18927349827349@lid', participantAlt: '966500000000@s.whatsapp.net' } };
+    assert.equal(isFromOwner(record, OWNER), false);
+  });
+
+  it('refuses when nothing identifies the sender', () => {
+    assert.equal(isFromOwner({ key: { id: '1', participant: '18927349827349@lid' } }, OWNER), false);
   });
 });

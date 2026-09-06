@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { FORBIDDEN, HYPE, isLocalSrc, LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB } from './rules.mjs';
 
 function matterportIdOf(value) {
   if (typeof value !== 'string') return null;
@@ -33,14 +34,10 @@ const CURRENCY = new Set(['SAR', 'AED', 'EUR', 'USD', 'OMR']);
 const PERIOD = new Set([null, 'year', 'month']);
 const MEDIA = /^https:\/\/tk-storage\.azoz\.uk\/tk-estate-media\/media\/[^/]+\/[^/]+$/;
 const THUMB = /^https:\/\/tk-storage\.azoz\.uk\/tk-estate-media\/website-thumbs\/[^/]+\.webp$/;
-// Site-local images served straight out of public/: land satellite stills (/land/<PLOT>.jpg,
-// land-stills.mjs) and WhatsApp-intake photos (/listings/<slug>/<nn>.jpg + <nn>-thumb.webp,
-// services/intake). Consumers must not prefix these with a CDN host.
-const LOCAL_STILL = /^\/(land|listings)\/[A-Za-z0-9-]+(?:\/[A-Za-z0-9-]+)?\.(jpg|webp)$/;
-const LOCAL_LAND = /^\/land\//;
 const ARABIC = /[؀-ۿ]/;
-const FORBIDDEN = [/\bTK\b/i, /tk[- ]?estates?/i, /tk-estates\.com/i, /\+966 ?5[56] ?\d{3} ?\d{4}/]; // old brand + old phones
-const HYPE = /\b(amazing|stunning|breathtaking|unparalleled|don't miss|dream home)\b/i;
+// The id, site-local image path, FORBIDDEN (old brand + any telephone number) and HYPE
+// rules all come from ./rules.mjs, which services/intake also uses — one definition, so
+// the intake can never publish something this validator would then reject.
 
 const errors = [];
 const err = (id, msg) => errors.push(`${id}: ${msg}`);
@@ -73,7 +70,7 @@ const heroes = new Map(); // hero src -> first listing (heroes are unique across
 
 for (const l of data) {
   const id = l.id ?? '(no id)';
-  if (!/^BONA-W?\d{3}$/.test(l.id ?? '')) err(id, 'id must match BONA-### (curated) or BONA-W### (WhatsApp intake)');
+  if (!LISTING_ID_RE.test(l.id ?? '')) err(id, 'id must match BONA-### (curated) or BONA-W### (WhatsApp intake)');
   if (ids.has(l.id)) err(id, 'duplicate id'); ids.add(l.id);
   if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(l.slug ?? '')) err(id, `slug must be lowercase-hyphenated: ${l.slug}`);
   if (slugs.has(l.slug)) err(id, `duplicate slug ${l.slug}`); slugs.add(l.slug);
@@ -111,11 +108,10 @@ for (const l of data) {
   if (!Array.isArray(l.images) || l.images.length < minImages || l.images.length > 10) err(id, `need ${minImages}–10 images, got ${l.images?.length}`);
   for (const [i, im] of (l.images ?? []).entries()) {
     const src = im.src ?? '';
-    if (LOCAL_STILL.test(src)) {
-      if (LOCAL_LAND.test(src) && !isLand) err(id, `images[${i}].src uses a /land/ still on a non-land listing`);
-      if (!src.endsWith('.jpg')) err(id, `images[${i}].src must be a .jpg`);
-    } else if (!MEDIA.test(src)) err(id, `images[${i}].src not a tk-storage media URL or a site-local /land//listings still`);
-    if (!(im.thumb === null || THUMB.test(im.thumb) || (LOCAL_STILL.test(im.thumb) && im.thumb.endsWith('.webp')))) err(id, `images[${i}].thumb must be null, a website-thumbs webp URL, or a site-local .webp`);
+    if (isLocalSrc(src)) {
+      if (LOCAL_LAND_STILL.test(src) && !isLand) err(id, `images[${i}].src uses a /land/ still on a non-land listing`);
+    } else if (!MEDIA.test(src)) err(id, `images[${i}].src is not a tk-storage media URL, /land/<name>.jpg or /listings/<slug>/<nn>.jpg`);
+    if (!(im.thumb === null || THUMB.test(im.thumb) || LOCAL_LISTING_THUMB.test(im.thumb))) err(id, `images[${i}].thumb must be null, a website-thumbs webp URL, or /listings/<slug>/<nn>-thumb.webp`);
     if (!isLoc(im.alt)) err(id, `images[${i}].alt.en/ar required`);
     const prev = srcs.get(src);
     if (prev && prev !== l) {
