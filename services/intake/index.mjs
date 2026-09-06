@@ -15,9 +15,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadConfig, missingRequired } from './lib/env.mjs';
-import { createEvolutionClient, documentOf, fileLengthOf, isFromOwner, isOwnerGroup, textOf, videoOf } from './lib/evolution.mjs';
+import { createEvolutionClient, documentOf, fileLengthOf, isFromOwner, isOwnerGroup, messageTs, oldestFirst, textOf, videoOf } from './lib/evolution.mjs';
 import { findListingId, HELP_TEXT, parseCaption, parseCommand } from './lib/commands.mjs';
 import * as edits from './lib/edits.mjs';
+import { pickListingForVideo } from './lib/video.mjs';
 import { listInbox } from './lib/listing.mjs';
 import { withLock } from './lib/lock.mjs';
 import { log } from './lib/log.mjs';
@@ -99,9 +100,12 @@ function isPdf(doc) {
 
 async function pollGroup(group) {
   const { records } = await evo.findMessages(group.id, { pageSize: 30 });
-  const fresh = records
-    .filter((r) => r?.key?.id && !state.hasSeen(r.key.id))
-    .sort((a, b) => Number(a.messageTimestamp || 0) - Number(b.messageTimestamp || 0));
+  // Oldest first, so a brochure's job exists before the clip sent seconds after it is
+  // handled. A record with no usable timestamp keeps the API's own order, reversed —
+  // Evolution is newest-first — instead of the old `Number(x || 0)` comparator, which
+  // collapsed to "whatever sort() felt like" and could hand the clip in before its PDF
+  // (Codex review, 2026-09-06).
+  const fresh = oldestFirst(records.filter((r) => r?.key?.id && !state.hasSeen(r.key.id)));
   for (const record of fresh) {
     if (!isFromOwner(record, cfg.ownerJid)) {
       state.markSeen(record.key.id);
@@ -119,23 +123,40 @@ async function pollGroup(group) {
         caption: textOf(record) || doc.caption || '',
         fileName: doc.fileName ?? null,
         fileLength: fileLengthOf(doc),
+        // WhatsApp send time — what a captionless clip is matched against (lib/video.mjs).
+        // Poll time stands in when the record carries none: polls are 20 s apart, the
+        // matching window is minutes.
+        ts: messageTs(record) ?? Math.floor(Date.now() / 1000),
       });
       state.markSeen(record.key.id);
       enqueue({ kind: 'pdf', group, record, doc });
       continue;
     }
-    // A video attaches to a listing that already exists — see handleVideo(). Checked BEFORE
-    // the text-only fallthrough below so a video with no caption is still recognized instead
-    // of silently vanishing (the original bug: WhatsApp caption-less media has no `text`, and
-    // `if (!text) continue;` used to be the only thing that ever looked at it).
+    // A video — see handleVideo(). Checked BEFORE the text-only fallthrough below so a clip
+    // with no caption is still recognized instead of silently vanishing (the original bug:
+    // caption-less media has no `text`, and `if (!text) continue;` was the only thing that
+    // ever looked at it; four clips sent 2026-09-06 14:14 were lost exactly that way).
     const video = videoOf(record);
     if (video) {
-      state.markSeen(record.key.id);
       if (video.gifPlayback) {
         // An animated GIF arrives as a videoMessage too; it is never a walkthrough clip.
+        state.markSeen(record.key.id);
         log.debug('video.gif_ignored', { jid: group.id, id: record.key.id });
         continue;
       }
+      // Durable FIRST, seen SECOND — the same rule as a PDF. A clip usually lands seconds after
+      // its brochure, while that brochure is still being published, and has to survive a
+      // restart in between.
+      state.addJob({
+        id: record.key.id,
+        jid: group.id,
+        key: record.key,
+        kind: 'video',
+        ts: messageTs(record) ?? Math.floor(Date.now() / 1000),
+        caption: textOf(record) || video.caption || '',
+        fileLength: fileLengthOf(video),
+      });
+      state.markSeen(record.key.id);
       enqueue({ kind: 'video', group, record, video });
       continue;
     }
@@ -148,12 +169,29 @@ async function pollGroup(group) {
   }
 }
 
+/** A queue entry rebuilt from a durable video job — a startup replay, or a clip parked behind its brochure. */
+function videoJobFromState(job) {
+  return {
+    kind: 'video',
+    group: { id: job.jid },
+    record: {
+      key: job.key || { id: job.id, fromMe: true, remoteJid: job.jid },
+      messageTimestamp: job.ts ?? null,
+      message: { videoMessage: { caption: job.caption || '' } },
+    },
+    video: { caption: job.caption || '', fileLength: job.fileLength ?? null },
+    retryPath: job.videoPath && fs.existsSync(job.videoPath) ? job.videoPath : undefined,
+    replay: true,
+  };
+}
+
 /** Anything left `pending` in the state file is re-run when the daemon comes back. */
 function replayPendingJobs() {
   const pending = state.pendingJobs();
   if (!pending.length) return;
   log.info('jobs.replay', { count: pending.length });
   for (const job of pending) {
+    if (job.kind === 'video') { enqueue(videoJobFromState(job)); continue; }
     enqueue({
       kind: 'pdf',
       group: { id: job.jid },
@@ -165,12 +203,39 @@ function replayPendingJobs() {
   }
 }
 
+/**
+ * Clips parked behind a brochure that was still publishing (handleVideo → `wait`): back in
+ * the queue once that brochure has answered, or once the wait has run out. Called on every
+ * poll tick; a job already queued or in flight is left alone.
+ */
+function requeueWaitingVideos() {
+  for (const job of state.pendingJobs()) {
+    if (job.kind !== 'video' || !job.waitSince) continue; // a parked clip carries waitSince
+    if (currentJobId === job.id || queue.some((q) => q.record?.key?.id === job.id)) continue;
+    const expired = Date.now() - Date.parse(job.waitSince) > cfg.videoWaitMin * 60 * 1000;
+    const target = job.waitingFor ? state.getJob(job.waitingFor) : null;
+    if (!expired) {
+      // Waiting on a named brochure that is still publishing: keep waiting.
+      if (target && target.status === 'pending') continue;
+      // Parked with nothing to wait on: only worth another look once a brochure has arrived
+      // since — not every 20 s for half an hour.
+      if (!job.waitingFor && !Object.values(state.raw.jobs || {}).some((j) => j.kind !== 'video' && j.jid === job.jid && String(j.at) > job.waitSince)) continue;
+    }
+    state.updateJob(job.id, { waitingFor: null });
+    log.info('video.requeue', { id: job.id, pdf: job.waitingFor ?? null, pdfStatus: target?.status ?? (job.waitingFor ? 'gone' : 'n/a'), expired });
+    enqueue(videoJobFromState(job));
+  }
+}
+
 // ---------------------------------------------------------------- queue
 function enqueue(job) {
   queue.push(job);
   log.info('queue.push', { kind: job.kind, id: job.record?.key?.id, depth: queue.length });
   drain();
 }
+
+/** The job drain() is handling right now — so requeueWaitingVideos() never double-queues it. */
+let currentJobId = null;
 
 async function drain() {
   if (working || stopping) return;
@@ -179,6 +244,7 @@ async function drain() {
     while (queue.length && !stopping) {
       const job = queue.shift();
       const jobId = job.record?.key?.id;
+      currentJobId = jobId;
       try {
         if (job.kind === 'pdf') await handlePdf(job);
         else if (job.kind === 'video') await handleVideo(job);
@@ -192,12 +258,13 @@ async function drain() {
           rolledBack: Boolean(err.rolledBack), stack: process.env.BONA_DEBUG ? err.stack : undefined,
         });
         state.setError(err.message);
-        if (job.kind === 'pdf' && jobId) state.failJob(jobId, err.message);
+        if ((job.kind === 'pdf' || job.kind === 'video') && jobId) state.failJob(jobId, err.message);
         await reply(job.group.id, msg.failed());
       }
     }
   } finally {
     working = false;
+    currentJobId = null;
   }
 }
 
@@ -333,54 +400,125 @@ function watchLive(jid, url) {
 
 // ---------------------------------------------------------------- video job
 /**
- * A WhatsApp video, captioned with the id of a listing that is already live — e.g. a
- * walkthrough clip sent after the brochure. Unlike a PDF this never mints a new listing: the
- * id has to resolve to one that `handlePdf` (or `run-once.mjs`) already published, exactly
- * like `hero <id>` / `price <id>` / `brochure <id>` act on one. See lib/video.mjs for why the
- * file is stored exactly as received, with no transcoding.
+ * A WhatsApp video. It never mints a listing; it attaches to one `handlePdf` (or
+ * `run-once.mjs`) already published, through the same edit/commit/push path as
+ * `hero <id>` / `price <id>` / `brochure <id>`. Which listing:
+ *   1. an id in the caption (`video BONA-W001`, or just the id) always wins;
+ *   2. otherwise the brochure sent closest to the clip in time (lib/video.mjs
+ *      pickListingForVideo) — the owner drops the PDF and its clips in one burst, uncaptioned.
+ *      If that brochure is still being published the clip is parked (`waitingFor`) and
+ *      requeueWaitingVideos() brings it back; a tie between two listings asks instead of
+ *      guessing.
+ * The file is stored exactly as received (lib/video.mjs), and downloaded once — a replay
+ * reuses `videoPath` the way a PDF replay reuses `pdfPath`.
  */
-async function handleVideo({ group, record, video }) {
+async function handleVideo({ group, record, video, retryPath }) {
   const jid = group.id;
+  const messageId = record.key.id;
   const caption = textOf(record) || video.caption || '';
-  const id = findListingId(caption);
+  const job = state.getJob(messageId);
+  let id = findListingId(caption);
+  let matched = null;
   if (!id) {
-    log.info('video.no_id', { jid, id: record.key.id, caption });
-    await reply(jid, msg.videoNoId());
-    return;
+    // Send time: the record's, else what the job recorded at poll time, else when the job was
+    // written — a clip never fails to match just because one field was missing.
+    const ts = messageTs(record) ?? job?.ts ?? (job?.at ? Math.round(Date.parse(job.at) / 1000) : null);
+    const pick = pickListingForVideo({ ts, jid }, Object.values(state.raw.jobs || {}), state.publishedByMessage, { windowSec: cfg.videoWindowMin * 60 });
+    // Park the clip rather than reject it while its brochure may still be coming: the nearest
+    // brochure is mid-publish (`wait`), or nothing matched yet but the clip is fresh (`none` —
+    // the owner sent the video first, or the PDF lands in the next poll). requeueWaitingVideos()
+    // brings it back when that brochure answers, a new one appears, or the wait runs out.
+    const freshClip = ts != null && Math.floor(Date.now() / 1000) - ts <= cfg.videoWindowMin * 60;
+    if (job && (pick.kind === 'wait' || (pick.kind === 'none' && freshClip))) {
+      const since = job.waitSince || new Date().toISOString();
+      const waitedMs = Date.now() - Date.parse(since);
+      if (waitedMs <= cfg.videoWaitMin * 60 * 1000) {
+        const waitingFor = pick.kind === 'wait' ? pick.pdfMessageId : null;
+        state.updateJob(messageId, { waitingFor, waitSince: since });
+        log.info('video.waiting', { id: messageId, pdf: waitingFor, waitedMs });
+        if (!job.waitNotified) {
+          state.updateJob(messageId, { waitNotified: true });
+          await reply(jid, msg.videoWaiting(waitingFor ? state.getJob(waitingFor)?.fileName : null));
+        }
+        return;
+      }
+      log.warn('video.wait_expired', { id: messageId, pdf: pick.pdfMessageId ?? null, waitedMs });
+    }
+    if (pick.kind === 'ambiguous') {
+      state.finishJob(messageId, 'rejected');
+      log.info('video.ambiguous', { id: messageId, listings: pick.listingIds });
+      await reply(jid, msg.videoAmbiguous(pick.listingIds));
+      return;
+    } else if (pick.kind === 'attach') {
+      id = pick.listingId;
+      matched = { pdfMessageId: pick.pdfMessageId, deltaSec: pick.deltaSec };
+      log.info('video.matched', { id: messageId, listing: id, pdf: pick.pdfMessageId, deltaSec: pick.deltaSec });
+    }
+    if (!id) {
+      state.finishJob(messageId, 'rejected');
+      log.info('video.no_id', { jid, id: messageId, caption });
+      await reply(jid, msg.videoNoId());
+      return;
+    }
   }
   const found = edits.locate(cfg.repo, id);
   if (!found) {
+    state.finishJob(messageId, 'rejected');
     log.info('video.not_found', { jid, id });
     await reply(jid, msg.notFound(id));
     return;
   }
   const size = fileLengthOf(video);
   if (size && size > cfg.maxVideoMb * 1024 * 1024) {
+    state.finishJob(messageId, 'rejected');
     log.warn('video.too_large', { id, size });
     await reply(jid, msg.videoTooLarge(size / 1048576, cfg.maxVideoMb));
     return;
   }
   await reply(jid, msg.READING_VIDEO);
-  const media = await evo.downloadMedia(record.key);
-  // The declared length (above) can be absent or wrong; the buffer that actually arrived is
+  // Downloaded once, kept next to the day's PDFs, so a replay after a crash never re-fetches it.
+  let videoPath = retryPath;
+  if (!videoPath) {
+    const dir = path.join(cfg.intakeDir, new Date().toISOString().slice(0, 10));
+    fs.mkdirSync(dir, { recursive: true });
+    videoPath = path.join(dir, `${messageId.replace(/[^A-Za-z0-9-]/g, '_')}.mp4`);
+    const media = await evo.downloadMedia(record.key);
+    fs.writeFileSync(videoPath, media.buffer);
+    state.updateJob(messageId, { videoPath });
+    log.info('video.downloaded', { id: messageId, bytes: media.buffer.length });
+  }
+  const buffer = fs.readFileSync(videoPath);
+  // The declared length (above) can be absent or wrong; the bytes that actually arrived are
   // the real check.
-  if (media.buffer.length > cfg.maxVideoMb * 1024 * 1024) {
-    log.warn('video.too_large', { id, bytes: media.buffer.length });
-    await reply(jid, msg.videoTooLarge(media.buffer.length / 1048576, cfg.maxVideoMb));
+  if (buffer.length > cfg.maxVideoMb * 1024 * 1024) {
+    state.finishJob(messageId, 'rejected');
+    log.warn('video.too_large', { id, bytes: buffer.length });
+    await reply(jid, msg.videoTooLarge(buffer.length / 1048576, cfg.maxVideoMb));
     return;
   }
   const res = await publishEdit(
     jid, id,
-    () => edits.addVideo(cfg.repo, id, media.buffer),
+    () => edits.addVideo(cfg.repo, id, buffer),
     () => `intake: video (${id})`,
-    (r) => msg.videoAdded(id, r.listing, r.video),
+    (r) => msg.videoAdded(id, r.listing, r.video, { matched }),
+    // Close the job the instant the push lands, inside the lock, before any reply. A crash
+    // after the push but before this replays the clip; addVideo() then finds the identical
+    // bytes already on the listing and answers `duplicate` instead of appending a second copy.
+    { onPushed: (r) => state.completeVideo({ messageId, id, src: r.video?.src }) },
   );
   if (res?.error) {
+    state.finishJob(messageId, 'rejected');
     log.warn('video.rejected', { id, error: res.error });
     await reply(jid, `✋ ${res.error}`);
     return;
   }
-  if (res) log.info('video.added', { id, bytes: res.video?.bytes, n: res.video?.n });
+  if (res?.duplicate) {
+    state.completeVideo({ messageId, id, src: res.video?.src });
+    log.info('video.already_on_listing', { id, messageId, src: res.video?.src });
+    await reply(jid, msg.videoAlreadyOn(id, res.listing, res.video));
+    return;
+  }
+  if (res) log.info('video.added', { id, messageId, bytes: res.video?.bytes, n: res.video?.n, matched: matched?.pdfMessageId ?? null });
 }
 
 // ---------------------------------------------------------------- command job
@@ -388,7 +526,7 @@ async function handleVideo({ group, record, video }) {
  * Every edit follows the same order as a publish: clean tree, pull, edit, rebuild, push —
  * and on any failure the clone is restored, because the next job has to be able to pull.
  */
-async function publishEdit(jid, id, apply, commitMessage, replyText) {
+async function publishEdit(jid, id, apply, commitMessage, replyText, { onPushed = null } = {}) {
   return withLock(cfg.lockPath, async () => {
     await prepareRepo();
     let res;
@@ -396,11 +534,16 @@ async function publishEdit(jid, id, apply, commitMessage, replyText) {
       // `await`: most edits are synchronous file writes, but `brochure <id>` shells out to
       // rebrand_pdf.py and must finish before the rebuild and the commit.
       res = await apply();
-      if (!res || res.error) return res;
+      // `duplicate`: the edit found its work already done (a replayed video) — nothing to commit.
+      if (!res || res.error || res.duplicate) return res;
       await rebuild(cfg.repo);
       await gitCommitPush(cfg.repo, commitMessage(res), {
         remote: cfg.gitRemote, branch: cfg.gitBranch, paths: stagePaths(res.listing.slug),
       });
+      // The commit is on the remote and cannot be taken back: durable bookkeeping goes HERE,
+      // inside the lock and before a word reaches the group — the same rule handlePdf follows
+      // with completePublish(). A reply can be retried; a second commit cannot be undone.
+      if (onPushed) await onPushed(res);
     } catch (err) {
       const clean = await resetTree(cfg.repo).catch(() => false);
       log.error('edit.rolled_back', { id, clean, error: err.message, detail: err.detail });
@@ -560,6 +703,7 @@ async function main() {
     try {
       if (Date.now() - lastScan >= cfg.groupScanMs) { await discoverGroups(); lastScan = Date.now(); }
       for (const g of groups) await pollGroup(g);
+      requeueWaitingVideos();
     } catch (err) {
       log.error('poll.failed', { error: err.message });
       state.setError(err.message);

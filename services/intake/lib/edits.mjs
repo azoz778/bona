@@ -1,5 +1,6 @@
 // The `remove | hero | price | sold | hide | brochure` commands, applied to an inbox
 // listing. File edits — the caller rebuilds, commits and replies.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { brochureFileIn, brochureUrlFor, buildBrandedBrochure, findSourcePdf } from './brochure.mjs';
@@ -70,19 +71,37 @@ export function setHidden(repo, id, hidden) {
   return { listing: save(found.file, found.listing) };
 }
 
+const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+
 /**
- * `video <id>` — append one WhatsApp video (sent with the listing's id as its caption) to an
- * already-published listing. The file is written exactly as received, into the same
- * public/listings/<slug> directory the photos live in (see lib/video.mjs) — `remove <id>`
- * already deletes that whole directory, so a removed listing's videos go with it for free.
+ * Append one WhatsApp video to an already-published listing — named by the owner
+ * (`video <id>`) or matched to its brochure by index.mjs. The file is written exactly as
+ * received, into the same public/listings/<slug> directory the photos live in (see
+ * lib/video.mjs) — `remove <id>` already deletes that whole directory, so a removed listing's
+ * videos go with it for free.
+ *
+ * Identical bytes already on the listing (a replay after a crash between the push and the
+ * job's close, or the owner sending the same clip twice) come back as `duplicate` with the
+ * copy that is already there — nothing is written, so nothing gets committed twice. This is
+ * the clip's counterpart of the PDF sha256 guard in state.mjs.
  * @param {Buffer} buffer
- * @returns {{listing:object,video:object}|{error:string}|null}
+ * @returns {{listing:object,video:object,duplicate?:true}|{error:string}|null}
  */
 export function addVideo(repo, id, buffer) {
   const found = findInbox(repo, id);
   if (!found) return null;
   const { listing } = found;
   const existing = Array.isArray(listing.videos) ? listing.videos : [];
+  const incoming = sha256(buffer);
+  for (const [i, src] of existing.entries()) {
+    const file = path.join(repo, 'public', src);
+    let st;
+    try { st = fs.statSync(file); } catch { continue; }
+    if (st.size !== buffer.length) continue;
+    if (sha256(fs.readFileSync(file)) === incoming) {
+      return { listing, video: { n: i + 1, src, file, bytes: st.size }, duplicate: true };
+    }
+  }
   if (existing.length >= MAX_VIDEOS) {
     return { error: `${id} already has ${existing.length} video(s) — the limit is ${MAX_VIDEOS}.` };
   }

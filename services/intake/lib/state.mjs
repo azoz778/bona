@@ -12,7 +12,8 @@ const EMPTY = () => ({
   seenMessageIds: [],
   announcedGroups: [],
   bySha256: {}, // sha256 -> { slug, id, url, at }
-  jobs: {},     // messageId -> { id, jid, key, caption, fileName, pdfPath, status, attempts, at }
+  jobs: {},     // messageId -> { id, jid, key, caption, fileName, pdfPath, status, attempts, at, ts }
+                //   video jobs add: kind:'video', fileLength, videoPath, waitingFor, waitSince, waitNotified
   lastError: null,
   lastPublishedAt: null,
 });
@@ -113,6 +114,43 @@ export function createState(file) {
         if (predicate(info, sha)) { delete data.bySha256[sha]; changed = true; }
       }
       if (changed) save();
+    },
+    /**
+     * A video job's close, as ONE write with what it produced — the counterpart of
+     * completePublish() for a clip. Call it inside the repo lock the instant the push lands
+     * (publishEdit's `onPushed`), never after the reply; and again for a replay that found
+     * the clip already on the listing.
+     */
+    completeVideo({ messageId, id = null, src = null }) {
+      if (!messageId || !data.jobs[messageId]) return null;
+      const at = new Date().toISOString();
+      data.jobs[messageId] = { ...data.jobs[messageId], status: 'done', doneAt: at, listingId: id, videoSrc: src, waitingFor: null };
+      data.lastPublishedAt = at;
+      save();
+      return data.jobs[messageId];
+    },
+    /** The listing a PDF message published (completePublish keeps the message id), or null. */
+    publishedByMessage(messageId) {
+      if (!messageId) return null;
+      for (const info of Object.values(data.bySha256)) if (info?.messageId === messageId) return info;
+      return null;
+    },
+    /**
+     * Un-see messages so the next poll handles them again, dropping any stale job record so
+     * the replay starts clean. A recovery tool (services/intake/unsee.mjs) for messages an
+     * older daemon swallowed — the daemon itself never calls this.
+     * @returns {number} how many ids were actually forgotten
+     */
+    forgetSeen(ids) {
+      let n = 0;
+      for (const id of ids || []) {
+        const wasSeen = seen.delete(id);
+        const hadJob = Boolean(data.jobs[id]);
+        if (hadJob) delete data.jobs[id];
+        if (wasSeen || hadJob) n += 1;
+      }
+      if (n) save();
+      return n;
     },
     setError(err) { data.lastError = err ? { message: String(err), at: new Date().toISOString() } : null; save(); },
 
