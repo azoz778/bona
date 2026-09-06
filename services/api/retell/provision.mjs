@@ -222,6 +222,13 @@ export function ensureEnvFile({ home = os.homedir(), env = process.env } = {}) {
     BONA_API_PORT: '4102',
     BONA_PUBLIC_API: 'https://bona-api.azoz.uk',
     BONA_TOOL_TOKEN: randomToken(16),
+    // Client-tracking stack (spec C6). The poller and fan-out run inside bona-api;
+    // the dashboard cookie lifetime is in days. BONA_DB_FILE is deliberately absent:
+    // it defaults to ${BONA_DATA}/bona.db and is only set to move the file.
+    BONA_WA_POLL: '1',
+    BONA_WA_POLL_MS: '45000',
+    BONA_FANOUT_MS: '20000',
+    BONA_DASH_COOKIE_DAYS: '30',
   };
   const result = ensureServicesEnv(defaults, { home });
   return { ...result, keys: Object.keys(defaults) };

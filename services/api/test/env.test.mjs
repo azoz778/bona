@@ -36,10 +36,24 @@ test('later files override earlier ones', () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('the three secret files are read in the documented order', () => {
+test('the four secret files are read in the documented order, marketing last', () => {
   const files = defaultEnvFiles('/home/tester');
-  assert.deepEqual(files.map((f) => path.basename(f)), ['retell.env', 'evolution-api.env', 'bona-services.env']);
+  assert.deepEqual(files.map((f) => path.basename(f)), ['retell.env', 'evolution-api.env', 'bona-services.env', 'bona-marketing.env']);
   assert.ok(files.every((f) => f.startsWith('/home/tester/.secrets/')));
+});
+
+test('a missing bona-marketing.env leaves every marketing key undefined (integration off)', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-home-'));
+  fs.mkdirSync(path.join(home, '.secrets'), { mode: 0o700 });
+  fs.writeFileSync(path.join(home, '.secrets', 'bona-services.env'), 'BONA_SITE=https://bona.azoz.uk\n');
+  const merged = loadEnv({ home, base: {} });
+  assert.equal(merged.BONA_SITE, 'https://bona.azoz.uk');
+  assert.equal(merged.META_CAPI_TOKEN, undefined);
+  fs.writeFileSync(path.join(home, '.secrets', 'bona-marketing.env'), 'META_PIXEL_ID=123\nBONA_SITE=https://override\n');
+  const again = loadEnv({ home, base: {} });
+  assert.equal(again.META_PIXEL_ID, '123');
+  assert.equal(again.BONA_SITE, 'https://override', 'the marketing file is read last and wins over bona-services.env');
+  fs.rmSync(home, { recursive: true, force: true });
 });
 
 test('bona-services.env is created 0600 with every key', () => {

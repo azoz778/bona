@@ -13,7 +13,9 @@
 # ============================================================================
 #
 # What it does, in order:
-#   1. checks node, cloudflared and the secrets file
+#   1. checks node, cloudflared and the secrets files (creates ~/.secrets/bona-marketing.env
+#      from services/deploy/bona-marketing.env.example when missing; tops up
+#      bona-services.env with the poller / fan-out / dashboard defaults)
 #   2. creates the Cloudflare tunnel "bona" (skipped if it already exists)
 #   3. writes ~/.cloudflared/bona.yml  — bona-api.azoz.uk -> http://localhost:4102
 #   4. routes DNS bona-api.azoz.uk -> the tunnel (skipped if already routed)
@@ -82,12 +84,28 @@ NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
 [ "$NODE_MAJOR" -ge 22 ] || die "node >= 22 required, found $(node -v)."
 ok "node $(node -v) at $NODE_BIN"
 
-if [ ! -f "$SECRETS" ]; then
-  warn "$SECRETS is missing — creating it now"
-  node "$SERVICES/api/retell/provision.mjs" --ensure-env
-fi
+[ -f "$SECRETS" ] || warn "$SECRETS is missing — creating it now"
+# Idempotent: creates the file, or appends only the keys it lacks (never rewrites a value,
+# never prints one). Also carries the tracking defaults BONA_WA_POLL=1, BONA_WA_POLL_MS,
+# BONA_FANOUT_MS and BONA_DASH_COOKIE_DAYS into an existing file.
+node "$SERVICES/api/retell/provision.mjs" --ensure-env
 grep -q '^BONA_TOOL_TOKEN=..' "$SECRETS" || die "BONA_TOOL_TOKEN is empty in $SECRETS."
 ok "secrets present at $SECRETS (contents not shown)"
+if grep -q '^BONA_WA_POLL=0' "$SECRETS"; then
+  warn "WhatsApp poller is switched OFF (BONA_WA_POLL=0 in $SECRETS)"
+else
+  ok "WhatsApp poller enabled (BONA_WA_POLL=1 — Ref codes in inbound chats become leads)"
+fi
+
+MARKETING="$HOME/.secrets/bona-marketing.env"
+if [ ! -f "$MARKETING" ]; then
+  install -m 0600 "$DEPLOY/bona-marketing.env.example" "$MARKETING"
+  ok "created $MARKETING (all keys empty) — fill in when the accounts exist: docs/checklists/{meta-bona-portfolio,google-bona,snapchat-bona}.md"
+else
+  chmod 0600 "$MARKETING" 2>/dev/null || true
+  FILLED="$(grep -cE '^(META_PIXEL_ID|META_CAPI_TOKEN|GA4_MEASUREMENT_ID|GA4_API_SECRET|SNAP_PIXEL_ID|SNAP_CAPI_TOKEN)=..' "$MARKETING" || true)"
+  ok "marketing secrets present at $MARKETING ($FILLED of 6 keys filled; contents not shown)"
+fi
 
 if [ ! -f "$SERVICES/api/retell/ids.json" ]; then
   warn "services/api/retell/ids.json not found — run 'node $SERVICES/api/retell/provision.mjs' before the concierge can answer."
@@ -252,4 +270,9 @@ cat <<TXT
     If the concierge answers 503 "not_provisioned", run:
       node $SERVICES/api/retell/provision.mjs
     then restart:  systemctl --user restart bona-api
+
+    Tracking: the WhatsApp poller and the ad-platform fan-out run inside bona-api.
+      Keys:      $MARKETING  (Meta / GA4 / Snap — empty = off)
+      Check:     node $REPO/scripts/marketing/verify-integrations.mjs
+      Dashboard: https://$HOSTNAME_API/dashboard  (login code arrives on WhatsApp)
 TXT
