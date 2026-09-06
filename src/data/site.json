@@ -26,7 +26,7 @@
   },
   "concierge": {
     "enabled": true,
-    "apiBase": "https://api.bona.azoz.uk",
+    "apiBase": "https://bona-api.azoz.uk",
     "name": { "en": "Dana", "ar": "دانة" }
   },
   "analytics": { "ga4": null, "metaPixel": null },

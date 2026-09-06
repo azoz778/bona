@@ -6,7 +6,7 @@ static Astro build on GitHub Pages, so anything that needs a server lives here.
 | Service | Directory | Unit | What it does |
 |---|---|---|---|
 | Concierge API (Dana) | `api/` | `bona-api.service` | Chat + voice concierge backend, Retell tool webhooks, leads |
-| Public HTTPS | — | `cloudflared-bona.service` | Cloudflare tunnel `bona`: `api.bona.azoz.uk` → `localhost:4102` |
+| Public HTTPS | — | `cloudflared-bona.service` | Cloudflare tunnel `bona`: `bona-api.azoz.uk` → `localhost:4102` |
 | WhatsApp intake | `intake/` | `bona-intake.service` | PDF brochure → published listing (separate workstream) |
 
 No runtime dependencies: `services/package.json` is `"dependencies": {}` and the API
@@ -20,7 +20,7 @@ is built on Node's own `http`. Node ≥ 22.
 visitor on bona.azoz.uk
         │  fetch (CORS allowlist)
         ▼
-api.bona.azoz.uk  ──Cloudflare tunnel──▶  bona-api on 127.0.0.1:4102 (WSL)
+bona-api.azoz.uk  ──Cloudflare tunnel──▶  bona-api on 127.0.0.1:4102 (WSL)
         │                                          │
         │  POST /create-chat, /create-chat-completion, /v2/create-web-call
         ▼                                          │
@@ -126,7 +126,7 @@ logged once when it trips, and `/health` carries the running counters.
 ## 3. curl examples
 
 ```bash
-API=https://api.bona.azoz.uk        # or http://localhost:4102 while testing
+API=https://bona-api.azoz.uk        # or http://localhost:4102 while testing
 
 # health
 curl -s $API/health | jq
@@ -179,7 +179,7 @@ never logged. `process.env` always wins over a file.
 | `BONA_API_PORT` | `4102` | |
 | `BONA_API_HOST` | `127.0.0.1` | the tunnel is the only way in |
 | `BONA_SITE` | `https://bona.azoz.uk` | used to absolutise image and page URLs |
-| `BONA_PUBLIC_API` | `https://api.bona.azoz.uk` | baked into the Retell tool URLs |
+| `BONA_PUBLIC_API` | `https://bona-api.azoz.uk` | baked into the Retell tool URLs |
 | `BONA_TOOL_TOKEN` | *(generated)* | 32 hex; gates `/v1/tools/*` and the webhook |
 | `BONA_ALLOW_QUERY_TOKEN` | `0` | `1` also accepts `?token=` on `/v1/tools/*` (the webhook always does) |
 | `BONA_TRUSTED_PROXY` | — | comma separated; addresses allowed to set `CF-Connecting-IP` |
@@ -273,7 +273,7 @@ bash ~/bona/services/deploy/install.sh
 ```
 
 It checks prerequisites, creates the tunnel `bona` (if absent), writes
-`~/.cloudflared/bona.yml` with `api.bona.azoz.uk → http://localhost:4102` plus a
+`~/.cloudflared/bona.yml` with `bona-api.azoz.uk → http://localhost:4102` plus a
 catch-all 404, routes DNS, installs the two systemd `--user` units, enables linger,
 and health-checks both the local and the public endpoint. Safe to re-run; nothing is
 duplicated. `--no-dns` installs the units only, `--restart` forces a restart,
@@ -308,11 +308,11 @@ Retell double, and the provisioning payloads including the model fallback.
 
 | Symptom | Where to look |
 |---|---|
-| Widget shows the WhatsApp fallback | `curl https://api.bona.azoz.uk/health`; then `systemctl --user status bona-api cloudflared-bona` |
+| Widget shows the WhatsApp fallback | `curl https://bona-api.azoz.uk/health`; then `systemctl --user status bona-api cloudflared-bona` |
 | `503 not_provisioned` | `node api/retell/provision.mjs`, then `systemctl --user restart bona-api` |
 | `/health` says `retell: "error"` | Retell key or balance — `journalctl --user -u bona-api -n 50` |
 | Chat works, calls do not | mic permission in the browser, then the voice agent id in `ids.json` |
-| Dana quotes a property that is gone | `curl -s https://api.bona.azoz.uk/health \| jq .inventory`; the file reloads within 30 s of a publish |
+| Dana quotes a property that is gone | `curl -s https://bona-api.azoz.uk/health \| jq .inventory`; the file reloads within 30 s of a publish |
 | No lead reached WhatsApp | the lead is still in `~/bona-data/leads.jsonl`; check `EVOLUTION_API_URL` reachability |
 | Tool webhooks 401 | `BONA_TOOL_TOKEN` changed after provisioning — re-run `provision.mjs` so the tools carry the new header |
 | `503 budget_exhausted` | the day's chat/call ceiling is spent; `journalctl … \| grep budget.exhausted`, raise `BONA_MAX_*` if that is the answer |

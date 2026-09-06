@@ -14,7 +14,7 @@ import {
 import { writeIds } from '../lib/config.mjs';
 
 const TOKEN = 'b'.repeat(32);
-const PUBLIC_API = 'https://api.bona.azoz.uk';
+const PUBLIC_API = 'https://bona-api.azoz.uk';
 const prompt = fs.readFileSync(PROMPT_FILE, 'utf8');
 
 function tempHome() {

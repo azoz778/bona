@@ -45,7 +45,7 @@ const truthy = (v, fallback = false) => (v == null || v === '' ? fallback : !['0
 
 export function loadConfig({ env = loadEnv(), ids = readIds(), home = os.homedir() } = {}) {
   const siteUrl = String(env.BONA_SITE ?? 'https://bona.azoz.uk').replace(/\/+$/, '');
-  const publicApi = String(env.BONA_PUBLIC_API ?? 'https://api.bona.azoz.uk').replace(/\/+$/, '');
+  const publicApi = String(env.BONA_PUBLIC_API ?? 'https://bona-api.azoz.uk').replace(/\/+$/, '');
   return {
     port: Number(env.BONA_API_PORT ?? 4102),
     host: env.BONA_API_HOST ?? '127.0.0.1',

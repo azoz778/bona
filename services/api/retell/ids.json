@@ -5,10 +5,10 @@
   "chatAgentId": "agent_c435e260fdd645681b5b6a07d3",
   "model": "claude-4.6-sonnet",
   "voiceId": "11labs-Nyla",
-  "publicApi": "https://api.bona.azoz.uk",
+  "publicApi": "https://bona-api.azoz.uk",
   "siteUrl": "https://bona.azoz.uk",
   "separateChatAgent": true,
   "published": false,
   "note": "Ids are not secrets. Regenerate with: node services/api/retell/provision.mjs",
-  "updatedAt": "2026-09-05T23:36:35.570Z"
+  "updatedAt": "2026-09-06T11:25:39.391Z"
 }

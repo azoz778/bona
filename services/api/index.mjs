@@ -4,7 +4,7 @@
  *
  * The Bona site is a static Astro build on GitHub Pages, so anything dynamic lives
  * here: a small Node HTTP service (no framework) reached through the Cloudflare
- * tunnel `bona` at https://api.bona.azoz.uk.
+ * tunnel `bona` at https://bona-api.azoz.uk.
  *
  *   GET  /health
  *   POST /v1/chat/session          { locale, page? }         -> { sessionId, greeting }

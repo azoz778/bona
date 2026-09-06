@@ -15,10 +15,10 @@
 # What it does, in order:
 #   1. checks node, cloudflared and the secrets file
 #   2. creates the Cloudflare tunnel "bona" (skipped if it already exists)
-#   3. writes ~/.cloudflared/bona.yml  — api.bona.azoz.uk -> http://localhost:4102
-#   4. routes DNS api.bona.azoz.uk -> the tunnel (skipped if already routed)
+#   3. writes ~/.cloudflared/bona.yml  — bona-api.azoz.uk -> http://localhost:4102
+#   4. routes DNS bona-api.azoz.uk -> the tunnel (skipped if already routed)
 #   5. installs and enables the systemd --user units bona-api + cloudflared-bona
-#   6. health-checks http://localhost:4102/health and https://api.bona.azoz.uk/health
+#   6. health-checks http://localhost:4102/health and https://bona-api.azoz.uk/health
 #
 # Flags:
 #   --no-dns      skip tunnel creation and DNS routing (units only)
@@ -34,7 +34,7 @@ UNIT_DIR="$HOME/.config/systemd/user"
 CF_DIR="$HOME/.cloudflared"
 CF_CONFIG="$CF_DIR/bona.yml"
 TUNNEL="bona"
-HOSTNAME_API="${BONA_API_HOSTNAME:-api.bona.azoz.uk}"
+HOSTNAME_API="${BONA_API_HOSTNAME:-bona-api.azoz.uk}"
 PORT="${BONA_API_PORT:-4102}"
 SECRETS="$HOME/.secrets/bona-services.env"
 CLOUDFLARED="${CLOUDFLARED:-$(command -v cloudflared || echo "$HOME/.local/bin/cloudflared")}"
@@ -208,7 +208,7 @@ for unit in bona-api.service cloudflared-bona.service; do
     continue
   fi
   if systemctl --user is-active --quiet "$unit"; then
-    if [ "$DO_RESTART" = 1 ]; then systemctl --user restart "$unit"; ok "$unit restarted"; else ok "$unit already running"; fi
+    if [ "$DO_RESTART" = 1 ] || { [ "$unit" = cloudflared-bona ] && [ "${CF_CONFIG_CHANGED:-0}" = 1 ]; }; then systemctl --user restart "$unit"; ok "$unit restarted"; else ok "$unit already running"; fi
     systemctl --user enable "$unit" >/dev/null 2>&1 || true
   else
     systemctl --user enable --now "$unit"

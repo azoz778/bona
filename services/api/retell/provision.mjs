@@ -220,7 +220,7 @@ export function ensureEnvFile({ home = os.homedir(), env = process.env } = {}) {
     BONA_CLAUDE_MODEL: 'sonnet',
     BONA_SITE: 'https://bona.azoz.uk',
     BONA_API_PORT: '4102',
-    BONA_PUBLIC_API: 'https://api.bona.azoz.uk',
+    BONA_PUBLIC_API: 'https://bona-api.azoz.uk',
     BONA_TOOL_TOKEN: randomToken(16),
   };
   const result = ensureServicesEnv(defaults, { home });
@@ -258,7 +258,7 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
   // Re-read: the file may have just been created with a fresh BONA_TOOL_TOKEN.
   const merged = { ...loadEnv({ home }), ...(env === process.env ? {} : env) };
   const siteUrl = String(merged.BONA_SITE ?? 'https://bona.azoz.uk').replace(/\/+$/, '');
-  const publicApi = String(merged.BONA_PUBLIC_API ?? 'https://api.bona.azoz.uk').replace(/\/+$/, '');
+  const publicApi = String(merged.BONA_PUBLIC_API ?? 'https://bona-api.azoz.uk').replace(/\/+$/, '');
   const toolToken = merged.BONA_TOOL_TOKEN ?? '';
   const preferred = merged.BONA_RETELL_MODEL ?? PREFERRED_MODEL;
   const fallback = merged.BONA_RETELL_MODEL_FALLBACK ?? FALLBACK_MODEL;

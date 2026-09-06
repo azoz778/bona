@@ -1,5 +1,5 @@
 [Unit]
-Description=Cloudflare tunnel "bona" — api.bona.azoz.uk -> localhost:4102
+Description=Cloudflare tunnel "bona" — bona-api.azoz.uk -> localhost:4102
 Documentation=https://github.com/azoz778/bona/blob/main/services/README.md
 After=network-online.target bona-api.service
 Wants=network-online.target

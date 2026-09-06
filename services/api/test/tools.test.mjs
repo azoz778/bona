@@ -46,7 +46,7 @@ test('the token arrives in a header or a bearer', () => {
 });
 
 test('?token= is ignored unless BONA_ALLOW_QUERY_TOKEN turns it back on', () => {
-  const url = new URL('https://api.bona.azoz.uk/v1/tools/show_property?token=q1');
+  const url = new URL('https://bona-api.azoz.uk/v1/tools/show_property?token=q1');
   assert.equal(extractToken({ url, headers: {} }), null, 'a token in a URL lands in logs — off by default');
   assert.equal(extractToken({ url, headers: {} , allowQuery: true }), 'q1');
   assert.equal(
