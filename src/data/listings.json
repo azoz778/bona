@@ -3762,6 +3762,730 @@
     "listedAt": "2026-03-21"
   },
   {
+    "id": "BONA-046",
+    "slug": "plot-285-al-shati",
+    "sourceRef": "LND-006",
+    "status": "available",
+    "category": "buy",
+    "type": "land",
+    "kind": "land",
+    "featured": false,
+    "title": {
+      "en": "Residential Plot 285, Al Shati",
+      "ar": "قطعة أرض رقم 285، الشاطئ"
+    },
+    "location": {
+      "district": {
+        "en": "Al Shati",
+        "ar": "الشاطئ"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 3816000,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": null,
+      "baths": null,
+      "areaSqm": null,
+      "plotSqm": 636,
+      "yearBuilt": null,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "/land/LND-006.jpg",
+        "thumb": null,
+        "alt": {
+          "en": "Satellite view of the plot — Residential Plot 285, Al Shati",
+          "ar": "صورة جوية للقطعة — قطعة أرض رقم 285، الشاطئ"
+        }
+      },
+      {
+        "src": "/land/LND-006-z15.jpg",
+        "thumb": null,
+        "alt": {
+          "en": "Satellite view of the surrounding area — Residential Plot 285, Al Shati",
+          "ar": "صورة جوية للمنطقة المحيطة — قطعة أرض رقم 285، الشاطئ"
+        }
+      }
+    ],
+    "description": {
+      "en": "Plot 285 in Al Shati, moments from King Road and a few minutes from the Corniche. The plot measures 636 square metres with a north-facing frontage of 21.25 metres on a 16-metre street.\n\nOffered directly by the owner at SAR 6,000 per square metre net, a total of SAR 3,816,000. The satellite frames show the plot's position and its surroundings.",
+      "ar": "القطعة رقم 285 في حي الشاطئ، على مقربة من طريق الملك ودقائق من الكورنيش. تبلغ مساحتها 636 متراً مربعاً بواجهة شمالية بطول 21.25 متراً على شارع بعرض 16 متراً.\n\nتُعرض من المالك مباشرة بسعر 6,000 ريال للمتر المربع صافياً، بإجمالي 3,816,000 ريال سعودي. توضح الصور الجوية موقع القطعة ومحيطها."
+    },
+    "highlights": {
+      "en": [
+        "636 sqm",
+        "North-facing, 21.25 m frontage",
+        "16-metre street",
+        "SAR 6,000 per sqm net",
+        "Direct from the owner"
+      ],
+      "ar": [
+        "636 متراً مربعاً",
+        "واجهة شمالية بطول 21.25 متراً",
+        "شارع بعرض 16 متراً",
+        "6,000 ريال للمتر صافياً",
+        "من المالك مباشرة"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": {
+      "lat": 21.6011128,
+      "lng": 39.1195974
+    },
+    "listedAt": "2026-04-10"
+  },
+  {
+    "id": "BONA-047",
+    "slug": "corner-plot-al-shati",
+    "sourceRef": "LND-004",
+    "status": "available",
+    "category": "buy",
+    "type": "land",
+    "kind": "land",
+    "featured": false,
+    "title": {
+      "en": "Corner Plot, Al Shati",
+      "ar": "أرض زاوية، الشاطئ"
+    },
+    "location": {
+      "district": {
+        "en": "Al Shati",
+        "ar": "الشاطئ"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 4200000,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": null,
+      "baths": null,
+      "areaSqm": null,
+      "plotSqm": 625,
+      "yearBuilt": null,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "/land/LND-004.jpg",
+        "thumb": null,
+        "alt": {
+          "en": "Satellite view of the plot — Corner Plot, Al Shati",
+          "ar": "صورة جوية للقطعة — أرض زاوية، الشاطئ"
+        }
+      },
+      {
+        "src": "/land/LND-004-z15.jpg",
+        "thumb": null,
+        "alt": {
+          "en": "Satellite view of the surrounding area — Corner Plot, Al Shati",
+          "ar": "صورة جوية للمنطقة المحيطة — أرض زاوية، الشاطئ"
+        }
+      }
+    ],
+    "description": {
+      "en": "A corner plot of 625 square metres in Al Shati, on two 12-metre streets to the north and east, measuring 24 metres wide by 26 metres deep. It sits on the second block from King Road, north of Heraa Street, close to the district's commercial centres and the Jeddah waterfront.\n\nAsking price SAR 4,200,000, about SAR 6,720 per square metre. The satellite frames show the plot's position and its surroundings.",
+      "ar": "أرض زاوية بمساحة 625 متراً مربعاً في حي الشاطئ، على شارعين بعرض 12 متراً من الجهتين الشمالية والشرقية، بأبعاد 24 متراً عرضاً و26 متراً عمقاً. تقع في المربع الثاني من طريق الملك شمال شارع حراء، على مقربة من المراكز التجارية والواجهة البحرية لجدة.\n\nالسعر المطلوب 4,200,000 ريال سعودي، أي نحو 6,720 ريالاً للمتر المربع. توضح الصور الجوية موقع القطعة ومحيطها."
+    },
+    "highlights": {
+      "en": [
+        "625 sqm corner plot",
+        "Two 12-metre streets, north and east",
+        "24 m by 26 m",
+        "Second block from King Road",
+        "Near the Jeddah waterfront",
+        "SAR 4,200,000"
+      ],
+      "ar": [
+        "أرض زاوية بمساحة 625 متراً مربعاً",
+        "شارعان بعرض 12 متراً شمالاً وشرقاً",
+        "24 في 26 متراً",
+        "المربع الثاني من طريق الملك",
+        "قرب الواجهة البحرية لجدة",
+        "4,200,000 ريال سعودي"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": {
+      "lat": 21.613996,
+      "lng": 39.1172
+    },
+    "listedAt": "2026-04-09"
+  },
+  {
+    "id": "BONA-055",
+    "slug": "plot-1200-sqm-al-shati",
+    "sourceRef": "LND-015",
+    "status": "available",
+    "category": "buy",
+    "type": "land",
+    "kind": "land",
+    "featured": false,
+    "title": {
+      "en": "Plot of 1,200 sqm behind the Corniche, Al Shati",
+      "ar": "أرض بمساحة 1,200 متر مربع خلف الكورنيش، الشاطئ"
+    },
+    "location": {
+      "district": {
+        "en": "Al Shati",
+        "ar": "الشاطئ"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 10200000,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": null,
+      "baths": null,
+      "areaSqm": null,
+      "plotSqm": 1200,
+      "yearBuilt": null,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "/land/LND-015.jpg",
+        "thumb": null,
+        "alt": {
+          "en": "Satellite view of the plot — Plot of 1,200 sqm behind the Corniche, Al Shati",
+          "ar": "صورة جوية للقطعة — أرض بمساحة 1,200 متر مربع خلف الكورنيش، الشاطئ"
+        }
+      },
+      {
+        "src": "/land/LND-015-z15.jpg",
+        "thumb": null,
+        "alt": {
+          "en": "Satellite view of the surrounding area — Plot of 1,200 sqm behind the Corniche, Al Shati",
+          "ar": "صورة جوية للمنطقة المحيطة — أرض بمساحة 1,200 متر مربع خلف الكورنيش، الشاطئ"
+        }
+      }
+    ],
+    "description": {
+      "en": "A residential plot of 1,200 square metres in Al Shati, in the row behind the Corniche. The rear of the plot faces toward the Corniche, and access is from a 20-metre street.\n\nThe asking price is SAR 10,200,000, at SAR 8,500 per square metre. The satellite frames show the plot and its distance from the shore.",
+      "ar": "قطعة أرض سكنية بمساحة 1,200 متر مربع في حي الشاطئ، في الصف الواقع خلف الكورنيش. تتجه الجهة الخلفية للقطعة نحو الكورنيش، والوصول إليها من شارع بعرض 20 متراً.\n\nالسعر المطلوب 10,200,000 ريال سعودي، بواقع 8,500 ريال للمتر المربع. توضح الصور الجوية القطعة ومسافتها من الشاطئ."
+    },
+    "highlights": {
+      "en": [
+        "1,200 sqm",
+        "Rear faces toward the Corniche",
+        "Access from a 20 m street",
+        "SAR 8,500 per sqm",
+        "Al Shati"
+      ],
+      "ar": [
+        "1,200 متر مربع",
+        "الجهة الخلفية نحو الكورنيش",
+        "الوصول من شارع بعرض 20 متراً",
+        "8,500 ريال للمتر المربع",
+        "حي الشاطئ"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": {
+      "lat": 21.562684543496626,
+      "lng": 39.11201582272763
+    },
+    "listedAt": "2026-08-26"
+  },
+  {
+    "id": "BONA-056",
+    "slug": "plot-980-sqm-durrat-al-basateen",
+    "sourceRef": "LND-017",
+    "status": "available",
+    "category": "buy",
+    "type": "land",
+    "kind": "land",
+    "featured": false,
+    "title": {
+      "en": "Plot of 980 sqm, Durrat Al Basateen",
+      "ar": "أرض بمساحة 980 متراً مربعاً، درة البساتين"
+    },
+    "location": {
+      "district": {
+        "en": "Durrat Al Basateen",
+        "ar": "درة البساتين"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 8330000,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": null,
+      "baths": null,
+      "areaSqm": null,
+      "plotSqm": 980,
+      "yearBuilt": null,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "/land/LND-017.jpg",
+        "thumb": null,
+        "alt": {
+          "en": "Satellite view of the plot — Plot of 980 sqm, Durrat Al Basateen",
+          "ar": "صورة جوية للقطعة — أرض بمساحة 980 متراً مربعاً، درة البساتين"
+        }
+      },
+      {
+        "src": "/land/LND-017-z15.jpg",
+        "thumb": null,
+        "alt": {
+          "en": "Satellite view of the surrounding area — Plot of 980 sqm, Durrat Al Basateen",
+          "ar": "صورة جوية للمنطقة المحيطة — أرض بمساحة 980 متراً مربعاً، درة البساتين"
+        }
+      }
+    ],
+    "description": {
+      "en": "A residential plot of 980 square metres in Durrat Al Basateen, north Jeddah, on a 16-metre south-facing street. The district is a low-rise villa neighbourhood close to the coast.\n\nThe asking price is SAR 8,330,000, at SAR 8,500 per square metre. The satellite frames show the plot and the surrounding blocks.",
+      "ar": "قطعة أرض سكنية بمساحة 980 متراً مربعاً في درة البساتين شمال جدة، على شارع بعرض 16 متراً بواجهة جنوبية. الحي منطقة فلل منخفضة الارتفاع قريبة من الساحل.\n\nالسعر المطلوب 8,330,000 ريال سعودي، بواقع 8,500 ريال للمتر المربع. توضح الصور الجوية القطعة والمربعات المحيطة بها."
+    },
+    "highlights": {
+      "en": [
+        "980 sqm",
+        "South-facing on a 16 m street",
+        "Villa district near the coast",
+        "SAR 8,500 per sqm"
+      ],
+      "ar": [
+        "980 متراً مربعاً",
+        "واجهة جنوبية على شارع بعرض 16 متراً",
+        "حي فلل قريب من الساحل",
+        "8,500 ريال للمتر المربع"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": {
+      "lat": 21.63689519443776,
+      "lng": 39.12082236721488
+    },
+    "listedAt": "2026-08-26"
+  },
+  {
+    "id": "BONA-057",
+    "slug": "plot-450-sqm-al-shati-1",
+    "sourceRef": "LND-020",
+    "status": "available",
+    "category": "buy",
+    "type": "land",
+    "kind": "land",
+    "featured": false,
+    "title": {
+      "en": "Plot of 450 sqm, Al Shati 1",
+      "ar": "أرض بمساحة 450 متراً مربعاً، الشاطئ 1"
+    },
+    "location": {
+      "district": {
+        "en": "Al Shati 1",
+        "ar": "الشاطئ 1"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 3825000,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": null,
+      "baths": null,
+      "areaSqm": null,
+      "plotSqm": 450,
+      "yearBuilt": null,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "/land/LND-020.jpg",
+        "thumb": null,
+        "alt": {
+          "en": "Satellite view of the plot — Plot of 450 sqm, Al Shati 1",
+          "ar": "صورة جوية للقطعة — أرض بمساحة 450 متراً مربعاً، الشاطئ 1"
+        }
+      },
+      {
+        "src": "/land/LND-020-z15.jpg",
+        "thumb": null,
+        "alt": {
+          "en": "Satellite view of the surrounding area — Plot of 450 sqm, Al Shati 1",
+          "ar": "صورة جوية للمنطقة المحيطة — أرض بمساحة 450 متراً مربعاً، الشاطئ 1"
+        }
+      }
+    ],
+    "description": {
+      "en": "A residential plot of 450 square metres in Al Shati 1, on a 32-metre street, a short walk from the sea and the amenities of the district.\n\nThe asking price is SAR 3,825,000, at SAR 8,500 per square metre. The satellite frames show the plot and its street.",
+      "ar": "قطعة أرض سكنية بمساحة 450 متراً مربعاً في حي الشاطئ 1، على شارع بعرض 32 متراً، على مسافة قصيرة سيراً من البحر ومرافق الحي.\n\nالسعر المطلوب 3,825,000 ريال سعودي، بواقع 8,500 ريال للمتر المربع. توضح الصور الجوية القطعة وشارعها."
+    },
+    "highlights": {
+      "en": [
+        "450 sqm",
+        "On a 32 m street",
+        "Close to the sea",
+        "SAR 8,500 per sqm"
+      ],
+      "ar": [
+        "450 متراً مربعاً",
+        "على شارع بعرض 32 متراً",
+        "قريبة من البحر",
+        "8,500 ريال للمتر المربع"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": {
+      "lat": 21.563638942028028,
+      "lng": 39.11882520750281
+    },
+    "listedAt": "2026-08-26"
+  },
+  {
+    "id": "BONA-058",
+    "slug": "plot-500-sqm-durrat-al-basateen",
+    "sourceRef": "LND-022",
+    "status": "available",
+    "category": "buy",
+    "type": "land",
+    "kind": "land",
+    "featured": false,
+    "title": {
+      "en": "North-Facing Plot of 500.8 sqm, Durrat Al Basateen",
+      "ar": "أرض بواجهة شمالية بمساحة 500.8 متر مربع، درة البساتين"
+    },
+    "location": {
+      "district": {
+        "en": "Durrat Al Basateen",
+        "ar": "درة البساتين"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 4256800,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": null,
+      "baths": null,
+      "areaSqm": null,
+      "plotSqm": 500.8,
+      "yearBuilt": null,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "/land/LND-022.jpg",
+        "thumb": null,
+        "alt": {
+          "en": "Satellite view of the plot — North-Facing Plot of 500.8 sqm, Durrat Al Basateen",
+          "ar": "صورة جوية للقطعة — أرض بواجهة شمالية بمساحة 500.8 متر مربع، درة البساتين"
+        }
+      },
+      {
+        "src": "/land/LND-022-z15.jpg",
+        "thumb": null,
+        "alt": {
+          "en": "Satellite view of the surrounding area — North-Facing Plot of 500.8 sqm, Durrat Al Basateen",
+          "ar": "صورة جوية للمنطقة المحيطة — أرض بواجهة شمالية بمساحة 500.8 متر مربع، درة البساتين"
+        }
+      }
+    ],
+    "description": {
+      "en": "A residential plot of 500.8 square metres in Durrat Al Basateen, north Jeddah, with a north-facing frontage on a 30-metre street. The district is a villa neighbourhood close to the coast.\n\nThe asking price is SAR 4,256,800, at SAR 8,500 per square metre. The satellite frames show the plot and the surrounding blocks.",
+      "ar": "قطعة أرض سكنية بمساحة 500.8 متر مربع في درة البساتين شمال جدة، بواجهة شمالية على شارع بعرض 30 متراً. الحي منطقة فلل قريبة من الساحل.\n\nالسعر المطلوب 4,256,800 ريال سعودي، بواقع 8,500 ريال للمتر المربع. توضح الصور الجوية القطعة والمربعات المحيطة بها."
+    },
+    "highlights": {
+      "en": [
+        "500.8 sqm",
+        "North-facing on a 30 m street",
+        "Villa district near the coast",
+        "SAR 8,500 per sqm"
+      ],
+      "ar": [
+        "500.8 متر مربع",
+        "واجهة شمالية على شارع بعرض 30 متراً",
+        "حي فلل قريب من الساحل",
+        "8,500 ريال للمتر المربع"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": {
+      "lat": 21.637311611993507,
+      "lng": 39.12081632967131
+    },
+    "listedAt": "2026-08-26"
+  },
+  {
+    "id": "BONA-059",
+    "slug": "corner-plot-al-khalidiyah",
+    "sourceRef": "LND-023",
+    "status": "available",
+    "category": "buy",
+    "type": "land",
+    "kind": "land",
+    "featured": false,
+    "title": {
+      "en": "Corner Plot, Al Khalidiyah",
+      "ar": "أرض زاوية، الخالدية"
+    },
+    "location": {
+      "district": {
+        "en": "Al Khalidiyah",
+        "ar": "الخالدية"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 3937500,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": null,
+      "baths": null,
+      "areaSqm": null,
+      "plotSqm": 625,
+      "yearBuilt": null,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "/land/LND-023.jpg",
+        "thumb": null,
+        "alt": {
+          "en": "Satellite view of the plot — Corner Plot, Al Khalidiyah",
+          "ar": "صورة جوية للقطعة — أرض زاوية، الخالدية"
+        }
+      },
+      {
+        "src": "/land/LND-023-z15.jpg",
+        "thumb": null,
+        "alt": {
+          "en": "Satellite view of the surrounding area — Corner Plot, Al Khalidiyah",
+          "ar": "صورة جوية للمنطقة المحيطة — أرض زاوية، الخالدية"
+        }
+      }
+    ],
+    "description": {
+      "en": "A corner plot of 625 square metres in Al Khalidiyah, on two streets, measuring 25 metres on the south side and 25 metres on the west. The district is an established central neighbourhood with schools, shops and quick access to the main roads.\n\nThe total price is SAR 3,937,500, at SAR 6,300 per square metre. The satellite frames show the corner and its two streets.",
+      "ar": "أرض زاوية بمساحة 625 متراً مربعاً في حي الخالدية، على شارعين، بطول 25 متراً من الجهة الجنوبية و25 متراً من الجهة الغربية. الحي منطقة مركزية راسخة تضم مدارس ومتاجر مع وصول سريع إلى الطرق الرئيسية.\n\nالسعر الإجمالي 3,937,500 ريال سعودي، بواقع 6,300 ريال للمتر المربع. توضح الصور الجوية الزاوية وشارعيها."
+    },
+    "highlights": {
+      "en": [
+        "625 sqm corner plot",
+        "Two streets, south and west",
+        "25 m by 25 m",
+        "SAR 6,300 per sqm",
+        "Al Khalidiyah"
+      ],
+      "ar": [
+        "أرض زاوية بمساحة 625 متراً مربعاً",
+        "شارعان جنوباً وغرباً",
+        "25 في 25 متراً",
+        "6,300 ريال للمتر المربع",
+        "حي الخالدية"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": {
+      "lat": 21.560239915427147,
+      "lng": 39.136093577749236
+    },
+    "listedAt": "2026-08-26"
+  },
+  {
+    "id": "BONA-060",
+    "slug": "plots-300-sqm-al-khalidiyah",
+    "sourceRef": "LND-024",
+    "status": "available",
+    "category": "buy",
+    "type": "land",
+    "kind": "land",
+    "featured": false,
+    "title": {
+      "en": "Plots of 300 sqm, Al Khalidiyah",
+      "ar": "قطع أراضٍ بمساحة 300 متر مربع، الخالدية"
+    },
+    "location": {
+      "district": {
+        "en": "Al Khalidiyah",
+        "ar": "الخالدية"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 2150000,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": null,
+      "baths": null,
+      "areaSqm": null,
+      "plotSqm": 300,
+      "yearBuilt": null,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "/land/LND-024.jpg",
+        "thumb": null,
+        "alt": {
+          "en": "Satellite view of the plot — Plots of 300 sqm, Al Khalidiyah",
+          "ar": "صورة جوية للقطعة — قطع أراضٍ بمساحة 300 متر مربع، الخالدية"
+        }
+      },
+      {
+        "src": "/land/LND-024-z15.jpg",
+        "thumb": null,
+        "alt": {
+          "en": "Satellite view of the surrounding area — Plots of 300 sqm, Al Khalidiyah",
+          "ar": "صورة جوية للمنطقة المحيطة — قطع أراضٍ بمساحة 300 متر مربع، الخالدية"
+        }
+      }
+    ],
+    "description": {
+      "en": "A subdivision of twelve residential plots of 300 square metres each in Al Khalidiyah. Two plots have already sold and ten remain available, individually or in groups.\n\nThe price is SAR 2,150,000 per plot, about SAR 7,167 per square metre. The satellite frames show the subdivision and its surroundings.",
+      "ar": "مخطط من اثنتي عشرة قطعة سكنية بمساحة 300 متر مربع لكل منها في حي الخالدية. بيعت قطعتان بالفعل وتبقّت عشر قطع متاحة، منفردة أو مجتمعة.\n\nالسعر 2,150,000 ريال سعودي للقطعة، أي نحو 7,167 ريالاً للمتر المربع. توضح الصور الجوية المخطط ومحيطه."
+    },
+    "highlights": {
+      "en": [
+        "300 sqm per plot",
+        "Twelve plots, ten remaining",
+        "SAR 2,150,000 per plot",
+        "About SAR 7,167 per sqm",
+        "Al Khalidiyah"
+      ],
+      "ar": [
+        "300 متر مربع للقطعة",
+        "اثنتا عشرة قطعة، تبقّت عشر",
+        "2,150,000 ريال سعودي للقطعة",
+        "نحو 7,167 ريالاً للمتر المربع",
+        "حي الخالدية"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": null,
+    "project": null,
+    "unit": null,
+    "map": {
+      "lat": 21.560999987056363,
+      "lng": 39.1362687553322
+    },
+    "listedAt": "2026-08-26"
+  },
+  {
     "id": "BONA-W003",
     "slug": "al-wareef-townhouse-jeddah",
     "sourceRef": "WA-20260906-ACB9C8",

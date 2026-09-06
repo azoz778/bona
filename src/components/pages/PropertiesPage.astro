@@ -4,8 +4,9 @@
 import Base from '../../layouts/Base.astro';
 import ListingCard from '../ListingCard.astro';
 import SectionHead from '../SectionHead.astro';
+import Icon from '../Icon.astro';
 import site from '../../data/site.json';
-import { localePath, t, ui, type Locale, count, countForms_ } from '../../lib/i18n';
+import { localePath, t, ui, waLink, type Locale, count, countForms_ } from '../../lib/i18n';
 import { listings, ordered, categories, categoryLabel, categorySlug, typesIn, typeLabel, kindOf, kindSlug, categoriesIn, type Listing, type Kind , nonEmptyCategories } from '../../lib/listings';
 import { breadcrumbJsonLd , collectionPageJsonLd } from '../../lib/seo';
 interface Props { locale: Locale; category?: Listing['category']; kind?: Kind }
@@ -30,6 +31,7 @@ if (!all) crumbs.push({ name: title, path });
 const countText = (n: number) => count(n, 'residence', locale);
 const arForms = JSON.stringify(countForms_('residence').ar);
 const chipCls = 'chip';
+const landOffMarketWa = kind === 'land' ? waLink(site.whatsapp.wa, t(ui.landOffMarketMessage, locale)) : null;
 ---
 <Base title={`${title} — ${locale === 'ar' ? site.nameAr : site.name}`} description={intro} locale={locale} path={path} image={items[0]?.images?.[0]?.src} jsonLd={[breadcrumbJsonLd(crumbs), collectionPageJsonLd({ locale, path, title, description: intro, listings: items })]}>
   <section class="section-tight pt-12 lg:pt-16" data-properties data-mode={kind ? 'kind' : all ? 'all' : 'category'} data-category={category ?? ''} data-count-many={t(ui.residencesCount, locale)} data-count-one={t(ui.residenceCountOne, locale)} data-count-ar={locale === 'ar' ? arForms : undefined}>
@@ -81,6 +83,21 @@ const chipCls = 'chip';
       </div>
     </div>
   </section>
+
+  {kind === 'land' && (
+    <section class="on-dark bg-ink text-ivory">
+      <div class="wrap section-tight grid gap-10 lg:grid-cols-12 lg:items-center" data-reveal>
+        <div class="lg:col-span-7">
+          <span class="rule"></span>
+          <h2 class="display-md mt-6">{t(ui.landOffMarketTitle, locale)}</h2>
+          <p class="mt-6 max-w-[52ch] text-ivory/75">{t(ui.landOffMarketText, locale)}</p>
+        </div>
+        <div class="lg:col-span-5 lg:flex lg:justify-end">
+          <a href={landOffMarketWa!} target="_blank" rel="noopener" class="btn btn-outline-light"><Icon name="whatsapp" size={16} />{t(ui.landOffMarketCta, locale)}</a>
+        </div>
+      </div>
+    </section>
+  )}
 </Base>
 
 <script>

@@ -248,6 +248,13 @@ export const ui = {
   apartmentsPageIntro: s('Apartments, penthouses and units in branded developments, in Jeddah, Riyadh and abroad.', 'شقق وبنتهاوس ووحدات في مشاريع بعلامات عالمية، في جدة والرياض وخارج المملكة.'),
   landPageTitle: s('Land', 'الأراضي'),
   landPageIntro: s('Plots for private houses and development projects, with aerial views and location maps.', 'قطع أراضٍ للمنازل الخاصة ومشاريع التطوير، مع صور جوية وخرائط للموقع.'),
+  landOffMarketTitle: s('Beyond what is listed', 'أراضٍ خارج السوق'),
+  landOffMarketText: s(
+    'Bona also holds a further selection of larger land, kept off-market out of respect for its owners. Write to us and a principal will share what is available, in confidence.',
+    'تحتفظ بونا أيضاً بمجموعة إضافية من الأراضي الكبيرة، خارج السوق احتراماً لملّاكها. راسلنا وسيشارك أحد شركاء الدار ما هو متاح، بسرية تامة.'
+  ),
+  landOffMarketCta: s('Enquire about off-market land', 'استفسر عن الأراضي خارج السوق'),
+  landOffMarketMessage: s('Hello Bona, I’m interested in your off-market land portfolio.', 'مرحباً بونا، أرغب في الاستفسار عن محفظة الأراضي خارج السوق لديكم.'),
   buildingsPageTitle: s('Buildings', 'العمارات'),
   buildingsPageIntro: s('Residential and mixed-use buildings offered as whole assets.', 'عمارات سكنية ومتعددة الاستخدام تُعرض كأصول كاملة.'),
   viewPill: s('View', 'عرض'),
