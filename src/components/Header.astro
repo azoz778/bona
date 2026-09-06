@@ -3,13 +3,15 @@ import Logo from './Logo.astro';
 import Icon from './Icon.astro';
 import site from '../data/site.json';
 import { localePath, switchLocalePath, otherLocale, t, ui, waLink, type Locale } from '../lib/i18n';
-import { hasCategory } from '../lib/listings';
+import { hasCategory, kindsPresent } from '../lib/listings';
 interface Props { locale: Locale; path: string; overHero?: boolean }
 const { locale, path, overHero = false } = Astro.props;
 const other = otherLocale(locale);
 const nav = [
   { href: localePath(locale, '/properties/houses/'), label: t(ui.navHouses, locale) },
   { href: localePath(locale, '/properties/apartments/'), label: t(ui.navApartments, locale) },
+  ...(kindsPresent().includes('land') ? [{ href: localePath(locale, '/properties/land/'), label: t(ui.navLand, locale) }] : []),
+  ...(kindsPresent().includes('building') ? [{ href: localePath(locale, '/properties/buildings/'), label: t(ui.navBuildings, locale) }] : []),
   ...(hasCategory('off-plan') ? [{ href: localePath(locale, '/properties/off-plan/'), label: t(ui.navOffPlan, locale) }] : []),
   ...(hasCategory('international') ? [{ href: localePath(locale, '/properties/international/'), label: t(ui.navInternational, locale) }] : []),
   { href: localePath(locale, '/tours/'), label: t(ui.navTours, locale) },
