@@ -1,0 +1,225 @@
+{
+  "id": "BONA-W009",
+  "slug": "elvira-murjan-townhouses-in-al-murjan",
+  "sourceRef": "WA-20260906-ACA18E",
+  "status": "available",
+  "category": "off-plan",
+  "type": "villa",
+  "kind": "house",
+  "featured": false,
+  "title": {
+    "en": "Elvira Murjan Townhouses in Al-Murjan",
+    "ar": "منازل إلفيرا مرجان في حي المرجان"
+  },
+  "location": {
+    "district": {
+      "en": "Al-Murjan",
+      "ar": "المرجان"
+    },
+    "city": {
+      "en": "Jeddah",
+      "ar": "جدة"
+    },
+    "country": {
+      "en": "Saudi Arabia",
+      "ar": "المملكة العربية السعودية"
+    },
+    "countryCode": "SA"
+  },
+  "price": {
+    "amount": null,
+    "currency": "SAR",
+    "from": false,
+    "period": null,
+    "onRequest": true
+  },
+  "specs": {
+    "beds": 5,
+    "baths": 8,
+    "areaSqm": 630,
+    "plotSqm": 300,
+    "yearBuilt": null,
+    "floors": 3
+  },
+  "images": [
+    {
+      "src": "/listings/elvira-murjan-townhouses-in-al-murjan/01.jpg",
+      "thumb": "/listings/elvira-murjan-townhouses-in-al-murjan/01-thumb.webp",
+      "alt": {
+        "en": "Exterior — Elvira Murjan Townhouses in Al-Murjan",
+        "ar": "الواجهة الخارجية — منازل إلفيرا مرجان في حي المرجان"
+      }
+    },
+    {
+      "src": "/listings/elvira-murjan-townhouses-in-al-murjan/02.jpg",
+      "thumb": "/listings/elvira-murjan-townhouses-in-al-murjan/02-thumb.webp",
+      "alt": {
+        "en": "Façade at night — Elvira Murjan Townhouses in Al-Murjan",
+        "ar": "الواجهة ليلاً — منازل إلفيرا مرجان في حي المرجان"
+      }
+    },
+    {
+      "src": "/listings/elvira-murjan-townhouses-in-al-murjan/03.jpg",
+      "thumb": "/listings/elvira-murjan-townhouses-in-al-murjan/03-thumb.webp",
+      "alt": {
+        "en": "Living room — Elvira Murjan Townhouses in Al-Murjan",
+        "ar": "غرفة المعيشة — منازل إلفيرا مرجان في حي المرجان"
+      }
+    },
+    {
+      "src": "/listings/elvira-murjan-townhouses-in-al-murjan/04.jpg",
+      "thumb": "/listings/elvira-murjan-townhouses-in-al-murjan/04-thumb.webp",
+      "alt": {
+        "en": "Kitchen — Elvira Murjan Townhouses in Al-Murjan",
+        "ar": "المطبخ — منازل إلفيرا مرجان في حي المرجان"
+      }
+    },
+    {
+      "src": "/listings/elvira-murjan-townhouses-in-al-murjan/05.jpg",
+      "thumb": "/listings/elvira-murjan-townhouses-in-al-murjan/05-thumb.webp",
+      "alt": {
+        "en": "Master suite — Elvira Murjan Townhouses in Al-Murjan",
+        "ar": "الجناح الرئيسي — منازل إلفيرا مرجان في حي المرجان"
+      }
+    },
+    {
+      "src": "/listings/elvira-murjan-townhouses-in-al-murjan/06.jpg",
+      "thumb": "/listings/elvira-murjan-townhouses-in-al-murjan/06-thumb.webp",
+      "alt": {
+        "en": "Bedroom — Elvira Murjan Townhouses in Al-Murjan",
+        "ar": "غرفة النوم — منازل إلفيرا مرجان في حي المرجان"
+      }
+    },
+    {
+      "src": "/listings/elvira-murjan-townhouses-in-al-murjan/07.jpg",
+      "thumb": "/listings/elvira-murjan-townhouses-in-al-murjan/07-thumb.webp",
+      "alt": {
+        "en": "Bathroom — Elvira Murjan Townhouses in Al-Murjan",
+        "ar": "الحمام — منازل إلفيرا مرجان في حي المرجان"
+      }
+    },
+    {
+      "src": "/listings/elvira-murjan-townhouses-in-al-murjan/08.jpg",
+      "thumb": "/listings/elvira-murjan-townhouses-in-al-murjan/08-thumb.webp",
+      "alt": {
+        "en": "Roof terrace — Elvira Murjan Townhouses in Al-Murjan",
+        "ar": "التراس العلوي — منازل إلفيرا مرجان في حي المرجان"
+      }
+    },
+    {
+      "src": "/listings/elvira-murjan-townhouses-in-al-murjan/09.jpg",
+      "thumb": "/listings/elvira-murjan-townhouses-in-al-murjan/09-thumb.webp",
+      "alt": {
+        "en": "Swimming pool — Elvira Murjan Townhouses in Al-Murjan",
+        "ar": "المسبح — منازل إلفيرا مرجان في حي المرجان"
+      }
+    },
+    {
+      "src": "/listings/elvira-murjan-townhouses-in-al-murjan/10.jpg",
+      "thumb": "/listings/elvira-murjan-townhouses-in-al-murjan/10-thumb.webp",
+      "alt": {
+        "en": "Pool at night — Elvira Murjan Townhouses in Al-Murjan",
+        "ar": "المسبح ليلاً — منازل إلفيرا مرجان في حي المرجان"
+      }
+    }
+  ],
+  "description": {
+    "en": "Elvira Murjan is a boutique row of five-bedroom townhouses in the Al-Murjan neighbourhood of Jeddah, close to the King Abdulaziz branch road, Jeddah Yacht Club and the Red Sea coast. Each home rises over three floors around a private indoor courtyard and swimming pool, with a private entrance and two indoor parking spaces.\n\nThe ground floor holds an open and a closed kitchen, separate guest and family living areas, a skylit indoor courtyard, a driver's room and a maid's room, and two guest bathrooms. Four en-suite bedrooms and two balconies occupy the first floor, while the second floor is given over to the master suite, an additional living area and a guest bathroom, opening onto a large rooftop terrace.\n\nThe structural frame is reinforced concrete built to the Saudi Building Code, with double-glazed windows, insulated roofs and façades, and high-quality aluminium systems throughout. Interiors are finished in Italian and Omani marble, with high ceilings, a sound system in every room, smart-home wiring and central air conditioning.\n\nThe build carries a ten-year structural warranty, a three-year warranty on electrical and plumbing work, and further cover on fit-out and hidden defects. Al-Murjan places residents minutes from Jeddah's marinas, malls and medical centres, with King Abdulaziz International Airport around fifteen minutes away.",
+    "ar": "إلفيرا مرجان مشروع بوتيكي مؤلف من تاون هاوس بخمس غرف نوم في حي المرجان بجدة، على مقربة من طريق فرع الملك عبدالعزيز ونادي جدة للياخوت وساحل البحر الأحمر. يمتد كل منزل على ثلاثة طوابق حول فناء داخلي خاص ومسبح، مع مدخل خاص وموقفين داخليين للسيارات.\n\nيضم الدور الأرضي مطبخين مفتوحاً ومغلقاً، وصالتي معيشة منفصلتين للضيوف والعائلة، وفناءً داخلياً يعلوه سقف زجاجي، وغرفة للسائق وأخرى للخادمة، وحمامين للضيوف. ويحتوي الدور الأول على أربع غرف نوم بحمامات خاصة وشرفتين، بينما يُخصَّص الدور الثاني لجناح رئيسي وصالة معيشة إضافية وحمام ضيوف، يفتح على تراس واسع على السطح.\n\nالهيكل الإنشائي من الخرسانة المسلحة وفق كود البناء السعودي، مع نوافذ مزدوجة الزجاج وعزل للأسطح والواجهات وأنظمة ألمنيوم عالية الجودة. التشطيبات الداخلية من الرخام الإيطالي والعُماني، بأسقف مرتفعة ونظام صوت في كل غرفة وتمديدات جاهزة للمنزل الذكي وتكييف مركزي.\n\nيحمل المشروع ضماناً إنشائياً لعشر سنوات، وضماناً لثلاث سنوات على الأعمال الكهربائية والصحية، إضافة إلى ضمانات أخرى على التشطيبات والعيوب الخفية. يقع حي المرجان على بعد دقائق من مرافئ جدة ومراكزها التجارية والطبية، ومطار الملك عبدالعزيز الدولي على مسافة نحو خمس عشرة دقيقة."
+  },
+  "highlights": {
+    "en": [
+      "Private indoor courtyard pool",
+      "Five bedrooms, eight bathrooms",
+      "Two indoor parking spaces",
+      "Rooftop terrace",
+      "Ten-year structural warranty"
+    ],
+    "ar": [
+      "مسبح خاص في فناء داخلي",
+      "خمس غرف نوم وثماني حمامات",
+      "موقفان داخليان للسيارات",
+      "تراس على السطح",
+      "ضمان إنشائي لعشر سنوات"
+    ]
+  },
+  "virtualTourUrl": null,
+  "brochureUrl": "https://bona.azoz.uk/listings/elvira-murjan-townhouses-in-al-murjan/brochure.pdf",
+  "project": {
+    "name": {
+      "en": "Elvira Murjan",
+      "ar": "إلفيرا مرجان"
+    },
+    "developer": {
+      "en": "TK Estate & Design",
+      "ar": "تي كي إستيت آند ديزاين"
+    }
+  },
+  "unit": null,
+  "map": null,
+  "listedAt": "2026-09-06",
+  "hidden": false,
+  "_intake": {
+    "source": "whatsapp",
+    "pdfSha256": "7f6e4e4a4410e714fd9d717e1cad53dcd40fa4ddad0293de6a0f01cae5d403ea",
+    "model": "sonnet",
+    "confidence": 0.72,
+    "warnings": [
+      "model-flagged"
+    ],
+    "images": [
+      {
+        "n": 1,
+        "candidate": 4,
+        "room": "exterior"
+      },
+      {
+        "n": 2,
+        "candidate": 1,
+        "room": "facade_night"
+      },
+      {
+        "n": 3,
+        "candidate": 12,
+        "room": "living"
+      },
+      {
+        "n": 4,
+        "candidate": 10,
+        "room": "kitchen"
+      },
+      {
+        "n": 5,
+        "candidate": 20,
+        "room": "master"
+      },
+      {
+        "n": 6,
+        "candidate": 16,
+        "room": "bedroom"
+      },
+      {
+        "n": 7,
+        "candidate": 22,
+        "room": "bathroom"
+      },
+      {
+        "n": 8,
+        "candidate": 21,
+        "room": "terrace"
+      },
+      {
+        "n": 9,
+        "candidate": 11,
+        "room": "pool"
+      },
+      {
+        "n": 10,
+        "candidate": 13,
+        "room": "pool_night"
+      }
+    ],
+    "createdAt": "2026-09-06T11:36:26.618Z",
+    "site": "https://bona.azoz.uk"
+  }
+}
