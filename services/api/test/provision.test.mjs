@@ -290,7 +290,7 @@ test('--ensure-env only creates the secrets file, 0600, and stops', async () => 
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   const body = fs.readFileSync(file, 'utf8');
   assert.match(body, /BONA_TOOL_TOKEN=[0-9a-f]{32}/);
-  assert.match(body, /BONA_PUBLIC_API=https:\/\/api\.bona\.azoz\.uk/);
+  assert.match(body, /BONA_PUBLIC_API=https:\/\/bona-api\.azoz\.uk/);
   cleanup();
 });
 
