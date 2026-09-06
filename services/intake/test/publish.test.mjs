@@ -219,6 +219,46 @@ describe('the entry points pull before they write, and never after', () => {
     assert.match(body, /gitCommitPush\(/);
   });
 
+  // A crash between the push and the job being closed used to publish the brochure twice:
+  // the job replayed, `replayPendingJobs()` set `retryPath` because the PDF was still on
+  // disk, and `retryPath` turned the sha256 guard off. state.mjs can be right and the daemon
+  // still wrong, so these assert the call sites.
+  it('index.mjs asks the duplicate guard on every pass, replay included', () => {
+    const src = read('index.mjs');
+    const guard = src.indexOf('state.duplicateGuard(');
+    const process_ = src.indexOf('processPdf({');
+    assert.ok(guard > 0, 'the sha256 guard must be called');
+    assert.ok(guard < process_, 'and before the pipeline writes anything');
+    assert.match(
+      src.slice(guard, process_),
+      /state\.duplicateGuard\(\{ sha, messageId, dryRun: caption\.dryRun \}\);\s*\n\s*if \(duplicate\) \{/,
+      'the answer must be acted on unconditionally — no replay may switch it off',
+    );
+    assert.ok(!/!retryPath\s*\)/.test(src.slice(guard, process_)), 'retryPath must not gate the guard');
+  });
+
+  it('index.mjs records the publish inside the lock, after the push and before any reply', () => {
+    const src = read('index.mjs');
+    const lock = src.indexOf('withLock(cfg.lockPath, async () => {');
+    const endOfLock = src.indexOf('label: `pdf ', lock);
+    const body = src.slice(lock, endOfLock);
+    const push = body.indexOf('gitCommitPush(');
+    const record = body.indexOf('state.completePublish(');
+    assert.ok(record > 0, 'the sha and the job must be written together');
+    assert.ok(push > 0 && push < record, 'only once the commit is on the remote');
+    assert.ok(!/reply\(/.test(body), 'nothing may be said to the group before the state is durable');
+    assert.ok(!/state\.recordPublished\(/.test(src), 'the two-write version left a replayable window');
+    assert.ok(!/state\.finishJob\(messageId, 'done'\)/.test(src), 'the close happens in that same write');
+  });
+
+  it('pipeline.mjs asks the pulled repo before it allocates a listing id', () => {
+    const src = fs.readFileSync(new URL('../lib/pipeline.mjs', import.meta.url), 'utf8');
+    const twin = src.indexOf('findByPdfSha(cfg.repo');
+    const allocate = src.indexOf('nextListingId(');
+    assert.ok(twin > 0, 'the repo is the durable record of what has already been published');
+    assert.ok(twin < allocate, 'a brochure already in the repo must never get a second id');
+  });
+
   it('index.mjs never blocks the worker on the live check', () => {
     const src = read('index.mjs');
     assert.ok(!/await waitForLive\(/.test(src), 'the live check must be detached');

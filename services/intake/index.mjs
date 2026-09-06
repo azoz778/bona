@@ -211,11 +211,17 @@ async function handlePdf({ group, record, doc, retryPath }) {
     log.info('pdf.downloaded', { id: messageId, bytes: media.buffer.length, fileName: media.fileName });
   }
 
+  // The duplicate guard runs on every pass, replay included. `retryPath` used to switch it
+  // off, and `replayPendingJobs()` sets `retryPath` for any job whose PDF is still on disk
+  // — so a crash after the push but before the job closed came back, skipped the check and
+  // published the same brochure again. It answers with the live URL instead, once: closing
+  // the job here takes it out of `pendingJobs()` for good.
   const sha = sha256File(pdfPath);
-  const already = state.publishedFor(sha);
-  if (already && !caption.dryRun && !retryPath) {
-    state.finishJob(messageId, 'duplicate');
-    await reply(jid, msg.alreadyLive(already));
+  const duplicate = state.duplicateGuard({ sha, messageId, dryRun: caption.dryRun });
+  if (duplicate) {
+    state.finishJob(messageId, duplicate.outcome);
+    log.info('pdf.already_published', { id: messageId, outcome: duplicate.outcome, listing: duplicate.published.id, replay: Boolean(retryPath) });
+    await reply(jid, msg.alreadyLive(duplicate.published));
     return;
   }
 
@@ -251,10 +257,23 @@ async function handlePdf({ group, record, doc, retryPath }) {
         err.rolledBack = true;
         throw err;
       }
+      // The commit is on the remote and cannot be taken back. Record the sha and close the
+      // job in ONE write, still inside the lock and before a single word goes to WhatsApp:
+      // from here on a crash must replay into the duplicate guard, not into a second push.
+      state.completePublish({ sha, messageId, id: r.id, slug: r.slug, url: r.url });
       return r;
     }, { timeoutMs: cfg.lockWaitMs, label: `pdf ${messageId}` });
   } catch (err) {
     if (err instanceof RejectError) {
+      // The repo knew about this PDF even though the state file did not (a lost state file,
+      // or a `run-once.mjs` publish). Write what the repo already proves, so the next copy
+      // of this brochure is answered from state without a pull.
+      if (err.published) {
+        log.warn('pdf.already_in_repo', { id: messageId, listing: err.published.id });
+        state.completePublish({ sha, messageId, ...err.published });
+        await reply(jid, msg.alreadyLive(err.published));
+        return;
+      }
       log.warn('pdf.rejected', { id: messageId, stage: err.stage, reason: err.reason });
       // A rejected PDF is never copied into the repo; drop the download too when the gate
       // says it is a private document.
@@ -277,8 +296,7 @@ async function handlePdf({ group, record, doc, retryPath }) {
     return;
   }
 
-  state.recordPublished(sha, { id: report.id, slug: report.slug, url: report.url });
-  state.finishJob(messageId, 'done');
+  // `state.completePublish()` already recorded the sha and closed the job, inside the lock.
   log.info('pdf.published', { id: report.id, slug: report.slug, sha: report.push.sha, images: report.listing.images.length, staged: report.push.staged?.length });
 
   // Reply NOW; the live check runs detached and only speaks up if the page never appears.

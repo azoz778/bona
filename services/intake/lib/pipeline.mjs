@@ -25,8 +25,8 @@ import { buildContactSheets } from './contact-sheet.mjs';
 import { buildPrompt, confirmPriceEvidence, runListingAi } from './claude.mjs';
 import { writeListingImages } from './images.mjs';
 import {
-  buildListing, checkListing, inboxIds, nextListingId, orderedPicks, readIndex, seqAfter,
-  slugify, takenSlugs, todayRiyadh, uniqueSlug, writeIndex, writeInboxListing,
+  buildListing, checkListing, findByPdfSha, inboxIds, nextListingId, orderedPicks, readIndex,
+  seqAfter, slugify, takenSlugs, todayRiyadh, uniqueSlug, writeIndex, writeInboxListing,
 } from './listing.mjs';
 import { log } from './log.mjs';
 import { extractPdf, renderPdfPages } from './pdf.mjs';
@@ -189,6 +189,19 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     report.blocked = reason;
     report.warnings.push(reason);
     report.warningCodes.push('not-enough-photos');
+  }
+
+  // The last word on "have we published this before?", asked of the pulled repo itself and
+  // therefore proof against a lost state file or a publish that `run-once.mjs` made. The
+  // caller's own sha dedupe runs first and answers more kindly; this one is the backstop
+  // that stands between a replay and a second listing id.
+  if (!dryRun) {
+    const twin = findByPdfSha(cfg.repo, report.sha256);
+    if (twin) {
+      const err = new RejectError(`this brochure is already published as ${twin.id} — ${cfg.site}/properties/${twin.slug}/`, 'duplicate');
+      err.published = { id: twin.id, slug: twin.slug, url: `${cfg.site}/properties/${twin.slug}/` };
+      throw err;
+    }
   }
 
   const index = readIndex(cfg.repo);

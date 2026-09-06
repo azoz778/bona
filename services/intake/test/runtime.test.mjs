@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { acquireLock, withLock } from '../lib/lock.mjs';
+import { acquireLock, withLock, LOCK_CEILING_MS, LOCK_ORPHAN_MS } from '../lib/lock.mjs';
 import { outsideDenyRules, writeConfinement } from '../lib/confine.mjs';
 import { priceAppearsIn, westernise } from '../lib/price.mjs';
 import { STOP_GRACE_MS, waitForIdle } from '../lib/shutdown.mjs';
@@ -47,11 +47,79 @@ describe('lock — one writer at a time, daemon or run-once', () => {
     release();
   });
 
-  it('steals a lock older than staleMs even if the pid is alive', async () => {
+  // Age is not evidence of death. One publish is an AI call, a full Astro build and a push
+  // over a Jeddah link; an hour of that is a working job. Stealing on age alone let the
+  // daemon and run-once.mjs into the repo phase together — two writers in one clone.
+  it('never steals from a live holder, however long it has been working', async () => {
+    const file = path.join(dir, 'intake.lock');
+    fs.writeFileSync(file, JSON.stringify({ pid: process.pid, label: 'pdf ABC', at: new Date().toISOString() }));
+    const twoHoursAgo = new Date(Date.now() - 2 * 3600e3);
+    fs.utimesSync(file, twoHoursAgo, twoHoursAgo);
+    await assert.rejects(
+      () => acquireLock(file, { timeoutMs: 120, pollMs: 10 }),
+      /holds intake\.lock/,
+      'a two-hour publish must be waited out and then failed, never barged into',
+    );
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).pid, process.pid, 'the holder still owns its lock');
+  });
+
+  it('waits for a live holder and takes the lock the moment it lets go', async () => {
     const file = path.join(dir, 'intake.lock');
     fs.writeFileSync(file, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
-    fs.utimesSync(file, new Date(Date.now() - 7200e3), new Date(Date.now() - 7200e3));
-    (await acquireLock(file, { timeoutMs: 500, staleMs: 3600e3, pollMs: 10 }))();
+    const hourAgo = new Date(Date.now() - 3600e3);
+    fs.utimesSync(file, hourAgo, hourAgo);
+    setTimeout(() => fs.rmSync(file, { force: true }), 40);
+    const release = await acquireLock(file, { timeoutMs: 2000, pollMs: 10 });
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).pid, process.pid);
+    release();
+  });
+
+  it('steals a lock past the hard ceiling, alive pid or not', async () => {
+    const file = path.join(dir, 'intake.lock');
+    fs.writeFileSync(file, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
+    const ancient = new Date(Date.now() - LOCK_CEILING_MS - 60e3);
+    fs.utimesSync(file, ancient, ancient);
+    assert.equal(LOCK_CEILING_MS, 6 * 3600e3);
+    (await acquireLock(file, { timeoutMs: 500, pollMs: 10 }))();
+  });
+
+  // A lock that names nobody is wreckage from a kill -9 between the open and the pid write.
+  // Left alone it would wedge every intake job until the six-hour ceiling.
+  for (const [what, contents] of [['empty', ''], ['half-written', '{"pid": 12'], ['not an object', '"hello"']]) {
+    it(`steals an ${what} lock file once it is plainly ownerless`, async () => {
+      const file = path.join(dir, 'intake.lock');
+      fs.writeFileSync(file, contents);
+      const old = new Date(Date.now() - LOCK_ORPHAN_MS - 1000);
+      fs.utimesSync(file, old, old);
+      const release = await acquireLock(file, { timeoutMs: 500, pollMs: 10 });
+      assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).pid, process.pid);
+      release();
+    });
+  }
+
+  it('waits on a fresh empty lock file rather than racing the pid write', async () => {
+    const file = path.join(dir, 'intake.lock');
+    fs.writeFileSync(file, '');
+    await assert.rejects(() => acquireLock(file, { timeoutMs: 80, pollMs: 10 }), /holds intake\.lock/);
+  });
+
+  it('does not steal from a live holder just because the file could not be read', async () => {
+    // A transient EACCES/EMFILE must read as "someone holds this", never as "nobody does".
+    const file = path.join(dir, 'intake.lock');
+    fs.writeFileSync(file, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
+    const old = new Date(Date.now() - LOCK_ORPHAN_MS - 1000);
+    fs.utimesSync(file, old, old);
+    const realRead = fs.readFileSync;
+    fs.readFileSync = (f, ...rest) => {
+      if (String(f) === file) throw Object.assign(new Error('EMFILE'), { code: 'EMFILE' });
+      return realRead(f, ...rest);
+    };
+    try {
+      await assert.rejects(() => acquireLock(file, { timeoutMs: 80, pollMs: 10 }), /holds intake\.lock/);
+    } finally {
+      fs.readFileSync = realRead;
+    }
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).pid, process.pid, 'the holder kept its lock');
   });
 
   it('releases even when the job throws', async () => {

@@ -505,6 +505,123 @@ test('the day\'s call budget is separate from the chat budget', async () => {
   });
 });
 
+/*
+ * The day's ceiling stands for money Retell actually takes. It is charged after the body
+ * has parsed and validated, and handed back when the upstream call fails — otherwise a
+ * script posting junk, or an hour of Retell being down, closes the concierge until midnight
+ * in Jeddah without a single billable event.
+ */
+test('malformed JSON is 400 and does not burn a unit of the day', async () => {
+  await withServer({ config: { maxChatsPerDay: 5, maxCallsPerDay: 4, chatRatePerMin: 60, tokenRatePerMin: 60 } }, async ({ call, retell }) => {
+    for (const p of ['/v1/chat/session', '/v1/call/token']) {
+      for (const body of ['{', '{"locale":', 'null', '[]', '"hello"', '{"locale":"en",}']) {
+        const res = await call(p, { method: 'POST', body });
+        assert.equal(res.status, 400, `${p} <- ${body}`);
+        assert.equal((await res.json()).error, 'invalid_json');
+      }
+    }
+    assert.equal(retell.calls.length, 0, 'nothing reached Retell, so nothing was billed');
+    const spent = (await (await call('/health')).json()).budget;
+    assert.equal(spent.chats, 0, 'twelve malformed posts must leave the day untouched');
+    assert.equal(spent.calls, 0);
+  });
+});
+
+test('a body of the wrong shape is 400 and does not burn a unit of the day', async () => {
+  await withServer({ config: { chatRatePerMin: 60, tokenRatePerMin: 60 } }, async ({ call, retell }) => {
+    for (const body of [{ page: [] }, { locale: 5 }, { locale: { en: 1 } }, { page: 7 }, { page: { url: 12 } }, { page: { title: {} } }]) {
+      const res = await call('/v1/chat/session', { method: 'POST', body: JSON.stringify(body) });
+      assert.equal(res.status, 400, JSON.stringify(body));
+      assert.equal((await res.json()).error, 'bad_request');
+    }
+    assert.equal((await call('/v1/call/token', { method: 'POST', body: JSON.stringify({ page: 7 }) })).status, 400);
+    assert.equal(retell.calls.length, 0);
+    const spent = (await (await call('/health')).json()).budget;
+    assert.equal(spent.chats, 0);
+    assert.equal(spent.calls, 0);
+  });
+});
+
+// The check must never be stricter than the routes were. The chat widget posts
+// `page: window.location.pathname` and the call widget passes that same string on, so a
+// validator that demanded `{ url, title }` would 400 every visitor on the site.
+test('the shapes the real widgets send are still accepted, and spend exactly one each', async () => {
+  await withServer({ config: { chatRatePerMin: 60, tokenRatePerMin: 60 } }, async ({ call }) => {
+    const bodies = [
+      {},
+      { locale: 'en', page: '/properties/houses/' },
+      { locale: 'ar', page: { url: 'https://bona.azoz.uk/ar/', title: 'بونا' } },
+      { locale: 'ar', page: null },
+    ];
+    for (const body of bodies) {
+      assert.equal((await call('/v1/chat/session', { method: 'POST', body: JSON.stringify(body) })).status, 200, JSON.stringify(body));
+    }
+    assert.equal((await call('/v1/call/token', { method: 'POST', body: JSON.stringify({ locale: 'en', page: '/ar/properties/x/' }) })).status, 200);
+    const spent = (await (await call('/health')).json()).budget;
+    assert.equal(spent.chats, bodies.length);
+    assert.equal(spent.calls, 1);
+  });
+});
+
+test('a Retell failure hands the unit back — a broken upstream must not close the day', async () => {
+  const retell = fakeRetell();
+  const realChat = retell.createChat;
+  const realCall = retell.createWebCall;
+  await withServer({ retell, config: { maxChatsPerDay: 5, maxCallsPerDay: 4, chatRatePerMin: 60, tokenRatePerMin: 60 } }, async ({ call }) => {
+    const body = JSON.stringify({ locale: 'en' });
+    const counters = async () => (await (await call('/health')).json()).budget;
+
+    for (const [thrown, status] of [
+      [new RetellError('rate limited', { status: 429, retryAfter: '3' }), 429],
+      [new RetellError('payment required', { status: 402 }), 503],
+      [new RetellError('upstream', { status: 503 }), 502],
+      [new Error('ECONNREFUSED api.retellai.com'), 500],
+    ]) {
+      retell.createChat = async () => { throw thrown; };
+      assert.equal((await call('/v1/chat/session', { method: 'POST', body })).status, status);
+    }
+    assert.equal((await counters()).chats, 0, 'four sessions Retell never opened cost the day nothing');
+
+    retell.createWebCall = async () => { throw new RetellError('upstream', { status: 500 }); };
+    assert.equal((await call('/v1/call/token', { method: 'POST', body })).status, 502);
+    assert.equal((await counters()).calls, 0);
+
+    // …and a request Retell does answer still spends exactly one of each.
+    retell.createChat = realChat;
+    retell.createWebCall = realCall;
+    assert.equal((await call('/v1/chat/session', { method: 'POST', body })).status, 200);
+    assert.equal((await call('/v1/call/token', { method: 'POST', body })).status, 200);
+    const after = await counters();
+    assert.equal(after.chats, 1);
+    assert.equal(after.calls, 1);
+  });
+});
+
+test('a day of Retell being down still leaves a full budget when it comes back', async () => {
+  const retell = fakeRetell();
+  const realChat = retell.createChat;
+  await withServer({ retell, config: { maxChatsPerDay: 2, chatRatePerMin: 60 } }, async ({ call }) => {
+    const body = JSON.stringify({ locale: 'en' });
+    retell.createChat = async () => { throw new RetellError('payment required', { status: 402 }); };
+    for (let i = 0; i < 6; i += 1) assert.equal((await call('/v1/chat/session', { method: 'POST', body })).status, 503);
+    retell.createChat = realChat;
+    assert.equal((await call('/v1/chat/session', { method: 'POST', body })).status, 200, 'the ceiling was never really spent');
+    assert.equal((await call('/v1/chat/session', { method: 'POST', body })).status, 200);
+    assert.equal((await call('/v1/chat/session', { method: 'POST', body })).status, 503, 'and it still stops at two');
+  });
+});
+
+test('an unprovisioned agent is 503 and costs the day nothing', async () => {
+  await withServer({ config: { chatAgentId: '', voiceAgentId: '', chatRatePerMin: 60, tokenRatePerMin: 60 } }, async ({ call }) => {
+    const body = JSON.stringify({ locale: 'en' });
+    assert.equal((await call('/v1/chat/session', { method: 'POST', body })).status, 503);
+    assert.equal((await call('/v1/call/token', { method: 'POST', body })).status, 503);
+    const spent = (await (await call('/health')).json()).budget;
+    assert.equal(spent.chats, 0);
+    assert.equal(spent.calls, 0);
+  });
+});
+
 test('one session cannot run for ever: 429 session_limit after the turn cap', async () => {
   await withServer({ config: { maxTurnsPerSession: 3 } }, async ({ call }) => {
     const { sessionId } = await (await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale: 'en' }) })).json();

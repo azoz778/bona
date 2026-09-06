@@ -112,6 +112,33 @@ export const asPageTitle = (v, max = 80) =>
 /** POST routes the browser widget may call. Anything else is 404 before any budget is spent. */
 export const BROWSER_ROUTES = new Set(['/v1/chat/session', '/v1/chat/message', '/v1/chat/end', '/v1/call/token']);
 
+/** The two routes that open something Retell bills for, and the day counter each one spends. */
+export const BILLABLE_ROUTES = new Map([['/v1/chat/session', 'chats'], ['/v1/call/token', 'calls']]);
+
+/**
+ * Shape check for the billable routes, run *before* the day's budget is charged. A body
+ * that is the wrong shape never reaches Retell, so it costs the owner nothing — and it must
+ * not cost the day a unit either, or a script POSTing junk 300 times closes the concierge
+ * until midnight in Jeddah for free.
+ *
+ * It is deliberately no stricter than the routes themselves. Both fields are optional (the
+ * widget may send an empty object) and `page` may be a plain path string: the chat widget
+ * sends `window.location.pathname` and the call widget passes the same string through, so
+ * a check that insisted on `{ url, title }` would 400 every real visitor.
+ */
+export function assertBillableBody(body) {
+  const bad = (message) => Object.assign(new Error(message), { code: 'BAD_BODY' });
+  const { locale, page } = body;
+  if (locale !== undefined && locale !== null && typeof locale !== 'string') throw bad('locale must be a string');
+  if (page !== undefined && page !== null && typeof page !== 'string' && (typeof page !== 'object' || Array.isArray(page))) {
+    throw bad('page must be a path or an object');
+  }
+  if (page && typeof page === 'object') {
+    if (page.url !== undefined && page.url !== null && typeof page.url !== 'string') throw bad('page.url must be a string');
+    if (page.title !== undefined && page.title !== null && typeof page.title !== 'string') throw bad('page.title must be a string');
+  }
+}
+
 const isJsonContentType = (value) => /^application\/(?:[\w.+-]+\+)?json\s*(?:;|$)/i.test(String(value ?? '').trim());
 
 /* ------------------------------------------------------------------ */
@@ -412,22 +439,35 @@ export function createApp(options = {}) {
     const gate = limiters[limiterKey].take(`${limiterKey}:${ip}`);
     if (!gate.ok) return sendJson(res, 429, { error: 'rate_limited' }, { ...cors, 'Retry-After': String(gate.retryAfterS) });
 
-    // The day's ceiling, checked before Retell is contacted at all.
-    if (p === '/v1/chat/session' && !budget.takeChat()) return sendJson(res, 503, { error: 'budget_exhausted' }, cors);
-    if (p === '/v1/call/token' && !budget.takeCall()) return sendJson(res, 503, { error: 'budget_exhausted' }, cors);
-
     const body = await bodyOf(req, res, cors);
     if (body === undefined) return undefined;
 
+    // The day's ceiling stands for money Retell actually takes, so it is charged only once
+    // the body has parsed AND validated — malformed JSON never reached Retell and must not
+    // burn the day — and given back below if the Retell call itself fails. `charged` holds
+    // the unit that is still owed; it is cleared the moment Retell has answered.
+    let charged = null;
     try {
+      const kind = BILLABLE_ROUTES.get(p);
+      if (kind) {
+        assertBillableBody(body);
+        if (!budget.take(kind)) return sendJson(res, 503, { error: 'budget_exhausted' }, cors);
+        charged = kind;
+      }
+      let payload;
       switch (p) {
-        case '/v1/chat/session': return sendJson(res, 200, await chatSession(body), cors);
-        case '/v1/chat/message': return sendJson(res, 200, await chatMessage(body), cors);
-        case '/v1/chat/end': return sendJson(res, 200, await chatEnd(body), cors);
-        case '/v1/call/token': return sendJson(res, 200, await callToken(body), cors);
+        case '/v1/chat/session': payload = await chatSession(body); break;
+        case '/v1/chat/message': payload = await chatMessage(body); break;
+        case '/v1/chat/end': payload = await chatEnd(body); break;
+        case '/v1/call/token': payload = await callToken(body); break;
         default: return sendJson(res, 404, { error: 'not_found' }, cors);
       }
+      charged = null;
+      return sendJson(res, 200, payload, cors);
     } catch (err) {
+      // Nothing was opened upstream: a 402/429/5xx from Retell, a network error, a body the
+      // handler itself refused, or an agent that was never provisioned. Hand the unit back.
+      if (charged) budget.refund(charged);
       if (err?.code === 'NO_SESSION') return sendJson(res, 404, { error: 'session_not_found' }, cors);
       if (err?.code === 'BAD_BODY') return sendJson(res, 400, { error: 'bad_request', message: err.message }, cors);
       if (err?.code === 'SESSION_LIMIT') return sendJson(res, 429, { error: 'session_limit' }, cors);

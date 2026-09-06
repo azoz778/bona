@@ -86,6 +86,20 @@ export function takenSlugs(repo) {
   return taken;
 }
 
+/**
+ * The listing a PDF already produced, found in the REPO rather than in the daemon's state
+ * file. After a successful push the repo is the durable record: the state file can be lost,
+ * rolled back or never have known (a `run-once.mjs` publish writes no state at all), and in
+ * every one of those cases resending the brochure would otherwise mint a second listing.
+ */
+export function findByPdfSha(repo, sha) {
+  if (!sha) return null;
+  for (const { listing } of listInbox(repo)) {
+    if (listing?._intake?.pdfSha256 === sha) return listing;
+  }
+  return null;
+}
+
 /** Every BONA-W id already present in the inbox. */
 export function inboxIds(repo) {
   return listInbox(repo).map((x) => x.listing?.id).filter(Boolean);

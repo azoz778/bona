@@ -6,7 +6,7 @@ import { after, before, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   buildListing, checkListing, inboxIds, nextListingId, orderedPicks, readIndex, seqAfter, slugify,
-  takenSlugs, todayRiyadh, uniqueSlug, writeIndex, writeInboxListing, findInbox, listInbox,
+  takenSlugs, todayRiyadh, uniqueSlug, writeIndex, writeInboxListing, findInbox, findByPdfSha, listInbox,
 } from '../lib/listing.mjs';
 import * as edits from '../lib/edits.mjs';
 
@@ -293,5 +293,41 @@ describe('inbox + edits', () => {
     assert.equal(listInbox(tmp).length, 0);
     assert.equal(fs.existsSync(path.join(tmp, 'public', 'listings', slug)), false);
     assert.equal(edits.removeListing(tmp, 'BONA-W001'), null);
+  });
+});
+
+// After a push the listing JSON is committed, and it carries the sha256 of the PDF it came
+// from. That makes the repo the durable answer to "have we published this brochure?" — the
+// one that survives a state file being lost or rolled back, and the one that catches a
+// listing `run-once.mjs` published without touching the daemon's state at all.
+describe('findByPdfSha — the repo remembers which PDF made which listing', () => {
+  const SHA = 'a'.repeat(64);
+  const entry = (id, slug, sha) => ({
+    id, slug, status: 'available', hidden: false,
+    title: { en: slug, ar: slug }, images: [],
+    _intake: { source: 'whatsapp', pdfSha256: sha },
+  });
+  let tmp;
+  before(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-pdfsha-'));
+    fs.mkdirSync(path.join(tmp, 'scripts', 'curate', 'inbox'), { recursive: true });
+    writeInboxListing(tmp, entry('BONA-W007', 'obhur-villa', SHA));
+    writeInboxListing(tmp, entry('BONA-W008', 'khalidiyah-flat', 'b'.repeat(64)));
+  });
+  after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+  it('finds the listing a brochure already produced', () => {
+    assert.equal(findByPdfSha(tmp, SHA).id, 'BONA-W007');
+    assert.equal(findByPdfSha(tmp, SHA).slug, 'obhur-villa');
+  });
+
+  it('says nothing for a brochure that has never been published', () => {
+    assert.equal(findByPdfSha(tmp, 'c'.repeat(64)), null);
+    assert.equal(findByPdfSha(tmp, null), null, 'a missing sha is not a match for a listing that has none');
+  });
+
+  it('is quiet on a repo with no inbox at all', () => {
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-pdfsha-empty-'));
+    try { assert.equal(findByPdfSha(empty, SHA), null); } finally { fs.rmSync(empty, { recursive: true, force: true }); }
   });
 });

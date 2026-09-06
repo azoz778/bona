@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { after, before, describe, it } from 'node:test';
+import { after, afterEach, before, beforeEach, describe, it } from 'node:test';
 import { createState, MAX_JOB_ATTEMPTS } from '../lib/state.mjs';
 import { parseEnv, loadConfig } from '../lib/env.mjs';
 import { redact } from '../lib/log.mjs';
@@ -219,5 +219,91 @@ describe('durable jobs', () => {
     const s = createState(file);
     for (let i = 0; i < 400; i += 1) { s.addJob({ id: `X${i}` }); s.finishJob(`X${i}`); }
     assert.ok(Object.keys(createState(file).raw.jobs).length <= 200);
+  });
+});
+
+// A crash between the push and `finishJob()` used to publish the brochure twice: the job
+// came back pending, `replayPendingJobs()` set `retryPath` because the PDF was still on
+// disk, and `retryPath` switched the sha256 duplicate check off.
+describe('replay after a crash never publishes the same PDF twice', () => {
+  let dir;
+  let file;
+  const SHA = crypto.createHash('sha256').update('brochure bytes').digest('hex');
+  const LIVE = { id: 'BONA-W042', slug: 'sea-view-villa', url: 'https://bona.azoz.uk/properties/sea-view-villa/' };
+
+  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-replay-')); file = path.join(dir, 'state.json'); });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  /** A brochure that has just arrived: durable job first, message id seen second. */
+  const arrive = (s, id = 'M1') => {
+    s.addJob({ id, jid: 'g@g.us', key: { id }, caption: '', fileName: 'villa.pdf', pdfPath: path.join(dir, `${id}.pdf`) });
+    s.markSeen(id);
+    return s;
+  };
+
+  it('closes the job and answers with the live URL when its own push already landed', () => {
+    const first = arrive(createState(file));
+    first.completePublish({ sha: SHA, messageId: 'M1', ...LIVE });
+    // …and the daemon is killed here, before `reply()` — the job is closed, but even if it
+    // were not, the replay must not push again.
+    const s = createState(file);
+    s.updateJob('M1', { status: 'pending' });          // the worst case: the close was lost too
+    assert.deepEqual(s.pendingJobs().map((j) => j.id), ['M1'], 'the job is replayed on boot');
+
+    const guard = s.duplicateGuard({ sha: SHA, messageId: 'M1' });
+    assert.ok(guard, 'the replay must be stopped by the sha256 guard');
+    assert.equal(guard.outcome, 'done', 'our own push finished — the job is done, not a duplicate');
+    assert.equal(guard.published.url, LIVE.url);
+    assert.match(msg.alreadyLive(guard.published), /sea-view-villa/);
+
+    s.finishJob('M1', guard.outcome);
+    assert.deepEqual(createState(file).pendingJobs(), [], 'and it is answered once, then never again');
+  });
+
+  it('ignores retryPath entirely — the guard has no way to be switched off by a replay', () => {
+    const s = arrive(createState(file));
+    s.completePublish({ sha: SHA, messageId: 'M1', ...LIVE });
+    // Whatever the daemon knows about the downloaded file, the question is only ever
+    // "is this sha live?". The guard takes no retry/replay argument at all.
+    assert.equal(s.duplicateGuard.length, 1);
+    assert.ok(s.duplicateGuard({ sha: SHA, messageId: 'M1' }));
+    assert.ok(s.duplicateGuard({ sha: SHA, messageId: 'M9' }), 'another message, same bytes');
+    assert.equal(s.duplicateGuard({ sha: SHA, messageId: 'M9' }).outcome, 'duplicate');
+    assert.equal(s.duplicateGuard({ sha: 'other-bytes', messageId: 'M1' }), null, 'a new brochure still publishes');
+  });
+
+  it('still catches a half-written publish from an older state file', () => {
+    // Two separate saves (record, then close) leave a window; a crash inside it is what the
+    // guard has to survive. It does, because it asks the sha and nothing else.
+    const s = arrive(createState(file));
+    s.recordPublished(SHA, { ...LIVE, messageId: 'M1' });
+    const rebooted = createState(file);
+    assert.equal(rebooted.getJob('M1').status, 'pending');
+    assert.equal(rebooted.duplicateGuard({ sha: SHA, messageId: 'M1' }).outcome, 'done');
+  });
+
+  it('records the sha and closes the job in ONE write, so no crash can land half of it', () => {
+    const s = arrive(createState(file));
+    const renames = [];
+    const realRename = fs.renameSync;
+    fs.renameSync = (from, to) => { renames.push(to); return realRename(from, to); };
+    try {
+      s.completePublish({ sha: SHA, messageId: 'M1', ...LIVE });
+    } finally {
+      fs.renameSync = realRename;
+    }
+    assert.equal(renames.length, 1, 'two saves would leave a replayable window between them');
+
+    const reloaded = createState(file);
+    assert.equal(reloaded.publishedFor(SHA).id, LIVE.id, 'the sha is live on disk');
+    assert.equal(reloaded.publishedFor(SHA).messageId, 'M1', 'and it remembers which message published it');
+    assert.equal(reloaded.getJob('M1').status, 'done', 'and the job is closed in the same write');
+    assert.deepEqual(reloaded.pendingJobs(), []);
+  });
+
+  it('lets a dry run preview a brochure that is already live', () => {
+    const s = arrive(createState(file));
+    s.completePublish({ sha: SHA, messageId: 'M1', ...LIVE });
+    assert.equal(s.duplicateGuard({ sha: SHA, messageId: 'M2', dryRun: true }), null);
   });
 });

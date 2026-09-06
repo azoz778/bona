@@ -61,6 +61,52 @@ export function createState(file) {
     markAnnounced(jid) { if (!data.announcedGroups.includes(jid)) { data.announcedGroups.push(jid); save(); } },
     publishedFor: (sha) => data.bySha256[sha] || null,
     recordPublished(sha, info) { data.bySha256[sha] = { ...info, at: new Date().toISOString() }; data.lastPublishedAt = new Date().toISOString(); save(); },
+
+    /**
+     * The "is this brochure already live?" question, asked on EVERY pass over a PDF —
+     * a replay included.
+     *
+     * A replay used to be exempt, on the reasoning that a job only comes back when it
+     * failed. It also comes back when it *succeeded* and the process died before the job
+     * could be closed: the push has landed, the sha is recorded, and the downloaded PDF is
+     * still on disk. Skipping the check there publishes the same brochure a second time —
+     * a second listing id, a second commit, a second card on the site.
+     *
+     * Returns null when the job should go ahead, otherwise the listing that is already live
+     * plus the outcome to close this job with: `done` when this very message is the one
+     * that published it (our own push, finished late), `duplicate` when the owner has sent
+     * a brochure that is already on the site.
+     *
+     * A dry run is exempt by design: it writes nothing and the owner asked for a preview.
+     *
+     * @param {{ sha: string, messageId?: string|null, dryRun?: boolean }} q
+     */
+    duplicateGuard({ sha, messageId = null, dryRun = false }) {
+      if (dryRun) return null;
+      const published = sha ? data.bySha256[sha] : null;
+      if (!published) return null;
+      const outcome = published.messageId && published.messageId === messageId ? 'done' : 'duplicate';
+      return { published, outcome };
+    },
+
+    /**
+     * The publish bookkeeping, as ONE atomic write: the sha becomes "already live" and the
+     * job closes in the same tmp+rename. Two separate saves leave a window in between, and
+     * a crash inside it is exactly the replay that publishes twice. Call this inside the
+     * repo lock, the instant the push lands and BEFORE any reply goes out — a reply can be
+     * retried, a second commit cannot be taken back.
+     *
+     * `messageId` is stored alongside the listing so a later replay can tell "my own push
+     * finished" apart from "the owner sent this brochure again".
+     */
+    completePublish({ sha, messageId = null, id, slug, url }) {
+      const at = new Date().toISOString();
+      if (sha) data.bySha256[sha] = { id, slug, url, messageId, at };
+      data.lastPublishedAt = at;
+      if (messageId && data.jobs[messageId]) data.jobs[messageId] = { ...data.jobs[messageId], status: 'done', doneAt: at };
+      save();
+      return sha ? data.bySha256[sha] : null;
+    },
     forgetPublished(predicate) {
       let changed = false;
       for (const [sha, info] of Object.entries(data.bySha256)) {

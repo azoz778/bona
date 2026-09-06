@@ -23,7 +23,7 @@ export function riyadhDay(ts) {
 
 /**
  * @param {{ maxChats?: number, maxCalls?: number, now?: () => number, log?: Function }} opts
- * @returns {{ takeChat(): boolean, takeCall(): boolean, counters(): object }}
+ * @returns {{ take(kind: string): boolean, takeChat(): boolean, takeCall(): boolean, refund(kind: string): void, counters(): object }}
  */
 export function createBudget({ maxChats = MAX_CHATS_PER_DAY, maxCalls = MAX_CALLS_PER_DAY, now = () => Date.now(), log = () => {} } = {}) {
   let day = riyadhDay(now());
@@ -54,7 +54,28 @@ export function createBudget({ maxChats = MAX_CHATS_PER_DAY, maxCalls = MAX_CALL
     return true;
   }
 
+  /**
+   * Give a unit back. A charged request that never reached Retell — or reached it and was
+   * refused — cost the owner nothing, so it must not shorten the day for the next visitor.
+   * Clamped at zero, and it clears the "exhausted" latch so the ceiling can be announced
+   * again if the day really does run out later.
+   *
+   * A refund that arrives after midnight in Jeddah finds a fresh counter and is dropped
+   * rather than pushed negative: yesterday's unit cannot be spent today either.
+   */
+  function refund(kind, max) {
+    roll();
+    if (used[kind] > 0) used[kind] -= 1;
+    if (used[kind] < max) tripped[kind] = false;
+  }
+
+  const MAX = { chats: maxChats, calls: maxCalls };
+
   return {
+    /** @param {'chats'|'calls'} kind */
+    take: (kind) => take(kind, MAX[kind]),
+    /** @param {'chats'|'calls'} kind */
+    refund: (kind) => refund(kind, MAX[kind]),
     takeChat: () => take('chats', maxChats),
     takeCall: () => take('calls', maxCalls),
     counters() {

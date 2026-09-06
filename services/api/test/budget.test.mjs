@@ -52,3 +52,47 @@ test('counters reset at the Riyadh midnight, and can trip again the next day', (
   assert.equal(budget.takeChat(), false);
   assert.equal(lines.length, 2, 'each day gets its own warning');
 });
+
+test('a refunded unit goes back into the day — a failed call cost the owner nothing', () => {
+  const budget = createBudget({ maxChats: 3, maxCalls: 2, now: () => 0 });
+  assert.equal(budget.take('chats'), true);
+  assert.equal(budget.counters().chats, 1);
+  budget.refund('chats');
+  assert.equal(budget.counters().chats, 0);
+  // Chat and call stay independent through a refund too.
+  budget.take('calls');
+  budget.refund('chats');
+  assert.equal(budget.counters().calls, 1, 'a chat refund must not hand back a call');
+});
+
+test('a refund never pushes a counter below zero', () => {
+  const budget = createBudget({ maxChats: 2, now: () => 0 });
+  budget.refund('chats');
+  budget.refund('chats');
+  assert.equal(budget.counters().chats, 0);
+  assert.equal(budget.takeChat(), true, 'and the ceiling is still the ceiling');
+  assert.equal(budget.takeChat(), true);
+  assert.equal(budget.takeChat(), false);
+});
+
+test('a refund reopens an exhausted day, and the ceiling can be announced again', () => {
+  const lines = [];
+  const budget = createBudget({ maxChats: 1, now: () => 0, log: (o) => lines.push(o) });
+  assert.equal(budget.takeChat(), true);
+  assert.equal(budget.takeChat(), false);
+  assert.equal(lines.length, 1);
+  budget.refund('chats');
+  assert.equal(budget.takeChat(), true, 'the returned unit is spendable');
+  assert.equal(budget.takeChat(), false);
+  assert.equal(lines.length, 2, 'the second exhaustion is worth saying out loud');
+});
+
+test('a refund that lands after midnight in Jeddah is dropped, not carried over', () => {
+  let t = Date.parse('2026-09-06T12:00:00Z');
+  const budget = createBudget({ maxChats: 2, now: () => t });
+  assert.equal(budget.takeChat(), true);
+  t = Date.parse('2026-09-06T21:01:00Z');   // a new day in Riyadh
+  budget.refund('chats');
+  assert.equal(budget.counters().chats, 0, "yesterday's unit cannot be spent today");
+  assert.equal(budget.counters().day, '2026-09-07');
+});
