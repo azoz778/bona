@@ -22,5 +22,11 @@ export default defineConfig({
       i18n: { defaultLocale: 'en', locales: { en: 'en', ar: 'ar' } },
     }),
   ],
-  vite: { plugins: [tailwindcss()] },
+  vite: {
+    plugins: [tailwindcss()],
+    // Hoisted scripts are emitted as files, never inlined: the site ships a Content-Security-Policy <meta>, and the
+    // ClientRouter's "inline module scripts have run" probe (an empty data: module script) would be refused by it
+    // on every navigation. Files also cache across the 100+ pages instead of repeating in each one.
+    build: { assetsInlineLimit: 0 },
+  },
 });

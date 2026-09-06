@@ -37,6 +37,14 @@ window.BONA_CONCIERGE_API = 'http://127.0.0.1:4111';   // then reload
 
 Otherwise the widget uses `src/data/site.json` → `concierge.apiBase`.
 
+**Content-Security-Policy.** Every page carries a CSP `<meta>` (see `src/components/seo/Head.astro`) whose
+`connect-src` names the production API only. `npm run dev` adds `http://localhost:*` / `http://127.0.0.1:*`
+automatically; for a *preview* build that must talk to a local API, build with the flag:
+
+```bash
+BONA_CSP_LOCAL_API=1 npm run build && npm run preview
+```
+
 ## The drills
 
 Run each in EN and AR (`/` and `/ar/`), at 375 and 1440.
