@@ -1,0 +1,166 @@
+{
+  "id": "BONA-W003",
+  "slug": "al-wareef-townhouse-jeddah",
+  "sourceRef": "WA-20260906-ACB9C8",
+  "status": "available",
+  "category": "off-plan",
+  "type": "villa",
+  "kind": "house",
+  "featured": false,
+  "title": {
+    "en": "Al-Wareef Townhouse, Jeddah",
+    "ar": "تاون هاوس الوريف، جدة"
+  },
+  "location": {
+    "district": {
+      "en": "Al Wareef",
+      "ar": "الوريف"
+    },
+    "city": {
+      "en": "Jeddah",
+      "ar": "جدة"
+    },
+    "country": {
+      "en": "Saudi Arabia",
+      "ar": "المملكة العربية السعودية"
+    },
+    "countryCode": "SA"
+  },
+  "price": {
+    "amount": null,
+    "currency": "SAR",
+    "from": false,
+    "period": null,
+    "onRequest": true
+  },
+  "specs": {
+    "beds": 3,
+    "baths": 4,
+    "areaSqm": 192,
+    "plotSqm": 200,
+    "yearBuilt": null,
+    "floors": 3
+  },
+  "images": [
+    {
+      "src": "/listings/al-wareef-townhouse-jeddah/01.jpg",
+      "thumb": "/listings/al-wareef-townhouse-jeddah/01-thumb.webp",
+      "alt": {
+        "en": "Illustrative — developer's finished unit at Wajhat Al-Wareef: Exterior — Al-Wareef Townhouse, Jeddah",
+        "ar": "صورة توضيحية — وحدة منجزة من المطوّر في وجهة الوريف: الواجهة الخارجية — تاون هاوس الوريف، جدة"
+      }
+    },
+    {
+      "src": "/listings/al-wareef-townhouse-jeddah/02.jpg",
+      "thumb": "/listings/al-wareef-townhouse-jeddah/02-thumb.webp",
+      "alt": {
+        "en": "Illustrative — developer's finished unit at Wajhat Al-Wareef: Entrance — Al-Wareef Townhouse, Jeddah",
+        "ar": "صورة توضيحية — وحدة منجزة من المطوّر في وجهة الوريف: المدخل — تاون هاوس الوريف، جدة"
+      }
+    },
+    {
+      "src": "/listings/al-wareef-townhouse-jeddah/03.jpg",
+      "thumb": "/listings/al-wareef-townhouse-jeddah/03-thumb.webp",
+      "alt": {
+        "en": "Illustrative — developer's finished unit at Wajhat Al-Wareef: Living room — Al-Wareef Townhouse, Jeddah",
+        "ar": "صورة توضيحية — وحدة منجزة من المطوّر في وجهة الوريف: غرفة المعيشة — تاون هاوس الوريف، جدة"
+      }
+    },
+    {
+      "src": "/listings/al-wareef-townhouse-jeddah/04.jpg",
+      "thumb": "/listings/al-wareef-townhouse-jeddah/04-thumb.webp",
+      "alt": {
+        "en": "Illustrative — developer's finished unit at Wajhat Al-Wareef: Exterior — Al-Wareef Townhouse, Jeddah",
+        "ar": "صورة توضيحية — وحدة منجزة من المطوّر في وجهة الوريف: الواجهة الخارجية — تاون هاوس الوريف، جدة"
+      }
+    },
+    {
+      "src": "/listings/al-wareef-townhouse-jeddah/05.jpg",
+      "thumb": "/listings/al-wareef-townhouse-jeddah/05-thumb.webp",
+      "alt": {
+        "en": "Illustrative — developer's finished unit at Wajhat Al-Wareef: Aerial view — Al-Wareef Townhouse, Jeddah",
+        "ar": "صورة توضيحية — وحدة منجزة من المطوّر في وجهة الوريف: منظر جوي — تاون هاوس الوريف، جدة"
+      }
+    }
+  ],
+  "description": {
+    "en": "The townhouse sits within a master-planned residential destination in southeast Jeddah, within easy reach of the city's historic centre and its main business districts. A network of pedestrian paths connects the home to schools, mosques, health centres and retail, most reachable on foot within five to ten minutes. The wider destination extends over more than ten million square metres, with over 1.3 million square metres set aside for parks and green space.\n\nThis is one of 134 townhouses built to a single three-storey layout, with a built-up area of 192 square metres on a 200-square-metre plot. The ground floor holds a majlis, a family sitting room, a separate dining area, a living room and a kitchen, alongside two washrooms. The first floor carries a master bedroom with a dressing room and a private terrace, a second bedroom with its own terrace, and two further bathrooms. A rooftop of roughly 82 square metres tops the house, reached by its own staircase, with one open parking space in front.\n\nConstruction follows the Saudi Building Code, with porcelain flooring, washable paint finishes, moisture-resistant gypsum ceilings and marble staircases inside and out. Windows and doors carry thermal insulation and double glazing, and LED lighting is fitted throughout. The build carries a one-year warranty on finishes, plumbing and electrical work, and a ten-year warranty on the structure, waterproofing and soil treatment against insects.",
+    "ar": "يقع تاون هاوس ضمن وجهة سكنية مخطط لها بعناية في جنوب شرق جدة، على مقربة من قلب المدينة التاريخي ومراكز الأعمال الرئيسية. تربط شبكة من الممرات الآمنة المنزل بالمدارس والمساجد والمراكز الصحية والمحال التجارية، وتصل معظمها سيراً على الأقدام خلال خمس إلى عشر دقائق. تمتد الوجهة على أكثر من عشرة ملايين متر مربع، خُصص منها أكثر من 1.3 مليون متر مربع للحدائق والمساحات الخضراء.\n\nيُعد هذا التاون هاوس واحداً من 134 وحدة بُنيت وفق نموذج واحد من ثلاثة طوابق، بمساحة بناء إجمالية 192 متراً مربعاً على قطعة أرض مساحتها 200 متر مربع. يضم الدور الأرضي مجلساً وصالة عائلية ومنطقة طعام منفصلة وصالة معيشة ومطبخاً، إضافة إلى دورتي مياه. أما الدور الأول فيحتوي على غرفة نوم رئيسية مع غرفة ملابس وتراس خاص، وغرفة نوم ثانية بتراسها الخاص، ودورتي مياه إضافيتين. ويعلو المنزل سطح بمساحة تقارب 82 متراً مربعاً يُصعد إليه بدرج مستقل، مع موقف سيارة مفتوح أمام المنزل.\n\nيتبع البناء كود البناء السعودي، بأرضيات بورسلين ودهانات قابلة للغسل وأسقف جبسية مقاومة للرطوبة وسلالم رخامية داخلية وخارجية. تأتي الأبواب والنوافذ بمواصفات عزل حراري وزجاج مزدوج، مع إنارة LED في مختلف الأرجاء. ويحصل المنزل على ضمان لمدة سنة على التشطيبات والسباكة والأعمال الكهربائية، وضمان لعشر سنوات على الهيكل الإنشائي والعزل ومعالجة التربة ضد الحشرات."
+  },
+  "highlights": {
+    "en": [
+      "192 sqm build on 200 sqm plot",
+      "Three-storey layout with rooftop",
+      "Master suite with dressing room and terrace",
+      "Majlis and separate family sitting room",
+      "Ten-year structural warranty",
+      "Walkable schools, mosques, clinics"
+    ],
+    "ar": [
+      "بناء 192 م² على أرض 200 م²",
+      "ثلاثة طوابق مع سطح علوي",
+      "غرفة نوم رئيسية بغرفة ملابس وتراس",
+      "مجلس وصالة عائلية منفصلة",
+      "ضمان هيكلي لعشر سنوات",
+      "قرب سير من المدارس والمساجد والمراكز الصحية"
+    ]
+  },
+  "virtualTourUrl": null,
+  "brochureUrl": null,
+  "project": {
+    "name": {
+      "en": "Wajhat Al-Wareef",
+      "ar": "وجهة الوريف"
+    },
+    "developer": {
+      "en": "National Housing Company (NHC) and Faisal Bin Saedan Real Estate Development",
+      "ar": "الوطنية للإسكان (NHC) وفيصل بن سعيدان للاستثمار والتطوير العقاري"
+    }
+  },
+  "unit": {
+    "floor": null,
+    "block": null,
+    "unitRef": "Maren model"
+  },
+  "map": null,
+  "listedAt": "2026-09-06",
+  "hidden": false,
+  "_intake": {
+    "source": "whatsapp",
+    "pdfSha256": "51ffa065d39b8e541bca3359d0cbcb40efa1a988e783b51de6e695a5c8794ac7",
+    "model": "sonnet",
+    "confidence": 0.6,
+    "warnings": [
+      "model-flagged"
+    ],
+    "images": [
+      {
+        "n": 1,
+        "candidate": 6,
+        "room": "exterior"
+      },
+      {
+        "n": 2,
+        "candidate": 8,
+        "room": "entrance"
+      },
+      {
+        "n": 3,
+        "candidate": 13,
+        "room": "living"
+      },
+      {
+        "n": 4,
+        "candidate": 7,
+        "room": "exterior"
+      },
+      {
+        "n": 5,
+        "candidate": 18,
+        "room": "aerial"
+      }
+    ],
+    "createdAt": "2026-09-06T02:14:25.367Z",
+    "site": "https://bona.azoz.uk"
+  }
+}
