@@ -150,3 +150,31 @@ test('pinFromLinks handles an empty or missing link list', async () => {
   assert.equal(await pinFromLinks([], { resolve: async (u) => u }), null);
   assert.equal(await pinFromLinks(undefined, { resolve: async (u) => u }), null);
 });
+
+// ---- corroboration must survive URL cosmetics ---------------------------------------
+// Two links only corroborate each other when they are genuinely two links. Google decorates
+// the same URL with per-share tracking (g_st, g_ep, entry, lucs, skid), and two different
+// shortlinks can resolve to one target — neither is a second opinion.
+
+test('pinFromLinks treats tracking-param variants of one URL as one source', async () => {
+  const a = `${WARF_PLACE}?entry=ttu&g_ep=EgoyMDI1MDgwMy4w`;
+  const b = `${WARF_PLACE}?entry=tts&g_ep=EgoyMDI2MDEwMS4x&skid=abc`;
+  assert.equal(await pinFromLinks([{ page: 1, uri: a }, { page: 2, uri: b }], { resolve: async (u) => u }), null);
+});
+
+test('pinFromLinks treats two shortlinks resolving to one target as one source', async () => {
+  const target = 'https://maps.google.com/maps?q=21.3380000,39.3047778&entry=gps';
+  const pin = await pinFromLinks(
+    [{ page: 1, uri: 'https://maps.app.goo.gl/AAAAAAAAAAAAAAAA' }, { page: 2, uri: 'https://maps.app.goo.gl/BBBBBBBBBBBBBBBB' }],
+    { resolve: async () => target },
+  );
+  assert.equal(pin, null);
+});
+
+test('pinFromLinks still accepts the real brochure: a shortlink AND a distinct place link', async () => {
+  const pin = await pinFromLinks(
+    [{ page: 7, uri: WARF_SHORT }, { page: 21, uri: WARF_PLACE }],
+    { resolve: resolveWarf },
+  );
+  assert.deepEqual(pin, { lat: 21.338, lng: 39.304778 });
+});

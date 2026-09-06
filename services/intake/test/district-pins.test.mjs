@@ -31,6 +31,20 @@ describe('isDistrictRow', () => {
     assert.equal(isDistrictRow({ category: 'highway', type: 'secondary', addresstype: 'road' }), false);
   });
 
+  it('rejects the city itself standing in for a district it could not find', () => {
+    // Nominatim answers an unmatched district query with the city. Pinning "Khayala Suburb"
+    // to the middle of Jeddah would look like an answer and be none.
+    assert.equal(isDistrictRow({ category: 'place', type: 'city', addresstype: 'city', name: 'Jeddah' }, 'Jeddah'), false);
+    assert.equal(isDistrictRow({ category: 'boundary', type: 'administrative', addresstype: 'city', name: 'جدة' }, 'Jeddah', 'جدة'), false);
+  });
+
+  it('accepts a town or village that is a real place inside the city, not the city itself', () => {
+    // Benahavís is a village near Marbella — a genuine answer for a Marbella listing.
+    assert.equal(isDistrictRow({ category: 'boundary', type: 'administrative', addresstype: 'village', name: 'Benahavís' }, 'Marbella'), true);
+    // Le Vésinet named for a Le Vésinet listing is the city fallback, not a district.
+    assert.equal(isDistrictRow({ category: 'boundary', type: 'administrative', addresstype: 'town', name: 'Le Vésinet' }, 'Le Vésinet'), false);
+  });
+
   it('rejects a shop, a building and junk', () => {
     assert.equal(isDistrictRow({ category: 'shop', type: 'supermarket', addresstype: 'shop' }), false);
     assert.equal(isDistrictRow({ category: 'building', type: 'school', addresstype: 'building' }), false);
@@ -42,10 +56,20 @@ describe('isDistrictRow', () => {
 describe('districtsNeeded', () => {
   it('skips listings that already carry an exact pin', () => {
     const need = districtsNeeded([
-      { id: 'A', map: { lat: 1, lng: 2 }, location: { district: { en: 'Pinned' }, city: { en: 'Jeddah' } } },
+      { id: 'A', map: { lat: 1, lng: 2 }, mapPrecision: 'exact', location: { district: { en: 'Pinned' }, city: { en: 'Jeddah' } } },
       { id: 'B', map: null, location: { district: { en: 'Unpinned' }, city: { en: 'Jeddah' } } },
     ]);
     assert.deepEqual([...need.keys()], ['Unpinned|Jeddah']);
+  });
+
+  it('still needs a district whose pin the BUILD filled in', () => {
+    // listings.json is written with the district pins already applied. If a re-run read
+    // those as "already pinned", the district would look unused and its entry would be
+    // deleted from district-pins.json — and the next build would drop the pin entirely.
+    const need = districtsNeeded([
+      { id: 'A', map: { lat: 21.6, lng: 39.1 }, mapPrecision: 'district', location: { district: { en: 'Al Nuzhah' }, city: { en: 'Jeddah' } } },
+    ]);
+    assert.deepEqual([...need.keys()], ['Al Nuzhah|Jeddah']);
   });
 
   it('groups every listing sharing a district under one key', () => {
