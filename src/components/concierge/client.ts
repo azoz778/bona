@@ -3,10 +3,12 @@
    Lifecycle: the module runs once. The controller lives in module scope and re-binds to the DOM on every
    `astro:page-load`, releasing it on `astro:before-swap` — so a conversation (and a running voice call) survive
    in-site navigation, while the per-page WhatsApp deep link is re-rendered normally.
-   Chat state is mirrored into sessionStorage so a hard reload restores it too. */
+   Chat state is mirrored into sessionStorage so a hard reload restores it too — versioned, validated on the way
+   back in, and dropped after two hours (see STATE_VERSION below and docs/qa/concierge/README.md).
+   A voice call survives an in-site swap; closing the panel or leaving the page ends it. */
 
 import { navigate } from 'astro:transitions/client';
-import { postBeacon, postJson, resolveApiBase, type Card, type ChatAction, type ChatMessageResponse, type ChatSessionResponse } from './api';
+import { postBeacon, postJson, resolveApiBase, statusOf, type Card, type ChatAction, type ChatMessageResponse, type ChatSessionResponse } from './api';
 import { bubble, el, listingCard, note, type ConciergeConfig } from './render';
 import { browserSupportsCall, CallSession } from './call';
 
@@ -21,6 +23,23 @@ interface ChatState { sessionId: string | null; items: Item[]; greeted: boolean;
 
 const UI_KEY = 'bona.concierge.ui';
 const chatKey = (locale: string) => `bona.chat.${locale}`;
+
+/* What is mirrored into sessionStorage. It can hold what the visitor typed — a phone number, a budget — so it is
+   versioned, dropped after two hours, capped, and re-validated item by item before any of it reaches the DOM. */
+const STATE_VERSION = 1;
+const STATE_TTL_MS = 2 * 60 * 60 * 1000;
+const MAX_ITEMS = 60;
+
+interface StoredChat { v: number; savedAt: number; sessionId: string | null; items: Item[]; greeted: boolean; quickUsed: boolean }
+
+/** A stored item is only rendered if it is a shape this build knows how to render. */
+function validItem(x: unknown): x is Item {
+  if (!x || typeof x !== 'object') return false;
+  const it = x as { t?: unknown; text?: unknown; card?: { id?: unknown; slug?: unknown } | null };
+  if (it.t === 'agent' || it.t === 'user' || it.t === 'wa' || it.t === 'note') return typeof it.text === 'string';
+  if (it.t === 'card') return !!it.card && typeof it.card === 'object' && typeof it.card.id === 'string' && typeof it.card.slug === 'string';
+  return false;
+}
 
 const read = (key: string): unknown => {
   try { const raw = sessionStorage.getItem(key); return raw ? JSON.parse(raw) : null; } catch { return null; }
@@ -103,8 +122,16 @@ class Concierge {
 
     on(this.q('[data-cg-panel]'), 'keydown', e => {
       if (e.key === 'Escape') { e.stopPropagation(); this.setOpen(false); }
-      else if (e.key === 'Tab') this.trap(e);
+      // Only the mobile sheet is modal. The desktop drawer sits beside the page, so Tab is free to leave it.
+      else if (e.key === 'Tab' && this.modal) this.trap(e);
     });
+    on(this.q('[data-cg-tablist]'), 'keydown', e => this.tabKeys(e));
+
+    // Modality follows the viewport: keep it right if the panel is open while the window is resized or rotated.
+    const mq = window.matchMedia('(max-width: 639px)');
+    const onViewport = () => { if (this.open) { if (mq.matches) this.takeModal(); else this.releaseModal(); } };
+    mq.addEventListener('change', onViewport);
+    this.off.push(() => mq.removeEventListener('change', onViewport));
 
     // Page-level triggers ("Ask Dana" links). Re-queried per page.
     document.querySelectorAll<HTMLElement>('[data-concierge-trigger]').forEach(trigger =>
@@ -129,18 +156,39 @@ class Concierge {
 
   private restore() {
     const ui = read(UI_KEY) as { open?: boolean; tab?: string } | null;
-    const stored = read(chatKey(this.cfg!.locale)) as ChatState | null;
-    if (stored && Array.isArray(stored.items)) this.chat = { sessionId: stored.sessionId ?? null, items: stored.items, greeted: !!stored.greeted, quickUsed: !!stored.quickUsed };
-    this.tab = this.call.active ? 'call' : (ui?.tab === 'call' && this.call.active ? 'call' : 'chat');
+    this.loadChat();
+    // A fresh page always starts on Chat; only a call still running pulls the panel back to the Call tab.
+    this.tab = this.call.active ? 'call' : 'chat';
     this.renderChat();
     this.renderCall();
     this.applyTab();
+    // A call that survived an in-site navigation must come back with its End/Mute controls in view.
     if (ui?.open || this.call.active) this.setOpen(true, this.tab, undefined, false);
     this.q('[data-cg-open]')?.classList.toggle('is-live', this.call.active);
   }
 
+  /** sessionStorage is not trusted: another version, older than two hours, or a malformed item and it is dropped. */
+  private loadChat() {
+    const key = chatKey(this.cfg!.locale);
+    const raw = read(key) as Partial<StoredChat> | null;
+    const fresh = !!raw && typeof raw === 'object' && raw.v === STATE_VERSION
+      && typeof raw.savedAt === 'number' && Number.isFinite(raw.savedAt)
+      && Date.now() - raw.savedAt <= STATE_TTL_MS && Array.isArray(raw.items);
+    if (!fresh) { if (raw) drop(key); return; }
+    this.chat = {
+      sessionId: typeof raw!.sessionId === 'string' ? raw!.sessionId : null,
+      items: (raw!.items as unknown[]).filter(validItem).slice(-MAX_ITEMS),
+      greeted: !!raw!.greeted,
+      quickUsed: !!raw!.quickUsed,
+    };
+  }
+
   private persistUi() { write(UI_KEY, { open: this.open, tab: this.tab }); }
-  private persistChat() { write(chatKey(this.cfg!.locale), this.chat); }
+  private persistChat() {
+    if (this.chat.items.length > MAX_ITEMS) this.chat.items = this.chat.items.slice(-MAX_ITEMS);
+    const payload: StoredChat = { v: STATE_VERSION, savedAt: Date.now(), ...this.chat };
+    write(chatKey(this.cfg!.locale), payload);
+  }
 
   setOpen(open: boolean, tab?: 'chat' | 'call', prefill?: string, focus = true) {
     if (!this.cfg?.enabled || !this.root) return;
@@ -176,19 +224,40 @@ class Concierge {
       void this.ensureSession();
       this.scrollLog(false);
     } else {
+      // Once the panel is shut there is no visible way to stop a call, so closing is what stops it.
+      if (this.call.active) this.call.end();
       this.releaseModal();
       if (focus) opener.focus({ preventScroll: true });
     }
     this.persistUi();
   }
 
-  private setTab(tab: 'chat' | 'call') {
+  private setTab(tab: 'chat' | 'call', focus: 'tab' | 'pane' = 'pane') {
     this.tab = tab;
     this.applyTab();
     this.persistUi();
-    const target = tab === 'chat' ? this.q<HTMLElement>('[data-cg-input]') : this.q<HTMLElement>('[data-cg-call-start]');
+    const target = focus === 'tab'
+      ? this.q<HTMLElement>(`[data-cg-tab="${tab}"]`)
+      : (tab === 'chat' ? this.q<HTMLElement>('[data-cg-input]') : this.q<HTMLElement>('[data-cg-call-start]'));
     target?.focus({ preventScroll: true });
     if (tab === 'chat') this.scrollLog(false);
+  }
+
+  /** Roving tablist: Arrow Left/Right (mirrored in RTL), Home, End — focus stays on the tab itself. */
+  private tabKeys(e: KeyboardEvent) {
+    const order: ('chat' | 'call')[] = ['chat', 'call'];
+    const rtl = document.documentElement.dir === 'rtl';
+    // Move relative to the tab the key was pressed on, falling back to the selected one.
+    const from = (e.target as HTMLElement | null)?.closest<HTMLElement>('[data-cg-tab]')?.dataset.cgTab as 'chat' | 'call' | undefined;
+    const at = Math.max(0, order.indexOf(from ?? this.tab));
+    let next: number;
+    if (e.key === 'ArrowRight') next = at + (rtl ? -1 : 1);
+    else if (e.key === 'ArrowLeft') next = at + (rtl ? 1 : -1);
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = order.length - 1;
+    else return;
+    e.preventDefault();
+    this.setTab(order[(next + order.length) % order.length], 'tab');
   }
 
   private applyTab() {
@@ -235,17 +304,30 @@ class Concierge {
 
   /* -------------------------------------------------------------------- chat */
 
+  /** Opens a chat session. `announce` false is a silent re-open (an expired session) — no second greeting bubble. */
+  private async openSession(announce: boolean) {
+    const cfg = this.cfg!;
+    const res = await postJson<ChatSessionResponse>(cfg.apiBase, '/v1/chat/session', { locale: cfg.locale, page: window.location.pathname }, 15000);
+    this.chat.sessionId = res?.sessionId || null;
+    this.chat.greeted = true;
+    if (announce && res?.greeting) this.push({ t: 'agent', text: res.greeting });
+    else this.persistChat();
+  }
+
+  private postMessage(text: string): Promise<ChatMessageResponse> {
+    const cfg = this.cfg!;
+    return postJson<ChatMessageResponse>(cfg.apiBase, '/v1/chat/message', {
+      sessionId: this.chat.sessionId, text, locale: cfg.locale, page: window.location.pathname,
+    }, 30000);
+  }
+
   private async ensureSession() {
     if (!this.cfg || this.chat.greeted || this.busy) return;
     this.busy = true;
     this.setTyping(true);
     try {
-      const res = await postJson<ChatSessionResponse>(this.cfg.apiBase, '/v1/chat/session', { locale: this.cfg.locale, page: window.location.pathname }, 15000);
-      this.chat.sessionId = res?.sessionId || null;
-      this.chat.greeted = true;
+      await this.openSession(true);
       this.setOffline(false);
-      if (res?.greeting) this.push({ t: 'agent', text: res.greeting });
-      else this.persistChat();
       if (!this.chat.quickUsed) this.showQuick();
     } catch {
       this.setOffline(true);
@@ -265,14 +347,19 @@ class Concierge {
     this.setTyping(true);
     this.setOffline(false);
     try {
-      if (!this.chat.sessionId) {
-        const s = await postJson<ChatSessionResponse>(this.cfg.apiBase, '/v1/chat/session', { locale: this.cfg.locale, page: window.location.pathname }, 15000);
-        this.chat.sessionId = s?.sessionId || null;
-        this.chat.greeted = true;
+      if (!this.chat.sessionId) await this.openSession(false);
+      let res: ChatMessageResponse;
+      try {
+        res = await this.postMessage(text);
+      } catch (err) {
+        // 404 = the server no longer knows this session (expired, or restarted). Open a fresh one, send once more,
+        // and only fall through to the offline card if that fails too.
+        if (statusOf(err) !== 404) throw err;
+        this.chat.sessionId = null;
+        this.chat.greeted = false;
+        await this.openSession(false);
+        res = await this.postMessage(text);
       }
-      const res = await postJson<ChatMessageResponse>(this.cfg.apiBase, '/v1/chat/message', {
-        sessionId: this.chat.sessionId, text, locale: this.cfg.locale, page: window.location.pathname,
-      }, 30000);
       for (const m of res?.messages ?? []) if (m?.text) this.push({ t: 'agent', text: m.text });
       for (const a of res?.actions ?? []) this.action(a);
     } catch {
@@ -437,7 +524,7 @@ class Concierge {
 
     if (timer) {
       timer.hidden = !(s.startedAt && (this.call.active || s.status === 'ended'));
-      if (!timer.hidden) timer.textContent = this.elapsed();
+      if (!timer.hidden) this.paintTimer();
     }
     if (this.call.active && s.startedAt) this.startTicker(); else this.stopTicker();
 
@@ -450,13 +537,22 @@ class Concierge {
     const list = this.q('[data-cg-mentioned-list]');
     const section = this.q('[data-cg-mentioned]');
     if (list && section) {
-      if (list.childElementCount !== s.cards.length) {
+      // Re-render on the set of ids, not the count: two different homes are both "one card".
+      const sig = s.cards.map(c => c.id).join('|');
+      if (list.dataset.sig !== sig) {
+        list.dataset.sig = sig;
         list.textContent = '';
         for (const card of s.cards) list.append(listingCard(card, this.cfg));
       }
       section.hidden = s.cards.length === 0;
     }
     if (!browserSupportsCall() && orb) orb.disabled = false; // let the tap surface the explanation
+  }
+
+  /** Only the value changes — the visually hidden "Call duration:" label in the markup has to survive every tick. */
+  private paintTimer() {
+    const value = this.q('[data-cg-timer-value]');
+    if (value) value.textContent = this.elapsed();
   }
 
   private elapsed(): string {
@@ -471,12 +567,18 @@ class Concierge {
     if (this.timer) return;
     this.timer = window.setInterval(() => {
       const timer = this.q('[data-cg-timer]');
-      if (timer && !timer.hidden) timer.textContent = this.elapsed();
+      if (timer && !timer.hidden) this.paintTimer();
     }, 1000);
   }
 
   private stopTicker() {
     if (this.timer) { window.clearInterval(this.timer); this.timer = 0; }
+  }
+
+  /** The page itself is going away (close, reload, real navigation): leave nothing running. */
+  dispose() {
+    this.stopTicker();
+    this.call.dispose();
   }
 }
 
@@ -497,4 +599,6 @@ function init() {
 }
 
 document.addEventListener('astro:page-load', init);
+/* An in-site swap keeps the call alive (the panel re-opens on the Call tab); leaving the page for good does not. */
 document.addEventListener('astro:before-swap', () => { if (bound) { widget.unbind(); bound = null; } });
+window.addEventListener('pagehide', () => widget.dispose());

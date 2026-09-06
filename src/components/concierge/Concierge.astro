@@ -59,7 +59,7 @@ const quick = [
 
     <div class="cg-scrim" data-cg-scrim aria-hidden="true"></div>
 
-    <section id="concierge-panel" class="cg-panel" data-cg-panel role="dialog" aria-labelledby="cg-title" aria-hidden="true" tabindex="-1">
+    <section id="concierge-panel" class="cg-panel" data-cg-panel role="dialog" aria-labelledby="cg-title" aria-hidden="true" tabindex="-1" inert>
       <header class="cg-head">
         <span class="cg-head-dot" aria-hidden="true"></span>
         <div class="cg-head-id">
@@ -71,7 +71,7 @@ const quick = [
         </button>
       </header>
 
-      <div class="cg-tabs" role="tablist" aria-label={t(ui.conciergeTabs, locale)}>
+      <div class="cg-tabs" role="tablist" data-cg-tablist aria-label={t(ui.conciergeTabs, locale)}>
         <button type="button" role="tab" id="cg-tab-chat" class="cg-tab" data-cg-tab="chat" aria-controls="cg-pane-chat" aria-selected="true">{t(ui.conciergeTabChat, locale)}</button>
         <button type="button" role="tab" id="cg-tab-call" class="cg-tab" data-cg-tab="call" aria-controls="cg-pane-call" aria-selected="false" tabindex="-1">{t(ui.conciergeTabCall, locale)}</button>
       </div>
@@ -135,7 +135,7 @@ const quick = [
                data-ended={t(ui.conciergeCallEnded, locale)}
                data-error={t(ui.conciergeCallNotConnected, locale)}>{t(ui.conciergeCallIdle, locale)}</p>
 
-            <p class="cg-call-timer" data-cg-timer dir="ltr" hidden><span class="cg-sr">{t(ui.conciergeCallTimer, locale)}: </span>0:00</p>
+            <p class="cg-call-timer" data-cg-timer dir="ltr" hidden><span class="cg-sr">{t(ui.conciergeCallTimer, locale)}: </span><span data-cg-timer-value>0:00</span></p>
             <p class="cg-call-intro" data-cg-call-intro>{t(ui.conciergeCallIntro, locale)}</p>
 
             <div class="cg-call-actions" data-cg-call-actions hidden>

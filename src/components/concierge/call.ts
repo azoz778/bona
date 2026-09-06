@@ -36,6 +36,8 @@ export class CallSession {
   private client: RetellWebClient | null = null;
   private poll = 0;
   private starting = false;
+  /** Bumped by end()/dispose(); a start whose id is stale drops whatever it was about to do. */
+  private startId = 0;
 
   get active(): boolean {
     return this.state.status === 'connecting' || this.state.status === 'live' || this.state.status === 'speaking' || this.state.status === 'permission';
@@ -46,60 +48,81 @@ export class CallSession {
     this.onChange();
   }
 
+  /** Every await below is followed by this check: the panel may have closed, or the page gone, meanwhile. */
+  private live(id: number): boolean {
+    return id === this.startId;
+  }
+
   async start(apiBase: string, locale: string, page: string): Promise<void> {
     if (this.starting || this.active) return;
+    const id = ++this.startId;
     this.starting = true;
     this.set({ status: 'permission', errorKind: null, cards: [], transcript: [], endedAt: null, muted: false, callId: null });
 
-    if (!browserSupportsCall()) {
-      this.starting = false;
-      this.set({ status: 'error', errorKind: 'unsupported' });
-      return;
-    }
-
-    // Ask for the microphone first, so a denial is reported before a call token is spent.
     try {
-      const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
-      probe.getTracks().forEach(t => t.stop());
-    } catch {
-      this.starting = false;
-      this.set({ status: 'error', errorKind: 'mic' });
-      return;
-    }
+      if (!browserSupportsCall()) {
+        this.set({ status: 'error', errorKind: 'unsupported' });
+        return;
+      }
 
-    this.set({ status: 'connecting' });
-    try {
-      const [{ accessToken, callId }, mod] = await Promise.all([
-        postJson<CallTokenResponse>(apiBase, '/v1/call/token', { locale, page }, 15000),
-        import('retell-client-js-sdk'),
-      ]);
-      if (!accessToken) throw new Error('no access token');
+      // Ask for the microphone first, so a denial is reported before a call token is spent.
+      try {
+        const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+        probe.getTracks().forEach(t => t.stop());
+      } catch {
+        if (this.live(id)) this.set({ status: 'error', errorKind: 'mic' });
+        return;
+      }
+      if (!this.live(id)) return;
 
-      const client = new mod.RetellWebClient();
-      this.client = client;
-      this.state.callId = callId || null;
+      this.set({ status: 'connecting' });
+      let client: RetellWebClient | null = null;
+      try {
+        const [{ accessToken, callId }, mod] = await Promise.all([
+          postJson<CallTokenResponse>(apiBase, '/v1/call/token', { locale, page }, 15000),
+          import('retell-client-js-sdk'),
+        ]);
+        if (!this.live(id)) return;
+        if (!accessToken) throw new Error('no access token');
 
-      client.on('call_started', () => this.set({ status: 'live', startedAt: Date.now() }));
-      client.on('agent_start_talking', () => { if (this.active) this.set({ status: 'speaking' }); });
-      client.on('agent_stop_talking', () => { if (this.active) this.set({ status: 'live' }); });
-      client.on('update', (u: { transcript?: { role: string; content: string }[] }) => {
-        if (Array.isArray(u?.transcript)) this.set({ transcript: u.transcript.slice(-6) });
-      });
-      client.on('call_ended', () => this.finish('ended'));
-      client.on('error', () => { try { client.stopCall(); } catch { /* already down */ } this.finish('error', 'failed'); });
+        client = new mod.RetellWebClient();
+        this.client = client;
+        this.state.callId = callId || null;
+        const mine = () => this.client === client && this.live(id);
 
-      await client.startCall({ accessToken });
-      this.startPolling(apiBase);
-    } catch {
-      this.finish('error', 'failed');
+        client.on('call_started', () => { if (mine()) this.set({ status: 'live', startedAt: Date.now() }); });
+        client.on('agent_start_talking', () => { if (mine() && this.active) this.set({ status: 'speaking' }); });
+        client.on('agent_stop_talking', () => { if (mine() && this.active) this.set({ status: 'live' }); });
+        client.on('update', (u: { transcript?: { role: string; content: string }[] }) => {
+          if (mine() && Array.isArray(u?.transcript)) this.set({ transcript: u.transcript.slice(-6) });
+        });
+        client.on('call_ended', () => { if (mine()) this.finish('ended'); });
+        client.on('error', () => {
+          try { client?.stopCall(); } catch { /* already down */ }
+          if (mine()) this.finish('error', 'failed');
+        });
+
+        await client.startCall({ accessToken });
+        // Closed or navigated away while the SDK was connecting: take the call down instead of leaving it live.
+        if (!this.live(id)) { try { client.stopCall(); } catch { /* already down */ } this.client = null; return; }
+        this.startPolling(apiBase);
+      } catch {
+        try { client?.stopCall(); } catch { /* already down */ }
+        if (this.live(id)) this.finish('error', 'failed');
+        else this.client = null;
+      }
     } finally {
-      this.starting = false;
+      if (this.live(id)) this.starting = false;
     }
   }
 
+  /** Ends a live call and cancels one that is still connecting. Safe to call when nothing is running. */
   end(): void {
+    this.startId++;
+    this.starting = false;
     try { this.client?.stopCall(); } catch { /* already down */ }
     if (this.active) this.finish('ended');
+    else { this.stopPolling(); this.client = null; }
   }
 
   toggleMute(): void {
@@ -109,11 +132,14 @@ export class CallSession {
     this.set({ muted: next });
   }
 
-  /** Called when the widget's DOM goes away for good; keeps nothing running. */
+  /** Called when the page goes away for good; keeps nothing running and invalidates any pending start. */
   dispose(): void {
+    this.startId++;
+    this.starting = false;
     this.stopPolling();
     try { this.client?.stopCall(); } catch { /* already down */ }
     this.client = null;
+    if (this.active) this.set({ status: 'ended', endedAt: Date.now(), muted: false });
   }
 
   private finish(status: 'ended' | 'error', errorKind: CallErrorKind | null = null) {

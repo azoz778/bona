@@ -1,5 +1,12 @@
 /* Concierge HTTP client. The contract is fixed by the backend workstream (spec §3) — do not change shapes here.
-   apiBase is overridable at runtime for QA: ?concierge_api=<url> (sticky for the tab) or window.BONA_CONCIERGE_API. */
+
+   apiBase override, for QA only (see docs/qa/concierge/README.md):
+   - `?concierge_api=<url>` is honoured **only** when the page itself is served from localhost/127.0.0.1 (dev or
+     `npm run preview`) *and* the target is a localhost http(s) URL. Anywhere else the parameter is ignored and any
+     override left in sessionStorage is dropped, so a crafted production link cannot re-point the widget at a
+     stranger's API. It stays sticky for the tab so it survives the `navigate` action.
+   - `window.BONA_CONCIERGE_API` still wins on any host, because it can only be set from the console by whoever is
+     already sitting at the browser. */
 
 export type Loc = 'en' | 'ar';
 
@@ -32,17 +39,53 @@ export interface CallContextResponse { listings?: Card[]; updatedAt?: string }
 
 export const API_KEY = 'bona.concierge.api';
 
-/** Query param wins (and sticks for the tab, so it survives the `navigate` action), then the global, then site.json. */
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
+/** The page itself is a dev/preview page — the only place a QA override is allowed to take effect. */
+function onLocalPage(): boolean {
+  try { return LOCAL_HOSTS.has(window.location.hostname); } catch { return false; }
+}
+
+/** A QA override must be a localhost http(s) URL, requested from a localhost page. Anything else is refused. */
+function allowedOverride(raw: string): boolean {
+  if (!raw || !onLocalPage()) return false;
+  try {
+    const url = new URL(raw);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && LOCAL_HOSTS.has(url.hostname);
+  } catch { return false; }
+}
+
+/** Query param (localhost only, sticky for the tab so it survives the `navigate` action), then the global, then site.json. */
 export function resolveApiBase(fallback: string): string {
   let base = '';
   try {
     const q = new URLSearchParams(window.location.search).get('concierge_api');
-    if (q) { base = q; try { sessionStorage.setItem(API_KEY, q); } catch {} }
-    else base = sessionStorage.getItem(API_KEY) || '';
+    const candidate = q ?? sessionStorage.getItem(API_KEY) ?? '';
+    if (candidate && allowedOverride(candidate)) {
+      base = candidate;
+      try { sessionStorage.setItem(API_KEY, candidate); } catch { /* private mode */ }
+    } else if (candidate) {
+      try { sessionStorage.removeItem(API_KEY); } catch { /* private mode */ }
+    }
   } catch { /* private mode */ }
   if (!base) base = (window as unknown as { BONA_CONCIERGE_API?: string }).BONA_CONCIERGE_API || '';
   if (!base) base = fallback || '';
   return base.replace(/\/+$/, '');
+}
+
+/** A failed request carries its HTTP status, so callers can tell an expired session (404) from a dead API. */
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(status: number) {
+    super(`HTTP ${status}`);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+/** The HTTP status of a rejection, or 0 for a network error / timeout. */
+export function statusOf(err: unknown): number {
+  return err instanceof ApiError ? err.status : 0;
 }
 
 async function request<T>(url: string, init: RequestInit, timeoutMs: number): Promise<T> {
@@ -50,7 +93,7 @@ async function request<T>(url: string, init: RequestInit, timeoutMs: number): Pr
   const timer = window.setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(url, { ...init, signal: ctrl.signal, cache: 'no-store', credentials: 'omit' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new ApiError(res.status);
     return (await res.json()) as T;
   } finally {
     window.clearTimeout(timer);

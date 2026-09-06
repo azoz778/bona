@@ -44,6 +44,20 @@ function plural(n: number, forms: PluralForms, locale: Loc): string {
   return (forms.ar[cat] ?? forms.ar.other).replace('{n}', num(n));
 }
 
+/** Card images: only our own paths and plain https URLs. Anything else (data:, blob:, http:, protocol-relative,
+    javascript:) is dropped and the card renders without a picture — an API response must not be able to point the
+    browser at an arbitrary resource. */
+export function safeImageSrc(raw: string | null | undefined): string | null {
+  if (!raw || typeof raw !== 'string') return null;
+  const src = raw.trim();
+  if (!src || src.startsWith('//')) return null;
+  if (src.startsWith('/')) return src;
+  try {
+    const url = new URL(src);
+    return url.protocol === 'https:' ? url.href : null;
+  } catch { return null; }
+}
+
 /** Card links stay on this site: an off-origin url from the API falls back to the local property page. */
 function cardHref(card: Card, cfg: ConciergeConfig): string {
   const local = card.slug ? `${cfg.propertiesBase}${card.slug}/` : cfg.propertiesBase;
@@ -64,7 +78,7 @@ export function listingCard(card: Card, cfg: ConciergeConfig): HTMLElement {
   link.href = cardHref(card, cfg);
   link.setAttribute('data-concierge-card-link', '');
 
-  const thumb = card.image?.thumb || card.image?.src;
+  const thumb = safeImageSrc(card.image?.thumb) || safeImageSrc(card.image?.src);
   if (thumb) {
     const media = el('span', 'cg-card-media');
     const img = el('img');

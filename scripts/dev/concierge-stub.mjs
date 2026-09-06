@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 /* Local stand-in for the concierge API (spec §3) — development only, never part of the site build.
  *
- *   node scripts/dev/concierge-stub.mjs [--port 4102]
- *   npm run preview   # then open http://localhost:4321/?concierge_api=http://localhost:4102
+ *   node scripts/dev/concierge-stub.mjs [--port 4102] [--expire-once]
+ *   npm run preview   # then open http://localhost:4321/?concierge_api=http://127.0.0.1:4102
+ *
+ * The `?concierge_api=` override is honoured only on a localhost page pointing at a localhost API — which is
+ * exactly this arrangement. See docs/qa/concierge/README.md.
  *
  * Canned but contract-shaped: a greeting, a reply that carries one `show_listing` Card built from
  * src/data/listings.json, a `navigate` action for "show me houses", a `whatsapp` action, a fake call
  * token (so the Call tab exercises its failure path) and a call-context endpoint.
+ *
+ * Expired-session drill: `--expire-once`, or `GET/POST /__stub/expire-next` at any time, makes the next
+ * /v1/chat/message answer 404 once — the widget must silently open a new session and resend.
  */
 
 import { createServer } from 'node:http';
@@ -24,6 +30,8 @@ const PORT = Number(argPort > -1 ? process.argv[argPort + 1] : process.env.PORT 
 const started = Date.now();
 const sessions = new Map();
 const calls = new Map();
+/** When true, the next /v1/chat/message is answered 404 as if the session had expired. */
+let expireNext = process.argv.includes('--expire-once');
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -61,14 +69,18 @@ const path = (locale, p) => (locale === 'ar' ? `/ar${p}` : p);
 
 function send(res, code, body) {
   const payload = JSON.stringify(body);
-  res.writeHead(code, {
-    'content-type': 'application/json; charset=utf-8',
-    'cache-control': 'no-store',
-    'access-control-allow-origin': '*',
-    'access-control-allow-headers': 'content-type',
-    'access-control-allow-methods': 'GET,POST,OPTIONS',
-  });
+  res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
   res.end(payload);
+}
+
+/* CORS. The origin is echoed rather than `*` because navigator.sendBeacon (used by "New conversation")
+   sends in credentials mode "include", which a wildcard origin is not allowed to answer. */
+function cors(req, res) {
+  res.setHeader('access-control-allow-origin', req.headers.origin || '*');
+  res.setHeader('access-control-allow-credentials', 'true');
+  res.setHeader('access-control-allow-headers', 'content-type');
+  res.setHeader('access-control-allow-methods', 'GET,POST,OPTIONS');
+  res.setHeader('vary', 'origin');
 }
 
 const readBody = (req) => new Promise((resolve) => {
@@ -117,7 +129,8 @@ function reply(text, locale) {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const route = url.pathname.replace(/\/+$/, '') || '/';
-  if (req.method === 'OPTIONS') return send(res, 204, {});
+  cors(req, res);
+  if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
   console.log(`${req.method} ${route}`);
 
   if (route === '/health') {
@@ -137,9 +150,16 @@ const server = createServer(async (req, res) => {
     });
   }
 
+  if (route === '/__stub/expire-next') {
+    expireNext = true;
+    console.log('  → the next /v1/chat/message will answer 404');
+    return send(res, 200, { ok: true, expireNext: true });
+  }
+
   if (route === '/v1/chat/message' && req.method === 'POST') {
     const { sessionId, text = '', locale = 'en' } = await readBody(req);
-    if (!sessionId || !sessions.has(sessionId)) return send(res, 400, { error: 'unknown session' });
+    if (expireNext) { expireNext = false; sessions.delete(sessionId); }
+    if (!sessionId || !sessions.has(sessionId)) return send(res, 404, { error: 'unknown session' });
     await new Promise(r => setTimeout(r, 600));
     return send(res, 200, reply(text, locale));
   }
@@ -171,4 +191,6 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`bona concierge stub on http://127.0.0.1:${PORT}  (${listings.length} listings)`);
   console.log(`point the widget at it:  http://localhost:4321/?concierge_api=http://127.0.0.1:${PORT}`);
+  console.log(`expire the next message:  curl http://127.0.0.1:${PORT}/__stub/expire-next`);
+  if (expireNext) console.log('--expire-once: the first chat message will answer 404');
 });

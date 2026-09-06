@@ -322,7 +322,6 @@ export const ui = {
   conciergeAskDana: s('Ask Dana', 'اسأل دانة'),
   conciergeAskAboutHome: s('Ask Dana about this home', 'اسأل دانة عن هذا المنزل'),
   conciergeAskAboutHomeMsg: s('Tell me about {title} ({id}).', 'حدّثيني عن {title} ({id}).'),
-  conciergeCallTitle: s('Speak with Dana', 'تحدّث مع دانة'),
   conciergeCallIntro: s('A voice conversation in your browser, in Arabic or English. The microphone is used only while the call is running.', 'محادثة صوتية داخل المتصفح، بالعربية أو الإنجليزية. لا يُستخدم الميكروفون إلا أثناء المكالمة.'),
   conciergeCallStart: s('Start the call', 'ابدأ المكالمة'),
   conciergeCallIdle: s('Ready when you are', 'جاهزة متى شئت'),
