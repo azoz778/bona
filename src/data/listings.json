@@ -3889,6 +3889,153 @@
     "listedAt": "2026-09-06"
   },
   {
+    "id": "BONA-W006",
+    "slug": "al-warf-district-jeddah",
+    "sourceRef": "WA-20260906-AC4C77",
+    "status": "available",
+    "category": "off-plan",
+    "type": "villa",
+    "kind": "house",
+    "featured": false,
+    "title": {
+      "en": "Al Warf District, Jeddah",
+      "ar": "وجهة الويرف، جدة"
+    },
+    "location": {
+      "district": {
+        "en": "Southeast Jeddah",
+        "ar": "جنوب شرق جدة"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": null,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": true
+    },
+    "specs": {
+      "beds": null,
+      "baths": null,
+      "areaSqm": null,
+      "plotSqm": null,
+      "yearBuilt": null,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "/listings/al-warf-district-jeddah/01.jpg",
+        "thumb": "/listings/al-warf-district-jeddah/01-thumb.webp",
+        "alt": {
+          "en": "Exterior — Al Warf District, Jeddah",
+          "ar": "الواجهة الخارجية — وجهة الويرف، جدة"
+        }
+      },
+      {
+        "src": "/listings/al-warf-district-jeddah/02.jpg",
+        "thumb": "/listings/al-warf-district-jeddah/02-thumb.webp",
+        "alt": {
+          "en": "Exterior — Al Warf District, Jeddah",
+          "ar": "الواجهة الخارجية — وجهة الويرف، جدة"
+        }
+      },
+      {
+        "src": "/listings/al-warf-district-jeddah/03.jpg",
+        "thumb": "/listings/al-warf-district-jeddah/03-thumb.webp",
+        "alt": {
+          "en": "Entrance — Al Warf District, Jeddah",
+          "ar": "المدخل — وجهة الويرف، جدة"
+        }
+      },
+      {
+        "src": "/listings/al-warf-district-jeddah/04.jpg",
+        "thumb": "/listings/al-warf-district-jeddah/04-thumb.webp",
+        "alt": {
+          "en": "Exterior — Al Warf District, Jeddah",
+          "ar": "الواجهة الخارجية — وجهة الويرف، جدة"
+        }
+      },
+      {
+        "src": "/listings/al-warf-district-jeddah/05.jpg",
+        "thumb": "/listings/al-warf-district-jeddah/05-thumb.webp",
+        "alt": {
+          "en": "Sea view — Al Warf District, Jeddah",
+          "ar": "إطلالة على البحر — وجهة الويرف، جدة"
+        }
+      },
+      {
+        "src": "/listings/al-warf-district-jeddah/06.jpg",
+        "thumb": "/listings/al-warf-district-jeddah/06-thumb.webp",
+        "alt": {
+          "en": "Exterior — Al Warf District, Jeddah",
+          "ar": "الواجهة الخارجية — وجهة الويرف، جدة"
+        }
+      },
+      {
+        "src": "/listings/al-warf-district-jeddah/07.jpg",
+        "thumb": "/listings/al-warf-district-jeddah/07-thumb.webp",
+        "alt": {
+          "en": "Garden — Al Warf District, Jeddah",
+          "ar": "الحديقة — وجهة الويرف، جدة"
+        }
+      },
+      {
+        "src": "/listings/al-warf-district-jeddah/08.jpg",
+        "thumb": "/listings/al-warf-district-jeddah/08-thumb.webp",
+        "alt": {
+          "en": "Aerial view — Al Warf District, Jeddah",
+          "ar": "منظر جوي — وجهة الويرف، جدة"
+        }
+      }
+    ],
+    "description": {
+      "en": "Al Warf sits in southeast Jeddah, close to the historic city center and its main arteries. The development is planned as part of the wider Wjhat destinations program, with schools, mosques, health centers and retail reachable within a five- to ten-minute walk on a dedicated pedestrian network.\n\nThe residential collection comprises 693 villas and townhouses across eight models — A, B, C and D villas, the Ufuq and Maren townhouses, and the Saah and Rihab villas. Built-up areas range from about 161 sqm for the townhouses to 271 sqm for the largest villa model, with three to four bedrooms and four to six bathrooms depending on the model. Each home is arranged over a ground floor, first floor and roof level, with a private majlis, living and dining areas, and a private parking space.\n\nConstruction follows the Saudi Building Code, with porcelain flooring, washable paint, moisture-resistant gypsum ceilings and marble cladding to interior and exterior walls. Bathrooms use non-slip tiling and rust-resistant fittings, while doors and double-glazed windows are rated for water resistance and thermal insulation. The homes carry a ten-year structural warranty alongside shorter warranties on finishing, plumbing and electrical work.\n\nThe wider Wjhat Al Warf destination is planned for around 12,000 residential units, 21 retail centers, ten schools, twelve mosques, two health centers and landscaped green spaces exceeding a million square meters. Renderings throughout the brochure are for illustrative purposes, as the project remains under development.",
+      "ar": "تقع وجهة الويرف في جنوب شرق جدة، على مقربة من قلب المدينة التاريخية ومداخلها الرئيسية. يأتي المشروع ضمن برنامج «وجهات» التطويري الأوسع، حيث تتوزع المدارس والمساجد والمراكز الصحية والمرافق التجارية على مسافة خمس إلى عشر دقائق سيرًا عبر شبكة ممرات مخصصة للمشاة.\n\nتضم المجموعة السكنية 693 وحدة بين فلل وتاون هاوس موزعة على ثمانية نماذج: فلل A وB وC وD، وتاون هاوس أفق ومرن، وفلل سعة ورحاب. تتراوح مساحات البناء بين نحو 161 مترًا مربعًا للتاون هاوس و271 مترًا مربعًا لأكبر نماذج الفلل، بواقع ثلاث إلى أربع غرف نوم وأربع إلى ست دورات مياه بحسب النموذج. تتوزع كل وحدة على دور أرضي وأول وسطح، وتضم مجلسًا خاصًا وصالة معيشة وطعام وموقف سيارة خاص.\n\nيلتزم التنفيذ بكود البناء السعودي، مع أرضيات بورسلين ودهانات قابلة للغسل وأسقف جبسية مقاومة للرطوبة وكسوة رخامية داخلية وخارجية. تُجهَّز دورات المياه ببلاط مانع للانزلاق وتجهيزات مقاومة للصدأ، فيما تحمل الأبواب والنوافذ المزدوجة الزجاج مواصفات عزل مائي وحراري. وتشمل الضمانات عشر سنوات على الهيكل الإنشائي، إلى جانب ضمانات أقصر على التشطيبات والسباكة والكهرباء.\n\nتخطط وجهة الويرف الأوسع لتضم نحو 12,000 وحدة سكنية، و21 مركزًا تجاريًا، وعشر مدارس، و12 مسجدًا وجامعًا، ومركزين صحيين، ومساحات خضراء تتجاوز مليون متر مربع. الصور ثلاثية الأبعاد الواردة في الكتيب مخصصة للأغراض التوضيحية فقط، إذ ما يزال المشروع قيد التطوير."
+    },
+    "highlights": {
+      "en": [
+        "Eight villa & townhouse models",
+        "693 units across the community",
+        "Green boulevard and parks",
+        "5–10 minute walk to schools & mosques",
+        "10-year structural warranty",
+        "Southeast Jeddah location"
+      ],
+      "ar": [
+        "ثمانية نماذج فلل وتاون هاوس",
+        "693 وحدة سكنية",
+        "ممر أخضر وحدائق",
+        "خمس إلى عشر دقائق للمدارس والمساجد",
+        "ضمان إنشائي 10 سنوات",
+        "موقع في جنوب شرق جدة"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": "https://bona.azoz.uk/listings/al-warf-district-jeddah/brochure.pdf",
+    "project": {
+      "name": {
+        "en": "Al Warf District",
+        "ar": "وجهة الويرف"
+      },
+      "developer": {
+        "en": "Faisal Bin Saedan Real Estate Investment & Development",
+        "ar": "شركة فيصل بن سعيدان للاستثمار والتطوير العقاري"
+      }
+    },
+    "unit": null,
+    "map": null,
+    "listedAt": "2026-09-06"
+  },
+  {
     "id": "BONA-W002",
     "slug": "nuzul-khayala-residences-north-jeddah",
     "sourceRef": "WA-20260906-AC20EE",
