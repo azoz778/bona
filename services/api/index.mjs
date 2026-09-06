@@ -28,6 +28,7 @@ import { createLimiter, clientIp, trustedPeer } from './lib/ratelimit.mjs';
 import { openDb, newId } from './lib/db.mjs';
 import { validateEvent, recordEvent, cleanAttrIds, MAX_BODY_BYTES as MAX_EVENT_BYTES } from './lib/events.mjs';
 import { validateEnquiry } from './lib/enquiry.mjs';
+import { importJsonl } from './lib/import-legacy.mjs';
 import { createBudget } from './lib/budget.mjs';
 import { createInventory } from './lib/inventory.mjs';
 import { createStore } from './lib/store.mjs';
@@ -665,6 +666,12 @@ export function createApp(options = {}) {
 const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
 if (isMain) {
   const app = createApp();
+  // The enquiries recorded before the store existed come in once; a rerun is a no-op.
+  try {
+    jsonLog('info', { evt: 'import.legacy', ...importJsonl(app.db, app.cfg.dataDir) });
+  } catch (err) {
+    jsonLog('error', { evt: 'import.legacy_failed', error: String(err?.message ?? err) });
+  }
   app.server.listen(app.cfg.port, app.cfg.host, () => {
     jsonLog('info', { evt: 'listening', ...redacted(app.cfg) });
   });
