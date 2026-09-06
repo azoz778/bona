@@ -57,6 +57,11 @@ Rules: prices are asking prices from TK only (never an estimate — TAQEEM rule)
 - IDs are positional (`BONA-###` = index+1 in `listings.source.mjs`): new listings are appended at the END of the array, never inserted.
 - Curation helpers: `node scripts/curate/contact-sheet.mjs <gallery-folder> <out.jpg>` (labelled index sheet) and `node scripts/curate/land-stills.mjs <PLOT-ID> <lat> <lng>`.
 
+## REGA advertising compliance (2026-09-06, tracking round)
+- Optional `licence`: `{ "adNumber": string|null, "adExpiry": "YYYY-MM-DD"|null, "wafiNumber": string|null, "escrowAccount": string|null } | null` — the advertisement licence REGA issues per listing on the FAL platform, and the Wafi licence / escrow account for off-plan projects. `validate.mjs` checks the shape only (strings ≤ 64 chars, `adExpiry` a date that needs an `adNumber`); whether a licence is required is the owner's call.
+- Curated listings get theirs from `scripts/curate/licences.json` (keyed by id, merged by `build.mjs`); intake listings carry `licence` in their inbox JSON (the intake's `licence` / `wafi` commands). Default `null` everywhere.
+- `RegaBlock.astro` renders, on every listing page, the advertiser (`site.json → advertiser`, the owner's personal FAL while the Bona CR is pursued), the advertisement licence line when `adNumber` is set, the Wafi line when `wafiNumber` is set, and a QR code of the listing URL (`src/lib/qr.ts`, no dependency; `node scripts/qr-selftest.mjs`).
+
 ## Publication rule (owner, 2026-09-05 20:45)
 Only listings whose `sourceRef` exists in TK's live public API (scripts/tk-public-properties.snapshot.json, refreshed from https://dashboard.azoz.uk/api/public/properties) AND whose API status is available are written to listings.json. `scripts/curate/build.mjs` enforces it; anything from the old TK website that is not in the live list is excluded.
 

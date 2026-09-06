@@ -178,6 +178,21 @@ for (const l of data) {
     err(id, "a map pin needs mapPrecision ('exact' or 'district')");
   }
   if (isLand && l.map && l.mapPrecision !== 'exact') err(id, 'land listings need an exact plot pin, never a district centroid');
+  // REGA advertising compliance (optional; shape only — whether a licence is actually required is the owner's call).
+  // { adNumber, adExpiry (YYYY-MM-DD), wafiNumber, escrowAccount }, each a short string or null.
+  if (!(l.licence === null || l.licence === undefined)) {
+    const lc = l.licence;
+    if (!lc || typeof lc !== 'object' || Array.isArray(lc)) err(id, 'licence must be null or { adNumber, adExpiry, wafiNumber, escrowAccount }');
+    else {
+      for (const k of Object.keys(lc)) if (!['adNumber', 'adExpiry', 'wafiNumber', 'escrowAccount'].includes(k)) err(id, `licence has an unknown field "${k}"`);
+      for (const k of ['adNumber', 'adExpiry', 'wafiNumber', 'escrowAccount']) {
+        const v = lc[k];
+        if (!(v === null || v === undefined || (typeof v === 'string' && v.trim().length > 0 && v.length <= 64))) err(id, `licence.${k} must be null or a non-empty string of at most 64 characters`);
+      }
+      if (typeof lc.adExpiry === 'string' && (!/^\d{4}-\d{2}-\d{2}$/.test(lc.adExpiry) || Number.isNaN(Date.parse(lc.adExpiry)))) err(id, `licence.adExpiry must be YYYY-MM-DD, got ${lc.adExpiry}`);
+      if (typeof lc.adExpiry === 'string' && !lc.adNumber) err(id, 'licence.adExpiry without licence.adNumber');
+    }
+  }
 
   // copy hygiene
   for (const [label, str] of [['title.en', l.title?.en], ['title.ar', l.title?.ar], ['description.en', l.description?.en], ['description.ar', l.description?.ar], ['project.name.en', l.project?.name?.en], ['project.name.ar', l.project?.name?.ar], ...((h.en ?? []).map((x, i) => [`highlights.en[${i}]`, x])), ...((h.ar ?? []).map((x, i) => [`highlights.ar[${i}]`, x]))]) if (isStr(str)) checkCopy(id, label, str);

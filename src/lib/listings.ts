@@ -26,6 +26,10 @@ export interface Listing {
   map?: { lat: number; lng: number } | null;
   /** How much the pin is worth: 'exact' is the published pin, 'district' a centroid the build filled in. Null when there is no pin. */
   mapPrecision?: 'exact' | 'district' | null;
+  /** REGA advertising compliance (optional, shape only). adNumber/adExpiry = the advertisement licence issued for this
+      listing on the FAL platform; wafiNumber = the off-plan project's Wafi licence; escrowAccount = its escrow account.
+      Curated listings take theirs from scripts/curate/licences.json, intake listings carry it in their inbox JSON. */
+  licence?: { adNumber?: string | null; adExpiry?: string | null; wafiNumber?: string | null; escrowAccount?: string | null } | null;
 }
 
 export const listings: Listing[] = raw as Listing[];

@@ -74,6 +74,7 @@ const out = LISTINGS.map((l, idx) => {
     unit: l.unit ?? null,
     map: l.map ?? null,
     listedAt: l.listedAt,
+    licence: null, // filled from scripts/curate/licences.json below
   };
 });
 
@@ -115,6 +116,8 @@ if (fs.existsSync(INBOX)) {
     if (!KIND_OF[clean.type]) throw new Error(`inbox/${name}: no kind mapping for type "${clean.type}"`);
     clean.kind = KIND_OF[clean.type];
     clean.featured = Boolean(clean.featured);
+    // REGA licence fields travel with the inbox JSON (the intake's `licence` / `wafi` commands write them there).
+    clean.licence = clean.licence ?? null;
     for (const [i, im] of (clean.images ?? []).entries()) {
       // BOTH src and thumb: a listing whose thumbnail is missing renders a broken card,
       // and the site never regenerates one at build time.
@@ -148,6 +151,21 @@ for (const l of published) {
   else { l.map = null; l.mapPrecision = null; noPin++; }
 }
 console.log(`Map pins: ${exactPins} exact, ${districtPins} district-level, ${noPin} without a pin`);
+
+// ---- REGA advertising licences -----------------------------------------------------------
+// Curated (TK-synced) listings have no home for a licence in listings.source.mjs, so the
+// numbers live in scripts/curate/licences.json keyed by listing id:
+//   { "BONA-015": { "adNumber": "7200012345", "adExpiry": "2027-03-01", "wafiNumber": null, "escrowAccount": null } }
+// The site renders the advertiser + FAL line on every listing regardless; these add the
+// per-listing advertisement licence (and the Wafi licence for off-plan) when the owner has one.
+const LICENCES = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts', 'curate', 'licences.json'), 'utf8'));
+let licensed = 0;
+for (const l of published) {
+  const lc = LICENCES[l.id];
+  if (lc && typeof lc === 'object') { l.licence = { adNumber: null, adExpiry: null, wafiNumber: null, escrowAccount: null, ...lc }; }
+  if (l.licence && (l.licence.adNumber || l.licence.wafiNumber)) licensed++;
+}
+console.log(`REGA licences: ${licensed} of ${published.length} listings carry an advertisement or Wafi licence`);
 
 // Every site-local image must actually exist in public/ — src AND thumb, for the curated
 // set as well as the intake set. A missing file is a broken page, so it fails the build.
