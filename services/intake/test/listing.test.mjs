@@ -147,6 +147,22 @@ describe('buildListing', () => {
     assert.match(l.images[0].alt.ar, /صورة توضيحية/);
   });
 
+  it('carries a map pin found in the brochure, marked exact', () => {
+    const l = buildListing({
+      ai: structuredClone(AI), images: imagesFor(slug, picks), slug, id: 'BONA-W011', repo: REPO,
+      caption: {}, meta: { map: { lat: 21.338, lng: 39.304778 } },
+    });
+    assert.deepEqual(l.map, { lat: 21.338, lng: 39.304778 });
+    assert.equal(l.mapPrecision, 'exact');
+    assert.deepEqual(checkListing(l), []);
+  });
+
+  it('leaves map null and precision null when the brochure carries no pin', () => {
+    const l = base();
+    assert.equal(l.map, null);
+    assert.equal(l.mapPrecision, null);
+  });
+
   it('lets the caption override the price and the category', () => {
     const l = buildListing({
       ai: structuredClone(AI), images: imagesFor(slug, picks), slug, id: 'BONA-W009', repo: REPO,

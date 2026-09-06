@@ -168,6 +168,16 @@ for (const l of data) {
     if (!ok) err(id, 'map must be null or { lat, lng } numbers');
   }
   if (isLand && !(l.map && typeof l.map.lat === 'number')) err(id, 'land listings need map.lat/lng (exact plot pin)');
+  // How much the pin is worth: 'exact' is the developer's / register's own pin, 'district'
+  // a district centroid the site fills in so a listing still shows roughly where it is.
+  // A pin with no precision would be rendered as exact, so the two travel together.
+  if (!(l.mapPrecision === null || l.mapPrecision === undefined)) {
+    if (!['exact', 'district'].includes(l.mapPrecision)) err(id, "mapPrecision must be null, 'exact' or 'district'");
+    if (!l.map) err(id, 'mapPrecision without a map pin');
+  } else if (l.map) {
+    err(id, "a map pin needs mapPrecision ('exact' or 'district')");
+  }
+  if (isLand && l.map && l.mapPrecision !== 'exact') err(id, 'land listings need an exact plot pin, never a district centroid');
 
   // copy hygiene
   for (const [label, str] of [['title.en', l.title?.en], ['title.ar', l.title?.ar], ['description.en', l.description?.en], ['description.ar', l.description?.ar], ['project.name.en', l.project?.name?.en], ['project.name.ar', l.project?.name?.ar], ...((h.en ?? []).map((x, i) => [`highlights.en[${i}]`, x])), ...((h.ar ?? []).map((x, i) => [`highlights.ar[${i}]`, x]))]) if (isStr(str)) checkCopy(id, label, str);

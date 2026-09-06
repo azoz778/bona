@@ -118,7 +118,10 @@
     }
   },
   "unit": null,
-  "map": null,
+  "map": {
+    "lat": 21.338,
+    "lng": 39.304778
+  },
   "listedAt": "2026-09-06",
   "hidden": false,
   "_intake": {
@@ -158,5 +161,6 @@
     ],
     "createdAt": "2026-09-06T02:22:34.556Z",
     "site": "https://bona.azoz.uk"
-  }
+  },
+  "mapPrecision": "exact"
 }

@@ -84,6 +84,7 @@ type ListingExt = Listing & {
   project?: { name?: Localised | null; developer?: Localised | null } | null;
   unit?: { floor?: string | number | null; block?: string | null; unitRef?: string | null } | null;
   map?: { lat: number; lng: number } | null;
+  mapPrecision?: 'exact' | 'district' | null;
 };
 const KIND_SET = new Set<string>(['house', 'apartment', 'land', 'building']);
 import kindMapJson from '../data/kind-map.json';
@@ -453,7 +454,11 @@ export function listingJsonLd(listing: Listing, locale: Locale): object {
     url,
     image: images,
     address,
-    geo: x.map && typeof x.map.lat === 'number' && typeof x.map.lng === 'number'
+    // EXACT pins only. Most listings carry a district centroid (mapPrecision: 'district')
+    // that the page labels as approximate; publishing one as GeoCoordinates would tell a
+    // search engine the home stands at a point it does not stand at. The address block
+    // above already carries the district, which is the true claim.
+    geo: x.map && x.mapPrecision === 'exact' && typeof x.map.lat === 'number' && typeof x.map.lng === 'number'
       ? { '@type': 'GeoCoordinates', latitude: x.map.lat, longitude: x.map.lng }
       : undefined,
     containedInPlace: projectName

@@ -1,0 +1,98 @@
+---
+/* Where a listing is, on a map.
+   Same facade pattern as TourEmbed: nothing third-party is requested until the visitor asks
+   for it, so the page stays fast and no map provider sees a visitor who never opened a map.
+   Precision is shown honestly — `mapPrecision: 'district'` says so on the face of it, because
+   a district centroid drawn as a confident pin would claim accuracy we do not have. */
+import Icon from './Icon.astro';
+import { t, ui, fill, type Locale } from '../lib/i18n';
+import { localeTitle, type Listing } from '../lib/listings';
+
+interface Props { listing: Listing; locale: Locale; class?: string }
+const { listing: l, locale, class: cls = '' } = Astro.props;
+
+const pin = l.map && Number.isFinite(l.map.lat) && Number.isFinite(l.map.lng) ? l.map : null;
+const exact = l.mapPrecision === 'exact';
+const title = localeTitle(l, locale);
+
+// A district pin is a centroid, so the frame opens wider: a tight box around it would look
+// like the house is on that exact corner.
+const span = exact ? 0.006 : 0.022;
+const bbox = pin ? [pin.lng - span, pin.lat - span / 2, pin.lng + span, pin.lat + span / 2].map(n => n.toFixed(6)).join(',') : '';
+const embedSrc = pin
+  ? `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${pin.lat},${pin.lng}`
+  : '';
+const mapsLink = pin ? `https://www.google.com/maps/search/?api=1&query=${pin.lat},${pin.lng}` : '';
+const locationLine = [t(l.location.district, locale), t(l.location.city, locale), t(l.location.country, locale)].filter(Boolean).join(locale === 'ar' ? '، ' : ', ');
+---
+{pin && (
+  <section id="map" class:list={['scroll-mt-28', cls]} aria-labelledby={`map-${l.id}`}>
+    <div class="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+      <div>
+        <h2 id={`map-${l.id}`} class="label text-stone-2">{t(ui.listingMapTitle, locale)}</h2>
+        <p class="mt-3 text-[15px] leading-relaxed text-ink">{locationLine}</p>
+        <p class="mt-2 max-w-[52ch] text-[13px] leading-relaxed text-stone-2">
+          <span class:list={['map-flag', exact ? 'is-exact' : 'is-approx']}>{t(exact ? ui.mapExact : ui.mapApprox, locale)}</span>
+          <span class="ms-2">{t(exact ? ui.mapExactNote : ui.mapApproxNote, locale)}</span>
+        </p>
+      </div>
+      <a href={mapsLink} target="_blank" rel="noopener" class="link-label shrink-0 self-start text-ink md:self-auto">
+        <span class="inline-flex items-center gap-2">{t(ui.openMap, locale)}<Icon name="external" size={14} /></span>
+      </a>
+    </div>
+
+    <div class="map-frame mt-6" data-map-frame data-src={embedSrc} data-title={fill(t(ui.listingMapFrameTitle, locale), { title })}>
+      <button type="button" class="map-facade" data-map-play aria-label={t(ui.showMap, locale)}>
+        <span class="map-grid" aria-hidden="true"></span>
+        <span class="map-pin" aria-hidden="true"><Icon name="pin" size={22} /></span>
+        <span class="map-caption label" aria-hidden="true">{t(ui.showMap, locale)}</span>
+      </button>
+    </div>
+  </section>
+)}
+
+<style>
+  .map-frame { position: relative; overflow: hidden; aspect-ratio: 16 / 9; background: color-mix(in srgb, var(--color-ink, #1a1a1a) 5%, transparent); }
+  @media (min-width: 768px) { .map-frame { aspect-ratio: 21 / 9; } }
+  .map-facade { position: absolute; inset: 0; display: grid; place-items: center; width: 100%; height: 100%; cursor: pointer; border: 0; background: transparent; }
+  /* A drawn suggestion of a street grid — never a real map, so it cannot misread as one. */
+  .map-grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(to right, color-mix(in srgb, currentColor 7%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, color-mix(in srgb, currentColor 7%, transparent) 1px, transparent 1px);
+    background-size: 44px 44px;
+    color: var(--color-ink, #1a1a1a);
+  }
+  .map-pin { position: relative; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 999px; background: var(--color-ivory, #faf8f4); color: var(--color-champagne, #b8975a); box-shadow: 0 2px 14px rgb(0 0 0 / 0.14); }
+  .map-caption { position: absolute; inset-inline-start: 1rem; bottom: 1rem; color: var(--color-stone-2, #6b6660); }
+  .map-facade:hover .map-pin { transform: translateY(-2px); }
+  .map-pin { transition: transform 180ms ease; }
+  .map-frame.is-live .map-grid, .map-frame.is-live .map-pin { display: none; }
+  .map-flag { text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; font-weight: 600; }
+  .map-flag.is-exact { color: var(--color-champagne, #b8975a); }
+  .map-flag.is-approx { color: var(--color-stone-2, #6b6660); }
+  @media (prefers-reduced-motion: reduce) { .map-pin { transition: none; } }
+</style>
+
+<script>
+  function init() {
+    document.querySelectorAll<HTMLElement>('[data-map-frame]:not([data-ready])').forEach(frame => {
+      frame.dataset.ready = '1';
+      const play = frame.querySelector<HTMLButtonElement>('[data-map-play]');
+      if (!play) return;
+      play.addEventListener('click', () => {
+        const iframe = document.createElement('iframe');
+        iframe.src = frame.dataset.src || '';
+        iframe.title = frame.dataset.title || 'Map';
+        iframe.loading = 'lazy';
+        iframe.setAttribute('referrerpolicy', 'no-referrer');
+        iframe.className = 'absolute inset-0 h-full w-full border-0';
+        frame.classList.add('is-live');
+        play.replaceWith(iframe);
+        iframe.focus();
+      }, { once: true });
+    });
+  }
+  document.addEventListener('astro:page-load', init);
+</script>

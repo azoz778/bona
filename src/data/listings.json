@@ -150,8 +150,12 @@
     "brochureUrl": null,
     "project": null,
     "unit": null,
-    "map": null,
-    "listedAt": "2026-03-21"
+    "map": {
+      "lat": 21.9458152,
+      "lng": 38.9575876
+    },
+    "listedAt": "2026-03-21",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-002",
@@ -304,8 +308,12 @@
     "brochureUrl": null,
     "project": null,
     "unit": null,
-    "map": null,
-    "listedAt": "2026-03-21"
+    "map": {
+      "lat": 21.600939,
+      "lng": 39.113731
+    },
+    "listedAt": "2026-03-21",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-005",
@@ -458,8 +466,12 @@
     "brochureUrl": null,
     "project": null,
     "unit": null,
-    "map": null,
-    "listedAt": "2026-03-21"
+    "map": {
+      "lat": 21.560194,
+      "lng": 39.133472
+    },
+    "listedAt": "2026-03-21",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-014",
@@ -596,8 +608,12 @@
     "brochureUrl": null,
     "project": null,
     "unit": null,
-    "map": null,
-    "listedAt": "2026-03-21"
+    "map": {
+      "lat": 21.565901,
+      "lng": 39.15729
+    },
+    "listedAt": "2026-03-21",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-015",
@@ -742,8 +758,12 @@
     "brochureUrl": null,
     "project": null,
     "unit": null,
-    "map": null,
-    "listedAt": "2026-07-04"
+    "map": {
+      "lat": 21.590405,
+      "lng": 39.134588
+    },
+    "listedAt": "2026-07-04",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-022",
@@ -896,8 +916,12 @@
     "brochureUrl": null,
     "project": null,
     "unit": null,
-    "map": null,
-    "listedAt": "2026-03-21"
+    "map": {
+      "lat": 21.600939,
+      "lng": 39.113731
+    },
+    "listedAt": "2026-03-21",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-023",
@@ -1050,8 +1074,12 @@
     "brochureUrl": null,
     "project": null,
     "unit": null,
-    "map": null,
-    "listedAt": "2026-03-21"
+    "map": {
+      "lat": 21.600939,
+      "lng": 39.113731
+    },
+    "listedAt": "2026-03-21",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-024",
@@ -1188,8 +1216,12 @@
     "brochureUrl": null,
     "project": null,
     "unit": null,
-    "map": null,
-    "listedAt": "2026-03-21"
+    "map": {
+      "lat": 21.560194,
+      "lng": 39.133472
+    },
+    "listedAt": "2026-03-21",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-026",
@@ -1342,8 +1374,12 @@
     "brochureUrl": null,
     "project": null,
     "unit": null,
-    "map": null,
-    "listedAt": "2026-04-14"
+    "map": {
+      "lat": 21.593996,
+      "lng": 39.152355
+    },
+    "listedAt": "2026-04-14",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-027",
@@ -1480,8 +1516,12 @@
     "brochureUrl": null,
     "project": null,
     "unit": null,
-    "map": null,
-    "listedAt": "2026-03-21"
+    "map": {
+      "lat": 23.5091205,
+      "lng": 58.6599331
+    },
+    "listedAt": "2026-03-21",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-028",
@@ -1634,8 +1674,12 @@
     "brochureUrl": null,
     "project": null,
     "unit": null,
-    "map": null,
-    "listedAt": "2026-03-21"
+    "map": {
+      "lat": 48.894254,
+      "lng": 2.1347291
+    },
+    "listedAt": "2026-03-21",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-031",
@@ -1756,8 +1800,12 @@
     "brochureUrl": null,
     "project": null,
     "unit": null,
-    "map": null,
-    "listedAt": "2026-04-18"
+    "map": {
+      "lat": 36.5222736,
+      "lng": -5.0441068
+    },
+    "listedAt": "2026-04-18",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-032",
@@ -1910,8 +1958,12 @@
     "brochureUrl": null,
     "project": null,
     "unit": null,
-    "map": null,
-    "listedAt": "2026-03-21"
+    "map": {
+      "lat": 23.5091205,
+      "lng": 58.6599331
+    },
+    "listedAt": "2026-03-21",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-033",
@@ -2061,8 +2113,12 @@
       "block": "128",
       "unitRef": "KIA-128A"
     },
-    "map": null,
-    "listedAt": "2026-09-01"
+    "map": {
+      "lat": 21.618494,
+      "lng": 39.128366
+    },
+    "listedAt": "2026-09-01",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-034",
@@ -2212,8 +2268,12 @@
       "block": "127",
       "unitRef": "KIA-127A"
     },
-    "map": null,
-    "listedAt": "2026-09-01"
+    "map": {
+      "lat": 21.618494,
+      "lng": 39.128366
+    },
+    "listedAt": "2026-09-01",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-035",
@@ -2353,8 +2413,12 @@
       "block": "113",
       "unitRef": "KIA-113A"
     },
-    "map": null,
-    "listedAt": "2026-09-01"
+    "map": {
+      "lat": 21.624678,
+      "lng": 39.166174
+    },
+    "listedAt": "2026-09-01",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-036",
@@ -2494,8 +2558,12 @@
       "block": "113",
       "unitRef": "KIA-113B"
     },
-    "map": null,
-    "listedAt": "2026-09-01"
+    "map": {
+      "lat": 21.624678,
+      "lng": 39.166174
+    },
+    "listedAt": "2026-09-01",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-037",
@@ -2635,8 +2703,12 @@
       "block": "113",
       "unitRef": "KIA-113C"
     },
-    "map": null,
-    "listedAt": "2026-09-01"
+    "map": {
+      "lat": 21.624678,
+      "lng": 39.166174
+    },
+    "listedAt": "2026-09-01",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-038",
@@ -2776,8 +2848,12 @@
       "block": "114",
       "unitRef": "KIA-114B"
     },
-    "map": null,
-    "listedAt": "2026-09-01"
+    "map": {
+      "lat": 21.624678,
+      "lng": 39.166174
+    },
+    "listedAt": "2026-09-01",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-039",
@@ -2917,8 +2993,12 @@
       "block": "114",
       "unitRef": "KIA-114C"
     },
-    "map": null,
-    "listedAt": "2026-09-01"
+    "map": {
+      "lat": 21.624678,
+      "lng": 39.166174
+    },
+    "listedAt": "2026-09-01",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-040",
@@ -3066,8 +3146,12 @@
       "block": "117",
       "unitRef": "KIA-117B"
     },
-    "map": null,
-    "listedAt": "2026-09-01"
+    "map": {
+      "lat": 21.624678,
+      "lng": 39.166174
+    },
+    "listedAt": "2026-09-01",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-041",
@@ -3207,8 +3291,12 @@
       "block": "117",
       "unitRef": "KIA-117C"
     },
-    "map": null,
-    "listedAt": "2026-09-01"
+    "map": {
+      "lat": 21.624678,
+      "lng": 39.166174
+    },
+    "listedAt": "2026-09-01",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-042",
@@ -3349,7 +3437,8 @@
       "unitRef": "KIA-115A"
     },
     "map": null,
-    "listedAt": "2026-09-01"
+    "listedAt": "2026-09-01",
+    "mapPrecision": null
   },
   {
     "id": "BONA-043",
@@ -3502,8 +3591,12 @@
     "brochureUrl": null,
     "project": null,
     "unit": null,
-    "map": null,
-    "listedAt": "2026-03-21"
+    "map": {
+      "lat": 21.593996,
+      "lng": 39.152355
+    },
+    "listedAt": "2026-03-21",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-044",
@@ -3607,7 +3700,8 @@
     "project": null,
     "unit": null,
     "map": null,
-    "listedAt": "2026-03-21"
+    "listedAt": "2026-03-21",
+    "mapPrecision": null
   },
   {
     "id": "BONA-045",
@@ -3758,8 +3852,12 @@
     "brochureUrl": null,
     "project": null,
     "unit": null,
-    "map": null,
-    "listedAt": "2026-03-21"
+    "map": {
+      "lat": 23.5091205,
+      "lng": 58.6599331
+    },
+    "listedAt": "2026-03-21",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-046",
@@ -3850,7 +3948,8 @@
       "lat": 21.6011128,
       "lng": 39.1195974
     },
-    "listedAt": "2026-04-10"
+    "listedAt": "2026-04-10",
+    "mapPrecision": "exact"
   },
   {
     "id": "BONA-047",
@@ -3943,7 +4042,8 @@
       "lat": 21.613996,
       "lng": 39.1172
     },
-    "listedAt": "2026-04-09"
+    "listedAt": "2026-04-09",
+    "mapPrecision": "exact"
   },
   {
     "id": "BONA-055",
@@ -4034,7 +4134,8 @@
       "lat": 21.562684543496626,
       "lng": 39.11201582272763
     },
-    "listedAt": "2026-08-26"
+    "listedAt": "2026-08-26",
+    "mapPrecision": "exact"
   },
   {
     "id": "BONA-056",
@@ -4123,7 +4224,8 @@
       "lat": 21.63689519443776,
       "lng": 39.12082236721488
     },
-    "listedAt": "2026-08-26"
+    "listedAt": "2026-08-26",
+    "mapPrecision": "exact"
   },
   {
     "id": "BONA-057",
@@ -4212,7 +4314,8 @@
       "lat": 21.563638942028028,
       "lng": 39.11882520750281
     },
-    "listedAt": "2026-08-26"
+    "listedAt": "2026-08-26",
+    "mapPrecision": "exact"
   },
   {
     "id": "BONA-058",
@@ -4301,7 +4404,8 @@
       "lat": 21.637311611993507,
       "lng": 39.12081632967131
     },
-    "listedAt": "2026-08-26"
+    "listedAt": "2026-08-26",
+    "mapPrecision": "exact"
   },
   {
     "id": "BONA-059",
@@ -4392,7 +4496,8 @@
       "lat": 21.560239915427147,
       "lng": 39.136093577749236
     },
-    "listedAt": "2026-08-26"
+    "listedAt": "2026-08-26",
+    "mapPrecision": "exact"
   },
   {
     "id": "BONA-060",
@@ -4483,7 +4588,8 @@
       "lat": 21.560999987056363,
       "lng": 39.1362687553322
     },
-    "listedAt": "2026-08-26"
+    "listedAt": "2026-08-26",
+    "mapPrecision": "exact"
   },
   {
     "id": "BONA-W003",
@@ -4609,8 +4715,12 @@
       "block": null,
       "unitRef": "Maren model"
     },
-    "map": null,
-    "listedAt": "2026-09-06"
+    "map": {
+      "lat": 21.338,
+      "lng": 39.304778
+    },
+    "listedAt": "2026-09-06",
+    "mapPrecision": "exact"
   },
   {
     "id": "BONA-W006",
@@ -4756,8 +4866,12 @@
       }
     },
     "unit": null,
-    "map": null,
-    "listedAt": "2026-09-06"
+    "map": {
+      "lat": 21.338,
+      "lng": 39.304778
+    },
+    "listedAt": "2026-09-06",
+    "mapPrecision": "exact"
   },
   {
     "id": "BONA-W010",
@@ -4903,8 +5017,12 @@
       }
     },
     "unit": null,
-    "map": null,
-    "listedAt": "2026-09-06"
+    "map": {
+      "lat": 21.593996,
+      "lng": 39.152355
+    },
+    "listedAt": "2026-09-06",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-W009",
@@ -5065,7 +5183,8 @@
     },
     "unit": null,
     "map": null,
-    "listedAt": "2026-09-06"
+    "listedAt": "2026-09-06",
+    "mapPrecision": null
   },
   {
     "id": "BONA-W008",
@@ -5225,8 +5344,12 @@
       }
     },
     "unit": null,
-    "map": null,
-    "listedAt": "2026-09-06"
+    "map": {
+      "lat": 25.1629302,
+      "lng": 55.3142967
+    },
+    "listedAt": "2026-09-06",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-W002",
@@ -5365,7 +5488,8 @@
     },
     "unit": null,
     "map": null,
-    "listedAt": "2026-09-06"
+    "listedAt": "2026-09-06",
+    "mapPrecision": null
   },
   {
     "id": "BONA-W005",
@@ -5479,8 +5603,12 @@
       }
     },
     "unit": null,
-    "map": null,
-    "listedAt": "2026-09-06"
+    "map": {
+      "lat": 21.338,
+      "lng": 39.304778
+    },
+    "listedAt": "2026-09-06",
+    "mapPrecision": "exact"
   },
   {
     "id": "BONA-W007",
@@ -5634,8 +5762,12 @@
       }
     },
     "unit": null,
-    "map": null,
-    "listedAt": "2026-09-06"
+    "map": {
+      "lat": 25.1629302,
+      "lng": 55.3142967
+    },
+    "listedAt": "2026-09-06",
+    "mapPrecision": "district"
   },
   {
     "id": "BONA-W004",
@@ -5757,7 +5889,11 @@
       }
     },
     "unit": null,
-    "map": null,
-    "listedAt": "2026-09-06"
+    "map": {
+      "lat": 21.338,
+      "lng": 39.304778
+    },
+    "listedAt": "2026-09-06",
+    "mapPrecision": "exact"
   }
 ]
