@@ -102,13 +102,14 @@ export function pickListingForVideo(video, jobs, publishedBy, { windowSec = MATC
 /**
  * Should a parked clip (a pending video job carrying `waitSince`) go back in the queue?
  * Decided here, not in index.mjs, so the loop it must avoid is testable: a clip parked with
- * nothing to wait on wakes ONCE per new brochure job — `wakeCursor` remembers the newest job
- * it has already been woken for — never every poll for the same rejected PDF until it
- * expires (Codex review, 2026-09-06).
+ * nothing to wait on wakes ONCE per new brochure job — `wakeSeen` is the ids of the brochure
+ * jobs it has already been woken for — never every poll for the same rejected PDF until it
+ * expires, and never missing one because two jobs share a timestamp (Codex review,
+ * 2026-09-06: ids, not a timestamp cursor).
  * @param {object} job                  the parked video job
  * @param {object[]} jobs               every job record (state.raw.jobs values)
  * @param {{now?:number, waitMs:number}} opts
- * @returns {{wake:boolean, reason:string, cursor?:string}}
+ * @returns {{wake:boolean, reason:string, seen?:string[]}}  `seen` = the new wakeSeen to persist
  */
 export function wakeParkedClip(job, jobs, { now = Date.now(), waitMs } = {}) {
   if (!job?.waitSince) return { wake: false, reason: 'not-parked' };
@@ -118,11 +119,10 @@ export function wakeParkedClip(job, jobs, { now = Date.now(), waitMs } = {}) {
     if (target && target.status === 'pending') return { wake: false, reason: 'brochure-still-publishing' };
     return { wake: true, reason: target ? `brochure-${target.status}` : 'brochure-gone' };
   }
-  const since = job.wakeCursor || job.waitSince;
-  const newer = (jobs || [])
-    .filter((j) => j && j.kind !== 'video' && j.jid === job.jid && String(j.at) > since)
-    .map((j) => String(j.at))
-    .sort();
-  if (!newer.length) return { wake: false, reason: 'nothing-new' };
-  return { wake: true, reason: 'new-brochure', cursor: newer[newer.length - 1] };
+  // Brochure jobs that appeared since the clip was parked (inclusive: same-millisecond `at`
+  // counts) and have not woken it before.
+  const seen = new Set(job.wakeSeen || []);
+  const fresh = (jobs || []).filter((j) => j?.id && j.kind !== 'video' && j.jid === job.jid && !seen.has(j.id) && String(j.at) >= job.waitSince);
+  if (!fresh.length) return { wake: false, reason: 'nothing-new' };
+  return { wake: true, reason: 'new-brochure', seen: [...seen, ...fresh.map((j) => j.id)] };
 }

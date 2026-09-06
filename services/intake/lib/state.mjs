@@ -13,7 +13,7 @@ const EMPTY = () => ({
   announcedGroups: [],
   bySha256: {}, // sha256 -> { slug, id, url, at }
   jobs: {},     // messageId -> { id, jid, key, caption, fileName, pdfPath, status, attempts, at, ts }
-                //   video jobs add: kind:'video', fileLength, videoPath, waitingFor, waitSince, waitNotified
+                //   video jobs add: kind:'video', fileLength, videoPath, waitingFor, waitSince, waitNotified, wakeSeen[]
   lastError: null,
   lastPublishedAt: null,
 });
