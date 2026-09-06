@@ -18,7 +18,7 @@ import { loadConfig, missingRequired } from './lib/env.mjs';
 import { createEvolutionClient, documentOf, fileLengthOf, isFromOwner, isOwnerGroup, messageTs, oldestFirst, textOf, videoOf } from './lib/evolution.mjs';
 import { findListingId, HELP_TEXT, parseCaption, parseCommand } from './lib/commands.mjs';
 import * as edits from './lib/edits.mjs';
-import { pickListingForVideo } from './lib/video.mjs';
+import { pickListingForVideo, wakeParkedClip } from './lib/video.mjs';
 import { listInbox } from './lib/listing.mjs';
 import { withLock } from './lib/lock.mjs';
 import { log } from './lib/log.mjs';
@@ -212,17 +212,12 @@ function requeueWaitingVideos() {
   for (const job of state.pendingJobs()) {
     if (job.kind !== 'video' || !job.waitSince) continue; // a parked clip carries waitSince
     if (currentJobId === job.id || queue.some((q) => q.record?.key?.id === job.id)) continue;
-    const expired = Date.now() - Date.parse(job.waitSince) > cfg.videoWaitMin * 60 * 1000;
-    const target = job.waitingFor ? state.getJob(job.waitingFor) : null;
-    if (!expired) {
-      // Waiting on a named brochure that is still publishing: keep waiting.
-      if (target && target.status === 'pending') continue;
-      // Parked with nothing to wait on: only worth another look once a brochure has arrived
-      // since — not every 20 s for half an hour.
-      if (!job.waitingFor && !Object.values(state.raw.jobs || {}).some((j) => j.kind !== 'video' && j.jid === job.jid && String(j.at) > job.waitSince)) continue;
-    }
-    state.updateJob(job.id, { waitingFor: null });
-    log.info('video.requeue', { id: job.id, pdf: job.waitingFor ?? null, pdfStatus: target?.status ?? (job.waitingFor ? 'gone' : 'n/a'), expired });
+    const w = wakeParkedClip(job, Object.values(state.raw.jobs || {}), { waitMs: cfg.videoWaitMin * 60 * 1000 });
+    if (!w.wake) continue;
+    // `wakeCursor`: the newest brochure this clip has been woken for, so one rejected PDF
+    // cannot wake it again on every poll (lib/video.mjs wakeParkedClip).
+    state.updateJob(job.id, { waitingFor: null, ...(w.cursor ? { wakeCursor: w.cursor } : {}) });
+    log.info('video.requeue', { id: job.id, reason: w.reason, pdf: job.waitingFor ?? null });
     enqueue(videoJobFromState(job));
   }
 }

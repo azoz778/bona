@@ -98,3 +98,31 @@ export function pickListingForVideo(video, jobs, publishedBy, { windowSec = MATC
   if (rivals.length) return { kind: 'ambiguous', listingIds: [best.listingId, ...new Set(rivals.map((r) => r.listingId))] };
   return { kind: 'attach', listingId: best.listingId, pdfMessageId: best.job.id, deltaSec: best.delta };
 }
+
+/**
+ * Should a parked clip (a pending video job carrying `waitSince`) go back in the queue?
+ * Decided here, not in index.mjs, so the loop it must avoid is testable: a clip parked with
+ * nothing to wait on wakes ONCE per new brochure job — `wakeCursor` remembers the newest job
+ * it has already been woken for — never every poll for the same rejected PDF until it
+ * expires (Codex review, 2026-09-06).
+ * @param {object} job                  the parked video job
+ * @param {object[]} jobs               every job record (state.raw.jobs values)
+ * @param {{now?:number, waitMs:number}} opts
+ * @returns {{wake:boolean, reason:string, cursor?:string}}
+ */
+export function wakeParkedClip(job, jobs, { now = Date.now(), waitMs } = {}) {
+  if (!job?.waitSince) return { wake: false, reason: 'not-parked' };
+  if (now - Date.parse(job.waitSince) > waitMs) return { wake: true, reason: 'expired' };
+  if (job.waitingFor) {
+    const target = (jobs || []).find((j) => j?.id === job.waitingFor);
+    if (target && target.status === 'pending') return { wake: false, reason: 'brochure-still-publishing' };
+    return { wake: true, reason: target ? `brochure-${target.status}` : 'brochure-gone' };
+  }
+  const since = job.wakeCursor || job.waitSince;
+  const newer = (jobs || [])
+    .filter((j) => j && j.kind !== 'video' && j.jid === job.jid && String(j.at) > since)
+    .map((j) => String(j.at))
+    .sort();
+  if (!newer.length) return { wake: false, reason: 'nothing-new' };
+  return { wake: true, reason: 'new-brochure', cursor: newer[newer.length - 1] };
+}
