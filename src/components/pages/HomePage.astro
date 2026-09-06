@@ -49,7 +49,7 @@ const strips = ([{ kind: 'land', items: land }, { kind: 'building', items: build
       <p class="hero-in mt-7 max-w-[50ch] text-[15px] leading-relaxed text-ivory/80 md:text-base" style={`--i:${words.length + 1}`}>{t(ui.heroSubline, locale)}</p>
       <div class="hero-in mt-10 flex flex-wrap gap-4" style={`--i:${words.length + 2}`}>
         <a href={localePath(locale, '/properties/')} class="btn btn-light">{t(ui.exploreProperties, locale)}</a>
-        <a href={wa} target="_blank" rel="noopener" class="btn btn-outline-light"><Icon name="whatsapp" size={16} />{t(ui.privateEnquiry, locale)}</a>
+        <a href={wa} target="_blank" rel="noopener" class="btn btn-outline-light" data-cta="hero_enquiry"><Icon name="whatsapp" size={16} />{t(ui.privateEnquiry, locale)}</a>
       </div>
     </div>
     <a href="#houses" class="scroll-cue" aria-label={t(ui.scrollCue, locale)}><span class="label">{t(ui.scrollCue, locale)}</span><span class="scroll-cue-line" aria-hidden="true"></span></a>
@@ -167,8 +167,8 @@ const strips = ([{ kind: 'land', items: land }, { kind: 'building', items: build
       <h2 class="display-lg mt-6">{t(ui.speakWithUs, locale)}</h2>
       <p class="mx-auto mt-6 max-w-[48ch] text-stone-2">{t(ui.contactBandText, locale)}</p>
       <div class="mt-10 flex flex-wrap justify-center gap-4">
-        <a href={wa} target="_blank" rel="noopener" class="btn btn-ink"><Icon name="whatsapp" size={17} />{t(ui.chatOnWhatsApp, locale)}</a>
-        <a href={`tel:${site.phone.e164}`} class="btn btn-outline" dir="ltr">{site.phone.display}</a>
+        <a href={wa} target="_blank" rel="noopener" class="btn btn-ink" data-cta="contact_band_whatsapp"><Icon name="whatsapp" size={17} />{t(ui.chatOnWhatsApp, locale)}</a>
+        <a href={`tel:${site.phone.e164}`} class="btn btn-outline" dir="ltr" data-cta="contact_band_tel">{site.phone.display}</a>
       </div>
     </div>
   </section>

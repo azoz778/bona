@@ -16,8 +16,11 @@ interface Props {
   hero?: boolean;
   /** Pre-filled message for the WhatsApp button in the concierge cluster (listing pages). */
   waMessage?: string;
+  /** Listing id (BONA-### / BONA-W###) on listing pages: rendered as <body data-listing> so the attribution script
+      can tag listing_view, the WhatsApp Ref line and every CTA on the page. Read fresh on each view transition. */
+  listingId?: string;
 }
-const { locale, hero = false, waMessage, ...head } = Astro.props;
+const { locale, hero = false, waMessage, listingId, ...head } = Astro.props;
 ---
 <!doctype html>
 <html lang={locale} dir={dir(locale)}>
@@ -25,7 +28,7 @@ const { locale, hero = false, waMessage, ...head } = Astro.props;
     <Head locale={locale} {...head} />
     <ClientRouter />
   </head>
-  <body class:list={[!hero && 'pt-16 lg:pt-20']}>
+  <body class:list={[!hero && 'pt-16 lg:pt-20']} data-listing={listingId}>
     <script is:inline data-astro-rerun>document.documentElement.classList.add('js');</script>
     <a href="#main" class="label fixed start-4 top-4 z-[60] -translate-y-24 bg-ink px-4 py-3 text-ivory transition-transform focus:translate-y-0">{t(ui.skipToContent, locale)}</a>
     <Header locale={locale} path={head.path} overHero={hero} />
