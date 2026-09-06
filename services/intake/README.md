@@ -112,6 +112,14 @@ Anything else in the group is ignored, silently.
   whose crops the ranking step still refuses is still rejected. It costs one call, only on
   the brochures that would otherwise have been rejected, capped at 20 pages and 24 crops
   (the numbers are constants at the top of `lib/photo-regions.mjs`, not env vars).
+  It is also the most memory-hungry thing this service does, and it is bounded on purpose:
+  **one page at a time** — render it, cut its regions out, delete the render, move on — with
+  a hard 12 MP budget per render (`CROP_MAX_PIXELS`; a page render is decoded twice, once by
+  PyMuPDF to make it and once by sharp to cut from it), MuPDF's object store emptied after
+  every page, and libvips' cache and worker threads turned off for the loop. Before that, the
+  step rendered every page up front at up to 30 MP and the unit was OOM-killed in a restart
+  loop inside its 1 GB cgroup on the owner's 2026-09-06 brochures. Measured after: peak RSS
+  522 MB for the whole run (five-page Sadana brochure), inside a 1 GB cap.
 - **Never estimates a price** (TAQEEM), and does not take the model's word for one either.
   A price is published only when the number is **actually printed**: `lib/price.mjs` looks it
   up in the PDF's text layer and in the caption (thousands separators, Arabic-Indic digits,
@@ -280,8 +288,10 @@ answered — including its free-text `warnings`, which are never committed), `im
 candidate, `cNNN.jpg` being the regions cropped out of composite pages), `sheets/` (the
 contact sheets it looked at), `pages/` (the page renders, for a PDF with no text layer),
 `regions/` (the photo-region step, when it ran: `views/` the page renders it looked at,
-`sheets/` their contact sheet, `prompt.txt` what it was asked, `regions.json` the boxes it
-drew and `crops/` the high-resolution page renders they were cut from) and
+`sheets/` their contact sheet, `prompt.txt` what it was asked and `regions.json` the boxes
+it drew — `crops/` holds one high-resolution page render at a time and is empty when the
+step finishes, because the renders are the memory and disk cost of the step and the crops
+themselves are what survive, in `images/cNNN.jpg`) and
 `claude-settings.json` (the deny rules that confined it). That is the first place to look
 when a listing comes out wrong.
 
