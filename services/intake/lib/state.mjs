@@ -13,7 +13,11 @@ const EMPTY = () => ({
   announcedGroups: [],
   bySha256: {}, // sha256 -> { slug, id, url, at }
   jobs: {},     // messageId -> { id, jid, key, caption, fileName, pdfPath, status, attempts, at, ts }
-                //   video jobs add: kind:'video', fileLength, videoPath, waitingFor, waitSince, waitNotified, wakeSeen[]
+                //   video jobs add: kind:'video', fileLength, videoPath, waitingFor, waitSince, waitNotified, wakeSeen[],
+                //   contentTried (the lib/video-match.mjs pass has been paid for once — a parked clip
+                //   is re-queued on every new brochure and must not buy a model call each time) and
+                //   contentSaw {listingId, confidence, candidates} (what that one pass concluded, kept
+                //   because the clip usually parks afterwards and only asks about itself much later)
   lastError: null,
   lastPublishedAt: null,
 });

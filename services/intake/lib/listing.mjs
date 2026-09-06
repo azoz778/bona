@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOMS } from '../../../scripts/curate/rooms.mjs';
-import { INTAKE_ID_RE, LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, LOCAL_LISTING_VIDEO } from '../../../scripts/curate/rules.mjs';
+import { INTAKE_ID_RE, LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, videoEntryProblems } from '../../../scripts/curate/rules.mjs';
 
 export const INBOX_DIR = path.join('scripts', 'curate', 'inbox');
 export const INDEX_FILE = '_index.json';
@@ -275,13 +275,12 @@ export function checkListing(listing, { minImages = 4, maxImages = 10 } = {}) {
   if (!listing.price?.onRequest && !(typeof listing.price?.amount === 'number' && listing.price.amount > 0)) {
     e.push('price.amount must be > 0 unless onRequest');
   }
-  // Optional, like project/unit/map — but when present it must be the same site-local shape
-  // as an image src (or a full https URL, for a future non-intake source of videos).
+  // Optional, like project/unit/map — but when present every entry is `{ src, poster }` in
+  // the same site-local shapes the site validator demands (scripts/curate/rules.mjs), so a
+  // listing this accepts can never fail the build afterwards.
   if (listing.videos !== undefined) {
     if (!Array.isArray(listing.videos)) e.push('videos must be an array when present');
-    else for (const [i, v] of listing.videos.entries()) {
-      if (!(LOCAL_LISTING_VIDEO.test(v) || /^https:\/\//.test(v))) e.push(`videos[${i}] is not /listings/<slug>/v-nn.mp4 or an https URL`);
-    }
+    else for (const [i, v] of listing.videos.entries()) e.push(...videoEntryProblems(v, i));
   }
   if (!isStr(listing.description?.en) || !isStr(listing.description?.ar)) e.push('description.en/ar required');
   else {

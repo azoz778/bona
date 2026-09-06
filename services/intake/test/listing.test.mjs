@@ -325,10 +325,21 @@ describe('inbox + edits', () => {
 
 // The fix for "videos aren't getting added": a video is downloaded by the daemon
 // (index.mjs::handleVideo, not exercised here — see evolution.test.mjs/commands.test.mjs for
-// the pieces that recognize and address it) and handed to edits.addVideo() as a plain buffer.
+// the pieces that recognize and address it), re-encoded by lib/video.mjs prepareVideo(), and
+// handed to edits.addVideo() as PATHS — never as a Buffer: the stored clip is up to 25 MB and
+// the daemon shares a 2 GB cgroup with a `claude` process.
 describe('edits.addVideo — a video attaches to a listing that already exists', () => {
   let tmp;
   const slug = 'tmp-video-villa';
+  /** Stand-in for what prepareVideo() leaves behind: a transcoded clip, optionally a poster. */
+  const prepared = (name, bytes, poster = null) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-prepared-'));
+    const file = path.join(dir, `${name}.mp4`);
+    fs.writeFileSync(file, bytes);
+    let posterFile = null;
+    if (poster) { posterFile = path.join(dir, `${name}.jpg`); fs.writeFileSync(posterFile, poster); }
+    return { file, poster: posterFile };
+  };
   const seed = () => ({
     id: 'BONA-W001', slug, status: 'available', hidden: false,
     title: { en: 'Temp Villa', ar: 'فيلا مؤقتة' },
@@ -347,43 +358,57 @@ describe('edits.addVideo — a video attaches to a listing that already exists',
   });
   afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
-  it('writes the file and records its site-local path on the listing', () => {
-    const buffer = Buffer.from('fake mp4 bytes');
-    const res = edits.addVideo(tmp, 'BONA-W001', buffer);
+  it('copies the clip AND its poster in, and records both site-local paths on the listing', () => {
+    const bytes = Buffer.from('fake mp4 bytes');
+    const res = edits.addVideo(tmp, 'BONA-W001', prepared('clip', bytes, Buffer.from('fake jpg')));
     assert.equal(res.video.n, 1);
     assert.equal(res.video.src, `/listings/${slug}/v-01.mp4`);
-    assert.equal(res.video.bytes, buffer.length);
-    assert.deepEqual(res.listing.videos, [`/listings/${slug}/v-01.mp4`]);
-    assert.ok(fs.existsSync(path.join(tmp, 'public', 'listings', slug, 'v-01.mp4')));
-    assert.deepEqual(fs.readFileSync(path.join(tmp, 'public', 'listings', slug, 'v-01.mp4')), buffer);
+    assert.equal(res.video.poster, `/listings/${slug}/v-01-poster.jpg`);
+    assert.equal(res.video.bytes, bytes.length);
+    assert.deepEqual(res.listing.videos, [{ src: `/listings/${slug}/v-01.mp4`, poster: `/listings/${slug}/v-01-poster.jpg` }]);
+    assert.deepEqual(fs.readFileSync(path.join(tmp, 'public', 'listings', slug, 'v-01.mp4')), bytes);
+    assert.ok(fs.existsSync(path.join(tmp, 'public', 'listings', slug, 'v-01-poster.jpg')));
     // persisted, not just returned
-    assert.deepEqual(findInbox(tmp, 'BONA-W001').listing.videos, [`/listings/${slug}/v-01.mp4`]);
+    assert.deepEqual(findInbox(tmp, 'BONA-W001').listing.videos, [{ src: `/listings/${slug}/v-01.mp4`, poster: `/listings/${slug}/v-01-poster.jpg` }]);
+  });
+
+  it('a clip ffmpeg could not cut a poster out of still publishes, with poster null', () => {
+    const res = edits.addVideo(tmp, 'BONA-W001', prepared('clip', Buffer.from('no poster for this one')));
+    assert.deepEqual(res.listing.videos, [{ src: `/listings/${slug}/v-01.mp4`, poster: null }]);
+    assert.equal(fs.existsSync(path.join(tmp, 'public', 'listings', slug, 'v-01-poster.jpg')), false);
   });
 
   it('numbers a second video after the first, on its own sequence from the photos', () => {
-    edits.addVideo(tmp, 'BONA-W001', Buffer.from('one'));
-    const res = edits.addVideo(tmp, 'BONA-W001', Buffer.from('two'));
-    assert.deepEqual(res.listing.videos, [`/listings/${slug}/v-01.mp4`, `/listings/${slug}/v-02.mp4`]);
+    edits.addVideo(tmp, 'BONA-W001', prepared('a', Buffer.from('one'), Buffer.from('p1')));
+    const res = edits.addVideo(tmp, 'BONA-W001', prepared('b', Buffer.from('two'), Buffer.from('p2')));
+    assert.deepEqual(res.listing.videos.map((v) => v.src), [`/listings/${slug}/v-01.mp4`, `/listings/${slug}/v-02.mp4`]);
+    assert.deepEqual(res.listing.videos.map((v) => v.poster), [`/listings/${slug}/v-01-poster.jpg`, `/listings/${slug}/v-02-poster.jpg`]);
     assert.deepEqual(res.listing.images.map((im) => im.src), [1, 2, 3, 4].map((n) => `/listings/${slug}/0${n}.jpg`), 'photo numbering untouched');
   });
 
   it('refuses past MAX_VIDEOS rather than growing forever', () => {
-    for (let i = 0; i < 4; i += 1) assert.ok(!edits.addVideo(tmp, 'BONA-W001', Buffer.from(`v${i}`)).error);
-    const res = edits.addVideo(tmp, 'BONA-W001', Buffer.from('one-too-many'));
+    for (let i = 0; i < 4; i += 1) assert.ok(!edits.addVideo(tmp, 'BONA-W001', prepared(`v${i}`, Buffer.from(`v${i}`))).error);
+    const res = edits.addVideo(tmp, 'BONA-W001', prepared('extra', Buffer.from('one-too-many')));
     assert.match(res.error, /the limit is 4/);
     assert.equal(findInbox(tmp, 'BONA-W001').listing.videos.length, 4, 'the 5th write never happened');
   });
 
   it('returns null for a listing that does not exist, like the other edits', () => {
-    assert.equal(edits.addVideo(tmp, 'BONA-W404', Buffer.from('x')), null);
+    assert.equal(edits.addVideo(tmp, 'BONA-W404', prepared('x', Buffer.from('x'))), null);
+  });
+
+  it('says so rather than throwing when the prepared file has already been cleaned up', () => {
+    const media = prepared('gone', Buffer.from('x'));
+    fs.rmSync(media.file, { force: true });
+    assert.match(edits.addVideo(tmp, 'BONA-W001', media).error, /not on disk/);
   });
 
   it('works on a listing published before this field existed (no videos key at all)', () => {
     const legacy = seed();
     delete legacy.videos;
     writeInboxListing(tmp, legacy);
-    const res = edits.addVideo(tmp, 'BONA-W001', Buffer.from('x'));
-    assert.deepEqual(res.listing.videos, [`/listings/${slug}/v-01.mp4`]);
+    const res = edits.addVideo(tmp, 'BONA-W001', prepared('x', Buffer.from('x')));
+    assert.deepEqual(res.listing.videos, [{ src: `/listings/${slug}/v-01.mp4`, poster: null }]);
   });
 });
 
@@ -411,14 +436,19 @@ describe('a PDF + a video together — the combination the owner actually sends'
       writeInboxListing(tmp, listing);
       fs.mkdirSync(path.join(tmp, 'public', 'listings', slug), { recursive: true });
 
-      // Step 2 — the video, captioned "video BONA-W020" (see findListingId in commands.mjs).
-      const res = edits.addVideo(tmp, listing.id, Buffer.from('a whole walkthrough clip'));
+      // Step 2 — the video, captioned "video BONA-W020" (see findListingId in commands.mjs),
+      // after lib/video.mjs prepareVideo() has re-encoded it and cut a poster out of it.
+      const media = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-prepared-'));
+      fs.writeFileSync(path.join(media, 'clip.mp4'), 'a whole walkthrough clip');
+      fs.writeFileSync(path.join(media, 'poster.jpg'), 'its first frame');
+      const res = edits.addVideo(tmp, listing.id, { file: path.join(media, 'clip.mp4'), poster: path.join(media, 'poster.jpg') });
 
       assert.equal(res.error, undefined);
-      assert.deepEqual(res.listing.videos, [`/listings/${slug}/v-01.mp4`]);
+      const expected = [{ src: `/listings/${slug}/v-01.mp4`, poster: `/listings/${slug}/v-01-poster.jpg` }];
+      assert.deepEqual(res.listing.videos, expected);
       assert.deepEqual(checkListing(res.listing), [], 'still a valid listing once the video is on it');
       // The repo, not just the return value, is what a re-publish/rebuild would see.
-      assert.deepEqual(findInbox(tmp, listing.id).listing.videos, [`/listings/${slug}/v-01.mp4`]);
+      assert.deepEqual(findInbox(tmp, listing.id).listing.videos, expected);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

@@ -71,43 +71,74 @@ export function setHidden(repo, id, hidden) {
   return { listing: save(found.file, found.listing) };
 }
 
-const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+/**
+ * sha256 of a file, read a megabyte at a time. The stored clip is up to 25 MB and the daemon
+ * lives in a 2 GB cgroup next to a `claude` process: nothing here reads a video into a Buffer.
+ */
+export function sha256File(file) {
+  const hash = crypto.createHash('sha256');
+  const fd = fs.openSync(file, 'r');
+  try {
+    const buf = Buffer.allocUnsafe(1024 * 1024);
+    for (;;) {
+      const n = fs.readSync(fd, buf, 0, buf.length, null);
+      if (n <= 0) break;
+      hash.update(buf.subarray(0, n));
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return hash.digest('hex');
+}
+
+/** The src of a video entry, whichever shape the listing carries it in. */
+export const videoSrc = (v) => (typeof v === 'string' ? v : v?.src ?? '');
 
 /**
- * Append one WhatsApp video to an already-published listing — named by the owner
- * (`video <id>`) or matched to its brochure by index.mjs. The file is written exactly as
- * received, into the same public/listings/<slug> directory the photos live in (see
- * lib/video.mjs) — `remove <id>` already deletes that whole directory, so a removed listing's
- * videos go with it for free.
+ * Append one walkthrough video to an already-published listing — named by the owner
+ * (`video <id>`), matched to its brochure by the burst rule, or recognised from its own
+ * frames by lib/video-match.mjs. The clip has already been transcoded and given a poster
+ * frame (lib/video.mjs `prepareVideo`); this copies both into the same
+ * public/listings/<slug> directory the photos live in, and `remove <id>` already deletes
+ * that whole directory, so a removed listing's videos go with it for free.
  *
- * Identical bytes already on the listing (a replay after a crash between the push and the
- * job's close, or the owner sending the same clip twice) come back as `duplicate` with the
- * copy that is already there — nothing is written, so nothing gets committed twice. This is
- * the clip's counterpart of the PDF sha256 guard in state.mjs.
- * @param {Buffer} buffer
+ * The dedupe is on the STORED bytes — the transcoded file, not the download — because that
+ * is what a replay would write a second time: ffmpeg is deterministic for a given input and
+ * settings, so the same clip re-processed hashes the same. Identical bytes already on the
+ * listing (a replay after a crash between the push and the job's close, or the owner sending
+ * the same clip twice) come back as `duplicate` with the copy that is already there; nothing
+ * is written, so nothing gets committed twice. This is the clip's counterpart of the PDF
+ * sha256 guard in state.mjs.
+ *
+ * @param {{file:string, poster?:string|null}} media  what prepareVideo() produced
  * @returns {{listing:object,video:object,duplicate?:true}|{error:string}|null}
  */
-export function addVideo(repo, id, buffer) {
+export function addVideo(repo, id, media) {
   const found = findInbox(repo, id);
   if (!found) return null;
   const { listing } = found;
+  const source = typeof media === 'string' ? { file: media } : (media || {});
+  if (!source.file || !fs.existsSync(source.file)) return { error: `the prepared video for ${id} is not on disk any more — send the clip again.` };
   const existing = Array.isArray(listing.videos) ? listing.videos : [];
-  const incoming = sha256(buffer);
-  for (const [i, src] of existing.entries()) {
+  const incoming = sha256File(source.file);
+  const incomingBytes = fs.statSync(source.file).size;
+  for (const [i, entry] of existing.entries()) {
+    const src = videoSrc(entry);
+    if (!src.startsWith('/')) continue;                       // a remote URL has no local bytes to compare
     const file = path.join(repo, 'public', src);
     let st;
     try { st = fs.statSync(file); } catch { continue; }
-    if (st.size !== buffer.length) continue;
-    if (sha256(fs.readFileSync(file)) === incoming) {
-      return { listing, video: { n: i + 1, src, file, bytes: st.size }, duplicate: true };
+    if (st.size !== incomingBytes) continue;
+    if (sha256File(file) === incoming) {
+      return { listing, video: { n: i + 1, src, poster: typeof entry === 'string' ? null : entry?.poster ?? null, file, bytes: st.size }, duplicate: true };
     }
   }
   if (existing.length >= MAX_VIDEOS) {
     return { error: `${id} already has ${existing.length} video(s) — the limit is ${MAX_VIDEOS}.` };
   }
   const outDir = path.join(repo, 'public', 'listings', listing.slug);
-  const written = writeListingVideo(buffer, outDir, listing.slug, existing.length);
-  listing.videos = [...existing, written.src];
+  const written = writeListingVideo(source, outDir, listing.slug, existing.length);
+  listing.videos = [...existing, { src: written.src, poster: written.poster }];
   return { listing: save(found.file, listing), video: written };
 }
 

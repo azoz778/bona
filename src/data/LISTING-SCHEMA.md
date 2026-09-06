@@ -33,7 +33,7 @@ Array of listing objects:
   "highlights": { "en": ["Private beach", "..."], "ar": ["شاطئ خاص", "..."] },
   "virtualTourUrl": null,
   "brochureUrl": null,
-  "videos": [],                     // optional; hosted video URLs (walkthrough clips) — see "Videos" below
+  "videos": [],                     // optional; [{ src, poster }] walkthrough clips — see "Videos" below
   "listedAt": "2026-06-01"
 }
 ```
@@ -124,24 +124,51 @@ this repo. Nothing else in the pipeline changes.
 
 ## Videos (2026-09-06, `services/intake`)
 A PDF never arrives with a video attached to the same WhatsApp message — a video is added to a
-listing that already exists, one clip per message: send the video into the intake group with the
-listing's id somewhere in its caption (`video BONA-W001`, or just `BONA-W001`) and it is downloaded
-and added, no re-publish command needed. Up to `services/intake/lib/video.mjs::MAX_VIDEOS` (4)
-per listing.
+listing that already exists, one clip per message. Which listing is worked out for the owner, in
+this order (he should never have to pick):
+1. a `BONA-W###` in the caption (`video BONA-W001`, or just the id) — he said so;
+2. the **burst rule** (`services/intake/lib/video.mjs::pickListingForVideo`): he drops the
+   brochure and its clips in one go, so the brochure sent closest in time IS the property;
+3. the **content matcher** (`services/intake/lib/video-match.mjs`), for a clip that arrives on
+   its own: ffmpeg pulls 3-4 evenly spaced frames out of it and one confined `claude -p` looks
+   at them beside the hero photos of the last ~15 intake listings. It attaches only at
+   `BONA_VIDEO_MATCH_CONFIDENCE` (0.75) or better; below that the bot sends one line saying it
+   could not tell, and never guesses.
+
+Up to `services/intake/lib/video.mjs::MAX_VIDEOS` (4) per listing.
+
 - `videos`: always an array on a WhatsApp-intake listing (`[]` until a video is added); optional
-  and may be absent on a curated listing that predates this field. Every entry is either a
-  site-local path `/listings/<slug>/v-<nn>.mp4` (intake videos: numbered on their OWN sequence,
-  separate from `<nn>.jpg` photos, written to `public/listings/<slug>/` and served by GitHub
-  Pages exactly like the photos) or a full `https://` URL (for a future non-intake source).
-  `scripts/curate/rules.mjs::LOCAL_LISTING_VIDEO` is the local shape; `validate.mjs` and the
-  intake's own `checkListing()` share it.
-- **Stored as received — no transcoding, no thumbnail.** This service's only media library
-  (`sharp`) does not read video; adding one would mean a new native dependency (ffmpeg) for a
-  narrow feature, so the video committed to the repo is exactly the file WhatsApp handed over.
-  `BONA_MAX_VIDEO_MB` (default 60) caps what is accepted. **Follow-up, not yet built**: raw
-  video committed straight into git will bloat the repo as more are added — if that becomes a
-  real problem, look at Git LFS or moving intake video (like intake photos today) to a real
-  object store instead of the git-and-GitHub-Pages path used now.
+  and may be absent on a curated listing that predates this field. Every entry is an OBJECT:
+
+  ```jsonc
+  "videos": [
+    { "src": "/listings/<slug>/v-01.mp4", "poster": "/listings/<slug>/v-01-poster.jpg" }
+  ]
+  ```
+
+  `src` is a site-local clip `/listings/<slug>/v-<nn>.mp4` (numbered on its OWN sequence,
+  separate from the `<nn>.jpg` photos, written to `public/listings/<slug>/` and served by
+  GitHub Pages exactly like the photos) or a full `https://` URL, for a future non-intake
+  source. `poster` is the frame beside it, `/listings/<slug>/v-<nn>-poster.jpg`, an https URL,
+  or `null` when ffmpeg could not read one — the listing page then falls back to the hero
+  photo. `scripts/curate/rules.mjs::videoEntryProblems` is the one definition of that shape;
+  `validate.mjs` and the intake's own `checkListing()` both call it.
+  *(Before 2026-09-06 an entry was a bare string. Nothing was ever published in that shape, so
+  the bare string is no longer accepted.)*
+- **Transcoded before it is committed, and given a poster.** The clip is re-encoded with the
+  static ffmpeg (`BONA_FFMPEG_BIN`, `~/.local/bin/ffmpeg`) to H.264 + AAC in MP4, capped at
+  1080p (long side ≤ 1920, short side ≤ 1080, aspect kept) with `-movflags +faststart` so a
+  browser can start playing before the file has finished arriving; a poster frame is cut a
+  second in and resized by sharp to 1600 px. If the result misses `BONA_MAX_VIDEO_MB` (25) it
+  is re-encoded once at 720p/CRF 31, and if it *still* misses, the clip is **skipped with a
+  reply** rather than committed: a raw phone clip in git history cannot be taken back out.
+  `BONA_MAX_VIDEO_INPUT_MB` (200) caps what may be downloaded in the first place.
+  `edits.addVideo()` dedupes on the sha256 of the **stored** bytes, so a replay after a crash
+  finds the clip already there instead of appending a second copy.
+- **Follow-up, not yet built**: even at 25 MB a video committed straight into git will bloat
+  the repo as more are added — if that becomes a real problem, look at Git LFS or moving
+  intake video (like intake photos today) to a real object store instead of the
+  git-and-GitHub-Pages path used now.
 
 ## Map pins (2026-09-06)
 Every listing that can be placed shows a map on its page. Two fields carry it, and they

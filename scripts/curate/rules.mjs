@@ -33,8 +33,33 @@ export const INTAKE_ID_RE = /^BONA-W\d{3,5}$/;
 export const LOCAL_LAND_STILL = /^\/land\/[A-Za-z0-9-]+\.jpg$/;
 export const LOCAL_LISTING_SRC = /^\/listings\/[a-z0-9]+(?:-[a-z0-9]+)*\/\d{2,3}\.jpg$/;
 export const LOCAL_LISTING_THUMB = /^\/listings\/[a-z0-9]+(?:-[a-z0-9]+)*\/\d{2,3}-thumb\.webp$/;
-// /listings/<slug>/v-<nn>.mp4 — walkthrough videos added post-publish (services/intake,
-// lib/video.mjs). A separate `v-` prefix from the photos' <nn>.jpg so the two numbering
-// tracks can never collide.
+// /listings/<slug>/v-<nn>.mp4          walkthrough videos added post-publish (services/intake,
+// /listings/<slug>/v-<nn>-poster.jpg    lib/video.mjs) and the poster frame ffmpeg cut out of
+// each one. A separate `v-` prefix from the photos' <nn>.jpg so the two numbering tracks can
+// never collide.
 export const LOCAL_LISTING_VIDEO = /^\/listings\/[a-z0-9]+(?:-[a-z0-9]+)*\/v-\d{2,3}\.mp4$/;
+export const LOCAL_LISTING_VIDEO_POSTER = /^\/listings\/[a-z0-9]+(?:-[a-z0-9]+)*\/v-\d{2,3}-poster\.jpg$/;
+
+/**
+ * One entry of `videos[]`: `{ src, poster }`. `src` is a site-local clip or a full https URL
+ * (for a future non-intake source); `poster` is the site-local poster frame beside it, an
+ * https URL, or null when ffmpeg could not cut one (the page then falls back to the hero
+ * photo). ONE definition, shared by scripts/curate/validate.mjs and the intake's own
+ * checkListing(), so the intake can never write something the site build then rejects.
+ * @returns {string[]} problems (empty = good)
+ */
+export function videoEntryProblems(v, i) {
+  const e = [];
+  if (!v || typeof v !== 'object' || Array.isArray(v)) {
+    return [`videos[${i}] must be { src, poster } — a bare string is the pre-2026-09-06 shape`];
+  }
+  if (!(LOCAL_LISTING_VIDEO.test(v.src ?? '') || /^https:\/\//.test(v.src ?? ''))) {
+    e.push(`videos[${i}].src is not /listings/<slug>/v-nn.mp4 or an https URL: ${v.src}`);
+  }
+  if (!(v.poster === null || v.poster === undefined
+        || LOCAL_LISTING_VIDEO_POSTER.test(v.poster) || /^https:\/\//.test(v.poster))) {
+    e.push(`videos[${i}].poster must be null, /listings/<slug>/v-nn-poster.jpg or an https URL: ${v.poster}`);
+  }
+  return e;
+}
 export const isLocalSrc = (s) => LOCAL_LAND_STILL.test(s) || LOCAL_LISTING_SRC.test(s);
