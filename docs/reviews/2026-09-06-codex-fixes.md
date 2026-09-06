@@ -14,3 +14,6 @@ DO-NOT-SHIP.
 3. [services/intake/lib/lock.mjs:42](/home/azoz778/bona/services/intake/lib/lock.mjs:42) - HIGH - A stale lock is stolen even when the holder PID is still alive. Any long AI/render/build/push run over `staleMs` lets another daemon/run-once process remove the lock and enter the repo phase concurrently, which can interleave pulls, writes, resets, commits, and pushes. Fix: only steal when the holder is dead or the lock is malformed and demonstrably ownerless; if live holders need stale protection, heartbeat/touch the lock while held and timeout waiters instead of stealing live locks.
 
 DO-NOT-SHIP.
+
+---
+**Resolution (orchestrator, 2026-09-06 04:20 KSA):** all three HIGH findings fixed in commit `00a8b49` (budget charged after body validation + refunded on Retell failure; sha256 dedupe runs on every pass and the publish record + job close are one atomic write; lock stolen only on a dead PID, wreckage, or a 6 h ceiling). Codex's follow-up MEDIUM (half-written lock treated as live) fixed too. **Disagreement kept:** Codex wanted no ceiling for a verifiably alive holder; the orchestrator kept the 6 h ceiling because a hung `claude`/`uv` child would otherwise block intake until a human intervenes, and no legitimate publish approaches 6 h. api 194 / intake 259 tests green.
