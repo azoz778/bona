@@ -12,7 +12,7 @@
  * Retell truncates tool results at ~4000 characters — keep rows small.
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { appendLead, leadNote } from './leads.mjs';
+import { createOrMergeLead, leadNote } from './leads.mjs';
 import { normaliseSearchArgs } from './actions.mjs';
 import { toAsciiDigits } from './inventory.mjs';
 
@@ -95,14 +95,16 @@ export function toolArgs(body = {}) {
 
 /**
  * Build the three handlers.
- * @param {{ inventory, store, dataDir: string, siteUrl: string, env: object,
+ * @param {{ inventory, store, db, dataDir: string, siteUrl: string, env: object,
  *           sendWhatsApp?: (text: string) => Promise<any>, log?: Function,
  *           now?: () => number, leadDedupeMs?: number }} deps
+ *   `db` is the SQLite store (`openDb`); `dataDir` is where the raw `leads.jsonl` lives.
  */
 export function createToolHandlers({
-  inventory, store, dataDir, siteUrl, env = {}, sendWhatsApp, log = () => {},
+  inventory, store, db, dataDir, siteUrl, env = {}, sendWhatsApp, log = () => {},
   now = () => Date.now(), leadDedupeMs = LEAD_DEDUPE_MS,
 }) {
+  if (!db) throw new TypeError('createToolHandlers needs the store (db)');
   /** leadKey → { at, id }. Bounded by the dedupe window, pruned on every save. */
   const recentLeads = new Map();
 
@@ -127,13 +129,29 @@ export function createToolHandlers({
     return { shown: true, id: card.id, title: card.title, url: card.url[ctx.locale] ?? card.url.en };
   }
 
+  /**
+   * The property a lead is about: the tool argument when the model named one (an id,
+   * a slug or a title, resolved against inventory), else the page the widget was
+   * opened on, which the visitor's `attr` carried through Retell's metadata.
+   */
+  function leadListing(args, ctx) {
+    const named = args.listing_id ?? args.property_id ?? args.id;
+    if (named) {
+      const hit = inventory.find(named);
+      if (hit) return hit.id;
+      const upper = String(named).trim().toUpperCase();
+      if (/^BONA-W?\d{3}$/.test(upper)) return upper;
+    }
+    return ctx.attr?.listing_id ?? null;
+  }
+
   async function create_lead(args, ctx) {
     const lead = {
       name: args.name, phone: args.phone ?? args.phone_number ?? args.mobile,
       interest: args.interest ?? args.enquiry, budget: args.budget,
       timeline: args.timeline, notes: args.notes, language: args.language ?? ctx.locale,
       district: args.district ?? args.area ?? args.location,
-      listingId: args.listing_id ?? args.property_id ?? args.id,
+      listingId: leadListing(args, ctx),
     };
     if (!lead.phone && !lead.name) {
       return { saved: false, reason: 'missing_contact', note: 'Ask for a name or a phone number before saving the enquiry.' };
@@ -153,21 +171,26 @@ export function createToolHandlers({
       };
     }
 
-    const record = appendLead(dataDir, lead, {
-      channel: ctx.channel, source: 'concierge',
-      extra: { conversationId: ctx.conversationId ?? null, page: ctx.page ?? null },
+    // The visitor's session came through Retell's metadata (set by /v1/chat/session
+    // and /v1/call/token), so a concierge lead inherits the campaign that brought them.
+    const attr = ctx.attr ?? {};
+    const { lead: record, created } = createOrMergeLead(db, lead, {
+      channel: ctx.channel === 'chat' ? 'concierge_chat' : 'concierge_voice', matchMethod: 'concierge',
+      sessionId: attr.session_id ?? null, anonId: attr.anon_id ?? null, ref: attr.ref ?? null,
+      now: t, dataDir, raw: { conversationId: ctx.conversationId ?? null, page: ctx.page ?? null },
     });
-    recentLeads.set(key, { at: t, id: record.id });
+    recentLeads.set(key, { at: t, id: record.lead_id });
     store.markLead(ctx.conversationId);
+    log({ evt: 'lead.saved', id: record.lead_id, created, channel: record.channel, source: record.source, conversationId: ctx.conversationId ?? null });
     if (sendWhatsApp) {
       try {
-        const res = await sendWhatsApp(leadNote({ ...record }, { siteUrl }));
-        if (!res?.ok) log({ evt: 'lead.wa_failed', id: record.id, error: res?.error ?? 'unknown' });
+        const res = await sendWhatsApp(leadNote(record, { siteUrl }));
+        if (!res?.ok) log({ evt: 'lead.wa_failed', id: record.lead_id, error: res?.error ?? 'unknown' });
       } catch (err) {
-        log({ evt: 'lead.wa_error', id: record.id, error: String(err?.message ?? err) });
+        log({ evt: 'lead.wa_error', id: record.lead_id, error: String(err?.message ?? err) });
       }
     }
-    return { saved: true, id: record.id, note: 'Enquiry saved. Tell the visitor a Bona principal will be in touch, and offer WhatsApp +966 59 329 6933 to speak now.' };
+    return { saved: true, id: record.lead_id, note: 'Enquiry saved. Tell the visitor a Bona principal will be in touch, and offer WhatsApp +966 59 329 6933 to speak now.' };
   }
 
   const handlers = { search_properties, show_property, create_lead };
@@ -184,6 +207,9 @@ export function createToolHandlers({
       locale: conversationLocale(body),
       channel: body.chat || body.chat_id ? 'chat' : 'voice',
       page: body.call?.metadata?.page ?? body.chat?.metadata?.page ?? null,
+      // The metadata we set when the conversation opened: locale, page, source and the
+      // visitor's attribution ids (anon_id, session_id, ref, listing_id).
+      attr: body.call?.metadata ?? body.chat?.metadata ?? {},
       ...extra,
     };
     const result = await handler(toolArgs(body), ctx);
