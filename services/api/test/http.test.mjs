@@ -766,6 +766,104 @@ test('events cost the day nothing and /health reports the store', async () => {
   });
 });
 
+/* ---------------- enquiry ---------------- */
+
+const enquiryBody = (over = {}) => ({
+  form: 'listing', name: 'Sara Ahmed', phone: '+966 50 000 0000', interest: 'villa', type: 'buy', budget: '8m', location: 'Al Shati',
+  message: 'Is it still available?', listing_id: 'BONA-W003', page: '/properties/bona-w003/', locale: 'ar',
+  event_id: 'mf3k2a1b-form0001', attr: { anon_id: ANON, session_id: 'mf3k2a-7b1c', ref: 'K7Q2XR', first: touch(), last: touch() },
+  consent: { analytics: true, ads: true }, ...over,
+});
+
+test('POST /v1/enquiry lands a form lead with the visitor\'s source, queues the fan-out, and tells the owner', async () => {
+  await withServer({}, async ({ call, app, sent, dataDir }) => {
+    // The visitor browsed first, so the session (and its last touch) is on record.
+    assert.equal((await postEvent(call, sampleEvent({ event: 'page_view' }))).status, 204);
+
+    const res = await call('/v1/enquiry', { method: 'POST', body: JSON.stringify(enquiryBody()) });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.match(body.lead_id, /^LEAD-\d{8}-[0-9a-f]{8}$/);
+    assert.deepEqual(Object.keys(body), ['lead_id']);
+
+    const lead = app.db.getLead(body.lead_id);
+    assert.equal(lead.channel, 'form');
+    assert.equal(lead.match_method, 'form');
+    assert.equal(lead.name, 'Sara Ahmed');
+    assert.equal(lead.phone_e164, '966500000000');
+    assert.equal(lead.listing_id, 'BONA-W003');
+    assert.equal(lead.district, 'Al Shati');
+    assert.equal(lead.language, 'ar');
+    assert.equal(lead.notes, 'Is it still available?\nType: buy\nLocation: Al Shati');
+    assert.equal(lead.source, 'meta', 'the source comes from the stored session');
+    assert.equal(lead.campaign, 'villas_sep');
+    assert.equal(lead.session_id, 'mf3k2a-7b1c');
+    assert.equal(lead.ref, 'K7Q2XR');
+    assert.equal(lead.stage, 'new');
+
+    const submit = app.db.getEvent('mf3k2a1b-form0001');
+    assert.equal(submit.name, 'form_submit', 'the server records the submit under the browser\'s event id');
+    assert.equal(submit.lead_id, body.lead_id);
+    assert.deepEqual(submit.props, { form: 'listing', cta: 'enquiry' });
+    const created = app.db.recentEvents({ name: 'lead_created' })[0];
+    assert.equal(created.lead_id, body.lead_id);
+    assert.deepEqual(app.db.dueFanout(Date.now() + 1000).filter((f) => f.event_id === created.event_id).map((f) => f.dest), ['meta', 'ga4', 'snap']);
+
+    assert.equal(sent.length, 1);
+    assert.match(sent[0], /Sara Ahmed/);
+    assert.match(sent[0], /Source: meta \/ paid · villas_sep · Ref K7Q2XR · BONA-W003/);
+    assert.match(fs.readFileSync(path.join(dataDir, 'leads.jsonl'), 'utf8'), /Sara Ahmed/);
+
+    // The same person submitting again is one lead, told about twice.
+    const again = await (await call('/v1/enquiry', { method: 'POST', body: JSON.stringify(enquiryBody({ event_id: 'mf3k2a1b-form0002', message: 'Still keen' })) })).json();
+    assert.equal(again.lead_id, body.lead_id);
+    assert.deepEqual(app.db.touchpointsForLead(body.lead_id).map((t) => t.event_type), ['lead_created', 'form_submit']);
+    assert.equal(sent.length, 2);
+    const spent = (await (await call('/health')).json()).budget;
+    assert.equal(spent.chats + spent.calls, 0, 'enquiries are not billable');
+  });
+});
+
+test('an enquiry with no attribution at all is still a lead, sourced as "form"', async () => {
+  await withServer({}, async ({ call, app }) => {
+    const res = await call('/v1/enquiry', { method: 'POST', body: JSON.stringify({ form: 'contact', name: 'Omar', phone: '0500000009', message: 'hi' }) });
+    assert.equal(res.status, 200);
+    const lead = app.db.getLead((await res.json()).lead_id);
+    assert.equal(lead.source, 'form');
+    assert.equal(lead.session_id, null);
+    assert.equal(app.db.recentEvents({ name: 'form_submit' }).length, 0, 'no session, no browser event to record');
+    assert.equal(app.db.recentEvents({ name: 'lead_created' }).length, 1);
+  });
+});
+
+test('an enquiry with a bad phone or a missing name is 400 and creates nothing', async () => {
+  await withServer({}, async ({ call, app, sent }) => {
+    const bad = await call('/v1/enquiry', { method: 'POST', body: JSON.stringify(enquiryBody({ phone: '12' })) });
+    assert.equal(bad.status, 400);
+    const body = await bad.json();
+    assert.equal(body.error, 'bad_request');
+    assert.match(body.message, /phone/);
+    assert.equal((await call('/v1/enquiry', { method: 'POST', body: JSON.stringify(enquiryBody({ name: 'S' })) })).status, 400);
+    assert.equal((await call('/v1/enquiry', { method: 'POST', body: '{oops' })).status, 400);
+    assert.equal(app.db.listLeads().length, 0);
+    assert.equal(sent.length, 0);
+  });
+});
+
+test('the enquiry route is origin-checked, JSON-only, and limited to six a minute', async () => {
+  await withServer({}, async ({ call }) => {
+    const body = JSON.stringify(enquiryBody());
+    const foreign = await call('/v1/enquiry', { method: 'POST', body, headers: { Origin: 'https://evil.example' } });
+    assert.equal(foreign.status, 403);
+    assert.equal((await call('/v1/enquiry', { method: 'POST', body, headers: { 'Content-Type': 'text/plain' } })).status, 415);
+    for (let i = 0; i < 6; i += 1) assert.equal((await call('/v1/enquiry', { method: 'POST', body })).status, 200, `enquiry ${i + 1}`);
+    const blocked = await call('/v1/enquiry', { method: 'POST', body });
+    assert.equal(blocked.status, 429);
+    assert.ok(Number(blocked.headers.get('retry-after')) >= 1);
+    assert.equal((await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale: 'en' }) })).status, 200, 'chat is a separate bucket');
+  });
+});
+
 /* ---------------- inventory + upstream failures ---------------- */
 
 test('an empty portfolio is reported as unhealthy, not served quietly', async () => {
