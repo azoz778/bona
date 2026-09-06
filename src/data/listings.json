@@ -4028,6 +4028,121 @@
     "listedAt": "2026-09-06"
   },
   {
+    "id": "BONA-W005",
+    "slug": "rihab-villas-wajhat-al-warf",
+    "sourceRef": "WA-20260906-AC7B92",
+    "status": "available",
+    "category": "off-plan",
+    "type": "villa",
+    "kind": "house",
+    "featured": false,
+    "title": {
+      "en": "Rihab Villas, Wajhat Al Warf",
+      "ar": "فلل رحاب في وجهة الويرف، جدة"
+    },
+    "location": {
+      "district": {
+        "en": "Wajhat Al Warf",
+        "ar": "وجهة الويرف"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": null,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": true
+    },
+    "specs": {
+      "beds": 4,
+      "baths": 6,
+      "areaSqm": 271.47,
+      "plotSqm": 275,
+      "yearBuilt": null,
+      "floors": 3
+    },
+    "images": [
+      {
+        "src": "/listings/rihab-villas-wajhat-al-warf/01.jpg",
+        "thumb": "/listings/rihab-villas-wajhat-al-warf/01-thumb.webp",
+        "alt": {
+          "en": "Exterior — Rihab Villas, Wajhat Al Warf",
+          "ar": "الواجهة الخارجية — فلل رحاب في وجهة الويرف، جدة"
+        }
+      },
+      {
+        "src": "/listings/rihab-villas-wajhat-al-warf/02.jpg",
+        "thumb": "/listings/rihab-villas-wajhat-al-warf/02-thumb.webp",
+        "alt": {
+          "en": "Exterior — Rihab Villas, Wajhat Al Warf",
+          "ar": "الواجهة الخارجية — فلل رحاب في وجهة الويرف، جدة"
+        }
+      },
+      {
+        "src": "/listings/rihab-villas-wajhat-al-warf/03.jpg",
+        "thumb": "/listings/rihab-villas-wajhat-al-warf/03-thumb.webp",
+        "alt": {
+          "en": "Living room — Rihab Villas, Wajhat Al Warf",
+          "ar": "غرفة المعيشة — فلل رحاب في وجهة الويرف، جدة"
+        }
+      },
+      {
+        "src": "/listings/rihab-villas-wajhat-al-warf/04.jpg",
+        "thumb": "/listings/rihab-villas-wajhat-al-warf/04-thumb.webp",
+        "alt": {
+          "en": "Aerial view — Rihab Villas, Wajhat Al Warf",
+          "ar": "منظر جوي — فلل رحاب في وجهة الويرف، جدة"
+        }
+      }
+    ],
+    "description": {
+      "en": "Rihab is a villa model within Wajhat Al Warf, a residential district developed in southeast Jeddah, close to the historic city core and the main business centers. A planned pedestrian network within the wider community places schools, mosques, health centers and shops within a five to ten minute walk.\n\nThe broader district spans more than 10 million square meters and includes over 12,000 residential units, 21 commercial centers, 10 schools, 7 mosques and 5 larger mosques, and two health centers, alongside green spaces and parks totalling more than 1.3 million square meters.\n\nThe Rihab villa sits on a 275 sqm plot with a total built-up area of 271.47 sqm across three floors. It has four bedrooms and a maid's room, six bathrooms, a ground-floor majlis and a separate family majlis on the first floor, a living and dining area, a kitchen, and front and back roof terraces, with one open parking space.\n\nConstruction follows the Saudi Building Code, with porcelain flooring, washable paint, moisture-resistant gypsum ceilings, and marble staircases inside and out. Doors and windows are water-resistant and thermally insulated with double glazing, and the villa has integrated electrical, air-conditioning and telecom wiring, LED lighting and irrigation for the garden. It carries a 10-year warranty on the concrete structure and soil treatment, 10 years on the building and insulation, and one year on finishes, plumbing and electrical work.",
+      "ar": "تقع فلل رحاب ضمن وجهة الويرف، وهي وجهة سكنية طُوّرت في جنوب شرق جدة، على مقربة من قلب المدينة التاريخي ومراكز الأعمال الرئيسية فيها. وتتيح شبكة مشي مخططة داخل الوجهة الوصول إلى المدارس والمساجد والمراكز الصحية والأسواق خلال خمس إلى عشر دقائق سيرًا على الأقدام.\n\nتمتد الضاحية التي تنتمي إليها الوجهة على مساحة تتجاوز 10 ملايين متر مربع، وتضم أكثر من 12,000 وحدة سكنية، و21 مركزًا تجاريًا، و10 مدارس، و7 مساجد و5 جوامع، ومركزين صحيين، إضافة إلى مساحات خضراء وحدائق تتجاوز مساحتها 1.3 مليون متر مربع.\n\nتقوم فيلا رحاب على أرض مساحتها 275 مترًا مربعًا، بمساحة بناء إجمالية تبلغ 271.47 مترًا مربعًا موزعة على ثلاثة طوابق. وتضم أربع غرف نوم وغرفة خادمة وست دورات مياه، إلى جانب مجلس في الدور الأرضي ومجلس عائلي مستقل في الدور الأول، وصالة معيشة وصالة طعام ومطبخ، وسطحين أمامي وخلفي، مع موقف سيارة واحد مفتوح.\n\nيُنفَّذ البناء وفق كود البناء السعودي للمباني السكنية، بأرضيات بورسلين ودهانات قابلة للغسل وأسقف جبسية مقاومة للرطوبة وسلالم رخامية داخلية وخارجية. وتأتي الأبواب مقاومة للماء والنوافذ بعزل حراري وزجاج مزدوج، مع تأسيس متكامل للكهرباء والتكييف والاتصالات، وإنارة LED وأنظمة ري للحديقة. وتشمل الضمانات عشر سنوات للهيكل الخرساني ومعالجة التربة، وعشر سنوات للمباني والعزل، وسنة كاملة للتشطيبات والسباكة والكهرباء."
+    },
+    "highlights": {
+      "en": [
+        "4 bedrooms plus maid's room",
+        "6 bathrooms across 3 floors",
+        "Majlis and separate family majlis",
+        "Front and back roof terraces",
+        "10-year structural warranty",
+        "Walkable community amenities"
+      ],
+      "ar": [
+        "أربع غرف نوم وغرفة خادمة",
+        "ست دورات مياه على ثلاثة طوابق",
+        "مجلس رئيسي ومجلس عائلي منفصل",
+        "سطح أمامي وخلفي",
+        "ضمان هيكلي لعشر سنوات",
+        "مرافق مجتمعية على مقربة"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": "https://bona.azoz.uk/listings/rihab-villas-wajhat-al-warf/brochure.pdf",
+    "project": {
+      "name": {
+        "en": "Wajhat Al Warf",
+        "ar": "وجهة الويرف"
+      },
+      "developer": {
+        "en": "Faisal Bin Saedan Real Estate Investment & Development",
+        "ar": "شركة فيصل بن سعيدان للاستثمار والتطوير العقاري"
+      }
+    },
+    "unit": null,
+    "map": null,
+    "listedAt": "2026-09-06"
+  },
+  {
     "id": "BONA-W004",
     "slug": "wharf-destination-villas-jeddah",
     "sourceRef": "WA-20260906-ACBA8B",
