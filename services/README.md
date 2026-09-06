@@ -173,6 +173,7 @@ never logged. `process.env` always wins over a file.
 | `~/.secrets/retell.env` | `RETELL_API_KEY` |
 | `~/.secrets/evolution-api.env` | `EVOLUTION_API_URL`, `EVOLUTION_API_KEY` |
 | `~/.secrets/bona-services.env` | everything below |
+| `~/.secrets/bona-marketing.env` | `META_PIXEL_ID`, `META_CAPI_TOKEN`, `META_TEST_EVENT_CODE`, `GA4_MEASUREMENT_ID`, `GA4_API_SECRET`, `SNAP_PIXEL_ID`, `SNAP_CAPI_TOKEN` — read last (highest precedence); an empty key switches that fan-out off. Template: `deploy/bona-marketing.env.example`, copied there by `install.sh` |
 
 | Variable | Default | Notes |
 |---|---|---|
@@ -192,6 +193,11 @@ never logged. `process.env` always wins over a file.
 | `BONA_RETELL_SEPARATE_CHAT_AGENT` | `1` | `0` reuses the voice agent for chat |
 | `BONA_RETELL_MOCK` | `0` | `1` answers chat locally, contacts no one |
 | `BONA_WA_NOTIFY` | `1` | `0` stops the WhatsApp lead note |
+| `BONA_WA_POLL` | `1` (set by the unit) | the in-process WhatsApp poller — `0` stops it (§10) |
+| `BONA_WA_POLL_MS` | `45000` | poll interval; each tick reads the last 2 minutes of `chat/findMessages` |
+| `BONA_FANOUT_MS` | `20000` | fan-out worker interval (Meta CAPI, GA4 MP, Snap CAPI) |
+| `BONA_DB_FILE` | `${BONA_DATA}/bona.db` | the SQLite lead store (0600); set only to move it |
+| `BONA_DASH_COOKIE_DAYS` | `30` | how long a dashboard login lasts |
 | `BONA_RATE_CHAT` / `BONA_RATE_TOKEN` | `30` / `6` | per IP per minute |
 | `BONA_RATE_TOOL` / `BONA_RATE_TOOL_AUTH_FAIL` | `600` / `10` | per IP per minute |
 | `BONA_MAX_CHATS_PER_DAY` / `BONA_MAX_CALLS_PER_DAY` | `300` / `60` | reset at midnight Asia/Riyadh |
@@ -318,6 +324,9 @@ Retell double, and the provisioning payloads including the model fallback.
 | `503 budget_exhausted` | the day's chat/call ceiling is spent; `journalctl … \| grep budget.exhausted`, raise `BONA_MAX_*` if that is the answer |
 | `503 billing` | the owner's Retell balance is empty — top it up; the log line says so loudly |
 | `/health` 503, `inventory: 0` | `listings.json` is missing or broken at the path in `redacted` config; fix it, no restart needed |
+| Dashboard code never arrives | `/health` → `evolution` must be reachable; `journalctl --user -u bona-api \| grep dashboard`; the owner JID is `BONA_OWNER_JID` |
+| `/health` `poller.lag` keeps growing | Evolution outage or wrong `EVOLUTION_API_URL`; nothing else is affected, messages are picked up when it is back |
+| `/health` `fanout.failed` > 0 | a key is wrong or expired — `node scripts/marketing/verify-integrations.mjs` says which; rows retry ≤ 5 times with backoff |
 | PC is off | everything pauses; the site falls back to WhatsApp and no data is lost |
 
 Logs are one JSON object per line: `journalctl --user -u bona-api -f`.
@@ -335,3 +344,57 @@ is no separate LLM key. The knowledge base re-crawls two static text files every
 hours. Cloudflare Tunnel is free. The tighter budget on `/v1/call/token` (6 per IP per
 minute) is the guard against someone opening calls in a loop — a web call is the only
 route here that costs money by the minute.
+
+---
+
+## 10. Tracking: WhatsApp poller, fan-out, dashboard
+
+Design: `docs/superpowers/specs/2026-09-06-client-acquisition-tracking-design.md`. Owner
+side: `docs/OWNER-RUNBOOK.md` §4, §9–§11 and `docs/checklists/`.
+
+**Store.** `${BONA_DATA}/bona.db` (SQLite, WAL, mode 0600): sessions, events, leads,
+touchpoints, stage history, spend, fan-out queue, dashboard auth. The JSONL files stay as
+the append-only raw log and are imported once on start-up. Raw phone numbers, names and
+message snippets never leave this file; ad platforms get hashed identifiers only.
+
+**Poller** (`BONA_WA_POLL=1`, every `BONA_WA_POLL_MS`). A read-only loop inside this
+process: `POST /chat/findMessages/{instance}` on Evolution for the last two minutes,
+deduplicated by message id. A message is kept only when it carries a site `Ref` code
+(`Ref BONA-W003 · K7Q2XR`), comes from a known lead, mentions Bona or a listing id, arrives
+with ad context, or lands within ±15 min of a `whatsapp_click` from an unknown sender
+(marked *inferred*). Everything else is discarded in memory. A match creates or updates a
+lead, records the response time from your first reply, and sends you the usual WhatsApp
+note with a source line. Evolution is **never** given a webhook. `/health` shows
+`poller.lastRun` and `lag`.
+
+**Fan-out** (every `BONA_FANOUT_MS`). Per event, per destination, idempotent by
+`event_id`, retried ≤ 5 times with backoff: Meta CAPI `Contact` / `Lead` / `Schedule` /
+`Purchase`, GA4 Measurement Protocol `generate_lead` → `close_convert_lead`, Snap
+`SIGN_UP` / `PURCHASE`. Consent-gated: Meta/Snap only for sessions that allowed
+*advertising*, GA4 only with *analytics*; a lead without a session gets no ad-platform
+event. Keys in `~/.secrets/bona-marketing.env`; `node scripts/marketing/verify-integrations.mjs`
+checks each one and updates the site's Integrations board.
+
+### Dashboard
+
+`https://bona-api.azoz.uk/dashboard` — server-rendered HTML from this process, no CDN,
+`Cache-Control: no-store`, CSP `default-src 'self'`, `X-Frame-Options: DENY`.
+
+Login: `GET /dashboard/login` → `POST /dashboard/login/code` sends a 6-digit code to the
+owner's WhatsApp (`BONA_OWNER_JID`; only `sha256(code)` is stored, 10-min expiry, 3 codes per
+10 min per IP, 1 per minute globally) → `POST /dashboard/login/verify` (5 attempts per code)
+sets the `bona_dash` cookie (HttpOnly, Secure, SameSite=Lax, `BONA_DASH_COOKIE_DAYS`, token
+hashed at rest) → `/dashboard/logout`. Every other `/dashboard/*` route 302s to the login
+without a valid cookie.
+
+Routes (being built in the dashboard workstream; shapes in the spec §4.5 and plan C7):
+
+| Route | What |
+|---|---|
+| `GET /dashboard` | Overview — 14-day strip, sources → leads (first- vs last-touch), match quality, CPL |
+| `GET /dashboard/leads`, `/dashboard/leads/:id` | pipeline board, lead journey, stage + note forms |
+| `GET /dashboard/listings` | per-listing funnel + REGA flags (`no_ad_licence`, `expiring_30d`, `expired`, `wafi_missing`) |
+| `GET /dashboard/spend` | manual spend entry / CSV import |
+| `GET /dashboard/integrations` | key presence, Evolution, Retell, poller, fan-out, last accepted per platform |
+| `GET /v1/admin/stats`, `/v1/admin/leads[/:id]`, `/v1/admin/listings` | JSON behind the cookie + `X-Bona-Dash: 1` + same-origin |
+| `POST /v1/admin/leads/:id/stage`, `/note`, `/v1/admin/spend` | writes; a stage change also enqueues the fan-out |

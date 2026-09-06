@@ -41,8 +41,17 @@ export const LLM_NAME = 'Bona Dana';
 export const VOICE_AGENT_NAME = 'Bona Dana (voice)';
 export const CHAT_AGENT_NAME = 'Bona Dana (chat)';
 
+/**
+ * What Dana says first on a CALL (`start_speaker: agent`): the PDPL disclosure — who she is
+ * and that the call is recorded — in both languages, then the invitation. The chat panel's
+ * greeting is NOT this string: `POST /create-chat` returns no begin message, so bona-api
+ * uses its own `GREETING[locale]` (index.mjs) and the panel's "conversations are stored"
+ * notice line covers chat. Changing this constant only reaches Retell through
+ * `node services/api/retell/provision.mjs`.
+ */
 export const BEGIN_MESSAGE =
-  'مرحباً، أنا دانة من بونا. كيف أقدر أساعدك؟ Hello, I’m Dana from Bona — how can I help?';
+  'معك دانة، المساعدة الذكية لبونا. هذه المكالمة مسجّلة لمتابعة طلبك. كيف أقدر أساعدك؟ ' +
+  'This is Dana, Bona’s AI concierge. This call is recorded to handle your enquiry. How can I help?';
 
 /** Models Retell accepts (retell-sdk 5.64.0 `LlmCreateParams.model`). */
 export const PREFERRED_MODEL = 'claude-4.6-sonnet';
