@@ -1,0 +1,203 @@
+{
+  "id": "BONA-W013",
+  "slug": "danyah-villas-al-basateen",
+  "sourceRef": "WA-20260906-AC4732",
+  "status": "available",
+  "category": "off-plan",
+  "type": "villa",
+  "kind": "house",
+  "featured": false,
+  "title": {
+    "en": "Danyah Villas, Al Basateen",
+    "ar": "فلل دانية، البساتين"
+  },
+  "location": {
+    "district": {
+      "en": "Al Basateen",
+      "ar": "البساتين"
+    },
+    "city": {
+      "en": "Jeddah",
+      "ar": "جدة"
+    },
+    "country": {
+      "en": "Saudi Arabia",
+      "ar": "السعودية"
+    },
+    "countryCode": "SA"
+  },
+  "price": {
+    "amount": null,
+    "currency": "SAR",
+    "from": false,
+    "period": null,
+    "onRequest": true
+  },
+  "specs": {
+    "beds": 4,
+    "baths": 7,
+    "areaSqm": 497,
+    "plotSqm": 375,
+    "yearBuilt": null,
+    "floors": 3
+  },
+  "images": [
+    {
+      "src": "/listings/danyah-villas-al-basateen/01.jpg",
+      "thumb": "/listings/danyah-villas-al-basateen/01-thumb.webp",
+      "alt": {
+        "en": "Pool at night — Danyah Villas, Al Basateen",
+        "ar": "المسبح ليلاً — فلل دانية، البساتين"
+      }
+    },
+    {
+      "src": "/listings/danyah-villas-al-basateen/02.jpg",
+      "thumb": "/listings/danyah-villas-al-basateen/02-thumb.webp",
+      "alt": {
+        "en": "Roof terrace — Danyah Villas, Al Basateen",
+        "ar": "التراس العلوي — فلل دانية، البساتين"
+      }
+    },
+    {
+      "src": "/listings/danyah-villas-al-basateen/03.jpg",
+      "thumb": "/listings/danyah-villas-al-basateen/03-thumb.webp",
+      "alt": {
+        "en": "Reception salon — Danyah Villas, Al Basateen",
+        "ar": "المجلس — فلل دانية، البساتين"
+      }
+    },
+    {
+      "src": "/listings/danyah-villas-al-basateen/04.jpg",
+      "thumb": "/listings/danyah-villas-al-basateen/04-thumb.webp",
+      "alt": {
+        "en": "Living room — Danyah Villas, Al Basateen",
+        "ar": "غرفة المعيشة — فلل دانية، البساتين"
+      }
+    },
+    {
+      "src": "/listings/danyah-villas-al-basateen/05.jpg",
+      "thumb": "/listings/danyah-villas-al-basateen/05-thumb.webp",
+      "alt": {
+        "en": "Dining room — Danyah Villas, Al Basateen",
+        "ar": "غرفة الطعام — فلل دانية، البساتين"
+      }
+    },
+    {
+      "src": "/listings/danyah-villas-al-basateen/06.jpg",
+      "thumb": "/listings/danyah-villas-al-basateen/06-thumb.webp",
+      "alt": {
+        "en": "Kitchen — Danyah Villas, Al Basateen",
+        "ar": "المطبخ — فلل دانية، البساتين"
+      }
+    },
+    {
+      "src": "/listings/danyah-villas-al-basateen/07.jpg",
+      "thumb": "/listings/danyah-villas-al-basateen/07-thumb.webp",
+      "alt": {
+        "en": "Master suite — Danyah Villas, Al Basateen",
+        "ar": "الجناح الرئيسي — فلل دانية، البساتين"
+      }
+    },
+    {
+      "src": "/listings/danyah-villas-al-basateen/08.jpg",
+      "thumb": "/listings/danyah-villas-al-basateen/08-thumb.webp",
+      "alt": {
+        "en": "Lounge — Danyah Villas, Al Basateen",
+        "ar": "الصالة — فلل دانية، البساتين"
+      }
+    }
+  ],
+  "videos": [],
+  "description": {
+    "en": "Danyah Villas is a villa development in Al Basateen, a quiet residential district in north Jeddah, built by Specialized Homes (Al Masaken Al Mutakhassisah). The plot sits close to Jawharat Jeddah Mall, Sulaiman Al Habib Hospital, the Jeddah Yacht Club and King Abdulaziz International Airport.\n\nEach villa is arranged over a ground floor, a first floor and a roof-level second floor, with a total built-up area of 497 square metres on a 375 square metre plot. The ground floor holds a reception hall, a main salon, a dining hall, a family room, two guest washrooms, a private pool with an outdoor shower, and a staff room.\n\nThe first floor holds a master bedroom with an en-suite bathroom and balcony, two further bedrooms each with their own bathroom, and a family sitting room with a side balcony. The second floor adds a second master bedroom with an en-suite bathroom and interior balcony, a sitting room, a staff room, a laundry room and a large roof terrace.\n\nThe project carries a ten-year structural warranty and a twenty-five year Abyat-backed warranty on the aluminium work. Insulation is covered for ten years, and the plumbing, electrical, sanitary fittings, water network and elevator each carry a two-year warranty.",
+    "ar": "فلل دانية مشروع سكني في حي البساتين، أحد الأحياء الهادئة في شمال جدة، طورته شركة المساكن المتخصصة. يقع المشروع بالقرب من جوهرة جدة مول، ومستشفى سليمان الحبيب، ونادي جدة لليخوت، ومطار الملك عبدالعزيز الدولي.\n\nتتوزع كل فيلا على دور أرضي ودور أول ودور ثاني على مستوى السطح، بإجمالي مساحة بناء 497 مترًا مربعًا على أرض مساحتها 375 مترًا مربعًا. يضم الدور الأرضي صالة استقبال وصالونًا رئيسيًا وصالة طعام وغرفة معيشة، ودورتي مياه للضيوف، ومسبحًا خاصًا مع حمام خارجي، وغرفة للحارس.\n\nيضم الدور الأول غرفة نوم رئيسية بحمام خاص وبلكونة، وغرفتي نوم إضافيتين لكل منهما حمامها الخاص، وصالة معيشة ببلكونة جانبية. أما الدور الثاني فيحتوي على غرفة نوم رئيسية ثانية بحمام وبلكونة داخلية، وصالة جلوس، وغرفة عاملات، وغرفة غسيل، وسطح واسع.\n\nيحصل المشروع على ضمان إنشائي لمدة عشر سنوات، وضمان أبيات لأعمال الألمنيوم لمدة خمس وعشرين عامًا. كما تُغطى أعمال العزل لعشر سنوات، فيما تحصل أعمال السباكة والكهرباء والأدوات الصحية وشبكة المياه والمصعد على ضمان سنتين لكل منها."
+  },
+  "highlights": {
+    "en": [
+      "Private pool and terrace",
+      "Rooftop lounge with fire pit",
+      "Four en-suite bedrooms",
+      "Staff room and laundry",
+      "Ten-year structural warranty"
+    ],
+    "ar": [
+      "مسبح خاص وتراس",
+      "جلسة على السطح مع موقد نار",
+      "أربع غرف نوم بحمامات خاصة",
+      "غرفة عاملات وغرفة غسيل",
+      "ضمان إنشائي لعشر سنوات"
+    ]
+  },
+  "virtualTourUrl": null,
+  "brochureUrl": "https://bona.azoz.uk/listings/danyah-villas-al-basateen/brochure.pdf",
+  "project": {
+    "name": {
+      "en": "Danyah Villas",
+      "ar": "فلل دانية"
+    },
+    "developer": {
+      "en": "Specialized Homes",
+      "ar": "المساكن المتخصصة"
+    }
+  },
+  "unit": null,
+  "map": null,
+  "mapPrecision": null,
+  "listedAt": "2026-09-06",
+  "hidden": false,
+  "_intake": {
+    "source": "whatsapp",
+    "pdfSha256": "308ba56e4ce2b36f90e688ea0ee714d151e1857835da1dbf88528dc8e6026c86",
+    "model": "sonnet",
+    "confidence": 0.72,
+    "warnings": [
+      "photos-cropped",
+      "model-flagged",
+      "map-unconfirmed"
+    ],
+    "images": [
+      {
+        "n": 1,
+        "candidate": 25,
+        "room": "pool_night"
+      },
+      {
+        "n": 2,
+        "candidate": 28,
+        "room": "terrace"
+      },
+      {
+        "n": 3,
+        "candidate": 21,
+        "room": "majlis"
+      },
+      {
+        "n": 4,
+        "candidate": 22,
+        "room": "living"
+      },
+      {
+        "n": 5,
+        "candidate": 23,
+        "room": "dining"
+      },
+      {
+        "n": 6,
+        "candidate": 24,
+        "room": "kitchen"
+      },
+      {
+        "n": 7,
+        "candidate": 26,
+        "room": "master"
+      },
+      {
+        "n": 8,
+        "candidate": 27,
+        "room": "lounge"
+      }
+    ],
+    "createdAt": "2026-09-06T20:03:55.772Z",
+    "site": "https://bona.azoz.uk"
+  }
+}
