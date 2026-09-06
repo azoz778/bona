@@ -36,9 +36,9 @@ test('later files override earlier ones', () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('the three secret files are read in the documented order', () => {
+test('the four secret files are read in the documented order, marketing keys last', () => {
   const files = defaultEnvFiles('/home/tester');
-  assert.deepEqual(files.map((f) => path.basename(f)), ['retell.env', 'evolution-api.env', 'bona-services.env']);
+  assert.deepEqual(files.map((f) => path.basename(f)), ['retell.env', 'evolution-api.env', 'bona-services.env', 'bona-marketing.env']);
   assert.ok(files.every((f) => f.startsWith('/home/tester/.secrets/')));
 });
 

@@ -70,11 +70,16 @@ export function parseTrustedProxies(value) {
  * may append to it, so a spoofed hop would hand an attacker a fresh rate-limit
  * bucket per request. Everything else keys on the socket address.
  */
-export function clientIp(req, { trustedProxies = [] } = {}) {
+/** Is the socket peer allowed to speak for the client (`CF-Connecting-IP`, `CF-IPCountry`)? */
+export function trustedPeer(req, { trustedProxies = [] } = {}) {
   const socketAddr = req?.socket?.remoteAddress ?? '';
   const peer = normaliseAddr(socketAddr);
-  const trusted = isLoopback(socketAddr) || (peer && trustedProxies.includes(peer));
-  if (trusted) {
+  return isLoopback(socketAddr) || (Boolean(peer) && trustedProxies.includes(peer));
+}
+
+export function clientIp(req, { trustedProxies = [] } = {}) {
+  const peer = normaliseAddr(req?.socket?.remoteAddress ?? '');
+  if (trustedPeer(req, { trustedProxies })) {
     const cf = req?.headers?.['cf-connecting-ip'];
     if (typeof cf === 'string' && cf.trim()) return cf.trim();
   }

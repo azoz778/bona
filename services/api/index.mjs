@@ -14,14 +14,18 @@
  *   GET  /v1/call/:callId/context                            -> { listings, updatedAt }
  *   POST /v1/tools/<name>?token=   (Retell custom tools)
  *   POST /v1/retell/webhook?token= (Retell agent events)
+ *   POST /v1/events                { v:1, event, event_id, … }  -> 204   (text/plain or JSON, ≤ 8 KB)
  *
  * Everything is JSON, `Cache-Control: no-store`, CORS-allowlisted, per-IP rate
- * limited, and bodies are capped at 16 KB.
+ * limited, and bodies are capped at 16 KB (8 KB for events).
  */
 import http from 'node:http';
+import path from 'node:path';
 import { loadConfig, redacted } from './lib/config.mjs';
 import { corsHeaders, isAllowedOrigin } from './lib/cors.mjs';
-import { createLimiter, clientIp } from './lib/ratelimit.mjs';
+import { createLimiter, clientIp, trustedPeer } from './lib/ratelimit.mjs';
+import { openDb } from './lib/db.mjs';
+import { validateEvent, recordEvent, MAX_BODY_BYTES as MAX_EVENT_BYTES } from './lib/events.mjs';
 import { createBudget } from './lib/budget.mjs';
 import { createInventory } from './lib/inventory.mjs';
 import { createStore } from './lib/store.mjs';
@@ -150,6 +154,8 @@ export function createApp(options = {}) {
   const log = options.log ?? ((obj) => jsonLog(obj.level ?? 'info', obj));
   const inventory = options.inventory ?? createInventory({ file: cfg.inventoryFile, siteUrl: cfg.siteUrl });
   const store = options.store ?? createStore();
+  const db = options.db ?? openDb(cfg.dbFile ?? path.join(cfg.dataDir, 'bona.db'));
+  const ownsDb = !options.db;
   const retell = options.retell ?? createRetellClient({ apiKey: cfg.retellApiKey, mock: cfg.retellMock });
   const probeRetell = options.probeRetell ?? createHealthProbe(retell);
   const sendWhatsApp = options.sendWhatsApp ?? ((text) => sendText(text, { env: cfg.env }));
@@ -162,6 +168,10 @@ export function createApp(options = {}) {
     chat: createLimiter({ capacity: cfg.chatRatePerMin, perMs: perMin }),
     token: createLimiter({ capacity: cfg.tokenRatePerMin, perMs: perMin }),
     misc: createLimiter({ capacity: 120, perMs: perMin }),
+    // First-party events are cheap and frequent (every page view, every click), so the
+    // bucket is wide; the enquiry form creates a lead and messages the owner, so it is not.
+    events: createLimiter({ capacity: cfg.eventsRatePerMin ?? 240, perMs: perMin }),
+    enquiry: createLimiter({ capacity: cfg.enquiryRatePerMin ?? 6, perMs: perMin }),
     // Retell is allowed to call tools as often as a conversation needs; the tight
     // bucket only counts failed authentications, so guessing the token is pointless.
     tool: createLimiter({ capacity: cfg.toolRatePerMin ?? 600, perMs: perMin }),
@@ -185,6 +195,18 @@ export function createApp(options = {}) {
     };
   }
 
+  /**
+   * What the server itself knows about a request, stored beside every event and
+   * session: the client IP (`clientIp` rules), the user agent, and the country
+   * Cloudflare stamps on the request — trusted only from the tunnel, like the IP.
+   */
+  function serverContext(req, ip) {
+    const ua = String(req.headers['user-agent'] ?? '').slice(0, 300) || null;
+    const cfCountry = trustedPeer(req, { trustedProxies: cfg.trustedProxies }) ? String(req.headers['cf-ipcountry'] ?? '') : '';
+    const country = /^[A-Za-z]{2}$/.test(cfCountry) ? cfCountry.toUpperCase() : null;
+    return { ip, ua, country, received: Date.now() };
+  }
+
   /* -------------------- route handlers -------------------- */
 
   async function health() {
@@ -192,12 +214,15 @@ export function createApp(options = {}) {
     // An empty portfolio is not a healthy concierge: Dana would answer every question
     // with "nothing matches". Say so out loud rather than serving it quietly.
     const inventoryOk = inventory.ok ? inventory.ok() : inventory.count() > 0;
+    let dbStatus = 'error';
+    try { dbStatus = db.ping() ? 'ok' : 'error'; } catch { dbStatus = 'error'; }
     return {
       ok: inventoryOk,
       service: 'bona-api',
       version: cfg.version,
       uptimeS: Math.round((Date.now() - startedAt) / 1000),
       retell: retellStatus === 'ok' ? 'ok' : 'error',
+      db: dbStatus,
       inventory: inventory.count(),
       budget: budget.counters(),
       mock: cfg.retellMock || undefined,
@@ -337,19 +362,57 @@ export function createApp(options = {}) {
 
   /* -------------------- dispatcher -------------------- */
 
+  /** 413, then drop the connection: the rest of the oversized body is never read. */
+  function sendTooLarge(req, res, cors) {
+    res.on('finish', () => req.destroy());
+    sendJson(res, 413, { error: 'payload_too_large' }, { ...cors, Connection: 'close' });
+    return undefined;
+  }
+
   /** Read + parse the body, or answer 413/400 and return `undefined`. */
   async function bodyOf(req, res, cors) {
     try {
       return parseJsonBody(await readBody(req, cfg.maxBodyBytes));
     } catch (err) {
-      if (err?.code === 'BODY_TOO_LARGE') {
-        res.on('finish', () => req.destroy());
-        sendJson(res, 413, { error: 'payload_too_large' }, { ...cors, Connection: 'close' });
-        return undefined;
-      }
+      if (err?.code === 'BODY_TOO_LARGE') return sendTooLarge(req, res, cors);
       sendJson(res, 400, { error: 'invalid_json' }, cors);
       return undefined;
     }
+  }
+
+  /**
+   * `POST /v1/events` — first-party events from the site. Outside the JSON-only gate
+   * (the site posts `text/plain` so there is no preflight and `keepalive` works),
+   * outside the Retell budget (nothing here costs money), on its own wide rate limit,
+   * and with its own 8 KB cap. A stated foreign origin is refused like every other
+   * browser route. Success is an empty 204.
+   */
+  async function eventsRoute({ req, res, origin, cors, ip }) {
+    if (req.method !== 'POST') return sendJson(res, 405, { error: 'method_not_allowed' }, cors);
+    if (origin && !isAllowedOrigin(origin, cfg.origins)) {
+      log({ level: 'warn', evt: 'origin.rejected', path: '/v1/events', origin: String(origin).slice(0, 200), ip });
+      return sendJson(res, 403, { error: 'forbidden_origin' }, cors);
+    }
+    const gate = limiters.events.take(`events:${ip}`);
+    if (!gate.ok) return sendJson(res, 429, { error: 'rate_limited' }, { ...cors, 'Retry-After': String(gate.retryAfterS) });
+
+    let parsed;
+    try {
+      parsed = JSON.parse(await readBody(req, MAX_EVENT_BYTES));
+    } catch (err) {
+      if (err?.code === 'BODY_TOO_LARGE') return sendTooLarge(req, res, cors);
+      return sendJson(res, 400, { error: 'bad_event', reason: 'json' }, cors);
+    }
+    const checked = validateEvent(parsed);
+    if (!checked.ok) return sendJson(res, 400, { error: 'bad_event', reason: checked.reason }, cors);
+    try {
+      recordEvent(db, checked.event, serverContext(req, ip));
+    } catch (err) {
+      log({ level: 'error', evt: 'event.write_failed', name: checked.event.event, error: String(err?.message ?? err) });
+      return sendJson(res, 500, { error: 'internal_error' }, cors);
+    }
+    res.writeHead(204, { ...cors, 'Cache-Control': 'no-store' });
+    return res.end();
   }
 
   /**
@@ -421,6 +484,8 @@ export function createApp(options = {}) {
     if (toolMatch || p === '/v1/retell/webhook') {
       return toolRoute({ req, res, url, p, ip, toolName: toolMatch?.[1] ?? null });
     }
+
+    if (p === '/v1/events') return eventsRoute({ req, res, origin, cors, ip });
 
     /* Browser-facing routes. */
     if (req.method !== 'POST' || !BROWSER_ROUTES.has(p)) return sendJson(res, 404, { error: 'not_found' }, cors);
@@ -509,8 +574,11 @@ export function createApp(options = {}) {
   });
   server.headersTimeout = 20_000;
   server.requestTimeout = 60_000;
+  // The store is owned by the app when the app opened it; a caller who injected one
+  // (tests, tools) closes it themselves.
+  if (ownsDb) server.on('close', () => db.close());
 
-  return { server, handle, cfg, inventory, store, retell, tools, limiters };
+  return { server, handle, cfg, inventory, store, db, retell, tools, limiters };
 }
 
 /* ------------------------------------------------------------------ */
