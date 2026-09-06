@@ -1,6 +1,6 @@
 ---
 /* Enquiry form: builds a localised message and opens WhatsApp. Since the tracking round it also posts the lead to
-   the concierge API first (`POST /v1/enquiry`, fire-and-forget, keepalive so it survives the hand-off to WhatsApp)
+   the concierge API first (`POST /v1/enquiry` as text/plain JSON, fire-and-forget, keepalive so it survives the hand-off to WhatsApp)
    and closes the message with the session's Ref line, so the WhatsApp conversation can be tied back to the visit.
    The API is a nicety: if it is down or the attribution script did not run, WhatsApp still opens exactly as before. */
 import Icon from './Icon.astro';
@@ -98,12 +98,13 @@ const fallbackHref = waLink(site.whatsapp.wa, labels.greeting);
   function consentFlags() {
     try { const c = JSON.parse(localStorage.getItem('bona_consent') || 'null'); return { analytics: c?.analytics === true, ads: c?.ads === true }; } catch { return { analytics: false, ads: false }; }
   }
-  /** POST the lead to the API. Never awaited, never surfaced: WhatsApp opens regardless. */
+  /** POST the lead to the API, exactly like events: text/plain + keepalive is a CORS "simple request" (no preflight),
+      so it survives the immediate navigation to WhatsApp on mobile. Never awaited, never surfaced. */
   function postLead(body: Record<string, unknown>) {
     const api = (w.BONA_API || '').replace(/\/+$/, '');
     if (!api) return;
     try {
-      fetch(`${api}/v1/enquiry`, { method: 'POST', keepalive: true, credentials: 'omit', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).catch(() => {});
+      fetch(`${api}/v1/enquiry`, { method: 'POST', keepalive: true, credentials: 'omit', headers: { 'content-type': 'text/plain' }, body: JSON.stringify(body) }).catch(() => {});
     } catch { /* ignore */ }
   }
 
