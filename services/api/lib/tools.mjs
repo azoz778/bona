@@ -11,29 +11,59 @@
  * itself compact JSON, so the model gets structured data it can quote verbatim.
  * Retell truncates tool results at ~4000 characters — keep rows small.
  */
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { appendLead, leadNote } from './leads.mjs';
+import { normaliseSearchArgs } from './actions.mjs';
+import { toAsciiDigits } from './inventory.mjs';
 
 export const TOOL_NAMES = ['search_properties', 'show_property', 'create_lead'];
 
-/** Constant-time token comparison; empty configured token means "deny". */
+/** A duplicate `create_lead` inside this window returns the first lead's id. */
+export const LEAD_DEDUPE_MS = 10 * 60 * 1000;
+
+/**
+ * Constant-time token comparison. Both sides are hashed first, so the comparison
+ * is over two fixed 32-byte digests: a wrong *length* costs exactly as much as a
+ * wrong byte, and nothing about the real token's shape leaks. An empty configured
+ * token means "deny".
+ */
 export function tokenMatches(provided, expected) {
   if (!expected || !provided) return false;
-  const a = Buffer.from(String(provided));
-  const b = Buffer.from(String(expected));
-  if (a.length !== b.length) return false;
-  try { return timingSafeEqual(a, b); } catch { return false; }
+  const a = createHash('sha256').update(String(provided), 'utf8').digest();
+  const b = createHash('sha256').update(String(expected), 'utf8').digest();
+  return timingSafeEqual(a, b);
 }
 
-/** Token from `?token=`, `X-Bona-Token:` or `Authorization: Bearer …`. */
-export function extractToken({ url, headers = {} }) {
-  const fromQuery = url?.searchParams?.get('token');
-  if (fromQuery) return fromQuery;
+/**
+ * Token from `X-Bona-Token:` or `Authorization: Bearer …`.
+ *
+ * `?token=` is accepted only when `BONA_ALLOW_QUERY_TOKEN=1`: a token in a URL ends
+ * up in proxy logs and in Retell's own tool-call records. Provisioning puts it in a
+ * header, so the query form is off by default.
+ */
+export function extractToken({ url, headers = {}, allowQuery = false }) {
   const header = headers['x-bona-token'];
   if (typeof header === 'string' && header) return header;
   const auth = headers.authorization;
   if (typeof auth === 'string' && /^bearer\s+/i.test(auth)) return auth.replace(/^bearer\s+/i, '').trim();
+  if (allowQuery) {
+    const fromQuery = url?.searchParams?.get('token');
+    if (fromQuery) return fromQuery;
+  }
   return null;
+}
+
+/**
+ * Dedupe key for `create_lead`: one conversation plus one contact. Phone numbers are
+ * compared on their last 9 digits so "+966500000000", "0500000000" and "٠٥٠٠٠٠٠٠٠٠"
+ * are one person; with no phone, the name carries the key.
+ */
+export function leadKey({ conversationId, phone, name } = {}) {
+  const digits = toAsciiDigits(phone ?? '').replace(/\D/g, '').replace(/^0+/, '');
+  const who = digits
+    ? `p:${digits.slice(-9)}`
+    : `n:${String(name ?? '').replace(/\s+/g, ' ').trim().toLowerCase()}`;
+  return `${conversationId ?? 'anon'}|${who}`;
 }
 
 /** The conversation this tool call belongs to (call_id for voice, chat_id for chat). */
@@ -66,21 +96,18 @@ export function toolArgs(body = {}) {
 /**
  * Build the three handlers.
  * @param {{ inventory, store, dataDir: string, siteUrl: string, env: object,
- *           sendWhatsApp?: (text: string) => Promise<any>, log?: Function }} deps
+ *           sendWhatsApp?: (text: string) => Promise<any>, log?: Function,
+ *           now?: () => number, leadDedupeMs?: number }} deps
  */
-export function createToolHandlers({ inventory, store, dataDir, siteUrl, env = {}, sendWhatsApp, log = () => {} }) {
+export function createToolHandlers({
+  inventory, store, dataDir, siteUrl, env = {}, sendWhatsApp, log = () => {},
+  now = () => Date.now(), leadDedupeMs = LEAD_DEDUPE_MS,
+}) {
+  /** leadKey → { at, id }. Bounded by the dedupe window, pruned on every save. */
+  const recentLeads = new Map();
+
   async function search_properties(args, ctx) {
-    const listings = inventory.search({
-      kind: args.kind ?? args.section,
-      type: args.type ?? args.property_type,
-      district: args.district ?? args.area ?? args.location,
-      category: args.category ?? args.listing_kind,
-      minPrice: args.minPrice ?? args.min_price ?? args.budget_min,
-      maxPrice: args.maxPrice ?? args.max_price ?? args.budget ?? args.budget_max,
-      beds: args.beds ?? args.min_rooms ?? args.bedrooms,
-      query: args.query ?? args.q ?? args.text,
-      limit: 5,
-    });
+    const listings = inventory.search({ ...normaliseSearchArgs(args), limit: 5 });
     const results = listings.map((l) => inventory.row(l));
     for (const l of listings.slice(0, 3)) store.addCard(ctx.conversationId, inventory.card(l));
     return {
@@ -111,10 +138,26 @@ export function createToolHandlers({ inventory, store, dataDir, siteUrl, env = {
     if (!lead.phone && !lead.name) {
       return { saved: false, reason: 'missing_contact', note: 'Ask for a name or a phone number before saving the enquiry.' };
     }
+
+    // Retell retries a timed-out tool call, and a model that is being talked into it
+    // will call create_lead twice. One enquiry per conversation per contact.
+    const t = now();
+    const key = leadKey({ conversationId: ctx.conversationId, phone: lead.phone, name: lead.name });
+    for (const [k, v] of recentLeads) if (t - v.at > leadDedupeMs) recentLeads.delete(k);
+    const seen = recentLeads.get(key);
+    if (seen) {
+      log({ evt: 'lead.duplicate', id: seen.id, conversationId: ctx.conversationId ?? null });
+      return {
+        saved: true, id: seen.id, duplicate: true,
+        note: 'This enquiry is already saved — do not save it again. Tell the visitor a Bona principal will be in touch.',
+      };
+    }
+
     const record = appendLead(dataDir, lead, {
       channel: ctx.channel, source: 'concierge',
       extra: { conversationId: ctx.conversationId ?? null, page: ctx.page ?? null },
     });
+    recentLeads.set(key, { at: t, id: record.id });
     store.markLead(ctx.conversationId);
     if (sendWhatsApp) {
       try {

@@ -23,11 +23,26 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=bona-api
 
-# The service only ever reads the repo and writes ~/bona-data.
+# The service reads the repo and ~/.secrets, and writes exactly one directory.
+# Verified on this machine with `systemd-analyze --user verify` and a dry
+# `systemd-run --user` carrying the same directives.
 PrivateTmp=true
 NoNewPrivileges=true
 ProtectHostname=true
 RestrictSUIDSGID=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/bona-data
+PrivateDevices=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
 MemoryMax=512M
 
 [Install]

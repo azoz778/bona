@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractActions, stripMarkers, safePath, plainText } from '../lib/actions.mjs';
+import { extractActions, stripMarkers, safePath, plainText, normaliseSearchArgs, NAV_ROUTES } from '../lib/actions.mjs';
 import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
 
 const inventory = createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk' });
@@ -151,4 +151,95 @@ test('plainText flattens the markdown Retell models emit into plain text', () =>
   assert.match(out, /^1\. first$/m);
   assert.match(out, /the page \(https:\/\/bona\.azoz\.uk\/properties\/x\/\)/);
   assert.equal(plainText('4 * 5 = 20 and a_b_c stay'), '4 * 5 = 20 and a_b_c stay');
+});
+
+/* ---------------- safePath allowlist ---------------- */
+
+test('safePath accepts every route the prompt offers, in both languages', () => {
+  for (const route of NAV_ROUTES) {
+    assert.equal(safePath(route), route, route);
+    const ar = route === '/' ? '/ar/' : `/ar${route}`;
+    assert.equal(safePath(ar), ar, ar);
+  }
+});
+
+test('safePath refuses a page the site does not have', () => {
+  assert.equal(safePath('/admin/'), null);
+  assert.equal(safePath('/properties/houses/secret/'), null);
+  assert.equal(safePath('/ar/admin/'), null);
+  assert.equal(safePath('/wp-login.php'), null);
+});
+
+test('safePath decodes before it judges — no encoded traversal gets through', () => {
+  assert.equal(safePath('/properties/%2e%2e/%2e%2e/etc/passwd'), null);
+  assert.equal(safePath('/properties/./houses/'), null);
+  assert.equal(safePath('/%2fevil.example/'), null);
+  assert.equal(safePath('/properties/houses/%2e%2e/'), null);
+  assert.equal(safePath('/properties/%ff/'), null, 'a broken percent-escape is not a route');
+});
+
+test('safePath allows a real property page, and only a real one', () => {
+  const good = `/properties/${KHALIDIYAH.slug}/`;
+  assert.equal(safePath(good, { inventory }), good);
+  assert.equal(safePath(`/ar${good}`, { inventory }), `/ar${good}`);
+  assert.equal(safePath('/properties/a-villa-we-never-listed/', { inventory }), null);
+  assert.equal(safePath(good), null, 'without inventory to check against, a slug is just a guess');
+});
+
+test('a navigate marker is checked against inventory too', () => {
+  const out = extractActions([
+    { role: 'agent', content: `Have a look. [[navigate:/properties/${KHALIDIYAH.slug}/]]` },
+  ], { inventory });
+  assert.deepEqual(out.actions, [{ type: 'navigate', path: `/properties/${KHALIDIYAH.slug}/` }]);
+  const bad = extractActions([{ role: 'agent', content: 'Have a look. [[navigate:/properties/invented-villa/]]' }], { inventory });
+  assert.deepEqual(bad.actions, [], 'a dead link is worse than no link');
+});
+
+/* ---------------- shared search vocabulary ---------------- */
+
+test('normaliseSearchArgs folds the aliases a model reaches for', () => {
+  assert.deepEqual(normaliseSearchArgs({
+    budget: '5m', area: 'Al Shati', min_rooms: 4, section: 'houses', q: 'sea view',
+    property_type: 'villa', listing_kind: 'buy', budget_min: '2m',
+  }), {
+    kind: 'houses', type: 'villa', district: 'Al Shati', category: 'buy',
+    minPrice: '2m', maxPrice: '5m', beds: 4, query: 'sea view',
+  });
+  assert.deepEqual(normaliseSearchArgs({}), {});
+  assert.deepEqual(normaliseSearchArgs(null), {});
+  assert.deepEqual(normaliseSearchArgs({ district: '', beds: 0 }), { beds: 0 } , 'an empty string is absent; a zero is a value');
+});
+
+test('the canonical names win over their aliases', () => {
+  const out = normaliseSearchArgs({ maxPrice: '9m', budget: '1m', district: 'Obhur', area: 'Al Rawdah' });
+  assert.equal(out.maxPrice, '9m');
+  assert.equal(out.district, 'Obhur');
+});
+
+test('the fallback search speaks the same alias vocabulary as the tool', () => {
+  const out = extractActions([
+    { role: 'tool_call_invocation', tool_call_id: 't1', name: 'search_properties', arguments: JSON.stringify({ area: 'Al Khalidiyah' }) },
+    { role: 'tool_call_result', tool_call_id: 't1', content: 'ok' },
+    { role: 'agent', content: 'Here is one.' },
+  ], { inventory });
+  assert.ok(out.actions.length > 0, '`area` must reach the search as `district`');
+  assert.equal(out.actions[0].listing.district.en, 'Al Khalidiyah');
+});
+
+test('a search that reported count: 0 never gets cards guessed underneath it', () => {
+  const out = extractActions([
+    { role: 'tool_call_invocation', tool_call_id: 't1', name: 'search_properties', arguments: JSON.stringify({ query: 'villa in Al Khalidiyah' }) },
+    { role: 'tool_call_result', tool_call_id: 't1', content: JSON.stringify({ count: 0, results: [] }) },
+    { role: 'agent', content: 'Nothing in the portfolio matches that today.' },
+  ], { inventory });
+  assert.deepEqual(out.actions, [], 'cards under "nothing matches" would call Dana a liar');
+  assert.equal(out.messages[0].text, 'Nothing in the portfolio matches that today.');
+});
+
+test('count: 0 wrapped as a JSON string (the shape Retell carries) is still honoured', () => {
+  const out = extractActions([
+    { role: 'tool_call_invocation', tool_call_id: 't1', name: 'search_properties', arguments: '{"district":"Al Khalidiyah"}' },
+    { role: 'tool_call_result', tool_call_id: 't1', content: JSON.stringify(JSON.stringify({ count: 0, results: [] })) },
+  ], { inventory });
+  assert.deepEqual(out.actions, []);
 });

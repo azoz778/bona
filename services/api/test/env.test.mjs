@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseEnvText, loadEnvFile, loadEnv, ensureServicesEnv, randomToken, defaultEnvFiles } from '../lib/env.mjs';
+import { parseEnvText, loadEnvFile, loadEnv, ensureServicesEnv, randomToken, defaultEnvFiles, setEnvValues } from '../lib/env.mjs';
 
 test('dotenv parsing handles comments, blanks, export and quotes', () => {
   const parsed = parseEnvText([
@@ -70,4 +70,40 @@ test('randomToken is 32 hex characters and does not repeat', () => {
   const a = randomToken(16);
   assert.match(a, /^[0-9a-f]{32}$/);
   assert.notEqual(a, randomToken(16));
+});
+
+test('setEnvValues rewrites one key in place and leaves the rest of the file alone', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-env-'));
+  const file = path.join(dir, 'bona-services.env');
+  fs.writeFileSync(file, [
+    '# Bona services — created automatically. Do not commit.',
+    'BONA_SITE=https://bona.azoz.uk',
+    'BONA_TOOL_TOKEN=oldtokenvalue',
+    '# BONA_TOOL_TOKEN=a-commented-out-decoy',
+    'export BONA_DATA=/home/x/bona-data',
+    '',
+  ].join('\n'), { mode: 0o600 });
+
+  const res = setEnvValues(file, { BONA_TOOL_TOKEN: 'newtokenvalue' });
+  assert.deepEqual(res.replaced, ['BONA_TOOL_TOKEN']);
+  assert.deepEqual(res.appended, []);
+
+  const after = fs.readFileSync(file, 'utf8');
+  assert.equal(loadEnvFile(file).BONA_TOOL_TOKEN, 'newtokenvalue');
+  assert.equal(loadEnvFile(file).BONA_SITE, 'https://bona.azoz.uk');
+  assert.equal(loadEnvFile(file).BONA_DATA, '/home/x/bona-data');
+  assert.ok(after.includes('# Bona services'), 'comments survive');
+  assert.ok(after.includes('# BONA_TOOL_TOKEN=a-commented-out-decoy'), 'a commented key is not a key');
+  assert.equal(after.includes('oldtokenvalue'), false);
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('setEnvValues appends a key the file does not have yet', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-env-'));
+  const file = path.join(dir, 'new.env');
+  setEnvValues(file, { BONA_TOOL_TOKEN: 'abc', BONA_SITE: 'https://bona.azoz.uk' });
+  assert.deepEqual(loadEnvFile(file), { BONA_TOOL_TOKEN: 'abc', BONA_SITE: 'https://bona.azoz.uk' });
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  fs.rmSync(dir, { recursive: true, force: true });
 });

@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   createInventory, WORKTREE_LISTINGS, formatPrice, parsePriceValue, toCard, toToolRow,
-  search, findOne, normalise, tokenise, absoluteUrl, kindOf, resolveInventoryFile,
+  search, findOne, normalise, tokenise, absoluteUrl, kindOf, resolveInventoryFile, STAT_MS,
 } from '../lib/inventory.mjs';
 
 const inv = createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk' });
@@ -166,4 +169,56 @@ test('a broken listings.json keeps the last good copy', () => {
   ok = false; t = 100;
   assert.equal(hot.count(), 1);
   assert.match(String(hot.lastError?.message), /bad json/);
+});
+
+test('a publish is picked up from the file\'s mtime, within half a minute', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-inv-'));
+  const file = path.join(dir, 'listings.json');
+  const row = (id) => ({ id, slug: id.toLowerCase(), title: { en: id, ar: id }, location: { district: {} }, price: {}, specs: {}, images: [] });
+  fs.writeFileSync(file, JSON.stringify([row('A')]));
+
+  let t = 0;
+  let stats = 0;
+  const hot = createInventory({
+    file,
+    reloadMs: 10 * 60 * 1000,
+    now: () => t,
+    read: (f) => { stats += 1; return JSON.parse(fs.readFileSync(f, 'utf8')); },
+  });
+  assert.equal(hot.count(), 1);
+
+  // The intake publishes a second listing, well inside the 10 minute interval.
+  fs.writeFileSync(file, JSON.stringify([row('A'), row('B')]));
+  fs.utimesSync(file, new Date(), new Date(Date.now() + 5000));
+
+  assert.equal(hot.count(), 1, 'the mtime is not stat-ed on every single request');
+  t = STAT_MS + 1;
+  assert.equal(hot.count(), 2, 'one cheap stat later, the new listing is live');
+
+  const before = stats;
+  t += 1;
+  hot.count();
+  assert.equal(stats, before, 'and it does not re-read the file on every call after that');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('an inventory whose first load produced nothing reports itself unhealthy', () => {
+  const broken = createInventory({ file: '/virtual.json', read: () => { throw new Error('bad json'); } });
+  assert.equal(broken.count(), 0);
+  assert.equal(broken.ok(), false, 'serving an empty portfolio quietly is the failure mode');
+
+  const empty = createInventory({ file: '/virtual.json', read: () => [] });
+  assert.equal(empty.ok(), false);
+});
+
+test('a healthy inventory says so, and recovers if the file arrives late', () => {
+  assert.equal(inv.ok(), true);
+
+  let rows = [];
+  let t = 0;
+  const late = createInventory({ file: '/virtual.json', reloadMs: 100, now: () => t, read: () => rows });
+  assert.equal(late.ok(), false);
+  rows = [{ id: 'A', slug: 'a', title: {}, location: { district: {} }, price: {}, specs: {}, images: [] }];
+  t = 200;
+  assert.equal(late.ok(), true, 'once the publisher finishes, health comes back on its own');
 });

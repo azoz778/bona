@@ -75,3 +75,50 @@ test('ending a session drops it and its external link', () => {
   assert.equal(store.getSession(s.sessionId), null);
   assert.equal(store.stats().sessions, 0);
 });
+
+test('call contexts are capped like sessions, oldest first', () => {
+  let t = 0;
+  const store = createStore({ now: () => { t += 1; return t; }, maxEntries: 5 });
+  for (let i = 0; i < 20; i += 1) store.createCall({ callId: `call_${i}` });
+  const stats = store.stats();
+  assert.ok(stats.calls <= 5, `expected the cap to hold, got ${stats.calls}`);
+  assert.equal(store.getCall('call_0'), null, 'the oldest call went first');
+  assert.ok(store.getCall('call_19'), 'the newest call is still there');
+});
+
+test('an authenticated flood of new call ids cannot grow memory without bound', () => {
+  let t = 0;
+  const store = createStore({ now: () => { t += 1; return t; }, maxEntries: 10 });
+  for (let i = 0; i < 500; i += 1) store.addCard(`call_${i}`, card(`A${i}`));
+  const stats = store.stats();
+  assert.ok(stats.calls <= 10, `calls: ${stats.calls}`);
+  assert.ok(stats.external <= 20, `external ids must not outlive their conversations: ${stats.external}`);
+});
+
+test('every eviction path takes the external key with it', () => {
+  let t = 0;
+  const store = createStore({ now: () => t, maxEntries: 5000 });
+  const s = store.createSession({ chatId: 'chat_x' });
+  store.createCall({ callId: 'call_x' });
+  assert.equal(store.stats().external, 2);
+
+  store.endSession(s.sessionId);
+  assert.equal(store.stats().external, 1, 'ending a chat drops its chat_id mapping');
+
+  const s2 = store.createSession({ chatId: 'chat_y' });
+  t = TTL_MS + 1;
+  store.getSession(s2.sessionId);          // expiry path
+  store.getCall('call_x');                 // expiry path
+  store.createCall({ callId: 'call_z' });  // sweeps
+  assert.equal(store.stats().external, 1, 'only the new call is left');
+  assert.equal(store.stats().sessions, 0);
+});
+
+test('a session evicted by the cap does not leave its chat_id behind', () => {
+  let t = 0;
+  const store = createStore({ now: () => { t += 1; return t; }, maxEntries: 3 });
+  for (let i = 0; i < 30; i += 1) store.createSession({ chatId: `chat_${i}` });
+  const stats = store.stats();
+  assert.ok(stats.sessions <= 3, `sessions: ${stats.sessions}`);
+  assert.ok(stats.external <= 6, `external: ${stats.external}`);
+});

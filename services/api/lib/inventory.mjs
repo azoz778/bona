@@ -16,6 +16,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const WORKTREE_LISTINGS = path.resolve(HERE, '../../../src/data/listings.json');
 
 export const RELOAD_MS = 10 * 60 * 1000;
+/** How often the file's mtime may be checked — one cheap stat, at most twice a minute. */
+export const STAT_MS = 30 * 1000;
 
 /* ------------------------------------------------------------------ */
 /* Locale helpers (mirrors of src/lib/i18n.ts + src/lib/listings.ts)    */
@@ -392,15 +394,25 @@ export function readInventoryFile(file) {
 }
 
 /**
- * Inventory holder with a 10-minute lazy reload (and an mtime check, so an intake
- * publish shows up promptly). A failed reload keeps the last good copy.
+ * Inventory holder.
+ *
+ * The file is re-read as soon as its mtime changes — the mtime is checked with one
+ * cheap `stat`, at most every 30 s — so a WhatsApp-intake publish is being served
+ * within half a minute without a restart. Failing that, it is re-read every
+ * `reloadMs` (10 minutes) anyway. A failed reload keeps the last good copy in memory.
+ *
+ * `ok()` is false when the very first load produced no listings at all (missing file,
+ * broken JSON, or a publisher caught mid-write): serving an empty portfolio quietly
+ * is worse than saying the service is degraded.
  */
-export function createInventory({ file, siteUrl = 'https://bona.azoz.uk', reloadMs = RELOAD_MS, now = () => Date.now(), read = readInventoryFile } = {}) {
+export function createInventory({ file, siteUrl = 'https://bona.azoz.uk', reloadMs = RELOAD_MS, statMs = STAT_MS, now = () => Date.now(), read = readInventoryFile } = {}) {
   let listings = [];
   let loaded = false;
   let loadedAt = 0;
+  let statedAt = 0;
   let mtimeMs = 0;
   let lastError = null;
+  let firstLoadEmpty = false;
 
   function load() {
     try {
@@ -411,24 +423,32 @@ export function createInventory({ file, siteUrl = 'https://bona.azoz.uk', reload
       lastError = err;
       if (!listings.length) listings = [];
     }
+    if (!loaded) firstLoadEmpty = listings.length === 0;
     loaded = true;
     loadedAt = now();
+    statedAt = loadedAt;
     return listings;
   }
 
   function maybeReload() {
     if (!loaded) return load();
-    if (now() - loadedAt < reloadMs) return listings;
-    let changed = true;
-    try { changed = fs.statSync(file).mtimeMs !== mtimeMs; } catch { changed = true; }
-    if (!changed) { loadedAt = now(); return listings; }
-    return load();
+    const t = now();
+    if (t - statedAt >= statMs) {
+      statedAt = t;
+      let m = mtimeMs;
+      try { m = fs.statSync(file).mtimeMs; } catch { m = mtimeMs; }
+      if (m !== mtimeMs) return load();
+    }
+    if (t - loadedAt >= reloadMs) return load();
+    return listings;
   }
 
   return {
     file,
     siteUrl,
     get lastError() { return lastError; },
+    /** False while the first load has produced nothing — `/health` answers 503. */
+    ok() { return maybeReload().length > 0 || !firstLoadEmpty; },
     all() { return maybeReload(); },
     count() { return maybeReload().length; },
     reload: load,

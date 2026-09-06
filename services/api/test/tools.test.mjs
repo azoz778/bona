@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createToolHandlers, tokenMatches, extractToken, conversationId, conversationLocale, toolArgs } from '../lib/tools.mjs';
+import { createToolHandlers, tokenMatches, extractToken, conversationId, conversationLocale, toolArgs, leadKey } from '../lib/tools.mjs';
 import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
 import { createStore } from '../lib/store.mjs';
-import { normaliseLead, leadNote } from '../lib/leads.mjs';
+import { normaliseLead, leadNote, appendLead, appendJsonl } from '../lib/leads.mjs';
 
 const inventory = createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk' });
 const KHALIDIYAH = inventory.all().find((l) => l.location.district.en === 'Al Khalidiyah');
@@ -39,12 +39,28 @@ test('tool auth: an unset server token denies everything', () => {
   assert.equal(tokenMatches('', ''), false);
 });
 
-test('the token may arrive as a query param, a header or a bearer', () => {
-  const url = new URL('https://api.bona.azoz.uk/v1/tools/show_property?token=q1');
-  assert.equal(extractToken({ url, headers: {} }), 'q1');
+test('the token arrives in a header or a bearer', () => {
   assert.equal(extractToken({ url: new URL('https://x/y'), headers: { 'x-bona-token': 'h1' } }), 'h1');
   assert.equal(extractToken({ url: new URL('https://x/y'), headers: { authorization: 'Bearer b1' } }), 'b1');
   assert.equal(extractToken({ url: new URL('https://x/y'), headers: {} }), null);
+});
+
+test('?token= is ignored unless BONA_ALLOW_QUERY_TOKEN turns it back on', () => {
+  const url = new URL('https://api.bona.azoz.uk/v1/tools/show_property?token=q1');
+  assert.equal(extractToken({ url, headers: {} }), null, 'a token in a URL lands in logs — off by default');
+  assert.equal(extractToken({ url, headers: {} , allowQuery: true }), 'q1');
+  assert.equal(
+    extractToken({ url, headers: { 'x-bona-token': 'h1' }, allowQuery: true }),
+    'h1',
+    'the header wins when both are present',
+  );
+});
+
+test('tokenMatches is length-blind: a wrong length is just a wrong token', () => {
+  assert.equal(tokenMatches('a'.repeat(32), 'a'.repeat(32)), true);
+  assert.equal(tokenMatches('a', 'a'.repeat(32)), false);
+  assert.equal(tokenMatches('a'.repeat(4000), 'a'.repeat(32)), false);
+  assert.equal(tokenMatches('a'.repeat(31) + 'b', 'a'.repeat(32)), false);
 });
 
 /* ---------------- envelope parsing ---------------- */
@@ -170,8 +186,69 @@ test('the owner note reads as a briefing, not as JSON', () => {
   assert.ok(!note.includes('{'));
 });
 
+test('create_lead is idempotent inside its window — one enquiry, one WhatsApp note', async () => {
+  const h = harness();
+  const body = {
+    chat: { chat_id: 'chat_dupe' },
+    args: { phone: '+966 50 000 0000', name: 'Sara', notes: 'first' },
+  };
+  const first = JSON.parse(await h.tools.run('create_lead', body));
+  const again = JSON.parse(await h.tools.run('create_lead', body));
+  const spelled = JSON.parse(await h.tools.run('create_lead', {
+    chat: { chat_id: 'chat_dupe' }, args: { phone: '0500000000', name: 'Sara' },
+  }));
+  assert.equal(again.id, first.id, 'a retry must return the lead that already exists');
+  assert.equal(again.duplicate, true);
+  assert.equal(spelled.id, first.id, 'the same number written another way is the same person');
+  const lines = fs.readFileSync(path.join(h.dataDir, 'leads.jsonl'), 'utf8').trim().split('\n');
+  assert.equal(lines.length, 1);
+  assert.equal(h.sent.length, 1, 'the owner is told once');
+  h.cleanup();
+});
+
+test('the dedupe window expires, and another conversation is another lead', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-tools-'));
+  let t = 0;
+  const tools = createToolHandlers({
+    inventory, store: createStore(), dataDir, siteUrl: 'https://bona.azoz.uk', env: {},
+    sendWhatsApp: async () => ({ ok: true }), now: () => t, leadDedupeMs: 10 * 60 * 1000,
+  });
+  const args = { phone: '+966500000000', name: 'Sara' };
+  const first = JSON.parse(await tools.run('create_lead', { chat: { chat_id: 'c1' }, args }));
+  const other = JSON.parse(await tools.run('create_lead', { chat: { chat_id: 'c2' }, args }));
+  assert.notEqual(other.id, first.id, 'a second conversation is a second enquiry');
+  t = 10 * 60 * 1000 + 1;
+  const later = JSON.parse(await tools.run('create_lead', { chat: { chat_id: 'c1' }, args }));
+  assert.notEqual(later.id, first.id, 'ten minutes on, the visitor is asking again');
+  assert.equal(fs.readFileSync(path.join(dataDir, 'leads.jsonl'), 'utf8').trim().split('\n').length, 3);
+  fs.rmSync(dataDir, { recursive: true, force: true });
+});
+
+test('leadKey folds phone spellings together and falls back to the name', () => {
+  const k = (phone, name) => leadKey({ conversationId: 'c1', phone, name });
+  assert.equal(k('+966500000000'), k('0500000000'));
+  assert.equal(k('+966500000000'), k('٠٥٠٠٠٠٠٠٠٠'), 'Arabic-Indic digits are the same number');
+  assert.notEqual(k('+966500000000'), k('+966500000001'));
+  assert.equal(k(null, ' Sara  Ahmed '), k('', 'sara ahmed'));
+  assert.notEqual(leadKey({ conversationId: 'a', name: 'Sara' }), leadKey({ conversationId: 'b', name: 'Sara' }));
+});
+
 test('an unknown tool name is rejected', async () => {
   const h = harness();
   await assert.rejects(() => h.tools.run('drop_tables', {}), /unknown tool/);
   h.cleanup();
+});
+
+test('the data directory and its files are owner-only — enquiries are personal data', function (t) {
+  if (process.platform === 'win32') return t.skip('POSIX modes only');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-modes-'));
+  const dataDir = path.join(dir, 'bona-data');
+  appendLead(dataDir, { phone: '+966500000000' });
+  appendJsonl(dataDir, 'calls.jsonl', { event: 'call_ended' });
+  appendJsonl(dataDir, 'chats.jsonl', { event: 'chat_ended' });
+  assert.equal(fs.statSync(dataDir).mode & 0o777, 0o700);
+  for (const name of ['leads.jsonl', 'calls.jsonl', 'chats.jsonl']) {
+    assert.equal(fs.statSync(path.join(dataDir, name)).mode & 0o777, 0o600, name);
+  }
+  fs.rmSync(dir, { recursive: true, force: true });
 });

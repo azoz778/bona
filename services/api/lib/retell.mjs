@@ -20,12 +20,14 @@
 export const RETELL_BASE = 'https://api.retellai.com';
 
 export class RetellError extends Error {
-  constructor(message, { status, body, path } = {}) {
+  constructor(message, { status, body, path, retryAfter = null } = {}) {
     super(message);
     this.name = 'RetellError';
     this.status = status;
     this.body = body;
     this.path = path;
+    /** Upstream `Retry-After`, in seconds, when Retell sent one with a 429. */
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -65,7 +67,8 @@ export function createRetellClient({ apiKey, baseUrl = RETELL_BASE, fetchImpl = 
     if (text) { try { parsed = JSON.parse(text); } catch { parsed = text; } }
     if (!res.ok) {
       const detail = typeof parsed === 'string' ? parsed : parsed?.message ?? parsed?.error_message ?? JSON.stringify(parsed);
-      throw new RetellError(`Retell ${method} ${path} -> ${res.status}: ${String(detail).slice(0, 400)}`, { status: res.status, body: parsed, path });
+      const retryAfter = res.headers?.get?.('retry-after') ?? null;
+      throw new RetellError(`Retell ${method} ${path} -> ${res.status}: ${String(detail).slice(0, 400)}`, { status: res.status, body: parsed, path, retryAfter });
     }
     return parsed;
   }

@@ -1,5 +1,5 @@
 /**
- * In-memory session + call-context store with a 2 hour TTL.
+ * In-memory session + call-context store with a 2 hour TTL and a hard entry cap.
  *
  * Chat sessions map our opaque `sessionId` to a Retell `chat_id`; call contexts
  * collect the Cards that `show_property` / `search_properties` produced during a
@@ -28,30 +28,55 @@ export function createStore({ ttlMs = TTL_MS, now = () => Date.now(), maxEntries
 
   function expired(entry, t) { return t - entry.touchedAt > ttlMs; }
 
+  /* Every removal goes through these two, so no external key is ever orphaned. */
+  function dropSession(sessionId, entry = sessions.get(sessionId)) {
+    sessions.delete(sessionId);
+    if (entry?.chatId) byExternal.delete(entry.chatId);
+    byExternal.delete(sessionId);
+  }
+
+  function dropCall(callId) {
+    calls.delete(callId);
+    byExternal.delete(callId);
+  }
+
+  /** Evict the oldest entries of `map` until it is back under `maxEntries`. */
+  function trim(map, drop) {
+    if (map.size <= maxEntries) return;
+    const oldest = [...map.entries()].sort((a, b) => a[1].touchedAt - b[1].touchedAt);
+    for (const [k, v] of oldest.slice(0, map.size - maxEntries)) drop(k, v);
+  }
+
   function sweep() {
     const t = now();
-    for (const [k, v] of sessions) if (expired(v, t)) { sessions.delete(k); byExternal.delete(v.chatId); }
-    for (const [k, v] of calls) if (expired(v, t)) { calls.delete(k); byExternal.delete(k); }
-    if (sessions.size > maxEntries) {
-      const oldest = [...sessions.entries()].sort((a, b) => a[1].touchedAt - b[1].touchedAt);
-      for (const [k, v] of oldest.slice(0, sessions.size - maxEntries)) { sessions.delete(k); byExternal.delete(v.chatId); }
+    for (const [k, v] of sessions) if (expired(v, t)) dropSession(k, v);
+    for (const [k, v] of calls) if (expired(v, t)) dropCall(k, v);
+    trim(sessions, dropSession);
+    trim(calls, dropCall);
+    // Belt and braces: a `link()` for a conversation that never opened would otherwise
+    // sit here for ever. Anything pointing at nothing goes.
+    if (byExternal.size > maxEntries * 2) {
+      for (const [k, v] of byExternal) {
+        if (!sessions.has(v) && !calls.has(k)) byExternal.delete(k);
+        if (byExternal.size <= maxEntries * 2) break;
+      }
     }
   }
 
   function createSession({ chatId, locale = 'en', page = null, greeting = null }) {
-    sweep();
     const t = now();
     const sessionId = randomId();
     const entry = { sessionId, chatId, locale, page, greeting, createdAt: t, touchedAt: t, cards: [], leadCaptured: false, turns: 0 };
     sessions.set(sessionId, entry);
     if (chatId) byExternal.set(chatId, sessionId);
+    sweep(); // after the insert, so the cap is a cap and not a cap-plus-one
     return entry;
   }
 
   function getSession(sessionId) {
     const entry = sessions.get(sessionId);
     if (!entry) return null;
-    if (expired(entry, now())) { sessions.delete(sessionId); byExternal.delete(entry.chatId); return null; }
+    if (expired(entry, now())) { dropSession(sessionId, entry); return null; }
     entry.touchedAt = now();
     return entry;
   }
@@ -59,24 +84,23 @@ export function createStore({ ttlMs = TTL_MS, now = () => Date.now(), maxEntries
   function endSession(sessionId) {
     const entry = sessions.get(sessionId);
     if (!entry) return false;
-    sessions.delete(sessionId);
-    byExternal.delete(entry.chatId);
+    dropSession(sessionId, entry);
     return true;
   }
 
   function createCall({ callId, locale = 'en', page = null }) {
-    sweep();
     const t = now();
     const entry = { callId, locale, page, createdAt: t, touchedAt: t, updatedAt: t, cards: [] };
     calls.set(callId, entry);
     byExternal.set(callId, callId);
+    sweep();
     return entry;
   }
 
   function getCall(callId) {
     const entry = calls.get(callId);
     if (!entry) return null;
-    if (expired(entry, now())) { calls.delete(callId); return null; }
+    if (expired(entry, now())) { dropCall(callId); return null; }
     return entry;
   }
 
@@ -109,6 +133,6 @@ export function createStore({ ttlMs = TTL_MS, now = () => Date.now(), maxEntries
     createSession, getSession, endSession,
     createCall, getCall, addCard, markLead, sweep,
     link: (externalId, sessionId) => byExternal.set(externalId, sessionId),
-    stats: () => ({ sessions: sessions.size, calls: calls.size }),
+    stats: () => ({ sessions: sessions.size, calls: calls.size, external: byExternal.size }),
   };
 }

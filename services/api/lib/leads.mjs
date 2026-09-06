@@ -32,16 +32,17 @@ export function appendLead(dataDir, lead, meta = {}) {
     ...(meta.extra ?? {}),
   };
   const file = path.join(dataDir, 'leads.jsonl');
-  fs.mkdirSync(dataDir, { recursive: true });
-  fs.appendFileSync(file, `${JSON.stringify(record)}\n`, 'utf8');
+  // Enquiries are personal data: the directory is owner-only and so is every file in it.
+  fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  fs.appendFileSync(file, `${JSON.stringify(record)}\n`, { encoding: 'utf8', mode: 0o600 });
   return record;
 }
 
 /** Append one line to another jsonl in the data dir (calls.jsonl, chats.jsonl…). */
 export function appendJsonl(dataDir, name, record) {
   const file = path.join(dataDir, name);
-  fs.mkdirSync(dataDir, { recursive: true });
-  fs.appendFileSync(file, `${JSON.stringify(record)}\n`, 'utf8');
+  fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  fs.appendFileSync(file, `${JSON.stringify(record)}\n`, { encoding: 'utf8', mode: 0o600 });
   return file;
 }
 

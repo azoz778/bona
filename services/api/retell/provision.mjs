@@ -61,13 +61,27 @@ export function knowledgeBasePayload({ siteUrl }) {
   };
 }
 
+/**
+ * The three custom tools.
+ *
+ * The token rides in an `X-Bona-Token` header, not in the query string: Retell's
+ * CustomTool schema takes a `headers` object (verified against
+ * docs.retellai.com/api-references/create-retell-llm), and a token in a URL ends up
+ * in every log and every tool-call record along the way.
+ *
+ * The *agent webhook* cannot do this — Retell offers no custom headers there, only
+ * its own `X-Retell-Signature` — so `webhook_url` keeps `?token=`, and the API keeps
+ * accepting a query token on that one route.
+ */
 export function toolsPayload({ publicApi, toolToken }) {
-  const url = (name) => `${String(publicApi).replace(/\/+$/, '')}/v1/tools/${name}?token=${toolToken}`;
+  const url = (name) => `${String(publicApi).replace(/\/+$/, '')}/v1/tools/${name}`;
+  const headers = { 'X-Bona-Token': toolToken, 'Content-Type': 'application/json' };
   return [
     {
       type: 'custom',
       name: 'search_properties',
       url: url('search_properties'),
+      headers,
       description:
         "Search Bona's live inventory. Call this BEFORE answering anything about what is available, in which district, at what price, or how many bedrooms. Returns up to 5 real listings with their asking prices. If it returns nothing, say so honestly — never invent a property and never estimate a price.",
       speak_during_execution: true,
@@ -94,6 +108,7 @@ export function toolsPayload({ publicApi, toolToken }) {
       type: 'custom',
       name: 'show_property',
       url: url('show_property'),
+      headers,
       description:
         'Put one specific property on the visitor’s screen. Call this every time you name a property, using the id (e.g. BONA-005) or slug returned by search_properties. Call it once per property.',
       speak_during_execution: false,
@@ -113,6 +128,7 @@ export function toolsPayload({ publicApi, toolToken }) {
       type: 'custom',
       name: 'create_lead',
       url: url('create_lead'),
+      headers,
       description:
         'Register the visitor as an enquiry for Bona. Call this as soon as they give a name or phone number, ask for a viewing, or ask to speak to someone. Confirm the phone number back to them once before calling.',
       speak_during_execution: false,
@@ -361,8 +377,8 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
     voiceId, publicApi, siteUrl, separateChatAgent, published: publish,
     note: 'Ids are not secrets. Regenerate with: node services/api/retell/provision.mjs',
   };
-  writeIds(record, idsFile);
-  log(`\nwrote ${idsFile}`);
+  const written = writeIds(record, idsFile);
+  log(written.changed ? `\nwrote ${idsFile}` : `\n${idsFile} unchanged`);
   log('Add to ~/.secrets/bona-services.env (or leave to ids.json):');
   log(`  BONA_RETELL_VOICE_AGENT_ID=${voiceAgentId}`);
   log(`  BONA_RETELL_CHAT_AGENT_ID=${chatAgentId}`);

@@ -11,6 +11,7 @@ import {
   redactPayload, provision, PROMPT_FILE, PREFERRED_MODEL, FALLBACK_MODEL, BEGIN_MESSAGE,
   KB_NAME, VOICE_AGENT_NAME, CHAT_AGENT_NAME,
 } from '../retell/provision.mjs';
+import { writeIds } from '../lib/config.mjs';
 
 const TOKEN = 'b'.repeat(32);
 const PUBLIC_API = 'https://api.bona.azoz.uk';
@@ -30,12 +31,27 @@ test('the knowledge base points at both llms files with auto-refresh on', () => 
   assert.equal(kb.enable_auto_refresh, true);
 });
 
-test('all three tools are custom webhooks on the public API, carrying the token', () => {
+test('the tool token travels in a header, never in the URL', () => {
+  const tools = toolsPayload({ publicApi: PUBLIC_API, toolToken: TOKEN });
+  for (const t of tools) {
+    assert.equal(t.headers['X-Bona-Token'], TOKEN, `${t.name} must authenticate itself`);
+    assert.equal(t.url.includes('token='), false, `${t.name} leaks the token into logs`);
+    assert.equal(t.url.includes(TOKEN), false);
+  }
+});
+
+test('a dry run prints no secret, header included', () => {
+  const printed = JSON.stringify(redactPayload(toolsPayload({ publicApi: PUBLIC_API, toolToken: TOKEN }), TOKEN));
+  assert.equal(printed.includes(TOKEN), false);
+  assert.ok(printed.includes('<BONA_TOOL_TOKEN>'));
+});
+
+test('all three tools are custom webhooks on the public API', () => {
   const tools = toolsPayload({ publicApi: PUBLIC_API, toolToken: TOKEN });
   assert.deepEqual(tools.map((t) => t.name), ['search_properties', 'show_property', 'create_lead']);
   for (const t of tools) {
     assert.equal(t.type, 'custom');
-    assert.equal(t.url, `${PUBLIC_API}/v1/tools/${t.name}?token=${TOKEN}`);
+    assert.equal(t.url, `${PUBLIC_API}/v1/tools/${t.name}`);
     assert.equal(t.parameters.type, 'object');
     assert.ok(t.description.length > 40, `${t.name} needs a description the model can act on`);
     assert.ok(t.timeout_ms >= 1000 && t.timeout_ms <= 600_000);
@@ -284,5 +300,28 @@ test('provisioning without a tool token refuses to build unauthenticated webhook
     () => provision({ argv: [], home, log: () => {}, env: { BONA_TOOL_TOKEN: '', RETELL_API_KEY: 'k' }, idsFile: path.join(home, 'ids.json'), clientFactory: () => fakeClient() }),
     /BONA_TOOL_TOKEN/,
   );
+  cleanup();
+});
+
+test('writeIds only rewrites the file when an id actually changed', () => {
+  const { home, cleanup } = tempHome();
+  const file = path.join(home, 'ids.json');
+  const record = { llmId: 'llm_1', voiceAgentId: 'agent_1', chatAgentId: 'agent_2' };
+
+  const first = writeIds(record, file);
+  assert.equal(first.changed, true);
+  const stamp = JSON.parse(fs.readFileSync(file, 'utf8')).updatedAt;
+  assert.ok(stamp);
+
+  const again = writeIds({ ...record }, file);
+  assert.equal(again.changed, false, 're-running provisioning must not dirty the worktree');
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).updatedAt, stamp);
+
+  const reordered = writeIds({ chatAgentId: 'agent_2', voiceAgentId: 'agent_1', llmId: 'llm_1' }, file);
+  assert.equal(reordered.changed, false, 'key order is not a change');
+
+  const moved = writeIds({ ...record, voiceAgentId: 'agent_9' }, file);
+  assert.equal(moved.changed, true);
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).voiceAgentId, 'agent_9');
   cleanup();
 });

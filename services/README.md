@@ -42,13 +42,13 @@ deliberately **not** CORS-readable.
 
 | Route | Body → Response |
 |---|---|
-| `GET /health` | → `{ ok, service:"bona-api", version, uptimeS, retell:"ok"\|"error", inventory:<count> }` |
+| `GET /health` | → `{ ok, service:"bona-api", version, uptimeS, retell:"ok"\|"error", inventory:<count>, budget }` — 503 when `inventory` is 0 |
 | `POST /v1/chat/session` | `{ locale, page? }` → `{ sessionId, greeting }` |
 | `POST /v1/chat/message` | `{ sessionId, text, locale?, page? }` → `{ messages, actions, leadCaptured? }` |
 | `POST /v1/chat/end` | `{ sessionId }` → `{ ok: true }` |
 | `POST /v1/call/token` | `{ locale, page? }` → `{ accessToken, callId }` |
 | `GET /v1/call/:callId/context` | → `{ listings: Card[], updatedAt }` |
-| `POST /v1/tools/<name>?token=` | Retell custom tool → a JSON string result |
+| `POST /v1/tools/<name>` | Retell custom tool (`X-Bona-Token:`) → a JSON string result |
 | `POST /v1/retell/webhook?token=` | Retell agent events → `calls.jsonl` / `chats.jsonl` |
 
 `page` is `{ url, title }` and becomes the dynamic variables `{{page_url}}` and
@@ -95,15 +95,31 @@ stripped from the text before it reaches `messages`, so the widget never renders
 |---|---|
 | 400 | malformed JSON, or empty `text` |
 | 401 | wrong or missing tool token |
+| 403 | `forbidden_origin` — an `Origin` header that is not on the allowlist |
 | 404 | unknown route, unknown tool, expired `sessionId` |
 | 405 | known route, wrong method |
 | 413 | body over 16 KB |
-| 429 | rate limited (`Retry-After` in seconds) |
-| 502 / 500 | Retell unreachable / unexpected failure |
-| 503 | `not_provisioned` — run the provisioning script |
+| 415 | a browser POST that is not `application/json` |
+| 429 | `rate_limited` (`Retry-After` in seconds), or `session_limit` — this chat hit its turn cap |
+| 500 | unexpected failure |
+| 502 | `upstream_error` — Retell unreachable or broken |
+| 503 | `not_provisioned` · `budget_exhausted` (the day's ceiling) · `billing` (Retell balance empty) |
 
-Rate limits are per IP, per minute: chat 30, `/v1/call/token` 6, call context 120.
-Tool routes are unlimited (Retell may call them freely) but token-gated.
+**Who may call.** A browser route with an `Origin` header that is not on the allowlist
+is refused with 403 *before* Retell is contacted — CORS alone only stops the browser
+*reading* the answer, and the call would already have cost money. A request with no
+`Origin` at all (curl, the widget's own server-side probes) is allowed through.
+
+**Rate limits**, per IP, per minute: chat 30, `/v1/call/token` 6, call context 120,
+tool routes 600, and *failed* tool authentications 10 — so Retell can call tools as
+freely as a conversation needs while guessing the token gets you nowhere. Tool routes
+authenticate before the body is read, so an unauthenticated caller never gets this
+process to parse its JSON.
+
+**Daily ceilings**, counted across everybody and reset at midnight Asia/Riyadh:
+`BONA_MAX_CHATS_PER_DAY` (300), `BONA_MAX_CALLS_PER_DAY` (60) → 503
+`budget_exhausted`; `BONA_MAX_TURNS_PER_SESSION` (40) → 429 `session_limit`. Each is
+logged once when it trips, and `/health` carries the running counters.
 
 ---
 
@@ -136,8 +152,8 @@ curl -s $API/v1/call/<callId>/context | jq
 
 # a tool webhook, exactly as Retell sends it
 TOKEN=$(grep '^BONA_TOOL_TOKEN=' ~/.secrets/bona-services.env | cut -d= -f2)
-curl -s -X POST "$API/v1/tools/search_properties?token=$TOKEN" \
-  -H 'Content-Type: application/json' \
+curl -s -X POST "$API/v1/tools/search_properties" \
+  -H "X-Bona-Token: $TOKEN" -H 'Content-Type: application/json' \
   -d '{"call":{"call_id":"c1"},"name":"search_properties","args":{"district":"Al Khalidiyah"}}'
 ```
 
@@ -165,6 +181,8 @@ never logged. `process.env` always wins over a file.
 | `BONA_SITE` | `https://bona.azoz.uk` | used to absolutise image and page URLs |
 | `BONA_PUBLIC_API` | `https://api.bona.azoz.uk` | baked into the Retell tool URLs |
 | `BONA_TOOL_TOKEN` | *(generated)* | 32 hex; gates `/v1/tools/*` and the webhook |
+| `BONA_ALLOW_QUERY_TOKEN` | `0` | `1` also accepts `?token=` on `/v1/tools/*` (the webhook always does) |
+| `BONA_TRUSTED_PROXY` | — | comma separated; addresses allowed to set `CF-Connecting-IP` |
 | `BONA_DATA` | `~/bona-data` | `leads.jsonl`, `calls.jsonl`, `chats.jsonl` |
 | `BONA_REPO` | `~/bona-bot` | checkout whose `src/data/listings.json` is served |
 | `BONA_INVENTORY_FILE` | — | overrides the two rules above outright |
@@ -175,11 +193,17 @@ never logged. `process.env` always wins over a file.
 | `BONA_RETELL_MOCK` | `0` | `1` answers chat locally, contacts no one |
 | `BONA_WA_NOTIFY` | `1` | `0` stops the WhatsApp lead note |
 | `BONA_RATE_CHAT` / `BONA_RATE_TOKEN` | `30` / `6` | per IP per minute |
+| `BONA_RATE_TOOL` / `BONA_RATE_TOOL_AUTH_FAIL` | `600` / `10` | per IP per minute |
+| `BONA_MAX_CHATS_PER_DAY` / `BONA_MAX_CALLS_PER_DAY` | `300` / `60` | reset at midnight Asia/Riyadh |
+| `BONA_MAX_TURNS_PER_SESSION` | `40` | one chat cannot run for ever |
 
 Inventory resolution order: `BONA_INVENTORY_FILE` → `$BONA_REPO/src/data/listings.json`
-→ the checkout the service is running from. It is re-read every 10 minutes, and only
-if the file's mtime changed, so a WhatsApp-intake publish appears without a restart.
-A broken `listings.json` keeps the last good copy in memory.
+→ the checkout the service is running from. The file's mtime is checked with one cheap
+`stat`, at most every 30 seconds, and the file is re-read as soon as it changes — so a
+WhatsApp-intake publish is being served within half a minute, without a restart. Failing
+that it is re-read every 10 minutes anyway. A broken `listings.json` keeps the last good
+copy in memory; a *first* load that yields nothing makes `/health` answer
+`503 { ok: false, inventory: 0 }` rather than quietly serving an empty portfolio.
 
 ---
 
@@ -203,10 +227,15 @@ What it creates:
 
 1. **Knowledge base "Bona site"** — `knowledge_base_urls: [/llms-full.txt, /llms.txt]`,
    `enable_auto_refresh: true` (Retell re-fetches every 12 h). `POST /create-knowledge-base`
-   is `multipart/form-data`; array values repeat the field name.
+   is `multipart/form-data`, and an array field is **one** field holding a JSON-encoded
+   array — verified against the live API on 2026-09-06: repeating the field name gives a
+   500, and so does sending a JSON body.
 2. **Retell LLM "Bona Dana"** — `general_prompt` from `api/retell/prompt.md`, bilingual
    `begin_message`, `start_speaker: agent`, `knowledge_base_ids`, and three custom
-   tools pointing at `${BONA_PUBLIC_API}/v1/tools/<name>?token=…`.
+   tools pointing at `${BONA_PUBLIC_API}/v1/tools/<name>`, each carrying the token in an
+   `X-Bona-Token` header (Retell's `CustomTool` takes a `headers` object, so the token
+   never enters a URL). The agent `webhook_url` still carries `?token=`: Retell sends no
+   custom headers with agent webhooks, only its own `X-Retell-Signature`.
    Model `claude-4.6-sonnet`, falling back to `gpt-4.1` on any 4xx.
 3. **Voice agent "Bona Dana (voice)"** — `11labs-Nyla` / `eleven_flash_v2_5`,
    `language: ["ar-SA","en-US"]`, responsiveness 1, interruption sensitivity 0.8,
@@ -262,11 +291,14 @@ BONA_RETELL_MOCK=1 node api/index.mjs      # no Retell traffic at all
 ## 7. Tests
 
 ```bash
-cd ~/bona/services && node --test api/test
+cd ~/bona/services && node --test api/test/*.test.mjs
 ```
 
-128 tests, no network and no Retell: search and Card formatting in EN and AR, price
-parsing ("4.5m", "٤ ملايين"), token buckets, the CORS allowlist, tool authentication,
+184 tests, no network and no Retell: search and Card formatting in EN and AR, price
+parsing ("4.5m", "٤ ملايين"), token buckets and the trusted-proxy rules for client IPs,
+the CORS allowlist and the origin refusal, tool authentication (header, bearer, and the
+auth-failure throttle), the navigation allowlist, lead de-duplication, the daily
+budgets and their Riyadh-midnight reset, inventory hot-reload and degraded health,
 action extraction from mocked Retell messages, every HTTP route against a scripted
 Retell double, and the provisioning payloads including the model fallback.
 
@@ -280,9 +312,12 @@ Retell double, and the provisioning payloads including the model fallback.
 | `503 not_provisioned` | `node api/retell/provision.mjs`, then `systemctl --user restart bona-api` |
 | `/health` says `retell: "error"` | Retell key or balance — `journalctl --user -u bona-api -n 50` |
 | Chat works, calls do not | mic permission in the browser, then the voice agent id in `ids.json` |
-| Dana quotes a property that is gone | `curl -s https://api.bona.azoz.uk/health \| jq .inventory`; the file reloads every 10 min |
+| Dana quotes a property that is gone | `curl -s https://api.bona.azoz.uk/health \| jq .inventory`; the file reloads within 30 s of a publish |
 | No lead reached WhatsApp | the lead is still in `~/bona-data/leads.jsonl`; check `EVOLUTION_API_URL` reachability |
-| Tool webhooks 401 | `BONA_TOOL_TOKEN` changed after provisioning — re-run `provision.mjs` so the tool URLs match |
+| Tool webhooks 401 | `BONA_TOOL_TOKEN` changed after provisioning — re-run `provision.mjs` so the tools carry the new header |
+| `503 budget_exhausted` | the day's chat/call ceiling is spent; `journalctl … \| grep budget.exhausted`, raise `BONA_MAX_*` if that is the answer |
+| `503 billing` | the owner's Retell balance is empty — top it up; the log line says so loudly |
+| `/health` 503, `inventory: 0` | `listings.json` is missing or broken at the path in `redacted` config; fix it, no restart needed |
 | PC is off | everything pauses; the site falls back to WhatsApp and no data is lost |
 
 Logs are one JSON object per line: `journalctl --user -u bona-api -f`.

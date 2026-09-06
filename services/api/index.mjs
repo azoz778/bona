@@ -20,8 +20,9 @@
  */
 import http from 'node:http';
 import { loadConfig, redacted } from './lib/config.mjs';
-import { corsHeaders } from './lib/cors.mjs';
+import { corsHeaders, isAllowedOrigin } from './lib/cors.mjs';
 import { createLimiter, clientIp } from './lib/ratelimit.mjs';
+import { createBudget } from './lib/budget.mjs';
 import { createInventory } from './lib/inventory.mjs';
 import { createStore } from './lib/store.mjs';
 import { createRetellClient, createHealthProbe, RetellError } from './lib/retell.mjs';
@@ -99,6 +100,20 @@ function parseJsonBody(text) {
 const asLocale = (v) => (String(v ?? 'en').toLowerCase().startsWith('ar') ? 'ar' : 'en');
 const asText = (v, max = 2000) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
+/**
+ * A page title reaches the model verbatim as `{{page_title}}`, and the page it comes
+ * from is under nobody's control once a link is shared. Brackets and braces are the
+ * punctuation of instructions — markers, JSON, templates — so they come out, and the
+ * whole thing is short enough that it cannot become a paragraph of its own.
+ */
+export const asPageTitle = (v, max = 80) =>
+  String(v ?? '').replace(/[[\]{}<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, max);
+
+/** POST routes the browser widget may call. Anything else is 404 before any budget is spent. */
+export const BROWSER_ROUTES = new Set(['/v1/chat/session', '/v1/chat/message', '/v1/chat/end', '/v1/call/token']);
+
+const isJsonContentType = (value) => /^application\/(?:[\w.+-]+\+)?json\s*(?:;|$)/i.test(String(value ?? '').trim());
+
 /* ------------------------------------------------------------------ */
 /* App                                                                 */
 /* ------------------------------------------------------------------ */
@@ -120,7 +135,17 @@ export function createApp(options = {}) {
     chat: createLimiter({ capacity: cfg.chatRatePerMin, perMs: perMin }),
     token: createLimiter({ capacity: cfg.tokenRatePerMin, perMs: perMin }),
     misc: createLimiter({ capacity: 120, perMs: perMin }),
+    // Retell is allowed to call tools as often as a conversation needs; the tight
+    // bucket only counts failed authentications, so guessing the token is pointless.
+    tool: createLimiter({ capacity: cfg.toolRatePerMin ?? 600, perMs: perMin }),
+    toolAuth: createLimiter({ capacity: cfg.toolAuthFailRatePerMin ?? 10, perMs: perMin }),
   };
+  const budget = options.budget ?? createBudget({
+    maxChats: cfg.maxChatsPerDay ?? 300,
+    maxCalls: cfg.maxCallsPerDay ?? 60,
+    log,
+  });
+  const maxTurns = cfg.maxTurnsPerSession ?? 40;
 
   const startedAt = Date.now();
 
@@ -128,7 +153,7 @@ export function createApp(options = {}) {
     return {
       locale,
       page_url: page?.url ? String(page.url).slice(0, 300) : `${cfg.siteUrl}/`,
-      page_title: page?.title ? asText(page.title, 160) : locale === 'ar' ? 'بونا' : 'Bona',
+      page_title: (page?.title ? asPageTitle(page.title) : '') || (locale === 'ar' ? 'بونا' : 'Bona'),
       ...(sessionId ? { session_id: sessionId } : {}),
     };
   }
@@ -137,13 +162,17 @@ export function createApp(options = {}) {
 
   async function health() {
     const retellStatus = await probeRetell();
+    // An empty portfolio is not a healthy concierge: Dana would answer every question
+    // with "nothing matches". Say so out loud rather than serving it quietly.
+    const inventoryOk = inventory.ok ? inventory.ok() : inventory.count() > 0;
     return {
-      ok: true,
+      ok: inventoryOk,
       service: 'bona-api',
       version: cfg.version,
       uptimeS: Math.round((Date.now() - startedAt) / 1000),
       retell: retellStatus === 'ok' ? 'ok' : 'error',
       inventory: inventory.count(),
+      budget: budget.counters(),
       mock: cfg.retellMock || undefined,
     };
   }
@@ -181,6 +210,15 @@ export function createApp(options = {}) {
     if (!text) {
       const err = new Error('text is required');
       err.code = 'BAD_BODY';
+      throw err;
+    }
+    if (session.turns >= maxTurns) {
+      if (!session.limitLogged) {
+        session.limitLogged = true;
+        log({ level: 'warn', evt: 'session.limit', sessionId: session.sessionId, turns: session.turns, max: maxTurns });
+      }
+      const err = new Error('this conversation has reached its length limit');
+      err.code = 'SESSION_LIMIT';
       throw err;
     }
     if (body.locale) session.locale = asLocale(body.locale);
@@ -272,6 +310,56 @@ export function createApp(options = {}) {
 
   /* -------------------- dispatcher -------------------- */
 
+  /** Read + parse the body, or answer 413/400 and return `undefined`. */
+  async function bodyOf(req, res, cors) {
+    try {
+      return parseJsonBody(await readBody(req, cfg.maxBodyBytes));
+    } catch (err) {
+      if (err?.code === 'BODY_TOO_LARGE') {
+        res.on('finish', () => req.destroy());
+        sendJson(res, 413, { error: 'payload_too_large' }, { ...cors, Connection: 'close' });
+        return undefined;
+      }
+      sendJson(res, 400, { error: 'invalid_json' }, cors);
+      return undefined;
+    }
+  }
+
+  /**
+   * Retell-facing routes. Authenticated *before* the body is read: an unauthenticated
+   * caller must never get this process to buffer and parse 16 KB of its JSON. No CORS
+   * either — these are server-to-server and must not be readable from a browser.
+   */
+  async function toolRoute({ req, res, url, p, ip, toolName }) {
+    if (req.method !== 'POST') return sendJson(res, 405, { error: 'method_not_allowed' });
+
+    const flood = limiters.tool.take(`tool:${ip}`);
+    if (!flood.ok) return sendJson(res, 429, { error: 'rate_limited' }, { 'Retry-After': String(flood.retryAfterS) });
+
+    // Custom tools carry the token in a header (provisioning puts it there). Retell's
+    // agent webhook has no way to send one — it offers only its own X-Retell-Signature
+    // — so `?token=` stays valid on that single route.
+    const token = extractToken({ url, headers: req.headers, allowQuery: cfg.allowQueryToken || !toolName });
+    if (!tokenMatches(token, cfg.toolToken)) {
+      const guess = limiters.toolAuth.take(`toolauth:${ip}`);
+      log({ level: 'warn', evt: 'tool.unauthorised', path: p, ip, blocked: !guess.ok });
+      if (!guess.ok) return sendJson(res, 429, { error: 'rate_limited' }, { 'Retry-After': String(guess.retryAfterS) });
+      return sendJson(res, 401, { error: 'unauthorised' });
+    }
+
+    const body = await bodyOf(req, res, {});
+    if (body === undefined) return undefined;
+
+    if (!toolName) return sendJson(res, 200, retellWebhook(body));
+    if (!TOOL_NAMES.includes(toolName)) return sendJson(res, 404, { error: 'unknown_tool' });
+    try {
+      return sendRaw(res, 200, JSON.stringify(await tools.run(toolName, body)));
+    } catch (err) {
+      log({ level: 'error', evt: 'tool.failed', tool: toolName, error: String(err?.message ?? err) });
+      return sendRaw(res, 200, JSON.stringify(JSON.stringify({ error: 'tool_failed', note: 'Tell the visitor you cannot check that right now and offer WhatsApp +966 59 329 6933.' })));
+    }
+  }
+
   async function handle(req, res) {
     const origin = req.headers.origin;
     const cors = corsHeaders(origin, cfg.origins);
@@ -282,7 +370,7 @@ export function createApp(options = {}) {
       return sendJson(res, 400, { error: 'bad_request' }, cors);
     }
     const p = url.pathname.replace(/\/+$/, '') || '/';
-    const ip = clientIp(req);
+    const ip = clientIp(req, { trustedProxies: cfg.trustedProxies });
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204, { ...cors, 'Cache-Control': 'no-store' });
@@ -291,7 +379,8 @@ export function createApp(options = {}) {
 
     if (p === '/health' || p === '/') {
       if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method_not_allowed' }, cors);
-      return sendJson(res, 200, await health(), cors);
+      const report = await health();
+      return sendJson(res, report.ok ? 200 : 503, report, cors);
     }
 
     const callContextMatch = /^\/v1\/call\/([A-Za-z0-9_-]{1,128})\/context$/.exec(p);
@@ -301,42 +390,34 @@ export function createApp(options = {}) {
       return sendJson(res, 200, callContext(callContextMatch[1]), cors);
     }
 
-    if (req.method !== 'POST') return sendJson(res, 404, { error: 'not_found' }, cors);
-
-    let body;
-    try {
-      body = parseJsonBody(await readBody(req, cfg.maxBodyBytes));
-    } catch (err) {
-      if (err?.code === 'BODY_TOO_LARGE') {
-        res.on('finish', () => req.destroy());
-        return sendJson(res, 413, { error: 'payload_too_large' }, { ...cors, Connection: 'close' });
-      }
-      return sendJson(res, 400, { error: 'invalid_json' }, cors);
-    }
-
-    /* Retell-facing routes: token-gated, no CORS (server-to-server). */
     const toolMatch = /^\/v1\/tools\/([a-z_]{1,64})$/.exec(p);
     if (toolMatch || p === '/v1/retell/webhook') {
-      const token = extractToken({ url, headers: req.headers });
-      if (!tokenMatches(token, cfg.toolToken)) {
-        log({ level: 'warn', evt: 'tool.unauthorised', path: p, ip });
-        return sendJson(res, 401, { error: 'unauthorised' });
-      }
-      if (p === '/v1/retell/webhook') return sendJson(res, 200, retellWebhook(body));
-      const name = toolMatch[1];
-      if (!TOOL_NAMES.includes(name)) return sendJson(res, 404, { error: 'unknown_tool' });
-      try {
-        return sendRaw(res, 200, JSON.stringify(await tools.run(name, body)));
-      } catch (err) {
-        log({ level: 'error', evt: 'tool.failed', tool: name, error: String(err?.message ?? err) });
-        return sendRaw(res, 200, JSON.stringify(JSON.stringify({ error: 'tool_failed', note: 'Tell the visitor you cannot check that right now and offer WhatsApp +966 59 329 6933.' })));
-      }
+      return toolRoute({ req, res, url, p, ip, toolName: toolMatch?.[1] ?? null });
     }
 
     /* Browser-facing routes. */
+    if (req.method !== 'POST' || !BROWSER_ROUTES.has(p)) return sendJson(res, 404, { error: 'not_found' }, cors);
+
+    // CORS only stops a browser *reading* the answer — the request still ran and still
+    // cost Retell money. A stated origin that is not ours is refused outright.
+    if (origin && !isAllowedOrigin(origin, cfg.origins)) {
+      log({ level: 'warn', evt: 'origin.rejected', path: p, origin: String(origin).slice(0, 200), ip });
+      return sendJson(res, 403, { error: 'forbidden_origin' }, cors);
+    }
+    if (!isJsonContentType(req.headers['content-type'])) {
+      return sendJson(res, 415, { error: 'unsupported_media_type' }, cors);
+    }
+
     const limiterKey = p === '/v1/call/token' ? 'token' : 'chat';
     const gate = limiters[limiterKey].take(`${limiterKey}:${ip}`);
     if (!gate.ok) return sendJson(res, 429, { error: 'rate_limited' }, { ...cors, 'Retry-After': String(gate.retryAfterS) });
+
+    // The day's ceiling, checked before Retell is contacted at all.
+    if (p === '/v1/chat/session' && !budget.takeChat()) return sendJson(res, 503, { error: 'budget_exhausted' }, cors);
+    if (p === '/v1/call/token' && !budget.takeCall()) return sendJson(res, 503, { error: 'budget_exhausted' }, cors);
+
+    const body = await bodyOf(req, res, cors);
+    if (body === undefined) return undefined;
 
     try {
       switch (p) {
@@ -349,11 +430,34 @@ export function createApp(options = {}) {
     } catch (err) {
       if (err?.code === 'NO_SESSION') return sendJson(res, 404, { error: 'session_not_found' }, cors);
       if (err?.code === 'BAD_BODY') return sendJson(res, 400, { error: 'bad_request', message: err.message }, cors);
+      if (err?.code === 'SESSION_LIMIT') return sendJson(res, 429, { error: 'session_limit' }, cors);
       if (err?.code === 'NOT_PROVISIONED') return sendJson(res, 503, { error: 'not_provisioned', message: err.message }, cors);
-      const status = err instanceof RetellError ? 502 : 500;
-      log({ level: 'error', evt: 'route.failed', path: p, status, error: String(err?.message ?? err) });
-      return sendJson(res, status, { error: status === 502 ? 'upstream_error' : 'internal_error' }, cors);
+      if (err instanceof RetellError) return sendRetellError(res, err, { p, cors });
+      log({ level: 'error', evt: 'route.failed', path: p, status: 500, error: String(err?.message ?? err) });
+      return sendJson(res, 500, { error: 'internal_error' }, cors);
     }
+  }
+
+  /**
+   * Retell's own failures, told apart rather than flattened to 502:
+   *   429 — Retell is throttling us; pass the backpressure (and its Retry-After) on.
+   *   402 — the owner's Retell balance is empty. Nothing retries its way out of that,
+   *         so it is 503 and it is shouted about in the log.
+   *   anything else — 502, with no upstream body echoed back.
+   */
+  function sendRetellError(res, err, { p, cors }) {
+    const status = Number(err.status);
+    if (status === 429) {
+      log({ level: 'warn', evt: 'retell.throttled', path: p, retryAfter: err.retryAfter ?? null });
+      const retryAfter = /^\d+$/.test(String(err.retryAfter ?? '')) ? String(err.retryAfter) : null;
+      return sendJson(res, 429, { error: 'rate_limited' }, { ...cors, ...(retryAfter ? { 'Retry-After': retryAfter } : {}) });
+    }
+    if (status === 402) {
+      log({ level: 'error', evt: 'retell.billing', path: p, message: 'RETELL BALANCE EXHAUSTED — the concierge is down until the owner tops it up' });
+      return sendJson(res, 503, { error: 'billing' }, cors);
+    }
+    log({ level: 'error', evt: 'route.failed', path: p, status: 502, upstream: status ?? null, error: String(err?.message ?? err) });
+    return sendJson(res, 502, { error: 'upstream_error' }, cors);
   }
 
   const server = http.createServer((req, res) => {

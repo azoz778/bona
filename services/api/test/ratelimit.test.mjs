@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createLimiter, clientIp } from '../lib/ratelimit.mjs';
+import { createLimiter, clientIp, isLoopback, normaliseAddr, parseTrustedProxies } from '../lib/ratelimit.mjs';
 
 test('a bucket allows exactly `capacity` requests per window', () => {
   let t = 0;
@@ -47,9 +47,38 @@ test('capacity and window must be positive', () => {
   assert.throws(() => createLimiter({ capacity: 5, perMs: 0 }), TypeError);
 });
 
-test('clientIp trusts CF-Connecting-IP first, then the first XFF hop', () => {
-  assert.equal(clientIp({ headers: { 'cf-connecting-ip': '2.2.2.2', 'x-forwarded-for': '9.9.9.9' }, socket: {} }), '2.2.2.2');
-  assert.equal(clientIp({ headers: { 'x-forwarded-for': '1.1.1.1, 10.0.0.1' }, socket: {} }), '1.1.1.1');
-  assert.equal(clientIp({ headers: {}, socket: { remoteAddress: '127.0.0.1' } }), '127.0.0.1');
+test('clientIp honours CF-Connecting-IP only from a loopback peer', () => {
+  const cf = { 'cf-connecting-ip': '2.2.2.2' };
+  assert.equal(clientIp({ headers: cf, socket: { remoteAddress: '127.0.0.1' } }), '2.2.2.2');
+  assert.equal(clientIp({ headers: cf, socket: { remoteAddress: '::1' } }), '2.2.2.2');
+  assert.equal(clientIp({ headers: cf, socket: { remoteAddress: '::ffff:127.0.0.1' } }), '2.2.2.2');
+  assert.equal(
+    clientIp({ headers: cf, socket: { remoteAddress: '203.0.113.9' } }),
+    '203.0.113.9',
+    'a direct caller cannot name its own rate-limit bucket',
+  );
+});
+
+test('clientIp never reads X-Forwarded-For', () => {
+  const req = { headers: { 'x-forwarded-for': '1.1.1.1, 10.0.0.1' }, socket: { remoteAddress: '127.0.0.1' } };
+  assert.equal(clientIp(req), '127.0.0.1', 'anything on the path may append a hop — it buys a fresh bucket per request');
+});
+
+test('clientIp falls back to the socket address, then to "unknown"', () => {
+  assert.equal(clientIp({ headers: {}, socket: { remoteAddress: '::ffff:203.0.113.4' } }), '203.0.113.4');
   assert.equal(clientIp({ headers: {}, socket: {} }), 'unknown');
+});
+
+test('an explicitly trusted proxy may name the client too', () => {
+  const trustedProxies = parseTrustedProxies('10.0.0.5, 10.0.0.6');
+  assert.deepEqual(trustedProxies, ['10.0.0.5', '10.0.0.6']);
+  const req = { headers: { 'cf-connecting-ip': '2.2.2.2' }, socket: { remoteAddress: '10.0.0.5' } };
+  assert.equal(clientIp(req, { trustedProxies }), '2.2.2.2');
+  assert.equal(clientIp(req, { trustedProxies: [] }), '10.0.0.5');
+});
+
+test('loopback detection covers v4, v6 and v4-mapped forms', () => {
+  for (const a of ['127.0.0.1', '127.1.2.3', '::1', '::ffff:127.0.0.1']) assert.equal(isLoopback(a), true, a);
+  for (const a of ['203.0.113.1', '10.0.0.1', '', null]) assert.equal(isLoopback(a), false, String(a));
+  assert.equal(normaliseAddr('::ffff:192.168.1.4'), '192.168.1.4');
 });

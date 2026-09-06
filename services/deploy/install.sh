@@ -52,6 +52,12 @@ for arg in "$@"; do
   esac
 done
 
+# Scratch space for this run only: predictable /tmp names are a symlink race and are
+# shared with every other run on the machine.
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/bona-install.XXXXXXXX")"
+cleanup() { rm -rf "$TMP"; }
+trap cleanup EXIT INT TERM
+
 say()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 ok()   { printf '    \033[32mok\033[0m %s\n' "$*"; }
 warn() { printf '    \033[33m!\033[0m  %s\n' "$*"; }
@@ -142,12 +148,12 @@ YAML
 
   # ------------------------------------------------------------- 4. DNS
   say "Routing DNS $HOSTNAME_API"
-  if "$CLOUDFLARED" tunnel route dns "$TUNNEL" "$HOSTNAME_API" 2>&1 | tee /tmp/bona-dns.log; then
+  if "$CLOUDFLARED" tunnel route dns "$TUNNEL" "$HOSTNAME_API" 2>&1 | tee "$TMP/dns.log"; then
     ok "DNS routed"
-  elif grep -qiE 'already exists|record with that host' /tmp/bona-dns.log; then
+  elif grep -qiE 'already exists|record with that host' "$TMP/dns.log"; then
     ok "DNS record already points at this tunnel"
   else
-    warn "DNS routing failed — see /tmp/bona-dns.log. Fix it in the Cloudflare dashboard (CNAME $HOSTNAME_API -> $TUNNEL_ID.cfargotunnel.com) and re-run."
+    warn "DNS routing failed. Fix it in the Cloudflare dashboard (CNAME $HOSTNAME_API -> $TUNNEL_ID.cfargotunnel.com) and re-run; the output above is the whole story."
   fi
 else
   say "Skipping tunnel and DNS (--no-dns)"
@@ -160,17 +166,20 @@ for unit in bona-api.service cloudflared-bona.service; do
   src="$DEPLOY/$unit"
   dst="$UNIT_DIR/$unit"
   [ -f "$src" ] || die "$src not found."
-  # Point the unit at the node and cloudflared this machine actually has.
+  # Point the unit at the node and cloudflared this machine actually has. The staging
+  # file is created beside its destination (unpredictable name, same filesystem) so the
+  # install is one atomic rename.
+  tmp_unit="$(mktemp "$dst.XXXXXXXX")"
   sed -e "s#^ExecStart=%h/.nvm/versions/node/[^/]*/bin/node#ExecStart=$NODE_BIN#" \
       -e "s#^Environment=PATH=%h/.nvm/versions/node/[^/]*/bin:#Environment=PATH=$(dirname "$NODE_BIN"):#" \
       -e "s#^ExecStart=%h/.local/bin/cloudflared#ExecStart=$CLOUDFLARED#" \
       -e "s#%h/bona/services#$SERVICES#g" \
-      "$src" > "$dst.tmp"
-  if [ -f "$dst" ] && cmp -s "$dst" "$dst.tmp"; then
-    rm -f "$dst.tmp"
+      "$src" > "$tmp_unit"
+  if [ -f "$dst" ] && cmp -s "$dst" "$tmp_unit"; then
+    rm -f "$tmp_unit"
     ok "$unit unchanged"
   else
-    mv "$dst.tmp" "$dst"
+    mv "$tmp_unit" "$dst"
     ok "$unit installed"
   fi
 done
@@ -199,11 +208,11 @@ done
 say "Health check"
 LOCAL_OK=0
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  if curl -fsS --max-time 3 "http://localhost:$PORT/health" >/tmp/bona-health.json 2>/dev/null; then LOCAL_OK=1; break; fi
+  if curl -fsS --max-time 3 "http://localhost:$PORT/health" >"$TMP/health.json" 2>/dev/null; then LOCAL_OK=1; break; fi
   sleep 1
 done
 if [ "$LOCAL_OK" = 1 ]; then
-  ok "local  http://localhost:$PORT/health -> $(cat /tmp/bona-health.json)"
+  ok "local  http://localhost:$PORT/health -> $(cat "$TMP/health.json")"
 else
   warn "local health check failed. Logs: journalctl --user -u bona-api -n 50 --no-pager"
 fi
@@ -211,11 +220,11 @@ fi
 if [ "$DO_DNS" = 1 ]; then
   PUBLIC_OK=0
   for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
-    if curl -fsS --max-time 5 "https://$HOSTNAME_API/health" >/tmp/bona-health-public.json 2>/dev/null; then PUBLIC_OK=1; break; fi
+    if curl -fsS --max-time 5 "https://$HOSTNAME_API/health" >"$TMP/health-public.json" 2>/dev/null; then PUBLIC_OK=1; break; fi
     sleep 5
   done
   if [ "$PUBLIC_OK" = 1 ]; then
-    ok "public https://$HOSTNAME_API/health -> $(cat /tmp/bona-health-public.json)"
+    ok "public https://$HOSTNAME_API/health -> $(cat "$TMP/health-public.json")"
   else
     warn "public health check failed (DNS can take a couple of minutes). Logs: journalctl --user -u cloudflared-bona -n 50 --no-pager"
   fi

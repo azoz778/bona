@@ -81,6 +81,41 @@ export function randomToken(bytes = 16) {
 }
 
 /**
+ * Rewrite keys in an env file **in place**, keeping every other line — comments,
+ * ordering, unrelated keys — exactly as it found them. Used to rotate
+ * `BONA_TOOL_TOKEN` without hand-editing a secrets file. Values are never printed;
+ * the file keeps mode 0600.
+ * @param {string} file
+ * @param {Record<string,string>} updates
+ * @returns {{ file: string, replaced: string[], appended: string[] }}
+ */
+export function setEnvValues(file, updates) {
+  const keys = Object.keys(updates);
+  if (!keys.length) return { file, replaced: [], appended: [] };
+  const prev = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  const replaced = [];
+  const lines = prev.split(/\r?\n/).map((line) => {
+    const body = line.trim().startsWith('export ') ? line.trim().slice(7) : line.trim();
+    const eq = body.indexOf('=');
+    if (eq <= 0 || body.startsWith('#')) return line;
+    const key = body.slice(0, eq).trim();
+    if (!keys.includes(key) || replaced.includes(key)) return line;
+    replaced.push(key);
+    return `${key}=${updates[key]}`;
+  });
+  const appended = keys.filter((k) => !replaced.includes(k));
+  let out = lines.join('\n');
+  if (appended.length) {
+    if (out && !out.endsWith('\n')) out += '\n';
+    out += `${appended.map((k) => `${k}=${updates[k]}`).join('\n')}\n`;
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(file, out, { mode: 0o600 });
+  try { fs.chmodSync(file, 0o600); } catch { /* best effort */ }
+  return { file, replaced, appended };
+}
+
+/**
  * Ensure `~/.secrets/bona-services.env` exists and holds every key in `defaults`.
  * Existing values are never changed and the file is never printed.
  * @returns {{ file: string, created: boolean, added: string[] }}
