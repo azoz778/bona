@@ -1,0 +1,162 @@
+{
+  "id": "BONA-W004",
+  "slug": "wharf-destination-villas-jeddah",
+  "sourceRef": "WA-20260906-ACBA8B",
+  "status": "available",
+  "category": "off-plan",
+  "type": "villa",
+  "kind": "house",
+  "featured": false,
+  "title": {
+    "en": "Wharf Destination Villas, Jeddah",
+    "ar": "فلل وجهة الويرف بجدة"
+  },
+  "location": {
+    "district": {
+      "en": "Southeast Jeddah",
+      "ar": "جنوب شرق جدة"
+    },
+    "city": {
+      "en": "Jeddah",
+      "ar": "جدة"
+    },
+    "country": {
+      "en": "Saudi Arabia",
+      "ar": "المملكة العربية السعودية"
+    },
+    "countryCode": "SA"
+  },
+  "price": {
+    "amount": null,
+    "currency": "SAR",
+    "from": false,
+    "period": null,
+    "onRequest": true
+  },
+  "specs": {
+    "beds": 4,
+    "baths": 5,
+    "areaSqm": 224.3,
+    "plotSqm": 250,
+    "yearBuilt": null,
+    "floors": 3
+  },
+  "images": [
+    {
+      "src": "/listings/wharf-destination-villas-jeddah/01.jpg",
+      "thumb": "/listings/wharf-destination-villas-jeddah/01-thumb.webp",
+      "alt": {
+        "en": "Exterior — Wharf Destination Villas, Jeddah",
+        "ar": "الواجهة الخارجية — فلل وجهة الويرف بجدة"
+      }
+    },
+    {
+      "src": "/listings/wharf-destination-villas-jeddah/02.jpg",
+      "thumb": "/listings/wharf-destination-villas-jeddah/02-thumb.webp",
+      "alt": {
+        "en": "Exterior — Wharf Destination Villas, Jeddah",
+        "ar": "الواجهة الخارجية — فلل وجهة الويرف بجدة"
+      }
+    },
+    {
+      "src": "/listings/wharf-destination-villas-jeddah/03.jpg",
+      "thumb": "/listings/wharf-destination-villas-jeddah/03-thumb.webp",
+      "alt": {
+        "en": "Entrance — Wharf Destination Villas, Jeddah",
+        "ar": "المدخل — فلل وجهة الويرف بجدة"
+      }
+    },
+    {
+      "src": "/listings/wharf-destination-villas-jeddah/04.jpg",
+      "thumb": "/listings/wharf-destination-villas-jeddah/04-thumb.webp",
+      "alt": {
+        "en": "Living room — Wharf Destination Villas, Jeddah",
+        "ar": "غرفة المعيشة — فلل وجهة الويرف بجدة"
+      }
+    },
+    {
+      "src": "/listings/wharf-destination-villas-jeddah/05.jpg",
+      "thumb": "/listings/wharf-destination-villas-jeddah/05-thumb.webp",
+      "alt": {
+        "en": "Aerial view — Wharf Destination Villas, Jeddah",
+        "ar": "منظر جوي — فلل وجهة الويرف بجدة"
+      }
+    }
+  ],
+  "description": {
+    "en": "Wharf Destination is a villa community in southeast Jeddah, developed within a large master-planned suburb close to historic Jeddah and the city's business districts. The neighbourhood layout places schools, health centres, mosques and retail within a five- to ten-minute walk of every home. The development occupies a plot of more than 188,000 square metres within a wider suburb spanning over 10 million square metres, of which more than 1.3 million square metres is set aside for green space and parks.\n\nThe project comprises 269 villas arranged over a ground floor, first floor and roof level. The standard villa spans 224.30 square metres of built-up area on a 250 square metre plot, with four bedrooms, five bathrooms, a main majlis and a separate family majlis, an open kitchen, and a rooftop terrace of close to 85 square metres. Each villa includes one covered parking space.\n\nConstruction follows the Saudi Building Code, with porcelain flooring, washable paint finishes, moisture-resistant gypsum ceilings, and marble staircases inside and out. Bathrooms are fitted with slip-resistant tiling and rust-resistant fixtures, and windows are double-glazed with thermal insulation. The villas carry a ten-year structural warranty, a ten-year insulation warranty and a ten-year warranty against soil-borne pests, alongside one-year warranties on finishes, plumbing and electrical work.",
+    "ar": "تقع وجهة الويرف في جنوب شرق جدة، ضمن ضاحية كبرى قريبة من جدة التاريخية ومراكز الأعمال في المدينة. يتيح التخطيط العمراني الوصول إلى المدارس والمراكز الصحية والمساجد والأسواق سيرًا على الأقدام خلال خمس إلى عشر دقائق. تمتد أرض المشروع على أكثر من 188 ألف متر مربع ضمن ضاحية تتجاوز مساحتها الإجمالية 10 ملايين متر مربع، منها أكثر من 1.3 مليون متر مربع من المساحات الخضراء والحدائق.\n\nيضم المشروع 269 فيلا موزعة على الدور الأرضي والدور الأول ودور السطح. تبلغ مساحة البناء في الفيلا النموذجية 224.30 مترًا مربعًا على أرض مساحتها 250 مترًا مربعًا، وتضم أربع غرف نوم وخمس دورات مياه ومجلسًا رئيسيًا ومجلسًا عائليًا ومطبخًا مفتوحًا وتراسًا على السطح تقارب مساحته 85 مترًا مربعًا. وتحتوي كل فيلا على موقف سيارة مغطى واحد.\n\nيُنفَّذ البناء وفق كود البناء السعودي، بأرضيات بورسلين ودهانات قابلة للغسل وأسقف جبسية مقاومة للرطوبة وسلالم رخامية داخلية وخارجية. أما دورات المياه فمجهزة ببلاط مانع للانزلاق وتجهيزات مقاومة للصدأ، والنوافذ مزدوجة الزجاج وذات عزل حراري. وتشمل الضمانات عشر سنوات على الهيكل الإنشائي وعشر سنوات على العزل وعشر سنوات لمعالجة التربة ضد الحشرات، إضافة إلى ضمان سنة كاملة على التشطيبات والسباكة والكهرباء."
+  },
+  "highlights": {
+    "en": [
+      "269 villas",
+      "4 bedrooms, 5 bathrooms",
+      "Rooftop terrace",
+      "Two majlis areas",
+      "Southeast Jeddah location",
+      "10-year structural warranty"
+    ],
+    "ar": [
+      "269 فيلا",
+      "4 غرف نوم و5 حمامات",
+      "تراس على السطح",
+      "مجلسان رئيسي وعائلي",
+      "موقع جنوب شرق جدة",
+      "ضمان هيكلي 10 سنوات"
+    ]
+  },
+  "virtualTourUrl": null,
+  "brochureUrl": null,
+  "project": {
+    "name": {
+      "en": "Wharf Destination",
+      "ar": "وجهة الويرف"
+    },
+    "developer": {
+      "en": "Faisal Bin Saedan for Investment and Real Estate Development",
+      "ar": "شركة فيصل بن سعيدان للاستثمار والتطوير العقاري"
+    }
+  },
+  "unit": null,
+  "map": null,
+  "listedAt": "2026-09-06",
+  "hidden": false,
+  "_intake": {
+    "source": "whatsapp",
+    "pdfSha256": "5e768709dfab2fee674bf4860ac553b92e7fef51b9a37b76a10b08cece51d410",
+    "model": "sonnet",
+    "confidence": 0.72,
+    "warnings": [
+      "model-flagged"
+    ],
+    "images": [
+      {
+        "n": 1,
+        "candidate": 6,
+        "room": "exterior"
+      },
+      {
+        "n": 2,
+        "candidate": 7,
+        "room": "exterior"
+      },
+      {
+        "n": 3,
+        "candidate": 9,
+        "room": "entrance"
+      },
+      {
+        "n": 4,
+        "candidate": 13,
+        "room": "living"
+      },
+      {
+        "n": 5,
+        "candidate": 18,
+        "room": "aerial"
+      }
+    ],
+    "createdAt": "2026-09-06T02:22:34.556Z",
+    "site": "https://bona.azoz.uk"
+  }
+}

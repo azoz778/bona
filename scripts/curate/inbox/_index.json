@@ -1,8 +1,9 @@
 {
-  "nextSeq": 4,
+  "nextSeq": 5,
   "listings": {
     "kian-residence-apartments-al-nahda": "BONA-W001",
     "nuzul-khayala-residences-north-jeddah": "BONA-W002",
-    "al-wareef-townhouse-jeddah": "BONA-W003"
+    "al-wareef-townhouse-jeddah": "BONA-W003",
+    "wharf-destination-villas-jeddah": "BONA-W004"
   }
 }
