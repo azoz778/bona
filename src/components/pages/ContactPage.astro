@@ -36,6 +36,12 @@ const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { n
               <dt class="label text-stone-2">{t(ui.phone, locale)}</dt>
               <dd class="mt-2"><a href={`tel:${site.phone.e164}`} class="link display-md" dir="ltr">{site.phone.display}</a></dd>
             </div>
+            {site.email && (
+              <div>
+                <dt class="label text-stone-2">{t(ui.email, locale)}</dt>
+                <dd class="mt-2"><a href={`mailto:${site.email}`} class="link display-md" dir="ltr">{site.email}</a></dd>
+              </div>
+            )}
             <div>
               <dt class="label text-stone-2">{t(ui.instagram, locale)}</dt>
               <dd class="mt-2"><a href={site.instagram.url} target="_blank" rel="noopener" class="link display-md" dir="ltr">@{site.instagram.handle}</a></dd>

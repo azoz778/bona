@@ -190,6 +190,7 @@ export const ui = {
   contactMetaDesc: s('Reach Bona on WhatsApp or by phone, or visit us in Al Rawdah, Jeddah. Private enquiries answered personally.', 'تواصل مع بونا عبر واتساب أو الهاتف، أو زرنا في حي الروضة بجدة. نردّ على الاستفسارات الخاصة شخصياً.'),
   contactIntro: s('Write to us the way you would write to a friend who happens to know every good house in Jeddah.', 'راسلنا كما تراسل صديقاً يعرف كل بيت جيد في جدة.'),
   phone: s('Phone', 'الهاتف'),
+  email: s('Email', 'البريد الإلكتروني'),
   address: s('Address', 'العنوان'),
   hours: s('Hours', 'ساعات العمل'),
   openInMaps: s('Open in Google Maps', 'فتح في خرائط جوجل'),

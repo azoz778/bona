@@ -41,6 +41,7 @@ const nav: [string, string][] = [
         <ul class="mt-5 space-y-3 text-sm">
           <li><a href={wa} target="_blank" rel="noopener" class="link inline-flex items-center gap-2 text-ivory/85 hover:text-ivory"><Icon name="whatsapp" size={16} />{t(ui.whatsapp, locale)}</a></li>
           <li><a href={`tel:${site.phone.e164}`} class="link text-ivory/85 hover:text-ivory" dir="ltr">{site.phone.display}</a></li>
+          {site.email && <li><a href={`mailto:${site.email}`} class="link text-ivory/85 hover:text-ivory" dir="ltr">{site.email}</a></li>}
           <li><a href={site.instagram.url} target="_blank" rel="noopener" class="link inline-flex items-center gap-2 text-ivory/85 hover:text-ivory"><Icon name="instagram" size={16} />@{site.instagram.handle}</a></li>
         </ul>
       </div>
