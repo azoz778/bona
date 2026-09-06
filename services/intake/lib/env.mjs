@@ -88,6 +88,10 @@ export function loadConfig(overrides = {}) {
     site: (raw.BONA_SITE || 'https://bona.azoz.uk').replace(/\/+$/, ''),
     maxPdfMb: num(raw.BONA_MAX_PDF_MB, 150), // real developer brochures are 50–80 MB (owner's files 2026-09-06)
     maxPdfPages: num(raw.BONA_MAX_PDF_PAGES, 120),
+    // A walkthrough video is stored exactly as received (see lib/video.mjs) — no downsampling
+    // like the branded brochure gets, so this is the only thing standing between a long clip
+    // and a bloated git repo.
+    maxVideoMb: num(raw.BONA_MAX_VIDEO_MB, 60),
     // The cap on the BRANDED output, not on the developer's original: rebrand_pdf.py
     // downsamples until it fits and refuses to write anything larger.
     maxBrochureMb: num(raw.BONA_MAX_BROCHURE_MB, 25),

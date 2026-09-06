@@ -2,7 +2,7 @@
 // (verified 2026-09-05). If Evolution changes them, these tests fail before production does.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { bareJid, createEvolutionClient, documentOf, fileLengthOf, isFromOwner, isOwnerGroup, textOf, unwrapMessage } from '../lib/evolution.mjs';
+import { bareJid, createEvolutionClient, documentOf, fileLengthOf, isFromOwner, isOwnerGroup, textOf, unwrapMessage, videoOf } from '../lib/evolution.mjs';
 
 const OWNER = '966593296933@s.whatsapp.net';
 
@@ -144,6 +144,22 @@ describe('record helpers', () => {
     assert.equal(textOf({}), '');
   });
 
+  // The root cause this fixes: a video message was invisible to the daemon (no videoOf() at
+  // all, and textOf() never read videoMessage.caption), so `if (!text) continue;` silently
+  // dropped it — captioned or not.
+  it('finds a video message', () => {
+    const record = { message: { videoMessage: { mimetype: 'video/mp4', caption: 'video BONA-W001', seconds: 42 } } };
+    assert.equal(videoOf(record).mimetype, 'video/mp4');
+    assert.equal(videoOf(record).seconds, 42);
+    assert.equal(videoOf({ message: { imageMessage: {} } }), null);
+    assert.equal(videoOf({}), null);
+  });
+
+  it('reads a video\'s caption — inline on videoMessage, unlike documents', () => {
+    assert.equal(textOf({ message: { videoMessage: { caption: 'BONA-W002' } } }), 'BONA-W002');
+    assert.equal(textOf({ message: { videoMessage: {} } }), '');
+  });
+
   it('decodes the Baileys long fileLength', () => {
     assert.equal(fileLengthOf({ fileLength: { low: 916537, high: 0, unsigned: true } }), 916537);
     assert.equal(fileLengthOf({ fileLength: '4096' }), 4096);
@@ -215,6 +231,13 @@ describe('message unwrapping — ephemeral and view-once', () => {
   it('sees a command inside a disappearing text message', () => {
     const record = { message: { ephemeralMessage: { message: { extendedTextMessage: { text: 'remove BONA-W001' } } } } };
     assert.equal(textOf(record), 'remove BONA-W001');
+  });
+
+  it('sees a video inside an ephemeralMessage / viewOnceMessageV2', () => {
+    const video = { mimetype: 'video/mp4', caption: 'video BONA-W001' };
+    const record = { message: { ephemeralMessage: { message: { viewOnceMessageV2: { message: { videoMessage: video } } } } } };
+    assert.equal(videoOf(record).mimetype, 'video/mp4');
+    assert.equal(textOf(record), 'video BONA-W001');
   });
 
   it('does not loop on a self-referential wrapper', () => {

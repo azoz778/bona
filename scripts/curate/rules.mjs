@@ -33,4 +33,8 @@ export const INTAKE_ID_RE = /^BONA-W\d{3,5}$/;
 export const LOCAL_LAND_STILL = /^\/land\/[A-Za-z0-9-]+\.jpg$/;
 export const LOCAL_LISTING_SRC = /^\/listings\/[a-z0-9]+(?:-[a-z0-9]+)*\/\d{2,3}\.jpg$/;
 export const LOCAL_LISTING_THUMB = /^\/listings\/[a-z0-9]+(?:-[a-z0-9]+)*\/\d{2,3}-thumb\.webp$/;
+// /listings/<slug>/v-<nn>.mp4 — walkthrough videos added post-publish (services/intake,
+// lib/video.mjs). A separate `v-` prefix from the photos' <nn>.jpg so the two numbering
+// tracks can never collide.
+export const LOCAL_LISTING_VIDEO = /^\/listings\/[a-z0-9]+(?:-[a-z0-9]+)*\/v-\d{2,3}\.mp4$/;
 export const isLocalSrc = (s) => LOCAL_LAND_STILL.test(s) || LOCAL_LISTING_SRC.test(s);

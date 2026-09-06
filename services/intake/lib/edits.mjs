@@ -5,6 +5,7 @@ import path from 'node:path';
 import { brochureFileIn, brochureUrlFor, buildBrandedBrochure, findSourcePdf } from './brochure.mjs';
 import { WARNING_CODES, findInbox } from './listing.mjs';
 import { removeListingImages } from './images.mjs';
+import { MAX_VIDEOS, writeListingVideo } from './video.mjs';
 
 /** @returns {{listing:object,file:string}|null} */
 export function locate(repo, id) {
@@ -67,6 +68,28 @@ export function setHidden(repo, id, hidden) {
   if (!found) return null;
   found.listing.hidden = Boolean(hidden);
   return { listing: save(found.file, found.listing) };
+}
+
+/**
+ * `video <id>` — append one WhatsApp video (sent with the listing's id as its caption) to an
+ * already-published listing. The file is written exactly as received, into the same
+ * public/listings/<slug> directory the photos live in (see lib/video.mjs) — `remove <id>`
+ * already deletes that whole directory, so a removed listing's videos go with it for free.
+ * @param {Buffer} buffer
+ * @returns {{listing:object,video:object}|{error:string}|null}
+ */
+export function addVideo(repo, id, buffer) {
+  const found = findInbox(repo, id);
+  if (!found) return null;
+  const { listing } = found;
+  const existing = Array.isArray(listing.videos) ? listing.videos : [];
+  if (existing.length >= MAX_VIDEOS) {
+    return { error: `${id} already has ${existing.length} video(s) — the limit is ${MAX_VIDEOS}.` };
+  }
+  const outDir = path.join(repo, 'public', 'listings', listing.slug);
+  const written = writeListingVideo(buffer, outDir, listing.slug, existing.length);
+  listing.videos = [...existing, written.src];
+  return { listing: save(found.file, listing), video: written };
 }
 
 /**

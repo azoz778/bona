@@ -152,6 +152,17 @@ export function documentOf(record) {
   return m.documentMessage || m.documentWithCaptionMessage?.message?.documentMessage || null;
 }
 
+/**
+ * videoMessage | ephemeral/view-once wrappers -> videoMessage. Unlike documents, WhatsApp has
+ * no separate "videoWithCaptionMessage" wrapper — a video's caption lives inline on the
+ * message itself (`videoMessage.caption`), so unwrapMessage() is all this needs.
+ */
+export function videoOf(record) {
+  const m = unwrapMessage(record?.message);
+  if (!m) return null;
+  return m.videoMessage || null;
+}
+
 /** Caption / body text of any record shape we care about. */
 export function textOf(record) {
   const m = unwrapMessage(record?.message);
@@ -162,6 +173,7 @@ export function textOf(record) {
     m.documentWithCaptionMessage?.message?.documentMessage?.caption ||
     m.documentMessage?.caption ||
     m.imageMessage?.caption ||
+    m.videoMessage?.caption ||
     ''
   );
 }

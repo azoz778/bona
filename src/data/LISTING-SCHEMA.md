@@ -33,6 +33,7 @@ Array of listing objects:
   "highlights": { "en": ["Private beach", "..."], "ar": ["شاطئ خاص", "..."] },
   "virtualTourUrl": null,
   "brochureUrl": null,
+  "videos": [],                     // optional; hosted video URLs (walkthrough clips) — see "Videos" below
   "listedAt": "2026-06-01"
 }
 ```
@@ -120,3 +121,24 @@ this repo. Nothing else in the pipeline changes.
   the model must cite `priceEvidence: { page, quote }` and a second `claude -p` must confirm it on
   that page image. Anything else becomes `price.onRequest = true`, `price.amount = null`. The
   intake never estimates.
+
+## Videos (2026-09-06, `services/intake`)
+A PDF never arrives with a video attached to the same WhatsApp message — a video is added to a
+listing that already exists, one clip per message: send the video into the intake group with the
+listing's id somewhere in its caption (`video BONA-W001`, or just `BONA-W001`) and it is downloaded
+and added, no re-publish command needed. Up to `services/intake/lib/video.mjs::MAX_VIDEOS` (4)
+per listing.
+- `videos`: always an array on a WhatsApp-intake listing (`[]` until a video is added); optional
+  and may be absent on a curated listing that predates this field. Every entry is either a
+  site-local path `/listings/<slug>/v-<nn>.mp4` (intake videos: numbered on their OWN sequence,
+  separate from `<nn>.jpg` photos, written to `public/listings/<slug>/` and served by GitHub
+  Pages exactly like the photos) or a full `https://` URL (for a future non-intake source).
+  `scripts/curate/rules.mjs::LOCAL_LISTING_VIDEO` is the local shape; `validate.mjs` and the
+  intake's own `checkListing()` share it.
+- **Stored as received — no transcoding, no thumbnail.** This service's only media library
+  (`sharp`) does not read video; adding one would mean a new native dependency (ffmpeg) for a
+  narrow feature, so the video committed to the repo is exactly the file WhatsApp handed over.
+  `BONA_MAX_VIDEO_MB` (default 60) caps what is accepted. **Follow-up, not yet built**: raw
+  video committed straight into git will bloat the repo as more are added — if that becomes a
+  real problem, look at Git LFS or moving intake video (like intake photos today) to a real
+  object store instead of the git-and-GitHub-Pages path used now.

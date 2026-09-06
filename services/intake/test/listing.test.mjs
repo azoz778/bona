@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { after, before, describe, it } from 'node:test';
+import { after, afterEach, before, beforeEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   buildListing, checkListing, inboxIds, nextListingId, orderedPicks, readIndex, seqAfter, slugify,
@@ -195,6 +195,13 @@ describe('buildListing', () => {
     assert.match(todayRiyadh(new Date('2026-09-05T22:30:00Z')), /^2026-09-06$/);
     assert.equal(base().listedAt, todayRiyadh());
   });
+
+  // A PDF never arrives with a video already attached — videos.mjs/edits.addVideo() populate
+  // this AFTER publish (see the "video attaches..." describe below) — but every WhatsApp
+  // listing carries the field from the moment it is built, same as `images`.
+  it('always carries an empty videos array — a PDF never arrives with one attached', () => {
+    assert.deepEqual(base().videos, []);
+  });
 });
 
 describe('checkListing — mirrors scripts/curate/validate.mjs', () => {
@@ -297,6 +304,108 @@ describe('inbox + edits', () => {
     assert.equal(listInbox(tmp).length, 0);
     assert.equal(fs.existsSync(path.join(tmp, 'public', 'listings', slug)), false);
     assert.equal(edits.removeListing(tmp, 'BONA-W001'), null);
+  });
+});
+
+// The fix for "videos aren't getting added": a video is downloaded by the daemon
+// (index.mjs::handleVideo, not exercised here — see evolution.test.mjs/commands.test.mjs for
+// the pieces that recognize and address it) and handed to edits.addVideo() as a plain buffer.
+describe('edits.addVideo — a video attaches to a listing that already exists', () => {
+  let tmp;
+  const slug = 'tmp-video-villa';
+  const seed = () => ({
+    id: 'BONA-W001', slug, status: 'available', hidden: false,
+    title: { en: 'Temp Villa', ar: 'فيلا مؤقتة' },
+    price: { amount: 1000000, currency: 'SAR', from: false, period: null, onRequest: false },
+    images: [1, 2, 3, 4].map((n) => ({ src: `/listings/${slug}/0${n}.jpg`, thumb: null, alt: { en: 'x', ar: 'س' } })),
+    videos: [],
+    _intake: { images: [1, 2, 3, 4].map((n) => ({ n, room: 'view' })) },
+  });
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-video-'));
+    fs.mkdirSync(path.join(tmp, 'scripts', 'curate', 'inbox'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'public', 'listings', slug), { recursive: true });
+    writeInboxListing(tmp, seed());
+    writeIndex(tmp, { nextSeq: 2, listings: { [slug]: 'BONA-W001' } });
+  });
+  afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+  it('writes the file and records its site-local path on the listing', () => {
+    const buffer = Buffer.from('fake mp4 bytes');
+    const res = edits.addVideo(tmp, 'BONA-W001', buffer);
+    assert.equal(res.video.n, 1);
+    assert.equal(res.video.src, `/listings/${slug}/v-01.mp4`);
+    assert.equal(res.video.bytes, buffer.length);
+    assert.deepEqual(res.listing.videos, [`/listings/${slug}/v-01.mp4`]);
+    assert.ok(fs.existsSync(path.join(tmp, 'public', 'listings', slug, 'v-01.mp4')));
+    assert.deepEqual(fs.readFileSync(path.join(tmp, 'public', 'listings', slug, 'v-01.mp4')), buffer);
+    // persisted, not just returned
+    assert.deepEqual(findInbox(tmp, 'BONA-W001').listing.videos, [`/listings/${slug}/v-01.mp4`]);
+  });
+
+  it('numbers a second video after the first, on its own sequence from the photos', () => {
+    edits.addVideo(tmp, 'BONA-W001', Buffer.from('one'));
+    const res = edits.addVideo(tmp, 'BONA-W001', Buffer.from('two'));
+    assert.deepEqual(res.listing.videos, [`/listings/${slug}/v-01.mp4`, `/listings/${slug}/v-02.mp4`]);
+    assert.deepEqual(res.listing.images.map((im) => im.src), [1, 2, 3, 4].map((n) => `/listings/${slug}/0${n}.jpg`), 'photo numbering untouched');
+  });
+
+  it('refuses past MAX_VIDEOS rather than growing forever', () => {
+    for (let i = 0; i < 4; i += 1) assert.ok(!edits.addVideo(tmp, 'BONA-W001', Buffer.from(`v${i}`)).error);
+    const res = edits.addVideo(tmp, 'BONA-W001', Buffer.from('one-too-many'));
+    assert.match(res.error, /the limit is 4/);
+    assert.equal(findInbox(tmp, 'BONA-W001').listing.videos.length, 4, 'the 5th write never happened');
+  });
+
+  it('returns null for a listing that does not exist, like the other edits', () => {
+    assert.equal(edits.addVideo(tmp, 'BONA-W404', Buffer.from('x')), null);
+  });
+
+  it('works on a listing published before this field existed (no videos key at all)', () => {
+    const legacy = seed();
+    delete legacy.videos;
+    writeInboxListing(tmp, legacy);
+    const res = edits.addVideo(tmp, 'BONA-W001', Buffer.from('x'));
+    assert.deepEqual(res.listing.videos, [`/listings/${slug}/v-01.mp4`]);
+  });
+});
+
+// This is the "(b)" scenario end to end: a brochure PDF publishes a listing (buildListing() is
+// exactly what processPdf() calls to do that), then a video sent afterward — captioned with
+// the new listing's id, per handleVideo()/findListingId() — attaches to it. Two WhatsApp
+// messages, because WhatsApp cannot carry a PDF and a video in one message; the combination's
+// END STATE is one published listing whose videos field is populated, which is what this
+// asserts.
+describe('a PDF + a video together — the combination the owner actually sends', () => {
+  it('publishes from the PDF, then the video attaches to that same listing', () => {
+    const slug = 'obhur-waterfront-villa';
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-pdf-video-'));
+    try {
+      fs.mkdirSync(path.join(tmp, 'scripts', 'curate', 'inbox'), { recursive: true });
+      const picks = orderedPicks(AI.images);
+      // Step 1 — the PDF: exactly what processPdf() does after writeListingImages().
+      const listing = buildListing({
+        ai: structuredClone(AI), images: imagesFor(slug, picks), slug, id: 'BONA-W020',
+        repo: REPO, caption: {}, site: 'https://bona.azoz.uk',
+        meta: { sourceRef: 'WA-20260906-VID001', messageId: 'VID001', pdfSha256: 'f'.repeat(64) },
+      });
+      assert.deepEqual(checkListing(listing), [], 'the PDF-derived listing publishes cleanly');
+      assert.deepEqual(listing.videos, [], 'nothing yet — the video has not arrived');
+      writeInboxListing(tmp, listing);
+      fs.mkdirSync(path.join(tmp, 'public', 'listings', slug), { recursive: true });
+
+      // Step 2 — the video, captioned "video BONA-W020" (see findListingId in commands.mjs).
+      const res = edits.addVideo(tmp, listing.id, Buffer.from('a whole walkthrough clip'));
+
+      assert.equal(res.error, undefined);
+      assert.deepEqual(res.listing.videos, [`/listings/${slug}/v-01.mp4`]);
+      assert.deepEqual(checkListing(res.listing), [], 'still a valid listing once the video is on it');
+      // The repo, not just the return value, is what a re-publish/rebuild would see.
+      assert.deepEqual(findInbox(tmp, listing.id).listing.videos, [`/listings/${slug}/v-01.mp4`]);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
 

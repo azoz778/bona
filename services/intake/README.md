@@ -54,6 +54,14 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
    help                      the list above
    ```
 
+5. Got a walkthrough clip for a listing that is already live? Send the **video** into the group
+   with the listing's id somewhere in its caption — `video BONA-W001`, or just `BONA-W001` on
+   its own. It is downloaded and added to the listing (up to 4 per listing), no re-publish
+   command needed. A video sent with no id anywhere in its caption gets one line back asking
+   for one — it is never silently dropped. See `lib/video.mjs`: the file is stored exactly as
+   WhatsApp sent it (no transcoding, no thumbnail — this service has no video library), so
+   `BONA_MAX_VIDEO_MB` is the only thing capping it.
+
 Anything else in the group is ignored, silently.
 
 ## The rules it enforces
@@ -203,6 +211,7 @@ default, so only the ones you want to change need to be present.
 | `BONA_MIN_IMAGES` / `BONA_MAX_IMAGES` | `4` / `10` | publishable photo count |
 | `BONA_MIN_IMAGE_SIDE` | `700` | smallest long side of a candidate photo |
 | `BONA_MAX_PDF_MB` / `BONA_MAX_PDF_PAGES` | `150` / `120` | input limits (developer brochures run 50–80 MB) |
+| `BONA_MAX_VIDEO_MB` | `60` | largest walkthrough video accepted; stored exactly as received (no downsampling like the brochure gets — see `lib/video.mjs`) |
 | `BONA_PAGE_READ_LONG_SIDE` | `1600` | long side of the page renders the AI reads (text-free PDFs) |
 | `BONA_LOCK_WAIT_MS` | `900000` | how long a job waits for `$BONA_DATA/intake.lock` |
 | `BONA_PY_CMD` | `uv run --with pymupdf python` | argv for the extractor; split on spaces, never shelled |
@@ -284,6 +293,8 @@ live-list filter; intake listings are exempt from that filter because they are o
 | `⚠️ … spawn claude ENOENT` | the unit's PATH is missing `~/.local/bin` | fix `PATH=` in the unit, `daemon-reload`, restart |
 | listing live but no *Download brochure* button | the branded PDF was over `BONA_MAX_BROCHURE_MB` even after downsampling, or `rebrand_pdf.py` failed | the reply says which; `_intake.warnings` holds `brochure-too-large` / `brochure-failed`. Raise the cap and send `brochure <id>`, or leave it — the listing itself is fine |
 | `✋ the original PDF for BONA-W00x is not in …` | `brochure <id>` after the download was cleaned out of `$BONA_DATA` | send the brochure again |
+| `✋ Which listing? Caption the video with its id …` | a video arrived with no `BONA-W###` anywhere in its caption | send it again captioned `video BONA-W001` |
+| `✋ The video is N MB — the limit is …` | over `BONA_MAX_VIDEO_MB` (declared length or the actual download, whichever catches it) | trim the clip, or raise the limit |
 | bot silent, no greeting | no group subject matches `BONA_WA_GROUP_MATCH`, or the group is not the owner's | rename the group; if the journal says `group.rejected_not_owned`, the group was created by somebody else — put its jid in `BONA_WA_GROUP_JIDS` if that is really what you want |
 | bot silent on a PDF | the message was not authored by the owner, or was already seen | check `journalctl` for `msg.ignored_not_owner` |
 | `Already published: <url>` | the same PDF bytes were sent twice | use `remove <id>` first if you meant to replace it |
@@ -317,8 +328,9 @@ services/intake/
     lock.mjs            $BONA_DATA/intake.lock — one writer at a time
     shutdown.mjs        wait for the job in flight on SIGTERM
     images.mjs          sharp: NN.jpg + NN-thumb.webp
+    video.mjs           a walkthrough video, stored exactly as received: v-NN.mp4
     listing.mjs         slug/id allocation, listing assembly, local validation, the inbox
-    edits.mjs           remove / hero / price / status / hidden
+    edits.mjs           remove / hero / price / status / hidden / video
     messages.mjs        every reply the bot sends
     pipeline.mjs        the gates, in order
     publish.mjs         clean tree, pull, build + validate, allowlisted commit + push, rollback

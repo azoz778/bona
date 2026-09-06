@@ -8,7 +8,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   FORBIDDEN, HYPE, INTAKE_ID_RE, isLocalSrc, LISTING_ID_RE, LOCAL_LAND_STILL,
-  LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, PHONE_RE,
+  LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, LOCAL_LISTING_VIDEO, PHONE_RE,
 } from '../../../scripts/curate/rules.mjs';
 import { checkListing } from '../lib/listing.mjs';
 
@@ -87,6 +87,47 @@ describe('site-local image paths', () => {
     const brokenThumb = structuredClone(listing);
     brokenThumb.images[2].thumb = '/listings/five-bedroom-villa/03.webp';
     assert.ok(checkListing(brokenThumb).some((e) => /images\[2\]\.thumb/.test(e)));
+  });
+});
+
+describe('site-local video paths', () => {
+  it('accepts /listings/<slug>/v-nn.mp4', () => {
+    assert.ok(LOCAL_LISTING_VIDEO.test('/listings/five-bedroom-villa/v-01.mp4'));
+    assert.ok(LOCAL_LISTING_VIDEO.test('/listings/five-bedroom-villa/v-123.mp4'));
+  });
+
+  it('rejects a photo\'s shape and anything not the exact video shape', () => {
+    for (const s of [
+      '/listings/villa/01.jpg',           // a photo, not a video
+      '/listings/villa/v-01.mp4?x=1',
+      '/listings/villa/v-01.mov',         // only mp4
+      '/listings/villa/01.mp4',           // missing the v- prefix
+      '/listings/Villa/v-01.mp4',         // slugs are lowercase
+      'listings/villa/v-01.mp4',
+    ]) assert.ok(!LOCAL_LISTING_VIDEO.test(s), `${s} should be rejected`);
+  });
+
+  // checkListing() (services/intake) mirrors validate.mjs (scripts/curate) — a listing the
+  // intake would publish must never then fail the site build.
+  it('checkListing accepts a listing with videos and refuses a bad one', () => {
+    const base = {
+      id: 'BONA-W001', slug: 'five-bedroom-villa',
+      title: { en: 'Five-Bedroom Villa', ar: 'فيلا بخمس غرف نوم' },
+      price: { amount: 1, currency: 'SAR', onRequest: false, from: false, period: null },
+      description: { en: 'a\n\nb', ar: 'أ\n\nب' },
+      highlights: { en: ['a', 'b', 'c', 'd'], ar: ['أ', 'ب', 'ج', 'د'] },
+      listedAt: '2026-09-06',
+      images: new Array(4).fill(null).map((_, i) => ({
+        src: `/listings/five-bedroom-villa/0${i + 1}.jpg`,
+        thumb: `/listings/five-bedroom-villa/0${i + 1}-thumb.webp`,
+        alt: { en: 'x', ar: 'س' },
+      })),
+    };
+    assert.deepEqual(checkListing({ ...base, videos: [] }), [], 'empty videos array is fine');
+    assert.deepEqual(checkListing({ ...base, videos: ['/listings/five-bedroom-villa/v-01.mp4'] }), []);
+    assert.deepEqual(checkListing(base), [], 'no videos key at all is also fine (curated listings predate the field)');
+    assert.ok(checkListing({ ...base, videos: 'not-an-array' }).some((e) => /videos must be an array/.test(e)));
+    assert.ok(checkListing({ ...base, videos: ['/listings/five-bedroom-villa/01.jpg'] }).some((e) => /videos\[0\]/.test(e)));
   });
 });
 

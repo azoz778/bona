@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { HELP_TEXT, parseCaption, parseCommand, parsePriceHint } from '../lib/commands.mjs';
+import { findListingId, HELP_TEXT, parseCaption, parseCommand, parsePriceHint } from '../lib/commands.mjs';
 
 describe('parseCaption', () => {
   it('reads an empty caption', () => {
@@ -158,5 +158,32 @@ describe('parseCommand', () => {
 
   it('tells the owner about #nobrochure, the only caption flag that changes the PDF', () => {
     assert.ok(HELP_TEXT.includes('#nobrochure'));
+  });
+
+  it('mentions the video capability', () => {
+    assert.match(HELP_TEXT, /video BONA-W001/);
+  });
+});
+
+// A video only ever attaches to a listing that already exists, so it is addressed by pulling
+// an id out of free text — the caption — rather than a fixed verb + argv shape.
+describe('findListingId — pulling an id out of a video\'s caption', () => {
+  it('finds the id in any of the phrasings an owner might type', () => {
+    for (const caption of ['BONA-W001', 'video BONA-W001', 'add this to BONA-W001', 'bona-w001', '/video BONA-W0123']) {
+      assert.ok(findListingId(caption), caption);
+    }
+    assert.equal(findListingId('video BONA-W001'), 'BONA-W001');
+    assert.equal(findListingId('bona-w001'), 'BONA-W001', 'case-insensitive, always returned uppercase');
+    assert.equal(findListingId('add this to BONA-W0123'), 'BONA-W0123');
+  });
+
+  it('finds nothing in ordinary chatter or a curated id', () => {
+    for (const caption of ['', 'the master bedroom', 'BONA-001', 'bona w001']) {
+      assert.equal(findListingId(caption), null, caption);
+    }
+  });
+
+  it('takes the first id when a caption somehow carries more than one', () => {
+    assert.equal(findListingId('BONA-W001 not BONA-W002'), 'BONA-W001');
   });
 });

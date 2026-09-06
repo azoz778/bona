@@ -13,6 +13,7 @@ export const ANNOUNCE = [
 ].join('\n');
 
 export const READING = 'Reading the brochure…';
+export const READING_VIDEO = 'Adding the video…';
 
 const commandsFor = (id) => `Reply \`remove ${id}\` / \`hero ${id} 4\` / \`price ${id} 4500000\` / \`sold ${id}\``;
 
@@ -98,6 +99,21 @@ export function brochureRebuilt(id, listing, brochure = {}) {
 }
 export const removed = (id, title) => `🗑️ Removed *${title}* (${id}). It comes off the site with the next deploy.`;
 export const updated = (id, what, listing) => `✏️ ${what} — *${listing.title.en}* (${id})\n${commandsFor(id)}`;
+
+/** A video message with no listing id anywhere in its caption — recognized, not silently dropped. */
+export const videoNoId = () => '✋ Which listing? Caption the video with its id, e.g. `video BONA-W001`.';
+export const videoTooLarge = (mb, limitMb) => `✋ The video is ${mb.toFixed(1)} MB — the limit is ${limitMb} MB.`;
+
+/** `video <id>` — the clip was downloaded and added to an already-published listing. */
+export function videoAdded(id, listing, video = {}) {
+  const mb = video.bytes ? ` (${(video.bytes / 1048576).toFixed(1)} MB)` : '';
+  return [
+    `🎬 Video added${mb} — *${listing.title.en}* (${id})`,
+    `${listing.videos?.length ?? 1} video${(listing.videos?.length ?? 1) === 1 ? '' : 's'} on this listing now.`,
+    '',
+    commandsFor(id),
+  ].join('\n');
+}
 
 export function statusReport({ listings, groups, lastError, queueLength }) {
   const lines = ['*Bona intake*', `Watching ${groups.length} group${groups.length === 1 ? '' : 's'}${queueLength ? `, ${queueLength} in the queue` : ''}.`];

@@ -14,6 +14,8 @@ export interface Listing {
   price: { amount: number | null; currency: string; from?: boolean; period?: string | null; onRequest?: boolean };
   specs: { beds?: number | null; baths?: number | null; areaSqm?: number | null; plotSqm?: number | null; yearBuilt?: number | null; floors?: number | null };
   images: { src: string; thumb?: string | null; alt?: Localised }[];
+  /** Walkthrough clips (hosted URLs — site-local `/listings/<slug>/v-nn.mp4` or full https). Optional; added post-publish by the WhatsApp intake. */
+  videos?: string[];
   description: Localised;
   highlights?: { en: string[]; ar: string[] };
   virtualTourUrl?: string | null; brochureUrl?: string | null; listedAt?: string;

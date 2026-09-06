@@ -15,8 +15,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadConfig, missingRequired } from './lib/env.mjs';
-import { createEvolutionClient, documentOf, fileLengthOf, isFromOwner, isOwnerGroup, textOf } from './lib/evolution.mjs';
-import { HELP_TEXT, parseCaption, parseCommand } from './lib/commands.mjs';
+import { createEvolutionClient, documentOf, fileLengthOf, isFromOwner, isOwnerGroup, textOf, videoOf } from './lib/evolution.mjs';
+import { findListingId, HELP_TEXT, parseCaption, parseCommand } from './lib/commands.mjs';
 import * as edits from './lib/edits.mjs';
 import { listInbox } from './lib/listing.mjs';
 import { withLock } from './lib/lock.mjs';
@@ -124,6 +124,21 @@ async function pollGroup(group) {
       enqueue({ kind: 'pdf', group, record, doc });
       continue;
     }
+    // A video attaches to a listing that already exists — see handleVideo(). Checked BEFORE
+    // the text-only fallthrough below so a video with no caption is still recognized instead
+    // of silently vanishing (the original bug: WhatsApp caption-less media has no `text`, and
+    // `if (!text) continue;` used to be the only thing that ever looked at it).
+    const video = videoOf(record);
+    if (video) {
+      state.markSeen(record.key.id);
+      if (video.gifPlayback) {
+        // An animated GIF arrives as a videoMessage too; it is never a walkthrough clip.
+        log.debug('video.gif_ignored', { jid: group.id, id: record.key.id });
+        continue;
+      }
+      enqueue({ kind: 'video', group, record, video });
+      continue;
+    }
     state.markSeen(record.key.id);
     const text = textOf(record).trim();
     if (!text) continue;
@@ -166,6 +181,7 @@ async function drain() {
       const jobId = job.record?.key?.id;
       try {
         if (job.kind === 'pdf') await handlePdf(job);
+        else if (job.kind === 'video') await handleVideo(job);
         else await handleCommand(job);
         state.setError(null);
       } catch (err) {
@@ -313,6 +329,58 @@ function watchLive(jid, url) {
       return undefined;
     })
     .catch((err) => log.warn('live.check_failed', { url, error: err.message }));
+}
+
+// ---------------------------------------------------------------- video job
+/**
+ * A WhatsApp video, captioned with the id of a listing that is already live — e.g. a
+ * walkthrough clip sent after the brochure. Unlike a PDF this never mints a new listing: the
+ * id has to resolve to one that `handlePdf` (or `run-once.mjs`) already published, exactly
+ * like `hero <id>` / `price <id>` / `brochure <id>` act on one. See lib/video.mjs for why the
+ * file is stored exactly as received, with no transcoding.
+ */
+async function handleVideo({ group, record, video }) {
+  const jid = group.id;
+  const caption = textOf(record) || video.caption || '';
+  const id = findListingId(caption);
+  if (!id) {
+    log.info('video.no_id', { jid, id: record.key.id, caption });
+    await reply(jid, msg.videoNoId());
+    return;
+  }
+  const found = edits.locate(cfg.repo, id);
+  if (!found) {
+    log.info('video.not_found', { jid, id });
+    await reply(jid, msg.notFound(id));
+    return;
+  }
+  const size = fileLengthOf(video);
+  if (size && size > cfg.maxVideoMb * 1024 * 1024) {
+    log.warn('video.too_large', { id, size });
+    await reply(jid, msg.videoTooLarge(size / 1048576, cfg.maxVideoMb));
+    return;
+  }
+  await reply(jid, msg.READING_VIDEO);
+  const media = await evo.downloadMedia(record.key);
+  // The declared length (above) can be absent or wrong; the buffer that actually arrived is
+  // the real check.
+  if (media.buffer.length > cfg.maxVideoMb * 1024 * 1024) {
+    log.warn('video.too_large', { id, bytes: media.buffer.length });
+    await reply(jid, msg.videoTooLarge(media.buffer.length / 1048576, cfg.maxVideoMb));
+    return;
+  }
+  const res = await publishEdit(
+    jid, id,
+    () => edits.addVideo(cfg.repo, id, media.buffer),
+    () => `intake: video (${id})`,
+    (r) => msg.videoAdded(id, r.listing, r.video),
+  );
+  if (res?.error) {
+    log.warn('video.rejected', { id, error: res.error });
+    await reply(jid, `✋ ${res.error}`);
+    return;
+  }
+  if (res) log.info('video.added', { id, bytes: res.video?.bytes, n: res.video?.n });
 }
 
 // ---------------------------------------------------------------- command job

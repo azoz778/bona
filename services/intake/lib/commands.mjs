@@ -99,6 +99,22 @@ export function parseCaption(caption) {
 // listing the intake can publish is always a listing the owner can then command.
 export const LISTING_ID_RE = /^BONA-W\d{3,5}$/i;
 
+// Unanchored version of LISTING_ID_RE, for pulling an id out of free text — a video's
+// caption, e.g. "video BONA-W001" or just "BONA-W001" on its own.
+const LISTING_ID_SEARCH_RE = /BONA-W\d{3,5}/i;
+
+/**
+ * Find a listing id anywhere in a string. Used for a WhatsApp VIDEO message: unlike the PDF
+ * (which always mints a new listing) or the text commands above (one exact verb + id), a
+ * video only ever attaches to a listing that already exists, so its caption just needs to
+ * mention the id — `video BONA-W001`, `BONA-W001`, `add this to BONA-W001`, all work.
+ * @returns {string|null} the id, uppercased, or null when the text carries none.
+ */
+export function findListingId(text) {
+  const m = LISTING_ID_SEARCH_RE.exec(String(text || ''));
+  return m ? m[0].toUpperCase() : null;
+}
+
 /**
  * Parse a text message as a command. Returns { cmd: null } for ordinary chatter so the
  * daemon stays silent instead of replying to everything.
@@ -170,6 +186,9 @@ export const HELP_TEXT = [
   'Send a property brochure PDF here to publish it — the brochure is re-published under',
   'Bona branding and appears on the page as "Download brochure".',
   'Caption hints: rent · off-plan · SAR 4,500,000 · #test (dry run) · #nobrochure (no PDF on the page) · #hidden',
+  '',
+  'Got a walkthrough clip? Send the VIDEO here with the listing id as its caption, e.g.',
+  '`video BONA-W001` (up to 4 per listing) — it is added to the listing, no re-publish needed.',
   '',
   'remove BONA-W001        take the listing off the site',
   'hero BONA-W001 4        make photo 4 the cover',
