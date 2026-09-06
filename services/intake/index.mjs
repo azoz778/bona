@@ -214,9 +214,9 @@ function requeueWaitingVideos() {
     if (currentJobId === job.id || queue.some((q) => q.record?.key?.id === job.id)) continue;
     const w = wakeParkedClip(job, Object.values(state.raw.jobs || {}), { waitMs: cfg.videoWaitMin * 60 * 1000 });
     if (!w.wake) continue;
-    // `wakeCursor`: the newest brochure this clip has been woken for, so one rejected PDF
+    // `wakeSeen`: the brochure jobs this clip has already been woken for, so one rejected PDF
     // cannot wake it again on every poll (lib/video.mjs wakeParkedClip).
-    state.updateJob(job.id, { waitingFor: null, ...(w.cursor ? { wakeCursor: w.cursor } : {}) });
+    state.updateJob(job.id, { waitingFor: null, ...(w.seen ? { wakeSeen: w.seen } : {}) });
     log.info('video.requeue', { id: job.id, reason: w.reason, pdf: job.waitingFor ?? null });
     enqueue(videoJobFromState(job));
   }

@@ -111,20 +111,26 @@ describe('wakeParkedClip — a parked clip comes back once per reason, never on 
     assert.equal(wakeParkedClip(parked({ waitingFor: 'PDF_GONE' }), jobs, { now: (T0 + 60) * 1000, waitMs: WAIT }).reason, 'brochure-gone');
   });
 
-  // Codex review 2026-09-06: without a cursor, one rejected PDF that arrived after the clip was
-  // parked satisfied "a newer brochure exists" on every poll — a requeue loop until expiry.
-  it('with nothing to wait on, wakes ONCE for a new brochure, then not again for the same one', () => {
+  // Codex review 2026-09-06: without tracking, one rejected PDF that arrived after the clip was
+  // parked satisfied "a newer brochure exists" on every poll — a requeue loop until expiry. And
+  // a timestamp cursor could skip a brochure whose `at` equalled it, so it is ids, not a time.
+  it('with nothing to wait on, wakes ONCE per new brochure, tracked by id', () => {
     const jobs = [{ ...job('PDF_LATER', T0 + 40, 'rejected'), at: at(T0 + 45) }];
     const first = wakeParkedClip(parked(), jobs, { now: (T0 + 90) * 1000, waitMs: WAIT });
     assert.equal(first.wake, true);
     assert.equal(first.reason, 'new-brochure');
-    assert.equal(first.cursor, at(T0 + 45));
-    // index.mjs stores that cursor on the job; the same rejected PDF must not wake it again.
-    const again = wakeParkedClip(parked({ wakeCursor: first.cursor }), jobs, { now: (T0 + 110) * 1000, waitMs: WAIT });
+    assert.deepEqual(first.seen, ['PDF_LATER']);
+    // index.mjs stores that list on the job; the same rejected PDF must not wake it again.
+    const again = wakeParkedClip(parked({ wakeSeen: first.seen }), jobs, { now: (T0 + 110) * 1000, waitMs: WAIT });
     assert.deepEqual(again, { wake: false, reason: 'nothing-new' });
-    // A brochure newer than the cursor wakes it once more.
-    jobs.push({ ...job('PDF_NEWER', T0 + 100, 'pending'), at: at(T0 + 105) });
-    assert.equal(wakeParkedClip(parked({ wakeCursor: first.cursor }), jobs, { now: (T0 + 130) * 1000, waitMs: WAIT }).cursor, at(T0 + 105));
+    // A brochure with the SAME `at` as the first (two PDFs polled in one tick) still wakes it.
+    jobs.push({ ...job('PDF_TWIN', T0 + 40, 'pending'), at: at(T0 + 45) });
+    const twin = wakeParkedClip(parked({ wakeSeen: first.seen }), jobs, { now: (T0 + 120) * 1000, waitMs: WAIT });
+    assert.equal(twin.wake, true);
+    assert.deepEqual(twin.seen, ['PDF_LATER', 'PDF_TWIN']);
+    // A brochure whose `at` equals waitSince itself counts as new (inclusive), one before it does not.
+    assert.equal(wakeParkedClip(parked(), [{ ...job('PDF_SAME_MS', T0 + 12, 'done'), at: at(T0 + 12) }], { now: (T0 + 60) * 1000, waitMs: WAIT }).wake, true);
+    assert.equal(wakeParkedClip(parked(), [{ ...job('PDF_BEFORE', T0, 'done'), at: at(T0 + 11) }], { now: (T0 + 60) * 1000, waitMs: WAIT }).wake, false);
   });
 
   it('ignores other video jobs and other groups when looking for a new brochure', () => {
@@ -140,11 +146,11 @@ describe('wakeParkedClip — a parked clip comes back once per reason, never on 
     assert.equal(wakeParkedClip({ id: 'V', kind: 'video', status: 'pending' }, [], { waitMs: WAIT }).wake, false);
   });
 
-  it('index.mjs stores the cursor it is handed', () => {
+  it('index.mjs persists the wake list it is handed', () => {
     const src = fs.readFileSync(new URL('../index.mjs', import.meta.url), 'utf8');
     const rq = src.slice(src.indexOf('function requeueWaitingVideos('), src.indexOf('// ---------------------------------------------------------------- queue'));
     assert.match(rq, /wakeParkedClip\(job, Object\.values\(state\.raw\.jobs/);
-    assert.match(rq, /wakeCursor: w\.cursor/);
+    assert.match(rq, /wakeSeen: w\.seen/);
   });
 });
 
