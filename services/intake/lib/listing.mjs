@@ -138,6 +138,7 @@ export const WARNING_CODES = new Set([
   'brochure-failed',        // rebrand_pdf.py could not build the branded brochure at all
   'images-skipped',         // sharp could not decode one or more candidates
   'model-flagged',          // the model returned warnings; read them in the work dir's ai.json
+  'photos-cropped',         // one or more photographs were cut out of a page that was one flattened picture
 ]);
 
 /**

@@ -11,7 +11,7 @@ Everything between `<<<BONA-UNTRUSTED-DATA: …>>>` and `<<<END BONA-UNTRUSTED-D
 - The full text of the PDF, page by page, below.
 - {{SHEET_COUNT}} labelled contact sheet(s) of every image candidate extracted from the PDF. **Read them with the Read tool** (they are images):
 {{SHEET_LIST}}
-  Each tile is labelled `#<index>  <width>x<height>  ar <aspect ratio>  p<page>  <source>`. `source: embedded` means a real bitmap lifted out of the PDF; `source: render` means the whole PDF page was rasterised because no usable bitmaps could be extracted — a rendered page is a page of a document, not a photograph, so it may only be used if it is genuinely a full-bleed photograph with no text on it.
+  Each tile is labelled `#<index>  <width>x<height>  ar <aspect ratio>  p<page>  <source>`. `source: embedded` means a real bitmap lifted out of the PDF; `source: render` means the whole PDF page was rasterised because no usable bitmaps could be extracted — a rendered page is a page of a document, not a photograph, so it may only be used if it is genuinely a full-bleed photograph with no text on it. `source: photo-crop` means a photograph that was cut OUT of a page that had been designed as one flattened picture: judge it as an ordinary photograph, and exclude it like any other if the crop still carries text, a logo, a plan or a border.
 - Before you finalise the order, **Read the 2–4 strongest hero candidates at full resolution** (their paths are listed under "Candidate files") and confirm or change your choice. Sharpness, clutter and watermarks only show at full size.
 
 ### Page renders
