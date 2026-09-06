@@ -148,12 +148,24 @@ YAML
 
   # ------------------------------------------------------------- 4. DNS
   say "Routing DNS $HOSTNAME_API"
-  if "$CLOUDFLARED" tunnel route dns "$TUNNEL" "$HOSTNAME_API" 2>&1 | tee "$TMP/dns.log"; then
+  # --config: with a default ~/.cloudflared/config.yml present (another tunnel), cloudflared routed the
+  # hostname to THAT tunnel id on 2026-09-06. Pin the config, and --overwrite-dns so a re-run repairs a
+  # wrong record instead of failing on "record already exists".
+  if "$CLOUDFLARED" --config "$CF_CONFIG" tunnel route dns --overwrite-dns "$TUNNEL" "$HOSTNAME_API" 2>&1 | tee "$TMP/dns.log"; then
     ok "DNS routed"
   elif grep -qiE 'already exists|record with that host' "$TMP/dns.log"; then
     ok "DNS record already points at this tunnel"
   else
     warn "DNS routing failed. Fix it in the Cloudflare dashboard (CNAME $HOSTNAME_API -> $TUNNEL_ID.cfargotunnel.com) and re-run; the output above is the whole story."
+  fi
+
+  # Verify what the public resolvers see: the CNAME must point at THIS tunnel, or the API is unreachable.
+  EXPECT="$TUNNEL_ID.cfargotunnel.com"
+  GOT="$(node -e 'const {Resolver}=require("dns").promises;const r=new Resolver();r.setServers(["1.1.1.1","8.8.8.8"]);r.resolveCname(process.argv[1]).then(a=>console.log(a[0]||"")).catch(()=>console.log(""))' "$HOSTNAME_API" 2>/dev/null || true)"
+  if [ -n "$GOT" ] && [ "$GOT" != "$EXPECT" ]; then
+    warn "DNS mismatch: $HOSTNAME_API -> $GOT (expected $EXPECT). Run: $CLOUDFLARED --config $CF_CONFIG tunnel route dns --overwrite-dns $TUNNEL $HOSTNAME_API"
+  elif [ -n "$GOT" ]; then
+    ok "DNS: $HOSTNAME_API -> $GOT"
   fi
 else
   say "Skipping tunnel and DNS (--no-dns)"
