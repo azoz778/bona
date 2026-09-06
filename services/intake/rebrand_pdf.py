@@ -188,74 +188,158 @@ def line(text: str, *, family: str, size: float, color: str = INK_HEX, align: st
     return f'<div style="{style}">{html.escape(text)}</div>'
 
 
-def put(page, rect, htmltext, css, archive):
-    """insert_htmlbox with a hard failure when the text does not fit its box."""
-    spare, _scale = page.insert_htmlbox(rect, htmltext, css=css, archive=archive, scale_low=0.55)
-    return spare
+class Stack:
+    """A vertical stack of centred blocks, measured before it is drawn.
+
+    The brochures the owner is actually sent are 16:9 slide decks (1920x1080) as often as
+    they are portrait, and one of them mixes 709x510 and 1417x510 pages in the same file.
+    Positioning by fractions of the page height therefore does not work: the same fraction
+    is a comfortable gap on an A4 page and an overlap on a 1080pt-high one. So every block
+    is measured on a scratch page first, the stack is centred as a whole, and nothing is
+    placed at a hard-coded height.
+    """
+
+    def __init__(self, page, scratch, css, archive, column):
+        self.page = page
+        self.scratch = scratch
+        self.css = css
+        self.archive = archive
+        self.column = column
+        self.items: list = []
+
+    def _measure(self, htmltext) -> float:
+        import pymupdf
+
+        spare, _scale = self.scratch.insert_htmlbox(
+            pymupdf.Rect(0, 0, self.column, 3000), htmltext, css=self.css, archive=self.archive)
+        return max(6.0, 3000.0 - max(spare, 0.0))
+
+    def text(self, htmltext, gap: float = 0.0):
+        if htmltext is None:
+            return self
+        self.items.append(("text", htmltext, self._measure(htmltext), gap))
+        return self
+
+    def rule(self, width: float, thickness: float, gap: float = 0.0):
+        self.items.append(("rule", (width, thickness), thickness, gap))
+        return self
+
+    def image(self, stream: bytes, side: float, gap: float = 0.0):
+        self.items.append(("image", stream, side, gap))
+        return self
+
+    @property
+    def height(self) -> float:
+        return sum(h + gap for _kind, _payload, h, gap in self.items)
+
+    def draw(self, top: float):
+        import pymupdf
+
+        W = self.page.rect.width
+        x0 = (W - self.column) / 2
+        y = top
+        for kind, payload, h, gap in self.items:
+            y += gap
+            if kind == "text":
+                self.page.insert_htmlbox(pymupdf.Rect(x0, y, x0 + self.column, y + h + 2),
+                                         payload, css=self.css, archive=self.archive)
+            elif kind == "rule":
+                width, thickness = payload
+                self.page.draw_line(pymupdf.Point(W / 2 - width / 2, y + thickness / 2),
+                                    pymupdf.Point(W / 2 + width / 2, y + thickness / 2),
+                                    color=CHAMPAGNE, width=thickness)
+            else:
+                self.page.insert_image(
+                    pymupdf.Rect((W - h) / 2, y, (W + h) / 2, y + h), stream=payload)
+            y += h
+        return y
+
+
+def page_unit(width: float, height: float) -> float:
+    """Type scale for a page of any shape.
+
+    Against A4 in BOTH directions, smaller wins: a 1920x1080 deck is 3.2x A4's width but
+    only 1.3x its height, and scaling type by the width alone puts a 110pt wordmark on a
+    page with 1080pt of room for the whole cover.
+    """
+    return max(0.55, min(width / 595.0, height / 842.0))
+
+
+def text_column(width: float, unit: float) -> float:
+    """A readable measure, never the full width of a 1920pt-wide deck."""
+    return min(width * 0.78, 640.0 * unit)
+
+
+def dominant_page_size(doc) -> tuple:
+    """The size MOST of the brochure's pages use, for the pages we add.
+
+    Not page 1's size: real brochures open on a half-spread or a portrait title page and
+    then run landscape. A size outside MIN_PAGE_PT..MAX_PAGE_PT is not trusted at all and
+    the cover falls back to A4.
+    """
+    counts: dict = {}
+    for page in doc:
+        rect = page.rect
+        key = (round(float(rect.width), 1), round(float(rect.height), 1))
+        counts[key] = counts.get(key, 0) + 1
+    if not counts:
+        return A4
+    (W, H), _n = max(counts.items(), key=lambda kv: (kv[1], kv[0][0] * kv[0][1]))
+    if not (MIN_PAGE_PT <= W <= MAX_PAGE_PT and MIN_PAGE_PT <= H <= MAX_PAGE_PT):
+        return A4
+    return W, H
 
 
 # ---- pages -------------------------------------------------------------------------------
-def draw_cover(page, facts, brand, css, archive, unit):
+def draw_cover(page, scratch, facts, brand, css, archive, unit):
     import pymupdf
 
     W, H = page.rect.width, page.rect.height
     page.draw_rect(pymupdf.Rect(0, 0, W, H), fill=IVORY, color=None)
-    side = W * 0.14
+    column = text_column(W, unit)
 
-    # wordmark — the logo IS the name set in Cormorant; the champagne rule under it is the
-    # bar at the foot of public/logo.svg.
-    put(page, pymupdf.Rect(side, H * 0.200, W - side, H * 0.262),
-        line(brand["name"].upper(), family="bona-display", size=36 * unit, tracking=14 * unit),
-        css, archive)
-    rule = W * 0.10
-    y_rule = H * 0.272
-    page.draw_line(pymupdf.Point(W / 2 - rule, y_rule), pymupdf.Point(W / 2 + rule, y_rule),
-                   color=CHAMPAGNE, width=1.0 * unit)
-
-    y = H * 0.298
-    put(page, pymupdf.Rect(side, y, W - side, y + 26 * unit),
-        line(brand["tagline"]["en"].upper(), family="bona-sans", size=7.6 * unit,
-             color=STONE_HEX, tracking=2.6 * unit), css, archive)
-    y += 22 * unit
-    put(page, pymupdf.Rect(side, y, W - side, y + 30 * unit),
-        line(brand["tagline"]["ar"], family="bona-sans, bona-arabic", size=10 * unit,
-             color=STONE_HEX, rtl=True), css, archive)
-
-    # the property
-    y = H * 0.445
+    stack = Stack(page, scratch, css, archive, column)
+    # The wordmark IS the name set in Cormorant; the rule under it is the champagne bar at
+    # the foot of public/logo.svg.
+    stack.text(line(brand["name"].upper(), family="bona-display", size=34 * unit, tracking=13 * unit))
+    stack.rule(column * 0.30, 1.0 * unit, gap=10 * unit)
+    stack.text(line(brand["tagline"]["en"].upper(), family="bona-sans", size=7.6 * unit,
+                    color=STONE_HEX, tracking=2.6 * unit), gap=18 * unit)
+    stack.text(line(brand["tagline"]["ar"], family="bona-sans, bona-arabic", size=10 * unit,
+                    color=STONE_HEX, rtl=True), gap=4 * unit)
     if facts.get("titleAr"):
-        put(page, pymupdf.Rect(side * 0.7, y, W - side * 0.7, y + 90 * unit),
-            line(facts["titleAr"], family="bona-display, bona-arabic-display",
-                 size=21 * unit, rtl=True, leading=1.6), css, archive)
-        y += 92 * unit
+        stack.text(line(facts["titleAr"], family="bona-display, bona-arabic-display",
+                        size=21 * unit, rtl=True, leading=1.55), gap=44 * unit)
     if facts.get("titleEn"):
-        put(page, pymupdf.Rect(side * 0.7, y, W - side * 0.7, y + 90 * unit),
-            line(facts["titleEn"], family="bona-display, bona-arabic-display", size=25 * unit,
-                 leading=1.28), css, archive)
-        y += 84 * unit
-
-    meta = " · ".join([p for p in [facts.get("place"), facts.get("priceEn")] if p])
+        stack.text(line(facts["titleEn"], family="bona-display, bona-arabic-display",
+                        size=25 * unit, leading=1.28), gap=10 * unit)
+    meta = " \u00b7 ".join([p for p in [facts.get("place"), facts.get("priceEn")] if p])
     if meta:
-        put(page, pymupdf.Rect(side * 0.6, y, W - side * 0.6, y + 40 * unit),
-            line(meta, family="bona-sans, bona-arabic", size=9 * unit, color=STONE_HEX,
-                 tracking=1.4 * unit), css, archive)
-        y += 26 * unit
-    project = " · ".join([p for p in [facts.get("project"), facts.get("developer")] if p])
+        stack.text(line(meta, family="bona-sans, bona-arabic", size=9 * unit,
+                        color=STONE_HEX, tracking=1.4 * unit), gap=22 * unit)
+    project = " \u00b7 ".join([p for p in [facts.get("project"), facts.get("developer")] if p])
     if project:
-        put(page, pymupdf.Rect(side * 0.6, y, W - side * 0.6, y + 34 * unit),
-            line(project, family="bona-sans, bona-arabic", size=8 * unit, color=STONE_HEX,
-                 tracking=1.2 * unit), css, archive)
+        stack.text(line(project, family="bona-sans, bona-arabic", size=8 * unit,
+                        color=STONE_HEX, tracking=1.2 * unit), gap=8 * unit)
 
-    foot = " · ".join([p for p in [brand["host"], f"FAL {brand['fal']}", facts.get("id")] if p])
-    put(page, pymupdf.Rect(side * 0.5, H * 0.895, W - side * 0.5, H * 0.945),
-        line(foot, family="bona-sans", size=7.4 * unit, color=STONE_HEX, tracking=1.4 * unit),
-        css, archive)
+    foot = " \u00b7 ".join([p for p in [brand["host"], f"FAL {brand['fal']}", facts.get("id")] if p])
+    foot_html = line(foot, family="bona-sans", size=7.4 * unit, color=STONE_HEX, tracking=1.4 * unit)
+    foot_h = stack._measure(foot_html)                                   # noqa: SLF001
+    foot_top = H - foot_h - 34 * unit
+
+    # Sit the stack a little above true centre in what is left above the foot line — a
+    # cover reads better weighted to the upper half than dead-centred.
+    top = max(24 * unit, (foot_top - stack.height) * 0.38)
+    stack.draw(top)
+    x0 = (W - column) / 2
+    page.insert_htmlbox(pymupdf.Rect(x0, foot_top, x0 + column, foot_top + foot_h + 2),
+                        foot_html, css=css, archive=archive)
 
 
 def draw_footer(page, text, latin_font, latin_file, unit):
     """The strip on a developer's page: ivory band, champagne hairline, ink text.
 
-    Latin only and drawn with insert_text rather than the story engine — it is stamped on
+    Latin only and drawn with insert_text rather than the story engine \u2014 it is stamped on
     every page, the baseline has to be exact, and there is nothing to shape.
     """
     import pymupdf
@@ -277,76 +361,52 @@ def draw_footer(page, text, latin_font, latin_file, unit):
                      fontsize=size, color=INK, overlay=True)
 
 
-def draw_enquire(page, facts, brand, css, archive, unit):
+def draw_enquire(page, scratch, facts, brand, css, archive, unit):
     import pymupdf
     import segno
 
     W, H = page.rect.width, page.rect.height
     page.draw_rect(pymupdf.Rect(0, 0, W, H), fill=IVORY, color=None)
-    side = W * 0.14
+    column = text_column(W, unit)
 
-    put(page, pymupdf.Rect(side, H * 0.10, W - side, H * 0.175),
-        line(brand["name"].upper(), family="bona-display", size=26 * unit, tracking=9 * unit),
-        css, archive)
-    rule = W * 0.07
-    page.draw_line(pymupdf.Point(W / 2 - rule, H * 0.176), pymupdf.Point(W / 2 + rule, H * 0.176),
-                   color=CHAMPAGNE, width=1.0 * unit)
-
-    y = H * 0.205
-    put(page, pymupdf.Rect(side, y, W - side, y + 26 * unit),
-        line("ENQUIRE", family="bona-sans", size=8 * unit, color=STONE_HEX, tracking=3.2 * unit),
-        css, archive)
-    y += 20 * unit
-    put(page, pymupdf.Rect(side, y, W - side, y + 30 * unit),
-        line("للاستفسار والمعاينة", family="bona-sans, bona-arabic", size=11 * unit,
-             color=STONE_HEX, rtl=True), css, archive)
-
-    y = H * 0.275
-    if facts.get("titleEn"):
-        put(page, pymupdf.Rect(side * 0.6, y, W - side * 0.6, y + 70 * unit),
-            line(facts["titleEn"], family="bona-display, bona-arabic-display", size=17 * unit),
-            css, archive)
-        y += 46 * unit
-    if facts.get("titleAr"):
-        put(page, pymupdf.Rect(side * 0.6, y, W - side * 0.6, y + 60 * unit),
-            line(facts["titleAr"], family="bona-display, bona-arabic-display", size=14 * unit,
-                 rtl=True, leading=1.6), css, archive)
-
-    # QR of the listing URL
     url = facts.get("url") or brand["site"]
-    qr_side = min(W * 0.30, H * 0.20)
-    qr_top = H * 0.44
-    buf = io.BytesIO()
-    segno.make(url, error="m").save(buf, kind="png", scale=14, border=1,
+    qr = io.BytesIO()
+    segno.make(url, error="m").save(qr, kind="png", scale=14, border=1,
                                     dark=INK_HEX, light=IVORY_HEX)
-    page.insert_image(pymupdf.Rect((W - qr_side) / 2, qr_top, (W + qr_side) / 2, qr_top + qr_side),
-                      stream=buf.getvalue())
 
-    y = qr_top + qr_side + 22 * unit
-    rows = [
-        (facts.get("urlLabel") or url, "bona-sans", 9.6 * unit, INK_HEX, 0.6 * unit, False),
-        (brand["waLink"], "bona-sans", 9.0 * unit, INK_HEX, 0.6 * unit, False),
-        (brand["phone"], "bona-sans", 10.5 * unit, INK_HEX, 1.6 * unit, False),
-        (brand["hours"]["en"], "bona-sans", 8.4 * unit, STONE_HEX, 1.0 * unit, False),
-        (brand["hours"]["ar"], "bona-sans, bona-arabic", 10 * unit, STONE_HEX, 0, True),
-    ]
-    for text, family, size, colour, tracking, rtl in rows:
-        if not text:
-            continue
-        put(page, pymupdf.Rect(side * 0.4, y, W - side * 0.4, y + size * 3.4),
-            line(text, family=family, size=size, color=colour, tracking=tracking, rtl=rtl),
-            css, archive)
-        y += size * 2.3
+    stack = Stack(page, scratch, css, archive, column)
+    stack.text(line(brand["name"].upper(), family="bona-display", size=25 * unit, tracking=10 * unit))
+    stack.rule(column * 0.22, 1.0 * unit, gap=9 * unit)
+    stack.text(line("ENQUIRE", family="bona-sans", size=8 * unit, color=STONE_HEX,
+                    tracking=3.2 * unit), gap=16 * unit)
+    stack.text(line("\u0644\u0644\u0627\u0633\u062a\u0641\u0633\u0627\u0631 \u0648\u0627\u0644\u0645\u0639\u0627\u064a\u0646\u0629",
+                    family="bona-sans, bona-arabic", size=11 * unit, color=STONE_HEX, rtl=True), gap=4 * unit)
+    if facts.get("titleEn"):
+        stack.text(line(facts["titleEn"], family="bona-display, bona-arabic-display",
+                        size=16 * unit, leading=1.3), gap=26 * unit)
+    if facts.get("titleAr"):
+        stack.text(line(facts["titleAr"], family="bona-display, bona-arabic-display",
+                        size=13 * unit, rtl=True, leading=1.55), gap=6 * unit)
+    stack.image(qr.getvalue(), min(column * 0.34, H * 0.26), gap=24 * unit)
+    stack.text(line(facts.get("urlLabel") or url, family="bona-sans", size=9.6 * unit,
+                    tracking=0.6 * unit), gap=20 * unit)
+    stack.text(line(brand["waLink"], family="bona-sans", size=9 * unit, tracking=0.6 * unit), gap=7 * unit)
+    stack.text(line(brand["phone"], family="bona-sans", size=10.5 * unit, tracking=1.6 * unit), gap=7 * unit)
+    stack.text(line(brand["hours"]["en"], family="bona-sans", size=8.4 * unit, color=STONE_HEX,
+                    tracking=1.0 * unit), gap=12 * unit)
+    stack.text(line(brand["hours"]["ar"], family="bona-sans, bona-arabic", size=10 * unit,
+                    color=STONE_HEX, rtl=True), gap=4 * unit)
 
-    y = H * 0.895
-    licence = f"{brand['legalName']} · {brand['host']} · FAL {brand['fal']}"
-    put(page, pymupdf.Rect(side * 0.4, y, W - side * 0.4, y + 30 * unit),
-        line(licence, family="bona-sans", size=7.4 * unit, color=STONE_HEX, tracking=1.2 * unit),
-        css, archive)
-    y += 20 * unit
-    put(page, pymupdf.Rect(side * 0.4, y, W - side * 0.4, y + 30 * unit),
-        line(f"{brand['nameAr']} · رخصة فال {brand['fal']}", family="bona-sans, bona-arabic",
-             size=9 * unit, color=STONE_HEX, rtl=True), css, archive)
+    licence = f"{brand['legalName']} \u00b7 {brand['host']} \u00b7 FAL {brand['fal']}"
+    foot = Stack(page, scratch, css, archive, column)
+    foot.text(line(licence, family="bona-sans", size=7.4 * unit, color=STONE_HEX, tracking=1.2 * unit))
+    foot.text(line(f"{brand['nameAr']} \u00b7 \u0631\u062e\u0635\u0629 \u0641\u0627\u0644 {brand['fal']}",
+                   family="bona-sans, bona-arabic", size=9 * unit, color=STONE_HEX, rtl=True), gap=5 * unit)
+    foot_top = H - foot.height - 30 * unit
+
+    top = max(20 * unit, (foot_top - stack.height) * 0.42)
+    stack.draw(top)
+    foot.draw(foot_top)
 
 
 # ---- facts -------------------------------------------------------------------------------
@@ -566,11 +626,11 @@ def main() -> int:
 
     # The added pages take the size of the brochure's own first page so the document reads
     # as one piece in a viewer instead of jumping between page sizes.
-    first = doc[0].rect
-    W, H = float(first.width), float(first.height)
-    if not (MIN_PAGE_PT <= W <= MAX_PAGE_PT and MIN_PAGE_PT <= H <= MAX_PAGE_PT):
-        W, H = A4
-    unit = W / 595.0
+    # The added pages take the brochure's DOMINANT page size, not page 1's: one of the
+    # owner's real files opens on a 709x510 half-spread and then runs 15 pages at
+    # 1417x510, and a cover at the odd size out reads as a mistake in a viewer.
+    W, H = dominant_page_size(doc)
+    unit = page_unit(W, H)
 
     css = font_css(faces)
     archive = pymupdf.Archive(cache)
@@ -580,10 +640,19 @@ def main() -> int:
                                           facts.get("id")] if p])
 
     try:
+        # A scratch page in a throwaway document: every block is measured on it before a
+        # real page is touched (see Stack).
+        ruler = pymupdf.open()
+        scratch = ruler.new_page(width=max(W, 700.0), height=3200)
         for i in range(src_pages):
-            draw_footer(doc[i], footer_text, latin, latin_file, unit)
-        draw_enquire(doc.new_page(width=W, height=H), facts, brand, css, archive, unit)
-        draw_cover(doc.new_page(pno=0, width=W, height=H), facts, brand, css, archive, unit)
+            # A page's OWN size decides its footer, so a mixed-size brochure gets a strip
+            # that is proportional on every page instead of one sized for the cover.
+            page = doc[i]
+            draw_footer(page, footer_text, latin, latin_file,
+                        page_unit(page.rect.width, page.rect.height))
+        draw_enquire(doc.new_page(width=W, height=H), scratch, facts, brand, css, archive, unit)
+        draw_cover(doc.new_page(pno=0, width=W, height=H), scratch, facts, brand, css, archive, unit)
+        ruler.close()
         title = " — ".join([p for p in [facts.get("titleEn"), brand["legalName"]] if p])
         doc.set_metadata({
             "title": title or brand["legalName"],

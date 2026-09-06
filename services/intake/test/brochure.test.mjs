@@ -188,15 +188,73 @@ print("ok")
     execFileSync('uv', ['run', '--with', 'pymupdf', 'python', '-c', py], { encoding: 'utf8' });
   };
 
-  const textOf = (pdf, pageIndex) => {
+  /** A brochure whose first page is the odd size out, as several of the owner's are. */
+  const makeMixedFixture = (file) => {
     const py = `
-import pymupdf, json, sys
+import pymupdf
+doc = pymupdf.open()
+doc.new_page(width=400, height=300).insert_text(pymupdf.Point(30, 40), "half spread", fontsize=11)
+for i in range(3):
+    doc.new_page(width=1920, height=1080).insert_text(pymupdf.Point(60, 90), "deck page %d" % (i + 1), fontsize=24)
+doc.save(${JSON.stringify(file)}, garbage=3, deflate=True)
+print("ok")
+`;
+    execFileSync('uv', ['run', '--with', 'pymupdf', 'python', '-c', py], { encoding: 'utf8' });
+  };
+
+  /**
+   * Page text, image count and — for the overlap check — the bounding box of every text
+   * block on the page, in reading order.
+   */
+  const pageOf = (pdf, pageIndex) => {
+    const py = `
+import pymupdf, json
 doc = pymupdf.open(${JSON.stringify(pdf)})
 page = doc[${pageIndex} if ${pageIndex} >= 0 else doc.page_count + ${pageIndex}]
-print(json.dumps({"pages": doc.page_count, "text": page.get_text(), "images": len(page.get_images(full=True))}))
+blocks = [
+    {"x0": b[0], "y0": b[1], "x1": b[2], "y1": b[3], "text": " ".join(b[4].split())}
+    for b in page.get_text("blocks") if b[4].strip()
+]
+print(json.dumps({
+    "pages": doc.page_count,
+    "text": page.get_text(),
+    "images": len(page.get_images(full=True)),
+    "width": page.rect.width,
+    "height": page.rect.height,
+    "sizes": sorted({(round(p.rect.width), round(p.rect.height)) for p in doc}),
+    "blocks": blocks,
+}))
 `;
     const out = execFileSync('uv', ['run', '--with', 'pymupdf', 'python', '-c', py], { encoding: 'utf8' });
     return JSON.parse(out.trim().split('\n').pop());
+  };
+  const textOf = pageOf;
+
+  /**
+   * Every pair of text blocks drawn on top of one another.
+   *
+   * Measured as a FRACTION of the shorter block, not in absolute points: two wrapped lines
+   * of the same Arabic paragraph share a couple of points where the ascenders of one line
+   * reach into the box of the next, and calling that a collision would only teach the test
+   * to be ignored. A line actually drawn over another overlaps it almost entirely — the bug
+   * this guards against had the Arabic strapline sitting on top of the English title.
+   */
+  const overlaps = (blocks, fraction = 0.45) => {
+    const bad = [];
+    for (let i = 0; i < blocks.length; i += 1) {
+      for (let j = i + 1; j < blocks.length; j += 1) {
+        const a = blocks[i];
+        const b = blocks[j];
+        const vertical = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+        const horizontal = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+        const shortest = Math.min(a.y1 - a.y0, b.y1 - b.y0);
+        const narrowest = Math.min(a.x1 - a.x0, b.x1 - b.x0);
+        if (vertical > shortest * fraction && horizontal > narrowest * 0.25) {
+          bad.push(`"${a.text}" x "${b.text}" (${vertical.toFixed(1)}pt of ${shortest.toFixed(1)}pt)`);
+        }
+      }
+    }
+    return bad;
   };
 
   before(() => {
@@ -305,6 +363,88 @@ print(json.dumps({"pages": doc.page_count, "text": page.get_text(), "images": le
     const inner = textOf(out, 1);
     assert.equal(inner.images, 1, 'a downsample pass that empties the pages is worse than a big file');
     assert.match(inner.text, /developer page 1/);
+  });
+
+  // The brochures the owner is really sent are 16:9 decks, and one of them opens on a
+  // half-spread. Laying the cover out by fractions of the page height put the wordmark off
+  // the page on a 1080pt-high deck and stacked the Enquire page's lines on top of one
+  // another; both are measured now, and these two tests are what keep them measured.
+  describe('any page shape', () => {
+    let mixed;
+    let landscapeOut;
+
+    before(() => {
+      mixed = path.join(dir, 'deck.pdf');
+      makeMixedFixture(mixed);
+      landscapeOut = path.join(dir, 'out-deck.pdf');
+    });
+
+    it('gives the pages it adds the brochure\'s DOMINANT size, not page 1\'s', async () => {
+      const res = await buildBrandedBrochure({ pdfPath: mixed, listing: LISTING, outPath: landscapeOut, workDir: dir, cfg });
+      assert.ok(res.ok, res.error);
+      const cover = pageOf(landscapeOut, 0);
+      assert.equal(cover.width, 1920);
+      assert.equal(cover.height, 1080);
+      const enquire = pageOf(landscapeOut, -1);
+      assert.equal(enquire.width, 1920);
+      // the developer's own half-spread is left at its own size, untouched
+      assert.deepEqual(cover.sizes, [[400, 300], [1920, 1080]]);
+    });
+
+    // The detector has to fire on the real bug, or the test below proves nothing.
+    it('the overlap detector catches a line drawn on top of another', () => {
+      const stacked = [
+        { x0: 100, y0: 200, x1: 500, y1: 230, text: 'Al-Wareef Townhouse, Jeddah' },
+        { x0: 120, y0: 202, x1: 480, y1: 232, text: 'للاستفسار والمعاينة' },
+      ];
+      assert.equal(overlaps(stacked).length, 1);
+      const stackedLines = [
+        { x0: 100, y0: 200, x1: 500, y1: 230, text: 'line one' },
+        { x0: 100, y0: 228, x1: 500, y1: 258, text: 'line two, tight leading' },
+      ];
+      assert.deepEqual(overlaps(stackedLines), [], 'tight leading is not a collision');
+    });
+
+    it('never overlaps two lines, on the cover or the Enquire page, at any title length', async () => {
+      const longTitle = {
+        ...LISTING,
+        title: {
+          en: 'Nuzul Khayala Residences at Wajhat Al-Wareef, North Jeddah Waterfront District',
+          ar: 'نزل خيالة ريزيدنسز في واجهة الوريف، حي الواجهة البحرية شمال جدة الجديدة',
+        },
+        project: {
+          name: { en: 'Wajhat Al-Wareef Masterplan', ar: 'واجهة الوريف' },
+          developer: { en: 'National Housing Company and Faisal Bin Saedan Real Estate Development', ar: 'الوطنية للإسكان' },
+        },
+      };
+      for (const [label, listing, src] of [
+        ['short title, portrait', LISTING, fixture],
+        ['long title, portrait', longTitle, fixture],
+        ['short title, 16:9 deck', LISTING, mixed],
+        ['long title, 16:9 deck', longTitle, mixed],
+      ]) {
+        const out = path.join(dir, `out-overlap-${label.replace(/\W+/g, '-')}.pdf`);
+        const res = await buildBrandedBrochure({ pdfPath: src, listing, outPath: out, workDir: dir, cfg });
+        assert.ok(res.ok, `${label}: ${res.error}`);
+        for (const [page, name] of [[0, 'cover'], [-1, 'enquire']]) {
+          const bad = overlaps(pageOf(out, page).blocks);
+          assert.deepEqual(bad, [], `${label} — ${name} overlaps: ${bad.join(', ')}`);
+        }
+      }
+    });
+
+    it('puts the wordmark on the cover whatever the page shape', async () => {
+      for (const src of [fixture, mixed]) {
+        const out = path.join(dir, `out-wordmark-${path.basename(src)}`);
+        const res = await buildBrandedBrochure({ pdfPath: src, listing: LISTING, outPath: out, workDir: dir, cfg });
+        assert.ok(res.ok, res.error);
+        const cover = pageOf(out, 0);
+        assert.match(cover.text, /B\s*O\s*N\s*A/, `no wordmark on the ${cover.width}x${cover.height} cover`);
+        // …and inside the page, not off the top of it
+        const mark = cover.blocks.find((b) => /^B\s*O?\s*N?\s*A?/.test(b.text));
+        assert.ok(mark && mark.y0 > 0 && mark.y1 < cover.height, JSON.stringify(mark));
+      }
+    });
   });
 
   it('answers with a reason instead of throwing on a file that is not a PDF', async () => {

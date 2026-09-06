@@ -87,8 +87,9 @@ this repo. Nothing else in the pipeline changes.
     warnings, images[], createdAt, site }` — provenance, so a listing can always be traced back to
     the WhatsApp message and the PDF that produced it. `warnings` is an array of **codes** from a
     fixed vocabulary (`not-enough-photos`, `price-not-printed`, `brochure-too-large`,
-    `images-skipped`, `model-flagged`) and never free text: the model's own `warnings` are model
-    output about an untrusted document, so they stay in the run's `ai.json` and are not committed.
+    `brochure-failed`, `images-skipped`, `model-flagged`) and never free text: the model's own
+    `warnings` are model output about an untrusted document, so they stay in the run's `ai.json`
+    and are not committed.
   A `status: "sold"` intake listing stays published and renders with the Sold badge.
 - **Images**: stored in this repo at `public/listings/<slug>/<nn>.jpg` (max 1920 px, q82, EXIF
   stripped) with `<nn>-thumb.webp` (640 px). `src` and `thumb` are therefore site-local paths, and
@@ -100,8 +101,19 @@ this repo. Nothing else in the pipeline changes.
   than 4 usable photographs is rejected rather than published thin.
 - **`sourceRef`**: `WA-<yyyymmdd>-<6 chars of the WhatsApp message id>`. It is deliberately NOT a
   TK reference, and `build.mjs` never looks it up in the TK API.
-- **`brochureUrl`**: set to `https://bona.azoz.uk/listings/<slug>/brochure.pdf` only when the owner
-  captioned the PDF with `#brochure`; the PDF is then committed alongside the photos.
+- **`brochureUrl`**: `https://bona.azoz.uk/listings/<slug>/brochure.pdf` — the **default** for an
+  intake listing, not an opt-in. The brochure at that path is not the developer's file: it is
+  their document re-published under Bona's branding by `services/intake/rebrand_pdf.py`, with a
+  Bona cover in front of it, a footer strip (`bona.azoz.uk · +966 59 329 6933 · FAL 1100313556 ·
+  <id>`) on every one of their pages and a closing *Enquire* page carrying the listing URL, a QR
+  of it, the WhatsApp link, the opening hours and the licence line. Their own pages and branding
+  are left exactly as they are; nothing Bona adds may carry another agency, and any listing fact
+  that holds a rival broker, a phone number, an email or a link is dropped rather than printed.
+  It is `null` when the owner captioned the PDF `#nobrochure`, or when the branded file could not
+  be built or could not be squeezed under `BONA_MAX_BROCHURE_MB` (25 MB) — the listing then also
+  carries `brochure-failed` or `brochure-too-large` in `_intake.warnings`, and `brochure <id>` in
+  the WhatsApp group rebuilds it. `validate.mjs` still requires an https URL or `null`, so the
+  value is absolute even though the file is site-local like the photos.
 - **Price**: TAQEEM still applies, and the model's word is not enough. The number must appear in
   the PDF's text layer or in the caption (`services/intake/lib/price.mjs` allows thousands
   separators, Arabic-Indic digits and the `4.5m` / `مليون` forms); for a PDF with no text layer

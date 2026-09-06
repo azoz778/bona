@@ -33,7 +33,8 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
    | `off-plan`, `international` | sets the category |
    | `SAR 4,500,000`, `4.5m`, `990,000 ر.س`, `٤٥٠٠٠٠٠ ريال` | the asking price, overriding the PDF |
    | `#test` | dry run — the bot replies with the listing it *would* publish and writes nothing |
-   | `#brochure` | also publishes the PDF at `/listings/<slug>/brochure.pdf` |
+   | `#nobrochure` | publish the listing with **no** downloadable brochure |
+   | `#brochure` | nothing (a no-op alias — every brochure is re-published by default) |
    | `#hidden` | writes the listing but keeps it off the site until `show <id>` |
 
 3. The bot replies `Reading the brochure…`, then either
@@ -45,6 +46,7 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
    remove BONA-W001          take the listing off the site (deletes the JSON and the photos)
    hero BONA-W001 4          make photo 4 the cover
    price BONA-W001 4500000   set the asking price   (price BONA-W001 onrequest clears it)
+   brochure BONA-W001        rebuild the Bona-branded PDF from the developer's original
    sold BONA-W001            mark it sold           (also: reserved / available)
    hide BONA-W001            keep it off the site   (show BONA-W001 puts it back)
    status                    what is published and what the intake is doing
@@ -98,6 +100,14 @@ Anything else in the group is ignored, silently.
 - **No other agency in the copy.** The brochures the owner receives are usually branded by
   someone else; the generated copy is checked for `TK`, `tk-estates`, phone numbers and the
   hype words the site validator bans, and is rejected if any appear.
+- **The brochure comes back out under Bona's brand.** The owner is sent someone else's
+  brochure; what goes on the site is that document with a Bona cover in front of it, a
+  discreet footer strip on every one of the developer's pages and a closing *Enquire* page
+  with a QR of the listing URL. The developer's own pages are never re-rendered and their
+  branding is never removed — it is their document, and their brand on it is legitimate —
+  but nothing Bona *adds* may carry another agency: `rebrand_pdf.py` scrubs every listing
+  fact it is about to print and drops any that holds a rival broker, a phone number, an
+  email or a link. `#nobrochure` publishes the listing with no PDF at all.
 - **Real Arabic**, checked for Arabic script in every `ar` field.
 - **4–10 photos.** A PDF that yields fewer than four publishable photographs is rejected
   rather than published thin.
@@ -117,8 +127,9 @@ assertCleanTree(repo)      git status --porcelain must be empty; a crashed job's
                            under public/listings and scripts/curate/inbox are cleaned once
                            and re-checked (anything else is a hard stop — it is not ours)
 gitPull(repo)              fetch + rebase, BEFORE the first byte is written
-processPdf(...)            images into <workDir>/publish/<slug>, promoted into the repo only
-                           after checkListing() passes; then build.mjs + validate.mjs
+processPdf(...)            images AND the branded brochure into <workDir>/publish/<slug>,
+                           promoted into the repo only after checkListing() passes;
+                           then build.mjs + validate.mjs
 gitCommitPush(repo, …)     `git add -A -- <allowlist>` only:
                              public/listings/<slug>, scripts/curate/inbox, src/data/listings.json
                            (a staged path outside that list aborts the commit)
@@ -195,7 +206,9 @@ default, so only the ones you want to change need to be present.
 | `BONA_PAGE_READ_LONG_SIDE` | `1600` | long side of the page renders the AI reads (text-free PDFs) |
 | `BONA_LOCK_WAIT_MS` | `900000` | how long a job waits for `$BONA_DATA/intake.lock` |
 | `BONA_PY_CMD` | `uv run --with pymupdf python` | argv for the extractor; split on spaces, never shelled |
-| `BONA_MAX_BROCHURE_MB` | `8` | largest PDF `#brochure` will commit into the repo |
+| `BONA_BROCHURE_PY_CMD` | `uv run --with pymupdf --with segno --with fonttools --with brotli python` | argv for the brochure step (segno draws the QR, fontTools+brotli turn `public/fonts/*.woff2` into TTF) |
+| `BONA_BROCHURE_TIMEOUT_MS` | `600000` | how long `rebrand_pdf.py` may take |
+| `BONA_MAX_BROCHURE_MB` | `25` | largest **branded** PDF committed into the repo; over it the images are downsampled, and if it still does not fit the listing publishes without one |
 | `BONA_SEND_REPLIES` | `true` | set `false` to run completely silent |
 | `BONA_DEBUG` | — | any value adds debug logs and stack traces |
 
@@ -213,9 +226,20 @@ node services/intake/run-once.mjs ~/brochures/villa.pdf --no-git --repo ~/bona -
 # the real thing (commits and pushes, exactly like the daemon)
 node services/intake/run-once.mjs ~/brochures/villa.pdf
 
+# the brochure step on its own: rebrand a local PDF and print what went on the Bona pages
+node services/intake/rebrand-once.mjs ~/brochures/villa.pdf ~/bona-bot/scripts/curate/inbox/villa.json /tmp/out.pdf
+node services/intake/rebrand-once.mjs ~/brochures/villa.pdf ~/facts.json /tmp/out.pdf --max-mb 12 --json
+
 # unit tests — note the glob: node v24.19.0 on this box does not accept a bare directory
 node --test 'services/intake/test/*.test.mjs'
 ```
+
+`rebrand-once.mjs` takes either a full listing (`scripts/curate/inbox/<slug>.json`) or a bare
+facts object `{ id, titleEn, titleAr, place, priceEn, project, developer, url }`. It writes no
+state, takes no lock and never touches git, so it is safe to run while the daemon is up — it is
+the loop to use when changing anything in `rebrand_pdf.py`. Rasterise a page or two afterwards
+and look at them; `docs/qa/brochure/` holds the reference renders (portrait, 16:9 deck, and the
+709x510 half-spread the owner's Nuzul Khayala brochure opens on).
 
 Every run leaves its scratch directory behind (`--work`, else `$BONA_DATA/intake/manual/…`)
 containing `prompt.txt` (exactly what the model was asked), `ai.json` (exactly what it
@@ -236,7 +260,7 @@ so pointing `--repo` at a working checkout with uncommitted changes in it is saf
 | `scripts/curate/inbox/_index.json` | the `BONA-W###` counter |
 | `public/listings/<slug>/NN.jpg` | photo, max 1920 px, q82, EXIF stripped |
 | `public/listings/<slug>/NN-thumb.webp` | 640 px thumbnail |
-| `public/listings/<slug>/brochure.pdf` | only with `#brochure`, and only up to `BONA_MAX_BROCHURE_MB` |
+| `public/listings/<slug>/brochure.pdf` | the Bona-branded brochure — by default, unless `#nobrochure`, and only up to `BONA_MAX_BROCHURE_MB` |
 | `$BONA_DATA/intake/<date>/<msgid>.pdf` | the downloaded PDF (outside the repo) |
 | `$BONA_DATA/intake/<date>/<msgid>/` | the run's work dir: `prompt.txt`, `ai.json`, `images/`, `pages/`, `sheets/`, `publish/<slug>/` (staging), `claude-settings.json` (the model's confinement) |
 | `$BONA_DATA/intake-state.json` | seen message ids, greeted groups, published PDF hashes, job records |
@@ -258,6 +282,8 @@ live-list filter; intake listings are exempt from that filter because they are o
 | `the publishing clone has N uncommitted path(s)` | something other than the intake wrote to `~/bona-bot` | look at `git status` there yourself; the intake refuses to throw away work that is not its own |
 | `another intake job holds intake.lock` | a `run-once.mjs` is still running | wait, or remove the file if its pid is gone |
 | `⚠️ … spawn claude ENOENT` | the unit's PATH is missing `~/.local/bin` | fix `PATH=` in the unit, `daemon-reload`, restart |
+| listing live but no *Download brochure* button | the branded PDF was over `BONA_MAX_BROCHURE_MB` even after downsampling, or `rebrand_pdf.py` failed | the reply says which; `_intake.warnings` holds `brochure-too-large` / `brochure-failed`. Raise the cap and send `brochure <id>`, or leave it — the listing itself is fine |
+| `✋ the original PDF for BONA-W00x is not in …` | `brochure <id>` after the download was cleaned out of `$BONA_DATA` | send the brochure again |
 | bot silent, no greeting | no group subject matches `BONA_WA_GROUP_MATCH`, or the group is not the owner's | rename the group; if the journal says `group.rejected_not_owned`, the group was created by somebody else — put its jid in `BONA_WA_GROUP_JIDS` if that is really what you want |
 | bot silent on a PDF | the message was not authored by the owner, or was already seen | check `journalctl` for `msg.ignored_not_owner` |
 | `Already published: <url>` | the same PDF bytes were sent twice | use `remove <id>` first if you meant to replace it |
@@ -274,12 +300,15 @@ services/intake/
   index.mjs             the daemon: group discovery, polling, single-worker queue
   run-once.mjs          the same pipeline on one local PDF, no WhatsApp
   extract_pdf.py        PyMuPDF: page text + candidate photos (run via `uv run --with pymupdf`)
+  rebrand_pdf.py        PyMuPDF + segno: the Bona cover, the footer strip, the Enquire page, the shrink
+  rebrand-once.mjs      the brochure step alone, on one local PDF — the loop for changing rebrand_pdf.py
   lib/
     env.mjs             config; reads ~/.secrets/*.env inside Node, never through a shell
     log.mjs             one JSON line per event, with secret redaction
     evolution.mjs       Evolution API client (+ the verified response shapes, in comments)
     classify.mjs        the default-deny gate
     pdf.mjs             wrapper around extract_pdf.py
+    brochure.mjs        wrapper around rebrand_pdf.py: the facts it prints, where the file lands
     contact-sheet.mjs   labelled sheets of the candidates, for the model to look at
     prompt.md           the prompt template (the contract the model must answer with)
     claude.mjs          the `claude -p` runner, contract validation, repair retry
