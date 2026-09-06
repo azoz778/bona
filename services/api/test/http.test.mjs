@@ -658,6 +658,114 @@ test('an unknown POST path is 404 and does not spend the chat bucket', async () 
   });
 });
 
+/* ---------------- events ---------------- */
+
+const ANON = '9f1c'.repeat(8);
+const touch = (over = {}) => ({
+  ts: Date.now() - 10_000, landing: '/properties/bona-w003/', referrer: 'https://l.instagram.com/',
+  utm_source: 'meta', utm_medium: 'paid', utm_campaign: 'villas_sep', utm_content: 'reels', utm_term: null, utm_id: '1203',
+  click_ids: { fbclid: 'IwAR1' }, ...over,
+});
+const sampleEvent = (over = {}) => ({
+  v: 1, event_id: `mf3k2a1b-${Math.random().toString(16).slice(2, 10)}`, ts: Date.now(), event: 'whatsapp_click',
+  anon_id: ANON, session_id: 'mf3k2a-7b1c', ref: 'K7Q2XR', page: '/properties/bona-w003/', locale: 'en',
+  listing_id: 'BONA-W003', props: { cta: 'listing_whatsapp', href: 'https://wa.me/966593296933' },
+  attr: { first: touch(), last: touch(), fbp: 'fb.1.1.2', fbc: 'fb.1.3.IwAR1', ga: { client_id: '123.456', session_id: '1757149000' }, scid: null, ttp: null },
+  consent: { analytics: true, ads: true },
+  ...over,
+});
+/** The site posts events as text/plain so there is no preflight and keepalive works. */
+const postEvent = (call, body, init = {}) => call('/v1/events', {
+  method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body),
+  ...init, headers: { 'Content-Type': 'text/plain', ...(init.headers ?? {}) },
+});
+
+test('POST /v1/events takes a text/plain event and answers an empty 204 with CORS', async () => {
+  await withServer({}, async ({ call, app }) => {
+    const ev = sampleEvent();
+    const res = await postEvent(call, ev);
+    assert.equal(res.status, 204);
+    assert.equal(res.headers.get('access-control-allow-origin'), 'https://bona.azoz.uk');
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+    assert.equal(await res.text(), '');
+    const row = app.db.getEvent(ev.event_id);
+    assert.equal(row.name, 'whatsapp_click');
+    assert.equal(row.listing_id, 'BONA-W003');
+    assert.equal(row.session_id, 'mf3k2a-7b1c');
+    assert.equal(app.db.getSession('mf3k2a-7b1c').ref, 'K7Q2XR');
+    assert.deepEqual(app.db.dueFanout(Date.now() + 1000).map((f) => f.dest), ['meta']);
+    // JSON is fine too, and a retry of the same event_id is a quiet 204.
+    assert.equal((await call('/v1/events', { method: 'POST', body: JSON.stringify(ev) })).status, 204);
+    assert.equal(app.db.eventsForSession('mf3k2a-7b1c').length, 1);
+  });
+});
+
+test('an event the taxonomy does not know, or that only the server may write, is 400 bad_event', async () => {
+  await withServer({}, async ({ call, app }) => {
+    const unknown = await postEvent(call, sampleEvent({ event: 'purchase' }));
+    assert.equal(unknown.status, 400);
+    assert.deepEqual(await unknown.json(), { error: 'bad_event', reason: 'event' });
+    const server = await postEvent(call, sampleEvent({ event: 'lead_created' }));
+    assert.equal(server.status, 400);
+    assert.deepEqual(await server.json(), { error: 'bad_event', reason: 'server_only' });
+    assert.equal((await postEvent(call, sampleEvent({ anon_id: 'nope' }))).status, 400);
+    assert.equal((await postEvent(call, '{not json')).status, 400);
+    assert.equal((await postEvent(call, '[1,2]')).status, 400);
+    assert.equal(app.db.eventsForSession('mf3k2a-7b1c').length, 0, 'nothing was stored');
+    assert.equal(app.db.getSession('mf3k2a-7b1c'), null);
+  });
+});
+
+test('events from a foreign origin are refused, GET is 405, and 9 KB is 413', async () => {
+  await withServer({}, async ({ call }) => {
+    const foreign = await postEvent(call, sampleEvent(), { headers: { Origin: 'https://evil.example' } });
+    assert.equal(foreign.status, 403);
+    assert.deepEqual(await foreign.json(), { error: 'forbidden_origin' });
+    assert.equal((await call('/v1/events')).status, 405);
+    const big = await postEvent(call, sampleEvent({ props: { pad: 'x'.repeat(9 * 1024) } }));
+    assert.equal(big.status, 413);
+  });
+});
+
+test('events carry the server\'s view of the visitor: IP, user agent and Cloudflare country', async () => {
+  await withServer({ config: { trustedProxies: [] } }, async ({ call, app }) => {
+    const ev = sampleEvent({ event: 'page_view' });
+    // The test socket is loopback — exactly where cloudflared sits in production — so
+    // the CF-* headers are believed here, and would not be from any other peer.
+    const res = await postEvent(call, ev, { headers: { 'CF-Connecting-IP': '203.0.113.9', 'CF-IPCountry': 'sa', 'User-Agent': 'Mozilla/5.0 (test)' } });
+    assert.equal(res.status, 204);
+    const s = app.db.getSession('mf3k2a-7b1c');
+    assert.equal(s.ip, '203.0.113.9');
+    assert.equal(s.ua, 'Mozilla/5.0 (test)');
+    assert.equal(s.country, 'SA');
+    assert.equal(s.pages, 1);
+    const row = app.db.getEvent(ev.event_id);
+    assert.equal(row.ip, '203.0.113.9');
+    assert.equal(row.country, 'SA');
+  });
+});
+
+test('the events bucket is its own: wide, and separate from chat', async () => {
+  await withServer({ config: { eventsRatePerMin: 2, chatRatePerMin: 1 } }, async ({ call }) => {
+    assert.equal((await postEvent(call, sampleEvent())).status, 204);
+    assert.equal((await postEvent(call, sampleEvent())).status, 204);
+    const blocked = await postEvent(call, sampleEvent());
+    assert.equal(blocked.status, 429);
+    assert.ok(Number(blocked.headers.get('retry-after')) >= 1);
+    assert.equal((await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale: 'en' }) })).status, 200, 'chat is untouched');
+  });
+});
+
+test('events cost the day nothing and /health reports the store', async () => {
+  await withServer({}, async ({ call }) => {
+    for (let i = 0; i < 3; i += 1) assert.equal((await postEvent(call, sampleEvent())).status, 204);
+    const body = await (await call('/health')).json();
+    assert.equal(body.db, 'ok');
+    assert.equal(body.budget.chats, 0);
+    assert.equal(body.budget.calls, 0);
+  });
+});
+
 /* ---------------- inventory + upstream failures ---------------- */
 
 test('an empty portfolio is reported as unhealthy, not served quietly', async () => {

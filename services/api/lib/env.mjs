@@ -5,6 +5,8 @@
  *   ~/.secrets/retell.env         RETELL_API_KEY, TOOLTOKEN, …
  *   ~/.secrets/evolution-api.env  EVOLUTION_API_URL, EVOLUTION_API_KEY, …
  *   ~/.secrets/bona-services.env  BONA_* configuration for the intake + concierge
+ *   ~/.secrets/bona-marketing.env META_PIXEL_ID, META_CAPI_TOKEN, META_TEST_EVENT_CODE,
+ *                                 GA4_MEASUREMENT_ID, GA4_API_SECRET, SNAP_PIXEL_ID, SNAP_CAPI_TOKEN
  *
  * Values are never logged. `process.env` always wins over a file so systemd
  * (`EnvironmentFile=`) and one-off overrides stay authoritative.
@@ -50,13 +52,14 @@ export function secretsDir(home = os.homedir()) {
   return path.join(home, '.secrets');
 }
 
-/** The three env files the services read, lowest precedence first. */
+/** The four env files the services read, lowest precedence first. */
 export function defaultEnvFiles(home = os.homedir()) {
   const dir = secretsDir(home);
   return [
     path.join(dir, 'retell.env'),
     path.join(dir, 'evolution-api.env'),
     path.join(dir, 'bona-services.env'),
+    path.join(dir, 'bona-marketing.env'),
   ];
 }
 

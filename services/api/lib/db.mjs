@@ -181,7 +181,11 @@ export function openDb(file = ':memory:') {
     return s;
   };
 
+  let txDepth = 0;
+  /** Run `fn` inside a transaction. Re-entrant: an inner call joins the outer one. */
   function transaction(fn) {
+    if (txDepth > 0) return fn();
+    txDepth += 1;
     db.exec('BEGIN');
     try {
       const out = fn();
@@ -190,6 +194,8 @@ export function openDb(file = ':memory:') {
     } catch (err) {
       try { db.exec('ROLLBACK'); } catch { /* already rolled back */ }
       throw err;
+    } finally {
+      txDepth -= 1;
     }
   }
 
