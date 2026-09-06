@@ -1,11 +1,12 @@
 {
-  "nextSeq": 7,
+  "nextSeq": 8,
   "listings": {
     "kian-residence-apartments-al-nahda": "BONA-W001",
     "nuzul-khayala-residences-north-jeddah": "BONA-W002",
     "al-wareef-townhouse-jeddah": "BONA-W003",
     "wharf-destination-villas-jeddah": "BONA-W004",
     "rihab-villas-wajhat-al-warf": "BONA-W005",
-    "al-warf-district-jeddah": "BONA-W006"
+    "al-warf-district-jeddah": "BONA-W006",
+    "the-knightsbridge-villas-meydan-district-11": "BONA-W007"
   }
 }
