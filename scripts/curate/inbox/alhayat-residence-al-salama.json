@@ -1,0 +1,201 @@
+{
+  "id": "BONA-W010",
+  "slug": "alhayat-residence-al-salama",
+  "sourceRef": "WA-20260906-AC88DA",
+  "status": "available",
+  "category": "buy",
+  "type": "apartment",
+  "kind": "apartment",
+  "featured": false,
+  "title": {
+    "en": "Alhayat Residence, Al-Salama",
+    "ar": "الحياة ريزيدنس - السلامة"
+  },
+  "location": {
+    "district": {
+      "en": "Al-Salama",
+      "ar": "السلامة"
+    },
+    "city": {
+      "en": "Jeddah",
+      "ar": "جدة"
+    },
+    "country": {
+      "en": "Saudi Arabia",
+      "ar": "السعودية"
+    },
+    "countryCode": "SA"
+  },
+  "price": {
+    "amount": 950000,
+    "currency": "SAR",
+    "from": false,
+    "period": null,
+    "onRequest": false
+  },
+  "specs": {
+    "beds": 4,
+    "baths": 4,
+    "areaSqm": 180,
+    "plotSqm": null,
+    "yearBuilt": null,
+    "floors": null
+  },
+  "images": [
+    {
+      "src": "/listings/alhayat-residence-al-salama/01.jpg",
+      "thumb": "/listings/alhayat-residence-al-salama/01-thumb.webp",
+      "alt": {
+        "en": "Exterior — Alhayat Residence, Al-Salama",
+        "ar": "الواجهة الخارجية — الحياة ريزيدنس - السلامة"
+      }
+    },
+    {
+      "src": "/listings/alhayat-residence-al-salama/02.jpg",
+      "thumb": "/listings/alhayat-residence-al-salama/02-thumb.webp",
+      "alt": {
+        "en": "Entrance — Alhayat Residence, Al-Salama",
+        "ar": "المدخل — الحياة ريزيدنس - السلامة"
+      }
+    },
+    {
+      "src": "/listings/alhayat-residence-al-salama/03.jpg",
+      "thumb": "/listings/alhayat-residence-al-salama/03-thumb.webp",
+      "alt": {
+        "en": "Living room — Alhayat Residence, Al-Salama",
+        "ar": "غرفة المعيشة — الحياة ريزيدنس - السلامة"
+      }
+    },
+    {
+      "src": "/listings/alhayat-residence-al-salama/04.jpg",
+      "thumb": "/listings/alhayat-residence-al-salama/04-thumb.webp",
+      "alt": {
+        "en": "Master suite — Alhayat Residence, Al-Salama",
+        "ar": "الجناح الرئيسي — الحياة ريزيدنس - السلامة"
+      }
+    },
+    {
+      "src": "/listings/alhayat-residence-al-salama/05.jpg",
+      "thumb": "/listings/alhayat-residence-al-salama/05-thumb.webp",
+      "alt": {
+        "en": "Bedroom — Alhayat Residence, Al-Salama",
+        "ar": "غرفة النوم — الحياة ريزيدنس - السلامة"
+      }
+    },
+    {
+      "src": "/listings/alhayat-residence-al-salama/06.jpg",
+      "thumb": "/listings/alhayat-residence-al-salama/06-thumb.webp",
+      "alt": {
+        "en": "Great hall — Alhayat Residence, Al-Salama",
+        "ar": "القاعة الكبرى — الحياة ريزيدنس - السلامة"
+      }
+    },
+    {
+      "src": "/listings/alhayat-residence-al-salama/07.jpg",
+      "thumb": "/listings/alhayat-residence-al-salama/07-thumb.webp",
+      "alt": {
+        "en": "Bedroom — Alhayat Residence, Al-Salama",
+        "ar": "غرفة النوم — الحياة ريزيدنس - السلامة"
+      }
+    },
+    {
+      "src": "/listings/alhayat-residence-al-salama/08.jpg",
+      "thumb": "/listings/alhayat-residence-al-salama/08-thumb.webp",
+      "alt": {
+        "en": "Bathroom — Alhayat Residence, Al-Salama",
+        "ar": "الحمام — الحياة ريزيدنس - السلامة"
+      }
+    }
+  ],
+  "description": {
+    "en": "Alhayat Residence sits in Al-Salama, Jeddah, close to Prince Sultan Street, five minutes from the Corniche and ten minutes from the airport. Arab Open University, Jeddah University and CBA University are all nearby, along with the Al Yamama walkway.\n\nThis ready apartment covers 180 square metres, arranged as four bedrooms and four bathrooms around a large living hall, with an open American-style kitchen. A maid's room, a driver's room and dedicated private parking complete the layout.\n\nThe building offers hotel-style entrances, high ceilings and wide windows, with smart entry and camera coverage in the common areas, and a landscaped rooftop. The structure carries a 25-year warranty, with further coverage on fixtures, plumbing, sanitary ware, the lift and the electrical wiring.",
+    "ar": "تقع الحياة ريزيدنس في حي السلامة بجدة، بالقرب من شارع الأمير سلطان، وتبعد خمس دقائق عن الكورنيش وعشر دقائق عن المطار. كما تقترب من الجامعة العربية المفتوحة وجامعة جدة وجامعة CBA، إضافة إلى ممشى اليمامة.\n\nتمتد هذه الشقة الجاهزة على مساحة 180 مترًا مربعًا، وتضم أربع غرف وأربع دورات مياه حول صالة كبيرة، مع مطبخ أمريكي مفتوح. وتكتمل المساحة بغرفة خادمة وغرفة سائق وموقف خاص.\n\nيوفر المبنى مداخل بطراز فندقي وأسقفًا عالية ونوافذ واسعة، مع نظام دخول ذكي وكاميرات مراقبة في المناطق المشتركة، ولاند سكيب علوي على السطح. ويحمل الهيكل الإنشائي ضمانًا لمدة 25 سنة، مع ضمانات إضافية على الأفياش والسباكة والأدوات الصحية والمصعد والأسلاك الكهربائية."
+  },
+  "highlights": {
+    "en": [
+      "180 sqm layout",
+      "4 bedrooms, 4 bathrooms",
+      "Maid's and driver's rooms",
+      "Private covered parking",
+      "5 minutes to the Corniche",
+      "25-year structural warranty"
+    ],
+    "ar": [
+      "مساحة 180 م²",
+      "4 غرف و4 دورات مياه",
+      "غرفة خادمة وغرفة سائق",
+      "موقف خاص مغطى",
+      "5 دقائق من الكورنيش",
+      "ضمان إنشائي 25 سنة"
+    ]
+  },
+  "virtualTourUrl": null,
+  "brochureUrl": "https://bona.azoz.uk/listings/alhayat-residence-al-salama/brochure.pdf",
+  "project": {
+    "name": {
+      "en": "Alhayat Residence",
+      "ar": "الحياة ريزيدنس"
+    },
+    "developer": {
+      "en": "Alhayat Residence",
+      "ar": "الحياة ريزيدنس"
+    }
+  },
+  "unit": null,
+  "map": null,
+  "listedAt": "2026-09-06",
+  "hidden": false,
+  "_intake": {
+    "source": "whatsapp",
+    "pdfSha256": "ae9163954042e5d440744e2bc6f44492de9d92e9612cea77582f39e8101df73d",
+    "model": "sonnet",
+    "confidence": 0.75,
+    "warnings": [
+      "model-flagged"
+    ],
+    "images": [
+      {
+        "n": 1,
+        "candidate": 4,
+        "room": "exterior"
+      },
+      {
+        "n": 2,
+        "candidate": 6,
+        "room": "entrance"
+      },
+      {
+        "n": 3,
+        "candidate": 7,
+        "room": "living"
+      },
+      {
+        "n": 4,
+        "candidate": 12,
+        "room": "master"
+      },
+      {
+        "n": 5,
+        "candidate": 8,
+        "room": "bedroom"
+      },
+      {
+        "n": 6,
+        "candidate": 11,
+        "room": "hall"
+      },
+      {
+        "n": 7,
+        "candidate": 13,
+        "room": "bedroom"
+      },
+      {
+        "n": 8,
+        "candidate": 14,
+        "room": "bathroom"
+      }
+    ],
+    "createdAt": "2026-09-06T11:42:06.402Z",
+    "site": "https://bona.azoz.uk"
+  }
+}
