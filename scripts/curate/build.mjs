@@ -125,6 +125,16 @@ if (fs.existsSync(INBOX)) {
         }
       }
     }
+    // The same rule for walkthrough clips: `{ src, poster }`, both site-local files that have
+    // to exist, or the page renders a player pointing at a 404.
+    for (const [i, v] of (clean.videos ?? []).entries()) {
+      for (const field of ['src', 'poster']) {
+        const p = v?.[field];
+        if (typeof p === 'string' && p.startsWith('/') && !fs.existsSync(path.join(ROOT, 'public', p))) {
+          throw new Error(`inbox/${name}: videos[${i}].${field} missing: public${p}`);
+        }
+      }
+    }
     inbox.push(clean);
   }
 }
@@ -150,13 +160,22 @@ for (const l of published) {
 console.log(`Map pins: ${exactPins} exact, ${districtPins} district-level, ${noPin} without a pin`);
 
 // Every site-local image must actually exist in public/ — src AND thumb, for the curated
-// set as well as the intake set. A missing file is a broken page, so it fails the build.
+// set as well as the intake set, plus every video and its poster. A missing file is a broken
+// page, so it fails the build.
 for (const l of published) {
   for (const [i, im] of (l.images ?? []).entries()) {
     for (const field of ['src', 'thumb']) {
       const v = im[field];
       if (typeof v === 'string' && v.startsWith('/') && !fs.existsSync(path.join(ROOT, 'public', v))) {
         throw new Error(`${l.id} (${l.slug}): images[${i}].${field} missing: public${v}`);
+      }
+    }
+  }
+  for (const [i, vid] of (l.videos ?? []).entries()) {
+    for (const field of ['src', 'poster']) {
+      const v = vid?.[field];
+      if (typeof v === 'string' && v.startsWith('/') && !fs.existsSync(path.join(ROOT, 'public', v))) {
+        throw new Error(`${l.id} (${l.slug}): videos[${i}].${field} missing: public${v}`);
       }
     }
   }

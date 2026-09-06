@@ -88,10 +88,25 @@ export function loadConfig(overrides = {}) {
     site: (raw.BONA_SITE || 'https://bona.azoz.uk').replace(/\/+$/, ''),
     maxPdfMb: num(raw.BONA_MAX_PDF_MB, 150), // real developer brochures are 50–80 MB (owner's files 2026-09-06)
     maxPdfPages: num(raw.BONA_MAX_PDF_PAGES, 120),
-    // A walkthrough video is stored exactly as received (see lib/video.mjs) — no downsampling
-    // like the branded brochure gets, so this is the only thing standing between a long clip
-    // and a bloated git repo.
-    maxVideoMb: num(raw.BONA_MAX_VIDEO_MB, 60),
+    // The size of the video that is COMMITTED, after ffmpeg has re-encoded it (H.264/AAC,
+    // <=1080p, faststart — see lib/video.mjs). The clip is transcoded down once more if the
+    // first pass misses it, and skipped rather than committed if it still does not fit: a
+    // raw phone clip goes straight into git history and can never be taken back out.
+    maxVideoMb: num(raw.BONA_MAX_VIDEO_MB, 25),
+    // What may be DOWNLOADED. Bigger than the stored cap because the transcode is what
+    // brings the size down; this only exists so a 2 GB clip cannot fill the disk.
+    maxVideoInputMb: num(raw.BONA_MAX_VIDEO_INPUT_MB, 200),
+    // ffmpeg/ffprobe. The static build on this box, not a system package: the unit's PATH
+    // carries ~/.local/bin, and both are spawned with an argv array, never through a shell.
+    ffmpegBin: raw.BONA_FFMPEG_BIN || path.join(HOME, '.local', 'bin', 'ffmpeg'),
+    ffprobeBin: raw.BONA_FFPROBE_BIN || path.join(HOME, '.local', 'bin', 'ffprobe'),
+    ffmpegTimeoutMs: num(raw.BONA_FFMPEG_TIMEOUT_MS, 600000),
+    // The content matcher (lib/video-match.mjs): how sure the model has to be before a
+    // captionless clip with no brochure near it is attached to a listing by what is IN it,
+    // how many frames it looks at, and how far back the candidate list goes.
+    videoMatchConfidence: num(raw.BONA_VIDEO_MATCH_CONFIDENCE, 0.75),
+    videoMatchFrames: num(raw.BONA_VIDEO_MATCH_FRAMES, 4),
+    videoMatchListings: num(raw.BONA_VIDEO_MATCH_LISTINGS, 15),
     // A captionless clip is matched to the brochure sent closest to it in time (lib/video.mjs
     // pickListingForVideo): how far apart they may be, and how long the clip waits for that
     // brochure to finish publishing before it gives up and asks for an id.

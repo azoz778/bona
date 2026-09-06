@@ -54,20 +54,37 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
    help                      the list above
    ```
 
-5. Got a walkthrough clip? Send the **video** into the group right after its brochure — no
-   caption needed. The clip is matched to the brochure sent closest to it in time (within
-   `BONA_VIDEO_WINDOW_MIN`, 15 minutes; `lib/video.mjs` `pickListingForVideo`) and added to
-   that listing, up to 4 per listing, no re-publish command needed. If the brochure is still
-   being published — or has not arrived yet — the clip is parked (one line back: "Got the
-   video — it will be added once … is published") and attached the moment the listing exists;
-   if two different listings were published from brochures equally close, the bot asks which
-   one instead of guessing. An id in the caption always wins — `video BONA-W001`, or just
-   `BONA-W001` — and is the way to add a clip to a listing published long ago. A clip with no
-   id and no brochure near it gets one line back asking; it is never silently dropped (before
-   2026-09-06 it was — see `unsee.mjs` for replaying clips an older daemon swallowed). The
-   file is stored exactly as WhatsApp sent it (no transcoding, no thumbnail — this service has
-   no video library), so `BONA_MAX_VIDEO_MB` is the only thing capping it. The site renders
-   `videos[]` on the listing page (`ListingPage.astro`) as plain `<video>` elements.
+5. Got a walkthrough clip? Send the **video** into the group — no caption needed. Working out
+   which property it belongs to is the bot's job, not the owner's; three answers are tried,
+   cheapest first:
+
+   1. **an id in the caption** — `video BONA-W001`, or just `BONA-W001`. Always wins, and it
+      is the way to add a clip to a listing published long ago.
+   2. **the burst rule** — the brochure sent closest to the clip in time, within
+      `BONA_VIDEO_WINDOW_MIN` (15 minutes; `lib/video.mjs` `pickListingForVideo`). The owner
+      drops the PDF and its clips in one go, so this is almost always the answer. If the
+      brochure is still being published — or has not arrived yet — the clip is parked (one
+      line back: "Got the video — it will be added once … is published") and attached the
+      moment the listing exists; if two different listings were published from brochures
+      equally close, the bot asks which one instead of guessing.
+   3. **the content matcher** (`lib/video-match.mjs`), for a clip with no id and no brochure
+      anywhere near it: ffmpeg pulls 3–4 evenly spaced frames out of the clip and **one**
+      extra `claude -p` — under the same confinement as everything else — looks at them
+      beside the hero photos of the last ~15 intake listings, plus anything legible in the
+      frame (a hoarding, a gate, a project name). It attaches only at
+      `BONA_VIDEO_MATCH_CONFIDENCE` (0.75) or better; below that the group gets **one** line
+      saying it could not tell which property this is, naming what it compared against. It
+      never guesses, and it costs at most one call per clip (`contentTried` on the job).
+
+   What is stored is **not** the file WhatsApp sent. ffmpeg re-encodes it to H.264 + AAC in
+   MP4, capped at 1080p (long side ≤ 1920, short side ≤ 1080, aspect kept), with
+   `-movflags +faststart` so the browser can start playing before the file has finished
+   arriving, and cuts a poster frame out of it (`v-NN-poster.jpg`, 1600 px via sharp). If the
+   result misses `BONA_MAX_VIDEO_MB` (25 MB) it is re-encoded once at 720p/CRF 31, and if it
+   still misses, the clip is refused with a line asking for a shorter one — a raw phone clip
+   committed into git history cannot be taken back out. Up to 4 clips per listing. The site
+   renders `videos[]` on the listing page (`ListingPage.astro`) as `<video>` elements with
+   that poster.
 
 Anything else in the group is ignored, silently.
 
@@ -243,7 +260,13 @@ default, so only the ones you want to change need to be present.
 | `BONA_MIN_IMAGES` / `BONA_MAX_IMAGES` | `4` / `10` | publishable photo count |
 | `BONA_MIN_IMAGE_SIDE` | `700` | smallest long side of a candidate photo |
 | `BONA_MAX_PDF_MB` / `BONA_MAX_PDF_PAGES` | `150` / `120` | input limits (developer brochures run 50–80 MB) |
-| `BONA_MAX_VIDEO_MB` | `60` | largest walkthrough video accepted; stored exactly as received (no downsampling like the brochure gets — see `lib/video.mjs`) |
+| `BONA_MAX_VIDEO_MB` | `25` | largest **stored** clip, after ffmpeg has re-encoded it; over it the clip is re-encoded smaller once and then refused (see `lib/video.mjs`) |
+| `BONA_MAX_VIDEO_INPUT_MB` | `200` | largest clip that may be **downloaded** at all |
+| `BONA_FFMPEG_BIN` / `BONA_FFPROBE_BIN` | `~/.local/bin/ffmpeg` / `…/ffprobe` | the static builds the transcode, the poster and the matcher's frames use; spawned with an argv array, never a shell |
+| `BONA_FFMPEG_TIMEOUT_MS` | `600000` | how long one ffmpeg may take |
+| `BONA_VIDEO_MATCH_CONFIDENCE` | `0.75` | how sure the content matcher must be before it attaches a captionless clip |
+| `BONA_VIDEO_MATCH_FRAMES` | `4` | frames pulled out of the clip for it to look at |
+| `BONA_VIDEO_MATCH_LISTINGS` | `15` | how many recent intake listings the clip is compared against |
 | `BONA_PAGE_READ_LONG_SIDE` | `1600` | long side of the page renders the AI reads (text-free PDFs) |
 | `BONA_LOCK_WAIT_MS` | `900000` | how long a job waits for `$BONA_DATA/intake.lock` |
 | `BONA_PY_CMD` | `uv run --with pymupdf python` | argv for the extractor; split on spaces, never shelled |
@@ -273,6 +296,18 @@ node services/intake/rebrand-once.mjs ~/brochures/villa.pdf ~/facts.json /tmp/ou
 
 # unit tests — note the glob: node v24.19.0 on this box does not accept a bare directory
 node --test 'services/intake/test/*.test.mjs'
+
+# the video path on one local clip: which listing does it think this is, and what would be
+# committed? Writes nothing to the repo and takes no lock.
+node --input-type=module -e '
+  const { loadConfig } = await import("./services/intake/lib/env.mjs");
+  const { candidateListings, matchVideoToListing } = await import("./services/intake/lib/video-match.mjs");
+  const { prepareVideo } = await import("./services/intake/lib/video.mjs");
+  const cfg = loadConfig({ repo: process.env.PWD });
+  const clip = process.argv[1], work = "/tmp/bona-clip";
+  console.log(await matchVideoToListing({ videoPath: clip, workDir: work + "/match", candidates: candidateListings(cfg.repo), cfg }));
+  console.log(await prepareVideo({ input: clip, outDir: work + "/media", cfg }));
+' ~/clips/walkthrough.mp4
 ```
 
 `rebrand-once.mjs` takes either a full listing (`scripts/curate/inbox/<slug>.json`) or a bare
@@ -311,8 +346,13 @@ so pointing `--repo` at a working checkout with uncommitted changes in it is saf
 | `scripts/curate/inbox/_index.json` | the `BONA-W###` counter |
 | `public/listings/<slug>/NN.jpg` | photo, max 1920 px, q82, EXIF stripped |
 | `public/listings/<slug>/NN-thumb.webp` | 640 px thumbnail |
+| `public/listings/<slug>/v-NN.mp4` | a walkthrough clip, re-encoded (H.264/AAC, ≤1080p, faststart, ≤ `BONA_MAX_VIDEO_MB`) |
+| `public/listings/<slug>/v-NN-poster.jpg` | its poster frame, 1600 px |
 | `public/listings/<slug>/brochure.pdf` | the Bona-branded brochure — by default, unless `#nobrochure`, and only up to `BONA_MAX_BROCHURE_MB` |
 | `$BONA_DATA/intake/<date>/<msgid>.pdf` | the downloaded PDF (outside the repo) |
+| `$BONA_DATA/intake/<date>/<msgid>.mp4` | the downloaded clip, exactly as WhatsApp sent it (kept for a replay; never committed) |
+| `$BONA_DATA/intake/<date>/<msgid>-video/` | the transcode: `clip.mp4` (deleted once it is in the repo) and `poster.jpg` |
+| `$BONA_DATA/intake/<date>/<msgid>-match/` | the content matcher: `frames/`, `listings/` (the candidates' thumbnails, copied in so the confined model can read them), `sheets/`, `prompt.txt`, `match.json` |
 | `$BONA_DATA/intake/<date>/<msgid>/` | the run's work dir: `prompt.txt`, `ai.json`, `images/`, `pages/`, `sheets/`, `regions/` (only when photo regions were cropped), `publish/<slug>/` (staging), `claude-settings.json` (the model's confinement) |
 | `$BONA_DATA/intake-state.json` | seen message ids, greeted groups, published PDF hashes, job records |
 | `$BONA_DATA/intake.lock` | the publish lock (daemon + run-once) |
@@ -336,11 +376,14 @@ live-list filter; intake listings are exempt from that filter because they are o
 | `⚠️ … spawn claude ENOENT` | the unit's PATH is missing `~/.local/bin` | fix `PATH=` in the unit, `daemon-reload`, restart |
 | listing live but no *Download brochure* button | the branded PDF was over `BONA_MAX_BROCHURE_MB` even after downsampling, or `rebrand_pdf.py` failed | the reply says which; `_intake.warnings` holds `brochure-too-large` / `brochure-failed`. Raise the cap and send `brochure <id>`, or leave it — the listing itself is fine |
 | `✋ the original PDF for BONA-W00x is not in …` | `brochure <id>` after the download was cleaned out of `$BONA_DATA` | send the brochure again |
-| `✋ Which listing is this video for? …` | a video with no `BONA-W###` in its caption and no brochure within `BONA_VIDEO_WINDOW_MIN` of it (or the nearest brochure was rejected / never finished within `BONA_VIDEO_WAIT_MIN`) | send it again right after the brochure, or captioned `video BONA-W001` |
+| `✋ Which listing is this video for? …` | a video with no `BONA-W###` in its caption and no brochure within `BONA_VIDEO_WINDOW_MIN` of it (or the nearest brochure was rejected / never finished within `BONA_VIDEO_WAIT_MIN`), and there was nothing published to compare it against | send it again right after the brochure, or captioned `video BONA-W001` |
+| `✋ I watched the clip and still cannot tell which property it is …` | the content matcher ran and came back under `BONA_VIDEO_MATCH_CONFIDENCE` | caption it with the id. `video.content_match` in the journal says what it saw and how sure it was; the frames, the contact sheets and `match.json` are in `<msgid>-match/` |
 | `✋ Two brochures were sent just as close to this video …` | two different listings were published from brochures within 60 s of each other around the clip | send it again captioned with the id you mean |
 | `🎬 Got the video — it will be added once … is published` | the clip landed while its brochure was still in the pipeline (or before the brochure arrived at all); it is parked in the state file (`waitSince`, plus `waitingFor` when a specific brochure is mid-publish) and requeued once that brochure answers, a new brochure arrives, or `BONA_VIDEO_WAIT_MIN` runs out | nothing — if the brochure ends up rejected or never comes, the clip comes back as the "Which listing" line |
 | a clip sent before 2026-09-06 never appeared | the old daemon had no video path and marked it seen | stop the unit, `node services/intake/unsee.mjs <messageId…>`, start the unit — it is handled as if just sent |
-| `✋ The video is N MB — the limit is …` | over `BONA_MAX_VIDEO_MB` (declared length or the actual download, whichever catches it) | trim the clip, or raise the limit |
+| `✋ The video is N MB — the limit is …` | over `BONA_MAX_VIDEO_INPUT_MB` (declared length or the actual download, whichever catches it) | trim the clip, or raise the limit |
+| `✋ Even re-encoded, the video is N MB …` | two ffmpeg passes and it still misses `BONA_MAX_VIDEO_MB` | send a shorter clip — nothing was committed |
+| `✋ That video could not be re-encoded …` | ffmpeg refused the file (not a video, or a container it cannot read) | the journal has the tail of ffmpeg's stderr; try re-sending it as MP4 |
 | bot silent, no greeting | no group subject matches `BONA_WA_GROUP_MATCH`, or the group is not the owner's | rename the group; if the journal says `group.rejected_not_owned`, the group was created by somebody else — put its jid in `BONA_WA_GROUP_JIDS` if that is really what you want |
 | bot silent on a PDF | the message was not authored by the owner, or was already seen | check `journalctl` for `msg.ignored_not_owner` |
 | `Already published: <url>` | the same PDF bytes were sent twice | use `remove <id>` first if you meant to replace it |
@@ -376,7 +419,10 @@ services/intake/
     lock.mjs            $BONA_DATA/intake.lock — one writer at a time
     shutdown.mjs        wait for the job in flight on SIGTERM
     images.mjs          sharp: NN.jpg + NN-thumb.webp
-    video.mjs           a walkthrough video, stored exactly as received: v-NN.mp4
+    video.mjs           ffmpeg: probe, frames, the H.264/AAC transcode, the poster; v-NN.mp4 + v-NN-poster.jpg
+                        (plus the burst rule that says which brochure a captionless clip came with)
+    video-match.mjs     "which property is this?" answered by LOOKING at the clip — frames +
+                        the recent listings' photos in one confined `claude -p`
     listing.mjs         slug/id allocation, listing assembly, local validation, the inbox
     edits.mjs           remove / hero / price / status / hidden / video
     messages.mjs        every reply the bot sends

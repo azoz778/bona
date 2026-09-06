@@ -107,6 +107,20 @@ export const videoAmbiguous = (ids) => `✋ Two brochures were sent just as clos
 /** The clip arrived while its brochure is still being published; it is parked, not lost. Sent once. */
 export const videoWaiting = (fileName) => `🎬 Got the video — it will be added once *${String(fileName || 'the brochure').replace(/\n/g, ' ')}* is published.`;
 export const videoTooLarge = (mb, limitMb) => `✋ The video is ${mb.toFixed(1)} MB — the limit is ${limitMb} MB.`;
+/**
+ * The clip was looked at frame by frame and still could not be placed. ONE line, naming the
+ * listings it was compared against so the owner can just reply with the right id — never a
+ * guess, because a walkthrough on the wrong property is worse than a question.
+ */
+export function videoUnsure(ids = []) {
+  const shown = ids.slice(0, 3);
+  const example = shown[0] || 'BONA-W001';
+  return `✋ I watched the clip and still cannot tell which property it is${shown.length ? ` — the closest I have are ${shown.join(', ')}` : ''}. Caption it with the id, e.g. \`video ${example}\`, or send it right after its brochure.`;
+}
+/** ffmpeg could not get it under the cap even at 720p — nothing was committed. */
+export const videoStillTooLarge = (mb, limitMb) => `✋ Even re-encoded, the video is ${mb.toFixed(1)} MB — the limit for what goes on the site is ${limitMb} MB. Send a shorter clip.`;
+/** ffmpeg refused the file outright (not a video, or a container it cannot read). */
+export const videoUnreadable = () => '✋ That video could not be re-encoded — the reason is in the journal. Try sending it again, or as MP4.';
 /** The identical clip is already on the listing (a re-send, or a replay after a crash) — nothing was committed. */
 export const videoAlreadyOn = (id, listing, video = {}) => `🎬 That video is already on *${listing.title.en}* (${id})${video.n ? ` as video ${video.n}` : ''} — nothing to add.`;
 
@@ -117,9 +131,13 @@ export const videoAlreadyOn = (id, listing, video = {}) => `🎬 That video is a
 export function videoAdded(id, listing, video = {}, { matched = null } = {}) {
   const mb = video.bytes ? ` (${(video.bytes / 1048576).toFixed(1)} MB)` : '';
   const n = listing.videos?.length ?? 1;
+  // How it was placed, in the owner's terms: the brochure it came with, or the clip itself.
+  const how = matched?.by === 'content' && matched.confidence != null
+    ? `Recognised from the video itself — ${Math.round(matched.confidence * 100)}% sure it is this property.`
+    : (matched?.deltaSec != null ? `Matched to the brochure sent within ${Math.round(matched.deltaSec)} s of it.` : null);
   return [
     `🎬 Video added${mb} — *${listing.title.en}* (${id})`,
-    matched?.deltaSec != null ? `Matched to the brochure sent within ${Math.round(matched.deltaSec)} s of it.` : null,
+    how,
     `${n} video${n === 1 ? '' : 's'} on this listing now.`,
     '',
     commandsFor(id),

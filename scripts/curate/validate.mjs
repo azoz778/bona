@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FORBIDDEN, HYPE, isLocalSrc, LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, LOCAL_LISTING_VIDEO } from './rules.mjs';
+import { FORBIDDEN, HYPE, isLocalSrc, LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, videoEntryProblems } from './rules.mjs';
 
 function matterportIdOf(value) {
   if (typeof value !== 'string') return null;
@@ -142,11 +142,10 @@ for (const l of data) {
   if (l.virtualTourUrl && !(l.virtualTourUrl.startsWith('https://') && matterportIdOf(l.virtualTourUrl))) err(id, `virtualTourUrl must be a full Matterport URL with a valid m= id: ${l.virtualTourUrl}`);
   // Optional, like project/unit/map. WhatsApp-intake listings always carry it (as []);
   // curated listings may not have it at all yet — both are fine, only the SHAPE is checked.
+  // Every entry is `{ src, poster }` (scripts/curate/rules.mjs::videoEntryProblems).
   if (l.videos !== undefined) {
     if (!Array.isArray(l.videos)) err(id, 'videos must be an array when present');
-    else for (const [i, v] of l.videos.entries()) {
-      if (!(LOCAL_LISTING_VIDEO.test(v) || /^https:\/\//.test(v))) err(id, `videos[${i}] is not /listings/<slug>/v-nn.mp4 or an https URL: ${v}`);
-    }
+    else for (const [i, v] of l.videos.entries()) for (const problem of videoEntryProblems(v, i)) err(id, problem);
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(l.listedAt ?? '') || Number.isNaN(Date.parse(l.listedAt))) err(id, `bad listedAt ${l.listedAt}`);
 

@@ -5,6 +5,7 @@
 // clips belong to the brochure sent 12 seconds before them, not to the ones sent two
 // minutes after. `pickListingForVideo` encodes exactly that: nearest PDF in time wins.
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -226,29 +227,54 @@ describe('state — video jobs and the message → listing lookup', () => {
 });
 
 describe('edits.addVideo — a replay or a re-send of the same clip is a no-op, never a second copy', () => {
-  it('returns `duplicate` for identical bytes and writes nothing', () => {
+  // The dedupe is on the STORED bytes — the transcoded file, not the download — because that
+  // is what a replay would write a second time. ffmpeg is deterministic for a given input and
+  // settings, so the same clip re-prepared hashes the same.
+  it('returns `duplicate` for identical stored bytes and writes nothing', () => {
     const slug = 'dup-villa';
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-video-dup-'));
+    const media = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-video-media-'));
+    const prepared = (name, bytes) => {
+      const file = path.join(media, `${name}.mp4`);
+      const poster = path.join(media, `${name}.jpg`);
+      fs.writeFileSync(file, bytes);
+      fs.writeFileSync(poster, `poster of ${name}`);
+      return { file, poster };
+    };
     try {
       const inbox = path.join(tmp, 'scripts', 'curate', 'inbox');
       fs.mkdirSync(inbox, { recursive: true });
       fs.writeFileSync(path.join(inbox, `${slug}.json`), JSON.stringify({ id: 'BONA-W030', slug, title: { en: 'Dup Villa', ar: 'x' }, images: [], videos: [] }));
-      const clip = Buffer.from('the same walkthrough, byte for byte');
-      const first = edits.addVideo(tmp, 'BONA-W030', clip);
+      const clip = 'the same walkthrough, byte for byte';
+      const first = edits.addVideo(tmp, 'BONA-W030', prepared('one', clip));
       assert.equal(first.duplicate, undefined);
-      assert.deepEqual(first.listing.videos, [`/listings/${slug}/v-01.mp4`]);
+      assert.deepEqual(first.listing.videos, [{ src: `/listings/${slug}/v-01.mp4`, poster: `/listings/${slug}/v-01-poster.jpg` }]);
 
-      const again = edits.addVideo(tmp, 'BONA-W030', Buffer.from(clip));
+      const again = edits.addVideo(tmp, 'BONA-W030', prepared('one-again', clip));
       assert.equal(again.duplicate, true);
       assert.equal(again.video.src, `/listings/${slug}/v-01.mp4`, 'points at the copy that is already there');
-      assert.deepEqual(again.listing.videos, [`/listings/${slug}/v-01.mp4`], 'no second entry');
-      assert.deepEqual(fs.readdirSync(path.join(tmp, 'public', 'listings', slug)), ['v-01.mp4'], 'no second file');
+      assert.deepEqual(again.listing.videos, [{ src: `/listings/${slug}/v-01.mp4`, poster: `/listings/${slug}/v-01-poster.jpg` }], 'no second entry');
+      assert.deepEqual(fs.readdirSync(path.join(tmp, 'public', 'listings', slug)).sort(), ['v-01-poster.jpg', 'v-01.mp4'], 'no second file');
 
-      const different = edits.addVideo(tmp, 'BONA-W030', Buffer.from('a different clip of the same length!!!!'));
+      const different = edits.addVideo(tmp, 'BONA-W030', prepared('two', 'a different clip of the same length!!'));
       assert.equal(different.duplicate, undefined);
       assert.equal(different.video.src, `/listings/${slug}/v-02.mp4`);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
+      fs.rmSync(media, { recursive: true, force: true });
+    }
+  });
+
+  it('sha256File hashes a file a megabyte at a time — the clip is never a Buffer', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-video-hash-'));
+    try {
+      // Bigger than the 1 MB read buffer, so the chunked loop really runs more than once.
+      const bytes = Buffer.alloc(3 * 1024 * 1024 + 7, 0xab);
+      const file = path.join(dir, 'clip.mp4');
+      fs.writeFileSync(file, bytes);
+      assert.equal(edits.sha256File(file), crypto.createHash('sha256').update(bytes).digest('hex'));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 });
@@ -303,6 +329,39 @@ describe('poll ordering and timestamps — the brochure is handled before the cl
     const rq = src.slice(src.indexOf('function requeueWaitingVideos('), src.indexOf('// ---------------------------------------------------------------- queue'));
     assert.match(rq, /if \(job\.kind !== 'video' \|\| !job\.waitSince\) continue;/, 'a parked clip is found by waitSince, with or without a named brochure');
   });
+
+  // The owner's rule: "it should know which video is for which property; I shouldn't be
+  // picking anything." The chain is caption id → burst rule → the clip's own frames → park →
+  // ask. The content matcher sits exactly where pickListingForVideo gives up, BEFORE the park.
+  it('index.mjs tries the content matcher where the burst rule returns `none`, before the freshClip park, once per clip', () => {
+    const src = fs.readFileSync(new URL('../index.mjs', import.meta.url), 'utf8');
+    const fn = src.slice(src.indexOf('async function handleVideo('), src.indexOf('async function publishEdit('));
+    const caption = fn.indexOf('findListingId(caption)');
+    const burst = fn.indexOf('pickListingForVideo(');
+    const content = fn.indexOf("pick.kind === 'none' && !job?.contentTried");
+    const park = fn.indexOf('const freshClip =');
+    const ask = fn.indexOf('msg.videoUnsure(');
+    assert.ok(caption >= 0 && caption < burst, 'an id in the caption is answered before anything is worked out');
+    assert.ok(burst < content, 'the burst rule (free) runs before the model call');
+    assert.ok(content > 0 && content < park, 'the content matcher runs BEFORE the clip is parked');
+    assert.ok(park < ask, 'and the park comes before the one line that gives up');
+    assert.match(fn, /matchVideoToListing\(/, 'lib/video-match.mjs does the looking');
+    assert.match(fn, /state\.updateJob\(messageId, \{ contentTried: true \}\);[\s\S]{0,200}matchVideoToListing/, 'the "already paid for" flag is written BEFORE the call, so a crash inside it cannot buy a second one');
+    assert.match(fn, /verdict\.kind === 'match'/, 'only a match attaches');
+    assert.ok(!/verdict\.listingId\s*\|\|/.test(fn), 'an ambiguous verdict never falls back to its own best guess');
+  });
+
+  // Nothing raw goes into the repo, and nothing big goes through memory.
+  it('index.mjs transcodes and posters the clip before addVideo, and hands over paths, not a Buffer', () => {
+    const src = fs.readFileSync(new URL('../index.mjs', import.meta.url), 'utf8');
+    const fn = src.slice(src.indexOf('async function handleVideo('), src.indexOf('async function publishEdit('));
+    const prepare = fn.indexOf('prepareVideo(');
+    const add = fn.indexOf('edits.addVideo(');
+    assert.ok(prepare > 0 && prepare < add, 'the transcode happens before the listing is edited');
+    assert.match(fn, /edits\.addVideo\(cfg\.repo, id, \{ file: prepared\.file, poster: prepared\.poster \}\)/, 'paths, never bytes');
+    assert.match(fn, /prepared\.reason === 'too-large'[\s\S]{0,120}videoStillTooLarge/, 'a clip that will not fit is refused, not committed');
+    assert.ok(!/fs\.readFileSync\(videoPath\)/.test(fn), 'the clip is never read into a Buffer');
+  });
 });
 
 describe('reply messages — video', () => {
@@ -326,11 +385,32 @@ describe('reply messages — video', () => {
     assert.match(t, /video BONA-W001/);
   });
   it('the auto-match reply says which brochure it matched and how far apart they were', () => {
-    const listing = { title: { en: 'Knightsbridge Villas' }, videos: ['/listings/k/v-01.mp4'] };
-    const t = msg.videoAdded('BONA-W008', listing, { bytes: 3 * 1048576 }, { matched: { deltaSec: 12 } });
+    const listing = { title: { en: 'Knightsbridge Villas' }, videos: [{ src: '/listings/k/v-01.mp4', poster: '/listings/k/v-01-poster.jpg' }] };
+    const t = msg.videoAdded('BONA-W008', listing, { bytes: 3 * 1048576 }, { matched: { by: 'burst', deltaSec: 12 } });
     assert.match(t, /Knightsbridge Villas/);
     assert.match(t, /12 s/);
     assert.match(t, /brochure/i);
+  });
+  it('a clip placed by looking at it says so, with how sure it was', () => {
+    const listing = { title: { en: 'Knightsbridge Villas' }, videos: [{ src: '/listings/k/v-01.mp4', poster: null }] };
+    const t = msg.videoAdded('BONA-W008', listing, { bytes: 9 * 1048576 }, { matched: { by: 'content', confidence: 0.86 } });
+    assert.match(t, /Recognised from the video itself/);
+    assert.match(t, /86%/);
+    assert.ok(!/brochure/i.test(t), 'no brochure was involved — do not claim one was');
+  });
+  it('the "cannot tell" line names what it compared against and asks, exactly once, never guessing', () => {
+    const t = msg.videoUnsure(['BONA-W008', 'BONA-W009', 'BONA-W010', 'BONA-W011']);
+    assert.equal(t.split('\n').length, 1);
+    assert.match(t, /cannot tell/);
+    assert.match(t, /BONA-W008, BONA-W009, BONA-W010/);
+    assert.ok(!t.includes('BONA-W011'), 'at most three, so it stays one line on a phone');
+    assert.match(t, /video BONA-W008/, 'and tells him how to answer it');
+    assert.match(msg.videoUnsure([]), /cannot tell/);
+  });
+  it('says nothing was committed when even a re-encode misses the size cap', () => {
+    assert.match(msg.videoStillTooLarge(38.4, 25), /38\.4 MB/);
+    assert.match(msg.videoStillTooLarge(38.4, 25), /25 MB/);
+    assert.match(msg.videoUnreadable(), /journal/);
   });
   it('the waiting reply is one line and mentions the brochure it is waiting on', () => {
     const t = msg.videoWaiting('Knightsbridge_Phase 2_Brochure_EN.pdf');

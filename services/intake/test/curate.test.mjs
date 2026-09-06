@@ -8,7 +8,8 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   FORBIDDEN, HYPE, INTAKE_ID_RE, isLocalSrc, LISTING_ID_RE, LOCAL_LAND_STILL,
-  LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, LOCAL_LISTING_VIDEO, PHONE_RE,
+  LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, LOCAL_LISTING_VIDEO, LOCAL_LISTING_VIDEO_POSTER,
+  PHONE_RE, videoEntryProblems,
 } from '../../../scripts/curate/rules.mjs';
 import { checkListing } from '../lib/listing.mjs';
 
@@ -104,7 +105,31 @@ describe('site-local video paths', () => {
       '/listings/villa/01.mp4',           // missing the v- prefix
       '/listings/Villa/v-01.mp4',         // slugs are lowercase
       'listings/villa/v-01.mp4',
+      '/listings/villa/v-01-poster.jpg',  // the poster is not the clip
     ]) assert.ok(!LOCAL_LISTING_VIDEO.test(s), `${s} should be rejected`);
+  });
+
+  it('accepts /listings/<slug>/v-nn-poster.jpg and nothing near it', () => {
+    assert.ok(LOCAL_LISTING_VIDEO_POSTER.test('/listings/five-bedroom-villa/v-01-poster.jpg'));
+    assert.ok(LOCAL_LISTING_VIDEO_POSTER.test('/listings/five-bedroom-villa/v-123-poster.jpg'));
+    for (const s of [
+      '/listings/villa/v-01.jpg',
+      '/listings/villa/v-01-poster.webp',
+      '/listings/villa/01-poster.jpg',
+      '/listings/villa/v-01-poster.jpg?x=1',
+    ]) assert.ok(!LOCAL_LISTING_VIDEO_POSTER.test(s), `${s} should be rejected`);
+  });
+
+  // ONE definition of a `videos[]` entry, called by BOTH scripts/curate/validate.mjs and the
+  // intake's own checkListing(): the intake can never write a video shape the build refuses.
+  it('videoEntryProblems accepts { src, poster } and refuses the pre-2026-09-06 bare string', () => {
+    assert.deepEqual(videoEntryProblems({ src: '/listings/villa/v-01.mp4', poster: '/listings/villa/v-01-poster.jpg' }, 0), []);
+    assert.deepEqual(videoEntryProblems({ src: '/listings/villa/v-02.mp4', poster: null }, 0), [], 'no poster is allowed — the page falls back to the hero');
+    assert.deepEqual(videoEntryProblems({ src: 'https://cdn.example.com/a.mp4', poster: 'https://cdn.example.com/a.jpg' }, 0), []);
+    assert.match(videoEntryProblems('/listings/villa/v-01.mp4', 0)[0], /must be \{ src, poster \}/);
+    assert.match(videoEntryProblems({ src: '/listings/villa/01.jpg' }, 3)[0], /videos\[3\]\.src/);
+    assert.match(videoEntryProblems({ src: '/listings/villa/v-01.mp4', poster: '/listings/villa/01.jpg' }, 1)[0], /videos\[1\]\.poster/);
+    assert.deepEqual(videoEntryProblems(null, 0).length, 1);
   });
 
   // checkListing() (services/intake) mirrors validate.mjs (scripts/curate) — a listing the
@@ -124,10 +149,12 @@ describe('site-local video paths', () => {
       })),
     };
     assert.deepEqual(checkListing({ ...base, videos: [] }), [], 'empty videos array is fine');
-    assert.deepEqual(checkListing({ ...base, videos: ['/listings/five-bedroom-villa/v-01.mp4'] }), []);
+    assert.deepEqual(checkListing({ ...base, videos: [{ src: '/listings/five-bedroom-villa/v-01.mp4', poster: '/listings/five-bedroom-villa/v-01-poster.jpg' }] }), []);
+    assert.deepEqual(checkListing({ ...base, videos: [{ src: '/listings/five-bedroom-villa/v-01.mp4', poster: null }] }), []);
     assert.deepEqual(checkListing(base), [], 'no videos key at all is also fine (curated listings predate the field)');
     assert.ok(checkListing({ ...base, videos: 'not-an-array' }).some((e) => /videos must be an array/.test(e)));
-    assert.ok(checkListing({ ...base, videos: ['/listings/five-bedroom-villa/01.jpg'] }).some((e) => /videos\[0\]/.test(e)));
+    assert.ok(checkListing({ ...base, videos: [{ src: '/listings/five-bedroom-villa/01.jpg' }] }).some((e) => /videos\[0\]\.src/.test(e)));
+    assert.ok(checkListing({ ...base, videos: ['/listings/five-bedroom-villa/v-01.mp4'] }).some((e) => /must be \{ src, poster \}/.test(e)), 'the bare string shape is gone');
   });
 });
 
