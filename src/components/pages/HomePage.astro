@@ -25,7 +25,7 @@ const aboutImgListing = pool[1 % Math.max(1, pool.length)];
 const wa = waLink(site.whatsapp.wa, t(ui.formGreeting, locale));
 const title = `${locale === 'ar' ? site.nameAr : site.name} — ${t(site.tagline, locale)}`;
 const words = t(site.tagline, locale).split(/\s+/).filter(Boolean);
-const strips: { kind: Kind; items: typeof land }[] = [{ kind: 'land', items: land }, { kind: 'building', items: buildings }].filter(s => s.items.length > 0);
+const strips = ([{ kind: 'land', items: land }, { kind: 'building', items: buildings }] as { kind: Kind; items: typeof land }[]).filter(s => s.items.length > 0);
 ---
 <Base title={title} description={t(site.description, locale)} locale={locale} path={path} image={heroImg?.src} hero jsonLd={orgJsonLd(locale)}>
   <!-- Hero: full-bleed photograph(s) with a slow Ken Burns drift and an 8s crossfade between the top featured homes. -->
