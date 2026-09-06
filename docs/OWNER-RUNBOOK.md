@@ -47,9 +47,10 @@ That creates the tunnel `bona`, points `api.bona.azoz.uk` at it, installs and st
 - Off switch: `site.json → concierge.enabled: false` (push) removes the pill; `systemctl --user stop bona-api` stops the backend.
 
 ## 8. Publish a property from WhatsApp (PDF → live listing)
-1. Create (or rename) a WhatsApp group whose name contains **"Bona"** (e.g. "Bona Listings") — you can be the only member. Within ~5 minutes the intake service posts "Bona intake connected".
+1. Your existing owner-only WhatsApp group **"PDF"** is already wired (you will see "Bona intake connected" there). Alternatively create or rename any group so its name contains **"Bona"** (e.g. "Bona Listings") — you must be the group's creator; within ~5 minutes the service posts the same greeting there.
 2. Drop a property brochure **PDF** in the group. Optional caption hints: `rent`, `SAR 4,500,000`, `#test` (dry run — summary only), `#brochure` (also publish the PDF). Within a minute it replies "Reading…", then "✅ Live: … https://bona.azoz.uk/properties/<slug>/" once the page is on the site (deploy takes ~3 min).
 3. Fix-ups by replying in the group: `remove BONA-W003` · `hero BONA-W003 4` (make photo 4 the cover) · `price BONA-W003 4500000` · `sold BONA-W003`.
+Verified 2026-09-06 03:56 KSA: a test brochure sent with `#test` came back in 7 minutes as a dry-run summary (title AR/EN, price from the PDF, 7 photos ranked, cover chosen). Costs ≈ $0.15–0.60 of Claude usage per PDF (60–200 s).
 Rules baked in: only PDFs *you* send are processed; prices are taken only if printed in the PDF (otherwise "Price on request" — TAQEEM); invoices/IDs/contracts are rejected and never stored; the cover photo is chosen by the AI against `scripts/curate/IMAGE-RUBRIC.md`. The service (`bona-intake`) runs on this PC — if the PC is off, PDFs wait in the group and are processed when it is back. Ops: `systemctl --user status bona-intake`, `journalctl --user -u bona-intake -f`, manual run: `node ~/bona/services/intake/run-once.mjs <file.pdf> --dry-run`.
 
 ## Daily loop (already running once the repo is public)
