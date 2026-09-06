@@ -95,6 +95,23 @@ Anything else in the group is ignored, silently.
   ~40 characters of text per page is not judged locally at all: every page is rendered at
   1600 px and handed to the AI, which reads the specs and the prices off the pages and
   rejects it if it is not one property for sale. Default-deny simply moves one gate later.
+- **A brochure whose pages ARE the pictures gets its photographs cut out of them.** A deck
+  designed in Canva/Illustrator and exported one picture per page yields candidates that are
+  whole pages — photo plus headline plus logo plus floor plan in one bitmap — and the ranking
+  step rightly refuses every one of them ("collage", "text page"), which used to end the run
+  at `not enough usable photos — 0 of 4`. When the pages are page-sized composites (the
+  bitmap covers ~all of its page, or the PDF has no text layer) **and** the leftovers could
+  not fill a gallery on their own, `lib/photo-regions.mjs` renders those pages, sends **one**
+  extra `claude -p` — under the same confinement — and gets back the bounding box of every
+  photograph printed on them, in 0–1 coordinates. The boxes are cut out with sharp from a
+  re-render of the page at crop resolution and go into the candidate list as ordinary
+  candidates, so `IMAGE-RUBRIC.md` judges them like any other photograph. A page too long to
+  read in one frame (the Sadana cover is 1080×10449 pt) is sliced into overlapping views
+  first and the boxes are mapped back onto the page. Nothing is relaxed: a crop under
+  `BONA_MIN_IMAGE_SIDE` on its short side, or shaped like a banner, is dropped, and a run
+  whose crops the ranking step still refuses is still rejected. It costs one call, only on
+  the brochures that would otherwise have been rejected, capped at 20 pages and 24 crops
+  (the numbers are constants at the top of `lib/photo-regions.mjs`, not env vars).
 - **Never estimates a price** (TAQEEM), and does not take the model's word for one either.
   A price is published only when the number is **actually printed**: `lib/price.mjs` looks it
   up in the PDF's text layer and in the caption (thousands separators, Arabic-Indic digits,
@@ -260,9 +277,17 @@ and look at them; `docs/qa/brochure/` holds the reference renders (portrait, 16:
 Every run leaves its scratch directory behind (`--work`, else `$BONA_DATA/intake/manual/…`)
 containing `prompt.txt` (exactly what the model was asked), `ai.json` (exactly what it
 answered — including its free-text `warnings`, which are never committed), `images/` (every
-candidate), `sheets/` (the contact sheets it looked at), `pages/` (the page renders, for a PDF
-with no text layer) and `claude-settings.json` (the deny rules that confined it). That is the
-first place to look when a listing comes out wrong.
+candidate, `cNNN.jpg` being the regions cropped out of composite pages), `sheets/` (the
+contact sheets it looked at), `pages/` (the page renders, for a PDF with no text layer),
+`regions/` (the photo-region step, when it ran: `views/` the page renders it looked at,
+`sheets/` their contact sheet, `prompt.txt` what it was asked, `regions.json` the boxes it
+drew and `crops/` the high-resolution page renders they were cut from) and
+`claude-settings.json` (the deny rules that confined it). That is the first place to look
+when a listing comes out wrong.
+
+A rescue round — the ranking step calling the candidates collages, so the crop step runs
+after it rather than before — overwrites `prompt.txt` and `ai.json` with the second, final
+ask; the `intake.cropped` line in the journal says why the crop step ran.
 
 `run-once.mjs` takes the same `$BONA_DATA/intake.lock` as the daemon, so it is safe to run
 while the service is up — it waits its turn. `--dry-run` and `--no-git` never call git at all,
@@ -278,7 +303,7 @@ so pointing `--repo` at a working checkout with uncommitted changes in it is saf
 | `public/listings/<slug>/NN-thumb.webp` | 640 px thumbnail |
 | `public/listings/<slug>/brochure.pdf` | the Bona-branded brochure — by default, unless `#nobrochure`, and only up to `BONA_MAX_BROCHURE_MB` |
 | `$BONA_DATA/intake/<date>/<msgid>.pdf` | the downloaded PDF (outside the repo) |
-| `$BONA_DATA/intake/<date>/<msgid>/` | the run's work dir: `prompt.txt`, `ai.json`, `images/`, `pages/`, `sheets/`, `publish/<slug>/` (staging), `claude-settings.json` (the model's confinement) |
+| `$BONA_DATA/intake/<date>/<msgid>/` | the run's work dir: `prompt.txt`, `ai.json`, `images/`, `pages/`, `sheets/`, `regions/` (only when photo regions were cropped), `publish/<slug>/` (staging), `claude-settings.json` (the model's confinement) |
 | `$BONA_DATA/intake-state.json` | seen message ids, greeted groups, published PDF hashes, job records |
 | `$BONA_DATA/intake.lock` | the publish lock (daemon + run-once) |
 
@@ -292,6 +317,7 @@ live-list filter; intake listings are exempt from that filter because they are o
 | `✋ Not published — looks like a private document ("IBAN")` | the default-deny gate | correct: that PDF is not a brochure |
 | `✋ … not a property brochure` (AI gate) | a scan, certificate or site plan without property details | send the real brochure |
 | `✋ … not enough usable photos — 0 of 4` | the PDF has no extractable photographs (only page renders) or they are all plans/logos | send a brochure with real photos, or the photos themselves |
+| `✋ … not enough usable photos — 2 of 4 (even after cutting 3 photo region(s) out of its own pages)` | the pages were composites, the crops were made, and the ranking step still would not publish enough of them | look in the work dir: `regions/regions.json` is where the model said the photographs were, `images/cNNN.jpg` is what came out |
 | `⚠️ … You've hit your session limit` | Claude Code quota | wait for the reset; the PDF stays in `$BONA_DATA`, send `retry` |
 | `⚠️ Something went wrong …` | any failure: git, build, model | the reason is in the journal — the reply deliberately quotes none of it. The repo is rolled back. |
 | `⚠️ The page is still not answering …` | GitHub Pages did not deploy | the listing IS committed; check the Actions run |
@@ -320,7 +346,8 @@ waits in the queue; `status` shows the depth.
 services/intake/
   index.mjs             the daemon: group discovery, polling, single-worker queue
   run-once.mjs          the same pipeline on one local PDF, no WhatsApp
-  extract_pdf.py        PyMuPDF: page text + candidate photos (run via `uv run --with pymupdf`)
+  extract_pdf.py        PyMuPDF: page text + candidate photos, whole-page renders (--mode pages)
+                        and sliced page views (--mode views); run via `uv run --with pymupdf`
   rebrand_pdf.py        PyMuPDF + segno: the Bona cover, the footer strip, the Enquire page, the shrink
   rebrand-once.mjs      the brochure step alone, on one local PDF — the loop for changing rebrand_pdf.py
   lib/
@@ -331,6 +358,7 @@ services/intake/
     pdf.mjs             wrapper around extract_pdf.py
     brochure.mjs        wrapper around rebrand_pdf.py: the facts it prints, where the file lands
     contact-sheet.mjs   labelled sheets of the candidates, for the model to look at
+    photo-regions.mjs   the photographs cut out of pages that are single flattened pictures
     prompt.md           the prompt template (the contract the model must answer with)
     claude.mjs          the `claude -p` runner, contract validation, repair retry
     confine.mjs         the --settings deny rules that lock the model into the work dir

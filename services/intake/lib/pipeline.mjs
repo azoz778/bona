@@ -4,6 +4,7 @@
 // WhatsApp, and nothing is written to the repo until every gate has passed:
 //   1. size/pages           (cheap, local)
 //   2. classifyPdf          (default-deny keyword gate — invoices/IDs/statements never reach the AI)
+//   2b. photo-region crop  (only when the pages ARE the pictures — see lib/photo-regions.mjs)
 //   3. AI contract          (validateAiResult + copyProblems)  <- the real brochure/not-brochure gate
 //   4. TAQEEM cross-check   (a price is published only when the NUMBER is actually printed)
 //   5. checkListing         (mirror of scripts/curate/validate.mjs)
@@ -32,6 +33,7 @@ import {
 } from './listing.mjs';
 import { log } from './log.mjs';
 import { extractPdf, renderPdfPages } from './pdf.mjs';
+import { compositePages, cropPhotoRegions, modelFlagsComposites } from './photo-regions.mjs';
 import { priceAppearsIn } from './price.mjs';
 import { rebuild, resetTree } from './publish.mjs';
 
@@ -102,42 +104,119 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     log.info('intake.page_renders', { pages: pageImages.length, longSide: cfg.pageReadLongSide });
   }
 
-  // --- 3. AI ------------------------------------------------------------------
-  report.stage = 'ai';
-  const sheets = await buildContactSheets(extraction.candidates, path.join(workDir, 'sheets'));
-  report.sheets = sheets.map((s) => s.file);
-  const rubricPath = path.join(cfg.repo, 'scripts', 'curate', 'IMAGE-RUBRIC.md');
-  const prompt = buildPrompt({ extraction, sheets, caption, pageImages, rubricPath: fs.existsSync(rubricPath) ? rubricPath : null });
-  fs.writeFileSync(path.join(workDir, 'prompt.txt'), prompt);
   const confinement = writeConfinement(workDir);
   // The rule count is one per sibling of every directory on the way to the work dir. Under
   // $BONA_DATA it is ~320; a work dir under a directory with thousands of siblings makes a
   // much larger settings file, which is still correct but slower for the CLI to load.
   const confineLog = confinement.ruleCount > 5000 ? log.warn : log.info;
   confineLog('intake.confined', { settings: confinement.file, denyRules: confinement.ruleCount });
-  const { result: ai, meta: aiMeta, attempt } = await runListingAi({
-    prompt,
-    cwd: workDir,
-    model: cfg.claudeModel,
-    fallbackModel: cfg.claudeFallbackModel,
-    bin: cfg.claudeBin,
-    addDirs: [workDir],
-    settingsPath: confinement.file,
-    timeoutMs: cfg.claudeTimeoutMs,
-    candidateCount: extraction.candidates.length,
-    logger: log,
-  });
+
+  // --- 2b. photo-region cropping ------------------------------------------------
+  // A deck exported one picture per page yields candidates that are whole pages: photo,
+  // headline, logo and floor plan in one bitmap. Every one of them is rightly excluded by
+  // the ranking step, and the run then dies at the photo gate. So when the pages ARE the
+  // pictures, one extra confined call marks where the photographs are on them and they are
+  // cut out; the crops go into the candidate list and are ranked like any other photograph.
+  const composites = compositePages(extraction, { imageOnly: verdict.imageOnly });
+  const ordinaryCandidates = extraction.candidates.length - composites.indices.length;
+  let cropped = null;
+
+  const runCrop = async (why) => {
+    report.stage = 'crop';
+    log.info('intake.cropping', { why, pages: composites.pages, ordinaryCandidates });
+    const out = await cropPhotoRegions({
+      pdfPath, workDir, pages: composites.pages, startIndex: extraction.candidates.length,
+      cfg, settingsPath: confinement.file, logger: log,
+    });
+    log.info('intake.cropped', {
+      why,
+      pages: out.pages.length,
+      views: out.views,
+      boxes: out.boxes,
+      crops: out.crops.length,
+      dropped: out.dropped.length,
+      costUsd: out.meta?.costUsd ?? null,
+      error: out.error ?? null,
+      rooms: out.crops.map((c) => c.room),
+    });
+    report.cropped = {
+      why,
+      pages: out.pages,
+      views: out.views,
+      boxes: out.boxes,
+      crops: out.crops.map((c) => ({ index: c.index, page: c.page, w: c.width, h: c.height, room: c.room, note: c.note })),
+      dropped: out.dropped,
+      error: out.error ?? null,
+    };
+    if (out.crops.length) {
+      extraction.candidates.push(...out.crops);
+      report.candidates = extraction.candidates.length;
+      report.warningCodes.push('photos-cropped');
+      report.warnings.push(`${out.crops.length} photo(s) were cut out of the brochure's own pages — check the gallery`);
+    }
+    return out;
+  };
+
+  // Only when the brochure could not pass the photo gate on its own candidates: an ordinary
+  // brochure with real photographs in it never pays for this call.
+  if (composites.pages.length && ordinaryCandidates < cfg.minImages) {
+    cropped = await runCrop(composites.reason);
+  }
+
+  // --- 3. AI ------------------------------------------------------------------
+  report.stage = 'ai';
+  const rubricPath = path.join(cfg.repo, 'scripts', 'curate', 'IMAGE-RUBRIC.md');
+  const askModel = async () => {
+    const sheets = await buildContactSheets(extraction.candidates, path.join(workDir, 'sheets'));
+    report.sheets = sheets.map((s) => s.file);
+    const prompt = buildPrompt({ extraction, sheets, caption, pageImages, rubricPath: fs.existsSync(rubricPath) ? rubricPath : null });
+    fs.writeFileSync(path.join(workDir, 'prompt.txt'), prompt);
+    return runListingAi({
+      prompt,
+      cwd: workDir,
+      model: cfg.claudeModel,
+      fallbackModel: cfg.claudeFallbackModel,
+      bin: cfg.claudeBin,
+      addDirs: [workDir],
+      settingsPath: confinement.file,
+      timeoutMs: cfg.claudeTimeoutMs,
+      candidateCount: extraction.candidates.length,
+      logger: log,
+    });
+  };
+  let { result: ai, meta: aiMeta, attempt } = await askModel();
   fs.writeFileSync(path.join(workDir, 'ai.json'), `${JSON.stringify(ai, null, 2)}\n`);
   report.ai = ai;
   report.aiMeta = { ...aiMeta, attempt, model: cfg.claudeModel };
+  log.info('intake.ai_done', { round: 1, attempt, costUsd: aiMeta.costUsd, durationMs: aiMeta.durationMs, reject: ai.reject, confidence: ai.confidence });
+  if (ai.reject) throw new RejectError(ai.rejectReason || 'not a publishable property brochure', 'ai');
+
+  // The rescue round. The geometry did not think this brochure needed cropping, but the
+  // ranking step has just said in its own words that the candidates it refused are collages
+  // and text pages — which is the same finding, arrived at by reading them. Crop and ask
+  // once more, but only when the run would otherwise be rejected for want of photographs.
+  let picks = orderedPicks(ai.images, { maxImages: cfg.maxImages });
+  if (picks.length < cfg.minImages && !cropped && composites.pages.length
+      && modelFlagsComposites(ai.images, composites.indices)) {
+    cropped = await runCrop('the ranking step called the page-sized candidates collages');
+    if (cropped.crops.length) {
+      report.stage = 'ai';
+      ({ result: ai, meta: aiMeta, attempt } = await askModel());
+      fs.writeFileSync(path.join(workDir, 'ai.json'), `${JSON.stringify(ai, null, 2)}\n`);
+      report.ai = ai;
+      report.aiMeta = { ...aiMeta, attempt, model: cfg.claudeModel };
+      log.info('intake.ai_done', { round: 2, attempt, costUsd: aiMeta.costUsd, durationMs: aiMeta.durationMs, reject: ai.reject, confidence: ai.confidence });
+      if (ai.reject) throw new RejectError(ai.rejectReason || 'not a publishable property brochure', 'ai');
+      picks = orderedPicks(ai.images, { maxImages: cfg.maxImages });
+    }
+  }
+
   // The model's `warnings` are free text from a model that just read an untrusted document.
   // They stay in ai.json: not in the listing, not in the reply.
   if (Array.isArray(ai.warnings) && ai.warnings.length) {
     report.warningCodes.push('model-flagged');
     report.warnings.push(`the model flagged ${ai.warnings.length} thing(s) to check by hand — they are in ai.json in the run's work dir`);
   }
-  log.info('intake.ai_done', { attempt, costUsd: aiMeta.costUsd, durationMs: aiMeta.durationMs, reject: ai.reject, confidence: ai.confidence });
-  if (ai.reject) throw new RejectError(ai.rejectReason || 'not a publishable property brochure', 'ai');
 
   // --- 4. TAQEEM cross-check ---------------------------------------------------
   // A price may only be published when the number is really printed. The model is not
@@ -180,11 +259,13 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
 
   // --- 5. images + listing ----------------------------------------------------
   report.stage = 'listing';
-  const picks = orderedPicks(ai.images, { maxImages: cfg.maxImages });
   report.picks = picks;
   report.excluded = (ai.images || []).filter((im) => im.exclude).map((im) => ({ index: im.index, reason: im.reason }));
   if (picks.length < cfg.minImages) {
-    const reason = `not enough usable photos — ${picks.length} of ${cfg.minImages} needed (${extraction.rendered ? 'the PDF has no extractable photographs, only page renders' : 'the rest were floor plans, logos or duplicates'})`;
+    const why = cropped
+      ? `even after cutting ${cropped.crops.length} photo region(s) out of its own pages`
+      : (extraction.rendered ? 'the PDF has no extractable photographs, only page renders' : 'the rest were floor plans, logos or duplicates');
+    const reason = `not enough usable photos — ${picks.length} of ${cfg.minImages} needed (${why})`;
     // A dry run is a preview: show the owner what WOULD have been published and why it
     // cannot be, instead of hiding the listing behind an early exit.
     if (!dryRun) throw new RejectError(reason, 'images');

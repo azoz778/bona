@@ -58,6 +58,11 @@ export async function extractPdf(pdfPath, outDir, opts = {}) {
 /**
  * Render EVERY page as a readable image, for a brochure with no text layer: the AI reads
  * these instead of a text layer that isn't there.
+ *
+ * `pages` (1-based numbers), `dir` and `minShortSide` are what the photo-region cropper
+ * uses to re-render a handful of pages at the resolution a crop needs — a page whose long
+ * side is ten times its short side is a sliver at any long-side cap, so the SHORT side is
+ * what has to be asked for.
  * @returns {Promise<{ok:boolean, pageImages?:Array<{page:number,abs:string,width:number,height:number}>, error?:string}>}
  */
 export async function renderPdfPages(pdfPath, outDir, opts = {}) {
@@ -68,5 +73,29 @@ export async function renderPdfPages(pdfPath, outDir, opts = {}) {
     '--mode', 'pages',
     '--max-pages', String(opts.maxPages ?? 60),
     '--render-long-side', String(opts.longSide ?? 1600),
+    ...(opts.minShortSide ? ['--render-min-short-side', String(opts.minShortSide)] : []),
+    ...(opts.maxPixels ? ['--render-max-pixels', String(opts.maxPixels)] : []),
+    ...(opts.dir ? ['--page-dir', opts.dir] : []),
+    ...(opts.pages?.length ? ['--pages', opts.pages.join(',')] : []),
+  ], opts);
+}
+
+/**
+ * Render pages FOR LOOKING AT. A page more extreme than `maxAspect` is cut into overlapping
+ * slices first; every view carries the normalised page rectangle it covers so a box drawn
+ * on it maps back onto the page.
+ * @returns {Promise<{ok:boolean, views?:Array<{id:number,page:number,slice:number,slices:number,abs:string,width:number,height:number,x0:number,y0:number,x1:number,y1:number}>, error?:string}>}
+ */
+export async function renderPdfViews(pdfPath, outDir, opts = {}) {
+  if (!fs.existsSync(pdfPath)) return { ok: false, error: `no such file: ${pdfPath}` };
+  fs.mkdirSync(outDir, { recursive: true });
+  return runScript([
+    pdfPath, outDir,
+    '--mode', 'views',
+    '--max-pages', String(opts.maxPages ?? 60),
+    '--view-long-side', String(opts.longSide ?? 1600),
+    ...(opts.maxAspect ? ['--view-max-aspect', String(opts.maxAspect)] : []),
+    ...(opts.dir ? ['--view-dir', opts.dir] : []),
+    ...(opts.pages?.length ? ['--pages', opts.pages.join(',')] : []),
   ], opts);
 }

@@ -257,8 +257,13 @@ describe('images — a candidate sharp cannot decode is skipped, not fatal', () 
     assert.match(py, /MAX_PIXELS = 50_000_000/);
     const usable = /def usable\([\s\S]*?\n\n/.exec(py)[0];
     assert.match(usable, /width \* height > MAX_PIXELS/, 'the cap must be inside usable(), which runs before colour_ratio()');
-    assert.match(py, /def render_matrix\(page, dpi: int, long_side: int\)/);
-    assert.ok(!/pymupdf\.Matrix\(zoom, zoom\)(?![\s\S]*render_matrix)/.test(py.split('def render_matrix')[1] || ''), 'page renders go through render_matrix');
+    assert.match(py, /def render_matrix\(page, dpi: int, long_side: int/);
+    assert.match(py, /def clip_matrix\(clip, dpi: int, long_side: int/);
+    // Every zoom this file builds goes through render_zoom, which is where the caps live —
+    // a page render (or a view slice of one) that built its own Matrix would escape them.
+    const matrices = py.split('\n').filter((l) => /pymupdf\.Matrix\(/.test(l));
+    assert.equal(matrices.length, 2, 'only render_matrix and clip_matrix may build a Matrix');
+    assert.match(py, /def render_zoom\([\s\S]*?if max_pixels and[\s\S]*?\n\n/, 'render_zoom is where the pixel cap is applied');
   });
 });
 

@@ -42,6 +42,12 @@ function printReport(r) {
   say(`           ${(r.bytes / 1048576).toFixed(2)} MB · ${r.pages} pages · sha ${r.sha256.slice(0, 12)}`);
   say(`Gate       ${r.classify.ok ? 'accepted' : 'REJECTED'} — ${r.classify.reason}`);
   say(`Candidates ${r.candidates}${r.rendered ? ' (page renders — the PDF has no extractable photographs)' : ''}`);
+  if (r.cropped) {
+    const c = r.cropped;
+    say(`Cropped    ${c.crops.length} photo region(s) out of ${c.pages.length} page(s) — ${c.boxes} box(es) on ${c.views} view(s), ${c.dropped.length} dropped`);
+    say(`           why: ${c.why}${c.error ? ` · ${c.error}` : ''}`);
+    for (const im of c.crops) say(`           #${String(im.index).padStart(2)}  p${im.page}  ${im.w}x${im.h}  ${String(im.room).padEnd(14)} ${im.note || ''}`);
+  }
   say(`AI         attempt ${r.aiMeta.attempt} · ${r.aiMeta.model} · ${(r.aiMeta.durationMs / 1000).toFixed(0)}s · $${(r.aiMeta.costUsd ?? 0).toFixed(3)} · confidence ${r.ai.confidence}`);
   say('');
   say('── Listing ──────────────────────────────────────────────────');
