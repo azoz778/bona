@@ -172,7 +172,11 @@ describe('buildListing', () => {
     });
     assert.equal(l.hidden, true);
     assert.equal(l._intake.source, 'whatsapp');
-    assert.equal(l._intake.messageId, 'MSG1');
+    assert.equal(l._intake.messageId, undefined, 'WhatsApp identifiers are never committed');
+    assert.equal(l._intake.groupJid, undefined);
+    assert.equal(l._intake.caption, undefined);
+    assert.equal(l._intake.pdfSha256, 'abc');
+    assert.ok(l._intake.images.every((im) => !('reason' in im)), 'no model reasons in the committed JSON');
     assert.equal(l._intake.model, 'sonnet');
     assert.equal(l._intake.images.length, 4);
     // Finding 5: the model's free-text warnings are NEVER committed — only known codes.

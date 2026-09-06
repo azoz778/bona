@@ -208,16 +208,13 @@ export function buildListing({ ai, images, slug, id, repo, caption = {}, meta = 
     hidden: Boolean(meta.hidden),
     _intake: {
       source: 'whatsapp',
-      messageId: meta.messageId ?? null,
-      groupJid: meta.groupJid ?? null,
+      // Public repo: no WhatsApp identifiers, captions or file names — those live in the job/state records.
       pdfSha256: meta.pdfSha256 ?? null,
-      pdfFileName: meta.pdfFileName ?? null,
-      caption: caption.text ?? null,
       model: meta.model ?? null,
       confidence: ai.confidence ?? null,
       // Codes only — never the model's free text (see WARNING_CODES).
       warnings: [...new Set(meta.warningCodes ?? [])].filter((c) => WARNING_CODES.has(c)),
-      images: images.map((im) => ({ n: im.n, candidate: im.index, room: im.room, reason: im.reason })),
+      images: images.map((im) => ({ n: im.n, candidate: im.index, room: im.room })), // no model free text (reasons stay in the work dir)
       createdAt: new Date(now).toISOString(),
       site: site ?? null,
     },
