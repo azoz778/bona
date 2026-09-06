@@ -134,10 +134,25 @@ export function seqAfter(id) {
 export const WARNING_CODES = new Set([
   'not-enough-photos',      // fewer publishable photographs than BONA_MIN_IMAGES (dry run only)
   'price-not-printed',      // the model's price was not in the PDF or the caption -> on request
-  'brochure-too-large',     // #brochure was asked for but the PDF is over the cap
+  'brochure-too-large',     // the branded brochure is still over BONA_MAX_BROCHURE_MB after downsampling
+  'brochure-failed',        // rebrand_pdf.py could not build the branded brochure at all
   'images-skipped',         // sharp could not decode one or more candidates
   'model-flagged',          // the model returned warnings; read them in the work dir's ai.json
 ]);
+
+/**
+ * Add a warning code to a listing that is already built. The brochure step runs AFTER
+ * buildListing() — it needs the final, validated copy to print — so its warnings arrive
+ * late. Same vocabulary rule as buildListing(): a code outside WARNING_CODES is dropped,
+ * never written into a public repo.
+ */
+export function addWarningCode(listing, code) {
+  if (!listing?._intake || !WARNING_CODES.has(code)) return listing;
+  const warnings = new Set(listing._intake.warnings ?? []);
+  warnings.add(code);
+  listing._intake.warnings = [...warnings].filter((c) => WARNING_CODES.has(c));
+  return listing;
+}
 
 const kindMap = (repo) => JSON.parse(fs.readFileSync(path.join(repo, 'src', 'data', 'kind-map.json'), 'utf8'));
 

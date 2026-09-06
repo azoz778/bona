@@ -79,10 +79,18 @@ export function loadConfig(overrides = {}) {
     pyCmd: String(raw.BONA_PY_CMD || '').trim()
       ? String(raw.BONA_PY_CMD).trim().split(/\s+/)
       : ['uv', 'run', '--with', 'pymupdf', 'python'],
+    // The brochure step needs more than the extractor does: segno draws the QR and
+    // fontTools+brotli decompress public/fonts/*.woff2 into the TTFs PyMuPDF can embed.
+    brochurePyCmd: String(raw.BONA_BROCHURE_PY_CMD || '').trim()
+      ? String(raw.BONA_BROCHURE_PY_CMD).trim().split(/\s+/)
+      : ['uv', 'run', '--with', 'pymupdf', '--with', 'segno', '--with', 'fonttools', '--with', 'brotli', 'python'],
+    brochureTimeoutMs: num(raw.BONA_BROCHURE_TIMEOUT_MS, 600000),
     site: (raw.BONA_SITE || 'https://bona.azoz.uk').replace(/\/+$/, ''),
     maxPdfMb: num(raw.BONA_MAX_PDF_MB, 150), // real developer brochures are 50–80 MB (owner's files 2026-09-06)
     maxPdfPages: num(raw.BONA_MAX_PDF_PAGES, 120),
-    maxBrochureMb: num(raw.BONA_MAX_BROCHURE_MB, 8),
+    // The cap on the BRANDED output, not on the developer's original: rebrand_pdf.py
+    // downsamples until it fits and refuses to write anything larger.
+    maxBrochureMb: num(raw.BONA_MAX_BROCHURE_MB, 25),
     minImages: num(raw.BONA_MIN_IMAGES, 4),
     maxImages: num(raw.BONA_MAX_IMAGES, 10),
     minImageSide: num(raw.BONA_MIN_IMAGE_SIDE, 700),

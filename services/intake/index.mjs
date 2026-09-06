@@ -325,7 +325,9 @@ async function publishEdit(jid, id, apply, commitMessage, replyText) {
     await prepareRepo();
     let res;
     try {
-      res = apply();
+      // `await`: most edits are synchronous file writes, but `brochure <id>` shells out to
+      // rebrand_pdf.py and must finish before the rebuild and the commit.
+      res = await apply();
       if (!res || res.error) return res;
       await rebuild(cfg.repo);
       await gitCommitPush(cfg.repo, commitMessage(res), {
@@ -402,6 +404,19 @@ async function handleCommand({ group, command }) {
         () => edits.setPrice(cfg.repo, command.id, command),
         () => `intake: price (${command.id})`,
         (r) => msg.updated(command.id, command.onRequest ? 'Price on request' : `Price set to ${r.listing.price.currency} ${r.listing.price.amount.toLocaleString('en-US')}`, r.listing),
+      );
+      if (res?.error) return reply(jid, `✋ ${res.error}`);
+      return undefined;
+    }
+    case 'brochure': {
+      const found = edits.locate(cfg.repo, command.id);
+      if (!found) return reply(jid, msg.notFound(command.id));
+      const workDir = path.join(cfg.intakeDir, 'brochure', `${command.id}-${Date.now()}`);
+      const res = await publishEdit(
+        jid, command.id,
+        () => edits.rebuildBrochure(cfg.repo, command.id, { cfg, workDir }),
+        () => `intake: branded brochure (${command.id})`,
+        (r) => msg.brochureRebuilt(command.id, r.listing, r.brochure),
       );
       if (res?.error) return reply(jid, `✋ ${res.error}`);
       return undefined;

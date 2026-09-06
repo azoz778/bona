@@ -59,6 +59,11 @@ export function parsePriceHint(caption) {
  * @returns {{dryRun:boolean, publishBrochure:boolean, hidden:boolean, category:string|null,
  *            price:{amount:number,currency:string}|null, period:'year'|'month'|null,
  *            tags:string[], text:string}}
+ *
+ * `publishBrochure` (`#brochure` / `#pdf`) is a NO-OP ALIAS: every accepted brochure is
+ * re-published under Bona's branding by default, so the tag only says out loud what already
+ * happens. `#nobrochure` (`#nopdf`) is the flag that changes anything — it is how to publish
+ * a listing with no downloadable document at all. Both together: `#nobrochure` wins.
  */
 export function parseCaption(caption) {
   const text = String(caption || '').trim();
@@ -79,7 +84,10 @@ export function parseCaption(caption) {
     text,
     tags,
     dryRun: has('test') || has('dry') || has('draft'),
+    // Kept for the reply/summary wording and for old captions; the pipeline does not branch
+    // on it any more (see the doc comment).
     publishBrochure: has('brochure') || has('pdf'),
+    noBrochure: has('nobrochure') || has('nopdf') || has('no-brochure') || has('no-pdf'),
     hidden: has('hidden') || has('private'),
     category,
     price: price ? { amount: price.amount, currency: price.currency } : null,
@@ -95,7 +103,8 @@ export const LISTING_ID_RE = /^BONA-W\d{3,5}$/i;
  * Parse a text message as a command. Returns { cmd: null } for ordinary chatter so the
  * daemon stays silent instead of replying to everything.
  * Supported: remove <id> | hero <id> <n> | price <id> <amount> [currency] | price <id> onrequest
- *            sold <id> | available <id> | hide <id> | show <id> | retry | help | status
+ *            sold <id> | available <id> | hide <id> | show <id> | brochure <id>
+ *            retry | help | status
  */
 export function parseCommand(text) {
   const raw = String(text || '').trim();
@@ -134,6 +143,11 @@ export function parseCommand(text) {
       if (!p) return { cmd: 'error', message: 'usage: price BONA-W001 4500000  |  price BONA-W001 onrequest' };
       return { cmd: 'price', id, amount: p.amount, currency: p.currency, onRequest: false };
     }
+    case 'brochure':
+    case 'pdf': {
+      const id = idAt(1);
+      return id ? { cmd: 'brochure', id } : { cmd: 'error', message: 'usage: brochure BONA-W001' };
+    }
     case 'sold':
       return idAt(1) ? { cmd: 'status-set', id: idAt(1), status: 'sold' } : { cmd: 'error', message: 'usage: sold BONA-W001' };
     case 'reserved':
@@ -153,12 +167,14 @@ export function parseCommand(text) {
 export const HELP_TEXT = [
   'Bona intake — commands',
   '',
-  'Send a property brochure PDF here to publish it.',
-  'Caption hints: rent · off-plan · SAR 4,500,000 · #test (dry run) · #brochure (also publish the PDF) · #hidden',
+  'Send a property brochure PDF here to publish it — the brochure is re-published under',
+  'Bona branding and appears on the page as "Download brochure".',
+  'Caption hints: rent · off-plan · SAR 4,500,000 · #test (dry run) · #nobrochure (no PDF on the page) · #hidden',
   '',
   'remove BONA-W001        take the listing off the site',
   'hero BONA-W001 4        make photo 4 the cover',
   'price BONA-W001 4500000 set the asking price (or: price BONA-W001 onrequest)',
+  'brochure BONA-W001      rebuild the Bona-branded PDF from the original',
   'sold BONA-W001          mark it sold   (also: reserved / available)',
   'hide BONA-W001          keep it off the site  (show BONA-W001 puts it back)',
   'status                  what the intake is doing',

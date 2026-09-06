@@ -5,8 +5,9 @@ import { ROOMS } from '../../../scripts/curate/rooms.mjs';
 export const ANNOUNCE = [
   '*Bona intake connected.*',
   '',
-  'Send a property brochure PDF here and it goes on the website.',
-  'Caption hints: `rent` · `off-plan` · `SAR 4,500,000` · `#test` (dry run) · `#brochure` (also publish the PDF) · `#hidden`',
+  'Send a property brochure PDF here and it goes on the website — the brochure itself comes',
+  'back out under Bona branding, on the listing page as *Download brochure*.',
+  'Caption hints: `rent` · `off-plan` · `SAR 4,500,000` · `#test` (dry run) · `#nobrochure` (no PDF on the page) · `#hidden`',
   '',
   'Send `help` for the commands.',
 ].join('\n');
@@ -37,6 +38,10 @@ export function published(report) {
     `Published — live in about 3 minutes: ${report.url}`,
     `${l.images.length} photos · cover: ${coverOf(l)} · ${priceText(l.price)}`,
   ];
+  if (l.brochureUrl) {
+    const mb = report.brochure?.bytes ? ` (${(report.brochure.bytes / 1048576).toFixed(1)} MB)` : '';
+    lines.push(`📄 Brochure re-published under Bona branding${mb}: ${l.brochureUrl}`);
+  }
   if (l.hidden) lines.push('_Hidden: it is in the repo but not on the site (`show ' + l.id + '` publishes it)._');
   const warn = (report.warnings || []).filter(Boolean).slice(0, 3);
   if (warn.length) lines.push('', ...warn.map((w) => `⚠️ ${w}`));
@@ -76,6 +81,21 @@ export const failed = () => '⚠️ Something went wrong — nothing was publish
 export const notLive = (url, minutes) => `⚠️ The page is still not answering ${minutes} minutes after the push: ${url}\nThe listing is committed — check the GitHub Pages deploy.`;
 export const alreadyLive = (info) => `Already published: ${info.url}\n(${info.id})`;
 export const notFound = (id) => `No listing called ${id}. Send \`status\` to see what is live.`;
+
+/** `brochure <id>` — the branded PDF was rebuilt from the developer's original. */
+export function brochureRebuilt(id, listing, brochure = {}) {
+  const mb = brochure.bytes ? `${(brochure.bytes / 1048576).toFixed(1)} MB` : null;
+  const shrunk = brochure.srcBytes && brochure.bytes && brochure.srcBytes > brochure.bytes * 1.05
+    ? ` (from ${(brochure.srcBytes / 1048576).toFixed(1)} MB)` : '';
+  const size = mb ? `${mb}${shrunk} · ${brochure.pages ?? '?'} pages` : '';
+  return [
+    `📄 Bona-branded brochure rebuilt — *${listing.title.en}* (${id})`,
+    size,
+    listing.brochureUrl || '',
+    '',
+    commandsFor(id),
+  ].filter(Boolean).join('\n');
+}
 export const removed = (id, title) => `🗑️ Removed *${title}* (${id}). It comes off the site with the next deploy.`;
 export const updated = (id, what, listing) => `✏️ ${what} — *${listing.title.en}* (${id})\n${commandsFor(id)}`;
 

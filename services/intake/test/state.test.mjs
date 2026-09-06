@@ -166,7 +166,13 @@ describe('reply messages', () => {
   });
 
   it('the announcement documents the caption hints', () => {
-    for (const hint of ['#test', '#brochure', 'rent', 'help']) assert.ok(msg.ANNOUNCE.includes(hint), hint);
+    for (const hint of ['#test', '#nobrochure', 'rent', 'help']) assert.ok(msg.ANNOUNCE.includes(hint), hint);
+  });
+
+  // The brochure being re-published under Bona branding is the surprising part of the
+  // service; the greeting is the only place the owner is told, so it is pinned here.
+  it('the announcement says the brochure comes back branded', () => {
+    assert.match(msg.ANNOUNCE, /Bona branding/i);
   });
 });
 

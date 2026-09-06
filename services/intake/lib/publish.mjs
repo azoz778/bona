@@ -15,6 +15,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /** The only paths the intake is ever allowed to stage. Nothing else is committed. */
+// `public/listings` is a PREFIX, so everything a listing owns is already covered:
+// `public/listings/<slug>/NN.jpg`, `NN-thumb.webp` and the Bona-branded
+// `public/listings/<slug>/brochure.pdf`. Nothing new had to be added for the brochure —
+// underAllowed() below matches on the `<allowed>/` prefix, and publish.test.mjs pins it.
 export const ALLOWED_PATHS = ['public/listings', 'scripts/curate/inbox', 'src/data/listings.json'];
 /** Where a crashed job can leave untracked files behind. */
 export const SCRATCH_PATHS = ['public/listings', 'scripts/curate/inbox'];
@@ -160,7 +164,14 @@ export async function waitForLive(url, { timeoutMs = 600000, intervalMs = 20000,
   return false;
 }
 
-/** Copy the brochure into public/listings/<slug>/brochure.pdf. */
+/**
+ * Copy a PDF into public/listings/<slug>/brochure.pdf.
+ *
+ * The pipeline no longer uses this: it stages the BRANDED brochure inside the run's staging
+ * directory (see lib/brochure.mjs), which is promoted and rolled back with the photos. Kept
+ * for a manual repair — putting a hand-made brochure on a listing — and because it is the
+ * one place that names the path.
+ */
 export function writeBrochure(repo, slug, pdfPath) {
   const dir = path.join(repo, 'public', 'listings', slug);
   fs.mkdirSync(dir, { recursive: true });

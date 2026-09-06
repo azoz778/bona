@@ -21,6 +21,25 @@ describe('parseCaption', () => {
     assert.deepEqual(c.tags.sort(), ['brochure', 'hidden', 'test']);
   });
 
+  // Every accepted brochure is re-published under Bona branding now, so #brochure only says
+  // out loud what already happens and #nobrochure is the flag that changes anything.
+  it('reads #nobrochure in all the shapes the owner might type it', () => {
+    for (const caption of ['villa #nobrochure', 'villa #nopdf', 'villa #no-brochure', 'villa #no-pdf']) {
+      assert.equal(parseCaption(caption).noBrochure, true, caption);
+    }
+  });
+
+  it('leaves noBrochure false when nothing was asked for', () => {
+    assert.equal(parseCaption('').noBrochure, false);
+    assert.equal(parseCaption('villa #brochure').noBrochure, false);
+  });
+
+  it('#brochure is a no-op alias and never switches the brochure OFF', () => {
+    const c = parseCaption('villa #brochure #nobrochure');
+    assert.equal(c.publishBrochure, true);
+    assert.equal(c.noBrochure, true, '#nobrochure is the one the pipeline reads');
+  });
+
   it('maps rent hints in both languages and defaults the period to year', () => {
     assert.equal(parseCaption('for rent').category, 'rent');
     assert.equal(parseCaption('للإيجار').category, 'rent');
@@ -109,6 +128,21 @@ describe('parseCommand', () => {
     assert.deepEqual(parseCommand('show BONA-W003'), { cmd: 'hidden-set', id: 'BONA-W003', hidden: false });
   });
 
+  // `brochure <id>` re-runs rebrand_pdf.py against the original PDF still on disk. It is
+  // what the owner reaches for after `price` or a title fix: those facts are printed on the
+  // brochure's cover, so the PDF goes stale the moment they change.
+  it('parses brochure <id>, and `pdf` as its alias', () => {
+    assert.deepEqual(parseCommand('brochure BONA-W003'), { cmd: 'brochure', id: 'BONA-W003' });
+    assert.deepEqual(parseCommand('brochure bona-w003'), { cmd: 'brochure', id: 'BONA-W003' });
+    assert.deepEqual(parseCommand('/pdf BONA-W012'), { cmd: 'brochure', id: 'BONA-W012' });
+  });
+
+  it('asks for an id rather than guessing which listing to rebuild', () => {
+    assert.equal(parseCommand('brochure').cmd, 'error');
+    assert.match(parseCommand('brochure').message, /brochure BONA-W001/);
+    assert.equal(parseCommand('brochure BONA-003').cmd, 'error', 'curated ids are not editable from WhatsApp');
+  });
+
   it('parses help / status / retry, with or without a leading slash', () => {
     assert.equal(parseCommand('help').cmd, 'help');
     assert.equal(parseCommand('/help').cmd, 'help');
@@ -117,8 +151,12 @@ describe('parseCommand', () => {
   });
 
   it('documents every command it accepts', () => {
-    for (const verb of ['remove', 'hero', 'price', 'sold', 'hide', 'status']) {
+    for (const verb of ['remove', 'hero', 'price', 'brochure', 'sold', 'hide', 'status']) {
       assert.ok(HELP_TEXT.includes(verb), `HELP_TEXT should mention ${verb}`);
     }
+  });
+
+  it('tells the owner about #nobrochure, the only caption flag that changes the PDF', () => {
+    assert.ok(HELP_TEXT.includes('#nobrochure'));
   });
 });
