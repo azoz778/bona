@@ -1,0 +1,188 @@
+{
+  "id": "BONA-W002",
+  "slug": "nuzul-khayala-residences-north-jeddah",
+  "sourceRef": "WA-20260906-AC20EE",
+  "status": "available",
+  "category": "off-plan",
+  "type": "apartment",
+  "kind": "apartment",
+  "featured": false,
+  "title": {
+    "en": "Nuzul Khayala Residences, North Jeddah",
+    "ar": "نزل خيالة، شمال جدة"
+  },
+  "location": {
+    "district": {
+      "en": "Khayala Suburb",
+      "ar": "ضاحية خيالة"
+    },
+    "city": {
+      "en": "Jeddah",
+      "ar": "جدة"
+    },
+    "country": {
+      "en": "Saudi Arabia",
+      "ar": "المملكة العربية السعودية"
+    },
+    "countryCode": "SA"
+  },
+  "price": {
+    "amount": null,
+    "currency": "SAR",
+    "from": false,
+    "period": null,
+    "onRequest": true
+  },
+  "specs": {
+    "beds": null,
+    "baths": null,
+    "areaSqm": null,
+    "plotSqm": null,
+    "yearBuilt": null,
+    "floors": null
+  },
+  "images": [
+    {
+      "src": "/listings/nuzul-khayala-residences-north-jeddah/01.jpg",
+      "thumb": "/listings/nuzul-khayala-residences-north-jeddah/01-thumb.webp",
+      "alt": {
+        "en": "Exterior — Nuzul Khayala Residences, North Jeddah",
+        "ar": "الواجهة الخارجية — نزل خيالة، شمال جدة"
+      }
+    },
+    {
+      "src": "/listings/nuzul-khayala-residences-north-jeddah/02.jpg",
+      "thumb": "/listings/nuzul-khayala-residences-north-jeddah/02-thumb.webp",
+      "alt": {
+        "en": "Façade at night — Nuzul Khayala Residences, North Jeddah",
+        "ar": "الواجهة ليلاً — نزل خيالة، شمال جدة"
+      }
+    },
+    {
+      "src": "/listings/nuzul-khayala-residences-north-jeddah/03.jpg",
+      "thumb": "/listings/nuzul-khayala-residences-north-jeddah/03-thumb.webp",
+      "alt": {
+        "en": "Living room — Nuzul Khayala Residences, North Jeddah",
+        "ar": "غرفة المعيشة — نزل خيالة، شمال جدة"
+      }
+    },
+    {
+      "src": "/listings/nuzul-khayala-residences-north-jeddah/04.jpg",
+      "thumb": "/listings/nuzul-khayala-residences-north-jeddah/04-thumb.webp",
+      "alt": {
+        "en": "Dining room — Nuzul Khayala Residences, North Jeddah",
+        "ar": "غرفة الطعام — نزل خيالة، شمال جدة"
+      }
+    },
+    {
+      "src": "/listings/nuzul-khayala-residences-north-jeddah/05.jpg",
+      "thumb": "/listings/nuzul-khayala-residences-north-jeddah/05-thumb.webp",
+      "alt": {
+        "en": "Living room — Nuzul Khayala Residences, North Jeddah",
+        "ar": "غرفة المعيشة — نزل خيالة، شمال جدة"
+      }
+    },
+    {
+      "src": "/listings/nuzul-khayala-residences-north-jeddah/06.jpg",
+      "thumb": "/listings/nuzul-khayala-residences-north-jeddah/06-thumb.webp",
+      "alt": {
+        "en": "Bathroom — Nuzul Khayala Residences, North Jeddah",
+        "ar": "الحمام — نزل خيالة، شمال جدة"
+      }
+    },
+    {
+      "src": "/listings/nuzul-khayala-residences-north-jeddah/07.jpg",
+      "thumb": "/listings/nuzul-khayala-residences-north-jeddah/07-thumb.webp",
+      "alt": {
+        "en": "Living room — Nuzul Khayala Residences, North Jeddah",
+        "ar": "غرفة المعيشة — نزل خيالة، شمال جدة"
+      }
+    }
+  ],
+  "description": {
+    "en": "Nuzul Khayala is a residential development in the Khayala suburb of north Jeddah, positioned along the city's future growth corridor. It sits close to Haramain Road, giving quick access across Jeddah's districts, and is within reach of King Faisal Specialist Hospital, Al Ruhaili station, Al Jawhara Mall and King Abdullah Medical Complex. The site is also near King Abdulaziz International Airport, King Abdullah Sports City and Al Jawhara Stadium, with future projects such as Marafy planned nearby.\n\nThe development comprises 18 residential buildings on a plot of roughly 30,000 square metres, with a combined built-up area of about 54,131 square metres, totalling 312 residential units. Units are offered across several layout types (A, B, C, D and AB), ranging from approximately 147 to 202 square metres, as single-level apartments or duplexes over two floors. Layouts include three to four bedrooms — some with two master suites — alongside a maid's room, guest bathroom and a laundry and dressing area.\n\nThe project is built under the direct supervision of the Ministry of Housing, with materials meeting Saudi Standards Organization requirements. The structural frame, thermal piping and waterproofing each carry a 10-year warranty, and electrical panels are covered for 20 years. Finishes include double-glazed, thermally insulated windows, external thermal insulation, and ceramic and marble to Saudi specifications.",
+    "ar": "يقع مشروع نزل خيالة في ضاحية خيالة شمال جدة، ضمن امتداد المدينة العقاري المستقبلي. يتميز الموقع بقربه من طريق الحرمين، ما يسهّل الوصول إلى مختلف أحياء جدة، كما يقع بالقرب من مستشفى الملك فيصل التخصصي ومحطة الرحيلي والجوهرة مول ومجمع الملك عبدالله الطبي. كذلك يقترب الموقع من مطار الملك عبدالعزيز الدولي ومدينة الملك عبدالله الرياضية واستاد الجوهرة، إلى جانب مشاريع مستقبلية كبرى في جدة مثل مرافئ.\n\nيضم المشروع 18 مبنى سكنياً على أرض تبلغ مساحتها نحو 30,000 متر مربع، بمساحة بناء إجمالية تقارب 54,131 متر مربع، ليصل إجمالي عدد الوحدات السكنية إلى 312 وحدة. تتوزع الوحدات على عدة نماذج تصميمية (A وB وC وD وAB) تتراوح مساحاتها بين 147 و202 متر مربع تقريباً، سواء كشقق بطابق واحد أو دوبلكس على طابقين. تضم التصاميم من ثلاث إلى أربع غرف نوم، بعضها بغرفتي ماستر، إضافة إلى غرفة خادمة وحمام ضيوف وغرفة غسيل وملابس.\n\nيُنفَّذ المشروع تحت إشراف مباشر من وزارة الإسكان، وتخضع جميع المواد المستخدمة لمطابقة مواصفات الهيئة السعودية للمواصفات والمقاييس. يُضمَن الهيكل الإنشائي والأنابيب الحرارية والعوازل المائية لمدة 10 سنوات لكل منها، بينما تُضمَن لوحات الكهرباء لمدة 20 عاماً. تشمل التشطيبات نوافذ زجاج مزدوج عازلة للحرارة، وعوازل حرارية للأسطح والجدران الخارجية، وسيراميك ورخام مطابقين للمواصفات السعودية."
+  },
+  "highlights": {
+    "en": [
+      "18 residential buildings",
+      "Units from 147–202 sqm",
+      "Apartment and duplex layouts",
+      "Near Haramain Road",
+      "10-year structural warranty",
+      "Close to King Abdulaziz Airport"
+    ],
+    "ar": [
+      "18 مبنى سكنياً",
+      "وحدات من 147 إلى 202 م²",
+      "تصاميم شقق ودوبلكس",
+      "قريب من طريق الحرمين",
+      "ضمان إنشائي 10 سنوات",
+      "قرب مطار الملك عبدالعزيز"
+    ]
+  },
+  "virtualTourUrl": null,
+  "brochureUrl": null,
+  "project": {
+    "name": {
+      "en": "Nuzul Khayala",
+      "ar": "نزل خيالة"
+    },
+    "developer": {
+      "en": "Faisal Bin Saedan",
+      "ar": "فيصل بن سعدان"
+    }
+  },
+  "unit": null,
+  "map": null,
+  "listedAt": "2026-09-06",
+  "hidden": false,
+  "_intake": {
+    "source": "whatsapp",
+    "pdfSha256": "ea2f59ab11e5e6b71d2a23937ae531a199cd7f9fbf154996f133a703176dbbc6",
+    "model": "sonnet",
+    "confidence": 0.78,
+    "warnings": [
+      "model-flagged"
+    ],
+    "images": [
+      {
+        "n": 1,
+        "candidate": 0,
+        "room": "exterior"
+      },
+      {
+        "n": 2,
+        "candidate": 6,
+        "room": "facade_night"
+      },
+      {
+        "n": 3,
+        "candidate": 10,
+        "room": "living"
+      },
+      {
+        "n": 4,
+        "candidate": 12,
+        "room": "dining"
+      },
+      {
+        "n": 5,
+        "candidate": 8,
+        "room": "living"
+      },
+      {
+        "n": 6,
+        "candidate": 11,
+        "room": "bathroom"
+      },
+      {
+        "n": 7,
+        "candidate": 9,
+        "room": "living"
+      }
+    ],
+    "createdAt": "2026-09-06T02:05:40.488Z",
+    "site": "https://bona.azoz.uk"
+  }
+}
