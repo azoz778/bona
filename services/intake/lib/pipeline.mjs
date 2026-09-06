@@ -35,6 +35,7 @@ import { log } from './log.mjs';
 import { extractPdf, renderPdfPages } from './pdf.mjs';
 import { compositePages, cropPhotoRegions, modelFlagsComposites } from './photo-regions.mjs';
 import { priceAppearsIn } from './price.mjs';
+import { pinFromLinks } from './geo.mjs';
 import { rebuild, resetTree } from './publish.mjs';
 
 export const sha256File = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -257,6 +258,25 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     }
   }
 
+  // --- 4b. map pin --------------------------------------------------------------
+  // A brochure almost never prints coordinates, but it very often hides a Google Maps link
+  // behind its location page. Two independent links must agree before we publish a pin —
+  // brochures link landmarks too (one links King Abdulaziz airport), and a wrong pin is
+  // worse than none. No pin here is not a failure: the site falls back to the district.
+  report.stage = 'map';
+  let mapPin = null;
+  try {
+    mapPin = await pinFromLinks(extraction.links);
+  } catch (e) {
+    log.warn('intake.map_failed', { error: String(e?.message || e) });
+  }
+  report.map = mapPin;
+  log.info('intake.map', { links: (extraction.links || []).length, pin: mapPin });
+  if (!mapPin && (extraction.links || []).some((l) => /maps/i.test(l.uri || ''))) {
+    report.warningCodes.push('map-unconfirmed');
+    report.warnings.push('the brochure has a map link but no two links agreed on one point, so the listing shows its district only');
+  }
+
   // --- 5. images + listing ----------------------------------------------------
   report.stage = 'listing';
   report.picks = picks;
@@ -305,7 +325,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       ai,
       images: picks.map((p) => ({ ...p, n: p.rank, src: `/listings/${slug}/${String(p.rank).padStart(2, '0')}.jpg`, thumb: `/listings/${slug}/${String(p.rank).padStart(2, '0')}-thumb.webp` })),
       slug, id, repo: cfg.repo, caption, site: cfg.site,
-      meta: { ...meta, sourceRef, pdfSha256: report.sha256, model: cfg.claudeModel, warningCodes: report.warningCodes },
+      meta: { ...meta, sourceRef, pdfSha256: report.sha256, model: cfg.claudeModel, warningCodes: report.warningCodes, map: mapPin },
     });
     const problems = checkListing(report.listingPreview, { minImages: cfg.minImages, maxImages: cfg.maxImages });
     if (problems.length) report.warnings.push(...problems);
@@ -328,7 +348,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
 
   const listing = buildListing({
     ai, images, slug, id, repo: cfg.repo, caption, site: cfg.site,
-    meta: { ...meta, sourceRef, brochureUrl: null, pdfSha256: report.sha256, model: cfg.claudeModel, hidden: caption.hidden, warningCodes: report.warningCodes },
+    meta: { ...meta, sourceRef, brochureUrl: null, pdfSha256: report.sha256, model: cfg.claudeModel, hidden: caption.hidden, warningCodes: report.warningCodes, map: mapPin },
   });
   const problems = checkListing(listing, { minImages: cfg.minImages, maxImages: cfg.maxImages });
   if (problems.length) {

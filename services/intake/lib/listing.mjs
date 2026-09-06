@@ -139,6 +139,7 @@ export const WARNING_CODES = new Set([
   'images-skipped',         // sharp could not decode one or more candidates
   'model-flagged',          // the model returned warnings; read them in the work dir's ai.json
   'photos-cropped',         // one or more photographs were cut out of a page that was one flattened picture
+  'map-unconfirmed',        // the brochure links a map but no two links agreed on one point -> district only
 ]);
 
 /**
@@ -223,7 +224,12 @@ export function buildListing({ ai, images, slug, id, repo, caption = {}, meta = 
     brochureUrl: meta.brochureUrl ?? null,
     project: l.project ?? null,
     unit: l.unit ?? null,
-    map: null,
+    // Pin from the brochure's own Google Maps hyperlink (lib/geo.mjs), when two independent
+    // links agreed on it. `mapPrecision` says how much to trust it: 'exact' is the pin the
+    // developer published, 'district' a district centroid filled in later by the site
+    // build. Null map => null precision; the site then shows the district text only.
+    map: meta.map ?? null,
+    mapPrecision: meta.map ? 'exact' : null,
     listedAt: meta.listedAt || todayRiyadh(now),
     hidden: Boolean(meta.hidden),
     _intake: {

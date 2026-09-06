@@ -17,6 +17,8 @@ stdout:
       "text": "all pages joined",
       "embeddedImageCount": 41,            # before filtering
       "rendered": false,                   # true when pages were rasterised
+      "links": [{"page": 9, "uri": "https://maps.app.goo.gl/..."}],  # hyperlink annotations
+
       "candidates": [
         { "index": 0, "file": "images/000.jpg", "abs": "/…/000.jpg",
           "width": 1600, "height": 1067, "page": 2, "source": "embedded",
@@ -64,6 +66,8 @@ MAX_PIXELS = 50_000_000         # decompression-bomb cap: never build a Pixmap b
 FLAT_RATIO = 0.015              # below this a bitmap is a logo/wordmark, never a photograph
 FLAT_MIN_COLOURS = 32
 MAX_CANDIDATES = 40
+MAX_LINKS = 200                 # hyperlink annotations returned; a brochure has a handful
+MAX_LINK_LEN = 2000             # a URI longer than this is not a map link
 MAX_PAGES = 60
 RENDER_DPI = 150
 RENDER_THRESHOLD = 3            # < this many usable embedded images -> rasterise pages
@@ -440,6 +444,31 @@ def main() -> int:
             except Exception:
                 continue
 
+    # Hyperlink annotations. A brochure rarely prints coordinates, but it very often hides
+    # a Google Maps link behind a "location" page — that is where a real pin comes from.
+    # Collected raw (page number + URI, deduplicated, capped); lib/geo.mjs decides which,
+    # if any, is the property.
+    links = []
+    seen_uri = set()
+    for i in range(pages):
+        try:
+            page_links = doc[i].get_links()
+        except Exception:
+            continue
+        for lnk in page_links:
+            uri = lnk.get("uri")
+            if not uri or not isinstance(uri, str) or len(uri) > MAX_LINK_LEN:
+                continue
+            key = (i + 1, uri)
+            if key in seen_uri:
+                continue
+            seen_uri.add(key)
+            links.append({"page": i + 1, "uri": uri})
+            if len(links) >= MAX_LINKS:
+                break
+        if len(links) >= MAX_LINKS:
+            break
+
     meta = {k: collapse(str(v)) for k, v in (doc.metadata or {}).items() if v}
     doc.close()
 
@@ -453,6 +482,7 @@ def main() -> int:
         "text": collapse("\n".join(page_text)),
         "embeddedImageCount": embedded_total,
         "rendered": rendered,
+        "links": links,
         "candidates": candidates,
     }, ensure_ascii=False))
     return 0

@@ -1,0 +1,139 @@
+{
+  "AIDA|Muscat": {
+    "lat": 23.5091205,
+    "lng": 58.6599331,
+    "source": "manual",
+    "matched": "يتي, ولاية مسقط, محافظة مسقط, عمان",
+    "query": "Yiti, Muscat, Oman",
+    "resolvedAt": "2026-09-06"
+  },
+  "Al Khalidiyah|Jeddah": {
+    "lat": 21.560194,
+    "lng": 39.133472,
+    "source": "nominatim",
+    "matched": "Al Khalidiyyah, Jeddah, Governorate of Jidda, Makkah Region, Saudi Arabia",
+    "osm": "relation/20039311",
+    "query": "الخالدية، جدة",
+    "resolvedAt": "2026-09-06"
+  },
+  "Al Nahda|Jeddah": {
+    "lat": 21.618494,
+    "lng": 39.128366,
+    "source": "nominatim",
+    "matched": "Al-Nahdah, Jeddah, Governorate of Jidda, Makkah Region, 23615, Saudi Arabia",
+    "osm": "relation/20039330",
+    "query": "النهضة، جدة",
+    "resolvedAt": "2026-09-06"
+  },
+  "Al Nuzhah|Jeddah": {
+    "lat": 21.624678,
+    "lng": 39.166174,
+    "source": "nominatim",
+    "matched": "Al-Nuzha, Jeddah, Governorate of Jidda, Makkah Region, Saudi Arabia",
+    "osm": "relation/20039236",
+    "query": "النزهة، جدة",
+    "resolvedAt": "2026-09-06"
+  },
+  "Al Rawdah|Jeddah": {
+    "lat": 21.565901,
+    "lng": 39.15729,
+    "source": "nominatim",
+    "matched": "Al-Rawdah, Jeddah, Governorate of Jidda, Makkah Region, Saudi Arabia",
+    "osm": "relation/20039328",
+    "query": "الروضة، جدة",
+    "resolvedAt": "2026-09-06"
+  },
+  "Al Salamah|Jeddah": {
+    "lat": 21.593996,
+    "lng": 39.152355,
+    "source": "nominatim",
+    "matched": "Al-Salamah, Jeddah, Governorate of Jidda, Makkah Region, Saudi Arabia",
+    "osm": "relation/20039239",
+    "query": "السلامة، جدة",
+    "resolvedAt": "2026-09-06"
+  },
+  "Al Shati 6|Jeddah": {
+    "lat": 21.600939,
+    "lng": 39.113731,
+    "source": "nominatim",
+    "matched": "Al-Shatee, Jeddah, Governorate of Jidda, Makkah Region, Saudi Arabia",
+    "osm": "relation/20039252",
+    "query": "الشاطئ 6، جدة",
+    "resolvedAt": "2026-09-06"
+  },
+  "Al Shati, Corniche|Jeddah": {
+    "lat": 21.600939,
+    "lng": 39.113731,
+    "source": "manual",
+    "matched": "Al-Shatee, Jeddah, Governorate of Jidda, Makkah Region, Saudi Arabia",
+    "query": "الشاطئ، جدة",
+    "resolvedAt": "2026-09-06"
+  },
+  "Al Shati|Jeddah": {
+    "lat": 21.600939,
+    "lng": 39.113731,
+    "source": "nominatim",
+    "matched": "Al-Shatee, Jeddah, Governorate of Jidda, Makkah Region, Saudi Arabia",
+    "osm": "relation/20039252",
+    "query": "الشاطئ، جدة",
+    "resolvedAt": "2026-09-06"
+  },
+  "Al Zahra|Jeddah": {
+    "lat": 21.590405,
+    "lng": 39.134588,
+    "source": "nominatim",
+    "matched": "Al-Zahra, Jeddah, Governorate of Jidda, Makkah Region, Saudi Arabia",
+    "osm": "relation/20039317",
+    "query": "الزهراء، جدة",
+    "resolvedAt": "2026-09-06"
+  },
+  "Al-Salama|Jeddah": {
+    "lat": 21.593996,
+    "lng": 39.152355,
+    "source": "nominatim",
+    "matched": "Al-Salamah, Jeddah, Governorate of Jidda, Makkah Region, Saudi Arabia",
+    "osm": "relation/20039239",
+    "query": "السلامة، جدة",
+    "resolvedAt": "2026-09-06"
+  },
+  "Benahavís, Costa del Sol|Marbella": {
+    "lat": 36.5222736,
+    "lng": -5.0441068,
+    "source": "manual",
+    "matched": "Benahavís, Costa del Sol Occidental, Málaga, Andalucía, Spain",
+    "query": "Benahavís, Málaga, Spain",
+    "resolvedAt": "2026-09-06"
+  },
+  "District 11, Meydan|Dubai": {
+    "lat": 25.1629302,
+    "lng": 55.3142967,
+    "source": "manual",
+    "matched": "ميدان, ند الشبا, دبي, الإمارات العربية المتحدة",
+    "query": "Meydan, Dubai",
+    "resolvedAt": "2026-09-06"
+  },
+  "Durrat Al Arous|Jeddah": {
+    "lat": 21.9458152,
+    "lng": 38.9575876,
+    "source": "manual",
+    "matched": "درة العروس, 21991, السعودية",
+    "query": "درة العروس",
+    "resolvedAt": "2026-09-06"
+  },
+  "Meydan District 11|Dubai": {
+    "lat": 25.1629302,
+    "lng": 55.3142967,
+    "source": "manual",
+    "matched": "ميدان, ند الشبا, دبي, الإمارات العربية المتحدة",
+    "query": "Meydan, Dubai",
+    "resolvedAt": "2026-09-06"
+  },
+  "Parc des Ibis, Île-de-France|Le Vésinet": {
+    "lat": 48.894254,
+    "lng": 2.1347291,
+    "source": "manual",
+    "matched": "Le Vésinet, Saint-Germain-en-Laye, Yvelines, Île-de-France, France",
+    "query": "Le Vésinet, Yvelines, France",
+    "resolvedAt": "2026-09-06"
+  }
+}

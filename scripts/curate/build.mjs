@@ -132,6 +132,23 @@ if (inbox.length || inboxHidden) console.log(`WhatsApp intake: appended ${inbox.
 
 const published = [...live, ...inbox];
 
+// ---- approximate map pins --------------------------------------------------------------
+// Most listings have no exact pin: TK's API carries no coordinates and most brochures carry
+// no map link. Rather than show nothing, fill in the DISTRICT centroid (src/data/
+// district-pins.json, resolved once by scripts/curate/district-pins.mjs) and mark it
+// `mapPrecision: "district"` so the page can label it approximate. An exact pin is never
+// overwritten, and a district with no trustworthy pin stays null — the listing then shows
+// its district as text only, which is the honest answer.
+const DISTRICT_PINS = JSON.parse(fs.readFileSync(path.join(ROOT, 'src', 'data', 'district-pins.json'), 'utf8'));
+let exactPins = 0, districtPins = 0, noPin = 0;
+for (const l of published) {
+  if (l.map) { l.mapPrecision = l.mapPrecision || 'exact'; exactPins++; continue; }
+  const pin = DISTRICT_PINS[`${l.location?.district?.en}|${l.location?.city?.en}`];
+  if (pin) { l.map = { lat: pin.lat, lng: pin.lng }; l.mapPrecision = 'district'; districtPins++; }
+  else { l.map = null; l.mapPrecision = null; noPin++; }
+}
+console.log(`Map pins: ${exactPins} exact, ${districtPins} district-level, ${noPin} without a pin`);
+
 // Every site-local image must actually exist in public/ — src AND thumb, for the curated
 // set as well as the intake set. A missing file is a broken page, so it fails the build.
 for (const l of published) {

@@ -142,3 +142,66 @@ per listing.
   video committed straight into git will bloat the repo as more are added — if that becomes a
   real problem, look at Git LFS or moving intake video (like intake photos today) to a real
   object store instead of the git-and-GitHub-Pages path used now.
+
+## Map pins (2026-09-06)
+Every listing that can be placed shows a map on its page. Two fields carry it, and they
+always travel together — `validate.mjs` rejects a pin with no precision and a precision with
+no pin:
+
+- `map`: `{ lat, lng } | null` — the pin, rounded to 6 decimals (~0.1 m).
+- `mapPrecision`: `"exact" | "district" | null`
+  - **`exact`** — a pin somebody published: a land plot from the register, or a Google Maps
+    link inside the owner's brochure. The page labels it *Exact location* and it is the ONLY
+    kind of pin emitted as schema.org `GeoCoordinates` (`lib/seo.ts`).
+  - **`district`** — a district centroid filled in by `scripts/curate/build.mjs` from
+    `src/data/district-pins.json`. The page labels it *Approximate — district only* and says
+    the pin marks the district, not the residence. Never published as `GeoCoordinates`: a
+    centroid told to a search engine as the home's position is a false claim.
+  - **`null`** — no trustworthy pin. The listing shows its district as text and no map. This
+    is a correct outcome, not a gap to paper over. Four listings sit here today (Al Rayyan,
+    Al-Murjan, North Riyadh, Khayala Suburb): OSM has no boundary for them and nothing else
+    in our data has coordinates.
+
+Land is unchanged and stricter than before: a land plot still needs a pin, and it must now
+be `exact` — a district centroid for a plot would be worse than nothing.
+
+### Where an exact pin comes from
+A brochure practically never prints coordinates, but it very often hides a Google Maps link
+behind its location page. `services/intake/extract_pdf.py` now returns the PDF's hyperlink
+annotations (`links: [{page, uri}]`) and `services/intake/lib/geo.mjs` turns them into a pin:
+
+1. Deduplicate by URI — the same link on five pages is one source, not five.
+2. Follow `maps.app.goo.gl` shortlinks (max 6 per brochure, 8 s each; a dead one is skipped).
+3. Parse `!3d/!4d` (the place's pin) > `?q=lat,lng` > `@lat,lng,z` (the viewport centre).
+4. **Corroborate**: cluster the results and take the centroid of the largest cluster, but
+   only when at least two independent links agree to within `PIN_AGREE_M` (500 m).
+
+Step 4 is the important one. Brochures link landmarks as well as the property — one Bona
+brochure links King Abdulaziz airport and a city-level view of Jeddah, and either one taken
+alone would put a Jeddah townhouse 35 km from where it stands. A single uncorroborated link
+is therefore refused, and the listing carries `map-unconfirmed` in `_intake.warnings`.
+
+Four listings (BONA-W003…W006, all units in Wajhat Al-Warf) were pinned this way at
+`21.338, 39.304778` — a shortlink and a place link in each brochure agreeing exactly.
+
+### District pins
+`node scripts/curate/district-pins.mjs` resolves each distinct district once against
+OpenStreetMap Nominatim and writes `src/data/district-pins.json` (`--refresh` re-resolves).
+The site build reads only that file — it never calls the network. Rules that keep it honest:
+
+- Only OSM `place`/`boundary` features are accepted. A bank, a compound, a golf resort or a
+  road named after the district all merely SIT in one; Nominatim returns them readily and
+  pinning to them would be a lie with decimals on it.
+- The result must land within 60 km of its city anchor.
+- Saudi districts are queried in **Arabic first** (`النزهة، جدة`, then `حي النزهة، جدة`) —
+  OSM tags them in Arabic and barely at all in English.
+- A pin edited by hand keeps `"source": "manual"` and is never overwritten. Every entry
+  stores `matched` (the OSM display name) so a wrong pin can be spotted by eye.
+
+### Prices are unchanged
+Nothing here loosens the TAQEEM rule. A price is still only published when the number is
+printed in the brochure or typed by the owner (`services/intake/lib/price.mjs`), and the
+intake never estimates. As of 2026-09-06 eight listings show *Price on request* because
+their brochures genuinely print no price anywhere — verified in the text layer, in the link
+annotations and by the model's own reading. Set one with `price <id> <amount> [currency]`
+in the WhatsApp group.

@@ -22,8 +22,10 @@ export interface Listing {
   /** Units inside a development (e.g. Kian Residence). */
   project?: { name: Localised; developer?: Localised | null } | null;
   unit?: { floor?: string | number | null; block?: string | null; unitRef?: string | null } | null;
-  /** Land plots: pin for a map link. */
+  /** Map pin. Exact where the developer or the land register gave one, otherwise the district centroid. */
   map?: { lat: number; lng: number } | null;
+  /** How much the pin is worth: 'exact' is the published pin, 'district' a centroid the build filled in. Null when there is no pin. */
+  mapPrecision?: 'exact' | 'district' | null;
 }
 
 export const listings: Listing[] = raw as Listing[];

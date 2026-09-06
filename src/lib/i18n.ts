@@ -269,6 +269,15 @@ export const ui = {
   block: s('Block', 'المبنى'),
   openMap: s('Open location in Google Maps', 'فتح الموقع في خرائط جوجل'),
 
+  // Map
+  listingMapTitle: s('Where it is', 'أين يقع'),
+  showMap: s('Show the map', 'إظهار الخريطة'),
+  listingMapFrameTitle: s('Map of {title}', 'خريطة {title}'),
+  mapExact: s('Exact location', 'الموقع الدقيق'),
+  mapApprox: s('Approximate — district only', 'تقريبي — الحي فقط'),
+  mapExactNote: s('The pin is the location given by the developer.', 'الدبوس هو الموقع كما حدده المطوّر.'),
+  mapApproxNote: s('The pin marks the district, not the residence itself. Ask us for the exact address.', 'يشير الدبوس إلى الحي وليس إلى المسكن نفسه. اسألنا عن العنوان الدقيق.'),
+
   // Matterport / tours
   tour3dTitle: s('Walk through in 3D', 'تجوّل في العقار بتقنية ثلاثية الأبعاد'),
   tour3dIntro: s('A Matterport scan of the residence. Move from room to room, look around and measure, before you visit.', 'مسح ماتربورت للمسكن. تنقّل بين الغرف وانظر حولك وقِس الأبعاد، قبل الزيارة.'),
