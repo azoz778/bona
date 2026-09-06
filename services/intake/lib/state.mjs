@@ -183,10 +183,16 @@ export function createState(file) {
       save();
       return data.jobs[id];
     },
-    /** The job threw. Keep it pending until MAX_JOB_ATTEMPTS, then give up on it. */
+    /**
+     * The job threw. Keep it pending until MAX_JOB_ATTEMPTS, then give up on it.
+     * Only a job still in flight can fail: one already closed — completePublish() /
+     * completeVideo() ran and then the WhatsApp reply threw — stays closed. Reopening it
+     * would replay a finished publish (Codex review, 2026-09-06).
+     */
     failJob(id, message) {
       const job = data.jobs[id];
       if (!job) return null;
+      if (job.status !== 'pending') return job;
       const attempts = (job.attempts ?? 0) + 1;
       data.jobs[id] = {
         ...job,

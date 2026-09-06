@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { pickListingForVideo } from '../lib/video.mjs';
+import { pickListingForVideo, wakeParkedClip } from '../lib/video.mjs';
 import { createState } from '../lib/state.mjs';
 import { messageTs, oldestFirst } from '../lib/evolution.mjs';
 import * as edits from '../lib/edits.mjs';
@@ -98,6 +98,56 @@ describe('pickListingForVideo — a captionless clip belongs to the nearest broc
   });
 });
 
+describe('wakeParkedClip — a parked clip comes back once per reason, never on every poll', () => {
+  const WAIT = 30 * 60 * 1000;
+  const at = (sec) => new Date(sec * 1000).toISOString();
+  const parked = (extra = {}) => ({ id: 'VID', jid: JID, kind: 'video', status: 'pending', waitSince: at(T0 + 12), ...extra });
+
+  it('keeps waiting while the named brochure is still publishing, wakes once it has answered', () => {
+    const jobs = [job('PDF_A', T0, 'pending')];
+    assert.equal(wakeParkedClip(parked({ waitingFor: 'PDF_A' }), jobs, { now: (T0 + 60) * 1000, waitMs: WAIT }).wake, false);
+    jobs[0].status = 'done';
+    assert.deepEqual(wakeParkedClip(parked({ waitingFor: 'PDF_A' }), jobs, { now: (T0 + 60) * 1000, waitMs: WAIT }), { wake: true, reason: 'brochure-done' });
+    assert.equal(wakeParkedClip(parked({ waitingFor: 'PDF_GONE' }), jobs, { now: (T0 + 60) * 1000, waitMs: WAIT }).reason, 'brochure-gone');
+  });
+
+  // Codex review 2026-09-06: without a cursor, one rejected PDF that arrived after the clip was
+  // parked satisfied "a newer brochure exists" on every poll — a requeue loop until expiry.
+  it('with nothing to wait on, wakes ONCE for a new brochure, then not again for the same one', () => {
+    const jobs = [{ ...job('PDF_LATER', T0 + 40, 'rejected'), at: at(T0 + 45) }];
+    const first = wakeParkedClip(parked(), jobs, { now: (T0 + 90) * 1000, waitMs: WAIT });
+    assert.equal(first.wake, true);
+    assert.equal(first.reason, 'new-brochure');
+    assert.equal(first.cursor, at(T0 + 45));
+    // index.mjs stores that cursor on the job; the same rejected PDF must not wake it again.
+    const again = wakeParkedClip(parked({ wakeCursor: first.cursor }), jobs, { now: (T0 + 110) * 1000, waitMs: WAIT });
+    assert.deepEqual(again, { wake: false, reason: 'nothing-new' });
+    // A brochure newer than the cursor wakes it once more.
+    jobs.push({ ...job('PDF_NEWER', T0 + 100, 'pending'), at: at(T0 + 105) });
+    assert.equal(wakeParkedClip(parked({ wakeCursor: first.cursor }), jobs, { now: (T0 + 130) * 1000, waitMs: WAIT }).cursor, at(T0 + 105));
+  });
+
+  it('ignores other video jobs and other groups when looking for a new brochure', () => {
+    const jobs = [
+      { id: 'V2', jid: JID, kind: 'video', status: 'pending', at: at(T0 + 50) },
+      { ...job('PDF_ELSEWHERE', T0 + 50, 'done'), jid: 'other@g.us', at: at(T0 + 50) },
+    ];
+    assert.equal(wakeParkedClip(parked(), jobs, { now: (T0 + 90) * 1000, waitMs: WAIT }).wake, false);
+  });
+
+  it('wakes on expiry whatever else is true, and never wakes a clip that is not parked', () => {
+    assert.deepEqual(wakeParkedClip(parked({ waitingFor: 'PDF_A' }), [job('PDF_A', T0, 'pending')], { now: (T0 + 12) * 1000 + WAIT + 1, waitMs: WAIT }), { wake: true, reason: 'expired' });
+    assert.equal(wakeParkedClip({ id: 'V', kind: 'video', status: 'pending' }, [], { waitMs: WAIT }).wake, false);
+  });
+
+  it('index.mjs stores the cursor it is handed', () => {
+    const src = fs.readFileSync(new URL('../index.mjs', import.meta.url), 'utf8');
+    const rq = src.slice(src.indexOf('function requeueWaitingVideos('), src.indexOf('// ---------------------------------------------------------------- queue'));
+    assert.match(rq, /wakeParkedClip\(job, Object\.values\(state\.raw\.jobs/);
+    assert.match(rq, /wakeCursor: w\.cursor/);
+  });
+});
+
 describe('state — video jobs and the message → listing lookup', () => {
   let dir;
   let file;
@@ -134,6 +184,27 @@ describe('state — video jobs and the message → listing lookup', () => {
     assert.equal(done.waitingFor, null);
     assert.equal(createState(file).pendingJobs().some((j) => j.id === 'VID_2'), false, 'never replayed again');
     assert.equal(s.completeVideo({ messageId: 'unknown' }), null);
+  });
+
+  // Codex review 2026-09-06: publishEdit pushed, onPushed closed the job, then the WhatsApp
+  // reply threw → drain() called failJob(), which reopened a finished publish as `pending`.
+  it('failJob never reopens a job that is already closed — a reply failing after the push is not a failed publish', () => {
+    const s = createState(file);
+    s.addJob({ id: 'VID_3', jid: JID, kind: 'video', ts: T0 });
+    s.completeVideo({ messageId: 'VID_3', id: 'BONA-W008', src: '/listings/k/v-01.mp4' });
+    const after = s.failJob('VID_3', 'sendText: HTTP 500');
+    assert.equal(after.status, 'done');
+    assert.equal(after.attempts, 0);
+    assert.equal(after.lastError, undefined);
+    assert.equal(createState(file).pendingJobs().some((j) => j.id === 'VID_3'), false);
+    // The same rule protects a rejected PDF whose reply failed.
+    s.addJob({ id: 'PDF_R', jid: JID });
+    s.finishJob('PDF_R', 'rejected');
+    assert.equal(s.failJob('PDF_R', 'boom').status, 'rejected');
+    // And a job still in flight still fails normally.
+    s.addJob({ id: 'VID_4', jid: JID, kind: 'video', ts: T0 });
+    assert.equal(s.failJob('VID_4', 'boom').status, 'pending');
+    assert.equal(s.failJob('VID_4', 'boom').attempts, 2);
   });
 
   it('forgetSeen lets a dropped message be picked up again — the recovery path for clips the old daemon swallowed', () => {
