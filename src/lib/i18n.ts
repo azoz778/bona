@@ -380,6 +380,14 @@ export const ui = {
 
   // Concierge — storage notice under the chat composer
   conciergeNotice: s('Conversations are stored to handle your enquiry', 'تُحفظ المحادثات لمتابعة استفسارك'),
+
+  // REGA advertising block on listing pages (RegaBlock.astro)
+  regaAdvertiser: s('Advertiser', 'المُعلن'),
+  regaFal: s('FAL licence', 'رخصة فال'),
+  regaAdLicence: s('Advertising licence', 'رخصة الإعلان العقاري'),
+  regaValidUntil: s('valid until', 'سارية حتى'),
+  regaWafi: s('Wafi project licence', 'رخصة مشروع وافي'),
+  regaVerify: s('Verify', 'تحقق'),
 } as const;
 
 export type UiKey = keyof typeof ui;
