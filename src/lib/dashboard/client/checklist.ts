@@ -4,8 +4,9 @@ import { $, $$ } from './dom';
 import { toast } from './dom';
 
 export function initChecklist(): void {
-  const root = $('#checklist');
-  if (!root) return;
+  const found = $('#checklist');
+  if (!found) return;
+  const root: HTMLElement = found;
   const boxes = $$<HTMLInputElement>('input[type="checkbox"][data-check-id]', root);
   const raw = load<unknown>(KEYS.checklist, {});
   const state: Record<string, true> = {};

@@ -8,7 +8,7 @@ import type { Listing, Localised } from '../listings';
 export type Kind = 'house' | 'apartment' | 'land' | 'building';
 export type KindOrOther = Kind | 'other';
 
-export interface ListingExt extends Listing {
+export interface ListingExt extends Omit<Listing, 'kind' | 'project'> {
   kind?: string | null;
   project?: { name?: Partial<Localised> | null; developer?: Partial<Localised> | null } | null;
   unit?: { floor?: string | number | null; block?: string | null; unitRef?: string | null } | null;

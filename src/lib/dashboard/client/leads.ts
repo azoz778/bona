@@ -89,15 +89,18 @@ export function initLeads(data: DashData): void {
   const root = $('#leads');
   if (!root) return;
   const store = new LeadStore(data.listings);
-  const tbody = $<HTMLTableSectionElement>('[data-leads-body]', root);
+  const tbodyFound = $<HTMLTableSectionElement>('[data-leads-body]', root);
   const empty = $('#leads-empty', root);
   const count = $('#lead-count', root);
   const search = $<HTMLInputElement>('#lead-search', root);
   const stageFilter = $<HTMLSelectElement>('#lead-stage-filter', root);
-  const dialog = $<HTMLDialogElement>('#lead-dialog');
-  const form = $<HTMLFormElement>('#lead-form');
+  const dialogFound = $<HTMLDialogElement>('#lead-dialog');
+  const formFound = $<HTMLFormElement>('#lead-form');
   const dialogTitle = $('#lead-dialog-title');
-  if (!tbody || !dialog || !form) return;
+  if (!tbodyFound || !dialogFound || !formFound) return;
+  const tbody: HTMLTableSectionElement = tbodyFound;
+  const dialog: HTMLDialogElement = dialogFound;
+  const form: HTMLFormElement = formFound;
 
   // Property select: available listings first, then the rest.
   const propSelect = form.elements.namedItem('propertyId') as HTMLSelectElement | null;

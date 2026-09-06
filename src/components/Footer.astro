@@ -10,17 +10,18 @@ const year = new Date().getFullYear();
 const addr = site.address[locale];
 const wa = waLink(site.whatsapp.wa, t(ui.formGreeting, locale));
 const extraKinds = kindsPresent().filter(k => k === 'land' || k === 'building');
+const row = (href: string, label: string): [string, string] => [href, label];
 const nav: [string, string][] = [
-  [localePath(locale, '/properties/houses/'), t(ui.navHouses, locale)],
-  [localePath(locale, '/properties/apartments/'), t(ui.navApartments, locale)],
-  ...extraKinds.map(k => [localePath(locale, `/properties/${kindSlug[k]}/`), t(kindLabelPlural[k], locale)] as [string, string]),
-  ...(hasCategory('off-plan') ? [[localePath(locale, '/properties/off-plan/'), t(ui.navOffPlan, locale)]] : []),
-  ...(hasCategory('international') ? [[localePath(locale, '/properties/international/'), t(ui.navInternational, locale)]] : []),
-  [localePath(locale, '/properties/'), t(ui.navAllProperties, locale)],
-  [localePath(locale, '/tours/'), t(ui.navTours, locale)],
-  [localePath(locale, '/about/'), t(ui.navAbout, locale)],
-  [localePath(locale, '/sell/'), t(ui.navSell, locale)],
-  [localePath(locale, '/contact/'), t(ui.navContact, locale)],
+  row(localePath(locale, '/properties/houses/'), t(ui.navHouses, locale)),
+  row(localePath(locale, '/properties/apartments/'), t(ui.navApartments, locale)),
+  ...extraKinds.map(k => row(localePath(locale, `/properties/${kindSlug[k]}/`), t(kindLabelPlural[k], locale))),
+  ...(hasCategory('off-plan') ? [row(localePath(locale, '/properties/off-plan/'), t(ui.navOffPlan, locale))] : []),
+  ...(hasCategory('international') ? [row(localePath(locale, '/properties/international/'), t(ui.navInternational, locale))] : []),
+  row(localePath(locale, '/properties/'), t(ui.navAllProperties, locale)),
+  row(localePath(locale, '/tours/'), t(ui.navTours, locale)),
+  row(localePath(locale, '/about/'), t(ui.navAbout, locale)),
+  row(localePath(locale, '/sell/'), t(ui.navSell, locale)),
+  row(localePath(locale, '/contact/'), t(ui.navContact, locale)),
 ];
 ---
 <footer class="on-dark bg-ink text-ivory">
