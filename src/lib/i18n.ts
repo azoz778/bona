@@ -366,6 +366,17 @@ export const ui = {
   notFoundText: s('The address may have changed, or the residence is no longer listed.', 'ربما تغيّر العنوان، أو لم يعد المسكن معروضاً.'),
   backHome: s('Back to the home page', 'العودة إلى الرئيسية'),
   browseProperties: s('Browse properties', 'تصفّح العقارات'),
+
+  // Consent banner (PDPL) — Consent.astro, footer link
+  consentTitle: s('Your privacy', 'خصوصيتك'),
+  consentText: s(
+    'We use cookies to measure visits and improve our advertising. Essential cookies keep the site working; the rest load only with your consent, and you can change your mind at any time from the footer.',
+    'نستخدم ملفات تعريف الارتباط لقياس الزيارات وتحسين الإعلانات. الملفات الضرورية تُبقي الموقع يعمل، أما البقية فلا تُحمَّل إلا بموافقتك، ويمكنك تغيير اختيارك في أي وقت من أسفل الصفحة.'
+  ),
+  consentAccept: s('Accept all', 'قبول الكل'),
+  consentEssential: s('Essential only', 'الضرورية فقط'),
+  consentSettings: s('Cookie settings', 'إعدادات ملفات تعريف الارتباط'),
+  consentPrivacy: s('Privacy and cookies', 'الخصوصية وملفات تعريف الارتباط'),
 } as const;
 
 export type UiKey = keyof typeof ui;
