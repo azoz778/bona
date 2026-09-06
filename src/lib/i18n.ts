@@ -211,7 +211,7 @@ export const ui = {
   formMessage: s('Message', 'رسالتك'),
   formOptional: s('optional', 'اختياري'),
   formSubmit: s('Send via WhatsApp', 'إرسال عبر واتساب'),
-  formNote: s('Your message opens in WhatsApp. Nothing is stored on this site.', 'تُفتح رسالتك في واتساب. لا يُخزَّن شيء على هذا الموقع.'),
+  formNote: s('Your message opens in WhatsApp. We keep a copy of your enquiry so a principal can follow it up.', 'تُفتح رسالتك في واتساب. ونحتفظ بنسخة من استفسارك ليتابعه أحد شركاء الدار.'),
   formErrName: s('Please enter your name.', 'يرجى إدخال الاسم.'),
   formErrPhone: s('Please enter a valid phone number, with the country code if outside Saudi Arabia.', 'يرجى إدخال رقم جوال صحيح، مع رمز الدولة إن كان خارج السعودية.'),
   formThanks: s('Thank you. WhatsApp should open with your message ready to send.', 'شكراً لك. سيُفتح واتساب ورسالتك جاهزة للإرسال.'),
@@ -377,6 +377,9 @@ export const ui = {
   consentEssential: s('Essential only', 'الضرورية فقط'),
   consentSettings: s('Cookie settings', 'إعدادات ملفات تعريف الارتباط'),
   consentPrivacy: s('Privacy and cookies', 'الخصوصية وملفات تعريف الارتباط'),
+
+  // Concierge — storage notice under the chat composer
+  conciergeNotice: s('Conversations are stored to handle your enquiry', 'تُحفظ المحادثات لمتابعة استفسارك'),
 } as const;
 
 export type UiKey = keyof typeof ui;

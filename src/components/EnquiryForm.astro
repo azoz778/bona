@@ -1,5 +1,8 @@
 ---
-/* Static-site enquiry form: builds a localised message and opens WhatsApp. No backend, nothing stored. */
+/* Enquiry form: builds a localised message and opens WhatsApp. Since the tracking round it also posts the lead to
+   the concierge API first (`POST /v1/enquiry`, fire-and-forget, keepalive so it survives the hand-off to WhatsApp)
+   and closes the message with the session's Ref line, so the WhatsApp conversation can be tied back to the visit.
+   The API is a nicety: if it is down or the attribution script did not run, WhatsApp still opens exactly as before. */
 import Icon from './Icon.astro';
 import site from '../data/site.json';
 import { t, ui, waLink, localePath, type Locale } from '../lib/i18n';
@@ -25,7 +28,7 @@ const labels = {
 const pageUrl = new URL(listing?.path ?? path ?? '/', site.url).href;
 const fallbackHref = waLink(site.whatsapp.wa, labels.greeting);
 ---
-<form class:list={['enquiry', cls]} id={id} data-enquiry data-wa={site.whatsapp.wa} data-labels={JSON.stringify(labels)} data-page={pageUrl} data-variant={variant} novalidate>
+<form class:list={['enquiry', cls]} id={id} data-enquiry data-wa={site.whatsapp.wa} data-labels={JSON.stringify(labels)} data-page={pageUrl} data-variant={variant} data-listing={listing?.id} novalidate>
   {listing && <input type="hidden" name="ref" value={`${listing.title} (${listing.id})`} />}
   <div class="grid gap-x-8 gap-y-7 sm:grid-cols-2">
     <div>
@@ -87,6 +90,23 @@ const fallbackHref = waLink(site.whatsapp.wa, labels.greeting);
 
 <script>
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const LISTING_RE = /^BONA-W?\d{3}$/;
+  type Attr = { anon_id?: string; session?: { id?: string; ref?: string } | null; first?: unknown; last?: unknown; fbp?: unknown; fbc?: unknown; ga?: unknown; scid?: unknown; ttp?: unknown };
+  type Hooks = Window & { BONA_API?: string; BONA_ATTR?: Attr; bonaEventId?: () => string; bonaTrack?: (e: string, p?: Record<string, unknown>) => unknown; fbq?: (...a: unknown[]) => void };
+  const w = window as Hooks;
+
+  function consentFlags() {
+    try { const c = JSON.parse(localStorage.getItem('bona_consent') || 'null'); return { analytics: c?.analytics === true, ads: c?.ads === true }; } catch { return { analytics: false, ads: false }; }
+  }
+  /** POST the lead to the API. Never awaited, never surfaced: WhatsApp opens regardless. */
+  function postLead(body: Record<string, unknown>) {
+    const api = (w.BONA_API || '').replace(/\/+$/, '');
+    if (!api) return;
+    try {
+      fetch(`${api}/v1/enquiry`, { method: 'POST', keepalive: true, credentials: 'omit', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).catch(() => {});
+    } catch { /* ignore */ }
+  }
+
   function initForm(form: HTMLFormElement) {
     if (form.dataset.ready) return;
     form.dataset.ready = '1';
@@ -122,6 +142,28 @@ const fallbackHref = waLink(site.whatsapp.wa, labels.greeting);
       const msg = field('message')?.value.trim();
       if (msg) lines.push('', `${labels.message}:`, msg);
       lines.push('', `${labels.sentFrom} ${page}`);
+
+      // Ref line (contract C2) — last line of the message, so the API can match the WhatsApp conversation.
+      const listingRaw = form.dataset.listing || document.body.dataset.listing || '';
+      const listing = LISTING_RE.test(listingRaw) ? listingRaw : null;
+      const attr = w.BONA_ATTR;
+      const sessionRef = attr?.session?.ref;
+      if (sessionRef) lines.push(`Ref ${listing || 'BONA'} \u00B7 ${sessionRef}`);
+
+      // The lead goes to the API before WhatsApp opens; the same event_id lets the browser and server Lead dedupe.
+      const eventId = w.bonaEventId?.() || `${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}`;
+      const value = (n: string) => field(n)?.value.trim() || null;
+      postLead({
+        form: form.dataset.variant || 'contact',
+        name, phone: phoneRaw,
+        interest: value('interest'), type: value('type'), budget: value('budget'), location: value('location'), message: msg || null,
+        listing_id: listing, page: window.location.pathname, locale: document.documentElement.lang === 'ar' ? 'ar' : 'en',
+        event_id: eventId,
+        attr: attr && attr.anon_id ? { anon_id: attr.anon_id, session_id: attr.session?.id ?? null, ref: sessionRef ?? null, first: attr.first ?? null, last: attr.last ?? null, fbp: attr.fbp ?? null, fbc: attr.fbc ?? null, ga: attr.ga ?? null, scid: attr.scid ?? null, ttp: attr.ttp ?? null } : null,
+        consent: consentFlags(),
+      });
+      try { if (typeof w.fbq === 'function') w.fbq('track', 'Lead', { content_ids: listing ? [listing] : [], content_type: 'product' }, { eventID: eventId }); } catch { /* ignore */ }
+      try { w.bonaTrack?.('form_submit', { form: form.dataset.variant || 'contact', enquiry_event_id: eventId }); } catch { /* ignore */ }
 
       const url = `https://wa.me/${wa}?text=${encodeURIComponent(lines.join('\n'))}`;
       if (thanksLink) thanksLink.href = url;
