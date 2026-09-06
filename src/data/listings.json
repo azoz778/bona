@@ -4036,6 +4036,167 @@
     "listedAt": "2026-09-06"
   },
   {
+    "id": "BONA-W008",
+    "slug": "knightsbridge-villas-meydan-district-11",
+    "sourceRef": "WA-20260906-ACCF6C",
+    "status": "available",
+    "category": "off-plan",
+    "type": "villa",
+    "kind": "house",
+    "featured": false,
+    "title": {
+      "en": "Knightsbridge Villas, Meydan District 11",
+      "ar": "فلل نايتسبريدج في المنطقة 11 بميدان"
+    },
+    "location": {
+      "district": {
+        "en": "District 11, Meydan",
+        "ar": "المنطقة 11، ميدان"
+      },
+      "city": {
+        "en": "Dubai",
+        "ar": "دبي"
+      },
+      "country": {
+        "en": "United Arab Emirates",
+        "ar": "الإمارات العربية المتحدة"
+      },
+      "countryCode": "AE"
+    },
+    "price": {
+      "amount": null,
+      "currency": "AED",
+      "from": false,
+      "period": null,
+      "onRequest": true
+    },
+    "specs": {
+      "beds": null,
+      "baths": null,
+      "areaSqm": null,
+      "plotSqm": null,
+      "yearBuilt": null,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "/listings/knightsbridge-villas-meydan-district-11/01.jpg",
+        "thumb": "/listings/knightsbridge-villas-meydan-district-11/01-thumb.webp",
+        "alt": {
+          "en": "Exterior — Knightsbridge Villas, Meydan District 11",
+          "ar": "الواجهة الخارجية — فلل نايتسبريدج في المنطقة 11 بميدان"
+        }
+      },
+      {
+        "src": "/listings/knightsbridge-villas-meydan-district-11/02.jpg",
+        "thumb": "/listings/knightsbridge-villas-meydan-district-11/02-thumb.webp",
+        "alt": {
+          "en": "Pool at night — Knightsbridge Villas, Meydan District 11",
+          "ar": "المسبح ليلاً — فلل نايتسبريدج في المنطقة 11 بميدان"
+        }
+      },
+      {
+        "src": "/listings/knightsbridge-villas-meydan-district-11/03.jpg",
+        "thumb": "/listings/knightsbridge-villas-meydan-district-11/03-thumb.webp",
+        "alt": {
+          "en": "Entrance — Knightsbridge Villas, Meydan District 11",
+          "ar": "المدخل — فلل نايتسبريدج في المنطقة 11 بميدان"
+        }
+      },
+      {
+        "src": "/listings/knightsbridge-villas-meydan-district-11/04.jpg",
+        "thumb": "/listings/knightsbridge-villas-meydan-district-11/04-thumb.webp",
+        "alt": {
+          "en": "Staircase — Knightsbridge Villas, Meydan District 11",
+          "ar": "الدرج — فلل نايتسبريدج في المنطقة 11 بميدان"
+        }
+      },
+      {
+        "src": "/listings/knightsbridge-villas-meydan-district-11/05.jpg",
+        "thumb": "/listings/knightsbridge-villas-meydan-district-11/05-thumb.webp",
+        "alt": {
+          "en": "Living room — Knightsbridge Villas, Meydan District 11",
+          "ar": "غرفة المعيشة — فلل نايتسبريدج في المنطقة 11 بميدان"
+        }
+      },
+      {
+        "src": "/listings/knightsbridge-villas-meydan-district-11/06.jpg",
+        "thumb": "/listings/knightsbridge-villas-meydan-district-11/06-thumb.webp",
+        "alt": {
+          "en": "Dining room — Knightsbridge Villas, Meydan District 11",
+          "ar": "غرفة الطعام — فلل نايتسبريدج في المنطقة 11 بميدان"
+        }
+      },
+      {
+        "src": "/listings/knightsbridge-villas-meydan-district-11/07.jpg",
+        "thumb": "/listings/knightsbridge-villas-meydan-district-11/07-thumb.webp",
+        "alt": {
+          "en": "Kitchen — Knightsbridge Villas, Meydan District 11",
+          "ar": "المطبخ — فلل نايتسبريدج في المنطقة 11 بميدان"
+        }
+      },
+      {
+        "src": "/listings/knightsbridge-villas-meydan-district-11/08.jpg",
+        "thumb": "/listings/knightsbridge-villas-meydan-district-11/08-thumb.webp",
+        "alt": {
+          "en": "Master suite — Knightsbridge Villas, Meydan District 11",
+          "ar": "الجناح الرئيسي — فلل نايتسبريدج في المنطقة 11 بميدان"
+        }
+      },
+      {
+        "src": "/listings/knightsbridge-villas-meydan-district-11/09.jpg",
+        "thumb": "/listings/knightsbridge-villas-meydan-district-11/09-thumb.webp",
+        "alt": {
+          "en": "Pool at night — Knightsbridge Villas, Meydan District 11",
+          "ar": "المسبح ليلاً — فلل نايتسبريدج في المنطقة 11 بميدان"
+        }
+      },
+      {
+        "src": "/listings/knightsbridge-villas-meydan-district-11/10.jpg",
+        "thumb": "/listings/knightsbridge-villas-meydan-district-11/10-thumb.webp",
+        "alt": {
+          "en": "Aerial view — Knightsbridge Villas, Meydan District 11",
+          "ar": "منظر جوي — فلل نايتسبريدج في المنطقة 11 بميدان"
+        }
+      }
+    ],
+    "description": {
+      "en": "Knightsbridge is a gated villa community in Meydan District 11, Dubai, drawing its architecture from the Georgian and Victorian townhouses of London's Knightsbridge and Mayfair. The community sits a three-minute walk from a swimmable lagoon and has direct access to Sheikh Mohammed Bin Zayed Road, putting Downtown Dubai, DIFC and Meydan Racecourse within a short drive.\n\nPhase 2 comprises two villa designs. The Chatsworth offers 31 five-bedroom villas with a sellable area of around 6,005 sq ft and plots ranging from 4,304 to 6,761 sq ft, each with a double-height entrance, a private elevator and three parking spaces. The Blenheim offers 15 six-bedroom signature villas, including two corner units, with a sellable area of around 9,007 sq ft, plots from 6,329 to 9,527 sq ft, a triple-height entrance and four parking spaces. Every villa has its own temperature-controlled pool, a fresh-harvest garden and a TAKIBI firepit terrace.\n\nThe community is built around a swimmable sunrise lagoon, alongside an outdoor cinema, a kids' aqua park, an outdoor jacuzzi, a BBQ and smoke-house pavilion, a water café, a jogging track and aqua sunbeds. Climate-adaptive features include a self-shading façade, an insulated building envelope, solar water heating, smart irrigation and EV charging points.",
+      "ar": "نايتسبريدج مجتمع فلل مسوّر في المنطقة 11 بميدان، دبي، مستوحى في عمارته من طراز البيوت الجورجية والفيكتورية في حي نايتسبريدج ومايفير بلندن. يبعد المجتمع مسافة ثلاث دقائق سيرًا عن بحيرة قابلة للسباحة، ويتصل مباشرة بشارع الشيخ محمد بن زايد، ما يجعل وسط مدينة دبي ومركز دبي المالي العالمي وميدان للفروسية على بُعد دقائق بالسيارة.\n\nتضم المرحلة الثانية تصميمين من الفلل. تشتمل فلل تشاتسويرث على 31 فيلا بخمس غرف نوم بمساحة بيع تقارب 6,005 قدمًا مربعة وقطع أرض تتراوح بين 4,304 و6,761 قدمًا مربعة، مع مدخل مزدوج الارتفاع ومصعد خاص وثلاثة مواقف سيارات لكل فيلا. أما فلل بلينهايم السيادية فتضم 15 فيلا بست غرف نوم، من بينها وحدتان زاويتان، بمساحة بيع تقارب 9,007 أقدام مربعة وقطع أرض من 6,329 إلى 9,527 قدمًا مربعة، مع مدخل ثلاثي الارتفاع وأربعة مواقف سيارات. تمتلك كل فيلا مسبحًا خاصًا يتحكم بحرارته، وحديقة حصاد طازجة، وتراسًا بموقد تاكيبي.\n\nيتمحور المجتمع حول بحيرة شروق قابلة للسباحة، إلى جانب سينما خارجية، ومنتزه مائي للأطفال، وجاكوزي خارجي، وجناح شواء ومدخنة، ومقهى على الماء، ومسار للجري، وأسرّة استرخاء فوق الماء. ومن ملامح التكيف المناخي واجهة ذاتية التظليل، وغلاف بناء معزول، وتسخين مياه بالطاقة الشمسية، وري ذكي، ونقاط شحن للسيارات الكهربائية."
+    },
+    "highlights": {
+      "en": [
+        "Swimmable sunrise lagoon",
+        "Private pool in every villa",
+        "5- or 6-bedroom layouts",
+        "Private elevator, double-height entrance",
+        "Climate-adaptive, self-shading design"
+      ],
+      "ar": [
+        "بحيرة شروق قابلة للسباحة",
+        "مسبح خاص لكل فيلا",
+        "تصاميم بخمس أو ست غرف نوم",
+        "مصعد خاص ومدخل مزدوج الارتفاع",
+        "تصميم متكيف مناخيًا وذاتي التظليل"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": "https://bona.azoz.uk/listings/knightsbridge-villas-meydan-district-11/brochure.pdf",
+    "project": {
+      "name": {
+        "en": "Knightsbridge",
+        "ar": "نايتسبريدج"
+      },
+      "developer": {
+        "en": "LEOS Developments",
+        "ar": "ليوس للتطوير العقاري"
+      }
+    },
+    "unit": null,
+    "map": null,
+    "listedAt": "2026-09-06"
+  },
+  {
     "id": "BONA-W002",
     "slug": "nuzul-khayala-residences-north-jeddah",
     "sourceRef": "WA-20260906-AC20EE",
