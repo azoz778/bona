@@ -1,0 +1,199 @@
+{
+  "id": "BONA-W001",
+  "slug": "kian-residence-apartments-al-nahda",
+  "sourceRef": "WA-20260906-3EB033",
+  "status": "available",
+  "category": "off-plan",
+  "type": "apartment",
+  "kind": "apartment",
+  "featured": false,
+  "title": {
+    "en": "Kian Residence Apartments, Al-Nahda",
+    "ar": "شقق كيان رزيدنس في حي النهضة"
+  },
+  "location": {
+    "district": {
+      "en": "Al-Nahda",
+      "ar": "حي النهضة"
+    },
+    "city": {
+      "en": "Jeddah",
+      "ar": "جدة"
+    },
+    "country": {
+      "en": "Saudi Arabia",
+      "ar": "المملكة العربية السعودية"
+    },
+    "countryCode": "SA"
+  },
+  "price": {
+    "amount": 888000,
+    "currency": "SAR",
+    "from": true,
+    "period": null,
+    "onRequest": false
+  },
+  "specs": {
+    "beds": null,
+    "baths": null,
+    "areaSqm": null,
+    "plotSqm": null,
+    "yearBuilt": null,
+    "floors": null
+  },
+  "images": [
+    {
+      "src": "/listings/kian-residence-apartments-al-nahda/01.jpg",
+      "thumb": "/listings/kian-residence-apartments-al-nahda/01-thumb.webp",
+      "alt": {
+        "en": "Façade at night — Kian Residence Apartments, Al-Nahda",
+        "ar": "الواجهة ليلاً — شقق كيان رزيدنس في حي النهضة"
+      }
+    },
+    {
+      "src": "/listings/kian-residence-apartments-al-nahda/02.jpg",
+      "thumb": "/listings/kian-residence-apartments-al-nahda/02-thumb.webp",
+      "alt": {
+        "en": "Exterior — Kian Residence Apartments, Al-Nahda",
+        "ar": "الواجهة الخارجية — شقق كيان رزيدنس في حي النهضة"
+      }
+    },
+    {
+      "src": "/listings/kian-residence-apartments-al-nahda/03.jpg",
+      "thumb": "/listings/kian-residence-apartments-al-nahda/03-thumb.webp",
+      "alt": {
+        "en": "Entrance — Kian Residence Apartments, Al-Nahda",
+        "ar": "المدخل — شقق كيان رزيدنس في حي النهضة"
+      }
+    },
+    {
+      "src": "/listings/kian-residence-apartments-al-nahda/04.jpg",
+      "thumb": "/listings/kian-residence-apartments-al-nahda/04-thumb.webp",
+      "alt": {
+        "en": "Living room — Kian Residence Apartments, Al-Nahda",
+        "ar": "غرفة المعيشة — شقق كيان رزيدنس في حي النهضة"
+      }
+    },
+    {
+      "src": "/listings/kian-residence-apartments-al-nahda/05.jpg",
+      "thumb": "/listings/kian-residence-apartments-al-nahda/05-thumb.webp",
+      "alt": {
+        "en": "Dining room — Kian Residence Apartments, Al-Nahda",
+        "ar": "غرفة الطعام — شقق كيان رزيدنس في حي النهضة"
+      }
+    },
+    {
+      "src": "/listings/kian-residence-apartments-al-nahda/06.jpg",
+      "thumb": "/listings/kian-residence-apartments-al-nahda/06-thumb.webp",
+      "alt": {
+        "en": "Kitchen — Kian Residence Apartments, Al-Nahda",
+        "ar": "المطبخ — شقق كيان رزيدنس في حي النهضة"
+      }
+    },
+    {
+      "src": "/listings/kian-residence-apartments-al-nahda/07.jpg",
+      "thumb": "/listings/kian-residence-apartments-al-nahda/07-thumb.webp",
+      "alt": {
+        "en": "Roof terrace — Kian Residence Apartments, Al-Nahda",
+        "ar": "التراس العلوي — شقق كيان رزيدنس في حي النهضة"
+      }
+    }
+  ],
+  "description": {
+    "en": "Kian Residence is a development of three residential buildings in Jeddah's Al-Nahda district. Building K faces the main street, while buildings N and R sit further inside the plot. Interior finishes are designed to a consistent, hotel-influenced standard across all three blocks.\n\nThe location places residents nine minutes from King Abdulaziz International Airport, eight minutes from Red Sea Mall and the Jeddah waterfront, and about a minute from a neighbourhood mosque, park and Hiraa Street. The Latelier Lafi complex is a five-minute drive away.\n\nApartment sizes across the project run from 120 to 207 square metres, including rooftop duplex units with a private outdoor terrace and their own entrance level. Each building includes basement parking and services, with private parking assigned to each unit.\n\nShared facilities include a fitness club, a children's play area, a coffee shop area, a mini market and a ground-floor majlis. Units are fitted with ducted air-conditioning, central gas, smart entry, security cameras and independent water tanks, and the development carries a two-year owners' association.",
+    "ar": "كيان رزيدنس مشروع سكني يضم ثلاث مبانٍ في حي النهضة بجدة. مبنى K يطل على الشارع الرئيسي، بينما يقع مبنيا N وR في الجزء الداخلي من الأرض. صُممت التشطيبات الداخلية بمستوى موحّد يستلهم أجواء الفنادق في المباني الثلاثة.\n\nيبعد الموقع تسع دقائق عن مطار الملك عبدالعزيز الدولي، وثماني دقائق عن ردسي مول والواجهة البحرية لجدة، ودقيقة واحدة تقريبًا عن مسجد وحديقة الحي وشارع حراء. كما يبعد مجمع أتيليه لافي خمس دقائق بالسيارة.\n\nتتراوح مساحات الشقق في المشروع بين 120 و207 متر مربع، وتشمل وحدات ملحق بسطح خارجي خاص ومدخل مستقل. تحتوي كل مبنى على مواقف وخدمات في الدور السفلي، مع مواقف خاصة مخصصة لكل وحدة.\n\nتشمل المرافق المشتركة ناديًا رياضيًا، ومنطقة ألعاب أطفال، ومنطقة كوفي شوب، وميني ماركت، ومجلسًا في الدور الأرضي. الوحدات مزودة بتكييف دكت وغاز مركزي ونظام دخول ذكي وكاميرات مراقبة وخزانات مياه مستقلة، ويشمل المشروع اتحاد ملاك لمدة سنتين."
+  },
+  "highlights": {
+    "en": [
+      "Three residential buildings",
+      "Units 120–207 sqm",
+      "Rooftop duplex terraces",
+      "Smart entry system",
+      "Two-year owners' association",
+      "Private covered parking"
+    ],
+    "ar": [
+      "ثلاث مبانٍ سكنية",
+      "مساحات من 120 إلى 207 م²",
+      "وحدات ملحق بسطح خاص",
+      "نظام دخول ذكي",
+      "اتحاد ملاك لمدة سنتين",
+      "مواقف خاصة مغطاة"
+    ]
+  },
+  "virtualTourUrl": null,
+  "brochureUrl": null,
+  "project": {
+    "name": {
+      "en": "Kian Residence",
+      "ar": "كيان رزيدنس"
+    },
+    "developer": {
+      "en": "Kian",
+      "ar": "كيان"
+    }
+  },
+  "unit": null,
+  "map": null,
+  "listedAt": "2026-09-06",
+  "hidden": true,
+  "_intake": {
+    "source": "whatsapp",
+    "messageId": "3EB033C7506C1FD00DF3F3",
+    "groupJid": "120363135705763548@g.us",
+    "pdfSha256": "77a08e0426fde5b5ecf82568e733c99b4ecbe224efac0bd299f316d6394c3d67",
+    "pdfFileName": "Kian-Residence-K.pdf",
+    "caption": "#hidden",
+    "model": "sonnet",
+    "confidence": 0.7,
+    "warnings": [
+      "model-flagged"
+    ],
+    "images": [
+      {
+        "n": 1,
+        "candidate": 0,
+        "room": "facade_night",
+        "reason": "sharp twilight façade render, whole building lit and centred — the strongest single frame in the brochure"
+      },
+      {
+        "n": 2,
+        "candidate": 1,
+        "room": "exterior",
+        "reason": "daytime isometric massing render, the only other clean exterior view, paired opposite the night hero"
+      },
+      {
+        "n": 3,
+        "candidate": 12,
+        "room": "entrance",
+        "reason": "entrance foyer opening into the living room, used as the arrival frame"
+      },
+      {
+        "n": 4,
+        "candidate": 7,
+        "room": "living",
+        "reason": "main living/dining reception render, the strongest interior in the set for the arrival-to-living sequence"
+      },
+      {
+        "n": 5,
+        "candidate": 3,
+        "room": "dining",
+        "reason": "warm, sharp dining render, best table setting for the dining slot"
+      },
+      {
+        "n": 6,
+        "candidate": 9,
+        "room": "kitchen",
+        "reason": "kitchen and dining render, follows the dining frame in the walkthrough"
+      },
+      {
+        "n": 7,
+        "candidate": 10,
+        "room": "terrace",
+        "reason": "rooftop children's play area, sharp daylight photo, closes the set as the amenity frame"
+      }
+    ],
+    "createdAt": "2026-09-06T01:25:32.796Z",
+    "site": "https://bona.azoz.uk"
+  }
+}
