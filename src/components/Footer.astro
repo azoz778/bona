@@ -61,6 +61,8 @@ const nav: [string, string][] = [
         {site.licences.cr && <span> · {t(ui.crNumber, locale)} <span dir="ltr">{site.licences.cr}</span></span>}
         <span class="mx-2 opacity-60" aria-hidden="true">·</span>
         <a href={localePath(locale, '/privacy/')} class="link hover:text-ivory">{t(ui.navPrivacy, locale)}</a>
+        <span class="mx-2 opacity-60" aria-hidden="true">·</span>
+        <button type="button" class="link hover:text-ivory" data-consent-open>{t(ui.consentSettings, locale)}</button>
       </p>
       <p>© {year} {site.name}{locale === 'ar' ? ` ${site.nameAr}` : ''}. {t(ui.allRightsReserved, locale)}</p>
     </div>

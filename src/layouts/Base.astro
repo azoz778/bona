@@ -8,6 +8,7 @@ import Head from '../components/seo/Head.astro';
 import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
 import Concierge from '../components/concierge/Concierge.astro';
+import Consent from '../components/Consent.astro';
 import { dir, t, ui, type Locale } from '../lib/i18n';
 interface Props {
   title: string; description: string; locale: Locale; path: string; image?: string; noindex?: boolean; jsonLd?: object | object[];
@@ -33,6 +34,7 @@ const { locale, hero = false, waMessage, ...head } = Astro.props;
     </main>
     <Footer locale={locale} />
     <Concierge locale={locale} waMessage={waMessage} />
+    <Consent locale={locale} />
     <script>
       /* Site-wide motion: reveals (with stagger), count-up stats, cursor "View" pill on listing cards. Idempotent. */
       const reduce = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;

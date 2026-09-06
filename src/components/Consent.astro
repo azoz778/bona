@@ -1,0 +1,101 @@
+---
+/* PDPL consent banner: a fixed bottom sheet, shown until the visitor has chosen, reopened from the footer
+   ("Cookie settings"). Two choices — Accept all / Essential only — written to localStorage `bona_consent`
+   ({ v:1, analytics, ads, ts }). Everything downstream reads that record: attribution.js decides where the
+   visitor's state may live, tags.js decides whether Google / Meta / Snap load at all. Non-modal on purpose:
+   the site stays usable while the choice is pending, and nothing third-party runs in the meantime. */
+import { localePath, t, ui, type Locale } from '../lib/i18n';
+interface Props { locale: Locale }
+const { locale } = Astro.props;
+const privacyHref = `${localePath(locale, '/privacy/')}#cookies`;
+---
+<div class="consent" data-consent role="dialog" aria-modal="false" aria-labelledby="consent-title" aria-describedby="consent-text" hidden>
+  <div class="consent-sheet">
+    <div class="consent-copy">
+      <p id="consent-title" class="consent-title display-sm">{t(ui.consentTitle, locale)}</p>
+      <p id="consent-text" class="consent-text">{t(ui.consentText, locale)} <a href={privacyHref} class="link text-ink">{t(ui.consentPrivacy, locale)}</a></p>
+    </div>
+    <div class="consent-actions">
+      <button type="button" class="btn btn-ink" data-consent-accept>{t(ui.consentAccept, locale)}</button>
+      <button type="button" class="btn btn-outline" data-consent-essential>{t(ui.consentEssential, locale)}</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .consent { position: fixed; inset-inline: 0; bottom: 0; z-index: 45; padding: .75rem; pointer-events: none; }
+  .consent-sheet {
+    pointer-events: auto; margin-inline: auto; max-width: 68rem; display: grid; gap: 1.25rem;
+    padding: 1.4rem 1.5rem 1.5rem; background: var(--color-ivory); color: var(--color-ink);
+    border: 1px solid color-mix(in oklab, var(--color-ink) 12%, transparent); border-top: 2px solid var(--color-champagne);
+    box-shadow: 0 30px 70px -30px rgba(15, 18, 20, .55);
+    opacity: 0; transform: translateY(14px); transition: opacity .38s var(--ease-luxe), transform .38s var(--ease-luxe);
+  }
+  .consent.is-open .consent-sheet { opacity: 1; transform: none; }
+  .consent-title { margin: 0; }
+  .consent-text { margin: .5rem 0 0; max-width: 62ch; font-size: 14px; line-height: 1.6; color: var(--color-stone-2); }
+  .consent-actions { display: flex; flex-wrap: wrap; gap: .75rem; }
+  .consent-actions .btn { flex: 1 1 auto; }
+  @media (min-width: 768px) {
+    /* Leaves the concierge cluster (fixed at the end edge) uncovered while the sheet is up. */
+    .consent { padding: 1.25rem; padding-inline-end: 12rem; }
+    .consent-sheet { grid-template-columns: 1fr auto; align-items: center; padding: 1.5rem 2rem; }
+    .consent-actions { flex-wrap: nowrap; }
+    .consent-actions .btn { flex: 0 0 auto; }
+  }
+  @media (prefers-reduced-motion: reduce) { .consent-sheet { transition: none; } }
+</style>
+
+<script>
+  /* Hoisted once per page load; re-binds to the freshly rendered banner on every astro:page-load. */
+  const KEY = 'bona_consent';
+  type Consent = { v: number; analytics: boolean; ads: boolean; ts: number };
+  type Hooks = Window & { bonaTrack?: (e: string, p?: Record<string, unknown>) => unknown; bonaTagsLoad?: () => void; bonaAttrPersist?: () => void };
+
+  function read(): Consent | null {
+    try {
+      const raw = localStorage.getItem(KEY);
+      const c = raw ? (JSON.parse(raw) as Partial<Consent>) : null;
+      return c && typeof c === 'object' && c.v === 1 ? (c as Consent) : null;
+    } catch { return null; }
+  }
+  function write(analytics: boolean, ads: boolean): boolean {
+    try { localStorage.setItem(KEY, JSON.stringify({ v: 1, analytics, ads, ts: Date.now() })); return true; } catch { return false; }
+  }
+
+  const root = () => document.querySelector<HTMLElement>('[data-consent]');
+  function show() {
+    const el = root(); if (!el) return;
+    el.hidden = false;
+    requestAnimationFrame(() => el.classList.add('is-open'));
+  }
+  function hide() {
+    const el = root(); if (!el) return;
+    el.classList.remove('is-open');
+    window.setTimeout(() => { el.hidden = true; }, 400);
+  }
+  function choose(analytics: boolean, ads: boolean) {
+    write(analytics, ads);
+    hide();
+    const w = window as Hooks;
+    // Order matters: persist the attribution state under the new rule, record the choice, then load the tags.
+    try { w.bonaAttrPersist?.(); } catch { /* ignore */ }
+    try { w.bonaTrack?.('consent_update', { analytics, ads }); } catch { /* ignore */ }
+    try { w.bonaTagsLoad?.(); } catch { /* ignore */ }
+  }
+
+  function init() {
+    const el = root(); if (!el) return;
+    if (!el.dataset.ready) {
+      el.dataset.ready = '1';
+      el.querySelector('[data-consent-accept]')?.addEventListener('click', () => choose(true, true));
+      el.querySelector('[data-consent-essential]')?.addEventListener('click', () => choose(false, false));
+    }
+    document.querySelectorAll<HTMLElement>('[data-consent-open]:not([data-ready])').forEach(btn => {
+      btn.dataset.ready = '1';
+      btn.addEventListener('click', e => { e.preventDefault(); show(); el.querySelector<HTMLElement>('[data-consent-accept]')?.focus({ preventScroll: true }); });
+    });
+    if (!read()) show();
+  }
+  document.addEventListener('astro:page-load', init);
+</script>
