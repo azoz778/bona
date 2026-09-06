@@ -11,6 +11,7 @@ import { navigate } from 'astro:transitions/client';
 import { postBeacon, postJson, resolveApiBase, statusOf, type Card, type ChatAction, type ChatMessageResponse, type ChatSessionResponse } from './api';
 import { bubble, el, listingCard, note, type ConciergeConfig } from './render';
 import { browserSupportsCall, CallSession } from './call';
+import { visitorAttr } from './attr';
 
 type Item =
   | { t: 'agent'; text: string }
@@ -209,6 +210,8 @@ class Concierge {
     if (!focus) requestAnimationFrame(() => panel.classList.remove('cg-no-anim'));
 
     if (open) {
+      // A visitor opening the panel is a journey event; a panel restored after a page swap (focus=false) is not.
+      if (focus) { try { (window as { bonaTrack?: (e: string, p?: Record<string, unknown>) => unknown }).bonaTrack?.('concierge_open', { tab: this.tab }); } catch { /* ignore */ } }
       this.applyTab();
       if (isSheet()) this.takeModal(); else this.releaseModal();
       if (prefill) {
@@ -307,7 +310,8 @@ class Concierge {
   /** Opens a chat session. `announce` false is a silent re-open (an expired session) — no second greeting bubble. */
   private async openSession(announce: boolean) {
     const cfg = this.cfg!;
-    const res = await postJson<ChatSessionResponse>(cfg.apiBase, '/v1/chat/session', { locale: cfg.locale, page: window.location.pathname }, 15000);
+    // `attr` (C4) is the only addition to the session body; it is omitted entirely when the attribution script is absent.
+    const res = await postJson<ChatSessionResponse>(cfg.apiBase, '/v1/chat/session', { locale: cfg.locale, page: window.location.pathname, attr: visitorAttr() }, 15000);
     this.chat.sessionId = res?.sessionId || null;
     this.chat.greeted = true;
     if (announce && res?.greeting) this.push({ t: 'agent', text: res.greeting });
