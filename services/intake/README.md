@@ -54,13 +54,20 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
    help                      the list above
    ```
 
-5. Got a walkthrough clip for a listing that is already live? Send the **video** into the group
-   with the listing's id somewhere in its caption — `video BONA-W001`, or just `BONA-W001` on
-   its own. It is downloaded and added to the listing (up to 4 per listing), no re-publish
-   command needed. A video sent with no id anywhere in its caption gets one line back asking
-   for one — it is never silently dropped. See `lib/video.mjs`: the file is stored exactly as
-   WhatsApp sent it (no transcoding, no thumbnail — this service has no video library), so
-   `BONA_MAX_VIDEO_MB` is the only thing capping it.
+5. Got a walkthrough clip? Send the **video** into the group right after its brochure — no
+   caption needed. The clip is matched to the brochure sent closest to it in time (within
+   `BONA_VIDEO_WINDOW_MIN`, 15 minutes; `lib/video.mjs` `pickListingForVideo`) and added to
+   that listing, up to 4 per listing, no re-publish command needed. If the brochure is still
+   being published — or has not arrived yet — the clip is parked (one line back: "Got the
+   video — it will be added once … is published") and attached the moment the listing exists;
+   if two different listings were published from brochures equally close, the bot asks which
+   one instead of guessing. An id in the caption always wins — `video BONA-W001`, or just
+   `BONA-W001` — and is the way to add a clip to a listing published long ago. A clip with no
+   id and no brochure near it gets one line back asking; it is never silently dropped (before
+   2026-09-06 it was — see `unsee.mjs` for replaying clips an older daemon swallowed). The
+   file is stored exactly as WhatsApp sent it (no transcoding, no thumbnail — this service has
+   no video library), so `BONA_MAX_VIDEO_MB` is the only thing capping it. The site renders
+   `videos[]` on the listing page (`ListingPage.astro`) as plain `<video>` elements.
 
 Anything else in the group is ignored, silently.
 
@@ -293,7 +300,10 @@ live-list filter; intake listings are exempt from that filter because they are o
 | `⚠️ … spawn claude ENOENT` | the unit's PATH is missing `~/.local/bin` | fix `PATH=` in the unit, `daemon-reload`, restart |
 | listing live but no *Download brochure* button | the branded PDF was over `BONA_MAX_BROCHURE_MB` even after downsampling, or `rebrand_pdf.py` failed | the reply says which; `_intake.warnings` holds `brochure-too-large` / `brochure-failed`. Raise the cap and send `brochure <id>`, or leave it — the listing itself is fine |
 | `✋ the original PDF for BONA-W00x is not in …` | `brochure <id>` after the download was cleaned out of `$BONA_DATA` | send the brochure again |
-| `✋ Which listing? Caption the video with its id …` | a video arrived with no `BONA-W###` anywhere in its caption | send it again captioned `video BONA-W001` |
+| `✋ Which listing is this video for? …` | a video with no `BONA-W###` in its caption and no brochure within `BONA_VIDEO_WINDOW_MIN` of it (or the nearest brochure was rejected / never finished within `BONA_VIDEO_WAIT_MIN`) | send it again right after the brochure, or captioned `video BONA-W001` |
+| `✋ Two brochures were sent just as close to this video …` | two different listings were published from brochures within 60 s of each other around the clip | send it again captioned with the id you mean |
+| `🎬 Got the video — it will be added once … is published` | the clip landed while its brochure was still in the pipeline (or before the brochure arrived at all); it is parked in the state file (`waitSince`, plus `waitingFor` when a specific brochure is mid-publish) and requeued once that brochure answers, a new brochure arrives, or `BONA_VIDEO_WAIT_MIN` runs out | nothing — if the brochure ends up rejected or never comes, the clip comes back as the "Which listing" line |
+| a clip sent before 2026-09-06 never appeared | the old daemon had no video path and marked it seen | stop the unit, `node services/intake/unsee.mjs <messageId…>`, start the unit — it is handled as if just sent |
 | `✋ The video is N MB — the limit is …` | over `BONA_MAX_VIDEO_MB` (declared length or the actual download, whichever catches it) | trim the clip, or raise the limit |
 | bot silent, no greeting | no group subject matches `BONA_WA_GROUP_MATCH`, or the group is not the owner's | rename the group; if the journal says `group.rejected_not_owned`, the group was created by somebody else — put its jid in `BONA_WA_GROUP_JIDS` if that is really what you want |
 | bot silent on a PDF | the message was not authored by the owner, or was already seen | check `journalctl` for `msg.ignored_not_owner` |

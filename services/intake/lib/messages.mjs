@@ -100,19 +100,30 @@ export function brochureRebuilt(id, listing, brochure = {}) {
 export const removed = (id, title) => `🗑️ Removed *${title}* (${id}). It comes off the site with the next deploy.`;
 export const updated = (id, what, listing) => `✏️ ${what} — *${listing.title.en}* (${id})\n${commandsFor(id)}`;
 
-/** A video message with no listing id anywhere in its caption — recognized, not silently dropped. */
-export const videoNoId = () => '✋ Which listing? Caption the video with its id, e.g. `video BONA-W001`.';
+/** A clip with no id in its caption and no brochure near it in time — recognized, not silently dropped. */
+export const videoNoId = () => '✋ Which listing is this video for? Send it right after its brochure, or caption it with the id, e.g. `video BONA-W001`.';
+/** Two different listings were published from brochures equally close to the clip. */
+export const videoAmbiguous = (ids) => `✋ Two brochures were sent just as close to this video — ${ids.join(' and ')}. Caption it with the one you mean, e.g. \`video ${ids[0]}\`.`;
+/** The clip arrived while its brochure is still being published; it is parked, not lost. Sent once. */
+export const videoWaiting = (fileName) => `🎬 Got the video — it will be added once *${String(fileName || 'the brochure').replace(/\n/g, ' ')}* is published.`;
 export const videoTooLarge = (mb, limitMb) => `✋ The video is ${mb.toFixed(1)} MB — the limit is ${limitMb} MB.`;
+/** The identical clip is already on the listing (a re-send, or a replay after a crash) — nothing was committed. */
+export const videoAlreadyOn = (id, listing, video = {}) => `🎬 That video is already on *${listing.title.en}* (${id})${video.n ? ` as video ${video.n}` : ''} — nothing to add.`;
 
-/** `video <id>` — the clip was downloaded and added to an already-published listing. */
-export function videoAdded(id, listing, video = {}) {
+/**
+ * The clip was downloaded and added to a listing — named by the owner (`video <id>`) or
+ * matched to the brochure sent closest to it (`matched.deltaSec`).
+ */
+export function videoAdded(id, listing, video = {}, { matched = null } = {}) {
   const mb = video.bytes ? ` (${(video.bytes / 1048576).toFixed(1)} MB)` : '';
+  const n = listing.videos?.length ?? 1;
   return [
     `🎬 Video added${mb} — *${listing.title.en}* (${id})`,
-    `${listing.videos?.length ?? 1} video${(listing.videos?.length ?? 1) === 1 ? '' : 's'} on this listing now.`,
+    matched?.deltaSec != null ? `Matched to the brochure sent within ${Math.round(matched.deltaSec)} s of it.` : null,
+    `${n} video${n === 1 ? '' : 's'} on this listing now.`,
     '',
     commandsFor(id),
-  ].join('\n');
+  ].filter((line) => line !== null).join('\n');
 }
 
 export function statusReport({ listings, groups, lastError, queueLength }) {

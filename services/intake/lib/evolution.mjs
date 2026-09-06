@@ -178,6 +178,33 @@ export function textOf(record) {
   );
 }
 
+/**
+ * WhatsApp send time in unix SECONDS — a number, a numeric string, milliseconds, or the
+ * Baileys Long { low, high }; null when the record carries none. The same shapes as
+ * fileLength below; a clip's match to its brochure rides on this (index.mjs pollGroup).
+ */
+export function messageTs(record) {
+  const v = record?.messageTimestamp;
+  let n = null;
+  if (typeof v === 'number') n = v;
+  else if (typeof v === 'string') n = Number(v);
+  else if (v && typeof v === 'object' && typeof v.low === 'number') n = v.high ? v.high * 2 ** 32 + v.low : v.low;
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n > 1e12 ? Math.round(n / 1000) : Math.round(n);
+}
+
+/**
+ * Evolution returns a chat newest-first. Oldest first by timestamp, so a brochure is handled
+ * before the clip sent seconds after it; records without a usable timestamp keep their
+ * relative API order, reversed — never "whatever sort() felt like".
+ */
+export function oldestFirst(records) {
+  return (records || [])
+    .map((r, i) => ({ r, i, ts: messageTs(r) }))
+    .sort((a, b) => (a.ts != null && b.ts != null && a.ts !== b.ts ? a.ts - b.ts : b.i - a.i))
+    .map((x) => x.r);
+}
+
 /** Baileys longs arrive as { low, high, unsigned }. */
 export function fileLengthOf(doc) {
   const v = doc?.fileLength;

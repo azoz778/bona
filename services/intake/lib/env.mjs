@@ -92,6 +92,11 @@ export function loadConfig(overrides = {}) {
     // like the branded brochure gets, so this is the only thing standing between a long clip
     // and a bloated git repo.
     maxVideoMb: num(raw.BONA_MAX_VIDEO_MB, 60),
+    // A captionless clip is matched to the brochure sent closest to it in time (lib/video.mjs
+    // pickListingForVideo): how far apart they may be, and how long the clip waits for that
+    // brochure to finish publishing before it gives up and asks for an id.
+    videoWindowMin: num(raw.BONA_VIDEO_WINDOW_MIN, 15),
+    videoWaitMin: num(raw.BONA_VIDEO_WAIT_MIN, 30),
     // The cap on the BRANDED output, not on the developer's original: rebrand_pdf.py
     // downsamples until it fits and refuses to write anything larger.
     maxBrochureMb: num(raw.BONA_MAX_BROCHURE_MB, 25),
