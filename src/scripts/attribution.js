@@ -261,6 +261,17 @@
   var boot = function () { try { page(true); } catch (e) { /* never break the page */ } };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
   document.addEventListener('click', function (ev) { try { onClick(ev); } catch (e) { /* ignore */ } }, true);
+  // `play` does not bubble, so it is caught in the capture phase; one event per <video> element (view transitions
+  // render fresh elements, so a video on the next page counts again).
+  document.addEventListener('play', function (ev) {
+    try {
+      var v = ev.target;
+      if (!v || v.tagName !== 'VIDEO' || v.__bonaPlayed) return;
+      v.__bonaPlayed = true;
+      var src = v.currentSrc || (v.querySelector('source') ? v.querySelector('source').getAttribute('src') : null);
+      send('video_play', { src: src || null });
+    } catch (e) { /* ignore */ }
+  }, true);
   document.addEventListener('astro:after-swap', function () { navigated = true; });
   // The ClientRouter also fires astro:page-load once for the initial document (on window load); that view is
   // already counted above, so only the loads that follow a swap are new pages.

@@ -17,10 +17,10 @@ const title = localeTitle(l, locale);
         <h2 id={`tour-${l.id}`} class="label text-stone-2">{t(ui.tour3dTitle, locale)}</h2>
         <p class="mt-3 max-w-[52ch] text-[15px] leading-relaxed text-stone-2">{t(ui.tour3dIntro, locale)}</p>
       </div>
-      <a href={l.virtualTourUrl} target="_blank" rel="noopener" class="link-label shrink-0 self-start text-ink md:self-auto"><span class="inline-flex items-center gap-2">{t(ui.openInMatterport, locale)}<Icon name="external" size={14} /></span></a>
+      <a href={l.virtualTourUrl} target="_blank" rel="noopener" class="link-label shrink-0 self-start text-ink md:self-auto" data-track="tour_open" data-cta="tour_matterport_link"><span class="inline-flex items-center gap-2">{t(ui.openInMatterport, locale)}<Icon name="external" size={14} /></span></a>
     </div>
     <div class="tour-frame mt-6" data-tour-frame>
-      <button type="button" class="tour-facade" data-tour-play aria-label={t(ui.playTour, locale)}>
+      <button type="button" class="tour-facade" data-tour-play data-track="tour_open" data-cta="tour_facade" aria-label={t(ui.playTour, locale)}>
         {poster && <img src={poster.src} alt={imageAlt(poster, l, locale)} loading="lazy" decoding="async" class="h-full w-full object-cover" />}
         <span class="tour-shade" aria-hidden="true"></span>
         <span class="badge badge-3d absolute start-4 top-4" aria-hidden="true"><Icon name="cube" size={12} />3D</span>

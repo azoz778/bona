@@ -81,7 +81,7 @@ const fallbackHref = waLink(site.whatsapp.wa, labels.greeting);
   </div>
   <div class="mt-8 border border-champagne/60 bg-ivory-2 p-6" data-thanks hidden>
     <p class="flex items-start gap-3 text-sm"><Icon name="check" size={18} class="mt-0.5 shrink-0 text-champagne" /><span>{t(ui.formThanks, locale)} {t(ui.formThanksFallback, locale)}</span></p>
-    <a class="btn btn-outline mt-5" data-thanks-link href={fallbackHref} target="_blank" rel="noopener">{t(ui.formOpenWhatsApp, locale)}</a>
+    <a class="btn btn-outline mt-5" data-thanks-link data-cta="form_whatsapp" href={fallbackHref} target="_blank" rel="noopener">{t(ui.formOpenWhatsApp, locale)}</a>
   </div>
 </form>
 

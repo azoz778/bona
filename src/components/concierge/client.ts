@@ -421,6 +421,7 @@ class Concierge {
     a.href = item.text ? `${c.waHref.split('?')[0]}?text=${encodeURIComponent(item.text)}` : c.waHref;
     a.target = '_blank';
     a.rel = 'noopener';
+    a.dataset.cta = 'concierge_whatsapp';
     wrap.append(a);
     return wrap;
   }

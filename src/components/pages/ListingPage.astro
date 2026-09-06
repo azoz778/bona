@@ -51,7 +51,7 @@ const conciergeOn = site.concierge?.enabled !== false;
 const danaMessage = fill(t(ui.conciergeAskAboutHomeMsg, locale), { title, id: l.id });
 const kindText = t(kindLabel[kind], locale);
 ---
-<Base title={`${title} — ${locale === 'ar' ? site.nameAr : site.name}`} description={description} locale={locale} path={path} image={l.images?.[0]?.src} waMessage={waMessage}
+<Base title={`${title} — ${locale === 'ar' ? site.nameAr : site.name}`} description={description} locale={locale} path={path} image={l.images?.[0]?.src} waMessage={waMessage} listingId={l.id}
       jsonLd={[listingJsonLd(l, locale), breadcrumbJsonLd(crumbs)]}>
   <article class="pt-6 lg:pt-8">
     <div class="wrap">
@@ -127,8 +127,8 @@ const kindText = t(kindLabel[kind], locale);
 
           {(l.brochureUrl || (l.virtualTourUrl && !hasMatterport)) && (
             <div class="mt-12 flex flex-wrap gap-4">
-              {l.brochureUrl && <a href={l.brochureUrl} target="_blank" rel="noopener" class="btn btn-outline"><Icon name="download" size={16} />{t(ui.brochure, locale)}</a>}
-              {l.virtualTourUrl && !hasMatterport && <a href={l.virtualTourUrl} target="_blank" rel="noopener" class="btn btn-outline"><Icon name="tour" size={16} />{t(ui.virtualTour, locale)}</a>}
+              {l.brochureUrl && <a href={l.brochureUrl} target="_blank" rel="noopener" class="btn btn-outline" data-track="brochure_download" data-cta="listing_brochure"><Icon name="download" size={16} />{t(ui.brochure, locale)}</a>}
+              {l.virtualTourUrl && !hasMatterport && <a href={l.virtualTourUrl} target="_blank" rel="noopener" class="btn btn-outline" data-track="tour_open" data-cta="listing_tour_link"><Icon name="tour" size={16} />{t(ui.virtualTour, locale)}</a>}
             </div>
           )}
 
@@ -144,8 +144,8 @@ const kindText = t(kindLabel[kind], locale);
             <p class="label text-stone-2">{t(ui.privateEnquiry, locale)}</p>
             <p class="display-md mt-3">{formatPrice(l.price, locale)}</p>
             <p class="mt-3 text-sm text-stone-2">{t(ui.enquiryPanelText, locale)}</p>
-            <a href={wa} target="_blank" rel="noopener" class="btn btn-ink mt-7 w-full"><Icon name="whatsapp" size={17} />{t(ui.enquireWhatsApp, locale)}</a>
-            <a href={`tel:${site.phone.e164}`} class="btn btn-outline mt-3 w-full"><Icon name="phone" size={16} /><span dir="ltr">{site.phone.display}</span></a>
+            <a href={wa} target="_blank" rel="noopener" class="btn btn-ink mt-7 w-full" data-cta="listing_whatsapp" data-listing={l.id}><Icon name="whatsapp" size={17} />{t(ui.enquireWhatsApp, locale)}</a>
+            <a href={`tel:${site.phone.e164}`} class="btn btn-outline mt-3 w-full" data-cta="listing_tel" data-listing={l.id}><Icon name="phone" size={16} /><span dir="ltr">{site.phone.display}</span></a>
             {hasMatterport && <a href="#tour" class="link-label mt-6 inline-flex items-center gap-2 text-ink" data-tour-jump><Icon name="cube" size={14} />{t(ui.tour3dTitle, locale)}</a>}
             {conciergeOn && (
               <p class="mt-6"><button type="button" class="link-label text-ink" data-concierge-trigger data-concierge-message={danaMessage}>{t(ui.conciergeAskAboutHome, locale)}</button></p>
