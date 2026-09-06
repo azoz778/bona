@@ -86,9 +86,33 @@ const gsc = analytics.gscVerification || null;
 const apiBase = ((site as { concierge?: { apiBase?: string } }).concierge?.apiBase || '').replace(/\/+$/, '');
 // `<` is escaped so a value can never close the script element.
 const tagConfig = `window.BONA_TAGS=${JSON.stringify(tags)};window.BONA_API=${JSON.stringify(apiBase)};`.replace(/</g, '\\u003c');
+
+// ---- Content Security Policy (GitHub Pages sends no headers, so it travels as a <meta>; frame-ancestors cannot be
+//      set that way and is left out). Everything the site talks to, and nothing else: the concierge API, the vendor
+//      tags (which only load after consent), Retell/LiveKit for the browser call, Matterport, OpenStreetMap and
+//      the Google Maps office embed as frames. Localhost API origins are allowed only in dev builds or with BONA_CSP_LOCAL_API=1 (QA against a
+//      local API through the ?concierge_api= override, see docs/qa/concierge/README.md). ----
+const siteOrigin = new URL(site.url).origin;
+const localApi = import.meta.env.DEV || process.env.BONA_CSP_LOCAL_API === '1';
+const csp = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://connect.facebook.net https://sc-static.net",
+  ["connect-src 'self'", apiBase, siteOrigin,
+    'https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com',
+    'https://www.facebook.com https://tr.snapchat.com',
+    'https://*.retellai.com wss://*.retellai.com https://*.livekit.cloud wss://*.livekit.cloud',
+    localApi ? 'http://localhost:* http://127.0.0.1:*' : ''].filter(Boolean).join(' '),
+  "img-src 'self' data: https:",
+  "media-src 'self' https: blob:",
+  'frame-src https://my.matterport.com https://www.openstreetmap.org https://www.google.com',
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
+  "worker-src 'self' blob:",
+].join('; ');
 ---
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta http-equiv="Content-Security-Policy" content={csp} />
 <title>{fullTitle}</title>
 <meta name="description" content={desc} />
 <meta name="robots" content={robots} />
