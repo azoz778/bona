@@ -26,14 +26,36 @@ Bio text, highlights, 9 launch posts and a 30-day calendar are in `marketing/`.
 Profile text, greeting and away messages are in `marketing/social-bios.md`. Every "Private enquiry" on the site opens a chat to this number with the property reference pre-filled.
 
 ## 4. Analytics, pixels and ad accounts — the checklists
-The tracking is built in: attribution on every page, a `Ref` code in every WhatsApp message, a lead store and a WhatsApp poller inside `bona-api`, fan-out to Meta / GA4 / Snap, a private dashboard (§9). What only you can create are the accounts — one checklist each, click-by-click:
+The tracking is built in: attribution on every page, a `Ref` code in every WhatsApp message, a lead store and a WhatsApp poller inside `bona-api`, fan-out to Meta / GA4 / Snap, a TikTok site pixel, a private dashboard (§9). What only you can create are the accounts — one checklist each, click-by-click:
 - `docs/checklists/meta-bona-portfolio.md` — Business Portfolio **"Bona"** (never TK's), Page, Pixel/dataset + Conversions API token, SAR ad account, system-user token, domain verification (~40 min).
 - `docs/checklists/google-bona.md` — finish bona.com.sa@gmail.com, GA4 property + Measurement Protocol secret, Search Console, Google Business Profile, Google Ads later (~45 min + verification wait).
 - `docs/checklists/snapchat-bona.md` — Snap Pixel + Conversions API token (~15 min).
+- `docs/checklists/tiktok-bona.md` — TikTok business account + Pixel id (~10 min; site tag only, no Events API yet).
 - `docs/checklists/aqar.md` — Aqar plan, what it enforces, the export.
 - `docs/checklists/pdpl.md` — NDGP registration and the rules of conduct (opt-in, 72 h, rights).
 
-Where the values go: secret keys into `~/.secrets/bona-marketing.env` (created empty by `install.sh`; a key left empty = that integration stays off), public ids into `src/data/site.json → analytics` (send them to the agent). Then:
+Where the values go — every value the tracking is waiting on, and the one place each belongs:
+
+| Value | Goes into | Field |
+|---|---|---|
+| GA4 Measurement ID (`G-…`) | `src/data/site.json` | `analytics.ga4` |
+| GA4 Measurement ID (again, for the server) | `~/.secrets/bona-marketing.env` | `GA4_MEASUREMENT_ID` |
+| GA4 Measurement Protocol API secret | `~/.secrets/bona-marketing.env` | `GA4_API_SECRET` |
+| Meta Pixel / dataset ID | `src/data/site.json` | `analytics.metaPixel` |
+| Meta Pixel ID (again, for the server) | `~/.secrets/bona-marketing.env` | `META_PIXEL_ID` |
+| Meta system-user Conversions API token | `~/.secrets/bona-marketing.env` | `META_CAPI_TOKEN` |
+| Meta test-event code (temporary, to prove delivery) | `~/.secrets/bona-marketing.env` | `META_TEST_EVENT_CODE` |
+| Snap Pixel ID | `src/data/site.json` | `analytics.snapPixel` |
+| Snap Pixel ID (again, for the server) | `~/.secrets/bona-marketing.env` | `SNAP_PIXEL_ID` |
+| Snap Conversions API token | `~/.secrets/bona-marketing.env` | `SNAP_CAPI_TOKEN` |
+| TikTok Pixel ID (`sdkid`) | `src/data/site.json` | `analytics.tiktokPixel` |
+| Search Console verification string | `src/data/site.json` | `analytics.gscVerification` |
+
+The rule behind the duplication: `site.json` ids are **public** — they are printed in
+every page — and the agent edits that file. The `~/.secrets/bona-marketing.env` values
+are **secret**, never enter the repo, and you paste them yourself. A key left empty is
+not an error: that destination is simply skipped, and the fan-out marks its rows
+`skipped` rather than piling up a backlog. Then:
 ```
 node ~/bona/scripts/marketing/verify-integrations.mjs     # probes every integration, updates the Integrations board
 systemctl --user restart bona-api                          # picks up the keys
