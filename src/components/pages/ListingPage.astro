@@ -46,7 +46,11 @@ const description = metaDescription(paragraphs[0]) || `${title} — ${t(l.locati
    ("villa for sale in Jeddah" / "فيلا للبيع في جدة"). Append the category and the city when the title does
    not already say them, then let <Head> add the brand. */
 const cityText = t(l.location.city, locale);
-const categoryText = t(categoryLabel[l.category], locale);
+/* "International" is an adjective, so the English label needs a noun before "in <city>" can follow it
+   ("International in Dubai" reads as a mistake). Arabic's عقارات دولية already carries the noun. */
+const categoryText = l.category === 'international' && locale !== 'ar'
+  ? 'International property'
+  : t(categoryLabel[l.category], locale);
 const titleHasCity = cityText ? title.includes(cityText) : true;
 const metaTitle = [title, [categoryText, !titleHasCity && cityText].filter(Boolean).join(locale === 'ar' ? ' في ' : ' in ')]
   .filter(Boolean).join(' — ');
