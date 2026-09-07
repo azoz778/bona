@@ -20,7 +20,7 @@ const sample = (over = {}) => ({
 });
 
 test('the taxonomy is split between what a browser may send and what only the server writes', () => {
-  assert.deepEqual(EVENT_NAMES, ['page_view', 'listing_view', 'gallery_open', 'tour_open', 'video_play', 'brochure_download', 'whatsapp_click', 'call_click', 'form_submit', 'consent_update', 'concierge_open']);
+  assert.deepEqual(EVENT_NAMES, ['page_view', 'listing_view', 'gallery_open', 'tour_open', 'video_play', 'brochure_download', 'whatsapp_click', 'call_click', 'form_submit', 'consent_update', 'concierge_open', 'map_click']);
   assert.deepEqual(SERVER_EVENT_NAMES, ['concierge_chat_start', 'concierge_call_start', 'lead_created', 'lead_stage']);
   assert.equal(MAX_BODY_BYTES, 8 * 1024);
   assert.equal(MAX_PROPS_BYTES, 2 * 1024);

@@ -13,7 +13,7 @@
 /** What a browser may send. */
 export const EVENT_NAMES = [
   'page_view', 'listing_view', 'gallery_open', 'tour_open', 'video_play', 'brochure_download',
-  'whatsapp_click', 'call_click', 'form_submit', 'consent_update', 'concierge_open',
+  'whatsapp_click', 'call_click', 'form_submit', 'consent_update', 'concierge_open', 'map_click',
 ];
 
 /** What only this server writes. A browser sending one of these is refused. */
