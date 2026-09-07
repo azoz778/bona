@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FORBIDDEN, HYPE, isLocalSrc, LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, videoEntryProblems } from './rules.mjs';
+import { FORBIDDEN, HOUSE_PRICE_CAP, HYPE, isHousePublic, isLocalSrc, LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, sarAmount, videoEntryProblems } from './rules.mjs';
 
 function matterportIdOf(value) {
   if (typeof value !== 'string') return null;
@@ -177,6 +177,14 @@ for (const l of data) {
     err(id, "a map pin needs mapPrecision ('exact' or 'district')");
   }
   if (isLand && l.map && l.mapPrecision !== 'exact') err(id, 'land listings need an exact plot pin, never a district centroid');
+
+  // Owner rule 2026-09-08: houses over SAR 10,000,000 are not on the public site.
+  // build.mjs filters them out, but listings.json is also written by scripts/sync-listings.mjs
+  // (which the daily deploy runs and which edits price.amount in place, without rebuilding).
+  // Checking it here means a synced price rise can never quietly republish a house.
+  if (!isHousePublic(l)) {
+    err(id, `house is over the SAR ${HOUSE_PRICE_CAP.toLocaleString('en-US')} public-site cap (${Math.round(sarAmount(l.price)).toLocaleString('en-US')} SAR eq.) — re-run scripts/curate/build.mjs`);
+  }
 
   // copy hygiene
   for (const [label, str] of [['title.en', l.title?.en], ['title.ar', l.title?.ar], ['description.en', l.description?.en], ['description.ar', l.description?.ar], ['project.name.en', l.project?.name?.en], ['project.name.ar', l.project?.name?.ar], ...((h.en ?? []).map((x, i) => [`highlights.en[${i}]`, x])), ...((h.ar ?? []).map((x, i) => [`highlights.ar[${i}]`, x]))]) if (isStr(str)) checkCopy(id, label, str);
