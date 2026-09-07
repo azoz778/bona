@@ -9,12 +9,27 @@ export function createLimiter({ capacity, perMs, now = () => Date.now(), maxKeys
   /** @type {Map<string, { tokens: number, last: number }>} */
   const buckets = new Map();
 
+  /**
+   * Keep the map bounded. The stale pass alone could not do it: when every bucket is
+   * fresh — a flood from many addresses, which is exactly when the limiter matters —
+   * nothing was evictable and the map grew without limit, one entry per source address.
+   * An IPv6 /64 makes that an unbounded amount of memory for the cost of one packet
+   * each. So a second pass evicts the least-recently-used buckets outright.
+   *
+   * Eviction hands that key a full bucket again, so it is only ever done under
+   * pressure, and down to a low-water mark rather than exactly `maxKeys`: the sort is
+   * then paid once per `maxKeys / 10` new keys instead of once per request.
+   */
   function sweep(t) {
     if (buckets.size <= maxKeys) return;
     for (const [key, b] of buckets) {
       if (t - b.last > perMs * 4) buckets.delete(key);
-      if (buckets.size <= maxKeys) break;
+      if (buckets.size <= maxKeys) return;
     }
+    if (buckets.size <= maxKeys) return;
+    const target = Math.max(1, Math.floor(maxKeys * 0.9));
+    const oldestFirst = [...buckets.entries()].sort((a, b) => a[1].last - b[1].last);
+    for (let i = 0; i < oldestFirst.length && buckets.size > target; i += 1) buckets.delete(oldestFirst[i][0]);
   }
 
   /**
