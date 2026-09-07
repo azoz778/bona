@@ -11,7 +11,9 @@
    only "present" / "empty". Public ids come from src/data/site.json → analytics.
 
    Checks (id → what "live" means):
-     ga4        GA4_MEASUREMENT_ID + GA4_API_SECRET accepted by the Measurement Protocol debug endpoint
+     ga4        the site tag from site.json is served by the live page (that is the only proof GA4 is
+                measuring); GA4_MEASUREMENT_ID + GA4_API_SECRET additionally validate a verify_ping and
+                send one for real — but neither call proves ingestion, so the owner confirms in Realtime
      meta-capi  META_PIXEL_ID + META_CAPI_TOKEN: a PageView test event reaches the dataset (test code)
                 or, without a test code, the token can read the dataset
      meta-pixel site.json carries analytics.metaPixel and the live home page serves it
@@ -38,6 +40,9 @@ const JSON_OUT = flag('--json');
 const STRICT = flag('--strict');
 const TIMEOUT_MS = 10_000;
 const UA = 'bona-verify-integrations/1.0 (+https://bona.azoz.uk)';
+/* One stable client_id, so every run's verify_ping lands on the same "user" in GA4's Realtime report
+   instead of inventing a fresh one the owner then has to hunt for. */
+const GA4_VERIFY_CLIENT_ID = 'verify-integrations.1';
 
 const SITE_FILE = path.join(root, 'src/data/site.json');
 const BOARD_FILE = path.join(root, 'src/data/integrations.json');
@@ -79,28 +84,43 @@ const row = (id, status, detail, extra = {}) => ({ id, status, detail: scrub(det
 
 /* ------------------------------------------------------------------ checks */
 
-export async function checkGa4({ env, site, homeHtml }) {
+/* GA4's two Measurement-Protocol endpoints answer very different questions and only one of them is
+   evidence of anything. /debug/mp/collect VALIDATES the payload's shape: it ingests nothing, and it
+   answers 200 with an empty validationMessages array even for a measurement_id / api_secret pair that
+   belongs to no property at all — so a green row resting on it alone can be produced by credentials
+   that measure nothing. /mp/collect is the real one, and it is write-only: 204, empty body, never an
+   error, whatever the credentials. Neither call can prove ingestion, so the only checkable evidence
+   that GA4 measures THIS site is the tag id from site.json coming back in the live home page — that,
+   and nothing else, is what gates "live" below. The owner closes the loop by eye in Realtime. */
+export async function checkGa4({ env, site, homeHtml, probe: send = probe }) {
   const mid = env.GA4_MEASUREMENT_ID;
   const secret = env.GA4_API_SECRET;
   const siteId = site.analytics?.ga4;
+  const served = present(siteId) && homeHtml != null && homeHtml.includes(siteId);
   const siteNote = present(siteId)
-    ? (homeHtml == null ? `site tag ${siteId} in site.json` : homeHtml.includes(siteId) ? `site tag ${siteId} served` : `site tag ${siteId} in site.json but NOT on the live page (deploy pending?)`)
+    ? (homeHtml == null ? `site tag ${siteId} in site.json, live page NOT fetched` : served ? `site tag ${siteId} served` : `site tag ${siteId} in site.json but NOT on the live page (deploy pending?)`)
     : 'site tag missing: site.json → analytics.ga4';
+  // Same ladder as checkSiteTag: a missing id is the owner's to paste, an id that is in site.json but
+  // not on the page is a broken deploy, and an unfetched page proves nothing either way.
+  const tagStatus = !present(siteId) ? 'pending-owner' : served ? 'live' : 'error';
   if (!present(mid) || !present(secret)) {
     return row('ga4', 'pending-owner', `GA4_MEASUREMENT_ID ${present(mid) ? 'present' : 'empty'}, GA4_API_SECRET ${present(secret) ? 'present' : 'empty'} in ~/.secrets/bona-marketing.env — docs/checklists/google-bona.md §1. ${siteNote}`);
   }
-  const url = `https://www.google-analytics.com/debug/mp/collect?measurement_id=${encodeURIComponent(mid)}&api_secret=${encodeURIComponent(secret)}`;
-  const res = await probe(url, {
+  const qs = `measurement_id=${encodeURIComponent(mid)}&api_secret=${encodeURIComponent(secret)}`;
+  const post = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ client_id: 'verify.1', non_personalized_ads: true, events: [{ name: 'verify_ping', params: { engagement_time_msec: 1 } }] }),
-  });
-  if (res.dry) return row('ga4', 'pending-owner', `[dry-run] would POST ${url.replace(/api_secret=[^&]+/, 'api_secret=<redacted>')}. ${siteNote}`, { secrets: [secret] });
-  if (res.status !== 200) return row('ga4', 'error', `debug/mp/collect HTTP ${res.status} ${res.error ?? res.text}`, { secrets: [secret] });
-  const messages = Array.isArray(res.json?.validationMessages) ? res.json.validationMessages : [];
-  if (messages.length) return row('ga4', 'error', `Measurement Protocol rejected the test event: ${messages.map((m) => `${m.validationCode ?? ''} ${m.description ?? ''}`.trim()).join('; ')}`, { secrets: [secret] });
-  const status = present(siteId) && (homeHtml == null || homeHtml.includes(siteId)) ? 'live' : 'error';
-  return row('ga4', status, `Measurement Protocol accepted a test event for ${mid}. ${siteNote}`, { secrets: [secret] });
+    body: JSON.stringify({ client_id: GA4_VERIFY_CLIENT_ID, non_personalized_ads: true, events: [{ name: 'verify_ping', params: { engagement_time_msec: 1 } }] }),
+  };
+  const dbg = await send(`https://www.google-analytics.com/debug/mp/collect?${qs}`, post);
+  if (dbg.dry) return row('ga4', 'pending-owner', `[dry-run] would validate a verify_ping on debug/mp/collect and send one on mp/collect for ${mid}. ${siteNote}`, { secrets: [secret] });
+  if (dbg.status !== 200) return row('ga4', 'error', `debug/mp/collect HTTP ${dbg.status} ${dbg.error ?? dbg.text}`, { secrets: [secret] });
+  const messages = Array.isArray(dbg.json?.validationMessages) ? dbg.json.validationMessages : [];
+  if (messages.length) return row('ga4', 'error', `Measurement Protocol rejected the verify_ping: ${messages.map((m) => `${m.validationCode ?? ''} ${m.description ?? ''}`.trim()).join('; ')}. ${siteNote}`, { secrets: [secret] });
+  const sent = await send(`https://www.google-analytics.com/mp/collect?${qs}`, post);
+  if (!(sent.status >= 200 && sent.status < 300)) return row('ga4', 'error', `mp/collect refused the verify_ping: HTTP ${sent.status} ${sent.error ?? sent.text}. ${siteNote}`, { secrets: [secret] });
+  const detail = `payload validated for ${mid}; one verify_ping sent to mp/collect (HTTP ${sent.status} — that endpoint answers 204 with an empty body and never reports errors, so acceptance is NOT proof of ingestion). ${siteNote}. Owner: confirm the verify_ping in GA4 → Reports → Realtime (or Admin → DebugView) before treating GA4 as measuring.`;
+  return row('ga4', tagStatus, detail, { secrets: [secret] });
 }
 
 export async function checkMetaCapi({ env, site }) {
