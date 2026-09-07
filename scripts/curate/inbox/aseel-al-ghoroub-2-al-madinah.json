@@ -1,0 +1,216 @@
+{
+  "id": "BONA-W015",
+  "slug": "aseel-al-ghoroub-2-al-madinah",
+  "sourceRef": "WA-20260907-AC53D4",
+  "status": "available",
+  "category": "off-plan",
+  "type": "villa",
+  "kind": "house",
+  "featured": false,
+  "title": {
+    "en": "Aseel Al Ghoroub 2, Al Madinah",
+    "ar": "أصيل الغروب ٢، المدينة المنورة"
+  },
+  "location": {
+    "district": {
+      "en": "Al Ghoroub Suburb",
+      "ar": "ضاحية الغروب"
+    },
+    "city": {
+      "en": "Al Madinah Al Munawwarah",
+      "ar": "المدينة المنورة"
+    },
+    "country": {
+      "en": "Saudi Arabia",
+      "ar": "المملكة العربية السعودية"
+    },
+    "countryCode": "SA"
+  },
+  "price": {
+    "amount": null,
+    "currency": "SAR",
+    "from": false,
+    "period": null,
+    "onRequest": true
+  },
+  "specs": {
+    "beds": null,
+    "baths": null,
+    "areaSqm": null,
+    "plotSqm": null,
+    "yearBuilt": null,
+    "floors": null
+  },
+  "images": [
+    {
+      "src": "/listings/aseel-al-ghoroub-2-al-madinah/01.jpg",
+      "thumb": "/listings/aseel-al-ghoroub-2-al-madinah/01-thumb.webp",
+      "alt": {
+        "en": "Aerial view — Aseel Al Ghoroub 2, Al Madinah",
+        "ar": "منظر جوي — أصيل الغروب ٢، المدينة المنورة"
+      }
+    },
+    {
+      "src": "/listings/aseel-al-ghoroub-2-al-madinah/02.jpg",
+      "thumb": "/listings/aseel-al-ghoroub-2-al-madinah/02-thumb.webp",
+      "alt": {
+        "en": "Exterior — Aseel Al Ghoroub 2, Al Madinah",
+        "ar": "الواجهة الخارجية — أصيل الغروب ٢، المدينة المنورة"
+      }
+    },
+    {
+      "src": "/listings/aseel-al-ghoroub-2-al-madinah/03.jpg",
+      "thumb": "/listings/aseel-al-ghoroub-2-al-madinah/03-thumb.webp",
+      "alt": {
+        "en": "Entrance — Aseel Al Ghoroub 2, Al Madinah",
+        "ar": "المدخل — أصيل الغروب ٢، المدينة المنورة"
+      }
+    },
+    {
+      "src": "/listings/aseel-al-ghoroub-2-al-madinah/04.jpg",
+      "thumb": "/listings/aseel-al-ghoroub-2-al-madinah/04-thumb.webp",
+      "alt": {
+        "en": "Living room — Aseel Al Ghoroub 2, Al Madinah",
+        "ar": "غرفة المعيشة — أصيل الغروب ٢، المدينة المنورة"
+      }
+    },
+    {
+      "src": "/listings/aseel-al-ghoroub-2-al-madinah/05.jpg",
+      "thumb": "/listings/aseel-al-ghoroub-2-al-madinah/05-thumb.webp",
+      "alt": {
+        "en": "Master suite — Aseel Al Ghoroub 2, Al Madinah",
+        "ar": "الجناح الرئيسي — أصيل الغروب ٢، المدينة المنورة"
+      }
+    },
+    {
+      "src": "/listings/aseel-al-ghoroub-2-al-madinah/06.jpg",
+      "thumb": "/listings/aseel-al-ghoroub-2-al-madinah/06-thumb.webp",
+      "alt": {
+        "en": "Exterior — Aseel Al Ghoroub 2, Al Madinah",
+        "ar": "الواجهة الخارجية — أصيل الغروب ٢، المدينة المنورة"
+      }
+    },
+    {
+      "src": "/listings/aseel-al-ghoroub-2-al-madinah/07.jpg",
+      "thumb": "/listings/aseel-al-ghoroub-2-al-madinah/07-thumb.webp",
+      "alt": {
+        "en": "Aerial view — Aseel Al Ghoroub 2, Al Madinah",
+        "ar": "منظر جوي — أصيل الغروب ٢، المدينة المنورة"
+      }
+    },
+    {
+      "src": "/listings/aseel-al-ghoroub-2-al-madinah/08.jpg",
+      "thumb": "/listings/aseel-al-ghoroub-2-al-madinah/08-thumb.webp",
+      "alt": {
+        "en": "Exterior — Aseel Al Ghoroub 2, Al Madinah",
+        "ar": "الواجهة الخارجية — أصيل الغروب ٢، المدينة المنورة"
+      }
+    },
+    {
+      "src": "/listings/aseel-al-ghoroub-2-al-madinah/09.jpg",
+      "thumb": "/listings/aseel-al-ghoroub-2-al-madinah/09-thumb.webp",
+      "alt": {
+        "en": "Aerial view — Aseel Al Ghoroub 2, Al Madinah",
+        "ar": "منظر جوي — أصيل الغروب ٢، المدينة المنورة"
+      }
+    }
+  ],
+  "videos": [],
+  "description": {
+    "en": "Aseel Al Ghoroub 2 sits within the wider Ghoroub Destination community in the Al Ghoroub suburb of Al Madinah Al Munawwarah, close to the district's main road network. The Prophet's Mosque is roughly 13 km away and Quba Mosque about 14 km, while Taibah University and the Prince Sultan Armed Forces Hospital are each around 6 km from the site.\n\nThe destination is built around Hadiqat Al Ghoroub, a central park spanning over 1,000,000 sqm of lawns, mature trees and rose gardens, alongside mosques, schools, health facilities and commercial centres planned into the community.\n\nThe project offers three villa layouts: a villa with a total built-up area of 293.55 sqm, a second villa type, and a townhouse villa of 244.86 sqm. Each unit is arranged over ground and first floors with a majlis, family living and dining space, kitchen and bedrooms, plus front, side and rear courtyards.\n\nThe build package carries warranties on the structural frame, waterproofing and termite protection, along with finishing works covering electrical wiring, plumbing, doors, windows and flooring.",
+    "ar": "يقع مشروع أصيل الغروب ٢ ضمن مجتمع وجهة الغروب في ضاحية الغروب بالمدينة المنورة، بالقرب من شبكة الطرق الرئيسية للحي. يبعد المسجد النبوي الشريف نحو ١٣ كم، ومسجد قباء نحو ١٤ كم، بينما تبعد جامعة طيبة ومستشفى الأمير سلطان للقوات المسلحة نحو ٦ كم عن الموقع.\n\nتتمحور الوجهة حول حديقة الغروب، وهي حديقة مركزية تمتد على أكثر من مليون متر مربع بمسطحاتها الخضراء وأشجارها الوارفة وحدائق الورود، إلى جانب مساجد ومدارس ومرافق صحية ومراكز تجارية موزعة ضمن المخطط العام للمجتمع.\n\nيضم المشروع ثلاثة نماذج فلل: فيلا بمساحة إجمالية ٢٩٣٫٥٥ متر مربع، ونموذج فيلا ثانٍ، وفيلا تاون هاوس بمساحة إجمالية ٢٤٤٫٨٦ متر مربع. تتوزع كل وحدة على الطابقين الأرضي والأول وتضم مجلسًا وغرفة معيشة وطعام ومطبخًا وغرف نوم، مع أفنية أمامية وجانبية وخلفية.\n\nتشمل حزمة البناء ضمانات على الهيكل الإنشائي والعزل المائي ومكافحة النمل الأبيض، إضافة إلى أعمال التشطيبات من كهرباء وسباكة وأبواب ونوافذ وأرضيات."
+  },
+  "highlights": {
+    "en": [
+      "Within Ghoroub Destination community",
+      "Three villa layouts, 245–294 sqm",
+      "Steps from a 1,000,000 sqm park",
+      "Close to Al Madinah's main roads",
+      "Structural and waterproofing warranty",
+      "Private front, side and rear courtyards"
+    ],
+    "ar": [
+      "ضمن مجتمع وجهة الغروب",
+      "ثلاثة نماذج فلل بمساحات ٢٤٥-٢٩٤ م²",
+      "بجوار حديقة بمساحة مليون م²",
+      "قرب شبكة الطرق الرئيسية بالمدينة المنورة",
+      "ضمان على الهيكل الإنشائي والعزل المائي",
+      "أفنية أمامية وجانبية وخلفية خاصة"
+    ]
+  },
+  "virtualTourUrl": null,
+  "brochureUrl": "https://bona.azoz.uk/listings/aseel-al-ghoroub-2-al-madinah/brochure.pdf",
+  "project": {
+    "name": {
+      "en": "Aseel Al Ghoroub 2",
+      "ar": "أصيل الغروب ٢"
+    },
+    "developer": {
+      "en": "Ambatt Real Estate",
+      "ar": "الأمباط العقارية"
+    }
+  },
+  "unit": null,
+  "map": null,
+  "mapPrecision": null,
+  "listedAt": "2026-09-07",
+  "hidden": false,
+  "_intake": {
+    "source": "whatsapp",
+    "pdfSha256": "0a354fc1012b3a7d1fe339b6083f6f89c37593f98b6decbe9c3a23f0c6793cdb",
+    "model": "sonnet",
+    "confidence": 0.72,
+    "warnings": [
+      "model-flagged"
+    ],
+    "images": [
+      {
+        "n": 1,
+        "candidate": 7,
+        "room": "aerial"
+      },
+      {
+        "n": 2,
+        "candidate": 2,
+        "room": "exterior"
+      },
+      {
+        "n": 3,
+        "candidate": 10,
+        "room": "entrance"
+      },
+      {
+        "n": 4,
+        "candidate": 18,
+        "room": "living"
+      },
+      {
+        "n": 5,
+        "candidate": 19,
+        "room": "master"
+      },
+      {
+        "n": 6,
+        "candidate": 17,
+        "room": "exterior"
+      },
+      {
+        "n": 7,
+        "candidate": 26,
+        "room": "aerial"
+      },
+      {
+        "n": 8,
+        "candidate": 23,
+        "room": "exterior"
+      },
+      {
+        "n": 9,
+        "candidate": 28,
+        "room": "aerial"
+      }
+    ],
+    "createdAt": "2026-09-07T13:07:44.970Z",
+    "site": "https://bona.azoz.uk"
+  }
+}

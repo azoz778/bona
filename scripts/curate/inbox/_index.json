@@ -1,5 +1,5 @@
 {
-  "nextSeq": 15,
+  "nextSeq": 16,
   "listings": {
     "kian-residence-apartments-al-nahda": "BONA-W001",
     "nuzul-khayala-residences-north-jeddah": "BONA-W002",
@@ -14,6 +14,7 @@
     "sadana-townhouse-al-rawdah": "BONA-W011",
     "modern-villa-in-al-shati-jeddah": "BONA-W012",
     "danyah-villas-al-basateen": "BONA-W013",
-    "darco-prime-waterfront-al-shati": "BONA-W014"
+    "darco-prime-waterfront-al-shati": "BONA-W014",
+    "aseel-al-ghoroub-2-al-madinah": "BONA-W015"
   }
 }
