@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeBoard, checkSiteTag, checkGsc, checkGa4 } from '../marketing/verify-integrations.mjs';
+import { mergeBoard, checkSiteTag, checkGsc, checkGa4, checkApi, buildUserAgent, healthLink } from '../marketing/verify-integrations.mjs';
 
 test('mergeBoard updates rows by id and appends unknown ids with their metadata', () => {
   const board = [
@@ -96,4 +96,31 @@ test('GA4 is live only with a clean validation and the tag served, and says acce
   assert.match(r.detail, /NOT proof of ingestion/);
   assert.match(r.detail, /Realtime/);
   assert.ok(!r.detail.includes('sekrit-value'), 'the api_secret is scrubbed out of every detail line');
+});
+
+test('the User-Agent and the API row link are derived from site.json, never from a literal domain', () => {
+  assert.equal(buildUserAgent({ url: 'https://example.test/' }), 'bona-verify-integrations/1.0 (+https://example.test)');
+  assert.equal(buildUserAgent({}), 'bona-verify-integrations/1.0', 'no site.json url: a domain-free UA beats a stale one');
+  assert.equal(healthLink({ concierge: { apiBase: 'https://api.example.test/' } }), 'https://api.example.test/health');
+  assert.equal(healthLink({ concierge: {} }), null);
+});
+
+test('with no concierge.apiBase in site.json the API and Retell rows say so instead of probing a guess', async () => {
+  let called = 0;
+  const probe = async () => { called++; return { status: 200, ok: true, json: { ok: true } }; };
+  const { api, retell } = await checkApi({ site: { url: 'https://example.test' }, probe });
+  assert.equal(called, 0);
+  assert.equal(api.status, 'pending-owner');
+  assert.match(api.detail, /concierge\.apiBase/);
+  assert.equal(retell.status, 'pending-owner');
+  assert.match(retell.detail, /concierge\.apiBase/);
+});
+
+test('a declared apiBase is the host that gets probed', async () => {
+  const seen = [];
+  const probe = async (url) => { seen.push(url); return { status: 200, ok: true, json: { ok: true, version: '1.2.3', retell: 'ok' } }; };
+  const { api, retell } = await checkApi({ site: { concierge: { apiBase: 'https://api.example.test/' } }, probe });
+  assert.deepEqual(seen, ['https://api.example.test/health']);
+  assert.equal(api.status, 'live');
+  assert.equal(retell.status, 'live');
 });
