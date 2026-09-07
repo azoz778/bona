@@ -50,7 +50,7 @@ const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { n
               <dt class="label text-stone-2">{t(ui.address, locale)}</dt>
               <dd class="mt-2 text-[15px] leading-relaxed">
                 <address class="not-italic">{addr.street}<br />{addr.city} {addr.postalCode}, {addr.region}<br />{addr.country}</address>
-                <a href={mapsLink} target="_blank" rel="noopener" class="link-label mt-4 inline-block text-ink">{t(ui.openInMaps, locale)}</a>
+                <a href={mapsLink} target="_blank" rel="noopener" class="link-label mt-4 inline-block text-ink" data-track="map_click" data-cta="contact_map">{t(ui.openInMaps, locale)}</a>
               </dd>
             </div>
             <div>

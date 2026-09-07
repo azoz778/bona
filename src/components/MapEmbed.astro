@@ -36,13 +36,13 @@ const locationLine = [t(l.location.district, locale), t(l.location.city, locale)
           <span class="ms-2">{t(exact ? ui.mapExactNote : ui.mapApproxNote, locale)}</span>
         </p>
       </div>
-      <a href={mapsLink} target="_blank" rel="noopener" class="link-label shrink-0 self-start text-ink md:self-auto">
+      <a href={mapsLink} target="_blank" rel="noopener" class="link-label shrink-0 self-start text-ink md:self-auto" data-track="map_click" data-cta="listing_map_external" data-listing={l.id}>
         <span class="inline-flex items-center gap-2">{t(ui.openMap, locale)}<Icon name="external" size={14} /></span>
       </a>
     </div>
 
     <div class="map-frame mt-6" data-map-frame data-src={embedSrc} data-title={fill(t(ui.listingMapFrameTitle, locale), { title })}>
-      <button type="button" class="map-facade" data-map-play aria-label={t(ui.showMap, locale)}>
+      <button type="button" class="map-facade" data-map-play data-track="map_click" data-cta="listing_map_embed" data-listing={l.id} aria-label={t(ui.showMap, locale)}>
         <span class="map-grid" aria-hidden="true"></span>
         <span class="map-pin" aria-hidden="true"><Icon name="pin" size={22} /></span>
         <span class="map-caption label" aria-hidden="true">{t(ui.showMap, locale)}</span>
