@@ -4,8 +4,9 @@
    Emits: charset/viewport, title (+ brand suffix), description, canonical, hreflang en/ar/x-default,
    robots, theme-color, favicons/manifest, Open Graph + Twitter, JSON-LD @graph (org + website once,
    plus whatever the page passes), preconnects, the tag configuration (window.BONA_TAGS / BONA_API), the inline
-   first-party attribution script and the consent-gated tag loader (src/scripts/*.js). Nothing from Google, Meta or
-   Snap is requested until the visitor accepts in the consent banner. */
+   first-party attribution script and the consent-gated tag loader (src/scripts/*.js). Nothing from Google, Meta,
+   Snap or TikTok is requested until the visitor accepts in the consent banner — and a tag whose id is null in
+   site.json → analytics is inert whatever the visitor chooses. */
 import site from '../../data/site.json';
 import type { Locale } from '../../lib/i18n';
 import privacy from '../../data/privacy.json';
@@ -80,8 +81,13 @@ const jsonLdText = JSON.stringify({ '@context': 'https://schema.org', '@graph': 
 
 // ---- Tags. Ids live in site.json → analytics; every one is optional. They are only ever handed to the browser as
 //      configuration: src/scripts/tags.js injects the vendor loaders after consent (see Consent.astro). ----
-const analytics = site.analytics as { ga4?: string | null; metaPixel?: string | null; snapPixel?: string | null; gscVerification?: string | null };
-const tags = { ga4: analytics.ga4 || null, metaPixel: analytics.metaPixel || null, snapPixel: analytics.snapPixel || null };
+const analytics = site.analytics as { ga4?: string | null; metaPixel?: string | null; snapPixel?: string | null; tiktokPixel?: string | null; gscVerification?: string | null };
+const tags = {
+  ga4: analytics.ga4 || null,
+  metaPixel: analytics.metaPixel || null,
+  snapPixel: analytics.snapPixel || null,
+  tiktokPixel: analytics.tiktokPixel || null,
+};
 const gsc = analytics.gscVerification || null;
 const apiBase = ((site as { concierge?: { apiBase?: string } }).concierge?.apiBase || '').replace(/\/+$/, '');
 // `<` is escaped so a value can never close the script element.
@@ -89,17 +95,18 @@ const tagConfig = `window.BONA_TAGS=${JSON.stringify(tags)};window.BONA_API=${JS
 
 // ---- Content Security Policy (GitHub Pages sends no headers, so it travels as a <meta>; frame-ancestors cannot be
 //      set that way and is left out). Everything the site talks to, and nothing else: the concierge API, the vendor
-//      tags (which only load after consent), Retell/LiveKit for the browser call, Matterport, OpenStreetMap and
-//      the Google Maps office embed as frames. Localhost API origins are allowed only in dev builds or with BONA_CSP_LOCAL_API=1 (QA against a
-//      local API through the ?concierge_api= override, see docs/qa/concierge/README.md). ----
+//      tags (Google, Meta, Snap, TikTok — which only load after consent), Retell/LiveKit for the browser call, and
+//      Matterport, OpenStreetMap and the Google Maps office embed as frames. Localhost API origins are allowed only
+//      in dev builds or with BONA_CSP_LOCAL_API=1 (QA against a local API through the ?concierge_api= override, see
+//      docs/qa/concierge/README.md). ----
 const siteOrigin = new URL(site.url).origin;
 const localApi = import.meta.env.DEV || process.env.BONA_CSP_LOCAL_API === '1';
 const csp = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://connect.facebook.net https://sc-static.net",
+  "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://connect.facebook.net https://sc-static.net https://analytics.tiktok.com",
   ["connect-src 'self'", apiBase, siteOrigin,
     'https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com',
-    'https://www.facebook.com https://tr.snapchat.com',
+    'https://www.facebook.com https://tr.snapchat.com https://analytics.tiktok.com',
     'https://*.retellai.com wss://*.retellai.com https://*.livekit.cloud wss://*.livekit.cloud',
     localApi ? 'http://localhost:* http://127.0.0.1:*' : ''].filter(Boolean).join(' '),
   "img-src 'self' data: https:",
