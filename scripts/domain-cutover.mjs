@@ -1,12 +1,20 @@
 #!/usr/bin/env node
-/* domain-cutover — move the site from bona.azoz.uk to its own domain (bona.sa) and the API
-   from bona-api.azoz.uk to api.<domain>, one logged step at a time, every step idempotent.
+/* domain-cutover — move the site from whatever domain it is on today to a new one (bona.sa) and the
+   API to api.<domain>, one logged step at a time, every step idempotent. The hosts being moved away
+   from are read from src/data/site.json (url, concierge.apiBase) at run time, never assumed.
 
      node scripts/domain-cutover.mjs --domain bona.sa --api api.bona.sa --dry-run   # the plan, nothing changed
      node scripts/domain-cutover.mjs --domain bona.sa --api api.bona.sa             # do it
      node scripts/domain-cutover.mjs … --only dns,repo      # a subset of steps (zone,dns,repo,pages,tunnel,env,redirect)
      node scripts/domain-cutover.mjs … --skip pages         # everything but
      node scripts/domain-cutover.mjs … --offline            # dry-run without even the read-only lookups
+     node scripts/domain-cutover.mjs … --allow-repo-without-dns   # steps 3/6 with the DNS done by hand
+
+   Fail-closed: steps 3 (repo) and 6 (env) point the site and the services at the new domain. A real
+   run refuses both unless the Cloudflare token is present AND step 1 resolved the zone id — without
+   that, DNS for the new domain was never touched and the edits would take the site and the API down
+   while claiming they had moved. --allow-repo-without-dns is the explicit opt-out for an operator who
+   is doing the DNS elsewhere and wants only the repo and env edits. Dry runs are never blocked.
 
    Before running for real the OWNER must have: registered the domain at nic.sa (Nafath), added the
    zone in the Cloudflare dashboard and changed the nameservers at nic.sa — step 1 checks and stops
@@ -23,8 +31,11 @@
      5 tunnel    ~/.cloudflared/bona.yml ingress hostname → <api host> (old host kept as a second entry);
                  cloudflared tunnel route dns --overwrite-dns bona <api host>
      6 env       ~/.secrets/bona-services.env BONA_PUBLIC_API / BONA_SITE via setEnvValues (never printed)
-     7 redirect  Cloudflare redirect rule on the azoz.uk zone: bona.azoz.uk/* → https://<domain>/$1 (301),
-                 + proxy the bona CNAME so the rule can fire; falls back to dashboard instructions on 403
+     7 redirect  Cloudflare redirect rule on the azoz.uk zone: <current site host>/* → https://<domain>/$1
+                 (301), + proxy the bona CNAME so the rule can fire; falls back to dashboard instructions
+                 on 403. This step only applies while the current site host still lives in the azoz.uk
+                 zone (OLD_ZONE, the registrar zone); once it has moved off, the step is skipped because
+                 there is nothing on that zone to redirect
      then prints the manual tail: provision.mjs, restart units, GA4 stream URL, Search Console, Meta domain,
      IndexNow, commit + push.
 
@@ -44,22 +55,52 @@ export const GITHUB_PAGES_A = ['185.199.108.153', '185.199.109.153', '185.199.11
 export const GITHUB_PAGES_AAAA = ['2606:50c0:8000::153', '2606:50c0:8001::153', '2606:50c0:8002::153', '2606:50c0:8003::153'];
 export const PAGES_CNAME_TARGET = 'azoz778.github.io';
 export const REPO = 'azoz778/bona';
+/* Last-resort fallbacks only. The hosts in play come from src/data/site.json through currentHosts();
+   these two constants go stale the moment the site moves, which is precisely what this script does. */
 export const OLD_SITE_HOST = 'bona.azoz.uk';
 export const OLD_API_HOST = 'bona-api.azoz.uk';
 export const OLD_ZONE = 'azoz.uk';
 export const STEPS = ['zone', 'dns', 'repo', 'pages', 'tunnel', 'env', 'redirect'];
 const CF_API = 'https://api.cloudflare.com/client/v4';
 
+const readJson = (file, fallback) => {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
+};
+
 /* ------------------------------------------------------------------ pure helpers (tested) */
 
+/**
+ * The hosts we are moving away from, read from site.json — the single source of truth for both
+ * domains. `fallback` is used only when site.json cannot be read or carries no url / apiBase.
+ */
+export function currentHosts(site, fallback = { site: OLD_SITE_HOST, api: OLD_API_HOST }) {
+  const host = (u) => { try { return new URL(String(u)).host; } catch { return null; } };
+  return { site: host(site?.url) ?? fallback.site, api: host(site?.concierge?.apiBase) ?? fallback.api };
+}
+
+/**
+ * May a real run rewrite the repo (step 3) and ~/.secrets/bona-services.env (step 6)? Only when the
+ * DNS half actually happened: a Cloudflare token was present AND step 1 resolved a zone id. A dry run
+ * writes nothing anywhere so it is always allowed, and --allow-repo-without-dns is the operator
+ * saying, explicitly, that the DNS is being handled somewhere else.
+ */
+export function canWriteRepo({ dryRun = false, token = '', zoneId = null, allowRepoWithoutDns = false } = {}) {
+  if (dryRun) return true;
+  if (allowRepoWithoutDns) return true;
+  return Boolean(token) && Boolean(zoneId);
+}
+
 export function parseArgs(argv) {
-  const o = { dryRun: false, offline: false, only: null, skip: [], domain: null, api: null, certWaitMin: 20 };
+  const o = { dryRun: false, offline: false, only: null, skip: [], domain: null, api: null, certWaitMin: 20, allowRepoWithoutDns: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--domain') o.domain = String(argv[++i] ?? '').toLowerCase();
     else if (a === '--api') o.api = String(argv[++i] ?? '').toLowerCase();
     else if (a === '--dry-run') o.dryRun = true;
     else if (a === '--offline') { o.dryRun = true; o.offline = true; }
+    // Steps 3 and 6 are fail-closed without a verified zone; this is the operator's way to say the
+    // DNS is being done by hand and only the repo / env edits are wanted.
+    else if (a === '--allow-repo-without-dns') o.allowRepoWithoutDns = true;
     else if (a === '--only') o.only = String(argv[++i] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
     else if (a === '--skip') o.skip = String(argv[++i] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
     else if (a === '--cert-wait') o.certWaitMin = Number(argv[++i]);
@@ -234,13 +275,16 @@ export async function run(argv = process.argv.slice(2)) {
   const siteUrl = `https://${domain}`;
   const apiUrl = `https://${apiHost}`;
 
+  // Where the site and the API live *today*, from site.json rather than from a constant that ages.
+  const hosts = currentHosts(readJson(path.join(root, 'src/data/site.json'), {}));
+
   const cfEnv = loadEnvFile(path.join(HOME, '.secrets', 'cloudflare.env'));
   const token = cfEnv.CLOUDFLARE_TOKEN || cfEnv.CLOUDFLARE_API_TOKEN || cfEnv.CF_API_TOKEN || '';
   const tunnelFile = path.join(HOME, '.cloudflared', 'bona.yml');
   const tunnelText = fs.existsSync(tunnelFile) ? fs.readFileSync(tunnelFile, 'utf8') : '';
   const tunnelId = tunnelIdFrom(tunnelText);
 
-  log(`domain-cutover ${OLD_SITE_HOST} → ${domain} · ${OLD_API_HOST} → ${apiHost}${DRY ? o.offline ? '  [offline dry-run]' : '  [dry-run: read-only lookups, no writes]' : ''}`);
+  log(`domain-cutover ${hosts.site} → ${domain} · ${hosts.api} → ${apiHost}${DRY ? o.offline ? '  [offline dry-run]' : '  [dry-run: read-only lookups, no writes]' : ''}`);
   log(`   token ${token ? 'present' : 'MISSING'} in ~/.secrets/cloudflare.env · tunnel id ${tunnelId ?? 'not found in ~/.cloudflared/bona.yml'}`);
   if (!token && !o.offline) { warn('no CLOUDFLARE_TOKEN — Cloudflare steps will only be printed'); }
   const canRead = Boolean(token) && !o.offline;
@@ -301,6 +345,28 @@ export async function run(argv = process.argv.slice(2)) {
       r.ok ? ok(line) : warn(`${line} — ${cfError(r)}`);
     }
     if (!canRead || !zoneId) plan('(records listed above are the full desired set; existing ones are skipped when the zone can be read)');
+  }
+
+  /* Fail closed before anything is written outside Cloudflare ---------------
+     Steps 3 and 6 rewrite site.json, public/CNAME, astro.config.mjs, robots.txt, cors.mjs and
+     ~/.secrets/bona-services.env to the new domain. Doing that when Cloudflare was never reached — no
+     token, or no zone id because step 1 was skipped or the zone is not in the account yet — publishes
+     a domain whose DNS nobody has touched: the site stops resolving, the API with it, and the repo now
+     insists that is where they live. Refuse instead, and say what would unblock it. */
+  if ((active('repo') || active('env')) && !canWriteRepo({ dryRun: DRY, token, zoneId, allowRepoWithoutDns: o.allowRepoWithoutDns })) {
+    const why = !token
+      ? 'no CLOUDFLARE_TOKEN in ~/.secrets/cloudflare.env'
+      : active('zone') ? `the ${domain} zone did not resolve` : 'step "zone" was skipped, so no zone id was resolved';
+    log(`\n== Refusing to rewrite the repo and ~/.secrets/bona-services.env`);
+    warn(`${why} — DNS for ${domain} is unverified, so repointing the repo and the services at it would take the site and the API down.`);
+    log([
+      `   Do one of:`,
+      `     a. put a Cloudflare token that can read ${domain} (Zone:Read, DNS:Edit) in ~/.secrets/cloudflare.env and re-run;`,
+      `     b. re-run without --only / --skip so step "zone" runs and resolves the zone id;`,
+      `     c. if the DNS really is being handled elsewhere, re-run with --allow-repo-without-dns.`,
+      `   Nothing has been written. --dry-run always prints the full plan without this check.`,
+    ].join('\n'));
+    return 3;
   }
 
   /* 3. repo --------------------------------------------------------------- */
@@ -370,10 +436,10 @@ export async function run(argv = process.argv.slice(2)) {
     if (!tunnelText) warn(`${tunnelFile} not found — run services/deploy/install.sh first`);
     else {
       let after;
-      try { after = patchTunnelConfig(tunnelText, apiHost); } catch (err) { after = null; warn(err.message); }
+      try { after = patchTunnelConfig(tunnelText, apiHost, hosts.api); } catch (err) { after = null; warn(err.message); }
       if (after === tunnelText) ok(`${tunnelFile} already routes ${apiHost}`);
       else if (after) {
-        if (DRY) plan(`edit ${tunnelFile}: add "- hostname: ${apiHost}" ingress before ${OLD_API_HOST} (both → localhost:4102)`);
+        if (DRY) plan(`edit ${tunnelFile}: add "- hostname: ${apiHost}" ingress before ${hosts.api} (both → localhost:4102)`);
         else { fs.writeFileSync(tunnelFile, after); ok(`${tunnelFile} updated (old host kept as a second ingress)`); }
       }
     }
@@ -401,21 +467,25 @@ export async function run(argv = process.argv.slice(2)) {
 
   /* 7. redirect ----------------------------------------------------------- */
   if (active('redirect')) {
-    say(7, `Redirect ${OLD_SITE_HOST}/* → ${siteUrl}/$1 (301) on the ${OLD_ZONE} zone`);
-    const rule = redirectRule(OLD_SITE_HOST, domain);
+    say(7, `Redirect ${hosts.site}/* → ${siteUrl}/$1 (301) on the ${OLD_ZONE} zone`);
+    const rule = redirectRule(hosts.site, domain);
     let done = false;
-    if (canRead) {
+    // The rule can only be created on the zone that actually answers for the old host.
+    if (hosts.site !== OLD_ZONE && !hosts.site.endsWith(`.${OLD_ZONE}`)) {
+      warn(`${hosts.site} is not in the ${OLD_ZONE} zone — there is no redirect to create here; set the 301 wherever ${hosts.site} is served`);
+      done = true;
+    } else if (canRead) {
       const z = await cf(token, 'GET', `/zones?name=${OLD_ZONE}`);
       const oldZone = z.ok ? z.json.result?.[0]?.id : null;
       if (!oldZone) warn(`zone ${OLD_ZONE} not visible to this token (${z.ok ? 'zone-scoped token' : cfError(z)})`);
       else {
         // The bona CNAME must be proxied for an edge rule to fire (it is DNS-only today so GitHub could issue its cert).
-        const rec = await cf(token, 'GET', `/zones/${oldZone}/dns_records?name=${OLD_SITE_HOST}`);
+        const rec = await cf(token, 'GET', `/zones/${oldZone}/dns_records?name=${hosts.site}`);
         const cname = rec.ok ? rec.json.result?.find((r) => r.type === 'CNAME') : null;
         if (cname && !cname.proxied) {
           if (DRY) plan(`PATCH /zones/${oldZone}/dns_records/${cname.id} {proxied:true}`);
-          else { const p = await cf(token, 'PATCH', `/zones/${oldZone}/dns_records/${cname.id}`, { proxied: true }); p.ok ? ok(`${OLD_SITE_HOST} CNAME now proxied`) : warn(`proxying failed: ${cfError(p)}`); }
-        } else if (cname) ok(`${OLD_SITE_HOST} CNAME already proxied`);
+          else { const p = await cf(token, 'PATCH', `/zones/${oldZone}/dns_records/${cname.id}`, { proxied: true }); p.ok ? ok(`${hosts.site} CNAME now proxied`) : warn(`proxying failed: ${cfError(p)}`); }
+        } else if (cname) ok(`${hosts.site} CNAME already proxied`);
         const ep = await cf(token, 'GET', `/zones/${oldZone}/rulesets/phases/http_request_dynamic_redirect/entrypoint`);
         const existingRule = ep.ok ? (ep.json.result?.rules ?? []).find((r) => r.description === rule.description) : null;
         if (existingRule) { ok('redirect rule already present'); done = true; }
@@ -427,8 +497,8 @@ export async function run(argv = process.argv.slice(2)) {
           if (r.ok) { ok('redirect rule created'); done = true; } else warn(`Rulesets API refused (${cfError(r)}) — do it in the dashboard:`);
         }
       }
-    } else plan(`GET /zones?name=${OLD_ZONE} → PATCH the ${OLD_SITE_HOST} CNAME to proxied → POST redirect rule ${JSON.stringify(rule.expression)}`);
-    if (!done) log(printRedirectSteps(domain));
+    } else plan(`GET /zones?name=${OLD_ZONE} → PATCH the ${hosts.site} CNAME to proxied → POST redirect rule ${JSON.stringify(rule.expression)}`);
+    if (!done) log(printRedirectSteps(domain, hosts.site));
   }
 
   /* tail ------------------------------------------------------------------ */
@@ -437,7 +507,7 @@ export async function run(argv = process.argv.slice(2)) {
     `   1. Review and push the repo edits:  git -C ${root} diff && git commit -am "site: cutover to ${domain}" && git push`,
     `   2. node ${root}/services/api/retell/provision.mjs      # Retell tools + webhook move to ${apiUrl}`,
     `   3. systemctl --user restart bona-api cloudflared-bona   # picks up BONA_SITE / BONA_PUBLIC_API and the new ingress`,
-    `   4. curl -s ${apiUrl}/health · curl -sI ${siteUrl}/ · curl -sI https://${OLD_SITE_HOST}/ (expect 301)`,
+    `   4. curl -s ${apiUrl}/health · curl -sI ${siteUrl}/ · curl -sI https://${hosts.site}/ (expect 301)`,
     `   5. GA4: Admin › Data streams › "Bona web" › edit the stream URL to ${siteUrl}`,
     `   6. Search Console: add the URL-prefix property ${siteUrl}/ (same meta tag) and submit ${siteUrl}/sitemap-index.xml`,
     `   7. Meta: Business settings › Brand safety › Domains › add ${domain} and verify (docs/checklists/meta-bona-portfolio.md §10)`,
@@ -463,14 +533,15 @@ function printOwnerZoneSteps(domain) {
   ].join('\n');
 }
 
-function printRedirectSteps(domain) {
+function printRedirectSteps(domain, oldSiteHost = OLD_SITE_HOST) {
+  const label = oldSiteHost.endsWith(`.${OLD_ZONE}`) ? oldSiteHost.slice(0, -(OLD_ZONE.length + 1)) : oldSiteHost;
   return [
     `   Dashboard steps for the redirect (2 min):`,
-    `     a. Cloudflare → ${OLD_ZONE} → DNS → the CNAME "bona" → turn the cloud orange (Proxied) → Save.`,
-    `     b. ${OLD_ZONE} → Rules → Redirect Rules → Create rule → name "bona.azoz.uk → ${domain}" →`,
-    `        Custom filter expression: Hostname equals bona.azoz.uk → Then… Dynamic →`,
+    `     a. Cloudflare → ${OLD_ZONE} → DNS → the CNAME "${label}" → turn the cloud orange (Proxied) → Save.`,
+    `     b. ${OLD_ZONE} → Rules → Redirect Rules → Create rule → name "${oldSiteHost} → ${domain}" →`,
+    `        Custom filter expression: Hostname equals ${oldSiteHost} → Then… Dynamic →`,
     `        Expression: concat("https://${domain}", http.request.uri.path) → Status code 301 → tick Preserve query string → Deploy.`,
-    `     c. curl -sI https://${OLD_SITE_HOST}/ar/ → Location: https://${domain}/ar/`,
+    `     c. curl -sI https://${oldSiteHost}/ar/ → Location: https://${domain}/ar/`,
   ].join('\n');
 }
 
