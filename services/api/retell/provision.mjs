@@ -5,7 +5,7 @@
  * Creates — or updates in place — four things and records their ids in `ids.json`
  * (committed; ids are not secret):
  *
- *   1. Knowledge base "Bona site"   ← https://bona.azoz.uk/llms-full.txt + /llms.txt
+ *   1. Knowledge base "Bona site"   ← <site>/llms-full.txt + /llms.txt
  *   2. Retell LLM "Bona Dana"       ← prompt.md, begin message, KB, 3 custom tools
  *   3. Voice agent "Bona Dana (voice)"
  *   4. Chat agent  "Bona Dana (chat)"
@@ -35,6 +35,7 @@ import { createRetellClient, isClientError } from '../lib/retell.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PROMPT_FILE = path.join(HERE, 'prompt.md');
+export const DEFAULT_SITE = 'https://bona-real-estate.com';
 
 export const KB_NAME = 'Bona site';
 export const LLM_NAME = 'Bona Dana';
@@ -153,7 +154,7 @@ export function toolsPayload({ publicApi, toolToken }) {
   ];
 }
 
-export function llmPayload({ prompt, model, knowledgeBaseIds, publicApi, toolToken }) {
+export function llmPayload({ prompt, model, knowledgeBaseIds, publicApi, toolToken, siteUrl = DEFAULT_SITE }) {
   return {
     model,
     model_temperature: 0.3,
@@ -162,7 +163,7 @@ export function llmPayload({ prompt, model, knowledgeBaseIds, publicApi, toolTok
     start_speaker: 'agent',
     general_tools: toolsPayload({ publicApi, toolToken }),
     ...(knowledgeBaseIds?.length ? { knowledge_base_ids: knowledgeBaseIds } : {}),
-    default_dynamic_variables: { locale: 'en', page_url: 'https://bona.azoz.uk/', page_title: 'Bona' },
+    default_dynamic_variables: { locale: 'en', page_url: `${String(siteUrl).replace(/\/+$/, '')}/`, page_title: 'Bona' },
   };
 }
 
@@ -218,7 +219,7 @@ export function ensureEnvFile({ home = os.homedir(), env = process.env } = {}) {
     BONA_DATA: path.join(home, 'bona-data'),
     BONA_POLL_MS: '20000',
     BONA_CLAUDE_MODEL: 'sonnet',
-    BONA_SITE: 'https://bona.azoz.uk',
+    BONA_SITE: DEFAULT_SITE,
     BONA_API_PORT: '4102',
     BONA_PUBLIC_API: 'https://bona-api.azoz.uk',
     BONA_TOOL_TOKEN: randomToken(16),
@@ -257,7 +258,7 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
 
   // Re-read: the file may have just been created with a fresh BONA_TOOL_TOKEN.
   const merged = { ...loadEnv({ home }), ...(env === process.env ? {} : env) };
-  const siteUrl = String(merged.BONA_SITE ?? 'https://bona.azoz.uk').replace(/\/+$/, '');
+  const siteUrl = String(merged.BONA_SITE ?? DEFAULT_SITE).replace(/\/+$/, '');
   const publicApi = String(merged.BONA_PUBLIC_API ?? 'https://bona-api.azoz.uk').replace(/\/+$/, '');
   const toolToken = merged.BONA_TOOL_TOKEN ?? '';
   const preferred = merged.BONA_RETELL_MODEL ?? PREFERRED_MODEL;
@@ -271,7 +272,7 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
   const ids = readIds(idsFile);
 
   const kbBody = knowledgeBasePayload({ siteUrl });
-  const llmBody = (model, kbIds) => llmPayload({ prompt, model, knowledgeBaseIds: kbIds, publicApi, toolToken });
+  const llmBody = (model, kbIds) => llmPayload({ prompt, model, knowledgeBaseIds: kbIds, publicApi, toolToken, siteUrl });
 
   if (dryRun) {
     log('--- DRY RUN — nothing is sent to Retell. Tool token shown as <BONA_TOOL_TOKEN>. ---\n');
