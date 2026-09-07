@@ -1,0 +1,53 @@
+---
+/* REGA advertising block — on every listing page, under the enquiry section (spec §3.5).
+   Saudi real-estate advertising rules ask an advertisement to name the licensed advertiser and carry the
+   advertisement licence issued for that listing. This renders, always: the advertiser (site.json → advertiser)
+   with the FAL licence; when the listing has one: "Advertising licence <no> · valid until <date>"; for off-plan,
+   the Wafi project licence; and a QR code of the listing's own URL, generated at build time by src/lib/qr.ts
+   (no dependency, no network) so a printed or screenshotted advert always leads back to its page. */
+import site from '../data/site.json';
+import { t, ui, type Locale } from '../lib/i18n';
+import { encodeQr, qrSvg } from '../lib/qr';
+import type { Listing } from '../lib/listings';
+
+interface Props { listing: Listing; locale: Locale; /** Absolute URL of the listing page (what the QR encodes). */ url: string; class?: string }
+const { listing: l, locale, url, class: cls = '' } = Astro.props;
+
+const advertiser = (site as { advertiser?: { name: { en: string; ar: string }; fal: string } }).advertiser;
+const advertiserName = advertiser ? t(advertiser.name, locale) : site.legalName;
+const fal = advertiser?.fal ?? site.licences.fal;
+const licence = l.licence ?? null;
+const adNumber = licence?.adNumber || null;
+const wafi = licence?.wafiNumber || null;
+const expiryIso = adNumber && licence?.adExpiry && /^\d{4}-\d{2}-\d{2}$/.test(licence.adExpiry) ? licence.adExpiry : null;
+const expiryText = expiryIso
+  ? new Intl.DateTimeFormat(locale === 'ar' ? 'ar-u-nu-latn-ca-gregory' : 'en-GB', { dateStyle: 'long', timeZone: 'UTC' }).format(new Date(`${expiryIso}T00:00:00Z`))
+  : null;
+const qr = qrSvg(encodeQr(url), { size: 96, quiet: 1, fg: '#0f1214', title: url });
+const sep = ' · ';
+---
+<aside class:list={['rega border border-ink/10 bg-ivory-2 p-6 md:p-7', cls]} aria-labelledby={`rega-${l.id}`} data-rega>
+  <div class="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+    <div class="min-w-0">
+      <h2 id={`rega-${l.id}`} class="label text-stone-2">{t(ui.regaAdvertiser, locale)}</h2>
+      <p class="mt-2 text-[15px] font-semibold text-ink">{advertiserName}</p>
+      <p class="mt-1 text-sm text-stone-2">{t(ui.regaFal, locale)} <span class="font-semibold text-ink" dir="ltr">{fal}</span></p>
+      {adNumber && (
+        <p class="mt-1 text-sm text-stone-2">
+          {t(ui.regaAdLicence, locale)} <span class="font-semibold text-ink" dir="ltr">{adNumber}</span>
+          {expiryText && <span>{sep}{t(ui.regaValidUntil, locale)} <time datetime={expiryIso} class="text-ink">{expiryText}</time></span>}
+        </p>
+      )}
+      {wafi && <p class="mt-1 text-sm text-stone-2">{t(ui.regaWafi, locale)} <span class="font-semibold text-ink" dir="ltr">{wafi}</span></p>}
+      <p class="mt-3 text-xs text-stone" dir="ltr">{l.id}</p>
+    </div>
+    <figure class="flex shrink-0 flex-col items-center gap-2">
+      <div class="rega-qr bg-ivory p-1.5" set:html={qr} />
+      <figcaption class="label text-stone-2">{t(ui.regaVerify, locale)}</figcaption>
+    </figure>
+  </div>
+</aside>
+
+<style>
+  .rega-qr :global(svg) { display: block; width: 96px; height: 96px; }
+</style>

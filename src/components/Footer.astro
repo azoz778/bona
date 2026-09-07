@@ -10,17 +10,18 @@ const year = new Date().getFullYear();
 const addr = site.address[locale];
 const wa = waLink(site.whatsapp.wa, t(ui.formGreeting, locale));
 const extraKinds = kindsPresent().filter(k => k === 'land' || k === 'building');
+const row = (href: string, label: string): [string, string] => [href, label];
 const nav: [string, string][] = [
-  [localePath(locale, '/properties/houses/'), t(ui.navHouses, locale)],
-  [localePath(locale, '/properties/apartments/'), t(ui.navApartments, locale)],
-  ...extraKinds.map(k => [localePath(locale, `/properties/${kindSlug[k]}/`), t(kindLabelPlural[k], locale)] as [string, string]),
-  ...(hasCategory('off-plan') ? [[localePath(locale, '/properties/off-plan/'), t(ui.navOffPlan, locale)]] : []),
-  ...(hasCategory('international') ? [[localePath(locale, '/properties/international/'), t(ui.navInternational, locale)]] : []),
-  [localePath(locale, '/properties/'), t(ui.navAllProperties, locale)],
-  [localePath(locale, '/tours/'), t(ui.navTours, locale)],
-  [localePath(locale, '/about/'), t(ui.navAbout, locale)],
-  [localePath(locale, '/sell/'), t(ui.navSell, locale)],
-  [localePath(locale, '/contact/'), t(ui.navContact, locale)],
+  row(localePath(locale, '/properties/houses/'), t(ui.navHouses, locale)),
+  row(localePath(locale, '/properties/apartments/'), t(ui.navApartments, locale)),
+  ...extraKinds.map(k => row(localePath(locale, `/properties/${kindSlug[k]}/`), t(kindLabelPlural[k], locale))),
+  ...(hasCategory('off-plan') ? [row(localePath(locale, '/properties/off-plan/'), t(ui.navOffPlan, locale))] : []),
+  ...(hasCategory('international') ? [row(localePath(locale, '/properties/international/'), t(ui.navInternational, locale))] : []),
+  row(localePath(locale, '/properties/'), t(ui.navAllProperties, locale)),
+  row(localePath(locale, '/tours/'), t(ui.navTours, locale)),
+  row(localePath(locale, '/about/'), t(ui.navAbout, locale)),
+  row(localePath(locale, '/sell/'), t(ui.navSell, locale)),
+  row(localePath(locale, '/contact/'), t(ui.navContact, locale)),
 ];
 ---
 <footer class="on-dark bg-ink text-ivory">
@@ -39,8 +40,8 @@ const nav: [string, string][] = [
       <div class="lg:col-span-2">
         <p class="label text-champagne">{t(ui.footerContact, locale)}</p>
         <ul class="mt-5 space-y-3 text-sm">
-          <li><a href={wa} target="_blank" rel="noopener" class="link inline-flex items-center gap-2 text-ivory/85 hover:text-ivory"><Icon name="whatsapp" size={16} />{t(ui.whatsapp, locale)}</a></li>
-          <li><a href={`tel:${site.phone.e164}`} class="link text-ivory/85 hover:text-ivory" dir="ltr">{site.phone.display}</a></li>
+          <li><a href={wa} target="_blank" rel="noopener" class="link inline-flex items-center gap-2 text-ivory/85 hover:text-ivory" data-cta="footer_whatsapp"><Icon name="whatsapp" size={16} />{t(ui.whatsapp, locale)}</a></li>
+          <li><a href={`tel:${site.phone.e164}`} class="link text-ivory/85 hover:text-ivory" dir="ltr" data-cta="footer_tel">{site.phone.display}</a></li>
           {site.email && <li><a href={`mailto:${site.email}`} class="link text-ivory/85 hover:text-ivory" dir="ltr">{site.email}</a></li>}
           <li><a href={site.instagram.url} target="_blank" rel="noopener" class="link inline-flex items-center gap-2 text-ivory/85 hover:text-ivory"><Icon name="instagram" size={16} />@{site.instagram.handle}</a></li>
         </ul>
@@ -60,6 +61,8 @@ const nav: [string, string][] = [
         {site.licences.cr && <span> · {t(ui.crNumber, locale)} <span dir="ltr">{site.licences.cr}</span></span>}
         <span class="mx-2 opacity-60" aria-hidden="true">·</span>
         <a href={localePath(locale, '/privacy/')} class="link hover:text-ivory">{t(ui.navPrivacy, locale)}</a>
+        <span class="mx-2 opacity-60" aria-hidden="true">·</span>
+        <button type="button" class="link hover:text-ivory" data-consent-open>{t(ui.consentSettings, locale)}</button>
       </p>
       <p>© {year} {site.name}{locale === 'ar' ? ` ${site.nameAr}` : ''}. {t(ui.allRightsReserved, locale)}</p>
     </div>

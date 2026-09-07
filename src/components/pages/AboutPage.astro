@@ -176,7 +176,7 @@ const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { n
       <p class="mx-auto mt-6 max-w-[46ch] text-stone-2">{t(ui.aboutClosing, locale)}</p>
       <div class="mt-10 flex flex-wrap justify-center gap-4">
         <a href={localePath(locale, '/contact/')} class="btn btn-ink">{t(ui.contactUs, locale)}</a>
-        <a href={wa} target="_blank" rel="noopener" class="btn btn-outline"><Icon name="whatsapp" size={17} />{t(ui.chatOnWhatsApp, locale)}</a>
+        <a href={wa} target="_blank" rel="noopener" class="btn btn-outline" data-cta="about_whatsapp"><Icon name="whatsapp" size={17} />{t(ui.chatOnWhatsApp, locale)}</a>
       </div>
     </div>
   </section>

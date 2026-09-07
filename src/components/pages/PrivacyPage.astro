@@ -62,8 +62,8 @@ const description = intro ? ((x) => x.length > 155 ? x.slice(0, x.lastIndexOf(' 
         <p class="label text-stone-2">{t(ui.privacyContactTitle, locale)}</p>
         {contact && <p class="mt-4 max-w-[60ch] text-[15px] leading-relaxed">{contact}</p>}
         <div class="mt-6 flex flex-wrap gap-4">
-          <a href={wa} target="_blank" rel="noopener" class="btn btn-ink"><Icon name="whatsapp" size={17} />{t(ui.chatOnWhatsApp, locale)}</a>
-          <a href={`tel:${site.phone.e164}`} class="btn btn-outline" dir="ltr">{site.phone.display}</a>
+          <a href={wa} target="_blank" rel="noopener" class="btn btn-ink" data-cta="privacy_whatsapp"><Icon name="whatsapp" size={17} />{t(ui.chatOnWhatsApp, locale)}</a>
+          <a href={`tel:${site.phone.e164}`} class="btn btn-outline" dir="ltr" data-cta="privacy_tel">{site.phone.display}</a>
         </div>
       </div>
     </div>

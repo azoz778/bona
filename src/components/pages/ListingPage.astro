@@ -7,6 +7,7 @@ import Breadcrumb from '../Breadcrumb.astro';
 import ListingCard from '../ListingCard.astro';
 import SectionHead from '../SectionHead.astro';
 import EnquiryForm from '../EnquiryForm.astro';
+import RegaBlock from '../RegaBlock.astro';
 import Icon from '../Icon.astro';
 import site from '../../data/site.json';
 import { localePath, formatPrice, formatNumber, t, ui, fill, waLink, type Locale } from '../../lib/i18n';
@@ -51,7 +52,7 @@ const conciergeOn = site.concierge?.enabled !== false;
 const danaMessage = fill(t(ui.conciergeAskAboutHomeMsg, locale), { title, id: l.id });
 const kindText = t(kindLabel[kind], locale);
 ---
-<Base title={`${title} — ${locale === 'ar' ? site.nameAr : site.name}`} description={description} locale={locale} path={path} image={l.images?.[0]?.src} waMessage={waMessage}
+<Base title={`${title} — ${locale === 'ar' ? site.nameAr : site.name}`} description={description} locale={locale} path={path} image={l.images?.[0]?.src} waMessage={waMessage} listingId={l.id}
       jsonLd={[listingJsonLd(l, locale), breadcrumbJsonLd(crumbs)]}>
   <article class="pt-6 lg:pt-8">
     <div class="wrap">
@@ -74,7 +75,7 @@ const kindText = t(kindLabel[kind], locale);
             {project && (
               <p class="mt-3 text-sm text-stone-2"><span class="font-semibold text-ink">{project}</span>{developer && <span> · {t(ui.developer, locale)}: {developer}</span>}{l.unit?.unitRef && <span> · {t(ui.unit, locale)} <span dir="ltr">{l.unit.unitRef}</span></span>}</p>
             )}
-            <p class="mt-4 flex items-center gap-2 text-sm text-stone-2"><Icon name="pin" size={16} class="shrink-0 text-champagne" />{locationLine}{mapLink && <a href="#map" class="link ms-2 text-ink">{t(ui.showMap, locale)}</a>}</p>
+            <p class="mt-4 flex items-center gap-2 text-sm text-stone-2"><Icon name="pin" size={16} class="shrink-0 text-champagne" />{locationLine}{mapLink && <a href="#map" class="link ms-2 text-ink" data-track="map_click" data-cta="listing_map_jump" data-listing={l.id}>{t(ui.showMap, locale)}</a>}</p>
             <p class="mt-6 font-sans text-xl font-semibold">{formatPrice(l.price, locale)}</p>
           </header>
 
@@ -114,9 +115,9 @@ const kindText = t(kindLabel[kind], locale);
               <h2 id={`video-${l.id}`} class="label text-stone-2">{t(ui.videoSectionTitle, locale)}</h2>
               <p class="mt-3 max-w-[52ch] text-[15px] leading-relaxed text-stone-2">{t(ui.videoIntro, locale)}</p>
               <div class="mt-6 grid gap-6">
-                {l.videos!.map((src, i) => (
-                  <video controls playsinline preload="metadata" poster={i === 0 ? l.images?.[0]?.src : undefined} class="aspect-video w-full bg-ink" aria-label={fill(t(ui.videoLabel, locale), { n: String(i + 1), title })}>
-                    <source src={src} type="video/mp4" />
+                {l.videos!.map((v, i) => (
+                  <video controls playsinline preload="metadata" poster={v.poster ?? (i === 0 ? l.images?.[0]?.src : undefined)} class="aspect-video w-full bg-ink" aria-label={fill(t(ui.videoLabel, locale), { n: String(i + 1), title })}>
+                    <source src={v.src} type="video/mp4" />
                   </video>
                 ))}
               </div>
@@ -127,8 +128,8 @@ const kindText = t(kindLabel[kind], locale);
 
           {(l.brochureUrl || (l.virtualTourUrl && !hasMatterport)) && (
             <div class="mt-12 flex flex-wrap gap-4">
-              {l.brochureUrl && <a href={l.brochureUrl} target="_blank" rel="noopener" class="btn btn-outline"><Icon name="download" size={16} />{t(ui.brochure, locale)}</a>}
-              {l.virtualTourUrl && !hasMatterport && <a href={l.virtualTourUrl} target="_blank" rel="noopener" class="btn btn-outline"><Icon name="tour" size={16} />{t(ui.virtualTour, locale)}</a>}
+              {l.brochureUrl && <a href={l.brochureUrl} target="_blank" rel="noopener" class="btn btn-outline" data-track="brochure_download" data-cta="listing_brochure"><Icon name="download" size={16} />{t(ui.brochure, locale)}</a>}
+              {l.virtualTourUrl && !hasMatterport && <a href={l.virtualTourUrl} target="_blank" rel="noopener" class="btn btn-outline" data-track="tour_open" data-cta="listing_tour_link"><Icon name="tour" size={16} />{t(ui.virtualTour, locale)}</a>}
             </div>
           )}
 
@@ -137,6 +138,8 @@ const kindText = t(kindLabel[kind], locale);
             <p class="mt-3 max-w-[52ch] text-sm text-stone-2">{t(ui.enquiryPanelText, locale)}</p>
             <div class="mt-8"><EnquiryForm locale={locale} variant="listing" listing={{ id: l.id, title, path }} id="enquiry-listing" /></div>
           </section>
+
+          <RegaBlock listing={l} locale={locale} url={absUrl} class="mt-12" />
         </div>
 
         <aside class="lg:col-span-5 xl:col-span-4">
@@ -144,8 +147,8 @@ const kindText = t(kindLabel[kind], locale);
             <p class="label text-stone-2">{t(ui.privateEnquiry, locale)}</p>
             <p class="display-md mt-3">{formatPrice(l.price, locale)}</p>
             <p class="mt-3 text-sm text-stone-2">{t(ui.enquiryPanelText, locale)}</p>
-            <a href={wa} target="_blank" rel="noopener" class="btn btn-ink mt-7 w-full"><Icon name="whatsapp" size={17} />{t(ui.enquireWhatsApp, locale)}</a>
-            <a href={`tel:${site.phone.e164}`} class="btn btn-outline mt-3 w-full"><Icon name="phone" size={16} /><span dir="ltr">{site.phone.display}</span></a>
+            <a href={wa} target="_blank" rel="noopener" class="btn btn-ink mt-7 w-full" data-cta="listing_whatsapp" data-listing={l.id}><Icon name="whatsapp" size={17} />{t(ui.enquireWhatsApp, locale)}</a>
+            <a href={`tel:${site.phone.e164}`} class="btn btn-outline mt-3 w-full" data-cta="listing_tel" data-listing={l.id}><Icon name="phone" size={16} /><span dir="ltr">{site.phone.display}</span></a>
             {hasMatterport && <a href="#tour" class="link-label mt-6 inline-flex items-center gap-2 text-ink" data-tour-jump><Icon name="cube" size={14} />{t(ui.tour3dTitle, locale)}</a>}
             {conciergeOn && (
               <p class="mt-6"><button type="button" class="link-label text-ink" data-concierge-trigger data-concierge-message={danaMessage}>{t(ui.conciergeAskAboutHome, locale)}</button></p>
