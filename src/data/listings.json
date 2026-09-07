@@ -5172,6 +5172,161 @@
     "listedAt": "2026-09-06"
   },
   {
+    "id": "BONA-W014",
+    "slug": "darco-prime-waterfront-al-shati",
+    "sourceRef": "WA-20260907-AC7039",
+    "status": "available",
+    "category": "off-plan",
+    "type": "apartment",
+    "kind": "apartment",
+    "featured": false,
+    "title": {
+      "en": "Darco Prime Waterfront, Al-Shati",
+      "ar": "داركو برايم الواجهة البحرية، الشاطئ"
+    },
+    "location": {
+      "district": {
+        "en": "Al-Shati District",
+        "ar": "حي الشاطئ"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": null,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": true
+    },
+    "specs": {
+      "beds": null,
+      "baths": null,
+      "areaSqm": null,
+      "plotSqm": null,
+      "yearBuilt": null,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "/listings/darco-prime-waterfront-al-shati/01.jpg",
+        "thumb": "/listings/darco-prime-waterfront-al-shati/01-thumb.webp",
+        "alt": {
+          "en": "Exterior — Darco Prime Waterfront, Al-Shati",
+          "ar": "الواجهة الخارجية — داركو برايم الواجهة البحرية، الشاطئ"
+        }
+      },
+      {
+        "src": "/listings/darco-prime-waterfront-al-shati/02.jpg",
+        "thumb": "/listings/darco-prime-waterfront-al-shati/02-thumb.webp",
+        "alt": {
+          "en": "Façade at night — Darco Prime Waterfront, Al-Shati",
+          "ar": "الواجهة ليلاً — داركو برايم الواجهة البحرية، الشاطئ"
+        }
+      },
+      {
+        "src": "/listings/darco-prime-waterfront-al-shati/03.jpg",
+        "thumb": "/listings/darco-prime-waterfront-al-shati/03-thumb.webp",
+        "alt": {
+          "en": "Courtyard — Darco Prime Waterfront, Al-Shati",
+          "ar": "الفناء الداخلي — داركو برايم الواجهة البحرية، الشاطئ"
+        }
+      },
+      {
+        "src": "/listings/darco-prime-waterfront-al-shati/04.jpg",
+        "thumb": "/listings/darco-prime-waterfront-al-shati/04-thumb.webp",
+        "alt": {
+          "en": "Living room — Darco Prime Waterfront, Al-Shati",
+          "ar": "غرفة المعيشة — داركو برايم الواجهة البحرية، الشاطئ"
+        }
+      },
+      {
+        "src": "/listings/darco-prime-waterfront-al-shati/05.jpg",
+        "thumb": "/listings/darco-prime-waterfront-al-shati/05-thumb.webp",
+        "alt": {
+          "en": "Dining room — Darco Prime Waterfront, Al-Shati",
+          "ar": "غرفة الطعام — داركو برايم الواجهة البحرية، الشاطئ"
+        }
+      },
+      {
+        "src": "/listings/darco-prime-waterfront-al-shati/06.jpg",
+        "thumb": "/listings/darco-prime-waterfront-al-shati/06-thumb.webp",
+        "alt": {
+          "en": "Living room — Darco Prime Waterfront, Al-Shati",
+          "ar": "غرفة المعيشة — داركو برايم الواجهة البحرية، الشاطئ"
+        }
+      },
+      {
+        "src": "/listings/darco-prime-waterfront-al-shati/07.jpg",
+        "thumb": "/listings/darco-prime-waterfront-al-shati/07-thumb.webp",
+        "alt": {
+          "en": "View — Darco Prime Waterfront, Al-Shati",
+          "ar": "الإطلالة — داركو برايم الواجهة البحرية، الشاطئ"
+        }
+      },
+      {
+        "src": "/listings/darco-prime-waterfront-al-shati/08.jpg",
+        "thumb": "/listings/darco-prime-waterfront-al-shati/08-thumb.webp",
+        "alt": {
+          "en": "Lounge — Darco Prime Waterfront, Al-Shati",
+          "ar": "الصالة — داركو برايم الواجهة البحرية، الشاطئ"
+        }
+      },
+      {
+        "src": "/listings/darco-prime-waterfront-al-shati/09.jpg",
+        "thumb": "/listings/darco-prime-waterfront-al-shati/09-thumb.webp",
+        "alt": {
+          "en": "Aerial view — Darco Prime Waterfront, Al-Shati",
+          "ar": "منظر جوي — داركو برايم الواجهة البحرية، الشاطئ"
+        }
+      }
+    ],
+    "videos": [],
+    "description": {
+      "en": "Darco Prime Waterfront is a residential development in Al-Shati District, Jeddah, developed by Darco Real Estate Company. The project spans 22 buildings with 534 residential units, positioned close to the Red Sea coastline. Nearby landmarks include Jeddah Waterfront, Jeddah Yacht Club, Red Sea Mall, City Walk and the Jeddah Formula 1 circuit, all within a few minutes by car.\n\nThe unit mix ranges from Standard one-bedroom apartments of 55.45 to 71.04 square metres to Premium one- and two-bedroom options of 73.62 to 85.01 square metres. Standard two-bedroom units span 88.87 to 93.56 square metres, while Premium two- and three-bedroom options reach 96.8 to 103.92 square metres. Standard three-bedroom units start at 123.98 square metres, and Premium three- and four-bedroom options run from 135.41 to 139.39 square metres. The Jewel duplex units offer three bedrooms across 174 to 183 square metres.\n\nOn-site facilities include a mosque, a children's play area, a resident lounge, a gym, a sauna, an infinity pool, a jacuzzi, a running track and a private cinema. The development also provides electric vehicle charging points and a car wash service.",
+      "ar": "يقع مشروع داركو برايم الواجهة البحرية في حي الشاطئ بمدينة جدة، وتطوره شركة داركو العقارية. يضم المشروع 22 مبنى تحتوي على 534 وحدة سكنية بالقرب من ساحل البحر الأحمر. تحيط بالمشروع معالم قريبة مثل الواجهة البحرية لجدة، ونادي جدة لليخوت، وردسي مول، وسيتي ووك، وحلبة فورمولا 1، وجميعها على بعد دقائق بالسيارة.\n\nتتنوع مساحات الوحدات بين الشقق القياسية بغرفة نوم واحدة من 55.45 إلى 71.04 متراً مربعاً، والخيارات المميزة بغرفة أو غرفتي نوم من 73.62 إلى 85.01 متراً مربعاً. أما الوحدات القياسية بغرفتي نوم فتتراوح مساحتها بين 88.87 و93.56 متراً مربعاً، بينما تصل الخيارات المميزة بغرفتين أو ثلاث غرف نوم إلى ما بين 96.8 و103.92 متراً مربعاً. تبدأ الوحدات القياسية بثلاث غرف نوم من مساحة 123.98 متراً مربعاً، وتتراوح الخيارات المميزة بثلاث أو أربع غرف نوم بين 135.41 و139.39 متراً مربعاً. وتوفر وحدات الجوهرة الدوبلكس ثلاث غرف نوم بمساحات من 174 إلى 183 متراً مربعاً.\n\nتشمل مرافق المشروع مسجداً، ومنطقة ألعاب للأطفال، وصالة استراحة، ونادياً رياضياً، وساونا، ومسبحاً لا متناهياً، وجاكوزي، ومسار جري، وسينما خاصة. كما يوفر المشروع نقاط شحن للسيارات الكهربائية وخدمة مغسلة سيارات."
+    },
+    "highlights": {
+      "en": [
+        "Red Sea waterfront location",
+        "22 buildings, 534 units",
+        "Studio to duplex layouts",
+        "Infinity pool and gym",
+        "Private cinema and lounge"
+      ],
+      "ar": [
+        "موقع على واجهة البحر الأحمر",
+        "22 مبنى و534 وحدة سكنية",
+        "وحدات من غرفة إلى دوبلكس",
+        "مسبح لا متناهٍ ونادٍ رياضي",
+        "سينما خاصة وصالة استراحة"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": "https://bona.azoz.uk/listings/darco-prime-waterfront-al-shati/brochure.pdf",
+    "project": {
+      "name": {
+        "en": "Darco Prime Waterfront",
+        "ar": "داركو برايم الواجهة البحرية"
+      },
+      "developer": {
+        "en": "Darco Real Estate Company",
+        "ar": "شركة داركو العقارية"
+      }
+    },
+    "unit": null,
+    "map": null,
+    "mapPrecision": null,
+    "listedAt": "2026-09-07"
+  },
+  {
     "id": "BONA-W009",
     "slug": "elvira-murjan-townhouses-in-al-murjan",
     "sourceRef": "WA-20260906-ACA18E",
