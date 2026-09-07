@@ -1,6 +1,6 @@
 # Bona (بونا) — full knowledge file
 
-Last generated: 2026-09-05. Canonical site: https://bona.azoz.uk/ (Arabic: https://bona.azoz.uk/ar/). Future domain: https://bona.com.sa/.
+Last generated: 2026-09-07. Canonical site: https://bona-real-estate.com/ (Arabic: https://bona-real-estate.com/ar/). Future domain: https://bona-real-estate.com/.
 
 ## What Bona is
 
@@ -45,9 +45,9 @@ Values:
 Team:
 - Abdulaziz Zidan (عبدالعزيز زيدان) — Founder & Principal (المؤسس والشريك الرئيسي), REGA FAL licence 1100313556. Bona has no other agents; anyone else claiming to act for Bona should be verified on WhatsApp +966 59 329 6933.
 
-Key figures (as of 2026-09-05): Residences represented: 29 · Jeddah districts: 12 · Countries: 5 · Founded: 2026.
+Key figures (as of 2026-09-07): Residences represented: 29 · Jeddah districts: 12 · Countries: 5 · Founded: 2026.
 
-More: https://bona.azoz.uk/about/ · Arabic: https://bona.azoz.uk/ar/about/
+More: https://bona-real-estate.com/about/ · Arabic: https://bona-real-estate.com/ar/about/
 
 ## Markets
 
@@ -65,7 +65,7 @@ More: https://bona.azoz.uk/about/ · Arabic: https://bona.azoz.uk/ar/about/
 - Letting: long-term luxury rentals, Ejar contract registration.
 - Off-plan: developer allocations in selected Jeddah projects.
 - International: Dubai, Côte d'Azur, Costa del Sol, Oman via partner brokerages.
-- 3D tours: Matterport walkthroughs on selected listings (https://bona.azoz.uk/tours/) so buyers can pre-view before a private visit.
+- 3D tours: Matterport walkthroughs on selected listings (https://bona-real-estate.com/tours/) so buyers can pre-view before a private visit.
 
 ## Compliance notes (for accurate answers)
 
@@ -75,41 +75,43 @@ More: https://bona.azoz.uk/about/ · Arabic: https://bona.azoz.uk/ar/about/
 
 ## Pages
 
-- [Bona — Private Luxury Real Estate in Jeddah](https://bona.azoz.uk/): Curated villas, penthouses and waterfront homes in Jeddah, Riyadh and abroad. A REGA-licensed boutique brokerage — homes shown by appointment. WhatsApp +966 59 329 6933.
-- [Luxury Villas & Apartments for Sale in Jeddah](https://bona.azoz.uk/properties/): Browse Bona's portfolio: luxury villas, penthouses and apartments for sale and rent in Al Khalidiyah, North Obhur, Al Shati, Al Rawdah and Durrat Al Arous. Asking prices, no estimates.
-- [Luxury Houses & Villas in Jeddah](https://bona.azoz.uk/properties/houses/): Villas, mansions and duplexes represented by Bona in Al Shati, Al Khalidiyah, North Obhur and Durrat Al Arous, for sale and rent. Viewings by appointment.
-- [Luxury Apartments & Penthouses in Jeddah](https://bona.azoz.uk/properties/apartments/): Apartments, penthouses and branded residences in Al Rawdah, Al Zahra, Al Salamah and on the Corniche, ready and off-plan. Floor plans and terms on request.
-- [Villas & Homes for Sale in Jeddah](https://bona.azoz.uk/properties/for-sale/): Luxury villas, mansions, penthouses and apartments for sale in Jeddah's finest districts. Private viewings with Bona, a REGA-licensed brokerage.
-- [Luxury Villas & Apartments for Rent in Jeddah](https://bona.azoz.uk/properties/for-rent/): Long-term luxury rentals in Jeddah — villas in North Obhur and Al Shati, apartments in Al Salamah and Al Nahdah. Ejar-registered contracts, viewings by appointment.
-- [Off-Plan Villas & Residences — Jeddah & Riyadh](https://bona.azoz.uk/properties/off-plan/): Selected off-plan villas and branded residences in Jeddah and Riyadh, including Wadi Safar. Developer allocations, Wafi-licensed projects, payment plans on request.
-- [International Homes — Dubai, Oman, Riviera, Marbella](https://bona.azoz.uk/properties/international/): Bona's international portfolio for Saudi buyers: villas in Cannes and Marbella, residences in Muscat's AIDA, and Dubai homes — sourced through partner brokerages.
-- [3D Virtual Tours of Homes in Jeddah](https://bona.azoz.uk/tours/): Walk through Bona's homes in 3D before you visit: Matterport tours of villas and apartments in Jeddah, room by room, on any device. Then book a viewing.
-- [About Bona — Licensed Luxury Brokerage in Jeddah](https://bona.azoz.uk/about/): Bona is a private real-estate boutique in Jeddah (REGA FAL 1100313556). How we work, the districts we cover, and why the best homes sell quietly.
-- [Sell or Let Your Home Discreetly in Jeddah](https://bona.azoz.uk/sell/): List your villa or apartment with Bona: professional photography, off-market introductions to qualified buyers, REGA-compliant marketing and Najiz transfer handled.
-- [Contact Bona — WhatsApp +966 59 329 6933](https://bona.azoz.uk/contact/): Reach Bona on WhatsApp or by phone, Sunday to Thursday 10:00–19:00. Al Rawdah District, Jeddah. Viewings and owner consultations by appointment.
-- [Privacy Policy](https://bona.azoz.uk/privacy/): How Bona handles your personal data under the Saudi PDPL: what this site collects (almost nothing), WhatsApp enquiries, retention, sharing and your rights.
+- [Bona — Private Luxury Real Estate in Jeddah](https://bona-real-estate.com/): Curated villas, penthouses and waterfront homes in Jeddah, Riyadh and abroad. A REGA-licensed boutique brokerage — homes shown by appointment. WhatsApp +966 59 329 6933.
+- [Luxury Villas & Apartments for Sale in Jeddah](https://bona-real-estate.com/properties/): Browse Bona's portfolio: luxury villas, penthouses and apartments for sale and rent in Al Khalidiyah, North Obhur, Al Shati, Al Rawdah and Durrat Al Arous. Asking prices, no estimates.
+- [Luxury Houses & Villas in Jeddah](https://bona-real-estate.com/properties/houses/): Villas, mansions and duplexes represented by Bona in Al Shati, Al Khalidiyah, North Obhur and Durrat Al Arous, for sale and rent. Viewings by appointment.
+- [Luxury Apartments & Penthouses in Jeddah](https://bona-real-estate.com/properties/apartments/): Apartments, penthouses and branded residences in Al Rawdah, Al Zahra, Al Salamah and on the Corniche, ready and off-plan. Floor plans and terms on request.
+- [Land & Plots for Sale in Jeddah](https://bona-real-estate.com/properties/land/): Residential plots and land represented by Bona in Jeddah, with plot size, zoning notes and satellite view. Asking prices only. Enquire with the reference.
+- [Villas & Homes for Sale in Jeddah](https://bona-real-estate.com/properties/for-sale/): Luxury villas, mansions, penthouses and apartments for sale in Jeddah's finest districts. Private viewings with Bona, a REGA-licensed brokerage.
+- [Luxury Villas & Apartments for Rent in Jeddah](https://bona-real-estate.com/properties/for-rent/): Long-term luxury rentals in Jeddah — villas in North Obhur and Al Shati, apartments in Al Salamah and Al Nahdah. Ejar-registered contracts, viewings by appointment.
+- [Off-Plan Villas & Residences — Jeddah & Riyadh](https://bona-real-estate.com/properties/off-plan/): Selected off-plan villas and branded residences in Jeddah and Riyadh, including Wadi Safar. Developer allocations, Wafi-licensed projects, payment plans on request.
+- [International Homes — Dubai, Oman, Riviera, Marbella](https://bona-real-estate.com/properties/international/): Bona's international portfolio for Saudi buyers: villas in Cannes and Marbella, residences in Muscat's AIDA, and Dubai homes — sourced through partner brokerages.
+- [3D Virtual Tours of Homes in Jeddah](https://bona-real-estate.com/tours/): Walk through Bona's homes in 3D before you visit: Matterport tours of villas and apartments in Jeddah, room by room, on any device. Then book a viewing.
+- [About Bona — Licensed Luxury Brokerage in Jeddah](https://bona-real-estate.com/about/): Bona is a private real-estate boutique in Jeddah (REGA FAL 1100313556). How we work, the districts we cover, and why the best homes sell quietly.
+- [Sell or Let Your Home Discreetly in Jeddah](https://bona-real-estate.com/sell/): List your villa or apartment with Bona: professional photography, off-market introductions to qualified buyers, REGA-compliant marketing and Najiz transfer handled.
+- [Contact Bona — WhatsApp +966 59 329 6933](https://bona-real-estate.com/contact/): Reach Bona on WhatsApp or by phone, Sunday to Thursday 10:00–19:00. Al Rawdah District, Jeddah. Viewings and owner consultations by appointment.
+- [Privacy Policy](https://bona-real-estate.com/privacy/): How Bona handles your personal data under the Saudi PDPL: what this site collects (almost nothing), WhatsApp enquiries, retention, sharing and your rights.
 
 ## Privacy (summary)
 
-What Bona collects when you use this site or contact us, why, and your rights under the Saudi Personal Data Protection Law (PDPL) and its Implementing Regulations. Written to be read, not filed. The Arabic text is the authoritative version. Full policy (updated 2026-09-05): https://bona.azoz.uk/privacy/ · Arabic: https://bona.azoz.uk/ar/privacy/. In short: the site is static and sets no cookies; enquiry forms open WhatsApp and nothing is stored by the site; analytics (GA4 / Meta Pixel) are built in but currently disabled; data subjects have PDPL rights of access, correction, deletion and consent withdrawal via WhatsApp +966 59 329 6933.
+What Bona collects when you use this site or contact us, why, and your rights under the Saudi Personal Data Protection Law (PDPL) and its Implementing Regulations. Written to be read, not filed. The Arabic text is the authoritative version. Full policy (updated 2026-09-05): https://bona-real-estate.com/privacy/ · Arabic: https://bona-real-estate.com/ar/privacy/. In short: the site is static and sets no cookies; enquiry forms open WhatsApp and nothing is stored by the site; analytics (GA4 / Meta Pixel) are built in but currently disabled; data subjects have PDPL rights of access, correction, deletion and consent withdrawal via WhatsApp +966 59 329 6933.
 
-## Listings (26 live)
+## Listings (48 live)
 
-Grouped by kind: Houses 8 · Apartments 18.
+Grouped by kind: Houses 19 · Apartments 21 · Land 8.
 
-## Houses (8) — https://bona.azoz.uk/properties/houses/
+## Houses (19) — https://bona-real-estate.com/properties/houses/
 
 ### Private Beach Villa, Durrat Al Arous — فيلا بشاطئ خاص، درة العروس
 - ID: BONA-001 (ref VIL-013)
-- URL: https://bona.azoz.uk/properties/private-beach-villa-durrat-al-arous/ · Arabic: https://bona.azoz.uk/ar/properties/private-beach-villa-durrat-al-arous/
+- URL: https://bona-real-estate.com/properties/private-beach-villa-durrat-al-arous/ · Arabic: https://bona-real-estate.com/ar/properties/private-beach-villa-durrat-al-arous/
 - Kind: House · Type: Villa · Category: For sale · Status: available
 - Location: Durrat Al Arous, Jeddah, Saudi Arabia (درة العروس، جدة)
 - Asking price: SAR 8,000,000
 - Specs: 5 bed, 8 bath, 537 m² built, 537 m² plot
+- Coordinates: 21.9458152, 38.9575876
 - Highlights: Direct beach access; Private pool facing the sea; Five master bedrooms; Private elevator; Panoramic sea views from every level; 537 sqm plot
 - المميزات: وصول مباشر إلى الشاطئ؛ مسبح خاص يطل على البحر؛ خمس غرف نوم رئيسية؛ مصعد خاص؛ إطلالات بحرية بانورامية من كل الطوابق؛ أرض بمساحة 537 متراً مربعاً
 - Listed: 2026-03-21
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04810-34922b.jpeg , https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04800-0c76a159-6389f8.jpeg , https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04815-8e4c37de-63c764.jpeg , https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04787-08e5295a-732cd7.jpeg , https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/aiease_1771959761782-d416b6.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04897-84814e.jpeg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04852_2_-8b7bbc.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04810-34922b.jpeg , https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04815-8e4c37de-63c764.jpeg , https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04808-c5bab7.jpeg , https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04787-08e5295a-732cd7.jpeg , https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/aiease_1771959761782-d416b6.jpg
 
 Set directly on the shore at Durrat Al Arous, north of Jeddah, this five-bedroom villa opens onto its own stretch of beach and a private pool that looks straight out to sea. Full-height glazing carries the horizon through the ground floor, where the living room, dining area and kitchen face the water.
 
@@ -127,15 +129,16 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Classic Mansion, Al Shati 6 — قصر كلاسيكي، الشاطئ 6
 - ID: BONA-002 (ref VIL-022)
-- URL: https://bona.azoz.uk/properties/classic-mansion-al-shati-6/ · Arabic: https://bona.azoz.uk/ar/properties/classic-mansion-al-shati-6/
+- URL: https://bona-real-estate.com/properties/classic-mansion-al-shati-6/ · Arabic: https://bona-real-estate.com/ar/properties/classic-mansion-al-shati-6/
 - Kind: House · Type: Mansion · Category: For sale · Status: available
 - Location: Al Shati 6, Jeddah, Saudi Arabia (الشاطئ 6، جدة)
 - Asking price: SAR 18,000,000
 - Specs: 4 bed, 8 bath, 2300 m² built, 2227.5 m² plot
+- Coordinates: 21.600939, 39.113731
 - Highlights: 2,227.5 sqm plot; Pool with jacuzzi and waterfalls; Four master bedrooms, eight bathrooms; Four reception rooms; Three-car garage; Four minutes to Jeddah Yacht Club
 - المميزات: أرض بمساحة 2,227.5 متر مربع؛ مسبح مع جاكوزي وشلالات؛ أربع غرف نوم رئيسية وثماني دورات مياه؛ أربع صالات استقبال؛ مرآب لثلاث سيارات؛ أربع دقائق إلى نادي جدة لليخوت
 - Listed: 2026-03-21
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagerirx2b-b051b3.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagezjtser-6fa95f.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/20241016_110539737_ios-4f079b.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimageipbc0w-a397a6.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagehe70em-1e0d7e.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagemtwhek-ffa560fe-58cd9a.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagerirx2b-b051b3.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagezjtser-6fa95f.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagegj2hp5-ef902f.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimageybitne-feb9fb.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagewaxbjr-52dd15.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagesdvrfg-cb6494.jpg
 
 A classic mansion on a plot of 2,227.5 square metres in Al Shati 6, one of the most established addresses on Jeddah's northern waterfront. The house is arranged around a garden with a swimming pool, jacuzzi and cascading water features, with a three-car garage and a rear terrace for outdoor seating.
 
@@ -153,15 +156,16 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Contemporary Villa, Al Khalidiyah — فيلا عصرية، الخالدية
 - ID: BONA-005 (ref VIL-038)
-- URL: https://bona.azoz.uk/properties/contemporary-villa-al-khalidiyah/ · Arabic: https://bona.azoz.uk/ar/properties/contemporary-villa-al-khalidiyah/
+- URL: https://bona-real-estate.com/properties/contemporary-villa-al-khalidiyah/ · Arabic: https://bona-real-estate.com/ar/properties/contemporary-villa-al-khalidiyah/
 - Kind: House · Type: Villa · Category: For sale · Status: available
 - Location: Al Khalidiyah, Jeddah, Saudi Arabia (الخالدية، جدة)
 - Asking price: SAR 6,700,000
 - Specs: 5 bed, 8 bath, 640 m² built, 375 m² plot
+- Coordinates: 21.560194, 39.133472
 - Highlights: Steps from Sari Street and Prince Sultan Road; Private pool with water features; Glass elevator to all floors; Five master bedrooms and a dedicated office; 640 sqm built-up area; Separate service kitchen
 - المميزات: على خطوات من شارع صاري وطريق الأمير سلطان؛ مسبح خاص بشلالات؛ مصعد زجاجي لجميع الطوابق؛ خمس غرف نوم رئيسية ومكتب مستقل؛ مساحة بناء 640 متراً مربعاً؛ مطبخ خدمة منفصل
 - Listed: 2026-03-21
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-107-45a677.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-119-1f59b7.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-129-8a2c83.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-67-4286b0.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-135-18ea62.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-142-994c9c.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-119-1f59b7.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-130-3005cb31-669f17.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-107-45a677.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-101-3bc74b.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-61-27f42b.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-67-4286b0.jpg
 
 A newly built contemporary villa in Al Khalidiyah, a few steps from Sari Street and Prince Sultan Road. Behind a restrained façade, the house is organised around a private pool with tiered water features and an outdoor seating area, visible from the two open-plan lounges and the fully fitted kitchen on the ground floor.
 
@@ -179,15 +183,16 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### NOBAL Arista, Al Khalidiyah — نوبال أريستا، الخالدية
 - ID: BONA-024 (ref VIL-031)
-- URL: https://bona.azoz.uk/properties/nobal-arista-al-khalidiyah/ · Arabic: https://bona.azoz.uk/ar/properties/nobal-arista-al-khalidiyah/
+- URL: https://bona-real-estate.com/properties/nobal-arista-al-khalidiyah/ · Arabic: https://bona-real-estate.com/ar/properties/nobal-arista-al-khalidiyah/
 - Kind: House · Type: Villa · Category: Off-plan · Status: available
 - Location: Al Khalidiyah, Jeddah, Saudi Arabia (الخالدية، جدة)
 - Asking price: SAR 5,000,000
 - Specs: 4 bed, 7 bath, 304 m² built
+- Coordinates: 21.560194, 39.133472
 - Highlights: One of six villas only; Private garden and pool; Master suite with rooftop terrace; Four bedrooms, seven bathrooms; Smart entry and CCTV; Ten-year structural warranty
 - المميزات: واحدة من ست فلل فقط؛ حديقة ومسبح خاصان؛ جناح رئيسي بتراس علوي؛ أربع غرف نوم وسبع دورات مياه؛ دخول ذكي وكاميرات مراقبة؛ ضمان إنشائي لعشر سنوات
 - Listed: 2026-03-21
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/aiease_1761747411967-2819c7.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/aiease_1761726003950-0ca592.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/screenshot_2025-10-29_174307-5c215d.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/screenshot_2025-10-29_174408-33a211.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/screenshot_2025-10-29_174429-473377.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/screenshot_2025-10-29_174340-f46c17.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/screenshot_2025-10-29_174307-5c215d.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/aiease_1761726003950-0ca592.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/screenshot_2025-10-29_174536-a2c296.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/screenshot_2025-10-29_174340-f46c17.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/screenshot_2025-10-29_174408-33a211.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/screenshot_2025-10-29_174444-6942c9.jpg
 
 NOBAL Arista is a limited collection of six villas in Al Khalidiyah, each with 304 square metres of built space over three floors, four bedrooms and seven bathrooms, a private garden and pool, and rooms for driver and maid.
 
@@ -205,15 +210,16 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Palais Rose, Le Vésinet — قصر بالي روز، لو فيزينيه
 - ID: BONA-028 (ref VIL-032)
-- URL: https://bona.azoz.uk/properties/palais-rose-le-vesinet/ · Arabic: https://bona.azoz.uk/ar/properties/palais-rose-le-vesinet/
+- URL: https://bona-real-estate.com/properties/palais-rose-le-vesinet/ · Arabic: https://bona-real-estate.com/ar/properties/palais-rose-le-vesinet/
 - Kind: House · Type: Mansion · Category: International · Status: available
 - Location: Parc des Ibis, Île-de-France, Le Vésinet, France (بارك دي زيبيس، إيل دو فرانس، لو فيزينيه)
 - Asking price: EUR 38,000,000
 - Specs: 8 bed, 16 bath, 1769 m² built, 7000 m² plot
+- Coordinates: 48.894254, 2.1347291
 - Highlights: 1,769 sqm residence on 7,000 sqm of grounds; Inspired by the Grand Trianon; Indoor pool, sauna, hammam and squash court; Private cinema; Independent four-bedroom guest house; Twenty minutes from Paris
 - المميزات: مسكن بمساحة 1,769 متراً مربعاً على أرض 7,000 متر مربع؛ مستوحى من قصر تريانون الكبير؛ مسبح داخلي وساونا وحمّام وملعب اسكواش؛ سينما خاصة؛ بيت ضيافة مستقل بأربع غرف نوم؛ على عشرين دقيقة من باريس
 - Listed: 2026-03-21
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/palais-rose/exterieur-a-2-2048x1365-aaf69e.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/palais-rose/cogemad-palais-rose-le-vesinet-paris-3-scaled-2048x1298-0bd32d.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/palais-rose/cogemad-palais-rose-le-vesinet-paris-gallery-4-2048x1109-8b37b9.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/palais-rose/salon-a-3-2048x1365-f8d7fa.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/palais-rose/salle-a-manger-2-2048x1365-cbde63.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/palais-rose/piscine-6-2048x1365-65e479.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/palais-rose/exterieur-a-2-2048x1365-aaf69e.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/palais-rose/cogemad-palais-rose-le-vesinet-paris-3-scaled-2048x1298-0bd32d.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/palais-rose/cogemad-palais-rose-le-vesinet-paris-gallery-4-2048x1109-8b37b9.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/palais-rose/mflphoto-cogemad-palaisrose-2024-web-6-1-2048x1365-3bb572.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/palais-rose/salle-a-manger-2-2048x1365-cbde63.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/palais-rose/salon-a-3-2048x1365-f8d7fa.jpg
 
 Twenty minutes from Porte Maillot, within the Parc des Ibis in Le Vésinet, Palais Rose is a private estate inspired by the Grand Trianon. The main residence offers 1,769 square metres across the lower ground, garden and ground floors, set in 7,000 square metres of landscaped grounds with a Japanese garden, a rose garden, a central fountain, a greenhouse and a private football pitch.
 
@@ -231,15 +237,16 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Painite Villas by Lamborghini, Benahavís — فلل باينايت بتوقيع لامبورغيني، بيناهابيس
 - ID: BONA-031 (ref VIL-044)
-- URL: https://bona.azoz.uk/properties/painite-villas-by-lamborghini-benahavis/ · Arabic: https://bona.azoz.uk/ar/properties/painite-villas-by-lamborghini-benahavis/
+- URL: https://bona-real-estate.com/properties/painite-villas-by-lamborghini-benahavis/ · Arabic: https://bona-real-estate.com/ar/properties/painite-villas-by-lamborghini-benahavis/
 - Kind: House · Type: Mansion · Category: International · Status: available
 - Location: Benahavís, Costa del Sol, Marbella, Spain (بيناهابيس، كوستا ديل سول، ماربيا)
 - Asking price: Price on request
 - Specs: 6 bed
+- Coordinates: 36.5222736, -5.0441068
 - Highlights: Private Sky Car Lift by Lamborghini; Six bedrooms with panoramic sea views; 700–1,450 sqm mansion types; Private clubhouse with Lamborghini Café; Minutes from Marbella and Puerto Banús; Completion June 2028
 - المميزات: مصعد سيارات خاص من لامبورغيني؛ ست غرف نوم بإطلالات بحرية بانورامية؛ طرز قصور من 700 إلى 1,450 متراً مربعاً؛ نادٍ خاص بمقهى لامبورغيني؛ على دقائق من ماربيا وبورتو بانوس؛ التسليم في يونيو 2028
 - Listed: 2026-04-18
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/painite-villas-by-lamborghini/dg.al_esmeralda_villa_ext_3-9df3c4.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/painite-villas-by-lamborghini/painite_villa_-_ext-d633be.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/painite-villas-by-lamborghini/dg_al_zafiro_villa_int_living_e47a0e6ea6-cacb76.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/painite-villas-by-lamborghini/painite_villa_-_int_1-00c6b4.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/painite-villas-by-lamborghini/painite_villa_-_int_2-9626ea.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/painite-villas-by-lamborghini/dg_al_tierra_viva_aerial_1_d6c70d43c2-7d3946.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/painite-villas-by-lamborghini/dg.al_esmeralda_villa_ext_3-9df3c4.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/painite-villas-by-lamborghini/painite_villa_-_ext-d633be.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/painite-villas-by-lamborghini/dg_al_zafiro_villa_int_living_e47a0e6ea6-cacb76.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/painite-villas-by-lamborghini/dg_al_tierra_viva_aerial_1_d6c70d43c2-7d3946.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/painite-villas-by-lamborghini/painite_villa_-_int_1-00c6b4.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/painite-villas-by-lamborghini/painite_villa_-_int_2-9626ea.jpg
 
 Within Tierra Viva, a gated community in the hills of Benahavís designed in partnership with Automobili Lamborghini, the Painite Villas are the only villas in southern Spain with a private Sky Car Lift. The lift carries a car through a glass dome into the living space, where floor-to-ceiling glazing frames the Mediterranean and the Andalusian hills.
 
@@ -257,15 +264,16 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Trump Cliff Villas, AIDA, Muscat — فلل ترامب كليف، آيدا، مسقط
 - ID: BONA-032 (ref VIL-034)
-- URL: https://bona.azoz.uk/properties/trump-cliff-villas-aida-muscat/ · Arabic: https://bona.azoz.uk/ar/properties/trump-cliff-villas-aida-muscat/
+- URL: https://bona-real-estate.com/properties/trump-cliff-villas-aida-muscat/ · Arabic: https://bona-real-estate.com/ar/properties/trump-cliff-villas-aida-muscat/
 - Kind: House · Type: Villa · Category: International · Status: available
 - Location: AIDA, Muscat, Oman (آيدا، مسقط)
 - Asking price: From SAR 4,000,000
 - Specs: 3 bed
+- Coordinates: 23.5091205, 58.6599331
 - Highlights: 130 metres above the sea; Fully furnished with private pool; Managed by Trump, live in or lease; 18-hole championship golf course; Freehold for all nationalities; From SAR 4,000,000
 - المميزات: على ارتفاع 130 متراً فوق البحر؛ مفروشة بالكامل مع مسبح خاص؛ بإدارة ترامب، للسكن أو التأجير؛ ملعب جولف بثماني عشرة حفرة؛ تملك حر لجميع الجنسيات؛ ابتداءً من 4,000,000 ريال سعودي
 - Listed: 2026-03-21
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/trump-golf-villas/ott_02_rear_view_ef_9704209c3d_37a210f5bb-e9d829.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-golf-villas/darglobal_aida_mp_bird_eye_view_1_1ae76a7ae5_d4d3249f4a-dd5dd5.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-golf-villas/desktop_1st_image_4ccdadb89e-fbdbdd.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-golf-villas/ott_03_living_ef_d91959670b_94997cc1af-f3b5fd.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-golf-villas/ott_04_kitchen_dining_ef_1421cb080c_070888783a-97222b.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/aida/a3_d71c7a87d7-7ea64b.png
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/trump-golf-villas/ott_02_rear_view_ef_9704209c3d_37a210f5bb-e9d829.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/aida/a3_d71c7a87d7-7ea64b.png , https://tk-storage.azoz.uk/tk-estate-media/media/trump-golf-villas/otg_02_view_ef_2733b43dc0_8338f5e9ed-5060b0.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-golf-villas/ott_03_living_ef_d91959670b_94997cc1af-f3b5fd.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-golf-villas/ott_04_kitchen_dining_ef_1421cb080c_070888783a-97222b.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-golf-villas/desktop_1st_image_4ccdadb89e-fbdbdd.jpg
 
 The Trump Cliff Villas sit 130 metres above sea level beside the Trump International Hotel within AIDA, on the coast at Muscat. Each three-bedroom villa is delivered fully furnished with a private pool overlooking the sea, in 128 to 166 square metres.
 
@@ -283,7 +291,7 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Neptune Villas, Interiors by Mouawad, North Riyadh — فلل نبتون بتصميم داخلي من معوض، شمال الرياض
 - ID: BONA-044 (ref VIL-029)
-- URL: https://bona.azoz.uk/properties/neptune-villas-north-riyadh/ · Arabic: https://bona.azoz.uk/ar/properties/neptune-villas-north-riyadh/
+- URL: https://bona-real-estate.com/properties/neptune-villas-north-riyadh/ · Arabic: https://bona-real-estate.com/ar/properties/neptune-villas-north-riyadh/
 - Kind: House · Type: Villa · Category: Off-plan · Status: available
 - Location: North Riyadh, Riyadh, Saudi Arabia (شمال الرياض، الرياض)
 - Asking price: From SAR 4,600,000
@@ -291,7 +299,7 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 - Highlights: Interiors by Mouawad; Five bedrooms; 300 to 420 sqm; Under construction in north Riyadh; From SAR 4,600,000
 - المميزات: تصميم داخلي من معوض؛ خمس غرف نوم؛ من 300 إلى 420 متراً مربعاً؛ قيد الإنشاء في شمال الرياض؛ ابتداءً من 4,600,000 ريال سعودي
 - Listed: 2026-03-21
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/neptune-interiors-by-mouawad/1-b42395.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/neptune-interiors-by-mouawad/14-b96487.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/neptune-interiors-by-mouawad/6-ea4d23.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/neptune-interiors-by-mouawad/8-ddced5.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/neptune-interiors-by-mouawad/6-ea4d23.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/neptune-interiors-by-mouawad/8-ddced5.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/neptune-interiors-by-mouawad/1-b42395.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/neptune-interiors-by-mouawad/14-b96487.jpg
 
 Neptune Villas is a villa community under construction in north Riyadh, with interiors by the jeweller Mouawad. Each villa has five bedrooms, in sizes from 300 to 420 square metres; the renders show roof terraces and covered parking.
 
@@ -303,19 +311,359 @@ The masterplan sets the houses along tree-lined streets around a central park an
 
 Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Neptune%20Villas%2C%20Interiors%20by%20Mouawad%2C%20North%20Riyadh%20(BONA-044).
 
-## Apartments (18) — https://bona.azoz.uk/properties/apartments/
+### Al-Wareef Townhouse, Jeddah — تاون هاوس الوريف، جدة
+- ID: BONA-W003 (ref WA-20260906-ACB9C8)
+- URL: https://bona-real-estate.com/properties/al-wareef-townhouse-jeddah/ · Arabic: https://bona-real-estate.com/ar/properties/al-wareef-townhouse-jeddah/
+- Kind: House · Type: Villa · Category: Off-plan · Status: available
+- Location: Al Wareef, Jeddah, Saudi Arabia (الوريف، جدة)
+- Asking price: Price on request
+- Project: Wajhat Al-Wareef (وجهة الوريف) · Developer: National Housing Company (NHC) and Faisal Bin Saedan Real Estate Development
+- Unit: unit Maren model
+- Specs: 3 bed, 4 bath, 192 m² built, 200 m² plot
+- Coordinates: 21.338, 39.304778
+- Highlights: 192 sqm build on 200 sqm plot; Three-storey layout with rooftop; Master suite with dressing room and terrace; Majlis and separate family sitting room; Ten-year structural warranty; Walkable schools, mosques, clinics
+- المميزات: بناء 192 م² على أرض 200 م²؛ ثلاثة طوابق مع سطح علوي؛ غرفة نوم رئيسية بغرفة ملابس وتراس؛ مجلس وصالة عائلية منفصلة؛ ضمان هيكلي لعشر سنوات؛ قرب سير من المدارس والمساجد والمراكز الصحية
+- Brochure: https://bona-real-estate.com/listings/al-wareef-townhouse-jeddah/brochure.pdf
+- Listed: 2026-09-06
+- Images: /listings/al-wareef-townhouse-jeddah/01.jpg , /listings/al-wareef-townhouse-jeddah/02.jpg , /listings/al-wareef-townhouse-jeddah/03.jpg , /listings/al-wareef-townhouse-jeddah/04.jpg , /listings/al-wareef-townhouse-jeddah/05.jpg
+
+The townhouse sits within a master-planned residential destination in southeast Jeddah, within easy reach of the city's historic centre and its main business districts. A network of pedestrian paths connects the home to schools, mosques, health centres and retail, most reachable on foot within five to ten minutes. The wider destination extends over more than ten million square metres, with over 1.3 million square metres set aside for parks and green space.
+
+This is one of 134 townhouses built to a single three-storey layout, with a built-up area of 192 square metres on a 200-square-metre plot. The ground floor holds a majlis, a family sitting room, a separate dining area, a living room and a kitchen, alongside two washrooms. The first floor carries a master bedroom with a dressing room and a private terrace, a second bedroom with its own terrace, and two further bathrooms. A rooftop of roughly 82 square metres tops the house, reached by its own staircase, with one open parking space in front.
+
+Construction follows the Saudi Building Code, with porcelain flooring, washable paint finishes, moisture-resistant gypsum ceilings and marble staircases inside and out. Windows and doors carry thermal insulation and double glazing, and LED lighting is fitted throughout. The build carries a one-year warranty on finishes, plumbing and electrical work, and a ten-year warranty on the structure, waterproofing and soil treatment against insects.
+
+يقع تاون هاوس ضمن وجهة سكنية مخطط لها بعناية في جنوب شرق جدة، على مقربة من قلب المدينة التاريخي ومراكز الأعمال الرئيسية. تربط شبكة من الممرات الآمنة المنزل بالمدارس والمساجد والمراكز الصحية والمحال التجارية، وتصل معظمها سيراً على الأقدام خلال خمس إلى عشر دقائق. تمتد الوجهة على أكثر من عشرة ملايين متر مربع، خُصص منها أكثر من 1.3 مليون متر مربع للحدائق والمساحات الخضراء.
+
+يُعد هذا التاون هاوس واحداً من 134 وحدة بُنيت وفق نموذج واحد من ثلاثة طوابق، بمساحة بناء إجمالية 192 متراً مربعاً على قطعة أرض مساحتها 200 متر مربع. يضم الدور الأرضي مجلساً وصالة عائلية ومنطقة طعام منفصلة وصالة معيشة ومطبخاً، إضافة إلى دورتي مياه. أما الدور الأول فيحتوي على غرفة نوم رئيسية مع غرفة ملابس وتراس خاص، وغرفة نوم ثانية بتراسها الخاص، ودورتي مياه إضافيتين. ويعلو المنزل سطح بمساحة تقارب 82 متراً مربعاً يُصعد إليه بدرج مستقل، مع موقف سيارة مفتوح أمام المنزل.
+
+يتبع البناء كود البناء السعودي، بأرضيات بورسلين ودهانات قابلة للغسل وأسقف جبسية مقاومة للرطوبة وسلالم رخامية داخلية وخارجية. تأتي الأبواب والنوافذ بمواصفات عزل حراري وزجاج مزدوج، مع إنارة LED في مختلف الأرجاء. ويحصل المنزل على ضمان لمدة سنة على التشطيبات والسباكة والأعمال الكهربائية، وضمان لعشر سنوات على الهيكل الإنشائي والعزل ومعالجة التربة ضد الحشرات.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Al-Wareef%20Townhouse%2C%20Jeddah%20(BONA-W003).
+
+### Al Warf District, Jeddah — وجهة الويرف، جدة
+- ID: BONA-W006 (ref WA-20260906-AC4C77)
+- URL: https://bona-real-estate.com/properties/al-warf-district-jeddah/ · Arabic: https://bona-real-estate.com/ar/properties/al-warf-district-jeddah/
+- Kind: House · Type: Villa · Category: Off-plan · Status: available
+- Location: Southeast Jeddah, Jeddah, Saudi Arabia (جنوب شرق جدة، جدة)
+- Asking price: Price on request
+- Project: Al Warf District (وجهة الويرف) · Developer: Faisal Bin Saedan Real Estate Investment & Development
+- Coordinates: 21.338, 39.304778
+- Highlights: Eight villa & townhouse models; 693 units across the community; Green boulevard and parks; 5–10 minute walk to schools & mosques; 10-year structural warranty; Southeast Jeddah location
+- المميزات: ثمانية نماذج فلل وتاون هاوس؛ 693 وحدة سكنية؛ ممر أخضر وحدائق؛ خمس إلى عشر دقائق للمدارس والمساجد؛ ضمان إنشائي 10 سنوات؛ موقع في جنوب شرق جدة
+- Brochure: https://bona-real-estate.com/listings/al-warf-district-jeddah/brochure.pdf
+- Listed: 2026-09-06
+- Images: /listings/al-warf-district-jeddah/01.jpg , /listings/al-warf-district-jeddah/02.jpg , /listings/al-warf-district-jeddah/03.jpg , /listings/al-warf-district-jeddah/04.jpg , /listings/al-warf-district-jeddah/05.jpg , /listings/al-warf-district-jeddah/06.jpg
+
+Al Warf sits in southeast Jeddah, close to the historic city center and its main arteries. The development is planned as part of the wider Wjhat destinations program, with schools, mosques, health centers and retail reachable within a five- to ten-minute walk on a dedicated pedestrian network.
+
+The residential collection comprises 693 villas and townhouses across eight models — A, B, C and D villas, the Ufuq and Maren townhouses, and the Saah and Rihab villas. Built-up areas range from about 161 sqm for the townhouses to 271 sqm for the largest villa model, with three to four bedrooms and four to six bathrooms depending on the model. Each home is arranged over a ground floor, first floor and roof level, with a private majlis, living and dining areas, and a private parking space.
+
+Construction follows the Saudi Building Code, with porcelain flooring, washable paint, moisture-resistant gypsum ceilings and marble cladding to interior and exterior walls. Bathrooms use non-slip tiling and rust-resistant fittings, while doors and double-glazed windows are rated for water resistance and thermal insulation. The homes carry a ten-year structural warranty alongside shorter warranties on finishing, plumbing and electrical work.
+
+The wider Wjhat Al Warf destination is planned for around 12,000 residential units, 21 retail centers, ten schools, twelve mosques, two health centers and landscaped green spaces exceeding a million square meters. Renderings throughout the brochure are for illustrative purposes, as the project remains under development.
+
+تقع وجهة الويرف في جنوب شرق جدة، على مقربة من قلب المدينة التاريخية ومداخلها الرئيسية. يأتي المشروع ضمن برنامج «وجهات» التطويري الأوسع، حيث تتوزع المدارس والمساجد والمراكز الصحية والمرافق التجارية على مسافة خمس إلى عشر دقائق سيرًا عبر شبكة ممرات مخصصة للمشاة.
+
+تضم المجموعة السكنية 693 وحدة بين فلل وتاون هاوس موزعة على ثمانية نماذج: فلل A وB وC وD، وتاون هاوس أفق ومرن، وفلل سعة ورحاب. تتراوح مساحات البناء بين نحو 161 مترًا مربعًا للتاون هاوس و271 مترًا مربعًا لأكبر نماذج الفلل، بواقع ثلاث إلى أربع غرف نوم وأربع إلى ست دورات مياه بحسب النموذج. تتوزع كل وحدة على دور أرضي وأول وسطح، وتضم مجلسًا خاصًا وصالة معيشة وطعام وموقف سيارة خاص.
+
+يلتزم التنفيذ بكود البناء السعودي، مع أرضيات بورسلين ودهانات قابلة للغسل وأسقف جبسية مقاومة للرطوبة وكسوة رخامية داخلية وخارجية. تُجهَّز دورات المياه ببلاط مانع للانزلاق وتجهيزات مقاومة للصدأ، فيما تحمل الأبواب والنوافذ المزدوجة الزجاج مواصفات عزل مائي وحراري. وتشمل الضمانات عشر سنوات على الهيكل الإنشائي، إلى جانب ضمانات أقصر على التشطيبات والسباكة والكهرباء.
+
+تخطط وجهة الويرف الأوسع لتضم نحو 12,000 وحدة سكنية، و21 مركزًا تجاريًا، وعشر مدارس، و12 مسجدًا وجامعًا، ومركزين صحيين، ومساحات خضراء تتجاوز مليون متر مربع. الصور ثلاثية الأبعاد الواردة في الكتيب مخصصة للأغراض التوضيحية فقط، إذ ما يزال المشروع قيد التطوير.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Al%20Warf%20District%2C%20Jeddah%20(BONA-W006).
+
+### Aseel Al Ghoroub 2, Al Madinah — أصيل الغروب ٢، المدينة المنورة
+- ID: BONA-W015 (ref WA-20260907-AC53D4)
+- URL: https://bona-real-estate.com/properties/aseel-al-ghoroub-2-al-madinah/ · Arabic: https://bona-real-estate.com/ar/properties/aseel-al-ghoroub-2-al-madinah/
+- Kind: House · Type: Villa · Category: Off-plan · Status: available
+- Location: Al Ghoroub Suburb, Al Madinah Al Munawwarah, Saudi Arabia (ضاحية الغروب، المدينة المنورة)
+- Asking price: Price on request
+- Project: Aseel Al Ghoroub 2 (أصيل الغروب ٢) · Developer: Ambatt Real Estate
+- Highlights: Within Ghoroub Destination community; Three villa layouts, 245–294 sqm; Steps from a 1,000,000 sqm park; Close to Al Madinah's main roads; Structural and waterproofing warranty; Private front, side and rear courtyards
+- المميزات: ضمن مجتمع وجهة الغروب؛ ثلاثة نماذج فلل بمساحات ٢٤٥-٢٩٤ م²؛ بجوار حديقة بمساحة مليون م²؛ قرب شبكة الطرق الرئيسية بالمدينة المنورة؛ ضمان على الهيكل الإنشائي والعزل المائي؛ أفنية أمامية وجانبية وخلفية خاصة
+- Brochure: https://bona-real-estate.com/listings/aseel-al-ghoroub-2-al-madinah/brochure.pdf
+- Listed: 2026-09-07
+- Images: /listings/aseel-al-ghoroub-2-al-madinah/01.jpg , /listings/aseel-al-ghoroub-2-al-madinah/02.jpg , /listings/aseel-al-ghoroub-2-al-madinah/03.jpg , /listings/aseel-al-ghoroub-2-al-madinah/04.jpg , /listings/aseel-al-ghoroub-2-al-madinah/05.jpg , /listings/aseel-al-ghoroub-2-al-madinah/06.jpg
+
+Aseel Al Ghoroub 2 sits within the wider Ghoroub Destination community in the Al Ghoroub suburb of Al Madinah Al Munawwarah, close to the district's main road network. The Prophet's Mosque is roughly 13 km away and Quba Mosque about 14 km, while Taibah University and the Prince Sultan Armed Forces Hospital are each around 6 km from the site.
+
+The destination is built around Hadiqat Al Ghoroub, a central park spanning over 1,000,000 sqm of lawns, mature trees and rose gardens, alongside mosques, schools, health facilities and commercial centres planned into the community.
+
+The project offers three villa layouts: a villa with a total built-up area of 293.55 sqm, a second villa type, and a townhouse villa of 244.86 sqm. Each unit is arranged over ground and first floors with a majlis, family living and dining space, kitchen and bedrooms, plus front, side and rear courtyards.
+
+The build package carries warranties on the structural frame, waterproofing and termite protection, along with finishing works covering electrical wiring, plumbing, doors, windows and flooring.
+
+يقع مشروع أصيل الغروب ٢ ضمن مجتمع وجهة الغروب في ضاحية الغروب بالمدينة المنورة، بالقرب من شبكة الطرق الرئيسية للحي. يبعد المسجد النبوي الشريف نحو ١٣ كم، ومسجد قباء نحو ١٤ كم، بينما تبعد جامعة طيبة ومستشفى الأمير سلطان للقوات المسلحة نحو ٦ كم عن الموقع.
+
+تتمحور الوجهة حول حديقة الغروب، وهي حديقة مركزية تمتد على أكثر من مليون متر مربع بمسطحاتها الخضراء وأشجارها الوارفة وحدائق الورود، إلى جانب مساجد ومدارس ومرافق صحية ومراكز تجارية موزعة ضمن المخطط العام للمجتمع.
+
+يضم المشروع ثلاثة نماذج فلل: فيلا بمساحة إجمالية ٢٩٣٫٥٥ متر مربع، ونموذج فيلا ثانٍ، وفيلا تاون هاوس بمساحة إجمالية ٢٤٤٫٨٦ متر مربع. تتوزع كل وحدة على الطابقين الأرضي والأول وتضم مجلسًا وغرفة معيشة وطعام ومطبخًا وغرف نوم، مع أفنية أمامية وجانبية وخلفية.
+
+تشمل حزمة البناء ضمانات على الهيكل الإنشائي والعزل المائي ومكافحة النمل الأبيض، إضافة إلى أعمال التشطيبات من كهرباء وسباكة وأبواب ونوافذ وأرضيات.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Aseel%20Al%20Ghoroub%202%2C%20Al%20Madinah%20(BONA-W015).
+
+### Danyah Villas, Al Basateen — فلل دانية، البساتين
+- ID: BONA-W013 (ref WA-20260906-AC4732)
+- URL: https://bona-real-estate.com/properties/danyah-villas-al-basateen/ · Arabic: https://bona-real-estate.com/ar/properties/danyah-villas-al-basateen/
+- Kind: House · Type: Villa · Category: Off-plan · Status: available
+- Location: Al Basateen, Jeddah, Saudi Arabia (البساتين، جدة)
+- Asking price: Price on request
+- Project: Danyah Villas (فلل دانية) · Developer: Specialized Homes
+- Specs: 4 bed, 7 bath, 497 m² built, 375 m² plot
+- Highlights: Private pool and terrace; Rooftop lounge with fire pit; Four en-suite bedrooms; Staff room and laundry; Ten-year structural warranty
+- المميزات: مسبح خاص وتراس؛ جلسة على السطح مع موقد نار؛ أربع غرف نوم بحمامات خاصة؛ غرفة عاملات وغرفة غسيل؛ ضمان إنشائي لعشر سنوات
+- Brochure: https://bona-real-estate.com/listings/danyah-villas-al-basateen/brochure.pdf
+- Listed: 2026-09-06
+- Images: /listings/danyah-villas-al-basateen/01.jpg , /listings/danyah-villas-al-basateen/02.jpg , /listings/danyah-villas-al-basateen/03.jpg , /listings/danyah-villas-al-basateen/04.jpg , /listings/danyah-villas-al-basateen/05.jpg , /listings/danyah-villas-al-basateen/06.jpg
+
+Danyah Villas is a villa development in Al Basateen, a quiet residential district in north Jeddah, built by Specialized Homes (Al Masaken Al Mutakhassisah). The plot sits close to Jawharat Jeddah Mall, Sulaiman Al Habib Hospital, the Jeddah Yacht Club and King Abdulaziz International Airport.
+
+Each villa is arranged over a ground floor, a first floor and a roof-level second floor, with a total built-up area of 497 square metres on a 375 square metre plot. The ground floor holds a reception hall, a main salon, a dining hall, a family room, two guest washrooms, a private pool with an outdoor shower, and a staff room.
+
+The first floor holds a master bedroom with an en-suite bathroom and balcony, two further bedrooms each with their own bathroom, and a family sitting room with a side balcony. The second floor adds a second master bedroom with an en-suite bathroom and interior balcony, a sitting room, a staff room, a laundry room and a large roof terrace.
+
+The project carries a ten-year structural warranty and a twenty-five year Abyat-backed warranty on the aluminium work. Insulation is covered for ten years, and the plumbing, electrical, sanitary fittings, water network and elevator each carry a two-year warranty.
+
+فلل دانية مشروع سكني في حي البساتين، أحد الأحياء الهادئة في شمال جدة، طورته شركة المساكن المتخصصة. يقع المشروع بالقرب من جوهرة جدة مول، ومستشفى سليمان الحبيب، ونادي جدة لليخوت، ومطار الملك عبدالعزيز الدولي.
+
+تتوزع كل فيلا على دور أرضي ودور أول ودور ثاني على مستوى السطح، بإجمالي مساحة بناء 497 مترًا مربعًا على أرض مساحتها 375 مترًا مربعًا. يضم الدور الأرضي صالة استقبال وصالونًا رئيسيًا وصالة طعام وغرفة معيشة، ودورتي مياه للضيوف، ومسبحًا خاصًا مع حمام خارجي، وغرفة للحارس.
+
+يضم الدور الأول غرفة نوم رئيسية بحمام خاص وبلكونة، وغرفتي نوم إضافيتين لكل منهما حمامها الخاص، وصالة معيشة ببلكونة جانبية. أما الدور الثاني فيحتوي على غرفة نوم رئيسية ثانية بحمام وبلكونة داخلية، وصالة جلوس، وغرفة عاملات، وغرفة غسيل، وسطح واسع.
+
+يحصل المشروع على ضمان إنشائي لمدة عشر سنوات، وضمان أبيات لأعمال الألمنيوم لمدة خمس وعشرين عامًا. كما تُغطى أعمال العزل لعشر سنوات، فيما تحصل أعمال السباكة والكهرباء والأدوات الصحية وشبكة المياه والمصعد على ضمان سنتين لكل منها.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Danyah%20Villas%2C%20Al%20Basateen%20(BONA-W013).
+
+### Elvira Murjan Townhouses in Al-Murjan — منازل إلفيرا مرجان في حي المرجان
+- ID: BONA-W009 (ref WA-20260906-ACA18E)
+- URL: https://bona-real-estate.com/properties/elvira-murjan-townhouses-in-al-murjan/ · Arabic: https://bona-real-estate.com/ar/properties/elvira-murjan-townhouses-in-al-murjan/
+- Kind: House · Type: Villa · Category: Off-plan · Status: available
+- Location: Al-Murjan, Jeddah, Saudi Arabia (المرجان، جدة)
+- Asking price: Price on request
+- Project: Elvira Murjan (إلفيرا مرجان) · Developer: TK Estate & Design
+- Specs: 5 bed, 8 bath, 630 m² built, 300 m² plot
+- Highlights: Private indoor courtyard pool; Five bedrooms, eight bathrooms; Two indoor parking spaces; Rooftop terrace; Ten-year structural warranty
+- المميزات: مسبح خاص في فناء داخلي؛ خمس غرف نوم وثماني حمامات؛ موقفان داخليان للسيارات؛ تراس على السطح؛ ضمان إنشائي لعشر سنوات
+- Brochure: https://bona-real-estate.com/listings/elvira-murjan-townhouses-in-al-murjan/brochure.pdf
+- Listed: 2026-09-06
+- Images: /listings/elvira-murjan-townhouses-in-al-murjan/01.jpg , /listings/elvira-murjan-townhouses-in-al-murjan/02.jpg , /listings/elvira-murjan-townhouses-in-al-murjan/03.jpg , /listings/elvira-murjan-townhouses-in-al-murjan/04.jpg , /listings/elvira-murjan-townhouses-in-al-murjan/05.jpg , /listings/elvira-murjan-townhouses-in-al-murjan/06.jpg
+
+Elvira Murjan is a boutique row of five-bedroom townhouses in the Al-Murjan neighbourhood of Jeddah, close to the King Abdulaziz branch road, Jeddah Yacht Club and the Red Sea coast. Each home rises over three floors around a private indoor courtyard and swimming pool, with a private entrance and two indoor parking spaces.
+
+The ground floor holds an open and a closed kitchen, separate guest and family living areas, a skylit indoor courtyard, a driver's room and a maid's room, and two guest bathrooms. Four en-suite bedrooms and two balconies occupy the first floor, while the second floor is given over to the master suite, an additional living area and a guest bathroom, opening onto a large rooftop terrace.
+
+The structural frame is reinforced concrete built to the Saudi Building Code, with double-glazed windows, insulated roofs and façades, and high-quality aluminium systems throughout. Interiors are finished in Italian and Omani marble, with high ceilings, a sound system in every room, smart-home wiring and central air conditioning.
+
+The build carries a ten-year structural warranty, a three-year warranty on electrical and plumbing work, and further cover on fit-out and hidden defects. Al-Murjan places residents minutes from Jeddah's marinas, malls and medical centres, with King Abdulaziz International Airport around fifteen minutes away.
+
+إلفيرا مرجان مشروع بوتيكي مؤلف من تاون هاوس بخمس غرف نوم في حي المرجان بجدة، على مقربة من طريق فرع الملك عبدالعزيز ونادي جدة للياخوت وساحل البحر الأحمر. يمتد كل منزل على ثلاثة طوابق حول فناء داخلي خاص ومسبح، مع مدخل خاص وموقفين داخليين للسيارات.
+
+يضم الدور الأرضي مطبخين مفتوحاً ومغلقاً، وصالتي معيشة منفصلتين للضيوف والعائلة، وفناءً داخلياً يعلوه سقف زجاجي، وغرفة للسائق وأخرى للخادمة، وحمامين للضيوف. ويحتوي الدور الأول على أربع غرف نوم بحمامات خاصة وشرفتين، بينما يُخصَّص الدور الثاني لجناح رئيسي وصالة معيشة إضافية وحمام ضيوف، يفتح على تراس واسع على السطح.
+
+الهيكل الإنشائي من الخرسانة المسلحة وفق كود البناء السعودي، مع نوافذ مزدوجة الزجاج وعزل للأسطح والواجهات وأنظمة ألمنيوم عالية الجودة. التشطيبات الداخلية من الرخام الإيطالي والعُماني، بأسقف مرتفعة ونظام صوت في كل غرفة وتمديدات جاهزة للمنزل الذكي وتكييف مركزي.
+
+يحمل المشروع ضماناً إنشائياً لعشر سنوات، وضماناً لثلاث سنوات على الأعمال الكهربائية والصحية، إضافة إلى ضمانات أخرى على التشطيبات والعيوب الخفية. يقع حي المرجان على بعد دقائق من مرافئ جدة ومراكزها التجارية والطبية، ومطار الملك عبدالعزيز الدولي على مسافة نحو خمس عشرة دقيقة.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Elvira%20Murjan%20Townhouses%20in%20Al-Murjan%20(BONA-W009).
+
+### Knightsbridge Villas, Meydan District 11 — فلل نايتسبريدج في المنطقة 11 بميدان
+- ID: BONA-W008 (ref WA-20260906-ACCF6C)
+- URL: https://bona-real-estate.com/properties/knightsbridge-villas-meydan-district-11/ · Arabic: https://bona-real-estate.com/ar/properties/knightsbridge-villas-meydan-district-11/
+- Kind: House · Type: Villa · Category: Off-plan · Status: available
+- Location: District 11, Meydan, Dubai, United Arab Emirates (المنطقة 11، ميدان، دبي)
+- Asking price: Price on request
+- Project: Knightsbridge (نايتسبريدج) · Developer: LEOS Developments
+- Coordinates: 25.1629302, 55.3142967
+- Highlights: Swimmable sunrise lagoon; Private pool in every villa; 5- or 6-bedroom layouts; Private elevator, double-height entrance; Climate-adaptive, self-shading design
+- المميزات: بحيرة شروق قابلة للسباحة؛ مسبح خاص لكل فيلا؛ تصاميم بخمس أو ست غرف نوم؛ مصعد خاص ومدخل مزدوج الارتفاع؛ تصميم متكيف مناخيًا وذاتي التظليل
+- Brochure: https://bona-real-estate.com/listings/knightsbridge-villas-meydan-district-11/brochure.pdf
+- Listed: 2026-09-06
+- Images: /listings/knightsbridge-villas-meydan-district-11/01.jpg , /listings/knightsbridge-villas-meydan-district-11/02.jpg , /listings/knightsbridge-villas-meydan-district-11/03.jpg , /listings/knightsbridge-villas-meydan-district-11/04.jpg , /listings/knightsbridge-villas-meydan-district-11/05.jpg , /listings/knightsbridge-villas-meydan-district-11/06.jpg
+
+Knightsbridge is a gated villa community in Meydan District 11, Dubai, drawing its architecture from the Georgian and Victorian townhouses of London's Knightsbridge and Mayfair. The community sits a three-minute walk from a swimmable lagoon and has direct access to Sheikh Mohammed Bin Zayed Road, putting Downtown Dubai, DIFC and Meydan Racecourse within a short drive.
+
+Phase 2 comprises two villa designs. The Chatsworth offers 31 five-bedroom villas with a sellable area of around 6,005 sq ft and plots ranging from 4,304 to 6,761 sq ft, each with a double-height entrance, a private elevator and three parking spaces. The Blenheim offers 15 six-bedroom signature villas, including two corner units, with a sellable area of around 9,007 sq ft, plots from 6,329 to 9,527 sq ft, a triple-height entrance and four parking spaces. Every villa has its own temperature-controlled pool, a fresh-harvest garden and a TAKIBI firepit terrace.
+
+The community is built around a swimmable sunrise lagoon, alongside an outdoor cinema, a kids' aqua park, an outdoor jacuzzi, a BBQ and smoke-house pavilion, a water café, a jogging track and aqua sunbeds. Climate-adaptive features include a self-shading façade, an insulated building envelope, solar water heating, smart irrigation and EV charging points.
+
+نايتسبريدج مجتمع فلل مسوّر في المنطقة 11 بميدان، دبي، مستوحى في عمارته من طراز البيوت الجورجية والفيكتورية في حي نايتسبريدج ومايفير بلندن. يبعد المجتمع مسافة ثلاث دقائق سيرًا عن بحيرة قابلة للسباحة، ويتصل مباشرة بشارع الشيخ محمد بن زايد، ما يجعل وسط مدينة دبي ومركز دبي المالي العالمي وميدان للفروسية على بُعد دقائق بالسيارة.
+
+تضم المرحلة الثانية تصميمين من الفلل. تشتمل فلل تشاتسويرث على 31 فيلا بخمس غرف نوم بمساحة بيع تقارب 6,005 قدمًا مربعة وقطع أرض تتراوح بين 4,304 و6,761 قدمًا مربعة، مع مدخل مزدوج الارتفاع ومصعد خاص وثلاثة مواقف سيارات لكل فيلا. أما فلل بلينهايم السيادية فتضم 15 فيلا بست غرف نوم، من بينها وحدتان زاويتان، بمساحة بيع تقارب 9,007 أقدام مربعة وقطع أرض من 6,329 إلى 9,527 قدمًا مربعة، مع مدخل ثلاثي الارتفاع وأربعة مواقف سيارات. تمتلك كل فيلا مسبحًا خاصًا يتحكم بحرارته، وحديقة حصاد طازجة، وتراسًا بموقد تاكيبي.
+
+يتمحور المجتمع حول بحيرة شروق قابلة للسباحة، إلى جانب سينما خارجية، ومنتزه مائي للأطفال، وجاكوزي خارجي، وجناح شواء ومدخنة، ومقهى على الماء، ومسار للجري، وأسرّة استرخاء فوق الماء. ومن ملامح التكيف المناخي واجهة ذاتية التظليل، وغلاف بناء معزول، وتسخين مياه بالطاقة الشمسية، وري ذكي، ونقاط شحن للسيارات الكهربائية.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Knightsbridge%20Villas%2C%20Meydan%20District%2011%20(BONA-W008).
+
+### Modern Villa in Al Shati, Jeddah — فيلا عصرية في حي الشاطئ، جدة
+- ID: BONA-W012 (ref WA-20260906-AC621E)
+- URL: https://bona-real-estate.com/properties/modern-villa-in-al-shati-jeddah/ · Arabic: https://bona-real-estate.com/ar/properties/modern-villa-in-al-shati-jeddah/
+- Kind: House · Type: Villa · Category: Off-plan · Status: available
+- Location: Al Shati, Jeddah, Saudi Arabia (حي الشاطئ، جدة)
+- Asking price: Price on request
+- Specs: 4 bed, 7 bath, 550 m² built, 325 m² plot
+- Coordinates: 21.600939, 39.113731
+- Highlights: Private indoor pool; Rooftop terrace with garden; Four bedrooms, seven bathrooms; Home elevator; Two covered parking spaces; Ten-year structural warranty
+- المميزات: مسبح داخلي خاص؛ تراس على السطح بحديقة؛ أربع غرف نوم وسبعة حمامات؛ مصعد داخلي؛ موقفان مغطاة للسيارات؛ ضمان إنشائي لعشر سنوات
+- Brochure: https://bona-real-estate.com/listings/modern-villa-in-al-shati-jeddah/brochure.pdf
+- Listed: 2026-09-06
+- Images: /listings/modern-villa-in-al-shati-jeddah/01.jpg , /listings/modern-villa-in-al-shati-jeddah/02.jpg , /listings/modern-villa-in-al-shati-jeddah/03.jpg , /listings/modern-villa-in-al-shati-jeddah/04.jpg , /listings/modern-villa-in-al-shati-jeddah/05.jpg , /listings/modern-villa-in-al-shati-jeddah/06.jpg
+
+The villa sits in Al Shati, one of Jeddah's established neighbourhoods close to the Corniche and the city's seafront. The area is known for its quiet, safety and quality of life, with easy access to the main roads and nearby landmarks: Al Nakheel Park and the Four Seasons Hotel are about two minutes away, Sari Street two minutes, the Corniche road three minutes, King Abdulaziz Road four minutes, and King Road Tower about five minutes.
+
+The plot measures 325 sqm with a built-up area of 550 sqm, arranged over a basement, ground floor, first floor and roof level (2.5 storeys above grade), with a north-facing orientation. It has four bedrooms, including two master suites, seven bathrooms, three reception rooms, one kitchen, a passenger elevator, and two covered parking spaces on a 12-metre-wide street.
+
+Interiors include a main reception room with a built-in fireplace, a dining area, and a guest majlis with floor-to-ceiling glazing. Outdoor space includes a private plunge pool with a timber deck on the ground floor and a rooftop terrace with built-in seating and a planted desert garden.
+
+The build carries a ten-year structural warranty, ten-year waterproofing, two-year plumbing and electrical works, and a five-year warranty on the elevator's mechanical parts, together with three months of post-handover maintenance.
+
+تقع الفيلا في حي الشاطئ، أحد أحياء جدة الراسخة القريبة من الكورنيش وواجهة المدينة البحرية، ويتميز الحي بهدوئه وأمانه وجودة نمط الحياة فيه، مع سهولة الوصول إلى الطرق الرئيسية وقرب أهم المعالم؛ فمنتزه النخيل وفندق فور سيزونز يبعدان نحو دقيقتين، وشارع صاري دقيقتين، وطريق الكورنيش ثلاث دقائق، وطريق الملك عبدالعزيز أربع دقائق، وبرج طريق الملك نحو خمس دقائق.
+
+تبلغ مساحة الأرض 325 مترًا مربعًا ومساحة البناء 550 مترًا مربعًا، موزعة على بيسمنت ودور أرضي وأول وسطح (2.5 طابق فوق سطح الأرض)، بواجهة شمالية. تضم الفيلا أربع غرف نوم من بينها غرفتا نوم رئيسيتين (ماستر)، وسبعة حمامات، وثلاث صالات استقبال، ومطبخًا واحدًا، ومصعدًا داخليًا، وموقفين مغطاة للسيارات على شارع بعرض 12 مترًا.
+
+تضم الفيلا من الداخل صالة معيشة رئيسية بموقد مدمج، ومنطقة لتناول الطعام، ومجلس ضيوف بواجهات زجاجية ممتدة من الأرض إلى السقف. وفي الخارج مسبح خاص بجلسة خشبية في الدور الأرضي، إضافة إلى تراس على السطح بجلسات مبنية وحديقة صحراوية مزروعة بالصبار.
+
+يأتي البناء بضمان إنشائي لعشر سنوات، وضمان عزل مائي لعشر سنوات، وضمان سنتين على أعمال السباكة والكهرباء، وضمان خمس سنوات على القطع الميكانيكية للمصعد، إلى جانب ثلاثة أشهر صيانة بعد التسليم.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Modern%20Villa%20in%20Al%20Shati%2C%20Jeddah%20(BONA-W012).
+
+### Rihab Villas, Wajhat Al Warf — فلل رحاب في وجهة الويرف، جدة
+- ID: BONA-W005 (ref WA-20260906-AC7B92)
+- URL: https://bona-real-estate.com/properties/rihab-villas-wajhat-al-warf/ · Arabic: https://bona-real-estate.com/ar/properties/rihab-villas-wajhat-al-warf/
+- Kind: House · Type: Villa · Category: Off-plan · Status: available
+- Location: Wajhat Al Warf, Jeddah, Saudi Arabia (وجهة الويرف، جدة)
+- Asking price: Price on request
+- Project: Wajhat Al Warf (وجهة الويرف) · Developer: Faisal Bin Saedan Real Estate Investment & Development
+- Specs: 4 bed, 6 bath, 271.47 m² built, 275 m² plot
+- Coordinates: 21.338, 39.304778
+- Highlights: 4 bedrooms plus maid's room; 6 bathrooms across 3 floors; Majlis and separate family majlis; Front and back roof terraces; 10-year structural warranty; Walkable community amenities
+- المميزات: أربع غرف نوم وغرفة خادمة؛ ست دورات مياه على ثلاثة طوابق؛ مجلس رئيسي ومجلس عائلي منفصل؛ سطح أمامي وخلفي؛ ضمان هيكلي لعشر سنوات؛ مرافق مجتمعية على مقربة
+- Brochure: https://bona-real-estate.com/listings/rihab-villas-wajhat-al-warf/brochure.pdf
+- Listed: 2026-09-06
+- Images: /listings/rihab-villas-wajhat-al-warf/01.jpg , /listings/rihab-villas-wajhat-al-warf/02.jpg , /listings/rihab-villas-wajhat-al-warf/03.jpg , /listings/rihab-villas-wajhat-al-warf/04.jpg
+
+Rihab is a villa model within Wajhat Al Warf, a residential district developed in southeast Jeddah, close to the historic city core and the main business centers. A planned pedestrian network within the wider community places schools, mosques, health centers and shops within a five to ten minute walk.
+
+The broader district spans more than 10 million square meters and includes over 12,000 residential units, 21 commercial centers, 10 schools, 7 mosques and 5 larger mosques, and two health centers, alongside green spaces and parks totalling more than 1.3 million square meters.
+
+The Rihab villa sits on a 275 sqm plot with a total built-up area of 271.47 sqm across three floors. It has four bedrooms and a maid's room, six bathrooms, a ground-floor majlis and a separate family majlis on the first floor, a living and dining area, a kitchen, and front and back roof terraces, with one open parking space.
+
+Construction follows the Saudi Building Code, with porcelain flooring, washable paint, moisture-resistant gypsum ceilings, and marble staircases inside and out. Doors and windows are water-resistant and thermally insulated with double glazing, and the villa has integrated electrical, air-conditioning and telecom wiring, LED lighting and irrigation for the garden. It carries a 10-year warranty on the concrete structure and soil treatment, 10 years on the building and insulation, and one year on finishes, plumbing and electrical work.
+
+تقع فلل رحاب ضمن وجهة الويرف، وهي وجهة سكنية طُوّرت في جنوب شرق جدة، على مقربة من قلب المدينة التاريخي ومراكز الأعمال الرئيسية فيها. وتتيح شبكة مشي مخططة داخل الوجهة الوصول إلى المدارس والمساجد والمراكز الصحية والأسواق خلال خمس إلى عشر دقائق سيرًا على الأقدام.
+
+تمتد الضاحية التي تنتمي إليها الوجهة على مساحة تتجاوز 10 ملايين متر مربع، وتضم أكثر من 12,000 وحدة سكنية، و21 مركزًا تجاريًا، و10 مدارس، و7 مساجد و5 جوامع، ومركزين صحيين، إضافة إلى مساحات خضراء وحدائق تتجاوز مساحتها 1.3 مليون متر مربع.
+
+تقوم فيلا رحاب على أرض مساحتها 275 مترًا مربعًا، بمساحة بناء إجمالية تبلغ 271.47 مترًا مربعًا موزعة على ثلاثة طوابق. وتضم أربع غرف نوم وغرفة خادمة وست دورات مياه، إلى جانب مجلس في الدور الأرضي ومجلس عائلي مستقل في الدور الأول، وصالة معيشة وصالة طعام ومطبخ، وسطحين أمامي وخلفي، مع موقف سيارة واحد مفتوح.
+
+يُنفَّذ البناء وفق كود البناء السعودي للمباني السكنية، بأرضيات بورسلين ودهانات قابلة للغسل وأسقف جبسية مقاومة للرطوبة وسلالم رخامية داخلية وخارجية. وتأتي الأبواب مقاومة للماء والنوافذ بعزل حراري وزجاج مزدوج، مع تأسيس متكامل للكهرباء والتكييف والاتصالات، وإنارة LED وأنظمة ري للحديقة. وتشمل الضمانات عشر سنوات للهيكل الخرساني ومعالجة التربة، وعشر سنوات للمباني والعزل، وسنة كاملة للتشطيبات والسباكة والكهرباء.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Rihab%20Villas%2C%20Wajhat%20Al%20Warf%20(BONA-W005).
+
+### Sadana Townhouse, Al Rawdah — تاون هاوس سدانة، الروضة
+- ID: BONA-W011 (ref WA-20260906-AC5466)
+- URL: https://bona-real-estate.com/properties/sadana-townhouse-al-rawdah/ · Arabic: https://bona-real-estate.com/ar/properties/sadana-townhouse-al-rawdah/
+- Kind: House · Type: Duplex · Category: Off-plan · Status: available
+- Location: Al Rawdah, Jeddah, Saudi Arabia (الروضة، جدة)
+- Asking price: Price on request
+- Specs: 3 bed, 364.7 m² built
+- Coordinates: 21.565901, 39.15729
+- Highlights: Three master suites; Rooftop plunge pool; Private garden; American-style kitchen; Interior skylight; Guard room
+- المميزات: ثلاث غرف ماستر؛ مسبح على السطح؛ حديقة خاصة؛ مطبخ أمريكي؛ سكاي لايت داخلي؛ غرفة حارس
+- Brochure: https://bona-real-estate.com/listings/sadana-townhouse-al-rawdah/brochure.pdf
+- Listed: 2026-09-06
+- Images: /listings/sadana-townhouse-al-rawdah/01.jpg , /listings/sadana-townhouse-al-rawdah/02.jpg , /listings/sadana-townhouse-al-rawdah/03.jpg , /listings/sadana-townhouse-al-rawdah/04.jpg , /listings/sadana-townhouse-al-rawdah/05.jpg
+
+Sadana Townhouse is a gated townhouse development in Al Rawdah, Jeddah, arranged as two facing rows of attached units. Each home totals 364.70 square metres across three levels: a 139.3 sqm ground floor, a 112.7 sqm first floor and a 112.7 sqm roof level.
+
+The ground floor holds the majlis, a living room, a dining area, an open American-style kitchen, a guest bathroom and a maid's room with its own bath. The first floor and roof together hold three master bedrooms, each with its own dressing room, and a second living room.
+
+Outdoor space includes a private garden and, on the roof level, a plunge pool with a seating area. An interior skylight brings daylight into the stairwell, and the layout allows some internal walls to be adjusted. The development includes a shared gym and lift infrastructure for future installation.
+
+تاون هاوس سدانة مشروع سكني مسوّر في حي الروضة بجدة، يتكوّن من صفّين متقابلين من الوحدات المتلاصقة. تبلغ مساحة الوحدة الواحدة 364.70 متراً مربعاً موزعة على ثلاثة طوابق: دور أرضي بمساحة 139.3 متراً مربعاً، ودور أول بمساحة 112.7 متراً مربعاً، وروف بمساحة 112.7 متراً مربعاً.
+
+يضم الدور الأرضي مجلساً وصالة معيشة وركن طعام ومطبخاً أمريكياً مفتوحاً ودورة مياه للضيوف وغرفة خادمة بحمام خاص. ويضم الدور الأول والروف معاً ثلاث غرف نوم ماستر، لكل منها غرفة ملابس خاصة، بالإضافة إلى صالة معيشة ثانية.
+
+تشمل المساحات الخارجية حديقة خاصة، وفي الروف مسبح صغير مع منطقة جلوس. وتُدخل فتحة سكاي لايت داخلية الإضاءة الطبيعية إلى بيت الدرج، مع تصميم يتيح تعديل بعض الجدران الداخلية. ويضم المشروع نادياً رياضياً مشتركاً وبنية تحتية لتركيب مصعد لاحقاً.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Sadana%20Townhouse%2C%20Al%20Rawdah%20(BONA-W011).
+
+### The Knightsbridge Villas, Meydan District 11 — فلل ذا نايتسبريدج في ميدان
+- ID: BONA-W007 (ref WA-20260906-AC981A)
+- URL: https://bona-real-estate.com/properties/the-knightsbridge-villas-meydan-district-11/ · Arabic: https://bona-real-estate.com/ar/properties/the-knightsbridge-villas-meydan-district-11/
+- Kind: House · Type: Villa · Category: International · Status: available
+- Location: Meydan District 11, Dubai, United Arab Emirates (ميدان، المنطقة 11، دبي)
+- Asking price: Price on request
+- Project: The Knightsbridge – Phase 2 (ذا نايتسبريدج - المرحلة الثانية) · Developer: LEOS Developments
+- Coordinates: 25.1629302, 55.3142967
+- Highlights: Swimmable Sunrise Lagoon frontage; Private pool and pool deck; Double- to triple-height entrance halls; Marble show kitchen; Gated community, 24/7 security; Smart-home climate control
+- المميزات: واجهة على بحيرة الشروق القابلة للسباحة؛ مسبح خاص وسطح محيط به؛ مدخل بارتفاع مزدوج إلى ثلاثي؛ مطبخ رئيسي برخام فاخر؛ مجتمع مسوّر بحراسة على مدار الساعة؛ تحكم ذكي بالإضاءة والتكييف
+- Brochure: https://bona-real-estate.com/listings/the-knightsbridge-villas-meydan-district-11/brochure.pdf
+- Listed: 2026-09-06
+- Images: /listings/the-knightsbridge-villas-meydan-district-11/01.jpg , /listings/the-knightsbridge-villas-meydan-district-11/02.jpg , /listings/the-knightsbridge-villas-meydan-district-11/03.jpg , /listings/the-knightsbridge-villas-meydan-district-11/04.jpg , /listings/the-knightsbridge-villas-meydan-district-11/05.jpg , /listings/the-knightsbridge-villas-meydan-district-11/06.jpg
+
+The Knightsbridge Phase 2 is a gated villa community in Meydan District 11, arranged around a central swimmable lagoon known as Sunrise Lagoon. The development sits on a total plot of 33,598 square metres, with 69 percent of that area kept as open garden, courtyards and private outdoor space. Every villa backing onto the lagoon has a garden gate giving direct access to the shared outdoor amenities.
+
+Two villa types anchor the collection: the five-bedroom Chatsworth and the six-bedroom signature Blenheim, both entered through mansion-style double- or triple-height halls with full-height glazing and a feature staircase in natural wood. Facades combine golden limestone-hued sandstone cladding with light grey Portland stone at ground level, framed by bay windows and low-e double glazing. Each villa has its own 1.2-metre-deep swimming pool and pool deck, plus a private elevator and expansive balconies.
+
+Interiors carry natural stone flooring through the foyer, living, dining and show kitchen, with parquet-look porcelain tile in the bedrooms. Show kitchens are finished in Calacatta Viola marble with integrated premium appliances, while the Grosvenor and Balmoral villas add a separate chef's kitchen with quartz worktops and integrated appliances. Master suites include a his-and-hers dressing room, a stone-lined double shower and a private jacuzzi finished in natural stone, and every villa has a dedicated maid's room and driver's room, each with its own bathroom.
+
+Community amenities are built around the lagoon and include an outdoor cinema, a kids' water zone with slide, an outdoor jacuzzi area, a BBQ pavilion and a lagoon-side cafe with in-water seating, plus a jogging track. The estate is gated with round-the-clock security, concierge and CCTV, and every villa is fitted with smart-home control of lighting and air conditioning, a solar hot water system and EV charging.
+
+تقع فلل ذا نايتسبريدج - المرحلة الثانية ضمن مجتمع سكني مسوّر في ميدان، المنطقة 11، وتتوزع حول بحيرة صناعية مركزية قابلة للسباحة تعرف باسم بحيرة الشروق. تمتد المساحة الإجمالية للمشروع على 33,598 مترًا مربعًا، منها 69% مخصصة كمساحات خضراء مفتوحة وحدائق وأفنية خاصة. تتيح كل فيلا مطلة على البحيرة بوابة خلفية للوصول المباشر إلى المرافق المشتركة.
+
+يضم المشروع نوعين رئيسيين من الفلل: فيلا تشاتسوورث بخمس غرف نوم، وفيلا بلينهايم المميزة بست غرف نوم، ويُدخل إليهما عبر مدخل بارتفاع مزدوج أو ثلاثي على طراز القصور مع واجهات زجاجية كاملة الارتفاع ودرج مميز بتشطيب خشبي طبيعي. تجمع الواجهات بين تكسية حجرية رملية بألوان ذهبية وحجر بورتلاند الرمادي الفاتح في الطابق الأرضي، مع نوافذ خليجية وزجاج مزدوج عاكس جزئيًا. تمتلك كل فيلا مسبحًا خاصًا بعمق 1.2 متر مع سطح محيط به، إضافة إلى مصعد خاص وشرفات واسعة.
+
+تمتد الأرضيات الحجرية الطبيعية في المدخل والصالة وغرفة الطعام والمطبخ الرئيسي، بينما تُستخدم بلاطات بورسلين بمظهر الباركيه في غرف النوم. تُشطب المطابخ الرئيسية برخام كالاكاتا فيولا مع أجهزة مدمجة راقية، فيما تضيف فيلات جروفنر وبالمورال مطبخًا إضافيًا للطهي بأسطح كوارتز وأجهزة مدمجة. تشمل الأجنحة الرئيسية غرفة تبديل ملابس مزدوجة ودشًا حجريًا مزدوجًا وجاكوزي خاصًا بتشطيب حجري طبيعي، ولكل فيلا غرفة خادمة وغرفة سائق مستقلتان بحمام خاص لكل منهما.
+
+تتمحور مرافق المجتمع حول البحيرة وتشمل سينما خارجية، ومنطقة ألعاب مائية للأطفال بها زحليقة، ومنطقة جاكوزي خارجية، وجناح شواء، ومقهى مطلًا على البحيرة بجلسات مائية، إضافة إلى مسار للجري. المجتمع مسوّر بحراسة على مدار الساعة وكونسيرج وكاميرات مراقبة، وكل فيلا مزودة بنظام تحكم ذكي بالإضاءة والتكييف، ونظام لتسخين المياه بالطاقة الشمسية، ومحطة شحن للسيارات الكهربائية.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20The%20Knightsbridge%20Villas%2C%20Meydan%20District%2011%20(BONA-W007).
+
+### Wharf Destination Villas, Jeddah — فلل وجهة الويرف بجدة
+- ID: BONA-W004 (ref WA-20260906-ACBA8B)
+- URL: https://bona-real-estate.com/properties/wharf-destination-villas-jeddah/ · Arabic: https://bona-real-estate.com/ar/properties/wharf-destination-villas-jeddah/
+- Kind: House · Type: Villa · Category: Off-plan · Status: available
+- Location: Southeast Jeddah, Jeddah, Saudi Arabia (جنوب شرق جدة، جدة)
+- Asking price: Price on request
+- Project: Wharf Destination (وجهة الويرف) · Developer: Faisal Bin Saedan for Investment and Real Estate Development
+- Specs: 4 bed, 5 bath, 224.3 m² built, 250 m² plot
+- Coordinates: 21.338, 39.304778
+- Highlights: 269 villas; 4 bedrooms, 5 bathrooms; Rooftop terrace; Two majlis areas; Southeast Jeddah location; 10-year structural warranty
+- المميزات: 269 فيلا؛ 4 غرف نوم و5 حمامات؛ تراس على السطح؛ مجلسان رئيسي وعائلي؛ موقع جنوب شرق جدة؛ ضمان هيكلي 10 سنوات
+- Brochure: https://bona-real-estate.com/listings/wharf-destination-villas-jeddah/brochure.pdf
+- Listed: 2026-09-06
+- Images: /listings/wharf-destination-villas-jeddah/01.jpg , /listings/wharf-destination-villas-jeddah/02.jpg , /listings/wharf-destination-villas-jeddah/03.jpg , /listings/wharf-destination-villas-jeddah/04.jpg , /listings/wharf-destination-villas-jeddah/05.jpg
+
+Wharf Destination is a villa community in southeast Jeddah, developed within a large master-planned suburb close to historic Jeddah and the city's business districts. The neighbourhood layout places schools, health centres, mosques and retail within a five- to ten-minute walk of every home. The development occupies a plot of more than 188,000 square metres within a wider suburb spanning over 10 million square metres, of which more than 1.3 million square metres is set aside for green space and parks.
+
+The project comprises 269 villas arranged over a ground floor, first floor and roof level. The standard villa spans 224.30 square metres of built-up area on a 250 square metre plot, with four bedrooms, five bathrooms, a main majlis and a separate family majlis, an open kitchen, and a rooftop terrace of close to 85 square metres. Each villa includes one covered parking space.
+
+Construction follows the Saudi Building Code, with porcelain flooring, washable paint finishes, moisture-resistant gypsum ceilings, and marble staircases inside and out. Bathrooms are fitted with slip-resistant tiling and rust-resistant fixtures, and windows are double-glazed with thermal insulation. The villas carry a ten-year structural warranty, a ten-year insulation warranty and a ten-year warranty against soil-borne pests, alongside one-year warranties on finishes, plumbing and electrical work.
+
+تقع وجهة الويرف في جنوب شرق جدة، ضمن ضاحية كبرى قريبة من جدة التاريخية ومراكز الأعمال في المدينة. يتيح التخطيط العمراني الوصول إلى المدارس والمراكز الصحية والمساجد والأسواق سيرًا على الأقدام خلال خمس إلى عشر دقائق. تمتد أرض المشروع على أكثر من 188 ألف متر مربع ضمن ضاحية تتجاوز مساحتها الإجمالية 10 ملايين متر مربع، منها أكثر من 1.3 مليون متر مربع من المساحات الخضراء والحدائق.
+
+يضم المشروع 269 فيلا موزعة على الدور الأرضي والدور الأول ودور السطح. تبلغ مساحة البناء في الفيلا النموذجية 224.30 مترًا مربعًا على أرض مساحتها 250 مترًا مربعًا، وتضم أربع غرف نوم وخمس دورات مياه ومجلسًا رئيسيًا ومجلسًا عائليًا ومطبخًا مفتوحًا وتراسًا على السطح تقارب مساحته 85 مترًا مربعًا. وتحتوي كل فيلا على موقف سيارة مغطى واحد.
+
+يُنفَّذ البناء وفق كود البناء السعودي، بأرضيات بورسلين ودهانات قابلة للغسل وأسقف جبسية مقاومة للرطوبة وسلالم رخامية داخلية وخارجية. أما دورات المياه فمجهزة ببلاط مانع للانزلاق وتجهيزات مقاومة للصدأ، والنوافذ مزدوجة الزجاج وذات عزل حراري. وتشمل الضمانات عشر سنوات على الهيكل الإنشائي وعشر سنوات على العزل وعشر سنوات لمعالجة التربة ضد الحشرات، إضافة إلى ضمان سنة كاملة على التشطيبات والسباكة والكهرباء.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Wharf%20Destination%20Villas%2C%20Jeddah%20(BONA-W004).
+
+## Apartments (21) — https://bona-real-estate.com/properties/apartments/
 
 ### NOBAL Five, Al Rawdah — نوبال 5، الروضة
 - ID: BONA-014 (ref APT-030)
-- URL: https://bona.azoz.uk/properties/nobal-five-al-rawdah/ · Arabic: https://bona.azoz.uk/ar/properties/nobal-five-al-rawdah/
+- URL: https://bona-real-estate.com/properties/nobal-five-al-rawdah/ · Arabic: https://bona-real-estate.com/ar/properties/nobal-five-al-rawdah/
 - Kind: Apartment · Type: Apartment · Category: For sale · Status: available
 - Location: Al Rawdah, Jeddah, Saudi Arabia (الروضة، جدة)
 - Asking price: SAR 1,800,000
 - Specs: 3 bed, 5 bath, 307 m² built
+- Coordinates: 21.565901, 39.15729
 - Highlights: One residence per floor; Private elevator; 307 sqm, three master bedrooms; Two private parking spaces; Smart-home system; Ten-year structural warranty
 - المميزات: مسكن واحد في كل طابق؛ مصعد خاص؛ 307 أمتار مربعة وثلاث غرف نوم رئيسية؛ موقفان خاصان؛ نظام منزل ذكي؛ ضمان إنشائي لعشر سنوات
 - Listed: 2026-03-21
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/8y00u361s6sg9wdlbmw3_al_rawdah_-_apartment_5_1_.v2.0000000-56f287.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/al_rawdah_-_apartment_5-648780.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk-70808e63-01c7cf.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk-2-3a1acb9f-164e4e.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk2-12-a664ca.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk2-4-c8524b25-b60052.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/al_rawdah_-_apartment_5-648780.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/8y00u361s6sg9wdlbmw3_al_rawdah_-_apartment_5_1_.v2.0000000-56f287.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk2-10-1d4ca5.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk-70808e63-01c7cf.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk2-13-161b23.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk-2-3a1acb9f-164e4e.jpg
 
 NOBAL Five is a building of five residences in Al Rawdah, one apartment per floor, each occupying its entire level with a private elevator. The apartment measures 307 square metres and holds three master bedrooms, five bathrooms, a maid's room, a large living room and a modern kitchen.
 
@@ -329,16 +677,17 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Al Zahra Residences — شقق الزهراء
 - ID: BONA-015 (ref APT-046)
-- URL: https://bona.azoz.uk/properties/al-zahra-residences/ · Arabic: https://bona.azoz.uk/ar/properties/al-zahra-residences/
+- URL: https://bona-real-estate.com/properties/al-zahra-residences/ · Arabic: https://bona-real-estate.com/ar/properties/al-zahra-residences/
 - Kind: Apartment · Type: Apartment · Category: For sale · Status: available
 - Location: Al Zahra, Jeddah, Saudi Arabia (الزهراء، جدة)
 - Asking price: From SAR 1,450,000
 - Specs: 3 bed, 200 m² built
+- Coordinates: 21.590405, 39.134588
 - Highlights: Two apartments per floor; Three master bedrooms in 200 sqm; 400 sqm rooftop residence with terrace; Private parking for each unit; 3D virtual tour available; From SAR 1,450,000
 - المميزات: شقتان في كل طابق؛ ثلاث غرف نوم رئيسية في 200 متر مربع؛ مسكن سطح بمساحة 400 متر مربع مع تراس؛ موقف خاص لكل وحدة؛ جولة افتراضية ثلاثية الأبعاد؛ ابتداءً من 1,450,000 ريال سعودي
 - 3D virtual tour (Matterport): https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0
 - Listed: 2026-07-04
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-25-3d6349.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-483899.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-8-0007dc.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-22-070a8e.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-6-c1ed71.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-25-3d6349.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-4-bbc8e0.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-483899.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-8-0007dc.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-6-c1ed71.jpg
 
 A new low-density building of nine residences in Al Zahra, between King Road and Prince Sultan Street, with two apartments per floor over five floors. The standard residence measures 200 square metres and holds three master bedrooms, a large lounge, an open kitchen, a maid's room with bathroom and a balcony.
 
@@ -352,14 +701,15 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Trump Tower Jeddah — برج ترامب جدة
 - ID: BONA-022 (ref APT-037)
-- URL: https://bona.azoz.uk/properties/trump-tower-jeddah/ · Arabic: https://bona.azoz.uk/ar/properties/trump-tower-jeddah/
+- URL: https://bona-real-estate.com/properties/trump-tower-jeddah/ · Arabic: https://bona-real-estate.com/ar/properties/trump-tower-jeddah/
 - Kind: Apartment · Type: Apartment · Category: Off-plan · Status: available
 - Location: Al Shati, Corniche, Jeddah, Saudi Arabia (الشاطئ، الكورنيش، جدة)
 - Asking price: From SAR 3,200,000
+- Coordinates: 21.600939, 39.113731
 - Highlights: On the Corniche, Al Shati; Uninterrupted Red Sea views; 1–4 bedroom residences and penthouses; Trump Private Club and 24/7 concierge; Completion December 2029; From SAR 3,200,000
 - المميزات: على الكورنيش في حي الشاطئ؛ إطلالات غير محجوبة على البحر الأحمر؛ مساكن من غرفة إلى أربع غرف وبنتهاوس؛ نادي ترامب الخاص وكونسيرج على مدار الساعة؛ التسليم في ديسمبر 2029؛ ابتداءً من 3,200,000 ريال سعودي
 - Listed: 2026-03-21
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_4-1078483b-cd44eb.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_8-87ea62.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_5-15f2dc.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/trump_penthouse-ad9886.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/trump_apartment_masterbedroom-46b7eb58-4af645.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/trump_private_club_meeting_room-7e5efc.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_4-1078483b-cd44eb.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_8-87ea62.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_5-15f2dc.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/trump_private_club_reception-8c7bdc.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/trump_penthouse-ad9886.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/trump_private_club_meeting_room-7e5efc.jpg
 
 Trump Tower Jeddah rises on the Corniche in Al Shati, a residential landmark overlooking the Red Sea. The tower offers one- to four-bedroom residences from 70 to 365 square metres and three- and four-bedroom penthouses, all with uninterrupted sea views.
 
@@ -377,14 +727,15 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Trump Plaza Jeddah — ترامب بلازا جدة
 - ID: BONA-023 (ref APT-036)
-- URL: https://bona.azoz.uk/properties/trump-plaza-jeddah/ · Arabic: https://bona.azoz.uk/ar/properties/trump-plaza-jeddah/
+- URL: https://bona-real-estate.com/properties/trump-plaza-jeddah/ · Arabic: https://bona-real-estate.com/ar/properties/trump-plaza-jeddah/
 - Kind: Apartment · Type: Apartment · Category: Off-plan · Status: available
 - Location: Al Shati, Jeddah, Saudi Arabia (الشاطئ، جدة)
 - Asking price: From SAR 1,750,000
+- Coordinates: 21.600939, 39.113731
 - Highlights: Fully furnished, Trump-branded residences; 1–3 bedrooms, 70–147 sqm; Vitality Club: spa, pools, golf simulators; Hotel-standard interiors, move-in ready; Completion December 2030; From SAR 1,750,000
 - المميزات: مساكن مفروشة بالكامل بعلامة ترامب؛ من غرفة إلى ثلاث غرف، 70–147 متراً مربعاً؛ نادي فايتاليتي: سبا ومسابح ومحاكيات جولف؛ تشطيبات بمستوى فندقي وجاهزة للسكن؛ التسليم في ديسمبر 2030؛ ابتداءً من 1,750,000 ريال سعودي
 - Listed: 2026-03-21
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/trump-plaza-jeddah/dgxtrump_plaza_front-entrance-02daae.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-plaza-jeddah/dgxtrump_plaza_entrance-ea2088.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-plaza-jeddah/dgxtrump_plaza_amenities-3e29e4.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-plaza-jeddah/dgxtrump_plaza_executive_residences_2-9fdc37.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-plaza-jeddah/dgxtrump_plaza_executive_residences_3_1_-d1ba6e.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-plaza-jeddah/dgxtrump_plaza_executive_residences_1-b3c705.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/trump-plaza-jeddah/dgxtrump_plaza_front-entrance-02daae.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-plaza-jeddah/dgxtrump_plaza_entrance-ea2088.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-plaza-jeddah/dgxtrump_plaza_inner-park-72948e.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-plaza-jeddah/dgxtrump_plaza_executive_residences_2-9fdc37.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-plaza-jeddah/dgxtrump_plaza_executive_residences_1-b3c705.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-plaza-jeddah/dgxtrump_plaza_executive_residences_3_1_-d1ba6e.jpg
 
 Trump Plaza Jeddah offers fully furnished, Trump-branded residences in one-, two- and three-bedroom layouts from 70 to 147 square metres, across seven floors in Al Shati. Interiors are finished to hotel standard and delivered ready to move in, with à la carte services.
 
@@ -402,14 +753,15 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Dari II, Al Salamah — داري 2، السلامة
 - ID: BONA-026 (ref APT-045)
-- URL: https://bona.azoz.uk/properties/dari-ii-al-salamah/ · Arabic: https://bona.azoz.uk/ar/properties/dari-ii-al-salamah/
+- URL: https://bona-real-estate.com/properties/dari-ii-al-salamah/ · Arabic: https://bona-real-estate.com/ar/properties/dari-ii-al-salamah/
 - Kind: Apartment · Type: Apartment · Category: Off-plan · Status: available
 - Location: Al Salamah, Jeddah, Saudi Arabia (السلامة، جدة)
 - Asking price: From SAR 1,600,000
+- Coordinates: 21.593996, 39.152355
 - Highlights: 3–4 bedroom apartments and a penthouse; 164–383 sqm; Pool, gym and event hall; Central Jeddah location; Minimalist design, natural finishes; From SAR 1,600,000
 - المميزات: شقق من ثلاث وأربع غرف وبنتهاوس؛ 164–383 متراً مربعاً؛ مسبح ونادٍ رياضي وقاعة مناسبات؛ موقع وسط جدة؛ تصميم بسيط وتشطيبات طبيعية؛ ابتداءً من 1,600,000 ريال سعودي
 - Listed: 2026-04-14
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776158984069-652361.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/copilot_20260414_134709-78feba.png , https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776107973242-dce1f4.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776184347685-22a142.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776158376378-509403.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776156825514-57cebf.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776158984069-652361.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/copilot_20260414_134709-78feba.png , https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776184665434-c1b3cf.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776157942045-975c1d.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/tk2-50-20a796.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776158376378-509403.jpg
 
 Dari II is a residential community in Al Salamah, central Jeddah, designed around minimalist architecture and warm natural finishes. Three- and four-bedroom apartments and a penthouse range from 164 to 383 square metres across five floors.
 
@@ -423,14 +775,15 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Marriott Residences, AIDA, Muscat — ماريوت ريزيدنسز، آيدا، مسقط
 - ID: BONA-027 (ref APT-010)
-- URL: https://bona.azoz.uk/properties/marriott-residences-aida-muscat/ · Arabic: https://bona.azoz.uk/ar/properties/marriott-residences-aida-muscat/
+- URL: https://bona-real-estate.com/properties/marriott-residences-aida-muscat/ · Arabic: https://bona-real-estate.com/ar/properties/marriott-residences-aida-muscat/
 - Kind: Apartment · Type: Apartment · Category: Off-plan · Status: available
 - Location: AIDA, Muscat, Oman (آيدا، مسقط)
 - Asking price: From SAR 1,900,000
+- Coordinates: 23.5091205, 58.6599331
 - Highlights: Fully furnished Marriott residences; 1–3 bedrooms, 60–194 sqm; Championship golf course and private beach; Concierge, doorman and valet; Freehold for all nationalities; From SAR 1,900,000
 - المميزات: مساكن ماريوت مفروشة بالكامل؛ من غرفة إلى ثلاث غرف، 60–194 متراً مربعاً؛ ملعب جولف بمواصفات البطولات وشاطئ خاص؛ كونسيرج وبواب وصف سيارات؛ تملك حر لجميع الجنسيات؛ ابتداءً من 1,900,000 ريال سعودي
 - Listed: 2026-03-21
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/marriott-residences-aida-oman/grp8o0h6sa2qtmdw99od_marriott_revealer_16x9.v2.0000000-befaf9.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/marriott-residences-aida-oman/marriott_ext_01-5f6fdf.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/marriott-residences-aida-oman/marriott_int_03-4a7aa9.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/marriott-residences-aida-oman/m_balcony_7c47413ee8-222bce.webp , https://tk-storage.azoz.uk/tk-estate-media/media/marriott-residences-aida-oman/marriott_ext_03-90134f.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/marriott-residences-aida-oman/marriott_int_01-4419b1.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/marriott-residences-aida-oman/marriott_ext_03-90134f.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/marriott-residences-aida-oman/marriott_ext_01-5f6fdf.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/marriott-residences-aida-oman/m_balcony_7c47413ee8-222bce.webp , https://tk-storage.azoz.uk/tk-estate-media/media/marriott-residences-aida-oman/marriott_int_03-4a7aa9.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/marriott-residences-aida-oman/marriott_int_02_634de5e369-b4bf19.webp , https://tk-storage.azoz.uk/tk-estate-media/media/marriott-residences-aida-oman/marriott_int_01-4419b1.jpg
 
 Fully furnished residences under the Marriott name within AIDA, the coastal community at Muscat. One-, two- and three-bedroom apartments range from 60 to 194 square metres, with interiors delivered complete.
 
@@ -448,17 +801,18 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Kayan Residence, 136 sqm Apartment, Al Nahda — كيان ريزيدنس، شقة 136 م²، النهضة
 - ID: BONA-033 (ref KIA-128A)
-- URL: https://bona.azoz.uk/properties/kayan-residence-al-nahda-unit-128a/ · Arabic: https://bona.azoz.uk/ar/properties/kayan-residence-al-nahda-unit-128a/
+- URL: https://bona-real-estate.com/properties/kayan-residence-al-nahda-unit-128a/ · Arabic: https://bona-real-estate.com/ar/properties/kayan-residence-al-nahda-unit-128a/
 - Kind: Apartment · Type: Apartment · Category: For sale · Status: available
 - Location: Al Nahda, Jeddah, Saudi Arabia (النهضة، جدة)
 - Asking price: SAR 990,000
 - Project: Kayan Residence, Al Nahda (كيان ريزيدنس، النهضة) · Developer: Kian Al-Masiah
 - Unit: floor 1st, 2nd or 3rd, block 128, unit KIA-128A
 - Specs: 2 bed, 3 bath, 136 m² built, built 2024
+- Coordinates: 21.618494, 39.128366
 - Highlights: 136 sqm, two bedrooms and three bathrooms; Private elevator to the apartment; Completed 2024; Hotel-style building with coffee shop and gym; First, second or third floor; SAR 990,000
 - المميزات: 136 متراً مربعاً، غرفتا نوم وثلاث دورات مياه؛ مصعد خاص للشقة؛ اكتمل البناء عام 2024؛ مبنى بأسلوب فندقي مع مقهى ونادٍ رياضي؛ الدور الأول أو الثاني أو الثالث؛ 990,000 ريال سعودي
 - Listed: 2026-09-01
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/uwq4bakpspm7gkozgcli_video_project_25_1_1_.v2.0000000-0ee6d0.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-36-e5e9aa.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/uwq4bakpspm7gkozgcli_video_project_25_1_1_.v2.0000000-0ee6d0.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-52-1c9679.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-36-e5e9aa.jpg
 
 A four-room apartment of 136 square metres in Kayan Residence, Al Nahda, a short distance from the Jeddah waterfront. The plan holds two bedrooms, three bathrooms, a large living room and a modern kitchen, and each apartment is served by its own private elevator.
 
@@ -476,17 +830,18 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Kayan Residence, 120 sqm Apartment, Al Nahda — كيان ريزيدنس، شقة 120 م²، النهضة
 - ID: BONA-034 (ref KIA-127A)
-- URL: https://bona.azoz.uk/properties/kayan-residence-al-nahda-unit-127a/ · Arabic: https://bona.azoz.uk/ar/properties/kayan-residence-al-nahda-unit-127a/
+- URL: https://bona-real-estate.com/properties/kayan-residence-al-nahda-unit-127a/ · Arabic: https://bona-real-estate.com/ar/properties/kayan-residence-al-nahda-unit-127a/
 - Kind: Apartment · Type: Apartment · Category: For sale · Status: available
 - Location: Al Nahda, Jeddah, Saudi Arabia (النهضة، جدة)
 - Asking price: SAR 940,000
 - Project: Kayan Residence, Al Nahda (كيان ريزيدنس، النهضة) · Developer: Kian Al-Masiah
 - Unit: floor 1st or 3rd, block 127, unit KIA-127A
 - Specs: 2 bed, 3 bath, 120 m² built, built 2024
+- Coordinates: 21.618494, 39.128366
 - Highlights: 120 sqm, two bedrooms and three bathrooms; Private elevator to the apartment; Completed 2024; Coffee shop, gym and children's area; First or third floor; SAR 940,000
 - المميزات: 120 متراً مربعاً، غرفتا نوم وثلاث دورات مياه؛ مصعد خاص للشقة؛ اكتمل البناء عام 2024؛ مقهى ونادٍ رياضي ومنطقة للأطفال؛ الدور الأول أو الثالث؛ 940,000 ريال سعودي
 - Listed: 2026-09-01
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-52-1c9679.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-33-792ba2.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-35-fd1ebb.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-37-7cead7.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-49-3dbda5.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-52-1c9679.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9b5e8f.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-33-792ba2.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-35-fd1ebb.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-37-7cead7.jpg
 
 The three-room plan at Kayan Residence, Al Nahda: 120 square metres with two bedrooms, three bathrooms, a living room and a fitted kitchen, served by a private elevator. The building was completed in 2024 by Kian Al-Masiah.
 
@@ -504,17 +859,18 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Three-Bedroom Apartment, Building 113, Al Nuzhah — شقة بثلاث غرف نوم، مبنى 113، النزهة
 - ID: BONA-035 (ref KIA-113A)
-- URL: https://bona.azoz.uk/properties/kian-building-113-unit-a-al-nuzhah/ · Arabic: https://bona.azoz.uk/ar/properties/kian-building-113-unit-a-al-nuzhah/
+- URL: https://bona-real-estate.com/properties/kian-building-113-unit-a-al-nuzhah/ · Arabic: https://bona-real-estate.com/ar/properties/kian-building-113-unit-a-al-nuzhah/
 - Kind: Apartment · Type: Apartment · Category: For sale · Status: available
 - Location: Al Nuzhah, Jeddah, Saudi Arabia (النزهة، جدة)
 - Asking price: SAR 750,000
 - Project: Kian Al-Masiah — Building 113, Al Nuzhah (كيان الماسية — مبنى 113، النزهة) · Developer: Kian Al-Masiah
 - Unit: block 113, unit KIA-113A
 - Specs: 3 bed, 3 bath, 174 m² built, built 2024
+- Coordinates: 21.624678, 39.166174
 - Highlights: 174 sqm, three bedrooms; Three bathrooms; Completed 2024; Commercial street frontage; SAR 750,000
 - المميزات: 174 متراً مربعاً، ثلاث غرف نوم؛ ثلاث دورات مياه؛ اكتمل البناء عام 2024؛ على شارع تجاري؛ 750,000 ريال سعودي
 - Listed: 2026-09-01
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-38-e33ac8.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9b5e8f.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9b5e8f.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-37-7cead7.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-47-f7e11d.jpg
 
 A five-room apartment of 174 square metres in Building 113, Al Nuzhah, on a commercial street with shops and services on the doorstep. Three bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.
 
@@ -528,17 +884,18 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Three-Bedroom Apartment of 182 sqm, Building 113, Al Nuzhah — شقة بثلاث غرف نوم بمساحة 182 م²، مبنى 113، النزهة
 - ID: BONA-036 (ref KIA-113B)
-- URL: https://bona.azoz.uk/properties/kian-building-113-unit-b-al-nuzhah/ · Arabic: https://bona.azoz.uk/ar/properties/kian-building-113-unit-b-al-nuzhah/
+- URL: https://bona-real-estate.com/properties/kian-building-113-unit-b-al-nuzhah/ · Arabic: https://bona-real-estate.com/ar/properties/kian-building-113-unit-b-al-nuzhah/
 - Kind: Apartment · Type: Apartment · Category: For sale · Status: available
 - Location: Al Nuzhah, Jeddah, Saudi Arabia (النزهة، جدة)
 - Asking price: SAR 790,000
 - Project: Kian Al-Masiah — Building 113, Al Nuzhah (كيان الماسية — مبنى 113، النزهة) · Developer: Kian Al-Masiah
 - Unit: block 113, unit KIA-113B
 - Specs: 3 bed, 3 bath, 182 m² built, built 2024
+- Coordinates: 21.624678, 39.166174
 - Highlights: 182 sqm, the largest plan in the building; Three bedrooms, three bathrooms; Completed 2024; Commercial street frontage; SAR 790,000
 - المميزات: 182 متراً مربعاً، أكبر مخططات المبنى؛ ثلاث غرف نوم وثلاث دورات مياه؛ اكتمل البناء عام 2024؛ على شارع تجاري؛ 790,000 ريال سعودي
 - Listed: 2026-09-01
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-33-792ba2.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-35-fd1ebb.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-36-e5e9aa.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-39-34403a.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-47-f7e11d.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/uwq4bakpspm7gkozgcli_video_project_25_1_1_.v2.0000000-0ee6d0.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-35-fd1ebb.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-36-e5e9aa.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-47-f7e11d.jpg
 
 The largest plan in Building 113, Al Nuzhah: 182 square metres over five rooms, with three bedrooms and three bathrooms, on a commercial street close to everyday shops and services. Completed in 2024 by Kian Al-Masiah.
 
@@ -552,17 +909,18 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Corner Three-Bedroom Apartment, Building 113, Al Nuzhah — شقة زاوية بثلاث غرف نوم، مبنى 113، النزهة
 - ID: BONA-037 (ref KIA-113C)
-- URL: https://bona.azoz.uk/properties/kian-building-113-unit-c-al-nuzhah/ · Arabic: https://bona.azoz.uk/ar/properties/kian-building-113-unit-c-al-nuzhah/
+- URL: https://bona-real-estate.com/properties/kian-building-113-unit-c-al-nuzhah/ · Arabic: https://bona-real-estate.com/ar/properties/kian-building-113-unit-c-al-nuzhah/
 - Kind: Apartment · Type: Apartment · Category: For sale · Status: available
 - Location: Al Nuzhah, Jeddah, Saudi Arabia (النزهة، جدة)
 - Asking price: SAR 760,000
 - Project: Kian Al-Masiah — Building 113, Al Nuzhah (كيان الماسية — مبنى 113، النزهة) · Developer: Kian Al-Masiah
 - Unit: block 113, unit KIA-113C
 - Specs: 3 bed, 3 bath, 174 m² built, built 2024
+- Coordinates: 21.624678, 39.166174
 - Highlights: Corner unit on two streets; 174 sqm, three bedrooms; Three bathrooms; Completed 2024; SAR 760,000
 - المميزات: وحدة زاوية على شارعين؛ 174 متراً مربعاً، ثلاث غرف نوم؛ ثلاث دورات مياه؛ اكتمل البناء عام 2024؛ 760,000 ريال سعودي
 - Listed: 2026-09-01
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-37-7cead7.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-65-967710.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-46-1bc2ec.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9b5e8f.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-37-7cead7.jpg
 
 A corner apartment of 174 square metres in Building 113, Al Nuzhah, with frontage on two streets and daylight from two sides. Five rooms in all: three bedrooms, three bathrooms and the living spaces. Completed in 2024 by Kian Al-Masiah.
 
@@ -576,17 +934,18 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Rear Three-Bedroom Apartment, Building 114, Al Nuzhah — شقة خلفية بثلاث غرف نوم، مبنى 114، النزهة
 - ID: BONA-038 (ref KIA-114B)
-- URL: https://bona.azoz.uk/properties/kian-building-114-unit-b-al-nuzhah/ · Arabic: https://bona.azoz.uk/ar/properties/kian-building-114-unit-b-al-nuzhah/
+- URL: https://bona-real-estate.com/properties/kian-building-114-unit-b-al-nuzhah/ · Arabic: https://bona-real-estate.com/ar/properties/kian-building-114-unit-b-al-nuzhah/
 - Kind: Apartment · Type: Apartment · Category: For sale · Status: available
 - Location: Al Nuzhah, Jeddah, Saudi Arabia (النزهة، جدة)
 - Asking price: SAR 660,000
 - Project: Kian Al-Masiah — Building 114, Al Nuzhah (كيان الماسية — مبنى 114، النزهة) · Developer: Kian Al-Masiah
 - Unit: block 114, unit KIA-114B
 - Specs: 3 bed, 3 bath, 169 m² built, built 2024
+- Coordinates: 21.624678, 39.166174
 - Highlights: 169 sqm, three bedrooms; Rear unit on the quieter side; Three bathrooms; Completed 2024; SAR 660,000
 - المميزات: 169 متراً مربعاً، ثلاث غرف نوم؛ وحدة خلفية على الجانب الأهدأ؛ ثلاث دورات مياه؛ اكتمل البناء عام 2024؛ 660,000 ريال سعودي
 - Listed: 2026-09-01
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-33-792ba2.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-38-e33ac8.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-63-3dfc0b.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9b5e8f.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-47-f7e11d.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/uwq4bakpspm7gkozgcli_video_project_25_1_1_.v2.0000000-0ee6d0.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-33-792ba2.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-39-34403a.jpg
 
 A five-room apartment of 169 square metres at the rear of Building 114, Al Nuzhah, set back from the commercial street the building fronts, so the bedrooms sit on the quieter side. Three bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.
 
@@ -600,17 +959,18 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Fourth-Floor Two-Bedroom Apartment, Building 114, Al Nuzhah — شقة بغرفتي نوم في الدور الرابع، مبنى 114، النزهة
 - ID: BONA-039 (ref KIA-114C)
-- URL: https://bona.azoz.uk/properties/kian-building-114-unit-c-al-nuzhah/ · Arabic: https://bona.azoz.uk/ar/properties/kian-building-114-unit-c-al-nuzhah/
+- URL: https://bona-real-estate.com/properties/kian-building-114-unit-c-al-nuzhah/ · Arabic: https://bona-real-estate.com/ar/properties/kian-building-114-unit-c-al-nuzhah/
 - Kind: Apartment · Type: Apartment · Category: For sale · Status: available
 - Location: Al Nuzhah, Jeddah, Saudi Arabia (النزهة، جدة)
 - Asking price: SAR 595,000
 - Project: Kian Al-Masiah — Building 114, Al Nuzhah (كيان الماسية — مبنى 114، النزهة) · Developer: Kian Al-Masiah
 - Unit: floor 4th, block 114, unit KIA-114C
 - Specs: 2 bed, 3 bath, 151 m² built, built 2024
+- Coordinates: 21.624678, 39.166174
 - Highlights: 151 sqm, two bedrooms; Fourth floor; Three bathrooms; Completed 2024; SAR 595,000
 - المميزات: 151 متراً مربعاً، غرفتا نوم؛ الدور الرابع؛ ثلاث دورات مياه؛ اكتمل البناء عام 2024؛ 595,000 ريال سعودي
 - Listed: 2026-09-01
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-35-fd1ebb.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-39-34403a.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-46-1bc2ec.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-52-1c9679.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-63-3dfc0b.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9b5e8f.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-35-fd1ebb.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-39-34403a.jpg
 
 A four-room apartment of 151 square metres on the fourth floor of Building 114, Al Nuzhah, facing the commercial street. Two bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.
 
@@ -624,17 +984,18 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Rear Three-Bedroom Apartment, Building 117, Al Nuzhah — شقة خلفية بثلاث غرف نوم، مبنى 117، النزهة
 - ID: BONA-040 (ref KIA-117B)
-- URL: https://bona.azoz.uk/properties/kian-building-117-unit-b-al-nuzhah/ · Arabic: https://bona.azoz.uk/ar/properties/kian-building-117-unit-b-al-nuzhah/
+- URL: https://bona-real-estate.com/properties/kian-building-117-unit-b-al-nuzhah/ · Arabic: https://bona-real-estate.com/ar/properties/kian-building-117-unit-b-al-nuzhah/
 - Kind: Apartment · Type: Apartment · Category: For sale · Status: available
 - Location: Al Nuzhah, Jeddah, Saudi Arabia (النزهة، جدة)
 - Asking price: SAR 660,000
 - Project: Kian Al-Masiah — Building 117, Al Nuzhah (كيان الماسية — مبنى 117، النزهة) · Developer: Kian Al-Masiah
 - Unit: block 117, unit KIA-117B
 - Specs: 3 bed, 3 bath, 169 m² built, built 2024
+- Coordinates: 21.624678, 39.166174
 - Highlights: 169 sqm, three bedrooms; Rear unit away from the street; Three bathrooms; Completed 2024; SAR 660,000
 - المميزات: 169 متراً مربعاً، ثلاث غرف نوم؛ وحدة خلفية بعيداً عن الشارع؛ ثلاث دورات مياه؛ اكتمل البناء عام 2024؛ 660,000 ريال سعودي
 - Listed: 2026-09-01
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-46-1bc2ec.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-33-792ba2.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-36-e5e9aa.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-4-cc60535e-95d3df.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-49-3dbda5.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/uwq4bakpspm7gkozgcli_video_project_25_1_1_.v2.0000000-0ee6d0.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-33-792ba2.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-36-e5e9aa.jpg
 
 A five-room apartment of 169 square metres at the rear of Building 117, Al Nuzhah, away from the commercial street on which the building stands. Three bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.
 
@@ -648,17 +1009,18 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Two-Bedroom Apartment, Building 117, Al Nuzhah — شقة بغرفتي نوم، مبنى 117، النزهة
 - ID: BONA-041 (ref KIA-117C)
-- URL: https://bona.azoz.uk/properties/kian-building-117-unit-c-al-nuzhah/ · Arabic: https://bona.azoz.uk/ar/properties/kian-building-117-unit-c-al-nuzhah/
+- URL: https://bona-real-estate.com/properties/kian-building-117-unit-c-al-nuzhah/ · Arabic: https://bona-real-estate.com/ar/properties/kian-building-117-unit-c-al-nuzhah/
 - Kind: Apartment · Type: Apartment · Category: For sale · Status: available
 - Location: Al Nuzhah, Jeddah, Saudi Arabia (النزهة، جدة)
 - Asking price: SAR 595,000
 - Project: Kian Al-Masiah — Building 117, Al Nuzhah (كيان الماسية — مبنى 117، النزهة) · Developer: Kian Al-Masiah
 - Unit: block 117, unit KIA-117C
 - Specs: 2 bed, 3 bath, 151 m² built, built 2024
+- Coordinates: 21.624678, 39.166174
 - Highlights: 151 sqm, two bedrooms; Three bathrooms; Completed 2024; Commercial street frontage; SAR 595,000
 - المميزات: 151 متراً مربعاً، غرفتا نوم؛ ثلاث دورات مياه؛ اكتمل البناء عام 2024؛ على شارع تجاري؛ 595,000 ريال سعودي
 - Listed: 2026-09-01
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-47-f7e11d.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-35-fd1ebb.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-37-7cead7.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-38-e33ac8.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9b5e8f.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-35-fd1ebb.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-37-7cead7.jpg
 
 A four-room apartment of 151 square metres in Building 117, Al Nuzhah, facing the commercial street. Two bedrooms and three bathrooms, completed in 2024 by Kian Al-Masiah.
 
@@ -672,7 +1034,7 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Front-Facing Two-Bedroom Apartment, Building 115, Al Rayyan — شقة أمامية بغرفتي نوم، مبنى 115، الريان
 - ID: BONA-042 (ref KIA-115A)
-- URL: https://bona.azoz.uk/properties/kian-building-115-unit-a-al-rayyan/ · Arabic: https://bona.azoz.uk/ar/properties/kian-building-115-unit-a-al-rayyan/
+- URL: https://bona-real-estate.com/properties/kian-building-115-unit-a-al-rayyan/ · Arabic: https://bona-real-estate.com/ar/properties/kian-building-115-unit-a-al-rayyan/
 - Kind: Apartment · Type: Apartment · Category: For sale · Status: available
 - Location: Al Rayyan, Jeddah, Saudi Arabia (الريان، جدة)
 - Asking price: SAR 550,000
@@ -682,7 +1044,7 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 - Highlights: 140 sqm, two bedrooms; Front-facing unit; Three bathrooms; Completed 2023; SAR 550,000
 - المميزات: 140 متراً مربعاً، غرفتا نوم؛ وحدة أمامية؛ ثلاث دورات مياه؛ اكتمل البناء عام 2023؛ 550,000 ريال سعودي
 - Listed: 2026-09-01
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-38-e33ac8.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-33-792ba2.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-49-3dbda5.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9b5e8f.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-4-cc60535e-95d3df.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/uwq4bakpspm7gkozgcli_video_project_25_1_1_.v2.0000000-0ee6d0.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-33-792ba2.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-36-e5e9aa.jpg
 
 A four-room apartment of 140 square metres on the front of Building 115 in Al Rayyan, with the main façade and its windows to the street. Two bedrooms and three bathrooms, completed in 2023 by Kian Al-Masiah.
 
@@ -696,15 +1058,16 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Dari Q Apartments, Al Salamah — شقق داري كيو، السلامة
 - ID: BONA-043 (ref APT-021)
-- URL: https://bona.azoz.uk/properties/dari-q-al-salamah/ · Arabic: https://bona.azoz.uk/ar/properties/dari-q-al-salamah/
+- URL: https://bona-real-estate.com/properties/dari-q-al-salamah/ · Arabic: https://bona-real-estate.com/ar/properties/dari-q-al-salamah/
 - Kind: Apartment · Type: Apartment · Category: For sale · Status: available
 - Location: Al Salamah, Jeddah, Saudi Arabia (السلامة، جدة)
 - Asking price: From SAR 1,200,000
 - Specs: 3 bed, 3 bath, 160.5 m² built
+- Coordinates: 21.593996, 39.152355
 - Highlights: 160.5 sqm, three bedrooms and three bathrooms; Rooftop pool and gym; Landscaped courtyard and basketball court; Dedicated parking, basement and driver's room; 24-hour security; From SAR 1,200,000
 - المميزات: 160.5 متراً مربعاً، ثلاث غرف نوم وثلاث دورات مياه؛ مسبح على السطح ونادٍ رياضي؛ فناء منسق وملعب كرة سلة؛ مواقف مخصصة وقبو وغرفة للسائق؛ حراسة على مدار الساعة؛ ابتداءً من 1,200,000 ريال سعودي
 - Listed: 2026-03-21
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/ktvxailerz6r8cc7lmec_tk_1_.v2.0000000-d36513.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/aiease_1760965320481-e8cec2.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-9-8a5aa3.jpeg , https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-18-926465.jpeg , https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-30-d9a124.jpeg , https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-21-06e049.jpeg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-12-bd8233.jpeg , https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-2-48e9e9.jpeg , https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-18-926465.jpeg , https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-26-20cb3e.jpeg , https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-21-06e049.jpeg , https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-30-d9a124.jpeg
 
 Dari Q is a completed apartment building in Al Salamah, north Jeddah, with a Starbucks at street level and a landscaped courtyard at its centre. The three-bedroom apartments measure 160.5 square metres with three bathrooms, and are offered from SAR 1,200,000.
 
@@ -718,15 +1081,16 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 
 ### Trump International Hotel Residences, AIDA, Muscat — مساكن فندق ترامب الدولي، آيدا، مسقط
 - ID: BONA-045 (ref APT-035)
-- URL: https://bona.azoz.uk/properties/trump-international-hotel-residences-aida-muscat/ · Arabic: https://bona.azoz.uk/ar/properties/trump-international-hotel-residences-aida-muscat/
+- URL: https://bona-real-estate.com/properties/trump-international-hotel-residences-aida-muscat/ · Arabic: https://bona-real-estate.com/ar/properties/trump-international-hotel-residences-aida-muscat/
 - Kind: Apartment · Type: Apartment · Category: International · Status: available
 - Location: AIDA, Muscat, Oman (آيدا، مسقط)
 - Asking price: From SAR 1,700,000
 - Specs: 1 bed
+- Coordinates: 23.5091205, 58.6599331
 - Highlights: Within the Trump International Hotel, AIDA; One to three bedrooms, 43 to 138 sqm; Fully furnished; Hotel pool, gym and restaurants; From SAR 1,700,000
 - المميزات: ضمن فندق ترامب الدولي في آيدا؛ من غرفة إلى ثلاث غرف نوم، 43 إلى 138 متراً مربعاً؛ مفروشة بالكامل؛ مسبح الفندق وناديه الرياضي ومطاعمه؛ ابتداءً من 1,700,000 ريال سعودي
 - Listed: 2026-03-21
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/aida_04_lounge_copy_2_ae1e9ac626_e8bc687dfe-bae44b.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/oth_01_main_lobby_ef_copy-287095.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/oth_05_deluxe_suite_master_bedroom_ef_copy-240d74.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/oth_02_all_day_dining_ef_copy-90e12d.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/master_bathroom-67aba7.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/umo_02_aerial_ef2_v3_copy-9ff535.jpg
+- Images: https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/aida_04_lounge_copy_2_ae1e9ac626_e8bc687dfe-bae44b.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/umo_10_hotel_balcony_ef2_copy-568a76.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/pre-function-fcd9b7.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/oth_03_deluxe_suite_living_room_ef_copy-a46172.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/oth_05_deluxe_suite_master_bedroom_ef_copy-240d74.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/trump-international-hotel-oman/oth_02_all_day_dining_ef_copy-90e12d.jpg
 
 Serviced residences within the Trump International Hotel at AIDA, on the cliffs above the sea at Muscat. Apartments range from 43 to 138 square metres with one to three bedrooms, delivered fully furnished.
 
@@ -738,6 +1102,275 @@ Owners use the hotel's pool, gym, lounges and restaurants, within the wider AIDA
 
 Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Trump%20International%20Hotel%20Residences%2C%20AIDA%2C%20Muscat%20(BONA-045).
 
+### Alhayat Residence, Al-Salama — الحياة ريزيدنس - السلامة
+- ID: BONA-W010 (ref WA-20260906-AC88DA)
+- URL: https://bona-real-estate.com/properties/alhayat-residence-al-salama/ · Arabic: https://bona-real-estate.com/ar/properties/alhayat-residence-al-salama/
+- Kind: Apartment · Type: Apartment · Category: For sale · Status: available
+- Location: Al-Salama, Jeddah, Saudi Arabia (السلامة، جدة)
+- Asking price: SAR 950,000
+- Project: Alhayat Residence (الحياة ريزيدنس) · Developer: Alhayat Residence
+- Specs: 4 bed, 4 bath, 180 m² built
+- Coordinates: 21.593996, 39.152355
+- Highlights: 180 sqm layout; 4 bedrooms, 4 bathrooms; Maid's and driver's rooms; Private covered parking; 5 minutes to the Corniche; 25-year structural warranty
+- المميزات: مساحة 180 م²؛ 4 غرف و4 دورات مياه؛ غرفة خادمة وغرفة سائق؛ موقف خاص مغطى؛ 5 دقائق من الكورنيش؛ ضمان إنشائي 25 سنة
+- Brochure: https://bona-real-estate.com/listings/alhayat-residence-al-salama/brochure.pdf
+- Listed: 2026-09-06
+- Images: /listings/alhayat-residence-al-salama/01.jpg , /listings/alhayat-residence-al-salama/02.jpg , /listings/alhayat-residence-al-salama/03.jpg , /listings/alhayat-residence-al-salama/04.jpg , /listings/alhayat-residence-al-salama/05.jpg , /listings/alhayat-residence-al-salama/06.jpg
+
+Alhayat Residence sits in Al-Salama, Jeddah, close to Prince Sultan Street, five minutes from the Corniche and ten minutes from the airport. Arab Open University, Jeddah University and CBA University are all nearby, along with the Al Yamama walkway.
+
+This ready apartment covers 180 square metres, arranged as four bedrooms and four bathrooms around a large living hall, with an open American-style kitchen. A maid's room, a driver's room and dedicated private parking complete the layout.
+
+The building offers hotel-style entrances, high ceilings and wide windows, with smart entry and camera coverage in the common areas, and a landscaped rooftop. The structure carries a 25-year warranty, with further coverage on fixtures, plumbing, sanitary ware, the lift and the electrical wiring.
+
+تقع الحياة ريزيدنس في حي السلامة بجدة، بالقرب من شارع الأمير سلطان، وتبعد خمس دقائق عن الكورنيش وعشر دقائق عن المطار. كما تقترب من الجامعة العربية المفتوحة وجامعة جدة وجامعة CBA، إضافة إلى ممشى اليمامة.
+
+تمتد هذه الشقة الجاهزة على مساحة 180 مترًا مربعًا، وتضم أربع غرف وأربع دورات مياه حول صالة كبيرة، مع مطبخ أمريكي مفتوح. وتكتمل المساحة بغرفة خادمة وغرفة سائق وموقف خاص.
+
+يوفر المبنى مداخل بطراز فندقي وأسقفًا عالية ونوافذ واسعة، مع نظام دخول ذكي وكاميرات مراقبة في المناطق المشتركة، ولاند سكيب علوي على السطح. ويحمل الهيكل الإنشائي ضمانًا لمدة 25 سنة، مع ضمانات إضافية على الأفياش والسباكة والأدوات الصحية والمصعد والأسلاك الكهربائية.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Alhayat%20Residence%2C%20Al-Salama%20(BONA-W010).
+
+### Darco Prime Waterfront, Al-Shati — داركو برايم الواجهة البحرية، الشاطئ
+- ID: BONA-W014 (ref WA-20260907-AC7039)
+- URL: https://bona-real-estate.com/properties/darco-prime-waterfront-al-shati/ · Arabic: https://bona-real-estate.com/ar/properties/darco-prime-waterfront-al-shati/
+- Kind: Apartment · Type: Apartment · Category: Off-plan · Status: available
+- Location: Al-Shati District, Jeddah, Saudi Arabia (حي الشاطئ، جدة)
+- Asking price: Price on request
+- Project: Darco Prime Waterfront (داركو برايم الواجهة البحرية) · Developer: Darco Real Estate Company
+- Highlights: Red Sea waterfront location; 22 buildings, 534 units; Studio to duplex layouts; Infinity pool and gym; Private cinema and lounge
+- المميزات: موقع على واجهة البحر الأحمر؛ 22 مبنى و534 وحدة سكنية؛ وحدات من غرفة إلى دوبلكس؛ مسبح لا متناهٍ ونادٍ رياضي؛ سينما خاصة وصالة استراحة
+- Brochure: https://bona-real-estate.com/listings/darco-prime-waterfront-al-shati/brochure.pdf
+- Listed: 2026-09-07
+- Images: /listings/darco-prime-waterfront-al-shati/01.jpg , /listings/darco-prime-waterfront-al-shati/02.jpg , /listings/darco-prime-waterfront-al-shati/03.jpg , /listings/darco-prime-waterfront-al-shati/04.jpg , /listings/darco-prime-waterfront-al-shati/05.jpg , /listings/darco-prime-waterfront-al-shati/06.jpg
+
+Darco Prime Waterfront is a residential development in Al-Shati District, Jeddah, developed by Darco Real Estate Company. The project spans 22 buildings with 534 residential units, positioned close to the Red Sea coastline. Nearby landmarks include Jeddah Waterfront, Jeddah Yacht Club, Red Sea Mall, City Walk and the Jeddah Formula 1 circuit, all within a few minutes by car.
+
+The unit mix ranges from Standard one-bedroom apartments of 55.45 to 71.04 square metres to Premium one- and two-bedroom options of 73.62 to 85.01 square metres. Standard two-bedroom units span 88.87 to 93.56 square metres, while Premium two- and three-bedroom options reach 96.8 to 103.92 square metres. Standard three-bedroom units start at 123.98 square metres, and Premium three- and four-bedroom options run from 135.41 to 139.39 square metres. The Jewel duplex units offer three bedrooms across 174 to 183 square metres.
+
+On-site facilities include a mosque, a children's play area, a resident lounge, a gym, a sauna, an infinity pool, a jacuzzi, a running track and a private cinema. The development also provides electric vehicle charging points and a car wash service.
+
+يقع مشروع داركو برايم الواجهة البحرية في حي الشاطئ بمدينة جدة، وتطوره شركة داركو العقارية. يضم المشروع 22 مبنى تحتوي على 534 وحدة سكنية بالقرب من ساحل البحر الأحمر. تحيط بالمشروع معالم قريبة مثل الواجهة البحرية لجدة، ونادي جدة لليخوت، وردسي مول، وسيتي ووك، وحلبة فورمولا 1، وجميعها على بعد دقائق بالسيارة.
+
+تتنوع مساحات الوحدات بين الشقق القياسية بغرفة نوم واحدة من 55.45 إلى 71.04 متراً مربعاً، والخيارات المميزة بغرفة أو غرفتي نوم من 73.62 إلى 85.01 متراً مربعاً. أما الوحدات القياسية بغرفتي نوم فتتراوح مساحتها بين 88.87 و93.56 متراً مربعاً، بينما تصل الخيارات المميزة بغرفتين أو ثلاث غرف نوم إلى ما بين 96.8 و103.92 متراً مربعاً. تبدأ الوحدات القياسية بثلاث غرف نوم من مساحة 123.98 متراً مربعاً، وتتراوح الخيارات المميزة بثلاث أو أربع غرف نوم بين 135.41 و139.39 متراً مربعاً. وتوفر وحدات الجوهرة الدوبلكس ثلاث غرف نوم بمساحات من 174 إلى 183 متراً مربعاً.
+
+تشمل مرافق المشروع مسجداً، ومنطقة ألعاب للأطفال، وصالة استراحة، ونادياً رياضياً، وساونا، ومسبحاً لا متناهياً، وجاكوزي، ومسار جري، وسينما خاصة. كما يوفر المشروع نقاط شحن للسيارات الكهربائية وخدمة مغسلة سيارات.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Darco%20Prime%20Waterfront%2C%20Al-Shati%20(BONA-W014).
+
+### Nuzul Khayala Residences, North Jeddah — نزل خيالة، شمال جدة
+- ID: BONA-W002 (ref WA-20260906-AC20EE)
+- URL: https://bona-real-estate.com/properties/nuzul-khayala-residences-north-jeddah/ · Arabic: https://bona-real-estate.com/ar/properties/nuzul-khayala-residences-north-jeddah/
+- Kind: Apartment · Type: Apartment · Category: Off-plan · Status: available
+- Location: Khayala Suburb, Jeddah, Saudi Arabia (ضاحية خيالة، جدة)
+- Asking price: Price on request
+- Project: Nuzul Khayala (نزل خيالة) · Developer: Faisal Bin Saedan
+- Highlights: 18 residential buildings; Units from 147–202 sqm; Apartment and duplex layouts; Near Haramain Road; 10-year structural warranty; Close to King Abdulaziz Airport
+- المميزات: 18 مبنى سكنياً؛ وحدات من 147 إلى 202 م²؛ تصاميم شقق ودوبلكس؛ قريب من طريق الحرمين؛ ضمان إنشائي 10 سنوات؛ قرب مطار الملك عبدالعزيز
+- Brochure: https://bona-real-estate.com/listings/nuzul-khayala-residences-north-jeddah/brochure.pdf
+- Listed: 2026-09-06
+- Images: /listings/nuzul-khayala-residences-north-jeddah/01.jpg , /listings/nuzul-khayala-residences-north-jeddah/02.jpg , /listings/nuzul-khayala-residences-north-jeddah/03.jpg , /listings/nuzul-khayala-residences-north-jeddah/04.jpg , /listings/nuzul-khayala-residences-north-jeddah/05.jpg , /listings/nuzul-khayala-residences-north-jeddah/06.jpg
+
+Nuzul Khayala is a residential development in the Khayala suburb of north Jeddah, positioned along the city's future growth corridor. It sits close to Haramain Road, giving quick access across Jeddah's districts, and is within reach of King Faisal Specialist Hospital, Al Ruhaili station, Al Jawhara Mall and King Abdullah Medical Complex. The site is also near King Abdulaziz International Airport, King Abdullah Sports City and Al Jawhara Stadium, with future projects such as Marafy planned nearby.
+
+The development comprises 18 residential buildings on a plot of roughly 30,000 square metres, with a combined built-up area of about 54,131 square metres, totalling 312 residential units. Units are offered across several layout types (A, B, C, D and AB), ranging from approximately 147 to 202 square metres, as single-level apartments or duplexes over two floors. Layouts include three to four bedrooms — some with two master suites — alongside a maid's room, guest bathroom and a laundry and dressing area.
+
+The project is built under the direct supervision of the Ministry of Housing, with materials meeting Saudi Standards Organization requirements. The structural frame, thermal piping and waterproofing each carry a 10-year warranty, and electrical panels are covered for 20 years. Finishes include double-glazed, thermally insulated windows, external thermal insulation, and ceramic and marble to Saudi specifications.
+
+يقع مشروع نزل خيالة في ضاحية خيالة شمال جدة، ضمن امتداد المدينة العقاري المستقبلي. يتميز الموقع بقربه من طريق الحرمين، ما يسهّل الوصول إلى مختلف أحياء جدة، كما يقع بالقرب من مستشفى الملك فيصل التخصصي ومحطة الرحيلي والجوهرة مول ومجمع الملك عبدالله الطبي. كذلك يقترب الموقع من مطار الملك عبدالعزيز الدولي ومدينة الملك عبدالله الرياضية واستاد الجوهرة، إلى جانب مشاريع مستقبلية كبرى في جدة مثل مرافئ.
+
+يضم المشروع 18 مبنى سكنياً على أرض تبلغ مساحتها نحو 30,000 متر مربع، بمساحة بناء إجمالية تقارب 54,131 متر مربع، ليصل إجمالي عدد الوحدات السكنية إلى 312 وحدة. تتوزع الوحدات على عدة نماذج تصميمية (A وB وC وD وAB) تتراوح مساحاتها بين 147 و202 متر مربع تقريباً، سواء كشقق بطابق واحد أو دوبلكس على طابقين. تضم التصاميم من ثلاث إلى أربع غرف نوم، بعضها بغرفتي ماستر، إضافة إلى غرفة خادمة وحمام ضيوف وغرفة غسيل وملابس.
+
+يُنفَّذ المشروع تحت إشراف مباشر من وزارة الإسكان، وتخضع جميع المواد المستخدمة لمطابقة مواصفات الهيئة السعودية للمواصفات والمقاييس. يُضمَن الهيكل الإنشائي والأنابيب الحرارية والعوازل المائية لمدة 10 سنوات لكل منها، بينما تُضمَن لوحات الكهرباء لمدة 20 عاماً. تشمل التشطيبات نوافذ زجاج مزدوج عازلة للحرارة، وعوازل حرارية للأسطح والجدران الخارجية، وسيراميك ورخام مطابقين للمواصفات السعودية.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Nuzul%20Khayala%20Residences%2C%20North%20Jeddah%20(BONA-W002).
+
+## Land (8) — https://bona-real-estate.com/properties/land/
+
+### Residential Plot 285, Al Shati — قطعة أرض رقم 285، الشاطئ
+- ID: BONA-046 (ref LND-006)
+- URL: https://bona-real-estate.com/properties/plot-285-al-shati/ · Arabic: https://bona-real-estate.com/ar/properties/plot-285-al-shati/
+- Kind: Land · Type: Land · Category: For sale · Status: available
+- Location: Al Shati, Jeddah, Saudi Arabia (الشاطئ، جدة)
+- Asking price: SAR 3,816,000
+- Specs: 636 m² plot
+- Coordinates: 21.6011128, 39.1195974
+- Highlights: 636 sqm; North-facing, 21.25 m frontage; 16-metre street; SAR 6,000 per sqm net; Direct from the owner
+- المميزات: 636 متراً مربعاً؛ واجهة شمالية بطول 21.25 متراً؛ شارع بعرض 16 متراً؛ 6,000 ريال للمتر صافياً؛ من المالك مباشرة
+- Listed: 2026-04-10
+- Images: /land/LND-006.jpg , /land/LND-006-z15.jpg
+
+Plot 285 in Al Shati, moments from King Road and a few minutes from the Corniche. The plot measures 636 square metres with a north-facing frontage of 21.25 metres on a 16-metre street.
+
+Offered directly by the owner at SAR 6,000 per square metre net, a total of SAR 3,816,000. The satellite frames show the plot's position and its surroundings.
+
+القطعة رقم 285 في حي الشاطئ، على مقربة من طريق الملك ودقائق من الكورنيش. تبلغ مساحتها 636 متراً مربعاً بواجهة شمالية بطول 21.25 متراً على شارع بعرض 16 متراً.
+
+تُعرض من المالك مباشرة بسعر 6,000 ريال للمتر المربع صافياً، بإجمالي 3,816,000 ريال سعودي. توضح الصور الجوية موقع القطعة ومحيطها.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Residential%20Plot%20285%2C%20Al%20Shati%20(BONA-046).
+
+### Corner Plot, Al Shati — أرض زاوية، الشاطئ
+- ID: BONA-047 (ref LND-004)
+- URL: https://bona-real-estate.com/properties/corner-plot-al-shati/ · Arabic: https://bona-real-estate.com/ar/properties/corner-plot-al-shati/
+- Kind: Land · Type: Land · Category: For sale · Status: available
+- Location: Al Shati, Jeddah, Saudi Arabia (الشاطئ، جدة)
+- Asking price: SAR 4,200,000
+- Specs: 625 m² plot
+- Coordinates: 21.613996, 39.1172
+- Highlights: 625 sqm corner plot; Two 12-metre streets, north and east; 24 m by 26 m; Second block from King Road; Near the Jeddah waterfront; SAR 4,200,000
+- المميزات: أرض زاوية بمساحة 625 متراً مربعاً؛ شارعان بعرض 12 متراً شمالاً وشرقاً؛ 24 في 26 متراً؛ المربع الثاني من طريق الملك؛ قرب الواجهة البحرية لجدة؛ 4,200,000 ريال سعودي
+- Listed: 2026-04-09
+- Images: /land/LND-004.jpg , /land/LND-004-z15.jpg
+
+A corner plot of 625 square metres in Al Shati, on two 12-metre streets to the north and east, measuring 24 metres wide by 26 metres deep. It sits on the second block from King Road, north of Heraa Street, close to the district's commercial centres and the Jeddah waterfront.
+
+Asking price SAR 4,200,000, about SAR 6,720 per square metre. The satellite frames show the plot's position and its surroundings.
+
+أرض زاوية بمساحة 625 متراً مربعاً في حي الشاطئ، على شارعين بعرض 12 متراً من الجهتين الشمالية والشرقية، بأبعاد 24 متراً عرضاً و26 متراً عمقاً. تقع في المربع الثاني من طريق الملك شمال شارع حراء، على مقربة من المراكز التجارية والواجهة البحرية لجدة.
+
+السعر المطلوب 4,200,000 ريال سعودي، أي نحو 6,720 ريالاً للمتر المربع. توضح الصور الجوية موقع القطعة ومحيطها.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Corner%20Plot%2C%20Al%20Shati%20(BONA-047).
+
+### Plot of 1,200 sqm behind the Corniche, Al Shati — أرض بمساحة 1,200 متر مربع خلف الكورنيش، الشاطئ
+- ID: BONA-055 (ref LND-015)
+- URL: https://bona-real-estate.com/properties/plot-1200-sqm-al-shati/ · Arabic: https://bona-real-estate.com/ar/properties/plot-1200-sqm-al-shati/
+- Kind: Land · Type: Land · Category: For sale · Status: available
+- Location: Al Shati, Jeddah, Saudi Arabia (الشاطئ، جدة)
+- Asking price: SAR 10,200,000
+- Specs: 1200 m² plot
+- Coordinates: 21.562684543496626, 39.11201582272763
+- Highlights: 1,200 sqm; Rear faces toward the Corniche; Access from a 20 m street; SAR 8,500 per sqm; Al Shati
+- المميزات: 1,200 متر مربع؛ الجهة الخلفية نحو الكورنيش؛ الوصول من شارع بعرض 20 متراً؛ 8,500 ريال للمتر المربع؛ حي الشاطئ
+- Listed: 2026-08-26
+- Images: /land/LND-015.jpg , /land/LND-015-z15.jpg
+
+A residential plot of 1,200 square metres in Al Shati, in the row behind the Corniche. The rear of the plot faces toward the Corniche, and access is from a 20-metre street.
+
+The asking price is SAR 10,200,000, at SAR 8,500 per square metre. The satellite frames show the plot and its distance from the shore.
+
+قطعة أرض سكنية بمساحة 1,200 متر مربع في حي الشاطئ، في الصف الواقع خلف الكورنيش. تتجه الجهة الخلفية للقطعة نحو الكورنيش، والوصول إليها من شارع بعرض 20 متراً.
+
+السعر المطلوب 10,200,000 ريال سعودي، بواقع 8,500 ريال للمتر المربع. توضح الصور الجوية القطعة ومسافتها من الشاطئ.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Plot%20of%201%2C200%20sqm%20behind%20the%20Corniche%2C%20Al%20Shati%20(BONA-055).
+
+### Plot of 980 sqm, Durrat Al Basateen — أرض بمساحة 980 متراً مربعاً، درة البساتين
+- ID: BONA-056 (ref LND-017)
+- URL: https://bona-real-estate.com/properties/plot-980-sqm-durrat-al-basateen/ · Arabic: https://bona-real-estate.com/ar/properties/plot-980-sqm-durrat-al-basateen/
+- Kind: Land · Type: Land · Category: For sale · Status: available
+- Location: Durrat Al Basateen, Jeddah, Saudi Arabia (درة البساتين، جدة)
+- Asking price: SAR 8,330,000
+- Specs: 980 m² plot
+- Coordinates: 21.63689519443776, 39.12082236721488
+- Highlights: 980 sqm; South-facing on a 16 m street; Villa district near the coast; SAR 8,500 per sqm
+- المميزات: 980 متراً مربعاً؛ واجهة جنوبية على شارع بعرض 16 متراً؛ حي فلل قريب من الساحل؛ 8,500 ريال للمتر المربع
+- Listed: 2026-08-26
+- Images: /land/LND-017.jpg , /land/LND-017-z15.jpg
+
+A residential plot of 980 square metres in Durrat Al Basateen, north Jeddah, on a 16-metre south-facing street. The district is a low-rise villa neighbourhood close to the coast.
+
+The asking price is SAR 8,330,000, at SAR 8,500 per square metre. The satellite frames show the plot and the surrounding blocks.
+
+قطعة أرض سكنية بمساحة 980 متراً مربعاً في درة البساتين شمال جدة، على شارع بعرض 16 متراً بواجهة جنوبية. الحي منطقة فلل منخفضة الارتفاع قريبة من الساحل.
+
+السعر المطلوب 8,330,000 ريال سعودي، بواقع 8,500 ريال للمتر المربع. توضح الصور الجوية القطعة والمربعات المحيطة بها.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Plot%20of%20980%20sqm%2C%20Durrat%20Al%20Basateen%20(BONA-056).
+
+### Plot of 450 sqm, Al Shati 1 — أرض بمساحة 450 متراً مربعاً، الشاطئ 1
+- ID: BONA-057 (ref LND-020)
+- URL: https://bona-real-estate.com/properties/plot-450-sqm-al-shati-1/ · Arabic: https://bona-real-estate.com/ar/properties/plot-450-sqm-al-shati-1/
+- Kind: Land · Type: Land · Category: For sale · Status: available
+- Location: Al Shati 1, Jeddah, Saudi Arabia (الشاطئ 1، جدة)
+- Asking price: SAR 3,825,000
+- Specs: 450 m² plot
+- Coordinates: 21.563638942028028, 39.11882520750281
+- Highlights: 450 sqm; On a 32 m street; Close to the sea; SAR 8,500 per sqm
+- المميزات: 450 متراً مربعاً؛ على شارع بعرض 32 متراً؛ قريبة من البحر؛ 8,500 ريال للمتر المربع
+- Listed: 2026-08-26
+- Images: /land/LND-020.jpg , /land/LND-020-z15.jpg
+
+A residential plot of 450 square metres in Al Shati 1, on a 32-metre street, a short walk from the sea and the amenities of the district.
+
+The asking price is SAR 3,825,000, at SAR 8,500 per square metre. The satellite frames show the plot and its street.
+
+قطعة أرض سكنية بمساحة 450 متراً مربعاً في حي الشاطئ 1، على شارع بعرض 32 متراً، على مسافة قصيرة سيراً من البحر ومرافق الحي.
+
+السعر المطلوب 3,825,000 ريال سعودي، بواقع 8,500 ريال للمتر المربع. توضح الصور الجوية القطعة وشارعها.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Plot%20of%20450%20sqm%2C%20Al%20Shati%201%20(BONA-057).
+
+### North-Facing Plot of 500.8 sqm, Durrat Al Basateen — أرض بواجهة شمالية بمساحة 500.8 متر مربع، درة البساتين
+- ID: BONA-058 (ref LND-022)
+- URL: https://bona-real-estate.com/properties/plot-500-sqm-durrat-al-basateen/ · Arabic: https://bona-real-estate.com/ar/properties/plot-500-sqm-durrat-al-basateen/
+- Kind: Land · Type: Land · Category: For sale · Status: available
+- Location: Durrat Al Basateen, Jeddah, Saudi Arabia (درة البساتين، جدة)
+- Asking price: SAR 4,256,800
+- Specs: 500.8 m² plot
+- Coordinates: 21.637311611993507, 39.12081632967131
+- Highlights: 500.8 sqm; North-facing on a 30 m street; Villa district near the coast; SAR 8,500 per sqm
+- المميزات: 500.8 متر مربع؛ واجهة شمالية على شارع بعرض 30 متراً؛ حي فلل قريب من الساحل؛ 8,500 ريال للمتر المربع
+- Listed: 2026-08-26
+- Images: /land/LND-022.jpg , /land/LND-022-z15.jpg
+
+A residential plot of 500.8 square metres in Durrat Al Basateen, north Jeddah, with a north-facing frontage on a 30-metre street. The district is a villa neighbourhood close to the coast.
+
+The asking price is SAR 4,256,800, at SAR 8,500 per square metre. The satellite frames show the plot and the surrounding blocks.
+
+قطعة أرض سكنية بمساحة 500.8 متر مربع في درة البساتين شمال جدة، بواجهة شمالية على شارع بعرض 30 متراً. الحي منطقة فلل قريبة من الساحل.
+
+السعر المطلوب 4,256,800 ريال سعودي، بواقع 8,500 ريال للمتر المربع. توضح الصور الجوية القطعة والمربعات المحيطة بها.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20North-Facing%20Plot%20of%20500.8%20sqm%2C%20Durrat%20Al%20Basateen%20(BONA-058).
+
+### Corner Plot, Al Khalidiyah — أرض زاوية، الخالدية
+- ID: BONA-059 (ref LND-023)
+- URL: https://bona-real-estate.com/properties/corner-plot-al-khalidiyah/ · Arabic: https://bona-real-estate.com/ar/properties/corner-plot-al-khalidiyah/
+- Kind: Land · Type: Land · Category: For sale · Status: available
+- Location: Al Khalidiyah, Jeddah, Saudi Arabia (الخالدية، جدة)
+- Asking price: SAR 3,937,500
+- Specs: 625 m² plot
+- Coordinates: 21.560239915427147, 39.136093577749236
+- Highlights: 625 sqm corner plot; Two streets, south and west; 25 m by 25 m; SAR 6,300 per sqm; Al Khalidiyah
+- المميزات: أرض زاوية بمساحة 625 متراً مربعاً؛ شارعان جنوباً وغرباً؛ 25 في 25 متراً؛ 6,300 ريال للمتر المربع؛ حي الخالدية
+- Listed: 2026-08-26
+- Images: /land/LND-023.jpg , /land/LND-023-z15.jpg
+
+A corner plot of 625 square metres in Al Khalidiyah, on two streets, measuring 25 metres on the south side and 25 metres on the west. The district is an established central neighbourhood with schools, shops and quick access to the main roads.
+
+The total price is SAR 3,937,500, at SAR 6,300 per square metre. The satellite frames show the corner and its two streets.
+
+أرض زاوية بمساحة 625 متراً مربعاً في حي الخالدية، على شارعين، بطول 25 متراً من الجهة الجنوبية و25 متراً من الجهة الغربية. الحي منطقة مركزية راسخة تضم مدارس ومتاجر مع وصول سريع إلى الطرق الرئيسية.
+
+السعر الإجمالي 3,937,500 ريال سعودي، بواقع 6,300 ريال للمتر المربع. توضح الصور الجوية الزاوية وشارعيها.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Corner%20Plot%2C%20Al%20Khalidiyah%20(BONA-059).
+
+### Plots of 300 sqm, Al Khalidiyah — قطع أراضٍ بمساحة 300 متر مربع، الخالدية
+- ID: BONA-060 (ref LND-024)
+- URL: https://bona-real-estate.com/properties/plots-300-sqm-al-khalidiyah/ · Arabic: https://bona-real-estate.com/ar/properties/plots-300-sqm-al-khalidiyah/
+- Kind: Land · Type: Land · Category: For sale · Status: available
+- Location: Al Khalidiyah, Jeddah, Saudi Arabia (الخالدية، جدة)
+- Asking price: SAR 2,150,000
+- Specs: 300 m² plot
+- Coordinates: 21.560999987056363, 39.1362687553322
+- Highlights: 300 sqm per plot; Twelve plots, ten remaining; SAR 2,150,000 per plot; About SAR 7,167 per sqm; Al Khalidiyah
+- المميزات: 300 متر مربع للقطعة؛ اثنتا عشرة قطعة، تبقّت عشر؛ 2,150,000 ريال سعودي للقطعة؛ نحو 7,167 ريالاً للمتر المربع؛ حي الخالدية
+- Listed: 2026-08-26
+- Images: /land/LND-024.jpg , /land/LND-024-z15.jpg
+
+A subdivision of twelve residential plots of 300 square metres each in Al Khalidiyah. Two plots have already sold and ten remain available, individually or in groups.
+
+The price is SAR 2,150,000 per plot, about SAR 7,167 per square metre. The satellite frames show the subdivision and its surroundings.
+
+مخطط من اثنتي عشرة قطعة سكنية بمساحة 300 متر مربع لكل منها في حي الخالدية. بيعت قطعتان بالفعل وتبقّت عشر قطع متاحة، منفردة أو مجتمعة.
+
+السعر 2,150,000 ريال سعودي للقطعة، أي نحو 7,167 ريالاً للمتر المربع. توضح الصور الجوية المخطط ومحيطه.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Plots%20of%20300%20sqm%2C%20Al%20Khalidiyah%20(BONA-060).
+
 ## How to enquire
 
-WhatsApp +966 59 329 6933 (https://wa.me/966593296933) with the property ID, or use the contact page https://bona.azoz.uk/contact/. Replies in English or Arabic during office hours.
+WhatsApp +966 59 329 6933 (https://wa.me/966593296933) with the property ID, or use the contact page https://bona-real-estate.com/contact/. Replies in English or Arabic during office hours.
