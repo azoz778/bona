@@ -444,6 +444,6 @@ So the site, schema and every other bio can be updated in one pass:
 ## Appendix — known follow-ups
 
 1. **`marketing/social-bios.md` and `public/og-default.png` still say `bona.azoz.uk` / `bona.com.sa`.** The live domain is `bona-real-estate.com`. The bios in *this* file are corrected; `og-default.png` still renders the old domain in the image itself and should be regenerated.
-2. **Instagram `@bona.com.sa` is still a personal account**, not Business/Creator — see `marketing/instagram-access.md`. That blocks the Meta posting API and Threads' business features. Unrelated to this checklist but on the critical path.
+2. **CORRECTED 2026-09-08:** Instagram `@bona.com.sa` **is already a Business account** — verified via Graph `business_discovery` (IG id `17841427688957180`, 0 followers, 0 media). The real blocker for API posting is that it is not yet linked to a Facebook Page inside a Meta business portfolio the token can see; that is step 1 of `OWNER-NOW-2026-09-08.md`, in progress.
 3. **Register `bona.com.sa` as a domain** once the CR exists, so the handle and a real domain match.
 4. **Do not use `bonaproperties` anywhere** — an active X account "Bona Properties" already uses that name in real estate.
