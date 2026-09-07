@@ -39,7 +39,6 @@ const WRITE = !DRY && !flag('--no-write');
 const JSON_OUT = flag('--json');
 const STRICT = flag('--strict');
 const TIMEOUT_MS = 10_000;
-const UA = 'bona-verify-integrations/1.0 (+https://bona.azoz.uk)';
 /* One stable client_id, so every run's verify_ping lands on the same "user" in GA4's Realtime report
    instead of inventing a fresh one the owner then has to hunt for. */
 const GA4_VERIFY_CLIENT_ID = 'verify-integrations.1';
@@ -54,6 +53,27 @@ const readJson = (file, fallback) => {
 };
 const present = (v) => typeof v === 'string' && v.trim().length > 0;
 const trimSlash = (s) => String(s ?? '').replace(/\/+$/, '');
+
+/* Both domains belong to site.json and to nothing else in this file. Read it once here so the
+   User-Agent we announce ourselves with and the board's links are derived rather than guessed;
+   run() re-reads it for the checks so a mid-run edit is still picked up. */
+const SITE = readJson(SITE_FILE, {});
+
+/** The UA names the site we probe on behalf of, so an ops log shows who called. With no readable
+    site.json we send a domain-free UA — a stale domain would be worse than none. */
+export function buildUserAgent(site) {
+  const url = trimSlash(site?.url);
+  return url ? `bona-verify-integrations/1.0 (+${url})` : 'bona-verify-integrations/1.0';
+}
+
+/** The board's link for the API row. null when site.json declares no concierge.apiBase — there is
+    no default host to fall back on; a wrong link is a wrong instruction to whoever clicks it. */
+export function healthLink(site) {
+  const base = trimSlash(site?.concierge?.apiBase);
+  return base ? `${base}/health` : null;
+}
+
+const UA = buildUserAgent(SITE);
 
 /** fetch with a timeout; returns { status, text, json } and never throws. */
 async function probe(url, init = {}) {
@@ -207,9 +227,15 @@ export function checkGsc({ site, homeHtml }) {
   return row('gsc', 'live', `google-site-verification tag served (${m[1].slice(0, 6)}…) — verify + submit sitemap-index.xml in Search Console if not done`);
 }
 
-export async function checkApi({ site }) {
-  const base = trimSlash(site.concierge?.apiBase || 'https://bona-api.azoz.uk');
-  const res = await probe(`${base}/health`);
+export async function checkApi({ site, probe: send = probe }) {
+  // No fallback host on purpose: site.json is where the API's domain lives, so a missing apiBase is a
+  // site.json defect to report, not something to paper over by probing whatever host used to be right.
+  const base = trimSlash(site.concierge?.apiBase);
+  if (!base) {
+    const detail = 'site.json has no concierge.apiBase — set it to the API origin (src/data/site.json → concierge.apiBase); nothing to probe until then';
+    return { api: row('bona-api', 'pending-owner', detail), retell: row('retell', 'pending-owner', 'Retell is checked through bona-api, whose base is unknown: site.json has no concierge.apiBase') };
+  }
+  const res = await send(`${base}/health`);
   if (res.dry) return { api: row('bona-api', 'pending-owner', `[dry-run] would GET ${base}/health`), retell: row('retell', 'pending-owner', '[dry-run] from /health') };
   const h = res.json ?? {};
   const parts = [`HTTP ${res.status}`];
@@ -250,7 +276,7 @@ const NEW_ROW_META = {
   'meta-capi': { name: 'Meta Conversions API', owner: 'owner', link: 'https://business.facebook.com/events_manager2', action: 'docs/checklists/meta-bona-portfolio.md §5–6' },
   'snap': { name: 'Snap Pixel + Conversions API', owner: 'owner', link: 'https://ads.snapchat.com/', action: 'docs/checklists/snapchat-bona.md' },
   'gsc': { name: 'Google Search Console', owner: 'owner', link: 'https://search.google.com/search-console', action: 'docs/checklists/google-bona.md §2' },
-  'bona-api': { name: 'Concierge API (bona-api)', owner: 'agent', link: 'https://bona-api.azoz.uk/health', action: 'systemctl --user status bona-api cloudflared-bona' },
+  'bona-api': { name: 'Concierge API (bona-api)', owner: 'agent', link: healthLink(SITE), action: 'systemctl --user status bona-api cloudflared-bona' },
   'retell': { name: 'Retell (Dana)', owner: 'owner', link: 'https://dashboard.retellai.com/', action: 'services/README.md §5' },
   'evolution': { name: 'Evolution API (WhatsApp)', owner: 'agent', link: null, action: '~/.secrets/evolution-api.env' },
 };
