@@ -18,7 +18,8 @@ import { loadConfig, missingRequired } from './lib/env.mjs';
 import { createEvolutionClient, documentOf, fileLengthOf, isFromOwner, isOwnerGroup, messageTs, oldestFirst, textOf, videoOf } from './lib/evolution.mjs';
 import { findListingId, HELP_TEXT, parseCaption, parseCommand } from './lib/commands.mjs';
 import * as edits from './lib/edits.mjs';
-import { pickListingForVideo, wakeParkedClip } from './lib/video.mjs';
+import { pickListingForVideo, prepareVideo, wakeParkedClip } from './lib/video.mjs';
+import { candidateListings, matchVideoToListing } from './lib/video-match.mjs';
 import { listInbox } from './lib/listing.mjs';
 import { withLock } from './lib/lock.mjs';
 import { log } from './lib/log.mjs';
@@ -397,62 +398,171 @@ function watchLive(jid, url) {
 /**
  * A WhatsApp video. It never mints a listing; it attaches to one `handlePdf` (or
  * `run-once.mjs`) already published, through the same edit/commit/push path as
- * `hero <id>` / `price <id>` / `brochure <id>`. Which listing:
+ * `hero <id>` / `price <id>` / `brochure <id>`.
+ *
+ * WHICH LISTING — the owner's rule is "it should know which video is for which property; I
+ * shouldn't be picking anything", so three answers are tried, cheapest first:
  *   1. an id in the caption (`video BONA-W001`, or just the id) always wins;
- *   2. otherwise the brochure sent closest to the clip in time (lib/video.mjs
- *      pickListingForVideo) — the owner drops the PDF and its clips in one burst, uncaptioned.
- *      If that brochure is still being published the clip is parked (`waitingFor`) and
+ *   2. the burst rule: the brochure sent closest to the clip in time (lib/video.mjs
+ *      pickListingForVideo) — he drops the PDF and its clips in one go, uncaptioned. If that
+ *      brochure is still being published the clip is parked (`waitingFor`) and
  *      requeueWaitingVideos() brings it back; a tie between two listings asks instead of
- *      guessing.
- * The file is stored exactly as received (lib/video.mjs), and downloaded once — a replay
- * reuses `videoPath` the way a PDF replay reuses `pdfPath`.
+ *      guessing;
+ *   3. when that finds nothing at all (`kind: 'none'`), the CONTENT matcher
+ *      (lib/video-match.mjs): frames of the clip itself, in front of one confined `claude -p`
+ *      alongside the hero photos of the last ~15 intake listings. It attaches at
+ *      `cfg.videoMatchConfidence` (0.75) or better and otherwise says it could not tell.
+ *      Run at most ONCE per clip — `contentTried` on the durable job record — because it
+ *      costs a model call, and a parked clip is re-queued every time a new brochure lands.
+ *
+ * WHAT IS STORED — not the file WhatsApp sent: ffmpeg re-encodes it (H.264/AAC, ≤1080p,
+ * faststart) and cuts a poster frame out of it (lib/video.mjs prepareVideo), and a clip that
+ * still will not fit `cfg.maxVideoMb` after a second, smaller pass is refused rather than
+ * committed. The download happens once — a replay reuses `videoPath` the way a PDF replay
+ * reuses `pdfPath` — and the video is never read into a Buffer: everything works on paths.
  */
 async function handleVideo({ group, record, video, retryPath }) {
   const jid = group.id;
   const messageId = record.key.id;
   const caption = textOf(record) || video.caption || '';
   const job = state.getJob(messageId);
+
+  // The declared size, checked BEFORE anything is downloaded (the content matcher below may
+  // need the file long before a listing has been chosen).
+  const declared = fileLengthOf(video);
+  if (declared && declared > cfg.maxVideoInputMb * 1024 * 1024) {
+    state.finishJob(messageId, 'rejected');
+    log.warn('video.too_large', { id: messageId, size: declared });
+    await reply(jid, msg.videoTooLarge(declared / 1048576, cfg.maxVideoInputMb));
+    return;
+  }
+
+  const dayDir = () => {
+    const dir = path.join(cfg.intakeDir, new Date().toISOString().slice(0, 10));
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  };
+  const safeId = messageId.replace(/[^A-Za-z0-9-]/g, '_');
+  let videoPath = retryPath && fs.existsSync(retryPath) ? retryPath : null;
+  let announced = false;
+  /** Downloaded once, kept next to the day's PDFs, so a replay after a crash never re-fetches it. */
+  const ensureDownloaded = async () => {
+    if (videoPath) return videoPath;
+    if (!announced) { announced = true; await reply(jid, msg.READING_VIDEO); }
+    const file = path.join(dayDir(), `${safeId}.mp4`);
+    const media = await evo.downloadMedia(record.key);
+    fs.writeFileSync(file, media.buffer);
+    videoPath = file;
+    state.updateJob(messageId, { videoPath });
+    log.info('video.downloaded', { id: messageId, bytes: media.buffer.length });
+    // The declared length can be absent or wrong; the bytes that actually arrived are the
+    // real check.
+    if (media.buffer.length > cfg.maxVideoInputMb * 1024 * 1024) {
+      const err = new Error('video over the download limit');
+      err.videoTooLarge = media.buffer.length;
+      throw err;
+    }
+    return videoPath;
+  };
+
   let id = findListingId(caption);
   let matched = null;
+  let unsure = null;
   if (!id) {
     // Send time: the record's, else what the job recorded at poll time, else when the job was
     // written — a clip never fails to match just because one field was missing.
     const ts = messageTs(record) ?? job?.ts ?? (job?.at ? Math.round(Date.parse(job.at) / 1000) : null);
     const pick = pickListingForVideo({ ts, jid }, Object.values(state.raw.jobs || {}), state.publishedByMessage, { windowSec: cfg.videoWindowMin * 60 });
-    // Park the clip rather than reject it while its brochure may still be coming: the nearest
-    // brochure is mid-publish (`wait`), or nothing matched yet but the clip is fresh (`none` —
-    // the owner sent the video first, or the PDF lands in the next poll). requeueWaitingVideos()
-    // brings it back when that brochure answers, a new one appears, or the wait runs out.
-    const freshClip = ts != null && Math.floor(Date.now() / 1000) - ts <= cfg.videoWindowMin * 60;
-    if (job && (pick.kind === 'wait' || (pick.kind === 'none' && freshClip))) {
-      const since = job.waitSince || new Date().toISOString();
-      const waitedMs = Date.now() - Date.parse(since);
-      if (waitedMs <= cfg.videoWaitMin * 60 * 1000) {
-        const waitingFor = pick.kind === 'wait' ? pick.pdfMessageId : null;
-        state.updateJob(messageId, { waitingFor, waitSince: since });
-        log.info('video.waiting', { id: messageId, pdf: waitingFor, waitedMs });
-        if (!job.waitNotified) {
-          state.updateJob(messageId, { waitNotified: true });
-          await reply(jid, msg.videoWaiting(waitingFor ? state.getJob(waitingFor)?.fileName : null));
-        }
-        return;
-      }
-      log.warn('video.wait_expired', { id: messageId, pdf: pick.pdfMessageId ?? null, waitedMs });
-    }
+
     if (pick.kind === 'ambiguous') {
       state.finishJob(messageId, 'rejected');
       log.info('video.ambiguous', { id: messageId, listings: pick.listingIds });
       await reply(jid, msg.videoAmbiguous(pick.listingIds));
       return;
-    } else if (pick.kind === 'attach') {
-      id = pick.listingId;
-      matched = { pdfMessageId: pick.pdfMessageId, deltaSec: pick.deltaSec };
-      log.info('video.matched', { id: messageId, listing: id, pdf: pick.pdfMessageId, deltaSec: pick.deltaSec });
     }
+    if (pick.kind === 'attach') {
+      id = pick.listingId;
+      matched = { by: 'burst', pdfMessageId: pick.pdfMessageId, deltaSec: pick.deltaSec };
+      log.info('video.matched', { id: messageId, listing: id, pdf: pick.pdfMessageId, deltaSec: pick.deltaSec });
+    } else if (pick.kind === 'none' && !job?.contentTried) {
+      // No brochure anywhere near this clip: look at the clip itself. ONE call per clip.
+      const candidates = candidateListings(cfg.repo, { limit: cfg.videoMatchListings });
+      if (candidates.length) {
+        try {
+          await ensureDownloaded();
+          // Written before the call, not after: a crash inside the model call must not buy
+          // this clip a second one on the replay.
+          state.updateJob(messageId, { contentTried: true });
+          const verdict = await matchVideoToListing({
+            videoPath,
+            workDir: path.join(dayDir(), `${safeId}-match`),
+            candidates,
+            cfg,
+            logger: log,
+          });
+          log.info('video.content_match', {
+            id: messageId, kind: verdict.kind, listing: verdict.listingId ?? null,
+            confidence: verdict.confidence ?? null, frames: verdict.frames,
+            candidates: verdict.candidates.length, why: verdict.why ?? null,
+            reason: verdict.reason ?? null, costUsd: verdict.meta?.costUsd ?? null,
+          });
+          if (verdict.kind === 'match') {
+            id = verdict.listingId;
+            matched = { by: 'content', confidence: verdict.confidence, reason: verdict.reason };
+          } else if (verdict.kind === 'ambiguous') {
+            unsure = verdict;
+            // Kept on the job, because the clip is usually PARKED after this and only asks
+            // about itself when the wait runs out, several requeues later — by which time
+            // this verdict would otherwise be gone and the reply would name nothing.
+            state.updateJob(messageId, { contentSaw: { listingId: verdict.listingId ?? null, confidence: verdict.confidence ?? 0, candidates: verdict.candidates } });
+          }
+        } catch (err) {
+          if (err.videoTooLarge) {
+            state.finishJob(messageId, 'rejected');
+            log.warn('video.too_large', { id: messageId, bytes: err.videoTooLarge });
+            await reply(jid, msg.videoTooLarge(err.videoTooLarge / 1048576, cfg.maxVideoInputMb));
+            return;
+          }
+          log.warn('video.content_match_failed', { id: messageId, error: err.message });
+        }
+      }
+    }
+
     if (!id) {
+      // Park the clip rather than reject it while its brochure may still be coming: the nearest
+      // brochure is mid-publish (`wait`), or nothing matched yet but the clip is fresh (`none` —
+      // the owner sent the video first, or the PDF lands in the next poll). requeueWaitingVideos()
+      // brings it back when that brochure answers, a new one appears, or the wait runs out.
+      const freshClip = ts != null && Math.floor(Date.now() / 1000) - ts <= cfg.videoWindowMin * 60;
+      if (job && (pick.kind === 'wait' || (pick.kind === 'none' && freshClip))) {
+        const since = job.waitSince || new Date().toISOString();
+        const waitedMs = Date.now() - Date.parse(since);
+        if (waitedMs <= cfg.videoWaitMin * 60 * 1000) {
+          const waitingFor = pick.kind === 'wait' ? pick.pdfMessageId : null;
+          state.updateJob(messageId, { waitingFor, waitSince: since });
+          log.info('video.waiting', { id: messageId, pdf: waitingFor, waitedMs });
+          if (!job.waitNotified) {
+            state.updateJob(messageId, { waitNotified: true });
+            await reply(jid, msg.videoWaiting(waitingFor ? state.getJob(waitingFor)?.fileName : null));
+          }
+          return;
+        }
+        log.warn('video.wait_expired', { id: messageId, pdf: pick.pdfMessageId ?? null, waitedMs });
+      }
       state.finishJob(messageId, 'rejected');
-      log.info('video.no_id', { jid, id: messageId, caption });
-      await reply(jid, msg.videoNoId());
+      // Exactly ONE line back, and never a guess: if the matcher looked at the clip and could
+      // not place it, say so and name what it compared against; otherwise the plain ask.
+      const saw = unsure || state.getJob(messageId)?.contentSaw;
+      if (saw) {
+        log.info('video.unsure', { jid, id: messageId, listing: saw.listingId ?? null, confidence: saw.confidence ?? null, why: unsure?.why ?? null });
+        // Its best guess first (it was under the bar, so it is a suggestion, not a choice),
+        // then everything else it compared against.
+        const others = (saw.candidates || []).filter((c) => c !== saw.listingId);
+        await reply(jid, msg.videoUnsure(saw.listingId ? [saw.listingId, ...others] : others));
+      } else {
+        log.info('video.no_id', { jid, id: messageId, caption });
+        await reply(jid, msg.videoNoId());
+      }
       return;
     }
   }
@@ -463,37 +573,32 @@ async function handleVideo({ group, record, video, retryPath }) {
     await reply(jid, msg.notFound(id));
     return;
   }
-  const size = fileLengthOf(video);
-  if (size && size > cfg.maxVideoMb * 1024 * 1024) {
+  try {
+    await ensureDownloaded();
+  } catch (err) {
+    if (!err.videoTooLarge) throw err;
     state.finishJob(messageId, 'rejected');
-    log.warn('video.too_large', { id, size });
-    await reply(jid, msg.videoTooLarge(size / 1048576, cfg.maxVideoMb));
+    log.warn('video.too_large', { id, bytes: err.videoTooLarge });
+    await reply(jid, msg.videoTooLarge(err.videoTooLarge / 1048576, cfg.maxVideoInputMb));
     return;
   }
-  await reply(jid, msg.READING_VIDEO);
-  // Downloaded once, kept next to the day's PDFs, so a replay after a crash never re-fetches it.
-  let videoPath = retryPath;
-  if (!videoPath) {
-    const dir = path.join(cfg.intakeDir, new Date().toISOString().slice(0, 10));
-    fs.mkdirSync(dir, { recursive: true });
-    videoPath = path.join(dir, `${messageId.replace(/[^A-Za-z0-9-]/g, '_')}.mp4`);
-    const media = await evo.downloadMedia(record.key);
-    fs.writeFileSync(videoPath, media.buffer);
-    state.updateJob(messageId, { videoPath });
-    log.info('video.downloaded', { id: messageId, bytes: media.buffer.length });
-  }
-  const buffer = fs.readFileSync(videoPath);
-  // The declared length (above) can be absent or wrong; the bytes that actually arrived are
-  // the real check.
-  if (buffer.length > cfg.maxVideoMb * 1024 * 1024) {
+
+  // What goes into the repo is the TRANSCODED clip and its poster, never the raw download.
+  const mediaDir = path.join(dayDir(), `${safeId}-video`);
+  const prepared = await prepareVideo({ input: videoPath, outDir: mediaDir, cfg, logger: log });
+  if (!prepared.ok) {
     state.finishJob(messageId, 'rejected');
-    log.warn('video.too_large', { id, bytes: buffer.length });
-    await reply(jid, msg.videoTooLarge(buffer.length / 1048576, cfg.maxVideoMb));
+    log.warn('video.prepare_failed', { id, reason: prepared.reason, bytes: prepared.bytes ?? null, error: prepared.error ?? null });
+    await reply(jid, prepared.reason === 'too-large'
+      ? msg.videoStillTooLarge(prepared.bytes / 1048576, cfg.maxVideoMb)
+      : msg.videoUnreadable());
     return;
   }
+  log.info('video.prepared', { id, bytes: prepared.bytes, width: prepared.width, height: prepared.height, durationSec: prepared.durationSec, poster: Boolean(prepared.poster), passes: prepared.passes.length });
+
   const res = await publishEdit(
     jid, id,
-    () => edits.addVideo(cfg.repo, id, buffer),
+    () => edits.addVideo(cfg.repo, id, { file: prepared.file, poster: prepared.poster }),
     () => `intake: video (${id})`,
     (r) => msg.videoAdded(id, r.listing, r.video, { matched }),
     // Close the job the instant the push lands, inside the lock, before any reply. A crash
@@ -501,6 +606,8 @@ async function handleVideo({ group, record, video, retryPath }) {
     // bytes already on the listing and answers `duplicate` instead of appending a second copy.
     { onPushed: (r) => state.completeVideo({ messageId, id, src: r.video?.src }) },
   );
+  // The transcoded copy now lives in the repo; the raw download stays for a replay.
+  fs.rmSync(prepared.file, { force: true });
   if (res?.error) {
     state.finishJob(messageId, 'rejected');
     log.warn('video.rejected', { id, error: res.error });
@@ -513,7 +620,7 @@ async function handleVideo({ group, record, video, retryPath }) {
     await reply(jid, msg.videoAlreadyOn(id, res.listing, res.video));
     return;
   }
-  if (res) log.info('video.added', { id, messageId, bytes: res.video?.bytes, n: res.video?.n, matched: matched?.pdfMessageId ?? null });
+  if (res) log.info('video.added', { id, messageId, bytes: res.video?.bytes, n: res.video?.n, poster: res.video?.poster ?? null, matched: matched?.by ?? null });
 }
 
 // ---------------------------------------------------------------- command job

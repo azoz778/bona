@@ -658,6 +658,286 @@ test('an unknown POST path is 404 and does not spend the chat bucket', async () 
   });
 });
 
+/* ---------------- events ---------------- */
+
+const ANON = '9f1c'.repeat(8);
+const touch = (over = {}) => ({
+  ts: Date.now() - 10_000, landing: '/properties/bona-w003/', referrer: 'https://l.instagram.com/',
+  utm_source: 'meta', utm_medium: 'paid', utm_campaign: 'villas_sep', utm_content: 'reels', utm_term: null, utm_id: '1203',
+  click_ids: { fbclid: 'IwAR1' }, ...over,
+});
+const sampleEvent = (over = {}) => ({
+  v: 1, event_id: `mf3k2a1b-${Math.random().toString(16).slice(2, 10)}`, ts: Date.now(), event: 'whatsapp_click',
+  anon_id: ANON, session_id: 'mf3k2a-7b1c', ref: 'K7Q2XR', page: '/properties/bona-w003/', locale: 'en',
+  listing_id: 'BONA-W003', props: { cta: 'listing_whatsapp', href: 'https://wa.me/966593296933' },
+  attr: { first: touch(), last: touch(), fbp: 'fb.1.1.2', fbc: 'fb.1.3.IwAR1', ga: { client_id: '123.456', session_id: '1757149000' }, scid: null, ttp: null },
+  consent: { analytics: true, ads: true },
+  ...over,
+});
+/** The site posts events as text/plain so there is no preflight and keepalive works. */
+const postEvent = (call, body, init = {}) => call('/v1/events', {
+  method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body),
+  ...init, headers: { 'Content-Type': 'text/plain', ...(init.headers ?? {}) },
+});
+
+test('POST /v1/events takes a text/plain event and answers an empty 204 with CORS', async () => {
+  await withServer({}, async ({ call, app }) => {
+    const ev = sampleEvent();
+    const res = await postEvent(call, ev);
+    assert.equal(res.status, 204);
+    assert.equal(res.headers.get('access-control-allow-origin'), 'https://bona.azoz.uk');
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+    assert.equal(await res.text(), '');
+    const row = app.db.getEvent(ev.event_id);
+    assert.equal(row.name, 'whatsapp_click');
+    assert.equal(row.listing_id, 'BONA-W003');
+    assert.equal(row.session_id, 'mf3k2a-7b1c');
+    assert.equal(app.db.getSession('mf3k2a-7b1c').ref, 'K7Q2XR');
+    assert.deepEqual(app.db.dueFanout(Date.now() + 1000).map((f) => f.dest), ['meta']);
+    // JSON is fine too, and a retry of the same event_id is a quiet 204.
+    assert.equal((await call('/v1/events', { method: 'POST', body: JSON.stringify(ev) })).status, 204);
+    assert.equal(app.db.eventsForSession('mf3k2a-7b1c').length, 1);
+  });
+});
+
+test('an event the taxonomy does not know, or that only the server may write, is 400 bad_event', async () => {
+  await withServer({}, async ({ call, app }) => {
+    const unknown = await postEvent(call, sampleEvent({ event: 'purchase' }));
+    assert.equal(unknown.status, 400);
+    assert.deepEqual(await unknown.json(), { error: 'bad_event', reason: 'event' });
+    const server = await postEvent(call, sampleEvent({ event: 'lead_created' }));
+    assert.equal(server.status, 400);
+    assert.deepEqual(await server.json(), { error: 'bad_event', reason: 'server_only' });
+    assert.equal((await postEvent(call, sampleEvent({ anon_id: 'nope' }))).status, 400);
+    assert.equal((await postEvent(call, '{not json')).status, 400);
+    assert.equal((await postEvent(call, '[1,2]')).status, 400);
+    assert.equal(app.db.eventsForSession('mf3k2a-7b1c').length, 0, 'nothing was stored');
+    assert.equal(app.db.getSession('mf3k2a-7b1c'), null);
+  });
+});
+
+test('events from a foreign origin are refused, GET is 405, and 9 KB is 413', async () => {
+  await withServer({}, async ({ call }) => {
+    const foreign = await postEvent(call, sampleEvent(), { headers: { Origin: 'https://evil.example' } });
+    assert.equal(foreign.status, 403);
+    assert.deepEqual(await foreign.json(), { error: 'forbidden_origin' });
+    assert.equal((await call('/v1/events')).status, 405);
+    const big = await postEvent(call, sampleEvent({ props: { pad: 'x'.repeat(9 * 1024) } }));
+    assert.equal(big.status, 413);
+  });
+});
+
+test('events carry the server\'s view of the visitor: IP, user agent and Cloudflare country', async () => {
+  await withServer({ config: { trustedProxies: [] } }, async ({ call, app }) => {
+    const ev = sampleEvent({ event: 'page_view' });
+    // The test socket is loopback — exactly where cloudflared sits in production — so
+    // the CF-* headers are believed here, and would not be from any other peer.
+    const res = await postEvent(call, ev, { headers: { 'CF-Connecting-IP': '203.0.113.9', 'CF-IPCountry': 'sa', 'User-Agent': 'Mozilla/5.0 (test)' } });
+    assert.equal(res.status, 204);
+    const s = app.db.getSession('mf3k2a-7b1c');
+    assert.equal(s.ip, '203.0.113.9');
+    assert.equal(s.ua, 'Mozilla/5.0 (test)');
+    assert.equal(s.country, 'SA');
+    assert.equal(s.pages, 1);
+    const row = app.db.getEvent(ev.event_id);
+    assert.equal(row.ip, '203.0.113.9');
+    assert.equal(row.country, 'SA');
+  });
+});
+
+test('the events bucket is its own: wide, and separate from chat', async () => {
+  await withServer({ config: { eventsRatePerMin: 2, chatRatePerMin: 1 } }, async ({ call }) => {
+    assert.equal((await postEvent(call, sampleEvent())).status, 204);
+    assert.equal((await postEvent(call, sampleEvent())).status, 204);
+    const blocked = await postEvent(call, sampleEvent());
+    assert.equal(blocked.status, 429);
+    assert.ok(Number(blocked.headers.get('retry-after')) >= 1);
+    assert.equal((await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale: 'en' }) })).status, 200, 'chat is untouched');
+  });
+});
+
+test('events cost the day nothing and /health reports the store', async () => {
+  await withServer({}, async ({ call }) => {
+    for (let i = 0; i < 3; i += 1) assert.equal((await postEvent(call, sampleEvent())).status, 204);
+    const body = await (await call('/health')).json();
+    assert.equal(body.db, 'ok');
+    assert.equal(body.budget.chats, 0);
+    assert.equal(body.budget.calls, 0);
+  });
+});
+
+/* ---------------- concierge attribution ---------------- */
+
+test('chat and call sessions pass the visitor\'s ids to Retell as metadata and record the start', async () => {
+  await withServer({}, async ({ call, retell, app }) => {
+    assert.equal((await postEvent(call, sampleEvent({ event: 'page_view' }))).status, 204);
+    const attr = { anon_id: ANON, session_id: 'mf3k2a-7b1c', ref: 'k7q2xr', listing_id: 'bona-w003' };
+    const chat = await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale: 'ar', page: { url: 'https://bona.azoz.uk/ar/properties/x/', title: 'x' }, attr }) });
+    assert.equal(chat.status, 200);
+    const [, sentChat] = retell.calls.find(([name]) => name === 'createChat');
+    assert.deepEqual(sentChat.metadata, { locale: 'ar', page: 'https://bona.azoz.uk/ar/properties/x/', source: 'bona-web', anon_id: ANON, session_id: 'mf3k2a-7b1c', ref: 'K7Q2XR', listing_id: 'BONA-W003' });
+
+    const voice = await call('/v1/call/token', { method: 'POST', body: JSON.stringify({ locale: 'en', attr }) });
+    assert.equal(voice.status, 200);
+    const [, sentCall] = retell.calls.find(([name]) => name === 'createWebCall');
+    assert.equal(sentCall.metadata.session_id, 'mf3k2a-7b1c');
+    assert.equal(sentCall.metadata.source, 'bona-web');
+
+    const events = app.db.eventsForSession('mf3k2a-7b1c').map((e) => e.name);
+    assert.deepEqual(events, ['page_view', 'concierge_chat_start', 'concierge_call_start']);
+    const start = app.db.recentEvents({ name: 'concierge_chat_start' })[0];
+    assert.equal(start.anon_id, ANON);
+    assert.equal(start.listing_id, 'BONA-W003');
+    assert.match(start.props.conversation_id, /^chat_/);
+    assert.equal(start.src_last.utm_campaign, 'villas_sep', 'the visitor\'s touch is copied from the session');
+    const spent = (await (await call('/health')).json()).budget;
+    assert.equal(spent.chats, 1);
+    assert.equal(spent.calls, 1);
+  });
+});
+
+test('a malformed attr is dropped, never a 400, and the start is still recorded without a session', async () => {
+  await withServer({}, async ({ call, retell, app }) => {
+    for (const attr of [{ anon_id: 'nope', session_id: 42, ref: 'K7Q2XRZZ', listing_id: 'TK-1' }, 'garbage', [1], null]) {
+      const res = await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale: 'en', attr }) });
+      assert.equal(res.status, 200, JSON.stringify(attr));
+    }
+    for (const [, sent] of retell.calls.filter(([name]) => name === 'createChat')) {
+      assert.deepEqual(sent.metadata, { locale: 'en', page: null, source: 'bona-web', anon_id: null, session_id: null, ref: null, listing_id: null });
+    }
+    const starts = app.db.recentEvents({ name: 'concierge_chat_start' });
+    assert.equal(starts.length, 4);
+    assert.equal(starts[0].session_id, null);
+    // …and a body without attr at all is exactly what the widget sends today.
+    assert.equal((await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale: 'en' }) })).status, 200);
+  });
+});
+
+test('a lead Dana saves during an attributed call carries the campaign that brought the visitor', async () => {
+  await withServer({}, async ({ call, tool, app, sent }) => {
+    assert.equal((await postEvent(call, sampleEvent({ event: 'page_view' }))).status, 204);
+    const { callId } = await (await call('/v1/call/token', { method: 'POST', body: JSON.stringify({ locale: 'en', attr: { anon_id: ANON, session_id: 'mf3k2a-7b1c', ref: 'K7Q2XR', listing_id: 'BONA-W003' } }) })).json();
+    // Retell echoes the metadata we set on every tool call.
+    const res = await tool('/v1/tools/create_lead', {
+      call: { call_id: callId, metadata: { locale: 'en', page: null, source: 'bona-web', anon_id: ANON, session_id: 'mf3k2a-7b1c', ref: 'K7Q2XR', listing_id: 'BONA-W003' } },
+      name: 'create_lead', args: { phone: '+966500000000', name: 'Sara' },
+    });
+    const payload = JSON.parse(await res.json());
+    assert.equal(payload.saved, true);
+    const lead = app.db.getLead(payload.id);
+    assert.equal(lead.channel, 'concierge_voice');
+    assert.equal(lead.source, 'meta');
+    assert.equal(lead.campaign, 'villas_sep');
+    assert.equal(lead.session_id, 'mf3k2a-7b1c');
+    assert.equal(lead.listing_id, 'BONA-W003');
+    assert.match(sent[0], /Source: meta \/ paid · villas_sep/);
+    assert.equal(app.db.getSession('mf3k2a-7b1c').ref, 'K7Q2XR');
+  });
+});
+
+/* ---------------- enquiry ---------------- */
+
+const enquiryBody = (over = {}) => ({
+  form: 'listing', name: 'Sara Ahmed', phone: '+966 50 000 0000', interest: 'villa', type: 'buy', budget: '8m', location: 'Al Shati',
+  message: 'Is it still available?', listing_id: 'BONA-W003', page: '/properties/bona-w003/', locale: 'ar',
+  event_id: 'mf3k2a1b-form0001', attr: { anon_id: ANON, session_id: 'mf3k2a-7b1c', ref: 'K7Q2XR', first: touch(), last: touch() },
+  consent: { analytics: true, ads: true }, ...over,
+});
+
+test('POST /v1/enquiry lands a form lead with the visitor\'s source, queues the fan-out, and tells the owner', async () => {
+  await withServer({}, async ({ call, app, sent, dataDir }) => {
+    // The visitor browsed first, so the session (and its last touch) is on record.
+    assert.equal((await postEvent(call, sampleEvent({ event: 'page_view' }))).status, 204);
+
+    const res = await call('/v1/enquiry', { method: 'POST', body: JSON.stringify(enquiryBody()) });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.match(body.lead_id, /^LEAD-\d{8}-[0-9a-f]{8}$/);
+    assert.deepEqual(Object.keys(body), ['lead_id']);
+
+    const lead = app.db.getLead(body.lead_id);
+    assert.equal(lead.channel, 'form');
+    assert.equal(lead.match_method, 'form');
+    assert.equal(lead.name, 'Sara Ahmed');
+    assert.equal(lead.phone_e164, '966500000000');
+    assert.equal(lead.listing_id, 'BONA-W003');
+    assert.equal(lead.district, 'Al Shati');
+    assert.equal(lead.language, 'ar');
+    assert.equal(lead.notes, 'Is it still available?\nType: buy\nLocation: Al Shati');
+    assert.equal(lead.source, 'meta', 'the source comes from the stored session');
+    assert.equal(lead.campaign, 'villas_sep');
+    assert.equal(lead.session_id, 'mf3k2a-7b1c');
+    assert.equal(lead.ref, 'K7Q2XR');
+    assert.equal(lead.stage, 'new');
+
+    const submit = app.db.getEvent('mf3k2a1b-form0001');
+    assert.equal(submit.name, 'form_submit', 'the server records the submit under the browser\'s event id');
+    assert.equal(submit.lead_id, body.lead_id);
+    assert.deepEqual(submit.props, { form: 'listing', cta: 'enquiry' });
+    const created = app.db.recentEvents({ name: 'lead_created' })[0];
+    assert.equal(created.lead_id, body.lead_id);
+    assert.deepEqual(app.db.dueFanout(Date.now() + 1000).filter((f) => f.event_id === created.event_id).map((f) => f.dest), ['meta', 'ga4', 'snap']);
+
+    assert.equal(sent.length, 1);
+    assert.match(sent[0], /Sara Ahmed/);
+    assert.match(sent[0], /Source: meta \/ paid · villas_sep · Ref K7Q2XR · BONA-W003/);
+    assert.match(fs.readFileSync(path.join(dataDir, 'leads.jsonl'), 'utf8'), /Sara Ahmed/);
+
+    // The same person submitting again is one lead, told about twice.
+    const again = await (await call('/v1/enquiry', { method: 'POST', body: JSON.stringify(enquiryBody({ event_id: 'mf3k2a1b-form0002', message: 'Still keen' })) })).json();
+    assert.equal(again.lead_id, body.lead_id);
+    assert.deepEqual(app.db.touchpointsForLead(body.lead_id).map((t) => t.event_type), ['lead_created', 'form_submit']);
+    assert.equal(sent.length, 2);
+    const spent = (await (await call('/health')).json()).budget;
+    assert.equal(spent.chats + spent.calls, 0, 'enquiries are not billable');
+  });
+});
+
+test('an enquiry with no attribution at all is still a lead, sourced as "form"', async () => {
+  await withServer({}, async ({ call, app }) => {
+    const res = await call('/v1/enquiry', { method: 'POST', body: JSON.stringify({ form: 'contact', name: 'Omar', phone: '0500000009', message: 'hi' }) });
+    assert.equal(res.status, 200);
+    const lead = app.db.getLead((await res.json()).lead_id);
+    assert.equal(lead.source, 'form');
+    assert.equal(lead.session_id, null);
+    assert.equal(app.db.recentEvents({ name: 'form_submit' }).length, 0, 'no session, no browser event to record');
+    assert.equal(app.db.recentEvents({ name: 'lead_created' }).length, 1);
+  });
+});
+
+test('an enquiry with a bad phone or a missing name is 400 and creates nothing', async () => {
+  await withServer({}, async ({ call, app, sent }) => {
+    const bad = await call('/v1/enquiry', { method: 'POST', body: JSON.stringify(enquiryBody({ phone: '12' })) });
+    assert.equal(bad.status, 400);
+    const body = await bad.json();
+    assert.equal(body.error, 'bad_request');
+    assert.match(body.message, /phone/);
+    assert.equal((await call('/v1/enquiry', { method: 'POST', body: JSON.stringify(enquiryBody({ name: 'S' })) })).status, 400);
+    assert.equal((await call('/v1/enquiry', { method: 'POST', body: '{oops' })).status, 400);
+    assert.equal(app.db.listLeads().length, 0);
+    assert.equal(sent.length, 0);
+  });
+});
+
+test('the enquiry route is origin-checked, takes the form\'s text/plain, and is limited to six a minute', async () => {
+  await withServer({}, async ({ call }) => {
+    const body = JSON.stringify(enquiryBody());
+    const foreign = await call('/v1/enquiry', { method: 'POST', body, headers: { Origin: 'https://evil.example' } });
+    assert.equal(foreign.status, 403);
+    // The site posts the lead as text/plain + keepalive so there is no preflight to lose
+    // while the page is navigating to WhatsApp. Refusing it dropped every form lead.
+    assert.equal((await call('/v1/enquiry', { method: 'POST', body, headers: { 'Content-Type': 'text/plain;charset=UTF-8' } })).status, 200);
+    assert.equal((await call('/v1/enquiry', { method: 'POST', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })).status, 415);
+    // The routes that spend Retell money stay JSON-only.
+    assert.equal((await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale: 'en' }), headers: { 'Content-Type': 'text/plain' } })).status, 415);
+    for (let i = 0; i < 5; i += 1) assert.equal((await call('/v1/enquiry', { method: 'POST', body })).status, 200, `enquiry ${i + 1}`);
+    const blocked = await call('/v1/enquiry', { method: 'POST', body });
+    assert.equal(blocked.status, 429);
+    assert.ok(Number(blocked.headers.get('retry-after')) >= 1);
+    assert.equal((await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale: 'en' }) })).status, 200, 'chat is a separate bucket');
+  });
+});
+
 /* ---------------- inventory + upstream failures ---------------- */
 
 test('an empty portfolio is reported as unhealthy, not served quietly', async () => {

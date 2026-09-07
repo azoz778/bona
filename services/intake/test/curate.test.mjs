@@ -8,7 +8,8 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   FORBIDDEN, HYPE, INTAKE_ID_RE, isLocalSrc, LISTING_ID_RE, LOCAL_LAND_STILL,
-  LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, LOCAL_LISTING_VIDEO, PHONE_RE,
+  LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, LOCAL_LISTING_VIDEO, LOCAL_LISTING_VIDEO_POSTER,
+  PHONE_RE, videoEntryProblems,
 } from '../../../scripts/curate/rules.mjs';
 import { checkListing } from '../lib/listing.mjs';
 
@@ -104,7 +105,31 @@ describe('site-local video paths', () => {
       '/listings/villa/01.mp4',           // missing the v- prefix
       '/listings/Villa/v-01.mp4',         // slugs are lowercase
       'listings/villa/v-01.mp4',
+      '/listings/villa/v-01-poster.jpg',  // the poster is not the clip
     ]) assert.ok(!LOCAL_LISTING_VIDEO.test(s), `${s} should be rejected`);
+  });
+
+  it('accepts /listings/<slug>/v-nn-poster.jpg and nothing near it', () => {
+    assert.ok(LOCAL_LISTING_VIDEO_POSTER.test('/listings/five-bedroom-villa/v-01-poster.jpg'));
+    assert.ok(LOCAL_LISTING_VIDEO_POSTER.test('/listings/five-bedroom-villa/v-123-poster.jpg'));
+    for (const s of [
+      '/listings/villa/v-01.jpg',
+      '/listings/villa/v-01-poster.webp',
+      '/listings/villa/01-poster.jpg',
+      '/listings/villa/v-01-poster.jpg?x=1',
+    ]) assert.ok(!LOCAL_LISTING_VIDEO_POSTER.test(s), `${s} should be rejected`);
+  });
+
+  // ONE definition of a `videos[]` entry, called by BOTH scripts/curate/validate.mjs and the
+  // intake's own checkListing(): the intake can never write a video shape the build refuses.
+  it('videoEntryProblems accepts { src, poster } and refuses the pre-2026-09-06 bare string', () => {
+    assert.deepEqual(videoEntryProblems({ src: '/listings/villa/v-01.mp4', poster: '/listings/villa/v-01-poster.jpg' }, 0), []);
+    assert.deepEqual(videoEntryProblems({ src: '/listings/villa/v-02.mp4', poster: null }, 0), [], 'no poster is allowed — the page falls back to the hero');
+    assert.deepEqual(videoEntryProblems({ src: 'https://cdn.example.com/a.mp4', poster: 'https://cdn.example.com/a.jpg' }, 0), []);
+    assert.match(videoEntryProblems('/listings/villa/v-01.mp4', 0)[0], /must be \{ src, poster \}/);
+    assert.match(videoEntryProblems({ src: '/listings/villa/01.jpg' }, 3)[0], /videos\[3\]\.src/);
+    assert.match(videoEntryProblems({ src: '/listings/villa/v-01.mp4', poster: '/listings/villa/01.jpg' }, 1)[0], /videos\[1\]\.poster/);
+    assert.deepEqual(videoEntryProblems(null, 0).length, 1);
   });
 
   // checkListing() (services/intake) mirrors validate.mjs (scripts/curate) — a listing the
@@ -124,10 +149,12 @@ describe('site-local video paths', () => {
       })),
     };
     assert.deepEqual(checkListing({ ...base, videos: [] }), [], 'empty videos array is fine');
-    assert.deepEqual(checkListing({ ...base, videos: ['/listings/five-bedroom-villa/v-01.mp4'] }), []);
+    assert.deepEqual(checkListing({ ...base, videos: [{ src: '/listings/five-bedroom-villa/v-01.mp4', poster: '/listings/five-bedroom-villa/v-01-poster.jpg' }] }), []);
+    assert.deepEqual(checkListing({ ...base, videos: [{ src: '/listings/five-bedroom-villa/v-01.mp4', poster: null }] }), []);
     assert.deepEqual(checkListing(base), [], 'no videos key at all is also fine (curated listings predate the field)');
     assert.ok(checkListing({ ...base, videos: 'not-an-array' }).some((e) => /videos must be an array/.test(e)));
-    assert.ok(checkListing({ ...base, videos: ['/listings/five-bedroom-villa/01.jpg'] }).some((e) => /videos\[0\]/.test(e)));
+    assert.ok(checkListing({ ...base, videos: [{ src: '/listings/five-bedroom-villa/01.jpg' }] }).some((e) => /videos\[0\]\.src/.test(e)));
+    assert.ok(checkListing({ ...base, videos: ['/listings/five-bedroom-villa/v-01.mp4'] }).some((e) => /must be \{ src, poster \}/.test(e)), 'the bare string shape is gone');
   });
 });
 
@@ -163,5 +190,80 @@ describe('build.mjs', () => {
     assert.ok(line, 'summary line not found');
     assert.ok(!/\bout\.length\b/.test(line[0]), 'the summary must not count the dropped listings');
     assert.match(line[0], /published\.length/);
+  });
+});
+
+// ---- publication price caps ------------------------------------------------------------
+// Owner rule 2026-09-08: houses above SAR 10,000,000 are not shown on the public site.
+import { HOUSE_PRICE_CAP, sarAmount, isHousePublic } from '../../../scripts/curate/rules.mjs';
+
+describe('sarAmount', () => {
+  it('passes a SAR price straight through', () => {
+    assert.equal(sarAmount({ amount: 18_000_000, currency: 'SAR' }), 18_000_000);
+  });
+
+  it('converts other currencies so one cap can govern them all', () => {
+    // Palais Rose is priced in euro; SAR 10m must mean the same line for it.
+    assert.ok(sarAmount({ amount: 38_000_000, currency: 'EUR' }) > 100_000_000);
+    assert.equal(sarAmount({ amount: 1_000_000, currency: 'AED' }), 1_020_000);
+  });
+
+  it('is null when there is no number to compare', () => {
+    assert.equal(sarAmount({ amount: null, currency: 'SAR', onRequest: true }), null);
+    assert.equal(sarAmount(null), null);
+    assert.equal(sarAmount({ amount: 0, currency: 'SAR' }), null);
+  });
+
+  it('annualises a monthly rent before comparing', () => {
+    assert.equal(sarAmount({ amount: 100_000, currency: 'SAR', period: 'month' }), 1_200_000);
+  });
+});
+
+describe('isHousePublic', () => {
+  const house = (amount, currency = 'SAR') => ({ kind: 'house', price: { amount, currency } });
+
+  it('keeps a house under the cap', () => {
+    assert.equal(isHousePublic(house(8_000_000)), true);
+  });
+
+  it('drops a house over the cap', () => {
+    assert.equal(isHousePublic(house(18_000_000)), false);
+    assert.equal(isHousePublic(house(38_000_000, 'EUR')), false);
+  });
+
+  it('keeps a house priced exactly at the cap', () => {
+    // "over ten million" — ten million itself is not over it.
+    assert.equal(isHousePublic(house(HOUSE_PRICE_CAP)), true);
+  });
+
+  it('keeps a house whose price we do not know', () => {
+    // Owner decision 2026-09-08: never remove on a guess. The cap catches it the moment
+    // a price is set.
+    assert.equal(isHousePublic({ kind: 'house', price: { amount: null, currency: 'SAR', onRequest: true } }), true);
+  });
+
+  it('leaves every other kind alone — land has its own, separate cap', () => {
+    assert.equal(isHousePublic({ kind: 'land', price: { amount: 10_200_000, currency: 'SAR' } }), true);
+    assert.equal(isHousePublic({ kind: 'apartment', price: { amount: 50_000_000, currency: 'SAR' } }), true);
+  });
+});
+
+describe('price caps — cases the Codex review found', () => {
+  it('treats an on-request price as unknown even when a stale number sits beside it', () => {
+    // buildListing's `price.amount = price.amount ?? null` is a no-op, so an AI result of
+    // { onRequest: true, amount: 12000000 } survives intact. onRequest is the owner's word
+    // that the price is not published; a number next to it is not a price we may act on.
+    assert.equal(sarAmount({ amount: 12_000_000, currency: 'SAR', onRequest: true }), null);
+    assert.equal(isHousePublic({ kind: 'house', price: { amount: 12_000_000, currency: 'SAR', onRequest: true } }), true);
+  });
+
+  it('still reads a real price when onRequest is false or absent', () => {
+    assert.equal(sarAmount({ amount: 12_000_000, currency: 'SAR', onRequest: false }), 12_000_000);
+    assert.equal(sarAmount({ amount: 12_000_000, currency: 'SAR' }), 12_000_000);
+  });
+
+  it('refuses to guess at a currency it does not know', () => {
+    // Silently treating KWD as SAR would under-count by ~12x and publish an over-cap house.
+    assert.throws(() => sarAmount({ amount: 1_000_000, currency: 'KWD' }), /currency/i);
   });
 });

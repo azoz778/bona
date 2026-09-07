@@ -11,6 +11,8 @@
  *   POST   /create-chat-agent  PATCH /update-chat-agent/{agent_id}
  *   POST   /publish-agent-version/{agent_id}
  *   POST   /create-knowledge-base   (multipart/form-data)   GET /list-knowledge-bases
+ *   DELETE /delete-knowledge-base/{kb_id}   — there is no "update knowledge base" endpoint,
+ *          so a base pointed at the wrong site can only be replaced, never re-pointed
  *   GET    /list-voices   POST /v2/list-agents
  *
  * `mock: true` (BONA_RETELL_MOCK=1) answers locally so the HTTP layer can be
@@ -149,6 +151,8 @@ export function createRetellClient({ apiKey, baseUrl = RETELL_BASE, fetchImpl = 
       if (knowledge_base_urls.length) form.set('knowledge_base_urls', JSON.stringify(knowledge_base_urls));
       return request('POST', `/add-knowledge-base-sources/${encodeURIComponent(kbId)}`, { form });
     },
+    /** Retell answers this one with an empty body — `request` yields null, which is fine. */
+    deleteKnowledgeBase: (kbId) => request('DELETE', `/delete-knowledge-base/${encodeURIComponent(kbId)}`),
 
     listVoices: () => request('GET', '/list-voices'),
     async ping() { await request('GET', '/list-agents'); return { ok: true }; },
