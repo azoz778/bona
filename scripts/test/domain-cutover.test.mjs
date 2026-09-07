@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   parseArgs, desiredRecords, diffRecords, patchSiteJson, patchAstroConfig, patchRobots, patchCors,
   patchTunnelConfig, tunnelIdFrom, redirectRule, GITHUB_PAGES_A, GITHUB_PAGES_AAAA,
+  canWriteRepo, currentHosts, OLD_SITE_HOST, OLD_API_HOST,
 } from '../domain-cutover.mjs';
 
 test('parseArgs: domain and api are required, api must be one label under the domain', () => {
@@ -106,4 +107,33 @@ test('redirect rule: 301 from the old host to the new domain, path and query pre
   assert.equal(r.action_parameters.from_value.status_code, 301);
   assert.equal(r.action_parameters.from_value.target_url.expression, 'concat("https://bona.sa", http.request.uri.path)');
   assert.equal(r.action_parameters.from_value.preserve_query_string, true);
+});
+
+test('parseArgs: --allow-repo-without-dns is off unless the operator asks for it', () => {
+  const base = ['--domain', 'bona.sa', '--api', 'api.bona.sa'];
+  assert.equal(parseArgs(base).allowRepoWithoutDns, false);
+  assert.equal(parseArgs([...base, '--allow-repo-without-dns']).allowRepoWithoutDns, true);
+});
+
+test('canWriteRepo: a real run needs both a token and a resolved zone, or the explicit opt-out', () => {
+  // A dry run writes nothing anywhere, so it is never blocked — whatever the DNS side looks like.
+  assert.equal(canWriteRepo({ dryRun: true, token: '', zoneId: null }), true);
+  assert.equal(canWriteRepo({ dryRun: true, token: 't', zoneId: 'z' }), true);
+  // Real runs: DNS must have been reached and the zone resolved.
+  assert.equal(canWriteRepo({ dryRun: false, token: 't', zoneId: 'z' }), true);
+  assert.equal(canWriteRepo({ dryRun: false, token: '', zoneId: 'z' }), false, 'no token: Cloudflare was never reached');
+  assert.equal(canWriteRepo({ dryRun: false, token: 't', zoneId: null }), false, 'no zone id: the zone step was skipped or failed');
+  assert.equal(canWriteRepo({ dryRun: false, token: '', zoneId: null }), false);
+  // The opt-out overrides both, and only when it is asked for.
+  assert.equal(canWriteRepo({ dryRun: false, token: '', zoneId: null, allowRepoWithoutDns: true }), true);
+  assert.equal(canWriteRepo({}), false, 'the defaults refuse: nothing proved, nothing written');
+});
+
+test('currentHosts reads both hosts out of site.json and only falls back when it cannot', () => {
+  const site = { url: 'https://bona-real-estate.com', concierge: { apiBase: 'https://api.bona-real-estate.com/' } };
+  assert.deepEqual(currentHosts(site), { site: 'bona-real-estate.com', api: 'api.bona-real-estate.com' });
+  assert.deepEqual(currentHosts({ url: 'https://only-site.test' }), { site: 'only-site.test', api: OLD_API_HOST });
+  assert.deepEqual(currentHosts({}), { site: OLD_SITE_HOST, api: OLD_API_HOST });
+  assert.deepEqual(currentHosts({ url: 'not a url' }), { site: OLD_SITE_HOST, api: OLD_API_HOST });
+  assert.deepEqual(currentHosts({ url: 'https://a.test' }, { site: 'x', api: 'y' }).api, 'y', 'the fallback is injectable');
 });
