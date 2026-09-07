@@ -1,4 +1,6 @@
-/* First-party attribution for bona.azoz.uk (spec §3.1). Inlined into <head> by Head.astro on every page.
+/* First-party attribution (spec §3.1). Inlined into <head> by Head.astro on every page. The site's own origin
+   is never written down here: the API base comes from window.BONA_API, which Head.astro fills from
+   site.json → concierge.apiBase, and everything else is relative.
 
    What it does, in order:
    - remembers where the visitor came from: first touch (never overwritten) and last touch (updated on every
@@ -6,7 +8,9 @@
      `ref` code (6 chars, no 0/O/1/I) so a WhatsApp message can be tied back to the visit;
    - sends journey events to the API as text/plain JSON (a CORS "simple request": no preflight, keepalive);
    - rewrites every WhatsApp link at click time so its prefilled message ends with `Ref <listing> · <ref>`;
-   - mirrors the important events into the vendor tags, but only when tags.js has loaded them after consent.
+   - mirrors the important events into the vendor tags (GA4, Meta, Snap, TikTok), but only when tags.js has
+     loaded them after consent, and always under the same event_id the server-side fan-out re-sends them with,
+     so a person seen by both the pixel and the Conversions API is counted once.
 
    Storage follows consent: with analytics or ads accepted the state lives in localStorage (90 days) and a
    `bona_id` cookie; otherwise it lives in sessionStorage and dies with the tab. Ref codes work either way.
@@ -25,7 +29,7 @@
   var CIDS = ['fbclid', 'gclid', 'gbraid', 'wbraid', 'gad_source', 'gad_campaignid', 'ttclid', 'ScCid', 'msclkid', 'li_fat_id', 'twclid', 'dclid'];
   var SOCIAL = /instagram|facebook|google|tiktok|snapchat|x\.com|twitter|linkedin|youtube|whatsapp/;
   var ALPHA = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  var EVENTS = ['page_view', 'listing_view', 'gallery_open', 'tour_open', 'video_play', 'brochure_download', 'whatsapp_click', 'call_click', 'form_submit', 'consent_update', 'concierge_open'];
+  var EVENTS = ['page_view', 'listing_view', 'gallery_open', 'tour_open', 'video_play', 'brochure_download', 'whatsapp_click', 'call_click', 'form_submit', 'consent_update', 'concierge_open', 'map_click'];
   var LISTING_RE = /^BONA-W?\d{3}$/;
 
   /* ------------------------------------------------------------------ helpers */
@@ -156,10 +160,17 @@
   /* ------------------------------------------------------------------ events */
   function eventId() { return Date.now().toString(36) + '-' + hex(4); }
 
-  function send(event, props, listing) {
+  /**
+   * @param {string} event    one of EVENTS
+   * @param {object} [props]
+   * @param {string} [listing]
+   * @param {{ eventId?: string }} [opts]  reuse an id minted elsewhere. The enquiry form does this: the id it
+   *        posts to /v1/enquiry has to be the id the pixels fire Lead with, or Meta counts the same lead twice.
+   */
+  function send(event, props, listing, opts) {
     if (EVENTS.indexOf(event) < 0) return null;
     var s = state || arrive(!navigated);
-    var id = eventId();
+    var id = (opts && typeof opts.eventId === 'string' && opts.eventId) ? opts.eventId : eventId();
     var lid = listing || listingOnPage();
     var p = {};
     if (props && typeof props === 'object') {
@@ -186,19 +197,55 @@
     return id;
   }
 
-  /** The vendor tags see the same events, with the same event_id (server-side fan-out dedupes on it). */
+  /* What each vendor is told, per event. GA4 gets our own name (register it as a key event in the GA4 UI);
+     the ad pixels get their own vocabulary, and `null` means that platform has no honest name for it — better
+     no event than one that muddies a standard one the owner will optimise campaigns against. `metaCustom`
+     sends the name through trackCustom instead of track. `page_view` is not here: tags.js owns it, so a view
+     transition counts exactly once. `consent_update` is ours alone and is never mirrored. */
+  var MIRROR = {
+    listing_view:      { ga4: 'view_item',          meta: 'ViewContent',       snap: 'VIEW_CONTENT', tiktok: 'ViewContent' },
+    whatsapp_click:    { ga4: 'whatsapp_click',     meta: 'Contact',           snap: 'CUSTOM_EVENT_1', tiktok: 'Contact' },
+    call_click:        { ga4: 'call_click',         meta: 'Contact',           snap: null,           tiktok: 'Contact' },
+    form_submit:       { ga4: 'generate_lead',      meta: 'Lead',              snap: 'SIGN_UP',      tiktok: 'SubmitForm' },
+    brochure_download: { ga4: 'brochure_download',  meta: 'BrochureDownload',  snap: null,           tiktok: 'Download', metaCustom: true },
+    concierge_open:    { ga4: 'concierge_open',     meta: null,                snap: null,           tiktok: null },
+    map_click:         { ga4: 'map_click',          meta: 'FindLocation',      snap: null,           tiktok: null },
+    tour_open:         { ga4: 'tour_open',          meta: null,                snap: null,           tiktok: null },
+    gallery_open:      { ga4: 'gallery_open',       meta: null,                snap: null,           tiktok: null },
+    video_play:        { ga4: 'video_play',         meta: null,                snap: null,           tiktok: null },
+  };
+
+  /** The vendor tags see the same events, with the same event_id (server-side fan-out dedupes on it). Every call
+      is guarded: a tag that never loaded (no id, or no consent) simply is not a function, and a tag that throws
+      must never take the page with it. */
   function mirror(event, body) {
+    var m = MIRROR[event];
+    if (!m) return;
     var listing = body.listing_id;
     var ids = listing ? [listing] : [];
+    var cta = (body.props && body.props.cta) || undefined;
     try {
-      if (event === 'whatsapp_click') {
-        if (typeof fbq === 'function') fbq('track', 'Contact', { content_ids: ids, content_type: 'product' }, { eventID: body.event_id });
-        if (typeof gtag === 'function') gtag('event', 'whatsapp_click', { listing_id: listing, cta: body.props.cta || undefined });
-      } else if (event === 'listing_view') {
-        if (typeof fbq === 'function') fbq('track', 'ViewContent', { content_ids: ids, content_type: 'product' }, { eventID: body.event_id });
-        if (typeof snaptr === 'function') snaptr('track', 'VIEW_CONTENT', { item_ids: ids });
-      } else if (event === 'call_click') {
-        if (typeof gtag === 'function') gtag('event', 'call_click', { listing_id: listing, cta: body.props.cta || undefined });
+      if (m.ga4 && typeof gtag === 'function') {
+        gtag('event', m.ga4, { listing_id: listing || undefined, cta: cta, ref: body.ref || undefined, event_id: body.event_id });
+      }
+    } catch (e) { /* ignore */ }
+    try {
+      if (m.meta && typeof fbq === 'function') {
+        fbq(m.metaCustom ? 'trackCustom' : 'track', m.meta,
+          listing ? { content_ids: ids, content_type: 'product' } : {},
+          { eventID: body.event_id });
+      }
+    } catch (e) { /* ignore */ }
+    try {
+      if (m.snap && typeof snaptr === 'function') {
+        snaptr('track', m.snap, { item_ids: ids, client_dedup_id: body.event_id });
+      }
+    } catch (e) { /* ignore */ }
+    try {
+      if (m.tiktok && window.ttq && typeof window.ttq.track === 'function') {
+        window.ttq.track(m.tiktok,
+          listing ? { contents: [{ content_id: listing, content_type: 'product' }] } : {},
+          { event_id: body.event_id });
       }
     } catch (e) { /* a vendor tag must never break ours */ }
   }
@@ -240,7 +287,10 @@
     var tel = t.closest('a[href^="tel:"]');
     if (tel) { send('call_click', { cta: tel.getAttribute('data-cta') || null, href: tel.getAttribute('href') }); return; }
     var tracked = t.closest('[data-track]');
-    if (tracked) send(tracked.getAttribute('data-track'), { cta: tracked.getAttribute('data-cta') || null });
+    if (tracked) {
+      var marked = tracked.getAttribute('data-listing');
+      send(tracked.getAttribute('data-track'), { cta: tracked.getAttribute('data-cta') || null }, marked && LISTING_RE.test(marked) ? marked : null);
+    }
   }
 
   /* ------------------------------------------------------------------ per page */
@@ -251,7 +301,7 @@
   }
 
   /* ------------------------------------------------------------------ public API */
-  window.bonaTrack = function (event, props) { try { return send(event, props); } catch (e) { return null; } };
+  window.bonaTrack = function (event, props, opts) { try { return send(event, props, null, opts); } catch (e) { return null; } };
   window.bonaEventId = function () { try { return eventId(); } catch (e) { return String(Date.now()); } };
   /** Re-applies the storage rule after a consent choice (moves the state into localStorage + cookie on accept). */
   window.bonaAttrPersist = function () { try { if (state) save(state); } catch (e) { /* ignore */ } };
