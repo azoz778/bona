@@ -85,7 +85,7 @@ export function loadConfig(overrides = {}) {
       ? String(raw.BONA_BROCHURE_PY_CMD).trim().split(/\s+/)
       : ['uv', 'run', '--with', 'pymupdf', '--with', 'segno', '--with', 'fonttools', '--with', 'brotli', 'python'],
     brochureTimeoutMs: num(raw.BONA_BROCHURE_TIMEOUT_MS, 600000),
-    site: (raw.BONA_SITE || 'https://bona.azoz.uk').replace(/\/+$/, ''),
+    site: (raw.BONA_SITE || 'https://bona-real-estate.com').replace(/\/+$/, ''),
     maxPdfMb: num(raw.BONA_MAX_PDF_MB, 150), // real developer brochures are 50–80 MB (owner's files 2026-09-06)
     maxPdfPages: num(raw.BONA_MAX_PDF_PAGES, 120),
     // The size of the video that is COMMITTED, after ffmpeg has re-encoded it (H.264/AAC,
