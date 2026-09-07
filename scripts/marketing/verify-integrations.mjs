@@ -143,7 +143,11 @@ export async function checkGa4({ env, site, homeHtml, probe: send = probe }) {
   return row('ga4', tagStatus, detail, { secrets: [secret] });
 }
 
-export async function checkMetaCapi({ env, site }) {
+/* The Conversions API is server-to-server, so unlike the pixels there is no page to check. The only
+   thing that proves the dataset actually receives what we send is Meta answering `events_received`,
+   and that needs a META_TEST_EVENT_CODE. Without one, a token that can merely READ the dataset proves
+   the credentials and nothing more — that is `pending-owner` (paste a test code), never `live`. */
+export async function checkMetaCapi({ env, site, probe: send = probe }) {
   const pixel = env.META_PIXEL_ID;
   const token = env.META_CAPI_TOKEN;
   const testCode = env.META_TEST_EVENT_CODE;
@@ -164,7 +168,7 @@ export async function checkMetaCapi({ env, site }) {
       test_event_code: testCode,
       access_token: token,
     };
-    const res = await probe(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const res = await send(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (res.dry) return row('meta-capi', 'pending-owner', `[dry-run] would POST ${url} with one PageView test event (test_event_code present)`, { secrets: [token] });
     if (res.status === 200 && res.json?.events_received >= 1) {
       return row('meta-capi', 'live', `dataset ${pixel} received a PageView test event (test_event_code set — empty it once events show in Events Manager)`, { secrets: [token, testCode] });
@@ -172,9 +176,11 @@ export async function checkMetaCapi({ env, site }) {
     return row('meta-capi', 'error', `POST /${pixel}/events HTTP ${res.status}: ${res.json?.error?.message ?? res.error ?? res.text}`, { secrets: [token, testCode] });
   }
   const url = `https://graph.facebook.com/v21.0/${encodeURIComponent(pixel)}?fields=name,id&access_token=${encodeURIComponent(token)}`;
-  const res = await probe(url);
+  const res = await send(url);
   if (res.dry) return row('meta-capi', 'pending-owner', `[dry-run] would GET /v21.0/${pixel}?fields=name (no test_event_code set)`, { secrets: [token] });
-  if (res.status === 200 && res.json?.id) return row('meta-capi', 'live', `token can read dataset ${pixel} ("${res.json.name ?? ''}"); set META_TEST_EVENT_CODE to also fire a test event`, { secrets: [token] });
+  if (res.status === 200 && res.json?.id) {
+    return row('meta-capi', 'pending-owner', `the token can read dataset ${pixel} ("${res.json.name ?? ''}") — that proves the credentials, not that events arrive. Set META_TEST_EVENT_CODE in ~/.secrets/bona-marketing.env (Events Manager → Test events) so this row can send one and read events_received back; docs/checklists/meta-bona-portfolio.md §5–6`, { secrets: [token] });
+  }
   return row('meta-capi', 'error', `GET /${pixel} HTTP ${res.status}: ${res.json?.error?.message ?? res.error ?? res.text}`, { secrets: [token] });
 }
 
@@ -185,13 +191,18 @@ export function checkSiteTag({ id, label, value, homeHtml, checklist, siteKey })
   return row(id, 'error', `${label} ${value} is in site.json but the live home page does not serve it — deploy pending, or Head.astro not wired`);
 }
 
-export async function checkSnap({ env, site, homeHtml }) {
+/* Snap's /events/validate is the same shape of endpoint as GA4's debug/mp/collect: it checks the
+   payload and the token and ingests nothing, so "validated" is not "measuring". Same ladder as GA4:
+   the only checkable evidence is the pixel id from site.json coming back in the live home page. */
+export async function checkSnap({ env, site, homeHtml, probe: send = probe }) {
   const pixel = env.SNAP_PIXEL_ID;
   const token = env.SNAP_CAPI_TOKEN;
   const siteId = site.analytics?.snapPixel;
+  const served = present(siteId) && homeHtml != null && homeHtml.includes(siteId);
   const siteNote = present(siteId)
-    ? (homeHtml == null ? `site tag ${siteId} in site.json` : homeHtml.includes(siteId) ? 'site tag served' : `site tag ${siteId} in site.json but NOT on the live page`)
+    ? (homeHtml == null ? `site tag ${siteId} in site.json, live page NOT fetched` : served ? `site tag ${siteId} served` : `site tag ${siteId} in site.json but NOT on the live page`)
     : 'site tag missing: site.json → analytics.snapPixel';
+  const tagStatus = !present(siteId) ? 'pending-owner' : served ? 'live' : 'error';
   if (!present(pixel) || !present(token)) {
     return row('snap', 'pending-owner', `SNAP_PIXEL_ID ${present(pixel) ? 'present' : 'empty'}, SNAP_CAPI_TOKEN ${present(token) ? 'present' : 'empty'} in ~/.secrets/bona-marketing.env — docs/checklists/snapchat-bona.md. ${siteNote}`);
   }
@@ -206,11 +217,10 @@ export async function checkSnap({ env, site, homeHtml }) {
       user_data: { client_user_agent: UA },
     }],
   };
-  const res = await probe(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+  const res = await send(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
   if (res.dry) return row('snap', 'pending-owner', `[dry-run] would POST ${url} with one PAGE_VIEW (Bearer token). ${siteNote}`, { secrets: [token] });
   if (res.status === 200 && !(res.json?.status === 'FAILED' || res.json?.reason)) {
-    const status = present(siteId) && (homeHtml == null || homeHtml.includes(siteId)) ? 'live' : 'error';
-    return row('snap', status, `Snap validated a PAGE_VIEW for pixel ${pixel}. ${siteNote}`, { secrets: [token] });
+    return row('snap', tagStatus, `Snap validated a PAGE_VIEW payload for pixel ${pixel} — /events/validate ingests nothing, so this proves the token and the shape, not that Snap is receiving events. ${siteNote}`, { secrets: [token] });
   }
   return row('snap', 'error', `POST /v3/${pixel}/events/validate HTTP ${res.status}: ${res.json?.reason ?? res.json?.status ?? res.error ?? res.text}`, { secrets: [token] });
 }
@@ -275,6 +285,7 @@ const NEW_ROW_META = {
   'meta-pixel': { name: 'Meta Pixel (site)', owner: 'owner', link: 'https://business.facebook.com/events_manager2', action: 'docs/checklists/meta-bona-portfolio.md §4' },
   'meta-capi': { name: 'Meta Conversions API', owner: 'owner', link: 'https://business.facebook.com/events_manager2', action: 'docs/checklists/meta-bona-portfolio.md §5–6' },
   'snap': { name: 'Snap Pixel + Conversions API', owner: 'owner', link: 'https://ads.snapchat.com/', action: 'docs/checklists/snapchat-bona.md' },
+  'tiktok-pixel': { name: 'TikTok Pixel (site)', owner: 'owner', link: 'https://ads.tiktok.com/i18n/events_manager', action: 'paste the sdkid into site.json → analytics.tiktokPixel' },
   'gsc': { name: 'Google Search Console', owner: 'owner', link: 'https://search.google.com/search-console', action: 'docs/checklists/google-bona.md §2' },
   'bona-api': { name: 'Concierge API (bona-api)', owner: 'agent', link: healthLink(SITE), action: 'systemctl --user status bona-api cloudflared-bona' },
   'retell': { name: 'Retell (Dana)', owner: 'owner', link: 'https://dashboard.retellai.com/', action: 'services/README.md §5' },
@@ -312,6 +323,9 @@ export async function run() {
   results.push(await checkMetaCapi({ env, site }));
   results.push(checkSiteTag({ id: 'meta-pixel', label: 'Meta Pixel', value: analytics.metaPixel, homeHtml, siteKey: 'metaPixel', checklist: 'docs/checklists/meta-bona-portfolio.md §4' }));
   results.push(await checkSnap({ env, site, homeHtml }));
+  // TikTok is a site tag only: there is no server-side key for it yet, so the live page is the
+  // whole check — exactly what checkSiteTag was written for.
+  results.push(checkSiteTag({ id: 'tiktok-pixel', label: 'TikTok Pixel', value: analytics.tiktokPixel, homeHtml, siteKey: 'tiktokPixel', checklist: 'TikTok Ads → Assets → Events → Web Events → the pixel\'s sdkid' }));
   results.push(checkGsc({ site, homeHtml }));
   const { api, retell } = await checkApi({ site });
   results.push(api, retell);
