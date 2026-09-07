@@ -18,12 +18,15 @@
  *   POST /v1/enquiry               { form, name, phone, … }    -> { lead_id }
  *
  * Everything is JSON, `Cache-Control: no-store`, CORS-allowlisted, per-IP rate
- * limited, and bodies are capped at 16 KB (8 KB for events).
+ * limited, and bodies are capped at 16 KB (8 KB for events). The one exception is a
+ * request that arrives on a legacy site host (see `lib/legacy.mjs`): it is 301'd to
+ * `BONA_SITE` before any of that runs.
  */
 import http from 'node:http';
 import path from 'node:path';
 import { loadConfig, redacted } from './lib/config.mjs';
 import { corsHeaders, isAllowedOrigin } from './lib/cors.mjs';
+import { isLegacyHost, legacyRedirectUrl } from './lib/legacy.mjs';
 import { createLimiter, clientIp, trustedPeer } from './lib/ratelimit.mjs';
 import { openDb, newId } from './lib/db.mjs';
 import { validateEvent, recordEvent, cleanAttrIds, MAX_BODY_BYTES as MAX_EVENT_BYTES } from './lib/events.mjs';
@@ -539,6 +542,24 @@ export function createApp(options = {}) {
   }
 
   async function handle(req, res) {
+    // The old site host, answered before anything else looks at the request. bona.azoz.uk
+    // was the site until the move to bona-real-estate.com, and its DNS now points at this
+    // API's tunnel — but there is nothing here for it, so every request it brings is sent
+    // on to the same path on the new domain. Ahead of CORS, the rate limiters, the token
+    // check and the routing table on purpose: someone following a two-year-old link must
+    // get the page, not a 404 or a 401, and a host that has no routes here must not be
+    // able to spend a bucket or a day's budget on the way to being told so.
+    if (isLegacyHost(req.headers.host, cfg.legacyHosts)) {
+      res.writeHead(301, {
+        Location: legacyRedirectUrl(cfg.siteUrl, req.url),
+        // Short, because the old host is a stepping stone: it stays cheap to change our
+        // minds about where it points while the move is still settling.
+        'Cache-Control': 'max-age=3600',
+        'Content-Length': '0',
+      });
+      return res.end();
+    }
+
     const origin = req.headers.origin;
     const cors = corsHeaders(origin, cfg.origins);
     let url;

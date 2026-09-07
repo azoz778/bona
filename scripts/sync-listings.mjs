@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { HOUSE_PRICE_CAP, isHousePublic, sarAmount } from './curate/rules.mjs';
 
 const API = process.env.TK_PUBLIC_API || 'https://dashboard.azoz.uk/api/public/properties';
 const TIMEOUT_MS = 10_000;
@@ -70,7 +71,7 @@ async function main() {
   }
   const byId = new Map(rows.map((r) => [String(r.id), r]));
 
-  const listings = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+  let listings = JSON.parse(fs.readFileSync(FILE, 'utf8'));
   const changes = [];
   let matched = 0;
   const missing = [];
@@ -103,6 +104,19 @@ async function main() {
       changes.push(`${l.id} virtualTourUrl null -> ${tour}`);
       l.virtualTourUrl = tour;
     }
+  }
+
+  // Owner rule 2026-09-08: houses over SAR 10,000,000 are not on the public site. A price
+  // rise from TK can push a published house over the cap, and the daily deploy runs this
+  // script and then builds WITHOUT re-running scripts/curate/build.mjs — so without this,
+  // a synced price would quietly republish a home the cap exists to hide. Drop it here.
+  const overCap = listings.filter((l) => !isHousePublic(l));
+  if (overCap.length) {
+    for (const l of overCap) {
+      changes.push(`${l.id} REMOVED — house over the SAR ${HOUSE_PRICE_CAP.toLocaleString('en-US')} cap (${Math.round(sarAmount(l.price)).toLocaleString('en-US')} SAR eq.)`);
+    }
+    const drop = new Set(overCap.map((l) => l.id));
+    listings = listings.filter((l) => !drop.has(l.id));
   }
 
   if (changes.length) {

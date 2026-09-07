@@ -1,6 +1,6 @@
 # Bona services
 
-Back-office processes for [bona.azoz.uk](https://bona.azoz.uk). The site itself is a
+Back-office processes for [bona-real-estate.com](https://bona-real-estate.com). The site itself is a
 static Astro build on GitHub Pages, so anything that needs a server lives here.
 
 | Service | Directory | Unit | What it does |
@@ -17,7 +17,7 @@ is built on Node's own `http`. Node ≥ 22.
 ## 1. The concierge, end to end
 
 ```
-visitor on bona.azoz.uk
+visitor on bona-real-estate.com
         │  fetch (CORS allowlist)
         ▼
 bona-api.azoz.uk  ──Cloudflare tunnel──▶  bona-api on 127.0.0.1:4102 (WSL)
@@ -54,6 +54,12 @@ dests, running }`. The WhatsApp poller and the owner dashboard (`/dashboard`,
 Every response is `Content-Type: application/json` and `Cache-Control: no-store`.
 Browser-facing routes are CORS-allowlisted; Retell-facing routes are token-gated and
 deliberately **not** CORS-readable.
+
+One thing happens before any of that. A request whose `Host` is a legacy site host —
+`bona.azoz.uk`, left stranded because GitHub Pages serves only one
+custom domain — is answered with a `301` to the same path and query on `BONA_SITE`,
+ahead of CORS, the rate limiters, the token check and the routing table. The old host's
+DNS points at this API's tunnel for exactly that reason; see `BONA_LEGACY_HOSTS`.
 
 | Route | Body → Response |
 |---|---|
@@ -149,7 +155,7 @@ Returned inside `actions[].listing` and in the call context.
   "price":    { "en": "SAR 6,700,000", "ar": "6,700,000 ر.س" },   // formatted, never computed
   "beds": 5, "baths": 8, "areaSqm": 640,
   "image": { "src": "https://…", "thumb": "https://…" },          // always absolute
-  "url":   { "en": "https://bona.azoz.uk/properties/…/", "ar": "https://bona.azoz.uk/ar/properties/…/" }
+  "url":   { "en": "https://bona-real-estate.com/properties/…/", "ar": "https://bona-real-estate.com/ar/properties/…/" }
 }
 ```
 
@@ -217,11 +223,11 @@ curl -s $API/health | jq
 
 # open a chat and ask something
 SID=$(curl -s -X POST $API/v1/chat/session \
-      -H 'Content-Type: application/json' -H 'Origin: https://bona.azoz.uk' \
-      -d '{"locale":"ar","page":{"url":"https://bona.azoz.uk/ar/","title":"بونا"}}' | jq -r .sessionId)
+      -H 'Content-Type: application/json' -H 'Origin: https://bona-real-estate.com' \
+      -d '{"locale":"ar","page":{"url":"https://bona-real-estate.com/ar/","title":"بونا"}}' | jq -r .sessionId)
 
 curl -s -X POST $API/v1/chat/message \
-  -H 'Content-Type: application/json' -H 'Origin: https://bona.azoz.uk' \
+  -H 'Content-Type: application/json' -H 'Origin: https://bona-real-estate.com' \
   -d "{\"sessionId\":\"$SID\",\"text\":\"أبغى فيلا في الخالدية\"}" | jq
 
 curl -s -X POST $API/v1/chat/end -H 'Content-Type: application/json' \
@@ -229,7 +235,7 @@ curl -s -X POST $API/v1/chat/end -H 'Content-Type: application/json' \
 
 # a web-call token (the widget passes accessToken to RetellWebClient.startCall)
 curl -s -X POST $API/v1/call/token -H 'Content-Type: application/json' \
-  -H 'Origin: https://bona.azoz.uk' -d '{"locale":"en"}' | jq
+  -H 'Origin: https://bona-real-estate.com' -d '{"locale":"en"}' | jq
 
 # what Dana has shown during that call
 curl -s $API/v1/call/<callId>/context | jq
@@ -274,8 +280,8 @@ never logged. `process.env` always wins over a file.
 |---|---|---|
 | `BONA_API_PORT` | `4102` | |
 | `BONA_API_HOST` | `127.0.0.1` | the tunnel is the only way in |
-| `BONA_SITE` | `https://bona.azoz.uk` | used to absolutise image and page URLs |
-| `BONA_PUBLIC_API` | `https://bona-api.azoz.uk` | baked into the Retell tool URLs |
+| `BONA_SITE` | `https://bona-real-estate.com` | used to absolutise image and page URLs |
+| `BONA_PUBLIC_API` | `https://api.bona-real-estate.com` | baked into the Retell tool URLs |
 | `BONA_TOOL_TOKEN` | *(generated)* | 32 hex; gates `/v1/tools/*` and the webhook |
 | `BONA_ALLOW_QUERY_TOKEN` | `0` | `1` also accepts `?token=` on `/v1/tools/*` (the webhook always does) |
 | `BONA_TRUSTED_PROXY` | — | comma separated; addresses allowed to set `CF-Connecting-IP` |
@@ -284,6 +290,7 @@ never logged. `process.env` always wins over a file.
 | `BONA_REPO` | `~/bona-bot` | checkout whose `src/data/listings.json` is served |
 | `BONA_INVENTORY_FILE` | — | overrides the two rules above outright |
 | `BONA_CORS_ORIGINS` | site, Pages, localhost:4321 | comma separated |
+| `BONA_LEGACY_HOSTS` | `bona.azoz.uk` | comma separated; each is 301'd to `BONA_SITE`, path and query kept. Anything listed must also be routed to the tunnel via `BONA_EXTRA_HOSTNAMES` |
 | `BONA_RETELL_VOICE_AGENT_ID` / `_CHAT_AGENT_ID` | from `ids.json` | env wins |
 | `BONA_RETELL_MODEL` / `_MODEL_FALLBACK` | `claude-4.6-sonnet` / `gpt-4.1` | |
 | `BONA_RETELL_SEPARATE_CHAT_AGENT` | `1` | `0` reuses the voice agent for chat |
@@ -317,6 +324,7 @@ cd ~/bona/services
 node api/retell/provision.mjs --dry-run   # prints every payload, calls nothing
 node api/retell/provision.mjs             # creates or updates, writes retell/ids.json
 node api/retell/provision.mjs --publish   # also publishes both agent versions
+node api/retell/provision.mjs --rebuild-kb  # replace the knowledge base after a site move
 node api/retell/provision.mjs --ensure-env  # only create ~/.secrets/bona-services.env
 ```
 
@@ -332,6 +340,12 @@ What it creates:
    is `multipart/form-data`, and an array field is **one** field holding a JSON-encoded
    array — verified against the live API on 2026-09-06: repeating the field name gives a
    500, and so does sending a JSON body.
+   **After a site move, use `--rebuild-kb`.** Retell has no endpoint that re-points a
+   knowledge base at new URLs, so a base created for the old domain keeps auto-refreshing
+   URLs that now 404 — a silent decay, since nothing errors. A plain run therefore compares
+   the base's `knowledge_base_sources` against `BONA_SITE` and warns; `--rebuild-kb` creates
+   the replacement, moves the LLM's `knowledge_base_ids` to it, and only then deletes the old
+   one, so a failure anywhere leaves Dana on a stale base rather than on none.
 2. **Retell LLM "Bona Dana"** — `general_prompt` from `api/retell/prompt.md`, bilingual
    `begin_message`, `start_speaker: agent`, `knowledge_base_ids`, and three custom
    tools pointing at `${BONA_PUBLIC_API}/v1/tools/<name>`, each carrying the token in an

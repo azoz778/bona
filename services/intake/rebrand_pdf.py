@@ -12,7 +12,7 @@ What it does to the PDF, and nothing else:
      Cormorant with the champagne hairline from `public/logo.svg` under it, the title in
      Arabic and English, the location/price line and the tagline;
   2. stamps a discreet **footer strip** across the bottom of every ORIGINAL page —
-     `bona.azoz.uk · +966 59 329 6933 · FAL 1100313556 · <listing id>`, ink on ivory;
+     `<site host> · +966 59 329 6933 · FAL 1100313556 · <listing id>`, ink on ivory;
   3. appends a closing **"Enquire"** page — listing URL, a QR code of it (segno), the
      WhatsApp link, the opening hours in both languages and the licence line.
 
@@ -415,7 +415,7 @@ DEFAULT_BRAND = {
     "nameAr": "بونا",
     "legalName": "Bona Real Estate",
     "tagline": {"en": "Exceptional homes, quietly.", "ar": "منازل استثنائية، بهدوء."},
-    "site": "https://bona.azoz.uk",
+    "site": "https://bona-real-estate.com",
     "phone": "+966 59 329 6933",
     "wa": "966593296933",
     "fal": "1100313556",

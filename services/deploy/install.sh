@@ -34,10 +34,17 @@ UNIT_DIR="$HOME/.config/systemd/user"
 CF_DIR="$HOME/.cloudflared"
 CF_CONFIG="$CF_DIR/bona.yml"
 TUNNEL="bona"
-HOSTNAME_API="${BONA_API_HOSTNAME:-bona-api.azoz.uk}"
+HOSTNAME_API="${BONA_API_HOSTNAME:-api.bona-real-estate.com}"
+# Hostnames that must keep reaching this same service. bona-api.azoz.uk is the API's old address,
+# still answering so anything that cached it does not break; bona.azoz.uk is the site's old address,
+# which the API answers with a 301 to the current site (GitHub Pages serves one custom domain, so
+# the old one cannot be redirected there). Space or comma separated; empty is allowed.
+HOSTNAMES_EXTRA="${BONA_EXTRA_HOSTNAMES-bona-api.azoz.uk bona.azoz.uk}"
 PORT="${BONA_API_PORT:-4102}"
 SECRETS="$HOME/.secrets/bona-services.env"
 CLOUDFLARED="${CLOUDFLARED:-$(command -v cloudflared || echo "$HOME/.local/bin/cloudflared")}"
+
+ALL_HOSTNAMES="$(printf '%s\n' "$HOSTNAME_API" $(printf '%s' "$HOSTNAMES_EXTRA" | tr ',' ' ') | awk 'NF && !seen[$0]++')"
 
 DO_DNS=1
 DO_RESTART=0
@@ -131,42 +138,43 @@ tunnel: $TUNNEL_ID
 credentials-file: $CREDS
 
 ingress:
-  - hostname: $HOSTNAME_API
-    service: http://localhost:$PORT
-    originRequest:
-      connectTimeout: 10s
-      noTLSVerify: false
-  - service: http_status:404
+$(for h in $ALL_HOSTNAMES; do printf '  - hostname: %s\n    service: http://localhost:%s\n    originRequest:\n      connectTimeout: 10s\n      noTLSVerify: false\n' "$h" "$PORT"; done; printf '  - service: http_status:404')
 YAML
 )"
   if [ -f "$CF_CONFIG" ] && [ "$(cat "$CF_CONFIG")" = "$NEW_CONFIG" ]; then
     ok "config unchanged"
   else
     printf '%s\n' "$NEW_CONFIG" > "$CF_CONFIG"
-    ok "config written ($HOSTNAME_API -> http://localhost:$PORT, catch-all 404)"
+    # A running tunnel holds its ingress in memory, so a rewritten file changes nothing
+    # until the unit restarts. Record it here; the unit loop below acts on it.
+    CF_CONFIG_CHANGED=1
+    ok "config written ($(printf '%s' "$ALL_HOSTNAMES" | tr '\n' ' ')-> http://localhost:$PORT, catch-all 404)"
   fi
 
   # ------------------------------------------------------------- 4. DNS
-  say "Routing DNS $HOSTNAME_API"
+  # Every hostname in the ingress needs a CNAME at this tunnel, or it simply does not resolve.
   # --config: with a default ~/.cloudflared/config.yml present (another tunnel), cloudflared routed the
   # hostname to THAT tunnel id on 2026-09-06. Pin the config, and --overwrite-dns so a re-run repairs a
   # wrong record instead of failing on "record already exists".
-  if "$CLOUDFLARED" --config "$CF_CONFIG" tunnel route dns --overwrite-dns "$TUNNEL" "$HOSTNAME_API" 2>&1 | tee "$TMP/dns.log"; then
-    ok "DNS routed"
-  elif grep -qiE 'already exists|record with that host' "$TMP/dns.log"; then
-    ok "DNS record already points at this tunnel"
-  else
-    warn "DNS routing failed. Fix it in the Cloudflare dashboard (CNAME $HOSTNAME_API -> $TUNNEL_ID.cfargotunnel.com) and re-run; the output above is the whole story."
-  fi
-
-  # Verify what the public resolvers see: the CNAME must point at THIS tunnel, or the API is unreachable.
   EXPECT="$TUNNEL_ID.cfargotunnel.com"
-  GOT="$(node -e 'const {Resolver}=require("dns").promises;const r=new Resolver();r.setServers(["1.1.1.1","8.8.8.8"]);r.resolveCname(process.argv[1]).then(a=>console.log(a[0]||"")).catch(()=>console.log(""))' "$HOSTNAME_API" 2>/dev/null || true)"
-  if [ -n "$GOT" ] && [ "$GOT" != "$EXPECT" ]; then
-    warn "DNS mismatch: $HOSTNAME_API -> $GOT (expected $EXPECT). Run: $CLOUDFLARED --config $CF_CONFIG tunnel route dns --overwrite-dns $TUNNEL $HOSTNAME_API"
-  elif [ -n "$GOT" ]; then
-    ok "DNS: $HOSTNAME_API -> $GOT"
-  fi
+  for h in $ALL_HOSTNAMES; do
+    say "Routing DNS $h"
+    if "$CLOUDFLARED" --config "$CF_CONFIG" tunnel route dns --overwrite-dns "$TUNNEL" "$h" 2>&1 | tee "$TMP/dns.log"; then
+      ok "DNS routed"
+    elif grep -qiE 'already exists|record with that host' "$TMP/dns.log"; then
+      ok "DNS record already points at this tunnel"
+    else
+      warn "DNS routing failed for $h. Fix it in the Cloudflare dashboard (CNAME $h -> $EXPECT) and re-run; the output above is the whole story."
+    fi
+
+    # Verify what the public resolvers see: the CNAME must point at THIS tunnel, or the host is unreachable.
+    GOT="$(node -e 'const {Resolver}=require("dns").promises;const r=new Resolver();r.setServers(["1.1.1.1","8.8.8.8"]);r.resolveCname(process.argv[1]).then(a=>console.log(a[0]||"")).catch(()=>console.log(""))' "$h" 2>/dev/null || true)"
+    if [ -n "$GOT" ] && [ "$GOT" != "$EXPECT" ]; then
+      warn "DNS mismatch: $h -> $GOT (expected $EXPECT). Run: $CLOUDFLARED --config $CF_CONFIG tunnel route dns --overwrite-dns $TUNNEL $h"
+    elif [ -n "$GOT" ]; then
+      ok "DNS: $h -> $GOT"
+    fi
+  done
 else
   say "Skipping tunnel and DNS (--no-dns)"
 fi
@@ -208,7 +216,7 @@ for unit in bona-api.service cloudflared-bona.service; do
     continue
   fi
   if systemctl --user is-active --quiet "$unit"; then
-    if [ "$DO_RESTART" = 1 ] || { [ "$unit" = cloudflared-bona ] && [ "${CF_CONFIG_CHANGED:-0}" = 1 ]; }; then systemctl --user restart "$unit"; ok "$unit restarted"; else ok "$unit already running"; fi
+    if [ "$DO_RESTART" = 1 ] || { [ "$unit" = cloudflared-bona.service ] && [ "${CF_CONFIG_CHANGED:-0}" = 1 ]; }; then systemctl --user restart "$unit"; ok "$unit restarted"; else ok "$unit already running"; fi
     systemctl --user enable "$unit" >/dev/null 2>&1 || true
   else
     systemctl --user enable --now "$unit"
