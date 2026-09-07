@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeBoard, checkSiteTag, checkGsc, checkGa4, checkApi, buildUserAgent, healthLink } from '../marketing/verify-integrations.mjs';
+import { mergeBoard, checkSiteTag, checkGsc, checkGa4, checkSnap, checkMetaCapi, checkApi, buildUserAgent, healthLink } from '../marketing/verify-integrations.mjs';
 
 test('mergeBoard updates rows by id and appends unknown ids with their metadata', () => {
   const board = [
@@ -123,4 +123,57 @@ test('a declared apiBase is the host that gets probed', async () => {
   assert.deepEqual(seen, ['https://api.example.test/health']);
   assert.equal(api.status, 'live');
   assert.equal(retell.status, 'live');
+});
+
+/* ---------------- Snap and Meta: the same endpoint honesty as GA4 ---------------- */
+
+const SNAP_ENV = { SNAP_PIXEL_ID: 'snap-1', SNAP_CAPI_TOKEN: 'snap-token' };
+const SNAP_SITE = { url: 'https://example.test', analytics: { snapPixel: 'snap-1' } };
+const okSnap = async () => ({ status: 200, ok: true, text: '{}', json: {} });
+
+test('Snap: a validated payload is not a served pixel — live needs the tag on the live page', async () => {
+  // /events/validate is Snap's debug endpoint: it checks the token and the shape and ingests nothing.
+  for (const homeHtml of [null, '<html>no pixel here</html>']) {
+    const r = await checkSnap({ env: SNAP_ENV, site: SNAP_SITE, homeHtml, probe: okSnap });
+    assert.notEqual(r.status, 'live', `homeHtml ${homeHtml === null ? 'not fetched' : 'without the id'}`);
+    assert.equal(r.status, 'error');
+  }
+  const served = await checkSnap({ env: SNAP_ENV, site: SNAP_SITE, homeHtml: '<script>snap-1</script>', probe: okSnap });
+  assert.equal(served.status, 'live');
+  assert.match(served.detail, /ingests nothing/);
+  assert.ok(!served.detail.includes('snap-token'), 'the token is never printed');
+});
+
+test('Snap with no pixel id in site.json is the owner\'s to paste, not an error', async () => {
+  const r = await checkSnap({ env: SNAP_ENV, site: { url: 'https://example.test', analytics: {} }, homeHtml: '<html></html>', probe: okSnap });
+  assert.equal(r.status, 'pending-owner');
+  assert.match(r.detail, /analytics\.snapPixel/);
+});
+
+test('Snap refusing the payload is an error whatever the page serves', async () => {
+  const bad = async () => ({ status: 401, ok: false, text: '{"reason":"BAD_TOKEN"}', json: { reason: 'BAD_TOKEN' } });
+  const r = await checkSnap({ env: SNAP_ENV, site: SNAP_SITE, homeHtml: '<script>snap-1</script>', probe: bad });
+  assert.equal(r.status, 'error');
+  assert.match(r.detail, /BAD_TOKEN/);
+});
+
+const META_SITE = { url: 'https://example.test' };
+
+test('Meta CAPI: a readable dataset proves the credentials, not that events arrive', async () => {
+  const readable = async () => ({ status: 200, ok: true, text: '{}', json: { id: '111', name: 'Bona' } });
+  const r = await checkMetaCapi({ env: { META_PIXEL_ID: '111', META_CAPI_TOKEN: 'tok' }, site: META_SITE, probe: readable });
+  assert.equal(r.status, 'pending-owner', 'reading a dataset is not measuring one');
+  assert.match(r.detail, /META_TEST_EVENT_CODE/);
+  assert.ok(!r.detail.includes('tok'), 'the token is never printed');
+});
+
+test('Meta CAPI is live only when the dataset says it received the test event', async () => {
+  const received = async () => ({ status: 200, ok: true, text: '{}', json: { events_received: 1 } });
+  const env = { META_PIXEL_ID: '111', META_CAPI_TOKEN: 'tok', META_TEST_EVENT_CODE: 'TEST123' };
+  const live = await checkMetaCapi({ env, site: META_SITE, probe: received });
+  assert.equal(live.status, 'live');
+
+  const nothing = async () => ({ status: 200, ok: true, text: '{}', json: { events_received: 0 } });
+  const r = await checkMetaCapi({ env, site: META_SITE, probe: nothing });
+  assert.equal(r.status, 'error');
 });
