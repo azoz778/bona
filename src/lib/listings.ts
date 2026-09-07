@@ -14,8 +14,14 @@ export interface Listing {
   price: { amount: number | null; currency: string; from?: boolean; period?: string | null; onRequest?: boolean };
   specs: { beds?: number | null; baths?: number | null; areaSqm?: number | null; plotSqm?: number | null; yearBuilt?: number | null; floors?: number | null };
   images: { src: string; thumb?: string | null; alt?: Localised }[];
-  /** Walkthrough clips (hosted URLs — site-local `/listings/<slug>/v-nn.mp4` or full https). Optional; added post-publish by the WhatsApp intake. */
-  videos?: string[];
+  /**
+   * Walkthrough clips. Optional; added post-publish by the WhatsApp intake, which transcodes
+   * each one (H.264/AAC, <=1080p, faststart) and cuts a `poster` frame out of it — so the
+   * player shows the property, not a black rectangle, before anyone presses play.
+   * `src`/`poster` are site-local (`/listings/<slug>/v-nn.mp4`, `…/v-nn-poster.jpg`) or full
+   * https URLs; `poster` is null when no frame could be read.
+   */
+  videos?: { src: string; poster?: string | null }[];
   description: Localised;
   highlights?: { en: string[]; ar: string[] };
   virtualTourUrl?: string | null; brochureUrl?: string | null; listedAt?: string;

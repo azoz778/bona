@@ -4,7 +4,7 @@ import sitemap from '@astrojs/sitemap';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
-  site: 'https://bona.azoz.uk',
+  site: 'https://bona-real-estate.com',
   output: 'static',
   trailingSlash: 'always',
   build: { format: 'directory' },

@@ -46,6 +46,15 @@ Decompression-bomb caps: an embedded bitmap over MAX_PIXELS (50 MP) is dropped i
 BEFORE any Pixmap is built, and every page render is clamped to a long side in pixels
 (RENDER_LONG_SIDE) whatever DPI is asked for.
 
+Memory discipline (2026-09-06, after bona-intake was OOM-killed inside its 1 GB cgroup on the
+Sadana and Al Shati brochures): ONE page is rendered at a time, every Pixmap is written
+straight to disk with `Pixmap.save()` instead of being materialised as a bytes object first,
+it is dropped the moment the file is on disk, and MuPDF's own object store — which caches the
+decoded source bitmap of a flattened page, 76 MB for the Sadana cover alone — is emptied after
+every page (`TOOLS.store_shrink(100)`). On top of that RENDER_MAX_PIXELS is a hard per-render
+pixel budget (12 MP): a 1080x10449 pt "story" page renders 1114x10776 instead of 1600x15481.
+Measured on the Sadana brochure: peak RSS 374 MB -> 233 MB.
+
 Never raises for a bad PDF: prints {"ok": false, "error": "..."} and exits 1.
 The caller (lib/pdf.mjs) is responsible for the default-deny classification.
 """
@@ -78,7 +87,32 @@ VIEW_MAX_ASPECT = 2.2           # beyond this a page is sliced before it is rend
 VIEW_TARGET_ASPECT = 1.45       # what each slice of a sliced page aims for
 VIEW_OVERLAP = 0.06             # slices overlap, so a photo on a seam is whole in one of them
 MAX_VIEWS = 40                  # hard cap on how many images one --mode views run produces
-RENDER_MAX_PIXELS = 30_000_000  # a render is scaled down until it fits (memory cap)
+RENDER_MAX_PIXELS = 12_000_000  # hard per-render pixel budget: a render is scaled down until it fits
+
+
+def free_store() -> None:
+    """Empty MuPDF's object store.
+
+    MuPDF caches the DECODED source bitmap of everything it has drawn. A brochure page that
+    is one flattened picture carries a 1620x15675 JPEG — 76 MB once decoded — and rendering
+    the next page does not drop it. Emptying the store after every page is what keeps a
+    multi-page render flat instead of cumulative.
+    """
+    try:
+        import pymupdf  # noqa: PLC0415
+        pymupdf.TOOLS.store_shrink(100)
+    except Exception:
+        pass
+
+
+def save_pixmap(pix, path: str, quality: int = 90) -> None:
+    """Write a Pixmap straight to disk.
+
+    `pix.tobytes("jpg")` builds the whole encoded image as a Python bytes object first, so a
+    24 MP page costs the raw samples AND the encoded copy at the same time. Pixmap.save()
+    streams it out instead.
+    """
+    pix.save(path, jpg_quality=quality)
 
 
 def collapse(s: str) -> str:
@@ -301,6 +335,9 @@ def main() -> int:
         page_images = []
         long_side = args.render_long_side or PAGE_READ_LONG_SIDE
         for i in wanted_pages(args.pages, pages):
+            # ONE page at a time: render it, write it, drop it, empty MuPDF's store. Nothing
+            # from page n is still resident when page n+1 is rendered.
+            pix = None
             try:
                 page = doc[i]
                 matrix = render_matrix(page, args.render_dpi, long_side,
@@ -308,8 +345,7 @@ def main() -> int:
                 pix = page.get_pixmap(matrix=matrix, alpha=False)
                 name = f"{i + 1:03d}.jpg"
                 path = os.path.join(page_dir, name)
-                with open(path, "wb") as fh:
-                    fh.write(pix.tobytes("jpg"))
+                save_pixmap(pix, path)
                 page_images.append({
                     "page": i + 1,
                     "file": os.path.join(rel_dir, name),
@@ -319,6 +355,9 @@ def main() -> int:
                 })
             except Exception:
                 continue
+            finally:
+                pix = None
+                free_store()
         doc.close()
         print(json.dumps({"ok": True, "pages": pages, "mode": "pages", "pageImages": page_images}, ensure_ascii=False))
         return 0
@@ -352,9 +391,11 @@ def main() -> int:
                     pix = page.get_pixmap(matrix=matrix, clip=clip, alpha=False)
                     name = f"{i + 1:03d}-{k + 1:02d}.jpg"
                     path = os.path.join(view_dir, name)
-                    with open(path, "wb") as fh:
-                        fh.write(pix.tobytes("jpg"))
+                    save_pixmap(pix, path)
+                    width, height = pix.width, pix.height
                 except Exception:
+                    pix = None
+                    free_store()
                     continue
                 views.append({
                     "id": len(views),
@@ -363,11 +404,15 @@ def main() -> int:
                     "slices": len(rects),
                     "file": os.path.join(args.view_dir, name),
                     "abs": os.path.abspath(path),
-                    "width": pix.width,
-                    "height": pix.height,
+                    "width": width,
+                    "height": height,
                     "x0": round(x0, 6), "y0": round(y0, 6),
                     "x1": round(x1, 6), "y1": round(y1, 6),
                 })
+                # Every slice of a long page redraws the same 76 MB source bitmap; without
+                # this the store keeps each one and the process grows slice by slice.
+                pix = None
+                free_store()
         doc.close()
         print(json.dumps({"ok": True, "pages": pages, "mode": "views", "views": views}, ensure_ascii=False))
         return 0
@@ -428,6 +473,10 @@ def main() -> int:
                 ext = "png"
             add(ext_img["image"], ext, w, h, i + 1, "embedded", stats[0] if stats else None,
                 placement_coverage(doc[i], xref))
+            ext_img = None
+        # colour_ratio() builds a Pixmap per candidate and MuPDF keeps every one of them in
+        # its store; a 40-image brochure would otherwise carry all of them to the end.
+        free_store()
 
     rendered = False
     if len(candidates) < RENDER_THRESHOLD:
@@ -437,12 +486,22 @@ def main() -> int:
         candidates = []
         seen.clear()
         for i in range(min(pages, args.max_candidates)):
+            pix = None
             try:
                 page = doc[i]
                 pix = page.get_pixmap(matrix=render_matrix(page, args.render_dpi, args.render_long_side), alpha=False)
-                add(pix.tobytes("jpg"), "jpg", pix.width, pix.height, i + 1, "render", None, 1.0)
+                # add() dedupes on the sha256 of the bytes, so this one render does have to
+                # exist as bytes — but only one at a time, and the Pixmap goes immediately.
+                data = pix.tobytes("jpg")
+                width, height = pix.width, pix.height
+                pix = None
+                add(data, "jpg", width, height, i + 1, "render", None, 1.0)
+                data = None
             except Exception:
                 continue
+            finally:
+                pix = None
+                free_store()
 
     # Hyperlink annotations. A brochure rarely prints coordinates, but it very often hides
     # a Google Maps link behind a "location" page — that is where a real pin comes from.

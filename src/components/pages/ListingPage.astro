@@ -114,9 +114,9 @@ const kindText = t(kindLabel[kind], locale);
               <h2 id={`video-${l.id}`} class="label text-stone-2">{t(ui.videoSectionTitle, locale)}</h2>
               <p class="mt-3 max-w-[52ch] text-[15px] leading-relaxed text-stone-2">{t(ui.videoIntro, locale)}</p>
               <div class="mt-6 grid gap-6">
-                {l.videos!.map((src, i) => (
-                  <video controls playsinline preload="metadata" poster={i === 0 ? l.images?.[0]?.src : undefined} class="aspect-video w-full bg-ink" aria-label={fill(t(ui.videoLabel, locale), { n: String(i + 1), title })}>
-                    <source src={src} type="video/mp4" />
+                {l.videos!.map((v, i) => (
+                  <video controls playsinline preload="metadata" poster={v.poster ?? (i === 0 ? l.images?.[0]?.src : undefined)} class="aspect-video w-full bg-ink" aria-label={fill(t(ui.videoLabel, locale), { n: String(i + 1), title })}>
+                    <source src={v.src} type="video/mp4" />
                   </video>
                 ))}
               </div>

@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv } from './env.mjs';
 import { parseOrigins } from './cors.mjs';
+import { resolveLegacyHosts } from './legacy.mjs';
 import { resolveInventoryFile } from './inventory.mjs';
 import { parseTrustedProxies } from './ratelimit.mjs';
 import { MAX_CALLS_PER_DAY, MAX_CHATS_PER_DAY, MAX_TURNS_PER_SESSION } from './budget.mjs';
@@ -44,8 +45,8 @@ export function version() {
 const truthy = (v, fallback = false) => (v == null || v === '' ? fallback : !['0', 'false', 'no', 'off'].includes(String(v).toLowerCase()));
 
 export function loadConfig({ env = loadEnv(), ids = readIds(), home = os.homedir() } = {}) {
-  const siteUrl = String(env.BONA_SITE ?? 'https://bona.azoz.uk').replace(/\/+$/, '');
-  const publicApi = String(env.BONA_PUBLIC_API ?? 'https://bona-api.azoz.uk').replace(/\/+$/, '');
+  const siteUrl = String(env.BONA_SITE ?? 'https://bona-real-estate.com').replace(/\/+$/, '');
+  const publicApi = String(env.BONA_PUBLIC_API ?? 'https://api.bona-real-estate.com').replace(/\/+$/, '');
   const dataDir = env.BONA_DATA ?? path.join(home, 'bona-data');
   return {
     port: Number(env.BONA_API_PORT ?? 4102),
@@ -56,6 +57,7 @@ export function loadConfig({ env = loadEnv(), ids = readIds(), home = os.homedir
     dbFile: env.BONA_DB_FILE ?? path.join(dataDir, 'bona.db'),
     inventoryFile: resolveInventoryFile(env),
     origins: parseOrigins(env.BONA_CORS_ORIGINS),
+    legacyHosts: resolveLegacyHosts(env.BONA_LEGACY_HOSTS, siteUrl),
     toolToken: env.BONA_TOOL_TOKEN ?? '',
     allowQueryToken: truthy(env.BONA_ALLOW_QUERY_TOKEN, false),
     trustedProxies: parseTrustedProxies(env.BONA_TRUSTED_PROXY),
@@ -103,6 +105,7 @@ export function redacted(cfg) {
   return {
     port: cfg.port, host: cfg.host, siteUrl: cfg.siteUrl, publicApi: cfg.publicApi,
     dataDir: cfg.dataDir, inventoryFile: cfg.inventoryFile, origins: cfg.origins,
+    legacyHosts: cfg.legacyHosts,
     retellMock: cfg.retellMock, hasRetellKey: Boolean(cfg.retellApiKey),
     hasToolToken: Boolean(cfg.toolToken), allowQueryToken: cfg.allowQueryToken,
     trustedProxies: cfg.trustedProxies, chatAgentId: cfg.chatAgentId,
