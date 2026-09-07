@@ -6,6 +6,8 @@
 
 export const DEFAULT_ORIGINS = [
   'https://bona.azoz.uk',
+  'https://bona-real-estate.com',
+  'https://www.bona-real-estate.com',
   'https://bona.com.sa',
   'https://www.bona.com.sa',
   'https://azoz778.github.io',

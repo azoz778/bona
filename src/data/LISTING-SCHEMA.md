@@ -97,15 +97,15 @@ this repo. Nothing else in the pipeline changes.
   `validate.mjs` accepts `/^\/(land|listings)\/[A-Za-z0-9-]+(?:\/[A-Za-z0-9-]+)?\.(jpg|webp)$/`
   for both (`/land/` stills remain land-only). Consumers must not prefix them with a CDN host —
   `ListingCard`, `Gallery` and `Head` already pass them through, and `lib/seo.ts::absoluteUrl`
-  turns `/listings/<slug>/01.jpg` into a full `https://bona.azoz.uk/...` OG image.
+  turns `/listings/<slug>/01.jpg` into a full `https://bona-real-estate.com/...` OG image.
   `images[0]` is the hero, exactly as for curated listings. 4–10 images; a PDF that yields fewer
   than 4 usable photographs is rejected rather than published thin.
 - **`sourceRef`**: `WA-<yyyymmdd>-<6 chars of the WhatsApp message id>`. It is deliberately NOT a
   TK reference, and `build.mjs` never looks it up in the TK API.
-- **`brochureUrl`**: `https://bona.azoz.uk/listings/<slug>/brochure.pdf` — the **default** for an
+- **`brochureUrl`**: `https://bona-real-estate.com/listings/<slug>/brochure.pdf` — the **default** for an
   intake listing, not an opt-in. The brochure at that path is not the developer's file: it is
   their document re-published under Bona's branding by `services/intake/rebrand_pdf.py`, with a
-  Bona cover in front of it, a footer strip (`bona.azoz.uk · +966 59 329 6933 · FAL 1100313556 ·
+  Bona cover in front of it, a footer strip (`bona-real-estate.com · +966 59 329 6933 · FAL 1100313556 ·
   <id>`) on every one of their pages and a closing *Enquire* page carrying the listing URL, a QR
   of it, the WhatsApp link, the opening hours and the licence line. Their own pages and branding
   are left exactly as they are; nothing Bona adds may carry another agency, and any listing fact

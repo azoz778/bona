@@ -22,6 +22,11 @@ import {
 import { ALLOWED_PATHS } from '../lib/publish.mjs';
 import { loadConfig } from '../lib/env.mjs';
 
+// The footer strip carries the host from src/data/site.json (rebrand_pdf.py's load_brand),
+// so this follows the configured domain instead of pinning one that a cutover would break.
+const SITE_HOST = JSON.parse(fs.readFileSync(new URL('../../../src/data/site.json', import.meta.url), 'utf8'))
+  .url.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+
 const LISTING = {
   id: 'BONA-W007',
   slug: 'garden-villa-al-rawdah',
@@ -292,7 +297,7 @@ print(json.dumps({
     const inner = textOf(out, 1);            // page 1 = the developer's first page
     assert.match(inner.text, /Marina Tower - developer page 1/, 'their copy is untouched');
     assert.equal(inner.images, 1, 'their photo is untouched');
-    assert.match(inner.text, /bona\.azoz\.uk/);
+    assert.ok(inner.text.includes(SITE_HOST), `the footer carries ${SITE_HOST}`);
     assert.match(inner.text, /\+966 59 329 6933/);
     assert.match(inner.text, /FAL 1100313556/);
     assert.match(inner.text, /BONA-W007/, 'the footer carries the listing id');

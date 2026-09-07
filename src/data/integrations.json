@@ -1,11 +1,11 @@
 [
   {
     "id": "website",
-    "name": "Website bona.azoz.uk",
+    "name": "Website bona-real-estate.com",
     "status": "live",
     "owner": "agent",
     "action": "Live since 2026-09-05 16:50 KSA. Daily rebuild 06:00 KSA.",
-    "link": "https://bona.azoz.uk/",
+    "link": "https://bona-real-estate.com/",
     "detail": "Astro static site on GitHub Pages; sections: for sale, rent, off-plan, international, houses, apartments, tours."
   },
   {
@@ -41,7 +41,7 @@
     "status": "live",
     "owner": "owner",
     "action": "1 tour live (Al Zahra Residences); paste more links into TK's virtual_tour_url or send them to the agent",
-    "link": "https://bona.azoz.uk/tours/",
+    "link": "https://bona-real-estate.com/tours/",
     "detail": "Synced from TK by the 06:00 rebuild (listings.json → virtualTourUrl); the site embeds each tour inline and lists them at /tours/."
   },
   {
@@ -50,7 +50,7 @@
     "status": "live",
     "owner": "agent",
     "action": "Published at /privacy/ (PDPL notice, EN + AR) and linked from the footer.",
-    "link": "https://bona.azoz.uk/privacy/"
+    "link": "https://bona-real-estate.com/privacy/"
   },
   {
     "id": "instagram",
@@ -84,7 +84,7 @@
     "name": "Google Analytics 4",
     "status": "pending-owner",
     "owner": "owner",
-    "action": "Create a GA4 property for bona.azoz.uk and paste the Measurement ID (G-XXXX) into site.json → analytics.ga4.",
+    "action": "Create a GA4 property for bona-real-estate.com and paste the Measurement ID (G-XXXX) into site.json → analytics.ga4.",
     "link": "https://analytics.google.com/"
   },
   {
@@ -100,7 +100,7 @@
     "name": "Google Search Console",
     "status": "pending-agent",
     "owner": "agent",
-    "action": "azoz.uk domain property is verified via DNS. Submit https://bona.azoz.uk/sitemap-index.xml once the site is live.",
+    "action": "azoz.uk domain property is verified via DNS. Submit https://bona-real-estate.com/sitemap-index.xml once the site is live.",
     "link": "https://search.google.com/search-console?resource_id=sc-domain:azoz.uk"
   },
   {
@@ -109,7 +109,7 @@
     "status": "live",
     "owner": "agent",
     "action": "Key file is in the site; CI submits changed URLs after each deploy.",
-    "link": "https://bona.azoz.uk/b0na7c3f9e2d4a1b8f6e5c4d3b2a1908.txt"
+    "link": "https://bona-real-estate.com/b0na7c3f9e2d4a1b8f6e5c4d3b2a1908.txt"
   },
   {
     "id": "gbp",
