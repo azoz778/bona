@@ -1,7 +1,7 @@
 # Bona WhatsApp intake
 
 The owner drops a property brochure PDF into a WhatsApp group on his own phone and, about a
-minute later, the property is on bona.azoz.uk. This service is what happens in between.
+minute later, the property is on bona-real-estate.com. This service is what happens in between.
 
 ```
 owner's phone ──WhatsApp group "Bona …"──▶ Evolution API (wa-api.azoz.uk, his own instance)
@@ -16,7 +16,7 @@ owner's phone ──WhatsApp group "Bona …"──▶ Evolution API (wa-api.azo
                                         │  reply    → "✅ Live: … "               │
                                         └─────────┬──────────────────────────────┘
                                                   ▼
-                              GitHub Actions ──▶ https://bona.azoz.uk
+                              GitHub Actions ──▶ https://bona-real-estate.com
 ```
 
 Nothing about this service is exposed to the internet: it makes outbound calls only.
@@ -38,7 +38,7 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
    | `#hidden` | writes the listing but keeps it off the site until `show <id>` |
 
 3. The bot replies `Reading the brochure…`, then either
-   `✅ *Title* — https://bona.azoz.uk/properties/<slug>/ · 8 photos · cover: Pool · SAR 4,500,000`
+   `✅ *Title* — https://bona-real-estate.com/properties/<slug>/ · 8 photos · cover: Pool · SAR 4,500,000`
    or one line saying why it was not published.
 4. Afterwards, plain text messages in the group act as commands:
 
@@ -256,7 +256,7 @@ default, so only the ones you want to change need to be present.
 | `BONA_GROUP_SCAN_MS` | `300000` | group discovery interval |
 | `BONA_CLAUDE_MODEL` | `sonnet` | the model for the extraction/curation step |
 | `BONA_CLAUDE_FALLBACK_MODEL` | `opus` | used for the last attempt if sonnet keeps failing the contract |
-| `BONA_SITE` | `https://bona.azoz.uk` | used for URLs and `brochureUrl` |
+| `BONA_SITE` | `https://bona-real-estate.com` | used for URLs and `brochureUrl` |
 | `BONA_MIN_IMAGES` / `BONA_MAX_IMAGES` | `4` / `10` | publishable photo count |
 | `BONA_MIN_IMAGE_SIDE` | `700` | smallest long side of a candidate photo |
 | `BONA_MAX_PDF_MB` / `BONA_MAX_PDF_PAGES` | `150` / `120` | input limits (developer brochures run 50–80 MB) |
