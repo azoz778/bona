@@ -15,8 +15,11 @@ const rtl = locale === 'ar';
     <div class="strip no-scrollbar" data-strip tabindex="0" role="region" aria-label={t(ui.gallery, locale)}>
       {images.map((img, i) => (
         <button type="button" class="strip-slide img-zoom" data-lb-open={i} aria-label={`${t(ui.openGallery, locale)} ${i + 1}`}>
+          {/* Slide 0 is the listing page's LCP element. It keeps fetchpriority and the shared-element
+              transition, but it needs the same srcset/sizes as its siblings: without them a phone downloads
+              the full-size 1920px JPEG (~400 KB) where a 15 KB WebP would do. */}
           {i === 0
-            ? <img src={img.src} alt={imageAlt(img, l, locale)} fetchpriority="high" decoding="async" transition:name={`listing-${l.slug}`} class="h-full w-full object-cover" />
+            ? <img src={img.src} srcset={img.thumb ? `${img.thumb} 400w, ${img.src} 1920w` : undefined} sizes="(min-width: 1024px) 60vw, 88vw" alt={imageAlt(img, l, locale)} fetchpriority="high" decoding="async" transition:name={`listing-${l.slug}`} class="h-full w-full object-cover" />
             : <img src={img.thumb ?? img.src} srcset={img.thumb ? `${img.thumb} 400w, ${img.src} 1920w` : undefined} sizes="(min-width: 1024px) 60vw, 88vw" alt={imageAlt(img, l, locale)} loading="lazy" decoding="async" class="h-full w-full object-cover" />}
         </button>
       ))}
