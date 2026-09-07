@@ -3,11 +3,16 @@
    Props API (stable): title, description, locale, path, image?, noindex?, jsonLd? (object | object[])
    Emits: charset/viewport, title (+ brand suffix), description, canonical, hreflang en/ar/x-default,
    robots, theme-color, favicons/manifest, Open Graph + Twitter, JSON-LD @graph (org + website once,
-   plus whatever the page passes), preconnects, GA4 / Meta Pixel hooks (only when configured). */
+   plus whatever the page passes), preconnects, the tag configuration (window.BONA_TAGS / BONA_API), the inline
+   first-party attribution script and the consent-gated tag loader (src/scripts/*.js). Nothing from Google, Meta,
+   Snap or TikTok is requested until the visitor accepts in the consent banner — and a tag whose id is null in
+   site.json → analytics is inert whatever the visitor chooses. */
 import site from '../../data/site.json';
 import type { Locale } from '../../lib/i18n';
 import privacy from '../../data/privacy.json';
 import { absoluteUrl, alternates, defaultOgImage, ogLocale, orgJsonLd, pageTitle, websiteJsonLd, compact, personJsonLd, webPageJsonLd, pageKindFromPath } from '../../lib/seo';
+import attributionSrc from '../../scripts/attribution.js?raw';
+import tagsSrc from '../../scripts/tags.js?raw';
 
 interface Props {
   title: string;
@@ -74,12 +79,47 @@ const ogType = listingNode ? 'article' : 'website';
 const publishedTime = listingNode && typeof listingNode.datePosted === 'string' ? listingNode.datePosted : undefined;
 const jsonLdText = JSON.stringify({ '@context': 'https://schema.org', '@graph': graph }).replace(/</g, '\\u003c');
 
-const analytics = site.analytics as { ga4: string | null; metaPixel: string | null };
-const ga4 = analytics.ga4 || null;
-const metaPixel = analytics.metaPixel || null;
+// ---- Tags. Ids live in site.json → analytics; every one is optional. They are only ever handed to the browser as
+//      configuration: src/scripts/tags.js injects the vendor loaders after consent (see Consent.astro). ----
+const analytics = site.analytics as { ga4?: string | null; metaPixel?: string | null; snapPixel?: string | null; tiktokPixel?: string | null; gscVerification?: string | null };
+const tags = {
+  ga4: analytics.ga4 || null,
+  metaPixel: analytics.metaPixel || null,
+  snapPixel: analytics.snapPixel || null,
+  tiktokPixel: analytics.tiktokPixel || null,
+};
+const gsc = analytics.gscVerification || null;
+const apiBase = ((site as { concierge?: { apiBase?: string } }).concierge?.apiBase || '').replace(/\/+$/, '');
+// `<` is escaped so a value can never close the script element.
+const tagConfig = `window.BONA_TAGS=${JSON.stringify(tags)};window.BONA_API=${JSON.stringify(apiBase)};`.replace(/</g, '\\u003c');
+
+// ---- Content Security Policy (GitHub Pages sends no headers, so it travels as a <meta>; frame-ancestors cannot be
+//      set that way and is left out). Everything the site talks to, and nothing else: the concierge API, the vendor
+//      tags (Google, Meta, Snap, TikTok — which only load after consent), Retell/LiveKit for the browser call, and
+//      Matterport, OpenStreetMap and the Google Maps office embed as frames. Localhost API origins are allowed only
+//      in dev builds or with BONA_CSP_LOCAL_API=1 (QA against a local API through the ?concierge_api= override, see
+//      docs/qa/concierge/README.md). ----
+const siteOrigin = new URL(site.url).origin;
+const localApi = import.meta.env.DEV || process.env.BONA_CSP_LOCAL_API === '1';
+const csp = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://connect.facebook.net https://sc-static.net https://analytics.tiktok.com",
+  ["connect-src 'self'", apiBase, siteOrigin,
+    'https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com',
+    'https://www.facebook.com https://tr.snapchat.com https://analytics.tiktok.com',
+    'https://*.retellai.com wss://*.retellai.com https://*.livekit.cloud wss://*.livekit.cloud',
+    localApi ? 'http://localhost:* http://127.0.0.1:*' : ''].filter(Boolean).join(' '),
+  "img-src 'self' data: https:",
+  "media-src 'self' https: blob:",
+  'frame-src https://my.matterport.com https://www.openstreetmap.org https://www.google.com',
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
+  "worker-src 'self' blob:",
+].join('; ');
 ---
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta http-equiv="Content-Security-Policy" content={csp} />
 <title>{fullTitle}</title>
 <meta name="description" content={desc} />
 <meta name="robots" content={robots} />
@@ -88,6 +128,7 @@ const metaPixel = analytics.metaPixel || null;
 <meta name="color-scheme" content="light" />
 <meta name="author" content={site.legalName} />
 <meta name="generator" content={Astro.generator} />
+{gsc && <meta name="google-site-verification" content={gsc} />}
 <meta name="geo.region" content="SA-02" />
 <meta name="geo.placename" content={ar ? site.address.ar.city : site.address.en.city} />
 <meta name="geo.position" content={`${site.geo.lat};${site.geo.lng}`} />
@@ -146,24 +187,9 @@ const metaPixel = analytics.metaPixel || null;
 
 <script type="application/ld+json" set:html={jsonLdText} />
 
-{ga4 && (
-  <>
-    <script is:inline async src={`https://www.googletagmanager.com/gtag/js?id=${ga4}`}></script>
-    <script is:inline define:vars={{ ga4 }}>
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){ dataLayer.push(arguments); }
-      gtag('js', new Date());
-      gtag('config', ga4, { anonymize_ip: true });
-    </script>
-  </>
-)}
-{metaPixel && (
-  <>
-    <script is:inline define:vars={{ metaPixel }}>
-      !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
-      fbq('init', metaPixel);
-      fbq('track', 'PageView');
-    </script>
-    <noscript><img height="1" width="1" style="display:none" alt="" src={`https://www.facebook.com/tr?id=${metaPixel}&ev=PageView&noscript=1`} /></noscript>
-  </>
-)}
+{/* Tag configuration, first-party attribution, consent-gated tag loader. Inline so they run before anything else on
+    every page, including the very first paint; each script binds once (window.__bona* guards) and re-runs its
+    per-page work on astro:page-load. */}
+<script is:inline set:html={tagConfig} />
+<script is:inline set:html={attributionSrc} />
+<script is:inline set:html={tagsSrc} />

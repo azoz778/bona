@@ -211,7 +211,7 @@ export const ui = {
   formMessage: s('Message', 'رسالتك'),
   formOptional: s('optional', 'اختياري'),
   formSubmit: s('Send via WhatsApp', 'إرسال عبر واتساب'),
-  formNote: s('Your message opens in WhatsApp. Nothing is stored on this site.', 'تُفتح رسالتك في واتساب. لا يُخزَّن شيء على هذا الموقع.'),
+  formNote: s('Your message opens in WhatsApp. We keep a copy of your enquiry so a principal can follow it up.', 'تُفتح رسالتك في واتساب. ونحتفظ بنسخة من استفسارك ليتابعه أحد شركاء الدار.'),
   formErrName: s('Please enter your name.', 'يرجى إدخال الاسم.'),
   formErrPhone: s('Please enter a valid phone number, with the country code if outside Saudi Arabia.', 'يرجى إدخال رقم جوال صحيح، مع رمز الدولة إن كان خارج السعودية.'),
   formThanks: s('Thank you. WhatsApp should open with your message ready to send.', 'شكراً لك. سيُفتح واتساب ورسالتك جاهزة للإرسال.'),
@@ -366,6 +366,28 @@ export const ui = {
   notFoundText: s('The address may have changed, or the residence is no longer listed.', 'ربما تغيّر العنوان، أو لم يعد المسكن معروضاً.'),
   backHome: s('Back to the home page', 'العودة إلى الرئيسية'),
   browseProperties: s('Browse properties', 'تصفّح العقارات'),
+
+  // Consent banner (PDPL) — Consent.astro, footer link
+  consentTitle: s('Your privacy', 'خصوصيتك'),
+  consentText: s(
+    'We use cookies to measure visits and improve our advertising. Essential cookies keep the site working; the rest load only with your consent, and you can change your mind at any time from the footer.',
+    'نستخدم ملفات تعريف الارتباط لقياس الزيارات وتحسين الإعلانات. الملفات الضرورية تُبقي الموقع يعمل، أما البقية فلا تُحمَّل إلا بموافقتك، ويمكنك تغيير اختيارك في أي وقت من أسفل الصفحة.'
+  ),
+  consentAccept: s('Accept all', 'قبول الكل'),
+  consentEssential: s('Essential only', 'الضرورية فقط'),
+  consentSettings: s('Cookie settings', 'إعدادات ملفات تعريف الارتباط'),
+  consentPrivacy: s('Privacy and cookies', 'الخصوصية وملفات تعريف الارتباط'),
+
+  // Concierge — storage notice under the chat composer
+  conciergeNotice: s('Conversations are stored to handle your enquiry', 'تُحفظ المحادثات لمتابعة استفسارك'),
+
+  // REGA advertising block on listing pages (RegaBlock.astro)
+  regaAdvertiser: s('Advertiser', 'المُعلن'),
+  regaFal: s('FAL licence', 'رخصة فال'),
+  regaAdLicence: s('Advertising licence', 'رخصة الإعلان العقاري'),
+  regaValidUntil: s('valid until', 'سارية حتى'),
+  regaWafi: s('Wafi project licence', 'رخصة مشروع وافي'),
+  regaVerify: s('Verify', 'تحقق'),
 } as const;
 
 export type UiKey = keyof typeof ui;

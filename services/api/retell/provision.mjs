@@ -5,7 +5,7 @@
  * Creates — or updates in place — four things and records their ids in `ids.json`
  * (committed; ids are not secret):
  *
- *   1. Knowledge base "Bona site"   ← https://bona.azoz.uk/llms-full.txt + /llms.txt
+ *   1. Knowledge base "Bona site"   ← <site>/llms-full.txt + /llms.txt
  *   2. Retell LLM "Bona Dana"       ← prompt.md, begin message, KB, 3 custom tools
  *   3. Voice agent "Bona Dana (voice)"
  *   4. Chat agent  "Bona Dana (chat)"
@@ -19,10 +19,20 @@
  * Set BONA_RETELL_SEPARATE_CHAT_AGENT=0 to reuse the voice agent instead (kept as an
  * escape hatch in case Retell later accepts any agent for chat).
  *
+ * WHY --rebuild-kb IS OPT-IN: Retell has no endpoint that re-points a knowledge base at
+ * different URLs — create, get, list, add-sources and delete are the whole surface. So a
+ * site move (bona.azoz.uk → bona-real-estate.com) leaves the live base re-crawling URLs
+ * that now 404, quietly, because auto-refresh keeps succeeding at fetching nothing. The
+ * cure is to replace the base, which costs a full re-crawl and throws away whatever is
+ * indexed, so a plain run never does it on its own: it warns and leaves the base alone.
+ * `--rebuild-kb` performs the swap in the only order that cannot strand Dana — create the
+ * new base, point the LLM at it, delete the old one last.
+ *
  * Usage:
  *   node services/api/retell/provision.mjs --dry-run     # print payloads, call nothing
  *   node services/api/retell/provision.mjs               # create/update for real
  *   node services/api/retell/provision.mjs --publish     # also publish both agents
+ *   node services/api/retell/provision.mjs --rebuild-kb  # replace the KB after a site move
  *   node services/api/retell/provision.mjs --ensure-env  # only create ~/.secrets/bona-services.env
  */
 import fs from 'node:fs';
@@ -35,6 +45,9 @@ import { createRetellClient, isClientError } from '../lib/retell.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PROMPT_FILE = path.join(HERE, 'prompt.md');
+export const DEFAULT_SITE = 'https://bona-real-estate.com';
+// Baked into Retell's tool and webhook URLs, so a wrong value here silently sends Dana elsewhere.
+export const DEFAULT_PUBLIC_API = 'https://api.bona-real-estate.com';
 
 export const KB_NAME = 'Bona site';
 export const LLM_NAME = 'Bona Dana';
@@ -68,6 +81,24 @@ export function knowledgeBasePayload({ siteUrl }) {
     knowledge_base_urls: [`${base}/llms-full.txt`, `${base}/llms.txt`],
     enable_auto_refresh: true,
   };
+}
+
+/**
+ * Does an existing knowledge base still index the site we are configured for?
+ *
+ * The only read-back Retell offers is `knowledge_base_sources`, which it fills in once
+ * indexing finishes — so a base that is still crawling reports its URLs as unknown
+ * rather than being accused of pointing at the wrong site. Nothing else would ever
+ * surface the mismatch: a base left on a dead domain refreshes without an error.
+ * @returns {{ known: boolean, stale: boolean, urls: string[], wanted: string[] }}
+ */
+export function knowledgeBaseFreshness(kb, { siteUrl }) {
+  const wanted = knowledgeBasePayload({ siteUrl }).knowledge_base_urls;
+  const sources = Array.isArray(kb?.knowledge_base_sources) ? kb.knowledge_base_sources : [];
+  const urls = sources.filter((s) => s?.type === 'url' && s?.url).map((s) => String(s.url));
+  if (!urls.length) return { known: false, stale: false, urls, wanted };
+  const matches = urls.length === wanted.length && wanted.every((u) => urls.includes(u));
+  return { known: true, stale: !matches, urls, wanted };
 }
 
 /**
@@ -162,7 +193,7 @@ export function toolsPayload({ publicApi, toolToken }) {
   ];
 }
 
-export function llmPayload({ prompt, model, knowledgeBaseIds, publicApi, toolToken }) {
+export function llmPayload({ prompt, model, knowledgeBaseIds, publicApi, toolToken, siteUrl = DEFAULT_SITE }) {
   return {
     model,
     model_temperature: 0.3,
@@ -171,7 +202,7 @@ export function llmPayload({ prompt, model, knowledgeBaseIds, publicApi, toolTok
     start_speaker: 'agent',
     general_tools: toolsPayload({ publicApi, toolToken }),
     ...(knowledgeBaseIds?.length ? { knowledge_base_ids: knowledgeBaseIds } : {}),
-    default_dynamic_variables: { locale: 'en', page_url: 'https://bona.azoz.uk/', page_title: 'Bona' },
+    default_dynamic_variables: { locale: 'en', page_url: `${String(siteUrl).replace(/\/+$/, '')}/`, page_title: 'Bona' },
   };
 }
 
@@ -227,9 +258,9 @@ export function ensureEnvFile({ home = os.homedir(), env = process.env } = {}) {
     BONA_DATA: path.join(home, 'bona-data'),
     BONA_POLL_MS: '20000',
     BONA_CLAUDE_MODEL: 'sonnet',
-    BONA_SITE: 'https://bona.azoz.uk',
+    BONA_SITE: DEFAULT_SITE,
     BONA_API_PORT: '4102',
-    BONA_PUBLIC_API: 'https://bona-api.azoz.uk',
+    BONA_PUBLIC_API: DEFAULT_PUBLIC_API,
     BONA_TOOL_TOKEN: randomToken(16),
     // Client-tracking stack (spec C6). The poller and fan-out run inside bona-api;
     // the dashboard cookie lifetime is in days. BONA_DB_FILE is deliberately absent:
@@ -264,6 +295,7 @@ async function withModelFallback(fn, { preferred, fallback, log }) {
 
 export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE, home = os.homedir(), log = console.log, clientFactory = createRetellClient } = {}) {
   const dryRun = argv.includes('--dry-run');
+  const rebuildKb = argv.includes('--rebuild-kb');
   const publish = argv.includes('--publish') || truthy(env.BONA_RETELL_PUBLISH, false);
   const separateChatAgent = truthy(env.BONA_RETELL_SEPARATE_CHAT_AGENT, true);
 
@@ -273,8 +305,8 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
 
   // Re-read: the file may have just been created with a fresh BONA_TOOL_TOKEN.
   const merged = { ...loadEnv({ home }), ...(env === process.env ? {} : env) };
-  const siteUrl = String(merged.BONA_SITE ?? 'https://bona.azoz.uk').replace(/\/+$/, '');
-  const publicApi = String(merged.BONA_PUBLIC_API ?? 'https://bona-api.azoz.uk').replace(/\/+$/, '');
+  const siteUrl = String(merged.BONA_SITE ?? DEFAULT_SITE).replace(/\/+$/, '');
+  const publicApi = String(merged.BONA_PUBLIC_API ?? DEFAULT_PUBLIC_API).replace(/\/+$/, '');
   const toolToken = merged.BONA_TOOL_TOKEN ?? '';
   const preferred = merged.BONA_RETELL_MODEL ?? PREFERRED_MODEL;
   const fallback = merged.BONA_RETELL_MODEL_FALLBACK ?? FALLBACK_MODEL;
@@ -287,10 +319,18 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
   const ids = readIds(idsFile);
 
   const kbBody = knowledgeBasePayload({ siteUrl });
-  const llmBody = (model, kbIds) => llmPayload({ prompt, model, knowledgeBaseIds: kbIds, publicApi, toolToken });
+  const llmBody = (model, kbIds) => llmPayload({ prompt, model, knowledgeBaseIds: kbIds, publicApi, toolToken, siteUrl });
 
   if (dryRun) {
     log('--- DRY RUN — nothing is sent to Retell. Tool token shown as <BONA_TOOL_TOKEN>. ---\n');
+    if (rebuildKb) {
+      log(`# --rebuild-kb: the knowledge base would be REPLACED so it indexes ${siteUrl}, in this order:`);
+      log('#   1. POST   /create-knowledge-base                       (the payload below)');
+      log(`#   2. PATCH  /update-retell-llm/${ids.llmId ?? '<llm_id>'}   knowledge_base_ids: ["<new_knowledge_base_id>"]`);
+      log('#   3. PATCH  /update-agent + /update-chat-agent                 (so the live agents serve that LLM)');
+      log('#      … and POST /publish-agent-version for each, when --publish is given');
+      log(`#   4. DELETE /delete-knowledge-base/${ids.knowledgeBaseId ?? '<old_knowledge_base_id>'}   — last, once the agents are on the new base\n`);
+    }
     log(`# POST /create-knowledge-base  (multipart/form-data)\n${JSON.stringify(redactPayload(kbBody, toolToken), null, 2)}\n`);
     log(`# POST /create-retell-llm  (model: "${preferred}", fallback on 4xx: "${fallback}")\n${JSON.stringify(redactPayload({ ...llmBody(preferred, ['<knowledge_base_id>']), general_prompt: `<prompt.md — ${prompt.length} chars>` }, toolToken), null, 2)}\n`);
     log(`# POST /create-agent\n${JSON.stringify(redactPayload(voiceAgentPayload({ llmId: '<llm_id>', publicApi, toolToken, voiceId }), toolToken), null, 2)}\n`);
@@ -298,7 +338,7 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
     else log('# chat agent: disabled (BONA_RETELL_SEPARATE_CHAT_AGENT=0) — /create-chat would reuse the voice agent id\n');
     log(`# publish step: ${publish ? 'POST /publish-agent-version/{agent_id}' : 'skipped (drafts work for create-web-call / create-chat; pass --publish to force)'}`);
     log(`# ids file: ${idsFile}`);
-    return { dryRun: true, ids, model: preferred };
+    return { dryRun: true, ids, model: preferred, rebuildKb };
   }
 
   if (!merged.RETELL_API_KEY) throw new Error('RETELL_API_KEY is missing — expected in ~/.secrets/retell.env');
@@ -311,9 +351,24 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
     try { kb = await client.getKnowledgeBase(knowledgeBaseId); } catch { kb = null; knowledgeBaseId = null; }
   }
   if (!kb) kb = await findKnowledgeBase(client, KB_NAME);
-  if (kb) {
+  // Set when --rebuild-kb replaced a base, and acted on only after the LLM points at the
+  // replacement — see the retirement step below.
+  let retiredKnowledgeBaseId = null;
+  if (kb && rebuildKb) {
+    retiredKnowledgeBaseId = kb.knowledge_base_id;
+    kb = await client.createKnowledgeBase(kbBody);
+    knowledgeBaseId = kb.knowledge_base_id;
+    log(`+ knowledge base "${KB_NAME}" rebuilt (${knowledgeBaseId}) from ${kbBody.knowledge_base_urls.join(' + ')}`);
+    log(`~ old knowledge base ${retiredKnowledgeBaseId} kept until the LLM points at the new one`);
+  } else if (kb) {
     knowledgeBaseId = kb.knowledge_base_id;
     log(`= knowledge base "${KB_NAME}" exists (${knowledgeBaseId}, status ${kb.status})`);
+    const freshness = knowledgeBaseFreshness(kb, { siteUrl });
+    if (freshness.stale) {
+      log(`  ! it indexes ${freshness.urls.join(' + ')}, not ${freshness.wanted.join(' + ')}`);
+      log("  ! auto-refresh keeps re-fetching those URLs, so Dana's knowledge decays with no error anywhere");
+      log('  ! re-run with --rebuild-kb to replace it — Retell cannot re-point a knowledge base in place');
+    }
   } else {
     kb = await client.createKnowledgeBase(kbBody);
     knowledgeBaseId = kb.knowledge_base_id;
@@ -376,6 +431,11 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
   }
 
   /* 5. Publish (optional) -------------------------------------------- */
+  // Tracked because on an account where published versions are what callers actually reach,
+  // an agent update only changes the draft — the live agent moves to the new knowledge base
+  // at publish time, not before. A swallowed publish failure must therefore still block the
+  // retirement below, or the live agent keeps serving a base that has just been deleted.
+  let publishFailed = false;
   if (publish) {
     for (const [label, id] of [['voice', voiceAgentId], ['chat', chatAgentId]]) {
       if (!id || (label === 'chat' && !separateChatAgent)) continue;
@@ -383,8 +443,29 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
         await client.publishAgent(id);
         log(`+ published ${label} agent (${id})`);
       } catch (err) {
+        publishFailed = true;
         log(`  ! publish ${label} agent failed: ${err.message}`);
       }
+    }
+  }
+
+  /* 6. Retire the replaced knowledge base ------------------------------ */
+  // Dead last, because "the LLM points at the new base" is not the same as "Dana does".
+  // When ids.llmId is missing or stale a *new* LLM is created above, and the agents keep
+  // serving the old one until they are updated — and, in publish mode, until that update is
+  // published. Deleting any earlier can leave a live agent reading from a base that no
+  // longer exists; deleting here, the worst case is an agent on a stale-but-populated base.
+  // A delete that merely fails is reported, not raised: that costs a dashboard cleanup,
+  // not a broken provisioning run.
+  if (retiredKnowledgeBaseId && publishFailed) {
+    log(`  ! keeping the old knowledge base ${retiredKnowledgeBaseId}: a publish failed, so a live agent may still be serving it`);
+    log('  ! re-run once publishing works, and it will be retired then');
+  } else if (retiredKnowledgeBaseId) {
+    try {
+      await client.deleteKnowledgeBase(retiredKnowledgeBaseId);
+      log(`- old knowledge base deleted (${retiredKnowledgeBaseId})`);
+    } catch (err) {
+      log(`  ! could not delete the old knowledge base ${retiredKnowledgeBaseId}: ${err.message} — remove it in the Retell dashboard`);
     }
   }
 

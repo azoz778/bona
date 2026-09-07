@@ -8,9 +8,11 @@ const NUMERIC = new Set(['price', 'images']);
 export function initInventory(): void {
   const root = $('#inventory');
   if (!root) return;
-  const table = $<HTMLTableElement>('#inventory-table', root);
-  const tbody = table?.tBodies[0];
-  if (!table || !tbody) return;
+  const tableFound = $<HTMLTableElement>('#inventory-table', root);
+  const tbodyFound = tableFound?.tBodies[0];
+  if (!tableFound || !tbodyFound) return;
+  const table: HTMLTableElement = tableFound;
+  const tbody: HTMLTableSectionElement = tbodyFound;
   const rows = Array.from(tbody.rows) as HTMLTableRowElement[];
   const search = $<HTMLInputElement>('#inv-search', root);
   const category = $<HTMLSelectElement>('#inv-category', root);

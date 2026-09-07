@@ -14,7 +14,7 @@ const rtl = locale === 'ar';
   {images.length > 0 && (
     <div class="strip no-scrollbar" data-strip tabindex="0" role="region" aria-label={t(ui.gallery, locale)}>
       {images.map((img, i) => (
-        <button type="button" class="strip-slide img-zoom" data-lb-open={i} aria-label={`${t(ui.openGallery, locale)} ${i + 1}`}>
+        <button type="button" class="strip-slide img-zoom" data-lb-open={i} data-track="gallery_open" data-cta="gallery_strip" aria-label={`${t(ui.openGallery, locale)} ${i + 1}`}>
           {i === 0
             ? <img src={img.src} alt={imageAlt(img, l, locale)} fetchpriority="high" decoding="async" transition:name={`listing-${l.slug}`} class="h-full w-full object-cover" />
             : <img src={img.thumb ?? img.src} srcset={img.thumb ? `${img.thumb} 400w, ${img.src} 1920w` : undefined} sizes="(min-width: 1024px) 60vw, 88vw" alt={imageAlt(img, l, locale)} loading="lazy" decoding="async" class="h-full w-full object-cover" />}

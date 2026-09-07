@@ -3,6 +3,7 @@
 
 import type { RetellWebClient } from 'retell-client-js-sdk';
 import { getJson, postJson, type Card, type CallContextResponse, type CallTokenResponse } from './api';
+import { visitorAttr } from './attr';
 
 export type CallStatus = 'idle' | 'permission' | 'connecting' | 'live' | 'speaking' | 'ended' | 'error';
 export type CallErrorKind = 'unsupported' | 'mic' | 'failed';
@@ -79,7 +80,7 @@ export class CallSession {
       let client: RetellWebClient | null = null;
       try {
         const [{ accessToken, callId }, mod] = await Promise.all([
-          postJson<CallTokenResponse>(apiBase, '/v1/call/token', { locale, page }, 15000),
+          postJson<CallTokenResponse>(apiBase, '/v1/call/token', { locale, page, attr: visitorAttr() }, 15000),
           import('retell-client-js-sdk'),
         ]);
         if (!this.live(id)) return;

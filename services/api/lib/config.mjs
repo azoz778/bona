@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv } from './env.mjs';
 import { parseOrigins } from './cors.mjs';
+import { resolveLegacyHosts } from './legacy.mjs';
 import { resolveInventoryFile } from './inventory.mjs';
 import { parseTrustedProxies } from './ratelimit.mjs';
 import { MAX_CALLS_PER_DAY, MAX_CHATS_PER_DAY, MAX_TURNS_PER_SESSION } from './budget.mjs';
@@ -44,16 +45,19 @@ export function version() {
 const truthy = (v, fallback = false) => (v == null || v === '' ? fallback : !['0', 'false', 'no', 'off'].includes(String(v).toLowerCase()));
 
 export function loadConfig({ env = loadEnv(), ids = readIds(), home = os.homedir() } = {}) {
-  const siteUrl = String(env.BONA_SITE ?? 'https://bona.azoz.uk').replace(/\/+$/, '');
-  const publicApi = String(env.BONA_PUBLIC_API ?? 'https://bona-api.azoz.uk').replace(/\/+$/, '');
+  const siteUrl = String(env.BONA_SITE ?? 'https://bona-real-estate.com').replace(/\/+$/, '');
+  const publicApi = String(env.BONA_PUBLIC_API ?? 'https://api.bona-real-estate.com').replace(/\/+$/, '');
+  const dataDir = env.BONA_DATA ?? path.join(home, 'bona-data');
   return {
     port: Number(env.BONA_API_PORT ?? 4102),
     host: env.BONA_API_HOST ?? '127.0.0.1',
     siteUrl,
     publicApi,
-    dataDir: env.BONA_DATA ?? path.join(home, 'bona-data'),
+    dataDir,
+    dbFile: env.BONA_DB_FILE ?? path.join(dataDir, 'bona.db'),
     inventoryFile: resolveInventoryFile(env),
     origins: parseOrigins(env.BONA_CORS_ORIGINS),
+    legacyHosts: resolveLegacyHosts(env.BONA_LEGACY_HOSTS, siteUrl),
     toolToken: env.BONA_TOOL_TOKEN ?? '',
     allowQueryToken: truthy(env.BONA_ALLOW_QUERY_TOKEN, false),
     trustedProxies: parseTrustedProxies(env.BONA_TRUSTED_PROXY),
@@ -70,6 +74,25 @@ export function loadConfig({ env = loadEnv(), ids = readIds(), home = os.homedir
     maxChatsPerDay: Number(env.BONA_MAX_CHATS_PER_DAY ?? MAX_CHATS_PER_DAY),
     maxCallsPerDay: Number(env.BONA_MAX_CALLS_PER_DAY ?? MAX_CALLS_PER_DAY),
     maxTurnsPerSession: Number(env.BONA_MAX_TURNS_PER_SESSION ?? MAX_TURNS_PER_SESSION),
+    // Tracking stack (events, enquiry, WhatsApp poller, fan-out, dashboard).
+    eventsRatePerMin: Number(env.BONA_RATE_EVENTS ?? 240),
+    enquiryRatePerMin: Number(env.BONA_RATE_ENQUIRY ?? 6),
+    waPoll: truthy(env.BONA_WA_POLL, true),
+    waPollMs: Number(env.BONA_WA_POLL_MS ?? 45_000),
+    fanoutMs: Number(env.BONA_FANOUT_MS ?? 20_000),
+    // Ad-platform fan-out carries a lead's hashed phone to Meta / Snap, so by default it
+    // waits for the visitor's ads consent (PDPL). Set to 0 only with a different legal basis.
+    fanoutRequireConsent: truthy(env.BONA_FANOUT_REQUIRE_CONSENT, true),
+    dashCookieDays: Number(env.BONA_DASH_COOKIE_DAYS ?? 30),
+    // Ad-platform server-side APIs (~/.secrets/bona-marketing.env). All optional: a
+    // missing key means that destination is skipped, never an error.
+    metaPixelId: env.META_PIXEL_ID ?? '',
+    metaCapiToken: env.META_CAPI_TOKEN ?? '',
+    metaTestEventCode: env.META_TEST_EVENT_CODE ?? '',
+    ga4MeasurementId: env.GA4_MEASUREMENT_ID ?? '',
+    ga4ApiSecret: env.GA4_API_SECRET ?? '',
+    snapPixelId: env.SNAP_PIXEL_ID ?? '',
+    snapCapiToken: env.SNAP_CAPI_TOKEN ?? '',
     logLevel: env.BONA_LOG_LEVEL ?? 'info',
     env,
     ids,
@@ -82,11 +105,17 @@ export function redacted(cfg) {
   return {
     port: cfg.port, host: cfg.host, siteUrl: cfg.siteUrl, publicApi: cfg.publicApi,
     dataDir: cfg.dataDir, inventoryFile: cfg.inventoryFile, origins: cfg.origins,
+    legacyHosts: cfg.legacyHosts,
     retellMock: cfg.retellMock, hasRetellKey: Boolean(cfg.retellApiKey),
     hasToolToken: Boolean(cfg.toolToken), allowQueryToken: cfg.allowQueryToken,
     trustedProxies: cfg.trustedProxies, chatAgentId: cfg.chatAgentId,
     voiceAgentId: cfg.voiceAgentId, version: cfg.version,
     maxChatsPerDay: cfg.maxChatsPerDay, maxCallsPerDay: cfg.maxCallsPerDay,
     maxTurnsPerSession: cfg.maxTurnsPerSession,
+    dbFile: cfg.dbFile, eventsRatePerMin: cfg.eventsRatePerMin, enquiryRatePerMin: cfg.enquiryRatePerMin,
+    waPoll: cfg.waPoll, waPollMs: cfg.waPollMs, fanoutMs: cfg.fanoutMs, fanoutRequireConsent: cfg.fanoutRequireConsent, dashCookieDays: cfg.dashCookieDays,
+    // Pixel / measurement ids are printed on every page of the site; the tokens are not.
+    metaPixelId: cfg.metaPixelId || null, ga4MeasurementId: cfg.ga4MeasurementId || null, snapPixelId: cfg.snapPixelId || null,
+    hasMetaCapiToken: Boolean(cfg.metaCapiToken), hasGa4ApiSecret: Boolean(cfg.ga4ApiSecret), hasSnapCapiToken: Boolean(cfg.snapCapiToken),
   };
 }

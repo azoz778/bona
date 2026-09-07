@@ -88,7 +88,7 @@ the work is off-market.
 - Licence: REGA FAL brokerage licence **1100313556**.
 - Office hours: **Sunday–Thursday, 10:00–19:00** (Jeddah time).
 - WhatsApp and phone: **+966 59 329 6933**.
-- Website: https://bona.azoz.uk — Arabic at https://bona.azoz.uk/ar/.
+- Website: https://bona-real-estate.com — Arabic at https://bona-real-estate.com/ar/.
 - Sections: Houses, Apartments, Land, and a Tours page with 3D virtual tours.
 
 Use the knowledge base for anything about the firm, its districts, its process or its

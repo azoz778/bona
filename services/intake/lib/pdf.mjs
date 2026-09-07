@@ -94,6 +94,7 @@ export async function renderPdfViews(pdfPath, outDir, opts = {}) {
     '--mode', 'views',
     '--max-pages', String(opts.maxPages ?? 60),
     '--view-long-side', String(opts.longSide ?? 1600),
+    ...(opts.maxPixels ? ['--render-max-pixels', String(opts.maxPixels)] : []),
     ...(opts.maxAspect ? ['--view-max-aspect', String(opts.maxAspect)] : []),
     ...(opts.dir ? ['--view-dir', opts.dir] : []),
     ...(opts.pages?.length ? ['--pages', opts.pages.join(',')] : []),

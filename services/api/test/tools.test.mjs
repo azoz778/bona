@@ -7,6 +7,7 @@ import { createToolHandlers, tokenMatches, extractToken, conversationId, convers
 import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
 import { createStore } from '../lib/store.mjs';
 import { normaliseLead, leadNote, appendLead, appendJsonl } from '../lib/leads.mjs';
+import { openDb } from '../lib/db.mjs';
 
 const inventory = createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk' });
 const KHALIDIYAH = inventory.all().find((l) => l.location.district.en === 'Al Khalidiyah');
@@ -15,12 +16,13 @@ function harness() {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-tools-'));
   const sent = [];
   const store = createStore();
+  const db = openDb(':memory:');
   const tools = createToolHandlers({
-    inventory, store, dataDir, siteUrl: 'https://bona.azoz.uk', env: {},
+    inventory, store, db, dataDir, siteUrl: 'https://bona.azoz.uk', env: {},
     // The real Evolution API is NEVER touched from tests.
     sendWhatsApp: async (text) => { sent.push(text); return { ok: true }; },
   });
-  return { dataDir, sent, store, tools, cleanup: () => fs.rmSync(dataDir, { recursive: true, force: true }) };
+  return { dataDir, sent, store, db, tools, cleanup: () => { db.close(); fs.rmSync(dataDir, { recursive: true, force: true }); } };
 }
 
 /* ---------------- auth ---------------- */
@@ -163,7 +165,7 @@ test('create_lead without any contact detail asks for one instead of saving', as
 test('a failing WhatsApp notification never loses the lead', async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-tools-'));
   const tools = createToolHandlers({
-    inventory, store: createStore(), dataDir, siteUrl: 'https://bona.azoz.uk', env: {},
+    inventory, store: createStore(), db: openDb(':memory:'), dataDir, siteUrl: 'https://bona.azoz.uk', env: {},
     sendWhatsApp: async () => { throw new Error('evolution down'); },
   });
   const payload = JSON.parse(await tools.run('create_lead', { call: { call_id: 'c1' }, args: { phone: '+966500000001' } }));
@@ -206,21 +208,26 @@ test('create_lead is idempotent inside its window — one enquiry, one WhatsApp 
   h.cleanup();
 });
 
-test('the dedupe window expires, and another conversation is another lead', async () => {
+test('the dedupe window expires, and another conversation is a fresh touch on the same lead', async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-tools-'));
   let t = 0;
+  const db = openDb(':memory:');
   const tools = createToolHandlers({
-    inventory, store: createStore(), dataDir, siteUrl: 'https://bona.azoz.uk', env: {},
+    inventory, store: createStore(), db, dataDir, siteUrl: 'https://bona.azoz.uk', env: {},
     sendWhatsApp: async () => ({ ok: true }), now: () => t, leadDedupeMs: 10 * 60 * 1000,
   });
   const args = { phone: '+966500000000', name: 'Sara' };
   const first = JSON.parse(await tools.run('create_lead', { chat: { chat_id: 'c1' }, args }));
   const other = JSON.parse(await tools.run('create_lead', { chat: { chat_id: 'c2' }, args }));
-  assert.notEqual(other.id, first.id, 'a second conversation is a second enquiry');
+  assert.equal(other.id, first.id, 'a second conversation from the same phone is the same person');
+  assert.equal(other.duplicate, undefined, 'but not a retry — it went through the model and merged');
   t = 10 * 60 * 1000 + 1;
   const later = JSON.parse(await tools.run('create_lead', { chat: { chat_id: 'c1' }, args }));
-  assert.notEqual(later.id, first.id, 'ten minutes on, the visitor is asking again');
-  assert.equal(fs.readFileSync(path.join(dataDir, 'leads.jsonl'), 'utf8').trim().split('\n').length, 3);
+  assert.equal(later.id, first.id);
+  assert.equal(later.duplicate, undefined, 'ten minutes on, the retry window has closed');
+  assert.deepEqual(db.touchpointsForLead(first.id).map((tp) => tp.event_type), ['lead_created', 'concierge', 'concierge']);
+  assert.equal(fs.readFileSync(path.join(dataDir, 'leads.jsonl'), 'utf8').trim().split('\n').length, 1, 'the raw log has one line per lead');
+  db.close();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -231,6 +238,82 @@ test('leadKey folds phone spellings together and falls back to the name', () => 
   assert.notEqual(k('+966500000000'), k('+966500000001'));
   assert.equal(k(null, ' Sara  Ahmed '), k('', 'sara ahmed'));
   assert.notEqual(leadKey({ conversationId: 'a', name: 'Sara' }), leadKey({ conversationId: 'b', name: 'Sara' }));
+});
+
+/* ---------------- attribution through Retell metadata ---------------- */
+
+const ANON = '9f1c'.repeat(8);
+const touch = (over = {}) => ({
+  ts: 1, landing: '/properties/bona-w003/', referrer: 'https://l.instagram.com/', utm_source: 'meta', utm_medium: 'paid',
+  utm_campaign: 'villas_sep', utm_content: 'reels', utm_term: null, utm_id: '1203', click_ids: { fbclid: 'IwAR1' }, ...over,
+});
+
+test('create_lead inherits the visitor\'s source from the session Retell\'s metadata names', async () => {
+  const h = harness();
+  h.db.upsertSession({ session_id: 'mf3k2a-7b1c', anon_id: ANON, ref: 'K7Q2XR', started: 1, last_seen: 2, pages: 2, locale: 'en', first_touch: touch(), last_touch: touch(), consent_ads: true, consent_analytics: true });
+  const payload = JSON.parse(await h.tools.run('create_lead', {
+    call: { call_id: 'call_9', metadata: { locale: 'en', page: '/properties/bona-w003/', source: 'bona-web', anon_id: ANON, session_id: 'mf3k2a-7b1c', ref: 'K7Q2XR', listing_id: 'BONA-W003' } },
+    args: { phone: '0500000000', name: 'Sara' },
+  }));
+  assert.equal(payload.saved, true);
+  const lead = h.db.getLead(payload.id);
+  assert.equal(lead.channel, 'concierge_voice');
+  assert.equal(lead.match_method, 'concierge');
+  assert.equal(lead.source, 'meta');
+  assert.equal(lead.medium, 'paid');
+  assert.equal(lead.campaign, 'villas_sep');
+  assert.equal(lead.session_id, 'mf3k2a-7b1c');
+  assert.equal(lead.anon_id, ANON);
+  assert.equal(lead.ref, 'K7Q2XR');
+  assert.equal(lead.listing_id, 'BONA-W003', 'no property named in the call, so the page the widget opened on');
+  assert.equal(lead.phone_e164, '966500000000');
+  assert.equal(h.db.getEvent(h.db.recentEvents({ name: 'lead_created' })[0].event_id).session_id, 'mf3k2a-7b1c');
+  assert.match(h.sent[0], /Source: meta \/ paid · villas_sep · Ref K7Q2XR · BONA-W003/);
+  const raw = JSON.parse(fs.readFileSync(path.join(h.dataDir, 'leads.jsonl'), 'utf8').trim());
+  assert.equal(raw.id, payload.id);
+  assert.equal(raw.channel, 'voice', 'the raw log keeps its old channel names');
+  assert.equal(raw.conversationId, 'call_9');
+  h.cleanup();
+});
+
+test('a property the model names wins over the page, and is resolved against inventory', async () => {
+  const h = harness();
+  const payload = JSON.parse(await h.tools.run('create_lead', {
+    chat: { chat_id: 'chat_9', metadata: { listing_id: 'BONA-W003' } },
+    args: { phone: '0500000000', listing_id: KHALIDIYAH.slug },
+  }));
+  const lead = h.db.getLead(payload.id);
+  assert.equal(lead.listing_id, KHALIDIYAH.id);
+  assert.equal(lead.channel, 'concierge_chat');
+  assert.equal(lead.source, 'concierge', 'no session on record for this metadata');
+  assert.equal(lead.session_id, null);
+  h.cleanup();
+});
+
+test('a returning caller merges into the lead they already are, and the owner still hears', async () => {
+  const h = harness();
+  const first = JSON.parse(await h.tools.run('create_lead', { chat: { chat_id: 'c1' }, args: { phone: '+966500000000', name: 'Sara' } }));
+  const later = JSON.parse(await h.tools.run('create_lead', { call: { call_id: 'c2' }, args: { phone: '0500000000', interest: 'now a penthouse' } }));
+  assert.equal(later.saved, true);
+  assert.equal(later.id, first.id, 'the same phone from another conversation is the same person');
+  assert.equal(later.duplicate, undefined, 'not a retry — a new conversation');
+  assert.deepEqual(h.db.touchpointsForLead(first.id).map((t) => t.event_type), ['lead_created', 'concierge']);
+  assert.equal(h.db.getLead(first.id).interest, 'now a penthouse');
+  assert.equal(h.db.getLead(first.id).name, 'Sara');
+  assert.equal(h.sent.length, 2);
+  assert.equal(fs.readFileSync(path.join(h.dataDir, 'leads.jsonl'), 'utf8').trim().split('\n').length, 1, 'one raw-log line per lead');
+  h.cleanup();
+});
+
+test('the tool context exposes the metadata as ctx.attr', async () => {
+  const h = harness();
+  let seen;
+  h.tools.handlers.show_property = async (args, ctx) => { seen = ctx; return {}; };
+  await h.tools.run('show_property', { chat: { chat_id: 'c1', metadata: { session_id: 'mf3k2a-7b1c', anon_id: ANON } }, args: { id: 'x' } });
+  assert.deepEqual(seen.attr, { session_id: 'mf3k2a-7b1c', anon_id: ANON });
+  await h.tools.run('show_property', { call: { call_id: 'c2' }, args: { id: 'x' } });
+  assert.deepEqual(seen.attr, {});
+  h.cleanup();
 });
 
 test('an unknown tool name is rejected', async () => {

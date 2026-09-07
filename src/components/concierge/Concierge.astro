@@ -95,7 +95,7 @@ const quick = [
           <div class="cg-fallback" data-cg-fallback hidden>
             <p class="cg-fallback-title">{t(ui.conciergeOfflineTitle, locale)}</p>
             <p class="cg-fallback-text">{t(ui.conciergeOfflineText, locale)}</p>
-            <a class="cg-wa-btn" href={waHref} target="_blank" rel="noopener">{t(ui.chatOnWhatsApp, locale)}</a>
+            <a class="cg-wa-btn" href={waHref} target="_blank" rel="noopener" data-cta="concierge_fallback">{t(ui.chatOnWhatsApp, locale)}</a>
             <button type="button" class="cg-link" data-cg-retry>{t(ui.conciergeRetry, locale)}</button>
           </div>
         </div>
@@ -110,6 +110,8 @@ const quick = [
 
         <p class="cg-foot">
           <button type="button" class="cg-link" data-cg-new>{t(ui.conciergeNewConversation, locale)}</button>
+          <span aria-hidden="true">·</span>
+          <span>{t(ui.conciergeNotice, locale)}</span>
           <span aria-hidden="true">·</span>
           <a class="cg-link" href={privacyHref}>{t(ui.navPrivacy, locale)}</a>
         </p>
@@ -145,8 +147,8 @@ const quick = [
 
             <p class="cg-call-error" data-cg-call-error hidden></p>
             <div class="cg-call-fallback" data-cg-call-fallback hidden>
-              <a class="cg-ghost" href={`tel:${site.phone.e164}`} dir="ltr">{site.phone.display}</a>
-              <a class="cg-wa-btn" href={waHref} target="_blank" rel="noopener">{t(ui.chatOnWhatsApp, locale)}</a>
+              <a class="cg-ghost" href={`tel:${site.phone.e164}`} dir="ltr" data-cta="concierge_tel">{site.phone.display}</a>
+              <a class="cg-wa-btn" href={waHref} target="_blank" rel="noopener" data-cta="concierge_fallback">{t(ui.chatOnWhatsApp, locale)}</a>
             </div>
 
             <p class="cg-captions" data-cg-captions hidden></p>
