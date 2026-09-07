@@ -35,9 +35,17 @@ from Bona's own inventory, and record leads and calls.
 The same process is also the site's first-party tracking backend: the site posts one
 small event per visitor action to `/v1/events`, the enquiry forms post to
 `/v1/enquiry`, and every lead — from WhatsApp, a form, or Dana — lands in one SQLite
-store (`bona.db`) with the campaign that brought the visitor. The WhatsApp poller,
-the ad-platform fan-out worker and the owner dashboard (`/dashboard`, `/v1/admin/*`)
-build on that store and arrive in their own workstreams.
+store (`bona.db`) with the campaign that brought the visitor. The **ad-platform
+fan-out worker** (`lib/fanout.mjs`) re-sends the moments a browser pixel loses — a
+WhatsApp click, a lead — to Meta's Conversions API, GA4's Measurement Protocol and
+Snap's Conversions API, under the same `event_id` the pixel used, so the two are
+counted once. It is entirely optional: a destination with no credentials in
+`~/.secrets/bona-marketing.env` has its rows marked `skipped` rather than queued, and
+starts flowing the moment the ids and tokens are filled in. A row is sent only for a
+session that accepted **ads** in the consent banner (PDPL); the phone never leaves
+this process unhashed. `/health` reports `fanout: { pending, sent, failed, skipped,
+dests, running }`. The WhatsApp poller and the owner dashboard (`/dashboard`,
+`/v1/admin/*`) build on the same store and arrive in their own workstreams.
 
 ---
 
@@ -231,8 +239,10 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST $API/v1/events \
   -H 'Content-Type: text/plain' -H 'Origin: https://bona.azoz.uk' \
   --data '{"v":1,"event_id":"mf3k2a1b-9c4e7f21","ts":1757150000000,"event":"whatsapp_click","anon_id":"9f1c9f1c9f1c9f1c9f1c9f1c9f1c9f1c","session_id":"mf3k2a-7b1c","ref":"K7Q2XR","page":"/properties/bona-w003/","locale":"en","listing_id":"BONA-W003","props":{"cta":"listing_whatsapp"},"attr":{"first":{"utm_source":"meta","utm_medium":"paid"},"last":{"utm_source":"meta","utm_medium":"paid"}},"consent":{"analytics":true,"ads":true}}'
 
-# an enquiry form -> { lead_id }
-curl -s -X POST $API/v1/enquiry -H 'Content-Type: application/json' -H 'Origin: https://bona.azoz.uk' \
+# an enquiry form -> { lead_id }.  The site posts this as text/plain + keepalive (a CORS
+# simple request, no preflight) so the lead survives the hand-off to WhatsApp on mobile;
+# application/json is accepted too.  The routes that spend Retell money stay JSON-only.
+curl -s -X POST $API/v1/enquiry -H 'Content-Type: text/plain' -H 'Origin: https://bona.azoz.uk' \
   -d '{"form":"listing","name":"Sara","phone":"0500000000","listing_id":"BONA-W003","message":"Still available?","attr":{"anon_id":"9f1c9f1c9f1c9f1c9f1c9f1c9f1c9f1c","session_id":"mf3k2a-7b1c","ref":"K7Q2XR"}}'
 
 # a tool webhook, exactly as Retell sends it
@@ -285,7 +295,8 @@ never logged. `process.env` always wins over a file.
 | `BONA_MAX_TURNS_PER_SESSION` | `40` | one chat cannot run for ever |
 | `BONA_RATE_EVENTS` / `BONA_RATE_ENQUIRY` | `240` / `6` | per IP per minute |
 | `BONA_WA_POLL` / `BONA_WA_POLL_MS` | `1` / `45000` | WhatsApp inbound poller (its own workstream) |
-| `BONA_FANOUT_MS` | `20000` | ad-platform fan-out worker interval (its own workstream) |
+| `BONA_FANOUT_MS` | `20000` | ad-platform fan-out worker interval; `0` turns the worker off |
+| `BONA_FANOUT_REQUIRE_CONSENT` | `1` | fan out only for a session that accepted ads (PDPL) |
 | `BONA_DASH_COOKIE_DAYS` | `30` | dashboard login cookie life (its own workstream) |
 
 Inventory resolution order: `BONA_INVENTORY_FILE` → `$BONA_REPO/src/data/listings.json`
@@ -394,7 +405,9 @@ action extraction from mocked Retell messages, every HTTP route against a script
 Retell double, the provisioning payloads including the model fallback, the phone
 normaliser, the SQLite store and its migrations, the Ref parser and source
 resolution, the event validator and intake, the lead model (create, merge by phone
-or jid, touchpoints, stages, fan-out), the enquiry route, the Retell metadata
+or jid, touchpoints, stages, fan-out), the enquiry route and the text/plain media type
+the form actually posts, the fan-out worker (credentials absent, consent absent,
+payload shape, hashing, delivery, backoff and giving up), the Retell metadata
 plumbing, and the one-time JSONL import.
 
 ---
