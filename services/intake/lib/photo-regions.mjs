@@ -16,8 +16,12 @@
 //   3. ONE extra `claude -p` call — same confinement as the main one — sees a contact sheet
 //      of those views and returns, per view it chooses to read, the bounding boxes of the
 //      actual photographs on it, in 0–1 coordinates
-//   4. the boxes are mapped from view coordinates back onto the page, the pages that carry
-//      them are re-rendered at crop resolution, and sharp cuts the regions out
+//   4. the boxes are mapped from view coordinates back onto the page, and then ONE PAGE AT A
+//      TIME: that page is re-rendered at crop resolution (capped at CROP_MAX_PIXELS), sharp
+//      cuts its regions out one after another, and the render is deleted before the next
+//      page is asked for. Nothing here ever holds two page renders at once — the step used
+//      to render every page up front, which is what OOM-killed the unit inside its 1 GB
+//      cgroup on the owner's 2026-09-06 brochures.
 //   5. the crops go into the candidate list as ordinary candidates, so the normal ranking
 //      step judges them against scripts/curate/IMAGE-RUBRIC.md like any other photograph
 //
@@ -54,12 +58,22 @@ export const MIN_BOX_AREA = 0.012;
 /** Two boxes this alike are the same photograph seen in two overlapping slices. */
 export const DEDUPE_IOU = 0.45;
 
-/** The page render the crops are cut from: long side capped, SHORT side floored. */
-export const CROP_LONG_SIDE = 3000;
+/** The page render the crops are cut from: long side capped, SHORT side floored.
+ *
+ * These three numbers are the memory budget of the whole step. A page render is decoded
+ * twice — once by PyMuPDF to make it, once by sharp to cut from it — so every megapixel
+ * here costs ~3 MB in python and ~4 MB in node, on top of the source bitmap MuPDF has to
+ * decode to draw the page at all (76 MB for the Sadana cover). At 30 MP the unit was
+ * OOM-killed inside its 1 GB cgroup on both of the owner's 2026-09-06 brochures; 12 MP is
+ * the budget that fits, and the Sadana cover renders 1114x10776 instead of 1600x15481 —
+ * still four times the short side a crop needs. */
+export const CROP_LONG_SIDE = 2200;
 export const CROP_MIN_SHORT_SIDE = 1600;
-export const CROP_MAX_PIXELS = 30_000_000;
-/** Decompression-bomb cap, matching images.mjs and extract_pdf.py::MAX_PIXELS. */
-export const MAX_INPUT_PIXELS = 50_000_000;
+export const CROP_MAX_PIXELS = 12_000_000;
+/** sharp's `limitInputPixels`: a hair over CROP_MAX_PIXELS, because the only thing sharp
+ *  ever opens here is a render this module just asked for. (images.mjs, which opens
+ *  bitmaps lifted out of the PDF, keeps its own, larger cap.) */
+export const MAX_INPUT_PIXELS = 14_000_000;
 /** A crop this small on its short side is a thumbnail off the page, not a photograph. */
 export const MIN_CROP_SHORT_SIDE = 700;
 /** Same window extract_pdf.py::usable() allows: no letterbox strips, no banner slivers. */
@@ -394,6 +408,7 @@ export async function cropPhotoRegions({
     pyCmd: cfg.pyCmd,
     maxPages: cfg.maxPdfPages,
     longSide: cfg.pageReadLongSide,
+    maxPixels: CROP_MAX_PIXELS,
     dir: path.join('regions', 'views'),
     pages,
   });
@@ -436,58 +451,95 @@ export async function cropPhotoRegions({
   const { boxes, dropped } = parseRegionResult(answer, views);
   if (!boxes.length) return { ...empty, views: views.length, dropped, meta, error: 'the model found no photographs' };
 
-  const cropPages = [...new Set(boxes.map((b) => b.page))].sort((a, b) => a - b);
-  const renders = await renderPdfPages(pdfPath, workDir, {
-    pyCmd: cfg.pyCmd,
-    maxPages: cfg.maxPdfPages,
-    dir: path.join('regions', 'crops'),
-    pages: cropPages,
-    longSide: CROP_LONG_SIDE,
-    minShortSide: CROP_MIN_SHORT_SIDE,
-    maxPixels: CROP_MAX_PIXELS,
-  });
-  if (renders.ok === false || !renders.pageImages?.length) {
-    return { ...empty, views: views.length, boxes: boxes.length, dropped, meta, error: renders.error || 'crop renders failed' };
+  // ONE page at a time: render it, cut its boxes out of it, delete the render, move on.
+  // Rendering every page up front held ~5 multi-megapixel JPEGs in the work dir and, worse,
+  // let sharp's operation cache keep the decoded copies of them alive across crops — which
+  // is how a 1 GB cgroup ran out on a five-page brochure. One python process per page also
+  // means each render's peak is the biggest SINGLE page, never their sum.
+  const byPage = new Map();
+  for (const b of boxes) {
+    if (!byPage.has(b.page)) byPage.set(b.page, []);
+    byPage.get(b.page).push(b);
   }
-  const pageRender = new Map(renders.pageImages.map((p) => [p.page, p]));
+  const cropPages = [...byPage.keys()].sort((a, b) => a - b);
 
   const imgDir = path.join(workDir, 'images');
   fs.mkdirSync(imgDir, { recursive: true });
   const crops = [];
   let index = startIndex;
-  for (const b of boxes) {
-    const render = pageRender.get(b.page);
-    if (!render) { dropped.push({ page: b.page, reason: 'page render missing' }); continue; }
-    const rect = cropRect(b.box, render);
-    const verdict = cropAcceptable(rect, { minShortSide: cfg.minImageSide ?? MIN_CROP_SHORT_SIDE });
-    if (!verdict.ok) { dropped.push({ page: b.page, box: b.box, reason: verdict.reason }); continue; }
-    const name = `c${String(index).padStart(3, '0')}.jpg`;
-    const file = path.join(imgDir, name);
-    try {
-      const info = await sharp(render.abs, { limitInputPixels: MAX_INPUT_PIXELS })
-        .extract(rect)
-        .jpeg({ quality: CROP_QUALITY, mozjpeg: true })
-        .toFile(file);
-      crops.push({
-        index,
-        file: path.join('images', name),
-        abs: path.resolve(file),
-        width: info.width,
-        height: info.height,
-        page: b.page,
-        source: 'photo-crop',
-        bytes: info.size,
-        colours: null,
-        coverage: null,
-        room: b.room,
-        note: b.note,
-        box: b.box,
+  let renderedPages = 0;
+
+  // libvips keeps decoded images in an operation cache and runs one thread per core, each
+  // with its own working buffers. Both are wrong for cutting eight crops out of one 12 MP
+  // page in a memory-capped daemon: turn them off for the loop and put them back after.
+  const prevConcurrency = sharp.concurrency();
+  sharp.cache(false);
+  sharp.concurrency(1);
+  try {
+    for (const page of cropPages) {
+      const render = await renderPdfPages(pdfPath, workDir, {
+        pyCmd: cfg.pyCmd,
+        maxPages: cfg.maxPdfPages,
+        dir: path.join('regions', 'crops'),
+        pages: [page],
+        longSide: CROP_LONG_SIDE,
+        minShortSide: CROP_MIN_SHORT_SIDE,
+        maxPixels: CROP_MAX_PIXELS,
       });
-      index += 1;
-    } catch (err) {
-      fs.rmSync(file, { force: true });
-      dropped.push({ page: b.page, box: b.box, reason: `sharp: ${err.message}` });
+      const image = render.ok === false ? null : (render.pageImages || []).find((p) => p.page === page);
+      if (!image) {
+        for (const b of byPage.get(page)) dropped.push({ page, box: b.box, reason: render.error || 'page render missing' });
+        continue;
+      }
+      renderedPages += 1;
+      try {
+        for (const b of byPage.get(page)) {
+          const rect = cropRect(b.box, image);
+          const verdict = cropAcceptable(rect, { minShortSide: cfg.minImageSide ?? MIN_CROP_SHORT_SIDE });
+          if (!verdict.ok) { dropped.push({ page, box: b.box, reason: verdict.reason }); continue; }
+          const name = `c${String(index).padStart(3, '0')}.jpg`;
+          const file = path.join(imgDir, name);
+          const pipeline = sharp(image.abs, { limitInputPixels: MAX_INPUT_PIXELS })
+            .extract(rect)
+            .jpeg({ quality: CROP_QUALITY, mozjpeg: true });
+          try {
+            const info = await pipeline.toFile(file);
+            crops.push({
+              index,
+              file: path.join('images', name),
+              abs: path.resolve(file),
+              width: info.width,
+              height: info.height,
+              page,
+              source: 'photo-crop',
+              bytes: info.size,
+              colours: null,
+              coverage: null,
+              room: b.room,
+              note: b.note,
+              box: b.box,
+            });
+            index += 1;
+          } catch (err) {
+            fs.rmSync(file, { force: true });
+            dropped.push({ page, box: b.box, reason: `sharp: ${err.message}` });
+          } finally {
+            // Release the pipeline's buffers now rather than at the next GC.
+            pipeline.destroy?.();
+          }
+        }
+      } finally {
+        // The render has given up everything it had; a 12 MP JPEG per page adds up in the
+        // work dir and nothing reads it again. `images/cNNN.jpg` is the artefact that stays.
+        fs.rmSync(image.abs, { force: true });
+      }
     }
+  } finally {
+    sharp.cache(true);
+    sharp.concurrency(prevConcurrency);
+  }
+  if (!renderedPages) {
+    return { ...empty, views: views.length, boxes: boxes.length, dropped, meta, error: 'no page could be rendered at crop resolution' };
   }
 
   return {

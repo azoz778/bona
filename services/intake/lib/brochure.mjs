@@ -3,7 +3,7 @@
 //
 // Why this exists: the owner is sent someone else's brochure and wants the property on the
 // site with his brand on the document — not a raw copy of a competitor's PDF sitting on
-// bona.azoz.uk. The developer's own pages are left exactly as they are (their brand belongs
+// the Bona site. The developer's own pages are left exactly as they are (their brand belongs
 // on their pages); what Bona adds is a cover, a footer strip and a closing "Enquire" page.
 //
 // Size is the reason this file has a cap at all: developer brochures run 50–80 MB, the repo
@@ -55,7 +55,7 @@ export function priceText(price) {
  * text and no untrusted PDF text ever reaches the page. rebrand_pdf.py scrubs them again.
  */
 export function brochureFacts(listing, { site } = {}) {
-  const base = String(site || listing?._intake?.site || 'https://bona.azoz.uk').replace(/\/+$/, '');
+  const base = String(site || listing?._intake?.site || 'https://bona-real-estate.com').replace(/\/+$/, '');
   const district = listing?.location?.district?.en || '';
   const city = listing?.location?.city?.en || '';
   return {

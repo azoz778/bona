@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FORBIDDEN, HYPE, isLocalSrc, LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, LOCAL_LISTING_VIDEO } from './rules.mjs';
+import { FORBIDDEN, HOUSE_PRICE_CAP, HYPE, isHousePublic, isLocalSrc, LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, sarAmount, videoEntryProblems } from './rules.mjs';
 
 function matterportIdOf(value) {
   if (typeof value !== 'string') return null;
@@ -142,11 +142,10 @@ for (const l of data) {
   if (l.virtualTourUrl && !(l.virtualTourUrl.startsWith('https://') && matterportIdOf(l.virtualTourUrl))) err(id, `virtualTourUrl must be a full Matterport URL with a valid m= id: ${l.virtualTourUrl}`);
   // Optional, like project/unit/map. WhatsApp-intake listings always carry it (as []);
   // curated listings may not have it at all yet — both are fine, only the SHAPE is checked.
+  // Every entry is `{ src, poster }` (scripts/curate/rules.mjs::videoEntryProblems).
   if (l.videos !== undefined) {
     if (!Array.isArray(l.videos)) err(id, 'videos must be an array when present');
-    else for (const [i, v] of l.videos.entries()) {
-      if (!(LOCAL_LISTING_VIDEO.test(v) || /^https:\/\//.test(v))) err(id, `videos[${i}] is not /listings/<slug>/v-nn.mp4 or an https URL: ${v}`);
-    }
+    else for (const [i, v] of l.videos.entries()) for (const problem of videoEntryProblems(v, i)) err(id, problem);
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(l.listedAt ?? '') || Number.isNaN(Date.parse(l.listedAt))) err(id, `bad listedAt ${l.listedAt}`);
 
@@ -192,6 +191,14 @@ for (const l of data) {
       if (typeof lc.adExpiry === 'string' && (!/^\d{4}-\d{2}-\d{2}$/.test(lc.adExpiry) || Number.isNaN(Date.parse(lc.adExpiry)))) err(id, `licence.adExpiry must be YYYY-MM-DD, got ${lc.adExpiry}`);
       if (typeof lc.adExpiry === 'string' && !lc.adNumber) err(id, 'licence.adExpiry without licence.adNumber');
     }
+  }
+
+  // Owner rule 2026-09-08: houses over SAR 10,000,000 are not on the public site.
+  // build.mjs filters them out, but listings.json is also written by scripts/sync-listings.mjs
+  // (which the daily deploy runs and which edits price.amount in place, without rebuilding).
+  // Checking it here means a synced price rise can never quietly republish a house.
+  if (!isHousePublic(l)) {
+    err(id, `house is over the SAR ${HOUSE_PRICE_CAP.toLocaleString('en-US')} public-site cap (${Math.round(sarAmount(l.price)).toLocaleString('en-US')} SAR eq.) — re-run scripts/curate/build.mjs`);
   }
 
   // copy hygiene

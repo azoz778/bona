@@ -42,6 +42,28 @@ test('idle buckets are swept so memory cannot grow without bound', () => {
   assert.ok(limiter.size() <= 31, `expected the sweep to bound growth, got ${limiter.size()}`);
 });
 
+test('a flood of fresh keys is bounded too — the stale pass alone could not evict any of them', () => {
+  // Every bucket is touched in the same instant, so nothing is stale. Before the LRU
+  // pass this grew one entry per source address for as long as the flood lasted; an
+  // IPv6 /64 makes that unbounded memory for the cost of one packet each.
+  const t = 1_000;
+  const limiter = createLimiter({ capacity: 5, perMs: 1000, now: () => t, maxKeys: 10 });
+  for (let i = 0; i < 500; i += 1) limiter.take(`ip-${i}`);
+  assert.ok(limiter.size() <= 10, `expected the map to stay at or under maxKeys, got ${limiter.size()}`);
+  // The most recent callers are the ones kept: the last key still has its own bucket.
+  assert.equal(limiter.take('ip-499').remaining, 3);
+});
+
+test('the least recently used bucket is the one evicted, not an arbitrary one', () => {
+  let t = 0;
+  const limiter = createLimiter({ capacity: 5, perMs: 60_000, now: () => t, maxKeys: 4 });
+  for (const k of ['a', 'b', 'c', 'd']) { limiter.take(k); t += 1; }
+  t += 1;
+  limiter.take('a'); // 'a' is used again, so 'b' is now the oldest
+  for (let i = 0; i < 20; i += 1) { t += 1; limiter.take(`flood-${i}`); }
+  assert.ok(limiter.size() <= 4);
+});
+
 test('capacity and window must be positive', () => {
   assert.throws(() => createLimiter({ capacity: 0, perMs: 1000 }), TypeError);
   assert.throws(() => createLimiter({ capacity: 5, perMs: 0 }), TypeError);

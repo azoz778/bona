@@ -1,5 +1,5 @@
 # Bona — private luxury real estate, Jeddah
-# https://bona.azoz.uk (future: https://bona.com.sa)
+# https://bona-real-estate.com
 
 User-agent: *
 Allow: /
@@ -10,4 +10,4 @@ Disallow: /dashboard/
 User-agent: CCBot
 Disallow: /
 
-Sitemap: https://bona.azoz.uk/sitemap-index.xml
+Sitemap: https://bona-real-estate.com/sitemap-index.xml

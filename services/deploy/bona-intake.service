@@ -54,9 +54,16 @@ LockPersonality=true
 ; A "-" prefix means "only if it exists", so a fresh box still starts.
 ReadWritePaths=%h/bona-data %h/bona-bot
 ReadWritePaths=-%h/.claude -%h/.claude.json -%h/.cache -%h/.local/share -%h/.local/state -%h/.config
-; RAM ceiling. The AI step spawns `claude`, which is another node process; if the journal
-; shows the job being OOM-killed at the "ai" stage, raise this rather than removing it.
-MemoryMax=1G
+; RAM ceiling. Three processes can be resident at once: this daemon, the `claude` it spawns
+; (another node process, 300-600 MB), and a `uv run python` rendering one brochure page
+; (~230 MB for the worst page the owner has sent). 1 G was not enough for that and the unit
+; was OOM-killed in a loop on 2026-09-06 re-queueing two brochures; the crop step was made
+; memory-bounded (one page at a time, 12 MP budget, no libvips cache) AND this was raised.
+; MemoryHigh throttles and reclaims before MemoryMax kills, so a run that creeps up is slowed
+; rather than shot. If the journal shows an OOM at the "ai" stage, raise these rather than
+; removing them.
+MemoryHigh=1536M
+MemoryMax=2G
 
 StandardOutput=journal
 StandardError=journal

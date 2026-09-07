@@ -7,8 +7,8 @@
     "en": "Bona is a private luxury real estate boutique in Jeddah, representing a curated portfolio of villas, penthouses, waterfront residences and off-market homes across Saudi Arabia and select international destinations.",
     "ar": "بونا بوتيك عقاري فاخر في جدة، يمثّل محفظة منتقاة من الفلل والبنتهاوس والمساكن الواجهية والعقارات خارج السوق في المملكة العربية السعودية ووجهات عالمية مختارة."
   },
-  "url": "https://bona.azoz.uk",
-  "futureDomain": "bona.com.sa",
+  "url": "https://bona-real-estate.com",
+  "futureDomain": "bona-real-estate.com",
   "whatsapp": { "e164": "+966593296933", "display": "+966 59 329 6933", "wa": "966593296933" },
   "phone": { "e164": "+966593296933", "display": "+966 59 329 6933" },
   "email": "bona.com.sa@gmail.com",
@@ -26,7 +26,7 @@
   },
   "concierge": {
     "enabled": true,
-    "apiBase": "https://bona-api.azoz.uk",
+    "apiBase": "https://api.bona-real-estate.com",
     "name": { "en": "Dana", "ar": "دانة" }
   },
   "analytics": { "ga4": null, "metaPixel": null, "snapPixel": null, "tiktokPixel": null, "gscVerification": null },
