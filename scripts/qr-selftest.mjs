@@ -7,7 +7,9 @@
 import assert from 'node:assert/strict';
 import { encodeQr, qrSvgPath, byteCapacity } from '../src/lib/qr.ts';
 
-const url = 'https://bona.azoz.uk/properties/x/';
+// A fixture, deliberately not a real Bona domain: the site's domain lives in site.json and changes, while the
+// assertions below depend on this string being exactly 34 bytes.
+const url = 'https://example.test/properties/x/';
 const qr = encodeQr(url);
 
 // 34 bytes: version 2-M holds 26, version 3-M holds 42.
