@@ -78,6 +78,9 @@ export function loadConfig({ env = loadEnv(), ids = readIds(), home = os.homedir
     waPoll: truthy(env.BONA_WA_POLL, true),
     waPollMs: Number(env.BONA_WA_POLL_MS ?? 45_000),
     fanoutMs: Number(env.BONA_FANOUT_MS ?? 20_000),
+    // Ad-platform fan-out carries a lead's hashed phone to Meta / Snap, so by default it
+    // waits for the visitor's ads consent (PDPL). Set to 0 only with a different legal basis.
+    fanoutRequireConsent: truthy(env.BONA_FANOUT_REQUIRE_CONSENT, true),
     dashCookieDays: Number(env.BONA_DASH_COOKIE_DAYS ?? 30),
     // Ad-platform server-side APIs (~/.secrets/bona-marketing.env). All optional: a
     // missing key means that destination is skipped, never an error.
@@ -107,7 +110,7 @@ export function redacted(cfg) {
     maxChatsPerDay: cfg.maxChatsPerDay, maxCallsPerDay: cfg.maxCallsPerDay,
     maxTurnsPerSession: cfg.maxTurnsPerSession,
     dbFile: cfg.dbFile, eventsRatePerMin: cfg.eventsRatePerMin, enquiryRatePerMin: cfg.enquiryRatePerMin,
-    waPoll: cfg.waPoll, waPollMs: cfg.waPollMs, fanoutMs: cfg.fanoutMs, dashCookieDays: cfg.dashCookieDays,
+    waPoll: cfg.waPoll, waPollMs: cfg.waPollMs, fanoutMs: cfg.fanoutMs, fanoutRequireConsent: cfg.fanoutRequireConsent, dashCookieDays: cfg.dashCookieDays,
     // Pixel / measurement ids are printed on every page of the site; the tokens are not.
     metaPixelId: cfg.metaPixelId || null, ga4MeasurementId: cfg.ga4MeasurementId || null, snapPixelId: cfg.snapPixelId || null,
     hasMetaCapiToken: Boolean(cfg.metaCapiToken), hasGa4ApiSecret: Boolean(cfg.ga4ApiSecret), hasSnapCapiToken: Boolean(cfg.snapCapiToken),

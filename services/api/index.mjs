@@ -28,6 +28,7 @@ import { createLimiter, clientIp, trustedPeer } from './lib/ratelimit.mjs';
 import { openDb, newId } from './lib/db.mjs';
 import { validateEvent, recordEvent, cleanAttrIds, MAX_BODY_BYTES as MAX_EVENT_BYTES } from './lib/events.mjs';
 import { validateEnquiry } from './lib/enquiry.mjs';
+import { createFanout } from './lib/fanout.mjs';
 import { importJsonl } from './lib/import-legacy.mjs';
 import { createBudget } from './lib/budget.mjs';
 import { createInventory } from './lib/inventory.mjs';
@@ -147,6 +148,9 @@ export function assertBillableBody(body) {
 }
 
 const isJsonContentType = (value) => /^application\/(?:[\w.+-]+\+)?json\s*(?:;|$)/i.test(String(value ?? '').trim());
+/** `text/plain` (with or without a charset). The one media type a cross-origin `fetch`
+    may send without a preflight, which is why the enquiry form uses it. */
+const isPlainTextContentType = (value) => /^text\/plain\s*(?:;|$)/i.test(String(value ?? '').trim());
 
 /* ------------------------------------------------------------------ */
 /* App                                                                 */
@@ -160,6 +164,9 @@ export function createApp(options = {}) {
   const db = options.db ?? openDb(cfg.dbFile ?? path.join(cfg.dataDir, 'bona.db'));
   const ownsDb = !options.db;
   const retell = options.retell ?? createRetellClient({ apiKey: cfg.retellApiKey, mock: cfg.retellMock });
+  // The queue behind `db.enqueueFanout()`. Constructed always, started only by the real
+  // server (below): a test drains it by hand so nothing goes out on a timer.
+  const fanout = options.fanout ?? createFanout({ db, cfg, log });
   const probeRetell = options.probeRetell ?? createHealthProbe(retell);
   const sendWhatsApp = options.sendWhatsApp ?? ((text) => sendText(text, { env: cfg.env }));
   const tools = createToolHandlers({
@@ -250,6 +257,7 @@ export function createApp(options = {}) {
     const inventoryOk = inventory.ok ? inventory.ok() : inventory.count() > 0;
     let dbStatus = 'error';
     try { dbStatus = db.ping() ? 'ok' : 'error'; } catch { dbStatus = 'error'; }
+    const fanoutCounts = () => { try { return db.fanoutCounts(); } catch { return { pending: 0, sent: 0, failed: 0, skipped: 0 }; } };
     return {
       ok: inventoryOk,
       service: 'bona-api',
@@ -257,6 +265,9 @@ export function createApp(options = {}) {
       uptimeS: Math.round((Date.now() - startedAt) / 1000),
       retell: retellStatus === 'ok' ? 'ok' : 'error',
       db: dbStatus,
+      // What the ad platforms have and have not been told. `pending` that never falls is
+      // the symptom of a fan-out that is queued but not draining.
+      fanout: { ...fanoutCounts(), dests: fanout.dests(), running: fanout.started },
       inventory: inventory.count(),
       budget: budget.counters(),
       mock: cfg.retellMock || undefined,
@@ -573,7 +584,15 @@ export function createApp(options = {}) {
       log({ level: 'warn', evt: 'origin.rejected', path: p, origin: String(origin).slice(0, 200), ip });
       return sendJson(res, 403, { error: 'forbidden_origin' }, cors);
     }
-    if (!isJsonContentType(req.headers['content-type'])) {
+    // JSON-only, with one exception. `/v1/enquiry` also takes `text/plain`, because the
+    // form posts the lead with `keepalive` in the same tick the page navigates to
+    // WhatsApp: only a CORS "simple request" (no preflight) survives that hand-off on
+    // mobile, and a preflight is exactly what `application/json` forces. Nothing
+    // upstream is billed by an enquiry, and the Origin check above already refuses a
+    // stated foreign origin. The chat and call routes — the ones that spend Retell
+    // money — stay JSON-only, so a cross-site form post cannot reach them at all.
+    const ct = req.headers['content-type'];
+    if (!isJsonContentType(ct) && !(p === '/v1/enquiry' && isPlainTextContentType(ct))) {
       return sendJson(res, 415, { error: 'unsupported_media_type' }, cors);
     }
 
@@ -654,9 +673,9 @@ export function createApp(options = {}) {
   server.requestTimeout = 60_000;
   // The store is owned by the app when the app opened it; a caller who injected one
   // (tests, tools) closes it themselves.
-  if (ownsDb) server.on('close', () => db.close());
+  if (ownsDb) server.on('close', () => { fanout.stop(); db.close(); });
 
-  return { server, handle, cfg, inventory, store, db, retell, tools, limiters };
+  return { server, handle, cfg, inventory, store, db, retell, tools, limiters, fanout };
 }
 
 /* ------------------------------------------------------------------ */
@@ -672,6 +691,11 @@ if (isMain) {
   } catch (err) {
     jsonLog('error', { evt: 'import.legacy_failed', error: String(err?.message ?? err) });
   }
+  // Ad-platform fan-out. Starting it with no credentials is not a waste: the worker
+  // marks those rows `skipped` instead of letting a backlog build, and picks the real
+  // destinations up the moment ~/.secrets/bona-marketing.env has them.
+  const fanoutStarted = app.fanout.start();
+  jsonLog('info', { evt: 'fanout.init', started: fanoutStarted, dests: app.fanout.dests(), everyMs: app.cfg.fanoutMs });
   app.server.listen(app.cfg.port, app.cfg.host, () => {
     jsonLog('info', { evt: 'listening', ...redacted(app.cfg) });
   });

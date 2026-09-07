@@ -919,13 +919,18 @@ test('an enquiry with a bad phone or a missing name is 400 and creates nothing',
   });
 });
 
-test('the enquiry route is origin-checked, JSON-only, and limited to six a minute', async () => {
+test('the enquiry route is origin-checked, takes the form\'s text/plain, and is limited to six a minute', async () => {
   await withServer({}, async ({ call }) => {
     const body = JSON.stringify(enquiryBody());
     const foreign = await call('/v1/enquiry', { method: 'POST', body, headers: { Origin: 'https://evil.example' } });
     assert.equal(foreign.status, 403);
-    assert.equal((await call('/v1/enquiry', { method: 'POST', body, headers: { 'Content-Type': 'text/plain' } })).status, 415);
-    for (let i = 0; i < 6; i += 1) assert.equal((await call('/v1/enquiry', { method: 'POST', body })).status, 200, `enquiry ${i + 1}`);
+    // The site posts the lead as text/plain + keepalive so there is no preflight to lose
+    // while the page is navigating to WhatsApp. Refusing it dropped every form lead.
+    assert.equal((await call('/v1/enquiry', { method: 'POST', body, headers: { 'Content-Type': 'text/plain;charset=UTF-8' } })).status, 200);
+    assert.equal((await call('/v1/enquiry', { method: 'POST', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })).status, 415);
+    // The routes that spend Retell money stay JSON-only.
+    assert.equal((await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale: 'en' }), headers: { 'Content-Type': 'text/plain' } })).status, 415);
+    for (let i = 0; i < 5; i += 1) assert.equal((await call('/v1/enquiry', { method: 'POST', body })).status, 200, `enquiry ${i + 1}`);
     const blocked = await call('/v1/enquiry', { method: 'POST', body });
     assert.equal(blocked.status, 429);
     assert.ok(Number(blocked.headers.get('retry-after')) >= 1);
