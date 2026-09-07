@@ -247,3 +247,23 @@ describe('isHousePublic', () => {
     assert.equal(isHousePublic({ kind: 'apartment', price: { amount: 50_000_000, currency: 'SAR' } }), true);
   });
 });
+
+describe('price caps — cases the Codex review found', () => {
+  it('treats an on-request price as unknown even when a stale number sits beside it', () => {
+    // buildListing's `price.amount = price.amount ?? null` is a no-op, so an AI result of
+    // { onRequest: true, amount: 12000000 } survives intact. onRequest is the owner's word
+    // that the price is not published; a number next to it is not a price we may act on.
+    assert.equal(sarAmount({ amount: 12_000_000, currency: 'SAR', onRequest: true }), null);
+    assert.equal(isHousePublic({ kind: 'house', price: { amount: 12_000_000, currency: 'SAR', onRequest: true } }), true);
+  });
+
+  it('still reads a real price when onRequest is false or absent', () => {
+    assert.equal(sarAmount({ amount: 12_000_000, currency: 'SAR', onRequest: false }), 12_000_000);
+    assert.equal(sarAmount({ amount: 12_000_000, currency: 'SAR' }), 12_000_000);
+  });
+
+  it('refuses to guess at a currency it does not know', () => {
+    // Silently treating KWD as SAR would under-count by ~12x and publish an over-cap house.
+    assert.throws(() => sarAmount({ amount: 1_000_000, currency: 'KWD' }), /currency/i);
+  });
+});

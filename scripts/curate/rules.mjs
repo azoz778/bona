@@ -84,10 +84,18 @@ export const SAR_RATE = { SAR: 1, AED: 1.02, USD: 3.75, EUR: 4.05, GBP: 4.75, OM
  * zero. Monthly rents are annualised so a cap means the same thing for them.
  */
 export function sarAmount(price) {
+  // `onRequest` is the owner's word that no price is published. A number may still sit in
+  // `amount` beside it — buildListing's `price.amount = price.amount ?? null` never clears
+  // one — but it is not a price we may act on, so the answer is "unknown", not that figure.
+  if (price?.onRequest) return null;
   const amount = price?.amount;
   if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) return null;
+  const rate = SAR_RATE[price.currency];
+  // Never fall back to 1: treating an unknown currency as SAR would under-count a price by
+  // up to ~12x and publish a home the cap exists to hide. Fail loudly instead.
+  if (!rate) throw new Error(`sarAmount: unknown currency "${price.currency}" (known: ${Object.keys(SAR_RATE).join(', ')})`);
   const annual = price.period === 'month' ? amount * 12 : amount;
-  return annual * (SAR_RATE[price.currency] ?? 1);
+  return annual * rate;
 }
 
 /** Owner rule 2026-09-08: houses over this are not published on the public site. */
