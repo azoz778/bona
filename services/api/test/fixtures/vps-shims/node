@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Fake `node` (both the PC node and, symlinked into the fake HOME, the pinned VPS node):
+#   -v / --version                 → v24.19.0
+#   -e 'require("node:sqlite")'    → exit 0 (exit 1 with SHIM_NODE_NO_SQLITE=1: an old node)
+#   -e '<count script>' <bona.db>  → prints 7 (the lead count)
+#   --test …                       → exit $SHIM_NODE_TEST_FAIL (default 0)
+#   anything else                  → exit 0 without doing anything
+set -u
+[ -n "${SHIM_LOG:-}" ] && printf 'node %s\n' "$*" >> "$SHIM_LOG"
+case "${1:-}" in
+  -v | --version) echo v24.19.0 ;;
+  --test) exit "${SHIM_NODE_TEST_FAIL:-0}" ;;
+  -e) if [ $# -ge 3 ]; then echo 7; elif [ "${SHIM_NODE_NO_SQLITE:-0}" = 1 ]; then exit 1; fi ;;
+esac
+exit 0
