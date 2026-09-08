@@ -64,7 +64,9 @@ legacy_procs() {
   { pgrep -u "$VPS_USER" -f "^[^ ]*/node $BONA_VPS_REPO/services/api/index[.]mjs"
     pgrep -u "$VPS_USER" -f "^[^ ]*/cloudflared .*tunnel run $BONA_TUNNEL_ID"; } 2>/dev/null | grep -vxF -e __none__ "${args[@]}" || true
 }
-export -f legacy_procs 2>/dev/null || true
+# Runs in THIS shell: a `bash -c` child would not see VPS_USER/BONA_VPS_REPO/BONA_TUNNEL_ID and would
+# probe for nothing (Codex, final pass 2026-09-08).
+no_legacy_procs() { [ -z "$(legacy_procs)" ]; }
 
 check_state() { # prints one line per item; returns the number of missing items
   local missing=0 f u
@@ -89,7 +91,7 @@ check_state() { # prints one line per item; returns the number of missing items
   # means a missing rule fails here instead of prompting inside cutover.sh's ssh.
   _label="passwordless sudo for systemctl (sudo -n systemctl --version)"; item bash -c "command -v sudo >/dev/null && sudo -n systemctl --version >/dev/null 2>&1"
   _label="no legacy user unit files in $LEGACY_USER_UNIT_DIR";   item bash -c "! ls '$LEGACY_USER_UNIT_DIR'/bona-api.service '$LEGACY_USER_UNIT_DIR'/cloudflared-bona.service '$LEGACY_USER_UNIT_DIR'/bona-repo-sync.service '$LEGACY_USER_UNIT_DIR'/bona-repo-sync.timer >/dev/null 2>&1"
-  _label="no legacy bona-api / tunnel processes for $VPS_USER";  item bash -c "[ -z \"\$(legacy_procs)\" ]"
+  _label="no legacy bona-api / tunnel processes for $VPS_USER";  item no_legacy_procs
   return "$missing"
 }
 

@@ -1,7 +1,7 @@
 // services/api/test/vps-deploy.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
@@ -543,6 +543,23 @@ test('install-vps.sh --check on a fully provisioned HOME reports every item ok a
   assert.ok(lines.some((l) => l.startsWith(` ok  unit ${units}/bona-api.service`)), `--check must look for the units under BONA_UNIT_DIR\n${r.stdout}`);
   assert.ok(lines.some((l) => l.startsWith(' ok  passwordless sudo')), `system units are driven with sudo -n; --check must prove it works\n${r.stdout}`);
   assert.ok(!r.stdout.includes('linger'), r.stdout);
+});
+
+test('install-vps.sh --check refuses while a stray API process for this user runs from the repo path', () => {
+  // A real process whose command line is exactly what a leftover attempt-1 unit would show:
+  // <some>/node <repo>/services/api/index.mjs — spawned with node's absolute path.
+  const home = mkdtempSync(path.join(tmpdir(), 'bona-home-'));
+  const repo = mkdtempSync(path.join(tmpdir(), 'bona-repo-'));
+  mkdirSync(path.join(repo, 'services/api'), { recursive: true });
+  writeFileSync(path.join(repo, 'services/api/index.mjs'), 'setTimeout(() => {}, 60000);\n');
+  const stray = spawn(process.execPath, [path.join(repo, 'services/api/index.mjs')], { stdio: 'ignore' });
+  try {
+    const r = bash([path.join(VPS, 'install-vps.sh'), '--check'], { env: { HOME: home, BONA_VPS_REPO: repo } });
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stdout, /^MISSING: no legacy bona-api \/ tunnel processes for /m, r.stdout);
+  } finally {
+    stray.kill('SIGKILL');
+  }
 });
 
 test('install-vps.sh install mode never enables, starts or restarts a unit', () => {
