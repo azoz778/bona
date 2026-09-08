@@ -163,6 +163,28 @@ describe('buildListing', () => {
     assert.equal(l.mapPrecision, null);
   });
 
+  it('refuses a house over the public-site price cap, before anything is written', () => {
+    // Codex review 2026-09-08: filtering only in build.mjs still let the intake commit
+    // public/listings/<slug>/*.jpg and brochure.pdf, which GitHub Pages serves directly —
+    // the home would be off the site but its photos and full brochure still fetchable.
+    const ai = structuredClone(AI);
+    ai.listing.price = { amount: 18_000_000, currency: 'SAR', from: false, period: null, onRequest: false };
+    const l = buildListing({ ai, images: imagesFor(slug, picks), slug, id: 'BONA-W020', repo: REPO, caption: {}, meta: {} });
+    const problems = checkListing(l);
+    assert.equal(problems.length, 1, JSON.stringify(problems));
+    assert.match(problems[0], /10,000,000|price cap/i);
+  });
+
+  it('accepts a house at or under the cap, and one with no published price', () => {
+    const under = structuredClone(AI);
+    under.listing.price = { amount: 9_000_000, currency: 'SAR', from: false, period: null, onRequest: false };
+    assert.deepEqual(checkListing(buildListing({ ai: under, images: imagesFor(slug, picks), slug, id: 'BONA-W021', repo: REPO, caption: {}, meta: {} })), []);
+
+    const onReq = structuredClone(AI);
+    onReq.listing.price = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true };
+    assert.deepEqual(checkListing(buildListing({ ai: onReq, images: imagesFor(slug, picks), slug, id: 'BONA-W022', repo: REPO, caption: {}, meta: {} })), []);
+  });
+
   it('lets the caption override the price and the category', () => {
     const l = buildListing({
       ai: structuredClone(AI), images: imagesFor(slug, picks), slug, id: 'BONA-W009', repo: REPO,

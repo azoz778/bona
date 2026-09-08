@@ -192,3 +192,78 @@ describe('build.mjs', () => {
     assert.match(line[0], /published\.length/);
   });
 });
+
+// ---- publication price caps ------------------------------------------------------------
+// Owner rule 2026-09-08: houses above SAR 10,000,000 are not shown on the public site.
+import { HOUSE_PRICE_CAP, sarAmount, isHousePublic } from '../../../scripts/curate/rules.mjs';
+
+describe('sarAmount', () => {
+  it('passes a SAR price straight through', () => {
+    assert.equal(sarAmount({ amount: 18_000_000, currency: 'SAR' }), 18_000_000);
+  });
+
+  it('converts other currencies so one cap can govern them all', () => {
+    // Palais Rose is priced in euro; SAR 10m must mean the same line for it.
+    assert.ok(sarAmount({ amount: 38_000_000, currency: 'EUR' }) > 100_000_000);
+    assert.equal(sarAmount({ amount: 1_000_000, currency: 'AED' }), 1_020_000);
+  });
+
+  it('is null when there is no number to compare', () => {
+    assert.equal(sarAmount({ amount: null, currency: 'SAR', onRequest: true }), null);
+    assert.equal(sarAmount(null), null);
+    assert.equal(sarAmount({ amount: 0, currency: 'SAR' }), null);
+  });
+
+  it('annualises a monthly rent before comparing', () => {
+    assert.equal(sarAmount({ amount: 100_000, currency: 'SAR', period: 'month' }), 1_200_000);
+  });
+});
+
+describe('isHousePublic', () => {
+  const house = (amount, currency = 'SAR') => ({ kind: 'house', price: { amount, currency } });
+
+  it('keeps a house under the cap', () => {
+    assert.equal(isHousePublic(house(8_000_000)), true);
+  });
+
+  it('drops a house over the cap', () => {
+    assert.equal(isHousePublic(house(18_000_000)), false);
+    assert.equal(isHousePublic(house(38_000_000, 'EUR')), false);
+  });
+
+  it('keeps a house priced exactly at the cap', () => {
+    // "over ten million" — ten million itself is not over it.
+    assert.equal(isHousePublic(house(HOUSE_PRICE_CAP)), true);
+  });
+
+  it('keeps a house whose price we do not know', () => {
+    // Owner decision 2026-09-08: never remove on a guess. The cap catches it the moment
+    // a price is set.
+    assert.equal(isHousePublic({ kind: 'house', price: { amount: null, currency: 'SAR', onRequest: true } }), true);
+  });
+
+  it('leaves every other kind alone — land has its own, separate cap', () => {
+    assert.equal(isHousePublic({ kind: 'land', price: { amount: 10_200_000, currency: 'SAR' } }), true);
+    assert.equal(isHousePublic({ kind: 'apartment', price: { amount: 50_000_000, currency: 'SAR' } }), true);
+  });
+});
+
+describe('price caps — cases the Codex review found', () => {
+  it('treats an on-request price as unknown even when a stale number sits beside it', () => {
+    // buildListing's `price.amount = price.amount ?? null` is a no-op, so an AI result of
+    // { onRequest: true, amount: 12000000 } survives intact. onRequest is the owner's word
+    // that the price is not published; a number next to it is not a price we may act on.
+    assert.equal(sarAmount({ amount: 12_000_000, currency: 'SAR', onRequest: true }), null);
+    assert.equal(isHousePublic({ kind: 'house', price: { amount: 12_000_000, currency: 'SAR', onRequest: true } }), true);
+  });
+
+  it('still reads a real price when onRequest is false or absent', () => {
+    assert.equal(sarAmount({ amount: 12_000_000, currency: 'SAR', onRequest: false }), 12_000_000);
+    assert.equal(sarAmount({ amount: 12_000_000, currency: 'SAR' }), 12_000_000);
+  });
+
+  it('refuses to guess at a currency it does not know', () => {
+    // Silently treating KWD as SAR would under-count by ~12x and publish an over-cap house.
+    assert.throws(() => sarAmount({ amount: 1_000_000, currency: 'KWD' }), /currency/i);
+  });
+});

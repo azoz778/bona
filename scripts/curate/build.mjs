@@ -7,10 +7,19 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LISTINGS } from './listings.source.mjs';
 import { ROOMS } from './rooms.mjs';
+import { HOUSE_PRICE_CAP, isHousePublic, sarAmount } from './rules.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const GALLERY = path.join(ROOT, 'scripts', 'tk-gallery-data.json');
 const OUT = path.join(ROOT, 'src', 'data', 'listings.json');
+
+// A brochure's public URL is a fact about where the site lives NOW, not about where it lived
+// when the intake daemon first published the file. The stored value is whatever the daemon
+// wrote at ingest, so after a domain move it is stale — and because this generator used to
+// copy it through verbatim, every rebuild quietly reintroduced the old host. Recompute it
+// from the site's own config; the stored value only decides WHETHER there is a brochure.
+const SITE_URL = JSON.parse(fs.readFileSync(path.join(ROOT, 'src', 'data', 'site.json'), 'utf8')).url.replace(/\/+$/, '');
+const brochureUrlFor = (slug) => `${SITE_URL}/listings/${slug}/brochure.pdf`;
 
 const gallery = JSON.parse(fs.readFileSync(GALLERY, 'utf8'));
 const byFolder = new Map();
@@ -69,7 +78,7 @@ const out = LISTINGS.map((l, idx) => {
     description: { en: l.description.en.join('\n\n'), ar: l.description.ar.join('\n\n') },
     highlights: l.highlights,
     virtualTourUrl: l.virtualTourUrl ?? null,
-    brochureUrl: l.brochureUrl ?? null,
+    brochureUrl: l.brochureUrl ? brochureUrlFor(l.slug) : null,
     project: l.project ?? null,
     unit: l.unit ?? null,
     map: l.map ?? null,
@@ -115,6 +124,9 @@ if (fs.existsSync(INBOX)) {
     if (!KIND_OF[clean.type]) throw new Error(`inbox/${name}: no kind mapping for type "${clean.type}"`);
     clean.kind = KIND_OF[clean.type];
     clean.featured = Boolean(clean.featured);
+    // Same reason as the curated set above: the daemon stamped this URL with whatever host
+    // was configured the day the brochure arrived, so it must be re-derived, not trusted.
+    if (clean.brochureUrl) clean.brochureUrl = brochureUrlFor(clean.slug);
     for (const [i, im] of (clean.images ?? []).entries()) {
       // BOTH src and thumb: a listing whose thumbnail is missing renders a broken card,
       // and the site never regenerates one at build time.
@@ -140,7 +152,16 @@ if (fs.existsSync(INBOX)) {
 }
 if (inbox.length || inboxHidden) console.log(`WhatsApp intake: appended ${inbox.length} listing(s), ${inboxHidden} hidden`);
 
-const published = [...live, ...inbox];
+// Owner rule 2026-09-08: houses over SAR 10,000,000 come off the public site. Applied to
+// curated AND intake listings alike (a brochure the owner sends is no different from TK
+// stock here), and applied to the COMBINED set so a listing can never slip in by route.
+// A house with no published price is kept — see isHousePublic() for why.
+const withinHouseCap = [...live, ...inbox].filter(isHousePublic);
+const overHouseCap = [...live, ...inbox].filter((l) => !isHousePublic(l));
+if (overHouseCap.length) {
+  console.log(`House cap: excluded ${overHouseCap.length} house(s) over SAR ${HOUSE_PRICE_CAP.toLocaleString('en-US')} — ${overHouseCap.map((l) => `${l.id} (${Math.round(sarAmount(l.price)).toLocaleString('en-US')} SAR eq.)`).join(', ')}`);
+}
+const published = withinHouseCap;
 
 // ---- approximate map pins --------------------------------------------------------------
 // Most listings have no exact pin: TK's API carries no coordinates and most brochures carry
