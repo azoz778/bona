@@ -101,6 +101,14 @@ only difference being where it lands: an intake listing keeps its numbers in its
 `scripts/curate/inbox/<slug>.json`, a curated one in `scripts/curate/licences.json` keyed
 by id, which `scripts/curate/build.mjs` merges back on. Nothing has to be edited by hand.
 
+**Caveat — a curated id only answers while the listing is published.** The daemon looks a
+`BONA-###` up in the built `src/data/listings.json`, so a curated listing the build excludes
+replies `No listing called BONA-002.` even though the id is real: a house over the SAR
+10,000,000 cap (BONA-002, BONA-028), a land plot at or over SAR 50,000,000, or anything not
+in TK's live public list. None of those are on the public site, so none of them need an
+advertisement licence yet — record the number after the build that republishes it, or put it
+straight into `scripts/curate/licences.json`.
+
 The expiry may be typed `01/05/2027` as well as `2027-05-01`, in Western or Arabic-Indic
 digits, and must be a real calendar date — `2027-02-31` is refused, never rounded. Arabic
 verbs work and are answered in Arabic (`ترخيص`, `وافي`), and `licence BONA-W003 clear` /

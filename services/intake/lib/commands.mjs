@@ -1,7 +1,7 @@
 // Caption hints (sent with the PDF) and text commands (sent afterwards).
 // Everything here is pure — the unit tests own this file.
 
-import { LICENCE_NUMBER_RE, isCalendarDate } from '../../../scripts/curate/rules.mjs';
+import { INTAKE_ID_RE, LICENCE_NUMBER_RE, LISTING_ID_RE as SITE_LISTING_ID_RE, isCalendarDate } from '../../../scripts/curate/rules.mjs';
 import { westernise } from './price.mjs';
 
 export const CURRENCIES = ['SAR', 'AED', 'EUR', 'USD', 'OMR'];
@@ -95,16 +95,16 @@ export function parseCaption(caption) {
   };
 }
 
-// Same shape the site validator accepts (scripts/curate/rules.mjs::INTAKE_ID_RE), so a
-// listing the intake can publish is always a listing the owner can then command.
-export const LISTING_ID_RE = /^BONA-W\d{3,5}$/i;
-
-// `licence` and `wafi` are the only commands that also reach a CURATED listing (BONA-###):
+// Both patterns are the SITE's own rules re-flagged, never re-typed: a second copy of an id
+// pattern is a copy that drifts. The only difference is `i`, because the owner types on a
+// phone keyboard that likes to capitalise.
+//
+// INTAKE_ID_RE (BONA-W###) is what every verb takes: they all edit an inbox JSON, which only
+// an intake listing has. LISTING_ID_RE (BONA-### as well) is what `licence` and `wafi` take —
 // a REGA advertisement number belongs to every listing on the site, not just the ones the
-// intake published, and the curated ones keep theirs in scripts/curate/licences.json. Every
-// other verb edits an inbox JSON, which a BONA-### listing does not have — hence two regexes.
-// (scripts/curate/rules.mjs::LISTING_ID_RE, plus /i because the owner types on a phone.)
-export const ANY_LISTING_ID_RE = /^(BONA-\d{3}|BONA-W\d{3,5})$/i;
+// intake published, and the curated ones keep theirs in scripts/curate/licences.json.
+export const LISTING_ID_RE = new RegExp(INTAKE_ID_RE.source, 'i');
+export const ANY_LISTING_ID_RE = new RegExp(SITE_LISTING_ID_RE.source, 'i');
 
 // Unanchored version of LISTING_ID_RE, for pulling an id out of free text — a video's
 // caption, e.g. "video BONA-W001" or just "BONA-W001" on its own.

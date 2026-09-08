@@ -71,13 +71,45 @@ const EMPTY_LICENCE = { adNumber: null, adExpiry: null, wafiNumber: null, escrow
 
 const licencesPath = (repo) => path.join(repo, LICENCES_FILE);
 
-function readLicences(repo) {
+/**
+ * scripts/curate/licences.json, as `{ [listingId]: licence }`.
+ *
+ * ONLY a genuinely absent file bootstraps to an empty set. Anything else — unreadable,
+ * invalid JSON, a half-written file, JSON that is not an object of listings — THROWS, because
+ * the caller's next move is to write the file back out: swallowing the error would rewrite it
+ * with just the one key being set and silently delete every other listing's licence. A throw
+ * reaches index.mjs::publishEdit, which restores the clone with resetTree() and answers the
+ * group with the generic failure line, leaving the broken file for the owner to fix.
+ *
+ * The result has NO PROTOTYPE: the keys come from a file and are looked up with a string that
+ * arrived in a WhatsApp message, so a lookup must never fall through to Object.prototype.
+ */
+export function readLicences(repo) {
+  const file = licencesPath(repo);
+  let raw;
   try {
-    const data = JSON.parse(fs.readFileSync(licencesPath(repo), 'utf8'));
-    return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
-  } catch {
-    return {};
+    raw = fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT') return Object.create(null);
+    throw err;
   }
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (cause) {
+    // Generic message, detail on `err.detail` — publish.mjs::must()'s rule. `err.message`
+    // reaches the group through `status` ("Last error: …"), and a parser message is one Node
+    // release away from quoting the bytes it choked on.
+    const err = new Error(`${LICENCES_FILE} is not valid JSON — refusing to overwrite it. See the journal.`);
+    err.detail = cause.message;
+    throw err;
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error(`${LICENCES_FILE} must be a JSON object of listing id -> licence`);
+  }
+  const all = Object.create(null);
+  for (const [k, v] of Object.entries(data)) all[k] = v;
+  return all;
 }
 
 /** Sorted by id, so two edits months apart produce a readable diff instead of a reshuffle. */
@@ -110,8 +142,18 @@ export function locateCurated(repo, id) {
  */
 function nextLicence(current, patch, clearKeys) {
   const next = { ...EMPTY_LICENCE, ...(current ?? {}) };
-  if (patch) Object.assign(next, patch);
-  else for (const k of clearKeys) next[k] = null;
+  if (patch) {
+    // Only the fields actually GIVEN are set. `wafi <id> <no>` must not blank the ad licence
+    // just because its patch carries no adNumber…
+    const given = Object.entries(patch).filter(([, v]) => v !== undefined);
+    // …and a patch that sets nothing at all is a caller bug, not a request to clear the
+    // block. Clearing is its own argument and its own command; an all-undefined patch used to
+    // look identical to one and wiped a licence the owner had recorded.
+    if (!given.length) throw new Error('licence patch has no field to set — use { clear: true } to remove one');
+    for (const [k, v] of given) next[k] = v;
+  } else {
+    for (const k of clearKeys) next[k] = null;
+  }
   return Object.values(next).some((v) => v !== null && v !== undefined && v !== '') ? next : null;
 }
 
