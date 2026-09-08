@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -129,7 +129,9 @@ function runShimmed(script, args = [], scenario = {}) {
   const log = path.join(home, 'shim.log');
   // SHIM_PRESEED_START (test-side only): pretend an `enable --now bona-api` already went over ssh,
   // so a SHIM_SSH_DOWN_AFTER_START scenario is down from the very first call.
-  const { SHIM_PRESEED_START, ...env } = scenario;
+  // SHIM_STALE_WAL (test-side only): the PC still has a bona.db-wal from before the cutover.
+  const { SHIM_PRESEED_START, SHIM_STALE_WAL, ...env } = scenario;
+  if (SHIM_STALE_WAL) writeFileSync(path.join(home, 'bona-data', 'bona.db-wal'), 'stale');
   writeFileSync(log, SHIM_PRESEED_START ? 'ssh -o BatchMode=yes -o ConnectTimeout=20 fake-vps systemctl --user enable --now bona-api\n' : '');
   const r = bash([path.join(VPS, script), ...args], {
     env: {
@@ -162,6 +164,9 @@ const CALL = {
   pcDisable: /^systemctl --user disable bona-api cloudflared-bona$/,
   pcStart: /^systemctl --user enable --now bona-api cloudflared-bona$/,
   publicHealth: /^curl .*https:\/\/public-health\.invalid\/health$/,
+  // rollback.sh --copy-back: VPS → a temp dir under the PC's bona-data
+  scpBack: (f) => new RegExp(`^scp -q -p fake-vps:bona-data\\/${f.replace(/\./g, '\\.')} \\S+\\/bona-data\\/\\.copy-back\\.[^/]+\\/$`),
+  vpsHasFile: (f) => new RegExp(`${REMOTE}test -f ~\\/bona-data\\/${f.replace(/\./g, '\\.')}$`),
 };
 // assertOrdered(lines, re1, re2, …) → each call happened, and in this order.
 function assertOrdered(lines, ...res) {
@@ -221,6 +226,57 @@ test('rollback.sh: stops the VPS units and verifies them inactive, only then sta
   const r = runShimmed('rollback.sh');
   assert.equal(r.status, 0, r.out);
   assertOrdered(r.lines, CALL.vpsStopAll, CALL.vpsVerifyInactive, CALL.pcStart, CALL.publicHealth);
+  assert.ok(!r.lines.some((l) => /^scp /.test(l)), `plain rollback copies nothing\n${r.lines.join('\n')}`);
+});
+
+// ---- --copy-back: the VPS's newer data replaces the PC's, all of it or none of it (Codex review)
+const JSONL = ['leads.jsonl', 'chats.jsonl', 'calls.jsonl'];
+const noPcStart = (r, why) => assert.ok(!r.lines.some((l) => /^systemctl .*enable --now/.test(l)), `${why}\n${r.lines.join('\n')}`);
+
+test('rollback.sh --copy-back: VPS verified inactive, PC API stopped, bona.db + the jsonl files fetched into a temp dir, counts compared, then the PC units start', () => {
+  const r = runShimmed('rollback.sh', ['--copy-back'], { SHIM_REMOTE_MISSING: 'bona.db-wal bona.db-shm', SHIM_STALE_WAL: '1' });
+  assert.equal(r.status, 0, r.out);
+  assertOrdered(r.lines, CALL.pcNodeSqlite, CALL.vpsStopAll, CALL.vpsVerifyInactive,
+    /^systemctl --user is-active --quiet bona-api$/, /^systemctl --user stop bona-api$/,
+    CALL.scpBack('bona.db'), CALL.vpsHasFile('bona.db-wal'), CALL.vpsHasFile('leads.jsonl'), CALL.scpBack('leads.jsonl'),
+    CALL.scpBack('calls.jsonl'), CALL.vpsLeadCount, CALL.pcStart, CALL.publicHealth);
+  // bona.db is fetched unconditionally (never probed with test -f); the WAL/SHM pair was absent, so never fetched
+  assert.ok(!r.lines.some((l) => CALL.vpsHasFile('bona.db').test(l)), r.lines.join('\n'));
+  for (const f of ['bona.db-wal', 'bona.db-shm']) assert.ok(!r.lines.some((l) => CALL.scpBack(f).test(l)), `${f} must not be fetched`);
+  for (const f of ['bona.db', ...JSONL]) assert.ok(statSync(path.join(r.home, 'bona-data', f)).isFile(), `${f} should be in bona-data`);
+  for (const f of ['bona.db', ...JSONL]) assert.equal(statSync(path.join(r.home, 'bona-data', f)).mode & 0o777, 0o600, `${f} mode`);
+  assert.ok(!readdirSync(path.join(r.home, 'bona-data')).some((f) => f.startsWith('.copy-back.')), 'temp dir removed');
+  assert.match(r.out, /absent on the VPS: bona\.db-wal/);
+  // the PC's pre-cutover WAL belongs to the OLD database; left beside the fresh bona.db SQLite would replay it
+  assert.ok(!existsSync(path.join(r.home, 'bona-data', 'bona.db-wal')), 'stale bona.db-wal must be removed');
+});
+
+test('rollback.sh --copy-back: scp fails — exit ≠ 0, PC data untouched, temp dir removed, PC units NOT started', () => {
+  const r = runShimmed('rollback.sh', ['--copy-back'], { SHIM_SCP_FAIL: '1' });
+  assert.notEqual(r.status, 0, 'rollback must fail');
+  assertOrdered(r.lines, CALL.vpsVerifyInactive, CALL.scpBack('bona.db'));
+  noPcStart(r, 'PC units must NOT start on stale data');
+  assert.ok(!r.lines.some((l) => CALL.vpsLeadCount.test(l)), 'no count after a failed copy');
+  assert.ok(!readdirSync(path.join(r.home, 'bona-data')).some((f) => f.startsWith('.copy-back.')), 'temp dir removed');
+  assert.ok(!r.lines.some((l) => /^systemctl --user disable/.test(l)), r.lines.join('\n'));
+});
+
+test('rollback.sh --copy-back: bona.db is not on the VPS — exit ≠ 0, PC units NOT started', () => {
+  // bona.db is never probed with `test -f`; the scp itself fails (the shim answers like scp does for a missing file).
+  const r = runShimmed('rollback.sh', ['--copy-back'], { SHIM_REMOTE_MISSING: 'bona.db' });
+  assert.notEqual(r.status, 0, 'rollback must fail');
+  noPcStart(r, 'PC units must NOT start without the database');
+  assert.ok(!r.lines.some((l) => CALL.vpsLeadCount.test(l)), 'no count without the database');
+  assert.ok(!readdirSync(path.join(r.home, 'bona-data')).some((f) => f.startsWith('.copy-back.')), 'temp dir removed');
+});
+
+test('rollback.sh --copy-back: a VPS unit refuses to stop — fail closed: no scp, PC units NOT started', () => {
+  const r = runShimmed('rollback.sh', ['--copy-back'], { SHIM_VPS_STOP_FAILS: '1' });
+  assert.notEqual(r.status, 0, 'rollback must fail');
+  assertOrdered(r.lines, CALL.vpsStopAll, CALL.vpsVerifyInactive);
+  assert.ok(!r.lines.some((l) => /^scp /.test(l)), `nothing may be copied while the VPS may still write\n${r.lines.join('\n')}`);
+  noPcStart(r, 'PC units must NOT be started');
+  assert.ok(r.out.includes(MANUAL_STOP) && r.out.includes(MANUAL_START), `manual commands missing:\n${r.out}`);
 });
 
 test('rollback.sh: a VPS unit refuses to stop — fail closed, PC units never started', () => {
