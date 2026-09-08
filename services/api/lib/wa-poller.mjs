@@ -36,9 +36,11 @@ import { waConfig } from './wa.mjs';
 /** With no cursor yet, look back this far rather than at the whole history. */
 export const FIRST_RUN_LOOKBACK_MS = 10 * 60_000;
 /**
- * The furthest back any window ever reaches. Without it the cursor can sit still — one
- * stale message inside the overlap keeps coming back as "the newest thing we saw" — and a
- * quiet week would end with every tick asking Evolution for a week of messages.
+ * How far behind `now` a tick may leave the cursor. It bounds the steady state: without it
+ * one stale message inside the overlap stays "the newest thing we saw" for ever, the cursor
+ * sits still, and a quiet week ends with every tick asking Evolution for a week. It does
+ * NOT bound the request — the first tick after downtime still asks for the whole gap, and
+ * says `wa.poll.truncated` if the gap holds more messages than the page cap can read.
  */
 export const MAX_WINDOW_MS = 10 * 60_000;
 /** Every window reaches this far back behind the cursor: WhatsApp delivery is not instant. */
@@ -193,7 +195,12 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
   let timer = null;
   let busy = false;
   let matched = 0;
-  /** Message ids this process has failed on, so a poison record cannot retry for ever. */
+  let skipLogged = false;
+  /**
+   * Message ids this process has failed on → `{ attempts, ts }`. The timestamp matters as
+   * much as the count: the cursor is held back to it, or the record would fall out of the
+   * window and be neither retried nor written off.
+   */
   const failures = new Map();
 
   /* -------------------- lookups -------------------- */
@@ -349,7 +356,8 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
     busy = true;
     try {
       if (!configured) {
-        log({ evt: 'wa.poll.skipped', reason: 'evolution_not_configured' });
+        // Once per process: a missing key is a standing state, not news every 45 seconds.
+        if (!skipLogged) { skipLogged = true; log({ evt: 'wa.poll.skipped', reason: 'evolution_not_configured' }); }
         return { skipped: 'not_configured' };
       }
       const t = now();
@@ -363,6 +371,7 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
 
       const tally = { scanned: records.length, matched: 0, unmatched: 0, created: 0, merged: 0, replies: 0, ignored: 0 };
       let maxTs = 0;
+      let oldestFailedTs = null;
       // Evolution answers newest-first. Handled in that order, a follow-up would be judged
       // before the Ref line that creates the lead, and a reply before the enquiry it answers.
       for (const rec of oldestFirst(records)) {
@@ -396,10 +405,16 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
           failures.delete(rec.id);
         } catch (err) {
           // No content, no jid: a record that fails is a bug to fix, not a person to log.
-          const attempts = (failures.get(rec.id) ?? 0) + 1;
-          failures.set(rec.id, attempts);
-          if (attempts >= MAX_RECORD_ATTEMPTS) { db.waSeenAdd(rec.id, ts); failures.delete(rec.id); }
-          log({ level: 'warn', evt: 'wa.poll.record_failed', attempts, writtenOff: attempts >= MAX_RECORD_ATTEMPTS, error: String(err?.message ?? err) });
+          const attempts = (failures.get(rec.id)?.attempts ?? 0) + 1;
+          const writtenOff = attempts >= MAX_RECORD_ATTEMPTS;
+          if (writtenOff) {
+            db.waSeenAdd(rec.id, ts);
+            failures.delete(rec.id);
+          } else {
+            failures.set(rec.id, { attempts, ts });
+            if (oldestFailedTs === null || ts < oldestFailedTs) oldestFailedTs = ts;
+          }
+          log({ level: 'warn', evt: 'wa.poll.record_failed', attempts, writtenOff, error: String(err?.message ?? err) });
         }
       }
 
@@ -408,13 +423,23 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
       // it says so. It takes downtime long enough for 500 messages to pile up.
       if (answer?.truncated) log({ level: 'warn', evt: 'wa.poll.truncated', scanned: records.length, gte, lte });
 
-      db.waCursorSet(instance, {
-        // Forward only, no further back than the newest message we saw, and never reaching
-        // back more than one window: those three together are what keeps this cheap.
-        lastTs: Math.max(since, maxTs || lte, lte - MAX_WINDOW_MS),
-        lastRun: t,
-        unmatched: (cursor?.unmatched ?? 0) + tally.unmatched,
-      });
+      // Forward only, no further back than the newest message we saw, and never reaching
+      // back more than one window: those three together are what keeps this cheap.
+      const floor = lte - MAX_WINDOW_MS;
+      let nextTs = Math.max(since, maxTs || lte, floor);
+      // …except that a record we still owe a retry has to stay inside the next window, or
+      // it is neither retried nor written off — it is simply lost, quietly. The floor still
+      // applies, so one poison record can hold the cursor for three ticks, never for ever.
+      if (oldestFailedTs !== null) nextTs = Math.max(floor, Math.min(nextTs, oldestFailedTs));
+      db.waCursorSet(instance, { lastTs: nextTs, lastRun: t, unmatched: (cursor?.unmatched ?? 0) + tally.unmatched });
+
+      // What the next window cannot reach will never come back: give up on it out loud
+      // rather than counting attempts against a record that can no longer be tried.
+      let abandoned = 0;
+      for (const [id, failure] of failures) {
+        if (failure.ts < nextTs - OVERLAP_MS) { failures.delete(id); abandoned += 1; }
+      }
+      if (abandoned) log({ level: 'warn', evt: 'wa.poll.abandoned', count: abandoned });
       db.pruneWaSeen(t - SEEN_TTL_MS);
       matched += tally.matched;
       if (tally.matched || tally.replies) log({ evt: 'wa.poll.tick', ...tally });

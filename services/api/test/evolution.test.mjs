@@ -150,8 +150,11 @@ test('the text is read from conversation, extendedTextMessage, a caption or an e
 test('the ad context is found on the message part that carries it, or at the top level', () => {
   const inner = { externalAdReply: { sourceId: '120210', ctwaClid: 'ARZ1', sourceApp: 'instagram' } };
   assert.deepEqual(contextOf({ message: { extendedTextMessage: { text: 'hi', contextInfo: inner } } }), inner);
+  assert.deepEqual(contextOf({ message: { imageMessage: { caption: 'hi', contextInfo: inner } } }), inner);
   assert.deepEqual(contextOf({ message: { conversation: 'hi' }, contextInfo: inner }), inner);
   assert.equal(contextOf({ message: { conversation: 'hi' } }), null);
+  // `messageContextInfo` is device metadata, not this: a plain message has no ad context.
+  assert.equal(contextOf({ message: { conversation: 'hi', messageContextInfo: { deviceListMetadata: {} } } }), null);
 });
 
 test('bareJid strips the device suffix and the domain', () => {
@@ -160,11 +163,18 @@ test('bareJid strips the device suffix and the domain', () => {
   assert.equal(bareJid(null), '');
 });
 
-test('oldestFirst reverses what Evolution hands over, and keeps the API order for records with no clock', () => {
+test('oldestFirst reverses what Evolution hands over, and puts records with no clock last', () => {
   const recs = [{ id: 'c', ts: 300 }, { id: 'b', ts: 200 }, { id: 'a', ts: 100 }];
   assert.deepEqual(oldestFirst(recs).map((r) => r.id), ['a', 'b', 'c']);
+  // Timestamps and no-timestamps in one batch: the dated ones order by date, the rest
+  // follow in reversed API order. Never a mix of the two rules.
+  assert.deepEqual(
+    oldestFirst([{ id: 'n2', ts: null }, { id: 'c', ts: 300 }, { id: 'n1', ts: undefined }, { id: 'a', ts: 100 }]).map((r) => r.id),
+    ['a', 'c', 'n1', 'n2'],
+  );
   assert.deepEqual(oldestFirst([{ id: 'y', ts: null }, { id: 'x', ts: null }]).map((r) => r.id), ['x', 'y']);
   assert.deepEqual(oldestFirst([]), []);
+  assert.deepEqual(oldestFirst(null), []);
 });
 
 /* ---------------- paging ---------------- */

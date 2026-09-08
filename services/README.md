@@ -521,21 +521,32 @@ in order — the first hit wins:
 |---|---|---|---|
 | 1 | `ref` | `Ref BONA-W003 · K7Q2XR`, the code the site prefills into every `wa.me` link | that session's last touch — the real campaign |
 | 2 | `phone` | the sender is already a lead (phone, `wa_jid` or `wa_lid`) | unchanged; an `inbound_message` touchpoint is added |
-| 3 | `ad_meta` | click-to-WhatsApp context: `externalAdReply`, `conversionSource`, `entryPointConversion*`, `utm` | `instagram` / `facebook`, `paid` when the ad context says so; the raw metadata is kept on the touchpoint |
+| 3 | `ad_meta` | click-to-WhatsApp context: `externalAdReply`, `conversionSource`, `entryPointConversion*`, `utm` | `instagram` / `facebook` from the app the record names, else `whatsapp_ad`; `paid` when the context says ad (or carries a `ctwaClid`), else `social_or_organic`. The raw metadata is kept on the touchpoint |
 | 4 | `keyword` | the text says Bona, بونا, or `BONA-W###` | `whatsapp_organic` |
 | 5 | `time_window` | the sender is unknown and a `whatsapp_click` from a session with no lead landed within ±15 min — the closest one | that session's touch; the note says *inferred* |
+
+The order is the rule, not a formality. A Ref code wins over everything, because it is the
+only thing that knows the campaign for certain — even from somebody who is already a lead.
+Ad context is read **before** the keyword rule, so an ad-originated message that also says
+"Bona" is attributed to the ad rather than to organic WhatsApp. And the time window is last
+because it is the weakest: two visitors clicking in the same quarter hour are told apart by
+nothing, which is why its leads are marked *inferred*.
 
 Everything else — your private conversations, which this loop can also see — is discarded
 in memory: counted in `poller.unmatched`, never written to disk, never sent anywhere. No
 log line here carries a phone number, a name or message text.
 
 Each window is handled oldest-first (Evolution answers the other way round, and judging a
-follow-up before the `Ref` line that explains it would discard it), a message is remembered
-as handled only once it is stored, and one that keeps failing is written off after three
-tries. Windows are read newest-first inside Evolution, so a window holding more than 500
-messages hides its oldest ones and cannot be asked again for them — the log says
-`wa.poll.truncated` when that happens, which takes downtime long enough for 500 messages
-to pile up.
+follow-up before the `Ref` line that explains it would discard it), and a message is
+remembered as handled only once it is stored — so a transient store failure costs a retry,
+not the lead. The cursor is held back to the oldest message it could not store, or that
+message would fall out of the window and be lost silently; one that keeps failing is
+written off after three tries (`wa.poll.record_failed`), and one the cursor can no longer
+reach — after downtime long enough to move the floor past it — is given up on out loud
+(`wa.poll.abandoned`). Windows are read newest-first inside Evolution, so one holding more
+than 500 messages hides its *oldest* ones and cannot be asked again for them — that is a
+loss, not a deferral, and the log says `wa.poll.truncated`. It takes downtime long enough
+for 500 messages to pile up in a single window.
 
 A match creates the lead (or merges into the person it already is) **at the message's own
 timestamp**, so `first_inbound_ts` is when the enquiry actually happened; the first ≤ 200
