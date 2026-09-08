@@ -53,6 +53,7 @@ check_state() { # prints one line per item; returns the number of missing items
   _label="node reports $NODE_VERSION";                       item bash -c "[ -x '$NODE_BIN/node' ] && [ \"\$('$NODE_BIN/node' -v)\" = '$NODE_VERSION' ]"
   _label="node:sqlite loads";                                item bash -c "[ -x '$NODE_BIN/node' ] && '$NODE_BIN/node' -e 'require(\"node:sqlite\")'"
   _label="cloudflared $CLOUDFLARED_VERSION at $CLOUDFLARED_BIN"; item bash -c "[ -x '$CLOUDFLARED_BIN' ] && '$CLOUDFLARED_BIN' --version 2>/dev/null | grep -q '$CLOUDFLARED_VERSION'"
+  _label="git at $GIT_BIN (bona-repo-sync.service execs that path)"; item test -x "$GIT_BIN"
   _label="repo checkout $BONA_VPS_REPO (services/api/index.mjs)"; item test -f "$BONA_VPS_REPO/services/api/index.mjs"
   _label="repo has src/data/listings.json";                  item test -f "$BONA_VPS_REPO/src/data/listings.json"
   _label="repo has src/data/site.json";                      item test -f "$BONA_VPS_REPO/src/data/site.json"
