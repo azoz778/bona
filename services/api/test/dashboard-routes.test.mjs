@@ -190,14 +190,33 @@ test('a login POST from someone else\'s page is refused', async () => {
 });
 
 test('logout ends the session on the server, not just in the browser', async () => {
-  await withDash({}, async ({ get, login }) => {
+  await withDash({}, async ({ get, postForm, login }) => {
     const { cookie } = await login();
-    const out = await get('/dashboard/logout', { cookie });
-    assert.equal(out.status, 302);
+
+    // A GET only offers the button: with SameSite=Lax the cookie rides a top-level
+    // navigation, so a link on any page could otherwise log the owner out.
+    const offered = await get('/dashboard/logout', { cookie });
+    assert.equal(offered.status, 200);
+    assert.match(await offered.text(), /Log out of the dashboard on this device\?/);
+    assert.equal((await get('/dashboard', { cookie })).status, 200, 'still signed in');
+
+    const out = await postForm('/dashboard/logout', { _dash: '1' }, { cookie });
+    assert.equal(out.status, 303);
     assert.equal(out.headers.get('location'), '/dashboard/login');
     assert.ok((out.headers.getSetCookie?.()[0] ?? '').includes('Max-Age=0'));
     const after = await get('/dashboard', { cookie });
     assert.equal(after.status, 302, 'the same cookie is worthless once logged out');
+  });
+});
+
+test('a logout POST without the marker or from a foreign page does nothing', async () => {
+  await withDash({}, async ({ get, postForm, login }) => {
+    const { cookie } = await login();
+    const noMarker = await postForm('/dashboard/logout', {}, { cookie });
+    assert.equal(noMarker.headers.get('location'), '/dashboard/login?error=forbidden');
+    const foreign = await postForm('/dashboard/logout', { _dash: '1' }, { cookie, headers: { Origin: 'https://evil.example' } });
+    assert.equal(foreign.headers.get('location'), '/dashboard/login?error=forbidden');
+    assert.equal((await get('/dashboard', { cookie })).status, 200, 'the session survived both');
   });
 });
 
@@ -466,9 +485,13 @@ test('an oversized or wrongly typed write body is refused', async () => {
     const huge = await fetch(`${base}/v1/admin/spend`, {
       method: 'POST', redirect: 'manual',
       headers: { 'Content-Type': 'application/json', Cookie: cookie, 'X-Bona-Dash': '1' },
-      body: JSON.stringify({ day: '2026-09-07', platform: 'meta', spend_sar: 1, campaign_name: 'x'.repeat(20_000) }),
-    }).catch(() => ({ status: 413 }));
+      body: JSON.stringify({ day: '2026-09-07', platform: 'meta', spend_sar: 1, campaign_name: 'x'.repeat(200_000) }),
+    });
     assert.equal(huge.status, 413);
+    // The rest of that body is never read, so the connection goes with the answer
+    // rather than being left half-full on a keep-alive socket.
+    assert.equal(huge.headers.get('connection'), 'close');
+    assert.deepEqual(await huge.json(), { error: 'payload_too_large' });
   });
 });
 

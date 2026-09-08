@@ -91,6 +91,9 @@ header.top{background:var(--ink);color:var(--ivory);padding:.7rem clamp(.9rem,3v
 header.top .brand{font-size:.78rem;letter-spacing:.18em;text-transform:uppercase;margin-inline-end:auto}
 header.top a{color:var(--ivory);border-bottom:0;font-size:.82rem;letter-spacing:.06em;opacity:.72}
 header.top a:hover,header.top a.on{opacity:1;border-bottom:1px solid var(--champagne)}
+header.top form{display:inline;margin:0}
+header.top form button{background:none;border:0;padding:0;color:var(--ivory);opacity:.72;font-size:.82rem;letter-spacing:.06em;text-transform:none;cursor:pointer}
+header.top form button:hover{opacity:1;border-bottom:1px solid var(--champagne);background:none}
 main{padding:clamp(1rem,3vw,2rem);max-width:1180px;margin:0 auto}
 h1{font-size:1.35rem;font-weight:600;letter-spacing:.02em;margin:0 0 .2rem}
 h2{font-size:.78rem;letter-spacing:.16em;text-transform:uppercase;color:var(--stone-2);margin:2rem 0 .7rem;font-weight:600}
@@ -156,7 +159,7 @@ footer{color:var(--stone);font-size:.72rem;padding:2rem 0 1rem;text-align:center
 export function layout({ title, body, active = null, chrome = true }) {
   const nav = chrome
     ? `<header class="top"><span class="brand">Bona</span>${NAV.map(([href, label]) =>
-        `<a href="${esc(href)}"${href === active ? ' class="on"' : ''}>${esc(label)}</a>`).join('')}<a href="/dashboard/logout">Log out</a></header>`
+        `<a href="${esc(href)}"${href === active ? ' class="on"' : ''}>${esc(label)}</a>`).join('')}<form method="post" action="/dashboard/logout"><input type="hidden" name="_dash" value="1"><button type="submit">Log out</button></form></header>`
     : '';
   return `<!doctype html>
 <html lang="en">
@@ -577,6 +580,24 @@ ${pollerBlock}
 
 <h2>Owner checklists</h2>
 <ul>${CHECKLISTS.map(([slug, label]) => `<li><a href="${CHECKLIST_BASE}/${esc(slug)}.md" rel="noreferrer">${esc(label)}</a></li>`).join('')}</ul>`,
+  });
+}
+
+/**
+ * The one thing a GET on `/dashboard/logout` may do: offer the button. Ending the
+ * session is a POST, so a link on someone else's page cannot do it for the owner.
+ */
+export function logoutPage() {
+  return layout({
+    title: 'Log out',
+    chrome: false,
+    body: `<div class="login"><h1>Bona</h1>
+<form method="post" action="/dashboard/logout">
+  <input type="hidden" name="_dash" value="1">
+  <p class="muted">Log out of the dashboard on this device?</p>
+  <button type="submit">Log out</button>
+</form>
+<p class="muted" style="margin-top:1rem"><a href="/dashboard">Stay signed in</a></p></div>`,
   });
 }
 
