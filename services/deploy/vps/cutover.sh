@@ -75,6 +75,10 @@ files=()
 for f in $DATA_FILES; do [ -f "$DATA_DIR/$f" ] && files+=("$DATA_DIR/$f"); done
 [ "${#files[@]}" -gt 0 ] || die "no data files in $DATA_DIR"
 vps "install -d -m 700 ~/bona-data"
+# A re-run after an earlier attempt (or a rollback) can leave stale WAL/SHM files on the VPS beside
+# the database we are about to overwrite, and SQLite would replay them over it. Clear them first;
+# the scp below puts the PC's own WAL/SHM back if the PC still has them (Codex review, 2026-09-08).
+vps "rm -f ~/bona-data/bona.db-wal ~/bona-data/bona.db-shm"
 scp -q -p "${files[@]}" "$BONA_VPS_SSH:bona-data/"
 vps "chmod 600 ~/bona-data/*"
 # Copy-integrity check, taken before the VPS API (and its poller) can open the database.
