@@ -6,6 +6,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# System unit run as the service user (see bona-api.service.in for why); cloudflared resolves
+# ~/.cloudflared through HOME.
+User=@USER@
+Group=@USER@
+Environment=HOME=@HOME@
 Environment=PATH=@HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
 # Run by tunnel ID, not name: name lookup picked the wrong tunnel on the PC once (2026-09-08).
 ExecStart=@HOME@/.local/bin/cloudflared --no-autoupdate --config @HOME@/.cloudflared/bona.yml tunnel run @TUNNEL_ID@
@@ -21,4 +26,4 @@ NoNewPrivileges=true
 MemoryMax=256M
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target

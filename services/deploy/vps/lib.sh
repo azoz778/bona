@@ -1,5 +1,5 @@
 # services/deploy/vps/lib.sh — shared by every script in this directory. Sourced, never executed.
-# Constants first (only BONA_VPS_REPO, BONA_VPS_DEPLOY_DIR, BONA_VPS_SSH, BONA_HOSTNAMES, BONA_REPO_URL, BONA_VPS_EVOLUTION_URL, BONA_PUBLIC_HEALTH, BONA_TUNNEL_NAME, BONA_WAIT_SCALE and GIT_BIN may be overridden from the environment; the rest are pinned), then small helpers. Never echo a secret.
+# Constants first (only BONA_VPS_REPO, BONA_VPS_DEPLOY_DIR, BONA_VPS_SSH, BONA_HOSTNAMES, BONA_REPO_URL, BONA_VPS_EVOLUTION_URL, BONA_PUBLIC_HEALTH, BONA_TUNNEL_NAME, BONA_WAIT_SCALE, GIT_BIN, VPS_USER and BONA_UNIT_DIR may be overridden from the environment; the rest are pinned), then small helpers. Never echo a secret.
 
 BONA_TUNNEL_ID=9022fbec-de4f-44b9-805e-8fff285d6263
 BONA_TUNNEL_NAME=${BONA_TUNNEL_NAME:-bona}
@@ -22,6 +22,21 @@ BONA_WAIT_SCALE=${BONA_WAIT_SCALE:-1}
 # lookup). install-vps.sh --check verifies it exists; the tests point it at a shim.
 GIT_BIN=${GIT_BIN:-/usr/bin/git}
 
+# The VPS units are SYSTEM units (/etc/systemd/system) that run as the service user, NOT
+# `systemctl --user` units: Ubuntu 24.04 sets kernel.apparmor_restrict_unprivileged_userns=1, and under
+# it a user-manager unit cannot apply the sandbox directives (ProtectSystem, PrivateTmp, ProtectHostname,
+# ProtectKernelModules, …) — the service dies with 218/CAPABILITIES. The first live cutover failed exactly
+# there (2026-09-08) and rolled back; the same directives under User= in a system unit run fine.
+# VPS_USER: the user the units run as = whoever runs install-vps.sh on the VPS (azoz), rendered into
+# User=/Group=. BONA_UNIT_DIR: where the rendered units go; the tests point it at a temp dir. The PC side
+# is untouched and stays `systemctl --user`.
+VPS_USER=${VPS_USER:-$(id -un)}
+BONA_UNIT_DIR=${BONA_UNIT_DIR:-/etc/systemd/system}
+# How the VPS units are driven — on the VPS (deploy.sh, install-vps.sh) and inside the remote command
+# strings cutover.sh / rollback.sh send over ssh. Passwordless sudo exists there; -n means "never prompt".
+VPS_SYSTEMCTL="sudo -n systemctl"
+VPS_JOURNALCTL="sudo -n journalctl"
+
 NODE_VERSION=v24.19.0
 NODE_SHA256=14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647
 CLOUDFLARED_VERSION=2026.8.3
@@ -39,7 +54,6 @@ NODE_BIN="$NODE_DIR/bin"
 CLOUDFLARED_BIN="$HOME_DIR/.local/bin/cloudflared"
 # For commands sent over ssh: the VPS home differs from the PC home, so let the REMOTE shell expand ~.
 REMOTE_NODE='~/.local/opt/node-'"$NODE_VERSION"'-linux-x64/bin/node'
-UNIT_DIR="$HOME_DIR/.config/systemd/user"
 DATA_DIR="$HOME_DIR/bona-data"
 SECRETS_DIR="$HOME_DIR/.secrets"
 CF_DIR="$HOME_DIR/.cloudflared"
@@ -61,6 +75,7 @@ render() {
   [ -f "$1" ] || die "template missing: $1"
   out=$(<"$1")
   out=${out//@HOME@/"$HOME_DIR"}
+  out=${out//@USER@/"$VPS_USER"}
   out=${out//@REPO@/"$BONA_VPS_REPO"}
   out=${out//@PORT@/"$BONA_VPS_PORT"}
   out=${out//@NODE_BIN@/"$NODE_BIN"}

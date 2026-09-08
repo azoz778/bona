@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -40,10 +40,26 @@ test('lib.sh pins versions with real checksums and the three public hostnames', 
 test('install-vps.sh --render-only renders units and tunnel config for the VPS', () => {
   const home = mkdtempSync(path.join(tmpdir(), 'bona-home-'));
   const out = mkdtempSync(path.join(tmpdir(), 'bona-render-'));
-  const r = bash([path.join(VPS, 'install-vps.sh'), '--render-only', out], { env: { HOME: home } });
+  const r = bash([path.join(VPS, 'install-vps.sh'), '--render-only', out], { env: { HOME: home, VPS_USER: 'svc' } });
   assert.equal(r.status, 0, r.stderr + r.stdout);
 
   const api = readFileSync(path.join(out, 'bona-api.service'), 'utf8');
+  // SYSTEM units run as the service user (Ubuntu 24.04's userns restriction kills the sandbox
+  // directives under `systemctl --user`: 218/CAPABILITIES on the first live cutover, 2026-09-08).
+  // User=/Group= come from VPS_USER; HOME is explicit because the process resolves ~/.secrets,
+  // cloudflared ~/.cloudflared and git its config through it.
+  for (const [name, text] of [['bona-api.service', api], ['cloudflared-bona.service', readFileSync(path.join(out, 'cloudflared-bona.service'), 'utf8')], ['bona-repo-sync.service', readFileSync(path.join(out, 'bona-repo-sync.service'), 'utf8')]]) {
+    assert.match(text, /^User=svc$/m, `${name}: User=`);
+    assert.match(text, /^Group=svc$/m, `${name}: Group=`);
+    assert.match(text, new RegExp(`^Environment=HOME=${home}$`, 'm'), `${name}: HOME`);
+  }
+  // system units hook multi-user.target (the timer keeps timers.target); no user-manager specifier survives
+  assert.match(api, /^WantedBy=multi-user\.target$/m);
+  assert.match(readFileSync(path.join(out, 'cloudflared-bona.service'), 'utf8'), /^WantedBy=multi-user\.target$/m);
+  assert.match(readFileSync(path.join(out, 'bona-repo-sync.timer'), 'utf8'), /^WantedBy=timers\.target$/m);
+  for (const f of readdirSync(out)) assert.ok(!readFileSync(path.join(out, f), 'utf8').includes('%h'), `${f}: %h is a user-manager specifier`);
+  assert.doesNotMatch(api, /^WantedBy=default\.target$/m);
+  assert.match(api, /apparmor_restrict_unprivileged_userns/, 'the unit explains why it is a system unit');
   assert.match(api, /^Environment=BONA_API_PORT=4120$/m);
   assert.match(api, /^Environment=BONA_REPO=\/opt\/bona$/m);
   assert.match(api, new RegExp(`^Environment=BONA_DATA=${home}/bona-data$`, 'm'));
@@ -71,6 +87,8 @@ test('install-vps.sh --render-only renders units and tunnel config for the VPS',
   const r2 = bash([path.join(VPS, 'install-vps.sh'), '--render-only', out2], { env: { HOME: home, GIT_BIN: '/snap/bin/git' } });
   assert.equal(r2.status, 0, r2.stderr + r2.stdout);
   assert.match(readFileSync(path.join(out2, 'bona-repo-sync.service'), 'utf8'), /^ExecStart=\/snap\/bin\/git -C \/opt\/bona pull --ff-only --quiet$/m);
+  // VPS_USER defaults to whoever runs install-vps.sh (azoz on the VPS)
+  assert.match(readFileSync(path.join(out2, 'bona-api.service'), 'utf8'), new RegExp(`^User=${userInfo().username}$`, 'm'));
   const timer = readFileSync(path.join(out, 'bona-repo-sync.timer'), 'utf8');
   // Wall-clock schedule: Persistent=true only catches up missed runs for OnCalendar= timers.
   assert.match(timer, /^OnCalendar=\*:0\/5$/m);
@@ -89,7 +107,10 @@ test('install-vps.sh --render-only renders units and tunnel config for the VPS',
 
 test('install-vps.sh --check on an empty HOME reports what is missing and exits 2', () => {
   const home = mkdtempSync(path.join(tmpdir(), 'bona-home-'));
-  const r = bash([path.join(VPS, 'install-vps.sh'), '--check'], { env: { HOME: home, BONA_VPS_REPO: path.join(home, 'repo'), GIT_BIN: path.join(home, 'no-git') } });
+  // BONA_UNIT_DIR: the system unit directory (/etc/systemd/system on the VPS) — pointed at a temp dir
+  // here so the host's /etc never decides the test. The sudo shim refuses (SHIM_SUDO_FAIL) so the host's
+  // own sudo setup does not decide it either.
+  const r = bash([path.join(VPS, 'install-vps.sh'), '--check'], { env: { PATH: `${SHIMS}:${process.env.PATH}`, HOME: home, BONA_VPS_REPO: path.join(home, 'repo'), GIT_BIN: path.join(home, 'no-git'), BONA_UNIT_DIR: path.join(home, 'units'), SHIM_SUDO_FAIL: '1' } });
   assert.equal(r.status, 2, r.stdout + r.stderr);
   // the sync unit's ExecStart is an absolute git path: --check must say when it is not there
   assert.match(stripAnsi(r.stdout), new RegExp(`^MISSING: git at ${home}/no-git`, 'm'), r.stdout);
@@ -98,6 +119,10 @@ test('install-vps.sh --check on an empty HOME reports what is missing and exits 
   }
   // one greppable line per missing item
   assert.match(stripAnsi(r.stdout), /^MISSING: secret file .*retell\.env \(0600\)$/m, r.stdout);
+  // the units are SYSTEM units under BONA_UNIT_DIR, driven with sudo -n: both are readiness items
+  assert.match(stripAnsi(r.stdout), new RegExp(`^MISSING: unit ${home}/units/bona-api\\.service$`, 'm'), r.stdout);
+  assert.match(stripAnsi(r.stdout), /^MISSING: passwordless sudo/m, r.stdout);
+  assert.ok(!r.stdout.includes('linger'), `linger is a user-manager concern; system units do not need it\n${r.stdout}`);
 });
 
 test('cutover.sh --dry-run prints the five steps and touches nothing', () => {
@@ -465,7 +490,9 @@ test('install-vps.sh --check on a fully provisioned HOME reports every item ok a
   const { home, env } = fakeVpsHome();
   const secrets = path.join(home, '.secrets');
   const cf = path.join(home, '.cloudflared');
-  const units = path.join(home, '.config', 'systemd', 'user');
+  // the system unit dir (/etc/systemd/system on the VPS) is a temp dir here; the sudo shim answers `-n true` with 0
+  const units = path.join(home, 'etc-systemd-system');
+  env.BONA_UNIT_DIR = units;
   for (const d of [secrets, cf, units]) mkdirSync(d, { recursive: true });
   for (const f of ['retell.env', 'evolution-api.env', 'bona-services.env', 'bona-marketing.env']) {
     writeFileSync(path.join(secrets, f), 'X=1\n');
@@ -484,11 +511,23 @@ test('install-vps.sh --check on a fully provisioned HOME reports every item ok a
   for (const l of lines) assert.match(l, /^( ok  |==> )/, `every line must be ok: ${l}`);
   assert.ok(!stripAnsi(r.stdout + r.stderr).includes('MISSING'), r.stdout + r.stderr);
   assert.ok(lines.some((l) => l.startsWith(` ok  git at ${path.join(SHIMS, 'git')}`)), `--check must verify the git the sync unit will exec\n${r.stdout}`);
+  assert.ok(lines.some((l) => l.startsWith(` ok  unit ${units}/bona-api.service`)), `--check must look for the units under BONA_UNIT_DIR\n${r.stdout}`);
+  assert.ok(lines.some((l) => l.startsWith(' ok  passwordless sudo')), `system units are driven with sudo -n; --check must prove it works\n${r.stdout}`);
+  assert.ok(!r.stdout.includes('linger'), r.stdout);
 });
 
 test('install-vps.sh install mode never enables, starts or restarts a unit', () => {
   const src = readFileSync(path.join(VPS, 'install-vps.sh'), 'utf8');
-  assert.doesNotMatch(src, /systemctl --user (enable|start|restart)/);
+  // neither directly, nor through sudo, nor through lib.sh's $VPS_SYSTEMCTL, nor on the user manager
+  assert.doesNotMatch(src, /(systemctl( --user)?|\$VPS_SYSTEMCTL) (enable|start|restart)\b/);
+  // The only user-manager calls left are the retire step for the first attempt's user units:
+  // `disable --now` (stop what may still be flapping) and a daemon-reload once the files are gone.
+  const userCalls = [...new Set(src.match(/systemctl --user [a-z-]+/g) || [])].sort();
+  assert.deepEqual(userCalls, ['systemctl --user daemon-reload', 'systemctl --user disable']);
+  assert.match(src, /systemctl --user disable --now "\$u"/);
+  // and the system units land in BONA_UNIT_DIR through sudo -n when the service user cannot write there
+  assert.match(src, /sudo -n install -m 644 "\$tmp\/\$u" "\$BONA_UNIT_DIR\/\$u"/);
+  assert.match(src, /\$VPS_SYSTEMCTL daemon-reload/);
 });
 
 // serviceKeys(unit text) → Map key → [values…] for the [Service] section only.
