@@ -16,6 +16,8 @@
  *   POST /v1/retell/webhook?token= (Retell agent events)
  *   POST /v1/events                { v:1, event, event_id, … }  -> 204   (text/plain or JSON, ≤ 8 KB)
  *   POST /v1/enquiry               { form, name, phone, … }    -> { lead_id }
+ *   GET  /dashboard/*              the owner's private dashboard (WhatsApp code login)
+ *   *    /v1/admin/*               the same data as JSON, behind the same cookie
  *
  * Everything is JSON, `Cache-Control: no-store`, CORS-allowlisted, per-IP rate
  * limited, and bodies are capped at 16 KB (8 KB for events). The one exception is a
@@ -41,6 +43,7 @@ import { createToolHandlers, extractToken, tokenMatches, TOOL_NAMES } from './li
 import { extractActions } from './lib/actions.mjs';
 import { appendJsonl, createOrMergeLead, leadNote } from './lib/leads.mjs';
 import { sendText } from './lib/wa.mjs';
+import { createDashboardRoutes } from './lib/dashboard/routes.mjs';
 
 const GREETING = {
   en: "Hello, I'm Dana from Bona. How can I help you today?",
@@ -198,6 +201,20 @@ export function createApp(options = {}) {
   const maxTurns = cfg.maxTurnsPerSession ?? 40;
 
   const startedAt = Date.now();
+
+  // Built before the routes so the dashboard can read what the process is running —
+  // notably `app.poller`, which another branch attaches — through one live reference
+  // rather than a second wiring step. `server` and `handle` are added at the end.
+  const app = {
+    cfg, inventory, store, db, retell, tools, limiters, fanout, budget,
+    poller: options.poller ?? null,
+  };
+
+  // The owner's dashboard. It owns its own auth (a WhatsApp one-time code), its own
+  // security headers and its own limiter; nothing about it is CORS-enabled.
+  const dashboard = options.dashboard ?? createDashboardRoutes({
+    db, cfg, inventory, fanout, app, log, sendWhatsApp, probeRetell,
+  });
 
   function dynamicVariables({ locale, page, sessionId }) {
     return {
@@ -597,6 +614,11 @@ export function createApp(options = {}) {
 
     if (p === '/v1/events') return eventsRoute({ req, res, origin, cors, ip });
 
+    // The private dashboard and its admin JSON, ahead of the browser routes on purpose:
+    // they are authenticated by a cookie rather than by an origin, they answer HTML as
+    // well as JSON, and they must never be handed the site's CORS headers.
+    if (dashboard.owns(p)) return dashboard.handle({ req, res, url, p, ip });
+
     /* Browser-facing routes. */
     if (req.method !== 'POST' || !BROWSER_ROUTES.has(p)) return sendJson(res, 404, { error: 'not_found' }, cors);
 
@@ -706,7 +728,10 @@ export function createApp(options = {}) {
   // (tests, tools) closes it themselves.
   if (ownsDb) server.on('close', () => { fanout.stop(); db.close(); });
 
-  return { server, handle, cfg, inventory, store, db, retell, tools, limiters, fanout };
+  app.server = server;
+  app.handle = handle;
+  app.dashboard = dashboard;
+  return app;
 }
 
 /* ------------------------------------------------------------------ */
