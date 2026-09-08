@@ -16,8 +16,9 @@
  *      keeping the cookie off cross-site POSTs, this is the second lock — a form on
  *      someone else's page cannot set a header and does not know the field.
  *   3. `Origin` and `Referer`, when the browser states them, must be this API's own.
- *      Checked on writes only: a GET is checked by nothing that matters, and a
- *      navigation arriving from the site itself is a normal way to reach the login.
+ *      Enforced on every `/v1/admin` request and on every dashboard write — but not on
+ *      a dashboard page GET, because following a link from the site to the login is a
+ *      normal way to arrive and would otherwise be refused.
  *
  * Phone numbers are masked everywhere a list is rendered and whole only on the one
  * page (and the one JSON route) that exists to show a single person's record.
@@ -30,7 +31,7 @@ import { createAuth } from './auth.mjs';
 import {
   knownError,
   loginPage, logoutPage, overviewPage, leadsPage, leadDetailPage, listingsPage, spendPage, integrationsPage, messagePage,
-  maskPhone, esc,
+  maskPhone,
 } from './render.mjs';
 
 /** Set on every dashboard and admin response, HTML or JSON, success or failure. */
@@ -44,7 +45,6 @@ export const SECURITY_HEADERS = {
 
 export const MAX_NOTE = 2000;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
-const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 const isForm = (ct) => /^application\/x-www-form-urlencoded\s*(?:;|$)/i.test(String(ct ?? '').trim());
 const isJson = (ct) => /^application\/(?:[\w.+-]+\+)?json\s*(?:;|$)/i.test(String(ct ?? '').trim());
@@ -613,5 +613,5 @@ export function createDashboardRoutes({
     }
   }
 
-  return { handle, owns, auth: authenticator, stats: statistics, esc };
+  return { handle, owns, auth: authenticator, stats: statistics };
 }
