@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   EvolutionError, MAX_PAGES, PAGE_SIZE, bareJid, contextOf, fetchWindow, findMessagesWindow,
-  normaliseRecord, recordsOf, textOf, toMs,
+  normaliseRecord, oldestFirst, recordsOf, textOf, toMs,
 } from '../lib/evolution.mjs';
 
 const GTE = Date.UTC(2026, 8, 6, 11, 58, 0);
@@ -158,6 +158,13 @@ test('bareJid strips the device suffix and the domain', () => {
   assert.equal(bareJid('966593296933:12@s.whatsapp.net'), '966593296933');
   assert.equal(bareJid('120363143519616993@g.us'), '120363143519616993');
   assert.equal(bareJid(null), '');
+});
+
+test('oldestFirst reverses what Evolution hands over, and keeps the API order for records with no clock', () => {
+  const recs = [{ id: 'c', ts: 300 }, { id: 'b', ts: 200 }, { id: 'a', ts: 100 }];
+  assert.deepEqual(oldestFirst(recs).map((r) => r.id), ['a', 'b', 'c']);
+  assert.deepEqual(oldestFirst([{ id: 'y', ts: null }, { id: 'x', ts: null }]).map((r) => r.id), ['x', 'y']);
+  assert.deepEqual(oldestFirst([]), []);
 });
 
 /* ---------------- paging ---------------- */

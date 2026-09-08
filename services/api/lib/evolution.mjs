@@ -145,6 +145,19 @@ export function normaliseRecord(record) {
   };
 }
 
+/**
+ * Oldest first, by timestamp. Evolution answers newest-first, and a caller that acts on
+ * the records in that order sees the effect before the cause: a follow-up before the
+ * message that creates the lead, a reply before the enquiry it answers. Records with no
+ * usable timestamp keep their relative API order, reversed.
+ */
+export function oldestFirst(records) {
+  return (records || [])
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => (Number.isFinite(a.r?.ts) && Number.isFinite(b.r?.ts) && a.r.ts !== b.r.ts ? a.r.ts - b.r.ts : b.i - a.i))
+    .map((x) => x.r);
+}
+
 /** Both shapes 2.3.7 answers with: `{ messages: { records: [...] } }` and a bare array. */
 export function recordsOf(payload) {
   const box = payload?.messages ?? payload ?? {};
@@ -195,9 +208,14 @@ export async function findMessagesWindow({
 
 /**
  * Every message in the window, paging while a page comes back full and stopping at
- * `MAX_PAGES` — a window that needs more than 500 messages is a backlog, not a tick,
- * and the cursor will pick the rest up next time rather than hold the loop open.
- * Duplicate `key.id`s across pages (the window keeps moving under us) are dropped.
+ * `MAX_PAGES`. Duplicate `key.id`s across pages (the window keeps moving under us) are
+ * dropped.
+ *
+ * `truncated` is not a detail: records come back NEWEST first, so a window with more than
+ * `maxPages × offset` messages in it yields the newest ones and the older ones are never
+ * reachable — asking again returns the same newest page. The caller has to decide what
+ * that means (the poller logs it and moves on: it happens only after downtime long enough
+ * that the messages have been dealt with by hand anyway).
  *
  * @returns {Promise<{ records: NormalisedRecord[], pages: number, truncated: boolean }>}
  */
