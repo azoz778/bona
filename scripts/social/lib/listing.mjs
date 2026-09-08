@@ -139,10 +139,24 @@ export function hookFor(l) {
   return { id: h.id, ar: h.ar(l), en: h.en(l) };
 }
 
+/**
+ * Category as it reads INSIDE the subhook sentence, not as a standalone chip.
+ * CATEGORY's labels are nouns/titles ("International"); lowercasing them into
+ * "${type} ${label}" produced broken copy — "Apartment international · AIDA,
+ * Muscat", and in Arabic the worse "شقة عقار دولي". An international listing is
+ * still simply for sale; the place label already says it is abroad.
+ */
+const SUBHOOK_CATEGORY = {
+  buy: { en: 'for sale', ar: 'للبيع' },
+  rent: { en: 'for rent', ar: 'للإيجار' },
+  'off-plan': { en: 'off-plan', ar: 'على الخارطة' },
+  international: { en: 'for sale', ar: 'للبيع' },
+};
+
 /** The line under the hook — always the place, never a claim. */
 export const subhookFor = (l) => ({
-  ar: `${typeLabel(l, 'ar')} ${t(CATEGORY[l.category] ?? CATEGORY.buy, 'ar')} · ${placeLabel(l, 'ar')}`,
-  en: `${typeLabel(l, 'en')} ${t(CATEGORY[l.category] ?? CATEGORY.buy, 'en').toLowerCase()} · ${placeLabel(l, 'en')}`,
+  ar: `${typeLabel(l, 'ar')} ${t(SUBHOOK_CATEGORY[l.category] ?? SUBHOOK_CATEGORY.buy, 'ar')} · ${placeLabel(l, 'ar')}`,
+  en: `${typeLabel(l, 'en')} ${t(SUBHOOK_CATEGORY[l.category] ?? SUBHOOK_CATEGORY.buy, 'en')} · ${placeLabel(l, 'en')}`,
 });
 
 // ---------- hashtags (ported from scripts/og/gen-social.mjs so both agree) ----------
