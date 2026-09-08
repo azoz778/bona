@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Fake LOCAL `curl`: records argv in $SHIM_LOG and prints a healthy /health body.
+# SHIM_PUBLIC_HEALTH_FAIL=1 makes every request that is not for 127.0.0.1 (i.e. the public
+# health URL) exit 22, the way `curl -f` does on an HTTP error.
+set -u
+[ -n "${SHIM_LOG:-}" ] && printf 'curl %s\n' "$*" >> "$SHIM_LOG"
+case " $* " in
+  *" http://127.0.0.1"*) ;;
+  *) [ "${SHIM_PUBLIC_HEALTH_FAIL:-0}" = 1 ] && exit 22 ;;
+esac
+echo '{"ok":true,"retell":"ok"}'
+exit 0

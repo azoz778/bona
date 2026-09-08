@@ -1,0 +1,18 @@
+[Unit]
+Description=Bona: pull the repo so Dana's inventory follows the WhatsApp intake
+Documentation=https://github.com/azoz778/bona/blob/main/services/README.md
+After=network-online.target
+
+[Service]
+Type=oneshot
+# System unit run as the service user (see bona-api.service.in for why); git reads ~/.gitconfig
+# and the credential setup through HOME, and the checkout is owned by that user.
+User=@USER@
+Group=@USER@
+Environment=HOME=@HOME@
+# Fast-forward only: the checkout is never edited by hand. The running API hot-reloads
+# src/data/listings.json on mtime; code changes on disk take effect at the next restart (deploy.sh).
+ExecStart=@GIT@ -C @REPO@ pull --ff-only --quiet
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bona-repo-sync

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Fake `sudo`: records argv in $SHIM_LOG, then runs the command itself as the same user (after
+# skipping sudo's own flags), so the other shims on PATH answer it — `sudo -n systemctl …` lands in
+# the log twice, once as `sudo -n systemctl …` and once as `systemctl …`.
+#   -n true                       → exit 0 (passwordless sudo available)
+#   SHIM_SUDO_FAIL=1              → exit 1 for everything, the way `sudo -n` fails without a cached credential
+set -u
+[ -n "${SHIM_LOG:-}" ] && printf 'sudo %s\n' "$*" >> "$SHIM_LOG"
+if [ "${SHIM_SUDO_FAIL:-0}" = 1 ]; then echo "sudo: a password is required (shim)" >&2; exit 1; fi
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -n | -E | -H | -i | -s) shift ;;
+    -u) shift 2 ;;
+    --) shift; break ;;
+    *) break ;;
+  esac
+done
+[ $# -gt 0 ] || exit 0
+exec "$@"

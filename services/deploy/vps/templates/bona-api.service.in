@@ -1,0 +1,71 @@
+[Unit]
+Description=Bona concierge API (Dana) — chat, web calls, Retell tools, WhatsApp poller, dashboard
+Documentation=https://github.com/azoz778/bona/blob/main/services/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# A SYSTEM unit (/etc/systemd/system) that runs as the service user — not a `systemctl --user` unit
+# like its PC twin. Ubuntu 24.04 sets kernel.apparmor_restrict_unprivileged_userns=1, and under that
+# a user-manager unit cannot apply the sandbox directives below (ProtectSystem, PrivateTmp,
+# ProtectHostname, ProtectKernelModules, …): the service dies with status=218/CAPABILITIES
+# ("Failed to drop capabilities: Operation not permitted"). The first live cutover failed exactly
+# there (2026-09-08) and rolled back. A transient system service with User= and the identical
+# hardening set ran fine (wrote to ~/bona-data, node:sqlite loaded), so the hardening stays as it is
+# and the unit runs under the system manager: `sudo -n systemctl …`, never `systemctl --user`.
+User=@USER@
+Group=@USER@
+# HOME explicitly (not left to systemd's User= default): the process resolves ~/.secrets/*.env
+# through it (lib/env.mjs), and ProtectHome=read-only below is keyed on the same directory.
+Environment=HOME=@HOME@
+# No EnvironmentFile= here, on purpose. The process loads the four ~/.secrets/*.env files itself
+# (retell, evolution-api, bona-services, bona-marketing — lib/env.mjs), and process.env wins over
+# those files. Every Environment= value below reaches process.env, which is exactly why the VPS
+# overrides work: bona-services.env is copied verbatim from the PC and still carries the PC's
+# BONA_API_PORT=4102, BONA_DATA and BONA_REPO. Had the unit loaded that file with EnvironmentFile=,
+# systemd would let the file's values override the Environment= lines regardless of line order,
+# and the VPS would try the PC's port and paths (Claude review, 2026-09-08).
+Environment=NODE_ENV=production
+Environment=BONA_API_PORT=@PORT@
+Environment=BONA_REPO=@REPO@
+Environment=BONA_DATA=@HOME@/bona-data
+Environment=EVOLUTION_API_URL=@EVOLUTION_URL@
+# The WhatsApp poller runs inside this process and is ON by default (lib/config.mjs). The owner
+# opts out with BONA_WA_POLL=0 in bona-services.env — and nothing here may set BONA_WA_POLL: an
+# Environment= value here reaches process.env, which wins over the file, so it would silently
+# override the owner's opt-out (Codex review, 2026-09-08).
+Environment=PATH=@NODE_BIN@:@HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=@REPO@/services
+ExecStart=@NODE_BIN@/node @REPO@/services/api/index.mjs
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+KillSignal=SIGTERM
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bona-api
+
+# Reads the repo (@REPO@, read-only under ProtectSystem=strict) and ~/.secrets; writes one directory.
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@HOME@/bona-data
+PrivateDevices=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

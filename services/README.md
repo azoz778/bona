@@ -6,7 +6,7 @@ static Astro build on GitHub Pages, so anything that needs a server lives here.
 | Service | Directory | Unit | What it does |
 |---|---|---|---|
 | Concierge API (Dana) | `api/` | `bona-api.service` | Chat + voice concierge backend, Retell tool webhooks, first-party events, leads |
-| Public HTTPS | — | `cloudflared-bona.service` | Cloudflare tunnel `bona`: `bona-api.azoz.uk` → `localhost:4102` |
+| Public HTTPS | — | `cloudflared-bona.service` | Cloudflare tunnel `bona`: `api.bona-real-estate.com` (+ legacy hosts) → `127.0.0.1:4120` on the VPS |
 | WhatsApp intake | `intake/` | `bona-intake.service` | PDF brochure → published listing; group commands `remove` / `hero` / `price` / `brochure` / `sold` / `hide` / `licence` / `wafi` (see `intake/README.md`) |
 
 No runtime dependencies: `services/package.json` is `"dependencies": {}` and the API
@@ -20,11 +20,11 @@ is built on Node's own `http`. Node ≥ 22.
 visitor on bona-real-estate.com
         │  fetch (CORS allowlist)
         ▼
-bona-api.azoz.uk  ──Cloudflare tunnel──▶  bona-api on 127.0.0.1:4102 (WSL)
-        │                                          │
+api.bona-real-estate.com  ──Cloudflare tunnel "bona"──▶  bona-api on 127.0.0.1:4120 on the VPS
+        │                                                          │
         │  POST /create-chat, /create-chat-completion, /v2/create-web-call
-        ▼                                          │
-   Retell AI  ── custom tool webhooks ─────────────┘
+        ▼                                                          │
+   Retell AI  ── custom tool webhooks ─────────────────────────────┘
    (agent "Dana", one Retell LLM, two agents: voice + chat)
 ```
 
@@ -302,7 +302,7 @@ never logged. `process.env` always wins over a file.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `BONA_API_PORT` | `4102` | |
+| `BONA_API_PORT` | `4102` | `4120` on the VPS (set in its unit; 4102 is taken there) |
 | `BONA_API_HOST` | `127.0.0.1` | the tunnel is the only way in |
 | `BONA_SITE` | `https://bona-real-estate.com` | used to absolutise image and page URLs |
 | `BONA_PUBLIC_API` | `https://api.bona-real-estate.com` | baked into the Retell tool URLs |
@@ -320,7 +320,7 @@ never logged. `process.env` always wins over a file.
 | `BONA_RETELL_SEPARATE_CHAT_AGENT` | `1` | `0` reuses the voice agent for chat |
 | `BONA_RETELL_MOCK` | `0` | `1` answers chat locally, contacts no one |
 | `BONA_WA_NOTIFY` | `1` | `0` stops the WhatsApp lead note |
-| `BONA_WA_POLL` | `1` (set by the unit) | the in-process WhatsApp poller — `0` stops it (§10) |
+| `BONA_WA_POLL` | `1` | the in-process WhatsApp poller defaults to ON inside the process (`lib/config.mjs`); opt out with `BONA_WA_POLL=0` in `bona-services.env`. No unit sets it — an `Environment=` line would override the file (§10) |
 | `BONA_WA_POLL_MS` | `45000` | poll interval; each tick reads the last 2 minutes of `chat/findMessages` |
 | `BONA_WA_INSTANCE` | `abdulaziz-personal` | the Evolution instance the poller reads and the note is sent from |
 | `BONA_OWNER_JID` | `966593296933@s.whatsapp.net` | where the notes go, and the one chat the poller never reads |
@@ -400,29 +400,66 @@ changes.
 version 0) and `create-web-call` / `create-chat` accept it. `--publish` is there if a
 future account setting demands a published version.
 
-After provisioning, restart the service so it picks up the new ids:
+After provisioning, restart the service so it picks up the new ids (the live one is on the VPS;
+`ids.json` reaches `/opt/bona` with the next `bona-repo-sync` pull, or run `deploy.sh`):
 
 ```bash
-systemctl --user restart bona-api
+ssh hermes-vps sudo systemctl restart bona-api
 ```
 
 ---
 
 ## 6. Install and run
 
-Deployment is the **owner's** command — creating a Cloudflare tunnel and routing DNS
-is refused by the agent's permission classifier:
+### Where it runs (since 2026-09-08): the VPS
+
+The live `bona-api` runs on the VPS (`ssh hermes-vps`) as **system** units in `/etc/systemd/system`
+that run as user `azoz` (`User=azoz`, driven with `sudo systemctl`, never `systemctl --user`):
+`bona-api.service` (port **4120**, loopback) and `cloudflared-bona.service` (tunnel `bona`, hostnames
+`api.bona-real-estate.com`, `bona-api.azoz.uk`, `bona.azoz.uk`), from a sparse checkout of this repo
+at `/opt/bona` that `bona-repo-sync.timer` fast-forwards every 5 minutes (so listings published by
+the intake reach Dana's inventory without a deploy). Data: `~/bona-data`. Secrets: `~/.secrets/*.env`.
+Why system units: Ubuntu 24.04 restricts unprivileged user namespaces, and a `systemctl --user` unit
+cannot apply the hardening directives (`ProtectSystem`, `PrivateTmp`, …) — it dies with
+`218/CAPABILITIES`; the same directives under `User=` in a system unit run fine (first live attempt,
+2026-09-08). `azoz` has passwordless sudo, and every script uses `sudo -n` (never a prompt).
+
+| I want to… | Run |
+|---|---|
+| deploy a code change (pull, test, restart, health) | `ssh hermes-vps bash /opt/bona/services/deploy/vps/deploy.sh` |
+| see logs | `ssh hermes-vps sudo journalctl -u bona-api -f` (tunnel: `-u cloudflared-bona`) |
+| unit status / restart by hand | `ssh hermes-vps sudo systemctl status bona-api cloudflared-bona` / `… sudo systemctl restart bona-api` |
+| is the repo-sync timer ticking | `ssh hermes-vps sudo systemctl list-timers bona-repo-sync.timer` |
+| check readiness / what is missing | `ssh hermes-vps bash /opt/bona/services/deploy/vps/install-vps.sh --check` |
+| copy changed secrets from the PC | `bash services/deploy/vps/sync-secrets.sh` (on the PC) |
+| bring it back to the PC | `bash services/deploy/vps/rollback.sh [--copy-back]` (on the PC) |
+
+`install.sh` in this directory is the **PC/WSL** installer and is kept only for rollback; its units
+are disabled on the PC. `bona-intake` (WhatsApp PDF → listing) still runs on the PC — it needs the
+owner's Claude login — and never talks to the API. Scripts: the header comment of each script in
+`services/deploy/vps/`; the move itself: `docs/superpowers/specs/2026-09-08-bona-api-vps-move-design.md`.
+
+### Legacy / rollback only: the PC installer
+
+Everything in this subsection describes the **PC path, which is no longer live**. It exists
+so `rollback.sh` has something to come back to; do not run it to "deploy" — that is
+`ssh hermes-vps bash /opt/bona/services/deploy/vps/deploy.sh` (table above).
+
+Running the PC installer is the **owner's** command — creating a Cloudflare tunnel and routing
+DNS is refused by the agent's permission classifier:
 
 ```bash
-bash ~/bona/services/deploy/install.sh
+bash ~/bona/services/deploy/install.sh        # legacy / rollback only
 ```
 
-It checks prerequisites, creates the tunnel `bona` (if absent), writes
+It checks prerequisites, creates the tunnel `bona` (if absent), writes the PC's
 `~/.cloudflared/bona.yml` with `bona-api.azoz.uk → http://localhost:4102` plus a
-catch-all 404, routes DNS, installs the two systemd `--user` units, enables linger,
+catch-all 404, routes DNS, installs the two systemd `--user` units on the PC, enables linger,
 and health-checks both the local and the public endpoint. Safe to re-run; nothing is
 duplicated. `--no-dns` installs the units only, `--restart` forces a restart,
-`--uninstall` stops and disables both units.
+`--uninstall` stops and disables both units. While the VPS is live the PC units stay
+**disabled**: two APIs or two tunnel connectors must never run (`cutover.sh` / `rollback.sh`
+enforce that; a manual `--restart` here would break it).
 
 Run it in the foreground instead, for a quick look:
 
@@ -439,7 +476,7 @@ BONA_RETELL_MOCK=1 node api/index.mjs      # no Retell traffic at all
 cd ~/bona/services && node --test api/test/*.test.mjs
 ```
 
-447 tests, no network, no Retell and no WhatsApp: search and Card formatting in EN and AR, price
+477 tests, no network, no Retell and no WhatsApp: search and Card formatting in EN and AR, price
 parsing ("4.5m", "٤ ملايين"), token buckets and the trusted-proxy rules for client IPs,
 the CORS allowlist and the origin refusal, tool authentication (header, bearer, and the
 auth-failure throttle), the navigation allowlist, lead de-duplication, the daily
@@ -463,24 +500,28 @@ text.
 
 ## 8. Runbook
 
+The live service is on the VPS: every `systemctl` / `journalctl` below runs there (`ssh hermes-vps sudo …`
+— the units are system units, see §6). On the PC (only after `rollback.sh` has brought the service
+back, legacy path) the same commands are `systemctl --user …` / `journalctl --user …` without sudo.
+
 | Symptom | Where to look |
 |---|---|
-| Widget shows the WhatsApp fallback | `curl https://bona-api.azoz.uk/health`; then `systemctl --user status bona-api cloudflared-bona` |
-| `503 not_provisioned` | `node api/retell/provision.mjs`, then `systemctl --user restart bona-api` |
-| `/health` says `retell: "error"` | Retell key or balance — `journalctl --user -u bona-api -n 50` |
+| Widget shows the WhatsApp fallback | `curl https://bona-api.azoz.uk/health`; then `ssh hermes-vps sudo systemctl status bona-api cloudflared-bona` |
+| `503 not_provisioned` | `node api/retell/provision.mjs`, then `ssh hermes-vps sudo systemctl restart bona-api` |
+| `/health` says `retell: "error"` | Retell key or balance — `ssh hermes-vps sudo journalctl -u bona-api -n 50` |
 | Chat works, calls do not | mic permission in the browser, then the voice agent id in `ids.json` |
 | Dana quotes a property that is gone | `curl -s https://bona-api.azoz.uk/health \| jq .inventory`; the file reloads within 30 s of a publish |
 | No lead reached WhatsApp | the lead is still in `~/bona-data/leads.jsonl`; check `EVOLUTION_API_URL` reachability |
 | Tool webhooks 401 | `BONA_TOOL_TOKEN` changed after provisioning — re-run `provision.mjs` so the tools carry the new header |
-| `503 budget_exhausted` | the day's chat/call ceiling is spent; `journalctl … \| grep budget.exhausted`, raise `BONA_MAX_*` if that is the answer |
+| `503 budget_exhausted` | the day's chat/call ceiling is spent; `ssh hermes-vps sudo journalctl -u bona-api \| grep budget.exhausted`, raise `BONA_MAX_*` if that is the answer |
 | `503 billing` | the owner's Retell balance is empty — top it up; the log line says so loudly |
 | `/health` 503, `inventory: 0` | `listings.json` is missing or broken at the path in `redacted` config; fix it, no restart needed |
-| Dashboard code never arrives | `/health` → `evolution` must be reachable; `journalctl --user -u bona-api \| grep dashboard`; the owner JID is `BONA_OWNER_JID` |
+| Dashboard code never arrives | `/health` → `evolution` must be reachable; `ssh hermes-vps sudo journalctl -u bona-api \| grep dashboard`; the owner JID is `BONA_OWNER_JID` |
 | `/health` `poller.lagS` keeps growing | Evolution outage or wrong `EVOLUTION_API_URL`; nothing else is affected, messages are picked up when it is back |
 | `/health` `fanout.failed` > 0 | a key is wrong or expired — `node scripts/marketing/verify-integrations.mjs` says which; rows retry ≤ 5 times with backoff |
-| PC is off | everything pauses; the site falls back to WhatsApp and no data is lost |
+| PC is off | nothing happens to Dana (she runs on the VPS); only `bona-intake` (PC) pauses — legacy path: everything pauses, the site falls back to WhatsApp and no data is lost |
 
-Logs are one JSON object per line: `journalctl --user -u bona-api -f`.
+Logs are one JSON object per line: `ssh hermes-vps sudo journalctl -u bona-api -f`.
 
 Data files under `~/bona-data` (owner-only, mode 0600):
 
@@ -489,6 +530,10 @@ Data files under `~/bona-data` (owner-only, mode 0600):
 | `bona.db` (+ `-wal`, `-shm`) | the SQLite store: sessions, events, leads, touchpoints, stage history, WhatsApp poller cursor, ad spend, fan-out queue, dashboard logins. Migrations run on start (`PRAGMA user_version`). Back it up with `sqlite3 bona.db ".backup …"`, not `cp`, while the service runs |
 | `leads.jsonl` | the append-only raw log: one line per **new** lead, same `id` as the store's `lead_id`. Imported into `bona.db` once at startup (`import.legacy` in the log; a rerun is a no-op) |
 | `calls.jsonl`, `chats.jsonl` | Retell webhook events and transcripts, one line per finished conversation |
+
+- **Dana down, site shows the WhatsApp fallback** → `ssh hermes-vps sudo systemctl status bona-api cloudflared-bona`; `ssh hermes-vps sudo journalctl -u bona-api -n 50`. Uptime Kuma #25 (`api.bona-real-estate.com/health`, keyword `"retell":"ok"`) pages Telegram after ~3 minutes. If the VPS itself is gone: `bash services/deploy/vps/rollback.sh` on the PC restores the previous setup in about a minute.
+- **Inventory stale after an intake publish** → `ssh hermes-vps sudo systemctl list-timers bona-repo-sync.timer` and `ssh hermes-vps sudo journalctl -u bona-repo-sync -n 5`; the API re-reads `listings.json` within 30 s of the pull.
+- **A unit dies with `218/CAPABILITIES`** → it is running under the user manager again (`systemctl --user`), which Ubuntu 24.04's userns restriction forbids for the hardened units; re-run `install-vps.sh` (it retires the user units and reinstalls the system ones), then `cutover.sh` from the PC.
 
 ---
 

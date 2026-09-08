@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Fake `cloudflared`: answers --version with the pinned release; never runs a tunnel.
+set -u
+[ -n "${SHIM_LOG:-}" ] && printf 'cloudflared %s\n' "$*" >> "$SHIM_LOG"
+case "${1:-}" in
+  --version | version) echo "cloudflared version 2026.8.3 (built 2026-08-20-1200 UTC)" ;;
+  *) echo "cloudflared shim: refusing to run: $*" >&2; exit 99 ;;
+esac
+exit 0
