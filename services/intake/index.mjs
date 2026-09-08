@@ -28,7 +28,7 @@ import { processPdf, RejectError, sha256File } from './lib/pipeline.mjs';
 import { assertCleanTree, gitCommitPush, gitPull, rebuild, resetTree, waitForLive } from './lib/publish.mjs';
 import { STOP_GRACE_MS, waitForIdle } from './lib/shutdown.mjs';
 import { createState } from './lib/state.mjs';
-import { seedGroups } from './lib/groups.mjs';
+import { seedGroups, pollableGroups } from './lib/groups.mjs';
 
 const cfg = loadConfig();
 const state = createState(cfg.statePath);
@@ -76,25 +76,29 @@ async function discoverGroups() {
     return false;
   });
   const added = selected.filter((g) => !groups.some((x) => x.id === g.id));
-  groups = selected;
   for (const g of added) {
     log.info('group.selected', { jid: g.id, subject: g.subject });
     if (!state.isAnnounced(g.id)) {
       // First sight of this group: treat everything already in it as history so an old PDF
-      // in an existing chat is never published behind the owner's back.
+      // in an existing chat is never published behind the owner's back. Until that history
+      // is on disk the group is neither announced nor polled — the next scan retries it —
+      // because "announced" is also what lets a restart poll the group before discovery
+      // (Codex review, 2026-09-08).
       try {
         const { records } = await evo.findMessages(g.id, { pageSize: 100 });
         state.markSeenBulk(records.map((r) => r?.key?.id).filter(Boolean));
         log.info('group.seeded', { jid: g.id, seeded: records.length });
       } catch (err) {
-        log.warn('group.seed_failed', { jid: g.id, error: err.message });
+        log.warn('group.seed_failed', { jid: g.id, error: err.message, retryInMs: cfg.groupScanMs });
+        continue;
       }
       state.markAnnounced(g.id);
       await reply(g.id, msg.ANNOUNCE);
     }
   }
+  groups = pollableGroups(selected, state.isAnnounced);
   if (!selected.length) log.warn('group.none', { match: cfg.groupMatch, scanned: all.length });
-  return selected;
+  return groups;
 }
 
 // ---------------------------------------------------------------- polling

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { seedGroups } from '../lib/groups.mjs';
+import { seedGroups, pollableGroups } from '../lib/groups.mjs';
 
 const announced = (jid) => jid === '120363135705763548@g.us';
 
@@ -21,4 +21,10 @@ test('non-group jids, duplicates and junk are ignored', () => {
 test('an empty or missing configuration seeds nothing', () => {
   assert.deepEqual(seedGroups([], announced), []);
   assert.deepEqual(seedGroups(undefined, announced), []);
+});
+
+test('a selected group whose history could not be seeded is not polled', () => {
+  const selected = [{ id: '120363135705763548@g.us', subject: 'PDF' }, { id: '999@g.us', subject: 'Bona new' }];
+  assert.deepEqual(pollableGroups(selected, announced).map((g) => g.id), ['120363135705763548@g.us']);
+  assert.deepEqual(pollableGroups(undefined, announced), []);
 });
