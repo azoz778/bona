@@ -206,6 +206,32 @@ test('cutover.sh: a PC node without node:sqlite is refused before anything is to
   assert.ok(!r.lines.some((l) => /^(ssh|scp|systemctl) /.test(l)), `nothing may be called before the preflight passes\n${r.lines.join('\n')}`);
 });
 
+// A refused preflight must leave BOTH sides alone: nothing stopped on the PC, nothing disabled on
+// the VPS (a copy that is legitimately live there must not be knocked over by a re-run).
+const untouchedAfterPreflight = (r) => {
+  assert.notEqual(r.status, 0, 'cutover must refuse');
+  assert.ok(!r.lines.some((l) => CALL.pcStop.test(l)), `no local stop\n${r.lines.join('\n')}`);
+  assert.ok(!r.lines.some((l) => /^systemctl .*enable --now/.test(l)), `no local start\n${r.lines.join('\n')}`);
+  assert.ok(!r.lines.some((l) => CALL.vpsStopAll.test(l)), `no remote disable --now\n${r.lines.join('\n')}`);
+  assert.ok(!r.lines.some((l) => /^scp /.test(l)), `nothing copied\n${r.lines.join('\n')}`);
+  assert.ok(!r.lines.some((l) => /^ssh .*enable --now/.test(l)), `nothing started on the VPS\n${r.lines.join('\n')}`);
+};
+
+test('cutover.sh: preflight finds bona-api already active on the VPS — refused, PC not stopped, VPS not disabled', () => {
+  const r = runShimmed('cutover.sh', [], { SHIM_VPS_ALREADY_ACTIVE: '1' });
+  untouchedAfterPreflight(r);
+  assert.match(r.out, /ALREADY running on the VPS/);
+  assertOrdered(r.lines, CALL.vpsCheck, new RegExp(`${REMOTE}systemctl --user is-active --quiet bona-api$`));
+});
+
+test('cutover.sh: preflight install-vps.sh --check fails on the VPS — refused, PC not stopped, VPS not disabled', () => {
+  const r = runShimmed('cutover.sh', [], { SHIM_CHECK_FAIL: '1' });
+  untouchedAfterPreflight(r);
+  assert.match(r.out, /not ready/);
+  assert.ok(r.lines.some((l) => CALL.vpsCheck.test(l)), `--check must have been asked\n${r.lines.join('\n')}`);
+  assert.ok(!r.lines.some((l) => /^ssh .*is-active/.test(l)), `the unit probe comes after --check, so it must not run\n${r.lines.join('\n')}`);
+});
+
 test('cutover.sh: public health never comes back — VPS units stopped AND verified inactive before the PC units start', () => {
   const r = runShimmed('cutover.sh', [], { SHIM_PUBLIC_HEALTH_FAIL: '1' });
   assert.notEqual(r.status, 0, 'cutover must fail');
