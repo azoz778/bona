@@ -460,7 +460,7 @@ BONA_RETELL_MOCK=1 node api/index.mjs      # no Retell traffic at all
 cd ~/bona/services && node --test api/test/*.test.mjs
 ```
 
-466 tests, no network, no Retell and no WhatsApp: search and Card formatting in EN and AR, price
+469 tests, no network, no Retell and no WhatsApp: search and Card formatting in EN and AR, price
 parsing ("4.5m", "٤ ملايين"), token buckets and the trusted-proxy rules for client IPs,
 the CORS allowlist and the origin refusal, tool authentication (header, bearer, and the
 auth-failure throttle), the navigation allowlist, lead de-duplication, the daily

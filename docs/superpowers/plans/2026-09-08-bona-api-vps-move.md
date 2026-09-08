@@ -891,3 +891,18 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - [ ] Update memory (`bona-intake-concierge-2026-09-05.md` + index): runtime on VPS, deploy command, rollback, what stays on the PC.
 - [ ] Final Codex pass on the full diff (docs included), then `git push -u origin feat/api-vps`, `gh pr create`, CI green, merge to main (owner rule: green CI → merge allowed), then `ssh hermes-vps bash /opt/bona/services/deploy/vps/deploy.sh` so `/opt/bona` carries the merged scripts.
 - [ ] Notify the peer session; final report to the owner.
+
+
+---
+
+## Review fixes (2026-09-08, after the Claude + Codex pass on the first cut)
+
+What changed versus the task text above (the code on the branch is the source of truth):
+
+1. `templates/bona-api.service.in` has no `EnvironmentFile=` lines — systemd gives environment-file values precedence over `Environment=` regardless of order, which would have cancelled the VPS port/path overrides (Claude C1). The process reads the env files itself.
+2. `cutover.sh` rollback is fail-closed: `VPS_STARTED` flag; PC units start only after the VPS units are verified inactive over ssh, otherwise manual commands + exit 1 (Codex #1). `rollback.sh` same rule; `--copy-back` only after that verification.
+3. `cutover.sh` enables `bona-repo-sync.timer` after the local health wait; the timer is `OnCalendar=*:0/5` (+`RandomizedDelaySec=30`, `Persistent=true`) instead of monotonic (Codex #2, Claude C2/M2).
+4. `lib.sh` gained `BONA_VPS_DEPLOY_DIR` (default `$BONA_VPS_REPO/services/deploy/vps`; `/tmp/bona-vps` before the branch is merged) used by the preflight `--check`; the preflight verifies the PC node has `node:sqlite`; the VPS lead count is taken right after the copy, before the VPS API starts (Claude I1, I2, M1).
+5. Hardening: `--smoke` uses `exec` and refuses a busy port; `sync-secrets.sh` chmods the four named files only; `deploy.sh` pauses the timer around its pull; `render()` uses bash substitution instead of sed; `uname -m` guard; README fixes (Claude M3, M5, M7, M8, M9, M10).
+6. Tests: shim-based cutover scenarios (happy path, refused PC node, public health never back, VPS unit refuses to stop, ssh dies after start), `--check` ready path with plain `MISSING:` lines, "install mode never enables/starts", hardening parity with the PC unit, secret scan over templates and shims (Codex #4, Claude M6). Suite: 469 tests.
+7. Accepted deviation (Codex #3): cone sparse checkout of the whole `src/data` directory is kept — it holds only a few small JSON files; the two-file non-cone pattern buys nothing.
