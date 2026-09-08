@@ -38,6 +38,7 @@ import { createPoller } from './lib/wa-poller.mjs';
 import { importJsonl } from './lib/import-legacy.mjs';
 import { createBudget } from './lib/budget.mjs';
 import { createInventory } from './lib/inventory.mjs';
+import { createUnits } from './lib/units.mjs';
 import { createStore } from './lib/store.mjs';
 import { createRetellClient, createHealthProbe, RetellError } from './lib/retell.mjs';
 import { createToolHandlers, extractToken, tokenMatches, TOOL_NAMES } from './lib/tools.mjs';
@@ -167,6 +168,11 @@ export function createApp(options = {}) {
   const cfg = options.config ?? loadConfig();
   const log = options.log ?? ((obj) => jsonLog(obj.level ?? 'info', obj));
   const inventory = options.inventory ?? createInventory({ file: cfg.inventoryFile, siteUrl: cfg.siteUrl });
+  // Per-unit stock sits beside listings.json in the same checkout, so one path
+  // decides both and a redeploy can never leave them pointing at different trees.
+  const units = options.units ?? createUnits({
+    file: path.join(path.dirname(cfg.inventoryFile), 'units.json'),
+  });
   const store = options.store ?? createStore();
   const db = options.db ?? openDb(cfg.dbFile ?? path.join(cfg.dataDir, 'bona.db'));
   const ownsDb = !options.db;
@@ -180,7 +186,7 @@ export function createApp(options = {}) {
   // constructing it contacts nothing; the real server (below) is what puts it on a timer.
   const poller = options.poller ?? (cfg.waPoll ? createPoller({ db, cfg, sendWhatsApp, log }) : null);
   const tools = createToolHandlers({
-    inventory, store, db, dataDir: cfg.dataDir, siteUrl: cfg.siteUrl, env: cfg.env, sendWhatsApp, log,
+    inventory, units, store, db, dataDir: cfg.dataDir, siteUrl: cfg.siteUrl, env: cfg.env, sendWhatsApp, log,
   });
 
   const perMin = 60_000;

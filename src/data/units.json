@@ -1,0 +1,3799 @@
+{
+  "listingId": "BONA-W014",
+  "project": {
+    "en": "Darco Prime Waterfront",
+    "ar": "داركو برايم الواجهة البحرية"
+  },
+  "developer": {
+    "en": "Darco Real Estate Company",
+    "ar": "شركة داركو العقارية"
+  },
+  "district": {
+    "en": "Al-Shati District",
+    "ar": "حي الشاطئ"
+  },
+  "city": {
+    "en": "Jeddah",
+    "ar": "جدة"
+  },
+  "delivery": "2028-06",
+  "currency": "SAR",
+  "updated": "2026-09-02",
+  "source": "developer unit-inventory sheet",
+  "units": [
+    {
+      "ref": "B05-3",
+      "building": "B05",
+      "unit": "3",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "North",
+        "ar": "شمالية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 74.58,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main garden",
+        "ar": "حديقة رئيسية"
+      },
+      "price": {
+        "cash": 948861,
+        "half": 969498,
+        "year": 1043747,
+        "twoYear": 1091190
+      }
+    },
+    {
+      "ref": "B05-7",
+      "building": "B05",
+      "unit": "7",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "South",
+        "ar": "جنوبية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 98.39,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Street",
+        "ar": "شارع"
+      },
+      "price": {
+        "cash": 1134793,
+        "half": 1159474,
+        "year": 1248272,
+        "twoYear": 1305012
+      }
+    },
+    {
+      "ref": "B05-8",
+      "building": "B05",
+      "unit": "8",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "North",
+        "ar": "شمالية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 74.58,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main garden",
+        "ar": "حديقة رئيسية"
+      },
+      "price": {
+        "cash": 948861,
+        "half": 969498,
+        "year": 1043747,
+        "twoYear": 1091190
+      }
+    },
+    {
+      "ref": "B06-1",
+      "building": "B06",
+      "unit": "1",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "South",
+        "ar": "جنوبية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 98.39,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Street",
+        "ar": "شارع"
+      },
+      "price": {
+        "cash": 1134793,
+        "half": 1159474,
+        "year": 1248272,
+        "twoYear": 1305012
+      }
+    },
+    {
+      "ref": "B06-2",
+      "building": "B06",
+      "unit": "2",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "South",
+        "ar": "جنوبية"
+      },
+      "beds": 3,
+      "baths": 4,
+      "maidRoom": true,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 123.49,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Street",
+        "ar": "شارع"
+      },
+      "price": {
+        "cash": 1359547,
+        "half": 1389117,
+        "year": 1495502,
+        "twoYear": 1563479
+      }
+    },
+    {
+      "ref": "B06-4",
+      "building": "B06",
+      "unit": "4",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "North",
+        "ar": "شمالية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 88.94,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main garden",
+        "ar": "حديقة رئيسية"
+      },
+      "price": {
+        "cash": 1036286,
+        "half": 1058825,
+        "year": 1139915,
+        "twoYear": 1191728
+      }
+    },
+    {
+      "ref": "B06-5",
+      "building": "B06",
+      "unit": "5",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "North",
+        "ar": "شمالية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 74.23,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main garden",
+        "ar": "حديقة رئيسية"
+      },
+      "price": {
+        "cash": 944457,
+        "half": 964999,
+        "year": 1038903,
+        "twoYear": 1086126
+      }
+    },
+    {
+      "ref": "B06-10",
+      "building": "B06",
+      "unit": "10",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "North",
+        "ar": "شمالية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 74.91,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main garden",
+        "ar": "حديقة رئيسية"
+      },
+      "price": {
+        "cash": 953013,
+        "half": 973740,
+        "year": 1048314,
+        "twoYear": 1095965
+      }
+    },
+    {
+      "ref": "B06-15",
+      "building": "B06",
+      "unit": "15",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "North",
+        "ar": "شمالية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 74.91,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main garden",
+        "ar": "حديقة رئيسية"
+      },
+      "price": {
+        "cash": 953013,
+        "half": 973740,
+        "year": 1048314,
+        "twoYear": 1095965
+      }
+    },
+    {
+      "ref": "B06-20",
+      "building": "B06",
+      "unit": "20",
+      "floor": {
+        "en": "3rd",
+        "ar": "الدور الثالث"
+      },
+      "floorIndex": 3,
+      "facing": {
+        "en": "North",
+        "ar": "شمالية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Penthouse",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 74.23,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main garden",
+        "ar": "حديقة رئيسية"
+      },
+      "price": {
+        "cash": 944457,
+        "half": 964999,
+        "year": 1038903,
+        "twoYear": 1086126
+      }
+    },
+    {
+      "ref": "B08-1",
+      "building": "B08",
+      "unit": "1",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 85.01,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Street",
+        "ar": "شارع"
+      },
+      "price": {
+        "cash": 1069607,
+        "half": 1092871,
+        "year": 1176568,
+        "twoYear": 1230048
+      }
+    },
+    {
+      "ref": "B08-2",
+      "building": "B08",
+      "unit": "2",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "North-East",
+        "ar": "شمالية شرقية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 103.92,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Street and main garden",
+        "ar": "شارع و حديقة رئيسية"
+      },
+      "price": {
+        "cash": 1209059,
+        "half": 1235355,
+        "year": 1329965,
+        "twoYear": 1390418
+      }
+    },
+    {
+      "ref": "B08-3",
+      "building": "B08",
+      "unit": "3",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 68.78,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 870642,
+        "half": 889578,
+        "year": 957705,
+        "twoYear": 1001238
+      }
+    },
+    {
+      "ref": "B08-4",
+      "building": "B08",
+      "unit": "4",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "South",
+        "ar": "جنوبية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 55.45,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main garden",
+        "ar": "حديقة رئيسية"
+      },
+      "price": {
+        "cash": 708164,
+        "half": 723567,
+        "year": 778981,
+        "twoYear": 814389
+      }
+    },
+    {
+      "ref": "B08-5",
+      "building": "B08",
+      "unit": "5",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "South",
+        "ar": "جنوبية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 56.69,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main garden",
+        "ar": "حديقة رئيسية"
+      },
+      "price": {
+        "cash": 723766,
+        "half": 739507,
+        "year": 796143,
+        "twoYear": 832331
+      }
+    },
+    {
+      "ref": "B08-6",
+      "building": "B08",
+      "unit": "6",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "South-West",
+        "ar": "جنوبية غربية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 92.07,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main and secondary garden",
+        "ar": "حديقة رئيسية و فرعية"
+      },
+      "price": {
+        "cash": 1077628,
+        "half": 1101066,
+        "year": 1185391,
+        "twoYear": 1239273
+      }
+    },
+    {
+      "ref": "B08-7",
+      "building": "B08",
+      "unit": "7",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 85.01,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Street",
+        "ar": "شارع"
+      },
+      "price": {
+        "cash": 1069607,
+        "half": 1092871,
+        "year": 1176568,
+        "twoYear": 1230048
+      }
+    },
+    {
+      "ref": "B08-8",
+      "building": "B08",
+      "unit": "8",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "North-East",
+        "ar": "شمالية شرقية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 103.92,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Street and main garden",
+        "ar": "شارع و حديقة رئيسية"
+      },
+      "price": {
+        "cash": 1209059,
+        "half": 1235355,
+        "year": 1329965,
+        "twoYear": 1390418
+      }
+    },
+    {
+      "ref": "B08-9",
+      "building": "B08",
+      "unit": "9",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 68.78,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 870642,
+        "half": 889578,
+        "year": 957705,
+        "twoYear": 1001238
+      }
+    },
+    {
+      "ref": "B08-10",
+      "building": "B08",
+      "unit": "10",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "South",
+        "ar": "جنوبية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 55.45,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main garden",
+        "ar": "حديقة رئيسية"
+      },
+      "price": {
+        "cash": 708164,
+        "half": 723567,
+        "year": 778981,
+        "twoYear": 814389
+      }
+    },
+    {
+      "ref": "B08-11",
+      "building": "B08",
+      "unit": "11",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "South",
+        "ar": "جنوبية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 56.69,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main garden",
+        "ar": "حديقة رئيسية"
+      },
+      "price": {
+        "cash": 723766,
+        "half": 739507,
+        "year": 796143,
+        "twoYear": 832331
+      }
+    },
+    {
+      "ref": "B08-12",
+      "building": "B08",
+      "unit": "12",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "South-West",
+        "ar": "جنوبية غربية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 92.07,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main and secondary garden",
+        "ar": "حديقة رئيسية و فرعية"
+      },
+      "price": {
+        "cash": 1077628,
+        "half": 1101066,
+        "year": 1185391,
+        "twoYear": 1239273
+      }
+    },
+    {
+      "ref": "B08-13",
+      "building": "B08",
+      "unit": "13",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 85.01,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Street",
+        "ar": "شارع"
+      },
+      "price": {
+        "cash": 1069607,
+        "half": 1092871,
+        "year": 1176568,
+        "twoYear": 1230048
+      }
+    },
+    {
+      "ref": "B08-14",
+      "building": "B08",
+      "unit": "14",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "North-East",
+        "ar": "شمالية شرقية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 103.92,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Street and main garden",
+        "ar": "شارع و حديقة رئيسية"
+      },
+      "price": {
+        "cash": 1209059,
+        "half": 1235355,
+        "year": 1329965,
+        "twoYear": 1390418
+      }
+    },
+    {
+      "ref": "B08-15",
+      "building": "B08",
+      "unit": "15",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 68.78,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 870642,
+        "half": 889578,
+        "year": 957705,
+        "twoYear": 1001238
+      }
+    },
+    {
+      "ref": "B08-16",
+      "building": "B08",
+      "unit": "16",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "South",
+        "ar": "جنوبية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 55.45,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main garden",
+        "ar": "حديقة رئيسية"
+      },
+      "price": {
+        "cash": 708164,
+        "half": 723567,
+        "year": 778981,
+        "twoYear": 814389
+      }
+    },
+    {
+      "ref": "B08-17",
+      "building": "B08",
+      "unit": "17",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "South",
+        "ar": "جنوبية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 56.69,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main garden",
+        "ar": "حديقة رئيسية"
+      },
+      "price": {
+        "cash": 723766,
+        "half": 739507,
+        "year": 796143,
+        "twoYear": 832331
+      }
+    },
+    {
+      "ref": "B08-18",
+      "building": "B08",
+      "unit": "18",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "South-West",
+        "ar": "جنوبية غربية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 92.07,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main and secondary garden",
+        "ar": "حديقة رئيسية و فرعية"
+      },
+      "price": {
+        "cash": 1077628,
+        "half": 1101066,
+        "year": 1185391,
+        "twoYear": 1239273
+      }
+    },
+    {
+      "ref": "B08-19",
+      "building": "B08",
+      "unit": "19",
+      "floor": {
+        "en": "3rd",
+        "ar": "الدور الثالث"
+      },
+      "floorIndex": 3,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "The Jewel",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 85.01,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Street",
+        "ar": "شارع"
+      },
+      "price": {
+        "cash": 1069607,
+        "half": 1092871,
+        "year": 1176568,
+        "twoYear": 1230048
+      }
+    },
+    {
+      "ref": "B08-20",
+      "building": "B08",
+      "unit": "20",
+      "floor": {
+        "en": "3rd",
+        "ar": "الدور الثالث"
+      },
+      "floorIndex": 3,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "The Jewel",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 103.92,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Street",
+        "ar": "شارع"
+      },
+      "price": {
+        "cash": 1198574,
+        "half": 1224642,
+        "year": 1318432,
+        "twoYear": 1378360
+      }
+    },
+    {
+      "ref": "B08-21",
+      "building": "B08",
+      "unit": "21",
+      "floor": {
+        "en": "3rd",
+        "ar": "الدور الثالث"
+      },
+      "floorIndex": 3,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 68.78,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 870642,
+        "half": 889578,
+        "year": 957705,
+        "twoYear": 1001238
+      }
+    },
+    {
+      "ref": "B08-22",
+      "building": "B08",
+      "unit": "22",
+      "floor": {
+        "en": "3rd",
+        "ar": "الدور الثالث"
+      },
+      "floorIndex": 3,
+      "facing": {
+        "en": "South",
+        "ar": "جنوبية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 55.45,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main garden",
+        "ar": "حديقة رئيسية"
+      },
+      "price": {
+        "cash": 708164,
+        "half": 723567,
+        "year": 778981,
+        "twoYear": 814389
+      }
+    },
+    {
+      "ref": "B08-23",
+      "building": "B08",
+      "unit": "23",
+      "floor": {
+        "en": "3rd",
+        "ar": "الدور الثالث"
+      },
+      "floorIndex": 3,
+      "facing": {
+        "en": "South",
+        "ar": "جنوبية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 56.69,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main garden",
+        "ar": "حديقة رئيسية"
+      },
+      "price": {
+        "cash": 723766,
+        "half": 739507,
+        "year": 796143,
+        "twoYear": 832331
+      }
+    },
+    {
+      "ref": "B08-24",
+      "building": "B08",
+      "unit": "24",
+      "floor": {
+        "en": "3rd",
+        "ar": "الدور الثالث"
+      },
+      "floorIndex": 3,
+      "facing": {
+        "en": "South-West",
+        "ar": "جنوبية غربية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 92.07,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main and secondary garden",
+        "ar": "حديقة رئيسية و فرعية"
+      },
+      "price": {
+        "cash": 1077628,
+        "half": 1101066,
+        "year": 1185391,
+        "twoYear": 1239273
+      }
+    },
+    {
+      "ref": "B08-25",
+      "building": "B08",
+      "unit": "25",
+      "floor": {
+        "en": "Roof annex",
+        "ar": "الملحق العلوي"
+      },
+      "floorIndex": 4,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Roof apartment",
+        "ar": "شقة روف"
+      },
+      "areaSqm": 83.54,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Street",
+        "ar": "شارع"
+      },
+      "price": {
+        "cash": 1051112,
+        "half": 1073973,
+        "year": 1156223,
+        "twoYear": 1208778
+      }
+    },
+    {
+      "ref": "B08-26",
+      "building": "B08",
+      "unit": "26",
+      "floor": {
+        "en": "Roof annex",
+        "ar": "الملحق العلوي"
+      },
+      "floorIndex": 4,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Roof apartment",
+        "ar": "شقة روف"
+      },
+      "areaSqm": 106.29,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Street",
+        "ar": "شارع"
+      },
+      "price": {
+        "cash": 1225909,
+        "half": 1252572,
+        "year": 1348500,
+        "twoYear": 1409795
+      }
+    },
+    {
+      "ref": "B08-27",
+      "building": "B08",
+      "unit": "27",
+      "floor": {
+        "en": "Roof annex",
+        "ar": "الملحق العلوي"
+      },
+      "floorIndex": 4,
+      "facing": {
+        "en": "South-West",
+        "ar": "جنوبية غربية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Penthouse",
+      "type": {
+        "en": "Roof apartment",
+        "ar": "شقة روف"
+      },
+      "areaSqm": 91.56,
+      "roofSqm": 50.99,
+      "feature": {
+        "en": "Main and secondary garden",
+        "ar": "حديقة رئيسية و فرعية"
+      },
+      "price": {
+        "cash": 1205405,
+        "half": 1231622,
+        "year": 1325946,
+        "twoYear": 1386216
+      }
+    },
+    {
+      "ref": "B08-28",
+      "building": "B08",
+      "unit": "28",
+      "floor": {
+        "en": "Roof annex",
+        "ar": "الملحق العلوي"
+      },
+      "floorIndex": 4,
+      "facing": {
+        "en": "South",
+        "ar": "جنوبية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Penthouse",
+      "type": {
+        "en": "Roof apartment",
+        "ar": "شقة روف"
+      },
+      "areaSqm": 57.82,
+      "roofSqm": 54.7,
+      "feature": {
+        "en": "Main garden",
+        "ar": "حديقة رئيسية"
+      },
+      "price": {
+        "cash": 881368,
+        "half": 900537,
+        "year": 969505,
+        "twoYear": 1013573
+      }
+    },
+    {
+      "ref": "B11-1",
+      "building": "B11",
+      "unit": "1",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "South-West",
+        "ar": "جنوبية غربية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 73.67,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main and secondary garden",
+        "ar": "حديقة رئيسية و فرعية"
+      },
+      "price": {
+        "cash": 942654,
+        "half": 963157,
+        "year": 1036919,
+        "twoYear": 1084052
+      }
+    },
+    {
+      "ref": "B11-2",
+      "building": "B11",
+      "unit": "2",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 101.68,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1177981,
+        "half": 1203601,
+        "year": 1295780,
+        "twoYear": 1354679
+      }
+    },
+    {
+      "ref": "B11-3",
+      "building": "B11",
+      "unit": "3",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "South-East",
+        "ar": "جنوبية شرقية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 93.56,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main and secondary garden",
+        "ar": "حديقة رئيسية و فرعية"
+      },
+      "price": {
+        "cash": 1094814,
+        "half": 1118625,
+        "year": 1204295,
+        "twoYear": 1259036
+      }
+    },
+    {
+      "ref": "B11-4",
+      "building": "B11",
+      "unit": "4",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 70.18,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 888257,
+        "half": 907576,
+        "year": 977082,
+        "twoYear": 1021495
+      }
+    },
+    {
+      "ref": "B11-5",
+      "building": "B11",
+      "unit": "5",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "South-West",
+        "ar": "جنوبية غربية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 73.67,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main and secondary garden",
+        "ar": "حديقة رئيسية و فرعية"
+      },
+      "price": {
+        "cash": 942654,
+        "half": 963157,
+        "year": 1036919,
+        "twoYear": 1084052
+      }
+    },
+    {
+      "ref": "B11-6",
+      "building": "B11",
+      "unit": "6",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 101.68,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1177981,
+        "half": 1203601,
+        "year": 1295780,
+        "twoYear": 1354679
+      }
+    },
+    {
+      "ref": "B11-8",
+      "building": "B11",
+      "unit": "8",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 70.18,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 888257,
+        "half": 907576,
+        "year": 977082,
+        "twoYear": 1021495
+      }
+    },
+    {
+      "ref": "B11-10",
+      "building": "B11",
+      "unit": "10",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 101.68,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1177981,
+        "half": 1203601,
+        "year": 1295780,
+        "twoYear": 1354679
+      }
+    },
+    {
+      "ref": "B11-12",
+      "building": "B11",
+      "unit": "12",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 70.18,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 888257,
+        "half": 907576,
+        "year": 977082,
+        "twoYear": 1021495
+      }
+    },
+    {
+      "ref": "B11-13",
+      "building": "B11",
+      "unit": "13",
+      "floor": {
+        "en": "3rd",
+        "ar": "الدور الثالث"
+      },
+      "floorIndex": 3,
+      "facing": {
+        "en": "South-West",
+        "ar": "جنوبية غربية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 73.67,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main and secondary garden",
+        "ar": "حديقة رئيسية و فرعية"
+      },
+      "price": {
+        "cash": 942654,
+        "half": 963157,
+        "year": 1036919,
+        "twoYear": 1084052
+      }
+    },
+    {
+      "ref": "B11-16",
+      "building": "B11",
+      "unit": "16",
+      "floor": {
+        "en": "3rd",
+        "ar": "الدور الثالث"
+      },
+      "floorIndex": 3,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 70.18,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 888257,
+        "half": 907576,
+        "year": 977082,
+        "twoYear": 1021495
+      }
+    },
+    {
+      "ref": "B12-3",
+      "building": "B12",
+      "unit": "3",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "South-East",
+        "ar": "جنوبية شرقية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 93.51,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main and secondary garden",
+        "ar": "حديقة رئيسية و فرعية"
+      },
+      "price": {
+        "cash": 1094237,
+        "half": 1118035,
+        "year": 1203661,
+        "twoYear": 1258372
+      }
+    },
+    {
+      "ref": "B12-4",
+      "building": "B12",
+      "unit": "4",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 70.18,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 888257,
+        "half": 907576,
+        "year": 977082,
+        "twoYear": 1021495
+      }
+    },
+    {
+      "ref": "B12-7",
+      "building": "B12",
+      "unit": "7",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "South-East",
+        "ar": "جنوبية شرقية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 93.51,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main and secondary garden",
+        "ar": "حديقة رئيسية و فرعية"
+      },
+      "price": {
+        "cash": 1094237,
+        "half": 1118035,
+        "year": 1203661,
+        "twoYear": 1258372
+      }
+    },
+    {
+      "ref": "B12-8",
+      "building": "B12",
+      "unit": "8",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 70.18,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 888257,
+        "half": 907576,
+        "year": 977082,
+        "twoYear": 1021495
+      }
+    },
+    {
+      "ref": "B12-11",
+      "building": "B12",
+      "unit": "11",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "South-East",
+        "ar": "جنوبية شرقية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 93.51,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Main and secondary garden",
+        "ar": "حديقة رئيسية و فرعية"
+      },
+      "price": {
+        "cash": 1094237,
+        "half": 1118035,
+        "year": 1203661,
+        "twoYear": 1258372
+      }
+    },
+    {
+      "ref": "B12-12",
+      "building": "B12",
+      "unit": "12",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 70.18,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 888257,
+        "half": 907576,
+        "year": 977082,
+        "twoYear": 1021495
+      }
+    },
+    {
+      "ref": "B12-17",
+      "building": "B12",
+      "unit": "17",
+      "floor": {
+        "en": "3rd",
+        "ar": "الدور الثالث"
+      },
+      "floorIndex": 3,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 93.51,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1083752,
+        "half": 1107323,
+        "year": 1192128,
+        "twoYear": 1246314
+      }
+    },
+    {
+      "ref": "B13-2",
+      "building": "B13",
+      "unit": "2",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 3,
+      "baths": 4,
+      "maidRoom": true,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 135.92,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Street",
+        "ar": "شارع"
+      },
+      "price": {
+        "cash": 1346754,
+        "half": 1376045,
+        "year": 1481429,
+        "twoYear": 1548767
+      }
+    },
+    {
+      "ref": "B13-5",
+      "building": "B13",
+      "unit": "5",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 83.13,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 946076,
+        "half": 966653,
+        "year": 1040682,
+        "twoYear": 1087987
+      }
+    },
+    {
+      "ref": "B13-8",
+      "building": "B13",
+      "unit": "8",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 71.04,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 899077,
+        "half": 918631,
+        "year": 988985,
+        "twoYear": 1033939
+      }
+    },
+    {
+      "ref": "B13-9",
+      "building": "B13",
+      "unit": "9",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 90.79,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1052380,
+        "half": 1075268,
+        "year": 1157619,
+        "twoYear": 1210237
+      }
+    },
+    {
+      "ref": "B13-10",
+      "building": "B13",
+      "unit": "10",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 84.15,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1064029,
+        "half": 1087171,
+        "year": 1170432,
+        "twoYear": 1223634
+      }
+    },
+    {
+      "ref": "B13-14",
+      "building": "B13",
+      "unit": "14",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 90.79,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1052380,
+        "half": 1075268,
+        "year": 1157619,
+        "twoYear": 1210237
+      }
+    },
+    {
+      "ref": "B13-15",
+      "building": "B13",
+      "unit": "15",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 84.15,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1064029,
+        "half": 1087171,
+        "year": 1170432,
+        "twoYear": 1223634
+      }
+    },
+    {
+      "ref": "B13-19",
+      "building": "B13",
+      "unit": "19",
+      "floor": {
+        "en": "3rd",
+        "ar": "الدور الثالث"
+      },
+      "floorIndex": 3,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 90.79,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1052380,
+        "half": 1075268,
+        "year": 1157619,
+        "twoYear": 1210237
+      }
+    },
+    {
+      "ref": "B13-20",
+      "building": "B13",
+      "unit": "20",
+      "floor": {
+        "en": "3rd",
+        "ar": "الدور الثالث"
+      },
+      "floorIndex": 3,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 83.13,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1051195,
+        "half": 1074058,
+        "year": 1156315,
+        "twoYear": 1208875
+      }
+    },
+    {
+      "ref": "B13-23",
+      "building": "B13",
+      "unit": "23",
+      "floor": {
+        "en": "Roof annex",
+        "ar": "الملحق العلوي"
+      },
+      "floorIndex": 4,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Roof apartment",
+        "ar": "شقة روف"
+      },
+      "areaSqm": 83.31,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1053460,
+        "half": 1076372,
+        "year": 1158806,
+        "twoYear": 1211479
+      }
+    },
+    {
+      "ref": "B15-1",
+      "building": "B15",
+      "unit": "1",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 3,
+      "baths": 4,
+      "maidRoom": true,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 135.65,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1348797,
+        "half": 1378132,
+        "year": 1483677,
+        "twoYear": 1551117
+      }
+    },
+    {
+      "ref": "B15-2",
+      "building": "B15",
+      "unit": "2",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 102.97,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1073574,
+        "half": 1096924,
+        "year": 1180931,
+        "twoYear": 1234610
+      }
+    },
+    {
+      "ref": "B15-3",
+      "building": "B15",
+      "unit": "3",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 83.13,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 946076,
+        "half": 966653,
+        "year": 1040682,
+        "twoYear": 1087987
+      }
+    },
+    {
+      "ref": "B15-5",
+      "building": "B15",
+      "unit": "5",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 71.03,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 809056,
+        "half": 826653,
+        "year": 889962,
+        "twoYear": 930415
+      }
+    },
+    {
+      "ref": "B15-6",
+      "building": "B15",
+      "unit": "6",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 3,
+      "baths": 4,
+      "maidRoom": true,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 135.65,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1348797,
+        "half": 1378132,
+        "year": 1483677,
+        "twoYear": 1551117
+      }
+    },
+    {
+      "ref": "B15-7",
+      "building": "B15",
+      "unit": "7",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 102.97,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1192860,
+        "half": 1218804,
+        "year": 1312146,
+        "twoYear": 1371789
+      }
+    },
+    {
+      "ref": "B15-8",
+      "building": "B15",
+      "unit": "8",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 83.15,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1051447,
+        "half": 1074315,
+        "year": 1156592,
+        "twoYear": 1209164
+      }
+    },
+    {
+      "ref": "B15-9",
+      "building": "B15",
+      "unit": "9",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 90.78,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1052265,
+        "half": 1075152,
+        "year": 1157491,
+        "twoYear": 1210105
+      }
+    },
+    {
+      "ref": "B15-10",
+      "building": "B15",
+      "unit": "10",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 71.03,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 809056,
+        "half": 826653,
+        "year": 889962,
+        "twoYear": 930415
+      }
+    },
+    {
+      "ref": "B15-11",
+      "building": "B15",
+      "unit": "11",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 3,
+      "baths": 4,
+      "maidRoom": true,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 135.65,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1348797,
+        "half": 1378132,
+        "year": 1483677,
+        "twoYear": 1551117
+      }
+    },
+    {
+      "ref": "B15-12",
+      "building": "B15",
+      "unit": "12",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 102.97,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1192860,
+        "half": 1218804,
+        "year": 1312146,
+        "twoYear": 1371789
+      }
+    },
+    {
+      "ref": "B15-13",
+      "building": "B15",
+      "unit": "13",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 84.15,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1064029,
+        "half": 1087171,
+        "year": 1170432,
+        "twoYear": 1223634
+      }
+    },
+    {
+      "ref": "B15-14",
+      "building": "B15",
+      "unit": "14",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 90.78,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1052265,
+        "half": 1075152,
+        "year": 1157491,
+        "twoYear": 1210105
+      }
+    },
+    {
+      "ref": "B15-15",
+      "building": "B15",
+      "unit": "15",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 71.03,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 809056,
+        "half": 826653,
+        "year": 889962,
+        "twoYear": 930415
+      }
+    },
+    {
+      "ref": "B15-18",
+      "building": "B15",
+      "unit": "18",
+      "floor": {
+        "en": "3rd",
+        "ar": "الدور الثالث"
+      },
+      "floorIndex": 3,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 83.13,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1051195,
+        "half": 1074058,
+        "year": 1156315,
+        "twoYear": 1208875
+      }
+    },
+    {
+      "ref": "B15-19",
+      "building": "B15",
+      "unit": "19",
+      "floor": {
+        "en": "3rd",
+        "ar": "الدور الثالث"
+      },
+      "floorIndex": 3,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 90.78,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1052265,
+        "half": 1075152,
+        "year": 1157491,
+        "twoYear": 1210105
+      }
+    },
+    {
+      "ref": "B15-20",
+      "building": "B15",
+      "unit": "20",
+      "floor": {
+        "en": "3rd",
+        "ar": "الدور الثالث"
+      },
+      "floorIndex": 3,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 71.03,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 898952,
+        "half": 918504,
+        "year": 988847,
+        "twoYear": 1033794
+      }
+    },
+    {
+      "ref": "B15-21",
+      "building": "B15",
+      "unit": "21",
+      "floor": {
+        "en": "Roof annex",
+        "ar": "الملحق العلوي"
+      },
+      "floorIndex": 4,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Roof apartment",
+        "ar": "شقة روف"
+      },
+      "areaSqm": 83.31,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1053460,
+        "half": 1076372,
+        "year": 1158806,
+        "twoYear": 1211479
+      }
+    },
+    {
+      "ref": "B16-3",
+      "building": "B16",
+      "unit": "3",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 83.13,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 946076,
+        "half": 966653,
+        "year": 966653,
+        "twoYear": 966653
+      }
+    },
+    {
+      "ref": "B16-5",
+      "building": "B16",
+      "unit": "5",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 71.03,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 809056,
+        "half": 826653,
+        "year": 826653,
+        "twoYear": 826653
+      }
+    },
+    {
+      "ref": "B16-7",
+      "building": "B16",
+      "unit": "7",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 102.97,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1192860,
+        "half": 1218804,
+        "year": 1218804,
+        "twoYear": 1218804
+      }
+    },
+    {
+      "ref": "B16-8",
+      "building": "B16",
+      "unit": "8",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 84.15,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1064029,
+        "half": 1087171,
+        "year": 1087171,
+        "twoYear": 1087171
+      }
+    },
+    {
+      "ref": "B16-9",
+      "building": "B16",
+      "unit": "9",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 90.78,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1052265,
+        "half": 1075152,
+        "year": 1075152,
+        "twoYear": 1075152
+      }
+    },
+    {
+      "ref": "B16-10",
+      "building": "B16",
+      "unit": "10",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 71.03,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 809056,
+        "half": 826653,
+        "year": 826653,
+        "twoYear": 826653
+      }
+    },
+    {
+      "ref": "B16-12",
+      "building": "B16",
+      "unit": "12",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 102.97,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1192860,
+        "half": 1218804,
+        "year": 1218804,
+        "twoYear": 1218804
+      }
+    },
+    {
+      "ref": "B16-13",
+      "building": "B16",
+      "unit": "13",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 84.15,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1064029,
+        "half": 1087171,
+        "year": 1087171,
+        "twoYear": 1087171
+      }
+    },
+    {
+      "ref": "B16-14",
+      "building": "B16",
+      "unit": "14",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 90.78,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1052265,
+        "half": 1075152,
+        "year": 1075152,
+        "twoYear": 1075152
+      }
+    },
+    {
+      "ref": "B16-15",
+      "building": "B16",
+      "unit": "15",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 71.03,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 809056,
+        "half": 826653,
+        "year": 826653,
+        "twoYear": 826653
+      }
+    },
+    {
+      "ref": "B16-17",
+      "building": "B16",
+      "unit": "17",
+      "floor": {
+        "en": "3rd",
+        "ar": "الدور الثالث"
+      },
+      "floorIndex": 3,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 102.97,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1192860,
+        "half": 1218804,
+        "year": 1218804,
+        "twoYear": 1218804
+      }
+    },
+    {
+      "ref": "B16-18",
+      "building": "B16",
+      "unit": "18",
+      "floor": {
+        "en": "3rd",
+        "ar": "الدور الثالث"
+      },
+      "floorIndex": 3,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 83.13,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1051195,
+        "half": 1074058,
+        "year": 1074058,
+        "twoYear": 1074058
+      }
+    },
+    {
+      "ref": "B16-19",
+      "building": "B16",
+      "unit": "19",
+      "floor": {
+        "en": "3rd",
+        "ar": "الدور الثالث"
+      },
+      "floorIndex": 3,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 2,
+      "baths": 3,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 90.78,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1052265,
+        "half": 1075152,
+        "year": 1075152,
+        "twoYear": 1075152
+      }
+    },
+    {
+      "ref": "B16-21",
+      "building": "B16",
+      "unit": "21",
+      "floor": {
+        "en": "Roof annex",
+        "ar": "الملحق العلوي"
+      },
+      "floorIndex": 4,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Roof apartment",
+        "ar": "شقة روف"
+      },
+      "areaSqm": 83.31,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1053460,
+        "half": 1076372,
+        "year": 1076372,
+        "twoYear": 1076372
+      }
+    },
+    {
+      "ref": "B17-5",
+      "building": "B17",
+      "unit": "5",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 71.03,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 809056,
+        "half": 826653,
+        "year": 826653,
+        "twoYear": 826653
+      }
+    },
+    {
+      "ref": "B17-8",
+      "building": "B17",
+      "unit": "8",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 84.15,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1064029,
+        "half": 1087171,
+        "year": 1087171,
+        "twoYear": 1087171
+      }
+    },
+    {
+      "ref": "B17-10",
+      "building": "B17",
+      "unit": "10",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 71.03,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 898952,
+        "half": 918504,
+        "year": 918504,
+        "twoYear": 918504
+      }
+    },
+    {
+      "ref": "B17-13",
+      "building": "B17",
+      "unit": "13",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 84.15,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1064029,
+        "half": 1087171,
+        "year": 1087171,
+        "twoYear": 1087171
+      }
+    },
+    {
+      "ref": "B17-15",
+      "building": "B17",
+      "unit": "15",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 71.03,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 898952,
+        "half": 918504,
+        "year": 918504,
+        "twoYear": 918504
+      }
+    },
+    {
+      "ref": "B17-18",
+      "building": "B17",
+      "unit": "18",
+      "floor": {
+        "en": "3rd",
+        "ar": "الدور الثالث"
+      },
+      "floorIndex": 3,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 83.13,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1051195,
+        "half": 1074058,
+        "year": 1074058,
+        "twoYear": 1074058
+      }
+    },
+    {
+      "ref": "B17-20",
+      "building": "B17",
+      "unit": "20",
+      "floor": {
+        "en": "3rd",
+        "ar": "الدور الثالث"
+      },
+      "floorIndex": 3,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 71.03,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 898952,
+        "half": 918504,
+        "year": 918504,
+        "twoYear": 918504
+      }
+    },
+    {
+      "ref": "B17-21",
+      "building": "B17",
+      "unit": "21",
+      "floor": {
+        "en": "Roof annex",
+        "ar": "الملحق العلوي"
+      },
+      "floorIndex": 4,
+      "facing": {
+        "en": "East",
+        "ar": "شرقية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Premium",
+      "type": {
+        "en": "Roof apartment",
+        "ar": "شقة روف"
+      },
+      "areaSqm": 83.31,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 1053460,
+        "half": 1076372,
+        "year": 1076372,
+        "twoYear": 1076372
+      }
+    },
+    {
+      "ref": "B19-9",
+      "building": "B19",
+      "unit": "9",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "North",
+        "ar": "شمالية"
+      },
+      "beds": 3,
+      "baths": 4,
+      "maidRoom": true,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 139.39,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Street",
+        "ar": "شارع"
+      },
+      "price": {
+        "cash": 1534596,
+        "half": 1567973,
+        "year": 1688055,
+        "twoYear": 1764785
+      }
+    },
+    {
+      "ref": "B19-13",
+      "building": "B19",
+      "unit": "13",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "West",
+        "ar": "غربية"
+      },
+      "beds": 1,
+      "baths": 2,
+      "maidRoom": false,
+      "class": "Standard",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 68.7,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Secondary garden",
+        "ar": "حديقة فرعية"
+      },
+      "price": {
+        "cash": 869635,
+        "half": 888549,
+        "year": 956599,
+        "twoYear": 1000081
+      }
+    },
+    {
+      "ref": "B19-16",
+      "building": "B19",
+      "unit": "16",
+      "floor": {
+        "en": "2nd",
+        "ar": "الدور الثاني"
+      },
+      "floorIndex": 2,
+      "facing": {
+        "en": "North",
+        "ar": "شمالية"
+      },
+      "beds": 3,
+      "baths": 4,
+      "maidRoom": true,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 139.39,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Street",
+        "ar": "شارع"
+      },
+      "price": {
+        "cash": 1534596,
+        "half": 1567973,
+        "year": 1688055,
+        "twoYear": 1764785
+      }
+    },
+    {
+      "ref": "B20-2",
+      "building": "B20",
+      "unit": "2",
+      "floor": {
+        "en": "Ground",
+        "ar": "الدور الارضي"
+      },
+      "floorIndex": 0,
+      "facing": {
+        "en": "North",
+        "ar": "شمالية"
+      },
+      "beds": 3,
+      "baths": 4,
+      "maidRoom": true,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 136.83,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Street",
+        "ar": "شارع"
+      },
+      "price": {
+        "cash": 1355771,
+        "half": 1385258,
+        "year": 1491348,
+        "twoYear": 1559136
+      }
+    },
+    {
+      "ref": "B20-9",
+      "building": "B20",
+      "unit": "9",
+      "floor": {
+        "en": "1st",
+        "ar": "الدور الاول"
+      },
+      "floorIndex": 1,
+      "facing": {
+        "en": "North",
+        "ar": "شمالية"
+      },
+      "beds": 3,
+      "baths": 4,
+      "maidRoom": true,
+      "class": "Premium",
+      "type": {
+        "en": "Apartment",
+        "ar": "شقة"
+      },
+      "areaSqm": 136.83,
+      "roofSqm": 0.0,
+      "feature": {
+        "en": "Street",
+        "ar": "شارع"
+      },
+      "price": {
+        "cash": 1506412,
+        "half": 1539175,
+        "year": 1657053,
+        "twoYear": 1732374
+      }
+    }
+  ]
+}
