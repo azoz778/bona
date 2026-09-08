@@ -2,10 +2,14 @@
 # Provision THIS machine (the VPS, as the service user) to run bona-api. Idempotent; safe to re-run.
 #
 #   install-vps.sh                 install/upgrade node + cloudflared, clone/refresh /opt/bona (sparse),
-#                                  create dirs, render units + ~/.cloudflared/bona.yml, daemon-reload.
-#                                  Enables NOTHING and starts NOTHING — cutover.sh does that, on purpose:
-#                                  a second running copy of the API or of the tunnel is the one thing
-#                                  this move must never produce.
+#                                  create dirs, retire the user units of the first attempt, render the
+#                                  SYSTEM units into /etc/systemd/system (sudo -n) + ~/.cloudflared/bona.yml,
+#                                  daemon-reload. Enables NOTHING and starts NOTHING — cutover.sh does
+#                                  that, on purpose: a second running copy of the API or of the tunnel
+#                                  is the one thing this move must never produce.
+#                                  System units, not `systemctl --user`: see lib.sh (BONA_UNIT_DIR) and
+#                                  templates/bona-api.service.in — Ubuntu 24.04's userns restriction
+#                                  kills the sandboxed user unit with 218/CAPABILITIES.
 #   install-vps.sh --check         report what is still missing (exit 0 = ready, 2 = not yet); no changes.
 #   install-vps.sh --render-only D render units + bona.yml into directory D only (tests use this).
 #   install-vps.sh --smoke         start the API in the foreground for 15 s on a throw-away port and
@@ -62,8 +66,10 @@ check_state() { # prints one line per item; returns the number of missing items
   _label="tunnel credentials $CF_DIR/$BONA_TUNNEL_ID.json (0600)"; item bash -c "[ -f '$CF_DIR/$BONA_TUNNEL_ID.json' ] && [ \"\$(stat -c %a '$CF_DIR/$BONA_TUNNEL_ID.json')\" = 600 ]"
   _label="tunnel config $CF_DIR/bona.yml";                   item test -f "$CF_DIR/bona.yml"
   _label="data dir $DATA_DIR (0700)";                        item bash -c "[ -d '$DATA_DIR' ] && [ \"\$(stat -c %a '$DATA_DIR')\" = 700 ]"
-  for u in $UNITS; do _label="unit $UNIT_DIR/$u"; item test -f "$UNIT_DIR/$u"; done
-  _label="linger enabled for $(id -un)";                     item bash -c "command -v loginctl >/dev/null && loginctl show-user '$(id -un)' -p Linger 2>/dev/null | grep -q '=yes'"
+  for u in $UNITS; do _label="unit $BONA_UNIT_DIR/$u"; item test -f "$BONA_UNIT_DIR/$u"; done
+  # System units are installed and driven with `sudo -n`; the VPS has passwordless sudo, and -n
+  # means a missing rule fails here instead of prompting inside cutover.sh's ssh.
+  _label="passwordless sudo available (sudo -n true)";       item bash -c "command -v sudo >/dev/null && sudo -n true 2>/dev/null"
   return "$missing"
 }
 
@@ -100,7 +106,7 @@ if [ "$MODE" = smoke ]; then
 fi
 
 # ---------------------------------------------------------------- install
-need curl; need sha256sum; need tar; need git; need systemctl
+need curl; need sha256sum; need tar; need git; need systemctl; need sudo
 # Before anything is downloaded or probed: the pinned node tarball and cloudflared binary are x86_64 builds.
 [ "$(uname -m)" = x86_64 ] || die "install-vps.sh supports x86_64 only (pinned node linux-x64 + cloudflared amd64); this machine is $(uname -m)"
 say "Node $NODE_VERSION"
@@ -153,17 +159,47 @@ done
 
 say "Directories"
 install -d -m 700 "$DATA_DIR" "$SECRETS_DIR" "$CF_DIR"
-install -d -m 755 "$UNIT_DIR" "$HOME_DIR/.local/bin"
-ok "$DATA_DIR $SECRETS_DIR $CF_DIR $UNIT_DIR"
+install -d -m 755 "$HOME_DIR/.local/bin"
+ok "$DATA_DIR $SECRETS_DIR $CF_DIR"
+
+say "Retire user units from the first attempt"
+# The first live cutover (2026-09-08) installed these as `systemctl --user` units; they died with
+# 218/CAPABILITIES (templates/bona-api.service.in says why). A leftover copy would sit next to the
+# system unit of the same name, so: disable + stop whatever may still be flapping, delete the file,
+# reload the user manager. Idempotent — nothing to do once they are gone. This is the ONLY
+# `systemctl --user` this installer runs, and it never enables or starts anything.
+LEGACY_USER_UNIT_DIR="$HOME_DIR/.config/systemd/user"
+retired=0
+for u in $UNITS; do
+  if [ -f "$LEGACY_USER_UNIT_DIR/$u" ]; then
+    systemctl --user disable --now "$u" 2>/dev/null || true
+    rm -f "$LEGACY_USER_UNIT_DIR/$u"
+    retired=$((retired + 1))
+  fi
+done
+if [ "$retired" -gt 0 ]; then
+  systemctl --user daemon-reload 2>/dev/null || true
+  ok "removed $retired user unit file(s) from $LEGACY_USER_UNIT_DIR"
+else
+  ok "none left in $LEGACY_USER_UNIT_DIR"
+fi
 
 say "Units and tunnel config"
 tmp=$(mktemp -d)
 render_all "$tmp"
-for u in $UNITS; do install -m 644 "$tmp/$u" "$UNIT_DIR/$u"; done
+# System units land in $BONA_UNIT_DIR (/etc/systemd/system) through `sudo -n install` — root-owned,
+# 0644 — and the system manager reloads through $VPS_SYSTEMCTL. A directory the current user can
+# write (the tests' temp dir) takes a plain install and a plain daemon-reload instead.
+if [ -w "$BONA_UNIT_DIR" ]; then
+  for u in $UNITS; do install -m 644 "$tmp/$u" "$BONA_UNIT_DIR/$u"; done
+  systemctl daemon-reload
+else
+  for u in $UNITS; do sudo -n install -m 644 "$tmp/$u" "$BONA_UNIT_DIR/$u" || die "cannot install $u into $BONA_UNIT_DIR (needs passwordless sudo)"; done
+  $VPS_SYSTEMCTL daemon-reload || die "daemon-reload failed (needs passwordless sudo)"
+fi
 install -m 600 "$tmp/bona.yml" "$CF_DIR/bona.yml"
 rm -rf "$tmp"
-systemctl --user daemon-reload
-ok "installed $UNITS and $CF_DIR/bona.yml (nothing enabled, nothing started)"
+ok "installed $UNITS into $BONA_UNIT_DIR (User=$VPS_USER) and $CF_DIR/bona.yml (nothing enabled, nothing started)"
 
 say "Status"
 if check_state; then ok "ready for cutover.sh (run it on the PC)"; else warn "still missing items above (secrets/credentials come from sync-secrets.sh on the PC)"; fi

@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-# Fake `loginctl`: reports linger enabled, so install-vps.sh --check does not depend on the test host.
-echo "Linger=yes"
-exit 0
