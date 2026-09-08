@@ -1,50 +1,175 @@
 # Search Console, Bing Webmaster & IndexNow — setup
 
-## Google Search Console
-`azoz.uk` is already a **Domain property** (verified via DNS TXT), so `bona.azoz.uk` and every path under it are covered automatically — no new verification needed.
+**Rewritten 2026-09-08 for the live domain `bona-real-estate.com`.** Everything below was checked against the
+live site on that date. The previous version of this file described `bona.azoz.uk` and a planned
+`bona.com.sa`; both are obsolete.
 
-### Day 1 (after the first deploy)
-1. search.google.com/search-console → property **azoz.uk** → **Sitemaps** → add `https://bona.azoz.uk/sitemap-index.xml` → Submit.
-2. **URL Inspection** → paste `https://bona.azoz.uk/` → *Request indexing*. Repeat for `/ar/`, `/properties/`, `/ar/properties/`, `/about/`, `/sell/` (Google allows ~10 manual requests/day).
-3. **Settings → Crawl stats** will start populating within 48 h; **Pages** report confirms indexing.
-4. Filter reports by *Page → URLs containing `bona.azoz.uk`* to see Bona separately from other azoz.uk subdomains. (Optional: also add a **URL-prefix property** `https://bona.azoz.uk/` — it auto-verifies through the domain property — to get a Bona-only dashboard and a clean Performance report.)
+## Where things actually stand (verified 2026-09-08)
 
-### Week 1
-- **Enhancements → hreflang**: no dedicated report; check *International targeting* is absent (it was retired) and rely on the Pages report showing both `/x/` and `/ar/x/` indexed.
-- **Rich results**: run https://search.google.com/test/rich-results on one listing page and the home page — expect `RealEstateListing` (no rich result type, but must parse without errors), `Organization`, `BreadcrumbList`.
-- Check **Core Web Vitals** once field data exists (28 days).
+| Thing | State | Evidence |
+|---|---|---|
+| `https://bona-real-estate.com/` | Live, HTTP 200 | `curl -I` |
+| `https://bona.azoz.uk/` → new domain | **301, correct** | `curl` no-follow → `301 https://bona-real-estate.com/` |
+| `https://www.bona-real-estate.com/` → apex | **301, correct** | same |
+| Canonical tags | **Correct on the new domain** | `<link rel="canonical" href="https://bona-real-estate.com/">` |
+| hreflang en / ar / x-default | **Correct, reciprocal** | present in HTML on every indexable page |
+| `sitemap-index.xml` → `sitemap-0.xml` | Live, **124 URLs** (62 EN + 62 AR) | fetched |
+| `robots.txt` | Live, sitemap referenced | fetched |
+| `llms.txt` (15.9 KB) / `llms-full.txt` (179 KB) | Live, all URLs on the new domain | fetched |
+| IndexNow key file | Live, HTTP 200, correct contents | `/b0na7c3f9e2d4a1b8f6e5c4d3b2a1908.txt` |
+| **IndexNow submission** | **Working — HTTP 200 from api.indexnow.org** | live POST, 2026-09-08 |
+| Google Search Console | **Not verified yet** — no TXT record on the zone | Cloudflare API: zero TXT records |
+| Bing Webmaster Tools | Not set up | — |
 
-### When bona.com.sa goes live
-1. Add **Domain property** `bona.com.sa` (DNS TXT at the .sa registrar / Cloudflare).
-2. Flip `site.url` in `src/data/site.json`, rebuild, deploy; keep `bona.azoz.uk` serving **301s** to the same paths on bona.com.sa (Cloudflare redirect rule) for ≥ 6 months.
-3. In the *old* property (azoz.uk) → **Settings → Change of address** is not available for subdomain-only moves; the 301s + sitemap on the new domain are sufficient.
-4. Submit `https://bona.com.sa/sitemap-index.xml` on the new property; re-run IndexNow with `SITE_URL=https://bona.com.sa` (the key file is copied automatically because it lives in `public/`).
+The domain cutover was done properly. The one thing missing is that **Google has never been told the site
+exists**, because there is no Search Console property. That is step 1 and it is the highest-value 15 minutes
+in this file.
 
-## Bing Webmaster Tools (also feeds Copilot/ChatGPT search)
-1. bing.com/webmasters → **Import from Google Search Console** (one click, uses the GSC OAuth) → pick azoz.uk.
-2. Sitemaps → add `https://bona.azoz.uk/sitemap-index.xml`.
-3. IndexNow status shows under **IndexNow** in the left nav once the first submission lands.
+---
 
-## IndexNow
-- Key: `site.indexNowKey` = `b0na7c3f9e2d4a1b8f6e5c4d3b2a1908`, served at `https://bona.azoz.uk/b0na7c3f9e2d4a1b8f6e5c4d3b2a1908.txt` (file lives in `public/`).
-- Submit after every deploy:
+## 1. Google Search Console — Domain property (owner, 10 min)
+
+A *Domain* property covers `bona-real-estate.com`, `www.`, every subdomain and both protocols at once, and is
+verified with one DNS TXT record. Do this rather than a URL-prefix property.
+
+### Step 1a — get the TXT value
+1. Go to <https://search.google.com/search-console>
+2. **Add property** → left-hand box, **Domain**
+3. Type `bona-real-estate.com` (no `https://`, no `www.`) → **Continue**
+4. Google shows a TXT value like `google-site-verification=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX`
+5. **Copy the whole string** and paste it into the chat.
+
+### Step 1b — Claude adds it to Cloudflare
+The DNS-edit token in `~/.secrets/cloudflare.env` was tested against this zone on 2026-09-08 and works
+(zone `bona-real-estate.com`, id `790f2dde2e03e7055f88ae4b6c05579b`, status `active`).
+
+```bash
+# Replace PASTE_VALUE_HERE with the value from step 1a, then run:
+set -a; . ~/.secrets/cloudflare.env; set +a
+curl -sS -X POST \
+  "https://api.cloudflare.com/client/v4/zones/790f2dde2e03e7055f88ae4b6c05579b/dns_records" \
+  -H "Authorization: Bearer $CLOUDFLARE_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "type": "TXT",
+    "name": "@",
+    "content": "PASTE_VALUE_HERE",
+    "ttl": 300,
+    "comment": "Google Search Console domain verification (added 2026-09-08)"
+  }' | python3 -m json.tool
+```
+
+`"success": true` means it is in. Confirm propagation before clicking Verify:
+
+```bash
+dig +short TXT bona-real-estate.com @1.1.1.1
+```
+
+Then back in Search Console → **Verify**. It usually passes within a minute at TTL 300.
+
+> `ZID` inside `cloudflare.env` is the **tk-estates.com** zone, not this one. Always pass the Bona zone id
+> `790f2dde2e03e7055f88ae4b6c05579b` explicitly, as the command above does.
+
+### Step 1c — immediately after verifying
+1. **Sitemaps** → add `sitemap-index.xml` → Submit. (Enter just that path; GSC prefixes the domain.)
+2. **URL Inspection** → paste each of these and click *Request indexing*. Google allows roughly 10 a day, so
+   this is the whole first day's budget — spend it on the pages that earn:
+
+   ```
+   https://bona-real-estate.com/
+   https://bona-real-estate.com/ar/
+   https://bona-real-estate.com/properties/
+   https://bona-real-estate.com/ar/properties/
+   https://bona-real-estate.com/properties/for-sale/
+   https://bona-real-estate.com/faq/
+   https://bona-real-estate.com/ar/faq/
+   https://bona-real-estate.com/about/
+   https://bona-real-estate.com/sell/
+   https://bona-real-estate.com/contact/
+   ```
+
+3. Day 2, spend the next ten on the strongest individual listings — the ones with real photography and a price.
+
+### Step 1d — week 1 checks
+- **Pages** report: indexed count should climb from 0. Watch for *"Duplicate without user-selected canonical"*
+  on `/ar/` pages. It should not appear — hreflang was verified reciprocal on 2026-09-08 — but if it does, the
+  pairing is being ignored and needs investigating.
+- **Rich results test** on `https://bona-real-estate.com/faq/` → expect a valid **FAQPage** with 12 questions.
+  On a listing page expect `RealEstateListing`, `RealEstateAgent`/`Organization`, `BreadcrumbList` and
+  `ItemPage` to parse without errors. (`RealEstateListing` earns no rich result in Google; parsing cleanly is
+  the goal, and being extractable by answer engines is the actual payoff.)
+- **Core Web Vitals** needs 28 days of field data. Nothing to look at until October.
+
+---
+
+## 2. Bing Webmaster Tools (owner, 5 min)
+
+Bing matters more than its market share suggests: it is the retrieval index behind **Microsoft Copilot** and
+part of **ChatGPT search**. Getting into Bing is getting into AI answers.
+
+1. <https://www.bing.com/webmasters> → sign in with the same Google account.
+2. **Import from Google Search Console** — one click, reuses the GSC OAuth, no second DNS record.
+   Do this *after* step 1 or there is nothing to import.
+3. Sitemaps → add `https://bona-real-estate.com/sitemap-index.xml`.
+4. Left nav → **IndexNow** → confirm the key `b0na7c3f9e2d4a1b8f6e5c4d3b2a1908` shows as active. It should:
+   a live submission returned HTTP 200 on 2026-09-08.
+
+---
+
+## 3. IndexNow — already working, do not touch
+
+Verified end to end on 2026-09-08:
+
+```
+GET /b0na7c3f9e2d4a1b8f6e5c4d3b2a1908.txt   → HTTP 200, text/plain, correct key
+POST https://api.indexnow.org/indexnow       → HTTP 200
+```
+
+- Key lives in `src/data/site.json` → `indexNowKey`; the file is served out of `public/`.
+- It already runs after every deploy: `.github/workflows/deploy.yml`, step *"IndexNow ping (non-fatal)"*,
+  running `node scripts/indexnow.mjs --dir dist`. Nothing to add.
+- Manual run, e.g. after publishing a single listing:
   ```bash
-  node scripts/indexnow.mjs            # reads dist/sitemap-index.xml, POSTs all URLs
-  node scripts/indexnow.mjs --dry-run  # inspect
+  node scripts/indexnow.mjs --only /properties/foo/,/ar/properties/foo/
+  node scripts/indexnow.mjs --dry-run     # inspect without sending
   ```
-- CI: add a step after `npm run build` in `.github/workflows/deploy.yml`: `- run: node scripts/indexnow.mjs` (non-fatal by design, always exits 0).
-- Expected responses: `200 OK` or `202 Accepted` on the first call (key validation), `403/422` means the key file isn't reachable yet — wait for the deploy to finish and re-run.
-- Google ignores IndexNow; it relies on the sitemap + internal links.
+- Reaches Bing, Yandex, Seznam and Naver. **Google ignores IndexNow entirely** and relies on the sitemap and
+  internal links — which is exactly why step 1 is not optional.
 
-## Other free discovery surfaces (15 min total)
-- **Google Business Profile** — see `google-business-profile.md` (this is the single most important local signal).
-- **Apple Business Connect** (register.apple.com) — same NAP; feeds Apple Maps / Siri.
-- **Bing Places** — import from GBP.
-- **Yandex Webmaster** — optional (Russian-speaking buyers on the Côte d'Azur/Costa del Sol inventory); it accepts the same IndexNow key.
+---
 
-## Monitoring cadence
+## 4. The other free discovery surfaces
+
+| Surface | Why | Where |
+|---|---|---|
+| **Google Business Profile** | Highest-intent free channel a local brokerage has. Own deliverable. | `google-business-profile.md` |
+| **Apple Business Connect** | Feeds Apple Maps and Siri. Free. Same NAP. | <https://register.apple.com> |
+| **Bing Places** | Imports from GBP in one click once GBP is verified. | <https://www.bingplaces.com> |
+| **WhatsApp Channel** | Free broadcast surface, strong in Saudi. | `broadcast-copy.md` |
+
+Keep name, address and phone **byte-identical** across all of them and the site footer. Inconsistent NAP is
+the most common reason a local listing under-ranks.
+
+---
+
+## 5. Monitoring cadence
+
 | When | What |
 |---|---|
-| Daily (first 2 weeks) | GSC *Pages* → indexed count trending up; no "Duplicate without user-selected canonical" for AR pages |
-| Weekly | GSC *Performance* filtered to Bona; Bing *Search performance*; IndexNow submissions count |
-| Monthly | Manual AI-visibility check: ask ChatGPT / Perplexity / Gemini "luxury real estate agency in Jeddah", "فلل فاخرة للبيع في جدة" — log whether Bona is cited |
+| Daily, first 2 weeks | GSC **Pages** → indexed count rising; no *"Duplicate without user-selected canonical"* on `/ar/` |
+| Weekly | GSC **Performance** — at this stage impressions and queries are the signal, not clicks; Bing **Search performance**; IndexNow submission count |
+| Monthly | Ask ChatGPT, Perplexity and Gemini: *"best luxury real estate agent in Jeddah"*, *"villas for sale in Al Shati"*, *"can a foreigner buy property in Jeddah"*, *"أفضل مكتب عقاري فاخر في جدة"*, *"فلل للبيع في الشاطئ جدة"*. Log whether Bona is cited and from which page. That third query is the one `/faq/` was built to win. |
+
+---
+
+## 6. Known gaps, deliberately left
+
+- **No GA4 and no Meta Pixel.** `site.json` → `analytics` is `{ga4: null, metaPixel: null}`; another agent owns
+  those fields and this file does not touch them. Until GA4 exists there is no way to see which pages convert
+  into a WhatsApp click — only which pages get impressions.
+- **Sitemap carries no `lastmod` and no `x-default`.** The HTML carries `x-default` correctly, which is what
+  Google reads, so that part is cosmetic. `lastmod` would help Google re-crawl changed listings sooner, but it
+  needs a per-listing modified date that the listing data does not yet carry.
+- **No `bona.sa` domain.** Prior research established `bona.sa` is registrable by a Saudi natural person with a
+  national ID, while `bona.com.sa` needs a CR or trademark. Not required — `bona-real-estate.com` is live and
+  should not be moved again. Moving domain twice in one quarter is how sites lose rankings.

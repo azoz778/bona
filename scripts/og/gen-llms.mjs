@@ -17,6 +17,7 @@ const site = read('src/data/site.json');
 const listings = read('src/data/listings.json');
 const about = read('src/data/about.json', { story: { en: [], ar: [] }, values: [], team: [], stats: [] });
 const privacy = read('src/data/privacy.json', null);
+const faq = read('src/data/faq.json', { items: [] });
 const pageMeta = read('marketing/page-meta.json', {});
 
 const base = site.url.replace(/\/$/, '');
@@ -75,6 +76,7 @@ const corePages = [
   ...(tours.length ? [['/tours/', '3D virtual tours', 'Matterport walkthroughs of homes you can tour before you visit.']] : []),
   ['/about/', 'About Bona', 'Who we are, how we work, licensing.'],
   ['/sell/', 'Sell or let with Bona', 'Discreet marketing of private homes to qualified buyers and tenants.'],
+  ['/faq/', 'Buying property in Jeddah — FAQ', 'Whether a non-Saudi may buy in Jeddah under the law in force since 22 January 2026, what RETT and brokerage fees apply, why a broker will not value your home, and how Ejar, Najiz and Wafi come into a transaction. Each answer names the authority it rests on.'],
   ['/contact/', 'Contact', 'WhatsApp, phone, office hours and location.'],
   ['/privacy/', 'Privacy policy', 'How Bona handles personal data under the Saudi PDPL.'],
 ];
@@ -93,6 +95,17 @@ const listingLine = (l) => {
   return `- [${l.title.en}](${listingUrl(l)}): ${typeLabel[l.type] || l.type}, ${l.location.district.en}, ${l.location.city.en} — ${catLabel[l.category] || l.category}, ${fmtPrice(l.price)}${extra.length ? `, ${extra.join(', ')}` : ''}`;
 };
 const founder = (about.team || [])[0];
+
+/* Announce a future domain only when it is genuinely a different host. Comparing hostnames rather than
+   using endsWith: "https://notbona.sa".endsWith("bona.sa") is true, which would silently suppress the line. */
+const futureDomainLine = (() => {
+  const fd = String(site.futureDomain || '').trim();
+  if (!fd) return '';
+  let currentHost;
+  try { currentHost = new URL(base).hostname.toLowerCase(); } catch { return ''; }
+  const futureHost = fd.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').toLowerCase();
+  return futureHost && futureHost !== currentHost ? ` Future domain: https://${futureHost}/.` : '';
+})();
 
 // ---------- llms.txt ----------
 const short = `# ${site.name} (${site.nameAr})
@@ -172,6 +185,29 @@ More: ${abs('/about/')} · Arabic: ${abs('/ar/about/')}
 `
   : '';
 
+/* The FAQ, in full, in both languages. This is the section an answer engine actually quotes when someone
+   asks "can a foreigner buy property in Jeddah" or "what fees do I pay" — so the answers go in whole rather
+   than as a link, and each one keeps the authority it names (REGA, ZATCA, TAQEEM, Ejar, Najiz, Wafi). */
+const faqSection = (faq.items || []).length
+  ? `## Frequently asked questions${faq.updated ? ` (answers current as of ${faq.updated})` : ''}
+
+${(faq.intro?.en || '').trim()}
+
+${(faq.items || []).filter((it) => it?.id && it?.q?.en && (it.a?.en || []).length).map((it) => [
+  `### ${it.q.en}`,
+  '',
+  (it.a?.en || []).join('\n\n'),
+  // The Arabic half is omitted rather than rendered as "**undefined**" when a question has not been
+  // translated yet — a half-written answer in a knowledge file is worse than a missing one.
+  ...(it.q?.ar && (it.a?.ar || []).length ? ['', `**${it.q.ar}**`, '', it.a.ar.join('\n\n')] : []),
+  '',
+  `Source: ${abs('/faq/')}#${it.id} · Arabic: ${abs('/ar/faq/')}#${it.id}`,
+].join('\n')).join('\n\n')}
+
+Full FAQ: ${abs('/faq/')} · Arabic: ${abs('/ar/faq/')}
+`
+  : '';
+
 const privacySection = privacy
   ? `## Privacy (summary)
 
@@ -181,7 +217,7 @@ ${privacy.intro?.en || ''} Full policy (updated ${privacy.updated}): ${abs('/pri
 
 const full = `# ${site.name} (${site.nameAr}) — full knowledge file
 
-Last generated: ${today}. Canonical site: ${base}/ (Arabic: ${base}/ar/). Future domain: https://${site.futureDomain}/.
+Last generated: ${today}. Canonical site: ${base}/ (Arabic: ${base}/ar/).${futureDomainLine}
 
 ## What Bona is
 
@@ -216,12 +252,13 @@ ${site.markets.en.map((m, i) => `- ${m} (${site.markets.ar[i]})`).join('\n')}
 
 - All prices are the owner's or developer's asking prices in the currency shown. Bona does not publish valuations, price estimates or forecasts (TAQEEM-accredited valuers only).
 - Real-estate advertising in Saudi Arabia requires a REGA ad licence per listing; Bona lists the FAL licence number on every page.
-- Non-Saudi buyers: ownership rules for non-residents are set by Saudi law and were expanded in 2025; Bona advises case by case — do not assume eligibility.
+- Non-Saudi buyers: the Law of Real Estate Ownership by Non-Saudis came into force on 22 January 2026 and permits ownership within designated geographic zones approved by the Council of Ministers; Jeddah is one of the cities covered, and Makkah and Madinah carry their own restrictions. Whether a specific property qualifies depends on where its deed sits on REGA's official zone map (saudiproperties.rega.gov.sa) — Bona checks each case and does not assume eligibility. See the FAQ section below.
 
 ## Pages
 
 ${corePages.map(([p, t, d]) => pageLine(p, t, d)).join('\n')}
 
+${faqSection}
 ${privacySection}
 ## Listings (${live.length} live${listings.length !== live.length ? `, ${listings.length - live.length} sold/archived` : ''})
 
