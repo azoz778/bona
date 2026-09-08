@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Run ON THE VPS (or: ssh hermes-vps bash /opt/bona/services/deploy/vps/deploy.sh).
 # Pause the repo-sync timer, pull main, run the API test suite with the pinned node, restart the
-# unit, wait for /health; the timer starts again on exit whatever happened in between.
+# unit, wait for /health; on exit — whatever happened in between — the timer starts again IF it was
+# active when this script began (a timer the owner had paused stays paused).
 # Tests failing = the running service is left untouched.
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -11,11 +12,19 @@ need git; need systemctl; need curl
 [ -x "$NODE_BIN/node" ] || die "node $NODE_VERSION missing — run install-vps.sh"
 
 say "Pause bona-repo-sync.timer"
-# The timer's own `git pull` must not collide with this one (or run mid-test): stop it now and
-# start it again on exit — the EXIT trap also runs after a `die`.
-systemctl --user stop bona-repo-sync.timer
-trap 'systemctl --user start bona-repo-sync.timer || warn "bona-repo-sync.timer did not start again — run: systemctl --user start bona-repo-sync.timer"' EXIT
-ok "paused until this script exits"
+# The timer's own `git pull` must not collide with this one (or run mid-test): stop the timer AND
+# its service (a pull already in flight) now, and start the timer again on exit — the EXIT trap
+# also runs after a `die` — but only if it was active to begin with: deploy.sh must not switch on
+# a timer the owner paused, nor one the cutover has not enabled yet.
+TIMER_WAS_ACTIVE=0
+if systemctl --user is-active --quiet bona-repo-sync.timer; then TIMER_WAS_ACTIVE=1; fi
+resume_timer() {
+  [ "$TIMER_WAS_ACTIVE" = 1 ] || return 0
+  systemctl --user start bona-repo-sync.timer || warn "bona-repo-sync.timer did not start again — run: systemctl --user start bona-repo-sync.timer"
+}
+trap resume_timer EXIT   # armed before the stop: a half-failed stop still hands the timer back
+systemctl --user stop bona-repo-sync.timer bona-repo-sync.service
+if [ "$TIMER_WAS_ACTIVE" = 1 ]; then ok "paused until this script exits"; else ok "was not active; it stays off"; fi
 
 say "Pull"
 before=$(git -C "$BONA_VPS_REPO" rev-parse --short HEAD)

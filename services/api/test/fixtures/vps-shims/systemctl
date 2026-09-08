@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# Fake LOCAL `systemctl` (the PC side): records argv in $SHIM_LOG and exits 0.
-# `is-active --quiet U` answers active (0) until a `stop` has been recorded here, inactive (1) after.
+# Fake LOCAL `systemctl` (the PC side, and the VPS side for deploy.sh): records argv in $SHIM_LOG
+# and exits 0. `is-active --quiet U` answers active (0) until a `stop` has been recorded here,
+# inactive (1) after — and inactive from the start for every unit named in SHIM_LOCAL_INACTIVE
+# (space-separated).
 set -u
 log=${SHIM_LOG:?SHIM_LOG must point at the log file}
 printf 'systemctl %s\n' "$*" >> "$log"
 case " $* " in
-  *" is-active "*) if grep -q '^systemctl .* stop ' "$log"; then exit 1; else exit 0; fi ;;
+  *" is-active "*)
+    unit=${!#}
+    case " ${SHIM_LOCAL_INACTIVE:-} " in *" $unit "*) exit 1 ;; esac
+    if grep -q '^systemctl .* stop ' "$log"; then exit 1; else exit 0; fi ;;
 esac
 exit 0
