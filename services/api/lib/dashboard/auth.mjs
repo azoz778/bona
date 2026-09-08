@@ -30,10 +30,17 @@
  * trade: the cost is one more tap on "send me a code", and the alternative is a column
  * in a table another workstream owns.
  *
- * Two limits stand in front of the sender, because every request costs the owner a
+ * Three limits stand in front of the sender, because every request costs the owner a
  * WhatsApp notification: three per ten minutes from one address, and — across the whole
- * service — one a minute and twenty a day. The daily ceiling is what turns a rotating
- * flood from 1,440 messages to the owner's personal phone into 20.
+ * service — one a minute and sixty a day.
+ *
+ * The daily ceiling is a compromise with its eyes open. Without one, a flood from
+ * rotating addresses rings the owner's personal phone 1,440 times a day. With one, an
+ * attacker can drain it and make the owner wait for it to refill. Sixty is where those
+ * two costs balance: the flood is capped at sixty messages, and because the bucket
+ * refills continuously the worst an attacker can do is push the owner's next code out
+ * by about twenty-four minutes — not lock him out. A sustained attack is a job for a
+ * rate rule on the tunnel in front of this endpoint, not for a number in this file.
  */
 import crypto from 'node:crypto';
 import { createLimiter } from '../ratelimit.mjs';
@@ -42,13 +49,18 @@ export const COOKIE_NAME = 'bona_dash';
 export const TRY_COOKIE_NAME = 'bona_dash_try';
 export const CODE_TTL_MS = 10 * 60_000;
 export const MAX_CODE_ATTEMPTS = 5;
-/** Per-IP: 3 codes per 10 minutes. Globally: 1 a minute, and 20 a day. */
+/** Per-IP: 3 codes per 10 minutes. Globally: 1 a minute, and 60 a day (see the header). */
 export const IP_CODES = 3;
 export const IP_WINDOW_MS = 10 * 60_000;
 export const GLOBAL_WINDOW_MS = 60_000;
-export const GLOBAL_DAILY_CODES = 20;
+export const GLOBAL_DAILY_CODES = 60;
 export const DAY_MS = 86_400_000;
-/** Enough outstanding requests for any real browser; a flood cannot grow the map. */
+/**
+ * A hard cap on the binding map. It cannot actually be reached — a code request is
+ * capped at one a minute and a binding lives ten minutes, so at most ten are ever
+ * outstanding — but an unbounded map reachable from an unauthenticated route is the
+ * kind of thing that stops being true after someone loosens a limiter.
+ */
 export const MAX_PENDING = 64;
 
 const sha256 = (v) => crypto.createHash('sha256').update(String(v), 'utf8').digest('hex');
@@ -119,16 +131,18 @@ export function createAuth({ db, cfg = {}, sendWhatsApp, now = () => Date.now(),
    *   `nonce` belongs in the `bona_dash_try` cookie; `verify` needs it back.
    */
   async function requestCode(ip) {
-    // The global buckets are checked first so that a request refused because of someone
-    // else's flood costs this address nothing of its own three.
-    if (!perMinute.take('dashcode:global').ok || !perDay.take('dashcode:daily').ok) {
-      log({ level: 'warn', evt: 'dash.code_rate_limited', scope: 'global' });
+    // All three limits are asked before any of them is charged. Charging one and then
+    // being turned away by the next is how a single address spends an allowance that
+    // was never its to spend: post once a minute, be refused by your own three-per-ten,
+    // and drain the whole service's day on the way out.
+    const ipKey = `dashcode:${ip ?? 'unknown'}`;
+    const gates = [[perMinute, 'dashcode:global', 'global'], [perDay, 'dashcode:daily', 'global'], [perIp, ipKey, 'ip']];
+    const blocked = gates.find(([limiter, key]) => !limiter.peek(key).ok);
+    if (blocked) {
+      log({ level: 'warn', evt: 'dash.code_rate_limited', scope: blocked[2] });
       return { ok: false, error: 'rate_limited' };
     }
-    if (!perIp.take(`dashcode:${ip ?? 'unknown'}`).ok) {
-      log({ level: 'warn', evt: 'dash.code_rate_limited', scope: 'ip' });
-      return { ok: false, error: 'rate_limited' };
-    }
+    for (const [limiter, key] of gates) limiter.take(key);
 
     const code = generateCode(random);
     const nonce = crypto.randomBytes(16).toString('hex');

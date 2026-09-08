@@ -11,10 +11,14 @@
  *   1. Every response carries `default-src 'none'` — the pages have no JavaScript at
  *      all, so the strictest possible policy is also a free one, and a lead named
  *      `<script>` has nowhere to run even if an escape were missed.
- *   2. Writes require a marker the browser will not send by itself: `X-Bona-Dash: 1`
- *      on a JSON call, a hidden `_dash=1` on a form. With `SameSite=Lax` already
- *      keeping the cookie off cross-site POSTs, this is the second lock — a form on
- *      someone else's page cannot set a header and does not know the field.
+ *   2. What actually stops a cross-site write is `SameSite=Lax` — the cookie does not
+ *      ride a cross-site POST at all — backed by the `Origin`/`Referer` check below.
+ *      On top of that every write carries a marker: `X-Bona-Dash: 1` on a JSON call, a
+ *      hidden `_dash=1` on a form. The header half is a real barrier (a cross-origin
+ *      form cannot set one, and a `fetch` that does needs a preflight this API never
+ *      answers for). The form field half is **not** a CSRF token — anyone can copy a
+ *      hidden field — it is there so one code path serves both callers, and so a write
+ *      that arrives without it is visibly not from one of our pages.
  *   3. `Origin` and `Referer`, when the browser states them, must be this API's own.
  *      Enforced on every `/v1/admin` request and on every dashboard write — but not on
  *      a dashboard page GET, because following a link from the site to the login is a
@@ -188,8 +192,9 @@ export function createDashboardRoutes({
   }
 
   /**
-   * The marker a cross-site form cannot produce. A proxy that adds the header to one
-   * that is already there hands us `"1, 1"`, so only the first value is read.
+   * The write marker. See the module header for what it is and is not worth: the header
+   * form is a barrier, the hidden field is not a token. A proxy that adds the header to
+   * one that is already there hands us `"1, 1"`, so only the first value is read.
    */
   const hasMarker = (req, fields) =>
     String(req.headers['x-bona-dash'] ?? '').split(',')[0].trim() === '1' ||
