@@ -199,8 +199,17 @@ export function createOrMergeLead(db, input = {}, meta = {}) {
       ip: session?.ip ?? null, ua: session?.ua ?? null, country: session?.country ?? null,
     };
     db.insertEvent(event);
-    db.enqueueFanout(event.event_id, LEAD_FANOUT, { now });
     if (meta.eventId) db.setEventLead(meta.eventId, id);
+
+    // Which id the ad platforms hear this under decides whether they count one lead or two.
+    // Meta and Snap de-duplicate on `event_id`, and when the lead came from the site's own
+    // form the browser has ALREADY fired Lead under the enquiry's id — so the Conversions
+    // API call has to carry that same id, not a fresh one, or Events Manager shows the same
+    // person twice: once from the pixel, once from the server. A lead that reached us with
+    // no browser event behind it (the WhatsApp poller, a concierge conversation) has no
+    // pixel to agree with, so it goes out under this record's own id.
+    const browserEvent = meta.eventId ? db.getEvent(meta.eventId) : null;
+    db.enqueueFanout(browserEvent ? meta.eventId : event.event_id, LEAD_FANOUT, { now });
 
     const dataDir = meta.dataDir ?? db.dataDir;
     if (dataDir) {
