@@ -3,7 +3,8 @@
 # bona-data back, then start and re-enable the PC units and wait for the public health.
 # Fail-closed: if the VPS cannot be reached or a unit will not stop, nothing is started here and
 # nothing is copied (two APIs or two tunnel connectors must never run) — the manual commands are
-# printed instead.
+# printed instead. The VPS units are system units (`sudo -n systemctl`, via vps_units_stopped in
+# lib.sh); the PC units stay `systemctl --user`.
 #   rollback.sh              bring the service back to this PC (PC data as it was at cutover)
 #   rollback.sh --copy-back  also copy the VPS's newer bona-data files back first. All or nothing:
 #                            the files land in a temp dir under ~/bona-data, bona.db must arrive and

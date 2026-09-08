@@ -8,6 +8,9 @@
 #      (new listings reach the inventory hot-reload)
 #   4. start cloudflared-bona on the VPS, wait for the public /health
 #   5. disable the two units here (files stay for rollback.sh)
+# The VPS units are SYSTEM units driven with `sudo -n systemctl` ($VPS_SYSTEMCTL in lib.sh; the
+# userns restriction on Ubuntu 24.04 killed the user units with 218/CAPABILITIES on the first
+# attempt); the PC units stay `systemctl --user`.
 # The automatic rollback is fail-closed: the PC units come back ONLY after the VPS units are
 # verified inactive; if the VPS cannot be reached or refuses to stop, nothing starts here and the
 # manual commands are printed (two APIs or two tunnel connectors must never run).
@@ -24,8 +27,8 @@ if [ "$DRY" = 1 ]; then
   say "Dry run — the cutover would:"
   echo "  1. stop cloudflared-bona and bona-api on this PC (systemctl --user)"
   echo "  2. copy $DATA_DIR/{$(echo $DATA_FILES | tr ' ' ',')} to $BONA_VPS_SSH:bona-data/ (whichever exist), compare lead counts"
-  echo "  3. start bona-api on the VPS and wait for http://127.0.0.1:$BONA_VPS_PORT/health, enable bona-repo-sync.timer"
-  echo "  4. start cloudflared-bona on the VPS and wait for $BONA_PUBLIC_HEALTH"
+  echo "  3. start bona-api on the VPS (sudo systemctl — system units there) and wait for http://127.0.0.1:$BONA_VPS_PORT/health, enable bona-repo-sync.timer"
+  echo "  4. start cloudflared-bona on the VPS (sudo systemctl) and wait for $BONA_PUBLIC_HEALTH"
   echo "  5. disable bona-api and cloudflared-bona on this PC (rollback.sh re-enables them)"
   ok "nothing done"
   exit 0
@@ -40,7 +43,7 @@ say "Preflight"
 vps true || die "cannot ssh to $BONA_VPS_SSH"
 vps "bash $BONA_VPS_DEPLOY_DIR/install-vps.sh --check" || die "VPS is not ready (install-vps.sh --check failed)"
 for u in bona-api cloudflared-bona; do
-  if vps "systemctl --user is-active --quiet $u"; then die "$u is ALREADY running on the VPS — refusing to start a second copy"; fi
+  if vps "$VPS_SYSTEMCTL is-active --quiet $u"; then die "$u is ALREADY running on the VPS — refusing to start a second copy"; fi
 done
 ok "VPS ready, nothing running there yet"
 
@@ -88,15 +91,15 @@ ok "copied ${#files[@]} files, $vps_leads leads carried over"
 
 say "3/5 Start bona-api on the VPS"
 VPS_STARTED=1
-vps "systemctl --user enable --now bona-api"
-wait_for 30 1 vps "curl -fsS http://127.0.0.1:$BONA_VPS_PORT/health | grep -q '\"ok\":true'" || { vps "journalctl --user -u bona-api -n 30 --no-pager" || true; die "VPS bona-api is not healthy"; }
-vps "systemctl --user enable --now bona-repo-sync.timer"
+vps "$VPS_SYSTEMCTL enable --now bona-api"
+wait_for 30 1 vps "curl -fsS http://127.0.0.1:$BONA_VPS_PORT/health | grep -q '\"ok\":true'" || { vps "$VPS_JOURNALCTL -u bona-api -n 30 --no-pager" || true; die "VPS bona-api is not healthy"; }
+vps "$VPS_SYSTEMCTL enable --now bona-repo-sync.timer"
 ok "healthy; bona-repo-sync.timer enabled"
 
 say "4/5 Start the tunnel connector on the VPS"
-vps "systemctl --user enable --now cloudflared-bona"
+vps "$VPS_SYSTEMCTL enable --now cloudflared-bona"
 public() { curl -fsS -m 10 "$BONA_PUBLIC_HEALTH" | grep -q '"retell":"ok"'; }
-wait_for 45 2 public || { vps "journalctl --user -u cloudflared-bona -n 30 --no-pager" || true; die "public health did not come back"; }
+wait_for 45 2 public || { vps "$VPS_JOURNALCTL -u cloudflared-bona -n 30 --no-pager" || true; die "public health did not come back"; }
 ok "$BONA_PUBLIC_HEALTH answers from the VPS"
 
 say "5/5 Disable the PC units"

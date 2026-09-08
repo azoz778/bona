@@ -125,10 +125,11 @@ vps_count_leads() {
 # vps_units_stopped → over ssh: disable + stop every VPS unit, then VERIFY the API and the tunnel
 # connector are inactive. Returns non-zero when ssh fails or a unit is still active — and then the
 # caller must NOT start the PC units (fail closed: two APIs or two connectors is the one thing the
-# move must never produce). Needs the caller's `vps` ssh wrapper.
+# move must never produce). Needs the caller's `vps` ssh wrapper. The units are system units, so
+# every systemctl in the remote string is $VPS_SYSTEMCTL (sudo -n systemctl).
 vps_units_stopped() {
-  vps "systemctl --user disable --now $VPS_UNITS" || return 1
-  vps "! systemctl --user is-active --quiet bona-api && ! systemctl --user is-active --quiet cloudflared-bona"
+  vps "$VPS_SYSTEMCTL disable --now $VPS_UNITS" || return 1
+  vps "! $VPS_SYSTEMCTL is-active --quiet bona-api && ! $VPS_SYSTEMCTL is-active --quiet cloudflared-bona"
 }
 
 # fail_closed → the VPS units could not be verified inactive: say so loudly, print the manual
@@ -140,9 +141,9 @@ fail_closed() {
 !!  The VPS units could NOT be verified inactive (ssh failed, or a unit is still active).
 !!  NOTHING was started on this PC: a second API or a second tunnel connector must never run.
 !!  Finish the rollback by hand, in this order:
-!!    1. ssh $BONA_VPS_SSH systemctl --user disable --now $VPS_UNITS
-!!    2. ssh $BONA_VPS_SSH systemctl --user is-active bona-api cloudflared-bona   # both: inactive
-!!    3. systemctl --user enable --now bona-api cloudflared-bona
+!!    1. ssh $BONA_VPS_SSH $VPS_SYSTEMCTL disable --now $VPS_UNITS
+!!    2. ssh $BONA_VPS_SSH $VPS_SYSTEMCTL is-active bona-api cloudflared-bona   # both: inactive
+!!    3. systemctl --user enable --now bona-api cloudflared-bona                # PC: user units
 !!    4. curl -fsS $BONA_PUBLIC_HEALTH
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
