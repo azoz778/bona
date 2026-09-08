@@ -2,8 +2,10 @@
 Description=Bona: pull the repo every 5 minutes
 
 [Timer]
-OnBootSec=2min
-OnUnitActiveSec=5min
+# Wall-clock schedule, not OnBootSec/OnUnitActiveSec: Persistent=true only catches up a missed
+# run for OnCalendar= timers (it is a no-op for monotonic ones), so a reboot or a long sleep never
+# leaves the checkout stale for longer than one interval.
+OnCalendar=*:0/5
 RandomizedDelaySec=30
 Persistent=true
 

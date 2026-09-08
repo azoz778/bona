@@ -3,7 +3,8 @@
 # back by itself if any step fails:
 #   1. stop cloudflared-bona + bona-api here (one API, one tunnel connector — never two)
 #   2. copy ~/bona-data/{bona.db,…jsonl} to the VPS (PC service is stopped, so the copy is consistent)
-#   3. start bona-api on the VPS, wait for 127.0.0.1:4120/health, compare lead counts
+#   3. start bona-api on the VPS, wait for 127.0.0.1:4120/health, compare lead counts, then
+#      enable the repo-sync timer (new listings reach the inventory hot-reload)
 #   4. start cloudflared-bona on the VPS, wait for the public /health
 #   5. disable the two units here (files stay for rollback.sh)
 # The automatic rollback is fail-closed: the PC units come back ONLY after the VPS units are
@@ -22,7 +23,7 @@ if [ "$DRY" = 1 ]; then
   say "Dry run — the cutover would:"
   echo "  1. stop cloudflared-bona and bona-api on this PC (systemctl --user)"
   echo "  2. copy $DATA_DIR/{$(echo $DATA_FILES | tr ' ' ',')} to $BONA_VPS_SSH:bona-data/ (whichever exist)"
-  echo "  3. start bona-api on the VPS and wait for http://127.0.0.1:$BONA_VPS_PORT/health, compare lead counts"
+  echo "  3. start bona-api on the VPS and wait for http://127.0.0.1:$BONA_VPS_PORT/health, compare lead counts, enable bona-repo-sync.timer"
   echo "  4. start cloudflared-bona on the VPS and wait for $BONA_PUBLIC_HEALTH"
   echo "  5. disable bona-api and cloudflared-bona on this PC (rollback.sh re-enables them)"
   ok "nothing done"
@@ -82,7 +83,8 @@ vps "systemctl --user enable --now bona-api"
 wait_for 30 1 vps "curl -fsS http://127.0.0.1:$BONA_VPS_PORT/health | grep -q '\"ok\":true'" || { vps "journalctl --user -u bona-api -n 30 --no-pager" || true; die "VPS bona-api is not healthy"; }
 vps_leads=$(vps "$REMOTE_NODE -e 'const {DatabaseSync}=require(\"node:sqlite\");const db=new DatabaseSync(process.argv[1],{readOnly:true});console.log(db.prepare(\"select count(*) as n from leads\").get().n)' ~/bona-data/bona.db")
 [ "$vps_leads" = "$pc_leads" ] || die "lead count mismatch: PC $pc_leads vs VPS $vps_leads"
-ok "healthy, $vps_leads leads carried over"
+vps "systemctl --user enable --now bona-repo-sync.timer"
+ok "healthy, $vps_leads leads carried over; bona-repo-sync.timer enabled"
 
 say "4/5 Start the tunnel connector on the VPS"
 vps "systemctl --user enable --now cloudflared-bona"
