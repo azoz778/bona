@@ -1,0 +1,457 @@
+{
+  "_meta": {
+    "generated": "2026-09-08",
+    "author": "growth research agent",
+    "source_doc": "docs/research/2026-09-08-growth-playbook.md",
+    "timezone": "Asia/Riyadh",
+    "currency": "SAR",
+    "usd_sar": 3.75,
+    "note": "Targets are ESTIMATES with stated assumptions in the source doc, not forecasts.",
+    "revise_after": "2026-09-23 — replace best_times with the account's own analytics once 14 days of data exist"
+  },
+  "brand": {
+    "name": "Bona",
+    "city": "Jeddah",
+    "country": "SA",
+    "site": "https://bona-real-estate.com",
+    "fal_licence": "1100313556",
+    "content_mode": "faceless",
+    "primary_language": "ar-SA",
+    "register": "Hijazi / Saudi colloquial, not MSA",
+    "whatsapp": "+966593296933"
+  },
+  "handles": {
+    "bona.com.sa": [
+      "tiktok",
+      "snapchat",
+      "youtube",
+      "threads",
+      "instagram"
+    ],
+    "bonarealestate": [
+      "x",
+      "linkedin",
+      "pinterest"
+    ],
+    "availability_observed_2026_09_08": {
+      "tiktok:bona.com.sa": "free",
+      "snapchat:bona.com.sa": "free",
+      "youtube:bona.com.sa": "free",
+      "instagram:bona.com.sa": "owned",
+      "tiktok:bonarealestate": "taken_by_unrelated_dormant_account"
+    }
+  },
+  "automation": {
+    "note": "Decides the cadence. Only YouTube is fully automatable.",
+    "youtube": {
+      "automatable": true
+    },
+    "instagram_reels": {
+      "automatable": true,
+      "blocked_on": "Facebook Page link + system-user token (marketing/instagram-status.md)"
+    },
+    "instagram_stories": {
+      "automatable": false
+    },
+    "tiktok": {
+      "automatable": false,
+      "reason": "unaudited Content Posting API publishes private-only"
+    },
+    "snapchat": {
+      "automatable": false,
+      "reason": "no organic posting API"
+    },
+    "x": {
+      "automatable": false,
+      "reason": "write access ~$200/month"
+    },
+    "linkedin": {
+      "automatable": false,
+      "reason": "local MCP has DM tool only, no post tool"
+    },
+    "human_time_per_day_minutes": 30,
+    "weekly_production_block": {
+      "day": "Saturday",
+      "hours": "2-3"
+    }
+  },
+  "cadence": {
+    "tiktok": {
+      "target_per_week": 10,
+      "fallback_per_week": 5,
+      "manual": true
+    },
+    "instagram_reels": {
+      "target_per_week": 6,
+      "fallback_per_week": 5,
+      "manual": false
+    },
+    "instagram_stories": {
+      "target_per_day": 4,
+      "fallback_per_day": 1,
+      "manual": true
+    },
+    "snapchat": {
+      "stories_per_day": 1,
+      "spotlight_per_week": 3,
+      "fallback_stories_per_week": 3,
+      "manual": true
+    },
+    "youtube_shorts": {
+      "target_per_week": 6,
+      "fallback_per_week": 5,
+      "manual": false
+    },
+    "x": {
+      "target_per_week": 3,
+      "fallback_per_week": 1,
+      "manual": true
+    },
+    "rule": "Never post the same file twice. Re-export per platform: new first 3s, new audio, new caption."
+  },
+  "best_times": {
+    "_evidence": "CST Saudi Internet Report 2024 (regulator): national peak 21:00-23:00, Saturday among busiest days. Isha Jeddah 20:03 on 2026-09-08; recompute quarterly.",
+    "_caveat": "For a 0-follower recommendation-driven account, timing is near-irrelevant. Land in the window and stop optimising.",
+    "primary": {
+      "start": "20:30",
+      "end": "23:00"
+    },
+    "secondary": {
+      "start": "00:00",
+      "end": "01:00"
+    },
+    "avoid": {
+      "start": "18:00",
+      "end": "20:15",
+      "reason": "Maghrib to Isha"
+    },
+    "best_days": [
+      "friday",
+      "saturday"
+    ],
+    "x_exception": {
+      "start": "09:00",
+      "end": "11:00",
+      "days": [
+        "sunday",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday"
+      ]
+    },
+    "national_day_2026_09_23": {
+      "start": "19:30",
+      "end": "20:30"
+    },
+    "ramadan_2027": {
+      "post_taraweeh": {
+        "start": "22:00",
+        "end": "01:00"
+      },
+      "pre_suhoor": {
+        "start": "03:30",
+        "end": "05:15"
+      },
+      "avoid": {
+        "start": "13:00",
+        "end": "17:00"
+      }
+    }
+  },
+  "pillars": [
+    {
+      "code": "RULES",
+      "share": 0.3,
+      "ad_licence_required": false,
+      "desc": "buyer/seller education"
+    },
+    {
+      "code": "DISTRICT",
+      "share": 0.25,
+      "ad_licence_required": false,
+      "desc": "Jeddah district guides"
+    },
+    {
+      "code": "EYE",
+      "share": 0.2,
+      "ad_licence_required": "only_if_property_is_marketed_by_bona",
+      "desc": "sensory detail"
+    },
+    {
+      "code": "WALK",
+      "share": 0.15,
+      "ad_licence_required": true,
+      "desc": "named listing walkthrough"
+    },
+    {
+      "code": "OWNER",
+      "share": 0.1,
+      "ad_licence_required": false,
+      "desc": "seller-side"
+    }
+  ],
+  "baseline": {
+    "followers_day0": {
+      "instagram": 0,
+      "tiktok": 0,
+      "snapchat": 0,
+      "youtube": 0
+    },
+    "calibration": {
+      "tkestates_tiktok_followers": 304,
+      "observed": "2026-09-08",
+      "source": "https://www.tiktok.com/@tkestates",
+      "note": "Owner's existing Jeddah brokerage, same city and niche"
+    },
+    "assets": {
+      "listings": 46,
+      "listing_images": 318,
+      "virtual_tours": 1,
+      "featured": 7
+    }
+  },
+  "targets": {
+    "_basis": "ESTIMATE. Assumes 10 TikTok posts/week sustained, no paid spend. At the 5/week fallback, halve.",
+    "day30": {
+      "tiktok": {
+        "low": 150,
+        "base": 250,
+        "high": 600
+      },
+      "instagram": {
+        "low": 80,
+        "base": 150,
+        "high": 250
+      },
+      "youtube": {
+        "low": 30,
+        "base": 60,
+        "high": 120
+      },
+      "snapchat": {
+        "low": 0,
+        "base": 40,
+        "high": 100
+      },
+      "total": {
+        "low": 250,
+        "base": 500,
+        "high": 900
+      }
+    },
+    "day60": {
+      "tiktok": {
+        "low": 600,
+        "base": 1000,
+        "high": 2000
+      },
+      "instagram": {
+        "low": 300,
+        "base": 450,
+        "high": 800
+      },
+      "youtube": {
+        "low": 100,
+        "base": 200,
+        "high": 350
+      },
+      "snapchat": {
+        "low": 50,
+        "base": 150,
+        "high": 300
+      },
+      "total": {
+        "low": 1000,
+        "base": 1800,
+        "high": 3000
+      }
+    },
+    "day90": {
+      "tiktok": {
+        "low": 1500,
+        "base": 2500,
+        "high": 5000
+      },
+      "instagram": {
+        "low": 700,
+        "base": 1100,
+        "high": 2000
+      },
+      "youtube": {
+        "low": 300,
+        "base": 550,
+        "high": 1000
+      },
+      "snapchat": {
+        "low": 100,
+        "base": 300,
+        "high": 600
+      },
+      "total": {
+        "low": 2500,
+        "base": 4500,
+        "high": 8000
+      }
+    },
+    "breakout_upside": {
+      "note": "If one TikTok breaks out (six figures of views), day-90 TikTok alone lands 10000-25000. Not the base case."
+    }
+  },
+  "enquiry_targets": {
+    "_basis": "ESTIMATE. Jeddah luxury cycles run 3-9 months; first closed deal realistically month 6-12.",
+    "month1": {
+      "enquiries": [
+        2,
+        8
+      ],
+      "qualified": [
+        0,
+        2
+      ],
+      "viewings": [
+        0,
+        1
+      ],
+      "closed": 0
+    },
+    "month2": {
+      "enquiries": [
+        5,
+        15
+      ],
+      "qualified": [
+        1,
+        4
+      ],
+      "viewings": [
+        0,
+        2
+      ],
+      "closed": 0
+    },
+    "month3": {
+      "enquiries": [
+        10,
+        30
+      ],
+      "qualified": [
+        3,
+        8
+      ],
+      "viewings": [
+        1,
+        4
+      ],
+      "closed": [
+        0,
+        1
+      ]
+    }
+  },
+  "paid": {
+    "start_after_day": 30,
+    "avoid_windows": [
+      {
+        "name": "Saudi National Day",
+        "start": "2026-09-20",
+        "end": "2026-09-27",
+        "reason": "CPM +30-60%"
+      },
+      {
+        "name": "Ramadan 2027",
+        "start": "2027-02-08",
+        "end": "2027-03-08",
+        "reason": "Meta CPM +30-70%"
+      }
+    ],
+    "cost_per_follower_sar": {
+      "tiktok": 0.21,
+      "snapchat": 0.19,
+      "meta": null,
+      "_sources": {
+        "tiktok": "https://ads.tiktok.com/business/en/generate-results-during-ramadan-metap (KSA case study, OFFICIAL)",
+        "snapchat": "https://forbusiness.snapchat.com/advertising/snap-promote (global, Snap internal 2024)",
+        "meta": "no follower objective exists; no credible figure"
+      }
+    },
+    "minimum_daily_usd": {
+      "snapchat": 5,
+      "tiktok_adgroup": 20,
+      "tiktok_campaign": 50,
+      "meta": null
+    },
+    "meta_warning": "Do NOT use cost-per-result-goal bidding: Meta requires daily budget >= 5x the goal. Use Highest Volume.",
+    "recommended_test": {
+      "total_sar": 15000,
+      "weeks": 6,
+      "stage1": {
+        "weeks": 2,
+        "sar": 4200,
+        "platforms": [
+          "meta_reels",
+          "snapchat"
+        ],
+        "objective": "traffic optimised for landing page views",
+        "gate": "cost per landing page view; rebuild creative if > SAR 9.40"
+      },
+      "stage2": {
+        "weeks": 4,
+        "sar": 10500,
+        "platform": "meta_click_to_whatsapp",
+        "objective": "conversations started"
+      },
+      "go_no_go": {
+        "metric": "cost_per_booked_viewing_sar",
+        "threshold": 2000,
+        "min_viewings": 10,
+        "rationale": "SAR 4M unit x 2.5% = SAR 100k commission; 1-in-10 viewing-to-close makes a viewing worth SAR 10k"
+      }
+    },
+    "cheapest_smoke_test": {
+      "platform": "snapchat",
+      "sar": 525,
+      "days": 28,
+      "warning": "statistically useless (+-88%); use to validate tracking only"
+    }
+  },
+  "compliance": {
+    "ad_licence_required_when": "content promotes the disposal of an identifiable property Bona markets - regardless of whether price, location or CTA appear",
+    "trap": "Anonymised interior footage of a marketed listing IS an advertisement. Art 6(1) requires precise identification; cropping makes it worse.",
+    "week1_action": "issue REGA ad licences for the 5-7 featured Jeddah listings",
+    "short_form_allowed": "Art 5(2): licence number + QR code is sufficient on Reels/Stories/Snaps",
+    "tier2_always": "Every property-related post must carry the licensed person's name + FAL number (Brokerage Law Art 10(7)) - free, warning-first offence",
+    "banned_phrases": [
+      "تقييم مجاني",
+      "مقيّم",
+      "تقييم عقاري",
+      "عائد استثماري مضمون",
+      "أرخص فيلا"
+    ],
+    "open_items": [
+      "verify FAL 1100313556 scope covers التسويق/الإعلانات not الوساطة alone",
+      "confirm whether GAMR Mawthooq licence applies to a broker advertising own listings"
+    ]
+  },
+  "review_metrics": {
+    "primary": [
+      "tiktok_watch_through_rate",
+      "instagram_sends_per_reach"
+    ],
+    "when_changing_cadence": [
+      "total_reach",
+      "reach_per_post"
+    ],
+    "never_alone": [
+      "engagement_rate_per_post"
+    ],
+    "lagging": [
+      "followers"
+    ],
+    "business": [
+      "whatsapp_enquiries",
+      "qualified_enquiries",
+      "viewings_booked"
+    ]
+  }
+}
