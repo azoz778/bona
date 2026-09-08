@@ -63,8 +63,11 @@ test('install-vps.sh --render-only renders units and tunnel config for the VPS',
   const sync = readFileSync(path.join(out, 'bona-repo-sync.service'), 'utf8');
   assert.match(sync, /^ExecStart=\/usr\/bin\/git -C \/opt\/bona pull --ff-only --quiet$/m);
   const timer = readFileSync(path.join(out, 'bona-repo-sync.timer'), 'utf8');
-  assert.match(timer, /^OnUnitActiveSec=5min$/m);
+  // Wall-clock schedule: Persistent=true only catches up missed runs for OnCalendar= timers.
+  assert.match(timer, /^OnCalendar=\*:0\/5$/m);
+  assert.match(timer, /^RandomizedDelaySec=30$/m);
   assert.match(timer, /^Persistent=true$/m);
+  assert.doesNotMatch(timer, /^On(BootSec|UnitActiveSec)=/m, 'monotonic timer keys must be gone');
 
   const yml = readFileSync(path.join(out, 'bona.yml'), 'utf8');
   assert.match(yml, /^tunnel: 9022fbec-de4f-44b9-805e-8fff285d6263$/m);
@@ -159,7 +162,7 @@ const MANUAL_START = 'systemctl --user enable --now bona-api cloudflared-bona';
 test('cutover.sh: happy path — stop PC, copy, start VPS API then tunnel, disable PC; no rollback', () => {
   const r = runShimmed('cutover.sh');
   assert.equal(r.status, 0, r.out);
-  assertOrdered(r.lines, CALL.pcStop, CALL.scp, CALL.vpsStartApi, CALL.vpsStartTunnel, CALL.publicHealth, CALL.pcDisable);
+  assertOrdered(r.lines, CALL.pcStop, CALL.scp, CALL.vpsStartApi, CALL.vpsStartTimer, CALL.vpsStartTunnel, CALL.publicHealth, CALL.pcDisable);
   assert.ok(r.lines.some((l) => CALL.vpsLeadCount.test(l)), 'the VPS lead count must be taken');
   assert.ok(!r.lines.some((l) => /^systemctl .*enable --now/.test(l)), `no PC unit may be started on success\n${r.lines.join('\n')}`);
   assert.ok(!r.lines.some((l) => CALL.vpsStopAll.test(l)), 'no rollback on success');
