@@ -1,0 +1,89 @@
+---
+/* /faq/ — renders src/data/faq.json as a bilingual FAQ with FAQPage JSON-LD.
+   Why this page exists: answer engines (AI Overviews, ChatGPT, Perplexity) answer "can foreigners buy
+   property in Jeddah", "what fees do I pay" and similar from pages that state the answer plainly and name
+   the authority. Every answer here leads with the direct answer and cites REGA / ZATCA / TAQEEM / Ejar /
+   Najiz / Wafi by name. Answers are open <details> by default so the text is in the DOM for crawlers and
+   for anyone with JS off. */
+import Base from '../../layouts/Base.astro';
+import Breadcrumb from '../Breadcrumb.astro';
+import Icon from '../Icon.astro';
+import site from '../../data/site.json';
+import faq from '../../data/faq.json';
+import { localePath, t, ui, waLink, type Locale } from '../../lib/i18n';
+import { breadcrumbJsonLd, faqPageJsonLd, metaDescription } from '../../lib/seo';
+interface Props { locale: Locale }
+const { locale } = Astro.props;
+const path = localePath(locale, '/faq/');
+type L = { en: string; ar: string };
+type Item = { id: string; q: L; a: { en: string[]; ar: string[] } };
+const data = faq as { updated?: string; title?: L; intro?: L; items?: Item[] };
+const title = (data.title && t(data.title, locale)) || t(ui.faqMetaTitle, locale);
+const intro = (data.intro && t(data.intro, locale)) || '';
+const items = (data.items ?? []).filter(i => i && i.id && i.q).map(i => ({
+  id: String(i.id).replace(/[^\w-]+/g, '-'),
+  q: t(i.q, locale),
+  a: ((i.a?.[locale] ?? i.a?.en) ?? []).filter(Boolean),
+})).filter(i => i.a.length > 0);
+const updatedIso = data.updated && /^\d{4}-\d{2}-\d{2}$/.test(data.updated) ? data.updated : null;
+const updatedText = updatedIso
+  ? new Intl.DateTimeFormat(locale === 'ar' ? 'ar-u-nu-latn-ca-gregory' : 'en-GB', { dateStyle: 'long', timeZone: 'UTC' }).format(new Date(`${updatedIso}T00:00:00Z`))
+  : null;
+const wa = waLink(site.whatsapp.wa, t(ui.formGreeting, locale));
+const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { name: title, path }];
+const description = metaDescription(intro) || t(ui.faqMetaDesc, locale);
+---
+<Base title={title} description={description} locale={locale} path={path}
+      jsonLd={[faqPageJsonLd({ locale, path, title, description, items, dateModified: updatedIso ?? undefined, breadcrumbId: `${new URL(path, site.url).href}#breadcrumb` }), breadcrumbJsonLd(crumbs)]}>
+  <section class="section-tight pt-8 lg:pt-10">
+    <div class="wrap-narrow">
+      <Breadcrumb locale={locale} items={crumbs.map(c => ({ name: c.name, href: c.path }))} />
+      <div class="mt-10" data-reveal>
+        <span class="rule"></span>
+        <h1 class="display-lg mt-6">{title}</h1>
+        {updatedText && <p class="label mt-5 text-stone-2">{t(ui.lastUpdated, locale)}: <time datetime={updatedIso} dir="ltr">{updatedText}</time></p>}
+        {intro && <p class="statement mt-8">{intro}</p>}
+      </div>
+
+      {items.length > 1 && (
+        <nav aria-label={t(ui.onThisPage, locale)} class="mt-12 border-y border-ink/10 py-6" data-reveal>
+          <p class="label text-stone-2">{t(ui.onThisPage, locale)}</p>
+          <ol class="mt-4 grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
+            {items.map((it, i) => <li class="flex gap-3"><span class="font-display text-champagne" dir="ltr">{String(i + 1).padStart(2, '0')}</span><a href={`#${it.id}`} class="link">{it.q}</a></li>)}
+          </ol>
+        </nav>
+      )}
+
+      <div class="mt-4 divide-y divide-ink/10">
+        {items.map((it, i) => (
+          <details id={it.id} class="faq-item scroll-mt-28 py-8" open>
+            <summary class="faq-q flex cursor-pointer items-baseline gap-4 list-none">
+              <span class="font-display text-lg text-champagne" dir="ltr">{String(i + 1).padStart(2, '0')}</span>
+              <h2 class="display-md flex-1">{it.q}</h2>
+              <span class="faq-mark shrink-0 text-champagne" aria-hidden="true"><Icon name="arrow-down" size={16} /></span>
+            </summary>
+            <div class="prose-bona mt-5 ps-[calc(1.5rem+1ch)] text-[15px] leading-relaxed text-ink/85 md:text-base">
+              {it.a.map(p => <p>{p}</p>)}
+            </div>
+          </details>
+        ))}
+      </div>
+
+      <div class="mt-12 border border-champagne/60 bg-ivory-2 p-8" data-reveal>
+        <p class="label text-stone-2">{t(ui.faqStillAsking, locale)}</p>
+        <p class="mt-4 max-w-[60ch] text-[15px] leading-relaxed">{t(ui.faqStillAskingBody, locale)}</p>
+        <div class="mt-6 flex flex-wrap gap-4">
+          <a href={wa} target="_blank" rel="noopener" class="btn btn-ink"><Icon name="whatsapp" size={17} />{t(ui.chatOnWhatsApp, locale)}</a>
+          <a href={localePath(locale, '/properties/')} class="btn btn-outline">{t(ui.navAllProperties, locale)}</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .faq-item > summary::-webkit-details-marker { display: none; }
+  .faq-mark { transition: transform .3s var(--ease-luxe); }
+  .faq-item[open] > summary .faq-mark { transform: rotate(180deg); }
+  .faq-q:hover h2 { color: color-mix(in oklab, var(--color-ink) 70%, var(--color-champagne)); }
+</style>
