@@ -6,21 +6,22 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# Secrets are read by the process itself from ~/.secrets/*.env (lib/env.mjs); these two files
-# are optional so the unit starts either way.
-EnvironmentFile=-@HOME@/.secrets/bona-services.env
-EnvironmentFile=-@HOME@/.secrets/bona-marketing.env
+# No EnvironmentFile= here, on purpose. The process loads the four ~/.secrets/*.env files itself
+# (retell, evolution-api, bona-services, bona-marketing — lib/env.mjs), and process.env wins over
+# those files. Every Environment= value below reaches process.env, which is exactly why the VPS
+# overrides work: bona-services.env is copied verbatim from the PC and still carries the PC's
+# BONA_API_PORT=4102, BONA_DATA and BONA_REPO. Had the unit loaded that file with EnvironmentFile=,
+# systemd would let the file's values override the Environment= lines regardless of line order,
+# and the VPS would try the PC's port and paths (Claude review, 2026-09-08).
 Environment=NODE_ENV=production
-# VPS-only overrides. process.env wins over the env files by design (lib/env.mjs), so the
-# PC paths carried inside bona-services.env are harmless here.
 Environment=BONA_API_PORT=@PORT@
 Environment=BONA_REPO=@REPO@
 Environment=BONA_DATA=@HOME@/bona-data
 Environment=EVOLUTION_API_URL=@EVOLUTION_URL@
-# The WhatsApp poller runs inside this process and is ON by default (lib/config.mjs). Set
-# BONA_WA_POLL=0 in bona-services.env to stop it — and nothing here may set it: an Environment=
-# line after EnvironmentFile= would win over the file and silently re-enable the poller
-# (Codex review, 2026-09-08).
+# The WhatsApp poller runs inside this process and is ON by default (lib/config.mjs). The owner
+# opts out with BONA_WA_POLL=0 in bona-services.env — and nothing here may set BONA_WA_POLL: an
+# Environment= value here reaches process.env, which wins over the file, so it would silently
+# override the owner's opt-out (Codex review, 2026-09-08).
 Environment=PATH=@NODE_BIN@:@HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
 WorkingDirectory=@REPO@/services
 ExecStart=@NODE_BIN@/node @REPO@/services/api/index.mjs

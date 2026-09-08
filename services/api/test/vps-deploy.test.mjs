@@ -48,6 +48,10 @@ test('install-vps.sh --render-only renders units and tunnel config for the VPS',
   assert.match(api, /^WorkingDirectory=\/opt\/bona\/services$/m);
   assert.match(api, new RegExp(`^ReadWritePaths=${home}/bona-data$`, 'm'));
   assert.doesNotMatch(api, /^Environment=.*BONA_WA_POLL/m, 'the unit must never force the poller on or off');
+  // EnvironmentFile= values override Environment= values regardless of line order (systemd), so the
+  // copied bona-services.env (PC port/paths) would cancel the VPS overrides above. The process reads
+  // the env files itself (lib/env.mjs) — the unit must not.
+  assert.doesNotMatch(api, /^EnvironmentFile=/m, 'the VPS unit must not load env files');
   assert.doesNotMatch(api, /@[A-Z_]+@/, 'unrendered placeholder');
 
   const cf = readFileSync(path.join(out, 'cloudflared-bona.service'), 'utf8');
