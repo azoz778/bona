@@ -376,3 +376,17 @@ test('createFanout exposes enqueueStage so the dashboard has one way in', () => 
   assert.equal(queued, 3);
   db.close();
 });
+
+test('a row carrying a prototype member where a name belongs maps to nothing', () => {
+  assert.deepEqual(stageDests('constructor'), []);
+  assert.deepEqual(stageDests('toString'), []);
+  assert.deepEqual(stageDests(undefined), []);
+  const db = seeded({ dests: [] });
+  const ctx = { session: db.getSession('mf3k2a-7b1c'), lead: db.getLead(LEAD_ID), cfg: CFG };
+  const bogus = { event_id: 'ev-x', ts: NOW, name: 'lead_stage', props: { stage: 'constructor' } };
+  assert.equal(buildMeta(bogus, ctx), null);
+  assert.equal(buildGa4(bogus, ctx), null);
+  assert.equal(buildSnap(bogus, ctx), null);
+  assert.equal(buildMeta({ event_id: 'ev-y', ts: NOW, name: 'valueOf', props: {} }, ctx), null);
+  db.close();
+});
