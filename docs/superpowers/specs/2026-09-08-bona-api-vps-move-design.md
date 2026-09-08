@@ -66,7 +66,7 @@ Rollback at any point: `rollback.sh`. The PC keeps every file it has today; only
 
 ## 5. Verification (must all pass before "done")
 
-- VPS: `systemctl --user is-active bona-api cloudflared-bona bona-repo-sync.timer`; journal `listening` line shows port 4120, inventory ≥ 45, `poller` configured; `cloudflared` registered 4 connections.
+- VPS: `sudo systemctl is-active bona-api cloudflared-bona bona-repo-sync.timer`; journal `listening` line shows port 4120, inventory ≥ 45, `poller` configured; `cloudflared` registered 4 connections.
 - Public: `/health` 200 `"retell":"ok"` on `api.bona-real-estate.com` and `bona-api.azoz.uk`; `bona.azoz.uk/x` → 301 to `https://bona-real-estate.com/x`; CORS preflight from `https://bona-real-estate.com` → 204.
 - Behaviour: chat session → greeting; a message that triggers `search_properties` returns listing cards (proves Retell → tool URL → token → VPS); `/v1/call/token` 200; `/dashboard` 200; browser end-to-end via `~/.claude/scripts/cdp-concierge-check.mjs` on bona-real-estate.com (EN desktop + AR mobile: cards, navigate, live call).
 - Data: lead count in the VPS `bona.db` = PC count at stop time; poller cursor carried over (journal shows no re-processing burst).
