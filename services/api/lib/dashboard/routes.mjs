@@ -46,6 +46,14 @@ export const SECURITY_HEADERS = {
 export const MAX_NOTE = 2000;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** `2026-09-08` and a date that exists. `9999-99-99` matches the shape and nothing else. */
+export function isDay(value) {
+  const s = String(value ?? '').trim();
+  if (!DAY_RE.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+
 const isForm = (ct) => /^application\/x-www-form-urlencoded\s*(?:;|$)/i.test(String(ct ?? '').trim());
 const isJson = (ct) => /^application\/(?:[\w.+-]+\+)?json\s*(?:;|$)/i.test(String(ct ?? '').trim());
 
@@ -167,8 +175,11 @@ export function createDashboardRoutes({
   /** True unless the browser stated an origin (or referer) that is not ours. */
   function sameOrigin(req) {
     const own = ownOrigins(req);
+    // `Origin: null` — a sandboxed iframe, a `data:` URL, some redirect chains — is not
+    // one of ours, so it is refused like any other foreign origin. `SameSite=Lax` would
+    // keep the cookie off those requests anyway; this is the check not depending on it.
     const origin = req.headers.origin;
-    if (origin && origin !== 'null' && !own.has(String(origin).trim().replace(/\/+$/, ''))) return false;
+    if (origin && !own.has(String(origin).trim().replace(/\/+$/, ''))) return false;
     const referer = req.headers.referer;
     if (referer) {
       try { if (!own.has(new URL(referer).origin)) return false; } catch { return false; }
@@ -176,8 +187,13 @@ export function createDashboardRoutes({
     return true;
   }
 
-  /** The marker a cross-site form cannot produce. */
-  const hasMarker = (req, fields) => req.headers['x-bona-dash'] === '1' || String(fields?._dash ?? '') === '1';
+  /**
+   * The marker a cross-site form cannot produce. A proxy that adds the header to one
+   * that is already there hands us `"1, 1"`, so only the first value is read.
+   */
+  const hasMarker = (req, fields) =>
+    String(req.headers['x-bona-dash'] ?? '').split(',')[0].trim() === '1' ||
+    String(fields?._dash ?? '') === '1';
 
   const sessionToken = (req) => authenticator.readCookie(req);
   const signedIn = (req) => {
@@ -230,6 +246,9 @@ export function createDashboardRoutes({
     if (!parsed.ok) return refuseBody(req, res, parsed);
     const out = await authenticator.requestCode(ip);
     if (!out.ok) return toLogin(res, `?step=code&error=${encodeURIComponent(out.error)}`, 303);
+    // The nonce is what lets this browser — and only this browser — spend the code's
+    // five attempts. See the header of `auth.mjs`.
+    authenticator.setTryCookie(res, out.nonce);
     return toLogin(res, '?step=code&sent=1', 303);
   }
 
@@ -243,8 +262,14 @@ export function createDashboardRoutes({
     if (!parsed.ok) return refuseBody(req, res, parsed);
 
     const ua = String(req.headers['user-agent'] ?? '').slice(0, 300) || null;
-    const out = authenticator.verify(parsed.fields.code, ua);
-    if (!out.ok) return toLogin(res, `?step=code&error=${encodeURIComponent(out.error)}`, 303);
+    const out = authenticator.verify(parsed.fields.code, ua, { nonce: authenticator.readTryCookie(req) });
+    if (!out.ok) {
+      // A burnt or spent code is finished; take its nonce with it rather than leaving a
+      // cookie that can only ever produce the same refusal.
+      if (out.error === 'attempts' || out.error === 'used' || out.error === 'expired') authenticator.clearTryCookie(res);
+      return toLogin(res, `?step=code&error=${encodeURIComponent(out.error)}`, 303);
+    }
+    authenticator.clearTryCookie(res);
     authenticator.setCookie(res, out.token);
     return redirect(res, '/dashboard');
   }
@@ -266,6 +291,7 @@ export function createDashboardRoutes({
     const token = sessionToken(req);
     if (token) authenticator.logout(token);
     authenticator.clearCookie(res);
+    authenticator.clearTryCookie(res);
     return toLogin(res, '', 303);
   }
 
@@ -348,13 +374,20 @@ export function createDashboardRoutes({
     }));
   }
 
+  /** Cards per column. The counts beside them are a COUNT(*), never this slice. */
+  const BOARD_CARDS = 500;
+
   function leads({ res, url }) {
     const stage = STAGES.includes(url.searchParams.get('stage')) ? url.searchParams.get('stage') : '';
     const q = String(url.searchParams.get('q') ?? '').slice(0, 100);
     const board = Object.fromEntries(STAGES.map((s) => [s, []]));
-    for (const lead of db.listLeads({ limit: 500 })) board[lead.stage]?.push(lead);
+    for (const lead of db.listLeads({ limit: BOARD_CARDS })) board[lead.stage]?.push(lead);
+    // The cards are the newest few hundred leads; the number on the column heading is the
+    // truth. A count that quietly becomes a slice is worse than a slow page.
+    const counts = Object.fromEntries(statistics.pipeline().map((p) => [p.stage, p.count]));
     return sendHtml(res, 200, leadsPage({
       board,
+      counts,
       leads: db.listLeads({ stage: stage || null, q: q || null, limit: 200 }),
       stage, q, now: now(), total: db.countLeads(),
     }));
@@ -376,9 +409,14 @@ export function createDashboardRoutes({
 
   const listings = ({ res }) => sendHtml(res, 200, listingsPage({ rows: listingRows() }));
 
+  /** How much of the spend ledger the page shows. The CPL table is unbounded and cheap. */
+  const SPEND_WINDOW_DAYS = 90;
+
   function spend({ res, url }) {
+    const fromDay = dayKey(now() - SPEND_WINDOW_DAYS * 86_400_000);
     return sendHtml(res, 200, spendPage({
-      rows: db.listSpend().reverse(),
+      rows: db.listSpend({ fromDay }).reverse(),
+      windowDays: SPEND_WINDOW_DAYS,
       campaigns: statistics.cplByCampaign(),
       saved: url.searchParams.get('ok') === '1',
       error: knownError(url.searchParams.get('error')),
@@ -429,9 +467,10 @@ export function createDashboardRoutes({
     const history = db.setStage(leadId, stage, { actor: 'owner', note, valueSar, now: t });
     const updated = db.getLead(leadId);
     // The ad platforms hear about the moves they can bid on; the rest is just history.
-    const queued = typeof fanout?.enqueueStage === 'function'
-      ? fanout.enqueueStage(updated, { stage, valueSar: updated.value_sar, now: t })
-      : enqueueStage(db, updated, { stage, valueSar: updated.value_sar, now: t });
+    // The worker's bound method and the bare function are the same code — `fanout` is
+    // optional in this factory only so a test can construct routes without a worker.
+    const queue = fanout?.enqueueStage ?? ((lead, opts) => enqueueStage(db, lead, opts));
+    const queued = queue(updated, { stage, valueSar: updated.value_sar, now: t });
     log({ evt: 'dash.stage', leadId, stage, dests: queued.dests });
 
     return answer(res, {
@@ -466,7 +505,7 @@ export function createDashboardRoutes({
     const day = String(fields.day ?? '').trim();
     const platform = trimTo(fields.platform, 32)?.toLowerCase() ?? null;
     const spendSar = Number(fields.spend_sar);
-    const bad = !DAY_RE.test(day) || !platform || !Number.isFinite(spendSar) || spendSar < 0;
+    const bad = !isDay(day) || !platform || !Number.isFinite(spendSar) || spendSar < 0;
     if (bad) return answer(res, { form, back: '/dashboard/spend?error=bad_request', status: 400, payload: { error: 'bad_request' } });
 
     db.upsertSpend({

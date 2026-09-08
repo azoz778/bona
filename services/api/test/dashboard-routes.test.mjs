@@ -13,6 +13,7 @@ import { createApp } from '../index.mjs';
 import { openDb } from '../lib/db.mjs';
 import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
 import { DEFAULT_ORIGINS } from '../lib/cors.mjs';
+import { leadsPage } from '../lib/dashboard/render.mjs';
 
 const TOKEN = 'a'.repeat(32);
 const inventory = createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk' });
@@ -53,6 +54,19 @@ async function withDash(overrides = {}, fn) {
   await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${app.server.address().port}`;
 
+  /** Every `Set-Cookie` on a response, as a browser would see them. */
+  const cookiesOf = (res) => res.headers.getSetCookie?.() ?? [res.headers.get('set-cookie')].filter(Boolean);
+  /** One named cookie's value, or null when the response cleared or never set it. */
+  const cookieValue = (res, name) => {
+    for (const c of cookiesOf(res)) {
+      const [pair, ...attrs] = c.split(';');
+      const [k, v] = [pair.slice(0, pair.indexOf('=')), pair.slice(pair.indexOf('=') + 1)];
+      if (k.trim() !== name) continue;
+      return attrs.some((a) => a.trim() === 'Max-Age=0') ? null : v;
+    }
+    return undefined;
+  };
+
   const go = (p, init = {}) => fetch(base + p, { redirect: 'manual', ...init });
   const get = (p, { cookie, headers } = {}) => go(p, { headers: { ...(cookie ? { Cookie: cookie } : {}), ...headers } });
   const postForm = (p, fields, { cookie, headers } = {}) => go(p, {
@@ -66,20 +80,31 @@ async function withDash(overrides = {}, fn) {
     body: JSON.stringify(body),
   });
 
+  /**
+   * Ask for a code the way a browser does, and keep what the browser would keep: the
+   * six digits from the "phone" and the `bona_dash_try` nonce from the response.
+   */
+  async function askForCode(opts = {}) {
+    const res = await postForm('/dashboard/login/code', { _dash: '1' }, opts);
+    const code = /(\d{6})/.exec(sent.at(-1) ?? '')?.[1] ?? null;
+    const nonce = cookieValue(res, 'bona_dash_try');
+    return { res, code, nonce, tryCookie: nonce ? `bona_dash_try=${nonce}` : '' };
+  }
+
   /** The whole login: ask for a code, read it off the "phone", type it back. */
   async function login() {
-    const asked = await postForm('/dashboard/login/code', { _dash: '1' });
-    assert.equal(asked.status, 303, 'the code request redirects to the code form');
-    const code = /(\d{6})/.exec(sent.at(-1) ?? '')?.[1];
-    assert.ok(code, `no code in the WhatsApp message: ${sent.at(-1)}`);
-    const verified = await postForm('/dashboard/login/verify', { _dash: '1', code });
-    const setCookie = verified.headers.getSetCookie?.()[0] ?? verified.headers.get('set-cookie');
-    assert.ok(setCookie, 'the verify step must set the cookie');
-    return { cookie: setCookie.split(';')[0], code, res: verified };
+    const asked = await askForCode();
+    assert.equal(asked.res.status, 303, 'the code request redirects to the code form');
+    assert.ok(asked.code, `no code in the WhatsApp message: ${sent.at(-1)}`);
+    assert.ok(asked.nonce, 'the code request must hand the browser a try nonce');
+    const verified = await postForm('/dashboard/login/verify', { _dash: '1', code: asked.code }, { cookie: asked.tryCookie });
+    const session = cookieValue(verified, 'bona_dash');
+    assert.ok(session, 'the verify step must set the session cookie');
+    return { cookie: `bona_dash=${session}`, code: asked.code, nonce: asked.nonce, res: verified };
   }
 
   try {
-    await fn({ app, db, base, get, postForm, postJson, login, sent });
+    await fn({ app, db, base, get, postForm, postJson, login, askForCode, cookiesOf, cookieValue, sent });
   } finally {
     await new Promise((resolve) => app.server.close(resolve));
     db.close();
@@ -149,10 +174,13 @@ test('the login round trip: ask, receive on WhatsApp, type it back', async () =>
     const { cookie, res } = await login();
     assert.equal(res.status, 303);
     assert.equal(res.headers.get('location'), '/dashboard');
-    const setCookie = res.headers.getSetCookie?.()[0] ?? res.headers.get('set-cookie');
+    const all = res.headers.getSetCookie?.() ?? [res.headers.get('set-cookie')];
+    const session = all.find((c) => c.startsWith('bona_dash='));
     for (const flag of ['HttpOnly', 'Secure', 'SameSite=Lax', 'Path=/', 'Max-Age=2592000']) {
-      assert.ok(setCookie.includes(flag), `${flag} missing from ${setCookie}`);
+      assert.ok(session.includes(flag), `${flag} missing from ${session}`);
     }
+    assert.ok(all.some((c) => c.startsWith('bona_dash_try=') && c.includes('Max-Age=0')),
+      'the spent try nonce is cleared with the same response that opens the session');
     assert.equal(sent.length, 1);
     assert.match(sent[0], /^Bona dashboard code: \d{6} \(valid 10 min\)$/);
 
@@ -165,26 +193,73 @@ test('the login round trip: ask, receive on WhatsApp, type it back', async () =>
   });
 });
 
-test('five wrong codes burn the real one', async () => {
-  await withDash({}, async ({ postForm, sent }) => {
-    await postForm('/dashboard/login/code', { _dash: '1' });
-    const code = /(\d{6})/.exec(sent[0])[1];
+test('five wrong codes from the browser that asked burn the real one', async () => {
+  await withDash({}, async ({ postForm, askForCode, cookieValue }) => {
+    const { code, tryCookie } = await askForCode();
     const wrong = String((Number(code) + 1) % 1_000_000).padStart(6, '0');
     for (let i = 0; i < 5; i += 1) {
-      const res = await postForm('/dashboard/login/verify', { _dash: '1', code: wrong });
+      const res = await postForm('/dashboard/login/verify', { _dash: '1', code: wrong }, { cookie: tryCookie });
       assert.equal(res.status, 303);
-      assert.match(res.headers.get('location'), /error=/, `guess ${i + 1}`);
+      assert.equal(res.headers.get('location'), '/dashboard/login?step=code&error=bad_code', `guess ${i + 1}`);
     }
-    const real = await postForm('/dashboard/login/verify', { _dash: '1', code });
+    const real = await postForm('/dashboard/login/verify', { _dash: '1', code }, { cookie: tryCookie });
     assert.equal(real.headers.get('location'), '/dashboard/login?step=code&error=attempts');
-    assert.equal(real.headers.getSetCookie?.().length ?? 0, 0, 'no cookie is handed out');
+    assert.equal(cookieValue(real, 'bona_dash'), undefined, 'no session cookie is handed out');
+  });
+});
+
+test('a stranger cannot burn the code the owner is holding', async () => {
+  await withDash({}, async ({ postForm, askForCode, get }) => {
+    const owner = await askForCode();
+
+    // No nonce, a forged one, over and over — kept under the route's own 20-a-minute
+    // guessing cap so that what is being tested here is the binding, not that limiter.
+    // The sender is capped at one code a minute globally, so if these guesses counted
+    // against the owner's code he could never win the race back.
+    for (let i = 0; i < 8; i += 1) {
+      const bare = await postForm('/dashboard/login/verify', { _dash: '1', code: '000000' });
+      assert.equal(bare.headers.get('location'), '/dashboard/login?step=code&error=no_request');
+      const forged = await postForm('/dashboard/login/verify', { _dash: '1', code: '000000' }, { cookie: `bona_dash_try=${'f'.repeat(32)}` });
+      assert.equal(forged.headers.get('location'), '/dashboard/login?step=code&error=no_request');
+    }
+
+    const real = await postForm('/dashboard/login/verify', { _dash: '1', code: owner.code }, { cookie: owner.tryCookie });
+    assert.equal(real.headers.get('location'), '/dashboard', 'the owner still gets in');
+    const session = (real.headers.getSetCookie?.() ?? []).find((c) => c.startsWith('bona_dash='));
+    assert.ok(session);
+    assert.equal((await get('/dashboard', { cookie: session.split(';')[0] })).status, 200);
+  });
+});
+
+test('guessing at the login is capped a minute at a time', async () => {
+  await withDash({}, async ({ postForm, askForCode }) => {
+    const { tryCookie } = await askForCode();
+    const seen = new Set();
+    for (let i = 0; i < 24; i += 1) {
+      const res = await postForm('/dashboard/login/verify', { _dash: '1', code: '000000' }, { cookie: tryCookie });
+      seen.add(res.headers.get('location'));
+    }
+    assert.ok(seen.has('/dashboard/login?step=code&error=rate_limited'), 'the twenty-first guess in a minute is refused outright');
+  });
+});
+
+test('a code cannot be redeemed from a browser that did not ask for it', async () => {
+  await withDash({}, async ({ postForm, askForCode, cookieValue }) => {
+    const { code } = await askForCode();
+    // The digits alone are not enough: whoever shoulder-surfed the WhatsApp still needs
+    // the nonce, and that only ever existed as an HttpOnly cookie on the asker's browser.
+    const res = await postForm('/dashboard/login/verify', { _dash: '1', code });
+    assert.equal(res.headers.get('location'), '/dashboard/login?step=code&error=no_request');
+    assert.equal(cookieValue(res, 'bona_dash'), undefined);
   });
 });
 
 test('a login POST from someone else\'s page is refused', async () => {
   await withDash({}, async ({ postForm, sent }) => {
-    const res = await postForm('/dashboard/login/code', { _dash: '1' }, { headers: { Origin: 'https://evil.example' } });
-    assert.equal(res.headers.get('location'), '/dashboard/login?error=forbidden');
+    for (const origin of ['https://evil.example', 'null']) {
+      const res = await postForm('/dashboard/login/code', { _dash: '1' }, { headers: { Origin: origin } });
+      assert.equal(res.headers.get('location'), '/dashboard/login?error=forbidden', origin);
+    }
     assert.equal(sent.length, 0, 'no WhatsApp is sent on behalf of a foreign page');
   });
 });
@@ -288,10 +363,55 @@ test('the leads list honours the stage and search filters', async () => {
       name: 'Khalid Omar', channel: 'form', source: 'form', stage: 'won', stage_ts: Date.now(),
     });
     const { cookie } = await login();
-    const won = await (await get('/dashboard/leads?stage=won', { cookie })).text();
+
+    // The board above the list shows every lead whatever the filter says, so asserting
+    // on the whole page would pass with the filter ripped out. Only the list is filtered.
+    const listOnly = (html) => html.slice(html.indexOf('<h2>List</h2>'));
+
+    const won = listOnly(await (await get('/dashboard/leads?stage=won', { cookie })).text());
     assert.match(won, /Khalid Omar/);
-    const searched = await (await get('/dashboard/leads?q=khalid', { cookie })).text();
+    assert.ok(!won.includes('Sara Ahmed'), 'a lead in another stage is not in the filtered list');
+
+    const searched = listOnly(await (await get('/dashboard/leads?q=khalid', { cookie })).text());
     assert.match(searched, /Khalid Omar/);
+    assert.ok(!searched.includes('Sara Ahmed'));
+
+    // …and the JSON, where there is no board to hide behind.
+    const byStage = await (await get('/v1/admin/leads?stage=won', { cookie })).json();
+    assert.deepEqual(byStage.leads.map((l) => l.name), ['Khalid Omar']);
+    const byQuery = await (await get('/v1/admin/leads?q=sara', { cookie })).json();
+    assert.deepEqual(byQuery.leads.map((l) => l.name), ['Sara Ahmed']);
+    const nonsense = await (await get('/v1/admin/leads?stage=not_a_stage', { cookie })).json();
+    assert.equal(nonsense.count, 2, 'an unknown stage is no filter at all, not an error');
+  });
+});
+
+test('the board counts the whole pipeline even when it can only show part of it', () => {
+  // Past a few hundred leads the cards become a slice. The number on the heading is a
+  // COUNT(*), so it must keep telling the truth and say what it is not showing.
+  const lead = (id) => ({ lead_id: id, name: id, phone_e164: '966500000000', stage: 'contacted', stage_ts: Date.now(), created: Date.now() });
+  const html = leadsPage({
+    board: { contacted: [lead('a'), lead('b')] },
+    counts: { new: 0, contacted: 517, qualified: 0, viewing: 0, offer: 0, negotiation: 0, won: 3, lost: 0 },
+    leads: [], total: 520,
+  });
+  assert.match(html, /<span>contacted<\/span><span>517<\/span>/);
+  assert.match(html, /\+515 older not shown/);
+  assert.match(html, /<span>won<\/span><span>3<\/span>/, 'a column with no cards still reports its count');
+});
+
+test('the reporting window is clamped, whatever the query string says', async () => {
+  await withDash({}, async ({ db, get, login }) => {
+    seedLead(db);
+    const { cookie } = await login();
+    for (const [q, expected] of [['?days=7', 7], ['?days=999', 90], ['?days=-3', 1], ['?days=abc', 14], ['', 14], ['?days=0', 14]]) {
+      const body = await (await get(`/v1/admin/stats${q}`, { cookie })).json();
+      assert.equal(body.days, expected, `days${q}`);
+      assert.equal(body.daily.length, expected, `daily length for ${q}`);
+    }
+    for (const q of ['?days=999', '?days=-3', '?days=abc']) {
+      assert.equal((await get(`/dashboard${q}`, { cookie })).status, 200, `the page survives ${q}`);
+    }
   });
 });
 

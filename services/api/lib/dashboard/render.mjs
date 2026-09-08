@@ -58,7 +58,13 @@ export function ago(ms) {
   return `${Math.floor(h / 24)}${NBSP}d`;
 }
 
-export const dateTime = (ts) => (Number.isFinite(Number(ts)) ? new Date(Number(ts)).toISOString().replace('T', ' ').slice(0, 16) : '—');
+/** The largest instant a Date can hold. `Number.isFinite(1e20)` is true; `new Date(1e20)` throws. */
+const MAX_TIME_MS = 8.64e15;
+export const dateTime = (ts) => {
+  const t = Number(ts);
+  if (!Number.isFinite(t) || Math.abs(t) > MAX_TIME_MS) return '—';
+  return new Date(t).toISOString().replace('T', ' ').slice(0, 16);
+};
 const number = (v) => (Number.isFinite(Number(v)) ? Number(v).toLocaleString('en-US') : '—');
 const money = (v) => (Number.isFinite(Number(v)) ? `${Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 })} SAR` : '—');
 
@@ -340,11 +346,16 @@ function leadCard(lead, now) {
 </div>`;
 }
 
-export function leadsPage({ board, leads, stage = '', q = '', now = Date.now(), total = 0 }) {
+export function leadsPage({ board, counts = null, leads, stage = '', q = '', now = Date.now(), total = 0 }) {
   const columns = STAGES.map((s) => {
-    const inStage = board[s] ?? [];
-    return `<div class="col"><h3><span>${esc(s)}</span><span>${esc(inStage.length)}</span></h3>` +
-      (inStage.length ? inStage.map((l) => leadCard(l, now)).join('') : '<div class="lead muted">—</div>') +
+    const cards = board[s] ?? [];
+    // The heading is a COUNT(*); the cards are the newest few hundred leads. When the two
+    // disagree the column says so rather than quietly showing a subset as the whole.
+    const count = counts && Number.isFinite(counts[s]) ? counts[s] : cards.length;
+    const hidden = Math.max(0, count - cards.length);
+    return `<div class="col"><h3><span>${esc(s)}</span><span>${esc(count)}</span></h3>` +
+      (cards.length ? cards.map((l) => leadCard(l, now)).join('') : '<div class="lead muted">—</div>') +
+      (hidden ? `<div class="lead muted">+${esc(hidden)} older not shown</div>` : '') +
       '</div>';
   }).join('');
 
@@ -372,6 +383,9 @@ ${scrollTable(
   });
 }
 
+/** A table lookup that cannot answer with a prototype member. */
+const from = (table, key, fallback = null) => (typeof key === 'string' && Object.hasOwn(table, key) ? table[key] : fallback);
+
 const JOURNEY_LABEL = {
   event: (e) => `${e.name}${e.listing_id ? ` · ${e.listing_id}` : ''}${e.path ? ` · ${e.path}` : ''}`,
   touchpoint: (e) => `${e.event_type} · ${e.channel}${e.source ? ` · ${e.source}${e.medium ? `/${e.medium}` : ''}` : ''}${e.campaign ? ` · ${e.campaign}` : ''}`,
@@ -383,7 +397,10 @@ export function leadDetailPage({ lead, journey, saved = null, error = null, now 
   const field = (k, v) => `<dt>${esc(k)}</dt><dd dir="auto">${esc(v ?? '—')}</dd>`;
   const responded = lead.first_inbound_ts && lead.first_reply_ts ? ago(lead.first_reply_ts - lead.first_inbound_ts) : '—';
 
-  const items = journey.map((e) => `<li><div class="when">${esc(dateTime(e.ts))} · ${esc(e.kind)}</div><div class="what" dir="auto">${esc(JOURNEY_LABEL[e.kind](e))}</div></li>`).join('');
+  const items = journey.map((e) => {
+    const label = from(JOURNEY_LABEL, e.kind);
+    return `<li><div class="when">${esc(dateTime(e.ts))} · ${esc(e.kind)}</div><div class="what" dir="auto">${esc(label ? label(e) : e.kind)}</div></li>`;
+  }).join('');
 
   const banner = error ? `<div class="err">${esc(messageFor(error))}</div>`
     : saved ? `<div class="ok">${esc(saved === 'stage' ? 'Stage updated.' : 'Note added.')}</div>` : '';
@@ -464,7 +481,7 @@ export function listingsPage({ rows }) {
     ${cell(r.listing_id)}${auto(r.title)}${cell(r.category ?? '—')}${cell(r.status ?? '—')}
     ${numCell(r.views)}${numCell(r.gallery)}${numCell(r.tour)}${numCell(r.brochure)}${numCell(r.wa_clicks)}${numCell(r.leads)}
     ${cell(r.licence?.adNumber ?? '—')}${cell(r.licence?.adExpiry ?? '—')}
-    <td class="wrap">${r.flags.length ? r.flags.map((f) => `<span class="tag ${esc(FLAG_LABEL[f]?.[0] ?? '')}">${esc(FLAG_LABEL[f]?.[1] ?? f)}</span>`).join('') : '<span class="tag ok">clear</span>'}</td>
+    <td class="wrap">${r.flags.length ? r.flags.map((f) => { const l = from(FLAG_LABEL, f, ['', f]); return `<span class="tag ${esc(l[0])}">${esc(l[1])}</span>`; }).join('') : '<span class="tag ok">clear</span>'}</td>
   </tr>`);
 
   return layout({
@@ -481,12 +498,20 @@ ${scrollTable(
 /* Spend                                                               */
 /* ------------------------------------------------------------------ */
 
-export function spendPage({ rows, campaigns, saved = false, error = null, today }) {
+export function spendPage({ rows, campaigns, saved = false, error = null, today, windowDays = 90 }) {
   const spendRows = rows.map((r) => `<tr>${cell(r.day)}${cell(r.platform)}${cell(r.campaign_id || '—')}${auto(r.campaign_name ?? '—')}` +
     `<td class="n">${esc(money(r.spend_sar))}</td>${numCell(r.clicks)}${numCell(r.impressions)}</tr>`);
-  const campaignRows = campaigns.map((c) => `<tr>${cell(c.platform)}${cell(c.campaign_id || '—')}${auto(c.campaign_name ?? '—')}` +
-    `<td class="n">${esc(money(c.spend_sar))}</td>${numCell(c.clicks)}${numCell(c.impressions)}${numCell(c.leads)}` +
-    `<td class="n">${esc(c.cpl === null ? '—' : money(c.cpl))}</td></tr>`);
+  const campaignRows = campaigns.map((c) => {
+    // Zero leads and "we could not tie any lead to this row" look identical in a number,
+    // and they call for opposite actions: kill the campaign, or fix the UTM source.
+    const unmatched = !c.leads && c.unmatched_leads
+      ? `<span class="tag warn">unmatched — check the UTM source</span>`
+      : '';
+    return `<tr>${cell(c.platform)}${cell(c.campaign_id || '—')}${auto(c.campaign_name ?? '—')}` +
+      `<td class="n">${esc(money(c.spend_sar))}</td>${numCell(c.clicks)}${numCell(c.impressions)}` +
+      `<td class="n">${esc(number(c.leads))}${unmatched ? ` ${unmatched}` : ''}</td>` +
+      `<td class="n">${esc(c.cpl === null ? '—' : money(c.cpl))}</td></tr>`;
+  });
 
   const banner = error ? `<div class="err">${esc(messageFor(error))}</div>`
     : saved ? '<div class="ok">Spend saved.</div>' : '';
@@ -512,7 +537,8 @@ ${banner}
 ${scrollTable('<th>Platform</th><th>Campaign ID</th><th>Name</th><th class="n">Spend</th><th class="n">Clicks</th><th class="n">Impressions</th><th class="n">Leads</th><th class="n">CPL</th>', campaignRows, 'No spend recorded yet.')}
 
 <h2>Entries</h2>
-${scrollTable('<th>Day</th><th>Platform</th><th>Campaign ID</th><th>Name</th><th class="n">Spend</th><th class="n">Clicks</th><th class="n">Impressions</th>', spendRows, 'No spend recorded yet.')}`,
+<p class="sub">The last ${esc(windowDays)} days.</p>
+${scrollTable('<th>Day</th><th>Platform</th><th>Campaign ID</th><th>Name</th><th class="n">Spend</th><th class="n">Clicks</th><th class="n">Impressions</th>', spendRows, 'No spend recorded in this window.')}`,
   });
 }
 

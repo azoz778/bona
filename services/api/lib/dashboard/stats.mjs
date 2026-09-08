@@ -343,9 +343,15 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
    */
   function cplByCampaign() {
     const leads = new Map();
+    // Kept alongside the strict pair: leads carrying this campaign id under *any*
+    // platform label. When the pair finds nothing but this does, the row has not failed
+    // — the two vocabularies failed to meet, and the page says which.
+    const byIdAlone = new Map();
     for (const r of all("SELECT source, campaign_id, COUNT(*) AS n FROM leads WHERE campaign_id IS NOT NULL AND campaign_id != '' GROUP BY source, campaign_id")) {
       const key = campaignKey(r.source, r.campaign_id);
       leads.set(key, (leads.get(key) ?? 0) + num(r.n));
+      const id = String(r.campaign_id);
+      byIdAlone.set(id, (byIdAlone.get(id) ?? 0) + num(r.n));
     }
     return all(`SELECT platform, campaign_id, MAX(campaign_name) AS campaign_name,
                        SUM(spend_sar) AS spend_sar, SUM(clicks) AS clicks, SUM(impressions) AS impressions
@@ -361,6 +367,9 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
           clicks: r.clicks === null ? null : num(r.clicks),
           impressions: r.impressions === null ? null : num(r.impressions),
           leads: n,
+          // Leads on this campaign id that the platform names did not agree on. Zero
+          // leads with a positive `unmatched_leads` is a mapping problem, not a dud ad.
+          unmatched_leads: n ? 0 : (byIdAlone.get(String(r.campaign_id ?? '')) ?? 0),
           cpl: spend > 0 && n > 0 ? round2(spend / n) : null,
         };
       })
