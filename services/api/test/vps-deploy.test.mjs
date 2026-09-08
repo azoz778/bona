@@ -88,6 +88,8 @@ test('install-vps.sh --check on an empty HOME reports what is missing and exits 
   for (const s of ['retell.env', 'evolution-api.env', 'bona-services.env', 'bona-marketing.env', '9022fbec-de4f-44b9-805e-8fff285d6263.json', 'node', 'cloudflared', 'bona-api.service']) {
     assert.ok(r.stdout.includes(s), `--check should mention ${s}\n${r.stdout}`);
   }
+  // one greppable line per missing item
+  assert.match(stripAnsi(r.stdout), /^MISSING: secret file .*retell\.env \(0600\)$/m, r.stdout);
 });
 
 test('cutover.sh --dry-run prints the five steps and touches nothing', () => {
@@ -98,12 +100,21 @@ test('cutover.sh --dry-run prints the five steps and touches nothing', () => {
   assert.equal(readdirSync(home).length, 0, 'dry run must not create files');
 });
 
-test('no script under deploy/vps carries a secret-looking value', () => {
-  for (const f of readdirSync(VPS)) {
-    const p = path.join(VPS, f);
-    if (!statSync(p).isFile()) continue;
+// walk(dir) → every regular file below dir (templates/ and the shim fixtures included).
+function walk(dir) {
+  return readdirSync(dir).flatMap((f) => {
+    const p = path.join(dir, f);
+    return statSync(p).isDirectory() ? walk(p) : [p];
+  });
+}
+const stripAnsi = (t) => t.replace(/\x1b\[[0-9;]*m/g, '');
+
+test('no script, template or test shim under deploy/vps carries a secret-looking value', () => {
+  const files = [...walk(VPS), ...walk(SHIMS)];
+  assert.ok(files.some((f) => f.endsWith('bona-api.service.in')) && files.some((f) => f.endsWith('vps-shims/ssh')), 'scan covers templates and shims');
+  for (const p of files) {
     const text = readFileSync(p, 'utf8');
-    assert.doesNotMatch(text, /(key|token|secret|password)\s*[:=]\s*['"]?[A-Za-z0-9_\-]{24,}/i, f);
+    assert.doesNotMatch(text, /(key|token|secret|password)\s*[:=]\s*['"]?[A-Za-z0-9_\-]{24,}/i, p);
   }
 });
 
@@ -328,4 +339,66 @@ test('install-vps.sh refuses a non-x86_64 machine before downloading anything', 
   assert.match(r.stderr, /x86_64/);
   const lines = shimLog();
   assert.ok(!lines.some((l) => /^curl /.test(l)), `no download may start\n${lines.join('\n')}`);
+});
+
+// ---------------------------------------------------------------- readiness, install mode, unit parity
+test('install-vps.sh --check on a fully provisioned HOME reports every item ok and exits 0', () => {
+  const { home, env } = fakeVpsHome();
+  const secrets = path.join(home, '.secrets');
+  const cf = path.join(home, '.cloudflared');
+  const units = path.join(home, '.config', 'systemd', 'user');
+  for (const d of [secrets, cf, units]) mkdirSync(d, { recursive: true });
+  for (const f of ['retell.env', 'evolution-api.env', 'bona-services.env', 'bona-marketing.env']) {
+    writeFileSync(path.join(secrets, f), 'X=1\n');
+    chmodSync(path.join(secrets, f), 0o600);
+  }
+  writeFileSync(path.join(cf, '9022fbec-de4f-44b9-805e-8fff285d6263.json'), '{}');
+  chmodSync(path.join(cf, '9022fbec-de4f-44b9-805e-8fff285d6263.json'), 0o600);
+  writeFileSync(path.join(cf, 'bona.yml'), 'tunnel: x\n');
+  mkdirSync(path.join(home, 'bona-data'));
+  chmodSync(path.join(home, 'bona-data'), 0o700);
+  for (const u of ['bona-api.service', 'cloudflared-bona.service', 'bona-repo-sync.service', 'bona-repo-sync.timer']) writeFileSync(path.join(units, u), '[Unit]\n');
+  const r = bash([path.join(VPS, 'install-vps.sh'), '--check'], { env });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const lines = stripAnsi(r.stdout).split('\n').filter(Boolean);
+  assert.ok(lines.length > 15, `expected one line per item\n${r.stdout}`);
+  for (const l of lines) assert.match(l, /^( ok  |==> )/, `every line must be ok: ${l}`);
+  assert.ok(!stripAnsi(r.stdout + r.stderr).includes('MISSING'), r.stdout + r.stderr);
+});
+
+test('install-vps.sh install mode never enables, starts or restarts a unit', () => {
+  const src = readFileSync(path.join(VPS, 'install-vps.sh'), 'utf8');
+  assert.doesNotMatch(src, /systemctl --user (enable|start|restart)/);
+});
+
+// serviceKeys(unit text) → Map key → [values…] for the [Service] section only.
+function serviceKeys(text) {
+  const map = new Map();
+  let inService = false;
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (/^\[.*\]$/.test(line)) { inService = line === '[Service]'; continue; }
+    if (!inService || !line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    const k = line.slice(0, eq);
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(line.slice(eq + 1));
+  }
+  return map;
+}
+
+test('the rendered VPS unit keeps every [Service] directive of the PC unit (hardening parity)', () => {
+  const home = mkdtempSync(path.join(tmpdir(), 'bona-home-'));
+  const out = mkdtempSync(path.join(tmpdir(), 'bona-render-'));
+  const r = bash([path.join(VPS, 'install-vps.sh'), '--render-only', out], { env: { HOME: home } });
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const pc = serviceKeys(readFileSync(path.resolve(HERE, '../../deploy/bona-api.service'), 'utf8'));
+  const vps = serviceKeys(readFileSync(path.join(out, 'bona-api.service'), 'utf8'));
+  const differsByDesign = new Set(['Environment', 'WorkingDirectory', 'ExecStart', 'ReadWritePaths']);
+  assert.ok(pc.has('ProtectSystem') && pc.has('SystemCallFilter'), 'PC unit parsed');
+  for (const [k, vals] of pc) {
+    if (k === 'EnvironmentFile') continue; // the VPS unit must not load env files (see the render test)
+    assert.ok(vps.has(k), `VPS unit lacks ${k}=`);
+    if (!differsByDesign.has(k)) assert.deepEqual(vps.get(k), vals, `${k}= differs from the PC unit`);
+  }
 });
