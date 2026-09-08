@@ -130,6 +130,7 @@ test('cutover.sh --dry-run prints the five steps and touches nothing', () => {
   const r = bash([path.join(VPS, 'cutover.sh'), '--dry-run'], { env: { HOME: home, BONA_VPS_SSH: 'ssh-must-not-be-called' } });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   for (const s of ['stop', 'copy', 'start bona-api', 'start cloudflared-bona', 'disable']) assert.ok(r.stdout.toLowerCase().includes(s), s);
+  assert.match(r.stdout, /sudo systemctl/, 'the plan says the VPS units are driven with sudo systemctl');
   assert.equal(readdirSync(home).length, 0, 'dry run must not create files');
 });
 
@@ -165,7 +166,7 @@ function runShimmed(script, args = [], scenario = {}) {
   // SHIM_STALE_WAL (test-side only): the PC still has a bona.db-wal from before the cutover.
   const { SHIM_PRESEED_START, SHIM_STALE_WAL, ...env } = scenario;
   if (SHIM_STALE_WAL) writeFileSync(path.join(home, 'bona-data', 'bona.db-wal'), 'stale');
-  writeFileSync(log, SHIM_PRESEED_START ? 'ssh -o BatchMode=yes -o ConnectTimeout=20 fake-vps systemctl --user enable --now bona-api\n' : '');
+  writeFileSync(log, SHIM_PRESEED_START ? 'ssh -o BatchMode=yes -o ConnectTimeout=20 fake-vps sudo -n systemctl enable --now bona-api\n' : '');
   const r = bash([path.join(VPS, script), ...args], {
     env: {
       PATH: `${SHIMS}:${process.env.PATH}`,
@@ -183,6 +184,9 @@ function runShimmed(script, args = [], scenario = {}) {
   return { status: r.status, out: r.stdout + r.stderr, lines, home };
 }
 const REMOTE = '^ssh -o BatchMode=yes -o ConnectTimeout=20 fake-vps ';
+// On the VPS the units are SYSTEM units driven with `sudo -n systemctl` (lib.sh VPS_SYSTEMCTL);
+// on the PC they stay `systemctl --user`. The two prefixes below keep that distinction visible.
+const VPS_CTL = 'sudo -n systemctl';
 const CALL = {
   pcStop: /^systemctl --user stop cloudflared-bona bona-api$/,
   pcApiInactive: /^systemctl --user is-active --quiet bona-api$/,
@@ -190,11 +194,12 @@ const CALL = {
   scp: /^scp -q -p \S+\/bona-data\/bona\.db fake-vps:bona-data\/$/,
   vpsClearWal: new RegExp(`${REMOTE}rm -f ~\\/bona-data\\/bona\\.db-wal ~\\/bona-data\\/bona\\.db-shm$`),
   vpsLeadCount: new RegExp(`${REMOTE}~\\/\\.local\\/opt\\/node-v24\\.19\\.0-linux-x64\\/bin\\/node -e .* ~\\/bona-data\\/bona\\.db$`),
-  vpsStartApi: new RegExp(`${REMOTE}systemctl --user enable --now bona-api$`),
-  vpsStartTimer: new RegExp(`${REMOTE}systemctl --user enable --now bona-repo-sync\\.timer$`),
-  vpsStartTunnel: new RegExp(`${REMOTE}systemctl --user enable --now cloudflared-bona$`),
-  vpsStopAll: new RegExp(`${REMOTE}systemctl --user disable --now cloudflared-bona bona-api bona-repo-sync\\.timer$`),
-  vpsVerifyInactive: new RegExp(`${REMOTE}! systemctl --user is-active --quiet bona-api && ! systemctl --user is-active --quiet cloudflared-bona$`),
+  vpsStartApi: new RegExp(`${REMOTE}${VPS_CTL} enable --now bona-api$`),
+  vpsStartTimer: new RegExp(`${REMOTE}${VPS_CTL} enable --now bona-repo-sync\\.timer$`),
+  vpsStartTunnel: new RegExp(`${REMOTE}${VPS_CTL} enable --now cloudflared-bona$`),
+  vpsStopAll: new RegExp(`${REMOTE}${VPS_CTL} disable --now cloudflared-bona bona-api bona-repo-sync\\.timer$`),
+  vpsVerifyInactive: new RegExp(`${REMOTE}! ${VPS_CTL} is-active --quiet bona-api && ! ${VPS_CTL} is-active --quiet cloudflared-bona$`),
+  vpsApiActive: new RegExp(`${REMOTE}${VPS_CTL} is-active --quiet bona-api$`),
   vpsCheck: new RegExp(`${REMOTE}bash \\/tmp\\/bona-vps\\/install-vps\\.sh --check$`),
   pcNodeSqlite: /^node -e require\("node:sqlite"\)$/,
   pcDisable: /^systemctl --user disable bona-api cloudflared-bona$/,
@@ -214,8 +219,10 @@ function assertOrdered(lines, ...res) {
     last = i;
   }
 }
-const MANUAL_STOP = 'ssh fake-vps systemctl --user disable --now cloudflared-bona bona-api';
+const MANUAL_STOP = 'ssh fake-vps sudo -n systemctl disable --now cloudflared-bona bona-api';
 const MANUAL_START = 'systemctl --user enable --now bona-api cloudflared-bona';
+// Nothing sent over ssh may address the user manager: the VPS units are system units.
+const noRemoteUserManager = (r) => assert.ok(!r.lines.some((l) => /^ssh .*(systemctl|journalctl) --user/.test(l)), `remote systemctl/journalctl --user\n${r.lines.join('\n')}`);
 
 test('cutover.sh: happy path — stop PC, copy, start VPS API then tunnel, disable PC; no rollback', () => {
   const r = runShimmed('cutover.sh');
@@ -233,6 +240,9 @@ test('cutover.sh: happy path — stop PC, copy, start VPS API then tunnel, disab
   }
   assert.ok(!r.lines.some((l) => /^systemctl .*enable --now/.test(l)), `no PC unit may be started on success\n${r.lines.join('\n')}`);
   assert.ok(!r.lines.some((l) => CALL.vpsStopAll.test(l)), 'no rollback on success');
+  noRemoteUserManager(r);
+  // and the PC side still talks to its own user manager, never to sudo
+  assert.ok(r.lines.some((l) => CALL.pcStop.test(l)) && !r.lines.some((l) => /^sudo /.test(l)), `PC commands stay systemctl --user\n${r.lines.join('\n')}`);
 });
 
 test('cutover.sh: a PC node without node:sqlite is refused before anything is touched', () => {
@@ -257,7 +267,7 @@ test('cutover.sh: preflight finds bona-api already active on the VPS — refused
   const r = runShimmed('cutover.sh', [], { SHIM_VPS_ALREADY_ACTIVE: '1' });
   untouchedAfterPreflight(r);
   assert.match(r.out, /ALREADY running on the VPS/);
-  assertOrdered(r.lines, CALL.vpsCheck, new RegExp(`${REMOTE}systemctl --user is-active --quiet bona-api$`));
+  assertOrdered(r.lines, CALL.vpsCheck, CALL.vpsApiActive);
 });
 
 test('cutover.sh: preflight install-vps.sh --check fails on the VPS — refused, PC not stopped, VPS not disabled', () => {
@@ -282,6 +292,9 @@ test('cutover.sh: a VPS unit refuses to stop — fail closed: the PC units are n
   assert.ok(!r.lines.some((l) => /^systemctl .*enable --now/.test(l)), `PC units must NOT be started while the VPS may still run\n${r.lines.join('\n')}`);
   assert.ok(r.out.includes(MANUAL_STOP), `manual stop command missing:\n${r.out}`);
   assert.ok(r.out.includes(MANUAL_START), `manual start command missing:\n${r.out}`);
+  // the manual "is it really inactive?" line goes through sudo as well
+  assert.ok(r.out.includes('ssh fake-vps sudo -n systemctl is-active bona-api cloudflared-bona'), r.out);
+  noRemoteUserManager(r);
 });
 
 test('cutover.sh: ssh dies after the VPS API was started — fail closed, PC units never started', () => {
@@ -297,6 +310,7 @@ test('rollback.sh: stops the VPS units and verifies them inactive, only then sta
   assert.equal(r.status, 0, r.out);
   assertOrdered(r.lines, CALL.vpsStopAll, CALL.vpsVerifyInactive, CALL.pcStart, CALL.publicHealth);
   assert.ok(!r.lines.some((l) => /^scp /.test(l)), `plain rollback copies nothing\n${r.lines.join('\n')}`);
+  noRemoteUserManager(r);
 });
 
 // ---- --copy-back: the VPS's newer data replaces the PC's, all of it or none of it (Codex review)
@@ -423,11 +437,14 @@ test('sync-secrets.sh chmods the four named secret files on the VPS, not *.env',
   assert.ok(lines.some((l) => /^scp -q -p .*\/\.secrets\/retell\.env .* fake-vps:\.secrets\/$/.test(l)), lines.join('\n'));
 });
 
+// deploy.sh runs ON the VPS, so its systemctl calls go through `sudo -n` (system units); the sudo
+// shim logs the `sudo -n systemctl …` line and then execs the systemctl shim, which logs its own.
 const TIMER = {
-  wasActive: /^systemctl --user is-active --quiet bona-repo-sync\.timer$/,
+  wasActive: /^sudo -n systemctl is-active --quiet bona-repo-sync\.timer$/,
   // the timer AND its service: a pull already in flight must not collide with deploy.sh's own
-  stopBoth: /^systemctl --user stop bona-repo-sync\.timer bona-repo-sync\.service$/,
-  start: /^systemctl --user start bona-repo-sync\.timer$/,
+  stopBoth: /^sudo -n systemctl stop bona-repo-sync\.timer bona-repo-sync\.service$/,
+  start: /^sudo -n systemctl start bona-repo-sync\.timer$/,
+  restart: /^sudo -n systemctl restart bona-api\.service$/,
 };
 
 test('deploy.sh pauses bona-repo-sync.timer (+ its service) around pull/test/restart and starts the timer again only if it was active', () => {
@@ -439,16 +456,17 @@ test('deploy.sh pauses bona-repo-sync.timer (+ its service) around pull/test/res
     TIMER.stopBoth,
     new RegExp(`^git -C ${repo} pull --ff-only --quiet$`),
     /^node --test api\/test\/\*\.test\.mjs$/,
-    /^systemctl --user restart bona-api\.service$/,
+    TIMER.restart,
     /^curl .*http:\/\/127\.0\.0\.1:4120\/health$/,
     TIMER.start);
+  assert.ok(!shimLog().some((l) => /^(sudo -n )?systemctl --user/.test(l)), `deploy.sh must never address the user manager on the VPS\n${shimLog().join('\n')}`);
 
   // tests red → no restart, timer still started again (EXIT trap)
   const failing = fakeVpsHome();
   const f = bash([path.join(VPS, 'deploy.sh')], { env: { ...failing.env, SHIM_NODE_TEST_FAIL: '1' } });
   assert.notEqual(f.status, 0, 'deploy must fail when the tests fail');
   const lines = failing.shimLog();
-  assert.ok(!lines.some((l) => /^systemctl --user restart/.test(l)), `no restart on red tests\n${lines.join('\n')}`);
+  assert.ok(!lines.some((l) => /systemctl restart/.test(l)), `no restart on red tests\n${lines.join('\n')}`);
   assertOrdered(lines, TIMER.wasActive, TIMER.stopBoth, /^node --test/, TIMER.start);
 
   // timer was NOT active before (the owner paused it, or before the cutover enabled it) → deploy
@@ -457,7 +475,7 @@ test('deploy.sh pauses bona-repo-sync.timer (+ its service) around pull/test/res
   const p = bash([path.join(VPS, 'deploy.sh')], { env: { ...paused.env, SHIM_LOCAL_INACTIVE: 'bona-repo-sync.timer' } });
   assert.equal(p.status, 0, p.stdout + p.stderr);
   const plines = paused.shimLog();
-  assertOrdered(plines, TIMER.wasActive, TIMER.stopBoth, /^systemctl --user restart bona-api\.service$/);
+  assertOrdered(plines, TIMER.wasActive, TIMER.stopBoth, TIMER.restart);
   assert.ok(!plines.some((l) => TIMER.start.test(l)), `an inactive timer must stay inactive\n${plines.join('\n')}`);
 });
 
