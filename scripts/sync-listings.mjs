@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { HOUSE_PRICE_CAP, isHousePublic, sarAmount } from './curate/rules.mjs';
+import { HOUSE_PRICE_CAP, LAND_PRICE_CAP, isHousePublic, isLandPublic, sarAmount } from './curate/rules.mjs';
 
 const API = process.env.TK_PUBLIC_API || 'https://dashboard.azoz.uk/api/public/properties';
 const TIMEOUT_MS = 10_000;
@@ -106,14 +106,17 @@ async function main() {
     }
   }
 
-  // Owner rule 2026-09-08: houses over SAR 10,000,000 are not on the public site. A price
-  // rise from TK can push a published house over the cap, and the daily deploy runs this
-  // script and then builds WITHOUT re-running scripts/curate/build.mjs — so without this,
-  // a synced price would quietly republish a home the cap exists to hide. Drop it here.
-  const overCap = listings.filter((l) => !isHousePublic(l));
+  // Owner rules: houses over SAR 10,000,000 (2026-09-08) and land at or above SAR 50,000,000
+  // (2026-09-06) are not on the public site. A price rise from TK can push a published listing
+  // over its cap, and the daily deploy runs this script and then builds WITHOUT re-running
+  // scripts/curate/build.mjs — so without this, a synced price would quietly republish what
+  // the cap exists to hide. Drop it here. (Codex review 2026-09-08: land was missing.)
+  const overCap = listings.filter((l) => !isHousePublic(l) || !isLandPublic(l));
   if (overCap.length) {
     for (const l of overCap) {
-      changes.push(`${l.id} REMOVED — house over the SAR ${HOUSE_PRICE_CAP.toLocaleString('en-US')} cap (${Math.round(sarAmount(l.price)).toLocaleString('en-US')} SAR eq.)`);
+      const which = !isHousePublic(l) ? `house over the SAR ${HOUSE_PRICE_CAP.toLocaleString('en-US')} cap` : `land at/above the SAR ${LAND_PRICE_CAP.toLocaleString('en-US')} cap`;
+      const sar = sarAmount(l.price);
+      changes.push(`${l.id} REMOVED — ${which} (${sar === null ? 'no published price' : `${Math.round(sar).toLocaleString('en-US')} SAR eq.`})`);
     }
     const drop = new Set(overCap.map((l) => l.id));
     listings = listings.filter((l) => !drop.has(l.id));
