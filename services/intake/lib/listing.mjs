@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOMS } from '../../../scripts/curate/rooms.mjs';
-import { HOUSE_PRICE_CAP, INTAKE_ID_RE, isHousePublic, licenceProblems, LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, sarAmount, videoEntryProblems } from '../../../scripts/curate/rules.mjs';
+import { INTAKE_ID_RE, isPublishable, licenceProblems, LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, videoEntryProblems } from '../../../scripts/curate/rules.mjs';
 
 export const INBOX_DIR = path.join('scripts', 'curate', 'inbox');
 export const INDEX_FILE = '_index.json';
@@ -295,13 +295,12 @@ export function checkListing(listing, { minImages = 4, maxImages = 10 } = {}) {
     if (!Array.isArray(h) || h.length < 4 || h.length > 6) e.push(`highlights.${lang} needs 4–6 items`);
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(listing.listedAt || '')) e.push(`bad listedAt ${listing.listedAt}`);
-  // Owner rule 2026-09-08: a house over the cap is not published. Refused HERE, not merely
-  // filtered out of listings.json later, because the intake commits public/listings/<slug>/
-  // photos and brochure.pdf — GitHub Pages serves those directly, so a listing that is only
-  // filtered downstream still leaks its pictures and the owner's full brochure.
-  if (!isHousePublic(listing)) {
-    const sar = sarAmount(listing.price);
-    e.push(`this house is over the SAR ${HOUSE_PRICE_CAP.toLocaleString('en-US')} public-site price cap (${Math.round(sar).toLocaleString('en-US')} SAR equivalent), so it was not published — share it on enquiry instead`);
+  // A withheld listing is refused HERE, not merely filtered out of listings.json later,
+  // because the intake commits public/listings/<slug>/ photos and brochure.pdf — GitHub
+  // Pages serves those directly, so a listing that is only filtered downstream still leaks
+  // its pictures and the owner's full brochure.
+  if (!isPublishable(listing)) {
+    e.push('this listing is withheld from the public site by owner decision — share it on enquiry instead');
   }
   return e;
 }
