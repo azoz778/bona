@@ -876,7 +876,12 @@ test('POST /v1/enquiry lands a form lead with the visitor\'s source, queues the 
     assert.deepEqual(submit.props, { form: 'listing', cta: 'enquiry' });
     const created = app.db.recentEvents({ name: 'lead_created' })[0];
     assert.equal(created.lead_id, body.lead_id);
-    assert.deepEqual(app.db.dueFanout(Date.now() + 1000).filter((f) => f.event_id === created.event_id).map((f) => f.dest), ['meta', 'ga4', 'snap']);
+    // The fan-out is keyed on the BROWSER's event id, not on this server-side record: the
+    // pixel already fired Lead under it, and Meta de-duplicates on it. Keying the
+    // Conversions API call on a fresh id would show the same enquiry twice.
+    const queued = app.db.dueFanout(Date.now() + 1000);
+    assert.deepEqual(queued.filter((f) => f.event_id === 'mf3k2a1b-form0001').map((f) => f.dest), ['meta', 'ga4', 'snap']);
+    assert.deepEqual(queued.filter((f) => f.event_id === created.event_id), [], 'not queued twice');
 
     assert.equal(sent.length, 1);
     assert.match(sent[0], /Sara Ahmed/);
@@ -901,7 +906,11 @@ test('an enquiry with no attribution at all is still a lead, sourced as "form"',
     assert.equal(lead.source, 'form');
     assert.equal(lead.session_id, null);
     assert.equal(app.db.recentEvents({ name: 'form_submit' }).length, 0, 'no session, no browser event to record');
-    assert.equal(app.db.recentEvents({ name: 'lead_created' }).length, 1);
+    const created = app.db.recentEvents({ name: 'lead_created' });
+    assert.equal(created.length, 1);
+    // With no browser event there is no pixel to agree with, so the fan-out falls back to
+    // this record's own id rather than queueing against an event that does not exist.
+    assert.deepEqual(app.db.dueFanout(Date.now() + 1000).map((f) => f.event_id), [created[0].event_id, created[0].event_id, created[0].event_id]);
   });
 });
 
