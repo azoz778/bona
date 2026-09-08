@@ -463,6 +463,90 @@ test('a record that fails every time is written off after three tries rather tha
   db.close();
 });
 
+/** A reader that honours the window it is given, like Evolution does. */
+function windowReader(pool) {
+  const asked = [];
+  return {
+    asked,
+    find: async ({ gte, lte }) => {
+      asked.push({ gte, lte });
+      // Newest first, the way the real API answers.
+      return { records: pool.filter((r) => r.ts >= gte && r.ts <= lte).sort((a, b) => b.ts - a.ts) };
+    },
+  };
+}
+
+test('a failed record is kept inside the window until it is handled or written off, however new the rest is', async () => {
+  // The failing one is minutes older than the message that came after it: if the cursor
+  // followed the newest message, the older one would fall out of the window for ever.
+  const old = msg({ id: 'OLD', ts: NOW - 300_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const fresh = msg({ id: 'FRESH', ts: NOW - 10_000, text: 'مرحبا بونا' });
+  const db = openDb(':memory:');
+  const reader = windowReader([old, fresh]);
+  const logs = [];
+  let clock = NOW;
+  const poller = createPoller({
+    db: flakyDb(db, Infinity), // every Ref lookup throws; the keyword message is unaffected
+    cfg: { env: { BONA_OWNER_JID: OWNER } },
+    findMessages: reader.find,
+    sendWhatsApp: async () => ({ ok: true }),
+    log: (o) => logs.push(o),
+    now: () => clock,
+  });
+
+  const first = await poller.tick();
+  assert.equal(first.created, 1, 'the newer message still becomes its lead');
+  assert.equal(db.waSeenHas('OLD'), false);
+  assert.ok(db.waCursorGet(INSTANCE).last_ts <= old.ts, 'the cursor waits for the record it could not handle');
+
+  clock = NOW + 45_000;
+  const second = await poller.tick();
+  assert.ok(reader.asked[1].gte <= old.ts, 'so the next window still reaches it');
+  assert.equal(second.scanned >= 1, true);
+  assert.equal(logs.filter((l) => l.evt === 'wa.poll.record_failed').length, 2, 'it was tried again');
+
+  clock = NOW + 90_000;
+  await poller.tick();
+  const failed = logs.filter((l) => l.evt === 'wa.poll.record_failed');
+  assert.equal(failed.length, MAX_RECORD_ATTEMPTS);
+  assert.equal(failed.at(-1).writtenOff, true, 'three tries and it is written off, not retried for ever');
+  assert.equal(db.waSeenHas('OLD'), true);
+
+  clock = NOW + 135_000;
+  const fourth = await poller.tick();
+  assert.equal(fourth.ignored, db.waSeenHas('FRESH') ? fourth.scanned : fourth.ignored, 'everything in the window is now handled');
+  assert.ok(db.waCursorGet(INSTANCE).last_ts > old.ts, 'and the cursor is free to move on');
+  db.close();
+});
+
+test('a failure the next window can no longer reach is given up on out loud, not remembered for ever', async () => {
+  // The hold-back is bounded by the floor, so a long enough gap between ticks — the loop
+  // stopped, the PC slept — eventually puts the record out of reach. That is a loss, and
+  // it has to be said rather than left as an attempt counter nobody will ever decrement.
+  const stale = msg({ id: 'STALE', ts: NOW - 300_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const db = openDb(':memory:');
+  const reader = windowReader([stale]);
+  const logs = [];
+  let clock = NOW;
+  const poller = createPoller({
+    db: flakyDb(db, Infinity),
+    cfg: { env: { BONA_OWNER_JID: OWNER } },
+    findMessages: reader.find,
+    log: (o) => logs.push(o),
+    now: () => clock,
+  });
+  await poller.tick();
+  assert.equal(logs.some((l) => l.evt === 'wa.poll.abandoned'), false, 'while it is still reachable it is still owed a try');
+
+  clock = NOW + 8 * 60_000;
+  await poller.tick();
+
+  assert.equal(logs.filter((l) => l.evt === 'wa.poll.record_failed').length, 2, 'it never reached the third try');
+  assert.equal(logs.find((l) => l.evt === 'wa.poll.abandoned').count, 1);
+  assert.ok(db.waCursorGet(INSTANCE).last_ts >= clock - MAX_WINDOW_MS, 'and the cursor is not held by it any more');
+  db.close();
+});
+
 /* ---------------- a window too big to read ---------------- */
 
 test('a window that overflowed the page cap says so — its oldest messages are unreachable', async () => {
@@ -632,6 +716,10 @@ test('with no Evolution credentials the loop does nothing at all — it does not
   assert.equal(poller.status().configured, false);
   assert.equal(db.waCursorGet(INSTANCE), null);
   assert.equal(logs[0].evt, 'wa.poll.skipped');
+
+  await poller.tick();
+  await poller.tick();
+  assert.equal(logs.length, 1, 'a missing key is a standing state, not news every 45 seconds');
   db.close();
 });
 

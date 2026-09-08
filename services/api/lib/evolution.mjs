@@ -110,7 +110,7 @@ export function textOf(record) {
 export function contextOf(record) {
   const m = unwrapMessage(record?.message);
   const parts = m && typeof m === 'object'
-    ? [m.extendedTextMessage, m.imageMessage, m.videoMessage, m.documentMessage, m.conversationContextInfo]
+    ? [m.extendedTextMessage, m.imageMessage, m.videoMessage, m.documentMessage]
     : [];
   for (const part of parts) {
     const ctx = part && typeof part === 'object' ? part.contextInfo : null;
@@ -148,13 +148,15 @@ export function normaliseRecord(record) {
 /**
  * Oldest first, by timestamp. Evolution answers newest-first, and a caller that acts on
  * the records in that order sees the effect before the cause: a follow-up before the
- * message that creates the lead, a reply before the enquiry it answers. Records with no
- * usable timestamp keep their relative API order, reversed.
+ * message that creates the lead, a reply before the enquiry it answers. A record with no
+ * usable timestamp sorts last (there is nothing to place it by) and keeps its relative API
+ * order, reversed — so the newest-first tail becomes an oldest-first tail.
  */
 export function oldestFirst(records) {
+  const at = (r) => (Number.isFinite(r?.ts) ? r.ts : Infinity);
   return (records || [])
-    .map((r, i) => ({ r, i }))
-    .sort((a, b) => (Number.isFinite(a.r?.ts) && Number.isFinite(b.r?.ts) && a.r.ts !== b.r.ts ? a.r.ts - b.r.ts : b.i - a.i))
+    .map((r, i) => ({ r, i, ts: at(r) }))
+    .sort((a, b) => (a.ts === b.ts ? b.i - a.i : a.ts - b.ts))
     .map((x) => x.r);
 }
 
