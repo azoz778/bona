@@ -386,17 +386,25 @@ test('sync-secrets.sh chmods the four named secret files on the VPS, not *.env',
   assert.ok(lines.some((l) => /^scp -q -p .*\/\.secrets\/retell\.env .* fake-vps:\.secrets\/$/.test(l)), lines.join('\n'));
 });
 
-test('deploy.sh pauses bona-repo-sync.timer around pull/test/restart and always starts it again', () => {
+const TIMER = {
+  wasActive: /^systemctl --user is-active --quiet bona-repo-sync\.timer$/,
+  // the timer AND its service: a pull already in flight must not collide with deploy.sh's own
+  stopBoth: /^systemctl --user stop bona-repo-sync\.timer bona-repo-sync\.service$/,
+  start: /^systemctl --user start bona-repo-sync\.timer$/,
+};
+
+test('deploy.sh pauses bona-repo-sync.timer (+ its service) around pull/test/restart and starts the timer again only if it was active', () => {
   const { repo, env, shimLog } = fakeVpsHome();
   const r = bash([path.join(VPS, 'deploy.sh')], { env });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assertOrdered(shimLog(),
-    /^systemctl --user stop bona-repo-sync\.timer$/,
+    TIMER.wasActive,
+    TIMER.stopBoth,
     new RegExp(`^git -C ${repo} pull --ff-only --quiet$`),
     /^node --test api\/test\/\*\.test\.mjs$/,
     /^systemctl --user restart bona-api\.service$/,
     /^curl .*http:\/\/127\.0\.0\.1:4120\/health$/,
-    /^systemctl --user start bona-repo-sync\.timer$/);
+    TIMER.start);
 
   // tests red → no restart, timer still started again (EXIT trap)
   const failing = fakeVpsHome();
@@ -404,7 +412,16 @@ test('deploy.sh pauses bona-repo-sync.timer around pull/test/restart and always 
   assert.notEqual(f.status, 0, 'deploy must fail when the tests fail');
   const lines = failing.shimLog();
   assert.ok(!lines.some((l) => /^systemctl --user restart/.test(l)), `no restart on red tests\n${lines.join('\n')}`);
-  assertOrdered(lines, /^systemctl --user stop bona-repo-sync\.timer$/, /^node --test/, /^systemctl --user start bona-repo-sync\.timer$/);
+  assertOrdered(lines, TIMER.wasActive, TIMER.stopBoth, /^node --test/, TIMER.start);
+
+  // timer was NOT active before (the owner paused it, or before the cutover enabled it) → deploy
+  // must not switch it on as a side effect
+  const paused = fakeVpsHome();
+  const p = bash([path.join(VPS, 'deploy.sh')], { env: { ...paused.env, SHIM_LOCAL_INACTIVE: 'bona-repo-sync.timer' } });
+  assert.equal(p.status, 0, p.stdout + p.stderr);
+  const plines = paused.shimLog();
+  assertOrdered(plines, TIMER.wasActive, TIMER.stopBoth, /^systemctl --user restart bona-api\.service$/);
+  assert.ok(!plines.some((l) => TIMER.start.test(l)), `an inactive timer must stay inactive\n${plines.join('\n')}`);
 });
 
 test('render() keeps & and | in a value verbatim (no sed, no patsub_replacement surprises)', () => {
