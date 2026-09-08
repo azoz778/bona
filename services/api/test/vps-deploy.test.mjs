@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const VPS = path.resolve(HERE, '../../deploy/vps');
 const SCRIPTS = ['lib.sh', 'install-vps.sh', 'deploy.sh', 'sync-secrets.sh', 'cutover.sh', 'rollback.sh'];
+const SHIMS = path.join(HERE, 'fixtures', 'vps-shims');
 
 function bash(args, opts = {}) {
   return spawnSync('bash', args, { encoding: 'utf8', env: { PATH: process.env.PATH, ...opts.env }, cwd: VPS });
@@ -98,4 +99,114 @@ test('no script under deploy/vps carries a secret-looking value', () => {
     const text = readFileSync(p, 'utf8');
     assert.doesNotMatch(text, /(key|token|secret|password)\s*[:=]\s*['"]?[A-Za-z0-9_\-]{24,}/i, f);
   }
+});
+
+// ---------------------------------------------------------------- cutover / rollback through the shims
+// Every ssh/scp/systemctl/curl/node call the scripts make lands in the shim log, one argv per line
+// (fixtures/vps-shims/*). Nothing real is touched: HOME is a temp dir, BONA_VPS_SSH is a fake host,
+// BONA_WAIT_SCALE=0 makes wait_for retry without sleeping.
+function runShimmed(script, args = [], scenario = {}) {
+  const home = mkdtempSync(path.join(tmpdir(), 'bona-home-'));
+  mkdirSync(path.join(home, 'bona-data'), { recursive: true });
+  writeFileSync(path.join(home, 'bona-data', 'bona.db'), '');
+  const log = path.join(home, 'shim.log');
+  // SHIM_PRESEED_START (test-side only): pretend an `enable --now bona-api` already went over ssh,
+  // so a SHIM_SSH_DOWN_AFTER_START scenario is down from the very first call.
+  const { SHIM_PRESEED_START, ...env } = scenario;
+  writeFileSync(log, SHIM_PRESEED_START ? 'ssh -o BatchMode=yes -o ConnectTimeout=20 fake-vps systemctl --user enable --now bona-api\n' : '');
+  const r = bash([path.join(VPS, script), ...args], {
+    env: {
+      PATH: `${SHIMS}:${process.env.PATH}`,
+      HOME: home,
+      SHIM_LOG: log,
+      BONA_VPS_SSH: 'fake-vps',
+      PC_NODE: path.join(SHIMS, 'node'),
+      BONA_PUBLIC_HEALTH: 'https://public-health.invalid/health',
+      BONA_WAIT_SCALE: '0',
+      ...env,
+    },
+  });
+  const lines = readFileSync(log, 'utf8').split('\n').filter(Boolean);
+  return { status: r.status, out: r.stdout + r.stderr, lines, home };
+}
+const REMOTE = '^ssh -o BatchMode=yes -o ConnectTimeout=20 fake-vps ';
+const CALL = {
+  pcStop: /^systemctl --user stop cloudflared-bona bona-api$/,
+  scp: /^scp -q -p \S+\/bona-data\/bona\.db fake-vps:bona-data\/$/,
+  vpsLeadCount: new RegExp(`${REMOTE}~\\/\\.local\\/opt\\/node-v24\\.19\\.0-linux-x64\\/bin\\/node -e .* ~\\/bona-data\\/bona\\.db$`),
+  vpsStartApi: new RegExp(`${REMOTE}systemctl --user enable --now bona-api$`),
+  vpsStartTimer: new RegExp(`${REMOTE}systemctl --user enable --now bona-repo-sync\\.timer$`),
+  vpsStartTunnel: new RegExp(`${REMOTE}systemctl --user enable --now cloudflared-bona$`),
+  vpsStopAll: new RegExp(`${REMOTE}systemctl --user disable --now cloudflared-bona bona-api bona-repo-sync\\.timer$`),
+  vpsVerifyInactive: new RegExp(`${REMOTE}! systemctl --user is-active --quiet bona-api && ! systemctl --user is-active --quiet cloudflared-bona$`),
+  pcDisable: /^systemctl --user disable bona-api cloudflared-bona$/,
+  pcStart: /^systemctl --user enable --now bona-api cloudflared-bona$/,
+  publicHealth: /^curl .*https:\/\/public-health\.invalid\/health$/,
+};
+// assertOrdered(lines, re1, re2, …) → each call happened, and in this order.
+function assertOrdered(lines, ...res) {
+  let last = -1;
+  for (const re of res) {
+    const i = lines.findIndex((l) => re.test(l));
+    assert.ok(i >= 0, `expected a call matching ${re}\n--- shim log ---\n${lines.join('\n')}`);
+    assert.ok(i > last, `${re} should come after the previous call\n--- shim log ---\n${lines.join('\n')}`);
+    last = i;
+  }
+}
+const MANUAL_STOP = 'ssh fake-vps systemctl --user disable --now cloudflared-bona bona-api';
+const MANUAL_START = 'systemctl --user enable --now bona-api cloudflared-bona';
+
+test('cutover.sh: happy path — stop PC, copy, start VPS API then tunnel, disable PC; no rollback', () => {
+  const r = runShimmed('cutover.sh');
+  assert.equal(r.status, 0, r.out);
+  assertOrdered(r.lines, CALL.pcStop, CALL.scp, CALL.vpsStartApi, CALL.vpsStartTunnel, CALL.publicHealth, CALL.pcDisable);
+  assert.ok(r.lines.some((l) => CALL.vpsLeadCount.test(l)), 'the VPS lead count must be taken');
+  assert.ok(!r.lines.some((l) => /^systemctl .*enable --now/.test(l)), `no PC unit may be started on success\n${r.lines.join('\n')}`);
+  assert.ok(!r.lines.some((l) => CALL.vpsStopAll.test(l)), 'no rollback on success');
+});
+
+test('cutover.sh: public health never comes back — VPS units stopped AND verified inactive before the PC units start', () => {
+  const r = runShimmed('cutover.sh', [], { SHIM_PUBLIC_HEALTH_FAIL: '1' });
+  assert.notEqual(r.status, 0, 'cutover must fail');
+  assertOrdered(r.lines, CALL.vpsStartTunnel, CALL.publicHealth, CALL.vpsStopAll, CALL.vpsVerifyInactive, CALL.pcStart);
+  assert.ok(!r.lines.some((l) => CALL.pcDisable.test(l)), 'the PC units must not be disabled after a failed cutover');
+});
+
+test('cutover.sh: a VPS unit refuses to stop — fail closed: the PC units are never started, manual commands printed', () => {
+  const r = runShimmed('cutover.sh', [], { SHIM_PUBLIC_HEALTH_FAIL: '1', SHIM_VPS_STOP_FAILS: '1' });
+  assert.notEqual(r.status, 0, 'cutover must fail');
+  assertOrdered(r.lines, CALL.vpsStopAll, CALL.vpsVerifyInactive);
+  assert.ok(!r.lines.some((l) => /^systemctl .*enable --now/.test(l)), `PC units must NOT be started while the VPS may still run\n${r.lines.join('\n')}`);
+  assert.ok(r.out.includes(MANUAL_STOP), `manual stop command missing:\n${r.out}`);
+  assert.ok(r.out.includes(MANUAL_START), `manual start command missing:\n${r.out}`);
+});
+
+test('cutover.sh: ssh dies after the VPS API was started — fail closed, PC units never started', () => {
+  const r = runShimmed('cutover.sh', [], { SHIM_SSH_DOWN_AFTER_START: '1' });
+  assert.notEqual(r.status, 0, 'cutover must fail');
+  assertOrdered(r.lines, CALL.vpsStartApi, CALL.vpsStopAll);
+  assert.ok(!r.lines.some((l) => /^systemctl .*enable --now/.test(l)), `PC units must NOT be started when the VPS cannot be reached\n${r.lines.join('\n')}`);
+  assert.ok(r.out.includes(MANUAL_STOP) && r.out.includes(MANUAL_START), `manual commands missing:\n${r.out}`);
+});
+
+test('rollback.sh: stops the VPS units and verifies them inactive, only then starts the PC units', () => {
+  const r = runShimmed('rollback.sh');
+  assert.equal(r.status, 0, r.out);
+  assertOrdered(r.lines, CALL.vpsStopAll, CALL.vpsVerifyInactive, CALL.pcStart, CALL.publicHealth);
+});
+
+test('rollback.sh: a VPS unit refuses to stop — fail closed, PC units never started', () => {
+  const r = runShimmed('rollback.sh', [], { SHIM_VPS_STOP_FAILS: '1' });
+  assert.notEqual(r.status, 0, 'rollback must fail');
+  assertOrdered(r.lines, CALL.vpsStopAll, CALL.vpsVerifyInactive);
+  assert.ok(!r.lines.some((l) => /^systemctl .*enable --now/.test(l)), `PC units must NOT be started\n${r.lines.join('\n')}`);
+  assert.ok(r.out.includes(MANUAL_STOP) && r.out.includes(MANUAL_START), `manual commands missing:\n${r.out}`);
+});
+
+test('rollback.sh: VPS unreachable — fail closed (a "could not reach" warning is not enough)', () => {
+  // SHIM_SSH_DOWN_AFTER_START needs an enable to have been seen; pre-seed the log with one so every call fails.
+  const r = runShimmed('rollback.sh', [], { SHIM_SSH_DOWN_AFTER_START: '1', SHIM_PRESEED_START: '1' });
+  assert.notEqual(r.status, 0, 'rollback must fail');
+  assert.ok(!r.lines.some((l) => /^systemctl .*enable --now/.test(l)), `PC units must NOT be started\n${r.lines.join('\n')}`);
+  assert.ok(r.out.includes(MANUAL_STOP) && r.out.includes(MANUAL_START), `manual commands missing:\n${r.out}`);
 });

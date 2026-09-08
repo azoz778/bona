@@ -13,6 +13,8 @@ BONA_REPO_URL=${BONA_REPO_URL:-https://github.com/azoz778/bona}
 BONA_VPS_EVOLUTION_URL=${BONA_VPS_EVOLUTION_URL:-http://127.0.0.1:8085}   # the same Evolution API as wa-api.azoz.uk, one hop shorter
 BONA_VPS_SSH=${BONA_VPS_SSH:-hermes-vps}
 BONA_PUBLIC_HEALTH=${BONA_PUBLIC_HEALTH:-https://api.bona-real-estate.com/health}
+# Multiplied into every wait_for pause (integer). The tests set 0 so retries do not sleep.
+BONA_WAIT_SCALE=${BONA_WAIT_SCALE:-1}
 
 NODE_VERSION=v24.19.0
 NODE_SHA256=14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647
@@ -22,6 +24,8 @@ CLOUDFLARED_SHA256=f29324fe934d1e100617484c78deef803c4dc2cd351d645bbde42e96b4fcc
 SECRET_FILES="retell.env evolution-api.env bona-services.env bona-marketing.env"
 DATA_FILES="bona.db bona.db-wal bona.db-shm leads.jsonl chats.jsonl calls.jsonl"
 UNITS="bona-api.service cloudflared-bona.service bona-repo-sync.service bona-repo-sync.timer"
+# Stop order on the VPS: the tunnel connector first (no more public traffic), then the API, then the timer.
+VPS_UNITS="cloudflared-bona bona-api bona-repo-sync.timer"
 
 HOME_DIR=${HOME:?HOME is not set}
 NODE_DIR="$HOME_DIR/.local/opt/node-$NODE_VERSION-linux-x64"
@@ -71,7 +75,7 @@ wait_for() {
   local tries=$1 pause=$2 i; shift 2
   for ((i = 1; i <= tries; i++)); do
     if "$@" >/dev/null 2>&1; then return 0; fi
-    sleep "$pause"
+    sleep "$((pause * BONA_WAIT_SCALE))"
   done
   return 1
 }
@@ -79,4 +83,32 @@ wait_for() {
 # count_leads NODE_BINARY DB_FILE → prints the number of rows in `leads` (read-only; WAL-safe).
 count_leads() {
   "$1" -e 'const { DatabaseSync } = require("node:sqlite"); const db = new DatabaseSync(process.argv[1], { readOnly: true }); console.log(db.prepare("select count(*) as n from leads").get().n)' "$2"
+}
+
+# vps_units_stopped → over ssh: disable + stop every VPS unit, then VERIFY the API and the tunnel
+# connector are inactive. Returns non-zero when ssh fails or a unit is still active — and then the
+# caller must NOT start the PC units (fail closed: two APIs or two connectors is the one thing the
+# move must never produce). Needs the caller's `vps` ssh wrapper.
+vps_units_stopped() {
+  vps "systemctl --user disable --now $VPS_UNITS" || return 1
+  vps "! systemctl --user is-active --quiet bona-api && ! systemctl --user is-active --quiet cloudflared-bona"
+}
+
+# fail_closed → the VPS units could not be verified inactive: say so loudly, print the manual
+# commands in the order to run them, start NOTHING on the PC, exit 1.
+fail_closed() {
+  cat >&2 <<EOF
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!  The VPS units could NOT be verified inactive (ssh failed, or a unit is still active).
+!!  NOTHING was started on this PC: a second API or a second tunnel connector must never run.
+!!  Finish the rollback by hand, in this order:
+!!    1. ssh $BONA_VPS_SSH systemctl --user disable --now $VPS_UNITS
+!!    2. ssh $BONA_VPS_SSH systemctl --user is-active bona-api cloudflared-bona   # both: inactive
+!!    3. systemctl --user enable --now bona-api cloudflared-bona
+!!    4. curl -fsS $BONA_PUBLIC_HEALTH
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+EOF
+  exit 1
 }
