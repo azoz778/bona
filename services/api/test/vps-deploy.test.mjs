@@ -278,7 +278,7 @@ test('cutover.sh: preflight finds legacy user units or processes on the VPS — 
   assert.ok(probe, r.lines.join('\n'));
   // the process probes are anchored to the binary, so the remote shell carrying the pattern never matches itself
   assert.match(probe, /pgrep -u \$\(id -un\) -f '\^\[\^ \]\*\/node \/opt\/bona\/services\/api\/index\[\.\]mjs'/);
-  assert.match(probe, /pgrep -u \$\(id -un\) -f '\^\[\^ \]\*\/cloudflared \.\*tunnel run 9022fbec-de4f-44b9-805e-8fff285d6263'/);
+  assert.match(probe, /pgrep -u \$\(id -un\) -f "\^\[\^ \]\*\/cloudflared \.\*--config \$HOME\/\.cloudflared\/bona\[\.\]yml \.\*tunnel run 9022fbec-de4f-44b9-805e-8fff285d6263"/);
 });
 
 test('cutover.sh: preflight install-vps.sh --check fails on the VPS — refused, PC not stopped, VPS not disabled', () => {
