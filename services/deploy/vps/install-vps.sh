@@ -46,8 +46,9 @@ fi
 # ---------------------------------------------------------------- check (read-only)
 check_state() { # prints one line per item; returns the number of missing items
   local missing=0 f u
-  # Every item line is the report itself, so MISSING goes to stdout like ok (warn alone would send it to stderr).
-  item() { if "$@"; then ok "$_label"; else warn "MISSING: $_label" 2>&1; missing=$((missing + 1)); fi; }
+  # Every item line is the report itself: ok lines and plain "MISSING: <item>" lines both go to stdout
+  # (machine-readable, no colour prefix), only the final summary uses warn/ok.
+  item() { if "$@"; then ok "$_label"; else printf 'MISSING: %s\n' "$_label"; missing=$((missing + 1)); fi; }
   _label="node $NODE_VERSION at $NODE_BIN/node";            item test -x "$NODE_BIN/node"
   _label="node reports $NODE_VERSION";                       item bash -c "[ -x '$NODE_BIN/node' ] && [ \"\$('$NODE_BIN/node' -v)\" = '$NODE_VERSION' ]"
   _label="node:sqlite loads";                                item bash -c "[ -x '$NODE_BIN/node' ] && '$NODE_BIN/node' -e 'require(\"node:sqlite\")'"
