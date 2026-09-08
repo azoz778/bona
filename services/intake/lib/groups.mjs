@@ -24,3 +24,13 @@ export function seedGroups(groupJids, isAnnounced) {
   }
   return out;
 }
+
+/**
+ * Of the groups discovery selected, only those whose history is already marked as seen
+ * (= announced) may be polled. A group whose history seeding failed stays out until the
+ * next scan seeds it; polling it would treat every old message as new.
+ * @param {{id: string}[]} selected  @param {(jid: string) => boolean} isAnnounced
+ */
+export function pollableGroups(selected, isAnnounced) {
+  return (selected ?? []).filter((g) => g && typeof g.id === 'string' && isAnnounced(g.id));
+}
