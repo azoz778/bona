@@ -827,7 +827,7 @@ async function main() {
   // the scan cadence, never every poll — hammering the throttled call is what kept it tripped.
   if (!groups.length) {
     groups = seedGroups(cfg.groupJids, state.isAnnounced);
-    if (groups.length) log.info('group.seeded', { jids: groups.map((g) => g.id) });
+    if (groups.length) log.info('group.seeded_from_config', { jids: groups.map((g) => g.id) });
   }
   let lastScan = 0;
   while (!stopping) {
