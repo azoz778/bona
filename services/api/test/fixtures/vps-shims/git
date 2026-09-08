@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Fake `git` for the deploy.sh test: records argv in $SHIM_LOG; rev-parse prints a short SHA.
+set -u
+[ -n "${SHIM_LOG:-}" ] && printf 'git %s\n' "$*" >> "$SHIM_LOG"
+case " $* " in
+  *" rev-parse "*) echo abc1234 ;;
+esac
+exit 0

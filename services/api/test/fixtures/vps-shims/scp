@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Fake `scp`: records argv in $SHIM_LOG, copies nothing, exits 0.
+set -u
+printf 'scp %s\n' "$*" >> "${SHIM_LOG:?SHIM_LOG must point at the log file}"
+exit 0

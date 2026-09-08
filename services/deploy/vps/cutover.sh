@@ -6,6 +6,9 @@
 #   3. start bona-api on the VPS, wait for 127.0.0.1:4120/health, compare lead counts
 #   4. start cloudflared-bona on the VPS, wait for the public /health
 #   5. disable the two units here (files stay for rollback.sh)
+# The automatic rollback is fail-closed: the PC units come back ONLY after the VPS units are
+# verified inactive; if the VPS cannot be reached or refuses to stop, nothing starts here and the
+# manual commands are printed (two APIs or two tunnel connectors must never run).
 #   cutover.sh --dry-run   print the plan, touch nothing, call nothing.
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -39,11 +42,19 @@ done
 ok "VPS ready, nothing running there yet"
 
 FINISHED=0
+VPS_STARTED=0   # 1 once anything was enabled on the VPS; rollback() must then stop it first
+# Fail-closed rollback: the PC units are started again ONLY after the VPS units are verified
+# inactive. If the VPS cannot be reached or a unit will not stop, nothing starts here (a second
+# API or connector is worse than an outage) and the manual commands are printed instead.
 rollback() {
   [ "$FINISHED" = 1 ] && return 0
   warn "cutover did not finish — rolling back to the PC"
-  vps "systemctl --user disable --now cloudflared-bona bona-api" || true
-  systemctl --user enable --now bona-api cloudflared-bona || true
+  if [ "$VPS_STARTED" = 1 ]; then
+    if vps_units_stopped; then ok "VPS units stopped and disabled (verified inactive)"; else fail_closed; fi
+  else
+    ok "nothing was started on the VPS"
+  fi
+  systemctl --user enable --now bona-api cloudflared-bona || warn "could not start the PC units — run: systemctl --user enable --now bona-api cloudflared-bona"
   warn "PC units started again; check: systemctl --user status bona-api cloudflared-bona"
 }
 # EXIT (not ERR): `die` exits, and an ERR trap would not fire for it. Armed only after the
@@ -66,6 +77,7 @@ vps "chmod 600 ~/bona-data/*"
 ok "copied ${#files[@]} files (PC leads: $pc_leads)"
 
 say "3/5 Start bona-api on the VPS"
+VPS_STARTED=1
 vps "systemctl --user enable --now bona-api"
 wait_for 30 1 vps "curl -fsS http://127.0.0.1:$BONA_VPS_PORT/health | grep -q '\"ok\":true'" || { vps "journalctl --user -u bona-api -n 30 --no-pager" || true; die "VPS bona-api is not healthy"; }
 vps_leads=$(vps "$REMOTE_NODE -e 'const {DatabaseSync}=require(\"node:sqlite\");const db=new DatabaseSync(process.argv[1],{readOnly:true});console.log(db.prepare(\"select count(*) as n from leads\").get().n)' ~/bona-data/bona.db")
