@@ -1,5 +1,5 @@
 # services/deploy/vps/lib.sh — shared by every script in this directory. Sourced, never executed.
-# Constants first (only BONA_VPS_REPO, BONA_VPS_SSH, BONA_HOSTNAMES, BONA_REPO_URL, BONA_VPS_EVOLUTION_URL, BONA_PUBLIC_HEALTH and BONA_TUNNEL_NAME may be overridden from the environment; the rest are pinned), then small helpers. Never echo a secret.
+# Constants first (only BONA_VPS_REPO, BONA_VPS_DEPLOY_DIR, BONA_VPS_SSH, BONA_HOSTNAMES, BONA_REPO_URL, BONA_VPS_EVOLUTION_URL, BONA_PUBLIC_HEALTH, BONA_TUNNEL_NAME and BONA_WAIT_SCALE may be overridden from the environment; the rest are pinned), then small helpers. Never echo a secret.
 
 BONA_TUNNEL_ID=9022fbec-de4f-44b9-805e-8fff285d6263
 BONA_TUNNEL_NAME=${BONA_TUNNEL_NAME:-bona}
@@ -9,6 +9,8 @@ BONA_HOSTNAMES=${BONA_HOSTNAMES:-"api.bona-real-estate.com bona-api.azoz.uk bona
 # 4102 is taken on the VPS (obsidian-mcp)
 BONA_VPS_PORT=4120
 BONA_VPS_REPO=${BONA_VPS_REPO:-/opt/bona}
+# Where install-vps.sh lives on the VPS; /tmp/bona-vps before the branch is merged (cutover.sh's preflight).
+BONA_VPS_DEPLOY_DIR=${BONA_VPS_DEPLOY_DIR:-$BONA_VPS_REPO/services/deploy/vps}
 BONA_REPO_URL=${BONA_REPO_URL:-https://github.com/azoz778/bona}
 BONA_VPS_EVOLUTION_URL=${BONA_VPS_EVOLUTION_URL:-http://127.0.0.1:8085}   # the same Evolution API as wa-api.azoz.uk, one hop shorter
 BONA_VPS_SSH=${BONA_VPS_SSH:-hermes-vps}

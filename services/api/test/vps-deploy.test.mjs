@@ -32,6 +32,8 @@ test('lib.sh pins versions with real checksums and the three public hostnames', 
   assert.match(lib, /^BONA_TUNNEL_ID=9022fbec-de4f-44b9-805e-8fff285d6263$/m);
   for (const h of ['api.bona-real-estate.com', 'bona-api.azoz.uk', 'bona.azoz.uk']) assert.ok(lib.includes(h), h);
   assert.match(lib, /^BONA_VPS_PORT=4120$/m);
+  // where install-vps.sh lives on the VPS — /tmp/bona-vps until the branch is merged into /opt/bona
+  assert.match(lib, /^BONA_VPS_DEPLOY_DIR=\$\{BONA_VPS_DEPLOY_DIR:-\$BONA_VPS_REPO\/services\/deploy\/vps\}$/m);
 });
 
 test('install-vps.sh --render-only renders units and tunnel config for the VPS', () => {
@@ -126,6 +128,7 @@ function runShimmed(script, args = [], scenario = {}) {
       PC_NODE: path.join(SHIMS, 'node'),
       BONA_PUBLIC_HEALTH: 'https://public-health.invalid/health',
       BONA_WAIT_SCALE: '0',
+      BONA_VPS_DEPLOY_DIR: '/tmp/bona-vps',
       ...env,
     },
   });
@@ -142,6 +145,8 @@ const CALL = {
   vpsStartTunnel: new RegExp(`${REMOTE}systemctl --user enable --now cloudflared-bona$`),
   vpsStopAll: new RegExp(`${REMOTE}systemctl --user disable --now cloudflared-bona bona-api bona-repo-sync\\.timer$`),
   vpsVerifyInactive: new RegExp(`${REMOTE}! systemctl --user is-active --quiet bona-api && ! systemctl --user is-active --quiet cloudflared-bona$`),
+  vpsCheck: new RegExp(`${REMOTE}bash \\/tmp\\/bona-vps\\/install-vps\\.sh --check$`),
+  pcNodeSqlite: /^node -e require\("node:sqlite"\)$/,
   pcDisable: /^systemctl --user disable bona-api cloudflared-bona$/,
   pcStart: /^systemctl --user enable --now bona-api cloudflared-bona$/,
   publicHealth: /^curl .*https:\/\/public-health\.invalid\/health$/,
@@ -162,10 +167,18 @@ const MANUAL_START = 'systemctl --user enable --now bona-api cloudflared-bona';
 test('cutover.sh: happy path — stop PC, copy, start VPS API then tunnel, disable PC; no rollback', () => {
   const r = runShimmed('cutover.sh');
   assert.equal(r.status, 0, r.out);
-  assertOrdered(r.lines, CALL.pcStop, CALL.scp, CALL.vpsStartApi, CALL.vpsStartTimer, CALL.vpsStartTunnel, CALL.publicHealth, CALL.pcDisable);
-  assert.ok(r.lines.some((l) => CALL.vpsLeadCount.test(l)), 'the VPS lead count must be taken');
+  // The VPS lead count is a copy-integrity check: it is taken right after the scp, before the VPS
+  // API (and its poller) can open the database.
+  assertOrdered(r.lines, CALL.pcNodeSqlite, CALL.vpsCheck, CALL.pcStop, CALL.scp, CALL.vpsLeadCount, CALL.vpsStartApi, CALL.vpsStartTimer, CALL.vpsStartTunnel, CALL.publicHealth, CALL.pcDisable);
   assert.ok(!r.lines.some((l) => /^systemctl .*enable --now/.test(l)), `no PC unit may be started on success\n${r.lines.join('\n')}`);
   assert.ok(!r.lines.some((l) => CALL.vpsStopAll.test(l)), 'no rollback on success');
+});
+
+test('cutover.sh: a PC node without node:sqlite is refused before anything is touched', () => {
+  const r = runShimmed('cutover.sh', [], { SHIM_NODE_NO_SQLITE: '1' });
+  assert.notEqual(r.status, 0, 'cutover must refuse');
+  assert.match(r.out, /node:sqlite/);
+  assert.ok(!r.lines.some((l) => /^(ssh|scp|systemctl) /.test(l)), `nothing may be called before the preflight passes\n${r.lines.join('\n')}`);
 });
 
 test('cutover.sh: public health never comes back — VPS units stopped AND verified inactive before the PC units start', () => {
