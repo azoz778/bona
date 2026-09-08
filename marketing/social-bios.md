@@ -49,7 +49,7 @@ Set up: Snapchat Business Manager → Public Profile → category *Real Estate* 
 ## YouTube (channel description ≤1000)
 **EN** `Bona is a private luxury real-estate boutique in Jeddah, Saudi Arabia. On this channel: cinematic walkthroughs of villas, penthouses and waterfront homes in Jeddah and Riyadh, district guides, and plain-language explainers on buying, selling and letting property in the Kingdom. REGA-licensed brokerage, FAL 1100313556. Enquiries: WhatsApp +966 59 329 6933 · https://bona-real-estate.com`
 **AR** `بونا بوتيك عقاري فاخر في جدة. في هذه القناة: جولات سينمائية في الفلل والبنتهاوس والمنازل الواجهية في جدة والرياض، أدلّة الأحياء، وشروحات مبسّطة عن شراء وبيع وتأجير العقار في المملكة. وساطة مرخّصة من الهيئة العامة للعقار، رخصة فال 1100313556. للاستفسار: واتساب +966 59 329 6933`
-Handle: **`@bona.com.sa`** (verified free 2026-09-08). Create a **Brand Account**, not a personal channel. Upload defaults: title `[Type] in [District], Jeddah — Ref. BONA-0xx | Bona`, chapters per room, end screen → site.
+Handle: **`@bonarealestatesa`** (verified free 2026-09-08). Create a **Brand Account**, not a personal channel. Upload defaults: title `[Type] in [District], Jeddah — Ref. BONA-0xx | Bona`, chapters per room, end screen → site.
 
 ## Pinterest (display name ≤30, about ≤500)
 Username `bonarealestate` (dots illegal). Display name: `Bona | Luxury Real Estate` (25).
@@ -69,7 +69,7 @@ Name: `Bona · بونا` · Icon: `marketing/brand/avatar-320.png`. Channel name
 
 Cadence: 3–4 updates/week — new listing, price change, one district note. No daily posting; a channel that pings too often gets muted.
 
-## Instagram (bio ≤150) — already live as @bona.com.sa
+## Instagram (bio ≤150) — already live as @bonarealestatesa
 **AR (116)** `بونا — عقارات فاخرة خاصة في جدة. فلل، بنتهاوس، وواجهات بحرية وعقارات خارج السوق. المعاينة بموعد. رخصة فال 1100313556`
 **EN (129)** `Private luxury real estate, Jeddah. Villas, penthouses, waterfront & off-market homes — shown by appointment. REGA FAL 1100313556`
 
@@ -84,7 +84,7 @@ AR: `بونا تفتح أبوابها. بوتيك عقاري خاص في جدة 
 2. `Why "quietly"? Because the best homes in Jeddah rarely reach the portals. Owners tell us first; we introduce them to a small number of qualified buyers.` / `لماذا «بهدوء»؟ لأن أفضل منازل جدة نادراً ما تصل إلى المنصات. المُلّاك يخبروننا أولاً؛ ونقدّمها لعدد محدود من المشترين الجادّين.`
 3. `Where: Al Khalidiyah, North Obhur, Al Shati, Al Rawdah, Durrat Al Arous — plus Riyadh, Dubai, Oman, the Côte d'Azur and Costa del Sol through partners.` / `أين: الخالدية، أبحر الشمالية، الشاطئ، الروضة، درة العروس — والرياض ودبي وعُمان والريفييرا الفرنسية وكوستا ديل سول عبر شركائنا.`
 4. `Licensed brokerage — REGA FAL 1100313556. Asking prices only, never estimates. Arabic and English.` / `وساطة مرخّصة — رخصة فال 1100313556. أسعار طلب فقط، لا تقديرات. بالعربية والإنجليزية.`
-5. `Browse: https://bona-real-estate.com · WhatsApp +966 59 329 6933 · Instagram @bona.com.sa` 
+5. `Browse: https://bona-real-estate.com · WhatsApp +966 59 329 6933 · Instagram @bonarealestatesa` 
 
 **LinkedIn launch post**
 > Bona opens today in Jeddah. We are a small, licensed brokerage (REGA FAL 1100313556) built around one idea: exceptional homes deserve a quieter sale. A curated portfolio across Al Khalidiyah, North Obhur, Al Shati, Al Rawdah and Durrat Al Arous — with Riyadh, Dubai, Oman and the Mediterranean through partners. If you own a home you would rather not put on a portal, we should talk. https://bona-real-estate.com
@@ -102,7 +102,7 @@ AR: `بونا تفتح أبوابها. بوتيك عقاري خاص في جدة 
 | Address | Al Rawdah District, Jeddah 23432 |
 | Hours | Sun–Thu 10:00–19:00 |
 | Email | (leave blank until bona.com.sa mail exists) |
-| Website | https://bona-real-estate.com , https://www.instagram.com/bona.com.sa/ |
+| Website | https://bona-real-estate.com , https://www.instagram.com/bonarealestatesa/ |
 | Catalog | Add 6–9 featured listings (photo, title, "Price on request" or asking price + ad licence no., link to listing page) |
 
 **Greeting message (first contact / after 14 days)**

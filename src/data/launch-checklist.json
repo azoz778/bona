@@ -20,7 +20,7 @@
   { "id": "seo-ga4", "group": "SEO", "text": "GA4 property created and the Measurement ID pasted into site.json", "owner": "owner", "link": "https://analytics.google.com/" },
   { "id": "seo-og", "group": "SEO", "text": "Link previews show the Bona image in WhatsApp and Instagram", "owner": "agent", "link": "https://bona-real-estate.com/og-default.png" },
 
-  { "id": "social-bio", "group": "Social", "text": "Instagram bio written and link set to bona-real-estate.com", "owner": "owner", "link": "https://www.instagram.com/bona.com.sa/" },
+  { "id": "social-bio", "group": "Social", "text": "Instagram bio written and link set to bona-real-estate.com", "owner": "owner", "link": "https://www.instagram.com/bonarealestatesa/" },
   { "id": "social-business", "group": "Social", "text": "Instagram switched to a Business account and linked to a Facebook Page", "owner": "owner", "link": "https://business.facebook.com/" },
   { "id": "social-ig-api", "group": "Social", "text": "Instagram API access granted: Business account linked into the TK Meta Business, or credentials shared (marketing/instagram-access.md)", "owner": "owner", "link": "https://business.facebook.com/settings/instagram-account-v2s" },
   { "id": "social-posts", "group": "Social", "text": "Nine launch posts published from the marketing kit", "owner": "agent" },

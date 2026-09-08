@@ -1,9 +1,9 @@
 # Instagram → Meta Graph API connection checklist (owner steps)
 
-Goal: let `scripts/instagram-post.mjs` publish to **@bona.com.sa** unattended. Everything below is
+Goal: let `scripts/instagram-post.mjs` publish to **@bonarealestatesa** unattended. Everything below is
 account-owner work (Meta will not let an agent do it). Budget: ~10 minutes.
 
-## 1. Convert @bona.com.sa to a Business account
+## 1. Convert @bonarealestatesa to a Business account
 1. Instagram app → profile → **☰ → Settings and privacy → Account type and tools → Switch to professional account**.
 2. Choose **Business** (not Creator — Creator accounts cannot use the content-publishing API for carousels in some regions).
 3. Category: **Real Estate** (search "Real Estate" → choose *Real Estate Agent* if offered).
@@ -13,14 +13,14 @@ account-owner work (Meta will not let an agent do it). Budget: ~10 minutes.
 The API only works through a Facebook Page.
 1. facebook.com/pages/create → Name **Bona**, Category **Real Estate Agent**, Bio = the EN bio from `instagram-profile.md`.
 2. Add the logo (`public/icon-512.png`) as profile picture and `public/og-default.png` as cover (crop to 820×312 if asked).
-3. Page → **Settings → Linked accounts → Instagram → Connect account** → log in as @bona.com.sa → allow "Access Instagram messages" (optional) → done.
+3. Page → **Settings → Linked accounts → Instagram → Connect account** → log in as @bonarealestatesa → allow "Access Instagram messages" (optional) → done.
    - If the Page settings say the IG account is linked to another Page, unlink it there first.
 
 ## 3. Add both to TK's Meta Business Portfolio
 1. business.facebook.com → the existing **TK Estate** portfolio → **Settings → Accounts → Pages → Add → Add a Page you own** → Bona.
-2. **Accounts → Instagram accounts → Add** → log in as @bona.com.sa (this associates it with the portfolio).
+2. **Accounts → Instagram accounts → Add** → log in as @bonarealestatesa (this associates it with the portfolio).
 3. **Users → System users** → pick the existing system user used for TK's automations (or create `bona-poster`, role *Employee*).
-   - **Add assets**: Page Bona (Full control) + Instagram account @bona.com.sa (Full control).
+   - **Add assets**: Page Bona (Full control) + Instagram account @bonarealestatesa (Full control).
    - **Generate new token** → app: the TK app already in the portfolio (any app with *Instagram Graph API* product) → token expiry **Never** → permissions:
      `instagram_basic`, `instagram_content_publish`, `pages_show_list`, `pages_read_engagement`, `business_management`.
    - Copy the token once; it is shown only once.
