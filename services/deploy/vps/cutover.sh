@@ -48,7 +48,7 @@ done
 # Attempt 1 ran the units under the VPS user's own manager; their files and processes must be gone
 # before a system unit of the same name starts beside them (Codex review, 2026-09-08). The pgrep
 # patterns are anchored to the binary so the remote shell carrying the pattern never matches itself.
-vps "! ls ~/.config/systemd/user/bona-api.service ~/.config/systemd/user/cloudflared-bona.service >/dev/null 2>&1 && ! pgrep -u \$(id -un) -f '^[^ ]*/node $BONA_VPS_REPO/services/api/index[.]mjs' >/dev/null && ! pgrep -u \$(id -un) -f '^[^ ]*/cloudflared .*tunnel run $BONA_TUNNEL_ID' >/dev/null" \
+vps "! ls ~/.config/systemd/user/bona-api.service ~/.config/systemd/user/cloudflared-bona.service >/dev/null 2>&1 && ! pgrep -u \$(id -un) -f '^[^ ]*/node $BONA_VPS_REPO/services/api/index[.]mjs' >/dev/null && ! pgrep -u \$(id -un) -f \"^[^ ]*/cloudflared .*--config \$HOME/.cloudflared/bona[.]yml .*tunnel run $BONA_TUNNEL_ID\" >/dev/null" \
   || die "legacy user units or processes are still present on the VPS — run install-vps.sh there (it retires them), then retry"
 ok "VPS ready, nothing running there yet"
 

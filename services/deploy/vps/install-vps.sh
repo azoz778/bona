@@ -55,14 +55,15 @@ fi
 
 # ---------------------------------------------------------------- check (read-only)
 # PIDs of API / tunnel processes for the service user that are NOT the system units' own main
-# processes — i.e. leftovers from the attempt-1 user units or a stray hand-started copy. After the
+# processes — i.e. leftovers from the attempt-1 user units or a stray hand-started copy (the tunnel
+# probe is scoped to THIS home's bona.yml, so the tests' fake HOME never sees the real connector). After the
 # cutover the live units match the same command lines, so their MainPIDs are excluded (Codex, 2026-09-08).
 legacy_procs() {
   local live pid args=()
   live=$(sudo -n systemctl show -p MainPID --value bona-api cloudflared-bona 2>/dev/null | tr '\n' ' ')
   for pid in $live; do [ "$pid" != 0 ] && args+=(-e "$pid"); done
   { pgrep -u "$VPS_USER" -f "^[^ ]*/node $BONA_VPS_REPO/services/api/index[.]mjs"
-    pgrep -u "$VPS_USER" -f "^[^ ]*/cloudflared .*tunnel run $BONA_TUNNEL_ID"; } 2>/dev/null | grep -vxF -e __none__ "${args[@]}" || true
+    pgrep -u "$VPS_USER" -f "^[^ ]*/cloudflared .*--config $CF_DIR/bona[.]yml .*tunnel run $BONA_TUNNEL_ID"; } 2>/dev/null | grep -vxF -e __none__ "${args[@]}" || true
 }
 # Runs in THIS shell: a `bash -c` child would not see VPS_USER/BONA_VPS_REPO/BONA_TUNNEL_ID and would
 # probe for nothing (Codex, final pass 2026-09-08).
