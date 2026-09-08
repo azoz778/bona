@@ -3,7 +3,7 @@
 # line to $SHIM_LOG, then answers the REMOTE command string (the last argument) the way the VPS
 # would:
 #   true, install -d …, chmod …, journalctl …           → exit 0
-#   bash …/install-vps.sh --check                       → exit 0 (ready)
+#   bash …/install-vps.sh --check                       → exit 0 (ready; 2 with SHIM_CHECK_FAIL=1)
 #   systemctl --user is-active --quiet U                → exit 1 (inactive) unless the scenario says active
 #   ! systemctl … is-active … && ! systemctl … is-active → the "verified inactive" check: exit 0 unless active
 #   systemctl --user enable --now … / disable --now …   → exit 0 (the log line is the record)
@@ -13,7 +13,9 @@
 #   anything else                                       → exit 99 (the test sees an unexpected command)
 # Scenarios (environment):
 #   SHIM_VPS_STOP_FAILS=1        once a `disable --now` was sent, the units report ACTIVE anyway
+#   SHIM_VPS_ALREADY_ACTIVE=1    the units report ACTIVE from the first call (a copy is live on the VPS)
 #   SHIM_SSH_DOWN_AFTER_START=1  every call after an `enable --now bona-api` was sent exits 255
+#   SHIM_CHECK_FAIL=1            install-vps.sh --check exits 2 (the VPS is not ready)
 #   SHIM_REMOTE_MISSING="a b"    space-separated data file names that `test -f ~/bona-data/NAME` reports absent
 set -u
 log=${SHIM_LOG:?SHIM_LOG must point at the log file}
@@ -25,9 +27,10 @@ printf 'ssh %s\n' "$*" >> "$log"
 if [ "$down" = 1 ]; then echo "ssh: connect to host $2 port 22: Connection refused (shim)" >&2; exit 255; fi
 active=0
 if [ "${SHIM_VPS_STOP_FAILS:-0}" = 1 ] && seen 'disable --now'; then active=1; fi
+if [ "${SHIM_VPS_ALREADY_ACTIVE:-0}" = 1 ]; then active=1; fi
 case "$cmd" in
   true | install\ -d* | chmod* | journalctl*) exit 0 ;;
-  *install-vps.sh\ --check*) exit 0 ;;
+  *install-vps.sh\ --check*) [ "${SHIM_CHECK_FAIL:-0}" = 1 ] && exit 2 || exit 0 ;;
   '! systemctl'*is-active*) exit "$active" ;;
   systemctl*is-active*) [ "$active" = 1 ] && exit 0 || exit 1 ;;
   systemctl*enable\ --now* | systemctl*disable\ --now*) exit 0 ;;
