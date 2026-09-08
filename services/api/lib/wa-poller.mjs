@@ -35,6 +35,12 @@ import { waConfig } from './wa.mjs';
 
 /** With no cursor yet, look back this far rather than at the whole history. */
 export const FIRST_RUN_LOOKBACK_MS = 10 * 60_000;
+/**
+ * The furthest back any window ever reaches. Without it the cursor can sit still — one
+ * stale message inside the overlap keeps coming back as "the newest thing we saw" — and a
+ * quiet week would end with every tick asking Evolution for a week of messages.
+ */
+export const MAX_WINDOW_MS = 10 * 60_000;
 /** Every window reaches this far back behind the cursor: WhatsApp delivery is not instant. */
 export const OVERLAP_MS = 120_000;
 /** How long a processed message id is remembered, so the overlap cannot double-count it. */
@@ -278,7 +284,6 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
       matchMethod: match.method,
       sessionId: match.sessionId ?? null,
       ref: match.ref ?? null,
-      eventId: match.eventId ?? null,
       adMeta: match.adMeta ?? null,
       // The enquiry happened when the message was sent, not when we noticed it: this is
       // what `first_inbound_ts` (and so every response time) is measured from.
@@ -299,6 +304,12 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
         first_touch: touch, last_touch: touch, updated: ts,
       });
     }
+
+    // The click that explains this message is marked as claimed, so the next unknown number
+    // cannot be inferred from it too. It is deliberately NOT passed to `createOrMergeLead`
+    // as `eventId`: that would fan the lead out under the click's own event id, and Meta —
+    // which already heard `Contact` under it — would drop the `Lead` as a duplicate.
+    if (match.eventId) db.setEventLead(match.eventId, lead.lead_id);
 
     const fresh = db.getLead(lead.lead_id) ?? lead;
     log({ evt: 'wa.lead', leadId: fresh.lead_id, created, match: match.method, source: fresh.source, listingId: fresh.listing_id ?? null });
@@ -373,7 +384,9 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
       }
 
       db.waCursorSet(instance, {
-        lastTs: Math.max(since, maxTs || t),
+        // Forward only, no further back than the newest message we saw, and never reaching
+        // back more than one window: those three together are what keeps this cheap.
+        lastTs: Math.max(since, maxTs || lte, lte - MAX_WINDOW_MS),
         lastRun: t,
         unmatched: (cursor?.unmatched ?? 0) + tally.unmatched,
       });
@@ -389,16 +402,20 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
     }
   }
 
-  /** What `/health` publishes. `lagS` is the age of the newest message we have seen. */
+  /**
+   * What `/health` publishes. `lagS` is the age of the last COMPLETED tick, not of the
+   * newest message: a quiet Saturday must not read like an outage, and an outage — which
+   * leaves the cursor untouched — must.
+   */
   function status() {
     const cursor = db.waCursorGet(instance);
-    const lastTs = cursor?.last_ts ?? null;
+    const lastRun = cursor?.last_run ?? null;
     return {
       instance,
       configured,
-      lastRun: cursor?.last_run ?? null,
-      lastTs,
-      lagS: lastTs ? Math.max(0, Math.round((now() - lastTs) / 1000)) : null,
+      lastRun,
+      lastTs: cursor?.last_ts ?? null,
+      lagS: lastRun ? Math.max(0, Math.round((now() - lastRun) / 1000)) : null,
       unmatched: cursor?.unmatched ?? 0,
       matched,
       running: Boolean(timer),

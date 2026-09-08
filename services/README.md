@@ -543,7 +543,7 @@ untouched, so an Evolution outage loses nothing and shows up only as growing lag
 | `instance` | the Evolution instance being read (`BONA_WA_INSTANCE`) |
 | `configured` | `false` when `EVOLUTION_API_URL` / `EVOLUTION_API_KEY` are missing — every tick then skips rather than guessing a URL |
 | `lastRun` / `lastTs` | ms: when the last tick ran, and the newest message it saw |
-| `lagS` | seconds since `lastTs` — the number to watch; it grows through an Evolution outage |
+| `lagS` | seconds since the last tick that *finished* — the number to watch. It grows only when Evolution is unreachable; a quiet WhatsApp still reads ~0 |
 | `unmatched` | messages discarded since the store was created (it lives in the cursor row, so it survives restarts) |
 | `matched` | messages kept since this process started |
 | `running` | whether the interval is on |
