@@ -152,6 +152,8 @@ function runShimmed(script, args = [], scenario = {}) {
 const REMOTE = '^ssh -o BatchMode=yes -o ConnectTimeout=20 fake-vps ';
 const CALL = {
   pcStop: /^systemctl --user stop cloudflared-bona bona-api$/,
+  pcApiInactive: /^systemctl --user is-active --quiet bona-api$/,
+  pcTunnelInactive: /^systemctl --user is-active --quiet cloudflared-bona$/,
   scp: /^scp -q -p \S+\/bona-data\/bona\.db fake-vps:bona-data\/$/,
   vpsLeadCount: new RegExp(`${REMOTE}~\\/\\.local\\/opt\\/node-v24\\.19\\.0-linux-x64\\/bin\\/node -e .* ~\\/bona-data\\/bona\\.db$`),
   vpsStartApi: new RegExp(`${REMOTE}systemctl --user enable --now bona-api$`),
@@ -184,9 +186,15 @@ const MANUAL_START = 'systemctl --user enable --now bona-api cloudflared-bona';
 test('cutover.sh: happy path — stop PC, copy, start VPS API then tunnel, disable PC; no rollback', () => {
   const r = runShimmed('cutover.sh');
   assert.equal(r.status, 0, r.out);
-  // The VPS lead count is a copy-integrity check: it is taken right after the scp, before the VPS
-  // API (and its poller) can open the database.
-  assertOrdered(r.lines, CALL.pcNodeSqlite, CALL.vpsCheck, CALL.pcStop, CALL.scp, CALL.vpsLeadCount, CALL.vpsStartApi, CALL.vpsStartTimer, CALL.vpsStartTunnel, CALL.publicHealth, CALL.pcDisable);
+  // The PC units are verified inactive (both of them) between the stop and the copy: the copy is
+  // consistent only when nothing on the PC still writes. The VPS lead count is a copy-integrity
+  // check: it is taken right after the scp, before the VPS API (and its poller) can open the database.
+  assertOrdered(r.lines, CALL.pcNodeSqlite, CALL.vpsCheck, CALL.pcStop, CALL.pcApiInactive, CALL.pcTunnelInactive, CALL.scp, CALL.vpsLeadCount, CALL.vpsStartApi, CALL.vpsStartTimer, CALL.vpsStartTunnel, CALL.publicHealth, CALL.pcDisable);
+  const scpAt = r.lines.findIndex((l) => CALL.scp.test(l));
+  for (const re of [CALL.pcApiInactive, CALL.pcTunnelInactive]) {
+    const i = r.lines.findIndex((l) => re.test(l));
+    assert.ok(i > r.lines.findIndex((l) => CALL.pcStop.test(l)) && i < scpAt, `${re} must sit between the PC stop and the scp\n${r.lines.join('\n')}`);
+  }
   assert.ok(!r.lines.some((l) => /^systemctl .*enable --now/.test(l)), `no PC unit may be started on success\n${r.lines.join('\n')}`);
   assert.ok(!r.lines.some((l) => CALL.vpsStopAll.test(l)), 'no rollback on success');
 });
