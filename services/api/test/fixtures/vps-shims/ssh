@@ -18,6 +18,7 @@
 #   SHIM_VPS_ALREADY_ACTIVE=1    the units report ACTIVE from the first call (a copy is live on the VPS)
 #   SHIM_SSH_DOWN_AFTER_START=1  every call after an `enable --now bona-api` was sent exits 255
 #   SHIM_CHECK_FAIL=1            install-vps.sh --check exits 2 (the VPS is not ready)
+#   SHIM_LEGACY_PRESENT=1        the legacy user-unit/process probe reports leftovers (cutover must refuse)
 #   SHIM_REMOTE_MISSING="a b"    space-separated data file names that `test -f ~/bona-data/NAME` reports absent
 set -u
 log=${SHIM_LOG:?SHIM_LOG must point at the log file}
@@ -33,6 +34,7 @@ if [ "${SHIM_VPS_ALREADY_ACTIVE:-0}" = 1 ]; then active=1; fi
 case "$cmd" in
   true | install\ -d* | chmod* | sudo\ -n\ journalctl* | rm\ -f*) exit 0 ;;
   *install-vps.sh\ --check*) [ "${SHIM_CHECK_FAIL:-0}" = 1 ] && exit 2 || exit 0 ;;
+  '! ls ~/.config/systemd/user/'*) [ "${SHIM_LEGACY_PRESENT:-0}" = 1 ] && exit 1 || exit 0 ;;
   '! sudo -n systemctl'*is-active*) exit "$active" ;;
   sudo\ -n\ systemctl*is-active*) [ "$active" = 1 ] && exit 0 || exit 1 ;;
   sudo\ -n\ systemctl*enable\ --now* | sudo\ -n\ systemctl*disable\ --now*) exit 0 ;;

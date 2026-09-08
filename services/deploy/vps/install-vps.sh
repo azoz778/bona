@@ -30,6 +30,12 @@ case "${1:-}" in
   *) die "usage: install-vps.sh [--check | --render-only DIR | --smoke]" ;;
 esac
 
+# The units render User=/Group=/HOME= from the invoking user: running this as root would bake root in.
+[ "$(id -u)" != 0 ] || die "run install-vps.sh as the service user (azoz), not as root"
+# Attempt 1 (2026-09-08) installed the units under this user's own manager; they must be gone before
+# a system unit of the same name runs, or two copies could exist side by side.
+LEGACY_USER_UNIT_DIR="$HOME_DIR/.config/systemd/user"
+
 # ---------------------------------------------------------------- render (pure; used by every mode)
 render_all() { # render_all DIR
   local dir=$1 u
@@ -69,7 +75,9 @@ check_state() { # prints one line per item; returns the number of missing items
   for u in $UNITS; do _label="unit $BONA_UNIT_DIR/$u"; item test -f "$BONA_UNIT_DIR/$u"; done
   # System units are installed and driven with `sudo -n`; the VPS has passwordless sudo, and -n
   # means a missing rule fails here instead of prompting inside cutover.sh's ssh.
-  _label="passwordless sudo available (sudo -n true)";       item bash -c "command -v sudo >/dev/null && sudo -n true 2>/dev/null"
+  _label="passwordless sudo for systemctl (sudo -n systemctl --version)"; item bash -c "command -v sudo >/dev/null && sudo -n systemctl --version >/dev/null 2>&1"
+  _label="no legacy user unit files in $LEGACY_USER_UNIT_DIR";   item bash -c "! ls '$LEGACY_USER_UNIT_DIR'/bona-api.service '$LEGACY_USER_UNIT_DIR'/cloudflared-bona.service '$LEGACY_USER_UNIT_DIR'/bona-repo-sync.service '$LEGACY_USER_UNIT_DIR'/bona-repo-sync.timer >/dev/null 2>&1"
+  _label="no legacy bona-api / tunnel processes for $VPS_USER";  item bash -c "! pgrep -u '$VPS_USER' -f '^[^ ]*/node $BONA_VPS_REPO/services/api/index[.]mjs' >/dev/null && ! pgrep -u '$VPS_USER' -f '^[^ ]*/cloudflared .*tunnel run $BONA_TUNNEL_ID' >/dev/null"
   return "$missing"
 }
 
@@ -168,11 +176,13 @@ say "Retire user units from the first attempt"
 # system unit of the same name, so: disable + stop whatever may still be flapping, delete the file,
 # reload the user manager. Idempotent — nothing to do once they are gone. This is the ONLY
 # `systemctl --user` this installer runs, and it never enables or starts anything.
-LEGACY_USER_UNIT_DIR="$HOME_DIR/.config/systemd/user"
 retired=0
 for u in $UNITS; do
   if [ -f "$LEGACY_USER_UNIT_DIR/$u" ]; then
     systemctl --user disable --now "$u" 2>/dev/null || true
+    # Never delete the file while the unit is still running: it would live on as a fileless unit that
+    # nothing here can see (review, 2026-09-08). An unreachable user manager answers "inactive".
+    if systemctl --user is-active --quiet "$u" 2>/dev/null; then die "user unit $u is still active after disable --now — stop it from a login shell, then re-run"; fi
     rm -f "$LEGACY_USER_UNIT_DIR/$u"
     retired=$((retired + 1))
   fi
