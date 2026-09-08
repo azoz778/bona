@@ -44,8 +44,10 @@ counted once. It is entirely optional: a destination with no credentials in
 starts flowing the moment the ids and tokens are filled in. A row is sent only for a
 session that accepted **ads** in the consent banner (PDPL); the phone never leaves
 this process unhashed. `/health` reports `fanout: { pending, sent, failed, skipped,
-dests, running }`. The WhatsApp poller and the owner dashboard (`/dashboard`,
-`/v1/admin/*`) build on the same store and arrive in their own workstreams.
+dests, running }`, and `poller: { lastRun, lastTs, lagS, unmatched, matched, running }`
+for the read-only WhatsApp loop that turns a `Ref` code into a lead with its campaign
+(§10). The owner dashboard (`/dashboard`, `/v1/admin/*`) builds on the same store and
+arrives in its own workstream.
 
 ---
 
@@ -318,6 +320,8 @@ never logged. `process.env` always wins over a file.
 | `BONA_WA_NOTIFY` | `1` | `0` stops the WhatsApp lead note |
 | `BONA_WA_POLL` | `1` (set by the unit) | the in-process WhatsApp poller — `0` stops it (§10) |
 | `BONA_WA_POLL_MS` | `45000` | poll interval; each tick reads the last 2 minutes of `chat/findMessages` |
+| `BONA_WA_INSTANCE` | `abdulaziz-personal` | the Evolution instance the poller reads and the note is sent from |
+| `BONA_OWNER_JID` | `966593296933@s.whatsapp.net` | where the notes go, and the one chat the poller never reads |
 | `BONA_FANOUT_MS` | `20000` | fan-out worker interval (Meta CAPI, GA4 MP, Snap CAPI) |
 | `BONA_DB_FILE` | `${BONA_DATA}/bona.db` | the SQLite lead store (0600); set only to move it |
 | `BONA_DASH_COOKIE_DAYS` | `30` | how long a dashboard login lasts |
@@ -326,7 +330,6 @@ never logged. `process.env` always wins over a file.
 | `BONA_MAX_CHATS_PER_DAY` / `BONA_MAX_CALLS_PER_DAY` | `300` / `60` | reset at midnight Asia/Riyadh |
 | `BONA_MAX_TURNS_PER_SESSION` | `40` | one chat cannot run for ever |
 | `BONA_RATE_EVENTS` / `BONA_RATE_ENQUIRY` | `240` / `6` | per IP per minute |
-| `BONA_WA_POLL` / `BONA_WA_POLL_MS` | `1` / `45000` | WhatsApp inbound poller (its own workstream) |
 | `BONA_FANOUT_MS` | `20000` | ad-platform fan-out worker interval; `0` turns the worker off |
 | `BONA_FANOUT_REQUIRE_CONSENT` | `1` | fan out only for a session that accepted ads (PDPL) |
 | `BONA_DASH_COOKIE_DAYS` | `30` | dashboard login cookie life (its own workstream) |
@@ -466,7 +469,7 @@ plumbing, and the one-time JSONL import.
 | `503 billing` | the owner's Retell balance is empty — top it up; the log line says so loudly |
 | `/health` 503, `inventory: 0` | `listings.json` is missing or broken at the path in `redacted` config; fix it, no restart needed |
 | Dashboard code never arrives | `/health` → `evolution` must be reachable; `journalctl --user -u bona-api \| grep dashboard`; the owner JID is `BONA_OWNER_JID` |
-| `/health` `poller.lag` keeps growing | Evolution outage or wrong `EVOLUTION_API_URL`; nothing else is affected, messages are picked up when it is back |
+| `/health` `poller.lagS` keeps growing | Evolution outage or wrong `EVOLUTION_API_URL`; nothing else is affected, messages are picked up when it is back |
 | `/health` `fanout.failed` > 0 | a key is wrong or expired — `node scripts/marketing/verify-integrations.mjs` says which; rows retry ≤ 5 times with backoff |
 | PC is off | everything pauses; the site falls back to WhatsApp and no data is lost |
 
@@ -502,15 +505,70 @@ touchpoints, stage history, spend, fan-out queue, dashboard auth. The JSONL file
 the append-only raw log and are imported once on start-up. Raw phone numbers, names and
 message snippets never leave this file; ad platforms get hashed identifiers only.
 
-**Poller** (`BONA_WA_POLL=1`, every `BONA_WA_POLL_MS`). A read-only loop inside this
-process: `POST /chat/findMessages/{instance}` on Evolution for the last two minutes,
-deduplicated by message id. A message is kept only when it carries a site `Ref` code
-(`Ref BONA-W003 · K7Q2XR`), comes from a known lead, mentions Bona or a listing id, arrives
-with ad context, or lands within ±15 min of a `whatsapp_click` from an unknown sender
-(marked *inferred*). Everything else is discarded in memory. A match creates or updates a
-lead, records the response time from your first reply, and sends you the usual WhatsApp
-note with a source line. Evolution is **never** given a webhook. `/health` shows
-`poller.lastRun` and `lag`.
+**Poller** (`BONA_WA_POLL=1`, every `BONA_WA_POLL_MS`; `lib/wa-poller.mjs` over
+`lib/evolution.mjs`). A read-only loop inside this process. Each tick asks Evolution for
+`POST /chat/findMessages/{instance}` with `{ messageTimestamp: { gte: <cursor − 2 min>,
+lte: <now> } }` — both bounds, because 2.3.7 ignores the filter without them — up to 5
+pages of 100, newest first, deduplicated on `key.id` (`wa_seen`, pruned after 7 days).
+Groups, status broadcasts and your own chat are skipped; an `…@lid` chat takes its phone
+from `key.remoteJidAlt` and stores both jids. Evolution is **never** given a webhook: the
+instance is your personal WhatsApp and another agent consumes its events.
+
+*Matched-only storage* (your decision). A message is kept only when one of these claims it,
+in order — the first hit wins:
+
+| # | `match_method` | What claims it | The source it gets |
+|---|---|---|---|
+| 1 | `ref` | `Ref BONA-W003 · K7Q2XR`, the code the site prefills into every `wa.me` link | that session's last touch — the real campaign |
+| 2 | `phone` | the sender is already a lead (phone, `wa_jid` or `wa_lid`) | unchanged; an `inbound_message` touchpoint is added |
+| 3 | `ad_meta` | click-to-WhatsApp context: `externalAdReply`, `conversionSource`, `entryPointConversion*`, `utm` | `instagram` / `facebook` from the app the record names, else `whatsapp_ad`; `paid` when the context says ad (or carries a `ctwaClid`), else `social_or_organic`. The raw metadata is kept on the touchpoint |
+| 4 | `keyword` | the text says Bona, بونا, or `BONA-W###` | `whatsapp_organic` |
+| 5 | `time_window` | the sender is unknown and a `whatsapp_click` from a session with no lead landed within ±15 min — the closest one | that session's touch; the note says *inferred* |
+
+The order is the rule, not a formality. A Ref code wins over everything, because it is the
+only thing that knows the campaign for certain — even from somebody who is already a lead.
+Ad context is read **before** the keyword rule, so an ad-originated message that also says
+"Bona" is attributed to the ad rather than to organic WhatsApp. And the time window is last
+because it is the weakest: two visitors clicking in the same quarter hour are told apart by
+nothing, which is why its leads are marked *inferred*.
+
+Everything else — your private conversations, which this loop can also see — is discarded
+in memory: counted in `poller.unmatched`, never written to disk, never sent anywhere. No
+log line here carries a phone number, a name or message text.
+
+Each window is handled oldest-first (Evolution answers the other way round, and judging a
+follow-up before the `Ref` line that explains it would discard it), and a message is
+remembered as handled only once it is stored — so a transient store failure costs a retry,
+not the lead. The cursor is held back to the oldest message it could not store, or that
+message would fall out of the window and be lost silently; one that keeps failing is
+written off after three tries (`wa.poll.record_failed`), and one the cursor can no longer
+reach — after downtime long enough to move the floor past it — is given up on out loud
+(`wa.poll.abandoned`). Windows are read newest-first inside Evolution, so one holding more
+than 500 messages hides its *oldest* ones and cannot be asked again for them — that is a
+loss, not a deferral, and the log says `wa.poll.truncated`. It takes downtime long enough
+for 500 messages to pile up in a single window.
+
+A match creates the lead (or merges into the person it already is) **at the message's own
+timestamp**, so `first_inbound_ts` is when the enquiry actually happened; the first ≤ 200
+characters are kept on the touchpoint of a *new* lead only. You get the note once, on
+create. Your own outbound message to a lead sets `first_reply_ts` — the response time on
+the dashboard. Every tick is wrapped: a failure logs `wa.poll.failed` and leaves the cursor
+untouched, so an Evolution outage loses nothing and shows up only as growing lag.
+
+`/health` → `poller`:
+
+| Field | |
+|---|---|
+| `instance` | the Evolution instance being read (`BONA_WA_INSTANCE`) |
+| `configured` | `false` when `EVOLUTION_API_URL` / `EVOLUTION_API_KEY` are missing — every tick then skips rather than guessing a URL |
+| `lastRun` / `lastTs` | ms: when the last tick ran, and the newest message it saw |
+| `lagS` | seconds since the last tick that *finished* — the number to watch. It grows only when Evolution is unreachable; a quiet WhatsApp still reads ~0 |
+| `unmatched` | messages discarded since the store was created (it lives in the cursor row, so it survives restarts) |
+| `matched` | messages kept since this process started |
+| `running` | whether the interval is on |
+
+`ok` never depends on any of it: a poller that is behind is a gap in attribution, not a
+site that stopped answering.
 
 **Fan-out** (every `BONA_FANOUT_MS`). Per event, per destination, idempotent by
 `event_id`, retried ≤ 5 times with backoff: Meta CAPI `Contact` / `Lead` / `Schedule` /

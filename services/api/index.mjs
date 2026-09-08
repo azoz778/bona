@@ -32,6 +32,7 @@ import { openDb, newId } from './lib/db.mjs';
 import { validateEvent, recordEvent, cleanAttrIds, MAX_BODY_BYTES as MAX_EVENT_BYTES } from './lib/events.mjs';
 import { validateEnquiry } from './lib/enquiry.mjs';
 import { createFanout } from './lib/fanout.mjs';
+import { createPoller } from './lib/wa-poller.mjs';
 import { importJsonl } from './lib/import-legacy.mjs';
 import { createBudget } from './lib/budget.mjs';
 import { createInventory } from './lib/inventory.mjs';
@@ -172,6 +173,9 @@ export function createApp(options = {}) {
   const fanout = options.fanout ?? createFanout({ db, cfg, log });
   const probeRetell = options.probeRetell ?? createHealthProbe(retell);
   const sendWhatsApp = options.sendWhatsApp ?? ((text) => sendText(text, { env: cfg.env }));
+  // The WhatsApp Ref-code poller. Read-only, and only when `BONA_WA_POLL` says so —
+  // constructing it contacts nothing; the real server (below) is what puts it on a timer.
+  const poller = cfg.waPoll ? (options.poller ?? createPoller({ db, cfg, sendWhatsApp, log })) : null;
   const tools = createToolHandlers({
     inventory, store, db, dataDir: cfg.dataDir, siteUrl: cfg.siteUrl, env: cfg.env, sendWhatsApp, log,
   });
@@ -271,6 +275,10 @@ export function createApp(options = {}) {
       // What the ad platforms have and have not been told. `pending` that never falls is
       // the symptom of a fan-out that is queued but not draining.
       fanout: { ...fanoutCounts(), dests: fanout.dests(), running: fanout.started },
+      // How far behind WhatsApp the poller is. Deliberately not part of `ok`: an Evolution
+      // outage must not take the concierge down with it — it is a gap in attribution, not
+      // a site that stopped answering.
+      ...(poller ? { poller: poller.status() } : {}),
       inventory: inventory.count(),
       budget: budget.counters(),
       mock: cfg.retellMock || undefined,
@@ -704,9 +712,9 @@ export function createApp(options = {}) {
   server.requestTimeout = 60_000;
   // The store is owned by the app when the app opened it; a caller who injected one
   // (tests, tools) closes it themselves.
-  if (ownsDb) server.on('close', () => { fanout.stop(); db.close(); });
+  if (ownsDb) server.on('close', () => { fanout.stop(); poller?.stop(); db.close(); });
 
-  return { server, handle, cfg, inventory, store, db, retell, tools, limiters, fanout };
+  return { server, handle, cfg, inventory, store, db, retell, tools, limiters, fanout, poller };
 }
 
 /* ------------------------------------------------------------------ */
@@ -727,6 +735,12 @@ if (isMain) {
   // destinations up the moment ~/.secrets/bona-marketing.env has them.
   const fanoutStarted = app.fanout.start();
   jsonLog('info', { evt: 'fanout.init', started: fanoutStarted, dests: app.fanout.dests(), everyMs: app.cfg.fanoutMs });
+  // The WhatsApp poller. `BONA_WA_POLL=0` turns it off; without Evolution credentials it
+  // starts and skips every tick rather than guessing a URL. It never sets a webhook.
+  if (app.poller) {
+    const pollStarted = app.poller.start({ intervalMs: app.cfg.waPollMs });
+    jsonLog('info', { evt: 'wa.poll.init', started: pollStarted, everyMs: app.cfg.waPollMs, ...app.poller.status() });
+  }
   app.server.listen(app.cfg.port, app.cfg.host, () => {
     jsonLog('info', { evt: 'listening', ...redacted(app.cfg) });
   });
