@@ -1,5 +1,5 @@
 {
-  "knowledgeBaseId": "knowledge_base_29fa8a06ce87d0d3",
+  "knowledgeBaseId": "knowledge_base_7d5231f809ca4f5e",
   "llmId": "llm_e978e39556e56a661a08fcdf0a22",
   "voiceAgentId": "agent_00ccf63b9fd9800da7d40d344c",
   "chatAgentId": "agent_c435e260fdd645681b5b6a07d3",
@@ -10,5 +10,5 @@
   "separateChatAgent": true,
   "published": false,
   "note": "Ids are not secrets. Regenerate with: node services/api/retell/provision.mjs",
-  "updatedAt": "2026-09-07T23:02:10.705Z"
+  "updatedAt": "2026-09-08T09:50:03.030Z"
 }
