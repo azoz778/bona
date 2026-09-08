@@ -94,11 +94,11 @@ More: https://bona-real-estate.com/about/ · Arabic: https://bona-real-estate.co
 
 What Bona collects when you use this site or contact us, why, and your rights under the Saudi Personal Data Protection Law (PDPL) and its Implementing Regulations. Written to be read, not filed. The Arabic text is the authoritative version. Full policy (updated 2026-09-05): https://bona-real-estate.com/privacy/ · Arabic: https://bona-real-estate.com/ar/privacy/. In short: the site is static and sets no cookies; enquiry forms open WhatsApp and nothing is stored by the site; analytics (GA4 / Meta Pixel) are built in but currently disabled; data subjects have PDPL rights of access, correction, deletion and consent withdrawal via WhatsApp +966 59 329 6933.
 
-## Listings (48 live)
+## Listings (46 live)
 
-Grouped by kind: Houses 19 · Apartments 21 · Land 8.
+Grouped by kind: Houses 17 · Apartments 21 · Land 8.
 
-## Houses (19) — https://bona-real-estate.com/properties/houses/
+## Houses (17) — https://bona-real-estate.com/properties/houses/
 
 ### Private Beach Villa, Durrat Al Arous — فيلا بشاطئ خاص، درة العروس
 - ID: BONA-001 (ref VIL-013)
@@ -126,33 +126,6 @@ The plot measures 537 square metres, with finishes of a high standard throughout
 تبلغ مساحة الأرض 537 متراً مربعاً، والتشطيبات على مستوى رفيع في كل التفاصيل. عنوان ساحلي هادئ على مسافة قصيرة بالسيارة من المدينة.
 
 Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Private%20Beach%20Villa%2C%20Durrat%20Al%20Arous%20(BONA-001).
-
-### Classic Mansion, Al Shati 6 — قصر كلاسيكي، الشاطئ 6
-- ID: BONA-002 (ref VIL-022)
-- URL: https://bona-real-estate.com/properties/classic-mansion-al-shati-6/ · Arabic: https://bona-real-estate.com/ar/properties/classic-mansion-al-shati-6/
-- Kind: House · Type: Mansion · Category: For sale · Status: available
-- Location: Al Shati 6, Jeddah, Saudi Arabia (الشاطئ 6، جدة)
-- Asking price: SAR 18,000,000
-- Specs: 4 bed, 8 bath, 2300 m² built, 2227.5 m² plot
-- Coordinates: 21.600939, 39.113731
-- Highlights: 2,227.5 sqm plot; Pool with jacuzzi and waterfalls; Four master bedrooms, eight bathrooms; Four reception rooms; Three-car garage; Four minutes to Jeddah Yacht Club
-- المميزات: أرض بمساحة 2,227.5 متر مربع؛ مسبح مع جاكوزي وشلالات؛ أربع غرف نوم رئيسية وثماني دورات مياه؛ أربع صالات استقبال؛ مرآب لثلاث سيارات؛ أربع دقائق إلى نادي جدة لليخوت
-- Listed: 2026-03-21
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagerirx2b-b051b3.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagezjtser-6fa95f.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagegj2hp5-ef902f.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimageybitne-feb9fb.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagewaxbjr-52dd15.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/exclusive-classic-mansion-al-shati-6/tempimagesdvrfg-cb6494.jpg
-
-A classic mansion on a plot of 2,227.5 square metres in Al Shati 6, one of the most established addresses on Jeddah's northern waterfront. The house is arranged around a garden with a swimming pool, jacuzzi and cascading water features, with a three-car garage and a rear terrace for outdoor seating.
-
-The ground floor holds four reception rooms, a formal dining room, a large kitchen and a master bedroom with its own sitting room and kitchenette, reached from a side entrance. Upstairs, three further master bedrooms share a living room and a balcony overlooking the pool. Eight bathrooms in total.
-
-Jeddah Yacht Club is a four-minute drive; Red Sea Mall and the Shangri-La are within seven. King Road is immediately accessible.
-
-قصر كلاسيكي على أرض بمساحة 2,227.5 متر مربع في حي الشاطئ 6، أحد أعرق العناوين على الواجهة البحرية الشمالية لجدة. يلتف المنزل حول حديقة تضم مسبحاً وجاكوزي وشلالات مائية، مع مرآب لثلاث سيارات وتراس خلفي للجلسات الخارجية.
-
-يضم الطابق الأرضي أربع صالات استقبال وغرفة طعام رسمية ومطبخاً كبيراً وغرفة نوم رئيسية بصالة جلوس خاصة ومطبخ صغير، يُصل إليها من مدخل جانبي. وفي الطابق الأول ثلاث غرف نوم رئيسية أخرى تتشارك صالة معيشة وشرفة تطل على المسبح. ثماني دورات مياه في المجموع.
-
-نادي جدة لليخوت على بعد أربع دقائق بالسيارة، ورد سي مول وفندق شانغريلا في حدود سبع دقائق، مع وصول مباشر إلى طريق الملك.
-
-Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Classic%20Mansion%2C%20Al%20Shati%206%20(BONA-002).
 
 ### Contemporary Villa, Al Khalidiyah — فيلا عصرية، الخالدية
 - ID: BONA-005 (ref VIL-038)
@@ -207,33 +180,6 @@ Finishes include porcelain, parquet and high-performance windows, with a smart e
 تشمل التشطيبات البورسلان والباركيه والنوافذ عالية الأداء، مع نظام دخول ذكي وكاميرات مراقبة وتكييف مركزي ومطبخ مجهز بالكامل. يشمل العرض ضماناً إنشائياً لعشر سنوات بدعم من شركة ملاذ للتأمين وسنة من الصيانة المجانية.
 
 Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20NOBAL%20Arista%2C%20Al%20Khalidiyah%20(BONA-024).
-
-### Palais Rose, Le Vésinet — قصر بالي روز، لو فيزينيه
-- ID: BONA-028 (ref VIL-032)
-- URL: https://bona-real-estate.com/properties/palais-rose-le-vesinet/ · Arabic: https://bona-real-estate.com/ar/properties/palais-rose-le-vesinet/
-- Kind: House · Type: Mansion · Category: International · Status: available
-- Location: Parc des Ibis, Île-de-France, Le Vésinet, France (بارك دي زيبيس، إيل دو فرانس، لو فيزينيه)
-- Asking price: EUR 38,000,000
-- Specs: 8 bed, 16 bath, 1769 m² built, 7000 m² plot
-- Coordinates: 48.894254, 2.1347291
-- Highlights: 1,769 sqm residence on 7,000 sqm of grounds; Inspired by the Grand Trianon; Indoor pool, sauna, hammam and squash court; Private cinema; Independent four-bedroom guest house; Twenty minutes from Paris
-- المميزات: مسكن بمساحة 1,769 متراً مربعاً على أرض 7,000 متر مربع؛ مستوحى من قصر تريانون الكبير؛ مسبح داخلي وساونا وحمّام وملعب اسكواش؛ سينما خاصة؛ بيت ضيافة مستقل بأربع غرف نوم؛ على عشرين دقيقة من باريس
-- Listed: 2026-03-21
-- Images: https://tk-storage.azoz.uk/tk-estate-media/media/palais-rose/exterieur-a-2-2048x1365-aaf69e.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/palais-rose/cogemad-palais-rose-le-vesinet-paris-3-scaled-2048x1298-0bd32d.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/palais-rose/cogemad-palais-rose-le-vesinet-paris-gallery-4-2048x1109-8b37b9.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/palais-rose/mflphoto-cogemad-palaisrose-2024-web-6-1-2048x1365-3bb572.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/palais-rose/salle-a-manger-2-2048x1365-cbde63.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/palais-rose/salon-a-3-2048x1365-f8d7fa.jpg
-
-Twenty minutes from Porte Maillot, within the Parc des Ibis in Le Vésinet, Palais Rose is a private estate inspired by the Grand Trianon. The main residence offers 1,769 square metres across the lower ground, garden and ground floors, set in 7,000 square metres of landscaped grounds with a Japanese garden, a rose garden, a central fountain, a greenhouse and a private football pitch.
-
-The ground floor holds the reception hall, a grand reception room, a formal living room, a winter garden, a La Cornue chef's kitchen, the dining room and a gallery. The garden level is private: a family living room, three bedroom suites and the owner's suite with his-and-hers dressing rooms and bathrooms. Below are a private cinema, a games room, a massage and yoga studio, an indoor pool with sauna and hammam, a gym, a squash court and a garage for three cars.
-
-The Hermitage House, an independent guest residence, has four en-suite bedrooms, a living room, an office and a kitchen. A caretaker's villa, a staff villa and estate-wide surveillance complete the domain.
-
-على عشرين دقيقة من بورت مايو، داخل بارك دي زيبيس في لو فيزينيه، يقف قصر بالي روز ضيعة خاصة مستوحاة من قصر تريانون الكبير. يوفر المسكن الرئيسي 1,769 متراً مربعاً على الطابق السفلي وطابق الحديقة والطابق الأرضي، وسط 7,000 متر مربع من الحدائق المنسقة تضم حديقة يابانية وحديقة ورود ونافورة مركزية ودفيئة وملعب كرة قدم خاصاً.
-
-يضم الطابق الأرضي بهو الاستقبال وقاعة استقبال كبرى وصالوناً رسمياً وحديقة شتوية ومطبخ طهاة من لا كورنو وغرفة الطعام ورواقاً. أما طابق الحديقة فخاص بالعائلة: صالة عائلية وثلاثة أجنحة نوم وجناح المالك بغرفتي ملابس وحمامين. وفي الأسفل سينما خاصة وغرفة ألعاب واستوديو للتدليك واليوغا ومسبح داخلي مع ساونا وحمّام وصالة رياضية وملعب اسكواش ومرآب لثلاث سيارات.
-
-يضم بيت الضيافة المستقل «الإرميتاج» أربع غرف نوم بحمامات خاصة وصالة ومكتباً ومطبخاً. وتكتمل الضيعة بفيلا للحارس وفيلا للعاملين ونظام مراقبة يغطي كامل الأرض.
-
-Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Palais%20Rose%2C%20Le%20V%C3%A9sinet%20(BONA-028).
 
 ### Painite Villas by Lamborghini, Benahavís — فلل باينايت بتوقيع لامبورغيني، بيناهابيس
 - ID: BONA-031 (ref VIL-044)

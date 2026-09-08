@@ -603,7 +603,7 @@ export const LISTINGS = [
     listedAt: '2026-03-21',
   },
   {
-    slug: 'nobal-arista-al-khalidiyah', sourceRef: 'VIL-031', status: 'available', category: 'off-plan', type: 'villa', featured: false,
+    slug: 'nobal-arista-al-khalidiyah', sourceRef: 'VIL-031', status: 'available', category: 'off-plan', type: 'villa', featured: true,
     title: { en: 'NOBAL Arista, Al Khalidiyah', ar: 'نوبال أريستا، الخالدية' },
     location: loc({ en: 'Al Khalidiyah', ar: 'الخالدية' }),
     price: { amount: 5000000, currency: 'SAR', from: false, period: null, onRequest: false },
@@ -810,7 +810,7 @@ export const LISTINGS = [
     listedAt: '2026-04-18',
   },
   {
-    slug: 'trump-cliff-villas-aida-muscat', sourceRef: 'VIL-034', status: 'available', category: 'international', type: 'villa', featured: false,
+    slug: 'trump-cliff-villas-aida-muscat', sourceRef: 'VIL-034', status: 'available', category: 'international', type: 'villa', featured: true,
     title: { en: 'Trump Cliff Villas, AIDA, Muscat', ar: 'فلل ترامب كليف، آيدا، مسقط' },
     location: loc({ en: 'AIDA', ar: 'آيدا' }, { en: 'Muscat', ar: 'مسقط' }, { en: 'Oman', ar: 'سلطنة عُمان' }, 'OM'),
     price: { amount: 4000000, currency: 'SAR', from: true, period: null, onRequest: false },

@@ -31,6 +31,11 @@ jobs:
       - run: npm ci
       - name: Sync listings from TK (non-fatal)
         run: node scripts/sync-listings.mjs || echo "sync skipped"
+      # The sync edits listings.json in place (status, price, tour URL) without going
+      # through scripts/curate/build.mjs, so the publication rules are re-checked here.
+      # A synced price that pushes a house over the public-site cap fails the deploy
+      # rather than quietly republishing a home the cap exists to hide.
+      - run: node scripts/curate/validate.mjs
       - run: node scripts/og/gen-llms.mjs
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3

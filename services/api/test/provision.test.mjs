@@ -7,14 +7,19 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  knowledgeBasePayload, toolsPayload, llmPayload, voiceAgentPayload, chatAgentPayload,
-  redactPayload, provision, PROMPT_FILE, PREFERRED_MODEL, FALLBACK_MODEL, BEGIN_MESSAGE,
-  KB_NAME, VOICE_AGENT_NAME, CHAT_AGENT_NAME,
+  knowledgeBasePayload, knowledgeBaseFreshness, toolsPayload, llmPayload, voiceAgentPayload,
+  chatAgentPayload, redactPayload, provision, PROMPT_FILE, PREFERRED_MODEL, FALLBACK_MODEL,
+  BEGIN_MESSAGE, KB_NAME, VOICE_AGENT_NAME, CHAT_AGENT_NAME,
 } from '../retell/provision.mjs';
 import { writeIds } from '../lib/config.mjs';
 
 const TOKEN = 'b'.repeat(32);
 const PUBLIC_API = 'https://bona-api.azoz.uk';
+const OLD_SITE = 'https://bona.azoz.uk';
+const NEW_SITE = 'https://bona-real-estate.com';
+/** What Retell reports back for a knowledge base once it has finished indexing. */
+const urlSources = (site) => knowledgeBasePayload({ siteUrl: site }).knowledge_base_urls
+  .map((url, i) => ({ type: 'url', source_id: `src_${i}`, url }));
 const prompt = fs.readFileSync(PROMPT_FILE, 'utf8');
 
 function tempHome() {
@@ -29,6 +34,27 @@ test('the knowledge base points at both llms files with auto-refresh on', () => 
   assert.equal(kb.knowledge_base_name, KB_NAME);
   assert.deepEqual(kb.knowledge_base_urls, ['https://bona.azoz.uk/llms-full.txt', 'https://bona.azoz.uk/llms.txt']);
   assert.equal(kb.enable_auto_refresh, true);
+});
+
+test('a knowledge base indexing the configured site reads back as fresh', () => {
+  const kb = { knowledge_base_id: 'kb_1', knowledge_base_sources: urlSources(NEW_SITE), status: 'complete' };
+  const freshness = knowledgeBaseFreshness(kb, { siteUrl: NEW_SITE });
+  assert.equal(freshness.known, true);
+  assert.equal(freshness.stale, false);
+});
+
+test('a knowledge base left on the old domain reads back as stale', () => {
+  const kb = { knowledge_base_id: 'kb_1', knowledge_base_sources: urlSources(OLD_SITE), status: 'complete' };
+  const freshness = knowledgeBaseFreshness(kb, { siteUrl: NEW_SITE });
+  assert.equal(freshness.stale, true);
+  assert.deepEqual(freshness.urls, [`${OLD_SITE}/llms-full.txt`, `${OLD_SITE}/llms.txt`]);
+  assert.deepEqual(freshness.wanted, [`${NEW_SITE}/llms-full.txt`, `${NEW_SITE}/llms.txt`]);
+});
+
+test('a knowledge base still indexing is unknown, not accused of being stale', () => {
+  const freshness = knowledgeBaseFreshness({ knowledge_base_id: 'kb_1', status: 'in_progress' }, { siteUrl: NEW_SITE });
+  assert.equal(freshness.known, false);
+  assert.equal(freshness.stale, false, 'Retell fills the sources in only when indexing finishes');
 });
 
 test('the tool token travels in a header, never in the URL', () => {
@@ -145,30 +171,35 @@ test('redaction removes the tool token from anything printed', () => {
 /* ---------------- runs ---------------- */
 
 function fakeClient({ rejectModels = [], existing = {} } = {}) {
-  const seen = { created: [], updated: [], published: [] };
+  // `order` is what proves the KB swap is safe: it records the calls as they arrive, so a
+  // test can insist the old base is deleted only after the LLM points at the new one.
+  const seen = { created: [], updated: [], published: [], deleted: [], order: [] };
   const client = {
     seen,
     async listKnowledgeBases() { return existing.kb ? [existing.kb] : []; },
     async getKnowledgeBase(id) { if (existing.kb?.knowledge_base_id === id) return existing.kb; throw new Error('404'); },
-    async createKnowledgeBase(body) { seen.created.push(['kb', body]); return { knowledge_base_id: 'kb_new', status: 'in_progress' }; },
+    async createKnowledgeBase(body) { seen.created.push(['kb', body]); seen.order.push('create-kb'); return { knowledge_base_id: 'kb_new', status: 'in_progress' }; },
+    async deleteKnowledgeBase(id) { seen.deleted.push(id); seen.order.push('delete-kb'); return null; },
     async createLlm(body) {
       if (rejectModels.includes(body.model)) throw Object.assign(new Error('bad model'), { name: 'RetellError', status: 400 });
       seen.created.push(['llm', body]);
+      seen.order.push('create-llm');
       return { llm_id: 'llm_new' };
     },
     async getLlm(id) { if (existing.llmId === id) return { llm_id: id }; throw new Error('404'); },
     async updateLlm(id, body) {
       if (rejectModels.includes(body.model)) throw Object.assign(new Error('bad model'), { name: 'RetellError', status: 400 });
       seen.updated.push(['llm', id, body]);
+      seen.order.push('update-llm');
       return { llm_id: id };
     },
     async getAgent(id) { if (existing.voiceAgentId === id) return { agent_id: id }; throw new Error('404'); },
     async createAgent(body) { seen.created.push(['agent', body]); return { agent_id: 'agent_voice_new' }; },
-    async updateAgent(id, body) { seen.updated.push(['agent', id, body]); return { agent_id: id }; },
+    async updateAgent(id, body) { seen.updated.push(['agent', id, body]); seen.order.push('update-agent'); return { agent_id: id }; },
     async getChatAgent(id) { if (existing.chatAgentId === id) return { agent_id: id }; throw new Error('404'); },
     async createChatAgent(body) { seen.created.push(['chat-agent', body]); return { agent_id: 'agent_chat_new' }; },
-    async updateChatAgent(id, body) { seen.updated.push(['chat-agent', id, body]); return { agent_id: id }; },
-    async publishAgent(id) { seen.published.push(id); return {}; },
+    async updateChatAgent(id, body) { seen.updated.push(['chat-agent', id, body]); seen.order.push('update-chat-agent'); return { agent_id: id }; },
+    async publishAgent(id) { seen.published.push(id); seen.order.push('publish'); return {}; },
   };
   return client;
 }
@@ -179,7 +210,7 @@ function run(opts, { home, ids = {}, client }) {
   return provision({
     argv: opts.argv ?? [],
     env: { BONA_TOOL_TOKEN: TOKEN, BONA_PUBLIC_API: PUBLIC_API, BONA_SITE: 'https://bona.azoz.uk', RETELL_API_KEY: 'k', ...(opts.env ?? {}) },
-    idsFile, home, log: () => {}, clientFactory: () => client,
+    idsFile, home, log: opts.log ?? (() => {}), clientFactory: () => client,
   }).then((result) => ({ result, ids: JSON.parse(fs.readFileSync(idsFile, 'utf8')) }));
 }
 
@@ -247,6 +278,154 @@ test('a knowledge base created by hand is adopted by name instead of duplicated'
   cleanup();
 });
 
+/** The live situation this guards: a KB created for bona.azoz.uk, a site now on bona-real-estate.com. */
+function movedSite(ids = {}) {
+  const kb = { knowledge_base_id: 'kb_old', knowledge_base_name: KB_NAME, status: 'complete', knowledge_base_sources: urlSources(OLD_SITE) };
+  return { client: fakeClient({ existing: { kb, llmId: 'llm_1', voiceAgentId: 'agent_v', chatAgentId: 'agent_c' } }),
+    ids: { knowledgeBaseId: 'kb_old', llmId: 'llm_1', voiceAgentId: 'agent_v', chatAgentId: 'agent_c', ...ids } };
+}
+
+test('without --rebuild-kb a stale knowledge base is reused, warned about, and never deleted', async () => {
+  const { home, cleanup } = tempHome();
+  const { client, ids: idsIn } = movedSite();
+  const lines = [];
+  const { ids } = await run({ env: { BONA_SITE: NEW_SITE }, log: (l) => lines.push(l) }, { home, client, ids: idsIn });
+  assert.equal(ids.knowledgeBaseId, 'kb_old', 'the existing base must be left exactly as it was');
+  assert.deepEqual(client.seen.deleted, [], 'nothing may be deleted without the flag');
+  assert.ok(!client.seen.created.some(([k]) => k === 'kb'));
+  const text = lines.join('\n');
+  assert.match(text, /bona\.azoz\.uk\/llms-full\.txt/, 'the operator must see which URLs it is stuck on');
+  assert.match(text, /--rebuild-kb/, 'the warning must say how to fix it');
+  cleanup();
+});
+
+test('a knowledge base that already indexes the configured site is not warned about', async () => {
+  const { home, cleanup } = tempHome();
+  const kb = { knowledge_base_id: 'kb_ok', knowledge_base_name: KB_NAME, status: 'complete', knowledge_base_sources: urlSources(NEW_SITE) };
+  const client = fakeClient({ existing: { kb } });
+  const lines = [];
+  await run({ env: { BONA_SITE: NEW_SITE }, log: (l) => lines.push(l) }, { home, client });
+  assert.equal(lines.join('\n').includes('--rebuild-kb'), false, 'a healthy base must not nag');
+  cleanup();
+});
+
+test('--rebuild-kb re-points the LLM first and deletes the old base only afterwards', async () => {
+  const { home, cleanup } = tempHome();
+  const { client, ids: idsIn } = movedSite();
+  const { ids } = await run({ argv: ['--rebuild-kb'], env: { BONA_SITE: NEW_SITE } }, { home, client, ids: idsIn });
+
+  const [, kbBody] = client.seen.created.find(([k]) => k === 'kb');
+  assert.deepEqual(kbBody.knowledge_base_urls, [`${NEW_SITE}/llms-full.txt`, `${NEW_SITE}/llms.txt`]);
+  const [, , llmBody] = client.seen.updated.find(([k]) => k === 'llm');
+  assert.deepEqual(llmBody.knowledge_base_ids, ['kb_new'], 'the LLM must be moved to the replacement');
+  assert.deepEqual(client.seen.deleted, ['kb_old']);
+  assert.ok(
+    client.seen.order.indexOf('delete-kb') > client.seen.order.indexOf('update-llm'),
+    'deleting first would leave Dana with no knowledge base at all',
+  );
+  assert.ok(client.seen.order.indexOf('create-kb') < client.seen.order.indexOf('update-llm'));
+  assert.equal(ids.knowledgeBaseId, 'kb_new');
+  cleanup();
+});
+
+test('--rebuild-kb deletes the old base only after the agents serve the new one', async () => {
+  const { home, cleanup } = tempHome();
+  const { client, ids: idsIn } = movedSite();
+  await run({ argv: ['--rebuild-kb'], env: { BONA_SITE: NEW_SITE } }, { home, client, ids: idsIn });
+  // Pointing the LLM at the new base is not the same as Dana serving it: when a new LLM has
+  // to be created, the agents keep answering from the old one until they are updated.
+  for (const step of ['update-agent', 'update-chat-agent']) {
+    assert.ok(
+      client.seen.order.indexOf('delete-kb') > client.seen.order.indexOf(step),
+      `delete-kb must come after ${step}, or a live agent can be left reading from nothing`,
+    );
+  }
+  cleanup();
+});
+
+test('--rebuild-kb --publish retires the old base only after publishing', async () => {
+  const { home, cleanup } = tempHome();
+  const { client, ids: idsIn } = movedSite();
+  await run({ argv: ['--rebuild-kb', '--publish'], env: { BONA_SITE: NEW_SITE } }, { home, client, ids: idsIn });
+  assert.ok(
+    client.seen.order.indexOf('delete-kb') > client.seen.order.lastIndexOf('publish'),
+    'where published versions are the live surface, the agent only moves at publish time',
+  );
+  cleanup();
+});
+
+test('--rebuild-kb --publish keeps the old base when a publish fails', async () => {
+  const { home, cleanup } = tempHome();
+  const { client, ids: idsIn } = movedSite();
+  client.publishAgent = async () => { throw new Error('Retell refused to publish'); };
+  // The run itself still succeeds — a failed publish is not fatal — but the base must survive,
+  // because the live published agent is still the one reading from it.
+  await run({ argv: ['--rebuild-kb', '--publish'], env: { BONA_SITE: NEW_SITE } }, { home, client, ids: idsIn });
+  assert.deepEqual(client.seen.deleted, [], 'a live published agent may still be serving the old base');
+  cleanup();
+});
+
+test('--rebuild-kb keeps the old knowledge base when an agent update fails', async () => {
+  const { home, cleanup } = tempHome();
+  const { client, ids: idsIn } = movedSite();
+  client.updateAgent = async () => { throw new Error('Retell rejected the agent payload'); };
+  client.createAgent = async () => { throw new Error('Retell rejected the agent payload'); };
+  await assert.rejects(() => run({ argv: ['--rebuild-kb'], env: { BONA_SITE: NEW_SITE } }, { home, client, ids: idsIn }), /rejected/);
+  assert.deepEqual(client.seen.deleted, [], 'an agent still on the old LLM must keep the base that LLM reads');
+  cleanup();
+});
+
+test('--rebuild-kb keeps the old knowledge base when re-pointing the LLM fails', async () => {
+  const { home, cleanup } = tempHome();
+  const { client, ids: idsIn } = movedSite();
+  client.updateLlm = async () => { throw new Error('Retell request timed out'); };
+  await assert.rejects(() => run({ argv: ['--rebuild-kb'], env: { BONA_SITE: NEW_SITE } }, { home, client, ids: idsIn }), /timed out/);
+  assert.deepEqual(client.seen.deleted, [], 'a half-finished swap must not destroy the base Dana is still using');
+  cleanup();
+});
+
+test('a failed delete is reported but does not fail the run', async () => {
+  const { home, cleanup } = tempHome();
+  const { client, ids: idsIn } = movedSite();
+  client.deleteKnowledgeBase = async () => { throw new Error('403 forbidden'); };
+  const lines = [];
+  const { ids } = await run({ argv: ['--rebuild-kb'], env: { BONA_SITE: NEW_SITE }, log: (l) => lines.push(l) }, { home, client, ids: idsIn });
+  assert.equal(ids.knowledgeBaseId, 'kb_new', 'the new base is live either way');
+  assert.match(lines.join('\n'), /could not delete the old knowledge base kb_old/);
+  cleanup();
+});
+
+test('--rebuild-kb on an account with no knowledge base simply creates one', async () => {
+  const { home, cleanup } = tempHome();
+  const client = fakeClient();
+  const { ids } = await run({ argv: ['--rebuild-kb'], env: { BONA_SITE: NEW_SITE } }, { home, client });
+  assert.equal(ids.knowledgeBaseId, 'kb_new');
+  assert.deepEqual(client.seen.deleted, []);
+  cleanup();
+});
+
+test('--dry-run --rebuild-kb prints the swap in order and still calls nothing', async () => {
+  const { home, cleanup } = tempHome();
+  const idsFile = path.join(home, 'ids.json');
+  fs.writeFileSync(idsFile, JSON.stringify({ knowledgeBaseId: 'kb_old', llmId: 'llm_1' }));
+  const lines = [];
+  const out = await provision({
+    argv: ['--dry-run', '--rebuild-kb'], home, log: (l) => lines.push(l), idsFile,
+    env: { BONA_TOOL_TOKEN: TOKEN, BONA_PUBLIC_API: PUBLIC_API, BONA_SITE: NEW_SITE },
+    clientFactory: () => { throw new Error('the dry run must not build a client that talks to Retell'); },
+  });
+  assert.equal(out.rebuildKb, true);
+  const text = lines.join('\n');
+  assert.match(text, /delete-knowledge-base\/kb_old/);
+  assert.match(text, /update-retell-llm\/llm_1/);
+  assert.ok(
+    text.indexOf('delete-knowledge-base') > text.indexOf('update-retell-llm'),
+    'the printed plan must show the delete happening last',
+  );
+  assert.match(text, new RegExp(`${NEW_SITE.replace('.', '\\.')}/llms-full\\.txt`));
+  cleanup();
+});
+
 test('a model Retell rejects falls back to gpt-4.1', async () => {
   const { home, cleanup } = tempHome();
   const client = fakeClient({ rejectModels: [PREFERRED_MODEL] });
@@ -290,7 +469,7 @@ test('--ensure-env only creates the secrets file, 0600, and stops', async () => 
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   const body = fs.readFileSync(file, 'utf8');
   assert.match(body, /BONA_TOOL_TOKEN=[0-9a-f]{32}/);
-  assert.match(body, /BONA_PUBLIC_API=https:\/\/bona-api\.azoz\.uk/);
+  assert.match(body, /BONA_PUBLIC_API=https:\/\/api\.bona-real-estate\.com/);
   cleanup();
 });
 

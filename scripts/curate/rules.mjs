@@ -63,3 +63,54 @@ export function videoEntryProblems(v, i) {
   return e;
 }
 export const isLocalSrc = (s) => LOCAL_LAND_STILL.test(s) || LOCAL_LISTING_SRC.test(s);
+
+// ---- publication price caps --------------------------------------------------------
+// Two separate owner rules, deliberately not merged: land and houses came off the public
+// site for different reasons and sit at different numbers.
+//   land   — SAR 50,000,000 (2026-09-06): exact plot locations are gated in TK's register.
+//   houses — SAR 10,000,000 (2026-09-08): keep the public site to the mainstream market.
+// A listing over its cap is excluded ENTIRELY by scripts/curate/build.mjs — it gets no
+// listings.json entry, so no page, card, sitemap entry or OG image can leak it. Enquiries
+// are how those homes are shared.
+
+/** Approximate SAR rates, for comparing prices against a cap. Mirrors src/lib/listings.ts. */
+export const SAR_RATE = { SAR: 1, AED: 1.02, USD: 3.75, EUR: 4.05, GBP: 4.75, OMR: 9.75 };
+
+/**
+ * A listing's asking price in SAR, or null when there is no number to compare.
+ *
+ * Null is the important case: a price of "on request" is unknown, not cheap and not dear.
+ * Every caller must decide for itself what to do with an unknown, and none may treat it as
+ * zero. Monthly rents are annualised so a cap means the same thing for them.
+ */
+export function sarAmount(price) {
+  // `onRequest` is the owner's word that no price is published. A number may still sit in
+  // `amount` beside it — buildListing's `price.amount = price.amount ?? null` never clears
+  // one — but it is not a price we may act on, so the answer is "unknown", not that figure.
+  if (price?.onRequest) return null;
+  const amount = price?.amount;
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) return null;
+  const rate = SAR_RATE[price.currency];
+  // Never fall back to 1: treating an unknown currency as SAR would under-count a price by
+  // up to ~12x and publish a home the cap exists to hide. Fail loudly instead.
+  if (!rate) throw new Error(`sarAmount: unknown currency "${price.currency}" (known: ${Object.keys(SAR_RATE).join(', ')})`);
+  const annual = price.period === 'month' ? amount * 12 : amount;
+  return annual * rate;
+}
+
+/** Owner rule 2026-09-08: houses over this are not published on the public site. */
+export const HOUSE_PRICE_CAP = 10_000_000;
+
+/**
+ * May this listing be published, as far as the HOUSE cap is concerned?
+ *
+ * Only `kind: 'house'` is governed — land has its own cap in build.mjs, and apartments have
+ * none. A house with no published price is KEPT (owner decision 2026-09-08): removing on a
+ * guess would take down homes that may be well under the line, and the cap catches them the
+ * moment a price is set.
+ */
+export function isHousePublic(l) {
+  if (l?.kind !== 'house') return true;
+  const sar = sarAmount(l.price);
+  return sar === null || sar <= HOUSE_PRICE_CAP;
+}
