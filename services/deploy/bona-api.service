@@ -14,8 +14,10 @@ EnvironmentFile=-%h/.secrets/bona-services.env
 EnvironmentFile=-%h/.secrets/bona-marketing.env
 Environment=NODE_ENV=production
 # The WhatsApp poller (read-only chat/findMessages against Evolution, matches Ref codes
-# to leads) runs inside this process. Set BONA_WA_POLL=0 in bona-services.env to stop it.
-Environment=BONA_WA_POLL=1
+# to leads) runs inside this process and is ON by default (lib/config.mjs: waPoll defaults
+# to true when BONA_WA_POLL is unset). Set BONA_WA_POLL=0 in bona-services.env to stop it —
+# and nothing here may set it: an Environment= line after EnvironmentFile= would win over the
+# file and silently re-enable the poller (Codex review, 2026-09-08).
 Environment=PATH=%h/.nvm/versions/node/v24.19.0/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 WorkingDirectory=%h/bona/services
 ExecStart=%h/.nvm/versions/node/v24.19.0/bin/node %h/bona/services/api/index.mjs

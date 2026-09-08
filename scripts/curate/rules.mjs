@@ -115,6 +115,34 @@ export function isHousePublic(l) {
   return sar === null || sar <= HOUSE_PRICE_CAP;
 }
 
+/**
+ * Owner decision 2026-09-06: land plots publish only under SAR 50,000,000. Plots at or above
+ * stay off-market — their exact locations are gated in TK's land register — and the Land
+ * page carries a CTA for enquiries instead.
+ */
+export const LAND_PRICE_CAP = 50_000_000;
+
+/** A land listing: by `kind` (the built form) or by `type` (curated/intake rows before build). */
+const isLandKind = (l) => l?.kind === 'land' || ['land', 'plot'].includes(String(l?.type ?? '').toLowerCase());
+
+/**
+ * May this listing be published, as far as the LAND cap is concerned?
+ *
+ * ONE rule for the three routes that write listings.json: build.mjs, the daily deploy's
+ * sync-listings.mjs (which updates prices in place and never rebuilds) and validate.mjs (the
+ * last gate before deploy). Codex review 2026-09-08: while the cap lived only in build.mjs, a
+ * plot whose TK price crossed the line was republished by the next scheduled deploy.
+ *
+ * Unlike a house, a plot with NO published price is not kept: every public plot comes from
+ * the hand-curated land pool with its figure, so an unknown price on land means off-market —
+ * exactly what the cap protects. Compared in SAR equivalent like the house cap.
+ */
+export function isLandPublic(l) {
+  if (!isLandKind(l)) return true;
+  const sar = sarAmount(l.price);
+  return sar !== null && sar < LAND_PRICE_CAP;
+}
+
 // ---- REGA advertising licence ------------------------------------------------------------
 // `licence: { adNumber, adExpiry, wafiNumber, escrowAccount } | null` — the advertisement
 // licence REGA issues per listing on the FAL platform, and the Wafi licence / escrow account

@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FORBIDDEN, HOUSE_PRICE_CAP, HYPE, isHousePublic, isLocalSrc, licenceProblems, LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, sarAmount, videoEntryProblems } from './rules.mjs';
+import { FORBIDDEN, HOUSE_PRICE_CAP, HYPE, isHousePublic, isLandPublic, isLocalSrc, LAND_PRICE_CAP, licenceProblems, LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, sarAmount, videoEntryProblems } from './rules.mjs';
 
 function matterportIdOf(value) {
   if (typeof value !== 'string') return null;
@@ -189,6 +189,12 @@ for (const l of data) {
   // Checking it here means a synced price rise can never quietly republish a house.
   if (!isHousePublic(l)) {
     err(id, `house is over the SAR ${HOUSE_PRICE_CAP.toLocaleString('en-US')} public-site cap (${Math.round(sarAmount(l.price)).toLocaleString('en-US')} SAR eq.) — re-run scripts/curate/build.mjs`);
+  }
+  // Same for land (owner rule 2026-09-06, cap SAR 50,000,000; a plot with no published price is
+  // off-market too) — the deploy's sync can move a price, so the rule is checked here as well.
+  if (!isLandPublic(l)) {
+    const sar = sarAmount(l.price);
+    err(id, `land is at/above the SAR ${LAND_PRICE_CAP.toLocaleString('en-US')} public-site cap (${sar === null ? 'no published price' : `${Math.round(sar).toLocaleString('en-US')} SAR eq.`}) — re-run scripts/curate/build.mjs`);
   }
 
   // copy hygiene

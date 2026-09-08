@@ -29,15 +29,21 @@ export function toNumber(jid) {
 }
 
 /**
- * Send one text message. Tries the owner's own chat, then the Bona group.
+ * Send one text message to the OWNER's own chat — and nowhere else.
+ *
+ * Every caller sends either a lead note (a visitor's name, phone and details) or a
+ * dashboard login code. This used to fall back to the Bona group when the owner chat
+ * timed out, which would have posted that PII or a live OTP into a group other people can
+ * read (Codex review, 2026-09-08). The group is reachable only when a caller says so
+ * explicitly with `allowGroupFallback: true`; nothing in the API does today.
  * @returns {Promise<{ ok: boolean, to?: string, status?: number, error?: string, skipped?: boolean }>}
  */
-export async function sendText(text, { env = {}, fetchImpl = globalThis.fetch, timeoutMs = 8000 } = {}) {
+export async function sendText(text, { env = {}, fetchImpl = globalThis.fetch, timeoutMs = 8000, allowGroupFallback = false } = {}) {
   const cfg = waConfig(env);
   if (!cfg.enabled) return { ok: false, skipped: true, error: 'disabled' };
   if (!cfg.baseUrl || !cfg.apiKey) return { ok: false, skipped: true, error: 'evolution-not-configured' };
 
-  const targets = [cfg.ownerJid, cfg.groupJid].filter(Boolean);
+  const targets = [cfg.ownerJid, allowGroupFallback ? cfg.groupJid : null].filter(Boolean);
   let lastError = 'no-target';
   for (const target of targets) {
     const controller = new AbortController();

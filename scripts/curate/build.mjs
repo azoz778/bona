@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LISTINGS } from './listings.source.mjs';
 import { ROOMS } from './rooms.mjs';
-import { HOUSE_PRICE_CAP, isHousePublic, sarAmount } from './rules.mjs';
+import { HOUSE_PRICE_CAP, isHousePublic, isLandPublic, sarAmount } from './rules.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const GALLERY = path.join(ROOT, 'scripts', 'tk-gallery-data.json');
@@ -96,13 +96,10 @@ for (const l of out) {
 const API = JSON.parse(fs.readFileSync(new URL('../tk-public-properties.snapshot.json', import.meta.url), 'utf8')).data || [];
 const apiById = new Map(API.map((r) => [String(r.id), r]));
 // Owner decision 2026-09-06 (revises the 2026-09-05 21:00 blanket hold): land plots are published on
-// the site when priced under SAR 50,000,000. Plots at or above that price stay off-market — their
-// exact locations are gated in TK's land register — and are excluded entirely (no listings.json entry,
-// so no sitemap/OG/card can leak them); the Land page instead carries a CTA inviting enquiries about
-// off-market inventory. The comparison is on price.amount (already the SAR figure for every land plot
-// today) so it isn't hardcoded to SAR and won't silently misfire if a non-SAR land listing shows up later.
-const LAND_PRICE_CAP = 50_000_000;
-const isLandPublic = (l) => l.kind !== 'land' || (typeof l.price?.amount === 'number' && l.price.amount < LAND_PRICE_CAP);
+// the site when priced under SAR 50,000,000; plots at or above stay off-market and are excluded
+// entirely (no listings.json entry, so no sitemap/OG/card can leak them) — the Land page carries a CTA
+// instead. The rule itself is isLandPublic() in rules.mjs, shared with sync-listings.mjs and
+// validate.mjs so the daily deploy cannot republish a plot whose price crossed the line.
 const live = out.filter((l) => l.sourceRef && apiById.has(String(l.sourceRef)) && !/sold|reserved|rented|inactive|withdrawn/i.test(String(apiById.get(String(l.sourceRef)).status || '')) && isLandPublic(l));
 console.log(`TK live list: kept ${live.length}, dropped ${out.length - live.length} (no sourceRef in the API, or not available there)`);
 
