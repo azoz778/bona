@@ -163,6 +163,7 @@ const CALL = {
   pcApiInactive: /^systemctl --user is-active --quiet bona-api$/,
   pcTunnelInactive: /^systemctl --user is-active --quiet cloudflared-bona$/,
   scp: /^scp -q -p \S+\/bona-data\/bona\.db fake-vps:bona-data\/$/,
+  vpsClearWal: new RegExp(`${REMOTE}rm -f ~\\/bona-data\\/bona\\.db-wal ~\\/bona-data\\/bona\\.db-shm$`),
   vpsLeadCount: new RegExp(`${REMOTE}~\\/\\.local\\/opt\\/node-v24\\.19\\.0-linux-x64\\/bin\\/node -e .* ~\\/bona-data\\/bona\\.db$`),
   vpsStartApi: new RegExp(`${REMOTE}systemctl --user enable --now bona-api$`),
   vpsStartTimer: new RegExp(`${REMOTE}systemctl --user enable --now bona-repo-sync\\.timer$`),
@@ -197,7 +198,9 @@ test('cutover.sh: happy path — stop PC, copy, start VPS API then tunnel, disab
   // The PC units are verified inactive (both of them) between the stop and the copy: the copy is
   // consistent only when nothing on the PC still writes. The VPS lead count is a copy-integrity
   // check: it is taken right after the scp, before the VPS API (and its poller) can open the database.
-  assertOrdered(r.lines, CALL.pcNodeSqlite, CALL.vpsCheck, CALL.pcStop, CALL.pcApiInactive, CALL.pcTunnelInactive, CALL.scp, CALL.vpsLeadCount, CALL.vpsStartApi, CALL.vpsStartTimer, CALL.vpsStartTunnel, CALL.publicHealth, CALL.pcDisable);
+  // Stale WAL/SHM left on the VPS by an earlier attempt are cleared before the copy, so the copied
+  // database is never opened next to someone else's write-ahead log.
+  assertOrdered(r.lines, CALL.pcNodeSqlite, CALL.vpsCheck, CALL.pcStop, CALL.pcApiInactive, CALL.pcTunnelInactive, CALL.vpsClearWal, CALL.scp, CALL.vpsLeadCount, CALL.vpsStartApi, CALL.vpsStartTimer, CALL.vpsStartTunnel, CALL.publicHealth, CALL.pcDisable);
   const scpAt = r.lines.findIndex((l) => CALL.scp.test(l));
   for (const re of [CALL.pcApiInactive, CALL.pcTunnelInactive]) {
     const i = r.lines.findIndex((l) => re.test(l));
