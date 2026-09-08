@@ -14,8 +14,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { openDb } from '../lib/db.mjs';
 import {
-  CLICK_WINDOW_MS, FIRST_RUN_LOOKBACK_MS, MAX_WINDOW_MS, OVERLAP_MS, SEEN_TTL_MS, adMetaOf,
-  adSourceOf, createPoller, isIgnorableChat, jidsOf,
+  CLICK_WINDOW_MS, FIRST_RUN_LOOKBACK_MS, MAX_RECORD_ATTEMPTS, MAX_WINDOW_MS, OVERLAP_MS,
+  SEEN_TTL_MS, adMetaOf, adSourceOf, createPoller, isIgnorableChat, jidsOf,
 } from '../lib/wa-poller.mjs';
 
 const NOW = Date.UTC(2026, 8, 6, 12, 0, 0);
@@ -363,6 +363,123 @@ test('jidsOf keeps a phone out of an @lid and a group out of everything', () => 
   assert.deepEqual(jidsOf({ jid: '272516946294519@lid' }), { phone: null, waJid: null, waLid: '272516946294519@lid' });
   assert.deepEqual(jidsOf({ jid: SENDER }), { phone: '966500000000', waJid: SENDER, waLid: null });
   assert.deepEqual(jidsOf({}), { phone: null, waJid: null, waLid: null });
+});
+
+/* ---------------- order within a window ---------------- */
+
+test('a window is handled oldest first, so the Ref line creates the lead its follow-up merges into', async () => {
+  // Evolution answers newest-first; this is the order it would hand them over in.
+  const h = harness({ windows: [[
+    msg({ id: 'NEW', ts: NOW - 20_000, text: 'أي جديد؟' }),
+    msg({ id: 'OLD', ts: NOW - 60_000, text: 'Hi — Ref BONA-W003 · K7Q2XR' }),
+  ]] });
+  const tally = await h.poller.tick();
+
+  assert.deepEqual({ matched: tally.matched, created: tally.created, merged: tally.merged, unmatched: tally.unmatched },
+    { matched: 2, created: 1, merged: 1, unmatched: 0 });
+  const [lead] = h.leads();
+  assert.equal(lead.match_method, 'ref', 'the follow-up did not get judged before the Ref line');
+  assert.equal(lead.first_inbound_ts, NOW - 60_000);
+  assert.equal(h.sent.length, 1);
+  h.cleanup();
+});
+
+test('a reply that arrives in the same window as the enquiry still stops the clock', async () => {
+  const h = harness({ windows: [[
+    msg({ id: 'REPLY', ts: NOW - 10_000, fromMe: true, text: 'Ahlan!', pushName: null }),
+    msg({ id: 'IN', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' }),
+  ]] });
+  const tally = await h.poller.tick();
+
+  assert.equal(tally.created, 1);
+  assert.equal(tally.replies, 1);
+  assert.equal(h.leads()[0].first_reply_ts, NOW - 10_000);
+  h.cleanup();
+});
+
+/* ---------------- the loop never reads itself ---------------- */
+
+test('our own new-lead note is never an enquiry, whatever fromMe says', async () => {
+  const note = '*Bona — new enquiry*\nName: Sara\nPhone: +966500000000\nSource: meta / paid · Ref K7Q2XR\nChannel: whatsapp';
+  const h = harness({ windows: [[msg({ id: 'NOTE', fromMe: false, jid: '272516946294519@lid', text: note })]] });
+  const tally = await h.poller.tick();
+
+  assert.equal(tally.ignored, 1);
+  assert.equal(tally.matched, 0);
+  assert.equal(tally.unmatched, 0);
+  assert.equal(h.db.countLeads(), 0, 'the note says "Bona", so only this rule keeps it out');
+  h.cleanup();
+});
+
+/* ---------------- a record that fails ---------------- */
+
+/** A store that throws on the first `getSessionByRef`, then behaves. */
+function flakyDb(db, failures) {
+  let left = failures;
+  return { ...db, getSessionByRef: (code) => { if (left > 0) { left -= 1; throw new Error('database is locked'); } return db.getSessionByRef(code); } };
+}
+
+test('a message that fails to store is retried on the next tick, not written off', async () => {
+  const db = openDb(':memory:');
+  db.upsertSession({ session_id: 'mf3k2a-7b1c', anon_id: ANON, ref: 'K7Q2XR', started: NOW, last_seen: NOW, pages: 1, locale: 'en', last_touch: touch() });
+  const logs = [];
+  const poller = createPoller({
+    db: flakyDb(db, 1),
+    cfg: { env: { BONA_OWNER_JID: OWNER } },
+    findMessages: async () => ({ records: [msg({ text: 'Ref BONA-W003 · K7Q2XR' })] }),
+    sendWhatsApp: async () => ({ ok: true }),
+    log: (o) => logs.push(o),
+    now: () => NOW,
+  });
+
+  const first = await poller.tick();
+  assert.equal(first.matched, 0);
+  assert.equal(db.countLeads(), 0);
+  assert.equal(db.waSeenHas('KEY1'), false, 'an unhandled message is not remembered as handled');
+  assert.equal(logs.find((l) => l.evt === 'wa.poll.record_failed').writtenOff, false);
+
+  const second = await poller.tick();
+  assert.equal(second.created, 1, 'the retry lands the lead the failure nearly lost');
+  assert.equal(db.waSeenHas('KEY1'), true);
+  db.close();
+});
+
+test('a record that fails every time is written off after three tries rather than retried for ever', async () => {
+  const db = openDb(':memory:');
+  const logs = [];
+  const poller = createPoller({
+    db: flakyDb(db, Infinity),
+    cfg: { env: { BONA_OWNER_JID: OWNER } },
+    findMessages: async () => ({ records: [msg({ text: 'Ref BONA-W003 · K7Q2XR' })] }),
+    log: (o) => logs.push(o),
+    now: () => NOW,
+  });
+  for (let i = 0; i < MAX_RECORD_ATTEMPTS; i += 1) await poller.tick(); // eslint-disable-line no-await-in-loop
+
+  assert.equal(db.waSeenHas('KEY1'), true);
+  assert.equal(logs.filter((l) => l.evt === 'wa.poll.record_failed').at(-1).writtenOff, true);
+  const after = await poller.tick();
+  assert.equal(after.ignored, 1, 'and then it stops costing anything');
+  db.close();
+});
+
+/* ---------------- a window too big to read ---------------- */
+
+test('a window that overflowed the page cap says so — its oldest messages are unreachable', async () => {
+  const db = openDb(':memory:');
+  const logs = [];
+  const poller = createPoller({
+    db,
+    cfg: { env: { BONA_OWNER_JID: OWNER } },
+    findMessages: async () => ({ records: [msg({ text: 'hi' })], truncated: true }),
+    log: (o) => logs.push(o),
+    now: () => NOW,
+  });
+  await poller.tick();
+  const warned = logs.find((l) => l.evt === 'wa.poll.truncated');
+  assert.equal(warned.level, 'warn');
+  assert.equal(warned.scanned, 1);
+  db.close();
 });
 
 /* ---------------- (k) an Evolution outage ---------------- */

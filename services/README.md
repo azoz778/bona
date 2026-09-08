@@ -529,6 +529,14 @@ Everything else — your private conversations, which this loop can also see —
 in memory: counted in `poller.unmatched`, never written to disk, never sent anywhere. No
 log line here carries a phone number, a name or message text.
 
+Each window is handled oldest-first (Evolution answers the other way round, and judging a
+follow-up before the `Ref` line that explains it would discard it), a message is remembered
+as handled only once it is stored, and one that keeps failing is written off after three
+tries. Windows are read newest-first inside Evolution, so a window holding more than 500
+messages hides its oldest ones and cannot be asked again for them — the log says
+`wa.poll.truncated` when that happens, which takes downtime long enough for 500 messages
+to pile up.
+
 A match creates the lead (or merges into the person it already is) **at the message's own
 timestamp**, so `first_inbound_ts` is when the enquiry actually happened; the first ≤ 200
 characters are kept on the touchpoint of a *new* lead only. You get the note once, on

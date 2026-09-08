@@ -28,7 +28,7 @@
  * number, a name or message text.
  */
 import { parseRef } from './attribution.mjs';
-import { MAX_PAGES, PAGE_SIZE, bareJid, fetchWindow } from './evolution.mjs';
+import { MAX_PAGES, PAGE_SIZE, bareJid, fetchWindow, oldestFirst } from './evolution.mjs';
 import { createOrMergeLead, leadNote } from './leads.mjs';
 import { normalisePhone } from './phone.mjs';
 import { waConfig } from './wa.mjs';
@@ -52,6 +52,14 @@ export const SNIPPET_MAX = 200;
 /** The one keyword rule: our name, in either script, or a listing id. */
 export const KEYWORD_RE = /\bbona\b|بونا|BONA-W?\d{3}/i;
 const LISTING_RE = /\bBONA-W?\d{3}\b/i;
+/**
+ * Our own new-lead note, read back out of the owner's chat. It says "Bona" in the first
+ * line, so without this it would keyword-match and become an enquiry from ourselves.
+ * `fromMe` normally keeps it out; this is the belt to that pair of braces.
+ */
+const OWN_NOTE_RE = /^\*?Bona — new enquiry\*?/;
+/** How often one record may fail before it is written off rather than retried for ever. */
+export const MAX_RECORD_ATTEMPTS = 3;
 
 const compact = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null && v !== undefined && v !== ''));
 const str = (v, max = 300) => {
@@ -185,6 +193,8 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
   let timer = null;
   let busy = false;
   let matched = 0;
+  /** Message ids this process has failed on, so a poison record cannot retry for ever. */
+  const failures = new Map();
 
   /* -------------------- lookups -------------------- */
 
@@ -353,35 +363,50 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
 
       const tally = { scanned: records.length, matched: 0, unmatched: 0, created: 0, merged: 0, replies: 0, ignored: 0 };
       let maxTs = 0;
-      for (const rec of records) {
+      // Evolution answers newest-first. Handled in that order, a follow-up would be judged
+      // before the Ref line that creates the lead, and a reply before the enquiry it answers.
+      for (const rec of oldestFirst(records)) {
         const ts = Number.isFinite(rec?.ts) ? rec.ts : t;
         if (ts > maxTs && ts <= lte) maxTs = ts;
 
         // The owner's own chat can also arrive as a `@lid` whose alt is his number.
         const isOwnChat = Boolean(ownerDigits) && [rec?.jid, rec?.jidAlt].some((j) => j && !isLid(j) && bareJid(j) === ownerDigits);
-        if (!rec?.id || isOwnChat || isIgnorableChat(rec.jid, ownerDigits)) {
+        const isOwnNote = !rec?.fromMe && OWN_NOTE_RE.test(String(rec?.text ?? '').trimStart());
+        if (!rec?.id || isOwnChat || isOwnNote || isIgnorableChat(rec.jid, ownerDigits)) {
           tally.ignored += 1;
           continue;
         }
         if (db.waSeenHas(rec.id)) { tally.ignored += 1; continue; }
-        // Remembered before it is handled: a message that makes this loop throw must not
-        // make it throw again on every tick for the next week.
-        db.waSeenAdd(rec.id, ts);
 
         try {
           if (rec.fromMe) {
             if (recordReply(rec, ts)) tally.replies += 1;
-            continue;
+          } else {
+            const out = await handleInbound(rec, ts);
+            if (!out) tally.unmatched += 1;
+            else {
+              tally.matched += 1;
+              if (out.created) tally.created += 1; else tally.merged += 1;
+            }
           }
-          const out = await handleInbound(rec, ts);
-          if (!out) { tally.unmatched += 1; continue; }
-          tally.matched += 1;
-          if (out.created) tally.created += 1; else tally.merged += 1;
+          // Remembered once it is safely handled, so a transient store failure costs a
+          // retry rather than the lead. (One process owns this loop; two would need the
+          // claim to be the INSERT itself.)
+          db.waSeenAdd(rec.id, ts);
+          failures.delete(rec.id);
         } catch (err) {
           // No content, no jid: a record that fails is a bug to fix, not a person to log.
-          log({ level: 'warn', evt: 'wa.poll.record_failed', error: String(err?.message ?? err) });
+          const attempts = (failures.get(rec.id) ?? 0) + 1;
+          failures.set(rec.id, attempts);
+          if (attempts >= MAX_RECORD_ATTEMPTS) { db.waSeenAdd(rec.id, ts); failures.delete(rec.id); }
+          log({ level: 'warn', evt: 'wa.poll.record_failed', attempts, writtenOff: attempts >= MAX_RECORD_ATTEMPTS, error: String(err?.message ?? err) });
         }
       }
+
+      // Newest-first paging means a window that overflowed the page cap hides its OLDEST
+      // messages, and asking again returns the same newest ones — so this is a loss, and
+      // it says so. It takes downtime long enough for 500 messages to pile up.
+      if (answer?.truncated) log({ level: 'warn', evt: 'wa.poll.truncated', scanned: records.length, gte, lte });
 
       db.waCursorSet(instance, {
         // Forward only, no further back than the newest message we saw, and never reaching
