@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LISTINGS } from './listings.source.mjs';
 import { ROOMS } from './rooms.mjs';
-import { HOUSE_PRICE_CAP, isHousePublic, sarAmount } from './rules.mjs';
+import { INTAKE_ID_RE, isPublishable, WITHHELD_LISTINGS } from './rules.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const GALLERY = path.join(ROOT, 'scripts', 'tk-gallery-data.json');
@@ -114,12 +114,14 @@ console.log(`TK live list: kept ${live.length}, dropped ${out.length - live.leng
 // with a Sold badge. `hidden` and `_intake` are intake bookkeeping and never reach the site.
 const INBOX = path.join(ROOT, 'scripts', 'curate', 'inbox');
 const inbox = [];
+const inboxIdsSeen = new Set(); // every id on disk, hidden ones included — for the stale-withheld check
 let inboxHidden = 0;
 if (fs.existsSync(INBOX)) {
   for (const name of fs.readdirSync(INBOX).filter((n) => n.endsWith('.json') && n !== '_index.json').sort()) {
     const file = path.join(INBOX, name);
     let l;
     try { l = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { throw new Error(`inbox/${name}: invalid JSON (${e.message})`); }
+    if (l.id) inboxIdsSeen.add(l.id);
     if (l.hidden === true) { inboxHidden++; continue; }
     const { hidden, _intake, ...clean } = l;
     if (!KIND_OF[clean.type]) throw new Error(`inbox/${name}: no kind mapping for type "${clean.type}"`);
@@ -155,16 +157,31 @@ if (fs.existsSync(INBOX)) {
 }
 if (inbox.length || inboxHidden) console.log(`WhatsApp intake: appended ${inbox.length} listing(s), ${inboxHidden} hidden`);
 
-// Owner rule 2026-09-08: houses over SAR 10,000,000 come off the public site. Applied to
-// curated AND intake listings alike (a brochure the owner sends is no different from TK
-// stock here), and applied to the COMBINED set so a listing can never slip in by route.
-// A house with no published price is kept — see isHousePublic() for why.
-const withinHouseCap = [...live, ...inbox].filter(isHousePublic);
-const overHouseCap = [...live, ...inbox].filter((l) => !isHousePublic(l));
-if (overHouseCap.length) {
-  console.log(`House cap: excluded ${overHouseCap.length} house(s) over SAR ${HOUSE_PRICE_CAP.toLocaleString('en-US')} — ${overHouseCap.map((l) => `${l.id} (${Math.round(sarAmount(l.price)).toLocaleString('en-US')} SAR eq.)`).join(', ')}`);
+// Listings the owner has withheld (scripts/curate/rules.mjs). Applied to curated AND intake
+// listings alike (a brochure the owner sends is no different from TK stock here), and to the
+// COMBINED set so a listing can never slip in by route.
+const withheld = [...live, ...inbox].filter((l) => !isPublishable(l));
+if (withheld.length) {
+  console.log(`Withheld by owner decision: ${withheld.map((l) => l.id).join(', ')}`);
 }
-const published = withinHouseCap;
+// Withholding a BONA-W### is only half a takedown. The intake committed that listing's photos
+// and brochure.pdf under public/listings/<slug>/, and GitHub Pages serves those paths directly,
+// so dropping it from listings.json leaves the pictures and the owner's full brochure fetchable
+// by anyone who kept the link. Fail loudly rather than half-hide it: `remove <id>` in the
+// WhatsApp group is the route that deletes the files.
+const leaking = withheld.filter((l) => INTAKE_ID_RE.test(l.id ?? '') && fs.existsSync(path.join(ROOT, 'public', 'listings', l.slug)));
+if (leaking.length) {
+  throw new Error(`withheld intake listing(s) still have public assets: ${leaking.map((l) => `${l.id} (public/listings/${l.slug}/)`).join(', ')} — send \`remove <id>\` in the WhatsApp group, which deletes the files, instead of naming it in WITHHELD_LISTINGS`);
+}
+// An id in the list that matches nothing is a decision quietly doing nothing — say so, so a
+// renamed or delisted listing does not leave a stale entry that hides a future namesake.
+// Compare against every id we KNOW OF, not the publish candidates: `live` has already lost
+// everything the TK list and the land cap dropped, and `inbox` has lost the hidden ones, so
+// judging staleness against those would call a deliberate hold "no longer exists".
+const known = new Set([...out.map((l) => l.id), ...inboxIdsSeen]);
+const stale = [...WITHHELD_LISTINGS].filter((id) => !known.has(id));
+if (stale.length) console.warn(`Withheld list mentions ${stale.join(', ')}, which no longer exist — prune scripts/curate/rules.mjs`);
+const published = [...live, ...inbox].filter(isPublishable);
 
 // ---- approximate map pins --------------------------------------------------------------
 // Most listings have no exact pin: TK's API carries no coordinates and most brochures carry

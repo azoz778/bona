@@ -64,12 +64,12 @@ export function videoEntryProblems(v, i) {
 }
 export const isLocalSrc = (s) => LOCAL_LAND_STILL.test(s) || LOCAL_LISTING_SRC.test(s);
 
-// ---- publication price caps --------------------------------------------------------
-// Two separate owner rules, deliberately not merged: land and houses came off the public
-// site for different reasons and sit at different numbers.
-//   land   — SAR 50,000,000 (2026-09-06): exact plot locations are gated in TK's register.
-//   houses — SAR 10,000,000 (2026-09-08): keep the public site to the mainstream market.
-// A listing over its cap is excluded ENTIRELY by scripts/curate/build.mjs — it gets no
+// ---- withholding listings from the public site --------------------------------------
+// Two separate owner rules, deliberately not merged:
+//   land   — a SAR 50,000,000 cap (2026-09-06, in build.mjs): exact plot locations are
+//            gated in TK's register, so the cap stands as a standing rule.
+//   houses — a NAMED LIST (below): specific homes the owner took down, one decision each.
+// A withheld listing is excluded ENTIRELY by scripts/curate/build.mjs — it gets no
 // listings.json entry, so no page, card, sitemap entry or OG image can leak it. Enquiries
 // are how those homes are shared.
 
@@ -98,19 +98,28 @@ export function sarAmount(price) {
   return annual * rate;
 }
 
-/** Owner rule 2026-09-08: houses over this are not published on the public site. */
-export const HOUSE_PRICE_CAP = 10_000_000;
-
 /**
- * May this listing be published, as far as the HOUSE cap is concerned?
+ * Listings the owner has taken off the public site. Shared on enquiry instead.
  *
- * Only `kind: 'house'` is governed — land has its own cap in build.mjs, and apartments have
- * none. A house with no published price is KEPT (owner decision 2026-09-08): removing on a
- * guess would take down homes that may be well under the line, and the cap catches them the
- * moment a price is set.
+ * This began (2026-09-08) as a price cap — houses over SAR 10,000,000 — but the owner's
+ * intent was to take these two homes down ONCE, not to install a standing rule. Corrected
+ * the same day. A permanent cap is the wrong instrument for a luxury brand: it would
+ * silently suppress the most valuable stock forever, including any brochure the WhatsApp
+ * intake publishes months from now, and the reason would be long forgotten by then. Naming
+ * the listings keeps each decision explicit, reversible, and visible in review.
+ *
+ * To publish one again, delete its id here.
+ *
+ * To withhold another, it matters where the listing came from. A curated BONA-### is TK
+ * stock and owns nothing in this repo, so naming it here is the whole takedown. A BONA-W###
+ * came from the WhatsApp intake, which committed its photos and brochure.pdf under
+ * public/listings/<slug>/ — paths GitHub Pages serves directly — so naming it here would
+ * hide the page and leave the brochure downloadable. Send `remove BONA-W###` in the group
+ * instead; that deletes the files. build.mjs refuses to build if the two are confused.
  */
-export function isHousePublic(l) {
-  if (l?.kind !== 'house') return true;
-  const sar = sarAmount(l.price);
-  return sar === null || sar <= HOUSE_PRICE_CAP;
+export const WITHHELD_LISTINGS = new Set(['BONA-002', 'BONA-028']);
+
+/** May this listing be published on the public site? */
+export function isPublishable(l) {
+  return !WITHHELD_LISTINGS.has(l?.id);
 }
