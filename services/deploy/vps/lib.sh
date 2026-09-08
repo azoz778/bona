@@ -95,6 +95,13 @@ count_leads() {
   "$1" -e 'const { DatabaseSync } = require("node:sqlite"); const db = new DatabaseSync(process.argv[1], { readOnly: true }); console.log(db.prepare("select count(*) as n from leads").get().n)' "$2"
 }
 
+# vps_count_leads → prints the number of rows in `leads` of ~/bona-data/bona.db ON THE VPS, using the
+# pinned node there (read-only). Needs the caller's `vps` ssh wrapper. Used as the copy-integrity
+# check in both directions: cutover.sh (PC → VPS) and rollback.sh --copy-back (VPS → PC).
+vps_count_leads() {
+  vps "$REMOTE_NODE -e 'const {DatabaseSync}=require(\"node:sqlite\");const db=new DatabaseSync(process.argv[1],{readOnly:true});console.log(db.prepare(\"select count(*) as n from leads\").get().n)' ~/bona-data/bona.db"
+}
+
 # vps_units_stopped → over ssh: disable + stop every VPS unit, then VERIFY the API and the tunnel
 # connector are inactive. Returns non-zero when ssh fails or a unit is still active — and then the
 # caller must NOT start the PC units (fail closed: two APIs or two connectors is the one thing the
