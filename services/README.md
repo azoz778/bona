@@ -404,7 +404,7 @@ After provisioning, restart the service so it picks up the new ids (the live one
 `ids.json` reaches `/opt/bona` with the next `bona-repo-sync` pull, or run `deploy.sh`):
 
 ```bash
-ssh hermes-vps systemctl --user restart bona-api
+ssh hermes-vps sudo systemctl restart bona-api
 ```
 
 ---
@@ -413,16 +413,23 @@ ssh hermes-vps systemctl --user restart bona-api
 
 ### Where it runs (since 2026-09-08): the VPS
 
-The live `bona-api` runs on the VPS (`ssh hermes-vps`, user `azoz`) as `systemctl --user` units
+The live `bona-api` runs on the VPS (`ssh hermes-vps`) as **system** units in `/etc/systemd/system`
+that run as user `azoz` (`User=azoz`, driven with `sudo systemctl`, never `systemctl --user`):
 `bona-api.service` (port **4120**, loopback) and `cloudflared-bona.service` (tunnel `bona`, hostnames
 `api.bona-real-estate.com`, `bona-api.azoz.uk`, `bona.azoz.uk`), from a sparse checkout of this repo
 at `/opt/bona` that `bona-repo-sync.timer` fast-forwards every 5 minutes (so listings published by
 the intake reach Dana's inventory without a deploy). Data: `~/bona-data`. Secrets: `~/.secrets/*.env`.
+Why system units: Ubuntu 24.04 restricts unprivileged user namespaces, and a `systemctl --user` unit
+cannot apply the hardening directives (`ProtectSystem`, `PrivateTmp`, …) — it dies with
+`218/CAPABILITIES`; the same directives under `User=` in a system unit run fine (first live attempt,
+2026-09-08). `azoz` has passwordless sudo, and every script uses `sudo -n` (never a prompt).
 
 | I want to… | Run |
 |---|---|
 | deploy a code change (pull, test, restart, health) | `ssh hermes-vps bash /opt/bona/services/deploy/vps/deploy.sh` |
-| see logs | `ssh hermes-vps journalctl --user -u bona-api -f` (tunnel: `-u cloudflared-bona`) |
+| see logs | `ssh hermes-vps sudo journalctl -u bona-api -f` (tunnel: `-u cloudflared-bona`) |
+| unit status / restart by hand | `ssh hermes-vps sudo systemctl status bona-api cloudflared-bona` / `… sudo systemctl restart bona-api` |
+| is the repo-sync timer ticking | `ssh hermes-vps sudo systemctl list-timers bona-repo-sync.timer` |
 | check readiness / what is missing | `ssh hermes-vps bash /opt/bona/services/deploy/vps/install-vps.sh --check` |
 | copy changed secrets from the PC | `bash services/deploy/vps/sync-secrets.sh` (on the PC) |
 | bring it back to the PC | `bash services/deploy/vps/rollback.sh [--copy-back]` (on the PC) |
@@ -493,27 +500,28 @@ text.
 
 ## 8. Runbook
 
-The live service is on the VPS: every `systemctl` / `journalctl` below runs there (`ssh hermes-vps …`).
-Drop the prefix only after `rollback.sh` has brought the service back to the PC (legacy path).
+The live service is on the VPS: every `systemctl` / `journalctl` below runs there (`ssh hermes-vps sudo …`
+— the units are system units, see §6). On the PC (only after `rollback.sh` has brought the service
+back, legacy path) the same commands are `systemctl --user …` / `journalctl --user …` without sudo.
 
 | Symptom | Where to look |
 |---|---|
-| Widget shows the WhatsApp fallback | `curl https://bona-api.azoz.uk/health`; then `ssh hermes-vps systemctl --user status bona-api cloudflared-bona` |
-| `503 not_provisioned` | `node api/retell/provision.mjs`, then `ssh hermes-vps systemctl --user restart bona-api` |
-| `/health` says `retell: "error"` | Retell key or balance — `ssh hermes-vps journalctl --user -u bona-api -n 50` |
+| Widget shows the WhatsApp fallback | `curl https://bona-api.azoz.uk/health`; then `ssh hermes-vps sudo systemctl status bona-api cloudflared-bona` |
+| `503 not_provisioned` | `node api/retell/provision.mjs`, then `ssh hermes-vps sudo systemctl restart bona-api` |
+| `/health` says `retell: "error"` | Retell key or balance — `ssh hermes-vps sudo journalctl -u bona-api -n 50` |
 | Chat works, calls do not | mic permission in the browser, then the voice agent id in `ids.json` |
 | Dana quotes a property that is gone | `curl -s https://bona-api.azoz.uk/health \| jq .inventory`; the file reloads within 30 s of a publish |
 | No lead reached WhatsApp | the lead is still in `~/bona-data/leads.jsonl`; check `EVOLUTION_API_URL` reachability |
 | Tool webhooks 401 | `BONA_TOOL_TOKEN` changed after provisioning — re-run `provision.mjs` so the tools carry the new header |
-| `503 budget_exhausted` | the day's chat/call ceiling is spent; `ssh hermes-vps journalctl --user -u bona-api \| grep budget.exhausted`, raise `BONA_MAX_*` if that is the answer |
+| `503 budget_exhausted` | the day's chat/call ceiling is spent; `ssh hermes-vps sudo journalctl -u bona-api \| grep budget.exhausted`, raise `BONA_MAX_*` if that is the answer |
 | `503 billing` | the owner's Retell balance is empty — top it up; the log line says so loudly |
 | `/health` 503, `inventory: 0` | `listings.json` is missing or broken at the path in `redacted` config; fix it, no restart needed |
-| Dashboard code never arrives | `/health` → `evolution` must be reachable; `ssh hermes-vps journalctl --user -u bona-api \| grep dashboard`; the owner JID is `BONA_OWNER_JID` |
+| Dashboard code never arrives | `/health` → `evolution` must be reachable; `ssh hermes-vps sudo journalctl -u bona-api \| grep dashboard`; the owner JID is `BONA_OWNER_JID` |
 | `/health` `poller.lagS` keeps growing | Evolution outage or wrong `EVOLUTION_API_URL`; nothing else is affected, messages are picked up when it is back |
 | `/health` `fanout.failed` > 0 | a key is wrong or expired — `node scripts/marketing/verify-integrations.mjs` says which; rows retry ≤ 5 times with backoff |
 | PC is off | nothing happens to Dana (she runs on the VPS); only `bona-intake` (PC) pauses — legacy path: everything pauses, the site falls back to WhatsApp and no data is lost |
 
-Logs are one JSON object per line: `ssh hermes-vps journalctl --user -u bona-api -f`.
+Logs are one JSON object per line: `ssh hermes-vps sudo journalctl -u bona-api -f`.
 
 Data files under `~/bona-data` (owner-only, mode 0600):
 
@@ -523,8 +531,9 @@ Data files under `~/bona-data` (owner-only, mode 0600):
 | `leads.jsonl` | the append-only raw log: one line per **new** lead, same `id` as the store's `lead_id`. Imported into `bona.db` once at startup (`import.legacy` in the log; a rerun is a no-op) |
 | `calls.jsonl`, `chats.jsonl` | Retell webhook events and transcripts, one line per finished conversation |
 
-- **Dana down, site shows the WhatsApp fallback** → `ssh hermes-vps systemctl --user status bona-api cloudflared-bona`; `journalctl --user -u bona-api -n 50`. Uptime Kuma #25 (`api.bona-real-estate.com/health`, keyword `"retell":"ok"`) pages Telegram after ~3 minutes. If the VPS itself is gone: `bash services/deploy/vps/rollback.sh` on the PC restores the previous setup in about a minute.
-- **Inventory stale after an intake publish** → `ssh hermes-vps systemctl --user list-timers bona-repo-sync.timer` and `journalctl --user -u bona-repo-sync -n 5`; the API re-reads `listings.json` within 30 s of the pull.
+- **Dana down, site shows the WhatsApp fallback** → `ssh hermes-vps sudo systemctl status bona-api cloudflared-bona`; `ssh hermes-vps sudo journalctl -u bona-api -n 50`. Uptime Kuma #25 (`api.bona-real-estate.com/health`, keyword `"retell":"ok"`) pages Telegram after ~3 minutes. If the VPS itself is gone: `bash services/deploy/vps/rollback.sh` on the PC restores the previous setup in about a minute.
+- **Inventory stale after an intake publish** → `ssh hermes-vps sudo systemctl list-timers bona-repo-sync.timer` and `ssh hermes-vps sudo journalctl -u bona-repo-sync -n 5`; the API re-reads `listings.json` within 30 s of the pull.
+- **A unit dies with `218/CAPABILITIES`** → it is running under the user manager again (`systemctl --user`), which Ubuntu 24.04's userns restriction forbids for the hardened units; re-run `install-vps.sh` (it retires the user units and reinstalls the system ones), then `cutover.sh` from the PC.
 
 ---
 
