@@ -1,5 +1,5 @@
 # services/deploy/vps/lib.sh — shared by every script in this directory. Sourced, never executed.
-# Constants first (override any of them from the environment), then small helpers. Never echo a secret.
+# Constants first (only BONA_VPS_REPO, BONA_VPS_SSH, BONA_HOSTNAMES, BONA_REPO_URL, BONA_VPS_EVOLUTION_URL, BONA_PUBLIC_HEALTH and BONA_TUNNEL_NAME may be overridden from the environment; the rest are pinned), then small helpers. Never echo a secret.
 
 BONA_TUNNEL_ID=9022fbec-de4f-44b9-805e-8fff285d6263
 BONA_TUNNEL_NAME=${BONA_TUNNEL_NAME:-bona}

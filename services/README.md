@@ -410,6 +410,27 @@ systemctl --user restart bona-api
 
 ## 6. Install and run
 
+### Where it runs (since 2026-09-08): the VPS
+
+The live `bona-api` runs on the VPS (`ssh hermes-vps`, user `azoz`) as `systemctl --user` units
+`bona-api.service` (port **4120**, loopback) and `cloudflared-bona.service` (tunnel `bona`, hostnames
+`api.bona-real-estate.com`, `bona-api.azoz.uk`, `bona.azoz.uk`), from a sparse checkout of this repo
+at `/opt/bona` that `bona-repo-sync.timer` fast-forwards every 5 minutes (so listings published by
+the intake reach Dana's inventory without a deploy). Data: `~/bona-data`. Secrets: `~/.secrets/*.env`.
+
+| I want to… | Run |
+|---|---|
+| deploy a code change (pull, test, restart, health) | `ssh hermes-vps bash /opt/bona/services/deploy/vps/deploy.sh` |
+| see logs | `ssh hermes-vps journalctl --user -u bona-api -f` (tunnel: `-u cloudflared-bona`) |
+| check readiness / what is missing | `ssh hermes-vps bash /opt/bona/services/deploy/vps/install-vps.sh --check` |
+| copy changed secrets from the PC | `bash services/deploy/vps/sync-secrets.sh` (on the PC) |
+| bring it back to the PC | `bash services/deploy/vps/rollback.sh [--copy-back]` (on the PC) |
+
+`install.sh` in this directory is the **PC/WSL** installer and is kept only for rollback; its units
+are disabled on the PC. `bona-intake` (WhatsApp PDF → listing) still runs on the PC — it needs the
+owner's Claude login — and never talks to the API. Scripts: `services/deploy/vps/README` header
+comments; the move itself: `docs/superpowers/specs/2026-09-08-bona-api-vps-move-design.md`.
+
 Deployment is the **owner's** command — creating a Cloudflare tunnel and routing DNS
 is refused by the agent's permission classifier:
 
@@ -489,6 +510,9 @@ Data files under `~/bona-data` (owner-only, mode 0600):
 | `bona.db` (+ `-wal`, `-shm`) | the SQLite store: sessions, events, leads, touchpoints, stage history, WhatsApp poller cursor, ad spend, fan-out queue, dashboard logins. Migrations run on start (`PRAGMA user_version`). Back it up with `sqlite3 bona.db ".backup …"`, not `cp`, while the service runs |
 | `leads.jsonl` | the append-only raw log: one line per **new** lead, same `id` as the store's `lead_id`. Imported into `bona.db` once at startup (`import.legacy` in the log; a rerun is a no-op) |
 | `calls.jsonl`, `chats.jsonl` | Retell webhook events and transcripts, one line per finished conversation |
+
+- **Dana down, site shows the WhatsApp fallback** → `ssh hermes-vps systemctl --user status bona-api cloudflared-bona`; `journalctl --user -u bona-api -n 50`. Uptime Kuma #25 (`api.bona-real-estate.com/health`, keyword `"retell":"ok"`) pages Telegram after ~3 minutes. If the VPS itself is gone: `bash services/deploy/vps/rollback.sh` on the PC restores the previous setup in about a minute.
+- **Inventory stale after an intake publish** → `ssh hermes-vps systemctl --user list-timers bona-repo-sync.timer` and `journalctl --user -u bona-repo-sync -n 5`; the API re-reads `listings.json` within 30 s of the pull.
 
 ---
 
