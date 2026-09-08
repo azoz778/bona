@@ -277,11 +277,11 @@ Full FAQ: https://bona-real-estate.com/faq/ · Arabic: https://bona-real-estate.
 
 What Bona collects when you use this site or contact us, why, and your rights under the Saudi Personal Data Protection Law (PDPL) and its Implementing Regulations. Written to be read, not filed. The Arabic text is the authoritative version. Full policy (updated 2026-09-05): https://bona-real-estate.com/privacy/ · Arabic: https://bona-real-estate.com/ar/privacy/. In short: the site is static and sets no cookies; enquiry forms open WhatsApp and nothing is stored by the site; analytics (GA4 / Meta Pixel) are built in but currently disabled; data subjects have PDPL rights of access, correction, deletion and consent withdrawal via WhatsApp +966 59 329 6933.
 
-## Listings (46 live)
+## Listings (45 live)
 
-Grouped by kind: Houses 17 · Apartments 21 · Land 8.
+Grouped by kind: Houses 16 · Apartments 21 · Land 8.
 
-## Houses (17) — https://bona-real-estate.com/properties/houses/
+## Houses (16) — https://bona-real-estate.com/properties/houses/
 
 ### Private Beach Villa, Durrat Al Arous — فيلا بشاطئ خاص، درة العروس
 - ID: BONA-001 (ref VIL-013)
@@ -717,38 +717,6 @@ Outdoor space includes a private garden and, on the roof level, a plunge pool wi
 تشمل المساحات الخارجية حديقة خاصة، وفي الروف مسبح صغير مع منطقة جلوس. وتُدخل فتحة سكاي لايت داخلية الإضاءة الطبيعية إلى بيت الدرج، مع تصميم يتيح تعديل بعض الجدران الداخلية. ويضم المشروع نادياً رياضياً مشتركاً وبنية تحتية لتركيب مصعد لاحقاً.
 
 Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Sadana%20Townhouse%2C%20Al%20Rawdah%20(BONA-W011).
-
-### The Knightsbridge Villas, Meydan District 11 — فلل ذا نايتسبريدج في ميدان
-- ID: BONA-W007 (ref WA-20260906-AC981A)
-- URL: https://bona-real-estate.com/properties/the-knightsbridge-villas-meydan-district-11/ · Arabic: https://bona-real-estate.com/ar/properties/the-knightsbridge-villas-meydan-district-11/
-- Kind: House · Type: Villa · Category: International · Status: available
-- Location: Meydan District 11, Dubai, United Arab Emirates (ميدان، المنطقة 11، دبي)
-- Asking price: Price on request
-- Project: The Knightsbridge – Phase 2 (ذا نايتسبريدج - المرحلة الثانية) · Developer: LEOS Developments
-- Coordinates: 25.1629302, 55.3142967
-- Highlights: Swimmable Sunrise Lagoon frontage; Private pool and pool deck; Double- to triple-height entrance halls; Marble show kitchen; Gated community, 24/7 security; Smart-home climate control
-- المميزات: واجهة على بحيرة الشروق القابلة للسباحة؛ مسبح خاص وسطح محيط به؛ مدخل بارتفاع مزدوج إلى ثلاثي؛ مطبخ رئيسي برخام فاخر؛ مجتمع مسوّر بحراسة على مدار الساعة؛ تحكم ذكي بالإضاءة والتكييف
-- Brochure: https://bona-real-estate.com/listings/the-knightsbridge-villas-meydan-district-11/brochure.pdf
-- Listed: 2026-09-06
-- Images: /listings/the-knightsbridge-villas-meydan-district-11/01.jpg , /listings/the-knightsbridge-villas-meydan-district-11/02.jpg , /listings/the-knightsbridge-villas-meydan-district-11/03.jpg , /listings/the-knightsbridge-villas-meydan-district-11/04.jpg , /listings/the-knightsbridge-villas-meydan-district-11/05.jpg , /listings/the-knightsbridge-villas-meydan-district-11/06.jpg
-
-The Knightsbridge Phase 2 is a gated villa community in Meydan District 11, arranged around a central swimmable lagoon known as Sunrise Lagoon. The development sits on a total plot of 33,598 square metres, with 69 percent of that area kept as open garden, courtyards and private outdoor space. Every villa backing onto the lagoon has a garden gate giving direct access to the shared outdoor amenities.
-
-Two villa types anchor the collection: the five-bedroom Chatsworth and the six-bedroom signature Blenheim, both entered through mansion-style double- or triple-height halls with full-height glazing and a feature staircase in natural wood. Facades combine golden limestone-hued sandstone cladding with light grey Portland stone at ground level, framed by bay windows and low-e double glazing. Each villa has its own 1.2-metre-deep swimming pool and pool deck, plus a private elevator and expansive balconies.
-
-Interiors carry natural stone flooring through the foyer, living, dining and show kitchen, with parquet-look porcelain tile in the bedrooms. Show kitchens are finished in Calacatta Viola marble with integrated premium appliances, while the Grosvenor and Balmoral villas add a separate chef's kitchen with quartz worktops and integrated appliances. Master suites include a his-and-hers dressing room, a stone-lined double shower and a private jacuzzi finished in natural stone, and every villa has a dedicated maid's room and driver's room, each with its own bathroom.
-
-Community amenities are built around the lagoon and include an outdoor cinema, a kids' water zone with slide, an outdoor jacuzzi area, a BBQ pavilion and a lagoon-side cafe with in-water seating, plus a jogging track. The estate is gated with round-the-clock security, concierge and CCTV, and every villa is fitted with smart-home control of lighting and air conditioning, a solar hot water system and EV charging.
-
-تقع فلل ذا نايتسبريدج - المرحلة الثانية ضمن مجتمع سكني مسوّر في ميدان، المنطقة 11، وتتوزع حول بحيرة صناعية مركزية قابلة للسباحة تعرف باسم بحيرة الشروق. تمتد المساحة الإجمالية للمشروع على 33,598 مترًا مربعًا، منها 69% مخصصة كمساحات خضراء مفتوحة وحدائق وأفنية خاصة. تتيح كل فيلا مطلة على البحيرة بوابة خلفية للوصول المباشر إلى المرافق المشتركة.
-
-يضم المشروع نوعين رئيسيين من الفلل: فيلا تشاتسوورث بخمس غرف نوم، وفيلا بلينهايم المميزة بست غرف نوم، ويُدخل إليهما عبر مدخل بارتفاع مزدوج أو ثلاثي على طراز القصور مع واجهات زجاجية كاملة الارتفاع ودرج مميز بتشطيب خشبي طبيعي. تجمع الواجهات بين تكسية حجرية رملية بألوان ذهبية وحجر بورتلاند الرمادي الفاتح في الطابق الأرضي، مع نوافذ خليجية وزجاج مزدوج عاكس جزئيًا. تمتلك كل فيلا مسبحًا خاصًا بعمق 1.2 متر مع سطح محيط به، إضافة إلى مصعد خاص وشرفات واسعة.
-
-تمتد الأرضيات الحجرية الطبيعية في المدخل والصالة وغرفة الطعام والمطبخ الرئيسي، بينما تُستخدم بلاطات بورسلين بمظهر الباركيه في غرف النوم. تُشطب المطابخ الرئيسية برخام كالاكاتا فيولا مع أجهزة مدمجة راقية، فيما تضيف فيلات جروفنر وبالمورال مطبخًا إضافيًا للطهي بأسطح كوارتز وأجهزة مدمجة. تشمل الأجنحة الرئيسية غرفة تبديل ملابس مزدوجة ودشًا حجريًا مزدوجًا وجاكوزي خاصًا بتشطيب حجري طبيعي، ولكل فيلا غرفة خادمة وغرفة سائق مستقلتان بحمام خاص لكل منهما.
-
-تتمحور مرافق المجتمع حول البحيرة وتشمل سينما خارجية، ومنطقة ألعاب مائية للأطفال بها زحليقة، ومنطقة جاكوزي خارجية، وجناح شواء، ومقهى مطلًا على البحيرة بجلسات مائية، إضافة إلى مسار للجري. المجتمع مسوّر بحراسة على مدار الساعة وكونسيرج وكاميرات مراقبة، وكل فيلا مزودة بنظام تحكم ذكي بالإضاءة والتكييف، ونظام لتسخين المياه بالطاقة الشمسية، ومحطة شحن للسيارات الكهربائية.
-
-Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20The%20Knightsbridge%20Villas%2C%20Meydan%20District%2011%20(BONA-W007).
 
 ### Wharf Destination Villas, Jeddah — فلل وجهة الويرف بجدة
 - ID: BONA-W004 (ref WA-20260906-ACBA8B)
