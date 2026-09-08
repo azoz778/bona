@@ -186,6 +186,8 @@ HOME_DIR=${HOME:?HOME is not set}
 NODE_DIR="$HOME_DIR/.local/opt/node-$NODE_VERSION-linux-x64"
 NODE_BIN="$NODE_DIR/bin"
 CLOUDFLARED_BIN="$HOME_DIR/.local/bin/cloudflared"
+# For commands sent over ssh: the VPS home differs from the PC home, so let the REMOTE shell expand ~.
+REMOTE_NODE='~/.local/opt/node-'"$NODE_VERSION"'-linux-x64/bin/node'
 UNIT_DIR="$HOME_DIR/.config/systemd/user"
 DATA_DIR="$HOME_DIR/bona-data"
 SECRETS_DIR="$HOME_DIR/.secrets"
@@ -711,13 +713,17 @@ for u in bona-api cloudflared-bona; do
 done
 ok "VPS ready, nothing running there yet"
 
+FINISHED=0
 rollback() {
-  warn "cutover failed — rolling back to the PC"
+  [ "$FINISHED" = 1 ] && return 0
+  warn "cutover did not finish — rolling back to the PC"
   vps "systemctl --user disable --now cloudflared-bona bona-api" || true
   systemctl --user enable --now bona-api cloudflared-bona || true
   warn "PC units started again; check: systemctl --user status bona-api cloudflared-bona"
 }
-trap rollback ERR
+# EXIT (not ERR): `die` exits, and an ERR trap would not fire for it. Armed only after the
+# preflight, so a refused preflight never stops a VPS copy that is legitimately live.
+trap rollback EXIT
 
 say "1/5 Stop the PC copy"
 systemctl --user stop cloudflared-bona bona-api
@@ -737,7 +743,7 @@ ok "copied ${#files[@]} files (PC leads: $pc_leads)"
 say "3/5 Start bona-api on the VPS"
 vps "systemctl --user enable --now bona-api"
 wait_for 30 1 vps "curl -fsS http://127.0.0.1:$BONA_VPS_PORT/health | grep -q '\"ok\":true'" || { vps "journalctl --user -u bona-api -n 30 --no-pager" || true; die "VPS bona-api is not healthy"; }
-vps_leads=$(vps "$NODE_BIN/node -e 'const {DatabaseSync}=require(\"node:sqlite\");const db=new DatabaseSync(process.argv[1],{readOnly:true});console.log(db.prepare(\"select count(*) as n from leads\").get().n)' ~/bona-data/bona.db")
+vps_leads=$(vps "$REMOTE_NODE -e 'const {DatabaseSync}=require(\"node:sqlite\");const db=new DatabaseSync(process.argv[1],{readOnly:true});console.log(db.prepare(\"select count(*) as n from leads\").get().n)' ~/bona-data/bona.db")
 [ "$vps_leads" = "$pc_leads" ] || die "lead count mismatch: PC $pc_leads vs VPS $vps_leads"
 ok "healthy, $vps_leads leads carried over"
 
@@ -749,7 +755,7 @@ ok "$BONA_PUBLIC_HEALTH answers from the VPS"
 
 say "5/5 Disable the PC units"
 systemctl --user disable bona-api cloudflared-bona
-trap - ERR
+FINISHED=1
 ok "done — bona-api now runs on $BONA_VPS_SSH; rollback.sh brings it back here"
 ```
 
