@@ -306,24 +306,25 @@ export function overviewPage({ daily, sources, matchQuality, responseTimes, pipe
   return layout({
     title: 'Overview',
     active: '/dashboard',
-    body: `<h1>Overview</h1><p class="sub">The last ${esc(days)} days, Jeddah time.</p>
+    body: `<h1>Overview</h1><p class="sub">Jeddah time.</p>
+<h2>The last ${esc(days)} days</h2>
 <div class="charts">${strip}</div>
 
-<h2>Right now</h2>
+<h2>Right now — all time</h2>
 <div class="grid">
   ${kpi('Open leads', number(openLeads), 'everything not won or lost')}
   ${kpi('Won', number(won))}
   ${kpi('First reply, median', responseTimes.median_min === null ? '—' : `${responseTimes.median_min} min`, responseTimes.p90_min === null ? 'no replies logged yet' : `p90 ${responseTimes.p90_min} min · ${responseTimes.count} leads`)}
-  ${kpi('Leads in window', number(daily.reduce((a, d) => a + d.leads, 0)))}
+  ${kpi(`Leads in ${days} days`, number(daily.reduce((a, d) => a + d.leads, 0)))}
 </div>
 
-<h2>Sources — first touch vs last touch</h2>
-<p class="sub">First touch is the campaign that found the person; last touch is the visit the enquiry happened on. They are counted separately on purpose.</p>
+<h2>Sources — first touch vs last touch, all time</h2>
+<p class="sub">First touch is the campaign that found the person; last touch is the visit the enquiry happened on. They are counted separately on purpose. Only the strip above is windowed — every lead ever is counted here.</p>
 ${scrollTable(
   '<th>Source</th><th>Medium</th><th>Campaign</th><th>ID</th><th class="n">First-touch leads</th><th class="n">Last-touch leads</th><th class="n">WA clicks</th><th class="n">Spend</th><th class="n">CPL</th>',
   sourceRows, 'No leads yet.')}
 
-<h2>Match quality</h2>
+<h2>Match quality — all time</h2>
 <p class="sub">How each lead was tied to its traffic. <code>time_window</code> is an inference, not a fact.</p>
 ${scrollTable('<th>Method</th><th class="n">Leads</th><th class="n">Share</th>', matchRows, 'No leads yet.')}`,
   });

@@ -548,8 +548,9 @@ Nothing here is CORS-enabled, so no other origin can read a byte of it.
 **Login.** `GET /dashboard/login` → `POST /dashboard/login/code` sends a 6-digit code to
 the owner's WhatsApp (`BONA_OWNER_JID`, via the same Evolution instance as the lead
 notes). Only `sha256(code)` is stored, for 10 minutes; three codes per 10 minutes per IP,
-and one a minute plus twenty a day across the whole service; the code appears in exactly
-one place, the message itself — never in a log line or a response.
+and one a minute plus sixty a day across the whole service — asked of all three buckets
+before any is charged, so a refusal from one never spends a token in another. The code
+appears in exactly one place, the message itself — never in a log line or a response.
 
 The same request also sets a short-lived `bona_dash_try` nonce cookie, and the code is
 remembered in memory beside it. This is what stops the login from being a lockout: a
@@ -567,10 +568,11 @@ server-side and clears the cookie — a GET there only offers the button, becaus
 otherwise end the session. Every other `/dashboard/*` route 302s to the login without a
 valid cookie; every `/v1/admin/*` route answers 401.
 
-**Writes** — including the logout — need a marker the browser will not send by itself — `X-Bona-Dash: 1` on a JSON
-call, a hidden `_dash=1` field on a form — and a stated `Origin`/`Referer` that is this
-API's own. `SameSite=Lax` already keeps the cookie off cross-site POSTs; this is the
-second lock. A stage change also writes a `lead_stage` event and enqueues the fan-out
+**Writes** — including the logout — carry a marker: `X-Bona-Dash: 1` on a JSON call, a
+hidden `_dash=1` field on a form. What actually stops a cross-site write is
+`SameSite=Lax` (the cookie does not ride one) plus the `Origin`/`Referer` check; the
+header half of the marker is a real barrier on top of that, the form field is not a CSRF
+token and is not pretending to be one. A stage change also writes a `lead_stage` event and enqueues the fan-out
 (`qualified` → GA4 `qualify_lead`; `viewing`/`offer`/`negotiation` → GA4 `working_lead`
 plus Meta `Schedule` for a viewing; `won` → Meta `Purchase` with the value, GA4
 `close_convert_lead`, Snap `PURCHASE`; `lost` → GA4 `close_unconvert_lead`; anything else
@@ -581,7 +583,7 @@ on `GET /dashboard/leads/:id` and `GET /v1/admin/leads/:id`.
 
 | Route | What |
 |---|---|
-| `GET /dashboard` | Overview — 14-day strip (sessions, WA clicks, leads, viewings) as inline SVG, sources with first-touch and last-touch columns side by side, match quality, first-reply median and p90. `?days=` 1–90 |
+| `GET /dashboard` | Overview — a 14-day strip (sessions, WA clicks, leads, viewings) as inline SVG, `?days=` 1–90. Everything below the strip — sources with first-touch and last-touch columns side by side, match quality, first-reply median and p90 — is **all time**, and the page says so |
 | `GET /dashboard/leads` | pipeline board (one column per stage: name, masked phone, source, listing, age, response) and a list below with `?stage=&q=` |
 | `GET /dashboard/leads/:id` | the whole record, the journey (events + touchpoints + stage moves + notes, oldest first), the stage form and the note form |
 | `GET /dashboard/listings` | per-listing funnel (views → gallery/tour/brochure → WA clicks → leads) and REGA flags: `no_ad_licence`, `expiring_30d`, `expired`, `wafi_missing` (off-plan) |
@@ -604,3 +606,11 @@ happens, the row carries `unmatched_leads` and the page says "unmatched — chec
 source" instead of printing a zero that reads like a dud campaign.
 
 A form post answers `303` back to the page it came from; a JSON call answers JSON.
+
+**One thing rate limits cannot fix.** `POST /dashboard/login/code` has to be reachable by
+an unauthenticated owner, so it is reachable by everyone. The limits above bound what a
+flood costs — sixty WhatsApp messages a day rather than 1,440, and a drained ceiling
+delays the owner's next code by about 24 minutes rather than until tomorrow — but they
+cannot make the endpoint available to him and not to an attacker. If it is ever actually
+attacked, the answer is a rate rule or a Cloudflare Access policy in front of
+`/dashboard/login*` on the tunnel, not a smaller number in `lib/dashboard/auth.mjs`.

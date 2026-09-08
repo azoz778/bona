@@ -96,27 +96,61 @@ test('one code a minute across the whole service, whoever asks', async () => {
   assert.equal((await h.auth.requestCode('2.2.2.2')).ok, true);
 });
 
-test('a global refusal costs the address nothing of its own three', async () => {
+test('a daily ceiling caps the flood, and refills fast enough not to be a lockout', async () => {
+  const h = harness();
+  // Drain it as fast as the one-a-minute bucket allows, from rotating addresses so the
+  // per-IP limit never bites. The daily bucket refills while this runs, which is the
+  // point: it paces the flood rather than stopping it dead.
+  let sends = 0;
+  let refused = 0;
+  for (let i = 0; i < 200 && refused === 0; i += 1) {
+    const out = await h.auth.requestCode(`10.0.${Math.floor(i / 250)}.${i % 250}`);
+    if (out.ok) sends += 1; else refused += 1;
+    h.tick(61_000);
+  }
+  assert.equal(refused, 1, 'the ceiling does eventually refuse');
+  assert.ok(sends >= 60 && sends <= 66, `sixty-ish messages, not fourteen hundred — got ${sends}`);
+  assert.equal(h.sent.length, sends);
+
+  // And it is not a lockout: the bucket refills continuously, so the owner's next code
+  // is about twenty-four minutes away rather than tomorrow.
+  h.tick(25 * 60_000);
+  assert.equal((await h.auth.requestCode('10.9.9.9')).ok, true);
+});
+
+test('one address cannot drain the whole service\'s day on its way to being refused', async () => {
+  const h = harness();
+  for (let i = 0; i < 3; i += 1) { assert.equal((await h.auth.requestCode('5.5.5.5')).ok, true); h.tick(61_000); }
+
+  // Its own three are gone and the clock does not move, so the only limit refusing these
+  // forty is the per-IP one — the shared minute still has a token to give. Every one of
+  // them must cost the shared buckets nothing.
+  for (let i = 0; i < 40; i += 1) {
+    assert.deepEqual(await h.auth.requestCode('5.5.5.5'), { ok: false, error: 'rate_limited' }, `attempt ${i + 1}`);
+  }
+  assert.equal(h.sent.length, 3, 'nothing more was sent');
+
+  // The proof: the day is still worth a full ceiling. Charge the globals before the
+  // per-IP check and those forty refusals would have eaten most of it.
+  let sends = 0;
+  for (let i = 0; i < 120; i += 1) {
+    if ((await h.auth.requestCode(`10.0.0.${i}`)).ok) sends += 1; else break;
+    h.tick(61_000);
+  }
+  // Charging the globals before the per-IP check leaves about twenty here, not sixty.
+  assert.ok(sends >= 50, `the refusals ate the day's ceiling — only ${sends} codes left in it`);
+});
+
+test('a global refusal is free for the address that hit it', async () => {
   const h = harness();
   assert.equal((await h.auth.requestCode('1.1.1.1')).ok, true);
-  // Refused by the one-a-minute bucket, not by anything this address did.
-  assert.deepEqual(await h.auth.requestCode('7.7.7.7'), { ok: false, error: 'rate_limited' });
+  for (let i = 0; i < 5; i += 1) {
+    assert.deepEqual(await h.auth.requestCode('7.7.7.7'), { ok: false, error: 'rate_limited' }, 'refused by the one-a-minute bucket');
+  }
   for (let i = 0; i < 3; i += 1) {
     h.tick(61_000);
     assert.equal((await h.auth.requestCode('7.7.7.7')).ok, true, `this address still has all three (${i + 1})`);
   }
-});
-
-test('twenty codes a day, so a rotating flood cannot ring the owner\'s phone all night', async () => {
-  const h = harness();
-  for (let i = 0; i < 20; i += 1) {
-    assert.equal((await h.auth.requestCode(`10.0.0.${i}`)).ok, true, `code ${i + 1}`);
-    h.tick(61_000);
-  }
-  assert.deepEqual(await h.auth.requestCode('10.0.1.1'), { ok: false, error: 'rate_limited' });
-  assert.equal(h.sent.length, 20);
-  h.tick(86_400_000);
-  assert.equal((await h.auth.requestCode('10.0.1.1')).ok, true, 'the ceiling refills over a day');
 });
 
 test('a WhatsApp that will not send is reported, not swallowed', async () => {
