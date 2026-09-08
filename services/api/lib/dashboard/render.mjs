@@ -217,7 +217,12 @@ const scrollTable = (head, rows, empty = 'Nothing yet.') =>
 /* Login                                                               */
 /* ------------------------------------------------------------------ */
 
-const LOGIN_ERRORS = {
+/**
+ * The messages an error code turns into. Codes travel in the query string, so the
+ * lookup is by own property only — `?error=constructor` must be an unknown code, not a
+ * function printed onto the page.
+ */
+export const MESSAGES = {
   rate_limited: 'Too many codes requested. Try again in a few minutes.',
   send_failed: 'WhatsApp would not take the message. Check the Evolution instance and try again.',
   bad_code: 'That code is not right.',
@@ -226,7 +231,17 @@ const LOGIN_ERRORS = {
   used: 'That code has already been used. Ask for a new one.',
   attempts: 'Too many wrong attempts on that code. Ask for a new one.',
   forbidden: 'That request did not come from this page.',
+  bad_stage: 'That is not one of the stages.',
+  bad_value: 'A deal value has to be a number.',
+  empty_note: 'A note cannot be empty.',
+  bad_request: 'That row was not accepted — check the day and the amount.',
 };
+
+/** A code the templates will render, or null. Anything unrecognised is nothing at all. */
+export const knownError = (code) =>
+  (typeof code === 'string' && Object.hasOwn(MESSAGES, code) ? code : null);
+
+const messageFor = (code) => (knownError(code) ? MESSAGES[code] : 'Something went wrong.');
 
 /**
  * Two steps in one page: ask for a code, then type it in. Nothing here says whether
@@ -234,7 +249,7 @@ const LOGIN_ERRORS = {
  * the login page is the one surface a stranger can reach.
  */
 export function loginPage({ step = 'request', error = null, sent = false } = {}) {
-  const message = error ? `<div class="err">${esc(LOGIN_ERRORS[error] ?? 'Something went wrong.')}</div>` : '';
+  const message = error ? `<div class="err">${esc(messageFor(error))}</div>` : '';
   const notice = sent && !error ? '<div class="ok">Code sent to the owner\'s WhatsApp. It is valid for 10 minutes.</div>' : '';
   const body = step === 'code'
     ? `<form method="post" action="/dashboard/login/verify">
@@ -367,7 +382,7 @@ export function leadDetailPage({ lead, journey, saved = null, error = null, now 
 
   const items = journey.map((e) => `<li><div class="when">${esc(dateTime(e.ts))} · ${esc(e.kind)}</div><div class="what" dir="auto">${esc(JOURNEY_LABEL[e.kind](e))}</div></li>`).join('');
 
-  const banner = error ? `<div class="err">${esc(LOGIN_ERRORS[error] ?? 'That did not go through.')}</div>`
+  const banner = error ? `<div class="err">${esc(messageFor(error))}</div>`
     : saved ? `<div class="ok">${esc(saved === 'stage' ? 'Stage updated.' : 'Note added.')}</div>` : '';
 
   return layout({
@@ -470,7 +485,7 @@ export function spendPage({ rows, campaigns, saved = false, error = null, today 
     `<td class="n">${esc(money(c.spend_sar))}</td>${numCell(c.clicks)}${numCell(c.impressions)}${numCell(c.leads)}` +
     `<td class="n">${esc(c.cpl === null ? '—' : money(c.cpl))}</td></tr>`);
 
-  const banner = error ? `<div class="err">${esc(error === 'bad_request' ? 'That row was not accepted — check the day and the amount.' : LOGIN_ERRORS[error] ?? 'That did not go through.')}</div>`
+  const banner = error ? `<div class="err">${esc(messageFor(error))}</div>`
     : saved ? '<div class="ok">Spend saved.</div>' : '';
 
   return layout({
