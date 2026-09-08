@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FORBIDDEN, HOUSE_PRICE_CAP, HYPE, isHousePublic, isLocalSrc, LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, sarAmount, videoEntryProblems } from './rules.mjs';
+import { FORBIDDEN, HOUSE_PRICE_CAP, HYPE, isHousePublic, isLocalSrc, licenceProblems, LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, sarAmount, videoEntryProblems } from './rules.mjs';
 
 function matterportIdOf(value) {
   if (typeof value !== 'string') return null;
@@ -179,19 +179,9 @@ for (const l of data) {
   if (isLand && l.map && l.mapPrecision !== 'exact') err(id, 'land listings need an exact plot pin, never a district centroid');
   // REGA advertising compliance (optional; shape only — whether a licence is actually required is the owner's call).
   // { adNumber, adExpiry (YYYY-MM-DD), wafiNumber, escrowAccount }, each a short string or null.
-  if (!(l.licence === null || l.licence === undefined)) {
-    const lc = l.licence;
-    if (!lc || typeof lc !== 'object' || Array.isArray(lc)) err(id, 'licence must be null or { adNumber, adExpiry, wafiNumber, escrowAccount }');
-    else {
-      for (const k of Object.keys(lc)) if (!['adNumber', 'adExpiry', 'wafiNumber', 'escrowAccount'].includes(k)) err(id, `licence has an unknown field "${k}"`);
-      for (const k of ['adNumber', 'adExpiry', 'wafiNumber', 'escrowAccount']) {
-        const v = lc[k];
-        if (!(v === null || v === undefined || (typeof v === 'string' && v.trim().length > 0 && v.length <= 64))) err(id, `licence.${k} must be null or a non-empty string of at most 64 characters`);
-      }
-      if (typeof lc.adExpiry === 'string' && (!/^\d{4}-\d{2}-\d{2}$/.test(lc.adExpiry) || Number.isNaN(Date.parse(lc.adExpiry)))) err(id, `licence.adExpiry must be YYYY-MM-DD, got ${lc.adExpiry}`);
-      if (typeof lc.adExpiry === 'string' && !lc.adNumber) err(id, 'licence.adExpiry without licence.adNumber');
-    }
-  }
+  // The rule lives in rules.mjs so the intake's `licence`/`wafi` commands check the SAME thing
+  // before they commit — see services/intake/lib/edits.mjs.
+  for (const problem of licenceProblems(l.licence)) err(id, problem);
 
   // Owner rule 2026-09-08: houses over SAR 10,000,000 are not on the public site.
   // build.mjs filters them out, but listings.json is also written by scripts/sync-listings.mjs

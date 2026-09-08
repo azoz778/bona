@@ -7,7 +7,7 @@ static Astro build on GitHub Pages, so anything that needs a server lives here.
 |---|---|---|---|
 | Concierge API (Dana) | `api/` | `bona-api.service` | Chat + voice concierge backend, Retell tool webhooks, first-party events, leads |
 | Public HTTPS | — | `cloudflared-bona.service` | Cloudflare tunnel `bona`: `bona-api.azoz.uk` → `localhost:4102` |
-| WhatsApp intake | `intake/` | `bona-intake.service` | PDF brochure → published listing (separate workstream) |
+| WhatsApp intake | `intake/` | `bona-intake.service` | PDF brochure → published listing; group commands `remove` / `hero` / `price` / `brochure` / `sold` / `hide` / `licence` / `wafi` (see `intake/README.md`) |
 
 No runtime dependencies: `services/package.json` is `"dependencies": {}` and the API
 is built on Node's own `http`. Node ≥ 22.

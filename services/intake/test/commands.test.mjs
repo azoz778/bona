@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { findListingId, HELP_TEXT, parseCaption, parseCommand, parsePriceHint } from '../lib/commands.mjs';
+import { ANY_LISTING_ID_RE, findListingId, HELP_TEXT, LISTING_ID_RE, parseCaption, parseCommand, parseExpiryDate, parsePriceHint } from '../lib/commands.mjs';
+import { INTAKE_ID_RE, LISTING_ID_RE as SITE_LISTING_ID_RE } from '../../../scripts/curate/rules.mjs';
 
 describe('parseCaption', () => {
   it('reads an empty caption', () => {
@@ -93,6 +94,25 @@ describe('parsePriceHint', () => {
   });
 });
 
+// Review finding: both of these used to be hand-written copies of the site's rules, which is
+// how two definitions of the same id drift apart. They are DERIVED now — same source, plus
+// the /i the owner's phone keyboard needs — so the copy cannot rot.
+describe('the command id patterns are the site\'s own, not a second copy', () => {
+  it('derives the intake id pattern from rules.mjs::INTAKE_ID_RE', () => {
+    assert.equal(LISTING_ID_RE.source, INTAKE_ID_RE.source);
+    assert.equal(LISTING_ID_RE.flags, 'i');
+  });
+  it('derives the licence id pattern from rules.mjs::LISTING_ID_RE', () => {
+    assert.equal(ANY_LISTING_ID_RE.source, SITE_LISTING_ID_RE.source);
+    assert.equal(ANY_LISTING_ID_RE.flags, 'i');
+  });
+  it('still means what the commands need it to mean', () => {
+    for (const id of ['BONA-015', 'bona-015', 'BONA-W003', 'bona-w0123']) assert.ok(ANY_LISTING_ID_RE.test(id), id);
+    for (const id of ['BONA-15', 'BONA-W1', 'TK-001', 'BONA-015 ']) assert.ok(!ANY_LISTING_ID_RE.test(id), id);
+    assert.ok(!LISTING_ID_RE.test('BONA-015'), 'the intake pattern still refuses a curated id');
+  });
+});
+
 describe('parseCommand', () => {
   it('stays silent on ordinary chatter', () => {
     for (const text of ['hello', 'شكرا', 'when is the viewing?', '']) {
@@ -150,8 +170,67 @@ describe('parseCommand', () => {
     assert.equal(parseCommand('retry').cmd, 'retry');
   });
 
+  // REGA advertisement licences. Two things separate these from every other command: they
+  // also address a CURATED listing (BONA-###), whose numbers live in licences.json rather
+  // than an inbox JSON; and nothing about them is guessed — a licence line the owner cannot
+  // show REGA is worse than no line, so anything that does not parse is a usage error.
+  it('parses licence <id> <adNumber> <expiry>', () => {
+    assert.deepEqual(parseCommand('licence BONA-W003 7200012345 2027-03-01'), {
+      cmd: 'licence', id: 'BONA-W003', adNumber: '7200012345', adExpiry: '2027-03-01', lang: 'en',
+    });
+    assert.deepEqual(parseCommand('license bona-w003 7200012345 2027-03-01'), {
+      cmd: 'licence', id: 'BONA-W003', adNumber: '7200012345', adExpiry: '2027-03-01', lang: 'en',
+    }, 'the American spelling is the same command');
+    assert.equal(parseCommand('/licence BONA-W003 FAL-7200012345/2 2027-03-01').adNumber, 'FAL-7200012345/2', 'letters, / and - are all in a REGA number');
+  });
+
+  it('reaches a curated listing too — a licence belongs to every listing, not just the intake\'s', () => {
+    assert.equal(parseCommand('licence BONA-015 7200012345 2027-03-01').id, 'BONA-015');
+    assert.equal(parseCommand('wafi BONA-015 1234567890').id, 'BONA-015');
+    assert.equal(parseCommand('remove BONA-015').cmd, 'error', 'every OTHER command is still intake-only');
+  });
+
+  it('reads the Arabic verbs, Arabic-Indic digits and DD/MM/YYYY — and answers in Arabic', () => {
+    assert.deepEqual(parseCommand('ترخيص BONA-W003 ٧٢٠٠٠١٢٣٤٥ ٠١/٠٣/٢٠٢٧'), {
+      cmd: 'licence', id: 'BONA-W003', adNumber: '7200012345', adExpiry: '2027-03-01', lang: 'ar',
+    });
+    assert.deepEqual(parseCommand('وافي BONA-W003 ١٢٣٤٥٦٧٨٩٠'), {
+      cmd: 'wafi', id: 'BONA-W003', wafiNumber: '1234567890', lang: 'ar',
+    });
+    assert.equal(parseCommand('licence BONA-W003 7200012345 01/03/2027').adExpiry, '2027-03-01', 'day first, the way a Saudi form prints it');
+  });
+
+  it('refuses an expiry that is not a real calendar date', () => {
+    // Date.parse() would have ROLLED 2027-02-31 over to the 3rd of March and published an
+    // expiry the owner never typed — see rules.mjs::isCalendarDate.
+    for (const bad of ['2027-02-31', '2027-13-01', '2027-02-29', 'soon', '2027/03', '31/02/2027']) {
+      const c = parseCommand(`licence BONA-W003 7200012345 ${bad}`);
+      assert.equal(c.cmd, 'error', bad);
+      assert.match(c.message, /is not a real date/, bad);
+    }
+    assert.equal(parseExpiryDate('2028-02-29'), '2028-02-29', '2028 IS a leap year');
+  });
+
+  it('asks for the pieces it is missing rather than half-recording a licence', () => {
+    assert.equal(parseCommand('licence').cmd, 'error');
+    assert.match(parseCommand('licence').message, /usage: licence BONA-W001/);
+    assert.equal(parseCommand('licence BONA-W003').cmd, 'error', 'no number');
+    assert.equal(parseCommand('licence BONA-W003 7200012345').cmd, 'error', 'no expiry');
+    assert.match(parseCommand('licence BONA-W003 7200012345').message, /the expiry date is part of the licence/);
+    assert.equal(parseCommand('licence BONA-W003 12 2027-03-01').cmd, 'error', 'too short to be a licence number');
+    assert.equal(parseCommand('wafi').cmd, 'error');
+    assert.equal(parseCommand('wafi BONA-W003 ab').cmd, 'error');
+    assert.match(parseCommand('wafi').message, /usage: wafi BONA-W001/);
+  });
+
+  it('parses `clear` on both, so a wrong number can be taken off again', () => {
+    assert.deepEqual(parseCommand('licence BONA-W003 clear'), { cmd: 'licence', id: 'BONA-W003', clear: true, lang: 'en' });
+    assert.deepEqual(parseCommand('wafi BONA-W003 clear'), { cmd: 'wafi', id: 'BONA-W003', clear: true, lang: 'en' });
+    assert.deepEqual(parseCommand('ترخيص BONA-W003 مسح'), { cmd: 'licence', id: 'BONA-W003', clear: true, lang: 'ar' });
+  });
+
   it('documents every command it accepts', () => {
-    for (const verb of ['remove', 'hero', 'price', 'brochure', 'sold', 'hide', 'status']) {
+    for (const verb of ['remove', 'hero', 'price', 'brochure', 'sold', 'hide', 'status', 'licence', 'wafi']) {
       assert.ok(HELP_TEXT.includes(verb), `HELP_TEXT should mention ${verb}`);
     }
   });

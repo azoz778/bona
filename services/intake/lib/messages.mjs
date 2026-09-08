@@ -97,6 +97,39 @@ export function brochureRebuilt(id, listing, brochure = {}) {
     commandsFor(id),
   ].filter(Boolean).join('\n');
 }
+/**
+ * `licence <id> <no> <expiry>` — the REGA advertisement licence is on the listing.
+ *
+ * The reply follows the VERB the owner typed (lib/commands.mjs sets `lang`): he asked in
+ * Arabic with `ترخيص`, he is answered in Arabic. Nothing else in the intake speaks Arabic
+ * yet, so this pair is the whole locale rule — and it is the right place for one, because a
+ * REGA licence line is the part of the site a Saudi regulator reads in Arabic.
+ */
+export function licenceRecorded(id, licence, lang = 'en') {
+  const ar = lang === 'ar';
+  if (!licence?.adNumber) {
+    return ar
+      ? `✅ تم حذف رخصة الإعلان من ${id}. يظهر التعديل خلال ٣ دقائق تقريبًا.`
+      : `✅ Licence cleared for ${id}. Live in ~3 min.`;
+  }
+  return ar
+    ? `✅ تم تسجيل رخصة الإعلان لـ ${id}: ${licence.adNumber}، سارية حتى ${licence.adExpiry}. يظهر التعديل خلال ٣ دقائق تقريبًا.`
+    : `✅ Licence recorded for ${id}: ${licence.adNumber}, valid until ${licence.adExpiry}. Live in ~3 min.`;
+}
+
+/** `wafi <id> <number>` — the off-plan project's Wafi licence. No expiry: Wafi numbers carry none. */
+export function wafiRecorded(id, licence, lang = 'en') {
+  const ar = lang === 'ar';
+  if (!licence?.wafiNumber) {
+    return ar
+      ? `✅ تم حذف رخصة وافي من ${id}. يظهر التعديل خلال ٣ دقائق تقريبًا.`
+      : `✅ Wafi licence cleared for ${id}. Live in ~3 min.`;
+  }
+  return ar
+    ? `✅ تم تسجيل رخصة وافي لـ ${id}: ${licence.wafiNumber}. يظهر التعديل خلال ٣ دقائق تقريبًا.`
+    : `✅ Wafi licence recorded for ${id}: ${licence.wafiNumber}. Live in ~3 min.`;
+}
+
 export const removed = (id, title) => `🗑️ Removed *${title}* (${id}). It comes off the site with the next deploy.`;
 export const updated = (id, what, listing) => `✏️ ${what} — *${listing.title.en}* (${id})\n${commandsFor(id)}`;
 

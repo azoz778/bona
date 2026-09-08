@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOMS } from '../../../scripts/curate/rooms.mjs';
-import { HOUSE_PRICE_CAP, INTAKE_ID_RE, isHousePublic, LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, sarAmount, videoEntryProblems } from '../../../scripts/curate/rules.mjs';
+import { HOUSE_PRICE_CAP, INTAKE_ID_RE, isHousePublic, licenceProblems, LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, sarAmount, videoEntryProblems } from '../../../scripts/curate/rules.mjs';
 
 export const INBOX_DIR = path.join('scripts', 'curate', 'inbox');
 export const INDEX_FILE = '_index.json';
@@ -282,6 +282,9 @@ export function checkListing(listing, { minImages = 4, maxImages = 10 } = {}) {
     if (!Array.isArray(listing.videos)) e.push('videos must be an array when present');
     else for (const [i, v] of listing.videos.entries()) e.push(...videoEntryProblems(v, i));
   }
+  // Also optional, and also the site validator's own rule rather than a copy of it: the REGA
+  // licence the owner records with `licence <id> …` / `wafi <id> …` (lib/edits.mjs).
+  e.push(...licenceProblems(listing.licence));
   if (!isStr(listing.description?.en) || !isStr(listing.description?.ar)) e.push('description.en/ar required');
   else {
     if (listing.description.en.split(/\n\n+/).length < 2) e.push('description.en needs at least 2 paragraphs');
