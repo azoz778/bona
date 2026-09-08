@@ -29,7 +29,7 @@ import { createStats, dayKey } from './stats.mjs';
 import { createAuth } from './auth.mjs';
 import {
   knownError,
-  loginPage, overviewPage, leadsPage, leadDetailPage, listingsPage, spendPage, integrationsPage, messagePage,
+  loginPage, logoutPage, overviewPage, leadsPage, leadDetailPage, listingsPage, spendPage, integrationsPage, messagePage,
   maskPhone, esc,
 } from './render.mjs';
 
@@ -130,6 +130,19 @@ export function createDashboardRoutes({
     res.end(body);
   }
 
+  /**
+   * Answer a body this route would not take. An oversized one is never finished being
+   * read, so the connection goes with it: the unread remainder must not be left sitting
+   * on a keep-alive socket for the request timeout to clear.
+   */
+  function refuseBody(req, res, parsed) {
+    if (parsed.status === 413) {
+      res.on('finish', () => req.destroy());
+      return sendJson(res, 413, { error: parsed.error }, { Connection: 'close' });
+    }
+    return sendJson(res, parsed.status, { error: parsed.error });
+  }
+
   /** 303, so a re-load of the result page does not re-post the form. */
   function redirect(res, location, status = 303) {
     res.writeHead(status, { Location: location, 'Content-Length': '0', ...SECURITY_HEADERS });
@@ -213,7 +226,7 @@ export function createDashboardRoutes({
       return toLogin(res, '?error=forbidden', 303);
     }
     const parsed = await fieldsOf(req);
-    if (!parsed.ok) return sendJson(res, parsed.status, { error: parsed.error });
+    if (!parsed.ok) return refuseBody(req, res, parsed);
     const out = await authenticator.requestCode(ip);
     if (!out.ok) return toLogin(res, `?step=code&error=${encodeURIComponent(out.error)}`, 303);
     return toLogin(res, '?step=code&sent=1', 303);
@@ -226,7 +239,7 @@ export function createDashboardRoutes({
     }
     if (!limiters.verify.take(`dashverify:${ip}`).ok) return toLogin(res, '?step=code&error=rate_limited', 303);
     const parsed = await fieldsOf(req);
-    if (!parsed.ok) return sendJson(res, parsed.status, { error: parsed.error });
+    if (!parsed.ok) return refuseBody(req, res, parsed);
 
     const ua = String(req.headers['user-agent'] ?? '').slice(0, 300) || null;
     const out = authenticator.verify(parsed.fields.code, ua);
@@ -235,11 +248,24 @@ export function createDashboardRoutes({
     return redirect(res, '/dashboard');
   }
 
-  function logout({ req, res }) {
+  /**
+   * Logging out ends a session on the server, so it is a POST behind the same marker
+   * and origin check as every other write. `SameSite=Lax` sends the cookie on a
+   * top-level GET navigation, which would have let any page on the internet log the
+   * owner out with a link; the GET here only offers the button.
+   */
+  async function logout({ req, res, ip }) {
+    if (!sameOrigin(req)) {
+      log({ level: 'warn', evt: 'dash.origin_rejected', path: '/dashboard/logout', ip });
+      return toLogin(res, '?error=forbidden', 303);
+    }
+    const parsed = await fieldsOf(req);
+    if (!parsed.ok) return refuseBody(req, res, parsed);
+    if (!hasMarker(req, parsed.fields)) return toLogin(res, '?error=forbidden', 303);
     const token = sessionToken(req);
     if (token) authenticator.logout(token);
     authenticator.clearCookie(res);
-    return toLogin(res);
+    return toLogin(res, '', 303);
   }
 
   /* -------------------- read models -------------------- */
@@ -511,7 +537,12 @@ export function createDashboardRoutes({
       if (req.method !== 'POST') return sendJson(res, 405, { error: 'method_not_allowed' });
       return loginVerify({ req, res, ip });
     }
-    if (p === '/dashboard/logout') return logout({ req, res });
+    if (p === '/dashboard/logout') {
+      if (req.method === 'POST') return logout({ req, res, ip });
+      if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method_not_allowed' });
+      if (!signedIn(req)) return toLogin(res);
+      return sendHtml(res, 200, logoutPage());
+    }
 
     /* --- everything else needs the cookie --- */
     if (!signedIn(req)) return toLogin(res);
@@ -553,7 +584,7 @@ export function createDashboardRoutes({
     if (!writes) return sendJson(res, 404, { error: 'not_found' });
 
     const parsed = await fieldsOf(req);
-    if (!parsed.ok) return sendJson(res, parsed.status, { error: parsed.error });
+    if (!parsed.ok) return refuseBody(req, res, parsed);
     if (!hasMarker(req, parsed.fields)) {
       log({ level: 'warn', evt: 'dash.marker_missing', path: p, ip });
       return sendJson(res, 403, { error: 'forbidden', message: 'X-Bona-Dash: 1 (or _dash=1) is required on a write' });

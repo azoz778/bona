@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../lib/db.mjs';
-import { createStats, dayKey, median, percentile, licenceFlags, expiryMs, DAY_MS } from '../lib/dashboard/stats.mjs';
+import { createStats, dayKey, median, percentile, licenceFlags, expiryMs, platformOf, DAY_MS } from '../lib/dashboard/stats.mjs';
 
 const NOW = 1_757_200_000_000;
 const now = () => NOW;
@@ -259,6 +259,38 @@ test('cplByCampaign shows the money even where the leads are not', () => {
     platform: 'snapchat', campaign_id: '9900', campaign_name: 'Snap test',
     spend_sar: 800, clicks: 10, impressions: 5000, leads: 0, cpl: null,
   });
+});
+
+test('two platforms running the same campaign number do not share a budget', () => {
+  const { db, stats } = seeded();
+  // Snapchat also has a campaign called 1203. Matching on the id alone would hand
+  // Meta's 4,500 SAR to Snap's leads, and Snap's 700 to Meta's.
+  db.upsertSpend({ day: day(1), platform: 'snapchat', campaign_id: '1203', campaign_name: 'Snap 1203', spend_sar: 700, clicks: 5, impressions: 900 });
+  db.insertLead({
+    lead_id: 'LEAD-E', created: NOW - DAY_MS, updated: NOW - DAY_MS, phone_e164: '966500000005', name: 'Snap lead',
+    channel: 'form', source: 'snapchat', medium: 'paid', campaign: 'snap_sep', campaign_id: '1203',
+    match_method: 'form', stage: 'new', stage_ts: NOW - DAY_MS,
+  });
+
+  const rows = stats.sources();
+  assert.equal(rows.find((r) => r.source === 'meta').spend_sar, 4500);
+  assert.equal(rows.find((r) => r.source === 'meta').cpl, 2250);
+  assert.equal(rows.find((r) => r.source === 'snapchat').spend_sar, 700);
+  assert.equal(rows.find((r) => r.source === 'snapchat').cpl, 700);
+
+  const cpl = Object.fromEntries(stats.cplByCampaign().map((r) => [`${r.platform}|${r.campaign_id}`, r]));
+  assert.equal(cpl['meta|1203'].leads, 2);
+  assert.equal(cpl['snapchat|1203'].leads, 1);
+});
+
+test('platformOf folds the names the two sides use for one platform', () => {
+  assert.equal(platformOf('Instagram'), 'meta');
+  assert.equal(platformOf('www.facebook.com'), 'meta');
+  assert.equal(platformOf('google.com'), 'google');
+  assert.equal(platformOf('snap'), 'snapchat');
+  assert.equal(platformOf('whatsapp_organic'), 'whatsapp_organic', 'an unknown name passes through and matches no spend');
+  assert.equal(platformOf(''), null);
+  assert.equal(platformOf('constructor'), 'constructor', 'a prototype member is just a name');
 });
 
 /* ---------------- journey ---------------- */

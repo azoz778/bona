@@ -52,6 +52,34 @@ export function percentile(values, p) {
   return s[Math.min(rank, s.length) - 1];
 }
 
+/**
+ * Ad-platform names arrive from two directions and have to be made to agree: a spend
+ * row carries whatever the owner typed on the Spend page, and a lead carries whatever
+ * the UTM said — or the referrer host, or the click id it was recognised by.
+ *
+ * This matters because a campaign id is unique only *inside* one platform. Meta and
+ * Snap can both run a campaign `1203`, and matching on the id alone would hand one
+ * platform's money to the other's leads. So spend is matched on the pair, and a name
+ * nothing recognises matches nothing rather than borrowing someone else's budget.
+ */
+export const PLATFORM_ALIASES = {
+  meta: 'meta', facebook: 'meta', 'facebook.com': 'meta', fb: 'meta', instagram: 'meta', 'instagram.com': 'meta', ig: 'meta',
+  google: 'google', 'google.com': 'google', googleads: 'google', adwords: 'google', youtube: 'google', 'youtube.com': 'google',
+  snapchat: 'snapchat', snap: 'snapchat', 'snapchat.com': 'snapchat',
+  tiktok: 'tiktok', 'tiktok.com': 'tiktok',
+  x: 'x', twitter: 'x', 'x.com': 'x', 'twitter.com': 'x',
+};
+
+/** A source or a typed platform name, folded to one label. Unknown names pass through. */
+export function platformOf(name) {
+  const s = String(name ?? '').trim().toLowerCase().replace(/^www\./, '');
+  if (!s) return null;
+  return Object.hasOwn(PLATFORM_ALIASES, s) ? PLATFORM_ALIASES[s] : s;
+}
+
+/** The key spend and leads are joined on: one platform, one campaign id. */
+const campaignKey = (platform, campaignId) => `${platformOf(platform) ?? ''}|${campaignId ?? ''}`;
+
 /** The four columns that name a campaign, from one stored touch bundle. */
 export function touchKey(touch) {
   const s = sourceFromTouch(touch);
@@ -104,11 +132,21 @@ export function licenceFlags(listing, now = Date.now()) {
  * @param {number} [o.tzOffsetMs]
  */
 export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET_MS } = {}) {
-  const sql = db.db;
-  const all = (text, ...params) => sql.prepare(text).all(...params).map((r) => ({ ...r }));
-  const one = (text, ...params) => { const r = sql.prepare(text).get(...params); return r ? { ...r } : null; };
+  const cache = new Map();
+  /** Same statement cache the store keeps: each query text is compiled once. */
+  const prep = (text) => {
+    let stmt = cache.get(text);
+    if (!stmt) { stmt = db.db.prepare(text); cache.set(text, stmt); }
+    return stmt;
+  };
+  const all = (text, ...params) => prep(text).all(...params).map((r) => ({ ...r }));
+  const one = (text, ...params) => { const r = prep(text).get(...params); return r ? { ...r } : null; };
+
+  // The only value this module ever interpolates into SQL rather than binding, so it is
+  // forced to a number here and cannot be anything else by the time it reaches a query.
+  const offset = Number.isFinite(Number(tzOffsetMs)) ? Math.trunc(Number(tzOffsetMs)) : TZ_OFFSET_MS;
   /** SQLite integer division floors, which is what a day bucket wants. */
-  const DAY_EXPR = (col) => `date((${col} + ${tzOffsetMs}) / 1000, 'unixepoch')`;
+  const DAY_EXPR = (col) => `date((${col} + ${offset}) / 1000, 'unixepoch')`;
 
   /**
    * The strip across the top of the Overview: one row per day, oldest first, days with
@@ -118,12 +156,12 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
   function overviewDaily(days = 14) {
     const span = Math.max(1, Math.min(365, Math.floor(Number(days) || 14)));
     const t = now();
-    const today = dayKey(t, tzOffsetMs);
-    const from = dayStart(today, tzOffsetMs) - (span - 1) * DAY_MS;
+    const today = dayKey(t, offset);
+    const from = dayStart(today, offset) - (span - 1) * DAY_MS;
 
     const blank = () => ({ sessions: 0, wa_clicks: 0, leads: 0, viewings: 0 });
     const byDay = new Map();
-    for (let i = 0; i < span; i += 1) byDay.set(dayKey(from + i * DAY_MS, tzOffsetMs), blank());
+    for (let i = 0; i < span; i += 1) byDay.set(dayKey(from + i * DAY_MS, offset), blank());
 
     for (const r of all(
       `SELECT ${DAY_EXPR('ts')} AS day, COUNT(DISTINCT session_id) AS sessions,
@@ -145,11 +183,13 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
     return [...byDay.entries()].map(([day, v]) => ({ day, ...v }));
   }
 
-  /** Spend summed per `campaign_id` — the id the ad platforms key their own reporting on. */
-  function spendByCampaignId() {
+  /** Spend summed per platform and campaign id — see `PLATFORM_ALIASES` for why both. */
+  function spendByCampaign() {
     const out = new Map();
-    for (const r of all('SELECT campaign_id, SUM(spend_sar) AS spend FROM ad_spend GROUP BY campaign_id')) {
-      if (r.campaign_id) out.set(String(r.campaign_id), round2(num(r.spend)));
+    for (const r of all('SELECT platform, campaign_id, SUM(spend_sar) AS spend FROM ad_spend GROUP BY platform, campaign_id')) {
+      if (!r.campaign_id) continue;
+      const key = campaignKey(r.platform, r.campaign_id);
+      out.set(key, round2((out.get(key) ?? 0) + num(r.spend)));
     }
     return out;
   }
@@ -192,9 +232,10 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
       row(touchKey(asObject(e.src_last) ?? asObject(e.src_first))).wa_clicks += 1;
     }
 
-    const spend = spendByCampaignId();
+    const spend = spendByCampaign();
     for (const r of rows.values()) {
-      if (r.campaign_id && spend.has(r.campaign_id)) r.spend_sar = spend.get(r.campaign_id);
+      const key = r.campaign_id ? campaignKey(r.source, r.campaign_id) : null;
+      if (key && spend.has(key)) r.spend_sar = spend.get(key);
       // Cost per lead is spend over the leads that *converted* on this campaign, so it
       // pairs with the money; it stays null when either half is missing rather than
       // printing a zero or an Infinity the owner would have to interpret.
@@ -302,15 +343,16 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
    */
   function cplByCampaign() {
     const leads = new Map();
-    for (const r of all('SELECT campaign_id, COUNT(*) AS n FROM leads WHERE campaign_id IS NOT NULL AND campaign_id != \'\' GROUP BY campaign_id')) {
-      leads.set(String(r.campaign_id), num(r.n));
+    for (const r of all("SELECT source, campaign_id, COUNT(*) AS n FROM leads WHERE campaign_id IS NOT NULL AND campaign_id != '' GROUP BY source, campaign_id")) {
+      const key = campaignKey(r.source, r.campaign_id);
+      leads.set(key, (leads.get(key) ?? 0) + num(r.n));
     }
     return all(`SELECT platform, campaign_id, MAX(campaign_name) AS campaign_name,
                        SUM(spend_sar) AS spend_sar, SUM(clicks) AS clicks, SUM(impressions) AS impressions
                 FROM ad_spend GROUP BY platform, campaign_id`)
       .map((r) => {
         const spend = round2(num(r.spend_sar));
-        const n = leads.get(String(r.campaign_id ?? '')) ?? 0;
+        const n = leads.get(campaignKey(r.platform, r.campaign_id)) ?? 0;
         return {
           platform: r.platform,
           campaign_id: r.campaign_id ?? null,
