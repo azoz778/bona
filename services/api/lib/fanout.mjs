@@ -72,12 +72,15 @@ export const STAGE_GA4 = {
 };
 export const STAGE_SNAP = { won: 'PURCHASE' };
 
+/** A mapping lookup that cannot answer with a prototype member. */
+const mapped = (table, key) => (typeof key === 'string' && Object.hasOwn(table, key) ? table[key] : null);
+
 /** Which destinations have a name for this stage. `[]` means the move stays private. */
 export function stageDests(stage) {
   const out = [];
-  if (STAGE_META[stage]) out.push('meta');
-  if (STAGE_GA4[stage]) out.push('ga4');
-  if (STAGE_SNAP[stage]) out.push('snap');
+  if (mapped(STAGE_META, stage)) out.push('meta');
+  if (mapped(STAGE_GA4, stage)) out.push('ga4');
+  if (mapped(STAGE_SNAP, stage)) out.push('snap');
   return out;
 }
 
@@ -98,9 +101,13 @@ const hashText = (v) => {
 };
 const compact = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null && v !== undefined && v !== ''));
 
-/** The platform's name for this event: by stage for `lead_stage`, by event name otherwise. */
+/**
+ * The platform's name for this event: by stage for `lead_stage`, by event name
+ * otherwise. Both lookups go through `mapped`, so a row carrying `constructor` where a
+ * name belongs is an event nobody has a name for rather than a function.
+ */
 const nameFor = (byEvent, byStage, event) =>
-  (event.name === 'lead_stage' ? byStage[event.props?.stage] : byEvent[event.name]) ?? null;
+  (event.name === 'lead_stage' ? mapped(byStage, event.props?.stage) : mapped(byEvent, event.name));
 
 /** The deal value a `won` move carries, in SAR. Anything else has none. */
 function stageValue(event) {
