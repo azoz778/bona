@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { openDb } from '../lib/db.mjs';
-import { createFanout, configuredDests, buildMeta, buildGa4, buildSnap, backoffMs, isRetryable, MAX_ATTEMPTS } from '../lib/fanout.mjs';
+import { createFanout, configuredDests, buildMeta, buildGa4, buildSnap, backoffMs, isRetryable, MAX_ATTEMPTS, enqueueStage, stageDests, STAGE_GA4 } from '../lib/fanout.mjs';
 
 const NOW = 1_757_200_000_000;
 const ANON = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
@@ -238,5 +238,141 @@ test('start() is a no-op with no interval and never holds the process open', asy
   assert.equal(on.start(), false, 'starting twice does not give the queue two drains');
   on.stop();
   assert.equal(on.started, false);
+  db.close();
+});
+
+/* ---------------- pipeline stages ---------------- */
+
+const LEAD_ID = 'LEAD-20260908-abcdef01';
+
+/** A stage move on the seeded lead, recorded exactly as the dashboard records it. */
+function moved(stage, { valueSar = null } = {}) {
+  const db = seeded({ dests: [] });
+  db.setStage(LEAD_ID, stage, { actor: 'owner', valueSar, now: NOW });
+  const { event, dests, queued } = enqueueStage(db, db.getLead(LEAD_ID), { stage, valueSar, now: NOW });
+  return { db, event: db.getEvent(event.event_id), dests, queued };
+}
+
+test('stageDests names only the platforms that can bid on a stage', () => {
+  assert.deepEqual(stageDests('new'), []);
+  assert.deepEqual(stageDests('contacted'), [], 'clerical moves stay private');
+  assert.deepEqual(stageDests('qualified'), ['ga4']);
+  assert.deepEqual(stageDests('viewing'), ['meta', 'ga4']);
+  assert.deepEqual(stageDests('offer'), ['ga4']);
+  assert.deepEqual(stageDests('negotiation'), ['ga4']);
+  assert.deepEqual(stageDests('won'), ['meta', 'ga4', 'snap']);
+  assert.deepEqual(stageDests('lost'), ['ga4']);
+  assert.deepEqual(STAGE_GA4.offer, 'working_lead');
+});
+
+test('a stage move is recorded as a lead_stage event carrying the lead\'s context', () => {
+  const { db, event, dests, queued } = moved('viewing');
+  assert.equal(event.name, 'lead_stage');
+  assert.equal(event.lead_id, LEAD_ID);
+  assert.equal(event.session_id, 'mf3k2a-7b1c');
+  assert.equal(event.listing_id, 'BONA-W003');
+  assert.deepEqual(event.props, { stage: 'viewing' });
+  assert.equal(event.ip, '2.2.2.2', 'the session context travels so the platforms can still match the person');
+  assert.equal(event.ua, 'Mozilla/5.0');
+  assert.deepEqual(dests, ['meta', 'ga4']);
+  assert.equal(queued, 2);
+  assert.deepEqual(db.dueFanout(NOW).map((r) => r.dest).sort(), ['ga4', 'meta']);
+  db.close();
+});
+
+test('a stage nobody bids on is still recorded, and queues nothing', () => {
+  const { db, event, dests, queued } = moved('contacted');
+  assert.equal(event.name, 'lead_stage');
+  assert.deepEqual(dests, []);
+  assert.equal(queued, 0);
+  assert.deepEqual(db.dueFanout(NOW), []);
+  db.close();
+});
+
+test('a won deal reaches Meta as a Purchase with its value, GA4 and Snap', () => {
+  const { db, event } = moved('won', { valueSar: 2_400_000 });
+  const ctx = { session: db.getSession('mf3k2a-7b1c'), lead: db.getLead(LEAD_ID), cfg: CFG };
+
+  const meta = buildMeta(event, ctx).body.data[0];
+  assert.equal(meta.event_name, 'Purchase');
+  assert.equal(meta.custom_data.value, 2_400_000);
+  assert.equal(meta.custom_data.currency, 'SAR');
+  assert.equal(meta.custom_data.content_category, 'won');
+  assert.equal(meta.event_id, event.event_id);
+
+  const ga4 = buildGa4(event, ctx).body.events[0];
+  assert.equal(ga4.name, 'close_convert_lead');
+  assert.equal(ga4.params.lead_stage, 'won');
+  assert.equal(ga4.params.value, 2_400_000);
+  assert.equal(ga4.params.currency, 'SAR');
+
+  const snap = buildSnap(event, ctx).body.data[0];
+  assert.equal(snap.event_name, 'PURCHASE');
+  assert.deepEqual(snap.custom_data, { price: 2_400_000, currency: 'SAR' });
+  db.close();
+});
+
+test('a lost deal is a GA4 close_unconvert_lead and nothing else', () => {
+  const { db, event, dests } = moved('lost');
+  const ctx = { session: db.getSession('mf3k2a-7b1c'), lead: db.getLead(LEAD_ID), cfg: CFG };
+  assert.deepEqual(dests, ['ga4']);
+  assert.equal(buildGa4(event, ctx).body.events[0].name, 'close_unconvert_lead');
+  assert.equal(buildMeta(event, ctx), null, 'Meta has no name for a lost lead');
+  assert.equal(buildSnap(event, ctx), null);
+  db.close();
+});
+
+test('a viewing is a Meta Schedule and a GA4 working_lead, with no value attached', () => {
+  const { db, event } = moved('viewing');
+  const ctx = { session: db.getSession('mf3k2a-7b1c'), lead: db.getLead(LEAD_ID), cfg: CFG };
+  assert.equal(buildMeta(event, ctx).body.data[0].event_name, 'Schedule');
+  assert.equal(buildMeta(event, ctx).body.data[0].custom_data.value, undefined);
+  assert.equal(buildGa4(event, ctx).body.events[0].name, 'working_lead');
+  assert.equal(buildGa4(event, ctx).body.events[0].params.value, undefined);
+  assert.equal(buildSnap(event, ctx), null);
+  db.close();
+});
+
+test('a qualified move is GA4 only', () => {
+  const { db, event, dests } = moved('qualified');
+  const ctx = { session: db.getSession('mf3k2a-7b1c'), lead: db.getLead(LEAD_ID), cfg: CFG };
+  assert.deepEqual(dests, ['ga4']);
+  assert.equal(buildGa4(event, ctx).body.events[0].name, 'qualify_lead');
+  assert.equal(buildMeta(event, ctx), null);
+  db.close();
+});
+
+test('the consent gate applies to a stage move like any other event', async () => {
+  const db = seeded({ dests: [] });
+  db.updateLead(LEAD_ID, { stage: 'won' });
+  const { event } = enqueueStage(db, db.getLead(LEAD_ID), { stage: 'won', valueSar: 1_000_000, now: NOW });
+  // The visitor never allowed advertising, so the win goes nowhere.
+  db.upsertSession({ session_id: 'mf3k2a-7b1c', consent_ads: 0 });
+  const { fetch, calls } = recorder();
+  const fanout = createFanout({ db, cfg: CFG, fetch, now: () => NOW });
+  const out = await fanout.drainOnce();
+  assert.equal(calls.length, 0);
+  assert.equal(out.skipped, 3);
+  assert.equal(db.getEvent(event.event_id).name, 'lead_stage', 'the record stays, only the sending is refused');
+  db.close();
+});
+
+test('the worker sends a queued stage move end to end', async () => {
+  const { db } = moved('won', { valueSar: 900_000 });
+  const { fetch, calls } = recorder();
+  const fanout = createFanout({ db, cfg: CFG, fetch, now: () => NOW });
+  const out = await fanout.drainOnce();
+  assert.equal(out.sent, 3);
+  assert.deepEqual(calls.map((c) => new URL(c.url).hostname).sort(),
+    ['graph.facebook.com', 'tr.snapchat.com', 'www.google-analytics.com']);
+  db.close();
+});
+
+test('createFanout exposes enqueueStage so the dashboard has one way in', () => {
+  const db = seeded({ dests: [] });
+  const fanout = createFanout({ db, cfg: CFG, now: () => NOW });
+  const { dests, queued } = fanout.enqueueStage(db.getLead(LEAD_ID), { stage: 'won', valueSar: 5 });
+  assert.deepEqual(dests, ['meta', 'ga4', 'snap']);
+  assert.equal(queued, 3);
   db.close();
 });
