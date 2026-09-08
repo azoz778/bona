@@ -16,7 +16,7 @@ import { createOrMergeLead, leadNote } from './leads.mjs';
 import { normaliseSearchArgs } from './actions.mjs';
 import { toAsciiDigits } from './inventory.mjs';
 
-export const TOOL_NAMES = ['search_properties', 'show_property', 'create_lead'];
+export const TOOL_NAMES = ['search_properties', 'show_property', 'search_units', 'create_lead'];
 
 /** A duplicate `create_lead` inside this window returns the first lead's id. */
 export const LEAD_DEDUPE_MS = 10 * 60 * 1000;
@@ -101,7 +101,7 @@ export function toolArgs(body = {}) {
  *   `db` is the SQLite store (`openDb`); `dataDir` is where the raw `leads.jsonl` lives.
  */
 export function createToolHandlers({
-  inventory, store, db, dataDir, siteUrl, env = {}, sendWhatsApp, log = () => {},
+  inventory, units = null, store, db, dataDir, siteUrl, env = {}, sendWhatsApp, log = () => {},
   now = () => Date.now(), leadDedupeMs = LEAD_DEDUPE_MS,
 }) {
   if (!db) throw new TypeError('createToolHandlers needs the store (db)');
@@ -127,6 +127,66 @@ export function createToolHandlers({
     const card = inventory.card(listing);
     store.addCard(ctx.conversationId, card);
     return { shown: true, id: card.id, title: card.title, url: card.url[ctx.locale] ?? card.url.en };
+  }
+
+  /**
+   * Per-unit stock inside one project (today: Darco Prime Waterfront, BONA-W014).
+   * `search_properties` answers "which projects"; this answers "which unit, on
+   * which floor, facing where, and for how much" — the question a buyer actually
+   * asks. Prices come from the developer's own inventory sheet; the model must
+   * quote them exactly and never estimate.
+   */
+  async function search_units(args, ctx) {
+    if (!units) return { count: 0, results: [], note: 'Unit-level stock is not loaded. Use search_properties and offer a specialist.' };
+
+    const listingId = String(args.listing_id ?? args.id ?? args.property ?? 'BONA-W014').trim().toUpperCase();
+    const overview = units.summary(listingId);
+    if (!overview) {
+      return {
+        count: 0, results: [],
+        note: 'No per-unit stock list for that project. Answer from search_properties only, and do not invent unit numbers or prices.',
+      };
+    }
+
+    const n = (v) => {
+      if (v === null || v === undefined || v === '') return null;
+      const x = Number(toAsciiDigits(v));
+      return Number.isFinite(x) ? x : null;
+    };
+    const bool = (v) => (v === true || v === 'true' || v === 'yes' ? true : v === false || v === 'false' || v === 'no' ? false : null);
+
+    const plan = args.plan ?? 'cash';
+    const { units: rows, total } = units.search({
+      listingId,
+      beds: n(args.beds ?? args.bedrooms),
+      minBeds: n(args.min_beds), maxBeds: n(args.max_beds),
+      building: args.building ?? args.block ?? null,
+      floor: args.floor ?? null,
+      facing: args.facing ?? args.orientation ?? args.view ?? null,
+      unitClass: args.class ?? args.unit_class ?? null,
+      maidRoom: bool(args.maid_room ?? args.maids_room),
+      minPrice: n(args.min_price), maxPrice: n(args.max_price),
+      minArea: n(args.min_area), maxArea: n(args.max_area),
+      plan,
+      query: args.query ?? null,
+      limit: n(args.limit) ?? 8,
+    });
+
+    const results = rows.map((u) => units.toRow(u, plan));
+
+    // Put the project card on screen so the visitor sees what is being discussed.
+    const listing = inventory.find(listingId);
+    if (listing) store.addCard(ctx.conversationId, inventory.card(listing));
+
+    return {
+      count: results.length,
+      total_matching: total,
+      availability: overview,
+      results,
+      note: results.length
+        ? `${total} unit(s) match; the ${results.length} cheapest are listed. Prices are the developer's published figures for the "${plan}" plan — quote them exactly, never estimate, and give the unit reference (e.g. B08-19) so the buyer can ask for it by name.`
+        : "No unit matches those criteria in the developer's stock list. Say so plainly, offer the closest alternative from `availability`, and never invent a unit.",
+    };
   }
 
   /**
@@ -193,7 +253,7 @@ export function createToolHandlers({
     return { saved: true, id: record.lead_id, note: 'Enquiry saved. Tell the visitor a Bona principal will be in touch, and offer WhatsApp +966 59 329 6933 to speak now.' };
   }
 
-  const handlers = { search_properties, show_property, create_lead };
+  const handlers = { search_properties, show_property, search_units, create_lead };
 
   /**
    * Run a tool by name.
