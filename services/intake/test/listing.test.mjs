@@ -10,7 +10,7 @@ import {
 } from '../lib/listing.mjs';
 import * as edits from '../lib/edits.mjs';
 import * as msg from '../lib/messages.mjs';
-import { licenceProblems } from '../../../scripts/curate/rules.mjs';
+import { licenceProblems, WITHHELD_LISTINGS } from '../../../scripts/curate/rules.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -165,19 +165,34 @@ describe('buildListing', () => {
     assert.equal(l.mapPrecision, null);
   });
 
-  it('refuses a house over the public-site price cap, before anything is written', () => {
+  it('refuses a WITHHELD listing before anything is written', () => {
     // Codex review 2026-09-08: filtering only in build.mjs still let the intake commit
     // public/listings/<slug>/*.jpg and brochure.pdf, which GitHub Pages serves directly —
     // the home would be off the site but its photos and full brochure still fetchable.
+    // The rule this guards changed from a price cap to a named list the same day; the
+    // "refuse before writing" property is what must survive that change.
+    // A withheld id must still be a well-formed intake id, or the id rule fires too and the
+    // assertion stops being about withholding. Today's withheld list holds only curated
+    // BONA-### ids, so stand one up for the length of the test.
     const ai = structuredClone(AI);
-    ai.listing.price = { amount: 18_000_000, currency: 'SAR', from: false, period: null, onRequest: false };
-    const l = buildListing({ ai, images: imagesFor(slug, picks), slug, id: 'BONA-W020', repo: REPO, caption: {}, meta: {} });
-    const problems = checkListing(l);
-    assert.equal(problems.length, 1, JSON.stringify(problems));
-    assert.match(problems[0], /10,000,000|price cap/i);
+    WITHHELD_LISTINGS.add('BONA-W099');
+    try {
+      const l = buildListing({ ai, images: imagesFor(slug, picks), slug, id: 'BONA-W099', repo: REPO, caption: {}, meta: {} });
+      const problems = checkListing(l);
+      assert.equal(problems.length, 1, JSON.stringify(problems));
+      assert.match(problems[0], /withheld/i);
+    } finally {
+      WITHHELD_LISTINGS.delete('BONA-W099');
+    }
   });
 
-  it('accepts a house at or under the cap, and one with no published price', () => {
+  it('accepts an expensive house — price alone never withholds one', () => {
+    // The regression this guards: a standing SAR 10,000,000 cap silently refused the most
+    // valuable homes a luxury brand publishes. Owner correction 2026-09-08.
+    const dear = structuredClone(AI);
+    dear.listing.price = { amount: 18_000_000, currency: 'SAR', from: false, period: null, onRequest: false };
+    assert.deepEqual(checkListing(buildListing({ ai: dear, images: imagesFor(slug, picks), slug, id: 'BONA-W020', repo: REPO, caption: {}, meta: {} })), []);
+
     const under = structuredClone(AI);
     under.listing.price = { amount: 9_000_000, currency: 'SAR', from: false, period: null, onRequest: false };
     assert.deepEqual(checkListing(buildListing({ ai: under, images: imagesFor(slug, picks), slug, id: 'BONA-W021', repo: REPO, caption: {}, meta: {} })), []);

@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { HOUSE_PRICE_CAP, LAND_PRICE_CAP, isHousePublic, isLandPublic, sarAmount } from './curate/rules.mjs';
+import { isLandPublic, isPublishable, LAND_PRICE_CAP, sarAmount } from './curate/rules.mjs';
 
 const API = process.env.TK_PUBLIC_API || 'https://dashboard.azoz.uk/api/public/properties';
 const TIMEOUT_MS = 10_000;
@@ -106,19 +106,22 @@ async function main() {
     }
   }
 
-  // Owner rules: houses over SAR 10,000,000 (2026-09-08) and land at or above SAR 50,000,000
-  // (2026-09-06) are not on the public site. A price rise from TK can push a published listing
+  // Two rules, both enforced here as well as in build.mjs: land at or above SAR 50,000,000
+  // (2026-09-06) stays off the public site, and homes the owner has named are withheld
+  // (2026-09-08, replacing a blanket house price cap). A price rise from TK can push a plot
   // over its cap, and the daily deploy runs this script and then builds WITHOUT re-running
-  // scripts/curate/build.mjs — so without this, a synced price would quietly republish what
-  // the cap exists to hide. Drop it here. (Codex review 2026-09-08: land was missing.)
-  const overCap = listings.filter((l) => !isHousePublic(l) || !isLandPublic(l));
+  // scripts/curate/build.mjs — so without this, a sync would quietly republish what the rule
+  // exists to hide. (Codex review 2026-09-08: land was missing.)
+  const overCap = listings.filter((l) => !isPublishable(l) || !isLandPublic(l));
   if (overCap.length) {
     for (const l of overCap) {
-      const which = !isHousePublic(l) ? `house over the SAR ${HOUSE_PRICE_CAP.toLocaleString('en-US')} cap` : `land at/above the SAR ${LAND_PRICE_CAP.toLocaleString('en-US')} cap`;
       const sar = sarAmount(l.price);
-      changes.push(`${l.id} REMOVED — ${which} (${sar === null ? 'no published price' : `${Math.round(sar).toLocaleString('en-US')} SAR eq.`})`);
+      const which = !isPublishable(l)
+        ? 'withheld from the public site by owner decision'
+        : `land at/above the SAR ${LAND_PRICE_CAP.toLocaleString('en-US')} cap (${sar === null ? 'no published price' : `${Math.round(sar).toLocaleString('en-US')} SAR eq.`})`;
+      changes.push(`${l.id} REMOVED — ${which}`);
     }
-    const drop = new Set(overCap.map((l) => l.id));
+    const drop = new Set(withheld.map((l) => l.id));
     listings = listings.filter((l) => !drop.has(l.id));
   }
 
