@@ -221,5 +221,11 @@
     ],
     "createdAt": "2026-09-06T11:28:08.218Z",
     "site": "https://bona.azoz.uk"
-  }
+  },
+  "videos": [
+    {
+      "src": "/listings/knightsbridge-villas-meydan-district-11/v-01.mp4",
+      "poster": "/listings/knightsbridge-villas-meydan-district-11/v-01-poster.jpg"
+    }
+  ]
 }

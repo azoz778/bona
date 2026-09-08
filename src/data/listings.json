@@ -5492,6 +5492,12 @@
       "lng": 55.3142967
     },
     "listedAt": "2026-09-06",
+    "videos": [
+      {
+        "src": "/listings/knightsbridge-villas-meydan-district-11/v-01.mp4",
+        "poster": "/listings/knightsbridge-villas-meydan-district-11/v-01-poster.jpg"
+      }
+    ],
     "mapPrecision": "district"
   },
   {
