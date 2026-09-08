@@ -78,7 +78,7 @@ vps "install -d -m 700 ~/bona-data"
 scp -q -p "${files[@]}" "$BONA_VPS_SSH:bona-data/"
 vps "chmod 600 ~/bona-data/*"
 # Copy-integrity check, taken before the VPS API (and its poller) can open the database.
-vps_leads=$(vps "$REMOTE_NODE -e 'const {DatabaseSync}=require(\"node:sqlite\");const db=new DatabaseSync(process.argv[1],{readOnly:true});console.log(db.prepare(\"select count(*) as n from leads\").get().n)' ~/bona-data/bona.db")
+vps_leads=$(vps_count_leads)
 [ "$vps_leads" = "$pc_leads" ] || die "lead count mismatch: PC $pc_leads vs VPS $vps_leads"
 ok "copied ${#files[@]} files, $vps_leads leads carried over"
 
