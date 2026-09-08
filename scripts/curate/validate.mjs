@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FORBIDDEN, HOUSE_PRICE_CAP, HYPE, isHousePublic, isLocalSrc, LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, sarAmount, videoEntryProblems } from './rules.mjs';
+import { FORBIDDEN, HYPE, isPublishable, isLocalSrc, LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, videoEntryProblems } from './rules.mjs';
 
 function matterportIdOf(value) {
   if (typeof value !== 'string') return null;
@@ -193,12 +193,12 @@ for (const l of data) {
     }
   }
 
-  // Owner rule 2026-09-08: houses over SAR 10,000,000 are not on the public site.
+  // Owner decision 2026-09-08: named listings are withheld from the public site.
   // build.mjs filters them out, but listings.json is also written by scripts/sync-listings.mjs
-  // (which the daily deploy runs and which edits price.amount in place, without rebuilding).
-  // Checking it here means a synced price rise can never quietly republish a house.
-  if (!isHousePublic(l)) {
-    err(id, `house is over the SAR ${HOUSE_PRICE_CAP.toLocaleString('en-US')} public-site cap (${Math.round(sarAmount(l.price)).toLocaleString('en-US')} SAR eq.) — re-run scripts/curate/build.mjs`);
+  // (which the daily deploy runs and which edits listings in place, without rebuilding).
+  // Checking it here means a sync can never quietly republish a withheld home.
+  if (!isPublishable(l)) {
+    err(id, 'this listing is withheld from the public site by owner decision (scripts/curate/rules.mjs) — re-run scripts/curate/build.mjs');
   }
 
   // copy hygiene
