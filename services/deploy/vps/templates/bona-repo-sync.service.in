@@ -7,7 +7,7 @@ After=network-online.target
 Type=oneshot
 # Fast-forward only: the checkout is never edited by hand. The running API hot-reloads
 # src/data/listings.json on mtime; code changes on disk take effect at the next restart (deploy.sh).
-ExecStart=/usr/bin/git -C @REPO@ pull --ff-only --quiet
+ExecStart=@GIT@ -C @REPO@ pull --ff-only --quiet
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=bona-repo-sync

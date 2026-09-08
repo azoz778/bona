@@ -65,6 +65,12 @@ test('install-vps.sh --render-only renders units and tunnel config for the VPS',
 
   const sync = readFileSync(path.join(out, 'bona-repo-sync.service'), 'utf8');
   assert.match(sync, /^ExecStart=\/usr\/bin\/git -C \/opt\/bona pull --ff-only --quiet$/m);
+  assert.doesNotMatch(sync, /@[A-Z_]+@/, 'unrendered placeholder');
+  // GIT_BIN is the one knob for that path (rendered from lib.sh, checked by --check)
+  const out2 = mkdtempSync(path.join(tmpdir(), 'bona-render-'));
+  const r2 = bash([path.join(VPS, 'install-vps.sh'), '--render-only', out2], { env: { HOME: home, GIT_BIN: '/snap/bin/git' } });
+  assert.equal(r2.status, 0, r2.stderr + r2.stdout);
+  assert.match(readFileSync(path.join(out2, 'bona-repo-sync.service'), 'utf8'), /^ExecStart=\/snap\/bin\/git -C \/opt\/bona pull --ff-only --quiet$/m);
   const timer = readFileSync(path.join(out, 'bona-repo-sync.timer'), 'utf8');
   // Wall-clock schedule: Persistent=true only catches up missed runs for OnCalendar= timers.
   assert.match(timer, /^OnCalendar=\*:0\/5$/m);
@@ -83,8 +89,10 @@ test('install-vps.sh --render-only renders units and tunnel config for the VPS',
 
 test('install-vps.sh --check on an empty HOME reports what is missing and exits 2', () => {
   const home = mkdtempSync(path.join(tmpdir(), 'bona-home-'));
-  const r = bash([path.join(VPS, 'install-vps.sh'), '--check'], { env: { HOME: home, BONA_VPS_REPO: path.join(home, 'repo') } });
+  const r = bash([path.join(VPS, 'install-vps.sh'), '--check'], { env: { HOME: home, BONA_VPS_REPO: path.join(home, 'repo'), GIT_BIN: path.join(home, 'no-git') } });
   assert.equal(r.status, 2, r.stdout + r.stderr);
+  // the sync unit's ExecStart is an absolute git path: --check must say when it is not there
+  assert.match(stripAnsi(r.stdout), new RegExp(`^MISSING: git at ${home}/no-git`, 'm'), r.stdout);
   for (const s of ['retell.env', 'evolution-api.env', 'bona-services.env', 'bona-marketing.env', '9022fbec-de4f-44b9-805e-8fff285d6263.json', 'node', 'cloudflared', 'bona-api.service']) {
     assert.ok(r.stdout.includes(s), `--check should mention ${s}\n${r.stdout}`);
   }
@@ -346,7 +354,8 @@ function fakeVpsHome() {
   }
   const log = path.join(home, 'shim.log');
   writeFileSync(log, '');
-  const env = { PATH: `${SHIMS}:${process.env.PATH}`, HOME: home, SHIM_LOG: log, BONA_VPS_REPO: repo, BONA_WAIT_SCALE: '0' };
+  // GIT_BIN: the sync unit hardcodes the git path and --check verifies it; the host's /usr/bin/git must not decide the test.
+  const env = { PATH: `${SHIMS}:${process.env.PATH}`, HOME: home, SHIM_LOG: log, BONA_VPS_REPO: repo, BONA_WAIT_SCALE: '0', GIT_BIN: path.join(SHIMS, 'git') };
   const shimLog = () => readFileSync(log, 'utf8').split('\n').filter(Boolean);
   return { home, repo, env, shimLog };
 }
@@ -471,6 +480,7 @@ test('install-vps.sh --check on a fully provisioned HOME reports every item ok a
   assert.ok(lines.length > 15, `expected one line per item\n${r.stdout}`);
   for (const l of lines) assert.match(l, /^( ok  |==> )/, `every line must be ok: ${l}`);
   assert.ok(!stripAnsi(r.stdout + r.stderr).includes('MISSING'), r.stdout + r.stderr);
+  assert.ok(lines.some((l) => l.startsWith(` ok  git at ${path.join(SHIMS, 'git')}`)), `--check must verify the git the sync unit will exec\n${r.stdout}`);
 });
 
 test('install-vps.sh install mode never enables, starts or restarts a unit', () => {

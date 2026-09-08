@@ -1,5 +1,5 @@
 # services/deploy/vps/lib.sh — shared by every script in this directory. Sourced, never executed.
-# Constants first (only BONA_VPS_REPO, BONA_VPS_DEPLOY_DIR, BONA_VPS_SSH, BONA_HOSTNAMES, BONA_REPO_URL, BONA_VPS_EVOLUTION_URL, BONA_PUBLIC_HEALTH, BONA_TUNNEL_NAME and BONA_WAIT_SCALE may be overridden from the environment; the rest are pinned), then small helpers. Never echo a secret.
+# Constants first (only BONA_VPS_REPO, BONA_VPS_DEPLOY_DIR, BONA_VPS_SSH, BONA_HOSTNAMES, BONA_REPO_URL, BONA_VPS_EVOLUTION_URL, BONA_PUBLIC_HEALTH, BONA_TUNNEL_NAME, BONA_WAIT_SCALE and GIT_BIN may be overridden from the environment; the rest are pinned), then small helpers. Never echo a secret.
 
 BONA_TUNNEL_ID=9022fbec-de4f-44b9-805e-8fff285d6263
 BONA_TUNNEL_NAME=${BONA_TUNNEL_NAME:-bona}
@@ -17,6 +17,10 @@ BONA_VPS_SSH=${BONA_VPS_SSH:-hermes-vps}
 BONA_PUBLIC_HEALTH=${BONA_PUBLIC_HEALTH:-https://api.bona-real-estate.com/health}
 # Multiplied into every wait_for pause (integer). The tests set 0 so retries do not sleep.
 BONA_WAIT_SCALE=${BONA_WAIT_SCALE:-1}
+
+# The absolute git the rendered bona-repo-sync.service execs (a unit's ExecStart takes no PATH
+# lookup). install-vps.sh --check verifies it exists; the tests point it at a shim.
+GIT_BIN=${GIT_BIN:-/usr/bin/git}
 
 NODE_VERSION=v24.19.0
 NODE_SHA256=14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647
@@ -62,6 +66,7 @@ render() {
   out=${out//@NODE_BIN@/"$NODE_BIN"}
   out=${out//@TUNNEL_ID@/"$BONA_TUNNEL_ID"}
   out=${out//@EVOLUTION_URL@/"$BONA_VPS_EVOLUTION_URL"}
+  out=${out//@GIT@/"$GIT_BIN"}
   if printf '%s\n' "$out" | grep -q '@[A-Z_][A-Z_]*@'; then die "unrendered placeholder in $1"; fi
   printf '%s\n' "$out"
 }
