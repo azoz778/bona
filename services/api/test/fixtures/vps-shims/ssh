@@ -9,11 +9,12 @@
 #   systemctl --user enable --now … / disable --now …   → exit 0 (the log line is the record)
 #   curl … /health …                                    → prints {"ok":true}
 #   ~/.local/opt/node-…/bin/node -e … ~/bona-data/bona.db → prints 7 (the lead count)
-#   test -f …                                           → exit 1 (nothing to copy back)
+#   test -f ~/bona-data/NAME                            → exit 0 (present) unless NAME is in SHIM_REMOTE_MISSING
 #   anything else                                       → exit 99 (the test sees an unexpected command)
 # Scenarios (environment):
 #   SHIM_VPS_STOP_FAILS=1        once a `disable --now` was sent, the units report ACTIVE anyway
 #   SHIM_SSH_DOWN_AFTER_START=1  every call after an `enable --now bona-api` was sent exits 255
+#   SHIM_REMOTE_MISSING="a b"    space-separated data file names that `test -f ~/bona-data/NAME` reports absent
 set -u
 log=${SHIM_LOG:?SHIM_LOG must point at the log file}
 cmd=${!#}
@@ -32,6 +33,8 @@ case "$cmd" in
   systemctl*enable\ --now* | systemctl*disable\ --now*) exit 0 ;;
   curl*/health*) echo '{"ok":true}'; exit 0 ;;
   *node\ -e*bona.db) echo 7; exit 0 ;;
-  test\ -f*) exit 1 ;;
+  test\ -f\ ~/bona-data/*)
+    name=${cmd##*/}
+    case " ${SHIM_REMOTE_MISSING:-} " in *" $name "*) exit 1 ;; *) exit 0 ;; esac ;;
   *) echo "ssh shim: unexpected remote command: $cmd" >&2; exit 99 ;;
 esac

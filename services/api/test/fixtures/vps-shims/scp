@@ -1,5 +1,30 @@
 #!/usr/bin/env bash
-# Fake `scp`: records argv in $SHIM_LOG, copies nothing, exits 0.
+# Fake `scp`: records argv in $SHIM_LOG. Nothing is copied over any wire, but the destination is
+# made to LOOK like the copy happened, so a script's "did the file arrive?" check works:
+#   remote → local (host:dir/X → D/ or D/X)  creates D/X (D is a directory) or the file D
+#   local  → remote (X … → host:dir/)         creates nothing (the VPS is fake)
+# SHIM_SCP_FAIL=1 → exit 1 without creating anything (a failed copy). A remote source whose file
+# name is listed in SHIM_REMOTE_MISSING (space-separated) also fails, the way scp does for a file
+# that is not there.
 set -u
 printf 'scp %s\n' "$*" >> "${SHIM_LOG:?SHIM_LOG must point at the log file}"
+[ "${SHIM_SCP_FAIL:-0}" = 1 ] && exit 1
+# Split argv into sources and destination; option flags (and the argument of the ones that take
+# one) are skipped.
+args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o | -i | -P | -F | -S | -c | -l | -J) shift 2; continue ;;
+    -*) shift; continue ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+[ "${#args[@]}" -ge 2 ] || exit 0
+dest=${args[${#args[@]}-1]}
+case "$dest" in *:*) exit 0 ;; esac   # remote destination: nothing to create locally
+for src in "${args[@]:0:${#args[@]}-1}"; do
+  name=$(basename "${src#*:}")
+  case "$src" in *:*) case " ${SHIM_REMOTE_MISSING:-} " in *" $name "*) echo "scp: $src: No such file or directory (shim)" >&2; exit 1 ;; esac ;; esac
+  if [ -d "$dest" ] || [ "${dest%/}" != "$dest" ]; then : > "${dest%/}/$name"; else : > "$dest"; fi
+done
 exit 0
