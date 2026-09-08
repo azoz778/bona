@@ -246,10 +246,11 @@ own export.
 
 ### How the 30 days are built
 
-**Ten TikToks a week, re-exported for every other platform.** The plan below lists
-**Asset A** (the daily post) and **Asset B** (a second post on the five strongest days).
-That is 10 TikToks a week — the top band in Buffer's frequency data — with Instagram
-Reels, Snapchat and YouTube Shorts drawing from the same shoot.
+**Ten TikToks a week, re-exported for every other platform.** The tables below list an
+**Asset A** and an **Asset B** for each day. Asset A is non-negotiable and goes out every
+day; **Asset B is the stretch slot — drop it on Friday and Saturday** and you land on 10
+posts a week, the top band in Buffer's frequency data. Instagram Reels, Snapchat and
+YouTube Shorts draw from the same shoots.
 
 ⚠️ **They are not the same *file*.** Instagram suppresses watermarked and
 already-posted content, and extended that penalty on 30 April 2026 (§4). Each platform
