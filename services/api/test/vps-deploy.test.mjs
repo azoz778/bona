@@ -556,6 +556,8 @@ test('install-vps.sh install mode never enables, starts or restarts a unit', () 
   // …and a unit file is only deleted once the unit is verified inactive (a fileless running unit would be invisible)
   assert.match(src, /systemctl --user is-active --quiet "\$u"[^\n]*\n[^\n]*rm -f "\$LEGACY_USER_UNIT_DIR\/\$u"/);
   assert.match(src, /\[ "\$\(id -u\)" != 0 \] \|\| die/, 'refuses to run as root');
+  // the legacy-process probe must not flag the live system units themselves after the cutover
+  assert.match(src, /systemctl show -p MainPID --value bona-api cloudflared-bona/, 'live MainPIDs are excluded from the legacy probe');
   assert.match(src, /systemctl --user disable --now "\$u"/);
   // and the system units land in BONA_UNIT_DIR through sudo -n when the service user cannot write there
   assert.match(src, /sudo -n install -m 644 "\$tmp\/\$u" "\$BONA_UNIT_DIR\/\$u"/);
