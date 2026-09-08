@@ -62,6 +62,32 @@ Rules: prices are asking prices from TK only (never an estimate — TAQEEM rule)
 - Curated listings get theirs from `scripts/curate/licences.json` (keyed by id, merged by `build.mjs`); intake listings carry `licence` in their inbox JSON (the intake's `licence` / `wafi` commands). Default `null` everywhere.
 - `RegaBlock.astro` renders, on every listing page, the advertiser (`site.json → advertiser`, the owner's personal FAL while the Bona CR is pursued), the advertisement licence line when `adNumber` is set, the Wafi line when `wafiNumber` is set, and a QR code of the listing URL (`src/lib/qr.ts`, no dependency; `node scripts/qr-selftest.mjs`).
 
+## Per-unit stock — `src/data/units.json` (2026-09-08)
+A project sold unit by unit needs more than one listing row: a buyer asks *which*
+apartment, on which floor, facing where, and for how much. `listings.json` holds the
+project (one price, `from: true`); `units.json` holds the stock behind it.
+
+- Built by `scripts/curate/build-units.py` from the developer's own inventory
+  spreadsheet. **Every field is copied from that sheet — nothing is estimated**, and a
+  unit with no printed cash price is dropped rather than guessed at (TAQEEM).
+- Shape: `{ listingId, project{en,ar}, developer{en,ar}, district{en,ar}, city{en,ar},
+  delivery: "YYYY-MM", currency, updated: "YYYY-MM-DD", source, units: [...] }`.
+  `updated` is the date **on the sheet**, not the day it was imported, so staleness is
+  visible to anyone reading it.
+- Each unit: `ref` (`B08-19`), `building`, `unit`, `floor{en,ar}` + `floorIndex`,
+  `facing{en,ar}`, `beds`, `baths`, `maidRoom`, `class`, `type{en,ar}`, `areaSqm`,
+  `roofSqm`, `feature{en,ar}` (outlook), and `price{cash,half,year,twoYear}` — the four
+  payment plans the developer publishes.
+- The importer **fails loudly on an unmapped Arabic value** instead of letting it
+  through into an English field, and asserts no duplicate `ref` and no missing cash
+  price before it writes.
+- Consumers: `services/api/lib/units.mjs` (same lazy-read + mtime-reload contract as
+  `inventory.mjs`) and the `search_units` concierge tool. The site does not render
+  units yet — publishing them as individual listings is a separate decision, because
+  111 rows would swamp `listings.json`'s 24–80 range and share one photo set.
+- Today only `BONA-W014` (Darco Prime Waterfront) has a stock list. `search_units`
+  returns nothing for any other listing id rather than another project's units.
+
 ## Publication rule (owner, 2026-09-05 20:45)
 Only listings whose `sourceRef` exists in TK's live public API (scripts/tk-public-properties.snapshot.json, refreshed from https://dashboard.azoz.uk/api/public/properties) AND whose API status is available are written to listings.json. `scripts/curate/build.mjs` enforces it; anything from the old TK website that is not in the live list is excluded.
 
