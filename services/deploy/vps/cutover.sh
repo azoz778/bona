@@ -3,8 +3,9 @@
 # back by itself if any step fails:
 #   1. stop cloudflared-bona + bona-api here (one API, one tunnel connector — never two)
 #   2. copy ~/bona-data/{bona.db,…jsonl} to the VPS (PC service is stopped, so the copy is consistent)
-#   3. start bona-api on the VPS, wait for 127.0.0.1:4120/health, compare lead counts, then
-#      enable the repo-sync timer (new listings reach the inventory hot-reload)
+#      and compare lead counts before anything on the VPS opens the database (copy integrity)
+#   3. start bona-api on the VPS, wait for 127.0.0.1:4120/health, then enable the repo-sync timer
+#      (new listings reach the inventory hot-reload)
 #   4. start cloudflared-bona on the VPS, wait for the public /health
 #   5. disable the two units here (files stay for rollback.sh)
 # The automatic rollback is fail-closed: the PC units come back ONLY after the VPS units are
@@ -22,8 +23,8 @@ PC_NODE=${PC_NODE:-$(command -v node || true)}
 if [ "$DRY" = 1 ]; then
   say "Dry run — the cutover would:"
   echo "  1. stop cloudflared-bona and bona-api on this PC (systemctl --user)"
-  echo "  2. copy $DATA_DIR/{$(echo $DATA_FILES | tr ' ' ',')} to $BONA_VPS_SSH:bona-data/ (whichever exist)"
-  echo "  3. start bona-api on the VPS and wait for http://127.0.0.1:$BONA_VPS_PORT/health, compare lead counts, enable bona-repo-sync.timer"
+  echo "  2. copy $DATA_DIR/{$(echo $DATA_FILES | tr ' ' ',')} to $BONA_VPS_SSH:bona-data/ (whichever exist), compare lead counts"
+  echo "  3. start bona-api on the VPS and wait for http://127.0.0.1:$BONA_VPS_PORT/health, enable bona-repo-sync.timer"
   echo "  4. start cloudflared-bona on the VPS and wait for $BONA_PUBLIC_HEALTH"
   echo "  5. disable bona-api and cloudflared-bona on this PC (rollback.sh re-enables them)"
   ok "nothing done"
@@ -32,11 +33,12 @@ fi
 
 need ssh; need scp; need curl; need systemctl
 [ -x "$PC_NODE" ] || die "node not found on the PC (set PC_NODE)"
+"$PC_NODE" -e 'require("node:sqlite")' >/dev/null 2>&1 || die "PC node lacks node:sqlite (set PC_NODE)"
 vps() { ssh -o BatchMode=yes -o ConnectTimeout=20 "$BONA_VPS_SSH" "$@"; }
 
 say "Preflight"
 vps true || die "cannot ssh to $BONA_VPS_SSH"
-vps "bash $BONA_VPS_REPO/services/deploy/vps/install-vps.sh --check" || die "VPS is not ready (install-vps.sh --check failed)"
+vps "bash $BONA_VPS_DEPLOY_DIR/install-vps.sh --check" || die "VPS is not ready (install-vps.sh --check failed)"
 for u in bona-api cloudflared-bona; do
   if vps "systemctl --user is-active --quiet $u"; then die "$u is ALREADY running on the VPS — refusing to start a second copy"; fi
 done
@@ -75,16 +77,17 @@ for f in $DATA_FILES; do [ -f "$DATA_DIR/$f" ] && files+=("$DATA_DIR/$f"); done
 vps "install -d -m 700 ~/bona-data"
 scp -q -p "${files[@]}" "$BONA_VPS_SSH:bona-data/"
 vps "chmod 600 ~/bona-data/*"
-ok "copied ${#files[@]} files (PC leads: $pc_leads)"
+# Copy-integrity check, taken before the VPS API (and its poller) can open the database.
+vps_leads=$(vps "$REMOTE_NODE -e 'const {DatabaseSync}=require(\"node:sqlite\");const db=new DatabaseSync(process.argv[1],{readOnly:true});console.log(db.prepare(\"select count(*) as n from leads\").get().n)' ~/bona-data/bona.db")
+[ "$vps_leads" = "$pc_leads" ] || die "lead count mismatch: PC $pc_leads vs VPS $vps_leads"
+ok "copied ${#files[@]} files, $vps_leads leads carried over"
 
 say "3/5 Start bona-api on the VPS"
 VPS_STARTED=1
 vps "systemctl --user enable --now bona-api"
 wait_for 30 1 vps "curl -fsS http://127.0.0.1:$BONA_VPS_PORT/health | grep -q '\"ok\":true'" || { vps "journalctl --user -u bona-api -n 30 --no-pager" || true; die "VPS bona-api is not healthy"; }
-vps_leads=$(vps "$REMOTE_NODE -e 'const {DatabaseSync}=require(\"node:sqlite\");const db=new DatabaseSync(process.argv[1],{readOnly:true});console.log(db.prepare(\"select count(*) as n from leads\").get().n)' ~/bona-data/bona.db")
-[ "$vps_leads" = "$pc_leads" ] || die "lead count mismatch: PC $pc_leads vs VPS $vps_leads"
 vps "systemctl --user enable --now bona-repo-sync.timer"
-ok "healthy, $vps_leads leads carried over; bona-repo-sync.timer enabled"
+ok "healthy; bona-repo-sync.timer enabled"
 
 say "4/5 Start the tunnel connector on the VPS"
 vps "systemctl --user enable --now cloudflared-bona"
