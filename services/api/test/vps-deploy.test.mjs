@@ -270,6 +270,17 @@ test('cutover.sh: preflight finds bona-api already active on the VPS — refused
   assertOrdered(r.lines, CALL.vpsCheck, CALL.vpsApiActive);
 });
 
+test('cutover.sh: preflight finds legacy user units or processes on the VPS — refused, PC not stopped, VPS not disabled', () => {
+  const r = runShimmed('cutover.sh', [], { SHIM_LEGACY_PRESENT: '1' });
+  untouchedAfterPreflight(r);
+  assert.match(r.out, /legacy user units or processes/);
+  const probe = r.lines.find((l) => /^ssh .*! ls ~\/\.config\/systemd\/user\/bona-api\.service/.test(l));
+  assert.ok(probe, r.lines.join('\n'));
+  // the process probes are anchored to the binary, so the remote shell carrying the pattern never matches itself
+  assert.match(probe, /pgrep -u \$\(id -un\) -f '\^\[\^ \]\*\/node \/opt\/bona\/services\/api\/index\[\.\]mjs'/);
+  assert.match(probe, /pgrep -u \$\(id -un\) -f '\^\[\^ \]\*\/cloudflared \.\*tunnel run 9022fbec-de4f-44b9-805e-8fff285d6263'/);
+});
+
 test('cutover.sh: preflight install-vps.sh --check fails on the VPS — refused, PC not stopped, VPS not disabled', () => {
   const r = runShimmed('cutover.sh', [], { SHIM_CHECK_FAIL: '1' });
   untouchedAfterPreflight(r);
@@ -541,7 +552,10 @@ test('install-vps.sh install mode never enables, starts or restarts a unit', () 
   // The only user-manager calls left are the retire step for the first attempt's user units:
   // `disable --now` (stop what may still be flapping) and a daemon-reload once the files are gone.
   const userCalls = [...new Set(src.match(/systemctl --user [a-z-]+/g) || [])].sort();
-  assert.deepEqual(userCalls, ['systemctl --user daemon-reload', 'systemctl --user disable']);
+  assert.deepEqual(userCalls, ['systemctl --user daemon-reload', 'systemctl --user disable', 'systemctl --user is-active']);
+  // …and a unit file is only deleted once the unit is verified inactive (a fileless running unit would be invisible)
+  assert.match(src, /systemctl --user is-active --quiet "\$u"[^\n]*\n[^\n]*rm -f "\$LEGACY_USER_UNIT_DIR\/\$u"/);
+  assert.match(src, /\[ "\$\(id -u\)" != 0 \] \|\| die/, 'refuses to run as root');
   assert.match(src, /systemctl --user disable --now "\$u"/);
   // and the system units land in BONA_UNIT_DIR through sudo -n when the service user cannot write there
   assert.match(src, /sudo -n install -m 644 "\$tmp\/\$u" "\$BONA_UNIT_DIR\/\$u"/);
