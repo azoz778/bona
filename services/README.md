@@ -53,9 +53,10 @@ arrives in its own workstream.
 
 ## 2. HTTP contract
 
-Every response is `Content-Type: application/json` and `Cache-Control: no-store`.
-Browser-facing routes are CORS-allowlisted; Retell-facing routes are token-gated and
-deliberately **not** CORS-readable.
+Every response is `Cache-Control: no-store`, and every response but the dashboard's own
+pages is `Content-Type: application/json`. Browser-facing routes are CORS-allowlisted;
+Retell-facing routes are token-gated and deliberately **not** CORS-readable, and neither
+are the dashboard and its admin JSON.
 
 One thing happens before any of that. A request whose `Host` is a legacy site host —
 `bona.azoz.uk`, left stranded because GitHub Pages serves only one
@@ -75,7 +76,8 @@ DNS points at this API's tunnel for exactly that reason; see `BONA_LEGACY_HOSTS`
 | `POST /v1/retell/webhook?token=` | Retell agent events → `calls.jsonl` / `chats.jsonl` |
 | `POST /v1/events` | one first-party event (`text/plain` or JSON, ≤ 8 KB) → `204`, or `400 { error:"bad_event", reason }` |
 | `POST /v1/enquiry` | `{ form, name, phone, … }` from the site's forms → `{ lead_id }` |
-| `GET /dashboard/*`, `/v1/admin/*` | *coming* — the owner dashboard (cookie login by WhatsApp code) and its JSON |
+| `GET /dashboard/*` | the owner's private dashboard — HTML, `bona_dash` cookie login by WhatsApp code (§10) |
+| `GET`/`POST` `/v1/admin/*` | the same data as JSON and every write, behind the same cookie (§10) |
 
 `page` is `{ url, title }` and becomes the dynamic variables `{{page_url}}` and
 `{{page_title}}`; `locale` becomes `{{locale}}`. `attr` is the optional
@@ -324,7 +326,7 @@ never logged. `process.env` always wins over a file.
 | `BONA_OWNER_JID` | `966593296933@s.whatsapp.net` | where the notes go, and the one chat the poller never reads |
 | `BONA_FANOUT_MS` | `20000` | fan-out worker interval (Meta CAPI, GA4 MP, Snap CAPI) |
 | `BONA_DB_FILE` | `${BONA_DATA}/bona.db` | the SQLite lead store (0600); set only to move it |
-| `BONA_DASH_COOKIE_DAYS` | `30` | how long a dashboard login lasts |
+| `BONA_DASH_COOKIE_DAYS` | `30` | how long a dashboard login lasts (the `bona_dash` cookie and its row in `auth_sessions`) |
 | `BONA_RATE_CHAT` / `BONA_RATE_TOKEN` | `30` / `6` | per IP per minute |
 | `BONA_RATE_TOOL` / `BONA_RATE_TOOL_AUTH_FAIL` | `600` / `10` | per IP per minute |
 | `BONA_MAX_CHATS_PER_DAY` / `BONA_MAX_CALLS_PER_DAY` | `300` / `60` | reset at midnight Asia/Riyadh |
@@ -332,7 +334,6 @@ never logged. `process.env` always wins over a file.
 | `BONA_RATE_EVENTS` / `BONA_RATE_ENQUIRY` | `240` / `6` | per IP per minute |
 | `BONA_FANOUT_MS` | `20000` | ad-platform fan-out worker interval; `0` turns the worker off |
 | `BONA_FANOUT_REQUIRE_CONSENT` | `1` | fan out only for a session that accepted ads (PDPL) |
-| `BONA_DASH_COOKIE_DAYS` | `30` | dashboard login cookie life (its own workstream) |
 
 Inventory resolution order: `BONA_INVENTORY_FILE` → `$BONA_REPO/src/data/listings.json`
 → the checkout the service is running from. The file's mtime is checked with one cheap
@@ -438,7 +439,7 @@ BONA_RETELL_MOCK=1 node api/index.mjs      # no Retell traffic at all
 cd ~/bona/services && node --test api/test/*.test.mjs
 ```
 
-261 tests, no network and no Retell: search and Card formatting in EN and AR, price
+395 tests, no network, no Retell and no WhatsApp: search and Card formatting in EN and AR, price
 parsing ("4.5m", "٤ ملايين"), token buckets and the trusted-proxy rules for client IPs,
 the CORS allowlist and the origin refusal, tool authentication (header, bearer, and the
 auth-failure throttle), the navigation allowlist, lead de-duplication, the daily
@@ -449,8 +450,14 @@ normaliser, the SQLite store and its migrations, the Ref parser and source
 resolution, the event validator and intake, the lead model (create, merge by phone
 or jid, touchpoints, stages, fan-out), the enquiry route and the text/plain media type
 the form actually posts, the fan-out worker (credentials absent, consent absent,
-payload shape, hashing, delivery, backoff and giving up), the Retell metadata
-plumbing, and the one-time JSONL import.
+payload shape, hashing, delivery, backoff and giving up, and the stage-move mapping),
+the Retell metadata plumbing, the one-time JSONL import, and the dashboard: the login
+code's whole life (hashes only, all three rate limits, five wrong guesses, expiry,
+cookie flags, and a stranger failing to burn the code the owner is holding), every
+statistic over a seeded store, and every route through the real HTTP server — the
+redirect when logged out, the login round trip with the code read back out of the
+mocked WhatsApp message, the write gates, and a lead named `<script>` rendering as
+text.
 
 ---
 
@@ -580,24 +587,88 @@ checks each one and updates the site's Integrations board.
 
 ### Dashboard
 
-`https://bona-api.azoz.uk/dashboard` — server-rendered HTML from this process, no CDN,
-`Cache-Control: no-store`, CSP `default-src 'self'`, `X-Frame-Options: DENY`.
+`https://bona-api.azoz.uk/dashboard` — the owner's private view of everything above,
+server-rendered by this same process. No CDN, no framework and **no JavaScript at all**:
+every page is HTML with one embedded stylesheet, every chart is inline SVG, every filter
+is a GET and every write is a form post. That is what lets the response headers be as
+tight as they are, on every dashboard and admin answer, HTML or JSON:
 
-Login: `GET /dashboard/login` → `POST /dashboard/login/code` sends a 6-digit code to the
-owner's WhatsApp (`BONA_OWNER_JID`; only `sha256(code)` is stored, 10-min expiry, 3 codes per
-10 min per IP, 1 per minute globally) → `POST /dashboard/login/verify` (5 attempts per code)
-sets the `bona_dash` cookie (HttpOnly, Secure, SameSite=Lax, `BONA_DASH_COOKIE_DAYS`, token
-hashed at rest) → `/dashboard/logout`. Every other `/dashboard/*` route 302s to the login
-without a valid cookie.
+```
+Cache-Control: no-store
+Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'
+X-Frame-Options: DENY
+Referrer-Policy: no-referrer
+X-Content-Type-Options: nosniff
+```
 
-Routes (being built in the dashboard workstream; shapes in the spec §4.5 and plan C7):
+Nothing here is CORS-enabled, so no other origin can read a byte of it.
+
+**Login.** `GET /dashboard/login` → `POST /dashboard/login/code` sends a 6-digit code to
+the owner's WhatsApp (`BONA_OWNER_JID`, via the same Evolution instance as the lead
+notes). Only `sha256(code)` is stored, for 10 minutes; three codes per 10 minutes per IP,
+and one a minute plus sixty a day across the whole service — asked of all three buckets
+before any is charged, so a refusal from one never spends a token in another. The code
+appears in exactly one place, the message itself — never in a log line or a response.
+
+The same request also sets a short-lived `bona_dash_try` nonce cookie, and the code is
+remembered in memory beside it. This is what stops the login from being a lockout: a
+wrong guess burns an attempt, five burn the code, and only the browser holding that
+nonce can spend them. A stranger POSTing guesses has no nonce, so the store never hears
+about it and the code the owner is holding survives. (The binding is in memory, so a
+service restart voids a code in flight — ask for another.)
+
+`POST /dashboard/login/verify` (form-encoded, 5 wrong attempts burn the code) sets
+`bona_dash`: `HttpOnly; Secure; SameSite=Lax; Path=/;
+Max-Age=BONA_DASH_COOKIE_DAYS`, with only the token's hash in `auth_sessions`.
+`POST /dashboard/logout` (the nav button; `_dash=1`, same-origin) deletes the session
+server-side and clears the cookie — a GET there only offers the button, because
+`SameSite=Lax` sends the cookie on a top-level navigation and a link on any page would
+otherwise end the session. Every other `/dashboard/*` route 302s to the login without a
+valid cookie; every `/v1/admin/*` route answers 401.
+
+**Writes** — including the logout — carry a marker: `X-Bona-Dash: 1` on a JSON call, a
+hidden `_dash=1` field on a form. What actually stops a cross-site write is
+`SameSite=Lax` (the cookie does not ride one) plus the `Origin`/`Referer` check; the
+header half of the marker is a real barrier on top of that, the form field is not a CSRF
+token and is not pretending to be one. A stage change also writes a `lead_stage` event and enqueues the fan-out
+(`qualified` → GA4 `qualify_lead`; `viewing`/`offer`/`negotiation` → GA4 `working_lead`
+plus Meta `Schedule` for a viewing; `won` → Meta `Purchase` with the value, GA4
+`close_convert_lead`, Snap `PURCHASE`; `lost` → GA4 `close_unconvert_lead`; anything else
+is recorded and not sent).
+
+Phone numbers are masked to `…6933` in every list — pages and JSON alike — and whole only
+on `GET /dashboard/leads/:id` and `GET /v1/admin/leads/:id`.
 
 | Route | What |
 |---|---|
-| `GET /dashboard` | Overview — 14-day strip, sources → leads (first- vs last-touch), match quality, CPL |
-| `GET /dashboard/leads`, `/dashboard/leads/:id` | pipeline board, lead journey, stage + note forms |
-| `GET /dashboard/listings` | per-listing funnel + REGA flags (`no_ad_licence`, `expiring_30d`, `expired`, `wafi_missing`) |
-| `GET /dashboard/spend` | manual spend entry / CSV import |
-| `GET /dashboard/integrations` | key presence, Evolution, Retell, poller, fan-out, last accepted per platform |
-| `GET /v1/admin/stats`, `/v1/admin/leads[/:id]`, `/v1/admin/listings` | JSON behind the cookie + `X-Bona-Dash: 1` + same-origin |
-| `POST /v1/admin/leads/:id/stage`, `/note`, `/v1/admin/spend` | writes; a stage change also enqueues the fan-out |
+| `GET /dashboard` | Overview — a 14-day strip (sessions, WA clicks, leads, viewings) as inline SVG, `?days=` 1–90. Everything below the strip — sources with first-touch and last-touch columns side by side, match quality, first-reply median and p90 — is **all time**, and the page says so |
+| `GET /dashboard/leads` | pipeline board (one column per stage: name, masked phone, source, listing, age, response) and a list below with `?stage=&q=` |
+| `GET /dashboard/leads/:id` | the whole record, the journey (events + touchpoints + stage moves + notes, oldest first), the stage form and the note form |
+| `GET /dashboard/listings` | per-listing funnel (views → gallery/tour/brochure → WA clicks → leads) and REGA flags: `no_ad_licence`, `expiring_30d`, `expired`, `wafi_missing` (off-plan) |
+| `GET /dashboard/spend` | spend entry form, cost per lead per campaign, and the last 90 days of entries |
+| `GET /dashboard/integrations` | which keys are present (booleans only, never a value), fan-out counts and last accepted event per destination, poller status when one is running, Retell, and the owner checklists |
+| `GET /v1/admin/stats?days=14` | the whole bundle: `daily`, `sources`, `match_quality`, `pipeline`, `response_times`, `cpl_by_campaign`, `totals` |
+| `GET /v1/admin/leads?stage=&q=&limit=100` | `{count, total, leads}` — phones masked |
+| `GET /v1/admin/leads/:id` | `{lead, journey, stage_history, touchpoints}` — phone in full |
+| `GET /v1/admin/listings` | the same funnel rows as the Listings page |
+| `POST /v1/admin/leads/:id/stage` | `{stage, value_sar?, note?}` → stage, history row, `lead_stage` event, fan-out |
+| `POST /v1/admin/leads/:id/note` | `{note}` → a `note` touchpoint and an appended line on the lead |
+| `POST /v1/admin/spend` | `{day, platform, campaign_id, campaign_name, spend_sar, clicks?, impressions?}`, upserted on `(day, platform, campaign_id)` |
+
+Spend is matched to leads on **platform and campaign id together**, never the id alone —
+Meta and Snap can both run a campaign `1203`. The two vocabularies are folded by
+`PLATFORM_ALIASES` in `lib/dashboard/stats.mjs`, so "instagram" typed on the Spend page
+meets a lead that arrived with `utm_source=meta`. A platform name nothing recognises
+matches no spend rather than borrowing another platform's budget — and when that
+happens, the row carries `unmatched_leads` and the page says "unmatched — check the UTM
+source" instead of printing a zero that reads like a dud campaign.
+
+A form post answers `303` back to the page it came from; a JSON call answers JSON.
+
+**One thing rate limits cannot fix.** `POST /dashboard/login/code` has to be reachable by
+an unauthenticated owner, so it is reachable by everyone. The limits above bound what a
+flood costs — sixty WhatsApp messages a day rather than 1,440, and a drained ceiling
+delays the owner's next code by about 24 minutes rather than until tomorrow — but they
+cannot make the endpoint available to him and not to an attacker. If it is ever actually
+attacked, the answer is a rate rule or a Cloudflare Access policy in front of
+`/dashboard/login*` on the tunnel, not a smaller number in `lib/dashboard/auth.mjs`.
