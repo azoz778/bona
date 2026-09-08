@@ -14,8 +14,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { openDb } from '../lib/db.mjs';
 import {
-  CLICK_WINDOW_MS, FIRST_RUN_LOOKBACK_MS, OVERLAP_MS, SEEN_TTL_MS, adMetaOf, adSourceOf,
-  createPoller, isIgnorableChat, jidsOf,
+  CLICK_WINDOW_MS, FIRST_RUN_LOOKBACK_MS, MAX_WINDOW_MS, OVERLAP_MS, SEEN_TTL_MS, adMetaOf,
+  adSourceOf, createPoller, isIgnorableChat, jidsOf,
 } from '../lib/wa-poller.mjs';
 
 const NOW = Date.UTC(2026, 8, 6, 12, 0, 0);
@@ -242,6 +242,12 @@ test('(f) an unknown number minutes after a WhatsApp click is inferred from that
   assert.equal(lead.listing_id, 'BONA-W007');
   assert.equal(h.db.getEvent('ev-click-1').lead_id, lead.lead_id, 'the click is claimed, so a second message cannot reuse it');
   assert.match(h.sent[0], /Match: inferred \(time window\)/);
+
+  // The lead goes out to the ad platforms under its OWN event id: the click already
+  // reached them as `Contact` under `ev-click-1`, and Meta drops a duplicate id.
+  const created = h.db.recentEvents({ name: 'lead_created', limit: 5 })[0];
+  assert.equal(created.lead_id, lead.lead_id);
+  assert.deepEqual(h.db.dueFanout(NOW + 1000).map((r) => r.event_id), [created.event_id, created.event_id, created.event_id]);
   h.cleanup();
 });
 
@@ -380,8 +386,9 @@ test('(k) an Evolution failure logs and leaves the cursor exactly where it was',
   assert.deepEqual(h.db.waCursorGet(INSTANCE), before, 'nothing is lost: the window simply widens next time');
   const failure = h.logs.find((l) => l.evt === 'wa.poll.failed');
   assert.equal(failure.level, 'warn');
-  // The lag the outage produces is what /health publishes.
-  assert.equal(broken.status().lagS, 600 + 60);
+  // The lag the outage produces is what /health publishes: ten minutes with no tick that
+  // finished, while a quiet WhatsApp with a healthy loop would still read 0.
+  assert.equal(broken.status().lagS, 600);
   h.cleanup();
 });
 
@@ -419,6 +426,22 @@ test('the first window looks back ten minutes; every later one overlaps the curs
   assert.deepEqual(h.asked[1], { gte: NOW - 60_000 - OVERLAP_MS, lte: NOW + 45_000, instance: INSTANCE });
   const after = h.db.waCursorGet(INSTANCE);
   assert.equal(after.last_ts, NOW + 45_000, 'an empty window still moves the cursor to now');
+  h.cleanup();
+});
+
+test('a lone stale message can never freeze the cursor and widen the window for ever', async () => {
+  // The same old message comes back inside the overlap on every tick, so "the newest
+  // thing we saw" never moves. Half an hour of that must not turn into a half-hour query.
+  const stale = msg({ id: 'STALE', ts: NOW - 60_000, text: 'hi' });
+  const h = harness();
+  for (let i = 0; i < 40; i += 1) {
+    h.push([stale]);
+    h.setClock(NOW + i * 45_000);
+    await h.poller.tick(); // eslint-disable-line no-await-in-loop
+  }
+  const last = h.asked.at(-1);
+  assert.ok(last.lte - last.gte <= MAX_WINDOW_MS + OVERLAP_MS + 45_000, `window is ${(last.lte - last.gte) / 60_000} minutes`);
+  assert.equal(h.db.countLeads(), 0);
   h.cleanup();
 });
 
@@ -465,7 +488,7 @@ test('status() is what /health publishes', async () => {
   const after = h.poller.status();
   assert.equal(after.lastRun, NOW);
   assert.equal(after.lastTs, NOW - 60_000);
-  assert.equal(after.lagS, 90);
+  assert.equal(after.lagS, 30, 'the lag is the age of the last completed tick, not of the newest message');
   assert.equal(after.matched, 1);
   assert.equal(after.instance, INSTANCE);
   assert.equal(after.running, false, 'status says whether the loop is on a timer, and nothing started one');
