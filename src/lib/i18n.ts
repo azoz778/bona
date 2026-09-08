@@ -291,6 +291,13 @@ export const ui = {
   toursMetaDesc: s('Matterport 3D walkthroughs of villas, apartments and residences represented by Bona in Jeddah. Explore room by room before you visit.', 'جولات ماتربورت ثلاثية الأبعاد في فلل وشقق ومساكن تمثّلها بونا في جدة. استكشف غرفةً غرفة قبل الزيارة.'),
   toursEmpty: s('No virtual tours are available at the moment. New scans are added regularly.', 'لا تتوفر جولات افتراضية حالياً. تُضاف جولات جديدة بانتظام.'),
 
+  // FAQ
+  navFaq: s('FAQ', 'أسئلة شائعة'),
+  faqMetaTitle: s('Buying property in Jeddah — frequently asked questions', 'شراء عقار في جدة — الأسئلة الشائعة'),
+  faqMetaDesc: s('Can non-Saudis buy in Jeddah, what RETT and brokerage fees apply, how viewings and Najiz transfers work — answered plainly by a REGA-licensed Jeddah brokerage.', 'هل يستطيع غير السعوديين الشراء في جدة، وما ضريبة التصرفات العقارية وأتعاب الوساطة، وكيف تتم المعاينة والإفراغ عبر ناجز — إجابات مباشرة من وساطة مرخّصة في جدة.'),
+  faqStillAsking: s('Still deciding?', 'ما زلت تفاضل؟'),
+  faqStillAskingBody: s('If your question is about one particular home — its zone status, its deed, its payment schedule — send us the reference on WhatsApp and you will get an answer about that home, not a general one.', 'إن كان سؤالك عن منزل بعينه — وضعه النظامي، أو صكّه، أو جدول دفعاته — فأرسل لنا رقمه على واتساب لتصلك إجابة عن ذلك المنزل تحديداً، لا إجابة عامة.'),
+
   // Privacy
   privacyMetaDesc: s('How Bona handles the personal information you share with us, on this site and on WhatsApp.', 'كيف تتعامل بونا مع المعلومات الشخصية التي تشاركها معنا، على هذا الموقع وعبر واتساب.'),
   lastUpdated: s('Last updated', 'آخر تحديث'),

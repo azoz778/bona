@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LISTINGS } from './listings.source.mjs';
 import { ROOMS } from './rooms.mjs';
-import { INTAKE_ID_RE, isPublishable, WITHHELD_LISTINGS } from './rules.mjs';
+import { INTAKE_ID_RE, isLandPublic, isPublishable, LAND_PRICE_CAP, sarAmount, WITHHELD_LISTINGS } from './rules.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const GALLERY = path.join(ROOT, 'scripts', 'tk-gallery-data.json');
@@ -96,13 +96,10 @@ for (const l of out) {
 const API = JSON.parse(fs.readFileSync(new URL('../tk-public-properties.snapshot.json', import.meta.url), 'utf8')).data || [];
 const apiById = new Map(API.map((r) => [String(r.id), r]));
 // Owner decision 2026-09-06 (revises the 2026-09-05 21:00 blanket hold): land plots are published on
-// the site when priced under SAR 50,000,000. Plots at or above that price stay off-market — their
-// exact locations are gated in TK's land register — and are excluded entirely (no listings.json entry,
-// so no sitemap/OG/card can leak them); the Land page instead carries a CTA inviting enquiries about
-// off-market inventory. The comparison is on price.amount (already the SAR figure for every land plot
-// today) so it isn't hardcoded to SAR and won't silently misfire if a non-SAR land listing shows up later.
-const LAND_PRICE_CAP = 50_000_000;
-const isLandPublic = (l) => l.kind !== 'land' || (typeof l.price?.amount === 'number' && l.price.amount < LAND_PRICE_CAP);
+// the site when priced under SAR 50,000,000; plots at or above stay off-market and are excluded
+// entirely (no listings.json entry, so no sitemap/OG/card can leak them) — the Land page carries a CTA
+// instead. The rule itself is isLandPublic() in rules.mjs, shared with sync-listings.mjs and
+// validate.mjs so the daily deploy cannot republish a plot whose price crossed the line.
 const live = out.filter((l) => l.sourceRef && apiById.has(String(l.sourceRef)) && !/sold|reserved|rented|inactive|withdrawn/i.test(String(apiById.get(String(l.sourceRef)).status || '')) && isLandPublic(l));
 console.log(`TK live list: kept ${live.length}, dropped ${out.length - live.length} (no sourceRef in the API, or not available there)`);
 
@@ -157,10 +154,19 @@ if (fs.existsSync(INBOX)) {
 }
 if (inbox.length || inboxHidden) console.log(`WhatsApp intake: appended ${inbox.length} listing(s), ${inboxHidden} hidden`);
 
-// Listings the owner has withheld (scripts/curate/rules.mjs). Applied to curated AND intake
-// listings alike (a brochure the owner sends is no different from TK stock here), and to the
-// COMBINED set so a listing can never slip in by route.
-const withheld = [...live, ...inbox].filter((l) => !isPublishable(l));
+// Two rules decide what reaches the public site, both applied to the COMBINED curated +
+// intake set so a listing can never slip in by route (the land rule filtered only the
+// curated set until the Codex final gate of 2026-09-08 caught the intake path):
+//   land     — at or above SAR 50,000,000, or with no published price (isLandPublic).
+//   withheld — specific homes the owner has named (scripts/curate/rules.mjs). This replaced
+//              a SAR 10,000,000 house cap on 2026-09-08: the owner meant to take two homes
+//              down once, not to hide every expensive house a luxury brand publishes.
+const candidates = [...live, ...inbox];
+const overLandCap = candidates.filter((l) => !isLandPublic(l));
+if (overLandCap.length) {
+  console.log(`Land cap: excluded ${overLandCap.length} plot(s) at/above SAR ${LAND_PRICE_CAP.toLocaleString('en-US')} or without a published price — ${overLandCap.map((l) => `${l.id ?? l.slug} (${sarAmount(l.price) === null ? 'no price' : `${Math.round(sarAmount(l.price)).toLocaleString('en-US')} SAR eq.`})`).join(', ')}`);
+}
+const withheld = candidates.filter((l) => !isPublishable(l));
 if (withheld.length) {
   console.log(`Withheld by owner decision: ${withheld.map((l) => l.id).join(', ')}`);
 }
@@ -176,12 +182,12 @@ if (leaking.length) {
 // An id in the list that matches nothing is a decision quietly doing nothing — say so, so a
 // renamed or delisted listing does not leave a stale entry that hides a future namesake.
 // Compare against every id we KNOW OF, not the publish candidates: `live` has already lost
-// everything the TK list and the land cap dropped, and `inbox` has lost the hidden ones, so
-// judging staleness against those would call a deliberate hold "no longer exists".
+// everything the TK list dropped, and `inbox` has lost the hidden ones, so judging staleness
+// against those would call a deliberate hold "no longer exists".
 const known = new Set([...out.map((l) => l.id), ...inboxIdsSeen]);
 const stale = [...WITHHELD_LISTINGS].filter((id) => !known.has(id));
 if (stale.length) console.warn(`Withheld list mentions ${stale.join(', ')}, which no longer exist — prune scripts/curate/rules.mjs`);
-const published = [...live, ...inbox].filter(isPublishable);
+const published = candidates.filter((l) => isPublishable(l) && isLandPublic(l));
 
 // ---- approximate map pins --------------------------------------------------------------
 // Most listings have no exact pin: TK's API carries no coordinates and most brochures carry

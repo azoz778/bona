@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isPublishable } from './curate/rules.mjs';
+import { isLandPublic, isPublishable, LAND_PRICE_CAP, sarAmount } from './curate/rules.mjs';
 
 const API = process.env.TK_PUBLIC_API || 'https://dashboard.azoz.uk/api/public/properties';
 const TIMEOUT_MS = 10_000;
@@ -106,13 +106,20 @@ async function main() {
     }
   }
 
-  // Owner decision 2026-09-08: named listings are withheld from the public site. The daily
-  // deploy runs this script and then builds WITHOUT re-running scripts/curate/build.mjs, so
-  // without this a sync could quietly reinstate a withheld home. Drop it here too.
-  const withheld = listings.filter((l) => !isPublishable(l));
-  if (withheld.length) {
-    for (const l of withheld) {
-      changes.push(`${l.id} REMOVED — withheld from the public site by owner decision`);
+  // Two rules, both enforced here as well as in build.mjs: land at or above SAR 50,000,000
+  // (2026-09-06) stays off the public site, and homes the owner has named are withheld
+  // (2026-09-08, replacing a blanket house price cap). A price rise from TK can push a plot
+  // over its cap, and the daily deploy runs this script and then builds WITHOUT re-running
+  // scripts/curate/build.mjs — so without this, a sync would quietly republish what the rule
+  // exists to hide. (Codex review 2026-09-08: land was missing.)
+  const overCap = listings.filter((l) => !isPublishable(l) || !isLandPublic(l));
+  if (overCap.length) {
+    for (const l of overCap) {
+      const sar = sarAmount(l.price);
+      const which = !isPublishable(l)
+        ? 'withheld from the public site by owner decision'
+        : `land at/above the SAR ${LAND_PRICE_CAP.toLocaleString('en-US')} cap (${sar === null ? 'no published price' : `${Math.round(sar).toLocaleString('en-US')} SAR eq.`})`;
+      changes.push(`${l.id} REMOVED — ${which}`);
     }
     const drop = new Set(withheld.map((l) => l.id));
     listings = listings.filter((l) => !drop.has(l.id));

@@ -128,6 +128,29 @@ test('/health reports retell: "error" when Retell is unreachable, and still answ
   });
 });
 
+test('/health carries the WhatsApp poller when it is enabled, and the poller never decides ok', async () => {
+  await withServer({ config: { waPoll: true, waPollMs: 45_000 } }, async ({ call, app }) => {
+    const body = await (await call('/health')).json();
+    assert.equal(body.ok, true, 'a poller that is behind is an attribution gap, not an unhealthy site');
+    assert.equal(body.poller.instance, 'abdulaziz-personal');
+    assert.equal(body.poller.configured, false, 'no Evolution credentials in a test environment');
+    assert.equal(body.poller.running, false, 'createApp builds the poller; only the real server puts it on a timer');
+    assert.equal(body.poller.lastRun, null);
+    assert.equal(body.poller.lastTs, null);
+    assert.equal(body.poller.unmatched, 0);
+    assert.equal(app.poller.started, false);
+  });
+});
+
+test('with BONA_WA_POLL off there is no poller at all, and nothing reaches Evolution', async () => {
+  await withServer({ config: { waPoll: false } }, async ({ call, app }) => {
+    assert.equal(app.poller, null);
+    const body = await (await call('/health')).json();
+    assert.equal(body.ok, true);
+    assert.equal('poller' in body, false);
+  });
+});
+
 /* ---------------- chat ---------------- */
 
 test('POST /v1/chat/session opens a Retell chat and returns a greeting', async () => {

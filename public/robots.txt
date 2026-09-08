@@ -5,9 +5,67 @@ User-agent: *
 Allow: /
 Disallow: /dashboard/
 
-# AI search / answer engines are welcome to read and cite (Google-Extended, GPTBot, ClaudeBot, PerplexityBot, Bingbot).
-# Training-only crawlers stay out.
+# Answer engines are welcome to read and cite Bona. They are named explicitly rather than left to the
+# wildcard above because a crawler that finds its own user-agent obeys that group and ignores the
+# wildcard entirely — so an unrelated future edit to the group above cannot quietly cut Bona out of
+# AI answers.
+User-agent: Googlebot
+Allow: /
+Disallow: /dashboard/
+
+User-agent: Google-Extended
+Allow: /
+Disallow: /dashboard/
+
+User-agent: Bingbot
+Allow: /
+Disallow: /dashboard/
+
+User-agent: GPTBot
+Allow: /
+Disallow: /dashboard/
+
+User-agent: OAI-SearchBot
+Allow: /
+Disallow: /dashboard/
+
+User-agent: ChatGPT-User
+Allow: /
+Disallow: /dashboard/
+
+User-agent: PerplexityBot
+Allow: /
+Disallow: /dashboard/
+
+User-agent: Perplexity-User
+Allow: /
+Disallow: /dashboard/
+
+User-agent: ClaudeBot
+Allow: /
+Disallow: /dashboard/
+
+User-agent: Claude-User
+Allow: /
+Disallow: /dashboard/
+
+User-agent: Applebot
+Allow: /
+Disallow: /dashboard/
+
+User-agent: Applebot-Extended
+Allow: /
+Disallow: /dashboard/
+
+# Training-only crawlers that cite nothing and send no one stay out.
 User-agent: CCBot
 Disallow: /
 
+User-agent: Bytespider
+Disallow: /
+
 Sitemap: https://bona-real-estate.com/sitemap-index.xml
+
+# Plain-text summaries of this site for language models:
+#   https://bona-real-estate.com/llms.txt       — index of every page and listing
+#   https://bona-real-estate.com/llms-full.txt  — the full text of the portfolio

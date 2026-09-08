@@ -1,0 +1,218 @@
+{
+  "updated": "2026-09-08",
+  "title": { "en": "Buying and selling property in Jeddah — questions we are asked", "ar": "أسئلة تُطرح علينا عن شراء وبيع العقار في جدة" },
+  "intro": {
+    "en": "Plain answers to the questions buyers and owners actually ask us, with the official source named wherever a rule or a figure comes from one. Where an answer depends on a specific property or a specific buyer, we say so rather than guess — send us the details on WhatsApp and we will check it for you.",
+    "ar": "إجابات مباشرة عن الأسئلة التي يطرحها علينا المشترون والمُلّاك فعلياً، مع ذكر المصدر الرسمي كلما استندت قاعدة أو رقم إلى جهة رسمية. وحين تتوقف الإجابة على عقار بعينه أو مشترٍ بعينه، نقول ذلك بدل التخمين — أرسل لنا التفاصيل على واتساب وسنتحقق منها لك."
+  },
+  "items": [
+    {
+      "id": "non-saudi-ownership",
+      "q": {
+        "en": "Can a non-Saudi buy property in Jeddah?",
+        "ar": "هل يستطيع غير السعودي شراء عقار في جدة؟"
+      },
+      "a": {
+        "en": [
+          "Yes, within designated geographic zones. The Law of Real Estate Ownership by Non-Saudis entered into force on 22 January 2026, and Jeddah is one of the cities it covers. Ownership is permitted inside zones approved by the Council of Ministers, not everywhere in the city.",
+          "Whether one particular home qualifies depends on where its title deed sits on the official zone map, so the honest answer for any specific property is \"let us check the deed\". REGA runs the official platform for this at saudiproperties.rega.gov.sa, and the zone map is the only authority that matters — press coverage and agent summaries, including this page, are not.",
+          "Makkah and Madinah are treated differently from the rest of the Kingdom and carry their own restrictions on who may own there. Send us the listing reference on WhatsApp and we will confirm the zone status before you spend time on a viewing."
+        ],
+        "ar": [
+          "نعم، ضمن نطاقات جغرافية محددة. دخل نظام تملّك غير السعوديين للعقار حيّز التنفيذ في 22 يناير 2026، وجدة من المدن التي يشملها. والتملّك مسموح داخل النطاقات المعتمدة بقرار من مجلس الوزراء، لا في كل أنحاء المدينة.",
+          "أما إن كان منزل بعينه مؤهلاً فيتوقف على موقع صكّه من خريطة النطاقات الرسمية، ولذلك فالإجابة الصادقة عن أي عقار محدد هي: دعنا نتحقق من الصك. وتُشغّل الهيئة العامة للعقار المنصة الرسمية لذلك على saudiproperties.rega.gov.sa، وخريطة النطاقات هي المرجع الوحيد المعتبر — لا التغطيات الصحفية ولا ملخصات الوسطاء، وهذه الصفحة منها.",
+          "وتُعامَل مكة المكرمة والمدينة المنورة معاملة مختلفة عن بقية المملكة، وعليهما قيود خاصة بمن يحق له التملّك فيهما. أرسل لنا رقم العقار على واتساب وسنؤكد وضعه النظامي قبل أن تصرف وقتاً في المعاينة."
+        ]
+      }
+    },
+    {
+      "id": "licence",
+      "q": {
+        "en": "Is Bona a licensed brokerage?",
+        "ar": "هل بونا وساطة مرخّصة؟"
+      },
+      "a": {
+        "en": [
+          "Yes. Bona holds REGA brokerage licence (FAL) number 1100313556 and is based in Al Rawdah District, Jeddah. You can verify any Saudi brokerage licence yourself on the Real Estate General Authority's register at rega.gov.sa.",
+          "Separately from the brokerage licence, every real-estate advertisement in Saudi Arabia must carry its own advertising licence number tied to the property's deed and to the broker. If you see a listing anywhere without one, that is a reason to ask questions before you go further."
+        ],
+        "ar": [
+          "نعم. تحمل بونا رخصة الوساطة العقارية (فال) رقم 1100313556 الصادرة عن الهيئة العامة للعقار، ومقرّها حي الروضة بجدة. ويمكنك التحقق من أي رخصة وساطة سعودية بنفسك عبر سجل الهيئة العامة للعقار على rega.gov.sa.",
+          "وبمعزل عن رخصة الوساطة، يجب أن يحمل كل إعلان عقاري في المملكة رقم ترخيص إعلاني خاصاً به مرتبطاً بصك العقار وبالوسيط. وإن رأيت إعلاناً في أي مكان بلا رقم ترخيص، فذلك سبب كافٍ للسؤال قبل المضي قدماً."
+        ]
+      }
+    },
+    {
+      "id": "costs",
+      "q": {
+        "en": "What does it cost to buy a home in Saudi Arabia, beyond the price?",
+        "ar": "ما تكاليف شراء منزل في السعودية إضافة إلى الثمن؟"
+      },
+      "a": {
+        "en": [
+          "The main statutory cost is the Real Estate Transaction Tax (RETT), charged at 5% of the transaction value. Its law took effect on 10 April 2025 and it is administered by ZATCA. In most sales the seller bears it, though the parties can agree otherwise in the contract — so treat who pays as a term to be negotiated and written down, not an assumption.",
+          "Brokerage commission is separate, is agreed in writing in the brokerage contract before any work begins, and is subject to VAT. Deed transfer itself is done through the Ministry of Justice's Najiz platform.",
+          "We put every figure that applies to your specific purchase in writing before you commit. Nothing on this site should be read as a tax opinion — for a binding answer on RETT, ZATCA is the authority."
+        ],
+        "ar": [
+          "التكلفة النظامية الأساسية هي ضريبة التصرفات العقارية، وقدرها 5% من قيمة الصفقة. وقد سرى نظامها في 10 أبريل 2025 وتتولاه هيئة الزكاة والضريبة والجمارك. وفي معظم عمليات البيع يتحمّلها البائع، وإن جاز للطرفين الاتفاق على غير ذلك في العقد — فتعامل مع مسألة من يدفعها بوصفها شرطاً يُتفاوض عليه ويُكتب، لا افتراضاً.",
+          "أما عمولة الوساطة فمستقلة عن ذلك، ويُتفق عليها كتابةً في عقد الوساطة قبل بدء أي عمل، وتخضع لضريبة القيمة المضافة. ويتم إفراغ الصك عبر منصة ناجز التابعة لوزارة العدل.",
+          "ونضع كل رقم ينطبق على صفقتك تحديداً في مستند مكتوب قبل أن تلتزم. ولا ينبغي قراءة أي شيء في هذا الموقع بوصفه رأياً ضريبياً — فالمرجع الملزم في ضريبة التصرفات العقارية هو هيئة الزكاة والضريبة والجمارك."
+        ]
+      }
+    },
+    {
+      "id": "valuations",
+      "q": {
+        "en": "Will you tell me what my property is worth?",
+        "ar": "هل تخبرونني بقيمة عقاري؟"
+      },
+      "a": {
+        "en": [
+          "No, and no licensed broker should. Property valuation in Saudi Arabia is a separate regulated profession under TAQEEM, the Saudi Authority for Accredited Valuers. A brokerage is not a valuer.",
+          "What we will do is tell you what comparable homes in your district have actually been marketed and transacted at, introduce you to an accredited valuer when you need a formal valuation, and give you a candid view on where a home is likely to find its buyer. Every price shown on this site is the seller's asking price, never our estimate."
+        ],
+        "ar": [
+          "لا، ولا ينبغي لأي وسيط مرخّص أن يفعل. فتقييم العقار في المملكة مهنة منظّمة مستقلة تحت مظلة \"تقييم\"، الهيئة السعودية للمقيّمين المعتمدين. والوساطة ليست تقييماً.",
+          "لكننا نخبرك بما سُوّقت وتداولت به فعلاً منازل مماثلة في حيّك، ونحيلك إلى مقيّم معتمد حين تحتاج تقييماً رسمياً، ونعطيك رأياً صريحاً في المدى الذي يُرجّح أن يجد فيه المنزل مشتريه. وكل سعر معروض في هذا الموقع هو السعر المطلوب من البائع، وليس تقديراً منّا."
+        ]
+      }
+    },
+    {
+      "id": "districts",
+      "q": {
+        "en": "Which parts of Jeddah does Bona cover?",
+        "ar": "أي مناطق جدة تغطيها بونا؟"
+      },
+      "a": {
+        "en": [
+          "Our portfolio concentrates on Jeddah's established northern and waterfront districts: Al Shati, Al Khalidiyah, Al Rawdah, Al Salamah, Al Nahda, Al Nuzhah, Al Zahra, Al Basateen, Al Murjan, North Obhur and Durrat Al Arous.",
+          "We also represent homes in Riyadh, and an international portfolio in Dubai, Muscat, the Côte d'Azur and the Costa del Sol, sourced through partner brokerages."
+        ],
+        "ar": [
+          "تتركّز محفظتنا في أحياء جدة الشمالية والواجهة البحرية العريقة: الشاطئ، والخالدية، والروضة، والسلامة، والنهضة، والنزهة، والزهراء، والبساتين، والمرجان، وأبحر الشمالية، ودرة العروس.",
+          "كما نمثّل منازل في الرياض، ومحفظة دولية في دبي ومسقط والريفييرا الفرنسية وكوستا ديل سول، عبر شراكات مع مكاتب وساطة في تلك الأسواق."
+        ]
+      }
+    },
+    {
+      "id": "viewing",
+      "q": {
+        "en": "How does a viewing with Bona work?",
+        "ar": "كيف تتم المعاينة مع بونا؟"
+      },
+      "a": {
+        "en": [
+          "You send us the listing reference on WhatsApp, we confirm the home is still available and agree a time with the owner, and one of us meets you there — not a junior nobody has briefed. Viewings are by appointment, Sunday to Thursday, 10:00 to 19:00.",
+          "For homes with a 3D tour you can walk the whole property first and decide whether it is worth your afternoon. Several sellers on our books ask that their home is shown only to buyers whose position we already understand, so we may ask a few questions before confirming."
+        ],
+        "ar": [
+          "ترسل لنا رقم العقار على واتساب، فنؤكد أن المنزل ما يزال متاحاً ونتفق مع المالك على موعد، ثم يلقاك أحدنا هناك — لا موظف لم يُطلعه أحد على شيء. والمعاينة بموعد مسبق، من الأحد إلى الخميس، من 10:00 إلى 19:00.",
+          "وللمنازل التي لها جولة ثلاثية الأبعاد يمكنك أن تتجوّل فيها كاملة أولاً ثم تقرر إن كانت تستحق أن تُفرد لها بعد ظهرك. ويشترط عدد من البائعين لدينا ألّا يُعرض منزلهم إلا على مشترٍ نفهم وضعه سلفاً، ولذلك قد نسأل بضعة أسئلة قبل تأكيد الموعد."
+        ]
+      }
+    },
+    {
+      "id": "selling",
+      "q": {
+        "en": "How do I sell or let my home through Bona?",
+        "ar": "كيف أبيع منزلي أو أؤجّره عن طريق بونا؟"
+      },
+      "a": {
+        "en": [
+          "Send us the address and the deed details on WhatsApp. We visit, agree an asking price with you, sign a brokerage contract that states our fee in writing, obtain the advertising licence the property needs, and then market it — publicly, or quietly to a shortlist of buyers we already know, if you would rather the market not see it.",
+          "Discreet marketing is not a lesser service and it is the reason a number of our sellers come to us. Photography, floor plans and a 3D tour are arranged by us."
+        ],
+        "ar": [
+          "أرسل لنا العنوان وبيانات الصك على واتساب. نزور العقار، ونتفق معك على السعر المطلوب، ونوقّع عقد وساطة يبيّن أتعابنا كتابةً، ونستخرج الترخيص الإعلاني الذي يحتاجه العقار، ثم نسوّقه — علناً، أو بهدوء على قائمة قصيرة من مشترين نعرفهم سلفاً إن كنت تفضّل ألّا يراه السوق.",
+          "والتسويق المتحفّظ ليس خدمة أقل، وهو سبب لجوء عدد من بائعينا إلينا. ونتولّى نحن التصوير والمخططات والجولة ثلاثية الأبعاد."
+        ]
+      }
+    },
+    {
+      "id": "off-plan",
+      "q": {
+        "en": "Is buying off-plan in Saudi Arabia safe?",
+        "ar": "هل الشراء على الخارطة في السعودية آمن؟"
+      },
+      "a": {
+        "en": [
+          "Off-plan sales in Saudi Arabia are regulated under the Wafi programme, which licenses the project and requires buyer payments to go into a supervised escrow account tied to construction progress rather than straight to the developer.",
+          "So the first question about any off-plan home is whether the project is Wafi-licensed, and the second is what the payment schedule is tied to. We will show you the licence for any off-plan project we represent. If a project cannot produce one, that tells you what you need to know."
+        ],
+        "ar": [
+          "يخضع البيع على الخارطة في المملكة لبرنامج \"وافي\"، الذي يرخّص المشروع ويشترط أن تُودَع دفعات المشتري في حساب ضمان خاضع للإشراف ومرتبط بنسب الإنجاز، لا أن تذهب إلى المطوّر مباشرة.",
+          "ولذلك فالسؤال الأول عن أي وحدة على الخارطة هو: هل المشروع مرخّص من وافي؟ والثاني: بماذا يرتبط جدول الدفعات؟ ونحن نُطلعك على ترخيص أي مشروع على الخارطة نمثّله. وإن عجز مشروع عن إبراز ترخيصه، ففي ذلك جواب كافٍ."
+        ]
+      }
+    },
+    {
+      "id": "rent",
+      "q": {
+        "en": "How are rental contracts handled?",
+        "ar": "كيف تُوثّق عقود الإيجار؟"
+      },
+      "a": {
+        "en": [
+          "Residential and commercial leases in Saudi Arabia are registered on Ejar, the Ministry of Housing's network. A registered Ejar contract is what makes the tenancy enforceable and is what utilities, schools and visa processes will ask you for.",
+          "Every rental we arrange is documented on Ejar. If a landlord anywhere offers you a lease outside it, that is not a shortcut in your favour."
+        ],
+        "ar": [
+          "تُوثَّق عقود الإيجار السكني والتجاري في المملكة عبر شبكة \"إيجار\" التابعة لوزارة الشؤون البلدية والقروية والإسكان. والعقد الموثّق في إيجار هو ما يجعل العلاقة الإيجارية نافذة، وهو ما ستطلبه منك جهات الخدمات والمدارس ومعاملات الإقامة.",
+          "وكل عقد إيجار نرتّبه موثّق في إيجار. وإن عرض عليك مؤجّر في أي مكان عقداً خارجه، فليس ذلك اختصاراً في مصلحتك."
+        ]
+      }
+    },
+    {
+      "id": "remote",
+      "q": {
+        "en": "Can I buy from outside Saudi Arabia without travelling?",
+        "ar": "هل أستطيع الشراء من خارج السعودية دون سفر؟"
+      },
+      "a": {
+        "en": [
+          "Much of the process can be done remotely. You can tour a home in 3D, receive floor plans, deed details and the advertising licence by WhatsApp, and have us walk the property on a live video call, asking whatever you would ask in person.",
+          "Signing and deed transfer happen through the Ministry of Justice's Najiz platform, and what that requires of you depends on your nationality, residency and whether you are buying personally or through a company. Tell us your situation and we will set out the steps for it specifically."
+        ],
+        "ar": [
+          "يمكن إنجاز جزء كبير من العملية عن بُعد. فبإمكانك التجوّل في المنزل ثلاثي الأبعاد، وتصلك المخططات وبيانات الصك والترخيص الإعلاني عبر واتساب، ونتجوّل لك في العقار في مكالمة فيديو مباشرة تسأل خلالها ما كنت ستسأله لو كنت حاضراً.",
+          "أما التوقيع والإفراغ فيتمّان عبر منصة ناجز التابعة لوزارة العدل، وما يتطلّبه ذلك منك يختلف باختلاف جنسيتك وإقامتك وما إذا كنت تشتري بصفتك الشخصية أو عبر شركة. أخبرنا بوضعك ونضع لك الخطوات الخاصة به تحديداً."
+        ]
+      }
+    },
+    {
+      "id": "tours",
+      "q": {
+        "en": "Do your listings have virtual tours?",
+        "ar": "هل لعقاراتكم جولات افتراضية؟"
+      },
+      "a": {
+        "en": [
+          "Some do. Where a home has one, it is a Matterport 3D tour you can walk room by room on a phone or a laptop, and it is linked from that home's page and gathered on our tours page.",
+          "We add tours to homes as we photograph them, so a listing without one today may have one next month. Ask us for the reference and we will tell you what exists."
+        ],
+        "ar": [
+          "بعضها نعم. وحين يكون للمنزل جولة، فهي جولة ماتربورت ثلاثية الأبعاد تتنقّل فيها غرفةً غرفة من هاتفك أو حاسوبك، ومرتبطة من صفحة ذلك المنزل ومجموعة في صفحة الجولات لدينا.",
+          "ونضيف الجولات إلى المنازل تباعاً مع تصويرها، فقد يكون للعقار الذي لا جولة له اليوم جولةٌ الشهر القادم. اسألنا عن رقم العقار ونخبرك بالمتاح."
+        ]
+      }
+    },
+    {
+      "id": "contact",
+      "q": {
+        "en": "How do I reach Bona?",
+        "ar": "كيف أتواصل مع بونا؟"
+      },
+      "a": {
+        "en": [
+          "WhatsApp is fastest: +966 59 329 6933. We answer Sunday to Thursday, 10:00 to 19:00 Saudi time, in Arabic or English, and enquiries are handled by the principal rather than passed down a call centre.",
+          "Send the listing reference with your message and you will get a straight answer about that home rather than a brochure."
+        ],
+        "ar": [
+          "واتساب أسرع وسيلة: ‎+966 59 329 6933. نردّ من الأحد إلى الخميس، من 10:00 إلى 19:00 بتوقيت المملكة، بالعربية أو الإنجليزية، وتُدار الاستفسارات من الشريك المسؤول لا عبر مركز اتصال.",
+          "أرسل رقم العقار مع رسالتك لتحصل على إجابة مباشرة عن ذلك المنزل بدل أن تصلك نشرة تعريفية."
+        ]
+      }
+    }
+  ]
+}

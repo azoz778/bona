@@ -16,6 +16,8 @@
  *   POST /v1/retell/webhook?token= (Retell agent events)
  *   POST /v1/events                { v:1, event, event_id, … }  -> 204   (text/plain or JSON, ≤ 8 KB)
  *   POST /v1/enquiry               { form, name, phone, … }    -> { lead_id }
+ *   GET  /dashboard/*              the owner's private dashboard (WhatsApp code login)
+ *   *    /v1/admin/*               the same data as JSON, behind the same cookie
  *
  * Everything is JSON, `Cache-Control: no-store`, CORS-allowlisted, per-IP rate
  * limited, and bodies are capped at 16 KB (8 KB for events). The one exception is a
@@ -32,6 +34,7 @@ import { openDb, newId } from './lib/db.mjs';
 import { validateEvent, recordEvent, cleanAttrIds, MAX_BODY_BYTES as MAX_EVENT_BYTES } from './lib/events.mjs';
 import { validateEnquiry } from './lib/enquiry.mjs';
 import { createFanout } from './lib/fanout.mjs';
+import { createPoller } from './lib/wa-poller.mjs';
 import { importJsonl } from './lib/import-legacy.mjs';
 import { createBudget } from './lib/budget.mjs';
 import { createInventory } from './lib/inventory.mjs';
@@ -41,6 +44,7 @@ import { createToolHandlers, extractToken, tokenMatches, TOOL_NAMES } from './li
 import { extractActions } from './lib/actions.mjs';
 import { appendJsonl, createOrMergeLead, leadNote } from './lib/leads.mjs';
 import { sendText } from './lib/wa.mjs';
+import { createDashboardRoutes } from './lib/dashboard/routes.mjs';
 
 const GREETING = {
   en: "Hello, I'm Dana from Bona. How can I help you today?",
@@ -172,6 +176,9 @@ export function createApp(options = {}) {
   const fanout = options.fanout ?? createFanout({ db, cfg, log });
   const probeRetell = options.probeRetell ?? createHealthProbe(retell);
   const sendWhatsApp = options.sendWhatsApp ?? ((text) => sendText(text, { env: cfg.env }));
+  // The WhatsApp Ref-code poller. Read-only, and only when `BONA_WA_POLL` says so —
+  // constructing it contacts nothing; the real server (below) is what puts it on a timer.
+  const poller = options.poller ?? (cfg.waPoll ? createPoller({ db, cfg, sendWhatsApp, log }) : null);
   const tools = createToolHandlers({
     inventory, store, db, dataDir: cfg.dataDir, siteUrl: cfg.siteUrl, env: cfg.env, sendWhatsApp, log,
   });
@@ -198,6 +205,20 @@ export function createApp(options = {}) {
   const maxTurns = cfg.maxTurnsPerSession ?? 40;
 
   const startedAt = Date.now();
+
+  // Built before the routes so the dashboard can read what the process is running —
+  // notably `app.poller`, which another branch attaches — through one live reference
+  // rather than a second wiring step. `server` and `handle` are added at the end.
+  const app = {
+    cfg, inventory, store, db, retell, tools, limiters, fanout, budget,
+    poller: options.poller ?? null,
+  };
+
+  // The owner's dashboard. It owns its own auth (a WhatsApp one-time code), its own
+  // security headers and its own limiter; nothing about it is CORS-enabled.
+  const dashboard = options.dashboard ?? createDashboardRoutes({
+    db, cfg, inventory, fanout, app, log, sendWhatsApp, probeRetell,
+  });
 
   function dynamicVariables({ locale, page, sessionId }) {
     return {
@@ -271,6 +292,10 @@ export function createApp(options = {}) {
       // What the ad platforms have and have not been told. `pending` that never falls is
       // the symptom of a fan-out that is queued but not draining.
       fanout: { ...fanoutCounts(), dests: fanout.dests(), running: fanout.started },
+      // How far behind WhatsApp the poller is. Deliberately not part of `ok`: an Evolution
+      // outage must not take the concierge down with it — it is a gap in attribution, not
+      // a site that stopped answering.
+      ...(poller ? { poller: poller.status() } : {}),
       inventory: inventory.count(),
       budget: budget.counters(),
       mock: cfg.retellMock || undefined,
@@ -597,6 +622,11 @@ export function createApp(options = {}) {
 
     if (p === '/v1/events') return eventsRoute({ req, res, origin, cors, ip });
 
+    // The private dashboard and its admin JSON, ahead of the browser routes on purpose:
+    // they are authenticated by a cookie rather than by an origin, they answer HTML as
+    // well as JSON, and they must never be handed the site's CORS headers.
+    if (dashboard.owns(p)) return dashboard.handle({ req, res, url, p, ip });
+
     /* Browser-facing routes. */
     if (req.method !== 'POST' || !BROWSER_ROUTES.has(p)) return sendJson(res, 404, { error: 'not_found' }, cors);
 
@@ -704,9 +734,13 @@ export function createApp(options = {}) {
   server.requestTimeout = 60_000;
   // The store is owned by the app when the app opened it; a caller who injected one
   // (tests, tools) closes it themselves.
-  if (ownsDb) server.on('close', () => { fanout.stop(); db.close(); });
+  if (ownsDb) server.on('close', () => { fanout.stop(); poller?.stop(); db.close(); });
 
-  return { server, handle, cfg, inventory, store, db, retell, tools, limiters, fanout };
+  app.server = server;
+  app.handle = handle;
+  app.dashboard = dashboard;
+  app.poller = poller;
+  return app;
 }
 
 /* ------------------------------------------------------------------ */
@@ -727,6 +761,12 @@ if (isMain) {
   // destinations up the moment ~/.secrets/bona-marketing.env has them.
   const fanoutStarted = app.fanout.start();
   jsonLog('info', { evt: 'fanout.init', started: fanoutStarted, dests: app.fanout.dests(), everyMs: app.cfg.fanoutMs });
+  // The WhatsApp poller. `BONA_WA_POLL=0` turns it off; without Evolution credentials it
+  // starts and skips every tick rather than guessing a URL. It never sets a webhook.
+  if (app.poller) {
+    const pollStarted = app.poller.start({ intervalMs: app.cfg.waPollMs });
+    jsonLog('info', { evt: 'wa.poll.init', started: pollStarted, everyMs: app.cfg.waPollMs, ...app.poller.status() });
+  }
   app.server.listen(app.cfg.port, app.cfg.host, () => {
     jsonLog('info', { evt: 'listening', ...redacted(app.cfg) });
   });

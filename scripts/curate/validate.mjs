@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FORBIDDEN, HYPE, isPublishable, isLocalSrc, LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, videoEntryProblems } from './rules.mjs';
+import { FORBIDDEN, HYPE, isLandPublic, isLocalSrc, isPublishable, LAND_PRICE_CAP, licenceProblems, LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, sarAmount, videoEntryProblems } from './rules.mjs';
 
 function matterportIdOf(value) {
   if (typeof value !== 'string') return null;
@@ -179,19 +179,9 @@ for (const l of data) {
   if (isLand && l.map && l.mapPrecision !== 'exact') err(id, 'land listings need an exact plot pin, never a district centroid');
   // REGA advertising compliance (optional; shape only — whether a licence is actually required is the owner's call).
   // { adNumber, adExpiry (YYYY-MM-DD), wafiNumber, escrowAccount }, each a short string or null.
-  if (!(l.licence === null || l.licence === undefined)) {
-    const lc = l.licence;
-    if (!lc || typeof lc !== 'object' || Array.isArray(lc)) err(id, 'licence must be null or { adNumber, adExpiry, wafiNumber, escrowAccount }');
-    else {
-      for (const k of Object.keys(lc)) if (!['adNumber', 'adExpiry', 'wafiNumber', 'escrowAccount'].includes(k)) err(id, `licence has an unknown field "${k}"`);
-      for (const k of ['adNumber', 'adExpiry', 'wafiNumber', 'escrowAccount']) {
-        const v = lc[k];
-        if (!(v === null || v === undefined || (typeof v === 'string' && v.trim().length > 0 && v.length <= 64))) err(id, `licence.${k} must be null or a non-empty string of at most 64 characters`);
-      }
-      if (typeof lc.adExpiry === 'string' && (!/^\d{4}-\d{2}-\d{2}$/.test(lc.adExpiry) || Number.isNaN(Date.parse(lc.adExpiry)))) err(id, `licence.adExpiry must be YYYY-MM-DD, got ${lc.adExpiry}`);
-      if (typeof lc.adExpiry === 'string' && !lc.adNumber) err(id, 'licence.adExpiry without licence.adNumber');
-    }
-  }
+  // The rule lives in rules.mjs so the intake's `licence`/`wafi` commands check the SAME thing
+  // before they commit — see services/intake/lib/edits.mjs.
+  for (const problem of licenceProblems(l.licence)) err(id, problem);
 
   // Owner decision 2026-09-08: named listings are withheld from the public site.
   // build.mjs filters them out, but listings.json is also written by scripts/sync-listings.mjs
@@ -199,6 +189,12 @@ for (const l of data) {
   // Checking it here means a sync can never quietly republish a withheld home.
   if (!isPublishable(l)) {
     err(id, 'this listing is withheld from the public site by owner decision (scripts/curate/rules.mjs) — re-run scripts/curate/build.mjs');
+  }
+  // Same for land (owner rule 2026-09-06, cap SAR 50,000,000; a plot with no published price is
+  // off-market too) — the deploy's sync can move a price, so the rule is checked here as well.
+  if (!isLandPublic(l)) {
+    const sar = sarAmount(l.price);
+    err(id, `land is at/above the SAR ${LAND_PRICE_CAP.toLocaleString('en-US')} public-site cap (${sar === null ? 'no published price' : `${Math.round(sar).toLocaleString('en-US')} SAR eq.`}) — re-run scripts/curate/build.mjs`);
   }
 
   // copy hygiene
