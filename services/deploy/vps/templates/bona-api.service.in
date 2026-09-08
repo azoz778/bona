@@ -1,0 +1,57 @@
+[Unit]
+Description=Bona concierge API (Dana) — chat, web calls, Retell tools, WhatsApp poller, dashboard
+Documentation=https://github.com/azoz778/bona/blob/main/services/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Secrets are read by the process itself from ~/.secrets/*.env (lib/env.mjs); these two files
+# are optional so the unit starts either way.
+EnvironmentFile=-@HOME@/.secrets/bona-services.env
+EnvironmentFile=-@HOME@/.secrets/bona-marketing.env
+Environment=NODE_ENV=production
+# VPS-only overrides. process.env wins over the env files by design (lib/env.mjs), so the
+# PC paths carried inside bona-services.env are harmless here.
+Environment=BONA_API_PORT=@PORT@
+Environment=BONA_REPO=@REPO@
+Environment=BONA_DATA=@HOME@/bona-data
+Environment=EVOLUTION_API_URL=@EVOLUTION_URL@
+# The WhatsApp poller runs inside this process and is ON by default (lib/config.mjs). Set
+# BONA_WA_POLL=0 in bona-services.env to stop it — and nothing here may set it: an Environment=
+# line after EnvironmentFile= would win over the file and silently re-enable the poller
+# (Codex review, 2026-09-08).
+Environment=PATH=@NODE_BIN@:@HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=@REPO@/services
+ExecStart=@NODE_BIN@/node @REPO@/services/api/index.mjs
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+KillSignal=SIGTERM
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bona-api
+
+# Reads the repo (@REPO@, read-only under ProtectSystem=strict) and ~/.secrets; writes one directory.
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@HOME@/bona-data
+PrivateDevices=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+MemoryMax=512M
+
+[Install]
+WantedBy=default.target
