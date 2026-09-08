@@ -24,5 +24,7 @@ for f in "${files[@]}" "$CF_DIR/$BONA_TUNNEL_ID.json"; do echo "  $f ($(stat -c 
 ssh "$BONA_VPS_SSH" 'install -d -m 700 ~/.secrets ~/.cloudflared'
 scp -q -p "${files[@]}" "$BONA_VPS_SSH:.secrets/"
 scp -q -p "$CF_DIR/$BONA_TUNNEL_ID.json" "$BONA_VPS_SSH:.cloudflared/"
-ssh "$BONA_VPS_SSH" "chmod 600 ~/.secrets/*.env ~/.cloudflared/$BONA_TUNNEL_ID.json && ls -l ~/.secrets ~/.cloudflared | sed 's/^/  /'"
+remote=""
+for f in $SECRET_FILES; do remote="$remote ~/.secrets/$f"; done   # only the files this script copies, never a glob
+ssh "$BONA_VPS_SSH" "chmod 600$remote ~/.cloudflared/$BONA_TUNNEL_ID.json && ls -l ~/.secrets ~/.cloudflared | sed 's/^/  /'"
 ok "copied; now run install-vps.sh --check on the VPS"
