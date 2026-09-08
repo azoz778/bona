@@ -28,6 +28,7 @@ import { enqueueStage } from '../fanout.mjs';
 import { createStats, dayKey } from './stats.mjs';
 import { createAuth } from './auth.mjs';
 import {
+  knownError,
   loginPage, overviewPage, leadsPage, leadDetailPage, listingsPage, spendPage, integrationsPage, messagePage,
   maskPhone, esc,
 } from './render.mjs';
@@ -49,7 +50,9 @@ const isForm = (ct) => /^application\/x-www-form-urlencoded\s*(?:;|$)/i.test(Str
 const isJson = (ct) => /^application\/(?:[\w.+-]+\+)?json\s*(?:;|$)/i.test(String(ct ?? '').trim());
 
 const trimTo = (v, max) => {
-  if (v === undefined || v === null) return null;
+  // A JSON caller can put an object where a string belongs; `String({})` would store
+  // "[object Object]" as if the owner had typed it.
+  if (typeof v !== 'string' && typeof v !== 'number') return null;
   const s = String(v).replace(/\r\n?/g, '\n').trim();
   return s ? s.slice(0, max) : null;
 };
@@ -199,29 +202,31 @@ export function createDashboardRoutes({
     const step = url.searchParams.get('step') === 'code' ? 'code' : 'request';
     const error = url.searchParams.get('error');
     const sent = url.searchParams.get('sent') === '1';
-    return loginPage({ step, error: error && /^[a-z_]{1,32}$/.test(error) ? error : null, sent });
+    return loginPage({ step, error: knownError(error), sent });
   }
 
   async function loginCode({ req, res, ip }) {
-    const parsed = await fieldsOf(req);
-    if (!parsed.ok) return sendJson(res, parsed.status, { error: parsed.error });
+    // Origin first: the login is the one surface a stranger reaches, and a stranger must
+    // not be able to make this process buffer and parse their body before being refused.
     if (!sameOrigin(req)) {
       log({ level: 'warn', evt: 'dash.origin_rejected', path: '/dashboard/login/code', ip });
       return toLogin(res, '?error=forbidden', 303);
     }
+    const parsed = await fieldsOf(req);
+    if (!parsed.ok) return sendJson(res, parsed.status, { error: parsed.error });
     const out = await authenticator.requestCode(ip);
     if (!out.ok) return toLogin(res, `?step=code&error=${encodeURIComponent(out.error)}`, 303);
     return toLogin(res, '?step=code&sent=1', 303);
   }
 
   async function loginVerify({ req, res, ip }) {
-    const parsed = await fieldsOf(req);
-    if (!parsed.ok) return sendJson(res, parsed.status, { error: parsed.error });
     if (!sameOrigin(req)) {
       log({ level: 'warn', evt: 'dash.origin_rejected', path: '/dashboard/login/verify', ip });
       return toLogin(res, '?step=code&error=forbidden', 303);
     }
     if (!limiters.verify.take(`dashverify:${ip}`).ok) return toLogin(res, '?step=code&error=rate_limited', 303);
+    const parsed = await fieldsOf(req);
+    if (!parsed.ok) return sendJson(res, parsed.status, { error: parsed.error });
 
     const ua = String(req.headers['user-agent'] ?? '').slice(0, 300) || null;
     const out = authenticator.verify(parsed.fields.code, ua);
@@ -337,7 +342,7 @@ export function createDashboardRoutes({
       lead,
       journey: statistics.leadJourney(leadId),
       saved: saved === 'stage' || saved === 'note' ? saved : null,
-      error: error && /^[a-z_]{1,32}$/.test(error) ? error : null,
+      error: knownError(error),
       now: now(),
     }));
   }
@@ -349,7 +354,7 @@ export function createDashboardRoutes({
       rows: db.listSpend().reverse(),
       campaigns: statistics.cplByCampaign(),
       saved: url.searchParams.get('ok') === '1',
-      error: url.searchParams.get('error'),
+      error: knownError(url.searchParams.get('error')),
       today: dayKey(now()),
     }));
   }

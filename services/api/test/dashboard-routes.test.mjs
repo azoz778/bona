@@ -516,3 +516,42 @@ test('the browser routes and the tool routes are untouched by the mount', async 
     assert.equal(nowhere.status, 404);
   });
 });
+
+test('an error code from the query string can only ever be one of ours', async () => {
+  await withDash({}, async ({ db, get, login }) => {
+    const id = seedLead(db);
+    const { cookie } = await login();
+    for (const [p, cookieNeeded] of [['/dashboard/login?error=constructor', false], [`/dashboard/leads/${id}?error=constructor`, true], ['/dashboard/spend?error=constructor', true]]) {
+      const html = await (await get(p, cookieNeeded ? { cookie } : {})).text();
+      assert.ok(!html.includes('function'), `${p} printed a prototype member`);
+      assert.ok(!html.includes('class="err"'), `${p} treated an unknown code as an error`);
+    }
+    const known = await (await get('/dashboard/login?step=code&error=expired')).text();
+    assert.match(known, /That code has expired/);
+  });
+});
+
+test('a JSON caller cannot smuggle an object where text belongs', async () => {
+  await withDash({}, async ({ db, postJson, login }) => {
+    const id = seedLead(db);
+    const { cookie } = await login();
+    const res = await postJson(`/v1/admin/leads/${id}/note`, { note: { toString: 'x' } }, { cookie, headers: { 'X-Bona-Dash': '1' } });
+    assert.equal(res.status, 400);
+    assert.equal(db.getLead(id).notes, null, '"[object Object]" is not a note');
+
+    const staged = await postJson(`/v1/admin/leads/${id}/stage`, { stage: 'qualified', note: ['a'] }, { cookie, headers: { 'X-Bona-Dash': '1' } });
+    assert.equal(staged.status, 200);
+    assert.equal(db.stageHistory(id).at(-1).note, null);
+  });
+});
+
+test('a stage value that is not a number is refused', async () => {
+  await withDash({}, async ({ db, postJson, login }) => {
+    const id = seedLead(db);
+    const { cookie } = await login();
+    const res = await postJson(`/v1/admin/leads/${id}/stage`, { stage: 'won', value_sar: 'a lot' }, { cookie, headers: { 'X-Bona-Dash': '1' } });
+    assert.equal(res.status, 400);
+    assert.equal((await res.json()).error, 'bad_value');
+    assert.equal(db.getLead(id).stage, 'new');
+  });
+});
