@@ -551,11 +551,13 @@ and one a minute globally; the code appears in exactly one place, the message it
 never in a log line or a response. `POST /dashboard/login/verify` (form-encoded, 5 wrong
 attempts burn the code) sets `bona_dash`: `HttpOnly; Secure; SameSite=Lax; Path=/;
 Max-Age=BONA_DASH_COOKIE_DAYS`, with only the token's hash in `auth_sessions`.
-`GET /dashboard/logout` deletes the session server-side and clears the cookie. Every
-other `/dashboard/*` route 302s to the login without a valid cookie; every `/v1/admin/*`
-route answers 401.
+`POST /dashboard/logout` (the nav button; `_dash=1`, same-origin) deletes the session
+server-side and clears the cookie — a GET there only offers the button, because
+`SameSite=Lax` sends the cookie on a top-level navigation and a link on any page would
+otherwise end the session. Every other `/dashboard/*` route 302s to the login without a
+valid cookie; every `/v1/admin/*` route answers 401.
 
-**Writes** need a marker the browser will not send by itself — `X-Bona-Dash: 1` on a JSON
+**Writes** — including the logout — need a marker the browser will not send by itself — `X-Bona-Dash: 1` on a JSON
 call, a hidden `_dash=1` field on a form — and a stated `Origin`/`Referer` that is this
 API's own. `SameSite=Lax` already keeps the cookie off cross-site POSTs; this is the
 second lock. A stage change also writes a `lead_stage` event and enqueues the fan-out
@@ -582,5 +584,11 @@ on `GET /dashboard/leads/:id` and `GET /v1/admin/leads/:id`.
 | `POST /v1/admin/leads/:id/stage` | `{stage, value_sar?, note?}` → stage, history row, `lead_stage` event, fan-out |
 | `POST /v1/admin/leads/:id/note` | `{note}` → a `note` touchpoint and an appended line on the lead |
 | `POST /v1/admin/spend` | `{day, platform, campaign_id, campaign_name, spend_sar, clicks?, impressions?}`, upserted on `(day, platform, campaign_id)` |
+
+Spend is matched to leads on **platform and campaign id together**, never the id alone —
+Meta and Snap can both run a campaign `1203`. The two vocabularies are folded by
+`PLATFORM_ALIASES` in `lib/dashboard/stats.mjs`, so "instagram" typed on the Spend page
+meets a lead that arrived with `utm_source=meta`. A platform name nothing recognises
+matches no spend rather than borrowing another platform's budget.
 
 A form post answers `303` back to the page it came from; a JSON call answers JSON.
