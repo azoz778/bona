@@ -37,6 +37,12 @@ test('all three routes enforce the land cap from the one shared rule', () => {
   const src = (p) => fs.readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8');
   assert.match(src('scripts/curate/build.mjs'), /isLandPublic/, 'build.mjs');
   assert.doesNotMatch(src('scripts/curate/build.mjs'), /const LAND_PRICE_CAP\s*=/, 'build.mjs must not keep its own copy of the cap');
+  // Codex, final gate 2026-09-08: the curated set was filtered but WhatsApp-intake listings were
+  // only checked for the house cap — a plot published from the group at SAR 50M+ would have
+  // reached listings.json (validate would then fail the deploy, but the build must not emit it).
+  const build = src('scripts/curate/build.mjs');
+  assert.match(build, /const candidates = \[\.\.\.live, \.\.\.inbox\];/, 'build.mjs forms the COMBINED curated + intake set');
+  assert.match(build, /candidates\.filter\(\(l\) => isHousePublic\(l\) && isLandPublic\(l\)\)/, 'and publishes only what passes BOTH caps');
   assert.match(src('scripts/sync-listings.mjs'), /isLandPublic/, 'sync-listings.mjs — the daily deploy path');
   assert.match(src('scripts/curate/validate.mjs'), /isLandPublic/, 'validate.mjs — the last gate before deploy');
 });

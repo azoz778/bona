@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LISTINGS } from './listings.source.mjs';
 import { ROOMS } from './rooms.mjs';
-import { HOUSE_PRICE_CAP, isHousePublic, isLandPublic, sarAmount } from './rules.mjs';
+import { HOUSE_PRICE_CAP, isHousePublic, isLandPublic, LAND_PRICE_CAP, sarAmount } from './rules.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const GALLERY = path.join(ROOT, 'scripts', 'tk-gallery-data.json');
@@ -152,16 +152,23 @@ if (fs.existsSync(INBOX)) {
 }
 if (inbox.length || inboxHidden) console.log(`WhatsApp intake: appended ${inbox.length} listing(s), ${inboxHidden} hidden`);
 
-// Owner rule 2026-09-08: houses over SAR 10,000,000 come off the public site. Applied to
-// curated AND intake listings alike (a brochure the owner sends is no different from TK
-// stock here), and applied to the COMBINED set so a listing can never slip in by route.
-// A house with no published price is kept — see isHousePublic() for why.
-const withinHouseCap = [...live, ...inbox].filter(isHousePublic);
-const overHouseCap = [...live, ...inbox].filter((l) => !isHousePublic(l));
+// Owner rules: houses over SAR 10,000,000 (2026-09-08) and land at or above SAR 50,000,000
+// (2026-09-06) come off the public site. Applied to curated AND intake listings alike (a
+// brochure the owner sends is no different from TK stock here), and applied to the COMBINED
+// set so a listing can never slip in by route — the land rule filtered only the curated set
+// until the Codex final gate of 2026-09-08 caught the intake path. A house with no
+// published price is kept (see isHousePublic()); a plot with none is not (isLandPublic()).
+const candidates = [...live, ...inbox];
+const withinCaps = candidates.filter((l) => isHousePublic(l) && isLandPublic(l));
+const overHouseCap = candidates.filter((l) => !isHousePublic(l));
+const overLandCap = candidates.filter((l) => !isLandPublic(l));
 if (overHouseCap.length) {
   console.log(`House cap: excluded ${overHouseCap.length} house(s) over SAR ${HOUSE_PRICE_CAP.toLocaleString('en-US')} — ${overHouseCap.map((l) => `${l.id} (${Math.round(sarAmount(l.price)).toLocaleString('en-US')} SAR eq.)`).join(', ')}`);
 }
-const published = withinHouseCap;
+if (overLandCap.length) {
+  console.log(`Land cap: excluded ${overLandCap.length} plot(s) at/above SAR ${LAND_PRICE_CAP.toLocaleString('en-US')} or without a published price — ${overLandCap.map((l) => `${l.id ?? l.slug} (${sarAmount(l.price) === null ? 'no price' : `${Math.round(sarAmount(l.price)).toLocaleString('en-US')} SAR eq.`})`).join(', ')}`);
+}
+const published = withinCaps;
 
 // ---- approximate map pins --------------------------------------------------------------
 // Most listings have no exact pin: TK's API carries no coordinates and most brochures carry
