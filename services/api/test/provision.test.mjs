@@ -14,6 +14,8 @@ import {
 import { writeIds } from '../lib/config.mjs';
 
 const TOKEN = 'b'.repeat(32);
+/** Derived, never hard-coded: adding a tool must not fail an unrelated assertion. */
+const TOOL_COUNT = toolsPayload({ publicApi: 'https://example.invalid', toolToken: TOKEN }).length;
 const PUBLIC_API = 'https://bona-api.azoz.uk';
 const OLD_SITE = 'https://bona.azoz.uk';
 const NEW_SITE = 'https://bona-real-estate.com';
@@ -72,9 +74,9 @@ test('a dry run prints no secret, header included', () => {
   assert.ok(printed.includes('<BONA_TOOL_TOKEN>'));
 });
 
-test('all three tools are custom webhooks on the public API', () => {
+test('every tool is a custom webhook on the public API', () => {
   const tools = toolsPayload({ publicApi: PUBLIC_API, toolToken: TOKEN });
-  assert.deepEqual(tools.map((t) => t.name), ['search_properties', 'show_property', 'create_lead']);
+  assert.deepEqual(tools.map((t) => t.name), ['search_properties', 'show_property', 'search_units', 'create_lead']);
   for (const t of tools) {
     assert.equal(t.type, 'custom');
     assert.equal(t.url, `${PUBLIC_API}/v1/tools/${t.name}`);
@@ -84,17 +86,28 @@ test('all three tools are custom webhooks on the public API', () => {
   }
 });
 
-test('only the slow tool talks while it runs; all of them speak after', () => {
-  const [search, show, lead] = toolsPayload({ publicApi: PUBLIC_API, toolToken: TOKEN });
-  assert.equal(search.speak_during_execution, true, 'a search must not leave silence on a call');
-  assert.ok(search.execution_message_description.length > 20);
-  assert.equal(show.speak_during_execution, false);
-  assert.equal(lead.speak_during_execution, false);
-  for (const t of [search, show, lead]) assert.equal(t.speak_after_execution, true);
+test('only the slow tools talk while they run; all of them speak after', () => {
+  // Looked up by name, not by position: adding a tool must not rewrite this test.
+  const byName = Object.fromEntries(toolsPayload({ publicApi: PUBLIC_API, toolToken: TOKEN }).map((t) => [t.name, t]));
+  assert.equal(byName.search_properties.speak_during_execution, true, 'a search must not leave silence on a call');
+  assert.ok(byName.search_properties.execution_message_description.length > 20);
+  assert.equal(byName.search_units.speak_during_execution, true, 'a unit lookup is a search too — do not go quiet mid-call');
+  assert.equal(byName.show_property.speak_during_execution, false);
+  assert.equal(byName.create_lead.speak_during_execution, false);
+  for (const t of Object.values(byName)) assert.equal(t.speak_after_execution, true);
+});
+
+test('search_units filters on what a buyer actually asks for', () => {
+  const units = toolsPayload({ publicApi: PUBLIC_API, toolToken: TOKEN }).find((t) => t.name === 'search_units');
+  for (const k of ['listing_id', 'beds', 'building', 'floor', 'facing', 'max_price', 'plan']) {
+    assert.ok(units.parameters.properties[k], `missing ${k}`);
+  }
+  assert.deepEqual(units.parameters.properties.plan.enum, ['cash', 'half', 'year', 'twoYear']);
+  assert.deepEqual(units.parameters.required, [], 'every filter is optional — the model may just ask what exists');
 });
 
 test('create_lead requires a phone number and offers the fields the owner needs', () => {
-  const lead = toolsPayload({ publicApi: PUBLIC_API, toolToken: TOKEN })[2];
+  const lead = toolsPayload({ publicApi: PUBLIC_API, toolToken: TOKEN }).find((t) => t.name === 'create_lead');
   assert.deepEqual(lead.parameters.required, ['phone']);
   for (const k of ['phone', 'name', 'interest', 'budget', 'timeline', 'notes', 'language']) {
     assert.ok(lead.parameters.properties[k], `missing ${k}`);
@@ -109,7 +122,7 @@ test('the LLM carries the persona, the begin message, the KB and the tools', () 
   assert.match(llm.begin_message, /دانة/);
   assert.match(llm.begin_message, /Dana/);
   assert.deepEqual(llm.knowledge_base_ids, ['kb_1']);
-  assert.equal(llm.general_tools.length, 3);
+  assert.equal(llm.general_tools.length, TOOL_COUNT);
   assert.equal(llm.general_prompt, prompt);
 });
 
