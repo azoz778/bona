@@ -52,6 +52,19 @@ export function pageTitle(title: string, locale: Locale): string {
 
 export function ogLocale(locale: Locale): string { return locale === 'ar' ? 'ar_SA' : 'en_US'; }
 
+/** Trim a description to `max` characters on a word boundary, adding an ellipsis when it was cut.
+    A hard slice() ends sentences mid-word ("The house is arr"), which is what Google and the answer
+    engines then quote. Arabic counts characters the same way; the break is on whitespace either way. */
+export function metaDescription(text: string | null | undefined, max = 155): string {
+  const s = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (s.length <= max) return s;
+  // Leave room for the ellipsis, then step back to the last space.
+  const cut = s.slice(0, max - 1);
+  const space = cut.lastIndexOf(' ');
+  const head = (space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[\s،,;:.\-–—]+$/u, '');
+  return `${head}…`;
+}
+
 /** Strip undefined/null/empty values recursively so JSON-LD never carries "undefined". */
 export function compact<T>(value: T): T {
   if (Array.isArray(value)) {
@@ -539,6 +552,37 @@ export function listingJsonLd(listing: Listing, locale: Locale): object {
     subjectOf: tour ? { '@id': tour['@id'] } : undefined,
     publisher: { '@id': ORG_ID },
     isPartOf: { '@id': WEBSITE_ID },
+  });
+}
+
+// ---------- FAQ ----------
+
+/** FAQPage JSON-LD. items = [{id, q, a}] where `a` is the answer's paragraphs, already localised.
+    Each Question gets a stable @id (<url>#faq-<id>) so the on-page anchor and the node agree — that is
+    what lets an answer engine deep-link the exact question it quoted. */
+export function faqPageJsonLd(opts: {
+  locale: Locale; path: string; title: string; description?: string;
+  items: { id: string; q: string; a: string[] }[]; dateModified?: string; breadcrumbId?: string;
+}): object {
+  const url = absoluteUrl(opts.path);
+  const items = (opts.items ?? []).filter((it) => it && it.q && (it.a ?? []).length);
+  return compact({
+    ...(webPageJsonLd({
+      locale: opts.locale, path: opts.path, type: 'WebPage', title: opts.title,
+      description: opts.description, dateModified: opts.dateModified, breadcrumbId: opts.breadcrumbId,
+    }) as Record<string, unknown>),
+    '@type': 'FAQPage',
+    mainEntity: items.map((it) => ({
+      '@type': 'Question',
+      '@id': `${url}#faq-${it.id}`,
+      name: it.q,
+      acceptedAnswer: {
+        '@type': 'Answer',
+        // Google reads answerText as HTML; paragraphs keep the answer readable when it is quoted whole.
+        text: it.a.map((p) => `<p>${p.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</p>`).join(''),
+        url: `${url}#${it.id}`,
+      },
+    })),
   });
 }
 

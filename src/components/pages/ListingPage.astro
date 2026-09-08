@@ -12,7 +12,7 @@ import Icon from '../Icon.astro';
 import site from '../../data/site.json';
 import { localePath, formatPrice, formatNumber, t, ui, fill, waLink, type Locale } from '../../lib/i18n';
 import { localeTitle, categoryLabel, categorySlug, typeLabel, similar, kindOf, kindLabel, kindLabelPlural, kindSlug, matterportId, type Listing } from '../../lib/listings';
-import { listingJsonLd, breadcrumbJsonLd } from '../../lib/seo';
+import { listingJsonLd, breadcrumbJsonLd, metaDescription } from '../../lib/seo';
 interface Props { locale: Locale; listing: Listing }
 const { locale, listing: l } = Astro.props;
 const path = localePath(locale, `/properties/${l.slug}/`);
@@ -41,7 +41,20 @@ const paragraphs = (t(l.description, locale) || '').split(/\n\s*\n|\n/).map(p =>
 const highlights = l.highlights?.[locale] ?? l.highlights?.en ?? [];
 const badge = l.status === 'sold' ? t(ui.sold, locale) : l.status === 'reserved' ? t(ui.reserved, locale) : null;
 const related = similar(l, 3);
-const description = paragraphs[0]?.slice(0, 155) || `${title} — ${t(l.location.district, locale)}, ${t(l.location.city, locale)}. ${formatPrice(l.price, locale)}.`;
+const description = metaDescription(paragraphs[0]) || `${title} — ${t(l.location.district, locale)}, ${t(l.location.city, locale)}. ${formatPrice(l.price, locale)}.`;
+/* Title tag. The listing's own title names the home and usually the district ("Classic Mansion, Al Shati 6"),
+   but on its own it carries no transactional term and no city — which is what people actually type
+   ("villa for sale in Jeddah" / "فيلا للبيع في جدة"). Append the category and the city when the title does
+   not already say them, then let <Head> add the brand. */
+const cityText = t(l.location.city, locale);
+/* "International" is an adjective, so the English label needs a noun before "in <city>" can follow it
+   ("International in Dubai" reads as a mistake). Arabic's عقارات دولية already carries the noun. */
+const categoryText = l.category === 'international' && locale !== 'ar'
+  ? 'International property'
+  : t(categoryLabel[l.category], locale);
+const titleHasCity = cityText ? title.includes(cityText) : true;
+const metaTitle = [title, [categoryText, !titleHasCity && cityText].filter(Boolean).join(locale === 'ar' ? ' في ' : ' in ')]
+  .filter(Boolean).join(' — ');
 const locationLine = [t(l.location.district, locale), t(l.location.city, locale), t(l.location.country, locale)].filter(Boolean).join(locale === 'ar' ? '، ' : ', ');
 const project = l.project?.name ? t(l.project.name, locale) : '';
 const developer = l.project?.developer ? t(l.project.developer, locale) : '';
@@ -52,7 +65,7 @@ const conciergeOn = site.concierge?.enabled !== false;
 const danaMessage = fill(t(ui.conciergeAskAboutHomeMsg, locale), { title, id: l.id });
 const kindText = t(kindLabel[kind], locale);
 ---
-<Base title={`${title} — ${locale === 'ar' ? site.nameAr : site.name}`} description={description} locale={locale} path={path} image={l.images?.[0]?.src} waMessage={waMessage} listingId={l.id}
+<Base title={metaTitle} description={description} locale={locale} path={path} image={l.images?.[0]?.src} waMessage={waMessage} listingId={l.id}
       jsonLd={[listingJsonLd(l, locale), breadcrumbJsonLd(crumbs)]}>
   <article class="pt-6 lg:pt-8">
     <div class="wrap">

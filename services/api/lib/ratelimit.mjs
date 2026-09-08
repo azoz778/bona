@@ -54,7 +54,26 @@ export function createLimiter({ capacity, perMs, now = () => Date.now(), maxKeys
     return { ok: false, remaining: 0, retryAfterS: Math.max(1, Math.ceil(deficit / refillPerMs / 1000)) };
   }
 
-  return { take, size: () => buckets.size, reset: () => buckets.clear() };
+  /**
+   * Would `take` succeed right now? Consumes nothing, and — unlike `take` — never
+   * creates a bucket, so peeking cannot be used to grow the map.
+   *
+   * It exists so that a caller standing in front of several limiters can refuse
+   * without spending: charging one bucket and then being turned away by the next
+   * hands an attacker a way to burn a limit that was never theirs to spend.
+   * Peek-then-take is only sound because this process is single threaded and there
+   * is no await between the two.
+   */
+  function peek(key, cost = 1) {
+    const t = now();
+    const b = buckets.get(key);
+    const tokens = b ? Math.min(capacity, b.tokens + (t - b.last) * refillPerMs) : capacity;
+    if (tokens >= cost) return { ok: true, remaining: Math.floor(tokens), retryAfterS: 0 };
+    const deficit = cost - tokens;
+    return { ok: false, remaining: 0, retryAfterS: Math.max(1, Math.ceil(deficit / refillPerMs / 1000)) };
+  }
+
+  return { take, peek, size: () => buckets.size, reset: () => buckets.clear() };
 }
 
 /** Loopback peers: cloudflared runs beside us, so only it may name the real client. */

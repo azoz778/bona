@@ -23,12 +23,13 @@ Instagram: https://www.instagram.com/bona.com.sa/
 - [3D Virtual Tours of Homes in Jeddah](https://bona-real-estate.com/tours/): Walk through Bona's homes in 3D before you visit: Matterport tours of villas and apartments in Jeddah, room by room, on any device. Then book a viewing.
 - [About Bona — Licensed Luxury Brokerage in Jeddah](https://bona-real-estate.com/about/): Bona is a private real-estate boutique in Jeddah (REGA FAL 1100313556). How we work, the districts we cover, and why the best homes sell quietly.
 - [Sell or Let Your Home Discreetly in Jeddah](https://bona-real-estate.com/sell/): List your villa or apartment with Bona: professional photography, off-market introductions to qualified buyers, REGA-compliant marketing and Najiz transfer handled.
+- [Buying property in Jeddah — FAQ](https://bona-real-estate.com/faq/): Whether a non-Saudi may buy in Jeddah under the law in force since 22 January 2026, what RETT and brokerage fees apply, why a broker will not value your home, and how Ejar, Najiz and Wafi come into a transaction. Each answer names the authority it rests on.
 - [Contact Bona — WhatsApp +966 59 329 6933](https://bona-real-estate.com/contact/): Reach Bona on WhatsApp or by phone, Sunday to Thursday 10:00–19:00. Al Rawdah District, Jeddah. Viewings and owner consultations by appointment.
 - [Privacy Policy](https://bona-real-estate.com/privacy/): How Bona handles your personal data under the Saudi PDPL: what this site collects (almost nothing), WhatsApp enquiries, retention, sharing and your rights.
 
-## Properties (46 live listings)
+## Properties (45 live listings)
 
-### Houses (17) — https://bona-real-estate.com/properties/houses/
+### Houses (16) — https://bona-real-estate.com/properties/houses/
 
 - [Private Beach Villa, Durrat Al Arous](https://bona-real-estate.com/properties/private-beach-villa-durrat-al-arous/): Villa, Durrat Al Arous, Jeddah — For sale, SAR 8,000,000, 5 bed, 8 bath, 537 m² built, 537 m² plot
 - [Contemporary Villa, Al Khalidiyah](https://bona-real-estate.com/properties/contemporary-villa-al-khalidiyah/): Villa, Al Khalidiyah, Jeddah — For sale, SAR 6,700,000, 5 bed, 8 bath, 640 m² built, 375 m² plot
@@ -45,7 +46,6 @@ Instagram: https://www.instagram.com/bona.com.sa/
 - [Modern Villa in Al Shati, Jeddah](https://bona-real-estate.com/properties/modern-villa-in-al-shati-jeddah/): Villa, Al Shati, Jeddah — Off-plan, Price on request, 4 bed, 7 bath, 550 m² built, 325 m² plot
 - [Rihab Villas, Wajhat Al Warf](https://bona-real-estate.com/properties/rihab-villas-wajhat-al-warf/): Villa, Wajhat Al Warf, Jeddah — Off-plan, Price on request, in Wajhat Al Warf, 4 bed, 6 bath, 271.47 m² built, 275 m² plot
 - [Sadana Townhouse, Al Rawdah](https://bona-real-estate.com/properties/sadana-townhouse-al-rawdah/): Duplex, Al Rawdah, Jeddah — Off-plan, Price on request, 3 bed, 364.7 m² built
-- [The Knightsbridge Villas, Meydan District 11](https://bona-real-estate.com/properties/the-knightsbridge-villas-meydan-district-11/): Villa, Meydan District 11, Dubai — International, Price on request, in The Knightsbridge – Phase 2
 - [Wharf Destination Villas, Jeddah](https://bona-real-estate.com/properties/wharf-destination-villas-jeddah/): Villa, Southeast Jeddah, Jeddah — Off-plan, Price on request, in Wharf Destination, 4 bed, 5 bath, 224.3 m² built, 250 m² plot
 
 ### Apartments (21) — https://bona-real-estate.com/properties/apartments/
@@ -95,4 +95,4 @@ Instagram: https://www.instagram.com/bona.com.sa/
 - [Arabic site](https://bona-real-estate.com/ar/)
 - [WhatsApp](https://wa.me/966593296933)
 
-Last generated: 2026-09-07
+Last generated: 2026-09-08

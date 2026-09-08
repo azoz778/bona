@@ -9,7 +9,8 @@ import {
   takenSlugs, todayRiyadh, uniqueSlug, writeIndex, writeInboxListing, findInbox, findByPdfSha, listInbox,
 } from '../lib/listing.mjs';
 import * as edits from '../lib/edits.mjs';
-import { WITHHELD_LISTINGS } from '../../../scripts/curate/rules.mjs';
+import * as msg from '../lib/messages.mjs';
+import { licenceProblems, WITHHELD_LISTINGS } from '../../../scripts/curate/rules.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -358,6 +359,213 @@ describe('inbox + edits', () => {
     assert.equal(listInbox(tmp).length, 0);
     assert.equal(fs.existsSync(path.join(tmp, 'public', 'listings', slug)), false);
     assert.equal(edits.removeListing(tmp, 'BONA-W001'), null);
+  });
+});
+
+// `licence BONA-W003 7200012345 2027-03-01` / `wafi BONA-W003 1234567890` — the REGA numbers
+// the owner reads off the FAL platform and types into the group. The command has to land in
+// one of TWO files depending on the id (docs/OWNER-RUNBOOK.md §10):
+//   BONA-W###  the listing's own inbox JSON, beside its price and status
+//   BONA-###   scripts/curate/licences.json, because a curated listing is generated code
+// and in both cases it is validated with the SITE's rule before anything is written, so the
+// daemon can never push a licence that then fails the build it runs on the next job.
+describe('edits.setLicence / setWafi — REGA advertising licences', () => {
+  let tmp;
+  const slug = 'licence-villa';
+  const inboxListing = () => ({
+    id: 'BONA-W001',
+    slug,
+    status: 'available',
+    title: { en: 'Licence Villa', ar: 'فيلا الترخيص' },
+    price: { amount: 1000000, currency: 'SAR', from: false, period: null, onRequest: false },
+    images: [1, 2, 3, 4].map((n) => ({ src: `/listings/${slug}/0${n}.jpg`, thumb: null, alt: { en: 'x', ar: 'س' } })),
+  });
+  // The curated set as it exists on disk: the built src/data/listings.json, which is the only
+  // place BONA-### listings are data rather than a module to execute.
+  const CURATED = [{ id: 'BONA-015', slug: 'curated-tower', title: { en: 'Curated Tower', ar: 'برج منسق' }, licence: null }];
+  const inboxFile = () => path.join(tmp, 'scripts', 'curate', 'inbox', `${slug}.json`);
+  const readInboxFile = () => JSON.parse(fs.readFileSync(inboxFile(), 'utf8'));
+  const readLicences = () => JSON.parse(fs.readFileSync(path.join(tmp, 'scripts', 'curate', 'licences.json'), 'utf8'));
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-licence-'));
+    fs.mkdirSync(path.join(tmp, 'scripts', 'curate', 'inbox'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'src', 'data'), { recursive: true });
+    writeInboxListing(tmp, inboxListing());
+    fs.writeFileSync(path.join(tmp, 'scripts', 'curate', 'licences.json'), '{}\n');
+    fs.writeFileSync(path.join(tmp, 'src', 'data', 'listings.json'), `${JSON.stringify(CURATED, null, 2)}\n`);
+  });
+  afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+  it('writes the advertisement number and its expiry into the listing\'s own JSON', () => {
+    const res = edits.setLicence(tmp, 'bona-w001', { adNumber: '7200012345', adExpiry: '2027-03-01' });
+    assert.equal(res.curated, false);
+    assert.deepEqual(res.licence, { adNumber: '7200012345', adExpiry: '2027-03-01', wafiNumber: null, escrowAccount: null });
+    // On DISK, not just in the returned object — the daemon commits the file.
+    assert.deepEqual(readInboxFile().licence, res.licence);
+    // …and in a shape the site build accepts, checked with the site's own rule.
+    assert.deepEqual(licenceProblems(readInboxFile().licence), []);
+  });
+
+  it('never writes a partial block — every field the site knows about is present', () => {
+    edits.setWafi(tmp, 'BONA-W001', { wafiNumber: '1234567890' });
+    assert.deepEqual(Object.keys(readInboxFile().licence).sort(), ['adExpiry', 'adNumber', 'escrowAccount', 'wafiNumber']);
+  });
+
+  it('merges: an off-plan unit can carry both an ad licence and a Wafi number', () => {
+    edits.setLicence(tmp, 'BONA-W001', { adNumber: '7200012345', adExpiry: '2027-03-01' });
+    const res = edits.setWafi(tmp, 'BONA-W001', { wafiNumber: '1234567890' });
+    assert.deepEqual(res.licence, { adNumber: '7200012345', adExpiry: '2027-03-01', wafiNumber: '1234567890', escrowAccount: null });
+    assert.deepEqual(readInboxFile().licence, res.licence);
+  });
+
+  it('clear takes back only its own fields, and the block becomes null once nothing is left', () => {
+    edits.setLicence(tmp, 'BONA-W001', { adNumber: '7200012345', adExpiry: '2027-03-01' });
+    edits.setWafi(tmp, 'BONA-W001', { wafiNumber: '1234567890' });
+    const cleared = edits.setLicence(tmp, 'BONA-W001', { clear: true });
+    assert.equal(cleared.licence.adNumber, null);
+    assert.equal(cleared.licence.adExpiry, null);
+    assert.equal(cleared.licence.wafiNumber, '1234567890', 'the Wafi number is a different command\'s');
+    const empty = edits.setWafi(tmp, 'BONA-W001', { clear: true });
+    assert.equal(empty.licence, null, 'an all-null licence is no licence');
+    assert.equal(readInboxFile().licence, null);
+  });
+
+  it('answers null for an id that is neither in the inbox nor in the curated set', () => {
+    assert.equal(edits.setLicence(tmp, 'BONA-W404', { adNumber: '7200012345', adExpiry: '2027-03-01' }), null);
+    assert.equal(edits.setWafi(tmp, 'BONA-404', { wafiNumber: '1234567890' }), null);
+    assert.equal(edits.locateCurated(tmp, 'BONA-015').listing.slug, 'curated-tower');
+    assert.equal(edits.locateCurated(tmp, 'BONA-404'), null);
+  });
+
+  it('puts a CURATED listing\'s numbers in licences.json instead, keyed by id', () => {
+    const res = edits.setLicence(tmp, 'bona-015', { adNumber: '7200099999', adExpiry: '2028-01-31' });
+    assert.equal(res.curated, true);
+    assert.equal(res.listing.title.en, 'Curated Tower', 'the reply needs the listing, not just the id');
+    assert.deepEqual(readLicences(), {
+      'BONA-015': { adNumber: '7200099999', adExpiry: '2028-01-31', wafiNumber: null, escrowAccount: null },
+    });
+    // build.mjs merges this file onto the built listing; nothing was written to the inbox.
+    assert.equal(readInboxFile().licence, undefined);
+  });
+
+  it('drops the key entirely when a curated listing\'s licence is cleared', () => {
+    edits.setLicence(tmp, 'BONA-015', { adNumber: '7200099999', adExpiry: '2028-01-31' });
+    const res = edits.setLicence(tmp, 'BONA-015', { clear: true });
+    assert.equal(res.licence, null);
+    assert.deepEqual(readLicences(), {}, 'no empty husk left behind for build.mjs to merge');
+  });
+
+  // Review finding (MEDIUM): a licences.json that is corrupt or half-written used to read
+  // back as `{}`, and the next `licence BONA-016 …` would then rewrite the file with only
+  // that one key — silently deleting every other listing's number. Nothing about a broken
+  // file is recoverable HERE, so it throws: index.mjs::publishEdit rolls the clone back with
+  // resetTree(), the reason goes to the journal, and the group gets the generic failure line.
+  it('throws rather than rewriting a corrupt licences.json down to one key', () => {
+    const file = path.join(tmp, 'scripts', 'curate', 'licences.json');
+    const corrupt = '{"BONA-014":{"adNumber":"7200011111","adExpiry":"2027-01-01"},,,';
+    fs.writeFileSync(file, corrupt);
+    assert.throws(
+      () => edits.setLicence(tmp, 'BONA-015', { adNumber: '7200099999', adExpiry: '2028-01-31' }),
+      (err) => {
+        assert.match(err.message, /not valid JSON — refusing to overwrite it/);
+        // `err.message` is read back to the group by `status`; only `err.detail` (journal) may
+        // carry the parser's account of the file — publish.mjs::must()'s rule.
+        assert.ok(!err.message.includes('BONA-014'), `the file's bytes leaked into the reply: ${err.message}`);
+        assert.ok(err.detail, 'the reason still reaches the journal');
+        return true;
+      },
+    );
+    assert.equal(fs.readFileSync(file, 'utf8'), corrupt, 'the file the owner still has to fix is untouched');
+  });
+
+  it('throws on a licences.json that parses but is not an object of listings', () => {
+    const file = path.join(tmp, 'scripts', 'curate', 'licences.json');
+    for (const body of ['[]', '"BONA-015"', 'null', '42']) {
+      fs.writeFileSync(file, body);
+      assert.throws(() => edits.setWafi(tmp, 'BONA-015', { wafiNumber: '1234567890' }), body);
+      assert.equal(fs.readFileSync(file, 'utf8'), body, body);
+    }
+  });
+
+  it('bootstraps only when the file is genuinely absent', () => {
+    fs.rmSync(path.join(tmp, 'scripts', 'curate', 'licences.json'));
+    const res = edits.setLicence(tmp, 'BONA-015', { adNumber: '7200099999', adExpiry: '2028-01-31' });
+    assert.equal(res.curated, true);
+    assert.deepEqual(Object.keys(readLicences()), ['BONA-015']);
+  });
+
+  it('keeps every other listing\'s numbers when it writes a new one', () => {
+    fs.writeFileSync(path.join(tmp, 'scripts', 'curate', 'licences.json'), JSON.stringify({
+      'BONA-014': { adNumber: '7200011111', adExpiry: '2027-01-01', wafiNumber: null, escrowAccount: null },
+    }));
+    edits.setLicence(tmp, 'BONA-015', { adNumber: '7200099999', adExpiry: '2028-01-31' });
+    assert.deepEqual(Object.keys(readLicences()).sort(), ['BONA-014', 'BONA-015']);
+  });
+
+  // Review finding: `setLicence(repo, id, {})` used to reach nextLicence as an all-undefined
+  // patch, which looked exactly like a clear and wiped the block. `clear` is its own argument
+  // and its own command; a patch that sets nothing is a caller bug, so it throws.
+  it('never reads an empty patch as a clear', () => {
+    edits.setLicence(tmp, 'BONA-W001', { adNumber: '7200012345', adExpiry: '2027-03-01' });
+    assert.throws(() => edits.setLicence(tmp, 'BONA-W001', {}), /no field to set/);
+    assert.throws(() => edits.setWafi(tmp, 'BONA-W001', {}), /no field to set/);
+    assert.throws(() => edits.setLicence(tmp, 'BONA-W001'), /no field to set/);
+    assert.equal(readInboxFile().licence.adNumber, '7200012345', 'the licence he recorded is still there');
+  });
+
+  it('sets only the fields it was given, leaving the rest of the block alone', () => {
+    edits.setLicence(tmp, 'BONA-W001', { adNumber: '7200012345', adExpiry: '2027-03-01' });
+    edits.setWafi(tmp, 'BONA-W001', { wafiNumber: '1234567890' });
+    // `wafi` must not blank the ad licence just because its patch has no adNumber in it.
+    assert.deepEqual(readInboxFile().licence, {
+      adNumber: '7200012345', adExpiry: '2027-03-01', wafiNumber: '1234567890', escrowAccount: null,
+    });
+  });
+
+  // Prototype-key hardening: the file is JSON from the repo, and `all[id]` is a lookup by a
+  // string that came off a WhatsApp message. A null-prototype object cannot answer that
+  // lookup with something off Object.prototype.
+  it('reads licences.json into an object with no prototype', () => {
+    fs.writeFileSync(path.join(tmp, 'scripts', 'curate', 'licences.json'), '{"BONA-015":{"adNumber":"7200099999"}}');
+    const all = edits.readLicences(tmp);
+    assert.equal(Object.getPrototypeOf(all), null);
+    assert.equal(all.constructor, undefined, 'a lookup can never fall through to Object.prototype');
+    assert.deepEqual(all['BONA-015'], { adNumber: '7200099999' });
+  });
+
+  it('refuses a licence the site validator would reject, and writes nothing', () => {
+    // An expiry with no number is the one combination validate.mjs singles out — it would
+    // print "valid until …" on a page with no licence to be valid.
+    const res = edits.setLicence(tmp, 'BONA-W001', { adExpiry: '2027-03-01' });
+    assert.match(res.error, /adExpiry without/);
+    assert.equal(readInboxFile().licence, undefined, 'the file was left exactly as it was');
+  });
+
+  // The daemon's own wiring (index.mjs::publishEdit) is: apply -> rebuild -> commit -> reply,
+  // with the commit rolled back if anything throws. The commit is stubbed here; what is being
+  // pinned is the message it is given and the line that goes back to the group.
+  it('composes the commit message and the group reply the owner sees', () => {
+    const commits = [];
+    const commit = (message) => commits.push(message);
+    const licence = edits.setLicence(tmp, 'BONA-W001', { adNumber: '7200012345', adExpiry: '2027-03-01' });
+    commit(`intake: licence (BONA-W001)`);
+    assert.equal(
+      msg.licenceRecorded('BONA-W001', licence.licence),
+      '✅ Licence recorded for BONA-W001: 7200012345, valid until 2027-03-01. Live in ~3 min.',
+    );
+    const wafi = edits.setWafi(tmp, 'BONA-W001', { wafiNumber: '1234567890' });
+    commit(`intake: wafi (BONA-W001)`);
+    assert.equal(
+      msg.wafiRecorded('BONA-W001', wafi.licence),
+      '✅ Wafi licence recorded for BONA-W001: 1234567890. Live in ~3 min.',
+    );
+    assert.deepEqual(commits, ['intake: licence (BONA-W001)', 'intake: wafi (BONA-W001)']);
+    // He asked in Arabic, he is answered in Arabic (lib/commands.mjs sets `lang` off the verb).
+    assert.match(msg.licenceRecorded('BONA-W001', licence.licence, 'ar'), /^✅ تم تسجيل رخصة الإعلان لـ BONA-W001: 7200012345/);
+    assert.match(msg.wafiRecorded('BONA-W001', wafi.licence, 'ar'), /^✅ تم تسجيل رخصة وافي لـ BONA-W001: 1234567890/);
+    assert.match(msg.licenceRecorded('BONA-W001', null, 'ar'), /^✅ تم حذف رخصة الإعلان من BONA-W001/);
+    assert.equal(msg.licenceRecorded('BONA-W001', null), '✅ Licence cleared for BONA-W001. Live in ~3 min.');
   });
 });
 

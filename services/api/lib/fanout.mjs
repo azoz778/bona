@@ -19,6 +19,7 @@
  * deployment whose legal basis is different; the default is to require it (PDPL).
  */
 import crypto from 'node:crypto';
+import { newId } from './db.mjs';
 
 /** Where a queued event goes, per destination. An event with no mapping is skipped. */
 export const META_EVENT = {
@@ -48,6 +49,41 @@ export const SNAP_EVENT = {
   listing_view: 'VIEW_CONTENT',
 };
 
+/**
+ * A pipeline move is one event name — `lead_stage` — carrying the stage in its props,
+ * so the mapping is by stage rather than by event name.
+ *
+ * The point of sending these at all is that the ad platforms optimise on what they are
+ * told is *good*. A campaign judged on `Lead` buys the cheapest leads there are; the
+ * same campaign judged on `Purchase` buys the ones that close. So the stages that mean
+ * something commercially travel, and the intermediate ones the owner uses for his own
+ * bookkeeping (`new`, `contacted`) stay here — a platform that hears about every
+ * clerical move learns nothing from any of them.
+ *
+ * Google's lead-lifecycle vocabulary (`qualify_lead` -> `working_lead` ->
+ * `close_convert_lead` / `close_unconvert_lead`) is a chain, so GA4 hears the whole
+ * pipeline; Meta and Snap have names only for the two moments they can bid on.
+ */
+export const STAGE_META = { viewing: 'Schedule', won: 'Purchase' };
+export const STAGE_GA4 = {
+  qualified: 'qualify_lead',
+  viewing: 'working_lead', offer: 'working_lead', negotiation: 'working_lead',
+  won: 'close_convert_lead', lost: 'close_unconvert_lead',
+};
+export const STAGE_SNAP = { won: 'PURCHASE' };
+
+/** A mapping lookup that cannot answer with a prototype member. */
+const mapped = (table, key) => (typeof key === 'string' && Object.hasOwn(table, key) ? table[key] : null);
+
+/** Which destinations have a name for this stage. `[]` means the move stays private. */
+export function stageDests(stage) {
+  const out = [];
+  if (mapped(STAGE_META, stage)) out.push('meta');
+  if (mapped(STAGE_GA4, stage)) out.push('ga4');
+  if (mapped(STAGE_SNAP, stage)) out.push('snap');
+  return out;
+}
+
 /** Give up after this many tries; the row then reads `failed` on the Integrations board. */
 export const MAX_ATTEMPTS = 6;
 /** 1 min, 2, 4, 8, 16, 32 — capped, so a long outage does not push a row a day out. */
@@ -64,6 +100,21 @@ const hashText = (v) => {
   return s ? sha256(s) : null;
 };
 const compact = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null && v !== undefined && v !== ''));
+
+/**
+ * The platform's name for this event: by stage for `lead_stage`, by event name
+ * otherwise. Both lookups go through `mapped`, so a row carrying `constructor` where a
+ * name belongs is an event nobody has a name for rather than a function.
+ */
+const nameFor = (byEvent, byStage, event) =>
+  (event.name === 'lead_stage' ? mapped(byStage, event.props?.stage) : mapped(byEvent, event.name));
+
+/** The deal value a `won` move carries, in SAR. Anything else has none. */
+function stageValue(event) {
+  if (event.name !== 'lead_stage') return null;
+  const v = Number(event.props?.value_sar);
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
 
 /**
  * A retryable failure is one that could plausibly work later: a network error, a
@@ -108,8 +159,9 @@ function sourceUrl(event, siteUrl) {
 }
 
 export function buildMeta(event, { session, lead, cfg }) {
-  const name = META_EVENT[event.name];
+  const name = nameFor(META_EVENT, STAGE_META, event);
   if (!name) return null;
+  const value = stageValue(event);
   return {
     url: `https://graph.facebook.com/v21.0/${encodeURIComponent(cfg.metaPixelId)}/events`,
     body: compact({
@@ -123,7 +175,12 @@ export function buildMeta(event, { session, lead, cfg }) {
         custom_data: compact({
           content_ids: event.listing_id ? [event.listing_id] : undefined,
           content_type: event.listing_id ? 'product' : undefined,
-          content_category: event.props?.form ?? undefined,
+          content_category: event.props?.form ?? event.props?.stage ?? undefined,
+          // A Purchase with no value is an optimisation target Meta cannot rank, so the
+          // deal size travels with the won stage. Everything else has none, and sending
+          // a zero would be worse than sending nothing.
+          value: value ?? undefined,
+          currency: value ? 'SAR' : undefined,
         }),
       })],
       test_event_code: cfg.metaTestEventCode || undefined,
@@ -133,8 +190,9 @@ export function buildMeta(event, { session, lead, cfg }) {
 }
 
 export function buildGa4(event, { session, lead, cfg }) {
-  const name = GA4_EVENT[event.name];
+  const name = nameFor(GA4_EVENT, STAGE_GA4, event);
   if (!name) return null;
+  const value = stageValue(event);
   // GA4 needs a client id. The browser's `_ga` value is the one that stitches this
   // event onto the same user the gtag pixel reported; the anon id is the fallback so a
   // consented visitor with no GA cookie yet is still counted once, consistently.
@@ -160,6 +218,9 @@ export function buildGa4(event, { session, lead, cfg }) {
           source: lead?.source ?? undefined,
           medium: lead?.medium ?? undefined,
           campaign: lead?.campaign ?? undefined,
+          lead_stage: event.props?.stage ?? undefined,
+          value: value ?? undefined,
+          currency: value ? 'SAR' : undefined,
         }),
       }],
     },
@@ -167,8 +228,9 @@ export function buildGa4(event, { session, lead, cfg }) {
 }
 
 export function buildSnap(event, { session, lead, cfg }) {
-  const name = SNAP_EVENT[event.name];
+  const name = nameFor(SNAP_EVENT, STAGE_SNAP, event);
   if (!name) return null;
+  const value = stageValue(event);
   return {
     url: `https://tr.snapchat.com/v3/${encodeURIComponent(cfg.snapPixelId)}/events`,
     headers: { Authorization: `Bearer ${cfg.snapCapiToken}` },
@@ -180,6 +242,7 @@ export function buildSnap(event, { session, lead, cfg }) {
         action_source: 'WEB',
         event_source_url: sourceUrl(event, cfg.siteUrl),
         user_data: userData(session, lead, 'snap'),
+        custom_data: value ? { price: value, currency: 'SAR' } : undefined,
       })],
     },
   };
@@ -194,6 +257,50 @@ export function configuredDests(cfg) {
     ga4: Boolean(cfg.ga4MeasurementId && cfg.ga4ApiSecret),
     snap: Boolean(cfg.snapPixelId && cfg.snapCapiToken),
   };
+}
+
+/* ------------------------------------------------------------------ stage moves */
+
+/**
+ * Record a pipeline move and queue it for whichever platforms have a name for it.
+ *
+ * The dashboard is the only caller: the owner drags a lead to `won`, and this is what
+ * turns that click into a `Purchase` at Meta and a `close_convert_lead` at Google. The
+ * event row is written whatever the stage is — it is the lead's own history and the
+ * dashboard reads it back — but only the mapped stages are queued, so `contacted` costs
+ * one insert and no outbound request.
+ *
+ * The event carries the lead's session context (ip, ua, the touch bundles) so the
+ * Conversions APIs can still match the person months after the click that found them.
+ *
+ * @param {ReturnType<import('./db.mjs').openDb>} db
+ * @param {object} lead                              a `leads` row
+ * @param {{ stage: string, valueSar?: number|null, now?: number }} o
+ * @returns {{ event: object, dests: string[], queued: number }}
+ */
+export function enqueueStage(db, lead, { stage, valueSar = null, now = Date.now() } = {}) {
+  const session = lead?.session_id ? db.getSession(lead.session_id) : null;
+  const value = Number(valueSar);
+  const event = {
+    event_id: newId('ev'),
+    ts: now,
+    name: 'lead_stage',
+    anon_id: lead?.anon_id ?? session?.anon_id ?? null,
+    session_id: lead?.session_id ?? null,
+    lead_id: lead?.lead_id ?? null,
+    listing_id: lead?.listing_id ?? null,
+    path: null,
+    props: compact({ stage, value_sar: Number.isFinite(value) && value > 0 ? value : null }),
+    src_first: lead?.first_touch ?? session?.first_touch ?? null,
+    src_last: lead?.last_touch ?? session?.last_touch ?? null,
+    ip: session?.ip ?? null,
+    ua: session?.ua ?? null,
+    country: session?.country ?? null,
+  };
+  db.insertEvent(event);
+  const dests = stageDests(stage);
+  const queued = dests.length ? db.enqueueFanout(event.event_id, dests, { now }) : 0;
+  return { event, dests, queued };
 }
 
 /* ------------------------------------------------------------------ worker */
@@ -307,5 +414,11 @@ export function createFanout({ db, cfg, log = () => {}, fetch: doFetch = globalT
     timer = null;
   }
 
-  return { drainOnce, start, stop, dests, counts: () => db.fanoutCounts(), get started() { return Boolean(timer); } };
+  return {
+    drainOnce, start, stop, dests,
+    /** The same `enqueueStage` bound to this worker's store and clock. */
+    enqueueStage: (lead, opts) => enqueueStage(db, lead, { now: now(), ...opts }),
+    counts: () => db.fanoutCounts(),
+    get started() { return Boolean(timer); },
+  };
 }

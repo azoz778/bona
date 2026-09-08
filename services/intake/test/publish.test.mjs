@@ -139,8 +139,20 @@ describe('gitCommitPush — an explicit allowlist, never `git add -A`', () => {
     );
   });
 
-  it('the allowlist is exactly the three places the intake writes', () => {
-    assert.deepEqual(ALLOWED_PATHS, ['public/listings', 'scripts/curate/inbox', 'src/data/listings.json']);
+  it('the allowlist is exactly the four places the intake writes', () => {
+    assert.deepEqual(ALLOWED_PATHS, ['public/listings', 'scripts/curate/inbox', 'scripts/curate/licences.json', 'src/data/listings.json']);
+  });
+
+  // A curated listing (BONA-###) has no inbox JSON, so `licence BONA-015 …` writes the one
+  // tracked file outside scripts/curate/inbox that the intake is allowed to touch. If it were
+  // not on the allowlist gitCommitPush would refuse the commit and the edit would roll back.
+  it('commits a curated listing\'s REGA numbers from scripts/curate/licences.json', async () => {
+    write(clone, 'scripts/curate/licences.json', '{"BONA-015":{"adNumber":"7200012345","adExpiry":"2027-03-01","wafiNumber":null,"escrowAccount":null}}\n');
+    const res = await gitCommitPush(clone, 'intake: licence (BONA-015)', {
+      remote: 'origin', branch: 'main', paths: ['scripts/curate/licences.json', 'src/data/listings.json'],
+    });
+    assert.equal(res.committed, true);
+    assert.deepEqual(res.staged, ['scripts/curate/licences.json']);
   });
 });
 

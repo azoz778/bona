@@ -49,10 +49,35 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
    brochure BONA-W001        rebuild the Bona-branded PDF from the developer's original
    sold BONA-W001            mark it sold           (also: reserved / available)
    hide BONA-W001            keep it off the site   (show BONA-W001 puts it back)
+   licence BONA-W001 7200012345 2027-03-01
+                             the REGA advertisement licence and its expiry
+                             (licence BONA-W001 clear takes it off again)
+   wafi BONA-W001 1234567890 the off-plan project's Wafi licence  (wafi … clear)
    status                    what is published and what the intake is doing
    retry                     re-run the last brochure
    help                      the list above
    ```
+
+   `licence` / `wafi` are the only two that also address a **curated** listing (`BONA-015`):
+   a REGA advertisement number belongs to every listing on the site, not just the ones the
+   intake published. Where it lands is not the owner's problem — an intake listing keeps it in
+   its own `scripts/curate/inbox/<slug>.json`, a curated one in `scripts/curate/licences.json`
+   keyed by id, which `scripts/curate/build.mjs` merges back on. Both are checked against
+   `scripts/curate/rules.mjs::licenceProblems` — the site validator's own rule — *before*
+   anything is written, so a licence that would fail the build never reaches a commit.
+   The expiry is accepted as `2027-03-01` or `01/03/2027`, in Western or Arabic-Indic digits,
+   and must be a real calendar date (`2027-02-31` is refused, not rounded up). The Arabic verbs
+   `ترخيص` and `وافي` do the same thing and are answered in Arabic — the only place the intake
+   speaks it, because the licence line is the part of the site a regulator reads.
+
+   > **A curated id only works while the listing is PUBLISHED.** `locateCurated()` looks the
+   > id up in the built `src/data/listings.json`, which holds only what `build.mjs` actually
+   > published — so a curated listing the build excludes answers `No listing called BONA-002.`
+   > even though the id is real. Today that is: a house over the SAR 10,000,000 cap
+   > (`rules.mjs::isHousePublic` — BONA-002 and BONA-028), a land plot at or over SAR
+   > 50,000,000, and anything missing from TK's live public list. Those need no advertisement
+   > licence while they are off the public site; if one goes back on, record its number after
+   > the build that republishes it, or edit `scripts/curate/licences.json` by hand.
 
 5. Got a walkthrough clip? Send the **video** into the group — no caption needed. Working out
    which property it belongs to is the bot's job, not the owner's; three answers are tried,
@@ -188,13 +213,14 @@ processPdf(...)            images AND the branded brochure into <workDir>/publis
                            promoted into the repo only after checkListing() passes;
                            then build.mjs + validate.mjs
 gitCommitPush(repo, …)     `git add -A -- <allowlist>` only:
-                             public/listings/<slug>, scripts/curate/inbox, src/data/listings.json
+                             public/listings/<slug>, scripts/curate/inbox,
+                             scripts/curate/licences.json, src/data/listings.json
                            (a staged path outside that list aborts the commit)
                            push; if the remote moved, re-pull (the tree is clean now) and retry
 ```
 
 Anything that throws after the first write calls `resetTree()`: it deletes the new listing
-directory, then `git checkout --` and `git clean -fd` **only** the three allowlisted paths, so
+directory, then `git checkout --` and `git clean -fd` **only** the allowlisted paths, so
 the next job can always pull. It deliberately never touches anything else — a modified tracked
 file outside the allowlist means somebody else is working in that clone, and the job stops with
 "the publishing clone has N uncommitted path(s)" rather than throwing their work away.

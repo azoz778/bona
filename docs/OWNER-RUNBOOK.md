@@ -83,7 +83,7 @@ That creates the tunnel `bona`, points `bona-api.azoz.uk` at it, installs and st
 ## 8. Publish a property from WhatsApp (PDF → live listing)
 1. Your existing owner-only WhatsApp group **"PDF"** is already wired (you will see "Bona intake connected" there). Alternatively create or rename any group so its name contains **"Bona"** (e.g. "Bona Listings") — you must be the group's creator; within ~5 minutes the service posts the same greeting there.
 2. Drop a property brochure **PDF** in the group. Optional caption hints: `rent`, `SAR 4,500,000`, `#test` (dry run — summary only), `#brochure` (also publish the PDF). Within a minute it replies "Reading…", then "✅ Live: … https://bona.azoz.uk/properties/<slug>/" once the page is on the site (deploy takes ~3 min).
-3. Fix-ups by replying in the group: `remove BONA-W003` · `hero BONA-W003 4` (make photo 4 the cover) · `price BONA-W003 4500000` · `sold BONA-W003` · `hide` / `show BONA-W003` · `brochure BONA-W003` (rebuild the Bona-branded PDF) · `status` · `help`.
+3. Fix-ups by replying in the group: `remove BONA-W003` · `hero BONA-W003 4` (make photo 4 the cover) · `price BONA-W003 4500000` · `sold BONA-W003` · `hide` / `show BONA-W003` · `brochure BONA-W003` (rebuild the Bona-branded PDF) · `licence BONA-W003 7200012345 2027-03-01` and `wafi BONA-W003 1234567890` (the REGA numbers — §10) · `status` · `help`.
 4. Every listing also gets a **Bona-branded brochure PDF** (Bona cover, footer on every page with our number and licence, closing enquiry page with a QR code), shrunk to ≤ 25 MB and linked as "Download brochure" on the page. Caption `#nobrochure` skips it. Whole-project brochures (a tower or compound) publish as one project listing with the developer named and a "from" price when printed.
 5. Limits: PDFs up to 150 MB / 120 pages. A run takes 3–10 minutes for a big deck and about $0.4–1.0 of Claude usage. If Claude's usage window is exhausted the group gets "Something went wrong"; the job is replayed automatically when the daemon restarts (`systemctl --user restart bona-intake`) after the window resets.
 Verified 2026-09-06 03:56 KSA: a test brochure sent with `#test` came back in 7 minutes as a dry-run summary (title AR/EN, price from the PDF, 7 photos ranked, cover chosen). Costs ≈ $0.15–0.60 of Claude usage per PDF (60–200 s).
@@ -103,8 +103,13 @@ Runs inside `bona-api` on this PC; nothing personal is on the public site.
 Full page: `docs/checklists/rega-ad-licences.md`. The short version:
 1. On the FAL platform (Nafath): brokerage contract with marketing scope, approved by the owner → *Advertisement licences* → new → contract, deed, purpose, **channels**, price → save (~SAR 50). Off-plan units use the developer's **Wafi** number instead.
 2. Record it by replying in the intake WhatsApp group:
-   `licence BONA-W003 <adNumber> <YYYY-MM-DD>` · `wafi BONA-W003 <number>`
-   The page then shows the licence line and a QR; the Aqar export and the brochure pick it up. (Commands land with the last step of the tracking work; until then send the numbers to the agent.)
+   `licence BONA-W003 7200012345 2027-03-01` · `wafi BONA-W003 1234567890`
+   The page then shows the licence line and a QR; the Aqar export and the brochure pick it up.
+   - Works on a **curated** listing too (`licence BONA-015 …`) — those numbers go to `scripts/curate/licences.json` instead of the listing's own file; you type the same thing either way.
+   - The expiry may be typed `01/03/2027` as well, and Arabic-Indic digits are fine. A date that is not real (`2027-02-31`) is refused rather than rounded.
+   - Arabic verbs work and are answered in Arabic: `ترخيص BONA-W003 7200012345 2027-03-01` · `وافي BONA-W003 1234567890`.
+   - Wrong number? `licence BONA-W003 clear` / `wafi BONA-W003 clear` takes it off again.
+   - The reply is `✅ Licence recorded for BONA-W003: 7200012345, valid until 2027-03-01. Live in ~3 min.` — the page updates with the next deploy (~3 minutes).
 3. Until a listing has a number it stays on the site with the advertiser + FAL block only — **no Aqar, no paid ad, no Story naming it**. The dashboard's Listings view flags `no_ad_licence`, `expiring_30d`, `expired`, `wafi_missing`.
 4. The advertiser on every ad is **Abdulaziz Zidan — FAL 1100313556** until Bona has its own CR (682010) and establishment FAL; then `site.json → advertiser` changes and everything re-renders.
 
