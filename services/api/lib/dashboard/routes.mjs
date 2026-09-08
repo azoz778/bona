@@ -131,15 +131,16 @@ export function createDashboardRoutes({
   }
 
   /**
-   * Answer a body this route would not take. An oversized one is never finished being
-   * read, so the connection goes with it: the unread remainder must not be left sitting
-   * on a keep-alive socket for the request timeout to clear.
+   * Answer a body this route would not take.
+   *
+   * An oversized one is never finished being read, so the connection goes with the
+   * answer: `Connection: close` makes Node end the socket once the 413 is out, rather
+   * than leaving the unread remainder sitting on a keep-alive connection until the
+   * request timeout clears it. The close is a FIN after the response — destroying the
+   * socket outright would race the client's read of the very answer explaining why.
    */
   function refuseBody(req, res, parsed) {
-    if (parsed.status === 413) {
-      res.on('finish', () => req.destroy());
-      return sendJson(res, 413, { error: parsed.error }, { Connection: 'close' });
-    }
+    if (parsed.status === 413) return sendJson(res, 413, { error: parsed.error }, { Connection: 'close' });
     return sendJson(res, parsed.status, { error: parsed.error });
   }
 
