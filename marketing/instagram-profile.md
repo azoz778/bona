@@ -1,9 +1,9 @@
-# Instagram profile — @bona.com.sa
+# Instagram profile — @bonarealestatesa
 
 | Field | Value |
 |---|---|
 | Name (display) | **Bona · بونا** — "Bona \| Luxury Real Estate Jeddah" is searchable but long; the name field is indexed by IG search, so keep *Bona* first. Recommended: `Bona · Jeddah Luxury Real Estate` (max 64 chars) |
-| Username | `@bona.com.sa` (exists — keep; it doubles as the future domain) |
+| Username | `@bonarealestatesa` (exists — keep; it doubles as the future domain) |
 | Category | **Real Estate** (label shown on profile; pick *Real Estate Agent* if the sub-category list appears) |
 | Account type | Business (required for the API — see `instagram-connect-checklist.md`) |
 | Link | `https://bona.azoz.uk` → switch to `https://bona.com.sa` on domain go-live |

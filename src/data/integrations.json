@@ -54,11 +54,11 @@
   },
   {
     "id": "instagram",
-    "name": "Instagram @bona.com.sa",
+    "name": "Instagram @bonarealestatesa",
     "status": "pending-owner",
     "owner": "owner",
     "action": "Switch the account to Business, link it to a Facebook Page under the TK Meta Business, then the posting script can publish unattended.",
-    "link": "https://www.instagram.com/bona.com.sa/",
+    "link": "https://www.instagram.com/bonarealestatesa/",
     "detail": "Profile exists and the site links to it. API posting waits on the account link."
   },
   {
@@ -66,7 +66,7 @@
     "name": "Instagram API access",
     "status": "pending-owner",
     "owner": "owner",
-    "action": "see marketing/instagram-access.md — switch @bona.com.sa to a Business account and link it into the Meta Business, or provide credentials",
+    "action": "see marketing/instagram-access.md — switch @bonarealestatesa to a Business account and link it into the Meta Business, or provide credentials",
     "link": "https://business.facebook.com/settings/instagram-account-v2s",
     "detail": "Unblocks unattended posting from the content calendar and the Meta MCP."
   },

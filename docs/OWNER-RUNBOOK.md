@@ -14,7 +14,7 @@ GitHub issues the HTTPS certificate for bona.azoz.uk automatically within ~15 mi
 gh api -X PUT repos/azoz778/bona/pages -F https_enforced=true
 ```
 
-## 2. Instagram @bona.com.sa → API posting (5 minutes)
+## 2. Instagram @bonarealestatesa → API posting (5 minutes)
 Follow `marketing/instagram-connect-checklist.md`: switch the account to Business, create a Facebook Page "Bona", link both into the existing Meta Business, then read the IG Business ID with the curl in §4 of that file. After that:
 ```
 META_ACCESS_TOKEN=... IG_BUSINESS_ID=... node scripts/instagram-post.mjs whoami

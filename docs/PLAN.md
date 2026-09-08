@@ -1,6 +1,6 @@
 # Bona — launch plan (2026-09-05)
 
-Owner brief: new luxury real-estate company **Bona** (بونا). Reuse TK Estate's photos, listings and copy. Luxury site, bilingual AR/EN, test domain **bona.azoz.uk** (real domain bona.com.sa to be bought later). Instagram **@bona.com.sa** exists. WhatsApp **+966 59 329 6933**. Everything connected (Instagram, social, SEO), an ops dashboard, a recurring loop, multiple agents, done today.
+Owner brief: new luxury real-estate company **Bona** (بونا). Reuse TK Estate's photos, listings and copy. Luxury site, bilingual AR/EN, test domain **bona.azoz.uk** (real domain bona.com.sa to be bought later). Instagram **@bonarealestatesa** exists. WhatsApp **+966 59 329 6933**. Everything connected (Instagram, social, SEO), an ops dashboard, a recurring loop, multiple agents, done today.
 
 ## Decisions (made autonomously — change any in `src/data/site.json`)
 | Topic | Decision | Why |
@@ -11,7 +11,7 @@ Owner brief: new luxury real-estate company **Bona** (بونا). Reuse TK Estate
 | Data | `src/data/listings.json` curated from TK's public API (50 live listings) + TK photo library (1,490 images, 64 folders on tk-storage.azoz.uk). `scripts/sync-listings.mjs` refreshes from TK daily in CI (non-fatal if TK is down) | Real inventory, real photos, self-updating |
 | Brand | Ivory / ink / champagne palette, editorial serif display, generous whitespace, photography-led | Luxury positioning; deliberately different from TK's Duda template |
 | Licences | Site footer shows FAL 1100313556 (owner's own REGA broker licence). CR number blank until Bona's CR exists | Legal to show; REGA ad rules still require per-listing ad licences before paid promotion (dashboard flags this) |
-| Instagram | Site links to @bona.com.sa. Launch kit in `marketing/` (bio, 30-day calendar, 9 launch posts AR/EN with image URLs, hashtag sets). Posting script ready for the Meta Graph API — needs the owner to convert @bona.com.sa to a Business account and link it to a Facebook Page in TK's Meta Business (5 min, owner-only) | API posting is gated on account linking, which only the account owner can do |
+| Instagram | Site links to @bonarealestatesa. Launch kit in `marketing/` (bio, 30-day calendar, 9 launch posts AR/EN with image URLs, hashtag sets). Posting script ready for the Meta Graph API — needs the owner to convert @bonarealestatesa to a Business account and link it to a Facebook Page in TK's Meta Business (5 min, owner-only) | API posting is gated on account linking, which only the account owner can do |
 | Dashboard | `/dashboard/` (noindex): lead tracker (local + CSV export), inventory, content calendar, integration status board, launch checklist | Zero backend; upgrade path = TK CRM or Supabase later |
 | Loop | GitHub Actions: daily 06:00 KSA rebuild (fresh listings) + link/health check; weekly content-calendar refresh issue. Session loop: agent swarm iterates until QA + two-model review pass | Durable without a chat session |
 | Review | Claude reviewer agent + Codex second opinion before "shipped" | Owner rule 2026-09-01 |
@@ -25,7 +25,7 @@ Owner brief: new luxury real-estate company **Bona** (بونا). Reuse TK Estate
 
 ## Owner-only items (cannot be done by the agent)
 - Create GitHub repo (`gh repo create azoz778/bona --public`) if the classifier keeps blocking it.
-- Instagram: switch @bona.com.sa to Business, link to a Facebook Page under the TK Meta Business, then the posting script works unattended.
+- Instagram: switch @bonarealestatesa to Business, link to a Facebook Page under the TK Meta Business, then the posting script works unattended.
 - Buy bona.com.sa (Saudi .com.sa needs a CR / trade name), then flip `site.url` and DNS.
 - GA4 property + Meta Pixel IDs → `site.json.analytics`.
 - Bona CR + FAL company licence + REGA ad licences before paid promotion.
@@ -37,5 +37,5 @@ Owner brief: new luxury real-estate company **Bona** (بونا). Reuse TK Estate
 
 ## Round 2 — 2026-09-05 20:20 KSA (owner request: more properties, houses vs apartments, about us, privacy, immersive, Matterport)
 - LIVE (main @ 66bccff): 47 listings (24 houses, 21 apartments incl. 10 Kian Residence units, 2 land plots with Esri satellite stills), sections /properties/houses/ · /apartments/ · /land/, /tours/ (Matterport inline embed; 1 tour today, more arrive via the 06:00 sync of TK's virtual_tour_url), /about/ from src/data/about.json (story, values, founder, stats), /privacy/ (PDPL policy AR/EN, 13 sections), immersive layer (hero slideshow + Ken Burns, view transitions, reveals, parallax, marquee, gallery strip), dashboard kind/tour views. 124 pages, 0 broken links, 0 console errors.
-- Instagram: @bona.com.sa is still a personal account (business_discovery: not found) → owner brief in marketing/instagram-access.md (Path A no password / Path B password).
+- Instagram: @bonarealestatesa is still a personal account (business_discovery: not found) → owner brief in marketing/instagram-access.md (Path A no password / Path B password).
 - Reviews DONE (main @ fd10c02): Codex 5 findings fixed (before-swap cleanup for lightbox/drawer, land-stills retry, shared Matterport parser, privacy names Matterport) · Claude reviewer 22 findings, the 9 important + 10 minor fixed (hero loads one image, About stats computed from inventory, Kian photos marked illustrative, Kayan project page as a range, land price/m² 6,720, one shared kind map, CollectionPage ItemList, Arabic zero plurals, Tours in nav, privacy names Cloudflare/CDN). Verified live: all pages 200, zero console errors.

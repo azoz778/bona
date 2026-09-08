@@ -2,34 +2,97 @@
   "name": "Bona",
   "nameAr": "بونا",
   "legalName": "Bona Real Estate",
-  "tagline": { "en": "Exceptional homes, quietly.", "ar": "منازل استثنائية، بهدوء." },
+  "tagline": {
+    "en": "Exceptional homes, quietly.",
+    "ar": "منازل استثنائية، بهدوء."
+  },
   "description": {
     "en": "Bona is a private luxury real estate boutique in Jeddah, representing a curated portfolio of villas, penthouses, waterfront residences and off-market homes across Saudi Arabia and select international destinations.",
     "ar": "بونا بوتيك عقاري فاخر في جدة، يمثّل محفظة منتقاة من الفلل والبنتهاوس والمساكن الواجهية والعقارات خارج السوق في المملكة العربية السعودية ووجهات عالمية مختارة."
   },
   "url": "https://bona-real-estate.com",
   "futureDomain": "bona-real-estate.com",
-  "whatsapp": { "e164": "+966593296933", "display": "+966 59 329 6933", "wa": "966593296933" },
-  "phone": { "e164": "+966593296933", "display": "+966 59 329 6933" },
-  "email": "bona.com.sa@gmail.com",
-  "instagram": { "handle": "bona.com.sa", "url": "https://www.instagram.com/bona.com.sa/" },
-  "address": {
-    "en": { "street": "Al Rawdah District", "city": "Jeddah", "region": "Makkah Province", "country": "Saudi Arabia", "postalCode": "23432" },
-    "ar": { "street": "حي الروضة", "city": "جدة", "region": "منطقة مكة المكرمة", "country": "المملكة العربية السعودية", "postalCode": "23432" }
+  "whatsapp": {
+    "e164": "+966593296933",
+    "display": "+966 59 329 6933",
+    "wa": "966593296933"
   },
-  "geo": { "lat": 21.5433, "lng": 39.1728 },
-  "licences": { "fal": "1100313556", "cr": null },
-  "hours": { "en": "Sunday – Thursday, 10:00 – 19:00", "ar": "الأحد – الخميس، 10:00 – 19:00" },
+  "phone": {
+    "e164": "+966593296933",
+    "display": "+966 59 329 6933"
+  },
+  "email": "bona.com.sa@gmail.com",
+  "instagram": {
+    "handle": "bonarealestatesa",
+    "url": "https://www.instagram.com/bonarealestatesa/"
+  },
+  "address": {
+    "en": {
+      "street": "Al Rawdah District",
+      "city": "Jeddah",
+      "region": "Makkah Province",
+      "country": "Saudi Arabia",
+      "postalCode": "23432"
+    },
+    "ar": {
+      "street": "حي الروضة",
+      "city": "جدة",
+      "region": "منطقة مكة المكرمة",
+      "country": "المملكة العربية السعودية",
+      "postalCode": "23432"
+    }
+  },
+  "geo": {
+    "lat": 21.5433,
+    "lng": 39.1728
+  },
+  "licences": {
+    "fal": "1100313556",
+    "cr": null
+  },
+  "hours": {
+    "en": "Sunday – Thursday, 10:00 – 19:00",
+    "ar": "الأحد – الخميس، 10:00 – 19:00"
+  },
   "markets": {
-    "en": ["Jeddah", "Riyadh", "Dubai", "Côte d'Azur", "Costa del Sol", "Oman"],
-    "ar": ["جدة", "الرياض", "دبي", "الريفييرا الفرنسية", "كوستا ديل سول", "عُمان"]
+    "en": [
+      "Jeddah",
+      "Riyadh",
+      "Dubai",
+      "Côte d'Azur",
+      "Costa del Sol",
+      "Oman"
+    ],
+    "ar": [
+      "جدة",
+      "الرياض",
+      "دبي",
+      "الريفييرا الفرنسية",
+      "كوستا ديل سول",
+      "عُمان"
+    ]
   },
   "concierge": {
     "enabled": true,
     "apiBase": "https://api.bona-real-estate.com",
-    "name": { "en": "Dana", "ar": "دانة" }
+    "name": {
+      "en": "Dana",
+      "ar": "دانة"
+    }
   },
-  "analytics": { "ga4": null, "metaPixel": null, "snapPixel": null, "tiktokPixel": null, "gscVerification": null },
-  "advertiser": { "name": { "en": "Abdulaziz Zidan", "ar": "عبدالعزيز زيدان" }, "fal": "1100313556" },
+  "analytics": {
+    "ga4": null,
+    "metaPixel": null,
+    "snapPixel": null,
+    "tiktokPixel": null,
+    "gscVerification": null
+  },
+  "advertiser": {
+    "name": {
+      "en": "Abdulaziz Zidan",
+      "ar": "عبدالعزيز زيدان"
+    },
+    "fal": "1100313556"
+  },
   "indexNowKey": "b0na7c3f9e2d4a1b8f6e5c4d3b2a1908"
 }
