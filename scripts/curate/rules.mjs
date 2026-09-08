@@ -114,3 +114,57 @@ export function isHousePublic(l) {
   const sar = sarAmount(l.price);
   return sar === null || sar <= HOUSE_PRICE_CAP;
 }
+
+// ---- REGA advertising licence ------------------------------------------------------------
+// `licence: { adNumber, adExpiry, wafiNumber, escrowAccount } | null` — the advertisement
+// licence REGA issues per listing on the FAL platform, and the Wafi licence / escrow account
+// for an off-plan project. ONE definition, shared by scripts/curate/validate.mjs and the
+// intake's own checkListing() + `licence`/`wafi` commands, so a number the owner records from
+// WhatsApp can never fail the site build afterwards.
+export const LICENCE_FIELDS = ['adNumber', 'adExpiry', 'wafiNumber', 'escrowAccount'];
+
+/**
+ * The shape of a licence number as REGA prints it: digits, letters, `/` and `-`.
+ * The lookahead is what earns the `-` and `/` their place: they are in the alphabet because
+ * REGA prints them, but a "number" made of nothing else is punctuation, and it would go onto
+ * a page as a compliance line. At least one digit or letter is required.
+ */
+export const LICENCE_NUMBER_RE = /^(?=.*[A-Za-z0-9])[A-Za-z0-9/-]{4,32}$/;
+
+/**
+ * A REAL calendar date in YYYY-MM-DD — `2027-02-31` is not one.
+ *
+ * Deliberately not `Date.parse`: V8 ROLLS OVER an out-of-range day in a date-only ISO string
+ * (`Date.parse('2027-02-31')` answers the 3rd of March, not NaN), so the obvious check would
+ * have published an expiry the owner never typed. The components are compared back instead.
+ */
+export function isCalendarDate(s) {
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, m, d] = s.split('-').map(Number);
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
+/**
+ * The licence block of a listing. `null`/absent is always fine — whether a listing actually
+ * NEEDS a licence is the owner's call (docs/checklists/rega-ad-licences.md), not a build rule.
+ * @returns {string[]} problems (empty = good)
+ */
+export function licenceProblems(lc) {
+  if (lc === null || lc === undefined) return [];
+  if (!lc || typeof lc !== 'object' || Array.isArray(lc)) {
+    return ['licence must be null or { adNumber, adExpiry, wafiNumber, escrowAccount }'];
+  }
+  const e = [];
+  for (const k of Object.keys(lc)) if (!LICENCE_FIELDS.includes(k)) e.push(`licence has an unknown field "${k}"`);
+  for (const k of LICENCE_FIELDS) {
+    const v = lc[k];
+    if (!(v === null || v === undefined || (typeof v === 'string' && v.trim().length > 0 && v.length <= 64))) {
+      e.push(`licence.${k} must be null or a non-empty string of at most 64 characters`);
+    }
+  }
+  if (typeof lc.adExpiry === 'string' && !isCalendarDate(lc.adExpiry)) e.push(`licence.adExpiry must be YYYY-MM-DD, got ${lc.adExpiry}`);
+  if (typeof lc.adExpiry === 'string' && !lc.adNumber) e.push('licence.adExpiry without licence.adNumber');
+  return e;
+}

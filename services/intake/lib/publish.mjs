@@ -19,7 +19,11 @@ import path from 'node:path';
 // `public/listings/<slug>/NN.jpg`, `NN-thumb.webp` and the Bona-branded
 // `public/listings/<slug>/brochure.pdf`. Nothing new had to be added for the brochure —
 // underAllowed() below matches on the `<allowed>/` prefix, and publish.test.mjs pins it.
-export const ALLOWED_PATHS = ['public/listings', 'scripts/curate/inbox', 'src/data/listings.json'];
+// `scripts/curate/licences.json` is where a CURATED listing's REGA numbers live (the intake's
+// `licence`/`wafi` commands, lib/edits.mjs) — the one tracked file outside the inbox those
+// commands write. It is on this list rather than a special case so a failed licence edit is
+// reverted by revertOwnPaths() like everything else.
+export const ALLOWED_PATHS = ['public/listings', 'scripts/curate/inbox', 'scripts/curate/licences.json', 'src/data/listings.json'];
 /** Where a crashed job can leave untracked files behind. */
 export const SCRATCH_PATHS = ['public/listings', 'scripts/curate/inbox'];
 

@@ -1,8 +1,9 @@
-// The `remove | hero | price | sold | hide | brochure` commands, applied to an inbox
-// listing. File edits — the caller rebuilds, commits and replies.
+// The `remove | hero | price | sold | hide | brochure | licence | wafi` commands, applied to
+// a listing. File edits — the caller rebuilds, commits and replies.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { licenceProblems } from '../../../scripts/curate/rules.mjs';
 import { brochureFileIn, brochureUrlFor, buildBrandedBrochure, findSourcePdf } from './brochure.mjs';
 import { WARNING_CODES, findInbox } from './listing.mjs';
 import { removeListingImages } from './images.mjs';
@@ -54,6 +55,147 @@ export function setPrice(repo, id, { amount, currency, onRequest }) {
   if (onRequest) { p.onRequest = true; p.amount = null; p.from = false; }
   else { p.onRequest = false; p.amount = amount; if (currency) p.currency = currency; }
   return { listing: save(found.file, found.listing) };
+}
+
+// ---- REGA advertising licences ------------------------------------------------------------
+// Two homes, one command. An intake listing carries `licence` inside its own inbox JSON; a
+// CURATED listing (BONA-###) is generated from listings.source.mjs and has nowhere to put one,
+// so its numbers live in scripts/curate/licences.json keyed by id and build.mjs merges them
+// back on (see the "REGA advertising licences" block there). The owner types the same command
+// either way — which file it lands in is not his problem.
+export const LICENCES_FILE = path.join('scripts', 'curate', 'licences.json');
+export const LISTINGS_JSON = path.join('src', 'data', 'listings.json');
+
+/** Every key the site knows about, so a stored licence is never a partial object. */
+const EMPTY_LICENCE = { adNumber: null, adExpiry: null, wafiNumber: null, escrowAccount: null };
+
+const licencesPath = (repo) => path.join(repo, LICENCES_FILE);
+
+/**
+ * scripts/curate/licences.json, as `{ [listingId]: licence }`.
+ *
+ * ONLY a genuinely absent file bootstraps to an empty set. Anything else — unreadable,
+ * invalid JSON, a half-written file, JSON that is not an object of listings — THROWS, because
+ * the caller's next move is to write the file back out: swallowing the error would rewrite it
+ * with just the one key being set and silently delete every other listing's licence. A throw
+ * reaches index.mjs::publishEdit, which restores the clone with resetTree() and answers the
+ * group with the generic failure line, leaving the broken file for the owner to fix.
+ *
+ * The result has NO PROTOTYPE: the keys come from a file and are looked up with a string that
+ * arrived in a WhatsApp message, so a lookup must never fall through to Object.prototype.
+ */
+export function readLicences(repo) {
+  const file = licencesPath(repo);
+  let raw;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT') return Object.create(null);
+    throw err;
+  }
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (cause) {
+    // Generic message, detail on `err.detail` — publish.mjs::must()'s rule. `err.message`
+    // reaches the group through `status` ("Last error: …"), and a parser message is one Node
+    // release away from quoting the bytes it choked on.
+    const err = new Error(`${LICENCES_FILE} is not valid JSON — refusing to overwrite it. See the journal.`);
+    err.detail = cause.message;
+    throw err;
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error(`${LICENCES_FILE} must be a JSON object of listing id -> licence`);
+  }
+  const all = Object.create(null);
+  for (const [k, v] of Object.entries(data)) all[k] = v;
+  return all;
+}
+
+/** Sorted by id, so two edits months apart produce a readable diff instead of a reshuffle. */
+function writeLicences(repo, all) {
+  const sorted = Object.fromEntries(Object.keys(all).sort().map((k) => [k, all[k]]));
+  fs.writeFileSync(licencesPath(repo), `${JSON.stringify(sorted, null, 2)}\n`);
+  return sorted;
+}
+
+/**
+ * A CURATED listing, read back from the built src/data/listings.json.
+ *
+ * That file is the only place in the repo where the curated set exists as data rather than as
+ * a module to execute, and it is committed, so it answers "is BONA-015 a real listing?"
+ * without importing listings.source.mjs into the daemon.
+ * @returns {{listing:object, curated:true}|null}
+ */
+export function locateCurated(repo, id) {
+  const want = String(id).toUpperCase();
+  let all;
+  try { all = JSON.parse(fs.readFileSync(path.join(repo, LISTINGS_JSON), 'utf8')); } catch { return null; }
+  const listing = Array.isArray(all) ? all.find((l) => String(l?.id).toUpperCase() === want) : null;
+  return listing ? { listing, curated: true } : null;
+}
+
+/**
+ * The licence a listing should END UP with: the one it has, plus the fields this command sets,
+ * or minus the fields it clears. An all-null block is not a licence — it becomes `null`, which
+ * is what the site reads as "advertiser + FAL line only, no per-listing number".
+ */
+function nextLicence(current, patch, clearKeys) {
+  const next = { ...EMPTY_LICENCE, ...(current ?? {}) };
+  if (patch) {
+    // Only the fields actually GIVEN are set. `wafi <id> <no>` must not blank the ad licence
+    // just because its patch carries no adNumber…
+    const given = Object.entries(patch).filter(([, v]) => v !== undefined);
+    // …and a patch that sets nothing at all is a caller bug, not a request to clear the
+    // block. Clearing is its own argument and its own command; an all-undefined patch used to
+    // look identical to one and wiped a licence the owner had recorded.
+    if (!given.length) throw new Error('licence patch has no field to set — use { clear: true } to remove one');
+    for (const [k, v] of given) next[k] = v;
+  } else {
+    for (const k of clearKeys) next[k] = null;
+  }
+  return Object.values(next).some((v) => v !== null && v !== undefined && v !== '') ? next : null;
+}
+
+/**
+ * Write the licence onto whichever of the two homes this id has.
+ *
+ * Validated with scripts/curate/rules.mjs::licenceProblems BEFORE anything is written — the
+ * SAME function validate.mjs runs on the built listings.json. A licence that would fail the
+ * site build never reaches a commit, so the daemon cannot push a tree that then refuses to
+ * rebuild.
+ * @returns {{listing:object,licence:object|null,curated:boolean}|{error:string}|null}
+ */
+function applyLicence(repo, id, patch, clearKeys) {
+  const want = String(id).toUpperCase();
+  const found = findInbox(repo, want);
+  if (found) {
+    const licence = nextLicence(found.listing.licence, patch, clearKeys);
+    const problems = licenceProblems(licence);
+    if (problems.length) return { error: problems.join('; ') };
+    found.listing.licence = licence;
+    return { listing: save(found.file, found.listing), licence, curated: false };
+  }
+  const curated = locateCurated(repo, want);
+  if (!curated) return null;
+  const all = readLicences(repo);
+  const licence = nextLicence(all[want], patch, clearKeys);
+  const problems = licenceProblems(licence);
+  if (problems.length) return { error: problems.join('; ') };
+  if (licence) all[want] = licence;
+  else delete all[want];
+  writeLicences(repo, all);
+  return { listing: curated.listing, licence, curated: true };
+}
+
+/** `licence <id> <adNumber> <YYYY-MM-DD>` — or `licence <id> clear`. */
+export function setLicence(repo, id, { adNumber, adExpiry, clear = false } = {}) {
+  return applyLicence(repo, id, clear ? null : { adNumber, adExpiry }, ['adNumber', 'adExpiry']);
+}
+
+/** `wafi <id> <number>` — or `wafi <id> clear`. */
+export function setWafi(repo, id, { wafiNumber, clear = false } = {}) {
+  return applyLicence(repo, id, clear ? null : { wafiNumber }, ['wafiNumber']);
 }
 
 export function setStatus(repo, id, status) {
