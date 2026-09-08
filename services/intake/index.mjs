@@ -28,6 +28,7 @@ import { processPdf, RejectError, sha256File } from './lib/pipeline.mjs';
 import { assertCleanTree, gitCommitPush, gitPull, rebuild, resetTree, waitForLive } from './lib/publish.mjs';
 import { STOP_GRACE_MS, waitForIdle } from './lib/shutdown.mjs';
 import { createState } from './lib/state.mjs';
+import { seedGroups } from './lib/groups.mjs';
 
 const cfg = loadConfig();
 const state = createState(cfg.statePath);
@@ -821,10 +822,24 @@ async function main() {
 
   replayPendingJobs();
 
+  // A restart must not wait for group discovery: the configured, already-announced group is
+  // polled from the first cycle, and a throttled discovery ("rate-overlimit") is retried at
+  // the scan cadence, never every poll — hammering the throttled call is what kept it tripped.
+  if (!groups.length) {
+    groups = seedGroups(cfg.groupJids, state.isAnnounced);
+    if (groups.length) log.info('group.seeded', { jids: groups.map((g) => g.id) });
+  }
   let lastScan = 0;
   while (!stopping) {
     try {
-      if (Date.now() - lastScan >= cfg.groupScanMs) { await discoverGroups(); lastScan = Date.now(); }
+      if (Date.now() - lastScan >= cfg.groupScanMs) {
+        try {
+          await discoverGroups();
+        } catch (err) {
+          log.warn('group.scan_failed', { error: err.message, polling: groups.length, retryInMs: cfg.groupScanMs });
+        }
+        lastScan = Date.now();
+      }
       for (const g of groups) await pollGroup(g);
       requeueWaitingVideos();
     } catch (err) {
