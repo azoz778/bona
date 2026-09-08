@@ -436,7 +436,7 @@ BONA_RETELL_MOCK=1 node api/index.mjs      # no Retell traffic at all
 cd ~/bona/services && node --test api/test/*.test.mjs
 ```
 
-378 tests, no network, no Retell and no WhatsApp: search and Card formatting in EN and AR, price
+395 tests, no network, no Retell and no WhatsApp: search and Card formatting in EN and AR, price
 parsing ("4.5m", "٤ ملايين"), token buckets and the trusted-proxy rules for client IPs,
 the CORS allowlist and the origin refusal, tool authentication (header, bearer, and the
 auth-failure throttle), the navigation allowlist, lead de-duplication, the daily
@@ -449,11 +449,12 @@ or jid, touchpoints, stages, fan-out), the enquiry route and the text/plain medi
 the form actually posts, the fan-out worker (credentials absent, consent absent,
 payload shape, hashing, delivery, backoff and giving up, and the stage-move mapping),
 the Retell metadata plumbing, the one-time JSONL import, and the dashboard: the login
-code's whole life (hashes only, both rate limits, five wrong guesses, expiry, cookie
-flags), every statistic over a seeded store, and every route through the real HTTP
-server — the redirect when logged out, the login round trip with the code read back out
-of the mocked WhatsApp message, the write gates, and a lead named `<script>` rendering
-as text.
+code's whole life (hashes only, all three rate limits, five wrong guesses, expiry,
+cookie flags, and a stranger failing to burn the code the owner is holding), every
+statistic over a seeded store, and every route through the real HTTP server — the
+redirect when logged out, the login round trip with the code read back out of the
+mocked WhatsApp message, the write gates, and a lead named `<script>` rendering as
+text.
 
 ---
 
@@ -546,10 +547,19 @@ Nothing here is CORS-enabled, so no other origin can read a byte of it.
 
 **Login.** `GET /dashboard/login` → `POST /dashboard/login/code` sends a 6-digit code to
 the owner's WhatsApp (`BONA_OWNER_JID`, via the same Evolution instance as the lead
-notes). Only `sha256(code)` is stored, for 10 minutes; three codes per 10 minutes per IP
-and one a minute globally; the code appears in exactly one place, the message itself —
-never in a log line or a response. `POST /dashboard/login/verify` (form-encoded, 5 wrong
-attempts burn the code) sets `bona_dash`: `HttpOnly; Secure; SameSite=Lax; Path=/;
+notes). Only `sha256(code)` is stored, for 10 minutes; three codes per 10 minutes per IP,
+and one a minute plus twenty a day across the whole service; the code appears in exactly
+one place, the message itself — never in a log line or a response.
+
+The same request also sets a short-lived `bona_dash_try` nonce cookie, and the code is
+remembered in memory beside it. This is what stops the login from being a lockout: a
+wrong guess burns an attempt, five burn the code, and only the browser holding that
+nonce can spend them. A stranger POSTing guesses has no nonce, so the store never hears
+about it and the code the owner is holding survives. (The binding is in memory, so a
+service restart voids a code in flight — ask for another.)
+
+`POST /dashboard/login/verify` (form-encoded, 5 wrong attempts burn the code) sets
+`bona_dash`: `HttpOnly; Secure; SameSite=Lax; Path=/;
 Max-Age=BONA_DASH_COOKIE_DAYS`, with only the token's hash in `auth_sessions`.
 `POST /dashboard/logout` (the nav button; `_dash=1`, same-origin) deletes the session
 server-side and clears the cookie — a GET there only offers the button, because
@@ -575,7 +585,7 @@ on `GET /dashboard/leads/:id` and `GET /v1/admin/leads/:id`.
 | `GET /dashboard/leads` | pipeline board (one column per stage: name, masked phone, source, listing, age, response) and a list below with `?stage=&q=` |
 | `GET /dashboard/leads/:id` | the whole record, the journey (events + touchpoints + stage moves + notes, oldest first), the stage form and the note form |
 | `GET /dashboard/listings` | per-listing funnel (views → gallery/tour/brochure → WA clicks → leads) and REGA flags: `no_ad_licence`, `expiring_30d`, `expired`, `wafi_missing` (off-plan) |
-| `GET /dashboard/spend` | spend entry form, cost per lead per campaign, and the entries |
+| `GET /dashboard/spend` | spend entry form, cost per lead per campaign, and the last 90 days of entries |
 | `GET /dashboard/integrations` | which keys are present (booleans only, never a value), fan-out counts and last accepted event per destination, poller status when one is running, Retell, and the owner checklists |
 | `GET /v1/admin/stats?days=14` | the whole bundle: `daily`, `sources`, `match_quality`, `pipeline`, `response_times`, `cpl_by_campaign`, `totals` |
 | `GET /v1/admin/leads?stage=&q=&limit=100` | `{count, total, leads}` — phones masked |
@@ -589,6 +599,8 @@ Spend is matched to leads on **platform and campaign id together**, never the id
 Meta and Snap can both run a campaign `1203`. The two vocabularies are folded by
 `PLATFORM_ALIASES` in `lib/dashboard/stats.mjs`, so "instagram" typed on the Spend page
 meets a lead that arrived with `utm_source=meta`. A platform name nothing recognises
-matches no spend rather than borrowing another platform's budget.
+matches no spend rather than borrowing another platform's budget — and when that
+happens, the row carries `unmatched_leads` and the page says "unmatched — check the UTM
+source" instead of printing a zero that reads like a dud campaign.
 
 A form post answers `303` back to the page it came from; a JSON call answers JSON.

@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { openDb } from '../lib/db.mjs';
-import { createAuth, COOKIE_NAME, parseCookies, hashEquals, generateCode, codeMessage } from '../lib/dashboard/auth.mjs';
+import { createAuth, COOKIE_NAME, TRY_COOKIE_NAME, parseCookies, hashEquals, generateCode, codeMessage } from '../lib/dashboard/auth.mjs';
 
 const NOW = 1_757_200_000_000;
 const sha256 = (v) => crypto.createHash('sha256').update(String(v), 'utf8').digest('hex');
@@ -29,16 +29,32 @@ function harness({ send = async () => ({ ok: true }), cfg = {} } = {}) {
     db, auth, sent, logs,
     tick: (ms) => { clock += ms; },
     get clock() { return clock; },
-    /** A response double: only `setHeader` is used by the cookie helpers. */
-    res: () => { const headers = {}; return { headers, setHeader: (k, v) => { headers[k.toLowerCase()] = v; } }; },
+    /** A response double: the cookie helpers only read and append `Set-Cookie`. */
+    res: () => {
+      const headers = {};
+      return {
+        headers,
+        getHeader: (k) => headers[k.toLowerCase()],
+        setHeader: (k, v) => { headers[k.toLowerCase()] = v; },
+        get cookies() { const v = headers['set-cookie']; return v === undefined ? [] : (Array.isArray(v) ? v : [v]); },
+      };
+    },
   };
+}
+
+/** Ask for a code and read back both halves of it: the digits and the browser's nonce. */
+async function asked(h, ip = '1.1.1.1') {
+  const out = await h.auth.requestCode(ip);
+  return { ...out, code: codeOf(h.sent.at(-1) ?? '') };
 }
 
 /* ---------------- code request ---------------- */
 
 test('requestCode sends six digits to the owner and stores only their hash', async () => {
   const h = harness();
-  assert.deepEqual(await h.auth.requestCode('1.1.1.1'), { ok: true });
+  const out = await h.auth.requestCode('1.1.1.1');
+  assert.equal(out.ok, true);
+  assert.match(out.nonce, /^[0-9a-f]{32}$/, 'the request hands the browser a nonce to come back with');
   assert.equal(h.sent.length, 1);
   const code = codeOf(h.sent[0]);
   assert.match(code, /^\d{6}$/);
@@ -62,21 +78,45 @@ test('the code never reaches a log line', async () => {
 test('a fourth code inside ten minutes from one address is refused', async () => {
   const h = harness();
   for (let i = 0; i < 3; i += 1) {
-    assert.deepEqual(await h.auth.requestCode('9.9.9.9'), { ok: true }, `request ${i + 1}`);
+    assert.equal((await h.auth.requestCode('9.9.9.9')).ok, true, `request ${i + 1}`);
     h.tick(61_000); // step past the global one-a-minute limit, stay inside the ten minutes
   }
   assert.deepEqual(await h.auth.requestCode('9.9.9.9'), { ok: false, error: 'rate_limited' });
   assert.equal(h.sent.length, 3, 'the refused request sent nothing');
   // Another address is unaffected by the first one's spending.
-  assert.deepEqual(await h.auth.requestCode('8.8.8.8'), { ok: true });
+  h.tick(61_000);
+  assert.equal((await h.auth.requestCode('8.8.8.8')).ok, true);
 });
 
 test('one code a minute across the whole service, whoever asks', async () => {
   const h = harness();
-  assert.deepEqual(await h.auth.requestCode('1.1.1.1'), { ok: true });
+  assert.equal((await h.auth.requestCode('1.1.1.1')).ok, true);
   assert.deepEqual(await h.auth.requestCode('2.2.2.2'), { ok: false, error: 'rate_limited' });
   h.tick(60_001);
-  assert.deepEqual(await h.auth.requestCode('2.2.2.2'), { ok: true });
+  assert.equal((await h.auth.requestCode('2.2.2.2')).ok, true);
+});
+
+test('a global refusal costs the address nothing of its own three', async () => {
+  const h = harness();
+  assert.equal((await h.auth.requestCode('1.1.1.1')).ok, true);
+  // Refused by the one-a-minute bucket, not by anything this address did.
+  assert.deepEqual(await h.auth.requestCode('7.7.7.7'), { ok: false, error: 'rate_limited' });
+  for (let i = 0; i < 3; i += 1) {
+    h.tick(61_000);
+    assert.equal((await h.auth.requestCode('7.7.7.7')).ok, true, `this address still has all three (${i + 1})`);
+  }
+});
+
+test('twenty codes a day, so a rotating flood cannot ring the owner\'s phone all night', async () => {
+  const h = harness();
+  for (let i = 0; i < 20; i += 1) {
+    assert.equal((await h.auth.requestCode(`10.0.0.${i}`)).ok, true, `code ${i + 1}`);
+    h.tick(61_000);
+  }
+  assert.deepEqual(await h.auth.requestCode('10.0.1.1'), { ok: false, error: 'rate_limited' });
+  assert.equal(h.sent.length, 20);
+  h.tick(86_400_000);
+  assert.equal((await h.auth.requestCode('10.0.1.1')).ok, true, 'the ceiling refills over a day');
 });
 
 test('a WhatsApp that will not send is reported, not swallowed', async () => {
@@ -91,10 +131,9 @@ test('a WhatsApp that will not send is reported, not swallowed', async () => {
 
 test('the right code opens a session; the token is 32 hex and stored hashed', async () => {
   const h = harness();
-  await h.auth.requestCode('1.1.1.1');
-  const code = codeOf(h.sent[0]);
+  const { code, nonce } = await asked(h);
 
-  const out = h.auth.verify(code, 'Mozilla/5.0 (iPhone)');
+  const out = h.auth.verify(code, 'Mozilla/5.0 (iPhone)', { nonce });
   assert.equal(out.ok, true);
   assert.match(out.token, /^[0-9a-f]{32}$/);
 
@@ -110,46 +149,75 @@ test('the right code opens a session; the token is 32 hex and stored hashed', as
   assert.equal(h.auth.check(null), false);
 });
 
-test('a code is single use', async () => {
+test('a code is single use, and its nonce dies with it', async () => {
   const h = harness();
-  await h.auth.requestCode('1.1.1.1');
-  const code = codeOf(h.sent[0]);
-  assert.equal(h.auth.verify(code).ok, true);
-  const again = h.auth.verify(code);
-  assert.equal(again.ok, false);
-  assert.equal(again.error, 'used');
+  const { code, nonce } = await asked(h);
+  assert.equal(h.auth.verify(code, null, { nonce }).ok, true);
+  assert.deepEqual(h.auth.verify(code, null, { nonce }), { ok: false, error: 'no_request' });
+  assert.equal(h.auth.pendingCount(), 0);
 });
 
-test('five wrong guesses burn the code', async () => {
+test('five wrong guesses from the browser that asked burn its code', async () => {
   const h = harness();
-  await h.auth.requestCode('1.1.1.1');
-  const code = codeOf(h.sent[0]);
+  const { code, nonce } = await asked(h);
   const wrong = String((Number(code) + 1) % 1_000_000).padStart(6, '0');
-  for (let i = 0; i < 5; i += 1) assert.equal(h.auth.verify(wrong).ok, false, `guess ${i + 1}`);
-  const out = h.auth.verify(code);
-  assert.equal(out.ok, false, 'the real code is dead once five guesses have missed');
-  assert.equal(out.error, 'attempts');
+  for (let i = 0; i < 5; i += 1) {
+    assert.deepEqual(h.auth.verify(wrong, null, { nonce }), { ok: false, error: 'bad_code' }, `guess ${i + 1}`);
+  }
+  assert.deepEqual(h.auth.verify(code, null, { nonce }), { ok: false, error: 'attempts' },
+    'the real code is dead once five guesses have missed');
+});
+
+test('a stranger cannot burn the code the owner is holding', async () => {
+  const h = harness();
+  const owner = await asked(h);
+
+  // No nonce at all, a forged one, and one from a different request: none of these may
+  // spend the owner's five attempts. Without this the login is a permanent lockout —
+  // the sender is capped at one code a minute, so an attacker wins that race for ever.
+  const forged = 'f'.repeat(32);
+  for (let i = 0; i < 30; i += 1) {
+    assert.deepEqual(h.auth.verify('000000', null, {}), { ok: false, error: 'no_request' });
+    assert.deepEqual(h.auth.verify('000000', null, { nonce: forged }), { ok: false, error: 'no_request' });
+    assert.deepEqual(h.auth.verify('000000', null, { nonce: 'not-a-nonce' }), { ok: false, error: 'no_request' });
+  }
+
+  const out = h.auth.verify(owner.code, null, { nonce: owner.nonce });
+  assert.equal(out.ok, true, 'the owner still gets in');
+  assert.match(out.token, /^[0-9a-f]{32}$/);
+});
+
+test('a second attacker who asks for their own code burns only their own', async () => {
+  const h = harness();
+  const owner = await asked(h, '1.1.1.1');
+  h.tick(61_000);
+  const attacker = await asked(h, '2.2.2.2');
+  const wrong = String((Number(attacker.code) + 1) % 1_000_000).padStart(6, '0');
+  for (let i = 0; i < 6; i += 1) h.auth.verify(wrong, null, { nonce: attacker.nonce });
+
+  assert.equal(h.auth.verify(owner.code, null, { nonce: owner.nonce }).ok, true);
 });
 
 test('a code expires after ten minutes', async () => {
   const h = harness();
-  await h.auth.requestCode('1.1.1.1');
-  const code = codeOf(h.sent[0]);
+  const { code, nonce } = await asked(h);
   h.tick(10 * 60_000 + 1);
-  assert.deepEqual(h.auth.verify(code), { ok: false, error: 'expired' });
+  assert.deepEqual(h.auth.verify(code, null, { nonce }), { ok: false, error: 'no_request' },
+    'the binding expires with the code, so there is nothing left to guess against');
+  assert.equal(h.auth.pendingCount(), 0);
 });
 
 test('a session expires with the cookie, and logout ends it early', async () => {
   const h = harness({ cfg: { dashCookieDays: 2 } });
-  await h.auth.requestCode('1.1.1.1');
-  const { token } = h.auth.verify(codeOf(h.sent[0]));
+  const first = await asked(h);
+  const { token } = h.auth.verify(first.code, null, { nonce: first.nonce });
   assert.equal(h.auth.check(token), true);
   h.tick(2 * 86_400_000 + 1);
   assert.equal(h.auth.check(token), false, 'the session died with the cookie');
 
   const h2 = harness();
-  await h2.auth.requestCode('1.1.1.1');
-  const second = h2.auth.verify(codeOf(h2.sent[0])).token;
+  const other = await asked(h2);
+  const second = h2.auth.verify(other.code, null, { nonce: other.nonce }).token;
   assert.equal(h2.auth.logout(second), true);
   assert.equal(h2.auth.check(second), false);
   assert.equal(h2.auth.logout(second), false, 'logging out twice is not an error, just a no-op');
@@ -159,12 +227,12 @@ test('a session expires with the cookie, and logout ends it early', async () => 
 
 test('the cookie is HttpOnly, Secure, SameSite=Lax and site-wide', async () => {
   const h = harness({ cfg: { dashCookieDays: 30 } });
-  await h.auth.requestCode('1.1.1.1');
-  const { token } = h.auth.verify(codeOf(h.sent[0]));
+  const { code, nonce } = await asked(h);
+  const { token } = h.auth.verify(code, null, { nonce });
 
   const res = h.res();
   h.auth.setCookie(res, token);
-  const cookie = res.headers['set-cookie'];
+  const cookie = res.cookies[0];
   assert.match(cookie, new RegExp(`^${COOKIE_NAME}=${token};`));
   for (const flag of ['HttpOnly', 'Secure', 'SameSite=Lax', 'Path=/', `Max-Age=${30 * 86_400}`]) {
     assert.ok(cookie.includes(flag), `${flag} missing from ${cookie}`);
@@ -172,7 +240,23 @@ test('the cookie is HttpOnly, Secure, SameSite=Lax and site-wide', async () => {
 
   const cleared = h.res();
   h.auth.clearCookie(cleared);
-  assert.ok(cleared.headers['set-cookie'].includes('Max-Age=0'));
+  assert.ok(cleared.cookies[0].includes('Max-Age=0'));
+
+  // The try nonce is the same shape and lives exactly as long as the code.
+  const tryRes = h.res();
+  h.auth.setTryCookie(tryRes, nonce);
+  assert.match(tryRes.cookies[0], new RegExp(`^${TRY_COOKIE_NAME}=${nonce};`));
+  for (const flag of ['HttpOnly', 'Secure', 'SameSite=Lax', 'Max-Age=600']) {
+    assert.ok(tryRes.cookies[0].includes(flag), `${flag} missing from ${tryRes.cookies[0]}`);
+  }
+  assert.equal(h.auth.readTryCookie({ headers: { cookie: `${TRY_COOKIE_NAME}=${nonce}` } }), nonce);
+  assert.equal(h.auth.readTryCookie({ headers: { cookie: `${TRY_COOKIE_NAME}=zzz` } }), null);
+
+  // Both cookies can ride one response.
+  const both = h.res();
+  h.auth.setCookie(both, token);
+  h.auth.clearTryCookie(both);
+  assert.equal(both.cookies.length, 2);
 
   assert.equal(h.auth.readCookie({ headers: { cookie: `other=1; ${COOKIE_NAME}=${token}` } }), token);
   assert.equal(h.auth.readCookie({ headers: { cookie: `${COOKIE_NAME}=nope` } }), null, 'a malformed token is not read');

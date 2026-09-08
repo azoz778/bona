@@ -416,7 +416,7 @@ export function createFanout({ db, cfg, log = () => {}, fetch: doFetch = globalT
 
   return {
     drainOnce, start, stop, dests,
-    /** The dashboard's stage form goes through here so the queueing rules live in one place. */
+    /** The same `enqueueStage` bound to this worker's store and clock. */
     enqueueStage: (lead, opts) => enqueueStage(db, lead, { now: now(), ...opts }),
     counts: () => db.fanoutCounts(),
     get started() { return Boolean(timer); },

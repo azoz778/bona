@@ -253,12 +253,32 @@ test('cplByCampaign shows the money even where the leads are not', () => {
   assert.equal(rows.length, 2);
   assert.deepEqual(rows[0], {
     platform: 'meta', campaign_id: '1203', campaign_name: 'Villas Sept',
-    spend_sar: 4500, clicks: 180, impressions: 60_000, leads: 2, cpl: 2250,
+    spend_sar: 4500, clicks: 180, impressions: 60_000, leads: 2, unmatched_leads: 0, cpl: 2250,
   });
   assert.deepEqual(rows[1], {
     platform: 'snapchat', campaign_id: '9900', campaign_name: 'Snap test',
-    spend_sar: 800, clicks: 10, impressions: 5000, leads: 0, cpl: null,
+    spend_sar: 800, clicks: 10, impressions: 5000, leads: 0, unmatched_leads: 0, cpl: null,
   });
+});
+
+test('a campaign whose platform names did not fold says so instead of reading as a dud', () => {
+  const { db, stats } = seeded();
+  // The owner filed this spend under "other"; the leads arrived as utm_source=paid_social.
+  // Zero leads and "we could not match any" call for opposite actions, so they must not
+  // render as the same number.
+  db.upsertSpend({ day: day(1), platform: 'other', campaign_id: '7700', campaign_name: 'Newsletter push', spend_sar: 400 });
+  db.insertLead({
+    lead_id: 'LEAD-F', created: NOW - DAY_MS, updated: NOW - DAY_MS, phone_e164: '966500000006', name: 'Unmatched',
+    channel: 'form', source: 'paid_social', medium: 'paid', campaign: 'news', campaign_id: '7700',
+    match_method: 'form', stage: 'new', stage_ts: NOW - DAY_MS,
+  });
+  const row = stats.cplByCampaign().find((r) => r.campaign_id === '7700');
+  assert.equal(row.leads, 0, 'the strict pair still finds nothing — that is the honest join');
+  assert.equal(row.unmatched_leads, 1, 'but one lead carries this campaign id under another label');
+  assert.equal(row.cpl, null);
+
+  const matched = stats.cplByCampaign().find((r) => r.campaign_id === '1203');
+  assert.equal(matched.unmatched_leads, 0, 'a row whose pair matched has nothing unexplained');
 });
 
 test('two platforms running the same campaign number do not share a budget', () => {
