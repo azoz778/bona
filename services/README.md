@@ -439,7 +439,7 @@ BONA_RETELL_MOCK=1 node api/index.mjs      # no Retell traffic at all
 cd ~/bona/services && node --test api/test/*.test.mjs
 ```
 
-395 tests, no network, no Retell and no WhatsApp: search and Card formatting in EN and AR, price
+447 tests, no network, no Retell and no WhatsApp: search and Card formatting in EN and AR, price
 parsing ("4.5m", "٤ ملايين"), token buckets and the trusted-proxy rules for client IPs,
 the CORS allowlist and the origin refusal, tool authentication (header, bearer, and the
 auth-failure throttle), the navigation allowlist, lead de-duplication, the daily
@@ -580,14 +580,15 @@ site that stopped answering.
 **Fan-out** (every `BONA_FANOUT_MS`). Per event, per destination, idempotent by
 `event_id`, retried ≤ 5 times with backoff: Meta CAPI `Contact` / `Lead` / `Schedule` /
 `Purchase`, GA4 Measurement Protocol `generate_lead` → `close_convert_lead`, Snap
-`SIGN_UP` / `PURCHASE`. Consent-gated: Meta/Snap only for sessions that allowed
-*advertising*, GA4 only with *analytics*; a lead without a session gets no ad-platform
+`SIGN_UP` / `PURCHASE`. Consent-gated: every destination — Meta, GA4 and Snap — fires only for sessions that
+allowed *advertising* in the banner (the banner grants analytics and advertising together,
+so this is the conservative reading of PDPL); a lead without a session gets no ad-platform
 event. Keys in `~/.secrets/bona-marketing.env`; `node scripts/marketing/verify-integrations.mjs`
 checks each one and updates the site's Integrations board.
 
 ### Dashboard
 
-`https://bona-api.azoz.uk/dashboard` — the owner's private view of everything above,
+`https://api.bona-real-estate.com/dashboard` — the owner's private view of everything above,
 server-rendered by this same process. No CDN, no framework and **no JavaScript at all**:
 every page is HTML with one embedded stylesheet, every chart is inline SVG, every filter
 is a GET and every write is a form post. That is what lets the response headers be as
