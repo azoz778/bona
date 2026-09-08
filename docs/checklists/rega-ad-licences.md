@@ -96,10 +96,16 @@ commits, and the site republishes within ~3 minutes: the listing page shows
 "Advertising licence 7200123456 · valid until 2027-05-01" (AR:
 "رخصة الإعلان العقاري: 7200123456 — سارية حتى 2027-05-01") under the enquiry block, the
 QR is regenerated, and `node scripts/portal-export.mjs` picks it up for Aqar.
-(These two commands are being added to the intake in the last step of the tracking
-work; until they land, send the numbers to the agent and it edits
-`scripts/curate/licences.json` / the inbox JSON by hand.) For curated (TK-synced)
-listings the agent records the number in `scripts/curate/licences.json` keyed by id.
+The same command works for a **curated** (TK-synced) listing — `licence BONA-015 …` — the
+only difference being where it lands: an intake listing keeps its numbers in its own
+`scripts/curate/inbox/<slug>.json`, a curated one in `scripts/curate/licences.json` keyed
+by id, which `scripts/curate/build.mjs` merges back on. Nothing has to be edited by hand.
+
+The expiry may be typed `01/05/2027` as well as `2027-05-01`, in Western or Arabic-Indic
+digits, and must be a real calendar date — `2027-02-31` is refused, never rounded. Arabic
+verbs work and are answered in Arabic (`ترخيص`, `وافي`), and `licence BONA-W003 clear` /
+`wafi BONA-W003 clear` takes a wrong number off again. The reply is
+`✅ Licence recorded for BONA-W003: 7200123456, valid until 2027-05-01. Live in ~3 min.`
 
 ## 5. Off-plan projects — Wafi instead of a per-ad licence
 
