@@ -7,9 +7,9 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  FORBIDDEN, HYPE, INTAKE_ID_RE, isLocalSrc, LISTING_ID_RE, LOCAL_LAND_STILL,
-  LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, LOCAL_LISTING_VIDEO, LOCAL_LISTING_VIDEO_POSTER,
-  PHONE_RE, videoEntryProblems,
+  FORBIDDEN, HYPE, INTAKE_ID_RE, isCalendarDate, isLocalSrc, licenceProblems, LICENCE_NUMBER_RE,
+  LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, LOCAL_LISTING_VIDEO,
+  LOCAL_LISTING_VIDEO_POSTER, PHONE_RE, videoEntryProblems,
 } from '../../../scripts/curate/rules.mjs';
 import { checkListing } from '../lib/listing.mjs';
 
@@ -34,6 +34,51 @@ describe('listing ids', () => {
     const src = fs.readFileSync(path.join(REPO, 'scripts', 'curate', 'validate.mjs'), 'utf8');
     assert.match(src, /LISTING_ID_RE\.test\(l\.id/);
     assert.match(src, /from '\.\/rules\.mjs'/);
+  });
+});
+
+// The REGA licence block. Same story as videoEntryProblems: ONE definition, so a number the
+// owner records from WhatsApp (`licence BONA-W003 …`) can never fail the site build later.
+describe('REGA licence rules', () => {
+  it('is optional — a listing with no licence is a valid listing', () => {
+    assert.deepEqual(licenceProblems(null), []);
+    assert.deepEqual(licenceProblems(undefined), []);
+  });
+
+  it('accepts the full block and rejects an unknown field', () => {
+    assert.deepEqual(licenceProblems({ adNumber: '7200012345', adExpiry: '2027-03-01', wafiNumber: null, escrowAccount: null }), []);
+    assert.match(licenceProblems({ adNumber: '7200012345', falNumber: '1100313556' })[0], /unknown field "falNumber"/);
+    assert.match(licenceProblems('7200012345')[0], /must be null or/);
+    assert.match(licenceProblems([])[0], /must be null or/);
+  });
+
+  it('refuses an expiry with nothing to expire', () => {
+    assert.deepEqual(licenceProblems({ adExpiry: '2027-03-01' }), ['licence.adExpiry without licence.adNumber']);
+  });
+
+  // The bug this rule exists for: V8 ROLLS OVER an out-of-range day in a date-only ISO
+  // string, so `Date.parse('2027-02-31')` answers the 3rd of March instead of NaN. A licence
+  // line reading "valid until" a date the owner never typed is a compliance problem, not a
+  // cosmetic one.
+  it('only accepts a real calendar date, where Date.parse would have rolled one over', () => {
+    assert.ok(!Number.isNaN(Date.parse('2027-02-31')), 'the trap: Date.parse accepts it');
+    assert.equal(isCalendarDate('2027-02-31'), false);
+    assert.equal(isCalendarDate('2027-02-29'), false, '2027 is not a leap year');
+    assert.equal(isCalendarDate('2028-02-29'), true);
+    assert.equal(isCalendarDate('2027-13-01'), false);
+    assert.equal(isCalendarDate('2027-3-1'), false, 'zero-padded or not at all');
+    assert.equal(isCalendarDate('2027-03-01'), true);
+    assert.match(licenceProblems({ adNumber: '7200012345', adExpiry: '2027-02-31' })[0], /must be YYYY-MM-DD/);
+  });
+
+  it('knows the shape of a licence number REGA actually prints', () => {
+    for (const ok of ['7200012345', 'FAL-1100313556', '7200012345/2', 'abcd']) assert.ok(LICENCE_NUMBER_RE.test(ok), ok);
+    for (const bad of ['123', '7200 012 345', '7200012345#', 'x'.repeat(33)]) assert.ok(!LICENCE_NUMBER_RE.test(bad), bad);
+  });
+
+  it('validate.mjs uses the shared rule rather than its own copy', () => {
+    const src = fs.readFileSync(path.join(REPO, 'scripts', 'curate', 'validate.mjs'), 'utf8');
+    assert.match(src, /licenceProblems\(l\.licence\)/);
   });
 });
 
