@@ -47,7 +47,10 @@ async function reply(jid, text) {
 }
 
 /** Repo-relative paths this job may stage. Nothing else is ever committed. */
-const stagePaths = (slug) => [path.posix.join('public', 'listings', slug), path.posix.join('scripts', 'curate', 'inbox'), path.posix.join('src', 'data', 'listings.json')];
+// `scripts/curate/licences.json` is here for every job, not only the licence commands: `git
+// add` on a path the job did not touch stages nothing, and the alternative — a second
+// stagePaths shape for two commands — is a way to forget one.
+const stagePaths = (slug) => [path.posix.join('public', 'listings', slug), path.posix.join('scripts', 'curate', 'inbox'), path.posix.join('scripts', 'curate', 'licences.json'), path.posix.join('src', 'data', 'listings.json')];
 
 /** Bring the clone to a known-good state. ALWAYS before the first write, never after. */
 async function prepareRepo() {
@@ -730,6 +733,24 @@ async function handleCommand({ group, command }) {
         () => edits.rebuildBrochure(cfg.repo, command.id, { cfg, workDir }),
         () => `intake: branded brochure (${command.id})`,
         (r) => msg.brochureRebuilt(command.id, r.listing, r.brochure),
+      );
+      if (res?.error) return reply(jid, `✋ ${res.error}`);
+      return undefined;
+    }
+    // The REGA numbers. Unlike every other command these also reach a CURATED listing
+    // (BONA-###), whose licence lives in scripts/curate/licences.json rather than an inbox
+    // JSON — edits.applyLicence() picks the home, so both look identical from here.
+    case 'licence':
+    case 'wafi': {
+      const wafi = command.cmd === 'wafi';
+      if (!edits.locate(cfg.repo, command.id) && !edits.locateCurated(cfg.repo, command.id)) {
+        return reply(jid, msg.notFound(command.id));
+      }
+      const res = await publishEdit(
+        jid, command.id,
+        () => (wafi ? edits.setWafi(cfg.repo, command.id, command) : edits.setLicence(cfg.repo, command.id, command)),
+        () => `intake: ${wafi ? 'wafi' : 'licence'} (${command.id})`,
+        (r) => (wafi ? msg.wafiRecorded(command.id, r.licence, command.lang) : msg.licenceRecorded(command.id, r.licence, command.lang)),
       );
       if (res?.error) return reply(jid, `✋ ${res.error}`);
       return undefined;

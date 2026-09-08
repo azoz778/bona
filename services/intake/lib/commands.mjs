@@ -1,6 +1,9 @@
 // Caption hints (sent with the PDF) and text commands (sent afterwards).
 // Everything here is pure — the unit tests own this file.
 
+import { LICENCE_NUMBER_RE, isCalendarDate } from '../../../scripts/curate/rules.mjs';
+import { westernise } from './price.mjs';
+
 export const CURRENCIES = ['SAR', 'AED', 'EUR', 'USD', 'OMR'];
 
 // JavaScript's \b is ASCII-only, so Arabic alternatives must live in their own patterns
@@ -22,9 +25,6 @@ const PERIOD_HINTS = [
   [/\b(per|\/)\s*(month|mo)\b/i, 'month'],
   [/(شهري|شهريا|شهرياً|\/ ?شهر|في الشهر)/, 'month'],
 ];
-
-const ARABIC_DIGITS = { '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9' };
-const westernise = (s) => String(s).replace(/[٠-٩]/g, (d) => ARABIC_DIGITS[d]);
 
 /**
  * A price the OWNER typed in the caption. Never an estimate — this only reads an
@@ -99,9 +99,43 @@ export function parseCaption(caption) {
 // listing the intake can publish is always a listing the owner can then command.
 export const LISTING_ID_RE = /^BONA-W\d{3,5}$/i;
 
+// `licence` and `wafi` are the only commands that also reach a CURATED listing (BONA-###):
+// a REGA advertisement number belongs to every listing on the site, not just the ones the
+// intake published, and the curated ones keep theirs in scripts/curate/licences.json. Every
+// other verb edits an inbox JSON, which a BONA-### listing does not have — hence two regexes.
+// (scripts/curate/rules.mjs::LISTING_ID_RE, plus /i because the owner types on a phone.)
+export const ANY_LISTING_ID_RE = /^(BONA-\d{3}|BONA-W\d{3,5})$/i;
+
 // Unanchored version of LISTING_ID_RE, for pulling an id out of free text — a video's
 // caption, e.g. "video BONA-W001" or just "BONA-W001" on its own.
 const LISTING_ID_SEARCH_RE = /BONA-W\d{3,5}/i;
+
+const LICENCE_USAGE = 'usage: licence BONA-W001 7200012345 2027-03-01  |  licence BONA-W001 clear';
+const WAFI_USAGE = 'usage: wafi BONA-W001 1234567890  |  wafi BONA-W001 clear';
+
+/** `clear` / `none` / `مسح` — take the number off the listing again. */
+const CLEAR_RE = /^(clear|none|مسح)$/i;
+
+/**
+ * The expiry date on a REGA advertisement licence, as `YYYY-MM-DD`.
+ *
+ * Accepts what the owner actually types: the ISO form, or the `DD/MM/YYYY` his phone's
+ * keyboard and every Saudi form use (also with `-` or `.` between the parts), in Western or
+ * Arabic-Indic digits. Day-first is the ONLY two-digit reading offered — guessing between
+ * `03/01` as January 3rd and March 1st is exactly the ambiguity that would put a wrong expiry
+ * on a licence line, so an American-style date simply does not parse here.
+ * @returns {string|null} the ISO date, or null when it is not a real calendar date
+ */
+export function parseExpiryDate(text) {
+  const s = westernise(text || '').trim();
+  let iso = null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) iso = s;
+  else {
+    const m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(s);
+    if (m) iso = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  }
+  return iso && isCalendarDate(iso) ? iso : null;
+}
 
 /**
  * Find a listing id anywhere in a string. Used for a WhatsApp VIDEO message: unlike the PDF
@@ -120,7 +154,11 @@ export function findListingId(text) {
  * daemon stays silent instead of replying to everything.
  * Supported: remove <id> | hero <id> <n> | price <id> <amount> [currency] | price <id> onrequest
  *            sold <id> | available <id> | hide <id> | show <id> | brochure <id>
+ *            licence <id> <adNumber> <YYYY-MM-DD> | wafi <id> <number> | either with `clear`
  *            retry | help | status
+ *
+ * `lang` rides along on the two licence commands: the owner who asks in Arabic (`ترخيص`,
+ * `وافي`) is answered in Arabic. Nothing else in the intake speaks Arabic yet.
  */
 export function parseCommand(text) {
   const raw = String(text || '').trim();
@@ -129,6 +167,9 @@ export function parseCommand(text) {
   const verb = parts[0].toLowerCase().replace(/^[/!]/, '');
   const arg = (i) => parts[i] ?? '';
   const idAt = (i) => (LISTING_ID_RE.test(arg(i)) ? arg(i).toUpperCase() : null);
+  const anyIdAt = (i) => (ANY_LISTING_ID_RE.test(arg(i)) ? arg(i).toUpperCase() : null);
+  // The verb tells us which language to answer in — he typed it.
+  const lang = /[\u0600-\u06FF]/.test(verb) ? 'ar' : 'en';
 
   switch (verb) {
     case 'help':
@@ -164,6 +205,33 @@ export function parseCommand(text) {
       const id = idAt(1);
       return id ? { cmd: 'brochure', id } : { cmd: 'error', message: 'usage: brochure BONA-W001' };
     }
+    // REGA advertisement licence — the number and its expiry, straight off the FAL platform.
+    // Nothing about it is guessed: a licence line on a page the owner cannot show REGA is
+    // worse than no line at all, so anything that does not parse comes back as a usage error.
+    case 'licence':
+    case 'license':
+    case 'ترخيص': {
+      const id = anyIdAt(1);
+      if (!id) return { cmd: 'error', message: LICENCE_USAGE };
+      if (CLEAR_RE.test(arg(2))) return { cmd: 'licence', id, clear: true, lang };
+      const adNumber = westernise(arg(2)).trim();
+      if (!LICENCE_NUMBER_RE.test(adNumber)) return { cmd: 'error', message: LICENCE_USAGE };
+      if (!arg(3)) return { cmd: 'error', message: `${LICENCE_USAGE}  (the expiry date is part of the licence)` };
+      const adExpiry = parseExpiryDate(arg(3));
+      if (!adExpiry) return { cmd: 'error', message: `"${arg(3)}" is not a real date — ${LICENCE_USAGE}` };
+      return { cmd: 'licence', id, adNumber, adExpiry, lang };
+    }
+    // The off-plan counterpart: the developer's Wafi project licence, which stands in for a
+    // per-listing advertisement number on an off-plan unit. No expiry — Wafi numbers carry none.
+    case 'wafi':
+    case 'وافي': {
+      const id = anyIdAt(1);
+      if (!id) return { cmd: 'error', message: WAFI_USAGE };
+      if (CLEAR_RE.test(arg(2))) return { cmd: 'wafi', id, clear: true, lang };
+      const wafiNumber = westernise(arg(2)).trim();
+      if (!LICENCE_NUMBER_RE.test(wafiNumber)) return { cmd: 'error', message: WAFI_USAGE };
+      return { cmd: 'wafi', id, wafiNumber, lang };
+    }
     case 'sold':
       return idAt(1) ? { cmd: 'status-set', id: idAt(1), status: 'sold' } : { cmd: 'error', message: 'usage: sold BONA-W001' };
     case 'reserved':
@@ -198,4 +266,10 @@ export const HELP_TEXT = [
   'sold BONA-W001          mark it sold   (also: reserved / available)',
   'hide BONA-W001          keep it off the site  (show BONA-W001 puts it back)',
   'status                  what the intake is doing',
+  '',
+  'REGA numbers — before any promotion (works on BONA-015 too, not just BONA-W###):',
+  'licence BONA-W001 7200012345 2027-03-01   the advertisement licence and its expiry',
+  'wafi BONA-W001 1234567890                 the off-plan project\'s Wafi licence',
+  'Arabic works and answers in Arabic: `ترخيص` · `وافي`. `clear` instead of the number',
+  'takes it off again.',
 ].join('\n');
