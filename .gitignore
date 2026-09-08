@@ -14,3 +14,4 @@ marketing/queue/*
 !marketing/queue/queue.json
 !marketing/queue/README.md
 scripts/social/.cache/
+ops/
