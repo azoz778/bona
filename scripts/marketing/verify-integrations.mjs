@@ -265,15 +265,24 @@ export async function checkApi({ site, probe: send = probe }) {
   return { api, retell };
 }
 
-export async function checkEvolution({ env }) {
+export async function checkEvolution({ env, probe: send = probe }) {
   const base = trimSlash(env.EVOLUTION_API_URL);
   const key = env.EVOLUTION_API_KEY;
   if (!present(base)) return row('evolution', 'pending-owner', 'EVOLUTION_API_URL empty in ~/.secrets/evolution-api.env — the WhatsApp poller and lead notes need it');
-  const res = await probe(`${base}/`, { headers: present(key) ? { apikey: key } : {} });
+  const res = await send(`${base}/`, { headers: present(key) ? { apikey: key } : {} });
   if (res.dry) return row('evolution', 'pending-owner', `[dry-run] would GET ${base}/ (apikey ${present(key) ? 'present' : 'empty'})`, { secrets: [key] });
-  if (res.status >= 200 && res.status < 500) {
+  // "Answered at all" is not "usable". Anything 200-499 used to count as live, so a 401 from
+  // a wrong or expired api key still said the WhatsApp source was fine — and the poller
+  // would have been silently dead. Only a 2xx is live; a 401/403 is a credential problem,
+  // and it is the owner's to fix when there is no key at all.
+  if (res.status >= 200 && res.status < 300) {
     const v = res.json?.version ? ` v${res.json.version}` : '';
     return row('evolution', 'live', `Evolution API answers HTTP ${res.status}${v} at ${base}; instance ${env.BONA_WA_INSTANCE ?? '(unset)'}`, { secrets: [key] });
+  }
+  if (res.status === 401 || res.status === 403) {
+    return present(key)
+      ? row('evolution', 'error', `Evolution API refused the api key: HTTP ${res.status} at ${base} — rotate or re-copy EVOLUTION_API_KEY in ~/.secrets/evolution-api.env`, { secrets: [key] })
+      : row('evolution', 'pending-owner', `Evolution API needs an api key: HTTP ${res.status} at ${base} — EVOLUTION_API_KEY is empty in ~/.secrets/evolution-api.env`, { secrets: [key] });
   }
   return row('evolution', 'error', `GET ${base}/ ${res.error ?? `HTTP ${res.status}`}`, { secrets: [key] });
 }

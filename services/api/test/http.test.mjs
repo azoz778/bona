@@ -465,12 +465,37 @@ test('a stated origin that is not ours is refused outright, before Retell is cal
   });
 });
 
-test('a request with no Origin at all still works — curl, and the Retell webhook', async () => {
+test('a browser route with no Origin at all is refused, and costs nothing upstream', async () => {
+  // Fail-closed: every real caller is a cross-origin fetch from the site, which the browser
+  // always stamps with an Origin. Defence in depth rather than authentication — a
+  // determined client sets the header — but it turns away the scripted and the accidental
+  // before a single Retell unit or owner notification is spent.
+  await withServer({}, async ({ base, app, retell, sent }) => {
+    for (const [path, body] of [['/v1/chat/session', { locale: 'en' }], ['/v1/call/token', { locale: 'en' }], ['/v1/enquiry', { form: 'contact', name: 'Sara', phone: '0500000000' }]]) {
+      const res = await fetch(`${base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      assert.equal(res.status, 403, path);
+      assert.equal((await res.json()).error, 'forbidden_origin', path);
+    }
+    const ev = await fetch(`${base}/v1/events`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(sampleEvent()) });
+    assert.equal(ev.status, 403);
+
+    assert.equal(retell.calls.length, 0, 'nothing reached Retell');
+    assert.equal(sent.length, 0, 'the owner was not messaged');
+    assert.equal(app.db.listLeads().length, 0);
+    assert.equal(app.db.recentEvents({}).length, 0);
+    const spent = (await (await fetch(`${base}/health`)).json()).budget;
+    assert.equal(spent.chats + spent.calls, 0, 'no budget was charged');
+  });
+});
+
+test('the token-gated Retell routes are unaffected — they never carry an Origin', async () => {
   await withServer({}, async ({ base }) => {
-    const res = await fetch(`${base}/v1/chat/session`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ locale: 'en' }),
+    const res = await fetch(`${base}/v1/tools/search_properties`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Bona-Token': TOKEN },
+      body: JSON.stringify({ call: { call_id: 'c1' }, name: 'search_properties', args: { district: 'Al Khalidiyah' } }),
     });
-    assert.equal(res.status, 200);
+    assert.equal(res.status, 200, 'authenticated by token, before the browser-route origin gate');
   });
 });
 
@@ -693,7 +718,7 @@ test('POST /v1/events takes a text/plain event and answers an empty 204 with COR
     assert.equal(row.listing_id, 'BONA-W003');
     assert.equal(row.session_id, 'mf3k2a-7b1c');
     assert.equal(app.db.getSession('mf3k2a-7b1c').ref, 'K7Q2XR');
-    assert.deepEqual(app.db.dueFanout(Date.now() + 1000).map((f) => f.dest), ['meta']);
+    assert.deepEqual(app.db.dueFanout(Date.now() + 1000).map((f) => f.dest), ['meta', 'ga4', 'snap']);
     // JSON is fine too, and a retry of the same event_id is a quiet 204.
     assert.equal((await call('/v1/events', { method: 'POST', body: JSON.stringify(ev) })).status, 204);
     assert.equal(app.db.eventsForSession('mf3k2a-7b1c').length, 1);

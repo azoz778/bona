@@ -149,6 +149,11 @@ export function buildGa4(event, { session, lead, cfg }) {
         name,
         params: compact({
           engagement_time_msec: 1,
+          // GA4 does not de-duplicate a Measurement Protocol hit against a gtag hit the way
+          // Meta does — but it cannot even be done downstream (in BigQuery, or by a report
+          // filter) unless the id travels. The browser sends the same value as an event
+          // parameter, so the pair is at least recognisable as one event.
+          event_id: event.event_id,
           session_id: session?.ga_session_id ?? undefined,
           listing_id: event.listing_id ?? undefined,
           ref: session?.ref ?? undefined,
