@@ -2,7 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import net from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -225,4 +226,106 @@ test('rollback.sh: VPS unreachable — fail closed (a "could not reach" warning 
   assert.notEqual(r.status, 0, 'rollback must fail');
   assert.ok(!r.lines.some((l) => /^systemctl .*enable --now/.test(l)), `PC units must NOT be started\n${r.lines.join('\n')}`);
   assert.ok(r.out.includes(MANUAL_STOP) && r.out.includes(MANUAL_START), `manual commands missing:\n${r.out}`);
+});
+
+// ---------------------------------------------------------------- hardening (review 2026-09-08)
+// fakeVpsHome() → a temp HOME laid out like the VPS user's: the pinned node and cloudflared paths
+// point at the shims, and a temp "repo" holds the four files install-vps.sh --check looks for.
+function fakeVpsHome() {
+  const home = mkdtempSync(path.join(tmpdir(), 'bona-vps-home-'));
+  const nodeBin = path.join(home, '.local', 'opt', 'node-v24.19.0-linux-x64', 'bin');
+  mkdirSync(nodeBin, { recursive: true });
+  symlinkSync(path.join(SHIMS, 'node'), path.join(nodeBin, 'node'));
+  mkdirSync(path.join(home, '.local', 'bin'), { recursive: true });
+  symlinkSync(path.join(SHIMS, 'cloudflared'), path.join(home, '.local', 'bin', 'cloudflared'));
+  const repo = mkdtempSync(path.join(tmpdir(), 'bona-repo-'));
+  for (const f of ['services/api/index.mjs', 'src/data/listings.json', 'src/data/site.json', 'services/api/retell/ids.json']) {
+    mkdirSync(path.dirname(path.join(repo, f)), { recursive: true });
+    writeFileSync(path.join(repo, f), f.endsWith('.json') ? '{}' : '// stub');
+  }
+  const log = path.join(home, 'shim.log');
+  writeFileSync(log, '');
+  const env = { PATH: `${SHIMS}:${process.env.PATH}`, HOME: home, SHIM_LOG: log, BONA_VPS_REPO: repo, BONA_WAIT_SCALE: '0' };
+  const shimLog = () => readFileSync(log, 'utf8').split('\n').filter(Boolean);
+  return { home, repo, env, shimLog };
+}
+
+test('install-vps.sh --smoke refuses to start when the smoke port is already listening', async () => {
+  if (spawnSync('ss', ['-V'], { encoding: 'utf8' }).error) return; // no `ss` here: the check cannot run
+  const { env } = fakeVpsHome();
+  const server = net.createServer();
+  await new Promise((resolve) => { server.once('error', resolve); server.listen(4121, '127.0.0.1', resolve); }); // EADDRINUSE is fine: still listening
+  try {
+    const r = bash([path.join(VPS, 'install-vps.sh'), '--smoke'], { env });
+    assert.notEqual(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stderr, /4121.*listening/);
+  } finally {
+    server.close();
+  }
+  // and when it does start, the API is exec'd (so the pid we kill is node, not a subshell)
+  assert.match(readFileSync(path.join(VPS, 'install-vps.sh'), 'utf8'), /exec "\$NODE_BIN\/node" api\/index\.mjs \) &$/m);
+});
+
+test('sync-secrets.sh chmods the four named secret files on the VPS, not *.env', () => {
+  const home = mkdtempSync(path.join(tmpdir(), 'bona-home-'));
+  mkdirSync(path.join(home, '.secrets'), { recursive: true });
+  mkdirSync(path.join(home, '.cloudflared'), { recursive: true });
+  for (const f of ['retell.env', 'evolution-api.env', 'bona-services.env', 'bona-marketing.env']) writeFileSync(path.join(home, '.secrets', f), 'X=1\n');
+  writeFileSync(path.join(home, '.cloudflared', '9022fbec-de4f-44b9-805e-8fff285d6263.json'), '{}');
+  const log = path.join(home, 'shim.log');
+  writeFileSync(log, '');
+  const r = bash([path.join(VPS, 'sync-secrets.sh')], { env: { PATH: `${SHIMS}:${process.env.PATH}`, HOME: home, SHIM_LOG: log, BONA_VPS_SSH: 'fake-vps' } });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const lines = readFileSync(log, 'utf8').split('\n').filter(Boolean);
+  const chmod = lines.find((l) => /^ssh fake-vps chmod 600 /.test(l));
+  assert.ok(chmod, `expected a remote chmod\n${lines.join('\n')}`);
+  for (const f of ['retell.env', 'evolution-api.env', 'bona-services.env', 'bona-marketing.env']) assert.ok(chmod.includes(`~/.secrets/${f}`), `${f} in: ${chmod}`);
+  assert.ok(chmod.includes('~/.cloudflared/9022fbec-de4f-44b9-805e-8fff285d6263.json'), chmod);
+  assert.ok(!chmod.includes('*.env'), `must not chmod a glob: ${chmod}`);
+  assert.ok(lines.some((l) => /^scp -q -p .*\/\.secrets\/retell\.env .* fake-vps:\.secrets\/$/.test(l)), lines.join('\n'));
+});
+
+test('deploy.sh pauses bona-repo-sync.timer around pull/test/restart and always starts it again', () => {
+  const { repo, env, shimLog } = fakeVpsHome();
+  const r = bash([path.join(VPS, 'deploy.sh')], { env });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assertOrdered(shimLog(),
+    /^systemctl --user stop bona-repo-sync\.timer$/,
+    new RegExp(`^git -C ${repo} pull --ff-only --quiet$`),
+    /^node --test api\/test\/\*\.test\.mjs$/,
+    /^systemctl --user restart bona-api\.service$/,
+    /^curl .*http:\/\/127\.0\.0\.1:4120\/health$/,
+    /^systemctl --user start bona-repo-sync\.timer$/);
+
+  // tests red → no restart, timer still started again (EXIT trap)
+  const failing = fakeVpsHome();
+  const f = bash([path.join(VPS, 'deploy.sh')], { env: { ...failing.env, SHIM_NODE_TEST_FAIL: '1' } });
+  assert.notEqual(f.status, 0, 'deploy must fail when the tests fail');
+  const lines = failing.shimLog();
+  assert.ok(!lines.some((l) => /^systemctl --user restart/.test(l)), `no restart on red tests\n${lines.join('\n')}`);
+  assertOrdered(lines, /^systemctl --user stop bona-repo-sync\.timer$/, /^node --test/, /^systemctl --user start bona-repo-sync\.timer$/);
+});
+
+test('render() keeps & and | in a value verbatim (no sed, no patsub_replacement surprises)', () => {
+  const home = mkdtempSync(path.join(tmpdir(), 'bona-home-'));
+  const out = mkdtempSync(path.join(tmpdir(), 'bona-render-'));
+  const odd = 'http://127.0.0.1:8085/a&b|c';
+  const r = bash([path.join(VPS, 'install-vps.sh'), '--render-only', out], { env: { HOME: home, BONA_VPS_EVOLUTION_URL: odd } });
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const api = readFileSync(path.join(out, 'bona-api.service'), 'utf8');
+  assert.ok(api.includes(`Environment=EVOLUTION_API_URL=${odd}\n`), api);
+  assert.doesNotMatch(api, /@[A-Z_]+@/, 'unrendered placeholder');
+  // and the guard still fires for a placeholder nobody substitutes
+  const lib = readFileSync(path.join(VPS, 'lib.sh'), 'utf8');
+  assert.doesNotMatch(lib, /\bsed\b.*@HOME@/, 'render() must not go through sed');
+  assert.match(lib, /unrendered placeholder/);
+});
+
+test('install-vps.sh refuses a non-x86_64 machine before downloading anything', () => {
+  const { env, shimLog } = fakeVpsHome();
+  const r = bash([path.join(VPS, 'install-vps.sh')], { env: { ...env, SHIM_UNAME_M: 'aarch64' } });
+  assert.notEqual(r.status, 0, 'install must refuse');
+  assert.match(r.stderr, /x86_64/);
+  const lines = shimLog();
+  assert.ok(!lines.some((l) => /^curl /.test(l)), `no download may start\n${lines.join('\n')}`);
 });

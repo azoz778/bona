@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Fake `uname`: -m prints $SHIM_UNAME_M (default x86_64); anything else defers to the real uname.
+set -u
+if [ "${1:-}" = -m ]; then echo "${SHIM_UNAME_M:-x86_64}"; exit 0; fi
+exec /usr/bin/uname "$@"

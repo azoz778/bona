@@ -6,7 +6,7 @@ static Astro build on GitHub Pages, so anything that needs a server lives here.
 | Service | Directory | Unit | What it does |
 |---|---|---|---|
 | Concierge API (Dana) | `api/` | `bona-api.service` | Chat + voice concierge backend, Retell tool webhooks, first-party events, leads |
-| Public HTTPS | — | `cloudflared-bona.service` | Cloudflare tunnel `bona`: `bona-api.azoz.uk` → `localhost:4102` |
+| Public HTTPS | — | `cloudflared-bona.service` | Cloudflare tunnel `bona`: `api.bona-real-estate.com` (+ legacy hosts) → `127.0.0.1:4120` on the VPS |
 | WhatsApp intake | `intake/` | `bona-intake.service` | PDF brochure → published listing; group commands `remove` / `hero` / `price` / `brochure` / `sold` / `hide` / `licence` / `wafi` (see `intake/README.md`) |
 
 No runtime dependencies: `services/package.json` is `"dependencies": {}` and the API
@@ -20,11 +20,11 @@ is built on Node's own `http`. Node ≥ 22.
 visitor on bona-real-estate.com
         │  fetch (CORS allowlist)
         ▼
-bona-api.azoz.uk  ──Cloudflare tunnel──▶  bona-api on 127.0.0.1:4102 (WSL)
-        │                                          │
+api.bona-real-estate.com  ──Cloudflare tunnel "bona"──▶  bona-api on 127.0.0.1:4120 on the VPS
+        │                                                          │
         │  POST /create-chat, /create-chat-completion, /v2/create-web-call
-        ▼                                          │
-   Retell AI  ── custom tool webhooks ─────────────┘
+        ▼                                                          │
+   Retell AI  ── custom tool webhooks ─────────────────────────────┘
    (agent "Dana", one Retell LLM, two agents: voice + chat)
 ```
 
@@ -302,7 +302,7 @@ never logged. `process.env` always wins over a file.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `BONA_API_PORT` | `4102` | |
+| `BONA_API_PORT` | `4102` | `4120` on the VPS (set in its unit; 4102 is taken there) |
 | `BONA_API_HOST` | `127.0.0.1` | the tunnel is the only way in |
 | `BONA_SITE` | `https://bona-real-estate.com` | used to absolutise image and page URLs |
 | `BONA_PUBLIC_API` | `https://api.bona-real-estate.com` | baked into the Retell tool URLs |
@@ -428,8 +428,8 @@ the intake reach Dana's inventory without a deploy). Data: `~/bona-data`. Secret
 
 `install.sh` in this directory is the **PC/WSL** installer and is kept only for rollback; its units
 are disabled on the PC. `bona-intake` (WhatsApp PDF → listing) still runs on the PC — it needs the
-owner's Claude login — and never talks to the API. Scripts: `services/deploy/vps/README` header
-comments; the move itself: `docs/superpowers/specs/2026-09-08-bona-api-vps-move-design.md`.
+owner's Claude login — and never talks to the API. Scripts: the header comment of each script in
+`services/deploy/vps/`; the move itself: `docs/superpowers/specs/2026-09-08-bona-api-vps-move-design.md`.
 
 Deployment is the **owner's** command — creating a Cloudflare tunnel and routing DNS
 is refused by the agent's permission classifier:
@@ -460,7 +460,7 @@ BONA_RETELL_MOCK=1 node api/index.mjs      # no Retell traffic at all
 cd ~/bona/services && node --test api/test/*.test.mjs
 ```
 
-447 tests, no network, no Retell and no WhatsApp: search and Card formatting in EN and AR, price
+466 tests, no network, no Retell and no WhatsApp: search and Card formatting in EN and AR, price
 parsing ("4.5m", "٤ ملايين"), token buckets and the trusted-proxy rules for client IPs,
 the CORS allowlist and the origin refusal, tool authentication (header, bearer, and the
 auth-failure throttle), the navigation allowlist, lead de-duplication, the daily

@@ -77,10 +77,13 @@ if [ "$MODE" = smoke ]; then
   need curl
   [ -x "$NODE_BIN/node" ] || die "run install-vps.sh first (node missing)"
   [ -f "$BONA_VPS_REPO/services/api/index.mjs" ] || die "run install-vps.sh first (repo missing)"
-  tmp=$(mktemp -d) ; port=$((BONA_VPS_PORT + 1))
+  port=$((BONA_VPS_PORT + 1))
+  if ss -ltn 2>/dev/null | grep -q ":$port "; then die "port $port is already listening — refusing the smoke run (an earlier smoke still up?)"; fi
+  tmp=$(mktemp -d)
   say "Smoke: API on 127.0.0.1:$port, data in $tmp, poller OFF, 15 s"
+  # exec: $pid is then node itself, not a subshell around it, so the kill below stops the API.
   ( cd "$BONA_VPS_REPO/services" && BONA_API_PORT=$port BONA_DATA=$tmp BONA_REPO=$BONA_VPS_REPO BONA_WA_POLL=0 \
-      EVOLUTION_API_URL=$BONA_VPS_EVOLUTION_URL NODE_ENV=production "$NODE_BIN/node" api/index.mjs ) &
+      EVOLUTION_API_URL=$BONA_VPS_EVOLUTION_URL NODE_ENV=production exec "$NODE_BIN/node" api/index.mjs ) &
   pid=$!
   if wait_for 15 1 curl -fsS "http://127.0.0.1:$port/health"; then
     curl -sS "http://127.0.0.1:$port/health"; echo
@@ -96,6 +99,8 @@ fi
 
 # ---------------------------------------------------------------- install
 need curl; need sha256sum; need tar; need git; need systemctl
+# Before anything is downloaded or probed: the pinned node tarball and cloudflared binary are x86_64 builds.
+[ "$(uname -m)" = x86_64 ] || die "install-vps.sh supports x86_64 only (pinned node linux-x64 + cloudflared amd64); this machine is $(uname -m)"
 say "Node $NODE_VERSION"
 if [ -x "$NODE_BIN/node" ] && [ "$("$NODE_BIN/node" -v)" = "$NODE_VERSION" ]; then
   ok "already installed"

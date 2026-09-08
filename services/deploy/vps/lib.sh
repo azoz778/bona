@@ -49,11 +49,19 @@ die()  { printf '\033[1;31mfail\033[0m %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "missing command: $1"; }
 
 # render TEMPLATE  → stdout, with every @PLACEHOLDER@ substituted; refuses to leave one behind.
+# Bash parameter substitution, not sed: a `|` or `&` in a value would break or corrupt a sed
+# expression. The replacements are quoted because bash ≥ 5.2 (patsub_replacement) would otherwise
+# expand an unquoted `&` to the matched placeholder.
 render() {
   local out
-  out=$(sed -e "s|@HOME@|$HOME_DIR|g" -e "s|@REPO@|$BONA_VPS_REPO|g" -e "s|@PORT@|$BONA_VPS_PORT|g" \
-            -e "s|@NODE_BIN@|$NODE_BIN|g" -e "s|@TUNNEL_ID@|$BONA_TUNNEL_ID|g" \
-            -e "s|@EVOLUTION_URL@|$BONA_VPS_EVOLUTION_URL|g" "$1")
+  [ -f "$1" ] || die "template missing: $1"
+  out=$(<"$1")
+  out=${out//@HOME@/"$HOME_DIR"}
+  out=${out//@REPO@/"$BONA_VPS_REPO"}
+  out=${out//@PORT@/"$BONA_VPS_PORT"}
+  out=${out//@NODE_BIN@/"$NODE_BIN"}
+  out=${out//@TUNNEL_ID@/"$BONA_TUNNEL_ID"}
+  out=${out//@EVOLUTION_URL@/"$BONA_VPS_EVOLUTION_URL"}
   if printf '%s\n' "$out" | grep -q '@[A-Z_][A-Z_]*@'; then die "unrendered placeholder in $1"; fi
   printf '%s\n' "$out"
 }
