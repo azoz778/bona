@@ -123,8 +123,13 @@ export function isHousePublic(l) {
 // WhatsApp can never fail the site build afterwards.
 export const LICENCE_FIELDS = ['adNumber', 'adExpiry', 'wafiNumber', 'escrowAccount'];
 
-/** The shape of a licence number as REGA prints it: digits, letters, `/` and `-`. */
-export const LICENCE_NUMBER_RE = /^[A-Za-z0-9/-]{4,32}$/;
+/**
+ * The shape of a licence number as REGA prints it: digits, letters, `/` and `-`.
+ * The lookahead is what earns the `-` and `/` their place: they are in the alphabet because
+ * REGA prints them, but a "number" made of nothing else is punctuation, and it would go onto
+ * a page as a compliance line. At least one digit or letter is required.
+ */
+export const LICENCE_NUMBER_RE = /^(?=.*[A-Za-z0-9])[A-Za-z0-9/-]{4,32}$/;
 
 /**
  * A REAL calendar date in YYYY-MM-DD — `2027-02-31` is not one.

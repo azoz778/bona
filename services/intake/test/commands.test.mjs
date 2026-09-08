@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { findListingId, HELP_TEXT, parseCaption, parseCommand, parseExpiryDate, parsePriceHint } from '../lib/commands.mjs';
+import { ANY_LISTING_ID_RE, findListingId, HELP_TEXT, LISTING_ID_RE, parseCaption, parseCommand, parseExpiryDate, parsePriceHint } from '../lib/commands.mjs';
+import { INTAKE_ID_RE, LISTING_ID_RE as SITE_LISTING_ID_RE } from '../../../scripts/curate/rules.mjs';
 
 describe('parseCaption', () => {
   it('reads an empty caption', () => {
@@ -90,6 +91,25 @@ describe('parsePriceHint', () => {
 
   it('takes the largest figure when several appear', () => {
     assert.equal(parsePriceHint('was 3,000,000 now SAR 4,500,000').amount, 4500000);
+  });
+});
+
+// Review finding: both of these used to be hand-written copies of the site's rules, which is
+// how two definitions of the same id drift apart. They are DERIVED now — same source, plus
+// the /i the owner's phone keyboard needs — so the copy cannot rot.
+describe('the command id patterns are the site\'s own, not a second copy', () => {
+  it('derives the intake id pattern from rules.mjs::INTAKE_ID_RE', () => {
+    assert.equal(LISTING_ID_RE.source, INTAKE_ID_RE.source);
+    assert.equal(LISTING_ID_RE.flags, 'i');
+  });
+  it('derives the licence id pattern from rules.mjs::LISTING_ID_RE', () => {
+    assert.equal(ANY_LISTING_ID_RE.source, SITE_LISTING_ID_RE.source);
+    assert.equal(ANY_LISTING_ID_RE.flags, 'i');
+  });
+  it('still means what the commands need it to mean', () => {
+    for (const id of ['BONA-015', 'bona-015', 'BONA-W003', 'bona-w0123']) assert.ok(ANY_LISTING_ID_RE.test(id), id);
+    for (const id of ['BONA-15', 'BONA-W1', 'TK-001', 'BONA-015 ']) assert.ok(!ANY_LISTING_ID_RE.test(id), id);
+    assert.ok(!LISTING_ID_RE.test('BONA-015'), 'the intake pattern still refuses a curated id');
   });
 });
 

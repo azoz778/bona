@@ -76,6 +76,14 @@ describe('REGA licence rules', () => {
     for (const bad of ['123', '7200 012 345', '7200012345#', 'x'.repeat(33)]) assert.ok(!LICENCE_NUMBER_RE.test(bad), bad);
   });
 
+  // Review finding: `/` and `-` are in the alphabet because REGA prints them, but a number
+  // made of NOTHING else is punctuation, not a licence — and it would have gone onto a page
+  // as one.
+  it('refuses a "number" with no digit or letter in it', () => {
+    for (const bad of ['----', '////', '-/-/-/-/', '-'.repeat(32)]) assert.ok(!LICENCE_NUMBER_RE.test(bad), bad);
+    assert.ok(LICENCE_NUMBER_RE.test('---7'), 'one alphanumeric is enough');
+  });
+
   it('validate.mjs uses the shared rule rather than its own copy', () => {
     const src = fs.readFileSync(path.join(REPO, 'scripts', 'curate', 'validate.mjs'), 'utf8');
     assert.match(src, /licenceProblems\(l\.licence\)/);

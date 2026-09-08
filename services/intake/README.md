@@ -70,6 +70,15 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
    `ترخيص` and `وافي` do the same thing and are answered in Arabic — the only place the intake
    speaks it, because the licence line is the part of the site a regulator reads.
 
+   > **A curated id only works while the listing is PUBLISHED.** `locateCurated()` looks the
+   > id up in the built `src/data/listings.json`, which holds only what `build.mjs` actually
+   > published — so a curated listing the build excludes answers `No listing called BONA-002.`
+   > even though the id is real. Today that is: a house over the SAR 10,000,000 cap
+   > (`rules.mjs::isHousePublic` — BONA-002 and BONA-028), a land plot at or over SAR
+   > 50,000,000, and anything missing from TK's live public list. Those need no advertisement
+   > licence while they are off the public site; if one goes back on, record its number after
+   > the build that republishes it, or edit `scripts/curate/licences.json` by hand.
+
 5. Got a walkthrough clip? Send the **video** into the group — no caption needed. Working out
    which property it belongs to is the bot's job, not the owner's; three answers are tried,
    cheapest first:

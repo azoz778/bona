@@ -441,6 +441,84 @@ describe('edits.setLicence / setWafi — REGA advertising licences', () => {
     assert.deepEqual(readLicences(), {}, 'no empty husk left behind for build.mjs to merge');
   });
 
+  // Review finding (MEDIUM): a licences.json that is corrupt or half-written used to read
+  // back as `{}`, and the next `licence BONA-016 …` would then rewrite the file with only
+  // that one key — silently deleting every other listing's number. Nothing about a broken
+  // file is recoverable HERE, so it throws: index.mjs::publishEdit rolls the clone back with
+  // resetTree(), the reason goes to the journal, and the group gets the generic failure line.
+  it('throws rather than rewriting a corrupt licences.json down to one key', () => {
+    const file = path.join(tmp, 'scripts', 'curate', 'licences.json');
+    const corrupt = '{"BONA-014":{"adNumber":"7200011111","adExpiry":"2027-01-01"},,,';
+    fs.writeFileSync(file, corrupt);
+    assert.throws(
+      () => edits.setLicence(tmp, 'BONA-015', { adNumber: '7200099999', adExpiry: '2028-01-31' }),
+      (err) => {
+        assert.match(err.message, /not valid JSON — refusing to overwrite it/);
+        // `err.message` is read back to the group by `status`; only `err.detail` (journal) may
+        // carry the parser's account of the file — publish.mjs::must()'s rule.
+        assert.ok(!err.message.includes('BONA-014'), `the file's bytes leaked into the reply: ${err.message}`);
+        assert.ok(err.detail, 'the reason still reaches the journal');
+        return true;
+      },
+    );
+    assert.equal(fs.readFileSync(file, 'utf8'), corrupt, 'the file the owner still has to fix is untouched');
+  });
+
+  it('throws on a licences.json that parses but is not an object of listings', () => {
+    const file = path.join(tmp, 'scripts', 'curate', 'licences.json');
+    for (const body of ['[]', '"BONA-015"', 'null', '42']) {
+      fs.writeFileSync(file, body);
+      assert.throws(() => edits.setWafi(tmp, 'BONA-015', { wafiNumber: '1234567890' }), body);
+      assert.equal(fs.readFileSync(file, 'utf8'), body, body);
+    }
+  });
+
+  it('bootstraps only when the file is genuinely absent', () => {
+    fs.rmSync(path.join(tmp, 'scripts', 'curate', 'licences.json'));
+    const res = edits.setLicence(tmp, 'BONA-015', { adNumber: '7200099999', adExpiry: '2028-01-31' });
+    assert.equal(res.curated, true);
+    assert.deepEqual(Object.keys(readLicences()), ['BONA-015']);
+  });
+
+  it('keeps every other listing\'s numbers when it writes a new one', () => {
+    fs.writeFileSync(path.join(tmp, 'scripts', 'curate', 'licences.json'), JSON.stringify({
+      'BONA-014': { adNumber: '7200011111', adExpiry: '2027-01-01', wafiNumber: null, escrowAccount: null },
+    }));
+    edits.setLicence(tmp, 'BONA-015', { adNumber: '7200099999', adExpiry: '2028-01-31' });
+    assert.deepEqual(Object.keys(readLicences()).sort(), ['BONA-014', 'BONA-015']);
+  });
+
+  // Review finding: `setLicence(repo, id, {})` used to reach nextLicence as an all-undefined
+  // patch, which looked exactly like a clear and wiped the block. `clear` is its own argument
+  // and its own command; a patch that sets nothing is a caller bug, so it throws.
+  it('never reads an empty patch as a clear', () => {
+    edits.setLicence(tmp, 'BONA-W001', { adNumber: '7200012345', adExpiry: '2027-03-01' });
+    assert.throws(() => edits.setLicence(tmp, 'BONA-W001', {}), /no field to set/);
+    assert.throws(() => edits.setWafi(tmp, 'BONA-W001', {}), /no field to set/);
+    assert.throws(() => edits.setLicence(tmp, 'BONA-W001'), /no field to set/);
+    assert.equal(readInboxFile().licence.adNumber, '7200012345', 'the licence he recorded is still there');
+  });
+
+  it('sets only the fields it was given, leaving the rest of the block alone', () => {
+    edits.setLicence(tmp, 'BONA-W001', { adNumber: '7200012345', adExpiry: '2027-03-01' });
+    edits.setWafi(tmp, 'BONA-W001', { wafiNumber: '1234567890' });
+    // `wafi` must not blank the ad licence just because its patch has no adNumber in it.
+    assert.deepEqual(readInboxFile().licence, {
+      adNumber: '7200012345', adExpiry: '2027-03-01', wafiNumber: '1234567890', escrowAccount: null,
+    });
+  });
+
+  // Prototype-key hardening: the file is JSON from the repo, and `all[id]` is a lookup by a
+  // string that came off a WhatsApp message. A null-prototype object cannot answer that
+  // lookup with something off Object.prototype.
+  it('reads licences.json into an object with no prototype', () => {
+    fs.writeFileSync(path.join(tmp, 'scripts', 'curate', 'licences.json'), '{"BONA-015":{"adNumber":"7200099999"}}');
+    const all = edits.readLicences(tmp);
+    assert.equal(Object.getPrototypeOf(all), null);
+    assert.equal(all.constructor, undefined, 'a lookup can never fall through to Object.prototype');
+    assert.deepEqual(all['BONA-015'], { adNumber: '7200099999' });
+  });
+
   it('refuses a licence the site validator would reject, and writes nothing', () => {
     // An expiry with no number is the one combination validate.mjs singles out — it would
     // print "valid until …" on a page with no licence to be valid.
