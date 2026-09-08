@@ -475,13 +475,14 @@ export function createApp(options = {}) {
    * `POST /v1/events` — first-party events from the site. Outside the JSON-only gate
    * (the site posts `text/plain` so there is no preflight and `keepalive` works),
    * outside the Retell budget (nothing here costs money), on its own wide rate limit,
-   * and with its own 8 KB cap. A stated foreign origin is refused like every other
-   * browser route. Success is an empty 204.
+   * and with its own 8 KB cap. It is origin-checked fail-closed like every other browser
+   * route: an origin that is not ours, or no origin at all, is refused. Success is an
+   * empty 204.
    */
   async function eventsRoute({ req, res, origin, cors, ip }) {
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'method_not_allowed' }, cors);
-    if (origin && !isAllowedOrigin(origin, cfg.origins)) {
-      log({ level: 'warn', evt: 'origin.rejected', path: '/v1/events', origin: String(origin).slice(0, 200), ip });
+    if (!isAllowedOrigin(origin, cfg.origins)) {
+      log({ level: 'warn', evt: 'origin.rejected', path: '/v1/events', origin: origin ? String(origin).slice(0, 200) : null, ip });
       return sendJson(res, 403, { error: 'forbidden_origin' }, cors);
     }
     const gate = limiters.events.take(`events:${ip}`);
@@ -600,9 +601,18 @@ export function createApp(options = {}) {
     if (req.method !== 'POST' || !BROWSER_ROUTES.has(p)) return sendJson(res, 404, { error: 'not_found' }, cors);
 
     // CORS only stops a browser *reading* the answer — the request still ran and still
-    // cost Retell money. A stated origin that is not ours is refused outright.
-    if (origin && !isAllowedOrigin(origin, cfg.origins)) {
-      log({ level: 'warn', evt: 'origin.rejected', path: p, origin: String(origin).slice(0, 200), ip });
+    // cost Retell money. So the origin is checked here, fail-closed: not just a stated
+    // origin that is not ours, but no stated origin at all.
+    //
+    // This is defence in depth, not authentication. A non-browser caller can set any
+    // header it likes, so this stops nothing determined — what it stops is the accidental
+    // and the lazy: a scraper, a copied curl, a scripted client written without thinking
+    // about it. Every real caller is a cross-origin fetch from the site, which the browser
+    // always stamps with an Origin, so nothing legitimate loses by it. What actually
+    // bounds the damage from a determined caller is the per-IP limiter and the daily
+    // Retell budget, both of which sit below this.
+    if (!isAllowedOrigin(origin, cfg.origins)) {
+      log({ level: 'warn', evt: 'origin.rejected', path: p, origin: origin ? String(origin).slice(0, 200) : null, ip });
       return sendJson(res, 403, { error: 'forbidden_origin' }, cors);
     }
     // JSON-only, with one exception. `/v1/enquiry` also takes `text/plain`, because the

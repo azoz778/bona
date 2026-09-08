@@ -19,6 +19,9 @@ export const EVENT_NAMES = [
 /** What only this server writes. A browser sending one of these is refused. */
 export const SERVER_EVENT_NAMES = ['concierge_chat_start', 'concierge_call_start', 'lead_created', 'lead_stage'];
 
+/** Where a WhatsApp click is re-sent from the server (see lib/fanout.mjs for the mapping). */
+export const CLICK_FANOUT = ['meta', 'ga4', 'snap'];
+
 export const ID_RE = {
   anon_id: /^[0-9a-f]{32}$/,
   session_id: /^[a-z0-9-]{6,24}$/,
@@ -195,7 +198,12 @@ export function recordEvent(db, event, server = {}) {
       lead_id: null, listing_id: event.listing_id, path: event.page, props: event.props,
       src_first: a.first, src_last: a.last, ip, ua, country,
     });
-    if (inserted && event.event === 'whatsapp_click') db.enqueueFanout(event.event_id, ['meta'], { now: received });
+    // A WhatsApp click is the strongest intent signal the site has, and it is exactly the
+    // one an ad blocker eats — so every destination that has a name for it hears it from
+    // the server as well, under the same event_id the browser pixel used. Credentials and
+    // ads consent are still checked at send time; a destination that has neither simply
+    // marks its row skipped.
+    if (inserted && event.event === 'whatsapp_click') db.enqueueFanout(event.event_id, CLICK_FANOUT, { now: received });
     return { inserted };
   });
 }

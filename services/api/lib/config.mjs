@@ -15,6 +15,8 @@ import { MAX_CALLS_PER_DAY, MAX_CHATS_PER_DAY, MAX_TURNS_PER_SESSION } from './b
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const IDS_FILE = path.resolve(HERE, '../retell/ids.json');
+/** The site's own config: the single source of truth for both domains (see `siteDefaults`). */
+export const SITE_FILE = path.resolve(HERE, '../../../src/data/site.json');
 export const PKG_FILE = path.resolve(HERE, '../../package.json');
 
 export function readIds(file = IDS_FILE) {
@@ -38,6 +40,24 @@ export function writeIds(ids, file = IDS_FILE) {
   return { file, changed: true };
 }
 
+/**
+ * The two domains, read from `src/data/site.json` rather than written down here a second
+ * time. The site moved once already (bona.azoz.uk → bona-real-estate.com) and will move
+ * again; a literal in this file is a place the move can be forgotten, and a forgotten one
+ * here is silent — it only shows up as a Retell tool pointing at a dead host, or an
+ * absolutised image URL on the wrong domain. Environment still wins over both, and the
+ * literals below survive only as a last resort for a service running without the repo.
+ */
+export function siteDefaults(file = SITE_FILE) {
+  const url = (v) => (typeof v === 'string' && /^https?:\/\//.test(v) ? v.replace(/\/+$/, '') : null);
+  try {
+    const site = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return { siteUrl: url(site?.url), publicApi: url(site?.concierge?.apiBase) };
+  } catch {
+    return { siteUrl: null, publicApi: null };
+  }
+}
+
 export function version() {
   try { return JSON.parse(fs.readFileSync(PKG_FILE, 'utf8')).version ?? '0.0.0'; } catch { return '0.0.0'; }
 }
@@ -45,8 +65,9 @@ export function version() {
 const truthy = (v, fallback = false) => (v == null || v === '' ? fallback : !['0', 'false', 'no', 'off'].includes(String(v).toLowerCase()));
 
 export function loadConfig({ env = loadEnv(), ids = readIds(), home = os.homedir() } = {}) {
-  const siteUrl = String(env.BONA_SITE ?? 'https://bona-real-estate.com').replace(/\/+$/, '');
-  const publicApi = String(env.BONA_PUBLIC_API ?? 'https://api.bona-real-estate.com').replace(/\/+$/, '');
+  const fromSite = siteDefaults();
+  const siteUrl = String(env.BONA_SITE ?? fromSite.siteUrl ?? 'https://bona-real-estate.com').replace(/\/+$/, '');
+  const publicApi = String(env.BONA_PUBLIC_API ?? fromSite.publicApi ?? 'https://api.bona-real-estate.com').replace(/\/+$/, '');
   const dataDir = env.BONA_DATA ?? path.join(home, 'bona-data');
   return {
     port: Number(env.BONA_API_PORT ?? 4102),
@@ -56,7 +77,10 @@ export function loadConfig({ env = loadEnv(), ids = readIds(), home = os.homedir
     dataDir,
     dbFile: env.BONA_DB_FILE ?? path.join(dataDir, 'bona.db'),
     inventoryFile: resolveInventoryFile(env),
-    origins: parseOrigins(env.BONA_CORS_ORIGINS),
+    // The site's own origin is always allowed, whatever the allowlist says: browser routes
+    // are now origin-checked fail-closed, so a domain move that outran BONA_CORS_ORIGINS
+    // would 403 every event, every enquiry and the whole concierge.
+    origins: [...new Set([...parseOrigins(env.BONA_CORS_ORIGINS), siteUrl])],
     legacyHosts: resolveLegacyHosts(env.BONA_LEGACY_HOSTS, siteUrl),
     toolToken: env.BONA_TOOL_TOKEN ?? '',
     allowQueryToken: truthy(env.BONA_ALLOW_QUERY_TOKEN, false),

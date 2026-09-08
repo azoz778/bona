@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeBoard, checkSiteTag, checkGsc, checkGa4, checkSnap, checkMetaCapi, checkApi, buildUserAgent, healthLink } from '../marketing/verify-integrations.mjs';
+import { mergeBoard, checkSiteTag, checkGsc, checkGa4, checkSnap, checkMetaCapi, checkApi, checkEvolution, buildUserAgent, healthLink } from '../marketing/verify-integrations.mjs';
 
 test('mergeBoard updates rows by id and appends unknown ids with their metadata', () => {
   const board = [
@@ -176,4 +176,19 @@ test('Meta CAPI is live only when the dataset says it received the test event', 
   const nothing = async () => ({ status: 200, ok: true, text: '{}', json: { events_received: 0 } });
   const r = await checkMetaCapi({ env, site: META_SITE, probe: nothing });
   assert.equal(r.status, 'error');
+});
+
+test('Evolution: answering is not the same as accepting the key', async () => {
+  const env = { EVOLUTION_API_URL: 'https://wa.example.test', EVOLUTION_API_KEY: 'k' };
+  const at = (status) => async () => ({ status, ok: status < 400, text: '', json: { version: '2.0' } });
+
+  assert.equal((await checkEvolution({ env, probe: at(200) })).status, 'live');
+  // A wrong or expired key used to read as live, which would have hidden a dead poller.
+  assert.equal((await checkEvolution({ env, probe: at(401) })).status, 'error');
+  assert.equal((await checkEvolution({ env, probe: at(403) })).status, 'error');
+  assert.equal((await checkEvolution({ env, probe: at(404) })).status, 'error');
+  // With no key at all it is the owner's to paste, not a fault.
+  const noKey = { EVOLUTION_API_URL: 'https://wa.example.test' };
+  assert.equal((await checkEvolution({ env: noKey, probe: at(401) })).status, 'pending-owner');
+  assert.equal((await checkEvolution({ env: {}, probe: at(200) })).status, 'pending-owner');
 });

@@ -183,20 +183,34 @@ stripped from the text before it reaches `messages`, so the widget never renders
 |---|---|
 | 400 | malformed JSON, or empty `text`; `bad_event` on `/v1/events`; `bad_request` with a message on `/v1/enquiry` |
 | 401 | wrong or missing tool token |
-| 403 | `forbidden_origin` — an `Origin` header that is not on the allowlist |
+| 403 | `forbidden_origin` — an `Origin` that is not on the allowlist, or no `Origin` at all |
 | 404 | unknown route, unknown tool, expired `sessionId` |
 | 405 | known route, wrong method |
 | 413 | body over 16 KB (8 KB on `/v1/events`) |
-| 415 | a browser POST that is not `application/json` (`/v1/events` also takes `text/plain`) |
+| 415 | a browser POST that is not `application/json` (`/v1/events` and `/v1/enquiry` also take `text/plain`) |
 | 429 | `rate_limited` (`Retry-After` in seconds), or `session_limit` — this chat hit its turn cap |
 | 500 | unexpected failure |
 | 502 | `upstream_error` — Retell unreachable or broken |
 | 503 | `not_provisioned` · `budget_exhausted` (the day's ceiling) · `billing` (Retell balance empty) |
 
-**Who may call.** A browser route with an `Origin` header that is not on the allowlist
-is refused with 403 *before* Retell is contacted — CORS alone only stops the browser
-*reading* the answer, and the call would already have cost money. A request with no
-`Origin` at all (curl, the widget's own server-side probes) is allowed through.
+**Who may call.** Browser routes are origin-checked **fail-closed**, *before* Retell is
+contacted, before the body is parsed and before anything is written: an `Origin` that is
+not on the allowlist is 403, and so is no `Origin` at all. CORS alone only stops the
+browser *reading* the answer — by then the call has already cost money, created a lead and
+messaged the owner.
+
+This is defence in depth, not authentication. A non-browser caller sets whatever header it
+likes, so what this actually turns away is the accidental and the scripted: a scraper, a
+copied curl, a client written without thinking about it. Every legitimate caller is a
+cross-origin `fetch` from the site, which the browser always stamps with an `Origin`, so
+nothing real loses by it. What bounds a determined caller is the per-IP limiter and the
+daily Retell budget below it. The token-gated Retell routes (`/v1/tools/*`,
+`/v1/retell/webhook`) are unaffected — Retell sends no origin and authenticates with
+`X-Bona-Token`.
+
+The allowlist is `BONA_CORS_ORIGINS`, or `DEFAULT_ORIGINS` in `lib/cors.mjs` when that is
+unset — and the site's own origin from `src/data/site.json` is unioned into it either way,
+so a domain move cannot lock the browser out of its own API.
 
 **Rate limits**, per IP, per minute: chat 30, `/v1/call/token` 6, `/v1/enquiry` 6,
 `/v1/events` 240, call context 120, tool routes 600, and *failed* tool
@@ -215,8 +229,14 @@ logged once when it trips, and `/health` carries the running counters.
 
 ## 3. curl examples
 
+Every browser-facing route is origin-checked **fail-closed**: a request with an origin that
+is not on the allowlist — or with no `Origin` header at all — is `403 forbidden_origin`
+before anything is parsed, charged or written. So each example below states one. (The
+token-gated Retell routes are the exception: Retell sends no origin, and it authenticates
+with `X-Bona-Token` instead.)
+
 ```bash
-API=https://bona-api.azoz.uk        # or http://localhost:4102 while testing
+API=https://api.bona-real-estate.com   # or http://localhost:4102 while testing
 
 # health
 curl -s $API/health | jq
@@ -231,7 +251,7 @@ curl -s -X POST $API/v1/chat/message \
   -d "{\"sessionId\":\"$SID\",\"text\":\"أبغى فيلا في الخالدية\"}" | jq
 
 curl -s -X POST $API/v1/chat/end -H 'Content-Type: application/json' \
-  -d "{\"sessionId\":\"$SID\"}"
+  -H 'Origin: https://bona-real-estate.com' -d "{\"sessionId\":\"$SID\"}"
 
 # a web-call token (the widget passes accessToken to RetellWebClient.startCall)
 curl -s -X POST $API/v1/call/token -H 'Content-Type: application/json' \
@@ -242,13 +262,13 @@ curl -s $API/v1/call/<callId>/context | jq
 
 # a first-party event, exactly as the site sends it (text/plain, no preflight) -> 204
 curl -s -o /dev/null -w '%{http_code}\n' -X POST $API/v1/events \
-  -H 'Content-Type: text/plain' -H 'Origin: https://bona.azoz.uk' \
+  -H 'Content-Type: text/plain' -H 'Origin: https://bona-real-estate.com' \
   --data '{"v":1,"event_id":"mf3k2a1b-9c4e7f21","ts":1757150000000,"event":"whatsapp_click","anon_id":"9f1c9f1c9f1c9f1c9f1c9f1c9f1c9f1c","session_id":"mf3k2a-7b1c","ref":"K7Q2XR","page":"/properties/bona-w003/","locale":"en","listing_id":"BONA-W003","props":{"cta":"listing_whatsapp"},"attr":{"first":{"utm_source":"meta","utm_medium":"paid"},"last":{"utm_source":"meta","utm_medium":"paid"}},"consent":{"analytics":true,"ads":true}}'
 
 # an enquiry form -> { lead_id }.  The site posts this as text/plain + keepalive (a CORS
 # simple request, no preflight) so the lead survives the hand-off to WhatsApp on mobile;
 # application/json is accepted too.  The routes that spend Retell money stay JSON-only.
-curl -s -X POST $API/v1/enquiry -H 'Content-Type: text/plain' -H 'Origin: https://bona.azoz.uk' \
+curl -s -X POST $API/v1/enquiry -H 'Content-Type: text/plain' -H 'Origin: https://bona-real-estate.com' \
   -d '{"form":"listing","name":"Sara","phone":"0500000000","listing_id":"BONA-W003","message":"Still available?","attr":{"anon_id":"9f1c9f1c9f1c9f1c9f1c9f1c9f1c9f1c","session_id":"mf3k2a-7b1c","ref":"K7Q2XR"}}'
 
 # a tool webhook, exactly as Retell sends it

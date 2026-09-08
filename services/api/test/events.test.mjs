@@ -135,7 +135,7 @@ test('cleanAttrIds keeps what matches and silently drops the rest', () => {
   assert.deepEqual(cleanAttrIds('x'), { anon_id: null, session_id: null, ref: null, listing_id: null });
 });
 
-test('recordEvent upserts the session, stores the event with the server context, and queues Meta for a WhatsApp click', () => {
+test('recordEvent upserts the session, stores the event with the server context, and queues the fan-out for a WhatsApp click', () => {
   const db = openDb(':memory:');
   const server = { ip: '203.0.113.9', ua: 'Mozilla/5.0', country: 'SA', received: NOW + 5 };
   const view = validateEvent(sample({ event: 'page_view', event_id: 'mf3k2a1b-view0001', ts: NOW - 5000, consent: { analytics: false, ads: false } }), { now: NOW }).event;
@@ -172,6 +172,10 @@ test('recordEvent upserts the session, stores the event with the server context,
   assert.equal(rows[1].country, 'SA');
   assert.equal(rows[1].lead_id, null);
 
-  assert.deepEqual(db.dueFanout(NOW + 5).map((f) => [f.event_id, f.dest]), [['mf3k2a1b-9c4e7f21', 'meta']], 'only the click fans out, and only to Meta');
+  assert.deepEqual(
+    db.dueFanout(NOW + 5).map((f) => [f.event_id, f.dest]),
+    [['mf3k2a1b-9c4e7f21', 'meta'], ['mf3k2a1b-9c4e7f21', 'ga4'], ['mf3k2a1b-9c4e7f21', 'snap']],
+    'only the click fans out — but to every destination that has a name for it, since a WhatsApp click is the event an ad blocker most often eats',
+  );
   db.close();
 });
