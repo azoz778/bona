@@ -19,13 +19,16 @@
                               skipped:manual), anything `adLicenceRequired`/`blocked` (REGA per-ad
                               licence not issued), and any caption still carrying a licence
                               placeholder ({{AD_LICENCE}} or the calendar's bracketed line) —
-                              that last one is a hard stop even with --force-id.
+                              that last one is a hard stop even with --force-id, for as long as
+                              the placeholder is in the caption.
 
    Selection: an entry is due when its KSA time is <= now and not older than --grace hours (6).
    Terminal ledger statuses are never retried: published, skipped:manual, skipped:no-image,
-   skipped:ad-licence-placeholder, skipped:missed, skipped:gave-up. `error` is retried on later
-   runs, three times, then becomes skipped:gave-up. Other skips (ad-licence, caption, quota,
-   no-jpeg) are re-evaluated every run and written to the ledger only when the status changes.
+   skipped:missed, skipped:gave-up. `error` is retried on later runs, three times, then becomes
+   skipped:gave-up. Other skips (ad-licence, ad-licence-placeholder, caption, quota, no-jpeg)
+   are re-evaluated every run and written to the ledger only when the status changes — the
+   placeholder one against the caption as it is NOW, so a number pasted in during the grace
+   window lets the post out.
    `published` is irrevocable: once any line says so, nothing appended later — and not
    --force-id — re-opens the id. An entry the calendar itself marks published is settled too.
 
@@ -103,7 +106,7 @@ export const DEFAULTS = Object.freeze({
   defaultTime: '20:30',
 });
 /** Ledger statuses that end an entry's life. Everything else is re-evaluated next run. */
-export const TERMINAL = new Set(['published', 'skipped:manual', 'skipped:no-image', 'skipped:ad-licence-placeholder', 'skipped:missed', 'skipped:gave-up']);
+export const TERMINAL = new Set(['published', 'skipped:manual', 'skipped:no-image', 'skipped:missed', 'skipped:gave-up']);
 /** What --force-id may override: the due window and these non-final outcomes. Never `published`. */
 const FORCEABLE = new Set(['skipped:missed', 'skipped:gave-up', 'skipped:no-image', 'skipped:no-jpeg', 'skipped:quota', 'skipped:caption', 'error']);
 
@@ -320,7 +323,9 @@ export function decide(entry, { now, graceMs, ledger, forceId = null, readCaptio
 
   let caption;
   try { caption = composeCaption(entry, readCaption); } catch (e) { return { status: 'skipped:caption', detail: `caption unavailable: ${e.message}`, terminal: false }; }
-  if (hasLicencePlaceholder(caption)) return { status: 'skipped:ad-licence-placeholder', detail: 'caption still carries a licence placeholder', terminal: true };
+  // Recomposed from the CURRENT caption every run: the owner may paste the real REGA number
+  // inside the grace window, and then the post goes out. Still a hard stop while it is there.
+  if (hasLicencePlaceholder(caption)) return { status: 'skipped:ad-licence-placeholder', detail: 'caption still carries a licence placeholder', terminal: false };
   const check = checkCaption(caption);
   if (entry.kind !== 'story' && check.problems.length) return { status: 'skipped:caption', detail: check.problems.join('; '), terminal: false };
   if (!entry.images.length) return { status: 'skipped:no-image', detail: 'entry has no image', terminal: true };

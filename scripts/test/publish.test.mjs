@@ -76,7 +76,7 @@ test('reels are never automated: skipped:manual once, terminal', () => {
   assert.equal(decide(mk({ format: 'reel' }), ctx({ now: ksaToEpoch('2026-09-13') })).status, 'skipped:manual', 'a missed reel still tells the human');
 });
 
-test('licence placeholder in a caption is a hard stop, even forced, in every spelling', () => {
+test('licence placeholder in a caption is a hard stop, even forced, in every spelling — until the caption is fixed', () => {
   assert.equal(hasLicencePlaceholder('REGA advertising licence: {{AD_LICENCE}}'), true);
   assert.equal(hasLicencePlaceholder('REGA ad licence: [add number before publishing]'), true);
   assert.equal(hasLicencePlaceholder('رقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]'), true);
@@ -84,10 +84,15 @@ test('licence placeholder in a caption is a hard stop, even forced, in every spe
   for (const cap of [{ ar: 'x {{AD_LICENCE}}', en: 'y' }, { ar: 'x', en: 'REGA ad licence: [add number before publishing]' }, { ar: 'رقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]', en: '' }]) {
     const d = decide(mk({ caption: cap }), ctx({ forceId: 'ig-2026-09-10-post-test' }));
     assert.equal(d.status, 'skipped:ad-licence-placeholder');
-    assert.equal(d.terminal, true);
+    assert.equal(d.terminal, false, 'not permanent: the number may be pasted in before the slot lapses');
   }
+  assert.equal(TERMINAL.has('skipped:ad-licence-placeholder'), false);
+  const prior = { id: 'ig-2026-09-10-post-test', status: 'skipped:ad-licence-placeholder', ts: '2026-09-10T17:31:00Z' };
+  assert.equal(decide(mk({ caption: { ar: 'x {{AD_LICENCE}}', en: 'y' } }), ctx({ ledger: ledgerOf(prior) })).status, 'skipped:ad-licence-placeholder', 'still there: still refused (logged, written only on a status change)');
+  assert.equal(decide(mk({ caption: { ar: 'رقم ترخيص الإعلان العقاري: 7200012345', en: 'REGA ad licence: 7200012345' } }), ctx({ ledger: ledgerOf(prior) })).status, 'candidate', 'the real number went in during the grace window: the post goes out');
   const launch = mk({ launch: 9 });
   assert.equal(decide(launch, ctx({ readCaption: () => 'Bona is open {{AD_LICENCE}}' })).status, 'skipped:ad-licence-placeholder', 'the launch caption file is checked too');
+  assert.equal(decide(launch, ctx({ ledger: ledgerOf({ id: launch.id, status: 'skipped:ad-licence-placeholder', ts: 't' }) })).status, 'candidate', 'the caption FILE is re-read every run, so fixing it is enough');
   assert.equal(decide(launch, ctx()).status, 'candidate');
 });
 
@@ -109,7 +114,7 @@ test('captions: launch posts read marketing/captions/launch-0N.txt, the rest are
 test('ledger idempotency: terminal statuses are never retried; error retries up to 3 times; --force-id re-opens everything but published', () => {
   const e = mk();
   const row = (status, extra = {}) => ({ id: e.id, status, ts: '2026-09-10T17:31:00Z', ...extra });
-  for (const s of ['published', 'skipped:manual', 'skipped:no-image', 'skipped:ad-licence-placeholder', 'skipped:missed', 'skipped:gave-up']) {
+  for (const s of ['published', 'skipped:manual', 'skipped:no-image', 'skipped:missed', 'skipped:gave-up']) {
     assert.ok(TERMINAL.has(s));
     assert.equal(decide(e, ctx({ ledger: ledgerOf(row(s)) })).status, null, s);
   }
@@ -138,7 +143,7 @@ test('ledger idempotency: terminal statuses are never retried; error retries up 
   assert.equal(decide(e, ctx({ ...forced, ledger: ledgerOf(row('skipped:no-jpeg')) })).status, 'candidate', 'forced: the image is re-checked live');
   assert.equal(decide(e, ctx({ ...forced, ledger: ledgerOf(row('skipped:no-image')) })).status, 'candidate', 'forced re-opens a structural skip too (the calendar may have been fixed)');
   assert.equal(decide(e, ctx({ ...forced, ledger: ledgerOf(row('skipped:manual')) })).status, null, 'a manual (reel) line is not re-opened by force — a reel is a human job whatever the flag says');
-  assert.equal(decide(e, ctx({ ...forced, ledger: ledgerOf(row('skipped:ad-licence-placeholder')) })).status, null, 'nor is a placeholder hard stop');
+  assert.equal(decide(mk({ caption: { ar: 'x {{AD_LICENCE}}', en: 'y' } }), ctx({ ...forced, ledger: ledgerOf(row('skipped:ad-licence-placeholder')) })).status, 'skipped:ad-licence-placeholder', 'a placeholder still in the caption is refused whatever the flag says');
   const refused = decide(e, ctx({ ...forced, ledger: ledgerOf(row('published', { permalink: 'https://instagram.com/p/x' })) }));
   assert.equal(refused.status, 'refused:published');
   assert.match(refused.detail, /never re-posted, not even with --force-id/);
