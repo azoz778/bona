@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# ExecStartPre for bona-ig-publish.service: refuse to run the publisher unless ~/bona has
-# `main` checked out. The timer reads src/data/content-calendar.json from the working tree;
-# a feature branch left checked out would silently feed it a different calendar.
-# Read-only (works under ProtectHome=read-only); exit 1 fails the unit before ExecStart.
+# ExecStartPre for bona-ig-publish.service: refuse to run unless the publish tree is exactly
+# origin/main (a detached worktree, which is how install.sh makes it) or on the main branch,
+# with no local modifications to tracked files. The calendar is read from that tree; a feature
+# branch, a stray edit or a stale checkout must not feed the timer. Read-only; exit 1 fails the
+# unit before ExecStart, with the reason in the journal.
 set -u
-repo="${1:-$HOME/bona}"
-if ! branch="$(git -C "$repo" symbolic-ref --short -q HEAD 2>/dev/null)"; then
-  echo "bona-ig-publish: refusing to run — $repo is not on a branch (detached HEAD or not a git checkout)" >&2
-  exit 1
+tree="${1:-$HOME/bona-publish}"
+refuse() { echo "bona-ig-publish: refusing to run — $tree $*" >&2; exit 1; }
+head="$(git -C "$tree" rev-parse -q --verify HEAD 2>/dev/null)" || refuse "is not a git checkout (run ops/systemd/install.sh)"
+branch="$(git -C "$tree" symbolic-ref --short -q HEAD 2>/dev/null || echo detached)"
+want="$(git -C "$tree" rev-parse -q --verify refs/remotes/origin/main 2>/dev/null || true)"
+if [ "$branch" != "main" ] && { [ -z "$want" ] || [ "$head" != "$want" ]; }; then
+  refuse "is on '$branch' at ${head:0:9}, not origin/main${want:+ (${want:0:9})} — git -C $tree checkout --detach origin/main"
 fi
-if [ "$branch" != "main" ]; then
-  echo "bona-ig-publish: refusing to run — $repo is on branch '$branch', not main (git -C $repo checkout main)" >&2
-  exit 1
-fi
-exit 0
+git -C "$tree" diff --quiet HEAD -- 2>/dev/null || refuse "has local modifications to tracked files — git -C $tree status"
+label=main; [ "$branch" = "main" ] || label=origin/main
+echo "bona-ig-publish: $tree at ${head:0:9} ($label), clean"
