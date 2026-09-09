@@ -395,11 +395,11 @@ node scripts/instagram-post.mjs post-carousel \
 Stories: `post-story --image-url …`. Reels are not supported by that script — two raw calls:
 
 ```bash
-curl -X POST "https://graph.facebook.com/v21.0/$IG_BUSINESS_ID/media" \
+curl -X POST "https://graph.facebook.com/v26.0/$IG_BUSINESS_ID/media" \
   -d media_type=REELS -d video_url="https://<host>/reel-BONA-001.mp4" \
   -d caption="$(cat /tmp/caption.ar.txt)" -d access_token=$META_ACCESS_TOKEN
 # poll GET /<container-id>?fields=status_code until FINISHED, then:
-curl -X POST "https://graph.facebook.com/v21.0/$IG_BUSINESS_ID/media_publish" \
+curl -X POST "https://graph.facebook.com/v26.0/$IG_BUSINESS_ID/media_publish" \
   -d creation_id=<container-id> -d access_token=$META_ACCESS_TOKEN
 ```
 

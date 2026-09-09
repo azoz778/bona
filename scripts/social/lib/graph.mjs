@@ -13,7 +13,8 @@
 //   captions     ≤ 2,200 characters, ≤ 30 hashtags
 //   quota        25 published posts per rolling 24 h (GET /{ig-id}/content_publishing_limit)
 
-export const DEFAULT_GRAPH_VERSION = 'v21.0';
+/** Newest version per https://developers.facebook.com/docs/graph-api/changelog on 2026-09-09 (v26.0, 2026-07-29). GRAPH_VERSION overrides. */
+export const DEFAULT_GRAPH_VERSION = 'v26.0';
 export const CAPTION_MAX_CHARS = 2200;
 export const CAPTION_MAX_HASHTAGS = 30;
 export const CAROUSEL_MIN = 2;
@@ -115,7 +116,8 @@ export function createGraph({
 } = {}) {
   const api = `https://graph.facebook.com/${version}`;
   const id = igId || '<IG_BUSINESS_ID>';
-  const masked = token ? `${token.slice(0, 6)}…` : '<META_ACCESS_TOKEN>';
+  // Never even a prefix: a dry-run line lands in the journal like any other.
+  const masked = token ? '<token>' : '<META_ACCESS_TOKEN>';
   const fakeId = () => `dry_${Math.random().toString(36).slice(2, 8)}`;
 
   async function call(method, pathname, params = {}) {

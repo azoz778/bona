@@ -607,6 +607,9 @@ export async function run(opts = {}, deps = {}) {
 // ---------------------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------------------
+/** Every log line passes through this: the token never reaches the journal, dry-run or not. */
+export const maskToken = (token) => (token ? (s) => String(s).split(token).join('<token>') : (s) => String(s));
+
 export async function main(argv = process.argv.slice(2), env = process.env) {
   let opts;
   try { opts = parseArgs(argv); } catch (e) { console.error(`error: ${e.message}`); return 1; }
@@ -617,7 +620,8 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   // Under the timer an empty token must not quietly become a dry-run every 15 minutes.
   if (opts.live && !token) { console.error('error: META_ACCESS_TOKEN missing — --live refuses to run without a token (set it in ~/.secrets/bona-meta-graph.env, or drop --live for a dry-run)'); return 1; }
   const dryRun = opts.dryRun || !token;
-  const log = opts.json ? (s) => console.error(s) : (s) => console.log(s);
+  const mask = maskToken(token);
+  const log = opts.json ? (s) => console.error(mask(s)) : (s) => console.log(mask(s));
   const r = await run({ ...opts, dryRun }, { now, token, igId: env.IG_BUSINESS_ID, log });
   if (opts.json) console.log(JSON.stringify({ now: new Date(now).toISOString(), nowKsa: fmtKsa(now), dryRun, code: r.code, published: r.published, errors: r.errors, results: r.results }, null, 2));
   return r.code;
