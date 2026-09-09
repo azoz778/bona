@@ -1,0 +1,24 @@
+; Bona — timer for bona-ig-publish.service.
+;
+; Every 15 minutes from 17:00 to 23:45 Asia/Riyadh. The zone is written INTO the calendar
+; expression (systemd >= 240 accepts it), so the schedule holds even if this machine's zone
+; changes; `timedatectl` on this box is Asia/Riyadh already. Check the next elapse with
+;   systemd-analyze calendar "*-*-* 17..23:00/15 Asia/Riyadh"
+;
+; Why that window: every slot in the calendar sits in it (stories 17:15, feed 20:30, 3D-tour
+; stories 21:05, the launch grid 17:30 → 20:10) and the publisher's --grace 6 h means a run
+; missed for any reason is caught by the next one the same evening.
+; Persistent=true: if the box was off at a tick, run once at the next boot. The publisher's
+; grace window decides whether anything is still worth posting.
+
+[Unit]
+Description=Bona — Instagram publisher, every 15 min 17:00–23:59 KSA
+
+[Timer]
+OnCalendar=*-*-* 17..23:00/15 Asia/Riyadh
+Persistent=true
+AccuracySec=30s
+Unit=bona-ig-publish.service
+
+[Install]
+WantedBy=timers.target
