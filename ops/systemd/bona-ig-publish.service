@@ -1,0 +1,58 @@
+; Bona — unattended Instagram publisher. systemd USER unit (no root anywhere).
+;
+; Fired by bona-ig-publish.timer every 15 min, 17:00–23:59 Asia/Riyadh. Each run reads
+; src/data/content-calendar.json, publishes what is due (max 3, 60 s apart), appends to
+; marketing/queue/published.jsonl and exits. See scripts/social/README.md → "Publishing — Instagram".
+;
+;   bash ~/bona/ops/systemd/install.sh            # copies both units, daemon-reload, enables the timer
+;   systemctl --user list-timers bona-ig-publish.timer
+;   journalctl --user -u bona-ig-publish -o cat -n 50
+;   systemctl --user start bona-ig-publish.service # run once, now
+;   systemctl --user stop  bona-ig-publish.timer   # pause
+;
+; A user unit inherits almost nothing from the login shell. node is nvm-managed here
+; (~/.local/bin/node -> ~/.nvm/versions/node/vX/bin/node), so PATH is set explicitly and
+; ExecStart goes through /usr/bin/env — if node is upgraded, fix the two paths on the PATH line.
+; TZ is set for the log lines only; the script itself does its due-time maths in Asia/Riyadh
+; regardless of the machine zone.
+
+[Unit]
+Description=Bona — publish due Instagram calendar entries
+Documentation=file:%h/bona/scripts/social/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/bona
+Environment=TZ=Asia/Riyadh
+Environment=NODE_ENV=production
+Environment=PATH=%h/.local/bin:%h/.nvm/versions/node/v24.19.0/bin:/usr/local/bin:/usr/bin:/bin
+; META_ACCESS_TOKEN, IG_BUSINESS_ID (and optionally GRAPH_VERSION). No "-" prefix on purpose:
+; a missing token file must FAIL the unit loudly, not silently run in dry-run mode every 15 min.
+EnvironmentFile=%h/.secrets/bona-meta-graph.env
+ExecStart=/usr/bin/env node scripts/social/publish.mjs --limit 3
+; Worst case per run: 3 publishes × (container poll up to 2 min + 60 s gap) ≈ 9 min. Must end
+; before the next 15-min tick; the lock file covers an overlap anyway.
+TimeoutStartSec=13min
+; Exit 2 = a publish error was recorded in the ledger (systemd shows the unit as failed, which
+; is what we want to see in `systemctl --user --failed`). Exit 0 = ok / nothing due.
+SuccessExitStatus=0
+
+; ---- sandbox -----------------------------------------------------------------------
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectControlGroups=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+LockPersonality=true
+; The only things the publisher writes: the ledger and its lock file.
+ReadWritePaths=%h/bona/marketing/queue
+MemoryHigh=256M
+MemoryMax=512M
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bona-ig-publish

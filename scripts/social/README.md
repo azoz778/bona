@@ -12,7 +12,9 @@ scripts/social/
   make-carousel.mjs    one listing -> 4-6 slides, 1080x1350 (or 1080x1080), PNG + JPEG
   make-story.mjs       1080x1920 story cards: new / price / sold / district / editorial
   queue.mjs            builds marketing/queue/queue.json — 30 days, 7 platforms
+  publish.mjs          the unattended Instagram publisher (timer-driven; see "Publishing — Instagram")
   lib/                 fonts, design system, listing copy, photo resolution, cards
+  lib/graph.mjs        the Instagram Graph API client shared with scripts/instagram-post.mjs
   fonts/               the six brand faces as .ttf (see fonts/README.md)
 ```
 
@@ -87,14 +89,16 @@ Output lands in `marketing/queue/`:
 ```
 marketing/queue/
   queue.json          <- committed
+  published.jsonl     <- committed: the Instagram publisher's ledger (see below)
+  .publish.lock       <- not committed: the publisher's run lock
   reels/reel-<ID>.mp4
   carousels/<ID>/01..06.png + .jpg
   stories/*.png + .jpg
   posts/*.png + .jpg
 ```
 
-Only `queue.json` is committed. The media is gitignored — it is large and fully reproducible
-from `queue.mjs --render`.
+Only `queue.json` and `published.jsonl` are committed. The media is gitignored — it is large
+and fully reproducible from `queue.mjs --render`.
 
 **PNG and JPEG twins.** Every still is written both ways. PNG is the master; the JPEG exists
 because Instagram's Graph API rejects PNG outright. `queue.json` carries `assets` (PNG) and
@@ -189,19 +193,143 @@ surface and alternate pillar instead. Channels that are structurally single-form
 
 ---
 
-## Publishing
+## Publishing — Instagram
 
-**Nothing here publishes anything.** No token exists in this repo and, apart from Instagram,
-no account has been claimed yet (`marketing/social-bios.md` lists the handles to register).
-Entries carry `accountStatus: "to-claim"` until they are. The commands below are what to run
-once the credentials are in place.
+Instagram is the one platform that publishes **unattended**. `scripts/social/publish.mjs` runs
+from a systemd user timer every 15 minutes between 17:00 and 23:59 Asia/Riyadh, posts what the
+calendar says is due, writes what happened to a ledger, and exits. No token lives in the repo.
+
+### What it reads, and why that file
+
+The source of truth is **`src/data/content-calendar.json`**, written by
+`scripts/og/gen-social.mjs` — *not* `marketing/queue/queue.json`. Three reasons:
+
+- it is the Instagram calendar: one entry per post with the AR+EN caption, hashtags, alt text,
+  `adLicenceRequired`, a stable `id` and a KSA `time`;
+- its images are already **public HTTPS URLs** (the site's own `/listings/…` files and the media
+  host). `queue.json` points at locally rendered files under `marketing/queue/` that are not
+  hosted anywhere, and the publisher never uploads anything;
+- the dashboard (`/dashboard`) reads the same file, so what the owner sees is what goes out.
+
+`--source` accepts another file (it understands `queue.json`'s shape too), but those assets
+would have to be hosted first.
+
+### How it picks entries
+
+For every Instagram entry, in slot order:
+
+1. **Due** = `date` + `time` (KSA) is at or before now, and not more than `--grace` hours ago
+   (default 6). Earlier: wait. Later: `skipped:missed`, written once, and it is gone — the
+   evening's slot is the point.
+2. **Never automated**: `adLicenceRequired` / `blocked` entries (REGA per-ad licence not
+   issued) log `skipped:ad-licence` and are re-checked every run until the calendar says
+   otherwise; `reel` entries log `skipped:manual` once (hosted video + an in-app audio pick
+   are a human's job).
+3. **Caption**: launch posts use `marketing/captions/launch-0N.txt`; everything else is
+   AR — EN + hashtags from the entry (cut to 30). Over 2,200 characters → `skipped:caption`.
+   A caption still carrying a licence placeholder — `{{AD_LICENCE}}`, `[add number before
+   publishing]` or `[يُضاف قبل النشر]` — is a **hard stop**, `skipped:ad-licence-placeholder`,
+   even with `--force-id`.
+4. **Image**: a site-relative path is prefixed with `https://bona-real-estate.com`; a PNG (or
+   anything not `.jpg/.jpeg`) is swapped for its `.jpg` / `.jpeg` twin if one is served; every
+   URL is HEAD-checked (200 + `image/jpeg`) before a container is created. No twin →
+   `skipped:no-jpeg` with the URLs it tried in the log. (`og-default.png` has no twin on the
+   site today, so the two posts that use it are skipped until one is deployed.)
+5. **Limits**: at most **3 publishes per run**, **60 s apart**, and the run reads
+   `GET /{ig-id}/content_publishing_limit` first and stops at **20 of 25** for the rolling day.
+6. **Publish**: `post` → single image container, `carousel` → 2–10 child containers + parent,
+   `story` → `media_type=STORIES`. The flow and the error hints are the same code the CLI uses
+   (`lib/graph.mjs`).
+
+### The ledger — `marketing/queue/published.jsonl`
+
+One JSON line per outcome, keyed by the entry `id`; the **last line for an id is its state**:
+
+```json
+{"id":"ig-2026-09-10-story-poll-villa-or-penthouse","date":"2026-09-10","slot":"17:15","kind":"story","status":"published","mediaId":"1789…","permalink":"https://www.instagram.com/…","ts":"2026-09-10T14:15:41.120Z","imageUrl":"https://…jpg"}
+```
+
+- **Terminal, never retried**: `published`, `skipped:manual`, `skipped:no-jpeg`,
+  `skipped:ad-licence-placeholder`, `skipped:missed`, `skipped:gave-up`.
+- **Retried**: `error` on later runs, three times, then `skipped:gave-up`.
+  `skipped:ad-licence`, `skipped:caption`, `skipped:quota` are re-evaluated every run and only
+  re-written when the status changes.
+- A post published **by hand** is recorded here too (`"manual": true`) — that is what keeps the
+  timer from posting it again. Launch post #9 on 2026-09-09 is the first such line.
+- **It is committed.** It is a few KB, append-only, and it *is* the audit trail of what went
+  out under Bona's name; `gen-social.mjs` reads it back so a regenerated calendar shows
+  `status: "published"` instead of `planned`. Commit it after the evening's run (or let the
+  next session do it); an uncommitted ledger is still honoured locally. The lock file next to
+  it is gitignored.
+
+### The timer
+
+`ops/systemd/bona-ig-publish.{service,timer}` + `ops/systemd/install.sh` (systemd **user**
+units; no root). The token file is `~/.secrets/bona-meta-graph.env`, mode 600:
+
+```
+META_ACCESS_TOKEN=EAAB…        # system-user token: instagram_basic, instagram_content_publish, pages_read_engagement
+IG_BUSINESS_ID=17841427688957180
+FB_PAGE_ID=1245646955305748
+```
+
+```bash
+bash ~/bona/ops/systemd/install.sh                 # once the token file exists: copy, daemon-reload, enable
+systemctl --user list-timers bona-ig-publish.timer # next elapse
+journalctl --user -u bona-ig-publish -o cat -f     # watch a run
+systemctl --user start bona-ig-publish.service     # run once, now
+systemctl --user stop  bona-ig-publish.timer       # PAUSE (start to resume; the service can still be run by hand)
+```
+
+`OnCalendar=*-*-* 17..23:00/15 Asia/Riyadh` — the zone is written into the expression, so the
+schedule holds whatever `timedatectl` says (this box is Asia/Riyadh anyway). `Persistent=true`
+runs once at boot if a tick was missed; the grace window decides whether anything is still
+worth posting. Two overlapping runs cannot double-post: `marketing/queue/.publish.lock` is
+taken with `O_EXCL` and a lock older than 20 minutes, or whose process is gone, is taken over.
+`node` is nvm-managed on this machine, so the unit sets `PATH` explicitly.
+
+### Running it by hand
+
+```bash
+node scripts/social/publish.mjs --dry-run                      # what the next run would do (default when no token)
+node scripts/social/publish.mjs --dry-run --now 2026-09-09T18:30   # pretend it is that KSA time
+node scripts/social/publish.mjs --force-id ig-2026-09-14-carousel-district-guide-north-obhur-al-sheraa-al-bandar
+node scripts/social/publish.mjs --json --limit 1
+```
+
+`--force-id` publishes one entry regardless of its slot and re-opens a `missed` / `gave-up` /
+`no-jpeg` line; it still refuses REGA-blocked entries, placeholder captions, reels and anything
+already `published` (delete the ledger line if you really mean it). Without a token every
+invocation is a dry-run: requests are printed, nothing is sent, nothing is written.
+Exit codes: 0 ok / nothing due · 1 config error · 2 a publish error was recorded.
+
+### What is never automated
+
+- **Reels** — video must be hosted and the audio picked in the app. Post from the rendered
+  `marketing/queue/reels/` file by hand; the ledger line is written the first time it is due.
+- **Anything about a specific property** until its REGA advertising licence is in the caption
+  (`adLicenceRequired: false` in the calendar). No licence, no post — there is no flag for it.
+- **Other platforms.** See below.
+
+The dry-run before install: `node scripts/social/publish.mjs --dry-run --now 2026-09-09T18:30`.
+Tests: `scripts/test/publish.test.mjs`, `scripts/test/graph.test.mjs` (`npm test`).
+
+---
+
+## Publishing — other platforms
+
+**Nothing here publishes anything except Instagram (above).** No other token exists in this
+repo and no other account has been claimed yet (`marketing/social-bios.md` lists the handles to
+register). Entries carry `accountStatus: "to-claim"` until they are. The commands below are what
+to run once the credentials are in place.
 
 Every API below needs a **public HTTPS URL** for the media, not a local path. Upload the
 asset first (the site's own storage, or any bucket) and substitute the URL.
 
 ### Instagram + Facebook — Meta Graph API
-The repo already ships a poster: `scripts/instagram-post.mjs` (needs `META_ACCESS_TOKEN` and
-`IG_BUSINESS_ID`; image URLs must be public **JPEG**, which is why the JPEG twins exist).
+The repo already ships a poster for one-off posts: `scripts/instagram-post.mjs` (needs
+`META_ACCESS_TOKEN` and `IG_BUSINESS_ID`; image URLs must be public **JPEG**, which is why the
+JPEG twins exist). It shares `lib/graph.mjs` with the unattended publisher.
 
 ```bash
 export META_ACCESS_TOKEN=... IG_BUSINESS_ID=...
@@ -214,7 +342,7 @@ node scripts/instagram-post.mjs post-carousel \
   --caption-file /tmp/caption.ar.txt
 ```
 
-Reels are not yet supported by that script — two raw calls:
+Stories: `post-story --image-url …`. Reels are not supported by that script — two raw calls:
 
 ```bash
 curl -X POST "https://graph.facebook.com/v21.0/$IG_BUSINESS_ID/media" \
