@@ -59,6 +59,8 @@
 
    Flags:
      --dry-run          print every request, write nothing (the default when META_ACCESS_TOKEN is unset)
+     --live             what the timer passes: with no META_ACCESS_TOKEN exit 1 loudly instead of
+                        dry-running (a human without a token still gets the dry-run)
      --now 2026-09-09T18:30   pretend it is this KSA time (or an ISO time with a zone)
      --grace 6          hours after the slot during which an entry is still due
      --limit 3          publishes per run (hard cap 3)
@@ -69,7 +71,7 @@
      --json             machine-readable result on stdout (log lines go to stderr)
 
    Env (from ~/.secrets/bona-meta-graph.env under the timer):
-     META_ACCESS_TOKEN  system-user token; unset -> dry-run
+     META_ACCESS_TOKEN  system-user token; unset -> dry-run (exit 1 under --live)
      IG_BUSINESS_ID     defaults to the account id of @bonarealestatesa
      GRAPH_VERSION      optional
      BONA_IG_LEDGER     ledger path (default ~/bona-data/ig/published.jsonl)
@@ -146,6 +148,7 @@ export function parseArgs(argv) {
     args: argv,
     options: {
       'dry-run': { type: 'boolean', default: false },
+      live: { type: 'boolean', default: false },
       now: { type: 'string' },
       grace: { type: 'string' },
       limit: { type: 'string' },
@@ -160,6 +163,7 @@ export function parseArgs(argv) {
   const num = (v, name, d) => { if (v == null) return d; const n = Number(v); if (!Number.isFinite(n) || n < 0) throw new Error(`--${name} must be a number (got "${v}")`); return n; };
   return {
     dryRun: values['dry-run'],
+    live: values.live,
     now: values.now,
     graceHours: num(values.grace, 'grace', DEFAULTS.graceHours),
     limit: Math.floor(num(values.limit, 'limit', DEFAULTS.limit)),
@@ -574,6 +578,8 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   let now;
   try { now = parseNow(opts.now); } catch (e) { console.error(`error: ${e.message}`); return 1; }
   const token = env.META_ACCESS_TOKEN || '';
+  // Under the timer an empty token must not quietly become a dry-run every 15 minutes.
+  if (opts.live && !token) { console.error('error: META_ACCESS_TOKEN missing — --live refuses to run without a token (set it in ~/.secrets/bona-meta-graph.env, or drop --live for a dry-run)'); return 1; }
   const dryRun = opts.dryRun || !token;
   const log = opts.json ? (s) => console.error(s) : (s) => console.log(s);
   const r = await run({ ...opts, dryRun }, { now, token, igId: env.IG_BUSINESS_ID, log });
