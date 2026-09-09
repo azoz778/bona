@@ -39,13 +39,24 @@ export function parseLedger(text) {
 export function readLedgerFile(file) {
   try { return parseLedger(fs.readFileSync(file, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return []; throw e; }
 }
-/** Per-id view: the latest record and how many `error` lines it has accumulated. */
+/**
+ * Per-id view:
+ *   latest     the last line — the entry's current state for everything re-evaluated per run
+ *   published  the FIRST `published` line, if any. Irrevocable: whatever lines follow (a hand
+ *              edit, a merge, a recovery script appending `error`), the post went out once and
+ *              must never go out again
+ *   inFlight   a `publishing` line (container created, media_publish attempted or about to be)
+ *              with no `published` / `error` line after it — settled only by reconciliation
+ *   errors     `error` lines since the last publish (what skipped:gave-up counts)
+ */
 export function indexLedger(records) {
   const m = new Map();
   for (const r of records) {
-    const cur = m.get(r.id) || { latest: null, errors: 0 };
+    const cur = m.get(r.id) || { latest: null, published: null, inFlight: null, errors: 0 };
     cur.latest = r;
-    cur.errors = r.status === 'error' ? cur.errors + 1 : (r.status === 'published' ? 0 : cur.errors);
+    if (r.status === 'published') { cur.published ??= r; cur.inFlight = null; cur.errors = 0; }
+    else if (r.status === 'publishing') cur.inFlight = r;
+    else if (r.status === 'error') { cur.inFlight = null; cur.errors += 1; }
     m.set(r.id, cur);
   }
   return m;
