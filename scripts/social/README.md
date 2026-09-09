@@ -231,9 +231,13 @@ For every Instagram entry, in slot order:
    even with `--force-id`.
 4. **Image**: a site-relative path is prefixed with `https://bona-real-estate.com`; a PNG (or
    anything not `.jpg/.jpeg`) is swapped for its `.jpg` / `.jpeg` twin if one is served; every
-   URL is HEAD-checked (200 + `image/jpeg`) before a container is created. No twin →
-   `skipped:no-jpeg` with the URLs it tried in the log. (`og-default.png` has no twin on the
-   site today, so the two posts that use it are skipped until one is deployed.)
+   URL is HEAD-checked (200 + `image/jpeg`) before a container is created. No twin served →
+   `skipped:no-jpeg` with the URLs it tried in the log — **not** terminal: a 404 (or a 5xx, or
+   the wrong content type) is a deploy away from a 200, so the entry is checked again every run
+   for as long as its slot is inside the grace window, and the line is written once per status
+   change. Only the structural cases are terminal, as `skipped:no-image`: no image on the entry,
+   a local (unhosted) path, a non-https URL. (`og-default.jpg` ships with this branch so the
+   two posts that use `og-default.png` go out once it is deployed.)
 5. **Limits**: at most **3 publishes per run**, **60 s apart**, and the run reads
    `GET /{ig-id}/content_publishing_limit` first and stops at **20 of 25** for the rolling day.
 6. **Publish**: `post` → single image container, `carousel` → 2–10 child containers + parent,
@@ -256,14 +260,14 @@ One JSON line per outcome, keyed by the entry `id`; the **last line for an id is
 {"id":"ig-2026-09-10-story-poll-villa-or-penthouse","date":"2026-09-10","slot":"17:15","kind":"story","status":"published","mediaId":"1789…","permalink":"https://www.instagram.com/…","ts":"2026-09-10T14:15:41.120Z","imageUrl":"https://…jpg"}
 ```
 
-- **Terminal, never retried**: `published`, `skipped:manual`, `skipped:no-jpeg`,
+- **Terminal, never retried**: `published`, `skipped:manual`, `skipped:no-image`,
   `skipped:ad-licence-placeholder`, `skipped:missed`, `skipped:gave-up`.
 - **`published` is irrevocable.** Once any line for an id says so, nothing appended after it
   (a hand edit, a merge, a recovery script writing `error`) re-opens it — not even
   `--force-id`. An entry the calendar itself marks `status: "published"` is settled the same way.
 - **Retried**: `error` on later runs, three times, then `skipped:gave-up`.
-  `skipped:ad-licence`, `skipped:caption`, `skipped:quota` are re-evaluated every run and only
-  re-written when the status changes.
+  `skipped:ad-licence`, `skipped:caption`, `skipped:quota`, `skipped:no-jpeg` are re-evaluated
+  every run and only re-written when the status changes.
 - **`publishing` = in flight.** Written *before* `media_publish`, with the `containerId`. If
   the run dies after that line (a crash, a SIGKILL, a 5xx with the post already live) the id
   is never a candidate again on its own: every live run starts by asking Instagram what became
@@ -325,7 +329,7 @@ node scripts/social/publish.mjs --json --limit 1
 ```
 
 `--force-id` publishes one entry regardless of its slot and re-opens a `missed` / `gave-up` /
-`no-jpeg` line; it still refuses REGA-blocked entries, placeholder captions, reels and anything
+`no-jpeg` / `no-image` line; it still refuses REGA-blocked entries, placeholder captions, reels and anything
 already `published` (delete the ledger line if you really mean it). Without a token every
 invocation is a dry-run: requests are printed, nothing is sent, nothing is written.
 Exit codes: 0 ok / nothing due · 1 config error · 2 a publish error was recorded.

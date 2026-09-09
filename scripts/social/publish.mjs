@@ -22,10 +22,10 @@
                               that last one is a hard stop even with --force-id.
 
    Selection: an entry is due when its KSA time is <= now and not older than --grace hours (6).
-   Terminal ledger statuses are never retried: published, skipped:manual, skipped:no-jpeg,
+   Terminal ledger statuses are never retried: published, skipped:manual, skipped:no-image,
    skipped:ad-licence-placeholder, skipped:missed, skipped:gave-up. `error` is retried on later
-   runs, three times, then becomes skipped:gave-up. Other skips (ad-licence, caption, quota) are
-   re-evaluated every run and written to the ledger only when the status changes.
+   runs, three times, then becomes skipped:gave-up. Other skips (ad-licence, caption, quota,
+   no-jpeg) are re-evaluated every run and written to the ledger only when the status changes.
    `published` is irrevocable: once any line says so, nothing appended later — and not
    --force-id — re-opens the id. An entry the calendar itself marks published is settled too.
 
@@ -40,7 +40,9 @@
 
    Images: relative paths are prefixed with the site origin; a PNG (or anything not .jpg/.jpeg)
    is swapped for its .jpg/.jpeg twin if one exists; every URL is HEAD-checked (200 + image/jpeg)
-   before a container is created. No twin -> skipped:no-jpeg, with the URLs tried in the log.
+   before a container is created. No twin served yet -> skipped:no-jpeg (re-checked every run
+   while the slot is in its grace window: a deploy fixes it); no image at all, a local path or a
+   non-https URL -> skipped:no-image (terminal: no deploy fixes that).
 
    Limits: at most 3 publishes per run, >= 60 s apart, and the run stops when the account's
    rolling 24 h quota (GET /{ig-id}/content_publishing_limit) is at 20 of 25.
@@ -101,9 +103,9 @@ export const DEFAULTS = Object.freeze({
   defaultTime: '20:30',
 });
 /** Ledger statuses that end an entry's life. Everything else is re-evaluated next run. */
-export const TERMINAL = new Set(['published', 'skipped:manual', 'skipped:no-jpeg', 'skipped:ad-licence-placeholder', 'skipped:missed', 'skipped:gave-up']);
+export const TERMINAL = new Set(['published', 'skipped:manual', 'skipped:no-image', 'skipped:ad-licence-placeholder', 'skipped:missed', 'skipped:gave-up']);
 /** What --force-id may override: the due window and these non-final outcomes. Never `published`. */
-const FORCEABLE = new Set(['skipped:missed', 'skipped:gave-up', 'skipped:no-jpeg', 'skipped:quota', 'skipped:caption', 'error']);
+const FORCEABLE = new Set(['skipped:missed', 'skipped:gave-up', 'skipped:no-image', 'skipped:no-jpeg', 'skipped:quota', 'skipped:caption', 'error']);
 
 // ---------------------------------------------------------------------------------------
 // time
@@ -232,13 +234,19 @@ export async function verifyJpeg(url, fetchImpl = globalThis.fetch, { timeoutMs 
 }
 /**
  * Resolve one calendar image to a verified public JPEG URL.
- * -> { ok:true, url } | { ok:false, reason:'no-jpeg'|'network'|'not-hosted', detail, tried }
+ * -> { ok:true, url }
+ *  | { ok:false, reason:'no-image', detail, tried:[] }   structural: not hosted / not https — no
+ *                                                        deploy fixes it, so the caller may stop
+ *  | { ok:false, reason:'no-jpeg',  detail, tried }      the server answered but not with a JPEG
+ *                                                        (404 before a deploy, wrong type, 5xx):
+ *                                                        worth asking again next run
+ *  | { ok:false, reason:'network',  detail, tried }      no answer at all
  */
 export async function resolveImage(u, { base = DEFAULTS.siteBase, fetch: fetchImpl = globalThis.fetch, onCheck = () => {} } = {}) {
   const abs = absoluteImageUrl(u, base);
-  if (!abs) return { ok: false, reason: 'not-hosted', detail: `${u} is not an https URL or a site path`, tried: [] };
+  if (!abs) return { ok: false, reason: 'no-image', detail: `${u} is not an https URL or a site path`, tried: [] };
   const stat = checkImageUrl(abs);
-  if (stat.problems.length) return { ok: false, reason: 'no-jpeg', detail: stat.problems[0], tried: [] };
+  if (stat.problems.length) return { ok: false, reason: 'no-image', detail: stat.problems[0], tried: [] };
   const tried = [];
   let network = null;
   for (const cand of jpegCandidates(abs)) {
@@ -315,7 +323,7 @@ export function decide(entry, { now, graceMs, ledger, forceId = null, readCaptio
   if (hasLicencePlaceholder(caption)) return { status: 'skipped:ad-licence-placeholder', detail: 'caption still carries a licence placeholder', terminal: true };
   const check = checkCaption(caption);
   if (entry.kind !== 'story' && check.problems.length) return { status: 'skipped:caption', detail: check.problems.join('; '), terminal: false };
-  if (!entry.images.length) return { status: 'skipped:no-jpeg', detail: 'entry has no image', terminal: true };
+  if (!entry.images.length) return { status: 'skipped:no-image', detail: 'entry has no image', terminal: true };
   if (!forced && (rec?.errors ?? 0) >= maxErrors) return { status: 'skipped:gave-up', detail: `${rec.errors} errors — not retrying (use --force-id to try again)`, terminal: true };
   return { status: 'candidate', caption: check.text, at, forced };
 }
@@ -482,9 +490,11 @@ export async function run(opts = {}, deps = {}) {
         if (r.ok) urls.push(r.url); else { failure = r; break; }
       }
       if (failure) {
-        const status = failure.reason === 'network' ? 'error' : 'skipped:no-jpeg';
+        // no-image is structural (terminal); no-jpeg is re-checked every run inside the grace
+        // window — a 404 today is a deploy away from a 200 — and written once per status change.
+        const status = failure.reason === 'network' ? 'error' : failure.reason === 'no-image' ? 'skipped:no-image' : 'skipped:no-jpeg';
         line(entry, status, failure.detail);
-        maybeWrite(entry, status, { detail: failure.detail }, { terminal: status !== 'error' });
+        maybeWrite(entry, status, { detail: failure.detail }, { terminal: status === 'skipped:no-image' });
         if (status === 'error') errors++;
         continue;
       }
