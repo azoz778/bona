@@ -1,5 +1,5 @@
 # Bona — next session handoff
-_Written 2026-09-09. Supersedes nothing; read alongside `OWNER-NOW-2026-09-08.md` and
+_Written 2026-09-09, updated 03:30 KSA with the resolved API location, the secrets-sync gap and the wiring runbook. Supersedes nothing; read alongside `OWNER-NOW-2026-09-08.md` and
 `OWNER-SOCIAL-SIGNUP.md`._
 
 ## Where things stand
@@ -104,6 +104,35 @@ categories, every field) is in `docs/checklists/OWNER-SOCIAL-SIGNUP.md`.
 5. With a Meta token: `node scripts/instagram-post.mjs whoami`, then start publishing the 66
    unblocked queue entries.
 
+## Wiring runbook — what the agent does the moment a value arrives
+
+Work in a worktree off `origin/main` (`~/bona` is often checked out on another session's branch).
+
+| Value | Where it goes | Then |
+|---|---|---|
+| GA4 `G-…` | `src/data/site.json → analytics.ga4` **and** `bona-secret GA4_MEASUREMENT_ID 'G-…'` | push → GitHub Pages deploy (~3 min) |
+| GA4 MP secret | `bona-secret GA4_API_SECRET '…'` (owner types) | helper syncs to VPS + restarts bona-api |
+| Meta Dataset/Pixel id | `site.json → analytics.metaPixel` **and** `bona-secret META_PIXEL_ID '…'` | push |
+| Meta CAPI token | `bona-secret META_CAPI_TOKEN 'EAA…'` (owner) | helper syncs + restarts |
+| Meta Graph token | `bona-secret META_ACCESS_TOKEN 'EAA…' meta` (owner) | `IG_BUSINESS_ID=17841427688957180 node scripts/instagram-post.mjs whoami` |
+| GSC TXT value | Cloudflare TXT on zone `790f2dde…`, name `bona-real-estate.com` | owner clicks Verify |
+
+GSC TXT (the token stays in the env file, never on the command line):
+
+    set -a; . ~/.secrets/cloudflare.env; set +a
+    curl -s "https://api.cloudflare.com/client/v4/zones/790f2dde2e03e7055f88ae4b6c05579b/dns_records" \
+      -H "Authorization: Bearer $CLOUDFLARE_TOKEN" -H 'Content-Type: application/json' \
+      --data '{"type":"TXT","name":"bona-real-estate.com","content":"google-site-verification=VALUE","ttl":300}'
+
+Verify, in this order — no assumptions:
+
+1. `node scripts/marketing/verify-integrations.mjs` on the PC — every configured row `live`.
+2. `ssh hermes-vps 'curl -s localhost:4120/health'` → `fanout.dests` shows `ga4:true` / `meta:true`.
+3. Browser: open the live site, accept the consent banner, confirm a `collect?v=2&tid=G-…` request
+   and a `facebook.com/tr?id=…` request in the network log → GA4 **Realtime** shows the visit within
+   a minute; Events Manager → the dataset → **Test events** shows a PageView.
+4. `node scripts/instagram-post.mjs whoami` returns the `bona.com.sa` IG id `17841427688957180`.
+
 ## Traps that have already bitten
 
 - **`bona-api` must be restarted after any deploy that changes it.** A merge alone leaves
@@ -118,12 +147,42 @@ categories, every field) is in `docs/checklists/OWNER-SOCIAL-SIGNUP.md`.
   posting API at all**; TikTok's unaudited API posts private-only. Budget ~30 min/day of manual
   posting for TikTok and Snapchat — the two platforms that matter most in Saudi.
 
-## Open questions for the agent to resolve
+## Resolved 2026-09-09
 
-- `bona-api` and `cloudflared-bona` are **disabled** systemd units and not running on this
-  machine, yet `api.bona-real-estate.com` is healthy with hours of uptime — so the origin is
-  running somewhere this session does not control. Find out where, and decide whether the
-  local units should be enabled or removed.
-- Two stray Astro dev servers are running from `~/bona-wt/track-site` (ports 4321, 4399).
-- 17 queued posts are for foreign property (Muscat, Dubai, Le Vésinet, Marbella) blocked on a
-  Saudi ad licence that can never be issued for them. Decide: separate legal route, or drop.
+- **Where bona-api runs: hermes-vps**, as *system* units (`User=azoz`, `/opt/bona` sparse clone
+  tracking `origin/main`, port 4120, tunnel `9022fbec…` → `api.bona-real-estate.com`).
+  `bona-repo-sync.timer` pulls `main` there every 5 minutes; `bona-api` itself is only restarted
+  by `services/deploy/vps/deploy.sh` or by hand:
+  `ssh hermes-vps 'sudo -n systemctl restart bona-api.service'`.
+  The PC's `bona-api` / `cloudflared-bona` user units are **disabled on purpose and must stay
+  installed but disabled**: `services/deploy/vps/rollback.sh` re-enables them as the fail-back path.
+  Never enable them (two APIs / two tunnel connectors must never run); do not delete them either.
+- **Secrets entered on the PC do not reach the API by themselves.** `bona-secret` writes
+  `~/.secrets/bona-marketing.env` on the PC; bona-api reads `/home/azoz/.secrets/…` on the VPS and
+  loads its config once at startup. `~/.local/bin/bona-secret` now runs
+  `services/deploy/vps/sync-secrets.sh` and restarts `bona-api` after every marketing key
+  (`BONA_SECRET_NO_SYNC=1` to defer until the last key). `bona-meta-graph.env` is read only by the
+  PC-side posting scripts and is not synced.
+- **Cloudflare:** the token in `~/.secrets/cloudflare.env` can edit the `bona-real-estate.com` zone
+  `790f2dde2e03e7055f88ae4b6c05579b`, but `ZID` in that file is the **tk-estates.com** zone — always
+  pass the Bona zone id explicitly. The Bona zone has no TXT records yet.
+- The two stray Astro dev servers (pids 1873662, 1890450 → ports 4321/4399) are orphans of the
+  deleted `~/bona-wt/track-site` worktree (ppid 1). Agents may not kill processes in auto mode;
+  owner: `kill 1873662 1890450`. (`:4323` is a 3-day-old preview server from another session's
+  scratchpad — same treatment.)
+- `docs/checklists/google-bona.md` still says `bona.azoz.uk` / `bona.sa` and a URL-prefix property.
+  The live domain is `bona-real-estate.com` and the plan is a **Domain** property verified by DNS
+  TXT, which also covers `api.`.
+- **Concurrency, 2026-09-09 03:00:** four Claude sessions were active on this repo at once. One
+  drives the Bona Chrome (`:9223`) through the Meta app + system-user flow and owns
+  `feat/ig-calendar-publisher` (`~/bona` is checked out on it). Never drive `:9223` from two
+  sessions; do other sessions' work in a worktree off `origin/main`.
+
+## Still open
+
+- **Facebook Page publishing does not exist yet.** `scripts/instagram-post.mjs` and the in-progress
+  `scripts/social/publish.mjs` (branch `feat/ig-calendar-publisher`) are Instagram-only; a Page
+  `/feed` + `/photos` poster is needed for the 4 unblocked Facebook entries. Build it into
+  `scripts/social/lib/graph.mjs` after that branch lands, not in parallel with it.
+- 17 queued posts are for foreign property (Muscat, Dubai, Le Vésinet, Marbella) blocked on a Saudi
+  ad licence that can never be issued. Recommendation: drop them from the queue.
