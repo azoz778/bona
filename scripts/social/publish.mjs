@@ -279,7 +279,15 @@ export function decide(entry, { now, graceMs, ledger, forceId = null, readCaptio
   if (entry.platform !== 'instagram') return { status: null };
   const rec = ledger.get(entry.id);
   const latest = rec?.latest?.status ?? null;
-  if (latest === 'published') return forced ? { status: 'refused:published', detail: `already published ${rec.latest.ts}${rec.latest.permalink ? ` ${rec.latest.permalink}` : ''} — remove the ledger line to re-post`, terminal: true } : { status: null };
+  // Published once = published forever, whatever was appended after it, and whatever the
+  // calendar says. The calendar's own status counts too (gen-social copies the ledger into it,
+  // and a human may mark a hand-published post there).
+  const pub = rec?.published ?? null;
+  if (pub || entry.status === 'published') {
+    const where = pub ? `${pub.manual ? 'by hand' : 'by the publisher'}${pub.ts ? ` ${pub.ts}` : ''}${pub.permalink ? ` ${pub.permalink}` : ''}` : 'per the calendar (status: published)';
+    return forced ? { status: 'refused:published', detail: `already published ${where} — never re-posted, not even with --force-id`, terminal: true } : { status: null };
+  }
+  if (rec?.inFlight) return forced ? { status: 'refused:publishing', detail: `container ${rec.inFlight.containerId ?? '?'} in flight since ${rec.inFlight.ts} — reconciled at the start of every live run, never re-posted blind`, terminal: true } : { status: null };
   if (latest && TERMINAL.has(latest) && !(forced && FORCEABLE.has(latest))) return { status: null };
 
   const at = scheduledAt(entry);
