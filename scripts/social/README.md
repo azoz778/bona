@@ -228,7 +228,9 @@ For every Instagram entry, in slot order:
    AR — EN + hashtags from the entry (cut to 30). Over 2,200 characters → `skipped:caption`.
    A caption still carrying a licence placeholder — `{{AD_LICENCE}}`, `[add number before
    publishing]` or `[يُضاف قبل النشر]` — is a **hard stop**, `skipped:ad-licence-placeholder`,
-   even with `--force-id`.
+   even with `--force-id`. It is not permanent, though: the caption (or the launch caption
+   file) is re-read every run, so pasting the real REGA number in while the slot is still inside
+   its grace window lets the post out; the line is written once per status change.
 4. **Image**: a site-relative path is prefixed with `https://bona-real-estate.com`; a PNG (or
    anything not `.jpg/.jpeg`) is swapped for its `.jpg` / `.jpeg` twin if one is served; every
    URL is HEAD-checked (200 + `image/jpeg`) before a container is created. No twin served →
@@ -261,13 +263,13 @@ One JSON line per outcome, keyed by the entry `id`; the **last line for an id is
 ```
 
 - **Terminal, never retried**: `published`, `skipped:manual`, `skipped:no-image`,
-  `skipped:ad-licence-placeholder`, `skipped:missed`, `skipped:gave-up`.
+  `skipped:missed`, `skipped:gave-up`.
 - **`published` is irrevocable.** Once any line for an id says so, nothing appended after it
   (a hand edit, a merge, a recovery script writing `error`) re-opens it — not even
   `--force-id`. An entry the calendar itself marks `status: "published"` is settled the same way.
 - **Retried**: `error` on later runs, three times, then `skipped:gave-up`.
-  `skipped:ad-licence`, `skipped:caption`, `skipped:quota`, `skipped:no-jpeg` are re-evaluated
-  every run and only re-written when the status changes.
+  `skipped:ad-licence`, `skipped:ad-licence-placeholder`, `skipped:caption`, `skipped:quota`,
+  `skipped:no-jpeg` are re-evaluated every run and only re-written when the status changes.
 - **`publishing` = in flight.** Written *before* `media_publish`, with the `containerId`. If
   the run dies after that line (a crash, a SIGKILL, a 5xx with the post already live) the id
   is never a candidate again on its own: every live run starts by asking Instagram what became
