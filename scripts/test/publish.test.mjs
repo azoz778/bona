@@ -545,7 +545,7 @@ test('run: dry-run writes nothing, sleeps nowhere, and still shows the image che
   assert.equal((await run({ dryRun: false, forceId: 'ig-2026-09-01-post-a' }, f2.deps)).published, 1, '--force-id ignores the slot');
 });
 
-test('lock: one holder at a time; a stale or orphaned lock is taken over; release removes it', () => {
+test('lock: one holder at a time; a LIVE holder is never taken over whatever its age; a dead one is; age only decides when there is no pid', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-publish-lock-'));
   const file = path.join(dir, '.publish.lock');
   const t0 = Date.UTC(2026, 8, 10, 18, 0);
@@ -554,16 +554,32 @@ test('lock: one holder at a time; a stale or orphaned lock is taken over; releas
   const b = acquireLock(file, { now: t0 + 60_000, pid: 222, isAlive: () => true });
   assert.equal(b.ok, false);
   assert.match(b.reason, /another run holds the lock \(pid 111, 60 s old\)/);
-  const stale = acquireLock(file, { now: t0 + DEFAULTS.lockStaleMs + 1, pid: 333, isAlive: () => true });
-  assert.equal(stale.ok, true, 'older than the stale window: taken over');
-  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).pid, 333);
-  const orphan = acquireLock(file, { now: t0 + DEFAULTS.lockStaleMs + 2, pid: 444, isAlive: (pid) => pid !== 333 });
-  assert.equal(orphan.ok, true, 'holder is dead: taken over');
+  const oldButAlive = acquireLock(file, { now: t0 + DEFAULTS.lockStaleMs + 1, pid: 333, isAlive: () => true });
+  assert.equal(oldButAlive.ok, false, 'older than the stale window but the holder is alive: a slow run is still a run');
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).pid, 111, 'the live holder keeps its lock');
+  const orphan = acquireLock(file, { now: t0 + 5_000, pid: 444, isAlive: (pid) => pid !== 111 });
+  assert.equal(orphan.ok, true, 'holder is dead: taken over at once, age irrelevant');
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).pid, 444);
+  assert.equal(fs.readdirSync(dir).length, 1, 'the stale file is renamed aside and removed, not left behind');
+  orphan.release();
+  // no readable pid: age is the only signal
   fs.writeFileSync(file, 'garbage');
-  assert.equal(acquireLock(file, { now: t0, pid: 555 }).ok, true, 'a corrupt lock is stale');
-  acquireLock(file, { now: t0, pid: 555 }).release?.();
+  const corruptFresh = acquireLock(file, { now: t0, pid: 555, isAlive: () => { throw new Error('must not be asked: there is no pid'); } });
+  assert.equal(corruptFresh.ok, false, 'a corrupt lock with no age is not stale either — it could be a writer mid-way');
+  assert.match(corruptFresh.reason, /without a readable pid/);
+  fs.writeFileSync(file, JSON.stringify({ ts: new Date(t0).toISOString() }));
+  assert.equal(acquireLock(file, { now: t0 + 60_000, pid: 555, isAlive: () => true }).ok, false, 'no pid, 60 s old: wait');
+  const noPidStale = acquireLock(file, { now: t0 + DEFAULTS.lockStaleMs + 1, pid: 555, isAlive: () => true });
+  assert.equal(noPidStale.ok, true, 'no pid, older than the stale window: taken over');
+  noPidStale.release();
   const last = acquireLock(file, { now: t0, pid: 666, isAlive: () => true });
+  // release only removes OUR lock: if someone replaced the file meanwhile it is theirs
+  fs.writeFileSync(file, JSON.stringify({ pid: 777, ts: new Date(t0).toISOString() }));
   last.release();
+  assert.equal(fs.existsSync(file), true, 'a lock that is no longer ours is left alone');
+  fs.unlinkSync(file);
+  const fin = acquireLock(file, { now: t0, pid: 888, isAlive: () => true });
+  fin.release();
   assert.equal(fs.existsSync(file), false);
   fs.rmSync(dir, { recursive: true, force: true });
 });

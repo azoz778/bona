@@ -276,22 +276,41 @@ export async function resolveImage(u, { base = DEFAULTS.siteBase, fetch: fetchIm
 // lock
 // ---------------------------------------------------------------------------------------
 const pidAlive = (pid) => { if (!Number.isInteger(pid) || pid <= 0) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
-/** O_EXCL lock file with stale-lock takeover (older than staleMs, or the holder is gone). */
+/**
+ * O_EXCL lock file. A lock whose holder is still alive is NEVER taken over, whatever its age
+ * (a slow run is still a run; the unit's TimeoutStartSec is what ends it). Takeover happens
+ * only when the holder is dead, or — when the file carries no readable pid — when it is older
+ * than staleMs. The takeover renames the stale file to a unique name first (two takers cannot
+ * both "unlink then create"), then re-reads what it created to make sure it is its own.
+ */
 export function acquireLock(file, { now = Date.now(), staleMs = DEFAULTS.lockStaleMs, pid = process.pid, isAlive = pidAlive } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  for (let attempt = 0; attempt < 2; attempt++) {
+  const mine = JSON.stringify({ pid, ts: new Date(now).toISOString() });
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      fs.writeFileSync(file, JSON.stringify({ pid, ts: new Date(now).toISOString() }), { flag: 'wx' });
-      return { ok: true, release: () => { try { fs.unlinkSync(file); } catch { /* already gone */ } } };
+      fs.writeFileSync(file, mine, { flag: 'wx' });
     } catch (e) {
       if (e.code !== 'EEXIST') return { ok: false, reason: e.message };
-      let info = {};
-      try { info = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* corrupt = stale */ }
-      const age = now - Date.parse(info.ts);
-      const fresh = Number.isFinite(age) && age >= 0 && age < staleMs;
-      if (fresh && isAlive(Number(info.pid))) return { ok: false, reason: `another run holds the lock (pid ${info.pid}, ${Math.round(age / 1000)} s old)`, pid: info.pid, age };
-      try { fs.unlinkSync(file); } catch { /* raced; the retry will tell */ }
+      let info = null;
+      try { info = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (re) { if (re.code === 'ENOENT') continue; /* corrupt: no pid to ask */ }
+      const holder = Number(info?.pid);
+      const age = now - Date.parse(info?.ts);
+      const ageS = Number.isFinite(age) ? `${Math.round(age / 1000)} s old` : 'age unknown';
+      if (Number.isInteger(holder) && holder > 0) {
+        if (isAlive(holder)) return { ok: false, reason: `another run holds the lock (pid ${holder}, ${ageS})`, pid: holder, age };
+      } else if (Number.isFinite(age) && age >= 0 && age < staleMs) {
+        return { ok: false, reason: `a lock without a readable pid is ${ageS} — waiting for it to go stale (${Math.round(staleMs / 60_000)} min)`, age };
+      }
+      // dead holder, or unreadable and stale: claim it by renaming — the rename is the atomic step
+      const aside = `${file}.stale-${Date.now().toString(36)}-${pid}`;
+      try { fs.renameSync(file, aside); fs.unlinkSync(aside); } catch { /* someone else claimed it first; the retry will tell */ }
+      continue;
     }
+    // wx succeeded: make sure the file still says it is ours before trusting it
+    let back = null;
+    try { back = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* fall through */ }
+    if (!back || Number(back.pid) !== pid || back.ts !== JSON.parse(mine).ts) return { ok: false, reason: 'the lock was replaced under us — leaving it' };
+    return { ok: true, release: () => { try { if (fs.readFileSync(file, 'utf8') === mine) fs.unlinkSync(file); } catch { /* already gone */ } } };
   }
   return { ok: false, reason: 'could not acquire the lock' };
 }

@@ -73,6 +73,17 @@ export function dryRunSummary(report) {
 export const rejected = (reason) => `✋ Not published — ${reason}`;
 
 /**
+ * A document the intake cannot read. It only ever publishes from a PDF brochure, and
+ * before this existed any other document type was dropped in silence — the owner had
+ * no way to tell "cannot read this" from "the bot is down".
+ */
+export const unsupportedDocument = (fileName, mimetype = null) => {
+  const ext = /\.([A-Za-z0-9]{1,6})$/.exec(String(fileName || ''))?.[1]?.toLowerCase();
+  const what = ext ? `a .${ext} file` : (mimetype ? `a ${mimetype} file` : 'that file');
+  return `✋ Not published — I can only read PDF brochures, and *${fileName}* is ${what}.\n\nSend the brochure as a PDF and I'll publish it. (Photos and videos are added to a listing that already exists.)`;
+};
+
+/**
  * Deliberately says nothing about WHY: the detail is git/build/model output, which can quote
  * file contents and secrets. It goes to the journal, where only the owner can read it.
  */
