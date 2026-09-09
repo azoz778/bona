@@ -198,7 +198,21 @@ Verify, in this order — no assumptions:
   `~/bona-wt/ops/marketing/queue/` — NOT in `~/bona`, which only ever had `queue.json`. The older
   render in `~/bona-wt/social/marketing/queue/` is stale (foreign CTA cards carry the REGA
   placeholder there). A worktree needs `npm ci` before `--render` works (sharp is native).
-- **Facebook Page publishing does not exist yet.** `scripts/instagram-post.mjs` and the in-progress
-  `scripts/social/publish.mjs` (branch `feat/ig-calendar-publisher`) are Instagram-only; a Page
-  `/feed` + `/photos` poster is needed for the 4 unblocked Facebook entries. Build it into
-  `scripts/social/lib/graph.mjs` after that branch lands, not in parallel with it.
+- **Facebook Page publishing exists but needs one more token scope (owner, 2 min).**
+  `scripts/social/facebook-post.mjs` (+ `lib/facebook.mjs`) publishes the queue's Facebook entries
+  by uploading the local PNG/MP4 straight to the Page; `services/deploy/install-fb-publish.sh`
+  installs a 17:00–23:59 KSA timer that runs from `~/bona-publish` like the Instagram one.
+  Verified live 2026-09-09 ~15:15 KSA: `whoami` reaches the Page, the system user `bona-poster`
+  has every task on it (CREATE_CONTENT …), but the token was generated with the Instagram scopes
+  + `pages_show_list` + `pages_read_engagement` only — the first real post failed with
+  `(#200) pages_manage_posts are not available`. Owner: Business Settings → Users → System
+  users → bona-poster → **Generate new token** → app *Bona Publisher* → expiry Never → tick the
+  existing scopes PLUS `pages_manage_posts` (and `business_management`, `ads_management`,
+  `ads_read` for later) → `bona-secret META_ACCESS_TOKEN 'EAA…' meta`. If
+  `pages_manage_posts` is not offered in that dialog, first add it to the app: App Dashboard →
+  *Use cases* → add **"Manage everything on your Page"** (or App Review → Permissions and
+  features → `pages_manage_posts` → Add). Then, after PR #3 is on main:
+  `bash ~/bona/services/deploy/install-fb-publish.sh`, and to post the opening brand post at once:
+  `cd ~/bona-publish && BONA_QUEUE_ASSETS=~/bona-data/queue node scripts/social/facebook-post.mjs queue --id q-046`.
+  Instagram scopes (`instagram_content_publish` …) ARE on the token — the other session's
+  `bona-ig-publish.timer` is enabled and posts from 17:00 KSA.
