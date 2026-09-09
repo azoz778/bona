@@ -258,9 +258,25 @@ One JSON line per outcome, keyed by the entry `id`; the **last line for an id is
 
 - **Terminal, never retried**: `published`, `skipped:manual`, `skipped:no-jpeg`,
   `skipped:ad-licence-placeholder`, `skipped:missed`, `skipped:gave-up`.
+- **`published` is irrevocable.** Once any line for an id says so, nothing appended after it
+  (a hand edit, a merge, a recovery script writing `error`) re-opens it — not even
+  `--force-id`. An entry the calendar itself marks `status: "published"` is settled the same way.
 - **Retried**: `error` on later runs, three times, then `skipped:gave-up`.
   `skipped:ad-licence`, `skipped:caption`, `skipped:quota` are re-evaluated every run and only
   re-written when the status changes.
+- **`publishing` = in flight.** Written *before* `media_publish`, with the `containerId`. If
+  the run dies after that line (a crash, a SIGKILL, a 5xx with the post already live) the id
+  is never a candidate again on its own: every live run starts by asking Instagram what became
+  of the container — `PUBLISHED` → a `published` line (mediaId unknown; fill it by hand from
+  the app if you care), `FINISHED` → `media_publish` again with the **same** `creation_id`,
+  `ERROR`/`EXPIRED` → an `error` line (the post never went live, so it may be retried with a new
+  container). If that lookup fails, or the container is still processing, the line stays in
+  flight and the log carries a loud `needs-reconcile` line — the unit exits 2 so it shows in
+  `systemctl --user --failed`. The publisher never re-posts an in-flight id blind. To settle
+  one by hand, append a `published` or `error` line for the id.
+- `SIGTERM`/`SIGINT` (`systemctl --user stop`, the unit's timeouts, Ctrl-C on a hand run) set
+  a flag that is read *between* entries: the publish in progress always completes, the rest is
+  deferred to the next run. The unit gives that 3 minutes (`TimeoutStopSec`).
 - A post published **by hand** is recorded here too (`"manual": true`, `ts` null until the
   human fills it) — that is what keeps the timer from posting it again. Launch post #9 on
   2026-09-09 is the first such line; `gen-social.mjs` renders it "published by hand" whether or
