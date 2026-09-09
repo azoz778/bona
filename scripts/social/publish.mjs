@@ -26,6 +26,17 @@
    skipped:ad-licence-placeholder, skipped:missed, skipped:gave-up. `error` is retried on later
    runs, three times, then becomes skipped:gave-up. Other skips (ad-licence, caption, quota) are
    re-evaluated every run and written to the ledger only when the status changes.
+   `published` is irrevocable: once any line says so, nothing appended later — and not
+   --force-id — re-opens the id. An entry the calendar itself marks published is settled too.
+
+   Never twice: a `publishing` line {containerId} is written BEFORE media_publish. If the run
+   dies after that (crash, SIGKILL, a 5xx with the post already live), the id is in flight:
+   never a candidate, never re-posted blind. Every live run starts by reconciling in-flight
+   lines through GET /{containerId}?fields=status_code — PUBLISHED -> published (mediaId
+   unknown); FINISHED -> media_publish again with the SAME creation_id; ERROR/EXPIRED -> error
+   (retriable with a new container). If that GET fails or the container is still processing,
+   the line stays in flight and a loud `needs-reconcile` line is logged for a human.
+   SIGTERM/SIGINT set a flag read between entries only: the current publish always completes.
 
    Images: relative paths are prefixed with the site origin; a PNG (or anything not .jpg/.jpeg)
    is swapped for its .jpg/.jpeg twin if one exists; every URL is HEAD-checked (200 + image/jpeg)
@@ -328,19 +339,35 @@ export async function run(opts = {}, deps = {}) {
   const readLedger = deps.readLedger ?? (() => readLedgerFile(ledgerPath));
   const appendLedger = deps.appendLedger ?? ((rec) => { fs.mkdirSync(path.dirname(ledgerPath), { recursive: true }); fs.appendFileSync(ledgerPath, `${JSON.stringify(rec)}\n`); });
   const readCaption = deps.readCaption ?? ((file) => fs.readFileSync(path.join(ROOT, o.captions, file), 'utf8'));
+  const wall = () => new Date(deps.wallClock ?? Date.now()).toISOString();
+  const detailOf = (e) => (e instanceof GraphError ? e.detail : (e?.message || String(e)));
+
   const results = [];
-  const record = (entry, status, extra = {}) => {
-    const row = { id: entry.id, date: entry.date, slot: entry.time, kind: entry.kind, status, mediaId: extra.mediaId ?? null, permalink: extra.permalink ?? null, ts: new Date(deps.wallClock ?? Date.now()).toISOString(), ...(extra.detail ? { detail: extra.detail } : {}), ...(extra.imageUrl ? { imageUrl: extra.imageUrl } : {}), ...(extra.imageUrls ? { imageUrls: extra.imageUrls } : {}) };
-    results.push({ ...row, topic: entry.topic });
+  /** Every ledger line has the same head; the tail is whatever the outcome knows. */
+  const rowOf = (entry, status, extra = {}) => ({
+    id: entry.id, date: entry.date, slot: entry.time, kind: entry.kind, status, mediaId: extra.mediaId ?? null, permalink: extra.permalink ?? null, ts: wall(),
+    ...(extra.containerId ? { containerId: extra.containerId } : {}), ...(extra.detail ? { detail: extra.detail } : {}),
+    ...(extra.imageUrl ? { imageUrl: extra.imageUrl } : {}), ...(extra.imageUrls ? { imageUrls: extra.imageUrls } : {}),
+  });
+  const record = (entry, status, extra = {}) => { const row = rowOf(entry, status, extra); results.push({ ...row, topic: entry.topic }); return row; };
+  const line = (entry, status, detail) => log(`${status.padEnd(30)} ${entry.id}  ${entry.date} ${entry.time}  ${String(entry.kind).padEnd(8)} ${entry.topic}${detail ? ` — ${detail}` : ''}`);
+  /** What reaches the ledger: published/error and terminal skips always; other skips when the status changed; deferred/refused/needs-reconcile never. */
+  let records = [];
+  let ledger = new Map();
+  const maybeWrite = (entry, status, extra, { terminal }) => {
+    const row = record(entry, status, extra);
+    if (dryRun || /^(deferred|refused|needs-reconcile)/.test(status)) return row;
+    const prev = ledger.get(entry.id)?.latest?.status ?? null;
+    if (terminal || status === 'published' || status === 'error' || prev !== status) { appendLedger(row); records.push(row); }
     return row;
   };
-  const line = (entry, status, detail) => log(`${status.padEnd(30)} ${entry.id}  ${entry.date} ${entry.time}  ${entry.kind.padEnd(8)} ${entry.topic}${detail ? ` — ${detail}` : ''}`);
-  const maybeWrite = (entry, status, extra, ledger, { terminal }) => {
-    const row = record(entry, status, extra);
-    if (dryRun) return;
-    const prev = ledger.get(entry.id)?.latest?.status ?? null;
-    if (terminal || status === 'published' || status === 'error' || prev !== status) appendLedger(row);
-  };
+
+  // A signal never interrupts a publish: the flag is read between entries only, and the unit
+  // gives the current one TimeoutStopSec to finish. Ctrl-C on a hand run behaves the same.
+  let stopSignal = null;
+  const onSignal = (sig) => { if (!stopSignal) log(`${sig} received — finishing the current entry, then stopping`); stopSignal = sig; };
+  const stopRequested = deps.stopRequested ?? (() => stopSignal);
+  if (deps.signals !== false) { process.on('SIGTERM', onSignal); process.on('SIGINT', onSignal); }
 
   let lock = null;
   try {
@@ -357,28 +384,95 @@ export async function run(opts = {}, deps = {}) {
     const list = Array.isArray(rawEntries) ? rawEntries : Array.isArray(rawEntries?.entries) ? rawEntries.entries : null;
     if (!list) { log(`config error: ${sourcePath} is neither an array nor {entries:[…]}`); return { code: 1, results, published: 0, errors: 0 }; }
     const entries = list.map(normaliseEntry).filter((e) => e.platform === 'instagram' && e.date);
-    const ledger = indexLedger(readLedger());
+    records = readLedger();
+    ledger = indexLedger(records);
 
     if (o.forceId && !entries.some((e) => e.id === o.forceId)) { log(`config error: --force-id ${o.forceId} is not in ${path.relative(ROOT, sourcePath)}`); return { code: 1, results, published: 0, errors: 0 }; }
 
+    const graph = deps.graph ?? createGraph({ token: deps.token, igId: deps.igId || DEFAULTS.igId, dryRun, fetch: fetchImpl, sleep, log: (s) => log(s), progress: () => {} });
+    let published = 0, errors = 0, quota = null, stopped = null;
+    const stopRun = (why, hint) => { stopped = why; log(`${why} error — stopping the run${hint ? `\nhint: ${hint}` : ''}`); };
+    /** Between entries only: a stop from an earlier error or a signal defers everything left. */
+    const mustDefer = (entry) => {
+      if (stopped) { line(entry, `deferred:${stopped}`, 'run stopped'); record(entry, `deferred:${stopped}`, { detail: `run stopped on ${stopped} error` }); return true; }
+      const sig = stopRequested();
+      if (sig) { line(entry, 'deferred:signal', `${sig} received — next run`); record(entry, 'deferred:signal', { detail: `${sig} received` }); return true; }
+      return false;
+    };
+
+    // ---- reconcile: a `publishing` line with no outcome after it ------------------------
+    // The container was FINISHED and media_publish was sent (or about to be) when the run died.
+    // Ask Instagram what became of the container. Never re-post from here without an answer.
+    const byId = new Map(entries.map((e) => [e.id, e]));
+    for (const [id, rec] of ledger) {
+      if (!rec.inFlight || rec.published) continue;
+      const fl = rec.inFlight;
+      const entry = byId.get(id) ?? normaliseEntry({ id, date: fl.date, time: fl.slot, format: fl.kind, topic: '(no longer in the calendar)' });
+      const cid = fl.containerId;
+      if (dryRun) { line(entry, 'needs-reconcile', `container ${cid ?? '?'} in flight since ${fl.ts} — a live run asks Instagram what became of it`); record(entry, 'needs-reconcile', { detail: 'dry-run: not checked', containerId: cid }); continue; }
+      if (mustDefer(entry)) continue;
+      if (!cid) { errors++; line(entry, 'needs-reconcile', `publishing line from ${fl.ts} has no containerId — settle by hand: append a published or error line for ${id} to ${ledgerPath}`); record(entry, 'needs-reconcile', { detail: 'no containerId' }); continue; }
+      let st;
+      try { st = await graph.containerStatus(cid); }
+      catch (e) {
+        errors++;
+        const detail = detailOf(e);
+        line(entry, 'needs-reconcile', `GET /${cid} failed: ${detail.split('\n')[0]} — left in flight, NOT re-posted, checked again next run`);
+        record(entry, 'needs-reconcile', { detail, containerId: cid });
+        if (e instanceof GraphError && e.isAuth) { stopRun('auth', e.hint); }
+        continue;
+      }
+      if (st.statusCode === 'PUBLISHED') {
+        line(entry, 'published', `container ${cid} reports PUBLISHED — reconciled; mediaId/permalink unknown`);
+        maybeWrite(entry, 'published', { containerId: cid, detail: 'reconciled: container PUBLISHED after a crash; mediaId/permalink unknown' }, { terminal: true });
+      } else if (st.statusCode === 'FINISHED') {
+        if (published >= limit) { line(entry, 'deferred:limit', `${limit} per run — container ${cid} stays in flight`); record(entry, 'deferred:limit', { detail: `${limit} per run`, containerId: cid }); continue; }
+        if (published > 0) await sleep(o.gapMs);
+        try {
+          const r = await graph.publishContainer(cid);
+          published++;
+          line(entry, 'published', `${r.mediaId} ${r.permalink} — reconciled: media_publish re-sent for container ${cid}`);
+          maybeWrite(entry, 'published', { mediaId: r.mediaId, permalink: r.permalink, containerId: cid, detail: 'reconciled: media_publish re-sent with the same creation_id' }, { terminal: true });
+        } catch (e) {
+          errors++;
+          const detail = detailOf(e);
+          line(entry, 'needs-reconcile', `media_publish for container ${cid} failed: ${detail.split('\n')[0]} — left in flight, NOT re-posted`);
+          record(entry, 'needs-reconcile', { detail, containerId: cid });
+          if (e instanceof GraphError && e.isAuth) stopRun('auth', e.hint);
+        }
+      } else if (st.statusCode === 'ERROR' || st.statusCode === 'EXPIRED') {
+        errors++;
+        const detail = `container ${cid} ${st.statusCode}${st.status ? `: ${st.status}` : ''} — the post never went live`;
+        line(entry, 'error', detail);
+        maybeWrite(entry, 'error', { detail, containerId: cid }, { terminal: false });
+      } else {
+        line(entry, 'needs-reconcile', `container ${cid} is ${st.statusCode || 'unknown'} — left in flight, checked again next run`);
+        record(entry, 'needs-reconcile', { detail: `container ${st.statusCode || 'unknown'}`, containerId: cid });
+      }
+    }
+    ledger = indexLedger(records);
+
+    // ---- what is due ----------------------------------------------------------------------
     const candidates = [];
     for (const entry of entries) {
       const d = decide(entry, { now: nowMs, graceMs, ledger, forceId: o.forceId, readCaption, maxErrors: o.maxErrors });
       if (!d.status) continue;
       if (d.status === 'candidate') { candidates.push({ entry, caption: d.caption, at: d.at, forced: d.forced }); continue; }
       line(entry, d.status, d.detail);
-      if (d.status.startsWith('refused:')) { record(entry, d.status, { detail: d.detail }); continue; }
-      maybeWrite(entry, d.status, { detail: d.detail }, ledger, { terminal: d.terminal });
+      maybeWrite(entry, d.status, { detail: d.detail }, { terminal: d.terminal });
     }
     candidates.sort((a, b) => a.at - b.at || a.entry.index - b.entry.index);
-    if (!candidates.length) { log('nothing due'); return { code: 0, results, published: 0, errors: 0 }; }
+    const finish = () => {
+      log(`done: ${published} published, ${errors} error(s), ${results.length - published - errors} skipped/deferred${dryRun ? ' (dry-run: nothing was sent or written)' : ''}`);
+      return { code: errors ? 2 : 0, results, published, errors };
+    };
+    if (!candidates.length) { log('nothing due'); return finish(); }
 
-    const graph = deps.graph ?? createGraph({ token: deps.token, igId: deps.igId || DEFAULTS.igId, dryRun, fetch: fetchImpl, sleep, log: (s) => log(s), progress: () => {} });
-    let published = 0, errors = 0, quota = null;
-    for (const [i, c] of candidates.entries()) {
+    for (const c of candidates) {
       const { entry } = c;
+      if (mustDefer(entry)) continue;
       if (published >= limit) { line(entry, 'deferred:limit', `${limit} per run — next run`); record(entry, 'deferred:limit', { detail: `${limit} per run` }); continue; }
-      if (quota && quota.quotaUsage + published >= o.quotaStop) { line(entry, 'skipped:quota', `${quota.quotaUsage + published} of ${quota.quotaTotal} used in 24 h — stop at ${o.quotaStop}`); maybeWrite(entry, 'skipped:quota', { detail: 'daily quota guard' }, ledger, { terminal: false }); continue; }
+      if (quota && quota.quotaUsage + published >= o.quotaStop) { line(entry, 'skipped:quota', `${quota.quotaUsage + published} of ${quota.quotaTotal} used in 24 h — stop at ${o.quotaStop}`); maybeWrite(entry, 'skipped:quota', { detail: 'daily quota guard' }, { terminal: false }); continue; }
 
       // images: absolute, JPEG (or a JPEG twin), HEAD-verified
       const want = entry.kind === 'carousel' ? entry.images.slice(0, CAROUSEL_MAX) : entry.images.slice(0, 1);
@@ -390,43 +484,59 @@ export async function run(opts = {}, deps = {}) {
       if (failure) {
         const status = failure.reason === 'network' ? 'error' : 'skipped:no-jpeg';
         line(entry, status, failure.detail);
-        maybeWrite(entry, status, { detail: failure.detail }, ledger, { terminal: status !== 'error' });
+        maybeWrite(entry, status, { detail: failure.detail }, { terminal: status !== 'error' });
         if (status === 'error') errors++;
         continue;
       }
       let kind = entry.kind;
       if (kind === 'carousel' && urls.length < CAROUSEL_MIN) { kind = 'post'; log(`  ${entry.id}: only one image — posting as a single image`); }
+      const imgs = kind === 'carousel' ? { imageUrls: urls } : { imageUrl: urls[0] };
 
       // quota: read once, before the first publish of the run
       if (quota === null) {
         try { quota = await graph.publishingLimit(); }
-        catch (e) { line(entry, 'error', `content_publishing_limit: ${e.message}`); maybeWrite(entry, 'error', { detail: e.message }, ledger, { terminal: false }); errors++; if (e instanceof GraphError && e.isAuth) { log(`auth error — stopping the run\nhint: ${e.hint}`); break; } continue; }
-        if (quota.quotaUsage >= o.quotaStop) { line(entry, 'skipped:quota', `${quota.quotaUsage} of ${quota.quotaTotal} used in 24 h — stop at ${o.quotaStop}`); maybeWrite(entry, 'skipped:quota', { detail: 'daily quota guard' }, ledger, { terminal: false }); continue; }
+        catch (e) { errors++; line(entry, 'error', `content_publishing_limit: ${e.message}`); maybeWrite(entry, 'error', { detail: e.message }, { terminal: false }); if (e instanceof GraphError && e.isAuth) stopRun('auth', e.hint); continue; }
+        if (quota.quotaUsage >= o.quotaStop) { line(entry, 'skipped:quota', `${quota.quotaUsage} of ${quota.quotaTotal} used in 24 h — stop at ${o.quotaStop}`); maybeWrite(entry, 'skipped:quota', { detail: 'daily quota guard' }, { terminal: false }); continue; }
       }
       if (published > 0) { if (dryRun) log(`[dry-run] (would wait ${o.gapMs / 1000} s before the next publish)`); else await sleep(o.gapMs); }
 
+      // The in-flight line goes to the ledger BEFORE media_publish. From that moment the entry
+      // is never re-posted blind: whatever happens next is settled by the reconcile step above.
+      let inFlight = null;
+      const beforePublish = (cid) => {
+        inFlight = cid;
+        if (dryRun) { log(`[dry-run] (would write the publishing line for container ${cid})`); return; }
+        appendLedger(rowOf(entry, 'publishing', { containerId: cid, ...imgs }));
+        log(`  ${entry.id}: container ${cid} ready — publishing line written`);
+      };
       try {
         const onStep = (s) => log(`  ${entry.id}: ${s}`);
-        const r = kind === 'carousel' ? await graph.publishCarousel({ imageUrls: urls, caption: c.caption, onStep })
-          : kind === 'story' ? await graph.publishStory({ imageUrl: urls[0], onStep })
-            : await graph.publishImage({ imageUrl: urls[0], caption: c.caption, altText: entry.alt || undefined, onStep });
+        const r = kind === 'carousel' ? await graph.publishCarousel({ imageUrls: urls, caption: c.caption, onStep, beforePublish })
+          : kind === 'story' ? await graph.publishStory({ imageUrl: urls[0], onStep, beforePublish })
+            : await graph.publishImage({ imageUrl: urls[0], caption: c.caption, altText: entry.alt || undefined, onStep, beforePublish });
         published++;
         line(entry, 'published', `${r.mediaId} ${r.permalink}`);
-        maybeWrite(entry, 'published', { mediaId: r.mediaId, permalink: r.permalink, ...(kind === 'carousel' ? { imageUrls: urls } : { imageUrl: urls[0] }) }, ledger, { terminal: true });
+        maybeWrite(entry, 'published', { mediaId: r.mediaId, permalink: r.permalink, containerId: r.containerId ?? inFlight, ...imgs }, { terminal: true });
       } catch (e) {
         errors++;
-        const detail = e instanceof GraphError ? e.detail : (e?.message || String(e));
-        line(entry, 'error', detail.split('\n')[0]);
-        maybeWrite(entry, 'error', { detail }, ledger, { terminal: false });
-        if (e instanceof GraphError && e.isAuth) { log(`auth error — stopping the run${e.hint ? `\nhint: ${e.hint}` : ''}`); for (const rest of candidates.slice(i + 1)) { line(rest.entry, 'deferred:auth', 'run stopped'); record(rest.entry, 'deferred:auth', { detail: 'run stopped on auth error' }); } break; }
+        const detail = detailOf(e);
+        if (inFlight) {
+          // media_publish may have gone through. Leave the publishing line as it is.
+          line(entry, 'needs-reconcile', `media_publish for container ${inFlight} failed or its outcome is unknown: ${detail.split('\n')[0]} — left in flight, NOT re-posted, checked next run`);
+          record(entry, 'needs-reconcile', { detail, containerId: inFlight });
+        } else {
+          line(entry, 'error', detail.split('\n')[0]);
+          maybeWrite(entry, 'error', { detail }, { terminal: false });
+        }
+        if (e instanceof GraphError && e.isAuth) stopRun('auth', e.hint);
       }
     }
-    log(`done: ${published} published, ${errors} error(s), ${results.length - published - errors} skipped/deferred${dryRun ? ' (dry-run: nothing was sent or written)' : ''}`);
-    return { code: errors ? 2 : 0, results, published, errors };
+    return finish();
   } catch (e) {
     log(`fatal: ${e?.stack || e}`);
     return { code: 2, results, published: 0, errors: 1 };
   } finally {
+    if (deps.signals !== false) { process.off('SIGTERM', onSignal); process.off('SIGINT', onSignal); }
     lock?.release?.();
   }
 }
