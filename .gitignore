@@ -13,5 +13,11 @@ __pycache__/
 marketing/queue/*
 !marketing/queue/queue.json
 !marketing/queue/README.md
+# The Instagram publisher's ledger (scripts/social/publish.mjs): small, append-only, and the
+# audit trail of what went out — committed on purpose. Its lock file is not.
+!marketing/queue/published.jsonl
 scripts/social/.cache/
-ops/
+# ops/ is scratch (browser step scripts, screenshots, session notes) — except the systemd
+# units for the unattended publisher, which are part of the product.
+ops/*
+!ops/systemd/
