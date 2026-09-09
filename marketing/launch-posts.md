@@ -1,6 +1,6 @@
-# Launch-day grid — 9 posts, 2026-09-06 (Sunday)
+# Launch-day grid — 9 posts, 2026-09-09 (Wednesday)
 
-Post in order #1 → #9 (about 20 minutes apart, 17:30 → 20:30 KSA) so the grid reads top-left = #9. Then pin #5 (manifesto), #9 (welcome) and #8 (sell). Generated from `src/data/listings.json` by `node scripts/og/gen-social.mjs`.
+Post in order #1 → #9 (20 minutes apart, 17:30 → 20:10 KSA) so the grid reads top-left = #9. Then pin #5 (manifesto), #9 (welcome) and #8 (sell). Generated from `src/data/listings.json` by `node scripts/og/gen-social.mjs`.
 
 **Before publishing listing posts (#1, #2, #3, #6, #7):** obtain the REGA advertising licence number for each property (منصة الإعلانات العقارية / عقار) and replace the `[add number before publishing]` line. Image URLs must be JPEG for the Graph API; the site's hero images are JPEG unless noted.
 
