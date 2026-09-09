@@ -127,6 +127,10 @@ test('ledger idempotency: terminal statuses are never retried; error retries up 
   const gaveUp = decide(e, ctx({ ledger: ledgerOf(row('error'), row('error'), row('error')) }));
   assert.equal(gaveUp.status, 'skipped:gave-up');
   assert.equal(gaveUp.terminal, true);
+  const t = (n) => row('error', { transient: true, detail: `try ${n}` });
+  assert.equal(decide(e, ctx({ ledger: ledgerOf(t(1), t(2), t(3), t(4)) })).status, 'candidate', 'transient errors (network, 5xx, rate limit) say nothing about the post: never gave-up');
+  assert.equal(decide(e, ctx({ ledger: ledgerOf(t(1), row('error'), t(2), row('error'), t(3)) })).status, 'candidate', 'two real errors among transient ones: still trying');
+  assert.equal(decide(e, ctx({ ledger: ledgerOf(t(1), row('error'), row('error'), t(2), row('error')) })).status, 'skipped:gave-up', 'the third real one gives up');
   assert.equal(decide(e, ctx({ ledger: ledgerOf(row('error'), row('error'), row('error'), row('published')) })).status, null, 'published after three errors is published');
   for (const later of [[row('error')], [row('skipped:quota')], [row('error'), row('error'), row('skipped:missed')]]) {
     assert.equal(decide(e, ctx({ ledger: ledgerOf(row('published'), ...later) })).status, null, `published is irrevocable: a later ${later.map((r) => r.status).join('+')} line (hand edit, merge, recovery script) never re-opens it`);
@@ -442,6 +446,7 @@ test('run: PNG with no JPEG twin → skipped:no-jpeg, written once, re-checked u
   const rn = await run({ dryRun: false }, net.deps);
   assert.equal(rn.code, 2);
   assert.equal(net.appended[0].status, 'error');
+  assert.equal(net.appended[0].transient, true, 'a HEAD that never answered says nothing about the post');
   assert.equal(TERMINAL.has('error'), false);
 });
 
@@ -473,6 +478,29 @@ test('run: a Graph error is recorded as error and the run continues; an auth err
   assert.equal(auth.calls.filter((c) => c[0] === 'image').length, 1);
   assert.ok(auth.logs.some((l) => l.startsWith('auth error — stopping')));
   assert.ok(auth.logs.some((l) => l.startsWith('deferred:auth')));
+  assert.equal(auth.appended[0].transient, undefined, 'a bad token is a real error line');
+
+  // a rate limit stops the run the same way, and its error line is transient: it does not count toward gave-up
+  const rl = harness({ entries: [raw({ n: 'a' }), raw({ n: 'b', time: '20:31' })], publishFail: new GraphError('POST /media → HTTP 400 code=4', { code: 4, status: 400, hint: 'h' }) });
+  const rr = await run({ dryRun: false }, rl.deps);
+  assert.equal(rr.code, 2);
+  assert.equal(rl.calls.filter((c) => c[0] === 'image').length, 1, 'stopped after the first');
+  assert.deepEqual(rl.appended.map((x) => [x.status, x.transient]), [['error', true]]);
+  assert.ok(rl.logs.some((l) => l.startsWith('rate-limit error — stopping')));
+  assert.ok(rl.logs.some((l) => l.startsWith('deferred:rate-limit') && l.includes('post-b')));
+  const sub = harness({ entries: [raw({ n: 'a' }), raw({ n: 'b', time: '20:31' })], publishFail: new GraphError('quota', { code: 100, subcode: 2207051, status: 400 }) });
+  await run({ dryRun: false }, sub.deps);
+  assert.equal(sub.calls.filter((c) => c[0] === 'image').length, 1, 'subcode 2207051 stops too');
+  // a 5xx is transient but does NOT stop the run: the next entry is still tried
+  const five = harness({ entries: [raw({ n: 'a' }), raw({ n: 'b', time: '20:31' })], publishFail: new GraphError('POST /media → HTTP 503', { status: 503 }) });
+  await run({ dryRun: false }, five.deps);
+  assert.equal(five.calls.filter((c) => c[0] === 'image').length, 2);
+  assert.deepEqual(five.appended.map((x) => [x.status, x.transient]), [['error', true], ['error', true]]);
+  // the reconcile GET hitting a rate limit stops the run before any candidate is touched
+  const flightRow = { id: 'ig-2026-09-10-post-a', date: '2026-09-10', slot: '20:30', kind: 'post', status: 'publishing', containerId: 'ca', ts: '2026-09-10T17:40:00.000Z' };
+  const rr2 = harness({ entries: [raw({ n: 'a' }), raw({ n: 'b', time: '20:31' })], ledger: [flightRow], containers: { ca: new GraphError('x', { code: 17, status: 400 }) } });
+  await run({ dryRun: false }, rr2.deps);
+  assert.deepEqual(rr2.calls, [['status', 'ca']]);
 });
 
 test('run: dry-run writes nothing, sleeps nowhere, and still shows the image checks; config errors exit 1', async () => {

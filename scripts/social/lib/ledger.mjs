@@ -47,7 +47,9 @@ export function readLedgerFile(file) {
  *              must never go out again
  *   inFlight   a `publishing` line (container created, media_publish attempted or about to be)
  *              with no `published` / `error` line after it — settled only by reconciliation
- *   errors     `error` lines since the last publish (what skipped:gave-up counts)
+ *   errors     `error` lines since the last publish (what skipped:gave-up counts) — minus the
+ *              ones flagged `transient` (network, 5xx, rate limit): those say nothing about
+ *              the post, and the grace window already bounds how long they are retried
  */
 export function indexLedger(records) {
   const m = new Map();
@@ -56,7 +58,7 @@ export function indexLedger(records) {
     cur.latest = r;
     if (r.status === 'published') { cur.published ??= r; cur.inFlight = null; cur.errors = 0; }
     else if (r.status === 'publishing') cur.inFlight = r;
-    else if (r.status === 'error') { cur.inFlight = null; cur.errors += 1; }
+    else if (r.status === 'error') { cur.inFlight = null; if (!r.transient) cur.errors += 1; }
     m.set(r.id, cur);
   }
   return m;

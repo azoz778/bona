@@ -2,7 +2,7 @@
 // publish.mjs. No network: fetch is injected everywhere.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CAPTION_MAX_CHARS, checkCaption, checkImageUrl, countHashtags, createGraph, GraphError } from '../social/lib/graph.mjs';
+import { CAPTION_MAX_CHARS, checkCaption, checkImageUrl, countHashtags, createGraph, GraphError, HINTS } from '../social/lib/graph.mjs';
 
 const jsonResponse = (body, status = 200) => ({ ok: status < 400, status, statusText: 'x', json: async () => body });
 
@@ -54,7 +54,31 @@ test('createGraph live: a Graph error becomes a GraphError with code, subcode an
     return true;
   });
   const g2 = createGraph({ token: 'tok', igId: '123', fetch: async () => { throw new Error('ECONNRESET'); } });
-  await assert.rejects(g2.me(), (e) => e instanceof GraphError && e.network === true && !e.isAuth);
+  await assert.rejects(g2.me(), (e) => e instanceof GraphError && e.network === true && !e.isAuth && e.isTransient && !e.shouldStop);
+});
+
+test('GraphError: rate limits (4/17/32/613, subcode 2207051) stop the run and are transient; 5xx and timeouts are transient but do not stop; 4xx content errors are neither', () => {
+  for (const code of [4, 17, 32, 613]) {
+    const e = new GraphError('x', { code, status: 400 });
+    assert.equal(e.isRateLimit, true, `code ${code}`);
+    assert.equal(e.shouldStop, true);
+    assert.equal(e.isTransient, true);
+    assert.equal(e.isAuth, false);
+  }
+  const sub = new GraphError('x', { code: 100, subcode: 2207051, status: 400 });
+  assert.equal(sub.isRateLimit, true, 'the publishing-limit subcode counts too');
+  assert.equal(sub.shouldStop, true);
+  const auth = new GraphError('x', { code: 190, status: 400 });
+  assert.equal(auth.shouldStop, true);
+  assert.equal(auth.isTransient, false, 'a bad token is not going to fix itself');
+  const five = new GraphError('x', { code: 1, status: 500 });
+  assert.equal(five.isTransient, true);
+  assert.equal(five.shouldStop, false);
+  assert.equal(new GraphError('x', { timeout: true }).isTransient, true);
+  const content = new GraphError('x', { code: 9004, status: 400 });
+  assert.equal(content.isTransient, false);
+  assert.equal(content.shouldStop, false);
+  assert.match(new GraphError('x', { code: 4, hint: HINTS[4] }).detail, /request limit/);
 });
 
 test('createGraph live: container is polled until FINISHED, then published; ERROR throws', async () => {
