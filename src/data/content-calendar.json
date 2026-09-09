@@ -1,6 +1,8 @@
 [
   {
-    "date": "2026-09-06",
+    "id": "ig-launch-01",
+    "date": "2026-09-09",
+    "time": "17:30",
     "platform": "instagram",
     "format": "carousel",
     "pillar": "listings",
@@ -53,7 +55,9 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-06",
+    "id": "ig-launch-02",
+    "date": "2026-09-09",
+    "time": "17:50",
     "platform": "instagram",
     "format": "post",
     "pillar": "listings",
@@ -101,7 +105,9 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-06",
+    "id": "ig-launch-03",
+    "date": "2026-09-09",
+    "time": "18:10",
     "platform": "instagram",
     "format": "carousel",
     "pillar": "listings",
@@ -156,7 +162,9 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-06",
+    "id": "ig-launch-04",
+    "date": "2026-09-09",
+    "time": "18:30",
     "platform": "instagram",
     "format": "post",
     "pillar": "behind the house",
@@ -203,7 +211,9 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-06",
+    "id": "ig-launch-05",
+    "date": "2026-09-09",
+    "time": "18:50",
     "platform": "instagram",
     "format": "post",
     "pillar": "behind the house",
@@ -248,7 +258,9 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-06",
+    "id": "ig-launch-06",
+    "date": "2026-09-09",
+    "time": "19:10",
     "platform": "instagram",
     "format": "carousel",
     "pillar": "listings",
@@ -302,7 +314,9 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-06",
+    "id": "ig-launch-07",
+    "date": "2026-09-09",
+    "time": "19:30",
     "platform": "instagram",
     "format": "post",
     "pillar": "listings",
@@ -350,7 +364,9 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-06",
+    "id": "ig-launch-08",
+    "date": "2026-09-09",
+    "time": "19:50",
     "platform": "instagram",
     "format": "post",
     "pillar": "buyer/seller education",
@@ -396,7 +412,9 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-06",
+    "id": "ig-launch-09",
+    "date": "2026-09-09",
+    "time": "20:10",
     "platform": "instagram",
     "format": "post",
     "pillar": "behind the house",
@@ -439,10 +457,14 @@
     "listingId": "BONA-024",
     "url": "https://bona-real-estate.com/",
     "adLicenceRequired": false,
-    "status": "planned"
+    "status": "published",
+    "publishedAt": "2026-09-09T00:07:40Z",
+    "manual": true
   },
   {
-    "date": "2026-09-06",
+    "id": "ig-2026-09-09-story-launch-day-9-homes-on-the-grid-swipe-up-link-in",
+    "date": "2026-09-09",
+    "time": "21:00",
     "platform": "instagram",
     "format": "story",
     "pillar": "listings",
@@ -460,220 +482,29 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-07",
-    "platform": "instagram",
-    "format": "carousel",
-    "pillar": "Jeddah district guides",
-    "topic": {
-      "en": "District guide — Al Khalidiyah",
-      "ar": "دليل الحي — الخالدية"
-    },
-    "caption": {
-      "en": "Al Khalidiyah, in five lines.\n\n1. Jeddah's original villa district — wide plots, mature trees, streets that were planned for families.\n2. Ten minutes to the Corniche, King Abdullah Road and the Red Sea Mall.\n3. Housing stock: classic 1990s–2000s villas being renovated, plus new-build contemporary villas on double plots.\n4. Who buys here: established Jeddah families and returning expats who want a house, not a compound.\n5. What to check: plot size on the deed (صك) versus the fence, and whether the street is on the municipality's re-paving list.\n\nWe have villas quietly available here. WhatsApp +966 59 329 6933.",
-      "ar": "الخالدية، في خمسة أسطر.\n\n1. حي الفلل الأصلي في جدة — قطع واسعة، أشجار معمّرة، وشوارع خُطّطت للعائلات.\n2. عشر دقائق إلى الكورنيش وطريق الملك عبدالله ورد سي مول.\n3. المعروض: فلل كلاسيكية من التسعينيات والألفينيات تُجدَّد، وفلل عصرية جديدة على قطع مزدوجة.\n4. من يشتري هنا: عائلات جدة العريقة والعائدون من الخارج ممن يريدون بيتاً لا مجمّعاً.\n5. ما يجب التحقق منه: مساحة القطعة في الصك مقابل السور، وهل الشارع ضمن خطة الأمانة لإعادة السفلتة.\n\nلدينا فلل متاحة هنا بهدوء. واتساب +966 59 329 6933."
-    },
-    "hashtags": [
-      "#بونا",
-      "#عقارات_جدة",
-      "#جدة",
-      "#عقارات_السعودية",
-      "#jeddahrealestate",
-      "#luxuryrealestate",
-      "#الخالدية",
-      "#حي_الخالدية",
-      "#alkhalidiyah",
-      "#khalidiyah",
-      "#فلل_الخالدية",
-      "#نصائح_عقارية",
-      "#دليل_المشتري",
-      "#شراء_عقار",
-      "#realestatetips",
-      "#jeddahdistricts",
-      "#bona"
-    ],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-119-1f59b7.jpg",
-    "images": [
-      "https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-119-1f59b7.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-130-3005cb31-669f17.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-107-45a677.jpg"
-    ],
-    "alt": {
-      "en": "Street and villa in Al Khalidiyah",
-      "ar": "شارع وفيلا في الخالدية"
-    },
-    "listingId": "BONA-005",
-    "url": "https://bona-real-estate.com/properties/",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-09-07",
-    "platform": "instagram",
-    "format": "story",
-    "pillar": "listings",
-    "topic": {
-      "en": "Poll: villa or penthouse?",
-      "ar": "استطلاع: فيلا أم بنتهاوس؟"
-    },
-    "caption": {
-      "en": "Poll: villa or penthouse?",
-      "ar": "استطلاع: فيلا أم بنتهاوس؟"
-    },
-    "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-119-1f59b7.jpg",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-09-08",
-    "platform": "instagram",
-    "format": "carousel",
-    "pillar": "buyer/seller education",
-    "topic": {
-      "en": "Buying a villa in Jeddah — the 7 steps",
-      "ar": "شراء فيلا في جدة — الخطوات السبع"
-    },
-    "caption": {
-      "en": "How a villa purchase actually happens in Jeddah — seven steps, no surprises.\n\n1. Brief: district, size, budget range, timeline.\n2. Shortlist and private viewings (two visits: day and evening).\n3. Deed check — the صك is verified on Najiz: owner, area, boundaries, any mortgage.\n4. Offer and negotiation in writing.\n5. Sale agreement and deposit (typically held until transfer).\n6. Transfer at the Ministry of Justice e-service (Najiz) — same day when documents are ready; buyer pays the 5% real-estate transaction tax unless exempt.\n7. Keys, utilities transfer (SEC, water), and the ad-licence closed.\n\nQuestions on any step: WhatsApp +966 59 329 6933.",
-      "ar": "كيف تتم عملية شراء فيلا في جدة فعلياً — سبع خطوات، بلا مفاجآت.\n\n1. التحديد: الحي، المساحة، نطاق الميزانية، الجدول الزمني.\n2. قائمة قصيرة ومعاينات خاصة (زيارتان: نهاراً ومساءً).\n3. فحص الصك — يُتحقق منه في ناجز: المالك، المساحة، الحدود، وأي رهن.\n4. عرض وتفاوض كتابياً.\n5. اتفاقية بيع وعربون (يُحفظ عادةً حتى نقل الملكية).\n6. نقل الملكية عبر خدمة وزارة العدل الإلكترونية (ناجز) — في اليوم نفسه عند اكتمال المستندات؛ يدفع المشتري ضريبة التصرفات العقارية 5% ما لم يكن معفى.\n7. المفاتيح، ونقل الخدمات (الكهرباء والمياه)، وإغلاق رخصة الإعلان.\n\nأسئلة عن أي خطوة: واتساب +966 59 329 6933."
-    },
-    "hashtags": [
-      "#بونا",
-      "#عقارات_جدة",
-      "#جدة",
-      "#عقارات_السعودية",
-      "#jeddahrealestate",
-      "#luxuryrealestate",
-      "#نصائح_عقارية",
-      "#دليل_المشتري",
-      "#شراء_عقار",
-      "#realestatetips",
-      "#homebuyingtips",
-      "#jeddahproperty",
-      "#saudiproperty",
-      "#ناجز",
-      "#صك",
-      "#شراء_فيلا",
-      "#homebuying",
-      "#bona"
-    ],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_5-15f2dc.jpg",
-    "images": [
-      "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_5-15f2dc.jpg"
-    ],
-    "alt": {
-      "en": "Interior detail used as a text-card background",
-      "ar": "تفصيل داخلي كخلفية لبطاقة نصية"
-    },
-    "listingId": null,
-    "url": "https://bona-real-estate.com/about/",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-09-08",
-    "platform": "instagram",
-    "format": "story",
-    "pillar": "listings",
-    "topic": {
-      "en": "One room, one listing: the majlis. Ref. in the sticker.",
-      "ar": "غرفة واحدة، عقار واحد: المجلس. المرجع في الملصق."
-    },
-    "caption": {
-      "en": "One room, one listing: the majlis. Ref. in the sticker.",
-      "ar": "غرفة واحدة، عقار واحد: المجلس. المرجع في الملصق."
-    },
-    "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-golf-villas/ott_02_rear_view_ef_9704209c3d_37a210f5bb-e9d829.jpg",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-09-08",
-    "platform": "instagram",
-    "format": "story",
-    "pillar": "listings",
-    "topic": {
-      "en": "3D tour story — Al Zahra Residences",
-      "ar": "قصة جولة ثلاثية الأبعاد — شقق الزهراء"
-    },
-    "caption": {
-      "en": "Walk through it before you visit — 3D tour of Al Zahra Residences. Link sticker → tour. Ref. BONA-015",
-      "ar": "تجوّل فيه قبل الزيارة — جولة ثلاثية الأبعاد في شقق الزهراء. ملصق الرابط ← الجولة. المرجع BONA-015"
-    },
-    "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg",
-    "listingId": "BONA-015",
-    "url": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
-    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-09-09",
-    "platform": "instagram",
-    "format": "post",
-    "pillar": "market insight",
-    "topic": {
-      "en": "What \"waterfront\" means in Jeddah — creek, Corniche or private beach",
-      "ar": "ماذا تعني «الواجهة البحرية» في جدة — الخور أم الكورنيش أم الشاطئ الخاص"
-    },
-    "caption": {
-      "en": "\"Waterfront\" means three different things in Jeddah.\n\nThe creek (Sharm Obhur, North Obhur): calm water, boat access, villa streets, 25 minutes from the centre.\nThe Corniche (Al Shati, Al Hamra): open sea, promenade, towers and older villas, in the city.\nThe private beach (Durrat Al Arous, Al Murjan communities): sand at the garden gate, gated, an hour out.\n\nThey suit different lives — and they are priced differently for reasons that have nothing to do with square metres. Ask us which one fits yours. WhatsApp +966 59 329 6933.",
-      "ar": "«الواجهة البحرية» تعني ثلاثة أشياء مختلفة في جدة.\n\nالخور (شرم أبحر، أبحر الشمالية): مياه هادئة، ومرسى للقوارب، وشوارع فلل، على بعد 25 دقيقة من الوسط.\nالكورنيش (الشاطئ، الحمراء): بحر مفتوح، وممشى، وأبراج وفلل أقدم، داخل المدينة.\nالشاطئ الخاص (درة العروس، مجتمعات المرجان): الرمل عند بوابة الحديقة، مسوّر، على بعد ساعة.\n\nتناسب أنماط حياة مختلفة — وتُسعَّر بشكل مختلف لأسباب لا علاقة لها بالأمتار المربعة. اسألنا أيها يناسبك. واتساب +966 59 329 6933."
-    },
-    "hashtags": [
-      "#بونا",
-      "#عقارات_جدة",
-      "#جدة",
-      "#عقارات_السعودية",
-      "#jeddahrealestate",
-      "#luxuryrealestate",
-      "#عقارات_الشاطئ",
-      "#واجهة_بحرية",
-      "#waterfrontliving",
-      "#beachfrontvilla",
-      "#seaview",
-      "#redsea",
-      "#أبحر",
-      "#الشاطئ",
-      "#درة_العروس",
-      "#jeddahlife",
-      "#bona"
-    ],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/aiease_1761726003950-0ca592.jpg",
-    "images": [
-      "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/aiease_1761726003950-0ca592.jpg"
-    ],
-    "alt": {
-      "en": "Room interior in a Bona listing",
-      "ar": "غرفة داخلية في أحد عقارات بونا"
-    },
-    "listingId": null,
-    "url": "https://bona-real-estate.com/",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-09-09",
-    "platform": "instagram",
-    "format": "story",
-    "pillar": "listings",
-    "topic": {
-      "en": "Question box: which Jeddah district should we guide next?",
-      "ar": "صندوق الأسئلة: أي حي في جدة نكتب عنه بعد ذلك؟"
-    },
-    "caption": {
-      "en": "Question box: which Jeddah district should we guide next?",
-      "ar": "صندوق الأسئلة: أي حي في جدة نكتب عنه بعد ذلك؟"
-    },
-    "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_4-1078483b-cd44eb.jpg",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
+    "id": "ig-2026-09-10-story-poll-villa-or-penthouse",
     "date": "2026-09-10",
+    "time": "17:15",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "listings",
+    "topic": {
+      "en": "Poll: villa or penthouse?",
+      "ar": "استطلاع: فيلا أم بنتهاوس؟"
+    },
+    "caption": {
+      "en": "Poll: villa or penthouse?",
+      "ar": "استطلاع: فيلا أم بنتهاوس؟"
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-119-1f59b7.jpg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-10-reel-painite-villas-by-lamborghini-benahav-s",
+    "date": "2026-09-10",
+    "time": "20:30",
     "platform": "instagram",
     "format": "reel",
     "pillar": "listings",
@@ -721,7 +552,72 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-10",
+    "id": "ig-2026-09-11-story-one-room-one-listing-the-majlis-ref-in-the-stick",
+    "date": "2026-09-11",
+    "time": "17:15",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "behind the house",
+    "topic": {
+      "en": "One room, one listing: the majlis. Ref. in the sticker.",
+      "ar": "غرفة واحدة، عقار واحد: المجلس. المرجع في الملصق."
+    },
+    "caption": {
+      "en": "One room, one listing: the majlis. Ref. in the sticker.",
+      "ar": "غرفة واحدة، عقار واحد: المجلس. المرجع في الملصق."
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-golf-villas/ott_02_rear_view_ef_9704209c3d_37a210f5bb-e9d829.jpg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-11-story-3d-tour-story-al-zahra-residences",
+    "date": "2026-09-11",
+    "time": "21:05",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "listings",
+    "topic": {
+      "en": "3D tour story — Al Zahra Residences",
+      "ar": "قصة جولة ثلاثية الأبعاد — شقق الزهراء"
+    },
+    "caption": {
+      "en": "Walk through it before you visit — 3D tour of Al Zahra Residences. Link sticker → tour. Ref. BONA-015",
+      "ar": "تجوّل فيه قبل الزيارة — جولة ثلاثية الأبعاد في شقق الزهراء. ملصق الرابط ← الجولة. المرجع BONA-015"
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg",
+    "listingId": "BONA-015",
+    "url": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
+    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-12-story-question-box-which-jeddah-district-should-we-gui",
+    "date": "2026-09-12",
+    "time": "17:15",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "behind the house",
+    "topic": {
+      "en": "Question box: which Jeddah district should we guide next?",
+      "ar": "صندوق الأسئلة: أي حي في جدة نكتب عنه بعد ذلك؟"
+    },
+    "caption": {
+      "en": "Question box: which Jeddah district should we guide next?",
+      "ar": "صندوق الأسئلة: أي حي في جدة نكتب عنه بعد ذلك؟"
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_4-1078483b-cd44eb.jpg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-13-story-new-this-week-quietly-two-homes-one-district-ask",
+    "date": "2026-09-13",
+    "time": "17:15",
     "platform": "instagram",
     "format": "story",
     "pillar": "listings",
@@ -739,10 +635,62 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-11",
+    "id": "ig-2026-09-13-carousel-dari-q-apartments-al-salamah",
+    "date": "2026-09-13",
+    "time": "20:30",
+    "platform": "instagram",
+    "format": "carousel",
+    "pillar": "listings",
+    "topic": {
+      "en": "Dari Q Apartments, Al Salamah",
+      "ar": "شقق داري كيو، السلامة"
+    },
+    "caption": {
+      "en": "Quietly available.\nDari Q Apartments, Al Salamah\nAl Salamah, Jeddah\n3 bedrooms · 3 bathrooms · 160.5 m²\n\nDari Q is a completed apartment building in Al Salamah, north Jeddah, with a Starbucks at street level and a landscaped courtyard at its centre. The three-bedroom apartments measure 160.5 square metres with three bathrooms, and are offered from SAR 1,200,000.\n160.5 sqm, three bedrooms and three bathrooms · Rooftop pool and gym · Landscaped courtyard and basketball court · Dedicated parking, basement and driver's room\n\nFrom SAR 1,200,000\nRef. BONA-043 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
+      "ar": "متاح بهدوء.\nشقق داري كيو، السلامة\nالسلامة، جدة\n3 غرف نوم · 3 دورات مياه · 160.5 م²\n\nداري كيو مبنى سكني مكتمل في حي السلامة شمال جدة، يضم فرعاً لستاربكس في الطابق الأرضي وفناءً منسقاً في قلبه. تبلغ مساحة الشقق ذات الغرف الثلاث 160.5 متراً مربعاً مع ثلاث دورات مياه، وتُعرض ابتداءً من 1,200,000 ريال سعودي.\n160.5 متراً مربعاً، ثلاث غرف نوم وثلاث دورات مياه · مسبح على السطح ونادٍ رياضي · فناء منسق وملعب كرة سلة · مواقف مخصصة وقبو وغرفة للسائق\n\nابتداءً من 1,200,000 ر.س\nالمرجع BONA-043 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
+    },
+    "hashtags": [
+      "#بونا",
+      "#عقارات_جدة",
+      "#جدة",
+      "#عقارات_السعودية",
+      "#jeddahrealestate",
+      "#luxuryrealestate",
+      "#شقق_جدة",
+      "#شقق_فاخرة_جدة",
+      "#شقق_للبيع",
+      "#luxuryapartment",
+      "#jeddahapartments",
+      "#apartmentforsale",
+      "#السلامة",
+      "#alsalamah",
+      "#bona"
+    ],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-12-bd8233.jpeg",
+    "images": [
+      "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-12-bd8233.jpeg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-2-48e9e9.jpeg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-18-926465.jpeg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-26-20cb3e.jpeg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-21-06e049.jpeg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-30-d9a124.jpeg"
+    ],
+    "alt": {
+      "en": "Rooftop pool — Dari Q Apartments, Al Salamah",
+      "ar": "مسبح السطح — شقق داري كيو، السلامة"
+    },
+    "listingId": "BONA-043",
+    "url": "https://bona-real-estate.com/properties/dari-q-al-salamah/",
+    "adLicenceRequired": true,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-14-story-weekend-a-garden-at-6-40-am-that-s-all",
+    "date": "2026-09-14",
+    "time": "17:15",
     "platform": "instagram",
     "format": "story",
-    "pillar": "behind the house",
+    "pillar": "listings",
     "topic": {
       "en": "Weekend: a garden at 6:40 am. That's all.",
       "ar": "نهاية الأسبوع: حديقة في 6:40 صباحاً. هذا كل شيء."
@@ -757,10 +705,61 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-12",
+    "id": "ig-2026-09-14-carousel-district-guide-al-khalidiyah",
+    "date": "2026-09-14",
+    "time": "20:30",
+    "platform": "instagram",
+    "format": "carousel",
+    "pillar": "Jeddah district guides",
+    "topic": {
+      "en": "District guide — Al Khalidiyah",
+      "ar": "دليل الحي — الخالدية"
+    },
+    "caption": {
+      "en": "Al Khalidiyah, in five lines.\n\n1. Jeddah's original villa district — wide plots, mature trees, streets that were planned for families.\n2. Ten minutes to the Corniche, King Abdullah Road and the Red Sea Mall.\n3. Housing stock: classic 1990s–2000s villas being renovated, plus new-build contemporary villas on double plots.\n4. Who buys here: established Jeddah families and returning expats who want a house, not a compound.\n5. What to check: plot size on the deed (صك) versus the fence, and whether the street is on the municipality's re-paving list.\n\nWe have villas quietly available here. WhatsApp +966 59 329 6933.",
+      "ar": "الخالدية، في خمسة أسطر.\n\n1. حي الفلل الأصلي في جدة — قطع واسعة، أشجار معمّرة، وشوارع خُطّطت للعائلات.\n2. عشر دقائق إلى الكورنيش وطريق الملك عبدالله ورد سي مول.\n3. المعروض: فلل كلاسيكية من التسعينيات والألفينيات تُجدَّد، وفلل عصرية جديدة على قطع مزدوجة.\n4. من يشتري هنا: عائلات جدة العريقة والعائدون من الخارج ممن يريدون بيتاً لا مجمّعاً.\n5. ما يجب التحقق منه: مساحة القطعة في الصك مقابل السور، وهل الشارع ضمن خطة الأمانة لإعادة السفلتة.\n\nلدينا فلل متاحة هنا بهدوء. واتساب +966 59 329 6933."
+    },
+    "hashtags": [
+      "#بونا",
+      "#عقارات_جدة",
+      "#جدة",
+      "#عقارات_السعودية",
+      "#jeddahrealestate",
+      "#luxuryrealestate",
+      "#الخالدية",
+      "#حي_الخالدية",
+      "#alkhalidiyah",
+      "#khalidiyah",
+      "#فلل_الخالدية",
+      "#نصائح_عقارية",
+      "#دليل_المشتري",
+      "#شراء_عقار",
+      "#realestatetips",
+      "#jeddahdistricts",
+      "#bona"
+    ],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-119-1f59b7.jpg",
+    "images": [
+      "https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-119-1f59b7.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-130-3005cb31-669f17.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/ultra-modern-luxury-villa-al-khalidiyah/tk-107-45a677.jpg"
+    ],
+    "alt": {
+      "en": "Street and villa in Al Khalidiyah",
+      "ar": "شارع وفيلا في الخالدية"
+    },
+    "listingId": "BONA-005",
+    "url": "https://bona-real-estate.com/properties/",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-15-story-weekend-the-corniche-from-the-18th-floor",
+    "date": "2026-09-15",
+    "time": "17:15",
     "platform": "instagram",
     "format": "story",
-    "pillar": "behind the house",
+    "pillar": "listings",
     "topic": {
       "en": "Weekend: the Corniche from the 18th floor.",
       "ar": "نهاية الأسبوع: الكورنيش من الدور الثامن عشر."
@@ -775,7 +774,278 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-13",
+    "id": "ig-2026-09-15-carousel-buying-a-villa-in-jeddah-the-7-steps",
+    "date": "2026-09-15",
+    "time": "20:30",
+    "platform": "instagram",
+    "format": "carousel",
+    "pillar": "buyer/seller education",
+    "topic": {
+      "en": "Buying a villa in Jeddah — the 7 steps",
+      "ar": "شراء فيلا في جدة — الخطوات السبع"
+    },
+    "caption": {
+      "en": "How a villa purchase actually happens in Jeddah — seven steps, no surprises.\n\n1. Brief: district, size, budget range, timeline.\n2. Shortlist and private viewings (two visits: day and evening).\n3. Deed check — the صك is verified on Najiz: owner, area, boundaries, any mortgage.\n4. Offer and negotiation in writing.\n5. Sale agreement and deposit (typically held until transfer).\n6. Transfer at the Ministry of Justice e-service (Najiz) — same day when documents are ready; buyer pays the 5% real-estate transaction tax unless exempt.\n7. Keys, utilities transfer (SEC, water), and the ad-licence closed.\n\nQuestions on any step: WhatsApp +966 59 329 6933.",
+      "ar": "كيف تتم عملية شراء فيلا في جدة فعلياً — سبع خطوات، بلا مفاجآت.\n\n1. التحديد: الحي، المساحة، نطاق الميزانية، الجدول الزمني.\n2. قائمة قصيرة ومعاينات خاصة (زيارتان: نهاراً ومساءً).\n3. فحص الصك — يُتحقق منه في ناجز: المالك، المساحة، الحدود، وأي رهن.\n4. عرض وتفاوض كتابياً.\n5. اتفاقية بيع وعربون (يُحفظ عادةً حتى نقل الملكية).\n6. نقل الملكية عبر خدمة وزارة العدل الإلكترونية (ناجز) — في اليوم نفسه عند اكتمال المستندات؛ يدفع المشتري ضريبة التصرفات العقارية 5% ما لم يكن معفى.\n7. المفاتيح، ونقل الخدمات (الكهرباء والمياه)، وإغلاق رخصة الإعلان.\n\nأسئلة عن أي خطوة: واتساب +966 59 329 6933."
+    },
+    "hashtags": [
+      "#بونا",
+      "#عقارات_جدة",
+      "#جدة",
+      "#عقارات_السعودية",
+      "#jeddahrealestate",
+      "#luxuryrealestate",
+      "#نصائح_عقارية",
+      "#دليل_المشتري",
+      "#شراء_عقار",
+      "#realestatetips",
+      "#homebuyingtips",
+      "#jeddahproperty",
+      "#saudiproperty",
+      "#ناجز",
+      "#صك",
+      "#شراء_فيلا",
+      "#homebuying",
+      "#bona"
+    ],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_5-15f2dc.jpg",
+    "images": [
+      "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_5-15f2dc.jpg"
+    ],
+    "alt": {
+      "en": "Interior detail used as a text-card background",
+      "ar": "تفصيل داخلي كخلفية لبطاقة نصية"
+    },
+    "listingId": null,
+    "url": "https://bona-real-estate.com/about/",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-16-story-office-open-sun-thu-10-19-whatsapp-sticker",
+    "date": "2026-09-16",
+    "time": "17:15",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "listings",
+    "topic": {
+      "en": "Office open. Sun–Thu 10–19. WhatsApp sticker.",
+      "ar": "المكتب مفتوح. الأحد–الخميس 10–19. ملصق واتساب."
+    },
+    "caption": {
+      "en": "Office open. Sun–Thu 10–19. WhatsApp sticker.",
+      "ar": "المكتب مفتوح. الأحد–الخميس 10–19. ملصق واتساب."
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-12-bd8233.jpeg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-16-post-what-waterfront-means-in-jeddah-creek-corniche-o",
+    "date": "2026-09-16",
+    "time": "20:30",
+    "platform": "instagram",
+    "format": "post",
+    "pillar": "market insight",
+    "topic": {
+      "en": "What \"waterfront\" means in Jeddah — creek, Corniche or private beach",
+      "ar": "ماذا تعني «الواجهة البحرية» في جدة — الخور أم الكورنيش أم الشاطئ الخاص"
+    },
+    "caption": {
+      "en": "\"Waterfront\" means three different things in Jeddah.\n\nThe creek (Sharm Obhur, North Obhur): calm water, boat access, villa streets, 25 minutes from the centre.\nThe Corniche (Al Shati, Al Hamra): open sea, promenade, towers and older villas, in the city.\nThe private beach (Durrat Al Arous, Al Murjan communities): sand at the garden gate, gated, an hour out.\n\nThey suit different lives — and they are priced differently for reasons that have nothing to do with square metres. Ask us which one fits yours. WhatsApp +966 59 329 6933.",
+      "ar": "«الواجهة البحرية» تعني ثلاثة أشياء مختلفة في جدة.\n\nالخور (شرم أبحر، أبحر الشمالية): مياه هادئة، ومرسى للقوارب، وشوارع فلل، على بعد 25 دقيقة من الوسط.\nالكورنيش (الشاطئ، الحمراء): بحر مفتوح، وممشى، وأبراج وفلل أقدم، داخل المدينة.\nالشاطئ الخاص (درة العروس، مجتمعات المرجان): الرمل عند بوابة الحديقة، مسوّر، على بعد ساعة.\n\nتناسب أنماط حياة مختلفة — وتُسعَّر بشكل مختلف لأسباب لا علاقة لها بالأمتار المربعة. اسألنا أيها يناسبك. واتساب +966 59 329 6933."
+    },
+    "hashtags": [
+      "#بونا",
+      "#عقارات_جدة",
+      "#جدة",
+      "#عقارات_السعودية",
+      "#jeddahrealestate",
+      "#luxuryrealestate",
+      "#عقارات_الشاطئ",
+      "#واجهة_بحرية",
+      "#waterfrontliving",
+      "#beachfrontvilla",
+      "#seaview",
+      "#redsea",
+      "#أبحر",
+      "#الشاطئ",
+      "#درة_العروس",
+      "#jeddahlife",
+      "#bona"
+    ],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/aiease_1761726003950-0ca592.jpg",
+    "images": [
+      "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/aiease_1761726003950-0ca592.jpg"
+    ],
+    "alt": {
+      "en": "Room interior in a Bona listing",
+      "ar": "غرفة داخلية في أحد عقارات بونا"
+    },
+    "listingId": null,
+    "url": "https://bona-real-estate.com/",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-16-story-3d-tour-story-al-zahra-residences",
+    "date": "2026-09-16",
+    "time": "21:05",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "listings",
+    "topic": {
+      "en": "3D tour story — Al Zahra Residences",
+      "ar": "قصة جولة ثلاثية الأبعاد — شقق الزهراء"
+    },
+    "caption": {
+      "en": "Tap, turn, walk: Al Zahra Residences in 3D. Which room would you change first?",
+      "ar": "اضغط، أدِر، امشِ: شقق الزهراء بتقنية ثلاثية الأبعاد. أي غرفة ستغيّرها أولاً؟"
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg",
+    "listingId": "BONA-015",
+    "url": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
+    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-17-story-quiz-how-many-m-is-this-living-room-answer-tomor",
+    "date": "2026-09-17",
+    "time": "17:15",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "listings",
+    "topic": {
+      "en": "Quiz: how many m² is this living room? Answer tomorrow.",
+      "ar": "اختبار: كم متراً مربعاً هذه الصالة؟ الجواب غداً."
+    },
+    "caption": {
+      "en": "Quiz: how many m² is this living room? Answer tomorrow.",
+      "ar": "اختبار: كم متراً مربعاً هذه الصالة؟ الجواب غداً."
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-25-3d6349.jpg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-17-reel-3d-tour-al-zahra-residences",
+    "date": "2026-09-17",
+    "time": "20:30",
+    "platform": "instagram",
+    "format": "reel",
+    "pillar": "listings",
+    "topic": {
+      "en": "3D tour — Al Zahra Residences",
+      "ar": "جولة ثلاثية الأبعاد — شقق الزهراء"
+    },
+    "caption": {
+      "en": "Walk through it before you visit.\nAl Zahra Residences\nAl Zahra, Jeddah\n3 bedrooms · 200 m²\n\nA Matterport 3D tour: every room at its true angle, with a measuring tool. Link in bio → “Tours”.\nThen we arrange the private viewing.\n\nFrom SAR 1,450,000\nRef. BONA-015 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
+      "ar": "تجوّل قبل أن تزور.\nشقق الزهراء\nالزهراء، جدة\n3 غرف نوم · 200 م²\n\nجولة Matterport ثلاثية الأبعاد: كل غرفة بزاويتها الحقيقية، مع أداة قياس. الرابط في البايو ← «الجولات».\nثم نرتّب المعاينة الخاصة.\n\nابتداءً من 1,450,000 ر.س\nالمرجع BONA-015 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
+    },
+    "hashtags": [
+      "#بونا",
+      "#عقارات_جدة",
+      "#جدة",
+      "#عقارات_السعودية",
+      "#jeddahrealestate",
+      "#luxuryrealestate",
+      "#شقق_جدة",
+      "#شقق_فاخرة_جدة",
+      "#شقق_للبيع",
+      "#luxuryapartment",
+      "#jeddahapartments",
+      "#apartmentforsale",
+      "#الزهراء",
+      "#alzahra",
+      "#3dtour",
+      "#virtualtour",
+      "#matterport",
+      "#جولة_افتراضية",
+      "#جولة_ثلاثية_الأبعاد"
+    ],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-25-3d6349.jpg",
+    "images": [
+      "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-25-3d6349.jpg"
+    ],
+    "alt": {
+      "en": "Façade at night — Al Zahra Residences",
+      "ar": "الواجهة ليلاً — شقق الزهراء"
+    },
+    "listingId": "BONA-015",
+    "url": "https://bona-real-estate.com/properties/al-zahra-residences/",
+    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
+    "note": "Screen-record the Matterport walkthrough (15–30 s, 9:16, captions on, ambient audio only); end card = listing hero + ref.",
+    "adLicenceRequired": true,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-18-story-answer-to-yesterday-s-quiz-the-listing-link",
+    "date": "2026-09-18",
+    "time": "17:15",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "behind the house",
+    "topic": {
+      "en": "Answer to yesterday's quiz + the listing link.",
+      "ar": "جواب اختبار الأمس + رابط العقار."
+    },
+    "caption": {
+      "en": "Answer to yesterday's quiz + the listing link.",
+      "ar": "جواب اختبار الأمس + رابط العقار."
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/al_rawdah_-_apartment_5-648780.jpg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-19-story-viewing-day-two-homes-one-street-no-faces-no-add",
+    "date": "2026-09-19",
+    "time": "17:15",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "behind the house",
+    "topic": {
+      "en": "Viewing day. Two homes, one street. No faces, no addresses.",
+      "ar": "يوم المعاينات. منزلان، شارع واحد. بلا وجوه، بلا عناوين."
+    },
+    "caption": {
+      "en": "Viewing day. Two homes, one street. No faces, no addresses.",
+      "ar": "يوم المعاينات. منزلان، شارع واحد. بلا وجوه، بلا عناوين."
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/uwq4bakpspm7gkozgcli_video_project_25_1_1_.v2.0000000-0ee6d0.jpg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-20-story-is-it-still-available-the-3-most-asked-refs-this",
+    "date": "2026-09-20",
+    "time": "17:15",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "listings",
+    "topic": {
+      "en": "\"Is it still available?\" — the 3 most-asked refs this week.",
+      "ar": "«هل ما زال متاحاً؟» — أكثر 3 مراجع سُئل عنها هذا الأسبوع."
+    },
+    "caption": {
+      "en": "\"Is it still available?\" — the 3 most-asked refs this week.",
+      "ar": "«هل ما زال متاحاً؟» — أكثر 3 مراجع سُئل عنها هذا الأسبوع."
+    },
+    "hashtags": [],
+    "image": "/listings/alhayat-residence-al-salama/01.jpg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-20-carousel-inside-kayan-residence-al-nahda-the-units",
+    "date": "2026-09-20",
+    "time": "20:30",
     "platform": "instagram",
     "format": "carousel",
     "pillar": "listings",
@@ -829,46 +1099,29 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-13",
+    "id": "ig-2026-09-21-story-weekend-pool-at-dusk-north-obhur",
+    "date": "2026-09-21",
+    "time": "17:15",
     "platform": "instagram",
     "format": "story",
     "pillar": "listings",
     "topic": {
-      "en": "Office open. Sun–Thu 10–19. WhatsApp sticker.",
-      "ar": "المكتب مفتوح. الأحد–الخميس 10–19. ملصق واتساب."
+      "en": "Weekend: pool at dusk, North Obhur.",
+      "ar": "نهاية الأسبوع: مسبح عند الغروب، أبحر الشمالية."
     },
     "caption": {
-      "en": "Office open. Sun–Thu 10–19. WhatsApp sticker.",
-      "ar": "المكتب مفتوح. الأحد–الخميس 10–19. ملصق واتساب."
+      "en": "Weekend: pool at dusk, North Obhur.",
+      "ar": "نهاية الأسبوع: مسبح عند الغروب، أبحر الشمالية."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-12-bd8233.jpeg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-52-1c9679.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   },
   {
-    "date": "2026-09-13",
-    "platform": "instagram",
-    "format": "story",
-    "pillar": "listings",
-    "topic": {
-      "en": "3D tour story — Al Zahra Residences",
-      "ar": "قصة جولة ثلاثية الأبعاد — شقق الزهراء"
-    },
-    "caption": {
-      "en": "Tap, turn, walk: Al Zahra Residences in 3D. Which room would you change first?",
-      "ar": "اضغط، أدِر، امشِ: شقق الزهراء بتقنية ثلاثية الأبعاد. أي غرفة ستغيّرها أولاً؟"
-    },
-    "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg",
-    "listingId": "BONA-015",
-    "url": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
-    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-09-14",
+    "id": "ig-2026-09-21-carousel-district-guide-north-obhur-al-sheraa-al-bandar",
+    "date": "2026-09-21",
+    "time": "20:30",
     "platform": "instagram",
     "format": "carousel",
     "pillar": "Jeddah district guides",
@@ -917,25 +1170,52 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-14",
+    "id": "ig-2026-09-21-story-3d-tour-story-al-zahra-residences",
+    "date": "2026-09-21",
+    "time": "21:05",
     "platform": "instagram",
     "format": "story",
     "pillar": "listings",
     "topic": {
-      "en": "Quiz: how many m² is this living room? Answer tomorrow.",
-      "ar": "اختبار: كم متراً مربعاً هذه الصالة؟ الجواب غداً."
+      "en": "3D tour story — Al Zahra Residences",
+      "ar": "قصة جولة ثلاثية الأبعاد — شقق الزهراء"
     },
     "caption": {
-      "en": "Quiz: how many m² is this living room? Answer tomorrow.",
-      "ar": "اختبار: كم متراً مربعاً هذه الصالة؟ الجواب غداً."
+      "en": "Same home, no traffic. The Matterport tour of Al Zahra Residences — link sticker.",
+      "ar": "المنزل نفسه، بلا زحام. جولة Matterport في شقق الزهراء — ملصق الرابط."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-25-3d6349.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg",
+    "listingId": "BONA-015",
+    "url": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
+    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
     "adLicenceRequired": false,
     "status": "planned"
   },
   {
-    "date": "2026-09-15",
+    "id": "ig-2026-09-22-story-weekend-reading-corner-al-khalidiyah-villa",
+    "date": "2026-09-22",
+    "time": "17:15",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "listings",
+    "topic": {
+      "en": "Weekend: reading corner, Al Khalidiyah villa.",
+      "ar": "نهاية الأسبوع: ركن القراءة، فيلا في الخالدية."
+    },
+    "caption": {
+      "en": "Weekend: reading corner, Al Khalidiyah villa.",
+      "ar": "نهاية الأسبوع: ركن القراءة، فيلا في الخالدية."
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-49-3dbda5.jpg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-22-carousel-off-market-explained",
+    "date": "2026-09-22",
+    "time": "20:30",
     "platform": "instagram",
     "format": "carousel",
     "pillar": "buyer/seller education",
@@ -979,259 +1259,9 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-15",
-    "platform": "instagram",
-    "format": "story",
-    "pillar": "listings",
-    "topic": {
-      "en": "Answer to yesterday's quiz + the listing link.",
-      "ar": "جواب اختبار الأمس + رابط العقار."
-    },
-    "caption": {
-      "en": "Answer to yesterday's quiz + the listing link.",
-      "ar": "جواب اختبار الأمس + رابط العقار."
-    },
-    "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/al_rawdah_-_apartment_5-648780.jpg",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-09-16",
-    "platform": "instagram",
-    "format": "reel",
-    "pillar": "behind the house",
-    "topic": {
-      "en": "Behind the house — shoot day",
-      "ar": "خلف الكواليس — يوم التصوير"
-    },
-    "caption": {
-      "en": "Behind the house.\n\nA shoot day starts at 6:40 — the only hour the light in a Jeddah garden is soft. We open every curtain, move the cars, and photograph the rooms in the order a buyer walks them. No wide-angle tricks; what you see is the room.\n\nThe result goes to owners first, then to the grid. WhatsApp +966 59 329 6933.",
-      "ar": "خلف الكواليس.\n\nيوم التصوير يبدأ في 6:40 — الساعة الوحيدة التي يكون فيها الضوء في حديقة جدة ناعماً. نفتح كل الستائر، ونحرّك السيارات، ونصوّر الغرف بالترتيب الذي يمشيه المشتري. لا حيل بالعدسات الواسعة؛ ما تراه هو الغرفة.\n\nالنتيجة تذهب إلى المُلّاك أولاً، ثم إلى الصفحة. واتساب +966 59 329 6933."
-    },
-    "hashtags": [
-      "#بونا",
-      "#عقارات_جدة",
-      "#جدة",
-      "#عقارات_السعودية",
-      "#jeddahrealestate",
-      "#luxuryrealestate",
-      "#منازل_استثنائية",
-      "#quietluxury",
-      "#luxuryinteriors",
-      "#architecture",
-      "#jeddahlife",
-      "#saudiluxury",
-      "#عمارة",
-      "#behindthescenes",
-      "#realestatephotography",
-      "#bona"
-    ],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/painite-villas-by-lamborghini/painite_villa_-_ext-d633be.jpg",
-    "images": [
-      "https://tk-storage.azoz.uk/tk-estate-media/media/painite-villas-by-lamborghini/painite_villa_-_ext-d633be.jpg"
-    ],
-    "alt": {
-      "en": "Room interior in a Bona listing",
-      "ar": "غرفة داخلية في أحد عقارات بونا"
-    },
-    "listingId": null,
-    "url": "https://bona-real-estate.com/",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-09-16",
-    "platform": "instagram",
-    "format": "story",
-    "pillar": "listings",
-    "topic": {
-      "en": "Viewing day. Two homes, one street. No faces, no addresses.",
-      "ar": "يوم المعاينات. منزلان، شارع واحد. بلا وجوه، بلا عناوين."
-    },
-    "caption": {
-      "en": "Viewing day. Two homes, one street. No faces, no addresses.",
-      "ar": "يوم المعاينات. منزلان، شارع واحد. بلا وجوه، بلا عناوين."
-    },
-    "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/uwq4bakpspm7gkozgcli_video_project_25_1_1_.v2.0000000-0ee6d0.jpg",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-09-17",
-    "platform": "instagram",
-    "format": "reel",
-    "pillar": "listings",
-    "topic": {
-      "en": "3D tour — Al Zahra Residences",
-      "ar": "جولة ثلاثية الأبعاد — شقق الزهراء"
-    },
-    "caption": {
-      "en": "Walk through it before you visit.\nAl Zahra Residences\nAl Zahra, Jeddah\n3 bedrooms · 200 m²\n\nA Matterport 3D tour: every room at its true angle, with a measuring tool. Link in bio → “Tours”.\nThen we arrange the private viewing.\n\nFrom SAR 1,450,000\nRef. BONA-015 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
-      "ar": "تجوّل قبل أن تزور.\nشقق الزهراء\nالزهراء، جدة\n3 غرف نوم · 200 م²\n\nجولة Matterport ثلاثية الأبعاد: كل غرفة بزاويتها الحقيقية، مع أداة قياس. الرابط في البايو ← «الجولات».\nثم نرتّب المعاينة الخاصة.\n\nابتداءً من 1,450,000 ر.س\nالمرجع BONA-015 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
-    },
-    "hashtags": [
-      "#بونا",
-      "#عقارات_جدة",
-      "#جدة",
-      "#عقارات_السعودية",
-      "#jeddahrealestate",
-      "#luxuryrealestate",
-      "#شقق_جدة",
-      "#شقق_فاخرة_جدة",
-      "#شقق_للبيع",
-      "#luxuryapartment",
-      "#jeddahapartments",
-      "#apartmentforsale",
-      "#الزهراء",
-      "#alzahra",
-      "#3dtour",
-      "#virtualtour",
-      "#matterport",
-      "#جولة_افتراضية",
-      "#جولة_ثلاثية_الأبعاد"
-    ],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-25-3d6349.jpg",
-    "images": [
-      "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-25-3d6349.jpg"
-    ],
-    "alt": {
-      "en": "Façade at night — Al Zahra Residences",
-      "ar": "الواجهة ليلاً — شقق الزهراء"
-    },
-    "listingId": "BONA-015",
-    "url": "https://bona-real-estate.com/properties/al-zahra-residences/",
-    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
-    "note": "Screen-record the Matterport walkthrough (15–30 s, 9:16, captions on, ambient audio only); end card = listing hero + ref.",
-    "adLicenceRequired": true,
-    "status": "planned"
-  },
-  {
-    "date": "2026-09-17",
-    "platform": "instagram",
-    "format": "story",
-    "pillar": "listings",
-    "topic": {
-      "en": "\"Is it still available?\" — the 3 most-asked refs this week.",
-      "ar": "«هل ما زال متاحاً؟» — أكثر 3 مراجع سُئل عنها هذا الأسبوع."
-    },
-    "caption": {
-      "en": "\"Is it still available?\" — the 3 most-asked refs this week.",
-      "ar": "«هل ما زال متاحاً؟» — أكثر 3 مراجع سُئل عنها هذا الأسبوع."
-    },
-    "hashtags": [],
-    "image": "/listings/alhayat-residence-al-salama/01.jpg",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-09-18",
-    "platform": "instagram",
-    "format": "story",
-    "pillar": "behind the house",
-    "topic": {
-      "en": "Weekend: pool at dusk, North Obhur.",
-      "ar": "نهاية الأسبوع: مسبح عند الغروب، أبحر الشمالية."
-    },
-    "caption": {
-      "en": "Weekend: pool at dusk, North Obhur.",
-      "ar": "نهاية الأسبوع: مسبح عند الغروب، أبحر الشمالية."
-    },
-    "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-52-1c9679.jpg",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-09-18",
-    "platform": "instagram",
-    "format": "story",
-    "pillar": "listings",
-    "topic": {
-      "en": "3D tour story — Al Zahra Residences",
-      "ar": "قصة جولة ثلاثية الأبعاد — شقق الزهراء"
-    },
-    "caption": {
-      "en": "Same home, no traffic. The Matterport tour of Al Zahra Residences — link sticker.",
-      "ar": "المنزل نفسه، بلا زحام. جولة Matterport في شقق الزهراء — ملصق الرابط."
-    },
-    "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg",
-    "listingId": "BONA-015",
-    "url": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
-    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-09-19",
-    "platform": "instagram",
-    "format": "story",
-    "pillar": "behind the house",
-    "topic": {
-      "en": "Weekend: reading corner, Al Khalidiyah villa.",
-      "ar": "نهاية الأسبوع: ركن القراءة، فيلا في الخالدية."
-    },
-    "caption": {
-      "en": "Weekend: reading corner, Al Khalidiyah villa.",
-      "ar": "نهاية الأسبوع: ركن القراءة، فيلا في الخالدية."
-    },
-    "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-49-3dbda5.jpg",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-09-20",
-    "platform": "instagram",
-    "format": "carousel",
-    "pillar": "listings",
-    "topic": {
-      "en": "Dari Q Apartments, Al Salamah",
-      "ar": "شقق داري كيو، السلامة"
-    },
-    "caption": {
-      "en": "Quietly available.\nDari Q Apartments, Al Salamah\nAl Salamah, Jeddah\n3 bedrooms · 3 bathrooms · 160.5 m²\n\nDari Q is a completed apartment building in Al Salamah, north Jeddah, with a Starbucks at street level and a landscaped courtyard at its centre. The three-bedroom apartments measure 160.5 square metres with three bathrooms, and are offered from SAR 1,200,000.\n160.5 sqm, three bedrooms and three bathrooms · Rooftop pool and gym · Landscaped courtyard and basketball court · Dedicated parking, basement and driver's room\n\nFrom SAR 1,200,000\nRef. BONA-043 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
-      "ar": "متاح بهدوء.\nشقق داري كيو، السلامة\nالسلامة، جدة\n3 غرف نوم · 3 دورات مياه · 160.5 م²\n\nداري كيو مبنى سكني مكتمل في حي السلامة شمال جدة، يضم فرعاً لستاربكس في الطابق الأرضي وفناءً منسقاً في قلبه. تبلغ مساحة الشقق ذات الغرف الثلاث 160.5 متراً مربعاً مع ثلاث دورات مياه، وتُعرض ابتداءً من 1,200,000 ريال سعودي.\n160.5 متراً مربعاً، ثلاث غرف نوم وثلاث دورات مياه · مسبح على السطح ونادٍ رياضي · فناء منسق وملعب كرة سلة · مواقف مخصصة وقبو وغرفة للسائق\n\nابتداءً من 1,200,000 ر.س\nالمرجع BONA-043 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
-    },
-    "hashtags": [
-      "#بونا",
-      "#عقارات_جدة",
-      "#جدة",
-      "#عقارات_السعودية",
-      "#jeddahrealestate",
-      "#luxuryrealestate",
-      "#شقق_جدة",
-      "#شقق_فاخرة_جدة",
-      "#شقق_للبيع",
-      "#luxuryapartment",
-      "#jeddahapartments",
-      "#apartmentforsale",
-      "#السلامة",
-      "#alsalamah",
-      "#bona"
-    ],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-12-bd8233.jpeg",
-    "images": [
-      "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-12-bd8233.jpeg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-2-48e9e9.jpeg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-18-926465.jpeg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-26-20cb3e.jpeg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-21-06e049.jpeg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-30-d9a124.jpeg"
-    ],
-    "alt": {
-      "en": "Rooftop pool — Dari Q Apartments, Al Salamah",
-      "ar": "مسبح السطح — شقق داري كيو، السلامة"
-    },
-    "listingId": "BONA-043",
-    "url": "https://bona-real-estate.com/properties/dari-q-al-salamah/",
-    "adLicenceRequired": true,
-    "status": "planned"
-  },
-  {
-    "date": "2026-09-20",
+    "id": "ig-2026-09-23-story-owners-3-things-we-need-to-start-marketing-your",
+    "date": "2026-09-23",
+    "time": "17:15",
     "platform": "instagram",
     "format": "story",
     "pillar": "listings",
@@ -1249,7 +1279,263 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-21",
+    "id": "ig-2026-09-23-post-saudi-national-day-96",
+    "date": "2026-09-23",
+    "time": "20:30",
+    "platform": "instagram",
+    "format": "post",
+    "pillar": "behind the house",
+    "topic": {
+      "en": "Saudi National Day 96",
+      "ar": "اليوم الوطني السعودي 96"
+    },
+    "caption": {
+      "en": "Ninety-six years of a home called Saudi Arabia.\n\nFrom all of us at Bona — happy National Day. The office is closed today; we're back Thursday.\n\n#اليوم_الوطني_96 #هي_لنا_دار",
+      "ar": "ستة وتسعون عاماً لوطنٍ اسمه السعودية.\n\nمن جميعنا في بونا — كل عام ووطننا بخير. المكتب مغلق اليوم؛ ونعود الخميس.\n\n#اليوم_الوطني_96 #هي_لنا_دار"
+    },
+    "hashtags": [
+      "#اليوم_الوطني",
+      "#اليوم_الوطني_السعودي_96",
+      "#هي_لنا_دار",
+      "#SaudiNationalDay",
+      "#KSA96",
+      "#بونا",
+      "#جدة",
+      "#السعودية",
+      "#bona",
+      "#jeddah",
+      "#saudiarabia"
+    ],
+    "image": "https://bona-real-estate.com/og-default.png",
+    "alt": {
+      "en": "Bona wordmark on ivory",
+      "ar": "شعار بونا على خلفية عاجية"
+    },
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-24-story-poll-creek-corniche-or-private-beach",
+    "date": "2026-09-24",
+    "time": "17:15",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "listings",
+    "topic": {
+      "en": "Poll: creek, Corniche or private beach?",
+      "ar": "استطلاع: الخور أم الكورنيش أم الشاطئ الخاص؟"
+    },
+    "caption": {
+      "en": "Poll: creek, Corniche or private beach?",
+      "ar": "استطلاع: الخور أم الكورنيش أم الشاطئ الخاص؟"
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776158984069-652361.jpg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-24-reel-al-zahra-residences",
+    "date": "2026-09-24",
+    "time": "20:30",
+    "platform": "instagram",
+    "format": "reel",
+    "pillar": "listings",
+    "topic": {
+      "en": "Al Zahra Residences",
+      "ar": "شقق الزهراء"
+    },
+    "caption": {
+      "en": "Now available through Bona.\nAl Zahra Residences\nAl Zahra, Jeddah\n3 bedrooms · 200 m²\n\nA new low-density building of nine residences in Al Zahra, between King Road and Prince Sultan Street, with two apartments per floor over five floors. The standard residence measures 200 square metres and holds three master bedrooms, a large lounge, an open kitchen, a maid's room with bathroom and a balcony.\nTwo apartments per floor · Three master bedrooms in 200 sqm · 400 sqm rooftop residence with terrace · Private parking for each unit\n\nFrom SAR 1,450,000\nRef. BONA-015 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
+      "ar": "متاح الآن عبر بونا.\nشقق الزهراء\nالزهراء، جدة\n3 غرف نوم · 200 م²\n\nمبنى جديد منخفض الكثافة من تسعة مساكن في حي الزهراء، بين طريق الملك وشارع الأمير سلطان، بشقتين في كل طابق على خمسة طوابق. تبلغ مساحة الشقة القياسية 200 متر مربع وتضم ثلاث غرف نوم رئيسية وصالة واسعة ومطبخاً مفتوحاً وغرفة خادمة بحمام وشرفة.\nشقتان في كل طابق · ثلاث غرف نوم رئيسية في 200 متر مربع · مسكن سطح بمساحة 400 متر مربع مع تراس · موقف خاص لكل وحدة\n\nابتداءً من 1,450,000 ر.س\nالمرجع BONA-015 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
+    },
+    "hashtags": [
+      "#بونا",
+      "#عقارات_جدة",
+      "#جدة",
+      "#عقارات_السعودية",
+      "#jeddahrealestate",
+      "#luxuryrealestate",
+      "#شقق_جدة",
+      "#شقق_فاخرة_جدة",
+      "#شقق_للبيع",
+      "#luxuryapartment",
+      "#jeddahapartments",
+      "#apartmentforsale",
+      "#الزهراء",
+      "#alzahra",
+      "#bona"
+    ],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-25-3d6349.jpg",
+    "images": [
+      "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-25-3d6349.jpg"
+    ],
+    "alt": {
+      "en": "Façade at night — Al Zahra Residences",
+      "ar": "الواجهة ليلاً — شقق الزهراء"
+    },
+    "listingId": "BONA-015",
+    "url": "https://bona-real-estate.com/properties/al-zahra-residences/",
+    "adLicenceRequired": true,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-25-story-national-day-eve-the-flag-on-a-jeddah-balcony",
+    "date": "2026-09-25",
+    "time": "17:15",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "behind the house",
+    "topic": {
+      "en": "National Day eve: the flag on a Jeddah balcony.",
+      "ar": "ليلة اليوم الوطني: العلم على شرفة في جدة."
+    },
+    "caption": {
+      "en": "National Day eve: the flag on a Jeddah balcony.",
+      "ar": "ليلة اليوم الوطني: العلم على شرفة في جدة."
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-26-story-national-day-office-closed-back-thursday",
+    "date": "2026-09-26",
+    "time": "17:15",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "behind the house",
+    "topic": {
+      "en": "National Day — office closed. Back Thursday.",
+      "ar": "اليوم الوطني — المكتب مغلق. نعود الخميس."
+    },
+    "caption": {
+      "en": "National Day — office closed. Back Thursday.",
+      "ar": "اليوم الوطني — المكتب مغلق. نعود الخميس."
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-46-1bc2ec.jpg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-26-story-3d-tour-story-al-zahra-residences",
+    "date": "2026-09-26",
+    "time": "21:05",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "listings",
+    "topic": {
+      "en": "3D tour story — Al Zahra Residences",
+      "ar": "قصة جولة ثلاثية الأبعاد — شقق الزهراء"
+    },
+    "caption": {
+      "en": "Poll: have you tried a 3D tour yet? Yes / Show me one",
+      "ar": "استطلاع: جرّبت جولة ثلاثية الأبعاد من قبل؟ نعم / أرِني واحدة"
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg",
+    "listingId": "BONA-015",
+    "url": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
+    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-27-story-back-in-the-office-new-ref-added-ask",
+    "date": "2026-09-27",
+    "time": "17:15",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "listings",
+    "topic": {
+      "en": "Back in the office. New ref added — ask.",
+      "ar": "عدنا إلى المكتب. مرجع جديد أُضيف — اسأل."
+    },
+    "caption": {
+      "en": "Back in the office. New ref added — ask.",
+      "ar": "عدنا إلى المكتب. مرجع جديد أُضيف — اسأل."
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-27-carousel-nobal-five-al-rawdah",
+    "date": "2026-09-27",
+    "time": "20:30",
+    "platform": "instagram",
+    "format": "carousel",
+    "pillar": "listings",
+    "topic": {
+      "en": "NOBAL Five, Al Rawdah",
+      "ar": "نوبال 5، الروضة"
+    },
+    "caption": {
+      "en": "By private appointment.\nNOBAL Five, Al Rawdah\nAl Rawdah, Jeddah\n3 bedrooms · 5 bathrooms · 307 m²\n\nNOBAL Five is a building of five residences in Al Rawdah, one apartment per floor, each occupying its entire level with a private elevator. The apartment measures 307 square metres and holds three master bedrooms, five bathrooms, a maid's room, a large living room and a modern kitchen.\nOne residence per floor · Private elevator · 307 sqm, three master bedrooms · Two private parking spaces\n\nSAR 1,800,000\nRef. BONA-014 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
+      "ar": "المعاينة بموعد خاص.\nنوبال 5، الروضة\nالروضة، جدة\n3 غرف نوم · 5 دورات مياه · 307 م²\n\nنوبال 5 مبنى من خمسة مساكن في حي الروضة، شقة واحدة في كل طابق تشغل مستواها بالكامل بمصعد خاص. تبلغ مساحة الشقة 307 أمتار مربعة وتضم ثلاث غرف نوم رئيسية وخمس دورات مياه وغرفة خادمة وصالة واسعة ومطبخاً حديثاً.\nمسكن واحد في كل طابق · مصعد خاص · 307 أمتار مربعة وثلاث غرف نوم رئيسية · موقفان خاصان\n\n1,800,000 ر.س\nالمرجع BONA-014 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
+    },
+    "hashtags": [
+      "#بونا",
+      "#عقارات_جدة",
+      "#جدة",
+      "#عقارات_السعودية",
+      "#jeddahrealestate",
+      "#luxuryrealestate",
+      "#شقق_جدة",
+      "#شقق_فاخرة_جدة",
+      "#شقق_للبيع",
+      "#luxuryapartment",
+      "#jeddahapartments",
+      "#apartmentforsale",
+      "#الروضة",
+      "#alrawdah",
+      "#bona"
+    ],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/al_rawdah_-_apartment_5-648780.jpg",
+    "images": [
+      "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/al_rawdah_-_apartment_5-648780.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/8y00u361s6sg9wdlbmw3_al_rawdah_-_apartment_5_1_.v2.0000000-56f287.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk2-10-1d4ca5.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk-70808e63-01c7cf.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk2-13-161b23.jpg",
+      "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk-2-3a1acb9f-164e4e.jpg"
+    ],
+    "alt": {
+      "en": "Façade at night — NOBAL Five, Al Rawdah",
+      "ar": "الواجهة ليلاً — نوبال 5، الروضة"
+    },
+    "listingId": "BONA-014",
+    "url": "https://bona-real-estate.com/properties/nobal-five-al-rawdah/",
+    "adLicenceRequired": true,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-28-story-weekend-a-kitchen-nobody-has-cooked-in-yet-off-p",
+    "date": "2026-09-28",
+    "time": "17:15",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "listings",
+    "topic": {
+      "en": "Weekend: a kitchen nobody has cooked in yet (off-plan handover).",
+      "ar": "نهاية الأسبوع: مطبخ لم يطبخ فيه أحد بعد (تسليم على الخارطة)."
+    },
+    "caption": {
+      "en": "Weekend: a kitchen nobody has cooked in yet (off-plan handover).",
+      "ar": "نهاية الأسبوع: مطبخ لم يطبخ فيه أحد بعد (تسليم على الخارطة)."
+    },
+    "hashtags": [],
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-47-f7e11d.jpg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-09-28-carousel-district-guide-al-shati",
+    "date": "2026-09-28",
+    "time": "20:30",
     "platform": "instagram",
     "format": "carousel",
     "pillar": "Jeddah district guides",
@@ -1297,25 +1583,29 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-21",
+    "id": "ig-2026-09-29-story-weekend-the-light-in-the-stairwell",
+    "date": "2026-09-29",
+    "time": "17:15",
     "platform": "instagram",
     "format": "story",
     "pillar": "listings",
     "topic": {
-      "en": "Poll: creek, Corniche or private beach?",
-      "ar": "استطلاع: الخور أم الكورنيش أم الشاطئ الخاص؟"
+      "en": "Weekend: the light in the stairwell.",
+      "ar": "نهاية الأسبوع: الضوء في بئر الدرج."
     },
     "caption": {
-      "en": "Poll: creek, Corniche or private beach?",
-      "ar": "استطلاع: الخور أم الكورنيش أم الشاطئ الخاص؟"
+      "en": "Weekend: the light in the stairwell.",
+      "ar": "نهاية الأسبوع: الضوء في بئر الدرج."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776158984069-652361.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-63-3dfc0b.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   },
   {
-    "date": "2026-09-22",
+    "id": "ig-2026-09-29-carousel-off-plan-6-things-to-check-before-you-reserve",
+    "date": "2026-09-29",
+    "time": "20:30",
     "platform": "instagram",
     "format": "carousel",
     "pillar": "buyer/seller education",
@@ -1359,108 +1649,105 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-22",
+    "id": "ig-2026-09-30-story-question-box-ask-us-anything-about-buying-in-jed",
+    "date": "2026-09-30",
+    "time": "17:15",
     "platform": "instagram",
     "format": "story",
     "pillar": "listings",
     "topic": {
-      "en": "National Day eve: the flag on a Jeddah balcony.",
-      "ar": "ليلة اليوم الوطني: العلم على شرفة في جدة."
+      "en": "Question box: ask us anything about buying in Jeddah. We answer in stories tomorrow.",
+      "ar": "صندوق الأسئلة: اسألنا أي شيء عن الشراء في جدة. نجيب في القصص غداً."
     },
     "caption": {
-      "en": "National Day eve: the flag on a Jeddah balcony.",
-      "ar": "ليلة اليوم الوطني: العلم على شرفة في جدة."
+      "en": "Question box: ask us anything about buying in Jeddah. We answer in stories tomorrow.",
+      "ar": "صندوق الأسئلة: اسألنا أي شيء عن الشراء في جدة. نجيب في القصص غداً."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-38-e33ac8.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   },
   {
-    "date": "2026-09-23",
+    "id": "ig-2026-09-30-reel-behind-the-house-shoot-day",
+    "date": "2026-09-30",
+    "time": "20:30",
     "platform": "instagram",
-    "format": "post",
+    "format": "reel",
     "pillar": "behind the house",
     "topic": {
-      "en": "Saudi National Day 96",
-      "ar": "اليوم الوطني السعودي 96"
+      "en": "Behind the house — shoot day",
+      "ar": "خلف الكواليس — يوم التصوير"
     },
     "caption": {
-      "en": "Ninety-six years of a home called Saudi Arabia.\n\nFrom all of us at Bona — happy National Day. The office is closed today; we're back Thursday.\n\n#اليوم_الوطني_96 #هي_لنا_دار",
-      "ar": "ستة وتسعون عاماً لوطنٍ اسمه السعودية.\n\nمن جميعنا في بونا — كل عام ووطننا بخير. المكتب مغلق اليوم؛ ونعود الخميس.\n\n#اليوم_الوطني_96 #هي_لنا_دار"
+      "en": "Behind the house.\n\nA shoot day starts at 6:40 — the only hour the light in a Jeddah garden is soft. We open every curtain, move the cars, and photograph the rooms in the order a buyer walks them. No wide-angle tricks; what you see is the room.\n\nThe result goes to owners first, then to the grid. WhatsApp +966 59 329 6933.",
+      "ar": "خلف الكواليس.\n\nيوم التصوير يبدأ في 6:40 — الساعة الوحيدة التي يكون فيها الضوء في حديقة جدة ناعماً. نفتح كل الستائر، ونحرّك السيارات، ونصوّر الغرف بالترتيب الذي يمشيه المشتري. لا حيل بالعدسات الواسعة؛ ما تراه هو الغرفة.\n\nالنتيجة تذهب إلى المُلّاك أولاً، ثم إلى الصفحة. واتساب +966 59 329 6933."
     },
     "hashtags": [
-      "#اليوم_الوطني",
-      "#اليوم_الوطني_السعودي_96",
-      "#هي_لنا_دار",
-      "#SaudiNationalDay",
-      "#KSA96",
       "#بونا",
+      "#عقارات_جدة",
       "#جدة",
-      "#السعودية",
-      "#bona",
-      "#jeddah",
-      "#saudiarabia"
+      "#عقارات_السعودية",
+      "#jeddahrealestate",
+      "#luxuryrealestate",
+      "#منازل_استثنائية",
+      "#quietluxury",
+      "#luxuryinteriors",
+      "#architecture",
+      "#jeddahlife",
+      "#saudiluxury",
+      "#عمارة",
+      "#behindthescenes",
+      "#realestatephotography",
+      "#bona"
     ],
-    "image": "https://bona-real-estate.com/og-default.png",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/painite-villas-by-lamborghini/painite_villa_-_ext-d633be.jpg",
+    "images": [
+      "https://tk-storage.azoz.uk/tk-estate-media/media/painite-villas-by-lamborghini/painite_villa_-_ext-d633be.jpg"
+    ],
     "alt": {
-      "en": "Bona wordmark on ivory",
-      "ar": "شعار بونا على خلفية عاجية"
+      "en": "Room interior in a Bona listing",
+      "ar": "غرفة داخلية في أحد عقارات بونا"
     },
+    "listingId": null,
+    "url": "https://bona-real-estate.com/",
     "adLicenceRequired": false,
     "status": "planned"
   },
   {
-    "date": "2026-09-23",
+    "id": "ig-2026-10-01-story-answers-to-your-questions-part-1",
+    "date": "2026-10-01",
+    "time": "17:15",
     "platform": "instagram",
     "format": "story",
     "pillar": "listings",
     "topic": {
-      "en": "National Day — office closed. Back Thursday.",
-      "ar": "اليوم الوطني — المكتب مغلق. نعود الخميس."
+      "en": "Answers to your questions (part 1).",
+      "ar": "إجابات أسئلتكم (الجزء الأول)."
     },
     "caption": {
-      "en": "National Day — office closed. Back Thursday.",
-      "ar": "اليوم الوطني — المكتب مغلق. نعود الخميس."
+      "en": "Answers to your questions (part 1).",
+      "ar": "إجابات أسئلتكم (الجزء الأول)."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-46-1bc2ec.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-4-cc60535e-95d3df.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   },
   {
-    "date": "2026-09-23",
-    "platform": "instagram",
-    "format": "story",
-    "pillar": "listings",
-    "topic": {
-      "en": "3D tour story — Al Zahra Residences",
-      "ar": "قصة جولة ثلاثية الأبعاد — شقق الزهراء"
-    },
-    "caption": {
-      "en": "Poll: have you tried a 3D tour yet? Yes / Show me one",
-      "ar": "استطلاع: جرّبت جولة ثلاثية الأبعاد من قبل؟ نعم / أرِني واحدة"
-    },
-    "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg",
-    "listingId": "BONA-015",
-    "url": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
-    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-09-24",
+    "id": "ig-2026-10-01-reel-kayan-residence-136-sqm-apartment-al-nahda",
+    "date": "2026-10-01",
+    "time": "20:30",
     "platform": "instagram",
     "format": "reel",
     "pillar": "listings",
     "topic": {
-      "en": "Al Zahra Residences",
-      "ar": "شقق الزهراء"
+      "en": "Kayan Residence, 136 sqm Apartment, Al Nahda",
+      "ar": "كيان ريزيدنس، شقة 136 م²، النهضة"
     },
     "caption": {
-      "en": "Now available through Bona.\nAl Zahra Residences\nAl Zahra, Jeddah\n3 bedrooms · 200 m²\n\nA new low-density building of nine residences in Al Zahra, between King Road and Prince Sultan Street, with two apartments per floor over five floors. The standard residence measures 200 square metres and holds three master bedrooms, a large lounge, an open kitchen, a maid's room with bathroom and a balcony.\nTwo apartments per floor · Three master bedrooms in 200 sqm · 400 sqm rooftop residence with terrace · Private parking for each unit\n\nFrom SAR 1,450,000\nRef. BONA-015 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
-      "ar": "متاح الآن عبر بونا.\nشقق الزهراء\nالزهراء، جدة\n3 غرف نوم · 200 م²\n\nمبنى جديد منخفض الكثافة من تسعة مساكن في حي الزهراء، بين طريق الملك وشارع الأمير سلطان، بشقتين في كل طابق على خمسة طوابق. تبلغ مساحة الشقة القياسية 200 متر مربع وتضم ثلاث غرف نوم رئيسية وصالة واسعة ومطبخاً مفتوحاً وغرفة خادمة بحمام وشرفة.\nشقتان في كل طابق · ثلاث غرف نوم رئيسية في 200 متر مربع · مسكن سطح بمساحة 400 متر مربع مع تراس · موقف خاص لكل وحدة\n\nابتداءً من 1,450,000 ر.س\nالمرجع BONA-015 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
+      "en": "Off the portals, on our list.\nKayan Residence, 136 sqm Apartment, Al Nahda\nAl Nahda, Jeddah\n2 bedrooms · 3 bathrooms · 136 m²\n\nA four-room apartment of 136 square metres in Kayan Residence, Al Nahda, a short distance from the Jeddah waterfront. The plan holds two bedrooms, three bathrooms, a large living room and a modern kitchen, and each apartment is served by its own private elevator.\n136 sqm, two bedrooms and three bathrooms · Private elevator to the apartment · Completed 2024 · Hotel-style building with coffee shop and gym\n\nSAR 990,000\nRef. BONA-033 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
+      "ar": "خارج المنصات، ضمن قائمتنا.\nكيان ريزيدنس، شقة 136 م²، النهضة\nالنهضة، جدة\n2 غرف نوم · 3 دورات مياه · 136 م²\n\nشقة من أربع غرف بمساحة 136 متراً مربعاً في كيان ريزيدنس بحي النهضة، على مسافة قصيرة من الواجهة البحرية لجدة. يضم المخطط غرفتي نوم وثلاث دورات مياه وصالة واسعة ومطبخاً حديثاً، ويخدم كل شقة مصعد خاص بها.\n136 متراً مربعاً، غرفتا نوم وثلاث دورات مياه · مصعد خاص للشقة · اكتمل البناء عام 2024 · مبنى بأسلوب فندقي مع مقهى ونادٍ رياضي\n\n990,000 ر.س\nالمرجع BONA-033 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
     },
     "hashtags": [
       "#بونا",
@@ -1475,79 +1762,110 @@
       "#luxuryapartment",
       "#jeddahapartments",
       "#apartmentforsale",
-      "#الزهراء",
-      "#alzahra",
+      "#النهضة",
+      "#alnahdah",
       "#bona"
     ],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-25-3d6349.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/uwq4bakpspm7gkozgcli_video_project_25_1_1_.v2.0000000-0ee6d0.jpg",
     "images": [
-      "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-25-3d6349.jpg"
+      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/uwq4bakpspm7gkozgcli_video_project_25_1_1_.v2.0000000-0ee6d0.jpg"
     ],
     "alt": {
-      "en": "Façade at night — Al Zahra Residences",
-      "ar": "الواجهة ليلاً — شقق الزهراء"
+      "en": "Illustrative — developer's finished unit at Kayan Residence, Al Nahda: Exterior — Kayan Residence, 136 sqm Apartment, Al Nahda",
+      "ar": "صورة توضيحية — وحدة منجزة من المطوّر في كيان ريزيدنس، النهضة: الواجهة الخارجية — كيان ريزيدنس، شقة 136 م²، النهضة"
     },
-    "listingId": "BONA-015",
-    "url": "https://bona-real-estate.com/properties/al-zahra-residences/",
+    "listingId": "BONA-033",
+    "url": "https://bona-real-estate.com/properties/kayan-residence-al-nahda-unit-128a/",
     "adLicenceRequired": true,
     "status": "planned"
   },
   {
-    "date": "2026-09-24",
+    "id": "ig-2026-10-01-story-3d-tour-story-al-zahra-residences",
+    "date": "2026-10-01",
+    "time": "21:05",
     "platform": "instagram",
     "format": "story",
     "pillar": "listings",
     "topic": {
-      "en": "Back in the office. New ref added — ask.",
-      "ar": "عدنا إلى المكتب. مرجع جديد أُضيف — اسأل."
+      "en": "3D tour story — Al Zahra Residences",
+      "ar": "قصة جولة ثلاثية الأبعاد — شقق الزهراء"
     },
     "caption": {
-      "en": "Back in the office. New ref added — ask.",
-      "ar": "عدنا إلى المكتب. مرجع جديد أُضيف — اسأل."
+      "en": "Measure it yourself — the 3D tour has a measuring tool. Al Zahra Residences, ref. BONA-015.",
+      "ar": "قِسها بنفسك — الجولة ثلاثية الأبعاد فيها أداة قياس. شقق الزهراء، المرجع BONA-015."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg",
+    "listingId": "BONA-015",
+    "url": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
+    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
     "adLicenceRequired": false,
     "status": "planned"
   },
   {
-    "date": "2026-09-25",
+    "id": "ig-2026-10-02-story-answers-to-your-questions-part-2",
+    "date": "2026-10-02",
+    "time": "17:15",
     "platform": "instagram",
     "format": "story",
     "pillar": "behind the house",
     "topic": {
-      "en": "Weekend: a kitchen nobody has cooked in yet (off-plan handover).",
-      "ar": "نهاية الأسبوع: مطبخ لم يطبخ فيه أحد بعد (تسليم على الخارطة)."
+      "en": "Answers to your questions (part 2).",
+      "ar": "إجابات أسئلتكم (الجزء الثاني)."
     },
     "caption": {
-      "en": "Weekend: a kitchen nobody has cooked in yet (off-plan handover).",
-      "ar": "نهاية الأسبوع: مطبخ لم يطبخ فيه أحد بعد (تسليم على الخارطة)."
+      "en": "Answers to your questions (part 2).",
+      "ar": "إجابات أسئلتكم (الجزء الثاني)."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-47-f7e11d.jpg",
+    "image": "/listings/darco-prime-waterfront-al-shati/01.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   },
   {
-    "date": "2026-09-26",
+    "id": "ig-2026-10-03-story-under-offer-one-of-the-launch-homes-ref-hidden-8",
+    "date": "2026-10-03",
+    "time": "17:15",
     "platform": "instagram",
     "format": "story",
     "pillar": "behind the house",
     "topic": {
-      "en": "Weekend: the light in the stairwell.",
-      "ar": "نهاية الأسبوع: الضوء في بئر الدرج."
+      "en": "Under offer: one of the launch homes. Ref hidden; 8 remain.",
+      "ar": "قيد التفاوض: أحد منازل الإطلاق. المرجع محجوب؛ يبقى 8."
     },
     "caption": {
-      "en": "Weekend: the light in the stairwell.",
-      "ar": "نهاية الأسبوع: الضوء في بئر الدرج."
+      "en": "Under offer: one of the launch homes. Ref hidden; 8 remain.",
+      "ar": "قيد التفاوض: أحد منازل الإطلاق. المرجع محجوب؛ يبقى 8."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-63-3dfc0b.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/marriott-residences-aida-oman/marriott_ext_03-90134f.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   },
   {
-    "date": "2026-09-27",
+    "id": "ig-2026-10-04-story-weekend-the-sea-from-a-durrat-al-arous-terrace",
+    "date": "2026-10-04",
+    "time": "17:15",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "listings",
+    "topic": {
+      "en": "Weekend: the sea from a Durrat Al Arous terrace.",
+      "ar": "نهاية الأسبوع: البحر من شرفة في درة العروس."
+    },
+    "caption": {
+      "en": "Weekend: the sea from a Durrat Al Arous terrace.",
+      "ar": "نهاية الأسبوع: البحر من شرفة في درة العروس."
+    },
+    "hashtags": [],
+    "image": "/listings/elvira-murjan-townhouses-in-al-murjan/01.jpg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-10-04-carousel-inside-kian-al-masiah-building-113-al-nuzhah-the",
+    "date": "2026-10-04",
+    "time": "20:30",
     "platform": "instagram",
     "format": "carousel",
     "pillar": "listings",
@@ -1601,25 +1919,29 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-27",
+    "id": "ig-2026-10-05-story-weekend-a-majlis-set-for-twelve",
+    "date": "2026-10-05",
+    "time": "17:15",
     "platform": "instagram",
     "format": "story",
     "pillar": "listings",
     "topic": {
-      "en": "Question box: ask us anything about buying in Jeddah. We answer in stories tomorrow.",
-      "ar": "صندوق الأسئلة: اسألنا أي شيء عن الشراء في جدة. نجيب في القصص غداً."
+      "en": "Weekend: a majlis set for twelve.",
+      "ar": "نهاية الأسبوع: مجلس مهيّأ لاثني عشر ضيفاً."
     },
     "caption": {
-      "en": "Question box: ask us anything about buying in Jeddah. We answer in stories tomorrow.",
-      "ar": "صندوق الأسئلة: اسألنا أي شيء عن الشراء في جدة. نجيب في القصص غداً."
+      "en": "Weekend: a majlis set for twelve.",
+      "ar": "نهاية الأسبوع: مجلس مهيّأ لاثني عشر ضيفاً."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-38-e33ac8.jpg",
+    "image": "/listings/knightsbridge-villas-meydan-district-11/01.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   },
   {
-    "date": "2026-09-28",
+    "id": "ig-2026-10-05-carousel-district-guide-al-rawdah-al-zahra-al-salamah",
+    "date": "2026-10-05",
+    "time": "20:30",
     "platform": "instagram",
     "format": "carousel",
     "pillar": "Jeddah district guides",
@@ -1668,46 +1990,29 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-28",
+    "id": "ig-2026-10-06-story-month-one-thank-you-what-you-asked-for-most-nort",
+    "date": "2026-10-06",
+    "time": "17:15",
     "platform": "instagram",
     "format": "story",
     "pillar": "listings",
     "topic": {
-      "en": "Answers to your questions (part 1).",
-      "ar": "إجابات أسئلتكم (الجزء الأول)."
+      "en": "Month one, thank you. What you asked for most: North Obhur villas. Noted.",
+      "ar": "الشهر الأول، شكراً. أكثر ما طلبتموه: فلل أبحر الشمالية. سُجّل."
     },
     "caption": {
-      "en": "Answers to your questions (part 1).",
-      "ar": "إجابات أسئلتكم (الجزء الأول)."
+      "en": "Month one, thank you. What you asked for most: North Obhur villas. Noted.",
+      "ar": "الشهر الأول، شكراً. أكثر ما طلبتموه: فلل أبحر الشمالية. سُجّل."
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-4-cc60535e-95d3df.jpg",
+    "image": "/listings/aseel-al-ghoroub-2-al-madinah/01.jpg",
     "adLicenceRequired": false,
     "status": "planned"
   },
   {
-    "date": "2026-09-28",
-    "platform": "instagram",
-    "format": "story",
-    "pillar": "listings",
-    "topic": {
-      "en": "3D tour story — Al Zahra Residences",
-      "ar": "قصة جولة ثلاثية الأبعاد — شقق الزهراء"
-    },
-    "caption": {
-      "en": "Measure it yourself — the 3D tour has a measuring tool. Al Zahra Residences, ref. BONA-015.",
-      "ar": "قِسها بنفسك — الجولة ثلاثية الأبعاد فيها أداة قياس. شقق الزهراء، المرجع BONA-015."
-    },
-    "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg",
-    "listingId": "BONA-015",
-    "url": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
-    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-09-29",
+    "id": "ig-2026-10-06-carousel-luxury-rentals-ejar-contracts-in-plain-language",
+    "date": "2026-10-06",
+    "time": "20:30",
     "platform": "instagram",
     "format": "carousel",
     "pillar": "buyer/seller education",
@@ -1751,25 +2056,52 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-29",
+    "id": "ig-2026-10-06-story-3d-tour-story-al-zahra-residences",
+    "date": "2026-10-06",
+    "time": "21:05",
     "platform": "instagram",
     "format": "story",
     "pillar": "listings",
     "topic": {
-      "en": "Answers to your questions (part 2).",
-      "ar": "إجابات أسئلتكم (الجزء الثاني)."
+      "en": "3D tour story — Al Zahra Residences",
+      "ar": "قصة جولة ثلاثية الأبعاد — شقق الزهراء"
     },
     "caption": {
-      "en": "Answers to your questions (part 2).",
-      "ar": "إجابات أسئلتكم (الجزء الثاني)."
+      "en": "All our 3D tours in one place → https://bona-real-estate.com/tours/",
+      "ar": "كل جولاتنا ثلاثية الأبعاد في مكان واحد ← https://bona-real-estate.com/tours/"
     },
     "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/marriott-residences-aida-oman/marriott_ext_03-90134f.jpg",
+    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg",
+    "listingId": "BONA-015",
+    "url": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
+    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
     "adLicenceRequired": false,
     "status": "planned"
   },
   {
-    "date": "2026-09-30",
+    "id": "ig-2026-10-07-story-poll-next-district-guide-al-mohammadiyah-or-al-a",
+    "date": "2026-10-07",
+    "time": "17:15",
+    "platform": "instagram",
+    "format": "story",
+    "pillar": "listings",
+    "topic": {
+      "en": "Poll: next district guide — Al Mohammadiyah or Al Andalus?",
+      "ar": "استطلاع: دليل الحي القادم — المحمدية أم الأندلس؟"
+    },
+    "caption": {
+      "en": "Poll: next district guide — Al Mohammadiyah or Al Andalus?",
+      "ar": "استطلاع: دليل الحي القادم — المحمدية أم الأندلس؟"
+    },
+    "hashtags": [],
+    "image": "/listings/modern-villa-in-al-shati-jeddah/01.jpg",
+    "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-10-07-post-villa-or-apartment-in-jeddah-a-lifestyle-compari",
+    "date": "2026-10-07",
+    "time": "20:30",
     "platform": "instagram",
     "format": "post",
     "pillar": "market insight",
@@ -1814,257 +2146,9 @@
     "status": "planned"
   },
   {
-    "date": "2026-09-30",
-    "platform": "instagram",
-    "format": "story",
-    "pillar": "listings",
-    "topic": {
-      "en": "Under offer: one of the launch homes. Ref hidden; 8 remain.",
-      "ar": "قيد التفاوض: أحد منازل الإطلاق. المرجع محجوب؛ يبقى 8."
-    },
-    "caption": {
-      "en": "Under offer: one of the launch homes. Ref hidden; 8 remain.",
-      "ar": "قيد التفاوض: أحد منازل الإطلاق. المرجع محجوب؛ يبقى 8."
-    },
-    "hashtags": [],
-    "image": "/listings/elvira-murjan-townhouses-in-al-murjan/01.jpg",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-10-01",
-    "platform": "instagram",
-    "format": "reel",
-    "pillar": "listings",
-    "topic": {
-      "en": "NOBAL Five, Al Rawdah",
-      "ar": "نوبال 5، الروضة"
-    },
-    "caption": {
-      "en": "By private appointment.\nNOBAL Five, Al Rawdah\nAl Rawdah, Jeddah\n3 bedrooms · 5 bathrooms · 307 m²\n\nNOBAL Five is a building of five residences in Al Rawdah, one apartment per floor, each occupying its entire level with a private elevator. The apartment measures 307 square metres and holds three master bedrooms, five bathrooms, a maid's room, a large living room and a modern kitchen.\nOne residence per floor · Private elevator · 307 sqm, three master bedrooms · Two private parking spaces\n\nSAR 1,800,000\nRef. BONA-014 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
-      "ar": "المعاينة بموعد خاص.\nنوبال 5، الروضة\nالروضة، جدة\n3 غرف نوم · 5 دورات مياه · 307 م²\n\nنوبال 5 مبنى من خمسة مساكن في حي الروضة، شقة واحدة في كل طابق تشغل مستواها بالكامل بمصعد خاص. تبلغ مساحة الشقة 307 أمتار مربعة وتضم ثلاث غرف نوم رئيسية وخمس دورات مياه وغرفة خادمة وصالة واسعة ومطبخاً حديثاً.\nمسكن واحد في كل طابق · مصعد خاص · 307 أمتار مربعة وثلاث غرف نوم رئيسية · موقفان خاصان\n\n1,800,000 ر.س\nالمرجع BONA-014 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
-    },
-    "hashtags": [
-      "#بونا",
-      "#عقارات_جدة",
-      "#جدة",
-      "#عقارات_السعودية",
-      "#jeddahrealestate",
-      "#luxuryrealestate",
-      "#شقق_جدة",
-      "#شقق_فاخرة_جدة",
-      "#شقق_للبيع",
-      "#luxuryapartment",
-      "#jeddahapartments",
-      "#apartmentforsale",
-      "#الروضة",
-      "#alrawdah",
-      "#bona"
-    ],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/al_rawdah_-_apartment_5-648780.jpg",
-    "images": [
-      "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/al_rawdah_-_apartment_5-648780.jpg"
-    ],
-    "alt": {
-      "en": "Façade at night — NOBAL Five, Al Rawdah",
-      "ar": "الواجهة ليلاً — نوبال 5، الروضة"
-    },
-    "listingId": "BONA-014",
-    "url": "https://bona-real-estate.com/properties/nobal-five-al-rawdah/",
-    "adLicenceRequired": true,
-    "status": "planned"
-  },
-  {
-    "date": "2026-10-01",
-    "platform": "instagram",
-    "format": "story",
-    "pillar": "listings",
-    "topic": {
-      "en": "Weekend: the sea from a Durrat Al Arous terrace.",
-      "ar": "نهاية الأسبوع: البحر من شرفة في درة العروس."
-    },
-    "caption": {
-      "en": "Weekend: the sea from a Durrat Al Arous terrace.",
-      "ar": "نهاية الأسبوع: البحر من شرفة في درة العروس."
-    },
-    "hashtags": [],
-    "image": "/listings/knightsbridge-villas-meydan-district-11/01.jpg",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-10-02",
-    "platform": "instagram",
-    "format": "story",
-    "pillar": "behind the house",
-    "topic": {
-      "en": "Weekend: a majlis set for twelve.",
-      "ar": "نهاية الأسبوع: مجلس مهيّأ لاثني عشر ضيفاً."
-    },
-    "caption": {
-      "en": "Weekend: a majlis set for twelve.",
-      "ar": "نهاية الأسبوع: مجلس مهيّأ لاثني عشر ضيفاً."
-    },
-    "hashtags": [],
-    "image": "/listings/aseel-al-ghoroub-2-al-madinah/01.jpg",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-10-03",
-    "platform": "instagram",
-    "format": "story",
-    "pillar": "behind the house",
-    "topic": {
-      "en": "Month one, thank you. What you asked for most: North Obhur villas. Noted.",
-      "ar": "الشهر الأول، شكراً. أكثر ما طلبتموه: فلل أبحر الشمالية. سُجّل."
-    },
-    "caption": {
-      "en": "Month one, thank you. What you asked for most: North Obhur villas. Noted.",
-      "ar": "الشهر الأول، شكراً. أكثر ما طلبتموه: فلل أبحر الشمالية. سُجّل."
-    },
-    "hashtags": [],
-    "image": "/listings/darco-prime-waterfront-al-shati/01.jpg",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-10-03",
-    "platform": "instagram",
-    "format": "story",
-    "pillar": "listings",
-    "topic": {
-      "en": "3D tour story — Al Zahra Residences",
-      "ar": "قصة جولة ثلاثية الأبعاد — شقق الزهراء"
-    },
-    "caption": {
-      "en": "All our 3D tours in one place → https://bona-real-estate.com/tours/",
-      "ar": "كل جولاتنا ثلاثية الأبعاد في مكان واحد ← https://bona-real-estate.com/tours/"
-    },
-    "hashtags": [],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg",
-    "listingId": "BONA-015",
-    "url": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
-    "tourUrl": "https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-10-04",
-    "platform": "instagram",
-    "format": "carousel",
-    "pillar": "listings",
-    "topic": {
-      "en": "Kayan Residence, 136 sqm Apartment, Al Nahda",
-      "ar": "كيان ريزيدنس، شقة 136 م²، النهضة"
-    },
-    "caption": {
-      "en": "Off the portals, on our list.\nKayan Residence, 136 sqm Apartment, Al Nahda\nAl Nahda, Jeddah\n2 bedrooms · 3 bathrooms · 136 m²\n\nA four-room apartment of 136 square metres in Kayan Residence, Al Nahda, a short distance from the Jeddah waterfront. The plan holds two bedrooms, three bathrooms, a large living room and a modern kitchen, and each apartment is served by its own private elevator.\n136 sqm, two bedrooms and three bathrooms · Private elevator to the apartment · Completed 2024 · Hotel-style building with coffee shop and gym\n\nSAR 990,000\nRef. BONA-033 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
-      "ar": "خارج المنصات، ضمن قائمتنا.\nكيان ريزيدنس، شقة 136 م²، النهضة\nالنهضة، جدة\n2 غرف نوم · 3 دورات مياه · 136 م²\n\nشقة من أربع غرف بمساحة 136 متراً مربعاً في كيان ريزيدنس بحي النهضة، على مسافة قصيرة من الواجهة البحرية لجدة. يضم المخطط غرفتي نوم وثلاث دورات مياه وصالة واسعة ومطبخاً حديثاً، ويخدم كل شقة مصعد خاص بها.\n136 متراً مربعاً، غرفتا نوم وثلاث دورات مياه · مصعد خاص للشقة · اكتمل البناء عام 2024 · مبنى بأسلوب فندقي مع مقهى ونادٍ رياضي\n\n990,000 ر.س\nالمرجع BONA-033 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
-    },
-    "hashtags": [
-      "#بونا",
-      "#عقارات_جدة",
-      "#جدة",
-      "#عقارات_السعودية",
-      "#jeddahrealestate",
-      "#luxuryrealestate",
-      "#شقق_جدة",
-      "#شقق_فاخرة_جدة",
-      "#شقق_للبيع",
-      "#luxuryapartment",
-      "#jeddahapartments",
-      "#apartmentforsale",
-      "#النهضة",
-      "#alnahdah",
-      "#bona"
-    ],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/uwq4bakpspm7gkozgcli_video_project_25_1_1_.v2.0000000-0ee6d0.jpg",
-    "images": [
-      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/uwq4bakpspm7gkozgcli_video_project_25_1_1_.v2.0000000-0ee6d0.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-52-1c9679.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-19-cfd1be.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-36-e5e9aa.jpg"
-    ],
-    "alt": {
-      "en": "Illustrative — developer's finished unit at Kayan Residence, Al Nahda: Exterior — Kayan Residence, 136 sqm Apartment, Al Nahda",
-      "ar": "صورة توضيحية — وحدة منجزة من المطوّر في كيان ريزيدنس، النهضة: الواجهة الخارجية — كيان ريزيدنس، شقة 136 م²، النهضة"
-    },
-    "listingId": "BONA-033",
-    "url": "https://bona-real-estate.com/properties/kayan-residence-al-nahda-unit-128a/",
-    "adLicenceRequired": true,
-    "status": "planned"
-  },
-  {
-    "date": "2026-10-04",
-    "platform": "instagram",
-    "format": "story",
-    "pillar": "listings",
-    "topic": {
-      "en": "Poll: next district guide — Al Mohammadiyah or Al Andalus?",
-      "ar": "استطلاع: دليل الحي القادم — المحمدية أم الأندلس؟"
-    },
-    "caption": {
-      "en": "Poll: next district guide — Al Mohammadiyah or Al Andalus?",
-      "ar": "استطلاع: دليل الحي القادم — المحمدية أم الأندلس؟"
-    },
-    "hashtags": [],
-    "image": "/listings/modern-villa-in-al-shati-jeddah/01.jpg",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-10-05",
-    "platform": "instagram",
-    "format": "carousel",
-    "pillar": "Jeddah district guides",
-    "topic": {
-      "en": "District guide — Durrat Al Arous",
-      "ar": "دليل الحي — درة العروس"
-    },
-    "caption": {
-      "en": "Durrat Al Arous, in five lines.\n\n1. A gated resort community 60 km north of Jeddah with private beaches, marinas and a golf course.\n2. Villas sit directly on the sand or on the lagoons — this is the \"private beach\" address in the Jeddah market.\n3. Weekend house for most owners; a handful live there year-round.\n4. Who buys here: families who want a second home an hour from the city, and buyers who want the beach without the resort crowd.\n5. What to check: community fees, beach-frontage rights on the plan, and the renovation age of the villa (salt air is unforgiving).\n\nA private-beach villa is quietly available. WhatsApp +966 59 329 6933.",
-      "ar": "درة العروس، في خمسة أسطر.\n\n1. مجتمع منتجعي مسوّر على بعد 60 كم شمال جدة بشواطئ خاصة ومراسٍ وملعب غولف.\n2. الفلل تقع مباشرة على الرمل أو على البحيرات — هذا هو عنوان «الشاطئ الخاص» في سوق جدة.\n3. بيت نهاية الأسبوع لمعظم المُلّاك؛ وقلّة يقيمون فيه طوال العام.\n4. من يشتري هنا: عائلات تريد منزلاً ثانياً على بعد ساعة من المدينة، ومن يريد الشاطئ دون زحام المنتجعات.\n5. ما يجب التحقق منه: رسوم المجتمع، وحقوق الواجهة الشاطئية في المخطط، وعمر تجديد الفيلا (هواء البحر لا يرحم).\n\nفيلا بشاطئ خاص متاحة بهدوء. واتساب +966 59 329 6933."
-    },
-    "hashtags": [
-      "#بونا",
-      "#عقارات_جدة",
-      "#جدة",
-      "#عقارات_السعودية",
-      "#jeddahrealestate",
-      "#luxuryrealestate",
-      "#درة_العروس",
-      "#durratalarous",
-      "#فلل_على_البحر",
-      "#شاطئ_خاص",
-      "#عقارات_الشاطئ",
-      "#واجهة_بحرية",
-      "#waterfrontliving",
-      "#beachfrontvilla",
-      "#seaview",
-      "#نصائح_عقارية",
-      "#دليل_المشتري",
-      "#bona"
-    ],
-    "image": "https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04852_2_-8b7bbc.jpg",
-    "images": [
-      "https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04852_2_-8b7bbc.jpg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04810-34922b.jpeg",
-      "https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04815-8e4c37de-63c764.jpeg"
-    ],
-    "alt": {
-      "en": "Street and villa in Durrat Al Arous",
-      "ar": "شارع وفيلا في درة العروس"
-    },
-    "listingId": "BONA-001",
-    "url": "https://bona-real-estate.com/properties/",
-    "adLicenceRequired": false,
-    "status": "planned"
-  },
-  {
-    "date": "2026-10-05",
+    "id": "ig-2026-10-08-story-new-week-new-refs-link-in-bio",
+    "date": "2026-10-08",
+    "time": "17:15",
     "platform": "instagram",
     "format": "story",
     "pillar": "listings",
@@ -2079,6 +2163,52 @@
     "hashtags": [],
     "image": "/land/LND-015.jpg",
     "adLicenceRequired": false,
+    "status": "planned"
+  },
+  {
+    "id": "ig-2026-10-08-reel-alhayat-residence-al-salama",
+    "date": "2026-10-08",
+    "time": "20:30",
+    "platform": "instagram",
+    "format": "reel",
+    "pillar": "listings",
+    "topic": {
+      "en": "Alhayat Residence, Al-Salama",
+      "ar": "الحياة ريزيدنس - السلامة"
+    },
+    "caption": {
+      "en": "Alhayat Residence, Al-Salama\nAl-Salama, Jeddah\n4 bedrooms · 4 bathrooms · 180 m²\n\nAlhayat Residence sits in Al-Salama, Jeddah, close to Prince Sultan Street, five minutes from the Corniche and ten minutes from the airport. Arab Open University, Jeddah University and CBA University are all nearby, along with the Al Yamama walkway.\n180 sqm layout · 4 bedrooms, 4 bathrooms · Maid's and driver's rooms · Private covered parking\n\nSAR 950,000\nRef. BONA-W010 — WhatsApp +966 59 329 6933 or the link in bio.\nREGA ad licence: [add number before publishing]",
+      "ar": "الحياة ريزيدنس - السلامة\nالسلامة، جدة\n4 غرف نوم · 4 دورات مياه · 180 م²\n\nتقع الحياة ريزيدنس في حي السلامة بجدة، بالقرب من شارع الأمير سلطان، وتبعد خمس دقائق عن الكورنيش وعشر دقائق عن المطار. كما تقترب من الجامعة العربية المفتوحة وجامعة جدة وجامعة CBA، إضافة إلى ممشى اليمامة.\nمساحة 180 م² · 4 غرف و4 دورات مياه · غرفة خادمة وغرفة سائق · موقف خاص مغطى\n\n950,000 ر.س\nالمرجع BONA-W010 — واتساب +966 59 329 6933 أو الرابط في البايو.\nرقم ترخيص الإعلان العقاري: [يُضاف قبل النشر]"
+    },
+    "hashtags": [
+      "#بونا",
+      "#عقارات_جدة",
+      "#جدة",
+      "#عقارات_السعودية",
+      "#jeddahrealestate",
+      "#luxuryrealestate",
+      "#شقق_جدة",
+      "#شقق_فاخرة_جدة",
+      "#شقق_للبيع",
+      "#luxuryapartment",
+      "#jeddahapartments",
+      "#apartmentforsale",
+      "#عقارات_الشاطئ",
+      "#واجهة_بحرية",
+      "#waterfrontliving",
+      "#bona"
+    ],
+    "image": "/listings/alhayat-residence-al-salama/01.jpg",
+    "images": [
+      "/listings/alhayat-residence-al-salama/01.jpg"
+    ],
+    "alt": {
+      "en": "Exterior — Alhayat Residence, Al-Salama",
+      "ar": "الواجهة الخارجية — الحياة ريزيدنس - السلامة"
+    },
+    "listingId": "BONA-W010",
+    "url": "https://bona-real-estate.com/properties/alhayat-residence-al-salama/",
+    "adLicenceRequired": true,
     "status": "planned"
   }
 ]

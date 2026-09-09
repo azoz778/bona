@@ -5,7 +5,12 @@
      marketing/launch-posts.md        (9 launch-day grid posts, EN+AR, image URLs, alt text, hashtags)
      marketing/captions/*.txt         (ready for scripts/instagram-post.mjs --caption-file)
    Re-run whenever listings.json changes:  node scripts/og/gen-social.mjs
-   Options: --start 2026-09-06   --days 30 */
+   Options: --start 2026-09-09   --days 30      (launch day; the default moved from 09-06 to 09-09 on 2026-09-09
+                                                  because nothing had been posted yet — pass --start to move it again)
+   Every entry carries a stable `id` (launch posts: ig-launch-0N; the rest: ig-<date>-<format>-<topic-slug>) and a
+   `time` in Asia/Riyadh. scripts/social/publish.mjs keys its ledger, marketing/queue/published.jsonl, on that id;
+   this generator reads the ledger back so an entry already published (by the timer or by hand) is written with
+   status "published" instead of "planned". Regenerating never loses that — the ledger is the record, not this file. */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,8 +18,29 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const args = process.argv.slice(2);
 const opt = (n, d) => { const i = args.indexOf(n); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
-const START = opt('--start', '2026-09-06');
+const START = opt('--start', '2026-09-09');
 const DAYS = Number(opt('--days', 30));
+
+// Publish times, Asia/Riyadh. The unattended publisher (scripts/social/publish.mjs) is driven by a
+// timer that runs every 15 min between 17:00 and 23:59 KSA, so every slot sits inside that window.
+// Feed posts go after Isha (the Maghrib–Isha stretch, ~18:15–20:10 in Jeddah this season, is a
+// known attention dip — see scripts/social/README.md); stories take the pre-Maghrib slot. The launch
+// grid is the one documented exception: nine posts 20 minutes apart from 17:30 so the grid fills in
+// order (marketing/launch-posts.md).
+const SLOTS = { launchFirst: '17:30', launchStepMin: 20, feed: '20:30', story: '17:15', launchDayStory: '21:00', tourStory: '21:05' };
+const addMinutes = (hhmm, min) => { const [h, m] = hhmm.split(':').map(Number); const t = h * 60 + m + min; return `${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
+const launchTime = (n) => addMinutes(SLOTS.launchFirst, (n - 1) * SLOTS.launchStepMin);
+const slug = (str) => String(str).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48).replace(/-+$/, '');
+
+// The publisher's ledger. One JSON object per line; the LAST line for an id wins.
+const LEDGER = path.join(root, 'marketing/queue/published.jsonl');
+const ledger = new Map();
+if (fs.existsSync(LEDGER)) {
+  for (const line of fs.readFileSync(LEDGER, 'utf8').split('\n')) {
+    if (!line.trim()) continue;
+    try { const r = JSON.parse(line); if (r && r.id) ledger.set(r.id, r); } catch { /* a corrupt line is the publisher's problem, not the calendar's */ }
+  }
+}
 
 const site = JSON.parse(fs.readFileSync(path.join(root, 'src/data/site.json'), 'utf8'));
 const listings = JSON.parse(fs.readFileSync(path.join(root, 'src/data/listings.json'), 'utf8'));
@@ -284,7 +310,7 @@ function tourStory(date) {
   const l = tourPool[tsi % tourPool.length];
   const st = TOUR_STORIES[tsi % TOUR_STORIES.length];
   tsi++;
-  return { date, platform: 'instagram', format: 'story', pillar: 'listings', topic: { en: `3D tour story — ${t(l.title, 'en')}`, ar: `قصة جولة ثلاثية الأبعاد — ${t(l.title, 'ar')}` }, caption: { en: st.en(l), ar: st.ar(l) }, hashtags: [], image: l.images?.[1]?.src || heroOf(l), listingId: l.id, url: tourOf(l), tourUrl: tourOf(l), adLicenceRequired: false, status: 'planned' };
+  return { date, time: SLOTS.tourStory, platform: 'instagram', format: 'story', pillar: 'listings', topic: { en: `3D tour story — ${t(l.title, 'en')}`, ar: `قصة جولة ثلاثية الأبعاد — ${t(l.title, 'ar')}` }, caption: { en: st.en(l), ar: st.ar(l) }, hashtags: [], image: l.images?.[1]?.src || heroOf(l), listingId: l.id, url: tourOf(l), tourUrl: tourOf(l), adLicenceRequired: false, status: 'planned' };
 }
 function tourCaption(l, lang) {
   const ar = lang === 'ar';
@@ -347,7 +373,7 @@ const launch = [
 const launchItems = launch.map((p, i) => {
   if (p.kind === 'listing' && p.listing) {
     const l = p.listing;
-    return { date: START, platform: 'instagram', format: p.format, pillar: 'listings', launch: p.n, grid: p.grid,
+    return { date: START, time: launchTime(p.n), platform: 'instagram', format: p.format, pillar: 'listings', launch: p.n, grid: p.grid,
       topic: { en: `Launch #${p.n} — ${t(l.title, 'en')}`, ar: `الإطلاق #${p.n} — ${t(l.title, 'ar')}` },
       caption: { en: listingCaption(l, 'en', i), ar: listingCaption(l, 'ar', i) },
       hashtags: tagsFor(l), image: heroOf(l), images: p.format === 'carousel' ? imgs(l, 6) : [heroOf(l)],
@@ -355,7 +381,7 @@ const launchItems = launch.map((p, i) => {
   }
   const b = BRAND[p.kind === 'listing' ? 'welcome' : p.kind];
   const img = p.kind === 'manifesto' ? OG : p.listing ? (p.kind === 'sell' ? (p.listing.images?.[1]?.src || heroOf(p.listing)) : heroOf(p.listing)) : OG;
-  return { date: START, platform: 'instagram', format: p.kind === 'manifesto' ? 'post' : 'post', pillar: p.kind === 'sell' ? 'buyer/seller education' : 'behind the house', launch: p.n, grid: p.grid,
+  return { date: START, time: launchTime(p.n), platform: 'instagram', format: 'post', pillar: p.kind === 'sell' ? 'buyer/seller education' : 'behind the house', launch: p.n, grid: p.grid,
     topic: b.topic, caption: { en: b.en, ar: b.ar }, hashtags: uniq(b.tags).slice(0, 20), image: img, images: [img],
     alt: b.alt, listingId: p.listing?.id ?? null, url: `${base}/${p.kind === 'sell' ? 'sell/' : p.kind === 'districts' ? 'properties/' : ''}`, adLicenceRequired: false, status: 'planned' };
 });
@@ -373,12 +399,12 @@ for (let n = 0; n < DAYS; n++) {
   const w = dow(d);
   // daily story
   const st = STORIES[si++ % STORIES.length];
-  items.push({ date, platform: 'instagram', format: 'story', pillar: w === 5 || w === 6 ? 'behind the house' : 'listings', topic: st, caption: st, hashtags: [], image: (pool[n % Math.max(1, pool.length)] ? heroOf(pool[n % pool.length]) : OG), adLicenceRequired: false, status: 'planned' });
+  items.push({ date, time: n === 0 ? SLOTS.launchDayStory : SLOTS.story, platform: 'instagram', format: 'story', pillar: w === 5 || w === 6 ? 'behind the house' : 'listings', topic: st, caption: st, hashtags: [], image: (pool[n % Math.max(1, pool.length)] ? heroOf(pool[n % pool.length]) : OG), adLicenceRequired: false, status: 'planned' });
   if (n > 0 && n % 5 === 2) { const ts = tourStory(date); if (ts) items.push(ts); } // 3D-tour story every ~5 days
   if (n === 0) continue; // launch day feed = the 9 grid posts
   if (w === 5 || w === 6) continue; // Fri/Sat: stories only
   if (date === '2026-09-23') {
-    items.push({ date, platform: 'instagram', format: 'post', pillar: 'behind the house', topic: NATIONAL_DAY.topic, caption: { en: NATIONAL_DAY.en, ar: NATIONAL_DAY.ar }, hashtags: NATIONAL_DAY.tags, image: OG, alt: { en: 'Bona wordmark on ivory', ar: 'شعار بونا على خلفية عاجية' }, adLicenceRequired: false, status: 'planned' });
+    items.push({ date, time: SLOTS.feed, platform: 'instagram', format: 'post', pillar: 'behind the house', topic: NATIONAL_DAY.topic, caption: { en: NATIONAL_DAY.en, ar: NATIONAL_DAY.ar }, hashtags: NATIONAL_DAY.tags, image: OG, alt: { en: 'Bona wordmark on ivory', ar: 'شعار بونا على خلفية عاجية' }, adLicenceRequired: false, status: 'planned' });
     continue;
   }
   let it;
@@ -407,30 +433,51 @@ for (let n = 0; n < DAYS; n++) {
     const l = pool[(ii + bi + 4) % Math.max(1, pool.length)];
     it = { format: useInsight ? 'post' : 'reel', pillar: useInsight ? 'market insight' : 'behind the house', topic: src.topic, caption: { en: src.en, ar: src.ar }, hashtags: uniq(src.tags).slice(0, 20), image: l ? (l.images?.[1]?.src || heroOf(l)) : OG, images: [l ? (l.images?.[1]?.src || heroOf(l)) : OG], alt: { en: 'Room interior in a Bona listing', ar: 'غرفة داخلية في أحد عقارات بونا' }, listingId: null, url: `${base}/`, adLicenceRequired: false };
   }
-  if (it) items.push({ date, platform: 'instagram', ...it, status: 'planned' });
+  if (it) items.push({ date, time: SLOTS.feed, platform: 'instagram', ...it, status: 'planned' });
 }
 
-// sort: date, then feed posts before stories
+// sort: date, then publish time, then launch order
 const fmtOrder = { post: 0, carousel: 0, reel: 0, story: 1 };
-items.sort((a, b) => a.date.localeCompare(b.date) || (fmtOrder[a.format] - fmtOrder[b.format]) || ((a.launch ?? 99) - (b.launch ?? 99)));
+items.sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time) || ((a.launch ?? 99) - (b.launch ?? 99)) || (fmtOrder[a.format] - fmtOrder[b.format]));
+
+// ids: stable across regenerations with the same --start, so the publisher's ledger keeps meaning.
+// Launch posts are keyed by number, not date, because the grid is one event wherever it lands.
+const seen = new Map();
+const withIds = items.map((it) => {
+  let id = it.launch ? `ig-launch-${String(it.launch).padStart(2, '0')}` : `ig-${it.date}-${it.format}-${slug(it.topic.en)}`;
+  const n = (seen.get(id) || 0) + 1; seen.set(id, n);
+  if (n > 1) id += `-${n}`;
+  const out = { id, ...it };
+  const rec = ledger.get(id);
+  if (rec?.status === 'published') {
+    out.status = 'published';
+    out.publishedAt = rec.ts ?? null;
+    if (rec.manual) out.manual = true;
+    if (rec.permalink) out.permalink = rec.permalink;
+  }
+  return out;
+});
+items.length = 0; items.push(...withIds);
 
 // ---------- outputs ----------
 fs.writeFileSync(path.join(root, 'src/data/content-calendar.json'), JSON.stringify(items, null, 2) + '\n');
 
 const weekday = (s) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(`${s}T00:00:00Z`).getUTCDay()];
 const md = [];
-md.push(`# Content calendar — Instagram @bona.com.sa (${START} → ${iso(addDays(DAYS - 1))})`, '',
+md.push(`# Content calendar — Instagram @${site.instagram?.handle || 'bonarealestatesa'} (${START} → ${iso(addDays(DAYS - 1))})`, '',
   `Generated by \`node scripts/og/gen-social.mjs\` from \`src/data/listings.json\` (${live.length} live listings). Machine-readable twin: \`src/data/content-calendar.json\`.`, '',
-  '**Rhythm**: 5 feed posts/week (Sun–Thu, publish 18:30–20:30 KSA) + 1 story every day (weekends = quiet lifestyle stories only). Launch day = 9-post grid (see `launch-posts.md`).',
+  `**Rhythm**: 5 feed posts/week (Sun–Thu, ${SLOTS.feed} KSA) + 1 story every day (${SLOTS.story} KSA; 3D-tour stories ${SLOTS.tourStory}; weekends = quiet lifestyle stories only). Launch day = 9-post grid from ${SLOTS.launchFirst}, ${SLOTS.launchStepMin} min apart (see \`launch-posts.md\`). All times Asia/Riyadh; \`scripts/social/publish.mjs\` posts feed images, carousels and stories unattended from this file (timer 17:00–23:59 KSA) — reels and REGA-blocked listing posts never go out automatically.`,
   '**Pillars**: listings · Jeddah district guides · market insight (facts only — no price forecasts, no valuations: TAQEEM/REGA rule) · behind the house · buyer/seller education.',
   '**Cultural calendar**: Saudi National Day Wed 23 Sep (brand post, office closed); weekends Fri–Sat; school year already started → relocation season; no Ramadan/Eid in window. Hijri: Rabiʿ I–II 1448.',
   '**Compliance**: every *listing* post needs the REGA ad-licence number in the caption before it goes live (`adLicenceRequired: true` in JSON; placeholder line in captions). Brand/education posts do not.',
   `**3D tours & projects**: listings with a Matterport tour (${tourPool.length} now) get a "3D tour" story every ~5 days (link sticker → the tour; 'tourUrl' in JSON) and a reel on alternate Thursdays (screen-record the walkthrough, 15–30 s, 9:16). Project units (${projects.map((p) => `${p.name}: ${p.units.length}`).join(', ') || 'none yet'}) are grouped into one carousel on alternate Sundays with a unit-by-unit caption ('listingIds' in JSON). Tours hub: ${TOURS_URL}`, '',
-  '| Date | Day | Format | Pillar | Topic (EN) | الموضوع | Image | Ad licence |', '|---|---|---|---|---|---|---|---|');
+  '| Date | Day | Time (KSA) | Format | Pillar | Topic (EN) | الموضوع | Image | Ad licence | Status |', '|---|---|---|---|---|---|---|---|---|---|');
+const statusCell = (it) => it.status === 'published' ? `published${it.manual ? ' by hand' : ''}${it.publishedAt ? ` ${String(it.publishedAt).slice(0, 10)}` : ''}` : it.status;
 for (const it of items) {
-  md.push(`| ${it.date} | ${weekday(it.date)} | ${it.format}${it.launch ? ` (launch #${it.launch})` : ''} | ${it.pillar} | ${it.topic.en} | ${it.topic.ar} | ${it.image ? `[img](${it.image})` : ''} | ${it.adLicenceRequired ? 'required' : '—'} |`);
+  md.push(`| ${it.date} | ${weekday(it.date)} | ${it.time} | ${it.format}${it.launch ? ` (launch #${it.launch})` : ''} | ${it.pillar} | ${it.topic.en} | ${it.topic.ar} | ${it.image ? `[img](${it.image})` : ''} | ${it.adLicenceRequired ? 'required' : '—'} | ${statusCell(it)} |`);
 }
 md.push('', '## Captions', '', 'Feed-post captions (EN + AR + hashtags) are in `content-calendar.json` → `caption`. Launch captions are also in `marketing/captions/launch-0N.txt` for `scripts/instagram-post.mjs --caption-file`.', '',
+  '## Status', '', 'The `status` column comes from the publisher ledger, `marketing/queue/published.jsonl` (one JSON line per attempt, keyed by the entry `id`). An entry published by hand is recorded there too — that is what keeps `scripts/social/publish.mjs` from posting it again. Regenerating this calendar re-reads the ledger, so the column survives.', '',
   '## Weekly checklist', '- Sun: schedule the week in Meta Business Suite (Planner) or post via `scripts/instagram-post.mjs`.', '- Daily 30 min: reply to every comment/DM; comment on 5 Jeddah accounts (architects, interior studios, Jeddah Season, Saudi Sotheby\'s/Knight Frank KSA).', '- Thu: note top/bottom 3 posts of the week in the dashboard; swap next week\'s listing if one went under offer.', '- Tours & projects: when a new Matterport link or a `project` block lands in listings.json, re-run the generator — the 3D-tour stories/reels and the unit carousels pick it up automatically.', '- Re-run `node scripts/og/gen-social.mjs` after listings change; edit captions by hand in the JSON if needed (the generator overwrites — copy edits into `marketing/captions/` first).');
 fs.writeFileSync(path.join(root, 'marketing/content-calendar.md'), md.join('\n') + '\n');
 
@@ -438,8 +485,9 @@ fs.writeFileSync(path.join(root, 'marketing/content-calendar.md'), md.join('\n')
 const capDir = path.join(root, 'marketing/captions');
 fs.mkdirSync(capDir, { recursive: true });
 const lp = [];
-lp.push(`# Launch-day grid — 9 posts, ${START} (Sunday)`, '',
-  `Post in order #1 → #9 (about 20 minutes apart, 17:30 → 20:30 KSA) so the grid reads top-left = #9. Then pin #5 (manifesto), #9 (welcome) and #8 (sell). Generated from \`src/data/listings.json\` by \`node scripts/og/gen-social.mjs\`${placeholder ? ' — **listings.json was still a placeholder when this was generated; re-run after the data agent lands real listings.**' : ''}.`, '',
+const weekdayLong = (s) => ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][new Date(`${s}T00:00:00Z`).getUTCDay()];
+lp.push(`# Launch-day grid — 9 posts, ${START} (${weekdayLong(START)})`, '',
+  `Post in order #1 → #9 (${SLOTS.launchStepMin} minutes apart, ${launchTime(1)} → ${launchTime(9)} KSA) so the grid reads top-left = #9. Then pin #5 (manifesto), #9 (welcome) and #8 (sell). Generated from \`src/data/listings.json\` by \`node scripts/og/gen-social.mjs\`${placeholder ? ' — **listings.json was still a placeholder when this was generated; re-run after the data agent lands real listings.**' : ''}.`, '',
   '**Before publishing listing posts (#1, #2, #3, #6, #7):** obtain the REGA advertising licence number for each property (منصة الإعلانات العقارية / عقار) and replace the `[add number before publishing]` line. Image URLs must be JPEG for the Graph API; the site\'s hero images are JPEG unless noted.', '',
   '| # | Grid slot | Format | Type | Listing | Image |', '|---|---|---|---|---|---|');
 for (const it of launchItems) lp.push(`| ${it.launch} | ${it.grid} | ${it.format} | ${it.pillar} | ${it.listingId ?? '—'} | ${it.image} |`);
