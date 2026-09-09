@@ -25,7 +25,9 @@
    Selection: an entry is due when its KSA time is <= now and not older than --grace hours (6).
    Terminal ledger statuses are never retried: published, skipped:manual, skipped:no-image,
    skipped:missed, skipped:gave-up. `error` is retried on later runs, three times, then becomes
-   skipped:gave-up. Other skips (ad-licence, ad-licence-placeholder, caption, quota, no-jpeg)
+   skipped:gave-up — counting only errors that say something about the post: a network failure,
+   an HTTP 5xx, a timeout or a rate limit is written with `transient: true` and does not count
+   (the grace window bounds those retries anyway). Other skips (ad-licence, ad-licence-placeholder, caption, quota, no-jpeg)
    are re-evaluated every run and written to the ledger only when the status changes — the
    placeholder one against the caption as it is NOW, so a number pasted in during the grace
    window lets the post out.
@@ -71,6 +73,9 @@
      IG_BUSINESS_ID     defaults to the account id of @bonarealestatesa
      GRAPH_VERSION      optional
      BONA_IG_LEDGER     ledger path (default ~/bona-data/ig/published.jsonl)
+
+   Stops: an auth error (Graph code 190/10/200) or a rate limit (code 4/17/32/613, subcode
+   2207051) ends the run at once — nothing after it can succeed — and the rest is deferred.
 
    Exit codes: 0 ok / nothing due · 1 config error · 2 one or more publish errors. */
 import fs from 'node:fs';
@@ -354,12 +359,13 @@ export async function run(opts = {}, deps = {}) {
   const readCaption = deps.readCaption ?? ((file) => fs.readFileSync(path.join(ROOT, o.captions, file), 'utf8'));
   const wall = () => new Date(deps.wallClock ?? Date.now()).toISOString();
   const detailOf = (e) => (e instanceof GraphError ? e.detail : (e?.message || String(e)));
+  const transientOf = (e) => Boolean(e instanceof GraphError && e.isTransient);
 
   const results = [];
   /** Every ledger line has the same head; the tail is whatever the outcome knows. */
   const rowOf = (entry, status, extra = {}) => ({
     id: entry.id, date: entry.date, slot: entry.time, kind: entry.kind, status, mediaId: extra.mediaId ?? null, permalink: extra.permalink ?? null, ts: wall(),
-    ...(extra.containerId ? { containerId: extra.containerId } : {}), ...(extra.detail ? { detail: extra.detail } : {}),
+    ...(extra.containerId ? { containerId: extra.containerId } : {}), ...(extra.detail ? { detail: extra.detail } : {}), ...(extra.transient ? { transient: true } : {}),
     ...(extra.imageUrl ? { imageUrl: extra.imageUrl } : {}), ...(extra.imageUrls ? { imageUrls: extra.imageUrls } : {}),
   });
   const record = (entry, status, extra = {}) => { const row = rowOf(entry, status, extra); results.push({ ...row, topic: entry.topic }); return row; };
@@ -405,6 +411,8 @@ export async function run(opts = {}, deps = {}) {
     const graph = deps.graph ?? createGraph({ token: deps.token, igId: deps.igId || DEFAULTS.igId, dryRun, fetch: fetchImpl, sleep, log: (s) => log(s), progress: () => {} });
     let published = 0, errors = 0, quota = null, stopped = null;
     const stopRun = (why, hint) => { stopped = why; log(`${why} error — stopping the run${hint ? `\nhint: ${hint}` : ''}`); };
+    /** Auth and rate-limit errors end the run: nothing after them can succeed, and hammering a rate limit makes it worse. */
+    const stopIfNeeded = (e) => { if (e instanceof GraphError && e.shouldStop) stopRun(e.isAuth ? 'auth' : 'rate-limit', e.hint); };
     /** Between entries only: a stop from an earlier error or a signal defers everything left. */
     const mustDefer = (entry) => {
       if (stopped) { line(entry, `deferred:${stopped}`, 'run stopped'); record(entry, `deferred:${stopped}`, { detail: `run stopped on ${stopped} error` }); return true; }
@@ -432,7 +440,7 @@ export async function run(opts = {}, deps = {}) {
         const detail = detailOf(e);
         line(entry, 'needs-reconcile', `GET /${cid} failed: ${detail.split('\n')[0]} — left in flight, NOT re-posted, checked again next run`);
         record(entry, 'needs-reconcile', { detail, containerId: cid });
-        if (e instanceof GraphError && e.isAuth) { stopRun('auth', e.hint); }
+        stopIfNeeded(e);
         continue;
       }
       if (st.statusCode === 'PUBLISHED') {
@@ -451,7 +459,7 @@ export async function run(opts = {}, deps = {}) {
           const detail = detailOf(e);
           line(entry, 'needs-reconcile', `media_publish for container ${cid} failed: ${detail.split('\n')[0]} — left in flight, NOT re-posted`);
           record(entry, 'needs-reconcile', { detail, containerId: cid });
-          if (e instanceof GraphError && e.isAuth) stopRun('auth', e.hint);
+          stopIfNeeded(e);
         }
       } else if (st.statusCode === 'ERROR' || st.statusCode === 'EXPIRED') {
         errors++;
@@ -499,7 +507,7 @@ export async function run(opts = {}, deps = {}) {
         // window — a 404 today is a deploy away from a 200 — and written once per status change.
         const status = failure.reason === 'network' ? 'error' : failure.reason === 'no-image' ? 'skipped:no-image' : 'skipped:no-jpeg';
         line(entry, status, failure.detail);
-        maybeWrite(entry, status, { detail: failure.detail }, { terminal: status === 'skipped:no-image' });
+        maybeWrite(entry, status, { detail: failure.detail, transient: status === 'error' }, { terminal: status === 'skipped:no-image' });
         if (status === 'error') errors++;
         continue;
       }
@@ -510,7 +518,7 @@ export async function run(opts = {}, deps = {}) {
       // quota: read once, before the first publish of the run
       if (quota === null) {
         try { quota = await graph.publishingLimit(); }
-        catch (e) { errors++; line(entry, 'error', `content_publishing_limit: ${e.message}`); maybeWrite(entry, 'error', { detail: e.message }, { terminal: false }); if (e instanceof GraphError && e.isAuth) stopRun('auth', e.hint); continue; }
+        catch (e) { errors++; line(entry, 'error', `content_publishing_limit: ${e.message}`); maybeWrite(entry, 'error', { detail: e.message, transient: transientOf(e) }, { terminal: false }); stopIfNeeded(e); continue; }
         if (quota.quotaUsage >= o.quotaStop) { line(entry, 'skipped:quota', `${quota.quotaUsage} of ${quota.quotaTotal} used in 24 h — stop at ${o.quotaStop}`); maybeWrite(entry, 'skipped:quota', { detail: 'daily quota guard' }, { terminal: false }); continue; }
       }
       if (published > 0) { if (dryRun) log(`[dry-run] (would wait ${o.gapMs / 1000} s before the next publish)`); else await sleep(o.gapMs); }
@@ -541,9 +549,9 @@ export async function run(opts = {}, deps = {}) {
           record(entry, 'needs-reconcile', { detail, containerId: inFlight });
         } else {
           line(entry, 'error', detail.split('\n')[0]);
-          maybeWrite(entry, 'error', { detail }, { terminal: false });
+          maybeWrite(entry, 'error', { detail, transient: transientOf(e) }, { terminal: false });
         }
-        if (e instanceof GraphError && e.isAuth) stopRun('auth', e.hint);
+        stopIfNeeded(e);
       }
     }
     return finish();

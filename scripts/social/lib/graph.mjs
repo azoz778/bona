@@ -33,10 +33,17 @@ export const HINTS = {
   36003: 'Aspect ratio out of range (allowed 4:5 to 1.91:1).',
   2207050: 'The Instagram account is not eligible for content publishing (must be Business/Creator and linked to a Facebook Page).',
   2207051: 'Application request limit reached (25 posts / 24 h).',
+  4: 'Application request limit reached — wait for the window to roll over before calling again.',
+  17: 'User request limit reached — wait for the window to roll over before calling again.',
+  32: 'Page request limit reached — wait for the window to roll over before calling again.',
+  613: 'Custom rate limit hit — wait before calling again.',
 };
 
 /** Error codes that mean "no call will succeed until a human fixes the token/permissions". */
 export const AUTH_ERROR_CODES = new Set([190, 10, 200]);
+/** Codes / subcodes that mean "stop calling for a while" — nothing is wrong with the post. */
+export const RATE_LIMIT_CODES = new Set([4, 17, 32, 613]);
+export const RATE_LIMIT_SUBCODES = new Set([2207051]);
 
 export class GraphError extends Error {
   constructor(message, meta = {}) {
@@ -47,6 +54,11 @@ export class GraphError extends Error {
   /** Message plus the hint line, the way the CLI prints it. */
   get detail() { return this.hint ? `${this.message}\nhint: ${this.hint}` : this.message; }
   get isAuth() { return AUTH_ERROR_CODES.has(Number(this.code)); }
+  get isRateLimit() { return RATE_LIMIT_CODES.has(Number(this.code)) || RATE_LIMIT_SUBCODES.has(Number(this.subcode)); }
+  /** Nothing is wrong with the post itself: the network, a 5xx, a timeout, a rate limit. Retry later, do not count it against the entry. */
+  get isTransient() { return Boolean(this.network || this.timeout || this.isRateLimit || (Number(this.status) >= 500)); }
+  /** No further call in this run can do any good: auth (fix the token) or a rate limit (wait). */
+  get shouldStop() { return this.isAuth || this.isRateLimit; }
 }
 
 /** Hashtags the way Instagram counts them: a '#' at the start or after whitespace. */
