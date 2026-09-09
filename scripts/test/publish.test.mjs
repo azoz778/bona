@@ -109,11 +109,15 @@ test('captions: launch posts read marketing/captions/launch-0N.txt, the rest are
 test('ledger idempotency: terminal statuses are never retried; error retries up to 3 times; --force-id re-opens everything but published', () => {
   const e = mk();
   const row = (status, extra = {}) => ({ id: e.id, status, ts: '2026-09-10T17:31:00Z', ...extra });
-  for (const s of ['published', 'skipped:manual', 'skipped:no-jpeg', 'skipped:ad-licence-placeholder', 'skipped:missed', 'skipped:gave-up']) {
+  for (const s of ['published', 'skipped:manual', 'skipped:no-image', 'skipped:ad-licence-placeholder', 'skipped:missed', 'skipped:gave-up']) {
     assert.ok(TERMINAL.has(s));
     assert.equal(decide(e, ctx({ ledger: ledgerOf(row(s)) })).status, null, s);
   }
   assert.equal(decide(e, ctx({ ledger: ledgerOf(row('skipped:ad-licence')) })).status, 'candidate', 'a non-terminal skip is re-evaluated against the calendar');
+  assert.equal(TERMINAL.has('skipped:no-jpeg'), false, 'a 404 is a deploy away from a 200');
+  assert.equal(decide(e, ctx({ ledger: ledgerOf(row('skipped:no-jpeg')) })).status, 'candidate', 'no-jpeg is re-checked live every run within the grace window');
+  assert.equal(decide(mk({ image: null, images: [] }), ctx()).status, 'skipped:no-image');
+  assert.equal(decide(mk({ image: null, images: [] }), ctx()).terminal, true);
   assert.equal(decide(e, ctx({ ledger: ledgerOf(row('error'), row('error')) })).status, 'candidate', 'two errors: try again');
   const gaveUp = decide(e, ctx({ ledger: ledgerOf(row('error'), row('error'), row('error')) }));
   assert.equal(gaveUp.status, 'skipped:gave-up');
@@ -132,6 +136,7 @@ test('ledger idempotency: terminal statuses are never retried; error retries up 
   assert.equal(decide(e, ctx({ ...forced, ledger: ledgerOf(row('skipped:gave-up')) })).status, 'candidate');
   assert.equal(decide(e, ctx({ ...forced, ledger: ledgerOf(row('skipped:missed')) })).status, 'candidate');
   assert.equal(decide(e, ctx({ ...forced, ledger: ledgerOf(row('skipped:no-jpeg')) })).status, 'candidate', 'forced: the image is re-checked live');
+  assert.equal(decide(e, ctx({ ...forced, ledger: ledgerOf(row('skipped:no-image')) })).status, 'candidate', 'forced re-opens a structural skip too (the calendar may have been fixed)');
   assert.equal(decide(e, ctx({ ...forced, ledger: ledgerOf(row('skipped:manual')) })).status, null, 'a manual (reel) line is not re-opened by force — a reel is a human job whatever the flag says');
   assert.equal(decide(e, ctx({ ...forced, ledger: ledgerOf(row('skipped:ad-licence-placeholder')) })).status, null, 'nor is a placeholder hard stop');
   const refused = decide(e, ctx({ ...forced, ledger: ledgerOf(row('published', { permalink: 'https://instagram.com/p/x' })) }));
@@ -199,8 +204,9 @@ test('resolveImage: HEAD-verified JPEG, twin lookup, no twin → no-jpeg, HEAD r
   assert.deepEqual(methods, ['HEAD', 'GET']);
   const net = await resolveImage('https://h/a.jpg', { fetch: async () => { throw new Error('ENOTFOUND'); } });
   assert.equal(net.reason, 'network');
-  assert.equal((await resolveImage('http://h/a.jpg', { fetch: imageFetch({}) })).reason, 'no-jpeg', 'plain http is refused before any request');
-  assert.equal((await resolveImage('marketing/queue/a.jpg', { fetch: imageFetch({}) })).reason, 'not-hosted');
+  assert.equal((await resolveImage('http://h/a.jpg', { fetch: imageFetch({}) })).reason, 'no-image', 'plain http is refused before any request — structural');
+  assert.equal((await resolveImage('marketing/queue/a.jpg', { fetch: imageFetch({}) })).reason, 'no-image', 'a local path is not hosted — structural');
+  assert.equal((await resolveImage('https://h/a.jpg', { fetch: imageFetch({ 'https://h/a.jpg': { status: 503, ct: 'text/html' } }) })).reason, 'no-jpeg', 'a 5xx is the server having a moment, not the image missing');
 });
 
 test('normaliseEntry: content-calendar.json shape and queue.json shape both map to one form', () => {
@@ -404,7 +410,7 @@ test('run: the daily quota guard stops the run at 20 of 25 without publishing', 
   assert.equal((await run({ dryRun: false }, h2.deps)).published, 2, '18 used + 2 published = 20 → the third waits');
 });
 
-test('run: PNG with no JPEG twin → skipped:no-jpeg (terminal); a network failure on the image → error (retried)', async () => {
+test('run: PNG with no JPEG twin → skipped:no-jpeg, written once, re-checked until a deploy serves it; a local path → skipped:no-image (terminal); a network failure → error (retried)', async () => {
   const png = raw({ n: 'png', image: 'https://bona-real-estate.com/og-default.png', images: ['https://bona-real-estate.com/og-default.png'] });
   const h = harness({ entries: [png, raw({ n: 'a', time: '20:31' })], imageMap: { 'https://media.example/a.jpg': {} } });
   const r = await run({ dryRun: false }, h.deps);
@@ -412,9 +418,20 @@ test('run: PNG with no JPEG twin → skipped:no-jpeg (terminal); a network failu
   assert.equal(r.published, 1);
   assert.equal(h.appended[0].status, 'skipped:no-jpeg');
   assert.match(h.appended[0].detail, /og-default\.jpg → 404.*og-default\.jpeg → 404/);
-  const twin = harness({ entries: [png], imageMap: { 'https://bona-real-estate.com/og-default.jpg': {} } });
+  // next tick, still no twin: checked again, not written again
+  const again = harness({ entries: [png], ledger: h.appended, imageMap: {} });
+  await run({ dryRun: false }, again.deps);
+  assert.deepEqual(again.appended, [], 'same status as last time → no new line');
+  assert.ok(again.logs.some((l) => l.startsWith('skipped:no-jpeg')), 'but it was checked and logged');
+  // the deploy lands: the twin is served and the post goes out inside its grace window
+  const twin = harness({ entries: [png], ledger: h.appended, imageMap: { 'https://bona-real-estate.com/og-default.jpg': {} } });
   await run({ dryRun: false }, twin.deps);
   assert.deepEqual(twin.calls[1], ['image', 'https://bona-real-estate.com/og-default.jpg', 'alt'], 'the twin is what gets posted');
+  assert.equal(twin.appended.at(-1).status, 'published');
+  const local = harness({ entries: [raw({ n: 'loc', image: 'marketing/queue/x.jpg', images: ['marketing/queue/x.jpg'] })] });
+  await run({ dryRun: false }, local.deps);
+  assert.equal(local.appended[0].status, 'skipped:no-image');
+  assert.ok(TERMINAL.has('skipped:no-image'));
   const net = harness({ entries: [raw({ n: 'a' })] });
   net.deps.fetch = async () => { throw new Error('ENOTFOUND media.example'); };
   const rn = await run({ dryRun: false }, net.deps);
