@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   absoluteImageUrl, acquireLock, composeCaption, decide, DEFAULTS, fmtKsa, hasLicencePlaceholder, indexLedger,
-  jpegCandidates, ksaToEpoch, normaliseEntry, parseArgs, parseLedger, parseNow, resolveImage, run, TERMINAL,
+  jpegCandidates, ksaToEpoch, main, normaliseEntry, parseArgs, parseLedger, parseNow, resolveImage, run, TERMINAL,
 } from '../social/publish.mjs';
 import { DEFAULT_LEDGER_PATH, lockPathFor, readLedgerFile, resolveLedgerPath } from '../social/lib/ledger.mjs';
 
@@ -233,11 +233,32 @@ test('normaliseEntry: content-calendar.json shape and queue.json shape both map 
 
 test('parseArgs: defaults, numbers validated, unknown flags refused', () => {
   const d = parseArgs([]);
-  assert.deepEqual(d, { dryRun: false, now: undefined, graceHours: 6, limit: 3, forceId: null, source: DEFAULTS.source, ledger: null, json: false, help: false });
+  assert.deepEqual(d, { dryRun: false, live: false, now: undefined, graceHours: 6, limit: 3, forceId: null, source: DEFAULTS.source, ledger: null, json: false, help: false });
   const o = parseArgs(['--dry-run', '--now', '2026-09-09T18:30', '--grace', '2', '--limit', '1', '--force-id', 'ig-launch-04', '--source', '/tmp/x.json', '--ledger', '/tmp/l.jsonl', '--json']);
-  assert.deepEqual(o, { dryRun: true, now: '2026-09-09T18:30', graceHours: 2, limit: 1, forceId: 'ig-launch-04', source: '/tmp/x.json', ledger: '/tmp/l.jsonl', json: true, help: false });
+  assert.deepEqual(o, { dryRun: true, live: false, now: '2026-09-09T18:30', graceHours: 2, limit: 1, forceId: 'ig-launch-04', source: '/tmp/x.json', ledger: '/tmp/l.jsonl', json: true, help: false });
+  assert.equal(parseArgs(['--live']).live, true);
   assert.throws(() => parseArgs(['--limit', 'three']), /--limit must be a number/);
   assert.throws(() => parseArgs(['--bogus']), /Unknown option/);
+});
+
+test('main: --live with no META_ACCESS_TOKEN exits 1 loudly; without --live an empty token is a dry-run (nothing sent, nothing written)', async () => {
+  const errs = [];
+  const orig = console.error; console.error = (s) => errs.push(String(s));
+  try {
+    assert.equal(await main(['--live'], {}), 1);
+    assert.equal(await main(['--live', '--now', '2026-09-09T18:30'], { META_ACCESS_TOKEN: '' }), 1);
+    assert.match(errs[0], /META_ACCESS_TOKEN missing/);
+    assert.match(errs[1], /--live refuses/);
+  } finally { console.error = orig; }
+  // no --live, no token: a dry-run against a calendar with nothing in it — exit 0, no ledger
+  const src = path.join(os.tmpdir(), `bona-empty-cal-${process.pid}.json`);
+  const led = path.join(os.tmpdir(), `bona-no-ledger-${process.pid}`, 'published.jsonl');
+  fs.writeFileSync(src, '[]');
+  const out = [];
+  const origLog = console.log; console.log = (s) => out.push(String(s));
+  try { assert.equal(await main(['--source', src, '--ledger', led, '--now', '2026-09-09T18:30'], {}), 0); } finally { console.log = origLog; fs.rmSync(src, { force: true }); }
+  assert.ok(out[0].startsWith('[dry-run]'));
+  assert.equal(fs.existsSync(led), false);
 });
 
 // ---- the run itself -------------------------------------------------------------------
