@@ -1,0 +1,65 @@
+; Bona — unattended Facebook Page publisher. systemd USER unit (no root anywhere).
+;
+; Fired by bona-fb-publish.timer every 15 min, 17:00–23:59 Asia/Riyadh. Each run reads
+; marketing/queue/queue.json from the publish tree (~/bona-publish, below), publishes the
+; Facebook entries that are due (max 3), appends to the ledger at ~/bona-data/fb/published.jsonl
+; (outside any repo) and exits. See scripts/social/facebook-post.mjs.
+;
+;   bash ~/bona/services/deploy/install-fb-publish.sh   # publish tree, assets, units, enable
+;   systemctl --user list-timers bona-fb-publish.timer
+;   journalctl --user -u bona-fb-publish -o cat -n 50
+;   systemctl --user start bona-fb-publish.service        # run once, now
+;   systemctl --user stop  bona-fb-publish.timer          # pause
+;
+; ~/bona-publish is a `git worktree` pinned (detached) to origin/main, shared with the
+; Instagram publisher: ~/bona itself sits on feature branches most evenings and the queue is
+; read from the working tree. publish-tree.sh moves it to origin/main before every run and
+; refuses a dirty tree or a feature branch. The rendered assets are gitignored, so they are
+; read from ~/bona-data/queue (BONA_QUEUE_ASSETS), and the ledger + lock live in
+; ~/bona-data/fb — the publisher never writes inside a git tree.
+;
+; --grace 3: the queue's Facebook slot is 20:20 and lapses at 23:20, before the last tick at
+; 23:45, so nothing is "still due" when Persistent=true runs the unit after a boot next day.
+
+[Unit]
+Description=Bona — publish due Facebook queue entries
+Documentation=file:%h/bona/scripts/social/facebook-post.mjs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/bona-publish
+Environment=TZ=Asia/Riyadh
+Environment=NODE_ENV=production
+Environment=PATH=%h/.local/bin:%h/.nvm/versions/node/v24.19.0/bin:/usr/local/bin:/usr/bin:/bin
+Environment=BONA_QUEUE_ASSETS=%h/bona-data/queue
+Environment=BONA_DATA=%h/bona-data
+; META_ACCESS_TOKEN + FB_PAGE_ID. No leading "-": without the token every run would fail loudly
+; every 15 minutes, which is the right behaviour — install-fb-publish.sh refuses to enable
+; the timer while the file is missing.
+EnvironmentFile=%h/.secrets/bona-meta-graph.env
+; Best effort (leading "-", 60 s): bring the tree to origin/main. Then a hard guard: refuse
+; anything that is not origin/main and clean.
+ExecStartPre=-/usr/bin/timeout 60 /usr/bin/env bash %h/bona-publish/services/deploy/publish-tree.sh sync %h/bona-publish
+ExecStartPre=/usr/bin/env bash %h/bona-publish/services/deploy/publish-tree.sh guard %h/bona-publish
+ExecStart=/usr/bin/env node scripts/social/facebook-post.mjs queue --grace 3 --limit 3
+TimeoutStartSec=900
+
+; ---- sandbox -----------------------------------------------------------------------
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectControlGroups=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+LockPersonality=true
+; The publish tree (git checkout during sync) and the data dir (ledger, lock).
+ReadWritePaths=%h/bona-publish %h/bona-data
+MemoryHigh=768M
+MemoryMax=1G
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bona-fb-publish
