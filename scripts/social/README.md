@@ -261,7 +261,8 @@ The ledger lives **outside the git working tree**, at `~/bona-data/ig/published.
 swapped the calendar under the timer, and a repo copy went stale the moment the timer wrote a
 line. `ops/systemd/install.sh` creates the directory and seeds the file once (from the legacy
 in-repo copy if it is still on disk, else from `ops/systemd/ledger-seed.jsonl`, which holds the
-hand-published launch post #9); an existing ledger is never touched.
+hand-published launch post #9); an existing ledger is never touched. The seed is what keeps
+the timer from re-posting #9 — do not delete it from the ledger.
 
 One JSON line per outcome, keyed by the entry `id`; the **last line for an id is its state**:
 
@@ -322,22 +323,41 @@ FB_PAGE_ID=1245646955305748
 ```
 
 ```bash
-bash ~/bona/ops/systemd/install.sh                 # once the token file exists: seed the ledger, copy, daemon-reload, enable
+bash ~/bona/ops/systemd/install.sh                 # once the token file exists: publish tree, ledger seed, units, enable
 systemctl --user list-timers bona-ig-publish.timer # next elapse
 journalctl --user -u bona-ig-publish -o cat -f     # watch a run
 systemctl --user start bona-ig-publish.service     # run once, now
 systemctl --user stop  bona-ig-publish.timer       # PAUSE (start to resume; the service can still be run by hand)
 ```
 
+**The unit runs from `~/bona-publish`, not `~/bona`.** `~/bona` is a shared working tree that
+is on a feature branch most evenings, and the calendar is read from the working tree — so the
+timer gets its own `git worktree` of the same repository, pinned to `origin/main`.
+`install.sh` creates it *detached* on purpose: a worktree that held the `main` branch would
+stop `~/bona` (or any other worktree) from checking `main` out. Before every run
+`ExecStartPre` does two things:
+
+1. `sync-publish-tree.sh` — `git fetch origin main` + `checkout --detach origin/main`, bounded
+   by `timeout 60` and prefixed with `-`, so no network means "run what is there";
+2. `guard-main.sh` — fails the unit, with a clear journal line, unless the tree is exactly at
+   `origin/main` (or on `main`) with no local modifications to tracked files.
+
+The publisher needs no `node_modules` (Node builtins + `scripts/social/lib`), so there is no
+`npm ci` in the publish tree; the ledger and lock live in `~/bona-data/ig`, outside both trees.
+What the timer publishes is therefore whatever is on **`origin/main`** — merge *and push*
+before expecting it to pick a change up (`git -C ~/bona-publish log -1` shows what it has).
+Running the publisher by hand from `~/bona` is fine: same ledger, same lock.
+
 `OnCalendar=*-*-* 17..23:00/15 Asia/Riyadh` — the zone is written into the expression, so the
 schedule holds whatever `timedatectl` says (this box is Asia/Riyadh anyway). `Persistent=true`
 runs once at boot if a tick was missed; inside the window that catches up on the evening,
-outside it the quiet-hours guard makes the run a no-op. Two overlapping runs cannot double-post: `~/bona-data/ig/.publish.lock` is
-taken with `O_EXCL` and a lock older than 20 minutes, or whose process is gone, is taken over.
-`node` is nvm-managed on this machine, so the unit sets `PATH` explicitly. `ExecStartPre` runs
-`ops/systemd/guard-main.sh`, which fails the unit (with a clear journal line) unless `~/bona`
-has `main` checked out — the calendar is read from the working tree, and a feature branch left
-checked out must not feed the timer.
+outside it the quiet-hours guard makes the run a no-op. Two overlapping runs cannot double-post:
+`~/bona-data/ig/.publish.lock` is taken with `O_EXCL`; a lock whose holder is still alive is
+never taken over whatever its age (a slow run is still a run — the unit's `TimeoutStartSec`,
+25 min, is what ends it), a dead holder's lock is taken over at once, and only a lock with no
+readable pid falls back to age (25 min, to match). Containers are polled every 3 s (single
+image, story) or 5 s (carousel items and parent) with a 2 min budget each. `node` is
+nvm-managed on this machine, so the unit sets `PATH` explicitly.
 
 ### Running it by hand
 

@@ -1,15 +1,23 @@
 ; Bona — unattended Instagram publisher. systemd USER unit (no root anywhere).
 ;
 ; Fired by bona-ig-publish.timer every 15 min, 17:00–23:59 Asia/Riyadh. Each run reads
-; src/data/content-calendar.json, publishes what is due (max 3, 60 s apart), appends to the
-; ledger at ~/bona-data/ig/published.jsonl (outside the repo) and exits.
-; See scripts/social/README.md → "Publishing — Instagram".
+; src/data/content-calendar.json from the publish tree (~/bona-publish, see below), publishes
+; what is due (max 3, 60 s apart), appends to the ledger at ~/bona-data/ig/published.jsonl
+; (outside any repo) and exits. See scripts/social/README.md → "Publishing — Instagram".
 ;
-;   bash ~/bona/ops/systemd/install.sh            # copies both units, daemon-reload, enables the timer
+;   bash ~/bona/ops/systemd/install.sh            # publish tree, ledger seed, units, enable
 ;   systemctl --user list-timers bona-ig-publish.timer
 ;   journalctl --user -u bona-ig-publish -o cat -n 50
 ;   systemctl --user start bona-ig-publish.service # run once, now
 ;   systemctl --user stop  bona-ig-publish.timer   # pause
+;
+; ~/bona-publish is a `git worktree` of ~/bona pinned (detached) to origin/main. ~/bona itself
+; is a shared tree that sits on feature branches most evenings, and the calendar comes from the
+; working tree, so the timer must not read it from there. sync-publish-tree.sh brings the
+; publish tree to origin/main before each run (best-effort: "-" and a 60 s timeout, so no
+; network means "run what is there"); guard-main.sh then refuses to run unless the tree is
+; exactly at origin/main (or on main) and clean. Nothing in the publish tree is ever edited by
+; hand, and the publisher needs no node_modules there (Node builtins + scripts/social/lib).
 ;
 ; A user unit inherits almost nothing from the login shell. node is nvm-managed here
 ; (~/.local/bin/node -> ~/.nvm/versions/node/vX/bin/node), so PATH is set explicitly and
@@ -19,13 +27,13 @@
 
 [Unit]
 Description=Bona — publish due Instagram calendar entries
-Documentation=file:%h/bona/scripts/social/README.md
+Documentation=file:%h/bona-publish/scripts/social/README.md
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=%h/bona
+WorkingDirectory=%h/bona-publish
 Environment=TZ=Asia/Riyadh
 Environment=NODE_ENV=production
 Environment=PATH=%h/.local/bin:%h/.nvm/versions/node/v24.19.0/bin:/usr/local/bin:/usr/bin:/bin
@@ -33,9 +41,11 @@ Environment=PATH=%h/.local/bin:%h/.nvm/versions/node/v24.19.0/bin:/usr/local/bin
 ; a missing token file must FAIL the unit loudly, not silently run in dry-run mode every 15 min.
 ; --live below does the same for a file that exists but has an EMPTY token: exit 1, not dry-run.
 EnvironmentFile=%h/.secrets/bona-meta-graph.env
-; The calendar comes from the working tree, so the tree must be on main — a feature branch
-; left checked out must not feed the timer. guard-main.sh logs why and fails the unit.
-ExecStartPre=/usr/bin/env bash %h/bona/ops/systemd/guard-main.sh %h/bona
+; 1. bring the publish tree to origin/main — best-effort: "-" means a failure (no network, no
+;    credentials, the 60 s timeout) does not block the run; the guard still checks the result.
+ExecStartPre=-/usr/bin/timeout 60 /usr/bin/env bash %h/bona-publish/ops/systemd/sync-publish-tree.sh %h/bona-publish
+; 2. refuse to run unless the tree is exactly origin/main (or on main) and clean — logs why.
+ExecStartPre=/usr/bin/env bash %h/bona-publish/ops/systemd/guard-main.sh %h/bona-publish
 ; --grace 3: the timer's last tick is 23:45 and the latest slot is 21:05, so 3 h is the most
 ; grace a slot can use inside the window; the publisher refuses to post outside 17:00–23:59 KSA
 ; anyway (deferred:quiet-hours), which is what makes Persistent=true safe at a 02:00 boot.
@@ -65,9 +75,11 @@ ProtectControlGroups=true
 ProtectKernelTunables=true
 RestrictSUIDSGID=true
 LockPersonality=true
-; The only things the publisher writes: the ledger and its lock file. install.sh creates the
-; directory (ReadWritePaths needs it to exist); the repo itself stays read-only.
-ReadWritePaths=%h/bona-data/ig
+; What gets written: the ledger + lock (install.sh creates the directory — ReadWritePaths needs
+; it to exist), the publish tree (the sync step checks origin/main out into it) and the
+; repository's .git, which the worktree shares with ~/bona (fetched objects, refs, the
+; worktree's own HEAD/index). ~/bona's working files stay read-only.
+ReadWritePaths=%h/bona-data/ig %h/bona-publish %h/bona/.git
 MemoryHigh=256M
 MemoryMax=512M
 
