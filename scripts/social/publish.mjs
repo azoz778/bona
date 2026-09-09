@@ -280,8 +280,9 @@ const pidAlive = (pid) => { if (!Number.isInteger(pid) || pid <= 0) return false
  * O_EXCL lock file. A lock whose holder is still alive is NEVER taken over, whatever its age
  * (a slow run is still a run; the unit's TimeoutStartSec is what ends it). Takeover happens
  * only when the holder is dead, or — when the file carries no readable pid — when it is older
- * than staleMs. The takeover renames the stale file to a unique name first (two takers cannot
- * both "unlink then create"), then re-reads what it created to make sure it is its own.
+ * than staleMs (by its ts, or its mtime if it is not even JSON). The takeover renames the
+ * stale file to a unique name first (two takers cannot both "unlink then create"), then
+ * re-reads what it created to make sure it is its own.
  */
 export function acquireLock(file, { now = Date.now(), staleMs = DEFAULTS.lockStaleMs, pid = process.pid, isAlive = pidAlive } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -294,11 +295,12 @@ export function acquireLock(file, { now = Date.now(), staleMs = DEFAULTS.lockSta
       let info = null;
       try { info = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (re) { if (re.code === 'ENOENT') continue; /* corrupt: no pid to ask */ }
       const holder = Number(info?.pid);
-      const age = now - Date.parse(info?.ts);
+      let age = now - Date.parse(info?.ts);
+      if (!Number.isFinite(age)) { try { age = now - fs.statSync(file).mtimeMs; } catch { age = NaN; } } // corrupt file: its mtime is the only clock
       const ageS = Number.isFinite(age) ? `${Math.round(age / 1000)} s old` : 'age unknown';
       if (Number.isInteger(holder) && holder > 0) {
         if (isAlive(holder)) return { ok: false, reason: `another run holds the lock (pid ${holder}, ${ageS})`, pid: holder, age };
-      } else if (Number.isFinite(age) && age >= 0 && age < staleMs) {
+      } else if (Number.isFinite(age) && age < staleMs) {
         return { ok: false, reason: `a lock without a readable pid is ${ageS} — waiting for it to go stale (${Math.round(staleMs / 60_000)} min)`, age };
       }
       // dead holder, or unreadable and stale: claim it by renaming — the rename is the atomic step

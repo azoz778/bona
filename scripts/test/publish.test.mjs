@@ -562,11 +562,15 @@ test('lock: one holder at a time; a LIVE holder is never taken over whatever its
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).pid, 444);
   assert.equal(fs.readdirSync(dir).length, 1, 'the stale file is renamed aside and removed, not left behind');
   orphan.release();
-  // no readable pid: age is the only signal
-  fs.writeFileSync(file, 'garbage');
-  const corruptFresh = acquireLock(file, { now: t0, pid: 555, isAlive: () => { throw new Error('must not be asked: there is no pid'); } });
-  assert.equal(corruptFresh.ok, false, 'a corrupt lock with no age is not stale either — it could be a writer mid-way');
-  assert.match(corruptFresh.reason, /without a readable pid/);
+  // no readable pid: age is the only signal (the file's mtime when it is not even JSON)
+  fs.writeFileSync(file, 'garbage'); fs.utimesSync(file, new Date(t0), new Date(t0));
+  const notAsked = () => { throw new Error('must not be asked: there is no pid'); };
+  const corruptFresh = acquireLock(file, { now: t0 + 60_000, pid: 555, isAlive: notAsked });
+  assert.equal(corruptFresh.ok, false, 'a fresh corrupt lock is left alone');
+  assert.match(corruptFresh.reason, /without a readable pid is 60 s old/);
+  const corruptStale = acquireLock(file, { now: t0 + DEFAULTS.lockStaleMs + 1, pid: 555, isAlive: notAsked });
+  assert.equal(corruptStale.ok, true, 'a corrupt lock older than the stale window is taken over — the timer must not be blocked forever by garbage');
+  corruptStale.release();
   fs.writeFileSync(file, JSON.stringify({ ts: new Date(t0).toISOString() }));
   assert.equal(acquireLock(file, { now: t0 + 60_000, pid: 555, isAlive: () => true }).ok, false, 'no pid, 60 s old: wait');
   const noPidStale = acquireLock(file, { now: t0 + DEFAULTS.lockStaleMs + 1, pid: 555, isAlive: () => true });
