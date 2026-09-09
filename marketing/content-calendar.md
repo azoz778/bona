@@ -83,7 +83,7 @@ Feed-post captions (EN + AR + hashtags) are in `content-calendar.json` → `capt
 
 ## Status
 
-The `status` column comes from the publisher ledger, `marketing/queue/published.jsonl` (one JSON line per attempt, keyed by the entry `id`). An entry published by hand is recorded there too — that is what keeps `scripts/social/publish.mjs` from posting it again. Regenerating this calendar re-reads the ledger, so the column survives.
+The `status` column comes from the publisher ledger, `~/bona-data/ig/published.jsonl` (outside the repo; one JSON line per attempt, keyed by the entry `id`). An entry published by hand is recorded there too — that is what keeps `scripts/social/publish.mjs` from posting it again. Regenerating this calendar re-reads the ledger, so the column survives.
 
 ## Weekly checklist
 - Sun: schedule the week in Meta Business Suite (Planner) or post via `scripts/instagram-post.mjs`.

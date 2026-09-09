@@ -34,9 +34,10 @@
    Limits: at most 3 publishes per run, >= 60 s apart, and the run stops when the account's
    rolling 24 h quota (GET /{ig-id}/content_publishing_limit) is at 20 of 25.
 
-   Ledger: marketing/queue/published.jsonl — one JSON line per outcome:
+   Ledger: ~/bona-data/ig/published.jsonl ($BONA_IG_LEDGER or --ledger override) — OUTSIDE the
+   repo, so a branch switch can never hide it. One JSON line per outcome:
      {id, date, slot, kind, status, mediaId, permalink, ts, ...detail}
-   The last line for an id is its current state. Committed to git on purpose (see README).
+   The last line for an id is its current state. The lock file sits beside it.
 
    Flags:
      --dry-run          print every request, write nothing (the default when META_ACCESS_TOKEN is unset)
@@ -46,12 +47,14 @@
      --force-id <id>    publish one entry regardless of its time; still refuses REGA-blocked,
                         placeholder captions, reels and anything already published
      --source path      calendar file (default src/data/content-calendar.json)
+     --ledger path      ledger file (default $BONA_IG_LEDGER or ~/bona-data/ig/published.jsonl)
      --json             machine-readable result on stdout (log lines go to stderr)
 
    Env (from ~/.secrets/bona-meta-graph.env under the timer):
      META_ACCESS_TOKEN  system-user token; unset -> dry-run
      IG_BUSINESS_ID     defaults to the account id of @bonarealestatesa
      GRAPH_VERSION      optional
+     BONA_IG_LEDGER     ledger path (default ~/bona-data/ig/published.jsonl)
 
    Exit codes: 0 ok / nothing due · 1 config error · 2 one or more publish errors. */
 import fs from 'node:fs';
@@ -59,6 +62,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs as nodeParseArgs } from 'node:util';
 import { CAPTION_MAX_HASHTAGS, CAROUSEL_MAX, CAROUSEL_MIN, checkCaption, checkImageUrl, createGraph, GraphError } from './lib/graph.mjs';
+import { indexLedger, lockPathFor, parseLedger, readLedgerFile, resolveLedgerPath, slug } from './lib/ledger.mjs';
+
+export { indexLedger, parseLedger, slug };
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 /** Asia/Riyadh is UTC+3 all year — Saudi Arabia has no DST. */
@@ -68,8 +74,8 @@ export const AD_LICENCE_TOKEN = '{{AD_LICENCE}}';
 export const LICENCE_PLACEHOLDERS = [AD_LICENCE_TOKEN, '[add number before publishing]', '[يُضاف قبل النشر]'];
 export const DEFAULTS = Object.freeze({
   source: 'src/data/content-calendar.json',
-  ledger: 'marketing/queue/published.jsonl',
-  lock: 'marketing/queue/.publish.lock',
+  /** null = $BONA_IG_LEDGER or ~/bona-data/ig/published.jsonl (lib/ledger.mjs); --ledger overrides. */
+  ledger: null,
   captions: 'marketing/captions',
   siteBase: 'https://bona-real-estate.com',
   // The public account id of @bonarealestatesa (ops/NEXT-SESSION.md). Not a secret; env wins.
@@ -124,6 +130,7 @@ export function parseArgs(argv) {
       limit: { type: 'string' },
       'force-id': { type: 'string' },
       source: { type: 'string' },
+      ledger: { type: 'string' },
       json: { type: 'boolean', default: false },
       help: { type: 'boolean', default: false },
     },
@@ -137,6 +144,7 @@ export function parseArgs(argv) {
     limit: Math.floor(num(values.limit, 'limit', DEFAULTS.limit)),
     forceId: values['force-id'] || null,
     source: values.source || DEFAULTS.source,
+    ledger: values.ledger || null,
     json: values.json,
     help: values.help,
   };
@@ -145,7 +153,6 @@ export function parseArgs(argv) {
 // ---------------------------------------------------------------------------------------
 // calendar entries
 // ---------------------------------------------------------------------------------------
-export const slug = (str) => String(str ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48).replace(/-+$/, '');
 const KIND = { image: 'post', video: 'reel', short: 'reel', post: 'post', carousel: 'carousel', reel: 'reel', story: 'story' };
 
 /** Accept a content-calendar.json entry (or a queue.json one) and give it the shape this file uses. */
@@ -235,32 +242,6 @@ export async function resolveImage(u, { base = DEFAULTS.siteBase, fetch: fetchIm
 }
 
 // ---------------------------------------------------------------------------------------
-// ledger
-// ---------------------------------------------------------------------------------------
-export function parseLedger(text) {
-  const out = [];
-  for (const line of String(text ?? '').split('\n')) {
-    if (!line.trim()) continue;
-    try { const r = JSON.parse(line); if (r && r.id && r.status) out.push(r); } catch { /* skip a corrupt line */ }
-  }
-  return out;
-}
-export function readLedgerFile(file) {
-  try { return parseLedger(fs.readFileSync(file, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return []; throw e; }
-}
-/** Per-id view: the latest record and how many `error` lines it has accumulated. */
-export function indexLedger(records) {
-  const m = new Map();
-  for (const r of records) {
-    const cur = m.get(r.id) || { latest: null, errors: 0 };
-    cur.latest = r;
-    cur.errors = r.status === 'error' ? cur.errors + 1 : (r.status === 'published' ? 0 : cur.errors);
-    m.set(r.id, cur);
-  }
-  return m;
-}
-
-// ---------------------------------------------------------------------------------------
 // lock
 // ---------------------------------------------------------------------------------------
 const pidAlive = (pid) => { if (!Number.isInteger(pid) || pid <= 0) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
@@ -333,8 +314,8 @@ export async function run(opts = {}, deps = {}) {
   const sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   const fetchImpl = deps.fetch ?? globalThis.fetch;
   const sourcePath = path.isAbsolute(o.source) ? o.source : path.join(ROOT, o.source);
-  const ledgerPath = path.isAbsolute(o.ledger) ? o.ledger : path.join(ROOT, o.ledger);
-  const lockPath = path.isAbsolute(o.lock) ? o.lock : path.join(ROOT, o.lock);
+  const ledgerPath = resolveLedgerPath(o.ledger);
+  const lockPath = o.lock ? path.resolve(o.lock) : lockPathFor(ledgerPath);
   const loadEntries = deps.loadEntries ?? (() => JSON.parse(fs.readFileSync(sourcePath, 'utf8')));
   const readLedger = deps.readLedger ?? (() => readLedgerFile(ledgerPath));
   const appendLedger = deps.appendLedger ?? ((rec) => { fs.mkdirSync(path.dirname(ledgerPath), { recursive: true }); fs.appendFileSync(ledgerPath, `${JSON.stringify(rec)}\n`); });
@@ -355,8 +336,8 @@ export async function run(opts = {}, deps = {}) {
 
   let lock = null;
   try {
-    if (dryRun) log(`[dry-run] no token or --dry-run: requests are printed, the ledger is not written · now = ${fmtKsa(nowMs)} · source = ${path.relative(ROOT, sourcePath)}`);
-    else log(`publish run · now = ${fmtKsa(nowMs)} · source = ${path.relative(ROOT, sourcePath)} · limit ${limit} · grace ${o.graceHours} h`);
+    if (dryRun) log(`[dry-run] no token or --dry-run: requests are printed, the ledger is not written · now = ${fmtKsa(nowMs)} · source = ${path.relative(ROOT, sourcePath)} · ledger = ${ledgerPath}`);
+    else log(`publish run · now = ${fmtKsa(nowMs)} · source = ${path.relative(ROOT, sourcePath)} · ledger = ${ledgerPath} · limit ${limit} · grace ${o.graceHours} h`);
 
     if (!dryRun && deps.lock !== false) {
       lock = acquireLock(lockPath, { now: deps.wallClock ?? Date.now() });
