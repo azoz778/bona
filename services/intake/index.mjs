@@ -42,9 +42,18 @@ let working = false;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const busy = () => working || queue.length > 0;
 
-async function reply(jid, text) {
+/**
+ * The actual send, allowed to throw. Most replies are best-effort and use reply()
+ * below; a message whose only purpose is to prove "I saw your unsupported file"
+ * uses this directly so its source message is not marked seen until delivery succeeds.
+ */
+async function sendReply(jid, text) {
   if (!cfg.sendReplies) { log.info('wa.reply_suppressed', { to: jid, text }); return; }
-  try { await evo.sendText(jid, text); } catch (err) { log.error('wa.reply_failed', { to: jid, error: err.message }); }
+  return evo.sendText(jid, text);
+}
+
+async function reply(jid, text) {
+  try { await sendReply(jid, text); } catch (err) { log.error('wa.reply_failed', { to: jid, error: err.message }); }
 }
 
 /** Repo-relative paths this job may stage. Nothing else is ever committed. */
@@ -169,6 +178,27 @@ async function pollGroup(group) {
       enqueue({ kind: 'video', group, record, video });
       continue;
     }
+    // A document that is NOT a PDF used to fall straight through to the text check
+    // below, and a document has no `text` — so it vanished without a word (an .html
+    // brochure sent 2026-09-09 02:24 was lost exactly that way, and the owner was
+    // left believing the bot had ignored him). Persist FIRST, mark seen SECOND, then
+    // queue — the same ordering as PDFs/videos. This survives restarts and also
+    // survives the source message falling outside findMessages' 30-row window.
+    if (doc) {
+      const name = doc.fileName || doc.title || 'that file';
+      log.info('msg.document_not_pdf', { jid: group.id, id: record.key.id, fileName: name, mimetype: doc.mimetype ?? null });
+      state.addJob({
+        id: record.key.id,
+        jid: group.id,
+        key: record.key,
+        kind: 'unsupported',
+        fileName: name,
+        mimetype: doc.mimetype ?? null,
+      });
+      state.markSeen(record.key.id);
+      enqueue({ kind: 'unsupported', group, record, doc });
+      continue;
+    }
     state.markSeen(record.key.id);
     const text = textOf(record).trim();
     if (!text) continue;
@@ -201,6 +231,16 @@ function replayPendingJobs() {
   log.info('jobs.replay', { count: pending.length });
   for (const job of pending) {
     if (job.kind === 'video') { enqueue(videoJobFromState(job)); continue; }
+    if (job.kind === 'unsupported') {
+      enqueue({
+        kind: 'unsupported',
+        group: { id: job.jid },
+        record: { key: job.key || { id: job.id, fromMe: true, remoteJid: job.jid } },
+        doc: { fileName: job.fileName ?? null, mimetype: job.mimetype ?? null },
+        replay: true,
+      });
+      continue;
+    }
     enqueue({
       kind: 'pdf',
       group: { id: job.jid },
@@ -252,6 +292,7 @@ async function drain() {
       try {
         if (job.kind === 'pdf') await handlePdf(job);
         else if (job.kind === 'video') await handleVideo(job);
+        else if (job.kind === 'unsupported') await handleUnsupported(job);
         else await handleCommand(job);
         state.setError(null);
       } catch (err) {
@@ -262,7 +303,7 @@ async function drain() {
           rolledBack: Boolean(err.rolledBack), stack: process.env.BONA_DEBUG ? err.stack : undefined,
         });
         state.setError(err.message);
-        if ((job.kind === 'pdf' || job.kind === 'video') && jobId) state.failJob(jobId, err.message);
+        if ((job.kind === 'pdf' || job.kind === 'video' || job.kind === 'unsupported') && jobId) state.failJob(jobId, err.message);
         await reply(job.group.id, msg.failed());
       }
     }
@@ -663,6 +704,16 @@ async function publishEdit(jid, id, apply, commitMessage, replyText, { onPushed 
     await reply(jid, replyText(res));
     return res;
   }, { timeoutMs: cfg.lockWaitMs, label: `command ${id}` });
+}
+
+/**
+ * Deliver the one actionable answer, then close the durable job. Send first,
+ * finish second: a crash in between may duplicate the refusal on replay, but can
+ * never lose it. At-least-once is the safe side for an owner-only operations group.
+ */
+async function handleUnsupported({ group, record, doc }) {
+  await sendReply(group.id, msg.unsupportedDocument(doc?.fileName || doc?.title || 'that file', doc?.mimetype ?? null));
+  state.finishJob(record.key.id, 'rejected');
 }
 
 async function handleCommand({ group, command }) {
