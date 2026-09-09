@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   absoluteImageUrl, acquireLock, composeCaption, decide, DEFAULTS, fmtKsa, hasLicencePlaceholder, indexLedger,
-  isQuietHours, jpegCandidates, ksaToEpoch, main, normaliseEntry, parseArgs, parseLedger, parseNow, resolveImage, run, TERMINAL,
+  isQuietHours, jpegCandidates, ksaToEpoch, main, maskToken, normaliseEntry, parseArgs, parseLedger, parseNow, resolveImage, run, TERMINAL,
 } from '../social/publish.mjs';
 import { DEFAULT_LEDGER_PATH, lockPathFor, readLedgerFile, resolveLedgerPath } from '../social/lib/ledger.mjs';
 
@@ -271,6 +271,14 @@ test('parseArgs: defaults, numbers validated, unknown flags refused', () => {
   assert.equal(parseArgs(['--live']).live, true);
   assert.throws(() => parseArgs(['--limit', 'three']), /--limit must be a number/);
   assert.throws(() => parseArgs(['--bogus']), /Unknown option/);
+});
+
+test('maskToken: every log line the CLI prints has the token replaced, wherever it appears', () => {
+  const m = maskToken('EAABtok123');
+  assert.equal(m('GET https://graph.facebook.com/v26.0/1?access_token=EAABtok123 → 400'), 'GET https://graph.facebook.com/v26.0/1?access_token=<token> → 400');
+  assert.equal(m('fatal: EAABtok123 EAABtok123'), 'fatal: <token> <token>');
+  assert.equal(m('nothing here'), 'nothing here');
+  assert.equal(maskToken('')('x=EAAB'), 'x=EAAB', 'no token: identity');
 });
 
 test('main: --live with no META_ACCESS_TOKEN exits 1 loudly; without --live an empty token is a dry-run (nothing sent, nothing written)', async () => {

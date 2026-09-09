@@ -35,11 +35,23 @@ test('createGraph dry-run: prints every request, never calls fetch, returns fake
   assert.equal(fetched, 0);
   assert.match(r.mediaId, /^dry_/);
   assert.equal(r.permalink, '(dry-run)');
-  assert.ok(lines.some((l) => l.startsWith('[dry-run] POST https://graph.facebook.com/v21.0/%3CIG_BUSINESS_ID%3E/media\n') && l.includes('alt_text=alt') && l.includes('access_token=%3CMETA_ACCESS_TOKEN%3E')));
+  assert.ok(lines.some((l) => l.startsWith('[dry-run] POST https://graph.facebook.com/v26.0/%3CIG_BUSINESS_ID%3E/media\n') && l.includes('alt_text=alt') && l.includes('access_token=%3CMETA_ACCESS_TOKEN%3E')));
   assert.ok(lines.some((l) => l.includes('/media_publish')));
   const s = await g.publishStory({ imageUrl: 'https://h/s.jpg' });
   assert.match(s.mediaId, /^dry_/);
   assert.ok(lines.some((l) => l.includes('media_type=STORIES')));
+});
+
+test('createGraph dry-run with a token present prints <token> — never the token, not even a prefix', async () => {
+  const lines = [];
+  const g = createGraph({ token: 'EAABsecretsecretsecret', igId: '123', dryRun: true, log: (s) => lines.push(s), progress: () => {} });
+  await g.publishImage({ imageUrl: 'https://h/a.jpg', caption: 'hi' });
+  await g.publishingLimit();
+  assert.ok(lines.length >= 4);
+  assert.ok(lines.every((l) => !l.includes('EAAB')), 'no prefix either');
+  assert.ok(lines.every((l) => l.includes('access_token=%3Ctoken%3E')));
+  assert.equal(g.api, 'https://graph.facebook.com/v26.0');
+  assert.equal(createGraph({ version: 'v23.0', dryRun: true, log: () => {} }).api, 'https://graph.facebook.com/v23.0', 'GRAPH_VERSION still overrides');
 });
 
 test('createGraph live: a Graph error becomes a GraphError with code, subcode and hint; 190 is an auth error', async () => {

@@ -2,7 +2,7 @@
 /* Instagram Graph API poster for @bonarealestatesa — Node 22+, zero dependencies.
    Env:   META_ACCESS_TOKEN  (Page/System-User token with instagram_basic, instagram_content_publish, pages_read_engagement)
           IG_BUSINESS_ID     (Instagram Business account id — see marketing/instagram-connect-checklist.md)
-          GRAPH_VERSION      (optional, default v21.0)
+          GRAPH_VERSION      (optional, default v26.0 — lib/graph.mjs DEFAULT_GRAPH_VERSION)
    Commands:
      whoami
      post-image    --image-url <https://…jpg> (--caption "text" | --caption-file path) [--alt-text "…"]
