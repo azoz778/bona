@@ -1,8 +1,9 @@
 ; Bona — unattended Instagram publisher. systemd USER unit (no root anywhere).
 ;
 ; Fired by bona-ig-publish.timer every 15 min, 17:00–23:59 Asia/Riyadh. Each run reads
-; src/data/content-calendar.json, publishes what is due (max 3, 60 s apart), appends to
-; marketing/queue/published.jsonl and exits. See scripts/social/README.md → "Publishing — Instagram".
+; src/data/content-calendar.json, publishes what is due (max 3, 60 s apart), appends to the
+; ledger at ~/bona-data/ig/published.jsonl (outside the repo) and exits.
+; See scripts/social/README.md → "Publishing — Instagram".
 ;
 ;   bash ~/bona/ops/systemd/install.sh            # copies both units, daemon-reload, enables the timer
 ;   systemctl --user list-timers bona-ig-publish.timer
@@ -31,6 +32,9 @@ Environment=PATH=%h/.local/bin:%h/.nvm/versions/node/v24.19.0/bin:/usr/local/bin
 ; META_ACCESS_TOKEN, IG_BUSINESS_ID (and optionally GRAPH_VERSION). No "-" prefix on purpose:
 ; a missing token file must FAIL the unit loudly, not silently run in dry-run mode every 15 min.
 EnvironmentFile=%h/.secrets/bona-meta-graph.env
+; The calendar comes from the working tree, so the tree must be on main — a feature branch
+; left checked out must not feed the timer. guard-main.sh logs why and fails the unit.
+ExecStartPre=/usr/bin/env bash %h/bona/ops/systemd/guard-main.sh %h/bona
 ExecStart=/usr/bin/env node scripts/social/publish.mjs --limit 3
 ; Worst case per run: 3 publishes × (container poll up to 2 min + 60 s gap) ≈ 9 min. Must end
 ; before the next 15-min tick; the lock file covers an overlap anyway.
@@ -48,8 +52,9 @@ ProtectControlGroups=true
 ProtectKernelTunables=true
 RestrictSUIDSGID=true
 LockPersonality=true
-; The only things the publisher writes: the ledger and its lock file.
-ReadWritePaths=%h/bona/marketing/queue
+; The only things the publisher writes: the ledger and its lock file. install.sh creates the
+; directory (ReadWritePaths needs it to exist); the repo itself stays read-only.
+ReadWritePaths=%h/bona-data/ig
 MemoryHigh=256M
 MemoryMax=512M
 
