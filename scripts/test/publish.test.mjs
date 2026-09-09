@@ -118,8 +118,16 @@ test('ledger idempotency: terminal statuses are never retried; error retries up 
   const gaveUp = decide(e, ctx({ ledger: ledgerOf(row('error'), row('error'), row('error')) }));
   assert.equal(gaveUp.status, 'skipped:gave-up');
   assert.equal(gaveUp.terminal, true);
-  assert.equal(decide(e, ctx({ ledger: ledgerOf(row('error'), row('error'), row('error'), row('published')) })).status, null, 'the last line wins: published after three errors is published');
-  assert.equal(decide(e, ctx({ ledger: ledgerOf(row('error'), row('error'), row('error'), row('published'), row('error')) })).status, 'candidate', 'the error count restarts after a publish (1, not 4)');
+  assert.equal(decide(e, ctx({ ledger: ledgerOf(row('error'), row('error'), row('error'), row('published')) })).status, null, 'published after three errors is published');
+  for (const later of [[row('error')], [row('skipped:quota')], [row('error'), row('error'), row('skipped:missed')]]) {
+    assert.equal(decide(e, ctx({ ledger: ledgerOf(row('published'), ...later) })).status, null, `published is irrevocable: a later ${later.map((r) => r.status).join('+')} line (hand edit, merge, recovery script) never re-opens it`);
+    assert.equal(decide(e, ctx({ ledger: ledgerOf(row('published'), ...later), forceId: e.id, now: 0 })).status, 'refused:published', 'not even forced');
+  }
+  assert.equal(decide(mk({ status: 'published' }), ctx()).status, null, 'the calendar itself saying published (gen-social read-back, or a human) is settled');
+  assert.equal(decide(mk({ status: 'published' }), ctx({ forceId: e.id, now: 0 })).status, 'refused:published');
+  assert.equal(decide(e, ctx({ ledger: ledgerOf(row('publishing', { containerId: 'c9' })) })).status, null, 'an in-flight line is never a candidate — reconcile settles it');
+  assert.equal(decide(e, ctx({ ledger: ledgerOf(row('publishing', { containerId: 'c9' })), forceId: e.id, now: 0 })).status, 'refused:publishing');
+  assert.equal(decide(e, ctx({ ledger: ledgerOf(row('publishing', { containerId: 'c9' }), row('error')) })).status, 'candidate', 'reconciled to error: the container failed, so the post may be tried again (counted)');
   const forced = { forceId: e.id, now: 0 };
   assert.equal(decide(e, ctx({ ...forced, ledger: ledgerOf(row('skipped:gave-up')) })).status, 'candidate');
   assert.equal(decide(e, ctx({ ...forced, ledger: ledgerOf(row('skipped:missed')) })).status, 'candidate');
@@ -128,7 +136,7 @@ test('ledger idempotency: terminal statuses are never retried; error retries up 
   assert.equal(decide(e, ctx({ ...forced, ledger: ledgerOf(row('skipped:ad-licence-placeholder')) })).status, null, 'nor is a placeholder hard stop');
   const refused = decide(e, ctx({ ...forced, ledger: ledgerOf(row('published', { permalink: 'https://instagram.com/p/x' })) }));
   assert.equal(refused.status, 'refused:published');
-  assert.match(refused.detail, /remove the ledger line/);
+  assert.match(refused.detail, /never re-posted, not even with --force-id/);
   assert.equal(decide(mk({ id: 'other' }), ctx(forced)).status, null, '--force-id ignores every other entry');
 });
 
@@ -150,8 +158,12 @@ test('ledger parsing: JSON lines, corrupt lines skipped, last line per id wins, 
   const idx = indexLedger(recs);
   assert.equal(idx.get('a').latest.status, 'error');
   assert.equal(idx.get('a').errors, 1);
+  assert.equal(idx.get('a').published.status, 'published', 'the published line is remembered even when it is not the last');
   assert.equal(idx.get('b').errors, 0);
   assert.equal(idx.has('c'), false);
+  const fl = indexLedger(parseLedger('{"id":"x","status":"publishing","containerId":"c1"}\n{"id":"y","status":"publishing","containerId":"c2"}\n{"id":"y","status":"published"}\n'));
+  assert.equal(fl.get('x').inFlight.containerId, 'c1');
+  assert.equal(fl.get('y').inFlight, null, 'a later published line settles the flight');
 });
 
 test('image URLs: site-relative → absolute, PNG → its .jpg/.jpeg twin, local paths are not hosted', () => {
