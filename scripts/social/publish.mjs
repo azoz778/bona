@@ -114,7 +114,8 @@ export const DEFAULTS = Object.freeze({
   gapMs: 60_000,
   quotaStop: 20,
   maxErrors: 3,
-  lockStaleMs: 20 * 60_000,
+  /** Age fallback for a lock with no readable pid — matches the unit's TimeoutStartSec, after which no holder can be alive. */
+  lockStaleMs: 25 * 60_000,
   defaultTime: '20:30',
 });
 /** Ledger statuses that end an entry's life. Everything else is re-evaluated next run. */

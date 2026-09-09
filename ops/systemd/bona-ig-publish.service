@@ -40,9 +40,13 @@ ExecStartPre=/usr/bin/env bash %h/bona/ops/systemd/guard-main.sh %h/bona
 ; grace a slot can use inside the window; the publisher refuses to post outside 17:00–23:59 KSA
 ; anyway (deferred:quiet-hours), which is what makes Persistent=true safe at a 02:00 boot.
 ExecStart=/usr/bin/env node scripts/social/publish.mjs --live --grace 3 --limit 3
-; Worst case per run: 3 publishes × (container poll up to 2 min + 60 s gap) ≈ 9 min. Must end
-; before the next 15-min tick; the lock file covers an overlap anyway.
-TimeoutStartSec=13min
+; Containers are polled every 3 s (single image / story) or 5 s (carousel items and the
+; carousel parent), 2 min budget per container. A run is normally well under a minute; the
+; theoretical worst case (3 publishes, 6-slide carousels, every container slow) is ~45 min,
+; which no real run reaches. 25 min bounds it: beyond that something is wrong, SIGTERM lands
+; between entries (or mid-publish with the in-flight line already written — reconciled next
+; run) and the next tick finds the lock held by a live pid and steps aside. Overlap is safe.
+TimeoutStartSec=25min
 ; On stop (the start timeout above, `systemctl --user stop`, shutdown) the publisher gets
 ; SIGTERM, finishes the entry it is on — the in-flight ledger line is written before
 ; media_publish, so a kill mid-publish is reconciled next run, never re-posted — and exits.
