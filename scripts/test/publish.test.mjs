@@ -9,6 +9,7 @@ import {
   absoluteImageUrl, acquireLock, composeCaption, decide, DEFAULTS, fmtKsa, hasLicencePlaceholder, indexLedger,
   jpegCandidates, ksaToEpoch, normaliseEntry, parseArgs, parseLedger, parseNow, resolveImage, run, TERMINAL,
 } from '../social/publish.mjs';
+import { DEFAULT_LEDGER_PATH, lockPathFor, readLedgerFile, resolveLedgerPath } from '../social/lib/ledger.mjs';
 
 const H = 3_600_000;
 const mk = (over = {}) => normaliseEntry({
@@ -131,6 +132,18 @@ test('ledger idempotency: terminal statuses are never retried; error retries up 
   assert.equal(decide(mk({ id: 'other' }), ctx(forced)).status, null, '--force-id ignores every other entry');
 });
 
+test('ledger location: outside the repo — ~/bona-data/ig by default, $BONA_IG_LEDGER or --ledger override, lock beside it, absent = empty', () => {
+  const home = os.homedir();
+  assert.equal(DEFAULT_LEDGER_PATH, path.join(home, 'bona-data', 'ig', 'published.jsonl'));
+  assert.equal(resolveLedgerPath(null, {}), DEFAULT_LEDGER_PATH);
+  assert.equal(resolveLedgerPath(null, { BONA_IG_LEDGER: '/srv/ig/l.jsonl' }), '/srv/ig/l.jsonl');
+  assert.equal(resolveLedgerPath('/tmp/x.jsonl', { BONA_IG_LEDGER: '/srv/ig/l.jsonl' }), '/tmp/x.jsonl', '--ledger beats the env');
+  assert.equal(resolveLedgerPath('~/ig/l.jsonl', {}), path.join(home, 'ig', 'l.jsonl'), 'a leading ~ is the home directory');
+  assert.equal(lockPathFor('/srv/ig/l.jsonl'), '/srv/ig/.publish.lock');
+  assert.ok(!DEFAULT_LEDGER_PATH.includes(path.join(home, 'bona') + path.sep), 'never inside the working tree');
+  assert.deepEqual(readLedgerFile(path.join(os.tmpdir(), 'bona-no-such-ledger-' + process.pid + '.jsonl')), [], 'a missing ledger reads as empty');
+});
+
 test('ledger parsing: JSON lines, corrupt lines skipped, last line per id wins, error count resets on publish', () => {
   const recs = parseLedger('{"id":"a","status":"error"}\nnot json\n\n{"id":"a","status":"error"}\n{"id":"b","status":"published","ts":"t"}\n{"id":"a","status":"published"}\n{"id":"a","status":"error"}\n{"status":"published"}\n');
   assert.equal(recs.length, 5);
@@ -193,9 +206,9 @@ test('normaliseEntry: content-calendar.json shape and queue.json shape both map 
 
 test('parseArgs: defaults, numbers validated, unknown flags refused', () => {
   const d = parseArgs([]);
-  assert.deepEqual(d, { dryRun: false, now: undefined, graceHours: 6, limit: 3, forceId: null, source: DEFAULTS.source, json: false, help: false });
-  const o = parseArgs(['--dry-run', '--now', '2026-09-09T18:30', '--grace', '2', '--limit', '1', '--force-id', 'ig-launch-04', '--source', '/tmp/x.json', '--json']);
-  assert.deepEqual(o, { dryRun: true, now: '2026-09-09T18:30', graceHours: 2, limit: 1, forceId: 'ig-launch-04', source: '/tmp/x.json', json: true, help: false });
+  assert.deepEqual(d, { dryRun: false, now: undefined, graceHours: 6, limit: 3, forceId: null, source: DEFAULTS.source, ledger: null, json: false, help: false });
+  const o = parseArgs(['--dry-run', '--now', '2026-09-09T18:30', '--grace', '2', '--limit', '1', '--force-id', 'ig-launch-04', '--source', '/tmp/x.json', '--ledger', '/tmp/l.jsonl', '--json']);
+  assert.deepEqual(o, { dryRun: true, now: '2026-09-09T18:30', graceHours: 2, limit: 1, forceId: 'ig-launch-04', source: '/tmp/x.json', ledger: '/tmp/l.jsonl', json: true, help: false });
   assert.throws(() => parseArgs(['--limit', 'three']), /--limit must be a number/);
   assert.throws(() => parseArgs(['--bogus']), /Unknown option/);
 });
