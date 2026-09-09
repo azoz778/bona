@@ -1,0 +1,141 @@
+{
+  "id": "BONA-W016",
+  "slug": "durrat-al-basateen-villa-al-mohammadiyah",
+  "sourceRef": "WA-20260909-0794C6",
+  "status": "available",
+  "category": "buy",
+  "type": "villa",
+  "kind": "house",
+  "featured": false,
+  "title": {
+    "en": "Durrat Al Basateen Villa, Al Mohammadiyah",
+    "ar": "فيلا درة البساتين، المحمدية"
+  },
+  "location": {
+    "district": {
+      "en": "Al Mohammadiyah",
+      "ar": "المحمدية"
+    },
+    "city": {
+      "en": "Jeddah",
+      "ar": "جدة"
+    },
+    "country": {
+      "en": "Saudi Arabia",
+      "ar": "المملكة العربية السعودية"
+    },
+    "countryCode": "SA"
+  },
+  "price": {
+    "amount": 7000000,
+    "currency": "SAR",
+    "from": false,
+    "period": null,
+    "onRequest": false
+  },
+  "specs": {
+    "beds": 4,
+    "baths": null,
+    "areaSqm": 680,
+    "plotSqm": 420,
+    "yearBuilt": null,
+    "floors": 2
+  },
+  "images": [
+    {
+      "src": "/listings/durrat-al-basateen-villa-al-mohammadiyah/01.jpg",
+      "thumb": "/listings/durrat-al-basateen-villa-al-mohammadiyah/01-thumb.webp",
+      "alt": {
+        "en": "Façade at night — Durrat Al Basateen Villa, Al Mohammadiyah",
+        "ar": "الواجهة ليلاً — فيلا درة البساتين، المحمدية"
+      }
+    },
+    {
+      "src": "/listings/durrat-al-basateen-villa-al-mohammadiyah/02.jpg",
+      "thumb": "/listings/durrat-al-basateen-villa-al-mohammadiyah/02-thumb.webp",
+      "alt": {
+        "en": "Exterior — Durrat Al Basateen Villa, Al Mohammadiyah",
+        "ar": "الواجهة الخارجية — فيلا درة البساتين، المحمدية"
+      }
+    },
+    {
+      "src": "/listings/durrat-al-basateen-villa-al-mohammadiyah/03.jpg",
+      "thumb": "/listings/durrat-al-basateen-villa-al-mohammadiyah/03-thumb.webp",
+      "alt": {
+        "en": "Living room — Durrat Al Basateen Villa, Al Mohammadiyah",
+        "ar": "غرفة المعيشة — فيلا درة البساتين، المحمدية"
+      }
+    },
+    {
+      "src": "/listings/durrat-al-basateen-villa-al-mohammadiyah/04.jpg",
+      "thumb": "/listings/durrat-al-basateen-villa-al-mohammadiyah/04-thumb.webp",
+      "alt": {
+        "en": "Reception salon — Durrat Al Basateen Villa, Al Mohammadiyah",
+        "ar": "المجلس — فيلا درة البساتين، المحمدية"
+      }
+    }
+  ],
+  "videos": [],
+  "description": {
+    "en": "Durrat Al Basateen stands in Al Mohammadiyah, one of north Jeddah's established residential districts, within a few minutes of King Road, Prince Sultan Road, Red Sea Mall and the Jeddah Corniche. King Abdulaziz International Airport is around ten minutes away.\n\nThe villa sits on a 420 m² plot with 680 m² of built-up area, arranged over two floors with a roof annex. The exterior combines clean white massing, vertical fin detailing and warm timber accents, with panoramic glazing, terraces and balconies opening the interior to natural light.\n\nThe ground floor holds two salons, a family living room facing the pool, and separate main and service kitchens. The first floor is given over to four master bedrooms and a family lounge, while the roof annex adds a further lounge, a wide terrace, a laundry room and a maid's room. The grounds include a private pool, garden and driver's room.\n\nThe house is fitted with a private lift, smart entry and central air conditioning, with provision for security and CCTV systems and smart-home readiness throughout.",
+    "ar": "تقع فيلا درة البساتين في حي المحمدية، أحد الأحياء السكنية الراسخة في شمال جدة، على بعد دقائق من طريق الملك وطريق الأمير سلطان ومول ريد سي وكورنيش جدة، وعلى مسافة نحو عشر دقائق من مطار الملك عبدالعزيز الدولي.\n\nتقوم الفيلا على أرض مساحتها 420 مترًا مربعًا بمسطح بناء يبلغ 680 مترًا مربعًا، موزعة على دورين مع ملحق علوي. تجمع الواجهة الخارجية بين الكتلة البيضاء النظيفة والزعانف العمودية واللمسات الخشبية الدافئة، مع زجاج بانورامي وتراسات وشرفات تفتح الداخل على الضوء الطبيعي.\n\nيضم الدور الأرضي صالونين وصالة معيشة عائلية تطل على المسبح، إلى جانب مطبخ رئيسي ومطبخ خدمات منفصلين. ويُخصَّص الدور الأول لأربع غرف نوم ماستر وصالة عائلية، بينما يضيف الملحق العلوي صالة إضافية وتراسًا واسعًا وغرفة غسيل وغرفة خادمة. ويشتمل الحوش الخارجي على مسبح خاص وحديقة وغرفة سائق.\n\nزُودت الفيلا بمصعد خاص ودخول ذكي وتكييف مركزي، مع تأسيس لأنظمة الأمن والمراقبة وجاهزية كاملة لتقنية المنزل الذكي."
+  },
+  "highlights": {
+    "en": [
+      "Private pool and garden",
+      "Four master bedrooms",
+      "Private lift, smart entry",
+      "Double-height reception majlis",
+      "Roof terrace annex"
+    ],
+    "ar": [
+      "مسبح وحديقة خاصة",
+      "أربع غرف نوم ماستر",
+      "مصعد خاص ودخول ذكي",
+      "مجلس استقبال مزدوج الارتفاع",
+      "ملحق علوي بتراس واسع"
+    ]
+  },
+  "virtualTourUrl": null,
+  "brochureUrl": "https://bona-real-estate.com/listings/durrat-al-basateen-villa-al-mohammadiyah/brochure.pdf",
+  "project": null,
+  "unit": null,
+  "map": null,
+  "mapPrecision": null,
+  "listedAt": "2026-09-09",
+  "hidden": false,
+  "_intake": {
+    "source": "whatsapp",
+    "pdfSha256": "0794c62fa7091055007bff90ab6fea966caa6bc6231ea360ff771a821b9b1338",
+    "model": "sonnet",
+    "confidence": 0.85,
+    "warnings": [
+      "model-flagged",
+      "map-unconfirmed"
+    ],
+    "images": [
+      {
+        "n": 1,
+        "candidate": 1,
+        "room": "facade_night"
+      },
+      {
+        "n": 2,
+        "candidate": 2,
+        "room": "exterior"
+      },
+      {
+        "n": 3,
+        "candidate": 4,
+        "room": "living"
+      },
+      {
+        "n": 4,
+        "candidate": 3,
+        "room": "majlis"
+      }
+    ],
+    "createdAt": "2026-09-09T04:13:56.246Z",
+    "site": "https://bona-real-estate.com"
+  }
+}
