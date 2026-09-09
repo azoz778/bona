@@ -39,7 +39,10 @@
    `published` is irrevocable: once any line says so, nothing appended later — and not
    --force-id — re-opens the id. An entry the calendar itself marks published is settled too.
 
-   Never twice: a `publishing` line {containerId} is written BEFORE media_publish. If the run
+   Never twice, part 1: a candidate whose exact image URLs + caption match a `published` line
+   from the last 14 days under another id is skipped:duplicate (a regenerated calendar can hand
+   an old post a new id). Every published line carries that contentHash.
+   Never twice, part 2: a `publishing` line {containerId} is written BEFORE media_publish. If the run
    dies after that (crash, SIGKILL, a 5xx with the post already live), the id is in flight:
    never a candidate, never re-posted blind. Every live run starts by reconciling in-flight
    lines through GET /{containerId}?fields=status_code — PUBLISHED -> published (mediaId
@@ -90,7 +93,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs as nodeParseArgs } from 'node:util';
 import { CAPTION_MAX_HASHTAGS, CAROUSEL_MAX, CAROUSEL_MIN, checkCaption, checkImageUrl, createGraph, GraphError } from './lib/graph.mjs';
-import { indexLedger, lockPathFor, parseLedger, readLedgerFile, resolveLedgerPath, slug } from './lib/ledger.mjs';
+import { contentHash, indexLedger, lockPathFor, parseLedger, readLedgerFile, resolveLedgerPath, slug } from './lib/ledger.mjs';
 
 export { indexLedger, parseLedger, slug };
 
@@ -114,6 +117,8 @@ export const DEFAULTS = Object.freeze({
   gapMs: 60_000,
   quotaStop: 20,
   maxErrors: 3,
+  /** A candidate whose images + caption match a `published` line this recent is a duplicate, whatever its id. */
+  dedupeDays: 14,
   /** Age fallback for a lock with no readable pid — matches the unit's TimeoutStartSec, after which no holder can be alive. */
   lockStaleMs: 25 * 60_000,
   defaultTime: '20:30',
@@ -404,7 +409,7 @@ export async function run(opts = {}, deps = {}) {
   /** Every ledger line has the same head; the tail is whatever the outcome knows. */
   const rowOf = (entry, status, extra = {}) => ({
     id: entry.id, date: entry.date, slot: entry.time, kind: entry.kind, status, mediaId: extra.mediaId ?? null, permalink: extra.permalink ?? null, ts: wall(),
-    ...(extra.containerId ? { containerId: extra.containerId } : {}), ...(extra.detail ? { detail: extra.detail } : {}), ...(extra.transient ? { transient: true } : {}),
+    ...(extra.containerId ? { containerId: extra.containerId } : {}), ...(extra.detail ? { detail: extra.detail } : {}), ...(extra.transient ? { transient: true } : {}), ...(extra.contentHash ? { contentHash: extra.contentHash } : {}),
     ...(extra.imageUrl ? { imageUrl: extra.imageUrl } : {}), ...(extra.imageUrls ? { imageUrls: extra.imageUrls } : {}),
   });
   const record = (entry, status, extra = {}) => { const row = rowOf(entry, status, extra); results.push({ ...row, topic: entry.topic }); return row; };
@@ -554,6 +559,12 @@ export async function run(opts = {}, deps = {}) {
       let kind = entry.kind;
       if (kind === 'carousel' && urls.length < CAROUSEL_MIN) { kind = 'post'; log(`  ${entry.id}: only one image — posting as a single image`); }
       const imgs = kind === 'carousel' ? { imageUrls: urls } : { imageUrl: urls[0] };
+      // The same pictures + caption already went out under another id recently? (A regenerated
+      // calendar can hand an old post a new id; ids protect against re-runs, this against that.)
+      const hash = contentHash(urls, kind === 'story' ? '' : c.caption);
+      const dup = records.find((r) => r.status === 'published' && r.contentHash === hash && r.id !== entry.id && Number.isFinite(Date.parse(r.ts)) && nowMs - Date.parse(r.ts) <= o.dedupeDays * 86_400_000);
+      if (dup) { line(entry, 'skipped:duplicate', `same images + caption as ${dup.id}, published ${dup.ts}`); maybeWrite(entry, 'skipped:duplicate', { detail: `duplicate of ${dup.id} (${dup.ts})`, contentHash: hash }, { terminal: false }); continue; }
+      imgs.contentHash = hash;
 
       // quota: read once, before the first publish of the run
       if (quota === null) {
