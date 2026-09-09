@@ -1,5 +1,5 @@
 # Bona — next session handoff
-_Written 2026-09-09, updated 03:30 KSA with the resolved API location, the secrets-sync gap and the wiring runbook. Supersedes nothing; read alongside `OWNER-NOW-2026-09-08.md` and
+_Written 2026-09-09, updated ~15:00 KSA with the resolved API location, the secrets-sync gap and the wiring runbook. Supersedes nothing; read alongside `OWNER-NOW-2026-09-08.md` and
 `OWNER-SOCIAL-SIGNUP.md`._
 
 ## Where things stand
@@ -173,16 +173,32 @@ Verify, in this order — no assumptions:
 - `docs/checklists/google-bona.md` still says `bona.azoz.uk` / `bona.sa` and a URL-prefix property.
   The live domain is `bona-real-estate.com` and the plan is a **Domain** property verified by DNS
   TXT, which also covers `api.`.
-- **Concurrency, 2026-09-09 03:00:** four Claude sessions were active on this repo at once. One
+- **Concurrency, 2026-09-09 ~14:00 KSA:** four Claude sessions were active on this repo at once. One
   drives the Bona Chrome (`:9223`) through the Meta app + system-user flow and owns
   `feat/ig-calendar-publisher` (`~/bona` is checked out on it). Never drive `:9223` from two
   sessions; do other sessions' work in a worktree off `origin/main`.
 
 ## Still open
 
+- **Foreign property stays in the queue and is unblocked (owner decision 2026-09-09 ~14:50 KSA).**
+  The owner holds a marketing authorisation from the developer for the Muscat / Marbella / Dubai
+  stock, so those posts are marketed on that basis, not on a REGA per-ad licence (which binds to a
+  Saudi deed and can never be issued for them). Implemented in `scripts/social/lib/listing.mjs`
+  `adLicence()`: `developer-authorisation` (outside the Kingdom: developer line in caption + CTA
+  card, never blocked) · `rega-ad-licence` (a recorded, unexpired `listing.licence.adNumber`:
+  the number is printed, entry publishable) · `rega-pending` (placeholder, blocked). Every queue
+  entry now carries `licenceBasis`. So the moment the owner records a REGA number with
+  `licence BONA-### <number> <YYYY-MM-DD>` in the WhatsApp group, a rebuild + `queue.mjs --render`
+  unblocks that listing's posts with the real number on caption and card — no hand edits.
+  Ask the lawyer to confirm the foreign-marketing basis explicitly (developer mandate vs a REGA
+  permit for marketing property outside the Kingdom) alongside the two FAL questions.
+- **Queue re-planned from 2026-09-10.** `listings.json` gained five listings after the first plan,
+  so the generator is not a like-for-like regeneration (103 entries re-assigned). Nothing had been
+  posted, so the new plan is the plan. Rendered assets (≈205 MB, gitignored) live in
+  `~/bona-wt/ops/marketing/queue/` — NOT in `~/bona`, which only ever had `queue.json`. The older
+  render in `~/bona-wt/social/marketing/queue/` is stale (foreign CTA cards carry the REGA
+  placeholder there). A worktree needs `npm ci` before `--render` works (sharp is native).
 - **Facebook Page publishing does not exist yet.** `scripts/instagram-post.mjs` and the in-progress
   `scripts/social/publish.mjs` (branch `feat/ig-calendar-publisher`) are Instagram-only; a Page
   `/feed` + `/photos` poster is needed for the 4 unblocked Facebook entries. Build it into
   `scripts/social/lib/graph.mjs` after that branch lands, not in parallel with it.
-- 17 queued posts are for foreign property (Muscat, Dubai, Le Vésinet, Marbella) blocked on a Saudi
-  ad licence that can never be issued. Recommendation: drop them from the queue.
