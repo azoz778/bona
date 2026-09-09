@@ -13,9 +13,8 @@ __pycache__/
 marketing/queue/*
 !marketing/queue/queue.json
 !marketing/queue/README.md
-# The Instagram publisher's ledger (scripts/social/publish.mjs): small, append-only, and the
-# audit trail of what went out — committed on purpose. Its lock file is not.
-!marketing/queue/published.jsonl
+# The Instagram publisher's ledger is NOT here: it lives in ~/bona-data/ig/published.jsonl,
+# outside the working tree (scripts/social/lib/ledger.mjs), so a branch switch cannot hide it.
 scripts/social/.cache/
 # ops/ is scratch (browser step scripts, screenshots, session notes) — except the systemd
 # units for the unattended publisher, which are part of the product.
