@@ -226,15 +226,26 @@ test('parseArgs: defaults, numbers validated, unknown flags refused', () => {
 });
 
 // ---- the run itself -------------------------------------------------------------------
-function harness({ entries, ledger = [], quota = 0, publishFail = null, imageMap = null } = {}) {
+function harness({ entries, ledger = [], quota = 0, publishFail = null, failAfterLine = null, imageMap = null, containers = {}, publishContainerFail = null, onPublish = null } = {}) {
   const appended = [], logs = [], slept = [], calls = [];
   const map = imageMap ?? Object.fromEntries(entries.flatMap((e) => (e.images || [e.image]).filter(Boolean).map((u) => [absoluteImageUrl(u), {}])));
-  let n = 0;
+  let n = 0, k = 0;
+  // Mirrors lib/graph.mjs: container → wait → beforePublish(containerId) → media_publish.
+  const flow = async (p) => {
+    if (publishFail) throw publishFail;
+    const cid = `c${++k}`;
+    await p.beforePublish?.(cid);
+    if (failAfterLine) throw failAfterLine;
+    await onPublish?.(cid);
+    return { mediaId: `m${++n}`, permalink: `https://instagram.com/p/m${n}`, containerId: cid };
+  };
   const graph = {
     publishingLimit: async () => { calls.push('limit'); return { quotaUsage: quota, quotaTotal: 25, quotaDurationSec: 86400 }; },
-    publishImage: async (p) => { calls.push(['image', p.imageUrl, p.altText]); if (publishFail) throw publishFail; return { mediaId: `m${++n}`, permalink: `https://instagram.com/p/m${n}` }; },
-    publishCarousel: async (p) => { calls.push(['carousel', p.imageUrls]); if (publishFail) throw publishFail; return { mediaId: `m${++n}`, permalink: `https://instagram.com/p/m${n}` }; },
-    publishStory: async (p) => { calls.push(['story', p.imageUrl]); if (publishFail) throw publishFail; return { mediaId: `m${++n}`, permalink: `https://instagram.com/p/m${n}` }; },
+    publishImage: async (p) => { calls.push(['image', p.imageUrl, p.altText]); return flow(p); },
+    publishCarousel: async (p) => { calls.push(['carousel', p.imageUrls]); return flow(p); },
+    publishStory: async (p) => { calls.push(['story', p.imageUrl]); return flow(p); },
+    containerStatus: async (cid) => { calls.push(['status', cid]); const c = containers[cid]; if (c instanceof Error) throw c; if (!c) throw new Error(`unexpected containerStatus(${cid})`); return c; },
+    publishContainer: async (cid) => { calls.push(['media_publish', cid]); if (publishContainerFail) throw publishContainerFail; return { mediaId: `m${++n}`, permalink: `https://instagram.com/p/m${n}`, containerId: cid }; },
   };
   const deps = {
     now: ksaToEpoch('2026-09-10', '21:00'), wallClock: Date.UTC(2026, 8, 10, 18, 0), lock: false, graph, fetch: imageFetch(map),
@@ -254,12 +265,19 @@ test('run: publishes what is due in slot order, 60 s apart, records the ledger, 
   assert.deepEqual(h.slept, [60_000, 60_000], 'a gap before every publish after the first');
   assert.deepEqual(h.appended.map((x) => [x.id, x.status, x.mediaId]), [
     ['ig-2026-09-10-post-lic', 'skipped:ad-licence', null],
-    ['ig-2026-09-10-story-story', 'published', 'm1'], ['ig-2026-09-10-post-a', 'published', 'm2'], ['ig-2026-09-10-post-b', 'published', 'm3'],
-  ]);
-  const pub = h.appended[1];
-  assert.deepEqual(Object.keys(pub), ['id', 'date', 'slot', 'kind', 'status', 'mediaId', 'permalink', 'ts', 'imageUrl']);
+    ['ig-2026-09-10-story-story', 'publishing', null], ['ig-2026-09-10-story-story', 'published', 'm1'],
+    ['ig-2026-09-10-post-a', 'publishing', null], ['ig-2026-09-10-post-a', 'published', 'm2'],
+    ['ig-2026-09-10-post-b', 'publishing', null], ['ig-2026-09-10-post-b', 'published', 'm3'],
+  ], 'the in-flight line lands BEFORE media_publish, the published line after');
+  const flight = h.appended[1];
+  assert.deepEqual(Object.keys(flight), ['id', 'date', 'slot', 'kind', 'status', 'mediaId', 'permalink', 'ts', 'containerId', 'imageUrl']);
+  assert.equal(flight.containerId, 'c1');
+  const pub = h.appended[2];
+  assert.deepEqual(Object.keys(pub), ['id', 'date', 'slot', 'kind', 'status', 'mediaId', 'permalink', 'ts', 'containerId', 'imageUrl']);
   assert.equal(pub.ts, '2026-09-10T18:00:00.000Z');
   assert.equal(pub.permalink, 'https://instagram.com/p/m1');
+  assert.equal(pub.containerId, 'c1');
+  assert.equal(r.results.some((x) => x.status === 'publishing'), false, 'the in-flight line is a ledger fact, not a result');
   assert.ok(h.logs.some((l) => /^published\s+ig-2026-09-10-post-a  2026-09-10 20:30  post/.test(l)), 'one log line per entry');
 
   // second run against the ledger it just wrote: nothing is repeated, the ad-licence line is not re-appended
@@ -269,6 +287,98 @@ test('run: publishes what is due in slot order, 60 s apart, records the ledger, 
   assert.deepEqual(h2.calls, []);
   assert.deepEqual(h2.appended, [], 'same status as last time → no new ledger line');
   assert.ok(h2.logs.some((l) => l.startsWith('skipped:ad-licence')), 'but it is still logged');
+});
+
+test('run: a failure after the publishing line is needs-reconcile — no error line, never re-posted; the next run asks Instagram', async () => {
+  const { GraphError } = await import('../social/lib/graph.mjs');
+  const entries = [raw({ n: 'a' }), raw({ n: 'b', time: '20:31' })];
+  const h = harness({ entries, failAfterLine: new GraphError('POST /media_publish → HTTP 500', { status: 500 }) });
+  const r = await run({ dryRun: false }, h.deps);
+  assert.equal(r.code, 2, 'a unit failure is what makes the human look');
+  assert.deepEqual(h.appended.map((x) => x.status), ['publishing', 'publishing'], 'nothing but the in-flight lines: no error line can re-open them');
+  assert.ok(h.logs.filter((l) => l.startsWith('needs-reconcile')).length === 2);
+  assert.ok(h.logs.some((l) => /NOT re-posted/.test(l)));
+
+  // next run, same ledger: c1 went through (PUBLISHED), c2 never did (ERROR) → one reconciled publish, one retriable error, no blind re-post of either
+  const h2 = harness({ entries, ledger: h.appended, containers: { c1: { statusCode: 'PUBLISHED', status: '' }, c2: { statusCode: 'ERROR', status: 'Media upload failed' } } });
+  const r2 = await run({ dryRun: false }, h2.deps);
+  assert.deepEqual(h2.calls.slice(0, 2), [['status', 'c1'], ['status', 'c2']], 'reconcile runs before anything else');
+  assert.deepEqual(h2.appended.map((x) => [x.id, x.status, x.mediaId, x.containerId]), [
+    ['ig-2026-09-10-post-a', 'published', null, 'c1'],
+    ['ig-2026-09-10-post-b', 'error', null, 'c2'],
+    ['ig-2026-09-10-post-b', 'publishing', null, 'c1'],
+    ['ig-2026-09-10-post-b', 'published', 'm1', 'c1'],
+  ], 'a: settled as published (mediaId unknown); b: the container died, so it is tried again with a NEW container');
+  assert.equal(h2.calls.filter((c) => c[0] === 'image').length, 1, 'a is never re-posted');
+  assert.equal(r2.published, 1);
+  assert.equal(r2.errors, 1);
+
+  // third run: the ledger says a is published, b is published → nothing to do, nothing asked
+  const h3 = harness({ entries, ledger: [...h.appended, ...h2.appended] });
+  const r3 = await run({ dryRun: false }, h3.deps);
+  assert.deepEqual(h3.calls, []);
+  assert.equal(r3.code, 0);
+});
+
+test('run: reconcile — FINISHED re-sends media_publish with the same creation_id; GET failure / IN_PROGRESS stay in flight and are never a candidate; dry-run only reports', async () => {
+  const { GraphError } = await import('../social/lib/graph.mjs');
+  const a = raw({ n: 'a' }), b = raw({ n: 'b', time: '20:31' }), c = raw({ n: 'c', time: '20:32' });
+  const flight = (e, cid) => ({ id: e.id, date: e.date, slot: e.time, kind: 'post', status: 'publishing', containerId: cid, ts: '2026-09-10T17:40:00.000Z' });
+  const h = harness({ entries: [a, b, c], ledger: [flight(a, 'ca'), flight(b, 'cb'), flight(c, 'cc')], containers: { ca: { statusCode: 'FINISHED', status: '' }, cb: new GraphError('GET /cb → network error: ECONNRESET', { network: true }), cc: { statusCode: 'IN_PROGRESS', status: '' } } });
+  const r = await run({ dryRun: false }, h.deps);
+  assert.deepEqual(h.calls, [['status', 'ca'], ['media_publish', 'ca'], ['status', 'cb'], ['status', 'cc']], 'a: media_publish for the SAME container; b and c: asked, left alone; no new containers for anyone');
+  assert.deepEqual(h.appended.map((x) => [x.id, x.status, x.mediaId, x.containerId, x.detail?.split(':')[0]]), [[a.id, 'published', 'm1', 'ca', 'reconciled']]);
+  assert.equal(r.published, 1, 'a reconciled publish counts against the per-run limit');
+  assert.equal(r.errors, 1, 'the unanswered GET is loud: exit 2');
+  assert.equal(r.code, 2);
+  assert.ok(h.logs.some((l) => l.startsWith('needs-reconcile') && l.includes(b.id) && /left in flight, NOT re-posted/.test(l)));
+  assert.ok(h.logs.some((l) => l.startsWith('needs-reconcile') && l.includes(c.id) && /IN_PROGRESS/.test(l)));
+  assert.equal(h.appended.some((x) => x.status === 'error'), false, 'no error line — that would re-open the entry');
+
+  // media_publish itself failing on reconcile: still in flight, still not an error line
+  const h2 = harness({ entries: [a], ledger: [flight(a, 'ca')], containers: { ca: { statusCode: 'FINISHED', status: '' } }, publishContainerFail: new GraphError('POST /media_publish → HTTP 400 code=9007', { code: 9007 }) });
+  const r2 = await run({ dryRun: false }, h2.deps);
+  assert.deepEqual(h2.appended, []);
+  assert.equal(r2.code, 2);
+  assert.ok(h2.logs.some((l) => l.startsWith('needs-reconcile') && /left in flight, NOT re-posted/.test(l)));
+
+  // an in-flight line whose entry left the calendar is still reconciled (the id is the key, not the calendar)
+  const h3 = harness({ entries: [b], ledger: [flight(a, 'ca')], containers: { ca: { statusCode: 'PUBLISHED', status: '' } } });
+  await run({ dryRun: false }, h3.deps);
+  assert.deepEqual(h3.appended.map((x) => [x.id, x.status]), [[a.id, 'published'], [b.id, 'publishing'], [b.id, 'published']]);
+
+  // dry-run: nothing is asked, nothing is written, the human is told
+  const h4 = harness({ entries: [a], ledger: [flight(a, 'ca')], containers: {} });
+  const r4 = await run({ dryRun: true }, h4.deps);
+  assert.deepEqual(h4.calls, []);
+  assert.ok(h4.logs.some((l) => l.startsWith('needs-reconcile') && /a live run asks Instagram/.test(l)));
+  assert.equal(r4.results.some((x) => x.id === a.id && x.status !== 'needs-reconcile'), false, 'not a candidate either');
+
+  // an auth error on the reconcile GET stops the run: nothing else is attempted
+  const h5 = harness({ entries: [a, b], ledger: [flight(a, 'ca')], containers: { ca: new GraphError('bad token', { code: 190, hint: 'h' }) } });
+  const r5 = await run({ dryRun: false }, h5.deps);
+  assert.deepEqual(h5.calls, [['status', 'ca']]);
+  assert.ok(h5.logs.some((l) => l.startsWith('deferred:auth') && l.includes(b.id)));
+  assert.equal(r5.code, 2);
+});
+
+test('run: SIGTERM/SIGINT never interrupt a publish — the flag is read between entries, the rest is deferred and not written', async () => {
+  const entries = ['a', 'b', 'c'].map((n, i) => raw({ n, time: `20:${30 + i}` }));
+  const h = harness({ entries, onPublish: async () => { process.emit('SIGTERM', 'SIGTERM'); } });
+  const r = await run({ dryRun: false }, h.deps);
+  assert.equal(r.code, 0);
+  assert.equal(r.published, 1, 'the entry in flight when the signal came finished');
+  assert.deepEqual(h.appended.map((x) => [x.id, x.status]), [['ig-2026-09-10-post-a', 'publishing'], ['ig-2026-09-10-post-a', 'published']]);
+  assert.deepEqual(h.calls.filter((c) => c[0] === 'image').length, 1);
+  assert.equal(h.logs.filter((l) => l.startsWith('deferred:signal')).length, 2);
+  assert.ok(h.logs.some((l) => /SIGTERM received — finishing the current entry/.test(l)));
+  assert.equal(process.listenerCount('SIGTERM'), 0, 'handlers are removed when the run ends');
+  // an injected stop flag (what the unit's TimeoutStopSec relies on) defers everything before the first publish
+  const h2 = harness({ entries });
+  h2.deps.stopRequested = () => 'SIGTERM';
+  const r2 = await run({ dryRun: false }, h2.deps);
+  assert.equal(r2.published, 0);
+  assert.deepEqual(h2.appended, []);
 });
 
 test('run: the per-run cap is 3 even if --limit asks for more; the rest is deferred, not written', async () => {

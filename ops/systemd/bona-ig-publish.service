@@ -39,6 +39,11 @@ ExecStart=/usr/bin/env node scripts/social/publish.mjs --limit 3
 ; Worst case per run: 3 publishes × (container poll up to 2 min + 60 s gap) ≈ 9 min. Must end
 ; before the next 15-min tick; the lock file covers an overlap anyway.
 TimeoutStartSec=13min
+; On stop (the start timeout above, `systemctl --user stop`, shutdown) the publisher gets
+; SIGTERM, finishes the entry it is on — the in-flight ledger line is written before
+; media_publish, so a kill mid-publish is reconciled next run, never re-posted — and exits.
+; A single publish is bounded by one container wait (2 min) + the API call, so 3 min is enough.
+TimeoutStopSec=3min
 ; Exit 2 = a publish error was recorded in the ledger (systemd shows the unit as failed, which
 ; is what we want to see in `systemctl --user --failed`). Exit 0 = ok / nothing due.
 SuccessExitStatus=0

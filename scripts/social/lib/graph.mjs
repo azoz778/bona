@@ -91,12 +91,15 @@ export function checkImageUrl(u) {
  *   fetch, sleep     injectable for tests
  *   log(line)        where dry-run request lines and step messages go
  *   progress(text)   container-poll progress (defaults to a \r line on stdout)
+ *   pollMs           container poll interval for single images / stories (3 s);
+ *   carouselPollMs   for carousel items and the carousel parent (5 s — more containers per
+ *                    post, and Instagram takes longer over them); pollMax polls per container
  */
 export function createGraph({
   token, igId, version = process.env.GRAPH_VERSION || DEFAULT_GRAPH_VERSION, dryRun = false,
   fetch: fetchImpl = globalThis.fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   log = console.log, progress = (s) => process.stdout.write(s),
-  timeoutMs = 30_000, pollMs = 3_000, pollMax = 40,
+  timeoutMs = 30_000, pollMs = 3_000, carouselPollMs = 5_000, pollMax = 40,
 } = {}) {
   const api = `https://graph.facebook.com/${version}`;
   const id = igId || '<IG_BUSINESS_ID>';
@@ -131,21 +134,32 @@ export function createGraph({
     return json;
   }
 
-  /** Poll a media container until FINISHED. Throws on ERROR/EXPIRED or after pollMax polls. */
-  async function waitForContainer(cid, label = 'container') {
-    const started = Date.now();
-    for (let i = 0; i < pollMax; i++) {
-      const r = await call('GET', cid, { fields: 'status_code,status' });
-      if (r.status_code === 'FINISHED') return r;
-      if (r.status_code === 'ERROR' || r.status_code === 'EXPIRED') throw new GraphError(`${label} ${cid} ${r.status_code}: ${r.status || ''}`, { container: cid, statusCode: r.status_code });
-      if (dryRun) return r;
-      progress(`  ${label} ${cid} ${r.status_code} (${Math.round((Date.now() - started) / 1000)}s)\r`);
-      await sleep(pollMs);
-    }
-    throw new GraphError(`${label} ${cid} did not finish processing within ${Math.round((pollMax * pollMs) / 60_000)} minutes`, { container: cid, timeout: true });
+  /** One status read of a media container: { statusCode: 'IN_PROGRESS'|'FINISHED'|'PUBLISHED'|'ERROR'|'EXPIRED', status }. */
+  async function containerStatus(cid) {
+    const r = await call('GET', cid, { fields: 'status_code,status' });
+    return { statusCode: r.status_code ?? null, status: r.status ?? '' };
   }
 
-  /** media_publish + best-effort permalink. The post is live once media_publish returns. */
+  /** Poll a media container until FINISHED. Throws on ERROR/EXPIRED or after pollMax polls. */
+  async function waitForContainer(cid, label = 'container', { pollMs: every = pollMs } = {}) {
+    const started = Date.now();
+    for (let i = 0; i < pollMax; i++) {
+      const r = await containerStatus(cid);
+      if (r.statusCode === 'FINISHED') return r;
+      if (r.statusCode === 'ERROR' || r.statusCode === 'EXPIRED') throw new GraphError(`${label} ${cid} ${r.statusCode}: ${r.status || ''}`, { container: cid, statusCode: r.statusCode });
+      if (dryRun) return r;
+      progress(`  ${label} ${cid} ${r.statusCode} (${Math.round((Date.now() - started) / 1000)}s)\r`);
+      await sleep(every);
+    }
+    throw new GraphError(`${label} ${cid} did not finish processing within ${Math.round((pollMax * every) / 60_000)} minutes`, { container: cid, timeout: true });
+  }
+
+  /**
+   * media_publish + best-effort permalink. The post is live once media_publish returns — and
+   * may be live even if it throws (a timeout, a 5xx after the write): the caller must treat
+   * an error from here as "unknown", record the container id, and reconcile with
+   * containerStatus() before ever re-posting. Never retry this blind.
+   */
   async function publishContainer(creationId) {
     const p = await call('POST', `${id}/media_publish`, { creation_id: creationId });
     let permalink = '(dry-run)';
@@ -156,41 +170,50 @@ export function createGraph({
     return { mediaId: p.id, permalink, containerId: creationId };
   }
 
-  /** Single-image feed post. `onStep` receives the three progress lines the CLI prints. */
-  async function publishImage({ imageUrl, caption, altText, onStep = () => {} }) {
+  // The three publish flows are: create the container(s) → wait until FINISHED →
+  // `beforePublish(containerId)` (the unattended publisher writes its in-flight ledger line
+  // here, so a crash after media_publish can be reconciled instead of re-posted) →
+  // media_publish. `onStep` receives the progress lines the CLI prints.
+  const noop = () => {};
+
+  /** Single-image feed post. */
+  async function publishImage({ imageUrl, caption, altText, onStep = noop, beforePublish = noop }) {
     const params = { image_url: imageUrl, caption };
     if (altText) params.alt_text = altText;
     onStep('1/3 creating media container…');
     const c = await call('POST', `${id}/media`, params);
     onStep(`2/3 waiting for container ${c.id}…`);
     await waitForContainer(c.id);
+    await beforePublish(c.id);
     onStep('3/3 publishing…');
     return publishContainer(c.id);
   }
 
-  /** Carousel of 2–10 images: one child container each, then the parent, then publish. */
-  async function publishCarousel({ imageUrls, caption, onStep = () => {} }) {
+  /** Carousel of 2–10 images: one child container each, then the parent, then publish. Children and the parent are polled every carouselPollMs. */
+  async function publishCarousel({ imageUrls, caption, onStep = noop, beforePublish = noop }) {
     if (imageUrls.length < CAROUSEL_MIN || imageUrls.length > CAROUSEL_MAX) throw new GraphError(`carousel needs ${CAROUSEL_MIN}–${CAROUSEL_MAX} images (got ${imageUrls.length})`, { local: true });
     const children = [];
     for (const [i, u] of imageUrls.entries()) {
       onStep(`item ${i + 1}/${imageUrls.length}: creating container…`);
       const c = await call('POST', `${id}/media`, { image_url: u, is_carousel_item: 'true' });
-      await waitForContainer(c.id, `item ${i + 1}`);
+      await waitForContainer(c.id, `item ${i + 1}`, { pollMs: carouselPollMs });
       children.push(c.id);
     }
     onStep('creating carousel container…');
     const car = await call('POST', `${id}/media`, { media_type: 'CAROUSEL', children: children.join(','), caption });
-    await waitForContainer(car.id, 'carousel');
+    await waitForContainer(car.id, 'carousel', { pollMs: carouselPollMs });
+    await beforePublish(car.id);
     onStep('publishing…');
     return publishContainer(car.id);
   }
 
   /** Image story (media_type=STORIES). Stories carry no caption on the API side. */
-  async function publishStory({ imageUrl, onStep = () => {} }) {
+  async function publishStory({ imageUrl, onStep = noop, beforePublish = noop }) {
     onStep('1/3 creating story container…');
     const c = await call('POST', `${id}/media`, { image_url: imageUrl, media_type: 'STORIES' });
     onStep(`2/3 waiting for container ${c.id}…`);
     await waitForContainer(c.id, 'story');
+    await beforePublish(c.id);
     onStep('3/3 publishing…');
     return publishContainer(c.id);
   }
@@ -205,5 +228,5 @@ export function createGraph({
   const me = (fields = 'id,username,name,followers_count,follows_count,media_count,profile_picture_url,website') => call('GET', id, { fields });
   const listMedia = (limit = 25) => call('GET', `${id}/media`, { fields: 'id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count', limit: String(limit) });
 
-  return { api, igId: id, dryRun, call, waitForContainer, publishContainer, publishImage, publishCarousel, publishStory, publishingLimit, me, listMedia };
+  return { api, igId: id, dryRun, call, containerStatus, waitForContainer, publishContainer, publishImage, publishCarousel, publishStory, publishingLimit, me, listMedia };
 }
