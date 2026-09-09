@@ -36,7 +36,10 @@ EnvironmentFile=%h/.secrets/bona-meta-graph.env
 ; The calendar comes from the working tree, so the tree must be on main — a feature branch
 ; left checked out must not feed the timer. guard-main.sh logs why and fails the unit.
 ExecStartPre=/usr/bin/env bash %h/bona/ops/systemd/guard-main.sh %h/bona
-ExecStart=/usr/bin/env node scripts/social/publish.mjs --live --limit 3
+; --grace 3: the timer's last tick is 23:45 and the latest slot is 21:05, so 3 h is the most
+; grace a slot can use inside the window; the publisher refuses to post outside 17:00–23:59 KSA
+; anyway (deferred:quiet-hours), which is what makes Persistent=true safe at a 02:00 boot.
+ExecStart=/usr/bin/env node scripts/social/publish.mjs --live --grace 3 --limit 3
 ; Worst case per run: 3 publishes × (container poll up to 2 min + 60 s gap) ≈ 9 min. Must end
 ; before the next 15-min tick; the lock file covers an overlap anyway.
 TimeoutStartSec=13min

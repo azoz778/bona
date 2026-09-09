@@ -218,8 +218,15 @@ would have to be hosted first.
 For every Instagram entry, in slot order:
 
 1. **Due** = `date` + `time` (KSA) is at or before now, and not more than `--grace` hours ago
-   (default 6). Earlier: wait. Later: `skipped:missed`, written once, and it is gone — the
-   evening's slot is the point.
+   (6 by hand; **the unit passes 3**). Earlier: wait. Later: `skipped:missed`, written once,
+   and it is gone — the evening's slot is the point. **Quiet hours**: outside 17:00–23:59 KSA
+   nothing is posted *or written* — every due entry is `deferred:quiet-hours` and looked at
+   again in the window (`--force-id` is the one exception: a human forcing at 02:00 means it).
+   Grace never exceeds the timer window: the last tick is 23:45 and the latest slot (21:05)
+   plus 3 h lapses at 00:05, so every slot gets its full grace inside the window and nothing
+   is "still due" when the timer wakes the next day. (With the original 6 h a 21:05 slot
+   stayed valid until 03:05 with no tick to serve it, and `Persistent=true` would have posted
+   it at boot at 02:00.)
 2. **Never automated**: `adLicenceRequired` / `blocked` entries (REGA per-ad licence not
    issued) log `skipped:ad-licence` and are re-checked every run until the calendar says
    otherwise; `reel` entries log `skipped:manual` once (hosted video + an in-app audio pick
@@ -320,8 +327,8 @@ systemctl --user stop  bona-ig-publish.timer       # PAUSE (start to resume; the
 
 `OnCalendar=*-*-* 17..23:00/15 Asia/Riyadh` — the zone is written into the expression, so the
 schedule holds whatever `timedatectl` says (this box is Asia/Riyadh anyway). `Persistent=true`
-runs once at boot if a tick was missed; the grace window decides whether anything is still
-worth posting. Two overlapping runs cannot double-post: `~/bona-data/ig/.publish.lock` is
+runs once at boot if a tick was missed; inside the window that catches up on the evening,
+outside it the quiet-hours guard makes the run a no-op. Two overlapping runs cannot double-post: `~/bona-data/ig/.publish.lock` is
 taken with `O_EXCL` and a lock older than 20 minutes, or whose process is gone, is taken over.
 `node` is nvm-managed on this machine, so the unit sets `PATH` explicitly. `ExecStartPre` runs
 `ops/systemd/guard-main.sh`, which fails the unit (with a clear journal line) unless `~/bona`
