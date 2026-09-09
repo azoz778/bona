@@ -170,6 +170,17 @@ async function pollGroup(group) {
       continue;
     }
     state.markSeen(record.key.id);
+    // A document that is NOT a PDF used to fall straight through to the text check
+    // below, and a document has no `text` — so it vanished without a word (an .html
+    // brochure sent 2026-09-09 02:24 was lost exactly that way, and the owner was
+    // left believing the bot had ignored him). Say so instead: silence is the one
+    // outcome the owner cannot act on.
+    if (doc) {
+      const name = doc.fileName || doc.title || 'that file';
+      log.info('msg.document_not_pdf', { jid: group.id, id: record.key.id, fileName: name, mimetype: doc.mimetype ?? null });
+      enqueue({ kind: 'unsupported', group, record, doc });
+      continue;
+    }
     const text = textOf(record).trim();
     if (!text) continue;
     const command = parseCommand(text);
@@ -252,6 +263,7 @@ async function drain() {
       try {
         if (job.kind === 'pdf') await handlePdf(job);
         else if (job.kind === 'video') await handleVideo(job);
+        else if (job.kind === 'unsupported') await handleUnsupported(job);
         else await handleCommand(job);
         state.setError(null);
       } catch (err) {
@@ -663,6 +675,15 @@ async function publishEdit(jid, id, apply, commitMessage, replyText, { onPushed 
     await reply(jid, replyText(res));
     return res;
   }, { timeoutMs: cfg.lockWaitMs, label: `command ${id}` });
+}
+
+/**
+ * A document that is not a PDF. One line back, so the owner knows the bot saw it and
+ * why it cannot be published — the alternative (what happened before) is silence he
+ * cannot tell apart from an outage.
+ */
+async function handleUnsupported({ group, doc }) {
+  await reply(group.id, msg.unsupportedDocument(doc?.fileName || doc?.title || 'that file', doc?.mimetype ?? null));
 }
 
 async function handleCommand({ group, command }) {
