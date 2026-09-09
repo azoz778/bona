@@ -267,9 +267,16 @@ One JSON line per outcome, keyed by the entry `id`; the **last line for an id is
 - **`published` is irrevocable.** Once any line for an id says so, nothing appended after it
   (a hand edit, a merge, a recovery script writing `error`) re-opens it — not even
   `--force-id`. An entry the calendar itself marks `status: "published"` is settled the same way.
-- **Retried**: `error` on later runs, three times, then `skipped:gave-up`.
+- **Retried**: `error` on later runs, three times, then `skipped:gave-up` — counting only
+  errors that say something about the post. A network failure, an HTTP 5xx, a timeout or a
+  rate limit is written with `"transient": true` and never counts; the grace window bounds
+  those retries on its own.
   `skipped:ad-licence`, `skipped:ad-licence-placeholder`, `skipped:caption`, `skipped:quota`,
   `skipped:no-jpeg` are re-evaluated every run and only re-written when the status changes.
+- **The run stops at once** on an auth error (Graph code 190 / 10 / 200 — fix the token) and
+  on a rate limit (code 4 / 17 / 32 / 613, or subcode 2207051 — wait); nothing after it could
+  succeed, and hammering a rate limit makes it worse. What was left is logged `deferred:auth`
+  / `deferred:rate-limit` and picked up by a later run.
 - **`publishing` = in flight.** Written *before* `media_publish`, with the `containerId`. If
   the run dies after that line (a crash, a SIGKILL, a 5xx with the post already live) the id
   is never a candidate again on its own: every live run starts by asking Instagram what became
