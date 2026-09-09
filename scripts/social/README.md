@@ -89,15 +89,14 @@ Output lands in `marketing/queue/`:
 ```
 marketing/queue/
   queue.json          <- committed
-  published.jsonl     <- committed: the Instagram publisher's ledger (see below)
-  .publish.lock       <- not committed: the publisher's run lock
+  (the Instagram publisher's ledger and lock are NOT here — ~/bona-data/ig/, see below)
   reels/reel-<ID>.mp4
   carousels/<ID>/01..06.png + .jpg
   stories/*.png + .jpg
   posts/*.png + .jpg
 ```
 
-Only `queue.json` and `published.jsonl` are committed. The media is gitignored — it is large
+Only `queue.json` is committed. The media is gitignored — it is large
 and fully reproducible from `queue.mjs --render`.
 
 **PNG and JPEG twins.** Every still is written both ways. PNG is the master; the JPEG exists
@@ -241,7 +240,15 @@ For every Instagram entry, in slot order:
    `story` → `media_type=STORIES`. The flow and the error hints are the same code the CLI uses
    (`lib/graph.mjs`).
 
-### The ledger — `marketing/queue/published.jsonl`
+### The ledger — `~/bona-data/ig/published.jsonl`
+
+The ledger lives **outside the git working tree**, at `~/bona-data/ig/published.jsonl`
+(`BONA_IG_LEDGER` or `--ledger` override; the lock file sits beside it). It used to be
+`marketing/queue/published.jsonl`, committed — but a branch switch in `~/bona` hid it and
+swapped the calendar under the timer, and a repo copy went stale the moment the timer wrote a
+line. `ops/systemd/install.sh` creates the directory and seeds the file once (from the legacy
+in-repo copy if it is still on disk, else from `ops/systemd/ledger-seed.jsonl`, which holds the
+hand-published launch post #9); an existing ledger is never touched.
 
 One JSON line per outcome, keyed by the entry `id`; the **last line for an id is its state**:
 
@@ -254,13 +261,14 @@ One JSON line per outcome, keyed by the entry `id`; the **last line for an id is
 - **Retried**: `error` on later runs, three times, then `skipped:gave-up`.
   `skipped:ad-licence`, `skipped:caption`, `skipped:quota` are re-evaluated every run and only
   re-written when the status changes.
-- A post published **by hand** is recorded here too (`"manual": true`) — that is what keeps the
-  timer from posting it again. Launch post #9 on 2026-09-09 is the first such line.
-- **It is committed.** It is a few KB, append-only, and it *is* the audit trail of what went
-  out under Bona's name; `gen-social.mjs` reads it back so a regenerated calendar shows
-  `status: "published"` instead of `planned`. Commit it after the evening's run (or let the
-  next session do it); an uncommitted ledger is still honoured locally. The lock file next to
-  it is gitignored.
+- A post published **by hand** is recorded here too (`"manual": true`, `ts` null until the
+  human fills it) — that is what keeps the timer from posting it again. Launch post #9 on
+  2026-09-09 is the first such line; `gen-social.mjs` renders it "published by hand" whether or
+  not a time is known.
+- **It is not committed.** It is the audit trail of what went out under Bona's name, so back it
+  up with the rest of `~/bona-data`; `gen-social.mjs` reads it back so a regenerated calendar
+  shows `status: "published"` instead of `planned`, and a missing file simply means nothing has
+  gone out yet.
 
 ### The timer
 
@@ -274,7 +282,7 @@ FB_PAGE_ID=1245646955305748
 ```
 
 ```bash
-bash ~/bona/ops/systemd/install.sh                 # once the token file exists: copy, daemon-reload, enable
+bash ~/bona/ops/systemd/install.sh                 # once the token file exists: seed the ledger, copy, daemon-reload, enable
 systemctl --user list-timers bona-ig-publish.timer # next elapse
 journalctl --user -u bona-ig-publish -o cat -f     # watch a run
 systemctl --user start bona-ig-publish.service     # run once, now
@@ -284,9 +292,12 @@ systemctl --user stop  bona-ig-publish.timer       # PAUSE (start to resume; the
 `OnCalendar=*-*-* 17..23:00/15 Asia/Riyadh` — the zone is written into the expression, so the
 schedule holds whatever `timedatectl` says (this box is Asia/Riyadh anyway). `Persistent=true`
 runs once at boot if a tick was missed; the grace window decides whether anything is still
-worth posting. Two overlapping runs cannot double-post: `marketing/queue/.publish.lock` is
+worth posting. Two overlapping runs cannot double-post: `~/bona-data/ig/.publish.lock` is
 taken with `O_EXCL` and a lock older than 20 minutes, or whose process is gone, is taken over.
-`node` is nvm-managed on this machine, so the unit sets `PATH` explicitly.
+`node` is nvm-managed on this machine, so the unit sets `PATH` explicitly. `ExecStartPre` runs
+`ops/systemd/guard-main.sh`, which fails the unit (with a clear journal line) unless `~/bona`
+has `main` checked out — the calendar is read from the working tree, and a feature branch left
+checked out must not feed the timer.
 
 ### Running it by hand
 
