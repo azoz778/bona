@@ -22,7 +22,12 @@
                               that last one is a hard stop even with --force-id, for as long as
                               the placeholder is in the caption.
 
-   Selection: an entry is due when its KSA time is <= now and not older than --grace hours (6).
+   Selection: an entry is due when its KSA time is <= now and not older than --grace hours (6 by
+   hand; the unit passes 3). Outside 17:00–23:59 KSA nothing is posted or written at all
+   (deferred:quiet-hours, --force-id excepted): a Persistent=true catch-up at boot must not post
+   at 02:00. Grace never exceeds the timer window: the last tick is 23:45 and the latest slot
+   (21:05) + 3 h lapses at 00:05, so every slot gets its full grace inside the window and
+   nothing is "still due" when the timer wakes the next day.
    Terminal ledger statuses are never retried: published, skipped:manual, skipped:no-image,
    skipped:missed, skipped:gave-up. `error` is retried on later runs, three times, then becomes
    skipped:gave-up — counting only errors that say something about the post: a network failure,
@@ -62,7 +67,7 @@
      --live             what the timer passes: with no META_ACCESS_TOKEN exit 1 loudly instead of
                         dry-running (a human without a token still gets the dry-run)
      --now 2026-09-09T18:30   pretend it is this KSA time (or an ISO time with a zone)
-     --grace 6          hours after the slot during which an entry is still due
+     --grace 6          hours after the slot during which an entry is still due (the unit passes 3)
      --limit 3          publishes per run (hard cap 3)
      --force-id <id>    publish one entry regardless of its time; still refuses REGA-blocked,
                         placeholder captions, reels and anything already published
@@ -130,6 +135,10 @@ export function fmtKsa(ms) {
   const s = new Date(ms + KSA_OFFSET_MS).toISOString();
   return `${s.slice(0, 10)} ${s.slice(11, 16)} KSA`;
 }
+/** The timer's window, KSA hours [17, 24). Nothing is posted outside it — not by a boot-time catch-up, not by a hand run at 02:00. */
+export const WINDOW = Object.freeze({ fromHour: 17, toHour: 24 });
+export const ksaHour = (ms) => new Date(ms + KSA_OFFSET_MS).getUTCHours();
+export const isQuietHours = (ms) => { const h = ksaHour(ms); return h < WINDOW.fromHour || h >= WINDOW.toHour; };
 /** `--now`: a KSA wall-clock time like 2026-09-09T18:30, or an ISO time carrying its own zone. */
 export function parseNow(s) {
   if (s == null || s === '') return Date.now();
@@ -346,6 +355,10 @@ export function decide(entry, { now, graceMs, ledger, forceId = null, readCaptio
   const due = at <= now && now - at <= graceMs;
   const past = at <= now && now - at > graceMs;
   if (!forced && !due && !past) return { status: null };
+  // The timer's window. A boot-time catch-up (Persistent=true) at 02:00, or a hand run at any
+  // hour, sees due entries but must not post them or write anything — not even a skip line.
+  // Re-evaluated in the window; by then a slot past its grace is `missed` the ordinary way.
+  if (!forced && isQuietHours(now)) return { status: 'deferred:quiet-hours', detail: `${fmtKsa(now)} is outside the 17:00–23:59 KSA window — nothing posted, nothing written`, terminal: false };
 
   if (entry.adLicenceRequired || entry.blocked) return past && !forced ? { status: null } : { status: 'skipped:ad-licence', detail: 'REGA per-ad licence required — never automated', terminal: false };
   if (entry.kind === 'reel') return { status: 'skipped:manual', detail: 'reel: needs hosted video + in-app audio, post by hand', terminal: true };
@@ -472,6 +485,7 @@ export async function run(opts = {}, deps = {}) {
         line(entry, 'published', `container ${cid} reports PUBLISHED — reconciled; mediaId/permalink unknown`);
         maybeWrite(entry, 'published', { containerId: cid, detail: 'reconciled: container PUBLISHED after a crash; mediaId/permalink unknown' }, { terminal: true });
       } else if (st.statusCode === 'FINISHED') {
+        if (isQuietHours(nowMs)) { line(entry, 'deferred:quiet-hours', `container ${cid} is FINISHED but ${fmtKsa(nowMs)} is outside the 17:00–23:59 KSA window — left in flight`); record(entry, 'deferred:quiet-hours', { detail: 'quiet hours', containerId: cid }); continue; }
         if (published >= limit) { line(entry, 'deferred:limit', `${limit} per run — container ${cid} stays in flight`); record(entry, 'deferred:limit', { detail: `${limit} per run`, containerId: cid }); continue; }
         if (published > 0) await sleep(o.gapMs);
         try {

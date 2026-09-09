@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   absoluteImageUrl, acquireLock, composeCaption, decide, DEFAULTS, fmtKsa, hasLicencePlaceholder, indexLedger,
-  jpegCandidates, ksaToEpoch, main, normaliseEntry, parseArgs, parseLedger, parseNow, resolveImage, run, TERMINAL,
+  isQuietHours, jpegCandidates, ksaToEpoch, main, normaliseEntry, parseArgs, parseLedger, parseNow, resolveImage, run, TERMINAL,
 } from '../social/publish.mjs';
 import { DEFAULT_LEDGER_PATH, lockPathFor, readLedgerFile, resolveLedgerPath } from '../social/lib/ledger.mjs';
 
@@ -42,8 +42,8 @@ test('time: KSA is UTC+3 with no DST; --now accepts KSA wall-clock or a zoned IS
 });
 
 test('due selection: due from the slot until --grace hours after it, missed beyond that, never before', () => {
-  const e = mk();
-  const at = ksaToEpoch('2026-09-10', '20:30');
+  const e = mk({ time: '17:15' }); // 17:15 + 6 h = 23:15, still inside the window
+  const at = ksaToEpoch('2026-09-10', '17:15');
   assert.equal(decide(e, ctx({ now: at - 60_000 })).status, null, 'one minute early: not yet');
   assert.equal(decide(e, ctx({ now: at })).status, 'candidate', 'on the slot');
   assert.equal(decide(e, ctx({ now: at + 6 * H })).status, 'candidate', 'exactly grace: still due');
@@ -52,10 +52,42 @@ test('due selection: due from the slot until --grace hours after it, missed beyo
   assert.equal(missed.terminal, true);
   assert.equal(decide(e, ctx({ now: at + 2 * H, graceMs: 1 * H })).status, 'skipped:missed', '--grace is honoured');
   // timezone edge: a 00:15 KSA slot is 21:15 UTC the day before; a UTC-minded clock must not push it a day out
+  // (00:15 KSA is quiet hours, so "due" shows as deferred:quiet-hours rather than candidate — null would mean not due)
   const early = mk({ date: '2026-09-11', time: '00:15' });
   assert.equal(decide(early, ctx({ now: Date.UTC(2026, 8, 10, 21, 14) })).status, null);
-  assert.equal(decide(early, ctx({ now: Date.UTC(2026, 8, 10, 21, 15) })).status, 'candidate');
+  assert.equal(decide(early, ctx({ now: Date.UTC(2026, 8, 10, 21, 15) })).status, 'deferred:quiet-hours');
   assert.equal(decide(mk({ platform: 'tiktok' }), ctx()).status, null, 'other platforms are ignored');
+});
+
+test('quiet hours: outside 17:00–23:59 KSA nothing is posted or written — deferred:quiet-hours, not missed; the window edges; --force-id is the exception', async () => {
+  const e = mk(); // 2026-09-10 20:30
+  const q = decide(e, ctx({ now: ksaToEpoch('2026-09-11', '02:00') }));
+  assert.equal(q.status, 'deferred:quiet-hours');
+  assert.equal(q.terminal, false);
+  const late = mk({ time: '21:05' });
+  assert.equal(decide(late, ctx({ now: ksaToEpoch('2026-09-11', '00:30'), graceMs: 3 * H })).status, 'deferred:quiet-hours', 'a 21:05 slot at 00:30 is deferred — not published, not missed');
+  assert.equal(decide(late, ctx({ now: ksaToEpoch('2026-09-11', '00:30'), graceMs: 6 * H })).status, 'deferred:quiet-hours', 'with the hand-run grace too');
+  assert.equal(decide(late, ctx({ now: ksaToEpoch('2026-09-11', '17:00'), graceMs: 3 * H })).status, 'skipped:missed', 'back in the window it is missed the ordinary way');
+  assert.equal(decide(late, ctx({ now: ksaToEpoch('2026-09-10', '23:45'), graceMs: 3 * H })).status, 'candidate', 'the last tick of the evening still serves it');
+  assert.equal(decide(mk({ time: '12:00' }), ctx({ now: ksaToEpoch('2026-09-10', '16:59') })).status, 'deferred:quiet-hours');
+  assert.equal(decide(mk({ time: '12:00' }), ctx({ now: ksaToEpoch('2026-09-10', '17:00') })).status, 'candidate');
+  assert.equal(decide(e, ctx({ now: ksaToEpoch('2026-09-10', '23:59') })).status, 'candidate');
+  assert.equal(decide(e, ctx({ now: ksaToEpoch('2026-09-11', '00:00') })).status, 'deferred:quiet-hours');
+  assert.equal(decide(mk({ format: 'reel' }), ctx({ now: ksaToEpoch('2026-09-11', '02:00') })).status, 'deferred:quiet-hours', 'not even a skip line at night');
+  assert.equal(decide(e, ctx({ now: ksaToEpoch('2026-09-11', '02:00'), forceId: e.id })).status, 'candidate', '--force-id at 02:00 is a human who means it');
+  assert.equal(isQuietHours(ksaToEpoch('2026-09-10', '17:00')), false);
+  assert.equal(isQuietHours(ksaToEpoch('2026-09-10', '02:00')), true);
+  // the run: a boot-time catch-up at 02:00 — nothing sent, nothing written, an in-flight FINISHED container left alone
+  const entries = [raw({ n: 'a' }), raw({ n: 'b', time: '20:31' })];
+  const flightRow = { id: 'ig-2026-09-10-post-a', date: '2026-09-10', slot: '20:30', kind: 'post', status: 'publishing', containerId: 'ca', ts: '2026-09-10T17:40:00.000Z' };
+  const h = harness({ entries, ledger: [flightRow], containers: { ca: { statusCode: 'FINISHED', status: '' } } });
+  h.deps.now = ksaToEpoch('2026-09-11', '02:00');
+  const r = await run({ dryRun: false, graceHours: 6 }, h.deps);
+  assert.equal(r.code, 0);
+  assert.equal(r.published, 0);
+  assert.deepEqual(h.appended, []);
+  assert.deepEqual(h.calls, [['status', 'ca']], 'asked, but not published at 02:00');
+  assert.equal(h.logs.filter((l) => l.startsWith('deferred:quiet-hours')).length, 2, 'the in-flight a and the due b');
 });
 
 test('REGA: adLicenceRequired / blocked entries are skipped while due, silent once past, and --force-id does not override', () => {
@@ -63,7 +95,7 @@ test('REGA: adLicenceRequired / blocked entries are skipped while due, silent on
     const d = decide(mk(over), ctx());
     assert.equal(d.status, 'skipped:ad-licence');
     assert.equal(d.terminal, false, 'not terminal: the licence may arrive');
-    assert.equal(decide(mk(over), ctx({ now: ksaToEpoch('2026-09-12') })).status, null);
+    assert.equal(decide(mk(over), ctx({ now: ksaToEpoch('2026-09-12', '18:00') })).status, null);
     assert.equal(decide(mk(over), ctx({ forceId: 'ig-2026-09-10-post-test', now: 0 })).status, 'skipped:ad-licence');
   }
 });
@@ -73,7 +105,7 @@ test('reels are never automated: skipped:manual once, terminal', () => {
   assert.equal(d.status, 'skipped:manual');
   assert.equal(d.terminal, true);
   assert.ok(TERMINAL.has('skipped:manual'));
-  assert.equal(decide(mk({ format: 'reel' }), ctx({ now: ksaToEpoch('2026-09-13') })).status, 'skipped:manual', 'a missed reel still tells the human');
+  assert.equal(decide(mk({ format: 'reel' }), ctx({ now: ksaToEpoch('2026-09-13', '18:00') })).status, 'skipped:manual', 'a missed reel still tells the human');
 });
 
 test('licence placeholder in a caption is a hard stop, even forced, in every spelling — until the caption is fixed', () => {
