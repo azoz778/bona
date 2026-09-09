@@ -31,11 +31,12 @@ Environment=NODE_ENV=production
 Environment=PATH=%h/.local/bin:%h/.nvm/versions/node/v24.19.0/bin:/usr/local/bin:/usr/bin:/bin
 ; META_ACCESS_TOKEN, IG_BUSINESS_ID (and optionally GRAPH_VERSION). No "-" prefix on purpose:
 ; a missing token file must FAIL the unit loudly, not silently run in dry-run mode every 15 min.
+; --live below does the same for a file that exists but has an EMPTY token: exit 1, not dry-run.
 EnvironmentFile=%h/.secrets/bona-meta-graph.env
 ; The calendar comes from the working tree, so the tree must be on main — a feature branch
 ; left checked out must not feed the timer. guard-main.sh logs why and fails the unit.
 ExecStartPre=/usr/bin/env bash %h/bona/ops/systemd/guard-main.sh %h/bona
-ExecStart=/usr/bin/env node scripts/social/publish.mjs --limit 3
+ExecStart=/usr/bin/env node scripts/social/publish.mjs --live --limit 3
 ; Worst case per run: 3 publishes × (container poll up to 2 min + 60 s gap) ≈ 9 min. Must end
 ; before the next 15-min tick; the lock file covers an overlap anyway.
 TimeoutStartSec=13min

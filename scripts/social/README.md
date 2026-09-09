@@ -338,10 +338,13 @@ node scripts/social/publish.mjs --json --limit 1
 ```
 
 `--force-id` publishes one entry regardless of its slot and re-opens a `missed` / `gave-up` /
-`no-jpeg` / `no-image` line; it still refuses REGA-blocked entries, placeholder captions, reels and anything
-already `published` (delete the ledger line if you really mean it). Without a token every
-invocation is a dry-run: requests are printed, nothing is sent, nothing is written.
-Exit codes: 0 ok / nothing due · 1 config error · 2 a publish error was recorded.
+`no-jpeg` / `no-image` line; it still refuses REGA-blocked entries, placeholder captions, reels
+and anything already `published` (never — see the ledger section). Without a token every
+invocation is a dry-run: requests are printed, nothing is sent, nothing is written. The unit
+passes `--live`, which turns that into a loud exit 1 (`META_ACCESS_TOKEN missing`) — an empty
+token under the timer must never become a silent dry-run every 15 minutes.
+Exit codes: 0 ok / nothing due · 1 config error (or `--live` without a token) · 2 a publish
+error was recorded.
 
 ### What is never automated
 
