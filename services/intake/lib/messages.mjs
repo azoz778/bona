@@ -73,6 +73,32 @@ export function dryRunSummary(report) {
 export const rejected = (reason) => `✋ Not published — ${reason}`;
 
 /**
+ * A document the intake cannot read. It only ever publishes from a PDF brochure, and
+ * before this existed any other document type was dropped in silence — the owner had
+ * no way to tell "cannot read this" from "the bot is down".
+ */
+function safeFileName(value) {
+  // A filename is owner-controlled but still untrusted display text. Keep only its
+  // basename, strip control/Markdown characters, collapse whitespace and cap it so
+  // it cannot turn one refusal into a wall of text or alter Telegram formatting.
+  const withoutUrls = String(value || '').replace(/https?:\/\/\S+/gi, '');
+  const base = withoutUrls.split(/[\\/]/).pop() || 'that file';
+  return base
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/[*_~`\[\]()<>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120) || 'that file';
+}
+
+export const unsupportedDocument = (fileName, mimetype = null) => {
+  const name = safeFileName(fileName);
+  const ext = /\.([A-Za-z0-9]{1,6})$/.exec(name)?.[1]?.toLowerCase();
+  const what = ext ? `a .${ext} file` : (mimetype ? `a ${String(mimetype).slice(0, 80)} file` : 'that file');
+  return `✋ Not published — I can only read PDF brochures, and ${name} is ${what}.\n\nSend the brochure as a PDF and I'll publish it. (Photos and videos are added to a listing that already exists.)`;
+};
+
+/**
  * Deliberately says nothing about WHY: the detail is git/build/model output, which can quote
  * file contents and secrets. It goes to the journal, where only the owner can read it.
  */
