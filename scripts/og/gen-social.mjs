@@ -8,12 +8,14 @@
    Options: --start 2026-09-09   --days 30      (launch day; the default moved from 09-06 to 09-09 on 2026-09-09
                                                   because nothing had been posted yet — pass --start to move it again)
    Every entry carries a stable `id` (launch posts: ig-launch-0N; the rest: ig-<date>-<format>-<topic-slug>) and a
-   `time` in Asia/Riyadh. scripts/social/publish.mjs keys its ledger, marketing/queue/published.jsonl, on that id;
-   this generator reads the ledger back so an entry already published (by the timer or by hand) is written with
-   status "published" instead of "planned". Regenerating never loses that — the ledger is the record, not this file. */
+   `time` in Asia/Riyadh. scripts/social/publish.mjs keys its ledger (~/bona-data/ig/published.jsonl, or
+   $BONA_IG_LEDGER — outside the repo) on that id; this generator reads the ledger back so an entry already
+   published (by the timer or by hand) is written with status "published" instead of "planned". Regenerating
+   never loses that — the ledger is the record, not this file. A missing ledger means nothing has gone out. */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { indexLedger, readLedgerFile, resolveLedgerPath, slug } from '../social/lib/ledger.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const args = process.argv.slice(2);
@@ -30,17 +32,11 @@ const DAYS = Number(opt('--days', 30));
 const SLOTS = { launchFirst: '17:30', launchStepMin: 20, feed: '20:30', story: '17:15', launchDayStory: '21:00', tourStory: '21:05' };
 const addMinutes = (hhmm, min) => { const [h, m] = hhmm.split(':').map(Number); const t = h * 60 + m + min; return `${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
 const launchTime = (n) => addMinutes(SLOTS.launchFirst, (n - 1) * SLOTS.launchStepMin);
-const slug = (str) => String(str).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48).replace(/-+$/, '');
 
-// The publisher's ledger. One JSON object per line; the LAST line for an id wins.
-const LEDGER = path.join(root, 'marketing/queue/published.jsonl');
-const ledger = new Map();
-if (fs.existsSync(LEDGER)) {
-  for (const line of fs.readFileSync(LEDGER, 'utf8').split('\n')) {
-    if (!line.trim()) continue;
-    try { const r = JSON.parse(line); if (r && r.id) ledger.set(r.id, r); } catch { /* a corrupt line is the publisher's problem, not the calendar's */ }
-  }
-}
+// The publisher's ledger (scripts/social/lib/ledger.mjs): ~/bona-data/ig/published.jsonl unless
+// $BONA_IG_LEDGER says otherwise. Outside the repo on purpose; absent = nothing published yet.
+const LEDGER = resolveLedgerPath();
+const ledger = indexLedger(readLedgerFile(LEDGER));
 
 const site = JSON.parse(fs.readFileSync(path.join(root, 'src/data/site.json'), 'utf8'));
 const listings = JSON.parse(fs.readFileSync(path.join(root, 'src/data/listings.json'), 'utf8'));
@@ -448,7 +444,7 @@ const withIds = items.map((it) => {
   const n = (seen.get(id) || 0) + 1; seen.set(id, n);
   if (n > 1) id += `-${n}`;
   const out = { id, ...it };
-  const rec = ledger.get(id);
+  const rec = ledger.get(id)?.latest;
   if (rec?.status === 'published') {
     out.status = 'published';
     out.publishedAt = rec.ts ?? null;
@@ -477,7 +473,7 @@ for (const it of items) {
   md.push(`| ${it.date} | ${weekday(it.date)} | ${it.time} | ${it.format}${it.launch ? ` (launch #${it.launch})` : ''} | ${it.pillar} | ${it.topic.en} | ${it.topic.ar} | ${it.image ? `[img](${it.image})` : ''} | ${it.adLicenceRequired ? 'required' : '—'} | ${statusCell(it)} |`);
 }
 md.push('', '## Captions', '', 'Feed-post captions (EN + AR + hashtags) are in `content-calendar.json` → `caption`. Launch captions are also in `marketing/captions/launch-0N.txt` for `scripts/instagram-post.mjs --caption-file`.', '',
-  '## Status', '', 'The `status` column comes from the publisher ledger, `marketing/queue/published.jsonl` (one JSON line per attempt, keyed by the entry `id`). An entry published by hand is recorded there too — that is what keeps `scripts/social/publish.mjs` from posting it again. Regenerating this calendar re-reads the ledger, so the column survives.', '',
+  '## Status', '', 'The `status` column comes from the publisher ledger, `~/bona-data/ig/published.jsonl` (outside the repo; one JSON line per attempt, keyed by the entry `id`). An entry published by hand is recorded there too — that is what keeps `scripts/social/publish.mjs` from posting it again. Regenerating this calendar re-reads the ledger, so the column survives.', '',
   '## Weekly checklist', '- Sun: schedule the week in Meta Business Suite (Planner) or post via `scripts/instagram-post.mjs`.', '- Daily 30 min: reply to every comment/DM; comment on 5 Jeddah accounts (architects, interior studios, Jeddah Season, Saudi Sotheby\'s/Knight Frank KSA).', '- Thu: note top/bottom 3 posts of the week in the dashboard; swap next week\'s listing if one went under offer.', '- Tours & projects: when a new Matterport link or a `project` block lands in listings.json, re-run the generator — the 3D-tour stories/reels and the unit carousels pick it up automatically.', '- Re-run `node scripts/og/gen-social.mjs` after listings change; edit captions by hand in the JSON if needed (the generator overwrites — copy edits into `marketing/captions/` first).');
 fs.writeFileSync(path.join(root, 'marketing/content-calendar.md'), md.join('\n') + '\n');
 
