@@ -284,6 +284,10 @@ One JSON line per outcome, keyed by the entry `id`; the **last line for an id is
   on a rate limit (code 4 / 17 / 32 / 613, or subcode 2207051 — wait); nothing after it could
   succeed, and hammering a rate limit makes it worse. What was left is logged `deferred:auth`
   / `deferred:rate-limit` and picked up by a later run.
+- **`contentHash`** (sha1 of the exact image URLs + caption) is stored on every published
+  line; a candidate matching a `published` line from the last 14 days under *another* id is
+  `skipped:duplicate` — ids protect against re-runs, this protects against a regenerated
+  calendar handing an old post a new id. Re-evaluated every run, written once per change.
 - **`publishing` = in flight.** Written *before* `media_publish`, with the `containerId`. If
   the run dies after that line (a crash, a SIGKILL, a 5xx with the post already live) the id
   is never a candidate again on its own: every live run starts by asking Instagram what became

@@ -9,7 +9,7 @@ import {
   absoluteImageUrl, acquireLock, composeCaption, decide, DEFAULTS, fmtKsa, hasLicencePlaceholder, indexLedger,
   isQuietHours, jpegCandidates, ksaToEpoch, main, maskToken, normaliseEntry, parseArgs, parseLedger, parseNow, resolveImage, run, TERMINAL,
 } from '../social/publish.mjs';
-import { DEFAULT_LEDGER_PATH, lockPathFor, readLedgerFile, resolveLedgerPath } from '../social/lib/ledger.mjs';
+import { contentHash, DEFAULT_LEDGER_PATH, lockPathFor, readLedgerFile, resolveLedgerPath } from '../social/lib/ledger.mjs';
 
 const H = 3_600_000;
 const mk = (over = {}) => normaliseEntry({
@@ -346,10 +346,10 @@ test('run: publishes what is due in slot order, 60 s apart, records the ledger, 
     ['ig-2026-09-10-post-b', 'publishing', null], ['ig-2026-09-10-post-b', 'published', 'm3'],
   ], 'the in-flight line lands BEFORE media_publish, the published line after');
   const flight = h.appended[1];
-  assert.deepEqual(Object.keys(flight), ['id', 'date', 'slot', 'kind', 'status', 'mediaId', 'permalink', 'ts', 'containerId', 'imageUrl']);
+  assert.deepEqual(Object.keys(flight), ['id', 'date', 'slot', 'kind', 'status', 'mediaId', 'permalink', 'ts', 'containerId', 'contentHash', 'imageUrl']);
   assert.equal(flight.containerId, 'c1');
   const pub = h.appended[2];
-  assert.deepEqual(Object.keys(pub), ['id', 'date', 'slot', 'kind', 'status', 'mediaId', 'permalink', 'ts', 'containerId', 'imageUrl']);
+  assert.deepEqual(Object.keys(pub), ['id', 'date', 'slot', 'kind', 'status', 'mediaId', 'permalink', 'ts', 'containerId', 'contentHash', 'imageUrl']);
   assert.equal(pub.ts, '2026-09-10T18:00:00.000Z');
   assert.equal(pub.permalink, 'https://instagram.com/p/m1');
   assert.equal(pub.containerId, 'c1');
@@ -455,6 +455,31 @@ test('run: SIGTERM/SIGINT never interrupt a publish — the flag is read between
   const r2 = await run({ dryRun: false }, h2.deps);
   assert.equal(r2.published, 0);
   assert.deepEqual(h2.appended, []);
+});
+
+test('run: contentHash — the same images + caption under another id within 14 days is skipped:duplicate; older, or a different caption, is not', async () => {
+  const a = raw({ n: 'a' });
+  const twin = raw({ n: 'twin', time: '20:31', image: a.image, images: a.images, caption: a.caption, hashtags: a.hashtags });
+  const h = harness({ entries: [a, twin] });
+  const r = await run({ dryRun: false }, h.deps);
+  assert.equal(r.published, 1);
+  assert.deepEqual(h.appended.map((x) => [x.id, x.status]), [[a.id, 'publishing'], [a.id, 'published'], [twin.id, 'skipped:duplicate']]);
+  assert.match(h.appended[2].detail, /duplicate of ig-2026-09-10-post-a/);
+  assert.equal(h.appended[1].contentHash.length, 40);
+  assert.equal(h.appended[0].contentHash, h.appended[1].contentHash, 'the in-flight line carries it too');
+  assert.equal(h.appended[2].contentHash, h.appended[1].contentHash);
+  const again = harness({ entries: [twin], ledger: h.appended });
+  await run({ dryRun: false }, again.deps);
+  assert.deepEqual(again.appended, [], 'still a duplicate next tick: logged, not re-written');
+  const old = { ...h.appended[1], ts: '2026-08-20T17:00:00.000Z' };
+  const h2 = harness({ entries: [twin], ledger: [old] });
+  assert.equal((await run({ dryRun: false }, h2.deps)).published, 1, '21 days later the same content is fine again');
+  const other = raw({ n: 'other', time: '20:32', image: a.image, images: a.images, caption: { ar: 'مختلف', en: 'different' } });
+  const h3 = harness({ entries: [other], ledger: [h.appended[1]] });
+  assert.equal((await run({ dryRun: false }, h3.deps)).published, 1, 'same picture, different caption: a different post');
+  assert.equal(contentHash(['https://x/a.jpg'], 'c'), contentHash(['https://x/a.jpg'], 'c'));
+  assert.notEqual(contentHash(['https://x/a.jpg'], 'c'), contentHash(['https://x/b.jpg'], 'c'));
+  assert.notEqual(contentHash(['https://x/a.jpg', 'https://x/b.jpg'], 'c'), contentHash(['https://x/b.jpg', 'https://x/a.jpg'], 'c'), 'order is part of a carousel');
 });
 
 test('run: the per-run cap is 3 even if --limit asks for more; the rest is deferred, not written', async () => {

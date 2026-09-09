@@ -8,12 +8,16 @@
 // because a branch switch in ~/bona must never hide the record of what was published, and
 // a repo copy would go stale the moment the timer wrote a line. One JSON object per line;
 // the file is append-only. Its lock file, .publish.lock, sits beside it.
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 /** Topic → id fragment. One definition, so the publisher derives the id gen-social wrote. */
 export const slug = (str) => String(str ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48).replace(/-+$/, '');
+
+/** What a post IS, independent of its id: the exact image URLs (in order) and the caption sent. Stored on published lines; a match within dedupeDays is a duplicate. */
+export const contentHash = (imageUrls, caption) => createHash('sha1').update(JSON.stringify([imageUrls, String(caption ?? '')])).digest('hex');
 
 export const LEDGER_ENV = 'BONA_IG_LEDGER';
 export const DEFAULT_LEDGER_DIR = path.join(os.homedir(), 'bona-data', 'ig');
