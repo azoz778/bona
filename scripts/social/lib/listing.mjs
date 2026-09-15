@@ -5,12 +5,18 @@
 //             Nothing in this file estimates, rounds, ranges or "from"s a number that is
 //             not there. No price => "السعر عند الطلب / Price on request".
 //   REGA    — a post that promotes a SPECIFIC property carries an advertising-licence line.
-//             We have no per-listing licence numbers yet, so listing copy carries the
-//             {{AD_LICENCE}} placeholder and queue.mjs marks those entries blocked.
+//             adLicence() decides the basis per listing: a property in the Kingdom needs a
+//             REGA per-ad licence number (`listing.licence.adNumber`, recorded with the
+//             WhatsApp `licence` command) — until one exists the copy carries the
+//             {{AD_LICENCE}} placeholder and queue.mjs marks the entry blocked. A property
+//             OUTSIDE the Kingdom cannot get a REGA ad licence (they bind to a Saudi deed);
+//             it is marketed under the developer's authorisation (owner decision
+//             2026-09-09) and its copy says so instead of carrying the placeholder.
 // Also: nothing in this repo's social output may mention TK Estates.
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT } from './fonts.mjs';
+import { LICENCE_NUMBER_RE, isCalendarDate } from '../../curate/rules.mjs';
 
 export const AD_LICENCE_TOKEN = '{{AD_LICENCE}}';
 
@@ -217,10 +223,66 @@ const refLine = (l, lang) => (lang === 'ar'
   ? `المرجع ${l.id} — واتساب ${WA_DISPLAY} أو الرابط في البايو.`
   : `Ref. ${l.id} — WhatsApp ${WA_DISPLAY} or the link in bio.`);
 
-/** The REGA line. Always emitted for listing posts, always with the placeholder. */
-export const adLicenceLine = (lang) => (lang === 'ar'
-  ? `رقم ترخيص الإعلان العقاري: ${AD_LICENCE_TOKEN}`
-  : `REGA advertising licence: ${AD_LICENCE_TOKEN}`);
+const SAUDI_RE = /saudi|\bksa\b|^sa$|السعودية|المملكة/i;
+/**
+ * Countries Bona actually markets property in outside the Kingdom. A listing whose country is
+ * neither Saudi nor on this list is NOT foreign — it is `unknown-country` and stays blocked
+ * until someone fixes the data or adds the country here. Compliance gating fails closed.
+ */
+export const FOREIGN_COUNTRIES = new Set([
+  'oman', 'united arab emirates', 'uae', 'bahrain', 'qatar', 'kuwait', 'jordan', 'egypt', 'lebanon',
+  'morocco', 'turkey', 'türkiye', 'cyprus', 'greece', 'spain', 'portugal', 'france', 'monaco', 'italy',
+  'switzerland', 'austria', 'germany', 'netherlands', 'united kingdom', 'uk', 'georgia', 'montenegro',
+  'bosnia and herzegovina', 'malaysia', 'indonesia', 'thailand', 'maldives', 'mauritius', 'seychelles',
+  'united states', 'usa', 'canada', 'australia',
+]);
+const countryOf = (l) => String(l?.location?.country?.en ?? '').trim().toLowerCase();
+export const isSaudi = (l) => { const c = countryOf(l); return !c || SAUDI_RE.test(c); };
+/** Foreign = a stated, recognised non-Saudi country. Odd strings ("KSA", "Jeddah", garbage) never are. */
+export const isForeign = (l) => !isSaudi(l) && FOREIGN_COUNTRIES.has(countryOf(l));
+
+const riyadhDay = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh' }).format(d);
+/** Values that pass the intake's shape check but are obviously not a licence number. */
+const JUNK_NUMBER_RE = /^(tbd|pending|none|null|todo|n\/?a|x+|0+|-+)$/i;
+
+/**
+ * On what basis may this property be advertised?
+ *   developer-authorisation — outside the Kingdom; marketed under the developer's mandate.
+ *   rega-ad-licence         — a REGA per-ad licence number is recorded and not expired.
+ *   rega-pending            — Saudi property with no valid number yet: placeholder, blocked.
+ *   unknown-country         — country string is neither Saudi nor in FOREIGN_COUNTRIES: blocked.
+ * The number must satisfy the intake's LICENCE_NUMBER_RE (and not be junk or the placeholder);
+ * `adExpiry`, when present, must be a real YYYY-MM-DD and not before today in Riyadh. Anything
+ * malformed counts as no licence — a line REGA can't be shown is worse than none.
+ */
+export function adLicence(l, { today = new Date() } = {}) {
+  if (!isSaudi(l)) {
+    return isForeign(l)
+      ? { basis: 'developer-authorisation', number: null, blocked: false }
+      : { basis: 'unknown-country', number: null, blocked: true, country: l?.location?.country?.en ?? '' };
+  }
+  const n = typeof l?.licence?.adNumber === 'string' ? l.licence.adNumber.trim() : '';
+  const validNumber = n !== '' && n !== AD_LICENCE_TOKEN && LICENCE_NUMBER_RE.test(n) && !JUNK_NUMBER_RE.test(n);
+  const exp = typeof l?.licence?.adExpiry === 'string' ? l.licence.adExpiry.trim() : '';
+  const validExpiry = exp === '' || (isCalendarDate(exp) && exp >= riyadhDay(today));
+  if (validNumber && validExpiry) return { basis: 'rega-ad-licence', number: n, blocked: false };
+  return { basis: 'rega-pending', number: null, blocked: true };
+}
+
+export const developerLine = (lang) => (lang === 'ar'
+  ? 'عقار خارج المملكة — يُسوَّق بتفويض من المطوّر.'
+  : 'Property outside Saudi Arabia — marketed under developer authorisation.');
+
+/**
+ * The licence line for a listing post. With no listing (old call sites) it is the REGA
+ * placeholder line; with one it follows adLicence().
+ */
+export function adLicenceLine(lang, l = null) {
+  const a = l ? adLicence(l) : { basis: 'rega-pending', number: null };
+  if (a.basis === 'developer-authorisation') return developerLine(lang);
+  const n = a.number ?? AD_LICENCE_TOKEN;
+  return lang === 'ar' ? `رقم ترخيص الإعلان العقاري: ${n}` : `REGA advertising licence: ${n}`;
+}
 
 /** FAL is the brokerage licence — a real number, and unrelated to the per-ad licence above. */
 export const falLine = (lang) => (lang === 'ar'
@@ -250,7 +312,7 @@ export function captionFor(l, lang, { format = 'post' } = {}) {
       ? 'الفيديو بلا موسيقى — أضف صوتاً رائجاً عند النشر.'
       : 'Silent by design — add a trending audio when you post.');
   }
-  lines.push(adLicenceLine(lang));
+  lines.push(adLicenceLine(lang, l));
   lines.push(falLine(lang));
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
@@ -261,5 +323,8 @@ export function firstCommentFor(l, lang) {
   return `${link}\n\n${tags}`;
 }
 
-/** A listing post always needs the REGA licence; editorial never does. */
-export const adLicenceRequired = (item) => item.pillar === 'listings';
+/**
+ * Does this piece need a REGA per-ad licence? Saudi property posts do (satisfied or not);
+ * foreign property is on the developer's authorisation; editorial never needs one.
+ */
+export const adLicenceRequired = (item) => item.pillar === 'listings' && !(item.listing && isForeign(item.listing));

@@ -22,8 +22,7 @@ same day, Business Profile takes a few days to verify, Ads waits for the CR.
 3. Business details: Industry **Real Estate**, size **Small** → Business objectives
    **Generate leads** → Create → accept the terms (choose *Saudi Arabia* in the
    country dropdown of the terms dialog).
-4. Data collection → **Web** → Website URL **https://bona.azoz.uk** (change to
-   **https://bona.sa** at the cutover: Admin › Data streams › the stream › edit URL),
+4. Data collection → **Web** → Website URL **https://bona-real-estate.com**,
    Stream name **Bona web**, leave *Enhanced measurement* on → **Create stream**.
 5. Copy the **Measurement ID** (`G-XXXXXXXXXX`) from the stream details. → goes to
    `src/data/site.json → analytics.ga4` (agent) **and** `GA4_MEASUREMENT_ID` in
@@ -42,24 +41,23 @@ same day, Business Profile takes a few days to verify, Ads waits for the CR.
 
 ## 2. Search Console — URL-prefix property for Bona (5 min)
 
-`azoz.uk` is a verified *domain* property in azoz778's account; Bona gets its own
-URL-prefix property in the Bona account so reports are Bona-only and survive the domain
-move.
+Bona gets its own property in the Bona account so reports are Bona-only. The plan in
+`NEXT-SESSION.md` is a **Domain** property (`bona-real-estate.com`, verified by a DNS TXT record
+the agent adds on Cloudflare — paste the TXT value in chat) because it covers `api.` and every
+path at once; the URL-prefix route below works too if you prefer the meta tag.
 
 1. https://search.google.com/search-console → **Add property** → **URL prefix** →
-   `https://bona.azoz.uk/` → Continue.
+   `https://bona-real-estate.com/` → Continue.
 2. Verification → **HTML tag** → you see
    `<meta name="google-site-verification" content="XYZ…" />` → copy only the
    `content` value → send it to the agent ("GSC tag: XYZ…"). The agent writes it to
    `src/data/site.json → analytics.gscVerification` and deploys (~3 min).
 3. Back in Search Console → **Verify**.
 4. **Sitemaps** (left menu) → enter `sitemap-index.xml` → Submit (full URL
-   `https://bona.azoz.uk/sitemap-index.xml`).
-5. **URL inspection** → paste `https://bona.azoz.uk/` → *Request indexing*; repeat for
+   `https://bona-real-estate.com/sitemap-index.xml`).
+5. **URL inspection** → paste `https://bona-real-estate.com/` → *Request indexing*; repeat for
    `/ar/`, `/properties/`, `/ar/properties/`.
-6. After the cutover: add `https://bona.sa/` the same way (the same meta tag is
-   rendered on every domain the site is served from) and submit its sitemap; keep the
-   old property — the 301s carry the signals over.
+6. The old address `bona.azoz.uk` 301s to the live domain and needs no property of its own.
 
 ## 3. Google Business Profile (10 min + verification wait)
 
@@ -71,7 +69,7 @@ move.
 4. "Do you want to add a location customers can visit?" → **No** → service area →
    **Jeddah** (add *Obhur*, *Al Khalidiyah*, *Al Shati*, *Al Rawdah* as extra areas) →
    this is a **service-area business with the address hidden**.
-5. Contact: Phone **+966 59 329 6933** · Website **https://bona.azoz.uk**.
+5. Contact: Phone **+966 59 329 6933** · Website **https://bona-real-estate.com**.
 6. **Verification** → choose **Video verification** when offered (fastest): record in
    one take, phone in hand — your FAL licence card/certificate (1100313556), the
    street outside, a business document with the name, you at work. Google reviews it in

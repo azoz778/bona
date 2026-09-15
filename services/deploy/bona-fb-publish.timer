@@ -1,0 +1,24 @@
+; Bona — timer for bona-fb-publish.service.
+;
+; Every 15 minutes from 17:00 to 23:45 Asia/Riyadh, the same window as the Instagram
+; publisher. The zone is written INTO the calendar expression, so the schedule holds even if
+; this machine's zone changes. Check the next elapse with
+;   systemd-analyze calendar "*-*-* 17..23:00/15 Asia/Riyadh"
+;
+; Why that window: the queue puts every Facebook slot at 20:20 KSA (the evening peak the queue
+; generator documents), and the service's --grace 3 h means a tick missed for any reason is
+; caught by a later one the same evening. Grace never outlives the window: 20:20 + 3 h lapses
+; at 23:20, before the last tick at 23:45, so Persistent=true (run once at the next boot if the
+; box was off) cannot post anything the next morning.
+
+[Unit]
+Description=Bona — Facebook publisher, every 15 min 17:00–23:59 KSA
+
+[Timer]
+OnCalendar=*-*-* 17..23:00/15 Asia/Riyadh
+Persistent=true
+AccuracySec=30s
+Unit=bona-fb-publish.service
+
+[Install]
+WantedBy=timers.target

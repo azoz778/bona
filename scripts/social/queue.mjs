@@ -21,10 +21,14 @@
 // rather than best-effort). Single-format surfaces — YouTube Shorts is only ever a Short —
 // alternate pillar instead, so the channel still varies.
 //
-// REGA. Any entry that promotes a specific property carries `adLicenceRequired: true` and
-// `blocked: true`, because Bona has no per-listing advertising licence yet and its captions
-// and CTA cards carry the literal string {{AD_LICENCE}}. Editorial entries are not blocked
-// and can go out today. `--only-publishable` prints just those.
+// REGA. Every entry states its `licenceBasis` (lib/listing.mjs adLicence()). A Saudi property
+// post needs a REGA per-ad licence number: while none is recorded on the listing its captions
+// and CTA card carry the literal string {{AD_LICENCE}} and the entry is `blocked: true`; once
+// the owner records one (WhatsApp `licence <id> <number> <YYYY-MM-DD>`, rebuild listings.json,
+// re-run this with --render) the number is printed and the entry is publishable. Property
+// OUTSIDE the Kingdom cannot get a REGA ad licence and is marketed under the developer's
+// authorisation (owner decision 2026-09-09): its copy says so, carries no placeholder and is
+// never blocked. Editorial entries are never blocked. `--only-publishable` prints what can go out.
 import './lib/fonts.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,7 +36,7 @@ import { spawn } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { EDITORIAL, districtNote } from './lib/editorial.mjs';
 import {
-  AD_LICENCE_TOKEN, BASE, FAL, WA_DISPLAY, WA_LINK, adLicenceLine, captionFor, districtLabel,
+  AD_LICENCE_TOKEN, BASE, FAL, WA_DISPLAY, WA_LINK, adLicence, adLicenceLine, captionFor, districtLabel,
   editorialTags, falLine, firstCommentFor, hashtagsFor, hasPrice, listingUrl, loadListings,
   placeLabel, priceText, site, specLine, t, typeLabel, uniq,
 } from './lib/listing.mjs';
@@ -310,7 +314,7 @@ function copyFor(p, platform) {
       // Rebuilt, not truncated: the licence line and the link are mandatory and reserved.
       const build = (lang) => shortCaption(
         [t(l.title, lang), placeLabel(l, lang), specLine(l, lang), priceText(l, lang)],
-        [adLicenceLine(lang), listingUrl(l, lang)],
+        [adLicenceLine(lang, l), listingUrl(l, lang)],
       );
       ar = build('ar');
       en = build('en');
@@ -421,6 +425,9 @@ for (let day = 0; day < DAYS; day++) {
       const time = respectAvoid(weekend ? lane.time.we : lane.time.wd, dow);
       const c = copyFor(p, pKey);
       const isListing = !!p.listing;
+      // A property piece with no listing object would slip past every REGA check as "editorial".
+      if (p.pillar === 'listings' && !isListing) throw new Error(`${p.key}: listings piece without a listing object`);
+      const lic = isListing ? adLicence(p.listing) : null;
       seq += 1;
       entries.push({
         id: `q-${String(seq).padStart(3, '0')}`,
@@ -443,11 +450,13 @@ for (let day = 0; day < DAYS; day++) {
         audio: p.kind === 'reel'
           ? 'Asset is silent by design (no music licence). Pick a trending in-app track when posting.'
           : null,
-        adLicenceRequired: isListing,
-        blocked: isListing,
-        blockedReason: isListing
-          ? `REGA per-ad advertising licence not issued for ${p.listing.id}. Replace ${AD_LICENCE_TOKEN} in the caption AND re-render the asset (the CTA card carries it too), then set blocked:false.`
-          : null,
+        licenceBasis: lic?.basis ?? null,
+        adLicenceRequired: isListing && lic.basis !== 'developer-authorisation',
+        blocked: lic?.blocked ?? false,
+        blockedReason: !lic?.blocked ? null
+          : lic.basis === 'unknown-country'
+            ? `${p.listing.id} says country "${lic.country}", which is neither Saudi Arabia nor a country in FOREIGN_COUNTRIES (scripts/social/lib/listing.mjs). Fix the listing or add the country, then re-run queue.mjs --render.`
+            : `REGA per-ad advertising licence not recorded for ${p.listing.id}. Record it in the WhatsApp group (licence ${p.listing.id} <number> <YYYY-MM-DD>), rebuild listings.json, then re-run queue.mjs --render so the caption AND the CTA card carry the number instead of ${AD_LICENCE_TOKEN}.`,
       });
     }
   }
@@ -564,12 +573,28 @@ function assertCompliance(list) {
   for (const e of list) {
     const both = `${e.caption.ar}\n${e.caption.en}`;
     if (e.listingRef) {
-      // REGA: a post promoting a specific property must carry the placeholder and be blocked.
-      if (!e.caption.ar.includes(AD_LICENCE_TOKEN)) problems.push(`${e.id} (${e.listingRef}, ${e.platform}): AR caption has no ${AD_LICENCE_TOKEN}`);
-      if (!e.caption.en.includes(AD_LICENCE_TOKEN)) problems.push(`${e.id} (${e.listingRef}, ${e.platform}): EN caption has no ${AD_LICENCE_TOKEN}`);
-      if (e.blocked !== true) problems.push(`${e.id} (${e.listingRef}): promotes a property but is not blocked`);
-      // TAQEEM: a listing with no printed price must say so, in words, in both languages.
       const l = listings.find((x) => x.id === e.listingRef);
+      const lic = l ? adLicence(l) : null;
+      const where = `${e.id} (${e.listingRef}, ${e.platform})`;
+      if (!lic) problems.push(`${where}: promotes a listing that is not in listings.json`);
+      else if (e.licenceBasis !== lic.basis) problems.push(`${where}: licenceBasis ${e.licenceBasis} but the listing says ${lic.basis}`);
+      else if (lic.basis === 'developer-authorisation') {
+        // Outside the Kingdom: the developer line, never the REGA placeholder, never blocked.
+        if (both.includes(AD_LICENCE_TOKEN)) problems.push(`${where}: foreign property carries ${AD_LICENCE_TOKEN}`);
+        if (!/المطوّر/.test(e.caption.ar) || !/developer authorisation/.test(e.caption.en)) problems.push(`${where}: foreign property lacks the developer-authorisation line`);
+        if (e.blocked !== false) problems.push(`${where}: foreign property must not be blocked`);
+      } else if (lic.basis === 'rega-ad-licence') {
+        // A recorded number replaces the placeholder in both captions and the entry may go out.
+        if (!e.caption.ar.includes(lic.number) || !e.caption.en.includes(lic.number)) problems.push(`${where}: licence ${lic.number} missing from a caption`);
+        if (both.includes(AD_LICENCE_TOKEN)) problems.push(`${where}: licensed but still carries ${AD_LICENCE_TOKEN}`);
+        if (e.blocked !== false) problems.push(`${where}: licensed but blocked`);
+      } else {
+        // REGA pending (or an unrecognised country): placeholder in both captions, entry blocked.
+        if (!e.caption.ar.includes(AD_LICENCE_TOKEN)) problems.push(`${where}: AR caption has no ${AD_LICENCE_TOKEN}`);
+        if (!e.caption.en.includes(AD_LICENCE_TOKEN)) problems.push(`${where}: EN caption has no ${AD_LICENCE_TOKEN}`);
+        if (e.blocked !== true) problems.push(`${where}: promotes an unlicensed Saudi property but is not blocked`);
+      }
+      // TAQEEM: a listing with no printed price must say so, in words, in both languages.
       if (l && !hasPrice(l)) {
         if (!/السعر عند الطلب/.test(e.caption.ar)) problems.push(`${e.id} (${e.listingRef}): no printed price and no "السعر عند الطلب"`);
         if (!/Price on request/.test(e.caption.en)) problems.push(`${e.id} (${e.listingRef}): no printed price and no "Price on request"`);
@@ -606,7 +631,7 @@ const doc = {
   },
   rules: {
     price: 'Never invented. A listing with no printed asking price says "السعر عند الطلب / Price on request" (TAQEEM reserves valuation to accredited valuers).',
-    regaAdLicence: `Any post promoting a specific property needs a REGA advertising licence number. None is issued yet, so those entries carry ${AD_LICENCE_TOKEN} and blocked:true. Editorial entries carry no such requirement and are publishable now.`,
+    regaAdLicence: `Every entry states its licenceBasis. A Saudi property post needs a REGA per-ad advertising licence number: until one is recorded on the listing (WhatsApp: licence <id> <number> <YYYY-MM-DD>) the entry carries ${AD_LICENCE_TOKEN} and blocked:true; a recorded, unexpired number is printed instead and the entry is publishable. Property outside the Kingdom (developer-authorisation) is marketed under the developer's mandate, says so in the caption and on the CTA card, and is never blocked. Editorial entries carry no such requirement.`,
     audio: 'Reels are rendered silent. Add a trending in-app track at post time — an unlicensed music bed risks a muted rights claim and kills reach.',
     language: 'Arabic is the primary caption on every platform; English follows.',
     formatMix: 'No platform posts the same format twice in a row. Single-format surfaces alternate pillar instead.',
@@ -616,6 +641,7 @@ const doc = {
     entries: kept.length,
     publishableNow: kept.filter((e) => !e.blocked).length,
     blockedOnAdLicence: kept.filter((e) => e.blocked).length,
+    byLicenceBasis: Object.fromEntries(['developer-authorisation', 'rega-ad-licence', 'rega-pending'].map((b) => [b, kept.filter((e) => e.licenceBasis === b).length])),
     assetsReady: kept.filter((e) => e.assetsReady).length,
     byPlatform, byPillar, byFormat,
     distinctPieces: new Set(kept.map((e) => e.pieceKey)).size,
