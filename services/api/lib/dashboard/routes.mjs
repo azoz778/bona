@@ -179,16 +179,22 @@ export function createDashboardRoutes({
   /** True unless the browser stated an origin (or referer) that is not ours. */
   function sameOrigin(req) {
     const own = ownOrigins(req);
-    // `Origin: null` — a sandboxed iframe, a `data:` URL, some redirect chains — is not
-    // one of ours, so it is refused like any other foreign origin. `SameSite=Lax` would
-    // keep the cookie off those requests anyway; this is the check not depending on it.
+    // `Origin` is authoritative when the browser sends it, which it does on every
+    // cross-origin POST. `Origin: null` — a sandboxed iframe, a `data:` URL, some
+    // redirect chains — is not one of ours, so it is refused like any other foreign
+    // origin. `SameSite=Lax` would keep the cookie off those requests anyway; this is
+    // the check not depending on it.
     const origin = req.headers.origin;
-    if (origin && !own.has(String(origin).trim().replace(/\/+$/, ''))) return false;
+    if (origin !== undefined) return own.has(String(origin).trim().replace(/\/+$/, ''));
+    // No `Origin` at all. A same-site form POST is allowed to omit it, and this API
+    // sends `Referrer-Policy: no-referrer`, so our own pages arrive here with neither
+    // header — refusing that would lock the owner out of his own login. A `Referer`
+    // naming a different site is still evidence of a cross-site post; an unparseable
+    // one is not evidence of anything, and the cookie and the write marker still stand
+    // behind this check.
     const referer = req.headers.referer;
-    if (referer) {
-      try { if (!own.has(new URL(referer).origin)) return false; } catch { return false; }
-    }
-    return true;
+    if (!referer) return true;
+    try { return own.has(new URL(referer).origin); } catch { return true; }
   }
 
   /**
