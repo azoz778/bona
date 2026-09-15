@@ -18,7 +18,7 @@ platforms. **66 are publishable immediately** (brand / education / district — 
 REGA advertising licence). 103 are blocked on `{{AD_LICENCE}}` and must not go out until
 licence numbers exist.
 
-## STEP 1 — Finish the Meta setup (biggest unlock, ~20 min)
+## STEP 1 — Meta setup — DONE 2026-09-15 except the dataset/pixel (see "Still open")
 
 Already done: business portfolio `bona.com.sa`, Facebook Page **Bona Real Estate**, and
 Accounts Center holds Facebook + Instagram `bona.com.sa`. Instagram is already a Business
@@ -198,21 +198,20 @@ Verify, in this order — no assumptions:
   `~/bona-wt/ops/marketing/queue/` — NOT in `~/bona`, which only ever had `queue.json`. The older
   render in `~/bona-wt/social/marketing/queue/` is stale (foreign CTA cards carry the REGA
   placeholder there). A worktree needs `npm ci` before `--render` works (sharp is native).
-- **Facebook Page publishing exists but needs one more token scope (owner, 2 min).**
-  `scripts/social/facebook-post.mjs` (+ `lib/facebook.mjs`) publishes the queue's Facebook entries
-  by uploading the local PNG/MP4 straight to the Page; `services/deploy/install-fb-publish.sh`
-  installs a 17:00–23:59 KSA timer that runs from `~/bona-publish` like the Instagram one.
-  Verified live 2026-09-09 ~15:15 KSA: `whoami` reaches the Page, the system user `bona-poster`
-  has every task on it (CREATE_CONTENT …), but the token was generated with the Instagram scopes
-  + `pages_show_list` + `pages_read_engagement` only — the first real post failed with
-  `(#200) pages_manage_posts are not available`. Owner: Business Settings → Users → System
-  users → bona-poster → **Generate new token** → app *Bona Publisher* → expiry Never → tick the
-  existing scopes PLUS `pages_manage_posts` (and `business_management`, `ads_management`,
-  `ads_read` for later) → `bona-secret META_ACCESS_TOKEN 'EAA…' meta`. If
-  `pages_manage_posts` is not offered in that dialog, first add it to the app: App Dashboard →
-  *Use cases* → add **"Manage everything on your Page"** (or App Review → Permissions and
-  features → `pages_manage_posts` → Add). Then, after PR #3 is on main:
-  `bash ~/bona/services/deploy/install-fb-publish.sh`, and to post the opening brand post at once:
-  `cd ~/bona-publish && BONA_QUEUE_ASSETS=~/bona-data/queue node scripts/social/facebook-post.mjs queue --id q-046`.
-  Instagram scopes (`instagram_content_publish` …) ARE on the token — the other session's
-  `bona-ig-publish.timer` is enabled and posts from 17:00 KSA.
+- **Facebook is LIVE (2026-09-15 06:38 KSA).** The app now has the use case *Manage everything on
+  your Page* (added from the owner's Chrome :9223 with `~/.claude/scripts/cdp-bona.mjs`), the
+  system user `claude` holds a never-expiring token with all 20 scopes (incl. `pages_manage_posts`,
+  `business_management`; NOT `ads_management`), the opening brand post q-046 is on the Page
+  (`~/bona-data/fb/published.jsonl`), and `bona-fb-publish.timer` is enabled next to the Instagram
+  one (both 17:00–23:45 KSA, from `~/bona-publish`). `journalctl --user -u bona-fb-publish -o cat -n 50`.
+- **Meta connector (claude.ai "Meta ads" MCP) is connected in the owner's Claude session** and
+  answers read-only questions: portfolio 3210786215773541 has **no dataset/pixel** and **no Bona ad
+  account** (only a personal ad account "Tarek Shams", no business, no payment method). The agent
+  may not create the dataset (classifier: real-world transaction) — the owner types this once:
+
+      ! set -a; . ~/.secrets/bona-meta-graph.env; set +a; curl -s -X POST -H "Authorization: Bearer $META_ACCESS_TOKEN" "https://graph.facebook.com/v23.0/$META_BUSINESS_ID/adspixels" --data-urlencode "name=Bona web"
+
+  → `{"id":"<15–16 digits>"}` = `META_PIXEL_ID` = `site.json → analytics.metaPixel`. Then the CAPI
+  token: Events Manager → *Bona web* → Settings → Conversions API → **Generate access token** →
+  `bona-secret META_CAPI_TOKEN 'EAA…'` (the system-user token lacks `ads_management`, so it cannot
+  send CAPI events itself).
