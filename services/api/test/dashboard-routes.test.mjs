@@ -24,7 +24,10 @@ function assertLocked(res) {
   assert.equal(res.headers.get('cache-control'), 'no-store');
   assert.equal(res.headers.get('content-security-policy'), CSP);
   assert.equal(res.headers.get('x-frame-options'), 'DENY');
-  assert.equal(res.headers.get('referrer-policy'), 'no-referrer');
+  // NOT `no-referrer`: that made Chrome send `Origin: null` on the login form's own
+  // same-origin POST, and `sameOrigin()` refused it — the owner could not log in at
+  // all. `same-origin` still strips the referrer from every cross-site request.
+  assert.equal(res.headers.get('referrer-policy'), 'same-origin');
 }
 
 async function withDash(overrides = {}, fn) {
@@ -484,37 +487,44 @@ test('a stage change from a foreign origin is refused before the body is read', 
 });
 
 /**
- * The regression this guards: `sameOrigin()` used to refuse on ANY unfamiliar
- * `Referer`, which locked the owner out of his own login — arriving from the
- * marketing site, from an in-app browser, or through Chrome's translate proxy all
- * produced `?error=forbidden`. `Origin` is now authoritative when the browser sends
- * it, and a `Referer` alone can only refuse when it names a different site.
+ * The bug this guards against, in the two places it lived.
+ *
+ * 1. `Referrer-Policy: no-referrer` left Chrome with no referrer to derive an origin
+ *    from, so it sent `Origin: null` on the login form's own same-origin POST. That is
+ *    byte-identical to a sandboxed iframe, `sameOrigin()` refused it, and the owner
+ *    could not log in from any browser. Reproduced in a real Chrome and confirmed
+ *    against a local server: `no-referrer` -> `Origin: null`, `same-origin` -> the
+ *    page's own origin.
+ * 2. `sameOrigin()` used to refuse on ANY unfamiliar `Referer`, which also refused a
+ *    click through from the marketing site or an in-app browser.
+ *
+ * `Origin: null` must still be refused — this asserts the header no longer provokes it
+ * rather than that the check has been loosened to accept it.
  */
-test('the login survives a foreign referer but still refuses a foreign origin', async () => {
-  await withDash({}, async ({ postForm, base }) => {
+test('the login is reachable from the owner\'s own browser, and only from it', async () => {
+  await withDash({}, async ({ get, postForm, base }) => {
     const errorOf = (res) =>
       new URL(res.headers.get('location'), 'https://x').searchParams.get('error');
 
-    // A browser that states our own Origin is the owner, whatever the Referer says.
-    // Before the fix the t.me Referer alone was enough to refuse this.
-    const ok = await postForm('/dashboard/login/code', { _dash: '1' },
+    // The header that caused it: anything but `no-referrer`, or Chrome sends null.
+    const page = await get('/dashboard/login');
+    assert.equal(page.headers.get('referrer-policy'), 'same-origin');
+
+    // The owner's real POST: its own origin, whatever referrer the arrival had.
+    const own = await postForm('/dashboard/login/code', { _dash: '1' },
       { headers: { Origin: base, Referer: 'https://t.me/' } });
-    assert.notEqual(errorOf(ok), 'forbidden');
+    assert.notEqual(errorOf(own), 'forbidden');
 
-    // An attacker's page states its own Origin and is still refused.
-    const evil = await postForm('/dashboard/login/code', { _dash: '1' },
-      { headers: { Origin: 'https://evil.example' } });
-    assert.equal(errorOf(evil), 'forbidden');
-
-    // `Origin: null` (sandboxed iframe, data: URL) is refused like any foreign origin.
-    const nul = await postForm('/dashboard/login/code', { _dash: '1' },
-      { headers: { Origin: 'null' } });
-    assert.equal(errorOf(nul), 'forbidden');
-
-    // No Origin and a foreign Referer is still a cross-site post.
-    const ref = await postForm('/dashboard/login/code', { _dash: '1' },
-      { headers: { Referer: 'https://evil.example/x' } });
-    assert.equal(errorOf(ref), 'forbidden');
+    // Still refused: a foreign origin, an opaque origin, a foreign referer.
+    for (const [label, headers] of [
+      ['attacker page', { Origin: 'https://evil.example' }],
+      ['sandboxed iframe', { Origin: 'null' }],
+      ['translate proxy', { Origin: 'https://api-bona--real--estate-com.translate.goog' }],
+      ['foreign referer, no origin', { Referer: 'https://evil.example/x' }],
+    ]) {
+      const res = await postForm('/dashboard/login/code', { _dash: '1' }, { headers });
+      assert.equal(errorOf(res), 'forbidden', label);
+    }
   });
 });
 
