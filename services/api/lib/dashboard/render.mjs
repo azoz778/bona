@@ -168,11 +168,12 @@ export function layout({ title, body, active = null, chrome = true }) {
         `<a href="${esc(href)}"${href === active ? ' class="on"' : ''}>${esc(label)}</a>`).join('')}<form method="post" action="/dashboard/logout"><input type="hidden" name="_dash" value="1"><button type="submit">Log out</button></form></header>`
     : '';
   return `<!doctype html>
-<html lang="en">
+<html lang="en" translate="no">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex, nofollow">
+<meta name="robots" content="noindex, nofollow, notranslate">
+<meta name="google" content="notranslate">
 <title>${esc(title)} · Bona</title>
 <style>${STYLE}</style>
 </head>
@@ -239,7 +240,8 @@ export const MESSAGES = {
   expired: 'That code has expired. Ask for a new one.',
   used: 'That code has already been used. Ask for a new one.',
   attempts: 'Too many wrong attempts on that code. Ask for a new one.',
-  forbidden: 'That request did not come from this page.',
+  no_request: 'Ask for a new code, then type it into this same browser — a code only works where it was requested.',
+  forbidden: 'That request did not come from this page. Open api.bona-real-estate.com/dashboard directly, with translation off.',
   bad_stage: 'That is not one of the stages.',
   bad_value: 'A deal value has to be a number.',
   empty_note: 'A note cannot be empty.',
