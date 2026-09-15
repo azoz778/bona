@@ -47,6 +47,19 @@ import { createLimiter } from '../ratelimit.mjs';
 
 export const COOKIE_NAME = 'bona_dash';
 export const TRY_COOKIE_NAME = 'bona_dash_try';
+
+/**
+ * Arabic-Indic (٠-٩) and Eastern Arabic-Indic (۰-۹) digits folded to ASCII.
+ * An Arabic keyboard is the normal case here, not an edge case: without this the
+ * six digits the owner reads off WhatsApp and types back are stripped by `\D` and
+ * the correct code is refused as wrong.
+ */
+export function normaliseDigits(input) {
+  return String(input ?? '').replace(/[\u0660-\u0669\u06F0-\u06F9]/g, (d) => {
+    const c = d.charCodeAt(0);
+    return String(c >= 0x06F0 ? c - 0x06F0 : c - 0x0660);
+  });
+}
 export const CODE_TTL_MS = 10 * 60_000;
 export const MAX_CODE_ATTEMPTS = 5;
 /** Per-IP: 3 codes per 10 minutes. Globally: 1 a minute, and 60 a day (see the header). */
@@ -195,7 +208,10 @@ export function createAuth({ db, cfg = {}, sendWhatsApp, now = () => Date.now(),
       return { ok: false, error: 'attempts' };
     }
 
-    const cleaned = String(code ?? '').replace(/\D/g, '');
+    // Arabic-Indic digits first: the owner's phone has an Arabic keyboard, and
+    // `\D` would strip ٠١٢٣٤٥٦٧٨٩ entirely — a correctly typed code would read as
+    // empty and be refused as wrong, burning one of its five attempts.
+    const cleaned = normaliseDigits(code).replace(/\D/g, '');
     if (cleaned.length !== 6 || !hashEquals(sha256(cleaned), entry.codeHash)) {
       log({ level: 'warn', evt: 'dash.login_failed', reason: 'bad_code' });
       return { ok: false, error: 'bad_code' };
