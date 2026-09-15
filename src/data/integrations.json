@@ -82,10 +82,12 @@
   {
     "id": "ga4",
     "name": "Google Analytics 4",
-    "status": "pending-owner",
+    "status": "error",
     "owner": "owner",
     "action": "Create a GA4 property for bona-real-estate.com and paste the Measurement ID (G-XXXX) into site.json → analytics.ga4.",
-    "link": "https://analytics.google.com/"
+    "link": "https://analytics.google.com/",
+    "detail": "payload validated for G-861TD74EW1; one verify_ping sent to mp/collect (HTTP 204 — that endpoint answers 204 with an empty body and never reports errors, so acceptance is NOT proof of ingestion). site tag G-861TD74EW1 in site.json but NOT on the live page (deploy pending?). Owner: confirm the verify",
+    "checkedAt": "2026-09-15T11:41:08.167Z"
   },
   {
     "id": "meta-pixel",
@@ -93,15 +95,19 @@
     "status": "pending-owner",
     "owner": "owner",
     "action": "Create a dataset in Events Manager and paste the Pixel ID into site.json → analytics.metaPixel.",
-    "link": "https://business.facebook.com/events_manager"
+    "link": "https://business.facebook.com/events_manager",
+    "detail": "Meta Pixel id missing: site.json → analytics.metaPixel — docs/checklists/meta-bona-portfolio.md §4",
+    "checkedAt": "2026-09-15T11:41:08.167Z"
   },
   {
     "id": "gsc",
     "name": "Google Search Console",
-    "status": "pending-agent",
+    "status": "pending-owner",
     "owner": "agent",
     "action": "azoz.uk domain property is verified via DNS. Submit https://bona-real-estate.com/sitemap-index.xml once the site is live.",
-    "link": "https://search.google.com/search-console?resource_id=sc-domain:azoz.uk"
+    "link": "https://search.google.com/search-console?resource_id=sc-domain:azoz.uk",
+    "detail": "no google-site-verification meta on https://bona-real-estate.com/ — paste the HTML-tag content into site.json → analytics.gscVerification (docs/checklists/google-bona.md §2)",
+    "checkedAt": "2026-09-15T11:41:08.167Z"
   },
   {
     "id": "indexnow",
@@ -151,5 +157,65 @@
     "owner": "owner",
     "action": "No mailbox until bona.com.sa exists. Then Google Workspace or Zoho Mail on the domain; add the address to site.json.",
     "link": null
+  },
+  {
+    "id": "meta-capi",
+    "name": "Meta Conversions API",
+    "owner": "owner",
+    "link": "https://business.facebook.com/events_manager2",
+    "action": "docs/checklists/meta-bona-portfolio.md §5–6",
+    "status": "pending-owner",
+    "detail": "META_PIXEL_ID empty, META_CAPI_TOKEN empty in ~/.secrets/bona-marketing.env — docs/checklists/meta-bona-portfolio.md §4–6",
+    "checkedAt": "2026-09-15T11:41:08.167Z"
+  },
+  {
+    "id": "snap",
+    "name": "Snap Pixel + Conversions API",
+    "owner": "owner",
+    "link": "https://ads.snapchat.com/",
+    "action": "docs/checklists/snapchat-bona.md",
+    "status": "pending-owner",
+    "detail": "SNAP_PIXEL_ID empty, SNAP_CAPI_TOKEN empty in ~/.secrets/bona-marketing.env — docs/checklists/snapchat-bona.md. site tag missing: site.json → analytics.snapPixel",
+    "checkedAt": "2026-09-15T11:41:08.167Z"
+  },
+  {
+    "id": "tiktok-pixel",
+    "name": "TikTok Pixel (site)",
+    "owner": "owner",
+    "link": "https://ads.tiktok.com/i18n/events_manager",
+    "action": "paste the sdkid into site.json → analytics.tiktokPixel",
+    "status": "pending-owner",
+    "detail": "TikTok Pixel id missing: site.json → analytics.tiktokPixel — TikTok Ads → Assets → Events → Web Events → the pixel's sdkid",
+    "checkedAt": "2026-09-15T11:41:08.167Z"
+  },
+  {
+    "id": "bona-api",
+    "name": "Concierge API (bona-api)",
+    "owner": "agent",
+    "link": "https://api.bona-real-estate.com/health",
+    "action": "systemctl --user status bona-api cloudflared-bona",
+    "status": "live",
+    "detail": "https://api.bona-real-estate.com/health ok — HTTP 200, v1.0.0, inventory 46, db ok, poller 1789472428062, fan-out pending 0 / failed 0",
+    "checkedAt": "2026-09-15T11:41:08.167Z"
+  },
+  {
+    "id": "retell",
+    "name": "Retell (Dana)",
+    "owner": "owner",
+    "link": "https://dashboard.retellai.com/",
+    "action": "services/README.md §5",
+    "status": "live",
+    "detail": "Retell reachable through bona-api",
+    "checkedAt": "2026-09-15T11:41:08.167Z"
+  },
+  {
+    "id": "evolution",
+    "name": "Evolution API (WhatsApp)",
+    "owner": "agent",
+    "link": null,
+    "action": "~/.secrets/evolution-api.env",
+    "status": "live",
+    "detail": "Evolution API answers HTTP 200 v2.3.7 at https://wa-api.azoz.uk; instance abdulaziz-personal",
+    "checkedAt": "2026-09-15T11:41:08.167Z"
   }
 ]
