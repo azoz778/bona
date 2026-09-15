@@ -43,7 +43,12 @@ export const SECURITY_HEADERS = {
   'Cache-Control': 'no-store',
   'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'",
   'X-Frame-Options': 'DENY',
-  'Referrer-Policy': 'no-referrer',
+  // `no-referrer` here is what broke the login: with no referrer at all Chrome sends
+  // `Origin: null` on the login form's own same-origin POST, which is indistinguishable
+  // from a sandboxed iframe and was refused. `same-origin` keeps the referrer off every
+  // cross-site request — the reason the header is here — while still letting our own
+  // pages identify themselves to our own endpoints.
+  'Referrer-Policy': 'same-origin',
   'X-Content-Type-Options': 'nosniff',
 };
 
@@ -180,18 +185,23 @@ export function createDashboardRoutes({
   function sameOrigin(req) {
     const own = ownOrigins(req);
     // `Origin` is authoritative when the browser sends it, which it does on every
-    // cross-origin POST. `Origin: null` — a sandboxed iframe, a `data:` URL, some
-    // redirect chains — is not one of ours, so it is refused like any other foreign
-    // origin. `SameSite=Lax` would keep the cookie off those requests anyway; this is
-    // the check not depending on it.
+    // cross-origin POST. `Origin: null` — a sandboxed iframe, a `data:` URL — is not
+    // one of ours, so it is refused like any other foreign origin. `SameSite=Lax`
+    // would keep the cookie off those requests anyway; this is the check not
+    // depending on it.
+    //
+    // This is only safe to state that plainly because `Referrer-Policy` is now
+    // `same-origin`. Under `no-referrer` Chrome sent `Origin: null` on the login
+    // form's OWN same-origin POST — the browser has no referrer to derive an origin
+    // from — so the owner's real login was indistinguishable from a sandboxed frame
+    // and was refused. Verified in a real browser: `no-referrer` produced
+    // `Origin: null`, `same-origin` produced the page's own origin.
     const origin = req.headers.origin;
     if (origin !== undefined) return own.has(String(origin).trim().replace(/\/+$/, ''));
-    // No `Origin` at all. A same-site form POST is allowed to omit it, and this API
-    // sends `Referrer-Policy: no-referrer`, so our own pages arrive here with neither
-    // header — refusing that would lock the owner out of his own login. A `Referer`
-    // naming a different site is still evidence of a cross-site post; an unparseable
-    // one is not evidence of anything, and the cookie and the write marker still stand
-    // behind this check.
+    // No `Origin` header at all — some browsers omit it on a same-site form POST. A
+    // `Referer` naming a different site is still evidence of a cross-site post; an
+    // unparseable one is not evidence of anything, and the cookie and the write
+    // marker still stand behind this check.
     const referer = req.headers.referer;
     if (!referer) return true;
     try { return own.has(new URL(referer).origin); } catch { return true; }
