@@ -26,7 +26,7 @@ import { C, SAFE, STORY, centred, fitText, iso, rule, sharp, text, wordmark } fr
 import { canvas, captionBand, ctaCard, editorialCard, flatten, lowerThird, markLayer } from './lib/cards.mjs';
 import { bestPhotos, cover } from './lib/photos.mjs';
 import {
-  AD_LICENCE_TOKEN, WA_DISPLAY, districtLabel, hasPrice, listingUrl, loadListings, placeLabel,
+  AD_LICENCE_TOKEN, WA_DISPLAY, adLicence, districtLabel, hasPrice, listingUrl, loadListings, placeLabel,
   priceText, t, typeLabel,
 } from './lib/listing.mjs';
 import { byId, districtNote } from './lib/editorial.mjs';
@@ -97,9 +97,13 @@ async function storyForListing(l, kind) {
   // we do not have.
   layers.push(await lowerThird(W, H, l, { bottom: STORY_BOTTOM, right: 140 }));
 
-  // The licence line every property story needs, small, at the very bottom of the safe area.
+  // The licence line every property story needs, small, at the very bottom of the safe area:
+  // the REGA number (placeholder until recorded), or the developer line outside the Kingdom.
+  const basis = adLicence(l);
   const lic = await text({
-    text: `ترخيص الإعلان العقاري ${iso(AD_LICENCE_TOKEN)}`,
+    text: basis.basis === 'developer-authorisation'
+      ? 'عقار خارج المملكة — يُسوَّق بتفويض من المطوّر'
+      : `ترخيص الإعلان العقاري ${iso(basis.number ?? AD_LICENCE_TOKEN)}`,
     face: 'ar-body', size: 24, color: 'rgba(245,241,234,0.74)',
   });
   layers.push(await canvas(W, H).composite([centred(lic, W, H - 116)]).png().toBuffer());

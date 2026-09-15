@@ -131,18 +131,30 @@ number with no source. If that line is ever wanted it must come from a real fiel
 through `priceText()` like every other price.
 
 `queue.mjs` asserts all three on the finished queue and **exits 4** rather than write a
-`queue.json` that breaks any of them: every entry with a `listingRef` must carry
-`{{AD_LICENCE}}` in both captions and `blocked: true`; a listing with no printed price must
-say so in both languages; no caption may mention TK. This caught a real bug — X captions are
+`queue.json` that breaks any of them: every entry with a `listingRef` must match its
+`licenceBasis` (placeholder + `blocked: true` while a Saudi listing has no REGA number; the
+recorded number printed and unblocked once it has one; the developer line, no placeholder,
+unblocked for property outside the Kingdom); a listing with no printed price must say so in
+both languages; no caption may mention TK. This caught a real bug — X captions are
 capped at 280 characters, and truncating from the top silently dropped the licence line,
 which is the last line of a listing caption. X captions are now *rebuilt* with the licence
 line and link reserved first, and the body is what gets cut.
 
-**2. REGA — a property advert needs an advertising licence.** Every post that promotes a
-*specific* property carries the literal placeholder `{{AD_LICENCE}}` — in the caption **and
-burned into the CTA card** — and is marked `blocked: true` in the queue. When the per-listing
-licences are issued: replace the placeholder in the caption, **re-render the asset** (the
-card carries it too), then set `blocked: false`.
+**2. REGA — a property advert needs an advertising licence.** `lib/listing.mjs` `adLicence()`
+decides the basis for every listing and every entry records it as `licenceBasis`:
+
+| basis | when | caption + CTA card | queue |
+|---|---|---|---|
+| `rega-pending` | Saudi property, no valid `listing.licence.adNumber` | `{{AD_LICENCE}}` placeholder, burned into the card too | `blocked: true` |
+| `rega-ad-licence` | a recorded number that passes the intake's shape check, expiry a real `YYYY-MM-DD` not before today (Riyadh) | the number is printed | publishable |
+| `developer-authorisation` | country is in `FOREIGN_COUNTRIES` (Oman, Spain, UAE, …) — a REGA ad licence binds to a Saudi deed and cannot exist for it; the owner markets it under the developer's mandate (decision 2026-09-09) | «عقار خارج المملكة — يُسوَّق بتفويض من المطوّر» / "marketed under developer authorisation" | publishable |
+| `unknown-country` | country string is neither Saudi nor recognised (data error) | placeholder | `blocked: true` with a reason naming the string |
+
+It fails closed: `KSA`, `السعودية` and garbage strings are Saudi, junk numbers (`TBD`,
+`pending`) and malformed dates count as no licence. To unblock a Saudi listing: record the
+number in the WhatsApp group (`licence BONA-### <number> <YYYY-MM-DD>`), rebuild
+`listings.json`, then `node scripts/social/queue.mjs --render` — the caption, the CTA card
+and the story line pick the number up; nothing is edited by hand.
 
 Brand, education, market-fact and district posts promote no specific property and carry no
 such requirement. They are `blocked: false` and can go out today —
