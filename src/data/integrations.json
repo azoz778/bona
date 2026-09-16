@@ -82,32 +82,32 @@
   {
     "id": "ga4",
     "name": "Google Analytics 4",
-    "status": "error",
+    "status": "live",
     "owner": "owner",
     "action": "Create a GA4 property for bona-real-estate.com and paste the Measurement ID (G-XXXX) into site.json → analytics.ga4.",
     "link": "https://analytics.google.com/",
-    "detail": "payload validated for G-861TD74EW1; one verify_ping sent to mp/collect (HTTP 204 — that endpoint answers 204 with an empty body and never reports errors, so acceptance is NOT proof of ingestion). site tag G-861TD74EW1 in site.json but NOT on the live page (deploy pending?). Owner: confirm the verify",
-    "checkedAt": "2026-09-15T11:41:08.167Z"
+    "detail": "payload validated for G-861TD74EW1; one verify_ping sent to mp/collect (HTTP 204 — that endpoint answers 204 with an empty body and never reports errors, so acceptance is NOT proof of ingestion). site tag G-861TD74EW1 served. Owner: confirm the verify_ping in GA4 → Reports → Realtime (or Admin → Deb",
+    "checkedAt": "2026-09-16T01:06:08.415Z"
   },
   {
     "id": "meta-pixel",
     "name": "Meta Pixel",
-    "status": "pending-owner",
+    "status": "live",
     "owner": "owner",
     "action": "Create a dataset in Events Manager and paste the Pixel ID into site.json → analytics.metaPixel.",
     "link": "https://business.facebook.com/events_manager",
-    "detail": "Meta Pixel id missing: site.json → analytics.metaPixel — docs/checklists/meta-bona-portfolio.md §4",
-    "checkedAt": "2026-09-15T11:41:08.167Z"
+    "detail": "Meta Pixel 1102591712117129 is served by the live site (loads after consent)",
+    "checkedAt": "2026-09-16T01:06:08.415Z"
   },
   {
     "id": "gsc",
     "name": "Google Search Console",
-    "status": "pending-owner",
+    "status": "live",
     "owner": "agent",
     "action": "azoz.uk domain property is verified via DNS. Submit https://bona-real-estate.com/sitemap-index.xml once the site is live.",
     "link": "https://search.google.com/search-console?resource_id=sc-domain:azoz.uk",
-    "detail": "no google-site-verification meta on https://bona-real-estate.com/ — paste the HTML-tag content into site.json → analytics.gscVerification (docs/checklists/google-bona.md §2)",
-    "checkedAt": "2026-09-15T11:41:08.167Z"
+    "detail": "google-site-verification tag served (ufBDKr…) — verify + submit sitemap-index.xml in Search Console if not done",
+    "checkedAt": "2026-09-16T01:06:08.415Z"
   },
   {
     "id": "indexnow",
@@ -164,9 +164,9 @@
     "owner": "owner",
     "link": "https://business.facebook.com/events_manager2",
     "action": "docs/checklists/meta-bona-portfolio.md §5–6",
-    "status": "pending-owner",
-    "detail": "META_PIXEL_ID empty, META_CAPI_TOKEN empty in ~/.secrets/bona-marketing.env — docs/checklists/meta-bona-portfolio.md §4–6",
-    "checkedAt": "2026-09-15T11:41:08.167Z"
+    "status": "live",
+    "detail": "dataset 1102591712117129 received a PageView test event (test_event_code set — empty it once events show in Events Manager)",
+    "checkedAt": "2026-09-16T01:06:08.415Z"
   },
   {
     "id": "snap",
@@ -176,7 +176,7 @@
     "action": "docs/checklists/snapchat-bona.md",
     "status": "pending-owner",
     "detail": "SNAP_PIXEL_ID empty, SNAP_CAPI_TOKEN empty in ~/.secrets/bona-marketing.env — docs/checklists/snapchat-bona.md. site tag missing: site.json → analytics.snapPixel",
-    "checkedAt": "2026-09-15T11:41:08.167Z"
+    "checkedAt": "2026-09-16T01:06:08.415Z"
   },
   {
     "id": "tiktok-pixel",
@@ -186,7 +186,7 @@
     "action": "paste the sdkid into site.json → analytics.tiktokPixel",
     "status": "pending-owner",
     "detail": "TikTok Pixel id missing: site.json → analytics.tiktokPixel — TikTok Ads → Assets → Events → Web Events → the pixel's sdkid",
-    "checkedAt": "2026-09-15T11:41:08.167Z"
+    "checkedAt": "2026-09-16T01:06:08.415Z"
   },
   {
     "id": "bona-api",
@@ -195,8 +195,8 @@
     "link": "https://api.bona-real-estate.com/health",
     "action": "systemctl --user status bona-api cloudflared-bona",
     "status": "live",
-    "detail": "https://api.bona-real-estate.com/health ok — HTTP 200, v1.0.0, inventory 46, db ok, poller 1789472428062, fan-out pending 0 / failed 0",
-    "checkedAt": "2026-09-15T11:41:08.167Z"
+    "detail": "https://api.bona-real-estate.com/health ok — HTTP 200, v1.0.0, inventory 46, db ok, poller 1789520737503, fan-out pending 0 / failed 0",
+    "checkedAt": "2026-09-16T01:06:08.415Z"
   },
   {
     "id": "retell",
@@ -206,7 +206,7 @@
     "action": "services/README.md §5",
     "status": "live",
     "detail": "Retell reachable through bona-api",
-    "checkedAt": "2026-09-15T11:41:08.167Z"
+    "checkedAt": "2026-09-16T01:06:08.415Z"
   },
   {
     "id": "evolution",
@@ -216,6 +216,6 @@
     "action": "~/.secrets/evolution-api.env",
     "status": "live",
     "detail": "Evolution API answers HTTP 200 v2.3.7 at https://wa-api.azoz.uk; instance abdulaziz-personal",
-    "checkedAt": "2026-09-15T11:41:08.167Z"
+    "checkedAt": "2026-09-16T01:06:08.415Z"
   }
 ]
