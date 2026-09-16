@@ -215,3 +215,28 @@ Verify, in this order — no assumptions:
   token: Events Manager → *Bona web* → Settings → Conversions API → **Generate access token** →
   `bona-secret META_CAPI_TOKEN 'EAA…'` (the system-user token lacks `ads_management`, so it cannot
   send CAPI events itself).
+
+## 2026-09-16 — tracking verified end to end; one owner action left
+
+- **Wired on 09-15 (PRs #5–#8):** GA4 `G-861TD74EW1`, Meta dataset **1102591712117129** ("Bona
+  Real Estate Website", owner bona.com.sa), Search Console HTML tag; PC marketing env holds the pixel
+  id, CAPI token, GA4 id + secret; VPS fan-out reports `dests:{meta:true,ga4:true}`.
+- **Proven, not assumed:** after "Accept all" the live page requests
+  `google-analytics.com/g/collect?…tid=G-861TD74EW1` and `facebook.com/tr/?id=1102591712117129&ev=PageView`;
+  a Conversions API POST answers `events_received: 1`; `verify-integrations.mjs` → 7 live · 0 error
+  (its probe needed a browser id — PR #12). Only Snap and TikTok are pending, by design.
+- **Fan-out scope:** only `lead_created`, `form_submit`, `whatsapp_click` (+ stages viewing/won) are
+  forwarded server-side; page views are browser-only. The 15 `skipped` rows are leads from before the
+  keys existed.
+- 🔴 **Owner: clear the test code.** While `META_TEST_EVENT_CODE` is set the fan-out sends every real
+  lead as a *test* event (visible only under Test events, never in reporting or ad optimisation):
+
+      bona-secret META_TEST_EVENT_CODE ''
+
+  (the helper accepts an empty value now; it syncs the VPS and restarts the API.)
+- Owner-only confirmations: GA4 → Reports → Realtime shows visits; Search Console property verified
+  and `sitemap-index.xml` submitted.
+- Facebook publisher: unit sandbox fix (PR #11) — the sync step could not write the shared git dir;
+  the installed unit is already refreshed. Nothing publishable on Facebook until 09-24 unless REGA
+  numbers are recorded (`licence BONA-### <number> <YYYY-MM-DD>` in WhatsApp, then a rebuild and
+  `queue.mjs --render`).
