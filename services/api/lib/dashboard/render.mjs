@@ -58,6 +58,22 @@ export function ago(ms) {
   return `${Math.floor(h / 24)}${NBSP}d`;
 }
 
+/**
+ * How long ago a TIMESTAMP was — the shape almost every caller actually wants.
+ *
+ * `ago(now - ts)` cannot defend itself: when `ts` is NULL, `now - null` is `now`, a
+ * perfectly finite number, so the guard inside `ago()` passes and the page prints
+ * "20712 d" — a 57-year-old lead. The nullability has to be caught on the timestamp,
+ * before the subtraction, which is why this helper exists and why call sites should
+ * use it instead of doing the arithmetic themselves.
+ */
+export function agoSince(now, ts) {
+  if (ts === null || ts === undefined || ts === '') return '—';
+  const t = Number(ts);
+  if (!Number.isFinite(t)) return '—';
+  return ago(now - t);
+}
+
 /** The largest instant a Date can hold. `Number.isFinite(1e20)` is true; `new Date(1e20)` throws. */
 const MAX_TIME_MS = 8.64e15;
 export const dateTime = (ts) => {
@@ -799,7 +815,7 @@ export function leadsPage({ board, counts = null, leads, stage = '', q = '', now
     <td data-label="District" dir="auto">${esc(l.district ?? '—')}</td>
     <td data-label="Channel">${esc(l.channel ?? '—')}</td>
     <td data-label="Match">${esc(l.match_method ?? '—')}</td>
-    <td data-label="Age">${esc(ago(now - l.created))}</td>
+    <td data-label="Age">${esc(agoSince(now, l.created))}</td>
     <td data-label="Created">${esc(dateTime(l.created))}</td>
   </tr>`);
 
@@ -867,7 +883,7 @@ export function leadDetailPage({ lead, journey, saved = null, error = null, now 
     title: lead.name || lead.lead_id,
     active: '/dashboard/leads',
     body: `<h1 dir="auto">${esc(lead.name || lead.lead_id)}</h1>
-<p class="sub">${esc(lead.lead_id)} · created ${esc(dateTime(lead.created))} (${esc(ago(now - lead.created))} ago)</p>
+<p class="sub">${esc(lead.lead_id)} · created ${esc(dateTime(lead.created))} (${esc(agoSince(now, lead.created))} ago)</p>
 ${banner}
 <div class="grid">
   <div class="card"><h3>Contact</h3><dl class="fields">
@@ -888,7 +904,7 @@ ${banner}
     ${field('Consent (ads / analytics)', `${lead.consent_ads ? 'yes' : 'no'} / ${lead.consent_analytics ? 'yes' : 'no'}`)}
   </dl></div>
   <div class="card"><h3>Brief</h3><dl class="fields">
-    ${field('Stage', `${lead.stage} · ${ago(now - (lead.stage_ts ?? lead.created))}`)}
+    ${field('Stage', `${lead.stage} · ${agoSince(now, lead.stage_ts ?? lead.created)}`)}
     ${field('Value', lead.value_sar ? money(lead.value_sar) : null)}
     ${field('Listing', lead.listing_id)}
     ${field('Interest', lead.interest)}
