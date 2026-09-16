@@ -20,3 +20,7 @@ scripts/social/.cache/
 # units for the unattended publisher, which are part of the product.
 ops/*
 !ops/systemd/
+
+# Design working files (mockups, proposals, preview renders, screenshots).
+.design/
+sketches/
