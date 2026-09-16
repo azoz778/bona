@@ -628,8 +628,19 @@ export function overviewPage({
   daily, sources, matchQuality, responseTimes, pipeline, days,
   waiting = [], waitingTotal = null, now = Date.now(),
 }) {
+  // Each of these is a separate query wrapped in its own try/catch in the route, so any
+  // one of them can legitimately arrive as null after a failure. A default parameter
+  // only fires on `undefined`, so an explicit null sails past it — normalise instead.
+  // The overview is the page the owner opens first; a single failed aggregate must
+  // degrade one section, never 500 the whole screen.
+  const days14 = Array.isArray(daily) ? daily : [];
+  const sourceList = Array.isArray(sources) ? sources : [];
+  const matchList = Array.isArray(matchQuality) ? matchQuality : [];
+  const replies = responseTimes ?? { median_min: null, p90_min: null, count: 0 };
+  const queueIn = Array.isArray(waiting) ? waiting : [];
+
   /* ---- the answer -------------------------------------------------- */
-  const queue = [...waiting].sort(byUrgency(now)).filter((l) => waitState(l, now).waiting);
+  const queue = [...queueIn].sort(byUrgency(now)).filter((l) => waitState(l, now).waiting);
   const shown = queue.slice(0, 6);
   const oldest = queue.length ? waitState(queue[0], now).ms : null;
   const overnight = queue.filter((l) => (waitState(l, now).ms ?? 0) >= 86_400_000).length;
@@ -670,13 +681,13 @@ export function overviewPage({
     : `<p class="muted">No leads in the pipeline yet.</p>`;
 
   /* ---- speed -------------------------------------------------------- */
-  const speed = responseTimes.median_min === null || !responseTimes.count
+  const speed = replies.median_min === null || !replies.count
     ? `<p class="muted">Nothing measured yet — no lead has both a message and a reply logged.</p>`
     : `<div class="strip">
-    <div class="cellv"><small>Median first reply</small><b>${esc(responseTimes.median_min)} min</b><i>across ${esc(responseTimes.count)} leads</i></div>
-    <div class="cellv"><small>Slowest 1 in 10</small><b>${esc(responseTimes.p90_min === null ? '—' : `${responseTimes.p90_min} min`)}</b><i>p90</i></div>
+    <div class="cellv"><small>Median first reply</small><b>${esc(replies.median_min)} min</b><i>across ${esc(replies.count)} leads</i></div>
+    <div class="cellv"><small>Slowest 1 in 10</small><b>${esc(replies.p90_min === null ? '—' : `${replies.p90_min} min`)}</b><i>p90</i></div>
     <div class="cellv"><small>Open leads</small><b>${esc(number(openLeads))}</b><i>not won or lost</i></div>
-    <div class="cellv"><small>Leads, ${esc(days)} d</small><b>${esc(number(daily.reduce((a, d) => a + (Number(d.leads) || 0), 0)))}</b><i>new in the window</i></div>
+    <div class="cellv"><small>Leads, ${esc(days)} d</small><b>${esc(number(days14.reduce((a, d) => a + (Number(d.leads) || 0), 0)))}</b><i>new in the window</i></div>
   </div>`;
 
   /* ---- the desk-at-night material ----------------------------------- */
@@ -686,9 +697,9 @@ export function overviewPage({
     ['Leads', 'leads', '#2f6b3f'],
     ['Viewings', 'viewings', '#6f6a62'],
   ].map(([label, key, color]) =>
-    bars(daily.map((d) => ({ label: d.day, value: d[key] })), { label, color })).join('');
+    bars(days14.map((d) => ({ label: d.day, value: d[key] })), { label, color })).join('');
 
-  const sourceRows = sources.map((s) => `<tr>
+  const sourceRows = sourceList.map((s) => `<tr>
     <td data-label="Source" dir="auto">${esc(s.source)}</td>
     <td data-label="Medium">${esc(s.medium)}</td>
     <td data-label="Campaign" dir="auto">${esc(s.campaign ?? '—')}</td>
@@ -700,8 +711,8 @@ export function overviewPage({
     <td data-label="CPL" class="n">${esc(s.cpl === null || s.cpl === undefined ? '—' : money(s.cpl))}</td>
   </tr>`);
 
-  const matchTotal = matchQuality.reduce((a, m) => a + m.count, 0);
-  const matchRows = matchQuality.map((m) => `<tr>
+  const matchTotal = matchList.reduce((a, m) => a + m.count, 0);
+  const matchRows = matchList.map((m) => `<tr>
     <td data-label="Method">${esc(m.match_method)}</td>
     <td data-label="Leads" class="n">${esc(number(m.count))}</td>
     <td data-label="Share" class="n">${esc(matchTotal ? `${Math.round((m.count / matchTotal) * 100)}%` : '—')}</td>

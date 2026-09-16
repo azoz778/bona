@@ -95,5 +95,23 @@ for (const [label, args] of [
   } catch (err) { ok(`${label} renders`, false, err.message); }
 }
 
+// The route wraps each aggregate in its own try/catch, so any one of them can arrive
+// as null after a failed query. A default parameter only fires on `undefined`, so an
+// explicit null sails straight past it. The overview is the first page the owner opens:
+// one failed aggregate must degrade one section, never 500 the whole screen.
+const overviewBase = {
+  daily: [], sources: [], matchQuality: [],
+  responseTimes: { median_min: null, p90_min: null, count: 0 },
+  pipeline: [], days: 14, waiting: [], waitingTotal: 0, now,
+};
+for (const key of ['daily', 'sources', 'matchQuality', 'pipeline', 'responseTimes', 'waiting']) {
+  for (const val of [null, undefined]) {
+    try {
+      const h = R.overviewPage({ ...overviewBase, [key]: val });
+      ok(`overview survives ${key}=${val}`, typeof h === 'string' && h.length > 0);
+    } catch (err) { ok(`overview survives ${key}=${val}`, false, err.message); }
+  }
+}
+
 console.log(bad ? `\n${bad} FAILURE(S)` : '\nALL PAGES RENDER CLEAN UNDER HOSTILE INPUT');
 process.exit(bad ? 1 : 0);
