@@ -394,7 +394,12 @@ const CLOSED = new Set(['won', 'lost']);
  * or at creation when they arrived through a web form and have not written yet.
  */
 export function waitState(lead, now) {
-  if (CLOSED.has(lead.stage) || lead.first_reply_ts) {
+  // `first_reply_ts != null` rather than truthiness: the SQL that builds this queue
+  // says `first_reply_ts IS NULL`, and 0 is a real (if absurd) timestamp that IS NOT
+  // NULL. Under truthiness the two predicates disagreed — SQL would exclude such a
+  // lead from the queue while this function still painted it as waiting, so the hero
+  // count and the cards below it could tell two different stories.
+  if (CLOSED.has(lead.stage) || (lead.first_reply_ts !== null && lead.first_reply_ts !== undefined)) {
     return { waiting: false, ms: null, tone: 'cool' };
   }
   // Guard the RAW value, not the coerced one: `Number(null)` is 0 and 0 IS finite, so

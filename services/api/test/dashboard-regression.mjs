@@ -89,5 +89,14 @@ ok('XSS no raw <img', !/<img/.test(eviln));
 ok('XSS no <script', !/<script/i.test(eviln));
 ok('XSS no javascript: href', !/href="javascript:/i.test(eviln));
 
+// Round-2 N-1: SQL says `first_reply_ts IS NULL`; JS used truthiness. 0 is NOT NULL,
+// so the two predicates disagreed and the hero count could contradict the cards.
+const replied0 = { lead_id: 'z', name: 'Z', phone_e164: '+966500000009', stage: 'new',
+  created: now - 7200000, stage_ts: now - 7200000, first_inbound_ts: now - 7200000, first_reply_ts: 0 };
+ok('N1 first_reply_ts=0 is NOT waiting (matches SQL IS NULL)', R.waitState(replied0, now).waiting === false);
+const db2 = openDb(':memory:');
+db2.insertLead({ lead_id: 'z', created: now, updated: now, phone_e164: '+966500000009', name: 'Z', stage: 'new', first_inbound_ts: now - 7200000, first_reply_ts: 0 });
+ok('N1 SQL agrees it is not waiting', db2.countWaitingLeads() === 0, `count=${db2.countWaitingLeads()}`);
+
 console.log(bad ? `\n${bad} FAILURE(S)` : '\nALL REGRESSION CHECKS PASS');
 process.exit(bad ? 1 : 0);
