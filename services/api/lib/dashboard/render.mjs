@@ -61,6 +61,10 @@ export function ago(ms) {
 /** The largest instant a Date can hold. `Number.isFinite(1e20)` is true; `new Date(1e20)` throws. */
 const MAX_TIME_MS = 8.64e15;
 export const dateTime = (ts) => {
+  // `Number(null)` is 0 and 0 is finite, so without this an unset timestamp renders as
+  // a real-looking "1970-01-01 00:00" in the Created column. `undefined` already fell
+  // through to '—'; the inconsistency was the tell.
+  if (ts === null || ts === undefined || ts === '') return '—';
   const t = Number(ts);
   if (!Number.isFinite(t) || Math.abs(t) > MAX_TIME_MS) return '—';
   return new Date(t).toISOString().replace('T', ' ').slice(0, 16);
@@ -377,7 +381,11 @@ export function waitState(lead, now) {
   if (CLOSED.has(lead.stage) || lead.first_reply_ts) {
     return { waiting: false, ms: null, tone: 'cool' };
   }
-  const since = Number(lead.first_inbound_ts ?? lead.created);
+  // Guard the RAW value, not the coerced one: `Number(null)` is 0 and 0 IS finite, so
+  // coercing first turns a NULL timestamp into the epoch and renders a 57-year wait
+  // (`20712 d`), which also poisons "Longest:" on the overview and paints the card red.
+  const raw = lead.first_inbound_ts ?? lead.created;
+  const since = raw === null || raw === undefined || raw === '' ? NaN : Number(raw);
   const ms = Number.isFinite(since) ? Math.max(0, now - since) : null;
   const hours = ms === null ? 0 : ms / 3_600_000;
   return { waiting: true, ms, tone: hours >= 24 ? 'hot' : hours >= 2 ? 'warm' : 'cool' };
@@ -523,14 +531,20 @@ export function loginPage({ step = 'request', error = null, sent = false } = {})
 
 /** The one line that says where this person stands. Never ambiguous, never half a sentence. */
 export function replyLine(lead, now) {
-  const inStage = ago(now - Number(lead.stage_ts ?? lead.created));
+  // Same NULL trap as waitState(): `Number(null)` is 0, which is finite, so coercing
+  // before guarding renders "for 20712 d" instead of omitting the clause.
+  const rawStage = lead.stage_ts ?? lead.created;
+  const stageMs = rawStage === null || rawStage === undefined || rawStage === ''
+    ? null : now - Number(rawStage);
+  const inStage = stageMs === null || !Number.isFinite(stageMs) ? null : ago(stageMs);
+  const held = inStage ? ` for ${inStage}` : '';
   if (lead.first_inbound_ts && lead.first_reply_ts) {
-    return `You replied in ${ago(lead.first_reply_ts - lead.first_inbound_ts)} · ${stageName(lead.stage)} for ${inStage}`;
+    return `You replied in ${ago(lead.first_reply_ts - lead.first_inbound_ts)} · ${stageName(lead.stage)}${held}`;
   }
   if (lead.first_inbound_ts) {
     return `Waiting ${ago(now - lead.first_inbound_ts)} for your first reply`;
   }
-  return `No message from them yet · ${stageName(lead.stage)} for ${inStage}`;
+  return `No message from them yet · ${stageName(lead.stage)}${held}`;
 }
 
 /**
@@ -591,32 +605,39 @@ export function leadCard(lead, now) {
  */
 export function overviewPage({
   daily, sources, matchQuality, responseTimes, pipeline, days,
-  waiting = [], now = Date.now(),
+  waiting = [], waitingTotal = null, now = Date.now(),
 }) {
   /* ---- the answer -------------------------------------------------- */
   const queue = [...waiting].sort(byUrgency(now)).filter((l) => waitState(l, now).waiting);
   const shown = queue.slice(0, 6);
-  const rest = queue.length - shown.length;
   const oldest = queue.length ? waitState(queue[0], now).ms : null;
   const overnight = queue.filter((l) => (waitState(l, now).ms ?? 0) >= 86_400_000).length;
 
-  const hero = queue.length === 0
+  // `waiting` is a CAPPED slice (the route asks for 50). Showing its length as the
+  // headline would tell the owner he has 50 people waiting when he has 400, which is
+  // the same "count the slice, not the set" bug the stage rail exists to avoid.
+  // `waitingTotal` is a real COUNT(*); fall back to the slice only when it is absent.
+  const total = Number(waitingTotal);
+  const trueWaiting = Number.isFinite(total) ? Math.max(total, queue.length) : queue.length;
+  const rest = trueWaiting - shown.length;
+
+  const hero = trueWaiting === 0
     ? `<div class="hero"><span class="n zero">0</span>
        <p class="say"><b>All caught up.</b></p>
        <p class="then">Every lead has had a reply.</p></div>`
-    : `<div class="hero"><span class="n">${esc(queue.length)}</span>
-       <p class="say"><b>${esc(queue.length === 1 ? 'lead is' : 'leads are')} waiting on your first reply</b></p>
+    : `<div class="hero"><span class="n">${esc(trueWaiting)}</span>
+       <p class="say"><b>${esc(trueWaiting === 1 ? 'lead is' : 'leads are')} waiting on your first reply</b></p>
        <p class="then">Longest: ${esc(ago(oldest))}.${overnight ? ` ${esc(overnight)} over a day old.` : ''}</p></div>`;
 
-  const queueBlock = queue.length
+  const queueBlock = trueWaiting
     ? shown.map((l) => leadCard(l, now)).join('') +
-      (rest ? `<p class="muted">${esc(rest)} more waiting — <a href="/dashboard/leads">open the full list</a>.</p>` : '')
+      (rest > 0 ? `<p class="muted">${esc(rest)} more waiting — <a href="/dashboard/leads">open the full list</a>.</p>` : '')
     : `<div class="allclear"><b>All caught up</b><span>Every lead has had a reply. Nothing needs you right now.</span></div>`;
 
   /* ---- pipeline, honest about empty stages -------------------------- */
-  const counts = new Map(pipeline.map((p) => [p.stage, Number(p.count) || 0]));
+  const counts = new Map((pipeline ?? []).map((p) => [p.stage, Number(p.count) || 0]));
   const live = STAGES.filter((s) => (counts.get(s) ?? 0) > 0);
-  const empty = STAGES.filter((s) => !(counts.get(s) > 0));
+  const empty = STAGES.filter((s) => (counts.get(s) ?? 0) <= 0);
   const openLeads = STAGES.filter((s) => !CLOSED.has(s)).reduce((a, s) => a + (counts.get(s) ?? 0), 0);
 
   const rail = live.map((s) => `<a class="${esc(s === 'won' ? 'win' : '')}" href="/dashboard/leads?stage=${encodeURIComponent(s)}">` +
@@ -717,14 +738,24 @@ const stageOptions = (selected) => STAGES.map((s) =>
  * naming the ones that do not, says strictly more in a fifth of the space.
  */
 export function leadsPage({ board, counts = null, leads, stage = '', q = '', now = Date.now(), total = 0 }) {
+  // A default parameter only fires on `undefined`; an explicit `null` sails past it and
+  // throws "leads is not iterable" at the spread below. Normalise instead.
+  const allLeads = Array.isArray(leads) ? leads : [];
   /* ---- stage rail from the counts the route already computes -------- */
+  // The rail must report COUNT(*), never the handful of cards this page rendered.
+  // `counts[s]` is coerced before the finite check: better-sqlite3 in safeIntegers mode
+  // yields BigInt, and a JSON round-trip yields a string — both fail Number.isFinite()
+  // directly and would silently fall back to the rendered slice, which is exactly the
+  // lie the rail exists to prevent. When `counts` is present but the key is missing,
+  // report 0 rather than the slice: a partial counts object must not mix two units.
   const tally = new Map(STAGES.map((s) => {
     const cards = board?.[s] ?? [];
-    const n = counts && Number.isFinite(counts[s]) ? counts[s] : cards.length;
-    return [s, n];
+    if (!counts) return [s, cards.length];
+    const n = Number(counts[s]);
+    return [s, Number.isFinite(n) ? n : 0];
   }));
   const live = STAGES.filter((s) => (tally.get(s) ?? 0) > 0);
-  const empty = STAGES.filter((s) => !(tally.get(s) > 0));
+  const empty = STAGES.filter((s) => (tally.get(s) ?? 0) <= 0);
 
   const rail = `<div class="rail">` +
     `<a class="all${stage === '' ? ' on' : ''}" href="/dashboard/leads${q ? `?q=${encodeURIComponent(q)}` : ''}">` +
@@ -738,13 +769,13 @@ export function leadsPage({ board, counts = null, leads, stage = '', q = '', now
       : '');
 
   /* ---- the list, urgent first --------------------------------------- */
-  const sorted = [...leads].sort(byUrgency(now));
+  const sorted = [...allLeads].sort(byUrgency(now));
   const hot = sorted.filter((l) => waitState(l, now).waiting);
   const cool = sorted.filter((l) => !waitState(l, now).waiting);
 
   const hotBlock = hot.length
     ? `<h2>Waiting on you — ${esc(hot.length)}</h2>${hot.map((l) => leadCard(l, now)).join('')}`
-    : (leads.length
+    : (allLeads.length
       ? `<h2>Waiting on you</h2><div class="allclear"><b>All caught up</b><span>Every lead here has had a reply.</span></div>`
       : '');
 
@@ -752,7 +783,7 @@ export function leadsPage({ board, counts = null, leads, stage = '', q = '', now
     ? `<h2>Everyone else — ${esc(cool.length)}</h2>${cool.map((l) => leadCard(l, now)).join('')}`
     : '';
 
-  const nothing = leads.length
+  const nothing = allLeads.length
     ? ''
     : `<p class="muted">${esc(stage || q ? 'No leads match that filter.' : 'No leads yet.')}</p>`;
 

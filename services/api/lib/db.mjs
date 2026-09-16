@@ -315,17 +315,35 @@ export function openDb(file = ':memory:') {
   }
 
   /**
-   * Leads that messaged and have never been answered, oldest first — the queue the
-   * owner actually works from. `won`/`lost` are excluded: a closed lead is not owed
-   * a reply. Ordered by the first inbound message (falling back to creation) so the
-   * person who has waited longest is always first.
+   * Leads that are owed a first reply, oldest first — the queue the owner works from.
+   *
+   * `stage IS NULL OR stage NOT IN (...)` is deliberate, not belt-and-braces: `stage`
+   * has no NOT NULL and no default, and in SQL `NULL NOT IN ('won','lost')` evaluates
+   * to NULL, not TRUE, so a stageless lead would be silently dropped from the queue
+   * while `waitState()` in the renderer (Set.has(null) === false) still considers it
+   * waiting. The two layers would disagree about who is owed a reply and the person
+   * would simply never appear.
    */
+  const WAITING_WHERE = `WHERE first_reply_ts IS NULL
+                           AND (stage IS NULL OR stage NOT IN ('won','lost'))`;
+
   function waitingLeads({ limit = 50 } = {}) {
-    const sql = `SELECT * FROM leads
-                 WHERE first_reply_ts IS NULL AND stage NOT IN ('won','lost')
+    // better-sqlite3 refuses a non-integer binding ("datatype mismatch"), so a
+    // fractional limit must be truncated rather than passed through.
+    const n = Math.trunc(Math.max(1, Math.min(500, Number(limit) || 50)));
+    const sql = `SELECT * FROM leads ${WAITING_WHERE}
                  ORDER BY COALESCE(first_inbound_ts, created) ASC, rowid ASC
                  LIMIT ?`;
-    return prep(sql).all(Math.max(1, Math.min(500, Number(limit) || 50))).map((r) => unwrap('leads', r));
+    return prep(sql).all(n).map((r) => unwrap('leads', r));
+  }
+
+  /**
+   * How many are ACTUALLY owed a reply. `waitingLeads()` is capped, so its length is a
+   * slice and must never be shown as a total — the page would tell the owner he has 50
+   * people waiting when he has 400.
+   */
+  function countWaitingLeads() {
+    return prep(`SELECT COUNT(*) AS n FROM leads ${WAITING_WHERE}`).get().n;
   }
 
   /* -------------------- touchpoints, stages -------------------- */
@@ -493,7 +511,7 @@ export function openDb(file = ':memory:') {
     db, file, dataDir: inMemory ? null : path.dirname(file), transaction, ping, close,
     upsertSession, getSession, getSessionByRef,
     insertEvent, getEvent, eventsForSession, recentEvents, setEventLead,
-    insertLead, getLead, getLeadByPhone, getLeadByJid, getLeadByLegacyId, updateLead, listLeads, countLeads, waitingLeads,
+    insertLead, getLead, getLeadByPhone, getLeadByJid, getLeadByLegacyId, updateLead, listLeads, countLeads, waitingLeads, countWaitingLeads,
     addTouchpoint, touchpointsForLead, setStage, stageHistory,
     enqueueFanout, dueFanout, markFanout, fanoutCounts,
     createAuthCode, consumeAuthCode, createAuthSession, checkAuthSession, deleteAuthSession,
