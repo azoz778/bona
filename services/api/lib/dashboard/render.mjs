@@ -1043,17 +1043,26 @@ const CHECKLIST_BASE = 'https://github.com/azoz778/bona/blob/main/docs/checklist
  * about the keys — never a key, never a fragment of one.
  */
 export function integrationsPage({ keys, fanout, retell, poller, lastAccepted, db }) {
-  const keyRows = keys.map((k) => `<tr>${cell(k.label)}<td>${yesNo(k.present)}</td>${cell(k.note ?? '')}</tr>`);
-  const destRows = Object.entries(fanout.dests).map(([dest, configured]) => {
-    const last = lastAccepted[dest];
+  // Every input here describes a subsystem that can be down — that is the entire point
+  // of the page. It must render when one of them answers with nothing, rather than
+  // 500ing and taking away the one screen that would have told the owner what broke.
+  const keyList = Array.isArray(keys) ? keys : [];
+  const dests = fanout?.dests ?? { meta: false, ga4: false, snap: false };
+  const tallies = fanout?.counts ?? { pending: null, sent: null, failed: null, skipped: null };
+  const seen = lastAccepted ?? {};
+  const health = db ?? { ok: false, file: null };
+  const poll = poller ?? { lastRun: null, lag: null, unmatched: null };
+  const keyRows = keyList.map((k) => `<tr>${cell(k.label)}<td>${yesNo(k.present)}</td>${cell(k.note ?? '')}</tr>`);
+  const destRows = Object.entries(dests).map(([dest, configured]) => {
+    const last = seen[dest];
     return `<tr>${cell(dest)}<td>${configured ? '<span class="tag ok">configured</span>' : '<span class="tag warn">no keys</span>'}</td>` +
       `${cell(last ? dateTime(last.ts) : '—')}${cell(last?.event_id ?? '—')}</tr>`;
   });
 
   const pollerBlock = poller
     ? `<div class="grid">
-        ${kpi('Poller last run', poller.lastRun ? dateTime(poller.lastRun) : '—', poller.lag === null || poller.lag === undefined ? '' : `lag ${ago(poller.lag)}`)}
-        ${kpi('Unmatched messages', poller.unmatched ?? '—', 'discarded in memory, never stored')}
+        ${kpi('Poller last run', poll.lastRun ? dateTime(poll.lastRun) : '—', poll.lag === null || poll.lag === undefined ? '' : `lag ${ago(poll.lag)}`)}
+        ${kpi('Unmatched messages', poll.unmatched ?? '—', 'discarded in memory, never stored')}
       </div>`
     : '<p class="muted">The WhatsApp poller is not running in this process.</p>';
 
@@ -1067,10 +1076,10 @@ ${scrollTable('<th>Integration</th><th>Key</th><th>Note</th>', keyRows)}
 
 <h2>Fan-out</h2>
 <div class="grid">
-  ${kpi('Pending', fanout.counts.pending)}
-  ${kpi('Sent', fanout.counts.sent)}
-  ${kpi('Failed', fanout.counts.failed)}
-  ${kpi('Skipped', fanout.counts.skipped, 'no keys, or no ads consent')}
+  ${kpi('Pending', tallies.pending)}
+  ${kpi('Sent', tallies.sent)}
+  ${kpi('Failed', tallies.failed)}
+  ${kpi('Skipped', tallies.skipped, 'no keys, or no ads consent')}
 </div>
 ${scrollTable('<th>Destination</th><th>Status</th><th>Last accepted</th><th>Event</th>', destRows)}
 
@@ -1080,7 +1089,7 @@ ${pollerBlock}
 <h2>Service</h2>
 <div class="grid">
   ${kpi('Retell', retell === 'ok' ? 'ok' : 'unreachable')}
-  ${kpi('Store', db.ok ? 'ok' : 'error', db.file ?? '')}
+  ${kpi('Store', health.ok ? 'ok' : 'error', health.file ?? '')}
 </div>
 
 <h2>Owner checklists</h2>
