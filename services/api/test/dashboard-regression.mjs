@@ -97,6 +97,11 @@ ok('N1 first_reply_ts=0 is NOT waiting (matches SQL IS NULL)', R.waitState(repli
 const db2 = openDb(':memory:');
 db2.insertLead({ lead_id: 'z', created: now, updated: now, phone_e164: '+966500000009', name: 'Z', stage: 'new', first_inbound_ts: now - 7200000, first_reply_ts: 0 });
 ok('N1 SQL agrees it is not waiting', db2.countWaitingLeads() === 0, `count=${db2.countWaitingLeads()}`);
+// The count and the sentence beside it must agree: an excluded lead must not still
+// describe itself as waiting on its own card.
+ok('N1 replyLine agrees it is not waiting', !/Waiting .* for your first reply/.test(R.replyLine(replied0, now)),
+   R.replyLine(replied0, now));
+ok('N1 card text agrees', !/Waiting .* for your first reply/.test(R.leadCard(replied0, now)));
 
 console.log(bad ? `\n${bad} FAILURE(S)` : '\nALL REGRESSION CHECKS PASS');
 process.exit(bad ? 1 : 0);

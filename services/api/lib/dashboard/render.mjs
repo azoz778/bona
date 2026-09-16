@@ -559,10 +559,19 @@ export function replyLine(lead, now) {
     ? null : now - Number(rawStage);
   const inStage = stageMs === null || !Number.isFinite(stageMs) ? null : ago(stageMs);
   const held = inStage ? ` for ${inStage}` : '';
-  if (lead.first_inbound_ts && lead.first_reply_ts) {
-    return `You replied in ${ago(lead.first_reply_ts - lead.first_inbound_ts)} · ${stageName(lead.stage)}${held}`;
+  // `!= null` rather than truthiness, to match waitState() and the SQL — otherwise a
+  // lead with first_reply_ts = 0 is correctly excluded from the queue and the hero
+  // count, while its own card still reads "Waiting 2 h for your first reply". The
+  // number and the sentence beside it must not contradict each other.
+  const answered = lead.first_reply_ts !== null && lead.first_reply_ts !== undefined;
+  if (lead.first_inbound_ts && answered) {
+    // A reply logged at or before the inbound message is a clock artefact, not a
+    // negative wait — say "Replied" rather than the nonsense "You replied in —".
+    const took = Number(lead.first_reply_ts) - Number(lead.first_inbound_ts);
+    const span = Number.isFinite(took) && took > 0 ? `You replied in ${ago(took)}` : 'Replied';
+    return `${span} · ${stageName(lead.stage)}${held}`;
   }
-  if (lead.first_inbound_ts) {
+  if (lead.first_inbound_ts && !answered) {
     return `Waiting ${ago(now - lead.first_inbound_ts)} for your first reply`;
   }
   return `No message from them yet · ${stageName(lead.stage)}${held}`;
