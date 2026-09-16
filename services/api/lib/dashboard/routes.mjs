@@ -390,6 +390,15 @@ export function createDashboardRoutes({
 
   function overview({ res, url }) {
     const days = Math.max(1, Math.min(90, Number(url.searchParams.get('days')) || 14));
+    // The queue the owner works from: everyone who wrote and has never been answered,
+    // oldest first. A failure here must not take the whole page down — the rest of the
+    // overview is still worth showing.
+    let waiting = [];
+    try {
+      waiting = db.waitingLeads({ limit: 50 });
+    } catch (err) {
+      log({ level: 'warn', evt: 'dash.waiting_failed', error: String(err?.message ?? err).slice(0, 200) });
+    }
     return sendHtml(res, 200, overviewPage({
       days,
       daily: statistics.overviewDaily(days),
@@ -397,6 +406,8 @@ export function createDashboardRoutes({
       matchQuality: statistics.matchQuality(),
       pipeline: statistics.pipeline(),
       responseTimes: statistics.responseTimes(),
+      waiting,
+      now: now(),
     }));
   }
 

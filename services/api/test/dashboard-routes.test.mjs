@@ -190,7 +190,7 @@ test('the login round trip: ask, receive on WhatsApp, type it back', async () =>
     const overview = await get('/dashboard', { cookie });
     assert.equal(overview.status, 200);
     const body = await overview.text();
-    assert.match(body, /Overview/);
+    assert.match(body, /Needs a reply/, 'the overview leads with the queue, not a title');
     assert.match(body, /<svg/, 'the daily strip is inline SVG, not a CDN chart library');
     assert.ok(!body.includes('cdn'), 'nothing is loaded from a CDN');
   });
@@ -305,7 +305,7 @@ test('every page renders for a signed-in owner', async () => {
     const id = seedLead(db);
     const { cookie } = await login();
     for (const [p, needle] of [
-      ['/dashboard', /Sources — first touch vs last touch/],
+      ['/dashboard', /Where leads come from/],
       ['/dashboard/leads', /Leads/],
       [`/dashboard/leads/${id}`, /Journey/],
       ['/dashboard/listings', /Ad licence/],
@@ -329,8 +329,12 @@ test('a phone number is masked in the list and whole on the record', async () =>
     const id = seedLead(db);
     const { cookie } = await login();
     const list = await (await get('/dashboard/leads', { cookie })).text();
-    assert.match(list, /…6933/);
-    assert.ok(!list.includes('966593296933'), 'the whole number does not belong in a list');
+    // Masking was removed deliberately: this is a private, OTP-gated, single-user
+    // dashboard, so hiding the owner's own leads' numbers from him protected nobody
+    // and cost a page load before every call. The number IS the action here.
+    assert.match(list, /\+966 59 329 6933/, 'the list shows the number so it can be tapped');
+    assert.match(list, /href="tel:\+966593296933"/, 'and it is a one-tap call link');
+    assert.match(list, /href="https:\/\/wa\.me\/966593296933"/, 'and a one-tap WhatsApp link');
 
     const detail = await (await get(`/dashboard/leads/${id}`, { cookie })).text();
     assert.match(detail, /\+966 59 329 6933/, 'the record shows the number the owner has to dial');
@@ -367,9 +371,17 @@ test('the leads list honours the stage and search filters', async () => {
     });
     const { cookie } = await login();
 
-    // The board above the list shows every lead whatever the filter says, so asserting
-    // on the whole page would pass with the filter ripped out. Only the list is filtered.
-    const listOnly = (html) => html.slice(html.indexOf('<h2>List</h2>'));
+    // The stage rail above the list shows every lead whatever the filter says, so
+    // asserting on the whole page would pass with the filter ripped out. Only the
+    // table is filtered. (The old marker was `<h2>List</h2>`; the redesign renders
+    // the table inside a <details> labelled "Full table". indexOf(-1) silently
+    // slices the last character, so a stale marker here passes as an empty string.)
+    const MARKER = 'Full table';
+    const listOnly = (html) => {
+      const i = html.indexOf(MARKER);
+      assert.ok(i !== -1, `the list section marker ${MARKER} is missing from the page`);
+      return html.slice(i);
+    };
 
     const won = listOnly(await (await get('/dashboard/leads?stage=won', { cookie })).text());
     assert.match(won, /Khalid Omar/);
@@ -398,9 +410,16 @@ test('the board counts the whole pipeline even when it can only show part of it'
     counts: { new: 0, contacted: 517, qualified: 0, viewing: 0, offer: 0, negotiation: 0, won: 3, lost: 0 },
     leads: [], total: 520,
   });
-  assert.match(html, /<span>contacted<\/span><span>517<\/span>/);
-  assert.match(html, /\+515 older not shown/);
-  assert.match(html, /<span>won<\/span><span>3<\/span>/, 'a column with no cards still reports its count');
+  // The 8-column board was replaced by a stage rail, but the invariant it protected
+  // still holds: the rail reports COUNT(*) for the whole pipeline, not the number of
+  // cards this page happened to render. Two cards, 517 in the stage — it must say 517.
+  assert.match(html, /<b>517<\/b>\s*<span>Contacted<\/span>/,
+    'the rail reports the whole stage, not the handful of rendered cards');
+  assert.match(html, /<b>3<\/b>\s*<span>Won<\/span>/,
+    'a stage with no rendered cards still reports its count');
+  assert.match(html, /<b>520<\/b>\s*<span>All<\/span>/, 'and the total is the pipeline total');
+  // Stages that are genuinely empty are omitted rather than drawn as a wall of dashes.
+  assert.ok(!/<span>Qualified<\/span>/.test(html), 'an empty stage is not rendered at all');
 });
 
 test('the reporting window is clamped, whatever the query string says', async () => {

@@ -314,6 +314,20 @@ export function openDb(file = ':memory:') {
       : prep('SELECT COUNT(*) AS n FROM leads').get().n;
   }
 
+  /**
+   * Leads that messaged and have never been answered, oldest first — the queue the
+   * owner actually works from. `won`/`lost` are excluded: a closed lead is not owed
+   * a reply. Ordered by the first inbound message (falling back to creation) so the
+   * person who has waited longest is always first.
+   */
+  function waitingLeads({ limit = 50 } = {}) {
+    const sql = `SELECT * FROM leads
+                 WHERE first_reply_ts IS NULL AND stage NOT IN ('won','lost')
+                 ORDER BY COALESCE(first_inbound_ts, created) ASC, rowid ASC
+                 LIMIT ?`;
+    return prep(sql).all(Math.max(1, Math.min(500, Number(limit) || 50))).map((r) => unwrap('leads', r));
+  }
+
   /* -------------------- touchpoints, stages -------------------- */
 
   function addTouchpoint(t) {
@@ -479,7 +493,7 @@ export function openDb(file = ':memory:') {
     db, file, dataDir: inMemory ? null : path.dirname(file), transaction, ping, close,
     upsertSession, getSession, getSessionByRef,
     insertEvent, getEvent, eventsForSession, recentEvents, setEventLead,
-    insertLead, getLead, getLeadByPhone, getLeadByJid, getLeadByLegacyId, updateLead, listLeads, countLeads,
+    insertLead, getLead, getLeadByPhone, getLeadByJid, getLeadByLegacyId, updateLead, listLeads, countLeads, waitingLeads,
     addTouchpoint, touchpointsForLead, setStage, stageHistory,
     enqueueFanout, dueFanout, markFanout, fanoutCounts,
     createAuthCode, consumeAuthCode, createAuthSession, checkAuthSession, deleteAuthSession,
