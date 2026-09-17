@@ -5313,6 +5313,148 @@
     "licence": null
   },
   {
+    "id": "BONA-W018",
+    "slug": "elemental-residences-al-rawabi",
+    "sourceRef": "WA-20260917-AC0D08",
+    "status": "available",
+    "category": "off-plan",
+    "type": "apartment",
+    "kind": "apartment",
+    "featured": false,
+    "title": {
+      "en": "Elemental Residences, Al Rawabi",
+      "ar": "مشروع إيلمنتال، حي الروابي بجدة"
+    },
+    "location": {
+      "district": {
+        "en": "Al Rawabi",
+        "ar": "الروابي"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 850000,
+      "currency": "SAR",
+      "from": true,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": null,
+      "baths": null,
+      "areaSqm": null,
+      "plotSqm": null,
+      "yearBuilt": null,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "/listings/elemental-residences-al-rawabi/01.jpg",
+        "thumb": "/listings/elemental-residences-al-rawabi/01-thumb.webp",
+        "alt": {
+          "en": "Exterior — Elemental Residences, Al Rawabi",
+          "ar": "الواجهة الخارجية — مشروع إيلمنتال، حي الروابي بجدة"
+        }
+      },
+      {
+        "src": "/listings/elemental-residences-al-rawabi/02.jpg",
+        "thumb": "/listings/elemental-residences-al-rawabi/02-thumb.webp",
+        "alt": {
+          "en": "Façade at night — Elemental Residences, Al Rawabi",
+          "ar": "الواجهة ليلاً — مشروع إيلمنتال، حي الروابي بجدة"
+        }
+      },
+      {
+        "src": "/listings/elemental-residences-al-rawabi/03.jpg",
+        "thumb": "/listings/elemental-residences-al-rawabi/03-thumb.webp",
+        "alt": {
+          "en": "Entrance — Elemental Residences, Al Rawabi",
+          "ar": "المدخل — مشروع إيلمنتال، حي الروابي بجدة"
+        }
+      },
+      {
+        "src": "/listings/elemental-residences-al-rawabi/04.jpg",
+        "thumb": "/listings/elemental-residences-al-rawabi/04-thumb.webp",
+        "alt": {
+          "en": "Living room — Elemental Residences, Al Rawabi",
+          "ar": "غرفة المعيشة — مشروع إيلمنتال، حي الروابي بجدة"
+        }
+      },
+      {
+        "src": "/listings/elemental-residences-al-rawabi/05.jpg",
+        "thumb": "/listings/elemental-residences-al-rawabi/05-thumb.webp",
+        "alt": {
+          "en": "Courtyard — Elemental Residences, Al Rawabi",
+          "ar": "الفناء الداخلي — مشروع إيلمنتال، حي الروابي بجدة"
+        }
+      },
+      {
+        "src": "/listings/elemental-residences-al-rawabi/06.jpg",
+        "thumb": "/listings/elemental-residences-al-rawabi/06-thumb.webp",
+        "alt": {
+          "en": "Gym — Elemental Residences, Al Rawabi",
+          "ar": "النادي الرياضي — مشروع إيلمنتال، حي الروابي بجدة"
+        }
+      },
+      {
+        "src": "/listings/elemental-residences-al-rawabi/07.jpg",
+        "thumb": "/listings/elemental-residences-al-rawabi/07-thumb.webp",
+        "alt": {
+          "en": "Aerial view — Elemental Residences, Al Rawabi",
+          "ar": "منظر جوي — مشروع إيلمنتال، حي الروابي بجدة"
+        }
+      }
+    ],
+    "videos": [],
+    "description": {
+      "en": "Elemental is a project by Sadana in the Al Rawabi district of Jeddah. It is built as four low-rise buildings named Light, Water, Earth and Air, arranged around a shared internal garden with direct views onto it.\n\nEach building combines ground-floor commercial units with residential units above. Unit sizes across the four buildings range from roughly 191 to about 276 square metres, and selected upper-floor units are configured as two-level garden penthouses with a private garden of up to 70 square metres.\n\nRenders show a shared rooftop-level courtyard with a water feature, a glazed gym pavilion, and a children's play area within the development. Ground-floor units are designed for commercial use, with frontages described in the brochure as corner or interior-facing.",
+      "ar": "إيلمنتال مشروع لشركة سدانة في حي الروابي بجدة. يتكوّن من أربعة مبانٍ منخفضة الارتفاع تحمل أسماء الضوء والماء والأرض والهواء، وتحيط بحديقة داخلية مشتركة تطل عليها الوحدات مباشرة.\n\nيجمع كل مبنى بين وحدات تجارية في الدور الأرضي ووحدات سكنية في الأدوار العلوية. تتراوح مساحات الوحدات بين المباني الأربعة من نحو 191 إلى نحو 276 مترًا مربعًا، وتُصمَّم بعض الوحدات العلوية كبنتهاوس بطابقين مع حديقة خاصة تصل مساحتها إلى 70 مترًا مربعًا.\n\nتُظهر التصاميم فناءً مشتركًا على مستوى السطح يضم نافورة مائية، وصالة رياضية زجاجية، ومنطقة ألعاب للأطفال ضمن المشروع. صُمِّمت الوحدات الأرضية للاستخدام التجاري، وتصفها الكتيبات بواجهات ركنية أو داخلية."
+    },
+    "highlights": {
+      "en": [
+        "Four themed buildings — Light, Water, Earth, Air",
+        "Two-level garden penthouse units",
+        "Private gardens up to 70 sqm",
+        "Ground-floor commercial units",
+        "Shared rooftop courtyard and gym",
+        "Direct views over shared garden"
+      ],
+      "ar": [
+        "أربعة مبانٍ بأسماء الضوء والماء والأرض والهواء",
+        "وحدات بنتهاوس بطابقين",
+        "حدائق خاصة حتى 70 م²",
+        "وحدات تجارية بالدور الأرضي",
+        "فناء مشترك وصالة رياضية على السطح",
+        "إطلالة مباشرة على الحديقة المشتركة"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": "https://bona-real-estate.com/listings/elemental-residences-al-rawabi/brochure.pdf",
+    "project": {
+      "name": {
+        "en": "Elemental",
+        "ar": "إيلمنتال"
+      },
+      "developer": {
+        "en": "Sadana",
+        "ar": "سدانة"
+      }
+    },
+    "unit": null,
+    "map": null,
+    "mapPrecision": null,
+    "listedAt": "2026-09-17",
+    "licence": null
+  },
+  {
     "id": "BONA-W009",
     "slug": "elvira-murjan-townhouses-in-al-murjan",
     "sourceRef": "WA-20260906-ACA18E",
