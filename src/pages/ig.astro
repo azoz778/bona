@@ -1,0 +1,99 @@
+---
+/**
+ * `/ig/` — the link in the Instagram bio.
+ *
+ * Instagram's bio field is a single line the owner retypes on a phone, so the URL has
+ * to be short enough to type without a mistake. A full
+ * `?utm_source=instagram&utm_medium=bio` query string is not: it has already been
+ * mangled once by a line break that arrived as a space, which left the account
+ * pointing at a dead URL.
+ *
+ * So the tags live here instead of in the bio. The visitor types four characters and
+ * this page attaches the attribution, which is what stops Instagram traffic landing in
+ * the dashboard as `(direct)`.
+ *
+ * Why a page and not a server redirect: the site is static on GitHub Pages, so there is
+ * no server to send a 302. The redirect therefore has to happen in the document itself,
+ * and it is done three times over so that it cannot depend on any one of them:
+ *
+ *   1. `<meta http-equiv="refresh">` — works with JavaScript disabled, and is the only
+ *      one that runs inside the in-app browsers Instagram forces links to open in.
+ *   2. A script that calls `location.replace()` — instant, and `replace` keeps the dead
+ *      `/ig/` entry out of history so Back returns to Instagram rather than looping.
+ *   3. A real, visible link — if both of the above are blocked (a strict in-app
+ *      webview, a CSP, a bot), the visitor still sees the brand and something to tap
+ *      instead of a blank page.
+ *
+ * The UTMs are appended to the destination rather than being read from the incoming
+ * URL: src/scripts/attribution.js reads `utm_source`/`utm_medium` off `location.search`
+ * on the landing page, so they must be present on `/` after the hop, not on `/ig/`
+ * before it. Any query the visitor arrived with is preserved and wins — that keeps a
+ * future `/ig/?utm_campaign=eid` working, and stops this page silently overwriting a
+ * real campaign tag with the default one.
+ *
+ * noindex, because this is a redirect, not a page: without it Google indexes `/ig/` and
+ * can show it in place of the homepage.
+ */
+import site from '../data/site.json';
+
+const DEST = '/';
+const DEFAULTS = { utm_source: 'instagram', utm_medium: 'bio' };
+
+// Build the canonical destination for the no-script path. The runtime script does the
+// same thing again with the visitor's real query string, which a static build cannot know.
+const fallback = new URLSearchParams(DEFAULTS);
+const fallbackHref = `${DEST}?${fallback.toString()}`;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, follow" />
+    <title>{site.name}</title>
+    <link rel="canonical" href={new URL(DEST, 'https://bona-real-estate.com').href} />
+    <meta http-equiv="refresh" content={`0; url=${fallbackHref}`} />
+    <style>
+      html { background: #f4f1ea; color: #15181b; }
+      body {
+        margin: 0; min-height: 100vh;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 1.25rem;
+        font: 15px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+        text-align: center; padding: 2rem;
+      }
+      .mark { font: 400 1.5rem/1 ui-serif, Georgia, serif; letter-spacing: .38em; text-indent: .38em; }
+      .msg { color: #6f6a62; font-size: 13px; }
+      a { color: #15181b; }
+    </style>
+  </head>
+  <body>
+    <p class="mark">BONA</p>
+    <p class="msg">Taking you to bona-real-estate.com…</p>
+    <p><a href={fallbackHref} data-fallback>Continue &rarr;</a></p>
+
+    <script is:inline>
+      (function () {
+        try {
+          var DEST = '/';
+          var DEFAULTS = { utm_source: 'instagram', utm_medium: 'bio' };
+          // Carry through anything the visitor arrived with; only fill what is missing,
+          // so /ig/?utm_campaign=eid keeps its campaign and a real utm_source is never
+          // clobbered by the default.
+          var q = new URLSearchParams(location.search);
+          for (var k in DEFAULTS) {
+            if (Object.prototype.hasOwnProperty.call(DEFAULTS, k) && !q.get(k)) q.set(k, DEFAULTS[k]);
+          }
+          var href = DEST + '?' + q.toString() + location.hash;
+          var a = document.querySelector('a[data-fallback]');
+          if (a) a.setAttribute('href', href);
+          // replace(), not assign(): Back must return to Instagram, not to this page,
+          // which would immediately redirect forward again and trap the visitor.
+          location.replace(href);
+        } catch (e) {
+          /* the <meta refresh> above is still in force, so a failure here is not fatal */
+        }
+      })();
+    </script>
+  </body>
+</html>
