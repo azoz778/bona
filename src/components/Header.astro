@@ -61,24 +61,24 @@ const switchHref = routeExists(mirrored) ? mirrored : localePath(other, '/');
   </div>
 </header>
 
-<div id="site-drawer" class="drawer" data-drawer>
+<nav id="site-drawer" class="drawer" data-drawer aria-label={t(ui.menuLandmark, locale)}>
   <div class="wrap flex h-16 items-center justify-between">
     <a href={localePath(locale, '/')} class="flex items-center" aria-label={locale === 'ar' ? site.nameAr : site.name}><Logo locale={locale} height={locale === 'ar' ? 24 : 21} /></a>
     <button type="button" class="-me-2 grid h-10 w-10 place-items-center" data-menu-close aria-label={t(ui.closeMenu, locale)}><Icon name="close" size={24} /></button>
   </div>
-  <nav aria-label={t(ui.menu, locale)} class="wrap mt-8 flex flex-col">
+  <div class="wrap mt-8 flex flex-col">
     {nav.map(item => (
       <a href={item.href} class="display-md border-b border-ink/10 py-4" aria-current={isCurrent(item) ? 'page' : undefined}>{item.label}</a>
     ))}
     <a href={localePath(locale, '/properties/')} class="label mt-6 text-stone-2" aria-current={path === localePath(locale, '/properties/') ? 'page' : undefined}>{t(ui.navAllProperties, locale)}</a>
     <a href={localePath(locale, '/tours/')} class="label mt-4 text-stone-2" aria-current={path === localePath(locale, '/tours/') ? 'page' : undefined}>{t(ui.navTours, locale)}</a>
-  </nav>
+  </div>
   <div class="wrap mt-10 flex flex-col gap-6 pb-16">
     <a href={wa} target="_blank" rel="noopener" class="btn btn-ink w-full sm:w-auto" data-cta="drawer_whatsapp"><Icon name="whatsapp" size={18} />{t(ui.chatOnWhatsApp, locale)}</a>
     <a href={switchHref} lang={other} hreflang={other} dir={other === 'ar' ? 'rtl' : 'ltr'} class:list={['link self-start', other === 'ar' ? 'font-arabic' : 'label']}>{t(ui.languageSwitch, locale)}</a>
     <p class="text-sm text-stone">{site.whatsapp.display}</p>
   </div>
-</div>
+</nav>
 
 <script>
   /* Header: solid-on-scroll, mobile drawer, magnetic nav links. Re-initialised on every page load; window/document
