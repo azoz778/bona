@@ -103,5 +103,30 @@ ok('N1 replyLine agrees it is not waiting', !/Waiting .* for your first reply/.t
    R.replyLine(replied0, now));
 ok('N1 card text agrees', !/Waiting .* for your first reply/.test(R.leadCard(replied0, now)));
 
-console.log(bad ? `\n${bad} FAILURE(S)` : '\nALL REGRESSION CHECKS PASS');
-process.exit(bad ? 1 : 0);
+// R1 — a reply time a human can read. The raw stat is minutes with one decimal,
+// which is right for 14 min and absurd for 344.2 min. Real production data (median
+// 344.2, p90 3520.5) is what surfaced this.
+ok('R1 minutes stay minutes under 90', JSON.stringify(R.minutesReadable(13.7)) === '["13.7","min"]', JSON.stringify(R.minutesReadable(13.7)));
+ok('R1 344.2 min becomes 5.7 hours', JSON.stringify(R.minutesReadable(344.2)) === '["5.7","hours"]', JSON.stringify(R.minutesReadable(344.2)));
+ok('R1 3520.5 min becomes 2.4 days', JSON.stringify(R.minutesReadable(3520.5)) === '["2.4","days"]', JSON.stringify(R.minutesReadable(3520.5)));
+// Number(null) is 0 and 0 is finite, so a missing stat must be rejected BEFORE
+// coercion or the page prints a confident "0 min" for something never measured.
+ok('R1 null is not 0 min', R.minutesReadable(null) === null, JSON.stringify(R.minutesReadable(null)));
+ok('R1 undefined is not 0 min', R.minutesReadable(undefined) === null);
+ok('R1 empty string is not 0 min', R.minutesReadable('') === null);
+
+// R2 — leads that arrive straight into WhatsApp from an ad never touched the site, so
+// leads can exceed on-site wa_clicks. Printing that as a conversion rate claimed
+// "500% became a lead" on the real dashboard.
+const skew = R.overviewPage({
+  daily: [{ day: '2026-09-16', sessions: 319, wa_clicks: 2, leads: 10, viewings: 0 }],
+  sources: [], matchQuality: [],
+  responseTimes: { median_min: 344.2, p90_min: 3520.5, count: 8 },
+  pipeline: [{ stage: 'new', count: 10, median_age_h: 42 }], days: 14, waiting: [], waitingTotal: 0, now,
+});
+ok('R2 no impossible conversion rate', !/\b[1-9]\d\d+%\s*became a lead/.test(skew),
+  (skew.match(/\d+% became a lead/) || [])[0]);
+ok('R2 says why the counts do not nest', /never visited/.test(skew));
+ok('R2 no raw 344.2 min in the page', !/344\.2<\/span><i>min/.test(skew));
+
+console.log(bad ? `\n${bad} FAILURE(S)` : '\nALL REGRESSION CHECKS PASS');process.exit(bad ? 1 : 0);
