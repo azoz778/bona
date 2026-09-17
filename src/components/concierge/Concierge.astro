@@ -48,7 +48,7 @@ const quick = [
 {!enabled && <WhatsAppFloat locale={locale} message={waMessage} />}
 
 {enabled && (
-  <div class="concierge" data-concierge data-config={JSON.stringify(config)}>
+  <aside class="concierge" data-concierge data-config={JSON.stringify(config)} aria-label={t(ui.conciergeRole, locale)}>
     <div class="cg-cluster">
       <WhatsAppFloat locale={locale} message={waMessage} floating={false} />
       <button type="button" class="cg-pill" data-cg-open aria-expanded="false" aria-controls="concierge-panel">
@@ -166,7 +166,7 @@ const quick = [
         </p>
       </div>
     </section>
-  </div>
+  </aside>
 )}
 
 <script>
