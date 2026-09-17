@@ -46,7 +46,11 @@ export default defineConfig({
   },
   integrations: [
     sitemap({
-      filter: (page) => !page.includes('/dashboard/'),
+      // `/dashboard/` is private; `/ig/` is a redirect, not a destination. Submitting a
+      // noindex URL in the sitemap is a contradictory signal — it asks Google to crawl a
+      // page that then tells it not to index — and risks /ig/ being surfaced in place of
+      // the homepage.
+      filter: (page) => !page.includes('/dashboard/') && !page.includes('/ig/'),
       i18n: { defaultLocale: 'en', locales: { en: 'en', ar: 'ar' } },
     }),
     sitemapAlias,
