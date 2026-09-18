@@ -55,8 +55,10 @@ ProtectControlGroups=true
 ProtectKernelTunables=true
 RestrictSUIDSGID=true
 LockPersonality=true
-; The publish tree (git checkout during sync) and the data dir (ledger, lock).
-ReadWritePaths=%h/bona-publish %h/bona-data
+; The publish tree (git checkout during sync), the data dir (ledger, lock) and the repository git
+; dir the worktree shares with ~/bona — without it the fetch cannot write FETCH_HEAD and the tree
+; only stays current because the Instagram unit syncs it (seen in the journal 2026-09-15).
+ReadWritePaths=%h/bona-publish %h/bona-data %h/bona/.git
 MemoryHigh=768M
 MemoryMax=1G
 
