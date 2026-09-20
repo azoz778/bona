@@ -390,13 +390,28 @@ export function createDashboardRoutes({
 
   function overview({ res, url }) {
     const days = Math.max(1, Math.min(90, Number(url.searchParams.get('days')) || 14));
+    // Every section is fetched defensively: one failing aggregate must not take the
+    // whole desk page down, and the queue at the top is the part the owner actually
+    // needs. `waitingTotal` is a real COUNT(*) — `waiting` is capped at 50, so its
+    // length is a slice and must never be rendered as the headline number.
+    const safe = (label, fn, fallback) => {
+      try {
+        return fn();
+      } catch (err) {
+        log({ level: 'warn', evt: 'dash.section_failed', section: label, error: String(err?.message ?? err).slice(0, 200) });
+        return fallback;
+      }
+    };
     return sendHtml(res, 200, overviewPage({
       days,
-      daily: statistics.overviewDaily(days),
-      sources: statistics.sources(),
-      matchQuality: statistics.matchQuality(),
-      pipeline: statistics.pipeline(),
-      responseTimes: statistics.responseTimes(),
+      daily: safe('daily', () => statistics.overviewDaily(days), []),
+      sources: safe('sources', () => statistics.sources(), []),
+      matchQuality: safe('matchQuality', () => statistics.matchQuality(), []),
+      pipeline: safe('pipeline', () => statistics.pipeline(), []),
+      responseTimes: safe('responseTimes', () => statistics.responseTimes(), { median_min: null, p90_min: null, count: 0 }),
+      waiting: safe('waiting', () => db.waitingLeads({ limit: 50 }), []),
+      waitingTotal: safe('waitingTotal', () => db.countWaitingLeads(), null),
+      now: now(),
     }));
   }
 

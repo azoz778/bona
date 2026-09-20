@@ -78,7 +78,7 @@ export const ui = {
   languageSwitchAria: s('Switch to Arabic', 'التبديل إلى الإنجليزية'),
   openMenu: s('Open menu', 'فتح القائمة'),
   closeMenu: s('Close menu', 'إغلاق القائمة'),
-  menu: s('Menu', 'القائمة'),
+  menuLandmark: s('Mobile menu', 'قائمة الجوال'),
   whatsapp: s('WhatsApp', 'واتساب'),
   chatOnWhatsApp: s('Chat on WhatsApp', 'تواصل عبر واتساب'),
   callUs: s('Call', 'اتصل'),
