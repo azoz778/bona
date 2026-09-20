@@ -163,7 +163,11 @@ export async function checkMetaCapi({ env, site, probe: send = probe }) {
         event_id: `verify-${Date.now()}`,
         action_source: 'website',
         event_source_url: `${trimSlash(site.url)}/`,
-        user_data: { client_user_agent: UA },
+        // Meta rejects a website event whose user_data is only a user agent ("no customer
+        // information parameters", HTTP 400 code 100 — seen 2026-09-16). A synthetic browser id
+        // (fbp) is the smallest parameter it accepts for a probe; production events carry the
+        // visitor's real ip/ua/fbp/fbc (services/api/lib/fanout.mjs userData()).
+        user_data: { client_user_agent: UA, fbp: `fb.1.${Date.now()}.${Math.floor(Math.random() * 1e10)}` },
       }],
       test_event_code: testCode,
       access_token: token,
