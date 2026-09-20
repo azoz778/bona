@@ -178,6 +178,21 @@ test('Meta CAPI is live only when the dataset says it received the test event', 
   assert.equal(r.status, 'error');
 });
 
+test('Meta CAPI probe carries a customer parameter Meta accepts (a browser id), never only a user agent', async () => {
+  // Meta answers HTTP 400 code 100 "no customer information parameters" to a website event whose
+  // user_data is just client_user_agent — the probe read as an error on the board (2026-09-16).
+  let sent = null;
+  const capture = async (url, opts) => { sent = { url, body: JSON.parse(opts.body) }; return { status: 200, ok: true, text: '{}', json: { events_received: 1 } }; };
+  const env = { META_PIXEL_ID: '111', META_CAPI_TOKEN: 'tok', META_TEST_EVENT_CODE: 'TEST123' };
+  const r = await checkMetaCapi({ env, site: META_SITE, probe: capture });
+  assert.equal(r.status, 'live');
+  const ev = sent.body.data[0];
+  assert.equal(ev.action_source, 'website');
+  assert.ok(ev.user_data.client_user_agent, 'user agent present');
+  assert.match(ev.user_data.fbp, /^fb\.1\.\d+\.\d+$/, 'synthetic fbp in Meta\'s format');
+  assert.equal(sent.body.test_event_code, 'TEST123');
+});
+
 test('Evolution: answering is not the same as accepting the key', async () => {
   const env = { EVOLUTION_API_URL: 'https://wa.example.test', EVOLUTION_API_KEY: 'k' };
   const at = (status) => async () => ({ status, ok: status < 400, text: '', json: { version: '2.0' } });
