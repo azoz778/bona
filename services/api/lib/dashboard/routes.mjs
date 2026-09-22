@@ -454,14 +454,23 @@ export function createDashboardRoutes({
   const SPEND_WINDOW_DAYS = 90;
 
   function spend({ res, url }) {
-    const fromDay = dayKey(now() - SPEND_WINDOW_DAYS * 86_400_000);
+    const today = dayKey(now());
+    const fallbackFrom = dayKey(now() - SPEND_WINDOW_DAYS * 86_400_000);
+    const requestedFrom = url.searchParams.get('from');
+    const requestedTo = url.searchParams.get('to');
+    let fromDay = isDay(requestedFrom) ? requestedFrom : fallbackFrom;
+    let toDay = isDay(requestedTo) ? requestedTo : today;
+    if (fromDay > toDay) [fromDay, toDay] = [toDay, fromDay];
     return sendHtml(res, 200, spendPage({
-      rows: db.listSpend({ fromDay }).reverse(),
+      rows: db.listSpend({ fromDay, toDay }).reverse(),
       windowDays: SPEND_WINDOW_DAYS,
       campaigns: statistics.cplByCampaign(),
+      roi: statistics.roi({ fromDay, toDay }),
+      fromDay,
+      toDay,
       saved: url.searchParams.get('ok') === '1',
       error: knownError(url.searchParams.get('error')),
-      today: dayKey(now()),
+      today,
     }));
   }
 

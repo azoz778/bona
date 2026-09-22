@@ -338,6 +338,106 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
   }
 
   /**
+   * Date-filtered campaign ROI plus an explicit unknown bucket. Leads are joined only
+   * on canonical platform + campaign id; spend-only campaigns remain visible.
+   */
+  function roi({ fromDay = null, toDay = null } = {}) {
+    const from = fromDay ? String(fromDay) : null;
+    const to = toDay ? String(toDay) : null;
+    const spendWhere = [];
+    const spendArgs = [];
+    if (from) { spendWhere.push('day >= ?'); spendArgs.push(from); }
+    if (to) { spendWhere.push('day <= ?'); spendArgs.push(to); }
+    const leadWhere = [];
+    const leadArgs = [];
+    if (from) { leadWhere.push('created >= ?'); leadArgs.push(dayStart(from, offset)); }
+    if (to) { leadWhere.push('created < ?'); leadArgs.push(dayStart(to, offset) + DAY_MS); }
+
+    const rows = new Map();
+    const ensure = (platform, campaignId) => {
+      const key = campaignKey(platform, campaignId);
+      let row = rows.get(key);
+      if (!row) {
+        row = { platform: platformOf(platform), campaign_id: String(campaignId), campaign_name: null,
+          spend_sar: 0, clicks: 0, impressions: 0, leads: 0, qualified_leads: 0, won_leads: 0,
+          revenue_sar: null, cpl: null, roas: null, unmatched_leads: 0, _won_value_count: 0, _revenue: 0 };
+        rows.set(key, row);
+      }
+      return row;
+    };
+
+    const spendSql = `SELECT platform, campaign_id, MAX(campaign_name) AS campaign_name,
+      SUM(spend_sar) AS spend_sar, SUM(clicks) AS clicks, SUM(impressions) AS impressions,
+      MAX(imported_at) AS freshness FROM ad_spend${spendWhere.length ? ` WHERE ${spendWhere.join(' AND ')}` : ''}
+      GROUP BY platform, campaign_id`;
+    let freshness = null;
+    for (const spend of all(spendSql, ...spendArgs)) {
+      if (!spend.campaign_id) continue;
+      const row = ensure(spend.platform, spend.campaign_id);
+      row.campaign_name = spend.campaign_name ?? null;
+      row.spend_sar = round2(num(spend.spend_sar));
+      row.clicks = spend.clicks === null ? null : num(spend.clicks);
+      row.impressions = spend.impressions === null ? null : num(spend.impressions);
+      if (spend.freshness !== null && (freshness === null || spend.freshness > freshness)) freshness = num(spend.freshness);
+    }
+
+    const leadSql = `SELECT source, campaign_id, stage, value_sar FROM leads${leadWhere.length ? ` WHERE ${leadWhere.join(' AND ')}` : ''}`;
+    const leadRows = all(leadSql, ...leadArgs);
+    const byId = new Map();
+    let attributed = 0;
+    const unknown = { bucket: 'unknown', platform: 'unknown', campaign_id: null, campaign_name: 'Unknown / unattributed',
+      spend_sar: 0, clicks: null, impressions: null, leads: 0, qualified_leads: 0, won_leads: 0,
+      revenue_sar: null, cpl: null, roas: null, unmatched_leads: 0, _won_value_count: 0, _revenue: 0 };
+    const qualified = new Set(['qualified', 'viewing', 'offer', 'negotiation', 'won']);
+    for (const lead of leadRows) {
+      const campaignId = presentCampaignId(lead.campaign_id);
+      const platform = platformOf(lead.source);
+      const target = campaignId && platform && !['(direct)', 'direct', 'unknown', '(unknown)'].includes(platform)
+        ? ensure(platform, campaignId) : unknown;
+      if (target !== unknown) attributed += 1;
+      target.leads += 1;
+      if (qualified.has(lead.stage)) target.qualified_leads += 1;
+      if (lead.stage === 'won') {
+        target.won_leads += 1;
+        if (lead.value_sar !== null && Number.isFinite(Number(lead.value_sar))) {
+          target._won_value_count += 1;
+          target._revenue += Number(lead.value_sar);
+        }
+      }
+      if (campaignId) byId.set(campaignId, (byId.get(campaignId) ?? 0) + 1);
+    }
+
+    for (const row of rows.values()) {
+      row.unmatched_leads = row.leads ? 0 : (byId.get(row.campaign_id) ?? 0);
+      row.cpl = row.spend_sar > 0 && row.leads > 0 ? round2(row.spend_sar / row.leads) : null;
+      row.revenue_sar = row._won_value_count > 0 ? round2(row._revenue) : null;
+      row.roas = row.revenue_sar !== null && row.spend_sar > 0 ? round2(row.revenue_sar / row.spend_sar) : null;
+      delete row._won_value_count;
+      delete row._revenue;
+    }
+    unknown.revenue_sar = unknown._won_value_count > 0 ? round2(unknown._revenue) : null;
+    delete unknown._won_value_count;
+    delete unknown._revenue;
+
+    const campaigns = [...rows.values()].sort((a, b) => b.spend_sar - a.spend_sar || b.leads - a.leads || String(a.campaign_id).localeCompare(String(b.campaign_id)));
+    campaigns.push(unknown);
+    const total = leadRows.length;
+    return {
+      range: { from, to },
+      generated: now(),
+      spend_freshness: freshness,
+      coverage: { attributed: attributed, total, percent: total ? round1((attributed / total) * 100) : 0 },
+      totals: { leads: total, attributed_leads: attributed, unknown_leads: total - attributed },
+      campaigns,
+    };
+  }
+
+  const presentCampaignId = (value) => {
+    const s = String(value ?? '').trim();
+    return s || null;
+  };
+
+  /**
    * Money against leads, per campaign. Rows come from `ad_spend`, so a campaign that
    * has taken money and produced nothing still appears — that is the row worth seeing.
    */
@@ -435,6 +535,7 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
       pipeline: pipeline(),
       response_times: responseTimes(),
       cpl_by_campaign: cplByCampaign(),
+      roi: roi(),
       totals: {
         leads: num(one('SELECT COUNT(*) AS n FROM leads')?.n),
         sessions: num(one('SELECT COUNT(*) AS n FROM sessions')?.n),
@@ -443,5 +544,5 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
     };
   }
 
-  return { overviewDaily, sources, matchQuality, pipeline, responseTimes, listingFunnel, cplByCampaign, leadJourney, overview };
+  return { overviewDaily, sources, matchQuality, pipeline, responseTimes, listingFunnel, cplByCampaign, roi, leadJourney, overview };
 }
