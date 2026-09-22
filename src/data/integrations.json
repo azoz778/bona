@@ -4,36 +4,40 @@
     "name": "Website bona-real-estate.com",
     "status": "live",
     "owner": "agent",
-    "action": "Live since 2026-09-05 16:50 KSA. Daily rebuild 06:00 KSA.",
+    "action": "Live production site; deploy through GitHub Actions and verify after each merge.",
     "link": "https://bona-real-estate.com/",
-    "detail": "Astro static site on GitHub Pages; sections: for sale, rent, off-plan, international, houses, apartments, tours."
+    "detail": "Astro static site on GitHub Pages; bilingual property, FAQ, privacy, contact, tour and dashboard routes.",
+    "checkedAt": "2026-09-22T13:49:22.728Z"
   },
   {
     "id": "dns",
     "name": "DNS (Cloudflare)",
     "status": "live",
     "owner": "agent",
-    "action": "CNAME bona → azoz778.github.io, DNS-only (grey cloud) so GitHub can issue the certificate.",
+    "action": "Cloudflare DNS is serving the production domain; preserve the GitHub Pages and API records.",
     "link": "https://dash.cloudflare.com/",
-    "detail": "Resolves to GitHub Pages IPs."
+    "detail": "bona-real-estate.com resolves to the active GitHub Pages deployment; API is routed separately.",
+    "checkedAt": "2026-09-22T13:49:22.728Z"
   },
   {
     "id": "https",
     "name": "HTTPS certificate",
     "status": "live",
     "owner": "agent",
-    "action": "Live since 2026-09-05 16:50 KSA. Daily rebuild 06:00 KSA.",
+    "action": "Certificate is active; monitor after DNS or custom-domain changes.",
     "link": "https://github.com/azoz778/bona/settings/pages",
-    "detail": "Currently serving the *.github.io certificate, so browsers show a name mismatch."
+    "detail": "Production serves a valid HTTPS certificate for bona-real-estate.com.",
+    "checkedAt": "2026-09-22T13:49:22.728Z"
   },
   {
     "id": "pages-deploy",
     "name": "GitHub Pages deploy",
     "status": "live",
     "owner": "agent",
-    "action": "Live since 2026-09-05 16:50 KSA. Daily rebuild 06:00 KSA.",
+    "action": "GitHub Actions deploys main to Pages; verify the workflow and live URL after changes.",
     "link": "https://github.com/azoz778/bona/actions",
-    "detail": "Needs Pages source set to GitHub Actions in repo settings."
+    "detail": "GitHub Pages deployment is active from the repository workflow.",
+    "checkedAt": "2026-09-22T13:49:22.728Z"
   },
   {
     "id": "matterport",
@@ -55,59 +59,62 @@
   {
     "id": "instagram",
     "name": "Instagram @bonarealestatesa",
-    "status": "pending-owner",
-    "owner": "owner",
-    "action": "Switch the account to Business, link it to a Facebook Page under the TK Meta Business, then the posting script can publish unattended.",
+    "status": "live",
+    "owner": "agent",
+    "action": "Publisher timer is enabled and active; inspect provider response and ledger before claiming an item published.",
     "link": "https://www.instagram.com/bonarealestatesa/",
-    "detail": "Profile exists and the site links to it. API posting waits on the account link."
+    "detail": "@bonarealestatesa is public. The ledger had 19 successful publication records; the public feed count is a separate measure.",
+    "checkedAt": "2026-09-22T13:49:22.728Z"
   },
   {
     "id": "instagram-api",
     "name": "Instagram API access",
-    "status": "pending-owner",
-    "owner": "owner",
-    "action": "see marketing/instagram-access.md — switch @bonarealestatesa to a Business account and link it into the Meta Business, or provide credentials",
+    "status": "live",
+    "owner": "agent",
+    "action": "Automated publisher is operating; North Obhur and National Day packages remain owner-approval gated.",
     "link": "https://business.facebook.com/settings/instagram-account-v2s",
-    "detail": "Unblocks unattended posting from the content calendar and the Meta MCP."
+    "detail": "Instagram Graph publishing is configured and the publisher timer is enabled/active.",
+    "checkedAt": "2026-09-22T13:49:22.728Z"
   },
   {
     "id": "whatsapp",
     "name": "WhatsApp +966 59 329 6933",
-    "status": "pending-owner",
+    "status": "live",
     "owner": "owner",
-    "action": "Install WhatsApp Business on this number and fill the profile: name, hours, address, catalogue.",
+    "action": "Website deep links and the read-only Bona lead poller are live; account-side Business profile completeness remains unverified.",
     "link": "https://wa.me/966593296933",
-    "detail": "Deep links with pre-filled property references are live on every listing."
+    "detail": "Bona enquiries use +966 59 329 6933; Evolution and the lead poller are live.",
+    "checkedAt": "2026-09-22T13:49:22.728Z"
   },
   {
     "id": "ga4",
     "name": "Google Analytics 4",
-    "status": "error",
+    "status": "live",
     "owner": "owner",
     "action": "Create a GA4 property for bona-real-estate.com and paste the Measurement ID (G-XXXX) into site.json → analytics.ga4.",
     "link": "https://analytics.google.com/",
-    "detail": "payload validated for G-861TD74EW1; one verify_ping sent to mp/collect (HTTP 204 — that endpoint answers 204 with an empty body and never reports errors, so acceptance is NOT proof of ingestion). site tag G-861TD74EW1 in site.json but NOT on the live page (deploy pending?). Owner: confirm the verify",
-    "checkedAt": "2026-09-15T11:41:08.167Z"
+    "detail": "payload validated for G-861TD74EW1; one verify_ping sent to mp/collect (HTTP 204 — that endpoint answers 204 with an empty body and never reports errors, so acceptance is NOT proof of ingestion). site tag G-861TD74EW1 served. Owner: confirm the verify_ping in GA4 → Reports → Realtime (or Admin → Deb",
+    "checkedAt": "2026-09-22T13:49:22.728Z"
   },
   {
     "id": "meta-pixel",
     "name": "Meta Pixel",
-    "status": "pending-owner",
+    "status": "live",
     "owner": "owner",
     "action": "Create a dataset in Events Manager and paste the Pixel ID into site.json → analytics.metaPixel.",
     "link": "https://business.facebook.com/events_manager",
-    "detail": "Meta Pixel id missing: site.json → analytics.metaPixel — docs/checklists/meta-bona-portfolio.md §4",
-    "checkedAt": "2026-09-15T11:41:08.167Z"
+    "detail": "Meta Pixel 1102591712117129 is served by the live site (loads after consent)",
+    "checkedAt": "2026-09-22T13:49:22.728Z"
   },
   {
     "id": "gsc",
     "name": "Google Search Console",
-    "status": "pending-owner",
-    "owner": "agent",
-    "action": "azoz.uk domain property is verified via DNS. Submit https://bona-real-estate.com/sitemap-index.xml once the site is live.",
-    "link": "https://search.google.com/search-console?resource_id=sc-domain:azoz.uk",
-    "detail": "no google-site-verification meta on https://bona-real-estate.com/ — paste the HTML-tag content into site.json → analytics.gscVerification (docs/checklists/google-bona.md §2)",
-    "checkedAt": "2026-09-15T11:41:08.167Z"
+    "status": "live",
+    "owner": "owner",
+    "action": "Verification tag is live; confirm ownership, sitemap submission and performance inside Search Console.",
+    "link": "https://search.google.com/search-console",
+    "detail": "google-site-verification is served on production; account-side sitemap/reporting state is not verified by the public probe.",
+    "checkedAt": "2026-09-22T13:49:22.728Z"
   },
   {
     "id": "indexnow",
@@ -146,17 +153,20 @@
     "name": "REGA FAL licence and ad licences",
     "status": "pending-owner",
     "owner": "owner",
-    "action": "Apply for the company FAL licence, then an advertising licence per listing before any paid promotion.",
+    "action": "Obtain and record a REGA advertising licence for every Saudi listing advertised, or unpublish the listings that cannot be licensed.",
     "link": "https://rega.gov.sa/",
-    "detail": "The site currently shows the owner's personal FAL licence 1100313556."
+    "detail": "The site shows FAL 1100313556, but the 2026-09-22 inventory audit found no recorded per-listing Saudi advertising licences.",
+    "checkedAt": "2026-09-22T13:49:22.728Z"
   },
   {
     "id": "email",
     "name": "Email",
-    "status": "planned",
+    "status": "live",
     "owner": "owner",
-    "action": "No mailbox until bona.com.sa exists. Then Google Workspace or Zoho Mail on the domain; add the address to site.json.",
-    "link": null
+    "action": "Keep info@bona-real-estate.com as the public Bona contact and verify deliverability after DNS/mail changes.",
+    "link": "mailto:info@bona-real-estate.com",
+    "detail": "Public Bona contact address is active as a managed Zoho alias.",
+    "checkedAt": "2026-09-22T13:49:22.728Z"
   },
   {
     "id": "meta-capi",
@@ -164,9 +174,9 @@
     "owner": "owner",
     "link": "https://business.facebook.com/events_manager2",
     "action": "docs/checklists/meta-bona-portfolio.md §5–6",
-    "status": "pending-owner",
-    "detail": "META_PIXEL_ID empty, META_CAPI_TOKEN empty in ~/.secrets/bona-marketing.env — docs/checklists/meta-bona-portfolio.md §4–6",
-    "checkedAt": "2026-09-15T11:41:08.167Z"
+    "status": "error",
+    "detail": "GET /1102591712117129 HTTP 400: (#100) Missing Permission",
+    "checkedAt": "2026-09-22T13:49:22.728Z"
   },
   {
     "id": "snap",
@@ -176,7 +186,7 @@
     "action": "docs/checklists/snapchat-bona.md",
     "status": "pending-owner",
     "detail": "SNAP_PIXEL_ID empty, SNAP_CAPI_TOKEN empty in ~/.secrets/bona-marketing.env — docs/checklists/snapchat-bona.md. site tag missing: site.json → analytics.snapPixel",
-    "checkedAt": "2026-09-15T11:41:08.167Z"
+    "checkedAt": "2026-09-22T13:49:22.728Z"
   },
   {
     "id": "tiktok-pixel",
@@ -186,7 +196,7 @@
     "action": "paste the sdkid into site.json → analytics.tiktokPixel",
     "status": "pending-owner",
     "detail": "TikTok Pixel id missing: site.json → analytics.tiktokPixel — TikTok Ads → Assets → Events → Web Events → the pixel's sdkid",
-    "checkedAt": "2026-09-15T11:41:08.167Z"
+    "checkedAt": "2026-09-22T13:49:22.728Z"
   },
   {
     "id": "bona-api",
@@ -195,8 +205,8 @@
     "link": "https://api.bona-real-estate.com/health",
     "action": "systemctl --user status bona-api cloudflared-bona",
     "status": "live",
-    "detail": "https://api.bona-real-estate.com/health ok — HTTP 200, v1.0.0, inventory 46, db ok, poller 1789472428062, fan-out pending 0 / failed 0",
-    "checkedAt": "2026-09-15T11:41:08.167Z"
+    "detail": "https://api.bona-real-estate.com/health ok — HTTP 200, v1.0.0, inventory 48, db ok, poller 1790084931478, fan-out pending 0 / failed 0",
+    "checkedAt": "2026-09-22T13:49:22.728Z"
   },
   {
     "id": "retell",
@@ -206,7 +216,7 @@
     "action": "services/README.md §5",
     "status": "live",
     "detail": "Retell reachable through bona-api",
-    "checkedAt": "2026-09-15T11:41:08.167Z"
+    "checkedAt": "2026-09-22T13:49:22.728Z"
   },
   {
     "id": "evolution",
@@ -216,6 +226,6 @@
     "action": "~/.secrets/evolution-api.env",
     "status": "live",
     "detail": "Evolution API answers HTTP 200 v2.3.7 at https://wa-api.azoz.uk; instance abdulaziz-personal",
-    "checkedAt": "2026-09-15T11:41:08.167Z"
+    "checkedAt": "2026-09-22T13:49:22.728Z"
   }
 ]
