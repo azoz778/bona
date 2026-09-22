@@ -1,0 +1,310 @@
+{
+  "approvalStatus": "AWAITING ABDULAZIZ APPROVAL — DO NOT PUBLISH OR SCHEDULE",
+  "campaignDate": "2026-09-23",
+  "brand": "Bona",
+  "rights": "Original vector artwork generated locally from Bona brand primitives. No photography, third-party marks, external media, or embedded audio.",
+  "sourceRepair": {
+    "failedEntry": "ig-2026-09-21-carousel-district-guide-north-obhur-al-sheraa-al-bandar",
+    "rootCause": "The Instagram publisher requires JPEG; slide 2 referenced a remote PNG whose .jpg/.jpeg twins returned 404. All three sources were also hosted under a legacy cross-brand media namespace.",
+    "remedy": "Replaced every remote/cross-brand dependency with deterministic Bona-owned vector artwork and rendered local sRGB JPEG exports."
+  },
+  "assets": [
+    {
+      "package": "north-obhur",
+      "platform": "instagram",
+      "path": "marketing/approval/2026-09-23/north-obhur/instagram/01.jpg",
+      "kind": "image",
+      "format": "jpeg",
+      "dimensions": [
+        1080,
+        1350
+      ],
+      "safeArea": {
+        "top": 74,
+        "right": 90,
+        "bottom": 92,
+        "left": 90
+      },
+      "foreground": "#f5f1ea",
+      "background": "#0f1214"
+    },
+    {
+      "package": "north-obhur",
+      "platform": "instagram",
+      "path": "marketing/approval/2026-09-23/north-obhur/instagram/02.jpg",
+      "kind": "image",
+      "format": "jpeg",
+      "dimensions": [
+        1080,
+        1350
+      ],
+      "safeArea": {
+        "top": 74,
+        "right": 90,
+        "bottom": 92,
+        "left": 90
+      },
+      "foreground": "#f5f1ea",
+      "background": "#0f1214"
+    },
+    {
+      "package": "north-obhur",
+      "platform": "instagram",
+      "path": "marketing/approval/2026-09-23/north-obhur/instagram/03.jpg",
+      "kind": "image",
+      "format": "jpeg",
+      "dimensions": [
+        1080,
+        1350
+      ],
+      "safeArea": {
+        "top": 74,
+        "right": 90,
+        "bottom": 92,
+        "left": 90
+      },
+      "foreground": "#f5f1ea",
+      "background": "#0f1214"
+    },
+    {
+      "package": "north-obhur",
+      "platform": "instagram",
+      "path": "marketing/approval/2026-09-23/north-obhur/instagram/04.jpg",
+      "kind": "image",
+      "format": "jpeg",
+      "dimensions": [
+        1080,
+        1350
+      ],
+      "safeArea": {
+        "top": 74,
+        "right": 90,
+        "bottom": 92,
+        "left": 90
+      },
+      "foreground": "#f5f1ea",
+      "background": "#0f1214"
+    },
+    {
+      "package": "north-obhur",
+      "platform": "instagram",
+      "path": "marketing/approval/2026-09-23/north-obhur/instagram/05.jpg",
+      "kind": "image",
+      "format": "jpeg",
+      "dimensions": [
+        1080,
+        1350
+      ],
+      "safeArea": {
+        "top": 74,
+        "right": 90,
+        "bottom": 92,
+        "left": 90
+      },
+      "foreground": "#f5f1ea",
+      "background": "#0f1214"
+    },
+    {
+      "package": "north-obhur",
+      "platform": "facebook",
+      "path": "marketing/approval/2026-09-23/north-obhur/facebook/01.jpg",
+      "kind": "image",
+      "format": "jpeg",
+      "dimensions": [
+        1080,
+        1080
+      ],
+      "safeArea": {
+        "top": 72,
+        "right": 84,
+        "bottom": 82,
+        "left": 84
+      },
+      "foreground": "#f5f1ea",
+      "background": "#0f1214"
+    },
+    {
+      "package": "north-obhur",
+      "platform": "facebook",
+      "path": "marketing/approval/2026-09-23/north-obhur/facebook/02.jpg",
+      "kind": "image",
+      "format": "jpeg",
+      "dimensions": [
+        1080,
+        1080
+      ],
+      "safeArea": {
+        "top": 72,
+        "right": 84,
+        "bottom": 82,
+        "left": 84
+      },
+      "foreground": "#f5f1ea",
+      "background": "#0f1214"
+    },
+    {
+      "package": "north-obhur",
+      "platform": "facebook",
+      "path": "marketing/approval/2026-09-23/north-obhur/facebook/03.jpg",
+      "kind": "image",
+      "format": "jpeg",
+      "dimensions": [
+        1080,
+        1080
+      ],
+      "safeArea": {
+        "top": 72,
+        "right": 84,
+        "bottom": 82,
+        "left": 84
+      },
+      "foreground": "#f5f1ea",
+      "background": "#0f1214"
+    },
+    {
+      "package": "north-obhur",
+      "platform": "facebook",
+      "path": "marketing/approval/2026-09-23/north-obhur/facebook/04.jpg",
+      "kind": "image",
+      "format": "jpeg",
+      "dimensions": [
+        1080,
+        1080
+      ],
+      "safeArea": {
+        "top": 72,
+        "right": 84,
+        "bottom": 82,
+        "left": 84
+      },
+      "foreground": "#f5f1ea",
+      "background": "#0f1214"
+    },
+    {
+      "package": "north-obhur",
+      "platform": "facebook",
+      "path": "marketing/approval/2026-09-23/north-obhur/facebook/05.jpg",
+      "kind": "image",
+      "format": "jpeg",
+      "dimensions": [
+        1080,
+        1080
+      ],
+      "safeArea": {
+        "top": 72,
+        "right": 84,
+        "bottom": 82,
+        "left": 84
+      },
+      "foreground": "#f5f1ea",
+      "background": "#0f1214"
+    },
+    {
+      "package": "national-day-96",
+      "platform": "instagram",
+      "path": "marketing/approval/2026-09-23/national-day-96/instagram/01.jpg",
+      "kind": "image",
+      "format": "jpeg",
+      "dimensions": [
+        1080,
+        1350
+      ],
+      "safeArea": {
+        "top": 74,
+        "right": 90,
+        "bottom": 92,
+        "left": 90
+      },
+      "foreground": "#fffaf0",
+      "background": "#07583a"
+    },
+    {
+      "package": "national-day-96",
+      "platform": "instagram",
+      "path": "marketing/approval/2026-09-23/national-day-96/instagram/02.jpg",
+      "kind": "image",
+      "format": "jpeg",
+      "dimensions": [
+        1080,
+        1350
+      ],
+      "safeArea": {
+        "top": 74,
+        "right": 90,
+        "bottom": 92,
+        "left": 90
+      },
+      "foreground": "#fffaf0",
+      "background": "#07583a"
+    },
+    {
+      "package": "national-day-96",
+      "platform": "instagram-story",
+      "path": "marketing/approval/2026-09-23/national-day-96/instagram/story-1080x1920.jpg",
+      "kind": "image",
+      "format": "jpeg",
+      "dimensions": [
+        1080,
+        1920
+      ],
+      "safeArea": {
+        "top": 190,
+        "right": 190,
+        "bottom": 360,
+        "left": 90
+      },
+      "foreground": "#fffaf0",
+      "background": "#07583a"
+    },
+    {
+      "package": "national-day-96",
+      "platform": "facebook",
+      "path": "marketing/approval/2026-09-23/national-day-96/facebook/feed-1200x1500.jpg",
+      "kind": "image",
+      "format": "jpeg",
+      "dimensions": [
+        1200,
+        1500
+      ],
+      "safeArea": {
+        "top": 82,
+        "right": 100,
+        "bottom": 102,
+        "left": 100
+      },
+      "foreground": "#fffaf0",
+      "background": "#07583a"
+    },
+    {
+      "package": "national-day-96",
+      "platform": "tiktok",
+      "path": "marketing/approval/2026-09-23/national-day-96/tiktok/national-day-96-silent.mp4",
+      "kind": "video",
+      "format": "mp4",
+      "dimensions": [
+        1080,
+        1920
+      ],
+      "safeArea": {
+        "top": 190,
+        "right": 190,
+        "bottom": 430,
+        "left": 90
+      },
+      "audio": false,
+      "foreground": "#fffaf0",
+      "background": "#07583a"
+    }
+  ],
+  "captions": {
+    "northObhur": "marketing/approval/2026-09-23/north-obhur/captions.json",
+    "nationalDay96": "marketing/approval/2026-09-23/national-day-96/captions.json"
+  },
+  "previews": [
+    "marketing/approval/2026-09-23/north-obhur/preview-instagram.jpg",
+    "marketing/approval/2026-09-23/north-obhur/preview-facebook.jpg",
+    "marketing/approval/2026-09-23/national-day-96/preview-instagram.jpg",
+    "marketing/approval/2026-09-23/national-day-96/preview-facebook.jpg",
+    "marketing/approval/2026-09-23/national-day-96/preview-tiktok.jpg"
+  ]
+}
