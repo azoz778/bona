@@ -309,7 +309,7 @@ test('every page renders for a signed-in owner', async () => {
       ['/dashboard/leads', /Leads/],
       [`/dashboard/leads/${id}`, /Journey/],
       ['/dashboard/listings', /Ad licence/],
-      ['/dashboard/spend', /Cost per lead/],
+      ['/dashboard/spend', /Attribution coverage/],
       ['/dashboard/integrations', /Owner checklists/],
     ]) {
       const res = await get(p, { cookie });
@@ -624,7 +624,11 @@ test('spend is upserted per day, platform and campaign', async () => {
       { day: '2026-09-07', platform: 'meta', campaign_id: '1203', campaign_name: 'Villas Sept', spend_sar: 3000, clicks: 120, impressions: 40_000 },
       { cookie, headers: { 'X-Bona-Dash': '1' } });
     assert.equal(first.status, 200);
-    assert.deepEqual(db.listSpend(), [{ day: '2026-09-07', platform: 'meta', campaign_id: '1203', campaign_name: 'Villas Sept', spend_sar: 3000, clicks: 120, impressions: 40_000 }]);
+    assert.deepEqual(db.listSpend(), [{
+      day: '2026-09-07', platform: 'meta', campaign_id: '1203', campaign_name: 'Villas Sept',
+      spend_sar: 3000, clicks: 120, impressions: 40_000,
+      source_spend: null, source_currency: null, imported_at: null,
+    }]);
 
     // The same three keys again: a corrected figure replaces the old one.
     const again = await postForm('/v1/admin/spend',

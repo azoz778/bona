@@ -1378,7 +1378,7 @@ ${scrollTable(
 /* Spend                                                               */
 /* ------------------------------------------------------------------ */
 
-export function spendPage({ rows, campaigns, saved = false, error = null, today, windowDays = 90 }) {
+export function spendPage({ rows = [], campaigns = [], roi = null, saved = false, error = null, today, fromDay = null, toDay = null, windowDays = 90 }) {
   const spendRows = rows.map((r) => `<tr>${cell(r.day)}${cell(r.platform)}${cell(r.campaign_id || '—')}${auto(r.campaign_name ?? '—')}` +
     `<td class="n">${esc(money(r.spend_sar))}</td>${numCell(r.clicks)}${numCell(r.impressions)}</tr>`);
   const campaignRows = campaigns.map((c) => {
@@ -1393,14 +1393,42 @@ export function spendPage({ rows, campaigns, saved = false, error = null, today,
       `<td class="n">${esc(c.cpl === null ? '—' : money(c.cpl))}</td></tr>`;
   });
 
+  const report = roi ?? { coverage: { attributed: 0, total: 0, percent: 0 }, totals: { unknown_leads: 0 }, campaigns: [], spend_freshness: null };
+  const roiRows = (report.campaigns ?? []).map((c) => {
+    const unmatched = !c.leads && c.unmatched_leads
+      ? `<span class="tag warn">platform mismatch</span>` : '';
+    return `<tr>${cell(c.platform ?? 'unknown')}${cell(c.campaign_id || '—')}${auto(c.campaign_name ?? '—')}` +
+      `<td class="n">${esc(money(c.spend_sar ?? 0))}</td>${numCell(c.clicks)}${numCell(c.impressions)}` +
+      `${numCell(c.leads)}${numCell(c.qualified_leads)}${numCell(c.won_leads)}` +
+      `<td class="n">${esc(c.revenue_sar === null ? '—' : money(c.revenue_sar))}</td>` +
+      `<td class="n">${esc(c.cpl === null ? '—' : money(c.cpl))}</td>` +
+      `<td class="n">${esc(c.roas === null ? '—' : `${number(c.roas)}×`)}${unmatched ? ` ${unmatched}` : ''}</td></tr>`;
+  });
+
   const banner = error ? `<div class="err">${esc(messageFor(error))}</div>`
     : saved ? '<div class="ok">Spend saved.</div>' : '';
+  const coverage = report.coverage ?? { attributed: 0, total: 0, percent: 0 };
+  const totals = report.totals ?? { unknown_leads: 0 };
 
   return layout({
     title: 'Spend',
     active: '/dashboard/spend',
-    body: `<h1>Spend</h1><p class="sub">One row per day, platform and campaign. Re-entering the same three overwrites the amount, so a corrected figure replaces the old one instead of adding to it.</p>
+    body: `<h1>Spend & ROI</h1><p class="sub">Campaign spend and attributed outcomes. Unknown attribution remains visible; ROAS is blank until a won lead has a recorded value.</p>
 ${banner}
+<form class="row" method="get" action="/dashboard/spend">
+  <div><label for="r-from">From</label><input id="r-from" name="from" type="date" value="${esc(fromDay ?? '')}"></div>
+  <div><label for="r-to">To</label><input id="r-to" name="to" type="date" value="${esc(toDay ?? '')}"></div>
+  <div><button type="submit">Apply range</button></div>
+</form>
+<div class="grid">
+  ${kpi('Attribution coverage', `${number(coverage.percent)}%`, `${number(coverage.attributed)} of ${number(coverage.total)} leads`)}
+  ${kpi('Unknown leads', totals.unknown_leads ?? 0, 'kept visible, never inferred')}
+  ${kpi('Spend freshness', report.spend_freshness ? dateTime(report.spend_freshness) : '—', report.spend_freshness ? 'latest imported row' : 'no imported spend yet')}
+</div>
+<h2>Campaign ROI</h2>
+${scrollTable('<th>Platform</th><th>Campaign ID</th><th>Name</th><th class="n">Spend</th><th class="n">Clicks</th><th class="n">Impressions</th><th class="n">Leads</th><th class="n">Qualified</th><th class="n">Won</th><th class="n">Revenue</th><th class="n">CPL</th><th class="n">ROAS</th>', roiRows, 'No campaign or lead data in this range.')}
+
+<h2>Add or correct spend</h2>
 <form class="row" method="post" action="/v1/admin/spend">
   <input type="hidden" name="_dash" value="1">
   <div><label for="s-day">Day</label><input id="s-day" name="day" type="date" value="${esc(today)}" required></div>
@@ -1413,12 +1441,12 @@ ${banner}
   <div><button type="submit">Save</button></div>
 </form>
 
-<h2>Cost per lead</h2>
+<h2>Cost per lead — all time</h2>
 ${scrollTable('<th>Platform</th><th>Campaign ID</th><th>Name</th><th class="n">Spend</th><th class="n">Clicks</th><th class="n">Impressions</th><th class="n">Leads</th><th class="n">CPL</th>', campaignRows, 'No spend recorded yet.')}
 
 <h2>Entries</h2>
-<p class="sub">The last ${esc(windowDays)} days.</p>
-${scrollTable('<th>Day</th><th>Platform</th><th>Campaign ID</th><th>Name</th><th class="n">Spend</th><th class="n">Clicks</th><th class="n">Impressions</th>', spendRows, 'No spend recorded in this window.')}`,
+<p class="sub">Selected range; defaults to the last ${esc(windowDays)} days.</p>
+${scrollTable('<th>Day</th><th>Platform</th><th>Campaign ID</th><th>Name</th><th class="n">Spend</th><th class="n">Clicks</th><th class="n">Impressions</th>', spendRows, 'No spend recorded in this range.')}`,
   });
 }
 

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { REF_RE, REF_ALPHABET, parseRef, sourceFromTouch, isExternalTouch, referrerHost } from '../lib/attribution.mjs';
+import { REF_RE, REF_ALPHABET, parseRef, sourceFromTouch, isExternalTouch, referrerHost, normaliseTouch } from '../lib/attribution.mjs';
 
 /* ---------------- Ref line ---------------- */
 
@@ -64,6 +64,21 @@ test('nothing at all is a direct visit', () => {
   assert.deepEqual(sourceFromTouch(null), direct);
   assert.deepEqual(sourceFromTouch({}), direct);
   assert.deepEqual(sourceFromTouch({ referrer: '', click_ids: {}, utm_source: '' }), direct);
+});
+
+test('the canonical touch contract validates ids, aliases campaign ids, and records availability', () => {
+  assert.deepEqual(normaliseTouch({
+    ts: 10, utm_source: ' Meta ', utm_medium: ' Paid ', utm_campaign: 'Launch',
+    campaign_id: ' 1203 ', utm_content: 'hero', listing_id: 'bona-w003',
+    click_ids: { fbclid: ' click-1 ', bad: 'x', gclid: 'x'.repeat(301) },
+  }), {
+    ts: 10, landing: null, referrer: null, utm_source: 'meta', utm_medium: 'paid',
+    utm_campaign: 'Launch', utm_content: 'hero', utm_term: null, utm_id: '1203',
+    listing_id: 'BONA-W003', click_ids: { fbclid: 'click-1' }, unavailable_reason: null,
+  });
+  assert.equal(normaliseTouch({ campaign_id: '<script>', listing_id: 'TK-1' }).utm_id, null);
+  assert.equal(normaliseTouch({ campaign_id: 'x'.repeat(65) }).utm_id, null);
+  assert.equal(normaliseTouch({}).unavailable_reason, 'direct_or_unknown');
 });
 
 test('an external touch is a UTM, a click id, or a referrer from another site', () => {
