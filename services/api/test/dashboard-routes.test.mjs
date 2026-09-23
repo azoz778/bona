@@ -13,7 +13,7 @@ import { createApp } from '../index.mjs';
 import { openDb } from '../lib/db.mjs';
 import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
 import { DEFAULT_ORIGINS } from '../lib/cors.mjs';
-import { leadsPage } from '../lib/dashboard/render.mjs';
+import { leadsPage, spendPage } from '../lib/dashboard/render.mjs';
 
 const TOKEN = 'a'.repeat(32);
 const inventory = createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk' });
@@ -309,7 +309,7 @@ test('every page renders for a signed-in owner', async () => {
       ['/dashboard/leads', /Leads/],
       [`/dashboard/leads/${id}`, /Journey/],
       ['/dashboard/listings', /Ad licence/],
-      ['/dashboard/spend', /Cost per lead/],
+      ['/dashboard/spend', /Attribution coverage/],
       ['/dashboard/integrations', /Owner checklists/],
     ]) {
       const res = await get(p, { cookie });
@@ -624,7 +624,11 @@ test('spend is upserted per day, platform and campaign', async () => {
       { day: '2026-09-07', platform: 'meta', campaign_id: '1203', campaign_name: 'Villas Sept', spend_sar: 3000, clicks: 120, impressions: 40_000 },
       { cookie, headers: { 'X-Bona-Dash': '1' } });
     assert.equal(first.status, 200);
-    assert.deepEqual(db.listSpend(), [{ day: '2026-09-07', platform: 'meta', campaign_id: '1203', campaign_name: 'Villas Sept', spend_sar: 3000, clicks: 120, impressions: 40_000 }]);
+    assert.deepEqual(db.listSpend(), [{
+      day: '2026-09-07', platform: 'meta', campaign_id: '1203', campaign_name: 'Villas Sept',
+      spend_sar: 3000, clicks: 120, impressions: 40_000,
+      source_spend: null, source_currency: null, imported_at: null,
+    }]);
 
     // The same three keys again: a corrected figure replaces the old one.
     const again = await postForm('/v1/admin/spend',
@@ -761,4 +765,27 @@ test('a stage value that is not a number is refused', async () => {
     assert.equal((await res.json()).error, 'bad_value');
     assert.equal(db.getLead(id).stage, 'new');
   });
+});
+
+test('the spend page renders unknown campaign metrics as dashes, never fabricated zeroes', () => {
+  const html = spendPage({
+    rows: [{ day: '2026-09-23', platform: 'meta', campaign_id: 'entry-missing-counts', campaign_name: null,
+      spend_sar: 10, clicks: null, impressions: null }],
+    campaigns: [{ platform: 'meta', campaign_id: 'all-time-missing-counts', campaign_name: null,
+      spend_sar: 10, clicks: null, impressions: null, leads: 0, unmatched_leads: 0, cpl: null }],
+    roi: {
+      coverage: { attributed: 1, total: 1, percent: 100 }, totals: { unknown_leads: 0 }, spend_freshness: null,
+      campaigns: [{ platform: 'meta', campaign_id: 'never-imported', campaign_name: null,
+        spend_sar: null, clicks: null, impressions: null, leads: 1, qualified_leads: 0, won_leads: 0,
+        revenue_sar: null, cpl: null, roas: null, unmatched_leads: 0 }],
+    },
+    today: '2026-09-23',
+  });
+  const row = html.match(/<tr><td>meta<\/td><td>never-imported<\/td>.*?<\/tr>/s)?.[0] ?? '';
+  assert.match(row, /<td class="n">—<\/td><td class="n">—<\/td><td class="n">—<\/td>/);
+  assert.doesNotMatch(row, /0 SAR/);
+  for (const id of ['entry-missing-counts', 'all-time-missing-counts']) {
+    const rendered = html.match(new RegExp(`<tr>.*?<td>${id}<\\/td>.*?<\\/tr>`, 's'))?.[0] ?? '';
+    assert.match(rendered, /<td class="n">—<\/td><td class="n">—<\/td>/, `${id} preserves unknown counts`);
+  }
 });
