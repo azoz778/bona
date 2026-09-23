@@ -64,18 +64,34 @@ export function planAttributionBackfill(db) {
     if (!present(lead.campaign_id) && !present(patch.campaign_id)) {
       const ad = [...tps].reverse().find((tp) => tp.meta?.ad_meta || present(tp.campaign_id));
       if (ad) {
-        // Same rule as touchPatch: an ad-referral touch is proposed only where it does
-        // not contradict a source/medium/campaign already recorded on the lead.
-        const adConflicts = (present(lead.source) && present(ad.source) && lead.source !== ad.source)
-          || (present(lead.medium) && present(ad.medium) && lead.medium !== ad.medium)
-          || (present(lead.campaign) && present(ad.campaign) && lead.campaign !== ad.campaign);
-        if (!adConflicts) {
-          if (!present(lead.source) && present(ad.source)) patch.source = ad.source;
-          if (!present(lead.medium) && present(ad.medium)) patch.medium = ad.medium;
-          if (!present(lead.campaign) && present(ad.campaign)) patch.campaign = ad.campaign;
-          if (present(ad.campaign_id)) patch.campaign_id = ad.campaign_id;
+        const effective = { ...lead, ...patch };
+        const effectiveHasAttribution = ['source', 'medium', 'campaign', 'campaign_id', 'click_ids'].some((key) => present(effective[key]));
+        const baseTs = Number(last?.ts ?? first?.ts);
+        const adTs = Number(ad.ts);
+        const adIsNewer = Number.isFinite(adTs) && (!Number.isFinite(baseTs) || adTs > baseTs);
+        // Referral rows and browser touches are alternate last-touch candidates, not
+        // bags of fields. An older referral must never complete or overwrite a newer
+        // browser touch. A newer referral may replace the pending browser-derived
+        // columns, but still may not contradict attribution already stored on the lead.
+        const comparison = adIsNewer ? lead : effective;
+        const adConflicts = (present(comparison.source) && present(ad.source) && comparison.source !== ad.source)
+          || (present(comparison.medium) && present(ad.medium) && comparison.medium !== ad.medium)
+          || (present(comparison.campaign) && present(ad.campaign) && comparison.campaign !== ad.campaign)
+          || (present(comparison.campaign_id) && present(ad.campaign_id) && comparison.campaign_id !== ad.campaign_id);
+        if (!adConflicts && (adIsNewer || !effectiveHasAttribution)) {
+          for (const key of ['source', 'medium', 'campaign', 'campaign_id']) {
+            if (!present(lead[key]) && present(ad[key])) patch[key] = ad[key];
+          }
           const click = ad.meta?.ad_meta?.ctwa_clid;
           if (click && !present(lead.click_ids)) patch.click_ids = { ctwa_clid: String(click).slice(0, 300) };
+          if (adIsNewer && !lead.last_touch) {
+            patch.last_touch = normaliseTouch({
+              ts: ad.ts, utm_source: ad.source, utm_medium: ad.medium,
+              utm_campaign: ad.campaign, utm_id: ad.campaign_id,
+              click_ids: click ? { ctwa_clid: String(click).slice(0, 300) } : null,
+              listing_id: ad.listing_id,
+            });
+          }
           evidence.push('whatsapp_referral');
         }
       }
@@ -154,7 +170,10 @@ export function createRestrictedBackup(dbFile, { backupDir = path.join(path.dirn
 }
 
 /** Restore through an adjacent temp file; integrity and target-change checks fail closed. */
-export function restoreRestrictedBackup(dbFile, manifestFile, { force = false } = {}) {
+export function restoreRestrictedBackup(dbFile, manifestFile, { force = false, apiOffline = false } = {}) {
+  if (apiOffline !== true) {
+    throw new Error('rollback requires an explicit API-offline confirmation; stop bona-api before restoring');
+  }
   const target = path.resolve(dbFile);
   const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
   if (manifest.source !== target) throw new Error('rollback manifest belongs to a different target');

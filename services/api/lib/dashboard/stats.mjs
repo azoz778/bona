@@ -359,7 +359,7 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
       let row = rows.get(key);
       if (!row) {
         row = { platform: platformOf(platform), campaign_id: String(campaignId), campaign_name: null,
-          spend_sar: 0, clicks: 0, impressions: 0, leads: 0, qualified_leads: 0, won_leads: 0,
+          spend_sar: null, clicks: null, impressions: null, leads: 0, qualified_leads: 0, won_leads: 0,
           revenue_sar: null, cpl: null, roas: null, unmatched_leads: 0, _won_value_count: 0, _revenue: 0 };
         rows.set(key, row);
       }
@@ -379,7 +379,7 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
       // same canonical key. Accumulate rather than overwrite, or the second alias's
       // spend silently replaces the first's instead of adding to it.
       row.campaign_name = row.campaign_name ?? (spend.campaign_name ?? null);
-      row.spend_sar = round2(row.spend_sar + num(spend.spend_sar));
+      row.spend_sar = round2((row.spend_sar ?? 0) + num(spend.spend_sar));
       row.clicks = spend.clicks === null ? row.clicks : (row.clicks ?? 0) + num(spend.clicks);
       row.impressions = spend.impressions === null ? row.impressions : (row.impressions ?? 0) + num(spend.impressions);
       if (spend.freshness !== null && (freshness === null || spend.freshness > freshness)) freshness = num(spend.freshness);
@@ -413,9 +413,9 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
 
     for (const row of rows.values()) {
       row.unmatched_leads = row.leads ? 0 : (byId.get(row.campaign_id) ?? 0);
-      row.cpl = row.spend_sar > 0 && row.leads > 0 ? round2(row.spend_sar / row.leads) : null;
+      row.cpl = row.spend_sar !== null && row.spend_sar > 0 && row.leads > 0 ? round2(row.spend_sar / row.leads) : null;
       row.revenue_sar = row._won_value_count > 0 ? round2(row._revenue) : null;
-      row.roas = row.revenue_sar !== null && row.spend_sar > 0 ? round2(row.revenue_sar / row.spend_sar) : null;
+      row.roas = row.revenue_sar !== null && row.spend_sar !== null && row.spend_sar > 0 ? round2(row.revenue_sar / row.spend_sar) : null;
       delete row._won_value_count;
       delete row._revenue;
     }
@@ -423,7 +423,7 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
     delete unknown._won_value_count;
     delete unknown._revenue;
 
-    const campaigns = [...rows.values()].sort((a, b) => b.spend_sar - a.spend_sar || b.leads - a.leads || String(a.campaign_id).localeCompare(String(b.campaign_id)));
+    const campaigns = [...rows.values()].sort((a, b) => (b.spend_sar ?? -1) - (a.spend_sar ?? -1) || b.leads - a.leads || String(a.campaign_id).localeCompare(String(b.campaign_id)));
     campaigns.push(unknown);
     const total = leadRows.length;
     return {

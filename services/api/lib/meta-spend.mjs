@@ -6,6 +6,7 @@ const redact = (message, token) => {
   const str = String(message ?? '');
   return token ? str.split(token).join('***') : str;
 };
+const safeMessage = (error, token, limit = 200) => redact(String(error?.message ?? error), token).slice(0, limit);
 
 export function validDay(value) {
   const day = String(value ?? '');
@@ -100,7 +101,7 @@ export async function importMetaSpend({
     } catch (error) {
       report.ok = false;
       report.partial = report.rows_valid > 0;
-      report.errors.push({ page: report.pages + 1, code: 'meta_api_error', message: redact(String(error?.message ?? error).slice(0, 200), accessToken) });
+      report.errors.push({ page: report.pages + 1, code: 'meta_api_error', message: safeMessage(error, accessToken) });
       break;
     }
     report.pages += 1;
@@ -116,14 +117,14 @@ export async function importMetaSpend({
         }
       } catch (error) {
         report.ok = false;
-        report.errors.push({ page: report.pages, code: 'invalid_insight', message: redact(String(error?.message ?? error).slice(0, 200), accessToken) });
+        report.errors.push({ page: report.pages, code: 'invalid_insight', message: safeMessage(error, accessToken) });
       }
     }
     try { url = safeNext(payload.paging?.next); }
     catch (error) {
       report.ok = false;
       report.partial = report.rows_valid > 0;
-      report.errors.push({ page: report.pages, code: 'unsafe_pagination', message: redact(error.message, accessToken) });
+      report.errors.push({ page: report.pages, code: 'unsafe_pagination', message: safeMessage(error, accessToken) });
       break;
     }
   }
