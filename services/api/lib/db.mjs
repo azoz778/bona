@@ -21,7 +21,7 @@ import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { randomId } from './store.mjs';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const STAGES = ['new', 'contacted', 'qualified', 'viewing', 'offer', 'negotiation', 'won', 'lost'];
 export const FANOUT_DESTS = ['meta', 'ga4', 'snap'];
@@ -101,6 +101,14 @@ const MIGRATIONS = [
 
       CREATE TABLE IF NOT EXISTS auth_codes (code_hash TEXT PRIMARY KEY, created INTEGER, expires INTEGER, used INTEGER, attempts INTEGER);
       CREATE TABLE IF NOT EXISTS auth_sessions (token_hash TEXT PRIMARY KEY, created INTEGER, expires INTEGER, ua TEXT);
+    `,
+  },
+  {
+    version: 2,
+    sql: `
+      ALTER TABLE ad_spend ADD COLUMN source_spend REAL;
+      ALTER TABLE ad_spend ADD COLUMN source_currency TEXT;
+      ALTER TABLE ad_spend ADD COLUMN imported_at INTEGER;
     `,
   },
 ];
@@ -479,10 +487,10 @@ export function openDb(file = ':memory:') {
 
   /* -------------------- ad spend -------------------- */
 
-  function upsertSpend({ day, platform, campaign_id = '', campaign_name = null, spend_sar = 0, clicks = null, impressions = null }) {
-    prep(`INSERT INTO ad_spend (day, platform, campaign_id, campaign_name, spend_sar, clicks, impressions) VALUES (?,?,?,?,?,?,?)
-          ON CONFLICT(day, platform, campaign_id) DO UPDATE SET campaign_name = excluded.campaign_name, spend_sar = excluded.spend_sar, clicks = excluded.clicks, impressions = excluded.impressions`)
-      .run(String(day), String(platform), String(campaign_id ?? ''), campaign_name == null ? null : String(campaign_name), Number(spend_sar) || 0, toInt(clicks), toInt(impressions));
+  function upsertSpend({ day, platform, campaign_id = '', campaign_name = null, spend_sar = 0, clicks = null, impressions = null, source_spend = null, source_currency = null, imported_at = null }) {
+    prep(`INSERT INTO ad_spend (day, platform, campaign_id, campaign_name, spend_sar, clicks, impressions, source_spend, source_currency, imported_at) VALUES (?,?,?,?,?,?,?,?,?,?)
+          ON CONFLICT(day, platform, campaign_id) DO UPDATE SET campaign_name = excluded.campaign_name, spend_sar = excluded.spend_sar, clicks = excluded.clicks, impressions = excluded.impressions, source_spend = excluded.source_spend, source_currency = excluded.source_currency, imported_at = excluded.imported_at`)
+      .run(String(day), String(platform), String(campaign_id ?? ''), campaign_name == null ? null : String(campaign_name), Number(spend_sar) || 0, toInt(clicks), toInt(impressions), source_spend == null ? null : Number(source_spend), source_currency == null ? null : String(source_currency), toInt(imported_at));
     return true;
   }
 

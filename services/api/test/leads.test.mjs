@@ -121,6 +121,73 @@ test('the same phone, spelled differently, merges: a touchpoint, no second lead,
   h.cleanup();
 });
 
+test('a returning lead keeps earliest first touch and adopts the latest valid last touch', () => {
+  const h = harness();
+  const first = createOrMergeLead(h.db, { phone: '0500000099', listingId: 'BONA-001' }, {
+    channel: 'form', matchMethod: 'form', sessionId: 'mf3k2a-7b1c', now: NOW,
+  });
+  h.db.upsertSession({
+    session_id: 'sess-return', anon_id: ANON, ref: 'M4TR7P', started: NOW + 1000, last_seen: NOW + 2000,
+    first_touch: touch({ ts: NOW + 1000, utm_campaign: 'later-first', utm_id: '2200' }),
+    last_touch: touch({ ts: NOW + 2000, utm_campaign: 'retargeting', utm_id: '3300', utm_content: 'story' }),
+    consent_ads: 1, consent_analytics: 1,
+  });
+  const again = createOrMergeLead(h.db, { phone: '0500000099', listingId: 'BONA-002' }, {
+    channel: 'form', matchMethod: 'form', sessionId: 'sess-return', now: NOW + 2000,
+  });
+  assert.equal(again.created, false);
+  assert.equal(again.lead.lead_id, first.lead.lead_id);
+  assert.equal(again.lead.first_touch.utm_campaign, 'villas_aug');
+  assert.equal(again.lead.last_touch.utm_campaign, 'retargeting');
+  assert.equal(again.lead.campaign, 'retargeting');
+  assert.equal(again.lead.campaign_id, '3300');
+  assert.equal(again.lead.content, 'story');
+  assert.equal(again.lead.listing_id, 'BONA-001', 'a later path cannot replace a populated listing id');
+  h.cleanup();
+});
+
+test('a stale session touch cannot regress a newer, more specific campaign attribution', () => {
+  const h = harness();
+  const first = createOrMergeLead(h.db, { phone: '0500000097' }, {
+    channel: 'form', matchMethod: 'form', sessionId: 'mf3k2a-7b1c', now: NOW,
+  });
+  // A session whose last_touch timestamp is OLDER than the lead's own recorded last
+  // touch (NOW - 10_000) — reusing a stale Ref code must not regress attribution.
+  h.db.upsertSession({
+    session_id: 'sess-stale', anon_id: ANON, ref: 'M4TR7S', started: NOW - 25_000, last_seen: NOW - 20_000,
+    first_touch: touch({ ts: NOW - 25_000, utm_campaign: 'old-campaign', utm_id: '9000' }),
+    last_touch: touch({ ts: NOW - 20_000, utm_campaign: 'old-campaign', utm_id: '9000' }),
+  });
+  const again = createOrMergeLead(h.db, { phone: '0500000097' }, {
+    channel: 'form', matchMethod: 'form', sessionId: 'sess-stale', now: NOW + 2000,
+  });
+  assert.equal(again.created, false);
+  assert.equal(again.lead.lead_id, first.lead.lead_id);
+  assert.equal(again.lead.campaign, 'villas_sep', 'the newer, already-recorded campaign is kept over an older session touch');
+  h.cleanup();
+});
+
+test('a direct return cannot erase a lead\'s existing deterministic campaign', () => {
+  const h = harness();
+  const first = createOrMergeLead(h.db, { phone: '0500000098' }, {
+    channel: 'form', matchMethod: 'form', sessionId: 'mf3k2a-7b1c', now: NOW,
+  });
+  h.db.upsertSession({
+    session_id: 'sess-direct', anon_id: ANON, ref: 'M4TR7Q', started: NOW + 1000, last_seen: NOW + 2000,
+    first_touch: { ts: NOW + 1000, landing: '/', referrer: null },
+    last_touch: { ts: NOW + 2000, landing: '/properties/', referrer: null },
+  });
+  const again = createOrMergeLead(h.db, { phone: '0500000098' }, {
+    channel: 'form', matchMethod: 'form', sessionId: 'sess-direct', now: NOW + 2000,
+  });
+  assert.equal(again.created, false);
+  assert.equal(again.lead.lead_id, first.lead.lead_id);
+  assert.equal(again.lead.source, 'meta');
+  assert.equal(again.lead.campaign_id, '1203');
+  assert.equal(again.lead.last_touch.utm_id, '1203');
+  h.cleanup();
+});
+
 test('a lead with no usable phone still merges on its WhatsApp jid or lid', () => {
   const h = harness();
   const a = createOrMergeLead(h.db, { waJid: '12345@lid', waLid: '12345@lid', name: 'Omar' }, { channel: 'whatsapp', matchMethod: 'keyword', now: NOW, dataDir: h.dataDir });

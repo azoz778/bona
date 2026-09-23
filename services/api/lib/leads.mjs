@@ -158,6 +158,28 @@ export function createOrMergeLead(db, input = {}, meta = {}) {
           first_touch: existing.first_touch ?? session.first_touch, last_touch: existing.last_touch ?? session.last_touch,
           consent_ads: existing.consent_ads || session.consent_ads || 0, consent_analytics: existing.consent_analytics || session.consent_analytics || 0,
         });
+      } else if (session) {
+        // The first touch is immutable. A later touch replaces campaign attribution
+        // only when it carries deterministic external evidence; a direct return must
+        // never erase the paid/organic campaign that originally identified the lead.
+        // A populated listing remains because a session is campaign evidence, not
+        // proof that a later page is the property's subject.
+        const latest = sourceFromTouch(session.last_touch);
+        const existingTs = Number(existing.last_touch?.ts ?? 0);
+        const incomingTs = Number(session.last_touch?.ts ?? 0);
+        const notOlder = !existing.last_touch || !Number.isFinite(existingTs) || !Number.isFinite(incomingTs) || incomingTs >= existingTs;
+        const deterministic = notOlder && (latest.campaign_id || latest.click_ids
+          || !['(direct)', 'direct', 'unknown', '(unknown)'].includes(String(latest.source ?? '').toLowerCase()));
+        Object.assign(patch, {
+          first_touch: existing.first_touch ?? session.first_touch,
+          last_touch: deterministic ? (session.last_touch ?? existing.last_touch) : existing.last_touch,
+          consent_ads: existing.consent_ads || session.consent_ads || 0,
+          consent_analytics: existing.consent_analytics || session.consent_analytics || 0,
+        });
+        if (deterministic) Object.assign(patch, {
+          source: latest.source, medium: latest.medium, campaign: latest.campaign,
+          campaign_id: latest.campaign_id, content: latest.content, click_ids: latest.click_ids,
+        });
       } else if (ref && !existing.ref) {
         patch.ref = ref;
       }

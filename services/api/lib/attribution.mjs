@@ -47,6 +47,43 @@ const str = (v) => {
   return s ? s.slice(0, 300) : null;
 };
 
+const TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$/;
+const LISTING_RE = /^BONA-W?\d{3}$/;
+const CLICK_KEYS = new Set(['fbclid', 'gclid', 'gbraid', 'wbraid', 'gad_source', 'gad_campaignid', 'ttclid', 'ScCid', 'msclkid', 'li_fat_id', 'twclid', 'dclid', 'ctwa_clid']);
+
+/** Canonical, allow-listed touch contract shared by all server-side lead paths. */
+export function normaliseTouch(value) {
+  const t = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const text = (key, { lower = false } = {}) => {
+    const v = str(t[key]);
+    return v ? (lower ? v.toLowerCase() : v) : null;
+  };
+  const rawCampaignId = str(t.utm_id ?? t.campaign_id ?? t.campaignid ?? t.gad_campaignid);
+  const campaignId = rawCampaignId && TOKEN_RE.test(rawCampaignId) ? rawCampaignId : null;
+  const rawListing = str(t.listing_id)?.toUpperCase() ?? null;
+  const click_ids = {};
+  if (t.click_ids && typeof t.click_ids === 'object' && !Array.isArray(t.click_ids)) {
+    for (const [key, raw] of Object.entries(t.click_ids)) {
+      const v = typeof raw === 'string' ? raw.trim() : '';
+      if (CLICK_KEYS.has(key) && v && v.length <= 300) click_ids[key] = v;
+    }
+  }
+  const out = {
+    ts: Number.isFinite(t.ts) ? Math.round(t.ts) : null,
+    landing: text('landing'), referrer: text('referrer'),
+    utm_source: text('utm_source', { lower: true }), utm_medium: text('utm_medium', { lower: true }),
+    utm_campaign: text('utm_campaign'), utm_content: text('utm_content'), utm_term: text('utm_term'),
+    utm_id: campaignId,
+    listing_id: rawListing && LISTING_RE.test(rawListing) ? rawListing : null,
+    click_ids: Object.keys(click_ids).length ? click_ids : null,
+    unavailable_reason: null,
+  };
+  if (!out.utm_source && !out.utm_medium && !out.utm_campaign && !out.utm_id && !out.referrer && !out.click_ids) {
+    out.unavailable_reason = 'direct_or_unknown';
+  }
+  return out;
+}
+
 /** Click ids with a non-empty value, or null when there are none. */
 function cleanClickIds(ids) {
   if (!ids || typeof ids !== 'object' || Array.isArray(ids)) return null;
@@ -72,7 +109,7 @@ const CLICK_ID_PLATFORMS = [
  * @returns {{ source: string, medium: string, campaign: string|null, campaign_id: string|null, content: string|null, click_ids: object|null }}
  */
 export function sourceFromTouch(touch) {
-  const t = touch && typeof touch === 'object' ? touch : {};
+  const t = normaliseTouch(touch);
   const click_ids = cleanClickIds(t.click_ids);
   const base = { campaign: str(t.utm_campaign), campaign_id: str(t.utm_id), content: str(t.utm_content), click_ids };
 

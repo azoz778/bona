@@ -261,6 +261,72 @@ test('cplByCampaign shows the money even where the leads are not', () => {
   });
 });
 
+test('ROI reports date-filtered funnel value, coverage, unknown and spend freshness without invented ROAS', () => {
+  const { db, stats } = seeded();
+  db.insertLead({
+    lead_id: 'LEAD-UNKNOWN', created: NOW - DAY_MS, updated: NOW - DAY_MS, phone_e164: '966500000099',
+    channel: 'form', source: '(direct)', medium: '(none)', stage: 'qualified', stage_ts: NOW - DAY_MS,
+  });
+  db.db.prepare('UPDATE ad_spend SET imported_at = ? WHERE campaign_id = ?').run(NOW - 1000, '1203');
+
+  const roi = stats.roi({ fromDay: day(3), toDay: day(1) });
+  assert.deepEqual(roi.range, { from: day(3), to: day(1) });
+  assert.equal(roi.totals.leads, 5);
+  assert.equal(roi.totals.attributed_leads, 2);
+  assert.equal(roi.totals.unknown_leads, 3);
+  assert.equal(roi.coverage.percent, 40);
+  assert.equal(roi.spend_freshness, NOW - 1000);
+
+  const meta = roi.campaigns.find((r) => r.campaign_id === '1203');
+  assert.deepEqual(meta, {
+    platform: 'meta', campaign_id: '1203', campaign_name: 'Villas Sept', spend_sar: 4500,
+    clicks: 180, impressions: 60000, leads: 2, qualified_leads: 2, won_leads: 1,
+    revenue_sar: 2000000, cpl: 2250, roas: 444.44, unmatched_leads: 0,
+  });
+  const unknown = roi.campaigns.find((r) => r.bucket === 'unknown');
+  assert.equal(unknown.leads, 3);
+  assert.equal(unknown.qualified_leads, 1);
+  assert.equal(unknown.spend_sar, null);
+  assert.equal(unknown.roas, null);
+
+  const noValueDb = openDb(':memory:');
+  noValueDb.upsertSpend({ day: day(1), platform: 'meta', campaign_id: 'x', spend_sar: 100 });
+  noValueDb.insertLead({ lead_id: 'L', created: NOW - DAY_MS, updated: NOW, source: 'meta', campaign_id: 'x', stage: 'won', value_sar: null });
+  const noValue = createStats({ db: noValueDb, now }).roi({ fromDay: day(1), toDay: day(1) }).campaigns.find((r) => r.campaign_id === 'x');
+  assert.equal(noValue.won_leads, 1);
+  assert.equal(noValue.revenue_sar, null);
+  assert.equal(noValue.roas, null, 'no won value means unknown ROAS, never zero');
+  noValueDb.close();
+});
+
+test('ROI accumulates raw platform aliases that fold to the same canonical Meta campaign', () => {
+  const db = openDb(':memory:');
+  db.upsertSpend({ day: day(1), platform: 'meta', campaign_id: 'alias-1', campaign_name: 'Alias campaign', spend_sar: 20, clicks: 2, impressions: 200 });
+  db.upsertSpend({ day: day(1), platform: 'facebook', campaign_id: 'alias-1', campaign_name: 'Alias campaign', spend_sar: 10, clicks: 1, impressions: 100 });
+  const row = createStats({ db, now }).roi({ fromDay: day(1), toDay: day(1) }).campaigns.find((r) => r.campaign_id === 'alias-1');
+  assert.equal(row.platform, 'meta');
+  assert.equal(row.spend_sar, 30);
+  assert.equal(row.clicks, 3);
+  assert.equal(row.impressions, 300);
+  db.close();
+});
+
+test('ROI keeps spend metrics unknown when a lead campaign has no imported spend row', () => {
+  const db = openDb(':memory:');
+  db.insertLead({
+    lead_id: 'lead-without-spend', created: NOW - DAY_MS, updated: NOW,
+    source: 'meta', campaign_id: 'never-imported', stage: 'qualified',
+  });
+  const row = createStats({ db, now }).roi({ fromDay: day(1), toDay: day(1) })
+    .campaigns.find((campaign) => campaign.campaign_id === 'never-imported');
+  assert.equal(row.spend_sar, null);
+  assert.equal(row.clicks, null);
+  assert.equal(row.impressions, null);
+  assert.equal(row.cpl, null);
+  assert.equal(row.roas, null);
+  db.close();
+});
+
 test('a campaign whose platform names did not fold says so instead of reading as a dud', () => {
   const { db, stats } = seeded();
   // The owner filed this spend under "other"; the leads arrived as utm_source=paid_social.
