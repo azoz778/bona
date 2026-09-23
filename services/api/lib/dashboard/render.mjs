@@ -1398,7 +1398,9 @@ export function spendPage({ rows = [], campaigns = [], roi = null, saved = false
     const unmatched = !c.leads && c.unmatched_leads
       ? `<span class="tag warn">platform mismatch</span>` : '';
     return `<tr>${cell(c.platform ?? 'unknown')}${cell(c.campaign_id || '—')}${auto(c.campaign_name ?? '—')}` +
-      `<td class="n">${esc(money(c.spend_sar ?? 0))}</td>${numCell(c.clicks)}${numCell(c.impressions)}` +
+      `<td class="n">${esc(c.spend_sar === null ? '—' : money(c.spend_sar))}</td>` +
+      `${c.clicks === null ? '<td class="n">—</td>' : numCell(c.clicks)}` +
+      `${c.impressions === null ? '<td class="n">—</td>' : numCell(c.impressions)}` +
       `${numCell(c.leads)}${numCell(c.qualified_leads)}${numCell(c.won_leads)}` +
       `<td class="n">${esc(c.revenue_sar === null ? '—' : money(c.revenue_sar))}</td>` +
       `<td class="n">${esc(c.cpl === null ? '—' : money(c.cpl))}</td>` +

@@ -116,3 +116,29 @@ test('newer session attribution is not combined with an older ad referral', () =
   assert.equal(change.evidence.includes('whatsapp_referral'), false);
   db.close();
 });
+
+test('a newer ad referral replaces the older browser attribution as one coherent bundle', () => {
+  const db = openDb(':memory:');
+  const google = {
+    ts: 100, utm_source: 'google', utm_medium: 'cpc', utm_campaign: 'old-google',
+    utm_id: 'google-old', utm_content: 'old-content', click_ids: { gclid: 'old-google-click' },
+  };
+  db.upsertSession({ session_id: 'sess-ad-newer', started: 100, last_seen: 200, first_touch: google, last_touch: google });
+  db.insertLead({ lead_id: 'lead-ad-newer', created: 300, updated: 300, session_id: 'sess-ad-newer', stage: 'new' });
+  db.addTouchpoint({
+    id: 'tp-new-meta', lead_id: 'lead-ad-newer', ts: 200, channel: 'whatsapp', event_type: 'lead_created',
+    source: 'meta', medium: 'paid', campaign: null, campaign_id: 'new-meta', meta: { ad_meta: {} },
+  });
+
+  const change = planAttributionBackfill(db).changes.find((c) => c.lead_id === 'lead-ad-newer');
+  assert.equal(change.patch.source, 'meta');
+  assert.equal(change.patch.medium, 'paid');
+  assert.equal(change.patch.campaign_id, 'new-meta');
+  assert.equal(Object.hasOwn(change.patch, 'campaign'), false);
+  assert.equal(Object.hasOwn(change.patch, 'content'), false);
+  assert.equal(Object.hasOwn(change.patch, 'click_ids'), false);
+  assert.equal(change.patch.last_touch.ts, 200);
+  assert.equal(change.patch.last_touch.utm_id, 'new-meta');
+  assert.equal(change.evidence.includes('whatsapp_referral'), true);
+  db.close();
+});

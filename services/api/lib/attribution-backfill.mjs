@@ -50,51 +50,30 @@ export function planAttributionBackfill(db) {
     const evidence = [];
     const session = lead.session_id ? db.getSession(lead.session_id) : null;
     const first = lead.first_touch ?? session?.first_touch ?? null;
-    const last = lead.last_touch ?? session?.last_touch ?? first;
+    const browserLast = lead.last_touch ?? session?.last_touch ?? first;
+    const tps = touchpoints.all(lead.lead_id).map((r) => ({ ...r, meta: parsed(r.meta) }));
+    const ad = [...tps].reverse().find((tp) => tp.meta?.ad_meta || present(tp.campaign_id));
+    const click = ad?.meta?.ad_meta?.ctwa_clid;
+    const adTouch = ad ? normaliseTouch({
+      ts: ad.ts, utm_source: ad.source, utm_medium: ad.medium,
+      utm_campaign: ad.campaign, utm_id: ad.campaign_id,
+      click_ids: click ? { ctwa_clid: String(click).slice(0, 300) } : null,
+      listing_id: ad.listing_id,
+    }) : null;
+    const browserTs = Number(browserLast?.ts);
+    const adTs = Number(adTouch?.ts);
+    // Stored last_touch is authoritative. Otherwise choose the newest complete candidate
+    // before deriving any scalar fields, so old and new attribution bundles cannot mix.
+    const last = lead.last_touch
+      ?? (adTouch && Number.isFinite(adTs) && (!Number.isFinite(browserTs) || adTs > browserTs) ? adTouch : browserLast);
 
     if (!lead.first_touch && first) patch.first_touch = normaliseTouch(first);
     if (!lead.last_touch && last) patch.last_touch = normaliseTouch(last);
-    const fromTouch = touchPatch({ ...lead, ...patch }, last ?? first);
+    const fromTouch = touchPatch(lead, last ?? first);
     if (Object.keys(fromTouch).length || patch.first_touch || patch.last_touch) {
       Object.assign(patch, fromTouch);
-      evidence.push(session && (!lead.first_touch || !lead.last_touch) ? 'session_touch' : 'stored_touch');
-    }
-
-    const tps = touchpoints.all(lead.lead_id).map((r) => ({ ...r, meta: parsed(r.meta) }));
-    if (!present(lead.campaign_id) && !present(patch.campaign_id)) {
-      const ad = [...tps].reverse().find((tp) => tp.meta?.ad_meta || present(tp.campaign_id));
-      if (ad) {
-        const effective = { ...lead, ...patch };
-        const effectiveHasAttribution = ['source', 'medium', 'campaign', 'campaign_id', 'click_ids'].some((key) => present(effective[key]));
-        const baseTs = Number(last?.ts ?? first?.ts);
-        const adTs = Number(ad.ts);
-        const adIsNewer = Number.isFinite(adTs) && (!Number.isFinite(baseTs) || adTs > baseTs);
-        // Referral rows and browser touches are alternate last-touch candidates, not
-        // bags of fields. An older referral must never complete or overwrite a newer
-        // browser touch. A newer referral may replace the pending browser-derived
-        // columns, but still may not contradict attribution already stored on the lead.
-        const comparison = adIsNewer ? lead : effective;
-        const adConflicts = (present(comparison.source) && present(ad.source) && comparison.source !== ad.source)
-          || (present(comparison.medium) && present(ad.medium) && comparison.medium !== ad.medium)
-          || (present(comparison.campaign) && present(ad.campaign) && comparison.campaign !== ad.campaign)
-          || (present(comparison.campaign_id) && present(ad.campaign_id) && comparison.campaign_id !== ad.campaign_id);
-        if (!adConflicts && (adIsNewer || !effectiveHasAttribution)) {
-          for (const key of ['source', 'medium', 'campaign', 'campaign_id']) {
-            if (!present(lead[key]) && present(ad[key])) patch[key] = ad[key];
-          }
-          const click = ad.meta?.ad_meta?.ctwa_clid;
-          if (click && !present(lead.click_ids)) patch.click_ids = { ctwa_clid: String(click).slice(0, 300) };
-          if (adIsNewer && !lead.last_touch) {
-            patch.last_touch = normaliseTouch({
-              ts: ad.ts, utm_source: ad.source, utm_medium: ad.medium,
-              utm_campaign: ad.campaign, utm_id: ad.campaign_id,
-              click_ids: click ? { ctwa_clid: String(click).slice(0, 300) } : null,
-              listing_id: ad.listing_id,
-            });
-          }
-          evidence.push('whatsapp_referral');
-        }
-      }
+      const usedAd = adTouch && last?.ts === adTouch.ts && last?.utm_id === adTouch.utm_id;
+      evidence.push(usedAd ? 'whatsapp_referral' : (session && (!lead.first_touch || !lead.last_touch) ? 'session_touch' : 'stored_touch'));
     }
 
     if (!present(lead.listing_id)) {
