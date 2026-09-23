@@ -142,3 +142,25 @@ test('a newer ad referral replaces the older browser attribution as one coherent
   assert.equal(change.evidence.includes('whatsapp_referral'), true);
   db.close();
 });
+
+test('apply plans inside its transaction so a concurrent newer attribution is not overwritten', () => {
+  const db = openDb(':memory:');
+  const oldTouch = { ts: 100, utm_source: 'meta', utm_medium: 'paid', utm_id: 'old' };
+  db.upsertSession({ session_id: 'sess-race', started: 100, last_seen: 100, first_touch: oldTouch, last_touch: oldTouch });
+  db.insertLead({ lead_id: 'lead-race', created: 100, updated: 100, session_id: 'sess-race' });
+
+  const transaction = db.transaction;
+  db.transaction = (fn) => {
+    db.updateLead('lead-race', {
+      source: 'google', medium: 'cpc', campaign_id: 'new',
+      last_touch: { ts: 200, utm_source: 'google', utm_medium: 'cpc', utm_id: 'new' },
+    });
+    return transaction(fn);
+  };
+  applyAttributionBackfill(db);
+  const lead = db.getLead('lead-race');
+  assert.equal(lead.source, 'google');
+  assert.equal(lead.campaign_id, 'new');
+  assert.equal(lead.last_touch.utm_id, 'new');
+  db.close();
+});

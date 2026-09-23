@@ -105,13 +105,18 @@ export function planAttributionBackfill(db) {
 }
 
 export function applyAttributionBackfill(db) {
-  const plan = planAttributionBackfill(db);
-  const before = db.countLeads();
+  let plan;
+  let before;
+  let after;
   db.transaction(() => {
+    // Plan under the same write transaction that applies it. Otherwise a live API write
+    // between planning and application could be overwritten by a stale backfill patch.
+    plan = planAttributionBackfill(db);
+    before = db.countLeads();
     for (const change of plan.changes) db.updateLead(change.lead_id, change.patch);
+    after = db.countLeads();
+    if (after !== before) throw new Error(`lead count invariant failed: ${before} -> ${after}`);
   });
-  const after = db.countLeads();
-  if (after !== before) throw new Error(`lead count invariant failed: ${before} -> ${after}`);
   return { ...plan, dry_run: false, applied: plan.changes.length, lead_count_before: before, lead_count_after: after };
 }
 
