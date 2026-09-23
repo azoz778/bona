@@ -769,6 +769,10 @@ test('a stage value that is not a number is refused', async () => {
 
 test('the spend page renders unknown campaign metrics as dashes, never fabricated zeroes', () => {
   const html = spendPage({
+    rows: [{ day: '2026-09-23', platform: 'meta', campaign_id: 'entry-missing-counts', campaign_name: null,
+      spend_sar: 10, clicks: null, impressions: null }],
+    campaigns: [{ platform: 'meta', campaign_id: 'all-time-missing-counts', campaign_name: null,
+      spend_sar: 10, clicks: null, impressions: null, leads: 0, unmatched_leads: 0, cpl: null }],
     roi: {
       coverage: { attributed: 1, total: 1, percent: 100 }, totals: { unknown_leads: 0 }, spend_freshness: null,
       campaigns: [{ platform: 'meta', campaign_id: 'never-imported', campaign_name: null,
@@ -780,4 +784,8 @@ test('the spend page renders unknown campaign metrics as dashes, never fabricate
   const row = html.match(/<tr><td>meta<\/td><td>never-imported<\/td>.*?<\/tr>/s)?.[0] ?? '';
   assert.match(row, /<td class="n">—<\/td><td class="n">—<\/td><td class="n">—<\/td>/);
   assert.doesNotMatch(row, /0 SAR/);
+  for (const id of ['entry-missing-counts', 'all-time-missing-counts']) {
+    const rendered = html.match(new RegExp(`<tr>.*?<td>${id}<\\/td>.*?<\\/tr>`, 's'))?.[0] ?? '';
+    assert.match(rendered, /<td class="n">—<\/td><td class="n">—<\/td>/, `${id} preserves unknown counts`);
+  }
 });
