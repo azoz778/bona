@@ -91,7 +91,7 @@
     "name": "Google Analytics 4",
     "status": "live",
     "owner": "owner",
-    "action": "Create a GA4 property for bona-real-estate.com and paste the Measurement ID (G-XXXX) into site.json → analytics.ga4.",
+    "action": "Confirm live traffic in GA4 Realtime and periodically verify that G-861TD74EW1 remains the production Measurement ID.",
     "link": "https://analytics.google.com/",
     "detail": "payload validated for G-861TD74EW1; one verify_ping sent to mp/collect (HTTP 204 — that endpoint answers 204 with an empty body and never reports errors, so acceptance is NOT proof of ingestion). site tag G-861TD74EW1 served. Owner: confirm the verify_ping in GA4 → Reports → Realtime (or Admin → Deb",
     "checkedAt": "2026-09-22T13:49:22.728Z"
@@ -101,7 +101,7 @@
     "name": "Meta Pixel",
     "status": "live",
     "owner": "owner",
-    "action": "Create a dataset in Events Manager and paste the Pixel ID into site.json → analytics.metaPixel.",
+    "action": "Use Meta Events Manager Test Events to verify browser events after consent; keep Pixel 1102591712117129 configured in site.json.",
     "link": "https://business.facebook.com/events_manager",
     "detail": "Meta Pixel 1102591712117129 is served by the live site (loads after consent)",
     "checkedAt": "2026-09-22T13:49:22.728Z"
@@ -203,7 +203,7 @@
     "name": "Concierge API (bona-api)",
     "owner": "agent",
     "link": "https://api.bona-real-estate.com/health",
-    "action": "systemctl --user status bona-api cloudflared-bona",
+    "action": "Check the public health URL; for VPS unit status run: ssh hermes-vps sudo systemctl status bona-api cloudflared-bona",
     "status": "live",
     "detail": "https://api.bona-real-estate.com/health ok — HTTP 200, v1.0.0, inventory 48, db ok, poller 1790084931478, fan-out pending 0 / failed 0",
     "checkedAt": "2026-09-22T13:49:22.728Z"
