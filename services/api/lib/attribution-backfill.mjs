@@ -20,6 +20,14 @@ function parsed(value) {
 function touchPatch(lead, touch) {
   if (!touch) return {};
   const source = sourceFromTouch(touch);
+  // Filling only the missing fields of a touch can bolt a paid campaign id onto a lead
+  // whose source is already recorded as something else (e.g. whatsapp_organic): that
+  // is not deterministic evidence, it is two different attributions stitched together.
+  // A touch's fields are proposed as one coherent unit, only when nothing on the lead
+  // already contradicts it.
+  const conflicts = ['source', 'medium', 'campaign', 'campaign_id']
+    .some((key) => present(lead[key]) && present(source[key]) && String(lead[key]) !== String(source[key]));
+  if (conflicts) return {};
   const patch = {};
   for (const key of ['source', 'medium', 'campaign', 'campaign_id', 'content', 'click_ids']) {
     if (!present(lead[key]) && present(source[key])) patch[key] = source[key];
@@ -56,13 +64,20 @@ export function planAttributionBackfill(db) {
     if (!present(lead.campaign_id) && !present(patch.campaign_id)) {
       const ad = [...tps].reverse().find((tp) => tp.meta?.ad_meta || present(tp.campaign_id));
       if (ad) {
-        if (present(ad.source)) patch.source = ad.source;
-        if (present(ad.medium)) patch.medium = ad.medium;
-        if (present(ad.campaign)) patch.campaign = ad.campaign;
-        if (present(ad.campaign_id)) patch.campaign_id = ad.campaign_id;
-        const click = ad.meta?.ad_meta?.ctwa_clid;
-        if (click && !present(lead.click_ids)) patch.click_ids = { ctwa_clid: String(click).slice(0, 300) };
-        evidence.push('whatsapp_referral');
+        // Same rule as touchPatch: an ad-referral touch is proposed only where it does
+        // not contradict a source/medium/campaign already recorded on the lead.
+        const adConflicts = (present(lead.source) && present(ad.source) && lead.source !== ad.source)
+          || (present(lead.medium) && present(ad.medium) && lead.medium !== ad.medium)
+          || (present(lead.campaign) && present(ad.campaign) && lead.campaign !== ad.campaign);
+        if (!adConflicts) {
+          if (!present(lead.source) && present(ad.source)) patch.source = ad.source;
+          if (!present(lead.medium) && present(ad.medium)) patch.medium = ad.medium;
+          if (!present(lead.campaign) && present(ad.campaign)) patch.campaign = ad.campaign;
+          if (present(ad.campaign_id)) patch.campaign_id = ad.campaign_id;
+          const click = ad.meta?.ad_meta?.ctwa_clid;
+          if (click && !present(lead.click_ids)) patch.click_ids = { ctwa_clid: String(click).slice(0, 300) };
+          evidence.push('whatsapp_referral');
+        }
       }
     }
 

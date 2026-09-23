@@ -146,6 +146,27 @@ test('a returning lead keeps earliest first touch and adopts the latest valid la
   h.cleanup();
 });
 
+test('a stale session touch cannot regress a newer, more specific campaign attribution', () => {
+  const h = harness();
+  const first = createOrMergeLead(h.db, { phone: '0500000097' }, {
+    channel: 'form', matchMethod: 'form', sessionId: 'mf3k2a-7b1c', now: NOW,
+  });
+  // A session whose last_touch timestamp is OLDER than the lead's own recorded last
+  // touch (NOW - 10_000) — reusing a stale Ref code must not regress attribution.
+  h.db.upsertSession({
+    session_id: 'sess-stale', anon_id: ANON, ref: 'M4TR7S', started: NOW - 25_000, last_seen: NOW - 20_000,
+    first_touch: touch({ ts: NOW - 25_000, utm_campaign: 'old-campaign', utm_id: '9000' }),
+    last_touch: touch({ ts: NOW - 20_000, utm_campaign: 'old-campaign', utm_id: '9000' }),
+  });
+  const again = createOrMergeLead(h.db, { phone: '0500000097' }, {
+    channel: 'form', matchMethod: 'form', sessionId: 'sess-stale', now: NOW + 2000,
+  });
+  assert.equal(again.created, false);
+  assert.equal(again.lead.lead_id, first.lead.lead_id);
+  assert.equal(again.lead.campaign, 'villas_sep', 'the newer, already-recorded campaign is kept over an older session touch');
+  h.cleanup();
+});
+
 test('a direct return cannot erase a lead\'s existing deterministic campaign', () => {
   const h = harness();
   const first = createOrMergeLead(h.db, { phone: '0500000098' }, {
