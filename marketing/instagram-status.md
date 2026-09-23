@@ -1,12 +1,49 @@
-# Instagram @bonarealestatesa — status (2026-09-05 22:30 KSA)
+# Instagram @bonarealestatesa — current operating status
 
-- **Login**: done from a dedicated Chrome profile on this PC (`C:\Users\ASUS\AppData\Local\cc-chrome-bona`, CDP port 9223, start with the scratch `chrome-bona.sh`). Email code was read from the owner's Gmail (signed in on the shared Chrome). Session persists in that profile; credentials in `~/.secrets/bona-instagram.env` (600), never in the repo.
-- **Account type**: switched to **Business**, category **Real Estate Agent** (shown on profile), contact info public (phone +966 59 329 6933).
-- **Profile**: bio (bilingual, option 2), website https://bona.azoz.uk, profile photo (B monogram). Display name is edited in Accounts Center on the web — set it in the app: `Bona · Jeddah Luxury Real Estate`.
-- **API posting**: the account is now a Business account. For `scripts/instagram-post.mjs` to publish it must still be linked to a Facebook Page inside a Meta Business the system-user token can see (Path A-i in `instagram-access.md`) — owner step, ~5 minutes in business.facebook.com. Until then posts go through the web UI (scratch `post.mjs`, human-paced).
-- **Ad licences**: listing posts carry a REGA ad-licence placeholder; only brand/editorial posts are published until numbers exist.
+_Last verified: 2026-09-22 16:49 KSA. The superseded 2026-09-05 setup note is preserved at `marketing/history/2026-09-05-instagram-status.md`._
 
-## 22:50 — where the API link stands
-- Accounts Center already holds Instagram @bonarealestatesa, Instagram @azoz778 and Facebook "Abdulaziz Zaidan" → facebook.com and Business Manager open signed-in from the Bona Chrome profile (port 9223, headed). Business portfolios visible: **abdulaziz Zaidan** (1 page, 2 people), **mountainbikeksa**. TK's business is NOT accessible to this user, so TK's token cannot publish for Bona.
-- The agent's permission system blocks any automated action inside the owner's Facebook session (creating a Page, pre-filling forms, even navigating to the create-page URL) and blocks web-UI posting on Instagram. What remains is a 10-minute owner click-through, then the agent verifies and publishes via the Graph API with the resulting token (`scripts/instagram-post.mjs`).
-- Owner click-through: (1) facebook.com/pages/create → Page "Bona", category Real Estate Agent → Create. (2) Page settings → Linked accounts → Instagram → Connect → bona.com.sa. (3) business.facebook.com → portfolio "abdulaziz Zaidan" → Settings → Accounts → Pages → Add → Bona; Instagram accounts → Add → bona.com.sa. (4) developers.facebook.com → Create app "Bona Publisher" (Business, portfolio abdulaziz Zaidan) → add product Instagram. (5) Business settings → Users → System users → Add "bona-poster" (Admin) → Assign assets: Page Bona + IG bona.com.sa (full control) → Generate token → app Bona Publisher → never expires → permissions instagram_basic, instagram_content_publish, instagram_manage_comments, instagram_manage_insights, pages_show_list, pages_read_engagement, business_management → copy → paste into `~/.secrets/bona-meta-graph.env` as `META_ACCESS_TOKEN=`.
+## Account and publication state
+
+- Public profile: `https://www.instagram.com/bonarealestatesa/`
+- Account is operating as a business profile and is linked to the live Bona website.
+- Automated Instagram publisher timer: **enabled and active**.
+- Publication ledger: **19 successful publication records** as of this verification.
+- Public audit observed six feed posts; ledger totals also include Stories and should not be presented as feed-post count.
+- Listing content that requires a Saudi advertising licence remains blocked by the queue’s licence controls.
+
+## Current incident
+
+The 2026-09-21 North Obhur district-guide carousel was not published:
+
+1. publisher recorded `skipped:no-jpeg`;
+2. the later retry window recorded `skipped:missed`.
+
+A repaired package is being prepared. It must be visually validated and shown to Abdulaziz with its caption before any reschedule or publication.
+
+## Facebook
+
+- Bona Facebook publisher timer: **enabled and active**.
+- Facebook publication ledger contains one opening post as of this verification.
+- Timer health does not imply content volume or audience growth.
+
+## Approval-gated content
+
+- Repaired North Obhur carousel and caption.
+- Saudi National Day 96 packages for Instagram, Facebook, and TikTok.
+
+Do not publish or schedule these items until Abdulaziz approves the exact outputs.
+
+## Verification commands
+
+```bash
+systemctl --user is-enabled bona-ig-publish.timer bona-fb-publish.timer
+systemctl --user is-active bona-ig-publish.timer bona-fb-publish.timer
+systemctl --user list-timers bona-ig-publish.timer bona-fb-publish.timer --all --no-pager
+python ~/.hermes/profiles/bona/cache/audit_marketing.py
+```
+
+## Known distinction
+
+- Publisher operational health, successful ledger rows, public feed count, and follower growth are different measurements.
+- Do not claim a scheduled item published until the provider response and publication ledger both confirm it.
+- Do not use TK-hosted/private creative material as a Bona-owned source unless its rights and cross-company use are explicitly established.
