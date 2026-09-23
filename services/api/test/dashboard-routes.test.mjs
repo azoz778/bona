@@ -13,7 +13,7 @@ import { createApp } from '../index.mjs';
 import { openDb } from '../lib/db.mjs';
 import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
 import { DEFAULT_ORIGINS } from '../lib/cors.mjs';
-import { leadsPage } from '../lib/dashboard/render.mjs';
+import { leadsPage, spendPage } from '../lib/dashboard/render.mjs';
 
 const TOKEN = 'a'.repeat(32);
 const inventory = createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk' });
@@ -765,4 +765,19 @@ test('a stage value that is not a number is refused', async () => {
     assert.equal((await res.json()).error, 'bad_value');
     assert.equal(db.getLead(id).stage, 'new');
   });
+});
+
+test('the spend page renders unknown campaign metrics as dashes, never fabricated zeroes', () => {
+  const html = spendPage({
+    roi: {
+      coverage: { attributed: 1, total: 1, percent: 100 }, totals: { unknown_leads: 0 }, spend_freshness: null,
+      campaigns: [{ platform: 'meta', campaign_id: 'never-imported', campaign_name: null,
+        spend_sar: null, clicks: null, impressions: null, leads: 1, qualified_leads: 0, won_leads: 0,
+        revenue_sar: null, cpl: null, roas: null, unmatched_leads: 0 }],
+    },
+    today: '2026-09-23',
+  });
+  const row = html.match(/<tr><td>meta<\/td><td>never-imported<\/td>.*?<\/tr>/s)?.[0] ?? '';
+  assert.match(row, /<td class="n">—<\/td><td class="n">—<\/td><td class="n">—<\/td>/);
+  assert.doesNotMatch(row, /0 SAR/);
 });
