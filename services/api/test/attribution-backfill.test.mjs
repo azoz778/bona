@@ -71,8 +71,10 @@ test('restricted backup can restore the exact database and refuses a changed tar
   db = openDb(file);
   applyAttributionBackfill(db);
   db.close();
-  assert.throws(() => restoreRestrictedBackup(file, backup.manifestFile), /target has changed/i);
-  restoreRestrictedBackup(file, backup.manifestFile, { force: true });
+  assert.throws(() => restoreRestrictedBackup(file, backup.manifestFile), /API.*offline/i);
+  assert.throws(() => restoreRestrictedBackup(file, backup.manifestFile, { force: true }), /API.*offline/i);
+  assert.throws(() => restoreRestrictedBackup(file, backup.manifestFile, { apiOffline: true }), /target has changed/i);
+  restoreRestrictedBackup(file, backup.manifestFile, { force: true, apiOffline: true });
   db = openDb(file);
   assert.equal(db.getLead('lead-one').source, null);
   assert.equal(db.countLeads(), 3);
@@ -93,5 +95,24 @@ test('a backfilled touch is never proposed when it conflicts with a source alrea
   for (const field of ['source', 'medium', 'campaign', 'campaign_id', 'click_ids']) {
     assert.equal(Object.hasOwn(change.patch, field), false, `${field} must not be stitched onto a conflicting attribution`);
   }
+  db.close();
+});
+
+test('newer session attribution is not combined with an older ad referral', () => {
+  const db = openDb(':memory:');
+  const google = { ts: 300, utm_source: 'google', utm_medium: 'cpc', click_ids: { gclid: 'new-google' } };
+  db.upsertSession({ session_id: 'sess-newest', anon_id: 'c'.repeat(32), ref: 'NEW123', started: 100, last_seen: 300, first_touch: google, last_touch: google });
+  db.insertLead({ lead_id: 'lead-newest', created: 350, updated: 350, phone_e164: '966500000005', session_id: 'sess-newest', stage: 'new' });
+  db.addTouchpoint({
+    id: 'tp-older-meta', lead_id: 'lead-newest', ts: 200, channel: 'whatsapp', event_type: 'lead_created',
+    source: 'meta', medium: 'paid', campaign: 'old-meta', campaign_id: 'meta-1', meta: { ad_meta: { ctwa_clid: 'old-click' } },
+  });
+
+  const change = planAttributionBackfill(db).changes.find((c) => c.lead_id === 'lead-newest');
+  assert.equal(change.patch.source, 'google');
+  assert.equal(change.patch.medium, 'cpc');
+  assert.deepEqual(change.patch.click_ids, { gclid: 'new-google' });
+  assert.equal(Object.hasOwn(change.patch, 'campaign_id'), false);
+  assert.equal(change.evidence.includes('whatsapp_referral'), false);
   db.close();
 });

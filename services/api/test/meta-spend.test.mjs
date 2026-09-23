@@ -95,6 +95,25 @@ test('request failures are redacted before the report can be printed', async () 
   db.close();
 });
 
+test('a token crossing the message limit is redacted before truncation', async () => {
+  const db = openDb(':memory:');
+  const token = 'boundary-secret-token';
+  let calls = 0;
+  const request = async () => {
+    calls += 1;
+    if (calls === 1) return { status: 200, json: { currency: 'SAR', timezone_name: 'Asia/Riyadh' } };
+    throw new Error(`${'x'.repeat(190)}${token}`);
+  };
+  const report = await importMetaSpend({
+    db, accountId: 'act_123', accessToken: token, from: FROM, to: FROM,
+    dryRun: true, request, retries: 0,
+  });
+  assert.equal(report.ok, false);
+  assert.doesNotMatch(report.errors[0].message, /boundary-secret/);
+  assert.doesNotMatch(JSON.stringify(report), new RegExp(token));
+  db.close();
+});
+
 test('a later page failure reports partial success and does not erase rows already stored', async () => {
   const db = openDb(':memory:');
   db.upsertSpend({ day: '2026-08-31', platform: 'meta', campaign_id: 'old', spend_sar: 7 });

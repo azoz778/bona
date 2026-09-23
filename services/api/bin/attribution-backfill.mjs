@@ -16,7 +16,7 @@ function option(argv, i, name) {
 }
 
 export function parseBackfillArgs(argv) {
-  const out = { dbFile: null, dryRun: true, json: false, rollbackManifest: null, force: false };
+  const out = { dbFile: null, dryRun: true, json: false, rollbackManifest: null, force: false, apiOffline: false };
   for (let i = 0; i < argv.length;) {
     const db = option(argv, i, '--db');
     if (db) { out.dbFile = db[0]; i += db[1]; continue; }
@@ -26,6 +26,7 @@ export function parseBackfillArgs(argv) {
     if (argv[i] === '--apply') { out.dryRun = false; i += 1; continue; }
     if (argv[i] === '--json') { out.json = true; i += 1; continue; }
     if (argv[i] === '--force') { out.force = true; i += 1; continue; }
+    if (argv[i] === '--confirm-api-offline') { out.apiOffline = true; i += 1; continue; }
     throw new Error(`unknown argument: ${argv[i]}`);
   }
   if (!out.dbFile) throw new Error('--db is required');
@@ -59,7 +60,10 @@ export function main(argv = process.argv.slice(2)) {
   let report;
   if (args.rollbackManifest) {
     if (args.dryRun) throw new Error('--rollback requires --apply (a rollback is never a dry-run)');
-    report = restoreRestrictedBackup(dbFile, path.resolve(args.rollbackManifest), { force: args.force });
+    report = restoreRestrictedBackup(dbFile, path.resolve(args.rollbackManifest), {
+      force: args.force,
+      apiOffline: args.apiOffline,
+    });
   } else if (args.dryRun) {
     const db = readonlyDb(dbFile);
     try { report = planAttributionBackfill(db); } finally { db.close(); }

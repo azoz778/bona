@@ -311,6 +311,22 @@ test('ROI accumulates raw platform aliases that fold to the same canonical Meta 
   db.close();
 });
 
+test('ROI keeps spend metrics unknown when a lead campaign has no imported spend row', () => {
+  const db = openDb(':memory:');
+  db.insertLead({
+    lead_id: 'lead-without-spend', created: NOW - DAY_MS, updated: NOW,
+    source: 'meta', campaign_id: 'never-imported', stage: 'qualified',
+  });
+  const row = createStats({ db, now }).roi({ fromDay: day(1), toDay: day(1) })
+    .campaigns.find((campaign) => campaign.campaign_id === 'never-imported');
+  assert.equal(row.spend_sar, null);
+  assert.equal(row.clicks, null);
+  assert.equal(row.impressions, null);
+  assert.equal(row.cpl, null);
+  assert.equal(row.roas, null);
+  db.close();
+});
+
 test('a campaign whose platform names did not fold says so instead of reading as a dud', () => {
   const { db, stats } = seeded();
   // The owner filed this spend under "other"; the leads arrived as utm_source=paid_social.

@@ -20,9 +20,11 @@ test('Meta spend CLI requires an explicit date window and defaults to dry-run JS
 });
 
 test('backfill CLI defaults to dry-run and requires explicit rollback inputs', () => {
-  assert.deepEqual(parseBackfillArgs(['--db', '/tmp/bona.db', '--json']), { dbFile: '/tmp/bona.db', dryRun: true, json: true, rollbackManifest: null, force: false });
+  assert.deepEqual(parseBackfillArgs(['--db', '/tmp/bona.db', '--json']), { dbFile: '/tmp/bona.db', dryRun: true, json: true, rollbackManifest: null, force: false, apiOffline: false });
   assert.equal(parseBackfillArgs(['--db=/tmp/bona.db', '--apply']).dryRun, false);
-  assert.equal(parseBackfillArgs(['--db', '/tmp/bona.db', '--rollback', '/tmp/backup.json', '--force']).rollbackManifest, '/tmp/backup.json');
+  const rollback = parseBackfillArgs(['--db', '/tmp/bona.db', '--rollback', '/tmp/backup.json', '--force', '--confirm-api-offline']);
+  assert.equal(rollback.rollbackManifest, '/tmp/backup.json');
+  assert.equal(rollback.apiOffline, true);
   assert.throws(() => parseBackfillArgs(['--apply']), /--db/);
   assert.throws(() => parseBackfillArgs(['--db', '/tmp/bona.db', '--rollback']), /manifest/);
 });
@@ -38,6 +40,10 @@ test('backfill rollback cannot mutate a database unless --apply is explicit', ()
   assert.throws(
     () => backfillMain(['--db', file, '--rollback', backup.manifestFile]),
     /requires --apply/,
+  );
+  assert.throws(
+    () => backfillMain(['--db', file, '--rollback', backup.manifestFile, '--apply', '--force']),
+    /API.*offline/i,
   );
   assert.deepEqual(fs.readFileSync(file), before);
   fs.rmSync(dir, { recursive: true, force: true });
