@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { C, centred, fitText, rule, sharp, text, wordmark } from './lib/brand.mjs';
+import { C, centred, fitText, iso, renderedContentBounds, riso, rule, sharp, text, wordmark } from './lib/brand.mjs';
 import { savePair } from './lib/util.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -38,28 +38,38 @@ function backdrop(w, h, p, variant = 0) {
 
 async function card({ w, h, palette, eyebrow, ar, en, number, footer, variant = 0, safe }) {
   const p = palette;
+  const usableW = w - safe.left - safe.right;
+  const inSafe = (child, top) => ({ input: child.data, top: Math.round(top), left: Math.round(safe.left + (usableW - child.width) / 2) });
   const mark = await wordmark({ size: Math.round(w * .041), color: p.fg, accent: p.accent });
-  const eb = await text({ text: eyebrow, face: 'en-body', size: Math.round(w * .027), color: p.accent, letterSpacing: 2.2, align: 'centre' });
-  const maxW = Math.round(w * .79);
+  const eb = await fitText({ text: eyebrow, face: 'en-body', size: Math.round(w * .027), color: p.accent, width: usableW, letterSpacing: 2.2, align: 'centre' }, { maxHeight: Math.round(h * .08), minSize: 22 });
+  const maxW = usableW;
   const arImg = await fitText({ text: ar, face: 'ar-display', size: Math.round(w * .075), color: p.fg, width: maxW, align: 'centre', dir: 'rtl', lineHeight: 1.18 }, { maxHeight: Math.round(h * .24), minSize: 42 });
   const enImg = await fitText({ text: en, face: 'en-display', size: Math.round(w * .052), color: p.muted, width: maxW, align: 'centre', dir: 'ltr', lineHeight: 1.18 }, { maxHeight: Math.round(h * .18), minSize: 30 });
-  const foot = await text({ text: footer, face: /[\u0600-\u06ff]/.test(footer) ? 'ar-body' : 'en-body', size: Math.round(w * .024), color: p.muted, width: maxW, align: 'centre', lineHeight: 1.3 });
-  const layers = [{ input: backdrop(w, h, p, variant), top: 0, left: 0 }, centred(mark, w, safe.top), centred(eb, w, safe.top + mark.height + 34)];
+  const foot = await fitText({ text: footer, face: /[\u0600-\u06ff]/.test(footer) ? 'ar-body' : 'en-body', size: Math.round(w * .024), color: p.muted, width: maxW, align: 'centre', lineHeight: 1.3 }, { maxHeight: Math.round(h * .10), minSize: 20 });
+  const contentLayers = [inSafe(mark, safe.top), inSafe(eb, safe.top + mark.height + 34)];
   if (number) {
-    const n = await text({ text: number, face: 'en-display', size: Math.round(w * .29), color: p.accent, opacity: .18, align: 'centre' });
-    layers.push(centred(n, w, Math.round(h * .28)));
+    const n = await fitText({ text: number, face: 'en-display', size: Math.round(w * .29), color: p.accent, opacity: .18, width: usableW, align: 'centre' }, { maxHeight: Math.round(h * .30), minSize: 42 });
+    contentLayers.push(inSafe(n, Math.round(h * .28)));
   }
   const arTop = Math.round(h * .45 - arImg.height / 2);
-  layers.push(centred(arImg, w, arTop));
-  layers.push({ input: await rule(Math.round(w * .13), 3, p.accent), top: clamp(arTop + arImg.height + 35), left: Math.round(w * .435) });
-  layers.push(centred(enImg, w, arTop + arImg.height + 64));
-  layers.push(centred(foot, w, h - safe.bottom - foot.height));
-  return sharp({ create: { width: w, height: h, channels: 4, background: p.bg } }).composite(layers).png().toBuffer();
+  contentLayers.push(inSafe(arImg, arTop));
+  const divider = { data: await rule(Math.min(Math.round(w * .13), usableW), 3, p.accent), width: Math.min(Math.round(w * .13), usableW), height: 3 };
+  contentLayers.push(inSafe(divider, clamp(arTop + arImg.height + 35)));
+  contentLayers.push(inSafe(enImg, arTop + arImg.height + 64));
+  contentLayers.push(inSafe(foot, h - safe.bottom - foot.height));
+  const content = await sharp({ create: { width: w, height: h, channels: 4, background: '#00000000' } }).composite(contentLayers).png().toBuffer();
+  const contentBounds = await renderedContentBounds(content);
+  const buffer = await sharp({ create: { width: w, height: h, channels: 4, background: p.bg } })
+    .composite([{ input: backdrop(w, h, p, variant), top: 0, left: 0 }, ...contentLayers]).png().toBuffer();
+  return { buffer, contentBounds };
 }
 
-async function writeJpegPair(file, buf) {
+const boundsByFile = new Map();
+async function writeJpegPair(file, rendered) {
   mkdir(path.dirname(file));
-  return savePair(file.replace(/\.jpg$/i, '.png'), buf, sharp, { quality: 95 });
+  const pair = await savePair(file.replace(/\.jpg$/i, '.png'), rendered.buffer, sharp, { quality: 95 });
+  boundsByFile.set(file, rendered.contentBounds);
+  return pair;
 }
 
 async function contactSheet(files, out, title) {
@@ -79,11 +89,11 @@ const northDir = path.join(OUT, 'north-obhur');
 const ndDir = path.join(OUT, 'national-day-96');
 mkdir(northDir); mkdir(ndDir);
 const northCopy = [
-  ['NORTH OBHUR · DISTRICT GUIDE', 'دليل أبحر الشمالية', 'North Obhur district guide', 'محتوى تحريري · Editorial'],
+  ['NORTH OBHUR · DISTRICT GUIDE', 'دليل أبحر الشمالية', 'North Obhur district guide', `${riso('محتوى تحريري')} · ${iso('Editorial')}`],
   ['01 · START WITH THE ROUTE', 'ابدأ بمسارك اليومي', 'Start with your daily route', 'قارن الوصول والخدمات في الأوقات التي تهمك'],
   ['02 · VISIT, THEN REVISIT', 'عاين الموقع أكثر من مرة', 'Visit the location more than once', 'افحص الحركة والضوضاء وأعمال البناء في أوقات مختلفة'],
   ['03 · VERIFY THE VIEW', 'تحقّق من معنى «إطلالة بحرية»', 'Verify what “sea view” means', 'اسأل عمّا قد يُبنى أمامها وعن حدود الاستخدام'],
-  ['04 · DEFINE YOUR NEEDS', 'حدّد احتياجك أولاً', 'Define your needs before viewing', 'الحي · الميزانية · التوقيت  |  bona-real-estate.com'],
+  ['04 · DEFINE YOUR NEEDS', 'حدّد احتياجك أولاً', 'Define your needs before viewing', `${riso('الحي · الميزانية · التوقيت')} | ${iso('bona-real-estate.com')}`],
 ];
 const northIg = [], northFb = [];
 for (let i = 0; i < northCopy.length; i++) {
@@ -101,7 +111,7 @@ await contactSheet(northFb, path.join(northDir, 'preview-facebook.jpg'), 'Bona �
 
 const nationalSlides = [
   ['SAUDI NATIONAL DAY · 23 SEPTEMBER 2026', 'اليوم الوطني السعودي ٩٦', 'Saudi National Day 96', 'كل عام والمملكة وشعبها بخير'],
-  ['FROM BONA · من بونا', 'دارٌ تجمعنا', 'A home that brings us together', 'مع أطيب التمنيات من بونا · With warm wishes from Bona'],
+  [`${iso('FROM BONA')} · ${riso('من بونا')}`, 'دارٌ تجمعنا', 'A home that brings us together', `${riso('مع أطيب التمنيات من بونا')} · ${iso('With warm wishes from Bona')}`],
 ];
 const ndIg = [];
 for (let i = 0; i < nationalSlides.length; i++) {
@@ -113,19 +123,22 @@ for (let i = 0; i < nationalSlides.length; i++) {
 const story = path.join(ndDir, 'instagram', 'story-1080x1920.jpg');
 await writeJpegPair(story, await card({ w: 1080, h: 1920, palette: PALETTE.national, eyebrow: nationalSlides[0][0], ar: nationalSlides[0][1], en: nationalSlides[0][2], footer: nationalSlides[0][3], number: '96', variant: 7, safe: { top: 190, bottom: 360, left: 90, right: 190 } }));
 const fbNational = path.join(ndDir, 'facebook', 'feed-1200x1500.jpg');
-await writeJpegPair(fbNational, await card({ w: 1200, h: 1500, palette: PALETTE.national, eyebrow: nationalSlides[0][0], ar: 'اليوم الوطني السعودي ٩٦\nكل عام والمملكة بخير', en: 'Saudi National Day 96\nWith warm wishes from Bona', footer: '23 SEPTEMBER 2026 · ٢٣ سبتمبر ٢٠٢٦', number: '96', variant: 8, safe: { top: 82, bottom: 102, left: 100, right: 100 } }));
+await writeJpegPair(fbNational, await card({ w: 1200, h: 1500, palette: PALETTE.national, eyebrow: nationalSlides[0][0], ar: 'اليوم الوطني السعودي ٩٦\nكل عام والمملكة بخير', en: 'Saudi National Day 96\nWith warm wishes from Bona', footer: `${iso('23 SEPTEMBER 2026')} · ${riso('٢٣ سبتمبر ٢٠٢٦')}`, number: '96', variant: 8, safe: { top: 82, bottom: 102, left: 100, right: 100 } }));
 
 const tkFrames = [];
 const tkCopy = [
-  ['SAUDI NATIONAL DAY · 96', 'اليوم الوطني السعودي ٩٦', 'Saudi National Day 96', '٢٣ سبتمبر ٢٠٢٦ · 23 September 2026'],
-  ['A HOME THAT BRINGS US TOGETHER', 'دارٌ تجمعنا', 'A home that brings us together', 'من بونا · From Bona'],
+  ['SAUDI NATIONAL DAY · 96', 'اليوم الوطني السعودي ٩٦', 'Saudi National Day 96', `${riso('٢٣ سبتمبر ٢٠٢٦')} · ${iso('23 September 2026')}`],
+  ['A HOME THAT BRINGS US TOGETHER', 'دارٌ تجمعنا', 'A home that brings us together', `${riso('من بونا')} · ${iso('From Bona')}`],
   ['WITH WARM WISHES', 'كل عام والمملكة وشعبها بخير', 'Happy Saudi National Day', 'bona-real-estate.com'],
 ];
+const tkContentBounds = [];
 for (let i = 0; i < tkCopy.length; i++) {
   const [eyebrow, ar, en, footer] = tkCopy[i];
   const f = path.join(ndDir, 'tiktok', 'frames', `${String(i + 1).padStart(2, '0')}.png`);
   mkdir(path.dirname(f));
-  fs.writeFileSync(f, await card({ w: 1080, h: 1920, palette: PALETTE.national, eyebrow, ar, en, footer, number: i === 0 ? '96' : null, variant: i + 9, safe: { top: 190, bottom: 430, left: 90, right: 190 } }));
+  const rendered = await card({ w: 1080, h: 1920, palette: PALETTE.national, eyebrow, ar, en, footer, number: i === 0 ? '96' : null, variant: i + 9, safe: { top: 190, bottom: 430, left: 90, right: 190 } });
+  fs.writeFileSync(f, rendered.buffer);
+  tkContentBounds.push(rendered.contentBounds);
   tkFrames.push(f);
 }
 const video = path.join(ndDir, 'tiktok', 'national-day-96-silent.mp4');
@@ -151,13 +164,17 @@ fs.writeFileSync(path.join(northDir, 'captions.json'), `${JSON.stringify(caption
 fs.writeFileSync(path.join(ndDir, 'captions.json'), `${JSON.stringify(captions.nationalDay96, null, 2)}\n`);
 
 const assets = [];
-const addImages = (pkg, platform, files, dimensions, safeArea) => files.forEach((f) => assets.push({ package: pkg, platform, path: rel(f), kind: 'image', format: 'jpeg', dimensions, safeArea, foreground: pkg === 'north-obhur' ? PALETTE.north.fg : PALETTE.national.fg, background: pkg === 'north-obhur' ? PALETTE.north.bg : PALETTE.national.bg }));
+const unionBounds = (items) => items.reduce((all, b) => all ? ({
+  left: Math.min(all.left, b.left), top: Math.min(all.top, b.top),
+  right: Math.max(all.right, b.right), bottom: Math.max(all.bottom, b.bottom),
+}) : b, null);
+const addImages = (pkg, platform, files, dimensions, safeArea) => files.forEach((f) => assets.push({ package: pkg, platform, path: rel(f), kind: 'image', format: 'jpeg', dimensions, safeArea, contentBounds: boundsByFile.get(f), foreground: pkg === 'north-obhur' ? PALETTE.north.fg : PALETTE.national.fg, background: pkg === 'north-obhur' ? PALETTE.north.bg : PALETTE.national.bg }));
 addImages('north-obhur', 'instagram', northIg, [1080, 1350], { top: 74, right: 90, bottom: 92, left: 90 });
 addImages('north-obhur', 'facebook', northFb, [1080, 1080], { top: 72, right: 84, bottom: 82, left: 84 });
 addImages('national-day-96', 'instagram', ndIg, [1080, 1350], { top: 74, right: 90, bottom: 92, left: 90 });
 addImages('national-day-96', 'instagram-story', [story], [1080, 1920], { top: 190, right: 190, bottom: 360, left: 90 });
 addImages('national-day-96', 'facebook', [fbNational], [1200, 1500], { top: 82, right: 100, bottom: 102, left: 100 });
-assets.push({ package: 'national-day-96', platform: 'tiktok', path: rel(video), kind: 'video', format: 'mp4', dimensions: [1080, 1920], safeArea: { top: 190, right: 190, bottom: 430, left: 90 }, audio: false, foreground: PALETTE.national.fg, background: PALETTE.national.bg });
+assets.push({ package: 'national-day-96', platform: 'tiktok', path: rel(video), kind: 'video', format: 'mp4', dimensions: [1080, 1920], safeArea: { top: 190, right: 190, bottom: 430, left: 90 }, contentBounds: unionBounds(tkContentBounds), audio: false, foreground: PALETTE.national.fg, background: PALETTE.national.bg });
 const manifest = {
   approvalStatus: 'AWAITING ABDULAZIZ APPROVAL — DO NOT PUBLISH OR SCHEDULE',
   campaignDate: '2026-09-23',

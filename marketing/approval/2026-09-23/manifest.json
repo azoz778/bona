@@ -25,6 +25,12 @@
         "bottom": 92,
         "left": 90
       },
+      "contentBounds": {
+        "left": 239,
+        "top": 74,
+        "right": 842,
+        "bottom": 1258
+      },
       "foreground": "#f5f1ea",
       "background": "#0f1214"
     },
@@ -43,6 +49,12 @@
         "right": 90,
         "bottom": 92,
         "left": 90
+      },
+      "contentBounds": {
+        "left": 249,
+        "top": 74,
+        "right": 831,
+        "bottom": 1258
       },
       "foreground": "#f5f1ea",
       "background": "#0f1214"
@@ -63,6 +75,12 @@
         "bottom": 92,
         "left": 90
       },
+      "contentBounds": {
+        "left": 175,
+        "top": 74,
+        "right": 906,
+        "bottom": 1258
+      },
       "foreground": "#f5f1ea",
       "background": "#0f1214"
     },
@@ -81,6 +99,12 @@
         "right": 90,
         "bottom": 92,
         "left": 90
+      },
+      "contentBounds": {
+        "left": 134,
+        "top": 74,
+        "right": 945,
+        "bottom": 1258
       },
       "foreground": "#f5f1ea",
       "background": "#0f1214"
@@ -101,6 +125,12 @@
         "bottom": 92,
         "left": 90
       },
+      "contentBounds": {
+        "left": 176,
+        "top": 74,
+        "right": 905,
+        "bottom": 1258
+      },
       "foreground": "#f5f1ea",
       "background": "#0f1214"
     },
@@ -119,6 +149,12 @@
         "right": 84,
         "bottom": 82,
         "left": 84
+      },
+      "contentBounds": {
+        "left": 239,
+        "top": 72,
+        "right": 842,
+        "bottom": 998
       },
       "foreground": "#f5f1ea",
       "background": "#0f1214"
@@ -139,6 +175,12 @@
         "bottom": 82,
         "left": 84
       },
+      "contentBounds": {
+        "left": 249,
+        "top": 72,
+        "right": 831,
+        "bottom": 998
+      },
       "foreground": "#f5f1ea",
       "background": "#0f1214"
     },
@@ -157,6 +199,12 @@
         "right": 84,
         "bottom": 82,
         "left": 84
+      },
+      "contentBounds": {
+        "left": 175,
+        "top": 72,
+        "right": 906,
+        "bottom": 998
       },
       "foreground": "#f5f1ea",
       "background": "#0f1214"
@@ -177,6 +225,12 @@
         "bottom": 82,
         "left": 84
       },
+      "contentBounds": {
+        "left": 134,
+        "top": 72,
+        "right": 945,
+        "bottom": 998
+      },
       "foreground": "#f5f1ea",
       "background": "#0f1214"
     },
@@ -195,6 +249,12 @@
         "right": 84,
         "bottom": 82,
         "left": 84
+      },
+      "contentBounds": {
+        "left": 176,
+        "top": 72,
+        "right": 905,
+        "bottom": 998
       },
       "foreground": "#f5f1ea",
       "background": "#0f1214"
@@ -215,6 +275,12 @@
         "bottom": 92,
         "left": 90
       },
+      "contentBounds": {
+        "left": 175,
+        "top": 74,
+        "right": 905,
+        "bottom": 1258
+      },
       "foreground": "#fffaf0",
       "background": "#07583a"
     },
@@ -233,6 +299,12 @@
         "right": 90,
         "bottom": 92,
         "left": 90
+      },
+      "contentBounds": {
+        "left": 198,
+        "top": 74,
+        "right": 883,
+        "bottom": 1258
       },
       "foreground": "#fffaf0",
       "background": "#07583a"
@@ -253,6 +325,12 @@
         "bottom": 360,
         "left": 90
       },
+      "contentBounds": {
+        "left": 125,
+        "top": 190,
+        "right": 855,
+        "bottom": 1560
+      },
       "foreground": "#fffaf0",
       "background": "#07583a"
     },
@@ -272,6 +350,12 @@
         "bottom": 102,
         "left": 100
       },
+      "contentBounds": {
+        "left": 206,
+        "top": 82,
+        "right": 996,
+        "bottom": 1398
+      },
       "foreground": "#fffaf0",
       "background": "#07583a"
     },
@@ -290,6 +374,12 @@
         "right": 190,
         "bottom": 430,
         "left": 90
+      },
+      "contentBounds": {
+        "left": 109,
+        "top": 190,
+        "right": 871,
+        "bottom": 1490
       },
       "audio": false,
       "foreground": "#fffaf0",

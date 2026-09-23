@@ -1,6 +1,6 @@
 {
   "valid": true,
-  "generatedAt": "2026-09-22T14:15:02.720Z",
+  "generatedAt": "2026-09-23T08:17:01.174Z",
   "assets": 15,
   "checks": [
     {
@@ -26,7 +26,7 @@
     {
       "name": "instagram:01.jpg:size",
       "status": "pass",
-      "detail": "86852 bytes"
+      "detail": "86797 bytes"
     },
     {
       "name": "instagram:01.jpg:contrast",
@@ -57,6 +57,11 @@
       "name": "instagram:01.jpg:safe-area",
       "status": "pass",
       "detail": "{\"top\":74,\"right\":90,\"bottom\":92,\"left\":90}"
+    },
+    {
+      "name": "instagram:01.jpg:content-bounds",
+      "status": "pass",
+      "detail": "{\"left\":239,\"top\":74,\"right\":842,\"bottom\":1258}"
     },
     {
       "name": "instagram:02.jpg:size",
@@ -94,9 +99,14 @@
       "detail": "{\"top\":74,\"right\":90,\"bottom\":92,\"left\":90}"
     },
     {
+      "name": "instagram:02.jpg:content-bounds",
+      "status": "pass",
+      "detail": "{\"left\":249,\"top\":74,\"right\":831,\"bottom\":1258}"
+    },
+    {
       "name": "instagram:03.jpg:size",
       "status": "pass",
-      "detail": "92635 bytes"
+      "detail": "92634 bytes"
     },
     {
       "name": "instagram:03.jpg:contrast",
@@ -129,9 +139,14 @@
       "detail": "{\"top\":74,\"right\":90,\"bottom\":92,\"left\":90}"
     },
     {
+      "name": "instagram:03.jpg:content-bounds",
+      "status": "pass",
+      "detail": "{\"left\":175,\"top\":74,\"right\":906,\"bottom\":1258}"
+    },
+    {
       "name": "instagram:04.jpg:size",
       "status": "pass",
-      "detail": "95585 bytes"
+      "detail": "95617 bytes"
     },
     {
       "name": "instagram:04.jpg:contrast",
@@ -164,9 +179,14 @@
       "detail": "{\"top\":74,\"right\":90,\"bottom\":92,\"left\":90}"
     },
     {
+      "name": "instagram:04.jpg:content-bounds",
+      "status": "pass",
+      "detail": "{\"left\":134,\"top\":74,\"right\":945,\"bottom\":1258}"
+    },
+    {
       "name": "instagram:05.jpg:size",
       "status": "pass",
-      "detail": "91002 bytes"
+      "detail": "90907 bytes"
     },
     {
       "name": "instagram:05.jpg:contrast",
@@ -199,9 +219,14 @@
       "detail": "{\"top\":74,\"right\":90,\"bottom\":92,\"left\":90}"
     },
     {
+      "name": "instagram:05.jpg:content-bounds",
+      "status": "pass",
+      "detail": "{\"left\":176,\"top\":74,\"right\":905,\"bottom\":1258}"
+    },
+    {
       "name": "facebook:01.jpg:size",
       "status": "pass",
-      "detail": "78115 bytes"
+      "detail": "78112 bytes"
     },
     {
       "name": "facebook:01.jpg:contrast",
@@ -232,6 +257,11 @@
       "name": "facebook:01.jpg:safe-area",
       "status": "pass",
       "detail": "{\"top\":72,\"right\":84,\"bottom\":82,\"left\":84}"
+    },
+    {
+      "name": "facebook:01.jpg:content-bounds",
+      "status": "pass",
+      "detail": "{\"left\":239,\"top\":72,\"right\":842,\"bottom\":998}"
     },
     {
       "name": "facebook:02.jpg:size",
@@ -269,9 +299,14 @@
       "detail": "{\"top\":72,\"right\":84,\"bottom\":82,\"left\":84}"
     },
     {
+      "name": "facebook:02.jpg:content-bounds",
+      "status": "pass",
+      "detail": "{\"left\":249,\"top\":72,\"right\":831,\"bottom\":998}"
+    },
+    {
       "name": "facebook:03.jpg:size",
       "status": "pass",
-      "detail": "85604 bytes"
+      "detail": "85572 bytes"
     },
     {
       "name": "facebook:03.jpg:contrast",
@@ -304,9 +339,14 @@
       "detail": "{\"top\":72,\"right\":84,\"bottom\":82,\"left\":84}"
     },
     {
+      "name": "facebook:03.jpg:content-bounds",
+      "status": "pass",
+      "detail": "{\"left\":175,\"top\":72,\"right\":906,\"bottom\":998}"
+    },
+    {
       "name": "facebook:04.jpg:size",
       "status": "pass",
-      "detail": "86932 bytes"
+      "detail": "86920 bytes"
     },
     {
       "name": "facebook:04.jpg:contrast",
@@ -339,9 +379,14 @@
       "detail": "{\"top\":72,\"right\":84,\"bottom\":82,\"left\":84}"
     },
     {
+      "name": "facebook:04.jpg:content-bounds",
+      "status": "pass",
+      "detail": "{\"left\":134,\"top\":72,\"right\":945,\"bottom\":998}"
+    },
+    {
       "name": "facebook:05.jpg:size",
       "status": "pass",
-      "detail": "82925 bytes"
+      "detail": "82821 bytes"
     },
     {
       "name": "facebook:05.jpg:contrast",
@@ -374,9 +419,14 @@
       "detail": "{\"top\":72,\"right\":84,\"bottom\":82,\"left\":84}"
     },
     {
+      "name": "facebook:05.jpg:content-bounds",
+      "status": "pass",
+      "detail": "{\"left\":176,\"top\":72,\"right\":905,\"bottom\":998}"
+    },
+    {
       "name": "instagram:01.jpg:size",
       "status": "pass",
-      "detail": "98396 bytes"
+      "detail": "98424 bytes"
     },
     {
       "name": "instagram:01.jpg:contrast",
@@ -409,9 +459,14 @@
       "detail": "{\"top\":74,\"right\":90,\"bottom\":92,\"left\":90}"
     },
     {
+      "name": "instagram:01.jpg:content-bounds",
+      "status": "pass",
+      "detail": "{\"left\":175,\"top\":74,\"right\":905,\"bottom\":1258}"
+    },
+    {
       "name": "instagram:02.jpg:size",
       "status": "pass",
-      "detail": "85059 bytes"
+      "detail": "84870 bytes"
     },
     {
       "name": "instagram:02.jpg:contrast",
@@ -444,9 +499,14 @@
       "detail": "{\"top\":74,\"right\":90,\"bottom\":92,\"left\":90}"
     },
     {
+      "name": "instagram:02.jpg:content-bounds",
+      "status": "pass",
+      "detail": "{\"left\":198,\"top\":74,\"right\":883,\"bottom\":1258}"
+    },
+    {
       "name": "instagram-story:story-1080x1920.jpg:size",
       "status": "pass",
-      "detail": "107445 bytes"
+      "detail": "108326 bytes"
     },
     {
       "name": "instagram-story:story-1080x1920.jpg:contrast",
@@ -479,9 +539,14 @@
       "detail": "{\"top\":190,\"right\":190,\"bottom\":360,\"left\":90}"
     },
     {
+      "name": "instagram-story:story-1080x1920.jpg:content-bounds",
+      "status": "pass",
+      "detail": "{\"left\":125,\"top\":190,\"right\":855,\"bottom\":1560}"
+    },
+    {
       "name": "facebook:feed-1200x1500.jpg:size",
       "status": "pass",
-      "detail": "144632 bytes"
+      "detail": "144579 bytes"
     },
     {
       "name": "facebook:feed-1200x1500.jpg:contrast",
@@ -514,9 +579,14 @@
       "detail": "{\"top\":82,\"right\":100,\"bottom\":102,\"left\":100}"
     },
     {
+      "name": "facebook:feed-1200x1500.jpg:content-bounds",
+      "status": "pass",
+      "detail": "{\"left\":206,\"top\":82,\"right\":996,\"bottom\":1398}"
+    },
+    {
       "name": "tiktok:national-day-96-silent.mp4:size",
       "status": "pass",
-      "detail": "214413 bytes"
+      "detail": "213959 bytes"
     },
     {
       "name": "tiktok:national-day-96-silent.mp4:contrast",
@@ -547,6 +617,11 @@
       "name": "tiktok:national-day-96-silent.mp4:safe-area",
       "status": "pass",
       "detail": "{\"top\":190,\"right\":190,\"bottom\":430,\"left\":90}"
+    },
+    {
+      "name": "tiktok:national-day-96-silent.mp4:content-bounds",
+      "status": "pass",
+      "detail": "{\"left\":109,\"top\":190,\"right\":871,\"bottom\":1490}"
     },
     {
       "name": "caption:northObhur:instagram:bilingual",
