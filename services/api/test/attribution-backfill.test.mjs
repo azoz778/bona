@@ -79,3 +79,19 @@ test('restricted backup can restore the exact database and refuses a changed tar
   db.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('a backfilled touch is never proposed when it conflicts with a source already recorded on the lead', () => {
+  const db = openDb(':memory:');
+  db.upsertSession({ session_id: 'sess-conflict', anon_id: 'b'.repeat(32), ref: 'CFL123', started: 100, last_seen: 200, first_touch: TOUCH, last_touch: TOUCH });
+  db.insertLead({
+    lead_id: 'lead-conflict', created: 200, updated: 200, phone_e164: '966500000004',
+    source: 'whatsapp_organic', medium: '(none)', session_id: 'sess-conflict', stage: 'new',
+  });
+  const report = planAttributionBackfill(db);
+  const change = report.changes.find((c) => c.lead_id === 'lead-conflict');
+  assert.ok(change, 'non-conflicting touch history may still be backfilled');
+  for (const field of ['source', 'medium', 'campaign', 'campaign_id', 'click_ids']) {
+    assert.equal(Object.hasOwn(change.patch, field), false, `${field} must not be stitched onto a conflicting attribution`);
+  }
+  db.close();
+});

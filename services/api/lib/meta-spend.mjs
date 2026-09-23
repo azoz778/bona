@@ -2,6 +2,10 @@
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const GRAPH_ORIGIN = 'https://graph.facebook.com';
 const round2 = (n) => Math.round(n * 100) / 100;
+const redact = (message, token) => {
+  const str = String(message ?? '');
+  return token ? str.split(token).join('***') : str;
+};
 
 export function validDay(value) {
   const day = String(value ?? '');
@@ -18,6 +22,7 @@ export function normaliseInsight(row, account, fxRates = {}, importedAt = Date.n
   const rate = currency === 'SAR' ? 1 : Number(fxRates[currency]);
   if (!(rate > 0)) throw new Error(`SAR exchange rate required for ${currency || 'unknown currency'}`);
   const sourceSpend = Number(row.spend);
+  if (row.spend === null || row.spend === undefined || row.spend === '') return null;
   if (!Number.isFinite(sourceSpend) || sourceSpend < 0) return null;
   const integer = (value) => {
     if (value === null || value === undefined || value === '') return null;
@@ -95,7 +100,7 @@ export async function importMetaSpend({
     } catch (error) {
       report.ok = false;
       report.partial = report.rows_valid > 0;
-      report.errors.push({ page: report.pages + 1, code: 'meta_api_error', message: String(error?.message ?? error).slice(0, 200) });
+      report.errors.push({ page: report.pages + 1, code: 'meta_api_error', message: redact(String(error?.message ?? error).slice(0, 200), accessToken) });
       break;
     }
     report.pages += 1;
@@ -111,14 +116,14 @@ export async function importMetaSpend({
         }
       } catch (error) {
         report.ok = false;
-        report.errors.push({ page: report.pages, code: 'invalid_insight', message: String(error?.message ?? error).slice(0, 200) });
+        report.errors.push({ page: report.pages, code: 'invalid_insight', message: redact(String(error?.message ?? error).slice(0, 200), accessToken) });
       }
     }
     try { url = safeNext(payload.paging?.next); }
     catch (error) {
       report.ok = false;
       report.partial = report.rows_valid > 0;
-      report.errors.push({ page: report.pages, code: 'unsafe_pagination', message: error.message });
+      report.errors.push({ page: report.pages, code: 'unsafe_pagination', message: redact(error.message, accessToken) });
       break;
     }
   }

@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { parseMetaSpendArgs } from '../bin/meta-spend.mjs';
-import { parseBackfillArgs } from '../bin/attribution-backfill.mjs';
+import { parseBackfillArgs, main as backfillMain } from '../bin/attribution-backfill.mjs';
+import { openDb } from '../lib/db.mjs';
+import { createRestrictedBackup } from '../lib/attribution-backfill.mjs';
 
 test('Meta spend CLI requires an explicit date window and defaults to dry-run JSON', () => {
   assert.deepEqual(parseMetaSpendArgs(['--from', '2026-09-01', '--to', '2026-09-02', '--json']), {
@@ -20,4 +25,20 @@ test('backfill CLI defaults to dry-run and requires explicit rollback inputs', (
   assert.equal(parseBackfillArgs(['--db', '/tmp/bona.db', '--rollback', '/tmp/backup.json', '--force']).rollbackManifest, '/tmp/backup.json');
   assert.throws(() => parseBackfillArgs(['--apply']), /--db/);
   assert.throws(() => parseBackfillArgs(['--db', '/tmp/bona.db', '--rollback']), /manifest/);
+});
+
+test('backfill rollback cannot mutate a database unless --apply is explicit', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-cli-rollback-'));
+  const file = path.join(dir, 'bona.db');
+  const db = openDb(file);
+  db.insertLead({ lead_id: 'lead-guard', created: 1, updated: 1, stage: 'new' });
+  db.close();
+  const backup = createRestrictedBackup(file, { backupDir: path.join(dir, 'backups'), now: () => 42 });
+  const before = fs.readFileSync(file);
+  assert.throws(
+    () => backfillMain(['--db', file, '--rollback', backup.manifestFile]),
+    /requires --apply/,
+  );
+  assert.deepEqual(fs.readFileSync(file), before);
+  fs.rmSync(dir, { recursive: true, force: true });
 });

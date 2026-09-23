@@ -62,6 +62,8 @@ export async function main(argv = process.argv.slice(2)) {
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 if (isMain) main().catch((error) => {
-  process.stderr.write(`${JSON.stringify({ ok: false, error: String(error?.message ?? error).slice(0, 300) })}\n`);
+  const token = process.env.BONA_META_MARKETING_TOKEN;
+  const message = String(error?.message ?? error).slice(0, 300);
+  process.stderr.write(`${JSON.stringify({ ok: false, error: token ? message.split(token).join('***') : message })}\n`);
   process.exitCode = 1;
 });

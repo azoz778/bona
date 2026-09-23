@@ -58,6 +58,7 @@ export function main(argv = process.argv.slice(2)) {
   if (!fs.existsSync(dbFile)) throw new Error('database file does not exist');
   let report;
   if (args.rollbackManifest) {
+    if (args.dryRun) throw new Error('--rollback requires --apply (a rollback is never a dry-run)');
     report = restoreRestrictedBackup(dbFile, path.resolve(args.rollbackManifest), { force: args.force });
   } else if (args.dryRun) {
     const db = readonlyDb(dbFile);

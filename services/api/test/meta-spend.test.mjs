@@ -31,6 +31,8 @@ test('normaliseInsight converts account currency to SAR without changing the acc
     clicks: 4, impressions: 100, imported_at: 123,
   });
   assert.equal(normaliseInsight(row({ date_start: '2026-09-02', date_stop: '2026-09-03' }), ACCOUNT, { USD: 3.75 }, 123), null, 'non-daily rows are refused');
+  assert.equal(normaliseInsight(row({ spend: null }), ACCOUNT, { USD: 3.75 }, 123), null, 'missing spend is not fabricated as zero');
+  assert.equal(normaliseInsight(row({ spend: '' }), ACCOUNT, { USD: 3.75 }, 123), null, 'empty spend is not fabricated as zero');
   assert.throws(() => normaliseInsight(row(), { ...ACCOUNT, currency: 'EUR' }, {}, 123), /exchange rate/i);
 });
 
@@ -73,6 +75,23 @@ test('dry-run performs no writes and an idempotent apply replaces the same natur
   await run(12, false);
   assert.equal(db.listSpend().length, 1);
   assert.equal(db.listSpend()[0].spend_sar, 12);
+  db.close();
+});
+
+test('request failures are redacted before the report can be printed', async () => {
+  const db = openDb(':memory:');
+  const token = 'top-secret-marketing-token';
+  const mock = responder([
+    { status: 200, json: { currency: 'SAR', timezone_name: 'Asia/Riyadh' } },
+    new Error(`request failed with Authorization: Bearer ${token}`),
+  ]);
+  const report = await importMetaSpend({
+    db, accountId: 'act_123', accessToken: token, from: FROM, to: FROM,
+    dryRun: true, request: mock.request, retries: 0,
+  });
+  assert.equal(report.ok, false);
+  assert.equal(JSON.stringify(report).includes(token), false);
+  assert.match(report.errors[0].message, /\*\*\*/);
   db.close();
 });
 

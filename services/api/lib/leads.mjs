@@ -165,8 +165,11 @@ export function createOrMergeLead(db, input = {}, meta = {}) {
         // A populated listing remains because a session is campaign evidence, not
         // proof that a later page is the property's subject.
         const latest = sourceFromTouch(session.last_touch);
-        const deterministic = latest.campaign_id || latest.click_ids
-          || !['(direct)', 'direct', 'unknown', '(unknown)'].includes(String(latest.source ?? '').toLowerCase());
+        const existingTs = Number(existing.last_touch?.ts ?? 0);
+        const incomingTs = Number(session.last_touch?.ts ?? 0);
+        const notOlder = !existing.last_touch || !Number.isFinite(existingTs) || !Number.isFinite(incomingTs) || incomingTs >= existingTs;
+        const deterministic = notOlder && (latest.campaign_id || latest.click_ids
+          || !['(direct)', 'direct', 'unknown', '(unknown)'].includes(String(latest.source ?? '').toLowerCase()));
         Object.assign(patch, {
           first_touch: existing.first_touch ?? session.first_touch,
           last_touch: deterministic ? (session.last_touch ?? existing.last_touch) : existing.last_touch,

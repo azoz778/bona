@@ -299,6 +299,18 @@ test('ROI reports date-filtered funnel value, coverage, unknown and spend freshn
   noValueDb.close();
 });
 
+test('ROI accumulates raw platform aliases that fold to the same canonical Meta campaign', () => {
+  const db = openDb(':memory:');
+  db.upsertSpend({ day: day(1), platform: 'meta', campaign_id: 'alias-1', campaign_name: 'Alias campaign', spend_sar: 20, clicks: 2, impressions: 200 });
+  db.upsertSpend({ day: day(1), platform: 'facebook', campaign_id: 'alias-1', campaign_name: 'Alias campaign', spend_sar: 10, clicks: 1, impressions: 100 });
+  const row = createStats({ db, now }).roi({ fromDay: day(1), toDay: day(1) }).campaigns.find((r) => r.campaign_id === 'alias-1');
+  assert.equal(row.platform, 'meta');
+  assert.equal(row.spend_sar, 30);
+  assert.equal(row.clicks, 3);
+  assert.equal(row.impressions, 300);
+  db.close();
+});
+
 test('a campaign whose platform names did not fold says so instead of reading as a dud', () => {
   const { db, stats } = seeded();
   // The owner filed this spend under "other"; the leads arrived as utm_source=paid_social.

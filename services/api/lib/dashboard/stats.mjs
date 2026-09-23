@@ -374,10 +374,14 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
     for (const spend of all(spendSql, ...spendArgs)) {
       if (!spend.campaign_id) continue;
       const row = ensure(spend.platform, spend.campaign_id);
-      row.campaign_name = spend.campaign_name ?? null;
-      row.spend_sar = round2(num(spend.spend_sar));
-      row.clicks = spend.clicks === null ? null : num(spend.clicks);
-      row.impressions = spend.impressions === null ? null : num(spend.impressions);
+      // The SQL groups by the raw platform string, but ensure() folds aliases (e.g.
+      // "facebook" and "meta") into one canonical row — two raw rows can land on the
+      // same canonical key. Accumulate rather than overwrite, or the second alias's
+      // spend silently replaces the first's instead of adding to it.
+      row.campaign_name = row.campaign_name ?? (spend.campaign_name ?? null);
+      row.spend_sar = round2(row.spend_sar + num(spend.spend_sar));
+      row.clicks = spend.clicks === null ? row.clicks : (row.clicks ?? 0) + num(spend.clicks);
+      row.impressions = spend.impressions === null ? row.impressions : (row.impressions ?? 0) + num(spend.impressions);
       if (spend.freshness !== null && (freshness === null || spend.freshness > freshness)) freshness = num(spend.freshness);
     }
 
