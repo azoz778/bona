@@ -390,7 +390,7 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
     const byId = new Map();
     let attributed = 0;
     const unknown = { bucket: 'unknown', platform: 'unknown', campaign_id: null, campaign_name: 'Unknown / unattributed',
-      spend_sar: 0, clicks: null, impressions: null, leads: 0, qualified_leads: 0, won_leads: 0,
+      spend_sar: null, clicks: null, impressions: null, leads: 0, qualified_leads: 0, won_leads: 0,
       revenue_sar: null, cpl: null, roas: null, unmatched_leads: 0, _won_value_count: 0, _revenue: 0 };
     const qualified = new Set(['qualified', 'viewing', 'offer', 'negotiation', 'won']);
     for (const lead of leadRows) {

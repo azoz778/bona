@@ -1379,8 +1379,10 @@ ${scrollTable(
 /* ------------------------------------------------------------------ */
 
 export function spendPage({ rows = [], campaigns = [], roi = null, saved = false, error = null, today, fromDay = null, toDay = null, windowDays = 90 }) {
+  const optionalNumberCell = (value) => value === null ? '<td class="n">—</td>' : numCell(value);
+  const optionalMoneyCell = (value) => `<td class="n">${esc(value === null ? '—' : money(value))}</td>`;
   const spendRows = rows.map((r) => `<tr>${cell(r.day)}${cell(r.platform)}${cell(r.campaign_id || '—')}${auto(r.campaign_name ?? '—')}` +
-    `<td class="n">${esc(money(r.spend_sar))}</td>${numCell(r.clicks)}${numCell(r.impressions)}</tr>`);
+    `${optionalMoneyCell(r.spend_sar)}${optionalNumberCell(r.clicks)}${optionalNumberCell(r.impressions)}</tr>`);
   const campaignRows = campaigns.map((c) => {
     // Zero leads and "we could not tie any lead to this row" look identical in a number,
     // and they call for opposite actions: kill the campaign, or fix the UTM source.
@@ -1388,7 +1390,7 @@ export function spendPage({ rows = [], campaigns = [], roi = null, saved = false
       ? `<span class="tag warn">unmatched — check the UTM source</span>`
       : '';
     return `<tr>${cell(c.platform)}${cell(c.campaign_id || '—')}${auto(c.campaign_name ?? '—')}` +
-      `<td class="n">${esc(money(c.spend_sar))}</td>${numCell(c.clicks)}${numCell(c.impressions)}` +
+      `${optionalMoneyCell(c.spend_sar)}${optionalNumberCell(c.clicks)}${optionalNumberCell(c.impressions)}` +
       `<td class="n">${esc(number(c.leads))}${unmatched ? ` ${unmatched}` : ''}</td>` +
       `<td class="n">${esc(c.cpl === null ? '—' : money(c.cpl))}</td></tr>`;
   });
@@ -1398,9 +1400,7 @@ export function spendPage({ rows = [], campaigns = [], roi = null, saved = false
     const unmatched = !c.leads && c.unmatched_leads
       ? `<span class="tag warn">platform mismatch</span>` : '';
     return `<tr>${cell(c.platform ?? 'unknown')}${cell(c.campaign_id || '—')}${auto(c.campaign_name ?? '—')}` +
-      `<td class="n">${esc(c.spend_sar === null ? '—' : money(c.spend_sar))}</td>` +
-      `${c.clicks === null ? '<td class="n">—</td>' : numCell(c.clicks)}` +
-      `${c.impressions === null ? '<td class="n">—</td>' : numCell(c.impressions)}` +
+      `${optionalMoneyCell(c.spend_sar)}${optionalNumberCell(c.clicks)}${optionalNumberCell(c.impressions)}` +
       `${numCell(c.leads)}${numCell(c.qualified_leads)}${numCell(c.won_leads)}` +
       `<td class="n">${esc(c.revenue_sar === null ? '—' : money(c.revenue_sar))}</td>` +
       `<td class="n">${esc(c.cpl === null ? '—' : money(c.cpl))}</td>` +

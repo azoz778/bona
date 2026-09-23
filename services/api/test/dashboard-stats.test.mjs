@@ -286,7 +286,7 @@ test('ROI reports date-filtered funnel value, coverage, unknown and spend freshn
   const unknown = roi.campaigns.find((r) => r.bucket === 'unknown');
   assert.equal(unknown.leads, 3);
   assert.equal(unknown.qualified_leads, 1);
-  assert.equal(unknown.spend_sar, 0);
+  assert.equal(unknown.spend_sar, null);
   assert.equal(unknown.roas, null);
 
   const noValueDb = openDb(':memory:');
