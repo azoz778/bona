@@ -21,6 +21,20 @@ export function contrast(a, b) {
 export function hasArabic(s) { return /[\u0600-\u06ff]/.test(String(s)); }
 export function hasLatin(s) { return /[A-Za-z]/.test(String(s)); }
 
+export function contentFitsSafeArea(bounds, safeArea, dimensions) {
+  if (!bounds || !safeArea || !Array.isArray(dimensions) || dimensions.length !== 2) {
+    return { valid: false, errors: ['missing content bounds, safe area, or dimensions'] };
+  }
+  const [width, height] = dimensions;
+  const limits = { left: safeArea.left, top: safeArea.top, right: width - safeArea.right, bottom: height - safeArea.bottom };
+  const errors = [];
+  if (bounds.left < limits.left) errors.push(`left ${bounds.left} < ${limits.left}`);
+  if (bounds.top < limits.top) errors.push(`top ${bounds.top} < ${limits.top}`);
+  if (bounds.right > limits.right) errors.push(`right ${bounds.right} > ${limits.right}`);
+  if (bounds.bottom > limits.bottom) errors.push(`bottom ${bounds.bottom} > ${limits.bottom}`);
+  return { valid: errors.length === 0, errors };
+}
+
 export async function validatePackage({ root = ROOT, manifestPath = MANIFEST, ffprobe = FFPROBE } = {}) {
   const errors = [], checks = [];
   const ok = (name, detail) => checks.push({ name, status: 'pass', detail });
@@ -60,7 +74,20 @@ export async function validatePackage({ root = ROOT, manifestPath = MANIFEST, ff
       duration >= 6 && duration <= 15 ? ok(`${id}:duration`, `${duration.toFixed(2)}s`) : fail(`${id}:duration`, `${duration}s outside 6–15s`);
     }
     const s = a.safeArea;
-    (s && s.top >= 0 && s.left >= 0 && s.right >= 0 && s.bottom >= 0) ? ok(`${id}:safe-area`, JSON.stringify(s)) : fail(`${id}:safe-area`, 'missing');
+    const safeValues = s && [s.top, s.left, s.right, s.bottom];
+    const validSafeArea = safeValues?.every((value) => Number.isFinite(value) && value >= 0)
+      && s.left + s.right < a.dimensions[0]
+      && s.top + s.bottom < a.dimensions[1];
+    validSafeArea ? ok(`${id}:safe-area`, JSON.stringify(s)) : fail(`${id}:safe-area`, 'missing, invalid, or leaves no usable rectangle');
+    const b = a.contentBounds;
+    const validBounds = b && [b.left, b.top, b.right, b.bottom].every(Number.isFinite)
+      && b.left <= b.right && b.top <= b.bottom;
+    if (!validBounds) {
+      fail(`${id}:content-bounds`, 'missing or invalid rendered-content bounds');
+    } else if (validSafeArea) {
+      const fit = contentFitsSafeArea(b, s, a.dimensions);
+      fit.valid ? ok(`${id}:content-bounds`, JSON.stringify(b)) : fail(`${id}:content-bounds`, fit.errors.join('; '));
+    }
   }
 
   for (const [name, captionPath] of Object.entries(manifest.captions)) {
