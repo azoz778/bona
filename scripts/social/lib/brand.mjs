@@ -45,6 +45,8 @@ export const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '
 export const rtl = (s) => `‏${s}`;
 /** Force a left-to-right base direction. */
 export const ltr = (s) => `‎${s}`;
+/** Isolate a right-to-left run (U+2067 RLI … U+2069 PDI). */
+export const riso = (s) => `⁧${s}⁩`;
 /**
  * Isolate a Latin/numeric run inside Arabic (U+2066 LRI … U+2069 PDI) so bidi cannot
  * reorder it against the neighbouring punctuation. Without this, "537 m²" and
@@ -136,6 +138,20 @@ export async function fitText(o, { maxHeight = Infinity, minSize = 18, step = 0.
     out = await text({ ...o, size });
   }
   return { ...out, size };
+}
+
+/** Return the exclusive pixel bounds of visible content in a transparent rendered layer. */
+export async function renderedContentBounds(input) {
+  const { data, info } = await sharp(input).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  let left = info.width, top = info.height, right = -1, bottom = -1;
+  for (let y = 0; y < info.height; y++) {
+    for (let x = 0; x < info.width; x++) {
+      if (data[(y * info.width + x) * info.channels + 3] === 0) continue;
+      left = Math.min(left, x); top = Math.min(top, y);
+      right = Math.max(right, x); bottom = Math.max(bottom, y);
+    }
+  }
+  return right < 0 ? null : { left, top, right: right + 1, bottom: bottom + 1 };
 }
 
 // ---------- primitives ----------
