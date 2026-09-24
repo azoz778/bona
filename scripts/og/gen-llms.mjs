@@ -71,7 +71,9 @@ const corePages = [
   ...(kindsPresent.has('building') ? [['/properties/buildings/', 'Buildings', 'Whole buildings and income property.']] : []),
   ['/properties/for-sale/', 'For sale', 'Villas, penthouses and apartments for sale in Jeddah.'],
   ['/properties/for-rent/', 'For rent', 'Long-term luxury rentals in Jeddah.'],
-  ['/properties/off-plan/', 'Off-plan', 'Developer allocations in selected Jeddah and Riyadh projects.'],
+  // Same title the page itself carries (ui.offPlanTitle.en in src/lib/i18n.ts); test/seo-jsonld.test.mjs
+  // checks the built page and dist/llms.txt agree.
+  ['/properties/off-plan/', 'Off-plan and branded residences', 'Developer allocations in selected Jeddah and Riyadh projects.'],
   ['/properties/international/', 'International', 'Selected residences in Dubai, the Côte d\'Azur, Costa del Sol and Oman.'],
   ...(tours.length ? [['/tours/', '3D virtual tours', 'Matterport walkthroughs of homes you can tour before you visit.']] : []),
   ['/about/', 'About Bona', 'Who we are, how we work, licensing.'],

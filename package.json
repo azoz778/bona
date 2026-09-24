@@ -9,7 +9,8 @@
     "preview": "astro preview",
     "sync": "node scripts/sync-listings.mjs",
     "check": "astro check",
-    "test": "node --test scripts/test/*.test.mjs"
+    "test": "node --test scripts/test/*.test.mjs",
+    "test:dist": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.7.4",
