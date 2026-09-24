@@ -33,7 +33,7 @@ const arForms = JSON.stringify(countForms_('residence').ar);
 const chipCls = 'chip';
 const landOffMarketWa = kind === 'land' ? waLink(site.whatsapp.wa, t(ui.landOffMarketMessage, locale)) : null;
 ---
-<Base title={`${title} — ${locale === 'ar' ? site.nameAr : site.name}`} description={intro} locale={locale} path={path} image={items[0]?.images?.[0]?.src} jsonLd={[breadcrumbJsonLd(crumbs), collectionPageJsonLd({ locale, path, title, description: intro, listings: items })]}>
+<Base title={`${title} — ${locale === 'ar' ? site.nameAr : site.name}`} description={intro} locale={locale} path={path} image={items[0]?.images?.[0]?.src} jsonLd={[breadcrumbJsonLd(crumbs), collectionPageJsonLd({ locale, path, title, description: intro, listings: items, breadcrumbId: `${new URL(path, site.url).href}#breadcrumb` })]}>
   <section class="section-tight pt-12 lg:pt-16" data-properties data-mode={kind ? 'kind' : all ? 'all' : 'category'} data-category={category ?? ''} data-count-many={t(ui.residencesCount, locale)} data-count-one={t(ui.residenceCountOne, locale)} data-count-ar={locale === 'ar' ? arForms : undefined}>
     <div class="wrap">
       <SectionHead as="h1" title={title} intro={intro} />

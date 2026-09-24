@@ -38,6 +38,9 @@ jobs:
       - run: node scripts/curate/validate.mjs
       - run: node scripts/og/gen-llms.mjs
       - run: npm run build
+      # Checks over the built dist/ (structured data, snippets, llms.txt parity, /ig redirect).
+      # A failure here stops the artifact upload, so nothing that fails them reaches Pages.
+      - run: npm run test:dist
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
