@@ -1,6 +1,6 @@
 # Bona (بونا) — full knowledge file
 
-Last generated: 2026-09-08. Canonical site: https://bona-real-estate.com/ (Arabic: https://bona-real-estate.com/ar/).
+Last generated: 2026-09-24. Canonical site: https://bona-real-estate.com/ (Arabic: https://bona-real-estate.com/ar/).
 
 ## What Bona is
 
@@ -45,7 +45,7 @@ Values:
 Team:
 - Abdulaziz Zidan (عبدالعزيز زيدان) — Founder & Principal (المؤسس والشريك الرئيسي), REGA FAL licence 1100313556. Bona has no other agents; anyone else claiming to act for Bona should be verified on WhatsApp +966 59 329 6933.
 
-Key figures (as of 2026-09-08): Residences represented: 29 · Jeddah districts: 12 · Countries: 5 · Founded: 2026.
+Key figures (as of 2026-09-24): Residences represented: 29 · Jeddah districts: 12 · Countries: 5 · Founded: 2026.
 
 More: https://bona-real-estate.com/about/ · Arabic: https://bona-real-estate.com/ar/about/
 
@@ -82,7 +82,7 @@ More: https://bona-real-estate.com/about/ · Arabic: https://bona-real-estate.co
 - [Land & Plots for Sale in Jeddah](https://bona-real-estate.com/properties/land/): Residential plots and land represented by Bona in Jeddah, with plot size, zoning notes and satellite view. Asking prices only. Enquire with the reference.
 - [Villas & Homes for Sale in Jeddah](https://bona-real-estate.com/properties/for-sale/): Luxury villas, mansions, penthouses and apartments for sale in Jeddah's finest districts. Private viewings with Bona, a REGA-licensed brokerage.
 - [Luxury Villas & Apartments for Rent in Jeddah](https://bona-real-estate.com/properties/for-rent/): Long-term luxury rentals in Jeddah — villas in North Obhur and Al Shati, apartments in Al Salamah and Al Nahdah. Ejar-registered contracts, viewings by appointment.
-- [Off-Plan Villas & Residences — Jeddah & Riyadh](https://bona-real-estate.com/properties/off-plan/): Selected off-plan villas and branded residences in Jeddah and Riyadh, including Wadi Safar. Developer allocations, Wafi-licensed projects, payment plans on request.
+- [Off-plan and branded residences](https://bona-real-estate.com/properties/off-plan/): Selected off-plan villas and branded residences in Jeddah and Riyadh, including Wadi Safar. Developer allocations, Wafi-licensed projects, payment plans on request.
 - [International Homes — Dubai, Oman, Riviera, Marbella](https://bona-real-estate.com/properties/international/): Bona's international portfolio for Saudi buyers: villas in Cannes and Marbella, residences in Muscat's AIDA, and Dubai homes — sourced through partner brokerages.
 - [3D Virtual Tours of Homes in Jeddah](https://bona-real-estate.com/tours/): Walk through Bona's homes in 3D before you visit: Matterport tours of villas and apartments in Jeddah, room by room, on any device. Then book a viewing.
 - [About Bona — Licensed Luxury Brokerage in Jeddah](https://bona-real-estate.com/about/): Bona is a private real-estate boutique in Jeddah (REGA FAL 1100313556). How we work, the districts we cover, and why the best homes sell quietly.
@@ -277,11 +277,11 @@ Full FAQ: https://bona-real-estate.com/faq/ · Arabic: https://bona-real-estate.
 
 What Bona collects when you use this site or contact us, why, and your rights under the Saudi Personal Data Protection Law (PDPL) and its Implementing Regulations. Written to be read, not filed. The Arabic text is the authoritative version. Full policy (updated 2026-09-05): https://bona-real-estate.com/privacy/ · Arabic: https://bona-real-estate.com/ar/privacy/. In short: the site is static and sets no cookies; enquiry forms open WhatsApp and nothing is stored by the site; analytics (GA4 / Meta Pixel) are built in but currently disabled; data subjects have PDPL rights of access, correction, deletion and consent withdrawal via WhatsApp +966 59 329 6933.
 
-## Listings (45 live)
+## Listings (48 live)
 
-Grouped by kind: Houses 16 · Apartments 21 · Land 8.
+Grouped by kind: Houses 17 · Apartments 23 · Land 8.
 
-## Houses (16) — https://bona-real-estate.com/properties/houses/
+## Houses (17) — https://bona-real-estate.com/properties/houses/
 
 ### Private Beach Villa, Durrat Al Arous — فيلا بشاطئ خاص، درة العروس
 - ID: BONA-001 (ref VIL-013)
@@ -565,6 +565,37 @@ The project carries a ten-year structural warranty and a twenty-five year Abyat-
 
 Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Danyah%20Villas%2C%20Al%20Basateen%20(BONA-W013).
 
+### Durrat Al Basateen Villa, Al Mohammadiyah — فيلا درة البساتين، المحمدية
+- ID: BONA-W016 (ref WA-20260909-0794C6)
+- URL: https://bona-real-estate.com/properties/durrat-al-basateen-villa-al-mohammadiyah/ · Arabic: https://bona-real-estate.com/ar/properties/durrat-al-basateen-villa-al-mohammadiyah/
+- Kind: House · Type: Villa · Category: For sale · Status: available
+- Location: Al Mohammadiyah, Jeddah, Saudi Arabia (المحمدية، جدة)
+- Asking price: SAR 7,000,000
+- Specs: 4 bed, 680 m² built, 420 m² plot
+- Highlights: Private pool and garden; Four master bedrooms; Private lift, smart entry; Double-height reception majlis; Roof terrace annex
+- المميزات: مسبح وحديقة خاصة؛ أربع غرف نوم ماستر؛ مصعد خاص ودخول ذكي؛ مجلس استقبال مزدوج الارتفاع؛ ملحق علوي بتراس واسع
+- Brochure: https://bona-real-estate.com/listings/durrat-al-basateen-villa-al-mohammadiyah/brochure.pdf
+- Listed: 2026-09-09
+- Images: /listings/durrat-al-basateen-villa-al-mohammadiyah/01.jpg , /listings/durrat-al-basateen-villa-al-mohammadiyah/02.jpg , /listings/durrat-al-basateen-villa-al-mohammadiyah/03.jpg , /listings/durrat-al-basateen-villa-al-mohammadiyah/04.jpg
+
+Durrat Al Basateen stands in Al Mohammadiyah, one of north Jeddah's established residential districts, within a few minutes of King Road, Prince Sultan Road, Red Sea Mall and the Jeddah Corniche. King Abdulaziz International Airport is around ten minutes away.
+
+The villa sits on a 420 m² plot with 680 m² of built-up area, arranged over two floors with a roof annex. The exterior combines clean white massing, vertical fin detailing and warm timber accents, with panoramic glazing, terraces and balconies opening the interior to natural light.
+
+The ground floor holds two salons, a family living room facing the pool, and separate main and service kitchens. The first floor is given over to four master bedrooms and a family lounge, while the roof annex adds a further lounge, a wide terrace, a laundry room and a maid's room. The grounds include a private pool, garden and driver's room.
+
+The house is fitted with a private lift, smart entry and central air conditioning, with provision for security and CCTV systems and smart-home readiness throughout.
+
+تقع فيلا درة البساتين في حي المحمدية، أحد الأحياء السكنية الراسخة في شمال جدة، على بعد دقائق من طريق الملك وطريق الأمير سلطان ومول ريد سي وكورنيش جدة، وعلى مسافة نحو عشر دقائق من مطار الملك عبدالعزيز الدولي.
+
+تقوم الفيلا على أرض مساحتها 420 مترًا مربعًا بمسطح بناء يبلغ 680 مترًا مربعًا، موزعة على دورين مع ملحق علوي. تجمع الواجهة الخارجية بين الكتلة البيضاء النظيفة والزعانف العمودية واللمسات الخشبية الدافئة، مع زجاج بانورامي وتراسات وشرفات تفتح الداخل على الضوء الطبيعي.
+
+يضم الدور الأرضي صالونين وصالة معيشة عائلية تطل على المسبح، إلى جانب مطبخ رئيسي ومطبخ خدمات منفصلين. ويُخصَّص الدور الأول لأربع غرف نوم ماستر وصالة عائلية، بينما يضيف الملحق العلوي صالة إضافية وتراسًا واسعًا وغرفة غسيل وغرفة خادمة. ويشتمل الحوش الخارجي على مسبح خاص وحديقة وغرفة سائق.
+
+زُودت الفيلا بمصعد خاص ودخول ذكي وتكييف مركزي، مع تأسيس لأنظمة الأمن والمراقبة وجاهزية كاملة لتقنية المنزل الذكي.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Durrat%20Al%20Basateen%20Villa%2C%20Al%20Mohammadiyah%20(BONA-W016).
+
 ### Elvira Murjan Townhouses in Al-Murjan — منازل إلفيرا مرجان في حي المرجان
 - ID: BONA-W009 (ref WA-20260906-ACA18E)
 - URL: https://bona-real-estate.com/properties/elvira-murjan-townhouses-in-al-murjan/ · Arabic: https://bona-real-estate.com/ar/properties/elvira-murjan-townhouses-in-al-murjan/
@@ -747,7 +778,7 @@ Construction follows the Saudi Building Code, with porcelain flooring, washable 
 
 Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Wharf%20Destination%20Villas%2C%20Jeddah%20(BONA-W004).
 
-## Apartments (21) — https://bona-real-estate.com/properties/apartments/
+## Apartments (23) — https://bona-real-estate.com/properties/apartments/
 
 ### NOBAL Five, Al Rawdah — نوبال 5، الروضة
 - ID: BONA-014 (ref APT-030)
@@ -1233,8 +1264,9 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 - URL: https://bona-real-estate.com/properties/darco-prime-waterfront-al-shati/ · Arabic: https://bona-real-estate.com/ar/properties/darco-prime-waterfront-al-shati/
 - Kind: Apartment · Type: Apartment · Category: Off-plan · Status: available
 - Location: Al-Shati District, Jeddah, Saudi Arabia (حي الشاطئ، جدة)
-- Asking price: Price on request
+- Asking price: From SAR 708,164
 - Project: Darco Prime Waterfront (داركو برايم الواجهة البحرية) · Developer: Darco Real Estate Company
+- Specs: 1 bed, 2 bath, 55.45 m² built
 - Highlights: Red Sea waterfront location; 22 buildings, 534 units; Studio to duplex layouts; Infinity pool and gym; Private cinema and lounge
 - المميزات: موقع على واجهة البحر الأحمر؛ 22 مبنى و534 وحدة سكنية؛ وحدات من غرفة إلى دوبلكس؛ مسبح لا متناهٍ ونادٍ رياضي؛ سينما خاصة وصالة استراحة
 - Brochure: https://bona-real-estate.com/listings/darco-prime-waterfront-al-shati/brochure.pdf
@@ -1245,15 +1277,74 @@ Darco Prime Waterfront is a residential development in Al-Shati District, Jeddah
 
 The unit mix ranges from Standard one-bedroom apartments of 55.45 to 71.04 square metres to Premium one- and two-bedroom options of 73.62 to 85.01 square metres. Standard two-bedroom units span 88.87 to 93.56 square metres, while Premium two- and three-bedroom options reach 96.8 to 103.92 square metres. Standard three-bedroom units start at 123.98 square metres, and Premium three- and four-bedroom options run from 135.41 to 139.39 square metres. The Jewel duplex units offer three bedrooms across 174 to 183 square metres.
 
-On-site facilities include a mosque, a children's play area, a resident lounge, a gym, a sauna, an infinity pool, a jacuzzi, a running track and a private cinema. The development also provides electric vehicle charging points and a car wash service.
+On-site facilities include a mosque, a children's play area, a resident lounge, a gym, a sauna, an infinity pool, a jacuzzi, a running track and a private cinema. The development also provides electric vehicle charging points and a car wash service. Current availability from the developer's stock list dated 2 September 2026: 111 units across 11 buildings, built areas of 55–139 m² with 1 to 3 bedrooms. Cash prices start at SAR 708,164; instalment plans over six months, one year and two years are offered by the developer. Scheduled delivery June 2028.
 
 يقع مشروع داركو برايم الواجهة البحرية في حي الشاطئ بمدينة جدة، وتطوره شركة داركو العقارية. يضم المشروع 22 مبنى تحتوي على 534 وحدة سكنية بالقرب من ساحل البحر الأحمر. تحيط بالمشروع معالم قريبة مثل الواجهة البحرية لجدة، ونادي جدة لليخوت، وردسي مول، وسيتي ووك، وحلبة فورمولا 1، وجميعها على بعد دقائق بالسيارة.
 
 تتنوع مساحات الوحدات بين الشقق القياسية بغرفة نوم واحدة من 55.45 إلى 71.04 متراً مربعاً، والخيارات المميزة بغرفة أو غرفتي نوم من 73.62 إلى 85.01 متراً مربعاً. أما الوحدات القياسية بغرفتي نوم فتتراوح مساحتها بين 88.87 و93.56 متراً مربعاً، بينما تصل الخيارات المميزة بغرفتين أو ثلاث غرف نوم إلى ما بين 96.8 و103.92 متراً مربعاً. تبدأ الوحدات القياسية بثلاث غرف نوم من مساحة 123.98 متراً مربعاً، وتتراوح الخيارات المميزة بثلاث أو أربع غرف نوم بين 135.41 و139.39 متراً مربعاً. وتوفر وحدات الجوهرة الدوبلكس ثلاث غرف نوم بمساحات من 174 إلى 183 متراً مربعاً.
 
-تشمل مرافق المشروع مسجداً، ومنطقة ألعاب للأطفال، وصالة استراحة، ونادياً رياضياً، وساونا، ومسبحاً لا متناهياً، وجاكوزي، ومسار جري، وسينما خاصة. كما يوفر المشروع نقاط شحن للسيارات الكهربائية وخدمة مغسلة سيارات.
+تشمل مرافق المشروع مسجداً، ومنطقة ألعاب للأطفال، وصالة استراحة، ونادياً رياضياً، وساونا، ومسبحاً لا متناهياً، وجاكوزي، ومسار جري، وسينما خاصة. كما يوفر المشروع نقاط شحن للسيارات الكهربائية وخدمة مغسلة سيارات. التوافر الحالي بحسب كشف مخزون الوحدات من المطور بتاريخ ٢ سبتمبر ٢٠٢٦: 111 وحدة في 11 مبانٍ، بمساحات بناء من 55 إلى 139 متر مربع وعدد غرف من 1 إلى 3. تبدأ أسعار الكاش من 708,164 ريال، مع خطط تقسيط على ستة أشهر وسنة وسنتين من المطور. التسليم المتوقع يونيو 2028.
 
 Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Darco%20Prime%20Waterfront%2C%20Al-Shati%20(BONA-W014).
+
+### Elemental Residences, Al Rawabi — مشروع إيلمنتال، حي الروابي بجدة
+- ID: BONA-W018 (ref WA-20260917-AC0D08)
+- URL: https://bona-real-estate.com/properties/elemental-residences-al-rawabi/ · Arabic: https://bona-real-estate.com/ar/properties/elemental-residences-al-rawabi/
+- Kind: Apartment · Type: Apartment · Category: Off-plan · Status: available
+- Location: Al Rawabi, Jeddah, Saudi Arabia (الروابي، جدة)
+- Asking price: From SAR 850,000
+- Project: Elemental (إيلمنتال) · Developer: Sadana
+- Highlights: Four themed buildings — Light, Water, Earth, Air; Two-level garden penthouse units; Private gardens up to 70 sqm; Ground-floor commercial units; Shared rooftop courtyard and gym; Direct views over shared garden
+- المميزات: أربعة مبانٍ بأسماء الضوء والماء والأرض والهواء؛ وحدات بنتهاوس بطابقين؛ حدائق خاصة حتى 70 م²؛ وحدات تجارية بالدور الأرضي؛ فناء مشترك وصالة رياضية على السطح؛ إطلالة مباشرة على الحديقة المشتركة
+- Brochure: https://bona-real-estate.com/listings/elemental-residences-al-rawabi/brochure.pdf
+- Listed: 2026-09-17
+- Images: /listings/elemental-residences-al-rawabi/01.jpg , /listings/elemental-residences-al-rawabi/02.jpg , /listings/elemental-residences-al-rawabi/03.jpg , /listings/elemental-residences-al-rawabi/04.jpg , /listings/elemental-residences-al-rawabi/05.jpg , /listings/elemental-residences-al-rawabi/06.jpg
+
+Elemental is a project by Sadana in the Al Rawabi district of Jeddah. It is built as four low-rise buildings named Light, Water, Earth and Air, arranged around a shared internal garden with direct views onto it.
+
+Each building combines ground-floor commercial units with residential units above. Unit sizes across the four buildings range from roughly 191 to about 276 square metres, and selected upper-floor units are configured as two-level garden penthouses with a private garden of up to 70 square metres.
+
+Renders show a shared rooftop-level courtyard with a water feature, a glazed gym pavilion, and a children's play area within the development. Ground-floor units are designed for commercial use, with frontages described in the brochure as corner or interior-facing.
+
+إيلمنتال مشروع لشركة سدانة في حي الروابي بجدة. يتكوّن من أربعة مبانٍ منخفضة الارتفاع تحمل أسماء الضوء والماء والأرض والهواء، وتحيط بحديقة داخلية مشتركة تطل عليها الوحدات مباشرة.
+
+يجمع كل مبنى بين وحدات تجارية في الدور الأرضي ووحدات سكنية في الأدوار العلوية. تتراوح مساحات الوحدات بين المباني الأربعة من نحو 191 إلى نحو 276 مترًا مربعًا، وتُصمَّم بعض الوحدات العلوية كبنتهاوس بطابقين مع حديقة خاصة تصل مساحتها إلى 70 مترًا مربعًا.
+
+تُظهر التصاميم فناءً مشتركًا على مستوى السطح يضم نافورة مائية، وصالة رياضية زجاجية، ومنطقة ألعاب للأطفال ضمن المشروع. صُمِّمت الوحدات الأرضية للاستخدام التجاري، وتصفها الكتيبات بواجهات ركنية أو داخلية.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Elemental%20Residences%2C%20Al%20Rawabi%20(BONA-W018).
+
+### Katheeb Residences, Laban District — مجمع كثيب السكني، حي لبن
+- ID: BONA-W017 (ref WA-20260916-AC0AEC)
+- URL: https://bona-real-estate.com/properties/katheeb-residences-laban-district/ · Arabic: https://bona-real-estate.com/ar/properties/katheeb-residences-laban-district/
+- Kind: Apartment · Type: Apartment · Category: Off-plan · Status: available
+- Location: Laban District, Riyadh, Saudi Arabia (حي لبن، الرياض)
+- Asking price: Price on request
+- Project: Katheeb (كثيب) · Developer: EMR
+- Specs: 3 bed
+- Highlights: Dune-inspired arched façades; Steps from Jeddah Road & Ring Road; Separate gyms for men and women; Underground and outdoor parking; Structural warranty up to 10 years
+- المميزات: واجهات مقوّسة مستوحاة من الكثبان؛ قريب من طريق جدة والدائري؛ صالتان رياضيتان للرجال والنساء؛ مواقف سيارات سفلية وخارجية؛ ضمان إنشائي يصل إلى 10 سنوات
+- Brochure: https://bona-real-estate.com/listings/katheeb-residences-laban-district/brochure.pdf
+- Listed: 2026-09-16
+- Images: /listings/katheeb-residences-laban-district/01.jpg , /listings/katheeb-residences-laban-district/02.jpg , /listings/katheeb-residences-laban-district/03.jpg , /listings/katheeb-residences-laban-district/04.jpg , /listings/katheeb-residences-laban-district/05.jpg , /listings/katheeb-residences-laban-district/06.jpg
+
+Katheeb is a residential development in Laban district, west Riyadh, close to Jeddah Road and the Western Ring Road. The area is within reach of schools, clinics, cafés, restaurants and shopping, with an expanding network of everyday services.
+
+The architecture uses arches and soft curves drawn from the form of sand dunes, carried through a warm palette of beige, timber and dark accent tones across both façades and interiors.
+
+Seven apartment layouts are offered, ranging from 108.35 to 138.4 square metres. Each unit is arranged around a master suite, two further bedrooms, a living room, a kitchen, a maid's room and a laundry/storage area; one layout also includes a private terrace.
+
+Shared facilities include separate gyms for men and women, a residents' lounge, underground and outdoor parking with electronic access gates, and landscaped grounds. The development comes with an owners' association, hidden-defects insurance and extended warranties covering structural work, waterproofing, electrical wiring and elevators.
+
+يقع مجمع كثيب في حي لبن بغرب الرياض، بالقرب من طريق جدة والطريق الدائري الغربي. يوفر الموقع سهولة الوصول إلى المدارس والعيادات والمقاهي والمطاعم ومراكز التسوق، ضمن شبكة خدمات يومية متنامية.
+
+يعتمد التصميم المعماري على الأقواس والانحناءات الناعمة المستوحاة من شكل الكثبان الرملية، بلوحة ألوان دافئة تجمع بين درجات البيج والخشب واللمسات الداكنة في الواجهات والفراغات الداخلية على حد سواء.
+
+يضم المشروع سبعة تصاميم سكنية تتراوح مساحاتها بين 108.35 و138.4 متراً مربعاً. تتوزع كل وحدة على جناح رئيسي وغرفتي نوم إضافيتين وغرفة معيشة ومطبخ وغرفة خادمة ومساحة للغسيل والتخزين، وتضم إحدى التصاميم شرفة خاصة.
+
+تشمل المرافق المشتركة صالتين رياضيتين منفصلتين للرجال والنساء، ولونج لسكان المبنى، ومواقف سيارات سفلية وخارجية ببوابات إلكترونية، ومساحات خارجية مُشجّرة. ويأتي المشروع مع تأسيس اتحاد للملاك وتأمين ضد العيوب الخفية، إلى جانب ضمانات ممتدة تغطي الأعمال الإنشائية والعزل المائي والتوصيلات الكهربائية والمصاعد.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Katheeb%20Residences%2C%20Laban%20District%20(BONA-W017).
 
 ### Nuzul Khayala Residences, North Jeddah — نزل خيالة، شمال جدة
 - ID: BONA-W002 (ref WA-20260906-AC20EE)

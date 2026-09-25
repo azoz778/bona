@@ -139,7 +139,9 @@ export const ui = {
   forSaleIntro: s('Villas, penthouses and apartments for sale in Jeddah and Riyadh, represented by Bona.', 'فلل وبنتهاوس وشقق للبيع في جدة والرياض، تمثّلها بونا.'),
   forRentTitle: s('Homes for rent', 'عقارات للإيجار'),
   forRentIntro: s('Furnished and unfurnished residences to rent, chosen with the same care as the homes we sell.', 'مساكن للإيجار، مفروشة وغير مفروشة، اخترناها بالعناية نفسها التي نختار بها ما نبيعه.'),
-  offPlanTitle: s('Off-plan residences', 'مشاريع على الخارطة'),
+  // EN names what the page's own intro is about — branded residences — which is also the query it
+  // ranks ~22 for (Search Console, 2026-09-24). The Arabic title is untouched: its queries are project names.
+  offPlanTitle: s('Off-plan and branded residences', 'مشاريع على الخارطة'),
   offPlanIntro: s('Branded residences and new developments from developers we know and trust.', 'مساكن بعلامات عالمية ومشاريع جديدة من مطوّرين نعرفهم ونثق بهم.'),
   internationalTitle: s('International', 'عقارات دولية'),
   internationalIntro: s('A small selection abroad: Dubai, the Côte d’Azur, the Costa del Sol and Oman, through partners we have worked with for years.', 'مجموعة صغيرة خارج المملكة: دبي والريفييرا الفرنسية وكوستا ديل سول وعُمان، عبر شركاء نعمل معهم منذ سنوات.'),

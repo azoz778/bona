@@ -7,8 +7,10 @@
    Round 2 — new pages (all return a plain object; pass to <Base jsonLd={…}>; Head dedupes by @id):
      personJsonLd(locale)                         → Person (founder) with hasCredential (REGA FAL)
      aboutPageJsonLd(locale, path?)               → [AboutPage, Person]
-     collectionPageJsonLd({locale, path, title, description?, listings, image?, tours?})
-                                                  → CollectionPage + ItemList (section pages, houses/apartments/land, /tours/)
+     collectionPageJsonLd({locale, path, title, description?, listings, image?, tours?, breadcrumbId?})
+                                                  → CollectionPage + ItemList (section pages, houses/apartments/land, /tours/);
+                                                    breadcrumbId = the page's BreadcrumbList @id, threaded into
+                                                    CollectionPage.breadcrumb (this node replaces Head's automatic WebPage)
      privacyPageJsonLd(locale, path?)             → WebPage for /privacy/ with dateModified
      webPageJsonLd({locale, path, title, …})      → WebPage | AboutPage | ContactPage | CollectionPage | ItemPage
      tourJsonLd(listing, locale)                  → 3DModel node for a Matterport tour (undefined when none)
@@ -333,6 +335,9 @@ export function privacyPageJsonLd(locale: Locale, path?: string): object {
 /** Section / kind / tours pages: CollectionPage whose mainEntity is an ItemList of the listings shown. */
 export function collectionPageJsonLd(opts: {
   locale: Locale; path: string; title: string; description?: string; listings: Listing[]; image?: string; tours?: boolean;
+  /** @id of the page's BreadcrumbList. This node replaces Head's automatic WebPage (same @id), so the
+      breadcrumb reference has to travel with it or the section pages lose it. */
+  breadcrumbId?: string;
 }): object {
   const l = L(opts.locale);
   const url = absoluteUrl(opts.path);
@@ -351,7 +356,7 @@ export function collectionPageJsonLd(opts: {
     });
   });
   return compact({
-    ...(webPageJsonLd({ locale: opts.locale, path: opts.path, type: 'CollectionPage', title: opts.title, description: opts.description, image: opts.image ?? shown[0]?.images?.[0]?.src }) as Record<string, unknown>),
+    ...(webPageJsonLd({ locale: opts.locale, path: opts.path, type: 'CollectionPage', title: opts.title, description: opts.description, image: opts.image ?? shown[0]?.images?.[0]?.src, breadcrumbId: opts.breadcrumbId }) as Record<string, unknown>),
     mainEntity: {
       '@type': 'ItemList',
       '@id': `${url}#list`,
@@ -589,7 +594,11 @@ export function faqPageJsonLd(opts: {
 // ---------- Breadcrumbs ----------
 
 /** BreadcrumbList. items = [{name, path}] in order; path may be relative or absolute.
-    @id = <last item URL>#breadcrumb so the page's WebPage node can reference it. */
+    @id = <last item URL>#breadcrumb so the page's WebPage node can reference it.
+    The list itself is named after the trail ("Home › Properties › Houses"). This is cosmetic: Search Console
+    labels each detected entity by its `name`, and a nameless BreadcrumbList shows up as "Unnamed item" in
+    URL inspection (seen 2026-09-24). The list was valid and eligible without it; the label is not an error,
+    a warning, or a ranking factor. The name only makes the report readable. */
 export function breadcrumbJsonLd(items: { name: string; path: string }[]): object {
   const list = items ?? [];
   const last = list[list.length - 1];
@@ -597,6 +606,7 @@ export function breadcrumbJsonLd(items: { name: string; path: string }[]): objec
     '@context': 'https://schema.org',
     '@type': 'BreadcrumbList',
     '@id': last ? `${absoluteUrl(last.path)}#breadcrumb` : undefined,
+    name: list.map((it) => (it.name ?? '').trim()).filter(Boolean).join(' › ') || undefined,
     itemListElement: list.map((it, i) => ({
       '@type': 'ListItem',
       position: i + 1,
