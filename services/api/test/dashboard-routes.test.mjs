@@ -1109,7 +1109,7 @@ test('removing a number that was never on the never list is reported, not silent
 
     const form = await postForm('/v1/admin/never/remove', { _dash: '1', phone: '0522222222' }, { cookie: ownerCookie });
     assert.equal(form.status, 303);
-    assert.equal(form.headers.get('location'), '/dashboard/team?error=not_found');
+    assert.equal(form.headers.get('location'), '/dashboard/team?error=never_not_found');
 
     const json = await fetch(`${base}/v1/admin/never/remove`, {
       method: 'POST', redirect: 'manual',
@@ -1117,7 +1117,7 @@ test('removing a number that was never on the never list is reported, not silent
       body: JSON.stringify({ phone: '0522222222' }),
     });
     assert.equal(json.status, 404);
-    assert.deepEqual(await json.json(), { error: 'not_found' });
+    assert.deepEqual(await json.json(), { error: 'never_not_found' });
   });
 });
 

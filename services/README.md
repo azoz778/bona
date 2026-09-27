@@ -671,6 +671,10 @@ records who made it, and `audit_log` records logins, team changes and switches (
 never a phone, name, code or note text). Team numbers (and their learned `@lid` ids) and the
 owner's never-a-client list are skipped by the WhatsApp poller. The owner is seeded from
 `BONA_OWNER_JID` at start-up and adopts sessions from before team accounts.
+Because of that seeding, the `BONA_OWNER_JID` account is re-activated as an owner on every
+restart even if another owner switched it off — change the env to retire it. With the Sending
+switch off, only that owner's own code still goes out; other members (other owners included)
+get the usual neutral answer but no code until Sending is back on.
 
 `POST /dashboard/login/verify` (form-encoded, 5 wrong attempts burn the code) sets
 `bona_dash`: `HttpOnly; Secure; SameSite=Lax; Path=/;

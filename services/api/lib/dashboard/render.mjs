@@ -689,6 +689,7 @@ export const MESSAGES = {
   bad_role: 'A role is owner or team.',
   last_owner: 'There has to be at least one active owner.',
   not_found: 'No such person.',
+  never_not_found: 'That number is not on the never-a-client list.',
   bad_setting: 'That switch does not exist.',
   bad_setting_value: 'That setting value is not allowed.',
   self_change: "You can't remove your own access — ask another owner.",
