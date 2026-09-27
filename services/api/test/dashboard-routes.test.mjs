@@ -993,21 +993,46 @@ test('the owner adds, demotes, deactivates and reactivates; each write is audite
   });
 });
 
-test('the last owner cannot deactivate or demote themselves: a message, not a 500', async () => {
+test('an owner cannot deactivate or demote themselves: a message, not a 500 (form and JSON)', async () => {
   await withTeamRoutes(async ({ team, owner, postForm, login }) => {
     const ownerCookie = await login('0593296933');
     const self = await postForm(`/v1/admin/team/${owner.user_id}/deactivate`, { _dash: '1' }, { cookie: ownerCookie });
     assert.equal(self.status, 303);
-    assert.equal(self.headers.get('location'), '/dashboard/team?error=last_owner');
+    assert.equal(self.headers.get('location'), '/dashboard/team?error=self_change');
     const demote = await postForm(`/v1/admin/team/${owner.user_id}/role`, { _dash: '1', role: 'staff' }, { cookie: ownerCookie });
-    assert.equal(demote.headers.get('location'), '/dashboard/team?error=last_owner');
+    assert.equal(demote.headers.get('location'), '/dashboard/team?error=self_change');
     const json = await fetch(`${'http://127.0.0.1:'}${(new URL(self.url)).port}/v1/admin/team/${owner.user_id}/deactivate`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Bona-Dash': '1', Cookie: ownerCookie }, body: '{}',
     });
     assert.equal(json.status, 400);
-    assert.deepEqual(await json.json(), { error: 'last_owner' });
+    assert.deepEqual(await json.json(), { error: 'self_change' });
+    const jsonDemote = await fetch(`${'http://127.0.0.1:'}${(new URL(self.url)).port}/v1/admin/team/${owner.user_id}/role`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Bona-Dash': '1', Cookie: ownerCookie }, body: JSON.stringify({ role: 'staff' }),
+    });
+    assert.equal(jsonDemote.status, 400);
+    assert.deepEqual(await jsonDemote.json(), { error: 'self_change' });
     assert.equal(team.getUser(owner.user_id).active, 1);
     assert.equal(team.getUser(owner.user_id).role, 'owner');
+  });
+});
+
+test('the self-change guard holds even with a second active owner in the room', async () => {
+  await withTeamRoutes(async ({ team, owner, postForm, login }) => {
+    // With only one owner, `team.mjs`'s own `last_owner` check would already refuse
+    // this. A second active owner removes that reason, so what stops it here has to
+    // be the guard in routes.mjs, not the one in team.mjs.
+    const second = team.addUser({ name: 'Omar', phone: '0500000002', role: 'owner' });
+    const ownerCookie = await login('0593296933');
+    const self = await postForm(`/v1/admin/team/${owner.user_id}/deactivate`, { _dash: '1' }, { cookie: ownerCookie });
+    assert.equal(self.headers.get('location'), '/dashboard/team?error=self_change');
+    const demote = await postForm(`/v1/admin/team/${owner.user_id}/role`, { _dash: '1', role: 'staff' }, { cookie: ownerCookie });
+    assert.equal(demote.headers.get('location'), '/dashboard/team?error=self_change');
+    assert.equal(team.getUser(owner.user_id).active, 1);
+    assert.equal(team.getUser(owner.user_id).role, 'owner');
+    // The other owner is untouched, and an owner acting on someone ELSE is still fine.
+    const off = await postForm(`/v1/admin/team/${second.user_id}/deactivate`, { _dash: '1' }, { cookie: ownerCookie });
+    assert.equal(off.headers.get('location'), '/dashboard/team?ok=deactivated');
+    assert.equal(team.getUser(second.user_id).active, 0);
   });
 });
 
@@ -1029,6 +1054,52 @@ test('the never list and the sending switch take effect, and the audit keeps no 
     assert.equal(none.headers.get('location'), '/dashboard/team?error=bad_setting');
     const text = JSON.stringify(audit.recent(50));
     assert.doesNotMatch(text, /511111111|cousin/);
+  });
+});
+
+test('the sending switch fails closed: only an explicit "0" or "1" is accepted, form and JSON alike', async () => {
+  await withTeamRoutes(async ({ team, postForm, login, base }) => {
+    const ownerCookie = await login('0593296933');
+    const before = team.getSetting('sending_enabled');
+    assert.equal(before, '1');
+    for (const bad of [false, null, 'off', '']) {
+      const res = await fetch(`${base}/v1/admin/settings`, {
+        method: 'POST', redirect: 'manual',
+        headers: { 'Content-Type': 'application/json', 'X-Bona-Dash': '1', Cookie: ownerCookie },
+        body: JSON.stringify({ sending_enabled: bad }),
+      });
+      assert.equal(res.status, 400, JSON.stringify(bad));
+      assert.deepEqual(await res.json(), { error: 'bad_setting_value' }, JSON.stringify(bad));
+      assert.equal(team.getSetting('sending_enabled'), before, JSON.stringify(bad));
+    }
+    // The form path shares the same guard: a value that is not literally "0" no
+    // longer falls through to "1" the way `=== '0' ? '0' : '1'` used to coerce it.
+    const formBad = await postForm('/v1/admin/settings', { _dash: '1', sending_enabled: 'off' }, { cookie: ownerCookie });
+    assert.equal(formBad.headers.get('location'), '/dashboard/team?error=bad_setting_value');
+    assert.equal(team.getSetting('sending_enabled'), before);
+    // The two real values still work.
+    const off = await postForm('/v1/admin/settings', { _dash: '1', sending_enabled: '0' }, { cookie: ownerCookie });
+    assert.equal(off.headers.get('location'), '/dashboard/team?ok=setting');
+    assert.equal(team.getSetting('sending_enabled'), '0');
+  });
+});
+
+test('removing a number that was never on the never list is reported, not silently accepted', async () => {
+  await withTeamRoutes(async ({ team, postForm, login, base }) => {
+    const ownerCookie = await login('0593296933');
+    assert.equal(team.isExcludedPhone('966522222222'), false);
+
+    const form = await postForm('/v1/admin/never/remove', { _dash: '1', phone: '0522222222' }, { cookie: ownerCookie });
+    assert.equal(form.status, 303);
+    assert.equal(form.headers.get('location'), '/dashboard/team?error=not_found');
+
+    const json = await fetch(`${base}/v1/admin/never/remove`, {
+      method: 'POST', redirect: 'manual',
+      headers: { 'Content-Type': 'application/json', 'X-Bona-Dash': '1', Cookie: ownerCookie },
+      body: JSON.stringify({ phone: '0522222222' }),
+    });
+    assert.equal(json.status, 404);
+    assert.deepEqual(await json.json(), { error: 'not_found' });
   });
 });
 
@@ -1078,6 +1149,64 @@ test('a person deactivated while their write body is still arriving does not get
     const res = await answer;
     assert.equal(res.status, 401);
     assert.equal(db.getLead(id).stage, 'new');
+  });
+});
+
+test('every Team write is refused to a staff member over JSON with the header marker too, not just a form', async () => {
+  await withTeamRoutes(async ({ team, audit, owner, login, base }) => {
+    const staff = await login('0500000001');
+    const beforeUsers = JSON.stringify(team.listUsers());
+    const beforeNever = JSON.stringify(team.listNever());
+    const beforeSetting = team.getSetting('sending_enabled');
+    const auditBefore = audit.recent(500).length;
+    const writes = [
+      ['/v1/admin/team', { name: 'X', phone: '0500000009', role: 'owner' }],
+      [`/v1/admin/team/${owner.user_id}/deactivate`, {}],
+      [`/v1/admin/team/${owner.user_id}/role`, { role: 'staff' }],
+      [`/v1/admin/team/${owner.user_id}/reactivate`, {}],
+      ['/v1/admin/never', { phone: '0511111111', note: 'x' }],
+      ['/v1/admin/never/remove', { phone: '0511111111' }],
+      ['/v1/admin/settings', { sending_enabled: beforeSetting === '1' ? '0' : '1' }],
+    ];
+    for (const [p, fields] of writes) {
+      const res = await fetch(`${base}${p}`, {
+        method: 'POST', redirect: 'manual',
+        headers: { 'Content-Type': 'application/json', 'X-Bona-Dash': '1', Cookie: staff },
+        body: JSON.stringify(fields),
+      });
+      assert.equal(res.status, 403, p);
+      assert.deepEqual(await res.json(), { error: 'owner_only' }, p);
+    }
+    assert.equal(JSON.stringify(team.listUsers()), beforeUsers);
+    assert.equal(JSON.stringify(team.listNever()), beforeNever);
+    assert.equal(team.getSetting('sending_enabled'), beforeSetting);
+    assert.equal(audit.recent(500).length, auditBefore);
+  });
+});
+
+test('an owner demoted to staff while their Team write body is still arriving is refused, not honoured', async () => {
+  await withTeamRoutes(async ({ team, owner, login, port }) => {
+    // A second active owner, so the mid-flight demotion below is not itself refused
+    // by team.mjs's own last_owner protection — what has to stop the write here is
+    // the fresh re-check of `me` in handleAdmin, not that.
+    const second = team.addUser({ name: 'Omar', phone: '0500000002', role: 'owner' });
+    const ownerCookie = await login('0593296933');
+    const body = JSON.stringify({ phone: '0511111111', note: 'x' });
+    const answer = new Promise((resolve, reject) => {
+      const req = http.request({
+        host: '127.0.0.1', port, method: 'POST', path: '/v1/admin/never',
+        headers: { 'Content-Type': 'application/json', 'X-Bona-Dash': '1', Cookie: ownerCookie, 'Content-Length': Buffer.byteLength(body) },
+      }, (res) => { let t = ''; res.on('data', (c) => { t += c; }); res.on('end', () => resolve({ status: res.statusCode, text: t })); });
+      req.on('error', reject);
+      req.write(body.slice(0, 5));
+      // The route has checked the cookie and is waiting for the rest of the body.
+      setTimeout(() => { team.setRole(owner.user_id, 'staff'); req.end(body.slice(5)); }, 50);
+    });
+    const res = await answer;
+    assert.equal(res.status, 403);
+    assert.deepEqual(JSON.parse(res.text), { error: 'owner_only' });
+    assert.equal(team.isExcludedPhone('966511111111'), false);
+    assert.equal(team.getUser(second.user_id).role, 'owner');
   });
 });
 
@@ -1131,7 +1260,7 @@ test('deactivating a person logs them out everywhere at once', async () => {
     assert.equal(after.headers.get('location'), '/dashboard/login');
     const me = app.team.getUserByPhone('0593296933').user_id;
     const self = await postForm(`/v1/admin/team/${me}/deactivate`, { _dash: '1' }, { cookie: owner.cookie });
-    assert.equal(self.headers.get('location'), '/dashboard/team?error=last_owner');
+    assert.equal(self.headers.get('location'), '/dashboard/team?error=self_change');
   });
 });
 
