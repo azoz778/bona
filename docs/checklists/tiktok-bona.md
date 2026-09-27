@@ -14,9 +14,9 @@ Do not create a replacement account or use the abandoned info@ signup.
 | Connection | Evidence / status | Required next step |
 |---|---|---|
 | Existing account/profile | Coordinator confirmed handle/name/bio and unchanged login | Complete owner-approved Business linking and verify API access |
-| Browser Pixel | Consent-gated loader and event IDs already exist; live Pixel ID is null | Obtain Bona web Pixel ID, configure and deploy |
-| Server Events API | Implemented in this branch; no local/VPS token or Pixel ID configured | Configure real credentials, deploy API, verify Test Events |
-| Business Center | Linking authorized; access and asset assignment not verified | Owner/admin links existing account and assigns least necessary access |
+| Browser Pixel | Pixel DASP9PBC77U0AVP50NEG deployed behind advertising consent | Verify browser Test Events receipt and withdrawal behavior |
+| Server Events API | Production credentials configured securely in test mode; synthetic Contact receipt verified in TikTok Test Events | Verify browser/server IDs and deduplication diagnostics before claiming reporting verified |
+| Business Center | Existing Business Center registration complete with one advertiser | Finish existing-profile linking and verify assigned permissions |
 | Organic publishing/insights | No approved app, account grant or valid token verified | Establish approved API for Business Accounts API access or connect an approved provider |
 | Content Posting/Login Kit OAuth | No client credentials or grant found | Only implement after choosing a permitted product/use case |
 | Unattended operation | Not connected; no TikTok job installed | Verify permissions, delivery, renewal/revocation handling, and content approval first |
