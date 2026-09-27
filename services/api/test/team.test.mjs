@@ -192,6 +192,19 @@ test('names are truncated by code point, stripped of control characters, and whi
   s.close();
 });
 
+test('names are stripped of bidi control characters, not just \\p{Cc} control characters', () => {
+  const { s, team } = teamHarness();
+  // U+202E (RLO) is category Cf, not Cc, so the old `\p{Cc}`-only strip left it in
+  // place; U+200F (RLM) and U+2066 (LRI) are the same story. A name carrying one could
+  // repaint everything rendered after it (e.g. the literal "(you)" marker on the Team
+  // page) right-to-left, or hide characters a reviewer would otherwise see.
+  const rlo = team.addUser({ name: 'Sara‮forcedRTL', phone: '0500000001' });
+  assert.equal(rlo.name, 'SaraforcedRTL');
+  const marks = team.addUser({ name: '‏Sara‎⁦Ali⁩؜', phone: '0500000002' });
+  assert.equal(marks.name, 'SaraAli');
+  s.close();
+});
+
 test('isExcludedPhone normalises its input and never throws on garbage', () => {
   const { s, team } = teamHarness();
   team.ensureOwner({ phone: '966593296933', name: 'Abdulaziz' });

@@ -591,7 +591,7 @@ export function layout({ title, body, active = null, chrome = true, counts = {},
   <div class="brandrow"><span class="mk" aria-hidden="true">B</span><span><b>Bona</b><s>Jeddah · Brokerage</s></span></div>
   ${rail}
   <div class="railend">
-    <div class="me"><span class="ava" aria-hidden="true">${esc(initials(me?.name ?? 'Abdulaziz Aziz'))}</span><span><b>${esc(me?.name ?? 'Abdulaziz')}</b><s>${me ? (me.role === 'owner' ? 'Owner' : 'Team') : 'Principal'}</s></span></div>
+    <div class="me"><span class="ava" aria-hidden="true">${esc(initials(me?.name))}</span><span><b><bdi>${esc(me?.name ?? '')}</bdi></b><s>${me ? (me.role === 'owner' ? 'Owner' : 'Team') : 'Signed in'}</s></span></div>
     <label class="tg" for="thm"><em><span class="dk">Dark</span><span class="lt">Light</span></em><span class="trk" aria-hidden="true"><span class="knb"></span></span></label>
     <div class="railout"><form method="post" action="/dashboard/logout"><input type="hidden" name="_dash" value="1"><button type="submit">Log out</button></form></div>
   </div>
@@ -700,12 +700,27 @@ export const knownError = (code) =>
 export const messageFor = (code) => (knownError(code) ? MESSAGES[code] : 'Something went wrong.');
 
 /**
+ * The only codes the login routes and `auth.mjs` can actually put in `?error=`
+ * (checked against `routes.mjs`'s `loginCode`/`loginVerify` and `auth.mjs`'s
+ * `requestCode`/`verify`). `MESSAGES` also holds copy for the Team page
+ * (`duplicate_phone`, `owner_only`, ...) — those codes are real `knownError`s, so
+ * without this second, narrower list a stray `?error=duplicate_phone` on the one page
+ * a stranger can reach would print "That number is already on the team.", telling
+ * them team membership is a thing to probe for. An unlisted code shows nothing.
+ */
+const LOGIN_ERRORS = new Set([
+  'forbidden', 'bad_phone', 'rate_limited', 'no_request', 'used', 'expired', 'attempts', 'bad_code', 'send_failed',
+]);
+const loginMessage = (code) => (typeof code === 'string' && LOGIN_ERRORS.has(code) ? messageFor(code) : null);
+
+/**
  * Two steps in one page: ask for a code, then type it in. Nothing here says whether
  * the owner exists, whether a code is outstanding, or how many attempts are left —
  * the login page is the one surface a stranger can reach.
  */
 export function loginPage({ step = 'request', error = null, sent = false } = {}) {
-  const message = error ? `<div class="err">${esc(messageFor(error))}</div>` : '';
+  const text = loginMessage(error);
+  const message = text ? `<div class="err">${esc(text)}</div>` : '';
   const notice = sent && !error
     ? '<div class="ok">If that number is on the Bona team, a code is on its way to its WhatsApp. It is valid for 10 minutes.</div>'
     : '';
@@ -1579,5 +1594,5 @@ export function logoutPage() {
 
 /** A bare page for the handful of states that are not a dashboard page. */
 export function messagePage({ title, message, me = null }) {
-  return layout({ title, chrome: false, body: `<div class="login"><h1>Bona</h1><p class="muted">${esc(message)}</p><p><a href="/dashboard">Back to the dashboard</a></p></div>` });
+  return layout({ title, chrome: false, me, body: `<div class="login"><h1>Bona</h1><p class="muted">${esc(message)}</p><p><a href="/dashboard">Back to the dashboard</a></p></div>` });
 }
