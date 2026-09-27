@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { openDb, SCHEMA_VERSION } from '../lib/db.mjs';
-import { createTeam, TeamError } from '../lib/team.mjs';
+import { createTeam, TeamError, isTeamLid, learnTeamLid } from '../lib/team.mjs';
 import { createAudit, AUDIT_ACTIONS } from '../lib/audit.mjs';
 
 const NOW = 1_790_500_000_000;
@@ -260,6 +260,29 @@ test('setRole refuses an unknown role', () => {
 test('removeNever on a number that was never added returns false, not an error', () => {
   const { s, team } = teamHarness();
   assert.equal(team.removeNever('0511111111'), false);
+  s.close();
+});
+
+test('learnTeamLid records a phone+lid pairing on the users row, and isTeamLid reads it back', () => {
+  const { s, team } = teamHarness();
+  const sara = team.addUser({ name: 'Sara', phone: '0500000001' });
+  assert.equal(sara.wa_lid, null);
+  assert.equal(isTeamLid(s, '272516946294519@lid'), false);
+
+  assert.equal(learnTeamLid(s, '966500000001', '272516946294519@lid'), true);
+  assert.equal(team.getUser(sara.user_id).wa_lid, '272516946294519@lid');
+  assert.equal(isTeamLid(s, '272516946294519@lid'), true);
+
+  // Learning it again, with the same lid, is a no-op — not an error, not a second write.
+  assert.equal(learnTeamLid(s, '0500000001', '272516946294519@lid'), false);
+  // A phone that is not on the team touches nothing.
+  assert.equal(learnTeamLid(s, '966511111111', '999@lid'), false);
+  assert.equal(isTeamLid(s, '999@lid'), false);
+  // Garbage input never throws.
+  assert.equal(learnTeamLid(s, '', '272516946294519@lid'), false);
+  assert.equal(learnTeamLid(s, '966500000001', null), false);
+  assert.equal(isTeamLid(s, null), false);
+  assert.equal(isTeamLid(s, ''), false);
   s.close();
 });
 

@@ -119,13 +119,18 @@ const MIGRATIONS = [
     // without '+', the same convention as `leads.phone_e164`.
     // No foreign keys, by design: users are deactivated, never deleted, so nothing here
     // needs to cascade or be blocked by a reference to a `user_id`.
+    // `wa_lid` is nullable and learned, not entered: the WhatsApp poller fills it in the
+    // first time it sees this person's phone arrive paired with a privacy-mode `@lid` via
+    // `jidAlt` (lib/wa-poller.mjs `learnTeamLid`), so a later message that carries the lid
+    // alone can still be recognised as theirs. Never derived from the lid's own digits.
     version: 3,
     sql: `
       CREATE TABLE IF NOT EXISTS users (
-        user_id TEXT PRIMARY KEY, name TEXT NOT NULL, phone_e164 TEXT NOT NULL UNIQUE, wa_jid TEXT NOT NULL,
+        user_id TEXT PRIMARY KEY, name TEXT NOT NULL, phone_e164 TEXT NOT NULL UNIQUE, wa_jid TEXT NOT NULL, wa_lid TEXT,
         role TEXT NOT NULL CHECK (role IN ('owner','staff')), active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
         created INTEGER NOT NULL, last_login INTEGER, deactivated INTEGER
       );
+      CREATE INDEX IF NOT EXISTS users_lid ON users(wa_lid);
       CREATE TABLE IF NOT EXISTS auth_challenges (
         challenge_id TEXT PRIMARY KEY, user_id TEXT, code_hash TEXT NOT NULL, nonce_hash TEXT NOT NULL UNIQUE,
         created INTEGER NOT NULL, expires INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,

@@ -22,6 +22,14 @@
  *   5. `time_window` — the sender is unknown, but a `whatsapp_click` from a lead-less
  *                      session landed within ±15 minutes (marked *inferred* in the note)
  *
+ * Before any rule: a team member's number (active or not) and a number on the owner's
+ * "never a client" list (lib/team.mjs) are skipped outright — not a lead, not a reply,
+ * not stored. A chat that arrives as only an opaque `@lid` (no phone in `jid` or
+ * `jidAlt`) cannot be checked against that list until its phone has been seen at least
+ * once alongside it (`lib/team.mjs` `learnTeamLid`); until then it is counted
+ * (`poll.lid_only_unexcludable`), never logged with the lid itself, and — being
+ * uncheckable — still judged by the rules below like any other message.
+ *
  * Anything else — the owner's private conversations, which this loop can also see — is
  * discarded in memory. It is counted (`status().unmatched`) and never written to disk,
  * never logged, never sent anywhere. For the same reason nothing here logs a phone
@@ -31,6 +39,7 @@ import { parseRef } from './attribution.mjs';
 import { MAX_PAGES, PAGE_SIZE, bareJid, fetchWindow, oldestFirst } from './evolution.mjs';
 import { createOrMergeLead, leadNote } from './leads.mjs';
 import { normalisePhone } from './phone.mjs';
+import { isTeamLid, learnTeamLid } from './team.mjs';
 import { waConfig } from './wa.mjs';
 
 /** With no cursor yet, look back this far rather than at the whole history. */
@@ -173,6 +182,10 @@ export function listingIdIn(text) {
 /* The poller                                                          */
 /* ------------------------------------------------------------------ */
 
+/** The default when no team is wired: nothing is excluded. A stable reference, so the
+ * poller can tell "no team passed" apart from "a team passed that excludes nobody yet". */
+const NO_EXCLUSIONS = () => false;
+
 /**
  * @param {object} o
  * @param {ReturnType<import('./db.mjs').openDb>} o.db
@@ -180,14 +193,24 @@ export function listingIdIn(text) {
  * @param {(w: { gte: number, lte: number }) => Promise<{ records: object[] }|object[]>} [o.findMessages]
  *        injected in tests; defaults to `fetchWindow()` against the instance in `cfg.env`
  * @param {(text: string) => Promise<any>} [o.sendWhatsApp] the owner note sender
+ * @param {(phone: string) => boolean} [o.isExcluded] `lib/team.mjs`'s `isExcludedPhone`:
+ *        true for a team member's number (active or not) or a never-a-client number.
+ *        Omitted by older wiring and by tests that predate team accounts — the poller
+ *        then excludes nothing, exactly as before.
  * @param {(obj: object) => void} [o.log]
  * @param {() => number} [o.now]
  */
-export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp = null, log = () => {}, now = () => Date.now() } = {}) {
+export function createPoller({
+  db, cfg = {}, findMessages = null, sendWhatsApp = null, isExcluded = NO_EXCLUSIONS, log = () => {}, now = () => Date.now(),
+} = {}) {
   const wa = waConfig(cfg.env ?? {});
   const instance = wa.instance;
   const ownerDigits = bareJid(wa.ownerJid);
   const configured = Boolean(findMessages) || Boolean(wa.baseUrl && wa.apiKey);
+  // Whether a team is wired at all — not whether it currently excludes anyone — because an
+  // uncheckable lid-only chat is worth counting the moment team accounts exist, even before
+  // any pairing has been learned.
+  const teamWired = isExcluded !== NO_EXCLUSIONS;
   const find = findMessages ?? (({ gte, lte }) => fetchWindow({
     baseUrl: wa.baseUrl, apiKey: wa.apiKey, instance, gte, lte, offset: PAGE_SIZE, maxPages: MAX_PAGES,
   }));
@@ -369,7 +392,7 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
       const answer = await find({ gte, lte, instance });
       const records = Array.isArray(answer) ? answer : (answer?.records ?? []);
 
-      const tally = { scanned: records.length, matched: 0, unmatched: 0, created: 0, merged: 0, replies: 0, ignored: 0 };
+      const tally = { scanned: records.length, matched: 0, unmatched: 0, created: 0, merged: 0, replies: 0, ignored: 0, lidOnlyUnexcludable: 0 };
       let maxTs = 0;
       let oldestFailedTs = null;
       // Evolution answers newest-first. Handled in that order, a follow-up would be judged
@@ -386,6 +409,29 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
           continue;
         }
         if (db.waSeenHas(rec.id)) { tally.ignored += 1; continue; }
+
+        // A colleague is not a client (our own login codes to them even say "Bona"), and
+        // the owner's never-a-client list is absolute. 2026-09-27 design §3.5.
+        const recJids = jidsOf(rec);
+        if (recJids.phone && isExcluded(recJids.phone)) {
+          // WhatsApp pairs a privacy-mode `@lid` with the real jid via `jidAlt` on the
+          // messages that carry both — the same correlation `jidsOf` already trusts for
+          // leads. Remembering it here lets a later message that arrives as the lid ALONE
+          // still be recognised as this same team member, without ever guessing a phone
+          // from the lid's own digits.
+          if (teamWired && recJids.waLid) learnTeamLid(db, recJids.phone, recJids.waLid);
+          tally.ignored += 1;
+          continue;
+        }
+        // A record that is only a `@lid` (no phone in `jid` or `jidAlt`) cannot be checked
+        // against `isExcluded`, which only ever sees phone numbers — unless this lid was
+        // already learned above from an earlier message that did carry the phone. What is
+        // left uncaught is counted here, never logged with the lid itself, and falls
+        // through to be judged by the ordinary rules below like any other message.
+        if (teamWired && !recJids.phone && recJids.waLid) {
+          if (isTeamLid(db, recJids.waLid)) { tally.ignored += 1; continue; }
+          tally.lidOnlyUnexcludable += 1;
+        }
 
         try {
           if (rec.fromMe) {
@@ -417,6 +463,10 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
           log({ level: 'warn', evt: 'wa.poll.record_failed', attempts, writtenOff, error: String(err?.message ?? err) });
         }
       }
+
+      // A count, never a number or an id: this is the gap above, made visible without
+      // reopening it. See the module header and `learnTeamLid`/`isTeamLid` (lib/team.mjs).
+      if (tally.lidOnlyUnexcludable) log({ level: 'warn', evt: 'poll.lid_only_unexcludable', count: tally.lidOnlyUnexcludable });
 
       // Newest-first paging means a window that overflowed the page cap hides its OLDEST
       // messages, and asking again returns the same newest ones — so this is a loss, and
