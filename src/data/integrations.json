@@ -193,10 +193,10 @@
     "name": "TikTok Pixel (site)",
     "owner": "owner",
     "link": "https://ads.tiktok.com/i18n/events_manager",
-    "action": "docs/checklists/tiktok-bona.md: obtain Bona web Pixel ID through the existing owner account.",
+    "action": "Verify browser receipt in TikTok Test Events and advertising-consent behavior.",
     "status": "pending-owner",
-    "detail": "Sept 28 live homepage has analytics.tiktokPixel=null. Loader exists, but no TikTok connection or receipt verified.",
-    "checkedAt": "2026-09-27T21:26:38Z"
+    "detail": "Bona Real Estate Website Pixel DASP9PBC77U0AVP50NEG configured behind advertising consent. Event receipt and reporting remain unverified.",
+    "checkedAt": "2026-09-28T00:00:00+03:00"
   },
   {
     "id": "bona-api",
