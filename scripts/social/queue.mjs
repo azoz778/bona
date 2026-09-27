@@ -639,7 +639,8 @@ const doc = {
   },
   counts: {
     entries: kept.length,
-    publishableNow: kept.filter((e) => !e.blocked).length,
+    publishableNow: 0, // New generations are drafts until owner review.
+    awaitingReview: kept.length,
     blockedOnAdLicence: kept.filter((e) => e.blocked).length,
     byLicenceBasis: Object.fromEntries(['developer-authorisation', 'rega-ad-licence', 'rega-pending'].map((b) => [b, kept.filter((e) => e.licenceBasis === b).length])),
     assetsReady: kept.filter((e) => e.assetsReady).length,
@@ -649,7 +650,7 @@ const doc = {
   },
   warnings: mixWarnings,
   notes: structuralNotes,
-  entries: kept,
+  entries: kept.map((entry) => ({ ...entry, reviewStatus: 'pending' })),
 };
 
 const out = a.out ? path.resolve(a.out) : path.join(OUT_ROOT, 'queue.json');
