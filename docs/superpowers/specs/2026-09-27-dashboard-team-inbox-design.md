@@ -59,13 +59,13 @@ Codex before the design was finished; every finding below is folded in.
 ### 3.1 Data (`db.mjs` migrations, additive)
 - `users (user_id PK, name, phone_e164 UNIQUE, wa_jid, role 'owner'|'staff', active, created, last_login, deactivated)`.
   Seeded with the owner from `BONA_OWNER_JID`.
-- `auth_challenges (challenge_id PK, user_id, code_hash, nonce_hash UNIQUE, created, expires, attempts, used)`
+- `auth_challenges (challenge_id PK, user_id (NULL = decoy), code_hash, nonce_hash UNIQUE, created, expires, attempts, used)`
   replaces `auth_codes` + the in-memory nonce map. A challenge belongs to exactly one user and one browser.
 - `auth_sessions` gains `user_id`; migration assigns every existing session to the owner (his login keeps working).
 - `audit_log (id PK, ts, user_id, action, target, meta)`: login, logout, code_request (never the code),
   team_add/deactivate/reactivate, never_list add/remove, stage change, note, reply_sent, inbox_move/out/add,
   switch changes, handler changes.
-- `never_list (phone_e164 PK, wa_lid, note, added_by, ts)`.
+- `never_list (phone_e164 PK, note, added_by, ts)` (by phone number; an `@lid`-only chat carries no phone, so the owner uses *Not a client* for those).
 - `settings (key PK, value, updated, updated_by)`: `sending_enabled` (default 1), later `dana_enabled` (default 0).
 
 ### 3.2 Login
@@ -219,8 +219,8 @@ message; an AI assistant (Dana) may reply (Phase 4); contact to request deletion
   gaps, retention), `lib/inbox/backfill.mjs`, `lib/push.mjs` (VAPID JWT, dispatch), `lib/dana-wa.mjs`.
 - `lib/dashboard/render-team.mjs`, `render-inbox.mjs` (render.mjs is already 1.5k lines; new screens get
   their own files), routes mounted from `routes.mjs`.
-- Changed: `auth.mjs`, `db.mjs` (migrations), `wa-poller.mjs`, `wa.mjs` (owner note keeps working through
-  `wa-send`), `index.mjs` wiring, `config.mjs`, `retell/provision.mjs`, privacy pages.
+- Changed: `auth.mjs`, `db.mjs` (migrations), `wa-poller.mjs`, `wa.mjs` (the owner's new-lead note stays on
+  lib/wa.mjs as a message to himself), `index.mjs` wiring, `config.mjs`, `retell/provision.mjs`, privacy pages.
 - bona-api stays dependency-free (Node 24 built-ins only).
 
 ## 8. Testing, review, deploy
