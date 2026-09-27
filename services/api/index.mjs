@@ -44,7 +44,11 @@ import { createRetellClient, createHealthProbe, RetellError } from './lib/retell
 import { createToolHandlers, extractToken, tokenMatches, TOOL_NAMES } from './lib/tools.mjs';
 import { extractActions } from './lib/actions.mjs';
 import { appendJsonl, createOrMergeLead, leadNote } from './lib/leads.mjs';
-import { sendText } from './lib/wa.mjs';
+import { sendText, waConfig } from './lib/wa.mjs';
+import { createTeam, TeamError } from './lib/team.mjs';
+import { createAudit } from './lib/audit.mjs';
+import { createSender } from './lib/wa-send.mjs';
+import { bareJid } from './lib/evolution.mjs';
 import { createDashboardRoutes } from './lib/dashboard/routes.mjs';
 
 const GREETING = {
@@ -182,9 +186,27 @@ export function createApp(options = {}) {
   const fanout = options.fanout ?? createFanout({ db, cfg, log });
   const probeRetell = options.probeRetell ?? createHealthProbe(retell);
   const sendWhatsApp = options.sendWhatsApp ?? ((text) => sendText(text, { env: cfg.env }));
+  // Team accounts (2026-09-27 design §3). The owner is (re)seeded on every start from
+  // BONA_OWNER_JID — which also hands him every session that predates accounts, so his
+  // live login survives the deploy; everyone else is added on the Team page.
+  const team = options.team ?? createTeam(db, { log });
+  try {
+    team.ensureOwner({ phone: bareJid(waConfig(cfg.env ?? {}).ownerJid), name: cfg.env?.BONA_OWNER_NAME ?? 'Abdulaziz' });
+  } catch (err) {
+    // A malformed BONA_OWNER_JID must not take the public site (chat, enquiries, Retell
+    // tools) down with it. The dashboard stays usable for any account already stored,
+    // and this line says loudly why a fresh owner could not be seeded.
+    if (!(err instanceof TeamError)) throw err;
+    log({ level: 'error', evt: 'team.owner_seed_failed', error: err.code });
+  }
+  const audit = options.audit ?? createAudit(db, { log });
+  // The ONE sender for messages from the owner's number to anyone else: its rate limits
+  // live in memory, so a second instance would be a second, independent budget.
+  const sender = options.sender ?? createSender({ env: cfg.env ?? {}, team, log });
+  const sendCode = options.sendCode ?? ((o) => sender.sendTo({ ...o, kind: 'code' }));
   // The WhatsApp Ref-code poller. Read-only, and only when `BONA_WA_POLL` says so —
   // constructing it contacts nothing; the real server (below) is what puts it on a timer.
-  const poller = options.poller ?? (cfg.waPoll ? createPoller({ db, cfg, sendWhatsApp, log }) : null);
+  const poller = options.poller ?? (cfg.waPoll ? createPoller({ db, cfg, sendWhatsApp, isExcluded: team.isExcludedPhone, log }) : null);
   const tools = createToolHandlers({
     inventory, units, store, db, dataDir: cfg.dataDir, siteUrl: cfg.siteUrl, env: cfg.env, sendWhatsApp, log,
   });
@@ -216,14 +238,14 @@ export function createApp(options = {}) {
   // notably `app.poller`, which another branch attaches — through one live reference
   // rather than a second wiring step. `server` and `handle` are added at the end.
   const app = {
-    cfg, inventory, store, db, retell, tools, limiters, fanout, budget,
+    cfg, inventory, store, db, retell, tools, limiters, fanout, budget, team, audit, sender,
     poller: options.poller ?? null,
   };
 
   // The owner's dashboard. It owns its own auth (a WhatsApp one-time code), its own
   // security headers and its own limiter; nothing about it is CORS-enabled.
   const dashboard = options.dashboard ?? createDashboardRoutes({
-    db, cfg, inventory, fanout, app, log, sendWhatsApp, probeRetell,
+    db, cfg, inventory, fanout, app, log, sendWhatsApp, probeRetell, team, audit, sendCode,
   });
 
   function dynamicVariables({ locale, page, sessionId }) {
