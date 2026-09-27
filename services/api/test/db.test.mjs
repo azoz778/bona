@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { openDb, newId, STAGES, FANOUT_DESTS, SCHEMA_VERSION } from '../lib/db.mjs';
 
 function tmp() {
@@ -32,10 +33,46 @@ test('openDb creates an owner-only file inside an owner-only directory and migra
   const b = openDb(file);
   assert.equal(b.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION, 'a second open is a no-op');
   const tables = b.db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map((r) => r.name);
-  for (const name of ['sessions', 'events', 'leads', 'touchpoints', 'lead_stage_history', 'wa_cursor', 'wa_seen', 'ad_spend', 'fanout', 'auth_codes', 'auth_sessions']) {
+  for (const name of ['sessions', 'events', 'leads', 'touchpoints', 'lead_stage_history', 'wa_cursor', 'wa_seen', 'ad_spend', 'fanout', 'auth_codes', 'auth_sessions', 'users', 'auth_challenges', 'audit_log', 'never_list', 'settings']) {
     assert.ok(tables.includes(name), name);
   }
   assert.equal(b.ping(), true);
+  b.close();
+  cleanup();
+});
+
+test('a v2-era file db upgrades to v3, an existing session survives with a null user_id, and reopening is a no-op', () => {
+  // `MIGRATIONS` and `migrate()` are internal to lib/db.mjs, and there's no exported hook
+  // to stop the real migration chain partway through — reasonably so, since nothing else
+  // needs one. Reimplementing the v1 SQL here to build a "real" v2 file would duplicate
+  // (and could silently drift from) that internal SQL without testing anything the v1
+  // migration doesn't already cover elsewhere in this file.
+  //
+  // What v3 actually risks is narrower: every v3 statement is `CREATE ... IF NOT EXISTS`
+  // except one bare `ALTER TABLE auth_sessions ADD COLUMN user_id`, which is exactly the
+  // statement fix #1 above is about (two concurrent openers both reading user_version=2
+  // and both trying to add the column). So the minimal state that genuinely exercises the
+  // v2->v3 upgrade path is a from-scratch file with just the pre-v3 shape of
+  // `auth_sessions` (the same columns the real v1 migration creates it with — no `user_id`)
+  // holding a live row, and `user_version` left at 2. Opening it for real with `openDb`
+  // then runs the actual, unmodified `migrate()`.
+  const { file, cleanup } = tmp();
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const seed = new DatabaseSync(file);
+  seed.exec('CREATE TABLE auth_sessions (token_hash TEXT PRIMARY KEY, created INTEGER, expires INTEGER, ua TEXT)');
+  seed.prepare('INSERT INTO auth_sessions (token_hash, created, expires, ua) VALUES (?,?,?,?)').run('deadbeef', 1000, 99_999_999_999, 'UA');
+  seed.exec('PRAGMA user_version = 2');
+  seed.close();
+
+  const a = openDb(file);
+  assert.equal(a.db.prepare('PRAGMA user_version').get().user_version, 3, 'v3 is applied on top of the v2 file');
+  const row = a.db.prepare('SELECT * FROM auth_sessions WHERE token_hash = ?').get('deadbeef');
+  assert.ok(row, 'the pre-existing session row survives the migration');
+  assert.equal(row.user_id, null, 'a session opened before user accounts existed has no user');
+  a.close();
+
+  const b = openDb(file);
+  assert.equal(b.db.prepare('PRAGMA user_version').get().user_version, 3, 'reopening an up-to-date file is a no-op');
   b.close();
   cleanup();
 });
@@ -198,32 +235,14 @@ test('fan-out rows are queued once per destination, come due in order, and recor
 
 /* ---------------- dashboard auth ---------------- */
 
-test('a login code is one-shot, expires, and five wrong guesses burn it', () => {
-  const s = openDb(':memory:');
-  s.createAuthCode('123456', { now: 1000, ttlMs: 600_000 });
-  assert.equal(s.consumeAuthCode('000000', { now: 1001 }).ok, false);
-  assert.equal(s.consumeAuthCode('123456', { now: 1002 }).ok, true);
-  assert.equal(s.consumeAuthCode('123456', { now: 1003 }).ok, false, 'used once');
-
-  s.createAuthCode('222222', { now: 2000, ttlMs: 600_000 });
-  assert.equal(s.consumeAuthCode('222222', { now: 2000 + 600_001 }).ok, false, 'expired');
-
-  s.createAuthCode('333333', { now: 3000, ttlMs: 600_000 });
-  for (let i = 0; i < 5; i += 1) assert.equal(s.consumeAuthCode('999999', { now: 3001 + i }).ok, false);
-  const burnt = s.consumeAuthCode('333333', { now: 3010 });
-  assert.equal(burnt.ok, false, 'five wrong guesses and the right code no longer works');
-  assert.equal(burnt.reason, 'attempts');
-  assert.ok(!s.db.prepare('SELECT code_hash FROM auth_codes').all().some((r) => r.code_hash.includes('333333')), 'codes are stored hashed');
-  s.close();
-});
-
 test('a dashboard session is checked by token hash and can be deleted or expire', () => {
   const s = openDb(':memory:');
-  s.createAuthSession('tok_secret', { now: 1000, ttlMs: 30 * 86_400_000, ua: 'UA' });
+  s.createAuthSession('tok_secret', { now: 1000, ttlMs: 30 * 86_400_000, ua: 'UA', userId: 'USR-1' });
   assert.equal(s.checkAuthSession('tok_secret', { now: 2000 }).ua, 'UA');
   assert.equal(s.checkAuthSession('tok_other', { now: 2000 }), null);
   assert.equal(s.checkAuthSession('tok_secret', { now: 1000 + 31 * 86_400_000 }), null, 'expired');
-  s.createAuthSession('tok_two', { now: 1000, ttlMs: 1000 });
+  s.createAuthSession('tok_two', { now: 1000, ttlMs: 1000, userId: 'USR-1' });
+  assert.throws(() => s.createAuthSession('tok_three', { now: 1000, ttlMs: 1000 }), /userId/, 'a session always names its person');
   assert.equal(s.deleteAuthSession('tok_two'), true);
   assert.equal(s.deleteAuthSession('tok_two'), false);
   assert.ok(!s.db.prepare('SELECT token_hash FROM auth_sessions').all().some((r) => r.token_hash.includes('tok_')), 'tokens are stored hashed');
