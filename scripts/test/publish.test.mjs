@@ -652,3 +652,9 @@ test('lock: one holder at a time; a LIVE holder is never taken over whatever its
   assert.equal(fs.existsSync(file), false);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+ test('pending design review cannot be bypassed by force-id', () => {
+ const e=mk({reviewStatus:'pending'});
+ assert.equal(decide(e,ctx({forceId:e.id})).status,'deferred:review');
+ assert.equal(decide(mk({reviewStatus:'approved'}),ctx()).status,'candidate');
+ });

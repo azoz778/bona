@@ -88,7 +88,15 @@ export async function resolveImage(image) {
  */
 export async function bestPhotos(listing, n = 6) {
   const out = [];
-  for (const [index, image] of (listing.images || []).entries()) {
+  const all = listing.images || [];
+  const selected = listing.socialPhotoIndices;
+  if (selected && (!Array.isArray(selected) || !selected.length ||
+      selected.some((i) => !Number.isInteger(i) || i < 0 || i >= all.length) ||
+      new Set(selected).size !== selected.length)) {
+    throw new Error(`Invalid socialPhotoIndices for ${listing.id}`);
+  }
+  const candidates = selected ? selected.map((index) => [index, all[index]]) : [...all.entries()];
+  for (const [index, image] of candidates) {
     if (out.length >= n) break;
     const file = await resolveImage(image);
     if (!file) continue;

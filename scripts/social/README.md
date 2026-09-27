@@ -534,3 +534,31 @@ schedules them so the day's plan is complete; treat those rows as a to-do list.
 - **ffmpeg** is the static build at `~/.local/bin/ffmpeg`, the same one `services/intake`
   uses. Override with `BONA_FFMPEG_BIN`.
 - Redirect all output with `BONA_SOCIAL_OUT=/some/dir`.
+
+
+## Owner review workflow (2026-09-28)
+
+Automatic daily filler stories were removed from the legacy calendar generator.
+New calendar and queue entries carry `reviewStatus: pending`; the queue publishers
+refuse them, including Instagram force-id. Existing legacy entries without this field
+retain prior semantics, so do NOT restart a live publisher against its old calendar.
+Current IG/FB timers were disabled for owner review; deployment has not happened.
+
+Render the approval package with:
+`node scripts/social/make-review-package.mjs /absolute/output/directory`
+This writes four Instagram 4:5 slides, four Facebook square images, a 9:16 story,
+bilingual captions, a pending manifest, and measured text bounds. It makes no network
+calls and publishes nothing. Inspect the actual JPEGs before asking for owner review.
+
+Editorial rows no longer silently borrow property imagery or generic website OG art.
+They remain incomplete drafts until purpose-built artwork replaces the empty assets.
+Listing openers no longer invent exclusivity or viewing arrangements.
+For listing imagery, optional `socialPhotoIndices` selects explicitly reviewed image
+indices in the desired order; malformed/duplicate selections fail instead of falling
+back. Original intake ranking remains the default when no curation is supplied.
+Reject dark, cluttered, wrong-location or brochure-placeholder images by visual review;
+correct dimensions alone do not establish quality. Never fabricate a replacement home.
+
+Owner review of a sample does not approve the old calendar. Prepare a small replacement
+queue, verify the exact assets/copy and licence basis, deploy the reviewed code/assets,
+then separately resume timers only when the owner has authorized resumption.
