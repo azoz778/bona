@@ -125,18 +125,10 @@ export function createDashboardRoutes({
   auth = null, stats = null, log = () => {}, now = () => Date.now(),
 } = {}) {
   const statistics = stats ?? createStats({ db, now });
-  if (!team) {
-    // Fail closed rather than throw: without the team store nobody can be identified,
-    // so every dashboard and admin request is refused, while the rest of the server
-    // (the site's chat, the Retell tools) still starts. index.mjs always passes `team`.
-    log({ level: 'error', evt: 'dash.no_team_store' });
-    const closed = async ({ res }) => {
-      const body = Buffer.from(JSON.stringify({ error: 'dashboard_unavailable' }), 'utf8');
-      res.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': body.length, ...SECURITY_HEADERS });
-      res.end(body);
-    };
-    return { handle: closed, owns: ownsDashboardPath, auth: null, stats: statistics };
-  }
+  // Without the team store nobody can be identified. index.mjs always builds one (and
+  // seeds the owner) before this runs, so a missing one is a wiring bug: say so at start-up
+  // rather than serve a dashboard that can only ever refuse.
+  if (!team) throw new TypeError('createDashboardRoutes needs the team store');
   const authenticator = auth ?? createAuth({ db, team, audit, cfg, sendCode, now, log });
   const maxBodyBytes = Number(cfg.maxBodyBytes ?? 16 * 1024);
   const limiters = {

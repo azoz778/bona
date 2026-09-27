@@ -38,6 +38,7 @@ async function withDash(overrides = {}, fn) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-dash-'));
   const db = openDb(':memory:');
   const sent = [];
+  const sentTo = [];
   const app = createApp({
     config: {
       port: 0, host: '127.0.0.1', siteUrl: 'https://bona.azoz.uk', publicApi: 'https://bona-api.azoz.uk',
@@ -55,6 +56,7 @@ async function withDash(overrides = {}, fn) {
     db,
     probeRetell: overrides.probeRetell ?? (async () => 'ok'),
     sendWhatsApp: overrides.sendWhatsApp ?? (async (text) => { sent.push(text); return { ok: true }; }),
+    sendCode: overrides.sendCode ?? (async ({ jid, text }) => { sent.push(text); sentTo.push(jid); return { ok: true }; }),
     log: overrides.log ?? (() => {}),
     ...(overrides.app ?? {}),
   });
@@ -91,18 +93,20 @@ async function withDash(overrides = {}, fn) {
    * Ask for a code the way a browser does, and keep what the browser would keep: the
    * six digits from the "phone" and the `bona_dash_try` nonce from the response.
    */
-  async function askForCode(opts = {}) {
-    const res = await postForm('/dashboard/login/code', { _dash: '1' }, opts);
-    const code = /(\d{6})/.exec(sent.at(-1) ?? '')?.[1] ?? null;
+  async function askForCode({ phone = '0593296933', ...opts } = {}) {
+    const before = sent.length;
+    const res = await postForm('/dashboard/login/code', { _dash: '1', phone }, opts);
+    await app.dashboard?.auth?.flush?.();
+    const code = sent.length > before ? (/(\d{6})/.exec(sent.at(-1) ?? '')?.[1] ?? null) : null;
     const nonce = cookieValue(res, 'bona_dash_try');
     return { res, code, nonce, tryCookie: nonce ? `bona_dash_try=${nonce}` : '' };
   }
 
   /** The whole login: ask for a code, read it off the "phone", type it back. */
-  async function login() {
-    const asked = await askForCode();
+  async function login({ phone = '0593296933' } = {}) {
+    const asked = await askForCode({ phone });
     assert.equal(asked.res.status, 303, 'the code request redirects to the code form');
-    assert.ok(asked.code, `no code in the WhatsApp message: ${sent.at(-1)}`);
+    assert.ok(asked.code, 'no code was sent for that login');
     assert.ok(asked.nonce, 'the code request must hand the browser a try nonce');
     const verified = await postForm('/dashboard/login/verify', { _dash: '1', code: asked.code }, { cookie: asked.tryCookie });
     const session = cookieValue(verified, 'bona_dash');
@@ -111,7 +115,7 @@ async function withDash(overrides = {}, fn) {
   }
 
   try {
-    await fn({ app, db, base, get, postForm, postJson, login, askForCode, cookiesOf, cookieValue, sent });
+    await fn({ app, db, base, get, postForm, postJson, login, askForCode, cookiesOf, cookieValue, sent, sentTo });
   } finally {
     await new Promise((resolve) => app.server.close(resolve));
     db.close();
@@ -568,7 +572,7 @@ test('a stage change with the marker moves the lead, writes history and queues t
 
     const history = db.stageHistory(id);
     assert.equal(history.at(-1).stage, 'won');
-    assert.equal(history.at(-1).actor, 'owner');
+    assert.equal(history.at(-1).actor, 'Abdulaziz', 'the actor is the signed-in person, not a role');
     assert.equal(history.at(-1).note, 'Signed today');
 
     const event = db.getEvent(body.event_id);
@@ -859,16 +863,13 @@ async function withTeamRoutes(fn) {
   }
 }
 
-test('routes without the team store refuse every dashboard request instead of crashing the server', async () => {
+test('the routes refuse to be built without the team store', () => {
   const db = openDb(':memory:');
-  const routes = createDashboardRoutes({ db, cfg: {} });
-  let status = null; let body = '';
-  const res = { writeHead: (s) => { status = s; }, end: (b) => { body = String(b); } };
-  await routes.handle({ req: {}, res, url: new URL('http://x/dashboard'), p: '/dashboard', ip: '1.1.1.1' });
-  assert.equal(status, 503);
-  assert.deepEqual(JSON.parse(body), { error: 'dashboard_unavailable' });
-  assert.equal(routes.owns('/v1/admin/team'), true);
-  db.close();
+  try {
+    assert.throws(() => createDashboardRoutes({ db, cfg: {} }), /needs the team store/);
+  } finally {
+    db.close();
+  }
 });
 
 test('a code goes to the WhatsApp of the person whose number was typed; a bad number goes back to step one', async () => {
@@ -1078,4 +1079,143 @@ test('a person deactivated while their write body is still arriving does not get
     assert.equal(res.status, 401);
     assert.equal(db.getLead(id).stage, 'new');
   });
+});
+
+/* ---------------- team accounts, through createApp's own wiring ---------------- */
+
+test('an unknown number gets the same answer and nothing is sent', async () => {
+  await withDash({}, async ({ askForCode, sent }) => {
+    const before = sent.length;
+    const asked = await askForCode({ phone: '0511111111' });
+    assert.equal(asked.res.status, 303);
+    assert.equal(asked.res.headers.get('location'), '/dashboard/login?step=code&sent=1');
+    assert.ok(asked.nonce);
+    assert.equal(sent.length, before);
+  });
+});
+
+test('the owner adds a person, who logs in with a code sent to their own WhatsApp and cannot open Team', async () => {
+  await withDash({}, async ({ get, postForm, login, sentTo }) => {
+    const owner = await login();
+    assert.equal(sentTo.at(-1), '966593296933@s.whatsapp.net', 'the owner seeded from BONA_OWNER_JID gets his own code');
+    const team = await get('/dashboard/team', { cookie: owner.cookie });
+    assert.equal(team.status, 200);
+    assertLocked(team);
+    const add = await postForm('/v1/admin/team', { _dash: '1', name: 'Sara', phone: '0500000001', role: 'staff' }, { cookie: owner.cookie });
+    assert.equal(add.status, 303);
+    assert.equal(add.headers.get('location'), '/dashboard/team?ok=added');
+
+    const staff = await login({ phone: '0500000001' });
+    assert.equal(sentTo.at(-1), '966500000001@s.whatsapp.net');
+    const desk = await (await get('/dashboard', { cookie: staff.cookie })).text();
+    assert.match(desk, /<b><bdi>Sara<\/bdi><\/b><s>Team<\/s>/);
+    assert.doesNotMatch(desk, /href="\/dashboard\/team"/);
+    assert.equal((await get('/dashboard/team', { cookie: staff.cookie })).status, 403);
+    const denied = await postForm('/v1/admin/team', { _dash: '1', name: 'X', phone: '0500000002' }, { cookie: staff.cookie });
+    assert.equal(denied.status, 403);
+    assert.deepEqual(await denied.json(), { error: 'owner_only' });
+  });
+});
+
+test('deactivating a person logs them out everywhere at once', async () => {
+  await withDash({}, async ({ app, get, postForm, login }) => {
+    const owner = await login();
+    await postForm('/v1/admin/team', { _dash: '1', name: 'Sara', phone: '0500000001' }, { cookie: owner.cookie });
+    const staff = await login({ phone: '0500000001' });
+    assert.equal((await get('/dashboard', { cookie: staff.cookie })).status, 200);
+    const id = app.team.getUserByPhone('0500000001').user_id;
+    const off = await postForm(`/v1/admin/team/${id}/deactivate`, { _dash: '1' }, { cookie: owner.cookie });
+    assert.equal(off.headers.get('location'), '/dashboard/team?ok=deactivated');
+    const after = await get('/dashboard', { cookie: staff.cookie });
+    assert.equal(after.status, 302);
+    assert.equal(after.headers.get('location'), '/dashboard/login');
+    const me = app.team.getUserByPhone('0593296933').user_id;
+    const self = await postForm(`/v1/admin/team/${me}/deactivate`, { _dash: '1' }, { cookie: owner.cookie });
+    assert.equal(self.headers.get('location'), '/dashboard/team?error=last_owner');
+  });
+});
+
+test('a stage change and a note carry the name of the person who made them', async () => {
+  await withDash({}, async ({ app, db, postForm, login }) => {
+    const id = seedLead(db);
+    const owner = await login();
+    await postForm('/v1/admin/team', { _dash: '1', name: 'Sara', phone: '0500000001' }, { cookie: owner.cookie });
+    const staff = await login({ phone: '0500000001' });
+    await postForm(`/v1/admin/leads/${id}/stage`, { _dash: '1', stage: 'contacted' }, { cookie: staff.cookie });
+    assert.equal(db.stageHistory(id).at(-1).actor, 'Sara');
+    await postForm(`/v1/admin/leads/${id}/note`, { _dash: '1', note: 'called her' }, { cookie: staff.cookie });
+    assert.equal(db.touchpointsForLead(id).at(-1).meta.actor, 'Sara');
+    // The two may share a millisecond, so assert membership rather than order.
+    const actions = app.audit.recent(10).map((r) => r.action);
+    assert.ok(actions.includes('note') && actions.includes('stage'), actions.join(','));
+  });
+});
+
+test('the never list and the sending switch are owner-only and take effect', async () => {
+  await withDash({}, async ({ app, postForm, login }) => {
+    const owner = await login();
+    await postForm('/v1/admin/never', { _dash: '1', phone: '0511111111', note: 'cousin' }, { cookie: owner.cookie });
+    assert.equal(app.team.isExcludedPhone('966511111111'), true);
+    await postForm('/v1/admin/settings', { _dash: '1', sending_enabled: '0' }, { cookie: owner.cookie });
+    assert.equal(app.team.sendingEnabled(), false);
+    await postForm('/v1/admin/settings', { _dash: '1', sending_enabled: '1' }, { cookie: owner.cookie });
+    assert.equal(app.team.sendingEnabled(), true);
+  });
+});
+
+test('createApp seeds the owner from BONA_OWNER_JID and hands him every session that predates accounts', () => {
+  const db = openDb(':memory:');
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-dash-'));
+  // A session opened before team accounts existed: no user behind it. Written directly,
+  // because the store's own API no longer opens one without a person.
+  db.db.prepare('INSERT INTO auth_sessions (token_hash, created, expires, ua) VALUES (?,?,?,?)')
+    .run('legacy-hash', Date.now(), Date.now() + 86_400_000, 'test');
+  try {
+    const app = createApp({
+      config: {
+        port: 0, host: '127.0.0.1', siteUrl: 'https://bona.azoz.uk', publicApi: 'https://bona-api.azoz.uk',
+        dataDir, inventoryFile: WORKTREE_LISTINGS, origins: DEFAULT_ORIGINS, toolToken: TOKEN,
+        retellApiKey: 'test', retellMock: true, chatAgentId: 'agent_chat', voiceAgentId: 'agent_voice',
+        maxBodyBytes: 16 * 1024, chatRatePerMin: 30, tokenRatePerMin: 6, toolRatePerMin: 600, toolAuthFailRatePerMin: 10,
+        allowQueryToken: false, maxChatsPerDay: 300, maxCallsPerDay: 60, maxTurnsPerSession: 40, dashCookieDays: 30,
+        env: { BONA_OWNER_JID: '966500000009:3@s.whatsapp.net', BONA_OWNER_NAME: 'Owner Two' },
+        ids: {}, version: '1.0.0', trustedProxies: [],
+      },
+      inventory, db, probeRetell: async () => 'ok', sendWhatsApp: async () => ({ ok: true }), log: () => {},
+    });
+    const owner = app.team.getUserByPhone('966500000009');
+    assert.equal(owner.role, 'owner');
+    assert.equal(owner.active, 1);
+    assert.equal(owner.name, 'Owner Two');
+    const row = db.db.prepare('SELECT user_id FROM auth_sessions WHERE token_hash = ?').get('legacy-hash');
+    assert.equal(row.user_id, owner.user_id);
+  } finally {
+    db.close();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('a malformed BONA_OWNER_JID is logged and does not stop the server from being built', () => {
+  const db = openDb(':memory:');
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-dash-'));
+  const logs = [];
+  try {
+    const app = createApp({
+      config: {
+        port: 0, host: '127.0.0.1', siteUrl: 'https://bona.azoz.uk', publicApi: 'https://bona-api.azoz.uk',
+        dataDir, inventoryFile: WORKTREE_LISTINGS, origins: DEFAULT_ORIGINS, toolToken: TOKEN,
+        retellApiKey: 'test', retellMock: true, chatAgentId: 'agent_chat', voiceAgentId: 'agent_voice',
+        maxBodyBytes: 16 * 1024, chatRatePerMin: 30, tokenRatePerMin: 6, toolRatePerMin: 600, toolAuthFailRatePerMin: 10,
+        allowQueryToken: false, maxChatsPerDay: 300, maxCallsPerDay: 60, maxTurnsPerSession: 40, dashCookieDays: 30,
+        env: { BONA_OWNER_JID: 'not-a-number' }, ids: {}, version: '1.0.0', trustedProxies: [],
+      },
+      inventory, db, probeRetell: async () => 'ok', sendWhatsApp: async () => ({ ok: true }), log: (e) => logs.push(e),
+    });
+    assert.ok(app.server);
+    assert.equal(app.team.listUsers().length, 0);
+    assert.ok(logs.some((e) => e.evt === 'team.owner_seed_failed' && e.error === 'bad_phone'));
+  } finally {
+    db.close();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
 });
