@@ -191,7 +191,9 @@ export async function checkMetaCapi({ env, site, probe: send = probe }) {
 export function checkSiteTag({ id, label, value, homeHtml, checklist, siteKey }) {
   if (!present(value)) return row(id, 'pending-owner', `${label} id missing: site.json → analytics.${siteKey} — ${checklist}`);
   if (homeHtml == null) return row(id, DRY ? 'pending-owner' : 'error', `${DRY ? '[dry-run] ' : ''}site.json carries ${label} ${value}; live page not fetched`);
-  if (homeHtml.includes(value)) return row(id, 'live', `${label} ${value} is served by the live site (loads after consent)`);
+  if (homeHtml.includes(value)) return id === 'tiktok-pixel'
+    ? row(id, 'pending-owner', `${label} ${value} is served by the live site (loads after consent); event receipt and reporting still require verification`)
+    : row(id, 'live', `${label} ${value} is served by the live site (loads after consent)`);
   return row(id, 'error', `${label} ${value} is in site.json but the live home page does not serve it — deploy pending, or Head.astro not wired`);
 }
 
