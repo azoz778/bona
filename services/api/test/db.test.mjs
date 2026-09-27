@@ -237,11 +237,12 @@ test('fan-out rows are queued once per destination, come due in order, and recor
 
 test('a dashboard session is checked by token hash and can be deleted or expire', () => {
   const s = openDb(':memory:');
-  s.createAuthSession('tok_secret', { now: 1000, ttlMs: 30 * 86_400_000, ua: 'UA' });
+  s.createAuthSession('tok_secret', { now: 1000, ttlMs: 30 * 86_400_000, ua: 'UA', userId: 'USR-1' });
   assert.equal(s.checkAuthSession('tok_secret', { now: 2000 }).ua, 'UA');
   assert.equal(s.checkAuthSession('tok_other', { now: 2000 }), null);
   assert.equal(s.checkAuthSession('tok_secret', { now: 1000 + 31 * 86_400_000 }), null, 'expired');
-  s.createAuthSession('tok_two', { now: 1000, ttlMs: 1000 });
+  s.createAuthSession('tok_two', { now: 1000, ttlMs: 1000, userId: 'USR-1' });
+  assert.throws(() => s.createAuthSession('tok_three', { now: 1000, ttlMs: 1000 }), /userId/, 'a session always names its person');
   assert.equal(s.deleteAuthSession('tok_two'), true);
   assert.equal(s.deleteAuthSession('tok_two'), false);
   assert.ok(!s.db.prepare('SELECT token_hash FROM auth_sessions').all().some((r) => r.token_hash.includes('tok_')), 'tokens are stored hashed');

@@ -15,7 +15,9 @@ export const AUDIT_ACTIONS = [
 
 export function createAudit(store, { now = () => Date.now(), log = () => {} } = {}) {
   const insert = store.db.prepare('INSERT INTO audit_log (id, ts, user_id, action, target, meta) VALUES (?,?,?,?,?,?)');
-  const latest = store.db.prepare('SELECT * FROM audit_log ORDER BY ts DESC, id DESC LIMIT ?');
+  // Ties on `ts` (two actions in one millisecond, or an injected clock) fall back to
+  // insertion order: `id` ends in random characters, so it cannot order them.
+  const latest = store.db.prepare('SELECT * FROM audit_log ORDER BY ts DESC, rowid DESC LIMIT ?');
 
   function record({ userId = null, action, target = null, meta = null } = {}) {
     if (!AUDIT_ACTIONS.includes(action)) throw new TypeError(`unknown audit action: ${action}`);

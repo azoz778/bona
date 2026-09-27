@@ -111,9 +111,16 @@ export function readBody(req, maxBytes) {
 export function createDashboardRoutes({
   db, cfg = {}, inventory = null, fanout = null, app = null,
   sendWhatsApp = null, probeRetell = null,
+  team = null, audit = null, sendCode = null,
   auth = null, stats = null, log = () => {}, now = () => Date.now(),
 } = {}) {
-  const authenticator = auth ?? createAuth({ db, cfg, sendWhatsApp, now, log });
+  // Interim (Phase 1, until Task 8/10 wire `team` from index.mjs): the authenticator is
+  // built on first use, so a server started without the team store still mounts every
+  // other route; its login fails loudly (createAuth throws) instead of the whole app.
+  let authInstance = auth;
+  const authenticator = new Proxy({}, {
+    get: (_target, key) => (authInstance ??= createAuth({ db, team, audit, cfg, sendCode, now, log }))[key],
+  });
   const statistics = stats ?? createStats({ db, now });
   const maxBodyBytes = Number(cfg.maxBodyBytes ?? 16 * 1024);
   const limiters = {

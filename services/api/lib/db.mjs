@@ -455,9 +455,15 @@ export function openDb(file = ':memory:') {
 
   /* -------------------- dashboard auth -------------------- */
 
-  function createAuthSession(token, { now = Date.now(), ttlMs = 30 * 86_400_000, ua = null, userId = null } = {}) {
+  /**
+   * Every session belongs to a person. `userId` is required: a session with no owner
+   * would be handed to the owner by `team.ensureOwner()` on the next start-up (that
+   * adoption exists only for sessions from before accounts).
+   */
+  function createAuthSession(token, { now = Date.now(), ttlMs = 30 * 86_400_000, ua = null, userId } = {}) {
+    if (typeof userId !== 'string' || !userId) throw new TypeError('createAuthSession needs a userId');
     prep('INSERT OR REPLACE INTO auth_sessions (token_hash, created, expires, ua, user_id) VALUES (?,?,?,?,?)')
-      .run(sha256(token), toInt(now), toInt(now + ttlMs), ua == null ? null : String(ua).slice(0, 300), userId == null ? null : String(userId));
+      .run(sha256(token), toInt(now), toInt(now + ttlMs), ua == null ? null : String(ua).slice(0, 300), userId);
     return { expires: now + ttlMs };
   }
 
