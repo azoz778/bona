@@ -82,11 +82,13 @@ const jsonLdText = JSON.stringify({ '@context': 'https://schema.org', '@graph': 
 // ---- Tags. Ids live in site.json → analytics; every one is optional. They are only ever handed to the browser as
 //      configuration: src/scripts/tags.js injects the vendor loaders after consent (see Consent.astro). ----
 const analytics = site.analytics as { ga4?: string | null; metaPixel?: string | null; snapPixel?: string | null; tiktokPixel?: string | null; gscVerification?: string | null };
+// Internal operations pages can contain client notes; never load TikTok there.
+const internalOperations = /^\/(?:ar\/)?dashboard(?:\/|$)/.test(path);
 const tags = {
   ga4: analytics.ga4 || null,
   metaPixel: analytics.metaPixel || null,
   snapPixel: analytics.snapPixel || null,
-  tiktokPixel: analytics.tiktokPixel || null,
+  tiktokPixel: internalOperations ? null : analytics.tiktokPixel || null,
 };
 const gsc = analytics.gscVerification || null;
 const apiBase = ((site as { concierge?: { apiBase?: string } }).concierge?.apiBase || '').replace(/\/+$/, '');
