@@ -30,8 +30,15 @@
  * Everything member-only (the audit row, the send, even a log line) runs in a later
  * macrotask (`setImmediate`), so it cannot run before the route has written its answer.
  * The synchronous database work — the member lookup, the budget count, the "void older
- * challenges" update and the insert — is the same on both paths; a stranger's queries
- * simply use a key that matches nothing.
+ * challenges" update and the insert — is the same on both paths; a stranger's budget
+ * count simply uses a key that matches nothing.
+ *
+ * A challenge's whole life is the same too, so no verify() answer tells them apart: every
+ * challenge for a number (real, decoy, or an over-budget decoy) voids that number's
+ * older ones, keyed by `phone_key` — an HMAC of the number under a per-process random
+ * key, never stored — so the first of two nonces answers 'used' for anyone. Attempts,
+ * expiry and 'no_request' already behave alike. Deactivating a member turns their codes
+ * in flight into decoys (lib/team.mjs) rather than deleting them.
  *
  * ## Limits
  *
@@ -41,8 +48,9 @@
  * minute and 200 a day. The send itself also passes the shared gate in lib/wa-send.mjs.
  *
  * Those limiters live in memory. The one that bounds guessing lives in the database, so
- * a restart does not reset it: a person has at most ONE live challenge (a new real code
- * voids their older unused ones, so guesses cannot be spread across several), and at
+ * a restart does not reset it: a number has at most ONE live challenge (a new code voids
+ * its older unused ones, so guesses cannot be spread across several; after a restart the
+ * pre-restart ones are left to expire, ten minutes at most), and at
  * most 5 real codes an hour and 10 a day, counted from their own `auth_challenges` rows.
  * Past that budget the request silently gets a decoy — same answer, same cookie, no
  * message. Worst case for an attacker: 10 codes x 5 guesses = 50 guesses in a million
@@ -199,6 +207,9 @@ const isHex32 = (v) => typeof v === 'string' && /^[0-9a-f]{32}$/.test(v);
  */
 export function createAuth({ db, team, audit = null, cfg = {}, sendCode, now = () => Date.now(), log = () => {}, random = crypto.randomInt } = {}) {
   if (!team) throw new TypeError('createAuth needs the team store');
+  // Refused here, not at the first login: a missing sender would otherwise surface only
+  // as a code that never arrives, while the page still says "a code is on its way".
+  if (typeof sendCode !== 'function') throw new TypeError('createAuth needs a sendCode function');
   const cookieDays = Number(cfg.dashCookieDays ?? 30) > 0 ? Number(cfg.dashCookieDays ?? 30) : 30;
   const sessionTtlMs = cookieDays * DAY_MS;
   const perPhone = createLimiter({ capacity: PHONE_CODES, perMs: CODE_WINDOW_MS, now });
@@ -207,6 +218,12 @@ export function createAuth({ db, team, audit = null, cfg = {}, sendCode, now = (
   const perDay = createLimiter({ capacity: GLOBAL_DAILY_CODES, perMs: DAY_MS, now });
   const inFlight = new Set();
   let lastPrune = -Infinity;
+  // Keys `auth_challenges.phone_key`. Generated here and never stored: the database never
+  // holds a phone-derived value that could be brute-forced offline. After a restart the
+  // older challenges simply are not voided by a new one; they expire within ten minutes,
+  // the same for a member and a stranger.
+  const phoneSecret = crypto.randomBytes(32);
+  const phoneKey = (digits) => crypto.createHmac('sha256', phoneSecret).update(digits, 'utf8').digest('hex');
 
   const stmts = new Map();
   const prep = (sql) => {
@@ -261,11 +278,15 @@ export function createAuth({ db, team, audit = null, cfg = {}, sendCode, now = (
     const nonce = crypto.randomBytes(16).toString('hex');
     // A decoy's hash is of 32 random hex characters: no six digits can ever match it.
     const codeHash = sha256(real ? code : crypto.randomBytes(16).toString('hex'));
+    const key = phoneKey(digits);
     db.transaction(() => {
-      // One live challenge per person: a new real code voids their older unused ones.
-      prep('UPDATE auth_challenges SET used = 1 WHERE user_id = ? AND used = 0').run(real?.user_id ?? '');
-      prep('INSERT INTO auth_challenges (challenge_id, user_id, code_hash, nonce_hash, created, expires, attempts, used) VALUES (?,?,?,?,?,?,0,0)')
-        .run(`CH-${crypto.randomBytes(8).toString('hex')}`, real?.user_id ?? null, codeHash, sha256(nonce), t, t + CODE_TTL_MS);
+      // One live challenge per NUMBER, real or decoy alike: every new challenge voids the
+      // number's older unused ones. Were only real codes to void, a stranger holding the
+      // first of two nonces would see 'used' for a member and 'bad_code' for anyone else.
+      // Voiding never un-counts: the budget above counts rows, used or not.
+      prep('UPDATE auth_challenges SET used = 1 WHERE phone_key = ? AND used = 0').run(key);
+      prep('INSERT INTO auth_challenges (challenge_id, user_id, code_hash, nonce_hash, created, expires, attempts, used, phone_key) VALUES (?,?,?,?,?,?,0,0,?)')
+        .run(`CH-${crypto.randomBytes(8).toString('hex')}`, real?.user_id ?? null, codeHash, sha256(nonce), t, t + CODE_TTL_MS, key);
     });
 
     if (real) {
