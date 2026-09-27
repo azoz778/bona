@@ -678,32 +678,45 @@ export function createDashboardRoutes({
     }, 'added');
   }
 
+  /**
+   * An owner can act on any account but their own, for the two moves that would take
+   * their own access away — deactivating themselves or dropping their own role to
+   * `staff`. This holds even with a second (or third) active owner in the room: the
+   * point is not "would this leave zero owners" (`team.mjs`'s `last_owner` already
+   * covers that) but "an owner's own access is someone else's to remove, never their
+   * own click" — ask another owner, on purpose, rather than one mis-tap.
+   */
+  function guardSelfChange(userId, what, role, me) {
+    if (userId !== me.user_id) return;
+    if (what === 'deactivate' || (what === 'role' && role !== 'owner')) throw new TeamError('self_change');
+  }
+
   function changePerson(ctx, userId, what) {
     const { fields, me } = ctx;
-    if (what === 'deactivate') {
-      return teamWrite(ctx, () => {
+    const role = what === 'role' ? asText(fields.role) : null;
+    return teamWrite(ctx, () => {
+      guardSelfChange(userId, what, role, me);
+      if (what === 'deactivate') {
         team.deactivateUser(userId);
         audit?.record({ userId: me.user_id, action: 'team_deactivate', target: userId });
-      }, 'deactivated');
-    }
-    if (what === 'reactivate') {
-      return teamWrite(ctx, () => {
+        return;
+      }
+      if (what === 'reactivate') {
         team.reactivateUser(userId);
         audit?.record({ userId: me.user_id, action: 'team_reactivate', target: userId });
-      }, 'reactivated');
-    }
-    return teamWrite(ctx, () => {
-      const role = asText(fields.role);
+        return;
+      }
       team.setRole(userId, role);
       audit?.record({ userId: me.user_id, action: 'team_role', target: userId, meta: { role } });
-    }, 'role');
+    }, what === 'deactivate' ? 'deactivated' : what === 'reactivate' ? 'reactivated' : 'role');
   }
 
   function neverWrite(ctx, remove) {
     const { fields, me } = ctx;
     if (remove) {
       return teamWrite(ctx, () => {
-        team.removeNever(asText(fields.phone));
+        const removed = team.removeNever(asText(fields.phone));
+        if (!removed) throw new TeamError('not_found');
         audit?.record({ userId: me.user_id, action: 'never_remove' });
       }, 'never_removed');
     }
@@ -717,7 +730,12 @@ export function createDashboardRoutes({
     const { fields, me } = ctx;
     return teamWrite(ctx, () => {
       if (!Object.hasOwn(fields, 'sending_enabled')) throw new TeamError('bad_setting');
-      const value = String(fields.sending_enabled) === '0' ? '0' : '1';
+      // Fails closed: `asText` turns anything that is not literally a string (a JSON
+      // `false`, `null`, a number) into `''`, and `team.setSetting` itself refuses any
+      // value outside `SETTINGS_ALLOWED` — including `''`, `"off"`, `"true"` — before
+      // it ever reaches the row. Coercing here (the old `=== '0' ? '0' : '1'`) would
+      // have defeated that check by handing it only ever '0' or '1' to approve.
+      const value = asText(fields.sending_enabled);
       team.setSetting('sending_enabled', value, { by: me.user_id });
       audit?.record({ userId: me.user_id, action: 'setting', target: 'sending_enabled', meta: { value } });
     }, 'setting');
@@ -821,7 +839,8 @@ export function createDashboardRoutes({
     if (p === '/v1/admin/team') return addPerson(ctx);
     if (p === '/v1/admin/never') return neverWrite(ctx, false);
     if (p === '/v1/admin/never/remove') return neverWrite(ctx, true);
-    return saveSetting(ctx);
+    if (p === '/v1/admin/settings') return saveSetting(ctx);
+    return sendJson(res, 404, { error: 'not_found' });
   }
 
   /**

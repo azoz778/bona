@@ -690,6 +690,8 @@ export const MESSAGES = {
   last_owner: 'There has to be at least one active owner.',
   not_found: 'No such person.',
   bad_setting: 'That switch does not exist.',
+  bad_setting_value: 'That setting value is not allowed.',
+  self_change: "You can't remove your own access — ask another owner.",
   owner_only: 'Only an owner can do that.',
 };
 
