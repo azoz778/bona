@@ -225,3 +225,9 @@ test('TikTok readiness makes test-mode routing explicit', () => {
   assert.equal(r.status, 'pending-owner');
   assert.match(r.detail, /Test mode configured/);
 });
+
+test('a served TikTok Pixel does not prove event receipt', () => {
+  const result = checkSiteTag({ id: 'tiktok-pixel', label: 'TikTok Pixel', value: 'real-pixel', homeHtml: '<script>real-pixel</script>', siteKey: 'tiktokPixel' });
+  assert.equal(result.status, 'pending-owner');
+  assert.match(result.detail, /event receipt and reporting still require verification/);
+});
