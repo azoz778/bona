@@ -128,4 +128,23 @@ issuer-specific lifecycle before scheduling any refresh job.
 - [OAuth expiry, rotation and revocation](https://developers.tiktok.com/docs/en/oauth-user-access-token-management)
 
 The account owner's consent and platform approval are external prerequisites;
-code and mock tests alone establish neither. No TikTok delivery has been verified.
+code and mock tests alone establish neither. Server Test Events receipt is verified.
+Browser Pageview transport returned HTTP 200 with the correct test-session ID, but
+its Test Events display remains unresolved. Production routing is enabled; person
+matching, deduplication and production reporting remain unverified.
+
+## Remaining organic API prerequisites (28 September 2026)
+
+The account browser operator reports no linked management account; the owner still
+needs to complete mobile approval for the existing profile. Native Business Center
+Publisher access and the Events API token do not establish an organic API grant.
+No approved publishing app/account grant or app credentials have been verified.
+
+The [Accounts API overview](https://business-api.tiktok.com/portal/docs/accounts-api-overview/v1.3)
+requires the Accounts API Access Application Form before a new developer app or a
+permission increase involving TikTok Accounts (effective 20 March 2026). Complete
+that application accurately, obtain app approval and required publishing/insights
+permissions, then authorize the owner's account through the registered callback.
+Store issued credentials securely and verify the actual scopes/account/expiry
+before implementing unattended publishing or renewal. Existing-profile mobile
+approval and platform app approval are the outstanding external prerequisites.
