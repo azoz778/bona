@@ -45,15 +45,22 @@ function cleanPhone(raw) {
   return digits && !digits.startsWith('0') ? digits : null;
 }
 
+// Bidi control characters (Unicode category Cf, not Cc, so `\p{Cc}` misses them): the
+// Arabic Letter Mark plus the explicit directional marks, embeddings, overrides and
+// isolates. A name carrying one of these can repaint how the *rest* of the row reads —
+// e.g. a trailing U+202E (RLO) turning the table cells after it right-to-left — so they
+// are stripped at the source rather than merely contained on render.
+const BIDI_CONTROLS = /[؜‎‏‪-‮⁦-⁩]/g;
+
 /**
- * Truncated by code point (never splitting a surrogate pair), control characters
- * gone, internal whitespace collapsed to single spaces, trimmed. `null`/`undefined`
- * (and anything that cleans down to nothing) become `fallback`, never the string
- * `"null"`.
+ * Truncated by code point (never splitting a surrogate pair), control and bidi-control
+ * characters gone, internal whitespace collapsed to single spaces, trimmed.
+ * `null`/`undefined` (and anything that cleans down to nothing) become `fallback`,
+ * never the string `"null"`.
  */
 function cleanName(raw, fallback = '') {
   const truncated = Array.from(String(raw ?? '')).slice(0, MAX_NAME).join('');
-  const collapsed = truncated.replace(/\p{Cc}/gu, '').replace(/\s+/g, ' ').trim();
+  const collapsed = truncated.replace(/\p{Cc}/gu, '').replace(BIDI_CONTROLS, '').replace(/\s+/g, ' ').trim();
   return collapsed || fallback;
 }
 
