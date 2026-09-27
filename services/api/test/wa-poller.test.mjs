@@ -877,3 +877,138 @@ test('(n) with no team wired, a lid-only chat is judged exactly as before — no
   assert.ok(!h.logs.some((l) => l.evt === 'poll.lid_only_unexcludable'));
   h.cleanup();
 });
+
+/* ---------------- (o) a lid-learning lookup that fails does not stall the loop ---------------- */
+
+/**
+ * Makes any statement touching `users.wa_lid` throw, as if the column were missing —
+ * exactly what `learnTeamLid`/`isTeamLid` (lib/team.mjs) run, and nothing else: the
+ * `leads` table's own (unrelated) `wa_lid` column is left alone.
+ */
+function withoutUsersWaLid(store) {
+  const real = store.db.prepare.bind(store.db);
+  store.db.prepare = (sql) => {
+    if (/\busers\b/.test(sql) && /wa_lid/.test(sql)) throw new Error('no such column: wa_lid');
+    return real(sql);
+  };
+  return store;
+}
+
+test('(o) a learnTeamLid failure is logged, never numbers or lids, and the record after it still gets processed', async () => {
+  const excluded = new Set(['966500000000']);
+  const h = harness({
+    isExcluded: (digits) => excluded.has(digits),
+    windows: [[
+      // A team phone paired with its lid — this is exactly where `learnTeamLid` runs.
+      msg({ id: 'TEAM-PAIR', jid: '272516946294519@lid', jidAlt: SENDER, pushName: null, ts: NOW - 90_000, text: 'Bona dashboard code: 123456' }),
+      // An unrelated message right after it: proof the tick did not stall on the failure.
+      msg({ id: 'AFTER', jid: '966511111111@s.whatsapp.net', ts: NOW - 30_000, text: 'Ref BONA-W003 · K7Q2XR' }),
+    ]],
+  });
+  withoutUsersWaLid(h.db);
+
+  const tally = await h.poller.tick();
+  assert.equal(tally.error, undefined, 'the tick itself must not fail over this');
+  assert.equal(tally.ignored, 1, 'the team-phone record is still excluded, learning failure or not');
+  assert.equal(tally.matched, 1, 'the record behind it in the same window is still reached');
+  assert.equal(h.leads().length, 1);
+
+  const warned = h.logs.find((l) => l.evt === 'poll.lid_learn_failed');
+  assert.ok(warned, 'the failure is logged');
+  assert.equal(warned.level, 'warn');
+  const dump = JSON.stringify(warned);
+  assert.ok(!dump.includes('272516946294519') && !dump.includes('966500000000'), 'no lid, no phone in the log');
+  h.cleanup();
+});
+
+test('(o) an isTeamLid failure is treated as uncheckable rather than crashing the tick', async () => {
+  const h = harness({
+    isExcluded: (digits) => digits === '966500000000',
+    windows: [[
+      // Lid-only: no phone to hand `isExcluded`, so the poller falls back to `isTeamLid`
+      // — the call this test makes fail.
+      msg({ id: 'LID-ONLY', jid: '272516946294519@lid', jidAlt: null, pushName: null, ts: NOW - 90_000, text: 'مرحبا بونا' }),
+      msg({ id: 'AFTER', jid: '966511111111@s.whatsapp.net', ts: NOW - 30_000, text: 'Ref BONA-W003 · K7Q2XR' }),
+    ]],
+  });
+  withoutUsersWaLid(h.db);
+
+  const tally = await h.poller.tick();
+  assert.equal(tally.error, undefined);
+  assert.equal(tally.lidOnlyUnexcludable, 1, 'counted as uncheckable, not thrown');
+  assert.equal(tally.matched, 2, 'both the lid-only record and the one after it are still judged');
+  assert.equal(h.leads().length, 2);
+  assert.ok(!h.logs.some((l) => l.evt === 'poll.lid_learn_failed'), 'a lookup failure is quiet, not another noisy warn');
+  h.cleanup();
+});
+
+/* ---------------- (p) a lid is learned only from a message we received ---------------- */
+
+test('(p) a fromMe record pairing a team phone with a lid does not teach the pairing', async () => {
+  const h = harness({
+    isExcluded: (digits) => digits === '966500000000',
+    windows: [
+      // Outbound: our own message to a team member, whose alt happens to carry their
+      // number. `jidAlt` on a `fromMe` record is not trusted for learning (see
+      // lib/wa-poller.mjs, and lib/evolution.mjs's `normaliseRecord` for why).
+      [msg({ id: 'OUT-PAIR', jid: '272516946294519@lid', jidAlt: SENDER, fromMe: true, pushName: null, text: 'Bona dashboard code: 123456' })],
+      // The same lid, alone, on a later tick.
+      [msg({ id: 'LID-ONLY', jid: '272516946294519@lid', jidAlt: null, ts: NOW - 30_000, pushName: null, text: 'Ref BONA-W003 · K7Q2XR' })],
+    ],
+  });
+
+  const first = await h.poller.tick();
+  assert.equal(first.ignored, 1);
+  assert.equal(first.replies, 0);
+  assert.equal(h.leads().length, 0);
+
+  const second = await h.poller.tick();
+  assert.equal(second.lidOnlyUnexcludable, 1, 'no pairing was learned, so this is still the ordinary uncheckable gap');
+  assert.equal(second.matched, 1, 'and it is judged normally — the Ref line makes it a lead');
+  assert.equal(h.leads().length, 1);
+  h.cleanup();
+});
+
+/* ---------------- (q) the owner's own self-chat lid ---------------- */
+
+test('(q) once the owner\'s self-chat lid pairs with his number, a later lid-only self-chat message is recognised too', async () => {
+  const h = harness({
+    isExcluded: () => false, // wires the team system without excluding anyone else
+    windows: [
+      // The owner's self-chat, showing up as a lid whose alt is his own number.
+      [msg({ id: 'SELF-PAIR', jid: '999888777@lid', jidAlt: OWNER, fromMe: false, pushName: null, text: 'reminder to myself' })],
+      // The same self-chat, now arriving as the lid alone.
+      [msg({ id: 'SELF-LID', jid: '999888777@lid', jidAlt: null, ts: NOW - 30_000, pushName: null, text: 'Ref BONA-W003 · K7Q2XR' })],
+    ],
+  });
+  createTeam(h.db, { now: () => NOW }).ensureOwner({ phone: '966593296933', name: 'Abdulaziz' });
+
+  const first = await h.poller.tick();
+  assert.equal(first.ignored, 1, 'the self-chat message is ignored, as any owner-chat message is');
+  assert.equal(h.leads().length, 0);
+
+  const second = await h.poller.tick();
+  assert.equal(second.ignored, 1, 'the lid-only follow-up is now recognised as the same self-chat');
+  assert.equal(second.lidOnlyUnexcludable, 0, 'no longer a gap for this lid');
+  assert.equal(second.matched, 0);
+  assert.equal(h.leads().length, 0);
+  h.cleanup();
+});
+
+/* ---------------- status() carries the running lid-gap total ---------------- */
+
+test('status() carries a running total of poll.lid_only_unexcludable across ticks', async () => {
+  const h = harness({
+    isExcluded: () => false,
+    windows: [
+      [msg({ id: 'LID-1', jid: '111@lid', jidAlt: null, pushName: null, text: 'مرحبا بونا' })],
+      [msg({ id: 'LID-2', jid: '222@lid', jidAlt: null, ts: NOW - 30_000, pushName: null, text: 'BONA-W004' })],
+    ],
+  });
+  assert.equal(h.poller.status().lidOnlyUnexcludable, 0);
+  await h.poller.tick();
+  assert.equal(h.poller.status().lidOnlyUnexcludable, 1);
+  await h.poller.tick();
+  assert.equal(h.poller.status().lidOnlyUnexcludable, 2, 'it accumulates, like matched does');
+  h.cleanup();
+});

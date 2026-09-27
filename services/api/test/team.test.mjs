@@ -299,6 +299,23 @@ test('learnTeamLid records a phone+lid pairing on the users row, and isTeamLid r
   s.close();
 });
 
+test('learnTeamLid and isTeamLid cache their prepared statements per store, rather than re-preparing on every call', () => {
+  const { s, team } = teamHarness();
+  team.addUser({ name: 'Sara', phone: '0500000001' });
+  let prepares = 0;
+  const realPrepare = s.db.prepare.bind(s.db);
+  s.db.prepare = (sql) => { prepares += 1; return realPrepare(sql); };
+
+  learnTeamLid(s, '966500000001', '111@lid');
+  isTeamLid(s, '111@lid');
+  isTeamLid(s, '111@lid');
+  learnTeamLid(s, '966500000001', '222@lid');
+
+  assert.equal(prepares, 2, 'one prepare per distinct statement text (the UPDATE, the SELECT), not per call');
+  s.db.prepare = realPrepare;
+  s.close();
+});
+
 test('the audit log records who did what, newest first, and refuses an unknown action', () => {
   const s = openDb(':memory:');
   let clock = NOW;

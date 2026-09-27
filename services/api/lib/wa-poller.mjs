@@ -26,9 +26,14 @@
  * "never a client" list (lib/team.mjs) are skipped outright — not a lead, not a reply,
  * not stored. A chat that arrives as only an opaque `@lid` (no phone in `jid` or
  * `jidAlt`) cannot be checked against that list until its phone has been seen at least
- * once alongside it (`lib/team.mjs` `learnTeamLid`); until then it is counted
- * (`poll.lid_only_unexcludable`), never logged with the lid itself, and — being
- * uncheckable — still judged by the rules below like any other message.
+ * once alongside it, from a message we RECEIVED (`lib/team.mjs` `learnTeamLid`; a
+ * `fromMe` record's alt is not trusted for this — see the pairing code below for why);
+ * until then it is counted (`poll.lid_only_unexcludable`, logged only as a per-tick
+ * count at `info` level and kept as a running total in `status()`), never logged with
+ * the lid itself, and — being uncheckable — still judged by the rules below like any
+ * other message. A lid-learning lookup that itself fails (a stale schema, say) never
+ * stalls the tick: it is logged (`poll.lid_learn_failed`, no numbers or lids) or simply
+ * treated as "not known", and the record in front of it is still handled.
  *
  * Anything else — the owner's private conversations, which this loop can also see — is
  * discarded in memory. It is counted (`status().unmatched`) and never written to disk,
@@ -218,6 +223,9 @@ export function createPoller({
   let timer = null;
   let busy = false;
   let matched = 0;
+  /** Running total of `poll.lid_only_unexcludable` — `status()`'s quieter alternative to
+   * a warn log firing on almost every tick with privacy-mode clients. */
+  let lidOnlyUnexcludable = 0;
   let skipLogged = false;
   /**
    * Message ids this process has failed on → `{ attempts, ts }`. The timestamp matters as
@@ -225,6 +233,33 @@ export function createPoller({
    * window and be neither retried nor written off.
    */
   const failures = new Map();
+
+  /* -------------------- lid learning, safely -------------------- */
+
+  /**
+   * `learnTeamLid`/`isTeamLid` (lib/team.mjs) run a raw SQL statement against `users`
+   * that nothing else in this loop retries. Called from outside the per-record `try`
+   * below, a schema-level failure there (a `wa_lid` column not yet migrated, say) would
+   * otherwise bubble to the tick's own outer `catch`, fail the WHOLE window, and leave
+   * the cursor stuck re-asking for the same records forever. Wrapped here instead: a
+   * learning failure is logged (no numbers, no lids — just that it happened) and the
+   * record is still excluded exactly as it would have been anyway; a lookup failure is
+   * treated as "not known", the same as a genuinely unpaired lid.
+   */
+  function learnLidSafely(phone, lid) {
+    try {
+      learnTeamLid(db, phone, lid);
+    } catch (err) {
+      log({ level: 'warn', evt: 'poll.lid_learn_failed', error: String(err?.message ?? err) });
+    }
+  }
+  function isTeamLidSafely(lid) {
+    try {
+      return isTeamLid(db, lid);
+    } catch {
+      return false;
+    }
+  }
 
   /* -------------------- lookups -------------------- */
 
@@ -405,6 +440,17 @@ export function createPoller({
         const isOwnChat = Boolean(ownerDigits) && [rec?.jid, rec?.jidAlt].some((j) => j && !isLid(j) && bareJid(j) === ownerDigits);
         const isOwnNote = !rec?.fromMe && OWN_NOTE_RE.test(String(rec?.text ?? '').trimStart());
         if (!rec?.id || isOwnChat || isOwnNote || isIgnorableChat(rec.jid, ownerDigits)) {
+          // A self-chat lid pairs with the owner's own number the same way a team
+          // member's does — via `jidAlt` on a message that also shows the real jid — so
+          // it is learned onto the owner's own `users` row here too: a later message that
+          // arrives as that lid ALONE then reaches `isTeamLidSafely` below on its own and
+          // is recognised as ours, not a client's. Same inbound-only guard as the team
+          // pairing further down (see there for why), and it changes nothing else about
+          // how an own-chat record is handled — it is still simply ignored.
+          if (teamWired && isOwnChat && !rec.fromMe) {
+            const ownLid = [rec?.jid, rec?.jidAlt].find(isLid);
+            if (ownLid) learnLidSafely(ownerDigits, ownLid);
+          }
           tally.ignored += 1;
           continue;
         }
@@ -419,7 +465,15 @@ export function createPoller({
           // leads. Remembering it here lets a later message that arrives as the lid ALONE
           // still be recognised as this same team member, without ever guessing a phone
           // from the lid's own digits.
-          if (teamWired && recJids.waLid) learnTeamLid(db, recJids.phone, recJids.waLid);
+          //
+          // Only from a message WE received (`!rec.fromMe`), though: `key.senderPn` and
+          // `key.remoteJidAlt` are folded into one `jidAlt` field by `lib/evolution.mjs`
+          // `normaliseRecord`, with nothing left to tell which one an outbound record's
+          // alt actually came from — and an outbound alt can be our own number for
+          // reasons that have nothing to do with whose CHAT this is. Binding a client's
+          // lid to a team member's phone from a bad pairing would be worse than the gap
+          // this closes.
+          if (teamWired && recJids.waLid && !rec.fromMe) learnLidSafely(recJids.phone, recJids.waLid);
           tally.ignored += 1;
           continue;
         }
@@ -429,8 +483,12 @@ export function createPoller({
         // left uncaught is counted here, never logged with the lid itself, and falls
         // through to be judged by the ordinary rules below like any other message.
         if (teamWired && !recJids.phone && recJids.waLid) {
-          if (isTeamLid(db, recJids.waLid)) { tally.ignored += 1; continue; }
-          tally.lidOnlyUnexcludable += 1;
+          if (isTeamLidSafely(recJids.waLid)) { tally.ignored += 1; continue; }
+          // A record already owed a retry (`failures` below) was counted the first time
+          // it was found uncheckable; counting it again on every retry would inflate the
+          // running total for one stuck record instead of the many distinct chats it is
+          // meant to track.
+          if (!failures.has(rec.id)) tally.lidOnlyUnexcludable += 1;
         }
 
         try {
@@ -466,7 +524,9 @@ export function createPoller({
 
       // A count, never a number or an id: this is the gap above, made visible without
       // reopening it. See the module header and `learnTeamLid`/`isTeamLid` (lib/team.mjs).
-      if (tally.lidOnlyUnexcludable) log({ level: 'warn', evt: 'poll.lid_only_unexcludable', count: tally.lidOnlyUnexcludable });
+      // `info`, not `warn` — a privacy-mode client makes this fire on almost every tick,
+      // and `status().lidOnlyUnexcludable` is the running total for anyone watching it.
+      if (tally.lidOnlyUnexcludable) log({ level: 'info', evt: 'poll.lid_only_unexcludable', count: tally.lidOnlyUnexcludable });
 
       // Newest-first paging means a window that overflowed the page cap hides its OLDEST
       // messages, and asking again returns the same newest ones — so this is a loss, and
@@ -492,6 +552,7 @@ export function createPoller({
       if (abandoned) log({ level: 'warn', evt: 'wa.poll.abandoned', count: abandoned });
       db.pruneWaSeen(t - SEEN_TTL_MS);
       matched += tally.matched;
+      lidOnlyUnexcludable += tally.lidOnlyUnexcludable;
       if (tally.matched || tally.replies) log({ evt: 'wa.poll.tick', ...tally });
       return tally;
     } catch (err) {
@@ -505,7 +566,9 @@ export function createPoller({
   /**
    * What `/health` publishes. `lagS` is the age of the last COMPLETED tick, not of the
    * newest message: a quiet Saturday must not read like an outage, and an outage — which
-   * leaves the cursor untouched — must.
+   * leaves the cursor untouched — must. `lidOnlyUnexcludable` is the running total of the
+   * uncheckable-lid gap (module header), the quieter alternative to reading it off an
+   * `info`-level log line per tick.
    */
   function status() {
     const cursor = db.waCursorGet(instance);
@@ -518,6 +581,7 @@ export function createPoller({
       lagS: lastRun ? Math.max(0, Math.round((now() - lastRun) / 1000)) : null,
       unmatched: cursor?.unmatched ?? 0,
       matched,
+      lidOnlyUnexcludable,
       running: Boolean(timer),
     };
   }
