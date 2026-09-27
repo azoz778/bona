@@ -119,10 +119,7 @@ const CTA = {
   en: (l) => `Ref. ${l.id} — WhatsApp ${WA} or the link in bio.`,
   ar: (l) => `المرجع ${l.id} — واتساب ${WA} أو الرابط في البايو.`,
 };
-const openers = {
-  en: ['', 'Quietly available.', 'Now available through Bona.', 'By private appointment.', 'Off the portals, on our list.'],
-  ar: ['', 'متاح بهدوء.', 'متاح الآن عبر بونا.', 'المعاينة بموعد خاص.', 'خارج المنصات، ضمن قائمتنا.'],
-};
+const openers = { en: [''], ar: [''] }; // Do not invent availability, exclusivity or appointment terms.
 function listingCaption(l, lang, i = 0) {
   const lines = [];
   const op = openers[lang][i % openers[lang].length];
@@ -393,9 +390,8 @@ for (let n = 0; n < DAYS; n++) {
   const d = addDays(n);
   const date = iso(d);
   const w = dow(d);
-  // daily story
-  const st = STORIES[si++ % STORIES.length];
-  items.push({ date, time: n === 0 ? SLOTS.launchDayStory : SLOTS.story, platform: 'instagram', format: 'story', pillar: w === 5 || w === 6 ? 'behind the house' : 'listings', topic: st, caption: st, hashtags: [], image: (pool[n % Math.max(1, pool.length)] ? heroOf(pool[n % pool.length]) : OG), adLicenceRequired: false, status: 'planned' });
+  // Daily filler stories were raw rotating photos with unrelated prompts.
+  // Stories now come from make-review-package.mjs and require owner review.
   if (n > 0 && n % 5 === 2) { const ts = tourStory(date); if (ts) items.push(ts); } // 3D-tour story every ~5 days
   if (n === 0) continue; // launch day feed = the 9 grid posts
   if (w === 5 || w === 6) continue; // Fri/Sat: stories only
@@ -417,7 +413,7 @@ for (let n = 0; n < DAYS; n++) {
     }
   } else if (w === 1) { // Mon: district guide
     const g = GUIDES[gi++ % GUIDES.length];
-    const l = findListing(g.match) || pool[gi % Math.max(1, pool.length)];
+    const l = findListing(g.match); // No unrelated district fallback.
     it = { format: 'carousel', pillar: 'Jeddah district guides', topic: g.topic, caption: { en: g.en, ar: g.ar }, hashtags: uniq(g.tags).slice(0, 20), image: l ? heroOf(l) : OG, images: l ? imgs(l, 3) : [OG], alt: { en: `Street and villa in ${g.topic.en.replace('District guide — ', '')}`, ar: `شارع وفيلا في ${g.topic.ar.replace('دليل الحي — ', '')}` }, listingId: l?.id ?? null, url: `${base}/properties/`, adLicenceRequired: false };
   } else if (w === 2) { // Tue: education
     const e = EDU[ei++ % EDU.length];
@@ -443,7 +439,18 @@ const withIds = items.map((it) => {
   let id = it.launch ? `ig-launch-${String(it.launch).padStart(2, '0')}` : `ig-${it.date}-${it.format}-${slug(it.topic.en)}`;
   const n = (seen.get(id) || 0) + 1; seen.set(id, n);
   if (n > 1) id += `-${n}`;
-  const out = { id, ...it };
+  const out = { id, ...it, reviewStatus: 'pending' };
+  // An editorial caption is not a finished visual. Do not silently attach a listing
+  // interior, a different district, or the generic website OG logo as its artwork.
+  if (!it.adLicenceRequired && !it.listingId && !it.listingIds?.length) {
+    out.image = null;
+    out.images = [];
+    out.designStatus = 'needs-purpose-built-artwork';
+  }
+  if (it.pillar === 'Jeddah district guides') {
+    out.image = null; out.images = []; out.listingId = null;
+    out.designStatus = 'needs-verified-district-artwork';
+  }
   const rec = ledger.get(id)?.latest;
   if (rec?.status === 'published') {
     out.status = 'published';
