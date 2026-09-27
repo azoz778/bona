@@ -467,6 +467,19 @@ export const NAV = [
   ['/dashboard/integrations', 'Setup', '<circle cx="8" cy="8" r="2"/><path d="M8 2v2.2M8 11.8V14M14 8h-2.2M4.2 8H2"/>', 'System'],
 ];
 
+/** Owner-only rail entries. Kept out of `NAV` so a staff page never even contains the link. */
+export const OWNER_NAV = [
+  ['/dashboard/team', 'Team', '<circle cx="5.5" cy="5.5" r="2.2"/><circle cx="11" cy="6.5" r="1.8"/><path d="M1.8 13.5c0-2.4 1.7-3.8 3.7-3.8s3.7 1.4 3.7 3.8M9.6 13.5c.2-1.9 1.3-3 2.9-3 1.1 0 1.8.4 1.8.4"/>', 'System'],
+];
+
+/** `Abdulaziz Zidan` → `AZ`; one word → its first two letters. */
+export function initials(name) {
+  const words = String(name ?? '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '·';
+  const letters = words.length === 1 ? [...words[0]].slice(0, 2) : [[...words[0]][0], [...words.at(-1)][0]];
+  return letters.join('').toUpperCase();
+}
+
 /**
  * One page. `chrome:false` drops the nav (the login page has nowhere to go).
  *
@@ -554,11 +567,12 @@ export const byUrgency = (now) => (a, b) => {
   return Number(b.created ?? 0) - Number(a.created ?? 0);
 };
 
-export function layout({ title, body, active = null, chrome = true, counts = {}, subtitle = null, actions = '' }) {
+export function layout({ title, body, active = null, chrome = true, counts = {}, subtitle = null, actions = '', me = null }) {
   // Each rail item is drawn inline: the CSP is `default-src 'none'`, so an icon font
   // or a sprite sheet from anywhere — including our own /img — is one more thing that
   // can fail to load. An inline path cannot.
-  const items = NAV.map(([href, label, icon, group]) => {
+  const entries = me?.role === 'owner' ? [...NAV, ...OWNER_NAV] : NAV;
+  const items = entries.map(([href, label, icon, group]) => {
     const c = counts && Object.hasOwn(counts, href) && Number.isFinite(Number(counts[href]))
       ? `<span class="c">${esc(number(counts[href]))}</span>` : '';
     return { group, html: `<a class="it${href === active ? ' on' : ''}" href="${esc(href)}"` +
@@ -577,7 +591,7 @@ export function layout({ title, body, active = null, chrome = true, counts = {},
   <div class="brandrow"><span class="mk" aria-hidden="true">B</span><span><b>Bona</b><s>Jeddah · Brokerage</s></span></div>
   ${rail}
   <div class="railend">
-    <div class="me"><span class="ava" aria-hidden="true">AA</span><span><b>Abdulaziz</b><s>Principal</s></span></div>
+    <div class="me"><span class="ava" aria-hidden="true">${esc(initials(me?.name ?? 'Abdulaziz Aziz'))}</span><span><b>${esc(me?.name ?? 'Abdulaziz')}</b><s>${me ? (me.role === 'owner' ? 'Owner' : 'Team') : 'Principal'}</s></span></div>
     <label class="tg" for="thm"><em><span class="dk">Dark</span><span class="lt">Light</span></em><span class="trk" aria-hidden="true"><span class="knb"></span></span></label>
     <div class="railout"><form method="post" action="/dashboard/logout"><input type="hidden" name="_dash" value="1"><button type="submit">Log out</button></form></div>
   </div>
@@ -641,7 +655,7 @@ export function bars(points, { label = '', color = '#0f1214', height = 56 } = {}
 
 const kpi = (k, v, note = '') => `<div class="kpi"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>${note ? `<div class="note">${esc(note)}</div>` : ''}</div>`;
 
-const scrollTable = (head, rows, empty = 'Nothing yet.') =>
+export const scrollTable = (head, rows, empty = 'Nothing yet.') =>
   (rows.length
     ? `<div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`
     : `<p class="muted">${esc(empty)}</p>`);
@@ -669,13 +683,21 @@ export const MESSAGES = {
   bad_value: 'A deal value has to be a number.',
   empty_note: 'A note cannot be empty.',
   bad_request: 'That row was not accepted — check the day and the amount.',
+  bad_phone: 'That is not a phone number. Type it the way you would dial it, e.g. 05XXXXXXXX.',
+  bad_name: 'A name is needed.',
+  duplicate_phone: 'That number is already on the team.',
+  bad_role: 'A role is owner or team.',
+  last_owner: 'There has to be at least one active owner.',
+  not_found: 'No such person.',
+  bad_setting: 'That switch does not exist.',
+  owner_only: 'Only an owner can do that.',
 };
 
 /** A code the templates will render, or null. Anything unrecognised is nothing at all. */
 export const knownError = (code) =>
   (typeof code === 'string' && Object.hasOwn(MESSAGES, code) ? code : null);
 
-const messageFor = (code) => (knownError(code) ? MESSAGES[code] : 'Something went wrong.');
+export const messageFor = (code) => (knownError(code) ? MESSAGES[code] : 'Something went wrong.');
 
 /**
  * Two steps in one page: ask for a code, then type it in. Nothing here says whether
@@ -684,18 +706,21 @@ const messageFor = (code) => (knownError(code) ? MESSAGES[code] : 'Something wen
  */
 export function loginPage({ step = 'request', error = null, sent = false } = {}) {
   const message = error ? `<div class="err">${esc(messageFor(error))}</div>` : '';
-  const notice = sent && !error ? '<div class="ok">Code sent to the owner\'s WhatsApp. It is valid for 10 minutes.</div>' : '';
+  const notice = sent && !error
+    ? '<div class="ok">If that number is on the Bona team, a code is on its way to its WhatsApp. It is valid for 10 minutes.</div>'
+    : '';
   const body = step === 'code'
     ? `<form method="post" action="/dashboard/login/verify">
   <input type="hidden" name="_dash" value="1">
   <div><label for="code">6-digit code</label>
-  <input class="code" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus></div>
+  <input class="code" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9٠-٩۰-۹]{6}" maxlength="6" required autofocus></div>
   <button type="submit">Sign in</button>
 </form>
 <p class="muted" style="margin-top:1rem"><a href="/dashboard/login">Send another code</a></p>`
     : `<form method="post" action="/dashboard/login/code">
   <input type="hidden" name="_dash" value="1">
-  <p class="muted">A 6-digit code goes to the Bona WhatsApp number.</p>
+  <div><label for="phone">Your WhatsApp number</label>
+  <input id="phone" name="phone" inputmode="tel" autocomplete="tel" dir="ltr" placeholder="05XXXXXXXX" maxlength="20" required autofocus></div>
   <button type="submit">Send me a code</button>
 </form>`;
   return layout({
@@ -921,7 +946,7 @@ export function leadRow(lead, now) {
 
 export function overviewPage({
   daily, sources, matchQuality, responseTimes, pipeline, days,
-  waiting = [], waitingTotal = null, now = Date.now(),
+  waiting = [], waitingTotal = null, now = Date.now(), me = null,
 }) {
   // Each of these is a separate query wrapped in its own try/catch in the route, so any
   // one of them can legitimately arrive as null after a failure. A default parameter
@@ -1141,6 +1166,7 @@ export function overviewPage({
     counts: { '/dashboard': trueWaiting || null, '/dashboard/leads': allLeads || null },
     actions: `<div class="seg">${seg}</div>`,
     body,
+    me,
   });
 }
 
@@ -1159,7 +1185,7 @@ const stageOptions = (selected) => STAGES.map((s) =>
  * sideways scroll; a rail of the stages that actually hold something, plus one sentence
  * naming the ones that do not, says strictly more in a fifth of the space.
  */
-export function leadsPage({ board, counts = null, leads, stage = '', q = '', now = Date.now(), total = 0 }) {
+export function leadsPage({ board, counts = null, leads, stage = '', q = '', now = Date.now(), total = 0, me = null }) {
   // A default parameter only fires on `undefined`; an explicit `null` sails past it and
   // throws "leads is not iterable" at the spread below. Normalise instead.
   const allLeads = Array.isArray(leads) ? leads : [];
@@ -1239,6 +1265,7 @@ export function leadsPage({ board, counts = null, leads, stage = '', q = '', now
   return layout({
     title: 'Leads',
     active: '/dashboard/leads',
+    me,
     body: `<h1>Leads</h1><p class="sub">${headline}</p>
 
 ${rail}
@@ -1273,7 +1300,7 @@ const JOURNEY_LABEL = {
   note: (e) => `note — ${e.text}`,
 };
 
-export function leadDetailPage({ lead, journey, saved = null, error = null, now = Date.now() }) {
+export function leadDetailPage({ lead, journey, saved = null, error = null, now = Date.now(), me = null }) {
   const field = (k, v) => `<dt>${esc(k)}</dt><dd dir="auto">${esc(v ?? '—')}</dd>`;
   const responded = lead.first_inbound_ts && lead.first_reply_ts ? ago(lead.first_reply_ts - lead.first_inbound_ts) : '—';
 
@@ -1288,6 +1315,7 @@ export function leadDetailPage({ lead, journey, saved = null, error = null, now 
   return layout({
     title: lead.name || lead.lead_id,
     active: '/dashboard/leads',
+    me,
     body: `<h1 dir="auto">${esc(lead.name || lead.lead_id)}</h1>
 <p class="sub">${esc(lead.lead_id)} · created ${esc(dateTime(lead.created))} (${esc(agoSince(now, lead.created))} ago)</p>
 ${banner}
@@ -1355,7 +1383,7 @@ const FLAG_LABEL = {
   wafi_missing: ['bad', 'Wafi missing'],
 };
 
-export function listingsPage({ rows }) {
+export function listingsPage({ rows, me = null }) {
   const flagged = rows.filter((r) => r.flags.length).length;
   const body = rows.map((r) => `<tr>
     ${cell(r.listing_id)}${auto(r.title)}${cell(r.category ?? '—')}${cell(r.status ?? '—')}
@@ -1367,6 +1395,7 @@ export function listingsPage({ rows }) {
   return layout({
     title: 'Listings',
     active: '/dashboard/listings',
+    me,
     body: `<h1>Listings</h1><p class="sub">${esc(rows.length)} listings, ${esc(flagged)} with a compliance flag. Advertising a property without a valid REGA ad licence is the expensive kind of mistake.</p>
 ${scrollTable(
   '<th>ID</th><th>Title</th><th>Category</th><th>Status</th><th class="n">Views</th><th class="n">Gallery</th><th class="n">Tour</th><th class="n">Brochure</th><th class="n">WA clicks</th><th class="n">Leads</th><th>Ad licence</th><th>Expires</th><th>Flags</th>',
@@ -1378,7 +1407,7 @@ ${scrollTable(
 /* Spend                                                               */
 /* ------------------------------------------------------------------ */
 
-export function spendPage({ rows = [], campaigns = [], roi = null, saved = false, error = null, today, fromDay = null, toDay = null, windowDays = 90 }) {
+export function spendPage({ rows = [], campaigns = [], roi = null, saved = false, error = null, today, fromDay = null, toDay = null, windowDays = 90, me = null }) {
   const optionalNumberCell = (value) => value === null ? '<td class="n">—</td>' : numCell(value);
   const optionalMoneyCell = (value) => `<td class="n">${esc(value === null ? '—' : money(value))}</td>`;
   const spendRows = rows.map((r) => `<tr>${cell(r.day)}${cell(r.platform)}${cell(r.campaign_id || '—')}${auto(r.campaign_name ?? '—')}` +
@@ -1415,6 +1444,7 @@ export function spendPage({ rows = [], campaigns = [], roi = null, saved = false
   return layout({
     title: 'Spend',
     active: '/dashboard/spend',
+    me,
     body: `<h1>Spend & ROI</h1><p class="sub">Campaign spend and attributed outcomes. Unknown attribution remains visible; ROAS is blank until a won lead has a recorded value.</p>
 ${banner}
 <form class="row" method="get" action="/dashboard/spend">
@@ -1473,7 +1503,7 @@ const CHECKLIST_BASE = 'https://github.com/azoz778/bona/blob/main/docs/checklist
  * What is wired up and what is still a form the owner has to fill in. Only booleans
  * about the keys — never a key, never a fragment of one.
  */
-export function integrationsPage({ keys, fanout, retell, poller, lastAccepted, db }) {
+export function integrationsPage({ keys, fanout, retell, poller, lastAccepted, db, me = null }) {
   // Every input here describes a subsystem that can be down — that is the entire point
   // of the page. It must render when one of them answers with nothing, rather than
   // 500ing and taking away the one screen that would have told the owner what broke.
@@ -1500,6 +1530,7 @@ export function integrationsPage({ keys, fanout, retell, poller, lastAccepted, d
   return layout({
     title: 'Integrations',
     active: '/dashboard/integrations',
+    me,
     body: `<h1>Integrations</h1><p class="sub">Which keys this process can see — presence only, never a value.</p>
 
 <h2>Keys</h2>
@@ -1547,6 +1578,6 @@ export function logoutPage() {
 }
 
 /** A bare page for the handful of states that are not a dashboard page. */
-export function messagePage({ title, message }) {
+export function messagePage({ title, message, me = null }) {
   return layout({ title, chrome: false, body: `<div class="login"><h1>Bona</h1><p class="muted">${esc(message)}</p><p><a href="/dashboard">Back to the dashboard</a></p></div>` });
 }
