@@ -665,7 +665,7 @@ export function createDashboardRoutes({
       if (!(err instanceof TeamError)) throw err;
       return answer(res, {
         form, back: teamBack(`error=${encodeURIComponent(err.code)}`),
-        status: err.code === 'not_found' ? 404 : 400, payload: { error: err.code },
+        status: err.code === 'not_found' || err.code === 'never_not_found' ? 404 : 400, payload: { error: err.code },
       });
     }
   }
@@ -716,7 +716,7 @@ export function createDashboardRoutes({
     if (remove) {
       return teamWrite(ctx, () => {
         const removed = team.removeNever(asText(fields.phone));
-        if (!removed) throw new TeamError('not_found');
+        if (!removed) throw new TeamError('never_not_found');
         audit?.record({ userId: me.user_id, action: 'never_remove' });
       }, 'never_removed');
     }
