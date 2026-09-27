@@ -21,7 +21,7 @@ import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { randomId } from './store.mjs';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const STAGES = ['new', 'contacted', 'qualified', 'viewing', 'offer', 'negotiation', 'won', 'lost'];
 export const FANOUT_DESTS = ['meta', 'ga4', 'snap', 'tiktok'];
@@ -109,6 +109,45 @@ const MIGRATIONS = [
       ALTER TABLE ad_spend ADD COLUMN source_spend REAL;
       ALTER TABLE ad_spend ADD COLUMN source_currency TEXT;
       ALTER TABLE ad_spend ADD COLUMN imported_at INTEGER;
+    `,
+  },
+  {
+    // Team accounts (2026-09-27 design §3.1). `auth_challenges.user_id` is NULL for the
+    // decoy challenge a number that is not on the team receives — see dashboard/auth.mjs.
+    // `auth_challenges.phone_key` is an HMAC of the number under a key that lives only in
+    // the running process (never stored), so every challenge for one number — real or
+    // decoy — can void its predecessors without the file holding a phone-derived value.
+    // `auth_codes` stays in the file, unused: migrations here only ever add.
+    // `phone_e164` (`users`, and `never_list` below) holds bare international digits
+    // without '+', the same convention as `leads.phone_e164`.
+    // No foreign keys, by design: users are deactivated, never deleted, so nothing here
+    // needs to cascade or be blocked by a reference to a `user_id`.
+    // `wa_lid` is nullable and learned, not entered: the WhatsApp poller fills it in the
+    // first time it sees this person's phone arrive paired with a privacy-mode `@lid` via
+    // `jidAlt` (lib/wa-poller.mjs `learnTeamLid`), so a later message that carries the lid
+    // alone can still be recognised as theirs. Never derived from the lid's own digits.
+    version: 3,
+    sql: `
+      CREATE TABLE IF NOT EXISTS users (
+        user_id TEXT PRIMARY KEY, name TEXT NOT NULL, phone_e164 TEXT NOT NULL UNIQUE, wa_jid TEXT NOT NULL, wa_lid TEXT,
+        role TEXT NOT NULL CHECK (role IN ('owner','staff')), active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+        created INTEGER NOT NULL, last_login INTEGER, deactivated INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS users_lid ON users(wa_lid);
+      CREATE TABLE IF NOT EXISTS auth_challenges (
+        challenge_id TEXT PRIMARY KEY, user_id TEXT, code_hash TEXT NOT NULL, nonce_hash TEXT NOT NULL UNIQUE,
+        created INTEGER NOT NULL, expires INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+        used INTEGER NOT NULL DEFAULT 0 CHECK (used IN (0,1)), phone_key TEXT
+      );
+      CREATE INDEX IF NOT EXISTS auth_challenges_user ON auth_challenges(user_id);
+      CREATE INDEX IF NOT EXISTS auth_challenges_phone ON auth_challenges(phone_key);
+      CREATE INDEX IF NOT EXISTS auth_challenges_expires ON auth_challenges(expires);
+      ALTER TABLE auth_sessions ADD COLUMN user_id TEXT;
+      CREATE INDEX IF NOT EXISTS auth_sessions_user ON auth_sessions(user_id);
+      CREATE TABLE IF NOT EXISTS audit_log (id TEXT PRIMARY KEY, ts INTEGER NOT NULL, user_id TEXT, action TEXT NOT NULL, target TEXT, meta TEXT);
+      CREATE INDEX IF NOT EXISTS audit_ts ON audit_log(ts);
+      CREATE TABLE IF NOT EXISTS never_list (phone_e164 TEXT PRIMARY KEY, note TEXT, added_by TEXT, ts INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT, updated INTEGER, updated_by TEXT);
     `,
   },
 ];
@@ -425,35 +464,15 @@ export function openDb(file = ':memory:') {
 
   /* -------------------- dashboard auth -------------------- */
 
-  function createAuthCode(code, { now = Date.now(), ttlMs = 10 * 60_000 } = {}) {
-    prep('INSERT OR REPLACE INTO auth_codes (code_hash, created, expires, used, attempts) VALUES (?,?,?,0,0)').run(sha256(code), toInt(now), toInt(now + ttlMs));
-    return { expires: now + ttlMs };
-  }
-
   /**
-   * Redeem a code. A wrong guess counts against every code still live, so five
-   * misses burn the real one — a six-digit code is small enough to brute force
-   * otherwise. Expired and used codes are swept as a side effect.
-   * @returns {{ ok: boolean, reason?: 'unknown'|'expired'|'used'|'attempts' }}
+   * Every session belongs to a person. `userId` is required: a session with no owner
+   * would be handed to the owner by `team.ensureOwner()` on the next start-up (that
+   * adoption exists only for sessions from before accounts).
    */
-  function consumeAuthCode(code, { now = Date.now(), maxAttempts = 5 } = {}) {
-    return transaction(() => {
-      prep('DELETE FROM auth_codes WHERE expires < ?').run(toInt(now - 86_400_000));
-      const row = prep('SELECT * FROM auth_codes WHERE code_hash = ?').get(sha256(code));
-      if (!row) {
-        prep('UPDATE auth_codes SET attempts = attempts + 1 WHERE used = 0 AND expires >= ?').run(toInt(now));
-        return { ok: false, reason: 'unknown' };
-      }
-      if (row.used) return { ok: false, reason: 'used' };
-      if (row.expires < now) return { ok: false, reason: 'expired' };
-      if (row.attempts >= maxAttempts) return { ok: false, reason: 'attempts' };
-      prep('UPDATE auth_codes SET used = 1 WHERE code_hash = ?').run(row.code_hash);
-      return { ok: true };
-    });
-  }
-
-  function createAuthSession(token, { now = Date.now(), ttlMs = 30 * 86_400_000, ua = null } = {}) {
-    prep('INSERT OR REPLACE INTO auth_sessions (token_hash, created, expires, ua) VALUES (?,?,?,?)').run(sha256(token), toInt(now), toInt(now + ttlMs), ua == null ? null : String(ua).slice(0, 300));
+  function createAuthSession(token, { now = Date.now(), ttlMs = 30 * 86_400_000, ua = null, userId } = {}) {
+    if (typeof userId !== 'string' || !userId) throw new TypeError('createAuthSession needs a userId');
+    prep('INSERT OR REPLACE INTO auth_sessions (token_hash, created, expires, ua, user_id) VALUES (?,?,?,?,?)')
+      .run(sha256(token), toInt(now), toInt(now + ttlMs), ua == null ? null : String(ua).slice(0, 300), userId);
     return { expires: now + ttlMs };
   }
 
@@ -522,18 +541,26 @@ export function openDb(file = ':memory:') {
     insertLead, getLead, getLeadByPhone, getLeadByJid, getLeadByLegacyId, updateLead, listLeads, countLeads, waitingLeads, countWaitingLeads,
     addTouchpoint, touchpointsForLead, setStage, stageHistory,
     enqueueFanout, dueFanout, markFanout, fanoutCounts,
-    createAuthCode, consumeAuthCode, createAuthSession, checkAuthSession, deleteAuthSession,
+    createAuthSession, checkAuthSession, deleteAuthSession,
     waCursorGet, waCursorSet, waSeenHas, waSeenAdd, pruneWaSeen,
     upsertSpend, listSpend,
   };
 }
 
 function migrate(db) {
-  const current = db.prepare('PRAGMA user_version').get().user_version;
   for (const m of MIGRATIONS) {
-    if (m.version <= current) continue;
-    db.exec('BEGIN');
+    // BEGIN IMMEDIATE takes the write lock up front, so a concurrent opener (another
+    // process's openDb on the same file) either gets here first and finishes its COMMIT
+    // before we acquire the lock, or blocks (busy_timeout) until we finish ours — either
+    // way the user_version read below is never stale, and a step already applied by the
+    // other opener is skipped instead of re-run (e.g. into a "duplicate column" crash).
+    db.exec('BEGIN IMMEDIATE');
     try {
+      const current = db.prepare('PRAGMA user_version').get().user_version;
+      if (m.version <= current) {
+        db.exec('ROLLBACK');
+        continue;
+      }
       db.exec(m.sql);
       db.exec(`PRAGMA user_version = ${m.version}`);
       db.exec('COMMIT');

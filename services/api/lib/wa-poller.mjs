@@ -22,6 +22,25 @@
  *   5. `time_window` — the sender is unknown, but a `whatsapp_click` from a lead-less
  *                      session landed within ±15 minutes (marked *inferred* in the note)
  *
+ * Before any rule: a team member's number (active or not) and a number on the owner's
+ * "never a client" list (lib/team.mjs) are skipped outright — not a lead, not a reply,
+ * not stored. A chat that arrives as only an opaque `@lid` (no phone in `jid` or
+ * `jidAlt`) cannot be checked against that list directly — unless its phone has already
+ * been seen alongside it, from a message we RECEIVED (`lib/team.mjs` `learnTeamLid`; a
+ * `fromMe` record's alt is not trusted for this — see the pairing code below for why), or
+ * an existing LEAD already maps the lid to a phone (`leads.wa_lid` → `phone_e164` — the
+ * case that catches a lead later put on the never list, or a team pairing that only ever
+ * landed on an old lead row). Only once both of those come up empty is it counted
+ * (`poll.lid_only_unexcludable`, logged only as a per-tick count at `info` level and kept
+ * as a running total in `status()`), never logged with the lid itself, and — being
+ * genuinely uncheckable — still judged by the rules below like any other message. A
+ * lid-learning or lid/lead lookup that itself fails (a stale schema, say) never stalls
+ * the tick: it is logged (`poll.lid_learn_failed`, no numbers or lids) or simply treated
+ * as "not known", and the record in front of it is still handled. `isExcluded` itself
+ * failing (a broken team lookup) is different: the record cannot be safely classified
+ * either way, so it is deferred to the next tick (logged `poll.exclusion_check_failed`,
+ * no numbers) rather than risking a wrong guess in either direction.
+ *
  * Anything else — the owner's private conversations, which this loop can also see — is
  * discarded in memory. It is counted (`status().unmatched`) and never written to disk,
  * never logged, never sent anywhere. For the same reason nothing here logs a phone
@@ -31,6 +50,7 @@ import { parseRef } from './attribution.mjs';
 import { MAX_PAGES, PAGE_SIZE, bareJid, fetchWindow, oldestFirst } from './evolution.mjs';
 import { createOrMergeLead, leadNote } from './leads.mjs';
 import { normalisePhone } from './phone.mjs';
+import { isTeamLid, learnTeamLid } from './team.mjs';
 import { waConfig } from './wa.mjs';
 
 /** With no cursor yet, look back this far rather than at the whole history. */
@@ -173,6 +193,10 @@ export function listingIdIn(text) {
 /* The poller                                                          */
 /* ------------------------------------------------------------------ */
 
+/** The default when no team is wired: nothing is excluded. A stable reference, so the
+ * poller can tell "no team passed" apart from "a team passed that excludes nobody yet". */
+const NO_EXCLUSIONS = () => false;
+
 /**
  * @param {object} o
  * @param {ReturnType<import('./db.mjs').openDb>} o.db
@@ -180,14 +204,24 @@ export function listingIdIn(text) {
  * @param {(w: { gte: number, lte: number }) => Promise<{ records: object[] }|object[]>} [o.findMessages]
  *        injected in tests; defaults to `fetchWindow()` against the instance in `cfg.env`
  * @param {(text: string) => Promise<any>} [o.sendWhatsApp] the owner note sender
+ * @param {(phone: string) => boolean} [o.isExcluded] `lib/team.mjs`'s `isExcludedPhone`:
+ *        true for a team member's number (active or not) or a never-a-client number.
+ *        Omitted by older wiring and by tests that predate team accounts — the poller
+ *        then excludes nothing, exactly as before.
  * @param {(obj: object) => void} [o.log]
  * @param {() => number} [o.now]
  */
-export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp = null, log = () => {}, now = () => Date.now() } = {}) {
+export function createPoller({
+  db, cfg = {}, findMessages = null, sendWhatsApp = null, isExcluded = NO_EXCLUSIONS, log = () => {}, now = () => Date.now(),
+} = {}) {
   const wa = waConfig(cfg.env ?? {});
   const instance = wa.instance;
   const ownerDigits = bareJid(wa.ownerJid);
   const configured = Boolean(findMessages) || Boolean(wa.baseUrl && wa.apiKey);
+  // Whether a team is wired at all — not whether it currently excludes anyone — because an
+  // uncheckable lid-only chat is worth counting the moment team accounts exist, even before
+  // any pairing has been learned.
+  const teamWired = isExcluded !== NO_EXCLUSIONS;
   const find = findMessages ?? (({ gte, lte }) => fetchWindow({
     baseUrl: wa.baseUrl, apiKey: wa.apiKey, instance, gte, lte, offset: PAGE_SIZE, maxPages: MAX_PAGES,
   }));
@@ -195,6 +229,9 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
   let timer = null;
   let busy = false;
   let matched = 0;
+  /** Running total of `poll.lid_only_unexcludable` — `status()`'s quieter alternative to
+   * a warn log firing on almost every tick with privacy-mode clients. */
+  let lidOnlyUnexcludable = 0;
   let skipLogged = false;
   /**
    * Message ids this process has failed on → `{ attempts, ts }`. The timestamp matters as
@@ -202,6 +239,71 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
    * window and be neither retried nor written off.
    */
   const failures = new Map();
+
+  /* -------------------- lid learning, safely -------------------- */
+
+  /**
+   * `learnTeamLid`/`isTeamLid` (lib/team.mjs) run a raw SQL statement against `users`
+   * that nothing else in this loop retries. Called from outside the per-record `try`
+   * below, a schema-level failure there (a `wa_lid` column not yet migrated, say) would
+   * otherwise bubble to the tick's own outer `catch`, fail the WHOLE window, and leave
+   * the cursor stuck re-asking for the same records forever. Wrapped here instead: a
+   * learning failure is logged (no numbers, no lids — just that it happened) and the
+   * record is still excluded exactly as it would have been anyway; a lookup failure is
+   * treated as "not known", the same as a genuinely unpaired lid.
+   */
+  function learnLidSafely(phone, lid) {
+    try {
+      learnTeamLid(db, phone, lid);
+    } catch (err) {
+      log({ level: 'warn', evt: 'poll.lid_learn_failed', error: String(err?.message ?? err) });
+    }
+  }
+  function isTeamLidSafely(lid) {
+    try {
+      return isTeamLid(db, lid);
+    } catch {
+      return false;
+    }
+  }
+  /**
+   * The phone an existing LEAD already maps this lid to (`leads.wa_lid` → `phone_e164`) —
+   * the other half of the pairing `isTeamLid` checks on `users`. `isTeamLid` alone misses
+   * two cases: a lead who was later put on the never list, and a team member whose
+   * `jidAlt` pairing only ever landed on an old lead row rather than on `users`. Both have
+   * to be checked before classification and reply-handling reach the record. Never derived
+   * from the lid's own digits — only an existing row that already carries both. Wrapped
+   * like `isTeamLidSafely`: a lookup failure is "not known", not a stalled tick.
+   */
+  function leadPhoneForLidSafely(lid) {
+    try {
+      return db.getLeadByJid(lid)?.phone_e164 ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * `isExcluded` (`team.isExcludedPhone` in production) runs a raw SQL lookup against
+   * `users` and `never_list` that nothing else in this loop retries. It is called from
+   * the tick's per-record loop, before the retry-safe `try` further down that wraps
+   * classification and reply-handling — those must never run before this has actually
+   * decided whether the record even reaches them. Left unwrapped, a failure here would
+   * bubble to the tick's own outer `catch`, fail the WHOLE window, and leave the cursor
+   * stuck re-asking for it forever. Wrapped here instead: the failure is logged
+   * (`poll.exclusion_check_failed`, no numbers) and reported as `ok: false`, which the
+   * caller treats as "not decided yet" — the record is deferred to the next attempt via
+   * the same `failures`/cursor bookkeeping a record that throws inside the `try` below
+   * gets, never guessed at either way, never lost.
+   */
+  function isExcludedSafely(phone) {
+    try {
+      return { ok: true, excluded: isExcluded(phone) };
+    } catch (err) {
+      log({ level: 'warn', evt: 'poll.exclusion_check_failed', error: String(err?.message ?? err) });
+      return { ok: false, excluded: false };
+    }
+  }
 
   /* -------------------- lookups -------------------- */
 
@@ -369,9 +471,20 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
       const answer = await find({ gte, lte, instance });
       const records = Array.isArray(answer) ? answer : (answer?.records ?? []);
 
-      const tally = { scanned: records.length, matched: 0, unmatched: 0, created: 0, merged: 0, replies: 0, ignored: 0 };
+      const tally = { scanned: records.length, matched: 0, unmatched: 0, created: 0, merged: 0, replies: 0, ignored: 0, lidOnlyUnexcludable: 0 };
       let maxTs = 0;
       let oldestFailedTs = null;
+      /**
+       * Leaves a record exactly where one that throws inside the `try` further down
+       * lands: not marked seen, the cursor held back (via `oldestFailedTs`) to include
+       * it in the next window, and — if the failure outlives that — eventually written
+       * off by the ordinary `floor`/abandon accounting below rather than retried forever.
+       */
+      const deferRecord = (id, ts) => {
+        const existing = failures.get(id);
+        failures.set(id, { attempts: existing?.attempts ?? 0, ts });
+        if (oldestFailedTs === null || ts < oldestFailedTs) oldestFailedTs = ts;
+      };
       // Evolution answers newest-first. Handled in that order, a follow-up would be judged
       // before the Ref line that creates the lead, and a reply before the enquiry it answers.
       for (const rec of oldestFirst(records)) {
@@ -382,10 +495,69 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
         const isOwnChat = Boolean(ownerDigits) && [rec?.jid, rec?.jidAlt].some((j) => j && !isLid(j) && bareJid(j) === ownerDigits);
         const isOwnNote = !rec?.fromMe && OWN_NOTE_RE.test(String(rec?.text ?? '').trimStart());
         if (!rec?.id || isOwnChat || isOwnNote || isIgnorableChat(rec.jid, ownerDigits)) {
+          // A self-chat lid pairs with the owner's own number the same way a team
+          // member's does — via `jidAlt` on a message that also shows the real jid — so
+          // it is learned onto the owner's own `users` row here too: a later message that
+          // arrives as that lid ALONE then reaches `isTeamLidSafely` below on its own and
+          // is recognised as ours, not a client's. Same inbound-only guard as the team
+          // pairing further down (see there for why), and it changes nothing else about
+          // how an own-chat record is handled — it is still simply ignored.
+          if (teamWired && isOwnChat && !rec.fromMe) {
+            const ownLid = [rec?.jid, rec?.jidAlt].find(isLid);
+            if (ownLid) learnLidSafely(ownerDigits, ownLid);
+          }
           tally.ignored += 1;
           continue;
         }
         if (db.waSeenHas(rec.id)) { tally.ignored += 1; continue; }
+
+        // A colleague is not a client (our own login codes to them even say "Bona"), and
+        // the owner's never-a-client list is absolute. 2026-09-27 design §3.5.
+        const recJids = jidsOf(rec);
+        const phoneExclusion = recJids.phone ? isExcludedSafely(recJids.phone) : { ok: true, excluded: false };
+        if (!phoneExclusion.ok) { deferRecord(rec.id, ts); continue; }
+        if (phoneExclusion.excluded) {
+          // WhatsApp pairs a privacy-mode `@lid` with the real jid via `jidAlt` on the
+          // messages that carry both — the same correlation `jidsOf` already trusts for
+          // leads. Remembering it here lets a later message that arrives as the lid ALONE
+          // still be recognised as this same team member, without ever guessing a phone
+          // from the lid's own digits.
+          //
+          // Only from a message WE received (`!rec.fromMe`), though: `key.senderPn` and
+          // `key.remoteJidAlt` are folded into one `jidAlt` field by `lib/evolution.mjs`
+          // `normaliseRecord`, with nothing left to tell which one an outbound record's
+          // alt actually came from — and an outbound alt can be our own number for
+          // reasons that have nothing to do with whose CHAT this is. Binding a client's
+          // lid to a team member's phone from a bad pairing would be worse than the gap
+          // this closes.
+          if (teamWired && recJids.waLid && !rec.fromMe) learnLidSafely(recJids.phone, recJids.waLid);
+          tally.ignored += 1;
+          continue;
+        }
+        // A record that is only a `@lid` (no phone in `jid` or `jidAlt`) cannot be checked
+        // against `isExcluded`, which only ever sees phone numbers — unless this lid was
+        // already learned above from an earlier message that did carry the phone, or an
+        // existing LEAD already maps it to a phone (a lead later put on the never list, or
+        // a team member's pairing that only ever landed on an old lead row). What is left
+        // uncaught after both of those is counted here, never logged with the lid itself,
+        // and falls through to be judged by the ordinary rules below like any other message.
+        if (teamWired && !recJids.phone && recJids.waLid) {
+          if (isTeamLidSafely(recJids.waLid)) { tally.ignored += 1; continue; }
+          const leadPhone = leadPhoneForLidSafely(recJids.waLid);
+          if (leadPhone) {
+            const leadExclusion = isExcludedSafely(leadPhone);
+            if (!leadExclusion.ok) { deferRecord(rec.id, ts); continue; }
+            if (leadExclusion.excluded) { tally.ignored += 1; continue; }
+            // Resolved, and not excluded: an ordinary client, judged by the rules below
+            // like any other message — not part of the uncheckable gap.
+          } else if (!failures.has(rec.id)) {
+            // A record already owed a retry (`failures` below) was counted the first time
+            // it was found uncheckable; counting it again on every retry would inflate the
+            // running total for one stuck record instead of the many distinct chats it is
+            // meant to track.
+            tally.lidOnlyUnexcludable += 1;
+          }
+        }
 
         try {
           if (rec.fromMe) {
@@ -418,6 +590,12 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
         }
       }
 
+      // A count, never a number or an id: this is the gap above, made visible without
+      // reopening it. See the module header and `learnTeamLid`/`isTeamLid` (lib/team.mjs).
+      // `info`, not `warn` — a privacy-mode client makes this fire on almost every tick,
+      // and `status().lidOnlyUnexcludable` is the running total for anyone watching it.
+      if (tally.lidOnlyUnexcludable) log({ level: 'info', evt: 'poll.lid_only_unexcludable', count: tally.lidOnlyUnexcludable });
+
       // Newest-first paging means a window that overflowed the page cap hides its OLDEST
       // messages, and asking again returns the same newest ones — so this is a loss, and
       // it says so. It takes downtime long enough for 500 messages to pile up.
@@ -442,6 +620,7 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
       if (abandoned) log({ level: 'warn', evt: 'wa.poll.abandoned', count: abandoned });
       db.pruneWaSeen(t - SEEN_TTL_MS);
       matched += tally.matched;
+      lidOnlyUnexcludable += tally.lidOnlyUnexcludable;
       if (tally.matched || tally.replies) log({ evt: 'wa.poll.tick', ...tally });
       return tally;
     } catch (err) {
@@ -455,7 +634,9 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
   /**
    * What `/health` publishes. `lagS` is the age of the last COMPLETED tick, not of the
    * newest message: a quiet Saturday must not read like an outage, and an outage — which
-   * leaves the cursor untouched — must.
+   * leaves the cursor untouched — must. `lidOnlyUnexcludable` is the running total of the
+   * uncheckable-lid gap (module header), the quieter alternative to reading it off an
+   * `info`-level log line per tick.
    */
   function status() {
     const cursor = db.waCursorGet(instance);
@@ -468,6 +649,7 @@ export function createPoller({ db, cfg = {}, findMessages = null, sendWhatsApp =
       lagS: lastRun ? Math.max(0, Math.round((now() - lastRun) / 1000)) : null,
       unmatched: cursor?.unmatched ?? 0,
       matched,
+      lidOnlyUnexcludable,
       running: Boolean(timer),
     };
   }
