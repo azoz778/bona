@@ -187,7 +187,7 @@ export function createTeam(store, { now = () => Date.now(), log = () => {} } = {
     return plain(prep('SELECT * FROM never_list WHERE phone_e164 = ?').get(digits));
   }
   function removeNever(phone) {
-    const digits = normalisePhone(phone);
+    const digits = cleanPhone(phone);
     return digits ? prep('DELETE FROM never_list WHERE phone_e164 = ?').run(digits).changes === 1 : false;
   }
   const listNever = () => prep('SELECT * FROM never_list ORDER BY ts DESC').all().map(plain);
