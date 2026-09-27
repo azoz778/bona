@@ -231,6 +231,22 @@ export function createTeam(store, { now = () => Date.now(), log = () => {} } = {
 /* -------------------- @lid learning (2026-09-27 carryover, §3.5) -------------------- */
 
 /**
+ * Prepared statements for `learnTeamLid`/`isTeamLid`, cached per `store.db` (the raw
+ * `node:sqlite` connection) rather than re-prepared on every poller tick — the two
+ * statement texts below are the only ones either function ever runs, so one prepare per
+ * connection is all this needs. Keyed by a `WeakMap` so a connection that is closed and
+ * discarded takes its cache with it; nothing here is ever cleared by hand.
+ */
+const lidStatements = new WeakMap();
+function lidStmt(rawDb, sql) {
+  let cache = lidStatements.get(rawDb);
+  if (!cache) { cache = new Map(); lidStatements.set(rawDb, cache); }
+  let stmt = cache.get(sql);
+  if (!stmt) { stmt = rawDb.prepare(sql); cache.set(sql, stmt); }
+  return stmt;
+}
+
+/**
  * A privacy-mode `@lid` chat carries no phone number of its own — WhatsApp only ever
  * links it to one through `jidAlt` on a message that also shows the real jid. The
  * WhatsApp poller calls this the moment it sees that pairing for a number that is on
@@ -249,8 +265,7 @@ export function createTeam(store, { now = () => Date.now(), log = () => {} } = {
 export function learnTeamLid(store, phone, lid) {
   const digits = normalisePhone(phone);
   if (!digits || !lid) return false;
-  const { changes } = store.db
-    .prepare('UPDATE users SET wa_lid = ? WHERE phone_e164 = ? AND (wa_lid IS NULL OR wa_lid != ?)')
+  const { changes } = lidStmt(store.db, 'UPDATE users SET wa_lid = ? WHERE phone_e164 = ? AND (wa_lid IS NULL OR wa_lid != ?)')
     .run(String(lid), digits, String(lid));
   return changes > 0;
 }
@@ -263,5 +278,5 @@ export function learnTeamLid(store, phone, lid) {
  */
 export function isTeamLid(store, lid) {
   if (!lid) return false;
-  return Boolean(store.db.prepare('SELECT 1 FROM users WHERE wa_lid = ?').get(String(lid)));
+  return Boolean(lidStmt(store.db, 'SELECT 1 FROM users WHERE wa_lid = ?').get(String(lid)));
 }
