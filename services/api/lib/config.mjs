@@ -117,6 +117,9 @@ export function loadConfig({ env = loadEnv(), ids = readIds(), home = os.homedir
     ga4ApiSecret: env.GA4_API_SECRET ?? '',
     snapPixelId: env.SNAP_PIXEL_ID ?? '',
     snapCapiToken: env.SNAP_CAPI_TOKEN ?? '',
+    tiktokPixelId: String(env.TIKTOK_PIXEL_ID ?? '').trim(),
+    tiktokEventsToken: String(env.TIKTOK_EVENTS_ACCESS_TOKEN ?? '').trim(),
+    tiktokTestEventCode: String(env.TIKTOK_TEST_EVENT_CODE ?? '').trim(),
     logLevel: env.BONA_LOG_LEVEL ?? 'info',
     env,
     ids,
@@ -140,6 +143,7 @@ export function redacted(cfg) {
     waPoll: cfg.waPoll, waPollMs: cfg.waPollMs, fanoutMs: cfg.fanoutMs, fanoutRequireConsent: cfg.fanoutRequireConsent, dashCookieDays: cfg.dashCookieDays,
     // Pixel / measurement ids are printed on every page of the site; the tokens are not.
     metaPixelId: cfg.metaPixelId || null, ga4MeasurementId: cfg.ga4MeasurementId || null, snapPixelId: cfg.snapPixelId || null,
+    tiktokPixelId: cfg.tiktokPixelId || null, hasTiktokEventsToken: Boolean(cfg.tiktokEventsToken),
     hasMetaCapiToken: Boolean(cfg.metaCapiToken), hasGa4ApiSecret: Boolean(cfg.ga4ApiSecret), hasSnapCapiToken: Boolean(cfg.snapCapiToken),
   };
 }

@@ -91,12 +91,16 @@
     if (!s) return;
     var raw;
     try { raw = JSON.stringify(s); } catch (e) { return; }
-    var persist = granted() || !!parse(getItem('localStorage', KEY));
+    var persist = granted();
     if (persist) {
       if (setItem('localStorage', KEY, raw)) removeItem('sessionStorage', KEY);
       else setItem('sessionStorage', KEY, raw);
       try { document.cookie = COOKIE + '=' + s.anon_id + '; Max-Age=' + (DAYS * 86400) + '; Path=/; Secure; SameSite=Lax'; } catch (e) { /* ignore */ }
     } else {
+      if (getItem('localStorage', KEY) || cookie(COOKIE)) {
+        try { document.cookie = COOKIE + '=; Max-Age=0; Path=/; Secure; SameSite=Lax'; } catch (e) { /* ignore */ }
+      }
+      removeItem('localStorage', KEY);
       setItem('sessionStorage', KEY, raw);
     }
   }
@@ -225,24 +229,24 @@
     var ids = listing ? [listing] : [];
     var cta = (body.props && body.props.cta) || undefined;
     try {
-      if (m.ga4 && typeof gtag === 'function') {
+      if (body.consent.analytics && m.ga4 && typeof gtag === 'function') {
         gtag('event', m.ga4, { listing_id: listing || undefined, cta: cta, ref: body.ref || undefined, event_id: body.event_id });
       }
     } catch (e) { /* ignore */ }
     try {
-      if (m.meta && typeof fbq === 'function') {
+      if (body.consent.ads && m.meta && typeof fbq === 'function') {
         fbq(m.metaCustom ? 'trackCustom' : 'track', m.meta,
           listing ? { content_ids: ids, content_type: 'product' } : {},
           { eventID: body.event_id });
       }
     } catch (e) { /* ignore */ }
     try {
-      if (m.snap && typeof snaptr === 'function') {
+      if (body.consent.ads && m.snap && typeof snaptr === 'function') {
         snaptr('track', m.snap, { item_ids: ids, client_dedup_id: body.event_id });
       }
     } catch (e) { /* ignore */ }
     try {
-      if (m.tiktok && window.ttq && typeof window.ttq.track === 'function') {
+      if (body.consent.ads && m.tiktok && window.ttq && typeof window.ttq.track === 'function') {
         window.ttq.track(m.tiktok,
           listing ? { contents: [{ content_id: listing, content_type: 'product' }] } : {},
           { event_id: body.event_id });

@@ -57,7 +57,7 @@ test('a destination with no credentials is skipped, not queued forever', async (
   const db = seeded();
   const { fetch, calls } = recorder();
   const fanout = createFanout({ db, cfg: { ...CFG, metaCapiToken: '', ga4ApiSecret: '', snapPixelId: '' }, fetch, now: () => NOW });
-  assert.deepEqual(fanout.dests(), { meta: false, ga4: false, snap: false });
+  assert.deepEqual(fanout.dests(), { meta: false, ga4: false, snap: false, tiktok: false });
 
   const out = await fanout.drainOnce();
   assert.deepEqual(out, { sent: 0, skipped: 3, retried: 0, failed: 0 });
@@ -69,9 +69,9 @@ test('a destination with no credentials is skipped, not queued forever', async (
 });
 
 test('configuredDests needs both halves of every credential pair', () => {
-  assert.deepEqual(configuredDests({}), { meta: false, ga4: false, snap: false });
-  assert.deepEqual(configuredDests({ metaPixelId: '1' }), { meta: false, ga4: false, snap: false });
-  assert.deepEqual(configuredDests(CFG), { meta: true, ga4: true, snap: true });
+  assert.deepEqual(configuredDests({}), { meta: false, ga4: false, snap: false, tiktok: false });
+  assert.deepEqual(configuredDests({ metaPixelId: '1' }), { meta: false, ga4: false, snap: false, tiktok: false });
+  assert.deepEqual(configuredDests(CFG), { meta: true, ga4: true, snap: true, tiktok: false });
 });
 
 /* ---------------- consent ---------------- */

@@ -247,7 +247,7 @@ test('(f) an unknown number minutes after a WhatsApp click is inferred from that
   // reached them as `Contact` under `ev-click-1`, and Meta drops a duplicate id.
   const created = h.db.recentEvents({ name: 'lead_created', limit: 5 })[0];
   assert.equal(created.lead_id, lead.lead_id);
-  assert.deepEqual(h.db.dueFanout(NOW + 1000).map((r) => r.event_id), [created.event_id, created.event_id, created.event_id]);
+  assert.deepEqual(h.db.dueFanout(NOW + 1000).map((r) => r.event_id), Array(4).fill(created.event_id));
   h.cleanup();
 });
 

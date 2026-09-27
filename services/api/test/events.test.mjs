@@ -165,7 +165,7 @@ test('recordEvent upserts the session, stores the event with the server context,
   assert.equal(rows[1].event_id, 'mf3k2a1b-9c4e7f21');
   assert.equal(rows[1].listing_id, 'BONA-W003');
   assert.equal(rows[1].path, '/properties/bona-w003/');
-  assert.deepEqual(rows[1].props, { cta: 'listing_whatsapp', href: 'https://wa.me/966593296933' });
+  assert.deepEqual(rows[1].props, { cta: 'listing_whatsapp', href: 'https://wa.me/966593296933', _consent_ads: true });
   assert.equal(rows[1].src_first.utm_campaign, 'villas_sep');
   assert.equal(rows[1].src_last.ts, NOW - 1000);
   assert.equal(rows[1].ip, '203.0.113.9');
@@ -174,8 +174,20 @@ test('recordEvent upserts the session, stores the event with the server context,
 
   assert.deepEqual(
     db.dueFanout(NOW + 5).map((f) => [f.event_id, f.dest]),
-    [['mf3k2a1b-9c4e7f21', 'meta'], ['mf3k2a1b-9c4e7f21', 'ga4'], ['mf3k2a1b-9c4e7f21', 'snap']],
+    [['mf3k2a1b-9c4e7f21', 'meta'], ['mf3k2a1b-9c4e7f21', 'ga4'], ['mf3k2a1b-9c4e7f21', 'snap'], ['mf3k2a1b-9c4e7f21', 'tiktok']],
     'only the click fans out — but to every destination that has a name for it, since a WhatsApp click is the event an ad blocker most often eats',
   );
+  db.close();
+});
+
+
+test('event consent snapshot cannot be forged through props or upgraded by later session consent', () => {
+  const db = openDb(':memory:');
+  const denied = validateEvent(sample({ consent: { analytics: true, ads: false }, props: { _consent_ads: true } }), { now: NOW }).event;
+  recordEvent(db, denied, { received: NOW });
+  const granted = validateEvent(sample({ event_id: 'later-event-123', ts: NOW + 1 }), { now: NOW + 1 }).event;
+  recordEvent(db, granted, { received: NOW + 1 });
+  assert.equal(db.getSession(denied.session_id).consent_ads, 1);
+  assert.equal(db.getEvent(denied.event_id).props._consent_ads, false);
   db.close();
 });

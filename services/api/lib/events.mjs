@@ -20,7 +20,7 @@ export const EVENT_NAMES = [
 export const SERVER_EVENT_NAMES = ['concierge_chat_start', 'concierge_call_start', 'lead_created', 'lead_stage'];
 
 /** Where a WhatsApp click is re-sent from the server (see lib/fanout.mjs for the mapping). */
-export const CLICK_FANOUT = ['meta', 'ga4', 'snap'];
+export const CLICK_FANOUT = ['meta', 'ga4', 'snap', 'tiktok'];
 
 export const ID_RE = {
   anon_id: /^[0-9a-f]{32}$/,
@@ -195,7 +195,7 @@ export function recordEvent(db, event, server = {}) {
     });
     const inserted = db.insertEvent({
       event_id: event.event_id, ts: event.ts, name: event.event, anon_id: event.anon_id, session_id: event.session_id,
-      lead_id: null, listing_id: event.listing_id, path: event.page, props: event.props,
+      lead_id: null, listing_id: event.listing_id, path: event.page, props: { ...event.props, _consent_ads: event.consent.ads === true },
       src_first: a.first, src_last: a.last, ip, ua, country,
     });
     // A WhatsApp click is the strongest intent signal the site has, and it is exactly the

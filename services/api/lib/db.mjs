@@ -24,7 +24,7 @@ import { randomId } from './store.mjs';
 export const SCHEMA_VERSION = 2;
 
 export const STAGES = ['new', 'contacted', 'qualified', 'viewing', 'offer', 'negotiation', 'won', 'lost'];
-export const FANOUT_DESTS = ['meta', 'ga4', 'snap'];
+export const FANOUT_DESTS = ['meta', 'ga4', 'snap', 'tiktok'];
 export const FANOUT_STATUSES = ['pending', 'sent', 'failed', 'skipped'];
 
 /** `${prefix}-${base36 time}-${4 hex}` — sortable, unique enough for one process. */

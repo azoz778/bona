@@ -45,7 +45,7 @@ test('newId is prefix, base-36 time and four hex characters', () => {
   assert.match(id, /^ev-[0-9a-z]{6,10}-[0-9a-f]{4}$/);
   assert.notEqual(id, newId('ev'));
   assert.deepEqual(STAGES, ['new', 'contacted', 'qualified', 'viewing', 'offer', 'negotiation', 'won', 'lost']);
-  assert.deepEqual(FANOUT_DESTS, ['meta', 'ga4', 'snap']);
+  assert.deepEqual(FANOUT_DESTS, ['meta', 'ga4', 'snap', 'tiktok']);
 });
 
 /* ---------------- sessions ---------------- */

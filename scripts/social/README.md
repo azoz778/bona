@@ -442,22 +442,14 @@ curl -X POST "https://graph.facebook.com/v26.0/$IG_BUSINESS_ID/media_publish" \
 Facebook Page equivalent: `POST /{page-id}/photos` (`url=`, `message=`) and
 `POST /{page-id}/videos` for a reel, with a Page token.
 
-### TikTok — Content Posting API v2
-Needs an approved app with the `video.publish` / `video.upload` scope.
+### TikTok — permission-gated setup
 
-```bash
-curl -X POST https://open.tiktokapis.com/v2/post/publish/video/init/ \
-  -H "Authorization: Bearer $TIKTOK_ACCESS_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"post_info":{"title":"<AR caption>","privacy_level":"PUBLIC_TO_EVERYONE"},
-       "source_info":{"source":"PULL_FROM_URL","video_url":"https://<host>/reel-BONA-001.mp4"}}'
-# then poll:
-curl -X POST https://open.tiktokapis.com/v2/post/publish/status/fetch/ \
-  -H "Authorization: Bearer $TIKTOK_ACCESS_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"publish_id":"<id>"}'
-```
-
-Photo carousels use `/v2/post/publish/content/init/` with `media_type: "PHOTO"` and
-`post_mode: "DIRECT_POST"`.
+No TikTok publisher is enabled. Use [the current connection checklist](../../docs/checklists/tiktok-bona.md).
+For Bona's own account, evaluate API for Business / Organic Accounts API access or an
+approved publishing provider. TikTok for Developers Direct Post is not an acceptable
+private team-only uploader route; an unaudited app is restricted to private posts.
+`video.publish` and `video.upload` are different grants, and upload requires the creator
+to finish posting in TikTok. Do not turn a curl example into a scheduled publisher.
 
 ### YouTube Shorts — Data API v3
 A vertical video of 3 minutes or less is treated as a Short automatically.

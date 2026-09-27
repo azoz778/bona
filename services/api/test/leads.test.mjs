@@ -87,7 +87,7 @@ test('a WhatsApp lead with a Ref inherits the session: source from the last touc
   assert.equal(ev[0].listing_id, 'BONA-W003');
   assert.equal(ev[0].src_last.utm_campaign, 'villas_sep');
   assert.equal(ev[0].ip, '203.0.113.9', 'the session\'s client context rides along for CAPI');
-  assert.deepEqual(h.db.dueFanout(NOW).map((f) => [f.event_id, f.dest]), [[ev[0].event_id, 'meta'], [ev[0].event_id, 'ga4'], [ev[0].event_id, 'snap']]);
+  assert.deepEqual(h.db.dueFanout(NOW).map((f) => [f.event_id, f.dest]), [[ev[0].event_id, 'meta'], [ev[0].event_id, 'ga4'], [ev[0].event_id, 'snap'], [ev[0].event_id, 'tiktok']]);
 
   const raw = h.jsonl();
   assert.equal(raw.length, 1, 'the append-only raw log continues');
@@ -115,7 +115,7 @@ test('the same phone, spelled differently, merges: a touchpoint, no second lead,
   assert.deepEqual(h.db.touchpointsForLead(first.lead.lead_id).map((t) => t.event_type), ['lead_created', 'inbound_message']);
   assert.equal(h.db.touchpointsForLead(first.lead.lead_id)[1].source, 'whatsapp_organic', 'this touch had no session of its own');
   assert.equal(h.db.recentEvents({ name: 'lead_created' }).length, 1);
-  assert.equal(h.db.fanoutCounts().pending, 3, 'no second fan-out');
+  assert.equal(h.db.fanoutCounts().pending, 4, 'no second fan-out');
   assert.equal(h.db.listLeads().length, 1);
   assert.equal(h.jsonl().length, 1, 'the raw log records enquiries, not repeats');
   h.cleanup();
