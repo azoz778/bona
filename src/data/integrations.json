@@ -195,8 +195,8 @@
     "link": "https://ads.tiktok.com/i18n/events_manager",
     "action": "Verify browser receipt in TikTok Test Events and advertising-consent behavior.",
     "status": "pending-owner",
-    "detail": "Bona Real Estate Website Pixel DASP9PBC77U0AVP50NEG configured behind advertising consent. Event receipt and reporting remain unverified.",
-    "checkedAt": "2026-09-28T00:00:00+03:00"
+    "detail": "Pixel DASP9PBC77U0AVP50NEG deployed. Refusal, acceptance and withdrawal verified; isolated browser Pageview POST returned HTTP200 with correct test ID. Browser Test Events display remains unresolved; matching/reporting unverified.",
+    "checkedAt": "2026-09-27T22:39:23.996134+00:00"
   },
   {
     "id": "bona-api",
@@ -235,8 +235,8 @@
     "owner": "owner",
     "action": "Verify browser/server matching IDs, deduplication and production reporting after Test Events validation.",
     "link": "https://business-api.tiktok.com/portal/",
-    "detail": "Server credentials configured in test mode. TikTok Test Events receipt of synthetic Contact verified September 28. Browser/server deduplication, person matching and production reporting remain unverified.",
-    "checkedAt": "2026-09-27T22:27:08.436599+00:00"
+    "detail": "Production routing enabled after verified server Test Events receipt. Advertising consent required at event and delivery. Browser/server deduplication, person matching and production reporting remain unverified.",
+    "checkedAt": "2026-09-27T22:39:23.996159+00:00"
   },
   {
     "id": "tiktok-api",
