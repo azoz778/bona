@@ -220,3 +220,41 @@ export function createTeam(store, { now = () => Date.now(), log = () => {} } = {
     getSetting, setSetting, sendingEnabled,
   };
 }
+
+/* -------------------- @lid learning (2026-09-27 carryover, §3.5) -------------------- */
+
+/**
+ * A privacy-mode `@lid` chat carries no phone number of its own — WhatsApp only ever
+ * links it to one through `jidAlt` on a message that also shows the real jid. The
+ * WhatsApp poller calls this the moment it sees that pairing for a number that is on
+ * the team, so a later message arriving as the lid ALONE can still be matched to the
+ * same person. Deliberately the only door in: nothing here ever turns a lid's own
+ * digits into a phone number.
+ *
+ * Plain functions, not part of `createTeam()` — the poller has the store (`db.mjs`'s
+ * `openDb()`) but not a `team` instance, and this is the one place it needs a `users`
+ * write.
+ *
+ * @param {ReturnType<import('./db.mjs').openDb>} store
+ * @returns {boolean} true when a row was actually updated (false for an unknown phone,
+ *   a missing lid, or a lid this phone is already recorded under)
+ */
+export function learnTeamLid(store, phone, lid) {
+  const digits = normalisePhone(phone);
+  if (!digits || !lid) return false;
+  const { changes } = store.db
+    .prepare('UPDATE users SET wa_lid = ? WHERE phone_e164 = ? AND (wa_lid IS NULL OR wa_lid != ?)')
+    .run(String(lid), digits, String(lid));
+  return changes > 0;
+}
+
+/**
+ * True when `lid` was learned as a team member's id by `learnTeamLid`. Never-list
+ * numbers are not covered — they have no row in `users` to attach a lid to, so a
+ * lid-only chat from one stays in the poller's logged, uncheckable gap.
+ * @param {ReturnType<import('./db.mjs').openDb>} store
+ */
+export function isTeamLid(store, lid) {
+  if (!lid) return false;
+  return Boolean(store.db.prepare('SELECT 1 FROM users WHERE wa_lid = ?').get(String(lid)));
+}

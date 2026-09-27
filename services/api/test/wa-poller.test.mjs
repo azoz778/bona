@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openDb } from '../lib/db.mjs';
+import { createTeam } from '../lib/team.mjs';
 import {
   CLICK_WINDOW_MS, FIRST_RUN_LOOKBACK_MS, MAX_RECORD_ATTEMPTS, MAX_WINDOW_MS, OVERLAP_MS,
   SEEN_TTL_MS, adMetaOf, adSourceOf, createPoller, isIgnorableChat, jidsOf,
@@ -41,7 +42,7 @@ const msg = (over = {}) => ({
  * A store with the visitor session behind Ref `K7Q2XR`, a poller wired to a queue of
  * windows (one per tick), and the owner's note sender recorded rather than sent.
  */
-function harness({ windows = [], env = {}, seedSession = true } = {}) {
+function harness({ windows = [], env = {}, seedSession = true, isExcluded } = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-poller-'));
   const db = openDb(':memory:');
   if (seedSession) {
@@ -61,6 +62,7 @@ function harness({ windows = [], env = {}, seedSession = true } = {}) {
     cfg: { env: { BONA_OWNER_JID: OWNER, ...env }, siteUrl: 'https://bona-real-estate.com', dataDir, waPollMs: 0 },
     findMessages: async (window) => { asked.push(window); return { records: queue.length ? queue.shift() : [] }; },
     sendWhatsApp: async (text) => { sent.push(text); return { ok: true }; },
+    ...(isExcluded ? { isExcluded } : {}),
     log: (obj) => logs.push(obj),
     now: () => clock,
   });
@@ -784,4 +786,94 @@ test('(l) the bare-array shape and an ISO timestamp are read the same way', asyn
   const [lead] = db.listLeads({ limit: 5 });
   assert.equal(lead.first_inbound_ts, NOW - 90_000);
   db.close();
+});
+
+/* ---------------- (m) team and never-list numbers ---------------- */
+
+test('(m) a team or never-a-client number is never a lead or a reply, even with "Bona" or a Ref line', async () => {
+  const excluded = new Set(['966500000000']);
+  const h = harness({
+    isExcluded: (digits) => excluded.has(digits),
+    windows: [[
+      msg({ id: 'K-code', fromMe: true, text: 'Bona dashboard code: 123456 (valid 10 min)' }),
+      msg({ id: 'K-word', text: 'I am handling the Bona client today' }),
+      msg({ id: 'K-ref', text: 'Ref BONA-W003 · K7Q2XR' }),
+    ]],
+  });
+  const tally = await h.poller.tick();
+  assert.equal(tally.matched, 0);
+  assert.equal(tally.replies, 0);
+  assert.equal(tally.ignored, 3);
+  assert.equal(h.leads().length, 0);
+  assert.equal(h.sent.length, 0, 'no new-lead note either');
+  h.cleanup();
+});
+
+test('with no isExcluded passed at all, team/never-list exclusion simply does not run (older wiring)', async () => {
+  const h = harness({ windows: [[msg({ text: 'Ref BONA-W003 · K7Q2XR' })]] });
+  const tally = await h.poller.tick();
+  assert.equal(tally.matched, 1);
+  assert.equal(h.leads().length, 1);
+  h.cleanup();
+});
+
+/* ---------------- (n) the @lid gap: a team number without a phone ---------------- */
+
+test('(n) an @lid chat is uncaught but counted, never logged with the lid, until its phone has paired with it', async () => {
+  const excluded = new Set(['966500000000']);
+  const h = harness({
+    isExcluded: (digits) => excluded.has(digits),
+    windows: [[msg({ id: 'LID-ONLY', jid: '272516946294519@lid', jidAlt: null, pushName: null, text: 'I am handling the Bona client today' })]],
+  });
+  const tally = await h.poller.tick();
+  // The gap, honestly: with only the lid to go on, isExcluded (phone-only) cannot rule
+  // this out, so the keyword rule still gets to it and makes it a lead.
+  assert.equal(tally.lidOnlyUnexcludable, 1);
+  assert.equal(tally.matched, 1);
+  assert.equal(h.leads().length, 1);
+
+  const dump = JSON.stringify(h.logs);
+  assert.ok(dump.includes('poll.lid_only_unexcludable'));
+  assert.ok(!dump.includes('272516946294519'), 'the lid itself is never in a log line');
+  h.cleanup();
+});
+
+test('(n) once a team phone pairs with its @lid via jidAlt, a later lid-only message from it is excluded too', async () => {
+  // A real `users` row is what `learnTeamLid` actually writes `wa_lid` onto — a bare
+  // closure over a Set (as `isExcluded` is everywhere else in this file) has nothing
+  // for it to update. Production always has this row: `isExcluded` there IS
+  // `team.isExcludedPhone`, backed by the same `users` table.
+  const h = harness({
+    isExcluded: (digits) => digits === '966500000000',
+    windows: [
+      // First message carries both: the phone (via jidAlt) is a team number, so it is
+      // dropped — and the pairing with the lid is learned in the same step.
+      [msg({ id: 'PAIR', jid: '272516946294519@lid', jidAlt: SENDER, pushName: null, text: 'Bona dashboard code: 123456' })],
+      // Second message carries the lid alone. Without the learning above this would be
+      // test (n)'s gap; with it, the same person is still recognised and stays excluded.
+      [msg({ id: 'LID-ONLY', jid: '272516946294519@lid', jidAlt: null, ts: NOW - 30_000, pushName: null, text: 'Ref BONA-W003 · K7Q2XR' })],
+    ],
+  });
+  createTeam(h.db, { now: () => NOW }).addUser({ name: 'Sara', phone: '966500000000', role: 'staff' });
+
+  const first = await h.poller.tick();
+  assert.equal(first.ignored, 1);
+  assert.equal(first.matched, 0);
+  assert.equal(h.leads().length, 0);
+
+  const second = await h.poller.tick();
+  assert.equal(second.ignored, 1, 'the learned lid excludes it on its own, even carrying a Ref line');
+  assert.equal(second.matched, 0);
+  assert.equal(second.lidOnlyUnexcludable, 0, 'no longer a gap for this lid');
+  assert.equal(h.leads().length, 0);
+  h.cleanup();
+});
+
+test('(n) with no team wired, a lid-only chat is judged exactly as before — no counter, no gap log', async () => {
+  const h = harness({ windows: [[msg({ id: 'LID-ONLY', jid: '272516946294519@lid', jidAlt: null, pushName: null, text: 'Ref BONA-W003 · K7Q2XR' })]] });
+  const tally = await h.poller.tick();
+  assert.equal(tally.lidOnlyUnexcludable, 0);
+  assert.equal(tally.matched, 1);
+  assert.ok(!h.logs.some((l) => l.evt === 'poll.lid_only_unexcludable'));
+  h.cleanup();
 });
