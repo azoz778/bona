@@ -174,7 +174,7 @@ test('recordEvent upserts the session, stores the event with the server context,
 
   assert.deepEqual(
     db.dueFanout(NOW + 5).map((f) => [f.event_id, f.dest]),
-    [['mf3k2a1b-9c4e7f21', 'meta'], ['mf3k2a1b-9c4e7f21', 'ga4'], ['mf3k2a1b-9c4e7f21', 'snap']],
+    [['mf3k2a1b-9c4e7f21', 'meta'], ['mf3k2a1b-9c4e7f21', 'ga4'], ['mf3k2a1b-9c4e7f21', 'snap'], ['mf3k2a1b-9c4e7f21', 'tiktok']],
     'only the click fans out — but to every destination that has a name for it, since a WhatsApp click is the event an ad blocker most often eats',
   );
   db.close();

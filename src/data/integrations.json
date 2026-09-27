@@ -24,20 +24,20 @@
     "name": "HTTPS certificate",
     "status": "live",
     "owner": "agent",
-    "action": "Certificate is active; monitor after DNS or custom-domain changes.",
+    "action": "HTTPS website responds successfully.",
     "link": "https://github.com/azoz778/bona/settings/pages",
-    "detail": "Production serves a valid HTTPS certificate for bona-real-estate.com.",
-    "checkedAt": "2026-09-22T13:49:22.728Z"
+    "detail": "TLS-valid public homepage retrieved 2026-09-28; previous certificate-mismatch note was obsolete.",
+    "checkedAt": "2026-09-27T21:26:38Z"
   },
   {
     "id": "pages-deploy",
     "name": "GitHub Pages deploy",
     "status": "live",
     "owner": "agent",
-    "action": "GitHub Actions deploys main to Pages; verify the workflow and live URL after changes.",
+    "action": "Public site is deployed; review future changes before deployment.",
     "link": "https://github.com/azoz778/bona/actions",
-    "detail": "GitHub Pages deployment is active from the repository workflow.",
-    "checkedAt": "2026-09-22T13:49:22.728Z"
+    "detail": "Public homepage serves current GA4 and Meta Pixel IDs. Deployment workflow configuration not re-audited here.",
+    "checkedAt": "2026-09-27T21:26:38Z"
   },
   {
     "id": "matterport",
@@ -59,22 +59,22 @@
   {
     "id": "instagram",
     "name": "Instagram @bonarealestatesa",
-    "status": "live",
-    "owner": "agent",
-    "action": "Publisher timer is enabled and active; inspect provider response and ledger before claiming an item published.",
+    "status": "pending-agent",
+    "owner": "owner",
+    "action": "Keep publishing paused pending the content-quality review.",
     "link": "https://www.instagram.com/bonarealestatesa/",
-    "detail": "@bonarealestatesa is public. The ledger had 19 successful publication records; the public feed count is a separate measure.",
-    "checkedAt": "2026-09-22T13:49:22.728Z"
+    "detail": "Coordinator verified Instagram/Facebook credentials on Sept 27/28. This integration change does not enable publishing timers.",
+    "checkedAt": "2026-09-27T21:26:38Z"
   },
   {
     "id": "instagram-api",
     "name": "Instagram API access",
-    "status": "live",
-    "owner": "agent",
-    "action": "Automated publisher is operating; North Obhur and National Day packages remain owner-approval gated.",
+    "status": "pending-agent",
+    "owner": "owner",
+    "action": "Credentials verified by coordinator; resolve the content-quality publishing hold.",
     "link": "https://business.facebook.com/settings/instagram-account-v2s",
-    "detail": "Instagram Graph publishing is configured and the publisher timer is enabled/active.",
-    "checkedAt": "2026-09-22T13:49:22.728Z"
+    "detail": "API connection is reported valid; publishing is intentionally disabled. No test post or fresh token probe made in this task.",
+    "checkedAt": "2026-09-27T21:26:38Z"
   },
   {
     "id": "whatsapp",
@@ -89,32 +89,32 @@
   {
     "id": "ga4",
     "name": "Google Analytics 4",
-    "status": "live",
+    "status": "pending-owner",
     "owner": "owner",
-    "action": "Confirm live traffic in GA4 Realtime and periodically verify that G-861TD74EW1 remains the production Measurement ID.",
+    "action": "Confirm real events in GA4 Realtime and reporting.",
     "link": "https://analytics.google.com/",
-    "detail": "payload validated for G-861TD74EW1; one verify_ping sent to mp/collect (HTTP 204 — that endpoint answers 204 with an empty body and never reports errors, so acceptance is NOT proof of ingestion). site tag G-861TD74EW1 served. Owner: confirm the verify_ping in GA4 → Reports → Realtime (or Admin → Deb",
-    "checkedAt": "2026-09-22T13:49:22.728Z"
+    "detail": "Live homepage serves G-861TD74EW1 (Sept 28). Sept 27 audit verified server HTTP delivery only; ingestion and reports remain unverified.",
+    "checkedAt": "2026-09-27T21:26:38Z"
   },
   {
     "id": "meta-pixel",
     "name": "Meta Pixel",
     "status": "live",
     "owner": "owner",
-    "action": "Use Meta Events Manager Test Events to verify browser events after consent; keep Pixel 1102591712117129 configured in site.json.",
+    "action": "Verify browser event receipt and matching in Events Manager.",
     "link": "https://business.facebook.com/events_manager",
-    "detail": "Meta Pixel 1102591712117129 is served by the live site (loads after consent)",
-    "checkedAt": "2026-09-22T13:49:22.728Z"
+    "detail": "Live homepage serves Pixel 1102591712117129 (Sept 28). This proves tag configuration, not browser delivery or deduplication.",
+    "checkedAt": "2026-09-27T21:26:38Z"
   },
   {
     "id": "gsc",
     "name": "Google Search Console",
-    "status": "live",
-    "owner": "owner",
-    "action": "Verification tag is live; confirm ownership, sitemap submission and performance inside Search Console.",
-    "link": "https://search.google.com/search-console",
-    "detail": "google-site-verification is served on production; account-side sitemap/reporting state is not verified by the public probe.",
-    "checkedAt": "2026-09-22T13:49:22.728Z"
+    "status": "pending-owner",
+    "owner": "agent",
+    "action": "Confirm Bona property ownership, sitemap submission and report access.",
+    "link": "https://search.google.com/search-console?resource_id=sc-domain:bona-real-estate.com",
+    "detail": "Sept 27 audit verified HTML and DNS verification records; Search Console account ownership, reports and OpenSEO linkage remain unverified.",
+    "checkedAt": "2026-09-27T21:26:38Z"
   },
   {
     "id": "indexnow",
@@ -161,62 +161,62 @@
   {
     "id": "email",
     "name": "Email",
-    "status": "live",
+    "status": "pending-owner",
     "owner": "owner",
-    "action": "Keep info@bona-real-estate.com as the public Bona contact and verify deliverability after DNS/mail changes.",
-    "link": "mailto:info@bona-real-estate.com",
-    "detail": "Public Bona contact address is active as a managed Zoho alias.",
-    "checkedAt": "2026-09-22T13:49:22.728Z"
+    "action": "Verify the Bona domain mailbox login and send/receive.",
+    "link": "https://mail.zoho.com/",
+    "detail": "Sept 27 audit found Zoho verification/SPF on bona-real-estate.com. Mailbox operation unverified; no dependency on obtaining bona.com.sa.",
+    "checkedAt": "2026-09-27T21:26:38Z"
   },
   {
     "id": "meta-capi",
     "name": "Meta Conversions API",
     "owner": "owner",
     "link": "https://business.facebook.com/events_manager2",
-    "action": "docs/checklists/meta-bona-portfolio.md §5–6",
-    "status": "error",
-    "detail": "GET /1102591712117129 HTTP 400: (#100) Missing Permission",
-    "checkedAt": "2026-09-22T13:49:22.728Z"
+    "action": "Verify matching and browser/server deduplication in Events Manager.",
+    "status": "live",
+    "detail": "Sept 27 audit recorded four accepted Meta responses (events_received=1); Sept 28 health reports destination configured. Historical acceptance is not a new test.",
+    "checkedAt": "2026-09-27T21:26:38Z"
   },
   {
     "id": "snap",
     "name": "Snap Pixel + Conversions API",
     "owner": "owner",
     "link": "https://ads.snapchat.com/",
-    "action": "docs/checklists/snapchat-bona.md",
+    "action": "Obtain authorized Snap Pixel and server credentials when required.",
     "status": "pending-owner",
-    "detail": "SNAP_PIXEL_ID empty, SNAP_CAPI_TOKEN empty in ~/.secrets/bona-marketing.env — docs/checklists/snapchat-bona.md. site tag missing: site.json → analytics.snapPixel",
-    "checkedAt": "2026-09-22T13:49:22.728Z"
+    "detail": "Live site has no Snap Pixel ID; Sept 28 API health shows Snap destination unconfigured.",
+    "checkedAt": "2026-09-27T21:26:38Z"
   },
   {
     "id": "tiktok-pixel",
     "name": "TikTok Pixel (site)",
     "owner": "owner",
     "link": "https://ads.tiktok.com/i18n/events_manager",
-    "action": "paste the sdkid into site.json → analytics.tiktokPixel",
+    "action": "docs/checklists/tiktok-bona.md: obtain Bona web Pixel ID through the existing owner account.",
     "status": "pending-owner",
-    "detail": "TikTok Pixel id missing: site.json → analytics.tiktokPixel — TikTok Ads → Assets → Events → Web Events → the pixel's sdkid",
-    "checkedAt": "2026-09-22T13:49:22.728Z"
+    "detail": "Sept 28 live homepage has analytics.tiktokPixel=null. Loader exists, but no TikTok connection or receipt verified.",
+    "checkedAt": "2026-09-27T21:26:38Z"
   },
   {
     "id": "bona-api",
     "name": "Concierge API (bona-api)",
     "owner": "agent",
     "link": "https://api.bona-real-estate.com/health",
-    "action": "Check the public health URL; for VPS unit status run: ssh hermes-vps sudo systemctl status bona-api cloudflared-bona",
+    "action": "Review API changes independently of paused publishing jobs.",
     "status": "live",
-    "detail": "https://api.bona-real-estate.com/health ok — HTTP 200, v1.0.0, inventory 48, db ok, poller 1790084931478, fan-out pending 0 / failed 0",
-    "checkedAt": "2026-09-22T13:49:22.728Z"
+    "detail": "Sept 28 GET /health: ok; db/Retell ok; inventory 48; fanout pending 0, sent 8, failed 0, skipped 101. Meta/GA4 configured; Snap off. TikTok implementation is not deployed.",
+    "checkedAt": "2026-09-27T21:26:38Z"
   },
   {
     "id": "retell",
     "name": "Retell (Dana)",
     "owner": "owner",
     "link": "https://dashboard.retellai.com/",
-    "action": "services/README.md §5",
+    "action": "Monitor API health and usage budget.",
     "status": "live",
-    "detail": "Retell reachable through bona-api",
-    "checkedAt": "2026-09-22T13:49:22.728Z"
+    "detail": "Sept 28 public API /health reports retell=ok. No new call made.",
+    "checkedAt": "2026-09-27T21:26:38Z"
   },
   {
     "id": "evolution",
@@ -227,5 +227,25 @@
     "status": "live",
     "detail": "Evolution API answers HTTP 200 v2.3.7 at https://wa-api.azoz.uk; instance abdulaziz-personal",
     "checkedAt": "2026-09-22T13:49:22.728Z"
+  },
+  {
+    "id": "tiktok-events",
+    "name": "TikTok Events API",
+    "status": "pending-owner",
+    "owner": "owner",
+    "action": "Complete docs/checklists/tiktok-bona.md prerequisites; preserve the existing login.",
+    "link": "https://business-api.tiktok.com/portal/",
+    "detail": "Implemented and mock-tested in feat/tiktok-integrations; not deployed. No configured Pixel ID or Events API token found in local/VPS Bona env files on Sept 28. Acceptance, matching and reporting unverified.",
+    "checkedAt": "2026-09-27T21:26:38Z"
+  },
+  {
+    "id": "tiktok-api",
+    "name": "TikTok organic account APIs",
+    "status": "pending-owner",
+    "owner": "owner",
+    "action": "Complete docs/checklists/tiktok-bona.md prerequisites; preserve the existing login.",
+    "link": "https://business-api.tiktok.com/portal/",
+    "detail": "Coordinator verified @bonarealestatesa, Bona Real Estate name, bilingual bio and official B logo; login unchanged. TikTok For Business permission/terms consent awaits owner response. Business tier, app/scopes and tokens unverified; no publisher or refresh job enabled.",
+    "checkedAt": "2026-09-27T21:26:38Z"
   }
 ]

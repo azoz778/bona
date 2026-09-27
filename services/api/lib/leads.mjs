@@ -29,7 +29,7 @@ const MERGE_EVENT = { whatsapp: 'inbound_message', form: 'form_submit', concierg
 /** The raw log predates the channel vocabulary; its old names stay so the file reads as one. */
 const RAW_LOG_CHANNEL = { concierge_chat: 'chat', concierge_voice: 'voice' };
 /** What every destination is told about on a new lead. */
-const LEAD_FANOUT = ['meta', 'ga4', 'snap'];
+const LEAD_FANOUT = ['meta', 'ga4', 'snap', 'tiktok'];
 
 /** Keep only known fields, trim, cap length — the values come from an LLM. */
 export function normaliseLead(input = {}) {
