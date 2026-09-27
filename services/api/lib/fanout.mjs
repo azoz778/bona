@@ -4,8 +4,8 @@
  * A pixel in a browser is blocked, throttled and consent-gated; the interesting
  * moments (a WhatsApp click, a lead) are exactly the ones an ad blocker eats. So
  * `db.enqueueFanout()` queues those events here and this worker re-sends them from the
- * server, carrying the same `event_id` the browser pixel used — Meta, GA4 and Snap all
- * de-duplicate on it, so a person who saw both is counted once.
+ * server, carrying the same `event_id` the browser pixel used. Meta, Snap and TikTok
+ * use it for deduplication; GA4 carries it for downstream reconciliation, not automatic deduplication.
  *
  * Everything is optional. A destination with no credentials is not an error and not a
  * backlog: its rows are marked `skipped` the first time they come due, so the queue

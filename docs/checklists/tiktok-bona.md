@@ -35,9 +35,10 @@ billing details, test posts or paid subscriptions are needed for this code revie
    **Bona web** and choose manual Pixel + direct Events API setup. Do not add
    a duplicate click/event-builder rule for events the site already emits.
 3. **Before enabling TikTok tracking, update and review the bilingual privacy notice.**
-   The current `src/data/privacy.json` incorrectly describes no forms/cookies/database
-   and omits TikTok as a recipient. Correct actual collection, purposes, recipients
-   and consent controls before activation; code deployment does not clear this gate.
+   The bilingual `src/data/privacy.json` now describes the actual forms, storage,
+   first-party records and active/pending providers. Review it against the final
+   enabled data flows before activation; no unverified deletion or residency promise
+   is made. Confirm the business retention schedule and provider arrangements separately.
    Set the public Pixel ID in `src/data/site.json` → `analytics.tiktokPixel`.
    On the API service host only, set these in `~/.secrets/bona-marketing.env`
    with directory mode 0700 and file mode 0600:

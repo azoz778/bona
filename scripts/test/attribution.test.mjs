@@ -23,6 +23,7 @@ const named = (dom, name) => posted(dom).filter((e) => e.event === name);
 
 /** The vendor tags, as tags.js would have left them after an "Accept all". */
 function installTags(dom) {
+  dom.setConsent(true, true);
   const calls = { ga: [], meta: [], snap: [], tiktok: [] };
   dom.win.gtag = (...a) => calls.ga.push(a);
   dom.win.fbq = (...a) => calls.meta.push(a);
@@ -211,4 +212,20 @@ test('after an accept the same visitor is remembered, keeping the first touch', 
   assert.equal(stored.anon_id, first.anon_id, 'the person is not restarted by saying yes');
   assert.equal(stored.first.utm_campaign, 'villas_sep');
   assert.match(dom.win.document.cookie, /^bona_id=[0-9a-f]{32};/);
+});
+
+
+test('withdrawing consent stops calls to already-loaded vendor tags and removes durable attribution', () => {
+  const dom = onListing();
+  const tags = installTags(dom);
+  dom.win.bonaAttrPersist();
+  assert.ok(dom.win.localStorage.getItem('bona_attr'));
+  dom.setConsent(false, false);
+  dom.win.bonaAttrPersist();
+  dom.win.bonaTrack('whatsapp_click');
+  assert.equal(dom.win.localStorage.getItem('bona_attr'), null);
+  assert.ok(dom.win.sessionStorage.getItem('bona_attr'));
+  assert.match(dom.win.document.cookie, /Max-Age=0/);
+  for (const calls of Object.values(tags)) assert.equal(calls.length, 0);
+  assert.equal(named(dom, 'whatsapp_click').at(-1).consent.ads, false);
 });
