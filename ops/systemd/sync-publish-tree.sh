@@ -5,7 +5,7 @@
 set -u
 tree="${1:-$HOME/bona-publish}"
 say() { echo "bona-ig-publish sync: $*"; }
-[ -e "$tree/.git" ] || { say "$tree is not a git worktree — run ops/systemd/install.sh"; exit 1; }
+[ -e "$tree/.git" ] || { say "$tree is not a git worktree — run ops/systemd/install-daily.sh"; exit 1; }
 if ! git -C "$tree" diff --quiet HEAD -- 2>/dev/null; then
   say "$tree has local modifications to tracked files — not touching it (the guard will refuse)"; exit 1
 fi

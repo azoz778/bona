@@ -19,7 +19,7 @@ refuse() { echo "$tag: refusing to run — $tree $*" >&2; exit 1; }
 
 case "$mode" in
   sync)
-    [ -e "$tree/.git" ] || { say "$tree is not a git worktree — run services/deploy/install-fb-publish.sh"; exit 1; }
+    [ -e "$tree/.git" ] || { say "$tree is not a git worktree — run ops/systemd/install-daily.sh"; exit 1; }
     if ! git -C "$tree" diff --quiet HEAD -- 2>/dev/null; then
       say "$tree has local modifications to tracked files — not touching it (guard will refuse)"; exit 1
     fi
@@ -32,7 +32,7 @@ case "$mode" in
     say "now at origin/main (${want:0:9})"
     ;;
   guard)
-    head="$(git -C "$tree" rev-parse -q --verify HEAD 2>/dev/null)" || refuse "is not a git checkout (run services/deploy/install-fb-publish.sh)"
+    head="$(git -C "$tree" rev-parse -q --verify HEAD 2>/dev/null)" || refuse "is not a git checkout (run ops/systemd/install-daily.sh)"
     branch="$(git -C "$tree" symbolic-ref --short -q HEAD 2>/dev/null || echo detached)"
     want="$(git -C "$tree" rev-parse -q --verify refs/remotes/origin/main 2>/dev/null || true)"
     if [ "$branch" != "main" ] && { [ -z "$want" ] || [ "$head" != "$want" ]; }; then
