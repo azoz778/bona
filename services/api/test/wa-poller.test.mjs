@@ -1012,3 +1012,89 @@ test('status() carries a running total of poll.lid_only_unexcludable across tick
   assert.equal(h.poller.status().lidOnlyUnexcludable, 2, 'it accumulates, like matched does');
   h.cleanup();
 });
+
+/* ---------------- (r) a lid known from a lead is checked against the team and never lists ---------------- */
+
+test('(r) an outbound lid-only record for a never-listed lead is ignored — no reply stamp', async () => {
+  // Codex repro: the lead's phone was later put on the never list, but the lid on its own
+  // still slipped through, because only `users.wa_lid` (team pairings) was ever consulted
+  // — a lead's own `wa_lid` → `phone_e164` mapping was not.
+  const h = harness({ isExcluded: (digits) => digits === '966500000001' });
+  h.db.insertLead({
+    lead_id: 'LEAD-test', phone_e164: '966500000001', wa_lid: '123456789@lid',
+    created: NOW - 3_600_000, updated: NOW - 3_600_000,
+  });
+  h.push([msg({ id: 'OUT-LID', jid: '123456789@lid', jidAlt: null, fromMe: true, pushName: null, text: 'Ahlan!' })]);
+
+  const tally = await h.poller.tick();
+  assert.equal(tally.ignored, 1);
+  assert.equal(tally.replies, 0, 'a never-listed contact is not a reply target, however the message arrives');
+  assert.equal(h.db.getLead('LEAD-test').first_reply_ts, null);
+  h.cleanup();
+});
+
+test('(r) an inbound lid-only record for a never-listed lead is ignored — no new lead, no touchpoint', async () => {
+  const h = harness({ isExcluded: (digits) => digits === '966500000001' });
+  h.db.insertLead({
+    lead_id: 'LEAD-test', phone_e164: '966500000001', wa_lid: '123456789@lid',
+    created: NOW - 3_600_000, updated: NOW - 3_600_000,
+  });
+  h.push([msg({ id: 'IN-LID', jid: '123456789@lid', jidAlt: null, pushName: null, text: 'Ref BONA-W003 · K7Q2XR' })]);
+
+  const tally = await h.poller.tick();
+  assert.equal(tally.matched, 0);
+  assert.equal(tally.ignored, 1);
+  assert.equal(h.db.countLeads(), 1, 'the pre-existing lead is the only one — none created for the never-listed contact');
+  assert.equal(h.db.touchpointsForLead('LEAD-test').length, 0);
+  h.cleanup();
+});
+
+test("(r) a normal client's lid-only record still merges as before, and is not counted toward the uncheckable gap", async () => {
+  const h = harness({ isExcluded: () => false });
+  h.db.insertLead({
+    lead_id: 'LEAD-client', phone_e164: '966500000002', wa_lid: '987654321@lid',
+    created: NOW - 3_600_000, updated: NOW - 3_600_000,
+  });
+  h.push([msg({ id: 'CLIENT-LID', jid: '987654321@lid', jidAlt: null, pushName: null, text: 'أي جديد؟' })]);
+
+  const tally = await h.poller.tick();
+  assert.equal(tally.merged, 1);
+  assert.equal(tally.lidOnlyUnexcludable, 0, 'resolved via the lead mapping, so it is not part of the gap');
+  assert.equal(h.db.countLeads(), 1);
+  h.cleanup();
+});
+
+/* ---------------- (s) an isExcluded failure defers the record, never fails the whole window ---------------- */
+
+test('(s) an isExcluded failure defers just that record; the tick completes and later records are processed', async () => {
+  let calls = 0;
+  const h = harness({
+    isExcluded: (digits) => {
+      if (digits === '966500000000' && calls++ === 0) throw new Error('team lookup exploded');
+      return false;
+    },
+    windows: [[
+      msg({ id: 'THROWS', ts: NOW - 90_000, text: 'Ref BONA-W003 · K7Q2XR' }),
+      msg({ id: 'AFTER', jid: '966511111111@s.whatsapp.net', ts: NOW - 30_000, text: 'Ref BONA-W003 · K7Q2XR' }),
+    ]],
+  });
+
+  const tally = await h.poller.tick();
+  assert.equal(tally.error, undefined, 'the tick itself must not fail over this');
+  assert.equal(tally.ignored, 0, 'not misfiled as excluded');
+  assert.equal(tally.matched, 1, 'the record behind the throwing one is still processed in the same tick');
+  assert.equal(h.db.countLeads(), 1);
+  assert.equal(h.db.waSeenHas('THROWS'), false, 'not marked seen — it is retried, not lost');
+
+  const warned = h.logs.find((l) => l.evt === 'poll.exclusion_check_failed');
+  assert.ok(warned, 'the failure is logged');
+  assert.equal(warned.level, 'warn');
+  assert.ok(!JSON.stringify(warned).includes('966500000000'), 'no phone number in the log');
+
+  // Retried: the cursor was held back to include it, and this time the lookup succeeds.
+  h.push([msg({ id: 'THROWS', ts: NOW - 90_000, text: 'Ref BONA-W003 · K7Q2XR' })]);
+  const second = await h.poller.tick();
+  assert.equal(second.matched, 1, 'the deferred record is picked up and judged normally next time');
+  assert.equal(h.db.countLeads(), 2);
+  h.cleanup();
+});
