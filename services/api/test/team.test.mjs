@@ -4,6 +4,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { openDb, SCHEMA_VERSION } from '../lib/db.mjs';
 import { createTeam, TeamError } from '../lib/team.mjs';
 import { createAudit, AUDIT_ACTIONS } from '../lib/audit.mjs';
@@ -33,7 +34,9 @@ const codeOf = (fn) => { try { fn(); } catch (err) { return err instanceof TeamE
 
 test('ensureOwner seeds the owner once and hands him the sessions from before accounts existed', () => {
   const { s, team } = teamHarness();
-  s.createAuthSession('tok_old', { now: NOW, ttlMs: 1000 });
+  // A session from before accounts: no user_id. createAuthSession no longer writes one.
+  s.db.prepare('INSERT INTO auth_sessions (token_hash, created, expires, ua, user_id) VALUES (?,?,?,?,NULL)')
+    .run(crypto.createHash('sha256').update('tok_old', 'utf8').digest('hex'), NOW, NOW + 1000, null);
   const owner = team.ensureOwner({ phone: '966593296933', name: 'Abdulaziz' });
   assert.equal(owner.role, 'owner');
   assert.equal(owner.phone_e164, '966593296933');
