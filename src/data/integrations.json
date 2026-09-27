@@ -233,10 +233,10 @@
     "name": "TikTok Events API",
     "status": "pending-owner",
     "owner": "owner",
-    "action": "Complete docs/checklists/tiktok-bona.md prerequisites; preserve the existing login.",
+    "action": "Verify browser/server matching IDs, deduplication and production reporting after Test Events validation.",
     "link": "https://business-api.tiktok.com/portal/",
-    "detail": "Events API support is available. Connection requires authorized credentials, privacy-notice review and verified event receipt; TikTok delivery is not yet active.",
-    "checkedAt": "2026-09-27T21:26:38Z"
+    "detail": "Server credentials configured in test mode. TikTok Test Events receipt of synthetic Contact verified September 28. Browser/server deduplication, person matching and production reporting remain unverified.",
+    "checkedAt": "2026-09-27T22:27:08.436599+00:00"
   },
   {
     "id": "tiktok-api",
