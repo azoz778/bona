@@ -115,16 +115,21 @@ const MIGRATIONS = [
     // Team accounts (2026-09-27 design §3.1). `auth_challenges.user_id` is NULL for the
     // decoy challenge a number that is not on the team receives — see dashboard/auth.mjs.
     // `auth_codes` stays in the file, unused: migrations here only ever add.
+    // `phone_e164` (`users`, and `never_list` below) holds bare international digits
+    // without '+', the same convention as `leads.phone_e164`.
+    // No foreign keys, by design: users are deactivated, never deleted, so nothing here
+    // needs to cascade or be blocked by a reference to a `user_id`.
     version: 3,
     sql: `
       CREATE TABLE IF NOT EXISTS users (
         user_id TEXT PRIMARY KEY, name TEXT NOT NULL, phone_e164 TEXT NOT NULL UNIQUE, wa_jid TEXT NOT NULL,
-        role TEXT NOT NULL CHECK (role IN ('owner','staff')), active INTEGER NOT NULL DEFAULT 1,
+        role TEXT NOT NULL CHECK (role IN ('owner','staff')), active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
         created INTEGER NOT NULL, last_login INTEGER, deactivated INTEGER
       );
       CREATE TABLE IF NOT EXISTS auth_challenges (
         challenge_id TEXT PRIMARY KEY, user_id TEXT, code_hash TEXT NOT NULL, nonce_hash TEXT NOT NULL UNIQUE,
-        created INTEGER NOT NULL, expires INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, used INTEGER NOT NULL DEFAULT 0
+        created INTEGER NOT NULL, expires INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+        used INTEGER NOT NULL DEFAULT 0 CHECK (used IN (0,1))
       );
       CREATE INDEX IF NOT EXISTS auth_challenges_user ON auth_challenges(user_id);
       CREATE INDEX IF NOT EXISTS auth_challenges_expires ON auth_challenges(expires);
@@ -528,11 +533,19 @@ export function openDb(file = ':memory:') {
 }
 
 function migrate(db) {
-  const current = db.prepare('PRAGMA user_version').get().user_version;
   for (const m of MIGRATIONS) {
-    if (m.version <= current) continue;
-    db.exec('BEGIN');
+    // BEGIN IMMEDIATE takes the write lock up front, so a concurrent opener (another
+    // process's openDb on the same file) either gets here first and finishes its COMMIT
+    // before we acquire the lock, or blocks (busy_timeout) until we finish ours — either
+    // way the user_version read below is never stale, and a step already applied by the
+    // other opener is skipped instead of re-run (e.g. into a "duplicate column" crash).
+    db.exec('BEGIN IMMEDIATE');
     try {
+      const current = db.prepare('PRAGMA user_version').get().user_version;
+      if (m.version <= current) {
+        db.exec('ROLLBACK');
+        continue;
+      }
       db.exec(m.sql);
       db.exec(`PRAGMA user_version = ${m.version}`);
       db.exec('COMMIT');
