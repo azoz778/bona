@@ -60,7 +60,7 @@
     "id": "instagram",
     "name": "Instagram @bonarealestatesa",
     "status": "pending-agent",
-    "owner": "owner",
+    "owner": "agent",
     "action": "Keep publishing paused pending the content-quality review.",
     "link": "https://www.instagram.com/bonarealestatesa/",
     "detail": "Coordinator verified Instagram/Facebook credentials on Sept 27/28. This integration change does not enable publishing timers.",
@@ -70,7 +70,7 @@
     "id": "instagram-api",
     "name": "Instagram API access",
     "status": "pending-agent",
-    "owner": "owner",
+    "owner": "agent",
     "action": "Credentials verified by coordinator; resolve the content-quality publishing hold.",
     "link": "https://business.facebook.com/settings/instagram-account-v2s",
     "detail": "API connection is reported valid; publishing is intentionally disabled. No test post or fresh token probe made in this task.",
@@ -110,7 +110,7 @@
     "id": "gsc",
     "name": "Google Search Console",
     "status": "pending-owner",
-    "owner": "agent",
+    "owner": "owner",
     "action": "Confirm Bona property ownership, sitemap submission and report access.",
     "link": "https://search.google.com/search-console?resource_id=sc-domain:bona-real-estate.com",
     "detail": "Sept 27 audit verified HTML and DNS verification records; Search Console account ownership, reports and OpenSEO linkage remain unverified.",
@@ -205,7 +205,7 @@
     "link": "https://api.bona-real-estate.com/health",
     "action": "Review API changes independently of paused publishing jobs.",
     "status": "live",
-    "detail": "Sept 28 GET /health: ok; db/Retell ok; inventory 48; fanout pending 0, sent 8, failed 0, skipped 101. Meta/GA4 configured; Snap off. TikTok implementation is not deployed.",
+    "detail": "Sept 28 GET /health: ok; db/Retell ok; inventory 48; fanout pending 0, sent 8, failed 0, skipped 101. Meta/GA4 configured; Snap off. TikTok delivery remains unverified.",
     "checkedAt": "2026-09-27T21:26:38Z"
   },
   {
@@ -235,7 +235,7 @@
     "owner": "owner",
     "action": "Complete docs/checklists/tiktok-bona.md prerequisites; preserve the existing login.",
     "link": "https://business-api.tiktok.com/portal/",
-    "detail": "Implemented and mock-tested in feat/tiktok-integrations; not deployed. No configured Pixel ID or Events API token found in local/VPS Bona env files on Sept 28. Acceptance, matching and reporting unverified.",
+    "detail": "Events API support is available. Connection requires authorized credentials, privacy-notice review and verified event receipt; TikTok delivery is not yet active.",
     "checkedAt": "2026-09-27T21:26:38Z"
   },
   {
@@ -245,7 +245,7 @@
     "owner": "owner",
     "action": "Complete docs/checklists/tiktok-bona.md prerequisites; preserve the existing login.",
     "link": "https://business-api.tiktok.com/portal/",
-    "detail": "Coordinator verified @bonarealestatesa, Bona Real Estate name, bilingual bio and official B logo; login unchanged. TikTok For Business permission/terms consent awaits owner response. Business tier, app/scopes and tokens unverified; no publisher or refresh job enabled.",
+    "detail": "Bona profile @bonarealestatesa is configured. Business account linking and API access are being verified; organic publishing is not yet connected.",
     "checkedAt": "2026-09-27T21:26:38Z"
   }
 ]

@@ -921,7 +921,7 @@ test('POST /v1/enquiry lands a form lead with the visitor\'s source, queues the 
     const submit = app.db.getEvent('mf3k2a1b-form0001');
     assert.equal(submit.name, 'form_submit', 'the server records the submit under the browser\'s event id');
     assert.equal(submit.lead_id, body.lead_id);
-    assert.deepEqual(submit.props, { form: 'listing', cta: 'enquiry' });
+    assert.deepEqual(submit.props, { form: 'listing', cta: 'enquiry', _consent_ads: true });
     const created = app.db.recentEvents({ name: 'lead_created' })[0];
     assert.equal(created.lead_id, body.lead_id);
     // The fan-out is keyed on the BROWSER's event id, not on this server-side record: the

@@ -333,6 +333,7 @@ export function createDashboardRoutes({
       { label: 'Snapchat — Conversions API token', present: Boolean(cfg.snapCapiToken) },
       { label: 'TikTok — Pixel ID', present: Boolean(cfg.tiktokPixelId) },
       { label: 'TikTok — Events API token', present: Boolean(cfg.tiktokEventsToken) },
+      { label: 'TikTok — test mode', present: Boolean(cfg.tiktokTestEventCode), note: cfg.tiktokTestEventCode ? 'Test events only; remove code before production measurement' : 'No test code' },
       { label: 'Retell — API key', present: Boolean(cfg.retellApiKey) },
       { label: 'Retell — tool token', present: Boolean(cfg.toolToken) },
       { label: 'Evolution — owner WhatsApp', present: Boolean(env.EVOLUTION_API_URL && env.EVOLUTION_API_KEY), note: 'sends the login code and the lead notes' },
@@ -384,7 +385,7 @@ export function createDashboardRoutes({
 
   function fanoutView() {
     const counts = (() => { try { return db.fanoutCounts(); } catch { return { pending: 0, sent: 0, failed: 0, skipped: 0 }; } })();
-    const dests = (() => { try { return fanout?.dests?.() ?? { meta: false, ga4: false, snap: false }; } catch { return { meta: false, ga4: false, snap: false }; } })();
+    const dests = (() => { try { return fanout?.dests?.() ?? { meta: false, ga4: false, snap: false, tiktok: false }; } catch { return { meta: false, ga4: false, snap: false, tiktok: false }; } })();
     return { counts, dests };
   }
 

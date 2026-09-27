@@ -5,7 +5,8 @@ account as Bona; preserve its login email, phone and password. Profile configura
 is owned by the coordinator's browser session. Coordinator reload-verified `@bonarealestatesa`, Bona Real Estate display name and
 bilingual bio. Coordinator also confirmed the official B logo on the TikTok OAuth consent screen.
 TikTok For Business linking has reached its permission/terms consent screen.
-Owner consent is pending; Business tier/API access remains unverified.
+The owner has authorized this consent; the browser executor is completing linking.
+Business tier/API access and actual grants remain unverified.
 Do not create a replacement account or use the abandoned info@ signup.
 
 ## What is ready, and what is still pending
@@ -15,7 +16,7 @@ Do not create a replacement account or use the abandoned info@ signup.
 | Existing account/profile | Coordinator confirmed handle/name/bio and unchanged login | Complete owner-approved Business linking and verify API access |
 | Browser Pixel | Consent-gated loader and event IDs already exist; live Pixel ID is null | Obtain Bona web Pixel ID, configure and deploy |
 | Server Events API | Implemented in this branch; no local/VPS token or Pixel ID configured | Configure real credentials, deploy API, verify Test Events |
-| Business Center | Access and asset assignment not verified | Owner/admin links existing account and assigns least necessary access |
+| Business Center | Linking authorized; access and asset assignment not verified | Owner/admin links existing account and assigns least necessary access |
 | Organic publishing/insights | No approved app, account grant or valid token verified | Establish approved API for Business Accounts API access or connect an approved provider |
 | Content Posting/Login Kit OAuth | No client credentials or grant found | Only implement after choosing a permitted product/use case |
 | Unattended operation | Not connected; no TikTok job installed | Verify permissions, delivery, renewal/revocation handling, and content approval first |
@@ -33,7 +34,11 @@ billing details, test posts or paid subscriptions are needed for this code revie
 2. In Ads Manager's Events Manager, select or create the website data source
    **Bona web** and choose manual Pixel + direct Events API setup. Do not add
    a duplicate click/event-builder rule for events the site already emits.
-3. Set the public Pixel ID in `src/data/site.json` → `analytics.tiktokPixel`.
+3. **Before enabling TikTok tracking, update and review the bilingual privacy notice.**
+   The current `src/data/privacy.json` incorrectly describes no forms/cookies/database
+   and omits TikTok as a recipient. Correct actual collection, purposes, recipients
+   and consent controls before activation; code deployment does not clear this gate.
+   Set the public Pixel ID in `src/data/site.json` → `analytics.tiktokPixel`.
    On the API service host only, set these in `~/.secrets/bona-marketing.env`
    with directory mode 0700 and file mode 0600:
 
@@ -62,15 +67,17 @@ billing details, test posts or paid subscriptions are needed for this code revie
 
 Implementation: `services/api/lib/tiktok.mjs` uses Events API 2.0 at
 `/open_api/v1.3/event/track/`. Website WhatsApp clicks map to Contact, forms to
-SubmitForm. Non-form CRM leads and pipeline stages are not sent to TikTok. The
+SubmitForm. CRM lead_created fallbacks and pipeline stages are not sent to TikTok; only validated
+   browser form events retain the deduplication ID. The
 existing browser loader still handles ViewContent, Contact, SubmitForm and Download.
 No server PageView, phone/name/email hashing or automatic advanced matching is added.
 The server uses consented IP/user agent and existing `_ttp`/`ttclid`; query strings,
-fragments and form text are omitted. TikTok always requires ads consent even if the
+fragments and form text are omitted. TikTok requires ads consent recorded on the event AND current session, even if the
 legacy fan-out consent override is disabled for other destinations.
 
 Transient HTTP/network failures retry using the existing bounded queue/backoff;
-HTTP-200 API errors fail visibly instead of being counted as sent. API response
+API-envelope throttling (40100) and system errors (50000) use the same bounded
+retry policy. Other HTTP-200 API errors fail visibly instead of being counted as sent. API response
 messages are not persisted, preventing an echoed credential or personal field
 from entering diagnostics. Investigate failed API codes before any manual replay.
 

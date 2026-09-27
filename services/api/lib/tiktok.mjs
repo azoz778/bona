@@ -2,13 +2,12 @@
  * Credentials use Bona's existing server-only environment loader.
  * Reference: https://business-api.tiktok.com/portal/docs/report-app-web-offline-or-crm-events/v1.3
  */
-const EVENTS = { whatsapp_click: 'Contact', form_submit: 'SubmitForm', lead_created: 'SubmitForm' };
+const EVENTS = { whatsapp_click: 'Contact', form_submit: 'SubmitForm' };
 const compact = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null && v !== undefined && v !== ''));
 
-export function buildTiktok(event, { session, lead, cfg }) {
+export function buildTiktok(event, { session, cfg }) {
   // Only website conversions with a browser session. CRM stages are deliberately unmapped.
   if (!session || !Object.hasOwn(EVENTS, event.name)) return null;
-  if (event.name === 'lead_created' && lead?.channel !== 'form') return null;
   let page;
   try {
     const url = new URL(cfg.siteUrl);
@@ -32,8 +31,8 @@ export function buildTiktok(event, { session, lead, cfg }) {
         event_id: event.event_id,
         user: compact({
           ip: session.ip, user_agent: session.ua, ttp: session.ttp,
-          ttclid: event.src_last?.click_ids?.ttclid ?? session.last_touch?.click_ids?.ttclid
-            ?? event.src_first?.click_ids?.ttclid ?? session.first_touch?.click_ids?.ttclid,
+          // Event-time last touch only; never borrow a later or stale first-touch campaign.
+          ttclid: event.src_last?.click_ids?.ttclid,
         }),
         page: { url: page },
       }],
@@ -49,6 +48,8 @@ export function tiktokResponse(res) {
   return {
     ...res,
     ok: res.ok && code === 0,
+    // API-level throttling/system errors can arrive in an HTTP 200 envelope.
+    retryable: res.ok ? [40100, 50000].includes(code) : undefined,
     text: JSON.stringify({ code, result: !res.ok ? 'http_error' : code === 0 ? 'accepted' : code === null ? 'invalid_response' : 'api_error' }),
   };
 }
