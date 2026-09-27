@@ -32,8 +32,8 @@ test('a site tag is pending-owner when absent, live when served, error when in s
 
 test('the Search Console tag is found in either attribute order and compared with site.json', () => {
   const site = { url: 'https://bona.azoz.uk', analytics: { gscVerification: 'abc' } };
-  assert.equal(checkGsc({ site, homeHtml: '<meta name="google-site-verification" content="abc">' }).status, 'live');
-  assert.equal(checkGsc({ site, homeHtml: '<meta content="abc" name="google-site-verification">' }).status, 'live');
+  assert.equal(checkGsc({ site, homeHtml: '<meta name="google-site-verification" content="abc">' }).status, 'pending-owner');
+  assert.equal(checkGsc({ site, homeHtml: '<meta content="abc" name="google-site-verification">' }).status, 'pending-owner');
   assert.equal(checkGsc({ site, homeHtml: '<meta name="google-site-verification" content="zzz">' }).status, 'error');
   assert.equal(checkGsc({ site: { url: 'https://bona.azoz.uk', analytics: {} }, homeHtml: '<html></html>' }).status, 'pending-owner');
 });
@@ -85,10 +85,10 @@ test('a clean validation is not enough for live: the live page must actually ser
   assert.equal(r.status, 'pending-owner');
 });
 
-test('GA4 is live only with a clean validation and the tag served, and says acceptance is not ingestion', async () => {
+test('GA4 delivery and a served tag still require report ingestion verification', async () => {
   const { calls, probe } = fakeProbe();
   const r = await checkGa4({ env: GA4_ENV, site: GA4_SITE, homeHtml: '<script src="/gtag/js?id=G-TEST123">', probe });
-  assert.equal(r.status, 'live');
+  assert.equal(r.status, 'pending-owner');
   assert.deepEqual(calls.map((c) => new URL(c.url).pathname), ['/debug/mp/collect', '/mp/collect']);
   assert.equal(JSON.parse(calls[1].init.body).events[0].name, 'verify_ping');
   assert.equal(JSON.parse(calls[1].init.body).events[0].params.engagement_time_msec, 1);
@@ -217,4 +217,11 @@ test('TikTok readiness never claims credentials prove delivery', () => {
   assert.equal(result.status, 'pending-owner');
   assert.match(result.detail, /still require verification/);
   assert.ok(!JSON.stringify(result).includes('secret-token'));
+});
+
+
+test('TikTok readiness makes test-mode routing explicit', () => {
+  const r = checkTiktokEvents({ env: { TIKTOK_PIXEL_ID: 'id', TIKTOK_EVENTS_ACCESS_TOKEN: 'secret', TIKTOK_TEST_EVENT_CODE: 'test' }, site: { analytics: { tiktokPixel: 'id' } } });
+  assert.equal(r.status, 'pending-owner');
+  assert.match(r.detail, /Test mode configured/);
 });

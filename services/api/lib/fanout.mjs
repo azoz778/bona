@@ -326,6 +326,7 @@ export function createFanout({ db, cfg, log = () => {}, fetch: doFetch = globalT
   function verdict(dest, event, session) {
     if (!dests()[dest]) return { skip: 'no_credentials' };
     if (!BUILDERS[dest]) return { skip: 'unknown_dest' };
+    if (dest === 'tiktok' && event.props?._consent_ads !== true) return { skip: 'no_event_ads_consent' };
     if ((requireConsent || dest === 'tiktok') && session?.consent_ads !== 1) return { skip: 'no_ads_consent' };
     return { skip: null };
   }
@@ -387,7 +388,7 @@ export function createFanout({ db, cfg, log = () => {}, fetch: doFetch = globalT
           tally.sent += 1;
           continue;
         }
-        const retry = isRetryable(res.status) && attempts < MAX_ATTEMPTS;
+        const retry = (res.retryable ?? isRetryable(res.status)) && attempts < MAX_ATTEMPTS;
         db.markFanout(row.event_id, row.dest, {
           status: retry ? 'pending' : 'failed',
           attempts,
