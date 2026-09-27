@@ -4,8 +4,8 @@
  * A pixel in a browser is blocked, throttled and consent-gated; the interesting
  * moments (a WhatsApp click, a lead) are exactly the ones an ad blocker eats. So
  * `db.enqueueFanout()` queues those events here and this worker re-sends them from the
- * server, carrying the same `event_id` the browser pixel used — Meta, GA4 and Snap all
- * de-duplicate on it, so a person who saw both is counted once.
+ * server, carrying the same `event_id` the browser pixel used. Meta, Snap and TikTok
+ * use it for deduplication; GA4 carries it for downstream reconciliation, not automatic deduplication.
  *
  * Everything is optional. A destination with no credentials is not an error and not a
  * backlog: its rows are marked `skipped` the first time they come due, so the queue
@@ -20,6 +20,7 @@
  */
 import crypto from 'node:crypto';
 import { newId } from './db.mjs';
+import { buildTiktok, tiktokResponse } from './tiktok.mjs';
 
 /** Where a queued event goes, per destination. An event with no mapping is skipped. */
 export const META_EVENT = {
@@ -248,7 +249,7 @@ export function buildSnap(event, { session, lead, cfg }) {
   };
 }
 
-const BUILDERS = { meta: buildMeta, ga4: buildGa4, snap: buildSnap };
+const BUILDERS = { meta: buildMeta, ga4: buildGa4, snap: buildSnap, tiktok: buildTiktok };
 
 /** Which destinations have everything they need. Missing credentials are normal. */
 export function configuredDests(cfg) {
@@ -256,6 +257,7 @@ export function configuredDests(cfg) {
     meta: Boolean(cfg.metaPixelId && cfg.metaCapiToken),
     ga4: Boolean(cfg.ga4MeasurementId && cfg.ga4ApiSecret),
     snap: Boolean(cfg.snapPixelId && cfg.snapCapiToken),
+    tiktok: Boolean(cfg.tiktokPixelId?.trim() && cfg.tiktokEventsToken?.trim()),
   };
 }
 
@@ -324,7 +326,8 @@ export function createFanout({ db, cfg, log = () => {}, fetch: doFetch = globalT
   function verdict(dest, event, session) {
     if (!dests()[dest]) return { skip: 'no_credentials' };
     if (!BUILDERS[dest]) return { skip: 'unknown_dest' };
-    if (requireConsent && session?.consent_ads !== 1) return { skip: 'no_ads_consent' };
+    if (dest === 'tiktok' && event.props?._consent_ads !== true) return { skip: 'no_event_ads_consent' };
+    if ((requireConsent || dest === 'tiktok') && session?.consent_ads !== 1) return { skip: 'no_ads_consent' };
     return { skip: null };
   }
 
@@ -377,14 +380,15 @@ export function createFanout({ db, cfg, log = () => {}, fetch: doFetch = globalT
           continue;
         }
 
-        const res = await post(req);
+        let res = await post(req);
+        if (row.dest === 'tiktok') res = tiktokResponse(res);
         const attempts = (row.attempts ?? 0) + 1;
         if (res.ok) {
           db.markFanout(row.event_id, row.dest, { status: 'sent', attempts, lastError: null, response: res.text });
           tally.sent += 1;
           continue;
         }
-        const retry = isRetryable(res.status) && attempts < MAX_ATTEMPTS;
+        const retry = (res.retryable ?? isRetryable(res.status)) && attempts < MAX_ATTEMPTS;
         db.markFanout(row.event_id, row.dest, {
           status: retry ? 'pending' : 'failed',
           attempts,

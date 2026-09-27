@@ -75,13 +75,23 @@ const privacyHref = `${localePath(locale, '/privacy/')}#cookies`;
     window.setTimeout(() => { el.hidden = true; }, 400);
   }
   function choose(analytics: boolean, ads: boolean) {
-    write(analytics, ads);
+    const previous = read();
+    if (!write(analytics, ads)) {
+      const text = root()?.querySelector<HTMLElement>('#consent-text');
+      if (text) text.textContent = document.documentElement.lang.startsWith('ar')
+        ? 'تعذّر حفظ اختيارك. يُرجى السماح بتخزين إعدادات هذا الموقع في المتصفح والمحاولة مجدداً.'
+        : 'Your choice could not be saved. Allow this site to store preferences in your browser, then try again.';
+      return;
+    }
     hide();
     const w = window as Hooks;
     // Order matters: persist the attribution state under the new rule, record the choice, then load the tags.
     try { w.bonaAttrPersist?.(); } catch { /* ignore */ }
     try { w.bonaTrack?.('consent_update', { analytics, ads }); } catch { /* ignore */ }
     try { w.bonaTagsLoad?.(); } catch { /* ignore */ }
+    // Remove already-loaded vendor SDKs on withdrawal; their internal listeners cannot
+    // be reliably unloaded. The new document observes the saved refusal before loading tags.
+    if ((previous?.analytics && !analytics) || (previous?.ads && !ads)) window.location.reload();
   }
 
   function init() {

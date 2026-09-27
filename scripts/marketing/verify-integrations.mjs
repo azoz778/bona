@@ -140,7 +140,7 @@ export async function checkGa4({ env, site, homeHtml, probe: send = probe }) {
   const sent = await send(`https://www.google-analytics.com/mp/collect?${qs}`, post);
   if (!(sent.status >= 200 && sent.status < 300)) return row('ga4', 'error', `mp/collect refused the verify_ping: HTTP ${sent.status} ${sent.error ?? sent.text}. ${siteNote}`, { secrets: [secret] });
   const detail = `payload validated for ${mid}; one verify_ping sent to mp/collect (HTTP ${sent.status} — that endpoint answers 204 with an empty body and never reports errors, so acceptance is NOT proof of ingestion). ${siteNote}. Owner: confirm the verify_ping in GA4 → Reports → Realtime (or Admin → DebugView) before treating GA4 as measuring.`;
-  return row('ga4', tagStatus, detail, { secrets: [secret] });
+  return row('ga4', tagStatus === 'live' ? 'pending-owner' : tagStatus, detail, { secrets: [secret] });
 }
 
 /* The Conversions API is server-to-server, so unlike the pixels there is no page to check. The only
@@ -238,7 +238,7 @@ export function checkGsc({ site, homeHtml }) {
     ?? homeHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]*name=["']google-site-verification["']/i);
   if (!m) return row('gsc', 'pending-owner', `no google-site-verification meta on ${trimSlash(site.url)}/ — paste the HTML-tag content into site.json → analytics.gscVerification (docs/checklists/google-bona.md §2)`);
   if (present(expected) && m[1] !== expected) return row('gsc', 'error', `live page serves a google-site-verification tag that differs from site.json (deploy pending?)`);
-  return row('gsc', 'live', `google-site-verification tag served (${m[1].slice(0, 6)}…) — verify + submit sitemap-index.xml in Search Console if not done`);
+  return row('gsc', 'pending-owner', `Ownership/report access unverified; google-site-verification tag served (${m[1].slice(0, 6)}…) — verify + submit sitemap-index.xml in Search Console if not done`);
 }
 
 export async function checkApi({ site, probe: send = probe }) {
@@ -291,6 +291,20 @@ export async function checkEvolution({ env, probe: send = probe }) {
   return row('evolution', 'error', `GET ${base}/ ${res.error ?? `HTTP ${res.status}`}`, { secrets: [key] });
 }
 
+/** Readiness only: no synthetic conversions or token probes are sent by this check. */
+export function checkTiktokEvents({ env, site }) {
+  const id = String(env.TIKTOK_PIXEL_ID ?? '').trim();
+  const token = env.TIKTOK_EVENTS_ACCESS_TOKEN;
+  if (!present(id) || !present(token)) return row('tiktok-events', 'pending-owner',
+    'TikTok Events API credentials missing; see docs/checklists/tiktok-bona.md. Code availability does not establish a connection.');
+  if (site.analytics?.tiktokPixel !== id) return row('tiktok-events', 'error',
+    'Server TIKTOK_PIXEL_ID must match site.json analytics.tiktokPixel for deduplication.');
+  if (present(env.TIKTOK_TEST_EVENT_CODE)) return row('tiktok-events', 'pending-owner',
+    'Test mode configured: events are routed to Test Events, not production measurement. Verify receipt, then remove TIKTOK_TEST_EVENT_CODE.');
+  return row('tiktok-events', 'pending-owner',
+    'Credentials configured; token access, deployed worker and Events Manager receipt/deduplication still require verification. No event sent by this check.');
+}
+
 /* ------------------------------------------------------------------ board */
 
 const NEW_ROW_META = {
@@ -299,6 +313,7 @@ const NEW_ROW_META = {
   'meta-capi': { name: 'Meta Conversions API', owner: 'owner', link: 'https://business.facebook.com/events_manager2', action: 'docs/checklists/meta-bona-portfolio.md §5–6' },
   'snap': { name: 'Snap Pixel + Conversions API', owner: 'owner', link: 'https://ads.snapchat.com/', action: 'docs/checklists/snapchat-bona.md' },
   'tiktok-pixel': { name: 'TikTok Pixel (site)', owner: 'owner', link: 'https://ads.tiktok.com/i18n/events_manager', action: 'paste the sdkid into site.json → analytics.tiktokPixel' },
+  'tiktok-events': { name: 'TikTok Events API', owner: 'owner', link: 'https://ads.tiktok.com/i18n/events_manager', action: 'docs/checklists/tiktok-bona.md' },
   'gsc': { name: 'Google Search Console', owner: 'owner', link: 'https://search.google.com/search-console', action: 'docs/checklists/google-bona.md §2' },
   'bona-api': { name: 'Concierge API (bona-api)', owner: 'agent', link: healthLink(SITE), action: 'systemctl --user status bona-api cloudflared-bona' },
   'retell': { name: 'Retell (Dana)', owner: 'owner', link: 'https://dashboard.retellai.com/', action: 'services/README.md §5' },
@@ -336,9 +351,9 @@ export async function run() {
   results.push(await checkMetaCapi({ env, site }));
   results.push(checkSiteTag({ id: 'meta-pixel', label: 'Meta Pixel', value: analytics.metaPixel, homeHtml, siteKey: 'metaPixel', checklist: 'docs/checklists/meta-bona-portfolio.md §4' }));
   results.push(await checkSnap({ env, site, homeHtml }));
-  // TikTok is a site tag only: there is no server-side key for it yet, so the live page is the
-  // whole check — exactly what checkSiteTag was written for.
+  // Pixel code on a page and server credential presence are separate readiness checks.
   results.push(checkSiteTag({ id: 'tiktok-pixel', label: 'TikTok Pixel', value: analytics.tiktokPixel, homeHtml, siteKey: 'tiktokPixel', checklist: 'TikTok Ads → Assets → Events → Web Events → the pixel\'s sdkid' }));
+  results.push(checkTiktokEvents({ env, site }));
   results.push(checkGsc({ site, homeHtml }));
   const { api, retell } = await checkApi({ site });
   results.push(api, retell);
