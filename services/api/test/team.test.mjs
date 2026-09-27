@@ -6,6 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb, SCHEMA_VERSION } from '../lib/db.mjs';
 import { createTeam, TeamError } from '../lib/team.mjs';
+import { createAudit, AUDIT_ACTIONS } from '../lib/audit.mjs';
 
 const NOW = 1_790_500_000_000;
 
@@ -102,5 +103,22 @@ test('settings default to on, can be switched, and refuse unknown keys', () => {
   assert.equal(team.sendingEnabled(), false);
   assert.equal(s.db.prepare("SELECT updated_by FROM settings WHERE key = 'sending_enabled'").get().updated_by, 'USR-1');
   assert.equal(codeOf(() => team.setSetting('dana_enabled', '1')), 'bad_setting', 'Phase 4 adds that key');
+  s.close();
+});
+
+test('the audit log records who did what, newest first, and refuses an unknown action', () => {
+  const s = openDb(':memory:');
+  let clock = NOW;
+  const audit = createAudit(s, { now: () => clock });
+  audit.record({ userId: 'USR-1', action: 'login' });
+  clock += 1000;
+  audit.record({ userId: 'USR-1', action: 'team_add', target: 'USR-2', meta: { role: 'staff' } });
+  const [latest, first] = audit.recent(10);
+  assert.equal(latest.action, 'team_add');
+  assert.deepEqual(latest.meta, { role: 'staff' });
+  assert.equal(first.action, 'login');
+  assert.equal(first.ts, NOW);
+  assert.throws(() => audit.record({ userId: 'USR-1', action: 'made_up' }), /unknown audit action/);
+  assert.ok(AUDIT_ACTIONS.includes('stage'));
   s.close();
 });
