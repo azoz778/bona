@@ -14,6 +14,10 @@ import { openDb } from '../lib/db.mjs';
 import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
 import { DEFAULT_ORIGINS } from '../lib/cors.mjs';
 import { leadsPage, spendPage } from '../lib/dashboard/render.mjs';
+import http from 'node:http';
+import { createDashboardRoutes } from '../lib/dashboard/routes.mjs';
+import { createTeam } from '../lib/team.mjs';
+import { createAudit } from '../lib/audit.mjs';
 
 const TOKEN = 'a'.repeat(32);
 const inventory = createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk' });
@@ -788,4 +792,290 @@ test('the spend page renders unknown campaign metrics as dashes, never fabricate
     const rendered = html.match(new RegExp(`<tr>.*?<td>${id}<\\/td>.*?<\\/tr>`, 's'))?.[0] ?? '';
     assert.match(rendered, /<td class="n">—<\/td><td class="n">—<\/td>/, `${id} preserves unknown counts`);
   }
+});
+
+/* ---------------- team accounts, routes built directly ---------------- */
+//
+// These build the routes the way index.mjs will once it passes `team` (Task 10): a real
+// team store, audit log and a spy for the code sender, mounted on a bare HTTP server.
+
+const OWNER_PHONE = '966593296933';
+const STAFF_PHONE = '966500000001';
+
+async function withTeamRoutes(fn) {
+  const db = openDb(':memory:');
+  const team = createTeam(db);
+  const owner = team.ensureOwner({ phone: OWNER_PHONE, name: 'Abdulaziz' });
+  const staffUser = team.addUser({ name: 'Sara', phone: STAFF_PHONE, role: 'staff' });
+  const audit = createAudit(db);
+  const sent = [];
+  const logs = [];
+  const routes = createDashboardRoutes({
+    db, cfg: { publicApi: 'https://bona-api.azoz.uk', dashCookieDays: 30, maxBodyBytes: 16 * 1024 },
+    inventory, team, audit,
+    sendCode: async ({ jid, text }) => { sent.push({ jid, text }); return { ok: true }; },
+    log: (o) => logs.push(o),
+  });
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const p = url.pathname.replace(/\/+$/, '') || '/';
+    routes.handle({ req, res, url, p, ip: '127.0.0.1' });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+  const go = (p, init = {}) => fetch(base + p, { redirect: 'manual', ...init });
+  const get = (p, { cookie } = {}) => go(p, { headers: cookie ? { Cookie: cookie } : {} });
+  const postForm = (p, fields, { cookie } = {}) => go(p, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...(cookie ? { Cookie: cookie } : {}) },
+    body: new URLSearchParams(fields).toString(),
+  });
+  const cookieOf = (res, name) => {
+    for (const c of res.headers.getSetCookie()) {
+      const pair = c.split(';')[0];
+      if (pair.slice(0, pair.indexOf('=')) === name && !c.includes('Max-Age=0')) return pair.slice(pair.indexOf('=') + 1);
+    }
+    return null;
+  };
+  async function login(phone) {
+    const before = sent.length;
+    const asked = await postForm('/dashboard/login/code', { _dash: '1', phone });
+    assert.equal(asked.status, 303);
+    await routes.auth.flush();
+    assert.equal(sent.length, before + 1, 'one code went out');
+    const code = /(\d{6})/.exec(sent.at(-1).text)[1];
+    const nonce = cookieOf(asked, 'bona_dash_try');
+    const verified = await postForm('/dashboard/login/verify', { _dash: '1', code }, { cookie: `bona_dash_try=${nonce}` });
+    assert.equal(verified.status, 303);
+    return `bona_dash=${cookieOf(verified, 'bona_dash')}`;
+  }
+  try {
+    await fn({ db, team, audit, owner, staffUser, sent, logs, routes, base, get, postForm, login, port });
+  } finally {
+    await routes.auth.flush();
+    await new Promise((resolve) => server.close(resolve));
+    db.close();
+  }
+}
+
+test('routes without the team store refuse every dashboard request instead of crashing the server', async () => {
+  const db = openDb(':memory:');
+  const routes = createDashboardRoutes({ db, cfg: {} });
+  let status = null; let body = '';
+  const res = { writeHead: (s) => { status = s; }, end: (b) => { body = String(b); } };
+  await routes.handle({ req: {}, res, url: new URL('http://x/dashboard'), p: '/dashboard', ip: '1.1.1.1' });
+  assert.equal(status, 503);
+  assert.deepEqual(JSON.parse(body), { error: 'dashboard_unavailable' });
+  assert.equal(routes.owns('/v1/admin/team'), true);
+  db.close();
+});
+
+test('a code goes to the WhatsApp of the person whose number was typed; a bad number goes back to step one', async () => {
+  await withTeamRoutes(async ({ sent, postForm, routes }) => {
+    const bad = await postForm('/dashboard/login/code', { _dash: '1', phone: 'hello' });
+    assert.equal(bad.status, 303);
+    assert.equal(bad.headers.get('location'), '/dashboard/login?error=bad_phone');
+    const ok = await postForm('/dashboard/login/code', { _dash: '1', phone: '0500000001' });
+    assert.equal(ok.headers.get('location'), '/dashboard/login?step=code&sent=1');
+    await routes.auth.flush();
+    assert.equal(sent.at(-1).jid, `${STAFF_PHONE}@s.whatsapp.net`);
+  });
+});
+
+test('a staff member sees their own name, no Team link, and cannot open Team', async () => {
+  await withTeamRoutes(async ({ get, login }) => {
+    const staff = await login('0500000001');
+    for (const p of ['/dashboard', '/dashboard/leads', '/dashboard/listings', '/dashboard/spend', '/dashboard/integrations']) {
+      const res = await get(p, { cookie: staff });
+      assert.equal(res.status, 200, p);
+      const html = await res.text();
+      assert.match(html, /<b><bdi>Sara<\/bdi><\/b><s>Team<\/s>/, p);
+      assert.doesNotMatch(html, /Abdulaziz/, p);
+      assert.doesNotMatch(html, /href="\/dashboard\/team"/, p);
+    }
+    const team = await get('/dashboard/team', { cookie: staff });
+    assert.equal(team.status, 403);
+    assertLocked(team);
+    assert.doesNotMatch(await team.text(), /966500000001|0500000001/);
+
+    const owner = await login('0593296933');
+    const page = await get('/dashboard/team', { cookie: owner });
+    assert.equal(page.status, 200);
+    const html = await page.text();
+    assert.match(html, /<b><bdi>Abdulaziz<\/bdi><\/b><s>Owner<\/s>/);
+    assert.match(html, /href="\/dashboard\/team"/);
+    assert.match(html, /Sara/);
+  });
+});
+
+test('every Team write is refused to a staff member and changes nothing', async () => {
+  await withTeamRoutes(async ({ team, audit, owner, postForm, login, db }) => {
+    const staff = await login('0500000001');
+    const beforeUsers = JSON.stringify(team.listUsers());
+    const beforeNever = JSON.stringify(team.listNever());
+    const beforeSetting = team.getSetting('sending_enabled');
+    const auditBefore = audit.recent(500).length;
+    const writes = [
+      ['/v1/admin/team', { name: 'X', phone: '0500000009', role: 'owner' }],
+      [`/v1/admin/team/${owner.user_id}/deactivate`, {}],
+      [`/v1/admin/team/${owner.user_id}/role`, { role: 'staff' }],
+      [`/v1/admin/team/${owner.user_id}/reactivate`, {}],
+      ['/v1/admin/never', { phone: '0511111111', note: 'x' }],
+      ['/v1/admin/never/remove', { phone: '0511111111' }],
+      ['/v1/admin/settings', { sending_enabled: beforeSetting === '1' ? '0' : '1' }],
+    ];
+    for (const [p, fields] of writes) {
+      const res = await postForm(p, { _dash: '1', ...fields }, { cookie: staff });
+      assert.equal(res.status, 403, p);
+      assertLocked(res);
+      assert.deepEqual(await res.json(), { error: 'owner_only' }, p);
+    }
+    assert.equal(JSON.stringify(team.listUsers()), beforeUsers);
+    assert.equal(JSON.stringify(team.listNever()), beforeNever);
+    assert.equal(team.getSetting('sending_enabled'), beforeSetting);
+    assert.equal(audit.recent(500).length, auditBefore);
+    assert.ok(db, 'store still open');
+  });
+});
+
+test('Team writes still need the marker, even from an owner', async () => {
+  await withTeamRoutes(async ({ team, postForm, login, get }) => {
+    const owner = await login('0593296933');
+    const res = await postForm('/v1/admin/team', { name: 'Omar', phone: '0500000002' }, { cookie: owner });
+    assert.equal(res.status, 403);
+    assert.equal(team.getUserByPhone('0500000002'), null);
+    const signedOut = await postForm('/v1/admin/team', { _dash: '1', name: 'Omar', phone: '0500000002' });
+    assert.equal(signedOut.status, 401);
+    assert.equal(team.getUserByPhone('0500000002'), null);
+    assert.equal((await get('/dashboard/team')).status, 302);
+  });
+});
+
+test('the owner adds, demotes, deactivates and reactivates; each write is audited by id only', async () => {
+  await withTeamRoutes(async ({ team, audit, owner, staffUser, postForm, login, get }) => {
+    const ownerCookie = await login('0593296933');
+    const staffCookie = await login('0500000001');
+
+    const add = await postForm('/v1/admin/team', { _dash: '1', name: 'Omar', phone: '0500000002', role: 'staff' }, { cookie: ownerCookie });
+    assert.equal(add.status, 303);
+    assert.equal(add.headers.get('location'), '/dashboard/team?ok=added');
+    const omar = team.getUserByPhone('0500000002');
+    assert.equal(omar.role, 'staff');
+    const dup = await postForm('/v1/admin/team', { _dash: '1', name: 'Omar again', phone: '0500000002' }, { cookie: ownerCookie });
+    assert.equal(dup.headers.get('location'), '/dashboard/team?error=duplicate_phone');
+    const flash = await (await get('/dashboard/team?error=duplicate_phone', { cookie: ownerCookie })).text();
+    assert.match(flash, /already on the team/);
+
+    const promote = await postForm(`/v1/admin/team/${omar.user_id}/role`, { _dash: '1', role: 'owner' }, { cookie: ownerCookie });
+    assert.equal(promote.headers.get('location'), '/dashboard/team?ok=role');
+    assert.equal(team.getUser(omar.user_id).role, 'owner');
+    const badRole = await postForm(`/v1/admin/team/${omar.user_id}/role`, { _dash: '1', role: 'admin' }, { cookie: ownerCookie });
+    assert.equal(badRole.headers.get('location'), '/dashboard/team?error=bad_role');
+
+    const off = await postForm(`/v1/admin/team/${staffUser.user_id}/deactivate`, { _dash: '1' }, { cookie: ownerCookie });
+    assert.equal(off.headers.get('location'), '/dashboard/team?ok=deactivated');
+    const out = await get('/dashboard', { cookie: staffCookie });
+    assert.equal(out.status, 302, 'a deactivated person is out on their very next request');
+    const back = await postForm(`/v1/admin/team/${staffUser.user_id}/reactivate`, { _dash: '1' }, { cookie: ownerCookie });
+    assert.equal(back.headers.get('location'), '/dashboard/team?ok=reactivated');
+    assert.equal(team.getUser(staffUser.user_id).active, 1);
+
+    const ghost = await postForm('/v1/admin/team/USR-nobody/deactivate', { _dash: '1' }, { cookie: ownerCookie });
+    assert.equal(ghost.headers.get('location'), '/dashboard/team?error=not_found');
+
+    const actions = audit.recent(50).map((r) => r.action);
+    for (const a of ['team_add', 'team_role', 'team_deactivate', 'team_reactivate']) assert.ok(actions.includes(a), a);
+    const text = JSON.stringify(audit.recent(50));
+    assert.doesNotMatch(text, /966500000002|0500000002|Omar|Sara/, 'no number or name in the audit log');
+    assert.ok(owner.user_id);
+  });
+});
+
+test('the last owner cannot deactivate or demote themselves: a message, not a 500', async () => {
+  await withTeamRoutes(async ({ team, owner, postForm, login }) => {
+    const ownerCookie = await login('0593296933');
+    const self = await postForm(`/v1/admin/team/${owner.user_id}/deactivate`, { _dash: '1' }, { cookie: ownerCookie });
+    assert.equal(self.status, 303);
+    assert.equal(self.headers.get('location'), '/dashboard/team?error=last_owner');
+    const demote = await postForm(`/v1/admin/team/${owner.user_id}/role`, { _dash: '1', role: 'staff' }, { cookie: ownerCookie });
+    assert.equal(demote.headers.get('location'), '/dashboard/team?error=last_owner');
+    const json = await fetch(`${'http://127.0.0.1:'}${(new URL(self.url)).port}/v1/admin/team/${owner.user_id}/deactivate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Bona-Dash': '1', Cookie: ownerCookie }, body: '{}',
+    });
+    assert.equal(json.status, 400);
+    assert.deepEqual(await json.json(), { error: 'last_owner' });
+    assert.equal(team.getUser(owner.user_id).active, 1);
+    assert.equal(team.getUser(owner.user_id).role, 'owner');
+  });
+});
+
+test('the never list and the sending switch take effect, and the audit keeps no number', async () => {
+  await withTeamRoutes(async ({ team, audit, postForm, login }) => {
+    const ownerCookie = await login('0593296933');
+    const add = await postForm('/v1/admin/never', { _dash: '1', phone: '0511111111', note: 'cousin' }, { cookie: ownerCookie });
+    assert.equal(add.headers.get('location'), '/dashboard/team?ok=never_added');
+    assert.equal(team.isExcludedPhone('966511111111'), true);
+    const rm = await postForm('/v1/admin/never/remove', { _dash: '1', phone: '966511111111' }, { cookie: ownerCookie });
+    assert.equal(rm.headers.get('location'), '/dashboard/team?ok=never_removed');
+    assert.equal(team.isExcludedPhone('966511111111'), false);
+    await postForm('/v1/admin/settings', { _dash: '1', sending_enabled: '0' }, { cookie: ownerCookie });
+    assert.equal(team.sendingEnabled(), false);
+    const on = await postForm('/v1/admin/settings', { _dash: '1', sending_enabled: '1' }, { cookie: ownerCookie });
+    assert.equal(on.headers.get('location'), '/dashboard/team?ok=setting');
+    assert.equal(team.sendingEnabled(), true);
+    const none = await postForm('/v1/admin/settings', { _dash: '1' }, { cookie: ownerCookie });
+    assert.equal(none.headers.get('location'), '/dashboard/team?error=bad_setting');
+    const text = JSON.stringify(audit.recent(50));
+    assert.doesNotMatch(text, /511111111|cousin/);
+  });
+});
+
+test('a stage change and a note carry the person who made them', async () => {
+  await withTeamRoutes(async ({ db, audit, staffUser, postForm, login }) => {
+    const id = seedLead(db);
+    const staff = await login('0500000001');
+    await postForm(`/v1/admin/leads/${id}/stage`, { _dash: '1', stage: 'contacted' }, { cookie: staff });
+    assert.equal(db.stageHistory(id).at(-1).actor, 'Sara');
+    await postForm(`/v1/admin/leads/${id}/note`, { _dash: '1', note: 'called her' }, { cookie: staff });
+    const tp = db.touchpointsForLead(id).at(-1);
+    assert.equal(tp.meta.actor, 'Sara');
+    assert.equal(tp.meta.actor_id, staffUser.user_id);
+    const rows = audit.recent(10).filter((r) => r.action === 'stage' || r.action === 'note');
+    assert.equal(rows.length, 2);
+    for (const r of rows) { assert.equal(r.user_id, staffUser.user_id); assert.equal(r.target, id); }
+    assert.doesNotMatch(JSON.stringify(rows), /called her/);
+  });
+});
+
+test('logout is audited against the person who logged out', async () => {
+  await withTeamRoutes(async ({ audit, staffUser, postForm, login, get }) => {
+    const staff = await login('0500000001');
+    const out = await postForm('/dashboard/logout', { _dash: '1' }, { cookie: staff });
+    assert.equal(out.status, 303);
+    assert.equal((await get('/dashboard', { cookie: staff })).status, 302);
+    const row = audit.recent(10).find((r) => r.action === 'logout');
+    assert.equal(row?.user_id, staffUser.user_id);
+  });
+});
+
+test('a person deactivated while their write body is still arriving does not get the write through', async () => {
+  await withTeamRoutes(async ({ db, team, staffUser, login, port }) => {
+    const id = seedLead(db);
+    const staff = await login('0500000001');
+    const body = JSON.stringify({ stage: 'contacted' });
+    const answer = new Promise((resolve, reject) => {
+      const req = http.request({
+        host: '127.0.0.1', port, method: 'POST', path: `/v1/admin/leads/${id}/stage`,
+        headers: { 'Content-Type': 'application/json', 'X-Bona-Dash': '1', Cookie: staff, 'Content-Length': Buffer.byteLength(body) },
+      }, (res) => { let t = ''; res.on('data', (c) => { t += c; }); res.on('end', () => resolve({ status: res.statusCode, text: t })); });
+      req.on('error', reject);
+      req.write(body.slice(0, 5));
+      // The route has checked the cookie and is waiting for the rest of the body.
+      setTimeout(() => { team.deactivateUser(staffUser.user_id); req.end(body.slice(5)); }, 50);
+    });
+    const res = await answer;
+    assert.equal(res.status, 401);
+    assert.equal(db.getLead(id).stage, 'new');
+  });
 });

@@ -32,6 +32,8 @@ import { createLimiter } from '../ratelimit.mjs';
 import { enqueueStage } from '../fanout.mjs';
 import { createStats, dayKey } from './stats.mjs';
 import { createAuth } from './auth.mjs';
+import { teamPage } from './render-team.mjs';
+import { TeamError } from '../team.mjs';
 import {
   knownError,
   loginPage, logoutPage, overviewPage, leadsPage, leadDetailPage, listingsPage, spendPage, integrationsPage, messagePage,
@@ -63,6 +65,9 @@ export function isDay(value) {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
 }
 
+/** Does this request belong to the dashboard? Used by the server before anything else runs. */
+const ownsDashboardPath = (p) => p === '/dashboard' || p.startsWith('/dashboard/') || p === '/v1/admin' || p.startsWith('/v1/admin/');
+
 const isForm = (ct) => /^application\/x-www-form-urlencoded\s*(?:;|$)/i.test(String(ct ?? '').trim());
 const isJson = (ct) => /^application\/(?:[\w.+-]+\+)?json\s*(?:;|$)/i.test(String(ct ?? '').trim());
 
@@ -73,6 +78,8 @@ const trimTo = (v, max) => {
   const s = String(v).replace(/\r\n?/g, '\n').trim();
   return s ? s.slice(0, max) : null;
 };
+/** A JSON caller can send an object where a form field would be text; that is no text at all. */
+const asText = (v) => (typeof v === 'string' ? v : '');
 const posInt = (v) => {
   if (v === undefined || v === null || v === '') return null;
   const n = Number(v);
@@ -107,6 +114,9 @@ export function readBody(req, maxBytes) {
  * @param {object} [o.app]                             the app object, read defensively for `poller`
  * @param {(text: string) => Promise<object>} [o.sendWhatsApp]
  * @param {() => Promise<string>} [o.probeRetell]
+ * @param {ReturnType<import('../team.mjs').createTeam>} o.team   who may log in, and the Team page's data
+ * @param {ReturnType<import('../audit.mjs').createAudit>} [o.audit]
+ * @param {Function} [o.sendCode]                     the shared sender's `sendTo`, for login codes
  */
 export function createDashboardRoutes({
   db, cfg = {}, inventory = null, fanout = null, app = null,
@@ -114,14 +124,20 @@ export function createDashboardRoutes({
   team = null, audit = null, sendCode = null,
   auth = null, stats = null, log = () => {}, now = () => Date.now(),
 } = {}) {
-  // Interim (Phase 1, until Task 8/10 wire `team` from index.mjs): the authenticator is
-  // built on first use, so a server started without the team store still mounts every
-  // other route; its login fails loudly (createAuth throws) instead of the whole app.
-  let authInstance = auth;
-  const authenticator = new Proxy({}, {
-    get: (_target, key) => (authInstance ??= createAuth({ db, team, audit, cfg, sendCode, now, log }))[key],
-  });
   const statistics = stats ?? createStats({ db, now });
+  if (!team) {
+    // Fail closed rather than throw: without the team store nobody can be identified,
+    // so every dashboard and admin request is refused, while the rest of the server
+    // (the site's chat, the Retell tools) still starts. index.mjs always passes `team`.
+    log({ level: 'error', evt: 'dash.no_team_store' });
+    const closed = async ({ res }) => {
+      const body = Buffer.from(JSON.stringify({ error: 'dashboard_unavailable' }), 'utf8');
+      res.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': body.length, ...SECURITY_HEADERS });
+      res.end(body);
+    };
+    return { handle: closed, owns: ownsDashboardPath, auth: null, stats: statistics };
+  }
+  const authenticator = auth ?? createAuth({ db, team, audit, cfg, sendCode, now, log });
   const maxBodyBytes = Number(cfg.maxBodyBytes ?? 16 * 1024);
   const limiters = {
     // The login is the one surface a stranger reaches, so guessing is capped separately
@@ -224,10 +240,15 @@ export function createDashboardRoutes({
     String(fields?._dash ?? '') === '1';
 
   const sessionToken = (req) => authenticator.readCookie(req);
-  const signedIn = (req) => {
+  /**
+   * The active member behind this request's cookie, or null. `check()` reads the
+   * `users` row every time, so a deactivated person is out on their very next request.
+   */
+  const currentUser = (req) => {
     const token = sessionToken(req);
-    return Boolean(token) && authenticator.check(token);
+    return token ? authenticator.check(token) : null;
   };
+  const signedIn = (req) => Boolean(currentUser(req));
 
   /**
    * Read and parse a write body.
@@ -272,8 +293,13 @@ export function createDashboardRoutes({
     }
     const parsed = await fieldsOf(req);
     if (!parsed.ok) return refuseBody(req, res, parsed);
-    const out = await authenticator.requestCode(ip);
-    if (!out.ok) return toLogin(res, `?step=code&error=${encodeURIComponent(out.error)}`, 303);
+    const out = await authenticator.requestCode({ phone: parsed.fields.phone, ip });
+    if (!out.ok) {
+      // A number that is not a number goes back to the first step to be retyped; a limit
+      // stays on the code step (a code may already be on its way).
+      const step = out.error === 'bad_phone' ? '' : 'step=code&';
+      return toLogin(res, `?${step}error=${encodeURIComponent(out.error)}`, 303);
+    }
     // The nonce is what lets this browser — and only this browser — spend the code's
     // five attempts. See the header of `auth.mjs`.
     authenticator.setTryCookie(res, out.nonce);
@@ -317,7 +343,7 @@ export function createDashboardRoutes({
     if (!parsed.ok) return refuseBody(req, res, parsed);
     if (!hasMarker(req, parsed.fields)) return toLogin(res, '?error=forbidden', 303);
     const token = sessionToken(req);
-    if (token) authenticator.logout(token);
+    if (token) authenticator.logout(token, currentUser(req));
     authenticator.clearCookie(res);
     authenticator.clearTryCookie(res);
     return toLogin(res, '', 303);
@@ -398,7 +424,7 @@ export function createDashboardRoutes({
 
   /* -------------------- HTML pages -------------------- */
 
-  function overview({ res, url }) {
+  function overview({ res, url, me }) {
     const days = Math.max(1, Math.min(90, Number(url.searchParams.get('days')) || 14));
     // Every section is fetched defensively: one failing aggregate must not take the
     // whole desk page down, and the queue at the top is the part the owner actually
@@ -422,13 +448,14 @@ export function createDashboardRoutes({
       waiting: safe('waiting', () => db.waitingLeads({ limit: 50 }), []),
       waitingTotal: safe('waitingTotal', () => db.countWaitingLeads(), null),
       now: now(),
+      me,
     }));
   }
 
   /** Cards per column. The counts beside them are a COUNT(*), never this slice. */
   const BOARD_CARDS = 500;
 
-  function leads({ res, url }) {
+  function leads({ res, url, me }) {
     const stage = STAGES.includes(url.searchParams.get('stage')) ? url.searchParams.get('stage') : '';
     const q = String(url.searchParams.get('q') ?? '').slice(0, 100);
     const board = Object.fromEntries(STAGES.map((s) => [s, []]));
@@ -441,12 +468,13 @@ export function createDashboardRoutes({
       counts,
       leads: db.listLeads({ stage: stage || null, q: q || null, limit: 200 }),
       stage, q, now: now(), total: db.countLeads(),
+      me,
     }));
   }
 
-  function leadDetail({ res, url }, leadId) {
+  function leadDetail({ res, url, me }, leadId) {
     const lead = db.getLead(leadId);
-    if (!lead) return sendHtml(res, 404, messagePage({ title: 'Not found', message: 'No lead with that id.' }));
+    if (!lead) return sendHtml(res, 404, messagePage({ title: 'Not found', message: 'No lead with that id.', me }));
     const saved = url.searchParams.get('ok');
     const error = url.searchParams.get('error');
     return sendHtml(res, 200, leadDetailPage({
@@ -455,15 +483,16 @@ export function createDashboardRoutes({
       saved: saved === 'stage' || saved === 'note' ? saved : null,
       error: knownError(error),
       now: now(),
+      me,
     }));
   }
 
-  const listings = ({ res }) => sendHtml(res, 200, listingsPage({ rows: listingRows() }));
+  const listings = ({ res, me }) => sendHtml(res, 200, listingsPage({ rows: listingRows(), me }));
 
   /** How much of the spend ledger the page shows. The CPL table is unbounded and cheap. */
   const SPEND_WINDOW_DAYS = 90;
 
-  function spend({ res, url }) {
+  function spend({ res, url, me }) {
     const today = dayKey(now());
     const fallbackFrom = dayKey(now() - SPEND_WINDOW_DAYS * 86_400_000);
     const requestedFrom = url.searchParams.get('from');
@@ -481,10 +510,11 @@ export function createDashboardRoutes({
       saved: url.searchParams.get('ok') === '1',
       error: knownError(url.searchParams.get('error')),
       today,
+      me,
     }));
   }
 
-  async function integrations({ res }) {
+  async function integrations({ res, me }) {
     let retell = 'unknown';
     try { retell = probeRetell ? await probeRetell() : (cfg.retellApiKey ? 'unknown' : 'error'); } catch { retell = 'error'; }
     let dbOk = false;
@@ -496,6 +526,19 @@ export function createDashboardRoutes({
       poller: pollerStatus(),
       lastAccepted: lastAccepted(),
       db: { ok: dbOk, file: db.file ?? null },
+      me,
+    }));
+  }
+
+  function teamView({ res, url, me }) {
+    if (me.role !== 'owner') return sendHtml(res, 403, messagePage({ title: 'Owners only', message: 'Only an owner can open the Team page.', me }));
+    return sendHtml(res, 200, teamPage({
+      me,
+      users: team.listUsers(),
+      never: team.listNever(),
+      sendingEnabled: team.sendingEnabled(),
+      ok: url.searchParams.get('ok'),
+      error: url.searchParams.get('error'),
     }));
   }
 
@@ -508,7 +551,7 @@ export function createDashboardRoutes({
   const answer = (res, { form, back, status, payload }) =>
     (form ? redirect(res, back) : sendJson(res, status, payload));
 
-  function setStage({ res, fields, form }, leadId) {
+  function setStage({ res, fields, form, me }, leadId) {
     const lead = db.getLead(leadId);
     if (!lead) return answer(res, { form, back: '/dashboard/leads', status: 404, payload: { error: 'not_found' } });
 
@@ -524,7 +567,7 @@ export function createDashboardRoutes({
     const note = trimTo(fields.note, MAX_NOTE);
     const t = now();
 
-    const history = db.setStage(leadId, stage, { actor: 'owner', note, valueSar, now: t });
+    const history = db.setStage(leadId, stage, { actor: me.name, note, valueSar, now: t });
     const updated = db.getLead(leadId);
     // The ad platforms hear about the moves they can bid on; the rest is just history.
     // The worker's bound method and the bare function are the same code — `fanout` is
@@ -532,6 +575,7 @@ export function createDashboardRoutes({
     const queue = fanout?.enqueueStage ?? ((lead, opts) => enqueueStage(db, lead, opts));
     const queued = queue(updated, { stage, valueSar: updated.value_sar, now: t });
     log({ evt: 'dash.stage', leadId, stage, dests: queued.dests });
+    audit?.record({ userId: me.user_id, action: 'stage', target: leadId, meta: { stage } });
 
     return answer(res, {
       form, back: `${back}?ok=stage`, status: 200,
@@ -539,7 +583,7 @@ export function createDashboardRoutes({
     });
   }
 
-  function addNote({ res, fields, form }, leadId) {
+  function addNote({ res, fields, form, me }, leadId) {
     const lead = db.getLead(leadId);
     const back = `/dashboard/leads/${encodeURIComponent(leadId)}`;
     if (!lead) return answer(res, { form, back: '/dashboard/leads', status: 404, payload: { error: 'not_found' } });
@@ -550,7 +594,7 @@ export function createDashboardRoutes({
     const touchpoint = db.transaction(() => {
       const tp = db.addTouchpoint({
         lead_id: leadId, ts: t, channel: 'manual', event_type: 'note',
-        listing_id: lead.listing_id ?? null, meta: { note, actor: 'owner' },
+        listing_id: lead.listing_id ?? null, meta: { note, actor: me.name, actor_id: me.user_id },
       });
       // Kept on the lead as well as in the journey: the owner's WhatsApp brief reads
       // `notes`, and a note nobody sees again is not worth typing.
@@ -558,10 +602,12 @@ export function createDashboardRoutes({
       return tp;
     });
     log({ evt: 'dash.note', leadId });
+    audit?.record({ userId: me.user_id, action: 'note', target: leadId });
     return answer(res, { form, back: `${back}?ok=note`, status: 200, payload: { ok: true, touchpoint_id: touchpoint.id } });
   }
 
-  function saveSpend({ res, fields, form }) {
+  // `me` is accepted but not used yet: spend changes are audited with Phase 5's reports.
+  function saveSpend({ res, fields, form, me: _me }) {
     const day = String(fields.day ?? '').trim();
     const platform = trimTo(fields.platform, 32)?.toLowerCase() ?? null;
     const spendSar = Number(fields.spend_sar);
@@ -614,13 +660,85 @@ export function createDashboardRoutes({
 
   const adminListings = ({ res }) => sendJson(res, 200, { listings: listingRows() });
 
+  /* -------------------- team (owner only) -------------------- */
+
+  // The audit log records WHO acted and on WHICH id — never a phone number, a name or a
+  // note: those live in `users` / `never_list`, and the log is not a second copy of them.
+  const teamBack = (query) => `/dashboard/team?${query}`;
+  function teamWrite({ res, form }, fn, okKey) {
+    try {
+      fn();
+      return answer(res, { form, back: teamBack(`ok=${okKey}`), status: 200, payload: { ok: true } });
+    } catch (err) {
+      if (!(err instanceof TeamError)) throw err;
+      return answer(res, {
+        form, back: teamBack(`error=${encodeURIComponent(err.code)}`),
+        status: err.code === 'not_found' ? 404 : 400, payload: { error: err.code },
+      });
+    }
+  }
+
+  function addPerson(ctx) {
+    const { fields, me } = ctx;
+    return teamWrite(ctx, () => {
+      const u = team.addUser({ name: asText(fields.name), phone: asText(fields.phone), role: fields.role === 'owner' ? 'owner' : 'staff' });
+      audit?.record({ userId: me.user_id, action: 'team_add', target: u.user_id, meta: { role: u.role } });
+    }, 'added');
+  }
+
+  function changePerson(ctx, userId, what) {
+    const { fields, me } = ctx;
+    if (what === 'deactivate') {
+      return teamWrite(ctx, () => {
+        team.deactivateUser(userId);
+        audit?.record({ userId: me.user_id, action: 'team_deactivate', target: userId });
+      }, 'deactivated');
+    }
+    if (what === 'reactivate') {
+      return teamWrite(ctx, () => {
+        team.reactivateUser(userId);
+        audit?.record({ userId: me.user_id, action: 'team_reactivate', target: userId });
+      }, 'reactivated');
+    }
+    return teamWrite(ctx, () => {
+      const role = asText(fields.role);
+      team.setRole(userId, role);
+      audit?.record({ userId: me.user_id, action: 'team_role', target: userId, meta: { role } });
+    }, 'role');
+  }
+
+  function neverWrite(ctx, remove) {
+    const { fields, me } = ctx;
+    if (remove) {
+      return teamWrite(ctx, () => {
+        team.removeNever(asText(fields.phone));
+        audit?.record({ userId: me.user_id, action: 'never_remove' });
+      }, 'never_removed');
+    }
+    return teamWrite(ctx, () => {
+      team.addNever({ phone: asText(fields.phone), note: asText(fields.note), by: me.user_id });
+      audit?.record({ userId: me.user_id, action: 'never_add' });
+    }, 'never_added');
+  }
+
+  function saveSetting(ctx) {
+    const { fields, me } = ctx;
+    return teamWrite(ctx, () => {
+      if (!Object.hasOwn(fields, 'sending_enabled')) throw new TeamError('bad_setting');
+      const value = String(fields.sending_enabled) === '0' ? '0' : '1';
+      team.setSetting('sending_enabled', value, { by: me.user_id });
+      audit?.record({ userId: me.user_id, action: 'setting', target: 'sending_enabled', meta: { value } });
+    }, 'setting');
+  }
+
   /* -------------------- dispatch -------------------- */
 
   const LEAD_PATH = /^\/dashboard\/leads\/([A-Za-z0-9_-]{1,64})$/;
   const ADMIN_LEAD = /^\/v1\/admin\/leads\/([A-Za-z0-9_-]{1,64})(?:\/(stage|note))?$/;
+  const ADMIN_TEAM = /^\/v1\/admin\/team\/([A-Za-z0-9_-]{1,64})\/(deactivate|reactivate|role)$/;
+  const OWNER_WRITES = new Set(['/v1/admin/team', '/v1/admin/never', '/v1/admin/never/remove', '/v1/admin/settings']);
 
-  /** Does this request belong to us? Used by the server before anything else runs. */
-  const owns = (p) => p === '/dashboard' || p.startsWith('/dashboard/') || p === '/v1/admin' || p.startsWith('/v1/admin/');
+  const owns = ownsDashboardPath;
 
   async function handleHtml({ req, res, url, p, ip }) {
     /* --- login, the only pages reachable signed out --- */
@@ -644,22 +762,24 @@ export function createDashboardRoutes({
       return sendHtml(res, 200, logoutPage());
     }
 
-    /* --- everything else needs the cookie --- */
-    if (!signedIn(req)) return toLogin(res);
+    /* --- everything else needs a signed-in, active member --- */
+    const me = currentUser(req);
+    if (!me) return toLogin(res);
     if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method_not_allowed' });
 
-    if (p === '/dashboard') return overview({ res, url });
-    if (p === '/dashboard/leads') return leads({ res, url });
+    if (p === '/dashboard') return overview({ res, url, me });
+    if (p === '/dashboard/leads') return leads({ res, url, me });
     const leadMatch = LEAD_PATH.exec(p);
-    if (leadMatch) return leadDetail({ res, url }, leadMatch[1]);
-    if (p === '/dashboard/listings') return listings({ res });
-    if (p === '/dashboard/spend') return spend({ res, url });
-    if (p === '/dashboard/integrations') return integrations({ res });
-    return sendHtml(res, 404, messagePage({ title: 'Not found', message: 'There is no such page.' }));
+    if (leadMatch) return leadDetail({ res, url, me }, leadMatch[1]);
+    if (p === '/dashboard/listings') return listings({ res, me });
+    if (p === '/dashboard/spend') return spend({ res, url, me });
+    if (p === '/dashboard/integrations') return integrations({ res, me });
+    if (p === '/dashboard/team') return teamView({ res, url, me });
+    return sendHtml(res, 404, messagePage({ title: 'Not found', message: 'There is no such page.', me }));
   }
 
   async function handleAdmin({ req, res, url, p, ip }) {
-    if (!signedIn(req)) return sendJson(res, 401, { error: 'unauthorised' });
+    if (!currentUser(req)) return sendJson(res, 401, { error: 'unauthorised' });
     // A stated foreign origin on a route that answers with the owner's leads is refused
     // whatever the method — CORS would stop a browser reading it, but not a script that
     // is not a browser, and this costs nothing.
@@ -680,7 +800,9 @@ export function createDashboardRoutes({
 
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'method_not_allowed' });
 
-    const writes = (leadMatch && leadMatch[2]) || (p === '/v1/admin/spend' ? 'spend' : null);
+    const teamMatch = ADMIN_TEAM.exec(p);
+    const ownerWrite = Boolean(teamMatch) || OWNER_WRITES.has(p);
+    const writes = (leadMatch && leadMatch[2]) || (p === '/v1/admin/spend' ? 'spend' : null) || (ownerWrite ? 'team' : null);
     if (!writes) return sendJson(res, 404, { error: 'not_found' });
 
     const parsed = await fieldsOf(req);
@@ -689,11 +811,25 @@ export function createDashboardRoutes({
       log({ level: 'warn', evt: 'dash.marker_missing', path: p, ip });
       return sendJson(res, 403, { error: 'forbidden', message: 'X-Bona-Dash: 1 (or _dash=1) is required on a write' });
     }
+    // Asked again now the body is in: reading it can take as long as the client likes,
+    // and a person deactivated (or demoted) meanwhile must not get the write through on
+    // the strength of a check made before they were.
+    const me = currentUser(req);
+    if (!me) return sendJson(res, 401, { error: 'unauthorised' });
+    if (ownerWrite && me.role !== 'owner') {
+      log({ level: 'warn', evt: 'dash.owner_only', path: teamMatch ? '/v1/admin/team/:id' : p });
+      return sendJson(res, 403, { error: 'owner_only' });
+    }
 
-    const ctx = { res, fields: parsed.fields, form: parsed.form };
+    const ctx = { res, fields: parsed.fields, form: parsed.form, me };
     if (writes === 'stage') return setStage(ctx, leadMatch[1]);
     if (writes === 'note') return addNote(ctx, leadMatch[1]);
-    return saveSpend(ctx);
+    if (writes === 'spend') return saveSpend(ctx);
+    if (teamMatch) return changePerson(ctx, teamMatch[1], teamMatch[2]);
+    if (p === '/v1/admin/team') return addPerson(ctx);
+    if (p === '/v1/admin/never') return neverWrite(ctx, false);
+    if (p === '/v1/admin/never/remove') return neverWrite(ctx, true);
+    return saveSetting(ctx);
   }
 
   /**
