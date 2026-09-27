@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { openDb, newId, STAGES, FANOUT_DESTS, SCHEMA_VERSION } from '../lib/db.mjs';
 
 function tmp() {
@@ -36,6 +37,42 @@ test('openDb creates an owner-only file inside an owner-only directory and migra
     assert.ok(tables.includes(name), name);
   }
   assert.equal(b.ping(), true);
+  b.close();
+  cleanup();
+});
+
+test('a v2-era file db upgrades to v3, an existing session survives with a null user_id, and reopening is a no-op', () => {
+  // `MIGRATIONS` and `migrate()` are internal to lib/db.mjs, and there's no exported hook
+  // to stop the real migration chain partway through — reasonably so, since nothing else
+  // needs one. Reimplementing the v1 SQL here to build a "real" v2 file would duplicate
+  // (and could silently drift from) that internal SQL without testing anything the v1
+  // migration doesn't already cover elsewhere in this file.
+  //
+  // What v3 actually risks is narrower: every v3 statement is `CREATE ... IF NOT EXISTS`
+  // except one bare `ALTER TABLE auth_sessions ADD COLUMN user_id`, which is exactly the
+  // statement fix #1 above is about (two concurrent openers both reading user_version=2
+  // and both trying to add the column). So the minimal state that genuinely exercises the
+  // v2->v3 upgrade path is a from-scratch file with just the pre-v3 shape of
+  // `auth_sessions` (the same columns the real v1 migration creates it with — no `user_id`)
+  // holding a live row, and `user_version` left at 2. Opening it for real with `openDb`
+  // then runs the actual, unmodified `migrate()`.
+  const { file, cleanup } = tmp();
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const seed = new DatabaseSync(file);
+  seed.exec('CREATE TABLE auth_sessions (token_hash TEXT PRIMARY KEY, created INTEGER, expires INTEGER, ua TEXT)');
+  seed.prepare('INSERT INTO auth_sessions (token_hash, created, expires, ua) VALUES (?,?,?,?)').run('deadbeef', 1000, 99_999_999_999, 'UA');
+  seed.exec('PRAGMA user_version = 2');
+  seed.close();
+
+  const a = openDb(file);
+  assert.equal(a.db.prepare('PRAGMA user_version').get().user_version, 3, 'v3 is applied on top of the v2 file');
+  const row = a.db.prepare('SELECT * FROM auth_sessions WHERE token_hash = ?').get('deadbeef');
+  assert.ok(row, 'the pre-existing session row survives the migration');
+  assert.equal(row.user_id, null, 'a session opened before user accounts existed has no user');
+  a.close();
+
+  const b = openDb(file);
+  assert.equal(b.db.prepare('PRAGMA user_version').get().user_version, 3, 'reopening an up-to-date file is a no-op');
   b.close();
   cleanup();
 });
