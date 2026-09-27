@@ -80,6 +80,7 @@ function loadMetaEnv() {
 const ENV = loadMetaEnv();
 const TOKEN = ENV.token;
 const PAGE = ENV.pageId || DEFAULT_PAGE_ID;
+if (cmd === 'queue') die('Legacy queue retired; use scripts/social/daily-publish.mjs facebook');
 
 function die(msg, code = 1) { console.error(`error: ${redact(msg, TOKEN)}`); process.exit(code); }
 

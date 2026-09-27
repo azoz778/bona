@@ -164,6 +164,7 @@ export function refuseText(text) {
 export function refusal(entry) {
   if (!entry) return 'no such entry';
   if (entry.platform !== 'facebook') return `entry is for ${entry.platform}, not facebook`;
+  if (entry.reviewStatus && entry.reviewStatus !== 'approved') return 'owner visual/copy review required';
   if (entry.blocked) return `blocked: ${entry.blockedReason || 'REGA licence pending'}`;
   const r = refuseText(`${entry.caption?.ar ?? ''}\n${entry.caption?.en ?? ''}\n${(entry.hashtags || []).join(' ')}\n${entry.firstComment ?? ''}`);
   if (r) return r;

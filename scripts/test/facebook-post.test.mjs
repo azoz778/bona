@@ -199,3 +199,8 @@ test('withLock: a second run is refused while the first holds the lock; a stale 
   assert.equal(await withLock(lock, async () => 'took over'), 'took over');
   assert.ok(!fs.existsSync(lock));
 });
+
+ test('pending design review blocks Facebook queue publication',()=>{
+ assert.match(refusal(entry({reviewStatus:'pending'})),/review required/);
+ assert.equal(refusal(entry({reviewStatus:'approved'})),null);
+ });

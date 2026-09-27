@@ -209,6 +209,7 @@ export function normaliseEntry(raw, index = 0) {
     id, index, date: raw.date, time: raw.time || DEFAULTS.defaultTime, platform: raw.platform || 'instagram', kind,
     topic, images: images.filter(Boolean), caption: raw.caption ?? '', hashtags: Array.isArray(raw.hashtags) ? raw.hashtags : [],
     alt: typeof raw.alt === 'string' ? raw.alt : raw.alt?.en || null, launch: raw.launch ?? null,
+    reviewStatus: raw.reviewStatus ?? null,
     adLicenceRequired: Boolean(raw.adLicenceRequired), blocked: Boolean(raw.blocked), status: raw.status || 'planned',
   };
 }
@@ -366,6 +367,7 @@ export function decide(entry, { now, graceMs, ledger, forceId = null, readCaptio
   // Re-evaluated in the window; by then a slot past its grace is `missed` the ordinary way.
   if (!forced && isQuietHours(now)) return { status: 'deferred:quiet-hours', detail: `${fmtKsa(now)} is outside the 17:00–23:59 KSA window — nothing posted, nothing written`, terminal: false };
 
+  if (entry.reviewStatus && entry.reviewStatus !== 'approved') return { status: 'deferred:review', detail: 'Owner visual/copy review required', terminal: false };
   if (entry.adLicenceRequired || entry.blocked) return past && !forced ? { status: null } : { status: 'skipped:ad-licence', detail: 'REGA per-ad licence required — never automated', terminal: false };
   if (entry.kind === 'reel') return { status: 'skipped:manual', detail: 'reel: needs hosted video + in-app audio, post by hand', terminal: true };
   if (past && !forced) return { status: 'skipped:missed', detail: `slot ${fmtKsa(at)} passed more than ${Math.round(graceMs / 3_600_000)} h ago`, terminal: true };
@@ -631,6 +633,9 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   // Under the timer an empty token must not quietly become a dry-run every 15 minutes.
   if (opts.live && !token) { console.error('error: META_ACCESS_TOKEN missing — --live refuses to run without a token (set it in ~/.secrets/bona-meta-graph.env, or drop --live for a dry-run)'); return 1; }
   const dryRun = opts.dryRun || !token;
+  if (!dryRun && [DEFAULTS.source, 'marketing/queue/queue.json'].some(p => path.resolve(ROOT, p) === path.resolve(ROOT, opts.source))) {
+    console.error('error: legacy publish source retired; use the reviewed daily publisher'); return 1;
+  }
   const mask = maskToken(token);
   const log = opts.json ? (s) => console.error(mask(s)) : (s) => console.log(mask(s));
   const r = await run({ ...opts, dryRun }, { now, token, igId: env.IG_BUSINESS_ID, log });

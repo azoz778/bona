@@ -1,0 +1,343 @@
+[
+  {
+    "date": "2026-09-28",
+    "key": "viewing-checklist",
+    "topic": {
+      "ar": "قبل المعاينة: ثلاث نقاط للمقارنة",
+      "en": "Before a viewing: three comparison notes"
+    },
+    "caption": {
+      "ar": "في المعاينة القادمة، اختبر طريقك اليومي، والضوء والخصوصية، وما تعنيه الإطلالة فعلياً. جرّب الطريق في وقت خروجك المعتاد وعُد إلى المنزل في وقت مختلف. وإذا ذُكر لك حق وصول خاص إلى الماء، اطلب مستنده. احفظ هذه القائمة لتدوين ملاحظاتك.",
+      "en": "At your next viewing, check your daily route, light and privacy, and what the view actually includes. Try your usual departure time and revisit at a different time of day. Request documents for any claimed private waterfront access. Save these prompts for your viewing notes."
+    },
+    "slides": [
+      {
+        "ar": "ابدأ برحلتك اليومية",
+        "en": "Start with your daily route",
+        "rows": [
+          [
+            "جرّب الطريق في وقت خروجك المعتاد",
+            "Drive the route at your usual departure time."
+          ],
+          [
+            "سجّل وقت الذهاب والعودة كلّاً على حدة",
+            "Record each direction separately."
+          ],
+          [
+            "تفقّد مدخل الشارع والمواقف مساءً",
+            "Check street access and parking in the evening."
+          ]
+        ],
+        "note": "دوّن الوقت الفعلي بدلاً من الاعتماد على تقدير عام.",
+        "noteEn": "Record actual times rather than a general estimate."
+      },
+      {
+        "ar": "عُد في وقت مختلف",
+        "en": "See it in a different light",
+        "rows": [
+          [
+            "راقب الضوء صباحاً وبعد الظهر",
+            "Check the light in the morning and afternoon."
+          ],
+          [
+            "افتح الستائر وتفقّد الخصوصية",
+            "Open the curtains and check privacy."
+          ],
+          [
+            "استمع للضوضاء والنوافذ مفتوحة ثم مغلقة",
+            "Listen with windows open, then closed."
+          ]
+        ],
+        "note": "الملاحظات المكتوبة تسهّل مقارنة زيارتين.",
+        "noteEn": "Written notes make two visits easier to compare."
+      },
+      {
+        "ar": "إطلالة أم وصول؟",
+        "en": "A view, or access?",
+        "rows": [
+          [
+            "حدّد الغرفة التي تظهر منها الإطلالة",
+            "Identify the room that actually has the view."
+          ],
+          [
+            "تفقّد طريق الوصول إلى الماء",
+            "Check the physical route to the water."
+          ],
+          [
+            "اطلب مستنداً لأي حق وصول خاص",
+            "Request documents for any claimed private access."
+          ]
+        ],
+        "note": "الإطلالة لا تعني تلقائياً حق استخدام الشاطئ.",
+        "noteEn": "A water view does not establish beach access rights."
+      }
+    ]
+  },
+  {
+    "date": "2026-09-29",
+    "key": "buyer-brief",
+    "topic": {
+      "ar": "اكتب احتياجك قبل البحث",
+      "en": "Write your brief before you search"
+    },
+    "caption": {
+      "ar": "قبل فتح قائمة العقارات، اكتب ثلاث قوائم قصيرة: ما لا يمكنك التنازل عنه، وما تفضّله، وما يمكنك تغييره لاحقاً. أضف عدد الغرف التي تستخدمها فعلياً، ومواعيد التنقل، والوقت المتاح للانتقال. هذه ملاحظاتك الشخصية للمقارنة وليست وصفاً لعقار متاح.",
+      "en": "Before opening a property list, separate your essentials, preferences and things you could change later. Add the rooms you actually use, your travel routine and your moving window. This is your comparison brief, not a claim about available inventory."
+    },
+    "slides": [
+      {
+        "ar": "ما الذي تحتاجه فعلاً؟",
+        "en": "What do you actually need?",
+        "dark": true,
+        "rows": [
+          [
+            "اكتب ثلاثة احتياجات لا تتنازل عنها",
+            "Write down three non-negotiable needs."
+          ],
+          [
+            "افصل الضروري عن المفضّل",
+            "Separate essentials from preferences."
+          ],
+          [
+            "حدّد ما يمكنك تغييره بعد الانتقال",
+            "Identify what you could change after moving."
+          ]
+        ],
+        "note": "احمل القائمة نفسها إلى كل معاينة.",
+        "noteEn": "Bring the same brief to every viewing."
+      }
+    ]
+  },
+  {
+    "date": "2026-09-30",
+    "key": "floorplan-fit",
+    "topic": {
+      "ar": "هل يناسب المخطط حياتك؟",
+      "en": "Does the layout fit your routine?"
+    },
+    "caption": {
+      "ar": "لا تعتمد على المساحة الإجمالية وحدها. أحضر أبعاد قطع الأثاث الأساسية وقارنها بالأبعاد المقاسة داخل الغرف. تتبّع الحركة بين المدخل والمطبخ وغرف النوم، واطلب توضيح أي اختلاف بين المخطط وما تراه في الموقع. لا تستنتج المقاسات من صورة تسويقية.",
+      "en": "Total area alone does not tell you whether a layout works. Bring dimensions for your main furniture and compare them with measured room dimensions. Trace routes between the entrance, kitchen and bedrooms, and ask about differences between the plan and the property. Do not infer measurements from marketing images."
+    },
+    "slides": [
+      {
+        "ar": "ابدأ بما ستضعه في الغرفة",
+        "en": "Start with what goes in the room",
+        "rows": [
+          [
+            "قِس الأثاث الأساسي قبل الزيارة",
+            "Measure your main furniture before the visit."
+          ],
+          [
+            "قارن القياسات بأبعاد الغرفة الفعلية",
+            "Compare with the actual room dimensions."
+          ],
+          [
+            "اترك مساحة لفتح الأبواب والأدراج",
+            "Allow space for doors and drawers to open."
+          ]
+        ],
+        "note": "الصور الواسعة ليست بديلاً عن القياس.",
+        "noteEn": "Wide-angle photos are not a substitute for measurements."
+      },
+      {
+        "ar": "جرّب الحركة داخل المنزل",
+        "en": "Walk through your daily routine",
+        "rows": [
+          [
+            "تتبّع الطريق من المدخل إلى المطبخ",
+            "Trace the route from entrance to kitchen."
+          ],
+          [
+            "تفقّد مواضع التخزين التي ستستخدمها",
+            "Check the storage you would actually use."
+          ],
+          [
+            "اسأل عن اختلاف المخطط عن الموقع",
+            "Ask about differences between plan and property."
+          ]
+        ],
+        "note": "دوّن السؤال بجانب الغرفة المعنية في المخطط.",
+        "noteEn": "Write each question beside the relevant room on the plan."
+      }
+    ]
+  },
+  {
+    "date": "2026-10-01",
+    "key": "included-items",
+    "topic": {
+      "ar": "ما الذي يشمله العرض؟",
+      "en": "What is included?"
+    },
+    "caption": {
+      "ar": "عند المعاينة، قد تبدو التجهيزات جزءاً من المنزل بينما تختلف شروط إدراجها في العرض. دوّن الأسئلة عن المكيّفات، والأجهزة، والستائر، والأثاث. اطلب قائمة مكتوبة بما يشمله العرض وما لا يشمله، مع وصف الحالة وأي مستندات ضمان متاحة. لا تفترض أن ما تراه سيبقى.",
+      "en": "Fixtures and furnishings visible at a viewing may have different inclusion terms. Ask about air conditioning, appliances, curtains and furniture. Request a written list of what is included and excluded, its condition and any available warranty documents. Do not assume everything you see will remain."
+    },
+    "slides": [
+      {
+        "ar": "اسأل عمّا سيبقى",
+        "en": "Ask what will stay",
+        "dark": true,
+        "rows": [
+          [
+            "دوّن الأجهزة والتجهيزات التي تراها",
+            "List the appliances and fittings you see."
+          ],
+          [
+            "اطلب توضيح المشمول والمستثنى كتابةً",
+            "Ask for written inclusions and exclusions."
+          ],
+          [
+            "اسأل عن الحالة والضمانات المتاحة",
+            "Ask about condition and available warranties."
+          ]
+        ],
+        "note": "وجود القطعة في الصورة لا يثبت أنها ضمن العرض.",
+        "noteEn": "Appearing in a photo does not prove an item is included."
+      }
+    ]
+  },
+  {
+    "date": "2026-10-02",
+    "key": "shared-spaces",
+    "topic": {
+      "ar": "أسئلة خارج باب الشقة",
+      "en": "Questions beyond the apartment door"
+    },
+    "caption": {
+      "ar": "عند معاينة شقة، خصّص وقتاً للمداخل والمصاعد والمواقف والأجزاء المشتركة. اسأل عن الجهة التي تتلقى بلاغات الصيانة، وعن أي رسوم أو قواعد استخدام مكتوبة. اطلب التفاصيل والمستندات الخاصة بالمبنى نفسه؛ لا تعتمد على إجابات عامة عن الحي.",
+      "en": "When viewing an apartment, make time for entrances, lifts, parking and shared areas. Ask who handles maintenance requests and request written details of any charges or use rules. Ask for building-specific information rather than general answers about the neighbourhood."
+    },
+    "slides": [
+      {
+        "ar": "ابدأ من مدخل المبنى",
+        "en": "Start at the building entrance",
+        "rows": [
+          [
+            "جرّب مسار الدخول إلى الشقة",
+            "Walk the route from entrance to apartment."
+          ],
+          [
+            "تفقّد المصعد ومسار حمل الأغراض",
+            "Check the lift and the route for carrying items."
+          ],
+          [
+            "اطلب تحديد الموقف المرتبط بالوحدة",
+            "Ask which parking space belongs to the unit."
+          ]
+        ],
+        "note": "دوّن ما رأيته وما يحتاج إلى توضيح.",
+        "noteEn": "Separate what you observed from what needs clarification."
+      },
+      {
+        "ar": "اسأل عن الإدارة اليومية",
+        "en": "Ask about day-to-day management",
+        "rows": [
+          [
+            "مَن يستقبل بلاغات الصيانة؟",
+            "Who receives maintenance requests?"
+          ],
+          [
+            "ما الرسوم المذكورة في المستندات؟",
+            "What charges are stated in the documents?"
+          ],
+          [
+            "ما قواعد استخدام المرافق المشتركة؟",
+            "What are the rules for shared facilities?"
+          ]
+        ],
+        "note": "اطلب الإجابات الخاصة بهذا المبنى كتابةً.",
+        "noteEn": "Request written answers specific to this building."
+      }
+    ]
+  },
+  {
+    "date": "2026-10-03",
+    "key": "compare-notes",
+    "topic": {
+      "ar": "قارن الملاحظات لا الانطباع فقط",
+      "en": "Compare notes, not just impressions"
+    },
+    "caption": {
+      "ar": "بعد كل معاينة، دوّن ما لاحظته قبل الانتقال إلى العقار التالي. استخدم المعايير نفسها لكل خيار، وافصل المعلومة المؤكدة عن السؤال المفتوح. إذا كانت نقطة حاسمة غير واضحة، اجعل التحقق منها خطوة تالية بدلاً من إعطاء العقار درجة مبنية على التخمين.",
+      "en": "After each viewing, record your observations before visiting the next property. Use the same criteria for every option and distinguish confirmed information from open questions. If an essential point is unclear, make verification your next step rather than scoring it on a guess."
+    },
+    "slides": [
+      {
+        "ar": "اكتب قبل أن تنسى",
+        "en": "Write it down while it is fresh",
+        "dark": true,
+        "rows": [
+          [
+            "استخدم المعايير نفسها لكل خيار",
+            "Use the same criteria for every option."
+          ],
+          [
+            "افصل المعلومة عن الانطباع",
+            "Separate facts from impressions."
+          ],
+          [
+            "ضع السؤال المفتوح في قائمة المتابعة",
+            "Add unanswered questions to a follow-up list."
+          ]
+        ],
+        "note": "اترك الخانة غير المؤكدة فارغة حتى تتحقّق منها.",
+        "noteEn": "Leave uncertain details blank until you verify them."
+      }
+    ]
+  },
+  {
+    "date": "2026-10-04",
+    "key": "honest-photo-prep",
+    "topic": {
+      "ar": "صور توضّح المنزل كما هو",
+      "en": "Photographs that show the home clearly"
+    },
+    "caption": {
+      "ar": "لتحضير صور عقارك، أزل الأغراض الشخصية واطلب إذن من يلزم قبل التصوير. نظّف العدسة وصوّر في ضوء مناسب، ثم راجع الصور بحثاً عن وجوه أو مستندات أو بيانات خاصة ظاهرة. اختر صوراً توضّح توزيع الغرف، وتجنّب التعديلات التي تغيّر حقيقة المساحة أو الإطلالة أو الحالة.",
+      "en": "Before photographing your property, remove personal items and obtain any needed permission. Clean the lens and use suitable light, then check for visible faces, documents or private details. Choose images that explain the layout; avoid edits that misrepresent space, views or condition."
+    },
+    "slides": [
+      {
+        "ar": "جهّز المكان قبل التصوير",
+        "en": "Prepare before taking the photo",
+        "rows": [
+          [
+            "أبعد الأغراض الشخصية والمستندات",
+            "Remove personal items and documents."
+          ],
+          [
+            "نظّف العدسة واختر ضوءاً مناسباً",
+            "Clean the lens and choose suitable light."
+          ],
+          [
+            "صوّر من موضع يوضّح توزيع الغرفة",
+            "Choose an angle that explains the room layout."
+          ]
+        ],
+        "note": "الهدف توضيح المكان، لا تغيير حقيقته.",
+        "noteEn": "The aim is clarity, not changing what is there."
+      },
+      {
+        "ar": "راجع الصورة قبل مشاركتها",
+        "en": "Review before you share",
+        "rows": [
+          [
+            "تفقّد الوجوه والبيانات الخاصة الظاهرة",
+            "Check for visible faces and private details."
+          ],
+          [
+            "استبعد الصور المعتمة أو غير الواضحة",
+            "Reject dark or unclear photographs."
+          ],
+          [
+            "تجنّب تعديلات تغيّر المساحة أو الإطلالة",
+            "Avoid edits that misrepresent space or views."
+          ]
+        ],
+        "note": "احتفظ بالصورة الأصلية للرجوع إليها.",
+        "noteEn": "Keep the original photograph for reference."
+      }
+    ]
+  }
+]
