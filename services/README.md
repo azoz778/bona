@@ -649,19 +649,28 @@ X-Content-Type-Options: nosniff
 
 Nothing here is CORS-enabled, so no other origin can read a byte of it.
 
-**Login.** `GET /dashboard/login` → `POST /dashboard/login/code` sends a 6-digit code to
-the owner's WhatsApp (`BONA_OWNER_JID`, via the same Evolution instance as the lead
-notes). Only `sha256(code)` is stored, for 10 minutes; three codes per 10 minutes per IP,
-and one a minute plus sixty a day across the whole service — asked of all three buckets
-before any is charged, so a refusal from one never spends a token in another. The code
-appears in exactly one place, the message itself — never in a log line or a response.
-
-The same request also sets a short-lived `bona_dash_try` nonce cookie, and the code is
-remembered in memory beside it. This is what stops the login from being a lockout: a
-wrong guess burns an attempt, five burn the code, and only the browser holding that
-nonce can spend them. A stranger POSTing guesses has no nonce, so the store never hears
-about it and the code the owner is holding survives. (The binding is in memory, so a
-service restart voids a code in flight — ask for another.)
+**Login (team accounts, since 2026-09).** `GET /dashboard/login` asks for a WhatsApp number.
+`POST /dashboard/login/code` — if the number belongs to an active member of the team
+(`users`, managed on the owner-only **Team** page), six digits go to that member's WhatsApp
+from the owner's number (the owner's own code goes to his own chat). Any other number gets
+the same answer, the same `bona_dash_try` cookie (`Path=/dashboard/login`) and a decoy
+challenge no code opens, and all member-only work (the audit row, the send) runs only after
+the answer is written, so the login says nothing about who is on the team. A challenge
+belongs to one person and one browser (found by the nonce, never by the code); five wrong
+guesses burn it; it lives 10 minutes; a new code voids that person's older one. Each person
+gets at most 5 real codes an hour and 10 a day (counted in the db, so a restart does not
+reset it); past that the request quietly gets a decoy. Limits: 3 per 10 min per number and
+per IP (IPv6 by /64), 6 a minute and 200 a day overall; the send also passes the shared gate
+in `lib/wa-send.mjs` (Sending switch on the Team page — only the owner's own code skips it;
+20/min, 500/day, 6/min per recipient). Known limit: anyone who knows a member's number can
+spend that member's code budget and block *new* logins for up to a day; existing sessions
+keep working.
+Sessions carry the member; deactivating someone deletes their sessions and codes at once, and
+every admin write re-checks the person after the body is read. Every stage change and note
+records who made it, and `audit_log` records logins, team changes and switches (ids only —
+never a phone, name, code or note text). Team numbers (and their learned `@lid` ids) and the
+owner's never-a-client list are skipped by the WhatsApp poller. The owner is seeded from
+`BONA_OWNER_JID` at start-up and adopts sessions from before team accounts.
 
 `POST /dashboard/login/verify` (form-encoded, 5 wrong attempts burn the code) sets
 `bona_dash`: `HttpOnly; Secure; SameSite=Lax; Path=/;
