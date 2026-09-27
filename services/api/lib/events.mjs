@@ -20,7 +20,7 @@ export const EVENT_NAMES = [
 export const SERVER_EVENT_NAMES = ['concierge_chat_start', 'concierge_call_start', 'lead_created', 'lead_stage'];
 
 /** Where a WhatsApp click is re-sent from the server (see lib/fanout.mjs for the mapping). */
-export const CLICK_FANOUT = ['meta', 'ga4', 'snap'];
+export const CLICK_FANOUT = ['meta', 'ga4', 'snap', 'tiktok'];
 
 export const ID_RE = {
   anon_id: /^[0-9a-f]{32}$/,

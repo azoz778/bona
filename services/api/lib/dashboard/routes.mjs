@@ -331,6 +331,8 @@ export function createDashboardRoutes({
       { label: 'GA4 — Measurement Protocol secret', present: Boolean(cfg.ga4ApiSecret) },
       { label: 'Snapchat — pixel id', present: Boolean(cfg.snapPixelId) },
       { label: 'Snapchat — Conversions API token', present: Boolean(cfg.snapCapiToken) },
+      { label: 'TikTok — Pixel ID', present: Boolean(cfg.tiktokPixelId) },
+      { label: 'TikTok — Events API token', present: Boolean(cfg.tiktokEventsToken) },
       { label: 'Retell — API key', present: Boolean(cfg.retellApiKey) },
       { label: 'Retell — tool token', present: Boolean(cfg.toolToken) },
       { label: 'Evolution — owner WhatsApp', present: Boolean(env.EVOLUTION_API_URL && env.EVOLUTION_API_KEY), note: 'sends the login code and the lead notes' },
@@ -345,7 +347,7 @@ export function createDashboardRoutes({
   function lastAccepted() {
     const out = {};
     const stmt = db.db.prepare("SELECT event_id, ts FROM fanout WHERE dest = ? AND status = 'sent' ORDER BY ts DESC, rowid DESC LIMIT 1");
-    for (const dest of ['meta', 'ga4', 'snap']) {
+    for (const dest of ['meta', 'ga4', 'snap', 'tiktok']) {
       const row = stmt.get(dest);
       out[dest] = row ? { event_id: row.event_id, ts: row.ts } : null;
     }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeBoard, checkSiteTag, checkGsc, checkGa4, checkSnap, checkMetaCapi, checkApi, checkEvolution, buildUserAgent, healthLink } from '../marketing/verify-integrations.mjs';
+import { mergeBoard, checkTiktokEvents, checkSiteTag, checkGsc, checkGa4, checkSnap, checkMetaCapi, checkApi, checkEvolution, buildUserAgent, healthLink } from '../marketing/verify-integrations.mjs';
 
 test('mergeBoard updates rows by id and appends unknown ids with their metadata', () => {
   const board = [
@@ -206,4 +206,15 @@ test('Evolution: answering is not the same as accepting the key', async () => {
   const noKey = { EVOLUTION_API_URL: 'https://wa.example.test' };
   assert.equal((await checkEvolution({ env: noKey, probe: at(401) })).status, 'pending-owner');
   assert.equal((await checkEvolution({ env: {}, probe: at(200) })).status, 'pending-owner');
+});
+
+
+test('TikTok readiness never claims credentials prove delivery', () => {
+  assert.equal(checkTiktokEvents({ env: {}, site: {} }).status, 'pending-owner');
+  const env = { TIKTOK_PIXEL_ID: 'test-pixel', TIKTOK_EVENTS_ACCESS_TOKEN: 'secret-token' };
+  assert.equal(checkTiktokEvents({ env, site: {} }).status, 'error');
+  const result = checkTiktokEvents({ env, site: { analytics: { tiktokPixel: 'test-pixel' } } });
+  assert.equal(result.status, 'pending-owner');
+  assert.match(result.detail, /still require verification/);
+  assert.ok(!JSON.stringify(result).includes('secret-token'));
 });

@@ -1478,7 +1478,7 @@ export function integrationsPage({ keys, fanout, retell, poller, lastAccepted, d
   // of the page. It must render when one of them answers with nothing, rather than
   // 500ing and taking away the one screen that would have told the owner what broke.
   const keyList = Array.isArray(keys) ? keys : [];
-  const dests = fanout?.dests ?? { meta: false, ga4: false, snap: false };
+  const dests = fanout?.dests ?? { meta: false, ga4: false, snap: false, tiktok: false };
   const tallies = fanout?.counts ?? { pending: null, sent: null, failed: null, skipped: null };
   const seen = lastAccepted ?? {};
   const health = db ?? { ok: false, file: null };
