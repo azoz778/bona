@@ -113,13 +113,15 @@
 
   /** One page view per page, per loaded tag. Safe to call repeatedly (a consent accept mid-page, a navigation). */
   function pageView() {
+    var c = consent();
+    if (!c || !(c.analytics || c.ads)) return;
     var href = location.href;
     if (viewed === href) return;
     viewed = href;
-    try { if (loaded.ga && typeof gtag === 'function') gtag('event', 'page_view'); } catch (e) { /* ignore */ }
-    try { if (loaded.meta && typeof fbq === 'function') fbq('track', 'PageView'); } catch (e) { /* ignore */ }
-    try { if (loaded.snap && typeof snaptr === 'function') snaptr('track', 'PAGE_VIEW'); } catch (e) { /* ignore */ }
-    try { if (loaded.tiktok && window.ttq) window.ttq.page(); } catch (e) { /* ignore */ }
+    try { if (c.analytics && loaded.ga && typeof gtag === 'function') gtag('event', 'page_view'); } catch (e) { /* ignore */ }
+    try { if (c.ads && loaded.meta && typeof fbq === 'function') fbq('track', 'PageView'); } catch (e) { /* ignore */ }
+    try { if (c.ads && loaded.snap && typeof snaptr === 'function') snaptr('track', 'PAGE_VIEW'); } catch (e) { /* ignore */ }
+    try { if (c.ads && loaded.tiktok && window.ttq) window.ttq.page(); } catch (e) { /* ignore */ }
   }
 
   function load() {

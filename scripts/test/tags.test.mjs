@@ -107,3 +107,15 @@ test('the loader never throws, whatever the storage or the config does', () => {
   assert.doesNotThrow(() => junk.run('tags.js'));
   assert.deepEqual(junk.injected, []);
 });
+
+
+test('withdrawal stops navigation pageviews even while old SDK stubs still exist', () => {
+  const dom = makeWindow({ tags: IDS, consent: { v: 1, analytics: true, ads: true, ts: 1 } });
+  dom.run('tags.js');
+  const before = [dom.win.dataLayer.length, dom.win.fbq.queue.length, dom.win.snaptr.queue.length, dom.win.ttq.length];
+  dom.setConsent(false, false);
+  dom.win.location.href = 'https://example.test/next/';
+  dom.fire('astro:after-swap');
+  dom.fire('astro:page-load');
+  assert.deepEqual([dom.win.dataLayer.length, dom.win.fbq.queue.length, dom.win.snaptr.queue.length, dom.win.ttq.length], before);
+});
