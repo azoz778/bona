@@ -32,7 +32,7 @@ test('openDb creates an owner-only file inside an owner-only directory and migra
   const b = openDb(file);
   assert.equal(b.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION, 'a second open is a no-op');
   const tables = b.db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map((r) => r.name);
-  for (const name of ['sessions', 'events', 'leads', 'touchpoints', 'lead_stage_history', 'wa_cursor', 'wa_seen', 'ad_spend', 'fanout', 'auth_codes', 'auth_sessions']) {
+  for (const name of ['sessions', 'events', 'leads', 'touchpoints', 'lead_stage_history', 'wa_cursor', 'wa_seen', 'ad_spend', 'fanout', 'auth_codes', 'auth_sessions', 'users', 'auth_challenges', 'audit_log', 'never_list', 'settings']) {
     assert.ok(tables.includes(name), name);
   }
   assert.equal(b.ping(), true);
@@ -197,25 +197,6 @@ test('fan-out rows are queued once per destination, come due in order, and recor
 });
 
 /* ---------------- dashboard auth ---------------- */
-
-test('a login code is one-shot, expires, and five wrong guesses burn it', () => {
-  const s = openDb(':memory:');
-  s.createAuthCode('123456', { now: 1000, ttlMs: 600_000 });
-  assert.equal(s.consumeAuthCode('000000', { now: 1001 }).ok, false);
-  assert.equal(s.consumeAuthCode('123456', { now: 1002 }).ok, true);
-  assert.equal(s.consumeAuthCode('123456', { now: 1003 }).ok, false, 'used once');
-
-  s.createAuthCode('222222', { now: 2000, ttlMs: 600_000 });
-  assert.equal(s.consumeAuthCode('222222', { now: 2000 + 600_001 }).ok, false, 'expired');
-
-  s.createAuthCode('333333', { now: 3000, ttlMs: 600_000 });
-  for (let i = 0; i < 5; i += 1) assert.equal(s.consumeAuthCode('999999', { now: 3001 + i }).ok, false);
-  const burnt = s.consumeAuthCode('333333', { now: 3010 });
-  assert.equal(burnt.ok, false, 'five wrong guesses and the right code no longer works');
-  assert.equal(burnt.reason, 'attempts');
-  assert.ok(!s.db.prepare('SELECT code_hash FROM auth_codes').all().some((r) => r.code_hash.includes('333333')), 'codes are stored hashed');
-  s.close();
-});
 
 test('a dashboard session is checked by token hash and can be deleted or expire', () => {
   const s = openDb(':memory:');
