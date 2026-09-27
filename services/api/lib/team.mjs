@@ -150,7 +150,10 @@ export function createTeam(store, { now = () => Date.now(), log = () => {} } = {
       if (user.role === 'owner' && activeOwners() <= 1) throw new TeamError('last_owner');
       prep('UPDATE users SET active = 0, deactivated = ? WHERE user_id = ?').run(now(), user.user_id);
       prep('DELETE FROM auth_sessions WHERE user_id = ?').run(user.user_id);
-      prep('DELETE FROM auth_challenges WHERE user_id = ?').run(user.user_id);
+      // Their codes become decoys rather than vanishing: a deleted row would answer
+      // 'no_request' where a stranger's challenge answers 'bad_code', telling whoever holds
+      // the nonce that this number was on the team (see dashboard/auth.mjs).
+      prep('UPDATE auth_challenges SET user_id = NULL WHERE user_id = ?').run(user.user_id);
       return getUser(user.user_id);
     });
   }

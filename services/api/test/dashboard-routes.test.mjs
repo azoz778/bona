@@ -242,6 +242,24 @@ test('a stranger cannot burn the code the owner is holding', async () => {
   });
 });
 
+test('two codes then a wrong one on the first: the same redirect and cookies for a member and a stranger', async () => {
+  const run = async (phone) => {
+    let out = null;
+    await withDash({}, async ({ postForm, askForCode, cookiesOf }) => {
+      const first = await askForCode({ phone });
+      const second = await askForCode({ phone });
+      assert.ok(first.nonce && second.nonce);
+      const res = await postForm('/dashboard/login/verify', { _dash: '1', code: '000000' }, { cookie: first.tryCookie });
+      out = { status: res.status, location: res.headers.get('location'), cookies: cookiesOf(res) };
+    });
+    return out;
+  };
+  const member = await run('0593296933');
+  const stranger = await run('0511111111');
+  assert.equal(member.location, '/dashboard/login?step=code&error=used');
+  assert.deepEqual(stranger, member);
+});
+
 test('guessing at the login is capped a minute at a time', async () => {
   await withDash({}, async ({ postForm, askForCode }) => {
     const { tryCookie } = await askForCode();

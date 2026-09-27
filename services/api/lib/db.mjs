@@ -114,6 +114,9 @@ const MIGRATIONS = [
   {
     // Team accounts (2026-09-27 design §3.1). `auth_challenges.user_id` is NULL for the
     // decoy challenge a number that is not on the team receives — see dashboard/auth.mjs.
+    // `auth_challenges.phone_key` is an HMAC of the number under a key that lives only in
+    // the running process (never stored), so every challenge for one number — real or
+    // decoy — can void its predecessors without the file holding a phone-derived value.
     // `auth_codes` stays in the file, unused: migrations here only ever add.
     // `phone_e164` (`users`, and `never_list` below) holds bare international digits
     // without '+', the same convention as `leads.phone_e164`.
@@ -134,9 +137,10 @@ const MIGRATIONS = [
       CREATE TABLE IF NOT EXISTS auth_challenges (
         challenge_id TEXT PRIMARY KEY, user_id TEXT, code_hash TEXT NOT NULL, nonce_hash TEXT NOT NULL UNIQUE,
         created INTEGER NOT NULL, expires INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
-        used INTEGER NOT NULL DEFAULT 0 CHECK (used IN (0,1))
+        used INTEGER NOT NULL DEFAULT 0 CHECK (used IN (0,1)), phone_key TEXT
       );
       CREATE INDEX IF NOT EXISTS auth_challenges_user ON auth_challenges(user_id);
+      CREATE INDEX IF NOT EXISTS auth_challenges_phone ON auth_challenges(phone_key);
       CREATE INDEX IF NOT EXISTS auth_challenges_expires ON auth_challenges(expires);
       ALTER TABLE auth_sessions ADD COLUMN user_id TEXT;
       CREATE INDEX IF NOT EXISTS auth_sessions_user ON auth_sessions(user_id);

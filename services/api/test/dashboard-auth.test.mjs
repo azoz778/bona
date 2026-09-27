@@ -134,7 +134,7 @@ test('deactivation ends a live session and voids a code in flight', async () => 
   const pending = await asked(h, '0500000001', '5.5.5.5');
   h.team.deactivateUser(h.staff.user_id);
   assert.equal(h.auth.check(session.token), null);
-  assert.deepEqual(h.auth.verify(pending.code, null, { nonce: pending.nonce }), { ok: false, error: 'no_request' });
+  assert.deepEqual(h.auth.verify(pending.code, null, { nonce: pending.nonce }), { ok: false, error: 'bad_code' }, 'void, and answering like a decoy');
   h.db.close();
 });
 
@@ -174,6 +174,17 @@ test('a failed send is logged and the login page still says "sent"', async () =>
   assert.equal(a.ok, true);
   assert.ok(h.logs.some((l) => l.evt === 'dash.code_send_failed' && l.reason === 'http_500'));
   h.db.close();
+});
+
+test('createAuth refuses to be built without a team store or a code sender', () => {
+  const db = openDb(':memory:');
+  const team = createTeam(db);
+  assert.throws(() => createAuth({ db, sendCode: async () => ({ ok: true }) }), /needs the team store/);
+  for (const sendCode of [undefined, null, 'send', {}]) {
+    assert.throws(() => createAuth({ db, team, sendCode }), { name: 'TypeError', message: /needs a sendCode function/ });
+  }
+  assert.doesNotThrow(() => createAuth({ db, team, sendCode: async () => ({ ok: true }) }));
+  db.close();
 });
 
 test('helpers: code shape, message, constant-time compare, cookies', () => {
@@ -252,6 +263,61 @@ test('one live challenge per person: a newer code voids the older one', async ()
   const c = await asked(h, '0500000001', '1.1.1.3');
   await asked(h, '0511111111', '1.1.1.4');
   assert.equal(h.auth.verify(c.code, null, { nonce: c.nonce }).ok, true);
+  h.db.close();
+});
+
+test('two codes then a wrong one on the first: a member, a stranger and a deactivated member answer alike', async () => {
+  const h = harness({ random: () => 482913 });
+  h.team.addUser({ name: 'Omar', phone: '0500000002', role: 'staff' });
+  h.team.deactivateUser(h.team.getUserByPhone('966500000002').user_id);
+  const answers = {};
+  let n = 0;
+  for (const [who, phone] of [['member', '0500000001'], ['stranger', '0511111111'], ['deactivated', '0500000002']]) {
+    const first = await asked(h, phone, `9.0.0.${n += 1}`);
+    const second = await asked(h, phone, `9.0.0.${n += 1}`);
+    answers[who] = [
+      h.auth.verify('000000', null, { nonce: first.nonce }),
+      h.auth.verify('000000', null, { nonce: second.nonce }),
+    ];
+    if (who === 'member') {
+      assert.ok(second.code, 'the member was sent a second code');
+      assert.equal(h.auth.verify(second.code, null, { nonce: second.nonce }).ok, true, "the member's newest code still works");
+    }
+  }
+  assert.deepEqual(answers.member, [{ ok: false, error: 'used' }, { ok: false, error: 'bad_code' }]);
+  assert.deepEqual(answers.stranger, answers.member, 'a stranger reads exactly like a member');
+  assert.deepEqual(answers.deactivated, answers.member, 'so does a deactivated member');
+  // A request for one number never touches another number's live challenge.
+  h.tick(60_000); // past the six-a-minute global cap
+  const mine = await asked(h, '0500000001', '9.0.1.1');
+  await asked(h, '0511111111', '9.0.1.2');
+  assert.equal(h.auth.verify(mine.code, null, { nonce: mine.nonce }).ok, true);
+  // Nothing phone-derived that could be brute-forced offline: the key is per process.
+  for (const row of h.db.db.prepare('SELECT phone_key FROM auth_challenges').all()) {
+    assert.match(row.phone_key, /^[0-9a-f]{64}$/);
+    for (const d of ['966500000001', '966511111111', '966500000002']) assert.notEqual(row.phone_key, sha256(d));
+  }
+  h.db.close();
+});
+
+test('an over-budget decoy voids the older real code, exactly as a new real code would', async () => {
+  const h = harness({ random: () => 482913 });
+  let last = null;
+  for (let i = 0; i < USER_CODES_PER_HOUR; i += 1) { last = await asked(h, '0500000001', `9.1.0.${i}`); assert.ok(last.msg); h.tick(4 * 60_000); }
+  const over = await asked(h, '0500000001', '9.1.1.1');
+  assert.equal(over.msg, null);
+  assert.deepEqual(h.auth.verify('482913', null, { nonce: last.nonce }), { ok: false, error: 'used' });
+  assert.deepEqual(h.auth.verify('482913', null, { nonce: over.nonce }), { ok: false, error: 'bad_code' });
+  h.db.close();
+});
+
+test('a code in flight when its member is deactivated then answers like a decoy', async () => {
+  const h = harness({ random: () => 482913 });
+  const pending = await asked(h, '0500000001');
+  const stranger = await asked(h, '0511111111', '9.2.0.1');
+  h.team.deactivateUser(h.staff.user_id);
+  assert.deepEqual(h.auth.verify('000000', null, { nonce: pending.nonce }), h.auth.verify('000000', null, { nonce: stranger.nonce }));
+  assert.deepEqual(h.auth.verify(pending.code, null, { nonce: pending.nonce }), { ok: false, error: 'bad_code' }, 'the right code no longer opens anything');
   h.db.close();
 });
 
