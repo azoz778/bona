@@ -11,16 +11,17 @@ import { createTeam } from '../lib/team.mjs';
 import { createAudit } from '../lib/audit.mjs';
 import {
   createAuth, COOKIE_NAME, TRY_COOKIE_NAME, parseCookies, hashEquals, generateCode, codeMessage,
-  PHONE_CODES, GLOBAL_PER_MIN, CODE_TTL_MS, MAX_CODE_ATTEMPTS,
+  PHONE_CODES, GLOBAL_PER_MIN, CODE_TTL_MS, MAX_CODE_ATTEMPTS, DAY_MS,
+  canonicalPhone, ipBucket, sendErrorLabel, USER_CODES_PER_HOUR, USER_CODES_PER_DAY,
 } from '../lib/dashboard/auth.mjs';
+import { normalisePhone } from '../lib/phone.mjs';
 
 const NOW = 1_790_500_000_000;
 const sha256 = (v) => crypto.createHash('sha256').update(String(v), 'utf8').digest('hex');
 const codeOf = (text) => /(\d{6})/.exec(text ?? '')?.[1] ?? null;
 
-function harness({ send = async () => ({ ok: true }), random = null } = {}) {
-  const db = openDb(':memory:');
-  let clock = NOW;
+function harness({ send = async () => ({ ok: true }), random = null, db = openDb(':memory:'), clockAt = NOW } = {}) {
+  let clock = clockAt;
   const team = createTeam(db, { now: () => clock });
   const owner = team.ensureOwner({ phone: '966593296933', name: 'Abdulaziz' });
   const staff = team.addUser({ name: 'Sara', phone: '0500000001', role: 'staff' });
@@ -36,6 +37,7 @@ function harness({ send = async () => ({ ok: true }), random = null } = {}) {
   return {
     db, team, audit, auth, owner, staff, sent, logs,
     tick: (ms) => { clock += ms; },
+    get clock() { return clock; },
     res: () => {
       const headers = {};
       return {
@@ -89,8 +91,8 @@ test('a code opens a session for its own person, in its own browser, once', asyn
   const h = harness();
   const a = await asked(h, '0500000001');
   assert.deepEqual(h.auth.verify(a.code, 'UA', { nonce: null }), { ok: false, error: 'no_request' });
-  const other = await asked(h, '0500000001', '3.3.3.3');
-  assert.deepEqual(h.auth.verify(a.code, 'UA', { nonce: other.nonce }).error, 'bad_code', "another browser's nonce does not open this code");
+  const stranger = await asked(h, '0511111111', '3.3.3.3');
+  assert.deepEqual(h.auth.verify(a.code, 'UA', { nonce: stranger.nonce }).error, 'bad_code', "another browser's nonce does not open this code");
   const ok = h.auth.verify(a.code, 'UA', { nonce: a.nonce });
   assert.equal(ok.ok, true);
   assert.equal(ok.user.user_id, h.staff.user_id);
@@ -186,6 +188,165 @@ test('helpers: code shape, message, constant-time compare, cookies', () => {
   h.auth.setCookie(res, 'f'.repeat(32));
   h.auth.setTryCookie(res, 'e'.repeat(32));
   assert.match(res.cookies[0], new RegExp(`^${COOKIE_NAME}=f{32}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000$`));
-  assert.match(res.cookies[1], new RegExp(`^${TRY_COOKIE_NAME}=e{32}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=600$`));
+  // The try cookie only ever goes back to /dashboard/login/{code,verify}.
+  assert.match(res.cookies[1], new RegExp(`^${TRY_COOKIE_NAME}=e{32}; HttpOnly; Secure; SameSite=Lax; Path=/dashboard/login; Max-Age=600$`));
+  const cleared = h.res();
+  h.auth.clearTryCookie(cleared);
+  assert.ok(cleared.cookies.some((c) => c.includes('Path=/dashboard/login;') && c.includes('Max-Age=0')));
+  assert.ok(cleared.cookies.some((c) => c.includes('Path=/;') && c.includes('Max-Age=0')), 'a pre-deploy Path=/ try cookie is cleared too');
+  h.db.close();
+});
+
+/* -------------------- security review fixes (Task 6 follow-up) -------------------- */
+
+const settle = () => new Promise((r) => setImmediate(r));
+
+test('member-only work starts after the answer: nothing audited or sent when requestCode resolves', async () => {
+  const h = harness();
+  const order = [];
+  const record = h.audit.record;
+  h.audit.record = (o) => { order.push('audit'); return record(o); };
+  const p = h.auth.requestCode({ phone: '0500000001', ip: '1.1.1.1' }).then((out) => { order.push('answered'); return out; });
+  order.push('sync-return');
+  const out = await p;
+  assert.equal(out.ok, true);
+  assert.deepEqual(order, ['sync-return', 'answered'], 'no member work in the synchronous or microtask phase');
+  assert.equal(h.audit.recent(5).length, 0);
+  assert.equal(h.sent.length, 0);
+  await settle(); await settle();
+  assert.deepEqual(order, ['sync-return', 'answered', 'audit']);
+  assert.equal(h.audit.recent(5)[0].action, 'code_request');
+  assert.equal(h.sent.length, 1);
+  await h.auth.flush();
+  h.db.close();
+});
+
+test('one canonical phone key: non-canonical spellings are refused or share a bucket', async () => {
+  for (const input of ['966593296933', '+966 59 329 6933', '0593296933', '593296933', '00966593296933', '٠٥٩٣٢٩٦٩٣٣', '441234567890']) {
+    const canon = canonicalPhone(input);
+    assert.ok(canon, input);
+    assert.equal(normalisePhone(canon), canon, `${input}: canonical form is a fixed point`);
+    assert.ok(!canon.startsWith('0'), input);
+  }
+  assert.equal(canonicalPhone('0000966593296933'), null);
+  assert.equal(canonicalPhone('00000593296933'), null);
+  const h = harness();
+  assert.deepEqual(await h.auth.requestCode({ phone: '0000966593296933', ip: '9.9.9.1' }), { ok: false, error: 'bad_phone' });
+  assert.deepEqual(await h.auth.requestCode({ phone: '00000593296933', ip: '9.9.9.2' }), { ok: false, error: 'bad_phone' });
+  // Every accepted spelling of the owner lands in the same per-phone bucket.
+  for (const [i, phone] of ['966593296933', '00966593296933', '0593296933'].entries()) {
+    assert.equal((await h.auth.requestCode({ phone, ip: `9.9.8.${i}` })).ok, true);
+  }
+  assert.deepEqual(await h.auth.requestCode({ phone: '+966593296933', ip: '9.9.7.1' }), { ok: false, error: 'rate_limited' });
+  await h.auth.flush();
+  h.db.close();
+});
+
+test('one live challenge per person: a newer code voids the older one', async () => {
+  const h = harness();
+  const a = await asked(h, '0500000001', '1.1.1.1');
+  const b = await asked(h, '0500000001', '1.1.1.2');
+  assert.deepEqual(h.auth.verify(a.code, null, { nonce: a.nonce }), { ok: false, error: 'used' });
+  assert.equal(h.auth.verify(b.code, null, { nonce: b.nonce }).ok, true);
+  // A stranger's request touches nobody's live challenge.
+  const c = await asked(h, '0500000001', '1.1.1.3');
+  await asked(h, '0511111111', '1.1.1.4');
+  assert.equal(h.auth.verify(c.code, null, { nonce: c.nonce }).ok, true);
+  h.db.close();
+});
+
+test('per-person code budget: over five an hour the answer is a decoy', async () => {
+  const h = harness({ random: () => 482913 });
+  for (let i = 0; i < USER_CODES_PER_HOUR; i += 1) {
+    assert.ok((await asked(h, '0500000001', `7.0.0.${i}`)).msg, `code ${i} sent`);
+    h.tick(4 * 60_000);
+  }
+  const over = await asked(h, '0500000001', '7.0.1.1');
+  assert.equal(over.ok, true);
+  assert.match(over.nonce, /^[0-9a-f]{32}$/);
+  assert.equal(over.msg, null, 'nothing sent over budget');
+  assert.deepEqual(h.auth.verify('482913', null, { nonce: over.nonce }), { ok: false, error: 'bad_code' });
+  h.db.close();
+});
+
+test('per-person code budget: the 11th code in a day is a decoy, and a restart keeps the count', async () => {
+  const db = openDb(':memory:');
+  const h = harness({ db, random: () => 482913 });
+  for (let i = 0; i < USER_CODES_PER_DAY; i += 1) {
+    assert.ok((await asked(h, '0500000001', `8.0.0.${i}`)).msg, `code ${i} sent`);
+    h.tick(13 * 60_000);
+  }
+  const over = await asked(h, '0500000001', '8.0.1.1');
+  assert.equal(over.msg, null, '11th in a day: no send');
+  assert.deepEqual(h.auth.verify('482913', null, { nonce: over.nonce }), { ok: false, error: 'bad_code' });
+  // A restart: a fresh createAuth on the same database (fresh in-memory limiters).
+  const sent = [];
+  const again = createAuth({
+    db, team: h.team, audit: h.audit, cfg: {}, now: () => h.clock, random: () => 482913,
+    sendCode: async (o) => { sent.push(o); return { ok: true }; },
+  });
+  const after = await again.requestCode({ phone: '0500000001', ip: '8.0.2.1' });
+  await again.flush();
+  assert.equal(after.ok, true);
+  assert.equal(sent.length, 0, 'the budget survived the restart');
+  // A day later the budget has refilled.
+  h.tick(DAY_MS);
+  const later = await again.requestCode({ phone: '0500000001', ip: '8.0.3.1' });
+  await again.flush();
+  assert.equal(sent.length, 1);
+  assert.equal(again.verify('482913', null, { nonce: later.nonce }).ok, true);
+  db.close();
+});
+
+test('expired challenges and sessions are pruned without a timer', async () => {
+  const h = harness();
+  const a = await asked(h, '0500000001', '6.0.0.1');
+  const session = h.auth.verify(a.code, null, { nonce: a.nonce });
+  assert.equal(session.ok, true);
+  h.tick(31 * DAY_MS);
+  await asked(h, '0511111111', '6.0.0.2');
+  const n = (t) => h.db.db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n;
+  assert.equal(n('auth_sessions'), 0, 'the expired session was pruned by a code request');
+  assert.equal(n('auth_challenges'), 1, 'only the fresh challenge remains');
+  // check() prunes too, at most once a minute, even for a token it has never seen.
+  const b = await asked(h, '0500000001', '6.0.0.3');
+  h.auth.verify(b.code, null, { nonce: b.nonce });
+  h.tick(31 * DAY_MS);
+  assert.equal(h.auth.check('a'.repeat(32)), null);
+  assert.equal(n('auth_sessions'), 0, 'check() pruned the expired session');
+  h.db.close();
+});
+
+test('send errors are logged by allowlisted label only', async () => {
+  assert.equal(sendErrorLabel('http_500'), 'http_500');
+  assert.equal(sendErrorLabel('sending_disabled'), 'sending_disabled');
+  assert.equal(sendErrorLabel('966500000001@s.whatsapp.net refused'), 'other');
+  assert.equal(sendErrorLabel(undefined), 'other');
+  const h = harness({ send: async () => ({ ok: false, error: 'boom 966500000001' }) });
+  await asked(h, '0500000001');
+  assert.ok(h.logs.some((l) => l.evt === 'dash.code_send_failed' && l.reason === 'other'));
+  const t = harness({ send: async () => { const e = new Error('966500000001'); e.code = '966500000001'; throw e; } });
+  await asked(t, '0500000001');
+  assert.ok(t.logs.some((l) => l.evt === 'dash.code_send_error' && l.error === 'other'));
+  assert.ok(!JSON.stringify(t.logs).includes('966500000001'));
+  h.db.close(); t.db.close();
+});
+
+test('IPv6 callers share an IP bucket per /64; IPv4-mapped addresses count as IPv4', async () => {
+  assert.equal(ipBucket('1.2.3.4'), '1.2.3.4');
+  assert.equal(ipBucket('::ffff:1.2.3.4'), '1.2.3.4');
+  assert.equal(ipBucket('2001:db8:0:1::1'), '2001:db8:0:1::/64');
+  assert.equal(ipBucket('2001:DB8:0:1:ffff:1:2:3'), '2001:db8:0:1::/64');
+  assert.equal(ipBucket('2001:db8::1'), '2001:db8:0:0::/64');
+  assert.equal(ipBucket('fe80::1%eth0'), 'fe80:0:0:0::/64');
+  assert.equal(ipBucket(undefined), 'unknown');
+  const h = harness();
+  for (let i = 0; i < 3; i += 1) assert.equal((await h.auth.requestCode({ phone: `05444444${10 + i}`, ip: `2001:db8:0:1::${i + 1}` })).ok, true);
+  assert.deepEqual(await h.auth.requestCode({ phone: '0544444420', ip: '2001:db8:0:1:ab::9' }), { ok: false, error: 'rate_limited' });
+  assert.equal((await h.auth.requestCode({ phone: '0544444421', ip: '2001:db8:0:2::1' })).ok, true);
+  h.tick(60_000);
+  for (let i = 0; i < 3; i += 1) assert.equal((await h.auth.requestCode({ phone: `05555555${10 + i}`, ip: '5.6.7.8' })).ok, true);
+  h.tick(60_000);
+  assert.deepEqual(await h.auth.requestCode({ phone: '0555555520', ip: '::ffff:5.6.7.8' }), { ok: false, error: 'rate_limited' });
   h.db.close();
 });
