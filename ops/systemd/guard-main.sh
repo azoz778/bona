@@ -7,7 +7,7 @@
 set -u
 tree="${1:-$HOME/bona-publish}"
 refuse() { echo "bona-ig-publish: refusing to run — $tree $*" >&2; exit 1; }
-head="$(git -C "$tree" rev-parse -q --verify HEAD 2>/dev/null)" || refuse "is not a git checkout (run ops/systemd/install.sh)"
+head="$(git -C "$tree" rev-parse -q --verify HEAD 2>/dev/null)" || refuse "is not a git checkout (run ops/systemd/install-daily.sh)"
 branch="$(git -C "$tree" symbolic-ref --short -q HEAD 2>/dev/null || echo detached)"
 want="$(git -C "$tree" rev-parse -q --verify refs/remotes/origin/main 2>/dev/null || true)"
 if [ "$branch" != "main" ] && { [ -z "$want" ] || [ "$head" != "$want" ]; }; then

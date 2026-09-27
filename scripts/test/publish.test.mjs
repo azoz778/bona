@@ -658,3 +658,11 @@ test('lock: one holder at a time; a LIVE holder is never taken over whatever its
  assert.equal(decide(e,ctx({forceId:e.id})).status,'deferred:review');
  assert.equal(decide(mk({reviewStatus:'approved'}),ctx()).status,'candidate');
  });
+
+test('live legacy sources refuse before making provider requests', async()=>{
+ const log=console.error;console.error=()=>{};
+ try{
+  assert.equal(await main(['--live'],{META_ACCESS_TOKEN:'test-not-real'}),1);
+  assert.equal(await main(['--live','--source','marketing/queue/queue.json'],{META_ACCESS_TOKEN:'test-not-real'}),1);
+ }finally{console.error=log}
+});

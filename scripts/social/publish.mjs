@@ -633,6 +633,9 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   // Under the timer an empty token must not quietly become a dry-run every 15 minutes.
   if (opts.live && !token) { console.error('error: META_ACCESS_TOKEN missing — --live refuses to run without a token (set it in ~/.secrets/bona-meta-graph.env, or drop --live for a dry-run)'); return 1; }
   const dryRun = opts.dryRun || !token;
+  if (!dryRun && [DEFAULTS.source, 'marketing/queue/queue.json'].some(p => path.resolve(ROOT, p) === path.resolve(ROOT, opts.source))) {
+    console.error('error: legacy publish source retired; use the reviewed daily publisher'); return 1;
+  }
   const mask = maskToken(token);
   const log = opts.json ? (s) => console.error(mask(s)) : (s) => console.log(mask(s));
   const r = await run({ ...opts, dryRun }, { now, token, igId: env.IG_BUSINESS_ID, log });

@@ -1,0 +1,13 @@
+{
+  "status": "approved",
+  "manifestSha256": "a2fba515956695b4545bdc0a602d56ab917ed50f6d0d8aec5ee87a7847574902",
+  "reviews": [
+    "claude-fable-5"
+  ],
+  "reviewEvidence": "marketing/daily/review.md",
+  "reviewEvidenceSha256": "e36485a887eaf470cc5edfd46470c905acd490a5054b266e2defa04e09fa67bb",
+  "reviewedAt": "2026-09-27T21:58:35.397580+00:00",
+  "authorization": "Owner authorized ongoing quality-controlled daily publishing on 2026-09-28; code/content/visual review passed.",
+  "visualReview": "24 JPEGs inspected in platform contact sheets; representative assets inspected full size, joined Arabic, no overflow; no property photography.",
+  "tests": "139 script tests passed; Astro build passed. Live publication not yet due."
+}

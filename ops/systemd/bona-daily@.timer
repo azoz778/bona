@@ -1,0 +1,10 @@
+[Unit]
+Description=Bona reviewed daily %i at 20:30 Riyadh with bounded retries
+[Timer]
+OnCalendar=*-*-* 20:30,45 Asia/Riyadh
+OnCalendar=*-*-* 21,22:00/15 Asia/Riyadh
+Persistent=true
+AccuracySec=15s
+Unit=bona-daily@%i.service
+[Install]
+WantedBy=timers.target
