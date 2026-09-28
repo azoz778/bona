@@ -333,3 +333,17 @@ test('the audit log records who did what, newest first, and refuses an unknown a
   assert.ok(AUDIT_ACTIONS.includes('stage'));
   s.close();
 });
+
+test('the audit log accepts the inbox actions, with a target and no text', () => {
+  const s = openDb(':memory:');
+  const audit = createAudit(s, { now: () => NOW });
+  for (const action of ['reply_sent', 'inbox_move', 'inbox_out', 'inbox_add', 'handler']) {
+    assert.ok(AUDIT_ACTIONS.includes(action), action);
+    audit.record({ userId: 'USR-1', action, target: 'LEAD-1', meta: action === 'handler' ? { to: 'USR-2' } : null });
+  }
+  const rows = audit.recent(10);
+  assert.deepEqual(rows.map((r) => r.action).sort(), ['handler', 'inbox_add', 'inbox_move', 'inbox_out', 'reply_sent']);
+  assert.deepEqual(rows.find((r) => r.action === 'handler').meta, { to: 'USR-2' });
+  assert.ok(rows.every((r) => r.target === 'LEAD-1'));
+  s.close();
+});

@@ -2,7 +2,8 @@
  * Who did what on the dashboard (2026-09-27 design §3.1). Append-only; never a code,
  * never message text. A write that fails to be audited is logged, not thrown: the
  * owner's action already happened, and refusing to show it would only hide it.
- * Phase 2 adds reply_sent, inbox_move, inbox_out, inbox_add and handler.
+ * The inbox actions carry no text and no number either: a reply is audited with its
+ * send status, a handler change with the user it went to.
  */
 import { newId } from './db.mjs';
 
@@ -11,6 +12,7 @@ export const AUDIT_ACTIONS = [
   'team_add', 'team_deactivate', 'team_reactivate', 'team_role',
   'never_add', 'never_remove', 'setting',
   'stage', 'note',
+  'reply_sent', 'inbox_move', 'inbox_out', 'inbox_add', 'handler',
 ];
 
 export function createAudit(store, { now = () => Date.now(), log = () => {} } = {}) {

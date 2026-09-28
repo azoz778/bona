@@ -430,6 +430,27 @@ footer{color:var(--t4);font-size:11.5px;padding:22px 0 6px;text-align:center}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:var(--t2);
 background:var(--l2);padding:1px 5px;border-radius:4px}
 
+/* ---- inbox: chat rows, and a thread that reads like WhatsApp ------
+   The client's bubbles sit on the left, everything sent from Bona's side
+   on the right. A reply still on its way, or one we are not sure went,
+   gets a dashed outline: WhatsApp has not confirmed it. */
+.rail a.it[href="/dashboard/inbox"] .c{color:#12100a;background:var(--gold);border-radius:99px;padding:0 6px;font-weight:600}
+.lr.ix{grid-template-columns:30px minmax(0,1fr)}
+a.lr.ix:hover{background:var(--l1)}
+.thread{display:flex;flex-direction:column;gap:8px;max-width:760px}
+.bub{align-self:flex-start;max-width:min(80%,34rem);padding:7px 11px 6px;border-radius:12px;
+background:var(--l2);border:1px solid var(--bd);overflow-wrap:anywhere}
+.bub.out{align-self:flex-end;background:var(--goldt);border-color:transparent}
+.bub.pend{background:transparent;border:1px dashed var(--bd2)}
+.bub .who{display:block;font-size:10.5px;font-weight:600;color:var(--t3);margin-bottom:2px}
+.bub .md{display:block;font-size:12px;color:var(--t4);font-style:italic}
+.bub .tx{white-space:pre-wrap;font-size:13.5px}
+.bub .at{display:block;margin-top:3px;font-size:10.5px;color:var(--t4);text-align:end;font-variant-numeric:tabular-nums}
+.bub .st{display:block;margin-top:2px;font-size:11.5px;color:var(--amber)}
+.bub .st.bad{color:var(--red)}
+.wgap{align-self:center;font-size:11.5px;color:var(--t4);padding:4px 11px;border:1px dashed var(--bd2);border-radius:99px}
+form.reply{display:grid;gap:8px;max-width:760px;margin-top:14px}
+
 /* ---- narrow: the rail becomes a top strip, content stacks ---------- */
 @media (max-width:1100px){
   .row2,.row3{grid-template-columns:minmax(0,1fr)}
@@ -453,6 +474,11 @@ background:var(--l2);padding:1px 5px;border-radius:4px}
   .lr .acts .btn{flex:1 1 auto}
   form.filters{grid-template-columns:minmax(0,1fr)}
 }
+/* A phone reads a chat full width: the list and the thread are two screens. */
+@media (max-width:720px){
+  .thread,form.reply{max-width:none}
+  .bub{max-width:90%}
+}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 `.trim();
 
@@ -461,6 +487,7 @@ background:var(--l2);padding:1px 5px;border-radius:4px}
  */
 export const NAV = [
   ['/dashboard', 'Desk', '<path d="M2 8h3l1.8-4.4L9.2 12l1.7-4H14"/>', 'Workspace'],
+  ['/dashboard/inbox', 'Inbox', '<path d="M2 9.2 3.9 3.3h8.2L14 9.2v3.5H2z"/><path d="M2 9.2h3.3l.9 1.6h3.6l.9-1.6H14"/>', 'Workspace'],
   ['/dashboard/leads', 'Leads', '<circle cx="8" cy="5.4" r="2.5"/><path d="M2.8 13.8c0-2.9 2.3-4.5 5.2-4.5s5.2 1.6 5.2 4.5"/>', 'Workspace'],
   ['/dashboard/listings', 'Listings', '<path d="M2.3 6.8 8 2.2l5.7 4.6v7H2.3z"/><path d="M6.3 13.8V9.3h3.4v4.5"/>', 'Workspace'],
   ['/dashboard/spend', 'Spend', '<path d="M8 1.8v12.4M11.2 4.3H6.5a2 2 0 0 0 0 4h3a2 2 0 0 1 0 4H4.4"/>', 'Marketing'],
@@ -526,7 +553,7 @@ export const STAGE_LABEL = {
   offer: 'Offer', negotiation: 'Negotiation', won: 'Won', lost: 'Lost',
 };
 /** Prototype-safe: `?stage=constructor` must not print a function. */
-const stageName = (s) => (typeof s === 'string' && Object.hasOwn(STAGE_LABEL, s)
+export const stageName = (s) => (typeof s === 'string' && Object.hasOwn(STAGE_LABEL, s)
   ? STAGE_LABEL[s]
   : (s ? String(s) : 'Unknown'));
 
@@ -572,9 +599,17 @@ export function layout({ title, body, active = null, chrome = true, counts = {},
   // or a sprite sheet from anywhere — including our own /img — is one more thing that
   // can fail to load. An inline path cannot.
   const entries = me?.role === 'owner' ? [...NAV, ...OWNER_NAV] : NAV;
+  // The Inbox count is the signed-in person's own unread messages. It rides on `me` so
+  // every page shows it without each route having to pass it; a page that passes its
+  // own Inbox count in `counts` still decides.
+  const unread = Number(me?.unread);
+  const railCounts = {
+    ...(Number.isFinite(unread) && unread > 0 ? { '/dashboard/inbox': unread } : {}),
+    ...(counts ?? {}),
+  };
   const items = entries.map(([href, label, icon, group]) => {
-    const c = counts && Object.hasOwn(counts, href) && Number.isFinite(Number(counts[href]))
-      ? `<span class="c">${esc(number(counts[href]))}</span>` : '';
+    const c = Object.hasOwn(railCounts, href) && Number.isFinite(Number(railCounts[href]))
+      ? `<span class="c">${esc(number(railCounts[href]))}</span>` : '';
     return { group, html: `<a class="it${href === active ? ' on' : ''}" href="${esc(href)}"` +
       `${href === active ? ' aria-current="page"' : ''}><svg class="i" viewBox="0 0 16 16" aria-hidden="true">${icon}</svg>${esc(label)}${c}</a>` };
   });
@@ -660,6 +695,17 @@ export const scrollTable = (head, rows, empty = 'Nothing yet.') =>
     ? `<div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`
     : `<p class="muted">${esc(empty)}</p>`);
 
+/**
+ * A write offered as one button: a plain form post with the hidden `_dash` marker every
+ * dashboard form carries (see routes.mjs). `action` is escaped here; a caller that puts
+ * an id in it encodes the id first, so the id stays one inert path segment.
+ */
+export const postButton = (action, label, fields = {}) =>
+  `<form method="post" action="${esc(action)}" style="display:inline;margin:0 .35rem 0 0">` +
+  '<input type="hidden" name="_dash" value="1">' +
+  Object.entries(fields).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('') +
+  `<button type="submit">${esc(label)}</button></form>`;
+
 /* ------------------------------------------------------------------ */
 /* Login                                                               */
 /* ------------------------------------------------------------------ */
@@ -694,6 +740,17 @@ export const MESSAGES = {
   bad_setting_value: 'That setting value is not allowed.',
   self_change: "You can't remove your own access — ask another owner.",
   owner_only: 'Only an owner can do that.',
+  stale: 'New activity since you opened this chat. Read it, then send again — your text is still in the box.',
+  lid_only: 'This chat has no phone number — reply from your phone.',
+  not_in_inbox: 'That chat is not in the Bona inbox.',
+  excluded: 'That number is on the team or the never-a-client list, so it is not a client chat.',
+  sending_disabled: 'Sending is off (Team page).',
+  send_uncertain: 'Not sure it went — check WhatsApp before you send it again.',
+  bad_text: 'A reply has to have some text, and at most 4,096 characters.',
+  bad_send_id: 'That reply form is out of date. Reload the chat and send again.',
+  bad_handler: 'A handler has to be an active member of the team, or nobody.',
+  reply_rate_limited: 'Too many messages from your number this minute. Wait a minute and send again.',
+  not_a_chat: 'That lead has no WhatsApp chat yet — it joins once they write on WhatsApp.',
 };
 
 /** A code the templates will render, or null. Anything unrecognised is nothing at all. */
@@ -1318,8 +1375,30 @@ const JOURNEY_LABEL = {
   note: (e) => `note — ${e.text}`,
 };
 
+/**
+ * Where a lead stands with the Bona inbox, in words. "Unsure" is the owner's call and
+ * only the owner sees the word (D9); to a team member, anything not in the inbox is
+ * simply not in it.
+ */
+function inboxLabel(lead, owner) {
+  if (lead.inbox_state === 'in') return lead.wa_jid || lead.wa_lid ? 'In the Bona inbox' : 'In the Bona inbox — no WhatsApp chat yet';
+  if (owner && lead.inbox_state === 'unsure') return 'Unsure — waiting for your decision';
+  if (owner && lead.inbox_state === 'out') return 'Not a client';
+  return 'Not in the Bona inbox';
+}
+
 export function leadDetailPage({ lead, journey, saved = null, error = null, now = Date.now(), me = null }) {
   const field = (k, v) => `<dt>${esc(k)}</dt><dd dir="auto">${esc(v ?? '—')}</dd>`;
+  const owner = me?.role === 'owner';
+  const state = lead.inbox_state ?? null;
+  const leadPath = encodeURIComponent(lead.lead_id);
+  // Only a chat can be opened; only an owner moves a lead in or out (D9). "Not a
+  // client" is offered while there is something to take out: in, or waiting on him.
+  const inboxActions = [
+    state === 'in' && (lead.wa_jid || lead.wa_lid) ? `<a class="btn pri" href="${esc(`/dashboard/inbox/${leadPath}`)}">Open chat</a>` : '',
+    owner && state !== 'in' ? postButton(`/v1/admin/inbox/${leadPath}/move`, 'Move to Bona inbox') : '',
+    owner && (state === 'in' || state === 'unsure') ? postButton(`/v1/admin/inbox/${leadPath}/out`, 'Not a client') : '',
+  ].join('');
   const responded = lead.first_inbound_ts && lead.first_reply_ts ? ago(lead.first_reply_ts - lead.first_inbound_ts) : '—';
 
   const items = journey.map((e) => {
@@ -1343,6 +1422,7 @@ ${banner}
     ${field('WhatsApp', lead.wa_jid ?? lead.wa_lid)}
     ${field('Language', lead.language)}
     ${field('Channel', lead.channel)}
+    ${field('Inbox', inboxLabel(lead, owner))}
     ${field('First reply', responded)}
   </dl></div>
   <div class="card"><h3>Attribution</h3><dl class="fields">
@@ -1365,6 +1445,10 @@ ${banner}
     ${field('District', lead.district)}
   </dl></div>
 </div>
+
+<h2>Bona inbox</h2>
+<p class="sub">${esc(inboxLabel(lead, owner))}</p>
+${inboxActions ? `<div class="acts" style="flex-wrap:wrap">${inboxActions}</div>` : ''}
 
 <h2>Notes</h2>
 <div class="card"><p dir="auto" style="white-space:pre-wrap;margin:0">${esc(lead.notes || '—')}</p></div>
