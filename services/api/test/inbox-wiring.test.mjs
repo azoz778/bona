@@ -22,8 +22,11 @@ const DAY = 86_400_000;
 const ENV = { EVOLUTION_API_URL: 'http://evo.test/', EVOLUTION_API_KEY: 'k', BONA_WA_INSTANCE: 'abdulaziz-personal' };
 const inventory = createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk' });
 
-/** createApp on an in-memory store with a pinned clock. `env` decides whether Evolution is "there". */
-function build({ env = {}, ...options } = {}) {
+/**
+ * createApp on an in-memory store with a pinned clock. `env` decides whether Evolution is
+ * "there"; `config` overrides the rest (`waPoll: true` builds the poller).
+ */
+function build({ env = {}, config = {}, ...options } = {}) {
   const db = options.db ?? openDb(':memory:');
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-inbox-wiring-'));
   const logs = [];
@@ -35,6 +38,7 @@ function build({ env = {}, ...options } = {}) {
       maxBodyBytes: 16 * 1024, chatRatePerMin: 30, tokenRatePerMin: 6, toolRatePerMin: 600, toolAuthFailRatePerMin: 10,
       allowQueryToken: false, maxChatsPerDay: 300, maxCallsPerDay: 60, maxTurnsPerSession: 40, dashCookieDays: 30,
       env, ids: {}, version: '1.0.0', trustedProxies: [],
+      ...config,
     },
     inventory, probeRetell: async () => 'ok', sendWhatsApp: async () => ({ ok: true }),
     log: (e) => logs.push(e), now: () => NOW,
@@ -124,6 +128,43 @@ test('a send the last process left pending is "uncertain" as soon as the app is 
     const row = h.app.inboxStore.getOutbox('SND-left-pending');
     assert.equal(row.status, 'uncertain', 'nobody knows whether it went, so it is never retried');
     assert.equal(row.error, 'interrupted');
+    assert.deepEqual(h.logs.filter((e) => e.evt === 'wa.send.interrupted'), [{ level: 'warn', evt: 'wa.send.interrupted', count: 1 }],
+      'said once, as a count: never the number or the text');
+  } finally {
+    await h.close();
+  }
+});
+
+test('the poller createApp builds stores a client\'s message in the inbox, reading through the one fetch', async () => {
+  const LEAD = 'LEAD-20260928-0000bbbb';
+  const JID = '966500000077@s.whatsapp.net';
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, where: body.where });
+    // The poller's window read gets one inbound message of the chat; any other read (none
+    // is expected: the chat is already in, so nothing joins) gets nothing.
+    const records = body.where?.messageTimestamp ? [{
+      key: { id: 'POLL-1', fromMe: false, remoteJid: JID }, pushName: null, messageType: 'conversation',
+      message: { conversation: 'is it still available?' }, messageTimestamp: Math.floor((NOW - 5_000) / 1000),
+    }] : [];
+    return { ok: true, status: 200, text: async () => JSON.stringify({ messages: { total: records.length, pages: 1, currentPage: 1, records } }) };
+  };
+  const h = build({ env: ENV, config: { waPoll: true }, fetchImpl });
+  try {
+    const { app, db } = h;
+    assert.ok(app.poller, 'BONA_WA_POLL on: the app has a poller');
+    db.insertLead({
+      lead_id: LEAD, created: NOW - DAY, updated: NOW - DAY, phone_e164: '966500000077', wa_jid: JID,
+      channel: 'whatsapp', match_method: 'ref', stage: 'new', stage_ts: NOW - DAY, inbox_state: 'in', inbox_since: NOW - DAY,
+    });
+
+    const tally = await app.poller.tick();
+    assert.equal(tally.stored, 1, 'the poller was handed the inbox: without it the message would be matched and dropped');
+    assert.deepEqual(app.inboxStore.messagesFor(LEAD).map((m) => m.key_id), ['POLL-1']);
+    assert.ok(calls.length >= 1);
+    assert.ok(calls.every((c) => c.url === 'http://evo.test/chat/findMessages/abdulaziz-personal'), 'every read through the fetch createApp was given');
+    assert.equal(calls[0].where.messageTimestamp.lte, new Date(NOW).toISOString(), 'on the clock createApp was given');
   } finally {
     await h.close();
   }
@@ -211,7 +252,7 @@ test('the daily upkeep: old transcripts and code rows go, stale sends become unc
     assert.equal(app.inboxStore.hasMessages('LEAD-recent'), true);
     assert.equal(app.inboxStore.getOutbox('SND-code-three-days'), null);
     assert.ok(app.inboxStore.getOutbox('SND-code-one-day'), 'still inside the rolling day the cap counts');
-    assert.ok(app.inboxStore.getOutbox('SND-staff-three-days'), 'only login-code rows are pruned');
+    assert.ok(app.inboxStore.getOutbox('SND-staff-three-days'), 'a staff send that still belongs to a chat stays');
     assert.equal(app.inboxStore.getOutbox('SND-stale').status, 'uncertain');
     assert.equal(app.inboxStore.getOutbox('SND-stale').error, 'interrupted');
     assert.equal(app.inboxStore.getOutbox('SND-fresh').status, 'pending', 'a send still inside its two minutes is left alone');
@@ -284,6 +325,78 @@ test('the upkeep takes a colleague\'s or a never-list number\'s chat out of the 
     const again = await app.inboxMaintenance();
     assert.equal(again.excludedOut, 0);
     assert.equal(h.logs.filter((e) => e.evt === 'inbox.excluded_out').length, 1);
+  } finally {
+    await h.close();
+  }
+});
+
+test('upkeep that fails is one log line that names the kind of failure, never its message, and the next run still runs', async () => {
+  let fail = null;
+  const backfill = {
+    configured: true,
+    phoneJidOf: () => null,
+    history: async () => { if (fail) throw fail; return { stored: 0, scanned: 0, truncated: false }; },
+    refresh: async () => ({ stored: 0, scanned: 0, truncated: false }),
+  };
+  const h = build({ backfill });
+  try {
+    const { app, db } = h;
+    db.insertLead({
+      lead_id: 'LEAD-empty', created: NOW - DAY, updated: NOW - DAY, phone_e164: '966500000077', wa_jid: '966500000077@s.whatsapp.net',
+      channel: 'whatsapp', match_method: 'ref', stage: 'new', stage_ts: NOW - DAY, inbox_state: 'in', inbox_since: NOW - DAY,
+    });
+    // An error message can carry a jid; its name and code are logged only in shapes that cannot.
+    fail = Object.assign(new TypeError('no chat for 966500000077@s.whatsapp.net'), { code: 'ERR_SQLITE_ERROR' });
+    assert.deepEqual(await app.inboxMaintenance(), { error: 'failed' });
+    fail = Object.assign(new Error('boom'), { name: 'Chat966500000077', code: '966500000077' });
+    assert.deepEqual(await app.inboxMaintenance(), { error: 'failed' });
+    assert.deepEqual(h.logs.filter((e) => e.evt === 'inbox.maintenance_failed'), [
+      { level: 'error', evt: 'inbox.maintenance_failed', name: 'TypeError', code: 'ERR_SQLITE_ERROR' },
+      { level: 'error', evt: 'inbox.maintenance_failed', name: null, code: null },
+    ]);
+    assert.ok(!JSON.stringify(h.logs).includes('966500000077'), 'no number, in the message, the name or the code');
+
+    fail = null;
+    assert.equal((await app.inboxMaintenance()).caughtUp, 1, 'a failed run does not leave the upkeep "running"');
+  } finally {
+    await h.close();
+  }
+});
+
+test('upkeep never rejects, even when the logger throws while it reports a failure', async () => {
+  const backfill = {
+    configured: true,
+    phoneJidOf: () => null,
+    history: async () => { throw new Error('read failed'); },
+    refresh: async () => ({ stored: 0, scanned: 0, truncated: false }),
+  };
+  const log = (e) => { if (String(e?.evt).startsWith('inbox.')) throw new Error('log sink down'); };
+  const h = build({ backfill, log });
+  try {
+    h.db.insertLead({
+      lead_id: 'LEAD-empty', created: NOW - DAY, updated: NOW - DAY, phone_e164: '966500000077', wa_jid: '966500000077@s.whatsapp.net',
+      channel: 'whatsapp', match_method: 'ref', stage: 'new', stage_ts: NOW - DAY, inbox_state: 'in', inbox_since: NOW - DAY,
+    });
+    assert.deepEqual(await h.app.inboxMaintenance(), { error: 'failed' }, 'resolved, not rejected: the server calls it fire-and-forget');
+  } finally {
+    await h.close();
+  }
+});
+
+test('without Evolution the upkeep still runs its local steps, and skips the catch-up without a word about it', async () => {
+  const h = build();
+  try {
+    const { app, db } = h;
+    assert.equal(app.backfill.configured, false);
+    db.insertLead({
+      lead_id: 'LEAD-empty', created: NOW - DAY, updated: NOW - DAY, phone_e164: '966500000077', wa_jid: '966500000077@s.whatsapp.net',
+      channel: 'whatsapp', match_method: 'ref', stage: 'new', stage_ts: NOW - DAY, inbox_state: 'in', inbox_since: NOW - DAY,
+    });
+    const counts = await app.inboxMaintenance();
+    assert.equal(counts.caughtUp, 0);
+    assert.equal(counts.caughtUpStored, 0);
+    assert.equal(h.logs.some((e) => e.evt === 'inbox.catchup'), false, 'no catch-up line when there is nothing to read from');
+    assert.deepEqual(h.logs.find((e) => e.evt === 'inbox.maintenance'), { evt: 'inbox.maintenance', ...counts });
   } finally {
     await h.close();
   }

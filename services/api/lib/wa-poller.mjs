@@ -257,6 +257,8 @@ const NO_EXCLUSIONS = () => false;
  *        true for a team member's number (active or not) or a never-a-client number.
  *        Omitted by older wiring and by tests that predate team accounts — the poller
  *        then excludes nothing, exactly as before.
+ * @param {typeof globalThis.fetch} [o.fetchImpl] what the default reader goes out through;
+ *        left undefined, `findMessagesPage` falls back to the global fetch
  * @param {(obj: object) => void} [o.log]
  * @param {() => number} [o.now]
  * @param {ReturnType<import('./inbox/store.mjs').createInboxStore>} [o.inboxStore]
@@ -269,7 +271,7 @@ const NO_EXCLUSIONS = () => false;
  */
 export function createPoller({
   db, cfg = {}, findMessages = null, sendWhatsApp = null, isExcluded = NO_EXCLUSIONS, log = () => {}, now = () => Date.now(),
-  inboxStore = null, ingest = null, backfill = null,
+  inboxStore = null, ingest = null, backfill = null, fetchImpl = undefined,
 } = {}) {
   // `createIngest()` hands back `{ ingest }`; the bare function is accepted as well. Every
   // other shape is refused here rather than read as "no inbox": a wiring slip that passes
@@ -289,7 +291,7 @@ export function createPoller({
   // any pairing has been learned.
   const teamWired = isExcluded !== NO_EXCLUSIONS;
   const find = findMessages ?? (({ gte, lte }) => readWindow({
-    baseUrl: wa.baseUrl, apiKey: wa.apiKey, instance, gte, lte, offset: PAGE_SIZE, maxPages: MAX_PAGES,
+    baseUrl: wa.baseUrl, apiKey: wa.apiKey, instance, gte, lte, offset: PAGE_SIZE, maxPages: MAX_PAGES, fetchImpl,
   }));
 
   let timer = null;
