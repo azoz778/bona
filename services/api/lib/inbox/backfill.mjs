@@ -20,7 +20,14 @@
  * a phone number sits under the phone jid itself. So one chat is three questions —
  * `remoteJidAlt` = phone jid, `remoteJid` = phone jid, `remoteJid` = lid — de-duplicated by
  * message id. The lid question is asked last, from a fresh read of the lead: the first two
- * can teach a lead its lid.
+ * can teach a lead its lid. What the two phone questions bring is stored together, oldest
+ * first, before the lid question is asked; what only the lid question brings follows it.
+ *
+ * Only a record that answers the question asked is kept (amendment A9). Evolution applies
+ * the key filter today, but a server that stops applying it — an upgrade that renames
+ * `remoteJidAlt`, a proxy or a cache — would otherwise file every private chat on the
+ * owner's personal WhatsApp inside the window under this one client's thread, for the whole
+ * team to read for five years. Such records are counted and logged, never stored.
  *
  * Read-only, like lib/evolution.mjs: it only ever asks `POST /chat/findMessages`. What is
  * stored is decided by lib/inbox/ingest.mjs, record by record. A read that fails never
@@ -66,13 +73,35 @@ export function phoneJidOf(lead) {
   return PHONE_RE.test(phone) ? `${phone}@s.whatsapp.net` : null;
 }
 
-/** What a failed read says about itself: a status or a kind of failure, never an error message — one could carry a jid. */
+/**
+ * What a failed read says about itself: a status or a kind of failure, never an error
+ * message — one could carry a jid. The kind comes first: lib/evolution.mjs throws
+ * `failed: timeout` / `failed: network` with the 2xx status when a body breaks off while it
+ * is read, and that is a timeout or a network failure, not an HTTP one.
+ */
 function errorCode(err) {
   if (err instanceof EvolutionError) {
-    if (err.status) return `http_${err.status}`;
-    return /timeout/.test(String(err.message)) ? 'timeout' : 'network';
+    const kind = / failed: (timeout|network)$/.exec(String(err.message))?.[1];
+    if (kind) return kind;
+    return err.status ? `http_${err.status}` : 'network';
   }
   return 'failed';
+}
+
+/** The error names worth logging: the kinds this code meets. Any other name is dropped — an injected error's name could carry anything. */
+const LOGGED_ERROR_NAMES = new Set([
+  'Error', 'EvolutionError', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'SqliteError', 'AbortError', 'TimeoutError',
+]);
+const loggableName = (err) => (typeof err?.name === 'string' && LOGGED_ERROR_NAMES.has(err.name) ? err.name : null);
+
+/**
+ * Whether a record answers the question asked. A `remoteJidAlt` question also takes a record
+ * filed under that jid itself: the normaliser drops an alt equal to the jid, so such a
+ * record has no alt to compare, and it is the same chat.
+ */
+function answers(key, rec) {
+  if (typeof key.remoteJidAlt === 'string') return rec.jidAlt === key.remoteJidAlt || rec.jid === key.remoteJidAlt;
+  return rec.jid === key.remoteJid;
 }
 
 /**
@@ -102,8 +131,13 @@ export function createBackfill({
   /** lead_id → when it was last refreshed. A Map keeps insertion order, so the first key is the stalest. */
   const refreshedAt = new Map();
 
+  /** A logger that throws never breaks a read, nor the promise that it never throws. */
+  function note(entry) {
+    try { log(entry); } catch { /* the read goes on */ }
+  }
+
   function failed(leadId, error, name = null) {
-    log({ level: 'warn', evt: 'inbox.backfill.failed', leadId, error, ...(name ? { name } : {}) });
+    note({ level: 'warn', evt: 'inbox.backfill.failed', leadId, error, ...(name ? { name } : {}) });
     return { error };
   }
 
@@ -120,17 +154,20 @@ export function createBackfill({
   /**
    * The three questions for one chat, each paged newest-first inside `time` (the
    * `messageTimestamp` window every question carries). With a `deadline` (a refresh), each
-   * question waits at most what is left of it, and none starts once it has passed: the
-   * tally then says `partial`.
+   * question waits at most what is left of it, and none starts once it has passed; a
+   * question cut off by its own timeout is dropped the same way. The tally then says
+   * `partial`, and the questions still inside the budget are asked.
    */
   async function readChat(lead, { time, offset, maxPages, noteTruncation, deadline = null }) {
     const leadId = lead.lead_id;
     const seen = new Set();
     const tally = { stored: 0, scanned: 0, truncated: false };
 
+    /** One question, paged: the new records that answer it, as they came. */
     async function ask(clause, key) {
       const where = { key, messageTimestamp: time };
       const batch = [];
+      let foreign = 0;
       for (let page = 1; page <= maxPages; page += 1) {
         let query = { where, page, offset };
         if (deadline !== null) {
@@ -141,11 +178,26 @@ export function createBackfill({
           }
           query = { ...query, timeoutMs: Math.min(left, REFRESH_REQUEST_MS) };
         }
-        const answer = await read(query);
+        let answer;
+        try {
+          answer = await read(query);
+        } catch (err) {
+          // Out of time is what the budget is for: the read is partial, not failed (A2).
+          // Anything else, and any timeout on a history read, fails the read.
+          if (deadline === null || errorCode(err) !== 'timeout') throw err;
+          tally.partial = true;
+          break;
+        }
         const records = Array.isArray(answer) ? answer : (Array.isArray(answer?.records) ? answer.records : []);
         tally.scanned += records.length;
         for (const rec of records) {
-          if (!rec?.id || seen.has(rec.id) || isGroupOrBroadcast(rec.jid)) continue;
+          if (!rec?.id || isGroupOrBroadcast(rec.jid)) continue;
+          // Another chat's record, however it got here, is never filed under this lead (A9).
+          if (!answers(key, rec)) {
+            foreign += 1;
+            continue;
+          }
+          if (seen.has(rec.id)) continue;
           seen.add(rec.id);
           batch.push(rec);
         }
@@ -157,15 +209,21 @@ export function createBackfill({
         if (page === maxPages) {
           tally.truncated = true;
           if (noteTruncation) {
-            log({
+            note({
               level: 'warn', evt: 'inbox.backfill.truncated', leadId, clause, pages,
               total: Number.isFinite(answer?.total) ? answer.total : null, maxPages,
             });
           }
         }
       }
-      // Oldest first, the order they happened in — like the poller.
-      for (const rec of oldestFirst(batch)) {
+      // Counts only: the moment an Evolution upgrade stops applying a filter shows here.
+      if (foreign > 0) note({ level: 'warn', evt: 'inbox.backfill.foreign', leadId, clause, count: foreign });
+      return batch;
+    }
+
+    /** Oldest first, the order they happened in — like the poller. */
+    async function store(records) {
+      for (const rec of oldestFirst(records)) {
         const out = await ingest(db.getLead(leadId), rec);
         if (out?.stored && out.inserted) tally.stored += 1;
       }
@@ -173,12 +231,20 @@ export function createBackfill({
 
     const phoneJid = phoneJidOf(lead);
     if (phoneJid) {
-      await ask('phone_alt', { remoteJidAlt: phoneJid });
-      await ask('phone', { remoteJid: phoneJid });
+      // Both phone questions, then stored together: what the owner typed (under the lid, the
+      // phone as alt) and what the API sent (under the phone jid) interleave, and ingest
+      // matches an outbox row and picks the handler by what it sees first. What the first
+      // question brought is stored even when the second fails.
+      const found = await ask('phone_alt', { remoteJidAlt: phoneJid });
+      try {
+        found.push(...await ask('phone', { remoteJid: phoneJid }));
+      } finally {
+        await store(found);
+      }
     }
     // Read again: the two questions above may have taught this lead its lid.
     const lid = db.getLead(leadId)?.wa_lid ?? null;
-    if (isLid(lid)) await ask('lid', { remoteJid: lid });
+    if (isLid(lid)) await store(await ask('lid', { remoteJid: lid }));
     return tally;
   }
 
@@ -189,16 +255,17 @@ export function createBackfill({
   async function history(lead, { sinceTs, untilTs = now(), maxPages = BACKFILL_MAX_PAGES } = {}) {
     if (!configured) return skipped('not_configured');
     const leadId = lead?.lead_id ?? null;
-    if (!Number.isFinite(sinceTs) || !Number.isFinite(untilTs)) return failed(leadId, 'bad_window');
+    if (!Number.isFinite(sinceTs) || !Number.isFinite(untilTs) || sinceTs > untilTs) return failed(leadId, 'bad_window');
     try {
       const { lead: current, skip } = inboxLead(leadId);
       if (skip) return skip;
-      const cap = Math.max(1, Math.trunc(Number(maxPages)) || BACKFILL_MAX_PAGES);
+      // Fewer pages may be asked for, never more: anything but a whole number from 1 reads the cap.
+      const cap = Number.isInteger(maxPages) && maxPages >= 1 ? Math.min(maxPages, BACKFILL_MAX_PAGES) : BACKFILL_MAX_PAGES;
       return await readChat(current, {
         time: { gte: iso(sinceTs), lte: iso(untilTs) }, offset: PAGE_SIZE, maxPages: cap, noteTruncation: true,
       });
     } catch (err) {
-      return failed(leadId, errorCode(err), err?.name ?? null);
+      return failed(leadId, errorCode(err), loggableName(err));
     }
   }
 
@@ -211,8 +278,11 @@ export function createBackfill({
    *
    * Bounded (A2): the thread page and the reply right after it both ask, so the same chat
    * is not read again within `minIntervalMs`; and the read keeps to `budgetMs`, each question
-   * waiting at most 2.5 s or what is left. The time is noted before the read, so a failing
-   * Evolution is not asked again on every click either. Never throws.
+   * waiting at most 2.5 s or what is left. A question that runs out of its time — the reader
+   * aborts it and throws a timeout — makes the result `partial`, like a spent budget, and
+   * keeps what the questions before it stored; any other failure is `{ error }`. The time is
+   * noted before the read, so a failing Evolution is not asked again on every click either.
+   * Never throws.
    * @returns {Promise<{ stored: number, scanned: number, truncated: boolean, partial?: true, skipped?: string }
    *          | { skipped: 'recent' } | { error: string }>}
    */
@@ -232,10 +302,10 @@ export function createBackfill({
       const out = await readChat(current, {
         time: { gte: iso(floor), lte: iso(t) }, offset: REFRESH_LIMIT, maxPages: 1, noteTruncation: false, deadline: t + budgetMs,
       });
-      if (out.partial) log({ level: 'warn', evt: 'inbox.refresh.partial', leadId, budgetMs });
+      if (out.partial) note({ level: 'warn', evt: 'inbox.refresh.partial', leadId, budgetMs });
       return out;
     } catch (err) {
-      return failed(leadId, errorCode(err), err?.name ?? null);
+      return failed(leadId, errorCode(err), loggableName(err));
     }
   }
 
