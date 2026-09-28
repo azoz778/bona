@@ -35,7 +35,13 @@ import { createAuth } from './auth.mjs';
 import { createTiktokAccounts, AccountsError } from '../tiktok-accounts.mjs';
 import { tiktokAccountsPage, tiktokContinuePage, validateTiktokDraft } from './render-tiktok.mjs';
 import { teamPage } from './render-team.mjs';
-import { TeamError } from '../team.mjs';
+import { inboxPage, unsurePage, threadPage, INBOX_OK } from './render-inbox.mjs';
+import { TeamError, isExcludedLead } from '../team.mjs';
+import { createOrMergeLead } from '../leads.mjs';
+import { normalisePhone } from '../phone.mjs';
+import { randomId } from '../store.mjs';
+import { replyJidFor } from '../wa-send.mjs';
+import { OWNER_HISTORY_MS } from '../inbox/backfill.mjs';
 import {
   knownError,
   loginPage, logoutPage, overviewPage, leadsPage, leadDetailPage, listingsPage, spendPage, integrationsPage, messagePage,
@@ -87,6 +93,15 @@ const posInt = (v) => {
   const n = Number(v);
   return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
 };
+/**
+ * The reply form's `seen_ts`: digits from a form, a number from JSON. Anything else is
+ * NaN, which the sender reads as "cannot tell what you saw" and holds as stale.
+ */
+const asTs = (v) => {
+  if (typeof v === 'number') return v;
+  const s = typeof v === 'string' ? v.trim() : '';
+  return /^\d{1,16}$/.test(s) ? Number(s) : NaN;
+};
 
 /** Read a body with a hard cap; an oversized one is refused rather than buffered. */
 export function readBody(req, maxBytes) {
@@ -119,11 +134,15 @@ export function readBody(req, maxBytes) {
  * @param {ReturnType<import('../team.mjs').createTeam>} o.team   who may log in, and the Team page's data
  * @param {ReturnType<import('../audit.mjs').createAudit>} [o.audit]
  * @param {Function} [o.sendCode]                     the shared sender's `sendTo`, for login codes
+ * @param {ReturnType<import('../inbox/store.mjs').createInboxStore>} [o.inbox]     the Bona inbox; without it the inbox pages are 404
+ * @param {ReturnType<import('../wa-send.mjs').createSender>} [o.sender]             the one sender; its `reply` answers a chat
+ * @param {ReturnType<import('../inbox/backfill.mjs').createBackfill>} [o.backfill]  per-chat Evolution reads: refresh, join history
  */
 export function createDashboardRoutes({
   db, cfg = {}, inventory = null, fanout = null, app = null,
   sendWhatsApp = null, probeRetell = null,
   team = null, audit = null, sendCode = null,
+  inbox = null, sender = null, backfill = null,
   auth = null, stats = null, tiktokAccounts = null, log = () => {}, now = () => Date.now(),
 } = {}) {
   const statistics = stats ?? createStats({ db, now });
@@ -706,11 +725,26 @@ export function createDashboardRoutes({
     }
   }
 
+  /**
+   * A number that has just become a colleague's or a never-list one is never a client
+   * (§3.5, P2-7): the chat stored under it, if any, leaves the inbox and its transcript
+   * goes now, not at the next daily upkeep. Audited by lead id only. Built without the
+   * inbox (older tests, tools), there is nothing stored to take out.
+   */
+  function leaveInboxFor(digits, me) {
+    if (!inbox || !digits) return;
+    const lead = db.getLeadByPhone(digits) ?? db.getLeadByJid(`${digits}@s.whatsapp.net`);
+    if (!lead || lead.inbox_state === 'out') return;
+    inbox.leaveInbox(lead.lead_id);
+    audit?.record({ userId: me.user_id, action: 'inbox_out', target: lead.lead_id });
+  }
+
   function addPerson(ctx) {
     const { fields, me } = ctx;
     return teamWrite(ctx, () => {
       const u = team.addUser({ name: asText(fields.name), phone: asText(fields.phone), role: fields.role === 'owner' ? 'owner' : 'staff' });
       audit?.record({ userId: me.user_id, action: 'team_add', target: u.user_id, meta: { role: u.role } });
+      leaveInboxFor(u.phone_e164, me);
     }, 'added');
   }
 
@@ -757,8 +791,9 @@ export function createDashboardRoutes({
       }, 'never_removed');
     }
     return teamWrite(ctx, () => {
-      team.addNever({ phone: asText(fields.phone), note: asText(fields.note), by: me.user_id });
+      const row = team.addNever({ phone: asText(fields.phone), note: asText(fields.note), by: me.user_id });
       audit?.record({ userId: me.user_id, action: 'never_add' });
+      leaveInboxFor(row.phone_e164, me);
     }, 'never_added');
   }
 
@@ -777,12 +812,251 @@ export function createDashboardRoutes({
     }, 'setting');
   }
 
+  /* -------------------- the Bona inbox -------------------- */
+  //
+  // Phase 2 of the 2026-09-27 design (§4). Three rules hold on every route here; the
+  // sender (lib/wa-send.mjs `reply`) checks the send-side ones again on its own:
+  //
+  //   1. A chat can be read or answered only while it is `in`, has a WhatsApp jid or lid
+  //      (P2-1), and its number is neither a team member's nor on the never list (§3.5,
+  //      P2-7). Anything else is the same 404, so no page tells anyone which numbers are
+  //      guesses, private, or colleagues.
+  //   2. Message text stays on the page it was typed on. A refused reply is drawn again
+  //      with the words still in the box (P2-9); a redirect, the audit log and the
+  //      process log carry ids and outcomes — never words, never numbers.
+  //   3. The Unsure list, Move, Not a client and Add by phone are the owner's (D9).
+
+  /** A colleague's or a never-list number, however the lead row holds it (lib/team.mjs). */
+  const excludedLead = (lead) => isExcludedLead(team, db, lead);
+
+  /** Rule 1: the one test every inbox read and write goes through first. */
+  const openChat = (lead) => Boolean(lead && lead.inbox_state === 'in' && (lead.wa_jid || lead.wa_lid) && !excludedLead(lead));
+
+  /**
+   * The signed-in person as a page draws them: their row plus `unread`, the Inbox badge.
+   * Summed over the very rows the inbox list shows, so the badge never counts a chat
+   * rule 1 hides (the store's `unreadTotal` knows nothing of the team or the never list).
+   * Unread chats sort first, so the list's cap only ever leaves out chats that add 0.
+   * Built without the inbox (older tests, tools), the row stays as it was. A count that
+   * fails is a missing badge, never a page that will not open.
+   */
+  function withUnread(user) {
+    if (!inbox) return user;
+    try {
+      const rows = inbox.listInbox({ userId: user.user_id, userCreated: user.created ?? 0, limit: 1000 }).filter((l) => !excludedLead(l));
+      return { ...user, unread: rows.reduce((n, r) => n + (Number(r.unread) || 0), 0) };
+    } catch (err) {
+      log({ level: 'warn', evt: 'dash.unread_failed', error: String(err?.message ?? err).slice(0, 200) });
+      return { ...user, unread: 0 };
+    }
+  }
+
+  /** `?ok=` codes the inbox pages know; own properties only, like `knownError`. */
+  const inboxOk = (v) => (typeof v === 'string' && Object.hasOwn(INBOX_OK, v) ? v : null);
+  const noSuchPage = (res, me) => sendHtml(res, 404, messagePage({ title: 'Not found', message: 'There is no such page.', me }));
+  const notInInbox = (res, me) => sendHtml(res, 404, messagePage({ title: 'Not in the inbox', message: 'That chat is not in the Bona inbox.', me }));
+  /** Rule 1's refusal for both callers: a form gets the page, JSON gets the code. */
+  const refuseChat = (res, form, me) => (form ? notInInbox(res, withUnread(me)) : sendJson(res, 404, { error: 'not_in_inbox' }));
+  /** One reply form's id: 24 hex characters, inside wa-send's SEND_ID_RE. */
+  const newSendId = () => randomId(12);
+
+  /**
+   * Fetch the chat from WhatsApp before it is drawn or answered (P2-10), so a reply is
+   * checked against what is really there rather than the last poll. The backfill bounds
+   * it (amendment A2) and promises never to throw; this catch is for one that breaks the
+   * promise. Either way a slow Evolution leaves the page with what is already stored.
+   */
+  async function refreshChat(lead) {
+    if (!backfill) return;
+    try {
+      await backfill.refresh(lead);
+    } catch (err) {
+      log({ level: 'warn', evt: 'dash.refresh_failed', leadId: lead.lead_id, error: String(err?.message ?? err).slice(0, 200) });
+    }
+  }
+
+  /** The owner vouched for this chat, so it brings its last 30 days (design §4.1). */
+  async function joinHistory(leadId, t) {
+    if (!backfill) return;
+    try {
+      await backfill.history(db.getLead(leadId), { sinceTs: t - OWNER_HISTORY_MS, untilTs: t });
+    } catch (err) {
+      log({ level: 'warn', evt: 'dash.history_failed', leadId, error: String(err?.message ?? err).slice(0, 200) });
+    }
+  }
+
+  /**
+   * Draw one chat and mark it read — up to the newest message on the page, never "now":
+   * a message the poller stores a moment later with an earlier WhatsApp timestamp must
+   * still count as unread. `seenTs` rides in the form for the sender's stale-view guard.
+   */
+  function renderThread(res, { status = 200, user, lead, draft = '', ok = null, error = null }) {
+    const seenTs = inbox.newestTs(lead.lead_id) ?? 0;
+    if (seenTs) inbox.markRead(user.user_id, lead.lead_id, seenTs);
+    return sendHtml(res, status, threadPage({
+      me: withUnread(user),
+      lead,
+      messages: inbox.messagesFor(lead.lead_id),
+      gaps: inbox.gapsFor(lead.lead_id),
+      outbox: inbox.openOutboxFor(lead.lead_id),
+      // Everyone, not only the active: a reply keeps its author's name after they leave.
+      // threadPage offers only active people as handlers.
+      users: team.listUsers(),
+      sendId: newSendId(),
+      seenTs,
+      sendingEnabled: team.sendingEnabled(),
+      canReply: replyJidFor(lead) !== null,
+      draft,
+      ok: inboxOk(ok),
+      error: knownError(error),
+      now: now(),
+    }));
+  }
+
+  function inboxList({ res, url, me }) {
+    if (!inbox) return noSuchPage(res, me);
+    const ok = inboxOk(url.searchParams.get('ok'));
+    const error = knownError(url.searchParams.get('error'));
+    if (url.searchParams.get('tab') === 'unsure') {
+      if (me.role !== 'owner') return sendHtml(res, 403, messagePage({ title: 'Owners only', message: 'Only an owner can see the Unsure list.', me }));
+      return sendHtml(res, 200, unsurePage({ me, rows: inbox.listUnsure().filter((l) => !excludedLead(l)), ok, error, now: now() }));
+    }
+    return sendHtml(res, 200, inboxPage({
+      me,
+      rows: inbox.listInbox({ userId: me.user_id, userCreated: me.created ?? 0 }).filter((l) => !excludedLead(l)),
+      // Counted from the rows the Unsure list shows, never the store's raw `countUnsure`.
+      unsureCount: me.role === 'owner' ? inbox.listUnsure({ limit: 1000 }).filter((l) => !excludedLead(l)).length : 0,
+      ok,
+      error,
+      now: now(),
+    }));
+  }
+
+  async function inboxThread({ res, url, user }, leadId) {
+    if (!inbox) return noSuchPage(res, withUnread(user));
+    if (!openChat(db.getLead(leadId))) return notInInbox(res, withUnread(user));
+    await refreshChat(db.getLead(leadId));
+    // Read again: the refresh may have learned the chat's lid or phone jid.
+    const lead = db.getLead(leadId);
+    if (!openChat(lead)) return notInInbox(res, withUnread(user));
+    return renderThread(res, { user, lead, ok: url.searchParams.get('ok'), error: url.searchParams.get('error') });
+  }
+
+  /** How each of `sender.reply`'s refusals is answered: HTTP status, then the page's message code. */
+  const REPLY_REFUSALS = {
+    stale: [409, 'stale'],
+    lid_only: [409, 'lid_only'],
+    bad_text: [400, 'bad_text'],
+    bad_send_id: [400, 'bad_send_id'],
+    sending_disabled: [503, 'sending_disabled'],
+    rate_limited: [429, 'reply_rate_limited'],
+  };
+  /** Refusals that mean the chat itself may not be answered (rule 1): no page of it is drawn. */
+  const NOT_ANSWERABLE = new Set(['not_found', 'not_in_inbox', 'excluded']);
+
+  async function inboxReply({ res, fields, form, me }, leadId) {
+    if (!sender) return sendJson(res, 404, { error: 'not_found' });
+    const back = `/dashboard/inbox/${encodeURIComponent(leadId)}`;
+    // Asked here as well as in the sender, and before the refresh: a chat that is not in
+    // the inbox must not cost an Evolution read, let alone a send.
+    if (!openChat(db.getLead(leadId))) return refuseChat(res, form, me);
+    await refreshChat(db.getLead(leadId));
+
+    const text = asText(fields.text).replace(/\r\n?/g, '\n').trim();
+    const out = await sender.reply({ sendId: asText(fields.send_id), leadId, userId: me.user_id, text, seenTs: asTs(fields.seen_ts) });
+    const inFlight = out.duplicate && (out.status === 'pending' || out.status === 'uncertain');
+    const outcome = out.ok ? 'accepted' : (out.uncertain || inFlight) ? 'uncertain' : 'failed';
+    // Audited once per request that reached WhatsApp (sent, perhaps sent, or turned away
+    // by it) — never a refusal made here first, never a resubmit — with the outcome only.
+    const attempted = out.ok || out.uncertain || out.error === 'network' || String(out.error ?? '').startsWith('http_');
+    if (!out.duplicate && attempted) {
+      audit?.record({ userId: me.user_id, action: 'reply_sent', target: leadId, meta: { status: outcome } });
+      log({ evt: 'dash.reply', leadId, status: outcome });
+    }
+    if (outcome === 'accepted') return answer(res, { form, back: `${back}?ok=sent`, status: 200, payload: { ok: true, status: outcome, send_id: out.sendId } });
+    // It may well have gone. Say so and let the person look at WhatsApp: never retried,
+    // and the words are not kept for a resubmit that could send them twice.
+    if (outcome === 'uncertain') return answer(res, { form, back: `${back}?error=send_uncertain`, status: 202, payload: { ok: false, error: 'send_uncertain', send_id: out.sendId } });
+    if (NOT_ANSWERABLE.has(out.error)) return refuseChat(res, form, me);
+    const [status, error] = !out.duplicate && Object.hasOwn(REPLY_REFUSALS, out.error) ? REPLY_REFUSALS[out.error] : [502, 'send_failed'];
+    if (!form) return sendJson(res, status, { error });
+    const lead = db.getLead(leadId);
+    if (!openChat(lead)) return notInInbox(res, withUnread(me));
+    // The page again, the words still in the box and a fresh send_id: nothing in a URL (P2-9).
+    return renderThread(res, { status, user: me, lead, draft: text, error });
+  }
+
+  function inboxHandler({ res, fields, form, me }, leadId) {
+    const back = `/dashboard/inbox/${encodeURIComponent(leadId)}`;
+    if (!openChat(db.getLead(leadId))) return refuseChat(res, form, me);
+    // Anyone on the team may hand a chat to any active person, or to nobody (P2-15).
+    const raw = asText(fields.user_id).trim();
+    const target = raw ? team.getUser(raw) : null;
+    if (raw && !(target && target.active)) return answer(res, { form, back: `${back}?error=bad_handler`, status: 400, payload: { error: 'bad_handler' } });
+    const to = target ? target.user_id : null;
+    inbox.setHandler(leadId, to);
+    audit?.record({ userId: me.user_id, action: 'handler', target: leadId, meta: { to } });
+    log({ evt: 'dash.handler', leadId });
+    return answer(res, { form, back: `${back}?ok=handler`, status: 200, payload: { ok: true, handler_user_id: to } });
+  }
+
+  async function inboxMove({ res, form, me }, leadId) {
+    const lead = db.getLead(leadId);
+    const leadPage = `/dashboard/leads/${encodeURIComponent(leadId)}`;
+    if (!lead) return answer(res, { form, back: '/dashboard/inbox?error=not_a_chat', status: 404, payload: { error: 'not_found' } });
+    if (excludedLead(lead)) return answer(res, { form, back: `${leadPage}?error=excluded`, status: 400, payload: { error: 'excluded' } });
+    // Nothing to read a chat by: no jid, no lid, no phone to make a jid of.
+    if (!lead.wa_jid && !lead.wa_lid && !lead.phone_e164) return answer(res, { form, back: `${leadPage}?error=not_a_chat`, status: 400, payload: { error: 'not_a_chat' } });
+    const t = now();
+    inbox.setInboxState(leadId, 'in', { since: t });
+    audit?.record({ userId: me.user_id, action: 'inbox_move', target: leadId });
+    log({ evt: 'dash.inbox_move', leadId });
+    await joinHistory(leadId, t);
+    // A phone-only lead becomes a chat once its history names a jid; until then, the list.
+    const back = openChat(db.getLead(leadId)) ? `/dashboard/inbox/${encodeURIComponent(leadId)}?ok=moved` : '/dashboard/inbox?ok=moved';
+    return answer(res, { form, back, status: 200, payload: { ok: true, lead_id: leadId } });
+  }
+
+  function inboxOut({ res, form, me }, leadId) {
+    const lead = db.getLead(leadId);
+    if (!lead) return answer(res, { form, back: '/dashboard/inbox?error=not_a_chat', status: 404, payload: { error: 'not_found' } });
+    // Not a client (design §4.1): out now, the transcript gone now, and it never comes
+    // back on its own — only the owner's Move or Add brings it in again.
+    const purged = inbox.leaveInbox(leadId);
+    audit?.record({ userId: me.user_id, action: 'inbox_out', target: leadId });
+    log({ evt: 'dash.inbox_out', leadId, messages: purged.messages });
+    const back = lead.inbox_state === 'in' ? '/dashboard/inbox?ok=out' : '/dashboard/inbox?tab=unsure&ok=out';
+    return answer(res, { form, back, status: 200, payload: { ok: true, purged } });
+  }
+
+  async function inboxAdd({ res, fields, form, me }) {
+    const raw = asText(fields.phone);
+    // A number the owner typed: never a lid or a jid, and international once normalised.
+    const digits = /[@:a-zA-Z]/.test(raw) ? null : normalisePhone(raw);
+    if (!digits || digits.startsWith('0')) return answer(res, { form, back: '/dashboard/inbox?error=bad_phone', status: 400, payload: { error: 'bad_phone' } });
+    if (team.isExcludedPhone(digits)) return answer(res, { form, back: '/dashboard/inbox?error=excluded', status: 400, payload: { error: 'excluded' } });
+    const t = now();
+    // The one lead write path; `owner_added` never fans out and is born in the inbox (P2-5).
+    const { lead } = createOrMergeLead(db, { phone: digits, waJid: `${digits}@s.whatsapp.net` }, {
+      channel: 'whatsapp', matchMethod: 'owner_added', now: t, dataDir: cfg.dataDir,
+    });
+    inbox.setInboxState(lead.lead_id, 'in', { since: t });
+    audit?.record({ userId: me.user_id, action: 'inbox_add', target: lead.lead_id });
+    log({ evt: 'dash.inbox_add', leadId: lead.lead_id });
+    await joinHistory(lead.lead_id, t);
+    return answer(res, { form, back: `/dashboard/inbox/${encodeURIComponent(lead.lead_id)}?ok=added`, status: 200, payload: { ok: true, lead_id: lead.lead_id } });
+  }
+
   /* -------------------- dispatch -------------------- */
 
   const LEAD_PATH = /^\/dashboard\/leads\/([A-Za-z0-9_-]{1,64})$/;
+  const INBOX_PATH = /^\/dashboard\/inbox\/([A-Za-z0-9_-]{1,64})$/;
   const ADMIN_LEAD = /^\/v1\/admin\/leads\/([A-Za-z0-9_-]{1,64})(?:\/(stage|note))?$/;
   const ADMIN_TEAM = /^\/v1\/admin\/team\/([A-Za-z0-9_-]{1,64})\/(deactivate|reactivate|role)$/;
-  const OWNER_WRITES = new Set(['/v1/admin/team', '/v1/admin/never', '/v1/admin/never/remove', '/v1/admin/settings']);
+  const ADMIN_INBOX = /^\/v1\/admin\/inbox\/([A-Za-z0-9_-]{1,64})\/(reply|handler|move|out)$/;
+  /** Inbox writes only an owner makes (D9); reply and handler are anyone's on the team. */
+  const OWNER_INBOX_WRITES = new Set(['move', 'out']);
+  const OWNER_WRITES = new Set(['/v1/admin/team', '/v1/admin/never', '/v1/admin/never/remove', '/v1/admin/settings', '/v1/admin/inbox/add']);
 
   const owns = ownsDashboardPath;
 
@@ -810,9 +1084,14 @@ export function createDashboardRoutes({
     }
 
     /* --- everything else needs a signed-in, active member --- */
-    const me = currentUser(req);
-    if (!me) return toLogin(res);
+    const user = currentUser(req);
+    if (!user) return toLogin(res);
     if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method_not_allowed' });
+    // A thread marks itself read before it is drawn, so it counts its own badge.
+    const threadMatch = INBOX_PATH.exec(p);
+    if (threadMatch) return inboxThread({ res, url, user }, threadMatch[1]);
+    // Every other signed-in page carries the person's unread count for the Inbox badge.
+    const me = withUnread(user);
 
     if (p === '/dashboard') return overview({ res, url, me });
     if (p === '/dashboard/leads') return leads({ res, url, me });
@@ -826,6 +1105,7 @@ export function createDashboardRoutes({
       return sendHtml(res, 200, tiktokAccountsPage({ me, state: accounts.status(), error: url.searchParams.get('error'), ok: url.searchParams.get('ok') }));
     }
     if (p === '/dashboard/team') return teamView({ res, url, me });
+    if (p === '/dashboard/inbox') return inboxList({ res, url, me });
     return sendHtml(res, 404, messagePage({ title: 'Not found', message: 'There is no such page.', me }));
   }
 
@@ -858,8 +1138,10 @@ export function createDashboardRoutes({
       if (!origin || req.headers.origin !== origin) return sendHtml(res, 403, messagePage({ title: 'Request origin could not be verified', message: 'Open the TikTok setup page on the canonical API address in your signed-in owner browser and try again. Your browser must send its same-origin Origin header.' }));
     }
     const teamMatch = ADMIN_TEAM.exec(p);
-    const ownerWrite = Boolean(teamMatch || tiktokMatch) || OWNER_WRITES.has(p);
-    const writes = (leadMatch && leadMatch[2]) || (p === '/v1/admin/spend' ? 'spend' : null) || (ownerWrite ? 'team' : null);
+    const inboxMatch = ADMIN_INBOX.exec(p);
+    const ownerWrite = Boolean(teamMatch || tiktokMatch || OWNER_WRITES.has(p) || (inboxMatch && OWNER_INBOX_WRITES.has(inboxMatch[2])));
+    const writes = (leadMatch && leadMatch[2]) || (p === '/v1/admin/spend' ? 'spend' : null)
+      || ((inboxMatch || p === '/v1/admin/inbox/add') ? 'inbox' : null) || (ownerWrite ? 'team' : null);
     if (!writes) return sendJson(res, 404, { error: 'not_found' });
 
     const parsed = await fieldsOf(req);
@@ -874,12 +1156,23 @@ export function createDashboardRoutes({
     const me = currentUser(req);
     if (!me) return sendJson(res, 401, { error: 'unauthorised' });
     if (ownerWrite && me.role !== 'owner') {
-      log({ level: 'warn', evt: 'dash.owner_only', path: teamMatch ? '/v1/admin/team/:id' : p });
+      const shown = teamMatch ? '/v1/admin/team/:id' : inboxMatch ? `/v1/admin/inbox/:id/${inboxMatch[2]}` : p;
+      log({ level: 'warn', evt: 'dash.owner_only', path: shown });
       return sendJson(res, 403, { error: 'owner_only' });
     }
 
     const ctx = { res, fields: parsed.fields, form: parsed.form, me };
-    if (tiktokMatch) return tiktokWrite({ ...ctx, req }, tiktokMatch[1]);
+    if (tiktokMatch) return tiktokWrite({ ...ctx, req, me: withUnread(me) }, tiktokMatch[1]);
+    if (writes === 'inbox') {
+      // index.mjs always wires the inbox; routes built without it (older tests, tools) have none.
+      if (!inbox) return sendJson(res, 404, { error: 'not_found' });
+      if (!inboxMatch) return inboxAdd(ctx);
+      const [, leadId, what] = inboxMatch;
+      if (what === 'reply') return inboxReply(ctx, leadId);
+      if (what === 'handler') return inboxHandler(ctx, leadId);
+      if (what === 'move') return inboxMove(ctx, leadId);
+      return inboxOut(ctx, leadId);
+    }
     if (writes === 'stage') return setStage(ctx, leadMatch[1]);
     if (writes === 'note') return addNote(ctx, leadMatch[1]);
     if (writes === 'spend') return saveSpend(ctx);
