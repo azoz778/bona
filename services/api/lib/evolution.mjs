@@ -39,7 +39,10 @@
  *     real phone jid is then on `key.remoteJidAlt`.
  */
 
-/** Evolution never returns more than this many pages per window — a runaway is a bug. */
+/**
+ * The most pages one read asks for; `readWindow` cuts a window that holds more than
+ * `MAX_PAGES × PAGE_SIZE`.
+ */
 export const MAX_PAGES = 5;
 /** `offset` in the request body: how many records one page holds. */
 export const PAGE_SIZE = 100;
@@ -344,6 +347,13 @@ const failureOf = (err) => (err?.name === 'TimeoutError' || err?.name === 'Abort
 /** A size Evolution states about the whole filtered set, or null when it did not state one. */
 const countOf = (value) => (Number.isInteger(value) && value >= 0 ? value : null);
 
+/** Refuses, before anything is sent, a `name` that is not a whole number of at least `min`. */
+function requireWhole(name, value, min) {
+  if (!Number.isInteger(value) || value < min) {
+    throw new TypeError(`evolution: ${name} must be a whole number of at least ${min}`);
+  }
+}
+
 /** The `where.key` fields Evolution matches on. */
 const KEY_FILTERS = ['remoteJid', 'remoteJidAlt', 'id'];
 const isIsoDate = (value) => typeof value === 'string' && Number.isFinite(Date.parse(value));
@@ -385,7 +395,8 @@ function narrowsRead(where) {
  * Evolution would not apply — empty, a key with a null or empty jid, a one-sided window —
  * is refused with a TypeError before anything is sent (`narrowsRead`): it would page
  * through every chat on the owner's personal WhatsApp. `fromMe` is never worth sending —
- * the server ignores it.
+ * the server ignores it. A `page` or `offset` that is not a whole number of at least 1 is
+ * refused the same way (offset 0 would quietly page by Evolution's default of 50).
  *
  * `total` and `pages` describe everything the filter matched, not this page, when the
  * answer is boxed; both are null for a bare array, and the caller then cannot tell a
@@ -408,6 +419,8 @@ export async function findMessagesPage({
 } = {}) {
   if (!baseUrl) throw new TypeError('evolution: baseUrl required');
   if (!instance) throw new TypeError('evolution: instance required');
+  requireWhole('page', page, 1);
+  requireWhole('offset', offset, 1);
   // Checked as it will be sent: JSON.stringify keeps only an object's own enumerable fields
   // and runs toJSON, so an inherited or hidden `remoteJid` would pass a check on the object
   // itself and still go out as `{"key":{}}` — every chat. What was checked is what is sent.
@@ -512,46 +525,53 @@ export async function fetchWindow({ maxPages = MAX_PAGES, offset = PAGE_SIZE, ..
 }
 
 /**
- * Every message in a time window across every chat, without silent loss (2026-09-27
- * design §4.3).
+ * Every message in a time window across every chat, without silent loss (2026-09-27 design
+ * §4.3): each record at most once, and what could not be read is counted in `missing` and
+ * flagged `truncated`, never dropped quietly.
  *
- * Records come back NEWEST first and one read stops at `maxPages`, so paging alone cannot
- * reach the older messages of a window that holds more than `maxPages × offset` — asking
- * again returns the same newest pages. The boxed answer says how many the window holds
- * (`total`), so a window that is too big is cut in two on a whole second and each half is
- * read the same way, the older half first, down to `maxDepth` levels. Evolution compares
- * whole seconds, so the halves `[gte, mid - 1 ms]` and `[mid, lte]` neither overlap nor
- * leave a second out.
+ * Evolution answers newest first, orders by `messageTimestamp` alone and pages with
+ * LIMIT/OFFSET, so the window is read in pieces:
+ *   - A piece whose stated `total` is more than `maxPages × offset` is cut in two on a whole
+ *     second, `[from, mid − 1 ms]` and `[mid, to]` (Evolution compares whole seconds, so the
+ *     halves neither overlap nor leave a second out), and each half is read the same way,
+ *     the older half first.
+ *   - A piece that fits is paged through with its ids de-duplicated. It is complete when it
+ *     returned as many DIFFERENT records as the largest `total` any of its pages stated (a
+ *     bare array states none: as many as its pages held rows). It reads on past the stated
+ *     pages while its pages held fewer rows than that total and the last one came back full:
+ *     a late delivery pushed the oldest record down a page.
+ *   - A piece that comes back short is cut too, and its halves read, instead of being
+ *     accepted. Short means records slid between pages: PostgreSQL does not keep records that
+ *     share a second in one order across different LIMIT/OFFSET values, so a same-second group
+ *     (a photo album) on a page boundary can come back partly twice and partly never, and a
+ *     delivery or a deletion between two page requests shifts the pages as well. Each cut
+ *     leaves fewer records around the group, until it falls inside one page or the piece can
+ *     be cut no further.
+ * Only a piece that cannot be cut again — at `maxDepth`, or under two seconds wide — is
+ * accepted short: its shortfall goes into `missing` and `truncated` is set. A bare-array piece
+ * that the page cap stops with its last page full is `truncated` too; what lies past that page
+ * cannot be counted, so it adds nothing to `missing`. The caller logs it and moves on: holding
+ * its cursor there would re-read the same pages for ever.
  *
- * A message that lands inside a piece while it is being paged pushes that piece's older
- * records one place down: the next page may repeat a record, and the oldest slides past the
- * last page the first answer stated. The newcomer need not be the newest thing in the
- * window — WhatsApp keeps the sender's timestamp, so what a phone delivers on reconnecting
- * lands wherever its time puts it, often mid-piece. So ids are de-duplicated, a piece counts
- * the records it KEPT — not the rows its pages held — and it reads on past the stated pages
- * while that count is short of the largest `total` any of its pages stated and the pages
- * still come back full.
+ * Cost: a piece asks for at most `maxPages` pages whether it is kept or cut, and the cuts
+ * make at most `2^(maxDepth + 1) − 1` pieces in all (the kept ones, counted in `pieces`, are
+ * at most `2^maxDepth`), so one call makes at most `maxPages × (2^(maxDepth + 1) − 1)`
+ * requests — 155 with the defaults.
  *
- * A piece is complete only when it kept as many records as the largest `total` any of its
- * pages stated. Anything short of that is `truncated`, and the shortfall is added to
- * `missing`: a piece that is still too big when it cannot be cut again — at `maxDepth`, or
- * under two seconds wide (narrower windows are never cut) — and is read partially, its newest
- * `maxPages` pages; a piece the page cap stops while it reads on for a late delivery; and a
- * newcomer that landed on a page already read, which this read never sees. That last one is
- * not left to the caller's next window: the poller reaches back only a couple of minutes, and
- * a window needs more than one page only when it catches up after downtime, when most of it
- * is older than that. The caller logs `missing` and moves on; holding its cursor there would
- * re-read the same newest pages for ever. A record that leaves the window mid-read can make
- * the count one too high — a warning too many, never a loss unreported. (A record with no id
- * is kept each time it comes back and so can hide one; Evolution gives every record an id.)
- *
- * A bare-array answer states no size. That piece falls back to paging until a short page,
- * exactly like `fetchWindow`; a cut-off there is `truncated`, and adds nothing to `missing`
- * because nobody can count it.
+ * Known limits:
+ *   - Page counts cannot see everything that happens between two page requests, and
+ *     Evolution offers no snapshot read. A record that leaves a piece (deleted, or re-stamped
+ *     out of it) and one that arrives in it can cancel out: a record then slides past a page
+ *     boundary and nothing reports it.
+ *   - `missing` is an upper bound. In a piece that cannot be cut, a newcomer stamped near
+ *     `lte` on a page already read is counted, though the caller's next window reads it; a
+ *     record that left mid-read can count one too many.
+ *   - A record with no id cannot be told from another, so each copy is kept and counted.
+ *     Evolution gives every stored record an id.
  *
  * Within a piece the records keep Evolution's newest-first order (the poller sorts with
- * `oldestFirst`); the pieces come oldest first. A failed request throws as it is — nothing
- * is half-returned — so the caller keeps its cursor and asks again next time.
+ * `oldestFirst`); the pieces come oldest first. A failed request throws as it is — nothing is
+ * half-returned — so the caller keeps its cursor and asks again next time.
  *
  * @returns {Promise<{ records: NormalisedRecord[], pieces: number, truncated: boolean, missing: number }>}
  */
@@ -560,82 +580,87 @@ export async function readWindow({
 } = {}) {
   const gteMs = toMs(gte);
   const lteMs = toMs(lte);
-  if (gteMs === null || lteMs === null) throw new TypeError('readWindow needs both gte and lte');
-  // offset 0 would make every window "too big" and cut it to maxDepth for nothing (and the
-  // server would quietly page by 50 instead).
-  if (!Number.isInteger(offset) || offset < 1) throw new TypeError('readWindow: offset must be a whole number of at least 1');
-  if (!Number.isInteger(maxPages) || maxPages < 1) throw new TypeError('readWindow: maxPages must be a whole number of at least 1');
-  if (!Number.isInteger(maxDepth) || maxDepth < 0) throw new TypeError('readWindow: maxDepth must be a whole number of at least 0');
+  if (gteMs === null || lteMs === null) throw new TypeError('evolution: readWindow needs both gte and lte');
+  // offset 0 would make every window "too big" and cut it to maxDepth for nothing.
+  requireWhole('offset', offset, 1);
+  requireWhole('maxPages', maxPages, 1);
+  requireWhole('maxDepth', maxDepth, 0);
+  const cap = maxPages * offset;
   const records = [];
   const seen = new Set();
   let pieces = 0;
   let truncated = false;
   let missing = 0;
 
-  /** Adds the records not kept yet, in order; returns how many that was. */
-  const keep = (batch) => {
-    let added = 0;
-    for (const rec of batch) {
-      // A record with no id cannot be matched against anything, so it is kept as it is.
+  const readPage = (from, to, page) => findMessagesPage({
+    ...opts, where: { messageTimestamp: { gte: toIso(from), lte: toIso(to) } }, page, offset,
+  });
+
+  /**
+   * One piece paged through, `first` being its page 1. `kept` is what it returned, each id
+   * once — counted in the piece alone, so a record some other piece returned still counts;
+   * `size` is how many it says it holds: the largest `total` a page stated, or for a bare
+   * array the rows its pages held; `cutOff` is a bare array stopped by the page cap.
+   */
+  async function readPiece(from, to, first) {
+    const kept = [];
+    const ids = new Set();
+    const keep = (batch) => {
+      for (const rec of batch) {
+        // A record with no id cannot be matched against anything, so it is kept as it is.
+        if (rec.id) {
+          if (ids.has(rec.id)) continue;
+          ids.add(rec.id);
+        }
+        kept.push(rec);
+      }
+    };
+    const boxed = first.total !== null;
+    const stated = boxed ? Math.min(first.pages ?? Math.ceil(first.total / offset), maxPages) : maxPages;
+    let total = first.total ?? 0;
+    let rows = first.records.length;
+    let last = rows;
+    keep(first.records);
+    for (let page = 2; page <= maxPages; page += 1) {
+      const more = boxed ? page <= stated || (rows < total && last >= offset) : last >= offset;
+      if (!more) break;
+      const next = await readPage(from, to, page);
+      keep(next.records);
+      rows += next.records.length;
+      last = next.records.length;
+      total = Math.max(total, next.total ?? 0);
+    }
+    return { kept, size: boxed ? total : rows, cutOff: !boxed && last >= offset };
+  }
+
+  async function read(from, to, depth) {
+    const canCut = to - from >= 2000 && depth < maxDepth;
+    const cut = async () => {
+      const mid = Math.floor((from + to) / 2000) * 1000;
+      await read(from, mid - 1, depth + 1);
+      await read(mid, to, depth + 1);
+    };
+    const first = await readPage(from, to, 1);
+    if (first.total !== null && first.total > cap && canCut) {
+      await cut();
+      return;
+    }
+    const piece = await readPiece(from, to, first);
+    const short = Math.max(0, piece.size - piece.kept.length);
+    if (short > 0 && canCut) {
+      await cut();
+      return;
+    }
+    pieces += 1;
+    for (const rec of piece.kept) {
       if (rec.id) {
         if (seen.has(rec.id)) continue;
         seen.add(rec.id);
       }
       records.push(rec);
-      added += 1;
     }
-    return added;
-  };
-  const readPage = (from, to, page) => findMessagesPage({
-    ...opts, where: { messageTimestamp: { gte: toIso(from), lte: toIso(to) } }, page, offset,
-  });
-
-  async function read(from, to, depth) {
-    const first = await readPage(from, to, 1);
-    if (first.total === null) {
-      pieces += 1;
-      keep(first.records);
-      let last = first.records.length;
-      for (let page = 2; page <= maxPages && last >= offset; page += 1) {
-        const next = await readPage(from, to, page);
-        keep(next.records);
-        last = next.records.length;
-      }
-      if (last >= offset) truncated = true;
-      return;
-    }
-    const cap = maxPages * offset;
-    if (first.total > cap && to - from >= 2000 && depth < maxDepth) {
-      const mid = Math.floor((from + to) / 2000) * 1000;
-      await read(from, mid - 1, depth + 1);
-      await read(mid, to, depth + 1);
-      return;
-    }
-    pieces += 1;
-    // Kept, not rows on the pages: a repeat that a late arrival pushed down must not stand
-    // in for the record it pushed past the last stated page.
-    let kept = keep(first.records);
-    let last = first.records.length;
-    // The largest total any page of this piece has stated. A late delivery raises it, and
-    // judged against the first answer's total alone, a piece whose later page held the
-    // newcomer and no repeat would look complete with its oldest record still unread.
-    let seenTotal = first.total;
-    const readingOn = () => kept < seenTotal && last >= offset;
-    const stated = Math.min(first.pages ?? Math.ceil(first.total / offset), maxPages);
-    for (let page = 2; page <= maxPages && (page <= stated || readingOn()); page += 1) {
-      const next = await readPage(from, to, page);
-      kept += keep(next.records);
-      last = next.records.length;
-      seenTotal = Math.max(seenTotal, next.total ?? 0);
-    }
-    // Over the cap at the deepest level, short when the page cap came first, stopped by the
-    // page cap while still reading on, or a newcomer on a page already read: all of them
-    // leave the piece short of the largest total it was told. (Reading on implies short.)
-    const unread = Math.max(0, seenTotal - kept);
-    if (unread > 0) {
-      truncated = true;
-      missing += unread;
-    }
+    if (short > 0 || piece.cutOff) truncated = true;
+    missing += short;
   }
 
   await read(gteMs, lteMs, 0);
