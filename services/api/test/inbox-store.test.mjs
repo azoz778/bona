@@ -172,6 +172,17 @@ test('newestTs and hasMessages look at one chat only', () => {
   s.close();
 });
 
+test('messageByKey returns the stored message with that WhatsApp id, or null', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-1');
+  inbox.upsertMessage(msg({ key_id: 'K-1', direction: 'out', sender_kind: 'owner_number' }));
+  assert.deepEqual([inbox.messageByKey('K-1').lead_id, inbox.messageByKey('K-1').sender_kind], ['L-1', 'owner_number']);
+  assert.equal(inbox.messageByKey('K-nope'), null);
+  assert.equal(inbox.messageByKey(null), null);
+  assert.equal(inbox.messageByKey(''), null);
+  s.close();
+});
+
 test('insertOutbox writes a pending row once; a second insert of the same send_id returns the row already there', () => {
   const { s, inbox, tick } = harness();
   const first = inbox.insertOutbox(out());

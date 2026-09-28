@@ -132,6 +132,8 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
 
   const newestTs = (leadId) => prep('SELECT MAX(ts) AS ts FROM wa_messages WHERE lead_id = ?').get(String(leadId ?? '')).ts ?? null;
   const hasMessages = (leadId) => Boolean(prep('SELECT 1 FROM wa_messages WHERE lead_id = ? LIMIT 1').get(String(leadId ?? '')));
+  /** The stored message with this WhatsApp id, or null. */
+  const messageByKey = (keyId) => (keyId ? plain(prep('SELECT * FROM wa_messages WHERE key_id = ?').get(String(keyId))) : null);
 
   /* -------------------- outbox -------------------- */
 
@@ -374,7 +376,7 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
   }
 
   return {
-    upsertMessage, messagesFor, newestTs, hasMessages,
+    upsertMessage, messagesFor, newestTs, hasMessages, messageByKey,
     insertOutbox, getOutbox, outboxByKey, updateOutbox, resolveUncertain, openOutboxFor, countSentSince, markStalePending, pruneCodeRows,
     markRead, listInbox, unreadTotal, listUnsure, countUnsure,
     addGap, gapsFor,

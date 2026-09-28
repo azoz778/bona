@@ -8,20 +8,15 @@
  *     chat the owner marked *Not a client* a moment ago has just had its transcript purged,
  *     and a caller still holding the old row must not write it back.
  *   - a team member's or a never-list number is never a client's chat (§3.5, P2-7), however
- *     the row came to be `in` — a Ref lead from before its number joined the team, say. The
- *     check is made here, not left to each caller: the poller screens its records, but a
- *     per-chat read (join history, catch-up, refresh) goes straight to a lead. Every number
- *     and lid a received record names is checked too, each on its own: a lid-only chat first
- *     shows its phone there. Such a record is refused and not stored. A row that holds no
- *     number learns the one number the record names (phone and phone jid, empty fields only),
- *     and only when that makes it excluded by itself from then on — for every read path, the
- *     daily sweep, the poller's lid lookup and the owner's own later records into that chat.
- *     A row that holds a number, or another chat's lid, learns nothing — neither the number
- *     nor its lid: either would make a client's chat exclude itself, hidden by every read
- *     path and purged by the sweep. Nor does a row learn a number another lead holds; the
- *     record is refused all the same, and logged with the lead id. Ingest never changes a
- *     chat's inbox state or purges a transcript: the owner's never-list add (P2-7) and the
- *     maintenance exclusion sweep (P2-20) are the only paths that move a chat out.
+ *     the row came to be `in`. Checked here, not left to callers: the poller screens its
+ *     records, but a per-chat read (join history, catch-up, refresh) goes straight to a lead.
+ *     The row is checked, and so is every number and lid the record names, sent or received
+ *     (a lid-only chat first shows whose it is there) — except the owner's own number as a
+ *     sent record's alt, which names the sender, not the chat. Such a record stores nothing.
+ *     A received one may teach a row that holds no number yet that number, when it then
+ *     excludes the row by itself; nothing else is learned from it, so a client's chat never
+ *     excludes itself. Ingest never moves a chat out: the never-list add (P2-7) and the
+ *     maintenance sweep (P2-20) do.
  *   - a record with no id cannot be de-duplicated, and noise — reactions, deletes and edits,
  *     poll votes, key-distribution records — is never a bubble (P2-14). Neither is stored.
  *   - a login code is never stored (§4.2: the code lives only in the WhatsApp message, P2-21).
@@ -33,8 +28,11 @@
  *     WhatsApp message id their send came back with. A send that never came back
  *     (`uncertain`, or `pending` when a restart cut it off) is found by its exact text within
  *     two minutes, anywhere in the LEAD's chat — the reply went to the phone jid, but
- *     Evolution may file the record under the chat's `@lid`. Anything else was typed on the
- *     owner's phone or sent by Lisa for him, which cannot be told apart: `owner_number`.
+ *     Evolution may file the record under the chat's `@lid`. Only a record seen for the first
+ *     time, and not one stamped before the send was written: a record read again, or typed
+ *     just before an identical reply, must not mark a reply that may never have gone as sent.
+ *     Anything else was typed on the owner's phone or sent by Lisa for him, which cannot be
+ *     told apart: `owner_number`.
  *   - a human outbound seen for the first time clears "needs a human" (P2-16) and gives a
  *     chat nobody handles a handler (P2-15): the staff member who replied, or the owner for
  *     his own number. Only the first time — a refresh reads old records again, and must not
@@ -52,16 +50,24 @@ import { jidsOf } from '../wa-poller.mjs';
 /** How far apart an unconfirmed send and the record that confirms it may be (P2-17). */
 export const RESOLVE_WINDOW_MS = 120_000;
 
+/**
+ * How much older than its outbox row a send's record may be stamped. The row is written
+ * before the HTTP call and the record stamped after it, on the Evolution host; the record's
+ * time is whole seconds, so it can read up to a second early. A few seconds covers that.
+ */
+export const SEND_SKEW_MS = 5_000;
+
+/** Distinct lead/reason pairs a refusal is logged for before the memory of them starts over. */
+const WARNED_MAX = 1000;
+
 /** Outbound senders that are a person answering — as opposed to Dana. */
 const HUMAN_SENDERS = new Set(['staff', 'owner_number']);
 
 /**
  * A team member's or a never-list number, however the lead row holds it: its phone, the
- * number in its phone jid, or a lid the poller learned for a team member. `createTeam` only
- * prepares statements when they are first used, so this second instance costs nothing.
+ * number in its phone jid, or a lid the poller learned for a team member.
  */
-function excludedByTeam(db) {
-  const team = createTeam(db);
+function excludedByTeam(db, team) {
   return (lead) => team.isExcludedPhone(lead.phone_e164)
     || team.isExcludedPhone(jidsOf({ jid: lead.wa_jid }).phone)
     || isTeamLid(db, lead.wa_lid);
@@ -84,18 +90,16 @@ function namedBy(rec) {
 }
 
 /**
- * The lead as each identifier an inbound record names shows it: one view per number (its
- * phone and phone jid over the row's) and one per lid, each checked on its own. A lid-only
- * chat read by its lid (join history, catch-up, refresh) first shows whose it is in a
- * record's alt, so that number is checked before anything is stored. Never for a record we
- * sent: its alt can be the owner's own number, a team number.
+ * True when a number or lid the record names is excluded. Each is checked as the row would
+ * be if it held that identifier, so whatever decides exclusion for a row (`isExcluded`)
+ * decides for the record too. On a record we sent, the owner's own number as the alt is left
+ * out: lib/evolution.mjs folds `key.senderPn` into `jidAlt`, and there it names the sender.
  */
-function viewsOf(lead, rec) {
-  const { numbers, lids } = namedBy(rec);
-  return [
-    ...numbers.map(({ phone, waJid }) => ({ ...lead, phone_e164: phone ?? lead.phone_e164, wa_jid: waJid })),
-    ...lids.map((waLid) => ({ ...lead, wa_lid: waLid })),
-  ];
+function recordNamesExcluded(lead, rec, isExcluded, ownerPhone) {
+  const senderAlt = rec.fromMe && ownerPhone && jidsOf({ jid: rec.jidAlt }).phone === ownerPhone;
+  const { numbers, lids } = namedBy(senderAlt ? { jid: rec.jid } : rec);
+  return numbers.some(({ phone, waJid }) => isExcluded({ ...lead, phone_e164: phone ?? lead.phone_e164, wa_jid: waJid }))
+    || lids.some((waLid) => isExcluded({ ...lead, wa_lid: waLid }));
 }
 
 /**
@@ -118,7 +122,7 @@ function sameChat(lead, rec) {
  * @param {ReturnType<import('../db.mjs').openDb>} o.db
  * @param {ReturnType<import('./store.mjs').createInboxStore>} o.inbox
  * @param {() => string|null} [o.ownerUserId] the env owner's `users.user_id`: the handler of a
- *        chat his own phone answers first
+ *        chat his own phone answers first, and whose number a sent record's alt may carry
  * @param {((lead: object) => boolean)|null} [o.isExcludedLead] true for a chat that is never a
  *        client's; defaults to the team and never-list tables in `db`
  * @param {(e: object) => void} [o.log]
@@ -128,15 +132,24 @@ export function createIngest({
   db, inbox, ownerUserId = () => null, isExcludedLead = null, log = () => {}, now = () => Date.now(),
 } = {}) {
   if (!db || !inbox) throw new TypeError('createIngest needs the store and the inbox store');
-  const isExcluded = isExcludedLead ?? excludedByTeam(db);
+  // `createTeam` only prepares statements when they are first used: this instance costs nothing.
+  const team = createTeam(db);
+  const isExcluded = isExcludedLead ?? excludedByTeam(db, team);
+  const ownerPhone = () => team.getUser(ownerUserId())?.phone_e164 ?? null;
 
-  /** The outbox row an outbound record is, when the dashboard sent it; `via` says how it was found. */
+  /**
+   * The outbox row an outbound record is, when the dashboard sent it; `via` says how it was
+   * found. Its message id always counts. Its text only for a record not stored yet — one
+   * already stored was judged when first read, and a send it did not match then was not its
+   * own — and only for a send written no later than the record was stamped (SEND_SKEW_MS).
+   * `resolveUncertain` returns the oldest match, so when that one is too new, all are.
+   */
   function outboxRowFor(leadId, rec, body, ts) {
     const byKey = inbox.outboxByKey(rec.id);
     if (byKey) return { row: byKey, via: 'key' };
-    if (!body) return null;
+    if (!body || inbox.messageByKey(rec.id)) return null;
     const byText = inbox.resolveUncertain({ leadId, text: body, ts, windowMs: RESOLVE_WINDOW_MS });
-    return byText ? { row: byText, via: 'text' } : null;
+    return byText && ts >= byText.created - SEND_SKEW_MS ? { row: byText, via: 'text' } : null;
   }
 
   /**
@@ -162,15 +175,33 @@ export function createIngest({
   }
 
   /**
-   * What a refused record may teach its row: the one number it names (phone and phone jid),
-   * and only to a row that holds no number yet. A row that holds one is somebody else's chat
-   * as far as it knows: taught the excluded number, or that number's lid, a client's chat
-   * would exclude itself.
+   * What a refused record teaches its row — `{ patch }` — or why it teaches nothing —
+   * `{ reason }`. Only the one number it names (phone and phone jid), only to a row that
+   * holds no number yet, and only when that number then excludes the row by itself. A row
+   * that holds a number is somebody else's chat as far as it knows: taught the excluded
+   * number, or that number's lid, a client's chat would exclude itself.
    */
-  function learnableWhenRefused(lead, rec) {
-    if (lead.phone_e164 || lead.wa_jid) return {};
+  function lessonOfRefused(lead, rec) {
+    if (lead.phone_e164 || lead.wa_jid) return { reason: 'row_has_number' };
+    if (!sameChat(lead, rec)) return { reason: 'other_chat' };
     const { phone_e164: phone, wa_jid: waJid } = learnable(lead, rec);
-    return { ...(phone && { phone_e164: phone }), ...(waJid && { wa_jid: waJid }) };
+    const patch = { ...(phone && { phone_e164: phone }), ...(waJid && { wa_jid: waJid }) };
+    if (isExcluded({ ...lead, ...patch })) return { patch };
+    // A number of the row's own chat goes unlearned only when another lead holds it.
+    return { reason: !waJid && jidsOf(rec).waJid ? 'held_by_other_lead' : 'nothing_to_learn' };
+  }
+
+  /**
+   * Once per lead and reason while this process runs: a refresh or catch-up reads the same
+   * chat again and again, and the lead id is all whoever looks into it needs.
+   */
+  const warned = new Set();
+  function warnRefused(leadId, reason) {
+    const key = `${leadId} ${reason}`;
+    if (warned.has(key)) return;
+    if (warned.size >= WARNED_MAX) warned.clear();
+    warned.add(key);
+    log({ level: 'warn', evt: 'inbox.refused_excluded', leadId, reason });
   }
 
   function learn(lead, patch) {
@@ -194,18 +225,12 @@ export function createIngest({
       if (isExcluded(current)) return { stored: false, reason: 'excluded' };
       if (!rec?.id) return { stored: false, reason: 'no_id' };
       if (rec.noise) return { stored: false, reason: 'noise' };
-      if (!rec.fromMe && viewsOf(current, rec).some(isExcluded)) {
-        // Nothing is stored, but a row that holds no number keeps the one the record showed:
-        // without it the row never looks excluded, and the owner's later records into this
-        // chat would still be stored and shown while the chat stayed `in` for good. Only when
-        // what the row can take (empty fields only) excludes it by itself. A row that holds a
-        // number or another chat's lid, or cannot take the number (another lead holds it),
-        // learns nothing — not even a lid that belongs to the excluded number. Ingest never
-        // moves a chat or purges a transcript; the owner's never-list add (P2-7) and the
-        // maintenance sweep (P2-20) do, so the lead id is logged for whoever looks into it.
-        const patch = learnableWhenRefused(current, rec);
-        if (isExcluded({ ...current, ...patch })) learn(current, patch);
-        else log({ level: 'warn', evt: 'inbox.refused_excluded', leadId: current.lead_id, reason: 'number_not_held' });
+      if (recordNamesExcluded(current, rec, isExcluded, rec.fromMe ? ownerPhone() : null)) {
+        // A row that learns the number excludes itself from then on; otherwise the lead id is
+        // logged. Learning is from a received record only (see `learnable`).
+        const lesson = rec.fromMe ? { reason: 'outbound' } : lessonOfRefused(current, rec);
+        if (lesson.patch) learn(current, lesson.patch);
+        else warnRefused(current.lead_id, lesson.reason);
         return { stored: false, reason: 'excluded' };
       }
       // Whichever way it went, and whether or not an outbox row still names its id.
