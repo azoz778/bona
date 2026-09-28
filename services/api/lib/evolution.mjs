@@ -202,12 +202,16 @@ function capCodePoints(text, max) {
  */
 const SPACES_RE = /[\s--\u{FEFF}]+/gv;
 
-/** A sender-chosen file name made safe to show: `''` when nothing usable is left. */
-function cleanFileName(name) {
+/** A sender-chosen file name without invisible characters or runs of whitespace, not yet cut. */
+function flatFileName(name) {
   if (typeof name !== 'string') return '';
   // Whitespace first, so a tab or a line break between two words leaves a space, not a join.
-  const flat = name.replace(SPACES_RE, ' ').replace(INVISIBLE_RE, '').replace(SPACES_RE, ' ').trim();
-  return capCodePoints(flat, MAX_FILE_NAME).trim();
+  return name.replace(SPACES_RE, ' ').replace(INVISIBLE_RE, '').replace(SPACES_RE, ' ').trim();
+}
+
+/** A sender-chosen file name made safe to show: `''` when nothing usable is left. */
+function cleanFileName(name) {
+  return capCodePoints(flatFileName(name), MAX_FILE_NAME).trim();
 }
 
 /**
@@ -291,18 +295,23 @@ export function isNoise(record) {
 /**
  * One Evolution record, flattened to what the poller and the inbox reason about.
  * `media` is `mediaOf`'s placeholder, `fileName` a document's cleaned name (null for
- * anything else), `noise` is `isNoise`. A document's name is chosen by its sender and is
- * often a person's name or a phone number, so `media` and `fileName` are never logged —
- * the same care as `text`, `pushName` and the jids.
+ * anything else), `fileNameTruncated` true when that name was cut at 120 code points (its
+ * last word may then be the start of a longer one, so lib/inbox/eligibility.mjs does not
+ * read a word at the cut), `noise` is `isNoise`. A document's name is chosen by its sender
+ * and is often a person's name or a phone number, so `media` and `fileName` are never
+ * logged — the same care as `text`, `pushName` and the jids.
  * @typedef {{ id: string|null, jid: string|null, jidAlt: string|null, fromMe: boolean,
  *             ts: number|null, text: string, pushName: string|null,
  *             contextInfo: object|null, messageType: string|null,
- *             media: string|null, fileName: string|null, noise: boolean }} NormalisedRecord
+ *             media: string|null, fileName: string|null, fileNameTruncated: boolean,
+ *             noise: boolean }} NormalisedRecord
  */
 export function normaliseRecord(record) {
   const key = record?.key ?? {};
   const jid = typeof key.remoteJid === 'string' ? key.remoteJid : null;
   const alt = key.remoteJidAlt ?? record?.remoteJidAlt ?? key.senderPn ?? null;
+  const flatName = flatFileName(unwrapMessage(record?.message)?.documentMessage?.fileName);
+  const fileName = capCodePoints(flatName, MAX_FILE_NAME).trim() || null;
   return {
     id: typeof key.id === 'string' && key.id ? key.id : null,
     jid,
@@ -314,7 +323,8 @@ export function normaliseRecord(record) {
     contextInfo: contextOf(record),
     messageType: typeof record?.messageType === 'string' ? record.messageType : null,
     media: mediaOf(record),
-    fileName: cleanFileName(unwrapMessage(record?.message)?.documentMessage?.fileName) || null,
+    fileName,
+    fileNameTruncated: fileName !== null && fileName !== flatName,
     noise: isNoise(record),
   };
 }
