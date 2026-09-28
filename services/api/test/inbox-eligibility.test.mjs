@@ -28,7 +28,7 @@ test('a client message is certain on a Ref code, ad context or a listing id', ()
   for (const [text, hasAdMeta] of [
     ['Hello\nRef BONA-W003 · K7Q2XR', false],
     ['ref bona - k7q2xr', false],
-    ['Ref K7Q2X', false],
+    ['Ref BONA · K7Q2XR', false],
     ['مرحبا، مهتم بالفيلا\nRef BONA-005: ABCDEF', false],
     ['', true],
     ['Hi, is this still available?', true],
@@ -41,9 +41,43 @@ test('a client message is certain on a Ref code, ad context or a listing id', ()
   }
 });
 
+test('a Ref line in the site\'s own shape is certain; a bare code only when the poller knows it', () => {
+  // The site always writes the listing part (`Ref BONA · K7Q2XR` on a page without one);
+  // a bare code is a client retyping it, or plain English that happens to have the shape.
+  assert.equal(inboundSignal({ text: 'Ref K7Q2X', refKnown: true }), 'certain', 'a code a site session holds');
+  for (const text of [
+    'Ref K7Q2X',
+    'Can you send me the ref number?',
+    'ref please',
+    'Ref check done',
+    'what is the ref 23456',
+    'Ref thanks',
+    'TK booking Ref ABCDEF',
+  ]) {
+    assert.equal(inboundSignal({ text }), 'unsure', `${text}: a guess, never a join by itself`);
+    assert.equal(inboundSignal({ text, refKnown: false }), 'unsure', text);
+  }
+  for (const refKnown of ['true', 1, {}]) {
+    assert.equal(inboundSignal({ text: 'Ref K7Q2X', refKnown }), 'unsure', `refKnown ${JSON.stringify(refKnown)} is not true`);
+  }
+});
+
+test('ad context counts only when it is exactly true', () => {
+  for (const hasAdMeta of ['false', 'true', 1, {}, []]) {
+    assert.equal(inboundSignal({ text: 'Hello', hasAdMeta }), null, `hasAdMeta ${JSON.stringify(hasAdMeta)}`);
+  }
+});
+
 test('the word bona on its own is only a guess', () => {
-  for (const text of ['I saw Bona on Instagram', 'BONA', 'bona?', 'بونا', 'شفت إعلان بونا', 'BONA-W0031']) {
+  for (const text of ['I saw Bona on Instagram', 'BONA', 'bona?', 'بونا', 'شفت إعلان بونا', 'BONA-W0031', 'BONA-W003٤', 'BONA-W003۴', 'بونا.', '(بونا)', 'بونا2']) {
     assert.equal(inboundSignal({ text }), 'unsure', text);
+  }
+});
+
+test('an Arabic word that only contains بونا is not the name', () => {
+  for (const text of ['عندكم كوبونات؟', 'جابونا', 'أبونا', 'طلبونا نرسل لكم العقد', 'كن زبوناً معنا', 'جربونا', 'حاسبونا على الدفعة']) {
+    assert.equal(inboundSignal({ text }), null, text);
+    assert.equal(BONA_WORD_RE.test(text), false, text);
   }
 });
 
@@ -75,6 +109,10 @@ test('the owner joins a chat by sending a Bona link or a listing id', () => {
     'الرابطbona-real-estate.com',
     'Details for BONA-W003 attached',
     'رقم العقار BONA-005',
+    'BONA-W003عندكم',
+    'Is it bona.azoz.uk, or bona-real-estate.com?',
+    '(bona-real-estate.com)',
+    'bona-real-estate.com/',
   ]) {
     assert.equal(ownerOutboundJoins({ text }), true, text);
   }
@@ -88,6 +126,12 @@ test('lookalike links and plain mentions of bona do not join a chat', () => {
     'bona-real-estate.co',
     'bona-realestate.com',
     'mybona.azoz.uk',
+    'https://bona-real-estate.com.evil.example/x',
+    'bona-real-estate.com.sa',
+    'bona.azoz.uk.attacker.io',
+    'https://bona.azoz.uk@evil.example/',
+    'bona-real-estate.com@evil.example',
+    'BONA-W003٤',
     'bona',
     'Bona villa is ready, call me',
     'بونا',
@@ -108,8 +152,12 @@ test('a document joins when its file name or caption says Bona or a listing id',
     doc('BONA-W003.pdf'),
     doc('brochure bona-005 v2.pdf'),
     doc('بونا - فيلا الشاطئ.pdf'),
+    doc('بونا_فيلا.pdf'),
+    doc('فيلا-بونا.pdf'),
     doc('villa.pdf', 'Brochure from Bona'),
     doc('villa.pdf', 'بروشور بونا'),
+    doc('villa.pdf', 'بروشور (بونا)'),
+    doc('Bona2026.pdf'),
     doc(null, 'bona'),
   ]) {
     assert.equal(ownerOutboundJoins(rec), true, `${rec.fileName} / ${rec.text}`);
@@ -119,6 +167,15 @@ test('a document joins when its file name or caption says Bona or a listing id',
     doc('Kabona_offer.pdf'),
     doc('TK_Villa.pdf', 'here you go'),
     doc(null),
+    // Arabic words that only contain the four letters: coupons, "our father", "they asked
+    // us", a customer, "try us", "bill us". Each would pull a private or TK chat in.
+    doc('كوبونات الخصم.pdf'),
+    doc('أبونا.pdf'),
+    doc('villa.pdf', 'طلبونا نرسل لكم العقد'),
+    doc('villa.pdf', 'كن زبوناً معنا'),
+    doc('villa.pdf', 'جربونا'),
+    doc('villa.pdf', 'حاسبونا على الدفعة'),
+    doc('Bonaé.pdf'),
   ]) {
     assert.equal(ownerOutboundJoins(rec), false, `${rec.fileName} / ${rec.text}`);
   }
