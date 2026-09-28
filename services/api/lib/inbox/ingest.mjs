@@ -12,11 +12,13 @@
  *     check is made here, not left to each caller: the poller screens its records, but a
  *     per-chat read (join history, catch-up, refresh) goes straight to a lead. The numbers a
  *     received record shows are checked too: a lid-only chat first shows its phone there.
- *     Such a record is not stored, but the row learns the number (empty fields only), so the
- *     row is excluded by itself from then on — for every read path, the daily sweep, the
- *     poller's lid lookup and the owner's own later records into that chat. A row that
- *     cannot take the number (another lead holds it, or the row holds a different one)
- *     leaves the inbox at once instead, its transcript purged (P2-7).
+ *     Such a record is refused and not stored. The row learns the number into empty fields
+ *     only, and only when that makes it excluded by itself from then on — for every read
+ *     path, the daily sweep, the poller's lid lookup and the owner's own later records into
+ *     that chat. A row that cannot take the number (another lead holds it, or the row holds
+ *     a different one) learns nothing; the record is refused all the same. Ingest never
+ *     changes a chat's inbox state or purges a transcript: the owner's never-list add (P2-7)
+ *     and the maintenance exclusion sweep (P2-20) are the only paths that move a chat out.
  *   - a record with no id cannot be de-duplicated, and noise — reactions, deletes and edits,
  *     poll votes, key-distribution records — is never a bubble (P2-14). Neither is stored.
  *   - a login code the sender sent is never stored (§4.2: the code lives only in the WhatsApp
@@ -96,19 +98,23 @@ export function createIngest({
   }
 
   /**
-   * Fill the lead's empty lid / phone jid / phone from a record it received. Not from one we
-   * sent: lib/evolution.mjs folds `key.senderPn` into the same `jidAlt`, and on an outbound
-   * record that can be our own number — the same caution as the poller's team pairing. Never
-   * a value another lead already holds: `phone_e164` is unique, and two leads on one jid would
-   * make every later lookup by that jid a coin toss.
+   * What the lead may learn from a record it received: its empty lid / phone jid / phone. Not
+   * from one we sent: lib/evolution.mjs folds `key.senderPn` into the same `jidAlt`, and on an
+   * outbound record that can be our own number — the same caution as the poller's team
+   * pairing. Never a value another lead already holds: `phone_e164` is unique, and two leads
+   * on one jid would make every later lookup by that jid a coin toss.
    */
-  function learn(lead, rec) {
+  function learnable(lead, rec) {
     const { phone, waJid, waLid } = jidsOf(rec);
     const free = (holder) => !holder || holder.lead_id === lead.lead_id;
     const patch = {};
     if (waLid && !lead.wa_lid && free(db.getLeadByJid(waLid))) patch.wa_lid = waLid;
     if (waJid && !lead.wa_jid && free(db.getLeadByJid(waJid))) patch.wa_jid = waJid;
     if (phone && !lead.phone_e164 && free(db.getLeadByPhone(phone))) patch.phone_e164 = phone;
+    return patch;
+  }
+
+  function learn(lead, patch) {
     const fields = Object.keys(patch);
     if (!fields.length) return;
     db.updateLead(lead.lead_id, { ...patch, updated: now() });
@@ -132,15 +138,14 @@ export function createIngest({
       if (!rec.fromMe && isExcluded(shownBy(current, rec))) {
         // Nothing is stored, but the row keeps the number the record showed: without it the
         // row never looks excluded, and the owner's later records into this chat would still
-        // be stored and shown while the chat stayed `in` for good.
-        learn(current, rec);
-        // A row that cannot take the number (another lead holds it, or the row already holds
-        // a different one) never looks excluded, and no sweep finds it by its own number, so
-        // the chat leaves the inbox now, with what it held (P2-7).
-        if (!isExcluded(db.getLead(current.lead_id))) {
-          inbox.leaveInbox(current.lead_id);
-          log({ level: 'warn', evt: 'inbox.left_excluded', leadId: current.lead_id });
-        }
+        // be stored and shown while the chat stayed `in` for good. Only when what the row can
+        // take (empty fields only) excludes it by itself: a row that cannot take the number
+        // (another lead holds it, or the row holds a different one) learns nothing — not even
+        // a lid that belongs to the excluded number. Ingest never moves a chat or purges a
+        // transcript; the owner's never-list add (P2-7) and the maintenance sweep (P2-20) do.
+        const patch = learnable(current, rec);
+        if (isExcluded({ ...current, ...patch })) learn(current, patch);
+        else log({ level: 'warn', evt: 'inbox.refused_excluded', reason: 'number_not_held' });
         return { stored: false, reason: 'excluded' };
       }
 
@@ -163,7 +168,7 @@ export function createIngest({
         senderKind = kind === 'staff' || kind === 'dana' ? kind : 'owner_number';
         senderUserId = senderKind === 'owner_number' ? null : (match.row.user_id ?? null);
       } else {
-        learn(current, rec);
+        learn(current, learnable(current, rec));
       }
 
       const { inserted } = inbox.upsertMessage({

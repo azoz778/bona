@@ -106,7 +106,7 @@ test("a team member's or a never-list chat stores nothing, whichever caller hand
   handed.s.close();
 });
 
-test('a lid-only chat whose record shows a team or never-list number stores nothing: its row learns whose chat it is, or the chat leaves the inbox', () => {
+test('a lid-only chat whose record shows a team or never-list number stores nothing: its row learns whose chat it is when it can, and the chat is never moved', () => {
   // A per-chat read (join history, catch-up, refresh) asks by the lid; the record's alt is
   // the first time the chat shows whose it is. The poller screens record jids; these callers do not.
   // Nothing is stored, but the row learns the number: it is then excluded by itself, so every
@@ -134,35 +134,52 @@ test('a lid-only chat whose record shows a team or never-list number stores noth
   assert.deepEqual(member.ingest(member.lead(), rec({ id: 'OWN-M', fromMe: true, jidAlt: null, text: TYPED })), { stored: false, reason: 'excluded' });
   member.s.close();
 
-  // A number another lead already holds is not learned (phone_e164 is unique), so this row
-  // can never exclude itself, and no sweep would find it by its own number. The chat leaves
-  // the inbox instead (P2-7): what it held is purged, and nothing from it is stored later.
+  // A row that cannot take the number — another lead holds it (phone_e164 is unique), or the
+  // row already holds a different one — does not exclude itself. The record is still refused,
+  // and nothing is stored or learned. Ingest never moves a chat or purges what it held: only
+  // the owner's audited never-list add (P2-7) and the maintenance sweep (P2-20) do that.
+  const NOT_HELD = { level: 'warn', evt: 'inbox.refused_excluded', reason: 'number_not_held' };
   const held = harness({ lead: { phone_e164: null, wa_jid: null } });
   held.s.insertLead({ ...LEAD, lead_id: OTHER_LEAD_ID, wa_lid: null, inbox_state: 'out' });
   assert.equal(held.ingest(held.lead(), rec({ id: 'IN-H0', jidAlt: null })).stored, true, 'nothing shows whose chat it is yet');
+  held.inbox.setHandler(LEAD_ID, held.staff.user_id);
+  held.inbox.setNeedsHuman(LEAD_ID, 1);
   held.team.addNever({ phone: PHONE, note: 'family' });
+  const heldBefore = { lead: held.lead(), thread: held.inbox.messagesFor(LEAD_ID), other: held.s.getLead(OTHER_LEAD_ID) };
   assert.deepEqual(held.ingest(held.lead(), rec()), { stored: false, reason: 'excluded' });
-  assert.deepEqual([held.lead().phone_e164, held.lead().wa_jid], [null, null]);
-  assert.equal(held.lead().inbox_state, 'out');
-  assert.equal(held.inbox.hasMessages(LEAD_ID), false, 'what the chat held is purged');
   assert.deepEqual(
-    held.ingest(held.lead(), rec({ id: 'OWN-H', fromMe: true, jidAlt: null, text: TYPED })),
-    { stored: false, reason: 'not_in_inbox' },
-    'a later record from the owner\'s number is not stored either',
+    [held.lead().inbox_state, held.lead().handler_user_id, held.lead().needs_human, held.lead().phone_e164, held.lead().wa_jid],
+    ['in', held.staff.user_id, 1, null, null],
+    'the chat stays in the inbox with its handler and "needs a human", and learns no number',
   );
-  assert.deepEqual([held.inbox.hasMessages(LEAD_ID), held.lead().handler_user_id, held.lead().last_msg_ts], [false, null, null]);
-  assert.ok(held.logs.some((e) => e.evt === 'inbox.left_excluded' && e.leadId === LEAD_ID));
-  assert.equal(held.s.getLead(OTHER_LEAD_ID).inbox_state, 'out', 'the lead that holds the number is left as it was');
+  assert.deepEqual(held.lead(), heldBefore.lead, 'the row is not touched at all');
+  assert.deepEqual(held.inbox.messagesFor(LEAD_ID), heldBefore.thread, 'its transcript is kept, and nothing is added');
+  assert.deepEqual(held.s.getLead(OTHER_LEAD_ID), heldBefore.other, 'the lead that holds the number is left as it was');
+  assert.deepEqual(held.logs.filter((e) => e.evt === NOT_HELD.evt), [NOT_HELD], 'one line, a reason and no id or number');
+  assert.equal(held.logs.some((e) => e.evt === 'inbox.learned'), false);
   assertClean(held.logs);
   held.s.close();
 
-  // The same when the row already holds another number: the chat showed an excluded one.
-  const other = harness({ lead: { phone_e164: '966500000002', wa_jid: '966500000002@s.whatsapp.net' } });
+  // The same when the row already holds another number: it learns nothing — not even the lid
+  // the record came under, which belongs to the excluded number, not to this row's.
+  const OTHER_PHONE_JID = '966500000002@s.whatsapp.net';
+  const other = harness({ lead: { phone_e164: '966500000002', wa_jid: OTHER_PHONE_JID, wa_lid: null } });
+  other.inbox.upsertMessage({
+    key_id: 'IN-O0', lead_id: LEAD_ID, jid: OTHER_PHONE_JID, direction: 'in', sender_kind: 'client', text: TEXT, ts: NOW - 120_000,
+  });
+  other.inbox.setHandler(LEAD_ID, other.staff.user_id);
+  other.inbox.setNeedsHuman(LEAD_ID, 1);
   other.team.addNever({ phone: PHONE, note: 'family' });
+  const otherBefore = { lead: other.lead(), thread: other.inbox.messagesFor(LEAD_ID) };
   assert.deepEqual(other.ingest(other.lead(), rec()), { stored: false, reason: 'excluded' });
-  assert.deepEqual([other.lead().phone_e164, other.lead().inbox_state], ['966500000002', 'out']);
-  assert.deepEqual(other.ingest(other.lead(), rec({ id: 'OWN-O', fromMe: true, jidAlt: null, text: TYPED })), { stored: false, reason: 'not_in_inbox' });
-  assert.equal(other.inbox.hasMessages(LEAD_ID), false);
+  assert.deepEqual(
+    [other.lead().inbox_state, other.lead().handler_user_id, other.lead().needs_human, other.lead().phone_e164, other.lead().wa_lid],
+    ['in', other.staff.user_id, 1, '966500000002', null],
+  );
+  assert.deepEqual(other.lead(), otherBefore.lead, 'the row is not touched at all');
+  assert.deepEqual(other.inbox.messagesFor(LEAD_ID), otherBefore.thread, 'its transcript is kept, and nothing is added');
+  assert.deepEqual(other.logs.filter((e) => e.evt === NOT_HELD.evt), [NOT_HELD]);
+  assertClean(other.logs);
   other.s.close();
 
   // A row that learned the number excludes itself and stays where it is: the daily sweep moves it.
@@ -170,7 +187,7 @@ test('a lid-only chat whose record shows a team or never-list number stores noth
   learnt.team.addNever({ phone: PHONE, note: 'family' });
   learnt.ingest(learnt.lead(), rec());
   assert.equal(learnt.lead().inbox_state, 'in');
-  assert.equal(learnt.logs.some((e) => e.evt === 'inbox.left_excluded'), false);
+  assert.equal(learnt.logs.some((e) => e.evt === NOT_HELD.evt), false, 'a row that took the number is not reported');
   learnt.s.close();
 
   // Not from a record we sent: its alt may be the owner's own number, a team number.
