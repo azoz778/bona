@@ -131,6 +131,7 @@ test('a text message flattens to the shape the poller reasons about', () => {
     messageType: 'conversation',
     media: null,
     fileName: null,
+    fileNameTruncated: false,
     noise: false,
   });
 });
@@ -1061,6 +1062,7 @@ test('a document name loses control and bidi characters, is capped at 120 code p
   const capped = '📄'.repeat(50) + 'a'.repeat(70);
   assert.equal(mediaOf({ message: doc(long) }), `[document: ${capped}]`);
   assert.equal(Array.from(normaliseRecord({ key: { id: 'D1' }, message: doc(long) }).fileName).length, 120);
+  assert.equal(normaliseRecord({ key: { id: 'D1' }, message: doc(long) }).fileNameTruncated, true, 'the record says the name was cut');
 
   // Invisible formatting characters, which let two different names look the same, go as
   // well; the joiners that Persian text and emoji need stay.
@@ -1075,6 +1077,8 @@ test('a document name loses control and bidi characters, is capped at 120 code p
   assert.equal(nameOf('a'.repeat(119) + '🇸🇦'), 'a'.repeat(119));
   assert.equal(nameOf('a'.repeat(119) + '\u0628\u064E'), 'a'.repeat(119));
   assert.equal(nameOf('a'.repeat(115) + family), 'a'.repeat(115) + family, 'exactly 120 code points: kept whole');
+  assert.equal(normaliseRecord({ key: { id: 'D2' }, message: doc('a'.repeat(115) + family) }).fileNameTruncated, false, 'kept whole is not cut');
+  assert.equal(normaliseRecord({ key: { id: 'D2' }, message: doc(' ' + 'a'.repeat(120) + ' \u202E') }).fileNameTruncated, false, 'what cleaning removes is not a cut');
   assert.equal(nameOf('a'.repeat(116) + family + 'b'), 'a'.repeat(116));
 
   // Every other invisible character goes too: they are found by category (control, format,
@@ -1164,6 +1168,7 @@ test('normaliseRecord carries the placeholder, the cleaned file name and the noi
   assert.equal(voice.media, '[voice note]');
   assert.equal(voice.text, '');
   assert.equal(voice.fileName, null);
+  assert.equal(voice.fileNameTruncated, false);
   assert.equal(voice.noise, false);
 
   const brochure = normaliseRecord(textRecord({
@@ -1172,6 +1177,7 @@ test('normaliseRecord carries the placeholder, the cleaned file name and the noi
   }));
   assert.equal(brochure.media, '[document: BONA-W014.pdf]');
   assert.equal(brochure.fileName, 'BONA-W014.pdf');
+  assert.equal(brochure.fileNameTruncated, false);
   assert.equal(brochure.text, 'as promised');
   assert.equal(brochure.noise, false);
 
