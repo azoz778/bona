@@ -85,7 +85,7 @@ export function toMs(value) {
 /** A time bound for the request body: ms, Date or ISO string → ISO string. */
 export function toIso(value) {
   const ms = toMs(value);
-  if (ms === null) throw new TypeError('findMessagesWindow needs both gte and lte');
+  if (ms === null) throw new TypeError('evolution: both gte and lte are required');
   return new Date(ms).toISOString();
 }
 
@@ -97,14 +97,23 @@ export function toIso(value) {
 export function unwrapMessage(message, depth = 0) {
   const m = message;
   if (!m || typeof m !== 'object' || depth > 6) return m ?? null;
-  const inner = m.ephemeralMessage?.message
-    ?? m.viewOnceMessage?.message
-    ?? m.viewOnceMessageV2?.message
-    ?? m.viewOnceMessageV2Extension?.message
-    ?? m.documentWithCaptionMessage?.message
-    ?? m.editedMessage?.message
-    ?? null;
+  const inner = innerOf(m);
   return inner ? unwrapMessage(inner, depth + 1) : m;
+}
+
+/** The wrappers `unwrapMessage` looks through, in the order it tries them. */
+const WRAPPERS = [
+  'ephemeralMessage', 'viewOnceMessage', 'viewOnceMessageV2', 'viewOnceMessageV2Extension',
+  'documentWithCaptionMessage', 'editedMessage',
+];
+
+/** The message one wrapper in (the first wrapper that holds one), or null. */
+function innerOf(m) {
+  for (const wrapper of WRAPPERS) {
+    const inner = m[wrapper]?.message;
+    if (inner !== undefined && inner !== null) return inner;
+  }
+  return null;
 }
 
 /** The body or caption of a record, whichever shape it arrived in. `''` when there is none. */
@@ -144,20 +153,42 @@ export function contextOf(record) {
 export const bareJid = (jid) => String(jid || '').split(':')[0].split('@')[0].replace(/[^0-9]/g, '');
 
 /**
- * Control characters and the bidi overrides, isolates and marks. A file name is chosen by
- * whoever sent the file: a right-to-left override can make `fdp.exe` read as `exe.pdf`,
- * and escaping for HTML does nothing about that, so they go before the name is shown.
+ * Control characters, the bidi overrides, isolates and marks, and the invisible formatting
+ * characters (zero-width space, soft hyphen, word joiner and invisible operators, the
+ * deprecated format controls, interlinear annotation). A file name is chosen by whoever
+ * sent the file: a right-to-left override can make `fdp.exe` read as `exe.pdf`, an
+ * invisible character makes two different names look the same, and escaping for HTML does
+ * nothing about either, so they go before the name is shown. The zero-width non-joiner and
+ * joiner (U+200C, U+200D) stay: Persian text and emoji sequences need them.
  */
-const CONTROL_OR_BIDI_RE = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+const CONTROL_OR_BIDI_RE = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufff9-\ufffb]/g;
 /** Longest document name kept, in code points (an emoji is one, not two). */
 const MAX_FILE_NAME = 120;
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+/**
+ * At most `max` code points of `text`, cut only between graphemes, so a flag, an emoji
+ * sequence or a letter with its vowel mark is kept whole or left out whole.
+ */
+function capCodePoints(text, max) {
+  if (Array.from(text).length <= max) return text;
+  let out = '';
+  let used = 0;
+  for (const { segment } of GRAPHEMES.segment(text)) {
+    const size = Array.from(segment).length;
+    if (used + size > max) break;
+    out += segment;
+    used += size;
+  }
+  return out;
+}
 
 /** A sender-chosen file name made safe to show: `''` when nothing usable is left. */
 function cleanFileName(name) {
   if (typeof name !== 'string') return '';
   // Whitespace first, so a tab or a line break between two words leaves a space, not a join.
   const flat = name.replace(/\s+/g, ' ').replace(CONTROL_OR_BIDI_RE, '').replace(/\s+/g, ' ').trim();
-  return Array.from(flat).slice(0, MAX_FILE_NAME).join('').trim();
+  return capCodePoints(flat, MAX_FILE_NAME).trim();
 }
 
 /**
@@ -184,20 +215,40 @@ export function mediaOf(record) {
   return null;
 }
 
-/** Record kinds that change or decorate another message instead of being one. */
-const NOISE_KINDS = new Set(['protocolMessage', 'reactionMessage', 'pollUpdateMessage']);
+/**
+ * Record kinds that change or decorate another message instead of being one: a delete or an
+ * edit (protocol), a reaction (plain or encrypted), a poll vote, an edit that carries its new
+ * text (Evolution rewrites the original record with it), an album header (the photos arrive
+ * as records of their own), a pin, and "keep" in a disappearing chat.
+ */
+const NOISE_KINDS = new Set([
+  'protocolMessage', 'reactionMessage', 'pollUpdateMessage', 'editedMessage',
+  'encReactionMessage', 'albumMessage', 'pinInChatMessage', 'keepInChatMessage',
+]);
 /** Parts that ride along with a message and never carry anything a person wrote. */
 const ENVELOPE_KEYS = new Set(['messageContextInfo', 'senderKeyDistributionMessage']);
 
+/** True when an edit wrapper sits anywhere on the way in to the real message. */
+function wrappedInEdit(message) {
+  let m = message;
+  for (let depth = 0; m && typeof m === 'object' && depth <= 6; depth += 1) {
+    if (m.editedMessage) return true;
+    m = innerOf(m);
+  }
+  return false;
+}
+
 /**
- * True for a record that is not a message of its own and must never become a bubble:
- * a reaction, a protocol message (a delete, an edit), a poll vote, or a record that is
- * only encryption/device envelope. A record with no message body at all is NOT noise —
- * it may be a client message the phone could not decrypt, so it shows as `[message]`
- * rather than vanishing (design §4.3, no silent loss).
+ * True for a record that is not a message of its own and must never become a bubble: one
+ * of the `NOISE_KINDS` (by `messageType`, by a part of the message, or — for an edit — by
+ * the wrapper `unwrapMessage` takes off), or a record that is only encryption/device
+ * envelope. A record with no message body at all is NOT noise — it may be a client message
+ * the phone could not decrypt, so it shows as `[message]` rather than vanishing (design
+ * §4.3, no silent loss). Nor is an unknown kind: it too shows as `[message]`.
  */
 export function isNoise(record) {
   if (NOISE_KINDS.has(record?.messageType)) return true;
+  if (wrappedInEdit(record?.message)) return true;
   const m = unwrapMessage(record?.message);
   if (!m || typeof m !== 'object') return false;
   const keys = Object.keys(m);
@@ -208,7 +259,9 @@ export function isNoise(record) {
 /**
  * One Evolution record, flattened to what the poller and the inbox reason about.
  * `media` is `mediaOf`'s placeholder, `fileName` a document's cleaned name (null for
- * anything else), `noise` is `isNoise`.
+ * anything else), `noise` is `isNoise`. A document's name is chosen by its sender and is
+ * often a person's name or a phone number, so `media` and `fileName` are never logged —
+ * the same care as `text`, `pushName` and the jids.
  * @typedef {{ id: string|null, jid: string|null, jidAlt: string|null, fromMe: boolean,
  *             ts: number|null, text: string, pushName: string|null,
  *             contextInfo: object|null, messageType: string|null,
@@ -260,14 +313,48 @@ export function recordsOf(payload) {
 /** A size Evolution states about the whole filtered set, or null when it did not state one. */
 const countOf = (value) => (Number.isInteger(value) && value >= 0 ? value : null);
 
+/** The `where.key` fields Evolution matches on. */
+const KEY_FILTERS = ['remoteJid', 'remoteJidAlt', 'id'];
+const isIsoDate = (value) => typeof value === 'string' && Number.isFinite(Date.parse(value));
+
+/**
+ * Whether Evolution would really narrow a read by `where`. It silently DROPS a key filter
+ * whose value is falsy (`{ key: { remoteJid: null } }` reads every chat) and ignores a time
+ * filter unless both bounds are given — and either slip would page through every chat on the
+ * owner's personal WhatsApp, into whichever thread the caller files the answer under. So a
+ * filter must name a chat or a message (`key.remoteJid`, `key.remoteJidAlt`, `key.id`) or a
+ * whole window (`messageTimestamp` with ISO `gte` AND `lte`), and every one of those that is
+ * present must be usable: a null jid beside a window is refused too, not read as the window.
+ */
+function narrowsRead(where) {
+  if (!where || typeof where !== 'object' || Array.isArray(where)) return false;
+  let applied = 0;
+  if (where.key !== undefined) {
+    const key = where.key;
+    if (!key || typeof key !== 'object' || Array.isArray(key)) return false;
+    const given = KEY_FILTERS.filter((field) => key[field] !== undefined);
+    if (given.length === 0) return false;
+    if (!given.every((field) => typeof key[field] === 'string' && key[field] !== '')) return false;
+    applied += 1;
+  }
+  if (where.messageTimestamp !== undefined) {
+    const window = where.messageTimestamp;
+    if (!window || typeof window !== 'object' || !isIsoDate(window.gte) || !isIsoDate(window.lte)) return false;
+    applied += 1;
+  }
+  return applied > 0;
+}
+
 /**
  * One page of the messages matching `where`, newest first.
  *
  * `where` goes to Evolution as given: `{ messageTimestamp: { gte, lte } }` (ISO strings —
  * both, or the filter is ignored) for a window across every chat, `{ key: { remoteJid } }`
- * or `{ key: { remoteJidAlt } }` for one chat, or a chat and a window together. An empty
- * filter is refused: it would page through every chat on the owner's personal WhatsApp.
- * `fromMe` is never worth sending — the server ignores it.
+ * or `{ key: { remoteJidAlt } }` for one chat, or a chat and a window together. A filter
+ * Evolution would not apply — empty, a key with a null or empty jid, a one-sided window —
+ * is refused with a TypeError before anything is sent (`narrowsRead`): it would page
+ * through every chat on the owner's personal WhatsApp. `fromMe` is never worth sending —
+ * the server ignores it.
  *
  * `total` and `pages` describe everything the filter matched, not this page, when the
  * answer is boxed; both are null for a bare array, and the caller then cannot tell a
@@ -284,8 +371,9 @@ export async function findMessagesPage({
 } = {}) {
   if (!baseUrl) throw new TypeError('evolution: baseUrl required');
   if (!instance) throw new TypeError('evolution: instance required');
-  if (!where || typeof where !== 'object' || Array.isArray(where) || Object.keys(where).length === 0) {
-    throw new TypeError('evolution: a where filter is required');
+  // The filter itself is never put in the message: it carries phone numbers.
+  if (!narrowsRead(where)) {
+    throw new TypeError('evolution: where must name a chat (key.remoteJid, key.remoteJidAlt, key.id) or a whole window (messageTimestamp gte and lte)');
   }
   const root = String(baseUrl).replace(/\/+$/, '');
   const route = `/chat/findMessages/${encodeURIComponent(instance)}`;
@@ -376,19 +464,23 @@ export async function fetchWindow({ maxPages = MAX_PAGES, offset = PAGE_SIZE, ..
  * whole seconds, so the halves `[gte, mid - 1 ms]` and `[mid, lte]` neither overlap nor
  * leave a second out.
  *
- * A message that arrives while a piece is being paged pushes that piece's older records one
- * place down: the next page repeats a record, and the oldest slides past the last page the
- * first answer stated. So ids are de-duplicated, a piece measures the records it KEPT — not
- * the rows its pages held — against the `total` its first answer stated, and it reads on
- * past the stated pages while that count is short and the pages still come back full. The
- * newcomer is stamped about now, the newest thing in the window, so the caller's next
- * window reaches it.
+ * A message that lands inside a piece while it is being paged pushes that piece's older
+ * records one place down: the next page may repeat a record, and the oldest slides past the
+ * last page the first answer stated. The newcomer need not be the newest thing in the
+ * window — WhatsApp keeps the sender's timestamp, so what a phone delivers on reconnecting
+ * lands wherever its time puts it, often mid-piece. So ids are de-duplicated, a piece counts
+ * the records it KEPT — not the rows its pages held — and it reads on past the stated pages
+ * while that count is short of the largest `total` any of its pages stated and the pages
+ * still come back full. A newcomer that lands on a page already read is not returned by
+ * this read; only the caller's next, overlapping window can reach it.
  *
  * Only a piece that is still too big when it cannot be cut again — at `maxDepth`, or under
- * two seconds wide with no whole second left to cut at — is read partially: its newest
- * `maxPages` pages, `truncated` set, and `missing` saying how many were left unread. A piece
- * whose kept count is still short when the page cap comes first is reported the same way.
- * The caller logs that and moves on; holding its cursor there would re-read the same newest
+ * two seconds wide (narrower windows are never cut) — is read partially: its newest
+ * `maxPages` pages, `truncated` set, and `missing` saying how many of the first answer's
+ * `total` were left unread. A piece whose kept count is still short when the page cap comes
+ * first is reported the same way, and so is one the page cap stops while it is still reading
+ * on for a late delivery — `truncated` even when `missing` cannot count what it left. The
+ * caller logs that and moves on; holding its cursor there would re-read the same newest
  * pages for ever.
  *
  * A bare-array answer states no size. That piece falls back to paging until a short page,
@@ -407,6 +499,11 @@ export async function readWindow({
   const gteMs = toMs(gte);
   const lteMs = toMs(lte);
   if (gteMs === null || lteMs === null) throw new TypeError('readWindow needs both gte and lte');
+  // offset 0 would make every window "too big" and cut it to maxDepth for nothing (and the
+  // server would quietly page by 50 instead).
+  if (!Number.isInteger(offset) || offset < 1) throw new TypeError('readWindow: offset must be a whole number of at least 1');
+  if (!Number.isInteger(maxPages) || maxPages < 1) throw new TypeError('readWindow: maxPages must be a whole number of at least 1');
+  if (!Number.isInteger(maxDepth) || maxDepth < 0) throw new TypeError('readWindow: maxDepth must be a whole number of at least 0');
   const records = [];
   const seen = new Set();
   let pieces = 0;
@@ -457,16 +554,26 @@ export async function readWindow({
     // in for the record it pushed past the last stated page.
     let kept = keep(first.records);
     let last = first.records.length;
+    // The largest total any page of this piece has stated. A late delivery raises it, and
+    // judged against the first answer's total alone, a piece whose later page held the
+    // newcomer and no repeat would look complete with its oldest record still unread.
+    let seenTotal = first.total;
+    const readingOn = () => kept < seenTotal && last >= offset;
     const stated = Math.min(first.pages ?? Math.ceil(first.total / offset), maxPages);
-    for (let page = 2; page <= maxPages && (page <= stated || (kept < first.total && last >= offset)); page += 1) {
+    for (let page = 2; page <= maxPages && (page <= stated || readingOn()); page += 1) {
       const next = await readPage(from, to, page);
       kept += keep(next.records);
       last = next.records.length;
+      seenTotal = Math.max(seenTotal, next.total ?? 0);
     }
-    // Over the cap at the deepest level, or short when the page cap came first.
-    if (kept < first.total) {
+    // Over the cap at the deepest level, short when the page cap came first, or stopped by
+    // the page cap while still reading on for a late delivery. `missing` is measured against
+    // the first answer's total only, so a newcomer that landed on a page already read is not
+    // counted: this read cannot tell it from the rest, and only the next window can reach it.
+    const short = Math.max(0, first.total - kept);
+    if (short > 0 || readingOn()) {
       truncated = true;
-      missing += first.total - kept;
+      missing += short;
     }
   }
 

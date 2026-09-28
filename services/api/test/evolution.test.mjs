@@ -65,6 +65,8 @@ test('both bounds are required — the timestamp filter is ignored without them'
   const { fetchImpl, calls } = recorder();
   await assert.rejects(() => findMessagesWindow({ ...OPTS, lte: null, fetchImpl }), TypeError);
   await assert.rejects(() => findMessagesWindow({ ...OPTS, gte: undefined, fetchImpl }), TypeError);
+  // The bound check is shared (readWindow and findMessagesWindow both use it), so it names neither.
+  await assert.rejects(() => findMessagesWindow({ ...OPTS, lte: 'soon', fetchImpl }), { name: 'TypeError', message: 'evolution: both gte and lte are required' });
   assert.equal(calls.length, 0, 'a half-open window is never sent');
 });
 
@@ -316,6 +318,48 @@ test('findMessagesPage refuses a missing or empty filter, which would read every
   await assert.rejects(() => findMessagesPage({ ...BASE, baseUrl: '', where: { key: { remoteJid: CLIENT } }, fetchImpl }), TypeError);
   assert.equal(calls.length, 0);
 
+  // Evolution drops a key filter whose value is falsy and ignores a one-sided time filter, so
+  // each of these would page through every chat. A null jid from a lead with neither a lid
+  // nor a phone jid is the likely slip; a time window beside it would still read every chat
+  // in that window.
+  const window = { gte: iso(T0), lte: iso(T0 + 60_000) };
+  const wide = [
+    { key: { remoteJid: null } },
+    { key: { remoteJid: '' } },
+    { key: { remoteJidAlt: undefined, remoteJid: null } },
+    { key: { id: '' } },
+    { key: { remoteJid: 42 } },
+    { key: {} },
+    { key: null },
+    { key: [] },
+    { key: { fromMe: true } },
+    { fromMe: true },
+    { messageTimestamp: { gte: iso(T0) } },
+    { messageTimestamp: { lte: iso(T0) } },
+    { messageTimestamp: { gte: 'not a date', lte: iso(T0) } },
+    { messageTimestamp: { gte: T0, lte: T0 + 60_000 } },
+    { messageTimestamp: null },
+    { key: { remoteJid: null }, messageTimestamp: window },
+    { key: { remoteJid: CLIENT }, messageTimestamp: { gte: iso(T0) } },
+    { key: { remoteJid: CLIENT, remoteJidAlt: null } },
+  ];
+  for (const where of wide) {
+    await assert.rejects(() => findMessagesPage({ ...BASE, where, fetchImpl }), TypeError, JSON.stringify(where));
+  }
+  assert.equal(calls.length, 0, 'nothing that would widen to every chat is ever sent');
+
+  // A filter that does narrow the read goes through as given.
+  const ok = recorder();
+  const narrow = [
+    { key: { remoteJid: CLIENT } },
+    { key: { remoteJidAlt: CLIENT } },
+    { key: { id: 'KEY1' } },
+    { messageTimestamp: window },
+    { key: { remoteJid: CLIENT }, messageTimestamp: window },
+  ];
+  for (const where of narrow) await findMessagesPage({ ...BASE, where, fetchImpl: ok.fetchImpl });
+  assert.deepEqual(ok.calls.map((c) => c.body.where), narrow);
+
   const bad = recorder([{ status: 500, body: { error: 'boom' } }]);
   await assert.rejects(() => findMessagesPage({ ...BASE, where: { key: { remoteJid: CLIENT } }, fetchImpl: bad.fetchImpl }), (err) => {
     assert.ok(err instanceof EvolutionError);
@@ -407,7 +451,7 @@ test('readWindow never cuts a window under two seconds wide, and maxDepth 0 neve
   const two = [...Array.from({ length: 300 }, (_, i) => stored(`X${i}`, S0)), ...Array.from({ length: 300 }, (_, i) => stored(`Y${i}`, S0 + 1))];
   const narrow = fakeEvolution(two);
   const a = await readWindow({ ...BASE, gte: T0, lte: T0 + 1_999, fetchImpl: narrow.fetchImpl });
-  assert.equal(narrow.calls.length, MAX_PAGES, 'no whole second inside the window to cut at');
+  assert.equal(narrow.calls.length, MAX_PAGES, 'under two seconds wide: not cut, although T0 + 1000 lies inside it');
   assert.equal(a.pieces, 1);
   assert.equal(a.records.length, 500);
   assert.equal(a.truncated, true);
@@ -467,6 +511,86 @@ test('readWindow drops an id seen twice, keeps records that have no id, and read
   assert.equal(short.truncated, true);
 });
 
+test('readWindow reads on when a late delivery lands inside the piece, so the oldest record is not dropped quietly', async () => {
+  const k = (id) => textRecord({ key: { id, fromMe: false, remoteJid: CLIENT } });
+  // Stored A, B, C, D (newest first), two a page. Between page 1 and page 2 the phone
+  // reconnects and delivers X, which keeps its sender's timestamp — between B and C — so
+  // page 2 is X, C and D slides to page 3. Both records on page 2 are new, so the kept count
+  // reaches the first answer's total (4) with D still unread; page 2's own total (5) says
+  // there is one more.
+  const answers = [
+    { status: 200, body: { messages: { total: 4, pages: 2, currentPage: 1, records: [k('A'), k('B')] } } },
+    { status: 200, body: { messages: { total: 5, pages: 3, currentPage: 2, records: [k('X'), k('C')] } } },
+    { status: 200, body: { messages: { total: 5, pages: 3, currentPage: 3, records: [k('D')] } } },
+  ];
+  const full = recorder(answers);
+  const out = await readWindow({ ...OPTS, offset: 2, fetchImpl: full.fetchImpl });
+  assert.deepEqual(full.calls.map((c) => c.body.page), [1, 2, 3]);
+  assert.deepEqual(out.records.map((r) => r.id), ['A', 'B', 'X', 'C', 'D']);
+  assert.equal(out.truncated, false);
+  assert.equal(out.missing, 0);
+
+  // When the page cap comes first, D is unread and the piece says so. `missing` stays 0:
+  // measured against the first answer's four, the kept four look complete, and which of the
+  // five went unread — D, or a newcomer on a page already read — cannot be told apart.
+  const capped = recorder(answers);
+  const short = await readWindow({ ...OPTS, offset: 2, maxPages: 2, fetchImpl: capped.fetchImpl });
+  assert.equal(capped.calls.length, 2);
+  assert.deepEqual(short.records.map((r) => r.id), ['A', 'B', 'X', 'C']);
+  assert.equal(short.truncated, true, 'never passed off as complete');
+  assert.equal(short.missing, 0);
+
+  // A record with no id pushed from the bottom of page 1 to the top of page 2 is kept (and
+  // counted) twice — nothing tells the two apart — but the newcomer that pushed it raised the
+  // total by the same one, so the piece still reads on to D.
+  const noId = textRecord({ key: { fromMe: false, remoteJid: CLIENT } });
+  const pushed = recorder([
+    { status: 200, body: { messages: { total: 4, pages: 2, currentPage: 1, records: [k('A'), noId] } } },
+    { status: 200, body: { messages: { total: 5, pages: 3, currentPage: 2, records: [noId, k('C')] } } },
+    { status: 200, body: { messages: { total: 5, pages: 3, currentPage: 3, records: [k('D')] } } },
+  ]);
+  const twice = await readWindow({ ...OPTS, offset: 2, fetchImpl: pushed.fetchImpl });
+  assert.deepEqual(pushed.calls.map((c) => c.body.page), [1, 2, 3]);
+  assert.deepEqual(twice.records.map((r) => r.id), ['A', null, null, 'C', 'D']);
+  assert.equal(twice.truncated, false);
+  assert.equal(twice.missing, 0);
+});
+
+test('readWindow cuts a window whose bounds are off whole seconds without overlap or a second left out', async () => {
+  const evo = fakeEvolution(Array.from({ length: 1200 }, (_, i) => stored(`M${i}`, S0 + i)));
+  // Evolution cuts both bounds down to the second, so T0 + 500 still takes in second S0.
+  const out = await readWindow({ ...BASE, gte: T0 + 500, lte: T0 + 1_199_500, fetchImpl: evo.fetchImpl });
+  assert.deepEqual(asked(evo.calls), [
+    [500, 1_199_500, 1], // 1,200: cut at 600 s
+    [500, 599_999, 1], // 600: cut at 300 s
+    [500, 299_999, 1], [500, 299_999, 2], [500, 299_999, 3],
+    [300_000, 599_999, 1], [300_000, 599_999, 2], [300_000, 599_999, 3],
+    [600_000, 1_199_500, 1], // 600: cut at 899 s
+    [600_000, 898_999, 1], [600_000, 898_999, 2], [600_000, 898_999, 3],
+    [899_000, 1_199_500, 1], [899_000, 1_199_500, 2], [899_000, 1_199_500, 3], [899_000, 1_199_500, 4],
+  ]);
+  assert.deepEqual(out.records.map((r) => r.id), [
+    ...desc('M', 0, 299), ...desc('M', 300, 599), ...desc('M', 600, 898), ...desc('M', 899, 1199),
+  ]);
+  assert.equal(new Set(out.records.map((r) => r.id)).size, 1200, 'every message exactly once');
+  assert.equal(out.pieces, 4);
+  assert.equal(out.truncated, false);
+  assert.equal(out.missing, 0);
+});
+
+test('readWindow refuses a page size, page cap or depth that is not a whole number', async () => {
+  const { fetchImpl, calls } = recorder();
+  const bad = [
+    { offset: 0 }, { offset: -100 }, { offset: 2.5 }, { offset: '100' }, { offset: null },
+    { maxPages: 0 }, { maxPages: 1.5 }, { maxPages: Infinity },
+    { maxDepth: -1 }, { maxDepth: 0.5 }, { maxDepth: Number.NaN },
+  ];
+  for (const opts of bad) {
+    await assert.rejects(() => readWindow({ ...OPTS, ...opts, fetchImpl }), TypeError, String(Object.entries(opts)));
+  }
+  assert.equal(calls.length, 0, 'nothing is read with a nonsense page size');
+});
+
 test('readWindow needs both bounds', async () => {
   const { fetchImpl, calls } = recorder();
   await assert.rejects(() => readWindow({ ...BASE, gte: T0, fetchImpl }), TypeError);
@@ -517,6 +641,21 @@ test('a document name loses control and bidi characters, is capped at 120 code p
   const capped = '📄'.repeat(50) + 'a'.repeat(70);
   assert.equal(mediaOf({ message: doc(long) }), `[document: ${capped}]`);
   assert.equal(Array.from(normaliseRecord({ key: { id: 'D1' }, message: doc(long) }).fileName).length, 120);
+
+  // Invisible formatting characters, which let two different names look the same, go as
+  // well; the joiners that Persian text and emoji need stay.
+  assert.equal(mediaOf({ message: doc('a​b⁠c⁪d­e￹f⁤g⁯h.pdf') }), '[document: abcdefgh.pdf]');
+  const joined = 'می‌خواهم 👨‍👩‍👧.pdf';
+  assert.equal(mediaOf({ message: doc(joined) }), `[document: ${joined}]`);
+
+  // The cap never cuts a character in half: a flag is two code points, a letter with its vowel
+  // mark two, a family emoji five. What does not fit whole is left out whole.
+  const nameOf = (fileName) => normaliseRecord({ key: { id: 'D2' }, message: doc(fileName) }).fileName;
+  const family = '👨‍👩‍👧';
+  assert.equal(nameOf('a'.repeat(119) + '🇸🇦'), 'a'.repeat(119));
+  assert.equal(nameOf('a'.repeat(119) + 'بَ'), 'a'.repeat(119));
+  assert.equal(nameOf('a'.repeat(115) + family), 'a'.repeat(115) + family, 'exactly 120 code points: kept whole');
+  assert.equal(nameOf('a'.repeat(116) + family + 'b'), 'a'.repeat(116));
 });
 
 test('reactions, deletes and edits, poll votes and key-distribution records are noise; a message is not', () => {
@@ -533,6 +672,21 @@ test('reactions, deletes and edits, poll votes and key-distribution records are 
   for (const type of ['reactionMessage', 'protocolMessage', 'pollUpdateMessage']) {
     assert.equal(n(undefined, type), true, `${type} by messageType alone`);
   }
+  // An edit that carries the new text: Evolution rewrites the original record with it, so the
+  // edit itself would be a second bubble. Unwrapping takes the edit wrapper off, so it is
+  // looked for on the way in, not on what is left.
+  assert.equal(n({ editedMessage: { message: { conversation: 'fixed' } } }, 'editedMessage'), true, 'an edit carrying its text');
+  assert.equal(n({ editedMessage: { message: { conversation: 'fixed' } } }), true, 'an edit, by its wrapper alone');
+  assert.equal(n({ ephemeralMessage: { message: { editedMessage: { message: { extendedTextMessage: { text: 'fixed' } } } } } }), true, 'an edit in a disappearing chat');
+  assert.equal(n({ albumMessage: { expectedImageCount: 3 } }), true, 'an album header: the photos arrive as records of their own');
+  assert.equal(n({ pinInChatMessage: { type: 1 } }), true, 'a pin');
+  assert.equal(n({ keepInChatMessage: { keepType: 1 } }), true, 'keep in a disappearing chat');
+  assert.equal(n({ encReactionMessage: { encPayload: 'x' } }), true, 'an encrypted reaction');
+  for (const type of ['editedMessage', 'albumMessage', 'pinInChatMessage', 'keepInChatMessage', 'encReactionMessage']) {
+    assert.equal(n(undefined, type), true, `${type} by messageType alone`);
+  }
+  assert.equal(n({ documentWithCaptionMessage: { message: { documentMessage: {} } } }), false, 'other wrappers are not edits');
+  assert.equal(n({ viewOnceMessageV2: { message: { imageMessage: {} } } }), false);
 
   assert.equal(n({ conversation: 'hello', messageContextInfo: {} }, 'conversation'), false);
   assert.equal(n({ extendedTextMessage: { text: 'x' }, senderKeyDistributionMessage: {} }), false, 'a real message riding with a key');
