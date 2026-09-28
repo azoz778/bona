@@ -40,6 +40,7 @@
  */
 import { EvolutionError, PAGE_SIZE, findMessagesPage, oldestFirst } from '../evolution.mjs';
 import { waConfig } from '../wa.mjs';
+import { loggableName } from './loggable.mjs';
 import { RETENTION_MS } from './store.mjs';
 
 /** An automatic join stores this much of the chat before the joining message. */
@@ -96,13 +97,6 @@ function errorCode(err) {
   }
   return 'failed';
 }
-
-/** The error names worth logging: the kinds this code meets. Any other name is dropped — an injected error's name could carry anything. */
-const LOGGED_ERROR_NAMES = new Set([
-  'Error', 'EvolutionError', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'SqliteError', 'AbortError', 'TimeoutError',
-]);
-/** An error's name if it is one of those, else null. Shared with index.mjs's inbox upkeep, so every inbox log line keeps one rule. */
-export const loggableName = (err) => (typeof err?.name === 'string' && LOGGED_ERROR_NAMES.has(err.name) ? err.name : null);
 
 /**
  * Whether a record answers the question asked. A `remoteJidAlt` question also takes a record

@@ -23,6 +23,7 @@ import { ownerOutboundJoins } from '../lib/inbox/eligibility.mjs';
 import { createIngest } from '../lib/inbox/ingest.mjs';
 import { createInboxStore } from '../lib/inbox/store.mjs';
 import { leadNote } from '../lib/leads.mjs';
+import { loadConfig } from '../lib/config.mjs';
 
 const NOW = Date.UTC(2026, 8, 6, 12, 0, 0);
 const ANON = '9f1c'.repeat(8);
@@ -762,6 +763,22 @@ test('start() puts the tick on an unref\'d timer and stop() takes it off', async
   h.poller.stop();
   assert.equal(h.poller.started, false);
   h.cleanup();
+});
+
+test('start() with no interval and a cfg without one polls on lib/config.mjs\'s default', (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const everyMs = loadConfig({ env: {}, ids: {} }).waPollMs;
+  const db = openDb(':memory:');
+  const logs = [];
+  // Not configured, so a tick only logs that it skipped — synchronously, as it starts.
+  const poller = createPoller({ db, cfg: { env: {} }, log: (o) => logs.push(o), now: () => NOW });
+  assert.equal(poller.start(), true);
+  t.mock.timers.tick(everyMs - 1);
+  assert.equal(logs.length, 0);
+  t.mock.timers.tick(1);
+  assert.deepEqual(logs.map((l) => l.evt), ['wa.poll.skipped'], 'one default, not a stale second copy');
+  poller.stop();
+  db.close();
 });
 
 test('with no Evolution credentials the loop does nothing at all — it does not guess a URL', async () => {

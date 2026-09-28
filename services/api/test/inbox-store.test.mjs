@@ -528,6 +528,17 @@ test('addGap records a message that could not be read, once; gapsFor lists one c
   s.close();
 });
 
+test('clearGap removes one gap by its key and says whether there was one', () => {
+  const { s, inbox } = harness();
+  inbox.addGap({ key_id: 'join:L-1:1', lead_id: 'L-1', ts: NOW - 1, reason: 'history_failed' });
+  inbox.addGap({ key_id: 'K-2', lead_id: 'L-1', jid: JID, ts: NOW + 1, reason: 'failed' });
+  assert.equal(inbox.clearGap('join:L-1:1'), true);
+  assert.equal(inbox.clearGap('join:L-1:1'), false, 'already gone');
+  assert.equal(inbox.clearGap(null), false);
+  assert.deepEqual(inbox.gapsFor('L-1').map((g) => g.key_id), ['K-2']);
+  s.close();
+});
+
 test('a message stored after all clears the gap its failure left; any other gap stays', () => {
   const { s, inbox } = harness();
   chat(s, 'L-1');

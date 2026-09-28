@@ -50,7 +50,8 @@ import { createAudit } from './lib/audit.mjs';
 import { createSender, INTERRUPTED_MS as INTERRUPTED_SEND_MS } from './lib/wa-send.mjs';
 import { createInboxStore, RETENTION_MS } from './lib/inbox/store.mjs';
 import { createIngest } from './lib/inbox/ingest.mjs';
-import { createBackfill, JOIN_HISTORY_MS, loggableName } from './lib/inbox/backfill.mjs';
+import { createBackfill, JOIN_HISTORY_MS } from './lib/inbox/backfill.mjs';
+import { loggableName, loggableCode } from './lib/inbox/loggable.mjs';
 import { bareJid } from './lib/evolution.mjs';
 import { createDashboardRoutes } from './lib/dashboard/routes.mjs';
 
@@ -63,12 +64,6 @@ const GREETING = {
 const CODE_ROW_TTL_MS = 2 * 86_400_000;
 /** How often the real server runs `app.inboxMaintenance()`. */
 const INBOX_UPKEEP_EVERY_MS = 24 * 3_600_000;
-/**
- * An error's code, when it is shaped like one (`ERR_SQLITE_ERROR`, `ECONNREFUSED`): capitals
- * and underscores only, so it cannot carry a number. The inbox never logs an error's message
- * (lib/inbox/backfill.mjs): one could carry a jid.
- */
-const loggableCode = (err) => (typeof err?.code === 'string' && /^[A-Z_]{1,64}$/.test(err.code) ? err.code : null);
 
 const jsonLog = (level, obj) => {
   const line = JSON.stringify({ ts: new Date().toISOString(), level, ...obj });
@@ -244,11 +239,15 @@ export function createApp(options = {}) {
   };
   // The inbox's one exclusion rule (lib/team.mjs), the same the upkeep and the routes use.
   const excludedLead = (lead) => isExcludedLead(team, db, lead);
-  const ingest = options.ingest ?? createIngest({
+  const given = options.ingest ?? createIngest({
     db, inbox: inboxStore, ownerUserId, ownerPhone: ownerDigits || null, isExcludedLead: excludedLead, log, now: clock,
   });
-  // The backfill and the poller take the one-record function, not the object.
-  const ingestRecord = (lead, rec) => ingest.ingest(lead, rec);
+  // The backfill and the poller take the one-record function. A test may hand in either
+  // shape, as createPoller allows; any other fails here, not on every record the poller reads.
+  const ingestRecord = typeof given === 'function' ? given
+    : (typeof given?.ingest === 'function' ? (lead, rec) => given.ingest(lead, rec) : null);
+  if (!ingestRecord) throw new TypeError('options.ingest must be createIngest() or its ingest function');
+  const ingest = typeof given === 'function' ? { ingest: given } : given;
   // Per-chat reads from Evolution: history when a chat joins, a refresh when a thread is
   // opened or answered. Read-only, like the poller; constructing it contacts nothing.
   const backfill = options.backfill ?? createBackfill({ env: cfg.env ?? {}, db, ingest: ingestRecord, fetchImpl, log, now: clock });
@@ -308,7 +307,14 @@ export function createApp(options = {}) {
    * retention horizon, or the purge would be undone the same morning (at most 200 chats a
    * run: see `inChatsWithoutMessages` for the limit). Counts only in the log: never a
    * number, a name, a word of a message or an error's message. One run at a time, and it
-   * never rejects: upkeep that fails is a line in the log, not a crashed server.
+   * never rejects: upkeep that fails is a line in the log, not a crashed server. Each step
+   * runs on its own: one that throws is one `inbox.maintenance_failed` line naming it, its
+   * count reads null (not known), and the steps after it still run; a logger that throws
+   * costs nothing at all.
+   *
+   * A catch-up read that fails leaves the thread a gap, like the poller's join does (design
+   * §4.3, "no silent loss"): see `catchupGap`. A later read of the same chat that comes back
+   * whole takes it back.
    *
    * The sweep sees only what a row holds. A lid-only chat whose number another lead holds
    * (ingest's `held_by_other_lead`) never learns that number, so it stays in: its records
@@ -319,52 +325,103 @@ export function createApp(options = {}) {
   app.inboxMaintenance = async function inboxMaintenance() {
     if (upkeepRunning) return { skipped: 'running' };
     upkeepRunning = true;
+    const failed = (step, err) => upkeepLog({ level: 'error', evt: 'inbox.maintenance_failed', step, name: loggableName(err), code: loggableCode(err) });
+    /** One local step on its own. */
+    const step = (name, fn) => {
+      try {
+        return fn();
+      } catch (err) {
+        failed(name, err);
+        return null;
+      }
+    };
     try {
       const t = clock();
-      // First, so the catch-up below never fetches a private chat's history.
-      let excludedOut = 0;
-      for (const lead of inboxStore.listedLeads()) {
-        if (!excludedLead(lead)) continue;
-        inboxStore.leaveInbox(lead.lead_id);
-        excludedOut += 1;
-      }
-      if (excludedOut) log({ level: 'warn', evt: 'inbox.excluded_out', count: excludedOut });
-      const retention = inboxStore.retentionPurge(t - RETENTION_MS);
+      // First, so the catch-up below never fetches a private chat's history. The catch-up
+      // checks each chat again right before its read, so a sweep that failed opens nothing up.
+      const excludedOut = step('sweep', () => {
+        let out = 0;
+        for (const lead of inboxStore.listedLeads()) {
+          if (!excludedLead(lead)) continue;
+          inboxStore.leaveInbox(lead.lead_id);
+          out += 1;
+        }
+        if (out) upkeepLog({ level: 'warn', evt: 'inbox.excluded_out', count: out });
+        return out;
+      });
+      const retention = step('retention', () => inboxStore.retentionPurge(t - RETENTION_MS));
       const counts = {
         excludedOut,
-        purgedChats: retention.leads,
-        purgedMessages: retention.messages,
-        codeRows: inboxStore.pruneCodeRows(t - CODE_ROW_TTL_MS),
-        interrupted: inboxStore.markStalePending(t - INTERRUPTED_SEND_MS),
+        purgedChats: retention?.leads ?? null,
+        purgedMessages: retention?.messages ?? null,
+        codeRows: step('code_rows', () => inboxStore.pruneCodeRows(t - CODE_ROW_TTL_MS)),
+        interrupted: step('interrupted', () => inboxStore.markStalePending(t - INTERRUPTED_SEND_MS)),
         caughtUp: 0,
         caughtUpStored: 0,
+        caughtUpFailed: 0,
       };
       if (backfill.configured) {
-        for (const lead of inboxStore.inChatsWithoutMessages()) {
-          // A number that joined the team while an earlier fetch was running is not fetched.
-          if (excludedLead(lead)) continue;
-          const sinceTs = Math.max((lead.inbox_since ?? lead.created ?? t) - JOIN_HISTORY_MS, t - RETENTION_MS);
-          const got = await backfill.history(lead, { sinceTs, untilTs: t });
-          // A chat that left the inbox meanwhile comes back `skipped`: nothing was read for it.
-          if (got && !got.error && !got.skipped) {
-            counts.caughtUp += 1;
-            counts.caughtUpStored += Number(got.stored) || 0;
+        try {
+          for (const lead of inboxStore.inChatsWithoutMessages()) {
+            // A number that joined the team while an earlier fetch was running is not fetched.
+            if (excludedLead(lead)) continue;
+            const joinedAt = lead.inbox_since ?? lead.created ?? t;
+            const sinceTs = Math.max(joinedAt - JOIN_HISTORY_MS, t - RETENTION_MS);
+            const got = await backfill.history(lead, { sinceTs, untilTs: t });
+            // Keyed like the poller's join gap (wa-poller.mjs `join`), so one join never shows two.
+            const gapKey = `join:${lead.lead_id}:${joinedAt}`;
+            if (got?.error) {
+              counts.caughtUpFailed += 1;
+              catchupGap(lead.lead_id, gapKey, sinceTs);
+            } else if (got && !got.skipped) {
+              // (A chat that left the inbox meanwhile comes back `skipped`: nothing was read for it.)
+              counts.caughtUp += 1;
+              counts.caughtUpStored += Number(got.stored) || 0;
+              // The whole window came back, so an earlier run's gap was never true. A read cut
+              // at its page cap (`truncated`) proves nothing and leaves it.
+              if (!got.truncated) inboxStore.clearGap(gapKey);
+            }
           }
+          upkeepLog({ evt: 'inbox.catchup', chats: counts.caughtUp, stored: counts.caughtUpStored, failed: counts.caughtUpFailed });
+        } catch (err) {
+          // A read that broke its promise never to throw ends the catch-up, not the run.
+          failed('catchup', err);
         }
-        log({ evt: 'inbox.catchup', chats: counts.caughtUp, stored: counts.caughtUpStored });
       }
-      log({ evt: 'inbox.maintenance', ...counts });
+      upkeepLog({ evt: 'inbox.maintenance', ...counts });
       return counts;
     } catch (err) {
-      // Guarded, so the promise the server fires and forgets resolves even if the logger throws.
-      try {
-        log({ level: 'error', evt: 'inbox.maintenance_failed', name: loggableName(err), code: loggableCode(err) });
-      } catch { /* still resolved */ }
+      // Outside every step (the clock): the run fails, and the promise the server fires and
+      // forgets still resolves.
+      failed('run', err);
       return { error: 'failed' };
     } finally {
       upkeepRunning = false;
     }
   };
+
+  /** The upkeep's logger: one that throws costs no step, and never turns a finished run into a failed one. */
+  function upkeepLog(entry) {
+    try { log(entry); } catch { /* the upkeep goes on */ }
+  }
+
+  /**
+   * The gap a failed catch-up read leaves at the start of the window it asked for, so the
+   * thread says "a message could not be loaded — check WhatsApp" where the history belongs.
+   * Written when part of the window was stored (the chat has a message now, so no run asks
+   * for it again, and this is the only trace of what is missing), and when nothing was (a
+   * client may write before the next run, and then the chat is never asked again either).
+   * Only to a chat still `in`: `leaveInbox` purged its gaps, and one written now would
+   * outlive that; the check and the insert run with no `await` between them. A gap that
+   * cannot be written is logged (`inbox.gap_failed`), never thrown, as in the poller's join.
+   */
+  function catchupGap(leadId, key, ts) {
+    try {
+      if (db.getLead(leadId)?.inbox_state === 'in') inboxStore.addGap({ key_id: key, lead_id: leadId, ts, reason: 'history_failed' });
+    } catch {
+      upkeepLog({ level: 'warn', evt: 'inbox.gap_failed', leadId, reason: 'history_failed' });
+    }
+  }
 
   // The owner's dashboard. It owns its own auth (a WhatsApp one-time code), its own
   // security headers and its own limiter; nothing about it is CORS-enabled.

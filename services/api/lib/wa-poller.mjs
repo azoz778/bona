@@ -81,6 +81,12 @@ export const FIRST_RUN_LOOKBACK_MS = 10 * 60_000;
 export const MAX_WINDOW_MS = 10 * 60_000;
 /** Every window reaches this far back behind the cursor: WhatsApp delivery is not instant. */
 export const OVERLAP_MS = 120_000;
+/**
+ * `start()`'s interval when neither it nor `cfg.waPollMs` gives one: lib/config.mjs's default
+ * (20 s since the inbox, P2-11). Kept as a copy so this file never loads the config module;
+ * wa-poller.test.mjs checks the two agree.
+ */
+const DEFAULT_POLL_MS = 20_000;
 /** How long a processed message id is remembered, so the overlap cannot double-count it. */
 export const SEEN_TTL_MS = 7 * 86_400_000;
 /** How close a `whatsapp_click` has to be for an unknown number to be inferred from it. */
@@ -678,7 +684,7 @@ export function createPoller({
     busy = true;
     try {
       if (!configured) {
-        // Once per process: a missing key is a standing state, not news every 45 seconds.
+        // Once per process: a missing key is a standing state, not news on every tick.
         if (!skipLogged) { skipLogged = true; log({ evt: 'wa.poll.skipped', reason: 'evolution_not_configured' }); }
         return { skipped: 'not_configured' };
       }
@@ -897,7 +903,7 @@ export function createPoller({
     };
   }
 
-  function start({ intervalMs = cfg.waPollMs ?? 45_000 } = {}) {
+  function start({ intervalMs = cfg.waPollMs ?? DEFAULT_POLL_MS } = {}) {
     if (timer || !(intervalMs > 0)) return false;
     timer = setInterval(() => { tick().catch((err) => log({ level: 'warn', evt: 'wa.poll.failed', error: String(err?.message ?? err) })); }, intervalMs);
     // Polling must never be the reason the process stays alive.
