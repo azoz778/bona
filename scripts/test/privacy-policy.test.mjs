@@ -5,7 +5,9 @@
 // §4.6) has to say before a single transcript is stored: what is kept, who reads it, for
 // how long, where other copies stay, and how to have it deleted. Dana is left out of it on
 // purpose until she answers on WhatsApp (Phase 4) — a policy that promises what the service
-// does not do is as wrong as one that hides what it does.
+// does not do is as wrong as one that hides what it does. A dated line in *Changes* flags a
+// material change for the 30 days the page promises and is then removed: nothing here
+// needs it to be there, and the pointer test checks the page without it too.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { test } from 'node:test';
@@ -77,27 +79,44 @@ test('the WhatsApp conversations section says what is stored, who reads it, for 
   assert.ok(en.includes(site.phone.display) && ar.includes(site.phone.display), 'phone number');
 });
 
-test('what the WhatsApp conversations section and a dated change line point to is a real heading, the same in both languages', () => {
-  // “…” below / «…» أدناه is how the section sends the reader on; a Changes line names the
-  // section it added. Renaming a heading must not leave a pointer to nothing behind.
-  const idOf = (locale) => new Map(policy.sections.map((x) => [x.heading[locale], x.id]));
-  const pointers = {
-    'whatsapp-conversations': { en: /“([^”]+)”\)?\s+below/g, ar: /«([^»]+)»\)?\s+أدناه/g },
-    changes: { en: /“([^”]+)”/g, ar: /«([^»]+)»/g },
-  };
-  for (const [id, re] of Object.entries(pointers)) {
-    const s = section(id);
+// “…” below / «…» أدناه is how the WhatsApp conversations section sends the reader on; a
+// dated Changes line names the section it added. Renaming a heading must not leave a
+// pointer to nothing behind.
+const POINTERS = {
+  'whatsapp-conversations': { en: /“([^”]+)”\)?\s+below/g, ar: /«([^»]+)»\)?\s+أدناه/g },
+  changes: { en: /“([^”]+)”/g, ar: /«([^»]+)»/g },
+};
+/** A dated Changes line: “28 September 2026: …” / “28 سبتمبر 2026: …”. */
+const DATED_LINE = /^\d{1,2} \S+ \d{4}:/u;
+
+function checkPointers(p) {
+  const idOf = (locale) => new Map(p.sections.map((x) => [x.heading[locale], x.id]));
+  for (const [id, re] of Object.entries(POINTERS)) {
+    const s = p.sections.find((x) => x.id === id);
     assert.ok(s, `${id} is missing`);
     const targets = {};
     for (const locale of ['en', 'ar']) {
       const headings = idOf(locale);
       const quoted = [...body(s, locale).matchAll(re[locale])].map((m) => m[1]);
-      assert.ok(quoted.length > 0, `${id}.${locale}: expected at least one pointer to a section`);
+      // The conversations section always sends the reader on. Changes may point nowhere:
+      // its dated lines come out once their 30 days are up.
+      if (id === 'whatsapp-conversations') assert.ok(quoted.length > 0, `${id}.${locale}: expected at least one pointer to a section`);
       for (const q of quoted) assert.ok(headings.has(q), `${id}.${locale} points to “${q}”, which is no ${locale} heading`);
       targets[locale] = [...new Set(quoted.map((q) => headings.get(q)))].sort();
     }
     assert.deepEqual(targets.ar, targets.en, `${id}: the Arabic text points to the same sections as the English`);
   }
+}
+
+test('what the WhatsApp conversations section and a dated change line point to is a real heading, the same in both languages', () => {
+  checkPointers(policy);
+  // The page flags a material change for 30 days, so the dated Changes line comes out
+  // again (this one on or after 2026-10-28). Doing that must not turn this test red.
+  const later = structuredClone(policy);
+  const changes = later.sections.find((x) => x.id === 'changes');
+  for (const locale of ['en', 'ar']) changes.body[locale] = changes.body[locale].filter((para) => !DATED_LINE.test(para));
+  assert.ok(changes.body.en.length > 0 && changes.body.en.length === changes.body.ar.length, 'Changes keeps its standing paragraph in both languages');
+  checkPointers(later);
 });
 
 test('Dana is not named in that section until she answers on WhatsApp (Phase 4)', () => {
