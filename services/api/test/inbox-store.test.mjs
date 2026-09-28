@@ -735,3 +735,35 @@ test('statements are prepared once per store, not on every call', () => {
   s.db.prepare = realPrepare;
   s.close();
 });
+
+test('inChatsWithoutMessages: in chats with nothing stored yet, oldest joiner first (amendment A3)', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-new', { wa_jid: '966500000002@s.whatsapp.net', inbox_since: NOW - DAY });
+  chat(s, 'L-old', { wa_jid: '966500000003@s.whatsapp.net', inbox_since: NOW - 3 * DAY });
+  chat(s, 'L-lid', { wa_jid: null, wa_lid: '123456789@lid', inbox_since: NOW - 2 * DAY });
+  chat(s, 'L-talked', { wa_jid: '966500000004@s.whatsapp.net' });
+  inbox.upsertMessage(msg({ lead_id: 'L-talked' }));
+  lead(s, 'L-form', { phone_e164: '966500000005', inbox_state: 'in', inbox_since: NOW - 4 * DAY });
+  lead(s, 'L-unsure', { wa_jid: '966500000006@s.whatsapp.net', inbox_state: 'unsure' });
+  lead(s, 'L-out', { wa_jid: '966500000007@s.whatsapp.net', inbox_state: 'out' });
+  assert.deepEqual(inbox.inChatsWithoutMessages().map((l) => l.lead_id), ['L-old', 'L-lid', 'L-new'],
+    'a chat with a message, a form lead with no chat, a guess and a "not a client" are not in it');
+  assert.deepEqual(inbox.inChatsWithoutMessages({ limit: 1 }).map((l) => l.lead_id), ['L-old']);
+  s.close();
+});
+
+test('listedLeads: every lead an inbox page can list or count, for the upkeep\'s exclusion sweep', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-in', { phone_e164: '966500000002', wa_jid: '966500000002@s.whatsapp.net' });
+  lead(s, 'L-form', { phone_e164: '966500000005', inbox_state: 'in' });
+  lead(s, 'L-unsure', { wa_jid: '966500000006@s.whatsapp.net', inbox_state: 'unsure' });
+  lead(s, 'L-unplaced', { wa_lid: '123456789@lid' });
+  lead(s, 'L-out', { wa_jid: '966500000007@s.whatsapp.net', inbox_state: 'out' });
+  lead(s, 'L-legacy', { phone_e164: '966500000008', channel: 'form' });
+  assert.deepEqual(inbox.listedLeads().map((l) => l.lead_id).sort(), ['L-form', 'L-in', 'L-unplaced', 'L-unsure'],
+    'a "not a client" and a lead that is neither in nor a chat are on no inbox page');
+  assert.deepEqual(inbox.listedLeads().find((l) => l.lead_id === 'L-in'),
+    { lead_id: 'L-in', phone_e164: '966500000002', wa_jid: '966500000002@s.whatsapp.net', wa_lid: null, inbox_state: 'in' },
+    'only what the exclusion test reads');
+  s.close();
+});

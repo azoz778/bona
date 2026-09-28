@@ -54,3 +54,10 @@ test('the site\'s own origin is always allowed, whatever the allowlist says', ()
   assert.ok(dflt.origins.includes(siteDefaults().siteUrl));
   assert.equal(new Set(dflt.origins).size, dflt.origins.length, 'no duplicate origins');
 });
+
+test('the WhatsApp poller reads every 20 s by default, and the environment still wins', () => {
+  // The inbox (2026-09-27 design §4.3, P2-11): a staff member waits at most one interval
+  // to see a client's message. The VPS env file pins its own value, which still wins.
+  assert.equal(loadConfig({ env: {}, ids: {} }).waPollMs, 20_000);
+  assert.equal(loadConfig({ env: { BONA_WA_POLL_MS: '45000' }, ids: {} }).waPollMs, 45_000);
+});
