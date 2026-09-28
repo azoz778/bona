@@ -554,7 +554,7 @@ side: `docs/OWNER-RUNBOOK.md` §4, §9–§11 and `docs/checklists/`.
 
 **Store.** `${BONA_DATA}/bona.db` (SQLite, WAL, mode 0600): sessions, events, leads,
 touchpoints, stage history, spend, fan-out queue, dashboard auth, and the transcripts of
-the chats in the Bona inbox (Dashboard → Inbox, below). The JSONL files stay as
+the chats in the Bona inbox ([Dashboard → Inbox](#inbox), below). The JSONL files stay as
 the append-only raw log and are imported once on start-up. Raw phone numbers, names and
 message snippets never leave this file; ad platforms get hashed identifiers only.
 
@@ -601,20 +601,23 @@ reach — after downtime long enough to move the floor past it — is given up o
 (`wa.poll.abandoned`). Evolution answers newest-first and 5 pages of 100 is the cap, so a
 window holding more than 500 messages would hide its *oldest* ones. Its answer says how many
 the window holds (`total`), so `readWindow` (`lib/evolution.mjs`) splits such a window in
-halves on whole-second boundaries, at most 4 levels deep (16 pieces, about 8,000 messages),
-and hands the pieces over oldest-first. A piece that comes back with fewer messages than its
-`total` (they slid between pages while it was read) is split and read again the same way.
-Only a piece still over the cap or still short at the deepest level (or one second wide) is
-kept partial — a loss, not a deferral, because asking again returns the same newest pages —
-and the log says `wa.poll.truncated` with the number missed. That takes downtime long
-enough for thousands of messages to pile up in one window. An answer without a `total` is
-read page by page until a short one, and one still full at the fifth page is split the same
-way.
+halves on whole-second boundaries, at most 4 levels deep (16 pieces: 8,000 messages at most,
+and only when they are spread evenly over the pieces), and hands the pieces over
+oldest-first. A piece that comes back with fewer messages than its `total` (they slid
+between pages while it was read) is split and read again the same way. Only a piece still
+over the cap or still short at the deepest level (or one second wide: a single second
+holding more than 500 messages cannot be split) is kept partial — a loss, not a deferral,
+because asking again returns the same newest pages — and the log says `wa.poll.truncated`
+with the number missed where the answer states a total. That takes downtime long enough for
+thousands of messages to pile up in one window. An answer without a `total` is read page by
+page until a short one, and one still full at the fifth page is split the same way; at the
+deepest level it is kept partial with `missing` 0, because nothing says how many more there
+were.
 
 A match creates the lead (or merges into the person it already is) **at the message's own
 timestamp**, so `first_inbound_ts` is when the enquiry actually happened; the first ≤ 200
 characters are kept on the touchpoint of a *new* lead only (a chat in the Bona inbox keeps its
-whole conversation as well — Dashboard → Inbox, below). You get the note once, on
+whole conversation as well — [Dashboard → Inbox](#inbox), below). You get the note once, on
 create. Your own outbound message to a lead sets `first_reply_ts` — the response time on
 the dashboard. Every tick is wrapped: a failure logs `wa.poll.failed` and leaves the cursor
 untouched, so an Evolution outage loses nothing and shows up only as growing lag.
@@ -711,10 +714,53 @@ Phone numbers are masked to `…6933` in every list — pages and JSON alike —
 on `GET /dashboard/leads/:id`, `GET /v1/admin/leads/:id` and the header of a chat
 (`GET /dashboard/inbox/:leadId`).
 
-**Inbox (since 2026-09).** `GET /dashboard/inbox` is where the team reads and answers the
-Bona chats on the owner's number (design §4, 2026-09-27). A *chat* is a lead with a `wa_jid`
-or a `wa_lid`. Whether it belongs is **stored** in `leads.inbox_state` (`in`, `unsure`,
-`out`) and never re-derived, so a guess cannot slip in later through the `phone` rule:
+| Route | What |
+|---|---|
+| `GET /dashboard` | Overview — a 14-day strip (sessions, WA clicks, leads, viewings) as inline SVG, `?days=` 1–90. Everything below the strip — sources with first-touch and last-touch columns side by side, match quality, first-reply median and p90 — is **all time**, and the page says so |
+| `GET /dashboard/leads` | pipeline board (one column per stage: name, masked phone, source, listing, age, response) and a list below with `?stage=&q=` |
+| `GET /dashboard/leads/:id` | the whole record, the journey (events + touchpoints + stage moves + notes, oldest first), the stage form and the note form |
+| `GET /dashboard/listings` | per-listing funnel (views → gallery/tour/brochure → WA clicks → leads) and REGA flags: `no_ad_licence`, `expiring_30d`, `expired`, `wafi_missing` (off-plan) |
+| `GET /dashboard/spend` | spend entry form, cost per lead per campaign, and the last 90 days of entries |
+| `GET /dashboard/integrations` | which keys are present (booleans only, never a value), fan-out counts and last accepted event per destination, poller status when one is running, Retell, and the owner checklists |
+| `GET /v1/admin/stats?days=14` | the whole bundle: `daily`, `sources`, `match_quality`, `pipeline`, `response_times`, `cpl_by_campaign`, `totals` |
+| `GET /v1/admin/leads?stage=&q=&limit=100` | `{count, total, leads}` — phones masked |
+| `GET /v1/admin/leads/:id` | `{lead, journey, stage_history, touchpoints}` — phone in full |
+| `GET /v1/admin/listings` | the same funnel rows as the Listings page |
+| `POST /v1/admin/leads/:id/stage` | `{stage, value_sar?, note?}` → stage, history row, `lead_stage` event, fan-out |
+| `POST /v1/admin/leads/:id/note` | `{note}` → a `note` touchpoint and an appended line on the lead |
+| `POST /v1/admin/spend` | `{day, platform, campaign_id, campaign_name, spend_sar, clicks?, impressions?}`, upserted on `(day, platform, campaign_id)` |
+| `GET /dashboard/inbox` | the Bona chats, unread first, then newest: name, masked number, last message, stage, handler, *Needs a human*. The owner also gets the **Unsure** tab (`?tab=unsure`; 403 for staff) and *Add chat by phone number* |
+| `GET /dashboard/inbox/:leadId` | one chat, refreshed from Evolution first and then marked read: bubbles labelled client / team member / Dana / the owner's number, gaps, sends still open, the reply box and the handler picker; the number in full in the header. 404 unless it is an `in` chat (a `wa_jid` or `wa_lid`) and its number is not excluded |
+| `POST /v1/admin/inbox/:leadId/reply` | any member: one reply through the shared gate. Form: sent → 303 to the thread `?ok=sent`; uncertain → 303 `?error=send_uncertain`; a chat that may not be answered → the same 404 as the thread; any other refusal renders the thread again with the text kept and a fresh `send_id` — never a redirect with message text in the URL. JSON: 200 `{ok, status, send_id}` when accepted, 202 `{error: 'send_uncertain', send_id}` when uncertain, 404 `{error: 'not_in_inbox'}` for a chat that may not be answered, and `{error}` with 409 (`stale`, `lid_only`), 400 (`bad_text`, `bad_send_id`), 429 (`reply_rate_limited`), 503 (`sending_disabled`) or 502 (`send_failed`, anything else) |
+| `POST /v1/admin/inbox/:leadId/handler` | any member: hand the chat to an active member, or to nobody |
+| `POST /v1/admin/inbox/:leadId/move` · `…/out` | owner: *Move to Bona inbox* (pulls 30 days) · *Not a client* (`out`, transcript purged now) |
+| `POST /v1/admin/inbox/add` | owner: *Add chat by phone number* — creates or reuses the lead (`owner_added`), puts it `in`, pulls 30 days |
+
+Spend is matched to leads on **platform and campaign id together**, never the id alone —
+Meta and Snap can both run a campaign `1203`. The two vocabularies are folded by
+`PLATFORM_ALIASES` in `lib/dashboard/stats.mjs`, so "instagram" typed on the Spend page
+meets a lead that arrived with `utm_source=meta`. A platform name nothing recognises
+matches no spend rather than borrowing another platform's budget — and when that
+happens, the row carries `unmatched_leads` and the page says "unmatched — check the UTM
+source" instead of printing a zero that reads like a dud campaign.
+
+A form post answers `303` back to the page it came from; a JSON call answers JSON.
+
+**One thing rate limits cannot fix.** `POST /dashboard/login/code` has to be reachable by
+an unauthenticated owner, so it is reachable by everyone. The limits above bound what a
+flood costs — sixty WhatsApp messages a day rather than 1,440, and a drained ceiling
+delays the owner's next code by about 24 minutes rather than until tomorrow — but they
+cannot make the endpoint available to him and not to an attacker. If it is ever actually
+attacked, the answer is a rate rule or a Cloudflare Access policy in front of
+`/dashboard/login*` on the tunnel, not a smaller number in `lib/dashboard/auth.mjs`.
+
+#### Inbox
+
+Since 2026-09, `GET /dashboard/inbox` is where the team reads and answers the Bona chats on
+the owner's number (design §4, 2026-09-27; routes in the table above). A *chat* is a lead
+with a `wa_jid` or a `wa_lid`. Whether it belongs is **stored** in `leads.inbox_state`
+(`in`, `unsure`, `out`) and never re-derived, so a guess cannot slip in later through the
+`phone` rule:
 
 - *Certain*: an inbound message with a Ref line as the site writes it
   (`Ref BONA-W003 · K7Q2XR`, with its listing part) or a code a site session holds,
@@ -746,8 +792,8 @@ or a `wa_lid`. Whether it belongs is **stored** in `leads.inbox_state` (`in`, `u
 
 Schema v4 sorted the leads that already existed: `in` for `ref` / `ad_meta`, for web-form and
 concierge leads that are not legacy imports, and for a listing id in the first snippet;
-everything else `unsure`, for the owner to settle (expected on the live db at the Phase 2
-deploy: 18 in, 9 unsure).
+everything else `unsure`, for the owner to settle (a read-only count of the live db on
+2026-09-28 gave 18 in and 9 unsure; the Phase 2 deploy checks it).
 
 *What is stored* (`wa_messages`, `in` chats only): every message in both directions and who
 sent it — the client, a team member (by user id), Dana (from Phase 4), or `owner_number`
@@ -761,26 +807,34 @@ owner types under the `@lid`, what the API sends to a number under the phone jid
 per-chat read (join history, opening a thread, the check before a reply) asks for both and
 de-duplicates on `key.id`. A message the poller writes off after three tries, or gives up on
 once the window has moved past it, becomes a `wa_gaps` row, shown in the thread as a message
-that could not be loaded, instead of vanishing; so does a join's or a catch-up's history
-read that failed. Unread means inbound messages newer than the newest one that person saw
-when they last opened the thread (a new member starts from the day the account was made);
-the total is the Inbox count in the nav.
+that could not be loaded, instead of vanishing; so does a failed history read of an
+automatic join or of the catch-up. The owner's *Move* and *Add* do not write one yet: their
+failed 30-day read is only logged (`inbox.backfill.failed`), and if the chat is still empty
+the next catch-up asks for the 24 h before it joined, not the 30 days. Unread means inbound
+messages newer than the newest one that person saw when they last opened the thread (a new
+member starts from the day the account was made); the total is the Inbox count in the nav.
 
 *Retention.* Five years after a chat's last message (`leads.last_msg_ts`) its transcript —
 messages, reply outbox rows, gaps and read marks — is deleted; the lead row stays for
 attribution. *Not a client*, a team add and a never-list add purge at once. A purged send
 of the last 24 h is cut to a stub (no text, no chat) that still counts toward the day cap. A
 login code's outbox row never holds the code (`text` is NULL); code rows and stubs are
-pruned after 2 days. The privacy page says all of this, including the copies that stay in
-Evolution's own database and on the phones, which this retention does not reach.
+pruned after 2 days. Known limit: the purge finds chats by their stored messages, so a
+failed or uncertain reply into a chat with nothing stored keeps its text in `wa_outbox`
+until the purge also looks at outbox rows. The privacy page (*WhatsApp conversations with
+our team*) tells clients the five years, the at-once purge of a chat that is not about a
+Bona enquiry (the first-message snippet stays with the lead), and the copies this retention
+does not reach: Evolution's own database — "the WhatsApp gateway server that Bona runs for
+this number", which keeps every message with no time limit — and the phones.
 
 *Replies* go out from the owner's number (`BONA_WA_INSTANCE`) and only into `in` chats.
 `POST /v1/admin/inbox/:leadId/reply` sends to the lead's **phone** jid (`…@s.whatsapp.net`);
 a chat known only by its `@lid` is refused (`lid_only`) and answered from the phone, because
 `lid` digits are not a phone number. Every reply passes the gate the login codes pass
-(`lib/wa-send.mjs`): the Sending switch, 20 a minute overall, 6 a minute per recipient,
-30 a minute per person, and 500 a day — counted from `wa_outbox` over a rolling 24 h
-(messages to the owner's own chat do not count), so a restart does not reset it. The form
+(`lib/wa-send.mjs`): the Sending switch, `BONA_WA_NOTIFY` not `0` (§4; a login code does
+not need it), 20 a minute overall, 6 a minute per recipient, 30 a minute per person, and
+500 a day — counted from `wa_outbox` over a rolling 24 h (messages to the owner's own chat
+do not count), so a restart does not reset it. The form
 carries a random `send_id`, and its outbox row is written before the HTTP call, so a double
 submit gets the first answer back, never a second message. A reply is `accepted` only when
 Evolution answers with a `key.id`. A timeout, a network error other than a refused
@@ -790,12 +844,16 @@ retries it. When the message turns up in a poll the row is settled — by its `k
 else the same lead and the same text within 2 minutes — and the bubble gets its sender; a
 row interrupted by a restart becomes `uncertain` (`interrupted`). The form also carries the
 newest message time the person saw, and the chat is refreshed from Evolution just before
-the check: anything newer, in either direction, holds the reply (`stale`) with the text kept
-in the box. The first person to reply becomes the chat's handler when it has none (a reply
-typed on the owner's phone makes the owner the handler); anyone can hand it to another
-active member or to nobody. Audit rows `reply_sent`, `handler`, `inbox_move`, `inbox_out`
-and `inbox_add` carry ids and a status — never text or a number. The first real client
-reply from the dashboard is sent with the owner beside it (design D14).
+the check — best effort: at most ~3 s, the newest 50 records per question, skipped within
+5 s of the last refresh, and a failed read leaves only what is already stored. Anything
+newer that is stored by then, in either direction, holds the reply (`stale`) with the text
+kept in the box. The first person to reply becomes the chat's handler when it has none (a
+reply typed on the owner's phone makes the owner the handler); anyone can hand it to
+another active member or to nobody. Audit rows name the chat's lead as their target and
+carry little else: `reply_sent` its outcome (`{status}`: `accepted`, `uncertain` or
+`failed`), `handler` the new handler's user id (`{to}`, null for nobody), and `inbox_move`,
+`inbox_out` and `inbox_add` nothing more — never text or a number.
+The first real client reply from the dashboard is sent with the owner beside it (design D14).
 
 *Polling and upkeep.* The poller runs every 20 s (`BONA_WA_POLL_MS`, §4). The VPS sets it in
 `~/.secrets/bona-services.env`, and a value there wins over the default — a stale
@@ -805,48 +863,8 @@ Inbox upkeep (`app.inboxMaintenance()`) runs at start-up and then every 24 h: fi
 listed chat whose number is a team or never-list number goes `out` with its transcript
 (logged `inbox.excluded_out`); then the 5-year purge, code rows and stubs older than 2 days,
 and `pending` sends older than 2 minutes marked `uncertain` (a process that died mid-send
-cannot know whether the message went); then every `in` chat with nothing stored yet fetches
-the history an automatic join takes, never from before the 5-year horizon (logged
-`inbox.catchup`; a read that fails leaves a gap). That is how the chats schema v4 put `in`
-get a thread on day one; one whose history comes back empty stays empty and is asked again
-on the next run.
-
-| Route | What |
-|---|---|
-| `GET /dashboard` | Overview — a 14-day strip (sessions, WA clicks, leads, viewings) as inline SVG, `?days=` 1–90. Everything below the strip — sources with first-touch and last-touch columns side by side, match quality, first-reply median and p90 — is **all time**, and the page says so |
-| `GET /dashboard/leads` | pipeline board (one column per stage: name, masked phone, source, listing, age, response) and a list below with `?stage=&q=` |
-| `GET /dashboard/leads/:id` | the whole record, the journey (events + touchpoints + stage moves + notes, oldest first), the stage form and the note form |
-| `GET /dashboard/listings` | per-listing funnel (views → gallery/tour/brochure → WA clicks → leads) and REGA flags: `no_ad_licence`, `expiring_30d`, `expired`, `wafi_missing` (off-plan) |
-| `GET /dashboard/spend` | spend entry form, cost per lead per campaign, and the last 90 days of entries |
-| `GET /dashboard/integrations` | which keys are present (booleans only, never a value), fan-out counts and last accepted event per destination, poller status when one is running, Retell, and the owner checklists |
-| `GET /v1/admin/stats?days=14` | the whole bundle: `daily`, `sources`, `match_quality`, `pipeline`, `response_times`, `cpl_by_campaign`, `totals` |
-| `GET /v1/admin/leads?stage=&q=&limit=100` | `{count, total, leads}` — phones masked |
-| `GET /v1/admin/leads/:id` | `{lead, journey, stage_history, touchpoints}` — phone in full |
-| `GET /v1/admin/listings` | the same funnel rows as the Listings page |
-| `POST /v1/admin/leads/:id/stage` | `{stage, value_sar?, note?}` → stage, history row, `lead_stage` event, fan-out |
-| `POST /v1/admin/leads/:id/note` | `{note}` → a `note` touchpoint and an appended line on the lead |
-| `POST /v1/admin/spend` | `{day, platform, campaign_id, campaign_name, spend_sar, clicks?, impressions?}`, upserted on `(day, platform, campaign_id)` |
-| `GET /dashboard/inbox` | the Bona chats, unread first, then newest: name, masked number, last message, stage, handler, *Needs a human*. The owner also gets the **Unsure** tab (`?tab=unsure`; 403 for staff) and *Add chat by phone number* |
-| `GET /dashboard/inbox/:leadId` | one chat, refreshed from Evolution first and then marked read: bubbles labelled client / team member / Dana / the owner's number, gaps, sends still open, the reply box and the handler picker; the number in full in the header. 404 unless it is an `in` chat (a `wa_jid` or `wa_lid`) and its number is not excluded |
-| `POST /v1/admin/inbox/:leadId/reply` | any member: one reply through the shared gate. Sent → 303 to the thread `?ok=sent`; uncertain → 303 `?error=send_uncertain`; a chat that may not be answered → the same 404 as the thread; any other refusal renders the thread again with the text kept and a fresh `send_id` — never a redirect with message text in the URL |
-| `POST /v1/admin/inbox/:leadId/handler` | any member: hand the chat to an active member, or to nobody |
-| `POST /v1/admin/inbox/:leadId/move` · `…/out` | owner: *Move to Bona inbox* (pulls 30 days) · *Not a client* (`out`, transcript purged now) |
-| `POST /v1/admin/inbox/add` | owner: *Add chat by phone number* — creates or reuses the lead (`owner_added`), puts it `in`, pulls 30 days |
-
-Spend is matched to leads on **platform and campaign id together**, never the id alone —
-Meta and Snap can both run a campaign `1203`. The two vocabularies are folded by
-`PLATFORM_ALIASES` in `lib/dashboard/stats.mjs`, so "instagram" typed on the Spend page
-meets a lead that arrived with `utm_source=meta`. A platform name nothing recognises
-matches no spend rather than borrowing another platform's budget — and when that
-happens, the row carries `unmatched_leads` and the page says "unmatched — check the UTM
-source" instead of printing a zero that reads like a dud campaign.
-
-A form post answers `303` back to the page it came from; a JSON call answers JSON.
-
-**One thing rate limits cannot fix.** `POST /dashboard/login/code` has to be reachable by
-an unauthenticated owner, so it is reachable by everyone. The limits above bound what a
-flood costs — sixty WhatsApp messages a day rather than 1,440, and a drained ceiling
-delays the owner's next code by about 24 minutes rather than until tomorrow — but they
-cannot make the endpoint available to him and not to an attacker. If it is ever actually
-attacked, the answer is a rate rule or a Cloudflare Access policy in front of
-`/dashboard/login*` on the tunnel, not a smaller number in `lib/dashboard/auth.mjs`.
+cannot know whether the message went); then every `in` chat with nothing stored yet — at
+most 200 a run, the longest-joined first — fetches the history an automatic join takes,
+never from before the 5-year horizon (logged `inbox.catchup`; a read that fails leaves a
+gap). That is how the chats schema v4 put `in` get a thread on day one; one whose
+history comes back empty stays empty and is asked again on the next run.
