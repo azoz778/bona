@@ -106,21 +106,42 @@ test("a team member's or a never-list chat stores nothing, whichever caller hand
   handed.s.close();
 });
 
-test('a lid-only chat whose record shows a team or never-list number stores nothing and learns nothing', () => {
+test('a lid-only chat whose record shows a team or never-list number stores nothing, and its row learns whose chat it is', () => {
   // A per-chat read (join history, catch-up, refresh) asks by the lid; the record's alt is
   // the first time the chat shows whose it is. The poller screens record jids; these callers do not.
+  // Nothing is stored, but the row learns the number: it is then excluded by itself, so every
+  // read path refuses it, the daily sweep takes it out, the poller maps the lid to it, and a
+  // record the owner's number sends into the chat later is refused as well.
   const never = harness({ lead: { phone_e164: null, wa_jid: null } });
   never.team.addNever({ phone: PHONE, note: 'family' });
   assert.deepEqual(never.ingest(never.lead(), rec()), { stored: false, reason: 'excluded' });
   assert.equal(never.inbox.hasMessages(LEAD_ID), false);
-  assert.deepEqual([never.lead().phone_e164, never.lead().wa_jid], [null, null], 'the number is not learned either');
+  assert.deepEqual([never.lead().phone_e164, never.lead().wa_jid], [PHONE, PHONE_JID], 'the row now shows whose chat it is');
+  assert.deepEqual(
+    never.ingest(never.lead(), rec({ id: 'OWN-N', fromMe: true, jidAlt: null, text: TYPED })),
+    { stored: false, reason: 'excluded' },
+    'a later record from the owner\'s number is refused by the row itself',
+  );
+  assert.equal(never.inbox.hasMessages(LEAD_ID), false);
+  assert.deepEqual([never.lead().handler_user_id, never.lead().last_msg_ts], [null, null]);
+  assertClean(never.logs);
   never.s.close();
 
   const member = harness({ lead: { phone_e164: null, wa_jid: null } });
   assert.deepEqual(member.ingest(member.lead(), rec({ jidAlt: '966500000009@s.whatsapp.net' })), { stored: false, reason: 'excluded' });
   assert.equal(member.inbox.hasMessages(LEAD_ID), false);
-  assert.equal(member.lead().phone_e164, null);
+  assert.equal(member.lead().phone_e164, '966500000009');
+  assert.deepEqual(member.ingest(member.lead(), rec({ id: 'OWN-M', fromMe: true, jidAlt: null, text: TYPED })), { stored: false, reason: 'excluded' });
   member.s.close();
+
+  // A number another lead already holds is not learned (phone_e164 is unique); still nothing is stored.
+  const held = harness({ lead: { phone_e164: null, wa_jid: null } });
+  held.team.addNever({ phone: PHONE, note: 'family' });
+  held.s.insertLead({ ...LEAD, lead_id: OTHER_LEAD_ID, wa_lid: null, inbox_state: 'out' });
+  assert.deepEqual(held.ingest(held.lead(), rec()), { stored: false, reason: 'excluded' });
+  assert.equal(held.inbox.hasMessages(LEAD_ID), false);
+  assert.deepEqual([held.lead().phone_e164, held.lead().wa_jid], [null, null]);
+  held.s.close();
 
   // Not from a record we sent: its alt may be the owner's own number, a team number.
   const own = harness({ lead: { phone_e164: null, wa_jid: null } });

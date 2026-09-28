@@ -12,6 +12,9 @@
  *     check is made here, not left to each caller: the poller screens its records, but a
  *     per-chat read (join history, catch-up, refresh) goes straight to a lead. The numbers a
  *     received record shows are checked too: a lid-only chat first shows its phone there.
+ *     Such a record is not stored, but the row learns the number (empty fields only), so the
+ *     row is excluded by itself from then on — for every read path, the daily sweep, the
+ *     poller's lid lookup and the owner's own later records into that chat.
  *   - a record with no id cannot be de-duplicated, and noise — reactions, deletes and edits,
  *     poll votes, key-distribution records — is never a bubble (P2-14). Neither is stored.
  *   - a login code the sender sent is never stored (§4.2: the code lives only in the WhatsApp
@@ -56,8 +59,8 @@ function excludedByTeam(db) {
 /**
  * The lead as an inbound record shows it: the record's lid, phone jid and phone over the
  * row's own. A lid-only chat read by its lid (join history, catch-up, refresh) first shows
- * whose it is in a record's alt, so that number is checked before anything is stored or
- * learned. Never for a record we sent: its alt can be the owner's own number, a team number.
+ * whose it is in a record's alt, so that number is checked before anything is stored. Never
+ * for a record we sent: its alt can be the owner's own number, a team number.
  */
 function shownBy(lead, rec) {
   const { phone, waJid, waLid } = jidsOf(rec);
@@ -124,7 +127,13 @@ export function createIngest({
       if (isExcluded(current)) return { stored: false, reason: 'excluded' };
       if (!rec?.id) return { stored: false, reason: 'no_id' };
       if (rec.noise) return { stored: false, reason: 'noise' };
-      if (!rec.fromMe && isExcluded(shownBy(current, rec))) return { stored: false, reason: 'excluded' };
+      if (!rec.fromMe && isExcluded(shownBy(current, rec))) {
+        // Nothing is stored, but the row keeps the number the record showed: without it the
+        // row never looks excluded, and the owner's later records into this chat would still
+        // be stored and shown while the chat stayed `in` for good.
+        learn(current, rec);
+        return { stored: false, reason: 'excluded' };
+      }
 
       const direction = rec.fromMe ? 'out' : 'in';
       const ts = Number.isFinite(rec.ts) ? rec.ts : now();
