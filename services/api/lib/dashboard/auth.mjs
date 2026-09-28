@@ -170,6 +170,12 @@ export function generateCode(random = crypto.randomInt) {
 /** The message a member receives. The only place the code is ever written. */
 export const codeMessage = (code) => `Bona dashboard code: ${code} (valid 10 min)`;
 
+/**
+ * True for the text of a `codeMessage`, spaces around it aside: the inbox's ingest refuses a
+ * WhatsApp record that carries one, even when no outbox row names its message id any more.
+ */
+export const isCodeMessage = (text) => typeof text === 'string' && /^Bona dashboard code: \d{6} \(valid 10 min\)$/.test(text.trim());
+
 /** Equal-length hex compare that does not leak where two values diverge. */
 export function hashEquals(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
