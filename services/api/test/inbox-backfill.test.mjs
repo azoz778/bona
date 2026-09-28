@@ -65,7 +65,7 @@ function pool(records) {
 }
 
 /** `serve(q, { tick })` answers each question; `tick(ms)` moves the one clock every part reads. */
-function harness({ serve = router({}), lead = {}, env = {}, injectFind = true, fetchImpl = undefined, ingest = undefined } = {}) {
+function harness({ serve = router({}), lead = {}, env = {}, injectFind = true, fetchImpl = undefined, ingest = undefined, logImpl = undefined } = {}) {
   const s = openDb(':memory:');
   let clock = NOW;
   const tick = (ms) => { clock += ms; };
@@ -73,7 +73,7 @@ function harness({ serve = router({}), lead = {}, env = {}, injectFind = true, f
   const owner = team.ensureOwner({ phone: '966593296933', name: 'Abdulaziz' });
   const inbox = createInboxStore(s, { now: () => clock });
   const logs = [];
-  const log = (o) => logs.push(o);
+  const log = logImpl ?? ((o) => logs.push(o));
   const real = createIngest({ db: s, inbox, ownerUserId: () => owner.user_id, log, now: () => clock });
   const ingested = [];
   const calls = [];
@@ -84,7 +84,7 @@ function harness({ serve = router({}), lead = {}, env = {}, injectFind = true, f
     ...(fetchImpl ? { fetchImpl } : {}),
   });
   s.insertLead({ ...LEAD, ...lead });
-  return { s, inbox, backfill, calls, ingested, logs, tick, now: () => clock, lead: () => s.getLead(LEAD_ID) };
+  return { s, team, owner, inbox, backfill, calls, ingested, logs, tick, now: () => clock, lead: () => s.getLead(LEAD_ID) };
 }
 
 /** Every phone number, lid and name these tests use. None may reach a log line. */
@@ -126,7 +126,7 @@ test('history asks the three questions in the join window, de-duplicates by id a
     { where: { key: { remoteJid: PHONE_JID }, messageTimestamp: DAY }, page: 1, offset: PAGE_SIZE },
     { where: { key: { remoteJid: LID }, messageTimestamp: DAY }, page: 1, offset: PAGE_SIZE },
   ]);
-  assert.deepEqual(h.ingested, ['K1', 'K2', 'K3', 'K4'], 'each id once, oldest first within each question');
+  assert.deepEqual(h.ingested, ['K1', 'K3', 'K2', 'K4'], 'each id once: the two phone questions oldest first together, then the lid');
   const stored = h.inbox.messagesFor(LEAD_ID);
   assert.deepEqual(stored.map((m) => m.key_id), ['K1', 'K3', 'K2', 'K4']);
   assert.equal(stored.find((m) => m.key_id === 'K3').sender_kind, 'owner_number');
@@ -207,6 +207,31 @@ test('paging follows the stated page count up to the cap, and says so — in cou
   capped.s.close();
 });
 
+test('maxPages never goes past BACKFILL_MAX_PAGES, and a window that ends before it starts is refused', async () => {
+  // A chat that always states more pages than anyone should read.
+  const endless = ({ where, page }) => (where.key.remoteJidAlt
+    ? { records: [rec({ id: `E-${page}`, ts: NOW - 100_000 + page })], total: 1_000, pages: 1_000 }
+    : { records: [], total: 0, pages: 0 });
+  for (const maxPages of [Infinity, 11, 0, -3, 1.5, Number.NaN, '3', null]) {
+    const h = harness({ serve: endless });
+    const out = await h.backfill.history(h.lead(), { sinceTs: NOW - JOIN_HISTORY_MS, maxPages });
+    assert.deepEqual(out, { stored: BACKFILL_MAX_PAGES, scanned: BACKFILL_MAX_PAGES, truncated: true }, String(maxPages));
+    assert.equal(h.calls.filter((c) => c.where.key.remoteJidAlt).length, BACKFILL_MAX_PAGES, String(maxPages));
+    h.s.close();
+  }
+  const three = harness({ serve: endless });
+  await three.backfill.history(three.lead(), { sinceTs: NOW - JOIN_HISTORY_MS, maxPages: 3 });
+  assert.equal(three.calls.filter((c) => c.where.key.remoteJidAlt).length, 3);
+  three.s.close();
+
+  const inverted = harness({ serve: endless });
+  assert.deepEqual(await inverted.backfill.history(inverted.lead(), { sinceTs: NOW, untilTs: NOW - 1 }), { error: 'bad_window' });
+  assert.equal(inverted.calls.length, 0);
+  assert.deepEqual(await inverted.backfill.history(inverted.lead(), { sinceTs: NOW, untilTs: NOW, maxPages: 1 }), { stored: 1, scanned: 1, truncated: true },
+    'one instant is still a window');
+  inverted.s.close();
+});
+
 test('groups and broadcasts are skipped whatever they carry', async () => {
   const h = harness({
     serve: router({
@@ -220,6 +245,69 @@ test('groups and broadcasts are skipped whatever they carry', async () => {
   const out = await h.backfill.history(h.lead(), { sinceTs: NOW - JOIN_HISTORY_MS });
   assert.deepEqual(h.ingested, ['K1']);
   assert.deepEqual(out, { stored: 1, scanned: 3, truncated: false });
+  h.s.close();
+});
+
+test('a record that does not answer the question asked is never stored, and the count of them is logged', async () => {
+  // An Evolution that ignores the key filter (an upgrade that renames it, a proxy, a cache):
+  // every question gets the same page, holding other people's private chats beside our own.
+  const OTHER = '966511111111';
+  const page = [
+    rec({ id: 'K1' }),
+    rec({ id: 'X-PHONE', jid: `${OTHER}@s.whatsapp.net`, jidAlt: null, text: 'private to someone else', pushName: 'Nour' }),
+    rec({ id: 'X-LID', jid: '999888777666555@lid', jidAlt: `${OTHER}@s.whatsapp.net`, fromMe: true, text: 'also private' }),
+  ];
+  const ignoresKey = () => ({ records: page, total: page.length, pages: 1 });
+  const needles = [OTHER, '999888777666555', 'Nour', 'private'];
+
+  const h = harness({ serve: ignoresKey });
+  const out = await h.backfill.history(h.lead(), { sinceTs: NOW - JOIN_HISTORY_MS });
+  assert.deepEqual(out, { stored: 1, scanned: 9, truncated: false });
+  assert.deepEqual(h.ingested, ['K1'], 'nothing of another chat reaches ingest');
+  assert.deepEqual(h.inbox.messagesFor(LEAD_ID).map((m) => m.key_id), ['K1']);
+  // K1 answers the remoteJidAlt and the lid questions; under remoteJid = phone jid it does not.
+  assert.deepEqual(h.logs.filter((e) => e.evt === 'inbox.backfill.foreign'), [
+    { level: 'warn', evt: 'inbox.backfill.foreign', leadId: LEAD_ID, clause: 'phone_alt', count: 2 },
+    { level: 'warn', evt: 'inbox.backfill.foreign', leadId: LEAD_ID, clause: 'phone', count: 3 },
+    { level: 'warn', evt: 'inbox.backfill.foreign', leadId: LEAD_ID, clause: 'lid', count: 2 },
+  ]);
+  assertClean(h.logs);
+  for (const needle of needles) assert.equal(JSON.stringify(h.logs).includes(needle), false, needle);
+
+  h.logs.length = 0;
+  assert.deepEqual(await h.backfill.refresh(h.lead()), { stored: 0, scanned: 9, truncated: false });
+  assert.deepEqual(h.inbox.messagesFor(LEAD_ID).map((m) => m.key_id), ['K1']);
+  assert.equal(h.logs.filter((e) => e.evt === 'inbox.backfill.foreign').length, 3);
+  h.s.close();
+
+  // A record under the phone jid answers the remoteJidAlt question too: the normaliser drops
+  // an alt equal to the jid, so such a record has no alt to compare.
+  const same = harness({ serve: router({ [`alt:${PHONE_JID}`]: [[rec({ id: 'K7', jid: PHONE_JID, jidAlt: null })]] }) });
+  assert.deepEqual(await same.backfill.history(same.lead(), { sinceTs: NOW - JOIN_HISTORY_MS }), { stored: 1, scanned: 1, truncated: false });
+  assert.equal(same.logs.some((e) => e.evt === 'inbox.backfill.foreign'), false);
+  same.s.close();
+});
+
+test('the two phone questions are stored together, oldest first: an older staff send is matched before a newer owner-phone line', async () => {
+  const h = harness({
+    serve: pool([
+      // Typed on the owner's phone: filed under the lid, the client's phone as alt.
+      rec({ id: 'OWN', fromMe: true, text: 'On my way', ts: NOW - 30_000 }),
+      // A dashboard reply whose send came back uncertain: filed under the phone jid.
+      rec({ id: 'API', jid: PHONE_JID, jidAlt: null, fromMe: true, text: 'Welcome', ts: NOW - 60_000 }),
+    ]),
+  });
+  const staff = h.team.addUser({ name: 'Mona Staff', phone: '0500000009', role: 'staff' });
+  h.tick(-70_000); // the send was written just before WhatsApp stamped it
+  h.inbox.insertOutbox({
+    send_id: 'SND-0000000000000001', lead_id: LEAD_ID, jid: PHONE_JID, text: 'Welcome', user_id: staff.user_id, sender_kind: 'staff', status: 'uncertain',
+  });
+  h.tick(70_000);
+  await h.backfill.history(h.lead(), { sinceTs: NOW - JOIN_HISTORY_MS });
+  assert.deepEqual(h.ingested, ['API', 'OWN']);
+  const stored = Object.fromEntries(h.inbox.messagesFor(LEAD_ID).map((m) => [m.key_id, m.sender_kind]));
+  assert.deepEqual(stored, { API: 'staff', OWN: 'owner_number' });
+  assert.equal(h.lead().handler_user_id, staff.user_id, 'the first human to answer is the handler');
   h.s.close();
 });
 
@@ -325,6 +413,54 @@ test('refresh keeps to its budget: each question waits at most 2.5 s or what is 
   tight.s.close();
 });
 
+/**
+ * Evolution taking `latency` over every question, the way lib/evolution.mjs meets it: a
+ * question whose own timeout comes first is aborted there and thrown as a timeout.
+ */
+const slowEvolution = (latency, answer) => (q, { tick }) => {
+  if (latency > q.timeoutMs) {
+    tick(q.timeoutMs);
+    throw new EvolutionError('POST /chat/findMessages/abdulaziz-personal failed: timeout', 0, null);
+  }
+  tick(latency);
+  return answer(q);
+};
+
+test('a refresh question that runs out of time makes the read partial, keeps what earlier questions brought, and never fails it', async () => {
+  const answer = pool([
+    rec({ id: 'K1' }),
+    rec({ id: 'API', jid: PHONE_JID, jidAlt: null, fromMe: true, text: 'Welcome', ts: NOW - 30_000 }),
+  ]);
+  // 1.6 s a question: the first answers; the second has 1.4 s left and is cut off there.
+  const cut = harness({ serve: slowEvolution(1_600, answer) });
+  assert.deepEqual(await cut.backfill.refresh(cut.lead()), { stored: 1, scanned: 1, truncated: false, partial: true });
+  assert.deepEqual(cut.calls.map((c) => [c.where.key, c.timeoutMs]), [
+    [{ remoteJidAlt: PHONE_JID }, 2_500],
+    [{ remoteJid: PHONE_JID }, 1_400],
+  ]);
+  assert.equal(cut.now() - NOW, 3_000);
+  assert.deepEqual(cut.inbox.messagesFor(LEAD_ID).map((m) => m.key_id), ['K1']);
+  assert.deepEqual(cut.logs.find((e) => e.evt === 'inbox.refresh.partial'), {
+    level: 'warn', evt: 'inbox.refresh.partial', leadId: LEAD_ID, budgetMs: 3_000,
+  });
+  assert.equal(cut.logs.some((e) => e.evt === 'inbox.backfill.failed'), false);
+  assertClean(cut.logs);
+  cut.s.close();
+
+  // 2.8 s a question: the first is cut at its 2.5 s cap, the next gets the 0.5 s still left.
+  const capped = harness({ serve: slowEvolution(2_800, answer) });
+  assert.deepEqual(await capped.backfill.refresh(capped.lead()), { stored: 0, scanned: 0, truncated: false, partial: true });
+  assert.deepEqual(capped.calls.map((c) => c.timeoutMs), [2_500, 500]);
+  assert.equal(capped.now() - NOW, 3_000);
+  capped.s.close();
+
+  // A history read has no budget: a timeout there is a failed read, as before.
+  const joined = harness({ serve: (q) => { if (q.where.key.remoteJid === PHONE_JID) throw new EvolutionError('POST /chat/findMessages/abdulaziz-personal failed: timeout', 0, null); return answer(q); } });
+  assert.deepEqual(await joined.backfill.history(joined.lead(), { sinceTs: NOW - JOIN_HISTORY_MS }), { error: 'timeout' });
+  assert.deepEqual(joined.inbox.messagesFor(LEAD_ID).map((m) => m.key_id), ['K1'], 'what the first question brought is kept');
+  joined.s.close();
+});
+
 test('a chat outside the inbox, an unknown lead, or no Evolution configured: nothing is read', async () => {
   const unsure = harness({ lead: { inbox_state: 'unsure' } });
   const skip = { stored: 0, scanned: 0, truncated: false };
@@ -351,13 +487,21 @@ test('a failed read never throws: it comes back as { error } and logs inbox.back
     [new EvolutionError('POST /chat/findMessages/abdulaziz-personal -> HTTP 500', 500, { detail: PHONE }), 'http_500'],
     [new EvolutionError('POST /chat/findMessages/abdulaziz-personal failed: network', 0, null), 'network'],
     [new EvolutionError('POST /chat/findMessages/abdulaziz-personal failed: timeout', 0, null), 'timeout'],
+    // A 2xx whose body broke off while it was read, or was not an answer.
+    [new EvolutionError('POST /chat/findMessages/abdulaziz-personal failed: timeout', 200, null), 'timeout'],
+    [new EvolutionError('POST /chat/findMessages/abdulaziz-personal failed: network', 200, null), 'network'],
+    [new EvolutionError('POST /chat/findMessages/abdulaziz-personal -> HTTP 200 but the answer is not JSON', 200, null), 'http_200'],
+    // An instance whose name says "timeout" does not turn an HTTP error into one.
+    [new EvolutionError('POST /chat/findMessages/timeout-test -> HTTP 502', 502, null), 'http_502'],
   ];
   for (const [err, code] of cases) {
     const h = harness({ serve: throwing(err) });
     assert.deepEqual(await h.backfill.history(h.lead(), { sinceTs: NOW - JOIN_HISTORY_MS }), { error: code });
-    assert.deepEqual(await h.backfill.refresh(h.lead()), { error: code });
+    // A refresh that runs out of time is partial, not failed (see the budget tests).
+    assert.deepEqual(await h.backfill.refresh(h.lead()),
+      code === 'timeout' ? { stored: 0, scanned: 0, truncated: false, partial: true } : { error: code });
     const failures = h.logs.filter((e) => e.evt === 'inbox.backfill.failed');
-    assert.equal(failures.length, 2, code);
+    assert.equal(failures.length, code === 'timeout' ? 1 : 2, code);
     assert.deepEqual([failures[0].leadId, failures[0].error, failures[0].level], [LEAD_ID, code, 'warn']);
     assertClean(h.logs);
     assert.equal(JSON.stringify(h.logs).includes('boom'), false, 'the thrown message is not logged');
@@ -372,6 +516,33 @@ test('a failed read never throws: it comes back as { error } and logs inbox.back
   assert.deepEqual(await broken.backfill.history(broken.lead(), { sinceTs: NOW - JOIN_HISTORY_MS }), { error: 'failed' });
   assertClean(broken.logs);
   broken.s.close();
+
+  // An error's name is logged only when it is one of the kinds this code meets: an injected
+  // one could carry anything.
+  const named = (name) => Object.assign(new Error('boom'), { name });
+  for (const [err, name] of [
+    [new TypeError('boom'), 'TypeError'], [new RangeError('boom'), 'RangeError'], [named('SqliteError'), 'SqliteError'],
+    [named(`Error for ${PHONE}`), undefined], [named(`Sara${'Error'}`), undefined], [named({ toString: () => PHONE }), undefined],
+  ]) {
+    const h = harness({ serve: throwing(err) });
+    assert.deepEqual(await h.backfill.history(h.lead(), { sinceTs: NOW - JOIN_HISTORY_MS }), { error: 'failed' });
+    assert.equal(h.logs.find((e) => e.evt === 'inbox.backfill.failed').name, name);
+    assertClean(h.logs);
+    h.s.close();
+  }
+
+  // A logger that throws never makes a read throw.
+  const angry = () => { throw new Error('log sink down'); };
+  const loud = harness({ serve: throwing(new EvolutionError('POST /chat/findMessages/abdulaziz-personal failed: network', 0, null)), logImpl: angry });
+  assert.deepEqual(await loud.backfill.history(loud.lead(), { sinceTs: NOW - JOIN_HISTORY_MS }), { error: 'network' });
+  assert.deepEqual(await loud.backfill.refresh(loud.lead()), { error: 'network' });
+  assert.deepEqual(await loud.backfill.history(loud.lead()), { error: 'bad_window' });
+  loud.s.close();
+  const pages = Array.from({ length: 12 }, (_, i) => [rec({ id: `L-${i}`, ts: NOW - 100_000 + i })]);
+  const loudOk = harness({ serve: router({ [`alt:${PHONE_JID}`]: pages }), logImpl: angry });
+  assert.deepEqual(await loudOk.backfill.history(loudOk.lead(), { sinceTs: NOW - JOIN_HISTORY_MS }), { stored: BACKFILL_MAX_PAGES, scanned: BACKFILL_MAX_PAGES, truncated: true },
+    'a truncation note that cannot be logged does not stop the read');
+  loudOk.s.close();
 
   // A window that is not two times is refused before anything is asked.
   const window = harness();
