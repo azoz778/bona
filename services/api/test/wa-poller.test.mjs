@@ -87,13 +87,13 @@ function inboxWiring({ db, history, historyFails = false, logs, now }) {
  * ingest and backfill over the same db, except that the backfill's per-chat reader is a
  * spy over `history`, so no test reaches Evolution; `historyFails` makes that reader throw,
  * as it does when Evolution is down. `ingestOverride` replaces only the poller's ingest
- * (the backfill keeps the real one), for a store that fails. `wire(wiring)` returns any of
+ * (the backfill keeps the real one), for a store that fails. `rewire(wiring)` returns any of
  * `inboxStore`/`ingest`/`backfill` to hand the poller instead of the defaults (the rest of
  * the wiring keeps the real ones). `onNote` runs while the owner's note is being sent.
  */
 function harness({
   windows = [], env = {}, seedSession = true, isExcluded, inbox = false, history = [], historyFails = false, ingestOverride = null,
-  wire = null, onNote = null,
+  rewire = null, onNote = null,
 } = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-poller-'));
   const db = openDb(':memory:');
@@ -116,7 +116,7 @@ function harness({
     findMessages: async (window) => { asked.push(window); return { records: queue.length ? queue.shift() : [] }; },
     sendWhatsApp: async (text) => { sent.push(text); if (onNote) await onNote(text); return { ok: true }; },
     ...(isExcluded ? { isExcluded } : {}),
-    ...(wiring ? { inboxStore: wiring.inbox, ingest: ingestOverride ?? wiring.ingest, backfill: wiring.backfill, ...(wire ? wire(wiring) : {}) } : {}),
+    ...(wiring ? { inboxStore: wiring.inbox, ingest: ingestOverride ?? wiring.ingest, backfill: wiring.backfill, ...(rewire ? rewire(wiring) : {}) } : {}),
     log: (obj) => logs.push(obj),
     now: () => clock,
   });
@@ -1655,7 +1655,7 @@ test('(t) a join whose history and whose gap both fail says so, and does not thr
   const ref = msg({ id: 'REF', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' });
   const h = harness({
     inbox: true, history: [ref], historyFails: true, windows: [[ref]],
-    wire: ({ inbox }) => ({ inboxStore: { ...inbox, addGap: () => { throw new Error('database is locked'); } } }),
+    rewire: ({ inbox }) => ({ inboxStore: { ...inbox, addGap: () => { throw new Error('database is locked'); } } }),
   });
   const tally = await h.poller.tick();
   const [lead] = h.leads();
@@ -1697,7 +1697,7 @@ test('(t) a written-off reaction, or a record the join history already stored, l
 test('(t) with no backfill wired a join stores from its own message on, and reads nothing', async () => {
   const hi = msg({ id: 'HI', ts: NOW - 3_600_000, text: 'Hi' });
   const ref = msg({ id: 'REF', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' });
-  const h = harness({ inbox: true, history: [hi, ref], windows: [[ref]], wire: () => ({ backfill: null }) });
+  const h = harness({ inbox: true, history: [hi, ref], windows: [[ref]], rewire: () => ({ backfill: null }) });
   const tally = await h.poller.tick();
   const [lead] = h.leads();
   assert.equal(lead.inbox_state, 'in');
@@ -1708,11 +1708,122 @@ test('(t) with no backfill wired a join stores from its own message on, and read
 });
 
 test('(t) the ingest can be handed over the way createIngest() returns it, as { ingest }', async () => {
-  const h = harness({ inbox: true, windows: [[msg({ text: 'BONA-W012 السعر؟' })]], wire: ({ ingestor }) => ({ ingest: ingestor }) });
+  const h = harness({ inbox: true, windows: [[msg({ text: 'BONA-W012 السعر؟' })]], rewire: ({ ingestor }) => ({ ingest: ingestor }) });
   const tally = await h.poller.tick();
   const [lead] = h.leads();
   assert.equal(lead.inbox_state, 'in');
   assert.equal(tally.stored, 1);
   assert.deepEqual(rows(h, lead.lead_id), [['KEY1', 'in', 'client']]);
   h.cleanup();
+});
+
+/* ---------------- (t) the second 2026-09-28 quality review of Task 9 ---------------- */
+
+test('(t) a record of an in chat given up on after an outage leaves a gap too, not silence', async () => {
+  // After downtime the first window reaches far back, but the cursor may not stay behind
+  // `now - MAX_WINDOW_MS`: a record that fails there is out of reach at once, so it is
+  // abandoned after one try, never written off. That is as lost as a write-off.
+  const h = harness({ inbox: true, ingestOverride: () => { throw new Error('disk I/O error'); } });
+  seedInLead(h);
+  h.db.waCursorSet(INSTANCE, { lastTs: NOW - 3_600_000, lastRun: NOW - 3_600_000, unmatched: 0 });
+  const old = msg({ id: 'OLD', ts: NOW - 50 * 60_000, text: 'أي جديد؟' });
+  assert.ok(old.ts < NOW - MAX_WINDOW_MS - OVERLAP_MS, 'older than the next window can reach');
+  h.push([old]);
+  await h.poller.tick();
+  await h.poller.tick();
+
+  const failed = h.logs.filter((l) => l.evt === 'wa.poll.record_failed');
+  assert.deepEqual(failed.map((l) => [l.attempts, l.writtenOff]), [[1, false]], 'one try, never written off');
+  assert.equal(h.logs.find((l) => l.evt === 'wa.poll.abandoned').count, 1);
+  assert.deepEqual(h.inbox.gapsFor('LEAD-in').map((g) => [g.key_id, g.lead_id, g.jid, g.ts, g.reason]), [['OLD', 'LEAD-in', SENDER, old.ts, 'failed']]);
+  assert.equal(h.inbox.hasMessages('LEAD-in'), false);
+  h.cleanup();
+});
+
+test('(t) an abandoned reaction, or a record of a chat that is not in, leaves no gap', async () => {
+  const h = harness({ inbox: true, ingestOverride: () => { throw new Error('disk I/O error'); } });
+  seedInLead(h);
+  h.db.waCursorSet(INSTANCE, { lastTs: NOW - 3_600_000, lastRun: NOW - 3_600_000, unmatched: 0 });
+  h.push([msg({ id: 'REACT', ts: NOW - 50 * 60_000, text: '', messageType: 'reactionMessage', noise: true })]);
+  await h.poller.tick();
+  assert.equal(h.logs.find((l) => l.evt === 'wa.poll.abandoned').count, 1);
+  assert.deepEqual(h.inbox.gapsFor('LEAD-in'), [], 'a reaction is never a bubble, so it is never a missing one');
+  h.cleanup();
+
+  // A Phase 1 poller (no inbox) gives up exactly as before and writes nothing.
+  const plain = harness({ windows: [[msg({ id: 'P1', ts: NOW - 50 * 60_000, text: 'Ref BONA-W003 · K7Q2XR' })]] });
+  plain.db.waCursorSet(INSTANCE, { lastTs: NOW - 3_600_000, lastRun: NOW - 3_600_000, unmatched: 0 });
+  const realCreate = plain.db.insertLead;
+  plain.db.insertLead = () => { throw new Error('disk I/O error'); };
+  await plain.poller.tick();
+  plain.db.insertLead = realCreate;
+  assert.equal(plain.logs.find((l) => l.evt === 'wa.poll.abandoned').count, 1);
+  assert.equal(plain.db.db.prepare('SELECT COUNT(*) AS n FROM wa_gaps').get().n, 0);
+  plain.cleanup();
+});
+
+test("(t) a chat marked 'Not a client' while its join history is read gets no history gap", async () => {
+  const ref = msg({ id: 'REF', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const h = harness({
+    inbox: true, windows: [[ref]],
+    rewire: ({ inbox }) => ({ backfill: { history: async (lead) => { inbox.leaveInbox(lead.lead_id); return { error: 'failed' }; } } }),
+  });
+  await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.inbox_state, 'out');
+  assert.deepEqual(h.inbox.gapsFor(lead.lead_id), [], 'the purge that put it out is not undone by a gap written after it');
+  assert.equal(h.inbox.hasMessages(lead.lead_id), false);
+  assert.equal(h.logs.some((l) => l.evt === 'wa.poll.record_failed'), false);
+  h.cleanup();
+});
+
+test('(t) an error that carries a number or a message never reaches a log line', async () => {
+  const leak = 'ingest failed for 966500000000: "Hi there Sara"';
+  const thrown = Object.assign(new RangeError(leak), { code: 'ERR 966500000000' });
+  const h = harness({
+    inbox: true, windows: [[msg({ id: 'REF', text: 'Ref BONA-W003 · K7Q2XR' })]],
+    ingestOverride: () => { throw thrown; },
+    rewire: () => ({ backfill: { history: async () => ({ error: 'http 966522222222 Ahlan' }) } }),
+  });
+  await h.poller.tick();
+  const failed = h.logs.find((l) => l.evt === 'wa.poll.record_failed');
+  assert.equal(failed.error, 'RangeError', 'the kind of error, not its message');
+  assert.equal(failed.code, undefined, 'a code that is not in the shape Node gives one is left out');
+  assert.equal(h.logs.find((l) => l.evt === 'inbox.join_history_failed').error, 'failed');
+  const dump = JSON.stringify(h.logs);
+  for (const secret of ['966500000000', '966522222222', 'Hi there', 'Sara', 'Ahlan']) {
+    assert.ok(!dump.includes(secret), `a log line carries ${secret}`);
+  }
+  h.cleanup();
+});
+
+test("(t) a failed record's log line keeps what is safe to know: an allowed name, Node's code, SQLite's number", async () => {
+  const h = harness({ inbox: true, ingestOverride: () => { throw Object.assign(new Error('UNIQUE constraint failed: wa_messages.key_id'), { code: 'ERR_SQLITE_ERROR', errcode: 1555 }); } });
+  seedInLead(h);
+  h.push([msg({ id: 'X', ts: NOW - 60_000, text: 'أي جديد؟' })]);
+  await h.poller.tick();
+  const failed = h.logs.find((l) => l.evt === 'wa.poll.record_failed');
+  assert.deepEqual([failed.error, failed.code, failed.errcode], ['Error', 'ERR_SQLITE_ERROR', 1555]);
+
+  const odd = harness({ inbox: true, ingestOverride: () => { throw Object.assign(new Error('x'), { name: 'Sara 966500000000' }); } });
+  seedInLead(odd);
+  odd.push([msg({ id: 'Y', ts: NOW - 60_000, text: 'أي جديد؟' })]);
+  await odd.poller.tick();
+  assert.equal(odd.logs.find((l) => l.evt === 'wa.poll.record_failed').error, 'Error', 'a name outside the kinds this loop meets is not logged');
+  h.cleanup();
+  odd.cleanup();
+});
+
+test('(t) an ingest or a backfill that cannot be used is a wiring mistake, refused at once', () => {
+  const db = openDb(':memory:');
+  const inboxStore = createInboxStore(db);
+  const ingest = () => ({ stored: false });
+  assert.throws(() => createPoller({ db, inboxStore, ingest: {} }), TypeError, 'an object with no ingest in it');
+  assert.throws(() => createPoller({ db, inboxStore, ingest: { ingest: 'yes' } }), TypeError);
+  assert.throws(() => createPoller({ db, inboxStore, backfill: { history: async () => ({}) } }), TypeError, 'a backfill with no ingest would be ignored');
+  assert.throws(() => createPoller({ db, inboxStore, ingest, backfill: {} }), TypeError, 'a backfill with no history');
+  assert.doesNotThrow(() => createPoller({ db, inboxStore, ingest, backfill: null }));
+  assert.doesNotThrow(() => createPoller({ db, inboxStore, ingest: { ingest } }));
+  assert.doesNotThrow(() => createPoller({ db }));
+  db.close();
 });
