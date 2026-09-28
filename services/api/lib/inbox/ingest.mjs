@@ -12,7 +12,9 @@
  *     records, but a per-chat read (join history, catch-up, refresh) goes straight to a lead.
  *     The row is checked, and so is every number and lid the record names, sent or received
  *     (a lid-only chat first shows whose it is there) — except the owner's own number as a
- *     sent record's alt, which names the sender, not the chat. Such a record stores nothing.
+ *     sent record's alt, which names the sender, not the chat. That number is the instance's
+ *     own (`ownerPhone`), not read from the owner's account, so it is still known while his
+ *     row is deactivated or demoted. Such a record stores nothing.
  *     A received one may teach a row that holds no number yet that number, when it then
  *     excludes the row by itself; nothing else is learned from it, so a client's chat never
  *     excludes itself. Ingest never moves a chat out: the never-list add (P2-7) and the
@@ -21,16 +23,19 @@
  *     poll votes, key-distribution records — is never a bubble (P2-14). Neither is stored.
  *   - a login code is never stored (§4.2: the code lives only in the WhatsApp message, P2-21).
  *     Its outbox row keeps the message id for the day's count, so the record is recognised
- *     by that id and refused before anything is written. A send that went uncertain never
- *     recorded an id, and the daily upkeep prunes code rows, so a record whose text is a
- *     login code's own message is refused as well, whichever way it went.
+ *     by that id — however it is filed, sent or received — and refused before anything is
+ *     written or learned. A send that went uncertain never recorded an id, and the daily
+ *     upkeep prunes code rows, so a record whose text is a login code's own message is
+ *     refused as well, whichever way it went.
  *   - who sent an outbound record (P2-17). The dashboard's own sends are found by the
  *     WhatsApp message id their send came back with. A send that never came back
  *     (`uncertain`, or `pending` when a restart cut it off) is found by its exact text within
  *     two minutes, anywhere in the LEAD's chat — the reply went to the phone jid, but
  *     Evolution may file the record under the chat's `@lid`. Only a record seen for the first
- *     time, and not one stamped before the send was written: a record read again, or typed
- *     just before an identical reply, must not mark a reply that may never have gone as sent.
+ *     time, that carries its own time, and not one stamped before the send was written: a
+ *     record read again, or typed just before an identical reply, must not mark a reply that
+ *     may never have gone as sent, and a record with no time is stored at now(), which says
+ *     nothing about when it was sent.
  *     Anything else was typed on the owner's phone or sent by Lisa for him, which cannot be
  *     told apart: `owner_number`.
  *   - a human outbound seen for the first time clears "needs a human" (P2-16) and gives a
@@ -44,6 +49,7 @@
  * Nothing here logs text, a phone number, a lid or a name — ids and field names only.
  */
 import { isCodeMessage } from '../dashboard/auth.mjs';
+import { normalisePhone } from '../phone.mjs';
 import { createTeam, isTeamLid } from '../team.mjs';
 import { jidsOf } from '../wa-poller.mjs';
 
@@ -122,32 +128,40 @@ function sameChat(lead, rec) {
  * @param {ReturnType<import('../db.mjs').openDb>} o.db
  * @param {ReturnType<import('./store.mjs').createInboxStore>} o.inbox
  * @param {() => string|null} [o.ownerUserId] the env owner's `users.user_id`: the handler of a
- *        chat his own phone answers first, and whose number a sent record's alt may carry
+ *        chat his own phone answers first
+ * @param {string|(() => string|null)|null} [o.ownerPhone] the instance's own number (digits,
+ *        from `BONA_OWNER_JID`): a sent record's alt that is this number names the sender, not
+ *        the chat. Left out, it is read from the `ownerUserId` account, which a deactivated or
+ *        demoted owner row no longer yields
  * @param {((lead: object) => boolean)|null} [o.isExcludedLead] true for a chat that is never a
  *        client's; defaults to the team and never-list tables in `db`
  * @param {(e: object) => void} [o.log]
  * @param {() => number} [o.now]
  */
 export function createIngest({
-  db, inbox, ownerUserId = () => null, isExcludedLead = null, log = () => {}, now = () => Date.now(),
+  db, inbox, ownerUserId = () => null, ownerPhone = null, isExcludedLead = null, log = () => {}, now = () => Date.now(),
 } = {}) {
   if (!db || !inbox) throw new TypeError('createIngest needs the store and the inbox store');
   // `createTeam` only prepares statements when they are first used: this instance costs nothing.
   const team = createTeam(db);
   const isExcluded = isExcludedLead ?? excludedByTeam(db, team);
-  const ownerPhone = () => team.getUser(ownerUserId())?.phone_e164 ?? null;
+  const givenOwnerPhone = typeof ownerPhone === 'function' ? ownerPhone : () => ownerPhone;
+  /** The owner's own number: the instance's, when given; else his account's, as before. */
+  const ownersNumber = () => normalisePhone(givenOwnerPhone()) ?? team.getUser(ownerUserId())?.phone_e164 ?? null;
 
   /**
    * The outbox row an outbound record is, when the dashboard sent it; `via` says how it was
    * found. Its message id always counts. Its text only for a record not stored yet — one
    * already stored was judged when first read, and a send it did not match then was not its
    * own — and only for a send written no later than the record was stamped (SEND_SKEW_MS).
-   * `resolveUncertain` returns the oldest match, so when that one is too new, all are.
+   * `resolveUncertain` returns the oldest match, so when that one is too new, all are. A
+   * record with no time of its own is never matched by text: `ts` is then now(), and a send
+   * written in the last two minutes would match a record that could be days old. `byKey` is
+   * the row the caller already looked up by the record's id.
    */
-  function outboxRowFor(leadId, rec, body, ts) {
-    const byKey = inbox.outboxByKey(rec.id);
+  function outboxRowFor(leadId, rec, body, ts, byKey) {
     if (byKey) return { row: byKey, via: 'key' };
-    if (!body || inbox.messageByKey(rec.id)) return null;
+    if (!body || !Number.isFinite(rec.ts) || inbox.messageByKey(rec.id)) return null;
     const byText = inbox.resolveUncertain({ leadId, text: body, ts, windowMs: RESOLVE_WINDOW_MS });
     return byText && ts >= byText.created - SEND_SKEW_MS ? { row: byText, via: 'text' } : null;
   }
@@ -225,7 +239,7 @@ export function createIngest({
       if (isExcluded(current)) return { stored: false, reason: 'excluded' };
       if (!rec?.id) return { stored: false, reason: 'no_id' };
       if (rec.noise) return { stored: false, reason: 'noise' };
-      if (recordNamesExcluded(current, rec, isExcluded, rec.fromMe ? ownerPhone() : null)) {
+      if (recordNamesExcluded(current, rec, isExcluded, rec.fromMe ? ownersNumber() : null)) {
         // A row that learns the number excludes itself from then on; otherwise the lead id is
         // logged. Learning is from a received record only (see `learnable`).
         const lesson = rec.fromMe ? { reason: 'outbound' } : lessonOfRefused(current, rec);
@@ -235,6 +249,11 @@ export function createIngest({
       }
       // Whichever way it went, and whether or not an outbox row still names its id.
       if (isCodeMessage(rec.text)) return { stored: false, reason: 'code' };
+      // And by the id its outbox row keeps, however the record is filed: refused before the
+      // direction is looked at, so a code record filed as received is neither stored nor
+      // learned from. The row is reused below to find who sent an outbound record.
+      const byKey = inbox.outboxByKey(rec.id);
+      if (byKey?.sender_kind === 'code') return { stored: false, reason: 'code' };
 
       const direction = rec.fromMe ? 'out' : 'in';
       const ts = Number.isFinite(rec.ts) ? rec.ts : now();
@@ -248,9 +267,8 @@ export function createIngest({
       let senderUserId = null;
       let match = null;
       if (direction === 'out') {
-        match = outboxRowFor(current.lead_id, rec, body, ts);
-        // Refused before anything is written, the row's status included.
-        if (match?.row.sender_kind === 'code') return { stored: false, reason: 'code' };
+        // A code row was refused above; the text match cannot find one (no lead, no text).
+        match = outboxRowFor(current.lead_id, rec, body, ts, byKey);
         const kind = match?.row.sender_kind;
         senderKind = kind === 'staff' || kind === 'dana' ? kind : 'owner_number';
         senderUserId = senderKind === 'owner_number' ? null : (match.row.user_id ?? null);
