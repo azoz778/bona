@@ -27,17 +27,22 @@
  *     cannot hand out a fresh day. Messages to the owner's own jid skip the shared
  *     per-minute and daily budget (still capped per-recipient), so a busy day of
  *     team-member codes cannot lock the owner out of logging in.
- *   - `BONA_WA_NOTIFY=0` (`cfg.enabled`) was built to stop the lead note (see
- *     services/README.md); a login `code` only needs Evolution to be configured
- *     (`baseUrl`/`apiKey`) — otherwise the owner could be locked out by an env var that was
- *     never about dashboard logins. Every other kind still needs it on.
+ *   - `BONA_WA_NOTIFY=0` (`cfg.enabled`) was built to stop the lead note, and stops team
+ *     replies too (see services/README.md); a login `code` only needs Evolution to be
+ *     configured (`baseUrl`/`apiKey`) — otherwise the owner could be locked out by an env
+ *     var that was never about dashboard logins. Every other kind still needs it on.
  *
  * Every send that passes the gate is written to `wa_outbox` BEFORE the HTTP call, then
  * marked with what came back. A login code's row has no text (a code is never written
  * anywhere but the WhatsApp message) and no lead. The ledger is what makes the daily cap
  * survive a restart, what turns a send cut off by a crash into `uncertain` instead of
  * forgotten (`recoverInterrupted`), and what lets the poller tell a team member's reply
- * from the owner typing on his phone.
+ * from the owner typing on his phone. The poller may see a message go (and mark its row
+ * `accepted`) while the call is still out; a failure that comes back after that never
+ * overwrites it, and the answer is ok — the thread already shows the message, and
+ * "failed" would invite the member to type it again. If writing the result itself fails
+ * (a full disk), that is logged and the call's answer still returned: a message that went
+ * is never reported as an error.
  *
  * A send is `accepted` only when the response is 2xx AND its body carries a `key.id`
  * string — the WhatsApp message id. Anything else (a non-2xx status, a 2xx with no id, a
@@ -53,7 +58,7 @@
  */
 import { createLimiter } from './ratelimit.mjs';
 import { waConfig } from './wa.mjs';
-import { newId } from './db.mjs';
+import { randomId } from './store.mjs';
 
 export const SEND_PER_MIN = 20;
 export const SEND_PER_DAY = 500;
@@ -70,6 +75,9 @@ const DEFINITE_NETWORK_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN'
 const DAY_MS = 86_400_000;
 /** A send still `pending` this long after it was written was cut off by a restart. */
 const INTERRUPTED_MS = 120_000;
+
+/** A send id of this file's own: 64 random bits, so two sends in one millisecond never share a row. */
+const newSendId = () => `SND-${Date.now().toString(36)}-${randomId(8)}`;
 
 /** Strip a jid's device suffix (`966…:12@s.whatsapp.net` → `966…@s.whatsapp.net`) before comparing. */
 const bareDigits = (jid) => String(jid ?? '').replace(/@.*$/, '').replace(/:.*$/, '');
@@ -166,9 +174,12 @@ export function createSender({
   /**
    * @param {{ jid: string, text: string, kind: 'code'|'staff', userId?: string|null, bypassSwitch?: boolean,
    *           leadId?: string|null, sendId?: string|null }} o
-   * @returns {Promise<{ ok: true, keyId: string, status: number, sendId: string }
+   * @returns {Promise<{ ok: true, keyId: string, status?: number, sendId: string }
    *                 | { ok: false, error: string, uncertain?: true, sendId?: string }>}
-   *   `sendId` is there whenever an outbox row stands behind the answer.
+   *   `sendId` is there whenever an outbox row stands behind the answer. `status` here is
+   *   the HTTP status of the 2xx that carried the key (201, say) — not an outbox status,
+   *   which is what `reply`'s `status` is. It is absent when the call itself failed but the
+   *   poller had already seen the message go: then `keyId` is the one the poller recorded.
    */
   async function sendTo({ jid, text, kind, userId = null, bypassSwitch = false, leadId = null, sendId = null } = {}) {
     const given = sendId ? String(sendId) : null;
@@ -192,8 +203,8 @@ export function createSender({
     // never trusted for anyone else, or it would be a way to spam past the kill switch.
     const bypassAllowed = bypassSwitch && kind === 'code' && isOwner;
     if (!bypassAllowed && !team.sendingEnabled()) return refuse('sending_disabled');
-    // BONA_WA_NOTIFY only ever promised to stop the lead note (services/README.md); a
-    // login code does not need it, or the owner could be locked out by an unrelated switch.
+    // BONA_WA_NOTIFY stops the lead note and team replies (services/README.md); a login
+    // code does not need it, or the owner could be locked out by an unrelated switch.
     if (kind !== 'code' && !cfg.enabled) return refuse('disabled');
     if (!cfg.baseUrl || !cfg.apiKey) return refuse('evolution-not-configured');
 
@@ -215,7 +226,7 @@ export function createSender({
 
     // Written before the call, so a crash in the middle leaves a trace (`recoverInterrupted`).
     const row = givenRow ?? inbox.insertOutbox({
-      send_id: given ?? newId('SND'),
+      send_id: given ?? newSendId(),
       lead_id: kind === 'code' ? null : leadId,
       jid: `${m[1]}@s.whatsapp.net`,
       text: kind === 'code' ? null : text,
@@ -224,8 +235,27 @@ export function createSender({
     }).row;
 
     const out = await post(m[1], text, kind);
-    if (out.ok) inbox.updateOutbox(row.send_id, { status: 'accepted', key_id: out.keyId });
-    else inbox.updateOutbox(row.send_id, { status: out.uncertain ? 'uncertain' : 'failed', error: out.error });
+    try {
+      // A 2xx with a key names this send exactly, so it is always written.
+      if (out.ok) {
+        inbox.updateOutbox(row.send_id, { status: 'accepted', key_id: out.keyId });
+      } else {
+        // While the call was out the poller may have matched WhatsApp's own copy to this
+        // row and marked it `accepted`: proof it went, which a failure coming back now must
+        // not undo. No await separates this read from the write below.
+        const current = inbox.getOutbox(row.send_id);
+        if (current?.status === 'accepted' && current.key_id) {
+          log({ level: 'warn', evt: 'wa.send.seen_sent', kind, error: out.error });
+          return { ok: true, keyId: current.key_id, sendId: row.send_id };
+        }
+        if (current?.status === 'pending') inbox.updateOutbox(row.send_id, { status: out.uncertain ? 'uncertain' : 'failed', error: out.error });
+      }
+    } catch (err) {
+      // The call's answer stands. The row stays `pending` until the poller matches it to
+      // WhatsApp's copy or `markStalePending` (start-up, daily upkeep) makes it `uncertain`;
+      // until then a second submit of the same form is told it is on its way.
+      log({ level: 'error', evt: 'wa.send.ledger_failed', kind, error: err?.code ?? err?.name ?? 'error' });
+    }
     return { ...out, sendId: row.send_id };
   }
 
@@ -252,6 +282,8 @@ export function createSender({
    * @param {{ sendId: string, leadId: string, userId: string, text: string, seenTs: number }} o
    * @returns {Promise<{ ok: true, status: 'accepted', sendId: string, keyId: string }
    *   | { ok: false, error: string, status?: string, sendId?: string, duplicate?: true, uncertain?: true }>}
+   *   `status` here is the outbox status ('accepted', 'pending', 'uncertain', 'failed') —
+   *   not the HTTP status `sendTo` reports.
    */
   async function reply({ sendId, leadId, userId, text, seenTs } = {}) {
     if (!db) throw new TypeError('reply needs the db store: pass `db` to createSender');
@@ -276,6 +308,12 @@ export function createSender({
     // direction, means they are answering a conversation that has moved on.
     const newest = inbox.newestTs(lead.lead_id);
     if (!Number.isFinite(seenTs) || (newest !== null && newest > seenTs)) return { ok: false, error: 'stale' };
+    // Nor may it cross another reply to this chat that is still on its way: that one is
+    // stored only once WhatsApp answers, so two people answering the same message at the
+    // same moment would both pass the check above. A row pending for longer than a send
+    // can take was cut off by a restart (`recoverInterrupted`), not in flight.
+    const onItsWay = inbox.openOutboxFor(lead.lead_id, { sinceTs: now() - INTERRUPTED_MS }).some((r) => r.status === 'pending');
+    if (onItsWay) return { ok: false, error: 'stale' };
 
     const ins = inbox.insertOutbox({
       send_id: sendId, lead_id: lead.lead_id, jid, text: body, user_id: userId ?? null, sender_kind: 'staff', status: 'pending',

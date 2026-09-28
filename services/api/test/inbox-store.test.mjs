@@ -359,16 +359,21 @@ test('markStalePending turns pending rows older than the cutoff into uncertain (
   s.close();
 });
 
-test('pruneCodeRows deletes only login-code rows older than the cutoff', () => {
+test('pruneCodeRows deletes login-code rows and purge stubs older than the cutoff, never a chat\'s sends', () => {
   const { s, inbox, at } = harness();
   at(NOW - 3 * DAY);
   inbox.insertOutbox({ send_id: 'SND-code-old', jid: JID, sender_kind: 'code', status: 'accepted' });
   inbox.insertOutbox(out({ send_id: 'SND-staff-old', status: 'accepted' }));
+  // What purgeLead leaves of a send: no text, no chat.
+  inbox.insertOutbox(out({ send_id: 'SND-stub-old', lead_id: null, text: null, status: 'accepted' }));
   at(NOW - DAY);
   inbox.insertOutbox({ send_id: 'SND-code-new', jid: JID, sender_kind: 'code', status: 'accepted' });
-  assert.equal(inbox.pruneCodeRows(NOW - 2 * DAY), 1);
+  inbox.insertOutbox(out({ send_id: 'SND-stub-new', lead_id: null, text: null, status: 'accepted' }));
+  assert.equal(inbox.pruneCodeRows(NOW - 2 * DAY), 2);
   assert.equal(inbox.getOutbox('SND-code-old'), null);
+  assert.equal(inbox.getOutbox('SND-stub-old'), null);
   assert.ok(inbox.getOutbox('SND-code-new'));
+  assert.ok(inbox.getOutbox('SND-stub-new'));
   assert.ok(inbox.getOutbox('SND-staff-old'));
   s.close();
 });
@@ -611,8 +616,17 @@ test('purgeLead deletes one chat\'s transcript and keeps login-code rows and eve
   assert.equal(inbox.hasMessages('L-1'), false);
   assert.ok(inbox.getOutbox('SND-code-lead'));
   assert.ok(inbox.getOutbox('SND-code'));
-  assert.equal(inbox.getOutbox('SND-staff'), null);
-  assert.equal(inbox.getOutbox('SND-dana'), null);
+  // A send of the last 24 hours stays as a stub: no text, no chat — still counted against
+  // the day, and its send id still never goes out a second time.
+  for (const id of ['SND-staff', 'SND-dana']) {
+    const stub = inbox.getOutbox(id);
+    assert.deepEqual(
+      { lead_id: stub.lead_id, text: stub.text, jid: stub.jid, status: stub.status, created: stub.created },
+      { lead_id: null, text: null, jid: JID, status: 'pending', created: NOW },
+      id,
+    );
+  }
+  assert.deepEqual(inbox.openOutboxFor('L-1'), []);
   assert.deepEqual(inbox.gapsFor('L-1'), []);
 
   assert.deepEqual(inbox.messagesFor('L-2').map((m) => m.key_id), ['K-9']);
@@ -621,6 +635,22 @@ test('purgeLead deletes one chat\'s transcript and keeps login-code rows and eve
   assert.equal(inbox.gapsFor('L-2').length, 1);
   assert.equal(count(s, 'inbox_reads'), 1);
   assert.deepEqual(inbox.purgeLead('L-1'), { messages: 0, outbox: 0, gaps: 0, reads: 0 });
+  s.close();
+});
+
+test('purgeLead deletes a send older than 24 hours outright; one of exactly 24 hours is still a stub', () => {
+  const { s, inbox, at } = harness();
+  chat(s, 'L-1');
+  at(NOW - DAY - 1);
+  inbox.insertOutbox(out({ send_id: 'SND-older', status: 'accepted' }));
+  at(NOW - DAY);
+  inbox.insertOutbox(out({ send_id: 'SND-edge', status: 'accepted' }));
+  at(NOW);
+  const counted = inbox.countSentSince(NOW - DAY);
+  assert.deepEqual(inbox.purgeLead('L-1'), { messages: 0, outbox: 2, gaps: 0, reads: 0 });
+  assert.equal(inbox.getOutbox('SND-older'), null, 'out of the day window: nothing left to guard');
+  assert.equal(inbox.getOutbox('SND-edge').text, null);
+  assert.equal(inbox.countSentSince(NOW - DAY), counted, 'the day count is what it was before the purge');
   s.close();
 });
 
@@ -653,7 +683,7 @@ test('leaveInbox is all or nothing: a failure half-way leaves the chat in, with 
 });
 
 test('retentionPurge deletes the transcripts of chats silent since before the cutoff; lead rows stay', () => {
-  const { s, inbox } = harness();
+  const { s, inbox, at } = harness();
   const cutoff = NOW - RETENTION_MS;
   chat(s, 'OLD');
   chat(s, 'EDGE', { wa_jid: '966500000051@s.whatsapp.net' });
@@ -661,7 +691,9 @@ test('retentionPurge deletes the transcripts of chats silent since before the cu
   chat(s, 'EMPTY', { wa_jid: '966500000053@s.whatsapp.net', last_msg_ts: cutoff - 99 });
   inbox.upsertMessage(msg({ key_id: 'O-1', lead_id: 'OLD', ts: cutoff - 5000 }));
   inbox.upsertMessage(msg({ key_id: 'O-2', lead_id: 'OLD', ts: cutoff - 1 }));
+  at(cutoff - 1);
   inbox.insertOutbox(out({ send_id: 'SND-old', lead_id: 'OLD' }));
+  at(NOW);
   inbox.upsertMessage(msg({ key_id: 'E-1', lead_id: 'EDGE', ts: cutoff }));
   inbox.upsertMessage(msg({ key_id: 'N-1', lead_id: 'NEW', ts: NOW - 1000 }));
 
