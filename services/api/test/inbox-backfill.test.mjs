@@ -227,9 +227,16 @@ test('maxPages never goes past BACKFILL_MAX_PAGES, and a window that ends before
   const inverted = harness({ serve: endless });
   assert.deepEqual(await inverted.backfill.history(inverted.lead(), { sinceTs: NOW, untilTs: NOW - 1 }), { error: 'bad_window' });
   assert.equal(inverted.calls.length, 0);
-  assert.deepEqual(await inverted.backfill.history(inverted.lead(), { sinceTs: NOW, untilTs: NOW, maxPages: 1 }), { stored: 1, scanned: 1, truncated: true },
-    'one instant is still a window');
   inverted.s.close();
+  // A record at that very instant: the window keeps what it holds, and nothing else.
+  const instant = harness({
+    serve: ({ where }) => (where.key.remoteJidAlt
+      ? { records: [rec({ id: 'I-1', ts: NOW })], total: 1_000, pages: 1_000 }
+      : { records: [], total: 0, pages: 0 }),
+  });
+  assert.deepEqual(await instant.backfill.history(instant.lead(), { sinceTs: NOW, untilTs: NOW, maxPages: 1 }), { stored: 1, scanned: 1, truncated: true },
+    'one instant is still a window');
+  instant.s.close();
 });
 
 test('groups and broadcasts are skipped whatever they carry', async () => {
@@ -311,6 +318,50 @@ test('the two phone questions are stored together, oldest first: an older staff 
   h.s.close();
 });
 
+test('a question that fails on a later page keeps the pages it already brought, stored oldest first', async () => {
+  const boom = new EvolutionError('POST /chat/findMessages/abdulaziz-personal failed: network', 0, null);
+  const firstPages = {
+    phone_alt: [rec({ id: 'A-new', ts: NOW - 100_000 }), rec({ id: 'A-old', ts: NOW - 200_000 })],
+    phone: [rec({ id: 'P-1', jid: PHONE_JID, jidAlt: null, fromMe: true, text: 'Welcome', ts: NOW - 150_000 })],
+    lid: [rec({ id: 'L-1', jidAlt: null, ts: NOW - 50_000 })],
+  };
+  const clauseOf = (key) => (key.remoteJidAlt ? 'phone_alt' : (key.remoteJid === LID ? 'lid' : 'phone'));
+  /** Every question answers its first page; `failing` says it has a second, which fails. */
+  const failsOnPage2 = (failing) => ({ where, page }) => {
+    const clause = clauseOf(where.key);
+    if (page > 1) throw boom;
+    const records = firstPages[clause];
+    return clause === failing ? { records, total: records.length + 1, pages: 2 } : { records, total: records.length, pages: 1 };
+  };
+  const cases = [
+    ['phone_alt', ['A-old', 'A-new'], 2],
+    ['phone', ['A-old', 'P-1', 'A-new'], 3],
+    ['lid', ['A-old', 'P-1', 'A-new', 'L-1'], 4],
+  ];
+  for (const [failing, stored, asked] of cases) {
+    const h = harness({ serve: failsOnPage2(failing) });
+    assert.deepEqual(await h.backfill.history(h.lead(), { sinceTs: NOW - JOIN_HISTORY_MS }), { error: 'network' }, failing);
+    assert.deepEqual(h.ingested, stored, `${failing}: what was fetched is kept, oldest first`);
+    assert.deepEqual(h.inbox.messagesFor(LEAD_ID).map((m) => m.key_id), stored, failing);
+    assert.equal(h.calls.length, asked, `${failing}: nothing is asked after the failure`);
+    assertClean(h.logs);
+    h.s.close();
+  }
+});
+
+test('a chat that leaves the inbox while it is being read is asked nothing more', async () => {
+  // The owner presses "Not a client" while the first question is out.
+  const answer = router({
+    [`alt:${PHONE_JID}`]: [[rec({ id: 'K1' })]],
+    [`jid:${LID}`]: [[rec({ id: 'K4', jidAlt: null, ts: NOW - 120_000 })]],
+  });
+  const h = harness({ serve: (q) => { h.inbox.leaveInbox(LEAD_ID); return answer(q); } });
+  assert.deepEqual(await h.backfill.history(h.lead(), { sinceTs: NOW - JOIN_HISTORY_MS }), { stored: 0, scanned: 1, truncated: false });
+  assert.deepEqual(h.calls.map((c) => c.where.key), [{ remoteJidAlt: PHONE_JID }], 'neither the phone nor the lid question is sent');
+  assert.deepEqual(h.inbox.messagesFor(LEAD_ID), []);
+  h.s.close();
+});
+
 test('refresh reads only from 24 h before the chat joined: every question carries the window, nothing older is stored', async () => {
   const h = harness({
     serve: pool([
@@ -335,6 +386,44 @@ test('refresh reads only from 24 h before the chat joined: every question carrie
   h.s.close();
 });
 
+test('a record outside the window asked for is never stored, whatever Evolution answers: A1 does not rest on its time filter', async () => {
+  // An Evolution that applies the key filter but not the time window (an upgrade, a proxy, a
+  // cache; 2.3.7 already skips it unless both bounds are sent): the owner's private
+  // conversation from months before the chat joined, a record with no time at all, and one
+  // stamped after the window closed come back beside the chat's own.
+  const records = [
+    rec({ id: 'OLD', ts: FLOOR - 90 * 86_400_000, text: 'months before Bona' }),
+    rec({ id: 'UNDATED', ts: null }),
+    rec({ id: 'LATER', ts: NOW + 60_000 }),
+    rec({ id: 'EDGE', ts: FLOOR }),
+    rec({ id: 'NEW', ts: NOW - 60_000 }),
+    rec({ id: 'API', jid: PHONE_JID, jidAlt: null, fromMe: true, text: 'Welcome', ts: NOW - 30_000 }),
+  ];
+  const ignoresTime = ({ where, page, offset }) => pool(records)({ where: { key: where.key }, page, offset });
+  const outside = (h) => h.logs.filter((e) => e.evt === 'inbox.backfill.outside_window');
+  const expected = [
+    { level: 'warn', evt: 'inbox.backfill.outside_window', leadId: LEAD_ID, clause: 'phone_alt', count: 3 },
+    { level: 'warn', evt: 'inbox.backfill.outside_window', leadId: LEAD_ID, clause: 'lid', count: 3 },
+  ];
+
+  const refreshed = harness({ serve: ignoresTime });
+  assert.deepEqual(await refreshed.backfill.refresh(refreshed.lead()), { stored: 3, scanned: 11, truncated: false });
+  assert.deepEqual(refreshed.ingested, ['EDGE', 'NEW', 'API'], 'nothing outside the window reaches ingest');
+  assert.deepEqual(refreshed.inbox.messagesFor(LEAD_ID).map((m) => m.key_id), ['EDGE', 'NEW', 'API']);
+  assert.deepEqual(outside(refreshed), expected);
+  assertClean(refreshed.logs);
+  assert.equal(JSON.stringify(refreshed.logs).includes('months before'), false);
+  refreshed.s.close();
+
+  // The same for a history read (here the catch-up's window: from the floor to now).
+  const joined = harness({ serve: ignoresTime });
+  assert.deepEqual(await joined.backfill.history(joined.lead(), { sinceTs: FLOOR, untilTs: NOW }), { stored: 3, scanned: 11, truncated: false });
+  assert.deepEqual(joined.ingested, ['EDGE', 'NEW', 'API']);
+  assert.deepEqual(outside(joined), expected);
+  assertClean(joined.logs);
+  joined.s.close();
+});
+
 test('the floor never reaches past the retention horizon, and is 24 h before now for a row with no join time', async () => {
   const old = harness({ lead: { inbox_since: NOW - 6 * 365 * 86_400_000 } });
   await old.backfill.refresh(old.lead());
@@ -349,11 +438,31 @@ test('the floor never reaches past the retention horizon, and is 24 h before now
   unset.s.close();
 });
 
+test('history never reaches past the retention horizon either: an older window is cut there, and one wholly older asks nothing', async () => {
+  // The purge leaves a quiet chat `in` with no messages; whatever window a caller asks for,
+  // what the purge removed is not fetched and stored again.
+  const purged = rec({ id: 'PURGED', ts: NOW - RETENTION_MS - 86_400_000 });
+  const kept = rec({ id: 'KEPT', ts: NOW - 60_000 });
+  const ignoresTime = ({ where, page, offset }) => pool([purged, kept])({ where: { key: where.key }, page, offset });
+  const h = harness({ serve: ignoresTime });
+  const horizon = { gte: new Date(NOW - RETENTION_MS).toISOString(), lte: SINCE_JOIN.lte };
+  assert.deepEqual(await h.backfill.history(h.lead(), { sinceTs: NOW - 6 * 365 * 86_400_000, untilTs: NOW }), { stored: 1, scanned: 4, truncated: false });
+  assert.deepEqual(h.calls.map((c) => c.where.messageTimestamp), [horizon, horizon, horizon]);
+  assert.deepEqual(h.inbox.messagesFor(LEAD_ID).map((m) => m.key_id), ['KEPT']);
+
+  h.calls.length = 0;
+  assert.deepEqual(await h.backfill.history(h.lead(), { sinceTs: NOW - 7 * 365 * 86_400_000, untilTs: NOW - RETENTION_MS - 1 }),
+    { stored: 0, scanned: 0, truncated: false });
+  assert.equal(h.calls.length, 0, 'a window wholly past the horizon is not asked for');
+  h.s.close();
+});
+
 test('a long chat is read for its newest 50 per question, and that is not truncation news', async () => {
   const many = Array.from({ length: REFRESH_LIMIT + 1 }, (_, i) => rec({ id: `R-${i}`, ts: NOW - 100_000 + i }));
   const h = harness({ serve: pool(many) });
   const out = await h.backfill.refresh(h.lead());
-  assert.deepEqual(out, { stored: REFRESH_LIMIT, scanned: 2 * REFRESH_LIMIT, truncated: true });
+  assert.deepEqual(out, { stored: REFRESH_LIMIT, scanned: 2 * REFRESH_LIMIT, truncated: false },
+    'what lies further back is the join history\'s to store: `truncated` would flag every active chat');
   const stored = h.inbox.messagesFor(LEAD_ID);
   assert.equal(stored.length, REFRESH_LIMIT);
   assert.equal(stored[0].key_id, 'R-1', 'the 51st newest is not fetched');
@@ -385,6 +494,74 @@ test('a second refresh within 5 s asks nothing; at 5 s it reads again; 1,000 cha
   await h.backfill.refresh(h.lead());
   assert.equal(h.calls.length, 12);
   h.s.close();
+});
+
+test('a second refresh while the first is still reading waits for it, so what it brings is stored before the caller looks', async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const answer = pool([rec({ id: 'K1' })]);
+  const h = harness({ serve: async (q) => { await gate; return answer(q); } });
+  const first = h.backfill.refresh(h.lead());
+  // Staff B's reply, right after staff A opened the thread: the pre-send refresh.
+  let secondDone = false;
+  const second = h.backfill.refresh(h.lead()).then((out) => { secondDone = true; return out; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(secondDone, false, 'the second caller does not go on before the read in flight lands');
+  release();
+  assert.deepEqual(await second, { skipped: 'recent' });
+  assert.deepEqual(h.inbox.messagesFor(LEAD_ID).map((m) => m.key_id), ['K1'], 'the stale-view check sees what the first read brought');
+  assert.deepEqual(await first, { stored: 1, scanned: 2, truncated: false });
+  assert.equal(h.calls.length, 3, 'still one read');
+  // Once it has landed, a refresh inside the pause is skipped at once, as before.
+  assert.deepEqual(await h.backfill.refresh(h.lead()), { skipped: 'recent' });
+  h.s.close();
+
+  // A read in flight that fails: the caller waiting on it is still skipped, never thrown at.
+  let fail;
+  const failing = new Promise((_, reject) => { fail = reject; });
+  const f = harness({ serve: async () => failing });
+  const one = f.backfill.refresh(f.lead());
+  const two = f.backfill.refresh(f.lead());
+  fail(new EvolutionError('POST /chat/findMessages/abdulaziz-personal -> HTTP 500', 500, null));
+  assert.deepEqual(await two, { skipped: 'recent' });
+  assert.deepEqual(await one, { error: 'http_500' });
+  f.s.close();
+});
+
+test('refresh reads a budget or a pause that is not a time sensibly: whole-millisecond waits, the defaults for nonsense', async () => {
+  // AbortSignal.timeout takes whole milliseconds only: a fractional budget is rounded down,
+  // never less than 1 ms, instead of failing inside the reader before anything is sent.
+  const frac = harness();
+  assert.deepEqual(await frac.backfill.refresh(frac.lead(), { budgetMs: 1_000.5, minIntervalMs: 0 }), { stored: 0, scanned: 0, truncated: false });
+  assert.deepEqual(await frac.backfill.refresh(frac.lead(), { budgetMs: 0.5, minIntervalMs: 0 }), { stored: 0, scanned: 0, truncated: false });
+  assert.deepEqual(frac.calls.map((c) => c.timeoutMs), [1_000, 1_000, 1_000, 1, 1, 1]);
+  frac.s.close();
+
+  const requests = [];
+  const fetchImpl = async (url, init) => {
+    requests.push(init);
+    return { ok: true, status: 200, text: async () => JSON.stringify({ messages: { total: 0, pages: 0, currentPage: 1, records: [] } }) };
+  };
+  const wired = harness({ injectFind: false, env: { EVOLUTION_API_URL: 'http://evo.test/', EVOLUTION_API_KEY: 'k' }, fetchImpl });
+  assert.deepEqual(await wired.backfill.refresh(wired.lead(), { budgetMs: 1_000.5 }), { stored: 0, scanned: 0, truncated: false });
+  assert.equal(requests.length, 3, 'the real reader was handed a timeout it accepts');
+  assert.equal(wired.logs.some((e) => e.evt === 'inbox.backfill.failed'), false);
+  wired.s.close();
+
+  // Not a finite number from 0: the default 3 s budget (2.5 s a question) and 5 s pause.
+  for (const bad of [Number.NaN, -1, Infinity, '3000', null]) {
+    const h = harness();
+    assert.deepEqual(await h.backfill.refresh(h.lead(), { budgetMs: bad }), { stored: 0, scanned: 0, truncated: false }, String(bad));
+    assert.deepEqual(h.calls.map((c) => c.timeoutMs), [2_500, 2_500, 2_500], String(bad));
+    h.tick(1_000);
+    assert.deepEqual(await h.backfill.refresh(h.lead(), { minIntervalMs: bad }), { skipped: 'recent' }, `a pause of ${String(bad)} does not switch the pause off`);
+    h.s.close();
+  }
+  // A budget of 0 is a time: nothing is asked, and the read says so.
+  const none = harness();
+  assert.deepEqual(await none.backfill.refresh(none.lead(), { budgetMs: 0 }), { stored: 0, scanned: 0, truncated: false, partial: true });
+  assert.equal(none.calls.length, 0);
+  none.s.close();
 });
 
 test('refresh keeps to its budget: each question waits at most 2.5 s or what is left, and a spent budget skips the rest', async () => {

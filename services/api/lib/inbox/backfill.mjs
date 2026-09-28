@@ -27,7 +27,11 @@
  * the key filter today, but a server that stops applying it — an upgrade that renames
  * `remoteJidAlt`, a proxy or a cache — would otherwise file every private chat on the
  * owner's personal WhatsApp inside the window under this one client's thread, for the whole
- * team to read for five years. Such records are counted and logged, never stored.
+ * team to read for five years. Such records are counted and logged, never stored. The same
+ * holds for the time window every question carries (A10): a record is kept only when its
+ * time is inside it, so A1's floor never rests on Evolution's `messageTimestamp` filter
+ * (2.3.7 already skips it unless both bounds are sent). A record with no time is outside
+ * every window.
  *
  * Read-only, like lib/evolution.mjs: it only ever asks `POST /chat/findMessages`. What is
  * stored is decided by lib/inbox/ingest.mjs, record by record. A read that fails never
@@ -49,6 +53,11 @@ export const REFRESH_LIMIT = 50;
 
 /** No single refresh question waits longer than this, whatever is left of the budget (A2). */
 const REFRESH_REQUEST_MS = 2_500;
+/** A refresh's whole budget, and the pause before the same chat is read again (A2). */
+const REFRESH_BUDGET_MS = 3_000;
+const REFRESH_PAUSE_MS = 5_000;
+/** A time a caller may pass: a finite number from 0. Anything else reads the default — a NaN pause would switch the pause off. */
+const isTime = (ms) => typeof ms === 'number' && Number.isFinite(ms) && ms >= 0;
 /** How many chats' last refresh times are kept; past that, the stalest is forgotten (A2). */
 const REFRESH_MEMORY = 1_000;
 const iso = (ms) => new Date(ms).toISOString();
@@ -130,6 +139,8 @@ export function createBackfill({
   const skipped = (reason) => ({ stored: 0, scanned: 0, truncated: false, skipped: reason });
   /** lead_id → when it was last refreshed. A Map keeps insertion order, so the first key is the stalest. */
   const refreshedAt = new Map();
+  /** lead_id → a refresh still reading that chat (settles, never rejects); removed when it lands. */
+  const inflight = new Map();
 
   /** A logger that throws never breaks a read, nor the promise that it never throws. */
   function note(entry) {
@@ -152,73 +163,92 @@ export function createBackfill({
   }
 
   /**
-   * The three questions for one chat, each paged newest-first inside `time` (the
-   * `messageTimestamp` window every question carries). With a `deadline` (a refresh), each
-   * question waits at most what is left of it, and none starts once it has passed; a
-   * question cut off by its own timeout is dropped the same way. The tally then says
-   * `partial`, and the questions still inside the budget are asked.
+   * The three questions for one chat, each paged newest-first inside `[sinceMs, untilMs]`
+   * (the `messageTimestamp` window every question carries, and the only records kept). With
+   * a `deadline` (a refresh), each question waits at most what is left of it, and none
+   * starts once it has passed; a question cut off by its own timeout is dropped the same
+   * way. The tally then says `partial`, and the questions still inside the budget are asked.
+   * Only a history read (`noteTruncation`) reports a question with more pages than it may
+   * read: a refresh reads only the newest page on purpose. Once the chat has left the
+   * inbox, nothing more is asked.
    */
-  async function readChat(lead, { time, offset, maxPages, noteTruncation, deadline = null }) {
+  async function readChat(lead, { sinceMs, untilMs, offset, maxPages, noteTruncation, deadline = null }) {
     const leadId = lead.lead_id;
+    const time = { gte: iso(sinceMs), lte: iso(untilMs) };
     const seen = new Set();
     const tally = { stored: 0, scanned: 0, truncated: false };
+    /** The lead as it is now while it is still in the inbox, else null. */
+    const stillIn = () => {
+      const current = db.getLead(leadId);
+      return current?.inbox_state === 'in' ? current : null;
+    };
 
-    /** One question, paged: the new records that answer it, as they came. */
-    async function ask(clause, key) {
+    /**
+     * One question, paged. Each new record that answers it is added to `into` as its page
+     * comes, so when a later page fails, what the earlier ones brought is still there to store.
+     */
+    async function ask(clause, key, into) {
       const where = { key, messageTimestamp: time };
-      const batch = [];
       let foreign = 0;
-      for (let page = 1; page <= maxPages; page += 1) {
-        let query = { where, page, offset };
-        if (deadline !== null) {
-          const left = deadline - now();
-          if (left <= 0) {
+      let outside = 0;
+      try {
+        for (let page = 1; page <= maxPages; page += 1) {
+          let query = { where, page, offset };
+          if (deadline !== null) {
+            const left = deadline - now();
+            if (left <= 0) {
+              tally.partial = true;
+              break;
+            }
+            // AbortSignal.timeout takes whole milliseconds only, and at least one.
+            query = { ...query, timeoutMs: Math.max(1, Math.floor(Math.min(left, REFRESH_REQUEST_MS))) };
+          }
+          let answer;
+          try {
+            answer = await read(query);
+          } catch (err) {
+            // Out of time is what the budget is for: the read is partial, not failed (A2).
+            // Anything else, and any timeout on a history read, fails the read.
+            if (deadline === null || errorCode(err) !== 'timeout') throw err;
             tally.partial = true;
             break;
           }
-          query = { ...query, timeoutMs: Math.min(left, REFRESH_REQUEST_MS) };
-        }
-        let answer;
-        try {
-          answer = await read(query);
-        } catch (err) {
-          // Out of time is what the budget is for: the read is partial, not failed (A2).
-          // Anything else, and any timeout on a history read, fails the read.
-          if (deadline === null || errorCode(err) !== 'timeout') throw err;
-          tally.partial = true;
-          break;
-        }
-        const records = Array.isArray(answer) ? answer : (Array.isArray(answer?.records) ? answer.records : []);
-        tally.scanned += records.length;
-        for (const rec of records) {
-          if (!rec?.id || isGroupOrBroadcast(rec.jid)) continue;
-          // Another chat's record, however it got here, is never filed under this lead (A9).
-          if (!answers(key, rec)) {
-            foreign += 1;
-            continue;
+          const records = Array.isArray(answer) ? answer : (Array.isArray(answer?.records) ? answer.records : []);
+          tally.scanned += records.length;
+          for (const rec of records) {
+            if (!rec?.id || isGroupOrBroadcast(rec.jid)) continue;
+            // Another chat's record, however it got here, is never filed under this lead (A9).
+            if (!answers(key, rec)) {
+              foreign += 1;
+              continue;
+            }
+            // Nor one from outside the window asked for (A10): the floor is ours to keep.
+            if (!(Number.isFinite(rec.ts) && rec.ts >= sinceMs && rec.ts <= untilMs)) {
+              outside += 1;
+              continue;
+            }
+            if (seen.has(rec.id)) continue;
+            seen.add(rec.id);
+            into.push(rec);
           }
-          if (seen.has(rec.id)) continue;
-          seen.add(rec.id);
-          batch.push(rec);
-        }
-        // Evolution says how many pages the question has; an answer that does not is read
-        // until a short page, the way lib/evolution.mjs `fetchWindow` always has.
-        const pages = Number.isFinite(answer?.pages) ? answer.pages : null;
-        const more = pages === null ? records.length >= offset : page < pages;
-        if (!more) break;
-        if (page === maxPages) {
-          tally.truncated = true;
-          if (noteTruncation) {
+          // Evolution says how many pages the question has; an answer that does not is read
+          // until a short page, the way lib/evolution.mjs `fetchWindow` always has.
+          const pages = Number.isFinite(answer?.pages) ? answer.pages : null;
+          const more = pages === null ? records.length >= offset : page < pages;
+          if (!more) break;
+          if (page === maxPages && noteTruncation) {
+            tally.truncated = true;
             note({
               level: 'warn', evt: 'inbox.backfill.truncated', leadId, clause, pages,
               total: Number.isFinite(answer?.total) ? answer.total : null, maxPages,
             });
           }
         }
+      } finally {
+        // Counts only: the moment an Evolution upgrade stops applying a filter shows here.
+        if (foreign > 0) note({ level: 'warn', evt: 'inbox.backfill.foreign', leadId, clause, count: foreign });
+        if (outside > 0) note({ level: 'warn', evt: 'inbox.backfill.outside_window', leadId, clause, count: outside });
       }
-      // Counts only: the moment an Evolution upgrade stops applying a filter shows here.
-      if (foreign > 0) note({ level: 'warn', evt: 'inbox.backfill.foreign', leadId, clause, count: foreign });
-      return batch;
     }
 
     /** Oldest first, the order they happened in — like the poller. */
@@ -233,23 +263,35 @@ export function createBackfill({
     if (phoneJid) {
       // Both phone questions, then stored together: what the owner typed (under the lid, the
       // phone as alt) and what the API sent (under the phone jid) interleave, and ingest
-      // matches an outbox row and picks the handler by what it sees first. What the first
-      // question brought is stored even when the second fails.
-      const found = await ask('phone_alt', { remoteJidAlt: phoneJid });
+      // matches an outbox row and picks the handler by what it sees first. Whatever was
+      // fetched is stored, also when a later page or the second question fails.
+      const found = [];
       try {
-        found.push(...await ask('phone', { remoteJid: phoneJid }));
+        await ask('phone_alt', { remoteJidAlt: phoneJid }, found);
+        if (stillIn()) await ask('phone', { remoteJid: phoneJid }, found);
       } finally {
         await store(found);
       }
     }
-    // Read again: the two questions above may have taught this lead its lid.
-    const lid = db.getLead(leadId)?.wa_lid ?? null;
-    if (isLid(lid)) await store(await ask('lid', { remoteJid: lid }));
+    // Read again: the chat may have left the inbox meanwhile (a chat the inbox has no
+    // business with is not fetched), and the two questions above may have taught it its lid.
+    const fresh = stillIn();
+    if (fresh && isLid(fresh.wa_lid)) {
+      const found = [];
+      try {
+        await ask('lid', { remoteJid: fresh.wa_lid }, found);
+      } finally {
+        await store(found);
+      }
+    }
     return tally;
   }
 
   /**
-   * Store a chat's messages between `sinceTs` and `untilTs` (ms).
+   * Store a chat's messages between `sinceTs` and `untilTs` (ms), never from before the
+   * retention horizon: like a refresh, it must not store again what the daily purge removed
+   * (the purge leaves a quiet chat `in` with no messages, which is just what the catch-up
+   * picks). A window wholly older than the horizon asks nothing.
    * @returns {Promise<{ stored: number, scanned: number, truncated: boolean, skipped?: string } | { error: string }>}
    */
   async function history(lead, { sinceTs, untilTs = now(), maxPages = BACKFILL_MAX_PAGES } = {}) {
@@ -259,10 +301,12 @@ export function createBackfill({
     try {
       const { lead: current, skip } = inboxLead(leadId);
       if (skip) return skip;
+      const since = Math.max(sinceTs, now() - RETENTION_MS);
+      if (since > untilTs) return { stored: 0, scanned: 0, truncated: false };
       // Fewer pages may be asked for, never more: anything but a whole number from 1 reads the cap.
       const cap = Number.isInteger(maxPages) && maxPages >= 1 ? Math.min(maxPages, BACKFILL_MAX_PAGES) : BACKFILL_MAX_PAGES;
       return await readChat(current, {
-        time: { gte: iso(sinceTs), lte: iso(untilTs) }, offset: PAGE_SIZE, maxPages: cap, noteTruncation: true,
+        sinceMs: since, untilMs: untilTs, offset: PAGE_SIZE, maxPages: cap, noteTruncation: true,
       });
     } catch (err) {
       return failed(leadId, errorCode(err), loggableName(err));
@@ -274,7 +318,9 @@ export function createBackfill({
    * now (A1). The floor is 24 h before the chat joined — an owner-button join already stored
    * its 30 days when it joined, so a refresh never needs to reach further — and never past
    * the retention horizon, or a refresh would store again what the daily purge removed.
-   * Reading only the newest page is the point, so a longer chat is not "truncated" news.
+   * Reading only the newest page is the point, so `truncated` is always false: what lies
+   * further back is the join history's to store, and a refresh saying otherwise would flag
+   * every active chat.
    *
    * Bounded (A2): the thread page and the reply right after it both ask, so the same chat
    * is not read again within `minIntervalMs`; and the read keeps to `budgetMs`, each question
@@ -282,27 +328,44 @@ export function createBackfill({
    * aborts it and throws a timeout — makes the result `partial`, like a spent budget, and
    * keeps what the questions before it stored; any other failure is `{ error }`. The time is
    * noted before the read, so a failing Evolution is not asked again on every click either.
-   * Never throws.
-   * @returns {Promise<{ stored: number, scanned: number, truncated: boolean, partial?: true, skipped?: string }
+   * A caller inside the pause while that read is still under way waits for it to land (it
+   * keeps to its own budget) before it is told `recent`, so the stale-view check before a
+   * send never runs on what the read in flight has not stored yet (A10). Either option that
+   * is not a finite number from 0 reads its default. Never throws.
+   * @returns {Promise<{ stored: number, scanned: number, truncated: false, partial?: true, skipped?: string }
    *          | { skipped: 'recent' } | { error: string }>}
    */
-  async function refresh(lead, { budgetMs = 3000, minIntervalMs = 5000 } = {}) {
+  async function refresh(lead, { budgetMs = REFRESH_BUDGET_MS, minIntervalMs = REFRESH_PAUSE_MS } = {}) {
     if (!configured) return skipped('not_configured');
     const leadId = lead?.lead_id ?? null;
+    const budget = isTime(budgetMs) ? budgetMs : REFRESH_BUDGET_MS;
+    const pause = isTime(minIntervalMs) ? minIntervalMs : REFRESH_PAUSE_MS;
     try {
       const { lead: current, skip } = inboxLead(leadId);
       if (skip) return skip;
       const t = now();
       const last = refreshedAt.get(leadId);
-      if (last !== undefined && t - last < minIntervalMs) return { skipped: 'recent' };
+      if (last !== undefined && t - last < pause) {
+        const pending = inflight.get(leadId);
+        if (pending) await pending;
+        return { skipped: 'recent' };
+      }
       refreshedAt.delete(leadId); // re-added at the end: the most recently refreshed
       refreshedAt.set(leadId, t);
       if (refreshedAt.size > REFRESH_MEMORY) refreshedAt.delete(refreshedAt.keys().next().value);
       const floor = Math.max((current.inbox_since ?? t) - JOIN_HISTORY_MS, t - RETENTION_MS);
-      const out = await readChat(current, {
-        time: { gte: iso(floor), lte: iso(t) }, offset: REFRESH_LIMIT, maxPages: 1, noteTruncation: false, deadline: t + budgetMs,
+      const run = readChat(current, {
+        sinceMs: floor, untilMs: t, offset: REFRESH_LIMIT, maxPages: 1, noteTruncation: false, deadline: t + budget,
       });
-      if (out.partial) note({ level: 'warn', evt: 'inbox.refresh.partial', leadId, budgetMs });
+      const landed = run.then(() => {}, () => {});
+      inflight.set(leadId, landed);
+      let out;
+      try {
+        out = await run;
+      } finally {
+        if (inflight.get(leadId) === landed) inflight.delete(leadId);
+      }
+      if (out.partial) note({ level: 'warn', evt: 'inbox.refresh.partial', leadId, budgetMs: budget });
       return out;
     } catch (err) {
       return failed(leadId, errorCode(err), loggableName(err));
