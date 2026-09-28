@@ -49,13 +49,40 @@ export const BONA_WORD_RE = /(?<![\p{L}\p{M}])(?:bona(?![\p{L}\p{M}])(?![\s_.-]*
  * The site (or its legacy host) as a link, with or without a scheme and `www.`. The
  * characters either side must not carry on a host name, so `notbona-real-estate.com`,
  * `bona-real-estate.company`, `bona-real-estate.com.evil.example`, `….com.السعودية`,
- * `bona.azoz.uk。evil.example` (browsers read `。．｡` as a dot in a host) and the user part
- * of `bona.azoz.uk@evil.example` or `bona.azoz.uk:443@evil.example` are not ours. A full
- * stop that ends the text or is followed by anything but a host character is allowed: a
- * sentence can end with the link. So is a port (`bona-real-estate.com:443/ar/`).
+ * `bona.azoz.uk。evil.example` (browsers read `。．｡` as a dot in a host), `bona.azoz.uk_evil…`
+ * and the user part of `bona.azoz.uk@evil.example`, `bona.azoz.uk.@evil.example` or
+ * `bona.azoz.uk:443@evil.example` are not ours. A full stop that ends the text or is
+ * followed by anything but a host character is allowed: a sentence can end with the link.
+ * So is a port (`bona-real-estate.com:443/ar/`).
+ *
+ * After a colon, the `@` of user-info is looked for only within 256 characters, and a colon
+ * followed by more than 256 characters with no space, `/` or `@` is refused as well (fewer
+ * joins, never more). Unbounded, that look-ahead re-read the rest of the text from every
+ * copy of the host in it (`bona.azoz.uk:bona.azoz.uk:…@`), quadratic in the text's length.
  */
-export const SITE_LINK_RE = /(?:^|[^a-z0-9.-])(?:www\.)?(?:bona-real-estate\.com|bona\.azoz\.uk)(?![\p{L}\p{M}\p{N}@-]|[.。．｡][\p{L}\p{M}\p{N}]|:[^\s/]*@)/iu;
-export const INBOX_STATES = ['in', 'unsure', 'out'];
+export const SITE_LINK_RE = /(?:^|[^a-z0-9.-])(?:www\.)?(?:bona-real-estate\.com|bona\.azoz\.uk)(?![\p{L}\p{M}\p{N}_@-]|[.。．｡][\p{L}\p{M}\p{N}@]|:(?:[^\s/@]{0,256}@|[^\s/@]{257}))/iu;
+export const INBOX_STATES = Object.freeze(['in', 'unsure', 'out']);
+
+/**
+ * Code points left out at the end of a document name that was cut (`fileNameTruncated`),
+ * so nothing close to the cut is read: more than "bona", a separator and "fides".
+ */
+const CUT_MARGIN = 16;
+/**
+ * Our name at the very end of what is left of a cut name, where the characters left out
+ * decide it: as the last word (`…Bona` of Bonanza, `…بونا` of بونات), or followed only by
+ * separators and the start of "fides" (`…Bona fi` of "Bona fide", `…BONA-` of BONA-fide).
+ * The same bounds and separators as `BONA_WORD_RE`: keep the two in step.
+ */
+const WORD_AT_END_RE = /(?<![\p{L}\p{M}])(?:bona[\s_.-]*(?:f(?:i(?:d(?:es?)?)?)?)?|بونا)$/iu;
+
+/**
+ * What a cut document name can be read by: all but its last `CUT_MARGIN` code points, and
+ * without our name at the new end when what followed it could change how it reads.
+ */
+function readableCutName(name) {
+  return Array.from(name).slice(0, -CUT_MARGIN).join('').replace(WORD_AT_END_RE, '');
+}
 
 /**
  * A Ref line exactly as the site writes it: `Ref BONA-W003 · K7Q2XR`, or `Ref BONA · K7Q2XR`
@@ -97,9 +124,13 @@ export function inboundSignal(o) {
  * (`[document: name]`, `[image]`, …) and `fileName` a document's cleaned name.
  *
  * A name cut at 120 code points (`fileNameTruncated`) may go on past the cut: "…Bonanza.pdf"
- * becomes "…Bona". It is read as if a letter followed the cut, so a word right at the end
- * does not count; anything before it still does. Any truthy flag counts as cut: that only
- * ever means fewer joins.
+ * becomes "…Bona", "…Bona fide declaration.pdf" becomes "…Bona fi". So a cut name is read
+ * without its last 16 code points (`CUT_MARGIN`) and without our name at the new end when
+ * what was left out could change how it reads (`WORD_AT_END_RE`: "…Bona| fide" leaves
+ * "…Bona"), and only by the word rule (an id at the new end may be the start of a longer
+ * one, `BONA-W003` of `BONA-W0031`; a listing id still counts through its `BONA`). Whatever
+ * is then found in it is found in the whole name too, so a cut name joins only where the
+ * whole name would join. Any truthy flag counts as cut: that only ever means fewer joins.
  * @param {{ text?: unknown, fileName?: unknown, fileNameTruncated?: boolean, media?: unknown }|null} [o]
  * @returns {boolean}
  */
@@ -108,8 +139,10 @@ export function ownerOutboundJoins(o) {
   const t = str(text);
   if (SITE_LINK_RE.test(t) || LISTING_ID_RE.test(t)) return true;
   if (!str(media).startsWith('[document')) return false;
-  const name = fileNameTruncated ? `${str(fileName)}x` : str(fileName);
-  return LISTING_ID_RE.test(name) || BONA_WORD_RE.test(name) || BONA_WORD_RE.test(t);
+  if (BONA_WORD_RE.test(t)) return true;
+  const name = str(fileName);
+  if (fileNameTruncated) return BONA_WORD_RE.test(readableCutName(name));
+  return LISTING_ID_RE.test(name) || BONA_WORD_RE.test(name);
 }
 
 /**

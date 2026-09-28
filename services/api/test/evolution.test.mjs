@@ -1094,6 +1094,28 @@ test('a document name loses control and bidi characters, is capped at 120 code p
   assert.equal(nameOf('\u2764\uFE0F villa.pdf'), '\u2764\uFE0F villa.pdf');
 });
 
+test('the placeholder and the record name the same file, and say it was cut only when it was', () => {
+  const doc = (fileName) => ({ key: { id: 'D3' }, message: { documentMessage: { fileName } } });
+  for (const [fileName, cut] of [
+    ['Villa\u202Efdp.exe  \t plan\u0000.pdf', false],
+    ['\u2067\u0645\u062E\u0637\u0637\u2069 \u200F\u0627\u0644\u0641\u064A\u0644\u0627\u061C\u202A.pdf\u202C\n', false],
+    ['\uD83D\uDCC4'.repeat(50) + 'a'.repeat(150), true],
+    ['a'.repeat(119) + ' b', true],
+    [`${'a'.repeat(118)}\u202E\u202E\u202Ebc`, false],
+    ['a'.repeat(116) + '\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67' + 'b', true],
+    [' ' + 'a'.repeat(120) + ' \u202E', false],
+    ['\u202E\u0007 \u2066 ', false],
+    ['', false],
+    [42, false],
+    [undefined, false],
+  ]) {
+    const rec = normaliseRecord(doc(fileName));
+    assert.equal(rec.media, rec.fileName === null ? '[document]' : `[document: ${rec.fileName}]`, JSON.stringify(fileName));
+    assert.equal(rec.fileNameTruncated, cut, JSON.stringify(fileName));
+    assert.equal(mediaOf(doc(fileName)), rec.media);
+  }
+});
+
 test('reactions, deletes and edits, poll votes and key-distribution records are noise; a message is not', () => {
   const n = (message, messageType) => isNoise({ message, messageType });
   assert.equal(n({ reactionMessage: { text: '👍', key: { id: 'X' } } }), true);

@@ -16,6 +16,7 @@ import { normaliseRecord } from '../lib/evolution.mjs';
 
 test('the states and patterns are what the store and the poller rely on', () => {
   assert.deepEqual(INBOX_STATES, ['in', 'unsure', 'out']);
+  assert.ok(Object.isFrozen(INBOX_STATES), 'nothing that imports the list can change it');
   for (const re of [LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE]) {
     assert.ok(re instanceof RegExp);
     assert.equal(re.global, false, `${re} has no /g, so .test() never carries a position over`);
@@ -188,6 +189,12 @@ test('lookalike links and plain mentions of bona do not join a chat', () => {
     'bona-real-estate.com．sa',
     'bona.azoz.uk｡evil.example',
     'bona-real-estate.comعندكم',
+    // a full stop before the user-info's @, and an underscore carrying the host on
+    'https://bona.azoz.uk.@evil.example/',
+    'https://bona.azoz.uk_evil.example/',
+    // user-info is looked for 256 characters after the colon; longer than that is refused too
+    `https://bona.azoz.uk:${'a'.repeat(300)}@evil.example/`,
+    `https://bona.azoz.uk:${'a'.repeat(300)} more`,
     'BONA-W003٤',
     'bona',
     'Bona villa is ready, call me',
@@ -269,6 +276,101 @@ test('a document name cut at 120 characters cannot make a word or an id at the c
   const short = rec('Villa Bona');
   assert.equal(short.fileNameTruncated, false);
   assert.equal(ownerOutboundJoins(short), true);
+});
+
+/** A document record sent by the owner, through normaliseRecord (which cuts the name). */
+const ownerDoc = (fileName) => normaliseRecord({
+  key: { id: 'D1', fromMe: true, remoteJid: '1@lid' },
+  message: { documentMessage: { fileName } },
+});
+/** The same document if its whole name had been kept (normaliseRecord cleans before it cuts). */
+const wholeDoc = (fileName) => ({ text: '', fileName, fileNameTruncated: false, media: `[document: ${fileName}]` });
+
+test('a cut name never joins where the whole name would not: "bona fide" and Bonanza at every cut', () => {
+  // Reading the cut as if a letter followed it turned "…Bona fi|de declaration" into
+  // "…Bona fix", which is not the Latin phrase, so the cut name joined. Leaving the end out
+  // is not enough on its own either: "…Bona| fide" left "…Bona" at the new end.
+  let cuts = 0;
+  for (const tail of ['Bona fide declaration.pdf', 'Bonanza.pdf', 'Bona-fides.pdf', 'بونات.pdf']) {
+    for (const sep of [' ', '_', '-', '1']) {
+      for (let pad = 80; pad <= 125; pad += 1) {
+        const name = `${'x'.repeat(pad)}${sep}${tail}`;
+        const rec = ownerDoc(name);
+        if (rec.fileNameTruncated) cuts += 1;
+        assert.equal(ownerOutboundJoins(wholeDoc(name)), false, `${pad} ${tail}: the whole name does not join`);
+        assert.equal(ownerOutboundJoins(rec), false, `${pad} ${JSON.stringify(sep)} ${tail}: nor may the cut one`);
+      }
+    }
+  }
+  assert.ok(cuts > 300, `the longer ones are cut (${cuts})`);
+});
+
+test('a cut name joins only where the whole name joins, whatever the name is made of', () => {
+  // Names built from the pieces that decide the rules, cut through normaliseRecord at every
+  // kind of place: whenever the cut record joins, the whole name must join too.
+  const pieces = ['bona', 'Bona', 'BONA', 'بونا', 'fide', 'fides', 'fi', 'f', 'fid', 'nza', 'x', 'é', 'ſ', ' ', ' ',
+    '_', '-', '.', '-W003', '-005', 'W', '1', '٤', '\u0301', 'ت', 'BONA-W003', 'BONA-005', 'pdf', '(', 'ب', 'bon', 'de', 's'];
+  let seed = 20260928;
+  const next = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed; };
+  let cuts = 0;
+  let cutJoins = 0;
+  for (let i = 0; i < 4000; i += 1) {
+    let name = `${'x'.repeat(60 + (next() % 45))} `;
+    while (Array.from(name).length < 125 + (next() % 15)) name += pieces[next() % pieces.length];
+    const rec = ownerDoc(name);
+    if (!rec.fileNameTruncated) continue;
+    cuts += 1;
+    if (!ownerOutboundJoins(rec)) continue;
+    cutJoins += 1;
+    const whole = name.replace(/\s+/g, ' ').trim();
+    assert.equal(ownerOutboundJoins(wholeDoc(whole)), true, JSON.stringify(name));
+  }
+  assert.ok(cuts > 3900, `the names are cut (${cuts})`);
+  assert.ok(cutJoins > 500, `and a cut name can still join (${cutJoins})`);
+});
+
+test('any truthy cut flag reads the name as cut: that only ever means fewer joins', () => {
+  const name = `${'x'.repeat(100)} Bona fi`;
+  assert.equal(ownerOutboundJoins({ fileName: name, media: '[document: …]' }), true, 'uncut, "Bona fi" is the name');
+  for (const fileNameTruncated of [true, 1, 'yes']) {
+    assert.equal(ownerOutboundJoins({ fileName: name, fileNameTruncated, media: '[document: …]' }), false, String(fileNameTruncated));
+  }
+  assert.equal(ownerOutboundJoins({ fileName: `Bona_Villa ${'x'.repeat(100)}`, fileNameTruncated: true, media: '[document: …]' }), true, 'far from the cut, the name counts');
+});
+
+/* ---------------- time ---------------- */
+
+test('no text makes the rules slow: every input is read in linear time', () => {
+  // Every inbound WhatsApp text reaches inboundSignal and every owner message
+  // ownerOutboundJoins, up to 65,536 characters. Each case below defeated a pattern with a
+  // run that could be re-read from many places; at ten times the size a quadratic pattern
+  // takes hundreds of milliseconds while a linear one stays in single digits.
+  const fill = (unit, n) => unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
+  const inputs = (n) => [
+    `Ref${' '.repeat(n)}x`, `Ref${'\n'.repeat(n)}x`, `Ref${'\u00A0'.repeat(n)}x`,
+    `Ref BONA${' '.repeat(n / 2)}-${' '.repeat(n / 2)}x`, fill('Ref BONA - ', n), fill('Ref BONA · K7Q2X', n),
+    `bona${' '.repeat(n)}x`, `bona${fill('_.- ', n)}x`, fill('bona ', n), fill('bona fi', n), fill('bona_', n),
+    fill('بونا ', n), fill('BONA-W00', n), fill('BONA-W003٤', n),
+    `${fill('bona.azoz.uk:', n)}@`, `${fill('bona-real-estate.com:', n)}@`, `${fill('www.bona.azoz.uk:', n)}@`,
+    fill('bona.azoz.uk.', n), fill('bona.azoz.uk@', n), fill('bona.azoz.uk_', n),
+  ];
+  const calls = [
+    ['inboundSignal', (s) => inboundSignal({ text: s })],
+    ['ownerOutboundJoins text', (s) => ownerOutboundJoins({ text: s })],
+    ['ownerOutboundJoins caption', (s) => ownerOutboundJoins({ text: s, media: '[document: x.pdf]' })],
+    ['ownerOutboundJoins name', (s) => ownerOutboundJoins({ fileName: s, media: '[document: x.pdf]' })],
+    ['ownerOutboundJoins cut name', (s) => ownerOutboundJoins({ fileName: s, fileNameTruncated: true, media: '[document: x.pdf]' })],
+  ];
+  for (const n of [20_000, 200_000]) {
+    for (const [i, s] of inputs(n).entries()) {
+      for (const [label, call] of calls) {
+        const started = performance.now();
+        call(s);
+        const ms = performance.now() - started;
+        assert.ok(ms < 100, `${label}, input ${i} × ${n}: ${ms.toFixed(1)} ms`);
+      }
+    }
+  }
 });
 
 /* ---------------- the next state ---------------- */
