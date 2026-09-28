@@ -236,13 +236,13 @@ export function mediaOf(record) {
 
 /**
  * Record kinds that change or decorate another message instead of being one: a delete or an
- * edit (protocol), a reaction (plain or encrypted), a poll vote, an edit that carries its new
- * text (Evolution rewrites the original record with it), an album header (the photos arrive
- * as records of their own), a pin, and "keep" in a disappearing chat.
+ * edit (protocol), a reaction (plain or encrypted), a poll vote, an edit event (`editedMessage`),
+ * an album header (the photos arrive as records of their own), a pin, and "keep" in a
+ * disappearing chat.
  *
- * Dropping an edit here is only half of showing it: a stored copy of the original shows the
- * new text only if whoever stores it takes a changed text for an id it already holds when
- * the rewritten record is read again. Otherwise the pre-edit text stays.
+ * Dropping an edit event here is only half of showing an edit: a stored copy of the original
+ * shows the new text only if whoever stores it takes a changed text for an id it already holds
+ * when the original is read again. Otherwise the pre-edit text stays.
  */
 const NOISE_KINDS = new Set([
   'protocolMessage', 'reactionMessage', 'pollUpdateMessage', 'editedMessage',
@@ -263,15 +263,24 @@ function wrappedInEdit(message) {
 
 /**
  * True for a record that is not a message of its own and must never become a bubble: one
- * of the `NOISE_KINDS` (by `messageType`, by a part of the message, or — for an edit — by
- * the wrapper `unwrapMessage` takes off), or a record that is only encryption/device
- * envelope. A record with no message body at all is NOT noise — it may be a client message
- * the phone could not decrypt, so it shows as `[message]` rather than vanishing (design
- * §4.3, no silent loss). Nor is an unknown kind: it too shows as `[message]`.
+ * of the `NOISE_KINDS` (by `messageType` or by a part of the unwrapped message), or a record
+ * that is only encryption/device envelope. A record with no message body at all is NOT noise
+ * — it may be a client message the phone could not decrypt, so it shows as `[message]` rather
+ * than vanishing (design §4.3, no silent loss). Nor is an unknown kind: it too shows as
+ * `[message]`.
+ *
+ * An edit wrapper (which `unwrapMessage` takes off) decides only for a record that names no
+ * kind of its own. An edit event on the wire holds a protocolMessage, which is noise by its
+ * content whatever the record's type says. But Baileys reports an edit as an update to the
+ * ORIGINAL, its content set to `{ editedMessage: { message: <new content> } }`: a record that
+ * says it is a `conversation` or an `imageMessage` and holds that is the client's message with
+ * its new content, and is kept (whether Evolution 2.3.7 stores originals that way is not
+ * verified; plan P2-14).
  */
 export function isNoise(record) {
-  if (NOISE_KINDS.has(record?.messageType)) return true;
-  if (wrappedInEdit(record?.message)) return true;
+  const type = typeof record?.messageType === 'string' && record.messageType ? record.messageType : null;
+  if (NOISE_KINDS.has(type)) return true;
+  if (type === null && wrappedInEdit(record?.message)) return true;
   const m = unwrapMessage(record?.message);
   if (!m || typeof m !== 'object') return false;
   const keys = Object.keys(m);
@@ -364,7 +373,13 @@ const KEY_FILTERS = new Set(['remoteJid', 'remoteJidAlt']);
 const WINDOW_BOUNDS = new Set(['gte', 'lte']);
 /** The top-level `where` fields a read may use. */
 const WHERE_FIELDS = new Set(['key', 'messageTimestamp']);
-const isIsoDate = (value) => typeof value === 'string' && Number.isFinite(Date.parse(value));
+/**
+ * An ISO 8601 date-time with seconds and a zone (`2026-09-06T12:00:00.000Z`, `…+03:00`), as
+ * `toIso` writes it, and a real one (`2026-13-45T…` is not). Anything else `Date.parse` happens
+ * to read (`'2026'`, `'Sep 1'`, a date with no time or no zone) is refused.
+ */
+const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+const isIsoDate = (value) => typeof value === 'string' && ISO_DATE_TIME.test(value) && Number.isFinite(Date.parse(value));
 const isPlainObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const onlyFrom = (object, allowed) => Object.keys(object).every((field) => allowed.has(field));
 
@@ -536,57 +551,41 @@ export async function fetchWindow({ maxPages = MAX_PAGES, offset = PAGE_SIZE, ..
 
 /**
  * Every message in a time window across every chat, without silent loss (2026-09-27 design
- * §4.3): each record at most once, and what could not be read is counted in `missing` and
- * flagged `truncated`, never dropped quietly.
+ * §4.3; the full reasoning is decision P2-3 in the Phase 2 plan): each record at most once,
+ * and what could not be read is counted in `missing` and flagged `truncated`, never dropped
+ * quietly.
  *
  * Evolution answers newest first, orders by `messageTimestamp` alone and pages with
  * LIMIT/OFFSET, so the window is read in pieces:
  *   - A piece whose stated `total` is more than `maxPages × offset` is cut in two on a whole
- *     second, `[from, mid − 1 ms]` and `[mid, to]` with `mid` the second the midpoint falls
- *     in but never `from`'s own, and each half is read the same way, the older half first.
- *     Evolution compares whole seconds, so the halves neither overlap nor leave a second out,
- *     and a piece can be cut whenever it takes in two or more seconds, however few ms wide.
- *   - A piece that fits is paged through with its ids de-duplicated. It is complete when it
- *     returned as many DIFFERENT records as the largest `total` any of its pages stated (a
- *     bare array states none: as many as its pages held rows), less the extra rows of an id
- *     repeated on ONE page (counted on the page that held the most of them) — one LIMIT/OFFSET
- *     page cannot return a row twice, so that is a record stored twice under one key.id, not
- *     a slide. It reads on past the stated pages
- *     while its pages held fewer rows than that total and the last one came back full: a late
- *     delivery pushed the oldest record down a page.
- *   - A piece that comes back short is cut too, and its halves read, instead of being
- *     accepted. Short means records slid between pages: PostgreSQL does not keep records that
- *     share a second in one order across different LIMIT/OFFSET values, so a same-second group
- *     (a photo album) on a page boundary can come back partly twice and partly never, and a
- *     delivery or a deletion between two page requests shifts the pages as well. Each cut
- *     leaves fewer records around the group, until it falls inside one page or the piece can
- *     be cut no further. A bare-array piece that the page cap stops with its last page full
- *     is cut the same way: there is more past that page.
- * Only a piece that cannot be cut again — at `maxDepth`, or a single whole second — is
- * accepted short: its shortfall goes into `missing` and `truncated` is set. A bare-array piece
- * that the page cap stops there with its last page full is `truncated` too; what lies past that
- * page cannot be counted, so it adds nothing to `missing`. The caller logs it and moves on:
- * holding its cursor there would re-read the same pages for ever.
+ *     second — `[from, mid − 1 ms]` and `[mid, to]`, each keeping at least one second — and
+ *     each half is read the same way, the older half first. Evolution compares whole seconds,
+ *     so the halves neither overlap nor leave a second out.
+ *   - A piece that fits is paged through, ids de-duplicated, reading on past its stated pages
+ *     while it holds fewer rows than the largest `total` any page stated and the last page came
+ *     back full (a late delivery pushed a record down a page). It is complete when its distinct
+ *     ids reach that total, less the extra rows of an id repeated on ONE page (one page cannot
+ *     return a row twice, so those are rows stored twice under one key.id, not a slide). A
+ *     bare array states no total: the rows its pages held stand in for it.
+ *   - A piece that comes back short (records slid between pages: same-second ties are not kept
+ *     in one order across LIMIT/OFFSET values, and deliveries or deletions shift the pages) is
+ *     cut and its halves re-read instead of being accepted. So is a bare-array piece stopped by
+ *     the page cap with its last page full.
+ * Only a piece that cannot be cut again — at `maxDepth`, or a single whole second — is kept
+ * short: its shortfall goes into `missing` and `truncated` is set (a bare-array piece cut off
+ * there is `truncated` and adds nothing to `missing`, since what lies past it cannot be
+ * counted). The caller logs it and moves on: holding its cursor would re-read the same pages
+ * for ever.
  *
- * Cost: a piece asks for at most `maxPages` pages whether it is kept or cut, and the cuts
- * make at most `2^(maxDepth + 1) − 1` pieces in all (the kept ones, counted in `pieces`, are
- * at most `2^maxDepth`), so one call makes at most `maxPages × (2^(maxDepth + 1) − 1)`
- * requests — 155 with the defaults.
+ * Cost: at most `maxPages × (2^(maxDepth + 1) − 1)` requests — 155 with the defaults — and at
+ * most `2^maxDepth` kept pieces (`pieces`).
  *
- * Known limits:
- *   - Page counts cannot see everything that happens between two page requests, and
- *     Evolution offers no snapshot read. A record that leaves a piece (deleted, or re-stamped
- *     out of it) and one that arrives in it can cancel out: a record then slides past a page
- *     boundary and nothing reports it.
- *   - `missing` is an upper bound. In a piece that cannot be cut, a newcomer stamped near
- *     `lte` on a page already read is counted, though the caller's next window reads it; a
- *     record that left mid-read can count one too many.
- *   - A record with no id cannot be told from another, so each copy is kept and counted.
- *     Evolution gives every stored record an id.
- *   - Two rows stored under one key.id that land on different pages look exactly like a slide,
- *     so the piece is cut until they share a page or fall in different pieces; only at the
- *     floor do they count one too many. Whether Evolution 2.3.7 stores such rows at all (an
- *     API send stored by the send path and again by the Baileys echo, say) is not verified.
+ * Known limits: page counts cannot see a record that leaves a piece cancelling one that
+ * arrives (a slide then goes unreported; Evolution offers no snapshot read). `missing` is an
+ * upper bound (a newcomer on a page already read, or a record that left mid-read, can count
+ * one too many). A record with no id is kept and counted per copy. Two rows under one key.id
+ * on different pages look like a slide and cost extra cuts; whether Evolution 2.3.7 stores
+ * such rows at all is not verified (P2-3's open check).
  *
  * Within a piece the records keep Evolution's newest-first order (the poller sorts with
  * `oldestFirst`); the pieces come oldest first. A failed request throws as it is — nothing is

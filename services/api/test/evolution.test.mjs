@@ -349,6 +349,13 @@ test('findMessagesPage refuses a missing or empty filter, which would read every
     { messageTimestamp: { lte: iso(T0) } },
     { messageTimestamp: { gte: 'not a date', lte: iso(T0) } },
     { messageTimestamp: { gte: T0, lte: T0 + 60_000 } },
+    // Bounds are ISO 8601 date-times, not whatever Date.parse happens to read.
+    { messageTimestamp: { gte: '2026', lte: iso(T0) } },
+    { messageTimestamp: { gte: 'Sep 1 2026', lte: 'Sep 2 2026' } },
+    { messageTimestamp: { gte: '0', lte: iso(T0) } },
+    { messageTimestamp: { gte: '2026-09-06', lte: iso(T0) } },
+    { messageTimestamp: { gte: '2026-13-45T00:00:00Z', lte: iso(T0) } },
+    { messageTimestamp: { gte: iso(T0), lte: '2026-09-06T12:00:00' } },
     { messageTimestamp: null },
     { key: { remoteJid: null }, messageTimestamp: window },
     { key: { remoteJid: CLIENT }, messageTimestamp: { gte: iso(T0) } },
@@ -385,6 +392,7 @@ test('findMessagesPage refuses a missing or empty filter, which would read every
     { messageTimestamp: window },
     { key: { remoteJid: CLIENT }, messageTimestamp: window },
     { key: { remoteJidAlt: CLIENT }, messageTimestamp: window },
+    { messageTimestamp: { gte: '2026-09-06T12:00:00Z', lte: '2026-09-06T15:00:00+03:00' } },
   ];
   for (const where of narrow) await findMessagesPage({ ...BASE, where, fetchImpl: ok.fetchImpl });
   assert.deepEqual(ok.calls.map((c) => c.body.where), narrow);
@@ -1096,12 +1104,14 @@ test('reactions, deletes and edits, poll votes and key-distribution records are 
   for (const type of ['reactionMessage', 'protocolMessage', 'pollUpdateMessage']) {
     assert.equal(n(undefined, type), true, `${type} by messageType alone`);
   }
-  // An edit that carries the new text: Evolution rewrites the original record with it, so the
-  // edit itself would be a second bubble. Unwrapping takes the edit wrapper off, so it is
-  // looked for on the way in, not on what is left.
+  // A record that says it is an edit is one, whatever its wrapper holds. A record that says
+  // nothing about its own kind is judged by the edit wrapper (unwrapping takes it off, so it
+  // is looked for on the way in, not on what is left). A record that names a kind of its own
+  // is the next test.
   assert.equal(n({ editedMessage: { message: { conversation: 'fixed' } } }, 'editedMessage'), true, 'an edit carrying its text');
   assert.equal(n({ editedMessage: { message: { conversation: 'fixed' } } }), true, 'an edit, by its wrapper alone');
   assert.equal(n({ ephemeralMessage: { message: { editedMessage: { message: { extendedTextMessage: { text: 'fixed' } } } } } }), true, 'an edit in a disappearing chat');
+  assert.equal(n({ editedMessage: { message: { protocolMessage: { type: 14 } } } }, 'conversation'), true, 'an edit event is noise by its content, whatever its type says');
   assert.equal(n({ albumMessage: { expectedImageCount: 3 } }), true, 'an album header: the photos arrive as records of their own');
   assert.equal(n({ pinInChatMessage: { type: 1 } }), true, 'a pin');
   assert.equal(n({ keepInChatMessage: { keepType: 1 } }), true, 'keep in a disappearing chat');
@@ -1118,6 +1128,35 @@ test('reactions, deletes and edits, poll votes and key-distribution records are 
   assert.equal(n({ someFutureMessage: {} }), false, 'an unknown kind shows as [message], never vanishes');
   assert.equal(n({}), false, 'no body at all may be a message the phone could not decrypt');
   assert.equal(n(null), false);
+});
+
+test('a record that names its own kind is kept, with its new content, when an edit wrapper holds it', () => {
+  // Baileys reports an edit as an update to the ORIGINAL message, its content set to
+  // `{ editedMessage: { message: <new content> } }`. Whether Evolution 2.3.7 ever stores an
+  // original that way is not verified; if it does, the record keeps its own id and says what
+  // it is, and it is the client's message: dropping it as noise would lose it silently.
+  const edited = normaliseRecord(textRecord({
+    key: { id: 'ORIG1', fromMe: false, remoteJid: '966500000000@s.whatsapp.net' },
+    messageType: 'conversation',
+    message: { editedMessage: { message: { conversation: 'x' } } },
+  }));
+  assert.equal(edited.noise, false);
+  assert.equal(edited.text, 'x');
+  assert.equal(edited.id, 'ORIG1');
+
+  const n = (message, messageType) => isNoise({ message, messageType });
+  assert.equal(n({ editedMessage: { message: { extendedTextMessage: { text: 'x' } } } }, 'extendedTextMessage'), false);
+  assert.equal(n({ ephemeralMessage: { message: { editedMessage: { message: { conversation: 'x' } } } } }, 'ephemeralMessage'), false,
+    'an original from a disappearing chat keeps the type it was stored with');
+  assert.equal(n({ editedMessage: { message: { conversation: 'x' } } }, 'unknown'), false, 'Evolution\'s "unknown" is not a claim to be an edit');
+
+  const photo = normaliseRecord(textRecord({
+    messageType: 'imageMessage',
+    message: { editedMessage: { message: { imageMessage: { caption: 'the view, corrected' } } } },
+  }));
+  assert.equal(photo.noise, false);
+  assert.equal(photo.media, '[image]');
+  assert.equal(photo.text, 'the view, corrected');
 });
 
 test('normaliseRecord carries the placeholder, the cleaned file name and the noise flag', () => {
