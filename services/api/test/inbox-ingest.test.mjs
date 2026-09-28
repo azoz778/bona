@@ -38,8 +38,11 @@ const rec = (over = {}) => ({
   contextInfo: null, messageType: 'conversation', media: null, fileName: null, noise: false, ...over,
 });
 
-/** `isExcludedLead` is left out unless a test hands one in: the default reads the team tables. */
-function harness({ lead = {}, ownerUserId = null, isExcludedLead = null } = {}) {
+/**
+ * `isExcludedLead` and `ownerPhone` are left out unless a test hands one in: the defaults read
+ * the team tables and the owner account's number.
+ */
+function harness({ lead = {}, ownerUserId = null, isExcludedLead = null, ownerPhone = undefined } = {}) {
   const s = openDb(':memory:');
   let clock = NOW;
   const team = createTeam(s, { now: () => clock });
@@ -50,6 +53,7 @@ function harness({ lead = {}, ownerUserId = null, isExcludedLead = null } = {}) 
   const { ingest } = createIngest({
     db: s, inbox, ownerUserId: ownerUserId ?? (() => owner.user_id), log: (o) => logs.push(o), now: () => clock,
     ...(isExcludedLead ? { isExcludedLead } : {}),
+    ...(ownerPhone !== undefined ? { ownerPhone } : {}),
   });
   s.insertLead({ ...LEAD, ...lead });
   return { s, team, inbox, ingest, owner, staff, logs, lead: () => s.getLead(LEAD_ID), at: (t) => { clock = t; } };
@@ -605,5 +609,64 @@ test('logs carry ids and field names only — never text, a phone number, a lid 
   h.ingest(h.lead(), rec({ id: 'OWN-5', fromMe: true, text: TYPED, ts: NOW + 1_000 }));
   assert.ok(h.logs.length >= 2, 'the learning and the resolution were both logged');
   assertClean(h.logs);
+  h.s.close();
+});
+
+/* ---------------- follow-ups from the Task 9 reviews (2026-09-28) ---------------- */
+
+test("the owner's own number as a sent record's alt is known by the instance's number, with no owner account to read it from", () => {
+  // Deactivated or demoted, the owner row gives no user id. His number is still in `users`,
+  // so read from his account it would be refused as a team number in every chat he answers.
+  const OWN_ALT = '966593296933@s.whatsapp.net';
+  const typed = (id) => rec({ id, fromMe: true, text: TYPED, jidAlt: OWN_ALT });
+  for (const ownerPhone of ['966593296933', () => '966593296933']) {
+    const h = harness({ ownerUserId: () => null, ownerPhone });
+    assert.deepEqual(h.ingest(h.lead(), typed('OWN-N')), { stored: true, inserted: true, senderKind: 'owner_number' });
+    assert.equal(h.lead().handler_user_id, null, 'no owner account, so nobody is made the handler');
+    // As the chat itself it is still his own chat, never a client's.
+    assert.deepEqual(h.ingest(h.lead(), rec({ id: 'OWN-S', fromMe: true, text: TYPED, jid: OWN_ALT, jidAlt: null })), { stored: false, reason: 'excluded' });
+    assertClean(h.logs);
+    h.s.close();
+  }
+
+  // Left out, it is read from the owner account, as before: with none, the alt is a team number.
+  const noAccount = harness({ ownerUserId: () => null });
+  assert.deepEqual(noAccount.ingest(noAccount.lead(), typed('OWN-D')), { stored: false, reason: 'excluded' });
+  noAccount.s.close();
+  const account = harness();
+  assert.equal(account.ingest(account.lead(), typed('OWN-E')).senderKind, 'owner_number');
+  account.s.close();
+});
+
+test('a record with no time of its own is stored at now, but never claims a send by its text; its message id still does', () => {
+  for (const ts of [undefined, null, Number.NaN, String(NOW)]) {
+    const label = String(ts);
+    const h = harness();
+    h.inbox.insertOutbox({ send_id: 'SND-nots-1', lead_id: LEAD_ID, jid: PHONE_JID, text: REPLY, user_id: h.staff.user_id, sender_kind: 'staff', status: 'uncertain' });
+    const out = h.ingest(h.lead(), rec({ id: 'OUT-NT', fromMe: true, text: REPLY, ts }));
+    assert.equal(out.senderKind, 'owner_number', label);
+    const row = h.inbox.getOutbox('SND-nots-1');
+    assert.deepEqual([row.status, row.key_id], ['uncertain', null], label);
+    assert.equal(h.inbox.messagesFor(LEAD_ID)[0].ts, NOW, `${label}: stored at now()`);
+
+    h.inbox.insertOutbox({ send_id: 'SND-nots-2', lead_id: LEAD_ID, jid: PHONE_JID, text: 'Photos attached', user_id: h.staff.user_id, sender_kind: 'staff' });
+    h.inbox.updateOutbox('SND-nots-2', { status: 'accepted', key_id: 'OUT-NT2' });
+    assert.equal(h.ingest(h.lead(), rec({ id: 'OUT-NT2', fromMe: true, text: 'Photos attached', ts })).senderKind, 'staff', label);
+    h.s.close();
+  }
+});
+
+test("a record carrying a login code's message id is refused whichever way it is filed, even as received, before anything is learned", () => {
+  const h = harness({ lead: { phone_e164: null, wa_jid: null } });
+  h.inbox.insertOutbox({ send_id: 'SND-code-5', jid: PHONE_JID, sender_kind: 'code' });
+  h.inbox.updateOutbox('SND-code-5', { status: 'accepted', key_id: 'CODE-5' });
+  const row = h.inbox.getOutbox('SND-code-5');
+  const lead = h.lead();
+  // Worded so the code's own shape does not refuse it: only its message id can.
+  assert.deepEqual(h.ingest(h.lead(), rec({ id: 'CODE-5', text: 'Your Bona sign-in code is 482913' })), { stored: false, reason: 'code' });
+  assert.equal(h.inbox.hasMessages(LEAD_ID), false);
+  assert.deepEqual(h.inbox.getOutbox('SND-code-5'), row, 'the row is not touched');
+  assert.deepEqual(h.lead(), lead, 'the row learns nothing from it');
+  assert.equal(JSON.stringify(h.logs).includes('482913'), false);
   h.s.close();
 });
