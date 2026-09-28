@@ -303,7 +303,7 @@ export function ensureEnvFile({ home = os.homedir(), env = process.env } = {}) {
     // the dashboard cookie lifetime is in days. BONA_DB_FILE is deliberately absent:
     // it defaults to ${BONA_DATA}/bona.db and is only set to move the file.
     BONA_WA_POLL: '1',
-    BONA_WA_POLL_MS: '45000',
+    BONA_WA_POLL_MS: '20000',
     BONA_FANOUT_MS: '20000',
     BONA_DASH_COOKIE_DAYS: '30',
   };

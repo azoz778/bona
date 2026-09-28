@@ -50,7 +50,7 @@
  */
 import { isCodeMessage } from '../dashboard/auth.mjs';
 import { normalisePhone } from '../phone.mjs';
-import { createTeam, isTeamLid } from '../team.mjs';
+import { createTeam, isExcludedLead as sharedIsExcludedLead } from '../team.mjs';
 import { jidsOf } from '../wa-poller.mjs';
 
 /** How far apart an unconfirmed send and the record that confirms it may be (P2-17). */
@@ -68,16 +68,6 @@ const WARNED_MAX = 1000;
 
 /** Outbound senders that are a person answering — as opposed to Dana. */
 const HUMAN_SENDERS = new Set(['staff', 'owner_number']);
-
-/**
- * A team member's or a never-list number, however the lead row holds it: its phone, the
- * number in its phone jid, or a lid the poller learned for a team member.
- */
-function excludedByTeam(db, team) {
-  return (lead) => team.isExcludedPhone(lead.phone_e164)
-    || team.isExcludedPhone(jidsOf({ jid: lead.wa_jid }).phone)
-    || isTeamLid(db, lead.wa_lid);
-}
 
 /**
  * Every number (with its phone jid) and every lid a record names, each once. `jidsOf` keeps
@@ -134,7 +124,9 @@ function sameChat(lead, rec) {
  *        the chat. Left out, it is read from the `ownerUserId` account, which a deactivated or
  *        demoted owner row no longer yields
  * @param {((lead: object) => boolean)|null} [o.isExcludedLead] true for a chat that is never a
- *        client's; defaults to the team and never-list tables in `db`
+ *        client's; defaults to lib/team.mjs `isExcludedLead` over the team and never-list
+ *        tables in `db`. Called with per-identifier views of a lead, so it must decide from
+ *        the `phone_e164`, `wa_jid` and `wa_lid` it is handed, never by re-reading the row
  * @param {(e: object) => void} [o.log]
  * @param {() => number} [o.now]
  */
@@ -144,7 +136,8 @@ export function createIngest({
   if (!db || !inbox) throw new TypeError('createIngest needs the store and the inbox store');
   // `createTeam` only prepares statements when they are first used: this instance costs nothing.
   const team = createTeam(db);
-  const isExcluded = isExcludedLead ?? excludedByTeam(db, team);
+  // The inbox's one exclusion rule (lib/team.mjs `isExcludedLead`) unless a caller hands one in.
+  const isExcluded = isExcludedLead ?? ((l) => sharedIsExcludedLead(team, db, l));
   const givenOwnerPhone = typeof ownerPhone === 'function' ? ownerPhone : () => ownerPhone;
   /** The owner's own number: the instance's, when given; else his account's, as before. */
   const ownersNumber = () => normalisePhone(givenOwnerPhone()) ?? team.getUser(ownerUserId())?.phone_e164 ?? null;

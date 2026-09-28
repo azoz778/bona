@@ -45,10 +45,12 @@ import { createToolHandlers, extractToken, tokenMatches, TOOL_NAMES } from './li
 import { extractActions } from './lib/actions.mjs';
 import { appendJsonl, createOrMergeLead, leadNote } from './lib/leads.mjs';
 import { sendText, waConfig } from './lib/wa.mjs';
-import { createTeam, TeamError } from './lib/team.mjs';
+import { createTeam, TeamError, isExcludedLead } from './lib/team.mjs';
 import { createAudit } from './lib/audit.mjs';
 import { createSender } from './lib/wa-send.mjs';
-import { createInboxStore } from './lib/inbox/store.mjs';
+import { createInboxStore, RETENTION_MS } from './lib/inbox/store.mjs';
+import { createIngest } from './lib/inbox/ingest.mjs';
+import { createBackfill, JOIN_HISTORY_MS } from './lib/inbox/backfill.mjs';
 import { bareJid } from './lib/evolution.mjs';
 import { createDashboardRoutes } from './lib/dashboard/routes.mjs';
 
@@ -56,6 +58,13 @@ const GREETING = {
   en: "Hello, I'm Dana from Bona. How can I help you today?",
   ar: 'مرحباً، أنا دانة من بونا. كيف أقدر أساعدك؟',
 };
+
+/** Login-code outbox rows exist only to count the day's sends; two days covers any rolling 24 h. */
+const CODE_ROW_TTL_MS = 2 * 86_400_000;
+/** lib/wa-send.mjs `recoverInterrupted`'s own rule: a send pending longer than this lost its process. */
+const INTERRUPTED_SEND_MS = 120_000;
+/** How often the real server runs `app.inboxMaintenance()`. */
+const INBOX_UPKEEP_EVERY_MS = 24 * 3_600_000;
 
 const jsonLog = (level, obj) => {
   const line = JSON.stringify({ ts: new Date().toISOString(), level, ...obj });
@@ -201,16 +210,49 @@ export function createApp(options = {}) {
     log({ level: 'error', evt: 'team.owner_seed_failed', error: err.code });
   }
   const audit = options.audit ?? createAudit(db, { log });
-  // The Bona inbox tables (2026-09-27 design §4.2). The sender already needs them: every
-  // send is written to the outbox first, and the daily cap is counted from it.
-  const inboxStore = options.inboxStore ?? createInboxStore(db);
-  // The ONE sender for messages from the owner's number to anyone else: its per-minute
-  // limits live in memory, so a second instance would be a second, independent budget.
-  const sender = options.sender ?? createSender({ env: cfg.env ?? {}, team, inbox: inboxStore, db, log });
+  // The clock the inbox pieces read. Only tests pin it; everything else in this file
+  // keeps reading Date.now() as before.
+  const clock = options.now ?? (() => Date.now());
+  // The fetch the sender and the backfill go out through. A test hands in a fake so
+  // nothing leaves the process; left undefined, each falls back to the global fetch.
+  const fetchImpl = options.fetchImpl;
+  // The Bona inbox (2026-09-27 design §4): transcripts of inbox chats, the outbox every
+  // send is written to before it goes, unread marks, and the gaps a thread owns up to.
+  const inboxStore = options.inboxStore ?? createInboxStore(db, { now: clock });
+  // The ONE sender for messages from the owner's number to anyone else. Its per-minute
+  // limits live in memory, so a second instance would be a second, independent budget;
+  // the day's cap is counted from the outbox, so a restart no longer resets it.
+  const sender = options.sender ?? createSender({ env: cfg.env ?? {}, team, inbox: inboxStore, db, fetchImpl, now: clock, log });
+  // A send that was in flight when the last process died is not known to have failed:
+  // it becomes "uncertain" — shown as such, never retried — rather than pending for ever.
+  const interrupted = sender.recoverInterrupted?.() ?? 0;
+  if (interrupted) log({ level: 'warn', evt: 'wa.send.interrupted', count: interrupted });
   const sendCode = options.sendCode ?? ((o) => sender.sendTo({ ...o, kind: 'code' }));
+  // The instance's own number (digits, from BONA_OWNER_JID): a sent record whose alt is
+  // this number names its sender, not the chat — known even while the owner's account is
+  // deactivated or demoted.
+  const ownerDigits = bareJid(waConfig(cfg.env ?? {}).ownerJid);
+  // A message typed on the owner's own phone makes him the chat's handler when it has
+  // none. Looked up on every call, so a change on the Team page is seen at once.
+  const ownerUserId = () => {
+    const owner = ownerDigits ? team.getUserByPhone(ownerDigits) : null;
+    return owner && owner.active && owner.role === 'owner' ? owner.user_id : null;
+  };
+  // The inbox's one exclusion rule (lib/team.mjs), the same the upkeep and the routes use.
+  const excludedLead = (lead) => isExcludedLead(team, db, lead);
+  const ingest = options.ingest ?? createIngest({
+    db, inbox: inboxStore, ownerUserId, ownerPhone: ownerDigits || null, isExcludedLead: excludedLead, log, now: clock,
+  });
+  // The backfill and the poller take the one-record function, not the object.
+  const ingestRecord = (lead, rec) => ingest.ingest(lead, rec);
+  // Per-chat reads from Evolution: history when a chat joins, a refresh when a thread is
+  // opened or answered. Read-only, like the poller; constructing it contacts nothing.
+  const backfill = options.backfill ?? createBackfill({ env: cfg.env ?? {}, db, ingest: ingestRecord, fetchImpl, log, now: clock });
   // The WhatsApp Ref-code poller. Read-only, and only when `BONA_WA_POLL` says so —
   // constructing it contacts nothing; the real server (below) is what puts it on a timer.
-  const poller = options.poller ?? (cfg.waPoll ? createPoller({ db, cfg, sendWhatsApp, isExcluded: team.isExcludedPhone, log }) : null);
+  const poller = options.poller ?? (cfg.waPoll ? createPoller({
+    db, cfg, sendWhatsApp, isExcluded: team.isExcludedPhone, log, inboxStore, ingest: ingestRecord, backfill,
+  }) : null);
   const tools = createToolHandlers({
     inventory, units, store, db, dataDir: cfg.dataDir, siteUrl: cfg.siteUrl, env: cfg.env, sendWhatsApp, log,
   });
@@ -243,13 +285,82 @@ export function createApp(options = {}) {
   // rather than a second wiring step. `server` and `handle` are added at the end.
   const app = {
     cfg, inventory, store, db, retell, tools, limiters, fanout, budget, team, audit, sender,
+    inboxStore, ingest, backfill,
     poller: options.poller ?? null,
+  };
+
+  /**
+   * The inbox's upkeep (P2-18, P2-20, amendment A3), run once at start-up and then daily
+   * by the real server below. In order: a chat whose number is a colleague's or on the
+   * never list leaves the inbox and its transcript goes (§3.5 — migration v4 sorted leads
+   * by how they matched, and a number can join the team or the never list after its chat
+   * joined); transcripts of chats silent for five years go (the lead rows stay — they are
+   * the attribution record); login-code outbox rows older than two days go (they only
+   * ever counted the day's sends); a send left pending by a process that died becomes
+   * uncertain; then every `in` chat with nothing stored yet gets the history an automatic
+   * join takes — never reaching past the retention horizon, or the purge would be undone
+   * the same morning. Counts only in the log: never a number, a name or a word of a
+   * message. One run at a time, and it never rejects: upkeep that fails is a line in the
+   * log, not a crashed server.
+   *
+   * The sweep sees only what a row holds. A lid-only chat whose number another lead holds
+   * (ingest's `held_by_other_lead`) never learns that number, so it stays in: its records
+   * that name the excluded number are refused, those with no alt are still stored, until
+   * the owner moves it out. Accepted (rare: 0 of 27 live leads are lid-only).
+   */
+  let upkeepRunning = false;
+  app.inboxMaintenance = async function inboxMaintenance() {
+    if (upkeepRunning) return { skipped: 'running' };
+    upkeepRunning = true;
+    try {
+      const t = clock();
+      // First, so the catch-up below never fetches a private chat's history.
+      let excludedOut = 0;
+      for (const lead of inboxStore.listedLeads()) {
+        if (!excludedLead(lead)) continue;
+        inboxStore.leaveInbox(lead.lead_id);
+        excludedOut += 1;
+      }
+      if (excludedOut) log({ level: 'warn', evt: 'inbox.excluded_out', count: excludedOut });
+      const retention = inboxStore.retentionPurge(t - RETENTION_MS);
+      const counts = {
+        excludedOut,
+        purgedChats: retention.leads,
+        purgedMessages: retention.messages,
+        codeRows: inboxStore.pruneCodeRows(t - CODE_ROW_TTL_MS),
+        interrupted: inboxStore.markStalePending(t - INTERRUPTED_SEND_MS),
+        caughtUp: 0,
+        caughtUpStored: 0,
+      };
+      if (backfill.configured) {
+        for (const lead of inboxStore.inChatsWithoutMessages()) {
+          // A number that joined the team while an earlier fetch was running is not fetched.
+          if (excludedLead(lead)) continue;
+          const sinceTs = Math.max((lead.inbox_since ?? lead.created ?? t) - JOIN_HISTORY_MS, t - RETENTION_MS);
+          const got = await backfill.history(lead, { sinceTs, untilTs: t });
+          // A chat that left the inbox meanwhile comes back `skipped`: nothing was read for it.
+          if (got && !got.error && !got.skipped) {
+            counts.caughtUp += 1;
+            counts.caughtUpStored += Number(got.stored) || 0;
+          }
+        }
+        log({ evt: 'inbox.catchup', chats: counts.caughtUp, stored: counts.caughtUpStored });
+      }
+      log({ evt: 'inbox.maintenance', ...counts });
+      return counts;
+    } catch (err) {
+      log({ level: 'error', evt: 'inbox.maintenance_failed', error: String(err?.message ?? err).slice(0, 200) });
+      return { error: 'failed' };
+    } finally {
+      upkeepRunning = false;
+    }
   };
 
   // The owner's dashboard. It owns its own auth (a WhatsApp one-time code), its own
   // security headers and its own limiter; nothing about it is CORS-enabled.
   const dashboard = options.dashboard ?? createDashboardRoutes({
     db, cfg, inventory, fanout, app, log, sendWhatsApp, probeRetell, team, audit, sendCode,
+    inbox: inboxStore, sender, backfill,
   });
 
   function dynamicVariables({ locale, page, sessionId }) {
@@ -799,6 +910,10 @@ if (isMain) {
     const pollStarted = app.poller.start({ intervalMs: app.cfg.waPollMs });
     jsonLog('info', { evt: 'wa.poll.init', started: pollStarted, everyMs: app.cfg.waPollMs, ...app.poller.status() });
   }
+  // Inbox upkeep (P2-18): once now, then daily. It logs its own counts and never rejects;
+  // like the poller, it is never the reason the process stays alive.
+  app.inboxMaintenance();
+  setInterval(() => { app.inboxMaintenance(); }, INBOX_UPKEEP_EVERY_MS).unref();
   app.server.listen(app.cfg.port, app.cfg.host, () => {
     jsonLog('info', { evt: 'listening', ...redacted(app.cfg) });
   });

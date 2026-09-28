@@ -102,7 +102,9 @@ export function loadConfig({ env = loadEnv(), ids = readIds(), home = os.homedir
     eventsRatePerMin: Number(env.BONA_RATE_EVENTS ?? 240),
     enquiryRatePerMin: Number(env.BONA_RATE_ENQUIRY ?? 6),
     waPoll: truthy(env.BONA_WA_POLL, true),
-    waPollMs: Number(env.BONA_WA_POLL_MS ?? 45_000),
+    // 20 s since the inbox (P2-11): a staff member waits at most one interval to see a
+    // client's message. Each tick is one ~20 ms read on the VPS (measured 2026-09-28).
+    waPollMs: Number(env.BONA_WA_POLL_MS ?? 20_000),
     fanoutMs: Number(env.BONA_FANOUT_MS ?? 20_000),
     // Ad-platform fan-out carries a lead's hashed phone to Meta / Snap, so by default it
     // waits for the visitor's ads consent (PDPL). Set to 0 only with a different legal basis.

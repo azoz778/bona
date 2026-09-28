@@ -298,6 +298,30 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
 
   const countUnsure = () => prep(`SELECT COUNT(*) AS n FROM leads l WHERE ${UNSURE_CHAT}`).get().n;
 
+  /**
+   * `in` chats with nothing stored yet (amendment A3): the chats migration v4 let in
+   * without their history, or whose history was empty when they joined. The daily upkeep
+   * (index.mjs `inboxMaintenance`) fetches for each what an automatic join would have
+   * taken, oldest joiner first, so a long backlog is worked in the order it built up.
+   */
+  function inChatsWithoutMessages({ limit = 200 } = {}) {
+    return prep(`SELECT l.* FROM leads l
+                 WHERE ${IN_CHAT} AND NOT EXISTS (SELECT 1 FROM wa_messages m WHERE m.lead_id = l.lead_id)
+                 ORDER BY COALESCE(l.inbox_since, l.created) ASC, l.rowid ASC
+                 LIMIT ?`)
+      .all(clampLimit(limit, 200)).map(leadRow);
+  }
+
+  /**
+   * Every lead an inbox page can list or count — an `in` lead, or one on the Unsure list —
+   * with only what the exclusion test reads. The daily upkeep puts out any whose number is
+   * a colleague's or on the never list (index.mjs `inboxMaintenance`). No limit: a sweep
+   * that stopped part-way would leave the rest listed.
+   */
+  const listedLeads = () => prep(`SELECT l.lead_id, l.phone_e164, l.wa_jid, l.wa_lid, l.inbox_state FROM leads l
+                                  WHERE l.inbox_state = 'in' OR ${UNSURE_CHAT}
+                                  ORDER BY l.rowid ASC`).all().map(plain);
+
   /* -------------------- gaps -------------------- */
 
   /** A message that could not be read, shown in the thread instead of silently missing. */
@@ -401,7 +425,7 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
   return {
     upsertMessage, messagesFor, newestTs, hasMessages, messageByKey,
     insertOutbox, getOutbox, outboxByKey, updateOutbox, resolveUncertain, openOutboxFor, countSentSince, markStalePending, pruneCodeRows,
-    markRead, listInbox, unreadTotal, listUnsure, countUnsure,
+    markRead, listInbox, unreadTotal, listUnsure, countUnsure, inChatsWithoutMessages, listedLeads,
     addGap, gapsFor,
     setInboxState, setHandler, setNeedsHuman,
     purgeLead, leaveInbox, retentionPurge,

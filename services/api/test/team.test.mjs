@@ -6,8 +6,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { openDb, SCHEMA_VERSION } from '../lib/db.mjs';
-import { createTeam, TeamError, isTeamLid, learnTeamLid } from '../lib/team.mjs';
+import { createTeam, TeamError, isTeamLid, learnTeamLid, isExcludedLead } from '../lib/team.mjs';
 import { createAudit, AUDIT_ACTIONS } from '../lib/audit.mjs';
+import { jidsOf } from '../lib/wa-poller.mjs';
 
 const NOW = 1_790_500_000_000;
 
@@ -345,5 +346,48 @@ test('the audit log accepts the inbox actions, with a target and no text', () =>
   assert.deepEqual(rows.map((r) => r.action).sort(), ['handler', 'inbox_add', 'inbox_move', 'inbox_out', 'reply_sent']);
   assert.deepEqual(rows.find((r) => r.action === 'handler').meta, { to: 'USR-2' });
   assert.ok(rows.every((r) => r.target === 'LEAD-1'));
+  s.close();
+});
+
+test('isExcludedLead: a lead is a colleague\'s or a never-list number\'s by its phone, its phone jid or a learned team lid', () => {
+  const { s, team } = teamHarness();
+  team.addUser({ name: 'Sara', phone: '0500000001', role: 'staff' });
+  const gone = team.addUser({ name: 'Old Hand', phone: '0500000002', role: 'staff' });
+  team.deactivateUser(gone.user_id);
+  team.addNever({ phone: '0500000003' });
+  learnTeamLid(s, '966500000001', '272516946294519@lid');
+  const lead = (over) => ({ lead_id: 'LEAD-1', phone_e164: null, wa_jid: null, wa_lid: null, ...over });
+  assert.equal(isExcludedLead(team, s, lead({ phone_e164: '966500000001' })), true, 'a team number');
+  assert.equal(isExcludedLead(team, s, lead({ phone_e164: '966500000002' })), true, 'a deactivated one too');
+  assert.equal(isExcludedLead(team, s, lead({ phone_e164: '966500000003' })), true, 'a never-list number');
+  assert.equal(isExcludedLead(team, s, lead({ wa_jid: '966500000003:12@s.whatsapp.net' })), true, 'by its phone jid, device suffix and all');
+  assert.equal(isExcludedLead(team, s, lead({ wa_lid: '272516946294519@lid' })), true, 'by a lid learned as a colleague\'s');
+  assert.equal(isExcludedLead(team, s, lead({ phone_e164: '966500000077', wa_jid: '966500000077@s.whatsapp.net', wa_lid: '111@lid' })), false, 'a client');
+  // A lid's digits are an opaque id, never a phone number, even when they spell a colleague's.
+  assert.equal(isExcludedLead(team, s, lead({ wa_jid: '966500000001@lid' })), false);
+  assert.equal(isExcludedLead(team, s, null), false);
+  s.close();
+});
+
+test('isExcludedLead reads a jid the way ingest does, and only the identifiers it is handed', () => {
+  const { s, team } = teamHarness();
+  team.addNever({ phone: '0500000003' });
+  const lead = (over) => ({ lead_id: 'LEAD-1', phone_e164: null, wa_jid: null, wa_lid: null, ...over });
+  // Ingest (lib/inbox/ingest.mjs) takes a jid's number with lib/wa-poller.mjs `jidsOf`: any
+  // jid that is not a lid, a group or a broadcast. The one exclusion rule must agree with it.
+  const cases = [
+    ['966500000003@s.whatsapp.net', true], ['966500000003:7@s.whatsapp.net', true], ['966500000003@c.us', true],
+    ['966500000003@lid', false], ['966500000003@g.us', false], ['966500000003@broadcast', false], ['status@broadcast', false],
+    ['966500000077@s.whatsapp.net', false], ['', false],
+  ];
+  for (const [jid, excluded] of cases) {
+    assert.equal(isExcludedLead(team, s, lead({ wa_jid: jid })), excluded, jid);
+    assert.equal(team.isExcludedPhone(jidsOf({ jid }).phone), excluded, `jidsOf agrees on ${jid}`);
+  }
+  // Callers hand in per-identifier views of a lead (ingest checks each number a record
+  // names as if the row held it): the stored row is never read back by its id.
+  s.insertLead({ lead_id: 'LEAD-1', created: NOW, updated: NOW, channel: 'whatsapp', stage: 'new', phone_e164: '966500000003' });
+  assert.equal(isExcludedLead(team, s, lead({ wa_jid: '966500000077@s.whatsapp.net' })), false, 'the row\'s own phone is not looked up');
+  assert.equal(isExcludedLead(team, s, s.getLead('LEAD-1')), true);
   s.close();
 });
