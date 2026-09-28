@@ -2062,3 +2062,10574 @@ Spec §6. Tasks: `retell/provision.mjs` creates a separate WhatsApp LLM + chat a
 
 ## Phase 5 — later list (not planned yet)
 Spec §9 — templates, listing card/brochure, Dana-drafted replies, reminders, staff performance, viewings calendar, media in dashboard. Brainstorm with the owner before planning.
+
+---
+
+## Phase 2 — detailed (expanded 2026-09-28 against origin/main 51c3802)
+
+> Branch `feat/team-inbox-p2`, cut from `origin/main` (51c3802 = Phase 1 #27 + TikTok #28; schema still v3).
+> Worktree `~/bona-wt/team-inbox`. Baseline: `cd ~/bona-wt/team-inbox/services && node --test api/test/*.test.mjs` → **622 pass, 0 fail**.
+> Commit trailer for this phase: `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+
+### Pre-work results (live, read-only, 2026-09-28)
+
+Probed `POST /chat/findMessages/abdulaziz-personal` on the VPS (`127.0.0.1:8085`, Evolution 2.3.7) printing counts and shapes only.
+
+1. **Per-jid filter works.** `where: { key: { remoteJid } }` returns only that chat; `page`/`offset` page it newest-first with no overlap between pages; it combines with `messageTimestamp: { gte, lte }`. An unknown jid returns 0. `key.fromMe` inside `where` is ignored (as documented). `where: { key: { remoteJidAlt } }` also works.
+2. **The paged response states its size**: `{ messages: { total, pages, currentPage, records } }`. So a reader knows whether a window is complete without guessing.
+3. **Chats are split across two jids.** 26 of 27 leads are privacy-mode `@lid` chats. Inbound messages and messages typed on the owner's phone are stored under the **lid** (with `key.remoteJidAlt` = the client's phone jid: 418/420 inbound, 190/191 outbound — never the owner's own number). Messages sent through the API **to a phone number** are stored under the **phone jid** (67 such records across those leads). A per-chat read must therefore ask for the lid, the phone jid, and `remoteJidAlt` = phone jid, and de-duplicate by `key.id`.
+4. **No lead is lid-only today** (0 of 27): every lid lead also has its phone from `remoteJidAlt`. Replies go to the phone jid. `@lid` sending stays refused (spec §4.5); the owner's second-phone test at the STOP can confirm delivery to a lid-addressed chat through its phone number.
+5. **sendText returns `key.id`**: the one live Phase 1 login code logged `wa.send.ok`, which `lib/wa-send.mjs` only logs when the 2xx body carries a `key.id` string.
+6. **Load**: a window query takes ~20 ms (45 s, 10 min and 1 h windows; 0–1 records at 04:30). Polling every 20 s is negligible. Note the VPS env pins `BONA_WA_POLL_MS=45000` in `~/.secrets/bona-services.env`, so the new 20 s default only takes effect after the deploy step edits that line.
+7. Stored records carry `messageType`, `MessageUpdate[].status` (e.g. `SERVER_ACK`), `source` (`android` = typed on the phone, `web` = sent through WhatsApp Web / the API) and `messageTimestamp` in seconds.
+8. Live db: `user_version 3`, SQLite 3.53.3 (`json_extract`/`json_valid` available; local Node has the same), 27 leads (16 `ad_meta` + 2 `ref` chats, 6 `keyword` + 2 `time_window` chats, 1 legacy `form` lead with no chat; the 2 first snippets that carry a listing id belong to the 2 Ref leads), 1 owner + 2 staff users.
+
+### Decisions taken while expanding (inside the spec; each is binding for the tasks below)
+
+- **P2-1 Chat = a lead with `wa_jid` or `wa_lid`.** A form/concierge lead with only a phone is `in` but has no chat until that person writes on WhatsApp (the poller then matches it by phone and stores from there). The inbox list and thread show chats only.
+- **P2-2 Per-chat read = three clauses** `{key:{remoteJidAlt: phoneJid}}`, `{key:{remoteJid: phoneJid}}`, `{key:{remoteJid: lid}}` (the lid clause is re-derived after the first two, because a lid can be learned from them), de-duplicated by `key.id`, groups/broadcasts skipped. Used by join backfill, thread refresh and the pre-send refresh.
+- **P2-3 No silent loss** (spec §4.3): `lib/evolution.mjs` `readWindow` uses `total` to decide; a window with more than `MAX_PAGES × PAGE_SIZE` (500) records is split in halves on whole-second boundaries, recursively to depth `MAX_SPLIT_DEPTH` = 4 (16 pieces ≈ 8,000 records), pieces returned oldest-first. Only a piece still over the cap at the maximum depth is read partially; that is logged `wa.poll.truncated` with the count missed — re-asking would return the same newest pages, so holding the cursor there would loop for ever. A bare-array response (no `total`) falls back to the old page-until-short read.
+- **P2-4 The daily cap is durable**: every `sender.sendTo` writes a `wa_outbox` row before the HTTP call (a login `code` row with `text` NULL, `lead_id` NULL); the 500/day cap is a rolling-24 h `COUNT(*)` of rows in `pending|accepted|uncertain` whose `jid` is not the owner's. Per-minute limits (20 global, 6 per recipient, 30 per user) stay in memory. There is still exactly one sender: `app.sender` (`createSender` in `index.mjs`).
+- **P2-5 Owner-started chats** (`match_method` `owner_outbound` from the poller, `owner_added` from *Add chat by phone number*) are created through `createOrMergeLead`, never fan out to the ad platforms (no click behind them), never send the owner a new-lead note, and are born `inbox_state='in'`, `first_inbound_ts=NULL`, `first_reply_ts=<creation ts>` (the owner already wrote or vouched, so the waiting queue and the Hermes `bona-unanswered-leads` watchdog must not flag them).
+- **P2-6 Form and concierge leads are certain**: `createOrMergeLead` sets `inbox_state='in'` for channels `form`/`concierge_chat`/`concierge_voice` on create, and upgrades `NULL`/`unsure` → `in` on merge. It never touches `out`, and never sets a state for channel `whatsapp` (the poller decides those).
+- **P2-7 Never-list add purges**: adding a number to the never list on the Team page moves its lead (if any) to `out` and purges its transcript at once. Reads also refuse any lead whose phone is excluded (team or never list).
+- **P2-8 Unread** = inbound messages newer than `COALESCE(inbox_reads.last_read_ts, users.created)`, so a newly added team member does not start with every historical message unread.
+- **P2-9 Reply errors render the thread directly** (status 4xx/5xx, text kept in the textarea, fresh `send_id`) — never a redirect carrying message text in a URL. Success → 303 to the thread `?ok=sent`; uncertain → 303 `?error=send_uncertain` (text not kept: it may have gone).
+- **P2-10 Opening a thread refreshes that chat** from Evolution first (bounded, errors swallowed), and the reply route refreshes again right before the stale-view check.
+- **P2-11 Poll default 20 s** (`config.mjs`); the deploy step edits the VPS env line (P-work §6).
+- **P2-12 Privacy page** says what Phase 2 does now (stored, team reads and replies, 5 years after the last message, Evolution/phone copies, how to ask for deletion). The Dana sentence ships with Phase 4, when it becomes true.
+- **P2-13 Migration v4 rules** for existing leads: `in` when `match_method IN ('ref','ad_meta')`, or channel `form`/`concierge_chat`/`concierge_voice` with `legacy_id IS NULL`, or the `lead_created` touchpoint's `meta.snippet` contains `BONA-###`/`BONA-W###`; every other lead `unsure` (keyword, time_window, legacy imports). `inbox_since = created` for `in`. Live expectation (read-only SELECT of the same CASE on 2026-09-28): **18 `in`** (16 ad_meta + 2 ref), **9 `unsure`** (6 keyword, 2 time_window, 1 legacy form).
+- **P2-14 Stored text** is capped at 8,000 characters; media are placeholders only (`[voice note]`, `[audio]`, `[image]`, `[video]`, `[document: name]`, `[location]`, `[contact]`, `[sticker]`, unknown non-noise → `[message]`) plus caption. Reactions, protocol messages (deletes/edits), poll updates and key-distribution records are **noise**: never stored as bubbles.
+- **P2-15 Handler**: first dashboard replier becomes handler when there is none; an `owner_number` outbound sets the env owner when there is none; anyone can reassign to an active user or nobody; audited `handler`.
+- **P2-16 `needs_human`** is cleared (0) by any human outbound (staff reply accepted, or an `owner_number` record). Phase 4 sets it.
+- **P2-17 Outbox reconciliation**: an outbound record whose `key.id` equals an outbox `key_id` inherits that row's sender; otherwise the oldest outbox row of the same **lead** with status `uncertain`/`pending`, no `key_id`, identical text and `|created − record ts| ≤ 2 min` is resolved (status `accepted`, `key_id` set) and the record inherits its sender (lead-level, not jid-level, because the record may carry the lid while the row carries the phone jid). A process restart marks `pending` rows older than 2 min `uncertain` (`error='interrupted'`).
+- **P2-18 Maintenance** (on start, then every 24 h, `unref`): retention purge (transcripts of chats whose `last_msg_ts` is older than 5 years; lead rows stay), prune `code` outbox rows older than 2 days, mark stale `pending` rows `uncertain`.
+
+- **P2-19 Dashboard replies ship switched off** (Task 14): owner setting `inbox_replies`, default `'0'`, fails closed like `sending_enabled`. While off, `sender.reply` refuses `replies_off` before writing anything, the thread shows a sentence instead of the reply box, the route answers 503. Only an owner turns it on (Team page, audited `setting`). Login codes do not depend on it. This is what makes the D14 STOP hold after the deploy: the team can read the inbox, but no client gets a dashboard message until the owner switches replies on, together with the first test send.
+- **P2-20 Exclusion sweep**: the v4 migration classifies by match rules only, and P2-7 only purges on a NEW never-list add, so `app.inboxMaintenance()` also moves every `in`/`unsure` lead whose number is a team or never-list number to `out` (with `leaveInbox`), and adding a team member does the same for that number at once. Every read path refuses such leads too (`team.isExcludedLead`).
+- **P2-21 Login codes are never stored as messages**: an outbound record whose outbox row is a `code` row is refused by ingest (`reason: 'code'`), even inside an `in` chat.
+
+### Amendments A1–A4 (supersede the contract where they differ)
+
+- **A1 History floor (privacy).** No per-chat read may store messages older than the chat's history floor. `backfill.refresh(lead)` reads only `[floor, now]` where `floor = (lead.inbox_since ?? now()) - JOIN_HISTORY_MS` (newest `REFRESH_LIMIT` per clause inside that window, `messageTimestamp: { gte, lte }` on every clause). Owner-button joins already stored their 30 days at join time (`history(..., { sinceTs: now - OWNER_HISTORY_MS })`), so the refresh never needs to reach further back. Without this, opening an automatically-joined chat would store months of earlier private conversation — the thing the 24 h rule (spec §4.1) exists to prevent.
+- **A2 Refresh is cheap and bounded.** `refresh(lead, { budgetMs = 3000, minIntervalMs = 5000 } = {})`: skipped (returns `{ skipped: 'recent' }`) when the same lead was refreshed less than `minIntervalMs` ago (in-memory map keyed by `lead_id`, pruned to 1,000 entries); each clause's request uses `timeoutMs = min(remaining budget, 2500)`; once the budget is spent the remaining clauses are skipped (`{ ..., partial: true }`). It never throws. The thread page and the pre-send refresh both call it; a page never waits on Evolution for more than ~3 s.
+- **A3 Catch-up for chats that joined without history** (the v4 migration's 18 `in` chats). `inboxStore.inChatsWithoutMessages({ limit = 200 })` → `in` leads with `wa_jid` or `wa_lid` and no `wa_messages` row. `app.inboxMaintenance()` becomes **async** and, after the P2-18 steps, runs `backfill.history(lead, { sinceTs: (lead.inbox_since ?? lead.created) - JOIN_HISTORY_MS, untilTs: now })` for each of them, sequentially, logging `inbox.catchup` with counts only. The same history a live automatic join takes (the joining message, the 24 h before it, everything since) — so the migrated chats show a real thread on day one, and a chat whose history is empty simply stays empty (the next run re-asks, cheaply).
+- **A4 Poller interval note.** Unchanged 20 s default; tests must not depend on it.
+
+
+### Task order
+
+1 Schema v4 · 2 Evolution reads · 3 Eligibility rules · 4 Inbox store · 5 Ingest · 6 Backfill · 7 Sender (outbox, caps, reply) · 8 Leads · 9 Poller · 10 Inbox screens · 11 Wiring + maintenance · 12 Routes · 13 Privacy page + README · 14 Replies ship off (D14) · 15 Reviews, rehearsal, ship, STOP.
+Each task: implementer subagent (TDD) → spec review → quality review, fix loops until both pass (superpowers:subagent-driven-development). Tasks run in order; each builds on the code the previous ones leave.
+
+### File map — Phase 2
+
+| File | Status | Responsibility |
+|---|---|---|
+| `services/api/lib/db.mjs` | modify | schema v4 (lead inbox columns, `wa_messages`, `wa_outbox`, `inbox_reads`, `wa_gaps`, v4 state migration); `COLUMNS.leads` gains the new columns |
+| `services/api/lib/evolution.mjs` | modify | `findMessagesPage` (any `where`, returns `total`/`pages`), `readWindow` (P2-3), `mediaOf`, `isNoise`, `normaliseRecord` adds `media`/`fileName`/`noise` |
+| `services/api/lib/inbox/eligibility.mjs` | create | pure rules: inbound signal, owner-outbound trigger, next inbox state |
+| `services/api/lib/inbox/store.mjs` | create | all SQL for `wa_messages`, `wa_outbox`, `inbox_reads`, `wa_gaps`, inbox state/handler/needs_human, lists, unread, purge, retention |
+| `services/api/lib/inbox/ingest.mjs` | create | one Evolution record of an `in` chat → one stored message (sender resolution, outbox reconciliation, handler default, lid learning) |
+| `services/api/lib/inbox/backfill.mjs` | create | per-chat Evolution reads: join history (24 h / 30 days) and thread refresh |
+| `services/api/lib/wa-send.mjs` | modify | outbox ledger + durable day cap, `userId` + 30/min per user, kinds `code`+`staff`, `reply()` (idempotency, recipient resolution, lid refusal, exclusion, stale guard), `recoverInterrupted()`, `replyJidFor` |
+| `services/api/lib/leads.mjs` | modify | `owner_outbound`/`owner_added` methods (P2-5), form/concierge → `in` (P2-6) |
+| `services/api/lib/wa-poller.mjs` | modify | state transitions, owner-outbound joins, store `in`-chat records, join backfill, `wa_gaps` for written-off records, `readWindow` default |
+| `services/api/lib/audit.mjs` | modify | actions `reply_sent`, `inbox_move`, `inbox_out`, `inbox_add`, `handler` |
+| `services/api/lib/dashboard/render.mjs` | modify | Inbox nav entry + unread badge (`me.unread`), lead page inbox links/buttons, new messages |
+| `services/api/lib/dashboard/render-inbox.mjs` | create | inbox list, Unsure list, thread |
+| `services/api/lib/dashboard/routes.mjs` | modify | inbox pages, reply/handler/move/out/add writes, never-list purge, `me.unread` |
+| `services/api/index.mjs` | modify | wire inbox store, ingest, backfill, sender(inbox), poller(inbox), routes(inbox), maintenance timer |
+| `services/api/lib/config.mjs` | modify | `waPollMs` default 20 000 |
+| `src/data/privacy.json` | modify | WhatsApp conversations section (EN + AR) |
+| `services/README.md` | modify | Dashboard → Inbox |
+| `services/api/lib/team.mjs` | modify | `isExcludedLead` (Task 11), `inbox_replies` setting + `repliesEnabled()` (Task 14) |
+| `services/api/lib/dashboard/render-team.mjs` | modify | the *Replies to clients from the dashboard* switch (Task 14) |
+| `services/api/retell/provision.mjs` | modify | `--ensure-env` default poll 20 s for a fresh install (Task 11) |
+| tests | create/modify | `db`, `evolution`, `inbox-eligibility`, `inbox-store`, `inbox-ingest`, `inbox-backfill`, `wa-send`, `leads`, `wa-poller`, `dashboard-render-inbox`, `dashboard-inbox`, `config` |
+
+### Interface contract (every task must match these names and shapes exactly)
+
+**`lib/db.mjs`**
+- `SCHEMA_VERSION = 4`. Migration `{ version: 4, sql }`:
+  ```sql
+  ALTER TABLE leads ADD COLUMN inbox_state TEXT CHECK (inbox_state IN ('in','unsure','out'));
+  ALTER TABLE leads ADD COLUMN inbox_since INTEGER;
+  ALTER TABLE leads ADD COLUMN handler_user_id TEXT;
+  ALTER TABLE leads ADD COLUMN last_msg_ts INTEGER;
+  ALTER TABLE leads ADD COLUMN needs_human INTEGER NOT NULL DEFAULT 0 CHECK (needs_human IN (0,1));
+  CREATE INDEX IF NOT EXISTS leads_inbox ON leads(inbox_state, last_msg_ts);
+  CREATE TABLE IF NOT EXISTS wa_messages (
+    key_id TEXT PRIMARY KEY, lead_id TEXT NOT NULL, jid TEXT,
+    direction TEXT NOT NULL CHECK (direction IN ('in','out')),
+    sender_kind TEXT NOT NULL CHECK (sender_kind IN ('client','staff','dana','owner_number')),
+    sender_user_id TEXT, text TEXT, media_type TEXT, ts INTEGER NOT NULL, status TEXT
+  );
+  CREATE INDEX IF NOT EXISTS wa_messages_lead ON wa_messages(lead_id, ts);
+  CREATE TABLE IF NOT EXISTS wa_outbox (
+    send_id TEXT PRIMARY KEY, lead_id TEXT, jid TEXT NOT NULL, text TEXT, user_id TEXT,
+    sender_kind TEXT NOT NULL CHECK (sender_kind IN ('staff','dana','code','note')),
+    status TEXT NOT NULL CHECK (status IN ('pending','accepted','failed','uncertain')),
+    key_id TEXT, created INTEGER NOT NULL, updated INTEGER NOT NULL, error TEXT
+  );
+  CREATE INDEX IF NOT EXISTS wa_outbox_key ON wa_outbox(key_id);
+  CREATE INDEX IF NOT EXISTS wa_outbox_lead ON wa_outbox(lead_id, created);
+  CREATE INDEX IF NOT EXISTS wa_outbox_created ON wa_outbox(created);
+  CREATE TABLE IF NOT EXISTS inbox_reads (user_id TEXT NOT NULL, lead_id TEXT NOT NULL, last_read_ts INTEGER NOT NULL, PRIMARY KEY (user_id, lead_id));
+  CREATE TABLE IF NOT EXISTS wa_gaps (key_id TEXT PRIMARY KEY, lead_id TEXT, jid TEXT, ts INTEGER, reason TEXT);
+  CREATE INDEX IF NOT EXISTS wa_gaps_lead ON wa_gaps(lead_id, ts);
+  UPDATE leads SET
+    inbox_state = CASE WHEN match_method IN ('ref','ad_meta')
+        OR (channel IN ('form','concierge_chat','concierge_voice') AND legacy_id IS NULL)
+        OR EXISTS (SELECT 1 FROM touchpoints t WHERE t.lead_id = leads.lead_id AND t.event_type = 'lead_created'
+                   AND json_valid(t.meta)
+                   AND (upper(json_extract(t.meta, '$.snippet')) GLOB '*BONA-[0-9][0-9][0-9]*'
+                        OR upper(json_extract(t.meta, '$.snippet')) GLOB '*BONA-W[0-9][0-9][0-9]*'))
+      THEN 'in' ELSE 'unsure' END;
+  UPDATE leads SET inbox_since = created WHERE inbox_state = 'in';
+  ```
+  Add a comment block above it in the house style (why each rule, "migrations here only ever add", P2-13).
+- `COLUMNS.leads` gains, in this order at the end: `'inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human'` (so `insertLead`/`updateLead` accept them).
+
+**`lib/evolution.mjs`** (keeps its read-only header; still only ever calls `POST /chat/findMessages`)
+- `export const MAX_SPLIT_DEPTH = 4;`
+- `export async function findMessagesPage({ baseUrl, apiKey, instance, where, page = 1, offset = PAGE_SIZE, fetchImpl = globalThis.fetch, timeoutMs = 10_000 })` → `{ records: NormalisedRecord[], raw, total: number|null, pages: number|null }` (`total`/`pages` from `payload.messages.total/.pages` when numeric, else null). Throws `EvolutionError` exactly like `findMessagesWindow` does today.
+- `findMessagesWindow(opts)` becomes a wrapper: `findMessagesPage({ ...opts, where: { messageTimestamp: { gte: toIso(gte), lte: toIso(lte) } } })`; still returns `records` and `raw` (plus `total`, `pages`).
+- `fetchWindow` unchanged (kept for compatibility; nothing new uses it).
+- `export async function readWindow({ gte, lte, maxPages = MAX_PAGES, offset = PAGE_SIZE, maxDepth = MAX_SPLIT_DEPTH, ...opts })` → `{ records: NormalisedRecord[] /* de-duplicated by id, in piece order */, pieces: number, truncated: boolean, missing: number }` implementing P2-3. Split: `mid = Math.floor((gteMs + lteMs) / 2000) * 1000`; left `[gte, mid - 1]`, right `[mid, lte]`; only when `lteMs - gteMs >= 2000` and `depth < maxDepth`; otherwise read `min(pages, maxPages)` pages, `missing += max(0, total - read)`.
+- `export function mediaOf(record)` → placeholder string or null (P2-14): `audioMessage` → `[voice note]` if `.ptt` else `[audio]`; `imageMessage` → `[image]`; `videoMessage`/`ptvMessage` → `[video]`; `documentMessage` → `[document: <name>]` (name = `fileName` with control/bidi characters removed, whitespace collapsed, max 120 code points; `[document]` when empty); `locationMessage`/`liveLocationMessage` → `[location]`; `contactMessage`/`contactsArrayMessage` → `[contact]`; `stickerMessage` → `[sticker]`. Uses `unwrapMessage` first.
+- `export function isNoise(record)` → true when the unwrapped message has `protocolMessage`, `reactionMessage`, `pollUpdateMessage`, or has no keys other than `messageContextInfo`/`senderKeyDistributionMessage`; or `record.messageType` is one of `protocolMessage`, `reactionMessage`, `pollUpdateMessage`.
+- `normaliseRecord` adds `media: mediaOf(record)`, `fileName: <documentMessage.fileName cleaned as above, or null>`, `noise: isNoise(record)`. The `NormalisedRecord` typedef is updated.
+
+**`lib/inbox/eligibility.mjs`** (pure; imports only `parseRef` from `../attribution.mjs`)
+- `export const LISTING_ID_RE = /\bBONA-W?\d{3}\b/i;`
+- `export const BONA_WORD_RE = /\bbona\b|بونا/i;`
+- `export const SITE_LINK_RE = /(?:^|[^a-z0-9.-])(?:www\.)?(?:bona-real-estate\.com|bona\.azoz\.uk)(?![a-z0-9-])/i;`
+- `export const INBOX_STATES = ['in', 'unsure', 'out'];`
+- `export function inboundSignal({ text = '', hasAdMeta = false } = {})` → `'certain'` (a Ref code via `parseRef`, `hasAdMeta`, or a listing id), `'unsure'` (the word bona/بونا), else `null`. Non-string text is `''`.
+- `export function ownerOutboundJoins({ text = '', fileName = null, media = null } = {})` → boolean: text/caption has a site link or listing id; or `media` starts with `[document` and (`fileName` or text) contains a listing id or `bona`/`بونا` bounded by non-letters (`/(?:^|[^a-z])bona(?:[^a-z]|$)|بونا/i`).
+- `export function nextInboxState(current, { signal = null, method = null } = {})` → `'out'`/`'in'` stay as they are; else `'certain'` → `'in'`; `'unsure'` signal or `method` `keyword`/`time_window` → `'unsure'`; else `current ?? null`.
+
+**`lib/inbox/store.mjs`** — `export const RETENTION_MS = Math.round(5 * 365.25 * 86_400_000);` `export const MAX_STORED_TEXT = 8000;` `export const SENDER_KINDS = ['client','staff','dana','owner_number'];` `export const OUTBOX_KINDS = ['staff','dana','code','note'];` `export const OUTBOX_STATUSES = ['pending','accepted','failed','uncertain'];`
+`export function createInboxStore(store, { now = () => Date.now() } = {})` (own prepared-statement cache like `team.mjs`; uses `store.transaction`) returns:
+- `upsertMessage({ key_id, lead_id, jid = null, direction, sender_kind, sender_user_id = null, text = null, media_type = null, ts, status = null })` → `{ inserted: boolean }`. RangeError on a bad `direction`/`sender_kind` or missing `key_id`/`lead_id`/`ts`. `text` capped at `MAX_STORED_TEXT`. `ON CONFLICT(key_id) DO UPDATE`: upgrades `sender_kind`/`sender_user_id` only from `owner_number` to `staff`/`dana`; `status = COALESCE(excluded.status, status)`; nothing else changes. In the same transaction: `UPDATE leads SET last_msg_ts = MAX(COALESCE(last_msg_ts, 0), ?) WHERE lead_id = ?`.
+- `messagesFor(leadId, { limit = 200 } = {})` → the newest `limit` rows, returned oldest-first (`ORDER BY ts, rowid`).
+- `newestTs(leadId)` → `MAX(ts)` or `null`. `hasMessages(leadId)` → boolean.
+- `insertOutbox({ send_id, lead_id = null, jid, text = null, user_id = null, sender_kind, status = 'pending' })` → `{ inserted: boolean, row }` (`INSERT OR IGNORE`; `row` is the stored row either way; RangeError on bad kind/status/missing send_id/jid; `created = updated = now()`).
+- `getOutbox(sendId)` → row|null. `outboxByKey(keyId)` → row|null.
+- `updateOutbox(sendId, { status, key_id = undefined, error = undefined })` → boolean (`updated = now()`; RangeError on bad status; `error` capped 200).
+- `resolveUncertain({ leadId, text, ts, windowMs = 120_000 })` → the oldest row with that `lead_id`, `status IN ('uncertain','pending')`, `key_id IS NULL`, `text = ?`, `ABS(created - ?) <= windowMs`, or null. Read-only.
+- `openOutboxFor(leadId, { sinceTs = 0 } = {})` → rows `status IN ('pending','uncertain','failed')`, `sender_kind IN ('staff','dana')`, `created >= sinceTs`, newest 20, returned oldest-first.
+- `countSentSince(sinceTs, { excludeJid = null } = {})` → `COUNT(*)` of rows `status IN ('pending','accepted','uncertain') AND created >= ? AND (? IS NULL OR jid != ?)`.
+- `markStalePending(beforeTs)` → changes (`status='uncertain', error='interrupted', updated=now()` where `status='pending' AND created < ?`).
+- `pruneCodeRows(beforeTs)` → changes (`DELETE ... WHERE sender_kind = 'code' AND created < ?`).
+- `markRead(userId, leadId, ts)` → upsert `last_read_ts = MAX(last_read_ts, excluded.last_read_ts)`.
+- `listInbox({ userId, userCreated = 0, limit = 200 } = {})` → rows = every lead column + `unread` (int), `last_text`, `last_media`, `last_direction`, `last_sender_kind`, `handler_name` (active handler's name or null); `WHERE inbox_state = 'in' AND (wa_jid IS NOT NULL OR wa_lid IS NOT NULL)`; `ORDER BY (unread > 0) DESC, COALESCE(last_msg_ts, inbox_since, created) DESC, rowid DESC`. Unread = inbound rows with `ts > COALESCE(r.last_read_ts, userCreated)`.
+- `unreadTotal({ userId, userCreated = 0 } = {})` → int, same rule summed over the `in` chats.
+- `listUnsure({ limit = 200 } = {})` → lead columns + `snippet` (from the `lead_created` touchpoint's `meta.snippet`, guarded with `json_valid`), `WHERE (inbox_state = 'unsure' OR inbox_state IS NULL) AND (wa_jid IS NOT NULL OR wa_lid IS NOT NULL)`, newest first. `countUnsure()` → int, same WHERE.
+- `addGap({ key_id, lead_id, jid = null, ts, reason })` → boolean (`INSERT OR IGNORE`). `gapsFor(leadId)` → rows oldest-first.
+- `setInboxState(leadId, state, { since = now() } = {})` → boolean. RangeError on a state outside `in|unsure|out`. `in`: `inbox_since = CASE WHEN inbox_state = 'in' THEN inbox_since ELSE ? END`; `out`/`unsure`: `inbox_since = NULL`. Also sets `updated = now()`.
+- `setHandler(leadId, userId)` (null clears) → boolean. `setNeedsHuman(leadId, flag)` → boolean (0/1).
+- `purgeLead(leadId)` → `{ messages, outbox, gaps, reads }`: one transaction deleting that lead's `wa_messages`, `wa_outbox` rows with `sender_kind IN ('staff','dana')`, `wa_gaps`, `inbox_reads`, then `last_msg_ts = NULL`.
+- `leaveInbox(leadId)` → one transaction: `setInboxState(leadId,'out')`, `purgeLead`, handler NULL, `needs_human = 0`; returns the purge counts.
+- `retentionPurge(beforeTs)` → `{ leads, messages }`: `purgeLead` for every lead with `last_msg_ts < beforeTs` that still has messages.
+
+**`lib/inbox/ingest.mjs`** — `export const RESOLVE_WINDOW_MS = 120_000;`
+`export function createIngest({ db, inbox, ownerUserId = () => null, log = () => {}, now = () => Date.now() })` returns `{ ingest(lead, rec) }` → `{ stored: false, reason: 'not_in_inbox'|'no_id'|'noise' }` or `{ stored: true, inserted: boolean, senderKind }`:
+- refuses when `lead?.inbox_state !== 'in'`, `!rec?.id`, or `rec.noise`.
+- direction `out` when `rec.fromMe`; `ts = Number.isFinite(rec.ts) ? rec.ts : now()`; `text = rec.text || null`; `media_type = rec.media ?? (text ? null : '[message]')`.
+- out: `inbox.outboxByKey(rec.id)` → sender = row's kind if `staff`/`dana` else `owner_number`, `sender_user_id = row.user_id`, and `updateOutbox(row.send_id, { status: 'accepted', key_id: rec.id })` when the row is not yet accepted. Else `inbox.resolveUncertain({ leadId, text: rec.text, ts, windowMs: RESOLVE_WINDOW_MS })` → same inheritance + `updateOutbox(..., { status: 'accepted', key_id: rec.id })`. Else `owner_number`. Any human outbound (`staff` or `owner_number`) → `setNeedsHuman(lead_id, 0)`. `owner_number` and `lead.handler_user_id` null → `setHandler(lead_id, ownerUserId())` when that returns a user id.
+- in: `client`.
+- fills only-empty lead fields from `jidsOf(rec)` (import from `../wa-poller.mjs`): `wa_lid`, `wa_jid`, `phone_e164` — never overwrites (`db.updateLead`).
+- `inbox.upsertMessage({ key_id: rec.id, lead_id, jid: rec.jid, direction, sender_kind, sender_user_id, text, media_type, ts })`.
+- Never logs text, numbers or names.
+
+**`lib/inbox/backfill.mjs`** — `export const JOIN_HISTORY_MS = 24 * 3_600_000; export const OWNER_HISTORY_MS = 30 * 86_400_000; export const BACKFILL_MAX_PAGES = 10; export const REFRESH_LIMIT = 50;`
+`export function createBackfill({ env = {}, db, ingest, find = null, fetchImpl = globalThis.fetch, log = () => {}, now = () => Date.now(), timeoutMs = 8000 })` — `find({ where, page, offset })` → `{ records, total, pages }`, defaulting to `findMessagesPage` against `waConfig(env)`; `configured = Boolean(find) || Boolean(baseUrl && apiKey)`. Returns:
+- `configured` (boolean), `phoneJidOf(lead)` (the lead's `@s.whatsapp.net` jid, device suffix stripped, else `${phone_e164}@s.whatsapp.net` when `phone_e164` is 8–15 digits not starting with 0, else null).
+- `async history(lead, { sinceTs, untilTs = now(), maxPages = BACKFILL_MAX_PAGES } = {})` → `{ stored, scanned, truncated }` or `{ error }`: re-reads the lead, runs the P2-2 clauses each with `messageTimestamp: { gte: ISO(sinceTs), lte: ISO(untilTs) }`, pages `1..min(pages ?? 1, maxPages)` (stops early on a short page when `pages` is null), skips groups/broadcasts and already-seen ids, calls `ingest(db.getLead(id), rec)` per record. `truncated` when any clause has more pages than `maxPages` (logged `inbox.backfill.truncated`, counts only). Never throws: failures return `{ error }` and log `inbox.backfill.failed`. Not configured → `{ stored: 0, scanned: 0, truncated: false, skipped: 'not_configured' }`.
+- `async refresh(lead)` → same without the time filter: page 1 with `offset = REFRESH_LIMIT` per clause.
+
+**`lib/wa-send.mjs`** — additions: `export const PER_USER_PER_MIN = 30;` kinds `new Set(['code', 'staff'])`; `const SEND_ID_RE = /^[A-Za-z0-9_-]{16,64}$/;` `export function replyJidFor(lead)` (phone jid per `phoneJidOf` rule above, or null for a lid-only lead).
+`createSender({ env, team, inbox, db = null, fetchImpl, now, log, timeoutMs })` — `inbox` (a `createInboxStore`) is **required** (TypeError, like `team`); `db` (the `openDb` store) is required only by `reply` (it reads and stamps the lead). Returns `{ sendTo, reply, recoverInterrupted }`:
+- `sendTo({ jid, text, kind, userId = null, bypassSwitch = false, leadId = null, sendId = null })`: validation as today; then switch/config checks; then gates — owner: `[perRecipient]`; others: `[perMinute, perRecipient]` + `perUser` when `userId` + the durable day check `inbox.countSentSince(now() - 86_400_000, { excludeJid: <owner jid> }) < SEND_PER_DAY`. A refusal after validation marks a given `sendId` row `failed` with that error. Then the outbox row: the given `sendId`'s row, or a new `insertOutbox({ send_id: newId('SND'), lead_id: leadId, jid: <bare 1:1 jid>, text: kind === 'code' ? null : text, user_id: userId, sender_kind: kind })`. HTTP exactly as today; then `updateOutbox` → `accepted` + `key_id` / `uncertain` / `failed` + error. Returns today's shapes plus `sendId`.
+- `async reply({ sendId, leadId, userId, text, seenTs })` → `{ ok: true, status: 'accepted', sendId, keyId }` | `{ ok: false, error, status?, sendId?, duplicate?: true, uncertain?: true }`. Order: `bad_send_id` (regex) → existing row for `sendId` (a different lead or user → `bad_send_id`; else `{ ok: status === 'accepted', duplicate: true, status, sendId, error }` — never re-sent) → `bad_text` (string, trimmed non-empty, ≤ `MAX_TEXT_LEN`) → `not_found` → `not_in_inbox` (`inbox_state !== 'in'`) → `lid_only` (`replyJidFor` null) → `excluded` (`team.isExcludedPhone`) → `stale` (`seenTs` not finite, or `inbox.newestTs(leadId) > seenTs`) → `insertOutbox(pending, sender_kind 'staff')` (lost race → duplicate path) → `sendTo({ ..., kind: 'staff', userId, leadId, sendId })`. On `ok`: `inbox.upsertMessage({ key_id, lead_id, jid, direction: 'out', sender_kind: 'staff', sender_user_id: userId, text, ts: now(), status: 'sent' })`, handler := `userId` when none, `needs_human = 0`, `first_reply_ts = now()` when null.
+- `recoverInterrupted()` → `inbox.markStalePending(now() - 120_000)`.
+
+**`lib/leads.mjs`** — `MATCH_METHODS` gains `'owner_outbound', 'owner_added'`; `export const OWNER_METHODS = new Set(['owner_outbound', 'owner_added']);` P2-5 and P2-6 behaviour inside `createOrMergeLead`.
+
+**`lib/wa-poller.mjs`** — `createPoller({ ..., inboxStore = null, ingest = null, backfill = null })`; when `ingest` is null the poller behaves exactly as in Phase 1 (every existing test keeps passing unchanged). Default `find` = `readWindow(...)`. New tally fields `stored`, `joined`. Per record (after the unchanged exclusions): inbound → today's `handleInbound` then `nextInboxState(lead.inbox_state, { signal: inboundSignal({ text, hasAdMeta: Boolean(adMetaOf(rec.contextInfo)) }), method })`; a transition is stored with `setInboxState(..., { since: ts })`; a fresh join awaits `backfill.history(lead, { sinceTs: ts - JOIN_HISTORY_MS, untilTs: ts })`; an `in` lead then gets `ingest(lead, rec)`. Outbound → today's `recordReply`, then: `in` lead → `ingest`; `out` → nothing; else `ownerOutboundJoins(rec)` → create (`owner_outbound`, name null — a `fromMe` pushName is the owner's) or reuse the lead, `setInboxState('in')`, backfill 24 h, `ingest`, log `inbox.join` `{ leadId, via }`. A written-off record of an `in` lead → `inboxStore.addGap({ reason: 'failed' })`. `answer.truncated` → `wa.poll.truncated` with `missing`.
+
+**`lib/audit.mjs`** — `AUDIT_ACTIONS` gains `'reply_sent', 'inbox_move', 'inbox_out', 'inbox_add', 'handler'`.
+
+**`lib/dashboard/render.mjs`** — `NAV` gains `['/dashboard/inbox', 'Inbox', <icon>, 'Workspace']` right after Desk; `layout()` shows `me.unread` (when > 0) as the Inbox count (explicit `counts` still win); `leadDetailPage` shows the inbox state and: `in` chat → "Open chat" link; owner + not `in` → *Move to Bona inbox* form (`POST /v1/admin/inbox/:id/move`); owner + `in`/`unsure` → *Not a client* form (`POST /v1/admin/inbox/:id/out`). `MESSAGES` gains `stale`, `lid_only`, `not_in_inbox`, `excluded`, `sending_disabled`, `send_uncertain`, `bad_text`, `bad_send_id`, `bad_handler`, `reply_rate_limited`, `not_a_chat`.
+
+**`lib/dashboard/render-inbox.mjs`** — `export const INBOX_OK = { sent, handler, moved, out, added }` (messages); `inboxPage({ me, rows, unsureCount = 0, ok = null, error = null, now = Date.now() })`, `unsurePage({ me, rows, ok = null, error = null, now = Date.now() })`, `threadPage({ me, lead, messages, gaps = [], outbox = [], users = [], sendId, seenTs, sendingEnabled, canReply, draft = '', ok = null, error = null, now = Date.now() })`. Server-rendered, no script, existing CSS/classes, masked phones in lists, whole number only on the thread header, every value through `esc`, names in `<bdi>`, bubbles labelled client / staff name / Dana / "Your number" (owner viewer) or "Owner's number" (staff viewer).
+
+**`lib/dashboard/routes.mjs`** — `createDashboardRoutes({ ..., inbox = null, sender = null, backfill = null })`. `GET /dashboard/inbox` (`?tab=unsure` owner-only else 403), `GET /dashboard/inbox/:leadId` (404 "not in the Bona inbox" unless `in` chat and not excluded; refresh; mark read), `POST /v1/admin/inbox/:leadId/reply|handler` (any member), `POST /v1/admin/inbox/:leadId/move|out` and `POST /v1/admin/inbox/add` (owner). Audit `reply_sent` (meta `{ status }`), `handler` (meta `{ to }`), `inbox_move`, `inbox_out`, `inbox_add` — never text or numbers. Never-list add → `inbox.leaveInbox` for that number's lead (P2-7). Every signed-in HTML page's `me` carries `unread`.
+
+**`index.mjs`** — `createInboxStore(db)`, `createSender({ env, team, inbox, db, log })` + `recoverInterrupted()`, `createIngest(...)`, `createBackfill(...)`, poller and routes wired with them, `app.inboxStore/ingest/backfill`, `app.inboxMaintenance()` (P2-18) run in the real server's start-up block and every 24 h (`unref`).
+
+---
+
+### Task 1: Schema v4 — inbox columns and tables (`lib/db.mjs`)
+
+**Files:**
+- Modify: `services/api/lib/db.mjs` (`SCHEMA_VERSION`, `MIGRATIONS` gains `version: 4`, `COLUMNS.leads`, `migrate` exported with an `upTo` option)
+- Modify: `services/api/test/db.test.mjs` (import, table list, the v2 upgrade test rebuilt on `migrate`, four new v4 tests)
+- Modify: `services/api/test/team.test.mjs` (its schema test stops pinning the number 3)
+
+Why the `migrate` seam: the v4 migration does more than add things — its two `UPDATE`s place every lead that already exists (P2-13). The only honest test of that is a genuine v3 file holding real rows, upgraded by the real chain. `MIGRATIONS` and `migrate()` are internal today, so `migrate(db, { upTo })` is exported: `openDb` still always runs the whole chain, and tests can stop it early on a raw `DatabaseSync`. The same seam fixes the existing v2 upgrade test, which built a file holding only `auth_sessions`; v4 alters `leads` and reads `touchpoints`, so that file would no longer open at all.
+
+- [ ] **Step 1: Write the failing tests**
+
+In `services/api/test/db.test.mjs`, change the import line
+```js
+import { openDb, newId, STAGES, FANOUT_DESTS, SCHEMA_VERSION } from '../lib/db.mjs';
+```
+to:
+```js
+import { openDb, newId, STAGES, FANOUT_DESTS, SCHEMA_VERSION, migrate } from '../lib/db.mjs';
+```
+
+In the first test (`'openDb creates an owner-only file inside an owner-only directory and migrates once'`), change the table-list line
+```js
+  for (const name of ['sessions', 'events', 'leads', 'touchpoints', 'lead_stage_history', 'wa_cursor', 'wa_seen', 'ad_spend', 'fanout', 'auth_codes', 'auth_sessions', 'users', 'auth_challenges', 'audit_log', 'never_list', 'settings']) {
+```
+to:
+```js
+  for (const name of ['sessions', 'events', 'leads', 'touchpoints', 'lead_stage_history', 'wa_cursor', 'wa_seen', 'ad_spend', 'fanout', 'auth_codes', 'auth_sessions', 'users', 'auth_challenges', 'audit_log', 'never_list', 'settings', 'wa_messages', 'wa_outbox', 'inbox_reads', 'wa_gaps']) {
+```
+
+Replace the whole test that begins
+```js
+test('a v2-era file db upgrades to v3, an existing session survives with a null user_id, and reopening is a no-op', () => {
+```
+— from that line through its closing `});` (the line after `  cleanup();`, just above the blank line before `test('newId is prefix, base-36 time and four hex characters', () => {`) — with these five tests:
+```js
+test('a v2-era file db upgrades to the current schema, an existing session survives with a null user_id, and reopening is a no-op', () => {
+  // `migrate(db, { upTo })` runs the real migration chain only as far as asked, so the
+  // file below is a genuine v2 database — every table v1 and v2 made, from the same SQL
+  // start-up runs — not a hand-built imitation that could drift from it. (v4 alters
+  // `leads` and reads `touchpoints`, so a file holding only `auth_sessions` would no
+  // longer open at all.) `openDb` then applies the rest of the chain exactly as start-up
+  // on the VPS does, including v3's bare `ALTER TABLE auth_sessions ADD COLUMN user_id`.
+  const { file, cleanup } = tmp();
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const seed = new DatabaseSync(file);
+  migrate(seed, { upTo: 2 });
+  assert.equal(seed.prepare('PRAGMA user_version').get().user_version, 2);
+  seed.prepare('INSERT INTO auth_sessions (token_hash, created, expires, ua) VALUES (?,?,?,?)').run('deadbeef', 1000, 99_999_999_999, 'UA');
+  seed.close();
+
+  const a = openDb(file);
+  assert.equal(a.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION, 'v3 onwards is applied on top of the v2 file');
+  const row = a.db.prepare('SELECT * FROM auth_sessions WHERE token_hash = ?').get('deadbeef');
+  assert.ok(row, 'the pre-existing session row survives the migration');
+  assert.equal(row.user_id, null, 'a session opened before user accounts existed has no user');
+  a.close();
+
+  const b = openDb(file);
+  assert.equal(b.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION, 'reopening an up-to-date file is a no-op');
+  b.close();
+  cleanup();
+});
+
+test('schema v4 gives leads their inbox columns and adds the transcript, outbox, read-mark and gap tables', () => {
+  const s = openDb(':memory:');
+  assert.equal(SCHEMA_VERSION, 4);
+  assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 4);
+  const info = (table) => s.db.prepare(`PRAGMA table_info(${table})`).all();
+  const names = (table) => info(table).map((c) => c.name);
+  const leadCols = info('leads');
+  assert.deepEqual(leadCols.slice(-5).map((c) => c.name), ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human']);
+  const needsHuman = leadCols.find((c) => c.name === 'needs_human');
+  assert.equal(needsHuman.notnull, 1);
+  assert.equal(needsHuman.dflt_value, '0');
+  assert.deepEqual(names('wa_messages'), ['key_id', 'lead_id', 'jid', 'direction', 'sender_kind', 'sender_user_id', 'text', 'media_type', 'ts', 'status']);
+  assert.deepEqual(names('wa_outbox'), ['send_id', 'lead_id', 'jid', 'text', 'user_id', 'sender_kind', 'status', 'key_id', 'created', 'updated', 'error']);
+  assert.deepEqual(names('inbox_reads'), ['user_id', 'lead_id', 'last_read_ts']);
+  assert.deepEqual(names('wa_gaps'), ['key_id', 'lead_id', 'jid', 'ts', 'reason']);
+  const indexes = new Set(s.db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map((r) => r.name));
+  for (const name of ['leads_inbox', 'wa_messages_lead', 'wa_outbox_key', 'wa_outbox_lead', 'wa_outbox_created', 'wa_gaps_lead']) assert.ok(indexes.has(name), name);
+  s.close();
+});
+
+test('the v4 CHECKs refuse an inbox state, direction, sender or outbox status the inbox never writes', () => {
+  const s = openDb(':memory:');
+  s.insertLead({ lead_id: 'L1', created: 1, updated: 1 });
+  assert.equal(s.getLead('L1').inbox_state, null, 'undecided until a rule or the owner decides');
+  assert.equal(s.getLead('L1').needs_human, 0, 'nobody has asked for a human yet');
+  for (const state of ['in', 'unsure', 'out']) assert.equal(s.updateLead('L1', { inbox_state: state }), true, state);
+  assert.throws(() => s.updateLead('L1', { inbox_state: 'maybe' }), /CHECK/);
+  assert.throws(() => s.updateLead('L1', { needs_human: 2 }), /CHECK/);
+  assert.throws(() => s.updateLead('L1', { needs_human: null }), /NOT NULL/);
+
+  const msg = s.db.prepare('INSERT INTO wa_messages (key_id, lead_id, direction, sender_kind, ts) VALUES (?,?,?,?,?)');
+  msg.run('K-client', 'L1', 'in', 'client', 10);
+  for (const kind of ['staff', 'dana', 'owner_number']) msg.run(`K-${kind}`, 'L1', 'out', kind, 11);
+  assert.throws(() => msg.run('K-2', 'L1', 'sideways', 'client', 12), /CHECK/);
+  assert.throws(() => msg.run('K-3', 'L1', 'out', 'owner', 12), /CHECK/);
+  assert.throws(() => msg.run('K-4', 'L1', 'in', 'client', null), /NOT NULL/, 'a message always has a time');
+  assert.throws(() => msg.run('K-client', 'L1', 'in', 'client', 13), /UNIQUE/, 'one row per WhatsApp message id');
+
+  const out = s.db.prepare('INSERT INTO wa_outbox (send_id, jid, sender_kind, status, created, updated) VALUES (?,?,?,?,?,?)');
+  for (const kind of ['staff', 'dana', 'code', 'note']) out.run(`S-${kind}`, '966500000001@s.whatsapp.net', kind, 'pending', 1, 1);
+  for (const status of ['accepted', 'failed', 'uncertain']) out.run(`S-${status}`, '966500000001@s.whatsapp.net', 'staff', status, 1, 1);
+  assert.throws(() => out.run('S-x', '966500000001@s.whatsapp.net', 'client', 'pending', 1, 1), /CHECK/);
+  assert.throws(() => out.run('S-y', '966500000001@s.whatsapp.net', 'staff', 'sent', 1, 1), /CHECK/);
+  assert.throws(() => out.run('S-z', null, 'staff', 'pending', 1, 1), /NOT NULL/, 'a send always names its recipient');
+
+  const read = s.db.prepare('INSERT INTO inbox_reads (user_id, lead_id, last_read_ts) VALUES (?,?,?)');
+  read.run('USR-1', 'L1', 5);
+  read.run('USR-2', 'L1', 6);
+  assert.throws(() => read.run('USR-1', 'L1', 7), /UNIQUE/, 'one read mark per person per chat');
+  s.close();
+});
+
+test('a v3 file db moves to v4: each existing lead is placed by what is certain about it, nothing else changes, and reopening is a no-op', () => {
+  const { file, cleanup } = tmp();
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const seed = new DatabaseSync(file);
+  migrate(seed, { upTo: 3 });
+  assert.equal(seed.prepare('PRAGMA user_version').get().user_version, 3);
+  assert.ok(!seed.prepare('PRAGMA table_info(leads)').all().some((c) => c.name === 'inbox_state'), 'a genuine v3 file: no inbox columns yet');
+
+  // One lead per P2-13 rule. Each gets the lead_created touchpoint lib/leads.mjs writes,
+  // with `snippet` as its first message; `meta` replaces that JSON (a legacy import's),
+  // `rawMeta` replaces the stored text outright (a broken row), `later` adds a second,
+  // non-creation touchpoint whose snippet must not count.
+  const cases = [
+    { id: 'L-ref', channel: 'whatsapp', method: 'ref', snippet: 'Hello\nRef K7Q2XR', want: 'in' },
+    { id: 'L-ad', channel: 'whatsapp', method: 'ad_meta', snippet: 'Hi', want: 'in' },
+    { id: 'L-form', channel: 'form', method: 'form', want: 'in' },
+    { id: 'L-chat', channel: 'concierge_chat', method: 'concierge', want: 'in' },
+    { id: 'L-voice', channel: 'concierge_voice', method: 'concierge', want: 'in' },
+    { id: 'L-old-form', channel: 'form', method: 'form', legacy: 'lead-2025-017', meta: { legacy_id: 'lead-2025-017', conversation_id: null, page: null }, want: 'unsure' },
+    { id: 'L-old-chat', channel: 'concierge_chat', method: 'concierge', legacy: 'lead-2025-018', meta: { legacy_id: 'lead-2025-018', conversation_id: null, page: null }, want: 'unsure' },
+    { id: 'L-kw-id', channel: 'whatsapp', method: 'keyword', snippet: 'Is BONA-W003 still available?', want: 'in' },
+    { id: 'L-kw-id-ar', channel: 'whatsapp', method: 'keyword', snippet: 'السلام عليكم، أبغى تفاصيل bona-012', want: 'in' },
+    { id: 'L-kw-word', channel: 'whatsapp', method: 'keyword', snippet: 'I saw Bona on Instagram', later: 'and BONA-W009?', want: 'unsure' },
+    { id: 'L-tw', channel: 'whatsapp', method: 'time_window', snippet: 'Hello', want: 'unsure' },
+    { id: 'L-tw-id', channel: 'whatsapp', method: 'time_window', snippet: 'Hello, BONA-W021 please', want: 'in' },
+    { id: 'L-bad-json', channel: 'whatsapp', method: 'keyword', rawMeta: '{"snippet": "BONA-W003"', want: 'unsure' },
+  ];
+  const T0 = 1_757_140_000_000;
+  const createdOf = (i) => T0 + i * 1000;
+  const insLead = seed.prepare('INSERT INTO leads (lead_id, created, updated, channel, match_method, legacy_id, stage, first_reply_ts) VALUES (?,?,?,?,?,?,?,?)');
+  const insTp = seed.prepare('INSERT INTO touchpoints (id, lead_id, ts, channel, event_type, meta) VALUES (?,?,?,?,?,?)');
+  cases.forEach((c, i) => {
+    insLead.run(c.id, createdOf(i), createdOf(i) + 1, c.channel, c.method, c.legacy ?? null, 'new', i % 2 ? createdOf(i) + 60_000 : null);
+    const meta = c.rawMeta ?? JSON.stringify(c.meta ?? { match_method: c.method, ref: null, session_id: null, event_id: null, ad_meta: null, snippet: c.snippet ?? null });
+    insTp.run(`tp-${c.id}`, c.id, createdOf(i), c.channel, 'lead_created', meta);
+    if (c.later) insTp.run(`tp-${c.id}-2`, c.id, createdOf(i) + 5000, c.channel, 'inbound_message', JSON.stringify({ snippet: c.later }));
+  });
+  const snapshot = (db) => db.prepare('SELECT * FROM leads ORDER BY lead_id').all().map((r) => ({ ...r }));
+  const countOf = (db, table) => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
+  const before = snapshot(seed);
+  const touchpointsBefore = countOf(seed, 'touchpoints');
+  seed.close();
+
+  const a = openDb(file);
+  assert.equal(a.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
+  const added = ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human'];
+  const after = snapshot(a.db);
+  assert.equal(after.length, before.length, 'no lead is added or lost');
+  assert.equal(countOf(a.db, 'touchpoints'), touchpointsBefore);
+  assert.deepEqual(after.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !added.includes(k)))), before, 'every v3 column is untouched');
+  cases.forEach((c, i) => {
+    const row = a.getLead(c.id);
+    assert.equal(row.inbox_state, c.want, c.id);
+    assert.equal(row.inbox_since, c.want === 'in' ? createdOf(i) : null, `${c.id}: in since the lead was created, and only if in`);
+    assert.equal(row.needs_human, 0, c.id);
+    assert.equal(row.handler_user_id, null, c.id);
+    assert.equal(row.last_msg_ts, null, c.id);
+  });
+  for (const table of ['wa_messages', 'wa_outbox', 'inbox_reads', 'wa_gaps']) assert.equal(countOf(a.db, table), 0, table);
+
+  // The owner moves one guess in and rules one certain lead out. Reopening must not run
+  // the v4 placement again and undo either.
+  a.updateLead('L-kw-word', { inbox_state: 'in', inbox_since: T0 + 99_000 });
+  a.updateLead('L-ref', { inbox_state: 'out', inbox_since: null });
+  a.close();
+  const b = openDb(file);
+  assert.equal(b.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION, 'reopening an up-to-date file is a no-op');
+  assert.equal(b.getLead('L-kw-word').inbox_state, 'in');
+  assert.equal(b.getLead('L-kw-word').inbox_since, T0 + 99_000);
+  assert.equal(b.getLead('L-ref').inbox_state, 'out');
+  assert.equal(b.getLead('L-ref').inbox_since, null);
+  b.close();
+  cleanup();
+});
+
+test('insertLead and updateLead carry the inbox columns', () => {
+  const s = openDb(':memory:');
+  const l = s.insertLead({
+    lead_id: 'L1', created: 1, updated: 1, wa_jid: '966500000001@s.whatsapp.net',
+    inbox_state: 'in', inbox_since: 1, handler_user_id: 'USR-1', last_msg_ts: 7, needs_human: true,
+  });
+  assert.deepEqual([l.inbox_state, l.inbox_since, l.handler_user_id, l.last_msg_ts, l.needs_human], ['in', 1, 'USR-1', 7, 1]);
+  assert.equal(s.updateLead('L1', { inbox_state: 'out', inbox_since: null, handler_user_id: null, last_msg_ts: null, needs_human: false }), true);
+  const after = s.getLead('L1');
+  assert.deepEqual([after.inbox_state, after.inbox_since, after.handler_user_id, after.last_msg_ts, after.needs_human], ['out', null, null, null, 0]);
+  s.close();
+});
+```
+
+In `services/api/test/team.test.mjs`, inside `test('schema v3 adds the team tables and a user on every session', …)`, replace
+```js
+  assert.equal(SCHEMA_VERSION, 3);
+  assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 3);
+```
+with:
+```js
+  // The newest schema's number is pinned in db.test.mjs; this test only needs v3's tables.
+  assert.ok(SCHEMA_VERSION >= 3);
+  assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
+```
+
+(`grep -rn "user_version\|SCHEMA_VERSION" services/api/test` finds no other test that pins the schema number.)
+
+- [ ] **Step 2: Run to see it fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/db.test.mjs api/test/team.test.mjs`
+Expected: FAIL — `SyntaxError: The requested module '../lib/db.mjs' does not provide an export named 'migrate'`, so db.test.mjs does not load (`ℹ fail 1`). team.test.mjs still passes (`ℹ pass 24`): its schema test no longer pins a number.
+
+- [ ] **Step 3: Implement** — four edits in `services/api/lib/db.mjs`.
+
+Change
+```js
+export const SCHEMA_VERSION = 3;
+```
+to:
+```js
+export const SCHEMA_VERSION = 4;
+```
+
+Append a fourth entry to `MIGRATIONS`, after the `version: 3` object. The current end of the array is
+```js
+      CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT, updated INTEGER, updated_by TEXT);
+    `,
+  },
+];
+```
+Insert the block below between that `  },` and the closing `];`:
+```js
+  {
+    // The Bona inbox (2026-09-27 design §4.1–4.2, Phase 2). Whether the team may read a
+    // chat is STORED on the lead (`inbox_state`: 'in' | 'unsure' | 'out', NULL = not decided
+    // yet) and never re-derived from the match rules, so a lead that was only guessed (the
+    // word "bona", the ±15-min click window) cannot drift into the inbox later through the
+    // `phone` rule. `needs_human` is Phase 4's hand-over flag; any human reply clears it.
+    // `wa_messages` holds the transcripts of `in` chats only. `wa_outbox` is every send
+    // from the owner's number through lib/wa-send.mjs — a login `code` row never holds its
+    // text — and its rolling-24 h count is the daily cap, so a restart cannot reset it.
+    // `wa_gaps` is a message the poller could not read: the thread says so instead of
+    // silently skipping it.
+    // The two UPDATEs place the leads that already exist (P2-13). Certain → `in`, counted
+    // from the day the lead was created: a Ref code or ad context, a web form or Dana
+    // concierge lead that was not imported from the old log, or a listing id in the first
+    // message. Everything else — the keyword and click-window guesses, legacy imports —
+    // goes to the owner's Unsure list. `json_valid` comes first because `json_extract`
+    // raises on malformed JSON, and one bad touchpoint must not stop bona-api starting.
+    // No foreign keys, as in v3. Migrations here only ever add.
+    version: 4,
+    sql: `
+      ALTER TABLE leads ADD COLUMN inbox_state TEXT CHECK (inbox_state IN ('in','unsure','out'));
+      ALTER TABLE leads ADD COLUMN inbox_since INTEGER;
+      ALTER TABLE leads ADD COLUMN handler_user_id TEXT;
+      ALTER TABLE leads ADD COLUMN last_msg_ts INTEGER;
+      ALTER TABLE leads ADD COLUMN needs_human INTEGER NOT NULL DEFAULT 0 CHECK (needs_human IN (0,1));
+      CREATE INDEX IF NOT EXISTS leads_inbox ON leads(inbox_state, last_msg_ts);
+      CREATE TABLE IF NOT EXISTS wa_messages (
+        key_id TEXT PRIMARY KEY, lead_id TEXT NOT NULL, jid TEXT,
+        direction TEXT NOT NULL CHECK (direction IN ('in','out')),
+        sender_kind TEXT NOT NULL CHECK (sender_kind IN ('client','staff','dana','owner_number')),
+        sender_user_id TEXT, text TEXT, media_type TEXT, ts INTEGER NOT NULL, status TEXT
+      );
+      CREATE INDEX IF NOT EXISTS wa_messages_lead ON wa_messages(lead_id, ts);
+      CREATE TABLE IF NOT EXISTS wa_outbox (
+        send_id TEXT PRIMARY KEY, lead_id TEXT, jid TEXT NOT NULL, text TEXT, user_id TEXT,
+        sender_kind TEXT NOT NULL CHECK (sender_kind IN ('staff','dana','code','note')),
+        status TEXT NOT NULL CHECK (status IN ('pending','accepted','failed','uncertain')),
+        key_id TEXT, created INTEGER NOT NULL, updated INTEGER NOT NULL, error TEXT
+      );
+      CREATE INDEX IF NOT EXISTS wa_outbox_key ON wa_outbox(key_id);
+      CREATE INDEX IF NOT EXISTS wa_outbox_lead ON wa_outbox(lead_id, created);
+      CREATE INDEX IF NOT EXISTS wa_outbox_created ON wa_outbox(created);
+      CREATE TABLE IF NOT EXISTS inbox_reads (user_id TEXT NOT NULL, lead_id TEXT NOT NULL, last_read_ts INTEGER NOT NULL, PRIMARY KEY (user_id, lead_id));
+      CREATE TABLE IF NOT EXISTS wa_gaps (key_id TEXT PRIMARY KEY, lead_id TEXT, jid TEXT, ts INTEGER, reason TEXT);
+      CREATE INDEX IF NOT EXISTS wa_gaps_lead ON wa_gaps(lead_id, ts);
+      UPDATE leads SET
+        inbox_state = CASE WHEN match_method IN ('ref','ad_meta')
+            OR (channel IN ('form','concierge_chat','concierge_voice') AND legacy_id IS NULL)
+            OR EXISTS (SELECT 1 FROM touchpoints t WHERE t.lead_id = leads.lead_id AND t.event_type = 'lead_created'
+                       AND json_valid(t.meta)
+                       AND (upper(json_extract(t.meta, '$.snippet')) GLOB '*BONA-[0-9][0-9][0-9]*'
+                            OR upper(json_extract(t.meta, '$.snippet')) GLOB '*BONA-W[0-9][0-9][0-9]*'))
+          THEN 'in' ELSE 'unsure' END;
+      UPDATE leads SET inbox_since = created WHERE inbox_state = 'in';
+    `,
+  },
+```
+
+In `COLUMNS`, change the last line of `leads`
+```js
+    'consent_ads', 'consent_analytics'],
+```
+to:
+```js
+    'consent_ads', 'consent_analytics', 'inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human'],
+```
+(`insertLead` and `updateLead` build their SQL from `COLUMNS.leads`, so this is all they need.)
+
+At the bottom of the file, replace
+```js
+function migrate(db) {
+  for (const m of MIGRATIONS) {
+```
+with:
+```js
+/**
+ * Bring `db` (a raw DatabaseSync) up to `upTo`, one migration per transaction. `openDb`
+ * always runs the whole chain; `upTo` exists so the tests can stop it early, build a
+ * genuine older file and upgrade that — the only honest way to test a step that places
+ * rows already in the file (v4).
+ */
+export function migrate(db, { upTo = SCHEMA_VERSION } = {}) {
+  for (const m of MIGRATIONS) {
+    if (m.version > upTo) continue;
+```
+(The rest of `migrate` — the `BEGIN IMMEDIATE` comment and body — stays exactly as it is. `openDb` keeps calling `migrate(db)`, which runs the whole chain.)
+
+- [ ] **Step 4: Run**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/db.test.mjs api/test/team.test.mjs`
+Expected: PASS — `ℹ pass 41` (17 in db.test.mjs, 24 in team.test.mjs), `ℹ fail 0`.
+
+- [ ] **Step 5: Full suite**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/*.test.mjs`
+Expected: `ℹ pass 626`, `ℹ fail 0` (baseline 622 + 4 new tests; the rebuilt v2 test replaces the old one).
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd /home/azoz778/bona-wt/team-inbox && git add services/api/lib/db.mjs services/api/test/db.test.mjs services/api/test/team.test.mjs
+git commit -m "db: schema v4 — inbox state on leads, transcripts, outbox, read marks, gaps
+
+Existing leads are placed once by what is certain about them (Ref code, ad
+context, web form or concierge, a listing id in the first message); every
+other lead goes to the owner's Unsure list. migrate() is exported with an
+upTo option so the tests upgrade a genuine v3 file.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+Note: this task tests the upgrade on a v3 file built by the real migration chain. The live-schema rehearsal (read-only `sqlite_master` dump from hermes-vps, rebuilt locally, opened with `openDb`) belongs to this phase's deploy section, before `deploy.sh`.
+
+---
+
+### Task 2: Evolution reads — any filter, whole windows without silent loss, media placeholders, noise
+
+Implements the `lib/evolution.mjs` part of the interface contract and decision P2-3 (no silent loss) and the media/noise part of P2-14. The module stays read-only: it still only ever calls `POST /chat/findMessages/{instance}`. `fetchWindow` is left exactly as it is (the poller switches to `readWindow` in its own task).
+
+**Files:**
+- Modify: `services/api/lib/evolution.mjs`
+- Test: `services/api/test/evolution.test.mjs` (modify: the import and one expected object; append 16 tests)
+
+- [ ] **Step 1: Write the failing tests** — three edits to `services/api/test/evolution.test.mjs`.
+
+**1a.** The import at the top of the file. Replace:
+
+```js
+import {
+  EvolutionError, MAX_PAGES, PAGE_SIZE, bareJid, contextOf, fetchWindow, findMessagesWindow,
+  normaliseRecord, oldestFirst, recordsOf, textOf, toMs,
+} from '../lib/evolution.mjs';
+```
+
+with:
+
+```js
+import {
+  EvolutionError, MAX_PAGES, MAX_SPLIT_DEPTH, PAGE_SIZE, bareJid, contextOf, fetchWindow,
+  findMessagesPage, findMessagesWindow, isNoise, mediaOf, normaliseRecord, oldestFirst,
+  readWindow, recordsOf, textOf, toMs,
+} from '../lib/evolution.mjs';
+```
+
+**1b.** The existing test `a text message flattens to the shape the poller reasons about` compares the whole normalised record, so its expected object gains the three new fields. Replace:
+
+```js
+    pushName: 'Sara',
+    contextInfo: null,
+    messageType: 'conversation',
+  });
+});
+```
+
+with:
+
+```js
+    pushName: 'Sara',
+    contextInfo: null,
+    messageType: 'conversation',
+    media: null,
+    fileName: null,
+    noise: false,
+  });
+});
+```
+
+**1c.** Append to the end of the file (after the last test, `fetchWindow stops on the first short page and drops ids seen twice`). The fake below behaves like the live instance as probed on 2026-09-28: it keeps a record set, applies the time filter in whole seconds with both bounds inclusive, matches `key.remoteJid` (or `key.remoteJidAlt`), sorts newest-first, pages with `page`/`offset`, and answers boxed with `total`/`pages` or as a bare array.
+
+```js
+/* ---------------- Phase 2: reads with any filter, and no silent loss ---------------- */
+
+const BASE = { baseUrl: 'https://wa-api.example/', apiKey: 'evo-key', instance: 'abdulaziz-personal' };
+const T0 = Date.UTC(2026, 8, 28, 9, 0, 0);
+const S0 = T0 / 1000;
+const CLIENT = '966500000000@s.whatsapp.net';
+const iso = (ms) => new Date(ms).toISOString();
+
+/** A stored record as Evolution keeps it: `messageTimestamp` in whole seconds. */
+const stored = (id, sec, key = {}) => ({
+  key: { id, fromMe: false, remoteJid: CLIENT, ...key },
+  messageType: 'conversation',
+  message: { conversation: 'hi' },
+  messageTimestamp: sec,
+});
+
+/**
+ * A stand-in for the live instance, answering `POST /chat/findMessages` the way Evolution
+ * 2.3.7 does: both time bounds cut down to whole seconds and inclusive (and only applied
+ * when both are given), `key.remoteJid` matched exactly (or, without it, `key.remoteJidAlt`),
+ * newest first, `offset` records per page from `page` 1 — boxed as
+ * `{ messages: { total, pages, currentPage, records } }`, or a bare array when `bare`.
+ */
+function fakeEvolution(records, { bare = false } = {}) {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, headers: init.headers, body });
+    const { where = {}, page = 1, offset = 50 } = body;
+    const w = where.messageTimestamp;
+    const both = Boolean(w?.gte && w?.lte);
+    const lo = both ? Math.floor(Date.parse(w.gte) / 1000) : -Infinity;
+    const hi = both ? Math.floor(Date.parse(w.lte) / 1000) : Infinity;
+    const key = where.key ?? {};
+    const hits = records
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => r.messageTimestamp >= lo && r.messageTimestamp <= hi)
+      .filter(({ r }) => (key.remoteJid ? r.key.remoteJid === key.remoteJid
+        : !key.remoteJidAlt || r.key.remoteJidAlt === key.remoteJidAlt))
+      .sort((a, b) => b.r.messageTimestamp - a.r.messageTimestamp || b.i - a.i)
+      .map(({ r }) => r);
+    const slice = hits.slice(offset * (page - 1), offset * page);
+    const payload = bare ? slice
+      : { messages: { total: hits.length, pages: Math.ceil(hits.length / offset), currentPage: page, records: slice } };
+    return { ok: true, status: 200, text: async () => JSON.stringify(payload) };
+  };
+  return { fetchImpl, calls };
+}
+
+/** `[from - T0, to - T0, page]` for every request — which piece was read, in what order. */
+const asked = (calls) => calls.map((c) => [
+  Date.parse(c.body.where.messageTimestamp.gte) - T0,
+  Date.parse(c.body.where.messageTimestamp.lte) - T0,
+  c.body.page,
+]);
+/** Ids `M<to>` down to `M<from>`: one piece as Evolution hands it over, newest first. */
+const desc = (prefix, from, to) => Array.from({ length: to - from + 1 }, (_, k) => `${prefix}${to - k}`);
+
+test('findMessagesPage sends any where filter as given and reads total and pages off the boxed answer', async () => {
+  const evo = fakeEvolution([
+    stored('A', S0 + 1),
+    stored('B', S0 + 2, { remoteJid: '272516946294519@lid', remoteJidAlt: '966500000001@s.whatsapp.net' }),
+    stored('C', S0 + 3),
+  ]);
+  const one = await findMessagesPage({ ...BASE, where: { key: { remoteJid: CLIENT } }, offset: 1, fetchImpl: evo.fetchImpl });
+  assert.equal(evo.calls[0].url, 'https://wa-api.example/chat/findMessages/abdulaziz-personal');
+  assert.equal(evo.calls[0].headers.apikey, 'evo-key');
+  assert.deepEqual(evo.calls[0].body, { where: { key: { remoteJid: CLIENT } }, page: 1, offset: 1 });
+  assert.deepEqual(one.records.map((r) => r.id), ['C'], 'one chat only, newest first');
+  assert.equal(one.total, 2, 'the size of everything the filter matched, not of this page');
+  assert.equal(one.pages, 2);
+  assert.equal(one.raw.messages.currentPage, 1);
+
+  const alt = await findMessagesPage({ ...BASE, where: { key: { remoteJidAlt: '966500000001@s.whatsapp.net' } }, page: 1, fetchImpl: evo.fetchImpl });
+  assert.equal(evo.calls[1].body.offset, PAGE_SIZE);
+  assert.deepEqual(alt.records.map((r) => r.id), ['B'], 'a lid chat found through its phone jid');
+  assert.equal(alt.records[0].jid, '272516946294519@lid');
+
+  const both = await findMessagesPage({
+    ...BASE, fetchImpl: evo.fetchImpl,
+    where: { key: { remoteJid: CLIENT }, messageTimestamp: { gte: iso(T0), lte: iso(T0 + 2000) } },
+  });
+  assert.deepEqual(both.records.map((r) => r.id), ['A'], 'a chat and a window together');
+  assert.equal(both.total, 1);
+});
+
+test('total and pages are null when the answer does not state them', async () => {
+  const bare = await findMessagesPage({ ...BASE, where: { key: { remoteJid: CLIENT } }, fetchImpl: fakeEvolution([stored('A', S0)], { bare: true }).fetchImpl });
+  assert.deepEqual(bare.records.map((r) => r.id), ['A']);
+  assert.equal(bare.total, null);
+  assert.equal(bare.pages, null);
+
+  const odd = recorder([{ status: 200, body: { messages: { total: '1', pages: -1, records: [textRecord()] } } }]);
+  const out = await findMessagesPage({ ...BASE, where: { key: { remoteJid: CLIENT } }, fetchImpl: odd.fetchImpl });
+  assert.equal(out.records.length, 1);
+  assert.equal(out.total, null, 'a size that is not a whole number is not a size');
+  assert.equal(out.pages, null);
+});
+
+test('findMessagesPage refuses a missing or empty filter, which would read every chat', async () => {
+  const { fetchImpl, calls } = recorder();
+  await assert.rejects(() => findMessagesPage({ ...BASE, fetchImpl }), TypeError);
+  await assert.rejects(() => findMessagesPage({ ...BASE, where: {}, fetchImpl }), TypeError);
+  await assert.rejects(() => findMessagesPage({ ...BASE, where: [], fetchImpl }), TypeError);
+  await assert.rejects(() => findMessagesPage({ ...BASE, baseUrl: '', where: { key: { remoteJid: CLIENT } }, fetchImpl }), TypeError);
+  assert.equal(calls.length, 0);
+
+  const bad = recorder([{ status: 500, body: { error: 'boom' } }]);
+  await assert.rejects(() => findMessagesPage({ ...BASE, where: { key: { remoteJid: CLIENT } }, fetchImpl: bad.fetchImpl }), (err) => {
+    assert.ok(err instanceof EvolutionError);
+    assert.equal(err.status, 500);
+    return true;
+  });
+});
+
+test('findMessagesWindow is the window case of findMessagesPage and passes the sizes through', async () => {
+  const { fetchImpl } = recorder([{ status: 200, body: boxed([textRecord()]) }]);
+  const out = await findMessagesWindow({ ...OPTS, fetchImpl });
+  assert.equal(out.records[0].id, 'KEY1');
+  assert.equal(out.total, 1);
+  assert.equal(out.pages, 1);
+});
+
+test('readWindow: a window that fits is one piece, one request, complete', async () => {
+  const evo = fakeEvolution([stored('A', S0 + 5), stored('B', S0 + 10), stored('LATER', S0 + 120)]);
+  const out = await readWindow({ ...BASE, gte: T0, lte: T0 + 60_000, fetchImpl: evo.fetchImpl });
+  assert.deepEqual(out.records.map((r) => r.id), ['B', 'A']);
+  assert.equal(out.pieces, 1);
+  assert.equal(out.truncated, false);
+  assert.equal(out.missing, 0);
+  assert.deepEqual(evo.calls.map((c) => c.body), [
+    { where: { messageTimestamp: { gte: iso(T0), lte: iso(T0 + 60_000) } }, page: 1, offset: PAGE_SIZE },
+  ]);
+});
+
+test('readWindow pages a window of exactly what one read can reach, without splitting it', async () => {
+  const evo = fakeEvolution(Array.from({ length: 500 }, (_, i) => stored(`M${i}`, S0 + i)));
+  const out = await readWindow({ ...BASE, gte: T0, lte: T0 + 600_000, fetchImpl: evo.fetchImpl });
+  assert.deepEqual(asked(evo.calls), [1, 2, 3, 4, 5].map((p) => [0, 600_000, p]), '500 is not more than 500');
+  assert.deepEqual(out.records.map((r) => r.id), desc('M', 0, 499));
+  assert.equal(out.pieces, 1);
+  assert.equal(out.truncated, false);
+  assert.equal(out.missing, 0);
+});
+
+test('readWindow splits 1,200 messages into complete pieces on whole seconds, older piece first, each message once', async () => {
+  // One message a second for 20 minutes: more than the 500 one read can reach.
+  const evo = fakeEvolution(Array.from({ length: 1200 }, (_, i) => stored(`M${i}`, S0 + i)));
+  const out = await readWindow({ ...BASE, gte: T0, lte: T0 + 1_199_000, fetchImpl: evo.fetchImpl });
+
+  assert.deepEqual(asked(evo.calls), [
+    [0, 1_199_000, 1], // 1,200: too many — cut at 599 s
+    [0, 598_999, 1], // 599: still too many — cut at 299 s
+    [0, 298_999, 1], [0, 298_999, 2], [0, 298_999, 3],
+    [299_000, 598_999, 1], [299_000, 598_999, 2], [299_000, 598_999, 3],
+    [599_000, 1_199_000, 1], // 601: cut at 899 s
+    [599_000, 898_999, 1], [599_000, 898_999, 2], [599_000, 898_999, 3],
+    [899_000, 1_199_000, 1], [899_000, 1_199_000, 2], [899_000, 1_199_000, 3], [899_000, 1_199_000, 4],
+  ]);
+  assert.ok(evo.calls.every((c) => c.body.page <= MAX_PAGES));
+  assert.deepEqual(out.records.map((r) => r.id), [
+    ...desc('M', 0, 298), ...desc('M', 299, 598), ...desc('M', 599, 898), ...desc('M', 899, 1199),
+  ]);
+  assert.equal(new Set(out.records.map((r) => r.id)).size, 1200, 'every message exactly once');
+  assert.equal(out.pieces, 4);
+  assert.equal(out.truncated, false);
+  assert.equal(out.missing, 0);
+});
+
+test('readWindow stops cutting at the depth cap and says exactly how many it could not read', async () => {
+  // 5,000 messages inside one second (a restored backup, say) with one message either side.
+  const burst = Array.from({ length: 5000 }, (_, i) => stored(`B${i}`, S0 + 30));
+  const evo = fakeEvolution([stored('EARLY', S0 + 5), ...burst, stored('LATE', S0 + 50)]);
+  const out = await readWindow({ ...BASE, gte: T0, lte: T0 + 60_000, fetchImpl: evo.fetchImpl });
+
+  assert.equal(MAX_SPLIT_DEPTH, 4);
+  assert.deepEqual(asked(evo.calls), [
+    [0, 60_000, 1],
+    [0, 29_999, 1], // depth 1: EARLY, complete
+    [30_000, 60_000, 1],
+    [30_000, 44_999, 1],
+    [30_000, 36_999, 1],
+    // depth 4 = the cap: the burst's piece is read partially, newest five pages
+    [30_000, 32_999, 1], [30_000, 32_999, 2], [30_000, 32_999, 3], [30_000, 32_999, 4], [30_000, 32_999, 5],
+    [33_000, 36_999, 1],
+    [37_000, 44_999, 1],
+    [45_000, 60_000, 1], // LATE, complete
+  ]);
+  assert.deepEqual(out.records.map((r) => r.id), ['EARLY', ...desc('B', 4500, 4999), 'LATE']);
+  assert.equal(out.pieces, 5);
+  assert.equal(out.truncated, true);
+  assert.equal(out.missing, 4500);
+});
+
+test('readWindow never cuts a window under two seconds wide, and maxDepth 0 never cuts at all', async () => {
+  const two = [...Array.from({ length: 300 }, (_, i) => stored(`X${i}`, S0)), ...Array.from({ length: 300 }, (_, i) => stored(`Y${i}`, S0 + 1))];
+  const narrow = fakeEvolution(two);
+  const a = await readWindow({ ...BASE, gte: T0, lte: T0 + 1_999, fetchImpl: narrow.fetchImpl });
+  assert.equal(narrow.calls.length, MAX_PAGES, 'no whole second inside the window to cut at');
+  assert.equal(a.pieces, 1);
+  assert.equal(a.records.length, 500);
+  assert.equal(a.truncated, true);
+  assert.equal(a.missing, 100);
+
+  const flat = fakeEvolution(Array.from({ length: 1200 }, (_, i) => stored(`M${i}`, S0 + i)));
+  const b = await readWindow({ ...BASE, gte: T0, lte: T0 + 1_199_000, maxDepth: 0, fetchImpl: flat.fetchImpl });
+  assert.equal(flat.calls.length, MAX_PAGES);
+  assert.deepEqual(b.records.map((r) => r.id), desc('M', 700, 1199), 'the newest 500');
+  assert.equal(b.pieces, 1);
+  assert.equal(b.truncated, true);
+  assert.equal(b.missing, 700);
+});
+
+test('readWindow falls back to paging until a short page when the answer is a bare array', async () => {
+  const small = fakeEvolution(Array.from({ length: 250 }, (_, i) => stored(`M${i}`, S0 + i)), { bare: true });
+  const a = await readWindow({ ...BASE, gte: T0, lte: T0 + 300_000, fetchImpl: small.fetchImpl });
+  assert.deepEqual(small.calls.map((c) => c.body.page), [1, 2, 3], 'the third page is short: done');
+  assert.equal(a.records.length, 250);
+  assert.equal(a.pieces, 1);
+  assert.equal(a.truncated, false);
+  assert.equal(a.missing, 0);
+
+  const big = fakeEvolution(Array.from({ length: 1200 }, (_, i) => stored(`M${i}`, S0 + i)), { bare: true });
+  const b = await readWindow({ ...BASE, gte: T0, lte: T0 + 1_199_000, fetchImpl: big.fetchImpl });
+  assert.deepEqual(asked(big.calls), [1, 2, 3, 4, 5].map((p) => [0, 1_199_000, p]), 'no size to decide a cut on');
+  assert.deepEqual(b.records.map((r) => r.id), desc('M', 700, 1199));
+  assert.equal(b.pieces, 1);
+  assert.equal(b.truncated, true);
+  assert.equal(b.missing, 0, 'nobody can count what a bare array left out');
+});
+
+test('readWindow drops an id seen twice, keeps records that have no id, and reads on for the one a late arrival pushed down', async () => {
+  const k = (id) => textRecord({ key: { id, fromMe: false, remoteJid: CLIENT } });
+  const noId = textRecord({ key: { fromMe: false, remoteJid: CLIENT } });
+  // Four messages, two a page: A, B, the one with no id, C. A message arriving after page 1
+  // pushes every older record one place down, so B comes back at the top of page 2 and C
+  // falls past the two pages the first answer stated.
+  const answers = [
+    { status: 200, body: { messages: { total: 4, pages: 2, currentPage: 1, records: [k('A'), k('B')] } } },
+    { status: 200, body: { messages: { total: 5, pages: 3, currentPage: 2, records: [k('B'), noId] } } },
+    { status: 200, body: { messages: { total: 5, pages: 3, currentPage: 3, records: [k('C')] } } },
+  ];
+  const { fetchImpl, calls } = recorder(answers);
+  const out = await readWindow({ ...OPTS, offset: 2, fetchImpl });
+  assert.deepEqual(calls.map((c) => c.body.page), [1, 2, 3], 'two full pages kept three of four: one page more');
+  assert.deepEqual(out.records.map((r) => r.id), ['A', 'B', null, 'C']);
+  assert.equal(out.missing, 0);
+  assert.equal(out.truncated, false);
+
+  // With no page left under the cap, the record pushed out is counted, never lost quietly.
+  const capped = recorder(answers);
+  const short = await readWindow({ ...OPTS, offset: 2, maxPages: 2, fetchImpl: capped.fetchImpl });
+  assert.equal(capped.calls.length, 2);
+  assert.deepEqual(short.records.map((r) => r.id), ['A', 'B', null]);
+  assert.equal(short.missing, 1);
+  assert.equal(short.truncated, true);
+});
+
+test('readWindow needs both bounds', async () => {
+  const { fetchImpl, calls } = recorder();
+  await assert.rejects(() => readWindow({ ...BASE, gte: T0, fetchImpl }), TypeError);
+  await assert.rejects(() => readWindow({ ...BASE, lte: T0, fetchImpl }), TypeError);
+  assert.equal(calls.length, 0);
+});
+
+/* ---------------- media placeholders and noise ---------------- */
+
+test('media become placeholders: a voice note is not just audio, a round video is a video', () => {
+  const m = (message) => mediaOf({ message });
+  assert.equal(m({ audioMessage: { ptt: true, seconds: 7 } }), '[voice note]');
+  assert.equal(m({ audioMessage: { ptt: false, seconds: 7 } }), '[audio]');
+  assert.equal(m({ audioMessage: {} }), '[audio]');
+  assert.equal(m({ imageMessage: { caption: 'the view' } }), '[image]');
+  assert.equal(m({ videoMessage: {} }), '[video]');
+  assert.equal(m({ ptvMessage: {} }), '[video]');
+  assert.equal(m({ documentMessage: { fileName: 'Brochure BONA-W014.pdf' } }), '[document: Brochure BONA-W014.pdf]');
+  assert.equal(m({ documentMessage: {} }), '[document]');
+  assert.equal(m({ documentMessage: { fileName: 42 } }), '[document]');
+  assert.equal(m({ locationMessage: { degreesLatitude: 21.5, degreesLongitude: 39.2 } }), '[location]');
+  assert.equal(m({ liveLocationMessage: {} }), '[location]');
+  assert.equal(m({ contactMessage: { displayName: 'x' } }), '[contact]');
+  assert.equal(m({ contactsArrayMessage: { contacts: [] } }), '[contact]');
+  assert.equal(m({ stickerMessage: {} }), '[sticker]');
+  assert.equal(m({ viewOnceMessageV2: { message: { imageMessage: {} } } }), '[image]');
+  assert.equal(m({ conversation: 'hello' }), null);
+  assert.equal(m({ extendedTextMessage: { text: 'hello' } }), null);
+  assert.equal(m({ someFutureMessage: {} }), null, 'unknown kinds are left to the caller ([message])');
+  assert.equal(mediaOf({}), null);
+  assert.equal(mediaOf(null), null);
+});
+
+test('a document name loses control and bidi characters, is capped at 120 code points, and is found inside wrappers', () => {
+  const doc = (fileName) => ({ documentMessage: { fileName, caption: 'the plan' } });
+  // ephemeral (disappearing messages) around documentWithCaption around the document
+  const wrapped = (fileName) => ({ message: { ephemeralMessage: { message: { documentWithCaptionMessage: { message: doc(fileName) } } } } });
+
+  const spoof = 'Villa\u202Efdp.exe  \t plan\u0000.pdf';
+  assert.equal(mediaOf(wrapped(spoof)), '[document: Villafdp.exe plan.pdf]');
+  const arabic = '\u2067مخطط\u2069 \u200Fالفيلا\u061C\u202A.pdf\u202C\n';
+  assert.equal(mediaOf(wrapped(arabic)), '[document: مخطط الفيلا.pdf]');
+  assert.equal(mediaOf({ message: doc('floor\tplan\nv2.pdf') }), '[document: floor plan v2.pdf]', 'a tab or line break still separates words');
+  assert.equal(mediaOf(wrapped('\u202E\u0007 \u2066 ')), '[document]', 'nothing usable left');
+
+  const long = '📄'.repeat(50) + 'a'.repeat(150);
+  assert.equal(Array.from(long).length, 200);
+  const capped = '📄'.repeat(50) + 'a'.repeat(70);
+  assert.equal(mediaOf({ message: doc(long) }), `[document: ${capped}]`);
+  assert.equal(Array.from(normaliseRecord({ key: { id: 'D1' }, message: doc(long) }).fileName).length, 120);
+});
+
+test('reactions, deletes and edits, poll votes and key-distribution records are noise; a message is not', () => {
+  const n = (message, messageType) => isNoise({ message, messageType });
+  assert.equal(n({ reactionMessage: { text: '👍', key: { id: 'X' } } }), true);
+  assert.equal(n({ protocolMessage: { type: 0, key: { id: 'X' } } }), true, 'a delete for everyone');
+  assert.equal(n({ protocolMessage: { type: 14, editedMessage: { conversation: 'fixed' } } }), true, 'an edit');
+  assert.equal(n({ editedMessage: { message: { protocolMessage: { type: 14 } } } }), true, 'an edit, wrapped');
+  assert.equal(n({ pollUpdateMessage: { vote: {} } }), true);
+  assert.equal(n({ ephemeralMessage: { message: { reactionMessage: { text: '❤' } } } }), true);
+  assert.equal(n({ senderKeyDistributionMessage: { groupId: 'g' }, messageContextInfo: {} }), true, 'key distribution only');
+  assert.equal(n({ senderKeyDistributionMessage: { groupId: 'g' } }), true);
+  assert.equal(n({ messageContextInfo: { deviceListMetadata: {} } }), true, 'device metadata only');
+  for (const type of ['reactionMessage', 'protocolMessage', 'pollUpdateMessage']) {
+    assert.equal(n(undefined, type), true, `${type} by messageType alone`);
+  }
+
+  assert.equal(n({ conversation: 'hello', messageContextInfo: {} }, 'conversation'), false);
+  assert.equal(n({ extendedTextMessage: { text: 'x' }, senderKeyDistributionMessage: {} }), false, 'a real message riding with a key');
+  assert.equal(n({ imageMessage: {} }, 'imageMessage'), false);
+  assert.equal(n({ someFutureMessage: {} }), false, 'an unknown kind shows as [message], never vanishes');
+  assert.equal(n({}), false, 'no body at all may be a message the phone could not decrypt');
+  assert.equal(n(null), false);
+});
+
+test('normaliseRecord carries the placeholder, the cleaned file name and the noise flag', () => {
+  const voice = normaliseRecord(textRecord({ messageType: 'audioMessage', message: { audioMessage: { ptt: true }, messageContextInfo: {} } }));
+  assert.equal(voice.media, '[voice note]');
+  assert.equal(voice.text, '');
+  assert.equal(voice.fileName, null);
+  assert.equal(voice.noise, false);
+
+  const brochure = normaliseRecord(textRecord({
+    messageType: 'documentWithCaptionMessage',
+    message: { documentWithCaptionMessage: { message: { documentMessage: { fileName: 'BONA-W014\u202E.pdf', caption: 'as promised' } } } },
+  }));
+  assert.equal(brochure.media, '[document: BONA-W014.pdf]');
+  assert.equal(brochure.fileName, 'BONA-W014.pdf');
+  assert.equal(brochure.text, 'as promised');
+  assert.equal(brochure.noise, false);
+
+  const reaction = normaliseRecord(textRecord({ messageType: 'reactionMessage', message: { reactionMessage: { text: '👍' } } }));
+  assert.equal(reaction.noise, true);
+  assert.equal(reaction.media, null);
+  assert.equal(reaction.fileName, null);
+});
+```
+
+- [ ] **Step 2: Run to see it fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/evolution.test.mjs`
+Expected: FAIL — the whole file fails to load with `SyntaxError: The requested module '../lib/evolution.mjs' does not provide an export named 'MAX_SPLIT_DEPTH'` (none of `MAX_SPLIT_DEPTH`, `findMessagesPage`, `readWindow`, `mediaOf`, `isNoise` exists yet).
+
+- [ ] **Step 3: Implement** — seven edits to `services/api/lib/evolution.mjs`.
+
+**3a.** The module header: say who reads what now, and where sends go. Replace:
+
+```js
+ * Evolution API 2.3.7 (Baileys) — the READ half, for the WhatsApp poller.
+ *
+ * IMPORTANT: the instance this talks to (`abdulaziz-personal`) is the owner's
+ * *personal* WhatsApp and is already consumed by another agent. This module only ever
+ * calls `POST /chat/findMessages/{instance}`. It never sets a webhook, a websocket or
+ * a rabbitmq consumer — doing so would steal the other agent's events — and it never
+ * sends: the one outbound message the API service writes goes through `lib/wa.mjs`.
+```
+
+with:
+
+```js
+ * Evolution API 2.3.7 (Baileys) — the READ half, for the WhatsApp poller and the Bona inbox.
+ *
+ * IMPORTANT: the instance this talks to (`abdulaziz-personal`) is the owner's
+ * *personal* WhatsApp and is already consumed by another agent. This module only ever
+ * calls `POST /chat/findMessages/{instance}`. It never sets a webhook, a websocket or
+ * a rabbitmq consumer — doing so would steal the other agent's events — and it never
+ * sends: what the API service sends goes through `lib/wa-send.mjs` (login codes and,
+ * from Phase 2, the team's replies) and `lib/wa.mjs` (the owner's note to himself).
+ *
+ * It asks two kinds of question, both through that one read-only route:
+ *   - a time window across every chat (`readWindow`), for the poller;
+ *   - one chat (`findMessagesPage` with `where.key.remoteJid` or `where.key.remoteJidAlt`),
+ *     for the Bona inbox: a joining chat's history, and the refresh when a thread is
+ *     opened (lib/inbox/backfill.mjs). A privacy-mode chat is stored under two jids —
+ *     what the client sends and what the owner types under the lid, what the API sent
+ *     to a phone number under the phone jid — so the inbox asks for both.
+ * Reading is not keeping: the window read sees every chat on the number, and only the
+ * callers decide what is stored (the inbox keeps chats in the Bona inbox, nothing else).
+```
+
+**3b.** The quirks list: the time filter works in whole seconds, the per-chat filter, the stated size. Replace:
+
+```js
+ *   - the `messageTimestamp` filter applies only when BOTH `gte` and `lte` are given.
+```
+
+with:
+
+```js
+ *   - the `messageTimestamp` filter applies only when BOTH `gte` and `lte` are given, and
+ *     it compares whole seconds: both ISO bounds are cut down to the second, both inclusive.
+ *   - `where.key.remoteJid` and `where.key.remoteJidAlt` narrow a read to one chat and
+ *     combine with the time filter (verified live 2026-09-28).
+ *   - the boxed answer states the size of everything the filter matched, not just this
+ *     page (`total`, `pages`), so a reader can tell a complete read from a cut-off one.
+```
+
+**3c.** The split depth, after `PAGE_SIZE`. Replace:
+
+```js
+/** `offset` in the request body: how many records one page holds. */
+export const PAGE_SIZE = 100;
+```
+
+with:
+
+```js
+/** `offset` in the request body: how many records one page holds. */
+export const PAGE_SIZE = 100;
+/**
+ * How many times `readWindow` may halve a window that holds more than one read can reach:
+ * 4 levels = at most 16 pieces of `MAX_PAGES × PAGE_SIZE`, about 8,000 messages.
+ */
+export const MAX_SPLIT_DEPTH = 4;
+```
+
+**3d.** `mediaOf`, `isNoise` and the file-name cleaner go right above `normaliseRecord`, and the typedef gains the three new fields. Replace:
+
+```js
+/**
+ * One Evolution record, flattened to what the poller reasons about.
+ * @typedef {{ id: string|null, jid: string|null, jidAlt: string|null, fromMe: boolean,
+ *             ts: number|null, text: string, pushName: string|null,
+ *             contextInfo: object|null, messageType: string|null }} NormalisedRecord
+ */
+export function normaliseRecord(record) {
+```
+
+with:
+
+```js
+/**
+ * Control characters and the bidi overrides, isolates and marks. A file name is chosen by
+ * whoever sent the file: a right-to-left override can make `fdp.exe` read as `exe.pdf`,
+ * and escaping for HTML does nothing about that, so they go before the name is shown.
+ */
+const CONTROL_OR_BIDI_RE = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+/** Longest document name kept, in code points (an emoji is one, not two). */
+const MAX_FILE_NAME = 120;
+
+/** A sender-chosen file name made safe to show: `''` when nothing usable is left. */
+function cleanFileName(name) {
+  if (typeof name !== 'string') return '';
+  // Whitespace first, so a tab or a line break between two words leaves a space, not a join.
+  const flat = name.replace(/\s+/g, ' ').replace(CONTROL_OR_BIDI_RE, '').replace(/\s+/g, ' ').trim();
+  return Array.from(flat).slice(0, MAX_FILE_NAME).join('').trim();
+}
+
+/**
+ * What stands in for a media message in a transcript (2026-09-27 design §4.2): the kind
+ * only, never the file. A caption, when there is one, is the record's `text`. `null` for a
+ * text message and for kinds not listed here (the inbox shows those as `[message]`).
+ * @returns {string|null}
+ */
+export function mediaOf(record) {
+  const m = unwrapMessage(record?.message);
+  if (!m || typeof m !== 'object') return null;
+  // A voice note is an audioMessage with `ptt` set; staff answer it differently from a file.
+  if (m.audioMessage) return m.audioMessage.ptt ? '[voice note]' : '[audio]';
+  if (m.imageMessage) return '[image]';
+  // ptvMessage is the round "video note".
+  if (m.videoMessage || m.ptvMessage) return '[video]';
+  if (m.documentMessage) {
+    const name = cleanFileName(m.documentMessage.fileName);
+    return name ? `[document: ${name}]` : '[document]';
+  }
+  if (m.locationMessage || m.liveLocationMessage) return '[location]';
+  if (m.contactMessage || m.contactsArrayMessage) return '[contact]';
+  if (m.stickerMessage) return '[sticker]';
+  return null;
+}
+
+/** Record kinds that change or decorate another message instead of being one. */
+const NOISE_KINDS = new Set(['protocolMessage', 'reactionMessage', 'pollUpdateMessage']);
+/** Parts that ride along with a message and never carry anything a person wrote. */
+const ENVELOPE_KEYS = new Set(['messageContextInfo', 'senderKeyDistributionMessage']);
+
+/**
+ * True for a record that is not a message of its own and must never become a bubble:
+ * a reaction, a protocol message (a delete, an edit), a poll vote, or a record that is
+ * only encryption/device envelope. A record with no message body at all is NOT noise —
+ * it may be a client message the phone could not decrypt, so it shows as `[message]`
+ * rather than vanishing (design §4.3, no silent loss).
+ */
+export function isNoise(record) {
+  if (NOISE_KINDS.has(record?.messageType)) return true;
+  const m = unwrapMessage(record?.message);
+  if (!m || typeof m !== 'object') return false;
+  const keys = Object.keys(m);
+  if (keys.some((k) => NOISE_KINDS.has(k))) return true;
+  return keys.length > 0 && keys.every((k) => ENVELOPE_KEYS.has(k));
+}
+
+/**
+ * One Evolution record, flattened to what the poller and the inbox reason about.
+ * `media` is `mediaOf`'s placeholder, `fileName` a document's cleaned name (null for
+ * anything else), `noise` is `isNoise`.
+ * @typedef {{ id: string|null, jid: string|null, jidAlt: string|null, fromMe: boolean,
+ *             ts: number|null, text: string, pushName: string|null,
+ *             contextInfo: object|null, messageType: string|null,
+ *             media: string|null, fileName: string|null, noise: boolean }} NormalisedRecord
+ */
+export function normaliseRecord(record) {
+```
+
+**3e.** The end of `normaliseRecord`. Replace:
+
+```js
+    messageType: typeof record?.messageType === 'string' ? record.messageType : null,
+  };
+}
+```
+
+with:
+
+```js
+    messageType: typeof record?.messageType === 'string' ? record.messageType : null,
+    media: mediaOf(record),
+    fileName: cleanFileName(unwrapMessage(record?.message)?.documentMessage?.fileName) || null,
+    noise: isNoise(record),
+  };
+}
+```
+
+**3f.** `findMessagesWindow` becomes a wrapper around the new `findMessagesPage` (same request, same errors, any `where`). Replace the whole of `findMessagesWindow`, doc comment included:
+
+```js
+/**
+ * One page of the messages sent or received in a time window, across every chat.
+ *
+ * The `messageTimestamp` filter only bites when both bounds are present, so both are
+ * required here; `fromMe` is deliberately not sent, because the server ignores it.
+ *
+ * @param {{ baseUrl: string, apiKey: string, instance: string,
+ *           gte: number|string|Date, lte: number|string|Date,
+ *           page?: number, offset?: number,
+ *           fetchImpl?: typeof globalThis.fetch, timeoutMs?: number }} o
+ * @returns {Promise<{ records: NormalisedRecord[], raw: any }>}
+ */
+export async function findMessagesWindow({
+  baseUrl, apiKey, instance, gte, lte, page = 1, offset = PAGE_SIZE,
+  fetchImpl = globalThis.fetch, timeoutMs = 10_000,
+} = {}) {
+  if (!baseUrl) throw new TypeError('evolution: baseUrl required');
+  if (!instance) throw new TypeError('evolution: instance required');
+  const root = String(baseUrl).replace(/\/+$/, '');
+  const route = `/chat/findMessages/${encodeURIComponent(instance)}`;
+  const body = { where: { messageTimestamp: { gte: toIso(gte), lte: toIso(lte) } }, page, offset };
+
+  let res;
+  try {
+    res = await fetchImpl(`${root}${route}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: apiKey ?? '' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    throw new EvolutionError(`POST ${route} failed: ${err?.name === 'TimeoutError' || err?.name === 'AbortError' ? 'timeout' : 'network'}`, 0, null);
+  }
+  const text = typeof res.text === 'function' ? await res.text().catch(() => '') : '';
+  let json = null;
+  try { json = text ? JSON.parse(text) : null; } catch { json = text; }
+  if (!res.ok) throw new EvolutionError(`POST ${route} -> HTTP ${res.status}`, res.status, json);
+  return { records: recordsOf(json).map(normaliseRecord), raw: json };
+}
+```
+
+with:
+
+```js
+/** A size Evolution states about the whole filtered set, or null when it did not state one. */
+const countOf = (value) => (Number.isInteger(value) && value >= 0 ? value : null);
+
+/**
+ * One page of the messages matching `where`, newest first.
+ *
+ * `where` goes to Evolution as given: `{ messageTimestamp: { gte, lte } }` (ISO strings —
+ * both, or the filter is ignored) for a window across every chat, `{ key: { remoteJid } }`
+ * or `{ key: { remoteJidAlt } }` for one chat, or a chat and a window together. An empty
+ * filter is refused: it would page through every chat on the owner's personal WhatsApp.
+ * `fromMe` is never worth sending — the server ignores it.
+ *
+ * `total` and `pages` describe everything the filter matched, not this page, when the
+ * answer is boxed; both are null for a bare array, and the caller then cannot tell a
+ * complete read from a cut-off one.
+ *
+ * @param {{ baseUrl: string, apiKey: string, instance: string, where: object,
+ *           page?: number, offset?: number,
+ *           fetchImpl?: typeof globalThis.fetch, timeoutMs?: number }} o
+ * @returns {Promise<{ records: NormalisedRecord[], raw: any, total: number|null, pages: number|null }>}
+ */
+export async function findMessagesPage({
+  baseUrl, apiKey, instance, where, page = 1, offset = PAGE_SIZE,
+  fetchImpl = globalThis.fetch, timeoutMs = 10_000,
+} = {}) {
+  if (!baseUrl) throw new TypeError('evolution: baseUrl required');
+  if (!instance) throw new TypeError('evolution: instance required');
+  if (!where || typeof where !== 'object' || Array.isArray(where) || Object.keys(where).length === 0) {
+    throw new TypeError('evolution: a where filter is required');
+  }
+  const root = String(baseUrl).replace(/\/+$/, '');
+  const route = `/chat/findMessages/${encodeURIComponent(instance)}`;
+  const body = { where, page, offset };
+
+  let res;
+  try {
+    res = await fetchImpl(`${root}${route}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: apiKey ?? '' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    throw new EvolutionError(`POST ${route} failed: ${err?.name === 'TimeoutError' || err?.name === 'AbortError' ? 'timeout' : 'network'}`, 0, null);
+  }
+  const text = typeof res.text === 'function' ? await res.text().catch(() => '') : '';
+  let json = null;
+  try { json = text ? JSON.parse(text) : null; } catch { json = text; }
+  if (!res.ok) throw new EvolutionError(`POST ${route} -> HTTP ${res.status}`, res.status, json);
+  return {
+    records: recordsOf(json).map(normaliseRecord),
+    raw: json,
+    total: countOf(json?.messages?.total),
+    pages: countOf(json?.messages?.pages),
+  };
+}
+
+/**
+ * One page of the messages sent or received in a time window, across every chat: the
+ * poller's question, as `findMessagesPage` with the time filter filled in.
+ *
+ * The `messageTimestamp` filter only bites when both bounds are present, so both are
+ * required here; `fromMe` is deliberately not sent, because the server ignores it.
+ *
+ * @param {{ baseUrl: string, apiKey: string, instance: string,
+ *           gte: number|string|Date, lte: number|string|Date,
+ *           page?: number, offset?: number,
+ *           fetchImpl?: typeof globalThis.fetch, timeoutMs?: number }} o
+ * @returns {Promise<{ records: NormalisedRecord[], raw: any, total: number|null, pages: number|null }>}
+ */
+export async function findMessagesWindow({ gte, lte, ...opts } = {}) {
+  return findMessagesPage({ ...opts, where: { messageTimestamp: { gte: toIso(gte), lte: toIso(lte) } } });
+}
+```
+
+**3g.** `readWindow` goes after `fetchWindow` (which stays as it is), at the end of the file. Replace the last lines of `fetchWindow`:
+
+```js
+    if (page === maxPages) truncated = true;
+  }
+  return { records, pages, truncated };
+}
+```
+
+with:
+
+```js
+    if (page === maxPages) truncated = true;
+  }
+  return { records, pages, truncated };
+}
+
+/**
+ * Every message in a time window across every chat, without silent loss (2026-09-27
+ * design §4.3).
+ *
+ * Records come back NEWEST first and one read stops at `maxPages`, so paging alone cannot
+ * reach the older messages of a window that holds more than `maxPages × offset` — asking
+ * again returns the same newest pages. The boxed answer says how many the window holds
+ * (`total`), so a window that is too big is cut in two on a whole second and each half is
+ * read the same way, the older half first, down to `maxDepth` levels. Evolution compares
+ * whole seconds, so the halves `[gte, mid - 1 ms]` and `[mid, lte]` neither overlap nor
+ * leave a second out.
+ *
+ * A message that arrives while a piece is being paged pushes that piece's older records one
+ * place down: the next page repeats a record, and the oldest slides past the last page the
+ * first answer stated. So ids are de-duplicated, a piece measures the records it KEPT — not
+ * the rows its pages held — against the `total` its first answer stated, and it reads on
+ * past the stated pages while that count is short and the pages still come back full. The
+ * newcomer is stamped about now, the newest thing in the window, so the caller's next
+ * window reaches it.
+ *
+ * Only a piece that is still too big when it cannot be cut again — at `maxDepth`, or under
+ * two seconds wide with no whole second left to cut at — is read partially: its newest
+ * `maxPages` pages, `truncated` set, and `missing` saying how many were left unread. A piece
+ * whose kept count is still short when the page cap comes first is reported the same way.
+ * The caller logs that and moves on; holding its cursor there would re-read the same newest
+ * pages for ever.
+ *
+ * A bare-array answer states no size. That piece falls back to paging until a short page,
+ * exactly like `fetchWindow`; a cut-off there is `truncated`, and adds nothing to `missing`
+ * because nobody can count it.
+ *
+ * Within a piece the records keep Evolution's newest-first order (the poller sorts with
+ * `oldestFirst`); the pieces come oldest first. A failed request throws as it is — nothing
+ * is half-returned — so the caller keeps its cursor and asks again next time.
+ *
+ * @returns {Promise<{ records: NormalisedRecord[], pieces: number, truncated: boolean, missing: number }>}
+ */
+export async function readWindow({
+  gte, lte, maxPages = MAX_PAGES, offset = PAGE_SIZE, maxDepth = MAX_SPLIT_DEPTH, ...opts
+} = {}) {
+  const gteMs = toMs(gte);
+  const lteMs = toMs(lte);
+  if (gteMs === null || lteMs === null) throw new TypeError('readWindow needs both gte and lte');
+  const records = [];
+  const seen = new Set();
+  let pieces = 0;
+  let truncated = false;
+  let missing = 0;
+
+  /** Adds the records not kept yet, in order; returns how many that was. */
+  const keep = (batch) => {
+    let added = 0;
+    for (const rec of batch) {
+      // A record with no id cannot be matched against anything, so it is kept as it is.
+      if (rec.id) {
+        if (seen.has(rec.id)) continue;
+        seen.add(rec.id);
+      }
+      records.push(rec);
+      added += 1;
+    }
+    return added;
+  };
+  const readPage = (from, to, page) => findMessagesPage({
+    ...opts, where: { messageTimestamp: { gte: toIso(from), lte: toIso(to) } }, page, offset,
+  });
+
+  async function read(from, to, depth) {
+    const first = await readPage(from, to, 1);
+    if (first.total === null) {
+      pieces += 1;
+      keep(first.records);
+      let last = first.records.length;
+      for (let page = 2; page <= maxPages && last >= offset; page += 1) {
+        const next = await readPage(from, to, page);
+        keep(next.records);
+        last = next.records.length;
+      }
+      if (last >= offset) truncated = true;
+      return;
+    }
+    const cap = maxPages * offset;
+    if (first.total > cap && to - from >= 2000 && depth < maxDepth) {
+      const mid = Math.floor((from + to) / 2000) * 1000;
+      await read(from, mid - 1, depth + 1);
+      await read(mid, to, depth + 1);
+      return;
+    }
+    pieces += 1;
+    // Kept, not rows on the pages: a repeat that a late arrival pushed down must not stand
+    // in for the record it pushed past the last stated page.
+    let kept = keep(first.records);
+    let last = first.records.length;
+    const stated = Math.min(first.pages ?? Math.ceil(first.total / offset), maxPages);
+    for (let page = 2; page <= maxPages && (page <= stated || (kept < first.total && last >= offset)); page += 1) {
+      const next = await readPage(from, to, page);
+      kept += keep(next.records);
+      last = next.records.length;
+    }
+    // Over the cap at the deepest level, or short when the page cap came first.
+    if (kept < first.total) {
+      truncated = true;
+      missing += first.total - kept;
+    }
+  }
+
+  await read(gteMs, lteMs, 0);
+  return { records, pieces, truncated, missing };
+}
+```
+
+- [ ] **Step 4: Run the task's tests**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/evolution.test.mjs`
+Expected: PASS — 29 tests (13 existing, 16 new), 0 fail.
+
+- [ ] **Step 5: Run the full suite**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/*.test.mjs`
+Expected: all pass, 0 fail — 16 more tests than after Task 1 (622 + Task 1's new tests + 16). Nothing outside `evolution.test.mjs` compares a whole normalised record, and the poller still calls `fetchWindow`, so no other test changes.
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd /home/azoz778/bona-wt/team-inbox && git add services/api/lib/evolution.mjs services/api/test/evolution.test.mjs
+git commit -m "evolution: per-chat pages, whole-window reads without silent loss, media placeholders, noise
+
+findMessagesPage takes any where filter and returns Evolution's total/pages;
+readWindow splits a window too big for one read on whole seconds (depth 4)
+and reports what it could not reach; mediaOf/isNoise feed the inbox.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 3: Eligibility rules (`lib/inbox/eligibility.mjs`)
+
+**Files:**
+- Create: `services/api/lib/inbox/eligibility.mjs`
+- Test: `services/api/test/inbox-eligibility.test.mjs`
+
+Pure rules, no I/O: which client message is certain or a guess, which owner message joins a chat (D12), and the state a chat moves to after an inbound message. The poller calls them (a later task of this phase); nothing here touches the database. `parseRef` (lib/attribution.mjs) is the only import, so Ref lines are read exactly as the poller's `ref` rule reads them.
+
+- [ ] **Step 1: Write the failing tests** — create `services/api/test/inbox-eligibility.test.mjs`:
+
+```js
+/**
+ * Which chats the Bona inbox takes (design §4.1): only what is certain joins by itself, a
+ * guess waits for the owner, the owner's own messages count only when they carry
+ * something that can only be Bona, and nothing a message says ever moves a chat out of
+ * `in` or `out`. Pure rules, so every case is a table row.
+ */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE, INBOX_STATES,
+  inboundSignal, ownerOutboundJoins, nextInboxState,
+} from '../lib/inbox/eligibility.mjs';
+
+/* ---------------- shared patterns ---------------- */
+
+test('the states and patterns are what the store and the poller rely on', () => {
+  assert.deepEqual(INBOX_STATES, ['in', 'unsure', 'out']);
+  for (const re of [LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE]) {
+    assert.ok(re instanceof RegExp);
+    assert.equal(re.global, false, `${re} has no /g, so .test() never carries a position over`);
+    assert.equal(re.sticky, false, `${re} has no /y`);
+  }
+});
+
+/* ---------------- a client's message ---------------- */
+
+test('a client message is certain on a Ref code, ad context or a listing id', () => {
+  for (const [text, hasAdMeta] of [
+    ['Hello\nRef BONA-W003 · K7Q2XR', false],
+    ['ref bona - k7q2xr', false],
+    ['Ref K7Q2X', false],
+    ['مرحبا، مهتم بالفيلا\nRef BONA-005: ABCDEF', false],
+    ['', true],
+    ['Hi, is this still available?', true],
+    ['Is BONA-W012 still available?', false],
+    ['bona-w012 price?', false],
+    ['السلام عليكم، أبغى تفاصيل BONA-005', false],
+    ['https://bona-real-estate.com/properties/bona-w003/', false],
+  ]) {
+    assert.equal(inboundSignal({ text, hasAdMeta }), 'certain', `${JSON.stringify(text)} ad=${hasAdMeta}`);
+  }
+});
+
+test('the word bona on its own is only a guess', () => {
+  for (const text of ['I saw Bona on Instagram', 'BONA', 'bona?', 'بونا', 'شفت إعلان بونا', 'BONA-W0031']) {
+    assert.equal(inboundSignal({ text }), 'unsure', text);
+  }
+});
+
+test('anything else says nothing, and text that is not a string reads as empty', () => {
+  for (const text of ['Hello', 'Bonanza', 'kabona', 'Refund 12345', 'السلام عليكم', '']) {
+    assert.equal(inboundSignal({ text }), null, JSON.stringify(text));
+  }
+  assert.equal(inboundSignal({ text: 'Hello', hasAdMeta: false }), null);
+  assert.equal(inboundSignal({ text: null }), null);
+  assert.equal(inboundSignal({ text: 42 }), null);
+  assert.equal(inboundSignal({ text: { toString: () => 'BONA-W003' } }), null, 'never coerced');
+  assert.equal(inboundSignal({}), null);
+  assert.equal(inboundSignal(), null);
+});
+
+/* ---------------- a message the owner sends ---------------- */
+
+test('the owner joins a chat by sending a Bona link or a listing id', () => {
+  for (const text of [
+    'https://bona-real-estate.com/properties/bona-w003/',
+    'bona-real-estate.com',
+    'www.bona-real-estate.com/ar/',
+    'Have a look: https://www.bona-real-estate.com/villas?utm_source=wa',
+    'Visit bona-real-estate.com.',
+    'HTTPS://BONA-REAL-ESTATE.COM/EN/',
+    'http://bona.azoz.uk/properties/',
+    'bona.azoz.uk',
+    'تفضل الرابط: https://bona-real-estate.com/ar/properties/',
+    'الرابطbona-real-estate.com',
+    'Details for BONA-W003 attached',
+    'رقم العقار BONA-005',
+  ]) {
+    assert.equal(ownerOutboundJoins({ text }), true, text);
+  }
+});
+
+test('lookalike links and plain mentions of bona do not join a chat', () => {
+  for (const text of [
+    'notbona-real-estate.com',
+    'https://notbona-real-estate.com/x',
+    'bona-real-estate.company',
+    'bona-real-estate.co',
+    'bona-realestate.com',
+    'mybona.azoz.uk',
+    'bona',
+    'Bona villa is ready, call me',
+    'بونا',
+    'BONA-W0031',
+    'Hello',
+    '',
+  ]) {
+    assert.equal(ownerOutboundJoins({ text }), false, JSON.stringify(text));
+  }
+});
+
+test('a document joins when its file name or caption says Bona or a listing id', () => {
+  const doc = (fileName, text = null) => ({ text, fileName, media: fileName ? `[document: ${fileName}]` : '[document]' });
+  for (const rec of [
+    doc('Bona_Villa.pdf'),
+    doc('Villa-Bona.pdf'),
+    doc('BONA brochure.pdf'),
+    doc('BONA-W003.pdf'),
+    doc('brochure bona-005 v2.pdf'),
+    doc('بونا - فيلا الشاطئ.pdf'),
+    doc('villa.pdf', 'Brochure from Bona'),
+    doc('villa.pdf', 'بروشور بونا'),
+    doc(null, 'bona'),
+  ]) {
+    assert.equal(ownerOutboundJoins(rec), true, `${rec.fileName} / ${rec.text}`);
+  }
+  for (const rec of [
+    doc('Bonanza.pdf'),
+    doc('Kabona_offer.pdf'),
+    doc('TK_Villa.pdf', 'here you go'),
+    doc(null),
+  ]) {
+    assert.equal(ownerOutboundJoins(rec), false, `${rec.fileName} / ${rec.text}`);
+  }
+});
+
+test('the word bona counts only on a document, never on plain text, a photo or a voice note', () => {
+  assert.equal(ownerOutboundJoins({ text: 'bona', media: null }), false);
+  assert.equal(ownerOutboundJoins({ text: 'bona', media: '[image]' }), false);
+  assert.equal(ownerOutboundJoins({ text: 'Bona villa', media: '[voice note]' }), false);
+  assert.equal(ownerOutboundJoins({ text: 'bona.azoz.uk/villas', media: '[image]' }), true, 'a link in a caption still counts');
+  assert.equal(ownerOutboundJoins({ text: null, fileName: null, media: null }), false);
+  assert.equal(ownerOutboundJoins({ text: null, fileName: 'Bona_Villa.pdf', media: '[document: Bona_Villa.pdf]' }), true, 'a document without a caption');
+  assert.equal(ownerOutboundJoins({}), false);
+  assert.equal(ownerOutboundJoins(), false);
+});
+
+/* ---------------- the next state ---------------- */
+
+const SIGNALS = [null, 'unsure', 'certain'];
+const METHODS = [null, 'ref', 'phone', 'ad_meta', 'keyword', 'time_window', 'concierge', 'form'];
+const OPEN = [null, undefined, 'unsure'];
+
+test('in and out never move on a message, whatever it says', () => {
+  for (const current of ['in', 'out']) {
+    for (const signal of SIGNALS) {
+      for (const method of METHODS) assert.equal(nextInboxState(current, { signal, method }), current, `${current} ${signal} ${method}`);
+    }
+    assert.equal(nextInboxState(current), current);
+  }
+  assert.equal(nextInboxState('out', { signal: 'certain', method: 'ref' }), 'out', '"not a client" is never undone by a Ref code');
+  assert.equal(nextInboxState('in', { signal: 'unsure', method: 'keyword' }), 'in', 'a guess never demotes a certain chat');
+});
+
+test('an undecided or unsure chat becomes in on anything certain, whatever rule matched it', () => {
+  for (const current of OPEN) {
+    for (const method of METHODS) assert.equal(nextInboxState(current, { signal: 'certain', method }), 'in', `${current} ${method}`);
+  }
+});
+
+test('a guess — the word, or a keyword or click-window match — makes it unsure', () => {
+  for (const current of OPEN) {
+    for (const method of METHODS) assert.equal(nextInboxState(current, { signal: 'unsure', method }), 'unsure', `${current} unsure ${method}`);
+    for (const method of ['keyword', 'time_window']) assert.equal(nextInboxState(current, { signal: null, method }), 'unsure', `${current} ${method}`);
+  }
+});
+
+test('with no signal and no guessing rule the state is left as it was', () => {
+  for (const method of [null, 'ref', 'phone', 'ad_meta', 'concierge', 'form']) {
+    assert.equal(nextInboxState(null, { method }), null, `null ${method}`);
+    assert.equal(nextInboxState(undefined, { method }), null, `undefined ${method}`);
+    assert.equal(nextInboxState('unsure', { method }), 'unsure', `unsure ${method}`);
+  }
+  assert.equal(nextInboxState(null), null);
+  assert.equal(nextInboxState(undefined), null);
+  assert.equal(nextInboxState('unsure'), 'unsure');
+});
+```
+
+- [ ] **Step 2: Run to see it fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/inbox-eligibility.test.mjs`
+Expected: FAIL — `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '…/services/api/lib/inbox/eligibility.mjs'` (`ℹ fail 1`): the folder `lib/inbox/` and the module do not exist yet.
+
+- [ ] **Step 3: Implement** — create `services/api/lib/inbox/eligibility.mjs`:
+
+```js
+/**
+ * Which WhatsApp chats belong in the Bona inbox (2026-09-27 design §4.1, D9 and D12).
+ *
+ * The team reads and answers these chats from the dashboard, and they arrive on the
+ * owner's personal number, which his TK clients and private conversations share. So a
+ * chat joins only on something that can only be about Bona:
+ *
+ *   - a client's message carrying a site Ref code, click-to-WhatsApp ad context or a
+ *     listing id (`BONA-W003`) is certain;
+ *   - a client's message that only says "bona" / "بونا" is a guess. It goes to the
+ *     owner's Unsure list, never into the inbox by itself. The other guess, the ±15-min
+ *     click window, arrives here as the lead's match method (`time_window`);
+ *   - a message the OWNER sends joins a chat only when it carries a Bona site link, a
+ *     listing id, or a document (a brochure) whose file name or caption says Bona or a
+ *     listing id. Nothing else he types counts: "bona" in a text to a TK client proves
+ *     nothing.
+ *
+ * The answer is stored on the lead (`leads.inbox_state`), and a message only ever moves it
+ * forward: a guess can become certain, but `in` is never demoted by a later message and
+ * `out` (the owner said "not a client") is never left automatically. Only the owner's
+ * buttons move a chat out of either (lib/inbox/store.mjs `setInboxState`).
+ *
+ * Pure functions, no I/O and no logging: the poller asks, the store records.
+ */
+import { parseRef } from '../attribution.mjs';
+
+/** A whole listing id: `BONA-W003`, `bona-005` — not `BONA-W0031`, not `XBONA-W003`. */
+export const LISTING_ID_RE = /\bBONA-W?\d{3}\b/i;
+/** Our name as a word, in either script. A guess on its own: TK and private chats say it too. */
+export const BONA_WORD_RE = /\bbona\b|بونا/i;
+/**
+ * The site (or its legacy host) as a link, with or without a scheme and `www.`. The
+ * characters either side must not carry on a host name, so `notbona-real-estate.com`
+ * and `bona-real-estate.company` are not ours. A full stop straight after is allowed:
+ * a sentence can end with the link.
+ */
+export const SITE_LINK_RE = /(?:^|[^a-z0-9.-])(?:www\.)?(?:bona-real-estate\.com|bona\.azoz\.uk)(?![a-z0-9-])/i;
+export const INBOX_STATES = ['in', 'unsure', 'out'];
+
+/**
+ * "bona" in a document's name or caption, bounded by anything that is not a letter.
+ * `\b` would miss `Bona_Villa.pdf` (`_` counts as a word character) and a letter-only
+ * bound keeps `Bonanza.pdf` out.
+ */
+const DOC_BONA_RE = /(?:^|[^a-z])bona(?:[^a-z]|$)|بونا/i;
+
+/** Anything that is not a string reads as empty: a record's text or caption may be null. */
+const str = (v) => (typeof v === 'string' ? v : '');
+
+/**
+ * What one message from a client says about the chat.
+ * @param {{ text?: unknown, hasAdMeta?: boolean }} [o]
+ * @returns {'certain'|'unsure'|null}
+ */
+export function inboundSignal({ text = '', hasAdMeta = false } = {}) {
+  const t = str(text);
+  if (parseRef(t) || hasAdMeta || LISTING_ID_RE.test(t)) return 'certain';
+  if (BONA_WORD_RE.test(t)) return 'unsure';
+  return null;
+}
+
+/**
+ * Does a message the owner sent make this a Bona chat (D12)? Takes a normalised record
+ * (lib/evolution.mjs): `text` is the body or the caption, `media` the placeholder
+ * (`[document: name]`, `[image]`, …) and `fileName` a document's cleaned name.
+ * @param {{ text?: unknown, fileName?: unknown, media?: unknown }} [o]
+ * @returns {boolean}
+ */
+export function ownerOutboundJoins({ text = '', fileName = null, media = null } = {}) {
+  const t = str(text);
+  if (SITE_LINK_RE.test(t) || LISTING_ID_RE.test(t)) return true;
+  if (!str(media).startsWith('[document')) return false;
+  const name = str(fileName);
+  return LISTING_ID_RE.test(name) || DOC_BONA_RE.test(name) || DOC_BONA_RE.test(t);
+}
+
+/**
+ * The chat's inbox state after one inbound message. `in` and `out` stay as they are; an
+ * undecided or unsure chat becomes `in` on anything certain and `unsure` on a guess (the
+ * word, or a lead the poller matched only by keyword or click window); otherwise it is
+ * left as it was.
+ * @param {'in'|'unsure'|'out'|null|undefined} current
+ * @param {{ signal?: 'certain'|'unsure'|null, method?: string|null }} [o]
+ * @returns {'in'|'unsure'|'out'|null}
+ */
+export function nextInboxState(current, { signal = null, method = null } = {}) {
+  if (current === 'out' || current === 'in') return current;
+  if (signal === 'certain') return 'in';
+  if (signal === 'unsure' || method === 'keyword' || method === 'time_window') return 'unsure';
+  return current ?? null;
+}
+```
+
+- [ ] **Step 4: Run**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/inbox-eligibility.test.mjs`
+Expected: PASS — `ℹ pass 12`, `ℹ fail 0`.
+
+- [ ] **Step 5: Full suite**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/*.test.mjs`
+Expected: `ℹ fail 0`; `ℹ pass` = the count after Task 2 plus 12 (626 + Task 2's new tests + 12).
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd /home/azoz778/bona-wt/team-inbox && git add services/api/lib/inbox/eligibility.mjs services/api/test/inbox-eligibility.test.mjs
+git commit -m "inbox: eligibility rules — what joins by itself, what is a guess, what never moves
+
+A client message is certain on a Ref code, ad context or a listing id and a
+guess on the word bona. An owner message joins a chat only with a Bona link,
+a listing id or a Bona document. in and out never move on a message.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 4: Inbox store (`lib/inbox/store.mjs`)
+
+All SQL for the Phase 2 tables (`wa_messages`, `wa_outbox`, `inbox_reads`, `wa_gaps`) and the inbox columns on `leads` (`inbox_state`, `inbox_since`, `handler_user_id`, `last_msg_ts`, `needs_human`) lives in this one module. It relies on Task 1 (schema v4, `COLUMNS.leads` taking the new columns, so `db.insertLead` can seed them) and Task 3 (`INBOX_STATES` exported from `lib/inbox/eligibility.mjs`). It creates new files only, so no existing test changes.
+
+**Files:**
+- Create: `services/api/lib/inbox/store.mjs`
+- Test: `services/api/test/inbox-store.test.mjs`
+
+- [ ] **Step 1: Write the failing tests** — create `services/api/test/inbox-store.test.mjs`:
+
+```js
+/**
+ * The inbox store: every SQL statement behind the Bona inbox — stored messages, the send
+ * outbox, read marks, unloadable-message gaps and the inbox columns on a lead. The clock
+ * is injected, so every timestamp is exact.
+ */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { openDb } from '../lib/db.mjs';
+import { createTeam } from '../lib/team.mjs';
+import {
+  createInboxStore, RETENTION_MS, MAX_STORED_TEXT, SENDER_KINDS, OUTBOX_KINDS, OUTBOX_STATUSES,
+} from '../lib/inbox/store.mjs';
+
+const NOW = 1_790_500_000_000;
+const DAY = 86_400_000;
+const JID = '966500000001@s.whatsapp.net';
+const OWNER_JID = '966593296933@s.whatsapp.net';
+
+function harness() {
+  const s = openDb(':memory:');
+  let clock = NOW;
+  const inbox = createInboxStore(s, { now: () => clock });
+  const team = createTeam(s, { now: () => clock });
+  return { s, inbox, team, tick: (ms) => { clock += ms; }, at: (t) => { clock = t; } };
+}
+
+/** A lead with only what a test needs; `over` wins. */
+const lead = (s, id, over = {}) => s.insertLead({ lead_id: id, created: NOW - DAY, updated: NOW - DAY, channel: 'whatsapp', stage: 'new', ...over });
+/** A chat in the Bona inbox. */
+const chat = (s, id, over = {}) => lead(s, id, { wa_jid: JID, inbox_state: 'in', inbox_since: NOW - DAY, ...over });
+const msg = (over = {}) => ({ key_id: 'K-1', lead_id: 'L-1', jid: JID, direction: 'in', sender_kind: 'client', text: 'hello', ts: NOW, ...over });
+const out = (over = {}) => ({ send_id: 'SND-1', lead_id: 'L-1', jid: JID, text: 'on my way', user_id: 'USR-1', sender_kind: 'staff', ...over });
+const count = (s, table) => s.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
+const row = (s, keyId) => ({ ...s.db.prepare('SELECT * FROM wa_messages WHERE key_id = ?').get(keyId) });
+
+test('the vocabularies are the ones the schema allows, and retention is five years', () => {
+  assert.deepEqual(SENDER_KINDS, ['client', 'staff', 'dana', 'owner_number']);
+  assert.deepEqual(OUTBOX_KINDS, ['staff', 'dana', 'code', 'note']);
+  assert.deepEqual(OUTBOX_STATUSES, ['pending', 'accepted', 'failed', 'uncertain']);
+  assert.equal(MAX_STORED_TEXT, 8000);
+  assert.equal(RETENTION_MS, 157_788_000_000);
+});
+
+test('upsertMessage stores a message once; seen again it is not a second row', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-1');
+  assert.deepEqual(inbox.upsertMessage(msg()), { inserted: true });
+  assert.deepEqual(row(s, 'K-1'), {
+    key_id: 'K-1', lead_id: 'L-1', jid: JID, direction: 'in', sender_kind: 'client', sender_user_id: null,
+    text: 'hello', media_type: null, ts: NOW, status: null,
+  });
+  assert.equal(s.getLead('L-1').last_msg_ts, NOW);
+  assert.deepEqual(inbox.upsertMessage(msg()), { inserted: false });
+  assert.equal(count(s, 'wa_messages'), 1);
+  s.close();
+});
+
+test('a message stored as the owner\'s number is upgraded to the staff member or Dana who sent it, never the other way', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-1');
+  inbox.upsertMessage(msg({ key_id: 'K-out', direction: 'out', sender_kind: 'owner_number', text: 'on my way' }));
+  inbox.upsertMessage(msg({ key_id: 'K-out', direction: 'out', sender_kind: 'staff', sender_user_id: 'USR-1', text: 'on my way' }));
+  assert.equal(row(s, 'K-out').sender_kind, 'staff');
+  assert.equal(row(s, 'K-out').sender_user_id, 'USR-1');
+  // A later poll that cannot find the outbox row must not demote a known sender.
+  inbox.upsertMessage(msg({ key_id: 'K-out', direction: 'out', sender_kind: 'owner_number', text: 'on my way' }));
+  assert.equal(row(s, 'K-out').sender_kind, 'staff');
+  assert.equal(row(s, 'K-out').sender_user_id, 'USR-1');
+  inbox.upsertMessage(msg({ key_id: 'K-out', direction: 'out', sender_kind: 'dana', text: 'on my way' }));
+  assert.equal(row(s, 'K-out').sender_kind, 'staff', 'only owner_number is ever upgraded');
+
+  inbox.upsertMessage(msg({ key_id: 'K-dana', direction: 'out', sender_kind: 'owner_number', text: 'Hello from Bona' }));
+  inbox.upsertMessage(msg({ key_id: 'K-dana', direction: 'out', sender_kind: 'dana', text: 'Hello from Bona' }));
+  assert.equal(row(s, 'K-dana').sender_kind, 'dana');
+  assert.equal(row(s, 'K-dana').sender_user_id, null);
+
+  inbox.upsertMessage(msg({ key_id: 'K-in' }));
+  inbox.upsertMessage(msg({ key_id: 'K-in', direction: 'out', sender_kind: 'staff', sender_user_id: 'USR-1', text: 'changed', jid: 'x@lid', ts: NOW + 5, media_type: '[image]' }));
+  assert.deepEqual(row(s, 'K-in'), {
+    key_id: 'K-in', lead_id: 'L-1', jid: JID, direction: 'in', sender_kind: 'client', sender_user_id: null,
+    text: 'hello', media_type: null, ts: NOW, status: null,
+  }, "a client's message is never anyone else's, and nothing else about it changes");
+  s.close();
+});
+
+test('status is filled in or moved on by a write that carries one, and kept by a write that does not', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-1');
+  inbox.upsertMessage(msg({ direction: 'out', sender_kind: 'owner_number' }));
+  assert.equal(row(s, 'K-1').status, null);
+  inbox.upsertMessage(msg({ direction: 'out', sender_kind: 'staff', sender_user_id: 'USR-1', status: 'sent' }));
+  assert.equal(row(s, 'K-1').status, 'sent');
+  inbox.upsertMessage(msg({ direction: 'out', sender_kind: 'owner_number' }));
+  assert.equal(row(s, 'K-1').status, 'sent');
+  inbox.upsertMessage(msg({ direction: 'out', sender_kind: 'owner_number', status: 'read' }));
+  assert.equal(row(s, 'K-1').status, 'read');
+  s.close();
+});
+
+test('the chat\'s last-message time only moves forward, and a message seen again keeps its first time', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-1');
+  inbox.upsertMessage(msg({ key_id: 'K-1', ts: NOW }));
+  inbox.upsertMessage(msg({ key_id: 'K-2', ts: NOW - 5000 }));
+  assert.equal(s.getLead('L-1').last_msg_ts, NOW, 'an older message arriving late does not move it back');
+  inbox.upsertMessage(msg({ key_id: 'K-3', ts: NOW + 5000 }));
+  assert.equal(s.getLead('L-1').last_msg_ts, NOW + 5000);
+  inbox.upsertMessage(msg({ key_id: 'K-1', ts: NOW + 99_999 }));
+  assert.equal(s.getLead('L-1').last_msg_ts, NOW + 5000);
+  assert.equal(row(s, 'K-1').ts, NOW);
+  s.close();
+});
+
+test('stored text is capped at MAX_STORED_TEXT code points, never splitting a pair; a media message may have none', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-1');
+  inbox.upsertMessage(msg({ key_id: 'K-long', text: 'a'.repeat(9000) }));
+  assert.equal(row(s, 'K-long').text, 'a'.repeat(MAX_STORED_TEXT));
+  inbox.upsertMessage(msg({ key_id: 'K-emoji', text: `${'a'.repeat(7999)}\u{1F600}b` }));
+  const kept = row(s, 'K-emoji').text;
+  assert.equal([...kept].length, MAX_STORED_TEXT);
+  assert.ok(kept.endsWith('\u{1F600}'), 'the emoji is kept whole');
+  inbox.upsertMessage(msg({ key_id: 'K-media', text: null, media_type: '[voice note]' }));
+  assert.equal(row(s, 'K-media').text, null);
+  assert.equal(row(s, 'K-media').media_type, '[voice note]');
+  s.close();
+});
+
+test('upsertMessage refuses a bad direction or sender, and a missing key, lead or time', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-1');
+  for (const bad of [
+    { direction: 'sideways' }, { sender_kind: 'lisa' }, { sender_kind: undefined },
+    { key_id: undefined }, { key_id: '' }, { lead_id: null },
+    { ts: undefined }, { ts: null }, { ts: 'soon' },
+  ]) {
+    assert.throws(() => inbox.upsertMessage(msg(bad)), RangeError, JSON.stringify(bad));
+  }
+  assert.equal(count(s, 'wa_messages'), 0);
+  assert.equal(s.getLead('L-1').last_msg_ts, null);
+  s.close();
+});
+
+test('messagesFor returns the newest N of one chat, oldest first; a tie keeps the order they were stored in', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-1');
+  chat(s, 'L-2');
+  for (const [key, ts] of [['K-3', NOW + 3000], ['K-1', NOW + 1000], ['K-5', NOW + 5000], ['K-2', NOW + 2000], ['K-4a', NOW + 4000], ['K-4b', NOW + 4000]]) {
+    inbox.upsertMessage(msg({ key_id: key, ts }));
+  }
+  inbox.upsertMessage(msg({ key_id: 'K-other', lead_id: 'L-2', ts: NOW + 9000 }));
+  assert.deepEqual(inbox.messagesFor('L-1', { limit: 3 }).map((m) => m.key_id), ['K-4a', 'K-4b', 'K-5']);
+  assert.deepEqual(inbox.messagesFor('L-1').map((m) => m.key_id), ['K-1', 'K-2', 'K-3', 'K-4a', 'K-4b', 'K-5']);
+  assert.deepEqual(inbox.messagesFor('L-nope'), []);
+  s.close();
+});
+
+test('newestTs and hasMessages look at one chat only', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-1');
+  chat(s, 'L-2');
+  assert.equal(inbox.newestTs('L-1'), null);
+  assert.equal(inbox.hasMessages('L-1'), false);
+  inbox.upsertMessage(msg({ key_id: 'K-1', ts: NOW }));
+  inbox.upsertMessage(msg({ key_id: 'K-2', ts: NOW + 700, direction: 'out', sender_kind: 'owner_number' }));
+  assert.equal(inbox.newestTs('L-1'), NOW + 700, 'either direction counts');
+  assert.equal(inbox.hasMessages('L-1'), true);
+  assert.equal(inbox.newestTs('L-2'), null);
+  assert.equal(inbox.hasMessages('L-2'), false);
+  s.close();
+});
+
+test('insertOutbox writes a pending row once; a second insert of the same send_id returns the row already there', () => {
+  const { s, inbox, tick } = harness();
+  const first = inbox.insertOutbox(out());
+  assert.equal(first.inserted, true);
+  assert.deepEqual(first.row, {
+    send_id: 'SND-1', lead_id: 'L-1', jid: JID, text: 'on my way', user_id: 'USR-1', sender_kind: 'staff',
+    status: 'pending', key_id: null, created: NOW, updated: NOW, error: null,
+  });
+  tick(1000);
+  const again = inbox.insertOutbox(out({ text: 'something else', user_id: 'USR-2' }));
+  assert.equal(again.inserted, false);
+  assert.deepEqual(again.row, first.row);
+  assert.equal(count(s, 'wa_outbox'), 1);
+  s.close();
+});
+
+test('a login-code row never stores its text, whatever the caller passes', () => {
+  const { s, inbox } = harness();
+  const { row: code } = inbox.insertOutbox({ send_id: 'SND-code', jid: '966500000002@s.whatsapp.net', text: 'Bona dashboard code: 123456 (valid 10 min)', sender_kind: 'code' });
+  assert.equal(code.text, null);
+  assert.equal(code.lead_id, null);
+  assert.equal(s.db.prepare("SELECT COUNT(*) AS n FROM wa_outbox WHERE text LIKE '%123456%'").get().n, 0);
+  s.close();
+});
+
+test('insertOutbox refuses an unknown kind or status and a missing send_id or jid', () => {
+  const { s, inbox } = harness();
+  for (const bad of [{ sender_kind: 'sms' }, { status: 'sent' }, { send_id: undefined }, { send_id: '' }, { jid: null }, { jid: '' }]) {
+    assert.throws(() => inbox.insertOutbox(out(bad)), RangeError, JSON.stringify(bad));
+  }
+  assert.equal(count(s, 'wa_outbox'), 0);
+  s.close();
+});
+
+test('getOutbox, outboxByKey and updateOutbox: a key is recorded, an error is capped, a missing field is kept', () => {
+  const { s, inbox, tick } = harness();
+  inbox.insertOutbox(out());
+  inbox.insertOutbox(out({ send_id: 'SND-2' }));
+  assert.equal(inbox.getOutbox('SND-nope'), null);
+  assert.equal(inbox.outboxByKey(null), null);
+  assert.equal(inbox.outboxByKey(''), null, 'rows still waiting for a key are not "the row for" an empty key');
+
+  tick(2000);
+  assert.equal(inbox.updateOutbox('SND-1', { status: 'accepted', key_id: 'KEY-9' }), true);
+  const accepted = inbox.getOutbox('SND-1');
+  assert.equal(accepted.status, 'accepted');
+  assert.equal(accepted.key_id, 'KEY-9');
+  assert.equal(accepted.updated, NOW + 2000);
+  assert.equal(accepted.created, NOW);
+  assert.equal(inbox.outboxByKey('KEY-9').send_id, 'SND-1');
+  assert.equal(inbox.outboxByKey('KEY-nope'), null);
+
+  assert.equal(inbox.updateOutbox('SND-2', { status: 'failed', error: 'x'.repeat(500) }), true);
+  assert.equal(inbox.getOutbox('SND-2').error.length, 200);
+  inbox.updateOutbox('SND-2', { status: 'uncertain' });
+  assert.equal(inbox.getOutbox('SND-2').error, 'x'.repeat(200), 'left out means kept');
+  assert.equal(inbox.getOutbox('SND-2').key_id, null);
+  inbox.updateOutbox('SND-2', { status: 'uncertain', error: null });
+  assert.equal(inbox.getOutbox('SND-2').error, null, 'null clears');
+
+  assert.equal(inbox.updateOutbox('SND-nope', { status: 'failed' }), false);
+  assert.throws(() => inbox.updateOutbox('SND-1', { status: 'sent' }), RangeError);
+  assert.throws(() => inbox.updateOutbox('SND-1', {}), RangeError);
+  s.close();
+});
+
+test('resolveUncertain finds the oldest unresolved send of the same lead with the same text; accepted and keyed rows never match', () => {
+  const { s, inbox, at } = harness();
+  const text = 'see you at 5';
+  at(NOW - 1000);
+  inbox.insertOutbox(out({ send_id: 'SND-accepted', text, status: 'accepted' }));
+  inbox.insertOutbox(out({ send_id: 'SND-keyed', text, status: 'uncertain' }));
+  inbox.updateOutbox('SND-keyed', { status: 'uncertain', key_id: 'KEY-7' });
+  inbox.insertOutbox(out({ send_id: 'SND-failed', text, status: 'failed' }));
+  at(NOW);
+  inbox.insertOutbox(out({ send_id: 'SND-old', text, status: 'uncertain' }));
+  inbox.insertOutbox(out({ send_id: 'SND-other-text', text: 'see you at 6', status: 'uncertain' }));
+  inbox.insertOutbox(out({ send_id: 'SND-other-lead', lead_id: 'L-2', text, status: 'uncertain' }));
+  at(NOW + 10_000);
+  inbox.insertOutbox(out({ send_id: 'SND-new', text }));
+
+  assert.equal(inbox.resolveUncertain({ leadId: 'L-1', text, ts: NOW + 5000 }).send_id, 'SND-old', 'the oldest wins');
+  assert.equal(inbox.resolveUncertain({ leadId: 'L-2', text, ts: NOW + 5000 }).send_id, 'SND-other-lead');
+  assert.equal(inbox.resolveUncertain({ leadId: 'L-1', text: 'see you at 6', ts: NOW }).send_id, 'SND-other-text');
+  assert.equal(inbox.resolveUncertain({ leadId: 'L-1', text: 'see you at 5 ', ts: NOW }), null, 'the text must be identical');
+  assert.equal(inbox.resolveUncertain({ leadId: 'L-1', text: 'See you at 5', ts: NOW }), null);
+  assert.equal(inbox.resolveUncertain({ leadId: 'L-1', text: null, ts: NOW }), null);
+  assert.equal(inbox.resolveUncertain({ leadId: 'L-3', text, ts: NOW }), null);
+  assert.equal(inbox.getOutbox('SND-old').status, 'uncertain', 'read-only: nothing is resolved here');
+  assert.equal(inbox.getOutbox('SND-old').key_id, null);
+  s.close();
+});
+
+test('resolveUncertain matches within two minutes of the send either way, edges included', () => {
+  const { s, inbox } = harness();
+  inbox.insertOutbox(out({ send_id: 'SND-edge', lead_id: 'L-3', text: 'ok', status: 'pending' }));
+  const find = (ts, extra = {}) => inbox.resolveUncertain({ leadId: 'L-3', text: 'ok', ts, ...extra })?.send_id ?? null;
+  assert.equal(find(NOW + 120_000), 'SND-edge');
+  assert.equal(find(NOW + 120_001), null);
+  assert.equal(find(NOW - 120_000), 'SND-edge');
+  assert.equal(find(NOW - 120_001), null);
+  assert.equal(find(NOW + 1000, { windowMs: 1000 }), 'SND-edge');
+  assert.equal(find(NOW + 1001, { windowMs: 1000 }), null);
+  s.close();
+});
+
+test('openOutboxFor lists the staff and Dana sends of one chat that did not surely go: newest 20, oldest first', () => {
+  const { s, inbox, tick } = harness();
+  inbox.insertOutbox(out({ send_id: 'SND-p' }));
+  tick(1000);
+  inbox.insertOutbox(out({ send_id: 'SND-u', sender_kind: 'dana', user_id: null, status: 'uncertain' }));
+  tick(1000);
+  inbox.insertOutbox(out({ send_id: 'SND-f', status: 'failed' }));
+  tick(1000);
+  inbox.insertOutbox(out({ send_id: 'SND-a', status: 'accepted' }));
+  inbox.insertOutbox(out({ send_id: 'SND-code', sender_kind: 'code', status: 'failed' }));
+  inbox.insertOutbox(out({ send_id: 'SND-note', sender_kind: 'note', status: 'failed' }));
+  inbox.insertOutbox(out({ send_id: 'SND-x', lead_id: 'L-2', status: 'failed' }));
+  assert.deepEqual(inbox.openOutboxFor('L-1').map((r) => r.send_id), ['SND-p', 'SND-u', 'SND-f']);
+  assert.deepEqual(inbox.openOutboxFor('L-1', { sinceTs: NOW + 1000 }).map((r) => r.send_id), ['SND-u', 'SND-f']);
+
+  for (let i = 1; i <= 20; i += 1) {
+    tick(1000);
+    inbox.insertOutbox(out({ send_id: `SND-f${String(i).padStart(2, '0')}`, status: 'failed' }));
+  }
+  const open = inbox.openOutboxFor('L-1').map((r) => r.send_id);
+  assert.equal(open.length, 20);
+  assert.equal(open[0], 'SND-f01');
+  assert.equal(open[19], 'SND-f20');
+  s.close();
+});
+
+test('countSentSince counts what may have gone in the window, and can leave the owner\'s own chat out', () => {
+  const { s, inbox, at } = harness();
+  const since = NOW - DAY;
+  at(since - 1);
+  inbox.insertOutbox(out({ send_id: 'SND-before', status: 'accepted' }));
+  at(since);
+  inbox.insertOutbox(out({ send_id: 'SND-edge', status: 'accepted' }));
+  at(NOW);
+  inbox.insertOutbox(out({ send_id: 'SND-p' }));
+  inbox.insertOutbox(out({ send_id: 'SND-a', jid: '966500000002@s.whatsapp.net', status: 'accepted' }));
+  inbox.insertOutbox(out({ send_id: 'SND-u', jid: '966500000003@s.whatsapp.net', status: 'uncertain' }));
+  inbox.insertOutbox(out({ send_id: 'SND-f', jid: '966500000004@s.whatsapp.net', status: 'failed' }));
+  inbox.insertOutbox({ send_id: 'SND-own', jid: OWNER_JID, sender_kind: 'code', status: 'accepted' });
+  assert.equal(inbox.countSentSince(since), 5, 'the edge row counts; the failed one and the older one do not');
+  assert.equal(inbox.countSentSince(since, { excludeJid: OWNER_JID }), 4);
+  assert.equal(inbox.countSentSince(since + 1), 4);
+  assert.equal(inbox.countSentSince(since, { excludeJid: null }), 5);
+  s.close();
+});
+
+test('markStalePending turns pending rows older than the cutoff into uncertain (interrupted), once', () => {
+  const { s, inbox, at } = harness();
+  at(NOW - 200_000);
+  inbox.insertOutbox(out({ send_id: 'SND-stale' }));
+  inbox.insertOutbox(out({ send_id: 'SND-accepted', status: 'accepted' }));
+  at(NOW - 300_000);
+  inbox.insertOutbox(out({ send_id: 'SND-uncertain', status: 'uncertain' }));
+  at(NOW - 120_000);
+  inbox.insertOutbox(out({ send_id: 'SND-edge' }));
+  at(NOW);
+  inbox.insertOutbox(out({ send_id: 'SND-fresh' }));
+  assert.equal(inbox.markStalePending(NOW - 120_000), 1);
+  const stale = inbox.getOutbox('SND-stale');
+  assert.equal(stale.status, 'uncertain');
+  assert.equal(stale.error, 'interrupted');
+  assert.equal(stale.updated, NOW);
+  assert.equal(inbox.getOutbox('SND-edge').status, 'pending', 'exactly at the cutoff is not older than it');
+  assert.equal(inbox.getOutbox('SND-fresh').status, 'pending');
+  assert.equal(inbox.getOutbox('SND-accepted').status, 'accepted');
+  assert.equal(inbox.getOutbox('SND-uncertain').error, null);
+  assert.equal(inbox.markStalePending(NOW - 120_000), 0);
+  s.close();
+});
+
+test('pruneCodeRows deletes only login-code rows older than the cutoff', () => {
+  const { s, inbox, at } = harness();
+  at(NOW - 3 * DAY);
+  inbox.insertOutbox({ send_id: 'SND-code-old', jid: JID, sender_kind: 'code', status: 'accepted' });
+  inbox.insertOutbox(out({ send_id: 'SND-staff-old', status: 'accepted' }));
+  at(NOW - DAY);
+  inbox.insertOutbox({ send_id: 'SND-code-new', jid: JID, sender_kind: 'code', status: 'accepted' });
+  assert.equal(inbox.pruneCodeRows(NOW - 2 * DAY), 1);
+  assert.equal(inbox.getOutbox('SND-code-old'), null);
+  assert.ok(inbox.getOutbox('SND-code-new'));
+  assert.ok(inbox.getOutbox('SND-staff-old'));
+  s.close();
+});
+
+test('markRead never moves backwards, is per person, and shrugs off a chat with nothing to mark', () => {
+  const { s, inbox } = harness();
+  const mark = (user, leadId) => s.db.prepare('SELECT last_read_ts FROM inbox_reads WHERE user_id = ? AND lead_id = ?').get(user, leadId)?.last_read_ts ?? null;
+  assert.equal(inbox.markRead('USR-1', 'L-1', NOW), true);
+  assert.equal(mark('USR-1', 'L-1'), NOW);
+  inbox.markRead('USR-1', 'L-1', NOW - 50);
+  assert.equal(mark('USR-1', 'L-1'), NOW, 'an old page submitted late does not un-read anything');
+  inbox.markRead('USR-1', 'L-1', NOW + 200);
+  assert.equal(mark('USR-1', 'L-1'), NOW + 200);
+  inbox.markRead('USR-2', 'L-1', NOW - 999);
+  assert.equal(mark('USR-2', 'L-1'), NOW - 999);
+  assert.equal(mark('USR-1', 'L-1'), NOW + 200);
+  assert.equal(inbox.markRead('USR-1', 'L-1', null), false);
+  assert.equal(inbox.markRead(null, 'L-1', NOW), false);
+  assert.equal(inbox.markRead('USR-1', '', NOW), false);
+  assert.equal(count(s, 'inbox_reads'), 2);
+  s.close();
+});
+
+/**
+ * Chats for the list tests. For a reader with no read marks and an account from before
+ * every message: B has 2 unread, G 1; A was read up to its last inbound message; C has no
+ * messages yet. D (no WhatsApp id), E (unsure) and F (out) are not inbox chats.
+ */
+function listScene() {
+  const h = harness();
+  const { s, inbox, team } = h;
+  const owner = team.ensureOwner({ phone: '966593296933', name: 'Abdulaziz' });
+  const sara = team.addUser({ name: 'Sara', phone: '0500000011' });
+  const gone = team.addUser({ name: 'Gone', phone: '0500000012' });
+  team.deactivateUser(gone.user_id);
+  chat(s, 'A', { wa_jid: '966500000021@s.whatsapp.net', handler_user_id: sara.user_id, click_ids: { fbclid: 'IwAR1' } });
+  chat(s, 'B', { wa_jid: null, wa_lid: '272516946294519@lid' });
+  chat(s, 'C', { wa_jid: '966500000023@s.whatsapp.net', inbox_since: NOW - 1000 });
+  chat(s, 'D', { wa_jid: null, phone_e164: '966500000024', channel: 'form' });
+  chat(s, 'E', { wa_jid: '966500000025@s.whatsapp.net', inbox_state: 'unsure', inbox_since: null });
+  chat(s, 'F', { wa_jid: '966500000026@s.whatsapp.net', inbox_state: 'out', inbox_since: null });
+  chat(s, 'G', { wa_jid: '966500000027@s.whatsapp.net', handler_user_id: gone.user_id });
+  inbox.upsertMessage(msg({ key_id: 'A-1', lead_id: 'A', text: 'is the villa free?', ts: NOW - 5000 }));
+  inbox.upsertMessage(msg({ key_id: 'A-2', lead_id: 'A', direction: 'out', sender_kind: 'staff', sender_user_id: sara.user_id, text: 'yes, come on Sunday', ts: NOW - 4000 }));
+  inbox.upsertMessage(msg({ key_id: 'B-1', lead_id: 'B', text: 'hello', ts: NOW - 9000 }));
+  inbox.upsertMessage(msg({ key_id: 'B-2', lead_id: 'B', text: null, media_type: '[image]', ts: NOW - 8000 }));
+  inbox.upsertMessage(msg({ key_id: 'E-1', lead_id: 'E', ts: NOW - 100 }));
+  inbox.upsertMessage(msg({ key_id: 'F-1', lead_id: 'F', ts: NOW - 100 }));
+  inbox.upsertMessage(msg({ key_id: 'G-1', lead_id: 'G', ts: NOW - 20_000 }));
+  inbox.markRead(owner.user_id, 'A', NOW - 5000);
+  return { ...h, owner, sara };
+}
+
+test('listInbox shows inbox chats only: unread first, then the most recent, with the last message and the handler', () => {
+  const { s, inbox, owner } = listScene();
+  const rows = inbox.listInbox({ userId: owner.user_id });
+  assert.deepEqual(rows.map((r) => r.lead_id), ['B', 'G', 'C', 'A']);
+  assert.deepEqual(rows.map((r) => r.unread), [2, 1, 0, 0]);
+
+  const a = rows.find((r) => r.lead_id === 'A');
+  assert.equal(a.last_text, 'yes, come on Sunday');
+  assert.equal(a.last_media, null);
+  assert.equal(a.last_direction, 'out');
+  assert.equal(a.last_sender_kind, 'staff');
+  assert.equal(a.handler_name, 'Sara');
+  assert.equal(a.stage, 'new');
+  assert.equal(a.inbox_state, 'in');
+  assert.equal(a.last_msg_ts, NOW - 4000);
+  assert.deepEqual(a.click_ids, { fbclid: 'IwAR1' }, 'JSON columns read the way getLead() reads them');
+
+  const b = rows.find((r) => r.lead_id === 'B');
+  assert.equal(b.last_text, null);
+  assert.equal(b.last_media, '[image]');
+  assert.equal(b.last_direction, 'in');
+  assert.equal(b.last_sender_kind, 'client');
+  assert.equal(b.handler_name, null);
+
+  const c = rows.find((r) => r.lead_id === 'C');
+  assert.equal(c.last_text, null);
+  assert.equal(c.last_direction, null);
+  assert.equal(rows.find((r) => r.lead_id === 'G').handler_name, null, 'a deactivated handler is nobody');
+
+  assert.deepEqual(inbox.listInbox({ userId: owner.user_id, limit: 2 }).map((r) => r.lead_id), ['B', 'G']);
+  s.close();
+});
+
+test('unread counts only messages after the person\'s read mark, or after their account was made', () => {
+  const { s, inbox, owner, sara } = listScene();
+  // Sara's account is newer than G's message: it is not unread for her.
+  const late = inbox.listInbox({ userId: sara.user_id, userCreated: NOW - 10_000 });
+  assert.deepEqual(late.map((r) => r.lead_id), ['A', 'B', 'C', 'G']);
+  assert.deepEqual(late.map((r) => r.unread), [1, 2, 0, 0], 'A-1 is unread for Sara: the owner\'s read mark is his own');
+  inbox.markRead(owner.user_id, 'B', NOW - 9000);
+  assert.equal(inbox.listInbox({ userId: owner.user_id }).find((r) => r.lead_id === 'B').unread, 1);
+  s.close();
+});
+
+test('unreadTotal is the same rule summed over every inbox chat, and nothing outside it', () => {
+  const { s, inbox, owner, sara } = listScene();
+  const sum = (rows) => rows.reduce((n, r) => n + r.unread, 0);
+  assert.equal(inbox.unreadTotal({ userId: owner.user_id }), 3, 'E and F have unread messages but are not inbox chats');
+  assert.equal(inbox.unreadTotal({ userId: owner.user_id }), sum(inbox.listInbox({ userId: owner.user_id })));
+  assert.equal(inbox.unreadTotal({ userId: sara.user_id, userCreated: NOW - 10_000 }), 3);
+  assert.equal(inbox.unreadTotal({ userId: sara.user_id, userCreated: NOW - 10_000 }), sum(inbox.listInbox({ userId: sara.user_id, userCreated: NOW - 10_000 })));
+  inbox.markRead(owner.user_id, 'B', NOW);
+  inbox.markRead(owner.user_id, 'G', NOW);
+  assert.equal(inbox.unreadTotal({ userId: owner.user_id }), 0);
+  assert.equal(inbox.unreadTotal({}), 4, 'no reader: every inbound message of every chat');
+  s.close();
+});
+
+test('listInbox breaks a tie by the newest row', () => {
+  const { s, inbox } = harness();
+  chat(s, 'T-1', { inbox_since: NOW - 1000 });
+  chat(s, 'T-2', { inbox_since: NOW - 1000 });
+  assert.deepEqual(inbox.listInbox({ userId: 'USR-1' }).map((r) => r.lead_id), ['T-2', 'T-1']);
+  s.close();
+});
+
+test('listUnsure and countUnsure: unsure or unplaced chats only, newest first, with the first message\'s snippet', () => {
+  const { s, inbox } = harness();
+  lead(s, 'U1', { created: NOW - 3000, wa_jid: '966500000031@s.whatsapp.net', inbox_state: 'unsure' });
+  s.addTouchpoint({ lead_id: 'U1', ts: NOW - 3000, channel: 'whatsapp', event_type: 'lead_created', meta: { match_method: 'keyword', snippet: 'is this bona?' } });
+  lead(s, 'U2', { created: NOW - 2000, wa_lid: '111222333@lid' });
+  s.db.prepare('INSERT INTO touchpoints (id, lead_id, ts, event_type, meta) VALUES (?,?,?,?,?)').run('tp-bad', 'U2', NOW - 2000, 'lead_created', '{not json');
+  lead(s, 'U3', { created: NOW - 500, phone_e164: '966500000033', inbox_state: 'unsure' });
+  lead(s, 'U4', { created: NOW - 400, wa_jid: '966500000034@s.whatsapp.net', inbox_state: 'in' });
+  lead(s, 'U5', { created: NOW - 300, wa_jid: '966500000035@s.whatsapp.net', inbox_state: 'out' });
+  lead(s, 'U6', { created: NOW - 1000, wa_jid: '966500000036@s.whatsapp.net', inbox_state: 'unsure' });
+  s.addTouchpoint({ lead_id: 'U6', ts: NOW - 900, channel: 'whatsapp', event_type: 'stage_change', meta: { snippet: 'not the first message' } });
+
+  const rows = inbox.listUnsure();
+  assert.deepEqual(rows.map((r) => r.lead_id), ['U6', 'U2', 'U1']);
+  assert.deepEqual(rows.map((r) => r.snippet), [null, null, 'is this bona?'], 'bad JSON meta shows no snippet instead of failing');
+  assert.equal(rows[1].inbox_state, null, 'a chat not placed yet counts as unsure');
+  assert.equal(inbox.countUnsure(), 3);
+  assert.deepEqual(inbox.listUnsure({ limit: 1 }).map((r) => r.lead_id), ['U6']);
+  s.close();
+});
+
+test('addGap records a message that could not be read, once; gapsFor lists one chat oldest first', () => {
+  const { s, inbox } = harness();
+  assert.equal(inbox.addGap({ key_id: 'G-2', lead_id: 'L-1', jid: JID, ts: NOW + 10, reason: 'failed' }), true);
+  assert.equal(inbox.addGap({ key_id: 'G-1', lead_id: 'L-1', ts: NOW, reason: 'failed' }), true);
+  assert.equal(inbox.addGap({ key_id: 'G-1', lead_id: 'L-1', ts: NOW, reason: 'failed' }), false);
+  inbox.addGap({ key_id: 'G-x', lead_id: 'L-2', ts: NOW, reason: 'failed' });
+  assert.deepEqual(inbox.gapsFor('L-1'), [
+    { key_id: 'G-1', lead_id: 'L-1', jid: null, ts: NOW, reason: 'failed' },
+    { key_id: 'G-2', lead_id: 'L-1', jid: JID, ts: NOW + 10, reason: 'failed' },
+  ]);
+  assert.throws(() => inbox.addGap({ lead_id: 'L-1', ts: NOW, reason: 'failed' }), RangeError);
+  s.close();
+});
+
+test('setInboxState keeps the first joining time, sets it on joining, and clears it on leaving', () => {
+  const { s, inbox, tick } = harness();
+  lead(s, 'X', { wa_jid: JID, inbox_state: 'unsure' });
+  lead(s, 'Y', { wa_jid: '966500000041@s.whatsapp.net' });
+  lead(s, 'Z', { wa_jid: '966500000042@s.whatsapp.net', inbox_state: 'in', inbox_since: null });
+
+  tick(1000);
+  assert.equal(inbox.setInboxState('X', 'in', { since: NOW - 500 }), true);
+  assert.equal(s.getLead('X').inbox_state, 'in');
+  assert.equal(s.getLead('X').inbox_since, NOW - 500);
+  assert.equal(s.getLead('X').updated, NOW + 1000);
+
+  tick(1000);
+  inbox.setInboxState('X', 'in', { since: NOW + 999 });
+  assert.equal(s.getLead('X').inbox_since, NOW - 500, 'already in: the first joining time stays');
+  assert.equal(s.getLead('X').updated, NOW + 2000);
+
+  inbox.setInboxState('Y', 'in');
+  assert.equal(s.getLead('Y').inbox_since, NOW + 2000, 'since defaults to now');
+  inbox.setInboxState('Z', 'in', { since: NOW - 7 });
+  assert.equal(s.getLead('Z').inbox_since, NOW - 7, 'an in chat missing its time gets one');
+
+  inbox.setInboxState('X', 'unsure');
+  assert.equal(s.getLead('X').inbox_state, 'unsure');
+  assert.equal(s.getLead('X').inbox_since, null);
+  inbox.setInboxState('X', 'in', { since: NOW + 3000 });
+  assert.equal(s.getLead('X').inbox_since, NOW + 3000, 'joining again starts again');
+  inbox.setInboxState('X', 'out');
+  assert.equal(s.getLead('X').inbox_state, 'out');
+  assert.equal(s.getLead('X').inbox_since, null);
+
+  assert.throws(() => inbox.setInboxState('X', 'maybe'), RangeError);
+  assert.throws(() => inbox.setInboxState('X', null), RangeError);
+  assert.equal(s.getLead('X').inbox_state, 'out');
+  assert.equal(inbox.setInboxState('L-nope', 'in'), false);
+  s.close();
+});
+
+test('setHandler and setNeedsHuman write the lead and say whether there was one', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-1');
+  assert.equal(inbox.setHandler('L-1', 'USR-1'), true);
+  assert.equal(s.getLead('L-1').handler_user_id, 'USR-1');
+  assert.equal(inbox.setHandler('L-1', null), true);
+  assert.equal(s.getLead('L-1').handler_user_id, null);
+  assert.equal(inbox.setHandler('L-nope', 'USR-1'), false);
+
+  assert.equal(inbox.setNeedsHuman('L-1', 1), true);
+  assert.equal(s.getLead('L-1').needs_human, 1);
+  inbox.setNeedsHuman('L-1', 0);
+  assert.equal(s.getLead('L-1').needs_human, 0);
+  inbox.setNeedsHuman('L-1', true);
+  assert.equal(s.getLead('L-1').needs_human, 1);
+  assert.equal(inbox.setNeedsHuman('L-nope', 1), false);
+  s.close();
+});
+
+/** Two chats with a transcript each; L-1 also has a login-code row that names it. */
+function purgeScene() {
+  const h = harness();
+  const { s, inbox } = h;
+  chat(s, 'L-1', { handler_user_id: 'USR-1', needs_human: 1 });
+  chat(s, 'L-2', { wa_jid: '966500000002@s.whatsapp.net' });
+  inbox.upsertMessage(msg({ key_id: 'K-1', ts: NOW - 2000 }));
+  inbox.upsertMessage(msg({ key_id: 'K-2', direction: 'out', sender_kind: 'staff', sender_user_id: 'USR-1', ts: NOW - 1000 }));
+  inbox.upsertMessage(msg({ key_id: 'K-9', lead_id: 'L-2', ts: NOW - 500 }));
+  inbox.insertOutbox(out({ send_id: 'SND-staff' }));
+  inbox.insertOutbox(out({ send_id: 'SND-dana', sender_kind: 'dana', user_id: null }));
+  inbox.insertOutbox({ send_id: 'SND-code-lead', lead_id: 'L-1', jid: JID, sender_kind: 'code' });
+  inbox.insertOutbox({ send_id: 'SND-code', jid: JID, sender_kind: 'code' });
+  inbox.insertOutbox(out({ send_id: 'SND-l2', lead_id: 'L-2' }));
+  inbox.addGap({ key_id: 'G-1', lead_id: 'L-1', ts: NOW - 1500, reason: 'failed' });
+  inbox.addGap({ key_id: 'G-9', lead_id: 'L-2', ts: NOW - 400, reason: 'failed' });
+  inbox.markRead('USR-1', 'L-1', NOW);
+  inbox.markRead('USR-2', 'L-1', NOW);
+  inbox.markRead('USR-1', 'L-2', NOW);
+  return h;
+}
+
+test('purgeLead deletes one chat\'s transcript and keeps login-code rows and every other chat', () => {
+  const { s, inbox } = purgeScene();
+  assert.deepEqual(inbox.purgeLead('L-1'), { messages: 2, outbox: 2, gaps: 1, reads: 2 });
+  const l1 = s.getLead('L-1');
+  assert.equal(l1.last_msg_ts, null);
+  assert.equal(l1.inbox_state, 'in', 'purging is not leaving');
+  assert.equal(inbox.hasMessages('L-1'), false);
+  assert.ok(inbox.getOutbox('SND-code-lead'));
+  assert.ok(inbox.getOutbox('SND-code'));
+  assert.equal(inbox.getOutbox('SND-staff'), null);
+  assert.equal(inbox.getOutbox('SND-dana'), null);
+  assert.deepEqual(inbox.gapsFor('L-1'), []);
+
+  assert.deepEqual(inbox.messagesFor('L-2').map((m) => m.key_id), ['K-9']);
+  assert.equal(s.getLead('L-2').last_msg_ts, NOW - 500);
+  assert.ok(inbox.getOutbox('SND-l2'));
+  assert.equal(inbox.gapsFor('L-2').length, 1);
+  assert.equal(count(s, 'inbox_reads'), 1);
+  assert.deepEqual(inbox.purgeLead('L-1'), { messages: 0, outbox: 0, gaps: 0, reads: 0 });
+  s.close();
+});
+
+test('leaveInbox moves a chat out, purges it, and clears its handler and needs-human flag', () => {
+  const { s, inbox } = purgeScene();
+  assert.deepEqual(inbox.leaveInbox('L-1'), { messages: 2, outbox: 2, gaps: 1, reads: 2 });
+  const l1 = s.getLead('L-1');
+  assert.equal(l1.inbox_state, 'out');
+  assert.equal(l1.inbox_since, null);
+  assert.equal(l1.handler_user_id, null);
+  assert.equal(l1.needs_human, 0);
+  assert.equal(l1.last_msg_ts, null);
+  assert.equal(inbox.hasMessages('L-1'), false);
+  assert.equal(inbox.hasMessages('L-2'), true);
+  s.close();
+});
+
+test('leaveInbox is all or nothing: a failure half-way leaves the chat in, with its transcript', () => {
+  const { s, inbox } = purgeScene();
+  s.db.exec('DROP TABLE inbox_reads');
+  assert.throws(() => inbox.leaveInbox('L-1'), /inbox_reads/);
+  const l1 = s.getLead('L-1');
+  assert.equal(l1.inbox_state, 'in');
+  assert.equal(l1.handler_user_id, 'USR-1');
+  assert.equal(l1.needs_human, 1);
+  assert.equal(l1.last_msg_ts, NOW - 1000);
+  assert.deepEqual(inbox.messagesFor('L-1').map((m) => m.key_id), ['K-1', 'K-2']);
+  assert.ok(inbox.getOutbox('SND-staff'));
+  s.close();
+});
+
+test('retentionPurge deletes the transcripts of chats silent since before the cutoff; lead rows stay', () => {
+  const { s, inbox } = harness();
+  const cutoff = NOW - RETENTION_MS;
+  chat(s, 'OLD');
+  chat(s, 'EDGE', { wa_jid: '966500000051@s.whatsapp.net' });
+  chat(s, 'NEW', { wa_jid: '966500000052@s.whatsapp.net' });
+  chat(s, 'EMPTY', { wa_jid: '966500000053@s.whatsapp.net', last_msg_ts: cutoff - 99 });
+  inbox.upsertMessage(msg({ key_id: 'O-1', lead_id: 'OLD', ts: cutoff - 5000 }));
+  inbox.upsertMessage(msg({ key_id: 'O-2', lead_id: 'OLD', ts: cutoff - 1 }));
+  inbox.insertOutbox(out({ send_id: 'SND-old', lead_id: 'OLD' }));
+  inbox.upsertMessage(msg({ key_id: 'E-1', lead_id: 'EDGE', ts: cutoff }));
+  inbox.upsertMessage(msg({ key_id: 'N-1', lead_id: 'NEW', ts: NOW - 1000 }));
+
+  assert.deepEqual(inbox.retentionPurge(cutoff), { leads: 1, messages: 2 });
+  assert.ok(s.getLead('OLD'), 'the lead row stays: it is attribution data');
+  assert.equal(s.getLead('OLD').last_msg_ts, null);
+  assert.equal(inbox.hasMessages('OLD'), false);
+  assert.equal(inbox.getOutbox('SND-old'), null);
+  assert.equal(inbox.hasMessages('EDGE'), true, 'exactly at the cutoff is not older than it');
+  assert.equal(inbox.hasMessages('NEW'), true);
+  assert.equal(s.getLead('EMPTY').last_msg_ts, cutoff - 99, 'nothing to delete: not counted, not touched');
+  assert.deepEqual(inbox.retentionPurge(cutoff), { leads: 0, messages: 0 });
+  s.close();
+});
+
+test('statements are prepared once per store, not on every call', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-1');
+  let prepares = 0;
+  const realPrepare = s.db.prepare.bind(s.db);
+  s.db.prepare = (sql) => { prepares += 1; return realPrepare(sql); };
+  inbox.newestTs('L-1');
+  inbox.newestTs('L-1');
+  inbox.hasMessages('L-1');
+  inbox.hasMessages('L-1');
+  assert.equal(prepares, 2);
+  s.db.prepare = realPrepare;
+  s.close();
+});
+```
+
+- [ ] **Step 2: Run to see it fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/inbox-store.test.mjs`
+Expected: FAIL — `ERR_MODULE_NOT_FOUND`: `services/api/lib/inbox/store.mjs` does not exist yet (0 tests run).
+
+- [ ] **Step 3: Implement** — create `services/api/lib/inbox/store.mjs`:
+
+```js
+/**
+ * Everything the Bona inbox keeps (2026-09-27 design §4.1–4.2): the stored transcript of
+ * each inbox chat, the outbox every send from the owner's number is written to before it
+ * goes, who has read what, the messages that could not be loaded, and the inbox columns
+ * on the lead itself.
+ *
+ * Only this file writes SQL for `wa_messages`, `wa_outbox`, `inbox_reads` and `wa_gaps`.
+ * Which chat belongs in the inbox is decided in `eligibility.mjs` and by the owner; this
+ * file only records the outcome, so a guessed lead can never slip in by being re-derived.
+ *
+ * Message text is personal data. Nothing here logs, and nothing here puts text into an
+ * error message. A login code never reaches the file: a `code` outbox row stores NULL
+ * text whatever the caller passes (design §4.2).
+ */
+import { INBOX_STATES } from './eligibility.mjs';
+
+/** Transcripts are kept for 5 years after the chat's last message (D11). */
+export const RETENTION_MS = Math.round(5 * 365.25 * 86_400_000);
+export const MAX_STORED_TEXT = 8000;
+export const SENDER_KINDS = ['client', 'staff', 'dana', 'owner_number'];
+export const OUTBOX_KINDS = ['staff', 'dana', 'code', 'note'];
+export const OUTBOX_STATUSES = ['pending', 'accepted', 'failed', 'uncertain'];
+const DIRECTIONS = ['in', 'out'];
+const MAX_ERROR = 200;
+
+/** JSON columns of `leads` — the same three `db.mjs` parses — so a list row reads like `getLead()`. */
+const LEAD_JSON = ['click_ids', 'first_touch', 'last_touch'];
+
+const plain = (row) => (row ? { ...row } : null);
+const str = (v) => (v === null || v === undefined ? null : String(v));
+const hasNumber = (v) => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
+const toTs = (v) => Math.trunc(Number(v));
+/**
+ * A cutoff or a start time. Anything unusable becomes 0, the harmless end for every caller
+ * here: a purge, prune or stale-mark given garbage touches nothing, and the day-cap count
+ * counts everything (so it refuses rather than overspends).
+ */
+const num = (v) => (hasNumber(v) ? Number(v) : 0);
+// A fractional LIMIT is truncated rather than passed through, the same as `waitingLeads()`
+// in db.mjs.
+const clampLimit = (limit, fallback) => Math.trunc(Math.max(1, Math.min(1000, Number(limit) || fallback)));
+
+function leadRow(row) {
+  if (!row) return null;
+  const out = { ...row };
+  for (const col of LEAD_JSON) {
+    if (out[col] === null || out[col] === undefined) { out[col] = null; continue; }
+    try { out[col] = JSON.parse(out[col]); } catch { out[col] = null; }
+  }
+  return out;
+}
+
+/**
+ * At most `MAX_STORED_TEXT` code points, never splitting a surrogate pair. That many code
+ * points always fit in the first 2 × MAX_STORED_TEXT UTF-16 units, so a huge string is
+ * never spread into an array whole.
+ */
+function capText(v) {
+  if (v === null || v === undefined) return null;
+  const s = String(v);
+  if (s.length <= MAX_STORED_TEXT) return s;
+  return Array.from(s.slice(0, MAX_STORED_TEXT * 2)).slice(0, MAX_STORED_TEXT).join('');
+}
+
+// A chat is a lead in the inbox that has a WhatsApp id (P2-1): a form lead with only a
+// phone number is `in` but has nothing to show until that person writes.
+const IN_CHAT = "l.inbox_state = 'in' AND (l.wa_jid IS NOT NULL OR l.wa_lid IS NOT NULL)";
+// NULL counts as unsure: a WhatsApp lead the poller has not placed yet is a guess until
+// the owner decides.
+const UNSURE_CHAT = "(l.inbox_state = 'unsure' OR l.inbox_state IS NULL) AND (l.wa_jid IS NOT NULL OR l.wa_lid IS NOT NULL)";
+
+/**
+ * @param {ReturnType<import('../db.mjs').openDb>} store
+ * @param {{ now?: () => number }} [o]
+ */
+export function createInboxStore(store, { now = () => Date.now() } = {}) {
+  const { db, transaction } = store;
+  const stmts = new Map();
+  const prep = (sql) => {
+    let s = stmts.get(sql);
+    if (!s) { s = db.prepare(sql); stmts.set(sql, s); }
+    return s;
+  };
+
+  /* -------------------- messages -------------------- */
+
+  /**
+   * Store one message of an inbox chat, once. A message seen again (a re-poll, a thread
+   * refresh, the dashboard's own write after a send) changes only two things:
+   *
+   *   - the sender, and only from `owner_number` to `staff`/`dana`. The poller can read a
+   *     sent message back before the send that made it has recorded its key (both wait on
+   *     the network) and store it as the owner's number; the send's own write corrects
+   *     that. Never the other way: a later poll that cannot find the outbox row must not
+   *     demote a known sender, and a client's message is never anyone else's.
+   *   - `status`, when the new write carries one.
+   *
+   * The chat's `last_msg_ts` only ever moves forward, and a message seen again counts with
+   * the time it was first stored at, so it cannot push the chat anywhere new.
+   *
+   * @returns {{ inserted: boolean }}
+   */
+  function upsertMessage({ key_id, lead_id, jid = null, direction, sender_kind, sender_user_id = null, text = null, media_type = null, ts, status = null } = {}) {
+    if (!key_id) throw new RangeError('key_id is required');
+    if (!lead_id) throw new RangeError('lead_id is required');
+    if (!hasNumber(ts)) throw new RangeError('ts is required');
+    if (!DIRECTIONS.includes(direction)) throw new RangeError(`unknown direction ${direction}`);
+    if (!SENDER_KINDS.includes(sender_kind)) throw new RangeError(`unknown sender_kind ${sender_kind}`);
+    return transaction(() => {
+      const existing = prep('SELECT lead_id, ts FROM wa_messages WHERE key_id = ?').get(String(key_id));
+      prep(`INSERT INTO wa_messages (key_id, lead_id, jid, direction, sender_kind, sender_user_id, text, media_type, ts, status)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(key_id) DO UPDATE SET
+              sender_kind = CASE WHEN sender_kind = 'owner_number' AND excluded.sender_kind IN ('staff','dana') THEN excluded.sender_kind ELSE sender_kind END,
+              sender_user_id = CASE WHEN sender_kind = 'owner_number' AND excluded.sender_kind IN ('staff','dana') THEN excluded.sender_user_id ELSE sender_user_id END,
+              status = COALESCE(excluded.status, status)`)
+        .run(String(key_id), String(lead_id), str(jid), direction, sender_kind, str(sender_user_id), capText(text), str(media_type), toTs(ts), str(status));
+      const at = existing ?? { lead_id: String(lead_id), ts: toTs(ts) };
+      prep('UPDATE leads SET last_msg_ts = MAX(COALESCE(last_msg_ts, 0), ?) WHERE lead_id = ?').run(at.ts, at.lead_id);
+      return { inserted: !existing };
+    });
+  }
+
+  /** The newest `limit` messages of a chat, returned oldest first (how a thread reads). */
+  function messagesFor(leadId, { limit = 200 } = {}) {
+    return prep('SELECT * FROM wa_messages WHERE lead_id = ? ORDER BY ts DESC, rowid DESC LIMIT ?')
+      .all(String(leadId ?? ''), clampLimit(limit, 200)).map(plain).reverse();
+  }
+
+  const newestTs = (leadId) => prep('SELECT MAX(ts) AS ts FROM wa_messages WHERE lead_id = ?').get(String(leadId ?? '')).ts ?? null;
+  const hasMessages = (leadId) => Boolean(prep('SELECT 1 FROM wa_messages WHERE lead_id = ? LIMIT 1').get(String(leadId ?? '')));
+
+  /* -------------------- outbox -------------------- */
+
+  const getOutbox = (sendId) => plain(prep('SELECT * FROM wa_outbox WHERE send_id = ?').get(String(sendId ?? '')));
+  // A NULL key never matches: a row still waiting for its key is not "the row for" anything.
+  const outboxByKey = (keyId) => (keyId
+    ? plain(prep('SELECT * FROM wa_outbox WHERE key_id = ? ORDER BY created ASC, rowid ASC LIMIT 1').get(String(keyId)))
+    : null);
+
+  /**
+   * Written before the HTTP call, so a send that dies half-way still counts against the
+   * day cap and can still be matched to the message it became. A `send_id` already there
+   * is left exactly as it is: a double submit gets the row the first submit made.
+   *
+   * @returns {{ inserted: boolean, row: object }}
+   */
+  function insertOutbox({ send_id, lead_id = null, jid, text = null, user_id = null, sender_kind, status = 'pending' } = {}) {
+    if (!send_id) throw new RangeError('send_id is required');
+    if (!jid) throw new RangeError('jid is required');
+    if (!OUTBOX_KINDS.includes(sender_kind)) throw new RangeError(`unknown outbox kind ${sender_kind}`);
+    if (!OUTBOX_STATUSES.includes(status)) throw new RangeError(`unknown outbox status ${status}`);
+    const t = now();
+    const stored = sender_kind === 'code' ? null : capText(text);
+    const { changes } = prep(`INSERT OR IGNORE INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error)
+                              VALUES (?,?,?,?,?,?,?,NULL,?,?,NULL)`)
+      .run(String(send_id), str(lead_id), String(jid), stored, str(user_id), sender_kind, status, t, t);
+    return { inserted: changes === 1, row: getOutbox(send_id) };
+  }
+
+  /** `key_id`/`error` left out (undefined) are kept as they are; null clears them. */
+  function updateOutbox(sendId, { status, key_id = undefined, error = undefined } = {}) {
+    if (!OUTBOX_STATUSES.includes(status)) throw new RangeError(`unknown outbox status ${status}`);
+    const sets = ['status = ?', 'updated = ?'];
+    const vals = [status, now()];
+    if (key_id !== undefined) { sets.push('key_id = ?'); vals.push(str(key_id)); }
+    if (error !== undefined) { sets.push('error = ?'); vals.push(error === null ? null : String(error).slice(0, MAX_ERROR)); }
+    vals.push(String(sendId ?? ''));
+    return prep(`UPDATE wa_outbox SET ${sets.join(', ')} WHERE send_id = ?`).run(...vals).changes === 1;
+  }
+
+  /**
+   * The send an outbound record most likely is, when its key was never recorded (a
+   * timeout, a restart mid-send): the oldest unresolved row of the same LEAD with the
+   * identical text, created within `windowMs` of the record either way. Lead-level, not
+   * jid-level, because the record may carry the chat's lid while the row carries its
+   * phone jid (P2-17). Read-only: the caller decides to resolve it.
+   */
+  function resolveUncertain({ leadId, text, ts, windowMs = 120_000 } = {}) {
+    if (!leadId || text === null || text === undefined || text === '' || !hasNumber(ts)) return null;
+    return plain(prep(`SELECT * FROM wa_outbox
+                       WHERE lead_id = ? AND status IN ('uncertain','pending') AND key_id IS NULL
+                         AND text = ? AND ABS(created - ?) <= ?
+                       ORDER BY created ASC, rowid ASC LIMIT 1`)
+      .get(String(leadId), capText(text), toTs(ts), num(windowMs)));
+  }
+
+  /** Staff and Dana sends of one chat that did not (surely) go: the newest 20, oldest first. */
+  function openOutboxFor(leadId, { sinceTs = 0 } = {}) {
+    return prep(`SELECT * FROM wa_outbox
+                 WHERE lead_id = ? AND status IN ('pending','uncertain','failed') AND sender_kind IN ('staff','dana') AND created >= ?
+                 ORDER BY created DESC, rowid DESC LIMIT 20`)
+      .all(String(leadId ?? ''), num(sinceTs)).map(plain).reverse();
+  }
+
+  /**
+   * Sends that may have gone since `sinceTs` — the durable day cap (P2-4). A failed send
+   * never reached WhatsApp, so it does not count; an uncertain one may have. `excludeJid`
+   * leaves the owner's own chat out: messages to himself cost nothing.
+   */
+  function countSentSince(sinceTs, { excludeJid = null } = {}) {
+    const ex = str(excludeJid);
+    return prep(`SELECT COUNT(*) AS n FROM wa_outbox
+                 WHERE status IN ('pending','accepted','uncertain') AND created >= ? AND (? IS NULL OR jid != ?)`)
+      .get(num(sinceTs), ex, ex).n;
+  }
+
+  /** A `pending` row this old belongs to a process that died mid-send: it may have gone. */
+  const markStalePending = (beforeTs) => prep("UPDATE wa_outbox SET status = 'uncertain', error = 'interrupted', updated = ? WHERE status = 'pending' AND created < ?")
+    .run(now(), num(beforeTs)).changes;
+
+  /** Login-code rows only ever feed the day cap, so they go once they are out of its window. */
+  const pruneCodeRows = (beforeTs) => prep("DELETE FROM wa_outbox WHERE sender_kind = 'code' AND created < ?").run(num(beforeTs)).changes;
+
+  /* -------------------- read marks -------------------- */
+
+  /**
+   * Mark a chat read up to `ts` for one person. Never moves backwards (two tabs, an old
+   * page submitted late). Opening a chat with nothing in it has nothing to mark, so an
+   * unusable `ts` or id is `false`, never a thrown error on a page load.
+   */
+  function markRead(userId, leadId, ts) {
+    if (!userId || !leadId || !hasNumber(ts)) return false;
+    prep(`INSERT INTO inbox_reads (user_id, lead_id, last_read_ts) VALUES (?,?,?)
+          ON CONFLICT(user_id, lead_id) DO UPDATE SET last_read_ts = MAX(last_read_ts, excluded.last_read_ts)`)
+      .run(String(userId), String(leadId), toTs(ts));
+    return true;
+  }
+
+  /* -------------------- lists -------------------- */
+
+  /**
+   * The inbox list for one person: every chat, unread first, then the most recent. A chat
+   * with no stored message yet sorts by when it joined. Unread counts inbound messages
+   * after this person's read mark or, with none, after their account was made (P2-8) —
+   * a new colleague does not start with every old message unread. `handler_name` is null
+   * for a handler who has been deactivated: the chat has nobody on it now.
+   */
+  function listInbox({ userId = null, userCreated = 0, limit = 200 } = {}) {
+    return prep(`SELECT l.*,
+                   (SELECT COUNT(*) FROM wa_messages m
+                     WHERE m.lead_id = l.lead_id AND m.direction = 'in'
+                       AND m.ts > COALESCE((SELECT r.last_read_ts FROM inbox_reads r WHERE r.user_id = ? AND r.lead_id = l.lead_id), ?)) AS unread,
+                   lm.text AS last_text, lm.media_type AS last_media, lm.direction AS last_direction, lm.sender_kind AS last_sender_kind,
+                   u.name AS handler_name
+                 FROM leads l
+                 LEFT JOIN wa_messages lm ON lm.rowid = (SELECT m2.rowid FROM wa_messages m2 WHERE m2.lead_id = l.lead_id ORDER BY m2.ts DESC, m2.rowid DESC LIMIT 1)
+                 LEFT JOIN users u ON u.user_id = l.handler_user_id AND u.active = 1
+                 WHERE ${IN_CHAT}
+                 ORDER BY (unread > 0) DESC, COALESCE(l.last_msg_ts, l.inbox_since, l.created) DESC, l.rowid DESC
+                 LIMIT ?`)
+      .all(str(userId), num(userCreated), clampLimit(limit, 200)).map(leadRow);
+  }
+
+  /** The nav badge: the same unread rule as `listInbox`, summed over every chat (not just a page of them). */
+  function unreadTotal({ userId = null, userCreated = 0 } = {}) {
+    return prep(`SELECT COUNT(*) AS n FROM wa_messages m
+                 JOIN leads l ON l.lead_id = m.lead_id
+                 LEFT JOIN inbox_reads r ON r.user_id = ? AND r.lead_id = m.lead_id
+                 WHERE ${IN_CHAT} AND m.direction = 'in' AND m.ts > COALESCE(r.last_read_ts, ?)`)
+      .get(str(userId), num(userCreated)).n;
+  }
+
+  /**
+   * The owner's Unsure list, newest first, each with the first message's snippet so he
+   * can decide without opening WhatsApp. The snippet comes from the `lead_created`
+   * touchpoint; a row whose meta is not valid JSON shows none rather than failing the page.
+   */
+  function listUnsure({ limit = 200 } = {}) {
+    return prep(`SELECT l.*,
+                   (SELECT CASE WHEN json_valid(t.meta) THEN json_extract(t.meta, '$.snippet') END
+                      FROM touchpoints t WHERE t.lead_id = l.lead_id AND t.event_type = 'lead_created'
+                      ORDER BY t.ts ASC, t.rowid ASC LIMIT 1) AS snippet
+                 FROM leads l
+                 WHERE ${UNSURE_CHAT}
+                 ORDER BY l.created DESC, l.rowid DESC
+                 LIMIT ?`)
+      .all(clampLimit(limit, 200)).map(leadRow);
+  }
+
+  const countUnsure = () => prep(`SELECT COUNT(*) AS n FROM leads l WHERE ${UNSURE_CHAT}`).get().n;
+
+  /* -------------------- gaps -------------------- */
+
+  /** A message that could not be read, shown in the thread instead of silently missing. */
+  function addGap({ key_id, lead_id, jid = null, ts, reason } = {}) {
+    if (!key_id) throw new RangeError('key_id is required');
+    return prep('INSERT OR IGNORE INTO wa_gaps (key_id, lead_id, jid, ts, reason) VALUES (?,?,?,?,?)')
+      .run(String(key_id), str(lead_id), str(jid), hasNumber(ts) ? toTs(ts) : null, reason === null || reason === undefined ? null : String(reason).slice(0, MAX_ERROR)).changes === 1;
+  }
+
+  const gapsFor = (leadId) => prep('SELECT * FROM wa_gaps WHERE lead_id = ? ORDER BY ts ASC, rowid ASC').all(String(leadId ?? '')).map(plain);
+
+  /* -------------------- inbox columns on the lead -------------------- */
+
+  /**
+   * Joining keeps the time a chat first joined: a chat already `in` keeps its
+   * `inbox_since` (one still missing it gets `since`). Leaving — `out` or back to
+   * `unsure` — clears it.
+   */
+  function setInboxState(leadId, state, { since = now() } = {}) {
+    if (!INBOX_STATES.includes(state)) throw new RangeError(`unknown inbox state ${state}`);
+    const t = now();
+    const id = String(leadId ?? '');
+    if (state === 'in') {
+      const at = hasNumber(since) ? toTs(since) : t;
+      return prep("UPDATE leads SET inbox_since = CASE WHEN inbox_state = 'in' THEN COALESCE(inbox_since, ?) ELSE ? END, inbox_state = 'in', updated = ? WHERE lead_id = ?")
+        .run(at, at, t, id).changes === 1;
+    }
+    return prep('UPDATE leads SET inbox_state = ?, inbox_since = NULL, updated = ? WHERE lead_id = ?').run(state, t, id).changes === 1;
+  }
+
+  /** `userId` null clears it. Who may be a handler is the caller's check (an active user). */
+  const setHandler = (leadId, userId) => prep('UPDATE leads SET handler_user_id = ? WHERE lead_id = ?')
+    .run(userId ? String(userId) : null, String(leadId ?? '')).changes === 1;
+
+  const setNeedsHuman = (leadId, flag) => prep('UPDATE leads SET needs_human = ? WHERE lead_id = ?')
+    .run(flag ? 1 : 0, String(leadId ?? '')).changes === 1;
+
+  /* -------------------- purge -------------------- */
+
+  /**
+   * Delete a chat's transcript: its messages, its staff and Dana sends, its gaps and read
+   * marks, in one transaction. The lead row stays (attribution data), and so do login-code
+   * rows, which hold no text and only feed the day cap.
+   *
+   * @returns {{ messages: number, outbox: number, gaps: number, reads: number }}
+   */
+  function purgeLead(leadId) {
+    const id = String(leadId ?? '');
+    return transaction(() => {
+      const counts = {
+        messages: prep('DELETE FROM wa_messages WHERE lead_id = ?').run(id).changes,
+        outbox: prep("DELETE FROM wa_outbox WHERE lead_id = ? AND sender_kind IN ('staff','dana')").run(id).changes,
+        gaps: prep('DELETE FROM wa_gaps WHERE lead_id = ?').run(id).changes,
+        reads: prep('DELETE FROM inbox_reads WHERE lead_id = ?').run(id).changes,
+      };
+      prep('UPDATE leads SET last_msg_ts = NULL WHERE lead_id = ?').run(id);
+      return counts;
+    });
+  }
+
+  /**
+   * *Not a client*: out of the inbox, transcript gone, nobody handling it, nothing
+   * pending — all or nothing, so a failure half-way never leaves a purged chat `in`.
+   */
+  function leaveInbox(leadId) {
+    return transaction(() => {
+      setInboxState(leadId, 'out');
+      const counts = purgeLead(leadId);
+      prep('UPDATE leads SET handler_user_id = NULL, needs_human = 0 WHERE lead_id = ?').run(String(leadId ?? ''));
+      return counts;
+    });
+  }
+
+  /**
+   * D11: the transcript of every chat whose last message is older than `beforeTs`. Lead
+   * rows stay. A chat with nothing left to delete is not counted.
+   *
+   * @returns {{ leads: number, messages: number }}
+   */
+  function retentionPurge(beforeTs) {
+    return transaction(() => {
+      const ids = prep(`SELECT lead_id FROM leads
+                        WHERE last_msg_ts < ? AND EXISTS (SELECT 1 FROM wa_messages m WHERE m.lead_id = leads.lead_id)`)
+        .all(num(beforeTs)).map((r) => r.lead_id);
+      let messages = 0;
+      for (const id of ids) messages += purgeLead(id).messages;
+      return { leads: ids.length, messages };
+    });
+  }
+
+  return {
+    upsertMessage, messagesFor, newestTs, hasMessages,
+    insertOutbox, getOutbox, outboxByKey, updateOutbox, resolveUncertain, openOutboxFor, countSentSince, markStalePending, pruneCodeRows,
+    markRead, listInbox, unreadTotal, listUnsure, countUnsure,
+    addGap, gapsFor,
+    setInboxState, setHandler, setNeedsHuman,
+    purgeLead, leaveInbox, retentionPurge,
+  };
+}
+```
+
+- [ ] **Step 4: Run**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/inbox-store.test.mjs`
+Expected: PASS (33 tests, 0 fail).
+
+- [ ] **Step 5: Run the full suite**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/*.test.mjs`
+Expected: all pass, 0 fail — exactly 33 more tests than after Task 3. This task only adds files, so no earlier test changes. (Checked against a copy of the tree with the contract's schema v4 applied: 622 baseline + 33 = 655. The only failures there were the two `SCHEMA_VERSION === 3` assertions that Task 1 updates.)
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd /home/azoz778/bona-wt/team-inbox && git add services/api/lib/inbox/store.mjs services/api/test/inbox-store.test.mjs
+git commit -m "inbox: one store for messages, outbox, read marks, gaps and inbox state
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 5: Ingest — `lib/inbox/ingest.mjs`
+
+One Evolution record of an `in` chat becomes one stored message. The poller (its Phase 2 task), the join backfill (Task 6) and the thread refresh all go through this one function, so sender resolution (P2-17), the handler default (P2-15), `needs_human` (P2-16), media placeholders and noise (P2-14) and lid/phone learning are decided in one place. So are two refusals the contract's list does not name, because no caller should be trusted to make them: a team member's or never-list chat (§3.5, P2-7: the join catch-up of amendment A3 reads migrated chats that nothing else screened) stores nothing, reason `excluded`; and an outbound record whose WhatsApp id is a login code's outbox row stores nothing, reason `code` (§4.2: a login code is never written anywhere but the WhatsApp message). Builds on Task 1 (schema v4 lead columns in `COLUMNS.leads`), Task 2 (`NormalisedRecord` carries `media`, `fileName`, `noise`) and Task 4 (`createInboxStore`).
+
+**Files:**
+- Create: `services/api/lib/inbox/ingest.mjs`
+- Test: `services/api/test/inbox-ingest.test.mjs`
+
+- [ ] **Step 1: Write the failing tests** — create `services/api/test/inbox-ingest.test.mjs`:
+
+```js
+/**
+ * One WhatsApp record of an inbox chat becomes one stored message: who sent it, whether it
+ * is the dashboard's own send coming back, and what the lead learns from it. Real store,
+ * real inbox store, real team accounts; the clock is injected so every time is exact.
+ */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { openDb } from '../lib/db.mjs';
+import { createTeam, learnTeamLid } from '../lib/team.mjs';
+import { createInboxStore } from '../lib/inbox/store.mjs';
+import { createIngest, RESOLVE_WINDOW_MS } from '../lib/inbox/ingest.mjs';
+
+const NOW = Date.UTC(2026, 8, 28, 12, 0, 0);
+const LEAD_ID = 'LEAD-20260928-0000aaaa';
+const OTHER_LEAD_ID = 'LEAD-20260928-0000bbbb';
+const PHONE = '966500000001';
+const PHONE_JID = `${PHONE}@s.whatsapp.net`;
+const LID = '111222333444555@lid';
+const TEXT = 'Is BONA-W003 still available?';
+const REPLY = 'Yes it is. When would you like to view it?';
+const TYPED = 'Welcome, here is the brochure';
+
+/** A lead that is in the inbox, reached on a privacy-mode chat whose phone is known. */
+const LEAD = {
+  lead_id: LEAD_ID, created: NOW - 3_600_000, updated: NOW - 3_600_000, phone_e164: PHONE, wa_jid: PHONE_JID, wa_lid: LID,
+  channel: 'whatsapp', match_method: 'ref', stage: 'new', inbox_state: 'in', inbox_since: NOW - 3_600_000,
+};
+
+/** One normalised record, as lib/evolution.mjs hands them over: inbound, under the lid, phone as alt. */
+const rec = (over = {}) => ({
+  id: 'IN-1', jid: LID, jidAlt: PHONE_JID, fromMe: false, ts: NOW - 60_000, text: TEXT, pushName: 'Sara',
+  contextInfo: null, messageType: 'conversation', media: null, fileName: null, noise: false, ...over,
+});
+
+/** `isExcludedLead` is left out unless a test hands one in: the default reads the team tables. */
+function harness({ lead = {}, ownerUserId = null, isExcludedLead = null } = {}) {
+  const s = openDb(':memory:');
+  const clock = NOW;
+  const team = createTeam(s, { now: () => clock });
+  const owner = team.ensureOwner({ phone: '966593296933', name: 'Abdulaziz' });
+  const staff = team.addUser({ name: 'Sara Staff', phone: '0500000009', role: 'staff' });
+  const inbox = createInboxStore(s, { now: () => clock });
+  const logs = [];
+  const { ingest } = createIngest({
+    db: s, inbox, ownerUserId: ownerUserId ?? (() => owner.user_id), log: (o) => logs.push(o), now: () => clock,
+    ...(isExcludedLead ? { isExcludedLead } : {}),
+  });
+  s.insertLead({ ...LEAD, ...lead });
+  return { s, team, inbox, ingest, owner, staff, logs, lead: () => s.getLead(LEAD_ID) };
+}
+
+const MESSAGE_FIELDS = ['key_id', 'lead_id', 'jid', 'direction', 'sender_kind', 'sender_user_id', 'text', 'media_type', 'ts'];
+const pick = (row) => Object.fromEntries(MESSAGE_FIELDS.map((k) => [k, row[k]]));
+
+/** Every phone number, lid, name and message text these tests use. None may reach a log line. */
+const PERSONAL = [PHONE, '111222333444555', '966593296933', '966500000009', 'Sara', 'Abdulaziz', TEXT, REPLY, TYPED];
+function assertClean(logs) {
+  const out = JSON.stringify(logs);
+  for (const needle of PERSONAL) assert.equal(out.includes(needle), false, 'a log line carries personal data');
+}
+
+test('refuses a chat outside the inbox, a record with no id and noise — and stores nothing', () => {
+  const h = harness();
+  assert.throws(() => createIngest({ db: h.s }), TypeError);
+  for (const state of [null, 'unsure', 'out']) {
+    h.s.updateLead(LEAD_ID, { inbox_state: state });
+    assert.deepEqual(h.ingest(h.lead(), rec()), { stored: false, reason: 'not_in_inbox' }, String(state));
+  }
+  // The row is read again: a chat marked "Not a client" a moment ago is not written back by
+  // a caller still holding its old `in` row.
+  assert.deepEqual(h.ingest({ ...LEAD }, rec()), { stored: false, reason: 'not_in_inbox' });
+  assert.deepEqual(h.ingest(null, rec()), { stored: false, reason: 'not_in_inbox' });
+  h.s.updateLead(LEAD_ID, { inbox_state: 'in' });
+  assert.deepEqual(h.ingest(h.lead(), rec({ id: null })), { stored: false, reason: 'no_id' });
+  assert.deepEqual(h.ingest(h.lead(), null), { stored: false, reason: 'no_id' });
+  assert.deepEqual(h.ingest(h.lead(), rec({ noise: true, text: '' })), { stored: false, reason: 'noise' });
+  assert.equal(h.inbox.hasMessages(LEAD_ID), false);
+  h.s.close();
+});
+
+test("a team member's or a never-list chat stores nothing, whichever caller hands the record over", () => {
+  // The staff member's own chat, `in` from before she joined the team (a migrated Ref lead).
+  const member = harness({ lead: { phone_e164: '966500000009', wa_jid: '966500000009@s.whatsapp.net', wa_lid: null } });
+  assert.deepEqual(member.ingest(member.lead(), rec({ jid: '966500000009@s.whatsapp.net', jidAlt: null })), { stored: false, reason: 'excluded' });
+  assert.equal(member.inbox.hasMessages(LEAD_ID), false);
+  assert.equal(member.lead().last_msg_ts, null);
+  member.s.close();
+
+  // No phone on the row, but its phone jid's number is on the never list.
+  const never = harness({ lead: { phone_e164: null } });
+  never.team.addNever({ phone: PHONE, note: 'family' });
+  assert.deepEqual(never.ingest(never.lead(), rec()), { stored: false, reason: 'excluded' });
+  assert.equal(never.lead().phone_e164, null, 'nothing is learned from it either');
+  never.s.close();
+
+  // Known only by a lid the poller learned for a team member.
+  const lid = harness({ lead: { phone_e164: null, wa_jid: null } });
+  learnTeamLid(lid.s, '0500000009', LID);
+  assert.deepEqual(lid.ingest(lid.lead(), rec({ id: 'OWN-L', fromMe: true, text: TYPED })), { stored: false, reason: 'excluded' });
+  assert.equal(lid.lead().handler_user_id, null);
+  lid.s.close();
+
+  // The check can be handed in instead of read from the team tables.
+  const handed = harness({ isExcludedLead: (l) => l.lead_id === LEAD_ID });
+  assert.deepEqual(handed.ingest(handed.lead(), rec()), { stored: false, reason: 'excluded' });
+  handed.s.close();
+});
+
+test('a login code coming back in a chat is never stored, and its outbox row is left as it was', () => {
+  // Belt and braces: a code only ever goes to a team member, whose chat the exclusion above
+  // already refuses. The code must still never reach wa_messages (design §4.2).
+  const h = harness();
+  const code = 'Bona dashboard code: 482913 (valid 10 min)';
+  h.inbox.insertOutbox({ send_id: 'SND-code-1', jid: PHONE_JID, sender_kind: 'code' });
+  h.inbox.updateOutbox('SND-code-1', { status: 'accepted', key_id: 'CODE-1' });
+  const before = h.inbox.getOutbox('SND-code-1');
+  assert.deepEqual(
+    h.ingest(h.lead(), rec({ id: 'CODE-1', fromMe: true, jid: PHONE_JID, jidAlt: null, text: code })),
+    { stored: false, reason: 'code' },
+  );
+  assert.equal(h.inbox.hasMessages(LEAD_ID), false);
+  assert.deepEqual(h.inbox.getOutbox('SND-code-1'), before, 'the row is not touched');
+  assert.equal(h.lead().handler_user_id, null, 'a login code makes nobody the handler');
+  assert.equal(h.lead().last_msg_ts, null);
+  assert.equal(JSON.stringify(h.logs).includes('482913'), false);
+  h.s.close();
+});
+
+test("an inbound record is stored as the client's message and moves the chat's last-message time", () => {
+  const h = harness();
+  assert.deepEqual(h.ingest(h.lead(), rec()), { stored: true, inserted: true, senderKind: 'client' });
+  const rows = h.inbox.messagesFor(LEAD_ID);
+  assert.equal(rows.length, 1);
+  assert.deepEqual(pick(rows[0]), {
+    key_id: 'IN-1', lead_id: LEAD_ID, jid: LID, direction: 'in', sender_kind: 'client', sender_user_id: null,
+    text: TEXT, media_type: null, ts: NOW - 60_000,
+  });
+  assert.equal(h.lead().last_msg_ts, NOW - 60_000);
+  assert.equal(h.lead().handler_user_id, null, 'a client message makes nobody the handler');
+  h.s.close();
+});
+
+test('media arrive as placeholders: a caption stays as text, an unknown bare message is "[message]"', () => {
+  const h = harness();
+  h.ingest(h.lead(), rec({ id: 'M-1', media: '[image]', text: 'Front view', messageType: 'imageMessage' }));
+  h.ingest(h.lead(), rec({ id: 'M-2', media: '[voice note]', text: '', messageType: 'audioMessage', ts: NOW - 50_000 }));
+  h.ingest(h.lead(), rec({ id: 'M-3', media: null, text: '', messageType: 'pollCreationMessageV3', ts: null }));
+  const byId = Object.fromEntries(h.inbox.messagesFor(LEAD_ID).map((m) => [m.key_id, m]));
+  assert.deepEqual([byId['M-1'].media_type, byId['M-1'].text], ['[image]', 'Front view']);
+  assert.deepEqual([byId['M-2'].media_type, byId['M-2'].text], ['[voice note]', null]);
+  assert.deepEqual([byId['M-3'].media_type, byId['M-3'].text], ['[message]', null]);
+  assert.equal(byId['M-3'].ts, NOW, 'a record with no usable time is stamped with now');
+  h.s.close();
+});
+
+test('an outbound record the dashboard sent is found by its message id: staff, that user, row accepted', () => {
+  const h = harness();
+  h.inbox.insertOutbox({ send_id: 'SND-key-1', lead_id: LEAD_ID, jid: PHONE_JID, text: REPLY, user_id: h.staff.user_id, sender_kind: 'staff' });
+  h.inbox.updateOutbox('SND-key-1', { status: 'accepted', key_id: 'OUT-1' });
+  const out = h.ingest(h.lead(), rec({ id: 'OUT-1', fromMe: true, jid: PHONE_JID, jidAlt: null, text: REPLY, ts: NOW + 1_000 }));
+  assert.deepEqual(out, { stored: true, inserted: true, senderKind: 'staff' });
+  const [m] = h.inbox.messagesFor(LEAD_ID);
+  assert.deepEqual([m.direction, m.sender_kind, m.sender_user_id], ['out', 'staff', h.staff.user_id]);
+  const row = h.inbox.getOutbox('SND-key-1');
+  assert.deepEqual([row.status, row.key_id], ['accepted', 'OUT-1']);
+  // The poller read the record before the reply had stored it: whoever replied first is still the handler.
+  assert.equal(h.lead().handler_user_id, h.staff.user_id);
+  assert.equal(h.logs.some((e) => e.evt === 'inbox.outbox.resolved'), false, 'an accepted row has nothing to resolve');
+  h.s.close();
+});
+
+test('a Dana send found by its id is Dana\'s, and leaves "needs a human" and the handler alone', () => {
+  const h = harness({ lead: { needs_human: 1 } });
+  h.inbox.insertOutbox({ send_id: 'SND-dana-1', lead_id: LEAD_ID, jid: PHONE_JID, text: 'Hello, I am Dana', sender_kind: 'dana' });
+  h.inbox.updateOutbox('SND-dana-1', { status: 'accepted', key_id: 'DANA-1' });
+  const out = h.ingest(h.lead(), rec({ id: 'DANA-1', fromMe: true, jid: PHONE_JID, jidAlt: null, text: 'Hello, I am Dana' }));
+  assert.equal(out.senderKind, 'dana');
+  assert.equal(h.inbox.messagesFor(LEAD_ID)[0].sender_user_id, null);
+  assert.equal(h.lead().needs_human, 1, 'Dana is not a human reply');
+  assert.equal(h.lead().handler_user_id, null);
+  h.s.close();
+});
+
+for (const status of ['uncertain', 'pending']) {
+  test(`a reply left ${status} is resolved by its text within two minutes, at the lead, though it comes back under the lid`, () => {
+    const h = harness({ lead: { needs_human: 1 } });
+    // The reply went to the phone jid (the outbox row says so); the record comes back under the lid.
+    h.inbox.insertOutbox({ send_id: 'SND-unsure-1', lead_id: LEAD_ID, jid: PHONE_JID, text: REPLY, user_id: h.staff.user_id, sender_kind: 'staff', status });
+    const out = h.ingest(h.lead(), rec({ id: 'OUT-2', fromMe: true, jid: LID, jidAlt: PHONE_JID, text: REPLY, ts: NOW + RESOLVE_WINDOW_MS }));
+    assert.deepEqual(out, { stored: true, inserted: true, senderKind: 'staff' });
+    const row = h.inbox.getOutbox('SND-unsure-1');
+    assert.deepEqual([row.status, row.key_id], ['accepted', 'OUT-2']);
+    assert.equal(h.inbox.messagesFor(LEAD_ID)[0].sender_user_id, h.staff.user_id);
+    assert.equal(h.lead().needs_human, 0, 'a staff reply is a human reply');
+    assert.equal(h.lead().handler_user_id, h.staff.user_id);
+    assert.ok(h.logs.some((e) => e.evt === 'inbox.outbox.resolved' && e.sendId === 'SND-unsure-1' && e.via === 'text'));
+    assertClean(h.logs);
+    h.s.close();
+  });
+}
+
+test("two minutes and one millisecond, other words, or another chat: the owner's own number, and the row stays unsure", () => {
+  const cases = [
+    ['too late', { ts: NOW + RESOLVE_WINDOW_MS + 1, text: REPLY }, LEAD_ID],
+    ['other words', { ts: NOW + 1_000, text: `${REPLY}!` }, LEAD_ID],
+    ['another chat', { ts: NOW + 1_000, text: REPLY }, OTHER_LEAD_ID],
+  ];
+  for (const [label, over, outboxLead] of cases) {
+    const h = harness();
+    h.inbox.insertOutbox({ send_id: 'SND-unsure-2', lead_id: outboxLead, jid: PHONE_JID, text: REPLY, user_id: h.staff.user_id, sender_kind: 'staff', status: 'uncertain' });
+    const out = h.ingest(h.lead(), rec({ id: 'OUT-3', fromMe: true, jid: LID, jidAlt: PHONE_JID, ...over }));
+    assert.equal(out.senderKind, 'owner_number', label);
+    const row = h.inbox.getOutbox('SND-unsure-2');
+    assert.deepEqual([row.status, row.key_id], ['uncertain', null], label);
+    assert.equal(h.inbox.messagesFor(LEAD_ID)[0].sender_user_id, null, label);
+    h.s.close();
+  }
+});
+
+test('an owner_number record makes the owner the handler only when nobody handles the chat', () => {
+  const typed = rec({ id: 'OWN-1', fromMe: true, text: TYPED });
+
+  const free = harness();
+  assert.equal(free.ingest(free.lead(), typed).senderKind, 'owner_number');
+  assert.equal(free.lead().handler_user_id, free.owner.user_id);
+  free.s.close();
+
+  const taken = harness();
+  taken.inbox.setHandler(LEAD_ID, taken.staff.user_id);
+  taken.ingest(taken.lead(), typed);
+  assert.equal(taken.lead().handler_user_id, taken.staff.user_id, 'an existing handler is kept');
+  taken.s.close();
+
+  const noOwner = harness({ ownerUserId: () => null });
+  noOwner.ingest(noOwner.lead(), typed);
+  assert.equal(noOwner.lead().handler_user_id, null, 'no owner account, no handler');
+  noOwner.s.close();
+});
+
+test('a human outbound clears "needs a human"; a client message does not', () => {
+  const h = harness({ lead: { needs_human: 1 } });
+  h.ingest(h.lead(), rec({ id: 'IN-9' }));
+  assert.equal(h.lead().needs_human, 1);
+  h.ingest(h.lead(), rec({ id: 'OWN-9', fromMe: true, text: TYPED, ts: NOW - 30_000 }));
+  assert.equal(h.lead().needs_human, 0);
+  h.s.close();
+});
+
+test('a lead learns its lid, phone jid and phone from a record it received, only into empty fields', () => {
+  // Phone known, jids not yet: both come from the lid chat and its alt.
+  const a = harness({ lead: { wa_jid: null, wa_lid: null } });
+  a.ingest(a.lead(), rec());
+  assert.deepEqual([a.lead().wa_lid, a.lead().wa_jid, a.lead().phone_e164], [LID, PHONE_JID, PHONE]);
+  assert.ok(a.logs.some((e) => e.evt === 'inbox.learned' && e.fields.includes('wa_lid') && e.fields.includes('wa_jid')));
+  assertClean(a.logs);
+  a.s.close();
+
+  // Never overwrites.
+  const b = harness({ lead: { wa_lid: '999888777666555@lid' } });
+  b.ingest(b.lead(), rec());
+  assert.equal(b.lead().wa_lid, '999888777666555@lid');
+  b.s.close();
+
+  // A lid-only chat learns its phone.
+  const c = harness({ lead: { phone_e164: null, wa_jid: null } });
+  c.ingest(c.lead(), rec());
+  assert.deepEqual([c.lead().phone_e164, c.lead().wa_jid], [PHONE, PHONE_JID]);
+  c.s.close();
+
+  // Not from a record we sent: its alt may be our own number.
+  const d = harness({ lead: { wa_jid: null, wa_lid: null } });
+  d.ingest(d.lead(), rec({ id: 'OWN-2', fromMe: true }));
+  assert.deepEqual([d.lead().wa_lid, d.lead().wa_jid], [null, null]);
+  d.s.close();
+
+  // Never a phone or jid another lead already holds (phone_e164 is unique).
+  const e = harness({ lead: { phone_e164: null, wa_jid: null } });
+  e.s.insertLead({ ...LEAD, lead_id: OTHER_LEAD_ID, wa_lid: null });
+  assert.equal(e.ingest(e.lead(), rec()).stored, true, 'the message is still stored');
+  assert.deepEqual([e.lead().phone_e164, e.lead().wa_jid], [null, null]);
+  e.s.close();
+});
+
+test('re-ingesting a record changes nothing: one row, and a reassignment to nobody is not undone', () => {
+  const h = harness();
+  const typed = rec({ id: 'OWN-3', fromMe: true, text: TYPED });
+  assert.deepEqual(h.ingest(h.lead(), typed), { stored: true, inserted: true, senderKind: 'owner_number' });
+  assert.equal(h.lead().handler_user_id, h.owner.user_id);
+  h.inbox.setHandler(LEAD_ID, null); // someone reassigned the chat to nobody
+  assert.deepEqual(h.ingest(h.lead(), typed), { stored: true, inserted: false, senderKind: 'owner_number' });
+  assert.equal(h.lead().handler_user_id, null);
+  h.ingest(h.lead(), rec());
+  h.ingest(h.lead(), rec());
+  assert.equal(h.inbox.messagesFor(LEAD_ID).length, 2);
+  h.s.close();
+});
+
+test("a reply first stored as the owner's number becomes staff once its outbox row carries the message id", () => {
+  const h = harness();
+  h.inbox.insertOutbox({ send_id: 'SND-slow-1', lead_id: LEAD_ID, jid: PHONE_JID, text: REPLY, user_id: h.staff.user_id, sender_kind: 'staff' });
+  const record = rec({ id: 'OUT-4', fromMe: true, jid: PHONE_JID, jidAlt: null, text: REPLY, ts: NOW + 3 * 60_000 });
+  assert.equal(h.ingest(h.lead(), record).senderKind, 'owner_number', 'too far from the send to be matched by its text');
+  h.inbox.updateOutbox('SND-slow-1', { status: 'accepted', key_id: 'OUT-4' }); // the slow send finally answered
+  assert.deepEqual(h.ingest(h.lead(), record), { stored: true, inserted: false, senderKind: 'staff' });
+  const [m] = h.inbox.messagesFor(LEAD_ID);
+  assert.deepEqual([m.sender_kind, m.sender_user_id], ['staff', h.staff.user_id]);
+  h.s.close();
+});
+
+test('logs carry ids and field names only — never text, a phone number, a lid or a name', () => {
+  const h = harness({ lead: { wa_jid: null, wa_lid: null } });
+  h.inbox.insertOutbox({ send_id: 'SND-log-1', lead_id: LEAD_ID, jid: PHONE_JID, text: REPLY, user_id: h.staff.user_id, sender_kind: 'staff', status: 'uncertain' });
+  h.ingest(h.lead(), rec({ pushName: 'Sara' }));
+  h.ingest(h.lead(), rec({ id: 'OUT-5', fromMe: true, text: REPLY, ts: NOW }));
+  h.ingest(h.lead(), rec({ id: 'OWN-5', fromMe: true, text: TYPED, ts: NOW + 1_000 }));
+  assert.ok(h.logs.length >= 2, 'the learning and the resolution were both logged');
+  assertClean(h.logs);
+  h.s.close();
+});
+```
+
+- [ ] **Step 2: Run to see it fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/inbox-ingest.test.mjs`
+Expected: FAIL — `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '…/services/api/lib/inbox/ingest.mjs'` (the store from Task 4 exists; the ingest module does not yet).
+
+- [ ] **Step 3: Implement** — create `services/api/lib/inbox/ingest.mjs`:
+
+```js
+/**
+ * One WhatsApp record of a Bona inbox chat → one stored message (2026-09-27 design §4.2–§4.3).
+ *
+ * The poller, the join backfill and the thread refresh all hand records over here, so what
+ * a stored message says about itself is decided in one place:
+ *
+ *   - only a chat that is `in` the inbox is stored (P2-1). The lead is read again first: a
+ *     chat the owner marked *Not a client* a moment ago has just had its transcript purged,
+ *     and a caller still holding the old row must not write it back.
+ *   - a team member's or a never-list number is never a client's chat (§3.5, P2-7), however
+ *     the row came to be `in` — a Ref lead from before its number joined the team, say. The
+ *     check is made here, not left to each caller: the poller screens its records, but a
+ *     per-chat read (join history, catch-up, refresh) goes straight to a lead.
+ *   - a record with no id cannot be de-duplicated, and noise — reactions, deletes and edits,
+ *     poll votes, key-distribution records — is never a bubble (P2-14). Neither is stored.
+ *   - a login code the sender sent is never stored (§4.2: the code lives only in the WhatsApp
+ *     message). Its outbox row keeps the message id for the day's count, so the record is
+ *     recognised by that id and refused before anything is written.
+ *   - who sent an outbound record (P2-17). The dashboard's own sends are found by the
+ *     WhatsApp message id their send came back with. A send that never came back
+ *     (`uncertain`, or `pending` when a restart cut it off) is found by its exact text within
+ *     two minutes, anywhere in the LEAD's chat — the reply went to the phone jid, but
+ *     Evolution may file the record under the chat's `@lid`. Anything else was typed on the
+ *     owner's phone or sent by Lisa for him, which cannot be told apart: `owner_number`.
+ *   - a human outbound seen for the first time clears "needs a human" (P2-16) and gives a
+ *     chat nobody handles a handler (P2-15): the staff member who replied, or the owner for
+ *     his own number. Only the first time — a refresh reads old records again, and must not
+ *     undo a later "needs a human" or somebody's reassignment of the chat to nobody.
+ *   - a lead learns its lid, phone jid and phone from a record it RECEIVED, into empty
+ *     fields only.
+ *
+ * Nothing here logs text, a phone number, a lid or a name — ids and field names only.
+ */
+import { createTeam, isTeamLid } from '../team.mjs';
+import { jidsOf } from '../wa-poller.mjs';
+
+/** How far apart an unconfirmed send and the record that confirms it may be (P2-17). */
+export const RESOLVE_WINDOW_MS = 120_000;
+
+/** Outbound senders that are a person answering — as opposed to Dana. */
+const HUMAN_SENDERS = new Set(['staff', 'owner_number']);
+
+/**
+ * A team member's or a never-list number, however the lead row holds it: its phone, the
+ * number in its phone jid, or a lid the poller learned for a team member. `createTeam` only
+ * prepares statements when they are first used, so this second instance costs nothing.
+ */
+function excludedByTeam(db) {
+  const team = createTeam(db);
+  return (lead) => team.isExcludedPhone(lead.phone_e164)
+    || team.isExcludedPhone(jidsOf({ jid: lead.wa_jid }).phone)
+    || isTeamLid(db, lead.wa_lid);
+}
+
+/**
+ * @param {object} o
+ * @param {ReturnType<import('../db.mjs').openDb>} o.db
+ * @param {ReturnType<import('./store.mjs').createInboxStore>} o.inbox
+ * @param {() => string|null} [o.ownerUserId] the env owner's `users.user_id`: the handler of a
+ *        chat his own phone answers first
+ * @param {((lead: object) => boolean)|null} [o.isExcludedLead] true for a chat that is never a
+ *        client's; defaults to the team and never-list tables in `db`
+ * @param {(e: object) => void} [o.log]
+ * @param {() => number} [o.now]
+ */
+export function createIngest({
+  db, inbox, ownerUserId = () => null, isExcludedLead = null, log = () => {}, now = () => Date.now(),
+} = {}) {
+  if (!db || !inbox) throw new TypeError('createIngest needs the store and the inbox store');
+  const isExcluded = isExcludedLead ?? excludedByTeam(db);
+
+  /** The outbox row an outbound record is, when the dashboard sent it; `via` says how it was found. */
+  function outboxRowFor(leadId, rec, body, ts) {
+    const byKey = inbox.outboxByKey(rec.id);
+    if (byKey) return { row: byKey, via: 'key' };
+    if (!body) return null;
+    const byText = inbox.resolveUncertain({ leadId, text: body, ts, windowMs: RESOLVE_WINDOW_MS });
+    return byText ? { row: byText, via: 'text' } : null;
+  }
+
+  /**
+   * Fill the lead's empty lid / phone jid / phone from a record it received. Not from one we
+   * sent: lib/evolution.mjs folds `key.senderPn` into the same `jidAlt`, and on an outbound
+   * record that can be our own number — the same caution as the poller's team pairing. Never
+   * a value another lead already holds: `phone_e164` is unique, and two leads on one jid would
+   * make every later lookup by that jid a coin toss.
+   */
+  function learn(lead, rec) {
+    const { phone, waJid, waLid } = jidsOf(rec);
+    const free = (holder) => !holder || holder.lead_id === lead.lead_id;
+    const patch = {};
+    if (waLid && !lead.wa_lid && free(db.getLeadByJid(waLid))) patch.wa_lid = waLid;
+    if (waJid && !lead.wa_jid && free(db.getLeadByJid(waJid))) patch.wa_jid = waJid;
+    if (phone && !lead.phone_e164 && free(db.getLeadByPhone(phone))) patch.phone_e164 = phone;
+    const fields = Object.keys(patch);
+    if (!fields.length) return;
+    db.updateLead(lead.lead_id, { ...patch, updated: now() });
+    log({ evt: 'inbox.learned', leadId: lead.lead_id, fields });
+  }
+
+  /**
+   * @param {object|null} lead  a `leads` row; only its `lead_id` is trusted, the row is read again
+   * @param {import('../evolution.mjs').NormalisedRecord} rec
+   * @returns {{ stored: false, reason: 'not_in_inbox'|'excluded'|'no_id'|'noise'|'code' }
+   *          | { stored: true, inserted: boolean, senderKind: 'client'|'staff'|'dana'|'owner_number' }}
+   */
+  function ingest(lead, rec) {
+    const leadId = lead?.lead_id ?? null;
+    return db.transaction(() => {
+      const current = leadId ? db.getLead(leadId) : null;
+      if (current?.inbox_state !== 'in') return { stored: false, reason: 'not_in_inbox' };
+      if (isExcluded(current)) return { stored: false, reason: 'excluded' };
+      if (!rec?.id) return { stored: false, reason: 'no_id' };
+      if (rec.noise) return { stored: false, reason: 'noise' };
+
+      const direction = rec.fromMe ? 'out' : 'in';
+      const ts = Number.isFinite(rec.ts) ? rec.ts : now();
+      const body = typeof rec.text === 'string' ? rec.text : '';
+      const text = body || null;
+      // A photo keeps its caption as text; a record with neither text nor a known media
+      // type still shows up as a bubble, so the team knows something arrived.
+      const mediaType = rec.media ?? (text ? null : '[message]');
+
+      let senderKind = 'client';
+      let senderUserId = null;
+      let match = null;
+      if (direction === 'out') {
+        match = outboxRowFor(current.lead_id, rec, body, ts);
+        // Refused before anything is written, the row's status included.
+        if (match?.row.sender_kind === 'code') return { stored: false, reason: 'code' };
+        const kind = match?.row.sender_kind;
+        senderKind = kind === 'staff' || kind === 'dana' ? kind : 'owner_number';
+        senderUserId = senderKind === 'owner_number' ? null : (match.row.user_id ?? null);
+      } else {
+        learn(current, rec);
+      }
+
+      const { inserted } = inbox.upsertMessage({
+        key_id: rec.id, lead_id: current.lead_id, jid: rec.jid ?? null, direction,
+        sender_kind: senderKind, sender_user_id: senderUserId, text, media_type: mediaType, ts,
+      });
+
+      if (match && match.row.status !== 'accepted') {
+        inbox.updateOutbox(match.row.send_id, { status: 'accepted', key_id: rec.id });
+        log({ evt: 'inbox.outbox.resolved', leadId: current.lead_id, sendId: match.row.send_id, via: match.via });
+      }
+
+      if (inserted && HUMAN_SENDERS.has(senderKind)) {
+        if (current.needs_human) inbox.setNeedsHuman(current.lead_id, 0);
+        if (!current.handler_user_id) {
+          const handler = senderKind === 'staff' ? senderUserId : ownerUserId();
+          if (handler) inbox.setHandler(current.lead_id, handler);
+        }
+      }
+      return { stored: true, inserted, senderKind };
+    });
+  }
+
+  return { ingest };
+}
+```
+
+- [ ] **Step 4: Run**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/inbox-ingest.test.mjs`
+Expected: PASS (16 tests, 0 fail).
+
+- [ ] **Step 5: Run the full suite**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/*.test.mjs`
+Expected: all pass, 0 fail (the Task 4 total plus these 16). No existing test changes: nothing imports `lib/inbox/ingest.mjs` yet, and `jidsOf` in `lib/wa-poller.mjs` and `createTeam`/`isTeamLid` in `lib/team.mjs` are only imported, not changed.
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd /home/azoz778/bona-wt/team-inbox && git add services/api/lib/inbox/ingest.mjs services/api/test/inbox-ingest.test.mjs
+git commit -m "inbox: ingest one Evolution record of an inbox chat
+
+Sender from the outbox (by key id, else an uncertain/pending send by its
+text within 2 min at lead level), owner_number otherwise; first human
+outbound clears needs_human and sets a missing handler; lid/phone learned
+only from received records into empty fields; noise and id-less records
+refused. Ingest makes its own exclusion check (team numbers, never list,
+learned team lids) whatever the caller, and never stores a login code
+recognised by its outbox key id; nothing logged but ids and field names.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+### Task 6: Backfill — `lib/inbox/backfill.mjs`
+
+Per-chat Evolution reads (P2-2): the join history (24 h automatic, 30 days owner-vouched) and the thread refresh (amendments A1 and A2: the newest 50 per question from the chat's history floor — 24 h before it joined, never past the five-year retention horizon — to now; about 3 s at most, each request capped at 2.5 s or what is left, the rest skipped and the result `partial` once the budget is spent; the same chat not read again within 5 s). One chat is three questions — `remoteJidAlt` = phone jid, `remoteJid` = phone jid, `remoteJid` = lid — de-duplicated by `key.id`, groups and broadcasts skipped; the lid question is derived from a fresh read of the lead after the first two, because ingest (Task 5) can learn the lid from them. Uses Task 2's `findMessagesPage` by default; never throws.
+
+**Files:**
+- Create: `services/api/lib/inbox/backfill.mjs`
+- Test: `services/api/test/inbox-backfill.test.mjs`
+
+- [ ] **Step 1: Write the failing tests** — create `services/api/test/inbox-backfill.test.mjs`:
+
+```js
+/**
+ * Per-chat reads for the Bona inbox. Evolution is never contacted: every test injects
+ * `find` and records each question it is asked (`where`, `page`, `offset`, and a refresh's
+ * `timeoutMs`), except the last, which stubs `fetchImpl` to prove the default wiring builds
+ * the request the live instance answered on 2026-09-28. Records go through the real ingest
+ * into a real store. The clock is injected; a slow Evolution is a `find` that moves it.
+ */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { openDb } from '../lib/db.mjs';
+import { createTeam } from '../lib/team.mjs';
+import { EvolutionError, PAGE_SIZE } from '../lib/evolution.mjs';
+import { createInboxStore, RETENTION_MS } from '../lib/inbox/store.mjs';
+import { createIngest } from '../lib/inbox/ingest.mjs';
+import {
+  BACKFILL_MAX_PAGES, JOIN_HISTORY_MS, OWNER_HISTORY_MS, REFRESH_LIMIT, createBackfill, phoneJidOf,
+} from '../lib/inbox/backfill.mjs';
+
+const NOW = Date.UTC(2026, 8, 28, 12, 0, 0);
+const LEAD_ID = 'LEAD-20260928-0000aaaa';
+const PHONE = '966500000001';
+const PHONE_JID = `${PHONE}@s.whatsapp.net`;
+const LID = '111222333444555@lid';
+/** `messageTimestamp` for a 24 h join ending now. */
+const DAY = { gte: '2026-09-27T12:00:00.000Z', lte: '2026-09-28T12:00:00.000Z' };
+
+const LEAD = {
+  lead_id: LEAD_ID, created: NOW - 3_600_000, updated: NOW - 3_600_000, phone_e164: PHONE, wa_jid: PHONE_JID, wa_lid: LID,
+  channel: 'whatsapp', match_method: 'ref', stage: 'new', inbox_state: 'in', inbox_since: NOW - 3_600_000,
+};
+/** LEAD's history floor (amendment A1): 24 h before it joined the inbox. */
+const FLOOR = LEAD.inbox_since - JOIN_HISTORY_MS;
+/** `messageTimestamp` for a refresh of LEAD at NOW: from its floor to now. */
+const SINCE_JOIN = { gte: '2026-09-27T11:00:00.000Z', lte: '2026-09-28T12:00:00.000Z' };
+
+/** One normalised record, as lib/evolution.mjs hands them over: inbound, under the lid, phone as alt. */
+const rec = (over = {}) => ({
+  id: 'K1', jid: LID, jidAlt: PHONE_JID, fromMe: false, ts: NOW - 600_000, text: 'Hi', pushName: 'Sara',
+  contextInfo: null, messageType: 'conversation', media: null, fileName: null, noise: false, ...over,
+});
+
+/** Answers each question from a table: `alt:<jid>` / `jid:<jid>` → pages of records, newest first. */
+function router(table) {
+  return ({ where, page }) => {
+    const k = where.key.remoteJidAlt ? `alt:${where.key.remoteJidAlt}` : `jid:${where.key.remoteJid}`;
+    const pages = table[k] ?? [];
+    return { records: pages[page - 1] ?? [], total: pages.flat().length, pages: pages.length };
+  };
+}
+
+/**
+ * Evolution's per-chat read over one pool of records, answered the way the live instance
+ * answered it on 2026-09-28: the key clause, the `messageTimestamp` window (both bounds),
+ * newest first, `offset` records a page, with the sizes stated.
+ */
+function pool(records) {
+  return ({ where, page, offset }) => {
+    const { key, messageTimestamp: span } = where;
+    const hits = records
+      .filter((r) => (key.remoteJidAlt ? r.jidAlt === key.remoteJidAlt : r.jid === key.remoteJid))
+      .filter((r) => !span || (r.ts >= Date.parse(span.gte) && r.ts <= Date.parse(span.lte)))
+      .sort((a, b) => b.ts - a.ts);
+    return { records: hits.slice((page - 1) * offset, page * offset), total: hits.length, pages: Math.ceil(hits.length / offset) };
+  };
+}
+
+/** `serve(q, { tick })` answers each question; `tick(ms)` moves the one clock every part reads. */
+function harness({ serve = router({}), lead = {}, env = {}, injectFind = true, fetchImpl = undefined, ingest = undefined } = {}) {
+  const s = openDb(':memory:');
+  let clock = NOW;
+  const tick = (ms) => { clock += ms; };
+  const team = createTeam(s, { now: () => clock });
+  const owner = team.ensureOwner({ phone: '966593296933', name: 'Abdulaziz' });
+  const inbox = createInboxStore(s, { now: () => clock });
+  const logs = [];
+  const log = (o) => logs.push(o);
+  const real = createIngest({ db: s, inbox, ownerUserId: () => owner.user_id, log, now: () => clock });
+  const ingested = [];
+  const calls = [];
+  const backfill = createBackfill({
+    env, db: s, log, now: () => clock,
+    ingest: ingest ?? ((l, r) => { ingested.push(r.id); return real.ingest(l, r); }),
+    ...(injectFind ? { find: async (q) => { calls.push(q); return serve(q, { tick }); } } : {}),
+    ...(fetchImpl ? { fetchImpl } : {}),
+  });
+  s.insertLead({ ...LEAD, ...lead });
+  return { s, inbox, backfill, calls, ingested, logs, tick, now: () => clock, lead: () => s.getLead(LEAD_ID) };
+}
+
+/** Every phone number, lid and name these tests use. None may reach a log line. */
+const PERSONAL = [PHONE, '111222333444555', '966593296933', 'Sara', 'Abdulaziz'];
+function assertClean(logs) {
+  const out = JSON.stringify(logs);
+  for (const needle of PERSONAL) assert.equal(out.includes(needle), false, 'a log line carries personal data');
+}
+
+test("phoneJidOf: the lead's phone jid without its device, else one built from a real international phone", () => {
+  assert.equal(phoneJidOf({ wa_jid: '966500000001:12@s.whatsapp.net', phone_e164: '966599999999' }), PHONE_JID);
+  assert.equal(phoneJidOf({ wa_jid: null, phone_e164: PHONE }), PHONE_JID);
+  assert.equal(phoneJidOf({ wa_jid: LID, phone_e164: PHONE }), PHONE_JID, 'a lid in the jid column is not a phone');
+  assert.equal(phoneJidOf({ wa_jid: '0500000001@s.whatsapp.net', phone_e164: null }), null, 'local trunk format');
+  for (const phone of ['0500000001', '1234567', '1234567890123456', 'abc', '', null]) {
+    assert.equal(phoneJidOf({ wa_jid: null, phone_e164: phone }), null, String(phone));
+  }
+  assert.equal(phoneJidOf({ wa_jid: null, wa_lid: LID, phone_e164: null }), null, 'lid-only: no phone to build');
+  assert.equal(phoneJidOf(null), null);
+  const h = harness();
+  assert.equal(h.backfill.phoneJidOf(h.lead()), PHONE_JID);
+  assert.equal(h.backfill.configured, true);
+  h.s.close();
+});
+
+test('history asks the three questions in the join window, de-duplicates by id and stores each record once', async () => {
+  const h = harness({
+    serve: router({
+      [`alt:${PHONE_JID}`]: [[rec({ id: 'K2', ts: NOW - 300_000 }), rec({ id: 'K1', ts: NOW - 600_000 })]],
+      // Sent through the API to the phone number: filed under the phone jid itself.
+      [`jid:${PHONE_JID}`]: [[rec({ id: 'K3', jid: PHONE_JID, jidAlt: null, fromMe: true, text: 'Welcome', ts: NOW - 420_000 })]],
+      [`jid:${LID}`]: [[rec({ id: 'K4', jidAlt: null, ts: NOW - 120_000 }), rec({ id: 'K2', ts: NOW - 300_000 })]],
+    }),
+  });
+  const out = await h.backfill.history(h.lead(), { sinceTs: NOW - JOIN_HISTORY_MS });
+  assert.deepEqual(out, { stored: 4, scanned: 5, truncated: false });
+  assert.deepEqual(h.calls, [
+    { where: { key: { remoteJidAlt: PHONE_JID }, messageTimestamp: DAY }, page: 1, offset: PAGE_SIZE },
+    { where: { key: { remoteJid: PHONE_JID }, messageTimestamp: DAY }, page: 1, offset: PAGE_SIZE },
+    { where: { key: { remoteJid: LID }, messageTimestamp: DAY }, page: 1, offset: PAGE_SIZE },
+  ]);
+  assert.deepEqual(h.ingested, ['K1', 'K2', 'K3', 'K4'], 'each id once, oldest first within each question');
+  const stored = h.inbox.messagesFor(LEAD_ID);
+  assert.deepEqual(stored.map((m) => m.key_id), ['K1', 'K3', 'K2', 'K4']);
+  assert.equal(stored.find((m) => m.key_id === 'K3').sender_kind, 'owner_number');
+  // Asking again stores nothing new.
+  assert.deepEqual(await h.backfill.history(h.lead(), { sinceTs: NOW - JOIN_HISTORY_MS }), { stored: 0, scanned: 5, truncated: false });
+  h.s.close();
+});
+
+test('a lid learned from the remoteJidAlt question is then asked for; with no lid there are only two questions', async () => {
+  const learns = harness({
+    lead: { wa_lid: null },
+    serve: router({
+      [`alt:${PHONE_JID}`]: [[rec({ id: 'K1' })]],
+      [`jid:${LID}`]: [[rec({ id: 'K9', jidAlt: null, ts: NOW - 60_000 })]],
+    }),
+  });
+  const out = await learns.backfill.history(learns.lead(), { sinceTs: NOW - JOIN_HISTORY_MS });
+  assert.equal(learns.lead().wa_lid, LID);
+  assert.equal(learns.calls.length, 3);
+  assert.deepEqual(learns.calls[2].where.key, { remoteJid: LID });
+  assert.deepEqual(learns.ingested, ['K1', 'K9']);
+  assert.equal(out.stored, 2);
+  learns.s.close();
+
+  const none = harness({ lead: { wa_lid: null } });
+  await none.backfill.history(none.lead(), { sinceTs: NOW - JOIN_HISTORY_MS });
+  assert.deepEqual(none.calls.map((c) => c.where.key), [{ remoteJidAlt: PHONE_JID }, { remoteJid: PHONE_JID }]);
+  none.s.close();
+});
+
+test('a lid-only chat is asked for by its lid alone, here over the 30 days an owner join reads', async () => {
+  const h = harness({
+    lead: { phone_e164: null, wa_jid: null },
+    serve: router({ [`jid:${LID}`]: [[rec({ id: 'K5', jidAlt: null })]] }),
+  });
+  const out = await h.backfill.history(h.lead(), { sinceTs: NOW - OWNER_HISTORY_MS, untilTs: NOW });
+  assert.deepEqual(h.calls, [{
+    where: { key: { remoteJid: LID }, messageTimestamp: { gte: '2026-08-29T12:00:00.000Z', lte: '2026-09-28T12:00:00.000Z' } },
+    page: 1, offset: PAGE_SIZE,
+  }]);
+  assert.deepEqual(out, { stored: 1, scanned: 1, truncated: false });
+  h.s.close();
+});
+
+test('paging follows the stated page count up to the cap, and says so — in counts — when a question has more', async () => {
+  const pages = (n, prefix) => Array.from({ length: n }, (_, i) => [rec({ id: `${prefix}-${i}`, ts: NOW - 100_000 + i })]);
+  const altPages = (h) => h.calls.filter((c) => c.where.key.remoteJidAlt).map((c) => c.page);
+
+  const short = harness({ serve: router({ [`alt:${PHONE_JID}`]: pages(3, 'S') }) });
+  assert.deepEqual(await short.backfill.history(short.lead(), { sinceTs: NOW - JOIN_HISTORY_MS }), { stored: 3, scanned: 3, truncated: false });
+  assert.deepEqual(altPages(short), [1, 2, 3]);
+  assert.equal(short.logs.some((e) => e.evt === 'inbox.backfill.truncated'), false);
+  short.s.close();
+
+  const long = harness({ serve: router({ [`alt:${PHONE_JID}`]: pages(12, 'L') }) });
+  const out = await long.backfill.history(long.lead(), { sinceTs: NOW - JOIN_HISTORY_MS });
+  assert.deepEqual(out, { stored: BACKFILL_MAX_PAGES, scanned: BACKFILL_MAX_PAGES, truncated: true });
+  assert.deepEqual(altPages(long), Array.from({ length: BACKFILL_MAX_PAGES }, (_, i) => i + 1));
+  assert.deepEqual(long.logs.find((e) => e.evt === 'inbox.backfill.truncated'), {
+    level: 'warn', evt: 'inbox.backfill.truncated', leadId: LEAD_ID, clause: 'phone_alt', pages: 12, total: 12, maxPages: BACKFILL_MAX_PAGES,
+  });
+  assertClean(long.logs);
+  long.s.close();
+
+  // An answer that does not state its pages is read until a short page.
+  const full = Array.from({ length: PAGE_SIZE }, (_, i) => rec({ id: `F-${i}`, ts: NOW - 500_000 + i }));
+  const unsized = ({ where, page }) => {
+    if (!where.key.remoteJidAlt) return { records: [], total: null, pages: null };
+    return { records: page === 1 ? full : [rec({ id: 'F-last', ts: NOW - 600_000 })], total: null, pages: null };
+  };
+  const bare = harness({ serve: unsized });
+  assert.deepEqual(await bare.backfill.history(bare.lead(), { sinceTs: NOW - JOIN_HISTORY_MS }), { stored: PAGE_SIZE + 1, scanned: PAGE_SIZE + 1, truncated: false });
+  assert.deepEqual(altPages(bare), [1, 2]);
+  bare.s.close();
+  const capped = harness({ serve: unsized });
+  assert.equal((await capped.backfill.history(capped.lead(), { sinceTs: NOW - JOIN_HISTORY_MS, maxPages: 1 })).truncated, true, 'a full last page may hide more');
+  assert.deepEqual(altPages(capped), [1]);
+  capped.s.close();
+});
+
+test('groups and broadcasts are skipped whatever they carry', async () => {
+  const h = harness({
+    serve: router({
+      [`alt:${PHONE_JID}`]: [[
+        rec({ id: 'G1', jid: '120363135705763548@g.us' }),
+        rec({ id: 'B1', jid: 'status@broadcast' }),
+        rec({ id: 'K1' }),
+      ]],
+    }),
+  });
+  const out = await h.backfill.history(h.lead(), { sinceTs: NOW - JOIN_HISTORY_MS });
+  assert.deepEqual(h.ingested, ['K1']);
+  assert.deepEqual(out, { stored: 1, scanned: 3, truncated: false });
+  h.s.close();
+});
+
+test('refresh reads only from 24 h before the chat joined: every question carries the window, nothing older is stored', async () => {
+  const h = harness({
+    serve: pool([
+      // Private conversation from before the chat had anything to do with Bona.
+      rec({ id: 'OLD', ts: FLOOR - 60_000 }),
+      rec({ id: 'EDGE', ts: FLOOR }),
+      rec({ id: 'NEW', ts: NOW - 60_000 }),
+      // Sent through the API to the phone number: filed under the phone jid itself.
+      rec({ id: 'API', jid: PHONE_JID, jidAlt: null, fromMe: true, text: 'Welcome', ts: NOW - 30_000 }),
+    ]),
+  });
+  const out = await h.backfill.refresh(h.lead());
+  assert.equal(Date.parse(SINCE_JOIN.gte), FLOOR);
+  assert.deepEqual(h.calls, [
+    { where: { key: { remoteJidAlt: PHONE_JID }, messageTimestamp: SINCE_JOIN }, page: 1, offset: REFRESH_LIMIT, timeoutMs: 2_500 },
+    { where: { key: { remoteJid: PHONE_JID }, messageTimestamp: SINCE_JOIN }, page: 1, offset: REFRESH_LIMIT, timeoutMs: 2_500 },
+    { where: { key: { remoteJid: LID }, messageTimestamp: SINCE_JOIN }, page: 1, offset: REFRESH_LIMIT, timeoutMs: 2_500 },
+  ]);
+  assert.deepEqual(out, { stored: 3, scanned: 5, truncated: false });
+  assert.deepEqual(h.ingested, ['EDGE', 'NEW', 'API']);
+  assert.deepEqual(h.inbox.messagesFor(LEAD_ID).map((m) => m.key_id), ['EDGE', 'NEW', 'API'], 'OLD never reaches the store');
+  h.s.close();
+});
+
+test('the floor never reaches past the retention horizon, and is 24 h before now for a row with no join time', async () => {
+  const old = harness({ lead: { inbox_since: NOW - 6 * 365 * 86_400_000 } });
+  await old.backfill.refresh(old.lead());
+  const horizon = { gte: new Date(NOW - RETENTION_MS).toISOString(), lte: SINCE_JOIN.lte };
+  assert.deepEqual(old.calls.map((c) => c.where.messageTimestamp), [horizon, horizon, horizon],
+    'a transcript the five-year purge emptied is not stored again');
+  old.s.close();
+
+  const unset = harness({ lead: { inbox_since: null } });
+  await unset.backfill.refresh(unset.lead());
+  assert.deepEqual(unset.calls.map((c) => c.where.messageTimestamp), [DAY, DAY, DAY]);
+  unset.s.close();
+});
+
+test('a long chat is read for its newest 50 per question, and that is not truncation news', async () => {
+  const many = Array.from({ length: REFRESH_LIMIT + 1 }, (_, i) => rec({ id: `R-${i}`, ts: NOW - 100_000 + i }));
+  const h = harness({ serve: pool(many) });
+  const out = await h.backfill.refresh(h.lead());
+  assert.deepEqual(out, { stored: REFRESH_LIMIT, scanned: 2 * REFRESH_LIMIT, truncated: true });
+  const stored = h.inbox.messagesFor(LEAD_ID);
+  assert.equal(stored.length, REFRESH_LIMIT);
+  assert.equal(stored[0].key_id, 'R-1', 'the 51st newest is not fetched');
+  assert.equal(h.logs.some((e) => e.evt === 'inbox.backfill.truncated'), false, 'reading only the newest page is the point');
+  h.s.close();
+});
+
+test('a second refresh within 5 s asks nothing; at 5 s it reads again; 1,000 chats are remembered, the stalest forgotten', async () => {
+  const h = harness();
+  assert.deepEqual(await h.backfill.refresh(h.lead()), { stored: 0, scanned: 0, truncated: false });
+  assert.equal(h.calls.length, 3);
+  h.tick(4_999);
+  assert.deepEqual(await h.backfill.refresh(h.lead()), { skipped: 'recent' });
+  assert.equal(h.calls.length, 3, 'the thread page and the reply right after it: one read');
+  h.tick(1);
+  assert.deepEqual(await h.backfill.refresh(h.lead()), { stored: 0, scanned: 0, truncated: false });
+  assert.equal(h.calls.length, 6);
+  await h.backfill.refresh(h.lead(), { minIntervalMs: 0 });
+  assert.equal(h.calls.length, 9, 'a caller may ask for no pause');
+
+  // 1,000 other chats refreshed since (no phone and no lid, so nothing is asked for them):
+  // this one is forgotten, and is read again at once.
+  for (let i = 0; i < 1_000; i += 1) {
+    const id = `LEAD-20260928-${String(i).padStart(8, '0')}`;
+    h.s.insertLead({ lead_id: id, created: NOW, updated: NOW, channel: 'whatsapp', match_method: 'ref', stage: 'new', inbox_state: 'in', inbox_since: NOW });
+    await h.backfill.refresh({ lead_id: id });
+  }
+  assert.equal(h.calls.length, 9);
+  await h.backfill.refresh(h.lead());
+  assert.equal(h.calls.length, 12);
+  h.s.close();
+});
+
+test('refresh keeps to its budget: each question waits at most 2.5 s or what is left, and a spent budget skips the rest', async () => {
+  const answer = pool([
+    rec({ id: 'K1' }),
+    rec({ id: 'API', jid: PHONE_JID, jidAlt: null, fromMe: true, text: 'Welcome', ts: NOW - 30_000 }),
+  ]);
+  // Evolution takes 1.5 s over every question.
+  const slow = harness({ serve: (q, { tick }) => { tick(1_500); return answer(q); } });
+  const out = await slow.backfill.refresh(slow.lead());
+  assert.deepEqual(slow.calls.map((c) => [c.where.key, c.timeoutMs]), [
+    [{ remoteJidAlt: PHONE_JID }, 2_500],
+    [{ remoteJid: PHONE_JID }, 1_500],
+  ], 'the lid question was never asked');
+  assert.deepEqual(out, { stored: 2, scanned: 2, truncated: false, partial: true });
+  assert.equal(slow.now() - NOW, 3_000, 'the page waited no longer than the budget');
+  assert.deepEqual(slow.logs.find((e) => e.evt === 'inbox.refresh.partial'), {
+    level: 'warn', evt: 'inbox.refresh.partial', leadId: LEAD_ID, budgetMs: 3_000,
+  });
+  assertClean(slow.logs);
+  slow.s.close();
+
+  const tight = harness({ serve: (q, { tick }) => { tick(1_000); return answer(q); } });
+  assert.deepEqual(await tight.backfill.refresh(tight.lead(), { budgetMs: 1_000 }), { stored: 1, scanned: 1, truncated: false, partial: true });
+  assert.deepEqual(tight.calls.map((c) => c.timeoutMs), [1_000]);
+  tight.s.close();
+});
+
+test('a chat outside the inbox, an unknown lead, or no Evolution configured: nothing is read', async () => {
+  const unsure = harness({ lead: { inbox_state: 'unsure' } });
+  const skip = { stored: 0, scanned: 0, truncated: false };
+  assert.deepEqual(await unsure.backfill.history(unsure.lead(), { sinceTs: NOW - JOIN_HISTORY_MS }), { ...skip, skipped: 'not_in_inbox' });
+  assert.deepEqual(await unsure.backfill.refresh(unsure.lead()), { ...skip, skipped: 'not_in_inbox' });
+  assert.deepEqual(await unsure.backfill.refresh({ lead_id: 'LEAD-20260928-00000000' }), { ...skip, skipped: 'not_found' });
+  assert.deepEqual(await unsure.backfill.refresh(null), { ...skip, skipped: 'not_found' });
+  assert.equal(unsure.calls.length, 0);
+  unsure.s.close();
+
+  const fetched = [];
+  const off = harness({ injectFind: false, env: {}, fetchImpl: async (...args) => { fetched.push(args); throw new Error('must not be called'); } });
+  assert.equal(off.backfill.configured, false);
+  assert.deepEqual(await off.backfill.history(off.lead(), { sinceTs: NOW - JOIN_HISTORY_MS }), { ...skip, skipped: 'not_configured' });
+  assert.deepEqual(await off.backfill.refresh(off.lead()), { ...skip, skipped: 'not_configured' });
+  assert.equal(fetched.length, 0);
+  off.s.close();
+});
+
+test('a failed read never throws: it comes back as { error } and logs inbox.backfill.failed without numbers', async () => {
+  const throwing = (err) => () => { throw err; };
+  const cases = [
+    [new Error(`boom for ${PHONE_JID} and ${LID}`), 'failed'],
+    [new EvolutionError('POST /chat/findMessages/abdulaziz-personal -> HTTP 500', 500, { detail: PHONE }), 'http_500'],
+    [new EvolutionError('POST /chat/findMessages/abdulaziz-personal failed: network', 0, null), 'network'],
+    [new EvolutionError('POST /chat/findMessages/abdulaziz-personal failed: timeout', 0, null), 'timeout'],
+  ];
+  for (const [err, code] of cases) {
+    const h = harness({ serve: throwing(err) });
+    assert.deepEqual(await h.backfill.history(h.lead(), { sinceTs: NOW - JOIN_HISTORY_MS }), { error: code });
+    assert.deepEqual(await h.backfill.refresh(h.lead()), { error: code });
+    const failures = h.logs.filter((e) => e.evt === 'inbox.backfill.failed');
+    assert.equal(failures.length, 2, code);
+    assert.deepEqual([failures[0].leadId, failures[0].error, failures[0].level], [LEAD_ID, code, 'warn']);
+    assertClean(h.logs);
+    assert.equal(JSON.stringify(h.logs).includes('boom'), false, 'the thrown message is not logged');
+    h.s.close();
+  }
+
+  // A store failure inside ingest is caught the same way.
+  const broken = harness({
+    serve: router({ [`alt:${PHONE_JID}`]: [[rec()]] }),
+    ingest: () => { throw new Error(`SQLITE_BUSY while storing ${PHONE}`); },
+  });
+  assert.deepEqual(await broken.backfill.history(broken.lead(), { sinceTs: NOW - JOIN_HISTORY_MS }), { error: 'failed' });
+  assertClean(broken.logs);
+  broken.s.close();
+
+  // A window that is not two times is refused before anything is asked.
+  const window = harness();
+  assert.deepEqual(await window.backfill.history(window.lead()), { error: 'bad_window' });
+  assert.deepEqual(await window.backfill.history(window.lead(), { sinceTs: NOW - JOIN_HISTORY_MS, untilTs: 'now' }), { error: 'bad_window' });
+  assert.equal(window.calls.length, 0);
+  window.s.close();
+});
+
+test('default wiring: the real findMessages request body, answered and stored through the normaliser', async () => {
+  const requests = [];
+  const raw = {
+    key: { id: 'WIRE-1', fromMe: false, remoteJid: LID, remoteJidAlt: PHONE_JID },
+    pushName: 'Sara', messageType: 'conversation',
+    message: { conversation: 'Hello from the site' },
+    messageTimestamp: Math.floor((NOW - 60_000) / 1000),
+  };
+  const fetchImpl = async (url, init) => {
+    requests.push({ url, headers: init.headers, body: JSON.parse(init.body) });
+    const first = requests.length === 1;
+    const body = { messages: { total: first ? 1 : 0, pages: first ? 1 : 0, currentPage: 1, records: first ? [raw] : [] } };
+    return { ok: true, status: 200, text: async () => JSON.stringify(body) };
+  };
+  const h = harness({ injectFind: false, env: { EVOLUTION_API_URL: 'http://evo.test/', EVOLUTION_API_KEY: 'k' }, fetchImpl });
+  assert.equal(h.backfill.configured, true);
+  assert.deepEqual(await h.backfill.history(h.lead(), { sinceTs: NOW - JOIN_HISTORY_MS }), { stored: 1, scanned: 1, truncated: false });
+  assert.equal(requests.length, 3);
+  assert.equal(requests[0].url, 'http://evo.test/chat/findMessages/abdulaziz-personal');
+  assert.equal(requests[0].headers.apikey, 'k');
+  assert.deepEqual(requests[0].body, { where: { key: { remoteJidAlt: PHONE_JID }, messageTimestamp: DAY }, page: 1, offset: PAGE_SIZE });
+  assert.deepEqual(requests[1].body.where.key, { remoteJid: PHONE_JID });
+  assert.deepEqual(requests[2].body.where.key, { remoteJid: LID });
+  const [m] = h.inbox.messagesFor(LEAD_ID);
+  assert.deepEqual([m.key_id, m.text, m.ts, m.sender_kind], ['WIRE-1', 'Hello from the site', NOW - 60_000, 'client']);
+
+  requests.length = 0;
+  await h.backfill.refresh(h.lead());
+  assert.equal(requests.length, 3);
+  assert.deepEqual(requests[0].body, { where: { key: { remoteJidAlt: PHONE_JID }, messageTimestamp: SINCE_JOIN }, page: 1, offset: REFRESH_LIMIT });
+  assert.ok(requests.every((r) => r.body.where.messageTimestamp.gte === SINCE_JOIN.gte), 'no request reaches before the floor');
+  h.s.close();
+});
+```
+
+- [ ] **Step 2: Run to see it fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/inbox-backfill.test.mjs`
+Expected: FAIL — `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '…/services/api/lib/inbox/backfill.mjs'`.
+
+- [ ] **Step 3: Implement** — create `services/api/lib/inbox/backfill.mjs`:
+
+```js
+/**
+ * Per-chat reads from Evolution for the Bona inbox (2026-09-27 design §4.1, §4.3; P2-2).
+ *
+ * The poller reads every chat in one time window. This reads ONE chat, at two moments:
+ *
+ *   - `history`: a chat has just joined the inbox, so store what led up to the joining
+ *     message — the preceding 24 h for an automatic join (the "Hi" before the Ref code, the
+ *     owner's opening line), 30 days when the owner vouched for the chat himself.
+ *   - `refresh`: someone opens a thread or is about to reply, so fetch its newest messages
+ *     first — the page, and the stale-view check before a send, must not be one poll behind.
+ *     Never from further back than the chat's history floor, 24 h before it joined
+ *     (amendment A1): an automatic join only ever brings that much of a chat's past, and
+ *     without the floor, opening the thread would store months of the owner's earlier
+ *     private conversation. And cheap (A2): about 3 s at most, whatever Evolution is
+ *     doing, and the same chat is not read again within 5 s.
+ *
+ * Evolution files one WhatsApp chat under two jids (verified live 2026-09-28): what the
+ * client sends and what the owner types on his phone sit under the chat's privacy-mode
+ * `@lid`, with the client's phone jid alongside as `key.remoteJidAlt`; what the API sends to
+ * a phone number sits under the phone jid itself. So one chat is three questions —
+ * `remoteJidAlt` = phone jid, `remoteJid` = phone jid, `remoteJid` = lid — de-duplicated by
+ * message id. The lid question is asked last, from a fresh read of the lead: the first two
+ * can teach a lead its lid.
+ *
+ * Read-only, like lib/evolution.mjs: it only ever asks `POST /chat/findMessages`. What is
+ * stored is decided by lib/inbox/ingest.mjs, record by record. A read that fails never
+ * throws — the chat stays as it was, and the poller or the next refresh brings the messages
+ * in. Nothing here logs a phone number, a lid or text.
+ */
+import { EvolutionError, PAGE_SIZE, findMessagesPage, oldestFirst } from '../evolution.mjs';
+import { waConfig } from '../wa.mjs';
+import { RETENTION_MS } from './store.mjs';
+
+/** An automatic join stores this much of the chat before the joining message. */
+export const JOIN_HISTORY_MS = 24 * 3_600_000;
+/** An owner-button join (Move to Bona inbox, Add chat by phone number) stores this much. */
+export const OWNER_HISTORY_MS = 30 * 86_400_000;
+/** Pages per question on a history read: 10 × 100 records is more than any real chat window. */
+export const BACKFILL_MAX_PAGES = 10;
+/** How many of the newest records a refresh asks for, per question. */
+export const REFRESH_LIMIT = 50;
+
+/** No single refresh question waits longer than this, whatever is left of the budget (A2). */
+const REFRESH_REQUEST_MS = 2_500;
+/** How many chats' last refresh times are kept; past that, the stalest is forgotten (A2). */
+const REFRESH_MEMORY = 1_000;
+const iso = (ms) => new Date(ms).toISOString();
+
+const PHONE_JID_RE = /^(\d{8,15})(?::\d+)?@s\.whatsapp\.net$/;
+/** International digits: 8–15 of them, never the local trunk `0` first (see wa-send.mjs). */
+const PHONE_RE = /^[1-9]\d{7,14}$/;
+const isLid = (jid) => typeof jid === 'string' && jid.endsWith('@lid');
+/** A group or a broadcast is never a client's chat, whatever alt it happens to carry. */
+const isGroupOrBroadcast = (jid) => typeof jid === 'string' && (jid.endsWith('@g.us') || jid.endsWith('@broadcast'));
+
+/**
+ * The lead's phone-number jid: its stored `@s.whatsapp.net` jid with any device suffix
+ * stripped, else one built from `phone_e164`. Null for a chat known only by its lid —
+ * a lid's digits are an opaque id, never a phone number.
+ * @returns {string|null}
+ */
+export function phoneJidOf(lead) {
+  const m = PHONE_JID_RE.exec(String(lead?.wa_jid ?? ''));
+  if (m && !m[1].startsWith('0')) return `${m[1]}@s.whatsapp.net`;
+  const phone = String(lead?.phone_e164 ?? '');
+  return PHONE_RE.test(phone) ? `${phone}@s.whatsapp.net` : null;
+}
+
+/** What a failed read says about itself: a status or a kind of failure, never an error message — one could carry a jid. */
+function errorCode(err) {
+  if (err instanceof EvolutionError) {
+    if (err.status) return `http_${err.status}`;
+    return /timeout/.test(String(err.message)) ? 'timeout' : 'network';
+  }
+  return 'failed';
+}
+
+/**
+ * @param {object} o
+ * @param {object} [o.env]          for `waConfig`: Evolution URL, key and instance
+ * @param {ReturnType<import('../db.mjs').openDb>} o.db
+ * @param {(lead: object, rec: object) => any} o.ingest  lib/inbox/ingest.mjs `createIngest().ingest`
+ * @param {(q: { where: object, page: number, offset: number, timeoutMs?: number }) => Promise<{ records: object[], total: number|null, pages: number|null }>} [o.find]
+ *        injected in tests; defaults to `findMessagesPage` against the instance in `env`.
+ *        A refresh adds `timeoutMs`, its per-question share of the budget.
+ * @param {typeof globalThis.fetch} [o.fetchImpl]
+ * @param {(e: object) => void} [o.log]
+ * @param {() => number} [o.now]
+ * @param {number} [o.timeoutMs]  a history question's timeout
+ */
+export function createBackfill({
+  env = {}, db, ingest, find = null, fetchImpl = globalThis.fetch, log = () => {}, now = () => Date.now(), timeoutMs = 8000,
+} = {}) {
+  if (!db) throw new TypeError('createBackfill needs the store');
+  if (typeof ingest !== 'function') throw new TypeError('createBackfill needs the ingest function');
+  const wa = waConfig(env);
+  const configured = Boolean(find) || Boolean(wa.baseUrl && wa.apiKey);
+  const read = find ?? (({ where, page, offset, timeoutMs: requestMs = timeoutMs }) => findMessagesPage({
+    baseUrl: wa.baseUrl, apiKey: wa.apiKey, instance: wa.instance, where, page, offset, fetchImpl, timeoutMs: requestMs,
+  }));
+  const skipped = (reason) => ({ stored: 0, scanned: 0, truncated: false, skipped: reason });
+  /** lead_id → when it was last refreshed. A Map keeps insertion order, so the first key is the stalest. */
+  const refreshedAt = new Map();
+
+  function failed(leadId, error, name = null) {
+    log({ level: 'warn', evt: 'inbox.backfill.failed', leadId, error, ...(name ? { name } : {}) });
+    return { error };
+  }
+
+  /** The lead as it is now, or why a per-chat read has no business with it. */
+  function inboxLead(leadId) {
+    const lead = leadId ? db.getLead(leadId) : null;
+    if (!lead) return { skip: skipped('not_found') };
+    // Ingest would refuse every record of a chat that is not in the inbox anyway, and a
+    // chat the inbox has no business with should not even be fetched.
+    if (lead.inbox_state !== 'in') return { skip: skipped('not_in_inbox') };
+    return { lead };
+  }
+
+  /**
+   * The three questions for one chat, each paged newest-first inside `time` (the
+   * `messageTimestamp` window every question carries). With a `deadline` (a refresh), each
+   * question waits at most what is left of it, and none starts once it has passed: the
+   * tally then says `partial`.
+   */
+  async function readChat(lead, { time, offset, maxPages, noteTruncation, deadline = null }) {
+    const leadId = lead.lead_id;
+    const seen = new Set();
+    const tally = { stored: 0, scanned: 0, truncated: false };
+
+    async function ask(clause, key) {
+      const where = { key, messageTimestamp: time };
+      const batch = [];
+      for (let page = 1; page <= maxPages; page += 1) {
+        let query = { where, page, offset };
+        if (deadline !== null) {
+          const left = deadline - now();
+          if (left <= 0) {
+            tally.partial = true;
+            break;
+          }
+          query = { ...query, timeoutMs: Math.min(left, REFRESH_REQUEST_MS) };
+        }
+        const answer = await read(query);
+        const records = Array.isArray(answer) ? answer : (Array.isArray(answer?.records) ? answer.records : []);
+        tally.scanned += records.length;
+        for (const rec of records) {
+          if (!rec?.id || seen.has(rec.id) || isGroupOrBroadcast(rec.jid)) continue;
+          seen.add(rec.id);
+          batch.push(rec);
+        }
+        // Evolution says how many pages the question has; an answer that does not is read
+        // until a short page, the way lib/evolution.mjs `fetchWindow` always has.
+        const pages = Number.isFinite(answer?.pages) ? answer.pages : null;
+        const more = pages === null ? records.length >= offset : page < pages;
+        if (!more) break;
+        if (page === maxPages) {
+          tally.truncated = true;
+          if (noteTruncation) {
+            log({
+              level: 'warn', evt: 'inbox.backfill.truncated', leadId, clause, pages,
+              total: Number.isFinite(answer?.total) ? answer.total : null, maxPages,
+            });
+          }
+        }
+      }
+      // Oldest first, the order they happened in — like the poller.
+      for (const rec of oldestFirst(batch)) {
+        const out = await ingest(db.getLead(leadId), rec);
+        if (out?.stored && out.inserted) tally.stored += 1;
+      }
+    }
+
+    const phoneJid = phoneJidOf(lead);
+    if (phoneJid) {
+      await ask('phone_alt', { remoteJidAlt: phoneJid });
+      await ask('phone', { remoteJid: phoneJid });
+    }
+    // Read again: the two questions above may have taught this lead its lid.
+    const lid = db.getLead(leadId)?.wa_lid ?? null;
+    if (isLid(lid)) await ask('lid', { remoteJid: lid });
+    return tally;
+  }
+
+  /**
+   * Store a chat's messages between `sinceTs` and `untilTs` (ms).
+   * @returns {Promise<{ stored: number, scanned: number, truncated: boolean, skipped?: string } | { error: string }>}
+   */
+  async function history(lead, { sinceTs, untilTs = now(), maxPages = BACKFILL_MAX_PAGES } = {}) {
+    if (!configured) return skipped('not_configured');
+    const leadId = lead?.lead_id ?? null;
+    if (!Number.isFinite(sinceTs) || !Number.isFinite(untilTs)) return failed(leadId, 'bad_window');
+    try {
+      const { lead: current, skip } = inboxLead(leadId);
+      if (skip) return skip;
+      const cap = Math.max(1, Math.trunc(Number(maxPages)) || BACKFILL_MAX_PAGES);
+      return await readChat(current, {
+        time: { gte: iso(sinceTs), lte: iso(untilTs) }, offset: PAGE_SIZE, maxPages: cap, noteTruncation: true,
+      });
+    } catch (err) {
+      return failed(leadId, errorCode(err), err?.name ?? null);
+    }
+  }
+
+  /**
+   * Store a chat's newest `REFRESH_LIMIT` records per question, from its history floor to
+   * now (A1). The floor is 24 h before the chat joined — an owner-button join already stored
+   * its 30 days when it joined, so a refresh never needs to reach further — and never past
+   * the retention horizon, or a refresh would store again what the daily purge removed.
+   * Reading only the newest page is the point, so a longer chat is not "truncated" news.
+   *
+   * Bounded (A2): the thread page and the reply right after it both ask, so the same chat
+   * is not read again within `minIntervalMs`; and the read keeps to `budgetMs`, each question
+   * waiting at most 2.5 s or what is left. The time is noted before the read, so a failing
+   * Evolution is not asked again on every click either. Never throws.
+   * @returns {Promise<{ stored: number, scanned: number, truncated: boolean, partial?: true, skipped?: string }
+   *          | { skipped: 'recent' } | { error: string }>}
+   */
+  async function refresh(lead, { budgetMs = 3000, minIntervalMs = 5000 } = {}) {
+    if (!configured) return skipped('not_configured');
+    const leadId = lead?.lead_id ?? null;
+    try {
+      const { lead: current, skip } = inboxLead(leadId);
+      if (skip) return skip;
+      const t = now();
+      const last = refreshedAt.get(leadId);
+      if (last !== undefined && t - last < minIntervalMs) return { skipped: 'recent' };
+      refreshedAt.delete(leadId); // re-added at the end: the most recently refreshed
+      refreshedAt.set(leadId, t);
+      if (refreshedAt.size > REFRESH_MEMORY) refreshedAt.delete(refreshedAt.keys().next().value);
+      const floor = Math.max((current.inbox_since ?? t) - JOIN_HISTORY_MS, t - RETENTION_MS);
+      const out = await readChat(current, {
+        time: { gte: iso(floor), lte: iso(t) }, offset: REFRESH_LIMIT, maxPages: 1, noteTruncation: false, deadline: t + budgetMs,
+      });
+      if (out.partial) log({ level: 'warn', evt: 'inbox.refresh.partial', leadId, budgetMs });
+      return out;
+    } catch (err) {
+      return failed(leadId, errorCode(err), err?.name ?? null);
+    }
+  }
+
+  return { configured, phoneJidOf, history, refresh };
+}
+```
+
+- [ ] **Step 4: Run**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/inbox-backfill.test.mjs`
+Expected: PASS (14 tests, 0 fail).
+
+- [ ] **Step 5: Run the full suite**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/*.test.mjs`
+Expected: all pass, 0 fail (the Task 5 total plus these 14). No existing test changes: nothing imports `lib/inbox/backfill.mjs` yet. `backfill.mjs` deliberately does not import `lib/wa-poller.mjs`, so the poller task can import `JOIN_HISTORY_MS` from it without an import cycle; its one new import, `RETENTION_MS` from `./store.mjs`, adds none (the store imports only `./eligibility.mjs`).
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd /home/azoz778/bona-wt/team-inbox && git add services/api/lib/inbox/backfill.mjs services/api/test/inbox-backfill.test.mjs
+git commit -m "inbox: per-chat history and refresh reads from Evolution
+
+Three findMessages questions per chat (remoteJidAlt = phone jid,
+remoteJid = phone jid, remoteJid = lid re-derived after the first two),
+de-duplicated by key id, groups and broadcasts skipped, stored oldest-first
+through ingest. History pages to BACKFILL_MAX_PAGES and logs truncation in
+counts only. Refresh (amendments A1, A2) stores the newest 50 per clause
+since 24 h before the chat joined, never past the retention horizon, in a
+~3 s budget (2.5 s per request at most; the rest skipped as partial), and
+not twice in 5 s for one chat. Never throws: failures come back as
+{ error } with a status code, never a message.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 7: Sender — outbox ledger, durable day cap, per-user cap and staff replies (`lib/wa-send.mjs`)
+
+> Builds on Task 1 (schema v4: `wa_outbox`, `wa_messages`, the lead inbox columns in `COLUMNS.leads`) and Task 4 (`createInboxStore`). Implements P2-4 and the `lib/wa-send.mjs` block of the interface contract. `inbox` becomes a required argument of `createSender`, so this task also hands it over in `index.mjs` (Step 5) — without that, every test that builds the app fails with `TypeError: createSender needs the inbox store`. The fuller Phase 2 wiring (`recoverInterrupted()` at start-up, `app.inboxStore`, maintenance timer) stays with the `index.mjs` task.
+
+**Files:**
+- Modify: `services/api/lib/wa-send.mjs` (whole file replaced — most of it changes)
+- Modify: `services/api/index.mjs` (one import; the one sender gets the inbox store and the db)
+- Test: `services/api/test/wa-send.test.mjs` (whole file replaced: the 18 Phase 1 tests are kept — the harness now passes `inbox` + `db`, results that reached the outbox are compared without their random `sendId`, and the kind / switch / `BONA_WA_NOTIFY` tests also cover `staff` and `dana` — plus 31 new tests)
+
+- [ ] **Step 1: Write the failing tests** — replace the whole of `services/api/test/wa-send.test.mjs` with:
+
+```js
+/**
+ * The one door every message to someone other than the owner goes out through: a 1:1
+ * jid only, the owner's sending switch, limits shared by every sender, an outbox row
+ * written before every call, and team members' replies that are never sent twice.
+ */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { openDb } from '../lib/db.mjs';
+import { createTeam } from '../lib/team.mjs';
+import { createInboxStore } from '../lib/inbox/store.mjs';
+import {
+  createSender, replyJidFor, SEND_PER_MIN, SEND_PER_DAY, PER_RECIPIENT_PER_MIN, PER_USER_PER_MIN,
+} from '../lib/wa-send.mjs';
+
+const NOW = 1_790_500_000_000;
+const DAY = 86_400_000;
+const ENV = { EVOLUTION_API_URL: 'http://evo.test/', EVOLUTION_API_KEY: 'k', BONA_WA_INSTANCE: 'abdulaziz-personal' };
+const OWNER_JID = '966593296933@s.whatsapp.net';
+const CLIENT = '966511111111';
+const CLIENT_JID = `${CLIENT}@s.whatsapp.net`;
+const SID = 'sid_0123456789abcdef';
+
+const abortError = () => Object.assign(new Error('aborted'), { name: 'AbortError' });
+const netError = (code) => Object.assign(new Error('boom'), { cause: { code } });
+
+/**
+ * `reply(n)` answers the n-th HTTP call: `{ status, body }`, or `{ throws: err }` to
+ * make the call itself fail. Each call also records how many outbox rows were
+ * `pending` at that moment — the row must be written before the call, not after.
+ */
+function harness({ reply = () => ({ status: 201, body: { key: { id: 'KEY-1' } } }), env = ENV, limits } = {}) {
+  const s = openDb(':memory:');
+  let clock = NOW;
+  const team = createTeam(s, { now: () => clock });
+  const inbox = createInboxStore(s, { now: () => clock });
+  const calls = [];
+  const logs = [];
+  const pendingNow = () => s.db.prepare("SELECT COUNT(*) AS n FROM wa_outbox WHERE status = 'pending'").get().n;
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init, body: JSON.parse(init.body), pending: pendingNow() });
+    const r = await reply(calls.length);
+    if (r.throws) throw r.throws;
+    return { ok: r.status >= 200 && r.status < 300, status: r.status, text: async () => JSON.stringify(r.body ?? {}) };
+  };
+  const sender = createSender({ env, team, inbox, db: s, fetchImpl, now: () => clock, log: (o) => logs.push(o), limits });
+  return { s, team, inbox, sender, calls, logs, now: () => clock, tick: (ms) => { clock += ms; } };
+}
+
+/** A result that reached the outbox carries its send id; the rest compares as it always did. */
+function withoutSendId(out) {
+  assert.match(out.sendId, /^SND-/);
+  const rest = { ...out };
+  delete rest.sendId;
+  return rest;
+}
+
+const outboxRows = (h) => h.s.db.prepare('SELECT * FROM wa_outbox ORDER BY created, rowid').all();
+
+let seedSeq = 0;
+/** Rows written straight into the outbox, with a chosen age — the ledger a busy day leaves. */
+function seedOutbox(h, n, { created = h.now(), jid = '966502000000@s.whatsapp.net', status = 'accepted', kind = 'staff' } = {}) {
+  const stmt = h.s.db.prepare(`INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error)
+                               VALUES (?, NULL, ?, NULL, NULL, ?, ?, NULL, ?, ?, NULL)`);
+  h.s.transaction(() => {
+    for (let i = 0; i < n; i += 1) {
+      seedSeq += 1;
+      stmt.run(`SEED-${seedSeq}`, jid, kind, status, created, created);
+    }
+  });
+}
+
+/** An inbox chat with a phone jid and one message from the client a minute ago. */
+function seedChat(h, patch = {}) {
+  const lead = h.s.insertLead({
+    lead_id: 'L-1', created: NOW - 3_600_000, updated: NOW - 3_600_000, phone_e164: CLIENT, wa_jid: CLIENT_JID,
+    channel: 'whatsapp', match_method: 'ref', inbox_state: 'in', inbox_since: NOW - 3_600_000, ...patch,
+  });
+  h.inbox.upsertMessage({ key_id: `IN-${lead.lead_id}`, lead_id: lead.lead_id, jid: CLIENT_JID, direction: 'in', sender_kind: 'client', text: 'hi', ts: NOW - 60_000 });
+  return lead;
+}
+
+const staffOf = (h) => h.team.addUser({ name: 'Sara', phone: '966500000077' });
+const replyArgs = (staff, patch = {}) => ({ sendId: SID, leadId: 'L-1', userId: staff.user_id, text: 'hello', seenTs: NOW - 60_000, ...patch });
+
+/* ------------------------------ the gate (Phase 1, kept) ------------------------------ */
+
+test('sends the text to that number on the owner instance and returns the WhatsApp message id', async () => {
+  const h = harness();
+  const out = await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'hello', kind: 'code' });
+  assert.deepEqual(withoutSendId(out), { ok: true, keyId: 'KEY-1', status: 201 });
+  assert.equal(h.calls[0].url, 'http://evo.test/message/sendText/abdulaziz-personal');
+  assert.equal(h.calls[0].init.headers.apikey, 'k');
+  assert.deepEqual(h.calls[0].body, { number: '966500000001', text: 'hello' });
+  h.s.close();
+});
+
+test('never sends to a group, a lid, a broadcast, a local-format number or garbage', async () => {
+  const h = harness();
+  const bad = ['120363135705763548@g.us', '123456789@lid', 'status@broadcast', '966500000001', '', null, '0500000001@s.whatsapp.net'];
+  for (const jid of bad) {
+    assert.deepEqual(await h.sender.sendTo({ jid, text: 'x', kind: 'code' }), { ok: false, error: 'bad_recipient' }, String(jid));
+  }
+  assert.equal(h.calls.length, 0);
+  h.s.close();
+});
+
+test('bad_text: empty, oversized, or not a string at all', async () => {
+  const h = harness();
+  const jid = '966500000001@s.whatsapp.net';
+  assert.deepEqual(await h.sender.sendTo({ jid, text: '', kind: 'code' }), { ok: false, error: 'bad_text' });
+  assert.deepEqual(await h.sender.sendTo({ jid, text: undefined, kind: 'code' }), { ok: false, error: 'bad_text' });
+  assert.deepEqual(await h.sender.sendTo({ jid, text: 'a'.repeat(4097), kind: 'code' }), { ok: false, error: 'bad_text' });
+  assert.equal(h.calls.length, 0, 'none of the bad texts reach the network');
+  assert.equal((await h.sender.sendTo({ jid, text: 'a'.repeat(4096), kind: 'code' })).ok, true, '4096 exactly is fine');
+  h.s.close();
+});
+
+test('bad_kind: "code" and "staff" are the real kinds in Phase 2; Dana waits for Phase 4', async () => {
+  const h = harness();
+  const jid = '966500000001@s.whatsapp.net';
+  assert.deepEqual(await h.sender.sendTo({ jid, text: 'x', kind: 'reply' }), { ok: false, error: 'bad_kind' });
+  assert.deepEqual(await h.sender.sendTo({ jid, text: 'x', kind: 'dana' }), { ok: false, error: 'bad_kind' });
+  assert.deepEqual(await h.sender.sendTo({ jid, text: 'x', kind: 'note' }), { ok: false, error: 'bad_kind' });
+  assert.deepEqual(await h.sender.sendTo({ jid, text: 'x' }), { ok: false, error: 'bad_kind' });
+  assert.equal(h.calls.length, 0);
+  assert.equal((await h.sender.sendTo({ jid, text: 'x', kind: 'staff' })).ok, true);
+  h.s.close();
+});
+
+test('the sending switch stops everything except what is allowed to bypass it', async () => {
+  const h = harness();
+  h.team.setSetting('sending_enabled', '0');
+  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'sending_disabled' });
+  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'staff' }), { ok: false, error: 'sending_disabled' });
+  const owner = await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code', bypassSwitch: true });
+  assert.equal(owner.ok, true, "the owner's own login code still goes, or he could never switch it back on");
+  h.s.close();
+});
+
+test('bypassSwitch is decided here, not trusted from the caller: it only ever works for the owner\'s own code', async () => {
+  const h = harness();
+  h.team.setSetting('sending_enabled', '0');
+  // a caller claiming bypassSwitch for someone other than the owner is still refused.
+  assert.deepEqual(
+    await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code', bypassSwitch: true }),
+    { ok: false, error: 'sending_disabled' },
+  );
+  // nor for a reply, even one addressed to the owner.
+  assert.deepEqual(
+    await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'staff', bypassSwitch: true }),
+    { ok: false, error: 'sending_disabled' },
+  );
+  assert.equal(h.calls.length, 0, 'a non-owner bypass attempt never reaches the network');
+  h.s.close();
+});
+
+test('limits: per recipient per minute, and across every sender', async () => {
+  const h = harness();
+  const one = '966500000001@s.whatsapp.net';
+  for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) assert.equal((await h.sender.sendTo({ jid: one, text: 'x', kind: 'code' })).ok, true);
+  assert.deepEqual(await h.sender.sendTo({ jid: one, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
+  let ok = PER_RECIPIENT_PER_MIN;
+  for (let n = 2; ok < SEND_PER_MIN; n += 1) {
+    if ((await h.sender.sendTo({ jid: `9665000000${String(n).padStart(2, '0')}@s.whatsapp.net`, text: 'x', kind: 'code' })).ok) ok += 1;
+  }
+  assert.deepEqual(await h.sender.sendTo({ jid: '966599999999@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
+  h.tick(60_000);
+  assert.equal((await h.sender.sendTo({ jid: '966599999999@s.whatsapp.net', text: 'x', kind: 'code' })).ok, true, 'refills');
+  h.s.close();
+});
+
+test('a limiter refusal leaves the other limiters untouched (peek before take)', async () => {
+  const h = harness();
+  const hot = '966500000001@s.whatsapp.net';
+  for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) assert.equal((await h.sender.sendTo({ jid: hot, text: 'x', kind: 'code' })).ok, true);
+  // burn a handful of refusals against the per-recipient limiter alone
+  for (let i = 0; i < 5; i += 1) assert.deepEqual(await h.sender.sendTo({ jid: hot, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
+  // if those refusals had also charged the shared per-minute bucket, this would stall below SEND_PER_MIN
+  let ok = PER_RECIPIENT_PER_MIN;
+  for (let n = 100; ok < SEND_PER_MIN && n < 200; n += 1) {
+    if ((await h.sender.sendTo({ jid: `966500000${n}@s.whatsapp.net`, text: 'x', kind: 'code' })).ok) ok += 1;
+  }
+  assert.equal(ok, SEND_PER_MIN, 'the refusals spent nothing from the shared bucket');
+  h.s.close();
+});
+
+test("the owner's own jid skips the shared per-minute/per-day budget, but not the per-recipient one", async () => {
+  const h = harness();
+  for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code' })).ok, true);
+  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' }, 'still capped per-recipient');
+  // immediately after, in the same minute, a fresh recipient still gets the FULL shared allowance
+  let ok = 0;
+  for (let n = 0; ok < SEND_PER_MIN && n < 100; n += 1) {
+    if ((await h.sender.sendTo({ jid: `96652220${String(n).padStart(4, '0')}@s.whatsapp.net`, text: 'x', kind: 'code' })).ok) ok += 1;
+  }
+  assert.equal(ok, SEND_PER_MIN, "the owner's sends never spent the shared budget");
+  h.s.close();
+});
+
+test('bypass is still subject to the per-recipient limit', async () => {
+  const h = harness();
+  h.team.setSetting('sending_enabled', '0');
+  for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) {
+    assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code', bypassSwitch: true })).ok, true);
+  }
+  assert.deepEqual(
+    await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code', bypassSwitch: true }),
+    { ok: false, error: 'rate_limited' },
+  );
+  h.s.close();
+});
+
+test('an HTTP error fails; a timeout is "uncertain", never retried here', async () => {
+  const bad = harness({ reply: () => ({ status: 500, body: {} }) });
+  assert.deepEqual(withoutSendId(await bad.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' })), { ok: false, error: 'http_500' });
+  bad.s.close();
+
+  const s = openDb(':memory:');
+  const team = createTeam(s);
+  const slow = createSender({
+    env: ENV, team, inbox: createInboxStore(s), timeoutMs: 5,
+    fetchImpl: (url, init) => new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(abortError()))),
+  });
+  assert.deepEqual(withoutSendId(await slow.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' })), { ok: false, error: 'timeout', uncertain: true });
+  s.close();
+});
+
+test('a 502 or 504 is "uncertain": the request may well have gone through', async () => {
+  for (const status of [502, 504]) {
+    const h = harness({ reply: () => ({ status, body: {} }) });
+    assert.deepEqual(
+      withoutSendId(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' })),
+      { ok: false, error: `http_${status}`, uncertain: true },
+      String(status),
+    );
+    h.s.close();
+  }
+});
+
+test('a definite pre-connection failure (refused, unknown host, DNS) is not "uncertain"', async () => {
+  const s = openDb(':memory:');
+  const team = createTeam(s);
+  const inbox = createInboxStore(s);
+  for (const code of ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']) {
+    const sender = createSender({ env: ENV, team, inbox, fetchImpl: async () => { throw netError(code); } });
+    assert.deepEqual(
+      withoutSendId(await sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' })),
+      { ok: false, error: 'network' },
+      code,
+    );
+  }
+  s.close();
+});
+
+test('any other thrown error is "network" but "uncertain" — we cannot tell if it sent', async () => {
+  const s = openDb(':memory:');
+  const team = createTeam(s);
+  const inbox = createInboxStore(s);
+  const causes = [
+    netError('ECONNRESET'),
+    Object.assign(new Error('mystery'), {}),
+    new TypeError('fetch failed'),
+  ];
+  for (const err of causes) {
+    const sender = createSender({ env: ENV, team, inbox, fetchImpl: async () => { throw err; } });
+    assert.deepEqual(
+      withoutSendId(await sender.sendTo({ jid: '966500000002@s.whatsapp.net', text: 'x', kind: 'code' })),
+      { ok: false, error: 'network', uncertain: true },
+      err.message,
+    );
+  }
+  s.close();
+});
+
+test('a 2xx counts as sent only when the body carries a WhatsApp message id', async () => {
+  const h = harness({ reply: () => ({ status: 200, body: { success: true, note: 'super-secret-body-marker' } }) });
+  const out = await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' });
+  assert.deepEqual(withoutSendId(out), { ok: false, error: 'no_ack', uncertain: true });
+  const entry = h.logs.find((l) => l.evt === 'wa.send.no_key');
+  assert.ok(entry, 'logs that the ack was missing');
+  assert.ok(!JSON.stringify(entry).includes('super-secret-body-marker'), 'never logs the response body');
+  h.s.close();
+});
+
+test('a timeout while reading the body is also "no key", not "network"', async () => {
+  const s = openDb(':memory:');
+  const team = createTeam(s);
+  const logs = [];
+  const sender = createSender({
+    env: ENV, team, inbox: createInboxStore(s), timeoutMs: 5, log: (o) => logs.push(o),
+    fetchImpl: (url, init) => Promise.resolve({
+      ok: true,
+      status: 200,
+      text: () => new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(abortError()))),
+    }),
+  });
+  assert.deepEqual(
+    withoutSendId(await sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' })),
+    { ok: false, error: 'no_ack', uncertain: true },
+  );
+  assert.ok(logs.some((l) => l.evt === 'wa.send.no_key'));
+  s.close();
+});
+
+test('BONA_WA_NOTIFY=0 does not block a login code (only other kinds would need it)', async () => {
+  const h = harness({ env: { ...ENV, BONA_WA_NOTIFY: '0' } });
+  const out = await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' });
+  assert.equal(out.ok, true);
+  assert.deepEqual(await h.sender.sendTo({ jid: '966500000002@s.whatsapp.net', text: 'x', kind: 'staff' }), { ok: false, error: 'disabled' });
+  assert.equal(h.calls.length, 1, 'the reply never reached the network');
+  h.s.close();
+});
+
+test('no Evolution credentials: nothing is attempted', async () => {
+  const h = harness({ env: {} });
+  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'evolution-not-configured' });
+  assert.equal(h.calls.length, 0);
+  h.s.close();
+});
+
+/* ------------------------------ construction ------------------------------ */
+
+test('createSender needs the inbox store; reply also needs the db', async () => {
+  const s = openDb(':memory:');
+  const team = createTeam(s);
+  assert.throws(() => createSender({ env: ENV, team }), TypeError);
+  assert.throws(() => createSender({ env: ENV, inbox: createInboxStore(s) }), TypeError);
+  const noDb = createSender({ env: ENV, team, inbox: createInboxStore(s), fetchImpl: async () => { throw new Error('never called'); } });
+  await assert.rejects(noDb.reply({ sendId: SID, leadId: 'L-1', userId: 'U', text: 'x', seenTs: 0 }), TypeError);
+  s.close();
+});
+
+/* ------------------------------ the outbox ledger ------------------------------ */
+
+test('every send is written to the outbox before the call, then marked with what came back', async () => {
+  const cases = [
+    { name: 'ok', reply: () => ({ status: 201, body: { key: { id: 'KEY-9' } } }), status: 'accepted', key_id: 'KEY-9', error: null },
+    { name: 'timeout', reply: () => ({ throws: abortError() }), status: 'uncertain', key_id: null, error: 'timeout' },
+    { name: '502', reply: () => ({ status: 502 }), status: 'uncertain', key_id: null, error: 'http_502' },
+    { name: '504', reply: () => ({ status: 504 }), status: 'uncertain', key_id: null, error: 'http_504' },
+    { name: 'no_ack', reply: () => ({ status: 200, body: { success: true } }), status: 'uncertain', key_id: null, error: 'no_ack' },
+    { name: '400', reply: () => ({ status: 400 }), status: 'failed', key_id: null, error: 'http_400' },
+    { name: 'refused', reply: () => ({ throws: netError('ECONNREFUSED') }), status: 'failed', key_id: null, error: 'network' },
+    { name: 'reset', reply: () => ({ throws: netError('ECONNRESET') }), status: 'uncertain', key_id: null, error: 'network' },
+  ];
+  for (const c of cases) {
+    const h = harness({ reply: c.reply });
+    const out = await h.sender.sendTo({ jid: CLIENT_JID, text: 'hello', kind: 'staff', userId: 'USR-a', leadId: 'L-1' });
+    assert.equal(h.calls.length, 1, c.name);
+    assert.equal(h.calls[0].pending, 1, `${c.name}: the row was pending while the call was in flight`);
+    assert.equal(out.ok, c.status === 'accepted', c.name);
+    assert.equal(out.uncertain, c.status === 'uncertain' ? true : undefined, c.name);
+    const row = h.inbox.getOutbox(out.sendId);
+    assert.deepEqual(
+      { lead_id: row.lead_id, jid: row.jid, text: row.text, user_id: row.user_id, sender_kind: row.sender_kind, status: row.status, key_id: row.key_id, error: row.error },
+      { lead_id: 'L-1', jid: CLIENT_JID, text: 'hello', user_id: 'USR-a', sender_kind: 'staff', status: c.status, key_id: c.key_id, error: c.error },
+      c.name,
+    );
+    assert.equal(row.created, NOW, c.name);
+    h.s.close();
+  }
+});
+
+test('a login code row keeps neither the code nor a lead', async () => {
+  const h = harness();
+  const out = await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'Your Bona code is 482915', kind: 'code', leadId: 'L-1' });
+  assert.equal(out.ok, true);
+  const row = h.inbox.getOutbox(out.sendId);
+  assert.equal(row.sender_kind, 'code');
+  assert.equal(row.text, null);
+  assert.equal(row.lead_id, null);
+  assert.equal(row.status, 'accepted');
+  assert.ok(!JSON.stringify(outboxRows(h)).includes('482915'), 'the code is nowhere in the outbox');
+  h.s.close();
+});
+
+test('a refusal before the call writes no row of its own', async () => {
+  const h = harness();
+  await h.sender.sendTo({ jid: '123456789@lid', text: 'x', kind: 'staff' });
+  h.team.setSetting('sending_enabled', '0');
+  await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' });
+  h.team.setSetting('sending_enabled', '1');
+  for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' });
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' }), { ok: false, error: 'rate_limited' });
+  assert.equal(outboxRows(h).length, PER_RECIPIENT_PER_MIN, 'only the sends that were attempted');
+  h.s.close();
+});
+
+test('a refusal closes a row the caller already wrote, so it never lingers as pending', async () => {
+  const h = harness();
+  h.inbox.insertOutbox({ send_id: SID, lead_id: 'L-1', jid: CLIENT_JID, text: 'x', user_id: 'USR-a', sender_kind: 'staff' });
+  h.team.setSetting('sending_enabled', '0');
+  assert.deepEqual(
+    await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a', leadId: 'L-1', sendId: SID }),
+    { ok: false, error: 'sending_disabled', sendId: SID },
+  );
+  const row = h.inbox.getOutbox(SID);
+  assert.equal(row.status, 'failed');
+  assert.equal(row.error, 'sending_disabled');
+  assert.equal(h.calls.length, 0);
+  h.s.close();
+});
+
+test('a send id that has already been decided is never sent again', async () => {
+  const h = harness();
+  for (const status of ['uncertain', 'accepted', 'failed']) {
+    const sendId = `${SID}_${status}`;
+    h.inbox.insertOutbox({ send_id: sendId, lead_id: 'L-1', jid: CLIENT_JID, text: 'x', user_id: 'USR-a', sender_kind: 'staff', status });
+    assert.deepEqual(
+      await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a', leadId: 'L-1', sendId }),
+      { ok: false, error: 'duplicate', sendId },
+      status,
+    );
+    assert.equal(h.inbox.getOutbox(sendId).status, status, `${status} row left as it was`);
+  }
+  assert.equal(h.calls.length, 0);
+  h.s.close();
+});
+
+/* ------------------------------ the durable day cap ------------------------------ */
+
+test('500 sends in the last 24 hours stop everyone but the owner — and a restart does not reset it', async () => {
+  const h = harness();
+  seedOutbox(h, SEND_PER_DAY, { created: NOW - 60_000 });
+  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a' }), { ok: false, error: 'rate_limited' });
+  assert.ok(h.logs.some((l) => l.evt === 'wa.send.rate_limited' && l.limit === 'day'));
+  assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code', bypassSwitch: true })).ok, true, "the owner's own code still goes");
+  assert.equal(h.calls.length, 1);
+
+  // A fresh process over the same file: the in-memory limiters are new, the ledger is not.
+  const again = createSender({ env: ENV, team: h.team, inbox: createInboxStore(h.s, { now: h.now }), db: h.s, now: h.now, fetchImpl: async () => { throw new Error('must not be called'); } });
+  assert.deepEqual(await again.sendTo({ jid: '966500000003@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
+  h.s.close();
+});
+
+test('499 in the last 24 hours (codes and replies alike): one more goes, and that one fills the day', async () => {
+  const h = harness();
+  seedOutbox(h, 250, { created: NOW - 3_600_000, kind: 'code' });
+  seedOutbox(h, SEND_PER_DAY - 1 - 250, { created: NOW - 3_600_000, kind: 'staff', status: 'uncertain' });
+  assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a' })).ok, true);
+  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
+  h.s.close();
+});
+
+test('rows older than 24 hours, rows to the owner and failed rows do not count', async () => {
+  const h = harness();
+  seedOutbox(h, SEND_PER_DAY, { created: NOW - DAY - 1 });
+  seedOutbox(h, SEND_PER_DAY, { jid: OWNER_JID, kind: 'code' });
+  seedOutbox(h, SEND_PER_DAY, { status: 'failed' });
+  assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a' })).ok, true);
+  h.s.close();
+});
+
+test('the day is rolling: a send becomes possible the moment the oldest of the 500 turns 24 hours old', async () => {
+  const h = harness();
+  seedOutbox(h, SEND_PER_DAY, { created: NOW - DAY + 1_000 });
+  h.tick(1_000);
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' }), { ok: false, error: 'rate_limited' }, 'exactly 24 hours old still counts');
+  h.tick(1);
+  assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' })).ok, true);
+  h.s.close();
+});
+
+/* ------------------------------ per user ------------------------------ */
+
+test('per user: 30 a minute from one team member; another member and a login code still go', async () => {
+  // The shipped 20 a minute across everyone always refuses before one person's 30 could,
+  // so the shared limit is widened here to reach the per-user one.
+  const h = harness({ limits: { perMinute: 100 } });
+  const to = (n) => `9665010${String(n).padStart(5, '0')}@s.whatsapp.net`;
+  for (let i = 0; i < PER_USER_PER_MIN; i += 1) {
+    assert.equal((await h.sender.sendTo({ jid: to(i), text: 'x', kind: 'staff', userId: 'USR-a' })).ok, true, `send ${i + 1}`);
+  }
+  assert.deepEqual(await h.sender.sendTo({ jid: to(100), text: 'x', kind: 'staff', userId: 'USR-a' }), { ok: false, error: 'rate_limited' });
+  assert.equal((await h.sender.sendTo({ jid: to(101), text: 'x', kind: 'staff', userId: 'USR-b' })).ok, true, 'another member has their own allowance');
+  assert.equal((await h.sender.sendTo({ jid: to(102), text: 'x', kind: 'code' })).ok, true, 'a login code has no member behind it');
+  h.tick(60_000);
+  assert.equal((await h.sender.sendTo({ jid: to(103), text: 'x', kind: 'staff', userId: 'USR-a' })).ok, true, 'refills');
+  h.s.close();
+});
+
+/* ------------------------------ where a reply goes ------------------------------ */
+
+test('replyJidFor: the phone jid (device suffix stripped), else the stored number, never a lid', () => {
+  assert.equal(replyJidFor({ wa_jid: '966511111111@s.whatsapp.net' }), '966511111111@s.whatsapp.net');
+  assert.equal(replyJidFor({ wa_jid: '966511111111:7@s.whatsapp.net' }), '966511111111@s.whatsapp.net');
+  assert.equal(replyJidFor({ wa_jid: null, wa_lid: '123456789012@lid', phone_e164: '966522222222' }), '966522222222@s.whatsapp.net');
+  assert.equal(replyJidFor({ wa_jid: '0501234567@s.whatsapp.net', phone_e164: '966533333333' }), '966533333333@s.whatsapp.net');
+  assert.equal(replyJidFor({ wa_jid: null, wa_lid: '123456789012@lid', phone_e164: null }), null);
+  assert.equal(replyJidFor({ phone_e164: '0501234567' }), null, 'a local-format number is not an address');
+  assert.equal(replyJidFor({ phone_e164: '1234567' }), null, 'too short');
+  assert.equal(replyJidFor(null), null);
+});
+
+/* ------------------------------ reply ------------------------------ */
+
+test('reply: sent to the phone jid, stored as the member\'s message, and the chat marked answered', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  seedChat(h, { needs_human: 1 });
+  const out = await h.sender.reply(replyArgs(staff));
+  assert.deepEqual(out, { ok: true, status: 'accepted', sendId: SID, keyId: 'KEY-1' });
+  assert.equal(h.calls.length, 1);
+  assert.deepEqual(h.calls[0].body, { number: CLIENT, text: 'hello' });
+
+  const row = h.inbox.getOutbox(SID);
+  assert.deepEqual(
+    { lead_id: row.lead_id, jid: row.jid, text: row.text, user_id: row.user_id, sender_kind: row.sender_kind, status: row.status, key_id: row.key_id },
+    { lead_id: 'L-1', jid: CLIENT_JID, text: 'hello', user_id: staff.user_id, sender_kind: 'staff', status: 'accepted', key_id: 'KEY-1' },
+  );
+  const last = h.inbox.messagesFor('L-1').at(-1);
+  assert.deepEqual(
+    { key_id: last.key_id, jid: last.jid, direction: last.direction, sender_kind: last.sender_kind, sender_user_id: last.sender_user_id, text: last.text, ts: last.ts, status: last.status },
+    { key_id: 'KEY-1', jid: CLIENT_JID, direction: 'out', sender_kind: 'staff', sender_user_id: staff.user_id, text: 'hello', ts: NOW, status: 'sent' },
+  );
+  const lead = h.s.getLead('L-1');
+  assert.equal(lead.handler_user_id, staff.user_id, 'the first to reply becomes the handler');
+  assert.equal(lead.first_reply_ts, NOW);
+  assert.equal(lead.needs_human, 0);
+  assert.equal(lead.last_msg_ts, NOW);
+  h.s.close();
+});
+
+test('reply: an existing handler and an earlier first reply are left alone', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  seedChat(h, { handler_user_id: 'USR-other', first_reply_ts: NOW - 5_000 });
+  assert.equal((await h.sender.reply(replyArgs(staff))).ok, true);
+  const lead = h.s.getLead('L-1');
+  assert.equal(lead.handler_user_id, 'USR-other');
+  assert.equal(lead.first_reply_ts, NOW - 5_000);
+  h.s.close();
+});
+
+test('reply: the text goes out trimmed, with browser line breaks made plain', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  seedChat(h);
+  assert.equal((await h.sender.reply(replyArgs(staff, { text: '  line one\r\nline two \r\n' }))).ok, true);
+  assert.equal(h.calls[0].body.text, 'line one\nline two');
+  assert.equal(h.inbox.getOutbox(SID).text, 'line one\nline two', 'the ledger holds what WhatsApp will hand back');
+  h.s.close();
+});
+
+test('reply: bad_send_id for anything that is not a form send id', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  seedChat(h);
+  for (const sendId of [undefined, null, 42, '', 'short', 'has spaces in it 0123', 'x'.repeat(65), 'sid_<script>alert1']) {
+    assert.deepEqual(await h.sender.reply(replyArgs(staff, { sendId })), { ok: false, error: 'bad_send_id' }, String(sendId));
+  }
+  assert.equal(h.calls.length, 0);
+  assert.equal(outboxRows(h).length, 0);
+  h.s.close();
+});
+
+test('reply: a double submit with the same send id makes one call and returns the first answer', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  seedChat(h);
+  assert.equal((await h.sender.reply(replyArgs(staff))).ok, true);
+  assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: true, duplicate: true, status: 'accepted', sendId: SID, error: null });
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.inbox.messagesFor('L-1').filter((m) => m.direction === 'out').length, 1);
+  h.s.close();
+});
+
+test('reply: two submits at once make one call; the second is told the first is on its way', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  seedChat(h);
+  const [first, second] = await Promise.all([h.sender.reply(replyArgs(staff)), h.sender.reply(replyArgs(staff))]);
+  assert.deepEqual(first, { ok: true, status: 'accepted', sendId: SID, keyId: 'KEY-1' });
+  assert.deepEqual(second, { ok: false, duplicate: true, status: 'pending', sendId: SID, error: 'pending', uncertain: true });
+  assert.equal(h.calls.length, 1);
+  h.s.close();
+});
+
+test('reply: an uncertain first attempt is never retried by a second submit', async () => {
+  const h = harness({ reply: (n) => (n === 1 ? { status: 504 } : { status: 201, body: { key: { id: 'KEY-2' } } }) });
+  const staff = staffOf(h);
+  seedChat(h);
+  assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: false, error: 'http_504', status: 'uncertain', sendId: SID, uncertain: true });
+  assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: false, duplicate: true, status: 'uncertain', sendId: SID, error: 'http_504', uncertain: true });
+  assert.equal(h.calls.length, 1, 'the second submit never reached the network');
+  assert.equal(h.inbox.messagesFor('L-1').filter((m) => m.direction === 'out').length, 0, 'nothing stored: the poller decides once WhatsApp shows it');
+  assert.equal(h.s.getLead('L-1').first_reply_ts, null);
+  h.s.close();
+});
+
+test('reply: a send id reused on another chat or by another member is bad_send_id', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  const other = h.team.addUser({ name: 'Omar', phone: '966500000088' });
+  seedChat(h);
+  seedChat(h, { lead_id: 'L-2', phone_e164: '966522222222', wa_jid: '966522222222@s.whatsapp.net' });
+  assert.equal((await h.sender.reply(replyArgs(staff))).ok, true);
+  assert.deepEqual(await h.sender.reply(replyArgs(staff, { leadId: 'L-2' })), { ok: false, error: 'bad_send_id' });
+  assert.deepEqual(await h.sender.reply(replyArgs(other)), { ok: false, error: 'bad_send_id' });
+  assert.equal(h.calls.length, 1);
+  h.s.close();
+});
+
+test('reply: bad_text for empty, blank, oversized or missing text — and nothing is written', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  seedChat(h);
+  for (const text of ['', '   \n\t ', 'a'.repeat(4097), undefined, null, 12]) {
+    assert.deepEqual(await h.sender.reply(replyArgs(staff, { text })), { ok: false, error: 'bad_text' }, String(text).slice(0, 10));
+  }
+  assert.equal(h.calls.length, 0);
+  assert.equal(outboxRows(h).length, 0);
+  assert.equal((await h.sender.reply(replyArgs(staff, { text: 'a'.repeat(4096) }))).ok, true, '4096 exactly is fine');
+  h.s.close();
+});
+
+test('reply: not_found, and not_in_inbox for an unsure, out or never-sorted chat', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  assert.deepEqual(await h.sender.reply(replyArgs(staff, { leadId: 'L-nope' })), { ok: false, error: 'not_found' });
+  seedChat(h, { lead_id: 'L-u', inbox_state: 'unsure', phone_e164: '966522222201', wa_jid: '966522222201@s.whatsapp.net' });
+  seedChat(h, { lead_id: 'L-o', inbox_state: 'out', phone_e164: '966522222202', wa_jid: '966522222202@s.whatsapp.net' });
+  seedChat(h, { lead_id: 'L-n', inbox_state: null, phone_e164: '966522222203', wa_jid: '966522222203@s.whatsapp.net' });
+  for (const leadId of ['L-u', 'L-o', 'L-n']) {
+    assert.deepEqual(await h.sender.reply(replyArgs(staff, { leadId })), { ok: false, error: 'not_in_inbox' }, leadId);
+  }
+  assert.equal(h.calls.length, 0);
+  assert.equal(outboxRows(h).length, 0);
+  h.s.close();
+});
+
+test('reply: lid_only for a chat we only know by its lid ("reply from your phone")', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  seedChat(h, { phone_e164: null, wa_jid: null, wa_lid: '123456789012@lid' });
+  assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: false, error: 'lid_only' });
+  assert.equal(h.calls.length, 0);
+  assert.equal(outboxRows(h).length, 0);
+  h.s.close();
+});
+
+test('reply: excluded for a team number or a never-list number, even on an in chat', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  seedChat(h, { lead_id: 'L-t', phone_e164: '966500000077', wa_jid: '966500000077@s.whatsapp.net' });
+  h.team.addNever({ phone: '966522222299' });
+  seedChat(h, { lead_id: 'L-x', phone_e164: '966522222299', wa_jid: '966522222299@s.whatsapp.net' });
+  assert.deepEqual(await h.sender.reply(replyArgs(staff, { leadId: 'L-t' })), { ok: false, error: 'excluded' });
+  assert.deepEqual(await h.sender.reply(replyArgs(staff, { leadId: 'L-x' })), { ok: false, error: 'excluded' });
+  assert.equal(h.calls.length, 0);
+  assert.equal(outboxRows(h).length, 0);
+  h.s.close();
+});
+
+test('reply: stale when a newer message exists (either direction) or the form did not say what it saw', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  seedChat(h);
+  h.inbox.upsertMessage({ key_id: 'OUT-phone', lead_id: 'L-1', jid: CLIENT_JID, direction: 'out', sender_kind: 'owner_number', text: 'on it', ts: NOW - 10_000 });
+  assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: false, error: 'stale' }, 'the owner answered from his phone meanwhile');
+  for (const seenTs of [undefined, null, NaN, String(NOW)]) {
+    assert.deepEqual(await h.sender.reply(replyArgs(staff, { seenTs })), { ok: false, error: 'stale' }, String(seenTs));
+  }
+  assert.equal(h.calls.length, 0);
+  assert.equal(outboxRows(h).length, 0);
+  assert.equal((await h.sender.reply(replyArgs(staff, { seenTs: NOW - 10_000 }))).ok, true, 'having seen the newest, it goes');
+  h.s.close();
+});
+
+test('reply: with the sending switch off nothing is sent and the row is closed as failed', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  seedChat(h);
+  h.team.setSetting('sending_enabled', '0');
+  assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: false, error: 'sending_disabled', status: 'failed', sendId: SID });
+  assert.equal(h.calls.length, 0);
+  const row = h.inbox.getOutbox(SID);
+  assert.equal(row.status, 'failed');
+  assert.equal(row.error, 'sending_disabled');
+  const lead = h.s.getLead('L-1');
+  assert.equal(lead.handler_user_id, null);
+  assert.equal(lead.first_reply_ts, null);
+  h.s.close();
+});
+
+test('reply: its own pending row is not counted twice against the day', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  seedChat(h);
+  seedOutbox(h, SEND_PER_DAY - 1);
+  assert.equal((await h.sender.reply(replyArgs(staff))).ok, true, '499 before it: this one is the 500th');
+
+  const full = harness();
+  const staff2 = staffOf(full);
+  seedChat(full);
+  seedOutbox(full, SEND_PER_DAY);
+  assert.deepEqual(await full.sender.reply(replyArgs(staff2)), { ok: false, error: 'rate_limited', status: 'failed', sendId: SID });
+  assert.equal(full.inbox.getOutbox(SID).status, 'failed');
+  assert.equal(full.calls.length, 0);
+  h.s.close();
+  full.s.close();
+});
+
+test('reply: once sent, a failure to record it still answers ok (saying otherwise would invite a second send)', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  seedChat(h);
+  const brittle = { ...h.inbox, upsertMessage: () => { throw Object.assign(new Error('disk full'), { code: 'ERR_SQLITE_ERROR' }); } };
+  const logs = [];
+  const sender = createSender({
+    env: ENV, team: h.team, inbox: brittle, db: h.s, now: h.now, log: (o) => logs.push(o),
+    fetchImpl: async () => ({ ok: true, status: 201, text: async () => JSON.stringify({ key: { id: 'KEY-7' } }) }),
+  });
+  assert.deepEqual(await sender.reply(replyArgs(staff)), { ok: true, status: 'accepted', sendId: SID, keyId: 'KEY-7' });
+  assert.equal(h.inbox.getOutbox(SID).status, 'accepted', 'the ledger already says it went');
+  assert.ok(logs.some((l) => l.evt === 'wa.reply.record_failed'));
+  assert.ok(!JSON.stringify(logs).includes('hello'), 'never logs the text');
+  h.s.close();
+});
+
+test('reply: a chat marked "Not a client" while the message was on its way stays purged', async () => {
+  let answer;
+  const h = harness({ reply: () => new Promise((resolve) => { answer = resolve; }) });
+  const staff = staffOf(h);
+  seedChat(h);
+  const sending = h.sender.reply(replyArgs(staff));
+  assert.equal(h.calls.length, 1, 'the call is in flight and WhatsApp has not answered yet');
+  // Meanwhile the owner presses *Not a client* (a never-list add does the same).
+  h.inbox.leaveInbox('L-1');
+  answer({ status: 201, body: { key: { id: 'KEY-1' } } });
+  assert.deepEqual(await sending, { ok: true, status: 'accepted', sendId: SID, keyId: 'KEY-1' }, 'it did go: saying otherwise would invite a second send');
+  assert.equal(h.inbox.hasMessages('L-1'), false, 'no transcript is started again for a purged chat');
+  const lead = h.s.getLead('L-1');
+  assert.equal(lead.inbox_state, 'out');
+  assert.equal(lead.last_msg_ts, null);
+  assert.equal(lead.handler_user_id, null, 'nobody is made handler of a chat that left the inbox');
+  assert.equal(lead.needs_human, 0);
+  assert.equal(lead.first_reply_ts, NOW, 'the client was still answered, and the watchdog must know');
+  // A second submit of the same form is refused, never sent again.
+  assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: false, error: 'not_in_inbox' });
+  assert.equal(h.calls.length, 1);
+  h.s.close();
+});
+
+test('reply: never logs the text or the number', async () => {
+  const h = harness({ reply: () => ({ status: 500 }) });
+  const staff = staffOf(h);
+  seedChat(h);
+  await h.sender.reply(replyArgs(staff, { text: 'secret-reply-marker' }));
+  const logged = JSON.stringify(h.logs);
+  assert.ok(!logged.includes('secret-reply-marker'));
+  assert.ok(!logged.includes(CLIENT));
+  h.s.close();
+});
+
+/* ------------------------------ after a restart ------------------------------ */
+
+test('recoverInterrupted: a send pending for over two minutes becomes uncertain, nothing else changes', async () => {
+  const h = harness();
+  seedOutbox(h, 1, { created: NOW - 121_000, status: 'pending' });
+  seedOutbox(h, 1, { created: NOW - 60_000, status: 'pending' });
+  seedOutbox(h, 1, { created: NOW - 3_600_000, status: 'accepted' });
+  assert.equal(h.sender.recoverInterrupted(), 1);
+  const rows = outboxRows(h);
+  assert.deepEqual(rows.map((r) => [r.status, r.error]), [['accepted', null], ['uncertain', 'interrupted'], ['pending', null]]);
+  h.s.close();
+});
+```
+
+- [ ] **Step 2: Run to see it fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/wa-send.test.mjs`
+Expected: FAIL — the file does not load: `SyntaxError: The requested module '../lib/wa-send.mjs' does not provide an export named 'PER_USER_PER_MIN'` (`replyJidFor` is missing too, and `createSender` has no `reply`/`recoverInterrupted` yet). 0 of its tests run.
+
+- [ ] **Step 3: Implement** — replace the whole of `services/api/lib/wa-send.mjs` with:
+
+```js
+/**
+ * Messages from the owner's WhatsApp to anyone other than the owner (2026-09-27 design §4.5).
+ *
+ * Phase 1 sent only login codes to team members. Phase 2 adds team members' replies to
+ * clients (`reply`, below); Phase 4 will add Dana. There is still exactly one sender —
+ * `app.sender` (`createSender` in index.mjs) — because every message spends the same
+ * thing, the standing of one personal number on WhatsApp, and the per-minute limits live
+ * in this object's memory: a second instance would be a second, independent budget.
+ * Every send passes the same gate:
+ *
+ *   - a 1:1 phone jid only (`…@s.whatsapp.net`, digits not starting with the local trunk
+ *     `0`). A group, a broadcast, an `…@lid`, or a local-format number that never got
+ *     turned into an international one, is refused: `lid` digits are an opaque id, not a
+ *     phone number (see wa-poller.mjs).
+ *   - a real `kind` — 'code' (a login code) or 'staff' (a team member's reply; 'dana' is
+ *     refused until Phase 4 builds her own caps) — and a `text` that is a non-empty string
+ *     of at most 4096 characters.
+ *   - the owner's Sending switch (`settings.sending_enabled`). It is bypassed only when
+ *     the recipient IS the owner's own jid (`cfg.ownerJid`) AND the message is a login
+ *     `code` — `bypassSwitch` is a hint from the caller, never trusted on its own, because
+ *     a caller that could bypass the switch for anyone else could use it to spam past the
+ *     owner's own kill switch. Without this the owner could never get back in to switch
+ *     sending back on.
+ *   - 20 a minute across every sender, 6 a minute to any one recipient and 30 a minute
+ *     from any one team member, all asked before any is charged (see lib/ratelimit.mjs
+ *     `peek`), and 500 in any 24 hours, counted from the outbox (below) so that a restart
+ *     cannot hand out a fresh day. Messages to the owner's own jid skip the shared
+ *     per-minute and daily budget (still capped per-recipient), so a busy day of
+ *     team-member codes cannot lock the owner out of logging in.
+ *   - `BONA_WA_NOTIFY=0` (`cfg.enabled`) was built to stop the lead note (see
+ *     services/README.md); a login `code` only needs Evolution to be configured
+ *     (`baseUrl`/`apiKey`) — otherwise the owner could be locked out by an env var that was
+ *     never about dashboard logins. Every other kind still needs it on.
+ *
+ * Every send that passes the gate is written to `wa_outbox` BEFORE the HTTP call, then
+ * marked with what came back. A login code's row has no text (a code is never written
+ * anywhere but the WhatsApp message) and no lead. The ledger is what makes the daily cap
+ * survive a restart, what turns a send cut off by a crash into `uncertain` instead of
+ * forgotten (`recoverInterrupted`), and what lets the poller tell a team member's reply
+ * from the owner typing on his phone.
+ *
+ * A send is `accepted` only when the response is 2xx AND its body carries a `key.id`
+ * string — the WhatsApp message id. Anything else (a non-2xx status, a 2xx with no id, a
+ * timeout reading the body, or any other thrown error) is a failure we come back with
+ * honestly: `uncertain` whenever the message might still have gone out. Only a handful of
+ * pre-connection errors (`ECONNREFUSED`, `ENOTFOUND`, `EAI_AGAIN`) are treated as
+ * definitely-not-sent (`failed`). Nothing here retries, and a send id that has been
+ * decided once is never sent again: the reply form carries a `send_id`, and a second
+ * submit of it gets the first one's answer back — an `uncertain` one included.
+ *
+ * The owner's new-lead note to his own chat stays in lib/wa.mjs: that one is a message to
+ * himself.
+ */
+import { createLimiter } from './ratelimit.mjs';
+import { waConfig } from './wa.mjs';
+import { newId } from './db.mjs';
+
+export const SEND_PER_MIN = 20;
+export const SEND_PER_DAY = 500;
+export const PER_RECIPIENT_PER_MIN = 6;
+export const PER_USER_PER_MIN = 30;
+export const MAX_TEXT_LEN = 4096;
+/** The kinds Phase 2 sends. Extend this, not the gate, when Phase 4 adds Dana. */
+const VALID_KINDS = new Set(['code', 'staff']);
+const PHONE_JID_RE = /^(\d{8,15})@s\.whatsapp\.net$/;
+/** What the reply form's hidden `send_id` must look like; anything else is not ours. */
+const SEND_ID_RE = /^[A-Za-z0-9_-]{16,64}$/;
+/** Failures we can be sure never reached the other side — no ambiguity, so not "uncertain". */
+const DEFINITE_NETWORK_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']);
+const DAY_MS = 86_400_000;
+/** A send still `pending` this long after it was written was cut off by a restart. */
+const INTERRUPTED_MS = 120_000;
+
+/** Strip a jid's device suffix (`966…:12@s.whatsapp.net` → `966…@s.whatsapp.net`) before comparing. */
+const bareDigits = (jid) => String(jid ?? '').replace(/@.*$/, '').replace(/:.*$/, '');
+
+/**
+ * Where a reply to this lead goes: its phone jid (device suffix stripped), else its
+ * stored phone number as a jid — or null for a chat we only know by its `@lid`, which is
+ * an opaque id, not a number (spec §4.5: "reply from your phone").
+ * @param {object|null} lead
+ * @returns {string|null}
+ */
+export function replyJidFor(lead) {
+  const m = /^(\d{8,15})(?::\d+)?@s\.whatsapp\.net$/.exec(String(lead?.wa_jid ?? ''));
+  if (m && !m[1].startsWith('0')) return `${m[1]}@s.whatsapp.net`;
+  const phone = String(lead?.phone_e164 ?? '');
+  return /^[1-9]\d{7,14}$/.test(phone) ? `${phone}@s.whatsapp.net` : null;
+}
+
+/**
+ * @param {{ env?: object, team: ReturnType<import('./team.mjs').createTeam>,
+ *           inbox: ReturnType<import('./inbox/store.mjs').createInboxStore>,
+ *           db?: ReturnType<import('./db.mjs').openDb>|null,
+ *           fetchImpl?: typeof globalThis.fetch, now?: () => number, log?: Function, timeoutMs?: number,
+ *           limits?: { perMinute?: number, perUser?: number } }} o
+ */
+export function createSender({
+  env = {}, team, inbox, db = null, fetchImpl = globalThis.fetch, now = () => Date.now(), log = () => {}, timeoutMs = 8000, limits = {},
+} = {}) {
+  if (!team) throw new TypeError('createSender needs the team store (for the sending switch)');
+  if (!inbox) throw new TypeError('createSender needs the inbox store (for the outbox and the daily cap)');
+  const cfg = waConfig(env);
+  const ownerDigits = bareDigits(cfg.ownerJid);
+  // The outbox holds bare jids, so the owner's is compared in that form too.
+  const ownerJid = ownerDigits ? `${ownerDigits}@s.whatsapp.net` : null;
+  const perMinute = createLimiter({ capacity: limits.perMinute ?? SEND_PER_MIN, perMs: 60_000, now });
+  const perRecipient = createLimiter({ capacity: PER_RECIPIENT_PER_MIN, perMs: 60_000, now });
+  // With the shipped 20/min across everyone this cannot bind; it is here so that raising
+  // the shared limit can never let one account alone send faster than this.
+  const perUser = createLimiter({ capacity: limits.perUser ?? PER_USER_PER_MIN, perMs: 60_000, now });
+
+  /** The HTTP call and nothing else: what came back, as honestly as we can tell. */
+  async function post(number, text, kind) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      let res;
+      try {
+        res = await fetchImpl(`${cfg.baseUrl}/message/sendText/${encodeURIComponent(cfg.instance)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', apikey: cfg.apiKey },
+          body: JSON.stringify({ number, text }),
+          signal: controller.signal,
+        });
+      } catch (err) {
+        if (err?.name === 'AbortError') {
+          log({ level: 'warn', evt: 'wa.send.uncertain', kind, error: 'timeout' });
+          return { ok: false, error: 'timeout', uncertain: true };
+        }
+        const definite = DEFINITE_NETWORK_CODES.has(err?.cause?.code);
+        log({ level: 'warn', evt: definite ? 'wa.send.failed' : 'wa.send.uncertain', kind, error: 'network' });
+        return definite ? { ok: false, error: 'network' } : { ok: false, error: 'network', uncertain: true };
+      }
+
+      if (!res.ok) {
+        const uncertain = res.status === 502 || res.status === 504;
+        log({ level: 'warn', evt: 'wa.send.failed', kind, status: res.status, uncertain: uncertain || undefined });
+        return uncertain ? { ok: false, error: `http_${res.status}`, uncertain: true } : { ok: false, error: `http_${res.status}` };
+      }
+
+      let text2xx;
+      try {
+        text2xx = await res.text();
+      } catch {
+        // The send may well have gone through — we just could not read the ack.
+        log({ level: 'warn', evt: 'wa.send.no_key', kind });
+        return { ok: false, error: 'no_ack', uncertain: true };
+      }
+      let keyId = null;
+      try {
+        const body = JSON.parse(text2xx);
+        keyId = typeof body?.key?.id === 'string' ? body.key.id : null;
+      } catch { keyId = null; }
+      if (typeof keyId !== 'string') {
+        log({ level: 'warn', evt: 'wa.send.no_key', kind });
+        return { ok: false, error: 'no_ack', uncertain: true };
+      }
+      log({ evt: 'wa.send.ok', kind });
+      return { ok: true, keyId, status: res.status };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * @param {{ jid: string, text: string, kind: 'code'|'staff', userId?: string|null, bypassSwitch?: boolean,
+   *           leadId?: string|null, sendId?: string|null }} o
+   * @returns {Promise<{ ok: true, keyId: string, status: number, sendId: string }
+   *                 | { ok: false, error: string, uncertain?: true, sendId?: string }>}
+   *   `sendId` is there whenever an outbox row stands behind the answer.
+   */
+  async function sendTo({ jid, text, kind, userId = null, bypassSwitch = false, leadId = null, sendId = null } = {}) {
+    const given = sendId ? String(sendId) : null;
+    const givenRow = given ? inbox.getOutbox(given) : null;
+    // Decided once — accepted, failed, or perhaps delivered — so never sent a second time.
+    if (givenRow && givenRow.status !== 'pending') return { ok: false, error: 'duplicate', sendId: given };
+    // A refusal closes a row the caller already wrote, so it is never left `pending` —
+    // which a restart would turn into "not sure it went" for a message that never left.
+    const refuse = (error) => {
+      if (givenRow) inbox.updateOutbox(given, { status: 'failed', error });
+      return givenRow ? { ok: false, error, sendId: given } : { ok: false, error };
+    };
+
+    const m = PHONE_JID_RE.exec(String(jid ?? ''));
+    if (!m || m[1].startsWith('0')) return refuse('bad_recipient');
+    if (!VALID_KINDS.has(kind)) return refuse('bad_kind');
+    if (typeof text !== 'string' || text.length === 0 || text.length > MAX_TEXT_LEN) return refuse('bad_text');
+
+    const isOwner = m[1] === ownerDigits;
+    // A caller's `bypassSwitch` is only ever honoured for the owner's own login code —
+    // never trusted for anyone else, or it would be a way to spam past the kill switch.
+    const bypassAllowed = bypassSwitch && kind === 'code' && isOwner;
+    if (!bypassAllowed && !team.sendingEnabled()) return refuse('sending_disabled');
+    // BONA_WA_NOTIFY only ever promised to stop the lead note (services/README.md); a
+    // login code does not need it, or the owner could be locked out by an unrelated switch.
+    if (kind !== 'code' && !cfg.enabled) return refuse('disabled');
+    if (!cfg.baseUrl || !cfg.apiKey) return refuse('evolution-not-configured');
+
+    const gates = isOwner
+      ? [[perRecipient, `send:to:${m[1]}`]]
+      : [[perMinute, 'send:minute'], [perRecipient, `send:to:${m[1]}`], ...(userId ? [[perUser, `send:user:${userId}`]] : [])];
+    let dayFull = false;
+    if (!isOwner) {
+      const since = now() - DAY_MS;
+      // The caller's own `pending` row is already in the count; it is this send, not an earlier one.
+      const own = givenRow && givenRow.created >= since && givenRow.jid !== ownerJid ? 1 : 0;
+      dayFull = inbox.countSentSince(since, { excludeJid: ownerJid }) - own >= SEND_PER_DAY;
+    }
+    if (dayFull || gates.some(([limiter, key]) => !limiter.peek(key).ok)) {
+      log({ level: 'warn', evt: 'wa.send.rate_limited', kind, limit: dayFull ? 'day' : 'minute' });
+      return refuse('rate_limited');
+    }
+    for (const [limiter, key] of gates) limiter.take(key);
+
+    // Written before the call, so a crash in the middle leaves a trace (`recoverInterrupted`).
+    const row = givenRow ?? inbox.insertOutbox({
+      send_id: given ?? newId('SND'),
+      lead_id: kind === 'code' ? null : leadId,
+      jid: `${m[1]}@s.whatsapp.net`,
+      text: kind === 'code' ? null : text,
+      user_id: userId,
+      sender_kind: kind,
+    }).row;
+
+    const out = await post(m[1], text, kind);
+    if (out.ok) inbox.updateOutbox(row.send_id, { status: 'accepted', key_id: out.keyId });
+    else inbox.updateOutbox(row.send_id, { status: out.uncertain ? 'uncertain' : 'failed', error: out.error });
+    return { ...out, sendId: row.send_id };
+  }
+
+  /** A second submit of a send id gets the first one's answer — never a second message. */
+  function answerFor(row, { leadId, userId }) {
+    if (row.sender_kind !== 'staff' || row.lead_id !== String(leadId ?? '') || row.user_id !== (userId ?? null)) {
+      return { ok: false, error: 'bad_send_id' };
+    }
+    const out = {
+      ok: row.status === 'accepted',
+      duplicate: true,
+      status: row.status,
+      sendId: row.send_id,
+      error: row.status === 'accepted' ? null : (row.error ?? row.status),
+    };
+    // Still on its way, or perhaps delivered: the thread says "not sure it went — check WhatsApp".
+    if (row.status === 'uncertain' || row.status === 'pending') out.uncertain = true;
+    return out;
+  }
+
+  /**
+   * A team member's reply from the inbox thread (spec §4.5). Every check that can refuse
+   * runs before anything is written, in this order, so the answer names the first reason.
+   * @param {{ sendId: string, leadId: string, userId: string, text: string, seenTs: number }} o
+   * @returns {Promise<{ ok: true, status: 'accepted', sendId: string, keyId: string }
+   *   | { ok: false, error: string, status?: string, sendId?: string, duplicate?: true, uncertain?: true }>}
+   */
+  async function reply({ sendId, leadId, userId, text, seenTs } = {}) {
+    if (!db) throw new TypeError('reply needs the db store: pass `db` to createSender');
+    if (typeof sendId !== 'string' || !SEND_ID_RE.test(sendId)) return { ok: false, error: 'bad_send_id' };
+    const existing = inbox.getOutbox(sendId);
+    if (existing) return answerFor(existing, { leadId, userId });
+
+    // A browser posts a textarea's line breaks as CRLF; WhatsApp keeps LF. The outbox row
+    // must hold exactly what WhatsApp will hand back, or the poller could not match it.
+    const body = typeof text === 'string' ? text.replace(/\r\n?/g, '\n').trim() : '';
+    if (!body || body.length > MAX_TEXT_LEN) return { ok: false, error: 'bad_text' };
+
+    const lead = db.getLead(leadId);
+    if (!lead) return { ok: false, error: 'not_found' };
+    if (lead.inbox_state !== 'in') return { ok: false, error: 'not_in_inbox' };
+    const jid = replyJidFor(lead);
+    if (!jid) return { ok: false, error: 'lid_only' };
+    if (team.isExcludedPhone(bareDigits(jid)) || (lead.phone_e164 && team.isExcludedPhone(lead.phone_e164))) {
+      return { ok: false, error: 'excluded' };
+    }
+    // The form carries the newest message the writer saw. Anything newer, in either
+    // direction, means they are answering a conversation that has moved on.
+    const newest = inbox.newestTs(lead.lead_id);
+    if (!Number.isFinite(seenTs) || (newest !== null && newest > seenTs)) return { ok: false, error: 'stale' };
+
+    const ins = inbox.insertOutbox({
+      send_id: sendId, lead_id: lead.lead_id, jid, text: body, user_id: userId ?? null, sender_kind: 'staff', status: 'pending',
+    });
+    if (!ins.inserted) return answerFor(ins.row, { leadId, userId });
+
+    const out = await sendTo({ jid, text: body, kind: 'staff', userId: userId ?? null, leadId: lead.lead_id, sendId });
+    if (!out.ok) {
+      const res = { ok: false, error: out.error, status: out.uncertain ? 'uncertain' : 'failed', sendId };
+      if (out.uncertain) res.uncertain = true;
+      return res;
+    }
+
+    try {
+      const t = now();
+      db.transaction(() => {
+        // Re-read: the lead may have changed while the message was on its way. If the owner
+        // marked it *Not a client*, or put its number on the never list, its transcript was
+        // purged on purpose — storing this reply would start a new one for a chat he just
+        // threw out, so only an `in` chat gets the message, the handler and the flag.
+        const fresh = db.getLead(lead.lead_id);
+        if (fresh?.inbox_state === 'in') {
+          inbox.upsertMessage({
+            key_id: out.keyId, lead_id: lead.lead_id, jid, direction: 'out', sender_kind: 'staff',
+            sender_user_id: userId ?? null, text: body, ts: t, status: 'sent',
+          });
+          if (!fresh.handler_user_id && userId) inbox.setHandler(lead.lead_id, userId);
+          inbox.setNeedsHuman(lead.lead_id, 0);
+        }
+        // The client was answered either way. The Hermes `bona-unanswered-leads` watchdog
+        // reads this column.
+        if (fresh && fresh.first_reply_ts == null) db.updateLead(lead.lead_id, { first_reply_ts: t });
+      });
+    } catch (err) {
+      // The message went. Saying otherwise would invite a second send; the poller stores
+      // it from WhatsApp's own copy, matched to this row by its key.
+      log({ level: 'error', evt: 'wa.reply.record_failed', error: err?.code ?? err?.name ?? 'error' });
+    }
+    return { ok: true, status: 'accepted', sendId, keyId: out.keyId };
+  }
+
+  /** On start-up: a send still `pending` after two minutes was cut off mid-flight. */
+  const recoverInterrupted = () => inbox.markStalePending(now() - INTERRUPTED_MS);
+
+  return { sendTo, reply, recoverInterrupted };
+}
+```
+
+- [ ] **Step 4: Run the task tests**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/wa-send.test.mjs`
+Expected: PASS — 49 tests, 0 fail.
+
+- [ ] **Step 5: Hand the inbox store to the one sender** — two edits in `services/api/index.mjs`.
+
+(a) Find:
+
+```js
+import { createSender } from './lib/wa-send.mjs';
+```
+
+Replace with:
+
+```js
+import { createSender } from './lib/wa-send.mjs';
+import { createInboxStore } from './lib/inbox/store.mjs';
+```
+
+(b) Find:
+
+```js
+  // The ONE sender for messages from the owner's number to anyone else: its rate limits
+  // live in memory, so a second instance would be a second, independent budget.
+  const sender = options.sender ?? createSender({ env: cfg.env ?? {}, team, log });
+```
+
+Replace with:
+
+```js
+  // The Bona inbox tables (2026-09-27 design §4.2). The sender already needs them: every
+  // send is written to the outbox first, and the daily cap is counted from it.
+  const inboxStore = options.inboxStore ?? createInboxStore(db);
+  // The ONE sender for messages from the owner's number to anyone else: its per-minute
+  // limits live in memory, so a second instance would be a second, independent budget.
+  const sender = options.sender ?? createSender({ env: cfg.env ?? {}, team, inbox: inboxStore, db, log });
+```
+
+(`sendCode` on the next line is unchanged: login codes still go through `sender.sendTo({ ...o, kind: 'code' })`, and now leave a text-less `code` row in the outbox.)
+
+- [ ] **Step 6: Run the full suite**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/*.test.mjs`
+Expected: all pass, 0 fail — 31 more tests than after Task 6. (Had Step 5 been skipped, every test that builds the app through `createApp` — in `http`, `legacy` and `dashboard-routes` — would fail with `TypeError: createSender needs the inbox store (for the outbox and the daily cap)`.)
+
+- [ ] **Step 7: Commit**
+
+```bash
+cd /home/azoz778/bona-wt/team-inbox && git add services/api/lib/wa-send.mjs services/api/index.mjs services/api/test/wa-send.test.mjs
+git commit -m "wa-send: outbox ledger, durable day cap, per-user cap and staff replies
+
+Every send that passes the gate is written to wa_outbox before the HTTP call
+and marked accepted / uncertain / failed after it. The 500-a-day cap is now a
+rolling 24 h count of that ledger (the owner's own jid excluded), so a restart
+cannot hand out a fresh day. Adds kind 'staff' ('dana' still refused), a
+30-a-minute cap per team member, reply() with send_id idempotency (a decided
+send, uncertain included, is never sent again), phone-jid-only recipients
+(lid-only chats refused), the exclusion and stale-view guards, and
+recoverInterrupted() for sends a restart cut off. A reply that lands after
+its chat was marked Not a client is not stored, so the purge stays a purge.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 8: Leads — owner-started chats and certain enquiries join the inbox (`lib/leads.mjs`)
+
+**Files:**
+- Modify: `services/api/lib/leads.mjs`
+- Test: `services/api/test/leads.test.mjs`
+
+Contract P2-5 / P2-6. `OWNER_METHODS` chats are born `inbox_state='in'`, `first_inbound_ts=NULL`, `first_reply_ts=<creation ts>`, and never reach the ad fan-out queue; a later merge by an owner method never touches `first_inbound_ts`. Form and concierge leads are born `in`; a merge from one of those channels (or an owner method) lifts `NULL`/`unsure` to `in` and never touches `out`. A `whatsapp` channel call gets no state from here (the poller decides, Task 9). The new-lead note is not sent from here, so "no note for owner-started chats" is the poller's job (Task 9).
+
+One rule on top of P2-5's birth values (it keeps them, and only acts on a later merge): an `owner_added` lead was only *vouched for*, so when that client's first own WhatsApp message merges in while `first_reply_ts` is still the add's own stamp (`=== created`), `first_reply_ts` goes back to NULL. The client is then in the waiting queue, so the Hermes `bona-unanswered-leads` watchdog sees an unanswered client, exactly as the merge rule "vouching is not answering" says. An `owner_outbound` lead keeps its stamp, because the owner really did write first and the client is answering him. **Owner report and memory file:** say that a chat added by number starts the reply clock at the client's first message after the add.
+
+- [ ] **Step 1: Write the failing tests** — in `services/api/test/leads.test.mjs` make these two exact edits, then append the block below to the end of the file.
+
+**Edit 1 — the import.** Replace:
+
+```js
+import { createOrMergeLead, leadNote, appendLead, CHANNELS, MATCH_METHODS } from '../lib/leads.mjs';
+```
+
+with:
+
+```js
+import { createOrMergeLead, leadNote, appendLead, CHANNELS, MATCH_METHODS, OWNER_METHODS } from '../lib/leads.mjs';
+```
+
+**Edit 2 — the vocabulary test.** Replace:
+
+```js
+  assert.deepEqual(MATCH_METHODS, ['ref', 'phone', 'keyword', 'time_window', 'concierge', 'form', 'ad_meta']);
+});
+```
+
+with:
+
+```js
+  assert.deepEqual(MATCH_METHODS, ['ref', 'phone', 'keyword', 'time_window', 'concierge', 'form', 'ad_meta', 'owner_outbound', 'owner_added']);
+  assert.deepEqual([...OWNER_METHODS], ['owner_outbound', 'owner_added']);
+});
+```
+
+**Then append** to the end of `services/api/test/leads.test.mjs`:
+
+```js
+/* ---------------- the Bona inbox state (2026-09-28 plan P2-5, P2-6) ---------------- */
+
+test('a chat the owner started is in the inbox from birth, already answered, and never reported as an ad lead', () => {
+  const h = harness();
+  const cases = [['owner_outbound', '0522222222', '966522222222@s.whatsapp.net'], ['owner_added', '0533333333', '966533333333@s.whatsapp.net']];
+  for (const [matchMethod, phone, waJid] of cases) {
+    const { lead, created } = createOrMergeLead(h.db, { phone, waJid }, { channel: 'whatsapp', matchMethod, now: NOW, dataDir: h.dataDir });
+    assert.equal(created, true, matchMethod);
+    assert.equal(lead.match_method, matchMethod);
+    assert.equal(lead.channel, 'whatsapp');
+    assert.equal(lead.inbox_state, 'in', `${matchMethod}: the owner already vouched for it`);
+    assert.equal(lead.inbox_since, NOW);
+    assert.equal(lead.first_inbound_ts, null, `${matchMethod}: the client has not written in — the owner did`);
+    assert.equal(lead.first_reply_ts, NOW, `${matchMethod}: so nobody is waiting for a first reply`);
+    assert.deepEqual(h.db.touchpointsForLead(lead.lead_id).map((t) => [t.event_type, t.meta.match_method]), [['lead_created', matchMethod]]);
+  }
+  assert.deepEqual(h.db.dueFanout(NOW + 1000), [], 'no click behind either, so the ad platforms hear nothing');
+  assert.equal(h.db.fanoutCounts().pending, 0);
+  assert.equal(h.db.countWaitingLeads(), 0, 'neither is in the waiting queue the Hermes watchdog reads');
+  assert.equal(h.db.recentEvents({ name: 'lead_created' }).length, 2, 'each keeps its own history row; only the ad queue is skipped');
+  assert.equal(h.jsonl().length, 2, 'both are still enquiries in the raw log');
+  h.cleanup();
+});
+
+test('an owner method merging into a lead never moves when the client first wrote, and vouching is not answering', () => {
+  const h = harness();
+  const wrote = createOrMergeLead(h.db, { phone: '0500000010' }, { channel: 'whatsapp', matchMethod: 'keyword', now: NOW });
+  assert.equal(wrote.lead.first_inbound_ts, NOW);
+  const added = createOrMergeLead(h.db, { phone: '0500000010' }, { channel: 'whatsapp', matchMethod: 'owner_added', now: NOW + 5000 });
+  assert.equal(added.created, false);
+  assert.equal(added.lead.lead_id, wrote.lead.lead_id);
+  assert.equal(added.lead.first_inbound_ts, NOW, "still measured from the client's own first message");
+  assert.equal(added.lead.first_reply_ts, null, 'the owner vouching for a chat does not answer it');
+  assert.equal(added.lead.inbox_state, 'in');
+  assert.equal(added.lead.inbox_since, NOW + 5000);
+  assert.deepEqual(h.db.touchpointsForLead(wrote.lead.lead_id).map((t) => t.event_type), ['lead_created', 'owner_contact'], 'the owner reaching out is not an inbound message');
+
+  // A lead that never wrote in at all keeps no inbound time through an owner merge either.
+  const form = createOrMergeLead(h.db, { phone: '0500000011' }, { channel: 'form', matchMethod: 'form', now: NOW });
+  const reached = createOrMergeLead(h.db, { phone: '0500000011', waJid: '966500000011@s.whatsapp.net' }, { channel: 'whatsapp', matchMethod: 'owner_outbound', now: NOW + 1 });
+  assert.equal(reached.lead.lead_id, form.lead.lead_id);
+  assert.equal(reached.lead.first_inbound_ts, null);
+  assert.equal(reached.lead.wa_jid, '966500000011@s.whatsapp.net', 'the merge still fills what is empty');
+  assert.equal(h.db.fanoutCounts().pending, 8, 'only the two creations fanned out; the merges added nothing');
+  h.cleanup();
+});
+
+test('a form or a concierge conversation is a certain enquiry: in the inbox the moment it exists', () => {
+  const h = harness();
+  for (const [channel, matchMethod, phone] of [['form', 'form', '0500000020'], ['concierge_chat', 'concierge', '0500000021'], ['concierge_voice', 'concierge', '0500000022']]) {
+    const { lead } = createOrMergeLead(h.db, { phone }, { channel, matchMethod, now: NOW });
+    assert.equal(lead.inbox_state, 'in', channel);
+    assert.equal(lead.inbox_since, NOW, channel);
+    assert.equal(lead.first_reply_ts, null, `${channel}: a real enquiry is still owed a reply`);
+  }
+  assert.equal(h.db.fanoutCounts().pending, 12, 'and each is still reported to the ad platforms');
+  h.cleanup();
+});
+
+test('a form or concierge merge lifts a missing or unsure state to in, and never pulls a chat back from out', () => {
+  const h = harness();
+  const make = (phone, state) => {
+    const { lead } = createOrMergeLead(h.db, { phone }, { channel: 'whatsapp', matchMethod: 'keyword', now: NOW });
+    if (state) h.db.updateLead(lead.lead_id, { inbox_state: state, inbox_since: state === 'in' ? NOW : null });
+    return lead.lead_id;
+  };
+  const none = make('0500000030', null);
+  const unsure = make('0500000031', 'unsure');
+  const out = make('0500000032', 'out');
+  const already = make('0500000033', 'in');
+  createOrMergeLead(h.db, { phone: '0500000030' }, { channel: 'form', matchMethod: 'form', now: NOW + 1000 });
+  createOrMergeLead(h.db, { phone: '0500000031' }, { channel: 'concierge_chat', matchMethod: 'concierge', now: NOW + 1000 });
+  createOrMergeLead(h.db, { phone: '0500000032' }, { channel: 'form', matchMethod: 'form', now: NOW + 1000 });
+  createOrMergeLead(h.db, { phone: '0500000033' }, { channel: 'concierge_voice', matchMethod: 'concierge', now: NOW + 1000 });
+  const state = (id) => { const l = h.db.getLead(id); return [l.inbox_state, l.inbox_since]; };
+  assert.deepEqual(state(none), ['in', NOW + 1000]);
+  assert.deepEqual(state(unsure), ['in', NOW + 1000]);
+  assert.deepEqual(state(out), ['out', null], '"not a client" is the owner\'s word, and a form cannot overrule it');
+  assert.deepEqual(state(already), ['in', NOW], 'already in: the date it joined stays');
+  h.cleanup();
+});
+
+test('a WhatsApp message never decides the inbox here — the poller does — and neither does a manual lead', () => {
+  const h = harness();
+  ['ref', 'phone', 'keyword', 'time_window', 'ad_meta'].forEach((matchMethod, i) => {
+    const { lead } = createOrMergeLead(h.db, { phone: `05000000${40 + i}` }, { channel: 'whatsapp', matchMethod, now: NOW });
+    assert.deepEqual([lead.inbox_state, lead.inbox_since], [null, null], matchMethod);
+  });
+  const manual = createOrMergeLead(h.db, { phone: '0500000050' }, { channel: 'manual', now: NOW });
+  assert.equal(manual.lead.inbox_state, null);
+
+  const guessed = createOrMergeLead(h.db, { phone: '0500000051' }, { channel: 'whatsapp', matchMethod: 'keyword', now: NOW });
+  h.db.updateLead(guessed.lead.lead_id, { inbox_state: 'unsure' });
+  const again = createOrMergeLead(h.db, { phone: '0500000051' }, { channel: 'whatsapp', matchMethod: 'ref', ref: 'K7Q2XR', now: NOW + 1 });
+  assert.equal(again.lead.inbox_state, 'unsure', 'even a Ref line merging here leaves the state to the poller');
+  h.cleanup();
+});
+
+test('a number the owner only added is owed a reply once the client writes; a chat he opened by writing is not', () => {
+  const h = harness();
+  const added = createOrMergeLead(h.db, { phone: '0500000060', waJid: '966500000060@s.whatsapp.net' }, { channel: 'whatsapp', matchMethod: 'owner_added', now: NOW });
+  const opened = createOrMergeLead(h.db, { phone: '0500000061', waJid: '966500000061@s.whatsapp.net' }, { channel: 'whatsapp', matchMethod: 'owner_outbound', now: NOW });
+  assert.equal(h.db.countWaitingLeads(), 0, 'nobody has written in yet, so nobody is waiting');
+
+  const wrote = createOrMergeLead(h.db, { phone: '0500000060' }, { channel: 'whatsapp', matchMethod: 'phone', now: NOW + 60_000 });
+  assert.equal(wrote.lead.lead_id, added.lead.lead_id);
+  assert.equal(wrote.lead.first_inbound_ts, NOW + 60_000);
+  assert.equal(wrote.lead.first_reply_ts, null, 'adding a number is not answering it: the client\'s own message starts the clock');
+  assert.equal(wrote.lead.inbox_state, 'in');
+
+  const answered = createOrMergeLead(h.db, { phone: '0500000061' }, { channel: 'whatsapp', matchMethod: 'phone', now: NOW + 60_000 });
+  assert.equal(answered.lead.lead_id, opened.lead.lead_id);
+  assert.equal(answered.lead.first_inbound_ts, NOW + 60_000);
+  assert.equal(answered.lead.first_reply_ts, NOW, 'the owner wrote first, so this client is answering him');
+
+  assert.deepEqual(h.db.waitingLeads().map((l) => l.lead_id), [added.lead.lead_id], 'the Hermes watchdog reads this queue');
+  assert.equal(h.db.countWaitingLeads(), 1);
+
+  // Once somebody has answered, a later message never takes that answer back.
+  h.db.updateLead(added.lead.lead_id, { first_reply_ts: NOW + 120_000 });
+  const later = createOrMergeLead(h.db, { phone: '0500000060' }, { channel: 'whatsapp', matchMethod: 'phone', now: NOW + 180_000 });
+  assert.equal(later.lead.first_reply_ts, NOW + 120_000);
+  assert.equal(later.lead.first_inbound_ts, NOW + 60_000);
+  assert.equal(h.db.countWaitingLeads(), 0);
+  h.cleanup();
+});
+```
+
+- [ ] **Step 2: Run to see it fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/leads.test.mjs`
+Expected: FAIL — the file does not load: `SyntaxError: The requested module '../lib/leads.mjs' does not provide an export named 'OWNER_METHODS'`. (Adding only the export is not enough: the five inbox tests about owner methods, form/concierge creation and merges, and the reply clock of an added number then fail on their assertions. The last one fails on `first_reply_ts` until Edit 5's `owner_added` rule is in, and the others fail until Edits 4–7 are. The WhatsApp test already passes — it pins behaviour that must not change.)
+
+- [ ] **Step 3: Implement** — in `services/api/lib/leads.mjs`, seven exact edits:
+
+**Edit 1 — the vocabularies.** Replace:
+
+```js
+export const CHANNELS = ['whatsapp', 'form', 'concierge_chat', 'concierge_voice', 'manual'];
+export const MATCH_METHODS = ['ref', 'phone', 'keyword', 'time_window', 'concierge', 'form', 'ad_meta'];
+```
+
+with:
+
+```js
+export const CHANNELS = ['whatsapp', 'form', 'concierge_chat', 'concierge_voice', 'manual'];
+export const MATCH_METHODS = ['ref', 'phone', 'keyword', 'time_window', 'concierge', 'form', 'ad_meta', 'owner_outbound', 'owner_added'];
+/**
+ * Chats the owner started rather than the client: `owner_outbound` when the poller sees him
+ * send a Bona link, brochure or listing number to a new number, `owner_added` when he adds a
+ * number on the dashboard (2026-09-28 plan P2-5). No click is behind them, so the ad
+ * platforms are never told; he has already written (or vouched), so nobody is waiting for a
+ * first reply and the Hermes `bona-unanswered-leads` watchdog must not flag them. Vouching
+ * is not answering, though: once an `owner_added` client writes in, the merge below opens
+ * the reply clock again (an `owner_outbound` client is answering him, so it stays shut).
+ */
+export const OWNER_METHODS = new Set(['owner_outbound', 'owner_added']);
+/** Channels whose every lead is a real enquiry, so it joins the Bona inbox at once (P2-6). */
+const CERTAIN_CHANNELS = new Set(['form', 'concierge_chat', 'concierge_voice']);
+```
+
+**Edit 2 — the JSDoc of `createOrMergeLead`.** Replace:
+
+```js
+ *           matchMethod?: 'ref'|'phone'|'keyword'|'time_window'|'concierge'|'form'|'ad_meta',
+```
+
+with:
+
+```js
+ *           matchMethod?: 'ref'|'phone'|'keyword'|'time_window'|'concierge'|'form'|'ad_meta'|'owner_outbound'|'owner_added',
+```
+
+**Edit 3 — the end of that JSDoc.** Replace:
+
+```js
+ *   `raw` holds extra fields for the raw-log line only (e.g. the Retell conversation id).
+ * @returns {{ lead: object, created: boolean }}
+```
+
+with:
+
+```js
+ *   `raw` holds extra fields for the raw-log line only (e.g. the Retell conversation id).
+ *
+ * The Bona inbox state is set here only where this call is certain (2026-09-28 plan P2-5,
+ * P2-6): a form or concierge lead, and a chat the owner started, are `in`; a merge of one of
+ * those lifts a missing or `unsure` state to `in` and never touches `out` — "not a client"
+ * is the owner's word. A WhatsApp message gets no state from here: the poller judges those
+ * (lib/inbox/eligibility.mjs).
+ * @returns {{ lead: object, created: boolean }}
+```
+
+**Edit 4 — after the match method is resolved.** Replace:
+
+```js
+    : (channel === 'form' ? 'form' : channel.startsWith('concierge') ? 'concierge' : 'phone');
+
+  const phone = normalisePhone(input.phone);
+```
+
+with:
+
+```js
+    : (channel === 'form' ? 'form' : channel.startsWith('concierge') ? 'concierge' : 'phone');
+  const ownerStarted = OWNER_METHODS.has(matchMethod);
+  const certain = ownerStarted || CERTAIN_CHANNELS.has(channel);
+
+  const phone = normalisePhone(input.phone);
+```
+
+**Edit 5 — the merge.** Replace:
+
+```js
+      if (channel === 'whatsapp' && !existing.first_inbound_ts) patch.first_inbound_ts = now;
+      db.updateLead(existing.lead_id, patch);
+      db.addTouchpoint({
+        lead_id: existing.lead_id, ts: now, channel, event_type: MERGE_EVENT[channel],
+```
+
+with:
+
+```js
+      // The owner writing to (or vouching for) a lead is not the client writing in: the
+      // response clock starts only at the client's own first message.
+      if (channel === 'whatsapp' && !ownerStarted && !existing.first_inbound_ts) {
+        patch.first_inbound_ts = now;
+        // A number the owner only added was born "answered" so it would not wait in the
+        // queue before anyone had written. Now the client has: whatever was said before,
+        // this message is owed a reply, and the Hermes watchdog has to be able to see it.
+        // `first_reply_ts` still equal to `created` is the stamp the add itself left (a
+        // real reply only ever fills an empty one), so it is the add's to take back.
+        if (existing.match_method === 'owner_added' && existing.first_reply_ts === existing.created) patch.first_reply_ts = null;
+      }
+      if (certain && (existing.inbox_state == null || existing.inbox_state === 'unsure')) Object.assign(patch, { inbox_state: 'in', inbox_since: now });
+      db.updateLead(existing.lead_id, patch);
+      db.addTouchpoint({
+        lead_id: existing.lead_id, ts: now, channel, event_type: ownerStarted ? 'owner_contact' : MERGE_EVENT[channel],
+```
+
+**Edit 6 — the insert.** Replace:
+
+```js
+      first_inbound_ts: channel === 'whatsapp' ? now : null, first_reply_ts: null, legacy_id: null,
+      consent_ads: session?.consent_ads ?? 0, consent_analytics: session?.consent_analytics ?? 0,
+    });
+```
+
+with:
+
+```js
+      first_inbound_ts: channel === 'whatsapp' && !ownerStarted ? now : null, first_reply_ts: ownerStarted ? now : null, legacy_id: null,
+      consent_ads: session?.consent_ads ?? 0, consent_analytics: session?.consent_analytics ?? 0,
+      inbox_state: certain ? 'in' : null, inbox_since: certain ? now : null,
+    });
+```
+
+**Edit 7 — the fan-out.** Replace:
+
+```js
+    const browserEvent = meta.eventId ? db.getEvent(meta.eventId) : null;
+    db.enqueueFanout(browserEvent ? meta.eventId : event.event_id, LEAD_FANOUT, { now });
+```
+
+with:
+
+```js
+    // An owner-started chat is not an ad conversion at all: nobody clicked anything, and
+    // reporting it would credit a campaign that never reached this person. Its event row
+    // above stays — it is the lead's own history — only the ad queue is skipped.
+    const browserEvent = meta.eventId ? db.getEvent(meta.eventId) : null;
+    if (!ownerStarted) db.enqueueFanout(browserEvent ? meta.eventId : event.event_id, LEAD_FANOUT, { now });
+```
+
+- [ ] **Step 4: Run**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/leads.test.mjs`
+Expected: PASS (19 tests).
+
+- [ ] **Step 5: Run the full suite**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/*.test.mjs`
+Expected: all pass, 0 fail. (Form and concierge leads created elsewhere in the suite — `http`, `tools`, `import-legacy`, the dashboard tests — are now born `inbox_state='in'`; no existing test asserts on that column.)
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd /home/azoz778/bona-wt/team-inbox && git add services/api/lib/leads.mjs services/api/test/leads.test.mjs
+git commit -m "leads: owner-started chats and certain enquiries join the inbox
+
+Owner-started chats (owner_outbound, owner_added) are born in the inbox,
+already answered, with no inbound time and no ad fan-out. A number the
+owner only added is owed a reply again once the client writes in. Form and
+concierge leads are born in; their merges lift a missing or unsure state,
+never out.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+### Task 9: Poller — inbox states, owner-started joins, transcripts of `in` chats (`lib/wa-poller.mjs`)
+
+**Files:**
+- Modify: `services/api/lib/wa-poller.mjs`
+- Test: `services/api/test/wa-poller.test.mjs`
+
+`createPoller` gains `inboxStore`, `ingest` and `backfill` (all default `null`). With `ingest` null nothing below runs and the poller is the Phase 1 poller — every one of the 50 existing tests passes unchanged. The only changes visible without the inbox are the default reader (`readWindow`, Task 2), `missing` on `wa.poll.truncated`, and two zero tally fields (`stored`, `joined`). Per record, after the unchanged exclusions: inbound → `handleInbound` (unchanged, now also returning the lead) → `nextInboxState` → transition stored with `setInboxState(..., { since: ts })` → a fresh join awaits `backfill.history(lead, { sinceTs: ts - JOIN_HISTORY_MS, untilTs: ts })` (when that answers `{ error }`, a `wa_gaps` row `join:<leadId>:<ts>`, reason `history_failed`, goes just before the joining message and `inbox.join_history_failed` is logged; the joining message is then stored, so amendment A3's catch-up, which only picks chats with nothing stored, would never retry the history, and the gap is how the thread shows the loss) → an `in` lead gets `ingest`. Outbound → `recordReply` (unchanged: `first_reply_ts` is stamped exactly as before) → `in` lead: `ingest`; `out`: nothing; otherwise `ownerOutboundJoins` → create (`owner_outbound`, name null) or reuse the lead, `setInboxState('in')`, 24 h backfill, `ingest`, log `inbox.join`. A written-off record of an `in` chat → `addGap({ reason: 'failed' })`. `index.mjs` wiring is a later task.
+
+- [ ] **Step 1: Write the failing tests** — in `services/api/test/wa-poller.test.mjs` make these four exact edits (imports, two harness helpers after `msg`, the opt-in inbox wiring of `harness`), then append the block below to the end of the file.
+
+**Edit 1 — the imports.** Replace:
+
+```js
+import {
+  CLICK_WINDOW_MS, FIRST_RUN_LOOKBACK_MS, MAX_RECORD_ATTEMPTS, MAX_WINDOW_MS, OVERLAP_MS,
+  SEEN_TTL_MS, adMetaOf, adSourceOf, createPoller, isIgnorableChat, jidsOf,
+} from '../lib/wa-poller.mjs';
+```
+
+with:
+
+```js
+import {
+  CLICK_WINDOW_MS, FIRST_RUN_LOOKBACK_MS, MAX_RECORD_ATTEMPTS, MAX_WINDOW_MS, OVERLAP_MS,
+  SEEN_TTL_MS, adMetaOf, adSourceOf, createPoller, isIgnorableChat, jidsOf,
+} from '../lib/wa-poller.mjs';
+import { JOIN_HISTORY_MS, createBackfill } from '../lib/inbox/backfill.mjs';
+import { createIngest } from '../lib/inbox/ingest.mjs';
+import { createInboxStore } from '../lib/inbox/store.mjs';
+```
+
+**Edit 2 — the fixtures, right after `msg`.** Replace:
+
+```js
+  text: '', pushName: 'Sara', contextInfo: null, messageType: 'conversation', ...over,
+});
+```
+
+with:
+
+```js
+  text: '', pushName: 'Sara', contextInfo: null, messageType: 'conversation', ...over,
+});
+
+/**
+ * Evolution's per-chat read (`findMessages` with a `key` filter) over a fixed pool: the
+ * `remoteJid` / `remoteJidAlt` filters and the time window honoured the way the live
+ * instance honours them (2026-09-28 pre-work), newest first, paged by `offset`. `fail`
+ * records the question and then throws, the way a read does while Evolution is down.
+ */
+function chatReader(pool, { fail = false } = {}) {
+  const calls = [];
+  const find = async ({ where = {}, page = 1, offset = 100 } = {}) => {
+    calls.push({ where, page, offset });
+    if (fail) throw new Error('connect ECONNREFUSED 127.0.0.1:8085');
+    const key = where.key ?? {};
+    const t = where.messageTimestamp ?? null;
+    const hits = pool
+      .filter((r) => (key.remoteJid === undefined || r.jid === key.remoteJid)
+        && (key.remoteJidAlt === undefined || r.jidAlt === key.remoteJidAlt)
+        && (!t || (r.ts >= Date.parse(t.gte) && r.ts <= Date.parse(t.lte))))
+      .sort((a, b) => b.ts - a.ts);
+    return { records: hits.slice((page - 1) * offset, page * offset), total: hits.length, pages: Math.max(1, Math.ceil(hits.length / offset)) };
+  };
+  return { calls, find };
+}
+
+/** The Bona inbox wired the way index.mjs wires it, with the owner seeded and the per-chat reader spied on. */
+function inboxWiring({ db, history, historyFails = false, logs, now }) {
+  const team = createTeam(db, { now });
+  const owner = team.ensureOwner({ phone: '966593296933', name: 'Abdulaziz' });
+  const inbox = createInboxStore(db, { now });
+  const log = (obj) => logs.push(obj);
+  const ingestor = createIngest({ db, inbox, ownerUserId: () => owner.user_id, log, now });
+  const ingest = (lead, rec) => ingestor.ingest(lead, rec);
+  const reader = chatReader(history, { fail: historyFails });
+  const backfill = createBackfill({ env: {}, db, ingest, find: reader.find, log, now });
+  return { team, owner, inbox, ingest, backfill, findCalls: reader.calls };
+}
+```
+
+**Edit 3 — the harness's comment and signature.** Replace:
+
+```js
+/**
+ * A store with the visitor session behind Ref `K7Q2XR`, a poller wired to a queue of
+ * windows (one per tick), and the owner's note sender recorded rather than sent.
+ */
+function harness({ windows = [], env = {}, seedSession = true, isExcluded } = {}) {
+```
+
+with:
+
+```js
+/**
+ * A store with the visitor session behind Ref `K7Q2XR`, a poller wired to a queue of
+ * windows (one per tick), and the owner's note sender recorded rather than sent.
+ *
+ * `inbox: true` also wires the Bona inbox (`inboxWiring` above): the real inbox store,
+ * ingest and backfill over the same db, except that the backfill's per-chat reader is a
+ * spy over `history`, so no test reaches Evolution; `historyFails` makes that reader throw,
+ * as it does when Evolution is down. `ingestOverride` replaces only the poller's ingest
+ * (the backfill keeps the real one), for a store that fails.
+ */
+function harness({ windows = [], env = {}, seedSession = true, isExcluded, inbox = false, history = [], historyFails = false, ingestOverride = null } = {}) {
+```
+
+**Edit 4 — the harness's poller and return value.** Replace:
+
+```js
+  let clock = NOW;
+  const poller = createPoller({
+    db,
+    cfg: { env: { BONA_OWNER_JID: OWNER, ...env }, siteUrl: 'https://bona-real-estate.com', dataDir, waPollMs: 0 },
+    findMessages: async (window) => { asked.push(window); return { records: queue.length ? queue.shift() : [] }; },
+    sendWhatsApp: async (text) => { sent.push(text); return { ok: true }; },
+    ...(isExcluded ? { isExcluded } : {}),
+    log: (obj) => logs.push(obj),
+    now: () => clock,
+  });
+  return {
+    db, poller, asked, sent, logs, dataDir,
+```
+
+with:
+
+```js
+  let clock = NOW;
+  const wiring = inbox ? inboxWiring({ db, history, historyFails, logs, now: () => clock }) : null;
+  const poller = createPoller({
+    db,
+    cfg: { env: { BONA_OWNER_JID: OWNER, ...env }, siteUrl: 'https://bona-real-estate.com', dataDir, waPollMs: 0 },
+    findMessages: async (window) => { asked.push(window); return { records: queue.length ? queue.shift() : [] }; },
+    sendWhatsApp: async (text) => { sent.push(text); return { ok: true }; },
+    ...(isExcluded ? { isExcluded } : {}),
+    ...(wiring ? { inboxStore: wiring.inbox, ingest: ingestOverride ?? wiring.ingest, backfill: wiring.backfill } : {}),
+    log: (obj) => logs.push(obj),
+    now: () => clock,
+  });
+  return {
+    db, poller, asked, sent, logs, dataDir,
+    inbox: wiring?.inbox ?? null, team: wiring?.team ?? null, owner: wiring?.owner ?? null, findCalls: wiring?.findCalls ?? [],
+```
+
+**Then append** to the end of `services/api/test/wa-poller.test.mjs`:
+
+```js
+/* ---------------- (l) the default reader trusts the size Evolution states ---------------- */
+
+test('(l) one full page that says it is the whole window is read once, not paged to the cap', async () => {
+  const db = openDb(':memory:');
+  const logs = [];
+  const poller = createPoller({
+    db,
+    cfg: { env: { EVOLUTION_API_URL: 'https://wa-api.example', EVOLUTION_API_KEY: 'evo-key', BONA_OWNER_JID: OWNER } },
+    log: (o) => logs.push(o),
+    now: () => NOW,
+  });
+  const page = Array.from({ length: 100 }, (_, i) => wire({ key: { id: `P${i}`, fromMe: false, remoteJid: SENDER }, message: { conversation: 'hi' } }));
+  await withStubbedFetch({ messages: { total: 100, pages: 1, currentPage: 1, records: page } }, async (calls) => {
+    const tally = await poller.tick();
+    assert.equal(calls.length, 1, 'total says 100 on one page, so there is no page 2 to ask for');
+    assert.equal(tally.scanned, 100);
+  });
+  assert.equal(logs.some((l) => l.evt === 'wa.poll.truncated'), false);
+  db.close();
+});
+
+test('a truncated window says how many messages it could not read', async () => {
+  const db = openDb(':memory:');
+  const logs = [];
+  const poller = createPoller({
+    db,
+    cfg: { env: { BONA_OWNER_JID: OWNER } },
+    findMessages: async () => ({ records: [msg({ text: 'hi' })], truncated: true, missing: 42 }),
+    log: (o) => logs.push(o),
+    now: () => NOW,
+  });
+  await poller.tick();
+  const warned = logs.find((l) => l.evt === 'wa.poll.truncated');
+  assert.equal(warned.level, 'warn');
+  assert.equal(warned.missing, 42);
+  db.close();
+});
+
+/* ---------------- (t) the Bona inbox (2026-09-27 design §4) ---------------- */
+
+const iso = (ms) => new Date(ms).toISOString();
+const STRANGER = '966522222222@s.whatsapp.net';
+const STRANGER2 = '966533333333@s.whatsapp.net';
+/** A chat's stored transcript, oldest first, as [id, direction, sender]. */
+const rows = (h, leadId) => h.inbox.messagesFor(leadId).map((m) => [m.key_id, m.direction, m.sender_kind]);
+/** Every per-chat read the backfill made asked for exactly the 24 h before the join. */
+function assertHistoryWindow(h, joinTs) {
+  assert.ok(h.findCalls.length > 0, 'the history before the join was asked for');
+  for (const c of h.findCalls) assert.deepEqual(c.where.messageTimestamp, { gte: iso(joinTs - JOIN_HISTORY_MS), lte: iso(joinTs) });
+}
+/** A lead already in the inbox, as a certain match (or the migration) would have left it. */
+const seedInLead = (h, over = {}) => h.db.insertLead({
+  lead_id: 'LEAD-in', phone_e164: '966500000000', wa_jid: SENDER, inbox_state: 'in', inbox_since: NOW - 3_600_000,
+  created: NOW - 3_600_000, updated: NOW - 3_600_000, ...over,
+});
+
+test('(t) with no inbox wired the poller stays the Phase 1 poller: no state, no transcript', async () => {
+  const h = harness({ windows: [[
+    msg({ text: 'Ref BONA-W003 · K7Q2XR' }),
+    msg({ id: 'OUT', fromMe: true, ts: NOW - 30_000, pushName: null, text: 'Ahlan!' }),
+  ]] });
+  const tally = await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.inbox_state, null);
+  assert.equal(lead.first_reply_ts, NOW - 30_000);
+  assert.equal(createInboxStore(h.db).hasMessages(lead.lead_id), false);
+  assert.deepEqual({ joined: tally.joined, stored: tally.stored }, { joined: 0, stored: 0 });
+  h.cleanup();
+});
+
+test('(t) an inbox ingest without the inbox store is a wiring mistake, refused at once', () => {
+  const db = openDb(':memory:');
+  assert.throws(() => createPoller({ db, ingest: () => ({ stored: false }) }), TypeError);
+  db.close();
+});
+
+test('(t) a Ref line puts the chat in the inbox: stored, with the 24 h before it', async () => {
+  const hi = msg({ id: 'HI', ts: NOW - 3_600_000, text: 'Hi' });
+  const ref = msg({ id: 'REF', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const h = harness({ inbox: true, history: [hi, ref], windows: [[ref]] });
+  const tally = await h.poller.tick();
+
+  const [lead] = h.leads();
+  assert.equal(lead.inbox_state, 'in');
+  assert.equal(lead.inbox_since, NOW - 60_000, 'in since the message that joined it');
+  assertHistoryWindow(h, NOW - 60_000);
+  assert.deepEqual(rows(h, lead.lead_id), [['HI', 'in', 'client'], ['REF', 'in', 'client']], 'the "Hi" before the Ref line is there too, and nothing twice');
+  assert.deepEqual(h.inbox.gapsFor(lead.lead_id), [], 'a history that was read leaves no gap');
+  assert.deepEqual({ joined: tally.joined, stored: tally.stored }, { joined: 1, stored: 1 });
+  assert.equal(h.sent.length, 1, 'a client-started lead still tells the owner');
+  const joined = h.logs.find((l) => l.evt === 'inbox.join');
+  assert.equal(joined.leadId, lead.lead_id);
+  assert.equal(joined.via, 'inbound');
+  h.cleanup();
+});
+
+test('(t) the word "bona" alone is a guess: the Unsure list, nothing stored, no history pulled', async () => {
+  const h = harness({ inbox: true, windows: [[msg({ text: 'مرحبا بونا، عندكم شقق في الشاطئ؟' })]] });
+  const tally = await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.match_method, 'keyword', 'still a lead, for the stats');
+  assert.equal(lead.inbox_state, 'unsure');
+  assert.equal(lead.inbox_since, null);
+  assert.equal(h.inbox.hasMessages(lead.lead_id), false);
+  assert.equal(h.findCalls.length, 0);
+  assert.deepEqual({ joined: tally.joined, stored: tally.stored }, { joined: 0, stored: 0 });
+  h.cleanup();
+});
+
+test('(t) a join whose history Evolution cannot give leaves a gap where that history belongs, and keeps the joining message', async () => {
+  const hi = msg({ id: 'HI', ts: NOW - 3_600_000, text: 'Hi' });
+  const ref = msg({ id: 'REF', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const h = harness({ inbox: true, history: [hi, ref], historyFails: true, windows: [[ref]] });
+  const tally = await h.poller.tick();
+
+  const [lead] = h.leads();
+  assert.equal(lead.inbox_state, 'in');
+  assert.equal(tally.joined, 1);
+  assert.ok(h.findCalls.length > 0, 'the history was asked for');
+  assert.deepEqual(rows(h, lead.lead_id), [['REF', 'in', 'client']], 'the joining message is kept; the "Hi" before it could not be read');
+  assert.deepEqual(h.inbox.gapsFor(lead.lead_id).map((g) => [g.key_id, g.lead_id, g.jid, g.ts, g.reason]), [
+    [`join:${lead.lead_id}:${NOW - 60_000}`, lead.lead_id, null, NOW - 60_001, 'history_failed'],
+  ], 'the chat now has a message, so the daily catch-up will not ask again: the thread has to say what is missing, just before the joining message');
+  const warned = h.logs.find((l) => l.evt === 'inbox.join_history_failed');
+  assert.deepEqual([warned.level, warned.leadId, warned.error], ['warn', lead.lead_id, 'failed']);
+  assert.equal(JSON.stringify(h.logs).includes('966500000000'), false, 'no number in any log line');
+  h.cleanup();
+});
+
+test('(t) a listing id is certain: in, and stored', async () => {
+  const h = harness({ inbox: true, windows: [[msg({ text: 'BONA-W012 السعر؟' })]] });
+  await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.match_method, 'keyword');
+  assert.equal(lead.inbox_state, 'in');
+  assert.deepEqual(rows(h, lead.lead_id), [['KEY1', 'in', 'client']]);
+  h.cleanup();
+});
+
+test('(t) a click-window match is a guess too: Unsure, nothing stored', async () => {
+  const h = harness({ inbox: true, windows: [[msg({ text: 'مرحبا' })]] });
+  h.db.upsertSession({ session_id: 'clk1-9zad', anon_id: ANON2, started: NOW - 700_000, last_seen: NOW - 300_000, pages: 2, locale: 'ar' });
+  h.db.insertEvent({ event_id: 'ev-click-1', ts: NOW - 300_000, name: 'whatsapp_click', anon_id: ANON2, session_id: 'clk1-9zad', listing_id: 'BONA-W007' });
+  await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.match_method, 'time_window');
+  assert.equal(lead.inbox_state, 'unsure');
+  assert.equal(h.inbox.hasMessages(lead.lead_id), false);
+  h.cleanup();
+});
+
+test('(t) an Unsure chat that later sends a Ref line joins, and its earlier messages come with it', async () => {
+  const guess = msg({ id: 'W1', ts: NOW - 120_000, text: 'مرحبا بونا' });
+  const ref = msg({ id: 'W2', ts: NOW - 30_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const h = harness({ inbox: true, history: [guess, ref], windows: [[guess], [ref]] });
+  await h.poller.tick();
+  const [before] = h.leads();
+  assert.equal(before.inbox_state, 'unsure');
+  assert.equal(h.inbox.hasMessages(before.lead_id), false);
+
+  const tally = await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.inbox_state, 'in');
+  assert.equal(lead.inbox_since, NOW - 30_000);
+  assert.equal(tally.joined, 1);
+  assertHistoryWindow(h, NOW - 30_000);
+  assert.deepEqual(rows(h, lead.lead_id), [['W1', 'in', 'client'], ['W2', 'in', 'client']], 'the message the poller already saw as a guess is pulled back in');
+  h.cleanup();
+});
+
+test('(t) an out chat never comes back on its own — not on a Ref line, not on a Bona link', async () => {
+  const h = harness({ inbox: true });
+  seedInLead(h, { lead_id: 'LEAD-out', inbox_state: 'out', inbox_since: null });
+  h.push([
+    msg({ id: 'O-IN', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' }),
+    msg({ id: 'O-OUT', fromMe: true, ts: NOW - 30_000, pushName: null, text: 'https://bona-real-estate.com/properties/bona-w003/' }),
+  ]);
+  const tally = await h.poller.tick();
+  assert.equal(h.db.getLead('LEAD-out').inbox_state, 'out');
+  assert.equal(h.inbox.hasMessages('LEAD-out'), false);
+  assert.equal(h.findCalls.length, 0);
+  assert.deepEqual({ joined: tally.joined, stored: tally.stored }, { joined: 0, stored: 0 });
+  h.cleanup();
+});
+
+test("(t) an in chat is stored both ways; the owner's own reply is 'owner_number', makes him the handler, and still stops the clock", async () => {
+  const h = harness({ inbox: true, windows: [
+    [msg({ id: 'IN1', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' })],
+    [
+      msg({ id: 'IN2', ts: NOW - 50_000, text: 'أي جديد؟' }),
+      msg({ id: 'OUT1', fromMe: true, ts: NOW - 40_000, pushName: 'Abdulaziz', text: 'Ahlan! Let me check.' }),
+    ],
+  ] });
+  await h.poller.tick();
+  const second = await h.poller.tick();
+  assert.equal(second.replies, 1);
+  assert.equal(second.stored, 2);
+  const [lead] = h.leads();
+  assert.equal(lead.first_reply_ts, NOW - 40_000, 'the reply clock stops exactly as before — the Hermes watchdog reads it');
+  assert.equal(lead.handler_user_id, h.owner.user_id, 'his number answered first, so the chat is his until someone takes it');
+  assert.deepEqual(h.inbox.messagesFor(lead.lead_id).map((m) => [m.key_id, m.direction, m.sender_kind, m.text]), [
+    ['IN1', 'in', 'client', 'Ref BONA-W003 · K7Q2XR'],
+    ['IN2', 'in', 'client', 'أي جديد؟'],
+    ['OUT1', 'out', 'owner_number', 'Ahlan! Let me check.'],
+  ]);
+  h.cleanup();
+});
+
+test('(t) a Bona link the owner sends to a stranger starts a chat: in, no note, already answered, no ad fan-out', async () => {
+  const opener = msg({ id: 'OPEN', fromMe: true, jid: STRANGER, pushName: 'Abdulaziz', ts: NOW - 600_000, text: 'Salam, this is Abdulaziz from Bona' });
+  const link = msg({ id: 'LINK', fromMe: true, jid: STRANGER, pushName: 'Abdulaziz', ts: NOW - 60_000, text: 'Here it is: https://bona-real-estate.com/properties/bona-w003/' });
+  const h = harness({ inbox: true, history: [opener, link], windows: [[link]] });
+  const tally = await h.poller.tick();
+
+  const [lead] = h.leads();
+  assert.equal(lead.match_method, 'owner_outbound');
+  assert.equal(lead.channel, 'whatsapp');
+  assert.equal(lead.phone_e164, '966522222222');
+  assert.equal(lead.name, null, "a fromMe pushName is the owner's own, never the client's");
+  assert.equal(lead.listing_id, 'BONA-W003');
+  assert.equal(lead.inbox_state, 'in');
+  assert.equal(lead.inbox_since, NOW - 60_000);
+  assert.equal(lead.first_inbound_ts, null);
+  assert.equal(lead.first_reply_ts, NOW - 60_000, 'he wrote first, so nobody is waiting on him');
+  assert.equal(lead.handler_user_id, h.owner.user_id);
+  assert.equal(h.db.countWaitingLeads(), 0);
+  assert.equal(h.sent.length, 0, 'no new-lead note: the owner started this chat himself');
+  assert.deepEqual(h.db.dueFanout(NOW + 1000), [], 'no click behind it, so the ad platforms hear nothing');
+  assertHistoryWindow(h, NOW - 60_000);
+  assert.deepEqual(rows(h, lead.lead_id), [['OPEN', 'out', 'owner_number'], ['LINK', 'out', 'owner_number']], 'his opening line comes with it');
+  assert.equal(tally.joined, 1);
+  const joined = h.logs.find((l) => l.evt === 'inbox.join');
+  assert.deepEqual({ leadId: joined.leadId, via: joined.via, created: joined.created }, { leadId: lead.lead_id, via: 'owner_outbound', created: true });
+  h.cleanup();
+});
+
+test('(t) nothing else the owner types to a stranger counts — not chat, not even the word Bona', async () => {
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'P1', fromMe: true, jid: STRANGER, pushName: null, text: 'see you at 6' }),
+    msg({ id: 'P2', fromMe: true, jid: STRANGER2, pushName: null, ts: NOW - 30_000, text: 'I work at Bona now' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0);
+  assert.equal(h.findCalls.length, 0);
+  assert.deepEqual({ joined: tally.joined, stored: tally.stored }, { joined: 0, stored: 0 });
+  h.cleanup();
+});
+
+test('(t) a Bona brochure the owner sends starts a chat; a file that only looks like one does not', async () => {
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'DOC', fromMe: true, jid: STRANGER, pushName: null, messageType: 'documentMessage', media: '[document: Bona Brochure.pdf]', fileName: 'Bona Brochure.pdf' }),
+    msg({ id: 'NOTDOC', fromMe: true, jid: STRANGER2, pushName: null, ts: NOW - 30_000, messageType: 'documentMessage', media: '[document: Bonanza menu.pdf]', fileName: 'Bonanza menu.pdf' }),
+  ]] });
+  await h.poller.tick();
+  assert.equal(h.db.countLeads(), 1);
+  const [lead] = h.leads();
+  assert.equal(lead.phone_e164, '966522222222');
+  assert.equal(lead.match_method, 'owner_outbound');
+  assert.equal(lead.inbox_state, 'in');
+  assert.deepEqual(h.inbox.messagesFor(lead.lead_id).map((m) => [m.key_id, m.direction, m.sender_kind, m.text, m.media_type]), [
+    ['DOC', 'out', 'owner_number', null, '[document: Bona Brochure.pdf]'],
+  ]);
+  h.cleanup();
+});
+
+test("(t) an outbound record carrying our own outbox row's WhatsApp id is the staff member's, not the owner's", async () => {
+  const h = harness({ inbox: true, windows: [[msg({ id: 'IN1', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' })]] });
+  await h.poller.tick();
+  const [lead] = h.leads();
+  const mona = h.team.addUser({ name: 'Mona', phone: '0511112222', role: 'staff' });
+  h.inbox.insertOutbox({ send_id: 'SND-test-0001', lead_id: lead.lead_id, jid: SENDER, text: 'Welcome to Bona', user_id: mona.user_id, sender_kind: 'staff' });
+  h.inbox.updateOutbox('SND-test-0001', { status: 'accepted', key_id: 'K-STAFF' });
+  h.push([msg({ id: 'K-STAFF', fromMe: true, ts: NOW - 30_000, pushName: null, text: 'Welcome to Bona' })]);
+
+  const tally = await h.poller.tick();
+  assert.equal(tally.stored, 1);
+  const row = h.inbox.messagesFor(lead.lead_id).find((m) => m.key_id === 'K-STAFF');
+  assert.equal(row.direction, 'out');
+  assert.equal(row.sender_kind, 'staff');
+  assert.equal(row.sender_user_id, mona.user_id);
+  assert.equal(h.db.getLead(lead.lead_id).first_reply_ts, NOW - 30_000, 'a staff reply stops the clock too');
+  h.cleanup();
+});
+
+test('(t) a team or never-list number is never stored, even when its lead is in the inbox', async () => {
+  const h = harness({ inbox: true, isExcluded: (digits) => digits === '966500000000' });
+  seedInLead(h);
+  h.push([
+    msg({ id: 'X-IN', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' }),
+    msg({ id: 'X-OUT', fromMe: true, ts: NOW - 30_000, pushName: null, text: 'https://bona-real-estate.com/properties/bona-w003/' }),
+  ]);
+  const tally = await h.poller.tick();
+  assert.equal(tally.ignored, 2);
+  assert.equal(tally.stored, 0);
+  assert.equal(h.inbox.hasMessages('LEAD-in'), false);
+  assert.equal(h.findCalls.length, 0);
+  h.cleanup();
+});
+
+test('(t) a record of an in chat that is written off leaves a gap in the thread, not silence', async () => {
+  const h = harness({ inbox: true, ingestOverride: () => { throw new Error('disk I/O error'); } });
+  seedInLead(h);
+  const bad = msg({ id: 'BAD', ts: NOW - 60_000, text: 'أي جديد؟' });
+  for (let i = 1; i <= MAX_RECORD_ATTEMPTS; i += 1) {
+    h.push([bad]);
+    await h.poller.tick(); // eslint-disable-line no-await-in-loop
+    if (i < MAX_RECORD_ATTEMPTS) assert.deepEqual(h.inbox.gapsFor('LEAD-in'), [], 'while it is still owed a retry it is not a gap');
+  }
+  assert.equal(h.logs.filter((l) => l.evt === 'wa.poll.record_failed').at(-1).writtenOff, true);
+  assert.deepEqual(h.inbox.gapsFor('LEAD-in').map((g) => [g.key_id, g.lead_id, g.jid, g.ts, g.reason]), [['BAD', 'LEAD-in', SENDER, NOW - 60_000, 'failed']]);
+  assert.equal(h.inbox.hasMessages('LEAD-in'), false);
+  h.cleanup();
+});
+
+test('(t) the inbox never puts a number, a name or a message into a log line', async () => {
+  const lid = '272516946294519@lid';
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'L-IN', jid: lid, jidAlt: SENDER, ts: NOW - 90_000, text: 'Hi there, Ref BONA-W003 · K7Q2XR' }),
+    msg({ id: 'L-OUT', jid: lid, jidAlt: SENDER, fromMe: true, pushName: 'Abdulaziz', ts: NOW - 60_000, text: 'Ahlan Sara, sending photos' }),
+    msg({ id: 'S-OUT', fromMe: true, jid: STRANGER, pushName: 'Abdulaziz', ts: NOW - 30_000, text: 'Here it is: https://bona-real-estate.com/properties/bona-w003/' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(tally.joined, 2, 'both kinds of join happened, so both kinds of log line were written');
+  assert.equal(tally.stored, 3);
+  const dump = JSON.stringify(h.logs);
+  for (const secret of ['966500000000', '966522222222', '272516946294519', 'Hi there', 'Ahlan', 'Here it is', 'Sara', 'Abdulaziz']) {
+    assert.ok(!dump.includes(secret), `a log line carries ${secret}`);
+  }
+  h.cleanup();
+});
+```
+
+- [ ] **Step 2: Run to see it fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/wa-poller.test.mjs`
+Expected: FAIL — 19 of 69 tests fail, the 19 new ones: the tally has no `stored`/`joined`, `createPoller` ignores `inboxStore`/`ingest`/`backfill` (so no state is set, nothing is stored, no history is asked for, no owner-started lead is created, no gap row is written, neither for a written-off record nor for a join whose history read failed, and no `TypeError` is thrown), the default reader (`fetchWindow`) pages a full page all the way to the 5-page cap, and `wa.poll.truncated` carries no `missing`. The 50 existing tests pass.
+
+- [ ] **Step 3: Implement** — in `services/api/lib/wa-poller.mjs`, twelve exact edits:
+
+**Edit 1 — the end of the module header, and the imports.** Replace:
+
+```js
+ * Anything else — the owner's private conversations, which this loop can also see — is
+ * discarded in memory. It is counted (`status().unmatched`) and never written to disk,
+ * never logged, never sent anywhere. For the same reason nothing here logs a phone
+ * number, a name or message text.
+ */
+import { parseRef } from './attribution.mjs';
+import { MAX_PAGES, PAGE_SIZE, bareJid, fetchWindow, oldestFirst } from './evolution.mjs';
+import { createOrMergeLead, leadNote } from './leads.mjs';
+```
+
+with:
+
+```js
+ * Anything else — the owner's private conversations, which this loop can also see — is
+ * discarded in memory. It is counted (`status().unmatched`) and never written to disk,
+ * never logged, never sent anywhere. For the same reason nothing here logs a phone
+ * number, a name or message text.
+ *
+ * **The Bona inbox** (2026-09-27 design §4). Wired only when `ingest` is passed; without it
+ * this loop is exactly the matched-only poller described above. With it, a lead also
+ * carries an inbox state, judged by lib/inbox/eligibility.mjs: a certain signal on an
+ * inbound message (a Ref code, ad context, a listing id) puts the chat `in`; a guess (the
+ * word "bona", the click window) puts it on the owner's Unsure list; the owner's own
+ * message puts a chat `in` only when it carries a Bona link, a listing number or a Bona
+ * brochure (D12 — TK and private chats share this number, so nothing else he types
+ * counts). Only `in` chats are kept as transcripts (lib/inbox/ingest.mjs), both directions,
+ * from the joining message plus the 24 h before it. An `out` chat never comes back on its
+ * own. Every other conversation is still discarded exactly as above.
+ */
+import { parseRef } from './attribution.mjs';
+import { MAX_PAGES, PAGE_SIZE, bareJid, oldestFirst, readWindow } from './evolution.mjs';
+import { JOIN_HISTORY_MS } from './inbox/backfill.mjs';
+import { inboundSignal, nextInboxState, ownerOutboundJoins } from './inbox/eligibility.mjs';
+import { createOrMergeLead, leadNote } from './leads.mjs';
+```
+
+**Edit 2 — the `MAX_WINDOW_MS` comment.** Replace:
+
+```js
+ * says `wa.poll.truncated` if the gap holds more messages than the page cap can read.
+```
+
+with:
+
+```js
+ * says `wa.poll.truncated` if even `readWindow`'s time-splitting cannot read the whole gap.
+```
+
+**Edit 3 — the `findMessages` JSDoc line.** Replace:
+
+```js
+ *        injected in tests; defaults to `fetchWindow()` against the instance in `cfg.env`
+```
+
+with:
+
+```js
+ *        injected in tests; defaults to `readWindow()` against the instance in `cfg.env`,
+ *        which splits a window too crowded to read in one go (lib/evolution.mjs)
+```
+
+**Edit 4 — the end of the JSDoc and the signature.** Replace:
+
+```js
+ * @param {(obj: object) => void} [o.log]
+ * @param {() => number} [o.now]
+ */
+export function createPoller({
+  db, cfg = {}, findMessages = null, sendWhatsApp = null, isExcluded = NO_EXCLUSIONS, log = () => {}, now = () => Date.now(),
+} = {}) {
+```
+
+with:
+
+```js
+ * @param {(obj: object) => void} [o.log]
+ * @param {() => number} [o.now]
+ * @param {ReturnType<import('./inbox/store.mjs').createInboxStore>} [o.inboxStore]
+ *        inbox states and gaps; required whenever `ingest` is given
+ * @param {((lead: object, rec: object) => object) | { ingest: Function }} [o.ingest]
+ *        lib/inbox/ingest.mjs: stores one record of an `in` chat. Null (older wiring and
+ *        every Phase 1 test) means no inbox at all — the poller behaves exactly as before.
+ * @param {ReturnType<import('./inbox/backfill.mjs').createBackfill>} [o.backfill]
+ *        pulls the 24 h before a join; without it a join stores from its own message on
+ */
+export function createPoller({
+  db, cfg = {}, findMessages = null, sendWhatsApp = null, isExcluded = NO_EXCLUSIONS, log = () => {}, now = () => Date.now(),
+  inboxStore = null, ingest = null, backfill = null,
+} = {}) {
+  // `createIngest()` hands back `{ ingest }`; the bare function is accepted as well.
+  const ingestOne = typeof ingest === 'function' ? ingest : (typeof ingest?.ingest === 'function' ? ingest.ingest : null);
+  const inboxOn = Boolean(ingestOne);
+  if (inboxOn && !inboxStore) throw new TypeError('createPoller: an inbox ingest needs the inbox store (for states and gaps)');
+```
+
+**Edit 5 — the default reader.** Replace:
+
+```js
+  const find = findMessages ?? (({ gte, lte }) => fetchWindow({
+    baseUrl: wa.baseUrl, apiKey: wa.apiKey, instance, gte, lte, offset: PAGE_SIZE, maxPages: MAX_PAGES,
+  }));
+```
+
+with:
+
+```js
+  const find = findMessages ?? (({ gte, lte }) => readWindow({
+    baseUrl: wa.baseUrl, apiKey: wa.apiKey, instance, gte, lte, offset: PAGE_SIZE, maxPages: MAX_PAGES,
+  }));
+```
+
+**Edit 6 — what `handleInbound` returns.** Replace:
+
+```js
+    return { method: match.method, created };
+```
+
+with:
+
+```js
+    return { method: match.method, created, lead: fresh };
+```
+
+**Edit 7 — a new section right before the tick.** Replace:
+
+```js
+  /* -------------------- the tick -------------------- */
+```
+
+with:
+
+```js
+  /* -------------------- the Bona inbox -------------------- */
+
+  /** One record into the transcript of an `in` chat, the lead read fresh (a backfill may just have filled its jids). */
+  async function storeRecord(leadId, rec, tally) {
+    const res = await ingestOne(db.getLead(leadId), rec);
+    if (res?.stored) tally.stored += 1;
+  }
+
+  /**
+   * A chat that has just joined: its state first — ingest refuses anything that is not
+   * `in`, so the history below would otherwise be thrown away — then the 24 h before the
+   * joining message, where the "Hi" before a Ref line or the owner's opening words live
+   * (design §4.1). Counts only in the log line: never a number or a name.
+   *
+   * A history Evolution could not give us (`{ error }`) is not dropped silently (design
+   * §4.3): the joining message is about to be stored, so the chat is no longer one the
+   * daily catch-up asks again for (it only picks chats with nothing stored). A gap just
+   * before the joining message makes the thread say "a message could not be loaded —
+   * check WhatsApp" where that history belongs.
+   */
+  async function join(leadId, ts, via, tally, extra = {}) {
+    inboxStore.setInboxState(leadId, 'in', { since: ts });
+    if (backfill) {
+      const got = await backfill.history(db.getLead(leadId), { sinceTs: ts - JOIN_HISTORY_MS, untilTs: ts });
+      if (got?.error) {
+        inboxStore.addGap({ key_id: `join:${leadId}:${ts}`, lead_id: leadId, ts: ts - 1, reason: 'history_failed' });
+        log({ level: 'warn', evt: 'inbox.join_history_failed', leadId, error: got.error });
+      }
+    }
+    tally.joined += 1;
+    log({ evt: 'inbox.join', leadId, via, ...extra });
+  }
+
+  /**
+   * What an inbound message means for the inbox, once `handleInbound` has matched it. A
+   * certain signal puts the chat `in`, a guess puts it on the Unsure list, and `in`/`out`
+   * never move from here (lib/inbox/eligibility.mjs `nextInboxState`). Unsure keeps
+   * nothing: a guessed chat is never stored or shown until the owner moves it in.
+   */
+  async function inboxAfterInbound(rec, ts, { lead, method }, tally) {
+    const text = typeof rec.text === 'string' ? rec.text : '';
+    const signal = inboundSignal({ text, hasAdMeta: Boolean(adMetaOf(rec.contextInfo)) });
+    const next = nextInboxState(lead.inbox_state, { signal, method });
+    if (next === 'in' && lead.inbox_state !== 'in') await join(lead.lead_id, ts, 'inbound', tally);
+    else if (next && next !== lead.inbox_state) inboxStore.setInboxState(lead.lead_id, next, { since: ts });
+    if (next === 'in') await storeRecord(lead.lead_id, rec, tally);
+  }
+
+  /**
+   * What the owner's own message means for the inbox, once `recordReply` has stamped the
+   * reply clock exactly as before (the Hermes `bona-unanswered-leads` watchdog reads
+   * `first_reply_ts`). In an `in` chat it is stored: typed on his phone or sent by Lisa,
+   * which nothing can tell apart, unless lib/inbox/ingest.mjs finds our own dashboard send
+   * in the outbox. An `out` chat never comes back on its own. Any other chat joins only on
+   * a Bona link, a listing number or a Bona brochure (D12). A stranger he writes to that
+   * way becomes an `owner_outbound` lead — no ad fan-out and no new-lead note, because he
+   * started it (lib/leads.mjs `OWNER_METHODS`) — with no name: a `fromMe` record's
+   * pushName is his own.
+   */
+  async function inboxAfterOutbound(rec, ts, tally) {
+    const jids = jidsOf(rec);
+    let lead = findLead(jids);
+    if (lead?.inbox_state === 'out') return;
+    if (lead?.inbox_state !== 'in') {
+      const text = typeof rec.text === 'string' ? rec.text : '';
+      const fileName = typeof rec.fileName === 'string' ? rec.fileName : null;
+      if (!ownerOutboundJoins({ text, fileName, media: rec.media ?? null })) return;
+      let created = false;
+      if (!lead) {
+        ({ lead, created } = createOrMergeLead(db, {
+          name: null, phone: jids.phone, waJid: jids.waJid, waLid: jids.waLid,
+          listingId: listingIdIn(`${text} ${fileName ?? ''}`),
+        }, { channel: 'whatsapp', matchMethod: 'owner_outbound', now: ts, dataDir: cfg.dataDir ?? undefined }));
+      }
+      await join(lead.lead_id, ts, 'owner_outbound', tally, { created });
+    }
+    await storeRecord(lead.lead_id, rec, tally);
+  }
+
+  /**
+   * A record of an `in` chat that has failed for the last time is not dropped silently
+   * (design §4.2): its id, chat and time go to `wa_gaps`, and the thread shows "a message
+   * could not be loaded — check WhatsApp" in its place. Never the text. Called from the
+   * per-record `catch`, so nothing in here may throw.
+   */
+  function recordGapSafely(rec, ts) {
+    if (!inboxOn) return;
+    try {
+      const lead = findLead(jidsOf(rec));
+      if (lead?.inbox_state === 'in') inboxStore.addGap({ key_id: rec.id, lead_id: lead.lead_id, jid: rec.jid ?? null, ts, reason: 'failed' });
+    } catch (err) {
+      log({ level: 'warn', evt: 'inbox.gap_failed', error: String(err?.message ?? err) });
+    }
+  }
+
+  /* -------------------- the tick -------------------- */
+```
+
+**Edit 8 — the tally.** Replace:
+
+```js
+      const tally = { scanned: records.length, matched: 0, unmatched: 0, created: 0, merged: 0, replies: 0, ignored: 0, lidOnlyUnexcludable: 0 };
+```
+
+with:
+
+```js
+      const tally = { scanned: records.length, matched: 0, unmatched: 0, created: 0, merged: 0, replies: 0, ignored: 0, lidOnlyUnexcludable: 0, stored: 0, joined: 0 };
+```
+
+**Edit 9 — the per-record handling.** Replace:
+
+```js
+        try {
+          if (rec.fromMe) {
+            if (recordReply(rec, ts)) tally.replies += 1;
+          } else {
+            const out = await handleInbound(rec, ts);
+            if (!out) tally.unmatched += 1;
+            else {
+              tally.matched += 1;
+              if (out.created) tally.created += 1; else tally.merged += 1;
+            }
+          }
+```
+
+with:
+
+```js
+        try {
+          if (rec.fromMe) {
+            if (recordReply(rec, ts)) tally.replies += 1;
+            if (inboxOn) await inboxAfterOutbound(rec, ts, tally);
+          } else {
+            const out = await handleInbound(rec, ts);
+            if (!out) tally.unmatched += 1;
+            else {
+              tally.matched += 1;
+              if (out.created) tally.created += 1; else tally.merged += 1;
+              if (inboxOn) await inboxAfterInbound(rec, ts, out, tally);
+            }
+          }
+```
+
+**Edit 10 — the write-off.** Replace:
+
+```js
+          if (writtenOff) {
+            db.waSeenAdd(rec.id, ts);
+            failures.delete(rec.id);
+          } else {
+```
+
+with:
+
+```js
+          if (writtenOff) {
+            db.waSeenAdd(rec.id, ts);
+            failures.delete(rec.id);
+            recordGapSafely(rec, ts);
+          } else {
+```
+
+**Edit 11 — the truncation warning.** Replace:
+
+```js
+      // Newest-first paging means a window that overflowed the page cap hides its OLDEST
+      // messages, and asking again returns the same newest ones — so this is a loss, and
+      // it says so. It takes downtime long enough for 500 messages to pile up.
+      if (answer?.truncated) log({ level: 'warn', evt: 'wa.poll.truncated', scanned: records.length, gte, lte });
+```
+
+with:
+
+```js
+      // `readWindow` splits a crowded window by time until every piece fits the page cap, so
+      // this now takes a piece still over the cap at the deepest split — thousands of
+      // messages inside a few minutes. Newest-first paging hides that piece's OLDEST
+      // messages and asking again returns the same newest ones, so this is a loss, and it
+      // says so, with how many it could not read (`missing`, from Evolution's own `total`).
+      if (answer?.truncated) log({ level: 'warn', evt: 'wa.poll.truncated', scanned: records.length, missing: Number.isFinite(answer.missing) ? answer.missing : null, gte, lte });
+```
+
+**Edit 12 — the tick log.** Replace:
+
+```js
+      if (tally.matched || tally.replies) log({ evt: 'wa.poll.tick', ...tally });
+```
+
+with:
+
+```js
+      if (tally.matched || tally.replies || tally.stored || tally.joined) log({ evt: 'wa.poll.tick', ...tally });
+```
+
+- [ ] **Step 4: Run**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/wa-poller.test.mjs`
+Expected: PASS (69 tests).
+
+- [ ] **Step 5: Run the full suite**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/*.test.mjs`
+Expected: all pass, 0 fail. (`http.test.mjs` builds the poller with no Evolution credentials, so the new default reader is never reached there. `wa-poller.mjs` now imports `inbox/backfill.mjs` and `inbox/eligibility.mjs`, and `inbox/ingest.mjs` imports `jidsOf` from `wa-poller.mjs`; if `backfill.mjs` also imports from `wa-poller.mjs` that is an ES module cycle, which stays safe because each side reads the other's exports only inside functions, never while loading.)
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd /home/azoz778/bona-wt/team-inbox && git add services/api/lib/wa-poller.mjs services/api/test/wa-poller.test.mjs
+git commit -m "wa-poller: inbox states, owner-started joins, transcripts of in chats
+
+Certain inbound signals put a chat in the inbox (with the 24 h before the
+join), guesses go to Unsure, out chats never come back on their own. The
+owner's Bona link, listing number or brochure to a stranger starts an
+owner_outbound chat with no note and no ad fan-out. In chats are stored both
+ways; first_reply_ts is stamped exactly as before. Written-off records of in
+chats, and a join whose history read failed, become wa_gaps rows; the
+default reader is readWindow and a truncated
+window logs how many messages it missed. Without an ingest wired the poller
+is unchanged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 10: Inbox screens — `render-inbox.mjs`, the Inbox rail entry, lead-page inbox controls, audit actions
+
+The three inbox screens as pure render functions (called directly by the tests; Task 12's routes call them), the rail's Inbox entry with the viewer's own unread count, the lead page's inbox state and buttons, the inbox error copy, and the five inbox audit actions. Server-rendered, no script (CSP `default-src 'none'`), every value through `esc`, names in `<bdi>`, masked numbers in both lists, the whole number only on the thread header.
+
+Form fields this task fixes, which Task 12's routes must read:
+
+| Form | `action` | Fields |
+|---|---|---|
+| Reply | `POST /v1/admin/inbox/:leadId/reply` | `_dash=1`, `send_id`, `seen_ts`, `text` (textarea, `maxlength` = `MAX_TEXT_LEN` 4096) |
+| Handler picker | `POST /v1/admin/inbox/:leadId/handler` | `_dash=1`, `user_id` (`''` = Nobody; options = active users only) |
+| Move to Bona inbox | `POST /v1/admin/inbox/:leadId/move` | `_dash=1` |
+| Not a client | `POST /v1/admin/inbox/:leadId/out` | `_dash=1` |
+| Add chat by phone number | `POST /v1/admin/inbox/add` | `_dash=1`, `phone` |
+
+Lead ids are `encodeURIComponent`-ed before they become a path segment (same rule as the Team page's user ids). No existing test asserts the `NAV` entries or the `MESSAGES` keys (checked with `grep -rn "NAV\|MESSAGES" services/api/test/`); the rail assertions in `dashboard-render-team.test.mjs` and `dashboard-routes.test.mjs` check the signed-in name and the absence of the Team link for staff, and both still hold, so no existing test changes.
+
+**Files:**
+- Create: `services/api/lib/dashboard/render-inbox.mjs`
+- Modify: `services/api/lib/dashboard/render.mjs`
+- Modify: `services/api/lib/audit.mjs`
+- Test: `services/api/test/dashboard-render-inbox.test.mjs` (create)
+- Test: `services/api/test/team.test.mjs` (one audit test added)
+
+- [ ] **Step 1: Write the failing tests** — create `services/api/test/dashboard-render-inbox.test.mjs`:
+
+```js
+/**
+ * The inbox screens, rendered directly: the chat list, the owner's Unsure list, one
+ * thread, and the inbox parts of the rail and the lead page. Every value that came from
+ * a client or a team member is hostile until escaped; a list never shows a whole number;
+ * an owner-only control never reaches a staff page, not even as a link.
+ */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { layout, loginPage, leadDetailPage, knownError, NAV } from '../lib/dashboard/render.mjs';
+import { inboxPage, unsurePage, threadPage, INBOX_OK } from '../lib/dashboard/render-inbox.mjs';
+
+const NOW = 1_790_500_000_000;
+const HOUR = 3_600_000;
+const EVIL = '<img src=x onerror=alert(1)>';
+
+const OWNER = { user_id: 'USR-o', name: 'Abdulaziz Zidan', role: 'owner', phone_e164: '966593296933', active: 1, created: 1 };
+const STAFF = { user_id: 'USR-s', name: 'Sara', role: 'staff', phone_e164: '966500000001', active: 1, created: 1 };
+const GONE = { user_id: 'USR-g', name: 'Omar Old', role: 'staff', phone_e164: '966500000003', active: 0, created: 1 };
+const USERS = [OWNER, STAFF, GONE];
+
+const LEAD = {
+  lead_id: 'LEAD-20260928-aaaa0001', name: 'Mona', phone_e164: '966512345678',
+  wa_jid: '966512345678@s.whatsapp.net', wa_lid: '111222333@lid', stage: 'new', match_method: 'ad_meta',
+  inbox_state: 'in', inbox_since: NOW - 48 * HOUR, handler_user_id: null, needs_human: 0,
+  last_msg_ts: NOW - HOUR, created: NOW - 48 * HOUR, stage_ts: NOW - 48 * HOUR, channel: 'whatsapp',
+};
+
+const row = (over = {}) => ({
+  ...LEAD, unread: 0, last_text: null, last_media: null, last_direction: 'in', last_sender_kind: 'client', handler_name: null, ...over,
+});
+
+const msg = (over = {}) => ({
+  key_id: 'K1', lead_id: LEAD.lead_id, jid: LEAD.wa_lid, direction: 'in', sender_kind: 'client',
+  sender_user_id: null, text: 'hello', media_type: null, ts: NOW - 2 * HOUR, status: null, ...over,
+});
+
+const thread = (over = {}) => threadPage({
+  me: OWNER, lead: LEAD, messages: [], gaps: [], outbox: [], users: USERS,
+  sendId: 'SND-abcdefghijklmnop', seenTs: NOW - HOUR, sendingEnabled: true, canReply: true, now: NOW, ...over,
+});
+
+/* ---------------- the rail ---------------- */
+
+test('the rail has an Inbox entry right after Desk, with the viewer\'s own unread count, and still no Team link for staff', () => {
+  assert.deepEqual(NAV.slice(0, 2).map(([href, label]) => [href, label]), [['/dashboard', 'Desk'], ['/dashboard/inbox', 'Inbox']]);
+
+  const staff = layout({ title: 'Desk', body: '', me: { ...STAFF, unread: 3 } });
+  assert.match(staff, /Desk<\/a><a class="it" href="\/dashboard\/inbox">/);
+  assert.match(staff, /Inbox<span class="c">3<\/span><\/a>/);
+  assert.doesNotMatch(staff, /href="\/dashboard\/team"/);
+
+  const none = layout({ title: 'Desk', body: '', me: { ...STAFF, unread: 0 } });
+  assert.match(none, /Inbox<\/a>/, 'nothing unread: no number at all, not a 0');
+
+  const owner = layout({ title: 'Desk', body: '', me: { ...OWNER, unread: 2 } });
+  assert.match(owner, /Inbox<span class="c">2<\/span><\/a>/);
+  assert.match(owner, /href="\/dashboard\/team"/);
+
+  const explicit = layout({ title: 'Inbox', body: '', me: { ...STAFF, unread: 3 }, counts: { '/dashboard/inbox': 9 } });
+  assert.match(explicit, /Inbox<span class="c">9<\/span><\/a>/, 'a count the page passes itself wins');
+});
+
+test('the inbox error codes are real messages, and the login page shows none of them', () => {
+  for (const code of ['stale', 'lid_only', 'not_in_inbox', 'excluded', 'sending_disabled', 'send_uncertain',
+    'bad_text', 'bad_send_id', 'bad_handler', 'reply_rate_limited', 'not_a_chat']) {
+    assert.equal(knownError(code), code, code);
+    assert.doesNotMatch(loginPage({ step: 'request', error: code }), /class="err"/, code);
+  }
+});
+
+/* ---------------- the chat list ---------------- */
+
+test('the chat list: escaped names in bdi, masked numbers, last message, time, stage, handler, unread and Needs a human', () => {
+  const html = inboxPage({
+    me: STAFF,
+    now: NOW,
+    rows: [
+      row({ name: EVIL, unread: 2, needs_human: 1, last_text: 'x'.repeat(100), handler_name: 'Sara <b>' }),
+      row({ lead_id: 'LEAD-20260928-aaaa0002', name: 'Khalid', phone_e164: '966598765432', stage: 'viewing',
+        last_media: '[voice note]', last_direction: 'out', last_sender_kind: 'staff', last_msg_ts: NOW - 3 * HOUR }),
+      row({ lead_id: 'LEAD-20260928-aaaa0003', name: null, phone_e164: null, wa_jid: null, last_text: 'السلام <script>',
+        last_direction: 'out', last_sender_kind: 'dana' }),
+    ],
+  });
+  assert.ok(!html.includes('<img'), 'a name is text, never markup');
+  assert.ok(!html.includes('<script'), 'a message is text, never markup');
+  assert.match(html, /<bdi>&lt;img src=x onerror=alert\(1\)&gt;<\/bdi>/);
+  assert.match(html, /…5678/);
+  assert.match(html, /…5432/);
+  assert.doesNotMatch(html, /966512345678|966598765432|\+966 51/, 'a list never shows a whole number');
+  assert.ok(html.includes(`${'x'.repeat(80)}…`), 'the last message is cut at 80 characters');
+  assert.ok(!html.includes('x'.repeat(81)));
+  assert.match(html, /Bona: \[voice note\]/, 'a media message shows its placeholder, and our side is marked');
+  assert.match(html, /Dana: السلام &lt;script&gt;/);
+  assert.match(html, /<span>1\sh<\/span>/, 'time since the last message');
+  assert.match(html, /<span>3\sh<\/span>/);
+  assert.match(html, /<span class="pl gold">2 new<\/span>/);
+  assert.match(html, /<span class="pl hot">Needs a human<\/span>/);
+  assert.equal(html.match(/Needs a human/g).length, 1, 'only the chat that needs one');
+  assert.match(html, /<span class="pl done">New<\/span>/);
+  assert.match(html, /<span class="pl done">Viewing<\/span>/);
+  assert.match(html, /Handler: <bdi>Sara &lt;b&gt;<\/bdi>/);
+  assert.match(html, /No handler/);
+  assert.match(html, /<bdi>Unnamed<\/bdi>/);
+  assert.match(html, /href="\/dashboard\/inbox\/LEAD-20260928-aaaa0001"/);
+  assert.match(html, /href="\/dashboard\/inbox\/LEAD-20260928-aaaa0002"/);
+  assert.match(html, /3 chats, 1 with new messages/);
+  assert.ok(!/<script/i.test(html));
+});
+
+test('only the owner sees the Unsure tab, its count and "Add chat by phone number"', () => {
+  const owner = inboxPage({ me: OWNER, rows: [row()], unsureCount: 4, now: NOW });
+  assert.match(owner, /<a class="on" href="\/dashboard\/inbox">Inbox<\/a><a href="\/dashboard\/inbox\?tab=unsure">Unsure · 4<\/a>/);
+  assert.match(owner, /action="\/v1\/admin\/inbox\/add"/);
+  assert.match(owner, /<input type="hidden" name="_dash" value="1">/);
+  assert.match(owner, /name="phone" inputmode="tel"/);
+
+  const staff = inboxPage({ me: STAFF, rows: [row()], unsureCount: 4, now: NOW });
+  assert.doesNotMatch(staff, /tab=unsure/);
+  assert.doesNotMatch(staff, /Unsure/);
+  assert.doesNotMatch(staff, /\/v1\/admin\/inbox\/add/);
+  assert.doesNotMatch(staff, /href="\/dashboard\/team"/);
+});
+
+test('an empty inbox says so, and a banner shows only for a code it knows', () => {
+  const empty = inboxPage({ me: STAFF, rows: [], now: NOW });
+  assert.match(empty, /No chats in the Bona inbox yet/);
+
+  assert.ok(inboxPage({ me: OWNER, rows: [], ok: 'added', now: NOW }).includes(`<div class="ok">${INBOX_OK.added}</div>`));
+  assert.match(inboxPage({ me: OWNER, rows: [], error: 'not_a_chat', now: NOW }), /<div class="err">That lead has no WhatsApp chat yet/);
+  const odd = inboxPage({ me: OWNER, rows: [], ok: 'constructor', error: 'toString', now: NOW });
+  assert.doesNotMatch(odd, /class="ok"|class="err"/, 'a prototype name is not a message');
+});
+
+/* ---------------- Unsure ---------------- */
+
+test('the Unsure list: escaped snippet, masked number, why it is unsure, and the two decisions', () => {
+  const html = unsurePage({
+    me: OWNER,
+    now: NOW,
+    rows: [
+      { ...LEAD, inbox_state: 'unsure', match_method: 'keyword', name: 'Ali', snippet: 'is bona <b>real</b>?' },
+      { ...LEAD, lead_id: 'LEAD/1?x=1', inbox_state: null, match_method: 'time_window', name: EVIL, snippet: null },
+    ],
+  });
+  assert.match(html, /is bona &lt;b&gt;real&lt;\/b&gt;\?/);
+  assert.ok(!html.includes('<b>real</b>'));
+  assert.ok(!html.includes('<img'));
+  assert.match(html, /…5678/);
+  assert.doesNotMatch(html, /966512345678/);
+  assert.match(html, /wrote the word “bona”/);
+  assert.match(html, /wrote within 15 minutes of a tap on the site/);
+  assert.match(html, /action="\/v1\/admin\/inbox\/LEAD-20260928-aaaa0001\/move"/);
+  assert.match(html, /action="\/v1\/admin\/inbox\/LEAD-20260928-aaaa0001\/out"/);
+  assert.match(html, />Move to Bona inbox<\/button>/);
+  assert.match(html, />Not a client<\/button>/);
+  assert.match(html, /action="\/v1\/admin\/inbox\/LEAD%2F1%3Fx%3D1\/move"/, 'an odd id stays one path segment');
+  assert.doesNotMatch(html, /action="\/v1\/admin\/inbox\/LEAD\/1/);
+  assert.match(html, /<a href="\/dashboard\/inbox">Inbox<\/a><a class="on" href="\/dashboard\/inbox\?tab=unsure">Unsure · 2<\/a>/);
+  assert.match(unsurePage({ me: OWNER, rows: [], now: NOW }), /Nothing to decide/);
+});
+
+/* ---------------- one chat ---------------- */
+
+test('a thread: client bubbles left, ours right, each labelled; media shows its placeholder and caption', () => {
+  const messages = [
+    msg({ key_id: 'K1', text: `hi ${EVIL}`, ts: NOW - 5 * HOUR }),
+    msg({ key_id: 'K2', direction: 'out', sender_kind: 'owner_number', text: 'Welcome', ts: NOW - 4 * HOUR }),
+    msg({ key_id: 'K3', direction: 'out', sender_kind: 'staff', sender_user_id: 'USR-s', text: 'Here is the villa', ts: NOW - 3 * HOUR }),
+    msg({ key_id: 'K4', direction: 'out', sender_kind: 'staff', sender_user_id: 'USR-g', text: 'Old reply', ts: NOW - 170 * 60_000 }),
+    msg({ key_id: 'K5', direction: 'out', sender_kind: 'dana', text: 'Dana here', ts: NOW - 160 * 60_000 }),
+    msg({ key_id: 'K6', media_type: '[image]', text: 'the view', ts: NOW - 150 * 60_000 }),
+    msg({ key_id: 'K7', media_type: '[document: <b>plan</b>.pdf]', text: null, ts: NOW - 140 * 60_000 }),
+    msg({ key_id: 'K8', direction: 'out', sender_kind: 'staff', sender_user_id: 'USR-unknown', text: 'who?', ts: NOW - 130 * 60_000 }),
+  ];
+  const html = thread({ messages });
+  assert.ok(!html.includes('<img'), 'message text is escaped');
+  assert.ok(!html.includes('<b>plan</b>'), 'a file name is escaped');
+  assert.match(html, /\[document: &lt;b&gt;plan&lt;\/b&gt;\.pdf\]/);
+  assert.match(html, /<div class="bub in"><span class="who"><bdi>Client<\/bdi><\/span><div class="tx" dir="auto">hi &lt;img/);
+  assert.match(html, /<div class="bub out"><span class="who"><bdi>Your number<\/bdi><\/span><div class="tx" dir="auto">Welcome/);
+  assert.match(html, /<div class="bub out"><span class="who"><bdi>Sara<\/bdi><\/span><div class="tx" dir="auto">Here is the villa/);
+  assert.match(html, /<bdi>Omar Old<\/bdi><\/span><div class="tx" dir="auto">Old reply/, 'a reply keeps its author after they leave');
+  assert.match(html, /<div class="bub out"><span class="who"><bdi>Dana<\/bdi><\/span>/);
+  assert.match(html, /<bdi>Team<\/bdi><\/span><div class="tx" dir="auto">who\?/, 'an author we cannot name is still "Team"');
+  assert.match(html, /<span class="md">\[image\]<\/span><div class="tx" dir="auto">the view<\/div>/);
+  assert.ok(html.indexOf('K1') === -1, 'no WhatsApp message id is printed');
+  assert.ok(html.indexOf('hi &lt;img') < html.indexOf('Welcome') && html.indexOf('Welcome') < html.indexOf('Here is the villa'), 'oldest first');
+
+  const asStaff = thread({ me: STAFF, messages });
+  assert.match(asStaff, /<bdi>Owner&#39;s number<\/bdi>/);
+  assert.doesNotMatch(asStaff, /Your number/);
+});
+
+test('the thread header shows the whole number, the stage, the handler and a link to the lead', () => {
+  const html = thread({ lead: { ...LEAD, handler_user_id: 'USR-s', needs_human: 1, stage: 'viewing', name: 'Mona <i>' } });
+  assert.match(html, /<span dir="ltr">\+966 51 234 5678<\/span>/);
+  assert.match(html, /Viewing/);
+  assert.match(html, /Handler: <bdi>Sara<\/bdi>/);
+  assert.match(html, /<span class="pl hot">Needs a human<\/span>/);
+  assert.match(html, /<h2><bdi>Mona &lt;i&gt;<\/bdi><\/h2>/);
+  assert.match(html, /href="\/dashboard\/leads\/LEAD-20260928-aaaa0001"/);
+  assert.match(html, /href="\/dashboard\/inbox">← Inbox<\/a>/);
+  assert.match(thread({ lead: { ...LEAD, handler_user_id: 'USR-g' } }), /No handler/, 'a deactivated handler is nobody');
+  assert.match(thread(), /No messages stored for this chat yet/);
+});
+
+test('gaps and unconfirmed replies sit in time order with an honest status line', () => {
+  const html = thread({
+    messages: [msg({ key_id: 'K1', text: 'first', ts: NOW - 5 * HOUR }), msg({ key_id: 'K9', text: 'last', ts: NOW - HOUR })],
+    gaps: [{ key_id: 'G1', lead_id: LEAD.lead_id, jid: LEAD.wa_lid, ts: NOW - 4 * HOUR, reason: 'failed' }],
+    outbox: [
+      { send_id: 'S1', lead_id: LEAD.lead_id, text: 'going <now>', user_id: 'USR-s', sender_kind: 'staff', status: 'pending', key_id: null, created: NOW - 3 * HOUR, error: null },
+      { send_id: 'S2', lead_id: LEAD.lead_id, text: 'maybe', user_id: 'USR-s', sender_kind: 'staff', status: 'uncertain', key_id: null, created: NOW - 2.5 * HOUR, error: 'timeout' },
+      { send_id: 'S3', lead_id: LEAD.lead_id, text: 'refused', user_id: 'USR-o', sender_kind: 'staff', status: 'failed', key_id: null, created: NOW - 2.2 * HOUR, error: 'http_500' },
+      { send_id: 'S4', lead_id: LEAD.lead_id, text: 'too fast', user_id: 'USR-o', sender_kind: 'staff', status: 'failed', key_id: null, created: NOW - 2.1 * HOUR, error: 'rate_limited' },
+      { send_id: 'S5', lead_id: LEAD.lead_id, text: 'odd', user_id: 'USR-o', sender_kind: 'staff', status: 'failed', key_id: null, created: NOW - 2 * HOUR, error: 'constructor' },
+      { send_id: 'S6', lead_id: LEAD.lead_id, text: 'last', user_id: 'USR-s', sender_kind: 'staff', status: 'uncertain', key_id: 'K9', created: NOW - HOUR, error: null },
+    ],
+  });
+  assert.match(html, /<div class="wgap">A message could not be loaded — check WhatsApp\.<\/div>/);
+  assert.match(html, /<div class="bub out pend"><span class="who"><bdi>Sara<\/bdi><\/span><div class="tx" dir="auto">going &lt;now&gt;<\/div>/);
+  assert.match(html, /Sending…/);
+  assert.match(html, /Not sure it went — check WhatsApp\./);
+  assert.match(html, /Not sent — WhatsApp refused it \(HTTP 500\)\./);
+  assert.match(html, /Not sent — too many messages this minute, try again shortly\./);
+  assert.match(html, /Not sent — something went wrong\./, 'an unknown code is not printed');
+  assert.doesNotMatch(html, /constructor|function/);
+  const order = ['first', 'A message could not be loaded', 'going &lt;now&gt;', 'maybe', 'refused', 'too fast', '>odd<', '>last<'].map((s) => html.indexOf(s));
+  assert.ok(order.every((at) => at >= 0), 'every item is on the page');
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'in time order');
+  assert.equal(html.match(/>last</g).length, 1, 'an outbox row that is already a stored message is not shown twice');
+});
+
+test('the reply form carries send_id, seen_ts and the kept draft, and posts to this chat', () => {
+  const html = thread({ draft: 'my text </textarea><script>x</script>', error: 'stale' });
+  assert.match(html, /<form class="reply" method="post" action="\/v1\/admin\/inbox\/LEAD-20260928-aaaa0001\/reply">/);
+  assert.match(html, /<input type="hidden" name="_dash" value="1">/);
+  assert.match(html, /<input type="hidden" name="send_id" value="SND-abcdefghijklmnop">/);
+  assert.match(html, new RegExp(`<input type="hidden" name="seen_ts" value="${NOW - HOUR}">`));
+  assert.match(html, /<textarea id="r-text" name="text" maxlength="4096" dir="auto" required>my text &lt;\/textarea&gt;&lt;script&gt;x&lt;\/script&gt;<\/textarea>/);
+  assert.ok(!/<script/i.test(html));
+  assert.match(html, /<div class="err">New activity since you opened this chat/);
+  assert.match(html, /it goes from your WhatsApp/);
+  assert.match(thread({ me: STAFF }), /it goes from the owner&#39;s WhatsApp/);
+});
+
+test('no reply box for a chat with no phone number, or while sending is off', () => {
+  const lid = thread({ lead: { ...LEAD, phone_e164: null, wa_jid: null }, canReply: false });
+  assert.match(lid, /This chat has no phone number — reply from your phone\./);
+  assert.doesNotMatch(lid, /\/reply"/);
+  assert.doesNotMatch(lid, /name="text"/);
+  assert.match(lid, /<span dir="ltr">—<\/span>/, 'no number to show');
+
+  const offStaff = thread({ me: STAFF, sendingEnabled: false });
+  assert.match(offStaff, /Sending is off \(Team page\)\./);
+  assert.doesNotMatch(offStaff, /\/reply"/);
+  assert.doesNotMatch(offStaff, /href="\/dashboard\/team"/, 'a staff page never carries the Team link');
+
+  const offOwner = thread({ sendingEnabled: false });
+  assert.match(offOwner, /Sending is off \(<a href="\/dashboard\/team">Team page<\/a>\)\./);
+
+  const both = thread({ lead: { ...LEAD, phone_e164: null, wa_jid: null }, canReply: false, sendingEnabled: false });
+  assert.match(both, /reply from your phone/, 'turning sending on would not help a chat with no number, so that is what it says');
+  assert.doesNotMatch(both, /Sending is off/);
+});
+
+test('the handler picker offers active people and Nobody, with the current handler chosen', () => {
+  const html = thread({ lead: { ...LEAD, handler_user_id: 'USR-s' }, users: [...USERS, { ...STAFF, user_id: 'USR-x', name: 'X <b>', active: 1 }] });
+  assert.match(html, /<form class="row" method="post" action="\/v1\/admin\/inbox\/LEAD-20260928-aaaa0001\/handler"/);
+  assert.match(html, /<select id="h-user" name="user_id"><option value="">Nobody<\/option>/);
+  assert.match(html, /<option value="USR-o" dir="auto">Abdulaziz Zidan<\/option>/);
+  assert.match(html, /<option value="USR-s" dir="auto" selected>Sara<\/option>/);
+  assert.match(html, /<option value="USR-x" dir="auto">X &lt;b&gt;<\/option>/);
+  assert.doesNotMatch(html, /value="USR-g"/, 'a deactivated person cannot be picked');
+  assert.match(thread(), /<option value="" selected>Nobody<\/option>/);
+});
+
+test('only the owner gets "Not a client" on a thread; nobody gets Move there', () => {
+  const owner = thread();
+  assert.match(owner, /action="\/v1\/admin\/inbox\/LEAD-20260928-aaaa0001\/out"/);
+  assert.doesNotMatch(owner, /\/move"/);
+  const staff = thread({ me: STAFF });
+  assert.doesNotMatch(staff, /\/out"/);
+  assert.doesNotMatch(staff, /Not a client/);
+  assert.doesNotMatch(staff, /\/move"/);
+  assert.match(thread({ ok: 'sent' }), /<div class="ok">Sent\.<\/div>/);
+});
+
+test('rows full of nulls render without "undefined", "NaN", "[object" or a 1970 date', () => {
+  const blank = Object.fromEntries(Object.keys(row({ snippet: null })).map((k) => [k, null]));
+  blank.lead_id = 'n';
+  const blankMsg = Object.fromEntries(Object.keys(msg()).map((k) => [k, null]));
+  const pages = [
+    inboxPage({ me: null, rows: [blank] }),
+    inboxPage({ me: null, rows: null }),
+    unsurePage({ me: null, rows: [blank] }),
+    threadPage({
+      me: null, lead: blank, messages: [blankMsg], gaps: [{ ts: null }], outbox: [{ status: 'failed', created: null, error: null, text: null }],
+      users: null, sendId: null, seenTs: null, sendingEnabled: true, canReply: true,
+    }),
+    threadPage({ me: null, lead: blank, messages: null, gaps: null, outbox: null, users: null }),
+  ];
+  for (const html of pages) assert.doesNotMatch(html, /undefined|NaN|\[object|1970-01-01/);
+});
+
+/* ---------------- the lead page ---------------- */
+
+test('the lead page offers the inbox controls that fit the viewer and the lead', () => {
+  const page = (lead, me) => leadDetailPage({ lead: { ...LEAD, ...lead }, journey: [], now: NOW, me });
+  const OPEN = /<a class="btn pri" href="\/dashboard\/inbox\/LEAD-20260928-aaaa0001">Open chat<\/a>/;
+  const MOVE = /action="\/v1\/admin\/inbox\/LEAD-20260928-aaaa0001\/move"/;
+  const OUT = /action="\/v1\/admin\/inbox\/LEAD-20260928-aaaa0001\/out"/;
+
+  const ownerIn = page({ inbox_state: 'in' }, OWNER);
+  assert.match(ownerIn, OPEN);
+  assert.match(ownerIn, OUT);
+  assert.doesNotMatch(ownerIn, MOVE);
+  assert.match(ownerIn, /<dt>Inbox<\/dt><dd dir="auto">In the Bona inbox<\/dd>/);
+
+  const ownerUnsure = page({ inbox_state: 'unsure' }, OWNER);
+  assert.match(ownerUnsure, MOVE);
+  assert.match(ownerUnsure, OUT);
+  assert.doesNotMatch(ownerUnsure, OPEN);
+  assert.match(ownerUnsure, /Unsure — waiting for your decision/);
+
+  const ownerOut = page({ inbox_state: 'out' }, OWNER);
+  assert.match(ownerOut, MOVE, 'the owner can change his mind');
+  assert.doesNotMatch(ownerOut, OUT);
+  assert.match(ownerOut, /<dd dir="auto">Not a client<\/dd>/);
+
+  const ownerNone = page({ inbox_state: null }, OWNER);
+  assert.match(ownerNone, MOVE);
+  assert.doesNotMatch(ownerNone, OUT);
+
+  const noChat = page({ inbox_state: 'in', wa_jid: null, wa_lid: null, channel: 'form' }, OWNER);
+  assert.doesNotMatch(noChat, OPEN, 'nothing to open until they write on WhatsApp');
+  assert.match(noChat, /In the Bona inbox — no WhatsApp chat yet/);
+
+  const staffIn = page({ inbox_state: 'in' }, STAFF);
+  assert.match(staffIn, OPEN);
+  assert.doesNotMatch(staffIn, MOVE);
+  assert.doesNotMatch(staffIn, OUT);
+
+  const staffUnsure = page({ inbox_state: 'unsure' }, STAFF);
+  assert.doesNotMatch(staffUnsure, MOVE);
+  assert.doesNotMatch(staffUnsure, OUT);
+  assert.doesNotMatch(staffUnsure, OPEN);
+  assert.doesNotMatch(staffUnsure, /Unsure/, 'Unsure is the owner\'s word');
+  assert.match(staffUnsure, /Not in the Bona inbox/);
+
+  const odd = page({ lead_id: 'LEAD/1?x=1', inbox_state: 'unsure' }, OWNER);
+  assert.match(odd, /action="\/v1\/admin\/inbox\/LEAD%2F1%3Fx%3D1\/move"/);
+});
+```
+
+Then in `services/api/test/team.test.mjs`, add a test right after the existing audit test. Find:
+
+```js
+  assert.ok(AUDIT_ACTIONS.includes('stage'));
+  s.close();
+});
+```
+
+Replace with:
+
+```js
+  assert.ok(AUDIT_ACTIONS.includes('stage'));
+  s.close();
+});
+
+test('the audit log accepts the inbox actions, with a target and no text', () => {
+  const s = openDb(':memory:');
+  const audit = createAudit(s, { now: () => NOW });
+  for (const action of ['reply_sent', 'inbox_move', 'inbox_out', 'inbox_add', 'handler']) {
+    assert.ok(AUDIT_ACTIONS.includes(action), action);
+    audit.record({ userId: 'USR-1', action, target: 'LEAD-1', meta: action === 'handler' ? { to: 'USR-2' } : null });
+  }
+  const rows = audit.recent(10);
+  assert.deepEqual(rows.map((r) => r.action).sort(), ['handler', 'inbox_add', 'inbox_move', 'inbox_out', 'reply_sent']);
+  assert.deepEqual(rows.find((r) => r.action === 'handler').meta, { to: 'USR-2' });
+  assert.ok(rows.every((r) => r.target === 'LEAD-1'));
+  s.close();
+});
+```
+
+- [ ] **Step 2: Run to see it fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/dashboard-render-inbox.test.mjs api/test/team.test.mjs`
+Expected: FAIL — `dashboard-render-inbox.test.mjs` cannot load (`ERR_MODULE_NOT_FOUND` for `lib/dashboard/render-inbox.mjs`); in `team.test.mjs` only the new test fails (`reply_sent` is not in `AUDIT_ACTIONS` yet), every other test in that file passes.
+
+- [ ] **Step 3: Implement the audit actions** — two edits in `services/api/lib/audit.mjs`.
+
+Find:
+
+```js
+ * owner's action already happened, and refusing to show it would only hide it.
+ * Phase 2 adds reply_sent, inbox_move, inbox_out, inbox_add and handler.
+ */
+```
+
+Replace with:
+
+```js
+ * owner's action already happened, and refusing to show it would only hide it.
+ * The inbox actions carry no text and no number either: a reply is audited with its
+ * send status, a handler change with the user it went to.
+ */
+```
+
+Find:
+
+```js
+  'stage', 'note',
+];
+```
+
+Replace with:
+
+```js
+  'stage', 'note',
+  'reply_sent', 'inbox_move', 'inbox_out', 'inbox_add', 'handler',
+];
+```
+
+- [ ] **Step 4: Implement the shared chrome** — ten edits in `services/api/lib/dashboard/render.mjs`. Each "Find" block exists exactly once in the file.
+
+**(a) STYLE — the inbox classes, placed just above the narrow-screen block.** Find:
+
+```css
+/* ---- narrow: the rail becomes a top strip, content stacks ---------- */
+```
+
+Replace with:
+
+```css
+/* ---- inbox: chat rows, and a thread that reads like WhatsApp ------
+   The client's bubbles sit on the left, everything sent from Bona's side
+   on the right. A reply still on its way, or one we are not sure went,
+   gets a dashed outline: WhatsApp has not confirmed it. */
+.rail a.it[href="/dashboard/inbox"] .c{color:#12100a;background:var(--gold);border-radius:99px;padding:0 6px;font-weight:600}
+.lr.ix{grid-template-columns:30px minmax(0,1fr)}
+a.lr.ix:hover{background:var(--l1)}
+.thread{display:flex;flex-direction:column;gap:8px;max-width:760px}
+.bub{align-self:flex-start;max-width:min(80%,34rem);padding:7px 11px 6px;border-radius:12px;
+background:var(--l2);border:1px solid var(--bd);overflow-wrap:anywhere}
+.bub.out{align-self:flex-end;background:var(--goldt);border-color:transparent}
+.bub.pend{background:transparent;border:1px dashed var(--bd2)}
+.bub .who{display:block;font-size:10.5px;font-weight:600;color:var(--t3);margin-bottom:2px}
+.bub .md{display:block;font-size:12px;color:var(--t4);font-style:italic}
+.bub .tx{white-space:pre-wrap;font-size:13.5px}
+.bub .at{display:block;margin-top:3px;font-size:10.5px;color:var(--t4);text-align:end;font-variant-numeric:tabular-nums}
+.bub .st{display:block;margin-top:2px;font-size:11.5px;color:var(--amber)}
+.bub .st.bad{color:var(--red)}
+.wgap{align-self:center;font-size:11.5px;color:var(--t4);padding:4px 11px;border:1px dashed var(--bd2);border-radius:99px}
+form.reply{display:grid;gap:8px;max-width:760px;margin-top:14px}
+
+/* ---- narrow: the rail becomes a top strip, content stacks ---------- */
+```
+
+**(b) STYLE — the phone rule (the thread goes full width under 720px), placed just above the reduced-motion rule.** Find:
+
+```css
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+```
+
+Replace with:
+
+```css
+/* A phone reads a chat full width: the list and the thread are two screens. */
+@media (max-width:720px){
+  .thread,form.reply{max-width:none}
+  .bub{max-width:90%}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+```
+
+**(c) `NAV` — the Inbox entry, right after Desk.** Find:
+
+```js
+  ['/dashboard', 'Desk', '<path d="M2 8h3l1.8-4.4L9.2 12l1.7-4H14"/>', 'Workspace'],
+```
+
+Replace with:
+
+```js
+  ['/dashboard', 'Desk', '<path d="M2 8h3l1.8-4.4L9.2 12l1.7-4H14"/>', 'Workspace'],
+  ['/dashboard/inbox', 'Inbox', '<path d="M2 9.2 3.9 3.3h8.2L14 9.2v3.5H2z"/><path d="M2 9.2h3.3l.9 1.6h3.6l.9-1.6H14"/>', 'Workspace'],
+```
+
+**(d) `stageName` becomes an export (render-inbox.mjs labels stages the same way).** Find:
+
+```js
+/** Prototype-safe: `?stage=constructor` must not print a function. */
+const stageName = (s) =>
+```
+
+Replace with:
+
+```js
+/** Prototype-safe: `?stage=constructor` must not print a function. */
+export const stageName = (s) =>
+```
+
+**(e) `layout()` — the Inbox count comes from `me.unread`; a page's own `counts` still win.** Find:
+
+```js
+  const entries = me?.role === 'owner' ? [...NAV, ...OWNER_NAV] : NAV;
+  const items = entries.map(([href, label, icon, group]) => {
+    const c = counts && Object.hasOwn(counts, href) && Number.isFinite(Number(counts[href]))
+      ? `<span class="c">${esc(number(counts[href]))}</span>` : '';
+```
+
+Replace with:
+
+```js
+  const entries = me?.role === 'owner' ? [...NAV, ...OWNER_NAV] : NAV;
+  // The Inbox count is the signed-in person's own unread messages. It rides on `me` so
+  // every page shows it without each route having to pass it; a page that passes its
+  // own Inbox count in `counts` still decides.
+  const unread = Number(me?.unread);
+  const railCounts = {
+    ...(Number.isFinite(unread) && unread > 0 ? { '/dashboard/inbox': unread } : {}),
+    ...(counts ?? {}),
+  };
+  const items = entries.map(([href, label, icon, group]) => {
+    const c = Object.hasOwn(railCounts, href) && Number.isFinite(Number(railCounts[href]))
+      ? `<span class="c">${esc(number(railCounts[href]))}</span>` : '';
+```
+
+**(f) `postButton` — a one-button form post, right after `scrollTable`.** Find:
+
+```js
+    : `<p class="muted">${esc(empty)}</p>`);
+```
+
+Replace with:
+
+```js
+    : `<p class="muted">${esc(empty)}</p>`);
+
+/**
+ * A write offered as one button: a plain form post with the hidden `_dash` marker every
+ * dashboard form carries (see routes.mjs). `action` is escaped here; a caller that puts
+ * an id in it encodes the id first, so the id stays one inert path segment.
+ */
+export const postButton = (action, label, fields = {}) =>
+  `<form method="post" action="${esc(action)}" style="display:inline;margin:0 .35rem 0 0">` +
+  '<input type="hidden" name="_dash" value="1">' +
+  Object.entries(fields).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('') +
+  `<button type="submit">${esc(label)}</button></form>`;
+```
+
+**(g) `MESSAGES` — the inbox error codes.** Find:
+
+```js
+  owner_only: 'Only an owner can do that.',
+};
+```
+
+Replace with:
+
+```js
+  owner_only: 'Only an owner can do that.',
+  stale: 'New activity since you opened this chat. Read it, then send again — your text is still in the box.',
+  lid_only: 'This chat has no phone number — reply from your phone.',
+  not_in_inbox: 'That chat is not in the Bona inbox.',
+  excluded: 'That number is on the team or the never-a-client list, so it is not a client chat.',
+  sending_disabled: 'Sending is off (Team page).',
+  send_uncertain: 'Not sure it went — check WhatsApp before you send it again.',
+  bad_text: 'A reply has to have some text, and at most 4,096 characters.',
+  bad_send_id: 'That reply form is out of date. Reload the chat and send again.',
+  bad_handler: 'A handler has to be an active member of the team, or nobody.',
+  reply_rate_limited: 'Too many messages from your number this minute. Wait a minute and send again.',
+  not_a_chat: 'That lead has no WhatsApp chat yet — it joins once they write on WhatsApp.',
+};
+```
+
+**(h) `leadDetailPage` — the inbox label helper and the inbox buttons (top of the function).** Find:
+
+```js
+export function leadDetailPage({ lead, journey, saved = null, error = null, now = Date.now(), me = null }) {
+  const field = (k, v) => `<dt>${esc(k)}</dt><dd dir="auto">${esc(v ?? '—')}</dd>`;
+```
+
+Replace with:
+
+```js
+/**
+ * Where a lead stands with the Bona inbox, in words. "Unsure" is the owner's call and
+ * only the owner sees the word (D9); to a team member, anything not in the inbox is
+ * simply not in it.
+ */
+function inboxLabel(lead, owner) {
+  if (lead.inbox_state === 'in') return lead.wa_jid || lead.wa_lid ? 'In the Bona inbox' : 'In the Bona inbox — no WhatsApp chat yet';
+  if (owner && lead.inbox_state === 'unsure') return 'Unsure — waiting for your decision';
+  if (owner && lead.inbox_state === 'out') return 'Not a client';
+  return 'Not in the Bona inbox';
+}
+
+export function leadDetailPage({ lead, journey, saved = null, error = null, now = Date.now(), me = null }) {
+  const field = (k, v) => `<dt>${esc(k)}</dt><dd dir="auto">${esc(v ?? '—')}</dd>`;
+  const owner = me?.role === 'owner';
+  const state = lead.inbox_state ?? null;
+  const leadPath = encodeURIComponent(lead.lead_id);
+  // Only a chat can be opened; only an owner moves a lead in or out (D9). "Not a
+  // client" is offered while there is something to take out: in, or waiting on him.
+  const inboxActions = [
+    state === 'in' && (lead.wa_jid || lead.wa_lid) ? `<a class="btn pri" href="${esc(`/dashboard/inbox/${leadPath}`)}">Open chat</a>` : '',
+    owner && state !== 'in' ? postButton(`/v1/admin/inbox/${leadPath}/move`, 'Move to Bona inbox') : '',
+    owner && (state === 'in' || state === 'unsure') ? postButton(`/v1/admin/inbox/${leadPath}/out`, 'Not a client') : '',
+  ].join('');
+```
+
+**(i) `leadDetailPage` — the Inbox row in the Contact card.** Find:
+
+```js
+    ${field('Channel', lead.channel)}
+    ${field('First reply', responded)}
+```
+
+Replace with:
+
+```js
+    ${field('Channel', lead.channel)}
+    ${field('Inbox', inboxLabel(lead, owner))}
+    ${field('First reply', responded)}
+```
+
+**(j) `leadDetailPage` — the "Bona inbox" section, just above Notes.** Find:
+
+```js
+<h2>Notes</h2>
+<div class="card"><p dir="auto" style="white-space:pre-wrap;margin:0">
+```
+
+Replace with:
+
+```js
+<h2>Bona inbox</h2>
+<p class="sub">${esc(inboxLabel(lead, owner))}</p>
+${inboxActions ? `<div class="acts" style="flex-wrap:wrap">${inboxActions}</div>` : ''}
+
+<h2>Notes</h2>
+<div class="card"><p dir="auto" style="white-space:pre-wrap;margin:0">
+```
+
+- [ ] **Step 5: Implement the inbox screens** — create `services/api/lib/dashboard/render-inbox.mjs`:
+
+```js
+/**
+ * The Bona inbox (2026-09-27 design §4.4): the chat list, the owner's Unsure list, and
+ * one chat's thread with its reply box.
+ *
+ * Same rules as render.mjs: no script (the CSP forbids it), every value through `esc`,
+ * every write a plain form post to /v1/admin/*. Without script a page is as fresh as
+ * its last load, so the list says so: reload to see new messages.
+ *
+ * Numbers: a list shows the last four digits only; the thread header shows the whole
+ * number, because that page exists to talk to that one person. Names sit in `<bdi>`, so
+ * an Arabic name cannot reorder the words around it.
+ *
+ * Who wrote a bubble: the client, a team member by name, Dana, or the owner's own phone,
+ * which the owner reads as "Your number" and everyone else as "Owner's number". What he
+ * types on that phone and what Lisa sends for him look the same to the API, so the
+ * label never claims more than "it came from that number".
+ */
+import {
+  esc, maskPhone, fullPhone, agoSince, dateTime, layout, knownError, messageFor, stageName, postButton,
+} from './render.mjs';
+import { MAX_TEXT_LEN } from '../wa-send.mjs';
+
+export const INBOX_OK = {
+  sent: 'Sent.',
+  handler: 'Handler saved.',
+  moved: 'Moved to the Bona inbox.',
+  out: 'Marked not a client. What the dashboard stored from that chat is deleted.',
+  added: 'Added to the Bona inbox.',
+};
+
+/** One banner. A known error wins over an ok; a code nobody knows shows nothing. */
+function flash(ok, error) {
+  if (knownError(error)) return `<div class="err">${esc(messageFor(error))}</div>`;
+  return typeof ok === 'string' && Object.hasOwn(INBOX_OK, ok) ? `<div class="ok">${esc(INBOX_OK[ok])}</div>` : '';
+}
+
+// A lead id reaches these templates as-is, so it is encoded before it becomes a path
+// segment: a `/` or `?` inside it must not be able to reshape a link or a form action.
+const threadHref = (leadId) => `/dashboard/inbox/${encodeURIComponent(leadId)}`;
+const leadHref = (leadId) => `/dashboard/leads/${encodeURIComponent(leadId)}`;
+const writeHref = (leadId, what) => `/v1/admin/inbox/${encodeURIComponent(leadId)}/${what}`;
+
+/** One line of at most `max` characters: whitespace folded, cut on a whole character. */
+function preview(text, max) {
+  const flat = String(text ?? '').replace(/\s+/g, ' ').trim();
+  const chars = [...flat];
+  return chars.length > max ? `${chars.slice(0, max).join('')}…` : flat;
+}
+
+const firstLetter = (name) => (name ? [...name][0] : '·');
+
+/** The owner's two lists. Staff never get this strip: Unsure is the owner's call (D9). */
+function tabs(active, unsureCount) {
+  const n = Number(unsureCount);
+  return `<div class="seg"><a${active === 'inbox' ? ' class="on"' : ''} href="/dashboard/inbox">Inbox</a>` +
+    `<a${active === 'unsure' ? ' class="on"' : ''} href="/dashboard/inbox?tab=unsure">Unsure${Number.isFinite(n) && n > 0 ? ` · ${esc(n)}` : ''}</a></div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* The chat list                                                       */
+/* ------------------------------------------------------------------ */
+
+/** The last message in a word or two: who sent it from our side, then what it said. */
+function lastLine(row) {
+  const said = preview([row.last_media, row.last_text].filter(Boolean).join(' '), 80);
+  if (!said) return '';
+  if (row.last_direction !== 'out') return said;
+  return `${row.last_sender_kind === 'dana' ? 'Dana' : 'Bona'}: ${said}`;
+}
+
+function inboxRow(row, now) {
+  const name = String(row.name ?? '').trim();
+  const unread = Number(row.unread) || 0;
+  const last = lastLine(row);
+  const pills = [
+    unread > 0 ? `<span class="pl gold">${esc(unread)} new</span>` : '',
+    Number(row.needs_human) === 1 ? '<span class="pl hot">Needs a human</span>' : '',
+    `<span class="pl done">${esc(stageName(row.stage))}</span>`,
+  ].join('');
+  const handler = row.handler_name ? `Handler: <bdi>${esc(row.handler_name)}</bdi>` : 'No handler';
+  return `<a class="lr ix" href="${esc(threadHref(row.lead_id))}">
+  <span class="av2" aria-hidden="true"><span dir="auto">${esc(firstLetter(name))}</span></span>
+  <div>
+    <div class="l1"><span class="nm"><bdi>${esc(name || 'Unnamed')}</bdi></span>${pills}</div>
+    <div class="l2"><span class="tel">${esc(maskPhone(row.phone_e164))}</span><span>·</span><span>${esc(agoSince(now, row.last_msg_ts ?? row.inbox_since ?? row.created))}</span><span>·</span><span>${handler}</span></div>
+    ${last ? `<div class="l2"><span dir="auto">${esc(last)}</span></div>` : ''}
+  </div>
+</a>`;
+}
+
+/**
+ * Every chat in the Bona inbox, in the order the store gives them (unread first, then
+ * newest). The owner also gets the Unsure tab and "Add chat by phone number"; a team
+ * member sees neither, not even as a link.
+ */
+export function inboxPage({ me, rows, unsureCount = 0, ok = null, error = null, now = Date.now() }) {
+  const owner = me?.role === 'owner';
+  const list = Array.isArray(rows) ? rows : [];
+  const withNew = list.filter((r) => (Number(r.unread) || 0) > 0).length;
+
+  const block = list.length
+    ? `<p class="sub">${esc(list.length)} ${list.length === 1 ? 'chat' : 'chats'}${withNew ? `, ${esc(withNew)} with new messages` : ''}. Reload the page to see new messages.</p>
+<div class="card cp">${list.map((r) => inboxRow(r, now)).join('')}</div>`
+    : '<p class="muted">No chats in the Bona inbox yet. A chat joins when a client writes from an ad, with a Ref code or with a listing number, or when the owner\'s number sends them a Bona link, a brochure or a listing number.</p>';
+
+  const add = owner
+    ? `<h2 style="margin-top:22px">Add chat by phone number</h2>
+<p class="sub">For a client who is not in the list yet. The chat's last 30 days are copied in from WhatsApp.</p>
+<form class="row" method="post" action="/v1/admin/inbox/add">
+  <input type="hidden" name="_dash" value="1">
+  <div><label for="a-phone">WhatsApp number</label><input id="a-phone" name="phone" inputmode="tel" dir="ltr" placeholder="05XXXXXXXX" maxlength="20" required></div>
+  <div><button type="submit">Add chat</button></div>
+</form>`
+    : '';
+
+  return layout({
+    title: 'Inbox',
+    active: '/dashboard/inbox',
+    me,
+    actions: owner ? tabs('inbox', unsureCount) : '',
+    body: `${flash(ok, error)}${block}${add}`,
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Unsure (owner only)                                                 */
+/* ------------------------------------------------------------------ */
+
+const WHY_UNSURE = {
+  keyword: 'wrote the word “bona”',
+  time_window: 'wrote within 15 minutes of a tap on the site',
+};
+
+function unsureRow(row, now) {
+  const name = String(row.name ?? '').trim();
+  const why = typeof row.match_method === 'string' && Object.hasOwn(WHY_UNSURE, row.match_method)
+    ? WHY_UNSURE[row.match_method]
+    : 'no sure sign it is about Bona';
+  const snippet = preview(row.snippet, 160);
+  return `<div class="lr ix">
+  <span class="av2" aria-hidden="true"><span dir="auto">${esc(firstLetter(name))}</span></span>
+  <div>
+    <div class="l1"><span class="nm"><a href="${esc(leadHref(row.lead_id))}"><bdi>${esc(name || 'Unnamed')}</bdi></a></span><span class="pl warm">${esc(why)}</span></div>
+    <div class="l2"><span class="tel">${esc(maskPhone(row.phone_e164))}</span><span>·</span><span>${esc(agoSince(now, row.created))}</span></div>
+    ${snippet ? `<div class="l2"><span dir="auto">${esc(snippet)}</span></div>` : ''}
+    <div class="acts" style="margin-top:8px">${postButton(writeHref(row.lead_id, 'move'), 'Move to Bona inbox')}${postButton(writeHref(row.lead_id, 'out'), 'Not a client')}</div>
+  </div>
+</div>`;
+}
+
+/** Chats that might be about Bona. Only the owner decides, so only the owner sees them. */
+export function unsurePage({ me, rows, ok = null, error = null, now = Date.now() }) {
+  const list = Array.isArray(rows) ? rows : [];
+  const body = `${flash(ok, error)}
+<p class="sub">Chats that might be about Bona but carry no ad, Ref code or listing number. Only owners see this list. <b>Move to Bona inbox</b> copies in the chat's last 30 days so the team can read and reply; <b>Not a client</b> keeps it out of the inbox, and it never comes back on its own.</p>
+${list.length ? `<div class="card cp">${list.map((r) => unsureRow(r, now)).join('')}</div>` : '<p class="muted">Nothing to decide.</p>'}`;
+  return layout({ title: 'Unsure', active: '/dashboard/inbox', me, actions: tabs('unsure', list.length), body });
+}
+
+/* ------------------------------------------------------------------ */
+/* One chat                                                            */
+/* ------------------------------------------------------------------ */
+
+/** Why a send failed, in words. Own-property lookup: an error code is data, not a key into anything. */
+const FAIL_REASON = {
+  rate_limited: 'too many messages this minute, try again shortly',
+  sending_disabled: 'sending is off',
+  disabled: 'WhatsApp sending is switched off on the server',
+  'evolution-not-configured': 'WhatsApp is not set up on the server',
+  network: 'WhatsApp could not be reached',
+  bad_recipient: 'there is no phone number to send to',
+};
+
+function failReason(code) {
+  if (typeof code !== 'string') return 'something went wrong';
+  if (Object.hasOwn(FAIL_REASON, code)) return FAIL_REASON[code];
+  const http = /^http_(\d{3})$/.exec(code);
+  return http ? `WhatsApp refused it (HTTP ${http[1]})` : 'something went wrong';
+}
+
+function senderLabel(kind, userId, { owner, names }) {
+  if (kind === 'client') return 'Client';
+  if (kind === 'dana') return 'Dana';
+  if (kind === 'owner_number') return owner ? 'Your number' : "Owner's number";
+  // A reply keeps its author's name after they leave the team, so the lookup covers
+  // every user, not only the active ones.
+  if (kind === 'staff') return names.get(userId) ?? 'Team';
+  return 'Bona';
+}
+
+function bubble({ side, label, media = null, text = null, ts, status = '', pending = false }) {
+  return `<div class="bub ${side}${pending ? ' pend' : ''}">` +
+    `<span class="who"><bdi>${esc(label)}</bdi></span>` +
+    (media ? `<span class="md">${esc(media)}</span>` : '') +
+    (text ? `<div class="tx" dir="auto">${esc(text)}</div>` : '') +
+    `<span class="at">${esc(dateTime(ts))}</span>${status}</div>`;
+}
+
+/** A reply the dashboard sent (or tried to) that WhatsApp has not confirmed. */
+function outboxStatus(row) {
+  if (row.status === 'pending') return '<span class="st">Sending…</span>';
+  if (row.status === 'uncertain') return '<span class="st">Not sure it went — check WhatsApp.</span>';
+  if (row.status === 'failed') return `<span class="st bad">Not sent — ${esc(failReason(row.error))}.</span>`;
+  return '';
+}
+
+/**
+ * The thread: stored messages, the gaps where a message could not be read, and the
+ * dashboard's own replies that WhatsApp has not confirmed yet, merged by time.
+ *
+ * The reply box is replaced by one plain sentence when a reply cannot go: a chat with
+ * no phone number (an `@lid` is not something we send to), or the owner's Sending switch
+ * off. The form carries `send_id` (a double tap sends once) and `seen_ts`, the newest
+ * message this page showed, so a reply written against an old view is held back.
+ */
+export function threadPage({
+  me, lead, messages, gaps = [], outbox = [], users = [], sendId, seenTs, sendingEnabled, canReply,
+  draft = '', ok = null, error = null, now = Date.now(),
+}) {
+  const owner = me?.role === 'owner';
+  const people = Array.isArray(users) ? users : [];
+  const names = new Map(people.map((u) => [u.user_id, u.name]));
+  const msgs = Array.isArray(messages) ? messages : [];
+  const shown = new Set(msgs.map((m) => m.key_id));
+  const who = { owner, names };
+
+  const items = [
+    ...msgs.map((m) => ({
+      ts: Number(m.ts) || 0,
+      html: bubble({
+        side: m.direction === 'out' ? 'out' : 'in',
+        label: senderLabel(m.sender_kind, m.sender_user_id, who),
+        media: m.media_type,
+        text: m.text,
+        ts: m.ts,
+      }),
+    })),
+    ...(Array.isArray(gaps) ? gaps : []).map((g) => ({
+      ts: Number(g.ts) || 0,
+      html: '<div class="wgap">A message could not be loaded — check WhatsApp.</div>',
+    })),
+    // A row whose WhatsApp id is already a stored message is that message; showing both
+    // would print one reply twice.
+    ...(Array.isArray(outbox) ? outbox : []).filter((o) => !(o.key_id && shown.has(o.key_id))).map((o) => ({
+      ts: Number(o.created) || 0,
+      html: bubble({
+        side: 'out',
+        label: senderLabel(o.sender_kind, o.user_id, who),
+        text: o.text,
+        ts: o.created,
+        status: outboxStatus(o),
+        pending: true,
+      }),
+    })),
+  ].map((it, i) => ({ ...it, i })).sort((a, b) => a.ts - b.ts || a.i - b.i);
+
+  const name = String(lead.name ?? '').trim();
+  const handler = people.find((u) => u.active && u.user_id === lead.handler_user_id) ?? null;
+
+  const head = `<div class="card cp">
+  <div class="hd"><div><h2><bdi>${esc(name || 'Unnamed')}</bdi></h2>
+    <div class="s"><span dir="ltr">${esc(fullPhone(lead.phone_e164))}</span> · ${esc(stageName(lead.stage))} · ${handler ? `Handler: <bdi>${esc(handler.name)}</bdi>` : 'No handler'}${Number(lead.needs_human) === 1 ? ' <span class="pl hot">Needs a human</span>' : ''}</div></div>
+    <a class="r" href="${esc(leadHref(lead.lead_id))}">Lead record →</a></div>
+</div>`;
+
+  const thread = items.length
+    ? `<div class="thread">${items.map((it) => it.html).join('')}</div>`
+    : '<p class="muted">No messages stored for this chat yet.</p>';
+
+  let reply;
+  if (!canReply) {
+    reply = '<p class="muted">This chat has no phone number — reply from your phone.</p>';
+  } else if (!sendingEnabled) {
+    // Only an owner can open the Team page, so only an owner gets it as a link: a
+    // staff page never contains that link at all (Phase 1 rule).
+    reply = `<p class="muted">Sending is off (${owner ? '<a href="/dashboard/team">Team page</a>' : 'Team page'}).</p>`;
+  } else {
+    reply = `<form class="reply" method="post" action="${esc(writeHref(lead.lead_id, 'reply'))}">
+  <input type="hidden" name="_dash" value="1">
+  <input type="hidden" name="send_id" value="${esc(sendId)}">
+  <input type="hidden" name="seen_ts" value="${esc(seenTs)}">
+  <label for="r-text">${esc(owner ? 'Reply — it goes from your WhatsApp' : "Reply — it goes from the owner's WhatsApp")}</label>
+  <textarea id="r-text" name="text" maxlength="${esc(MAX_TEXT_LEN)}" dir="auto" required>${esc(draft)}</textarea>
+  <div><button type="submit">Send</button></div>
+</form>`;
+  }
+
+  const options = [`<option value=""${handler ? '' : ' selected'}>Nobody</option>`,
+    ...people.filter((u) => u.active).map((u) =>
+      `<option value="${esc(u.user_id)}" dir="auto"${handler && u.user_id === handler.user_id ? ' selected' : ''}>${esc(u.name)}</option>`)].join('');
+  const picker = `<form class="row" method="post" action="${esc(writeHref(lead.lead_id, 'handler'))}" style="margin-top:18px">
+  <input type="hidden" name="_dash" value="1">
+  <div><label for="h-user">Handler</label><select id="h-user" name="user_id">${options}</select></div>
+  <div><button type="submit">Save handler</button></div>
+</form>`;
+
+  const notClient = owner
+    ? `<div style="margin-top:18px">${postButton(writeHref(lead.lead_id, 'out'), 'Not a client')}<span class="muted">Deletes what the dashboard stored from this chat; it never comes back on its own.</span></div>`
+    : '';
+
+  return layout({
+    title: 'Chat',
+    active: '/dashboard/inbox',
+    me,
+    actions: `<div class="seg"><a href="/dashboard/inbox">← Inbox</a><a href="${esc(threadHref(lead.lead_id))}">Reload</a></div>`,
+    body: `${flash(ok, error)}${head}${thread}${reply}${picker}${notClient}`,
+  });
+}
+```
+
+- [ ] **Step 6: Run**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/dashboard-render-inbox.test.mjs api/test/team.test.mjs`
+Expected: PASS — 15 tests in `dashboard-render-inbox.test.mjs`, and every test in `team.test.mjs` (the new audit test included).
+
+- [ ] **Step 7: Run the hostile-input render scripts** (not part of `*.test.mjs`; they render every page with null-heavy and attacking input, and now cover the new lead-page section)
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node api/test/dashboard-hostile.mjs && node api/test/dashboard-regression.mjs`
+Expected: the last lines are `ALL PAGES RENDER CLEAN UNDER HOSTILE INPUT` and `ALL REGRESSION CHECKS PASS`.
+
+- [ ] **Step 8: Run the full suite**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/*.test.mjs`
+Expected: all pass, 0 fail — 16 more tests than after Task 9 (15 in the new file, 1 in `team.test.mjs`).
+
+- [ ] **Step 9: Commit**
+
+```bash
+cd /home/azoz778/bona-wt/team-inbox && git add services/api/lib/dashboard/render-inbox.mjs services/api/lib/dashboard/render.mjs services/api/lib/audit.mjs services/api/test/dashboard-render-inbox.test.mjs services/api/test/team.test.mjs
+git commit -m "dashboard: inbox screens, Inbox rail entry with unread count, lead-page inbox controls
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 11: Wiring — `index.mjs` + `lib/config.mjs`
+
+Everything Tasks 1–10 built, put behind one app: one inbox store, handed to the one sender, the ingest, the backfill, the poller and the dashboard; `app.inboxMaintenance()` (P2-18 + amendment A3) on start and daily; the poll interval default down to 20 s (P2-11). Builds on Task 7's two `index.mjs` edits (the `createInboxStore` import and the `inboxStore` → sender hand-over): the anchors below are the file as Task 7 leaves it. Amendment A3's `inboxStore.inChatsWithoutMessages()` is not in Task 4's store, so it is added here, where its only caller is.
+
+The upkeep starts with an exclusion sweep. Migration v4 (Task 1) marks leads `in` by how they matched and never looks at `users` or `never_list`, and a number can join the team or the never list after its chat joined — so without the sweep the catch-up would fetch and store the private chat of a colleague or a never-list number, which the spec says is "ignored entirely" (D10, §3.5), and the badge would count messages from chats nobody may open. The sweep uses the inbox's one exclusion test, `isExcludedLead(team, store, lead)`, added to `lib/team.mjs` next to `isTeamLid` so Task 12's routes use the very same rule, and one new store read, `inboxStore.listedLeads()`.
+
+**Files:**
+- Modify: `services/api/index.mjs`
+- Modify: `services/api/lib/config.mjs`
+- Modify: `services/api/lib/inbox/store.mjs` (`inChatsWithoutMessages`, amendment A3; `listedLeads`, for the exclusion sweep)
+- Modify: `services/api/lib/team.mjs` (`isExcludedLead`: the inbox's one exclusion test, shared with Task 12's routes)
+- Modify: `services/api/retell/provision.mjs` (the `--ensure-env` default for a fresh install, so it no longer pins 45 s)
+- Modify: `services/api/test/config.test.mjs`
+- Modify: `services/api/test/team.test.mjs`
+- Modify: `services/api/test/inbox-store.test.mjs`
+- Create: `services/api/test/inbox-wiring.test.mjs`
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to the end of `services/api/test/config.test.mjs` (after the last test, which ends with `assert.equal(new Set(dflt.origins).size, dflt.origins.length, 'no duplicate origins');` and `});`):
+
+```js
+
+test('the WhatsApp poller reads every 20 s by default, and the environment still wins', () => {
+  // The inbox (2026-09-27 design §4.3, P2-11): a staff member waits at most one interval
+  // to see a client's message. The VPS env file pins its own value, which still wins.
+  assert.equal(loadConfig({ env: {}, ids: {} }).waPollMs, 20_000);
+  assert.equal(loadConfig({ env: { BONA_WA_POLL_MS: '45000' }, ids: {} }).waPollMs, 45_000);
+});
+```
+
+In `services/api/test/team.test.mjs`, replace the import line
+
+```js
+import { createTeam, TeamError, isTeamLid, learnTeamLid } from '../lib/team.mjs';
+```
+
+with
+
+```js
+import { createTeam, TeamError, isTeamLid, learnTeamLid, isExcludedLead } from '../lib/team.mjs';
+```
+
+Append to the end of `services/api/test/team.test.mjs` (after Task 10's audit test, which ends with `assert.ok(rows.every((r) => r.target === 'LEAD-1'));`, `s.close();`, `});`):
+
+```js
+
+test('isExcludedLead: a lead is a colleague\'s or a never-list number\'s by its phone, its phone jid or a learned team lid', () => {
+  const { s, team } = teamHarness();
+  team.addUser({ name: 'Sara', phone: '0500000001', role: 'staff' });
+  const gone = team.addUser({ name: 'Old Hand', phone: '0500000002', role: 'staff' });
+  team.deactivateUser(gone.user_id);
+  team.addNever({ phone: '0500000003' });
+  learnTeamLid(s, '966500000001', '272516946294519@lid');
+  const lead = (over) => ({ lead_id: 'LEAD-1', phone_e164: null, wa_jid: null, wa_lid: null, ...over });
+  assert.equal(isExcludedLead(team, s, lead({ phone_e164: '966500000001' })), true, 'a team number');
+  assert.equal(isExcludedLead(team, s, lead({ phone_e164: '966500000002' })), true, 'a deactivated one too');
+  assert.equal(isExcludedLead(team, s, lead({ phone_e164: '966500000003' })), true, 'a never-list number');
+  assert.equal(isExcludedLead(team, s, lead({ wa_jid: '966500000003:12@s.whatsapp.net' })), true, 'by its phone jid, device suffix and all');
+  assert.equal(isExcludedLead(team, s, lead({ wa_lid: '272516946294519@lid' })), true, 'by a lid learned as a colleague\'s');
+  assert.equal(isExcludedLead(team, s, lead({ phone_e164: '966500000077', wa_jid: '966500000077@s.whatsapp.net', wa_lid: '111@lid' })), false, 'a client');
+  // A lid's digits are an opaque id, never a phone number, even when they spell a colleague's.
+  assert.equal(isExcludedLead(team, s, lead({ wa_jid: '966500000001@lid' })), false);
+  assert.equal(isExcludedLead(team, s, null), false);
+  s.close();
+});
+```
+
+Append to the end of `services/api/test/inbox-store.test.mjs` (after its last test, which ends with `assert.equal(prepares, 2);`, `s.db.prepare = realPrepare;`, `s.close();`, `});`):
+
+```js
+
+test('inChatsWithoutMessages: in chats with nothing stored yet, oldest joiner first (amendment A3)', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-new', { wa_jid: '966500000002@s.whatsapp.net', inbox_since: NOW - DAY });
+  chat(s, 'L-old', { wa_jid: '966500000003@s.whatsapp.net', inbox_since: NOW - 3 * DAY });
+  chat(s, 'L-lid', { wa_jid: null, wa_lid: '123456789@lid', inbox_since: NOW - 2 * DAY });
+  chat(s, 'L-talked', { wa_jid: '966500000004@s.whatsapp.net' });
+  inbox.upsertMessage(msg({ lead_id: 'L-talked' }));
+  lead(s, 'L-form', { phone_e164: '966500000005', inbox_state: 'in', inbox_since: NOW - 4 * DAY });
+  lead(s, 'L-unsure', { wa_jid: '966500000006@s.whatsapp.net', inbox_state: 'unsure' });
+  lead(s, 'L-out', { wa_jid: '966500000007@s.whatsapp.net', inbox_state: 'out' });
+  assert.deepEqual(inbox.inChatsWithoutMessages().map((l) => l.lead_id), ['L-old', 'L-lid', 'L-new'],
+    'a chat with a message, a form lead with no chat, a guess and a "not a client" are not in it');
+  assert.deepEqual(inbox.inChatsWithoutMessages({ limit: 1 }).map((l) => l.lead_id), ['L-old']);
+  s.close();
+});
+
+test('listedLeads: every lead an inbox page can list or count, for the upkeep\'s exclusion sweep', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-in', { phone_e164: '966500000002', wa_jid: '966500000002@s.whatsapp.net' });
+  lead(s, 'L-form', { phone_e164: '966500000005', inbox_state: 'in' });
+  lead(s, 'L-unsure', { wa_jid: '966500000006@s.whatsapp.net', inbox_state: 'unsure' });
+  lead(s, 'L-unplaced', { wa_lid: '123456789@lid' });
+  lead(s, 'L-out', { wa_jid: '966500000007@s.whatsapp.net', inbox_state: 'out' });
+  lead(s, 'L-legacy', { phone_e164: '966500000008', channel: 'form' });
+  assert.deepEqual(inbox.listedLeads().map((l) => l.lead_id).sort(), ['L-form', 'L-in', 'L-unplaced', 'L-unsure'],
+    'a "not a client" and a lead that is neither in nor a chat are on no inbox page');
+  assert.deepEqual(inbox.listedLeads().find((l) => l.lead_id === 'L-in'),
+    { lead_id: 'L-in', phone_e164: '966500000002', wa_jid: '966500000002@s.whatsapp.net', wa_lid: null, inbox_state: 'in' },
+    'only what the exclusion test reads');
+  s.close();
+});
+```
+
+Create `services/api/test/inbox-wiring.test.mjs`:
+
+```js
+/**
+ * The inbox as createApp wires it (2026-09-27 design §4): one inbox store behind the one
+ * sender, the ingest and the backfill; a login code recorded in the outbox without its
+ * text; a send the last process left pending given up on at start-up; and the daily
+ * upkeep. Nothing leaves the process — the sender's fetch is a fake, and the backfill is
+ * a spy where the test needs one. No server is listened on.
+ */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createApp } from '../index.mjs';
+import { openDb } from '../lib/db.mjs';
+import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
+import { DEFAULT_ORIGINS } from '../lib/cors.mjs';
+import { createInboxStore, RETENTION_MS } from '../lib/inbox/store.mjs';
+import { JOIN_HISTORY_MS } from '../lib/inbox/backfill.mjs';
+
+const NOW = 1_790_500_000_000;
+const DAY = 86_400_000;
+const ENV = { EVOLUTION_API_URL: 'http://evo.test/', EVOLUTION_API_KEY: 'k', BONA_WA_INSTANCE: 'abdulaziz-personal' };
+const inventory = createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk' });
+
+/** createApp on an in-memory store with a pinned clock. `env` decides whether Evolution is "there". */
+function build({ env = {}, ...options } = {}) {
+  const db = options.db ?? openDb(':memory:');
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-inbox-wiring-'));
+  const logs = [];
+  const app = createApp({
+    config: {
+      port: 0, host: '127.0.0.1', siteUrl: 'https://bona.azoz.uk', publicApi: 'https://bona-api.azoz.uk',
+      dataDir, inventoryFile: WORKTREE_LISTINGS, origins: DEFAULT_ORIGINS, toolToken: 'a'.repeat(32),
+      retellApiKey: 'test', retellMock: true, chatAgentId: 'agent_chat', voiceAgentId: 'agent_voice',
+      maxBodyBytes: 16 * 1024, chatRatePerMin: 30, tokenRatePerMin: 6, toolRatePerMin: 600, toolAuthFailRatePerMin: 10,
+      allowQueryToken: false, maxChatsPerDay: 300, maxCallsPerDay: 60, maxTurnsPerSession: 40, dashCookieDays: 30,
+      env, ids: {}, version: '1.0.0', trustedProxies: [],
+    },
+    inventory, probeRetell: async () => 'ok', sendWhatsApp: async () => ({ ok: true }),
+    log: (e) => logs.push(e), now: () => NOW,
+    ...options,
+    db,
+  });
+  return {
+    app, db, logs,
+    close: async () => {
+      await app.dashboard.auth.flush();
+      db.close();
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    },
+  };
+}
+
+test('createApp exposes the inbox pieces, and what the ingest stores the inbox store reads back', async () => {
+  const h = build();
+  try {
+    const { app, db } = h;
+    for (const fn of ['upsertMessage', 'messagesFor', 'listInbox', 'unreadTotal', 'retentionPurge']) {
+      assert.equal(typeof app.inboxStore[fn], 'function', fn);
+    }
+    assert.equal(typeof app.ingest.ingest, 'function');
+    assert.equal(typeof app.backfill.history, 'function');
+    assert.equal(typeof app.backfill.refresh, 'function');
+    assert.equal(app.backfill.configured, false, 'no Evolution credentials here: the backfill reads nothing');
+    assert.equal(typeof app.sender.reply, 'function');
+    assert.equal(typeof app.inboxMaintenance, 'function');
+
+    // One store, not two: a record the ingest takes is a message the inbox store lists.
+    db.insertLead({
+      lead_id: 'LEAD-20260928-0000aaaa', created: NOW - DAY, updated: NOW - DAY, phone_e164: '966500000077',
+      wa_jid: '966500000077@s.whatsapp.net', channel: 'whatsapp', match_method: 'ref', stage: 'new', stage_ts: NOW - DAY,
+      inbox_state: 'in', inbox_since: NOW - DAY,
+    });
+    const out = await app.ingest.ingest(db.getLead('LEAD-20260928-0000aaaa'), {
+      id: 'MSG-1', jid: '966500000077@s.whatsapp.net', jidAlt: null, fromMe: false, ts: NOW - 1000,
+      text: 'is BONA-012 free?', pushName: null, contextInfo: null, messageType: 'conversation',
+      media: null, fileName: null, noise: false,
+    });
+    assert.equal(out.stored, true);
+    assert.deepEqual(app.inboxStore.messagesFor('LEAD-20260928-0000aaaa').map((m) => m.key_id), ['MSG-1']);
+  } finally {
+    await h.close();
+  }
+});
+
+test('a send the last process left pending is "uncertain" as soon as the app is built', async () => {
+  const db = openDb(':memory:');
+  createInboxStore(db, { now: () => NOW - 10 * 60_000 }).insertOutbox({
+    send_id: 'SND-left-pending', lead_id: 'LEAD-x', jid: '966500000077@s.whatsapp.net', text: 'hello', user_id: 'USR-1', sender_kind: 'staff',
+  });
+  const h = build({ db });
+  try {
+    const row = h.app.inboxStore.getOutbox('SND-left-pending');
+    assert.equal(row.status, 'uncertain', 'nobody knows whether it went, so it is never retried');
+    assert.equal(row.error, 'interrupted');
+  } finally {
+    await h.close();
+  }
+});
+
+test('a login code goes out through the one real sender and leaves an outbox row without its text', async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, body: JSON.parse(init.body) });
+    return { ok: true, status: 201, text: async () => JSON.stringify({ key: { id: 'KEY-CODE-1' } }) };
+  };
+  const h = build({ env: ENV, fetchImpl });
+  try {
+    assert.equal(typeof h.app.inboxMaintenance, 'function', 'the inbox wiring this test relies on');
+    const asked = await h.app.dashboard.auth.requestCode({ phone: '0593296933', ip: '127.0.0.1' });
+    assert.equal(asked.ok, true);
+    await h.app.dashboard.auth.flush();
+
+    assert.equal(calls.length, 1, 'exactly one request, through the fetch createApp was given');
+    assert.equal(calls[0].url, 'http://evo.test/message/sendText/abdulaziz-personal');
+    assert.equal(calls[0].body.number, '966593296933');
+    const code = /^Bona dashboard code: (\d{6}) \(valid 10 min\)$/.exec(calls[0].body.text)?.[1];
+    assert.ok(code, 'the code went to WhatsApp');
+
+    const rows = h.db.db.prepare('SELECT * FROM wa_outbox').all();
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].sender_kind, 'code');
+    assert.equal(rows[0].text, null, 'a login code is never written anywhere but the WhatsApp message');
+    assert.equal(rows[0].error, null);
+    assert.equal(rows[0].status, 'accepted');
+    assert.equal(rows[0].key_id, 'KEY-CODE-1');
+    assert.equal(rows[0].jid, '966593296933@s.whatsapp.net');
+    assert.equal(rows[0].lead_id, null);
+    assert.ok(!JSON.stringify(h.logs).includes(code), 'nor in the log');
+  } finally {
+    await h.close();
+  }
+});
+
+test('the daily upkeep: old transcripts and code rows go, stale sends become uncertain, empty chats get their history', async () => {
+  const asked = [];
+  const backfill = {
+    configured: true,
+    phoneJidOf: () => null,
+    history: async (lead, { sinceTs, untilTs }) => {
+      asked.push({ leadId: lead.lead_id, sinceTs, untilTs });
+      return { stored: lead.lead_id === 'LEAD-empty' ? 3 : 0, scanned: 3, truncated: false };
+    },
+    refresh: async () => ({ stored: 0, scanned: 0, truncated: false }),
+  };
+  const h = build({ backfill });
+  try {
+    const { app, db } = h;
+    const chat = (id, phone, since) => db.insertLead({
+      lead_id: id, created: since, updated: since, phone_e164: phone, wa_jid: `${phone}@s.whatsapp.net`,
+      channel: 'whatsapp', match_method: 'ref', stage: 'new', stage_ts: since, inbox_state: 'in', inbox_since: since,
+    });
+    chat('LEAD-old', '966500000077', NOW - 7 * 365 * DAY);
+    chat('LEAD-recent', '966500000078', NOW - 30 * DAY);
+    chat('LEAD-empty', '966500000079', NOW - 2 * DAY);
+    app.inboxStore.upsertMessage({
+      key_id: 'OLD-1', lead_id: 'LEAD-old', jid: '966500000077@s.whatsapp.net', direction: 'in', sender_kind: 'client',
+      text: 'an old question', ts: NOW - RETENTION_MS - DAY,
+    });
+    app.inboxStore.upsertMessage({
+      key_id: 'NEW-1', lead_id: 'LEAD-recent', jid: '966500000078@s.whatsapp.net', direction: 'in', sender_kind: 'client',
+      text: 'a new question', ts: NOW - DAY,
+    });
+    // Outbox rows written at other moments: the same store over the same file, another clock.
+    const at = (ts) => createInboxStore(db, { now: () => ts });
+    const owner = '966593296933@s.whatsapp.net';
+    const client = '966500000078@s.whatsapp.net';
+    at(NOW - 3 * DAY).insertOutbox({ send_id: 'SND-code-three-days', jid: owner, sender_kind: 'code', status: 'accepted' });
+    at(NOW - DAY).insertOutbox({ send_id: 'SND-code-one-day', jid: owner, sender_kind: 'code', status: 'accepted' });
+    at(NOW - 3 * DAY).insertOutbox({ send_id: 'SND-staff-three-days', lead_id: 'LEAD-recent', jid: client, text: 'on my way', user_id: 'USR-1', sender_kind: 'staff', status: 'accepted' });
+    at(NOW - 10 * 60_000).insertOutbox({ send_id: 'SND-stale', lead_id: 'LEAD-recent', jid: client, text: 'hello', user_id: 'USR-1', sender_kind: 'staff' });
+    at(NOW - 30_000).insertOutbox({ send_id: 'SND-fresh', lead_id: 'LEAD-recent', jid: client, text: 'hello again', user_id: 'USR-1', sender_kind: 'staff' });
+
+    const counts = await app.inboxMaintenance();
+    assert.deepEqual(counts, { excludedOut: 0, purgedChats: 1, purgedMessages: 1, codeRows: 1, interrupted: 1, caughtUp: 2, caughtUpStored: 3 });
+
+    assert.equal(app.inboxStore.hasMessages('LEAD-old'), false, 'five years after the last message the transcript goes');
+    assert.ok(db.getLead('LEAD-old'), 'the lead row stays: it is the attribution record');
+    assert.equal(db.getLead('LEAD-old').last_msg_ts, null);
+    assert.equal(app.inboxStore.hasMessages('LEAD-recent'), true);
+    assert.equal(app.inboxStore.getOutbox('SND-code-three-days'), null);
+    assert.ok(app.inboxStore.getOutbox('SND-code-one-day'), 'still inside the rolling day the cap counts');
+    assert.ok(app.inboxStore.getOutbox('SND-staff-three-days'), 'only login-code rows are pruned');
+    assert.equal(app.inboxStore.getOutbox('SND-stale').status, 'uncertain');
+    assert.equal(app.inboxStore.getOutbox('SND-stale').error, 'interrupted');
+    assert.equal(app.inboxStore.getOutbox('SND-fresh').status, 'pending', 'a send still inside its two minutes is left alone');
+
+    // Chats with nothing stored get the history an automatic join takes (amendment A3),
+    // never further back than the retention horizon — or the purge above would be undone.
+    assert.deepEqual([...asked].sort((a, b) => a.leadId.localeCompare(b.leadId)), [
+      { leadId: 'LEAD-empty', sinceTs: NOW - 2 * DAY - JOIN_HISTORY_MS, untilTs: NOW },
+      { leadId: 'LEAD-old', sinceTs: NOW - RETENTION_MS, untilTs: NOW },
+    ]);
+
+    assert.deepEqual(h.logs.find((e) => e.evt === 'inbox.maintenance'), { evt: 'inbox.maintenance', ...counts });
+    assert.deepEqual(h.logs.find((e) => e.evt === 'inbox.catchup'), { evt: 'inbox.catchup', chats: 2, stored: 3 });
+    const dump = JSON.stringify(h.logs);
+    for (const secret of ['966500000077', '966500000078', 'an old question', 'hello']) assert.ok(!dump.includes(secret), secret);
+
+    // One run at a time: a second call while the first is still fetching does nothing.
+    const [first, second] = await Promise.all([app.inboxMaintenance(), app.inboxMaintenance()]);
+    assert.deepEqual(second, { skipped: 'running' });
+    assert.equal(first.purgedChats, 0);
+  } finally {
+    await h.close();
+  }
+});
+
+test('the upkeep takes a colleague\'s or a never-list number\'s chat out of the inbox before any history is fetched', async () => {
+  const asked = [];
+  const backfill = {
+    configured: true,
+    phoneJidOf: () => null,
+    history: async (lead) => { asked.push(lead.lead_id); return { stored: 0, scanned: 0, truncated: false }; },
+    refresh: async () => ({ stored: 0, scanned: 0, truncated: false }),
+  };
+  const h = build({ backfill });
+  try {
+    const { app, db } = h;
+    // Leads migration v4 sorted by how they matched, before anyone checked the numbers.
+    const lead = (id, phone, state) => db.insertLead({
+      lead_id: id, created: NOW - DAY, updated: NOW - DAY, phone_e164: phone, wa_jid: `${phone}@s.whatsapp.net`,
+      channel: 'whatsapp', match_method: state === 'in' ? 'ad_meta' : 'keyword', stage: 'new', stage_ts: NOW - DAY,
+      inbox_state: state, inbox_since: state === 'in' ? NOW - DAY : null,
+    });
+    app.team.addUser({ name: 'Sara', phone: '0500000001', role: 'staff' });
+    app.team.addNever({ phone: '0500000080' });
+    app.team.addNever({ phone: '0500000081' });
+    lead('LEAD-staff', '966500000001', 'in');
+    lead('LEAD-never', '966500000080', 'in');
+    lead('LEAD-never-guess', '966500000081', 'unsure');
+    lead('LEAD-client', '966500000077', 'in');
+    // What the join history would have kept of the colleague's chat: her side of it.
+    app.inboxStore.upsertMessage({
+      key_id: 'T-1', lead_id: 'LEAD-staff', jid: '966500000001@s.whatsapp.net', direction: 'in', sender_kind: 'client',
+      text: 'my code did not come', ts: NOW - 1000,
+    });
+    assert.equal(app.inboxStore.unreadTotal({ userId: 'USR-anyone' }), 1, 'the control: before the upkeep it counts');
+
+    const counts = await app.inboxMaintenance();
+    assert.deepEqual(counts, { excludedOut: 3, purgedChats: 0, purgedMessages: 0, codeRows: 0, interrupted: 0, caughtUp: 1, caughtUpStored: 0 });
+    for (const id of ['LEAD-staff', 'LEAD-never', 'LEAD-never-guess']) assert.equal(db.getLead(id).inbox_state, 'out', id);
+    assert.equal(app.inboxStore.hasMessages('LEAD-staff'), false, 'her words are gone, not merely hidden');
+    assert.equal(app.inboxStore.unreadTotal({ userId: 'USR-anyone' }), 0, 'and no badge counts them');
+    assert.deepEqual(asked, ['LEAD-client'], 'history is fetched for the client alone');
+    assert.equal(db.getLead('LEAD-client').inbox_state, 'in');
+
+    assert.deepEqual(h.logs.find((e) => e.evt === 'inbox.excluded_out'), { level: 'warn', evt: 'inbox.excluded_out', count: 3 });
+    const dump = JSON.stringify(h.logs);
+    for (const secret of ['500000001', '500000080', '500000081', 'Sara', 'my code did not come']) assert.ok(!dump.includes(secret), secret);
+
+    // Nothing left to take out: the next run finds nothing and says nothing about it.
+    const again = await app.inboxMaintenance();
+    assert.equal(again.excludedOut, 0);
+    assert.equal(h.logs.filter((e) => e.evt === 'inbox.excluded_out').length, 1);
+  } finally {
+    await h.close();
+  }
+});
+```
+
+- [ ] **Step 2: Run to see them fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/config.test.mjs api/test/team.test.mjs api/test/inbox-store.test.mjs api/test/inbox-wiring.test.mjs`
+Expected: FAIL — config: `45000 !== 20000` (the default is still 45 s); team: the file does not load (`SyntaxError: The requested module '../lib/team.mjs' does not provide an export named 'isExcludedLead'`); inbox-store: the two new tests fail with `TypeError: inbox.inChatsWithoutMessages is not a function` and `TypeError: inbox.listedLeads is not a function`; inbox-wiring: all five fail, because `createApp` has no `app.inboxStore` / `app.inboxMaintenance` yet (`TypeError: Cannot read properties of undefined (reading 'upsertMessage')` / `'getOutbox'`, and `'undefined' !== 'function'` in the login-code test, which checks the wiring before it sends anything).
+
+- [ ] **Step 3: Implement**
+
+**3a. `services/api/lib/config.mjs`** — replace
+
+```js
+    waPollMs: Number(env.BONA_WA_POLL_MS ?? 45_000),
+```
+
+with
+
+```js
+    // 20 s since the inbox (P2-11): a staff member waits at most one interval to see a
+    // client's message. Each tick is one ~20 ms read on the VPS (measured 2026-09-28).
+    waPollMs: Number(env.BONA_WA_POLL_MS ?? 20_000),
+```
+
+**3b. `services/api/retell/provision.mjs`** — in `ensureServicesEnv`'s defaults, replace
+
+```js
+    BONA_WA_POLL_MS: '45000',
+```
+
+with
+
+```js
+    BONA_WA_POLL_MS: '20000',
+```
+
+(`--ensure-env` only appends keys a file lacks, so this changes a fresh install only; the live VPS line is edited by hand in the ship task.)
+
+**3c. `services/api/lib/inbox/store.mjs`** — two edits. After `countUnsure`, replace
+
+```js
+  const countUnsure = () => prep(`SELECT COUNT(*) AS n FROM leads l WHERE ${UNSURE_CHAT}`).get().n;
+```
+
+with
+
+```js
+  const countUnsure = () => prep(`SELECT COUNT(*) AS n FROM leads l WHERE ${UNSURE_CHAT}`).get().n;
+
+  /**
+   * `in` chats with nothing stored yet (amendment A3): the chats migration v4 let in
+   * without their history, or whose history was empty when they joined. The daily upkeep
+   * (index.mjs `inboxMaintenance`) fetches for each what an automatic join would have
+   * taken, oldest joiner first, so a long backlog is worked in the order it built up.
+   */
+  function inChatsWithoutMessages({ limit = 200 } = {}) {
+    return prep(`SELECT l.* FROM leads l
+                 WHERE ${IN_CHAT} AND NOT EXISTS (SELECT 1 FROM wa_messages m WHERE m.lead_id = l.lead_id)
+                 ORDER BY COALESCE(l.inbox_since, l.created) ASC, l.rowid ASC
+                 LIMIT ?`)
+      .all(clampLimit(limit, 200)).map(leadRow);
+  }
+
+  /**
+   * Every lead an inbox page can list or count — an `in` lead, or one on the Unsure list —
+   * with only what the exclusion test reads. The daily upkeep puts out any whose number is
+   * a colleague's or on the never list (index.mjs `inboxMaintenance`). No limit: a sweep
+   * that stopped part-way would leave the rest listed.
+   */
+  const listedLeads = () => prep(`SELECT l.lead_id, l.phone_e164, l.wa_jid, l.wa_lid, l.inbox_state FROM leads l
+                                  WHERE l.inbox_state = 'in' OR ${UNSURE_CHAT}
+                                  ORDER BY l.rowid ASC`).all().map(plain);
+```
+
+and in the returned object replace
+
+```js
+    markRead, listInbox, unreadTotal, listUnsure, countUnsure,
+```
+
+with
+
+```js
+    markRead, listInbox, unreadTotal, listUnsure, countUnsure, inChatsWithoutMessages, listedLeads,
+```
+
+**3d. `services/api/lib/team.mjs`** — the inbox's one exclusion test, next to the lid helpers it uses. Replace
+
+```js
+export function isTeamLid(store, lid) {
+  if (!lid) return false;
+  return Boolean(lidStmt(store.db, 'SELECT 1 FROM users WHERE wa_lid = ?').get(String(lid)));
+}
+```
+
+with
+
+```js
+export function isTeamLid(store, lid) {
+  if (!lid) return false;
+  return Boolean(lidStmt(store.db, 'SELECT 1 FROM users WHERE wa_lid = ?').get(String(lid)));
+}
+
+/**
+ * True when a lead's chat is a team member's (active or not) or a never-list number's,
+ * however the row holds it: its phone, the number in its phone jid, or a lid learned as
+ * a colleague's by `learnTeamLid`. The Bona inbox's one exclusion test (§3.5, P2-7): the
+ * dashboard routes refuse such a chat, and the daily upkeep takes it out of the inbox. A
+ * lid's own digits are an opaque id, never read as a phone number.
+ *
+ * @param {ReturnType<typeof createTeam>} team
+ * @param {ReturnType<import('./db.mjs').openDb>} store
+ * @param {{ phone_e164?: string|null, wa_jid?: string|null, wa_lid?: string|null }|null} lead
+ */
+export function isExcludedLead(team, store, lead) {
+  if (!lead) return false;
+  const jid = typeof lead.wa_jid === 'string' && lead.wa_jid.endsWith('@s.whatsapp.net') ? lead.wa_jid : null;
+  return team.isExcludedPhone(lead.phone_e164)
+    || Boolean(jid && team.isExcludedPhone(jid.split('@')[0].split(':')[0]))
+    || isTeamLid(store, lead.wa_lid);
+}
+```
+
+**3e. `services/api/index.mjs`** — seven edits, on the file as Task 7 left it.
+
+(1) Imports. Replace
+
+```js
+import { createSender } from './lib/wa-send.mjs';
+import { createInboxStore } from './lib/inbox/store.mjs';
+```
+
+with
+
+```js
+import { createSender } from './lib/wa-send.mjs';
+import { createInboxStore, RETENTION_MS } from './lib/inbox/store.mjs';
+import { createIngest } from './lib/inbox/ingest.mjs';
+import { createBackfill, JOIN_HISTORY_MS } from './lib/inbox/backfill.mjs';
+```
+
+(2) The exclusion test the upkeep's sweep uses. Replace
+
+```js
+import { createTeam, TeamError } from './lib/team.mjs';
+```
+
+with
+
+```js
+import { createTeam, TeamError, isExcludedLead } from './lib/team.mjs';
+```
+
+(3) Constants. Replace
+
+```js
+const jsonLog = (level, obj) => {
+```
+
+with
+
+```js
+/** Login-code outbox rows exist only to count the day's sends; two days covers any rolling 24 h. */
+const CODE_ROW_TTL_MS = 2 * 86_400_000;
+/** lib/wa-send.mjs `recoverInterrupted`'s own rule: a send pending longer than this lost its process. */
+const INTERRUPTED_SEND_MS = 120_000;
+/** How often the real server runs `app.inboxMaintenance()`. */
+const INBOX_UPKEEP_EVERY_MS = 24 * 3_600_000;
+
+const jsonLog = (level, obj) => {
+```
+
+(4) The wiring. Replace this block (from the audit line to the poller line, Task 7's inbox-store lines included):
+
+```js
+  const audit = options.audit ?? createAudit(db, { log });
+  // The Bona inbox tables (2026-09-27 design §4.2). The sender already needs them: every
+  // send is written to the outbox first, and the daily cap is counted from it.
+  const inboxStore = options.inboxStore ?? createInboxStore(db);
+  // The ONE sender for messages from the owner's number to anyone else: its per-minute
+  // limits live in memory, so a second instance would be a second, independent budget.
+  const sender = options.sender ?? createSender({ env: cfg.env ?? {}, team, inbox: inboxStore, db, log });
+  const sendCode = options.sendCode ?? ((o) => sender.sendTo({ ...o, kind: 'code' }));
+  // The WhatsApp Ref-code poller. Read-only, and only when `BONA_WA_POLL` says so —
+  // constructing it contacts nothing; the real server (below) is what puts it on a timer.
+  const poller = options.poller ?? (cfg.waPoll ? createPoller({ db, cfg, sendWhatsApp, isExcluded: team.isExcludedPhone, log }) : null);
+```
+
+with
+
+```js
+  const audit = options.audit ?? createAudit(db, { log });
+  // The clock the inbox pieces read. Only tests pin it; everything else in this file
+  // keeps reading Date.now() as before.
+  const clock = options.now ?? (() => Date.now());
+  // The fetch the sender and the backfill go out through. A test hands in a fake so
+  // nothing leaves the process; left undefined, each falls back to the global fetch.
+  const fetchImpl = options.fetchImpl;
+  // The Bona inbox (2026-09-27 design §4): transcripts of inbox chats, the outbox every
+  // send is written to before it goes, unread marks, and the gaps a thread owns up to.
+  const inboxStore = options.inboxStore ?? createInboxStore(db, { now: clock });
+  // The ONE sender for messages from the owner's number to anyone else. Its per-minute
+  // limits live in memory, so a second instance would be a second, independent budget;
+  // the day's cap is counted from the outbox, so a restart no longer resets it.
+  const sender = options.sender ?? createSender({ env: cfg.env ?? {}, team, inbox: inboxStore, db, fetchImpl, now: clock, log });
+  // A send that was in flight when the last process died is not known to have failed:
+  // it becomes "uncertain" — shown as such, never retried — rather than pending for ever.
+  const interrupted = sender.recoverInterrupted?.() ?? 0;
+  if (interrupted) log({ level: 'warn', evt: 'wa.send.interrupted', count: interrupted });
+  const sendCode = options.sendCode ?? ((o) => sender.sendTo({ ...o, kind: 'code' }));
+  // A message typed on the owner's own phone makes him the chat's handler when it has
+  // none. Looked up on every call, so a change on the Team page is seen at once.
+  const ownerDigits = bareJid(waConfig(cfg.env ?? {}).ownerJid);
+  const ownerUserId = () => {
+    const owner = ownerDigits ? team.getUserByPhone(ownerDigits) : null;
+    return owner && owner.active && owner.role === 'owner' ? owner.user_id : null;
+  };
+  const ingest = options.ingest ?? createIngest({ db, inbox: inboxStore, ownerUserId, log, now: clock });
+  // The backfill and the poller take the one-record function, not the object.
+  const ingestRecord = (lead, rec) => ingest.ingest(lead, rec);
+  // Per-chat reads from Evolution: history when a chat joins, a refresh when a thread is
+  // opened or answered. Read-only, like the poller; constructing it contacts nothing.
+  const backfill = options.backfill ?? createBackfill({ env: cfg.env ?? {}, db, ingest: ingestRecord, fetchImpl, log, now: clock });
+  // The WhatsApp Ref-code poller. Read-only, and only when `BONA_WA_POLL` says so —
+  // constructing it contacts nothing; the real server (below) is what puts it on a timer.
+  const poller = options.poller ?? (cfg.waPoll ? createPoller({
+    db, cfg, sendWhatsApp, isExcluded: team.isExcludedPhone, log, inboxStore, ingest: ingestRecord, backfill,
+  }) : null);
+```
+
+(5) The app object and the upkeep. Replace
+
+```js
+  const app = {
+    cfg, inventory, store, db, retell, tools, limiters, fanout, budget, team, audit, sender,
+    poller: options.poller ?? null,
+  };
+```
+
+with
+
+```js
+  const app = {
+    cfg, inventory, store, db, retell, tools, limiters, fanout, budget, team, audit, sender,
+    inboxStore, ingest, backfill,
+    poller: options.poller ?? null,
+  };
+
+  /**
+   * The inbox's upkeep (P2-18, amendment A3), run once at start-up and then daily by the
+   * real server below. In order: a chat whose number is a colleague's or on the never list
+   * leaves the inbox and its transcript goes (§3.5 — migration v4 sorted leads by how they
+   * matched, and a number can join the team or the never list after its chat joined);
+   * transcripts of chats silent for five years go (the lead rows stay — they are the
+   * attribution record); login-code outbox rows older than two days go (they only ever
+   * counted the day's sends); a send left pending by a process that died becomes
+   * uncertain; then every `in` chat with nothing stored yet gets the history an automatic
+   * join takes — never reaching past the retention horizon, or the purge would be undone
+   * the same morning. Counts only in the log: never a number, a name or a word of a
+   * message. One run at a time, and it never rejects: upkeep that fails is a line in the
+   * log, not a crashed server.
+   */
+  let upkeepRunning = false;
+  app.inboxMaintenance = async function inboxMaintenance() {
+    if (upkeepRunning) return { skipped: 'running' };
+    upkeepRunning = true;
+    try {
+      const t = clock();
+      // First, so the catch-up below never fetches a private chat's history.
+      let excludedOut = 0;
+      for (const lead of inboxStore.listedLeads()) {
+        if (!isExcludedLead(team, db, lead)) continue;
+        inboxStore.leaveInbox(lead.lead_id);
+        excludedOut += 1;
+      }
+      if (excludedOut) log({ level: 'warn', evt: 'inbox.excluded_out', count: excludedOut });
+      const retention = inboxStore.retentionPurge(t - RETENTION_MS);
+      const counts = {
+        excludedOut,
+        purgedChats: retention.leads,
+        purgedMessages: retention.messages,
+        codeRows: inboxStore.pruneCodeRows(t - CODE_ROW_TTL_MS),
+        interrupted: inboxStore.markStalePending(t - INTERRUPTED_SEND_MS),
+        caughtUp: 0,
+        caughtUpStored: 0,
+      };
+      if (backfill.configured) {
+        for (const lead of inboxStore.inChatsWithoutMessages()) {
+          // A number that joined the team while an earlier fetch was running is not fetched.
+          if (isExcludedLead(team, db, lead)) continue;
+          const sinceTs = Math.max((lead.inbox_since ?? lead.created ?? t) - JOIN_HISTORY_MS, t - RETENTION_MS);
+          const got = await backfill.history(lead, { sinceTs, untilTs: t });
+          // A chat that left the inbox meanwhile comes back `skipped`: nothing was read for it.
+          if (got && !got.error && !got.skipped) {
+            counts.caughtUp += 1;
+            counts.caughtUpStored += Number(got.stored) || 0;
+          }
+        }
+        log({ evt: 'inbox.catchup', chats: counts.caughtUp, stored: counts.caughtUpStored });
+      }
+      log({ evt: 'inbox.maintenance', ...counts });
+      return counts;
+    } catch (err) {
+      log({ level: 'error', evt: 'inbox.maintenance_failed', error: String(err?.message ?? err).slice(0, 200) });
+      return { error: 'failed' };
+    } finally {
+      upkeepRunning = false;
+    }
+  };
+```
+
+(6) The dashboard gets the inbox. Replace
+
+```js
+  const dashboard = options.dashboard ?? createDashboardRoutes({
+    db, cfg, inventory, fanout, app, log, sendWhatsApp, probeRetell, team, audit, sendCode,
+  });
+```
+
+with
+
+```js
+  const dashboard = options.dashboard ?? createDashboardRoutes({
+    db, cfg, inventory, fanout, app, log, sendWhatsApp, probeRetell, team, audit, sendCode,
+    inbox: inboxStore, sender, backfill,
+  });
+```
+
+(Task 12 teaches `createDashboardRoutes` to use the three new options; until then it ignores them.)
+
+(7) The real server's start-up block. Replace
+
+```js
+  if (app.poller) {
+    const pollStarted = app.poller.start({ intervalMs: app.cfg.waPollMs });
+    jsonLog('info', { evt: 'wa.poll.init', started: pollStarted, everyMs: app.cfg.waPollMs, ...app.poller.status() });
+  }
+  app.server.listen(app.cfg.port, app.cfg.host, () => {
+```
+
+with
+
+```js
+  if (app.poller) {
+    const pollStarted = app.poller.start({ intervalMs: app.cfg.waPollMs });
+    jsonLog('info', { evt: 'wa.poll.init', started: pollStarted, everyMs: app.cfg.waPollMs, ...app.poller.status() });
+  }
+  // Inbox upkeep (P2-18): once now, then daily. It logs its own counts and never rejects;
+  // like the poller, it is never the reason the process stays alive.
+  app.inboxMaintenance();
+  setInterval(() => { app.inboxMaintenance(); }, INBOX_UPKEEP_EVERY_MS).unref();
+  app.server.listen(app.cfg.port, app.cfg.host, () => {
+```
+
+- [ ] **Step 4: Run the tests**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/config.test.mjs api/test/team.test.mjs api/test/inbox-store.test.mjs api/test/inbox-wiring.test.mjs`
+Expected: PASS (6 config tests, every team test plus the new one, Task 4's store tests plus the two new ones, 5 inbox-wiring tests).
+
+- [ ] **Step 5: Run the full suite**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/*.test.mjs`
+Expected: all pass, 0 fail (`http.test.mjs` and `dashboard-routes.test.mjs` build the app through the new wiring; their Evolution-less env means the sender and backfill contact nothing).
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd /home/azoz778/bona-wt/team-inbox && git add services/api/index.mjs services/api/lib/config.mjs services/api/lib/inbox/store.mjs services/api/lib/team.mjs services/api/retell/provision.mjs services/api/test/config.test.mjs services/api/test/team.test.mjs services/api/test/inbox-store.test.mjs services/api/test/inbox-wiring.test.mjs
+git commit -m "inbox: wire one store behind the sender, ingest, backfill, poller and dashboard; daily upkeep that first puts out colleagues' and never-list chats; poll every 20 s
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+### Task 12: Routes — the inbox pages and writes (`lib/dashboard/routes.mjs`)
+
+`GET /dashboard/inbox` (and the owner's `?tab=unsure`), `GET /dashboard/inbox/:leadId`, `POST /v1/admin/inbox/:leadId/reply|handler` (anyone on the team), `POST /v1/admin/inbox/:leadId/move|out` and `POST /v1/admin/inbox/add` (owner), the never-list purge (P2-7) and the same purge when a colleague is added on the Team page (§3.5), and `me.unread` on every signed-in page. Every exclusion check goes through Task 11's `isExcludedLead`, and the badge and the Unsure count are counted from the rows the lists show, so no number ever counts a chat that rule 1 hides.
+
+Form fields, exactly as Task 10's `render-inbox.mjs` draws them: reply → `_dash`, `send_id`, `seen_ts`, `text` (`<form class="reply" method="post" action="/v1/admin/inbox/<leadId>/reply">`, hidden `send_id`/`seen_ts` inputs; no form at all when the chat is lid-only or sending is off); handler picker → `_dash`, `user_id` (`''` = nobody); add → `_dash`, `phone`; move / Not a client → `_dash`. Task 7's `sender.reply` is what refuses or sends; this task maps its answers to pages (P2-9).
+
+**Files:**
+- Modify: `services/api/lib/dashboard/routes.mjs`
+- Test: `services/api/test/dashboard-inbox.test.mjs` (create)
+
+- [ ] **Step 1: Write the failing tests** — create `services/api/test/dashboard-inbox.test.mjs`:
+
+```js
+/**
+ * The Bona inbox through the real HTTP server (2026-09-27 design §4, and the hostile list
+ * in §8): who may read a chat, who may answer it, and that an answer goes out exactly
+ * once — through the one real sender, over a fake Evolution that counts every request.
+ * The backfill is a spy: it records what it is asked for and, when a test says so,
+ * "finds" a message that arrived while the page was open. Login codes go to a spy of
+ * their own, so the only requests the fake Evolution ever sees are replies.
+ */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createApp } from '../index.mjs';
+import { openDb } from '../lib/db.mjs';
+import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
+import { DEFAULT_ORIGINS } from '../lib/cors.mjs';
+import { createTeam } from '../lib/team.mjs';
+import { createInboxStore } from '../lib/inbox/store.mjs';
+import { OWNER_HISTORY_MS } from '../lib/inbox/backfill.mjs';
+import { createSender } from '../lib/wa-send.mjs';
+
+const NOW = 1_790_500_000_000;
+const CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
+const ENV = { EVOLUTION_API_URL: 'http://evo.test/', EVOLUTION_API_KEY: 'k', BONA_WA_INSTANCE: 'abdulaziz-personal' };
+const inventory = createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk' });
+const OWNER_PHONE = '966593296933';
+const STAFF_PHONE = '966500000001';
+const CLIENT = '966500000077';
+
+/** The inbox opens nothing in the CSP: same four headers as every dashboard answer. */
+function assertLocked(res) {
+  assert.equal(res.headers.get('cache-control'), 'no-store');
+  assert.equal(res.headers.get('content-security-policy'), CSP);
+  assert.equal(res.headers.get('x-frame-options'), 'DENY');
+  assert.equal(res.headers.get('referrer-policy'), 'same-origin');
+}
+
+/** The value of a named form field on a page, whatever order the input's attributes come in. */
+function fieldOf(html, name) {
+  const tag = new RegExp(`<input[^>]*\\bname="${name}"[^>]*>`).exec(html)?.[0];
+  return tag ? (/\bvalue="([^"]*)"/.exec(tag)?.[1] ?? null) : null;
+}
+
+async function withInbox(fn) {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-inbox-'));
+  const db = openDb(':memory:');
+  let clock = NOW;
+  const now = () => clock;
+  const logs = [];
+  const log = (e) => logs.push(e);
+  // The team's clock is pinned too: `users.created` is where a person's unread count
+  // starts (P2-8), and every seeded message below is newer than it.
+  const team = createTeam(db, { now });
+  const inboxStore = createInboxStore(db, { now });
+
+  // Evolution's sendText, faked. Every request is counted; `evo.reply` decides the answer
+  // ('timeout' throws the AbortError a real timeout produces); `evo.hold()` parks the
+  // next request at WhatsApp until the test releases it — the double-click race.
+  const evo = { calls: [], reply: (n) => ({ status: 201, body: { key: { id: `KEY-${n}` } } }), gate: null };
+  evo.hold = () => {
+    let release;
+    let entered;
+    const released = new Promise((resolve) => { release = resolve; });
+    const reached = new Promise((resolve) => { entered = resolve; });
+    evo.gate = { released, entered };
+    return { reached, release };
+  };
+  const fetchImpl = async (url, init) => {
+    evo.calls.push({ url, body: JSON.parse(init.body) });
+    const gate = evo.gate;
+    if (gate) {
+      evo.gate = null;
+      gate.entered();
+      await gate.released;
+    }
+    const r = evo.reply(evo.calls.length);
+    if (r === 'timeout') throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+    return { ok: r.status >= 200 && r.status < 300, status: r.status, text: async () => JSON.stringify(r.body ?? {}) };
+  };
+  const sender = createSender({ env: ENV, team, inbox: inboxStore, db, fetchImpl, now, log });
+
+  const spy = { history: [], refresh: [], onRefresh: null };
+  const backfill = {
+    configured: true,
+    phoneJidOf: (lead) => (lead?.phone_e164 ? `${lead.phone_e164}@s.whatsapp.net` : null),
+    async history(lead, opts = {}) {
+      spy.history.push({ leadId: lead?.lead_id ?? null, sinceTs: opts.sinceTs, untilTs: opts.untilTs });
+      return { stored: 0, scanned: 0, truncated: false };
+    },
+    async refresh(lead) {
+      spy.refresh.push(lead?.lead_id ?? null);
+      spy.onRefresh?.(lead);
+      return { stored: 0, scanned: 0, truncated: false };
+    },
+  };
+
+  const codes = [];
+  const notes = [];
+  const app = createApp({
+    config: {
+      port: 0, host: '127.0.0.1', siteUrl: 'https://bona.azoz.uk', publicApi: 'https://bona-api.azoz.uk',
+      dataDir, inventoryFile: WORKTREE_LISTINGS, origins: DEFAULT_ORIGINS, toolToken: 'a'.repeat(32),
+      retellApiKey: 'test', retellMock: true, chatAgentId: 'agent_chat', voiceAgentId: 'agent_voice',
+      maxBodyBytes: 16 * 1024, chatRatePerMin: 30, tokenRatePerMin: 6, env: ENV, ids: {}, version: '1.0.0',
+      toolRatePerMin: 600, toolAuthFailRatePerMin: 10, allowQueryToken: false, trustedProxies: [],
+      maxChatsPerDay: 300, maxCallsPerDay: 60, maxTurnsPerSession: 40, dashCookieDays: 30,
+    },
+    inventory, db, team, inboxStore, sender, backfill, now, log,
+    probeRetell: async () => 'ok',
+    sendWhatsApp: async (text) => { notes.push(text); return { ok: true }; },
+    sendCode: async ({ text }) => { codes.push(text); return { ok: true }; },
+  });
+  await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const go = (p, init = {}) => fetch(base + p, { redirect: 'manual', ...init });
+  const get = (p, { cookie } = {}) => go(p, { headers: cookie ? { Cookie: cookie } : {} });
+  /** Every write carries the form marker, as our own pages do. */
+  const postForm = (p, fields, { cookie } = {}) => go(p, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...(cookie ? { Cookie: cookie } : {}) },
+    body: new URLSearchParams({ _dash: '1', ...fields }).toString(),
+  });
+  const cookieOf = (res, name) => {
+    for (const c of res.headers.getSetCookie()) {
+      const pair = c.split(';')[0];
+      if (pair.slice(0, pair.indexOf('=')) === name && !c.includes('Max-Age=0')) return pair.slice(pair.indexOf('=') + 1);
+    }
+    return null;
+  };
+  /** The whole login, as a browser does it: ask, read the code off the "phone", type it back. */
+  async function login(phone) {
+    const before = codes.length;
+    const asked = await postForm('/dashboard/login/code', { phone });
+    assert.equal(asked.status, 303);
+    await app.dashboard.auth.flush();
+    assert.equal(codes.length, before + 1, 'one code went out');
+    const code = /(\d{6})/.exec(codes.at(-1))[1];
+    const verified = await postForm('/dashboard/login/verify', { code }, { cookie: `bona_dash_try=${cookieOf(asked, 'bona_dash_try')}` });
+    assert.equal(verified.status, 303);
+    return `bona_dash=${cookieOf(verified, 'bona_dash')}`;
+  }
+
+  const staffUser = team.addUser({ name: 'Sara', phone: STAFF_PHONE, role: 'staff' });
+  const owner = team.getUserByPhone(OWNER_PHONE);
+  try {
+    await fn({
+      app, db, team, inboxStore, evo, spy, notes, logs, staffUser, owner, get, postForm,
+      staff: () => login('0500000001'),
+      boss: () => login('0593296933'),
+      tick: (ms) => { clock += ms; },
+    });
+  } finally {
+    await app.dashboard.auth.flush();
+    await new Promise((resolve) => app.server.close(resolve));
+    db.close();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+}
+
+/** One lead in whatever inbox state the test needs, with its stored messages (inbound unless said). */
+function seedChat(h, { id, name, phone = CLIENT, jid = phone ? `${phone}@s.whatsapp.net` : null, lid = null, state = 'in', messages = [] }) {
+  h.db.insertLead({
+    lead_id: id, created: NOW - 3_600_000, updated: NOW - 3_600_000, phone_e164: phone, wa_jid: jid, wa_lid: lid, name,
+    channel: 'whatsapp', source: 'meta', medium: 'paid', match_method: state === 'in' ? 'ad_meta' : 'keyword',
+    stage: 'new', stage_ts: NOW - 3_600_000, first_inbound_ts: NOW - 3_600_000,
+    inbox_state: state, inbox_since: state === 'in' ? NOW - 3_600_000 : null,
+  });
+  for (const m of messages) h.inboxStore.upsertMessage({ lead_id: id, jid: jid ?? lid, direction: 'in', sender_kind: 'client', ...m });
+  return id;
+}
+
+/**
+ * The cast most tests share: a client in the inbox, a lid-only client in the inbox, and
+ * one of every chat that must never be shown — a guess (unsure), a "not a client" (out),
+ * a never-list number and a team member's number (both still marked `in`, as a lead can
+ * be when its number was listed after it joined), and a form lead with no chat at all.
+ */
+function seedScene(h) {
+  seedChat(h, { id: 'LEAD-A', name: 'Alya Client', messages: [{ key_id: 'A-1', text: 'Is BONA-012 still free?', ts: NOW + 60_000 }] });
+  seedChat(h, { id: 'LEAD-L', name: 'Layla Lid', phone: null, lid: '123456789012345@lid', messages: [{ key_id: 'L-1', text: 'hello from a lid chat', ts: NOW + 50_000 }] });
+  seedChat(h, { id: 'LEAD-U', name: 'Umar Unsure', phone: '966500000078', state: 'unsure' });
+  seedChat(h, { id: 'LEAD-O', name: 'Omar Out', phone: '966500000079', state: 'out' });
+  seedChat(h, { id: 'LEAD-N', name: 'Nadia Never', phone: '966500000080', messages: [{ key_id: 'N-1', text: 'never words', ts: NOW + 40_000 }] });
+  h.team.addNever({ phone: '966500000080', note: 'family' });
+  seedChat(h, { id: 'LEAD-T', name: 'Tariq Team', phone: STAFF_PHONE, messages: [{ key_id: 'T-1', text: 'team words', ts: NOW + 30_000 }] });
+  seedChat(h, { id: 'LEAD-F', name: 'Farah Form', phone: '966500000081', jid: null });
+}
+
+const replyTo = (h, leadId, fields, cookie) => h.postForm(`/v1/admin/inbox/${leadId}/reply`, fields, { cookie });
+
+/* ---------------- who sees what ---------------- */
+
+test('the inbox lists only chats that are in, to everyone; the Unsure list is the owner\'s alone', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    // A guess whose number went on the never list after it arrived: on no list, in no count.
+    seedChat(h, { id: 'LEAD-NU', name: 'Noor Never Guess', phone: '966500000082', state: 'unsure' });
+    h.team.addNever({ phone: '966500000082' });
+    const staff = await h.staff();
+    const boss = await h.boss();
+    for (const cookie of [staff, boss]) {
+      const res = await h.get('/dashboard/inbox', { cookie });
+      assert.equal(res.status, 200);
+      assertLocked(res);
+      const html = await res.text();
+      assert.doesNotMatch(html, /<script/i, 'the inbox ships no script');
+      for (const name of ['Alya Client', 'Layla Lid']) assert.ok(html.includes(name), name);
+      for (const hidden of ['Umar Unsure', 'Omar Out', 'Nadia Never', 'Tariq Team', 'Farah Form', 'Noor Never Guess', 'never words', 'team words']) {
+        assert.ok(!html.includes(hidden), hidden);
+      }
+      // The badge counts what the list shows: Alya's and Layla's messages, never the
+      // never-list or the colleague's chat still marked `in`.
+      assert.match(html, /Inbox<span class="c">2<\/span>/);
+    }
+    const tabs = await (await h.get('/dashboard/inbox', { cookie: boss })).text();
+    assert.match(tabs, /Unsure · 1<\/a>/, 'Umar alone: the never-list guess is not counted either');
+    const denied = await h.get('/dashboard/inbox?tab=unsure', { cookie: staff });
+    assert.equal(denied.status, 403);
+    assertLocked(denied);
+    assert.ok(!(await denied.text()).includes('Umar Unsure'));
+    const unsure = await h.get('/dashboard/inbox?tab=unsure', { cookie: boss });
+    assert.equal(unsure.status, 200);
+    assertLocked(unsure);
+    const list = await unsure.text();
+    assert.ok(list.includes('Umar Unsure'));
+    assert.ok(!list.includes('Alya Client'), 'the Unsure list is the guesses only');
+    assert.ok(!list.includes('Noor Never Guess'));
+  });
+});
+
+test('a chat that is not in the inbox cannot be opened or answered, and nothing goes out', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    const boss = await h.boss();
+    // The control: the one chat that IS in opens, so every 404 below is a refusal, not a missing route.
+    assert.equal((await h.get('/dashboard/inbox/LEAD-A', { cookie: staff })).status, 200);
+    for (const id of ['LEAD-U', 'LEAD-O', 'LEAD-N', 'LEAD-T', 'LEAD-F', 'LEAD-nope']) {
+      for (const cookie of [staff, boss]) {
+        const page = await h.get(`/dashboard/inbox/${id}`, { cookie });
+        assert.equal(page.status, 404, id);
+        assertLocked(page);
+        const html = await page.text();
+        assert.ok(!html.includes('never words') && !html.includes('team words'), id);
+      }
+      const reply = await replyTo(h, id, { text: 'hello there', send_id: `send-${id}-000000000000`, seen_ts: String(NOW + 60_000) }, staff);
+      assert.equal(reply.status, 404, id);
+    }
+    assert.equal(h.evo.calls.length, 0, 'not one request reached WhatsApp');
+    assert.equal(h.db.db.prepare('SELECT COUNT(*) AS n FROM wa_outbox').get().n, 0);
+    assert.deepEqual(h.spy.refresh, ['LEAD-A'], 'a refused chat does not even cost an Evolution read');
+  });
+});
+
+test('a lid-only chat opens but has no reply box, and a reply to it is refused unsent', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    const page = await h.get('/dashboard/inbox/LEAD-L', { cookie: staff });
+    assert.equal(page.status, 200);
+    const html = await page.text();
+    assert.ok(html.includes('hello from a lid chat'));
+    assert.doesNotMatch(html, /action="\/v1\/admin\/inbox\/LEAD-L\/reply"/, 'WhatsApp gave no number to send to');
+    const reply = await replyTo(h, 'LEAD-L', { text: 'hi', send_id: 'send-lid-0000000000001', seen_ts: String(NOW + 60_000) }, staff);
+    assert.equal(reply.status, 409);
+    assertLocked(reply);
+    assert.equal(h.evo.calls.length, 0);
+    assert.equal(h.inboxStore.getOutbox('send-lid-0000000000001'), null);
+  });
+});
+
+/* ---------------- replying ---------------- */
+
+test('a reply goes out once from the owner\'s number: 303 ok=sent, in the thread, handler set, audited without the words', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    const page = await h.get('/dashboard/inbox/LEAD-A', { cookie: staff });
+    assert.equal(page.status, 200);
+    assertLocked(page);
+    const html = await page.text();
+    assert.ok(html.includes('Is BONA-012 still free?'));
+    assert.match(html, /action="\/v1\/admin\/inbox\/LEAD-A\/reply"/);
+    assert.deepEqual(h.spy.refresh, ['LEAD-A'], 'opening the thread fetched it from WhatsApp first');
+
+    h.tick(120_000);
+    const text = 'Yes it is, when can you visit';
+    const res = await replyTo(h, 'LEAD-A', { text, send_id: 'send-ok-000000000000001', seen_ts: String(NOW + 60_000) }, staff);
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), '/dashboard/inbox/LEAD-A?ok=sent');
+    assert.deepEqual(h.spy.refresh, ['LEAD-A', 'LEAD-A'], 'and again right before the reply was checked');
+    assert.equal(h.evo.calls.length, 1);
+    assert.equal(h.evo.calls[0].url, 'http://evo.test/message/sendText/abdulaziz-personal');
+    assert.deepEqual(h.evo.calls[0].body, { number: CLIENT, text });
+
+    assert.equal(h.db.getLead('LEAD-A').handler_user_id, h.staffUser.user_id, 'the first to reply becomes the handler');
+    const row = h.inboxStore.getOutbox('send-ok-000000000000001');
+    assert.equal(row.status, 'accepted');
+    assert.equal(row.key_id, 'KEY-1');
+    assert.equal(row.user_id, h.staffUser.user_id);
+    const mine = h.inboxStore.messagesFor('LEAD-A').find((m) => m.direction === 'out');
+    assert.equal(mine.text, text);
+    assert.equal(mine.sender_kind, 'staff');
+    assert.equal(mine.sender_user_id, h.staffUser.user_id);
+
+    const audited = h.app.audit.recent(50).filter((r) => r.action === 'reply_sent');
+    assert.equal(audited.length, 1);
+    assert.equal(audited[0].user_id, h.staffUser.user_id);
+    assert.equal(audited[0].target, 'LEAD-A');
+    assert.deepEqual(audited[0].meta, { status: 'accepted' });
+    assert.ok(!JSON.stringify(h.app.audit.recent(50)).includes('when can you visit'), 'never the words');
+
+    const after = await (await h.get('/dashboard/inbox/LEAD-A?ok=sent', { cookie: staff })).text();
+    assert.ok(after.includes(text), 'the reply is in the thread');
+  });
+});
+
+test('a double submit with one send_id sends once, whether the second click lands after the first or during it', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    h.tick(120_000);
+    const form = { text: 'On my way', send_id: 'send-twice-00000000001', seen_ts: String(NOW + 60_000) };
+    const first = await replyTo(h, 'LEAD-A', form, staff);
+    const again = await replyTo(h, 'LEAD-A', form, staff);
+    assert.equal(first.headers.get('location'), '/dashboard/inbox/LEAD-A?ok=sent');
+    assert.equal(again.headers.get('location'), '/dashboard/inbox/LEAD-A?ok=sent', 'the resubmit reports the send it repeats');
+    assert.equal(h.evo.calls.length, 1);
+
+    // The real double click: the second post arrives while the first is still at WhatsApp.
+    h.tick(60_000);
+    const race = { text: 'See you at five', send_id: 'send-race-000000000001', seen_ts: String(NOW + 120_000) };
+    const held = h.evo.hold();
+    const firstOfRace = replyTo(h, 'LEAD-A', race, staff);
+    await held.reached;
+    const secondOfRace = await replyTo(h, 'LEAD-A', race, staff);
+    assert.equal(secondOfRace.status, 303);
+    assert.equal(secondOfRace.headers.get('location'), '/dashboard/inbox/LEAD-A?error=send_uncertain', 'in flight: not sure yet, and not sent again');
+    held.release();
+    assert.equal((await firstOfRace).headers.get('location'), '/dashboard/inbox/LEAD-A?ok=sent');
+
+    assert.equal(h.evo.calls.length, 2, 'one request per send_id');
+    assert.equal(h.inboxStore.messagesFor('LEAD-A').filter((m) => m.direction === 'out').length, 2);
+    assert.equal(h.app.audit.recent(50).filter((r) => r.action === 'reply_sent').length, 2);
+  });
+});
+
+test('a timeout is "not sure it went", shown as such, and resubmitting it sends nothing', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    h.tick(120_000);
+    h.evo.reply = () => 'timeout';
+    const form = { text: 'Calling you now', send_id: 'send-slow-000000000001', seen_ts: String(NOW + 60_000) };
+    const res = await replyTo(h, 'LEAD-A', form, staff);
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), '/dashboard/inbox/LEAD-A?error=send_uncertain', 'and no words in the URL');
+    assert.equal(h.inboxStore.getOutbox('send-slow-000000000001').status, 'uncertain');
+    assert.ok(!h.inboxStore.messagesFor('LEAD-A').some((m) => m.text === 'Calling you now'), 'not drawn as sent: it may not have gone');
+    assert.deepEqual(h.app.audit.recent(50).find((r) => r.action === 'reply_sent').meta, { status: 'uncertain' });
+
+    h.evo.reply = (n) => ({ status: 201, body: { key: { id: `KEY-${n}` } } });
+    const again = await replyTo(h, 'LEAD-A', form, staff);
+    assert.equal(again.headers.get('location'), '/dashboard/inbox/LEAD-A?error=send_uncertain');
+    assert.equal(h.evo.calls.length, 1, 'an uncertain send is never retried');
+    assert.equal((await h.get('/dashboard/inbox/LEAD-A?error=send_uncertain', { cookie: staff })).status, 200);
+  });
+});
+
+test('a refused reply is drawn again with the words kept and a fresh send_id, and nothing is sent', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    await h.get('/dashboard/inbox/LEAD-A', { cookie: staff });
+    // A message that arrived while the page was open, found by the refresh the reply makes.
+    let played = false;
+    h.spy.onRefresh = (lead) => {
+      if (played || lead.lead_id !== 'LEAD-A') return;
+      played = true;
+      h.inboxStore.upsertMessage({
+        key_id: 'A-2', lead_id: 'LEAD-A', jid: `${CLIENT}@s.whatsapp.net`, direction: 'in', sender_kind: 'client',
+        text: 'Or is BONA-014 better?', ts: NOW + 90_000,
+      });
+    };
+    const draft = 'Draft about the villa';
+    const stale = await replyTo(h, 'LEAD-A', { text: draft, send_id: 'send-stale-00000000001', seen_ts: String(NOW + 60_000) }, staff);
+    assert.equal(stale.status, 409, 'new activity since the page was opened');
+    assertLocked(stale);
+    const html = await stale.text();
+    assert.ok(html.includes(draft), 'the words are still in the box');
+    assert.ok(html.includes('Or is BONA-014 better?'), 'and the new message is on the page');
+    assert.ok(!html.includes('send-stale-00000000001'), 'the old send_id is not handed out again');
+    const fresh = fieldOf(html, 'send_id');
+    assert.match(fresh, /^[A-Za-z0-9_-]{16,64}$/);
+    assert.equal(fieldOf(html, 'seen_ts'), String(NOW + 90_000));
+
+    const empty = await replyTo(h, 'LEAD-A', { text: '   ', send_id: fresh, seen_ts: String(NOW + 90_000) }, staff);
+    assert.equal(empty.status, 400);
+
+    h.team.setSetting('sending_enabled', '0');
+    const off = await replyTo(h, 'LEAD-A', { text: draft, send_id: fresh, seen_ts: String(NOW + 90_000) }, staff);
+    assert.equal(off.status, 503, 'the owner switched sending off');
+    assert.equal(h.evo.calls.length, 0, 'none of the three reached WhatsApp');
+
+    h.team.setSetting('sending_enabled', '1');
+    h.tick(120_000);
+    const sent = await replyTo(h, 'LEAD-A', { text: draft, send_id: 'send-after-00000000001', seen_ts: String(NOW + 90_000) }, staff);
+    assert.equal(sent.headers.get('location'), '/dashboard/inbox/LEAD-A?ok=sent');
+    assert.equal(h.evo.calls.length, 1);
+  });
+});
+
+test('a reply keeps its author\'s name after they leave the team, and they are no longer offered as handler', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const gone = h.team.addUser({ name: 'Hadi Former', phone: '0500000002', role: 'staff' });
+    h.inboxStore.upsertMessage({
+      key_id: 'A-out-1', lead_id: 'LEAD-A', jid: `${CLIENT}@s.whatsapp.net`, direction: 'out', sender_kind: 'staff',
+      sender_user_id: gone.user_id, text: 'Happy to show you round', ts: NOW + 61_000,
+    });
+    h.team.deactivateUser(gone.user_id);
+    const staff = await h.staff();
+    const page = await h.get('/dashboard/inbox/LEAD-A', { cookie: staff });
+    assert.equal(page.status, 200);
+    const html = await page.text();
+    assert.ok(html.includes('Happy to show you round'));
+    assert.ok(html.includes('<bdi>Hadi Former</bdi>'), 'the bubble still names who wrote it, not just "Team"');
+    assert.ok(!html.includes(`value="${gone.user_id}"`), 'but nobody can hand the chat to someone who has left');
+    assert.ok(html.includes(`value="${h.staffUser.user_id}"`), 'the control: the picker is on the page');
+  });
+});
+
+test('anyone on the team can hand a chat to someone else, and it is audited by id', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    const to = await h.postForm('/v1/admin/inbox/LEAD-A/handler', { user_id: h.owner.user_id }, { cookie: staff });
+    assert.equal(to.status, 303);
+    assert.equal(to.headers.get('location'), '/dashboard/inbox/LEAD-A?ok=handler');
+    assert.equal(h.db.getLead('LEAD-A').handler_user_id, h.owner.user_id);
+    const none = await h.postForm('/v1/admin/inbox/LEAD-A/handler', { user_id: '' }, { cookie: staff });
+    assert.equal(none.headers.get('location'), '/dashboard/inbox/LEAD-A?ok=handler');
+    assert.equal(h.db.getLead('LEAD-A').handler_user_id, null);
+
+    const gone = h.team.addUser({ name: 'Old Hand', phone: '0500000002', role: 'staff' });
+    h.team.deactivateUser(gone.user_id);
+    for (const userId of ['USR-nobody', gone.user_id]) {
+      const bad = await h.postForm('/v1/admin/inbox/LEAD-A/handler', { user_id: userId }, { cookie: staff });
+      assert.equal(bad.headers.get('location'), '/dashboard/inbox/LEAD-A?error=bad_handler', userId);
+    }
+    assert.equal(h.db.getLead('LEAD-A').handler_user_id, null);
+    const refused = await h.postForm('/v1/admin/inbox/LEAD-U/handler', { user_id: h.owner.user_id }, { cookie: staff });
+    assert.equal(refused.status, 404, 'not a chat anyone may pick up');
+
+    const rows = h.app.audit.recent(50).filter((r) => r.action === 'handler');
+    assert.deepEqual(rows.map((r) => r.meta).reverse(), [{ to: h.owner.user_id }, { to: null }]);
+    assert.ok(rows.every((r) => r.user_id === h.staffUser.user_id && r.target === 'LEAD-A'));
+  });
+});
+
+/* ---------------- the owner's moves ---------------- */
+
+test('move, Not a client and add by phone are the owner\'s alone', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    for (const [p, fields] of [['/v1/admin/inbox/LEAD-U/move', {}], ['/v1/admin/inbox/LEAD-A/out', {}], ['/v1/admin/inbox/add', { phone: '0500000088' }]]) {
+      const res = await h.postForm(p, fields, { cookie: staff });
+      assert.equal(res.status, 403, p);
+      assertLocked(res);
+      assert.deepEqual(await res.json(), { error: 'owner_only' }, p);
+    }
+    assert.equal(h.db.getLead('LEAD-U').inbox_state, 'unsure');
+    assert.equal(h.db.getLead('LEAD-A').inbox_state, 'in');
+    assert.equal(h.inboxStore.hasMessages('LEAD-A'), true);
+    assert.equal(h.db.getLeadByPhone('966500000088'), null);
+    assert.deepEqual(h.spy.history, []);
+    assert.ok(!h.app.audit.recent(50).some((r) => r.action.startsWith('inbox_')));
+  });
+});
+
+test('the owner moves a guess into the inbox, and it brings its last 30 days', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const boss = await h.boss();
+    const res = await h.postForm('/v1/admin/inbox/LEAD-U/move', {}, { cookie: boss });
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), '/dashboard/inbox/LEAD-U?ok=moved');
+    const lead = h.db.getLead('LEAD-U');
+    assert.equal(lead.inbox_state, 'in');
+    assert.ok(Number.isFinite(lead.inbox_since));
+    assert.equal(h.spy.history.length, 1);
+    assert.equal(h.spy.history[0].leadId, 'LEAD-U');
+    assert.equal(h.spy.history[0].untilTs - h.spy.history[0].sinceTs, OWNER_HISTORY_MS);
+    const audited = h.app.audit.recent(50).find((r) => r.action === 'inbox_move');
+    assert.equal(audited.target, 'LEAD-U');
+    assert.equal(audited.user_id, h.owner.user_id);
+    const staff = await h.staff();
+    assert.ok((await (await h.get('/dashboard/inbox', { cookie: staff })).text()).includes('Umar Unsure'), 'the team sees it now');
+  });
+});
+
+test('Not a client: the chat leaves the inbox and its transcript is purged at once', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    h.inboxStore.setHandler('LEAD-A', h.staffUser.user_id);
+    const boss = await h.boss();
+    const res = await h.postForm('/v1/admin/inbox/LEAD-A/out', {}, { cookie: boss });
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), '/dashboard/inbox?ok=out');
+    const lead = h.db.getLead('LEAD-A');
+    assert.equal(lead.inbox_state, 'out');
+    assert.equal(lead.handler_user_id, null);
+    assert.equal(h.inboxStore.hasMessages('LEAD-A'), false);
+    assert.equal((await h.get('/dashboard/inbox/LEAD-A', { cookie: boss })).status, 404);
+    assert.equal(h.app.audit.recent(50).find((r) => r.action === 'inbox_out').target, 'LEAD-A');
+    // From the Unsure list it lands back on the Unsure list.
+    const fromUnsure = await h.postForm('/v1/admin/inbox/LEAD-U/out', {}, { cookie: boss });
+    assert.equal(fromUnsure.headers.get('location'), '/dashboard/inbox?tab=unsure&ok=out');
+    assert.equal(h.db.getLead('LEAD-U').inbox_state, 'out');
+  });
+});
+
+test('add by phone: a new chat joins with 30 days of history; team, never-list and bad numbers are refused', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const boss = await h.boss();
+    const leadsBefore = h.db.countLeads();
+    for (const [phone, error] of [['0500000001', 'excluded'], ['0500000080', 'excluded'], ['hello', 'bad_phone'], ['123456789@lid', 'bad_phone']]) {
+      const res = await h.postForm('/v1/admin/inbox/add', { phone }, { cookie: boss });
+      assert.equal(res.status, 303, phone);
+      assert.equal(res.headers.get('location'), `/dashboard/inbox?error=${error}`, phone);
+    }
+    assert.equal(h.db.countLeads(), leadsBefore);
+    assert.deepEqual(h.spy.history, []);
+
+    const res = await h.postForm('/v1/admin/inbox/add', { phone: '0500000088' }, { cookie: boss });
+    assert.equal(res.status, 303);
+    const id = /^\/dashboard\/inbox\/(LEAD-[A-Za-z0-9-]+)\?ok=added$/.exec(res.headers.get('location'))?.[1];
+    assert.ok(id, res.headers.get('location'));
+    const lead = h.db.getLead(id);
+    assert.equal(lead.phone_e164, '966500000088');
+    assert.equal(lead.wa_jid, '966500000088@s.whatsapp.net');
+    assert.equal(lead.match_method, 'owner_added');
+    assert.equal(lead.inbox_state, 'in');
+    assert.equal(h.spy.history.at(-1).leadId, id);
+    assert.equal(h.spy.history.at(-1).untilTs - h.spy.history.at(-1).sinceTs, OWNER_HISTORY_MS);
+    assert.equal(h.app.audit.recent(50).find((r) => r.action === 'inbox_add').target, id);
+    assert.deepEqual(h.notes, [], 'no new-lead note to the owner for a chat he added himself');
+
+    const known = await h.postForm('/v1/admin/inbox/add', { phone: '0500000078' }, { cookie: boss });
+    assert.equal(known.headers.get('location'), '/dashboard/inbox/LEAD-U?ok=added', 'a number already on a lead brings that lead in');
+    assert.equal(h.db.getLead('LEAD-U').inbox_state, 'in');
+  });
+});
+
+test('adding a number to the never list takes its chat out of the inbox and purges it at once', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const boss = await h.boss();
+    const res = await h.postForm('/v1/admin/never', { phone: '0500000077', note: 'cousin' }, { cookie: boss });
+    assert.equal(res.headers.get('location'), '/dashboard/team?ok=never_added');
+    assert.equal(h.db.getLead('LEAD-A').inbox_state, 'out');
+    assert.equal(h.inboxStore.hasMessages('LEAD-A'), false);
+    assert.equal((await h.get('/dashboard/inbox/LEAD-A', { cookie: boss })).status, 404);
+    assert.ok(h.app.audit.recent(50).some((r) => r.action === 'inbox_out' && r.target === 'LEAD-A'));
+    assert.doesNotMatch(JSON.stringify(h.app.audit.recent(50)), /500000077|cousin/);
+  });
+});
+
+test('adding a colleague whose number already has a chat takes it out of the inbox and purges it at once', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const boss = await h.boss();
+    const res = await h.postForm('/v1/admin/team', { name: 'Alya Now Staff', phone: '0500000077', role: 'staff' }, { cookie: boss });
+    assert.equal(res.headers.get('location'), '/dashboard/team?ok=added');
+    assert.equal(h.db.getLead('LEAD-A').inbox_state, 'out');
+    assert.equal(h.inboxStore.hasMessages('LEAD-A'), false, 'a colleague\'s words are never kept (§3.5)');
+    assert.equal((await h.get('/dashboard/inbox/LEAD-A', { cookie: boss })).status, 404);
+    assert.ok(h.app.audit.recent(50).some((r) => r.action === 'inbox_out' && r.target === 'LEAD-A'));
+    // A number with no chat: the person is added and nothing else moves.
+    const fresh = await h.postForm('/v1/admin/team', { name: 'New Hand', phone: '0500000090', role: 'staff' }, { cookie: boss });
+    assert.equal(fresh.headers.get('location'), '/dashboard/team?ok=added');
+    assert.equal(h.app.audit.recent(50).filter((r) => r.action === 'inbox_out').length, 1);
+    assert.equal(h.db.getLead('LEAD-U').inbox_state, 'unsure');
+    assert.doesNotMatch(JSON.stringify(h.app.audit.recent(50)), /500000077|Alya/);
+  });
+});
+
+/* ---------------- unread, logs ---------------- */
+
+test('unread: the nav badge counts it on every page, and opening the thread marks it read for that person only', async () => {
+  await withInbox(async (h) => {
+    seedChat(h, { id: 'LEAD-A', name: 'Alya Client', messages: [
+      { key_id: 'A-1', text: 'Hello', ts: NOW + 60_000 },
+      { key_id: 'A-2', text: 'Is BONA-012 free?', ts: NOW + 70_000 },
+    ] });
+    const staff = await h.staff();
+    const boss = await h.boss();
+    for (const p of ['/dashboard', '/dashboard/leads', '/dashboard/spend']) {
+      assert.match(await (await h.get(p, { cookie: staff })).text(), /Inbox<span class="c">2<\/span>/, p);
+    }
+    assert.equal((await h.get('/dashboard/inbox/LEAD-A', { cookie: staff })).status, 200);
+    assert.doesNotMatch(await (await h.get('/dashboard/leads', { cookie: staff })).text(), /Inbox<span class="c">/);
+    const read = h.db.db.prepare('SELECT last_read_ts FROM inbox_reads WHERE user_id = ? AND lead_id = ?').get(h.staffUser.user_id, 'LEAD-A');
+    assert.equal(read.last_read_ts, NOW + 70_000, 'read up to the newest message on the page, not "now"');
+    assert.match(await (await h.get('/dashboard/leads', { cookie: boss })).text(), /Inbox<span class="c">2<\/span>/, 'the owner has not read it');
+  });
+});
+
+test('nothing the inbox writes to the log carries message text, a phone number or a name', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    const boss = await h.boss();
+    await h.get('/dashboard/inbox', { cookie: staff });
+    await h.get('/dashboard/inbox/LEAD-A', { cookie: staff });
+    h.tick(120_000);
+    await replyTo(h, 'LEAD-A', { text: 'Secret reply words', send_id: 'send-log-0000000000001', seen_ts: String(NOW + 60_000) }, staff);
+    h.evo.reply = () => 'timeout';
+    await replyTo(h, 'LEAD-A', { text: 'Second secret words', send_id: 'send-log-0000000000002', seen_ts: String(NOW + 120_000) }, staff);
+    await h.postForm('/v1/admin/inbox/LEAD-A/handler', { user_id: h.owner.user_id }, { cookie: staff });
+    await h.postForm('/v1/admin/inbox/add', { phone: '0500000088' }, { cookie: boss });
+    await h.postForm('/v1/admin/inbox/LEAD-U/move', {}, { cookie: boss });
+    await h.postForm('/v1/admin/never', { phone: '0500000077' }, { cookie: boss });
+    assert.ok(h.logs.some((e) => e.evt === 'dash.reply'), 'the replies were logged');
+    const dump = JSON.stringify(h.logs);
+    for (const secret of ['Secret reply words', 'Second secret words', 'Is BONA-012 still free?', '500000077', '500000088', '500000078', '500000001', 'Alya', 'Sara']) {
+      assert.ok(!dump.includes(secret), secret);
+    }
+  });
+});
+```
+
+- [ ] **Step 2: Run to see them fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/dashboard-inbox.test.mjs`
+Expected: FAIL — all 17. `/dashboard/inbox` and `/dashboard/inbox/:id` are still "There is no such page." (404 where 200 is expected — the hostile test fails on its control, `LEAD-A` must open, and the departed-author test on its first status check); `/v1/admin/inbox/*` answers `404 {"error":"not_found"}` where 303/403/409 is expected; the never-list test finds `LEAD-A` still `in`, and so does the colleague test (`/v1/admin/team` already answers `303 ok=added`, but nothing is purged yet); the unread test finds no `Inbox<span class="c">2</span>` (routes do not set `me.unread` yet); the log test finds no `dash.reply` line.
+
+- [ ] **Step 3: Implement** — ten edits to `services/api/lib/dashboard/routes.mjs`.
+
+(1) Imports. Replace
+
+```js
+import { teamPage } from './render-team.mjs';
+import { TeamError } from '../team.mjs';
+```
+
+with
+
+```js
+import { teamPage } from './render-team.mjs';
+import { inboxPage, unsurePage, threadPage, INBOX_OK } from './render-inbox.mjs';
+import { TeamError, isExcludedLead } from '../team.mjs';
+import { createOrMergeLead } from '../leads.mjs';
+import { normalisePhone } from '../phone.mjs';
+import { randomId } from '../store.mjs';
+import { replyJidFor } from '../wa-send.mjs';
+import { OWNER_HISTORY_MS } from '../inbox/backfill.mjs';
+```
+
+(2) A timestamp field. Replace
+
+```js
+const posInt = (v) => {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+};
+```
+
+with
+
+```js
+const posInt = (v) => {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+};
+/**
+ * The reply form's `seen_ts`: digits from a form, a number from JSON. Anything else is
+ * NaN, which the sender reads as "cannot tell what you saw" and holds as stale.
+ */
+const asTs = (v) => {
+  if (typeof v === 'number') return v;
+  const s = typeof v === 'string' ? v.trim() : '';
+  return /^\d{1,16}$/.test(s) ? Number(s) : NaN;
+};
+```
+
+(3) The factory's options. Replace
+
+```js
+ * @param {Function} [o.sendCode]                     the shared sender's `sendTo`, for login codes
+ */
+export function createDashboardRoutes({
+  db, cfg = {}, inventory = null, fanout = null, app = null,
+  sendWhatsApp = null, probeRetell = null,
+  team = null, audit = null, sendCode = null,
+  auth = null, stats = null, tiktokAccounts = null, log = () => {}, now = () => Date.now(),
+} = {}) {
+```
+
+with
+
+```js
+ * @param {Function} [o.sendCode]                     the shared sender's `sendTo`, for login codes
+ * @param {ReturnType<import('../inbox/store.mjs').createInboxStore>} [o.inbox]     the Bona inbox; without it the inbox pages are 404
+ * @param {ReturnType<import('../wa-send.mjs').createSender>} [o.sender]             the one sender; its `reply` answers a chat
+ * @param {ReturnType<import('../inbox/backfill.mjs').createBackfill>} [o.backfill]  per-chat Evolution reads: refresh, join history
+ */
+export function createDashboardRoutes({
+  db, cfg = {}, inventory = null, fanout = null, app = null,
+  sendWhatsApp = null, probeRetell = null,
+  team = null, audit = null, sendCode = null,
+  inbox = null, sender = null, backfill = null,
+  auth = null, stats = null, tiktokAccounts = null, log = () => {}, now = () => Date.now(),
+} = {}) {
+```
+
+(4) A colleague's number is purged like a never-list one (§3.5). Replace
+
+```js
+  function addPerson(ctx) {
+    const { fields, me } = ctx;
+    return teamWrite(ctx, () => {
+      const u = team.addUser({ name: asText(fields.name), phone: asText(fields.phone), role: fields.role === 'owner' ? 'owner' : 'staff' });
+      audit?.record({ userId: me.user_id, action: 'team_add', target: u.user_id, meta: { role: u.role } });
+    }, 'added');
+  }
+```
+
+with
+
+```js
+  /**
+   * A number that has just become a colleague's or a never-list one is never a client
+   * (§3.5, P2-7): the chat stored under it, if any, leaves the inbox and its transcript
+   * goes now, not at the next daily upkeep. Audited by lead id only. Built without the
+   * inbox (older tests, tools), there is nothing stored to take out.
+   */
+  function leaveInboxFor(digits, me) {
+    if (!inbox || !digits) return;
+    const lead = db.getLeadByPhone(digits) ?? db.getLeadByJid(`${digits}@s.whatsapp.net`);
+    if (!lead || lead.inbox_state === 'out') return;
+    inbox.leaveInbox(lead.lead_id);
+    audit?.record({ userId: me.user_id, action: 'inbox_out', target: lead.lead_id });
+  }
+
+  function addPerson(ctx) {
+    const { fields, me } = ctx;
+    return teamWrite(ctx, () => {
+      const u = team.addUser({ name: asText(fields.name), phone: asText(fields.phone), role: fields.role === 'owner' ? 'owner' : 'staff' });
+      audit?.record({ userId: me.user_id, action: 'team_add', target: u.user_id, meta: { role: u.role } });
+      leaveInboxFor(u.phone_e164, me);
+    }, 'added');
+  }
+```
+
+(Reactivating someone or changing their role needs nothing: `team.isExcludedPhone` counts every team number, active or not, so neither can bring a number onto the team. The owner seeded from `BONA_OWNER_JID` at start-up is covered by the start-up upkeep's sweep, Task 11.)
+
+(5) The never list purges (P2-7). Replace
+
+```js
+    return teamWrite(ctx, () => {
+      team.addNever({ phone: asText(fields.phone), note: asText(fields.note), by: me.user_id });
+      audit?.record({ userId: me.user_id, action: 'never_add' });
+    }, 'never_added');
+```
+
+with
+
+```js
+    return teamWrite(ctx, () => {
+      const row = team.addNever({ phone: asText(fields.phone), note: asText(fields.note), by: me.user_id });
+      audit?.record({ userId: me.user_id, action: 'never_add' });
+      leaveInboxFor(row.phone_e164, me);
+    }, 'never_added');
+```
+
+(6) The inbox section and the new paths. Replace
+
+```js
+  /* -------------------- dispatch -------------------- */
+
+  const LEAD_PATH = /^\/dashboard\/leads\/([A-Za-z0-9_-]{1,64})$/;
+  const ADMIN_LEAD = /^\/v1\/admin\/leads\/([A-Za-z0-9_-]{1,64})(?:\/(stage|note))?$/;
+  const ADMIN_TEAM = /^\/v1\/admin\/team\/([A-Za-z0-9_-]{1,64})\/(deactivate|reactivate|role)$/;
+  const OWNER_WRITES = new Set(['/v1/admin/team', '/v1/admin/never', '/v1/admin/never/remove', '/v1/admin/settings']);
+```
+
+with
+
+```js
+  /* -------------------- the Bona inbox -------------------- */
+  //
+  // Phase 2 of the 2026-09-27 design (§4). Three rules hold on every route here; the
+  // sender (lib/wa-send.mjs `reply`) checks the send-side ones again on its own:
+  //
+  //   1. A chat can be read or answered only while it is `in`, has a WhatsApp jid or lid
+  //      (P2-1), and its number is neither a team member's nor on the never list (§3.5,
+  //      P2-7). Anything else is the same 404, so no page tells anyone which numbers are
+  //      guesses, private, or colleagues.
+  //   2. Message text stays on the page it was typed on. A refused reply is drawn again
+  //      with the words still in the box (P2-9); a redirect, the audit log and the
+  //      process log carry ids and outcomes — never words, never numbers.
+  //   3. The Unsure list, Move, Not a client and Add by phone are the owner's (D9).
+
+  /** A colleague's or a never-list number, however the lead row holds it (lib/team.mjs). */
+  const excludedLead = (lead) => isExcludedLead(team, db, lead);
+
+  /** Rule 1: the one test every inbox read and write goes through first. */
+  const openChat = (lead) => Boolean(lead && lead.inbox_state === 'in' && (lead.wa_jid || lead.wa_lid) && !excludedLead(lead));
+
+  /**
+   * The signed-in person as a page draws them: their row plus `unread`, the Inbox badge.
+   * Summed over the very rows the inbox list shows, so the badge never counts a chat
+   * rule 1 hides (the store's `unreadTotal` knows nothing of the team or the never list).
+   * Unread chats sort first, so the list's cap only ever leaves out chats that add 0.
+   * Built without the inbox (older tests, tools), the row stays as it was. A count that
+   * fails is a missing badge, never a page that will not open.
+   */
+  function withUnread(user) {
+    if (!inbox) return user;
+    try {
+      const rows = inbox.listInbox({ userId: user.user_id, userCreated: user.created ?? 0, limit: 1000 }).filter((l) => !excludedLead(l));
+      return { ...user, unread: rows.reduce((n, r) => n + (Number(r.unread) || 0), 0) };
+    } catch (err) {
+      log({ level: 'warn', evt: 'dash.unread_failed', error: String(err?.message ?? err).slice(0, 200) });
+      return { ...user, unread: 0 };
+    }
+  }
+
+  /** `?ok=` codes the inbox pages know; own properties only, like `knownError`. */
+  const inboxOk = (v) => (typeof v === 'string' && Object.hasOwn(INBOX_OK, v) ? v : null);
+  const noSuchPage = (res, me) => sendHtml(res, 404, messagePage({ title: 'Not found', message: 'There is no such page.', me }));
+  const notInInbox = (res, me) => sendHtml(res, 404, messagePage({ title: 'Not in the inbox', message: 'That chat is not in the Bona inbox.', me }));
+  /** Rule 1's refusal for both callers: a form gets the page, JSON gets the code. */
+  const refuseChat = (res, form, me) => (form ? notInInbox(res, withUnread(me)) : sendJson(res, 404, { error: 'not_in_inbox' }));
+  /** One reply form's id: 24 hex characters, inside wa-send's SEND_ID_RE. */
+  const newSendId = () => randomId(12);
+
+  /**
+   * Fetch the chat from WhatsApp before it is drawn or answered (P2-10), so a reply is
+   * checked against what is really there rather than the last poll. The backfill bounds
+   * it (amendment A2) and promises never to throw; this catch is for one that breaks the
+   * promise. Either way a slow Evolution leaves the page with what is already stored.
+   */
+  async function refreshChat(lead) {
+    if (!backfill) return;
+    try {
+      await backfill.refresh(lead);
+    } catch (err) {
+      log({ level: 'warn', evt: 'dash.refresh_failed', leadId: lead.lead_id, error: String(err?.message ?? err).slice(0, 200) });
+    }
+  }
+
+  /** The owner vouched for this chat, so it brings its last 30 days (design §4.1). */
+  async function joinHistory(leadId, t) {
+    if (!backfill) return;
+    try {
+      await backfill.history(db.getLead(leadId), { sinceTs: t - OWNER_HISTORY_MS, untilTs: t });
+    } catch (err) {
+      log({ level: 'warn', evt: 'dash.history_failed', leadId, error: String(err?.message ?? err).slice(0, 200) });
+    }
+  }
+
+  /**
+   * Draw one chat and mark it read — up to the newest message on the page, never "now":
+   * a message the poller stores a moment later with an earlier WhatsApp timestamp must
+   * still count as unread. `seenTs` rides in the form for the sender's stale-view guard.
+   */
+  function renderThread(res, { status = 200, user, lead, draft = '', ok = null, error = null }) {
+    const seenTs = inbox.newestTs(lead.lead_id) ?? 0;
+    if (seenTs) inbox.markRead(user.user_id, lead.lead_id, seenTs);
+    return sendHtml(res, status, threadPage({
+      me: withUnread(user),
+      lead,
+      messages: inbox.messagesFor(lead.lead_id),
+      gaps: inbox.gapsFor(lead.lead_id),
+      outbox: inbox.openOutboxFor(lead.lead_id),
+      // Everyone, not only the active: a reply keeps its author's name after they leave.
+      // threadPage offers only active people as handlers.
+      users: team.listUsers(),
+      sendId: newSendId(),
+      seenTs,
+      sendingEnabled: team.sendingEnabled(),
+      canReply: replyJidFor(lead) !== null,
+      draft,
+      ok: inboxOk(ok),
+      error: knownError(error),
+      now: now(),
+    }));
+  }
+
+  function inboxList({ res, url, me }) {
+    if (!inbox) return noSuchPage(res, me);
+    const ok = inboxOk(url.searchParams.get('ok'));
+    const error = knownError(url.searchParams.get('error'));
+    if (url.searchParams.get('tab') === 'unsure') {
+      if (me.role !== 'owner') return sendHtml(res, 403, messagePage({ title: 'Owners only', message: 'Only an owner can see the Unsure list.', me }));
+      return sendHtml(res, 200, unsurePage({ me, rows: inbox.listUnsure().filter((l) => !excludedLead(l)), ok, error, now: now() }));
+    }
+    return sendHtml(res, 200, inboxPage({
+      me,
+      rows: inbox.listInbox({ userId: me.user_id, userCreated: me.created ?? 0 }).filter((l) => !excludedLead(l)),
+      // Counted from the rows the Unsure list shows, never the store's raw `countUnsure`.
+      unsureCount: me.role === 'owner' ? inbox.listUnsure({ limit: 1000 }).filter((l) => !excludedLead(l)).length : 0,
+      ok,
+      error,
+      now: now(),
+    }));
+  }
+
+  async function inboxThread({ res, url, user }, leadId) {
+    if (!inbox) return noSuchPage(res, withUnread(user));
+    if (!openChat(db.getLead(leadId))) return notInInbox(res, withUnread(user));
+    await refreshChat(db.getLead(leadId));
+    // Read again: the refresh may have learned the chat's lid or phone jid.
+    const lead = db.getLead(leadId);
+    if (!openChat(lead)) return notInInbox(res, withUnread(user));
+    return renderThread(res, { user, lead, ok: url.searchParams.get('ok'), error: url.searchParams.get('error') });
+  }
+
+  /** How each of `sender.reply`'s refusals is answered: HTTP status, then the page's message code. */
+  const REPLY_REFUSALS = {
+    stale: [409, 'stale'],
+    lid_only: [409, 'lid_only'],
+    bad_text: [400, 'bad_text'],
+    bad_send_id: [400, 'bad_send_id'],
+    sending_disabled: [503, 'sending_disabled'],
+    rate_limited: [429, 'reply_rate_limited'],
+  };
+  /** Refusals that mean the chat itself may not be answered (rule 1): no page of it is drawn. */
+  const NOT_ANSWERABLE = new Set(['not_found', 'not_in_inbox', 'excluded']);
+
+  async function inboxReply({ res, fields, form, me }, leadId) {
+    if (!sender) return sendJson(res, 404, { error: 'not_found' });
+    const back = `/dashboard/inbox/${encodeURIComponent(leadId)}`;
+    // Asked here as well as in the sender, and before the refresh: a chat that is not in
+    // the inbox must not cost an Evolution read, let alone a send.
+    if (!openChat(db.getLead(leadId))) return refuseChat(res, form, me);
+    await refreshChat(db.getLead(leadId));
+
+    const text = asText(fields.text).replace(/\r\n?/g, '\n').trim();
+    const out = await sender.reply({ sendId: asText(fields.send_id), leadId, userId: me.user_id, text, seenTs: asTs(fields.seen_ts) });
+    const inFlight = out.duplicate && (out.status === 'pending' || out.status === 'uncertain');
+    const outcome = out.ok ? 'accepted' : (out.uncertain || inFlight) ? 'uncertain' : 'failed';
+    // Audited once per request that reached WhatsApp (sent, perhaps sent, or turned away
+    // by it) — never a refusal made here first, never a resubmit — with the outcome only.
+    const attempted = out.ok || out.uncertain || out.error === 'network' || String(out.error ?? '').startsWith('http_');
+    if (!out.duplicate && attempted) {
+      audit?.record({ userId: me.user_id, action: 'reply_sent', target: leadId, meta: { status: outcome } });
+      log({ evt: 'dash.reply', leadId, status: outcome });
+    }
+    if (outcome === 'accepted') return answer(res, { form, back: `${back}?ok=sent`, status: 200, payload: { ok: true, status: outcome, send_id: out.sendId } });
+    // It may well have gone. Say so and let the person look at WhatsApp: never retried,
+    // and the words are not kept for a resubmit that could send them twice.
+    if (outcome === 'uncertain') return answer(res, { form, back: `${back}?error=send_uncertain`, status: 202, payload: { ok: false, error: 'send_uncertain', send_id: out.sendId } });
+    if (NOT_ANSWERABLE.has(out.error)) return refuseChat(res, form, me);
+    const [status, error] = !out.duplicate && Object.hasOwn(REPLY_REFUSALS, out.error) ? REPLY_REFUSALS[out.error] : [502, 'send_failed'];
+    if (!form) return sendJson(res, status, { error });
+    const lead = db.getLead(leadId);
+    if (!openChat(lead)) return notInInbox(res, withUnread(me));
+    // The page again, the words still in the box and a fresh send_id: nothing in a URL (P2-9).
+    return renderThread(res, { status, user: me, lead, draft: text, error });
+  }
+
+  function inboxHandler({ res, fields, form, me }, leadId) {
+    const back = `/dashboard/inbox/${encodeURIComponent(leadId)}`;
+    if (!openChat(db.getLead(leadId))) return refuseChat(res, form, me);
+    // Anyone on the team may hand a chat to any active person, or to nobody (P2-15).
+    const raw = asText(fields.user_id).trim();
+    const target = raw ? team.getUser(raw) : null;
+    if (raw && !(target && target.active)) return answer(res, { form, back: `${back}?error=bad_handler`, status: 400, payload: { error: 'bad_handler' } });
+    const to = target ? target.user_id : null;
+    inbox.setHandler(leadId, to);
+    audit?.record({ userId: me.user_id, action: 'handler', target: leadId, meta: { to } });
+    log({ evt: 'dash.handler', leadId });
+    return answer(res, { form, back: `${back}?ok=handler`, status: 200, payload: { ok: true, handler_user_id: to } });
+  }
+
+  async function inboxMove({ res, form, me }, leadId) {
+    const lead = db.getLead(leadId);
+    const leadPage = `/dashboard/leads/${encodeURIComponent(leadId)}`;
+    if (!lead) return answer(res, { form, back: '/dashboard/inbox?error=not_a_chat', status: 404, payload: { error: 'not_found' } });
+    if (excludedLead(lead)) return answer(res, { form, back: `${leadPage}?error=excluded`, status: 400, payload: { error: 'excluded' } });
+    // Nothing to read a chat by: no jid, no lid, no phone to make a jid of.
+    if (!lead.wa_jid && !lead.wa_lid && !lead.phone_e164) return answer(res, { form, back: `${leadPage}?error=not_a_chat`, status: 400, payload: { error: 'not_a_chat' } });
+    const t = now();
+    inbox.setInboxState(leadId, 'in', { since: t });
+    audit?.record({ userId: me.user_id, action: 'inbox_move', target: leadId });
+    log({ evt: 'dash.inbox_move', leadId });
+    await joinHistory(leadId, t);
+    // A phone-only lead becomes a chat once its history names a jid; until then, the list.
+    const back = openChat(db.getLead(leadId)) ? `/dashboard/inbox/${encodeURIComponent(leadId)}?ok=moved` : '/dashboard/inbox?ok=moved';
+    return answer(res, { form, back, status: 200, payload: { ok: true, lead_id: leadId } });
+  }
+
+  function inboxOut({ res, form, me }, leadId) {
+    const lead = db.getLead(leadId);
+    if (!lead) return answer(res, { form, back: '/dashboard/inbox?error=not_a_chat', status: 404, payload: { error: 'not_found' } });
+    // Not a client (design §4.1): out now, the transcript gone now, and it never comes
+    // back on its own — only the owner's Move or Add brings it in again.
+    const purged = inbox.leaveInbox(leadId);
+    audit?.record({ userId: me.user_id, action: 'inbox_out', target: leadId });
+    log({ evt: 'dash.inbox_out', leadId, messages: purged.messages });
+    const back = lead.inbox_state === 'in' ? '/dashboard/inbox?ok=out' : '/dashboard/inbox?tab=unsure&ok=out';
+    return answer(res, { form, back, status: 200, payload: { ok: true, purged } });
+  }
+
+  async function inboxAdd({ res, fields, form, me }) {
+    const raw = asText(fields.phone);
+    // A number the owner typed: never a lid or a jid, and international once normalised.
+    const digits = /[@:a-zA-Z]/.test(raw) ? null : normalisePhone(raw);
+    if (!digits || digits.startsWith('0')) return answer(res, { form, back: '/dashboard/inbox?error=bad_phone', status: 400, payload: { error: 'bad_phone' } });
+    if (team.isExcludedPhone(digits)) return answer(res, { form, back: '/dashboard/inbox?error=excluded', status: 400, payload: { error: 'excluded' } });
+    const t = now();
+    // The one lead write path; `owner_added` never fans out and is born in the inbox (P2-5).
+    const { lead } = createOrMergeLead(db, { phone: digits, waJid: `${digits}@s.whatsapp.net` }, {
+      channel: 'whatsapp', matchMethod: 'owner_added', now: t, dataDir: cfg.dataDir,
+    });
+    inbox.setInboxState(lead.lead_id, 'in', { since: t });
+    audit?.record({ userId: me.user_id, action: 'inbox_add', target: lead.lead_id });
+    log({ evt: 'dash.inbox_add', leadId: lead.lead_id });
+    await joinHistory(lead.lead_id, t);
+    return answer(res, { form, back: `/dashboard/inbox/${encodeURIComponent(lead.lead_id)}?ok=added`, status: 200, payload: { ok: true, lead_id: lead.lead_id } });
+  }
+
+  /* -------------------- dispatch -------------------- */
+
+  const LEAD_PATH = /^\/dashboard\/leads\/([A-Za-z0-9_-]{1,64})$/;
+  const INBOX_PATH = /^\/dashboard\/inbox\/([A-Za-z0-9_-]{1,64})$/;
+  const ADMIN_LEAD = /^\/v1\/admin\/leads\/([A-Za-z0-9_-]{1,64})(?:\/(stage|note))?$/;
+  const ADMIN_TEAM = /^\/v1\/admin\/team\/([A-Za-z0-9_-]{1,64})\/(deactivate|reactivate|role)$/;
+  const ADMIN_INBOX = /^\/v1\/admin\/inbox\/([A-Za-z0-9_-]{1,64})\/(reply|handler|move|out)$/;
+  /** Inbox writes only an owner makes (D9); reply and handler are anyone's on the team. */
+  const OWNER_INBOX_WRITES = new Set(['move', 'out']);
+  const OWNER_WRITES = new Set(['/v1/admin/team', '/v1/admin/never', '/v1/admin/never/remove', '/v1/admin/settings', '/v1/admin/inbox/add']);
+```
+
+(7) Every signed-in page carries `unread`; the thread is dispatched before it. Replace
+
+```js
+    /* --- everything else needs a signed-in, active member --- */
+    const me = currentUser(req);
+    if (!me) return toLogin(res);
+    if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method_not_allowed' });
+
+    if (p === '/dashboard') return overview({ res, url, me });
+```
+
+with
+
+```js
+    /* --- everything else needs a signed-in, active member --- */
+    const user = currentUser(req);
+    if (!user) return toLogin(res);
+    if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method_not_allowed' });
+    // A thread marks itself read before it is drawn, so it counts its own badge.
+    const threadMatch = INBOX_PATH.exec(p);
+    if (threadMatch) return inboxThread({ res, url, user }, threadMatch[1]);
+    // Every other signed-in page carries the person's unread count for the Inbox badge.
+    const me = withUnread(user);
+
+    if (p === '/dashboard') return overview({ res, url, me });
+```
+
+(8) The list page. Replace
+
+```js
+    if (p === '/dashboard/team') return teamView({ res, url, me });
+    return sendHtml(res, 404, messagePage({ title: 'Not found', message: 'There is no such page.', me }));
+```
+
+with
+
+```js
+    if (p === '/dashboard/team') return teamView({ res, url, me });
+    if (p === '/dashboard/inbox') return inboxList({ res, url, me });
+    return sendHtml(res, 404, messagePage({ title: 'Not found', message: 'There is no such page.', me }));
+```
+
+(9) Which admin writes exist, and which are the owner's. Replace
+
+```js
+    const teamMatch = ADMIN_TEAM.exec(p);
+    const ownerWrite = Boolean(teamMatch || tiktokMatch) || OWNER_WRITES.has(p);
+    const writes = (leadMatch && leadMatch[2]) || (p === '/v1/admin/spend' ? 'spend' : null) || (ownerWrite ? 'team' : null);
+    if (!writes) return sendJson(res, 404, { error: 'not_found' });
+```
+
+with
+
+```js
+    const teamMatch = ADMIN_TEAM.exec(p);
+    const inboxMatch = ADMIN_INBOX.exec(p);
+    const ownerWrite = Boolean(teamMatch || tiktokMatch || OWNER_WRITES.has(p) || (inboxMatch && OWNER_INBOX_WRITES.has(inboxMatch[2])));
+    const writes = (leadMatch && leadMatch[2]) || (p === '/v1/admin/spend' ? 'spend' : null)
+      || ((inboxMatch || p === '/v1/admin/inbox/add') ? 'inbox' : null) || (ownerWrite ? 'team' : null);
+    if (!writes) return sendJson(res, 404, { error: 'not_found' });
+```
+
+(10) The owner gate names the path without an id; the inbox writes are dispatched. Replace
+
+```js
+    if (ownerWrite && me.role !== 'owner') {
+      log({ level: 'warn', evt: 'dash.owner_only', path: teamMatch ? '/v1/admin/team/:id' : p });
+      return sendJson(res, 403, { error: 'owner_only' });
+    }
+
+    const ctx = { res, fields: parsed.fields, form: parsed.form, me };
+    if (tiktokMatch) return tiktokWrite({ ...ctx, req }, tiktokMatch[1]);
+```
+
+with
+
+```js
+    if (ownerWrite && me.role !== 'owner') {
+      const shown = teamMatch ? '/v1/admin/team/:id' : inboxMatch ? `/v1/admin/inbox/:id/${inboxMatch[2]}` : p;
+      log({ level: 'warn', evt: 'dash.owner_only', path: shown });
+      return sendJson(res, 403, { error: 'owner_only' });
+    }
+
+    const ctx = { res, fields: parsed.fields, form: parsed.form, me };
+    if (tiktokMatch) return tiktokWrite({ ...ctx, req, me: withUnread(me) }, tiktokMatch[1]);
+    if (writes === 'inbox') {
+      // index.mjs always wires the inbox; routes built without it (older tests, tools) have none.
+      if (!inbox) return sendJson(res, 404, { error: 'not_found' });
+      if (!inboxMatch) return inboxAdd(ctx);
+      const [, leadId, what] = inboxMatch;
+      if (what === 'reply') return inboxReply(ctx, leadId);
+      if (what === 'handler') return inboxHandler(ctx, leadId);
+      if (what === 'move') return inboxMove(ctx, leadId);
+      return inboxOut(ctx, leadId);
+    }
+```
+
+- [ ] **Step 4: Run the tests**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/dashboard-inbox.test.mjs`
+Expected: PASS (17 tests).
+
+- [ ] **Step 5: Run the dashboard suites, then the full suite**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/dashboard-routes.test.mjs api/test/dashboard-inbox.test.mjs`
+Expected: PASS — `withTeamRoutes` builds the routes without an inbox (no badge, inbox pages 404, never-list and team adds unchanged); `withDash` builds them through createApp (inbox wired, badge absent at 0 unread).
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/*.test.mjs`
+Expected: all pass, 0 fail.
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd /home/azoz778/bona-wt/team-inbox && git add services/api/lib/dashboard/routes.mjs services/api/test/dashboard-inbox.test.mjs
+git commit -m "dashboard: the Bona inbox — list, Unsure, thread, reply once, handler, move/out/add, never-list and team-add purge, unread badge
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 13: Privacy page and README say what the Bona inbox does
+
+P2-12: the site's privacy page says what Phase 2 does from the day it ships — Bona stores its
+WhatsApp conversations with clients, the owner and authorised team members read and answer
+them from a private dashboard, they are kept up to 5 years after the last message and then
+deleted automatically, copies stay in the WhatsApp service our number runs on and on our phones,
+and how to ask for deletion. Dana is not mentioned: that sentence ships with Phase 4, when it
+becomes true. The page promises that "material changes will be flagged here for 30 days", so the
+*Changes* section gets a dated line too. `services/README.md` gets the operator's view of the same
+thing under `### Dashboard`, plus the lines elsewhere in it that Phase 2 made wrong (the 45 s poll
+default, the 500-message truncation).
+
+No runtime code changes here. The site is not deployed by `deploy.sh`: `src/data/privacy.json` goes
+live through `.github/workflows/deploy.yml` (GitHub Pages) when the phase is merged to `main`.
+
+**Files:**
+- Create: `scripts/test/privacy-policy.test.mjs`
+- Modify: `src/data/privacy.json` (new section `whatsapp-conversations` right after `whatsapp-enquiries`; a dated line in `changes`)
+- Modify: `services/README.md` (§4 env table, §8 data files, §10 Store and Poller, `### Dashboard` → **Inbox** and its routes)
+
+- [ ] **Step 1: Write the failing test** — create `scripts/test/privacy-policy.test.mjs`:
+
+```js
+// src/data/privacy.json — the policy the site renders at /privacy/ and /ar/privacy/.
+// PrivacyPage.astro quietly drops a section with no id or heading and falls back to English
+// for a missing Arabic body, so a broken entry would ship as a hole nobody sees in review.
+// The WhatsApp conversations section is what Phase 2 of the team inbox (2026-09-27 design
+// §4.6) has to say before a single transcript is stored: what is kept, who reads it, for
+// how long, where other copies stay, and how to have it deleted. Dana is left out of it on
+// purpose until she answers on WhatsApp (Phase 4) — a policy that promises what the service
+// does not do is as wrong as one that hides what it does.
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { test } from 'node:test';
+
+const read = (rel) => JSON.parse(fs.readFileSync(new URL(rel, import.meta.url), 'utf8'));
+const policy = read('../../src/data/privacy.json');
+const site = read('../../src/data/site.json');
+const section = (id) => policy.sections.find((s) => s.id === id);
+const body = (s, locale) => s.body[locale].join(' ');
+
+test('every section has an id, both headings and the same number of EN and AR paragraphs', () => {
+  assert.match(policy.updated, /^\d{4}-\d{2}-\d{2}$/);
+  const ids = policy.sections.map((s) => s.id);
+  assert.equal(new Set(ids).size, ids.length, 'section ids are the page anchors, so they must be unique');
+  for (const s of policy.sections) {
+    assert.match(s.id, /^[a-z0-9-]+$/, `${s.id}: the page rewrites anything else in an id`);
+    for (const locale of ['en', 'ar']) {
+      assert.equal(typeof s.heading?.[locale], 'string', `${s.id} heading.${locale}`);
+      assert.ok(s.heading[locale].trim(), `${s.id} heading.${locale} is empty`);
+      assert.ok(Array.isArray(s.body?.[locale]) && s.body[locale].length > 0, `${s.id} body.${locale}`);
+      for (const p of s.body[locale]) assert.ok(typeof p === 'string' && p.trim(), `${s.id} body.${locale} has an empty paragraph`);
+    }
+    assert.equal(s.body.en.length, s.body.ar.length, `${s.id}: the Arabic text is the authoritative one, so it says everything the English does`);
+  }
+});
+
+test('the WhatsApp conversations section says what is stored, who reads it, for how long and how to have it deleted', () => {
+  const s = section('whatsapp-conversations');
+  assert.ok(s, 'Phase 2 stores WhatsApp transcripts; the policy has to say so before it does');
+  const ids = policy.sections.map((x) => x.id);
+  assert.equal(ids.indexOf('whatsapp-conversations'), ids.indexOf('whatsapp-enquiries') + 1, 'it follows the WhatsApp enquiries section it extends');
+  assert.ok(policy.updated >= '2026-09-28', 'the date at the top is the version date and must move with a material change');
+
+  const en = body(s, 'en');
+  assert.match(en, /stores that conversation/);
+  assert.match(en, /authorised members of the Bona team/);
+  assert.match(en, /private dashboard/);
+  assert.match(en, /five years after its last message/);
+  assert.match(en, /deleted automatically/);
+  assert.match(en, /on our phones/, 'the copies bona.db retention does not govern are named, not hidden');
+  assert.match(en, /WhatsApp’s own terms/);
+
+  const ar = body(s, 'ar');
+  assert.match(ar, /تحتفظ بونا بتلك المحادثة/);
+  assert.match(ar, /فريق بونا/);
+  assert.match(ar, /لوحة خاصة/);
+  assert.match(ar, /خمس سنوات/);
+  assert.match(ar, /تلقائي/);
+  assert.match(ar, /هواتفنا/);
+  assert.match(ar, /شروط واتساب/);
+
+  // The deletion route is the one the page's contact block and buttons offer (site.json).
+  for (const text of [en, ar, policy.contact.en, policy.contact.ar]) {
+    assert.ok(text.includes(site.whatsapp.display), 'WhatsApp number');
+  }
+  assert.ok(en.includes(site.phone.display) && ar.includes(site.phone.display), 'phone number');
+});
+
+test('Dana is not named in that section until she answers on WhatsApp (Phase 4)', () => {
+  const s = section('whatsapp-conversations');
+  assert.ok(s, 'the section is missing');
+  const all = [s.heading.en, s.heading.ar, body(s, 'en'), body(s, 'ar')].join(' ');
+  assert.doesNotMatch(all, /\bDana\b|دانة|دانا|\bAI\b|artificial intelligence|الذكاء الاصطناعي|المساعد الذكي|الكونسيرج/i);
+});
+```
+
+- [ ] **Step 2: Run it to see it fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox && node --test scripts/test/privacy-policy.test.mjs`
+Expected: FAIL — `ℹ pass 1`, `ℹ fail 2`. The shape test passes on today's file (every section already has both languages with matching paragraph counts); the other two fail with `Phase 2 stores WhatsApp transcripts; the policy has to say so before it does` and `the section is missing`, because there is no section with id `whatsapp-conversations` yet.
+
+- [ ] **Step 3: Add the section** — in `src/data/privacy.json`:
+
+Find (verbatim, once) in `src/data/privacy.json`:
+```json
+    },
+    {
+      "id": "ai-concierge",
+```
+Replace with:
+```json
+    },
+    {
+      "id": "whatsapp-conversations",
+      "heading": {
+        "en": "WhatsApp conversations with our team",
+        "ar": "محادثات واتساب مع فريق بونا"
+      },
+      "body": {
+        "en": [
+          "When you contact Bona on WhatsApp about a property or an enquiry, or when we write to you about one, Bona stores that conversation — your messages and our replies — so that we can serve your enquiry. For a photo, voice note or file we keep only a note of its type, a document’s file name and any caption, not the item itself. Private chats on the same number are not stored, and if a conversation turns out not to be about a Bona enquiry, the messages we stored from it are deleted straight away.",
+          "The owner of Bona and authorised members of the Bona team can read these conversations and reply to you through a private dashboard that requires sign-in. Replies sent from the dashboard come from Bona’s WhatsApp number, +966 59 329 6933, and the dashboard records which team member sent each one.",
+          "We keep a stored conversation for up to five years after its last message; it is then deleted automatically. The five years apply to the messages; your enquiry record itself follows “How long we keep it” below. A copy of the conversation also stays in the WhatsApp service our number runs on and on our phones, under WhatsApp’s own terms, and the automatic deletion does not reach those copies. To ask for a conversation to be deleted, message us on WhatsApp or call us on +966 59 329 6933; see “Your rights” below."
+        ],
+        "ar": [
+          "عندما تتواصل مع بونا عبر واتساب بشأن عقار أو استفسار، أو عندما نراسلك نحن بشأنه، تحتفظ بونا بتلك المحادثة — رسائلك وردودنا عليها — لخدمة استفسارك. وبالنسبة للصور والرسائل الصوتية والملفات، لا نحتفظ إلا بإشارة إلى نوعها، وباسم المستند، وبأي نص مرفق بها، دون المحتوى نفسه. ولا نحتفظ بالمحادثات الخاصة على الرقم نفسه، وإذا تبيّن أن محادثةً ما لا تتعلق باستفسار لدى بونا، حُذفت الرسائل التي حفظناها منها فوراً.",
+          "ويمكن لمالك المنشأة وأعضاء فريق بونا المخوّلين قراءة هذه المحادثات والرد عليك من خلال لوحة خاصة تتطلب تسجيل الدخول. وتصلك الردود المرسلة من اللوحة من رقم واتساب بونا +966 59 329 6933، وتسجّل اللوحة عضو الفريق الذي أرسل كل ردّ منها.",
+          "نحتفظ بالمحادثة مدةً أقصاها خمس سنوات بعد آخر رسالة فيها، ثم تُحذف تلقائياً. وتسري هذه المدة على الرسائل، أما سجل الاستفسار نفسه فيخضع لما ورد في «مدة الاحتفاظ بالبيانات» أدناه. وتبقى نسخة من المحادثة كذلك في خدمة واتساب التي يعمل عليها رقمنا وعلى هواتفنا، وفق شروط واتساب الخاصة، ولا يشمل الحذف التلقائي تلك النسخ. ولطلب حذف محادثة، راسلنا على واتساب أو اتصل بنا على الرقم +966 59 329 6933، وانظر «حقوقك» أدناه."
+        ]
+      }
+    },
+    {
+      "id": "ai-concierge",
+```
+
+Then flag the change in the *Changes to this policy* section, as the page promises (both languages; remove these two lines again on or after 2026-10-28, when the 30 days are up — the test does not pin them, so removing them needs no test change).
+
+Find (verbatim, once) in `src/data/privacy.json`:
+```json
+          "We will update this page when our practices change, for example if we enable analytics or change how we handle your data. The date at the top shows the current version; material changes will be flagged here for 30 days."
+        ],
+```
+Replace with:
+```json
+          "We will update this page when our practices change, for example if we enable analytics or change how we handle your data. The date at the top shows the current version; material changes will be flagged here for 30 days.",
+          "28 September 2026: we added “WhatsApp conversations with our team”. Bona now stores its WhatsApp conversations with clients about their enquiries, and authorised team members can read and answer them from a private dashboard."
+        ],
+```
+
+Find (verbatim, once) in `src/data/privacy.json`:
+```json
+          "سنحدّث هذه الصفحة عند تغيّر ممارساتنا، مثلاً إذا فعّلنا أدوات التحليل أو غيّرنا طريقة تعاملنا مع بياناتك. ويُبيّن التاريخ في أعلى الصفحة الإصدار الحالي. وسنشير إلى التغييرات الجوهرية في هذه الصفحة لمدة ثلاثين يوماً."
+        ]
+```
+Replace with:
+```json
+          "سنحدّث هذه الصفحة عند تغيّر ممارساتنا، مثلاً إذا فعّلنا أدوات التحليل أو غيّرنا طريقة تعاملنا مع بياناتك. ويُبيّن التاريخ في أعلى الصفحة الإصدار الحالي. وسنشير إلى التغييرات الجوهرية في هذه الصفحة لمدة ثلاثين يوماً.",
+          "28 سبتمبر 2026: أضفنا قسم «محادثات واتساب مع فريق بونا». فقد أصبحت بونا تحتفظ بمحادثات واتساب مع عملائها بشأن استفساراتهم، ويمكن لأعضاء فريقها المخوّلين قراءتها والرد عليها من خلال لوحة خاصة."
+        ]
+```
+
+Leave `"updated": "2026-09-28"` as it is: `origin/main` (51c3802) already carries that date and it is the day this phase is built. If the phase merges on a later day, set it to the merge day — the page shows it as the version date and in its JSON-LD `dateModified`, and the test only requires it to be 2026-09-28 or later.
+
+- [ ] **Step 4: Run the test and check the JSON**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox && node --test scripts/test/privacy-policy.test.mjs`
+Expected: PASS (3 tests, `ℹ fail 0`).
+
+Run: `cd /home/azoz778/bona-wt/team-inbox && node -e "const p = JSON.parse(require('fs').readFileSync('src/data/privacy.json', 'utf8')); console.log(p.updated, p.sections.length, p.sections.map((s) => s.id).join(' '))"`
+Expected: `2026-09-28 15 who-we-are what-this-site-collects whatsapp-enquiries whatsapp-conversations ai-concierge data-we-hold legal-basis retention sharing internal-dashboard international-transfers your-rights children security changes`
+
+- [ ] **Step 5: README** — eight exact replacements in `services/README.md`, in six places (a)–(f).
+
+(a) §4, the environment table: the poll default is 20 s now (P2-11).
+
+Find (verbatim, once) in `services/README.md`:
+```markdown
+| `BONA_WA_POLL_MS` | `45000` | poll interval; each tick reads the last 2 minutes of `chat/findMessages` |
+```
+Replace with:
+```markdown
+| `BONA_WA_POLL_MS` | `20000` | poll interval; each tick reads the last 2 minutes of `chat/findMessages`. 20 s since Phase 2 of the team inbox (it was 45 s); the VPS sets it in `bona-services.env`, and a value there wins over this default |
+```
+
+(b) §8, the data files table: `bona.db` now holds the inbox.
+
+Find (verbatim, once) in `services/README.md`:
+```markdown
+WhatsApp poller cursor, ad spend, fan-out queue, dashboard logins. Migrations run on start
+```
+Replace with:
+```markdown
+WhatsApp poller cursor, ad spend, fan-out queue, dashboard logins, the WhatsApp inbox (transcripts, outbox, read marks, gaps). Migrations run on start
+```
+
+(c) §10 **Store**: say where the transcripts live.
+
+Find (verbatim, once) in `services/README.md`:
+```markdown
+touchpoints, stage history, spend, fan-out queue, dashboard auth. The JSONL files stay as
+```
+Replace with:
+```markdown
+touchpoints, stage history, spend, fan-out queue, dashboard auth, and the transcripts of
+the chats in the Bona inbox (Dashboard → Inbox, below). The JSONL files stay as
+```
+
+(d) §10 **Poller**: windows are read by `readWindow` now (P2-3), in two places.
+
+Find (verbatim, once) in `services/README.md`:
+```markdown
+lte: <now> } }` — both bounds, because 2.3.7 ignores the filter without them — up to 5
+pages of 100, newest first, deduplicated on `key.id` (`wa_seen`, pruned after 7 days).
+```
+Replace with:
+```markdown
+lte: <now> } }` — both bounds, because 2.3.7 ignores the filter without them — read by
+`readWindow`: pages of 100, newest first, up to 5, and a window whose `total` is larger than
+that is split in halves by time instead (below); deduplicated on `key.id` (`wa_seen`,
+pruned after 7 days).
+```
+
+Find (verbatim, once) in `services/README.md`:
+```markdown
+(`wa.poll.abandoned`). Windows are read newest-first inside Evolution, so one holding more
+than 500 messages hides its *oldest* ones and cannot be asked again for them — that is a
+loss, not a deferral, and the log says `wa.poll.truncated`. It takes downtime long enough
+for 500 messages to pile up in a single window.
+```
+Replace with:
+```markdown
+(`wa.poll.abandoned`). Evolution answers newest-first and 5 pages of 100 is the cap, so a
+window holding more than 500 messages would hide its *oldest* ones. Its answer says how many
+the window holds (`total`), so `readWindow` (`lib/evolution.mjs`) splits such a window in
+halves on whole-second boundaries, at most 4 levels deep (16 pieces, about 8,000 messages),
+and hands the pieces over oldest-first. Only a piece still over the cap at the deepest level
+is read partially — a loss, not a deferral, because asking again returns the same newest
+pages — and the log says `wa.poll.truncated` with the number missed. That takes downtime long
+enough for thousands of messages to pile up in one window. An answer without a `total` falls
+back to reading pages until a short one.
+```
+
+(e) §10, the match paragraph: the 200-character snippet is no longer the only text kept.
+
+Find (verbatim, once) in `services/README.md`:
+```markdown
+characters are kept on the touchpoint of a *new* lead only. You get the note once, on
+```
+Replace with:
+```markdown
+characters are kept on the touchpoint of a *new* lead only (a chat in the Bona inbox keeps its
+whole conversation as well — Dashboard → Inbox, below). You get the note once, on
+```
+
+(f) `### Dashboard`: the whole number is also shown on a thread's header, then the **Inbox** paragraphs, then the inbox routes in the route table.
+
+Find (verbatim, once) in `services/README.md`:
+```markdown
+on `GET /dashboard/leads/:id` and `GET /v1/admin/leads/:id`.
+```
+Replace with:
+```markdown
+on `GET /dashboard/leads/:id`, `GET /v1/admin/leads/:id` and the header of a chat
+(`GET /dashboard/inbox/:leadId`).
+
+**Inbox (since 2026-09).** `GET /dashboard/inbox` is where the team reads and answers the
+Bona chats on the owner's number (design §4, 2026-09-27). A *chat* is a lead with a `wa_jid`
+or a `wa_lid`. Whether it belongs is **stored** in `leads.inbox_state` (`in`, `unsure`,
+`out`) and never re-derived, so a guess cannot slip in later through the `phone` rule:
+
+- *Certain*: an inbound message with a Ref code, click-to-WhatsApp ad context or a listing
+  id (`BONA-###`, `BONA-W###`) puts the chat `in` by itself, together with the 24 h of that
+  chat before it (the "Hi" before the Ref line). Web-form and concierge leads are certain
+  too; they become a chat once that person writes on WhatsApp.
+- *Unsure*: only the word Bona/بونا, or only the ±15-min click window. The lead is kept for
+  the statistics as before and goes to the owner-only **Unsure** tab (`?tab=unsure`; staff
+  get 403), where *Move to Bona inbox* or *Not a client* settles it.
+- *Owner-started*: the owner's own message in a 1:1 chat that carries a Bona site link
+  (`bona-real-estate.com`, legacy `bona.azoz.uk`), a listing id, or a document whose name or
+  caption says Bona or a listing id, puts that chat `in` (a new lead gets `match_method =
+  'owner_outbound'`) with the 24 h before it. Nothing else he types counts — TK and private
+  chats share the number. These leads fan out to no ad platform (no click is behind them),
+  send him no new-lead note, and are born answered (`first_reply_ts` set, `first_inbound_ts`
+  empty), so neither the waiting queue nor the Hermes `bona-unanswered-leads` watchdog flags
+  them.
+- *Owner buttons*: *Move to Bona inbox* (Unsure tab or the lead page) and *Add chat by phone
+  number* (`owner_added`) put a chat `in` and pull its last 30 days — he vouched for it.
+  *Not a client* puts it `out`: its transcript is purged there and then, and it never comes
+  back on its own.
+- *Never*: team numbers and the never-a-client list are not matched, stored or shown.
+  Adding a number to the never list moves its lead `out` and purges its transcript at once,
+  and every inbox page also refuses an excluded number.
+
+Schema v4 sorted the leads that already existed: `in` for `ref` / `ad_meta`, for web-form and
+concierge leads that are not legacy imports, and for a listing id in the first snippet;
+everything else `unsure`, for the owner to settle (expected on the live db at the Phase 2
+deploy: 18 in, 9 unsure).
+
+*What is stored* (`wa_messages`, `in` chats only): every message in both directions and who
+sent it — the client, a team member (by user id), Dana (from Phase 4), or `owner_number`
+(typed on the owner's phone, or sent for him by Lisa: WhatsApp cannot tell those apart).
+Text is capped at 8,000 characters. Media are placeholders only (`[voice note]`, `[audio]`,
+`[image]`, `[video]`, `[document: name]`, `[location]`, `[contact]`, `[sticker]`, else
+`[message]`) plus the caption, never the file. Reactions, deletes and edits, poll votes and
+key-distribution records are noise and are never stored. Evolution files one conversation
+under two jids — what arrives and what the owner types under the `@lid`, what the API sends
+to a number under the phone jid — so every per-chat read (join history, opening a thread,
+the check before a reply) asks for both and de-duplicates on `key.id`. A message the poller
+writes off after three tries becomes a `wa_gaps` row, shown in the thread as a message that
+could not be loaded, instead of vanishing. Unread means inbound messages newer than the last
+time that person opened the thread (a new member starts from the day the account was made);
+the total is the Inbox count in the nav.
+
+*Retention.* Five years after a chat's last message (`leads.last_msg_ts`) its transcript —
+messages, reply outbox rows, gaps and read marks — is deleted; the lead row stays for
+attribution. *Not a client* and a never-list add purge at once. A login code's outbox row
+never holds the code (`text` is NULL) and is pruned after 2 days. The privacy page says all
+of this, including the copies that stay in Evolution's own database and on the phones, which
+this retention does not reach.
+
+*Replies* go out from the owner's number (`BONA_WA_INSTANCE`) and only into `in` chats.
+`POST /v1/admin/inbox/:leadId/reply` sends to the lead's **phone** jid (`…@s.whatsapp.net`);
+a chat known only by its `@lid` is refused (`lid_only`) and answered from the phone, because
+`lid` digits are not a phone number. Every reply passes the gate the login codes pass
+(`lib/wa-send.mjs`): the Sending switch, 20 a minute overall, 6 a minute per recipient,
+30 a minute per person, and 500 a day — counted from `wa_outbox` over a rolling 24 h
+(messages to the owner's own chat do not count), so a restart does not reset it. The form
+carries a random `send_id`, and its outbox row is written before the HTTP call, so a double
+submit gets the first answer back, never a second message. A reply is `accepted` only when
+Evolution answers with a `key.id`. A timeout, a 502/504 or a 2xx without an id is
+`uncertain`: the thread says to check WhatsApp, the text is not put back (it may have gone),
+and nothing retries it. When the message turns up in a poll the row is settled — by its
+`key.id`, or else the same lead and the same text within 2 minutes — and the bubble gets its
+sender; a row interrupted by a restart becomes `uncertain` (`interrupted`). The form also
+carries the newest message time the person saw, and the chat is refreshed from Evolution
+just before the check: anything newer, in either direction, holds the reply (`stale`) with
+the text kept in the box. The first person to reply becomes the chat's handler when it has
+none (a reply typed on the owner's phone makes the owner the handler); anyone can hand it to
+another active member or to nobody. Audit rows `reply_sent`, `handler`, `inbox_move`,
+`inbox_out` and `inbox_add` carry ids and a status — never text or a number. The first real
+client reply from the dashboard is sent with the owner beside it (design D14).
+
+*Polling and upkeep.* The poller runs every 20 s (`BONA_WA_POLL_MS`, §4). The VPS sets it in
+`~/.secrets/bona-services.env`, and a value there wins over the default — a stale
+`BONA_WA_POLL_MS=45000` keeps the old pace. Opening a thread also reads that chat at once,
+but only messages since 24 h before it joined the inbox, and never for more than ~3 s.
+Inbox upkeep (`app.inboxMaintenance()`) runs at start-up and then every 24 h: the 5-year
+purge, login-code rows older than 2 days, and `pending` sends older than 2 minutes marked
+`uncertain` (a process that died mid-send cannot know whether the message went); then every
+`in` chat with nothing stored yet fetches the history an automatic join takes (logged
+`inbox.catchup`). That is how the chats schema v4 put `in` get a thread on day one; one whose
+history comes back empty stays empty and is asked again on the next run.
+```
+
+Find (verbatim, once) in `services/README.md`:
+```markdown
+| `POST /v1/admin/spend` | `{day, platform, campaign_id, campaign_name, spend_sar, clicks?, impressions?}`, upserted on `(day, platform, campaign_id)` |
+```
+Replace with:
+```markdown
+| `POST /v1/admin/spend` | `{day, platform, campaign_id, campaign_name, spend_sar, clicks?, impressions?}`, upserted on `(day, platform, campaign_id)` |
+| `GET /dashboard/inbox` | the Bona chats, unread first, then newest: name, masked number, last message, stage, handler, *Needs a human*. The owner also gets the **Unsure** tab (`?tab=unsure`; 403 for staff) and *Add chat by phone number* |
+| `GET /dashboard/inbox/:leadId` | one chat, refreshed from Evolution first and then marked read: bubbles labelled client / team member / Dana / the owner's number, gaps, sends still open, the reply box and the handler picker; the number in full in the header. 404 unless it is an `in` chat and not excluded |
+| `POST /v1/admin/inbox/:leadId/reply` | any member: one reply through the shared gate. Sent → 303 to the thread `?ok=sent`; uncertain → 303 `?error=send_uncertain`; any other refusal renders the thread again with the text kept and a fresh `send_id` — never a redirect with message text in the URL |
+| `POST /v1/admin/inbox/:leadId/handler` | any member: hand the chat to an active member, or to nobody |
+| `POST /v1/admin/inbox/:leadId/move` · `…/out` | owner: *Move to Bona inbox* (pulls 30 days) · *Not a client* (`out`, transcript purged now) |
+| `POST /v1/admin/inbox/add` | owner: *Add chat by phone number* — creates or reuses the lead (`owner_added`), puts it `in`, pulls 30 days |
+```
+
+- [ ] **Step 6: Check the README edits landed**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox && grep -c -e '^\*\*Inbox (since 2026-09)\.\*\*' -e '^| `BONA_WA_POLL_MS` | `20000`' -e '^| `GET /dashboard/inbox/:leadId` |' -e 'at most 4 levels deep' -e 'dashboard logins, the WhatsApp inbox' services/README.md`
+Expected: `5`
+
+- [ ] **Step 7: Run the suites**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox && npm test`
+Expected in this worktree: `ℹ tests 142`, `ℹ pass 140`, `ℹ fail 2`. The two failures are `scripts/test/approval-package.test.mjs` and `scripts/test/social-quality.test.mjs`, which cannot load the `sharp` package: this worktree has no `node_modules` (the same 2 fail at 51c3802 before this task — 139 tests, 137 pass). Do not install anything to fix them; they do not read `privacy.json`. For a clean gate without them:
+
+Run: `cd /home/azoz778/bona-wt/team-inbox && node --test $(ls scripts/test/*.test.mjs | grep -v -e approval-package -e social-quality)`
+Expected: `ℹ tests 140`, `ℹ pass 140`, `ℹ fail 0`.
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/*.test.mjs`
+Expected: all pass, `ℹ fail 0` — the same count as after Task 12 (this task adds no services test and no services test reads the README or the privacy page).
+
+- [ ] **Step 8: Commit**
+
+```bash
+cd /home/azoz778/bona-wt/team-inbox && git add scripts/test/privacy-policy.test.mjs src/data/privacy.json services/README.md
+git commit -m "Privacy page and README: say what the Bona inbox stores and who reads it
+
+The privacy page gets a WhatsApp conversations section (EN + AR): what is
+stored, who can read and reply, five years after the last message, the copies
+in the WhatsApp service and on our phones, and how to ask for deletion. Dana
+stays out of it until Phase 4. The README documents the inbox for the
+operator and corrects the poll default and the truncation note.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 14: Dashboard replies ship switched off; the owner turns them on (D14)
+
+Why this is its own task: after the deploy (Task 15, Step 9), every signed-in team member can open the inbox, and Sending is on by default (`SETTINGS_DEFAULTS.sending_enabled = '1'`, 2 staff exist). Without a switch of its own, a staff member could send the first real client message from the dashboard before the owner has been asked, and D14 says that first message happens with him. So replies ship **off**. A new owner setting, `inbox_replies`, defaults to `'0'` and fails closed like `sending_enabled`. While it is off: the thread draws a sentence where the reply box would be, `sender.reply` refuses `{ ok: false, error: 'replies_off' }` before it writes anything, and the route answers 503. The owner turns it on with one button on the Team page (owner-only, audited `setting`) at the STOP in Task 15. It is not the Sending switch: login codes still go while replies are off, so staff can still sign in and read the inbox.
+
+No migration: the `settings` table exists since v3, and a missing row reads as the default `'0'`. Dana (Phase 4) sends through `sendTo` under her own `dana_enabled` switch, so this switch only covers `reply`.
+
+**Files:**
+- Modify: `services/api/lib/team.mjs` (`inbox_replies` in `SETTINGS_DEFAULTS`/`SETTINGS_ALLOWED`, `repliesEnabled()`)
+- Modify: `services/api/lib/wa-send.mjs` (`reply` refuses `replies_off` right after the send-id checks)
+- Modify: `services/api/lib/dashboard/render-inbox.mjs` (`threadPage` gains `repliesEnabled = false`)
+- Modify: `services/api/lib/dashboard/render.mjs` (`MESSAGES.replies_off`)
+- Modify: `services/api/lib/dashboard/render-team.mjs` (the Team page switch)
+- Modify: `services/api/lib/dashboard/routes.mjs` (Team page and thread pass the switch; `saveSetting` takes either switch; `replies_off` → 503)
+- Modify: `services/README.md` (the Replies paragraph Task 13 wrote)
+- Test: `services/api/test/team.test.mjs` (one test)
+- Test: `services/api/test/wa-send.test.mjs` (the harness turns replies on; one test)
+- Test: `services/api/test/dashboard-render-inbox.test.mjs` (the `thread()` helper passes `repliesEnabled: true`; one test)
+- Test: `services/api/test/dashboard-render-team.test.mjs` (one test)
+- Test: `services/api/test/dashboard-inbox.test.mjs` (the `withInbox` harness turns replies on; one test)
+
+- [ ] **Step 1: Write the failing test for the setting**
+
+In `services/api/test/team.test.mjs`, find:
+
+```js
+  assert.equal(codeOf(() => team.setSetting('dana_enabled', '1')), 'bad_setting', 'Phase 4 adds that key');
+  s.close();
+});
+```
+
+Replace with:
+
+```js
+  assert.equal(codeOf(() => team.setSetting('dana_enabled', '1')), 'bad_setting', 'Phase 4 adds that key');
+  s.close();
+});
+
+test('replies to clients from the dashboard ship off, go on only with an exact "1", and fail closed', () => {
+  const { s, team } = teamHarness();
+  assert.equal(team.getSetting('inbox_replies'), '0');
+  assert.equal(team.repliesEnabled(), false, 'off until the owner turns them on (design D14)');
+  assert.equal(team.sendingEnabled(), true, 'a separate switch: login codes do not wait for it');
+  team.setSetting('inbox_replies', '1', { by: 'USR-1' });
+  assert.equal(team.repliesEnabled(), true);
+  assert.equal(s.db.prepare("SELECT updated_by FROM settings WHERE key = 'inbox_replies'").get().updated_by, 'USR-1');
+  team.setSetting('inbox_replies', '0');
+  assert.equal(team.repliesEnabled(), false);
+  assert.equal(codeOf(() => team.setSetting('inbox_replies', 'yes')), 'bad_setting_value');
+  assert.equal(codeOf(() => team.setSetting('inbox_replies', '')), 'bad_setting_value');
+  s.db.prepare("INSERT OR REPLACE INTO settings (key, value, updated, updated_by) VALUES ('inbox_replies','true',?,NULL)").run(NOW);
+  assert.equal(team.repliesEnabled(), false, "fail closed on anything but exactly '1'");
+  s.close();
+});
+```
+
+- [ ] **Step 2: Run it to see it fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/team.test.mjs`
+Expected: FAIL — exactly the new test, on its first assertion: `getSetting('inbox_replies')` is `null` where `'0'` is expected, because the key does not exist yet.
+
+- [ ] **Step 3: Add the setting**
+
+In `services/api/lib/team.mjs`, find:
+
+```js
+/** Every setting that exists, with its default. Phase 4 adds `dana_enabled: '0'`. */
+export const SETTINGS_DEFAULTS = { sending_enabled: '1' };
+/** The only values each setting may hold. A key with no entry here accepts any string. */
+export const SETTINGS_ALLOWED = { sending_enabled: ['0', '1'] };
+```
+
+Replace with:
+
+```js
+/**
+ * Every setting that exists, with its default. Phase 4 adds `dana_enabled: '0'`.
+ * `inbox_replies` ships '0': the team can read the Bona inbox from the day it goes live,
+ * but no reply reaches a client until the owner turns replies on — the first real client
+ * message from the dashboard is sent with him (design D14).
+ */
+export const SETTINGS_DEFAULTS = { sending_enabled: '1', inbox_replies: '0' };
+/** The only values each setting may hold. A key with no entry here accepts any string. */
+export const SETTINGS_ALLOWED = { sending_enabled: ['0', '1'], inbox_replies: ['0', '1'] };
+```
+
+Then find:
+
+```js
+  /** Fail closed: only an exact `'1'` is ON. Anything else — including old or corrupt data — is OFF. */
+  const sendingEnabled = () => getSetting('sending_enabled') === '1';
+
+  return {
+    ensureOwner, getUser, getUserByPhone, listUsers, addUser, deactivateUser, reactivateUser, setRole, touchLogin,
+    addNever, removeNever, listNever, isExcludedPhone,
+    getSetting, setSetting, sendingEnabled,
+  };
+```
+
+Replace with:
+
+```js
+  /** Fail closed: only an exact `'1'` is ON. Anything else — including old or corrupt data — is OFF. */
+  const sendingEnabled = () => getSetting('sending_enabled') === '1';
+  /** Replies to clients from the dashboard: fails closed the same way, and ships off. */
+  const repliesEnabled = () => getSetting('inbox_replies') === '1';
+
+  return {
+    ensureOwner, getUser, getUserByPhone, listUsers, addUser, deactivateUser, reactivateUser, setRole, touchLogin,
+    addNever, removeNever, listNever, isExcludedPhone,
+    getSetting, setSetting, sendingEnabled, repliesEnabled,
+  };
+```
+
+- [ ] **Step 4: Run it to see it pass**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/team.test.mjs`
+Expected: PASS — every test in the file, the new one included (the existing `dana_enabled` test still gets `bad_setting`: that key is still unknown).
+
+- [ ] **Step 5: Write the failing sender test.** The harness turns replies on, so the reply tests Task 7 wrote keep testing what a reply does once the owner has switched them on. `replies: false` is the state that ships.
+
+In `services/api/test/wa-send.test.mjs`, find:
+
+```js
+function harness({ reply = () => ({ status: 201, body: { key: { id: 'KEY-1' } } }), env = ENV, limits } = {}) {
+  const s = openDb(':memory:');
+  let clock = NOW;
+  const team = createTeam(s, { now: () => clock });
+```
+
+Replace with:
+
+```js
+function harness({ reply = () => ({ status: 201, body: { key: { id: 'KEY-1' } } }), env = ENV, limits, replies = true } = {}) {
+  const s = openDb(':memory:');
+  let clock = NOW;
+  const team = createTeam(s, { now: () => clock });
+  // Dashboard replies ship switched off (design D14). These tests are about what a reply
+  // does once the owner has turned them on; `replies: false` is the state that ships.
+  if (replies) team.setSetting('inbox_replies', '1');
+```
+
+Then insert the new test before the day-count reply test. Find:
+
+```js
+test('reply: its own pending row is not counted twice against the day', async () => {
+```
+
+Replace with:
+
+```js
+test('reply: replies_off until the owner turns dashboard replies on — nothing written, nothing sent, codes still go', async () => {
+  const h = harness({ replies: false, reply: (n) => ({ status: 201, body: { key: { id: `KEY-${n}` } } }) });
+  const staff = staffOf(h);
+  seedChat(h);
+  assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: false, error: 'replies_off' });
+  assert.equal(h.calls.length, 0);
+  assert.equal(outboxRows(h).length, 0, 'no row, so the same send id still works once replies are on');
+  const lead = h.s.getLead('L-1');
+  assert.equal(lead.handler_user_id, null);
+  assert.equal(lead.first_reply_ts, null);
+
+  // A login code is not a reply: the team can still sign in while replies are off.
+  const code = await h.sender.sendTo({ jid: '966500000077@s.whatsapp.net', text: 'Bona dashboard code: 123456 (valid 10 min)', kind: 'code' });
+  assert.equal(code.ok, true);
+  assert.equal(h.calls.length, 1);
+
+  h.team.setSetting('inbox_replies', '1');
+  assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: true, status: 'accepted', sendId: SID, keyId: 'KEY-2' });
+
+  // Off again: the reply that went keeps its answer; a new one is refused before anything is written.
+  h.team.setSetting('inbox_replies', '0');
+  assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: true, duplicate: true, status: 'accepted', sendId: SID, error: null });
+  assert.deepEqual(await h.sender.reply(replyArgs(staff, { sendId: 'sid_fedcba9876543210' })), { ok: false, error: 'replies_off' });
+  assert.equal(h.inbox.getOutbox('sid_fedcba9876543210'), null);
+  assert.equal(h.calls.length, 2);
+  h.s.close();
+});
+
+test('reply: its own pending row is not counted twice against the day', async () => {
+```
+
+- [ ] **Step 6: Run it to see it fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/wa-send.test.mjs`
+Expected: FAIL — 1 of 49, the new test. The reply goes out (`{ ok: true, status: 'accepted', keyId: 'KEY-1', … }` where `{ ok: false, error: 'replies_off' }` is expected), because `reply` does not ask the switch yet. The other 48 pass: the harness turns replies on, and nothing reads the setting yet.
+
+- [ ] **Step 7: The sender refuses while replies are off.** In `services/api/lib/wa-send.mjs` (inside `reply`, as Task 7 wrote it), find:
+
+```js
+    const existing = inbox.getOutbox(sendId);
+    if (existing) return answerFor(existing, { leadId, userId });
+```
+
+Replace with:
+
+```js
+    const existing = inbox.getOutbox(sendId);
+    if (existing) return answerFor(existing, { leadId, userId });
+    // Replies to clients ship switched off; the owner turns them on from the Team page
+    // (design D14: the first real client message from the dashboard is sent with him).
+    // Asked before anything is written, so a refusal leaves no row and the same send id
+    // still works once they are on. A send id decided above keeps its own answer.
+    if (!team.repliesEnabled()) return { ok: false, error: 'replies_off' };
+```
+
+- [ ] **Step 8: Run it to see it pass**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/wa-send.test.mjs`
+Expected: PASS — 49 tests, 0 fail.
+
+- [ ] **Step 9: Write the failing screen and route tests**
+
+In `services/api/test/dashboard-render-inbox.test.mjs`, the `thread()` helper draws a thread with replies on, the way every existing thread test means it. Find:
+
+```js
+  sendId: 'SND-abcdefghijklmnop', seenTs: NOW - HOUR, sendingEnabled: true, canReply: true, now: NOW, ...over,
+```
+
+Replace with:
+
+```js
+  sendId: 'SND-abcdefghijklmnop', seenTs: NOW - HOUR, sendingEnabled: true, canReply: true, repliesEnabled: true, now: NOW, ...over,
+```
+
+Then, in the same file, find:
+
+```js
+test('the handler picker offers active people and Nobody, with the current handler chosen', () => {
+```
+
+Replace with:
+
+```js
+test('no reply box until the owner turns dashboard replies on, and only an owner is pointed to the Team page', () => {
+  const offOwner = thread({ repliesEnabled: false });
+  assert.match(offOwner, /Replies from the dashboard are not switched on yet \(<a href="\/dashboard\/team">Team page<\/a>\)\./);
+  assert.doesNotMatch(offOwner, /\/reply"/);
+  assert.doesNotMatch(offOwner, /name="text"/);
+  assert.doesNotMatch(offOwner, /name="send_id"/);
+
+  const offStaff = thread({ me: STAFF, repliesEnabled: false });
+  assert.match(offStaff, /Replies from the dashboard are not switched on yet — the owner turns them on\./);
+  assert.doesNotMatch(offStaff, /\/reply"/);
+  assert.doesNotMatch(offStaff, /href="\/dashboard\/team"/, 'a staff page never carries the Team link');
+
+  assert.match(thread({ repliesEnabled: 'yes' }), /not switched on yet/, 'only a real true turns the box on');
+  const leftOut = threadPage({
+    me: OWNER, lead: LEAD, messages: [], users: USERS, sendId: 'SND-abcdefghijklmnop', seenTs: NOW, sendingEnabled: true, canReply: true, now: NOW,
+  });
+  assert.match(leftOut, /not switched on yet/, 'a caller that does not say gets no reply box');
+
+  const bothOff = thread({ repliesEnabled: false, sendingEnabled: false });
+  assert.match(bothOff, /Sending is off/, 'the switch that stops everything is named first');
+  assert.doesNotMatch(bothOff, /not switched on yet/);
+  const lid = thread({ repliesEnabled: false, lead: { ...LEAD, phone_e164: null, wa_jid: null }, canReply: false });
+  assert.match(lid, /reply from your phone/, 'a chat with no number says so, whatever the switches are');
+
+  assert.match(thread({ repliesEnabled: false, error: 'replies_off' }), /<div class="err">Replies from the dashboard are not switched on yet\.<\/div>/);
+  assert.equal(knownError('replies_off'), 'replies_off');
+  assert.doesNotMatch(loginPage({ step: 'request', error: 'replies_off' }), /class="err"/, 'never on the login page');
+});
+
+test('the handler picker offers active people and Nobody, with the current handler chosen', () => {
+```
+
+In `services/api/test/dashboard-render-team.test.mjs` (the last test in the file), find:
+
+```js
+  assert.match(html, /action="\/v1\/admin\/team\/USR%2F1%3Fx%3D1\/deactivate"/);
+  assert.doesNotMatch(html, /action="\/v1\/admin\/team\/USR\/1/);
+});
+```
+
+Replace with:
+
+```js
+  assert.match(html, /action="\/v1\/admin\/team\/USR%2F1%3Fx%3D1\/deactivate"/);
+  assert.doesNotMatch(html, /action="\/v1\/admin\/team\/USR\/1/);
+});
+
+test('the Team page carries the owner\'s switch for replies to clients, off until he turns it on', () => {
+  const off = teamPage({ me: OWNER, users: [OWNER], sendingEnabled: true });
+  assert.match(off, /<h2 style="margin-top:28px">Replies to clients from the dashboard<\/h2>/);
+  assert.match(off, /Off\. Nobody can send a client a message from the dashboard yet/);
+  assert.match(off, /name="inbox_replies" value="1"/, 'offers to turn replies on');
+  assert.match(off, /Turn replies on/);
+  assert.match(off, /name="sending_enabled" value="0"/, 'the Sending switch is still its own form');
+
+  const on = teamPage({ me: OWNER, users: [OWNER], sendingEnabled: true, repliesEnabled: true });
+  assert.match(on, /On\. Everyone on the team can answer Bona inbox chats/);
+  assert.match(on, /name="inbox_replies" value="0"/);
+  assert.match(on, /Turn replies off/);
+  assert.doesNotMatch(on, /name="inbox_replies" value="1"/);
+
+  assert.match(teamPage({ me: OWNER, users: [OWNER], repliesEnabled: 'yes' }), /name="inbox_replies" value="1"/, 'only a real true counts as on');
+});
+```
+
+In `services/api/test/dashboard-inbox.test.mjs` (the `withInbox` harness), find:
+
+```js
+  const team = createTeam(db, { now });
+  const inboxStore = createInboxStore(db, { now });
+```
+
+Replace with:
+
+```js
+  const team = createTeam(db, { now });
+  // Dashboard replies ship switched off (design D14). These tests are about what a reply
+  // does once the owner has turned them on; the switch itself has its own test.
+  team.setSetting('inbox_replies', '1');
+  const inboxStore = createInboxStore(db, { now });
+```
+
+Then, in the same file, find:
+
+```js
+test('anyone on the team can hand a chat to someone else, and it is audited by id', async () => {
+```
+
+Replace with:
+
+```js
+test('replies ship switched off: the chat reads but has no reply box, a posted reply goes nowhere, and only the owner turns them on', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    h.team.setSetting('inbox_replies', '0');
+    const staff = await h.staff();
+    const boss = await h.boss();
+
+    const page = await h.get('/dashboard/inbox/LEAD-A', { cookie: staff });
+    assert.equal(page.status, 200, 'the chat can still be read');
+    const html = await page.text();
+    assert.ok(html.includes('Is BONA-012 still free?'));
+    assert.match(html, /Replies from the dashboard are not switched on yet/);
+    assert.doesNotMatch(html, /action="\/v1\/admin\/inbox\/LEAD-A\/reply"/);
+
+    h.tick(120_000);
+    const form = { text: 'First words to a client', send_id: 'send-off-0000000000001', seen_ts: String(NOW + 60_000) };
+    const refused = await replyTo(h, 'LEAD-A', form, staff);
+    assert.equal(refused.status, 503);
+    assertLocked(refused);
+    assert.match(await refused.text(), /<div class="err">Replies from the dashboard are not switched on yet\.<\/div>/);
+    assert.equal(h.evo.calls.length, 0, 'nothing reached WhatsApp');
+    assert.equal(h.inboxStore.getOutbox('send-off-0000000000001'), null, 'and nothing was written');
+    assert.ok(!h.app.audit.recent(50).some((r) => r.action === 'reply_sent'));
+
+    const denied = await h.postForm('/v1/admin/settings', { inbox_replies: '1' }, { cookie: staff });
+    assert.equal(denied.status, 403);
+    assert.deepEqual(await denied.json(), { error: 'owner_only' });
+    assert.equal(h.team.repliesEnabled(), false);
+
+    const both = await h.postForm('/v1/admin/settings', { inbox_replies: '1', sending_enabled: '1' }, { cookie: boss });
+    assert.equal(both.headers.get('location'), '/dashboard/team?error=bad_setting', 'one switch per post');
+    assert.equal(h.team.repliesEnabled(), false);
+
+    assert.match(await (await h.get('/dashboard/team', { cookie: boss })).text(), /name="inbox_replies" value="1"/, 'the Team page offers to turn them on');
+    const on = await h.postForm('/v1/admin/settings', { inbox_replies: '1' }, { cookie: boss });
+    assert.equal(on.status, 303);
+    assert.equal(on.headers.get('location'), '/dashboard/team?ok=setting');
+    assert.equal(h.team.repliesEnabled(), true);
+    const audited = h.app.audit.recent(50).filter((r) => r.action === 'setting');
+    assert.equal(audited.length, 1);
+    assert.equal(audited[0].user_id, h.owner.user_id);
+    assert.equal(audited[0].target, 'inbox_replies');
+    assert.deepEqual(audited[0].meta, { value: '1' });
+
+    const sent = await replyTo(h, 'LEAD-A', form, staff);
+    assert.equal(sent.headers.get('location'), '/dashboard/inbox/LEAD-A?ok=sent', 'the same form goes once they are on');
+    assert.equal(h.evo.calls.length, 1);
+  });
+});
+
+test('anyone on the team can hand a chat to someone else, and it is audited by id', async () => {
+```
+
+- [ ] **Step 10: Run them to see them fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/dashboard-render-inbox.test.mjs api/test/dashboard-render-team.test.mjs api/test/dashboard-inbox.test.mjs`
+Expected: FAIL — exactly the three new tests, one per file. `render-inbox`: the thread still draws the reply form with `repliesEnabled: false` (no "not switched on yet" sentence). `render-team`: there is no *Replies to clients from the dashboard* section. `dashboard-inbox`: the thread still has the reply box, so the test fails on its first `not switched on yet` match. (A posted reply would come back 502 `send_failed`, because the route has no mapping for `replies_off` yet.) Every other test in the three files passes: both harnesses turn replies on.
+
+- [ ] **Step 11: Implement the screens and the routes**
+
+(a) The thread. In `services/api/lib/dashboard/render-inbox.mjs`, find:
+
+```js
+ * The reply box is replaced by one plain sentence when a reply cannot go: a chat with
+ * no phone number (an `@lid` is not something we send to), or the owner's Sending switch
+ * off. The form carries `send_id` (a double tap sends once) and `seen_ts`, the newest
+ * message this page showed, so a reply written against an old view is held back.
+ */
+export function threadPage({
+  me, lead, messages, gaps = [], outbox = [], users = [], sendId, seenTs, sendingEnabled, canReply,
+  draft = '', ok = null, error = null, now = Date.now(),
+}) {
+```
+
+Replace with:
+
+```js
+ * The reply box is replaced by one plain sentence when a reply cannot go: a chat with
+ * no phone number (an `@lid` is not something we send to), the owner's Sending switch
+ * off, or replies from the dashboard not switched on yet (they ship off, design D14,
+ * and only a real `true` turns them on). The form carries `send_id` (a double tap sends
+ * once) and `seen_ts`, the newest message this page showed, so a reply written against
+ * an old view is held back.
+ */
+export function threadPage({
+  me, lead, messages, gaps = [], outbox = [], users = [], sendId, seenTs, sendingEnabled, canReply, repliesEnabled = false,
+  draft = '', ok = null, error = null, now = Date.now(),
+}) {
+```
+
+Then, in the same file, find:
+
+```js
+  } else if (!sendingEnabled) {
+    // Only an owner can open the Team page, so only an owner gets it as a link: a
+    // staff page never contains that link at all (Phase 1 rule).
+    reply = `<p class="muted">Sending is off (${owner ? '<a href="/dashboard/team">Team page</a>' : 'Team page'}).</p>`;
+  } else {
+```
+
+Replace with:
+
+```js
+  } else if (!sendingEnabled) {
+    // Only an owner can open the Team page, so only an owner gets it as a link: a
+    // staff page never contains that link at all (Phase 1 rule).
+    reply = `<p class="muted">Sending is off (${owner ? '<a href="/dashboard/team">Team page</a>' : 'Team page'}).</p>`;
+  } else if (repliesEnabled !== true) {
+    // Replies ship switched off until the owner turns them on (design D14). Same link
+    // rule as above; the sender refuses a posted reply (`replies_off`) on its own too.
+    reply = owner
+      ? '<p class="muted">Replies from the dashboard are not switched on yet (<a href="/dashboard/team">Team page</a>).</p>'
+      : '<p class="muted">Replies from the dashboard are not switched on yet — the owner turns them on.</p>';
+  } else {
+```
+
+(b) The message a refused reply shows. In `services/api/lib/dashboard/render.mjs` (the end of `MESSAGES` as Task 10 left it), find:
+
+```js
+  not_a_chat: 'That lead has no WhatsApp chat yet — it joins once they write on WhatsApp.',
+};
+```
+
+Replace with:
+
+```js
+  not_a_chat: 'That lead has no WhatsApp chat yet — it joins once they write on WhatsApp.',
+  replies_off: 'Replies from the dashboard are not switched on yet.',
+};
+```
+
+(c) The Team page switch. In `services/api/lib/dashboard/render-team.mjs`, find:
+
+```js
+ * The Team page (owner only): who can log in, the numbers that are never a client, and
+ * the switch for everything the dashboard sends from the owner's WhatsApp.
+```
+
+Replace with:
+
+```js
+ * The Team page (owner only): who can log in, the numbers that are never a client, and
+ * the switches for what the dashboard sends from the owner's WhatsApp — everything
+ * (Sending), and replies to clients (off until the owner turns them on, design D14).
+```
+
+Then find:
+
+```js
+export function teamPage({ me, users = [], never = [], sendingEnabled = true, ok = null, error = null }) {
+```
+
+Replace with:
+
+```js
+export function teamPage({ me, users = [], never = [], sendingEnabled = true, repliesEnabled = false, ok = null, error = null }) {
+  // Fails closed like the setting itself: only a real `true` from team.repliesEnabled() is on.
+  const repliesOn = repliesEnabled === true;
+```
+
+Then find:
+
+```js
+${post('/v1/admin/settings', sendingEnabled ? 'Turn sending off' : 'Turn sending on', { sending_enabled: sendingEnabled ? '0' : '1' })}`;
+```
+
+Replace with:
+
+```js
+${post('/v1/admin/settings', sendingEnabled ? 'Turn sending off' : 'Turn sending on', { sending_enabled: sendingEnabled ? '0' : '1' })}
+
+<h2 style="margin-top:28px">Replies to clients from the dashboard</h2>
+<p class="sub">${repliesOn
+    ? 'On. Everyone on the team can answer Bona inbox chats from the dashboard; the reply goes from your number (while sending above is on).'
+    : 'Off. Nobody can send a client a message from the dashboard yet; the team can still read the inbox, and login codes still go.'}</p>
+${post('/v1/admin/settings', repliesOn ? 'Turn replies off' : 'Turn replies on', { inbox_replies: repliesOn ? '0' : '1' })}`;
+```
+
+(d) The routes. In `services/api/lib/dashboard/routes.mjs` (`teamView`), find:
+
+```js
+      never: team.listNever(),
+      sendingEnabled: team.sendingEnabled(),
+```
+
+Replace with:
+
+```js
+      never: team.listNever(),
+      sendingEnabled: team.sendingEnabled(),
+      repliesEnabled: team.repliesEnabled(),
+```
+
+Then (`saveSetting`, unchanged since Phase 1), find:
+
+```js
+  function saveSetting(ctx) {
+    const { fields, me } = ctx;
+    return teamWrite(ctx, () => {
+      if (!Object.hasOwn(fields, 'sending_enabled')) throw new TeamError('bad_setting');
+      // Fails closed: `asText` turns anything that is not literally a string (a JSON
+      // `false`, `null`, a number) into `''`, and `team.setSetting` itself refuses any
+      // value outside `SETTINGS_ALLOWED` — including `''`, `"off"`, `"true"` — before
+      // it ever reaches the row. Coercing here (the old `=== '0' ? '0' : '1'`) would
+      // have defeated that check by handing it only ever '0' or '1' to approve.
+      const value = asText(fields.sending_enabled);
+      team.setSetting('sending_enabled', value, { by: me.user_id });
+      audit?.record({ userId: me.user_id, action: 'setting', target: 'sending_enabled', meta: { value } });
+    }, 'setting');
+  }
+```
+
+Replace with:
+
+```js
+  /** The owner's switches, as the Team page posts them: one per form. */
+  const SWITCHES = ['sending_enabled', 'inbox_replies'];
+
+  function saveSetting(ctx) {
+    const { fields, me } = ctx;
+    return teamWrite(ctx, () => {
+      // Exactly one switch per post, the way the Team page's buttons send it: none, or
+      // two at once, is refused rather than guessed at.
+      const keys = SWITCHES.filter((k) => Object.hasOwn(fields, k));
+      if (keys.length !== 1) throw new TeamError('bad_setting');
+      const [key] = keys;
+      // Fails closed: `asText` turns anything that is not literally a string (a JSON
+      // `false`, `null`, a number) into `''`, and `team.setSetting` itself refuses any
+      // value outside `SETTINGS_ALLOWED` — including `''`, `"off"`, `"true"` — before
+      // it ever reaches the row. Coercing here (the old `=== '0' ? '0' : '1'`) would
+      // have defeated that check by handing it only ever '0' or '1' to approve.
+      const value = asText(fields[key]);
+      team.setSetting(key, value, { by: me.user_id });
+      audit?.record({ userId: me.user_id, action: 'setting', target: key, meta: { value } });
+    }, 'setting');
+  }
+```
+
+Then (`REPLY_REFUSALS`, from Task 12), find:
+
+```js
+    sending_disabled: [503, 'sending_disabled'],
+```
+
+Replace with:
+
+```js
+    sending_disabled: [503, 'sending_disabled'],
+    replies_off: [503, 'replies_off'],
+```
+
+Then (`renderThread`, from Task 12), find:
+
+```js
+      sendingEnabled: team.sendingEnabled(),
+      canReply: replyJidFor(lead) !== null,
+```
+
+Replace with:
+
+```js
+      sendingEnabled: team.sendingEnabled(),
+      canReply: replyJidFor(lead) !== null,
+      repliesEnabled: team.repliesEnabled(),
+```
+
+(e) The README. In `services/README.md` (the *Replies* paragraph Task 13 wrote), find:
+
+```markdown
+`inbox_out` and `inbox_add` carry ids and a status — never text or a number. The first real
+client reply from the dashboard is sent with the owner beside it (design D14).
+```
+
+Replace with:
+
+```markdown
+`inbox_out` and `inbox_add` carry ids and a status — never text or a number. Replies ship
+**switched off** (`settings.inbox_replies` = `'0'`): the thread shows "not switched on yet"
+in place of the box, and `reply` refuses `replies_off` (503) before anything is written,
+until the owner switches *Replies to clients from the dashboard* on from the Team page
+(one switch per post, audited `setting`). That is how the first real client reply from the
+dashboard is sent with the owner beside it (design D14). Login codes do not wait for it.
+```
+
+- [ ] **Step 12: Run the task's tests and the hostile-input scripts**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/team.test.mjs api/test/wa-send.test.mjs api/test/dashboard-render-inbox.test.mjs api/test/dashboard-render-team.test.mjs api/test/dashboard-inbox.test.mjs api/test/dashboard-routes.test.mjs`
+Expected: PASS, 0 fail. That is 49 in `wa-send`, 16 in `dashboard-render-inbox`, 7 in `dashboard-render-team` and 16 in `dashboard-inbox`. `dashboard-routes` is unchanged: its `sending_enabled` tests still pass, and a post with no switch is still `bad_setting`.
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node api/test/dashboard-hostile.mjs && node api/test/dashboard-regression.mjs`
+Expected: the last lines are `ALL PAGES RENDER CLEAN UNDER HOSTILE INPUT` and `ALL REGRESSION CHECKS PASS`.
+
+- [ ] **Step 13: Run the full suite**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/*.test.mjs`
+Expected: all pass, 0 fail — 5 more tests than after Task 13.
+
+- [ ] **Step 14: Commit**
+
+```bash
+cd /home/azoz778/bona-wt/team-inbox && git add services/api/lib/team.mjs services/api/lib/wa-send.mjs services/api/lib/dashboard/render-inbox.mjs services/api/lib/dashboard/render.mjs services/api/lib/dashboard/render-team.mjs services/api/lib/dashboard/routes.mjs services/README.md services/api/test/team.test.mjs services/api/test/wa-send.test.mjs services/api/test/dashboard-render-inbox.test.mjs services/api/test/dashboard-render-team.test.mjs services/api/test/dashboard-inbox.test.mjs
+git commit -m "dashboard: replies to clients ship switched off; the owner turns them on (Team page)
+
+The team can read the Bona inbox from the day it ships, but no reply reaches
+a client until the owner switches inbox_replies on (design D14: the first real
+client message from the dashboard is sent with him). While it is off the
+thread shows no reply box, sender.reply refuses replies_off before writing an
+outbox row, and the route answers 503. The switch is owner-only, one per post
+and audited. Login codes do not depend on it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+### Task 15: Reviews, migration rehearsal, ship Phase 2, STOP for the owner
+
+**Files:** none new (fixes from the reviews land in the files they concern, each with a test).
+
+- [ ] **Step 1: Full suite on the finished branch**
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/*.test.mjs 2>&1 | tail -8`
+Expected: `fail 0`; the pass count is 622 plus every test Phase 2 added.
+
+- [ ] **Step 2: Rehearse migration v4 on the live SCHEMA (client data never leaves the VPS)**
+
+Copying the live db is not allowed, so dump only its schema, read-only, rebuild it locally with one synthetic lead per live class, and migrate that with the branch's `openDb`:
+```bash
+SP=/tmp/claude-1001/-mnt-c-Users-ASUS/46575771-95e9-46bf-9b61-ed963502e756/scratchpad
+ssh hermes-vps '/home/azoz/.local/opt/node-v24.19.0-linux-x64/bin/node --input-type=module -e "
+import { DatabaseSync } from \"node:sqlite\";
+const db = new DatabaseSync(process.env.HOME + \"/bona-data/bona.db\", { readOnly: true });
+console.log(JSON.stringify({ version: db.prepare(\"PRAGMA user_version\").get().user_version,
+  objects: db.prepare(\"SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE ? ORDER BY rowid\").all(\"sqlite_%\") }));
+" 2>/dev/null' > $SP/live-schema.json
+cat > $SP/rehearse-v4.mjs <<'EOF'
+import fs from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+const [schemaFile, file] = process.argv.slice(2);
+const { version, objects } = JSON.parse(fs.readFileSync(schemaFile, 'utf8'));
+fs.rmSync(file, { force: true });
+const raw = new DatabaseSync(file);
+for (const o of objects.filter((x) => x.type === 'table')) raw.exec(o.sql);
+for (const o of objects.filter((x) => x.type !== 'table')) raw.exec(o.sql);
+raw.exec(`PRAGMA user_version = ${version}`);
+const lead = raw.prepare('INSERT INTO leads (lead_id, created, updated, phone_e164, wa_jid, wa_lid, channel, match_method, legacy_id, stage) VALUES (?,?,?,?,?,?,?,?,?,?)');
+const tp = raw.prepare('INSERT INTO touchpoints (id, lead_id, ts, channel, event_type, meta) VALUES (?,?,?,?,?,?)');
+const rows = [
+  ['L-ad', 'whatsapp', 'ad_meta', null, '{"snippet":"hello"}'],
+  ['L-ref', 'whatsapp', 'ref', null, '{"snippet":"Ref BONA-W003 · K7Q2XR"}'],
+  ['L-kw', 'whatsapp', 'keyword', null, '{"snippet":"is this bona?"}'],
+  ['L-kwid', 'whatsapp', 'keyword', null, '{"snippet":"about bona-w012 please"}'],
+  ['L-tw', 'whatsapp', 'time_window', null, '{"snippet":"hi"}'],
+  ['L-legacy', 'form', 'form', 'LEG-1', null],
+  ['L-badjson', 'whatsapp', 'keyword', null, 'not json'],
+];
+rows.forEach(([id, channel, mm, legacy, meta], i) => {
+  lead.run(id, 1_790_000_000_000 + i, 1_790_000_000_000 + i, `96650000000${i}`, `96650000000${i}@s.whatsapp.net`, `1${i}@lid`, channel, mm, legacy, 'new');
+  tp.run(`tp-${id}`, id, 1_790_000_000_000 + i, channel, 'lead_created', meta);
+});
+raw.close();
+const { openDb } = await import(process.env.HOME + '/bona-wt/team-inbox/services/api/lib/db.mjs');
+const s = openDb(file);
+const out = {
+  from: version,
+  to: s.db.prepare('PRAGMA user_version').get().user_version,
+  states: Object.fromEntries(s.db.prepare('SELECT lead_id, inbox_state FROM leads ORDER BY lead_id').all().map((r) => [r.lead_id, r.inbox_state])),
+  since: s.db.prepare("SELECT COUNT(*) n FROM leads WHERE inbox_state = 'in' AND inbox_since = created").get().n,
+  tables: s.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('wa_messages','wa_outbox','inbox_reads','wa_gaps') ORDER BY name").all().map((r) => r.name),
+  sessionsKept: s.db.prepare('SELECT COUNT(*) n FROM auth_sessions').get().n,
+};
+s.close();
+fs.rmSync(file, { force: true }); fs.rmSync(`${file}-wal`, { force: true }); fs.rmSync(`${file}-shm`, { force: true });
+console.log(JSON.stringify(out));
+EOF
+node $SP/rehearse-v4.mjs $SP/live-schema.json $SP/rehearse.db 2>&1 | grep -v ExperimentalWarning
+```
+Expected: `{"from":3,"to":4,"states":{"L-ad":"in","L-badjson":"unsure","L-kw":"unsure","L-kwid":"in","L-legacy":"unsure","L-ref":"in","L-tw":"unsure"},"since":3,"tables":["inbox_reads","wa_gaps","wa_messages","wa_outbox"],"sessionsKept":0}`. Any SQL error here stops the ship: fix the migration (a NEW commit on this branch), re-run Steps 1–2. (Task 14's replies switch needs no migration: with no `settings` row, `inbox_replies` reads as its default `'0'`.)
+
+- [ ] **Step 3: Claude review** — use superpowers:requesting-code-review on `git diff origin/main...HEAD -- services/ src/data/privacy.json`. Focus: (1) a guessed/unsure/out/never-list/team chat can never be read or sent to; (2) staff cannot reach Unsure, move, out or add; (3) every send passes the one sender's gate (switch, 20/min, 6/min per recipient, 30/min per user, durable 500/day) and an uncertain send is never retried; (4) the history floor (A1) holds on every per-chat read; (5) no message text, phone number, name or code in logs, audit meta, URLs or redirects; (6) migration v4 on the live schema; (7) `first_reply_ts` behaviour the Hermes watchdog depends on; (8) the poller's no-silent-loss read and cursor; (9) no reply can reach a client while `settings.inbox_replies` is not `'1'` (Task 14: it ships `'0'`; `sender.reply` refuses before writing, the thread draws no box, only an owner can switch it, and login codes do not depend on it).
+
+- [ ] **Step 4: Codex review** (second opinion, owner rule):
+```bash
+cd ~/bona-wt/team-inbox && codex exec --sandbox read-only "Review the diff origin/main...HEAD in services/ and src/data/privacy.json (Bona dashboard Phase 2: WhatsApp inbox). Spec: docs/superpowers/specs/2026-09-27-dashboard-team-inbox-design.md section 4; plan: docs/superpowers/plans/2026-09-27-dashboard-team-inbox.md '## Phase 2 — detailed' (decisions P2-1..P2-19 and amendments A1-A4). Look for: a message sent to a chat that is not 'in', to a team or never-list number, to a lid-only chat or a group, or without the shared gate; a double send (idempotency, uncertain retried, poller/outbox reconciliation mistakes); a reply that can reach a client while settings.inbox_replies is not '1' (it ships '0' and only the owner may switch it on, design D14); staff reaching owner-only inbox actions; unsure/out/never-list transcripts readable; history older than the floor stored; message text, phone numbers, names or codes in logs/audit/URLs; migration v4 failing or misclassifying on an existing bona.db; the poller losing records (readWindow split, cursor) or changing first_reply_ts semantics; SQL injection or XSS in the new pages. Verdict first, then findings ranked by severity with file:line and a fix."
+```
+
+- [ ] **Step 5: Fix what is real, report the disagreement.** For each finding from either model: reproduce with a failing test, fix, re-run the suite. Write down which model found what and where they disagree (kept for the owner's report and the memory file). Commit each fix with the trailer.
+
+- [ ] **Step 6: PR and squash-merge**
+```bash
+cd ~/bona-wt/team-inbox && git fetch origin && ROLLBACK=$(git rev-parse origin/main) && echo "rollback=$ROLLBACK"
+git push -u origin feat/team-inbox-p2
+gh pr create --base main --head feat/team-inbox-p2 --title "Dashboard: Bona WhatsApp inbox (Phase 2)" --body "Phase 2 of docs/superpowers/specs/2026-09-27-dashboard-team-inbox-design.md (§4): certain-match chats join a team inbox (unsure list, owner-started chats, never list), transcripts stored for inbox chats only (5-year retention), replies from the owner's number through the one sender (outbox, send_id idempotency, uncertain never retried, stale-view guard, lid-only refused, durable day cap, 30/min per person), no-silent-loss poller reads, privacy page. Dashboard replies ship switched off (Team page switch the owner turns on for the first send, D14). Schema v4 (additive). Claude + Codex reviewed. Rollback point: ${ROLLBACK}.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+gh pr merge --squash --delete-branch=false
+git fetch origin && git log --oneline -1 origin/main
+```
+Expected: the PR merges; `origin/main` is the squash commit. If main moved since the branch was cut and the merge conflicts, rebase onto a NEW branch name (force-push is not allowed), re-run Steps 1–2, and open the PR from that branch.
+
+- [ ] **Step 7: Back up the live db — consistently (WAL included)**
+```bash
+ssh hermes-vps 'cd ~/bona-data && STAMP=$(date +%Y%m%d-%H%M%S) && /home/azoz/.local/opt/node-v24.19.0-linux-x64/bin/node --input-type=module -e "
+import { DatabaseSync } from \"node:sqlite\";
+const db = new DatabaseSync(\"bona.db\");
+db.exec(\"VACUUM INTO \x27bona.db.snap-$STAMP\x27\");
+db.close();" 2>/dev/null && chmod 600 bona.db.snap-$STAMP && ls -la bona.db.snap-$STAMP'
+```
+Expected: one new `bona.db.snap-<stamp>` of roughly the live size, mode `-rw-------`.
+
+- [ ] **Step 8: Poll every 20 s on the VPS** (the env file pins 45 s, so the new code default alone changes nothing there)
+```bash
+ssh hermes-vps 'F=~/.secrets/bona-services.env; cp -p $F $F.bak-$(date +%Y%m%d) && sed -i "s/^BONA_WA_POLL_MS=45000$/BONA_WA_POLL_MS=20000/" $F && grep -c "^BONA_WA_POLL_MS=20000$" $F && stat -c %a $F'
+```
+Expected: `1` then `600`.
+
+- [ ] **Step 9: Deploy**
+Run: `ssh hermes-vps bash /opt/bona/services/deploy/vps/deploy.sh`
+Expected: tests green on the VPS, restart, healthy `/health`. A red run leaves the old process running — stop and fix.
+
+- [ ] **Step 10: Verify live** (read-only checks, no code requested for anyone)
+```bash
+curl -s https://api.bona-real-estate.com/health | head -c 600; echo
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' https://api.bona-real-estate.com/dashboard/inbox
+ssh hermes-vps 'journalctl -u bona-api --since "-10 min" --no-pager | grep -oE "\"evt\":\"(wa\.poll\.[a-z_]+|inbox\.[a-z_.]+|wa\.send\.[a-z_]+)\"[^}]{0,120}" | tail -20'
+ssh hermes-vps '/home/azoz/.local/opt/node-v24.19.0-linux-x64/bin/node --input-type=module -e "
+import { DatabaseSync } from \"node:sqlite\";
+const db = new DatabaseSync(process.env.HOME + \"/bona-data/bona.db\", { readOnly: true });
+console.log(JSON.stringify({ v: db.prepare(\"PRAGMA user_version\").get().user_version,
+  states: db.prepare(\"SELECT inbox_state, COUNT(*) n FROM leads GROUP BY 1\").all(),
+  messages: db.prepare(\"SELECT COUNT(*) n, COUNT(DISTINCT lead_id) chats FROM wa_messages\").get(),
+  outbox: db.prepare(\"SELECT sender_kind, status, COUNT(*) n FROM wa_outbox GROUP BY 1,2\").all(),
+  replies: db.prepare(\"SELECT value FROM settings WHERE key = ?\").get(\"inbox_replies\")?.value ?? null }));
+" 2>/dev/null'
+~/.claude/scripts/chrome-debug.sh
+node ~/.claude/scripts/browse.mjs https://api.bona-real-estate.com/dashboard/login /tmp/claude-1001/p2-login.png
+gh run list --workflow deploy.yml --limit 1
+node ~/.claude/scripts/browse.mjs https://bona-real-estate.com/privacy/ --text | grep -i -A3 whatsapp | head -20
+node ~/.claude/scripts/browse.mjs https://bona-real-estate.com/ar/privacy/ --text | grep -A3 "واتساب" | head -20
+```
+Expected: health ok with `poller.running: true` and a small `lagS`; `/dashboard/inbox` signed out → `302 …/dashboard/login`; logs show `wa.poll.init` with `everyMs: 20000`, `inbox.catchup` counts and no `wa.poll.failed`; `v: 4`, states `in 18 / unsure 9` (plus any lead that arrived since), `messages.chats` > 0 after the catch-up; `replies: null` (no row, so the shipped default `'0'`: nobody can reply from the dashboard yet) and no `staff` row in `outbox`; the login page renders; the site deploy run succeeded and both privacy pages carry the new WhatsApp section. If `replies` is `'1'` or `outbox` has a `staff` row, replies were switched on or a reply was attempted before the owner was asked: stop and tell him at once.
+
+- [ ] **Step 11: STOP — the first real client message is sent with the owner (D14).** Replies are off until he turns them on (Task 14), so nothing can go before this step. Tell the owner, mobile-short: Phase 2 is live (what staff now see: the inbox, read-only for now; the Unsure list; the rollback SHA), replies from the dashboard are OFF until he switches them on, and ask to do the first send together from his second phone: (1) he opens `https://api.bona-real-estate.com/dashboard/inbox` on his phone and confirms the list looks right; (2) from his second phone he sends his own number a message containing a site Ref line (or a listing id); (3) within about a minute it shows in the inbox, and the thread says "Replies from the dashboard are not switched on yet"; (4) he opens the Team page and taps **Turn replies on** under *Replies to clients from the dashboard*. Only he does this: Claude has no owner session, and a switch is never flipped by writing to the live db. (5) He (or I, on his "go") replies from the thread; (6) it arrives on the second phone from his number. Note whether that chat is `@lid` (it proves delivery to a lid-addressed chat through its phone number). (7) Check the lead's `first_reply_ts` is stamped and the audit log has one `setting` row (`inbox_replies`, `1`, his user id) and one `reply_sent`. (8) He decides whether replies stay on for the team now; if not, he taps **Turn replies off** again. Record his choice. Do not send any dashboard message to a real client before this.
+
+- [ ] **Step 12: Memory and handoff** — update Claude memory `bona-dashboard-team-inbox-2026-09-27.md` (status, main SHA, rollback, backups, review disagreements, gotchas, whether dashboard replies were left on or off after the first send) and its `MEMORY.md` line, and the shared-memory handoff (same id: `--scope claude-project:fed94f6b4de219192b28 --id bona-dashboard-team-inbox-handoff`).
