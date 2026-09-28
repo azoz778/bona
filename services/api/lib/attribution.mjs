@@ -14,8 +14,16 @@ import { DEFAULT_ORIGINS } from './cors.mjs';
 /** No 0/O/1/I: a code has to survive being read out loud and typed back. */
 export const REF_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
-/** `Ref BONA-W003 · K7Q2XR`, `ref bona - k7q2xr`, `Ref K7Q2X` — the listing part is optional. */
-export const REF_RE = /\bRef\s+(BONA(?:-W?\d{3})?)?\s*[·\-:|]?\s*([A-HJ-NP-Z2-9]{5,6})\b/i;
+/**
+ * `Ref BONA-W003 · K7Q2XR`, `ref bona - k7q2xr`, `Ref K7Q2X` — the listing part is optional.
+ *
+ * Each whitespace run follows something that is not whitespace (`Ref`, the listing part, the
+ * separator), so no two runs can share the same spaces. Written the other way
+ * (`\s+ (BONA)? \s* [·-:|]? \s*`), a failed match tried every split of one long run between
+ * three quantifiers: cubic, seconds for 2,000 spaces, and every inbound WhatsApp text goes
+ * through here. The two spellings match the same lines with the same listing and code.
+ */
+export const REF_RE = /\bRef\s+(?:(BONA(?:-W?\d{3})?)\s*)?(?:[·\-:|]\s*)?([A-HJ-NP-Z2-9]{5,6})\b/i;
 
 /**
  * @param {unknown} text
