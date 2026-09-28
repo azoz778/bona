@@ -14,7 +14,9 @@
  *     received record shows are checked too: a lid-only chat first shows its phone there.
  *     Such a record is not stored, but the row learns the number (empty fields only), so the
  *     row is excluded by itself from then on — for every read path, the daily sweep, the
- *     poller's lid lookup and the owner's own later records into that chat.
+ *     poller's lid lookup and the owner's own later records into that chat. A row that
+ *     cannot take the number (another lead holds it, or the row holds a different one)
+ *     leaves the inbox at once instead, its transcript purged (P2-7).
  *   - a record with no id cannot be de-duplicated, and noise — reactions, deletes and edits,
  *     poll votes, key-distribution records — is never a bubble (P2-14). Neither is stored.
  *   - a login code the sender sent is never stored (§4.2: the code lives only in the WhatsApp
@@ -132,6 +134,13 @@ export function createIngest({
         // row never looks excluded, and the owner's later records into this chat would still
         // be stored and shown while the chat stayed `in` for good.
         learn(current, rec);
+        // A row that cannot take the number (another lead holds it, or the row already holds
+        // a different one) never looks excluded, and no sweep finds it by its own number, so
+        // the chat leaves the inbox now, with what it held (P2-7).
+        if (!isExcluded(db.getLead(current.lead_id))) {
+          inbox.leaveInbox(current.lead_id);
+          log({ level: 'warn', evt: 'inbox.left_excluded', leadId: current.lead_id });
+        }
         return { stored: false, reason: 'excluded' };
       }
 
