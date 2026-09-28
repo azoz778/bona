@@ -321,7 +321,7 @@ never logged. `process.env` always wins over a file.
 | `BONA_RETELL_MOCK` | `0` | `1` answers chat locally, contacts no one |
 | `BONA_WA_NOTIFY` | `1` | `0` stops the WhatsApp lead note and team members' replies from the dashboard inbox; login codes still go |
 | `BONA_WA_POLL` | `1` | the in-process WhatsApp poller defaults to ON inside the process (`lib/config.mjs`); opt out with `BONA_WA_POLL=0` in `bona-services.env`. No unit sets it — an `Environment=` line would override the file (§10) |
-| `BONA_WA_POLL_MS` | `45000` | poll interval; each tick reads the last 2 minutes of `chat/findMessages` |
+| `BONA_WA_POLL_MS` | `20000` | poll interval; each tick reads the last 2 minutes of `chat/findMessages`. 20 s since Phase 2 of the team inbox (it was 45 s); the VPS sets it in `bona-services.env`, and a value there wins over this default |
 | `BONA_WA_INSTANCE` | `abdulaziz-personal` | the Evolution instance the poller reads and the note is sent from |
 | `BONA_OWNER_JID` | `966593296933@s.whatsapp.net` | where the notes go, and the one chat the poller never reads |
 | `BONA_FANOUT_MS` | `20000` | fan-out worker interval (Meta CAPI, GA4 MP, Snap CAPI) |
@@ -527,7 +527,7 @@ Data files under `~/bona-data` (owner-only, mode 0600):
 
 | File | What |
 |---|---|
-| `bona.db` (+ `-wal`, `-shm`) | the SQLite store: sessions, events, leads, touchpoints, stage history, WhatsApp poller cursor, ad spend, fan-out queue, dashboard logins. Migrations run on start (`PRAGMA user_version`). Back it up with `sqlite3 bona.db ".backup …"`, not `cp`, while the service runs |
+| `bona.db` (+ `-wal`, `-shm`) | the SQLite store: sessions, events, leads, touchpoints, stage history, WhatsApp poller cursor, ad spend, fan-out queue, dashboard logins, the WhatsApp inbox (transcripts, outbox, read marks, gaps). Migrations run on start (`PRAGMA user_version`). Back it up with `sqlite3 bona.db ".backup …"`, not `cp`, while the service runs |
 | `leads.jsonl` | the append-only raw log: one line per **new** lead, same `id` as the store's `lead_id`. Imported into `bona.db` once at startup (`import.legacy` in the log; a rerun is a no-op) |
 | `calls.jsonl`, `chats.jsonl` | Retell webhook events and transcripts, one line per finished conversation |
 
@@ -553,15 +553,18 @@ Design: `docs/superpowers/specs/2026-09-06-client-acquisition-tracking-design.md
 side: `docs/OWNER-RUNBOOK.md` §4, §9–§11 and `docs/checklists/`.
 
 **Store.** `${BONA_DATA}/bona.db` (SQLite, WAL, mode 0600): sessions, events, leads,
-touchpoints, stage history, spend, fan-out queue, dashboard auth. The JSONL files stay as
+touchpoints, stage history, spend, fan-out queue, dashboard auth, and the transcripts of
+the chats in the Bona inbox (Dashboard → Inbox, below). The JSONL files stay as
 the append-only raw log and are imported once on start-up. Raw phone numbers, names and
 message snippets never leave this file; ad platforms get hashed identifiers only.
 
 **Poller** (`BONA_WA_POLL=1`, every `BONA_WA_POLL_MS`; `lib/wa-poller.mjs` over
 `lib/evolution.mjs`). A read-only loop inside this process. Each tick asks Evolution for
 `POST /chat/findMessages/{instance}` with `{ messageTimestamp: { gte: <cursor − 2 min>,
-lte: <now> } }` — both bounds, because 2.3.7 ignores the filter without them — up to 5
-pages of 100, newest first, deduplicated on `key.id` (`wa_seen`, pruned after 7 days).
+lte: <now> } }` — both bounds, because 2.3.7 ignores the filter without them — read by
+`readWindow`: pages of 100, newest first, up to 5, and a window whose `total` is larger than
+that is split in halves by time instead (below); deduplicated on `key.id` (`wa_seen`,
+pruned after 7 days).
 Groups, status broadcasts and your own chat are skipped; an `…@lid` chat takes its phone
 from `key.remoteJidAlt` and stores both jids. Evolution is **never** given a webhook: the
 instance is your personal WhatsApp and another agent consumes its events.
@@ -595,14 +598,23 @@ not the lead. The cursor is held back to the oldest message it could not store, 
 message would fall out of the window and be lost silently; one that keeps failing is
 written off after three tries (`wa.poll.record_failed`), and one the cursor can no longer
 reach — after downtime long enough to move the floor past it — is given up on out loud
-(`wa.poll.abandoned`). Windows are read newest-first inside Evolution, so one holding more
-than 500 messages hides its *oldest* ones and cannot be asked again for them — that is a
-loss, not a deferral, and the log says `wa.poll.truncated`. It takes downtime long enough
-for 500 messages to pile up in a single window.
+(`wa.poll.abandoned`). Evolution answers newest-first and 5 pages of 100 is the cap, so a
+window holding more than 500 messages would hide its *oldest* ones. Its answer says how many
+the window holds (`total`), so `readWindow` (`lib/evolution.mjs`) splits such a window in
+halves on whole-second boundaries, at most 4 levels deep (16 pieces, about 8,000 messages),
+and hands the pieces over oldest-first. A piece that comes back with fewer messages than its
+`total` (they slid between pages while it was read) is split and read again the same way.
+Only a piece still over the cap or still short at the deepest level (or one second wide) is
+kept partial — a loss, not a deferral, because asking again returns the same newest pages —
+and the log says `wa.poll.truncated` with the number missed. That takes downtime long
+enough for thousands of messages to pile up in one window. An answer without a `total` is
+read page by page until a short one, and one still full at the fifth page is split the same
+way.
 
 A match creates the lead (or merges into the person it already is) **at the message's own
 timestamp**, so `first_inbound_ts` is when the enquiry actually happened; the first ≤ 200
-characters are kept on the touchpoint of a *new* lead only. You get the note once, on
+characters are kept on the touchpoint of a *new* lead only (a chat in the Bona inbox keeps its
+whole conversation as well — Dashboard → Inbox, below). You get the note once, on
 create. Your own outbound message to a lead sets `first_reply_ts` — the response time on
 the dashboard. Every tick is wrapped: a failure logs `wa.poll.failed` and leaves the cursor
 untouched, so an Evolution outage loses nothing and shows up only as growing lag.
@@ -696,7 +708,108 @@ plus Meta `Schedule` for a viewing; `won` → Meta `Purchase` with the value, GA
 is recorded and not sent).
 
 Phone numbers are masked to `…6933` in every list — pages and JSON alike — and whole only
-on `GET /dashboard/leads/:id` and `GET /v1/admin/leads/:id`.
+on `GET /dashboard/leads/:id`, `GET /v1/admin/leads/:id` and the header of a chat
+(`GET /dashboard/inbox/:leadId`).
+
+**Inbox (since 2026-09).** `GET /dashboard/inbox` is where the team reads and answers the
+Bona chats on the owner's number (design §4, 2026-09-27). A *chat* is a lead with a `wa_jid`
+or a `wa_lid`. Whether it belongs is **stored** in `leads.inbox_state` (`in`, `unsure`,
+`out`) and never re-derived, so a guess cannot slip in later through the `phone` rule:
+
+- *Certain*: an inbound message with a Ref line as the site writes it
+  (`Ref BONA-W003 · K7Q2XR`, with its listing part) or a code a site session holds,
+  click-to-WhatsApp ad context, or a listing id (`BONA-###`, `BONA-W###`) puts the chat `in`
+  by itself, together with the 24 h of that chat before it (the "Hi" before the Ref line).
+  Web-form and concierge leads are certain too; they become a chat once that person writes
+  on WhatsApp.
+- *Unsure*: only the word Bona/بونا, a bare Ref-shaped code no session holds, or only the
+  ±15-min click window. The lead is kept for the statistics as before and goes to the
+  owner-only **Unsure** tab (`?tab=unsure`; staff get 403), where *Move to Bona inbox* or
+  *Not a client* settles it.
+- *Owner-started*: the owner's own message in a 1:1 chat that carries a Bona site link
+  (`bona-real-estate.com`, legacy `bona.azoz.uk`), a listing id, or a document whose name or
+  caption says Bona or a listing id, puts that chat `in` (a new lead gets `match_method =
+  'owner_outbound'`) with the 24 h before it. Nothing else he types counts — TK and private
+  chats share the number. These leads fan out to no ad platform (no click is behind them),
+  send him no new-lead note, and are born answered (`first_reply_ts` set, `first_inbound_ts`
+  empty), so neither the waiting queue nor the Hermes `bona-unanswered-leads` watchdog flags
+  them.
+- *Owner buttons*: *Move to Bona inbox* (Unsure tab or the lead page) and *Add chat by phone
+  number* (`owner_added`) put a chat `in` and pull its last 30 days — he vouched for it.
+  *Not a client* puts it `out`: its transcript is purged there and then, and it never comes
+  back on its own.
+- *Never*: team numbers and the never-a-client list are not matched, stored or shown.
+  Adding a number to the team or to the never list moves its lead `out` and purges its
+  transcript at once, the daily upkeep (below) does the same for any chat whose number is
+  excluded, and every inbox page, reply, handover, move and add also refuses an excluded
+  number.
+
+Schema v4 sorted the leads that already existed: `in` for `ref` / `ad_meta`, for web-form and
+concierge leads that are not legacy imports, and for a listing id in the first snippet;
+everything else `unsure`, for the owner to settle (expected on the live db at the Phase 2
+deploy: 18 in, 9 unsure).
+
+*What is stored* (`wa_messages`, `in` chats only): every message in both directions and who
+sent it — the client, a team member (by user id), Dana (from Phase 4), or `owner_number`
+(typed on the owner's phone, or sent for him by Lisa: WhatsApp cannot tell those apart).
+Text is capped at 8,000 characters. Media are placeholders only (`[voice note]`, `[audio]`,
+`[image]`, `[video]`, `[document: name]`, `[location]`, `[contact]`, `[sticker]`, else
+`[message]`) plus the caption, never the file. Reactions, deletes and edits, poll votes and
+key-distribution records are noise and are never stored, and neither is a login code, even
+in an `in` chat. Evolution files one conversation under two jids — what arrives and what the
+owner types under the `@lid`, what the API sends to a number under the phone jid — so every
+per-chat read (join history, opening a thread, the check before a reply) asks for both and
+de-duplicates on `key.id`. A message the poller writes off after three tries, or gives up on
+once the window has moved past it, becomes a `wa_gaps` row, shown in the thread as a message
+that could not be loaded, instead of vanishing; so does a join's or a catch-up's history
+read that failed. Unread means inbound messages newer than the newest one that person saw
+when they last opened the thread (a new member starts from the day the account was made);
+the total is the Inbox count in the nav.
+
+*Retention.* Five years after a chat's last message (`leads.last_msg_ts`) its transcript —
+messages, reply outbox rows, gaps and read marks — is deleted; the lead row stays for
+attribution. *Not a client*, a team add and a never-list add purge at once. A purged send
+of the last 24 h is cut to a stub (no text, no chat) that still counts toward the day cap. A
+login code's outbox row never holds the code (`text` is NULL); code rows and stubs are
+pruned after 2 days. The privacy page says all of this, including the copies that stay in
+Evolution's own database and on the phones, which this retention does not reach.
+
+*Replies* go out from the owner's number (`BONA_WA_INSTANCE`) and only into `in` chats.
+`POST /v1/admin/inbox/:leadId/reply` sends to the lead's **phone** jid (`…@s.whatsapp.net`);
+a chat known only by its `@lid` is refused (`lid_only`) and answered from the phone, because
+`lid` digits are not a phone number. Every reply passes the gate the login codes pass
+(`lib/wa-send.mjs`): the Sending switch, 20 a minute overall, 6 a minute per recipient,
+30 a minute per person, and 500 a day — counted from `wa_outbox` over a rolling 24 h
+(messages to the owner's own chat do not count), so a restart does not reset it. The form
+carries a random `send_id`, and its outbox row is written before the HTTP call, so a double
+submit gets the first answer back, never a second message. A reply is `accepted` only when
+Evolution answers with a `key.id`. A timeout, a network error other than a refused
+connection or a failed DNS lookup, a 502/504 or a 2xx without an id is `uncertain`: the
+thread says to check WhatsApp, the text is not put back (it may have gone), and nothing
+retries it. When the message turns up in a poll the row is settled — by its `key.id`, or
+else the same lead and the same text within 2 minutes — and the bubble gets its sender; a
+row interrupted by a restart becomes `uncertain` (`interrupted`). The form also carries the
+newest message time the person saw, and the chat is refreshed from Evolution just before
+the check: anything newer, in either direction, holds the reply (`stale`) with the text kept
+in the box. The first person to reply becomes the chat's handler when it has none (a reply
+typed on the owner's phone makes the owner the handler); anyone can hand it to another
+active member or to nobody. Audit rows `reply_sent`, `handler`, `inbox_move`, `inbox_out`
+and `inbox_add` carry ids and a status — never text or a number. The first real client
+reply from the dashboard is sent with the owner beside it (design D14).
+
+*Polling and upkeep.* The poller runs every 20 s (`BONA_WA_POLL_MS`, §4). The VPS sets it in
+`~/.secrets/bona-services.env`, and a value there wins over the default — a stale
+`BONA_WA_POLL_MS=45000` keeps the old pace. Opening a thread also reads that chat at once,
+but only messages since 24 h before it joined the inbox, and never for more than ~3 s.
+Inbox upkeep (`app.inboxMaintenance()`) runs at start-up and then every 24 h: first every
+listed chat whose number is a team or never-list number goes `out` with its transcript
+(logged `inbox.excluded_out`); then the 5-year purge, code rows and stubs older than 2 days,
+and `pending` sends older than 2 minutes marked `uncertain` (a process that died mid-send
+cannot know whether the message went); then every `in` chat with nothing stored yet fetches
+the history an automatic join takes, never from before the 5-year horizon (logged
+`inbox.catchup`; a read that fails leaves a gap). That is how the chats schema v4 put `in`
+get a thread on day one; one whose history comes back empty stays empty and is asked again
+on the next run.
 
 | Route | What |
 |---|---|
@@ -713,6 +826,12 @@ on `GET /dashboard/leads/:id` and `GET /v1/admin/leads/:id`.
 | `POST /v1/admin/leads/:id/stage` | `{stage, value_sar?, note?}` → stage, history row, `lead_stage` event, fan-out |
 | `POST /v1/admin/leads/:id/note` | `{note}` → a `note` touchpoint and an appended line on the lead |
 | `POST /v1/admin/spend` | `{day, platform, campaign_id, campaign_name, spend_sar, clicks?, impressions?}`, upserted on `(day, platform, campaign_id)` |
+| `GET /dashboard/inbox` | the Bona chats, unread first, then newest: name, masked number, last message, stage, handler, *Needs a human*. The owner also gets the **Unsure** tab (`?tab=unsure`; 403 for staff) and *Add chat by phone number* |
+| `GET /dashboard/inbox/:leadId` | one chat, refreshed from Evolution first and then marked read: bubbles labelled client / team member / Dana / the owner's number, gaps, sends still open, the reply box and the handler picker; the number in full in the header. 404 unless it is an `in` chat (a `wa_jid` or `wa_lid`) and its number is not excluded |
+| `POST /v1/admin/inbox/:leadId/reply` | any member: one reply through the shared gate. Sent → 303 to the thread `?ok=sent`; uncertain → 303 `?error=send_uncertain`; a chat that may not be answered → the same 404 as the thread; any other refusal renders the thread again with the text kept and a fresh `send_id` — never a redirect with message text in the URL |
+| `POST /v1/admin/inbox/:leadId/handler` | any member: hand the chat to an active member, or to nobody |
+| `POST /v1/admin/inbox/:leadId/move` · `…/out` | owner: *Move to Bona inbox* (pulls 30 days) · *Not a client* (`out`, transcript purged now) |
+| `POST /v1/admin/inbox/add` | owner: *Add chat by phone number* — creates or reuses the lead (`owner_added`), puts it `in`, pulls 30 days |
 
 Spend is matched to leads on **platform and campaign id together**, never the id alone —
 Meta and Snap can both run a campaign `1203`. The two vocabularies are folded by

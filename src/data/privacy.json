@@ -65,6 +65,25 @@
       }
     },
     {
+      "id": "whatsapp-conversations",
+      "heading": {
+        "en": "WhatsApp conversations with our team",
+        "ar": "محادثات واتساب مع فريق بونا"
+      },
+      "body": {
+        "en": [
+          "When you contact Bona on WhatsApp about a property or an enquiry, or when we write to you about one, Bona stores that conversation — your messages and our replies — so that we can serve your enquiry. For a photo, voice note or file we keep only a note of its type, a document’s file name and any caption, not the item itself. Private chats on the same number are not stored, and if a conversation turns out not to be about a Bona enquiry, the messages we stored from it are deleted straight away.",
+          "The owner of Bona and authorised members of the Bona team can read these conversations and reply to you through a private dashboard that requires sign-in. Replies sent from the dashboard come from Bona’s WhatsApp number, +966 59 329 6933, and the dashboard records which team member sent each one.",
+          "We keep a stored conversation for up to five years after its last message; it is then deleted automatically. The five years apply to the messages; your enquiry record itself follows “How long we keep it” below. A copy of the conversation also stays in the WhatsApp service our number runs on and on our phones, under WhatsApp’s own terms, and the automatic deletion does not reach those copies. To ask for a conversation to be deleted, message us on WhatsApp or call us on +966 59 329 6933; see “Your rights” below."
+        ],
+        "ar": [
+          "عندما تتواصل مع بونا عبر واتساب بشأن عقار أو استفسار، أو عندما نراسلك نحن بشأنه، تحتفظ بونا بتلك المحادثة — رسائلك وردودنا عليها — لخدمة استفسارك. وبالنسبة للصور والرسائل الصوتية والملفات، لا نحتفظ إلا بإشارة إلى نوعها، وباسم المستند، وبأي نص مرفق بها، دون المحتوى نفسه. ولا نحتفظ بالمحادثات الخاصة على الرقم نفسه، وإذا تبيّن أن محادثةً ما لا تتعلق باستفسار لدى بونا، حُذفت الرسائل التي حفظناها منها فوراً.",
+          "ويمكن لمالك المنشأة وأعضاء فريق بونا المخوّلين قراءة هذه المحادثات والرد عليك من خلال لوحة خاصة تتطلب تسجيل الدخول. وتصلك الردود المرسلة من اللوحة من رقم واتساب بونا +966 59 329 6933، وتسجّل اللوحة عضو الفريق الذي أرسل كل ردّ منها.",
+          "نحتفظ بالمحادثة مدةً أقصاها خمس سنوات بعد آخر رسالة فيها، ثم تُحذف تلقائياً. وتسري هذه المدة على الرسائل، أما سجل الاستفسار نفسه فيخضع لما ورد في «مدة الاحتفاظ بالبيانات» أدناه. وتبقى نسخة من المحادثة كذلك في خدمة واتساب التي يعمل عليها رقمنا وعلى هواتفنا، وفق شروط واتساب الخاصة، ولا يشمل الحذف التلقائي تلك النسخ. ولطلب حذف محادثة، راسلنا على واتساب أو اتصل بنا على الرقم +966 59 329 6933، وانظر «حقوقك» أدناه."
+        ]
+      }
+    },
+    {
       "id": "ai-concierge",
       "heading": {
         "en": "The AI concierge",
@@ -248,10 +267,12 @@
       },
       "body": {
         "en": [
-          "We will update this page when our practices change, for example if we enable analytics or change how we handle your data. The date at the top shows the current version; material changes will be flagged here for 30 days."
+          "We will update this page when our practices change, for example if we enable analytics or change how we handle your data. The date at the top shows the current version; material changes will be flagged here for 30 days.",
+          "28 September 2026: we added “WhatsApp conversations with our team”. Bona now stores its WhatsApp conversations with clients about their enquiries, and authorised team members can read and answer them from a private dashboard."
         ],
         "ar": [
-          "سنحدّث هذه الصفحة عند تغيّر ممارساتنا، مثلاً إذا فعّلنا أدوات التحليل أو غيّرنا طريقة تعاملنا مع بياناتك. ويُبيّن التاريخ في أعلى الصفحة الإصدار الحالي. وسنشير إلى التغييرات الجوهرية في هذه الصفحة لمدة ثلاثين يوماً."
+          "سنحدّث هذه الصفحة عند تغيّر ممارساتنا، مثلاً إذا فعّلنا أدوات التحليل أو غيّرنا طريقة تعاملنا مع بياناتك. ويُبيّن التاريخ في أعلى الصفحة الإصدار الحالي. وسنشير إلى التغييرات الجوهرية في هذه الصفحة لمدة ثلاثين يوماً.",
+          "28 سبتمبر 2026: أضفنا قسم «محادثات واتساب مع فريق بونا». فقد أصبحت بونا تحتفظ بمحادثات واتساب مع عملائها بشأن استفساراتهم، ويمكن لأعضاء فريقها المخوّلين قراءتها والرد عليها من خلال لوحة خاصة."
         ]
       }
     }
