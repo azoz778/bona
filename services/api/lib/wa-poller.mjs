@@ -104,6 +104,33 @@ const OWN_NOTE_RE = /^\*?Bona — new enquiry\*?/;
 /** How often one record may fail before it is written off rather than retried for ever. */
 export const MAX_RECORD_ATTEMPTS = 3;
 
+/**
+ * What a failed step says about itself in a log line: the kind of error, never its message.
+ * The per-record `try` covers matching, lead writes and the inbox store, and a message can
+ * carry anything that step was handed, a number or a line of text included. So: the name
+ * only when it is one of the kinds this loop meets (an injected error's name could be
+ * anything), `code` only in Node's letters-and-underscores shape (`ERR_SQLITE_ERROR`,
+ * `ECONNREFUSED`: no digits, so no number fits), and SQLite's numeric `errcode` (5 busy,
+ * 19 a constraint), which is what tells one store failure from another.
+ */
+const LOGGED_ERROR_NAMES = new Set([
+  'Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'SqliteError', 'AbortError', 'TimeoutError', 'EvolutionError',
+]);
+const ERROR_CODE_RE = /^[A-Z][A-Z_]{1,63}$/;
+function errorKind(err) {
+  const kind = { error: typeof err?.name === 'string' && LOGGED_ERROR_NAMES.has(err.name) ? err.name : 'Error' };
+  if (typeof err?.code === 'string' && ERROR_CODE_RE.test(err.code)) kind.code = err.code;
+  if (Number.isInteger(err?.errcode)) kind.errcode = err.errcode;
+  return kind;
+}
+/**
+ * The codes lib/inbox/backfill.mjs answers a failed read with. Anything else an injected
+ * backfill returns is logged as plain `failed`: its `error` is logged, so it may say only
+ * what kind of failure it was.
+ */
+const HISTORY_ERROR_RE = /^(?:failed|timeout|network|bad_window|http_\d{3})$/;
+const historyError = (e) => (typeof e === 'string' && HISTORY_ERROR_RE.test(e) ? e : 'failed');
+
 const compact = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null && v !== undefined && v !== ''));
 const str = (v, max = 300) => {
   if (v === null || v === undefined) return null;
@@ -244,10 +271,15 @@ export function createPoller({
   db, cfg = {}, findMessages = null, sendWhatsApp = null, isExcluded = NO_EXCLUSIONS, log = () => {}, now = () => Date.now(),
   inboxStore = null, ingest = null, backfill = null,
 } = {}) {
-  // `createIngest()` hands back `{ ingest }`; the bare function is accepted as well.
+  // `createIngest()` hands back `{ ingest }`; the bare function is accepted as well. Every
+  // other shape is refused here rather than read as "no inbox": a wiring slip that passes
+  // the wrong property would otherwise switch the whole inbox off without a word.
   const ingestOne = typeof ingest === 'function' ? ingest : (typeof ingest?.ingest === 'function' ? ingest.ingest : null);
   const inboxOn = Boolean(ingestOne);
+  if (ingest != null && !inboxOn) throw new TypeError('createPoller: ingest must be a function or { ingest } (createIngest())');
   if (inboxOn && !inboxStore) throw new TypeError('createPoller: an inbox ingest needs the inbox store (for states and gaps)');
+  if (backfill != null && !inboxOn) throw new TypeError('createPoller: a backfill without an ingest would be ignored; pass both, or neither');
+  if (backfill != null && typeof backfill.history !== 'function') throw new TypeError('createPoller: backfill must be createBackfill() (it needs history)');
   const wa = waConfig(cfg.env ?? {});
   const instance = wa.instance;
   const ownerDigits = bareJid(wa.ownerJid);
@@ -268,12 +300,15 @@ export function createPoller({
   let lidOnlyUnexcludable = 0;
   let skipLogged = false;
   /**
-   * Message ids this process has failed on → `{ attempts, ts, handled? }`. The timestamp
-   * matters as much as the count: the cursor is held back to it, or the record would fall
-   * out of the window and be neither retried nor written off. `handled` (inbox only) is what
-   * `handleInbound` already did for a record that then failed in the inbox steps after it,
-   * so a retry goes straight back to those steps instead of merging the message into its
-   * lead again (one more touchpoint and `wa.lead` line per attempt).
+   * Message ids this process has failed on → `{ attempts, ts, handled?, gap? }`. The
+   * timestamp matters as much as the count: the cursor is held back to it, or the record
+   * would fall out of the window and be neither retried nor written off. `handled` (inbox
+   * only) is what `handleInbound` already did for a record that then failed in the inbox
+   * steps after it, so a retry goes straight back to those steps instead of merging the
+   * message into its lead again (one more touchpoint and `wa.lead` line per attempt). `gap`
+   * (inbox only) is what `recordGapSafely` needs of the record — its id, jids and whether
+   * it is noise, never its text — for when it is given up on after the window has moved
+   * past it (the abandon loop in the tick), where the record itself is no longer in hand.
    */
   const failures = new Map();
 
@@ -504,15 +539,22 @@ export function createPoller({
    * check WhatsApp" where that history belongs. If even that gap cannot be written, it is
    * logged (`inbox.gap_failed`) rather than thrown: a retry of the record would find the
    * chat already `in`, skip this join, and so never redo the history or its gap either.
+   *
+   * The gap goes only to a chat that is still `in` once the read is over: while it was
+   * awaited the owner may have marked the chat Not a client, and `leaveInbox` purged its
+   * gaps then; one written now would outlive that purge. The check and the insert run with
+   * no `await` between them, so nothing in this process can move the chat in between.
    */
   async function join(leadId, ts, via, tally, extra = {}) {
     inboxStore.setInboxState(leadId, 'in', { since: ts });
     if (backfill) {
       const got = await backfill.history(db.getLead(leadId), { sinceTs: ts - JOIN_HISTORY_MS, untilTs: ts });
       if (got?.error) {
-        log({ level: 'warn', evt: 'inbox.join_history_failed', leadId, error: got.error });
+        log({ level: 'warn', evt: 'inbox.join_history_failed', leadId, error: historyError(got.error) });
         try {
-          inboxStore.addGap({ key_id: `join:${leadId}:${ts}`, lead_id: leadId, ts: ts - 1, reason: 'history_failed' });
+          if (db.getLead(leadId)?.inbox_state === 'in') {
+            inboxStore.addGap({ key_id: `join:${leadId}:${ts}`, lead_id: leadId, ts: ts - 1, reason: 'history_failed' });
+          }
         } catch {
           log({ level: 'warn', evt: 'inbox.gap_failed', leadId, reason: 'history_failed' });
         }
@@ -592,11 +634,15 @@ export function createPoller({
   /**
    * A record of an `in` chat that has failed for the last time is not dropped silently
    * (design §4.2): its id, chat and time go to `wa_gaps`, and the thread shows "a message
-   * could not be loaded — check WhatsApp" in its place. Never the text. Called from the
-   * per-record `catch`, so nothing in here may throw. Not for noise (a reaction or an edit
-   * is never a bubble, so it is never a missing one), nor for a record that is stored after
-   * all (a join's history reads the joining message too). The log line carries no error
-   * text: an exception's message could carry a number.
+   * could not be loaded — check WhatsApp" in its place. Never the text. "For the last time"
+   * is either way the poller gives up: written off after `MAX_RECORD_ATTEMPTS`, or
+   * abandoned once the window has moved past it (after an outage that can be after a
+   * single try) — then `rec` is the `gap` its failure entry kept, which carries the same
+   * fields. Called from the per-record `catch` and the abandon loop, so nothing in here may
+   * throw. Not for noise (a reaction or an edit is never a bubble, so it is never a missing
+   * one), nor for a record that is stored after all (a join's history reads the joining
+   * message too). The log line carries no error text: an exception's message could carry a
+   * number.
    */
   function recordGapSafely(rec, ts) {
     if (!inboxOn || rec.noise) return;
@@ -761,10 +807,14 @@ export function createPoller({
             failures.delete(rec.id);
             recordGapSafely(rec, ts);
           } else {
-            failures.set(rec.id, handled ? { attempts, ts, handled } : { attempts, ts });
+            failures.set(rec.id, {
+              attempts, ts,
+              ...(handled ? { handled } : {}),
+              ...(inboxOn ? { gap: { id: rec.id, jid: rec.jid ?? null, jidAlt: rec.jidAlt ?? null, noise: Boolean(rec.noise) } } : {}),
+            });
             if (oldestFailedTs === null || ts < oldestFailedTs) oldestFailedTs = ts;
           }
-          log({ level: 'warn', evt: 'wa.poll.record_failed', attempts, writtenOff, error: String(err?.message ?? err) });
+          log({ level: 'warn', evt: 'wa.poll.record_failed', attempts, writtenOff, ...errorKind(err) });
         }
       }
 
@@ -792,10 +842,17 @@ export function createPoller({
       db.waCursorSet(instance, { lastTs: nextTs, lastRun: t, unmatched: (cursor?.unmatched ?? 0) + tally.unmatched });
 
       // What the next window cannot reach will never come back: give up on it out loud
-      // rather than counting attempts against a record that can no longer be tried.
+      // rather than counting attempts against a record that can no longer be tried. A
+      // record of an `in` chat given up on this way is as lost as one written off, so it
+      // leaves the same gap in the thread (`gap` is kept only by the per-record `catch`;
+      // a record only ever deferred by `deferRecord` was never judged, so it has none).
       let abandoned = 0;
       for (const [id, failure] of failures) {
-        if (failure.ts < nextTs - OVERLAP_MS) { failures.delete(id); abandoned += 1; }
+        if (failure.ts < nextTs - OVERLAP_MS) {
+          failures.delete(id);
+          abandoned += 1;
+          if (failure.gap) recordGapSafely(failure.gap, failure.ts);
+        }
       }
       if (abandoned) log({ level: 'warn', evt: 'wa.poll.abandoned', count: abandoned });
       db.pruneWaSeen(t - SEEN_TTL_MS);

@@ -528,6 +528,18 @@ test('addGap records a message that could not be read, once; gapsFor lists one c
   s.close();
 });
 
+test('a message stored after all clears the gap its failure left; any other gap stays', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-1');
+  inbox.addGap({ key_id: 'K-1', lead_id: 'L-1', jid: JID, ts: NOW, reason: 'failed' });
+  inbox.addGap({ key_id: 'join:L-1:1', lead_id: 'L-1', ts: NOW - 1, reason: 'history_failed' });
+  inbox.addGap({ key_id: 'K-2', lead_id: 'L-1', jid: JID, ts: NOW + 1, reason: 'failed' });
+  inbox.upsertMessage(msg());
+  assert.deepEqual(inbox.gapsFor('L-1').map((g) => g.key_id), ['join:L-1:1', 'K-2'],
+    'the thread would otherwise show the message and "could not be loaded" for the same id');
+  s.close();
+});
+
 test('setInboxState keeps the first joining time, sets it on joining, and clears it on leaving', () => {
   const { s, inbox, tick } = harness();
   lead(s, 'X', { wa_jid: JID, inbox_state: 'unsure' });

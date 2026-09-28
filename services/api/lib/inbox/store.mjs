@@ -100,6 +100,11 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
    * The chat's `last_msg_ts` only ever moves forward, and a message seen again counts with
    * the time it was first stored at, so it cannot push the chat anywhere new.
    *
+   * A message stored after all (a thread refresh re-reads one the poller gave up on) clears
+   * the `failed` gap its failure left under the same WhatsApp id, in the same transaction:
+   * otherwise the thread shows the message and "a message could not be loaded" for it.
+   * Only that one row: a join's `history_failed` gap is keyed `join:…`, never a message id.
+   *
    * @returns {{ inserted: boolean }}
    */
   function upsertMessage({ key_id, lead_id, jid = null, direction, sender_kind, sender_user_id = null, text = null, media_type = null, ts, status = null } = {}) {
@@ -122,6 +127,7 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
         .run(String(key_id), String(lead_id), str(jid), direction, sender_kind, str(sender_user_id), capText(text), str(media_type), toTs(ts), str(status));
       const at = existing ?? { lead_id: String(lead_id), ts: toTs(ts) };
       prep('UPDATE leads SET last_msg_ts = MAX(COALESCE(last_msg_ts, 0), ?) WHERE lead_id = ?').run(at.ts, at.lead_id);
+      prep('DELETE FROM wa_gaps WHERE key_id = ?').run(String(key_id));
       return { inserted: !existing };
     });
   }
