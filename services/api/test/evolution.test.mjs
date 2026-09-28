@@ -1098,11 +1098,11 @@ test('the placeholder and the record name the same file, and say it was cut only
   const doc = (fileName) => ({ key: { id: 'D3' }, message: { documentMessage: { fileName } } });
   for (const [fileName, cut] of [
     ['Villa\u202Efdp.exe  \t plan\u0000.pdf', false],
-    ['\u2067\u0645\u062E\u0637\u0637\u2069 \u200F\u0627\u0644\u0641\u064A\u0644\u0627\u061C\u202A.pdf\u202C\n', false],
-    ['\uD83D\uDCC4'.repeat(50) + 'a'.repeat(150), true],
+    ['\u2067مخطط\u2069 \u200Fالفيلا\u061C\u202A.pdf\u202C\n', false],
+    ['📄'.repeat(50) + 'a'.repeat(150), true],
     ['a'.repeat(119) + ' b', true],
     [`${'a'.repeat(118)}\u202E\u202E\u202Ebc`, false],
-    ['a'.repeat(116) + '\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67' + 'b', true],
+    ['a'.repeat(116) + '👨\u200D👩\u200D👧' + 'b', true],
     [' ' + 'a'.repeat(120) + ' \u202E', false],
     ['\u202E\u0007 \u2066 ', false],
     ['', false],
