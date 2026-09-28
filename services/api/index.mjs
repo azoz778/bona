@@ -48,6 +48,7 @@ import { sendText, waConfig } from './lib/wa.mjs';
 import { createTeam, TeamError } from './lib/team.mjs';
 import { createAudit } from './lib/audit.mjs';
 import { createSender } from './lib/wa-send.mjs';
+import { createInboxStore } from './lib/inbox/store.mjs';
 import { bareJid } from './lib/evolution.mjs';
 import { createDashboardRoutes } from './lib/dashboard/routes.mjs';
 
@@ -200,9 +201,12 @@ export function createApp(options = {}) {
     log({ level: 'error', evt: 'team.owner_seed_failed', error: err.code });
   }
   const audit = options.audit ?? createAudit(db, { log });
-  // The ONE sender for messages from the owner's number to anyone else: its rate limits
-  // live in memory, so a second instance would be a second, independent budget.
-  const sender = options.sender ?? createSender({ env: cfg.env ?? {}, team, log });
+  // The Bona inbox tables (2026-09-27 design §4.2). The sender already needs them: every
+  // send is written to the outbox first, and the daily cap is counted from it.
+  const inboxStore = options.inboxStore ?? createInboxStore(db);
+  // The ONE sender for messages from the owner's number to anyone else: its per-minute
+  // limits live in memory, so a second instance would be a second, independent budget.
+  const sender = options.sender ?? createSender({ env: cfg.env ?? {}, team, inbox: inboxStore, db, log });
   const sendCode = options.sendCode ?? ((o) => sender.sendTo({ ...o, kind: 'code' }));
   // The WhatsApp Ref-code poller. Read-only, and only when `BONA_WA_POLL` says so —
   // constructing it contacts nothing; the real server (below) is what puts it on a timer.
