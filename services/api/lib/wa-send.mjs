@@ -73,8 +73,11 @@ const SEND_ID_RE = /^[A-Za-z0-9_-]{16,64}$/;
 /** Failures we can be sure never reached the other side — no ambiguity, so not "uncertain". */
 const DEFINITE_NETWORK_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']);
 const DAY_MS = 86_400_000;
-/** A send still `pending` this long after it was written was cut off by a restart. */
-const INTERRUPTED_MS = 120_000;
+/**
+ * A send still `pending` this long after it was written was cut off by a restart. One rule
+ * for the start-up recovery, the reply stale guard and the daily upkeep (index.mjs).
+ */
+export const INTERRUPTED_MS = 120_000;
 
 /** A send id of this file's own: 64 random bits, so two sends in one millisecond never share a row. */
 const newSendId = () => `SND-${Date.now().toString(36)}-${randomId(8)}`;

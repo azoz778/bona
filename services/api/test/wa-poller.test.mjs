@@ -843,6 +843,32 @@ test('(l) the bare-array shape and an ISO timestamp are read the same way', asyn
   db.close();
 });
 
+test('(l) an injected fetchImpl is what the default reader goes out through, never the global fetch', async () => {
+  const db = openDb(':memory:');
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, body: JSON.parse(init.body) });
+    return { ok: true, status: 200, text: async () => JSON.stringify({ messages: { total: 1, pages: 1, currentPage: 1, records: [wire()] } }) };
+  };
+  const poller = createPoller({
+    db,
+    cfg: { env: { EVOLUTION_API_URL: 'https://wa-api.example', EVOLUTION_API_KEY: 'evo-key', BONA_OWNER_JID: OWNER } },
+    fetchImpl,
+    now: () => NOW,
+  });
+  const real = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('the global fetch was used'); };
+  try {
+    const tally = await poller.tick();
+    assert.equal(tally.matched, 1);
+  } finally {
+    globalThis.fetch = real;
+  }
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://wa-api.example/chat/findMessages/abdulaziz-personal');
+  db.close();
+});
+
 /* ---------------- (m) team and never-list numbers ---------------- */
 
 test('(m) a team or never-a-client number is never a lead or a reply, even with "Bona" or a Ref line', async () => {

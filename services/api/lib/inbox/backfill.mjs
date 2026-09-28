@@ -101,7 +101,8 @@ function errorCode(err) {
 const LOGGED_ERROR_NAMES = new Set([
   'Error', 'EvolutionError', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'SqliteError', 'AbortError', 'TimeoutError',
 ]);
-const loggableName = (err) => (typeof err?.name === 'string' && LOGGED_ERROR_NAMES.has(err.name) ? err.name : null);
+/** An error's name if it is one of those, else null. Shared with index.mjs's inbox upkeep, so every inbox log line keeps one rule. */
+export const loggableName = (err) => (typeof err?.name === 'string' && LOGGED_ERROR_NAMES.has(err.name) ? err.name : null);
 
 /**
  * Whether a record answers the question asked. A `remoteJidAlt` question also takes a record

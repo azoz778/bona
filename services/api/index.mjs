@@ -47,10 +47,10 @@ import { appendJsonl, createOrMergeLead, leadNote } from './lib/leads.mjs';
 import { sendText, waConfig } from './lib/wa.mjs';
 import { createTeam, TeamError, isExcludedLead } from './lib/team.mjs';
 import { createAudit } from './lib/audit.mjs';
-import { createSender } from './lib/wa-send.mjs';
+import { createSender, INTERRUPTED_MS as INTERRUPTED_SEND_MS } from './lib/wa-send.mjs';
 import { createInboxStore, RETENTION_MS } from './lib/inbox/store.mjs';
 import { createIngest } from './lib/inbox/ingest.mjs';
-import { createBackfill, JOIN_HISTORY_MS } from './lib/inbox/backfill.mjs';
+import { createBackfill, JOIN_HISTORY_MS, loggableName } from './lib/inbox/backfill.mjs';
 import { bareJid } from './lib/evolution.mjs';
 import { createDashboardRoutes } from './lib/dashboard/routes.mjs';
 
@@ -59,12 +59,16 @@ const GREETING = {
   ar: 'مرحباً، أنا دانة من بونا. كيف أقدر أساعدك؟',
 };
 
-/** Login-code outbox rows exist only to count the day's sends; two days covers any rolling 24 h. */
+/** Login-code outbox rows and purged chats' send stubs exist only to count the day's sends; two days covers any rolling 24 h. */
 const CODE_ROW_TTL_MS = 2 * 86_400_000;
-/** lib/wa-send.mjs `recoverInterrupted`'s own rule: a send pending longer than this lost its process. */
-const INTERRUPTED_SEND_MS = 120_000;
 /** How often the real server runs `app.inboxMaintenance()`. */
 const INBOX_UPKEEP_EVERY_MS = 24 * 3_600_000;
+/**
+ * An error's code, when it is shaped like one (`ERR_SQLITE_ERROR`, `ECONNREFUSED`): capitals
+ * and underscores only, so it cannot carry a number. The inbox never logs an error's message
+ * (lib/inbox/backfill.mjs): one could carry a jid.
+ */
+const loggableCode = (err) => (typeof err?.code === 'string' && /^[A-Z_]{1,64}$/.test(err.code) ? err.code : null);
 
 const jsonLog = (level, obj) => {
   const line = JSON.stringify({ ts: new Date().toISOString(), level, ...obj });
@@ -210,11 +214,11 @@ export function createApp(options = {}) {
     log({ level: 'error', evt: 'team.owner_seed_failed', error: err.code });
   }
   const audit = options.audit ?? createAudit(db, { log });
-  // The clock the inbox pieces read. Only tests pin it; everything else in this file
-  // keeps reading Date.now() as before.
+  // The clock the inbox pieces, and the poller that feeds them, read. Only tests pin it;
+  // everything else in this file keeps reading Date.now() as before.
   const clock = options.now ?? (() => Date.now());
-  // The fetch the sender and the backfill go out through. A test hands in a fake so
-  // nothing leaves the process; left undefined, each falls back to the global fetch.
+  // The fetch the sender, the backfill and the poller go out through. A test hands in a
+  // fake so nothing leaves the process; left undefined, each falls back to the global fetch.
   const fetchImpl = options.fetchImpl;
   // The Bona inbox (2026-09-27 design §4): transcripts of inbox chats, the outbox every
   // send is written to before it goes, unread marks, and the gaps a thread owns up to.
@@ -250,8 +254,10 @@ export function createApp(options = {}) {
   const backfill = options.backfill ?? createBackfill({ env: cfg.env ?? {}, db, ingest: ingestRecord, fetchImpl, log, now: clock });
   // The WhatsApp Ref-code poller. Read-only, and only when `BONA_WA_POLL` says so —
   // constructing it contacts nothing; the real server (below) is what puts it on a timer.
+  // Handed the inbox, so every live client message of an `in` chat is stored as it is
+  // read; without `ingest` it would run in Phase 1 mode and store nothing, silently.
   const poller = options.poller ?? (cfg.waPoll ? createPoller({
-    db, cfg, sendWhatsApp, isExcluded: team.isExcludedPhone, log, inboxStore, ingest: ingestRecord, backfill,
+    db, cfg, sendWhatsApp, isExcluded: team.isExcludedPhone, log, now: clock, fetchImpl, inboxStore, ingest: ingestRecord, backfill,
   }) : null);
   const tools = createToolHandlers({
     inventory, units, store, db, dataDir: cfg.dataDir, siteUrl: cfg.siteUrl, env: cfg.env, sendWhatsApp, log,
@@ -295,13 +301,14 @@ export function createApp(options = {}) {
    * never list leaves the inbox and its transcript goes (§3.5 — migration v4 sorted leads
    * by how they matched, and a number can join the team or the never list after its chat
    * joined); transcripts of chats silent for five years go (the lead rows stay — they are
-   * the attribution record); login-code outbox rows older than two days go (they only
-   * ever counted the day's sends); a send left pending by a process that died becomes
-   * uncertain; then every `in` chat with nothing stored yet gets the history an automatic
-   * join takes — never reaching past the retention horizon, or the purge would be undone
-   * the same morning. Counts only in the log: never a number, a name or a word of a
-   * message. One run at a time, and it never rejects: upkeep that fails is a line in the
-   * log, not a crashed server.
+   * the attribution record); login-code outbox rows, and the send stubs a purged chat
+   * leaves, go once they are two days old (they only ever counted the day's sends); a
+   * send left pending by a process that died becomes uncertain; then every `in` chat with
+   * nothing stored yet gets the history an automatic join takes — never reaching past the
+   * retention horizon, or the purge would be undone the same morning (at most 200 chats a
+   * run: see `inChatsWithoutMessages` for the limit). Counts only in the log: never a
+   * number, a name, a word of a message or an error's message. One run at a time, and it
+   * never rejects: upkeep that fails is a line in the log, not a crashed server.
    *
    * The sweep sees only what a row holds. A lid-only chat whose number another lead holds
    * (ingest's `held_by_other_lead`) never learns that number, so it stays in: its records
@@ -349,7 +356,10 @@ export function createApp(options = {}) {
       log({ evt: 'inbox.maintenance', ...counts });
       return counts;
     } catch (err) {
-      log({ level: 'error', evt: 'inbox.maintenance_failed', error: String(err?.message ?? err).slice(0, 200) });
+      // Guarded, so the promise the server fires and forgets resolves even if the logger throws.
+      try {
+        log({ level: 'error', evt: 'inbox.maintenance_failed', name: loggableName(err), code: loggableCode(err) });
+      } catch { /* still resolved */ }
       return { error: 'failed' };
     } finally {
       upkeepRunning = false;
@@ -910,10 +920,11 @@ if (isMain) {
     const pollStarted = app.poller.start({ intervalMs: app.cfg.waPollMs });
     jsonLog('info', { evt: 'wa.poll.init', started: pollStarted, everyMs: app.cfg.waPollMs, ...app.poller.status() });
   }
-  // Inbox upkeep (P2-18): once now, then daily. It logs its own counts and never rejects;
-  // like the poller, it is never the reason the process stays alive.
-  app.inboxMaintenance();
-  setInterval(() => { app.inboxMaintenance(); }, INBOX_UPKEEP_EVERY_MS).unref();
+  // Inbox upkeep (P2-18): once now, then daily. It logs its own counts and never rejects
+  // (the `.catch` only keeps a future slip from crashing the process); like the poller, it
+  // is never the reason the process stays alive.
+  app.inboxMaintenance().catch(() => {});
+  setInterval(() => { app.inboxMaintenance().catch(() => {}); }, INBOX_UPKEEP_EVERY_MS).unref();
   app.server.listen(app.cfg.port, app.cfg.host, () => {
     jsonLog('info', { evt: 'listening', ...redacted(app.cfg) });
   });

@@ -303,6 +303,13 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
    * without their history, or whose history was empty when they joined. The daily upkeep
    * (index.mjs `inboxMaintenance`) fetches for each what an automatic join would have
    * taken, oldest joiner first, so a long backlog is worked in the order it built up.
+   *
+   * Known limit: a chat that stays empty after its fetch — its history is empty or all
+   * refused, or the retention purge emptied it (it stays `in`) — is on this list for good,
+   * asked again every day, and as one of the oldest joiners it sorts first. Only once more
+   * than `limit` (200) such chats pile up would a newly joined empty chat never be reached;
+   * at 27 leads (2026-09-28) that is years away. The fix then is to remember when a chat
+   * was last asked (a column, so it survives restarts) and put never-asked chats first.
    */
   function inChatsWithoutMessages({ limit = 200 } = {}) {
     return prep(`SELECT l.* FROM leads l
@@ -313,13 +320,14 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
   }
 
   /**
-   * Every lead an inbox page can list or count — an `in` lead, or one on the Unsure list —
-   * with only what the exclusion test reads. The daily upkeep puts out any whose number is
-   * a colleague's or on the never list (index.mjs `inboxMaintenance`). No limit: a sweep
-   * that stopped part-way would leave the rest listed.
+   * Every `in` lead (a chat or not: a form lead with no chat yet is swept too, before it
+   * ever gets one) and every lead on the Unsure list, with only what the exclusion test
+   * reads. The daily upkeep puts out any whose number is a colleague's or on the never list
+   * (index.mjs `inboxMaintenance`). No limit: a sweep that stopped part-way would leave the
+   * rest listed.
    */
   const listedLeads = () => prep(`SELECT l.lead_id, l.phone_e164, l.wa_jid, l.wa_lid, l.inbox_state FROM leads l
-                                  WHERE l.inbox_state = 'in' OR ${UNSURE_CHAT}
+                                  WHERE l.inbox_state = 'in' OR (${UNSURE_CHAT})
                                   ORDER BY l.rowid ASC`).all().map(plain);
 
   /* -------------------- gaps -------------------- */

@@ -752,7 +752,7 @@ test('inChatsWithoutMessages: in chats with nothing stored yet, oldest joiner fi
   s.close();
 });
 
-test('listedLeads: every lead an inbox page can list or count, for the upkeep\'s exclusion sweep', () => {
+test('listedLeads: every in lead (a chat or not) and every lead on the Unsure list, for the upkeep\'s exclusion sweep', () => {
   const { s, inbox } = harness();
   chat(s, 'L-in', { phone_e164: '966500000002', wa_jid: '966500000002@s.whatsapp.net' });
   lead(s, 'L-form', { phone_e164: '966500000005', inbox_state: 'in' });
@@ -761,7 +761,7 @@ test('listedLeads: every lead an inbox page can list or count, for the upkeep\'s
   lead(s, 'L-out', { wa_jid: '966500000007@s.whatsapp.net', inbox_state: 'out' });
   lead(s, 'L-legacy', { phone_e164: '966500000008', channel: 'form' });
   assert.deepEqual(inbox.listedLeads().map((l) => l.lead_id).sort(), ['L-form', 'L-in', 'L-unplaced', 'L-unsure'],
-    'a "not a client" and a lead that is neither in nor a chat are on no inbox page');
+    'an in lead with no chat is swept too; a "not a client", and a lead that is neither in nor a chat, are not');
   assert.deepEqual(inbox.listedLeads().find((l) => l.lead_id === 'L-in'),
     { lead_id: 'L-in', phone_e164: '966500000002', wa_jid: '966500000002@s.whatsapp.net', wa_lid: null, inbox_state: 'in' },
     'only what the exclusion test reads');
