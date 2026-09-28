@@ -2160,14 +2160,14 @@ Each task: implementer subagent (TDD) → spec review → quality review, fix lo
   ALTER TABLE leads ADD COLUMN needs_human INTEGER NOT NULL DEFAULT 0 CHECK (needs_human IN (0,1));
   CREATE INDEX IF NOT EXISTS leads_inbox ON leads(inbox_state, last_msg_ts);
   CREATE TABLE IF NOT EXISTS wa_messages (
-    key_id TEXT PRIMARY KEY, lead_id TEXT NOT NULL, jid TEXT,
+    key_id TEXT NOT NULL PRIMARY KEY, lead_id TEXT NOT NULL, jid TEXT,
     direction TEXT NOT NULL CHECK (direction IN ('in','out')),
     sender_kind TEXT NOT NULL CHECK (sender_kind IN ('client','staff','dana','owner_number')),
     sender_user_id TEXT, text TEXT, media_type TEXT, ts INTEGER NOT NULL, status TEXT
   );
   CREATE INDEX IF NOT EXISTS wa_messages_lead ON wa_messages(lead_id, ts);
   CREATE TABLE IF NOT EXISTS wa_outbox (
-    send_id TEXT PRIMARY KEY, lead_id TEXT, jid TEXT NOT NULL, text TEXT, user_id TEXT,
+    send_id TEXT NOT NULL PRIMARY KEY, lead_id TEXT, jid TEXT NOT NULL, text TEXT, user_id TEXT,
     sender_kind TEXT NOT NULL CHECK (sender_kind IN ('staff','dana','code','note')),
     status TEXT NOT NULL CHECK (status IN ('pending','accepted','failed','uncertain')),
     key_id TEXT, created INTEGER NOT NULL, updated INTEGER NOT NULL, error TEXT
@@ -2176,15 +2176,14 @@ Each task: implementer subagent (TDD) → spec review → quality review, fix lo
   CREATE INDEX IF NOT EXISTS wa_outbox_lead ON wa_outbox(lead_id, created);
   CREATE INDEX IF NOT EXISTS wa_outbox_created ON wa_outbox(created);
   CREATE TABLE IF NOT EXISTS inbox_reads (user_id TEXT NOT NULL, lead_id TEXT NOT NULL, last_read_ts INTEGER NOT NULL, PRIMARY KEY (user_id, lead_id));
-  CREATE TABLE IF NOT EXISTS wa_gaps (key_id TEXT PRIMARY KEY, lead_id TEXT, jid TEXT, ts INTEGER, reason TEXT);
+  CREATE TABLE IF NOT EXISTS wa_gaps (key_id TEXT NOT NULL PRIMARY KEY, lead_id TEXT, jid TEXT, ts INTEGER, reason TEXT);
   CREATE INDEX IF NOT EXISTS wa_gaps_lead ON wa_gaps(lead_id, ts);
   UPDATE leads SET
     inbox_state = CASE WHEN match_method IN ('ref','ad_meta')
         OR (channel IN ('form','concierge_chat','concierge_voice') AND legacy_id IS NULL)
         OR EXISTS (SELECT 1 FROM touchpoints t WHERE t.lead_id = leads.lead_id AND t.event_type = 'lead_created'
-                   AND json_valid(t.meta)
-                   AND (upper(json_extract(t.meta, '$.snippet')) GLOB '*BONA-[0-9][0-9][0-9]*'
-                        OR upper(json_extract(t.meta, '$.snippet')) GLOB '*BONA-W[0-9][0-9][0-9]*'))
+                   AND (upper(CASE WHEN json_valid(t.meta) THEN json_extract(t.meta, '$.snippet') END) GLOB '*BONA-[0-9][0-9][0-9]*'
+                        OR upper(CASE WHEN json_valid(t.meta) THEN json_extract(t.meta, '$.snippet') END) GLOB '*BONA-W[0-9][0-9][0-9]*'))
       THEN 'in' ELSE 'unsure' END;
   UPDATE leads SET inbox_since = created WHERE inbox_state = 'in';
   ```
@@ -2525,13 +2524,18 @@ Insert the block below between that `  },` and the closing `];`:
     // from the owner's number through lib/wa-send.mjs — a login `code` row never holds its
     // text — and its rolling-24 h count is the daily cap, so a restart cannot reset it.
     // `wa_gaps` is a message the poller could not read: the thread says so instead of
-    // silently skipping it.
+    // silently skipping it. Their text keys are NOT NULL because a rowid table's TEXT
+    // PRIMARY KEY otherwise takes NULL, as many times as it is given one.
     // The two UPDATEs place the leads that already exist (P2-13). Certain → `in`, counted
-    // from the day the lead was created: a Ref code or ad context, a web form or Dana
-    // concierge lead that was not imported from the old log, or a listing id in the first
-    // message. Everything else — the keyword and click-window guesses, legacy imports —
-    // goes to the owner's Unsure list. `json_valid` comes first because `json_extract`
-    // raises on malformed JSON, and one bad touchpoint must not stop bona-api starting.
+    // from the day the lead was created: a Ref code or ad context, a web form or concierge
+    // lead with no legacy_id (neither imported from nor merged with the old leads.jsonl
+    // log), or a listing id in the first message. Everything else — the keyword and
+    // click-window guesses, legacy imports — goes to the owner's Unsure list. The GLOBs
+    // are deliberately a little looser than LISTING_ID_RE in lib/inbox/eligibility.mjs (no
+    // word boundary on either side) and were checked against the live data on 2026-09-28
+    // (18 in / 9 unsure). `json_extract` raises on malformed JSON, and one bad touchpoint
+    // must not stop bona-api starting, so it only runs inside CASE WHEN json_valid(...):
+    // SQLite evaluates a CASE lazily, but promises no order for the two sides of an AND.
     // No foreign keys, as in v3. Migrations here only ever add.
     version: 4,
     sql: `
@@ -2542,14 +2546,14 @@ Insert the block below between that `  },` and the closing `];`:
       ALTER TABLE leads ADD COLUMN needs_human INTEGER NOT NULL DEFAULT 0 CHECK (needs_human IN (0,1));
       CREATE INDEX IF NOT EXISTS leads_inbox ON leads(inbox_state, last_msg_ts);
       CREATE TABLE IF NOT EXISTS wa_messages (
-        key_id TEXT PRIMARY KEY, lead_id TEXT NOT NULL, jid TEXT,
+        key_id TEXT NOT NULL PRIMARY KEY, lead_id TEXT NOT NULL, jid TEXT,
         direction TEXT NOT NULL CHECK (direction IN ('in','out')),
         sender_kind TEXT NOT NULL CHECK (sender_kind IN ('client','staff','dana','owner_number')),
         sender_user_id TEXT, text TEXT, media_type TEXT, ts INTEGER NOT NULL, status TEXT
       );
       CREATE INDEX IF NOT EXISTS wa_messages_lead ON wa_messages(lead_id, ts);
       CREATE TABLE IF NOT EXISTS wa_outbox (
-        send_id TEXT PRIMARY KEY, lead_id TEXT, jid TEXT NOT NULL, text TEXT, user_id TEXT,
+        send_id TEXT NOT NULL PRIMARY KEY, lead_id TEXT, jid TEXT NOT NULL, text TEXT, user_id TEXT,
         sender_kind TEXT NOT NULL CHECK (sender_kind IN ('staff','dana','code','note')),
         status TEXT NOT NULL CHECK (status IN ('pending','accepted','failed','uncertain')),
         key_id TEXT, created INTEGER NOT NULL, updated INTEGER NOT NULL, error TEXT
@@ -2558,15 +2562,14 @@ Insert the block below between that `  },` and the closing `];`:
       CREATE INDEX IF NOT EXISTS wa_outbox_lead ON wa_outbox(lead_id, created);
       CREATE INDEX IF NOT EXISTS wa_outbox_created ON wa_outbox(created);
       CREATE TABLE IF NOT EXISTS inbox_reads (user_id TEXT NOT NULL, lead_id TEXT NOT NULL, last_read_ts INTEGER NOT NULL, PRIMARY KEY (user_id, lead_id));
-      CREATE TABLE IF NOT EXISTS wa_gaps (key_id TEXT PRIMARY KEY, lead_id TEXT, jid TEXT, ts INTEGER, reason TEXT);
+      CREATE TABLE IF NOT EXISTS wa_gaps (key_id TEXT NOT NULL PRIMARY KEY, lead_id TEXT, jid TEXT, ts INTEGER, reason TEXT);
       CREATE INDEX IF NOT EXISTS wa_gaps_lead ON wa_gaps(lead_id, ts);
       UPDATE leads SET
         inbox_state = CASE WHEN match_method IN ('ref','ad_meta')
             OR (channel IN ('form','concierge_chat','concierge_voice') AND legacy_id IS NULL)
             OR EXISTS (SELECT 1 FROM touchpoints t WHERE t.lead_id = leads.lead_id AND t.event_type = 'lead_created'
-                       AND json_valid(t.meta)
-                       AND (upper(json_extract(t.meta, '$.snippet')) GLOB '*BONA-[0-9][0-9][0-9]*'
-                            OR upper(json_extract(t.meta, '$.snippet')) GLOB '*BONA-W[0-9][0-9][0-9]*'))
+                       AND (upper(CASE WHEN json_valid(t.meta) THEN json_extract(t.meta, '$.snippet') END) GLOB '*BONA-[0-9][0-9][0-9]*'
+                            OR upper(CASE WHEN json_valid(t.meta) THEN json_extract(t.meta, '$.snippet') END) GLOB '*BONA-W[0-9][0-9][0-9]*'))
           THEN 'in' ELSE 'unsure' END;
       UPDATE leads SET inbox_since = created WHERE inbox_state = 'in';
     `,
