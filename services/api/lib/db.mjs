@@ -21,7 +21,7 @@ import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { randomId } from './store.mjs';
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const STAGES = ['new', 'contacted', 'qualified', 'viewing', 'offer', 'negotiation', 'won', 'lost'];
 export const FANOUT_DESTS = ['meta', 'ga4', 'snap', 'tiktok'];
@@ -150,6 +150,62 @@ const MIGRATIONS = [
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT, updated INTEGER, updated_by TEXT);
     `,
   },
+  {
+    // The Bona inbox (2026-09-27 design §4.1–4.2, Phase 2). Whether the team may read a
+    // chat is STORED on the lead (`inbox_state`: 'in' | 'unsure' | 'out', NULL = not decided
+    // yet) and never re-derived from the match rules, so a lead that was only guessed (the
+    // word "bona", the ±15-min click window) cannot drift into the inbox later through the
+    // `phone` rule. `needs_human` is Phase 4's hand-over flag; any human reply clears it.
+    // `wa_messages` holds the transcripts of `in` chats only. `wa_outbox` is every send
+    // from the owner's number through lib/wa-send.mjs — a login `code` row never holds its
+    // text — and its rolling-24 h count is the daily cap, so a restart cannot reset it.
+    // `wa_gaps` is a message the poller could not read: the thread says so instead of
+    // silently skipping it.
+    // The two UPDATEs place the leads that already exist (P2-13). Certain → `in`, counted
+    // from the day the lead was created: a Ref code or ad context, a web form or Dana
+    // concierge lead that was not imported from the old log, or a listing id in the first
+    // message. Everything else — the keyword and click-window guesses, legacy imports —
+    // goes to the owner's Unsure list. `json_valid` comes first because `json_extract`
+    // raises on malformed JSON, and one bad touchpoint must not stop bona-api starting.
+    // No foreign keys, as in v3. Migrations here only ever add.
+    version: 4,
+    sql: `
+      ALTER TABLE leads ADD COLUMN inbox_state TEXT CHECK (inbox_state IN ('in','unsure','out'));
+      ALTER TABLE leads ADD COLUMN inbox_since INTEGER;
+      ALTER TABLE leads ADD COLUMN handler_user_id TEXT;
+      ALTER TABLE leads ADD COLUMN last_msg_ts INTEGER;
+      ALTER TABLE leads ADD COLUMN needs_human INTEGER NOT NULL DEFAULT 0 CHECK (needs_human IN (0,1));
+      CREATE INDEX IF NOT EXISTS leads_inbox ON leads(inbox_state, last_msg_ts);
+      CREATE TABLE IF NOT EXISTS wa_messages (
+        key_id TEXT PRIMARY KEY, lead_id TEXT NOT NULL, jid TEXT,
+        direction TEXT NOT NULL CHECK (direction IN ('in','out')),
+        sender_kind TEXT NOT NULL CHECK (sender_kind IN ('client','staff','dana','owner_number')),
+        sender_user_id TEXT, text TEXT, media_type TEXT, ts INTEGER NOT NULL, status TEXT
+      );
+      CREATE INDEX IF NOT EXISTS wa_messages_lead ON wa_messages(lead_id, ts);
+      CREATE TABLE IF NOT EXISTS wa_outbox (
+        send_id TEXT PRIMARY KEY, lead_id TEXT, jid TEXT NOT NULL, text TEXT, user_id TEXT,
+        sender_kind TEXT NOT NULL CHECK (sender_kind IN ('staff','dana','code','note')),
+        status TEXT NOT NULL CHECK (status IN ('pending','accepted','failed','uncertain')),
+        key_id TEXT, created INTEGER NOT NULL, updated INTEGER NOT NULL, error TEXT
+      );
+      CREATE INDEX IF NOT EXISTS wa_outbox_key ON wa_outbox(key_id);
+      CREATE INDEX IF NOT EXISTS wa_outbox_lead ON wa_outbox(lead_id, created);
+      CREATE INDEX IF NOT EXISTS wa_outbox_created ON wa_outbox(created);
+      CREATE TABLE IF NOT EXISTS inbox_reads (user_id TEXT NOT NULL, lead_id TEXT NOT NULL, last_read_ts INTEGER NOT NULL, PRIMARY KEY (user_id, lead_id));
+      CREATE TABLE IF NOT EXISTS wa_gaps (key_id TEXT PRIMARY KEY, lead_id TEXT, jid TEXT, ts INTEGER, reason TEXT);
+      CREATE INDEX IF NOT EXISTS wa_gaps_lead ON wa_gaps(lead_id, ts);
+      UPDATE leads SET
+        inbox_state = CASE WHEN match_method IN ('ref','ad_meta')
+            OR (channel IN ('form','concierge_chat','concierge_voice') AND legacy_id IS NULL)
+            OR EXISTS (SELECT 1 FROM touchpoints t WHERE t.lead_id = leads.lead_id AND t.event_type = 'lead_created'
+                       AND json_valid(t.meta)
+                       AND (upper(json_extract(t.meta, '$.snippet')) GLOB '*BONA-[0-9][0-9][0-9]*'
+                            OR upper(json_extract(t.meta, '$.snippet')) GLOB '*BONA-W[0-9][0-9][0-9]*'))
+          THEN 'in' ELSE 'unsure' END;
+      UPDATE leads SET inbox_since = created WHERE inbox_state = 'in';
+    `,
+  },
 ];
 
 /** Columns of each table, in order — the single source for the insert/update helpers. */
@@ -160,7 +216,7 @@ const COLUMNS = {
   leads: ['lead_id', 'created', 'updated', 'phone_e164', 'wa_jid', 'wa_lid', 'name', 'channel', 'source', 'medium', 'campaign', 'campaign_id',
     'content', 'click_ids', 'ref', 'match_method', 'session_id', 'anon_id', 'listing_id', 'first_touch', 'last_touch', 'interest', 'budget',
     'timeline', 'district', 'language', 'notes', 'stage', 'stage_ts', 'value_sar', 'first_inbound_ts', 'first_reply_ts', 'legacy_id',
-    'consent_ads', 'consent_analytics'],
+    'consent_ads', 'consent_analytics', 'inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human'],
   touchpoints: ['id', 'lead_id', 'ts', 'channel', 'event_type', 'source', 'medium', 'campaign', 'campaign_id', 'listing_id', 'meta'],
 };
 
@@ -547,8 +603,15 @@ export function openDb(file = ':memory:') {
   };
 }
 
-function migrate(db) {
+/**
+ * Bring `db` (a raw DatabaseSync) up to `upTo`, one migration per transaction. `openDb`
+ * always runs the whole chain; `upTo` exists so the tests can stop it early, build a
+ * genuine older file and upgrade that — the only honest way to test a step that places
+ * rows already in the file (v4).
+ */
+export function migrate(db, { upTo = SCHEMA_VERSION } = {}) {
   for (const m of MIGRATIONS) {
+    if (m.version > upTo) continue;
     // BEGIN IMMEDIATE takes the write lock up front, so a concurrent opener (another
     // process's openDb on the same file) either gets here first and finishes its COMMIT
     // before we acquire the lock, or blocks (busy_timeout) until we finish ours — either
