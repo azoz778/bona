@@ -32,6 +32,8 @@ import { createLimiter } from '../ratelimit.mjs';
 import { enqueueStage } from '../fanout.mjs';
 import { createStats, dayKey } from './stats.mjs';
 import { createAuth } from './auth.mjs';
+import { createTiktokAccounts, AccountsError } from '../tiktok-accounts.mjs';
+import { tiktokAccountsPage, tiktokContinuePage, validateTiktokDraft } from './render-tiktok.mjs';
 import { teamPage } from './render-team.mjs';
 import { TeamError } from '../team.mjs';
 import {
@@ -122,9 +124,10 @@ export function createDashboardRoutes({
   db, cfg = {}, inventory = null, fanout = null, app = null,
   sendWhatsApp = null, probeRetell = null,
   team = null, audit = null, sendCode = null,
-  auth = null, stats = null, log = () => {}, now = () => Date.now(),
+  auth = null, stats = null, tiktokAccounts = null, log = () => {}, now = () => Date.now(),
 } = {}) {
   const statistics = stats ?? createStats({ db, now });
+  const accounts = tiktokAccounts ?? createTiktokAccounts({ cfg, now });
   // Without the team store nobody can be identified. index.mjs always builds one (and
   // seeds the owner) before this runs, so a missing one is a wiring bug: say so at start-up
   // rather than serve a dashboard that can only ever refuse.
@@ -177,8 +180,8 @@ export function createDashboardRoutes({
   }
 
   /** 303, so a re-load of the result page does not re-post the form. */
-  function redirect(res, location, status = 303) {
-    res.writeHead(status, { Location: location, 'Content-Length': '0', ...SECURITY_HEADERS });
+  function redirect(res, location, status = 303, extra = {}) {
+    res.writeHead(status, { Location: location, 'Content-Length': '0', ...SECURITY_HEADERS, ...extra });
     res.end();
   }
 
@@ -356,6 +359,9 @@ export function createDashboardRoutes({
       { label: 'GA4 — Measurement Protocol secret', present: Boolean(cfg.ga4ApiSecret) },
       { label: 'Snapchat — pixel id', present: Boolean(cfg.snapPixelId) },
       { label: 'Snapchat — Conversions API token', present: Boolean(cfg.snapCapiToken) },
+      { label: 'TikTok Accounts — app id', present: Boolean(cfg.tiktokAccountsAppId) },
+      { label: 'TikTok Accounts — app secret', present: Boolean(cfg.tiktokAccountsAppSecret) },
+      { label: 'TikTok Accounts — authorization URL', present: Boolean(cfg.tiktokAccountsAuthUrl) },
       { label: 'TikTok — Pixel ID', present: Boolean(cfg.tiktokPixelId) },
       { label: 'TikTok — Events API token', present: Boolean(cfg.tiktokEventsToken) },
       { label: 'TikTok — test mode', present: Boolean(cfg.tiktokTestEventCode), note: cfg.tiktokTestEventCode ? 'Test events only; remove code before production measurement' : 'No test code' },
@@ -532,6 +538,36 @@ export function createDashboardRoutes({
       ok: url.searchParams.get('ok'),
       error: url.searchParams.get('error'),
     }));
+  }
+
+  async function tiktokCallback({ req, res, url }) {
+    const noRef = { 'Referrer-Policy': 'no-referrer' };
+    if (req.method !== 'GET') return sendHtml(res, 405, messagePage({ title: 'Invalid callback', message: 'Use the owner authorization flow.' }), noRef);
+    const me = currentUser(req);
+    let canonicalHost;
+    try { canonicalHost = new URL(cfg.publicApi).host; } catch { /* fail closed */ }
+    if (url.pathname !== '/dashboard/tiktok/callback/' || !me || me.role !== 'owner' || req.headers.host !== canonicalHost || !url.searchParams.has('state'))
+      return sendHtml(res, 400, messagePage({ title: 'Authorization not completed', message: 'Start from the signed-in owner TikTok setup page. This callback does not accept unsolicited authorization codes.' }), noRef);
+    try {
+      await accounts.finish({ params: url.searchParams, session: sessionToken(req) });
+      return redirect(res, '/dashboard/tiktok?ok=connected', 303, noRef);
+    } catch (err) {
+      const code = err instanceof AccountsError ? err.code : 'provider_failed';
+      // Do not log the request URL, code, state, token or provider exception.
+      return redirect(res, `/dashboard/tiktok?error=${encodeURIComponent(code)}`, 303, noRef);
+    }
+  }
+  async function tiktokWrite({ req, res, me, fields }, operation) {
+    if (operation === 'preview') return sendHtml(res, 200, tiktokAccountsPage({ me, state: accounts.status(), draft: validateTiktokDraft(fields, cfg.siteUrl, now()) }));
+    try {
+      if (operation === 'connect') return sendHtml(res, 200, tiktokContinuePage({ me, authorizationUrl: accounts.begin(sessionToken(req)) }), { 'Referrer-Policy': 'no-referrer' });
+      if (operation === 'forget' && fields.confirm !== 'remove-local-grant') return sendJson(res, 400, { error: 'confirmation_required' });
+      await accounts[operation]();
+      return redirect(res, `/dashboard/tiktok?ok=${operation === 'refresh' ? 'refreshed' : operation === 'forget' ? 'forgotten' : 'revoked'}`);
+    } catch (err) {
+      const code = err instanceof AccountsError ? err.code : 'provider_failed';
+      return redirect(res, `/dashboard/tiktok?error=${encodeURIComponent(code)}`);
+    }
   }
 
   /* -------------------- writes -------------------- */
@@ -751,6 +787,7 @@ export function createDashboardRoutes({
   const owns = ownsDashboardPath;
 
   async function handleHtml({ req, res, url, p, ip }) {
+    if (p === '/dashboard/tiktok/callback') return tiktokCallback({ req, res, url });
     /* --- login, the only pages reachable signed out --- */
     if (p === '/dashboard/login') {
       if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method_not_allowed' });
@@ -784,6 +821,10 @@ export function createDashboardRoutes({
     if (p === '/dashboard/listings') return listings({ res, me });
     if (p === '/dashboard/spend') return spend({ res, url, me });
     if (p === '/dashboard/integrations') return integrations({ res, me });
+    if (p === '/dashboard/tiktok') {
+      if (me.role !== 'owner') return sendHtml(res, 403, messagePage({ title: 'Owners only', message: 'Only an owner can manage TikTok authorization.', me }));
+      return sendHtml(res, 200, tiktokAccountsPage({ me, state: accounts.status(), error: url.searchParams.get('error'), ok: url.searchParams.get('ok') }));
+    }
     if (p === '/dashboard/team') return teamView({ res, url, me });
     return sendHtml(res, 404, messagePage({ title: 'Not found', message: 'There is no such page.', me }));
   }
@@ -810,8 +851,14 @@ export function createDashboardRoutes({
 
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'method_not_allowed' });
 
+    const tiktokMatch = /^\/v1\/admin\/tiktok\/(connect|refresh|revoke|forget|preview)$/.exec(p);
+    if (tiktokMatch) {
+      let origin;
+      try { origin = new URL(cfg.publicApi).origin; } catch { /* fail closed */ }
+      if (!origin || req.headers.origin !== origin) return sendHtml(res, 403, messagePage({ title: 'Request origin could not be verified', message: 'Open the TikTok setup page on the canonical API address in your signed-in owner browser and try again. Your browser must send its same-origin Origin header.' }));
+    }
     const teamMatch = ADMIN_TEAM.exec(p);
-    const ownerWrite = Boolean(teamMatch) || OWNER_WRITES.has(p);
+    const ownerWrite = Boolean(teamMatch || tiktokMatch) || OWNER_WRITES.has(p);
     const writes = (leadMatch && leadMatch[2]) || (p === '/v1/admin/spend' ? 'spend' : null) || (ownerWrite ? 'team' : null);
     if (!writes) return sendJson(res, 404, { error: 'not_found' });
 
@@ -832,6 +879,7 @@ export function createDashboardRoutes({
     }
 
     const ctx = { res, fields: parsed.fields, form: parsed.form, me };
+    if (tiktokMatch) return tiktokWrite({ ...ctx, req }, tiktokMatch[1]);
     if (writes === 'stage') return setStage(ctx, leadMatch[1]);
     if (writes === 'note') return addNote(ctx, leadMatch[1]);
     if (writes === 'spend') return saveSpend(ctx);
