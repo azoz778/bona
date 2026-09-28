@@ -76,7 +76,7 @@ function inboxWiring({ db, history, historyFails = false, logs, now }) {
   const ingest = (lead, rec) => ingestor.ingest(lead, rec);
   const reader = chatReader(history, { fail: historyFails });
   const backfill = createBackfill({ env: {}, db, ingest, find: reader.find, log, now });
-  return { team, owner, inbox, ingest, backfill, findCalls: reader.calls };
+  return { team, owner, inbox, ingestor, ingest, backfill, findCalls: reader.calls };
 }
 
 /**
@@ -87,9 +87,14 @@ function inboxWiring({ db, history, historyFails = false, logs, now }) {
  * ingest and backfill over the same db, except that the backfill's per-chat reader is a
  * spy over `history`, so no test reaches Evolution; `historyFails` makes that reader throw,
  * as it does when Evolution is down. `ingestOverride` replaces only the poller's ingest
- * (the backfill keeps the real one), for a store that fails.
+ * (the backfill keeps the real one), for a store that fails. `wire(wiring)` returns any of
+ * `inboxStore`/`ingest`/`backfill` to hand the poller instead of the defaults (the rest of
+ * the wiring keeps the real ones). `onNote` runs while the owner's note is being sent.
  */
-function harness({ windows = [], env = {}, seedSession = true, isExcluded, inbox = false, history = [], historyFails = false, ingestOverride = null } = {}) {
+function harness({
+  windows = [], env = {}, seedSession = true, isExcluded, inbox = false, history = [], historyFails = false, ingestOverride = null,
+  wire = null, onNote = null,
+} = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-poller-'));
   const db = openDb(':memory:');
   if (seedSession) {
@@ -109,9 +114,9 @@ function harness({ windows = [], env = {}, seedSession = true, isExcluded, inbox
     db,
     cfg: { env: { BONA_OWNER_JID: OWNER, ...env }, siteUrl: 'https://bona-real-estate.com', dataDir, waPollMs: 0 },
     findMessages: async (window) => { asked.push(window); return { records: queue.length ? queue.shift() : [] }; },
-    sendWhatsApp: async (text) => { sent.push(text); return { ok: true }; },
+    sendWhatsApp: async (text) => { sent.push(text); if (onNote) await onNote(text); return { ok: true }; },
     ...(isExcluded ? { isExcluded } : {}),
-    ...(wiring ? { inboxStore: wiring.inbox, ingest: ingestOverride ?? wiring.ingest, backfill: wiring.backfill } : {}),
+    ...(wiring ? { inboxStore: wiring.inbox, ingest: ingestOverride ?? wiring.ingest, backfill: wiring.backfill, ...(wire ? wire(wiring) : {}) } : {}),
     log: (obj) => logs.push(obj),
     now: () => clock,
   });
@@ -1566,5 +1571,148 @@ test('(t) a document name cut at 120 characters starts a chat only where the who
   assert.equal(lead.inbox_state, 'in');
   assert.deepEqual(rows(h, lead.lead_id), [['CUT2', 'out', 'owner_number']]);
   assert.equal(tally.joined, 1);
+  h.cleanup();
+});
+
+/* ---------------- (t) the 2026-09-28 quality review of Task 9 ---------------- */
+
+/** The owner's chat with himself, filed under a privacy-mode lid with no alt: nothing in the record says whose it is. */
+const SELF_LID = '101010101010101@lid';
+const ownNote = () => leadNote({
+  name: 'Sara', phone_e164: '966500000000', listing_id: 'BONA-W003', source: 'meta', medium: 'paid', ref: 'K7Q2XR', channel: 'whatsapp', created: NOW,
+}, { siteUrl: 'https://bona-real-estate.com' });
+
+test("(t) the owner's self-chat seen as a bare @lid starts no chat: not our note, not a Bona link he saves there (A7)", async () => {
+  const self = [
+    msg({ id: 'SELF-TODO', fromMe: true, jid: SELF_LID, pushName: 'Abdulaziz', ts: NOW - 120_000, text: 'call the dentist at 5' }),
+    msg({ id: 'SELF-NOTE', fromMe: true, jid: SELF_LID, pushName: 'Abdulaziz', ts: NOW - 90_000, text: ownNote() }),
+    msg({ id: 'SELF-LINK', fromMe: true, jid: SELF_LID, pushName: 'Abdulaziz', ts: NOW - 60_000, text: 'https://bona-real-estate.com/properties/bona-w003/' }),
+  ];
+  let team = null;
+  const h = harness({ inbox: true, isExcluded: (digits) => team.isExcludedPhone(digits), history: self, windows: [self] });
+  team = h.team;
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0, 'no lead for a lid alone: it cannot be checked against the team or never list, nor replied to');
+  assert.equal(h.findCalls.length, 0, 'and not one message of that chat is read');
+  assert.deepEqual({ joined: tally.joined, stored: tally.stored }, { joined: 0, stored: 0 });
+  h.cleanup();
+});
+
+test("(t) our own note is refused by its first line, even where nothing else knows the owner's number (A7)", async () => {
+  const h = harness({ inbox: true, env: { BONA_OWNER_JID: '' }, windows: [[
+    msg({ id: 'N-OUT', fromMe: true, jid: OWNER, pushName: 'Abdulaziz', text: ownNote() }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0);
+  assert.equal(h.findCalls.length, 0);
+  assert.deepEqual({ joined: tally.joined, stored: tally.stored }, { joined: 0, stored: 0 });
+  h.cleanup();
+});
+
+test('(t) a Bona link to a known client seen only by @lid still joins: the lead already carries the number', async () => {
+  const lid = '272516946294519@lid';
+  const link = msg({ id: 'L-LINK', fromMe: true, jid: lid, pushName: null, ts: NOW - 60_000, text: 'https://bona-real-estate.com/properties/bona-w003/' });
+  const h = harness({ inbox: true, history: [link], windows: [[link]] });
+  seedInLead(h, { lead_id: 'LEAD-unsure', wa_lid: lid, inbox_state: 'unsure', inbox_since: null });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.getLead('LEAD-unsure').inbox_state, 'in');
+  assert.equal(tally.joined, 1);
+  assert.deepEqual(rows(h, 'LEAD-unsure'), [['L-LINK', 'out', 'owner_number']]);
+  h.cleanup();
+});
+
+test('(t) a record retried because its store failed is not matched again: one touchpoint, one wa.lead line', async () => {
+  const h = harness({ inbox: true, ingestOverride: () => { throw new Error('disk I/O error'); } });
+  seedInLead(h);
+  const bad = msg({ id: 'AGAIN', ts: NOW - 60_000, text: 'أي جديد؟' });
+  for (let i = 1; i <= MAX_RECORD_ATTEMPTS; i += 1) {
+    h.push([bad]);
+    await h.poller.tick(); // eslint-disable-line no-await-in-loop
+  }
+  assert.equal(h.logs.filter((l) => l.evt === 'wa.poll.record_failed').length, MAX_RECORD_ATTEMPTS, 'the store itself was retried every time');
+  assert.equal(h.db.touchpointsForLead('LEAD-in').filter((t) => t.event_type === 'inbound_message').length, 1);
+  assert.equal(h.logs.filter((l) => l.evt === 'wa.lead').length, 1);
+  assert.equal(h.poller.status().matched, 1);
+  h.cleanup();
+});
+
+test("(t) a chat marked 'Not a client' while its note is being sent stays out", async () => {
+  const h = harness({
+    inbox: true,
+    windows: [[msg({ text: 'BONA-W012 السعر؟' })]],
+    onNote: () => { const [lead] = h.leads(); h.inbox.setInboxState(lead.lead_id, 'out'); },
+  });
+  await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(h.sent.length, 1);
+  assert.equal(lead.inbox_state, 'out', 'out is absolute: a certain signal read before it does not undo it');
+  assert.equal(h.inbox.hasMessages(lead.lead_id), false);
+  assert.equal(h.findCalls.length, 0);
+  h.cleanup();
+});
+
+test('(t) a join whose history and whose gap both fail says so, and does not throw the message into a retry', async () => {
+  const ref = msg({ id: 'REF', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const h = harness({
+    inbox: true, history: [ref], historyFails: true, windows: [[ref]],
+    wire: ({ inbox }) => ({ inboxStore: { ...inbox, addGap: () => { throw new Error('database is locked'); } } }),
+  });
+  const tally = await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.inbox_state, 'in');
+  assert.equal(tally.joined, 1);
+  assert.deepEqual(rows(h, lead.lead_id), [['REF', 'in', 'client']]);
+  assert.equal(h.logs.some((l) => l.evt === 'wa.poll.record_failed'), false, 'a retry would skip the join, so it would never redo the history either');
+  const failed = h.logs.find((l) => l.evt === 'inbox.gap_failed');
+  assert.deepEqual([failed.level, failed.leadId, failed.reason], ['warn', lead.lead_id, 'history_failed']);
+  assert.equal(JSON.stringify(h.logs.filter((l) => l.evt === 'inbox.gap_failed')).includes('locked'), false, 'no raw error text');
+  h.cleanup();
+});
+
+test('(t) a written-off reaction, or a record the join history already stored, leaves no gap', async () => {
+  const noisy = harness({ inbox: true, ingestOverride: () => { throw new Error('disk I/O error'); } });
+  seedInLead(noisy);
+  const react = msg({ id: 'REACT', ts: NOW - 60_000, text: '', messageType: 'reactionMessage', noise: true });
+  for (let i = 1; i <= MAX_RECORD_ATTEMPTS; i += 1) {
+    noisy.push([react]);
+    await noisy.poller.tick(); // eslint-disable-line no-await-in-loop
+  }
+  assert.equal(noisy.logs.filter((l) => l.evt === 'wa.poll.record_failed').at(-1).writtenOff, true);
+  assert.deepEqual(noisy.inbox.gapsFor('LEAD-in'), [], 'a reaction is never a bubble, so it is never a missing one');
+  noisy.cleanup();
+
+  const ref = msg({ id: 'REF', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const h = harness({ inbox: true, history: [ref], ingestOverride: () => { throw new Error('disk I/O error'); } });
+  for (let i = 1; i <= MAX_RECORD_ATTEMPTS; i += 1) {
+    h.push([ref]);
+    await h.poller.tick(); // eslint-disable-line no-await-in-loop
+  }
+  const [lead] = h.leads();
+  assert.equal(h.logs.filter((l) => l.evt === 'wa.poll.record_failed').at(-1).writtenOff, true);
+  assert.deepEqual(rows(h, lead.lead_id), [['REF', 'in', 'client']], 'the join history stored it');
+  assert.deepEqual(h.inbox.gapsFor(lead.lead_id), [], 'so the thread does not say it could not be loaded');
+  h.cleanup();
+});
+
+test('(t) with no backfill wired a join stores from its own message on, and reads nothing', async () => {
+  const hi = msg({ id: 'HI', ts: NOW - 3_600_000, text: 'Hi' });
+  const ref = msg({ id: 'REF', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const h = harness({ inbox: true, history: [hi, ref], windows: [[ref]], wire: () => ({ backfill: null }) });
+  const tally = await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.inbox_state, 'in');
+  assert.equal(tally.joined, 1);
+  assert.deepEqual(rows(h, lead.lead_id), [['REF', 'in', 'client']]);
+  assert.equal(h.findCalls.length, 0);
+  h.cleanup();
+});
+
+test('(t) the ingest can be handed over the way createIngest() returns it, as { ingest }', async () => {
+  const h = harness({ inbox: true, windows: [[msg({ text: 'BONA-W012 السعر؟' })]], wire: ({ ingestor }) => ({ ingest: ingestor }) });
+  const tally = await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.inbox_state, 'in');
+  assert.equal(tally.stored, 1);
+  assert.deepEqual(rows(h, lead.lead_id), [['KEY1', 'in', 'client']]);
   h.cleanup();
 });

@@ -268,9 +268,12 @@ export function createPoller({
   let lidOnlyUnexcludable = 0;
   let skipLogged = false;
   /**
-   * Message ids this process has failed on → `{ attempts, ts }`. The timestamp matters as
-   * much as the count: the cursor is held back to it, or the record would fall out of the
-   * window and be neither retried nor written off.
+   * Message ids this process has failed on → `{ attempts, ts, handled? }`. The timestamp
+   * matters as much as the count: the cursor is held back to it, or the record would fall
+   * out of the window and be neither retried nor written off. `handled` (inbox only) is what
+   * `handleInbound` already did for a record that then failed in the inbox steps after it,
+   * so a retry goes straight back to those steps instead of merging the message into its
+   * lead again (one more touchpoint and `wa.lead` line per attempt).
    */
   const failures = new Map();
 
@@ -498,15 +501,21 @@ export function createPoller({
    * §4.3): the joining message is about to be stored, so the chat is no longer one the
    * daily catch-up asks again for (it only picks chats with nothing stored). A gap just
    * before the joining message makes the thread say "a message could not be loaded —
-   * check WhatsApp" where that history belongs.
+   * check WhatsApp" where that history belongs. If even that gap cannot be written, it is
+   * logged (`inbox.gap_failed`) rather than thrown: a retry of the record would find the
+   * chat already `in`, skip this join, and so never redo the history or its gap either.
    */
   async function join(leadId, ts, via, tally, extra = {}) {
     inboxStore.setInboxState(leadId, 'in', { since: ts });
     if (backfill) {
       const got = await backfill.history(db.getLead(leadId), { sinceTs: ts - JOIN_HISTORY_MS, untilTs: ts });
       if (got?.error) {
-        inboxStore.addGap({ key_id: `join:${leadId}:${ts}`, lead_id: leadId, ts: ts - 1, reason: 'history_failed' });
         log({ level: 'warn', evt: 'inbox.join_history_failed', leadId, error: got.error });
+        try {
+          inboxStore.addGap({ key_id: `join:${leadId}:${ts}`, lead_id: leadId, ts: ts - 1, reason: 'history_failed' });
+        } catch {
+          log({ level: 'warn', evt: 'inbox.gap_failed', leadId, reason: 'history_failed' });
+        }
       }
     }
     tally.joined += 1;
@@ -519,8 +528,14 @@ export function createPoller({
    * never move from here (lib/inbox/eligibility.mjs `nextInboxState`). Unsure keeps
    * nothing: a guessed chat is never stored or shown until the owner moves it in. A bare
    * Ref-shaped code is certain only when a site session holds it (`refKnown`, A6).
+   *
+   * Decided on the lead as it is NOW, not as `handleInbound` read it: the owner's note was
+   * sent in between (and a retried record carries the lead from its first attempt), and a
+   * chat the owner put `out` meanwhile — Not a client, the never list — must stay out.
    */
-  async function inboxAfterInbound(rec, ts, { lead, method, refKnown }, tally) {
+  async function inboxAfterInbound(rec, ts, { lead: seen, method, refKnown }, tally) {
+    const lead = db.getLead(seen.lead_id);
+    if (!lead) return;
     const text = typeof rec.text === 'string' ? rec.text : '';
     const signal = inboundSignal({ text, hasAdMeta: Boolean(adMetaOf(rec.contextInfo)), refKnown });
     const next = nextInboxState(lead.inbox_state, { signal, method });
@@ -542,17 +557,26 @@ export function createPoller({
    * record's pushName is his own.
    *
    * Our own new-lead note passes that rule too (it carries a Bona link, the listing id and
-   * a Ref line). It never gets here only because the tick skips the owner's own chat, team
-   * and never-list numbers and `OWN_NOTE_RE` first (A7): keep those checks ahead of this.
+   * a Ref line), and so does a Bona link he saves in his chat with himself. The tick skips
+   * the owner's own chat and team and never-list numbers, but only where the record shows a
+   * phone: his self-chat can arrive as a bare `@lid`, and its lid is practically never
+   * learned (every self-chat message is `fromMe`). So two more checks sit here (A7). Our own
+   * note is refused by its first line (`OWN_NOTE_RE`, which the tick applies to inbound
+   * records only). And no NEW lead is made from a record with no phone: a lid alone cannot
+   * be checked against the team or never list, cannot be replied to (`lid_only`), and the
+   * exclusion sweep cannot catch it later. A lead that already maps the lid (and so carries
+   * the number the tick checked) still joins; for anything else the owner has Add chat.
    */
   async function inboxAfterOutbound(rec, ts, tally) {
     const jids = jidsOf(rec);
     let lead = findLead(jids);
     if (lead?.inbox_state === 'out') return;
     if (lead?.inbox_state !== 'in') {
+      if (OWN_NOTE_RE.test(String(rec.text ?? '').trimStart())) return;
       if (!ownerOutboundJoins(rec)) return;
       let created = false;
       if (!lead) {
+        if (!jids.phone) return;
         const text = typeof rec.text === 'string' ? rec.text : '';
         const fileName = typeof rec.fileName === 'string' ? rec.fileName : '';
         ({ lead, created } = createOrMergeLead(db, {
@@ -569,15 +593,22 @@ export function createPoller({
    * A record of an `in` chat that has failed for the last time is not dropped silently
    * (design §4.2): its id, chat and time go to `wa_gaps`, and the thread shows "a message
    * could not be loaded — check WhatsApp" in its place. Never the text. Called from the
-   * per-record `catch`, so nothing in here may throw.
+   * per-record `catch`, so nothing in here may throw. Not for noise (a reaction or an edit
+   * is never a bubble, so it is never a missing one), nor for a record that is stored after
+   * all (a join's history reads the joining message too). The log line carries no error
+   * text: an exception's message could carry a number.
    */
   function recordGapSafely(rec, ts) {
-    if (!inboxOn) return;
+    if (!inboxOn || rec.noise) return;
+    let leadId = null;
     try {
       const lead = findLead(jidsOf(rec));
-      if (lead?.inbox_state === 'in') inboxStore.addGap({ key_id: rec.id, lead_id: lead.lead_id, jid: rec.jid ?? null, ts, reason: 'failed' });
-    } catch (err) {
-      log({ level: 'warn', evt: 'inbox.gap_failed', error: String(err?.message ?? err) });
+      if (lead?.inbox_state !== 'in') return;
+      leadId = lead.lead_id;
+      if (inboxStore.messageByKey?.(rec.id)) return;
+      inboxStore.addGap({ key_id: rec.id, lead_id: leadId, jid: rec.jid ?? null, ts, reason: 'failed' });
+    } catch {
+      log({ level: 'warn', evt: 'inbox.gap_failed', leadId, reason: 'failed' });
     }
   }
 
@@ -619,7 +650,7 @@ export function createPoller({
        */
       const deferRecord = (id, ts) => {
         const existing = failures.get(id);
-        failures.set(id, { attempts: existing?.attempts ?? 0, ts });
+        failures.set(id, { ...existing, attempts: existing?.attempts ?? 0, ts });
         if (oldestFailedTs === null || ts < oldestFailedTs) oldestFailedTs = ts;
       };
       // Evolution answers newest-first. Handled in that order, a follow-up would be judged
@@ -696,17 +727,24 @@ export function createPoller({
           }
         }
 
+        let handled = inboxOn ? (failures.get(rec.id)?.handled ?? null) : null;
         try {
           if (rec.fromMe) {
             if (recordReply(rec, ts)) tally.replies += 1;
             if (inboxOn) await inboxAfterOutbound(rec, ts, tally);
+          } else if (handled) {
+            // Matched and merged on an earlier attempt; only the inbox steps failed.
+            await inboxAfterInbound(rec, ts, handled, tally);
           } else {
             const out = await handleInbound(rec, ts);
             if (!out) tally.unmatched += 1;
             else {
               tally.matched += 1;
               if (out.created) tally.created += 1; else tally.merged += 1;
-              if (inboxOn) await inboxAfterInbound(rec, ts, out, tally);
+              if (inboxOn) {
+                handled = out;
+                await inboxAfterInbound(rec, ts, out, tally);
+              }
             }
           }
           // Remembered once it is safely handled, so a transient store failure costs a
@@ -723,7 +761,7 @@ export function createPoller({
             failures.delete(rec.id);
             recordGapSafely(rec, ts);
           } else {
-            failures.set(rec.id, { attempts, ts });
+            failures.set(rec.id, handled ? { attempts, ts, handled } : { attempts, ts });
             if (oldestFailedTs === null || ts < oldestFailedTs) oldestFailedTs = ts;
           }
           log({ level: 'warn', evt: 'wa.poll.record_failed', attempts, writtenOff, error: String(err?.message ?? err) });
