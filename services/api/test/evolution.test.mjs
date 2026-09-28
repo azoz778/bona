@@ -65,7 +65,8 @@ test('both bounds are required — the timestamp filter is ignored without them'
   const { fetchImpl, calls } = recorder();
   await assert.rejects(() => findMessagesWindow({ ...OPTS, lte: null, fetchImpl }), TypeError);
   await assert.rejects(() => findMessagesWindow({ ...OPTS, gte: undefined, fetchImpl }), TypeError);
-  // The bound check is shared (readWindow and findMessagesWindow both use it), so it names neither.
+  // The message comes from `toIso`, which turns every bound into what is sent (readWindow's
+  // too, after readWindow's own check of both bounds), so it names no caller.
   await assert.rejects(() => findMessagesWindow({ ...OPTS, lte: 'soon', fetchImpl }), { name: 'TypeError', message: 'evolution: both gte and lte are required' });
   assert.equal(calls.length, 0, 'a half-open window is never sent');
 });
@@ -368,6 +369,69 @@ test('findMessagesPage refuses a missing or empty filter, which would read every
   });
 });
 
+test('findMessagesPage checks the filter it sends, not the object it was handed', async () => {
+  // JSON.stringify sends only an object's own enumerable fields, and runs toJSON: a filter that
+  // looks narrow through ordinary property reads can still go out as `{"key":{}}`, which
+  // Evolution reads as every chat.
+  const { fetchImpl, calls } = recorder();
+  const inherited = { key: Object.create({ remoteJid: CLIENT }) };
+  const hidden = { key: {} };
+  Object.defineProperty(hidden.key, 'remoteJid', { value: CLIENT, enumerable: false });
+  const rewritten = { key: { remoteJid: CLIENT, toJSON: () => ({}) } };
+  for (const where of [inherited, hidden, rewritten]) {
+    await assert.rejects(() => findMessagesPage({ ...BASE, where, fetchImpl }), TypeError);
+  }
+  assert.equal(calls.length, 0);
+
+  // What does go out is exactly what was checked: a getter's value, no undefined fields.
+  const getter = { key: { get remoteJid() { return CLIENT; } } };
+  await findMessagesPage({ ...BASE, where: getter, fetchImpl });
+  await findMessagesPage({ ...BASE, where: { key: { remoteJid: CLIENT, id: undefined } }, fetchImpl });
+  assert.deepEqual(calls.map((c) => c.body.where), [{ key: { remoteJid: CLIENT } }, { key: { remoteJid: CLIENT } }]);
+});
+
+test('a 2xx answer that cannot be read, is not JSON or holds no records throws, and is never taken for an empty window', async () => {
+  const answer = (text) => async () => ({ ok: true, status: 200, text });
+  const cutOff = answer(async () => { throw Object.assign(new Error('aborted'), { name: 'TimeoutError' }); });
+  const dropped = answer(async () => { throw new TypeError('terminated'); });
+  const proxyPage = answer(async () => '<html>502 Bad Gateway</html>');
+  const noRecords = answer(async () => JSON.stringify({ status: 'ok' }));
+  const nothing = answer(async () => '');
+  const cases = [
+    [cutOff, /failed: timeout$/], [dropped, /failed: network$/],
+    [proxyPage, /not JSON/], [noRecords, /no records/], [nothing, /not JSON/],
+  ];
+  for (const [fetchImpl, message] of cases) {
+    const check = (err) => {
+      assert.ok(err instanceof EvolutionError);
+      assert.equal(err.status, 200);
+      assert.equal(err.body, null, 'what came back is not kept');
+      assert.match(err.message, message);
+      return true;
+    };
+    await assert.rejects(() => findMessagesPage({ ...BASE, where: { key: { remoteJid: CLIENT } }, fetchImpl }), check);
+    await assert.rejects(() => findMessagesWindow({ ...OPTS, fetchImpl }), check);
+    await assert.rejects(() => readWindow({ ...BASE, gte: T0, lte: T0 + 60_000, fetchImpl }), check);
+    await assert.rejects(() => fetchWindow({ ...OPTS, fetchImpl }), check);
+  }
+
+  // Evolution's own empty answer, and an empty bare array, are an empty window.
+  const empty = await readWindow({ ...BASE, gte: T0, lte: T0 + 60_000, fetchImpl: answer(async () => JSON.stringify({ messages: { total: 0, pages: 0, records: [] } })) });
+  assert.deepEqual(empty, { records: [], pieces: 1, truncated: false, missing: 0 });
+  const bare = await findMessagesPage({ ...BASE, where: { key: { remoteJid: CLIENT } }, fetchImpl: answer(async () => '[]') });
+  assert.deepEqual(bare.records, []);
+});
+
+test('an EvolutionError keeps the upstream body readable but out of anything that serialises the error', async () => {
+  const bad = recorder([{ status: 400, body: { error: 'Bad Request', response: { message: ['where.key.remoteJid 966500000000'] } } }]);
+  const err = await findMessagesPage({ ...BASE, where: { key: { remoteJid: CLIENT } }, fetchImpl: bad.fetchImpl }).catch((e) => e);
+  assert.ok(err instanceof EvolutionError);
+  assert.equal(err.body.error, 'Bad Request', 'a caller that asks for it still gets it');
+  assert.equal(JSON.stringify(err).includes('966500000000'), false);
+  assert.equal(JSON.stringify({ ...err }).includes('966500000000'), false);
+  assert.equal(Object.keys(err).includes('body'), false);
+});
+
 test('findMessagesWindow is the window case of findMessagesPage and passes the sizes through', async () => {
   const { fetchImpl } = recorder([{ status: 200, body: boxed([textRecord()]) }]);
   const out = await findMessagesWindow({ ...OPTS, fetchImpl });
@@ -488,8 +552,8 @@ test('readWindow drops an id seen twice, keeps records that have no id, and read
   const k = (id) => textRecord({ key: { id, fromMe: false, remoteJid: CLIENT } });
   const noId = textRecord({ key: { fromMe: false, remoteJid: CLIENT } });
   // Four messages, two a page: A, B, the one with no id, C. A message arriving after page 1
-  // pushes every older record one place down, so B comes back at the top of page 2 and C
-  // falls past the two pages the first answer stated.
+  // at the top of the window pushes every older record one place down, so B comes back at
+  // the top of page 2 and C falls past the two pages the first answer stated.
   const answers = [
     { status: 200, body: { messages: { total: 4, pages: 2, currentPage: 1, records: [k('A'), k('B')] } } },
     { status: 200, body: { messages: { total: 5, pages: 3, currentPage: 2, records: [k('B'), noId] } } },
@@ -499,15 +563,17 @@ test('readWindow drops an id seen twice, keeps records that have no id, and read
   const out = await readWindow({ ...OPTS, offset: 2, fetchImpl });
   assert.deepEqual(calls.map((c) => c.body.page), [1, 2, 3], 'two full pages kept three of four: one page more');
   assert.deepEqual(out.records.map((r) => r.id), ['A', 'B', null, 'C']);
-  assert.equal(out.missing, 0);
-  assert.equal(out.truncated, false);
+  // The newcomer sits on page 1, which was read before it came: five stated, four kept. The
+  // caller's next window may not reach back that far, so it is counted, not assumed found.
+  assert.equal(out.missing, 1);
+  assert.equal(out.truncated, true);
 
-  // With no page left under the cap, the record pushed out is counted, never lost quietly.
+  // With no page left under the cap, C is unread as well: both are counted.
   const capped = recorder(answers);
   const short = await readWindow({ ...OPTS, offset: 2, maxPages: 2, fetchImpl: capped.fetchImpl });
   assert.equal(capped.calls.length, 2);
   assert.deepEqual(short.records.map((r) => r.id), ['A', 'B', null]);
-  assert.equal(short.missing, 1);
+  assert.equal(short.missing, 2);
   assert.equal(short.truncated, true);
 });
 
@@ -530,19 +596,19 @@ test('readWindow reads on when a late delivery lands inside the piece, so the ol
   assert.equal(out.truncated, false);
   assert.equal(out.missing, 0);
 
-  // When the page cap comes first, D is unread and the piece says so. `missing` stays 0:
-  // measured against the first answer's four, the kept four look complete, and which of the
-  // five went unread — D, or a newcomer on a page already read — cannot be told apart.
+  // When the page cap comes first, D is unread and the piece says so: five stated, four kept.
   const capped = recorder(answers);
   const short = await readWindow({ ...OPTS, offset: 2, maxPages: 2, fetchImpl: capped.fetchImpl });
   assert.equal(capped.calls.length, 2);
   assert.deepEqual(short.records.map((r) => r.id), ['A', 'B', 'X', 'C']);
   assert.equal(short.truncated, true, 'never passed off as complete');
-  assert.equal(short.missing, 0);
+  assert.equal(short.missing, 1);
 
   // A record with no id pushed from the bottom of page 1 to the top of page 2 is kept (and
-  // counted) twice — nothing tells the two apart — but the newcomer that pushed it raised the
-  // total by the same one, so the piece still reads on to D.
+  // counted) twice — nothing tells the two apart — and the newcomer that pushed it raised the
+  // total by the same one, so the piece still reads on to D. That double count is also why
+  // the newcomer itself, on page 1, goes uncounted: a record with no id cannot be told from
+  // one that arrived. Evolution gives every stored record an id; this is the fallback.
   const noId = textRecord({ key: { fromMe: false, remoteJid: CLIENT } });
   const pushed = recorder([
     { status: 200, body: { messages: { total: 4, pages: 2, currentPage: 1, records: [k('A'), noId] } } },
@@ -554,6 +620,73 @@ test('readWindow reads on when a late delivery lands inside the piece, so the ol
   assert.deepEqual(twice.records.map((r) => r.id), ['A', null, null, 'C', 'D']);
   assert.equal(twice.truncated, false);
   assert.equal(twice.missing, 0);
+});
+
+test('readWindow counts what late deliveries push out of reach against the largest total any page stated', async () => {
+  /** The fake instance, with `arrive(records)` delivered straight after the first request is answered. */
+  const deliverAfterFirst = (records, arrive) => {
+    const evo = fakeEvolution(records);
+    const fetchImpl = async (url, init) => {
+      const res = await evo.fetchImpl(url, init);
+      if (evo.calls.length === 1) records.push(...arrive);
+      return res;
+    };
+    return { fetchImpl, calls: evo.calls };
+  };
+  const ids = (out) => new Set(out.records.map((r) => r.id));
+
+  // Exactly one read's worth, and one late delivery stamped mid-window: every page after the
+  // first states 501, the oldest record slides to a sixth page the cap never reads.
+  const full = Array.from({ length: 500 }, (_, i) => stored(`M${i}`, S0 + i));
+  const a = await readWindow({ ...BASE, gte: T0, lte: T0 + 600_000, ...deliverAfterFirst(full, [stored('LATE', S0 + 250)]) });
+  assert.equal(a.records.length, 500);
+  assert.equal(ids(a).has('LATE'), true);
+  assert.equal(ids(a).has('M0'), false);
+  assert.equal(a.truncated, true);
+  assert.equal(a.missing, 1, 'M0 is counted, not dropped quietly');
+
+  // 480 and 30 late ones: the ten oldest slide past the cap.
+  const most = Array.from({ length: 480 }, (_, i) => stored(`M${i}`, S0 + i));
+  const late = Array.from({ length: 30 }, (_, j) => stored(`L${j}`, S0 + 200 + j));
+  const b = await readWindow({ ...BASE, gte: T0, lte: T0 + 600_000, ...deliverAfterFirst(most, late) });
+  const unread = [...most, ...late].filter((r) => !ids(b).has(r.key.id)).length;
+  assert.equal(unread, 10);
+  assert.equal(b.truncated, true);
+  assert.equal(b.missing, 10);
+
+  // A delivery stamped among the newest records lands on the page already read: every other
+  // record is returned, and the one this read never saw is counted.
+  const some = Array.from({ length: 250 }, (_, i) => stored(`M${i}`, S0 + i));
+  const c = await readWindow({ ...BASE, gte: T0, lte: T0 + 600_000, ...deliverAfterFirst(some, [stored('LATE', S0 + 245)]) });
+  assert.equal(c.records.length, 250);
+  assert.equal(ids(c).has('LATE'), false);
+  assert.equal(c.truncated, true);
+  assert.equal(c.missing, 1);
+
+  // Nothing arriving: nothing counted, nothing flagged.
+  const quiet = Array.from({ length: 250 }, (_, i) => stored(`M${i}`, S0 + i));
+  const d = await readWindow({ ...BASE, gte: T0, lte: T0 + 600_000, ...deliverAfterFirst(quiet, []) });
+  assert.equal(d.records.length, 250);
+  assert.equal(d.truncated, false);
+  assert.equal(d.missing, 0);
+});
+
+test('readWindow returns nothing partial when a request fails midway: the caller keeps its cursor', async () => {
+  const evo = fakeEvolution(Array.from({ length: 1200 }, (_, i) => stored(`M${i}`, S0 + i)));
+  // Page 3 of the second piece is cut off while its body is read.
+  const fetchImpl = async (url, init) => {
+    const res = await evo.fetchImpl(url, init);
+    const { where, page } = JSON.parse(init.body);
+    if (where.messageTimestamp.gte === iso(T0 + 299_000) && page === 3) {
+      return { ok: true, status: 200, text: async () => { throw Object.assign(new Error('aborted'), { name: 'TimeoutError' }); } };
+    }
+    return res;
+  };
+  let out;
+  await assert.rejects(async () => { out = await readWindow({ ...BASE, gte: T0, lte: T0 + 1_199_000, fetchImpl }); }, EvolutionError);
+  assert.equal(out, undefined, 'no records from the pieces read before the failure');
+  assert.deepEqual(asked(evo.calls).at(-1), [299_000, 598_999, 3], 'and nothing is asked after it');
+  assert.equal(evo.calls.length, 8);
 });
 
 test('readWindow cuts a window whose bounds are off whole seconds without overlap or a second left out', async () => {
@@ -644,18 +777,30 @@ test('a document name loses control and bidi characters, is capped at 120 code p
 
   // Invisible formatting characters, which let two different names look the same, go as
   // well; the joiners that Persian text and emoji need stay.
-  assert.equal(mediaOf({ message: doc('a​b⁠c⁪d­e￹f⁤g⁯h.pdf') }), '[document: abcdefgh.pdf]');
-  const joined = 'می‌خواهم 👨‍👩‍👧.pdf';
+  assert.equal(mediaOf({ message: doc('a\u200Bb\u2060c\u206Ad\u00ADe\uFFF9f\u2064g\u206Fh.pdf') }), '[document: abcdefgh.pdf]');
+  const joined = 'می\u200Cخواهم 👨\u200D👩\u200D👧.pdf';
   assert.equal(mediaOf({ message: doc(joined) }), `[document: ${joined}]`);
 
   // The cap never cuts a character in half: a flag is two code points, a letter with its vowel
   // mark two, a family emoji five. What does not fit whole is left out whole.
   const nameOf = (fileName) => normaliseRecord({ key: { id: 'D2' }, message: doc(fileName) }).fileName;
-  const family = '👨‍👩‍👧';
+  const family = '👨\u200D👩\u200D👧';
   assert.equal(nameOf('a'.repeat(119) + '🇸🇦'), 'a'.repeat(119));
-  assert.equal(nameOf('a'.repeat(119) + 'بَ'), 'a'.repeat(119));
+  assert.equal(nameOf('a'.repeat(119) + '\u0628\u064E'), 'a'.repeat(119));
   assert.equal(nameOf('a'.repeat(115) + family), 'a'.repeat(115) + family, 'exactly 120 code points: kept whole');
   assert.equal(nameOf('a'.repeat(116) + family + 'b'), 'a'.repeat(116));
+
+  // Every other invisible character goes too: they are found by category (control, format,
+  // default-ignorable), not from a hand list. Among them the Mongolian vowel separator, the
+  // combining grapheme joiner, the Hangul fillers, the tag characters (which can spell out
+  // hidden text), the variation selectors outside the emoji range, the Arabic prepended
+  // marks and the byte-order mark.
+  const invisible = ['\u180E', '\u034F', '\u115F', '\u1160', '\u3164', '\uFFA0', '\u{E0001}', '\u{E0041}', '\u{E007F}',
+    '\u{E0100}', '\u{E01EF}', '\u0600', '\u0605', '\uFEFF', '\u2065', '\u17B4'];
+  assert.equal(mediaOf({ message: doc(`plan${invisible.join('')}.pdf`) }), '[document: plan.pdf]');
+  for (const ch of invisible) assert.equal(nameOf(`a${ch}b.pdf`), 'ab.pdf', `U+${ch.codePointAt(0).toString(16)}`);
+  // The emoji variation selector stays: it only picks how the heart before it is drawn.
+  assert.equal(nameOf('\u2764\uFE0F villa.pdf'), '\u2764\uFE0F villa.pdf');
 });
 
 test('reactions, deletes and edits, poll votes and key-distribution records are noise; a message is not', () => {

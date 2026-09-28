@@ -50,11 +50,17 @@ export const PAGE_SIZE = 100;
 export const MAX_SPLIT_DEPTH = 4;
 
 export class EvolutionError extends Error {
+  /**
+   * `message` holds only the route and the status. `body` is what Evolution answered an HTTP
+   * error with, which can echo the filter (phone numbers) or message text: it stays readable
+   * for a caller that asks for it, but is not enumerable, so logging or spreading the error
+   * never carries it along. Log `err.message`, never `err.body`.
+   */
   constructor(message, status, body) {
     super(message);
     this.name = 'EvolutionError';
     this.status = status;
-    this.body = body;
+    Object.defineProperty(this, 'body', { value: body, enumerable: false, writable: true, configurable: true });
   }
 }
 
@@ -153,15 +159,19 @@ export function contextOf(record) {
 export const bareJid = (jid) => String(jid || '').split(':')[0].split('@')[0].replace(/[^0-9]/g, '');
 
 /**
- * Control characters, the bidi overrides, isolates and marks, and the invisible formatting
- * characters (zero-width space, soft hyphen, word joiner and invisible operators, the
- * deprecated format controls, interlinear annotation). A file name is chosen by whoever
- * sent the file: a right-to-left override can make `fdp.exe` read as `exe.pdf`, an
- * invisible character makes two different names look the same, and escaping for HTML does
- * nothing about either, so they go before the name is shown. The zero-width non-joiner and
- * joiner (U+200C, U+200D) stay: Persian text and emoji sequences need them.
+ * Every invisible character: controls, format characters (the bidi overrides, isolates and
+ * marks, the zero-width space, the soft hyphen, the tag characters, the Arabic prepended
+ * marks …) and the rest of Unicode's default-ignorable set (the combining grapheme joiner,
+ * the Hangul fillers, variation selectors …) — matched by category, so no hand list can miss
+ * one. A file name is chosen by whoever sent the file: a right-to-left override can make
+ * `fdp.exe` read as `exe.pdf`, an invisible character makes two different names look the
+ * same or hides text in one, and escaping for HTML does nothing about any of it, so they go
+ * before the name is shown. Spared: the zero-width non-joiner and joiner (U+200C, U+200D),
+ * which Persian text and emoji sequences need, and the variation selectors U+FE00–U+FE0F,
+ * which only pick how the character before them is drawn (an emoji or a text heart). The tag
+ * characters that spell a subdivision flag go too: England's flag shows as a plain black flag.
  */
-const CONTROL_OR_BIDI_RE = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufff9-\ufffb]/g;
+const INVISIBLE_RE = /[[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}]--[\u{200C}\u{200D}\u{FE00}-\u{FE0F}]]/gv;
 /** Longest document name kept, in code points (an emoji is one, not two). */
 const MAX_FILE_NAME = 120;
 const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
@@ -183,11 +193,17 @@ function capCodePoints(text, max) {
   return out;
 }
 
+/**
+ * Runs of whitespace. JavaScript counts U+FEFF as whitespace, but it is a zero-width no-break
+ * space: it goes with the invisible characters instead of becoming a space.
+ */
+const SPACES_RE = /[\s--\u{FEFF}]+/gv;
+
 /** A sender-chosen file name made safe to show: `''` when nothing usable is left. */
 function cleanFileName(name) {
   if (typeof name !== 'string') return '';
   // Whitespace first, so a tab or a line break between two words leaves a space, not a join.
-  const flat = name.replace(/\s+/g, ' ').replace(CONTROL_OR_BIDI_RE, '').replace(/\s+/g, ' ').trim();
+  const flat = name.replace(SPACES_RE, ' ').replace(INVISIBLE_RE, '').replace(SPACES_RE, ' ').trim();
   return capCodePoints(flat, MAX_FILE_NAME).trim();
 }
 
@@ -220,6 +236,10 @@ export function mediaOf(record) {
  * edit (protocol), a reaction (plain or encrypted), a poll vote, an edit that carries its new
  * text (Evolution rewrites the original record with it), an album header (the photos arrive
  * as records of their own), a pin, and "keep" in a disappearing chat.
+ *
+ * Dropping an edit here is only half of showing it: a stored copy of the original shows the
+ * new text only if whoever stores it takes a changed text for an id it already holds when
+ * the rewritten record is read again. Otherwise the pre-edit text stays.
  */
 const NOISE_KINDS = new Set([
   'protocolMessage', 'reactionMessage', 'pollUpdateMessage', 'editedMessage',
@@ -302,13 +322,24 @@ export function oldestFirst(records) {
     .map((x) => x.r);
 }
 
-/** Both shapes 2.3.7 answers with: `{ messages: { records: [...] } }` and a bare array. */
-export function recordsOf(payload) {
+/**
+ * The records array in either shape 2.3.7 answers with — `{ messages: { records: [...] } }`
+ * or a bare array — or null when the payload holds neither.
+ */
+function recordsIn(payload) {
   const box = payload?.messages ?? payload ?? {};
   if (Array.isArray(box)) return box;
-  if (Array.isArray(box.records)) return box.records;
-  return [];
+  if (Array.isArray(box?.records)) return box.records;
+  return null;
 }
+
+/** Both shapes 2.3.7 answers with: `{ messages: { records: [...] } }` and a bare array. */
+export function recordsOf(payload) {
+  return recordsIn(payload) ?? [];
+}
+
+/** How a request that never produced a readable answer failed, in words safe to log. */
+const failureOf = (err) => (err?.name === 'TimeoutError' || err?.name === 'AbortError' ? 'timeout' : 'network');
 
 /** A size Evolution states about the whole filtered set, or null when it did not state one. */
 const countOf = (value) => (Number.isInteger(value) && value >= 0 ? value : null);
@@ -360,6 +391,12 @@ function narrowsRead(where) {
  * answer is boxed; both are null for a bare array, and the caller then cannot tell a
  * complete read from a cut-off one.
  *
+ * A 2xx is only an answer when it holds records. A body that breaks off while it is read
+ * (the timeout can fire partway through), one that is not JSON (a proxy's error page) and
+ * JSON with no records in it all throw an `EvolutionError`, like an HTTP error: returned as
+ * no records, each would read as an empty window, and a caller would move past every
+ * message in it. Evolution's own empty answer is `{ messages: { total: 0, records: [] } }`.
+ *
  * @param {{ baseUrl: string, apiKey: string, instance: string, where: object,
  *           page?: number, offset?: number,
  *           fetchImpl?: typeof globalThis.fetch, timeoutMs?: number }} o
@@ -371,13 +408,18 @@ export async function findMessagesPage({
 } = {}) {
   if (!baseUrl) throw new TypeError('evolution: baseUrl required');
   if (!instance) throw new TypeError('evolution: instance required');
+  // Checked as it will be sent: JSON.stringify keeps only an object's own enumerable fields
+  // and runs toJSON, so an inherited or hidden `remoteJid` would pass a check on the object
+  // itself and still go out as `{"key":{}}` — every chat. What was checked is what is sent.
+  let sent = null;
+  try { sent = JSON.parse(JSON.stringify(where ?? null)); } catch { sent = null; }
   // The filter itself is never put in the message: it carries phone numbers.
-  if (!narrowsRead(where)) {
+  if (!narrowsRead(sent)) {
     throw new TypeError('evolution: where must name a chat (key.remoteJid, key.remoteJidAlt, key.id) or a whole window (messageTimestamp gte and lte)');
   }
   const root = String(baseUrl).replace(/\/+$/, '');
   const route = `/chat/findMessages/${encodeURIComponent(instance)}`;
-  const body = { where, page, offset };
+  const body = { where: sent, page, offset };
 
   let res;
   try {
@@ -388,14 +430,31 @@ export async function findMessagesPage({
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
-    throw new EvolutionError(`POST ${route} failed: ${err?.name === 'TimeoutError' || err?.name === 'AbortError' ? 'timeout' : 'network'}`, 0, null);
+    throw new EvolutionError(`POST ${route} failed: ${failureOf(err)}`, 0, null);
   }
-  const text = typeof res.text === 'function' ? await res.text().catch(() => '') : '';
+  let text = '';
+  let readError = null;
+  try {
+    if (typeof res.text === 'function') text = await res.text();
+  } catch (err) {
+    readError = err;
+  }
   let json = null;
-  try { json = text ? JSON.parse(text) : null; } catch { json = text; }
+  let parsed = false;
+  try {
+    json = JSON.parse(text);
+    parsed = true;
+  } catch {
+    json = text || null;
+  }
   if (!res.ok) throw new EvolutionError(`POST ${route} -> HTTP ${res.status}`, res.status, json);
+  // Nothing of what came back goes on these errors: it may be a page of someone's messages.
+  if (readError) throw new EvolutionError(`POST ${route} failed: ${failureOf(readError)}`, res.status, null);
+  if (!parsed) throw new EvolutionError(`POST ${route} -> HTTP ${res.status} but the answer is not JSON`, res.status, null);
+  const records = recordsIn(json);
+  if (!records) throw new EvolutionError(`POST ${route} -> HTTP ${res.status} but the answer holds no records`, res.status, null);
   return {
-    records: recordsOf(json).map(normaliseRecord),
+    records: records.map(normaliseRecord),
     raw: json,
     total: countOf(json?.messages?.total),
     pages: countOf(json?.messages?.pages),
@@ -471,17 +530,20 @@ export async function fetchWindow({ maxPages = MAX_PAGES, offset = PAGE_SIZE, ..
  * lands wherever its time puts it, often mid-piece. So ids are de-duplicated, a piece counts
  * the records it KEPT — not the rows its pages held — and it reads on past the stated pages
  * while that count is short of the largest `total` any of its pages stated and the pages
- * still come back full. A newcomer that lands on a page already read is not returned by
- * this read; only the caller's next, overlapping window can reach it.
+ * still come back full.
  *
- * Only a piece that is still too big when it cannot be cut again — at `maxDepth`, or under
- * two seconds wide (narrower windows are never cut) — is read partially: its newest
- * `maxPages` pages, `truncated` set, and `missing` saying how many of the first answer's
- * `total` were left unread. A piece whose kept count is still short when the page cap comes
- * first is reported the same way, and so is one the page cap stops while it is still reading
- * on for a late delivery — `truncated` even when `missing` cannot count what it left. The
- * caller logs that and moves on; holding its cursor there would re-read the same newest
- * pages for ever.
+ * A piece is complete only when it kept as many records as the largest `total` any of its
+ * pages stated. Anything short of that is `truncated`, and the shortfall is added to
+ * `missing`: a piece that is still too big when it cannot be cut again — at `maxDepth`, or
+ * under two seconds wide (narrower windows are never cut) — and is read partially, its newest
+ * `maxPages` pages; a piece the page cap stops while it reads on for a late delivery; and a
+ * newcomer that landed on a page already read, which this read never sees. That last one is
+ * not left to the caller's next window: the poller reaches back only a couple of minutes, and
+ * a window needs more than one page only when it catches up after downtime, when most of it
+ * is older than that. The caller logs `missing` and moves on; holding its cursor there would
+ * re-read the same newest pages for ever. A record that leaves the window mid-read can make
+ * the count one too high — a warning too many, never a loss unreported. (A record with no id
+ * is kept each time it comes back and so can hide one; Evolution gives every record an id.)
  *
  * A bare-array answer states no size. That piece falls back to paging until a short page,
  * exactly like `fetchWindow`; a cut-off there is `truncated`, and adds nothing to `missing`
@@ -566,14 +628,13 @@ export async function readWindow({
       last = next.records.length;
       seenTotal = Math.max(seenTotal, next.total ?? 0);
     }
-    // Over the cap at the deepest level, short when the page cap came first, or stopped by
-    // the page cap while still reading on for a late delivery. `missing` is measured against
-    // the first answer's total only, so a newcomer that landed on a page already read is not
-    // counted: this read cannot tell it from the rest, and only the next window can reach it.
-    const short = Math.max(0, first.total - kept);
-    if (short > 0 || readingOn()) {
+    // Over the cap at the deepest level, short when the page cap came first, stopped by the
+    // page cap while still reading on, or a newcomer on a page already read: all of them
+    // leave the piece short of the largest total it was told. (Reading on implies short.)
+    const unread = Math.max(0, seenTotal - kept);
+    if (unread > 0) {
       truncated = true;
-      missing += short;
+      missing += unread;
     }
   }
 
