@@ -354,36 +354,46 @@ function requireWhole(name, value, min) {
   }
 }
 
-/** The `where.key` fields Evolution matches on. */
-const KEY_FILTERS = ['remoteJid', 'remoteJidAlt', 'id'];
+/**
+ * The `where.key` fields a read may use: the two the live probe of 2026-09-28 showed narrowing
+ * a read to one chat. `key.id` is left out until a caller needs it and a read-only live probe
+ * shows Evolution applies it — if it were ignored, `{ key: { id } }` would read every chat.
+ */
+const KEY_FILTERS = new Set(['remoteJid', 'remoteJidAlt']);
+/** The `where.messageTimestamp` fields Evolution reads; it applies them only as a pair. */
+const WINDOW_BOUNDS = new Set(['gte', 'lte']);
+/** The top-level `where` fields a read may use. */
+const WHERE_FIELDS = new Set(['key', 'messageTimestamp']);
 const isIsoDate = (value) => typeof value === 'string' && Number.isFinite(Date.parse(value));
+const isPlainObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const onlyFrom = (object, allowed) => Object.keys(object).every((field) => allowed.has(field));
 
 /**
- * Whether Evolution would really narrow a read by `where`. It silently DROPS a key filter
- * whose value is falsy (`{ key: { remoteJid: null } }` reads every chat) and ignores a time
- * filter unless both bounds are given — and either slip would page through every chat on the
- * owner's personal WhatsApp, into whichever thread the caller files the answer under. So a
- * filter must name a chat or a message (`key.remoteJid`, `key.remoteJidAlt`, `key.id`) or a
- * whole window (`messageTimestamp` with ISO `gte` AND `lte`), and every one of those that is
- * present must be usable: a null jid beside a window is refused too, not read as the window.
+ * Whether Evolution would really narrow a read by `where`, and by nothing but what was meant.
+ * It silently DROPS a key filter whose value is falsy (`{ key: { remoteJid: null } }` reads
+ * every chat), ignores a time filter unless both bounds are given, and ignores any field it
+ * does not know — so a chat named in the wrong place (`{ remoteJid, messageTimestamp }`) reads
+ * every chat in the window. Any such slip would page through every chat on the owner's
+ * personal WhatsApp, into whichever thread the caller files the answer under. So this is an
+ * allowlist at every level: the top level holds only `key` and `messageTimestamp`, `key` only
+ * non-empty string `remoteJid`/`remoteJidAlt`, `messageTimestamp` only ISO `gte` AND `lte`,
+ * and at least one of the two is there. Anything else is refused, even beside a filter that
+ * does narrow (`fromMe` included: the server ignores it, so it is never worth sending).
  */
 function narrowsRead(where) {
-  if (!where || typeof where !== 'object' || Array.isArray(where)) return false;
-  let applied = 0;
-  if (where.key !== undefined) {
-    const key = where.key;
-    if (!key || typeof key !== 'object' || Array.isArray(key)) return false;
-    const given = KEY_FILTERS.filter((field) => key[field] !== undefined);
-    if (given.length === 0) return false;
-    if (!given.every((field) => typeof key[field] === 'string' && key[field] !== '')) return false;
-    applied += 1;
+  if (!isPlainObject(where) || !onlyFrom(where, WHERE_FIELDS)) return false;
+  const { key, messageTimestamp: window } = where;
+  if (key === undefined && window === undefined) return false;
+  if (key !== undefined) {
+    if (!isPlainObject(key) || !onlyFrom(key, KEY_FILTERS)) return false;
+    const given = Object.values(key);
+    if (given.length === 0 || !given.every((value) => typeof value === 'string' && value !== '')) return false;
   }
-  if (where.messageTimestamp !== undefined) {
-    const window = where.messageTimestamp;
-    if (!window || typeof window !== 'object' || !isIsoDate(window.gte) || !isIsoDate(window.lte)) return false;
-    applied += 1;
+  if (window !== undefined) {
+    if (!isPlainObject(window) || !onlyFrom(window, WINDOW_BOUNDS)) return false;
+    if (!isIsoDate(window.gte) || !isIsoDate(window.lte)) return false;
   }
-  return applied > 0;
+  return true;
 }
 
 /**
@@ -392,11 +402,11 @@ function narrowsRead(where) {
  * `where` goes to Evolution as given: `{ messageTimestamp: { gte, lte } }` (ISO strings —
  * both, or the filter is ignored) for a window across every chat, `{ key: { remoteJid } }`
  * or `{ key: { remoteJidAlt } }` for one chat, or a chat and a window together. A filter
- * Evolution would not apply — empty, a key with a null or empty jid, a one-sided window —
- * is refused with a TypeError before anything is sent (`narrowsRead`): it would page
- * through every chat on the owner's personal WhatsApp. `fromMe` is never worth sending —
- * the server ignores it. A `page` or `offset` that is not a whole number of at least 1 is
- * refused the same way (offset 0 would quietly page by Evolution's default of 50).
+ * Evolution would not apply — empty, a key with a null or empty jid, a one-sided window — or
+ * one holding any other field (a misplaced `remoteJid`, `fromMe`, `key.id` …) is refused with
+ * a TypeError before anything is sent (`narrowsRead`): it would page through every chat on
+ * the owner's personal WhatsApp. A `page` or `offset` that is not a whole number of at least
+ * 1 is refused the same way (offset 0 would quietly page by Evolution's default of 50).
  *
  * `total` and `pages` describe everything the filter matched, not this page, when the
  * answer is boxed; both are null for a bare array, and the caller then cannot tell a
@@ -428,7 +438,7 @@ export async function findMessagesPage({
   try { sent = JSON.parse(JSON.stringify(where ?? null)); } catch { sent = null; }
   // The filter itself is never put in the message: it carries phone numbers.
   if (!narrowsRead(sent)) {
-    throw new TypeError('evolution: where must name a chat (key.remoteJid, key.remoteJidAlt, key.id) or a whole window (messageTimestamp gte and lte)');
+    throw new TypeError('evolution: where must name a chat (key.remoteJid or key.remoteJidAlt) or a whole window (messageTimestamp gte and lte), and hold nothing else');
   }
   const root = String(baseUrl).replace(/\/+$/, '');
   const route = `/chat/findMessages/${encodeURIComponent(instance)}`;
@@ -532,26 +542,31 @@ export async function fetchWindow({ maxPages = MAX_PAGES, offset = PAGE_SIZE, ..
  * Evolution answers newest first, orders by `messageTimestamp` alone and pages with
  * LIMIT/OFFSET, so the window is read in pieces:
  *   - A piece whose stated `total` is more than `maxPages × offset` is cut in two on a whole
- *     second, `[from, mid − 1 ms]` and `[mid, to]` (Evolution compares whole seconds, so the
- *     halves neither overlap nor leave a second out), and each half is read the same way,
- *     the older half first.
+ *     second, `[from, mid − 1 ms]` and `[mid, to]` with `mid` the second the midpoint falls
+ *     in but never `from`'s own, and each half is read the same way, the older half first.
+ *     Evolution compares whole seconds, so the halves neither overlap nor leave a second out,
+ *     and a piece can be cut whenever it takes in two or more seconds, however few ms wide.
  *   - A piece that fits is paged through with its ids de-duplicated. It is complete when it
  *     returned as many DIFFERENT records as the largest `total` any of its pages stated (a
- *     bare array states none: as many as its pages held rows). It reads on past the stated
- *     pages while its pages held fewer rows than that total and the last one came back full:
- *     a late delivery pushed the oldest record down a page.
+ *     bare array states none: as many as its pages held rows), less the extra rows of an id
+ *     repeated on ONE page (counted on the page that held the most of them) — one LIMIT/OFFSET
+ *     page cannot return a row twice, so that is a record stored twice under one key.id, not
+ *     a slide. It reads on past the stated pages
+ *     while its pages held fewer rows than that total and the last one came back full: a late
+ *     delivery pushed the oldest record down a page.
  *   - A piece that comes back short is cut too, and its halves read, instead of being
  *     accepted. Short means records slid between pages: PostgreSQL does not keep records that
  *     share a second in one order across different LIMIT/OFFSET values, so a same-second group
  *     (a photo album) on a page boundary can come back partly twice and partly never, and a
  *     delivery or a deletion between two page requests shifts the pages as well. Each cut
  *     leaves fewer records around the group, until it falls inside one page or the piece can
- *     be cut no further.
- * Only a piece that cannot be cut again — at `maxDepth`, or under two seconds wide — is
+ *     be cut no further. A bare-array piece that the page cap stops with its last page full
+ *     is cut the same way: there is more past that page.
+ * Only a piece that cannot be cut again — at `maxDepth`, or a single whole second — is
  * accepted short: its shortfall goes into `missing` and `truncated` is set. A bare-array piece
- * that the page cap stops with its last page full is `truncated` too; what lies past that page
- * cannot be counted, so it adds nothing to `missing`. The caller logs it and moves on: holding
- * its cursor there would re-read the same pages for ever.
+ * that the page cap stops there with its last page full is `truncated` too; what lies past that
+ * page cannot be counted, so it adds nothing to `missing`. The caller logs it and moves on:
+ * holding its cursor there would re-read the same pages for ever.
  *
  * Cost: a piece asks for at most `maxPages` pages whether it is kept or cut, and the cuts
  * make at most `2^(maxDepth + 1) − 1` pieces in all (the kept ones, counted in `pieces`, are
@@ -568,6 +583,10 @@ export async function fetchWindow({ maxPages = MAX_PAGES, offset = PAGE_SIZE, ..
  *     record that left mid-read can count one too many.
  *   - A record with no id cannot be told from another, so each copy is kept and counted.
  *     Evolution gives every stored record an id.
+ *   - Two rows stored under one key.id that land on different pages look exactly like a slide,
+ *     so the piece is cut until they share a page or fall in different pieces; only at the
+ *     floor do they count one too many. Whether Evolution 2.3.7 stores such rows at all (an
+ *     API send stored by the send path and again by the Baileys echo, say) is not verified.
  *
  * Within a piece the records keep Evolution's newest-first order (the poller sorts with
  * `oldestFirst`); the pieces come oldest first. A failed request throws as it is — nothing is
@@ -600,15 +619,31 @@ export async function readWindow({
    * One piece paged through, `first` being its page 1. `kept` is what it returned, each id
    * once — counted in the piece alone, so a record some other piece returned still counts;
    * `size` is how many it says it holds: the largest `total` a page stated, or for a bare
-   * array the rows its pages held; `cutOff` is a bare array stopped by the page cap.
+   * array the rows its pages held; `storedTwice` counts, per id, the extra rows it had on the
+   * one page that held the most of them; `cutOff` is a bare array stopped by the page cap with
+   * its last page full.
    */
   async function readPiece(from, to, first) {
     const kept = [];
     const ids = new Set();
+    // One LIMIT/OFFSET page cannot return one row twice: an id repeated on the same page is
+    // that many rows stored under it, not a record that slid, so those rows are no shortfall.
+    // Credited per id at the most it had on any ONE page, never summed over pages: the same
+    // two rows can show up on two pages.
+    const mostOnPage = new Map();
+    let storedTwice = 0;
     const keep = (batch) => {
+      const onPage = new Map();
       for (const rec of batch) {
         // A record with no id cannot be matched against anything, so it is kept as it is.
         if (rec.id) {
+          const n = (onPage.get(rec.id) ?? 0) + 1;
+          onPage.set(rec.id, n);
+          // n climbs one at a time, so passing the id's best page is always by exactly one row.
+          if (n > (mostOnPage.get(rec.id) ?? 1)) {
+            mostOnPage.set(rec.id, n);
+            storedTwice += 1;
+          }
           if (ids.has(rec.id)) continue;
           ids.add(rec.id);
         }
@@ -630,13 +665,19 @@ export async function readWindow({
       last = next.records.length;
       total = Math.max(total, next.total ?? 0);
     }
-    return { kept, size: boxed ? total : rows, cutOff: !boxed && last >= offset };
+    return { kept, size: boxed ? total : rows, storedTwice, cutOff: !boxed && last >= offset };
   }
 
   async function read(from, to, depth) {
-    const canCut = to - from >= 2000 && depth < maxDepth;
+    // Evolution compares whole seconds, so what can be cut is seconds, not milliseconds: a
+    // piece that takes in two or more of them, however few ms wide ([x.999, x+1.000] is two).
+    const lo = Math.floor(from / 1000);
+    const hi = Math.floor(to / 1000);
+    const canCut = hi > lo && depth < maxDepth;
     const cut = async () => {
-      const mid = Math.floor((from + to) / 2000) * 1000;
+      // The second the midpoint falls in, but never `from`'s own: each half keeps at least one
+      // whole second (lo + 1 ≤ mid ≤ hi).
+      const mid = Math.max(lo + 1, Math.floor((from + to) / 2000)) * 1000;
       await read(from, mid - 1, depth + 1);
       await read(mid, to, depth + 1);
     };
@@ -646,8 +687,9 @@ export async function readWindow({
       return;
     }
     const piece = await readPiece(from, to, first);
-    const short = Math.max(0, piece.size - piece.kept.length);
-    if (short > 0 && canCut) {
+    const short = Math.max(0, piece.size - piece.kept.length - piece.storedTwice);
+    // A bare array stopped by the page cap has more past its last page: cut like a short piece.
+    if ((short > 0 || piece.cutOff) && canCut) {
       await cut();
       return;
     }
