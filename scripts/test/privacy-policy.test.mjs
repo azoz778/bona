@@ -41,27 +41,63 @@ test('the WhatsApp conversations section says what is stored, who reads it, for 
 
   const en = body(s, 'en');
   assert.match(en, /stores that conversation/);
+  assert.match(en, /up to 30 days before it became an enquiry/, 'a join also stores the chat before it (24 h, or 30 days when the owner adds it)');
   assert.match(en, /authorised members of the Bona team/);
   assert.match(en, /private dashboard/);
   assert.match(en, /five years after its last message/);
   assert.match(en, /deleted automatically/);
-  assert.match(en, /on our phones/, 'the copies bona.db retention does not govern are named, not hidden');
-  assert.match(en, /WhatsApp’s own terms/);
+  // The copies bona.db retention does not govern are named, not hidden, and the one Bona
+  // runs itself (Evolution, on its own server) is not passed off as WhatsApp's.
+  assert.match(en, /does not reach two other copies/);
+  assert.match(en, /the WhatsApp gateway server that Bona runs for this number keeps its own copy/);
+  assert.doesNotMatch(en, /WhatsApp service our number runs on/);
+  assert.match(en, /on our phones, in WhatsApp, under WhatsApp’s own terms/);
+  assert.match(en, /from the dashboard, from our gateway server or from our phones/);
+  // Not a client purges the transcript, not the lead's first-message snippet (leads.mjs).
+  assert.match(en, /any short excerpt of its first message kept with the enquiry record stays there/);
 
   const ar = body(s, 'ar');
   assert.match(ar, /تحتفظ بونا بتلك المحادثة/);
+  assert.match(ar, /ثلاثون يوماً قبل أن تصبح استفساراً/);
   assert.match(ar, /فريق بونا/);
   assert.match(ar, /لوحة خاصة/);
   assert.match(ar, /خمس سنوات/);
   assert.match(ar, /تلقائي/);
-  assert.match(ar, /هواتفنا/);
-  assert.match(ar, /شروط واتساب/);
+  assert.match(ar, /ولا يشمل هذا الحذف التلقائي نسختين أخريين/);
+  assert.match(ar, /فخادم بوابة واتساب الذي تشغّله بونا لهذا الرقم يحتفظ بنسخته الخاصة/);
+  assert.doesNotMatch(ar, /خدمة واتساب التي يعمل عليها رقمنا/);
+  assert.match(ar, /على هواتفنا داخل واتساب، وفق شروط واتساب/);
+  assert.match(ar, /من اللوحة أو من خادم البوابة أو من هواتفنا/);
+  assert.match(ar, /مقتطف قصير من رسالتها الأولى/);
 
   // The deletion route is the one the page's contact block and buttons offer (site.json).
   for (const text of [en, ar, policy.contact.en, policy.contact.ar]) {
     assert.ok(text.includes(site.whatsapp.display), 'WhatsApp number');
   }
   assert.ok(en.includes(site.phone.display) && ar.includes(site.phone.display), 'phone number');
+});
+
+test('what the WhatsApp conversations section and a dated change line point to is a real heading, the same in both languages', () => {
+  // “…” below / «…» أدناه is how the section sends the reader on; a Changes line names the
+  // section it added. Renaming a heading must not leave a pointer to nothing behind.
+  const idOf = (locale) => new Map(policy.sections.map((x) => [x.heading[locale], x.id]));
+  const pointers = {
+    'whatsapp-conversations': { en: /“([^”]+)”\)?\s+below/g, ar: /«([^»]+)»\)?\s+أدناه/g },
+    changes: { en: /“([^”]+)”/g, ar: /«([^»]+)»/g },
+  };
+  for (const [id, re] of Object.entries(pointers)) {
+    const s = section(id);
+    assert.ok(s, `${id} is missing`);
+    const targets = {};
+    for (const locale of ['en', 'ar']) {
+      const headings = idOf(locale);
+      const quoted = [...body(s, locale).matchAll(re[locale])].map((m) => m[1]);
+      assert.ok(quoted.length > 0, `${id}.${locale}: expected at least one pointer to a section`);
+      for (const q of quoted) assert.ok(headings.has(q), `${id}.${locale} points to “${q}”, which is no ${locale} heading`);
+      targets[locale] = [...new Set(quoted.map((q) => headings.get(q)))].sort();
+    }
+    assert.deepEqual(targets.ar, targets.en, `${id}: the Arabic text points to the same sections as the English`);
+  }
 });
 
 test('Dana is not named in that section until she answers on WhatsApp (Phase 4)', () => {
