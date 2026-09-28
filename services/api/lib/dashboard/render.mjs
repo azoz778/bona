@@ -1551,6 +1551,7 @@ export function integrationsPage({ keys, fanout, retell, poller, lastAccepted, d
     me,
     body: `<h1>Integrations</h1><p class="sub">Which keys this process can see — presence only, never a value.</p>
 
+${me?.role === 'owner' ? '<p><a href="/dashboard/tiktok">TikTok account authorization and publishing prototype</a></p>' : ''}
 <h2>Keys</h2>
 ${scrollTable('<th>Integration</th><th>Key</th><th>Note</th>', keyRows)}
 
