@@ -45,9 +45,25 @@
  * discarded in memory. It is counted (`status().unmatched`) and never written to disk,
  * never logged, never sent anywhere. For the same reason nothing here logs a phone
  * number, a name or message text.
+ *
+ * **The Bona inbox** (2026-09-27 design §4). Wired only when `ingest` is passed; without it
+ * this loop is exactly the matched-only poller described above. With it, a lead also
+ * carries an inbox state, judged by lib/inbox/eligibility.mjs: a certain signal on an
+ * inbound message (a Ref line as the site writes it or a code a site session holds, ad
+ * context, a listing id) puts the chat `in`; a guess (the word "bona", a bare Ref-shaped
+ * code no session holds, the click window) puts it on the owner's Unsure list; the owner's
+ * own message puts a chat `in` only when it carries a Bona link, a listing number or a Bona
+ * brochure (D12 — TK and private chats share this number, so nothing else he types
+ * counts). Only `in` chats are kept as transcripts (lib/inbox/ingest.mjs), both directions,
+ * from the joining message plus the 24 h before it. An `out` chat never comes back on its
+ * own. Every other conversation is still discarded exactly as above.
  */
 import { parseRef } from './attribution.mjs';
-import { MAX_PAGES, PAGE_SIZE, bareJid, fetchWindow, oldestFirst } from './evolution.mjs';
+import { MAX_PAGES, PAGE_SIZE, bareJid, oldestFirst, readWindow } from './evolution.mjs';
+import { JOIN_HISTORY_MS } from './inbox/backfill.mjs';
+import {
+  BONA_WORD_RE, LISTING_ID_RE, inboundSignal, nextInboxState, ownerOutboundJoins,
+} from './inbox/eligibility.mjs';
 import { createOrMergeLead, leadNote } from './leads.mjs';
 import { normalisePhone } from './phone.mjs';
 import { isTeamLid, learnTeamLid } from './team.mjs';
@@ -60,7 +76,7 @@ export const FIRST_RUN_LOOKBACK_MS = 10 * 60_000;
  * one stale message inside the overlap stays "the newest thing we saw" for ever, the cursor
  * sits still, and a quiet week ends with every tick asking Evolution for a week. It does
  * NOT bound the request — the first tick after downtime still asks for the whole gap, and
- * says `wa.poll.truncated` if the gap holds more messages than the page cap can read.
+ * says `wa.poll.truncated` if even `readWindow`'s time-splitting cannot read the whole gap.
  */
 export const MAX_WINDOW_MS = 10 * 60_000;
 /** Every window reaches this far back behind the cursor: WhatsApp delivery is not instant. */
@@ -71,9 +87,14 @@ export const SEEN_TTL_MS = 7 * 86_400_000;
 export const CLICK_WINDOW_MS = 15 * 60_000;
 /** How much of the first message is kept on a new lead. */
 export const SNIPPET_MAX = 200;
-/** The one keyword rule: our name, in either script, or a listing id. */
-export const KEYWORD_RE = /\bbona\b|بونا|BONA-W?\d{3}/i;
-const LISTING_RE = /\bBONA-W?\d{3}\b/i;
+/**
+ * The one keyword rule: our name as a word, in either script, or a listing id — built from
+ * the patterns lib/inbox/eligibility.mjs judges the inbox by, so a lead and its inbox state
+ * never disagree about what counts. Rebuilt with `'iu'`, never `'i'` alone: the word's
+ * bounds are `\p{…}` classes, which mean nothing without the `u` flag. So "عندكم كوبونات؟"
+ * (coupons) and "a bona fide offer" are not our name (amendments A5, A8).
+ */
+export const KEYWORD_RE = new RegExp(`${BONA_WORD_RE.source}|${LISTING_ID_RE.source}`, 'iu');
 /**
  * Our own new-lead note, read back out of the owner's chat. It says "Bona" in the first
  * line, so without this it would keyword-match and become an enquiry from ourselves.
@@ -183,9 +204,9 @@ export function adSourceOf(meta = {}) {
   };
 }
 
-/** `BONA-W003` mentioned anywhere in the text, uppercased. */
+/** `BONA-W003` mentioned anywhere in the text as a whole id (`LISTING_ID_RE`), uppercased. */
 export function listingIdIn(text) {
-  const m = LISTING_RE.exec(String(text ?? ''));
+  const m = LISTING_ID_RE.exec(String(text ?? ''));
   return m ? m[0].toUpperCase() : null;
 }
 
@@ -202,7 +223,8 @@ const NO_EXCLUSIONS = () => false;
  * @param {ReturnType<import('./db.mjs').openDb>} o.db
  * @param {object} o.cfg                                    loadConfig(): `env`, `siteUrl`, `dataDir`, `waPollMs`
  * @param {(w: { gte: number, lte: number }) => Promise<{ records: object[] }|object[]>} [o.findMessages]
- *        injected in tests; defaults to `fetchWindow()` against the instance in `cfg.env`
+ *        injected in tests; defaults to `readWindow()` against the instance in `cfg.env`,
+ *        which splits a window too crowded to read in one go (lib/evolution.mjs)
  * @param {(text: string) => Promise<any>} [o.sendWhatsApp] the owner note sender
  * @param {(phone: string) => boolean} [o.isExcluded] `lib/team.mjs`'s `isExcludedPhone`:
  *        true for a team member's number (active or not) or a never-a-client number.
@@ -210,10 +232,22 @@ const NO_EXCLUSIONS = () => false;
  *        then excludes nothing, exactly as before.
  * @param {(obj: object) => void} [o.log]
  * @param {() => number} [o.now]
+ * @param {ReturnType<import('./inbox/store.mjs').createInboxStore>} [o.inboxStore]
+ *        inbox states and gaps; required whenever `ingest` is given
+ * @param {((lead: object, rec: object) => object) | { ingest: Function }} [o.ingest]
+ *        lib/inbox/ingest.mjs: stores one record of an `in` chat. Null (older wiring and
+ *        every Phase 1 test) means no inbox at all — the poller behaves exactly as before.
+ * @param {ReturnType<import('./inbox/backfill.mjs').createBackfill>} [o.backfill]
+ *        pulls the 24 h before a join; without it a join stores from its own message on
  */
 export function createPoller({
   db, cfg = {}, findMessages = null, sendWhatsApp = null, isExcluded = NO_EXCLUSIONS, log = () => {}, now = () => Date.now(),
+  inboxStore = null, ingest = null, backfill = null,
 } = {}) {
+  // `createIngest()` hands back `{ ingest }`; the bare function is accepted as well.
+  const ingestOne = typeof ingest === 'function' ? ingest : (typeof ingest?.ingest === 'function' ? ingest.ingest : null);
+  const inboxOn = Boolean(ingestOne);
+  if (inboxOn && !inboxStore) throw new TypeError('createPoller: an inbox ingest needs the inbox store (for states and gaps)');
   const wa = waConfig(cfg.env ?? {});
   const instance = wa.instance;
   const ownerDigits = bareJid(wa.ownerJid);
@@ -222,7 +256,7 @@ export function createPoller({
   // uncheckable lid-only chat is worth counting the moment team accounts exist, even before
   // any pairing has been learned.
   const teamWired = isExcluded !== NO_EXCLUSIONS;
-  const find = findMessages ?? (({ gte, lte }) => fetchWindow({
+  const find = findMessages ?? (({ gte, lte }) => readWindow({
     baseUrl: wa.baseUrl, apiKey: wa.apiKey, instance, gte, lte, offset: PAGE_SIZE, maxPages: MAX_PAGES,
   }));
 
@@ -441,7 +475,110 @@ export function createPoller({
         log({ level: 'warn', evt: 'wa.note.failed', leadId: fresh.lead_id, error: String(err?.message ?? err) });
       }
     }
-    return { method: match.method, created };
+    // `refKnown`: `classify` found a site session holding the Ref code, which makes even a
+    // bare `Ref K7Q2XR` certain for the inbox (amendment A6).
+    return { method: match.method, created, lead: fresh, refKnown: match.method === 'ref' && Boolean(match.sessionId) };
+  }
+
+  /* -------------------- the Bona inbox -------------------- */
+
+  /** One record into the transcript of an `in` chat, the lead read fresh (a backfill may just have filled its jids). */
+  async function storeRecord(leadId, rec, tally) {
+    const res = await ingestOne(db.getLead(leadId), rec);
+    if (res?.stored) tally.stored += 1;
+  }
+
+  /**
+   * A chat that has just joined: its state first — ingest refuses anything that is not
+   * `in`, so the history below would otherwise be thrown away — then the 24 h before the
+   * joining message, where the "Hi" before a Ref line or the owner's opening words live
+   * (design §4.1). Counts only in the log line: never a number or a name.
+   *
+   * A history Evolution could not give us (`{ error }`) is not dropped silently (design
+   * §4.3): the joining message is about to be stored, so the chat is no longer one the
+   * daily catch-up asks again for (it only picks chats with nothing stored). A gap just
+   * before the joining message makes the thread say "a message could not be loaded —
+   * check WhatsApp" where that history belongs.
+   */
+  async function join(leadId, ts, via, tally, extra = {}) {
+    inboxStore.setInboxState(leadId, 'in', { since: ts });
+    if (backfill) {
+      const got = await backfill.history(db.getLead(leadId), { sinceTs: ts - JOIN_HISTORY_MS, untilTs: ts });
+      if (got?.error) {
+        inboxStore.addGap({ key_id: `join:${leadId}:${ts}`, lead_id: leadId, ts: ts - 1, reason: 'history_failed' });
+        log({ level: 'warn', evt: 'inbox.join_history_failed', leadId, error: got.error });
+      }
+    }
+    tally.joined += 1;
+    log({ evt: 'inbox.join', leadId, via, ...extra });
+  }
+
+  /**
+   * What an inbound message means for the inbox, once `handleInbound` has matched it. A
+   * certain signal puts the chat `in`, a guess puts it on the Unsure list, and `in`/`out`
+   * never move from here (lib/inbox/eligibility.mjs `nextInboxState`). Unsure keeps
+   * nothing: a guessed chat is never stored or shown until the owner moves it in. A bare
+   * Ref-shaped code is certain only when a site session holds it (`refKnown`, A6).
+   */
+  async function inboxAfterInbound(rec, ts, { lead, method, refKnown }, tally) {
+    const text = typeof rec.text === 'string' ? rec.text : '';
+    const signal = inboundSignal({ text, hasAdMeta: Boolean(adMetaOf(rec.contextInfo)), refKnown });
+    const next = nextInboxState(lead.inbox_state, { signal, method });
+    if (next === 'in' && lead.inbox_state !== 'in') await join(lead.lead_id, ts, 'inbound', tally);
+    else if (next && next !== lead.inbox_state) inboxStore.setInboxState(lead.lead_id, next, { since: ts });
+    if (next === 'in') await storeRecord(lead.lead_id, rec, tally);
+  }
+
+  /**
+   * What the owner's own message means for the inbox, once `recordReply` has stamped the
+   * reply clock exactly as before (the Hermes `bona-unanswered-leads` watchdog reads
+   * `first_reply_ts`). In an `in` chat it is stored: typed on his phone or sent by Lisa,
+   * which nothing can tell apart, unless lib/inbox/ingest.mjs finds our own dashboard send
+   * in the outbox. An `out` chat never comes back on its own. Any other chat joins only on
+   * a Bona link, a listing number or a Bona brochure (D12), judged on the normalised record
+   * as it is, so a document name cut at 120 code points is read as cut (A8). A stranger he
+   * writes to that way becomes an `owner_outbound` lead — no ad fan-out and no new-lead
+   * note, because he started it (lib/leads.mjs `OWNER_METHODS`) — with no name: a `fromMe`
+   * record's pushName is his own.
+   *
+   * Our own new-lead note passes that rule too (it carries a Bona link, the listing id and
+   * a Ref line). It never gets here only because the tick skips the owner's own chat, team
+   * and never-list numbers and `OWN_NOTE_RE` first (A7): keep those checks ahead of this.
+   */
+  async function inboxAfterOutbound(rec, ts, tally) {
+    const jids = jidsOf(rec);
+    let lead = findLead(jids);
+    if (lead?.inbox_state === 'out') return;
+    if (lead?.inbox_state !== 'in') {
+      if (!ownerOutboundJoins(rec)) return;
+      let created = false;
+      if (!lead) {
+        const text = typeof rec.text === 'string' ? rec.text : '';
+        const fileName = typeof rec.fileName === 'string' ? rec.fileName : '';
+        ({ lead, created } = createOrMergeLead(db, {
+          name: null, phone: jids.phone, waJid: jids.waJid, waLid: jids.waLid,
+          listingId: listingIdIn(`${text} ${fileName}`),
+        }, { channel: 'whatsapp', matchMethod: 'owner_outbound', now: ts, dataDir: cfg.dataDir ?? undefined }));
+      }
+      await join(lead.lead_id, ts, 'owner_outbound', tally, { created });
+    }
+    await storeRecord(lead.lead_id, rec, tally);
+  }
+
+  /**
+   * A record of an `in` chat that has failed for the last time is not dropped silently
+   * (design §4.2): its id, chat and time go to `wa_gaps`, and the thread shows "a message
+   * could not be loaded — check WhatsApp" in its place. Never the text. Called from the
+   * per-record `catch`, so nothing in here may throw.
+   */
+  function recordGapSafely(rec, ts) {
+    if (!inboxOn) return;
+    try {
+      const lead = findLead(jidsOf(rec));
+      if (lead?.inbox_state === 'in') inboxStore.addGap({ key_id: rec.id, lead_id: lead.lead_id, jid: rec.jid ?? null, ts, reason: 'failed' });
+    } catch (err) {
+      log({ level: 'warn', evt: 'inbox.gap_failed', error: String(err?.message ?? err) });
+    }
   }
 
   /* -------------------- the tick -------------------- */
@@ -471,7 +608,7 @@ export function createPoller({
       const answer = await find({ gte, lte, instance });
       const records = Array.isArray(answer) ? answer : (answer?.records ?? []);
 
-      const tally = { scanned: records.length, matched: 0, unmatched: 0, created: 0, merged: 0, replies: 0, ignored: 0, lidOnlyUnexcludable: 0 };
+      const tally = { scanned: records.length, matched: 0, unmatched: 0, created: 0, merged: 0, replies: 0, ignored: 0, lidOnlyUnexcludable: 0, stored: 0, joined: 0 };
       let maxTs = 0;
       let oldestFailedTs = null;
       /**
@@ -562,12 +699,14 @@ export function createPoller({
         try {
           if (rec.fromMe) {
             if (recordReply(rec, ts)) tally.replies += 1;
+            if (inboxOn) await inboxAfterOutbound(rec, ts, tally);
           } else {
             const out = await handleInbound(rec, ts);
             if (!out) tally.unmatched += 1;
             else {
               tally.matched += 1;
               if (out.created) tally.created += 1; else tally.merged += 1;
+              if (inboxOn) await inboxAfterInbound(rec, ts, out, tally);
             }
           }
           // Remembered once it is safely handled, so a transient store failure costs a
@@ -582,6 +721,7 @@ export function createPoller({
           if (writtenOff) {
             db.waSeenAdd(rec.id, ts);
             failures.delete(rec.id);
+            recordGapSafely(rec, ts);
           } else {
             failures.set(rec.id, { attempts, ts });
             if (oldestFailedTs === null || ts < oldestFailedTs) oldestFailedTs = ts;
@@ -596,10 +736,12 @@ export function createPoller({
       // and `status().lidOnlyUnexcludable` is the running total for anyone watching it.
       if (tally.lidOnlyUnexcludable) log({ level: 'info', evt: 'poll.lid_only_unexcludable', count: tally.lidOnlyUnexcludable });
 
-      // Newest-first paging means a window that overflowed the page cap hides its OLDEST
-      // messages, and asking again returns the same newest ones — so this is a loss, and
-      // it says so. It takes downtime long enough for 500 messages to pile up.
-      if (answer?.truncated) log({ level: 'warn', evt: 'wa.poll.truncated', scanned: records.length, gte, lte });
+      // `readWindow` splits a crowded window by time until every piece fits the page cap, so
+      // this now takes a piece still over the cap at the deepest split — thousands of
+      // messages inside a few minutes. Newest-first paging hides that piece's OLDEST
+      // messages and asking again returns the same newest ones, so this is a loss, and it
+      // says so, with how many it could not read (`missing`, from Evolution's own `total`).
+      if (answer?.truncated) log({ level: 'warn', evt: 'wa.poll.truncated', scanned: records.length, missing: Number.isFinite(answer.missing) ? answer.missing : null, gte, lte });
 
       // Forward only, no further back than the newest message we saw, and never reaching
       // back more than one window: those three together are what keeps this cheap.
@@ -621,7 +763,7 @@ export function createPoller({
       db.pruneWaSeen(t - SEEN_TTL_MS);
       matched += tally.matched;
       lidOnlyUnexcludable += tally.lidOnlyUnexcludable;
-      if (tally.matched || tally.replies) log({ evt: 'wa.poll.tick', ...tally });
+      if (tally.matched || tally.replies || tally.stored || tally.joined) log({ evt: 'wa.poll.tick', ...tally });
       return tally;
     } catch (err) {
       log({ level: 'warn', evt: 'wa.poll.failed', error: String(err?.message ?? err) });
