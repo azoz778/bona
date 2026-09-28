@@ -353,9 +353,26 @@ test('findMessagesPage refuses a missing or empty filter, which would read every
     { key: { remoteJid: null }, messageTimestamp: window },
     { key: { remoteJid: CLIENT }, messageTimestamp: { gte: iso(T0) } },
     { key: { remoteJid: CLIENT, remoteJidAlt: null } },
+    // Anything Evolution does not read is refused too, even beside a filter that does narrow:
+    // a chat named at the top level instead of under `key` is ignored, and the window beside
+    // it then reads every chat — which a per-chat caller would file into one lead's thread.
+    { remoteJid: CLIENT, messageTimestamp: window },
+    { remoteJidAlt: CLIENT, messageTimestamp: window },
+    { key: { remoteJid: CLIENT }, messageType: 'conversation' },
+    { key: { remoteJid: CLIENT, fromMe: true } },
+    { key: { remoteJid: CLIENT, participants: 'x' } },
+    { key: { remoteJid: CLIENT }, messageTimestamp: { ...window, gt: iso(T0) } },
+    // key.id was never verified live to narrow a read, and nothing needs it.
+    { key: { id: 'KEY1' } },
+    { key: { remoteJid: CLIENT, id: 'KEY1' } },
   ];
+  const refused = (err) => {
+    assert.ok(err instanceof TypeError);
+    assert.equal(err.message, 'evolution: where must name a chat (key.remoteJid or key.remoteJidAlt) or a whole window (messageTimestamp gte and lte), and hold nothing else');
+    return true;
+  };
   for (const where of wide) {
-    await assert.rejects(() => findMessagesPage({ ...BASE, where, fetchImpl }), TypeError, JSON.stringify(where));
+    await assert.rejects(() => findMessagesPage({ ...BASE, where, fetchImpl }), refused, JSON.stringify(where));
   }
   assert.equal(calls.length, 0, 'nothing that would widen to every chat is ever sent');
 
@@ -364,9 +381,10 @@ test('findMessagesPage refuses a missing or empty filter, which would read every
   const narrow = [
     { key: { remoteJid: CLIENT } },
     { key: { remoteJidAlt: CLIENT } },
-    { key: { id: 'KEY1' } },
+    { key: { remoteJid: CLIENT, remoteJidAlt: CLIENT } },
     { messageTimestamp: window },
     { key: { remoteJid: CLIENT }, messageTimestamp: window },
+    { key: { remoteJidAlt: CLIENT }, messageTimestamp: window },
   ];
   for (const where of narrow) await findMessagesPage({ ...BASE, where, fetchImpl: ok.fetchImpl });
   assert.deepEqual(ok.calls.map((c) => c.body.where), narrow);
@@ -544,15 +562,39 @@ test('readWindow stops cutting at the depth cap and says exactly how many it cou
   assert.equal(out.missing, 4500);
 });
 
-test('readWindow never cuts a window under two seconds wide, and maxDepth 0 never cuts at all', async () => {
+test('readWindow cuts on whole seconds, so two seconds under 2,000 ms wide are cut; one second and maxDepth 0 never are', async () => {
+  // Evolution compares whole seconds: [T0, T0 + 1999] takes in two of them, S0 and S0 + 1,
+  // and a cut at T0 + 1000 separates them, though the window is only 1,999 ms wide. Cutting
+  // routinely makes such pieces: [0, 5999] halves into [0, 1999] and [2000, 5999].
   const two = [...Array.from({ length: 300 }, (_, i) => stored(`X${i}`, S0)), ...Array.from({ length: 300 }, (_, i) => stored(`Y${i}`, S0 + 1))];
   const narrow = fakeEvolution(two);
   const a = await readWindow({ ...BASE, gte: T0, lte: T0 + 1_999, fetchImpl: narrow.fetchImpl });
-  assert.equal(narrow.calls.length, MAX_PAGES, 'under two seconds wide: not cut, although T0 + 1000 lies inside it');
-  assert.equal(a.pieces, 1);
-  assert.equal(a.records.length, 500);
-  assert.equal(a.truncated, true);
-  assert.equal(a.missing, 100);
+  assert.deepEqual(asked(narrow.calls), [
+    [0, 1_999, 1], // 600 in two seconds: cut at S0 + 1
+    [0, 999, 1], [0, 999, 2], [0, 999, 3],
+    [1_000, 1_999, 1], [1_000, 1_999, 2], [1_000, 1_999, 3],
+  ]);
+  assert.deepEqual(new Set(a.records.map((r) => r.id)), new Set(two.map((r) => r.key.id)));
+  assert.equal(a.records.length, 600);
+  assert.equal(a.pieces, 2);
+  assert.equal(a.truncated, false);
+  assert.equal(a.missing, 0);
+
+  // Bounds off whole seconds: [T0 + 999, T0 + 1000] is 1 ms wide and still two seconds.
+  const tight = fakeEvolution(two);
+  const t = await readWindow({ ...BASE, gte: T0 + 999, lte: T0 + 1_000, fetchImpl: tight.fetchImpl });
+  assert.deepEqual(asked(tight.calls).filter(([, , page]) => page === 1), [[999, 1_000, 1], [999, 999, 1], [1_000, 1_000, 1]]);
+  assert.equal(t.records.length, 600);
+  assert.equal(t.missing, 0);
+
+  // One whole second, however wide in ms, has nothing to cut at: read partially and counted.
+  const one = fakeEvolution(Array.from({ length: 600 }, (_, i) => stored(`Z${i}`, S0)));
+  const o = await readWindow({ ...BASE, gte: T0, lte: T0 + 999, fetchImpl: one.fetchImpl });
+  assert.equal(one.calls.length, MAX_PAGES);
+  assert.equal(o.pieces, 1);
+  assert.equal(o.records.length, 500);
+  assert.equal(o.truncated, true);
+  assert.equal(o.missing, 100);
 
   const flat = fakeEvolution(Array.from({ length: 1200 }, (_, i) => stored(`M${i}`, S0 + i)));
   const b = await readWindow({ ...BASE, gte: T0, lte: T0 + 1_199_000, maxDepth: 0, fetchImpl: flat.fetchImpl });
@@ -572,13 +614,43 @@ test('readWindow falls back to paging until a short page when the answer is a ba
   assert.equal(a.truncated, false);
   assert.equal(a.missing, 0);
 
+  // No size to decide a cut on up front, so a piece is paged to the cap first; a last page
+  // still full there means more lies beyond it, and a piece that can still be cut is.
   const big = fakeEvolution(Array.from({ length: 1200 }, (_, i) => stored(`M${i}`, S0 + i)), { bare: true });
   const b = await readWindow({ ...BASE, gte: T0, lte: T0 + 1_199_000, fetchImpl: big.fetchImpl });
-  assert.deepEqual(asked(big.calls), [1, 2, 3, 4, 5].map((p) => [0, 1_199_000, p]), 'no size to decide a cut on');
-  assert.deepEqual(b.records.map((r) => r.id), desc('M', 700, 1199));
-  assert.equal(b.pieces, 1);
-  assert.equal(b.truncated, true);
-  assert.equal(b.missing, 0, 'nobody can count what a bare array left out');
+  const pages = (from, to, n) => Array.from({ length: n }, (_, k) => [from, to, k + 1]);
+  assert.deepEqual(asked(big.calls), [
+    ...pages(0, 1_199_000, 5), // five full pages: cut at 599 s
+    ...pages(0, 598_999, 5), // 599, five full pages: cut at 299 s
+    ...pages(0, 298_999, 3), // 299: the third page is short
+    ...pages(299_000, 598_999, 4), // 300: the third page is full, the fourth empty
+    ...pages(599_000, 1_199_000, 5), // 601: cut at 899 s
+    ...pages(599_000, 898_999, 4),
+    ...pages(899_000, 1_199_000, 4),
+  ]);
+  assert.deepEqual(b.records.map((r) => r.id), [
+    ...desc('M', 0, 298), ...desc('M', 299, 598), ...desc('M', 599, 898), ...desc('M', 899, 1199),
+  ]);
+  assert.equal(b.pieces, 4);
+  assert.equal(b.truncated, false);
+  assert.equal(b.missing, 0);
+
+  // Where it cannot be cut, the newest pages are kept and the cut-off is flagged, but it adds
+  // nothing to `missing`: nobody can count what a bare array left out.
+  const flat = fakeEvolution(Array.from({ length: 1200 }, (_, i) => stored(`M${i}`, S0 + i)), { bare: true });
+  const c = await readWindow({ ...BASE, gte: T0, lte: T0 + 1_199_000, maxDepth: 0, fetchImpl: flat.fetchImpl });
+  assert.deepEqual(asked(flat.calls), pages(0, 1_199_000, 5));
+  assert.deepEqual(c.records.map((r) => r.id), desc('M', 700, 1199));
+  assert.equal(c.pieces, 1);
+  assert.equal(c.truncated, true);
+  assert.equal(c.missing, 0);
+
+  const burst = fakeEvolution(Array.from({ length: 600 }, (_, i) => stored(`Z${i}`, S0)), { bare: true });
+  const d = await readWindow({ ...BASE, gte: T0, lte: T0 + 999, fetchImpl: burst.fetchImpl });
+  assert.equal(burst.calls.length, MAX_PAGES, 'one second: nothing to cut at');
+  assert.equal(d.records.length, 500);
+  assert.equal(d.truncated, true);
+  assert.equal(d.missing, 0);
 });
 
 /**
@@ -811,6 +883,52 @@ test('a same-second group bigger than a page is cut down to the depth cap, then 
   assert.equal(narrow.truncated, true);
   assert.equal(narrow.missing, notReturned(narrow));
   assert.equal(narrow.missing, 50);
+});
+
+test('two rows with one id on the same page are a stored duplicate, not a slide: the piece is complete', async () => {
+  // One LIMIT/OFFSET page cannot return one row twice, so an id repeated on a page is two rows
+  // Evolution stored under one key.id (an API send stored by the send path and again by the
+  // Baileys echo, say). Counted as a shortfall, it would cut every window holding it down to
+  // the depth cap and flag a loss that never happened, on every poll that overlaps it.
+  const rows = [stored('A', S0 + 5), stored('DUP', S0 + 10), stored('DUP', S0 + 10)];
+  for (const bare of [false, true]) {
+    const evo = fakeEvolution(rows, { bare });
+    const out = await readWindow({ ...BASE, gte: T0, lte: T0 + 20_000, fetchImpl: evo.fetchImpl });
+    assert.deepEqual(asked(evo.calls), [[0, 20_000, 1]], bare ? 'bare array' : 'boxed');
+    assert.deepEqual(out.records.map((r) => r.id), ['DUP', 'A'], 'each id once');
+    assert.equal(out.pieces, 1);
+    assert.equal(out.truncated, false);
+    assert.equal(out.missing, 0);
+  }
+
+  // On two pages the two rows look just like a slide, so the piece is cut until they share a
+  // page (or fall in different pieces) — and then nothing is reported lost.
+  const straddle = fakeEvolution([...rows, stored('N', S0 + 17)]);
+  const s = await readWindow({ ...BASE, gte: T0, lte: T0 + 20_000, offset: 2, fetchImpl: straddle.fetchImpl });
+  assert.deepEqual(asked(straddle.calls), [
+    [0, 20_000, 1], [0, 20_000, 2], // N, DUP | DUP, A: three ids for four rows — cut at 10 s
+    [0, 9_999, 1], // A
+    [10_000, 20_000, 1], [10_000, 20_000, 2], // N, DUP | DUP: still on two pages — cut at 15 s
+    [10_000, 14_999, 1], // DUP, DUP on one page: complete
+    [15_000, 20_000, 1], // N
+  ]);
+  assert.deepEqual(s.records.map((r) => r.id), ['A', 'DUP', 'N']);
+  assert.equal(s.pieces, 3);
+  assert.equal(s.truncated, false);
+  assert.equal(s.missing, 0);
+
+  // An id is credited with the most rows it had on any ONE page, never the sum over pages:
+  // X, X on page 1 and X, X again on page 2 may be the same two rows slid, so four rows stated
+  // and only the two Xs seen leaves two unread (Y and Z), not one.
+  const x = textRecord({ key: { id: 'X', fromMe: false, remoteJid: CLIENT } });
+  const twice = recorder([
+    { status: 200, body: { messages: { total: 4, pages: 2, currentPage: 1, records: [x, x] } } },
+    { status: 200, body: { messages: { total: 4, pages: 2, currentPage: 2, records: [x, x] } } },
+  ]);
+  const t = await readWindow({ ...SCRIPTED, fetchImpl: twice.fetchImpl });
+  assert.deepEqual(t.records.map((r) => r.id), ['X']);
+  assert.equal(t.truncated, true);
+  assert.equal(t.missing, 2);
 });
 
 test('readWindow makes at most maxPages × (2^(maxDepth+1) − 1) requests, even when every piece comes back short', async () => {
