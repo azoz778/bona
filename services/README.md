@@ -517,7 +517,7 @@ back, legacy path) the same commands are `systemctl --user …` / `journalctl --
 | `503 billing` | the owner's Retell balance is empty — top it up; the log line says so loudly |
 | `/health` 503, `inventory: 0` | `listings.json` is missing or broken at the path in `redacted` config; fix it, no restart needed |
 | Dashboard code never arrives | `/health` → `evolution` must be reachable; `ssh hermes-vps sudo journalctl -u bona-api \| grep dashboard`; the owner JID is `BONA_OWNER_JID` |
-| `/health` `poller.lagS` keeps growing | Evolution outage or wrong `EVOLUTION_API_URL`; nothing else is affected, messages are picked up when it is back |
+| `/health` `poller.lagS` keeps growing | Evolution outage or wrong `EVOLUTION_API_URL`; messages are picked up when it is back. Meanwhile login codes do not arrive, dashboard replies fail or come back uncertain (check WhatsApp before sending again), threads show only what is stored, and an automatic join or the inbox catch-up leaves a gap in the thread (opening the thread later reads the chat again) |
 | `/health` `fanout.failed` > 0 | a key is wrong or expired — `node scripts/marketing/verify-integrations.mjs` says which; rows retry ≤ 5 times with backoff |
 | PC is off | nothing happens to Dana (she runs on the VPS); only `bona-intake` (PC) pauses — legacy path: everything pauses, the site falls back to WhatsApp and no data is lost |
 
@@ -533,6 +533,19 @@ Data files under `~/bona-data` (owner-only, mode 0600):
 
 - **Dana down, site shows the WhatsApp fallback** → `ssh hermes-vps sudo systemctl status bona-api cloudflared-bona`; `ssh hermes-vps sudo journalctl -u bona-api -n 50`. Uptime Kuma #25 (`api.bona-real-estate.com/health`, keyword `"retell":"ok"`) pages Telegram after ~3 minutes. If the VPS itself is gone: `bash services/deploy/vps/rollback.sh` on the PC restores the previous setup in about a minute.
 - **Inventory stale after an intake publish** → `ssh hermes-vps sudo systemctl list-timers bona-repo-sync.timer` and `ssh hermes-vps sudo journalctl -u bona-repo-sync -n 5`; the API re-reads `listings.json` within 30 s of the pull.
+- **A client asks for a WhatsApp conversation to be deleted** (the privacy page offers it) →
+  the owner's *Not a client* on the chat deletes what this service stored of it — messages,
+  gaps, read marks and reply outbox rows (a send of the last 24 h stays as a stub with no
+  text and no chat, for the day cap) — and puts the chat `out`, where it never comes back on
+  its own. It leaves the lead row (name, number, jids), its touchpoints (the `lead_created`
+  one keeps the first ≤ 200 characters of the first message), stage history, notes and its
+  line in `leads.jsonl`; no button removes those, so a request that covers the enquiry record
+  too is a manual edit of `bona.db` and `leads.jsonl`. The gateway's copy is in Evolution's
+  own Postgres, which keeps every message, and nothing here deletes from it
+  (`lib/evolution.mjs` only reads, `lib/wa-send.mjs` only sends): remove that chat's messages
+  there by hand, under both its jids (the `@lid` and the phone jid) — until then a *Move* or
+  *Add* would pull its last 30 days back in. The phones' copy is deleted in WhatsApp on each
+  phone.
 - **A unit dies with `218/CAPABILITIES`** → it is running under the user manager again (`systemctl --user`), which Ubuntu 24.04's userns restriction forbids for the hardened units; re-run `install-vps.sh` (it retires the user units and reinstalls the system ones), then `cutover.sh` from the PC.
 
 ---
@@ -555,8 +568,10 @@ side: `docs/OWNER-RUNBOOK.md` §4, §9–§11 and `docs/checklists/`.
 **Store.** `${BONA_DATA}/bona.db` (SQLite, WAL, mode 0600): sessions, events, leads,
 touchpoints, stage history, spend, fan-out queue, dashboard auth, and the transcripts of
 the chats in the Bona inbox ([Dashboard → Inbox](#inbox), below). The JSONL files stay as
-the append-only raw log and are imported once on start-up. Raw phone numbers, names and
-message snippets never leave this file; ad platforms get hashed identifiers only.
+the append-only raw log and are imported once on start-up. Ad platforms get hashed
+identifiers only. The transcripts are shown only to signed-in team members, and the
+WhatsApp gateway (Evolution) is sent only what a message it delivers needs: your new-lead
+note, a login code, a dashboard reply.
 
 **Poller** (`BONA_WA_POLL=1`, every `BONA_WA_POLL_MS`; `lib/wa-poller.mjs` over
 `lib/evolution.mjs`). A read-only loop inside this process. Each tick asks Evolution for
@@ -567,10 +582,13 @@ that is split in halves by time instead (below); deduplicated on `key.id` (`wa_s
 pruned after 7 days).
 Groups, status broadcasts and your own chat are skipped; an `…@lid` chat takes its phone
 from `key.remoteJidAlt` and stores both jids. Evolution is **never** given a webhook: the
-instance is your personal WhatsApp and another agent consumes its events.
+instance is your personal WhatsApp, and nothing consumes its events (checked 2026-09-27: no
+webhook, websocket or queue; Lisa reads on demand and sends only on your request, through
+the same API).
 
-*Matched-only storage* (your decision). A message is kept only when one of these claims it,
-in order — the first hit wins:
+*Matched-only storage* (your decision). An incoming message is kept, as a new lead or on the
+lead it belongs to, only when one of these claims it, in order — the first hit wins (Phase 2
+adds the owner's own ways in, below the table):
 
 | # | `match_method` | What claims it | The source it gets |
 |---|---|---|---|
@@ -591,6 +609,13 @@ Everything else — your private conversations, which this loop can also see —
 in memory: counted in `poller.unmatched`, never written to disk, never sent anywhere. No
 log line here carries a phone number, a name or message text.
 
+Two exceptions since Phase 2 of the team inbox ([Dashboard → Inbox](#inbox)). Leads are also
+made without the table: from the owner's own message when it passes the *Owner-started* rule
+(a Bona site link, a listing id or a qualifying document: `owner_outbound`), and by his *Add
+chat by phone number* (`owner_added`). And a message discarded here when it arrived can
+still be stored later: when its chat joins the inbox, the 24 h before the join (30 days for
+the owner's *Move* and *Add*) are fetched from Evolution and stored with it.
+
 Each window is handled oldest-first (Evolution answers the other way round, and judging a
 follow-up before the `Ref` line that explains it would discard it), and a message is
 remembered as handled only once it is stored — so a transient store failure costs a retry,
@@ -608,11 +633,11 @@ between pages while it was read) is split and read again the same way. Only a pi
 over the cap or still short at the deepest level (or one second wide: a single second
 holding more than 500 messages cannot be split) is kept partial — a loss, not a deferral,
 because asking again returns the same newest pages — and the log says `wa.poll.truncated`
-with the number missed where the answer states a total. That takes downtime long enough for
-thousands of messages to pile up in one window. An answer without a `total` is read page by
-page until a short one, and one still full at the fifth page is split the same way; at the
-deepest level it is kept partial with `missing` 0, because nothing says how many more there
-were.
+with the number missed where the answer states a total. In practice that takes downtime
+long enough for thousands of messages to pile up in one window. An answer without a `total`
+is read page by page until a short one, and one still full at the fifth page is split the
+same way; at the deepest level it is kept partial with `missing` 0, because nothing says how
+many more there were.
 
 A match creates the lead (or merges into the person it already is) **at the message's own
 timestamp**, so `first_inbound_ts` is when the enquiry actually happened; the first ≤ 200
@@ -731,7 +756,7 @@ on `GET /dashboard/leads/:id`, `GET /v1/admin/leads/:id` and the header of a cha
 | `POST /v1/admin/spend` | `{day, platform, campaign_id, campaign_name, spend_sar, clicks?, impressions?}`, upserted on `(day, platform, campaign_id)` |
 | `GET /dashboard/inbox` | the Bona chats, unread first, then newest: name, masked number, last message, stage, handler, *Needs a human*. The owner also gets the **Unsure** tab (`?tab=unsure`; 403 for staff) and *Add chat by phone number* |
 | `GET /dashboard/inbox/:leadId` | one chat, refreshed from Evolution first and then marked read: bubbles labelled client / team member / Dana / the owner's number, gaps, sends still open, the reply box and the handler picker; the number in full in the header. 404 unless it is an `in` chat (a `wa_jid` or `wa_lid`) and its number is not excluded |
-| `POST /v1/admin/inbox/:leadId/reply` | any member: one reply through the shared gate. Form: sent → 303 to the thread `?ok=sent`; uncertain → 303 `?error=send_uncertain`; a chat that may not be answered → the same 404 as the thread; any other refusal renders the thread again with the text kept and a fresh `send_id` — never a redirect with message text in the URL. JSON: 200 `{ok, status, send_id}` when accepted, 202 `{error: 'send_uncertain', send_id}` when uncertain, 404 `{error: 'not_in_inbox'}` for a chat that may not be answered, and `{error}` with 409 (`stale`, `lid_only`), 400 (`bad_text`, `bad_send_id`), 429 (`reply_rate_limited`), 503 (`sending_disabled`) or 502 (`send_failed`, anything else) |
+| `POST /v1/admin/inbox/:leadId/reply` | any member: one reply through the shared gate; its answers, form and JSON, are under *Reply answers* ([Inbox](#inbox)), and none puts message text in a URL |
 | `POST /v1/admin/inbox/:leadId/handler` | any member: hand the chat to an active member, or to nobody |
 | `POST /v1/admin/inbox/:leadId/move` · `…/out` | owner: *Move to Bona inbox* (pulls 30 days) · *Not a client* (`out`, transcript purged now) |
 | `POST /v1/admin/inbox/add` | owner: *Add chat by phone number* — creates or reuses the lead (`owner_added`), puts it `in`, pulls 30 days |
@@ -744,7 +769,9 @@ matches no spend rather than borrowing another platform's budget — and when th
 happens, the row carries `unmatched_leads` and the page says "unmatched — check the UTM
 source" instead of printing a zero that reads like a dud campaign.
 
-A form post answers `303` back to the page it came from; a JSON call answers JSON.
+A form post answers `303` back to the page it came from, with two exceptions in the inbox: a
+reply or handover for a chat that may not be answered gets the 404 page, and a refused reply
+draws the thread again with the text kept ([Inbox](#inbox)). A JSON call answers JSON.
 
 **One thing rate limits cannot fix.** `POST /dashboard/login/code` has to be reachable by
 an unauthenticated owner, so it is reachable by everyone. The limits above bound what a
@@ -854,6 +881,18 @@ carry little else: `reply_sent` its outcome (`{status}`: `accepted`, `uncertain`
 `failed`), `handler` the new handler's user id (`{to}`, null for nobody), and `inbox_move`,
 `inbox_out` and `inbox_add` nothing more — never text or a number.
 The first real client reply from the dashboard is sent with the owner beside it (design D14).
+
+*Reply answers.* A form: sent → 303 to the thread `?ok=sent`; uncertain → 303
+`?error=send_uncertain` (the text is not kept: it may have gone); a chat that may not be
+answered → the same 404 page as the thread; any other refusal → the thread again with the
+text kept in the box, a fresh `send_id` and the HTTP status listed below. A JSON call:
+
+- 200 `{ok: true, status: 'accepted', send_id}`: sent.
+- 202 `{ok: false, error: 'send_uncertain', send_id}`: it may have gone; check WhatsApp.
+- 404 `{error: 'not_in_inbox'}`: a chat that may not be answered.
+- `{error}` with 409 (`stale`, `lid_only`), 400 (`bad_text`, `bad_send_id`), 429
+  (`reply_rate_limited`), 503 (`sending_disabled`) or 502 (`send_failed`: anything else,
+  and a resubmit of a send that failed).
 
 *Polling and upkeep.* The poller runs every 20 s (`BONA_WA_POLL_MS`, §4). The VPS sets it in
 `~/.secrets/bona-services.env`, and a value there wins over the default — a stale
