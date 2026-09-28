@@ -23,7 +23,7 @@ test('every site shape, separator and line break reads as before', () => {
     ['Ref BONA-W003K7Q2XR', { listingId: 'BONA-W003', code: 'K7Q2XR' }],
     ['Ref · K7Q2XR', { listingId: null, code: 'K7Q2XR' }],
     ['Ref\nBONA-W003\n·\nK7Q2XR', { listingId: 'BONA-W003', code: 'K7Q2XR' }],
-    ['Ref BONA · K7Q2XR', { listingId: 'BONA', code: 'K7Q2XR' }],
+    ['Ref\u00A0BONA\u00A0·\u00A0K7Q2XR', { listingId: 'BONA', code: 'K7Q2XR' }],
     ['Ref\tBONA\t-\tK7Q2XR', { listingId: 'BONA', code: 'K7Q2XR' }],
     ['Ref BONA-W2345Z', { listingId: 'BONA', code: 'W2345Z' }],
     // Only the shape is checked (lib/inbox/eligibility.mjs decides what a bare code is worth).
@@ -42,7 +42,7 @@ test('the rewritten pattern finds the same line, listing and code as the old one
   // The pattern before 2026-09-28, kept here only to compare on short strings (it is cubic
   // on long runs of whitespace, see the next test). Same language, same captures.
   const OLD_REF_RE = /\bRef\s+(BONA(?:-W?\d{3})?)?\s*[·\-:|]?\s*([A-HJ-NP-Z2-9]{5,6})\b/i;
-  const pieces = ['Ref', 'ref', 'Refund', ' ', '  ', '\n', ' ', '\t', 'BONA', 'bona', '-W003', '-005',
+  const pieces = ['Ref', 'ref', 'Refund', ' ', '  ', '\n', '\u00A0', '\t', 'BONA', 'bona', '-W003', '-005',
     '-W', '003', '·', ' · ', '-', ':', '|', 'K7Q2XR', 'k7q2x', 'ABCDEF', 'Z', '2', 'x', 'O', '1', 'please', 'é', '_', '٤'];
   const shape = (m) => (m ? [m.index, m[0], m[1] ?? null, m[2]] : null);
   let seed = 20260928;
@@ -59,7 +59,7 @@ test('a long run of spaces after Ref is read in linear time', () => {
   // (`\s+ (BONA)? \s* [·-:|]? \s*`), so a failed match tried every split of them: 2,000
   // spaces took seconds, and any stranger's WhatsApp message (up to 65,536 characters)
   // could block the event loop, since the poller reads every inbound text with parseRef.
-  for (const space of [' ', '\n', ' ']) {
+  for (const space of [' ', '\n', '\u00A0']) {
     for (const text of [
       `Ref${space.repeat(20_000)}x`,
       `Ref BONA${space.repeat(20_000)}x`,
