@@ -30,21 +30,29 @@ function build({ env = {}, config = {}, ...options } = {}) {
   const db = options.db ?? openDb(':memory:');
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-inbox-wiring-'));
   const logs = [];
-  const app = createApp({
-    config: {
-      port: 0, host: '127.0.0.1', siteUrl: 'https://bona.azoz.uk', publicApi: 'https://bona-api.azoz.uk',
-      dataDir, inventoryFile: WORKTREE_LISTINGS, origins: DEFAULT_ORIGINS, toolToken: 'a'.repeat(32),
-      retellApiKey: 'test', retellMock: true, chatAgentId: 'agent_chat', voiceAgentId: 'agent_voice',
-      maxBodyBytes: 16 * 1024, chatRatePerMin: 30, tokenRatePerMin: 6, toolRatePerMin: 600, toolAuthFailRatePerMin: 10,
-      allowQueryToken: false, maxChatsPerDay: 300, maxCallsPerDay: 60, maxTurnsPerSession: 40, dashCookieDays: 30,
-      env, ids: {}, version: '1.0.0', trustedProxies: [],
-      ...config,
-    },
-    inventory, probeRetell: async () => 'ok', sendWhatsApp: async () => ({ ok: true }),
-    log: (e) => logs.push(e), now: () => NOW,
-    ...options,
-    db,
-  });
+  let app;
+  try {
+    app = createApp({
+      config: {
+        port: 0, host: '127.0.0.1', siteUrl: 'https://bona.azoz.uk', publicApi: 'https://bona-api.azoz.uk',
+        dataDir, inventoryFile: WORKTREE_LISTINGS, origins: DEFAULT_ORIGINS, toolToken: 'a'.repeat(32),
+        retellApiKey: 'test', retellMock: true, chatAgentId: 'agent_chat', voiceAgentId: 'agent_voice',
+        maxBodyBytes: 16 * 1024, chatRatePerMin: 30, tokenRatePerMin: 6, toolRatePerMin: 600, toolAuthFailRatePerMin: 10,
+        allowQueryToken: false, maxChatsPerDay: 300, maxCallsPerDay: 60, maxTurnsPerSession: 40, dashCookieDays: 30,
+        env, ids: {}, version: '1.0.0', trustedProxies: [],
+        ...config,
+      },
+      inventory, probeRetell: async () => 'ok', sendWhatsApp: async () => ({ ok: true }),
+      log: (e) => logs.push(e), now: () => NOW,
+      ...options,
+      db,
+    });
+  } catch (err) {
+    // A build that throws leaves nothing behind either.
+    db.close();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+    throw err;
+  }
   return {
     app, db, logs,
     close: async () => {
@@ -170,6 +178,42 @@ test('the poller createApp builds stores a client\'s message in the inbox, readi
   }
 });
 
+test('an ingest handed in as its bare function is the one the poller calls; any other shape fails the build', async () => {
+  const JID = '966500000077@s.whatsapp.net';
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    const records = body.where?.messageTimestamp ? [{
+      key: { id: 'POLL-2', fromMe: false, remoteJid: JID }, pushName: null, messageType: 'conversation',
+      message: { conversation: 'hello' }, messageTimestamp: Math.floor((NOW - 5_000) / 1000),
+    }] : [];
+    return { ok: true, status: 200, text: async () => JSON.stringify({ messages: { total: records.length, pages: 1, currentPage: 1, records } }) };
+  };
+  const seen = [];
+  const ingest = async (lead, rec) => { seen.push([lead.lead_id, rec.id]); return { stored: true, inserted: true, senderKind: 'client' }; };
+  const h = build({ env: ENV, config: { waPoll: true }, fetchImpl, ingest });
+  try {
+    const { app, db } = h;
+    db.insertLead({
+      lead_id: 'LEAD-bare', created: NOW - DAY, updated: NOW - DAY, phone_e164: '966500000077', wa_jid: JID,
+      channel: 'whatsapp', match_method: 'ref', stage: 'new', stage_ts: NOW - DAY, inbox_state: 'in', inbox_since: NOW - DAY,
+    });
+    const tally = await app.poller.tick();
+    assert.deepEqual(seen, [['LEAD-bare', 'POLL-2']]);
+    assert.equal(tally.stored, 1);
+    assert.equal(app.ingest.ingest, ingest, 'app.ingest keeps one shape whichever was handed in');
+  } finally {
+    await h.close();
+  }
+
+  // With the backfill handed in too, nothing else would notice: the poller would take a
+  // null ingest for Phase 1 mode and store nothing, silently.
+  const backfill = { configured: false, phoneJidOf: () => null, history: async () => ({}), refresh: async () => ({}) };
+  for (const bad of [{}, { ingest: 'not a function' }, 42]) {
+    assert.throws(() => build({ env: ENV, config: { waPoll: true }, fetchImpl, backfill, ingest: bad }), /options\.ingest must be/,
+      `${JSON.stringify(bad)}: at build time, not on every record`);
+  }
+});
+
 test('a login code goes out through the one real sender and leaves an outbox row without its text', async () => {
   const calls = [];
   const fetchImpl = async (url, init) => {
@@ -244,7 +288,7 @@ test('the daily upkeep: old transcripts and code rows go, stale sends become unc
     at(NOW - 30_000).insertOutbox({ send_id: 'SND-fresh', lead_id: 'LEAD-recent', jid: client, text: 'hello again', user_id: 'USR-1', sender_kind: 'staff' });
 
     const counts = await app.inboxMaintenance();
-    assert.deepEqual(counts, { excludedOut: 0, purgedChats: 1, purgedMessages: 1, codeRows: 1, interrupted: 1, caughtUp: 2, caughtUpStored: 3 });
+    assert.deepEqual(counts, { excludedOut: 0, purgedChats: 1, purgedMessages: 1, codeRows: 1, interrupted: 1, caughtUp: 2, caughtUpStored: 3, caughtUpFailed: 0 });
 
     assert.equal(app.inboxStore.hasMessages('LEAD-old'), false, 'five years after the last message the transcript goes');
     assert.ok(db.getLead('LEAD-old'), 'the lead row stays: it is the attribution record');
@@ -265,7 +309,7 @@ test('the daily upkeep: old transcripts and code rows go, stale sends become unc
     ]);
 
     assert.deepEqual(h.logs.find((e) => e.evt === 'inbox.maintenance'), { evt: 'inbox.maintenance', ...counts });
-    assert.deepEqual(h.logs.find((e) => e.evt === 'inbox.catchup'), { evt: 'inbox.catchup', chats: 2, stored: 3 });
+    assert.deepEqual(h.logs.find((e) => e.evt === 'inbox.catchup'), { evt: 'inbox.catchup', chats: 2, stored: 3, failed: 0 });
     const dump = JSON.stringify(h.logs);
     for (const secret of ['966500000077', '966500000078', 'an old question', 'hello']) assert.ok(!dump.includes(secret), secret);
 
@@ -310,7 +354,7 @@ test('the upkeep takes a colleague\'s or a never-list number\'s chat out of the 
     assert.equal(app.inboxStore.unreadTotal({ userId: 'USR-anyone' }), 1, 'the control: before the upkeep it counts');
 
     const counts = await app.inboxMaintenance();
-    assert.deepEqual(counts, { excludedOut: 3, purgedChats: 0, purgedMessages: 0, codeRows: 0, interrupted: 0, caughtUp: 1, caughtUpStored: 0 });
+    assert.deepEqual(counts, { excludedOut: 3, purgedChats: 0, purgedMessages: 0, codeRows: 0, interrupted: 0, caughtUp: 1, caughtUpStored: 0, caughtUpFailed: 0 });
     for (const id of ['LEAD-staff', 'LEAD-never', 'LEAD-never-guess']) assert.equal(db.getLead(id).inbox_state, 'out', id);
     assert.equal(app.inboxStore.hasMessages('LEAD-staff'), false, 'her words are gone, not merely hidden');
     assert.equal(app.inboxStore.unreadTotal({ userId: 'USR-anyone' }), 0, 'and no badge counts them');
@@ -330,7 +374,133 @@ test('the upkeep takes a colleague\'s or a never-list number\'s chat out of the 
   }
 });
 
-test('upkeep that fails is one log line that names the kind of failure, never its message, and the next run still runs', async () => {
+test('a catch-up read that fails leaves the thread a gap where its history belongs, and a later clean read takes it back', async () => {
+  let h;
+  const asked = [];
+  const calls = {};
+  const ok = { stored: 0, scanned: 0, truncated: false };
+  /** Per chat, what each successive read answers. */
+  const answers = {
+    // Page 1 stored, then page 2 timed out: the chat has a message now, so no run asks again.
+    'LEAD-partial': [async () => {
+      h.app.inboxStore.upsertMessage({
+        key_id: 'P-1', lead_id: 'LEAD-partial', jid: '966500000071@s.whatsapp.net', direction: 'in', sender_kind: 'client',
+        text: 'the newest page', ts: NOW - DAY,
+      });
+      return { error: 'timeout' };
+    }],
+    // Nothing stored, then a clean read the next day: the gap was never true, so it goes.
+    'LEAD-down': [async () => ({ error: 'http_502' }), async () => ok],
+    // A read that got only part of the chat (more pages than it may read) proves nothing.
+    'LEAD-huge': [async () => ({ error: 'network' }), async () => ({ ...ok, truncated: true })],
+    // Marked Not a client while its read was failing: leaveInbox purged its gaps then.
+    'LEAD-left': [async () => { h.app.inboxStore.leaveInbox('LEAD-left'); return { error: 'timeout' }; }],
+    // Nothing was read for it: neither caught up nor failed.
+    'LEAD-skipped': [async () => ({ ...ok, skipped: 'not_in_inbox' })],
+  };
+  const backfill = {
+    configured: true,
+    phoneJidOf: () => null,
+    history: async (lead) => {
+      asked.push(lead.lead_id);
+      const n = calls[lead.lead_id] = (calls[lead.lead_id] ?? 0) + 1;
+      const list = answers[lead.lead_id] ?? [async () => ok];
+      return list[Math.min(n, list.length) - 1](lead);
+    },
+    refresh: async () => ok,
+  };
+  h = build({ backfill });
+  try {
+    const { app, db } = h;
+    const chat = (id, phone, since) => db.insertLead({
+      lead_id: id, created: since, updated: since, phone_e164: phone, wa_jid: `${phone}@s.whatsapp.net`,
+      channel: 'whatsapp', match_method: 'ad_meta', stage: 'new', stage_ts: since, inbox_state: 'in', inbox_since: since,
+    });
+    chat('LEAD-partial', '966500000071', NOW - 5 * DAY);
+    chat('LEAD-down', '966500000072', NOW - 4 * DAY);
+    chat('LEAD-huge', '966500000073', NOW - 3 * DAY);
+    chat('LEAD-left', '966500000074', NOW - 2 * DAY);
+    chat('LEAD-skipped', '966500000075', NOW - DAY);
+    const gap = (id, since) => ({
+      key_id: `join:${id}:${since}`, lead_id: id, jid: null, ts: since - JOIN_HISTORY_MS, reason: 'history_failed',
+    });
+
+    const first = await app.inboxMaintenance();
+    assert.deepEqual(first, { excludedOut: 0, purgedChats: 0, purgedMessages: 0, codeRows: 0, interrupted: 0, caughtUp: 0, caughtUpStored: 0, caughtUpFailed: 4 });
+    assert.deepEqual(h.logs.find((e) => e.evt === 'inbox.catchup'), { evt: 'inbox.catchup', chats: 0, stored: 0, failed: 4 },
+      'a run where every read failed does not read like a run with nothing to do');
+    // Keyed like the poller's join gap, at the start of the window the read was asked for.
+    assert.deepEqual(app.inboxStore.gapsFor('LEAD-partial'), [gap('LEAD-partial', NOW - 5 * DAY)],
+      'what page 1 brought is stored, and the thread says the rest could not be loaded');
+    assert.deepEqual(app.inboxStore.gapsFor('LEAD-down'), [gap('LEAD-down', NOW - 4 * DAY)],
+      'a client may write before the next run, and then this chat is never asked again');
+    assert.deepEqual(app.inboxStore.gapsFor('LEAD-huge'), [gap('LEAD-huge', NOW - 3 * DAY)]);
+    assert.deepEqual(app.inboxStore.gapsFor('LEAD-left'), [], 'a chat that left the inbox meanwhile gets no gap');
+    assert.deepEqual(app.inboxStore.gapsFor('LEAD-skipped'), []);
+
+    asked.length = 0;
+    const second = await app.inboxMaintenance();
+    assert.deepEqual(asked, ['LEAD-down', 'LEAD-huge', 'LEAD-skipped'], 'a chat with a message is never asked again: its gap is its only trace');
+    assert.equal(second.caughtUp, 2);
+    assert.equal(second.caughtUpFailed, 0);
+    assert.deepEqual(app.inboxStore.gapsFor('LEAD-down'), [], 'the whole window was read after all');
+    assert.deepEqual(app.inboxStore.gapsFor('LEAD-huge'), [gap('LEAD-huge', NOW - 3 * DAY)], 'a truncated read leaves it');
+    assert.deepEqual(app.inboxStore.gapsFor('LEAD-partial'), [gap('LEAD-partial', NOW - 5 * DAY)]);
+
+    // A gap that cannot be written is a log line, and the run goes on.
+    chat('LEAD-gapless', '966500000076', NOW - DAY / 2);
+    answers['LEAD-gapless'] = [async () => ({ error: 'timeout' })];
+    app.inboxStore.addGap = () => { throw new Error('disk full for 966500000076'); };
+    const third = await app.inboxMaintenance();
+    assert.equal(third.caughtUpFailed, 1);
+    assert.deepEqual(h.logs.filter((e) => e.evt === 'inbox.gap_failed'), [
+      { level: 'warn', evt: 'inbox.gap_failed', leadId: 'LEAD-gapless', reason: 'history_failed' },
+    ]);
+    assert.equal(h.logs.filter((e) => e.evt === 'inbox.maintenance_failed').length, 0);
+
+    const dump = JSON.stringify(h.logs);
+    for (const secret of ['96650000007', 'the newest page', 'disk full']) assert.ok(!dump.includes(secret), secret);
+  } finally {
+    await h.close();
+  }
+});
+
+test('a number that joins the team while the catch-up is fetching is not fetched after it', async () => {
+  let h;
+  const asked = [];
+  const backfill = {
+    configured: true,
+    phoneJidOf: () => null,
+    history: async (lead) => {
+      asked.push(lead.lead_id);
+      if (lead.lead_id === 'LEAD-first' && !h.app.team.getUserByPhone('966500000079')) {
+        h.app.team.addUser({ name: 'New Hand', phone: '0500000079', role: 'staff' });
+      }
+      return { stored: 0, scanned: 0, truncated: false };
+    },
+    refresh: async () => ({ stored: 0, scanned: 0, truncated: false }),
+  };
+  h = build({ backfill });
+  try {
+    const { app, db } = h;
+    const chat = (id, phone, since) => db.insertLead({
+      lead_id: id, created: since, updated: since, phone_e164: phone, wa_jid: `${phone}@s.whatsapp.net`,
+      channel: 'whatsapp', match_method: 'ad_meta', stage: 'new', stage_ts: since, inbox_state: 'in', inbox_since: since,
+    });
+    chat('LEAD-first', '966500000077', NOW - 2 * DAY);
+    chat('LEAD-colleague', '966500000079', NOW - DAY);
+
+    const counts = await app.inboxMaintenance();
+    assert.deepEqual(asked, ['LEAD-first'], 'the list was read before she joined; the check before each read was not');
+    assert.equal(counts.caughtUp, 1);
+    assert.equal((await app.inboxMaintenance()).excludedOut, 1, 'and the next sweep puts her chat out');
+    assert.deepEqual(asked, ['LEAD-first', 'LEAD-first']);
+  } finally {
+    await h.close();
+  }
+});
+
+test('a step that fails is one log line naming the step and the kind of failure, never its message; the other steps still run', async () => {
   let fail = null;
   const backfill = {
     configured: true,
@@ -338,46 +508,93 @@ test('upkeep that fails is one log line that names the kind of failure, never it
     history: async () => { if (fail) throw fail; return { stored: 0, scanned: 0, truncated: false }; },
     refresh: async () => ({ stored: 0, scanned: 0, truncated: false }),
   };
-  const h = build({ backfill });
+  let clockFails = false;
+  const h = build({ backfill, now: () => { if (clockFails) throw new TypeError('clock for 966500000077'); return NOW; } });
   try {
     const { app, db } = h;
     db.insertLead({
       lead_id: 'LEAD-empty', created: NOW - DAY, updated: NOW - DAY, phone_e164: '966500000077', wa_jid: '966500000077@s.whatsapp.net',
       channel: 'whatsapp', match_method: 'ref', stage: 'new', stage_ts: NOW - DAY, inbox_state: 'in', inbox_since: NOW - DAY,
     });
-    // An error message can carry a jid; its name and code are logged only in shapes that cannot.
+    // A read that breaks its promise never to throw ends the catch-up, not the run. An error
+    // message can carry a jid; its name and code are logged only in shapes that cannot.
     fail = Object.assign(new TypeError('no chat for 966500000077@s.whatsapp.net'), { code: 'ERR_SQLITE_ERROR' });
-    assert.deepEqual(await app.inboxMaintenance(), { error: 'failed' });
+    const counts = await app.inboxMaintenance();
+    assert.deepEqual(counts, { excludedOut: 0, purgedChats: 0, purgedMessages: 0, codeRows: 0, interrupted: 0, caughtUp: 0, caughtUpStored: 0, caughtUpFailed: 0 });
+    assert.deepEqual(h.logs.find((e) => e.evt === 'inbox.maintenance'), { evt: 'inbox.maintenance', ...counts }, 'the run still reports');
     fail = Object.assign(new Error('boom'), { name: 'Chat966500000077', code: '966500000077' });
+    await app.inboxMaintenance();
+
+    // A local step that fails reads null (not known), and the steps after it still run.
+    fail = null;
+    createInboxStore(db, { now: () => NOW - 10 * 60_000 }).insertOutbox({
+      send_id: 'SND-stale', lead_id: 'LEAD-empty', jid: '966500000077@s.whatsapp.net', text: 'hello', user_id: 'USR-1', sender_kind: 'staff',
+    });
+    const purge = app.inboxStore.retentionPurge;
+    app.inboxStore.retentionPurge = () => { throw Object.assign(new RangeError('966500000077'), { code: 'ERR_SQLITE_ERROR' }); };
+    const partial = await app.inboxMaintenance();
+    app.inboxStore.retentionPurge = purge;
+    assert.equal(partial.purgedChats, null);
+    assert.equal(partial.purgedMessages, null);
+    assert.equal(partial.interrupted, 1, 'the stale send is marked all the same');
+    assert.equal(partial.caughtUp, 1, 'and the catch-up runs');
+    const sweep = app.inboxStore.listedLeads;
+    app.inboxStore.listedLeads = () => { throw new Error('966500000077'); };
+    const unswept = await app.inboxMaintenance();
+    app.inboxStore.listedLeads = sweep;
+    assert.equal(unswept.excludedOut, null);
+    assert.equal(unswept.purgedChats, 0);
+
+    // Only a failure outside every step fails the run, and it resolves all the same.
+    clockFails = true;
     assert.deepEqual(await app.inboxMaintenance(), { error: 'failed' });
+    clockFails = false;
+
     assert.deepEqual(h.logs.filter((e) => e.evt === 'inbox.maintenance_failed'), [
-      { level: 'error', evt: 'inbox.maintenance_failed', name: 'TypeError', code: 'ERR_SQLITE_ERROR' },
-      { level: 'error', evt: 'inbox.maintenance_failed', name: null, code: null },
+      { level: 'error', evt: 'inbox.maintenance_failed', step: 'catchup', name: 'TypeError', code: 'ERR_SQLITE_ERROR' },
+      { level: 'error', evt: 'inbox.maintenance_failed', step: 'catchup', name: null, code: null },
+      { level: 'error', evt: 'inbox.maintenance_failed', step: 'retention', name: 'RangeError', code: 'ERR_SQLITE_ERROR' },
+      { level: 'error', evt: 'inbox.maintenance_failed', step: 'sweep', name: 'Error', code: null },
+      { level: 'error', evt: 'inbox.maintenance_failed', step: 'run', name: 'TypeError', code: null },
     ]);
     assert.ok(!JSON.stringify(h.logs).includes('966500000077'), 'no number, in the message, the name or the code');
 
-    fail = null;
     assert.equal((await app.inboxMaintenance()).caughtUp, 1, 'a failed run does not leave the upkeep "running"');
   } finally {
     await h.close();
   }
 });
 
-test('upkeep never rejects, even when the logger throws while it reports a failure', async () => {
+test('upkeep never rejects, and a logger that throws costs no step and fails no finished run', async () => {
   const backfill = {
     configured: true,
     phoneJidOf: () => null,
-    history: async () => { throw new Error('read failed'); },
+    history: async () => ({ stored: 0, scanned: 0, truncated: false }),
     refresh: async () => ({ stored: 0, scanned: 0, truncated: false }),
   };
   const log = (e) => { if (String(e?.evt).startsWith('inbox.')) throw new Error('log sink down'); };
-  const h = build({ backfill, log });
+  let clockFails = false;
+  const h = build({ backfill, log, now: () => { if (clockFails) throw new Error('clock'); return NOW; } });
   try {
-    h.db.insertLead({
-      lead_id: 'LEAD-empty', created: NOW - DAY, updated: NOW - DAY, phone_e164: '966500000077', wa_jid: '966500000077@s.whatsapp.net',
+    const { app, db } = h;
+    const lead = (id, phone) => db.insertLead({
+      lead_id: id, created: NOW - DAY, updated: NOW - DAY, phone_e164: phone, wa_jid: `${phone}@s.whatsapp.net`,
       channel: 'whatsapp', match_method: 'ref', stage: 'new', stage_ts: NOW - DAY, inbox_state: 'in', inbox_since: NOW - DAY,
     });
-    assert.deepEqual(await h.app.inboxMaintenance(), { error: 'failed' }, 'resolved, not rejected: the server calls it fire-and-forget');
+    app.team.addNever({ phone: '0500000080' });
+    lead('LEAD-never', '966500000080');
+    lead('LEAD-empty', '966500000077');
+    createInboxStore(db, { now: () => NOW - 10 * 60_000 }).insertOutbox({
+      send_id: 'SND-stale', lead_id: 'LEAD-empty', jid: '966500000077@s.whatsapp.net', text: 'hello', user_id: 'USR-1', sender_kind: 'staff',
+    });
+    assert.deepEqual(await app.inboxMaintenance(),
+      { excludedOut: 1, purgedChats: 0, purgedMessages: 0, codeRows: 0, interrupted: 1, caughtUp: 1, caughtUpStored: 0, caughtUpFailed: 0 },
+      'the sweep\'s line threw, and every step after it ran; the closing lines threw, and the run is still a finished one');
+
+    backfill.history = async () => { throw new Error('read failed'); };
+    assert.equal((await app.inboxMaintenance()).caughtUp, 0, 'resolved, not rejected: the server calls it fire-and-forget');
+    clockFails = true;
+    assert.deepEqual(await app.inboxMaintenance(), { error: 'failed' }, 'even while it reports a failure');
   } finally {
     await h.close();
   }

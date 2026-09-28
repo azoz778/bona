@@ -341,6 +341,13 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
 
   const gapsFor = (leadId) => prep('SELECT * FROM wa_gaps WHERE lead_id = ? ORDER BY ts ASC, rowid ASC').all(String(leadId ?? '')).map(plain);
 
+  /**
+   * Take back one gap, by its key: the daily catch-up's `history_failed` gap once a later
+   * read of that chat's whole window came back clean (index.mjs `inboxMaintenance`). A
+   * message stored after all clears its own `failed` gap in `upsertMessage` instead.
+   */
+  const clearGap = (keyId) => (keyId ? prep('DELETE FROM wa_gaps WHERE key_id = ?').run(String(keyId)).changes === 1 : false);
+
   /* -------------------- inbox columns on the lead -------------------- */
 
   /**
@@ -434,7 +441,7 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
     upsertMessage, messagesFor, newestTs, hasMessages, messageByKey,
     insertOutbox, getOutbox, outboxByKey, updateOutbox, resolveUncertain, openOutboxFor, countSentSince, markStalePending, pruneCodeRows,
     markRead, listInbox, unreadTotal, listUnsure, countUnsure, inChatsWithoutMessages, listedLeads,
-    addGap, gapsFor,
+    addGap, gapsFor, clearGap,
     setInboxState, setHandler, setNeedsHuman,
     purgeLead, leaveInbox, retentionPurge,
   };
