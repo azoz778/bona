@@ -89,7 +89,7 @@ test('schema v4 gives leads their inbox columns and adds the transcript, outbox,
   s.close();
 });
 
-test('the v4 CHECKs refuse an inbox state, direction, sender or outbox status the inbox never writes', () => {
+test('the v4 CHECKs refuse an inbox state, direction, sender, outbox status or missing key the inbox never writes', () => {
   const s = openDb(':memory:');
   s.insertLead({ lead_id: 'L1', created: 1, updated: 1 });
   assert.equal(s.getLead('L1').inbox_state, null, 'undecided until a rule or the owner decides');
@@ -106,6 +106,8 @@ test('the v4 CHECKs refuse an inbox state, direction, sender or outbox status th
   assert.throws(() => msg.run('K-3', 'L1', 'out', 'owner', 12), /CHECK/);
   assert.throws(() => msg.run('K-4', 'L1', 'in', 'client', null), /NOT NULL/, 'a message always has a time');
   assert.throws(() => msg.run('K-client', 'L1', 'in', 'client', 13), /UNIQUE/, 'one row per WhatsApp message id');
+  // A TEXT PRIMARY KEY on a rowid table takes NULL — several at once — unless NOT NULL says otherwise.
+  assert.throws(() => msg.run(null, 'L1', 'in', 'client', 14), /NOT NULL/, 'a message always has its WhatsApp id');
 
   const out = s.db.prepare('INSERT INTO wa_outbox (send_id, jid, sender_kind, status, created, updated) VALUES (?,?,?,?,?,?)');
   for (const kind of ['staff', 'dana', 'code', 'note']) out.run(`S-${kind}`, '966500000001@s.whatsapp.net', kind, 'pending', 1, 1);
@@ -113,6 +115,11 @@ test('the v4 CHECKs refuse an inbox state, direction, sender or outbox status th
   assert.throws(() => out.run('S-x', '966500000001@s.whatsapp.net', 'client', 'pending', 1, 1), /CHECK/);
   assert.throws(() => out.run('S-y', '966500000001@s.whatsapp.net', 'staff', 'sent', 1, 1), /CHECK/);
   assert.throws(() => out.run('S-z', null, 'staff', 'pending', 1, 1), /NOT NULL/, 'a send always names its recipient');
+  assert.throws(() => out.run(null, '966500000001@s.whatsapp.net', 'staff', 'pending', 1, 1), /NOT NULL/, 'a send always has its id');
+
+  const gap = s.db.prepare('INSERT INTO wa_gaps (key_id, lead_id, ts, reason) VALUES (?,?,?,?)');
+  gap.run('G-1', 'L1', 1, 'failed');
+  assert.throws(() => gap.run(null, 'L1', 2, 'failed'), /NOT NULL/, 'a gap always names the message it stands for');
 
   const read = s.db.prepare('INSERT INTO inbox_reads (user_id, lead_id, last_read_ts) VALUES (?,?,?)');
   read.run('USR-1', 'L1', 5);
@@ -193,6 +200,44 @@ test('a v3 file db moves to v4: each existing lead is placed by what is certain 
   assert.equal(b.getLead('L-ref').inbox_state, 'out');
   assert.equal(b.getLead('L-ref').inbox_since, null);
   b.close();
+  cleanup();
+});
+
+test('a v4 step that fails part-way leaves a clean v3 file, and a retry upgrades it', () => {
+  // v4 is several statements (ALTERs, CREATEs, then two UPDATEs over existing leads). If
+  // the last of them fails, the ALTERs and CREATEs before it must go too — a half-migrated
+  // file at user_version 3 would crash the retry on "duplicate column". The trigger makes
+  // the placement UPDATE fail after every ALTER and CREATE has already run.
+  const { file, cleanup } = tmp();
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const seed = new DatabaseSync(file);
+  migrate(seed, { upTo: 3 });
+  const insLead = seed.prepare('INSERT INTO leads (lead_id, created, updated, channel, match_method) VALUES (?,?,?,?,?)');
+  const insTp = seed.prepare('INSERT INTO touchpoints (id, lead_id, ts, channel, event_type, meta) VALUES (?,?,?,?,?,?)');
+  insLead.run('L-ref', 1000, 1001, 'whatsapp', 'ref');
+  insTp.run('tp-ref', 'L-ref', 1000, 'whatsapp', 'lead_created', JSON.stringify({ snippet: 'Hello\nRef K7Q2XR' }));
+  insLead.run('L-kw', 2000, 2001, 'whatsapp', 'keyword');
+  insTp.run('tp-kw', 'L-kw', 2000, 'whatsapp', 'lead_created', JSON.stringify({ snippet: 'I saw Bona on Instagram' }));
+  seed.exec("CREATE TRIGGER t BEFORE UPDATE ON leads BEGIN SELECT RAISE(ABORT,'x'); END");
+  seed.close();
+
+  assert.throws(() => openDb(file), { message: 'x' }, 'the v4 placement UPDATE hits the trigger');
+
+  const check = new DatabaseSync(file);
+  assert.equal(check.prepare('PRAGMA user_version').get().user_version, 3, 'still v3');
+  assert.ok(!check.prepare('PRAGMA table_info(leads)').all().some((c) => c.name === 'inbox_state'), 'the ALTERs were rolled back');
+  assert.equal(check.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'wa_messages'").get().n, 0, 'the CREATEs were rolled back');
+  assert.equal(check.prepare('SELECT COUNT(*) AS n FROM leads').get().n, 2, 'no lead lost');
+  check.exec('DROP TRIGGER t');
+  check.close();
+
+  const a = openDb(file);
+  assert.equal(a.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION, 'the retry upgrades the file');
+  assert.equal(a.getLead('L-ref').inbox_state, 'in');
+  assert.equal(a.getLead('L-ref').inbox_since, 1000);
+  assert.equal(a.getLead('L-kw').inbox_state, 'unsure');
+  assert.equal(a.getLead('L-kw').inbox_since, null);
+  a.close();
   cleanup();
 });
 
