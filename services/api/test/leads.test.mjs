@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openDb } from '../lib/db.mjs';
-import { createOrMergeLead, leadNote, appendLead, CHANNELS, MATCH_METHODS } from '../lib/leads.mjs';
+import { createOrMergeLead, leadNote, appendLead, CHANNELS, MATCH_METHODS, OWNER_METHODS } from '../lib/leads.mjs';
 
 const NOW = Date.UTC(2026, 8, 6, 12, 0, 0);
 const ANON = '9f1c'.repeat(8);
@@ -31,7 +31,8 @@ function harness() {
 
 test('the channel and match vocabularies are the ones the spec names', () => {
   assert.deepEqual(CHANNELS, ['whatsapp', 'form', 'concierge_chat', 'concierge_voice', 'manual']);
-  assert.deepEqual(MATCH_METHODS, ['ref', 'phone', 'keyword', 'time_window', 'concierge', 'form', 'ad_meta']);
+  assert.deepEqual(MATCH_METHODS, ['ref', 'phone', 'keyword', 'time_window', 'concierge', 'form', 'ad_meta', 'owner_outbound', 'owner_added']);
+  assert.deepEqual([...OWNER_METHODS], ['owner_outbound', 'owner_added']);
 });
 
 test('a WhatsApp lead with a Ref inherits the session: source from the last touch, both touches, consent', () => {
@@ -292,4 +293,131 @@ test('appendLead takes an id and a time when the caller already has them', () =>
   const auto = appendLead(dir, { phone: '0500000000' });
   assert.match(auto.id, /^LEAD-\d{8}-[0-9a-f]{8}$/);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+/* ---------------- the Bona inbox state (2026-09-28 plan P2-5, P2-6) ---------------- */
+
+test('a chat the owner started is in the inbox from birth, already answered, and never reported as an ad lead', () => {
+  const h = harness();
+  const cases = [['owner_outbound', '0522222222', '966522222222@s.whatsapp.net'], ['owner_added', '0533333333', '966533333333@s.whatsapp.net']];
+  for (const [matchMethod, phone, waJid] of cases) {
+    const { lead, created } = createOrMergeLead(h.db, { phone, waJid }, { channel: 'whatsapp', matchMethod, now: NOW, dataDir: h.dataDir });
+    assert.equal(created, true, matchMethod);
+    assert.equal(lead.match_method, matchMethod);
+    assert.equal(lead.channel, 'whatsapp');
+    assert.equal(lead.inbox_state, 'in', `${matchMethod}: the owner already vouched for it`);
+    assert.equal(lead.inbox_since, NOW);
+    assert.equal(lead.first_inbound_ts, null, `${matchMethod}: the client has not written in — the owner did`);
+    assert.equal(lead.first_reply_ts, NOW, `${matchMethod}: so nobody is waiting for a first reply`);
+    assert.deepEqual(h.db.touchpointsForLead(lead.lead_id).map((t) => [t.event_type, t.meta.match_method]), [['lead_created', matchMethod]]);
+  }
+  assert.deepEqual(h.db.dueFanout(NOW + 1000), [], 'no click behind either, so the ad platforms hear nothing');
+  assert.equal(h.db.fanoutCounts().pending, 0);
+  assert.equal(h.db.countWaitingLeads(), 0, 'neither is in the waiting queue the Hermes watchdog reads');
+  assert.equal(h.db.recentEvents({ name: 'lead_created' }).length, 2, 'each keeps its own history row; only the ad queue is skipped');
+  assert.equal(h.jsonl().length, 2, 'both are still enquiries in the raw log');
+  h.cleanup();
+});
+
+test('an owner method merging into a lead never moves when the client first wrote, and vouching is not answering', () => {
+  const h = harness();
+  const wrote = createOrMergeLead(h.db, { phone: '0500000010' }, { channel: 'whatsapp', matchMethod: 'keyword', now: NOW });
+  assert.equal(wrote.lead.first_inbound_ts, NOW);
+  const added = createOrMergeLead(h.db, { phone: '0500000010' }, { channel: 'whatsapp', matchMethod: 'owner_added', now: NOW + 5000 });
+  assert.equal(added.created, false);
+  assert.equal(added.lead.lead_id, wrote.lead.lead_id);
+  assert.equal(added.lead.first_inbound_ts, NOW, "still measured from the client's own first message");
+  assert.equal(added.lead.first_reply_ts, null, 'the owner vouching for a chat does not answer it');
+  assert.equal(added.lead.inbox_state, 'in');
+  assert.equal(added.lead.inbox_since, NOW + 5000);
+  assert.deepEqual(h.db.touchpointsForLead(wrote.lead.lead_id).map((t) => t.event_type), ['lead_created', 'owner_contact'], 'the owner reaching out is not an inbound message');
+
+  // A lead that never wrote in at all keeps no inbound time through an owner merge either.
+  const form = createOrMergeLead(h.db, { phone: '0500000011' }, { channel: 'form', matchMethod: 'form', now: NOW });
+  const reached = createOrMergeLead(h.db, { phone: '0500000011', waJid: '966500000011@s.whatsapp.net' }, { channel: 'whatsapp', matchMethod: 'owner_outbound', now: NOW + 1 });
+  assert.equal(reached.lead.lead_id, form.lead.lead_id);
+  assert.equal(reached.lead.first_inbound_ts, null);
+  assert.equal(reached.lead.wa_jid, '966500000011@s.whatsapp.net', 'the merge still fills what is empty');
+  assert.equal(h.db.fanoutCounts().pending, 8, 'only the two creations fanned out; the merges added nothing');
+  h.cleanup();
+});
+
+test('a form or a concierge conversation is a certain enquiry: in the inbox the moment it exists', () => {
+  const h = harness();
+  for (const [channel, matchMethod, phone] of [['form', 'form', '0500000020'], ['concierge_chat', 'concierge', '0500000021'], ['concierge_voice', 'concierge', '0500000022']]) {
+    const { lead } = createOrMergeLead(h.db, { phone }, { channel, matchMethod, now: NOW });
+    assert.equal(lead.inbox_state, 'in', channel);
+    assert.equal(lead.inbox_since, NOW, channel);
+    assert.equal(lead.first_reply_ts, null, `${channel}: a real enquiry is still owed a reply`);
+  }
+  assert.equal(h.db.fanoutCounts().pending, 12, 'and each is still reported to the ad platforms');
+  h.cleanup();
+});
+
+test('a form or concierge merge lifts a missing or unsure state to in, and never pulls a chat back from out', () => {
+  const h = harness();
+  const make = (phone, state) => {
+    const { lead } = createOrMergeLead(h.db, { phone }, { channel: 'whatsapp', matchMethod: 'keyword', now: NOW });
+    if (state) h.db.updateLead(lead.lead_id, { inbox_state: state, inbox_since: state === 'in' ? NOW : null });
+    return lead.lead_id;
+  };
+  const none = make('0500000030', null);
+  const unsure = make('0500000031', 'unsure');
+  const out = make('0500000032', 'out');
+  const already = make('0500000033', 'in');
+  createOrMergeLead(h.db, { phone: '0500000030' }, { channel: 'form', matchMethod: 'form', now: NOW + 1000 });
+  createOrMergeLead(h.db, { phone: '0500000031' }, { channel: 'concierge_chat', matchMethod: 'concierge', now: NOW + 1000 });
+  createOrMergeLead(h.db, { phone: '0500000032' }, { channel: 'form', matchMethod: 'form', now: NOW + 1000 });
+  createOrMergeLead(h.db, { phone: '0500000033' }, { channel: 'concierge_voice', matchMethod: 'concierge', now: NOW + 1000 });
+  const state = (id) => { const l = h.db.getLead(id); return [l.inbox_state, l.inbox_since]; };
+  assert.deepEqual(state(none), ['in', NOW + 1000]);
+  assert.deepEqual(state(unsure), ['in', NOW + 1000]);
+  assert.deepEqual(state(out), ['out', null], '"not a client" is the owner\'s word, and a form cannot overrule it');
+  assert.deepEqual(state(already), ['in', NOW], 'already in: the date it joined stays');
+  h.cleanup();
+});
+
+test('a WhatsApp message never decides the inbox here — the poller does — and neither does a manual lead', () => {
+  const h = harness();
+  ['ref', 'phone', 'keyword', 'time_window', 'ad_meta'].forEach((matchMethod, i) => {
+    const { lead } = createOrMergeLead(h.db, { phone: `05000000${40 + i}` }, { channel: 'whatsapp', matchMethod, now: NOW });
+    assert.deepEqual([lead.inbox_state, lead.inbox_since], [null, null], matchMethod);
+  });
+  const manual = createOrMergeLead(h.db, { phone: '0500000050' }, { channel: 'manual', now: NOW });
+  assert.equal(manual.lead.inbox_state, null);
+
+  const guessed = createOrMergeLead(h.db, { phone: '0500000051' }, { channel: 'whatsapp', matchMethod: 'keyword', now: NOW });
+  h.db.updateLead(guessed.lead.lead_id, { inbox_state: 'unsure' });
+  const again = createOrMergeLead(h.db, { phone: '0500000051' }, { channel: 'whatsapp', matchMethod: 'ref', ref: 'K7Q2XR', now: NOW + 1 });
+  assert.equal(again.lead.inbox_state, 'unsure', 'even a Ref line merging here leaves the state to the poller');
+  h.cleanup();
+});
+
+test('a number the owner only added is owed a reply once the client writes; a chat he opened by writing is not', () => {
+  const h = harness();
+  const added = createOrMergeLead(h.db, { phone: '0500000060', waJid: '966500000060@s.whatsapp.net' }, { channel: 'whatsapp', matchMethod: 'owner_added', now: NOW });
+  const opened = createOrMergeLead(h.db, { phone: '0500000061', waJid: '966500000061@s.whatsapp.net' }, { channel: 'whatsapp', matchMethod: 'owner_outbound', now: NOW });
+  assert.equal(h.db.countWaitingLeads(), 0, 'nobody has written in yet, so nobody is waiting');
+
+  const wrote = createOrMergeLead(h.db, { phone: '0500000060' }, { channel: 'whatsapp', matchMethod: 'phone', now: NOW + 60_000 });
+  assert.equal(wrote.lead.lead_id, added.lead.lead_id);
+  assert.equal(wrote.lead.first_inbound_ts, NOW + 60_000);
+  assert.equal(wrote.lead.first_reply_ts, null, 'adding a number is not answering it: the client\'s own message starts the clock');
+  assert.equal(wrote.lead.inbox_state, 'in');
+
+  const answered = createOrMergeLead(h.db, { phone: '0500000061' }, { channel: 'whatsapp', matchMethod: 'phone', now: NOW + 60_000 });
+  assert.equal(answered.lead.lead_id, opened.lead.lead_id);
+  assert.equal(answered.lead.first_inbound_ts, NOW + 60_000);
+  assert.equal(answered.lead.first_reply_ts, NOW, 'the owner wrote first, so this client is answering him');
+
+  assert.deepEqual(h.db.waitingLeads().map((l) => l.lead_id), [added.lead.lead_id], 'the Hermes watchdog reads this queue');
+  assert.equal(h.db.countWaitingLeads(), 1);
+
+  // Once somebody has answered, a later message never takes that answer back.
+  h.db.updateLead(added.lead.lead_id, { first_reply_ts: NOW + 120_000 });
+  const later = createOrMergeLead(h.db, { phone: '0500000060' }, { channel: 'whatsapp', matchMethod: 'phone', now: NOW + 180_000 });
+  assert.equal(later.lead.first_reply_ts, NOW + 120_000);
+  assert.equal(later.lead.first_inbound_ts, NOW + 60_000);
+  assert.equal(h.db.countWaitingLeads(), 0);
+  h.cleanup();
 });

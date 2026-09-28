@@ -20,7 +20,19 @@ import { newId } from './db.mjs';
 export const LEAD_FIELDS = ['name', 'phone', 'interest', 'budget', 'timeline', 'notes', 'language', 'district', 'listingId'];
 
 export const CHANNELS = ['whatsapp', 'form', 'concierge_chat', 'concierge_voice', 'manual'];
-export const MATCH_METHODS = ['ref', 'phone', 'keyword', 'time_window', 'concierge', 'form', 'ad_meta'];
+export const MATCH_METHODS = ['ref', 'phone', 'keyword', 'time_window', 'concierge', 'form', 'ad_meta', 'owner_outbound', 'owner_added'];
+/**
+ * Chats the owner started rather than the client: `owner_outbound` when the poller sees him
+ * send a Bona link, brochure or listing number to a new number, `owner_added` when he adds a
+ * number on the dashboard (2026-09-28 plan P2-5). No click is behind them, so the ad
+ * platforms are never told; he has already written (or vouched), so nobody is waiting for a
+ * first reply and the Hermes `bona-unanswered-leads` watchdog must not flag them. Vouching
+ * is not answering, though: once an `owner_added` client writes in, the merge below opens
+ * the reply clock again (an `owner_outbound` client is answering him, so it stays shut).
+ */
+export const OWNER_METHODS = new Set(['owner_outbound', 'owner_added']);
+/** Channels whose every lead is a real enquiry, so it joins the Bona inbox at once (P2-6). */
+const CERTAIN_CHANNELS = new Set(['form', 'concierge_chat', 'concierge_voice']);
 
 /** Where a lead came from when there is no session to say better. */
 const DEFAULT_SOURCE = { whatsapp: 'whatsapp_organic', form: 'form', concierge_chat: 'concierge', concierge_voice: 'concierge', manual: 'manual' };
@@ -103,11 +115,17 @@ const asRef = (v) => { const s = oneLine(v, 8)?.toUpperCase(); return s && /^[A-
  * @param {ReturnType<import('./db.mjs').openDb>} db
  * @param {{ name?, phone?, waJid?, waLid?, interest?, budget?, timeline?, district?, listingId?, language?, notes?, snippet? }} input
  * @param {{ channel: 'whatsapp'|'form'|'concierge_chat'|'concierge_voice'|'manual',
- *           matchMethod?: 'ref'|'phone'|'keyword'|'time_window'|'concierge'|'form'|'ad_meta',
+ *           matchMethod?: 'ref'|'phone'|'keyword'|'time_window'|'concierge'|'form'|'ad_meta'|'owner_outbound'|'owner_added',
  *           sessionId?, anonId?, ref?, eventId?, adMeta?, now?: number,
  *           dataDir?: string, raw?: object }} meta
  *   `dataDir` is where the raw log lives (defaults to the directory of the db file);
  *   `raw` holds extra fields for the raw-log line only (e.g. the Retell conversation id).
+ *
+ * The Bona inbox state is set here only where this call is certain (2026-09-28 plan P2-5,
+ * P2-6): a form or concierge lead, and a chat the owner started, are `in`; a merge of one of
+ * those lifts a missing or `unsure` state to `in` and never touches `out` — "not a client"
+ * is the owner's word. A WhatsApp message gets no state from here: the poller judges those
+ * (lib/inbox/eligibility.mjs).
  * @returns {{ lead: object, created: boolean }}
  */
 export function createOrMergeLead(db, input = {}, meta = {}) {
@@ -116,6 +134,8 @@ export function createOrMergeLead(db, input = {}, meta = {}) {
   const matchMethod = MATCH_METHODS.includes(meta.matchMethod)
     ? meta.matchMethod
     : (channel === 'form' ? 'form' : channel.startsWith('concierge') ? 'concierge' : 'phone');
+  const ownerStarted = OWNER_METHODS.has(matchMethod);
+  const certain = ownerStarted || CERTAIN_CHANNELS.has(channel);
 
   const phone = normalisePhone(input.phone);
   const waJid = oneLine(input.waJid, 100);
@@ -183,10 +203,21 @@ export function createOrMergeLead(db, input = {}, meta = {}) {
       } else if (ref && !existing.ref) {
         patch.ref = ref;
       }
-      if (channel === 'whatsapp' && !existing.first_inbound_ts) patch.first_inbound_ts = now;
+      // The owner writing to (or vouching for) a lead is not the client writing in: the
+      // response clock starts only at the client's own first message.
+      if (channel === 'whatsapp' && !ownerStarted && !existing.first_inbound_ts) {
+        patch.first_inbound_ts = now;
+        // A number the owner only added was born "answered" so it would not wait in the
+        // queue before anyone had written. Now the client has: whatever was said before,
+        // this message is owed a reply, and the Hermes watchdog has to be able to see it.
+        // `first_reply_ts` still equal to `created` is the stamp the add itself left (a
+        // real reply only ever fills an empty one), so it is the add's to take back.
+        if (existing.match_method === 'owner_added' && existing.first_reply_ts === existing.created) patch.first_reply_ts = null;
+      }
+      if (certain && (existing.inbox_state == null || existing.inbox_state === 'unsure')) Object.assign(patch, { inbox_state: 'in', inbox_since: now });
       db.updateLead(existing.lead_id, patch);
       db.addTouchpoint({
-        lead_id: existing.lead_id, ts: now, channel, event_type: MERGE_EVENT[channel],
+        lead_id: existing.lead_id, ts: now, channel, event_type: ownerStarted ? 'owner_contact' : MERGE_EVENT[channel],
         source: src.source, medium: src.medium, campaign: src.campaign, campaign_id: src.campaign_id,
         listing_id: fields.listing_id ?? existing.listing_id ?? null, meta: touchMeta,
       });
@@ -202,8 +233,9 @@ export function createOrMergeLead(db, input = {}, meta = {}) {
       click_ids: src.click_ids, ref, match_method: matchMethod, session_id: sessionId, anon_id: anonId,
       first_touch: session?.first_touch ?? null, last_touch: session?.last_touch ?? null, notes,
       stage: 'new', stage_ts: now, value_sar: null,
-      first_inbound_ts: channel === 'whatsapp' ? now : null, first_reply_ts: null, legacy_id: null,
+      first_inbound_ts: channel === 'whatsapp' && !ownerStarted ? now : null, first_reply_ts: ownerStarted ? now : null, legacy_id: null,
       consent_ads: session?.consent_ads ?? 0, consent_analytics: session?.consent_analytics ?? 0,
+      inbox_state: certain ? 'in' : null, inbox_since: certain ? now : null,
     });
     db.setStage(id, 'new', { actor: 'system', now });
     db.addTouchpoint({
@@ -230,8 +262,11 @@ export function createOrMergeLead(db, input = {}, meta = {}) {
     // person twice: once from the pixel, once from the server. A lead that reached us with
     // no browser event behind it (the WhatsApp poller, a concierge conversation) has no
     // pixel to agree with, so it goes out under this record's own id.
+    // An owner-started chat is not an ad conversion at all: nobody clicked anything, and
+    // reporting it would credit a campaign that never reached this person. Its event row
+    // above stays — it is the lead's own history — only the ad queue is skipped.
     const browserEvent = meta.eventId ? db.getEvent(meta.eventId) : null;
-    db.enqueueFanout(browserEvent ? meta.eventId : event.event_id, LEAD_FANOUT, { now });
+    if (!ownerStarted) db.enqueueFanout(browserEvent ? meta.eventId : event.event_id, LEAD_FANOUT, { now });
 
     const dataDir = meta.dataDir ?? db.dataDir;
     if (dataDir) {
