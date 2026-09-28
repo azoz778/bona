@@ -89,7 +89,7 @@ test('schema v4 gives leads their inbox columns and adds the transcript, outbox,
   s.close();
 });
 
-test('the v4 CHECKs refuse an inbox state, direction, sender, outbox status or missing key the inbox never writes', () => {
+test('the v4 CHECKs refuse an inbox state, direction, sender, outbox status or missing key the inbox never writes, a sender on the wrong side, and a login code\'s text', () => {
   const s = openDb(':memory:');
   s.insertLead({ lead_id: 'L1', created: 1, updated: 1 });
   assert.equal(s.getLead('L1').inbox_state, null, 'undecided until a rule or the owner decides');
@@ -108,6 +108,11 @@ test('the v4 CHECKs refuse an inbox state, direction, sender, outbox status or m
   assert.throws(() => msg.run('K-client', 'L1', 'in', 'client', 13), /UNIQUE/, 'one row per WhatsApp message id');
   // A TEXT PRIMARY KEY on a rowid table takes NULL — several at once — unless NOT NULL says otherwise.
   assert.throws(() => msg.run(null, 'L1', 'in', 'client', 14), /NOT NULL/, 'a message always has its WhatsApp id');
+  // Only the client writes in; only the owner's side (a team member, Dana, the owner's phone) writes out.
+  for (const [dir, kind] of [['in', 'staff'], ['in', 'dana'], ['in', 'owner_number'], ['out', 'client']]) {
+    assert.throws(() => msg.run(`K-${dir}-${kind}`, 'L1', dir, kind, 15), /CHECK/, `${dir} from ${kind}`);
+  }
+  assert.throws(() => s.db.prepare("UPDATE wa_messages SET sender_kind = 'staff' WHERE key_id = 'K-client'").run(), /CHECK/, 'a stored message cannot change sides');
 
   const out = s.db.prepare('INSERT INTO wa_outbox (send_id, jid, sender_kind, status, created, updated) VALUES (?,?,?,?,?,?)');
   for (const kind of ['staff', 'dana', 'code', 'note']) out.run(`S-${kind}`, '966500000001@s.whatsapp.net', kind, 'pending', 1, 1);
@@ -116,6 +121,14 @@ test('the v4 CHECKs refuse an inbox state, direction, sender, outbox status or m
   assert.throws(() => out.run('S-y', '966500000001@s.whatsapp.net', 'staff', 'sent', 1, 1), /CHECK/);
   assert.throws(() => out.run('S-z', null, 'staff', 'pending', 1, 1), /NOT NULL/, 'a send always names its recipient');
   assert.throws(() => out.run(null, '966500000001@s.whatsapp.net', 'staff', 'pending', 1, 1), /NOT NULL/, 'a send always has its id');
+  // A login code is only ever hashed (auth_challenges.code_hash): its outbox row can never
+  // hold the text, whether it is written with it or given it later.
+  const outText = s.db.prepare('INSERT INTO wa_outbox (send_id, jid, text, sender_kind, status, created, updated) VALUES (?,?,?,?,?,?,?)');
+  outText.run('S-code-blank', '966500000001@s.whatsapp.net', null, 'code', 'pending', 1, 1);
+  for (const kind of ['staff', 'dana', 'note']) outText.run(`S-${kind}-text`, '966500000001@s.whatsapp.net', 'hello', kind, 'pending', 1, 1);
+  assert.throws(() => outText.run('S-code-text', '966500000001@s.whatsapp.net', '123456', 'code', 'pending', 1, 1), /CHECK/);
+  assert.throws(() => s.db.prepare("UPDATE wa_outbox SET text = '123456' WHERE send_id = 'S-code-blank'").run(), /CHECK/);
+  assert.throws(() => s.db.prepare("UPDATE wa_outbox SET sender_kind = 'code' WHERE send_id = 'S-staff-text'").run(), /CHECK/);
 
   const gap = s.db.prepare('INSERT INTO wa_gaps (key_id, lead_id, ts, reason) VALUES (?,?,?,?)');
   gap.run('G-1', 'L1', 1, 'failed');
@@ -138,8 +151,10 @@ test('a v3 file db moves to v4: each existing lead is placed by what is certain 
 
   // One lead per P2-13 rule. Each gets the lead_created touchpoint lib/leads.mjs writes,
   // with `snippet` as its first message; `meta` replaces that JSON (a legacy import's),
-  // `rawMeta` replaces the stored text outright (a broken row), `later` adds a second,
-  // non-creation touchpoint whose snippet must not count.
+  // `rawMeta` replaces the stored text outright (a broken row, or NULL), `later` adds a
+  // second, non-creation touchpoint whose snippet must not count, `noTouchpoint` leaves
+  // the lead without its lead_created touchpoint. Only a snippet that is a string counts:
+  // json_extract hands back an object or array as its JSON text, which a GLOB would match.
   const cases = [
     { id: 'L-ref', channel: 'whatsapp', method: 'ref', snippet: 'Hello\nRef K7Q2XR', want: 'in' },
     { id: 'L-ad', channel: 'whatsapp', method: 'ad_meta', snippet: 'Hi', want: 'in' },
@@ -154,6 +169,12 @@ test('a v3 file db moves to v4: each existing lead is placed by what is certain 
     { id: 'L-tw', channel: 'whatsapp', method: 'time_window', snippet: 'Hello', want: 'unsure' },
     { id: 'L-tw-id', channel: 'whatsapp', method: 'time_window', snippet: 'Hello, BONA-W021 please', want: 'in' },
     { id: 'L-bad-json', channel: 'whatsapp', method: 'keyword', rawMeta: '{"snippet": "BONA-W003"', want: 'unsure' },
+    { id: 'L-null-meta', channel: 'whatsapp', method: 'keyword', rawMeta: null, want: 'unsure' },
+    { id: 'L-obj-snippet', channel: 'whatsapp', method: 'keyword', meta: { snippet: { text: 'BONA-W003' } }, want: 'unsure' },
+    { id: 'L-arr-snippet', channel: 'whatsapp', method: 'time_window', meta: { snippet: ['BONA-012'] }, want: 'unsure' },
+    { id: 'L-no-tp', channel: 'whatsapp', method: 'keyword', noTouchpoint: true, want: 'unsure' },
+    { id: 'L-manual', channel: 'manual', method: 'phone', snippet: 'Called about the villas', want: 'unsure' },
+    { id: 'L-ref-legacy', channel: 'whatsapp', method: 'ref', legacy: 'lead-2025-019', snippet: 'Ref K7Q2XR', want: 'in' },
   ];
   const T0 = 1_757_140_000_000;
   const createdOf = (i) => T0 + i * 1000;
@@ -161,8 +182,9 @@ test('a v3 file db moves to v4: each existing lead is placed by what is certain 
   const insTp = seed.prepare('INSERT INTO touchpoints (id, lead_id, ts, channel, event_type, meta) VALUES (?,?,?,?,?,?)');
   cases.forEach((c, i) => {
     insLead.run(c.id, createdOf(i), createdOf(i) + 1, c.channel, c.method, c.legacy ?? null, 'new', i % 2 ? createdOf(i) + 60_000 : null);
-    const meta = c.rawMeta ?? JSON.stringify(c.meta ?? { match_method: c.method, ref: null, session_id: null, event_id: null, ad_meta: null, snippet: c.snippet ?? null });
-    insTp.run(`tp-${c.id}`, c.id, createdOf(i), c.channel, 'lead_created', meta);
+    const meta = 'rawMeta' in c ? c.rawMeta
+      : JSON.stringify(c.meta ?? { match_method: c.method, ref: null, session_id: null, event_id: null, ad_meta: null, snippet: c.snippet ?? null });
+    if (!c.noTouchpoint) insTp.run(`tp-${c.id}`, c.id, createdOf(i), c.channel, 'lead_created', meta);
     if (c.later) insTp.run(`tp-${c.id}-2`, c.id, createdOf(i) + 5000, c.channel, 'inbound_message', JSON.stringify({ snippet: c.later }));
   });
   const snapshot = (db) => db.prepare('SELECT * FROM leads ORDER BY lead_id').all().map((r) => ({ ...r }));
@@ -222,6 +244,9 @@ test('a v4 step that fails part-way leaves a clean v3 file, and a retry upgrades
   seed.close();
 
   assert.throws(() => openDb(file), { message: 'x' }, 'the v4 placement UPDATE hits the trigger');
+  // SQLite deletes the WAL file when the last connection to the file closes, so a WAL
+  // file left behind means the failed open kept its handle.
+  assert.equal(fs.existsSync(`${file}-wal`), false, 'a failed open closes the connection it opened');
 
   const check = new DatabaseSync(file);
   assert.equal(check.prepare('PRAGMA user_version').get().user_version, 3, 'still v3');
