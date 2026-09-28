@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { openDb, newId, STAGES, FANOUT_DESTS, SCHEMA_VERSION } from '../lib/db.mjs';
+import { openDb, newId, STAGES, FANOUT_DESTS, SCHEMA_VERSION, migrate } from '../lib/db.mjs';
 
 function tmp() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-db-'));
@@ -33,7 +33,7 @@ test('openDb creates an owner-only file inside an owner-only directory and migra
   const b = openDb(file);
   assert.equal(b.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION, 'a second open is a no-op');
   const tables = b.db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map((r) => r.name);
-  for (const name of ['sessions', 'events', 'leads', 'touchpoints', 'lead_stage_history', 'wa_cursor', 'wa_seen', 'ad_spend', 'fanout', 'auth_codes', 'auth_sessions', 'users', 'auth_challenges', 'audit_log', 'never_list', 'settings']) {
+  for (const name of ['sessions', 'events', 'leads', 'touchpoints', 'lead_stage_history', 'wa_cursor', 'wa_seen', 'ad_spend', 'fanout', 'auth_codes', 'auth_sessions', 'users', 'auth_challenges', 'audit_log', 'never_list', 'settings', 'wa_messages', 'wa_outbox', 'inbox_reads', 'wa_gaps']) {
     assert.ok(tables.includes(name), name);
   }
   assert.equal(b.ping(), true);
@@ -41,40 +41,172 @@ test('openDb creates an owner-only file inside an owner-only directory and migra
   cleanup();
 });
 
-test('a v2-era file db upgrades to v3, an existing session survives with a null user_id, and reopening is a no-op', () => {
-  // `MIGRATIONS` and `migrate()` are internal to lib/db.mjs, and there's no exported hook
-  // to stop the real migration chain partway through — reasonably so, since nothing else
-  // needs one. Reimplementing the v1 SQL here to build a "real" v2 file would duplicate
-  // (and could silently drift from) that internal SQL without testing anything the v1
-  // migration doesn't already cover elsewhere in this file.
-  //
-  // What v3 actually risks is narrower: every v3 statement is `CREATE ... IF NOT EXISTS`
-  // except one bare `ALTER TABLE auth_sessions ADD COLUMN user_id`, which is exactly the
-  // statement fix #1 above is about (two concurrent openers both reading user_version=2
-  // and both trying to add the column). So the minimal state that genuinely exercises the
-  // v2->v3 upgrade path is a from-scratch file with just the pre-v3 shape of
-  // `auth_sessions` (the same columns the real v1 migration creates it with — no `user_id`)
-  // holding a live row, and `user_version` left at 2. Opening it for real with `openDb`
-  // then runs the actual, unmodified `migrate()`.
+test('a v2-era file db upgrades to the current schema, an existing session survives with a null user_id, and reopening is a no-op', () => {
+  // `migrate(db, { upTo })` runs the real migration chain only as far as asked, so the
+  // file below is a genuine v2 database — every table v1 and v2 made, from the same SQL
+  // start-up runs — not a hand-built imitation that could drift from it. (v4 alters
+  // `leads` and reads `touchpoints`, so a file holding only `auth_sessions` would no
+  // longer open at all.) `openDb` then applies the rest of the chain exactly as start-up
+  // on the VPS does, including v3's bare `ALTER TABLE auth_sessions ADD COLUMN user_id`.
   const { file, cleanup } = tmp();
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const seed = new DatabaseSync(file);
-  seed.exec('CREATE TABLE auth_sessions (token_hash TEXT PRIMARY KEY, created INTEGER, expires INTEGER, ua TEXT)');
+  migrate(seed, { upTo: 2 });
+  assert.equal(seed.prepare('PRAGMA user_version').get().user_version, 2);
   seed.prepare('INSERT INTO auth_sessions (token_hash, created, expires, ua) VALUES (?,?,?,?)').run('deadbeef', 1000, 99_999_999_999, 'UA');
-  seed.exec('PRAGMA user_version = 2');
   seed.close();
 
   const a = openDb(file);
-  assert.equal(a.db.prepare('PRAGMA user_version').get().user_version, 3, 'v3 is applied on top of the v2 file');
+  assert.equal(a.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION, 'v3 onwards is applied on top of the v2 file');
   const row = a.db.prepare('SELECT * FROM auth_sessions WHERE token_hash = ?').get('deadbeef');
   assert.ok(row, 'the pre-existing session row survives the migration');
   assert.equal(row.user_id, null, 'a session opened before user accounts existed has no user');
   a.close();
 
   const b = openDb(file);
-  assert.equal(b.db.prepare('PRAGMA user_version').get().user_version, 3, 'reopening an up-to-date file is a no-op');
+  assert.equal(b.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION, 'reopening an up-to-date file is a no-op');
   b.close();
   cleanup();
+});
+
+test('schema v4 gives leads their inbox columns and adds the transcript, outbox, read-mark and gap tables', () => {
+  const s = openDb(':memory:');
+  assert.equal(SCHEMA_VERSION, 4);
+  assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 4);
+  const info = (table) => s.db.prepare(`PRAGMA table_info(${table})`).all();
+  const names = (table) => info(table).map((c) => c.name);
+  const leadCols = info('leads');
+  assert.deepEqual(leadCols.slice(-5).map((c) => c.name), ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human']);
+  const needsHuman = leadCols.find((c) => c.name === 'needs_human');
+  assert.equal(needsHuman.notnull, 1);
+  assert.equal(needsHuman.dflt_value, '0');
+  assert.deepEqual(names('wa_messages'), ['key_id', 'lead_id', 'jid', 'direction', 'sender_kind', 'sender_user_id', 'text', 'media_type', 'ts', 'status']);
+  assert.deepEqual(names('wa_outbox'), ['send_id', 'lead_id', 'jid', 'text', 'user_id', 'sender_kind', 'status', 'key_id', 'created', 'updated', 'error']);
+  assert.deepEqual(names('inbox_reads'), ['user_id', 'lead_id', 'last_read_ts']);
+  assert.deepEqual(names('wa_gaps'), ['key_id', 'lead_id', 'jid', 'ts', 'reason']);
+  const indexes = new Set(s.db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map((r) => r.name));
+  for (const name of ['leads_inbox', 'wa_messages_lead', 'wa_outbox_key', 'wa_outbox_lead', 'wa_outbox_created', 'wa_gaps_lead']) assert.ok(indexes.has(name), name);
+  s.close();
+});
+
+test('the v4 CHECKs refuse an inbox state, direction, sender or outbox status the inbox never writes', () => {
+  const s = openDb(':memory:');
+  s.insertLead({ lead_id: 'L1', created: 1, updated: 1 });
+  assert.equal(s.getLead('L1').inbox_state, null, 'undecided until a rule or the owner decides');
+  assert.equal(s.getLead('L1').needs_human, 0, 'nobody has asked for a human yet');
+  for (const state of ['in', 'unsure', 'out']) assert.equal(s.updateLead('L1', { inbox_state: state }), true, state);
+  assert.throws(() => s.updateLead('L1', { inbox_state: 'maybe' }), /CHECK/);
+  assert.throws(() => s.updateLead('L1', { needs_human: 2 }), /CHECK/);
+  assert.throws(() => s.updateLead('L1', { needs_human: null }), /NOT NULL/);
+
+  const msg = s.db.prepare('INSERT INTO wa_messages (key_id, lead_id, direction, sender_kind, ts) VALUES (?,?,?,?,?)');
+  msg.run('K-client', 'L1', 'in', 'client', 10);
+  for (const kind of ['staff', 'dana', 'owner_number']) msg.run(`K-${kind}`, 'L1', 'out', kind, 11);
+  assert.throws(() => msg.run('K-2', 'L1', 'sideways', 'client', 12), /CHECK/);
+  assert.throws(() => msg.run('K-3', 'L1', 'out', 'owner', 12), /CHECK/);
+  assert.throws(() => msg.run('K-4', 'L1', 'in', 'client', null), /NOT NULL/, 'a message always has a time');
+  assert.throws(() => msg.run('K-client', 'L1', 'in', 'client', 13), /UNIQUE/, 'one row per WhatsApp message id');
+
+  const out = s.db.prepare('INSERT INTO wa_outbox (send_id, jid, sender_kind, status, created, updated) VALUES (?,?,?,?,?,?)');
+  for (const kind of ['staff', 'dana', 'code', 'note']) out.run(`S-${kind}`, '966500000001@s.whatsapp.net', kind, 'pending', 1, 1);
+  for (const status of ['accepted', 'failed', 'uncertain']) out.run(`S-${status}`, '966500000001@s.whatsapp.net', 'staff', status, 1, 1);
+  assert.throws(() => out.run('S-x', '966500000001@s.whatsapp.net', 'client', 'pending', 1, 1), /CHECK/);
+  assert.throws(() => out.run('S-y', '966500000001@s.whatsapp.net', 'staff', 'sent', 1, 1), /CHECK/);
+  assert.throws(() => out.run('S-z', null, 'staff', 'pending', 1, 1), /NOT NULL/, 'a send always names its recipient');
+
+  const read = s.db.prepare('INSERT INTO inbox_reads (user_id, lead_id, last_read_ts) VALUES (?,?,?)');
+  read.run('USR-1', 'L1', 5);
+  read.run('USR-2', 'L1', 6);
+  assert.throws(() => read.run('USR-1', 'L1', 7), /UNIQUE/, 'one read mark per person per chat');
+  s.close();
+});
+
+test('a v3 file db moves to v4: each existing lead is placed by what is certain about it, nothing else changes, and reopening is a no-op', () => {
+  const { file, cleanup } = tmp();
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const seed = new DatabaseSync(file);
+  migrate(seed, { upTo: 3 });
+  assert.equal(seed.prepare('PRAGMA user_version').get().user_version, 3);
+  assert.ok(!seed.prepare('PRAGMA table_info(leads)').all().some((c) => c.name === 'inbox_state'), 'a genuine v3 file: no inbox columns yet');
+
+  // One lead per P2-13 rule. Each gets the lead_created touchpoint lib/leads.mjs writes,
+  // with `snippet` as its first message; `meta` replaces that JSON (a legacy import's),
+  // `rawMeta` replaces the stored text outright (a broken row), `later` adds a second,
+  // non-creation touchpoint whose snippet must not count.
+  const cases = [
+    { id: 'L-ref', channel: 'whatsapp', method: 'ref', snippet: 'Hello\nRef K7Q2XR', want: 'in' },
+    { id: 'L-ad', channel: 'whatsapp', method: 'ad_meta', snippet: 'Hi', want: 'in' },
+    { id: 'L-form', channel: 'form', method: 'form', want: 'in' },
+    { id: 'L-chat', channel: 'concierge_chat', method: 'concierge', want: 'in' },
+    { id: 'L-voice', channel: 'concierge_voice', method: 'concierge', want: 'in' },
+    { id: 'L-old-form', channel: 'form', method: 'form', legacy: 'lead-2025-017', meta: { legacy_id: 'lead-2025-017', conversation_id: null, page: null }, want: 'unsure' },
+    { id: 'L-old-chat', channel: 'concierge_chat', method: 'concierge', legacy: 'lead-2025-018', meta: { legacy_id: 'lead-2025-018', conversation_id: null, page: null }, want: 'unsure' },
+    { id: 'L-kw-id', channel: 'whatsapp', method: 'keyword', snippet: 'Is BONA-W003 still available?', want: 'in' },
+    { id: 'L-kw-id-ar', channel: 'whatsapp', method: 'keyword', snippet: 'السلام عليكم، أبغى تفاصيل bona-012', want: 'in' },
+    { id: 'L-kw-word', channel: 'whatsapp', method: 'keyword', snippet: 'I saw Bona on Instagram', later: 'and BONA-W009?', want: 'unsure' },
+    { id: 'L-tw', channel: 'whatsapp', method: 'time_window', snippet: 'Hello', want: 'unsure' },
+    { id: 'L-tw-id', channel: 'whatsapp', method: 'time_window', snippet: 'Hello, BONA-W021 please', want: 'in' },
+    { id: 'L-bad-json', channel: 'whatsapp', method: 'keyword', rawMeta: '{"snippet": "BONA-W003"', want: 'unsure' },
+  ];
+  const T0 = 1_757_140_000_000;
+  const createdOf = (i) => T0 + i * 1000;
+  const insLead = seed.prepare('INSERT INTO leads (lead_id, created, updated, channel, match_method, legacy_id, stage, first_reply_ts) VALUES (?,?,?,?,?,?,?,?)');
+  const insTp = seed.prepare('INSERT INTO touchpoints (id, lead_id, ts, channel, event_type, meta) VALUES (?,?,?,?,?,?)');
+  cases.forEach((c, i) => {
+    insLead.run(c.id, createdOf(i), createdOf(i) + 1, c.channel, c.method, c.legacy ?? null, 'new', i % 2 ? createdOf(i) + 60_000 : null);
+    const meta = c.rawMeta ?? JSON.stringify(c.meta ?? { match_method: c.method, ref: null, session_id: null, event_id: null, ad_meta: null, snippet: c.snippet ?? null });
+    insTp.run(`tp-${c.id}`, c.id, createdOf(i), c.channel, 'lead_created', meta);
+    if (c.later) insTp.run(`tp-${c.id}-2`, c.id, createdOf(i) + 5000, c.channel, 'inbound_message', JSON.stringify({ snippet: c.later }));
+  });
+  const snapshot = (db) => db.prepare('SELECT * FROM leads ORDER BY lead_id').all().map((r) => ({ ...r }));
+  const countOf = (db, table) => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
+  const before = snapshot(seed);
+  const touchpointsBefore = countOf(seed, 'touchpoints');
+  seed.close();
+
+  const a = openDb(file);
+  assert.equal(a.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
+  const added = ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human'];
+  const after = snapshot(a.db);
+  assert.equal(after.length, before.length, 'no lead is added or lost');
+  assert.equal(countOf(a.db, 'touchpoints'), touchpointsBefore);
+  assert.deepEqual(after.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !added.includes(k)))), before, 'every v3 column is untouched');
+  cases.forEach((c, i) => {
+    const row = a.getLead(c.id);
+    assert.equal(row.inbox_state, c.want, c.id);
+    assert.equal(row.inbox_since, c.want === 'in' ? createdOf(i) : null, `${c.id}: in since the lead was created, and only if in`);
+    assert.equal(row.needs_human, 0, c.id);
+    assert.equal(row.handler_user_id, null, c.id);
+    assert.equal(row.last_msg_ts, null, c.id);
+  });
+  for (const table of ['wa_messages', 'wa_outbox', 'inbox_reads', 'wa_gaps']) assert.equal(countOf(a.db, table), 0, table);
+
+  // The owner moves one guess in and rules one certain lead out. Reopening must not run
+  // the v4 placement again and undo either.
+  a.updateLead('L-kw-word', { inbox_state: 'in', inbox_since: T0 + 99_000 });
+  a.updateLead('L-ref', { inbox_state: 'out', inbox_since: null });
+  a.close();
+  const b = openDb(file);
+  assert.equal(b.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION, 'reopening an up-to-date file is a no-op');
+  assert.equal(b.getLead('L-kw-word').inbox_state, 'in');
+  assert.equal(b.getLead('L-kw-word').inbox_since, T0 + 99_000);
+  assert.equal(b.getLead('L-ref').inbox_state, 'out');
+  assert.equal(b.getLead('L-ref').inbox_since, null);
+  b.close();
+  cleanup();
+});
+
+test('insertLead and updateLead carry the inbox columns', () => {
+  const s = openDb(':memory:');
+  const l = s.insertLead({
+    lead_id: 'L1', created: 1, updated: 1, wa_jid: '966500000001@s.whatsapp.net',
+    inbox_state: 'in', inbox_since: 1, handler_user_id: 'USR-1', last_msg_ts: 7, needs_human: true,
+  });
+  assert.deepEqual([l.inbox_state, l.inbox_since, l.handler_user_id, l.last_msg_ts, l.needs_human], ['in', 1, 'USR-1', 7, 1]);
+  assert.equal(s.updateLead('L1', { inbox_state: 'out', inbox_since: null, handler_user_id: null, last_msg_ts: null, needs_human: false }), true);
+  const after = s.getLead('L1');
+  assert.deepEqual([after.inbox_state, after.inbox_since, after.handler_user_id, after.last_msg_ts, after.needs_human], ['out', null, null, null, 0]);
+  s.close();
 });
 
 test('newId is prefix, base-36 time and four hex characters', () => {
