@@ -1827,3 +1827,81 @@ test('(t) an ingest or a backfill that cannot be used is a wiring mistake, refus
   assert.doesNotThrow(() => createPoller({ db }));
   db.close();
 });
+
+/* ---------------- (t) the third 2026-09-28 review of Task 9 ---------------- */
+
+test('(t) a lead known only by its @lid does not join on a Bona link or brochure: no number could be checked; once it has one, it does', async () => {
+  const lid = '272516946294519@lid';
+  const link = msg({ id: 'L-LINK', fromMe: true, jid: lid, jidAlt: null, pushName: null, ts: NOW - 90_000, text: 'https://bona-real-estate.com/properties/bona-w003/' });
+  const doc = msg({ id: 'L-DOC', fromMe: true, jid: lid, jidAlt: null, pushName: null, ts: NOW - 60_000, messageType: 'documentMessage', media: '[document: Bona Brochure.pdf]', fileName: 'Bona Brochure.pdf' });
+  const later = msg({ id: 'L-LATER', fromMe: true, jid: lid, jidAlt: null, pushName: null, ts: NOW - 30_000, text: 'https://bona-real-estate.com/properties/bona-w007/' });
+  for (const state of ['unsure', null]) {
+    let team = null;
+    const h = harness({ inbox: true, isExcluded: (digits) => team.isExcludedPhone(digits), history: [link, doc, later], windows: [[link, doc]] });
+    team = h.team;
+    seedInLead(h, { lead_id: 'LEAD-lid', phone_e164: null, wa_jid: null, wa_lid: lid, inbox_state: state, inbox_since: null });
+    const tally = await h.poller.tick();
+    const lead = h.db.getLead('LEAD-lid');
+    assert.equal(lead.inbox_state, state, `a lid alone moves nothing (${state})`);
+    assert.equal(lead.inbox_since, null);
+    assert.equal(h.inbox.hasMessages('LEAD-lid'), false, 'nothing is stored');
+    assert.equal(h.findCalls.length, 0, 'and not one message of that chat is read');
+    assert.deepEqual({ joined: tally.joined, stored: tally.stored }, { joined: 0, stored: 0 });
+    assert.equal(h.logs.some((l) => l.evt === 'inbox.join'), false);
+
+    // The lead learns its number (a client message with the alt, or the owner's Add chat):
+    // now the tick checks that number for this lid, and the next Bona link joins.
+    h.db.updateLead('LEAD-lid', { phone_e164: '966500000000' });
+    h.push([later]);
+    const second = await h.poller.tick();
+    assert.equal(h.db.getLead('LEAD-lid').inbox_state, 'in', `joins once a number is known (${state})`);
+    assert.equal(second.joined, 1);
+    assertHistoryWindow(h, NOW - 30_000);
+    assert.deepEqual(rows(h, 'LEAD-lid'), [['L-LINK', 'out', 'owner_number'], ['L-DOC', 'out', 'owner_number'], ['L-LATER', 'out', 'owner_number']]);
+    h.cleanup();
+  }
+});
+
+/** Click-to-WhatsApp context as Meta attaches it to the first message of an ad chat. */
+const AD_CONTEXT = {
+  externalAdReply: { title: 'Sea-view villas', sourceId: '120210987654321', sourceUrl: 'https://fb.me/ad', sourceType: 'ad', sourceApp: 'instagram', ctwaClid: 'ARZ1xyz' },
+  conversionSource: 'FB_Ads',
+  entryPointConversionApp: 'instagram',
+};
+
+test('(t) a click-to-WhatsApp ad message is certain: a new ad_meta lead goes in, stored as the client\'s, with the 24 h before it', async () => {
+  const hi = msg({ id: 'AD-HI', ts: NOW - 3_600_000, text: 'Hello' });
+  const ad = msg({ id: 'AD-1', ts: NOW - 60_000, text: 'مهتم، كم السعر؟', contextInfo: AD_CONTEXT });
+  const h = harness({ inbox: true, history: [hi, ad], windows: [[ad]] });
+  const tally = await h.poller.tick();
+
+  const [lead] = h.leads();
+  assert.equal(lead.match_method, 'ad_meta');
+  assert.equal(lead.inbox_state, 'in', 'ad context alone puts the chat in (design §4.1): nothing else in this message says Bona');
+  assert.equal(lead.inbox_since, NOW - 60_000);
+  assertHistoryWindow(h, NOW - 60_000);
+  assert.deepEqual(rows(h, lead.lead_id), [['AD-HI', 'in', 'client'], ['AD-1', 'in', 'client']]);
+  assert.deepEqual({ joined: tally.joined, stored: tally.stored }, { joined: 1, stored: 1 });
+  const joined = h.logs.find((l) => l.evt === 'inbox.join');
+  assert.deepEqual([joined.leadId, joined.via], [lead.lead_id, 'inbound']);
+  h.cleanup();
+});
+
+test('(t) an Unsure chat that later writes from a click-to-WhatsApp ad joins, and its earlier messages come with it', async () => {
+  const guess = msg({ id: 'U1', ts: NOW - 120_000, text: 'مرحبا بونا' });
+  const ad = msg({ id: 'U2', ts: NOW - 30_000, text: 'مهتم', contextInfo: AD_CONTEXT });
+  const h = harness({ inbox: true, history: [guess, ad], windows: [[guess], [ad]] });
+  await h.poller.tick();
+  const [before] = h.leads();
+  assert.equal(before.inbox_state, 'unsure');
+
+  const tally = await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.lead_id, before.lead_id, 'the same lead, matched by its number');
+  assert.equal(lead.inbox_state, 'in');
+  assert.equal(lead.inbox_since, NOW - 30_000);
+  assert.equal(tally.joined, 1);
+  assertHistoryWindow(h, NOW - 30_000);
+  assert.deepEqual(rows(h, lead.lead_id), [['U1', 'in', 'client'], ['U2', 'in', 'client']]);
+  h.cleanup();
+});

@@ -604,10 +604,13 @@ export function createPoller({
    * phone: his self-chat can arrive as a bare `@lid`, and its lid is practically never
    * learned (every self-chat message is `fromMe`). So two more checks sit here (A7). Our own
    * note is refused by its first line (`OWN_NOTE_RE`, which the tick applies to inbound
-   * records only). And no NEW lead is made from a record with no phone: a lid alone cannot
-   * be checked against the team or never list, cannot be replied to (`lid_only`), and the
-   * exclusion sweep cannot catch it later. A lead that already maps the lid (and so carries
-   * the number the tick checked) still joins; for anything else the owner has Add chat.
+   * records only). And a lid alone never starts or joins a chat: a lid cannot be checked
+   * against the team or never list, cannot be replied to (`lid_only`), and the exclusion
+   * sweep cannot catch it later. So no NEW lead is made from a record with no phone, and an
+   * existing lead that is not `in` joins only when the record or the lead carries a number
+   * (a phone, or a phone jid) — for a lid-only record, the lead's number is the one the tick
+   * checked for that lid. A lead known only by its lid keeps its state (Unsure stays on the
+   * Unsure list); the owner can still move it in by hand, and for a stranger he has Add chat.
    */
   async function inboxAfterOutbound(rec, ts, tally) {
     const jids = jidsOf(rec);
@@ -616,6 +619,7 @@ export function createPoller({
     if (lead?.inbox_state !== 'in') {
       if (OWN_NOTE_RE.test(String(rec.text ?? '').trimStart())) return;
       if (!ownerOutboundJoins(rec)) return;
+      if (lead && !(jids.waJid || lead.phone_e164 || lead.wa_jid)) return;
       let created = false;
       if (!lead) {
         if (!jids.phone) return;
