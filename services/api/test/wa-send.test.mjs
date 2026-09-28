@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { openDb } from '../lib/db.mjs';
 import { createTeam } from '../lib/team.mjs';
 import { createInboxStore } from '../lib/inbox/store.mjs';
+import { createIngest } from '../lib/inbox/ingest.mjs';
 import {
   createSender, replyJidFor, SEND_PER_MIN, SEND_PER_DAY, PER_RECIPIENT_PER_MIN, PER_USER_PER_MIN,
 } from '../lib/wa-send.mjs';
@@ -417,6 +418,39 @@ test('a send id that has already been decided is never sent again', async () => 
   h.s.close();
 });
 
+test('a send id this file makes itself carries 64 random bits, so two sends in one millisecond never share a row', async () => {
+  const h = harness();
+  const ids = new Set();
+  for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) {
+    const out = await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a' });
+    assert.match(out.sendId, /^SND-[0-9a-z]+-[0-9a-f]{16}$/);
+    ids.add(out.sendId);
+  }
+  assert.equal(ids.size, PER_RECIPIENT_PER_MIN);
+  assert.equal(outboxRows(h).length, PER_RECIPIENT_PER_MIN, 'one row per send');
+  h.s.close();
+});
+
+test('a ledger write that fails after a 2xx with a key still answers ok, logged without the number or the text', async () => {
+  const h = harness();
+  const brittle = { ...h.inbox, updateOutbox: () => { throw Object.assign(new Error('disk full'), { code: 'ERR_SQLITE_ERROR' }); } };
+  const logs = [];
+  const sender = createSender({
+    env: ENV, team: h.team, inbox: brittle, db: h.s, now: h.now, log: (o) => logs.push(o),
+    fetchImpl: async () => ({ ok: true, status: 201, text: async () => JSON.stringify({ key: { id: 'KEY-7' } }) }),
+  });
+  const out = await sender.sendTo({ jid: CLIENT_JID, text: 'secret-ledger-marker', kind: 'staff', userId: 'USR-a', leadId: 'L-1' });
+  assert.deepEqual(withoutSendId(out), { ok: true, keyId: 'KEY-7', status: 201 }, 'it went: saying otherwise would invite a second send');
+  assert.equal(h.inbox.getOutbox(out.sendId).status, 'pending', 'left pending: the poller or the next restart settles it');
+  const entry = logs.find((l) => l.evt === 'wa.send.ledger_failed');
+  assert.ok(entry, 'the failed write is logged');
+  assert.equal(entry.error, 'ERR_SQLITE_ERROR');
+  const logged = JSON.stringify(logs);
+  assert.ok(!logged.includes('secret-ledger-marker'));
+  assert.ok(!logged.includes(CLIENT));
+  h.s.close();
+});
+
 /* ------------------------------ the durable day cap ------------------------------ */
 
 test('500 sends in the last 24 hours stop everyone but the owner — and a restart does not reset it', async () => {
@@ -737,8 +771,104 @@ test('reply: a chat marked "Not a client" while the message was on its way stays
   assert.equal(lead.handler_user_id, null, 'nobody is made handler of a chat that left the inbox');
   assert.equal(lead.needs_human, 0);
   assert.equal(lead.first_reply_ts, NOW, 'the client was still answered, and the watchdog must know');
-  // A second submit of the same form is refused, never sent again.
-  assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: false, error: 'not_in_inbox' });
+  assert.equal(h.inbox.countSentSince(NOW - DAY), 1, 'it still counts against the day');
+  // A second submit of the same form is refused, never sent again: the purge left the
+  // row as a stub that belongs to no chat.
+  assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: false, error: 'bad_send_id' });
+  assert.equal(h.calls.length, 1);
+  h.s.close();
+});
+
+test('reply: the poller seeing the message go while the call is out wins over a failure that comes back later', async () => {
+  for (const [name, failure] of [['timeout', { throws: abortError() }], ['500', { status: 500 }]]) {
+    let answer;
+    const h = harness({ reply: () => new Promise((resolve) => { answer = resolve; }) });
+    const staff = staffOf(h);
+    seedChat(h);
+    const { ingest } = createIngest({ db: h.s, inbox: h.inbox, now: h.now });
+    const sending = h.sender.reply(replyArgs(staff));
+    // Meanwhile the poller reads WhatsApp's own copy and matches it to the pending row by its text.
+    const seen = ingest(h.s.getLead('L-1'), {
+      id: 'KEY-SEEN', jid: CLIENT_JID, jidAlt: null, fromMe: true, ts: NOW, text: 'hello', pushName: null,
+      contextInfo: null, messageType: 'conversation', media: null, fileName: null, noise: false,
+    });
+    assert.deepEqual(seen, { stored: true, inserted: true, senderKind: 'staff' }, name);
+    assert.equal(h.inbox.getOutbox(SID).status, 'accepted', `${name}: the poller has proof it went`);
+    answer(failure);
+    assert.deepEqual(await sending, { ok: true, status: 'accepted', sendId: SID, keyId: 'KEY-SEEN' }, `${name}: never "failed" for a message the thread shows`);
+    const row = h.inbox.getOutbox(SID);
+    assert.deepEqual({ status: row.status, key_id: row.key_id, error: row.error }, { status: 'accepted', key_id: 'KEY-SEEN', error: null }, name);
+    assert.equal(h.inbox.countSentSince(NOW - DAY), 1, `${name}: still counted against the day`);
+    assert.equal(h.inbox.messagesFor('L-1').filter((m) => m.direction === 'out').length, 1, `${name}: stored once`);
+    assert.equal(h.s.getLead('L-1').first_reply_ts, NOW, name);
+    assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: true, duplicate: true, status: 'accepted', sendId: SID, error: null }, name);
+    assert.equal(h.calls.length, 1, name);
+    assert.ok(h.logs.some((l) => l.evt === 'wa.send.seen_sent'), `${name}: logged`);
+    h.s.close();
+  }
+});
+
+test('reply: a ledger write that fails after a keyed 2xx still answers ok, and a second submit is not sent', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  seedChat(h);
+  const brittle = { ...h.inbox, updateOutbox: () => { throw Object.assign(new Error('disk full'), { code: 'ERR_SQLITE_ERROR' }); } };
+  let calls = 0;
+  const sender = createSender({
+    env: ENV, team: h.team, inbox: brittle, db: h.s, now: h.now,
+    fetchImpl: async () => { calls += 1; return { ok: true, status: 201, text: async () => JSON.stringify({ key: { id: 'KEY-7' } }) }; },
+  });
+  assert.deepEqual(await sender.reply(replyArgs(staff)), { ok: true, status: 'accepted', sendId: SID, keyId: 'KEY-7' });
+  assert.equal(h.inbox.messagesFor('L-1').at(-1).key_id, 'KEY-7', "stored as the member's message all the same");
+  assert.deepEqual(
+    await sender.reply(replyArgs(staff)),
+    { ok: false, duplicate: true, status: 'pending', sendId: SID, error: 'pending', uncertain: true },
+    'the row it could not update still stops the same form going twice',
+  );
+  assert.equal(calls, 1);
+  h.s.close();
+});
+
+test('reply: stale while another reply to the chat is on its way; a send stuck pending past two minutes no longer holds it', async () => {
+  let answer;
+  const h = harness({ reply: (n) => (n === 1 ? new Promise((resolve) => { answer = resolve; }) : { status: 201, body: { key: { id: 'KEY-2' } } }) });
+  const staff = staffOf(h);
+  const other = h.team.addUser({ name: 'Omar', phone: '966500000088' });
+  seedChat(h);
+  const first = h.sender.reply(replyArgs(staff));
+  // Omar saw the same newest message and answers at the same moment, from his own form.
+  const OTHER_SID = 'sid_fedcba9876543210';
+  assert.deepEqual(await h.sender.reply(replyArgs(other, { sendId: OTHER_SID })), { ok: false, error: 'stale' });
+  assert.equal(h.inbox.getOutbox(OTHER_SID), null, 'nothing written for the refused one');
+  answer({ status: 201, body: { key: { id: 'KEY-1' } } });
+  assert.equal((await first).ok, true);
+  assert.equal(h.calls.length, 1, 'the client got one answer, not two');
+  h.s.close();
+
+  // A row a crash left pending: still possibly in flight at two minutes exactly, not a moment later.
+  const k = harness();
+  const member = staffOf(k);
+  seedChat(k);
+  k.inbox.insertOutbox({ send_id: 'SND-stuck', lead_id: 'L-1', jid: CLIENT_JID, text: 'x', user_id: member.user_id, sender_kind: 'staff' });
+  k.tick(120_000);
+  assert.deepEqual(await k.sender.reply(replyArgs(member)), { ok: false, error: 'stale' }, 'two minutes exactly');
+  k.tick(1);
+  assert.equal((await k.sender.reply(replyArgs(member))).ok, true, 'past that it was cut off, not on its way');
+  k.s.close();
+});
+
+test('reply: a chat purged and moved back in never sends an old form again, and its sends still count against the day', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  seedChat(h);
+  assert.equal((await h.sender.reply(replyArgs(staff))).ok, true);
+  h.inbox.leaveInbox('L-1');
+  assert.equal(h.inbox.countSentSince(NOW - DAY), 1, 'the reply went, so it still counts');
+  // The owner moves it back in, and the history has not come back (Evolution down, say),
+  // so the stale check has nothing newer to see.
+  h.inbox.setInboxState('L-1', 'in');
+  assert.equal(h.inbox.newestTs('L-1'), null);
+  assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: false, error: 'bad_send_id' });
   assert.equal(h.calls.length, 1);
   h.s.close();
 });
@@ -764,5 +894,13 @@ test('recoverInterrupted: a send pending for over two minutes becomes uncertain,
   assert.equal(h.sender.recoverInterrupted(), 1);
   const rows = outboxRows(h);
   assert.deepEqual(rows.map((r) => [r.status, r.error]), [['accepted', null], ['uncertain', 'interrupted'], ['pending', null]]);
+  h.s.close();
+});
+
+test('recoverInterrupted: a send pending for exactly two minutes stays pending', async () => {
+  const h = harness();
+  seedOutbox(h, 1, { created: NOW - 120_000, status: 'pending' });
+  assert.equal(h.sender.recoverInterrupted(), 0);
+  assert.equal(outboxRows(h)[0].status, 'pending');
   h.s.close();
 });

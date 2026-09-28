@@ -22,6 +22,8 @@ export const OUTBOX_KINDS = ['staff', 'dana', 'code', 'note'];
 export const OUTBOX_STATUSES = ['pending', 'accepted', 'failed', 'uncertain'];
 const DIRECTIONS = ['in', 'out'];
 const MAX_ERROR = 200;
+/** The day cap's window (lib/wa-send.mjs): a send younger than this still counts against it. */
+const SEND_DAY_MS = 86_400_000;
 
 /** JSON columns of `leads` — the same three `db.mjs` parses — so a list row reads like `getLead()`. */
 const LEAD_JSON = ['click_ids', 'first_touch', 'last_touch'];
@@ -214,8 +216,13 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
   const markStalePending = (beforeTs) => prep("UPDATE wa_outbox SET status = 'uncertain', error = 'interrupted', updated = ? WHERE status = 'pending' AND created < ?")
     .run(now(), num(beforeTs)).changes;
 
-  /** Login-code rows only ever feed the day cap, so they go once they are out of its window. */
-  const pruneCodeRows = (beforeTs) => prep("DELETE FROM wa_outbox WHERE sender_kind = 'code' AND created < ?").run(num(beforeTs)).changes;
+  /**
+   * Rows that only ever feed the day cap go once they are out of its window: login codes,
+   * and the stubs `purgeLead` leaves of a purged chat's sends (no text, no chat).
+   */
+  const pruneCodeRows = (beforeTs) => prep(`DELETE FROM wa_outbox
+                                            WHERE (sender_kind = 'code' OR (sender_kind IN ('staff','dana') AND lead_id IS NULL))
+                                              AND created < ?`).run(num(beforeTs)).changes;
 
   /* -------------------- read marks -------------------- */
 
@@ -329,14 +336,24 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
    * marks, in one transaction. The lead row stays (attribution data), and so do login-code
    * rows, which hold no text and only feed the day cap.
    *
+   * A send of the last 24 hours is not deleted but cut down to a stub — its text and its
+   * chat gone, its send id, number, status and time kept — because it still has two jobs:
+   * it counts against the day cap (a purge must not hand out fresh sends, least of all
+   * for one still in flight), and its send id must never go out a second time (an old
+   * form submitted again after the chat was moved back in is `bad_send_id`, since the
+   * stub belongs to no chat). `pruneCodeRows` removes stubs once the day is over.
+   *
    * @returns {{ messages: number, outbox: number, gaps: number, reads: number }}
    */
   function purgeLead(leadId) {
     const id = String(leadId ?? '');
     return transaction(() => {
+      const t = now();
+      const sends = "lead_id = ? AND sender_kind IN ('staff','dana')";
       const counts = {
         messages: prep('DELETE FROM wa_messages WHERE lead_id = ?').run(id).changes,
-        outbox: prep("DELETE FROM wa_outbox WHERE lead_id = ? AND sender_kind IN ('staff','dana')").run(id).changes,
+        outbox: prep(`DELETE FROM wa_outbox WHERE ${sends} AND created < ?`).run(id, t - SEND_DAY_MS).changes
+          + prep(`UPDATE wa_outbox SET text = NULL, lead_id = NULL, updated = ? WHERE ${sends}`).run(t, id).changes,
         gaps: prep('DELETE FROM wa_gaps WHERE lead_id = ?').run(id).changes,
         reads: prep('DELETE FROM inbox_reads WHERE lead_id = ?').run(id).changes,
       };
