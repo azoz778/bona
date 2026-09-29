@@ -57,13 +57,24 @@
  * this number, so nothing else he sends counts; lib/inbox/eligibility.mjs has the rules).
  * Only `in` chats are kept as transcripts (lib/inbox/ingest.mjs), both directions, from the
  * joining message plus the 24 h before it. An `out` chat never comes back on its own.
- * Every other conversation is still discarded exactly as above.
+ *
+ * **Real-estate chats to check** (D17). A message that ends up with no lead behind it — a
+ * stranger's that matched no rule, or the owner's to a stranger that did not join — but
+ * uses property words (`propertyWordsIn`) or a property-document word (`PROPERTY_DOC_RE`),
+ * or is a document of his that names TK, puts its chat on the owner's list
+ * (lib/inbox/store.mjs `noteCandidate`) when the chat has a phone number: the number and
+ * jid (and lid, when WhatsApp shows one), the name WhatsApp shows for a client (never the
+ * owner's own, on a message he sent), the property words and the time. Never the text,
+ * never a lead, never a note to anyone; the owner moves it into the inbox or marks it not a
+ * client. A chat that becomes a lead leaves the list. Every other conversation is still
+ * discarded exactly as above.
  */
 import { parseRef } from './attribution.mjs';
 import { MAX_PAGES, PAGE_SIZE, bareJid, oldestFirst, readWindow } from './evolution.mjs';
 import { JOIN_HISTORY_MS } from './inbox/backfill.mjs';
 import {
-  BONA_WORD_RE, LISTING_ID_RE, inboundSignal, nextInboxState, ownerOutboundJoins,
+  BONA_WORD_RE, LISTING_ID_RE, MAX_PROPERTY_WORDS, PROPERTY_DOC_RE, inboundSignal, isTkDocument, nextInboxState, ownerOutboundJoins,
+  propertyWordsIn,
 } from './inbox/eligibility.mjs';
 import { createOrMergeLead, leadNote } from './leads.mjs';
 import { normalisePhone } from './phone.mjs';
@@ -110,6 +121,35 @@ export const KEYWORD_RE = new RegExp(`${BONA_WORD_RE.source}|${LISTING_ID_RE.sou
 const OWN_NOTE_RE = /^\*?Bona — new enquiry\*?/;
 /** How often one record may fail before it is written off rather than retried for ever. */
 export const MAX_RECORD_ATTEMPTS = 3;
+/** What the owner's list shows for a document of his that names TK (D16, D17). */
+export const TK_DOCUMENT_WORD = 'tk document';
+/**
+ * What it shows for a property-document word (lib/inbox/eligibility.mjs `PROPERTY_DOC_RE`:
+ * brochure, price list, بروشور …) in a message or a document's name that did not join.
+ */
+export const PROPERTY_DOCUMENT_WORD = 'property document';
+
+/**
+ * Why a record's chat belongs on the owner's list of real-estate chats to check (D17): the
+ * property words in its text or caption and, for a document, in its file name — after
+ * `tk document` when it is a document the owner sent that names TK, and `property document`
+ * when the text, the caption or a document's name has a property-document word, in either
+ * direction. So every owner-sent property document that did not join (it names Bona, or its
+ * name was cut too close to the word, Task 15) is on the list, and so is a client asking
+ * for "the price list". Canonical words only, never the text. A word at the end of a name
+ * cut at 120 characters may be the start of a longer one; that only ever puts a chat on the
+ * list to check, never in the inbox.
+ * @returns {string[]} at most `MAX_PROPERTY_WORDS`
+ */
+export function candidateWordsOf(rec) {
+  const text = typeof rec?.text === 'string' ? rec.text : '';
+  const doc = typeof rec?.media === 'string' && rec.media.startsWith('[document');
+  const name = doc && typeof rec.fileName === 'string' ? rec.fileName : '';
+  const markers = [];
+  if (rec?.fromMe === true && isTkDocument(rec)) markers.push(TK_DOCUMENT_WORD);
+  if (PROPERTY_DOC_RE.test(text) || (name && PROPERTY_DOC_RE.test(name))) markers.push(PROPERTY_DOCUMENT_WORD);
+  return [...markers, ...propertyWordsIn(name ? `${text}\n${name}` : text)].slice(0, MAX_PROPERTY_WORDS);
+}
 
 /**
  * What a failed step says about itself in a log line: the kind of error, never its message.
@@ -672,6 +712,41 @@ export function createPoller({
     }
   }
 
+  /**
+   * D17: after a record is handled, a chat that is a lead leaves the owner's list of
+   * real-estate chats to check (its inbox state rules now), and a chat that is not one goes
+   * on it when the record gives a reason (`candidateWordsOf`) — only a person's chat with a
+   * phone number. A WhatsApp channel (`…@newsletter`) is nobody's chat. A lid alone is not
+   * noted, for the reasons A7 makes no lead of one: it cannot be checked against the team or
+   * the never list (it may be a colleague whose lid is not learned yet), cannot be replied
+   * to, and the exclusion sweep cannot catch it later. A client's name is kept, the name on
+   * a record the owner sent is his own and never is. It is only a list for the owner to look
+   * at, so it never fails the record: a failure is logged by its kind only (`errorKind`: no
+   * message, so no numbers, no words) and the record is not retried for it — a retry would
+   * handle the record a second time.
+   */
+  function noteCandidateSafely(rec, ts, tally) {
+    try {
+      const jids = jidsOf(rec);
+      if (jids.waJid && !jids.waJid.endsWith('@s.whatsapp.net')) return;
+      if (!jids.phone && !jids.waJid && !jids.waLid) return;
+      if (findLead(jids)) {
+        inboxStore.removeCandidatesFor({ phone: jids.phone, jid: jids.waJid, lid: jids.waLid });
+        return;
+      }
+      if (!jids.phone) return;
+      const words = candidateWordsOf(rec);
+      if (!words.length) return;
+      const res = inboxStore.noteCandidate({
+        jid: jids.waJid, lid: jids.waLid, phone: jids.phone, name: rec.fromMe ? null : (rec.pushName ?? null),
+        ts, words, dir: rec.fromMe ? 'out' : 'in',
+      });
+      if (res.state === 'open') tally.candidates += 1;
+    } catch (err) {
+      log({ level: 'warn', evt: 'inbox.candidate_failed', ...errorKind(err) });
+    }
+  }
+
   /* -------------------- the tick -------------------- */
 
   /**
@@ -699,7 +774,7 @@ export function createPoller({
       const answer = await find({ gte, lte, instance });
       const records = Array.isArray(answer) ? answer : (answer?.records ?? []);
 
-      const tally = { scanned: records.length, matched: 0, unmatched: 0, created: 0, merged: 0, replies: 0, ignored: 0, lidOnlyUnexcludable: 0, stored: 0, joined: 0 };
+      const tally = { scanned: records.length, matched: 0, unmatched: 0, created: 0, merged: 0, replies: 0, ignored: 0, lidOnlyUnexcludable: 0, stored: 0, joined: 0, candidates: 0 };
       let maxTs = 0;
       let oldestFailedTs = null;
       /**
@@ -807,6 +882,7 @@ export function createPoller({
               }
             }
           }
+          if (inboxOn) noteCandidateSafely(rec, ts, tally);
           // Remembered once it is safely handled, so a transient store failure costs a
           // retry rather than the lead. (One process owns this loop; two would need the
           // claim to be the INSERT itself.)
@@ -872,7 +948,7 @@ export function createPoller({
       db.pruneWaSeen(t - SEEN_TTL_MS);
       matched += tally.matched;
       lidOnlyUnexcludable += tally.lidOnlyUnexcludable;
-      if (tally.matched || tally.replies || tally.stored || tally.joined) log({ evt: 'wa.poll.tick', ...tally });
+      if (tally.matched || tally.replies || tally.stored || tally.joined || tally.candidates) log({ evt: 'wa.poll.tick', ...tally });
       return tally;
     } catch (err) {
       log({ level: 'warn', evt: 'wa.poll.failed', error: String(err?.message ?? err) });

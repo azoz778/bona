@@ -16,7 +16,7 @@ import { openDb } from '../lib/db.mjs';
 import { createTeam } from '../lib/team.mjs';
 import {
   CLICK_WINDOW_MS, FIRST_RUN_LOOKBACK_MS, MAX_RECORD_ATTEMPTS, MAX_WINDOW_MS, OVERLAP_MS,
-  SEEN_TTL_MS, adMetaOf, adSourceOf, createPoller, isIgnorableChat, jidsOf,
+  SEEN_TTL_MS, PROPERTY_DOCUMENT_WORD, TK_DOCUMENT_WORD, adMetaOf, adSourceOf, candidateWordsOf, createPoller, isIgnorableChat, jidsOf,
 } from '../lib/wa-poller.mjs';
 import { JOIN_HISTORY_MS, createBackfill } from '../lib/inbox/backfill.mjs';
 import { ownerOutboundJoins } from '../lib/inbox/eligibility.mjs';
@@ -1973,5 +1973,244 @@ test('(t) a price list for a property the owner sends starts a chat; a bare pric
   assert.equal(lead.inbox_state, 'in');
   assert.deepEqual(rows(h, lead.lead_id), [['D-PRICE', 'out', 'owner_number']]);
   assert.equal(tally.joined, 1);
+  h.cleanup();
+});
+
+/* ---------------- (u) real-estate chats to check (D17) ---------------- */
+
+/** Every candidate row, as stored. */
+const candidates = (h) => h.db.db.prepare('SELECT * FROM inbox_candidates ORDER BY rowid').all().map((r) => ({ ...r }));
+
+test('(u) candidateWordsOf: property words from the text and a document\'s name, "property document" for a document word, "tk document" for a TK document the owner sent', () => {
+  assert.equal(TK_DOCUMENT_WORD, 'tk document');
+  assert.equal(PROPERTY_DOCUMENT_WORD, 'property document');
+  assert.deepEqual(candidateWordsOf(msg({ text: 'عندكم شقة للإيجار؟' })), ['شقة', 'إيجار']);
+  assert.deepEqual(candidateWordsOf(msg({ text: 'see the plan', media: '[document: Villa 12 photos.pdf]', fileName: 'Villa 12 photos.pdf' })), ['villa']);
+  assert.deepEqual(candidateWordsOf(msg({ text: 'villa', media: '[image]', fileName: 'Flat.pdf' })), ['villa'], 'only a document has a file name');
+  // A document word, in either direction, in the text or a document's name (D16's words).
+  assert.deepEqual(candidateWordsOf(msg({ text: 'Can I get the price list and payment plan?' })), [PROPERTY_DOCUMENT_WORD]);
+  assert.deepEqual(candidateWordsOf(msg({ text: 'ابغى البروشور وقائمة الأسعار' })), [PROPERTY_DOCUMENT_WORD]);
+  assert.deepEqual(candidateWordsOf(msg({ fromMe: true, text: '', media: '[document: Bona Traffic HD brochure.pdf]', fileName: 'Bona Traffic HD brochure.pdf' })), [PROPERTY_DOCUMENT_WORD]);
+  assert.deepEqual(candidateWordsOf(msg({ text: 'price list', media: '[image]', fileName: 'x' })), [PROPERTY_DOCUMENT_WORD], 'a caption counts');
+  const tkDoc = { fromMe: true, text: '', media: '[document: TK Brochure Villa.pdf]', fileName: 'TK Brochure Villa.pdf', fileNameTruncated: false, fileNameTk: true };
+  assert.deepEqual(candidateWordsOf(msg(tkDoc)), [TK_DOCUMENT_WORD, PROPERTY_DOCUMENT_WORD, 'villa']);
+  assert.deepEqual(candidateWordsOf(msg({ ...tkDoc, fromMe: false })), [PROPERTY_DOCUMENT_WORD, 'villa'], 'a client\'s file that says TK is only its words');
+  assert.deepEqual(candidateWordsOf(msg({ ...tkDoc, fileName: 'TK Villa 12.pdf', media: '[document: TK Villa 12.pdf]' })), [TK_DOCUMENT_WORD, 'villa']);
+  assert.deepEqual(candidateWordsOf(msg({ ...tkDoc, fileName: 'TK invoice.pdf', media: '[document: TK invoice.pdf]' })), [TK_DOCUMENT_WORD]);
+  assert.deepEqual(candidateWordsOf(msg({ ...tkDoc, text: 'villa apartment flat rent lease land plot property duplex' })),
+    [TK_DOCUMENT_WORD, PROPERTY_DOCUMENT_WORD, 'villa', 'apartment', 'flat', 'rent', 'lease', 'land'], 'the markers first, then at most eight in all');
+  assert.deepEqual(candidateWordsOf(msg({ text: 'see you at 6' })), []);
+  assert.deepEqual(candidateWordsOf(null), []);
+});
+
+test('(u) a stranger asking about property goes on the owner\'s list: no lead, no note, no text, no history', async () => {
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'Q1', jid: STRANGER, pushName: 'Umm Khalid', ts: NOW - 60_000, text: 'عندكم شقة للإيجار؟' }),
+    msg({ id: 'Q2', jid: STRANGER2, pushName: null, ts: NOW - 30_000, text: '', messageType: 'documentMessage', media: '[document: Villa 12 photos.pdf]', fileName: 'Villa 12 photos.pdf' }),
+    msg({ id: 'P1', jid: '966544444444@s.whatsapp.net', ts: NOW - 20_000, text: 'see you at 6' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0, 'nothing sure: not a lead');
+  assert.equal(h.sent.length, 0, 'the owner is not sent a note');
+  assert.equal(h.findCalls.length, 0, 'no history is read');
+  assert.equal(tally.unmatched, 3);
+  assert.equal(tally.candidates, 2);
+  const rows = candidates(h);
+  assert.deepEqual(rows.map((r) => [r.phone_e164, r.jid, r.name, r.words, r.last_dir, r.hits, r.first_ts, r.state]), [
+    ['966522222222', STRANGER, 'Umm Khalid', 'شقة,إيجار', 'in', 1, NOW - 60_000, 'open'],
+    ['966533333333', STRANGER2, null, 'villa', 'in', 1, NOW - 30_000, 'open'],
+  ]);
+  assert.ok(!JSON.stringify(rows).includes('عندكم'), 'never the text');
+  assert.equal(h.db.db.prepare('SELECT COUNT(*) AS n FROM wa_messages').get().n, 0);
+  h.cleanup();
+});
+
+test('(u) the owner writing about property to a stranger puts that chat on the list too — as "you wrote", never with his own name', async () => {
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'O1', fromMe: true, jid: STRANGER, pushName: 'Abdulaziz', ts: NOW - 60_000, text: 'the villa is 3M' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0);
+  assert.equal(tally.candidates, 1);
+  const [row] = candidates(h);
+  assert.deepEqual([row.phone_e164, row.name, row.words, row.last_dir], ['966522222222', null, 'villa', 'out']);
+  h.cleanup();
+});
+
+test('(u) a TK document the owner sends is a chat to check, never a join', async () => {
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'TK1', fromMe: true, jid: STRANGER, pushName: 'Abdulaziz', ts: NOW - 60_000, text: '', messageType: 'documentMessage',
+      media: '[document: TK Brochure Villa.pdf]', fileName: 'TK Brochure Villa.pdf', fileNameTruncated: false, fileNameTk: true }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0, 'TK chats stay out of the Bona inbox');
+  assert.equal(tally.joined, 0);
+  assert.equal(h.findCalls.length, 0);
+  const [row] = candidates(h);
+  assert.deepEqual([row.phone_e164, row.name, row.words, row.last_dir], ['966522222222', null, 'tk document,property document,villa', 'out']);
+  h.cleanup();
+});
+
+test('(u) a property document the owner sends that does not join is a chat to check: a cut name, or one that names Bona', async () => {
+  // "…(111 x) Brochure.pdf" cut at 120 code points: the word is in the part a cut name is not
+  // read by (Task 15), so it cannot join; the owner's list is where he sees it.
+  const cutName = `${'x'.repeat(111)} Brochure`;
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'CUTB', fromMe: true, jid: STRANGER, pushName: 'Abdulaziz', ts: NOW - 60_000, text: '', messageType: 'documentMessage',
+      media: `[document: ${cutName}]`, fileName: cutName, fileNameTruncated: true, fileNameTk: false, fileNameBona: false }),
+    msg({ id: 'BONAB', fromMe: true, jid: STRANGER2, pushName: 'Abdulaziz', ts: NOW - 30_000, text: '', messageType: 'documentMessage',
+      media: '[document: Bona Traffic HD brochure.pdf]', fileName: 'Bona Traffic HD brochure.pdf' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0, 'no lead');
+  assert.equal(tally.joined, 0);
+  assert.equal(h.findCalls.length, 0);
+  assert.equal(tally.candidates, 2);
+  assert.deepEqual(candidates(h).map((r) => [r.phone_e164, r.name, r.words, r.last_dir]), [
+    ['966522222222', null, 'property document', 'out'],
+    ['966533333333', null, 'property document', 'out'],
+  ]);
+  h.cleanup();
+});
+
+test('(u) a bare price list the owner sends a stranger is a chat to check, never a join (D16 owner answer)', async () => {
+  // A price list with no property word beside it may be TK fit-out work (owner answer,
+  // 2026-09-28), so it does not join (Task 15); the owner's list is where he sees it.
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'PLS', fromMe: true, jid: STRANGER, pushName: 'Abdulaziz', ts: NOW - 60_000, text: '', messageType: 'documentMessage',
+      media: '[document: Price List Sep.pdf]', fileName: 'Price List Sep.pdf' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0, 'no lead');
+  assert.equal(tally.joined, 0);
+  assert.equal(h.findCalls.length, 0, 'no history is read');
+  assert.equal(tally.candidates, 1);
+  assert.deepEqual(candidates(h).map((r) => [r.phone_e164, r.name, r.words, r.last_dir]), [['966522222222', null, 'property document', 'out']]);
+  h.cleanup();
+});
+
+test('(u) a stranger asking for the price list is a chat to check', async () => {
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'PL1', jid: STRANGER, pushName: 'Umm Fahad', ts: NOW - 60_000, text: 'Can I get the price list and payment plan?' }),
+    msg({ id: 'PL2', jid: STRANGER2, pushName: null, ts: NOW - 30_000, text: 'ابغى البروشور وقائمة الأسعار' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0);
+  assert.equal(tally.candidates, 2);
+  assert.deepEqual(candidates(h).map((r) => [r.phone_e164, r.name, r.words, r.last_dir]), [
+    ['966522222222', 'Umm Fahad', 'property document', 'in'],
+    ['966533333333', null, 'property document', 'in'],
+  ]);
+  h.cleanup();
+});
+
+test('(u) a chat with no number is never a candidate: a lid alone, or a WhatsApp channel', async () => {
+  const h = harness({ inbox: true, windows: [[
+    // A lid alone may be a colleague whose lid is not learned yet: it cannot be checked (A7).
+    msg({ id: 'LID1', jid: '272516946294519@lid', jidAlt: null, pushName: 'Maybe Mona', ts: NOW - 60_000, text: 'the villa keys are with me' }),
+    msg({ id: 'LID2', fromMe: true, jid: '272516946294520@lid', jidAlt: null, pushName: null, ts: NOW - 50_000, text: 'rent is due' }),
+    // A channel the instance follows posts listings all day long.
+    msg({ id: 'CH1', jid: '120363025246125486@newsletter', pushName: 'Jeddah Villas', ts: NOW - 40_000, text: 'فيلا للبيع في الشاطئ' }),
+    msg({ id: 'CH2', jid: '12036302524@newsletter', pushName: 'Villas', ts: NOW - 30_000, text: 'villa for rent' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(tally.candidates, 0);
+  assert.deepEqual(candidates(h), []);
+  assert.equal(h.db.countLeads(), 0);
+  h.cleanup();
+});
+
+test('(u) a chat on the list that later sends a Ref line becomes a lead and leaves the list', async () => {
+  const h = harness({ inbox: true, windows: [[msg({ id: 'Q1', jid: STRANGER, ts: NOW - 120_000, text: 'Is the apartment still for rent?' })]] });
+  await h.poller.tick();
+  assert.equal(candidates(h).length, 1);
+  h.push([msg({ id: 'R1', jid: STRANGER, ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' })]);
+  await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.phone_e164, '966522222222');
+  assert.equal(lead.inbox_state, 'in');
+  assert.deepEqual(candidates(h), [], 'it is a lead now: its own inbox state decides');
+  h.cleanup();
+});
+
+test('(u) a chat that is already a lead is never a candidate, whatever it says', async () => {
+  const h = harness({ inbox: true });
+  seedInLead(h, { inbox_state: 'out', inbox_since: null });
+  h.db.insertLead({ lead_id: 'LEAD-guess', phone_e164: '966522222222', wa_jid: STRANGER, inbox_state: 'unsure', created: NOW - 3_600_000, updated: NOW - 3_600_000 });
+  h.push([
+    msg({ id: 'A1', ts: NOW - 60_000, text: 'still want the villa' }),
+    msg({ id: 'A2', fromMe: true, pushName: null, ts: NOW - 50_000, text: 'the villa is sold' }),
+    msg({ id: 'B1', jid: STRANGER, ts: NOW - 40_000, text: 'any apartment?' }),
+  ]);
+  const tally = await h.poller.tick();
+  assert.equal(tally.candidates, 0);
+  assert.deepEqual(candidates(h), []);
+  assert.equal(h.db.getLead('LEAD-in').inbox_state, 'out', '"Not a client" stays');
+  h.cleanup();
+});
+
+test('(u) a dismissed chat stays dismissed: later property messages neither reopen nor count it', async () => {
+  const h = harness({ inbox: true, windows: [[msg({ id: 'Q1', jid: STRANGER, ts: NOW - 120_000, text: 'أبغى فيلا' })]] });
+  await h.poller.tick();
+  const [row] = candidates(h);
+  h.inbox.dismissCandidate(row.cand_id);
+  h.push([msg({ id: 'Q2', jid: STRANGER, ts: NOW - 60_000, text: 'وش صار على الفيلا؟ عندكم شقة؟' })]);
+  const tally = await h.poller.tick();
+  assert.equal(tally.candidates, 0);
+  const [after] = candidates(h);
+  assert.deepEqual([after.state, after.hits, after.words, after.name, after.last_dir], ['dismissed', 0, null, null, null]);
+  assert.equal(h.inbox.countCandidates(), 0);
+  h.cleanup();
+});
+
+test('(u) team and never-list numbers never become candidates', async () => {
+  const h = harness({ inbox: true, isExcluded: (digits) => digits === '966522222222' || digits === '966533333333' });
+  h.push([
+    msg({ id: 'T1', jid: STRANGER, ts: NOW - 60_000, text: 'the villa keys are with me' }),
+    msg({ id: 'T2', fromMe: true, jid: STRANGER2, pushName: null, ts: NOW - 30_000, text: 'rent is due' }),
+  ]);
+  const tally = await h.poller.tick();
+  assert.equal(tally.ignored, 2);
+  assert.deepEqual(candidates(h), []);
+  h.cleanup();
+});
+
+test('(u) without the inbox the poller keeps no list: Phase 1 is unchanged', async () => {
+  const h = harness({ windows: [[msg({ id: 'Q1', jid: STRANGER, text: 'عندكم شقة للإيجار؟' })]] });
+  const tally = await h.poller.tick();
+  assert.equal(tally.unmatched, 1);
+  assert.equal(tally.candidates, 0);
+  assert.equal(createInboxStore(h.db).countCandidates(), 0);
+  h.cleanup();
+});
+
+test('(u) a list that cannot be written never fails the record, and says so by the kind of error only', async () => {
+  const h = harness({ inbox: true, windows: [[msg({ id: 'Q1', jid: STRANGER, pushName: 'Umm Khalid', text: 'عندكم شقة للإيجار؟' })]] });
+  h.inbox.noteCandidate = () => { throw new Error('disk I/O error on 966522222222'); };
+  const tally = await h.poller.tick();
+  assert.equal(tally.unmatched, 1);
+  assert.equal(h.db.waSeenHas('Q1'), true, 'handled: it is not read again');
+  assert.ok(!h.logs.some((l) => l.evt === 'wa.poll.record_failed'));
+  const failed = h.logs.find((l) => l.evt === 'inbox.candidate_failed');
+  assert.deepEqual(failed, { level: 'warn', evt: 'inbox.candidate_failed', error: 'Error' }, 'the kind of error, never its message (Task 9, c9e3145)');
+  const dump = JSON.stringify(h.logs);
+  for (const secret of ['disk I/O', '966522222222']) assert.ok(!dump.includes(secret), secret);
+  h.cleanup();
+});
+
+test('(u) nothing about a candidate reaches a log line: no number, name, lid or word', async () => {
+  const lid = '272516946294519@lid';
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'Q1', jid: lid, jidAlt: STRANGER, pushName: 'Umm Khalid', ts: NOW - 60_000, text: 'عندكم شقة للإيجار؟' }),
+    msg({ id: 'O1', fromMe: true, jid: STRANGER2, pushName: 'Abdulaziz', ts: NOW - 30_000, text: 'the villa is 3M' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(tally.candidates, 2);
+  const tick = h.logs.find((l) => l.evt === 'wa.poll.tick');
+  assert.equal(tick.candidates, 2, 'the count is logged');
+  const dump = JSON.stringify(h.logs);
+  for (const secret of ['966522222222', '966533333333', '272516946294519', 'Umm Khalid', 'Abdulaziz', 'شقة', 'villa', 'عندكم']) {
+    assert.ok(!dump.includes(secret), `a log line carries ${secret}`);
+  }
   h.cleanup();
 });
