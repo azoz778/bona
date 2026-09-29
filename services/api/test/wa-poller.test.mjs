@@ -2070,8 +2070,8 @@ test('(u) candidateWordsOf: property words from the text and a document\'s name,
   assert.deepEqual(candidateWordsOf(msg({ ...tkDoc, fromMe: false })), [PROPERTY_DOCUMENT_WORD, 'villa'], 'a client\'s file that says TK is only its words');
   assert.deepEqual(candidateWordsOf(msg({ ...tkDoc, fileName: 'TK Villa 12.pdf', media: '[document: TK Villa 12.pdf]' })), [TK_DOCUMENT_WORD, 'villa']);
   assert.deepEqual(candidateWordsOf(msg({ ...tkDoc, fileName: 'TK invoice.pdf', media: '[document: TK invoice.pdf]' })), [TK_DOCUMENT_WORD]);
-  assert.deepEqual(candidateWordsOf(msg({ ...tkDoc, text: 'villa apartment flat rent lease land plot property duplex' })),
-    [TK_DOCUMENT_WORD, PROPERTY_DOCUMENT_WORD, 'villa', 'apartment', 'flat', 'rent', 'lease', 'land'], 'the markers first, then at most eight in all');
+  assert.deepEqual(candidateWordsOf(msg({ ...tkDoc, text: 'villa apartment flat rent lease land plot property duplex penthouse townhouse' })),
+    [TK_DOCUMENT_WORD, PROPERTY_DOCUMENT_WORD, 'villa', 'apartment', 'rent', 'property', 'duplex', 'penthouse'], 'the markers first, then at most eight in all');
   assert.deepEqual(candidateWordsOf(msg({ text: 'see you at 6' })), []);
   assert.deepEqual(candidateWordsOf(null), []);
 });
@@ -2095,6 +2095,22 @@ test('(u) a stranger asking about property goes on the owner\'s list: no lead, n
   ]);
   assert.ok(!JSON.stringify(rows).includes('عندكم'), 'never the text');
   assert.equal(h.db.db.prepare('SELECT COUNT(*) AS n FROM wa_messages').get().n, 0);
+  h.cleanup();
+});
+
+test('(u) only strong property terms make a chat to check: a flight that will land, a flat tyre, a bedroom do not', async () => {
+  const chats = [
+    ['966541000001', 'My flight will land at 9'],
+    ['966541000002', 'flat tyre'],
+    ['966541000003', 'غرفة النوم'],
+    ['966541000004', 'شقة للإيجار'],
+    ['966541000005', 'villa for sale'],
+  ];
+  const h = harness({ inbox: true, windows: [chats.map(([phone, text], i) => msg({ id: `S${i}`, jid: `${phone}@s.whatsapp.net`, ts: NOW - 60_000 + i, text }))] });
+  const tally = await h.poller.tick();
+  assert.equal(tally.candidates, 2);
+  assert.deepEqual(candidates(h).map((r) => [r.phone_e164, r.words]), [['966541000004', 'شقة,إيجار'], ['966541000005', 'villa,for sale']]);
+  for (const [, text] of chats.slice(0, 3)) assert.deepEqual(candidateWordsOf(msg({ text })), [], text);
   h.cleanup();
 });
 

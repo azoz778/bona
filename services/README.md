@@ -853,12 +853,18 @@ with a `wa_jid` or a `wa_lid`. Whether it belongs is **stored** in `leads.inbox_
   number* (`owner_added`) put a chat `in` and pull its last 30 days — he vouched for it.
   *Not a client* puts it `out`: its transcript is purged there and then, and it never comes
   back on its own.
-- *Real-estate chats to check* (D17): a chat with no lead behind it whose message uses
-  property words (`propertyWordsIn`: villa, apartment, rent, land, فيلا, شقة, للإيجار, أرض,
-  عقار …) or a property-document word (brochure, price list, بروشور …), in either direction,
-  or a document of the owner's that names TK, goes on a second list on the owner's
+- *Real-estate chats to check* (D17): a chat with no lead behind it where a message sent or
+  received uses one of these property words (`PROPERTY_WORD_FORMS`, `propertyWordsIn`:
+  villa, apartment, rent / rental / for rent, for sale, real estate, property, duplex,
+  penthouse, townhouse; فيلا, شقة, إيجار / للإيجار, للبيع, عقار, دوبلكس, بنتهاوس, تاون هاوس —
+  and nothing else: everyday words such as land, flat, plot, compound, bedroom, broker, lease,
+  listing, commission, أرض, غرفة, مخطط, صك, سمسار or عمولة never count, so "My flight will land
+  at 9" or "غرفة النوم" keeps nothing), or mentions a property-document word (brochure, floor
+  plan, price list, بروشور …, in its text or a file's name), or where the owner sends a
+  property document or a document that names TK, goes on a second list on the owner's
   **Unsure** tab (`inbox_candidates`) — so does every property document he sends that did
-  not join (one that names Bona, or a name cut too close to the word). Only a chat with a
+  not join (one that names Bona, or a name cut too close to the word). The privacy page lists
+  exactly these words, and a test holds the two together. Only a chat with a
   phone number: never a lid alone or a WhatsApp channel. Kept: the number and jid (and lid),
   the name WhatsApp shows for the client (never the name on a message the owner sent), the
   property words, first and last time, how many messages and who wrote last — never the
