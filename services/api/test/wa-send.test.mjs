@@ -992,21 +992,35 @@ test('reply: never logs the text or the number', async () => {
 
 /* ------------------------------ after a restart ------------------------------ */
 
-test('recoverInterrupted: a send pending for over two minutes becomes uncertain, nothing else changes', async () => {
+test('recoverInterrupted: at start-up EVERY pending send becomes uncertain, however young; nothing else changes', async () => {
   const h = harness();
+  seedOutbox(h, 1, { created: NOW - 3_600_000, status: 'accepted' });
+  seedOutbox(h, 1, { created: NOW - 3_600_000, status: 'failed' });
   seedOutbox(h, 1, { created: NOW - 121_000, status: 'pending' });
   seedOutbox(h, 1, { created: NOW - 60_000, status: 'pending' });
-  seedOutbox(h, 1, { created: NOW - 3_600_000, status: 'accepted' });
-  assert.equal(h.sender.recoverInterrupted(), 1);
-  const rows = outboxRows(h);
-  assert.deepEqual(rows.map((r) => [r.status, r.error]), [['accepted', null], ['uncertain', 'interrupted'], ['pending', null]]);
+  // A few seconds old: the process that wrote it died mid-send, and a process that has just
+  // started has no send of its own in flight — so it cannot still be on its way.
+  seedOutbox(h, 1, { created: NOW - 3_000, status: 'pending' });
+  seedOutbox(h, 1, { created: NOW, status: 'pending' });
+  // A row stamped ahead of this clock (another process's clock ran fast) is no different.
+  seedOutbox(h, 1, { created: NOW + 5_000, status: 'pending' });
+  assert.equal(h.sender.recoverInterrupted(), 5);
+  assert.deepEqual(outboxRows(h).map((r) => [r.status, r.error]), [
+    ['accepted', null], ['failed', null],
+    ['uncertain', 'interrupted'], ['uncertain', 'interrupted'], ['uncertain', 'interrupted'], ['uncertain', 'interrupted'], ['uncertain', 'interrupted'],
+  ]);
+  assert.equal(h.sender.recoverInterrupted(), 0, 'once');
   h.s.close();
 });
 
-test('recoverInterrupted: a send pending for exactly two minutes stays pending', async () => {
+test('recoverInterrupted: a reply the last process left pending seconds ago no longer holds the chat as stale', async () => {
   const h = harness();
-  seedOutbox(h, 1, { created: NOW - 120_000, status: 'pending' });
-  assert.equal(h.sender.recoverInterrupted(), 0);
-  assert.equal(outboxRows(h)[0].status, 'pending');
+  const staff = staffOf(h);
+  seedChat(h);
+  h.inbox.insertOutbox({ send_id: 'SND-cut-off', lead_id: 'L-1', jid: CLIENT_JID, text: 'x', user_id: staff.user_id, sender_kind: 'staff' });
+  h.tick(5_000);
+  assert.equal(h.sender.recoverInterrupted(), 1);
+  assert.equal(h.inbox.getOutbox('SND-cut-off').status, 'uncertain');
+  assert.equal((await h.sender.reply(replyArgs(staff))).ok, true, 'shown as "not sure it went", not as a send on its way');
   h.s.close();
 });
