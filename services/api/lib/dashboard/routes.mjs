@@ -63,6 +63,13 @@ export const SECURITY_HEADERS = {
 };
 
 export const MAX_NOTE = 2000;
+/**
+ * The reply route's body cap. A reply may be 4,096 characters (lib/wa-send.mjs
+ * MAX_TEXT_LEN), and a form percent-encodes each one to at most nine bytes (a three-byte
+ * UTF-8 character; a four-byte one is two of the 4,096): 36,864 bytes before the other
+ * fields. Every other write keeps `cfg.maxBodyBytes`.
+ */
+export const REPLY_MAX_BODY_BYTES = 64 * 1024;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** `2026-09-08` and a date that exists. `9999-99-99` matches the shape and nothing else. */
@@ -266,17 +273,17 @@ export function createDashboardRoutes({
 
   /**
    * Read and parse a write body.
-   * @returns {{ ok: true, fields: object, form: boolean } | { ok: false, status: number, error: string }}
+   * @returns {{ ok: true, fields: object, form: boolean } | { ok: false, status: number, error: string, form?: boolean }}
    */
-  async function fieldsOf(req) {
+  async function fieldsOf(req, maxBytes = maxBodyBytes) {
     const ct = req.headers['content-type'];
     const form = isForm(ct);
     if (!form && !isJson(ct)) return { ok: false, status: 415, error: 'unsupported_media_type' };
     let text;
     try {
-      text = await readBody(req, maxBodyBytes);
+      text = await readBody(req, maxBytes);
     } catch (err) {
-      if (err?.code === 'BODY_TOO_LARGE') return { ok: false, status: 413, error: 'payload_too_large' };
+      if (err?.code === 'BODY_TOO_LARGE') return { ok: false, status: 413, error: 'payload_too_large', form };
       return { ok: false, status: 400, error: 'bad_request' };
     }
     if (form) return { ok: true, form: true, fields: Object.fromEntries(new URLSearchParams(text)) };
@@ -1080,6 +1087,22 @@ export function createDashboardRoutes({
     return renderThread(res, { status, user: me, lead, draft: text, error });
   }
 
+  /**
+   * A form reply whose body is over `REPLY_MAX_BODY_BYTES`: the thread again with `bad_text`
+   * (the words were never read, so there is no draft to keep). Only a page is drawn — no
+   * write, nothing sent — so it asks only what a page asks: a signed-in person, an open chat.
+   */
+  function replyTooLarge(req, res, leadId) {
+    // The rest of the body is never read, so the connection goes with the answer (refuseBody).
+    res.setHeader('Connection', 'close');
+    const me = currentUser(req);
+    if (!me) return toLogin(res, '', 303);
+    if (!inbox || !sender) return sendJson(res, 404, { error: 'not_found' });
+    const lead = db.getLead(leadId);
+    if (!openChat(lead)) return notInInbox(res, withUnread(me));
+    return renderThread(res, { status: 413, user: me, lead, error: 'bad_text' });
+  }
+
   function inboxHandler({ res, fields, form, me }, leadId) {
     const back = `/dashboard/inbox/${encodeURIComponent(leadId)}`;
     if (!openChat(db.getLead(leadId))) return refuseChat(res, form, me);
@@ -1292,8 +1315,14 @@ export function createDashboardRoutes({
       || ((inboxMatch || candMatch || p === '/v1/admin/inbox/add') ? 'inbox' : null) || (ownerWrite ? 'team' : null);
     if (!writes) return sendJson(res, 404, { error: 'not_found' });
 
-    const parsed = await fieldsOf(req);
-    if (!parsed.ok) return refuseBody(req, res, parsed);
+    const replyWrite = Boolean(inboxMatch && inboxMatch[2] === 'reply');
+    const parsed = await fieldsOf(req, replyWrite ? Math.max(maxBodyBytes, REPLY_MAX_BODY_BYTES) : maxBodyBytes);
+    if (!parsed.ok) {
+      // A form reply too big even for its own cap comes back as the thread, with a message
+      // a person can act on — never a raw JSON answer in the browser.
+      if (replyWrite && parsed.status === 413 && parsed.form) return replyTooLarge(req, res, inboxMatch[1]);
+      return refuseBody(req, res, parsed);
+    }
     if (!hasMarker(req, parsed.fields)) {
       log({ level: 'warn', evt: 'dash.marker_missing', path: p, ip });
       return sendJson(res, 403, { error: 'forbidden', message: 'X-Bona-Dash: 1 (or _dash=1) is required on a write' });

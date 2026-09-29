@@ -647,6 +647,48 @@ test('no reply outcome answers 502 or 504 (Cloudflare replaces those pages, and 
   });
 });
 
+test('a 4,096-character Arabic reply reaches WhatsApp whole; a body too big even for that draws the thread again (bad_text), never raw JSON', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    h.tick(120_000);
+    // Two bytes a letter in UTF-8, six once a form percent-encodes it: 24 KiB of body.
+    const arabic = 'ب'.repeat(4096);
+    const res = await replyTo(h, 'LEAD-A', { text: arabic, send_id: 'send-long-000000000001', seen_ts: String(NOW + 60_000) }, staff);
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), '/dashboard/inbox/LEAD-A?ok=sent');
+    assert.equal(h.evo.calls.length, 1);
+    assert.equal(h.evo.calls[0].body.text, arabic, 'every letter reached the sender');
+
+    // The worst a character can be: three bytes in UTF-8 (ﻻ, the lam-alef ligature), nine encoded — 36 KiB.
+    const ligatures = 'ﻻ'.repeat(4096);
+    const worst = await replyTo(h, 'LEAD-A', { text: ligatures, send_id: 'send-long-000000000002', seen_ts: String(NOW + 120_000) }, staff);
+    assert.equal(worst.headers.get('location'), '/dashboard/inbox/LEAD-A?ok=sent');
+    assert.equal(h.evo.calls[1].body.text, ligatures);
+
+    // Past 64 KiB it is not read at all: the thread comes back with a message a person can act on.
+    const huge = await replyTo(h, 'LEAD-A', { text: 'ب'.repeat(12_000), send_id: 'send-long-000000000003', seen_ts: String(NOW + 120_000) }, staff);
+    assert.equal(huge.status, 413);
+    assertLocked(huge);
+    assert.equal(huge.headers.get('content-type'), 'text/html; charset=utf-8', 'the page, never raw JSON');
+    assert.equal(huge.headers.get('connection'), 'close', 'the unread rest of the body goes with the connection');
+    const html = await huge.text();
+    assert.ok(html.includes('A reply has to have some text, and at most 4,096 characters.'));
+    assert.ok(html.includes('Is BONA-012 still free?'), 'the thread itself');
+    assert.match(fieldOf(html, 'send_id'), /^[A-Za-z0-9_-]{16,64}$/, 'with a fresh form to send from');
+    assert.equal(h.evo.calls.length, 2, 'nothing more went');
+    assert.equal(h.inboxStore.getOutbox('send-long-000000000003'), null, 'and nothing was written');
+
+    // A JSON caller still gets JSON, and every other write keeps the ordinary 16 KiB cap.
+    const json = await h.postJson('/v1/admin/inbox/LEAD-A/reply', { text: 'x'.repeat(70_000), send_id: 'send-long-000000000004', seen_ts: NOW + 120_000 }, { cookie: staff });
+    assert.equal(json.status, 413);
+    assert.deepEqual(await json.json(), { error: 'payload_too_large' });
+    const handler = await h.postForm('/v1/admin/inbox/LEAD-A/handler', { user_id: '', pad: 'x'.repeat(20_000) }, { cookie: staff });
+    assert.equal(handler.status, 413);
+    assert.deepEqual(await handler.json(), { error: 'payload_too_large' });
+  });
+});
+
 test('a refused reply is drawn again with the words kept and a fresh send_id, and nothing is sent', async () => {
   await withInbox(async (h) => {
     seedScene(h);
