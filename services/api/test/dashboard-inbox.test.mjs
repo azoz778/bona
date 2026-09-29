@@ -1016,6 +1016,31 @@ test('a thread draws every unread message past 200 (up to 1,000), says how many 
   });
 });
 
+test('a thread sizes its page by every message from the oldest unread one on, replies included, so a busy chat draws all its unread messages', async () => {
+  await withInbox(async (h) => {
+    const staff = await h.staff();
+    // 30 messages Sara has read, then 150 unread client messages, each answered from the
+    // owner's phone: the answers sit between the unread ones, so 150 unread span 300 messages.
+    seedChat(h, {
+      id: 'LEAD-MIX', name: 'Mix', phone: '966500000094',
+      messages: Array.from({ length: 30 }, (_, i) => ({ key_id: `mix-old-${i}`, text: `mix old ${i}`, ts: NOW + 1_000 + i * 1_000 })),
+    });
+    h.inboxStore.markRead(h.staffUser.user_id, 'LEAD-MIX', NOW + 30_000);
+    for (let i = 0; i < 150; i += 1) {
+      const ts = NOW + 100_000 + i * 2_000;
+      h.inboxStore.upsertMessage({ key_id: `mix-in-${i}`, lead_id: 'LEAD-MIX', jid: '966500000094@s.whatsapp.net', direction: 'in', sender_kind: 'client', text: `mix in ${i}`, ts });
+      h.inboxStore.upsertMessage({ key_id: `mix-out-${i}`, lead_id: 'LEAD-MIX', jid: '966500000094@s.whatsapp.net', direction: 'out', sender_kind: 'owner_number', text: `mix out ${i}`, ts: ts + 1_000 });
+    }
+    const html = await (await h.get('/dashboard/inbox/LEAD-MIX', { cookie: staff })).text();
+    const drawn = new Set([...html.matchAll(/mix in (\d+)</g)].map((m) => Number(m[1])));
+    assert.equal(drawn.size, 150, 'every unread client message is drawn, not only the newest 100');
+    assert.match(html, /mix old 10</, '20 messages before the oldest unread one');
+    assert.doesNotMatch(html, /mix old 9</);
+    assert.match(html, /10 earlier messages are not shown here\./);
+    assert.equal(h.inboxStore.unreadSpan('LEAD-MIX', { userId: h.staffUser.user_id, userCreated: h.staffUser.created }), 0, 'all of them read now');
+  });
+});
+
 test('nothing the inbox writes to the log carries message text, a phone number or a name', async () => {
   await withInbox(async (h) => {
     seedScene(h);

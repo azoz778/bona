@@ -950,7 +950,10 @@ export function createDashboardRoutes({
     }
   }
 
-  /** A thread draws at least this many messages, its unread ones plus this much before them, and never more than the most. */
+  /**
+   * A thread draws at least this many messages, every message from the oldest unread one
+   * on plus this much before them, and never more than the most.
+   */
   const THREAD_MESSAGES = 200;
   const THREAD_CONTEXT = 20;
   const THREAD_MOST = 1000;
@@ -960,12 +963,14 @@ export function createDashboardRoutes({
    * a message the poller stores a moment later with an earlier WhatsApp timestamp must
    * still count as unread. `seenTs` rides in the form for the sender's stale-view guard.
    *
-   * Every unread message is drawn, not only the newest 200: the newest max(200, unread +
-   * 20) messages, at most 1,000, and the page says how many older ones it leaves out.
+   * Every unread message is drawn, not only the newest 200: the newest max(200, span + 20)
+   * messages, at most 1,000, where the span is every message, both directions, from this
+   * person's oldest unread one on — replies between unread messages take room on the page
+   * too. The page says how many older ones it leaves out.
    */
   function renderThread(res, { status = 200, user, lead, draft = '', ok = null, error = null }) {
-    const unread = inbox.unreadIn(lead.lead_id, { userId: user.user_id, userCreated: user.created ?? 0 });
-    const messages = inbox.messagesFor(lead.lead_id, { limit: Math.min(THREAD_MOST, Math.max(THREAD_MESSAGES, unread + THREAD_CONTEXT)) });
+    const span = inbox.unreadSpan(lead.lead_id, { userId: user.user_id, userCreated: user.created ?? 0 });
+    const messages = inbox.messagesFor(lead.lead_id, { limit: Math.min(THREAD_MOST, Math.max(THREAD_MESSAGES, span + THREAD_CONTEXT)) });
     const hidden = Math.max(0, inbox.countMessages(lead.lead_id) - messages.length);
     const seenTs = messages.reduce((max, m) => (Number(m.ts) > max ? Number(m.ts) : max), 0);
     if (seenTs) inbox.markRead(user.user_id, lead.lead_id, seenTs);
