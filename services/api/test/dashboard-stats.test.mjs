@@ -422,6 +422,40 @@ test('median and percentile', () => {
 
 /* ---------------- the bundle the admin API answers with ---------------- */
 
+test('owner-started leads are not acquisitions: out of the Desk new-lead counts, the sources table and ROI; still on the board and in match quality', () => {
+  const { db, stats } = seeded();
+  const window = { fromDay: day(3), toDay: day(0) };
+  const before = {
+    daily: stats.overviewDaily(14), sources: stats.sources(), roi: stats.roi(window), cpl: stats.cplByCampaign(),
+    pipeline: Object.fromEntries(stats.pipeline().map((p) => [p.stage, p.count])),
+  };
+  // A chat the owner started by sending a Bona link, and a number he added on the dashboard
+  // that later came back through the paid campaign: neither is a lead the campaign found.
+  db.insertLead({
+    lead_id: 'LEAD-OUT', created: NOW - DAY_MS, updated: NOW - DAY_MS, phone_e164: '966500000011',
+    channel: 'whatsapp', source: 'whatsapp_organic', medium: '(none)', match_method: 'owner_outbound',
+    stage: 'new', stage_ts: NOW - DAY_MS, first_reply_ts: NOW - DAY_MS,
+  });
+  db.insertLead({
+    lead_id: 'LEAD-ADD', created: NOW - DAY_MS, updated: NOW - DAY_MS, phone_e164: '966500000012',
+    channel: 'whatsapp', source: 'meta', medium: 'paid', campaign: 'villas_sep', campaign_id: '1203', match_method: 'owner_added',
+    first_touch: META_TOUCH, last_touch: META_TOUCH, stage: 'qualified', stage_ts: NOW - DAY_MS, first_reply_ts: NOW - DAY_MS,
+  });
+
+  assert.deepEqual(stats.overviewDaily(14), before.daily, 'the Desk\'s leads per day, and so its "Leads · N d" and its funnel');
+  assert.deepEqual(stats.sources(), before.sources, 'no row, no first or last touch, no share of the spend');
+  assert.deepEqual(stats.roi(window), before.roi, 'no campaign, no unknown bucket, no coverage');
+  assert.deepEqual(stats.cplByCampaign(), before.cpl, 'the Spend page\'s cost per lead agrees with its ROI');
+  assert.deepEqual(stats.overview(14).roi.totals, stats.roi().totals);
+
+  const pipeline = Object.fromEntries(stats.pipeline().map((p) => [p.stage, p.count]));
+  assert.equal(pipeline.new, before.pipeline.new + 1, 'still on the pipeline board');
+  assert.equal(pipeline.qualified, before.pipeline.qualified + 1);
+  const quality = Object.fromEntries(stats.matchQuality().map((r) => [r.match_method, r.count]));
+  assert.deepEqual(quality, { ref: 1, time_window: 1, keyword: 1, form: 1, owner_outbound: 1, owner_added: 1 }, 'and in match quality');
+  assert.equal(stats.overview(14).totals.leads, 6, 'the book still holds them');
+});
+
 test('overview() carries every section plus the totals', () => {
   const { stats } = seeded();
   const o = stats.overview(7);
