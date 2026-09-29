@@ -950,18 +950,30 @@ export function createDashboardRoutes({
     }
   }
 
+  /** A thread draws at least this many messages, its unread ones plus this much before them, and never more than the most. */
+  const THREAD_MESSAGES = 200;
+  const THREAD_CONTEXT = 20;
+  const THREAD_MOST = 1000;
+
   /**
-   * Draw one chat and mark it read — up to the newest message on the page, never "now":
+   * Draw one chat and mark it read — up to the newest message the page drew, never "now":
    * a message the poller stores a moment later with an earlier WhatsApp timestamp must
    * still count as unread. `seenTs` rides in the form for the sender's stale-view guard.
+   *
+   * Every unread message is drawn, not only the newest 200: the newest max(200, unread +
+   * 20) messages, at most 1,000, and the page says how many older ones it leaves out.
    */
   function renderThread(res, { status = 200, user, lead, draft = '', ok = null, error = null }) {
-    const seenTs = inbox.newestTs(lead.lead_id) ?? 0;
+    const unread = inbox.unreadIn(lead.lead_id, { userId: user.user_id, userCreated: user.created ?? 0 });
+    const messages = inbox.messagesFor(lead.lead_id, { limit: Math.min(THREAD_MOST, Math.max(THREAD_MESSAGES, unread + THREAD_CONTEXT)) });
+    const hidden = Math.max(0, inbox.countMessages(lead.lead_id) - messages.length);
+    const seenTs = messages.reduce((max, m) => (Number(m.ts) > max ? Number(m.ts) : max), 0);
     if (seenTs) inbox.markRead(user.user_id, lead.lead_id, seenTs);
     return sendHtml(res, status, threadPage({
       me: withUnread(user),
       lead,
-      messages: inbox.messagesFor(lead.lead_id),
+      messages,
+      hidden,
       gaps: inbox.gapsFor(lead.lead_id),
       outbox: inbox.openOutboxFor(lead.lead_id),
       // Everyone, not only the active: a reply keeps its author's name after they leave.

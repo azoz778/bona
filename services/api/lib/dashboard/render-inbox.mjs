@@ -267,10 +267,14 @@ function outboxStatus(row) {
  * and only a real `true` turns them on). The form carries `send_id` (a double tap sends
  * once) and `seen_ts`, the newest message this page showed, so a reply written against
  * an old view is held back.
+ *
+ * `hidden` is how many stored messages older than the first one drawn the page leaves out
+ * (the route draws every unread message, up to 1,000); the thread says so above the first
+ * one rather than looking like the start of the chat.
  */
 export function threadPage({
   me, lead, messages, gaps = [], outbox = [], users = [], sendId, seenTs, sendingEnabled, canReply, repliesEnabled = false,
-  draft = '', ok = null, error = null, now = Date.now(),
+  draft = '', ok = null, error = null, now = Date.now(), hidden = 0,
 }) {
   const owner = me?.role === 'owner';
   const people = Array.isArray(users) ? users : [];
@@ -318,8 +322,12 @@ export function threadPage({
     <a class="r" href="${esc(leadHref(lead.lead_id))}">Lead record →</a></div>
 </div>`;
 
+  const left = Number.isInteger(hidden) && hidden > 0 ? hidden : 0;
+  const earlier = left
+    ? `<p class="muted">${esc(left.toLocaleString('en-US'))} earlier ${left === 1 ? 'message is' : 'messages are'} not shown here.</p>`
+    : '';
   const thread = items.length
-    ? `<div class="thread">${items.map((it) => it.html).join('')}</div>`
+    ? `${earlier}<div class="thread">${items.map((it) => it.html).join('')}</div>`
     : '<p class="muted">No messages stored for this chat yet.</p>';
 
   let reply;
