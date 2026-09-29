@@ -6,11 +6,12 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {
   LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE, PROPERTY_WORD_RE, MAX_PROPERTY_WORDS, INBOX_STATES,
   // The two kinds of document word and the property words (owner answer, 2026-09-28).
   BROCHURE_RE, QUALIFIED_DOC_RE, PROPERTY_NOUN_RE,
-  inboundSignal, ownerOutboundJoins, isTkDocument, namesTk, namesBona, propertyWordsIn, nextInboxState, hasAdEvidence,
+  inboundSignal, ownerOutboundJoins, isTkDocument, namesTk, namesBona, propertyWordsIn, nextInboxState, hasAdEvidence, PROPERTY_WORD_FORMS,
 } from '../lib/inbox/eligibility.mjs';
 import { normaliseRecord } from '../lib/evolution.mjs';
 
@@ -771,22 +772,41 @@ test('property words come out as the forms the owner\'s list shows: each once, i
   for (const [text, words] of [
     ['عندكم شقة للإيجار؟', ['شقة', 'إيجار']],
     ['the villa is 3M', ['villa']],
-    ['Villas and apartments for rent, 300m², 4 bedrooms', ['villa', 'apartment', 'rent', 'sqm', 'bedroom']],
-    ['Flat to let? Lease or rental, a plot of land, 2 properties', ['flat', 'lease', 'rent', 'plot', 'land', 'property']],
-    ['Real-estate broker, commission 2.5%', ['real estate', 'broker', 'commission']],
-    ['DUPLEX penthouse Town House compound listing 250 sqm', ['duplex', 'penthouse', 'townhouse', 'compound', 'listing', 'sqm']],
+    ['villa for sale', ['villa', 'for sale']],
+    ['Villas and apartments for rent, 300m², 4 bedrooms', ['villa', 'apartment', 'rent']],
+    ['A rental? Two rentals, 2 properties, one property', ['rent', 'property']],
+    ['Real-estate, real estate, RealEstate', ['real estate']],
+    ['FOR SALE: DUPLEX penthouse Town House', ['for sale', 'duplex', 'penthouse', 'townhouse']],
     ['الفيلا فله فلل فلة فيلا', ['فيلا']],
-    ['شقه، الشقق', ['شقة']],
-    ['ايجار الإيجار للايجار', ['إيجار']],
-    ['أرض للبيع، ارض، الأراضي', ['أرض', 'للبيع']],
+    ['شقه، الشقق، شقق', ['شقة']],
+    ['ايجار الإيجار للايجار للإيجار', ['إيجار']],
+    ['أرض للبيع', ['للبيع']],
     ['عقار العقارات دوبلكس البنتهاوس', ['عقار', 'دوبلكس', 'بنتهاوس']],
-    ['تاون هاوس في مجمع سكني', ['تاون هاوس', 'مجمع سكني']],
-    ['غرفة غرف غرفه', ['غرفة']],
-    ['الصك مع السمسار، العمولة ٢٫٥', ['صك', 'سمسار', 'عمولة']],
-    ['مخطط الشاطئ', ['مخطط']],
-    ['villa apartment flat rent lease land plot property duplex penthouse', ['villa', 'apartment', 'flat', 'rent', 'lease', 'land', 'plot', 'property']],
+    ['تاون هاوس في مجمع سكني', ['تاون هاوس']],
+    ['villa apartment rent for sale real estate property duplex penthouse townhouse', ['villa', 'apartment', 'rent', 'for sale', 'real estate', 'property', 'duplex', 'penthouse']],
   ]) {
     assert.deepEqual(propertyWordsIn(text), words, text);
+  }
+});
+
+test('the property words are strong real-estate terms only, and the privacy page names exactly them (D17)', () => {
+  assert.deepEqual(PROPERTY_WORD_FORMS, [
+    'villa', 'apartment', 'rent', 'for sale', 'real estate', 'property', 'duplex', 'penthouse', 'townhouse',
+    'فيلا', 'شقة', 'إيجار', 'للبيع', 'عقار', 'دوبلكس', 'بنتهاوس', 'تاون هاوس',
+  ]);
+  assert.ok(Object.isFrozen(PROPERTY_WORD_FORMS));
+  // The page promises that only these words keep a chat (src/data/privacy.json): it lists
+  // every one of them, in both languages, and none of the words the code no longer counts.
+  const policy = JSON.parse(fs.readFileSync(new URL('../../../src/data/privacy.json', import.meta.url), 'utf8'));
+  const s = policy.sections.find((x) => x.id === 'whatsapp-conversations');
+  const exception = { en: s.body.en.find((p) => p.startsWith('There is one narrow exception')), ar: s.body.ar.find((p) => p.startsWith('وهناك استثناء محدود')) };
+  for (const locale of ['en', 'ar']) {
+    assert.ok(exception[locale], `${locale}: the exception paragraph`);
+    for (const word of PROPERTY_WORD_FORMS) assert.ok(exception[locale].includes(word), `${locale} lists ${word}`);
+    for (const word of ['land', 'flat', 'plot', 'compound', 'listing', 'bedroom', 'broker', 'lease', 'commission', 'sqm']) {
+      assert.doesNotMatch(exception[locale], new RegExp(`\\b${word}`, 'i'), `${locale} does not list ${word}`);
+    }
+    for (const word of ['أرض', 'غرفة', 'صك', 'سمسار', 'عمولة']) assert.ok(!exception[locale].includes(word), `${locale} does not list ${word}`);
   }
 });
 
@@ -794,13 +814,19 @@ test('a property word is found by its own named group, never by its position amo
   // Labels by position would all shift the day a word's source gains a plain ( ) group.
   const m = PROPERTY_WORD_RE.exec('a duplex for sale');
   assert.ok(m?.groups, 'one named group per word');
-  assert.deepEqual(Object.keys(m.groups).filter((k) => m.groups[k] !== undefined), ['w9'], 'duplex is the tenth word');
+  assert.deepEqual(Object.keys(m.groups).filter((k) => m.groups[k] !== undefined), ['w6'], 'duplex is the seventh word');
   assert.ok(Object.keys(m.groups).every((k, i) => k === `w${i}`), 'named w0, w1 … in the table\'s order');
-  assert.deepEqual(propertyWordsIn('a duplex for sale'), ['duplex']);
+  assert.deepEqual(propertyWordsIn('a duplex for sale'), ['duplex', 'for sale']);
 });
 
-test('words that only contain a property word, everyday Arabic and non-strings are no property words', () => {
-  for (const text of ['Hello', 'villager', 'parent', 'current', 'island', 'landlord', 'flatter', 'rented a car', 'plotted',
+test('only strong property terms count: everyday words, words that only contain one, and non-strings are no property words', () => {
+  // Everyday words that are also real-estate words (land, flat, plot, compound, listing,
+  // bedroom, broker, lease, commission, sqm; أرض, غرفة, مخطط, صك, سمسار, عمولة) are not
+  // on the list: "My flight will land at 9" is nobody's property enquiry.
+  for (const text of ['My flight will land at 9', 'flat tyre', 'غرفة النوم', 'a plot twist', 'compound interest', 'the listing', '4 bedrooms',
+    'my broker', 'car lease', 'sales commission', '250 sqm', '300m²', 'أرض', 'ارض', 'الأراضي', 'مجمع سكني', 'مخطط الشاطئ', 'الصك', 'السمسار', 'العمولة',
+    'for', 'sale', 'on sale', 'he rents', 'forsale',
+    'Hello', 'villager', 'parent', 'current', 'island', 'landlord', 'flatter', 'rented a car', 'plotted',
     'commissioner', 'broken', 'propertyX', 'km²', 'طحت على الأرض', 'الغرفة باردة', 'والفيلا', 'بالإيجار', 'كوبونات', 'Bona', '']) {
     assert.deepEqual(propertyWordsIn(text), [], text);
     assert.equal(PROPERTY_WORD_RE.test(text), false, text);

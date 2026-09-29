@@ -228,51 +228,46 @@ function nameHasSiteLink(name) {
 
 /**
  * Words that say a chat is about property, each with the one form the owner's list shows
- * (D17). English and Arabic, bounded like `BONA_WORD_RE` by anything that is not a letter or
- * a mark (`3villas` and `villa2` count, `villager` does not). Arabic words written with ه
- * for ة (فله, شقه) count too, as people type them, and most Arabic nouns also with the
- * article (الفيلا, العقار); أرض and غرفة do not, because with it they are everyday words (the
- * ground, the room). A clitic before a word (والفيلا, بالإيجار) is missed: that only means
- * the owner does not see that chat on his list, never that anything joins.
+ * (D17). Only strong real-estate terms, in English and Arabic: villa, apartment, rent /
+ * rental / for rent, for sale, real estate, property, duplex, penthouse, townhouse; فيلا,
+ * شقة, إيجار / للإيجار, للبيع, عقار, دوبلكس, بنتهاوس, تاون هاوس. Words that are just as often
+ * everyday words are left out on purpose (final review, 2026-09-29): land, flat, plot,
+ * compound, listing, bedroom, broker, lease, commission, sqm; أرض, غرفة, مخطط, صك, سمسار,
+ * عمولة — "My flight will land at 9", "flat tyre" and "غرفة النوم" are nobody's property
+ * enquiry, and the privacy page promises only these words keep a chat. Each is bounded like
+ * `BONA_WORD_RE` by anything that is not a letter or a mark (`3villas` and `villa2` count,
+ * `villager` and `rented` do not). Arabic words written with ه for ة (فله, شقه) count too,
+ * as people type them, and the nouns also with the article (الفيلا, العقار). A clitic before
+ * a word (والفيلا, بالإيجار) is missed: that only means the owner does not see that chat on
+ * his list, never that anything joins.
  *
  * A match only ever puts a chat on the owner's list of chats to check; it never joins one.
- * Every alternative starts with a fixed word and repeats nothing: linear in the text.
+ * Every alternative starts with a fixed word and repeats nothing unbounded: linear in the text.
  */
 const PROPERTY_WORDS = [
   ['villa', 'villas?'],
   ['apartment', 'apartments?'],
-  ['flat', 'flats?'],
-  ['rent', 'rent(?:al)?s?'],
-  ['lease', 'leases?'],
-  ['land', 'lands?'],
-  ['plot', 'plots?'],
-  ['property', 'propert(?:y|ies)'],
+  ['rent', 'rent|rentals?'],
+  ['for sale', String.raw`for[\s_-]{1,3}sale`],
   ['real estate', String.raw`real[\s_-]?estate`],
+  ['property', 'propert(?:y|ies)'],
   ['duplex', 'duplex(?:es)?'],
   ['penthouse', 'penthouses?'],
   ['townhouse', String.raw`town[\s_-]?houses?`],
-  ['compound', 'compounds?'],
-  ['bedroom', 'bedrooms?'],
-  ['sqm', 'sqm|m²'],
-  ['listing', 'listings?'],
-  ['broker', 'brokers?'],
-  ['commission', 'commissions?'],
   ['فيلا', '(?:ال)?(?:فيلا|فلل|فلة|فله)'],
   ['شقة', '(?:ال)?(?:شقة|شقه|شقق)'],
   ['إيجار', '(?:ال|لل)?[إا]يجار'],
   ['للبيع', 'للبيع'],
-  ['أرض', '[أا]رض|(?:ال)?[أا]راضي'],
   ['عقار', '(?:ال)?عقارات?'],
   ['دوبلكس', '(?:ال)?دوبلكس'],
   ['بنتهاوس', '(?:ال)?بنتهاوس'],
   ['تاون هاوس', String.raw`تاون[\s_-]?هاوس`],
-  ['مجمع سكني', String.raw`مجمع[\s_-]?سكني`],
-  ['غرفة', 'غرفة|غرفه|غرف'],
-  ['صك', '(?:ال)?صك'],
-  ['سمسار', '(?:ال)?سمسار'],
-  ['عمولة', '(?:ال)?(?:عمولة|عموله)'],
-  ['مخطط', '(?:ال)?مخطط'],
 ];
+/**
+ * The forms the owner's list shows, in the table's order. The privacy page (src/data/privacy.json)
+ * lists exactly these as the words that keep a chat; a test holds the two together.
+ */
+export const PROPERTY_WORD_FORMS = Object.freeze(PROPERTY_WORDS.map(([form]) => form));
 const WORDS_SOURCE = String.raw`(?<![\p{L}\p{M}])(?:${PROPERTY_WORDS.map(([, src], i) => `(?<w${i}>${src})`).join('|')})(?![\p{L}\p{M}])`;
 /**
  * Any property word: one named group per word, `w<index in PROPERTY_WORDS>`, so a word is

@@ -131,15 +131,23 @@ test('the chats kept only to be checked are named: what is kept, for how long, a
   const s = section('whatsapp-conversations');
   assert.ok(s, 'the section is missing');
   const en = body(s, 'en');
-  assert.match(en, /looks like a property enquiry/);
-  assert.match(en, /the property words it used/);
+  // What keeps a chat, exactly as the code decides it (lib/inbox/eligibility.mjs
+  // PROPERTY_WORDS, lib/wa-poller.mjs candidateWordsOf): one of the listed property words,
+  // in a message sent or received; a property document named in a message or a file name;
+  // a property or TK document the owner sends. Not "looks like a property enquiry": that
+  // promised a judgement the code does not make.
+  assert.doesNotMatch(en, /looks like a property enquiry/);
+  assert.match(en, /When a message sent or received on our number uses one of these property words — villa, apartment, rent \(rental, for rent\), for sale, real estate, property, duplex, penthouse, townhouse, or in Arabic فيلا, شقة, إيجار \(للإيجار\), للبيع, عقار, دوبلكس, بنتهاوس, تاون هاوس —/);
+  assert.match(en, /or mentions a property document such as a brochure, a floor plan or a price list/);
+  assert.match(en, /or when the owner of Bona sends a property document or a document of TK Estate & Design, his other company/);
+  assert.match(en, /and the chat is not already a Bona enquiry/);
   assert.match(en, /until 30 days after the last such message/);
   assert.doesNotMatch(en, /for up to 30 days/, 'a chat that keeps writing is kept as long as it does');
   assert.match(en, /The conversation itself is not stored unless/);
   assert.match(en, /for up to a year/);
   // "Only" lists every field the row keeps (lib/inbox/store.mjs `inbox_candidates`): the
   // ids, the name, the words, the times, the count and who wrote last.
-  assert.match(en, /we keep only the number \(and the ids WhatsApp gives the chat\), the name WhatsApp shows for it, the property words it used/);
+  assert.match(en, /we keep only the number \(and the ids WhatsApp gives the chat\), the name WhatsApp shows for it, those words \(or that it was a property or TK document\)/);
   assert.match(en, /when such messages were sent, how many there were and who sent the last one/);
   assert.doesNotMatch(en, /we keep only the number, the name WhatsApp shows for it and the property words/);
   // A later sure sign joins the chat on its own, and the join copies its earlier messages.
@@ -149,13 +157,16 @@ test('the chats kept only to be checked are named: what is kept, for how long, a
   assert.match(en, /are not stored; the next paragraph describes the one narrow exception/);
   assert.ok(policy.updated >= '2026-09-29', 'the version date moves with this change');
   const ar = body(s, 'ar');
-  assert.match(ar, /استفساراً عقارياً/);
-  assert.match(ar, /الكلمات العقارية/);
+  assert.doesNotMatch(ar, /استفساراً عقارياً/);
+  assert.match(ar, /إذا استُخدمت في رسالة مُرسلة أو واردة على رقمنا إحدى هذه الكلمات العقارية — فيلا، شقة، إيجار \(للإيجار\)، للبيع، عقار، دوبلكس، بنتهاوس، تاون هاوس، أو بالإنجليزية villa وapartment وrent \(rental وfor rent\) وfor sale وreal estate وproperty وduplex وpenthouse وtownhouse —/);
+  assert.match(ar, /أو ذُكر فيها مستند عقاري مثل بروشور أو مخطط أو قائمة أسعار/);
+  assert.match(ar, /أو أرسل مالك بونا مستنداً عقارياً أو مستنداً لشركته الأخرى TK Estate & Design/);
+  assert.match(ar, /ولم تكن المحادثة استفساراً لدى بونا أصلاً/);
   assert.match(ar, /حتى ثلاثين يوماً من آخر رسالة من هذا النوع/);
   assert.match(ar, /ولا تُحفظ المحادثة نفسها/);
   assert.match(ar, /مدةً أقصاها سنة/);
   assert.match(ar, /باستثناء محدود نبيّنه في الفقرة التالية/);
-  assert.match(ar, /إلا بالرقم \(ومعرّفات واتساب للمحادثة\)، والاسم الذي يُظهره واتساب له، والكلمات العقارية/);
+  assert.match(ar, /إلا بالرقم \(ومعرّفات واتساب للمحادثة\)، والاسم الذي يُظهره واتساب له، وهذه الكلمات \(أو أنها كانت مستنداً عقارياً أو مستنداً لـ TK\)/);
   assert.match(ar, /ووقت هذه الرسائل وعددها ومَن أرسل آخرها/);
   assert.match(ar, /ما لم يُضفها إلى صندوق محادثات بونا أو تصبح لاحقاً استفساراً لدى بونا/);
   assert.match(ar, /لا نحتفظ إلا بالرقم ومعرّفات واتساب للمحادثة، مدةً أقصاها سنة/);
@@ -171,15 +182,17 @@ test('the Changes section flags the chats kept only to be checked, in both langu
   const en = line('en', '29 September 2026:');
   assert.ok(en, 'the version date moved to 29 September for this change, so Changes says what changed');
   assert.match(en, /“WhatsApp conversations with our team”/);
-  assert.match(en, /looks like a property enquiry but does not make clear that it is for Bona/);
-  assert.match(en, /the number, the name WhatsApp shows and the property words it used, not the conversation/);
+  assert.match(en, /When a message sent or received on our number uses one of the property words that section lists, or mentions a property document, or the owner of Bona sends a property document or a document of TK Estate & Design, and the chat is not already a Bona enquiry/);
+  assert.doesNotMatch(en, /looks like a property enquiry/);
+  assert.match(en, /the number, the name WhatsApp shows and those words, not the conversation/);
   assert.match(en, /until 30 days after the last such message/);
   assert.match(en, /for up to a year/);
   const ar = line('ar', '29 سبتمبر 2026:');
   assert.ok(ar, 'the Arabic text says everything the English does');
   assert.match(ar, /«محادثات واتساب مع فريق بونا»/);
-  assert.match(ar, /استفساراً عقارياً دون أن يتضح أنها موجّهة إلى بونا/);
-  assert.match(ar, /الرقم، والاسم الذي يُظهره واتساب، والكلمات العقارية الواردة فيها، دون المحادثة نفسها/);
+  assert.match(ar, /فإذا استُخدمت في رسالة مُرسلة أو واردة على رقمنا إحدى الكلمات العقارية التي يذكرها القسم، أو ذُكر فيها مستند عقاري، أو أرسل مالك بونا مستنداً عقارياً أو مستنداً لـ TK Estate & Design، ولم تكن المحادثة استفساراً لدى بونا أصلاً/);
+  assert.doesNotMatch(ar, /استفساراً عقارياً دون أن يتضح/);
+  assert.match(ar, /الرقم، والاسم الذي يُظهره واتساب، وهذه الكلمات، دون المحادثة نفسها/);
   assert.match(ar, /حتى ثلاثين يوماً من آخر رسالة من هذا النوع/);
   assert.match(ar, /مدةً أقصاها سنة/);
   assert.ok(policy.updated >= '2026-09-29', 'the version date is the newest change');
