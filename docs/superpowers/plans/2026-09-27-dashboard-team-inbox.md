@@ -2123,9 +2123,14 @@ Probed `POST /chat/findMessages/abdulaziz-personal` on the VPS (`127.0.0.1:8085`
 - **A10 The window is ours to keep too** (second quality review of Task 6, 2026-09-28, Claude + Codex). (1) Privacy, next to A1 and A9: a per-chat read keeps a record only when `Number.isFinite(rec.ts)` and it lies inside the window the question carried (`history`: `[max(sinceTs, now − RETENTION_MS), untilTs]`; `refresh`: `[floor, now]`); anything else is counted and logged once per question as `inbox.backfill.outside_window` `{ leadId, clause, count }`, never handed to ingest. A1's floor rested on Evolution's `messageTimestamp` filter alone, which 2.3.7 already skips unless both bounds are sent; a stub that honoured the key but not the time had `refresh` store a record from 90 days before the floor, and a record with `ts: null` stamped with the current time. (2) What a question fetched before a later page (or the second phone question) failed is stored, oldest first, before the `{ error }` comes back (A9(2) held only across questions). (3) Once the chat has left the inbox mid-read (the owner pressed *Not a client*), neither the second phone question nor the lid question is sent. (4) `history` clamps `sinceTs` to the retention horizon itself, as `refresh` does; a window wholly older than it returns `{ stored: 0, scanned: 0, truncated: false }` without asking. (5) `refresh` returns `truncated: false` always: reading the newest `REFRESH_LIMIT` is the point, and `true` would flag every active chat. (6) A `refresh` inside `minIntervalMs` while the same chat's read is still under way awaits that read (capped by its budget) before returning `{ skipped: 'recent' }`, so the pre-send stale-view check never runs on data the read in flight has not stored yet. (7) `budgetMs`/`minIntervalMs` that are not a finite number from 0 read the defaults (3,000 / 5,000; a NaN pause switched the pause off), and each question's `timeoutMs` is a whole number of at least 1 ms (`AbortSignal.timeout` throws on `1000.5`, which came back as `{ error: 'network' }` with nothing sent).
 
 
+### Owner decisions D15–D17 (2026-09-28, answered in chat; binding like D1–D14)
+- **D15** TK click-to-WhatsApp ads go to the TK company number only; any ad-origin chat on the personal number is a Bona client (ad context stays certain).
+- **D16** A chat joins when the owner sends it a property document: a brochure on its own; a floor plan / price list / payment plan / master plan / fact sheet / booklet / plan only next to a property word (villa, apartment, unit, project…), a listing id or a Bona site link (owner answer 2026-09-28: TK design work uses those words); or a listing id / Bona site link as before. A document naming Bona joins only through a listing id or a site link (Bona AB floor finishes); a document naming TK never joins (it becomes a candidate).
+- **D17** Other real-estate chats (property words, either direction) go to the owner-only Unsure list as candidates (`inbox_candidates`: ids, WhatsApp name, matched property words; never text; open rows pruned 30 days after the last such message; dismissed rows keep only the chat's ids for a year). Nothing auto-joins without a sure signal; TK chats stay out. Tasks 15 (D16) and 16 (D17) implement these; the ship task is now Task 17.
+
 ### Task order
 
-1 Schema v4 · 2 Evolution reads · 3 Eligibility rules · 4 Inbox store · 5 Ingest · 6 Backfill · 7 Sender (outbox, caps, reply) · 8 Leads · 9 Poller · 10 Inbox screens · 11 Wiring + maintenance · 12 Routes · 13 Privacy page + README · 14 Replies ship off (D14) · 15 Reviews, rehearsal, ship, STOP.
+1 Schema v4 · 2 Evolution reads · 3 Eligibility rules · 4 Inbox store · 5 Ingest · 6 Backfill · 7 Sender (outbox, caps, reply) · 8 Leads · 9 Poller · 10 Inbox screens · 11 Wiring + maintenance · 12 Routes · 13 Privacy page + README · 14 Replies ship off (D14) · 15 Property documents join (D16) · 16 Real-estate chats to the owner's Unsure list (D17) · 17 Reviews, rehearsal, ship, STOP.
 Each task: implementer subagent (TDD) → spec review → quality review, fix loops until both pass (superpowers:subagent-driven-development). Tasks run in order; each builds on the code the previous ones leave.
 
 ### File map — Phase 2
@@ -12526,7 +12531,3372 @@ and audited. Login codes do not depend on it.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-### Task 15: Reviews, migration rehearsal, ship Phase 2, STOP for the owner
+### Task 15: Property documents join the inbox; the word Bona, Bona AB's papers and TK documents do not (D16)
+
+Owner decisions of 2026-09-28 (binding, same weight as D1–D14):
+
+- **D15** TK's click-to-WhatsApp ads go to the TK company number only, so an ad-origin chat on the owner's personal number is a Bona client: ad context stays a **certain** signal. No code changes; this task records it in `lib/inbox/eligibility.mjs` and the README (it settles the question A7 left open).
+- **D16** A chat joins the Bona inbox when the owner sends it **any property document** — a brochure, floor plan, price list, payment plan, master plan or fact sheet, from any developer, in English or Arabic, by its file name or caption — or, as before, a listing id or a Bona site link in the text, caption or file name. The bare word "Bona" on a document **no longer** joins (Bona AB makes wood-floor finishes: "Bona Traffic HD datasheet.pdf" must not pull a TK chat in; this settles A7's other open question). A document whose file name or caption names **TK** (`TK` as a word, `T.K.`, `tk-estates`, `تي كي` / `تى كى`) never joins by itself, whatever else it says; Task 16 puts such a chat on the owner's list of real-estate chats to check instead (D17).
+
+What changes, as Task 3 and its amendments A5–A8 left the rules:
+
+- `PROPERTY_DOC_RE` (new, exported): the document words, bounded like `BONA_WORD_RE` by anything that is not a letter or a mark; two English words may be joined by a space, `-`, `_` or nothing; the Arabic single words also with the article (البروشور), which the brief's list did not name but a caption like "هذا البروشور" needs. Linear time (every alternative starts with a fixed word and repeats nothing).
+- `TK_RE` (new, exported): `TK` bounded by anything that is not a letter or a digit, `T.K.` / `T.K`, `tk-estates` / `TKEstates`, and `تي كي` **bounded** like `بونا`, with ي or ى in either place: Saudi typing often ends a word with ى, so `بروشور تى كى.pdf` and `بروشور تي كى.pdf` name TK too (the brief's `تي\s?كي` missed them, and each joined with 24 h of history). The brief's pattern also left the Arabic side unbounded, which is exactly A5's mistake: بلاستيكي / بلاستيكى (plastic) and أوتوماتيكي (automatic) contain تيكي, and every document so named would read as TK. Bounded, a TK name still counts when it is its own word.
+- `isTkDocument(o)` (new, exported): a document whose file name or caption matches `TK_RE`.
+- `ownerOutboundJoins(o)`: text and non-document captions are unchanged (site link or listing id). A document: `TK_RE` in its file name or caption → `false`, first; then a site link or a listing id in the caption or the file name → `true`; then our name (`BONA_WORD_RE`) in the file name or caption → `false`; else `PROPERTY_DOC_RE` in the caption or the file name → `true`. In a file name `_` stands for a space, so `Villa_BONA-W003_EN.pdf` still joins as it did before (it used to join through the word `BONA`; `LISTING_ID_RE`'s `\b` alone would now miss it). `BONA_WORD_RE` no longer joins anything.
+- **A document that names Bona joins only by a listing id or a site link** (decided inside D16, fail-safe; the owner is asked below). D16's own example, "Bona Traffic HD datasheet.pdf", matches no document word, but Bona AB publishes brochures, price lists and fact sheets too, and TK Estate & Design sends them to TK clients: "Bona Traffic HD brochure.pdf", "Bona Price List 2026.pdf" and "Bona Traffic HD Fact Sheet.pdf" would each pull a TK chat into the inbox with 24 h of history — the harm D16 was written to stop — while the owner's words are "if it's related to real estate". Our name next to a document word cannot tell Bona AB from us, so it is not a sure sign (D17): such a chat goes on the owner's list of real-estate chats to check (Task 16 notes it as a `property document`), one tap from the inbox. The price is a brochure of ours named "Bona Villa brochure.pdf" with no listing id: it no longer joins by itself.
+- **Cut names.** A name cut at 120 code points is still read without its last 16 (`CUT_MARGIN`), and there a property word or a listing id counts only when a character that cannot carry it on follows it inside what is read (so `…Brochure` cut from `…BrochureX` is never read as `brochure`); a site link, whose look-ahead reaches 257 characters, is not read in a cut name at all. `WORD_AT_END_RE` goes: it only guarded the word Bona as a reason to join, which it no longer is. But TK or Bona can sit in the part the cut hid ("Villa Brochure …(110 characters)… TK.pdf", "… Bona.pdf"), and then the visible name joins where the whole name would not. No rule on the cut name can see that, so `lib/evolution.mjs` `normaliseRecord` gains **`fileNameTk`** and **`fileNameBona`**: `TK_RE` and `BONA_WORD_RE` on the whole cleaned name before it is cut (one bit each, not a second, uncapped copy of a sender-chosen name). For a cut name, TK and Bona are judged by those bits and by what is left of the name as well (a TK or Bona the visible part shows counts even when its bit says no: "…TK" may be the start of "…TKO", and that only means fewer joins), and a cut name without a boolean bit of exactly `false` is read as naming it (fewer joins, never more). So a cut name still joins only where the whole name would, which the fuzz test now checks with TK, Bona and property words among its pieces.
+- The fuzz test's generator changes to mulberry32: with the old `(seed * 1103515245 + 12345) & 0x7fffffff`, `next() % 48` reaches only 10 of 48 pieces (its low bits repeat with a short period), so most new pieces would never be tried.
+
+**Open for the owner** (review of this task, 2026-09-28; record the answers in context.md). (1) D16's words include some that are not only real estate: *payment plan* / خطة الدفع / خطة السداد / جدول الدفعات / جدول السداد (TK Estate & Design sends payment schedules for fit-out work), *price list*, *fact sheet*, كتيب (any booklet: a maintenance manual) and a bare مخطط (any drawing: an electrical plan). As D16 is written each joins by itself, so `Payment plan - kitchen works.pdf`, `جدول الدفعات - أعمال الديكور.pdf`, `كتيب الصيانة.pdf` and `مخطط الكهرباء.pdf` sent to a TK client pull that chat in with 24 h of history; a test pins this, so an answer changes it on purpose. Should these words join only with a property word (villa, apartment, فيلا, شقة …), a listing id or a link next to them, and go to the owner's list to check otherwise? `brochure`, `floor plan`, `master plan` and بروشور would stay as they are; but the brief's own examples `Price List Sep.pdf`, `payment_plan.pdf` and `قائمة الأسعار.pdf` would stop joining, so the answer changes D16. (2) Is keeping a document that names Bona without a listing id or link out of the inbox (above) what he wants?
+
+The poller's code does not change (`inboxAfterOutbound` already calls `ownerOutboundJoins(rec)` on the normalised record, which now carries `fileNameTk` and `fileNameBona`); two of its comments still describe the D12 rule ("a Bona brochure") and are brought up to date. Two poller tests change and one is added: Task 9's "a Bona brochure the owner sends starts a chat" sent `Bona Brochure.pdf`, which names Bona and so stays out now (it becomes one of the files that must not join, and the brochure that does is `Palm Villa Brochure.pdf`); the A8 cut-name test hands in hand-made cut records, which now need `fileNameTk: false` and `fileNameBona: false` (plus one with `fileNameTk: true`), and its brochure's name no longer starts with "Bona"; and one new end-to-end test shows D16 in the poller. No other existing test asserts the old document rule (checked on the branch up to 232b9f8 with `grep -rn "Bona_Villa\|DOC_BONA\|Bona Brochure\|ownerOutboundJoins\|fileNameTruncated" services/api/test/`: only `inbox-eligibility`, `evolution` and the three `wa-poller` places here; the lid test 232b9f8 added also sends a `Bona Brochure.pdf`, but its chat joins by a link, so it passes either way). Tasks 10–14 do not touch these files; Task 13's README bullet is updated here.
+
+**Files:**
+- Modify: `services/api/lib/inbox/eligibility.mjs` (whole file replaced)
+- Modify: `services/api/lib/evolution.mjs` (`fileNameTk`, `fileNameBona`)
+- Modify: `services/api/lib/wa-poller.mjs` (two comments only)
+- Modify: `services/README.md` (Task 13's *Owner-started* bullet; the D15 line)
+- Test: `services/api/test/inbox-eligibility.test.mjs`
+- Test: `services/api/test/evolution.test.mjs`
+- Test: `services/api/test/wa-poller.test.mjs`
+
+- [ ] **Step 1: Write the failing tests**
+
+**(a) `services/api/test/evolution.test.mjs`** — four edits.
+
+Find:
+
+```js
+    fileNameTruncated: false,
+    noise: false,
+  });
+```
+
+Replace with:
+
+```js
+    fileNameTruncated: false,
+    fileNameTk: false,
+    fileNameBona: false,
+    noise: false,
+  });
+```
+
+Find:
+
+```js
+  assert.equal(voice.fileNameTruncated, false);
+  assert.equal(voice.noise, false);
+```
+
+Replace with:
+
+```js
+  assert.equal(voice.fileNameTruncated, false);
+  assert.equal(voice.fileNameTk, false);
+  assert.equal(voice.fileNameBona, false);
+  assert.equal(voice.noise, false);
+```
+
+Find:
+
+```js
+  assert.equal(brochure.fileNameTruncated, false);
+  assert.equal(brochure.text, 'as promised');
+```
+
+Replace with:
+
+```js
+  assert.equal(brochure.fileNameTruncated, false);
+  assert.equal(brochure.fileNameTk, false);
+  assert.equal(brochure.fileNameBona, true, 'a listing id names Bona too (it joins by the id)');
+  assert.equal(brochure.text, 'as promised');
+```
+
+Find:
+
+```js
+test('reactions, deletes and edits, poll votes and key-distribution records are noise; a message is not', () => {
+```
+
+Replace with:
+
+```js
+test('fileNameTk and fileNameBona say whether the whole name names TK or Bona, even where the cut hides it (D16)', () => {
+  const rec = (fileName) => normaliseRecord({ key: { id: 'D4' }, message: { documentMessage: { fileName } } });
+  // TK after the 120th code point: the name the record carries no longer shows it.
+  const hidden = rec(`Villa Brochure ${'x'.repeat(120)} TK.pdf`);
+  assert.equal(hidden.fileNameTruncated, true);
+  assert.ok(!hidden.fileName.includes('TK'), 'the cut hides it');
+  assert.equal(hidden.fileNameTk, true, 'but the record still says so');
+  assert.equal(hidden.fileNameBona, false);
+  const bona = rec(`Villa Brochure ${'x'.repeat(120)} Bona.pdf`);
+  assert.ok(!bona.fileName.includes('Bona'), 'the cut hides our name too');
+  assert.deepEqual([bona.fileNameBona, bona.fileNameTk], [true, false], 'and the record says so');
+  for (const [fileName, tk] of [
+    ['TK Brochure Villa.pdf', true],
+    ['T.K. Estates brochure.pdf', true],
+    ['tk-estates price list.pdf', true],
+    ['TKEstates_floorplan.pdf', true],
+    ['بروشور تي كي.pdf', true],
+    ['بروشور تى كى.pdf', true],
+    ['بروشور تي كى.pdf', true],
+    // An invisible character cannot hide it: the name is cleaned before it is read.
+    ['T\u200BK Brochure.pdf', true],
+    [`Villa Brochure ${'x'.repeat(120)}.pdf`, false],
+    ['TKO brochure.pdf', false],
+    ['Stock2TK9.pdf', false],
+    ['بلاستيكي.pdf', false],
+    ['بلاستيكى.pdf', false],
+    ['Knightsbridge_Phase 2_Brochure_EN.pdf', false],
+  ]) {
+    assert.equal(rec(fileName).fileNameTk, tk, JSON.stringify(fileName));
+  }
+  for (const [fileName, named] of [
+    ['Bona Traffic HD brochure.pdf', true],
+    ['BONA-W003 brochure.pdf', true],
+    ['بونا - فيلا الشاطئ.pdf', true],
+    ['Bona Fide Purchaser Declaration.pdf', false],
+    ['Bonanza brochure.pdf', false],
+    ['Knightsbridge_Phase 2_Brochure_EN.pdf', false],
+  ]) {
+    assert.equal(rec(fileName).fileNameBona, named, JSON.stringify(fileName));
+  }
+  for (const r of [rec(''), normaliseRecord(textRecord())]) {
+    assert.deepEqual([r.fileNameTk, r.fileNameBona], [false, false], 'no usable name, or no document');
+  }
+});
+
+test('reactions, deletes and edits, poll votes and key-distribution records are noise; a message is not', () => {
+```
+
+**(b) `services/api/test/inbox-eligibility.test.mjs`** — six edits.
+
+(b1) The import. Find:
+
+```js
+import {
+  LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE, INBOX_STATES,
+  inboundSignal, ownerOutboundJoins, nextInboxState,
+} from '../lib/inbox/eligibility.mjs';
+```
+
+Replace with:
+
+```js
+import {
+  LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE, INBOX_STATES,
+  inboundSignal, ownerOutboundJoins, isTkDocument, nextInboxState,
+} from '../lib/inbox/eligibility.mjs';
+```
+
+(b2) The pattern checks. Find:
+
+```js
+  for (const re of [LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE]) {
+    assert.ok(re instanceof RegExp);
+```
+
+Replace with:
+
+```js
+  for (const re of [LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE]) {
+    assert.ok(re instanceof RegExp);
+```
+
+Find:
+
+```js
+  for (const re of [BONA_WORD_RE, SITE_LINK_RE]) assert.equal(re.unicode, true, `${re} needs /u`);
+```
+
+Replace with:
+
+```js
+  for (const re of [BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE]) assert.equal(re.unicode, true, `${re} needs /u`);
+  for (const re of [PROPERTY_DOC_RE, TK_RE]) assert.equal(re.ignoreCase, true, `${re} ignores case`);
+```
+
+(b3) The end of the "bona fide" test: the word next to the phrase still counts for a client, and on a document only a property word joins now. Find:
+
+```js
+  assert.equal(ownerOutboundJoins(doc('Bona_Villa.pdf')), true);
+  assert.equal(ownerOutboundJoins(doc('offer.pdf', 'Bona villa, a bona fide offer')), true, 'the name next to the phrase still counts');
+});
+```
+
+Replace with:
+
+```js
+  assert.equal(inboundSignal({ text: 'Bona villa, a bona fide offer' }), 'unsure', 'the name next to the phrase still counts');
+  assert.equal(ownerOutboundJoins(doc('Bona Fide Purchaser Declaration - Brochure.pdf')), true, 'a brochure joins, whatever Latin is on it');
+});
+```
+
+(b4) The document tests and every cut-name test are replaced. Delete everything from the line
+
+```js
+test('a document joins when its file name or caption says Bona or a listing id', () => {
+```
+
+down to, but not including, the line
+
+```js
+/* ---------------- time ---------------- */
+```
+
+(that range holds, in order: "a document joins when its file name or caption says Bona or a listing id", "the word bona counts only on a document, …", "a document name cut at 120 characters cannot make a word or an id at the cut", the `ownerDoc` / `wholeDoc` helpers, "a cut name never joins where the whole name would not: …", "a cut name joins only where the whole name joins, …" and "any truthy cut flag reads the name as cut: …"), and put in its place:
+
+```js
+test('a property document the owner sends joins the chat, from any developer (D16)', () => {
+  const doc = (fileName, text = null) => ({ text, fileName, media: fileName ? `[document: ${fileName}]` : '[document]' });
+  for (const rec of [
+    doc('Knightsbridge_Phase 2_Brochure_EN.pdf'),
+    doc('Floor-Plan_Type-A.pdf'),
+    doc('floorplan.pdf'),
+    doc('Floor plans v2.pdf'),
+    doc('Price List Sep.pdf'),
+    doc('pricelist.pdf'),
+    doc('payment_plan.pdf'),
+    doc('Master-Plan.pdf'),
+    doc('Fact sheet 2026.pdf'),
+    doc('brochure2.pdf'),
+    doc('Brochures.zip'),
+    doc('بروشور المشروع.pdf'),
+    doc('البروشور.pdf'),
+    doc('بروشورات.pdf'),
+    doc('كتيّب المشروع.pdf'),
+    doc('كتيب.pdf'),
+    doc('مخطط الدور الأرضي.pdf'),
+    doc('المخططات.pdf'),
+    doc('قائمة الأسعار.pdf'),
+    doc('قائمة_الاسعار.pdf'),
+    doc('جدول الأسعار.pdf'),
+    doc('خطة الدفع.pdf'),
+    doc('خطة السداد.pdf'),
+    doc('جدول الدفعات.pdf'),
+    doc('جدول السداد.pdf'),
+    doc('doc.pdf', 'price list attached'),
+    doc('scan.pdf', 'هذا البروشور'),
+    doc(null, 'Floor plan'),
+    doc('BONA-W003 brochure.pdf'),
+    doc('Brochure BONA-W014.pdf'),
+    doc('BONA-W003.pdf'),
+    doc('Villa_BONA-W003_EN.pdf'),
+    doc('Bona Villa BONA-W003 brochure.pdf'),
+    doc('bona-real-estate.com villa.pdf'),
+    doc('Bona brochure.pdf', 'https://bona-real-estate.com/ar/'),
+    doc('scan.pdf', 'BONA-005'),
+    doc('scan.pdf', 'https://bona-real-estate.com/ar/'),
+  ]) {
+    assert.equal(ownerOutboundJoins(rec), true, `${rec.fileName} / ${rec.text}`);
+  }
+});
+
+test('D16 as written: the generic document words join by themselves, fit-out papers too (open for the owner)', () => {
+  // TK Estate & Design sends such papers to TK clients. D16 names payment plans, price lists
+  // and fact sheets, and its Arabic words include كتيب and a bare مخطط, so each of these joins.
+  // The owner is asked whether they should need a property word, a listing id or a link next
+  // to them (Task 15, "Open for the owner"): an answer changes this test on purpose.
+  const doc = (fileName) => ({ text: null, fileName, media: `[document: ${fileName}]` });
+  for (const fileName of ['Payment plan - kitchen works.pdf', 'جدول الدفعات - أعمال الديكور.pdf', 'كتيب الصيانة.pdf', 'مخطط الكهرباء.pdf']) {
+    assert.equal(ownerOutboundJoins(doc(fileName)), true, fileName);
+  }
+});
+
+test('the word Bona, or any other file, no longer joins a chat by itself, and a document that names Bona needs a listing id or a link (D16)', () => {
+  const doc = (fileName, text = null) => ({ text, fileName, media: fileName ? `[document: ${fileName}]` : '[document]' });
+  // Bona AB makes wood-floor finishes, with brochures, price lists and fact sheets of its own:
+  // TK Estate & Design sends them to TK clients.
+  for (const rec of [
+    doc('Bona Traffic HD datasheet.pdf'),
+    doc('Bona Traffic HD brochure.pdf'),
+    doc('Bona Price List 2026.pdf'),
+    doc('Bona Traffic HD Fact Sheet.pdf'),
+    doc('Bona_Villa_Brochure.pdf'),
+    doc('بروشور بونا.pdf'),
+    doc('brochure.pdf', 'Bona'),
+    doc('Floor plan.pdf', 'from بونا'),
+    doc('Bona.pdf'),
+    doc('Bona_Villa.pdf'),
+    doc('بونا - فيلا الشاطئ.pdf'),
+    doc('villa.pdf', 'Files from Bona'),
+    doc(null, 'bona'),
+    doc('Invoice 1234.pdf'),
+    doc('XBONA-W003.pdf'),
+    doc('BONA-W0031.pdf'),
+    doc('Stock brochureX.pdf'),
+    doc('Brochureware.pdf'),
+    doc('datasheet.pdf'),
+    doc('Floor.pdf'),
+    doc('وبروشور.pdf'),
+    doc('Bona Fide Purchaser Declaration.pdf'),
+    doc(null),
+  ]) {
+    assert.equal(ownerOutboundJoins(rec), false, `${rec.fileName} / ${rec.text}`);
+  }
+  // "brochure" typed as text, or on a photo, is not a document.
+  for (const media of [null, '[image]', '[voice note]']) {
+    assert.equal(ownerOutboundJoins({ text: 'BONA brochure', media }), false, String(media));
+    assert.equal(ownerOutboundJoins({ text: 'price list', media }), false, String(media));
+  }
+  assert.equal(ownerOutboundJoins({ text: 'bona.azoz.uk/villas', media: '[image]' }), true, 'a link in a caption still counts');
+  assert.equal(ownerOutboundJoins({ text: 'BONA-W003 on the photo', media: '[image]' }), true, 'so does a listing id');
+});
+
+test('a document that names TK never joins, whatever else it says, and isTkDocument says so (D16, D17)', () => {
+  const doc = (fileName, text = null) => ({ text, fileName, media: fileName ? `[document: ${fileName}]` : '[document]' });
+  for (const rec of [
+    doc('TK Brochure Villa.pdf'),
+    doc('brochure.pdf', 'TK Estates brochure'),
+    doc('بروشور تي كي.pdf'),
+    doc('بروشور تى كى.pdf'),
+    doc('بروشور تي كى.pdf'),
+    doc('T.K. Estates brochure.pdf'),
+    doc('TK_Price_List.pdf'),
+    doc('tk-estates floor plan.pdf'),
+    doc('TKEstates brochure.pdf'),
+    doc('Brochure BONA-W014 TK.pdf'),
+    doc('scan.pdf', 'TK · https://bona-real-estate.com/ar/'),
+    doc('Brochure.pdf', 'from تي كي'),
+  ]) {
+    assert.equal(ownerOutboundJoins(rec), false, `${rec.fileName} / ${rec.text}`);
+    assert.equal(isTkDocument(rec), true, `${rec.fileName} / ${rec.text}`);
+  }
+  // TK only as part of a longer word or number, and Arabic words that only contain the letters.
+  for (const rec of [doc('TKO brochure.pdf'), doc('Brochure TK2.pdf'), doc('Stock brochure.pdf', 'atk ok'), doc('St.Kitts brochure.pdf'),
+    doc('مخطط بلاستيكي.pdf'), doc('مخطط بلاستيكى.pdf'), doc('بلاستيكى floor plan.pdf'), doc('brochure.pdf', 'أوتوماتيكي')]) {
+    assert.equal(isTkDocument(rec), false, `${rec.fileName} / ${rec.text}`);
+    assert.equal(ownerOutboundJoins(rec), true, `${rec.fileName} / ${rec.text}`);
+  }
+  // Only a document is a TK document: text and photos keep the rules they had.
+  assert.equal(isTkDocument({ text: 'TK brochure', media: null }), false);
+  assert.equal(isTkDocument({ text: 'TK brochure', media: '[image]' }), false);
+  assert.equal(ownerOutboundJoins({ text: 'TK · BONA-W003', media: null }), true, 'a listing id in a text still joins');
+  assert.equal(isTkDocument({}), false);
+  assert.equal(isTkDocument(), false);
+  assert.equal(isTkDocument(null), false);
+  assert.equal(isTkDocument({ fileName: 42, text: {}, media: '[document]' }), false);
+});
+
+test('a cut name is TK or Bona by what the whole name said and by what is left of it; without the answer it may be either', () => {
+  const cutName = `Villa Brochure ${'x'.repeat(100)}`;
+  const cut = (over = {}) => ({ fileName: cutName, fileNameTruncated: true, fileNameTk: false, fileNameBona: false, media: `[document: ${cutName}]`, ...over });
+  const withFlag = (key, v) => {
+    const rec = cut();
+    if (v === undefined) delete rec[key]; else rec[key] = v;
+    return rec;
+  };
+  assert.equal(ownerOutboundJoins(cut()), true, 'the whole name named neither');
+  assert.equal(isTkDocument(cut()), false);
+  assert.equal(ownerOutboundJoins(cut({ fileNameTk: true })), false, 'it named TK, past the cut');
+  assert.equal(isTkDocument(cut({ fileNameTk: true })), true);
+  assert.equal(ownerOutboundJoins(cut({ fileNameBona: true })), false, 'it named Bona, past the cut');
+  assert.equal(isTkDocument(cut({ fileNameBona: true })), false, 'which is not TK');
+  for (const v of [undefined, null, 0, 'false']) {
+    assert.equal(ownerOutboundJoins(withFlag('fileNameTk', v)), false, `TK unknown (${JSON.stringify(v)}): fewer joins, never more`);
+    assert.equal(isTkDocument(withFlag('fileNameTk', v)), true, JSON.stringify(v));
+    assert.equal(ownerOutboundJoins(withFlag('fileNameBona', v)), false, `Bona unknown (${JSON.stringify(v)})`);
+  }
+  // What is left of the name counts too, whatever the bits say ("…TK" may be the start of "…TKO").
+  const shows = (fileName) => cut({ fileName, media: `[document: ${fileName}]` });
+  assert.equal(ownerOutboundJoins(shows(`Villa Brochure TK ${'x'.repeat(100)}`)), false);
+  assert.equal(isTkDocument(shows(`Villa Brochure TK ${'x'.repeat(100)}`)), true);
+  assert.equal(ownerOutboundJoins(shows(`Bona Villa Brochure ${'x'.repeat(100)}`)), false);
+  assert.equal(ownerOutboundJoins(shows(`Bona Villa BONA-W003 ${'x'.repeat(100)}`)), true, 'a listing id still joins');
+  // A name that was not cut is read as it is; a bit of exactly true still counts.
+  const whole = (over = {}) => ({ fileName: 'Villa Brochure.pdf', media: '[document: Villa Brochure.pdf]', ...over });
+  assert.equal(ownerOutboundJoins(whole()), true);
+  assert.equal(ownerOutboundJoins(whole({ fileNameTk: true })), false);
+  assert.equal(ownerOutboundJoins(whole({ fileNameBona: true })), false);
+});
+
+/** A document record sent by the owner, through normaliseRecord (which cuts the name). */
+const ownerDoc = (fileName) => normaliseRecord({
+  key: { id: 'D1', fromMe: true, remoteJid: '1@lid' },
+  message: { documentMessage: { fileName } },
+});
+/** The same document if its whole name had been kept (normaliseRecord cleans before it cuts). */
+const wholeDoc = (fileName) => ({ text: '', fileName, fileNameTruncated: false, media: `[document: ${fileName}]` });
+
+test('a document name cut at 120 characters cannot make a word or an id at the cut', () => {
+  // Through normaliseRecord, which cuts the name: what follows the cut is unknown, so the
+  // last word may be the start of a longer one (Bonanza cut to Bona).
+  const rec = (fileName, caption) => normaliseRecord({
+    key: { id: 'D1', fromMe: true, remoteJid: '1@lid' },
+    message: { documentMessage: { fileName, ...(caption ? { caption } : {}) } },
+  });
+  const bonanza = rec('x'.repeat(115) + ' Bonanza.pdf');
+  assert.ok(bonanza.fileName.endsWith(' Bona'), 'the cut leaves "Bona" at the end');
+  assert.equal(bonanza.fileNameTruncated, true);
+  assert.equal(ownerOutboundJoins(bonanza), false);
+  // "…BrochureX.pdf" cut straight after "Brochure": the word is not read at the cut.
+  const brochureX = rec(`${'x'.repeat(111)} BrochureX.pdf`);
+  assert.ok(brochureX.fileName.endsWith(' Brochure'), 'the cut leaves "Brochure" at the end');
+  assert.equal(ownerOutboundJoins(brochureX), false);
+  assert.equal(ownerOutboundJoins(wholeDoc(`${'x'.repeat(111)} BrochureX.pdf`)), false, 'nor does the whole name join');
+  // Anything before the cut still counts, and a caption is never cut.
+  assert.equal(ownerOutboundJoins(rec('Villa brochure ' + 'x'.repeat(200) + '.pdf')), true);
+  assert.equal(ownerOutboundJoins(rec('BONA-W003 ' + 'x'.repeat(200) + '.pdf')), true);
+  assert.equal(ownerOutboundJoins(rec(`${'x'.repeat(111)} BrochureX.pdf`, 'price list attached')), true);
+  // But "Bona" left at the cut may be our name as much as the start of Bonanza, so it keeps
+  // a caption's brochure out, as our name does anywhere on a document (fewer joins, never more).
+  assert.equal(ownerOutboundJoins(rec('x'.repeat(115) + ' Bonanza.pdf', 'the brochure')), false);
+  // TK or Bona past the cut is still there: the record says so (fileNameTk, fileNameBona).
+  assert.equal(ownerOutboundJoins(rec('Villa brochure ' + 'x'.repeat(200) + ' TK.pdf')), false);
+  assert.equal(ownerOutboundJoins(rec('Villa brochure ' + 'x'.repeat(200) + ' Bona.pdf')), false);
+  assert.equal(ownerOutboundJoins(rec('BONA-W003 brochure ' + 'x'.repeat(200) + ' Bona.pdf')), true, 'a listing id joins whatever names Bona');
+  // A name that was not cut ends where it ends.
+  const short = rec('Villa Brochure');
+  assert.equal(short.fileNameTruncated, false);
+  assert.equal(ownerOutboundJoins(short), true);
+});
+
+test('a cut name never joins where the whole name would not: "bona fide", Bonanza, BrochureX, TK and Bona AB at every cut', () => {
+  // Reading the cut as if a letter followed it turned "…Bona fi|de declaration" into
+  // "…Bona fix", which is not the Latin phrase, so the cut name joined. Leaving the end out
+  // is not enough on its own either: "…Bona| fide" left "…Bona" at the new end. The same
+  // goes for a property word at the cut (…Brochure|X, …Price List|ing), a listing id
+  // (…BONA-W003|1), a TK brochure, whichever side of the cut TK falls, and Bona AB's papers.
+  let cuts = 0;
+  for (const tail of ['Bona fide declaration.pdf', 'Bonanza.pdf', 'Bona-fides.pdf', 'بونات.pdf',
+    'BrochureX.pdf', 'Price Listing.pdf', 'Floor Planner.pdf', 'BONA-W0031.pdf', '_TK Brochure.pdf', 'Brochure TK.pdf',
+    'بروشور تي كي.pdf', 'بروشور تى كى.pdf', '_T.K. Brochure.pdf', 'Bona Traffic HD datasheet.pdf', 'Bona Traffic HD brochure.pdf',
+    'Bona Price List 2026.pdf']) {
+    for (const sep of [' ', '_', '-', '1']) {
+      for (let pad = 80; pad <= 125; pad += 1) {
+        const name = `${'x'.repeat(pad)}${sep}${tail}`;
+        const rec = ownerDoc(name);
+        if (rec.fileNameTruncated) cuts += 1;
+        assert.equal(ownerOutboundJoins(wholeDoc(name)), false, `${pad} ${tail}: the whole name does not join`);
+        assert.equal(ownerOutboundJoins(rec), false, `${pad} ${JSON.stringify(sep)} ${tail}: nor may the cut one`);
+      }
+    }
+  }
+  assert.ok(cuts > 1200, `the longer ones are cut (${cuts})`);
+});
+
+test('a brochure at every cut: the whole name joins, the cut one only where what is read holds the word', () => {
+  let cuts = 0;
+  let cutJoins = 0;
+  for (const tail of ['Brochure.pdf', 'Floor Plan.pdf', 'BONA-W003 plan.pdf', 'قائمة الأسعار.pdf']) {
+    for (const sep of [' ', '_', '-']) {
+      for (let pad = 80; pad <= 125; pad += 1) {
+        const name = `${'x'.repeat(pad)}${sep}${tail}`;
+        const rec = ownerDoc(name);
+        assert.equal(ownerOutboundJoins(wholeDoc(name)), true, `${pad} ${tail}: the whole name joins`);
+        if (!rec.fileNameTruncated) {
+          assert.equal(ownerOutboundJoins(rec), true, `${pad} ${tail}: not cut, so it joins`);
+          continue;
+        }
+        cuts += 1;
+        if (ownerOutboundJoins(rec)) cutJoins += 1;
+      }
+    }
+  }
+  assert.ok(cuts > 200, `the longer ones are cut (${cuts})`);
+  // Each word sits in the last 16 code points of what a cut leaves, so no cut one joins by
+  // it: a missed join, which the owner's list of real-estate chats catches (D17; Task 16
+  // notes it there as a `property document`).
+  assert.equal(cutJoins, 0);
+  // A property word before the cut, TK after it: the whole name names TK, so neither joins.
+  for (const word of ['Brochure', 'BONA-W003', 'Floor Plan', 'بروشور']) {
+    for (let pad = 90; pad <= 130; pad += 5) {
+      const name = `${word} ${'x'.repeat(pad)} TK.pdf`;
+      assert.equal(ownerOutboundJoins(wholeDoc(name)), false, `${word} ${pad}: the whole name names TK`);
+      assert.equal(ownerOutboundJoins(ownerDoc(name)), false, `${word} ${pad}: so the cut one does not join`);
+    }
+  }
+  // Our name before the cut or after it: such a document joins only by a listing id, cut or not.
+  for (let pad = 90; pad <= 130; pad += 5) {
+    for (const [name, joins] of [
+      [`Brochure ${'x'.repeat(pad)} Bona.pdf`, false],
+      [`Bona ${'x'.repeat(pad)} Brochure.pdf`, false],
+      [`BONA-W003 ${'x'.repeat(pad)} Bona.pdf`, true],
+    ]) {
+      assert.equal(ownerOutboundJoins(wholeDoc(name)), joins, `${name.slice(0, 12)} ${pad}: the whole name`);
+      assert.equal(ownerOutboundJoins(ownerDoc(name)), joins, `${name.slice(0, 12)} ${pad}: the one the record carries`);
+    }
+  }
+});
+
+test('a cut name joins only where the whole name joins, whatever the name is made of', () => {
+  // Names built from the pieces that decide the rules, cut through normaliseRecord at every
+  // kind of place: whenever the cut record joins, the whole name must join too. The pieces
+  // are picked by mulberry32: the old `(seed * 1103515245 + 12345) & 0x7fffffff` repeats in
+  // its low bits, so with 48 pieces `% pieces.length` reached only 10 of them (51 now).
+  const pieces = ['bona', 'Bona', 'BONA', 'بونا', 'fide', 'fides', 'fi', 'f', 'fid', 'nza', 'x', 'é', 'ſ', ' ', ' ',
+    '_', '-', '.', '-W003', '-005', 'W', '1', '٤', '\u0301', 'ت', 'BONA-W003', 'BONA-005', 'pdf', '(', 'ب', 'bon', 'de', 's',
+    'brochure', 'Brochure', 'floor', 'Plan', 'price', 'list', 'بروشور', 'مخطط', 'قائمة', 'الأسعار', 'X', 'TK', 'tk', 'تي', 'كي',
+    'تى', 'كى', 'T.K.'];
+  let seed = 20260928;
+  const next = () => {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return (t ^ (t >>> 14)) >>> 0;
+  };
+  let cuts = 0;
+  let cutJoins = 0;
+  let keptOutByTk = 0;
+  let keptOutByBona = 0;
+  for (let i = 0; i < 4000; i += 1) {
+    let name = `${'x'.repeat(60 + (next() % 45))} `;
+    while (Array.from(name).length < 125 + (next() % 15)) name += pieces[next() % pieces.length];
+    const rec = ownerDoc(name);
+    if (!rec.fileNameTruncated) continue;
+    cuts += 1;
+    // Would have joined but for TK, or our name, in the part of the whole name the cut hid.
+    if (rec.fileNameTk && ownerOutboundJoins({ ...rec, fileNameTk: false })) keptOutByTk += 1;
+    if (rec.fileNameBona && ownerOutboundJoins({ ...rec, fileNameBona: false })) keptOutByBona += 1;
+    if (!ownerOutboundJoins(rec)) continue;
+    cutJoins += 1;
+    const whole = name.replace(/\s+/g, ' ').trim();
+    assert.equal(ownerOutboundJoins(wholeDoc(whole)), true, JSON.stringify(name));
+  }
+  assert.ok(cuts > 3900, `the names are cut (${cuts})`);
+  assert.ok(cutJoins > 150, `and a cut name can still join (${cutJoins})`);
+  assert.ok(keptOutByTk > 2, `and TK in the whole name keeps some out (${keptOutByTk})`);
+  assert.ok(keptOutByBona > 50, `and so does our name (${keptOutByBona})`);
+});
+
+test('any truthy cut flag reads the name as cut: that only ever means fewer joins', () => {
+  const doc = (fileName, over = {}) => ({ fileName, fileNameTk: false, fileNameBona: false, media: '[document: …]', ...over });
+  const name = `${'x'.repeat(100)} Brochure`;
+  assert.equal(ownerOutboundJoins(doc(name)), true, 'uncut, it ends with the word');
+  for (const fileNameTruncated of [true, 1, 'yes']) {
+    assert.equal(ownerOutboundJoins(doc(name, { fileNameTruncated })), false, String(fileNameTruncated));
+  }
+  assert.equal(ownerOutboundJoins(doc(`Villa_Brochure ${'x'.repeat(100)}`, { fileNameTruncated: true })), true, 'far from the cut, the word counts');
+  assert.equal(ownerOutboundJoins(doc(`BONA-W003 ${'x'.repeat(100)}`, { fileNameTruncated: true })), true, 'and so does a listing id');
+  assert.equal(ownerOutboundJoins(doc(`bona-real-estate.com ${'x'.repeat(100)}`, { fileNameTruncated: true })), false, 'a site link is not read in a cut name');
+  assert.equal(ownerOutboundJoins(doc(`bona-real-estate.com ${'x'.repeat(100)}`)), true, 'it is in a whole one');
+});
+
+```
+
+(b5) The timing test reads the new patterns. Find:
+
+```js
+    fill('bona.azoz.uk.', n), fill('bona.azoz.uk@', n), fill('bona.azoz.uk_', n),
+  ];
+```
+
+Replace with:
+
+```js
+    fill('bona.azoz.uk.', n), fill('bona.azoz.uk@', n), fill('bona.azoz.uk_', n),
+    fill('floor ', n), fill('floor-', n), fill('floor_plan', n), fill('brochur', n), fill('brochureX', n), fill('price ', n),
+    fill('payment_', n), fill('fact sheet', n), fill('قائمة ', n), fill('جدول ال', n), fill('خطة ', n), fill('البروشور', n), fill('كتي', n),
+    fill('tk', n), fill('tk ', n), fill('tk-estate', n), fill('tk_', n), fill('تي ', n), fill('تي', n), fill('تيكي', n),
+    fill('t.k', n), fill('t.', n), fill('تى ', n), fill('تى', n), fill('تيكى', n),
+  ];
+```
+
+(b6) Find:
+
+```js
+    ['ownerOutboundJoins cut name', (s) => ownerOutboundJoins({ fileName: s, fileNameTruncated: true, media: '[document: x.pdf]' })],
+  ];
+```
+
+Replace with (a cut name with no `fileNameTk` or `fileNameBona` now stops at the TK or Bona check, so the cut-name reading is timed with both `false`):
+
+```js
+    ['ownerOutboundJoins cut name', (s) => ownerOutboundJoins({ fileName: s, fileNameTruncated: true, fileNameTk: false, fileNameBona: false, media: '[document: x.pdf]' })],
+    ['isTkDocument', (s) => isTkDocument({ text: s, fileName: s, media: '[document: x.pdf]' })],
+    ['PROPERTY_DOC_RE', (s) => PROPERTY_DOC_RE.test(s)],
+    ['TK_RE', (s) => TK_RE.test(s)],
+  ];
+```
+
+**(c) `services/api/test/wa-poller.test.mjs`** — three edits (on the file as Task 9 left it, checked against its commits up to 232b9f8; if a test below has moved, make the same change to it as Task 9 left it: only the lines shown change).
+
+(c0) Task 9's Bona brochure test. Find:
+
+```js
+test('(t) a Bona brochure the owner sends starts a chat; a file that only looks like one does not', async () => {
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'DOC', fromMe: true, jid: STRANGER, pushName: null, messageType: 'documentMessage', media: '[document: Bona Brochure.pdf]', fileName: 'Bona Brochure.pdf' }),
+```
+
+Replace with:
+
+```js
+test('(t) a brochure the owner sends starts a chat; a file that only looks like one does not, nor one that names Bona (D16)', async () => {
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'DOC', fromMe: true, jid: STRANGER, pushName: null, messageType: 'documentMessage', media: '[document: Palm Villa Brochure.pdf]', fileName: 'Palm Villa Brochure.pdf' }),
+    msg({ id: 'BONADOC', fromMe: true, jid: '966544444444@s.whatsapp.net', pushName: null, ts: NOW - 40_000, messageType: 'documentMessage', media: '[document: Bona Brochure.pdf]', fileName: 'Bona Brochure.pdf' }),
+```
+
+and, a few lines below in the same test, find:
+
+```js
+    ['DOC', 'out', 'owner_number', null, '[document: Bona Brochure.pdf]'],
+```
+
+Replace with:
+
+```js
+    ['DOC', 'out', 'owner_number', null, '[document: Palm Villa Brochure.pdf]'],
+```
+
+(c1) Find the test `'(t) a document name cut at 120 characters starts a chat only where the whole name would (A8)'` as Task 9 left it, and replace its opening, from its `test(` line through its `assert.equal(h.db.countLeads(), 1, 'only the brochure');` line:
+
+```js
+test('(t) a document name cut at 120 characters starts a chat only where the whole name would (A8)', async () => {
+  // What is left of "… Bonanza menu.pdf" and of a real brochure's long name after the cut.
+  const cutBonanza = `${'x'.repeat(115)} Bona`;
+  const cutBrochure = `Bona Villa brochure ${'x'.repeat(100)}`;
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'CUT1', fromMe: true, jid: STRANGER, pushName: null, ts: NOW - 60_000, messageType: 'documentMessage', media: `[document: ${cutBonanza}]`, fileName: cutBonanza, fileNameTruncated: true }),
+    msg({ id: 'CUT2', fromMe: true, jid: STRANGER2, pushName: null, ts: NOW - 30_000, messageType: 'documentMessage', media: `[document: ${cutBrochure}]`, fileName: cutBrochure, fileNameTruncated: true }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 1, 'only the brochure');
+```
+
+with:
+
+```js
+test('(t) a document name cut at 120 characters starts a chat only where the whole name would (A8, D16)', async () => {
+  // What is left of "… Bonanza menu.pdf" and of a real brochure's long name after the cut;
+  // the record says whether the whole name named TK or Bona (lib/evolution.mjs `fileNameTk`,
+  // `fileNameBona`). A brochure that names Bona would stay out now, so this one does not.
+  const cutBonanza = `${'x'.repeat(115)} Bona`;
+  const cutBrochure = `Palm Villa brochure ${'x'.repeat(100)}`;
+  const cut = { messageType: 'documentMessage', fileNameTruncated: true, fileNameTk: false, fileNameBona: false };
+  const h = harness({ inbox: true, windows: [[
+    msg({ ...cut, id: 'CUT1', fromMe: true, jid: STRANGER, pushName: null, ts: NOW - 60_000, media: `[document: ${cutBonanza}]`, fileName: cutBonanza }),
+    msg({ ...cut, id: 'CUT2', fromMe: true, jid: STRANGER2, pushName: null, ts: NOW - 30_000, media: `[document: ${cutBrochure}]`, fileName: cutBrochure }),
+    msg({ ...cut, id: 'CUT3', fromMe: true, jid: '966544444444@s.whatsapp.net', pushName: null, ts: NOW - 20_000, media: `[document: ${cutBrochure}]`, fileName: cutBrochure, fileNameTk: true }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 1, 'only the brochure whose whole name did not name TK');
+```
+
+(the rest of that test — the lead is `966533333333`, `in`, holds `CUT2`, `tally.joined` is 1 — stays as it is).
+
+(c2) Append to the end of the file (after its last test, as Task 9 left it):
+
+```js
+
+test('(t) any developer\'s price list the owner sends starts a chat; a floor-finish brochure named Bona and a TK brochure do not (D16)', async () => {
+  const doc = (id, jid, fileName, ts, extra = {}) => msg({
+    id, fromMe: true, jid, pushName: null, ts, messageType: 'documentMessage', media: `[document: ${fileName}]`, fileName, ...extra,
+  });
+  const h = harness({ inbox: true, windows: [[
+    doc('D-PRICE', STRANGER, 'Price List Sep.pdf', NOW - 60_000),
+    doc('D-BONA', STRANGER2, 'Bona Traffic HD brochure.pdf', NOW - 50_000),
+    doc('D-TK', '966544444444@s.whatsapp.net', 'TK Brochure Villa.pdf', NOW - 40_000, { fileNameTk: true }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 1, 'only the price list');
+  const [lead] = h.leads();
+  assert.equal(lead.phone_e164, '966522222222');
+  assert.equal(lead.match_method, 'owner_outbound');
+  assert.equal(lead.inbox_state, 'in');
+  assert.deepEqual(rows(h, lead.lead_id), [['D-PRICE', 'out', 'owner_number']]);
+  assert.equal(tally.joined, 1);
+  h.cleanup();
+});
+```
+
+- [ ] **Step 2: Run to see them fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/inbox-eligibility.test.mjs api/test/evolution.test.mjs api/test/wa-poller.test.mjs`
+Expected: FAIL — `inbox-eligibility.test.mjs` does not load (`SyntaxError: The requested module '../lib/inbox/eligibility.mjs' does not provide an export named 'PROPERTY_DOC_RE'`); in `evolution.test.mjs` three tests fail because records carry no `fileNameTk` or `fileNameBona` yet ("a text message flattens …", "normaliseRecord carries the placeholder …", "fileNameTk and fileNameBona say …"); in `wa-poller.test.mjs` three fail, each because only the word Bona joins a document yet: the brochure test (`Palm Villa Brochure.pdf` does not join and `Bona Brochure.pdf` does, so the one lead is `966544444444`), the A8/D16 cut test (no brochure joins: `0 !== 1`) and the D16 test (the price list does not join and the Bona brochure does, so the lead is `966533333333`). Every other test passes.
+
+- [ ] **Step 3: Implement the rules** — replace the whole of `services/api/lib/inbox/eligibility.mjs` with:
+
+```js
+/**
+ * Which WhatsApp chats belong in the Bona inbox (2026-09-27 design §4.1, D9, D12, D16).
+ *
+ * The team reads and answers these chats from the dashboard, and they arrive on the
+ * owner's personal number, which his TK clients and private conversations share. So a
+ * chat joins only on something that can only be about Bona:
+ *
+ *   - a client's message carrying a site Ref line (with its listing part, or a code a site
+ *     session holds), click-to-WhatsApp ad context or a listing id (`BONA-W003`) is certain.
+ *     TK runs no click-to-WhatsApp ads to this number (owner, D15), so ad context stays
+ *     certain;
+ *   - a client's message that only says "bona" / "بونا", or carries a bare Ref-shaped code
+ *     no session holds, is a guess. It goes to the owner's Unsure list, never into the
+ *     inbox by itself. The other guess, the ±15-min click window, arrives here as the
+ *     lead's match method (`time_window`);
+ *   - a message the OWNER sends joins a chat when it carries a Bona site link or a listing
+ *     id, or when it is a property document — a brochure, floor plan, price list, payment
+ *     plan, master plan or fact sheet, from any developer (D16) — by its file name or
+ *     caption. A document that names TK (`TK`, `T.K.`, `tk-estates`, `تي كي`) never joins
+ *     by itself: TK chats stay out (D17). Nor does a document that names Bona without a
+ *     listing id or a site link: Bona AB makes wood-floor finishes, so "Bona Traffic HD
+ *     brochure.pdf" to a TK contractor proves nothing (the poller puts such a chat on the
+ *     owner's list to check, D17). Nothing else he sends counts, and the word "Bona" joins
+ *     nothing by itself.
+ *
+ * The answer is stored on the lead (`leads.inbox_state`), and a message only ever moves it
+ * forward: a guess can become certain, but `in` is never demoted by a later message and
+ * `out` (the owner said "not a client") is never left automatically. Only the owner's
+ * buttons move a chat out of either (lib/inbox/store.mjs `setInboxState`).
+ *
+ * Pure functions, no I/O and no logging: the poller asks, the store records.
+ */
+import { parseRef } from '../attribution.mjs';
+
+/**
+ * A whole listing id: `BONA-W003`, `bona-005` — not `BONA-W0031`, not `XBONA-W003`, and not
+ * `BONA-W003٤` (`\b` knows only ASCII digits, so the Arabic-Indic and Persian ones are named).
+ */
+export const LISTING_ID_RE = /\bBONA-W?\d{3}(?![\w٠-٩۰-۹])/i;
+/**
+ * Our name as a word, in either script. A guess on its own: TK and private chats say it too.
+ * Both scripts are bounded by anything that is not a letter or a mark, so `_`, digits and
+ * punctuation end the word (`Bona_Villa`, `Bona2026`, `(بونا)`) while `Bonanza`, `Bonaé` and
+ * the Arabic words that only contain the four letters do not count: كوبونات (coupons),
+ * أبونا (our father), طلبونا, زبوناً … A clitic form (وبونا) is missed on purpose: that
+ * fails safe, the owner still has the Move button.
+ *
+ * "bona fide" / "bona fides" is Latin, common in English real-estate papers ("Bona Fide
+ * Purchaser Declaration"), and never our name.
+ *
+ * The bounds are `\p{…}` classes, which mean something only with the `u` flag: reuse this
+ * pattern by calling `.test()` on it, or rebuild it with `'iu'`, never `'i'` alone.
+ */
+export const BONA_WORD_RE = /(?<![\p{L}\p{M}])(?:bona(?![\p{L}\p{M}])(?![\s_.-]*fides?(?![\p{L}\p{M}]))|بونا(?![\p{L}\p{M}]))/iu;
+/**
+ * The site (or its legacy host) as a link, with or without a scheme and `www.`. The
+ * characters either side must not carry on a host name, so `notbona-real-estate.com`,
+ * `bona-real-estate.company`, `bona-real-estate.com.evil.example`, `….com.السعودية`,
+ * `bona.azoz.uk。evil.example` (browsers read `。．｡` as a dot in a host), `bona.azoz.uk_evil…`
+ * and the user part of `bona.azoz.uk@evil.example`, `bona.azoz.uk.@evil.example` or
+ * `bona.azoz.uk:443@evil.example` are not ours. A full stop that ends the text or is
+ * followed by anything but a host character is allowed: a sentence can end with the link.
+ * So is a port (`bona-real-estate.com:443/ar/`).
+ *
+ * After a colon, the `@` of user-info is looked for only within 256 characters, and a colon
+ * followed by more than 256 characters with no space, `/` or `@` is refused as well (fewer
+ * joins, never more). Unbounded, that look-ahead re-read the rest of the text from every
+ * copy of the host in it (`bona.azoz.uk:bona.azoz.uk:…@`), quadratic in the text's length.
+ */
+export const SITE_LINK_RE = /(?:^|[^a-z0-9.-])(?:www\.)?(?:bona-real-estate\.com|bona\.azoz\.uk)(?![\p{L}\p{M}\p{N}_@-]|[.。．｡][\p{L}\p{M}\p{N}@]|:(?:[^\s/@]{0,256}@|[^\s/@]{257}))/iu;
+export const INBOX_STATES = Object.freeze(['in', 'unsure', 'out']);
+
+/**
+ * The kinds of property document a developer or an agent sends (D16), in English and
+ * Arabic, each a whole word: bounded, like `BONA_WORD_RE`, by anything that is not a letter
+ * or a mark, so `_`, `-`, digits and punctuation end it (`Phase 2_Brochure_EN.pdf`,
+ * `brochure2.pdf`) while `brochureX` does not count. Two English words may be written with a
+ * space, `-`, `_` or nothing between them (`Floor-Plan`, `floorplan`, `price_list`). The
+ * Arabic single words also count with the article (البروشور, المخطط); a clitic before them
+ * (وبروشور) is missed on purpose, which fails safe like وبونا. `كتيّب` may carry its shadda.
+ *
+ * Every alternative starts with a fixed word and repeats nothing, so a failed match costs a
+ * bounded amount at each position: linear in the text's length.
+ */
+const DOC_WORDS = String.raw`(?:brochures?|floor[\s_-]?plans?|price[\s_-]?lists?|payment[\s_-]?plans?|master[\s_-]?plans?|fact[\s_-]?sheets?`
+  + String.raw`|(?:ال)?بروشور(?:ات)?|(?:ال)?كتي\u0651?ب|(?:ال)?مخطط(?:ات)?`
+  + String.raw`|(?:قائمة|جدول)[\s_-]?ال[أا]سعار|خطة[\s_-]?(?:الدفع|السداد)|جدول[\s_-]?(?:الدفعات|السداد))`;
+export const PROPERTY_DOC_RE = new RegExp(String.raw`(?<![\p{L}\p{M}])${DOC_WORDS}(?![\p{L}\p{M}])`, 'iu');
+/**
+ * The same words inside a cut document name, where the end of what is read is not the end
+ * of the name: a word counts only when something that is not a letter or a mark follows it
+ * inside what is read, so `…brochure` cut from `…brochureX` is never read as `brochure`.
+ */
+const PROPERTY_DOC_CUT_RE = new RegExp(String.raw`(?<![\p{L}\p{M}])${DOC_WORDS}(?=[^\p{L}\p{M}])`, 'iu');
+/**
+ * A listing id in a file name, where `_` stands for a space (`Villa_BONA-W003_EN.pdf`):
+ * `LISTING_ID_RE` with `_` allowed on either side. `XBONA-W003` and `BONA-W0031` still do
+ * not count. The second is the same inside a cut name: something that cannot carry the id
+ * on follows it inside what is read.
+ */
+const LISTING_ID_NAME_RE = /(?<![A-Za-z0-9])BONA-W?\d{3}(?![A-Za-z0-9٠-٩۰-۹])/i;
+const LISTING_ID_NAME_CUT_RE = /(?<![A-Za-z0-9])BONA-W?\d{3}(?=[^A-Za-z0-9٠-٩۰-۹])/i;
+
+/**
+ * TK Estate & Design, the owner's other company, named on a document: `TK` as a word
+ * (bounded by anything that is not a letter or a digit, so `TK_Villa` and `TK-Estates`
+ * count and `TKO` or `TK2` do not), `T.K.` / `T.K`, `tk-estates` / `TKEstates`, or `تي كي`
+ * as its own word, with ي or ى in either place (Saudi typing often ends a word with ى: تى
+ * كى), bounded like `بونا` (بلاستيكي, بلاستيكى and أوتوماتيكي only contain the letters). A
+ * document that matches never joins a chat by itself (D16, D17). Every alternative starts
+ * with a fixed letter and repeats nothing: linear in the text.
+ */
+export const TK_RE = /(?<![\p{L}\p{N}])tk(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])t\.k\.?(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])tk[\s_-]?estates?|(?<![\p{L}\p{M}])ت[يى][\s_.-]?ك[يى](?![\p{L}\p{M}])/iu;
+
+/**
+ * Code points left out at the end of a document name that was cut (`fileNameTruncated`):
+ * nothing close to the cut is read.
+ */
+const CUT_MARGIN = 16;
+
+/** What a cut document name can be read by: all but its last `CUT_MARGIN` code points. */
+function readableCutName(name) {
+  return Array.from(name).slice(0, -CUT_MARGIN).join('');
+}
+
+/**
+ * A Ref line exactly as the site writes it: `Ref BONA-W003 · K7Q2XR`, or `Ref BONA · K7Q2XR`
+ * from a page without a listing (`refLine()` in src/scripts/attribution.js, EnquiryForm.astro).
+ * The listing part and a separator are always there, and nothing carries the code on.
+ * `parseRef` is looser — no separator needed, ASCII bounds — so it also reads "Ref bona
+ * please" as listing BONA + code PLEASE. Every line this matches, parseRef reads too.
+ */
+const SITE_REF_RE = /\bRef\s+BONA(?:-W?\d{3})?\s*[·:|-]\s*[A-HJ-NP-Z2-9]{5,6}(?![\p{L}\p{N}_])/iu;
+
+/** Anything that is not a string reads as empty: a record's text or caption may be null. */
+const str = (v) => (typeof v === 'string' ? v : '');
+const isDocument = (media) => str(media).startsWith('[document');
+
+/**
+ * Does the document's file name name TK (`TK_RE`) or Bona (`BONA_WORD_RE`)? A name cut at
+ * 120 code points hides its end, so for a cut name the answer comes from what
+ * lib/evolution.mjs worked out on the whole name before it was cut (`fileNameTk`,
+ * `fileNameBona`: `wholeSays`); a cut name without that answer may name it in the part
+ * nobody saw, and is read as if it did. What is left of the name is read as well, cut or
+ * not ("…TK" cut from "…TKO" reads as TK): either way that only ever means fewer joins.
+ * A `wholeSays` of exactly `true` counts for a name that was not cut too.
+ */
+function nameSays(re, name, fileNameTruncated, wholeSays) {
+  return (fileNameTruncated ? wholeSays !== false : wholeSays === true) || re.test(name);
+}
+
+/**
+ * What one message from a client says about the chat.
+ *
+ * A Ref line is certain only in the shape the site writes it (`SITE_REF_RE`), or when the
+ * poller found a site session holding the code (`refKnown`, from `db.getSessionByRef`).
+ * `parseRef` checks only the shape, so a bare `Ref K7Q2X` is also "ref please", "Ref check
+ * done" or a TK booking reference: a guess, never a join by itself. `hasAdMeta` and
+ * `refKnown` count only when exactly `true`, like the text, never coerced. A site link
+ * with no listing id is only a guess too (spec §4.1 does not name it); the owner decides.
+ * @param {{ text?: unknown, hasAdMeta?: boolean, refKnown?: boolean }|null} [o]
+ * @returns {'certain'|'unsure'|null}
+ */
+export function inboundSignal(o) {
+  const { text = '', hasAdMeta = false, refKnown = false } = o ?? {};
+  const t = str(text);
+  const ref = parseRef(t);
+  if (SITE_REF_RE.test(t) || (ref && refKnown === true)) return 'certain';
+  if (hasAdMeta === true || LISTING_ID_RE.test(t)) return 'certain';
+  if (ref || BONA_WORD_RE.test(t)) return 'unsure';
+  return null;
+}
+
+/**
+ * Is this a document that names TK, by its file name or its caption (D16)? The poller
+ * puts such a chat on the owner's list of real-estate chats to check instead of joining
+ * it (D17). Takes a normalised record (lib/evolution.mjs); a cut name is judged as in
+ * `nameSays`.
+ * @param {{ text?: unknown, fileName?: unknown, fileNameTruncated?: boolean, fileNameTk?: boolean, media?: unknown }|null} [o]
+ * @returns {boolean}
+ */
+export function isTkDocument(o) {
+  const { text = '', fileName = null, fileNameTruncated = false, fileNameTk = null, media = null } = o ?? {};
+  if (!isDocument(media)) return false;
+  return TK_RE.test(str(text)) || nameSays(TK_RE, str(fileName), Boolean(fileNameTruncated), fileNameTk);
+}
+
+/**
+ * Does a message the owner sent make this a Bona chat (D12, D16)? Takes a normalised
+ * record (lib/evolution.mjs): `text` is the body or the caption, `media` the placeholder
+ * (`[document: name]`, `[image]`, …), `fileName` a document's cleaned name, and
+ * `fileNameTk` / `fileNameBona` whether the whole name named TK / Bona.
+ *
+ * Any message: a Bona site link or a listing id in the text or caption joins. A document
+ * that names TK (`TK_RE`) in its file name or caption never joins, whatever else it says.
+ * Otherwise a document joins by a site link or a listing id in its caption or file name,
+ * or by a property-document word (`PROPERTY_DOC_RE`) in either — but a document that names
+ * Bona (`BONA_WORD_RE`) joins only by a site link or a listing id: "Bona Traffic HD
+ * brochure.pdf" is Bona AB's floor finish as often as ours, and the poller puts it on the
+ * owner's list to check instead (D17). The word "Bona" joins nothing by itself.
+ *
+ * A name cut at 120 code points (`fileNameTruncated`) may go on past the cut: "…Brochure"
+ * may be "…BrochureX", "…BONA-W003" may be "…BONA-W0031". So a cut name is read without its
+ * last 16 code points (`CUT_MARGIN`), and there a word or an id counts only when a
+ * character that cannot carry it on follows it inside what is read; a site link, whose
+ * look-ahead reaches much further, is not read in a cut name at all. Whatever is then found
+ * in it is found in the whole name too, and TK and Bona are judged on the whole name
+ * (`fileNameTk`, `fileNameBona`) as well as on what is left of it, so a cut name joins only
+ * where the whole name would join. Any truthy flag counts as cut: that only ever means
+ * fewer joins.
+ * @param {{ text?: unknown, fileName?: unknown, fileNameTruncated?: boolean, fileNameTk?: boolean, fileNameBona?: boolean, media?: unknown }|null} [o]
+ * @returns {boolean}
+ */
+export function ownerOutboundJoins(o) {
+  const { text = '', fileName = null, fileNameTruncated = false, fileNameTk = null, fileNameBona = null, media = null } = o ?? {};
+  const t = str(text);
+  if (!isDocument(media)) return SITE_LINK_RE.test(t) || LISTING_ID_RE.test(t);
+  const name = str(fileName);
+  const cut = Boolean(fileNameTruncated);
+  if (TK_RE.test(t) || nameSays(TK_RE, name, cut, fileNameTk)) return false;
+  const readable = cut ? readableCutName(name) : name;
+  if (SITE_LINK_RE.test(t) || LISTING_ID_RE.test(t)) return true;
+  if (cut ? LISTING_ID_NAME_CUT_RE.test(readable) : LISTING_ID_NAME_RE.test(name) || SITE_LINK_RE.test(name)) return true;
+  if (BONA_WORD_RE.test(t) || nameSays(BONA_WORD_RE, name, cut, fileNameBona)) return false;
+  return PROPERTY_DOC_RE.test(t) || (cut ? PROPERTY_DOC_CUT_RE : PROPERTY_DOC_RE).test(readable);
+}
+
+/**
+ * The chat's inbox state after one inbound message. `in` and `out` stay as they are; an
+ * undecided or unsure chat becomes `in` on anything certain and `unsure` on a guess (the
+ * word, or a lead the poller matched only by keyword or click window); otherwise it is
+ * left as it was. A `current` that is not one of the three states reads as undecided
+ * (the store's CHECK allows only those and NULL), so the answer is always a state or null.
+ * @param {'in'|'unsure'|'out'|null|undefined} current
+ * @param {{ signal?: 'certain'|'unsure'|null, method?: string|null }|null} [o]
+ * @returns {'in'|'unsure'|'out'|null}
+ */
+export function nextInboxState(current, o) {
+  const { signal = null, method = null } = o ?? {};
+  const cur = INBOX_STATES.includes(current) ? current : null;
+  if (cur === 'out' || cur === 'in') return cur;
+  if (signal === 'certain') return 'in';
+  if (signal === 'unsure' || method === 'keyword' || method === 'time_window') return 'unsure';
+  return cur;
+}
+```
+
+- [ ] **Step 4: The record says whether the whole name named TK or Bona** — five edits in `services/api/lib/evolution.mjs` (it keeps its read-only header; the import is the module's first). Find:
+
+```js
+/**
+ * The most pages one read asks for; `readWindow` cuts a window that holds more than
+```
+
+Replace with:
+
+```js
+import { BONA_WORD_RE, TK_RE } from './inbox/eligibility.mjs';
+
+/**
+ * The most pages one read asks for; `readWindow` cuts a window that holds more than
+```
+
+Find:
+
+```js
+/**
+ * A record's document name made safe to show (`name`, null when there is no document or
+ * nothing usable is left) and whether it had to be cut at `MAX_FILE_NAME` code points to get
+ * there (`truncated`; what cleaning removes is not a cut). The one place both are worked out,
+ * so `mediaOf`'s placeholder and `normaliseRecord`'s `fileName`/`fileNameTruncated` agree.
+ * @returns {{ name: string|null, truncated: boolean }}
+ */
+function fileNameOf(record) {
+  const flat = flatFileName(unwrapMessage(record?.message)?.documentMessage?.fileName);
+  const name = capCodePoints(flat, MAX_FILE_NAME).trim() || null;
+  return { name, truncated: name !== null && name !== flat };
+}
+```
+
+Replace with:
+
+```js
+/**
+ * A record's document name made safe to show (`name`, null when there is no document or
+ * nothing usable is left), whether it had to be cut at `MAX_FILE_NAME` code points to get
+ * there (`truncated`; what cleaning removes is not a cut), and whether the whole cleaned
+ * name, before any cut, names TK or Bona (`tk`, `bona`: lib/inbox/eligibility.mjs `TK_RE`,
+ * `BONA_WORD_RE`). The one place all four are worked out, so `mediaOf`'s placeholder and
+ * `normaliseRecord`'s `fileName`/`fileNameTruncated`/`fileNameTk`/`fileNameBona` agree.
+ * @returns {{ name: string|null, truncated: boolean, tk: boolean, bona: boolean }}
+ */
+function fileNameOf(record) {
+  const flat = flatFileName(unwrapMessage(record?.message)?.documentMessage?.fileName);
+  const name = capCodePoints(flat, MAX_FILE_NAME).trim() || null;
+  return {
+    name,
+    truncated: name !== null && name !== flat,
+    tk: name !== null && TK_RE.test(flat),
+    bona: name !== null && BONA_WORD_RE.test(flat),
+  };
+}
+```
+
+Find:
+
+```js
+ * read the end of it), both from `fileNameOf`, `noise` is `isNoise`. A document's name is chosen by its sender
+```
+
+Replace with:
+
+```js
+ * read the end of it), `fileNameTk` / `fileNameBona` true when the whole name, cut or not,
+ * names TK / Bona — the two things about the part a cut hides that the inbox rules need
+ * (D16) — all four from `fileNameOf`, `noise` is `isNoise`. A document's name is chosen by its sender
+```
+
+Find:
+
+```js
+ *             media: string|null, fileName: string|null, fileNameTruncated: boolean,
+ *             noise: boolean }} NormalisedRecord
+ */
+export function normaliseRecord(record) {
+  const key = record?.key ?? {};
+  const jid = typeof key.remoteJid === 'string' ? key.remoteJid : null;
+  const alt = key.remoteJidAlt ?? record?.remoteJidAlt ?? key.senderPn ?? null;
+  const { name: fileName, truncated: fileNameTruncated } = fileNameOf(record);
+```
+
+Replace with:
+
+```js
+ *             media: string|null, fileName: string|null, fileNameTruncated: boolean,
+ *             fileNameTk: boolean, fileNameBona: boolean, noise: boolean }} NormalisedRecord
+ */
+export function normaliseRecord(record) {
+  const key = record?.key ?? {};
+  const jid = typeof key.remoteJid === 'string' ? key.remoteJid : null;
+  const alt = key.remoteJidAlt ?? record?.remoteJidAlt ?? key.senderPn ?? null;
+  const { name: fileName, truncated: fileNameTruncated, tk: fileNameTk, bona: fileNameBona } = fileNameOf(record);
+```
+
+and, in the object it returns, find:
+
+```js
+    fileNameTruncated,
+    noise: isNoise(record),
+```
+
+Replace with:
+
+```js
+    fileNameTruncated,
+    fileNameTk,
+    fileNameBona,
+    noise: isNoise(record),
+```
+
+(No import cycle: `eligibility.mjs` imports only `../attribution.mjs`, which imports only `./cors.mjs`; neither reaches `evolution.mjs`.)
+
+- [ ] **Step 5: The poller's comments** — two edits in `services/api/lib/wa-poller.mjs` (comments only; the code already hands `ownerOutboundJoins` the normalised record). In the module header, find:
+
+```js
+ * own message puts a chat `in` only when it carries a Bona link, a listing number or a Bona
+ * brochure (D12 — TK and private chats share this number, so nothing else he types
+ * counts). Only `in` chats are kept as transcripts (lib/inbox/ingest.mjs), both directions,
+ * from the joining message plus the 24 h before it. An `out` chat never comes back on its
+ * own. Every other conversation is still discarded exactly as above.
+```
+
+Replace with:
+
+```js
+ * own message puts a chat `in` only when it carries a Bona link or a listing number, or is a
+ * property document that names neither TK nor Bona (D12, D16 — TK and private chats share
+ * this number, so nothing else he sends counts; lib/inbox/eligibility.mjs has the rules).
+ * Only `in` chats are kept as transcripts (lib/inbox/ingest.mjs), both directions, from the
+ * joining message plus the 24 h before it. An `out` chat never comes back on its own.
+ * Every other conversation is still discarded exactly as above.
+```
+
+In the doc comment of `inboxAfterOutbound`, find:
+
+```js
+   * in the outbox. An `out` chat never comes back on its own. Any other chat joins only on
+   * a Bona link, a listing number or a Bona brochure (D12), judged on the normalised record
+   * as it is, so a document name cut at 120 code points is read as cut (A8). A stranger he
+   * writes to that way becomes an `owner_outbound` lead — no ad fan-out and no new-lead
+   * note, because he started it (lib/leads.mjs `OWNER_METHODS`) — with no name: a `fromMe`
+   * record's pushName is his own.
+```
+
+Replace with:
+
+```js
+   * in the outbox. An `out` chat never comes back on its own. Any other chat joins only on
+   * a Bona link, a listing number or a property document that names neither TK nor Bona
+   * (D12, D16), judged on the normalised record as it is, so a document name cut at 120
+   * code points is read as cut, with what the whole name said (A8, `fileNameTk`,
+   * `fileNameBona`). A stranger he writes to that way becomes an `owner_outbound` lead — no
+   * ad fan-out and no new-lead note, because he started it (lib/leads.mjs `OWNER_METHODS`) —
+   * with no name: a `fromMe` record's pushName is his own.
+```
+
+- [ ] **Step 6: Run the three files**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/inbox-eligibility.test.mjs api/test/evolution.test.mjs api/test/wa-poller.test.mjs`
+Expected: PASS, 0 fail. (`inbox-eligibility`: 4 tests more than before — the two old document tests are replaced by five, and the "brochure at every cut" sweep is new; `evolution`: 1 more; `wa-poller`: 1 more. The timing test stays well under its 100 ms per call: the slowest new case measured 17 ms at 200,000 characters.)
+
+- [ ] **Step 7: README** — in `services/README.md`, in the **Inbox** paragraphs Task 13 wrote under `### Dashboard`:
+
+(a) D15. Find the line that starts `- *Unsure*:` and insert, directly above it (so it continues the *Certain* bullet):
+
+```markdown
+  Ad context stays certain: TK runs no click-to-WhatsApp ads to this number (owner,
+  2026-09-28, D15), so an ad-origin chat here is a Bona client.
+```
+
+(b) D16. Replace the whole *Owner-started* bullet — from the line that starts `- *Owner-started*:` down to, not including, the line that starts `- *Owner buttons*:` — with:
+
+```markdown
+- *Owner-started*: the owner's own message in a 1:1 chat puts that chat `in` (a new lead gets
+  `match_method = 'owner_outbound'`) with the 24 h before it when it carries a Bona site link
+  (`bona-real-estate.com`, legacy `bona.azoz.uk`) or a listing id, or when it is a property
+  document (D16): a brochure, floor plan, price list, payment plan, master plan or fact sheet
+  from any developer, in English or Arabic, named in its file name or caption, or a document
+  whose file name carries a listing id or a site link. A document whose file name or caption
+  names TK (`TK`, `T.K.`, `tk-estates`, `تي كي` / `تى كى`) never joins, whatever else it says.
+  A document that names Bona joins only by a listing id or a site link: Bona AB also makes
+  wood-floor finishes, with brochures and price lists of its own, so "Bona Traffic HD
+  brochure.pdf" goes on the owner's list of real-estate chats to check instead. A document
+  name cut at 120 characters joins only where the whole name would (`fileNameTk` and
+  `fileNameBona` carry whether the whole name named TK or Bona). Nothing else he types
+  counts — TK and private chats share the number. These leads fan out to no ad platform (no
+  click is behind them), send him no new-lead note, and are born answered (`first_reply_ts`
+  set, `first_inbound_ts` empty), so neither the waiting queue nor the Hermes
+  `bona-unanswered-leads` watchdog flags them.
+```
+
+Check: `cd /home/azoz778/bona-wt/team-inbox && grep -c -e 'D15), so an ad-origin chat' -e 'document (D16): a brochure' services/README.md` → `2`.
+
+- [ ] **Step 8: Run the full suite**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/*.test.mjs`
+Expected: all pass, 0 fail — 6 more tests than after Task 14 (checked on a copy of the tree with Tasks 1–14 applied: 899 → 905, all pass).
+
+- [ ] **Step 9: Commit**
+
+```bash
+cd /home/azoz778/bona-wt/team-inbox && git add services/api/lib/inbox/eligibility.mjs services/api/lib/evolution.mjs services/api/lib/wa-poller.mjs services/README.md services/api/test/inbox-eligibility.test.mjs services/api/test/evolution.test.mjs services/api/test/wa-poller.test.mjs
+git commit -m "inbox: any property document the owner sends joins the chat; the word Bona and a TK document do not
+
+Owner decisions D15 and D16 (2026-09-28). A brochure, floor plan, price list,
+payment plan, master plan or fact sheet in the file name or caption joins, as do
+a listing id or a site link. The bare word Bona on a document no longer does,
+and a document that names Bona joins only by a listing id or a link (Bona AB
+makes floor finishes and has brochures of its own). A document naming TK
+(TK, T.K., tk-estates, تي كي / تى كى) never joins. The record carries
+fileNameTk and fileNameBona, worked out on the whole name, so a cut name still
+joins only where the whole name would.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+#### Owner answer 2026-09-28 (binding; supersedes the task text above where they differ — "only clear property documents join")
+The owner chose: **"brochure" joins on its own; the other document words join only next to a property word, a listing id or a Bona site link**, because TK design work uses them too ("Payment plan - kitchen works.pdf", "مخطط الكهرباء.pdf", "كتيب الصيانة.pdf", a fit-out floor plan). Implement it this way:
+- Split the document words into two exported patterns in `lib/inbox/eligibility.mjs` (both `iu`, linear, bounded by non-letters, same style as `PROPERTY_DOC_RE`):
+  - `BROCHURE_RE` — `brochure(s)`, `بروشور`/`بروشورات`: joins on its own (still subject to the TK and Bona document rules).
+  - `QUALIFIED_DOC_RE` — `floor ?plan(s)`, `price ?list(s)`, `payment ?plan(s)`, `master ?plan(s)`, `fact ?sheet(s)`, `كتيب`/`كتيّب`, `مخطط`/`مخططات`, `قائمة الأسعار`/`قائمة الاسعار`, `جدول الأسعار`/`جدول الاسعار`, `خطة الدفع`/`خطة السداد`, `جدول الدفعات`/`جدول السداد`: joins only when the same file name or caption ALSO matches `PROPERTY_NOUN_RE`, a listing id or a site link.
+  - `PROPERTY_NOUN_RE` (exported) — English `villa(s)`, `apartment(s)`, `unit(s)`, `project(s)`, `tower(s)`, `residence(s)`, `townhouse(s)`, `duplex`, `penthouse(s)`, `compound`, `plot(s)`, `land`, `property`/`properties`; Arabic `فيلا`/`فلل`/`فله`/`فلة`, `شقة`/`شقق`/`شقه`, `مشروع`/`مشاريع` (with or without `ال`), `وحدة`/`وحدات`, `برج`/`أبراج`, `عمارة`, `دوبلكس`, `بنتهاوس`, `تاون هاوس`, `مجمع سكني`, `أرض`/`ارض`/`أراضي` (without `ال`), `عقار`/`عقارات`.
+  - `PROPERTY_DOC_RE` stays exported as the union of `BROCHURE_RE` and `QUALIFIED_DOC_RE` (Task 16's `'property document'` candidate marker keeps using it, so a qualified word that did not join still reaches the owner's Unsure list).
+- Tests (replace the task text's cases where they differ): JOIN — `Knightsbridge_Phase 2_Brochure_EN.pdf`, `بروشور المشروع.pdf`, `Villa floor plan.pdf`, `مخطط فيلا.pdf`, `Project price list.pdf`, `Unit payment plan.pdf`, `قائمة أسعار الشقق.pdf`, `Tower A fact sheet.pdf`, `floor plan BONA-W003.pdf`, caption "price list for the villa" on `doc.pdf`; DO NOT JOIN (and are candidates in Task 16) — `Floor-Plan_Type-A.pdf`, `Price List Sep.pdf`, `payment_plan.pdf`, `مخطط الدور الأرضي.pdf`, `قائمة الأسعار.pdf`, `Payment plan - kitchen works.pdf`, `مخطط الكهرباء.pdf`, `كتيب الصيانة.pdf`, `Master plan.pdf`; the Bona/TK/invoice cases stay as the task text says. Extend the cut-name sweep and the timing test to the three patterns.
+- Record the answer in the plan's Phase 2 section next to D16 (one paragraph) when you commit.
+
+---
+
+### Task 16: Real-estate chats go to the owner's Unsure list (D17)
+
+Owner decision of 2026-09-28 (binding, same weight as D1–D14): **D17** Any chat on his number that looks like real estate — property words, in either direction — but carries no sure signal goes to the **owner-only Unsure list** as a *candidate*, for him to check and tap *Move to Bona inbox* or *Not a client*. Nothing joins automatically without a sure signal (a Ref line in the site's shape or a code a session holds, ad context, a listing id, an owner-sent Bona link or property document, Task 15). TK clients who write to the personal number stay out of the Bona inbox this way (never list, or *Not a client*).
+
+A candidate is **not a lead**: no touchpoint, no ad fan-out, no new-lead note, no transcript, never the message text. It is one row per chat in a new table `inbox_candidates` — the number and jid (and lid, when WhatsApp shows one), the name WhatsApp shows for the client (never the owner's own name on a message he sent), the property words used (canonical forms, at most 8), first and last time, how many messages, who wrote last. Staff never see one, in HTML or JSON.
+
+Decisions taken while writing this task (inside D17 and the brief):
+
+- **Schema.** v4 has not shipped (the ship task runs after this one), so the table goes into the v4 migration, in a later commit than the rest of v4 (the comment says so). Every existing v4 test stays green and gains assertions for the new table. `words` is the comma-joined canonical words.
+- **Words** (`PROPERTY_WORD_RE`, `propertyWordsIn`): the brief's list, bounded like `BONA_WORD_RE`. Two additions for recall on typed Arabic, both only ever adding a chat to the owner's list, never joining one: ه for ة (فله, شقه, غرفه, عموله), and the article on most nouns (الفيلا, الشقة, العقار, الإيجار) — not on أرض and غرفة, where "الأرض" (the ground) and "الغرفة" (the room) are everyday words. The shown form is the canonical one (`إيجار` for للإيجار, `sqm` for m²).
+- **Documents and document words.** A TK document the owner sends (Task 15's `isTkDocument`) is a candidate even with no property word; its words start with `tk document`. A property-document word (Task 15's `PROPERTY_DOC_RE`: brochure, price list, بروشور …) in the text, the caption or a document's file name, in either direction, adds `property document`: so every owner-sent property document that did not join — one that names Bona without a listing id (Task 15), one whose name was cut too close to the word — is a candidate, and so is a client asking for "the price list". The owner sees why a chat is there. A document's file name counts for property words in either direction too.
+- **Only a chat with a phone number.** A record whose only id is a lid is never noted, like A7's rule that no lead is made from one: a lid cannot be checked against the team or the never list (it may be a colleague whose lid is not learned yet, with their name), cannot be replied to, and the exclusion sweep cannot catch it later. Nor is a jid that is not a phone's (`…@newsletter`, a WhatsApp channel the instance follows: every "فيلا للبيع" post would be a candidate). *Move* refuses such a row too, should one exist.
+- **Dismissed keeps only the ids.** *Not a client* clears the row's name, words, count and last writer, sets both times to the moment of the dismissal, and keeps it (state `dismissed`) only so the chat is not listed again; `noteCandidate` leaves a dismissed row untouched. Open rows are pruned 30 days after their last property message — so a chat that keeps writing about property stays until 30 days after its last such message, and the privacy page says exactly that, not "up to 30 days" — and dismissed rows a year after the dismissal (`CANDIDATE_KEEP_MS`, `DISMISSED_KEEP_MS`); the privacy page says both.
+- **A chat that becomes a lead leaves the list.** The poller removes its rows the moment a record of that chat has a lead behind it (created, merged, joined or already there, in any state), and so do the owner's *Add chat by phone number* and *Move to Bona inbox* on a lead. A lead made elsewhere (a web form) is caught when read: `listCandidates` and `countCandidates` leave out, in SQL, a candidate whose number, jid or lid is on a lead — that lead's own state decides — until the poller sees that chat again or the 30-day prune takes the row. The Unsure tab also leaves out one whose number is a colleague's or on the never list (the store knows no team, like Task 12's rule 1).
+- **Counting.** `countUnsure()` keeps its contract (unsure leads only). The owner's tab label on the inbox page and on the Unsure page counts the guesses plus the candidates the tab shows — one list (at most 200, newest first) for both, so the label and the list never disagree. Task 10's rail has no Unsure count (its only badge is the viewer's unread Inbox count), so there is no nav number to change.
+- **The poller never fails a record for the list.** Noting a candidate runs after the record is handled, in its own `try`: a failure is logged `inbox.candidate_failed` with the kind of error only (Task 9's `errorKind`, never its message: no numbers, no words) and the record is not retried for it, because a retry would handle the record a second time.
+- **Move** uses `createOrMergeLead({ name, phone, waJid, waLid }, { channel: 'whatsapp', matchMethod: 'owner_added' })` as the brief says: no fan-out, no note, born answered (P2-5); the name is the client's WhatsApp name, when the candidate has one. Born answered even when the client wrote last (`last_dir = 'in'`), on purpose: `last_dir` follows only the messages with property words, so it cannot tell "asked and nobody answered" from "asked, and the owner answered without a property word"; and `lib/leads.mjs` already puts an `owner_added` lead back on the waiting queue at the client's next message (its `first_reply_ts` still equal to `created` is cleared). Open for the owner: should a moved chat whose client wrote last be on the waiting queue at once? Audit rows carry the candidate id as `target` (plus `{ lead_id }` for a move), never a number.
+
+**Files:**
+- Modify: `services/api/lib/db.mjs` (v4 gains `inbox_candidates`)
+- Modify: `services/api/lib/inbox/store.mjs` (the candidate functions)
+- Modify: `services/api/lib/inbox/eligibility.mjs` (`PROPERTY_WORD_RE`, `MAX_PROPERTY_WORDS`, `propertyWordsIn`)
+- Modify: `services/api/lib/wa-poller.mjs` (`candidateWordsOf`, `TK_DOCUMENT_WORD`, `PROPERTY_DOCUMENT_WORD`, noting candidates, the `candidates` tally)
+- Modify: `services/api/lib/dashboard/render-inbox.mjs` (the "Real-estate chats to check" section, `INBOX_OK.dismissed`)
+- Modify: `services/api/lib/dashboard/render.mjs` (`MESSAGES.candidate_gone`, `MESSAGES.candidate_no_number`)
+- Modify: `services/api/lib/dashboard/routes.mjs` (the Unsure tab and its count, move/dismiss, removal on a never-list or team add, *Add chat* and *Move* on a lead)
+- Modify: `services/api/index.mjs` (the upkeep prunes candidates)
+- Modify: `services/README.md`, `src/data/privacy.json`
+- Test: `services/api/test/db.test.mjs`, `services/api/test/inbox-store.test.mjs`, `services/api/test/inbox-eligibility.test.mjs`, `services/api/test/wa-poller.test.mjs`, `services/api/test/dashboard-render-inbox.test.mjs`, `services/api/test/dashboard-inbox.test.mjs`, `services/api/test/inbox-wiring.test.mjs`, `scripts/test/privacy-policy.test.mjs`
+
+Four commits, one per part (A the table, the property words and the store; B the poller; C the screens, routes and upkeep; D the privacy page and README). Each part runs the full suite before it commits.
+
+#### Part A — the table, the property words and the store
+
+- [ ] **Step 1: Write the failing tests**
+
+In `services/api/test/db.test.mjs`, six edits.
+
+Find:
+
+```js
+'never_list', 'settings', 'wa_messages', 'wa_outbox', 'inbox_reads', 'wa_gaps']) {
+    assert.ok(tables.includes(name), name);
+```
+
+Replace with:
+
+```js
+'never_list', 'settings', 'wa_messages', 'wa_outbox', 'inbox_reads', 'wa_gaps', 'inbox_candidates']) {
+    assert.ok(tables.includes(name), name);
+```
+
+Find:
+
+```js
+test('schema v4 gives leads their inbox columns and adds the transcript, outbox, read-mark and gap tables', () => {
+```
+
+Replace with:
+
+```js
+test('schema v4 gives leads their inbox columns and adds the transcript, outbox, read-mark, gap and candidate tables', () => {
+```
+
+Find:
+
+```js
+  assert.deepEqual(names('wa_gaps'), ['key_id', 'lead_id', 'jid', 'ts', 'reason']);
+  const indexes = new Set(s.db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map((r) => r.name));
+  for (const name of ['leads_inbox', 'wa_messages_lead', 'wa_outbox_key', 'wa_outbox_lead', 'wa_outbox_created', 'wa_gaps_lead']) assert.ok(indexes.has(name), name);
+```
+
+Replace with:
+
+```js
+  assert.deepEqual(names('wa_gaps'), ['key_id', 'lead_id', 'jid', 'ts', 'reason']);
+  assert.deepEqual(names('inbox_candidates'), ['cand_id', 'jid', 'lid', 'phone_e164', 'name', 'first_ts', 'last_ts', 'hits', 'words', 'last_dir', 'state', 'updated']);
+  assert.ok(!names('inbox_candidates').some((c) => /text|snippet|body/.test(c)), 'a candidate never holds what was written');
+  const indexes = new Set(s.db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map((r) => r.name));
+  for (const name of ['leads_inbox', 'wa_messages_lead', 'wa_outbox_key', 'wa_outbox_lead', 'wa_outbox_created', 'wa_gaps_lead', 'inbox_candidates_state']) assert.ok(indexes.has(name), name);
+```
+
+Find (the end of the v4 CHECKs test):
+
+```js
+  assert.throws(() => read.run('USR-1', 'L1', 7), /UNIQUE/, 'one read mark per person per chat');
+  s.close();
+});
+```
+
+Replace with:
+
+```js
+  assert.throws(() => read.run('USR-1', 'L1', 7), /UNIQUE/, 'one read mark per person per chat');
+
+  const cand = s.db.prepare('INSERT INTO inbox_candidates (cand_id, jid, lid, phone_e164, first_ts, last_ts, last_dir, state, updated) VALUES (?,?,?,?,?,?,?,?,?)');
+  cand.run('CND-1', '966500000001@s.whatsapp.net', null, '966500000001', 1, 1, 'in', 'open', 1);
+  cand.run('CND-2', null, '111@lid', null, 1, 1, 'out', 'dismissed', 1);
+  cand.run('CND-3', null, null, '966500000003', 1, 1, null, 'open', 1);
+  cand.run('CND-4', null, null, null, 1, 1, null, 'open', 1);
+  cand.run('CND-5', null, null, null, 1, 1, null, 'open', 1);
+  assert.equal(s.db.prepare("SELECT hits FROM inbox_candidates WHERE cand_id = 'CND-1'").get().hits, 1, 'a new row is one message');
+  assert.throws(() => cand.run('CND-6', null, null, '966500000001', 1, 1, 'in', 'open', 1), /UNIQUE/, 'one row per number');
+  assert.throws(() => cand.run('CND-7', '966500000001@s.whatsapp.net', null, null, 1, 1, 'in', 'open', 1), /UNIQUE/, 'one row per jid');
+  assert.throws(() => cand.run('CND-8', null, '111@lid', null, 1, 1, 'in', 'open', 1), /UNIQUE/, 'one row per lid');
+  assert.throws(() => cand.run('CND-9', null, null, null, 1, 1, 'sideways', 'open', 1), /CHECK/);
+  assert.throws(() => cand.run('CND-10', null, null, null, 1, 1, 'in', 'maybe', 1), /CHECK/);
+  assert.throws(() => cand.run(null, null, null, null, 1, 1, 'in', 'open', 1), /NOT NULL/, 'a candidate always has its id');
+  assert.throws(() => cand.run('CND-11', null, null, null, null, 1, 'in', 'open', 1), /NOT NULL/);
+  assert.throws(() => cand.run('CND-12', null, null, null, 1, 1, 'in', 'open', null), /NOT NULL/);
+  s.close();
+});
+```
+
+Find (in the v3 → v4 test):
+
+```js
+  for (const table of ['wa_messages', 'wa_outbox', 'inbox_reads', 'wa_gaps']) assert.equal(countOf(a.db, table), 0, table);
+```
+
+Replace with:
+
+```js
+  for (const table of ['wa_messages', 'wa_outbox', 'inbox_reads', 'wa_gaps', 'inbox_candidates']) assert.equal(countOf(a.db, table), 0, table);
+```
+
+Find (in the part-way failure test):
+
+```js
+  assert.equal(check.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'wa_messages'").get().n, 0, 'the CREATEs were rolled back');
+```
+
+Replace with:
+
+```js
+  assert.equal(check.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'wa_messages'").get().n, 0, 'the CREATEs were rolled back');
+  assert.equal(check.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'inbox_candidates'").get().n, 0, 'the candidates table too');
+```
+
+In `services/api/test/inbox-eligibility.test.mjs` (as Task 15 left it), six edits.
+
+Find:
+
+```js
+import {
+  LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE, INBOX_STATES,
+  inboundSignal, ownerOutboundJoins, isTkDocument, nextInboxState,
+} from '../lib/inbox/eligibility.mjs';
+```
+
+Replace with:
+
+```js
+import {
+  LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE, PROPERTY_WORD_RE, MAX_PROPERTY_WORDS, INBOX_STATES,
+  inboundSignal, ownerOutboundJoins, isTkDocument, propertyWordsIn, nextInboxState,
+} from '../lib/inbox/eligibility.mjs';
+```
+
+Find:
+
+```js
+  for (const re of [LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE]) {
+    assert.ok(re instanceof RegExp);
+```
+
+Replace with:
+
+```js
+  for (const re of [LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE, PROPERTY_WORD_RE]) {
+    assert.ok(re instanceof RegExp);
+```
+
+Find:
+
+```js
+  for (const re of [BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE]) assert.equal(re.unicode, true, `${re} needs /u`);
+  for (const re of [PROPERTY_DOC_RE, TK_RE]) assert.equal(re.ignoreCase, true, `${re} ignores case`);
+```
+
+Replace with:
+
+```js
+  for (const re of [BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE, PROPERTY_WORD_RE]) assert.equal(re.unicode, true, `${re} needs /u`);
+  for (const re of [PROPERTY_DOC_RE, TK_RE, PROPERTY_WORD_RE]) assert.equal(re.ignoreCase, true, `${re} ignores case`);
+```
+
+Find:
+
+```js
+/* ---------------- time ---------------- */
+```
+
+Replace with:
+
+```js
+/* ---------------- property words (D17) ---------------- */
+
+test('property words come out as the forms the owner\'s list shows: each once, in order, at most eight', () => {
+  assert.equal(MAX_PROPERTY_WORDS, 8);
+  for (const [text, words] of [
+    ['عندكم شقة للإيجار؟', ['شقة', 'إيجار']],
+    ['the villa is 3M', ['villa']],
+    ['Villas and apartments for rent, 300m², 4 bedrooms', ['villa', 'apartment', 'rent', 'sqm', 'bedroom']],
+    ['Flat to let? Lease or rental, a plot of land, 2 properties', ['flat', 'lease', 'rent', 'plot', 'land', 'property']],
+    ['Real-estate broker, commission 2.5%', ['real estate', 'broker', 'commission']],
+    ['DUPLEX penthouse Town House compound listing 250 sqm', ['duplex', 'penthouse', 'townhouse', 'compound', 'listing', 'sqm']],
+    ['الفيلا فله فلل فلة فيلا', ['فيلا']],
+    ['شقه، الشقق', ['شقة']],
+    ['ايجار الإيجار للايجار', ['إيجار']],
+    ['أرض للبيع، ارض، الأراضي', ['أرض', 'للبيع']],
+    ['عقار العقارات دوبلكس البنتهاوس', ['عقار', 'دوبلكس', 'بنتهاوس']],
+    ['تاون هاوس في مجمع سكني', ['تاون هاوس', 'مجمع سكني']],
+    ['غرفة غرف غرفه', ['غرفة']],
+    ['الصك مع السمسار، العمولة ٢٫٥', ['صك', 'سمسار', 'عمولة']],
+    ['مخطط الشاطئ', ['مخطط']],
+    ['villa apartment flat rent lease land plot property duplex penthouse', ['villa', 'apartment', 'flat', 'rent', 'lease', 'land', 'plot', 'property']],
+  ]) {
+    assert.deepEqual(propertyWordsIn(text), words, text);
+  }
+});
+
+test('words that only contain a property word, everyday Arabic and non-strings are no property words', () => {
+  for (const text of ['Hello', 'villager', 'parent', 'current', 'island', 'landlord', 'flatter', 'rented a car', 'plotted',
+    'commissioner', 'broken', 'propertyX', 'km²', 'طحت على الأرض', 'الغرفة باردة', 'والفيلا', 'بالإيجار', 'كوبونات', 'Bona', '']) {
+    assert.deepEqual(propertyWordsIn(text), [], text);
+    assert.equal(PROPERTY_WORD_RE.test(text), false, text);
+  }
+  for (const text of [null, undefined, 42, {}, ['villa']]) assert.deepEqual(propertyWordsIn(text), [], String(text));
+  assert.equal(PROPERTY_WORD_RE.test('a villa'), true);
+  assert.equal(PROPERTY_WORD_RE.lastIndex, 0, 'no /g: nothing is carried over');
+});
+
+/* ---------------- time ---------------- */
+```
+
+and in the timing test, find:
+
+```js
+    fill('t.k', n), fill('t.', n), fill('تى ', n), fill('تى', n), fill('تيكى', n),
+  ];
+```
+
+Replace with:
+
+```js
+    fill('t.k', n), fill('t.', n), fill('تى ', n), fill('تى', n), fill('تيكى', n),
+    fill('villa ', n), fill('villax', n), fill('real ', n), fill('town-', n), fill('rent', n), fill('الفي', n), fill('ال', n),
+    fill('تاون ', n), fill('مجمع ', n), fill('شقة ', n),
+  ];
+```
+
+Find:
+
+```js
+    ['TK_RE', (s) => TK_RE.test(s)],
+  ];
+```
+
+Replace with:
+
+```js
+    ['TK_RE', (s) => TK_RE.test(s)],
+    ['propertyWordsIn', (s) => propertyWordsIn(s)],
+    ['PROPERTY_WORD_RE', (s) => PROPERTY_WORD_RE.test(s)],
+  ];
+```
+
+In `services/api/test/inbox-store.test.mjs`, replace the import
+
+```js
+import {
+  createInboxStore, RETENTION_MS, MAX_STORED_TEXT, SENDER_KINDS, OUTBOX_KINDS, OUTBOX_STATUSES,
+} from '../lib/inbox/store.mjs';
+```
+
+with
+
+```js
+import {
+  createInboxStore, RETENTION_MS, MAX_STORED_TEXT, SENDER_KINDS, OUTBOX_KINDS, OUTBOX_STATUSES, CANDIDATE_KEEP_MS, DISMISSED_KEEP_MS,
+} from '../lib/inbox/store.mjs';
+```
+
+and append to the end of the file (after Task 11's `listedLeads` test):
+
+```js
+
+/* ---------------- real-estate chats to check (D17) ---------------- */
+
+const PHONE = '966500000077';
+const PJID = `${PHONE}@s.whatsapp.net`;
+const LID = '272516946294519@lid';
+const cand = (s, id) => ({ ...s.db.prepare('SELECT * FROM inbox_candidates WHERE cand_id = ?').get(id) });
+
+test('a candidate is kept 30 days after its last property message, a dismissed one a year', () => {
+  assert.equal(CANDIDATE_KEEP_MS, 30 * DAY);
+  assert.equal(DISMISSED_KEEP_MS, 365 * DAY);
+});
+
+test('noteCandidate makes one row per chat: who, when, which words and who wrote last — never what was written', () => {
+  const { s, inbox, at } = harness();
+  const first = inbox.noteCandidate({ jid: PJID, phone: PHONE, name: '  Umm   Khalid ', ts: NOW - 5000, words: ['شقة', 'إيجار'], dir: 'in' });
+  assert.equal(first.state, 'open');
+  assert.equal(first.created, true);
+  assert.match(first.cand_id, /^CND-[0-9a-z]+-[0-9a-f]{4}$/);
+  assert.deepEqual(cand(s, first.cand_id), {
+    cand_id: first.cand_id, jid: PJID, lid: null, phone_e164: PHONE, name: 'Umm Khalid',
+    first_ts: NOW - 5000, last_ts: NOW - 5000, hits: 1, words: 'شقة,إيجار', last_dir: 'in', state: 'open', updated: NOW,
+  });
+
+  // The same chat again, now by its lid with the phone jid alongside: the same row.
+  at(NOW + 1000);
+  const again = inbox.noteCandidate({ jid: PJID, lid: LID, name: 'Someone Else', ts: NOW - 1000, words: ['villa', 'شقة'], dir: 'out' });
+  assert.deepEqual(again, { state: 'open', cand_id: first.cand_id, created: false });
+  assert.deepEqual(cand(s, first.cand_id), {
+    cand_id: first.cand_id, jid: PJID, lid: LID, phone_e164: PHONE, name: 'Umm Khalid',
+    first_ts: NOW - 5000, last_ts: NOW - 1000, hits: 2, words: 'شقة,إيجار,villa', last_dir: 'out', state: 'open', updated: NOW + 1000,
+  }, 'a name it has is kept; the lid it lacked is filled');
+
+  // An older message read late (the poll overlap) counts, but moves neither the last time nor the last writer.
+  inbox.noteCandidate({ lid: LID, ts: NOW - 9000, words: [], dir: 'in' });
+  const row = cand(s, first.cand_id);
+  assert.deepEqual([row.first_ts, row.last_ts, row.last_dir, row.hits], [NOW - 9000, NOW - 1000, 'out', 3]);
+  assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM inbox_candidates').get().n, 1);
+  s.close();
+});
+
+test('noteCandidate keeps at most eight words, each once, no commas, strings only', () => {
+  const { s, inbox } = harness();
+  const { cand_id } = inbox.noteCandidate({ phone: PHONE, ts: NOW, words: ['villa', 'villa', 'a,b', 42, null, '  ', 'flat'], dir: 'in' });
+  assert.equal(cand(s, cand_id).words, 'villa,a b,flat');
+  inbox.noteCandidate({ phone: PHONE, ts: NOW, words: ['land', 'plot', 'rent', 'lease', 'sqm', 'broker', 'duplex'], dir: 'in' });
+  assert.equal(cand(s, cand_id).words, 'villa,a b,flat,land,plot,rent,lease,sqm', 'the first eight, in order');
+  assert.deepEqual(inbox.getCandidate(cand_id).words, ['villa', 'a b', 'flat', 'land', 'plot', 'rent', 'lease', 'sqm']);
+  const none = inbox.noteCandidate({ jid: 'x@s.whatsapp.net', ts: NOW, dir: 'out' });
+  assert.equal(cand(s, none.cand_id).words, null);
+  assert.deepEqual(inbox.getCandidate(none.cand_id).words, []);
+  s.close();
+});
+
+test('noteCandidate never fills an id another row already holds, and refuses a chat with no id, no time or no direction', () => {
+  const { s, inbox } = harness();
+  const byLid = inbox.noteCandidate({ lid: LID, ts: NOW, words: ['villa'], dir: 'in' });
+  const byPhone = inbox.noteCandidate({ phone: PHONE, ts: NOW, words: ['flat'], dir: 'in' });
+  // A record that shows both: found by its number first, and the lid stays with its own row.
+  assert.equal(inbox.noteCandidate({ phone: PHONE, lid: LID, ts: NOW + 1, words: [], dir: 'in' }).cand_id, byPhone.cand_id);
+  assert.equal(cand(s, byPhone.cand_id).lid, null);
+  assert.equal(cand(s, byLid.cand_id).lid, LID);
+  assert.throws(() => inbox.noteCandidate({ ts: NOW, dir: 'in' }), RangeError);
+  assert.throws(() => inbox.noteCandidate({ phone: '  ', jid: '', ts: NOW, dir: 'in' }), RangeError);
+  assert.throws(() => inbox.noteCandidate({ phone: PHONE, ts: 'soon', dir: 'in' }), RangeError);
+  assert.throws(() => inbox.noteCandidate({ phone: PHONE, ts: NOW, dir: 'sideways' }), RangeError);
+  assert.throws(() => inbox.noteCandidate(), RangeError);
+  s.close();
+});
+
+test('a dismissed candidate stays dismissed: a later message neither reopens nor counts it, and only its ids are left', () => {
+  const { s, inbox, at } = harness();
+  const { cand_id } = inbox.noteCandidate({ jid: PJID, phone: PHONE, name: 'Umm Khalid', ts: NOW - 9000, words: ['villa'], dir: 'in' });
+  inbox.noteCandidate({ phone: PHONE, ts: NOW - 1000, words: ['شقة'], dir: 'out' });
+  at(NOW + 5000);
+  assert.equal(inbox.dismissCandidate(cand_id), true);
+  assert.equal(inbox.dismissCandidate(cand_id), false, 'once');
+  assert.equal(inbox.dismissCandidate('CND-nope'), false);
+  const row = cand(s, cand_id);
+  assert.deepEqual(row, {
+    cand_id, jid: PJID, lid: null, phone_e164: PHONE, name: null,
+    first_ts: NOW + 5000, last_ts: NOW + 5000, hits: 0, words: null, last_dir: null, state: 'dismissed', updated: NOW + 5000,
+  }, 'no name, words, count, last writer or message times: only the ids and when it was dismissed');
+  at(NOW + 9000);
+  assert.deepEqual(inbox.noteCandidate({ phone: PHONE, name: 'Umm Khalid', ts: NOW + 8000, words: ['شقة'], dir: 'in' }), { state: 'dismissed', cand_id, created: false });
+  assert.deepEqual(cand(s, cand_id), row, 'not touched at all');
+  assert.equal(inbox.countCandidates(), 0);
+  assert.deepEqual(inbox.listCandidates(), []);
+  s.close();
+});
+
+test('listCandidates and countCandidates: open rows only, the latest message first', () => {
+  const { s, inbox } = harness();
+  const a = inbox.noteCandidate({ phone: '966500000001', ts: NOW - 3000, words: ['villa'], dir: 'in' });
+  const b = inbox.noteCandidate({ phone: '966500000002', ts: NOW - 1000, words: ['flat'], dir: 'out' });
+  const c = inbox.noteCandidate({ phone: '966500000003', ts: NOW - 2000, words: ['land'], dir: 'in' });
+  const d = inbox.noteCandidate({ phone: '966500000004', ts: NOW, words: ['plot'], dir: 'in' });
+  inbox.dismissCandidate(d.cand_id);
+  assert.deepEqual(inbox.listCandidates().map((r) => r.cand_id), [b.cand_id, c.cand_id, a.cand_id]);
+  assert.deepEqual(inbox.listCandidates({ limit: 1 }).map((r) => r.cand_id), [b.cand_id]);
+  assert.equal(inbox.countCandidates(), 3);
+  assert.deepEqual(inbox.listCandidates()[0].words, ['flat']);
+  assert.equal(inbox.getCandidate('CND-nope'), null);
+  s.close();
+});
+
+test('listCandidates and countCandidates leave out a chat that has become a lead since, by its number, jid or lid', () => {
+  const { s, inbox } = harness();
+  const byPhone = inbox.noteCandidate({ phone: '966500000001', ts: NOW - 1000, words: ['villa'], dir: 'in' });
+  const byJid = inbox.noteCandidate({ phone: '966500000002', jid: '966500000002@s.whatsapp.net', ts: NOW - 2000, words: ['villa'], dir: 'in' });
+  const byLid = inbox.noteCandidate({ phone: '966500000003', lid: LID, ts: NOW - 3000, words: ['villa'], dir: 'in' });
+  const stays = inbox.noteCandidate({ phone: '966500000004', ts: NOW - 4000, words: ['villa'], dir: 'in' });
+  assert.equal(inbox.countCandidates(), 4);
+  lead(s, 'LEAD-p', { phone_e164: '966500000001' });
+  lead(s, 'LEAD-j', { wa_jid: '966500000002@s.whatsapp.net' });
+  lead(s, 'LEAD-l', { wa_lid: LID });
+  assert.deepEqual(inbox.listCandidates().map((r) => r.cand_id), [stays.cand_id]);
+  assert.equal(inbox.countCandidates(), 1, 'the count is the list');
+  // Still there to be read and removed: the lead decides, the row waits for the poller or the prune.
+  for (const c of [byPhone, byJid, byLid]) assert.equal(inbox.getCandidate(c.cand_id).state, 'open');
+  s.close();
+});
+
+test('removeCandidate and removeCandidatesFor: one row, or every row of a chat by any of its ids, open or dismissed', () => {
+  const { s, inbox } = harness();
+  const byPhone = inbox.noteCandidate({ phone: PHONE, ts: NOW, words: ['villa'], dir: 'in' });
+  const byLid = inbox.noteCandidate({ lid: LID, ts: NOW, words: ['villa'], dir: 'in' });
+  const other = inbox.noteCandidate({ phone: '966500000001', jid: '966500000001@s.whatsapp.net', ts: NOW, words: ['flat'], dir: 'in' });
+  inbox.dismissCandidate(byLid.cand_id);
+  assert.equal(inbox.removeCandidatesFor({ phone: PHONE, jid: PJID, lid: LID }), 2);
+  assert.equal(inbox.getCandidate(byPhone.cand_id), null);
+  assert.equal(inbox.getCandidate(byLid.cand_id), null);
+  assert.ok(inbox.getCandidate(other.cand_id), 'another chat stays');
+  assert.equal(inbox.removeCandidatesFor({}), 0, 'no id, nothing removed');
+  assert.equal(inbox.removeCandidatesFor({ phone: null, jid: '', lid: undefined }), 0);
+  assert.equal(inbox.removeCandidatesFor({ jid: '966500000001@s.whatsapp.net' }), 1);
+  const last = inbox.noteCandidate({ phone: PHONE, ts: NOW, words: [], dir: 'in' });
+  assert.equal(inbox.removeCandidate(last.cand_id), true);
+  assert.equal(inbox.removeCandidate(last.cand_id), false);
+  s.close();
+});
+
+test('pruneCandidates: open rows by their last message, dismissed rows by when they were dismissed; a cutoff is not older than itself', () => {
+  const { s, inbox, at } = harness();
+  const openOld = inbox.noteCandidate({ phone: '966500000001', ts: NOW - 31 * DAY, words: ['villa'], dir: 'in' });
+  const openEdge = inbox.noteCandidate({ phone: '966500000002', ts: NOW - 30 * DAY, words: ['villa'], dir: 'in' });
+  const openNew = inbox.noteCandidate({ phone: '966500000003', ts: NOW - DAY, words: ['villa'], dir: 'in' });
+  const gone = inbox.noteCandidate({ phone: '966500000004', ts: NOW - 400 * DAY, words: ['villa'], dir: 'in' });
+  const kept = inbox.noteCandidate({ phone: '966500000005', ts: NOW - 400 * DAY, words: ['villa'], dir: 'in' });
+  at(NOW - 366 * DAY);
+  inbox.dismissCandidate(gone.cand_id);
+  at(NOW - 365 * DAY);
+  inbox.dismissCandidate(kept.cand_id);
+  at(NOW);
+  assert.deepEqual(inbox.pruneCandidates({ openBefore: NOW - 30 * DAY, dismissedBefore: NOW - 365 * DAY }), { open: 1, dismissed: 1 });
+  assert.equal(inbox.getCandidate(openOld.cand_id), null);
+  assert.ok(inbox.getCandidate(openEdge.cand_id), 'exactly 30 days is not older than the cutoff');
+  assert.ok(inbox.getCandidate(openNew.cand_id));
+  assert.equal(inbox.getCandidate(gone.cand_id), null);
+  assert.ok(inbox.getCandidate(kept.cand_id), 'dismissed exactly a year ago stays, so it is still not listed again');
+  assert.deepEqual(inbox.pruneCandidates({ openBefore: 'x', dismissedBefore: null }), { open: 0, dismissed: 0 }, 'garbage deletes nothing');
+  assert.deepEqual(inbox.pruneCandidates(), { open: 0, dismissed: 0 });
+  s.close();
+});
+```
+
+- [ ] **Step 2: Run to see them fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/db.test.mjs api/test/inbox-eligibility.test.mjs api/test/inbox-store.test.mjs`
+Expected: FAIL — `inbox-eligibility.test.mjs` does not load (`SyntaxError: The requested module '../lib/inbox/eligibility.mjs' does not provide an export named 'MAX_PROPERTY_WORDS'` — Node names one of the three new imports), nor does `inbox-store.test.mjs` (`… '../lib/inbox/store.mjs' does not provide an export named 'CANDIDATE_KEEP_MS'`); in `db.test.mjs` four tests fail, because there is no `inbox_candidates` table ("openDb creates …", "schema v4 gives leads …", "the v4 CHECKs refuse …" with `no such table: inbox_candidates`, "a v3 file db moves to v4 …"); the part-way failure test passes (the table is absent either way).
+
+- [ ] **Step 3: The table** — two edits in `services/api/lib/db.mjs`.
+
+Find:
+
+```js
+    // Team and never-list numbers are not excluded here; app.inboxMaintenance() moves them
+    // out on start (P2-20). No foreign keys, as in v3. Migrations here only ever add.
+    version: 4,
+```
+
+Replace with:
+
+```js
+    // Team and never-list numbers are not excluded here; app.inboxMaintenance() moves them
+    // out on start (P2-20).
+    // `inbox_candidates` (added to v4 on 2026-09-28 in a later commit than the rest of v4,
+    // before v4 ever shipped: no file anywhere is at v4 without it) is the owner's list of
+    // real-estate chats to check (D17): a chat that used property words, in either
+    // direction, but gave no sure sign it is about Bona. It is not a lead and holds no
+    // message text: only who (number, jid, lid, the name WhatsApp shows for them), when
+    // (first and last message, how many), which property words (`words`, comma-joined, at
+    // most 8) and who wrote last. `dismissed` is the owner's "Not a client": the row stays,
+    // emptied of everything but its ids, only so the chat is not listed again. One row per
+    // number, jid and lid (UNIQUE; NULLs do not collide). No foreign keys, as in v3.
+    // Migrations here only ever add.
+    version: 4,
+```
+
+Find:
+
+```js
+      CREATE INDEX IF NOT EXISTS wa_gaps_lead ON wa_gaps(lead_id, ts);
+      UPDATE leads SET
+```
+
+Replace with:
+
+```js
+      CREATE INDEX IF NOT EXISTS wa_gaps_lead ON wa_gaps(lead_id, ts);
+      CREATE TABLE IF NOT EXISTS inbox_candidates (
+        cand_id TEXT NOT NULL PRIMARY KEY, jid TEXT UNIQUE, lid TEXT UNIQUE, phone_e164 TEXT UNIQUE, name TEXT,
+        first_ts INTEGER NOT NULL, last_ts INTEGER NOT NULL, hits INTEGER NOT NULL DEFAULT 1, words TEXT,
+        last_dir TEXT CHECK (last_dir IN ('in','out')),
+        state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open','dismissed')), updated INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS inbox_candidates_state ON inbox_candidates(state, last_ts);
+      UPDATE leads SET
+```
+
+(`CREATE … IF NOT EXISTS` like the rest of v4. A development file already opened at v4 before this commit would lack the table; none exists outside the tests' temporary files, and the live db is still v3.)
+
+- [ ] **Step 4: The words** — in `services/api/lib/inbox/eligibility.mjs` (as Task 15 left it), find the cut-name margin:
+
+```js
+/**
+ * Code points left out at the end of a document name that was cut (`fileNameTruncated`):
+ * nothing close to the cut is read.
+ */
+const CUT_MARGIN = 16;
+```
+
+Replace with:
+
+```js
+/**
+ * Words that say a chat is about property, each with the one form the owner's list shows
+ * (D17). English and Arabic, bounded like `BONA_WORD_RE` by anything that is not a letter or
+ * a mark (`3villas` and `villa2` count, `villager` does not). Arabic words written with ه
+ * for ة (فله, شقه) count too, as people type them, and most Arabic nouns also with the
+ * article (الفيلا, العقار); أرض and غرفة do not, because with it they are everyday words (the
+ * ground, the room). A clitic before a word (والفيلا, بالإيجار) is missed: that only means
+ * the owner does not see that chat on his list, never that anything joins.
+ *
+ * A match only ever puts a chat on the owner's list of chats to check; it never joins one.
+ * Every alternative starts with a fixed word and repeats nothing: linear in the text.
+ */
+const PROPERTY_WORDS = [
+  ['villa', 'villas?'],
+  ['apartment', 'apartments?'],
+  ['flat', 'flats?'],
+  ['rent', 'rent(?:al)?s?'],
+  ['lease', 'leases?'],
+  ['land', 'lands?'],
+  ['plot', 'plots?'],
+  ['property', 'propert(?:y|ies)'],
+  ['real estate', String.raw`real[\s_-]?estate`],
+  ['duplex', 'duplex(?:es)?'],
+  ['penthouse', 'penthouses?'],
+  ['townhouse', String.raw`town[\s_-]?houses?`],
+  ['compound', 'compounds?'],
+  ['bedroom', 'bedrooms?'],
+  ['sqm', 'sqm|m²'],
+  ['listing', 'listings?'],
+  ['broker', 'brokers?'],
+  ['commission', 'commissions?'],
+  ['فيلا', '(?:ال)?(?:فيلا|فلل|فلة|فله)'],
+  ['شقة', '(?:ال)?(?:شقة|شقه|شقق)'],
+  ['إيجار', '(?:ال|لل)?[إا]يجار'],
+  ['للبيع', 'للبيع'],
+  ['أرض', '[أا]رض|(?:ال)?[أا]راضي'],
+  ['عقار', '(?:ال)?عقارات?'],
+  ['دوبلكس', '(?:ال)?دوبلكس'],
+  ['بنتهاوس', '(?:ال)?بنتهاوس'],
+  ['تاون هاوس', String.raw`تاون[\s_-]?هاوس`],
+  ['مجمع سكني', String.raw`مجمع[\s_-]?سكني`],
+  ['غرفة', 'غرفة|غرفه|غرف'],
+  ['صك', '(?:ال)?صك'],
+  ['سمسار', '(?:ال)?سمسار'],
+  ['عمولة', '(?:ال)?(?:عمولة|عموله)'],
+  ['مخطط', '(?:ال)?مخطط'],
+];
+const WORDS_SOURCE = String.raw`(?<![\p{L}\p{M}])(?:${PROPERTY_WORDS.map(([, src]) => `(${src})`).join('|')})(?![\p{L}\p{M}])`;
+/**
+ * Any property word (one capture group per word, in `PROPERTY_WORDS` order). No `g`, like
+ * every pattern here, so `.test()` never carries a position over; `propertyWordsIn` scans
+ * with its own global copy.
+ */
+export const PROPERTY_WORD_RE = new RegExp(WORDS_SOURCE, 'iu');
+const PROPERTY_WORDS_ALL = new RegExp(WORDS_SOURCE, 'giu');
+/** At most this many words are kept for one chat. */
+export const MAX_PROPERTY_WORDS = 8;
+
+/**
+ * The property words a text uses, as the forms the owner's list shows (`villa`, `شقة`,
+ * `إيجار` …): lower case, each once, in the order they first appear, at most
+ * `MAX_PROPERTY_WORDS`. Never the text itself. Anything that is not a string has none.
+ * @param {unknown} text
+ * @returns {string[]}
+ */
+export function propertyWordsIn(text) {
+  const out = [];
+  if (typeof text !== 'string' || !text) return out;
+  for (const m of text.matchAll(PROPERTY_WORDS_ALL)) {
+    const word = PROPERTY_WORDS[m.findIndex((g, i) => i > 0 && g !== undefined) - 1][0];
+    if (!out.includes(word)) out.push(word);
+    if (out.length === MAX_PROPERTY_WORDS) break;
+  }
+  return out;
+}
+
+/**
+ * Code points left out at the end of a document name that was cut (`fileNameTruncated`):
+ * nothing close to the cut is read.
+ */
+const CUT_MARGIN = 16;
+```
+
+- [ ] **Step 5: The store** — five edits in `services/api/lib/inbox/store.mjs`.
+
+Find:
+
+```js
+ * Only this file writes SQL for `wa_messages`, `wa_outbox`, `inbox_reads` and `wa_gaps`.
+```
+
+Replace with:
+
+```js
+ * Only this file writes SQL for `wa_messages`, `wa_outbox`, `inbox_reads`, `wa_gaps` and
+ * `inbox_candidates` (the owner's list of real-estate chats to check, D17).
+```
+
+Find:
+
+```js
+import { INBOX_STATES } from './eligibility.mjs';
+```
+
+Replace with:
+
+```js
+import { newId } from '../db.mjs';
+import { INBOX_STATES, MAX_PROPERTY_WORDS } from './eligibility.mjs';
+```
+
+Find:
+
+```js
+/** The day cap's window (lib/wa-send.mjs): a send younger than this still counts against it. */
+const SEND_DAY_MS = 86_400_000;
+```
+
+Replace with:
+
+```js
+/** The day cap's window (lib/wa-send.mjs): a send younger than this still counts against it. */
+const SEND_DAY_MS = 86_400_000;
+/**
+ * A real-estate chat to check (D17) is kept this long after its last property message, and
+ * a dismissed one (the owner's "Not a client") this long after he dismissed it, only so it
+ * is not listed again. The privacy page states both.
+ */
+export const CANDIDATE_KEEP_MS = 30 * 86_400_000;
+export const DISMISSED_KEEP_MS = 365 * 86_400_000;
+/** Longest name kept for a candidate, in code points: what WhatsApp shows, never more. */
+const MAX_CANDIDATE_NAME = 100;
+```
+
+Find:
+
+```js
+  return {
+    upsertMessage, messagesFor, newestTs, hasMessages, messageByKey,
+```
+
+Replace with:
+
+```js
+  /* -------------------- real-estate chats to check (D17) -------------------- */
+  //
+  // A chat that used property words (lib/inbox/eligibility.mjs `propertyWordsIn`) but gave
+  // no sure sign it is about Bona: not a lead, never shown to staff, and never its words —
+  // only who, when, how often, which property words and who wrote last.
+
+  const idOf = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+  const nameOf = (v) => {
+    if (typeof v !== 'string') return null;
+    return Array.from(v.replace(/\s+/g, ' ').trim()).slice(0, MAX_CANDIDATE_NAME).join('') || null;
+  };
+  /** Strings only, no commas (the column is comma-joined), each once, at most `MAX_PROPERTY_WORDS`. */
+  function wordsOf(list) {
+    const out = [];
+    for (const w of Array.isArray(list) ? list : []) {
+      const v = typeof w === 'string' ? w.replace(/,/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40) : '';
+      if (v && !out.includes(v)) out.push(v);
+      if (out.length === MAX_PROPERTY_WORDS) break;
+    }
+    return out;
+  }
+  const splitWords = (v) => (typeof v === 'string' && v ? v.split(',') : []);
+  const candidateRow = (row) => (row ? { ...row, words: splitWords(row.words) } : null);
+
+  /** One chat's row: by number first, then jid, then lid. */
+  function findCandidate({ phone, jid, lid }) {
+    return (phone ? prep('SELECT * FROM inbox_candidates WHERE phone_e164 = ?').get(phone) : null)
+      ?? (jid ? prep('SELECT * FROM inbox_candidates WHERE jid = ?').get(jid) : null)
+      ?? (lid ? prep('SELECT * FROM inbox_candidates WHERE lid = ?').get(lid) : null)
+      ?? null;
+  }
+
+  /**
+   * One more property message from a chat that is not a lead. A new chat gets a row; an
+   * open row counts it (`hits`), moves `last_ts` forward, adds the words (at most 8), fills
+   * a number, jid, lid or name it did not have yet (never one another row holds: each is
+   * UNIQUE) and says who wrote last. A dismissed row is left exactly as it is: the owner
+   * said "Not a client", and a later message does not ask him again.
+   *
+   * @returns {{ state: 'open'|'dismissed', cand_id: string, created: boolean }}
+   */
+  function noteCandidate({ jid = null, lid = null, phone = null, name = null, ts, words = [], dir } = {}) {
+    const ids = { phone: idOf(phone), jid: idOf(jid), lid: idOf(lid) };
+    if (!ids.phone && !ids.jid && !ids.lid) throw new RangeError('a candidate needs a phone, jid or lid');
+    if (!hasNumber(ts)) throw new RangeError('ts is required');
+    if (!DIRECTIONS.includes(dir)) throw new RangeError(`unknown direction ${dir}`);
+    const at = toTs(ts);
+    const said = wordsOf(words);
+    const who = nameOf(name);
+    return transaction(() => {
+      const found = findCandidate(ids);
+      if (found?.state === 'dismissed') return { state: 'dismissed', cand_id: found.cand_id, created: false };
+      if (found) {
+        const free = (col, v) => (found[col] || !v || prep(`SELECT 1 FROM inbox_candidates WHERE ${col} = ?`).get(v) ? found[col] : v);
+        const all = wordsOf([...splitWords(found.words), ...said]);
+        prep(`UPDATE inbox_candidates SET phone_e164 = ?, jid = ?, lid = ?, name = COALESCE(name, ?),
+                first_ts = MIN(first_ts, ?), last_dir = CASE WHEN ? >= last_ts THEN ? ELSE last_dir END,
+                last_ts = MAX(last_ts, ?), hits = hits + 1, words = ?, updated = ?
+              WHERE cand_id = ?`)
+          .run(free('phone_e164', ids.phone), free('jid', ids.jid), free('lid', ids.lid), who,
+            at, at, dir, at, all.join(',') || null, now(), found.cand_id);
+        return { state: 'open', cand_id: found.cand_id, created: false };
+      }
+      const candId = newId('CND');
+      prep(`INSERT INTO inbox_candidates (cand_id, jid, lid, phone_e164, name, first_ts, last_ts, hits, words, last_dir, state, updated)
+            VALUES (?,?,?,?,?,?,?,1,?,?,'open',?)`)
+        .run(candId, ids.jid, ids.lid, ids.phone, who, at, at, said.join(',') || null, dir, now());
+      return { state: 'open', cand_id: candId, created: true };
+    });
+  }
+
+  /**
+   * Open rows whose chat is not a lead by now: no lead holds the candidate's number, jid or
+   * lid (a web form or *Add chat* may have made one since it was noted, and that lead's own
+   * inbox state decides the chat). In SQL, so a hidden row never takes a listed one's place.
+   */
+  const OPEN_NOT_A_LEAD = `c.state = 'open' AND NOT EXISTS (
+      SELECT 1 FROM leads l WHERE l.phone_e164 = c.phone_e164 OR l.wa_jid IN (c.jid, c.lid) OR l.wa_lid IN (c.jid, c.lid))`;
+
+  /** The owner's list: open rows of chats that are not leads, the latest message first. `words` comes back as an array. */
+  function listCandidates({ limit = 200 } = {}) {
+    return prep(`SELECT c.* FROM inbox_candidates c WHERE ${OPEN_NOT_A_LEAD} ORDER BY c.last_ts DESC, c.rowid DESC LIMIT ?`)
+      .all(clampLimit(limit, 200)).map(candidateRow);
+  }
+
+  /** How many rows `listCandidates` would list with no limit. */
+  const countCandidates = () => prep(`SELECT COUNT(*) AS n FROM inbox_candidates c WHERE ${OPEN_NOT_A_LEAD}`).get().n;
+  const getCandidate = (candId) => candidateRow(prep('SELECT * FROM inbox_candidates WHERE cand_id = ?').get(String(candId ?? '')));
+
+  /**
+   * *Not a client*: the row stays only so the chat is not listed again, so everything but
+   * its ids goes now — the name, the words, the count, who wrote last, and the times (both
+   * become the moment of the dismissal). An unknown or already dismissed id is `false`.
+   */
+  function dismissCandidate(candId) {
+    const t = now();
+    return prep(`UPDATE inbox_candidates SET state = 'dismissed', name = NULL, words = NULL, hits = 0, last_dir = NULL,
+                   first_ts = ?, last_ts = ?, updated = ?
+                 WHERE cand_id = ? AND state = 'open'`).run(t, t, t, String(candId ?? '')).changes === 1;
+  }
+
+  const removeCandidate = (candId) => prep('DELETE FROM inbox_candidates WHERE cand_id = ?').run(String(candId ?? '')).changes === 1;
+
+  /**
+   * Every row of one chat, open or dismissed, by any of its ids: the chat became a lead (its
+   * own inbox state rules from now on), or its number went on the never list. Returns how
+   * many rows went.
+   */
+  function removeCandidatesFor({ phone = null, jid = null, lid = null } = {}) {
+    const ids = [idOf(phone), idOf(jid), idOf(lid)];
+    if (!ids.some(Boolean)) return 0;
+    return prep('DELETE FROM inbox_candidates WHERE phone_e164 = ? OR jid = ? OR lid = ?').run(...ids).changes;
+  }
+
+  /**
+   * Open rows whose last property message is older than `openBefore`, and dismissed rows
+   * dismissed before `dismissedBefore`. Exactly at a cutoff is not older than it; a cutoff
+   * that is not a number deletes nothing.
+   *
+   * @returns {{ open: number, dismissed: number }}
+   */
+  function pruneCandidates({ openBefore, dismissedBefore } = {}) {
+    return transaction(() => ({
+      open: prep("DELETE FROM inbox_candidates WHERE state = 'open' AND last_ts < ?").run(num(openBefore)).changes,
+      dismissed: prep("DELETE FROM inbox_candidates WHERE state = 'dismissed' AND updated < ?").run(num(dismissedBefore)).changes,
+    }));
+  }
+
+  return {
+    upsertMessage, messagesFor, newestTs, hasMessages, messageByKey,
+```
+
+Find:
+
+```js
+    purgeLead, leaveInbox, retentionPurge,
+  };
+}
+```
+
+Replace with:
+
+```js
+    purgeLead, leaveInbox, retentionPurge,
+    noteCandidate, listCandidates, countCandidates, getCandidate, dismissCandidate, removeCandidate, removeCandidatesFor, pruneCandidates,
+  };
+}
+```
+
+(`db.mjs` imports only `lib/store.mjs`, never the inbox store, so the new `newId` import makes no cycle.)
+
+- [ ] **Step 6: Run**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/db.test.mjs api/test/inbox-eligibility.test.mjs api/test/inbox-store.test.mjs`
+Expected: PASS, 0 fail (`inbox-eligibility`: 2 more tests; `inbox-store`: 9 more; the slowest new timing case measured 6 ms at 200,000 characters).
+
+- [ ] **Step 7: Run the full suite**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/*.test.mjs`
+Expected: all pass, 0 fail — 11 more tests than after Task 15 (905 → 916 on the copy).
+
+- [ ] **Step 8: Commit**
+
+```bash
+cd /home/azoz778/bona-wt/team-inbox && git add services/api/lib/db.mjs services/api/lib/inbox/eligibility.mjs services/api/lib/inbox/store.mjs services/api/test/db.test.mjs services/api/test/inbox-eligibility.test.mjs services/api/test/inbox-store.test.mjs
+git commit -m "inbox: v4 also keeps the owner's list of real-estate chats to check (D17)
+
+Added to the v4 migration before v4 ships: one row per chat that used
+property words with no sure sign it is about Bona. Never the text: the ids,
+the client's WhatsApp name, the property words (propertyWordsIn, English and
+Arabic, as the forms the list shows), first and last time, how many, who
+wrote last. A dismissed row keeps only its ids, so the chat is not listed
+again.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+#### Part B — the poller
+
+- [ ] **Step 9: Write the failing tests**
+
+In `services/api/test/wa-poller.test.mjs`, find the import (as Task 9 left it):
+
+```js
+import {
+  CLICK_WINDOW_MS, FIRST_RUN_LOOKBACK_MS, MAX_RECORD_ATTEMPTS, MAX_WINDOW_MS, OVERLAP_MS,
+  SEEN_TTL_MS, adMetaOf, adSourceOf, createPoller, isIgnorableChat, jidsOf,
+} from '../lib/wa-poller.mjs';
+```
+
+Replace with:
+
+```js
+import {
+  CLICK_WINDOW_MS, FIRST_RUN_LOOKBACK_MS, MAX_RECORD_ATTEMPTS, MAX_WINDOW_MS, OVERLAP_MS,
+  SEEN_TTL_MS, PROPERTY_DOCUMENT_WORD, TK_DOCUMENT_WORD, adMetaOf, adSourceOf, candidateWordsOf, createPoller, isIgnorableChat, jidsOf,
+} from '../lib/wa-poller.mjs';
+```
+
+and append to the end of the file (after Task 15's D16 test):
+
+```js
+
+/* ---------------- (u) real-estate chats to check (D17) ---------------- */
+
+/** Every candidate row, as stored. */
+const candidates = (h) => h.db.db.prepare('SELECT * FROM inbox_candidates ORDER BY rowid').all().map((r) => ({ ...r }));
+
+test('(u) candidateWordsOf: property words from the text and a document\'s name, "property document" for a document word, "tk document" for a TK document the owner sent', () => {
+  assert.equal(TK_DOCUMENT_WORD, 'tk document');
+  assert.equal(PROPERTY_DOCUMENT_WORD, 'property document');
+  assert.deepEqual(candidateWordsOf(msg({ text: 'عندكم شقة للإيجار؟' })), ['شقة', 'إيجار']);
+  assert.deepEqual(candidateWordsOf(msg({ text: 'see the plan', media: '[document: Villa 12 photos.pdf]', fileName: 'Villa 12 photos.pdf' })), ['villa']);
+  assert.deepEqual(candidateWordsOf(msg({ text: 'villa', media: '[image]', fileName: 'Flat.pdf' })), ['villa'], 'only a document has a file name');
+  // A document word, in either direction, in the text or a document's name (D16's words).
+  assert.deepEqual(candidateWordsOf(msg({ text: 'Can I get the price list and payment plan?' })), [PROPERTY_DOCUMENT_WORD]);
+  assert.deepEqual(candidateWordsOf(msg({ text: 'ابغى البروشور وقائمة الأسعار' })), [PROPERTY_DOCUMENT_WORD]);
+  assert.deepEqual(candidateWordsOf(msg({ fromMe: true, text: '', media: '[document: Bona Traffic HD brochure.pdf]', fileName: 'Bona Traffic HD brochure.pdf' })), [PROPERTY_DOCUMENT_WORD]);
+  assert.deepEqual(candidateWordsOf(msg({ text: 'price list', media: '[image]', fileName: 'x' })), [PROPERTY_DOCUMENT_WORD], 'a caption counts');
+  const tkDoc = { fromMe: true, text: '', media: '[document: TK Brochure Villa.pdf]', fileName: 'TK Brochure Villa.pdf', fileNameTruncated: false, fileNameTk: true };
+  assert.deepEqual(candidateWordsOf(msg(tkDoc)), [TK_DOCUMENT_WORD, PROPERTY_DOCUMENT_WORD, 'villa']);
+  assert.deepEqual(candidateWordsOf(msg({ ...tkDoc, fromMe: false })), [PROPERTY_DOCUMENT_WORD, 'villa'], 'a client\'s file that says TK is only its words');
+  assert.deepEqual(candidateWordsOf(msg({ ...tkDoc, fileName: 'TK Villa 12.pdf', media: '[document: TK Villa 12.pdf]' })), [TK_DOCUMENT_WORD, 'villa']);
+  assert.deepEqual(candidateWordsOf(msg({ ...tkDoc, fileName: 'TK invoice.pdf', media: '[document: TK invoice.pdf]' })), [TK_DOCUMENT_WORD]);
+  assert.deepEqual(candidateWordsOf(msg({ ...tkDoc, text: 'villa apartment flat rent lease land plot property duplex' })),
+    [TK_DOCUMENT_WORD, PROPERTY_DOCUMENT_WORD, 'villa', 'apartment', 'flat', 'rent', 'lease', 'land'], 'the markers first, then at most eight in all');
+  assert.deepEqual(candidateWordsOf(msg({ text: 'see you at 6' })), []);
+  assert.deepEqual(candidateWordsOf(null), []);
+});
+
+test('(u) a stranger asking about property goes on the owner\'s list: no lead, no note, no text, no history', async () => {
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'Q1', jid: STRANGER, pushName: 'Umm Khalid', ts: NOW - 60_000, text: 'عندكم شقة للإيجار؟' }),
+    msg({ id: 'Q2', jid: STRANGER2, pushName: null, ts: NOW - 30_000, text: '', messageType: 'documentMessage', media: '[document: Villa 12 photos.pdf]', fileName: 'Villa 12 photos.pdf' }),
+    msg({ id: 'P1', jid: '966544444444@s.whatsapp.net', ts: NOW - 20_000, text: 'see you at 6' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0, 'nothing sure: not a lead');
+  assert.equal(h.sent.length, 0, 'the owner is not sent a note');
+  assert.equal(h.findCalls.length, 0, 'no history is read');
+  assert.equal(tally.unmatched, 3);
+  assert.equal(tally.candidates, 2);
+  const rows = candidates(h);
+  assert.deepEqual(rows.map((r) => [r.phone_e164, r.jid, r.name, r.words, r.last_dir, r.hits, r.first_ts, r.state]), [
+    ['966522222222', STRANGER, 'Umm Khalid', 'شقة,إيجار', 'in', 1, NOW - 60_000, 'open'],
+    ['966533333333', STRANGER2, null, 'villa', 'in', 1, NOW - 30_000, 'open'],
+  ]);
+  assert.ok(!JSON.stringify(rows).includes('عندكم'), 'never the text');
+  assert.equal(h.db.db.prepare('SELECT COUNT(*) AS n FROM wa_messages').get().n, 0);
+  h.cleanup();
+});
+
+test('(u) the owner writing about property to a stranger puts that chat on the list too — as "you wrote", never with his own name', async () => {
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'O1', fromMe: true, jid: STRANGER, pushName: 'Abdulaziz', ts: NOW - 60_000, text: 'the villa is 3M' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0);
+  assert.equal(tally.candidates, 1);
+  const [row] = candidates(h);
+  assert.deepEqual([row.phone_e164, row.name, row.words, row.last_dir], ['966522222222', null, 'villa', 'out']);
+  h.cleanup();
+});
+
+test('(u) a TK document the owner sends is a chat to check, never a join', async () => {
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'TK1', fromMe: true, jid: STRANGER, pushName: 'Abdulaziz', ts: NOW - 60_000, text: '', messageType: 'documentMessage',
+      media: '[document: TK Brochure Villa.pdf]', fileName: 'TK Brochure Villa.pdf', fileNameTruncated: false, fileNameTk: true }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0, 'TK chats stay out of the Bona inbox');
+  assert.equal(tally.joined, 0);
+  assert.equal(h.findCalls.length, 0);
+  const [row] = candidates(h);
+  assert.deepEqual([row.phone_e164, row.name, row.words, row.last_dir], ['966522222222', null, 'tk document,property document,villa', 'out']);
+  h.cleanup();
+});
+
+test('(u) a property document the owner sends that does not join is a chat to check: a cut name, or one that names Bona', async () => {
+  // "…(111 x) Brochure.pdf" cut at 120 code points: the word is in the part a cut name is not
+  // read by (Task 15), so it cannot join; the owner's list is where he sees it.
+  const cutName = `${'x'.repeat(111)} Brochure`;
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'CUTB', fromMe: true, jid: STRANGER, pushName: 'Abdulaziz', ts: NOW - 60_000, text: '', messageType: 'documentMessage',
+      media: `[document: ${cutName}]`, fileName: cutName, fileNameTruncated: true, fileNameTk: false, fileNameBona: false }),
+    msg({ id: 'BONAB', fromMe: true, jid: STRANGER2, pushName: 'Abdulaziz', ts: NOW - 30_000, text: '', messageType: 'documentMessage',
+      media: '[document: Bona Traffic HD brochure.pdf]', fileName: 'Bona Traffic HD brochure.pdf' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0, 'no lead');
+  assert.equal(tally.joined, 0);
+  assert.equal(h.findCalls.length, 0);
+  assert.equal(tally.candidates, 2);
+  assert.deepEqual(candidates(h).map((r) => [r.phone_e164, r.name, r.words, r.last_dir]), [
+    ['966522222222', null, 'property document', 'out'],
+    ['966533333333', null, 'property document', 'out'],
+  ]);
+  h.cleanup();
+});
+
+test('(u) a stranger asking for the price list is a chat to check', async () => {
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'PL1', jid: STRANGER, pushName: 'Umm Fahad', ts: NOW - 60_000, text: 'Can I get the price list and payment plan?' }),
+    msg({ id: 'PL2', jid: STRANGER2, pushName: null, ts: NOW - 30_000, text: 'ابغى البروشور وقائمة الأسعار' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0);
+  assert.equal(tally.candidates, 2);
+  assert.deepEqual(candidates(h).map((r) => [r.phone_e164, r.name, r.words, r.last_dir]), [
+    ['966522222222', 'Umm Fahad', 'property document', 'in'],
+    ['966533333333', null, 'property document', 'in'],
+  ]);
+  h.cleanup();
+});
+
+test('(u) a chat with no number is never a candidate: a lid alone, or a WhatsApp channel', async () => {
+  const h = harness({ inbox: true, windows: [[
+    // A lid alone may be a colleague whose lid is not learned yet: it cannot be checked (A7).
+    msg({ id: 'LID1', jid: '272516946294519@lid', jidAlt: null, pushName: 'Maybe Mona', ts: NOW - 60_000, text: 'the villa keys are with me' }),
+    msg({ id: 'LID2', fromMe: true, jid: '272516946294520@lid', jidAlt: null, pushName: null, ts: NOW - 50_000, text: 'rent is due' }),
+    // A channel the instance follows posts listings all day long.
+    msg({ id: 'CH1', jid: '120363025246125486@newsletter', pushName: 'Jeddah Villas', ts: NOW - 40_000, text: 'فيلا للبيع في الشاطئ' }),
+    msg({ id: 'CH2', jid: '12036302524@newsletter', pushName: 'Villas', ts: NOW - 30_000, text: 'villa for rent' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(tally.candidates, 0);
+  assert.deepEqual(candidates(h), []);
+  assert.equal(h.db.countLeads(), 0);
+  h.cleanup();
+});
+
+test('(u) a chat on the list that later sends a Ref line becomes a lead and leaves the list', async () => {
+  const h = harness({ inbox: true, windows: [[msg({ id: 'Q1', jid: STRANGER, ts: NOW - 120_000, text: 'Is the apartment still for rent?' })]] });
+  await h.poller.tick();
+  assert.equal(candidates(h).length, 1);
+  h.push([msg({ id: 'R1', jid: STRANGER, ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' })]);
+  await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.phone_e164, '966522222222');
+  assert.equal(lead.inbox_state, 'in');
+  assert.deepEqual(candidates(h), [], 'it is a lead now: its own inbox state decides');
+  h.cleanup();
+});
+
+test('(u) a chat that is already a lead is never a candidate, whatever it says', async () => {
+  const h = harness({ inbox: true });
+  seedInLead(h, { inbox_state: 'out', inbox_since: null });
+  h.db.insertLead({ lead_id: 'LEAD-guess', phone_e164: '966522222222', wa_jid: STRANGER, inbox_state: 'unsure', created: NOW - 3_600_000, updated: NOW - 3_600_000 });
+  h.push([
+    msg({ id: 'A1', ts: NOW - 60_000, text: 'still want the villa' }),
+    msg({ id: 'A2', fromMe: true, pushName: null, ts: NOW - 50_000, text: 'the villa is sold' }),
+    msg({ id: 'B1', jid: STRANGER, ts: NOW - 40_000, text: 'any apartment?' }),
+  ]);
+  const tally = await h.poller.tick();
+  assert.equal(tally.candidates, 0);
+  assert.deepEqual(candidates(h), []);
+  assert.equal(h.db.getLead('LEAD-in').inbox_state, 'out', '"Not a client" stays');
+  h.cleanup();
+});
+
+test('(u) a dismissed chat stays dismissed: later property messages neither reopen nor count it', async () => {
+  const h = harness({ inbox: true, windows: [[msg({ id: 'Q1', jid: STRANGER, ts: NOW - 120_000, text: 'أبغى فيلا' })]] });
+  await h.poller.tick();
+  const [row] = candidates(h);
+  h.inbox.dismissCandidate(row.cand_id);
+  h.push([msg({ id: 'Q2', jid: STRANGER, ts: NOW - 60_000, text: 'وش صار على الفيلا؟ عندكم شقة؟' })]);
+  const tally = await h.poller.tick();
+  assert.equal(tally.candidates, 0);
+  const [after] = candidates(h);
+  assert.deepEqual([after.state, after.hits, after.words, after.name, after.last_dir], ['dismissed', 0, null, null, null]);
+  assert.equal(h.inbox.countCandidates(), 0);
+  h.cleanup();
+});
+
+test('(u) team and never-list numbers never become candidates', async () => {
+  const h = harness({ inbox: true, isExcluded: (digits) => digits === '966522222222' || digits === '966533333333' });
+  h.push([
+    msg({ id: 'T1', jid: STRANGER, ts: NOW - 60_000, text: 'the villa keys are with me' }),
+    msg({ id: 'T2', fromMe: true, jid: STRANGER2, pushName: null, ts: NOW - 30_000, text: 'rent is due' }),
+  ]);
+  const tally = await h.poller.tick();
+  assert.equal(tally.ignored, 2);
+  assert.deepEqual(candidates(h), []);
+  h.cleanup();
+});
+
+test('(u) without the inbox the poller keeps no list: Phase 1 is unchanged', async () => {
+  const h = harness({ windows: [[msg({ id: 'Q1', jid: STRANGER, text: 'عندكم شقة للإيجار؟' })]] });
+  const tally = await h.poller.tick();
+  assert.equal(tally.unmatched, 1);
+  assert.equal(tally.candidates, 0);
+  assert.equal(createInboxStore(h.db).countCandidates(), 0);
+  h.cleanup();
+});
+
+test('(u) a list that cannot be written never fails the record, and says so by the kind of error only', async () => {
+  const h = harness({ inbox: true, windows: [[msg({ id: 'Q1', jid: STRANGER, pushName: 'Umm Khalid', text: 'عندكم شقة للإيجار؟' })]] });
+  h.inbox.noteCandidate = () => { throw new Error('disk I/O error on 966522222222'); };
+  const tally = await h.poller.tick();
+  assert.equal(tally.unmatched, 1);
+  assert.equal(h.db.waSeenHas('Q1'), true, 'handled: it is not read again');
+  assert.ok(!h.logs.some((l) => l.evt === 'wa.poll.record_failed'));
+  const failed = h.logs.find((l) => l.evt === 'inbox.candidate_failed');
+  assert.deepEqual(failed, { level: 'warn', evt: 'inbox.candidate_failed', error: 'Error' }, 'the kind of error, never its message (Task 9, c9e3145)');
+  const dump = JSON.stringify(h.logs);
+  for (const secret of ['disk I/O', '966522222222']) assert.ok(!dump.includes(secret), secret);
+  h.cleanup();
+});
+
+test('(u) nothing about a candidate reaches a log line: no number, name, lid or word', async () => {
+  const lid = '272516946294519@lid';
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'Q1', jid: lid, jidAlt: STRANGER, pushName: 'Umm Khalid', ts: NOW - 60_000, text: 'عندكم شقة للإيجار؟' }),
+    msg({ id: 'O1', fromMe: true, jid: STRANGER2, pushName: 'Abdulaziz', ts: NOW - 30_000, text: 'the villa is 3M' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(tally.candidates, 2);
+  const tick = h.logs.find((l) => l.evt === 'wa.poll.tick');
+  assert.equal(tick.candidates, 2, 'the count is logged');
+  const dump = JSON.stringify(h.logs);
+  for (const secret of ['966522222222', '966533333333', '272516946294519', 'Umm Khalid', 'Abdulaziz', 'شقة', 'villa', 'عندكم']) {
+    assert.ok(!dump.includes(secret), `a log line carries ${secret}`);
+  }
+  h.cleanup();
+});
+```
+
+- [ ] **Step 10: Run to see them fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/wa-poller.test.mjs`
+Expected: FAIL — the file does not load (`SyntaxError: The requested module '../lib/wa-poller.mjs' does not provide an export named 'TK_DOCUMENT_WORD'`).
+
+- [ ] **Step 11: The poller** — seven edits in `services/api/lib/wa-poller.mjs`, on the file as Tasks 9 and 15 left it (the anchors below match Task 9's commits up to 232b9f8 and Task 15's comment edit; if one of those lines has moved since, make the same change to the line as they left it — each edit only adds to it).
+
+(a) The module header (as Task 15 left it). Find:
+
+```js
+ * joining message plus the 24 h before it. An `out` chat never comes back on its own.
+ * Every other conversation is still discarded exactly as above.
+ */
+```
+
+Replace with:
+
+```js
+ * joining message plus the 24 h before it. An `out` chat never comes back on its own.
+ *
+ * **Real-estate chats to check** (D17). A message that ends up with no lead behind it — a
+ * stranger's that matched no rule, or the owner's to a stranger that did not join — but
+ * uses property words (`propertyWordsIn`) or a property-document word (`PROPERTY_DOC_RE`),
+ * or is a document of his that names TK, puts its chat on the owner's list
+ * (lib/inbox/store.mjs `noteCandidate`) when the chat has a phone number: the number and
+ * jid (and lid, when WhatsApp shows one), the name WhatsApp shows for a client (never the
+ * owner's own, on a message he sent), the property words and the time. Never the text,
+ * never a lead, never a note to anyone; the owner moves it into the inbox or marks it not a
+ * client. A chat that becomes a lead leaves the list. Every other conversation is still
+ * discarded exactly as above.
+ */
+```
+
+(b) The import. Find:
+
+```js
+import {
+  BONA_WORD_RE, LISTING_ID_RE, inboundSignal, nextInboxState, ownerOutboundJoins,
+} from './inbox/eligibility.mjs';
+```
+
+Replace with:
+
+```js
+import {
+  BONA_WORD_RE, LISTING_ID_RE, MAX_PROPERTY_WORDS, PROPERTY_DOC_RE, inboundSignal, isTkDocument, nextInboxState, ownerOutboundJoins,
+  propertyWordsIn,
+} from './inbox/eligibility.mjs';
+```
+
+(c) The words of one record. Find:
+
+```js
+/** How often one record may fail before it is written off rather than retried for ever. */
+export const MAX_RECORD_ATTEMPTS = 3;
+```
+
+Replace with:
+
+```js
+/** How often one record may fail before it is written off rather than retried for ever. */
+export const MAX_RECORD_ATTEMPTS = 3;
+/** What the owner's list shows for a document of his that names TK (D16, D17). */
+export const TK_DOCUMENT_WORD = 'tk document';
+/**
+ * What it shows for a property-document word (lib/inbox/eligibility.mjs `PROPERTY_DOC_RE`:
+ * brochure, price list, بروشور …) in a message or a document's name that did not join.
+ */
+export const PROPERTY_DOCUMENT_WORD = 'property document';
+
+/**
+ * Why a record's chat belongs on the owner's list of real-estate chats to check (D17): the
+ * property words in its text or caption and, for a document, in its file name — after
+ * `tk document` when it is a document the owner sent that names TK, and `property document`
+ * when the text, the caption or a document's name has a property-document word, in either
+ * direction. So every owner-sent property document that did not join (it names Bona, or its
+ * name was cut too close to the word, Task 15) is on the list, and so is a client asking
+ * for "the price list". Canonical words only, never the text. A word at the end of a name
+ * cut at 120 characters may be the start of a longer one; that only ever puts a chat on the
+ * list to check, never in the inbox.
+ * @returns {string[]} at most `MAX_PROPERTY_WORDS`
+ */
+export function candidateWordsOf(rec) {
+  const text = typeof rec?.text === 'string' ? rec.text : '';
+  const doc = typeof rec?.media === 'string' && rec.media.startsWith('[document');
+  const name = doc && typeof rec.fileName === 'string' ? rec.fileName : '';
+  const markers = [];
+  if (rec?.fromMe === true && isTkDocument(rec)) markers.push(TK_DOCUMENT_WORD);
+  if (PROPERTY_DOC_RE.test(text) || (name && PROPERTY_DOC_RE.test(name))) markers.push(PROPERTY_DOCUMENT_WORD);
+  return [...markers, ...propertyWordsIn(name ? `${text}\n${name}` : text)].slice(0, MAX_PROPERTY_WORDS);
+}
+```
+
+(d) Noting a candidate, next to the other inbox helpers. Find:
+
+```js
+  /* -------------------- the tick -------------------- */
+```
+
+Replace with:
+
+```js
+  /**
+   * D17: after a record is handled, a chat that is a lead leaves the owner's list of
+   * real-estate chats to check (its inbox state rules now), and a chat that is not one goes
+   * on it when the record gives a reason (`candidateWordsOf`) — only a person's chat with a
+   * phone number. A WhatsApp channel (`…@newsletter`) is nobody's chat. A lid alone is not
+   * noted, for the reasons A7 makes no lead of one: it cannot be checked against the team or
+   * the never list (it may be a colleague whose lid is not learned yet), cannot be replied
+   * to, and the exclusion sweep cannot catch it later. A client's name is kept, the name on
+   * a record the owner sent is his own and never is. It is only a list for the owner to look
+   * at, so it never fails the record: a failure is logged by its kind only (`errorKind`: no
+   * message, so no numbers, no words) and the record is not retried for it — a retry would
+   * handle the record a second time.
+   */
+  function noteCandidateSafely(rec, ts, tally) {
+    try {
+      const jids = jidsOf(rec);
+      if (jids.waJid && !jids.waJid.endsWith('@s.whatsapp.net')) return;
+      if (!jids.phone && !jids.waJid && !jids.waLid) return;
+      if (findLead(jids)) {
+        inboxStore.removeCandidatesFor({ phone: jids.phone, jid: jids.waJid, lid: jids.waLid });
+        return;
+      }
+      if (!jids.phone) return;
+      const words = candidateWordsOf(rec);
+      if (!words.length) return;
+      const res = inboxStore.noteCandidate({
+        jid: jids.waJid, lid: jids.waLid, phone: jids.phone, name: rec.fromMe ? null : (rec.pushName ?? null),
+        ts, words, dir: rec.fromMe ? 'out' : 'in',
+      });
+      if (res.state === 'open') tally.candidates += 1;
+    } catch (err) {
+      log({ level: 'warn', evt: 'inbox.candidate_failed', ...errorKind(err) });
+    }
+  }
+
+  /* -------------------- the tick -------------------- */
+```
+
+(e) The tally. Find:
+
+```js
+      const tally = { scanned: records.length, matched: 0, unmatched: 0, created: 0, merged: 0, replies: 0, ignored: 0, lidOnlyUnexcludable: 0, stored: 0, joined: 0 };
+```
+
+Replace with:
+
+```js
+      const tally = { scanned: records.length, matched: 0, unmatched: 0, created: 0, merged: 0, replies: 0, ignored: 0, lidOnlyUnexcludable: 0, stored: 0, joined: 0, candidates: 0 };
+```
+
+(f) After the record is handled, inside the per-record `try`, just before it is marked seen. Find:
+
+```js
+          // Remembered once it is safely handled, so a transient store failure costs a
+```
+
+Replace with:
+
+```js
+          if (inboxOn) noteCandidateSafely(rec, ts, tally);
+          // Remembered once it is safely handled, so a transient store failure costs a
+```
+
+(The team, never-list, own-chat, group and seen checks all `continue` before this point, so an excluded number never becomes a candidate. A retried inbound record — Task 9's `handled` path — reaches it too, and finds its lead.)
+
+(g) The tick's log line counts candidates. Find:
+
+```js
+      if (tally.matched || tally.replies || tally.stored || tally.joined) log({ evt: 'wa.poll.tick', ...tally });
+```
+
+Replace with:
+
+```js
+      if (tally.matched || tally.replies || tally.stored || tally.joined || tally.candidates) log({ evt: 'wa.poll.tick', ...tally });
+```
+
+- [ ] **Step 12: Run**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/wa-poller.test.mjs`
+Expected: PASS, 0 fail (14 more tests than before).
+
+- [ ] **Step 13: Run the full suite**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/*.test.mjs`
+Expected: all pass, 0 fail — 14 more tests than after Part A (916 → 930).
+
+- [ ] **Step 14: Commit**
+
+```bash
+cd /home/azoz778/bona-wt/team-inbox && git add services/api/lib/wa-poller.mjs services/api/test/wa-poller.test.mjs
+git commit -m "wa-poller: a chat that talks about property with no sure sign goes on the owner's list (D17)
+
+A record with no lead behind it that uses property words or a
+property-document word, or a TK document the owner sends, notes a candidate
+when its chat has a phone number: never a lead, never the text, never a
+note, never the owner's own name. A chat that becomes a lead leaves the list.
+Noting never fails the record, and a failure is logged by its kind only.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+#### Part C — the Unsure tab, move and dismiss, the upkeep
+
+- [ ] **Step 15: Write the failing tests**
+
+Append to the end of `services/api/test/dashboard-render-inbox.test.mjs` (after Task 14's test):
+
+```js
+
+/* ---------------- real-estate chats to check (D17) ---------------- */
+
+const cand = (over = {}) => ({
+  cand_id: 'CND-mf3k2a-1a2b', jid: '966512340077@s.whatsapp.net', lid: null, phone_e164: '966512340077', name: 'Umm Khalid',
+  first_ts: NOW - 50 * HOUR, last_ts: NOW - HOUR, hits: 3, words: ['شقة', 'إيجار'], last_dir: 'in', state: 'open', updated: NOW - HOUR, ...over,
+});
+
+test('the owner\'s Unsure tab lists the real-estate chats to check: name or masked number, words, times, count, who wrote last, two decisions', () => {
+  const html = unsurePage({
+    me: OWNER,
+    now: NOW,
+    rows: [],
+    candidates: [
+      cand(),
+      cand({ cand_id: 'CND/1?x=1', name: EVIL, phone_e164: '966598760011', words: ['villa', '<b>x</b>'], hits: 1, last_dir: 'out', first_ts: NOW - 30_000, last_ts: NOW - 30_000 }),
+      cand({ cand_id: 'CND-3', name: null, phone_e164: '966555550022', words: [], last_dir: null }),
+    ],
+  });
+  assert.match(html, /<h2[^>]*>Real-estate chats to check<\/h2>/);
+  assert.match(html, /<bdi>Umm Khalid<\/bdi>/);
+  assert.match(html, /<bdi>&lt;img src=x onerror=alert\(1\)&gt;<\/bdi>/);
+  assert.ok(!html.includes('<img'), 'a name is text, never markup');
+  assert.ok(!html.includes('<b>x</b>'), 'so is a word');
+  assert.match(html, /شقة · إيجار/);
+  assert.match(html, /…0077/);
+  assert.match(html, /<span class="nm"><span class="tel">…0022<\/span><\/span>/, 'no name: the masked number stands in');
+  assert.doesNotMatch(html, /966512340077|966598760011|966555550022/, 'never a whole number');
+  assert.match(html, /first 2\sd ago/);
+  assert.match(html, /last 1\sh ago/);
+  assert.match(html, /last just now/);
+  assert.match(html, /3 messages/);
+  assert.match(html, /1 message</);
+  assert.match(html, /they wrote last/);
+  assert.match(html, /you wrote last/);
+  assert.match(html, /action="\/v1\/admin\/inbox\/candidates\/CND-mf3k2a-1a2b\/move"/);
+  assert.match(html, /action="\/v1\/admin\/inbox\/candidates\/CND-mf3k2a-1a2b\/dismiss"/);
+  assert.match(html, /action="\/v1\/admin\/inbox\/candidates\/CND%2F1%3Fx%3D1\/move"/, 'an odd id stays one path segment');
+  assert.equal(html.match(/>Move to Bona inbox<\/button>/g).length, 3);
+  assert.equal(html.match(/>Not a client<\/button>/g).length, 3);
+  assert.match(html, /Unsure · 3<\/a>/, 'the tab counts the chats to check');
+  assert.match(html, /until 30 days after the last such message/, 'how long, as the privacy page says');
+  assert.match(html, /No chats that mention Bona to decide/);
+  assert.doesNotMatch(html, /Nothing to decide/);
+});
+
+test('the Unsure tab counts guesses and chats to check together, and says so when there is neither', () => {
+  const both = unsurePage({ me: OWNER, now: NOW, rows: [{ ...LEAD, inbox_state: 'unsure', match_method: 'keyword', snippet: 'bona?' }], candidates: [cand()] });
+  assert.match(both, /Unsure · 2<\/a>/);
+  assert.match(both, /wrote the word “bona”/);
+  assert.match(both, /Real-estate chats to check/);
+  const none = unsurePage({ me: OWNER, now: NOW, rows: [], candidates: [] });
+  assert.match(none, /Nothing to decide/);
+  assert.doesNotMatch(none, /Real-estate chats to check/);
+});
+
+test('only an owner\'s page ever draws a chat to check, even when one is passed', () => {
+  for (const me of [STAFF, null, { ...OWNER, role: 'staff' }]) {
+    const html = unsurePage({ me, now: NOW, rows: [], candidates: [cand()] });
+    assert.doesNotMatch(html, /Umm Khalid|Real-estate chats to check|\/candidates\/|…0077|شقة/, JSON.stringify(me?.role ?? null));
+    assert.doesNotMatch(html, /Unsure · \d/, 'and it counts none');
+  }
+});
+
+test('a chat to check full of nulls renders without "undefined", "NaN", "[object" or a 1970 date', () => {
+  const blank = Object.fromEntries(Object.keys(cand()).map((k) => [k, null]));
+  blank.cand_id = 'n';
+  const html = unsurePage({ me: OWNER, now: NOW, rows: [], candidates: [blank, { cand_id: 'w', words: 'villa,flat' }] });
+  assert.doesNotMatch(html, /undefined|NaN|\[object|1970-01-01/);
+  assert.match(html, /villa · flat/, 'words stored as text still read as words');
+  assert.match(html, /action="\/v1\/admin\/inbox\/candidates\/n\/dismiss"/);
+});
+
+test('a chat to check has its own banners: dismissed, gone, and no number to move in', () => {
+  assert.equal(knownError('candidate_gone'), 'candidate_gone');
+  assert.equal(knownError('candidate_no_number'), 'candidate_no_number');
+  assert.match(unsurePage({ me: OWNER, rows: [], error: 'candidate_no_number', now: NOW }), /<div class="err">That chat has no phone number/);
+  assert.ok(unsurePage({ me: OWNER, rows: [], ok: 'dismissed', now: NOW }).includes(`<div class="ok">${INBOX_OK.dismissed}</div>`));
+  assert.match(unsurePage({ me: OWNER, rows: [], error: 'candidate_gone', now: NOW }), /<div class="err">That chat is no longer on the list/);
+});
+```
+
+Append to the end of `services/api/test/dashboard-inbox.test.mjs` (after Task 14's test):
+
+```js
+
+/* ---------------- real-estate chats to check (D17) ---------------- */
+
+const CAND_PHONE = '966500000091';
+/** One chat on the owner's list, as the poller would have noted it. */
+const noteCand = (h, { phone = CAND_PHONE, name = 'Candi Date', words = ['شقة', 'إيجار'], dir = 'in', ts = NOW + 10_000 } = {}) =>
+  h.inboxStore.noteCandidate({ phone, jid: `${phone}@s.whatsapp.net`, name, ts, words, dir }).cand_id;
+
+test('the owner\'s Unsure tab lists and counts the real-estate chats to check; a never-list one is on no list', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const id = noteCand(h);
+    h.team.addNever({ phone: '966500000092' });
+    noteCand(h, { phone: '966500000092', name: 'Never Cand' });
+    const boss = await h.boss();
+    assert.match(await (await h.get('/dashboard/inbox', { cookie: boss })).text(), /Unsure · 2<\/a>/, 'Umar and Candi, not the never-list chat');
+    const res = await h.get('/dashboard/inbox?tab=unsure', { cookie: boss });
+    assert.equal(res.status, 200);
+    assertLocked(res);
+    const html = await res.text();
+    assert.match(html, /Real-estate chats to check/);
+    assert.ok(html.includes('Candi Date'));
+    assert.ok(html.includes('Umar Unsure'), 'the guesses are still there');
+    assert.match(html, /شقة · إيجار/);
+    assert.ok(html.includes(`action="/v1/admin/inbox/candidates/${id}/move"`));
+    assert.ok(html.includes(`action="/v1/admin/inbox/candidates/${id}/dismiss"`));
+    assert.ok(!html.includes('Never Cand'));
+    assert.ok(!html.includes(CAND_PHONE), 'a masked number only');
+  });
+});
+
+test('a chat to check that has become a lead meanwhile is on no list and in no count: the lead decides', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    noteCand(h);
+    noteCand(h, { phone: '966500000078', name: 'Umar Again' });
+    const boss = await h.boss();
+    const html = await (await h.get('/dashboard/inbox?tab=unsure', { cookie: boss })).text();
+    assert.ok(html.includes('Candi Date'));
+    assert.ok(!html.includes('Umar Again'), 'LEAD-U already holds that number');
+    assert.match(await (await h.get('/dashboard/inbox', { cookie: boss })).text(), /Unsure · 2<\/a>/, 'Umar once, as the guess he is, and Candi');
+  });
+});
+
+test('staff never see a chat to check: not on any page, not in any JSON', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    noteCand(h);
+    const staff = await h.staff();
+    for (const p of ['/dashboard', '/dashboard/inbox', '/dashboard/leads', '/dashboard/inbox?tab=unsure', '/v1/admin/leads']) {
+      const res = await h.get(p, { cookie: staff });
+      const body = await res.text();
+      for (const secret of ['Candi Date', 'candidates/', 'شقة · إيجار', CAND_PHONE, '…0091']) assert.ok(!body.includes(secret), `${p}: ${secret}`);
+    }
+  });
+});
+
+test('the owner moves a chat to check into the inbox: an owner_added lead, in, 30 days of history, off the list, audited by ids only', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const id = noteCand(h);
+    const boss = await h.boss();
+    const res = await h.postForm(`/v1/admin/inbox/candidates/${id}/move`, {}, { cookie: boss });
+    assert.equal(res.status, 303);
+    const leadId = /^\/dashboard\/inbox\/(LEAD-[A-Za-z0-9-]+)\?ok=moved$/.exec(res.headers.get('location'))?.[1];
+    assert.ok(leadId, res.headers.get('location'));
+    const lead = h.db.getLead(leadId);
+    assert.equal(lead.phone_e164, CAND_PHONE);
+    assert.equal(lead.wa_jid, `${CAND_PHONE}@s.whatsapp.net`);
+    assert.equal(lead.name, 'Candi Date');
+    assert.equal(lead.match_method, 'owner_added');
+    assert.equal(lead.inbox_state, 'in');
+    assert.equal(h.spy.history.at(-1).leadId, leadId);
+    assert.equal(h.spy.history.at(-1).untilTs - h.spy.history.at(-1).sinceTs, OWNER_HISTORY_MS);
+    assert.equal(h.inboxStore.getCandidate(id), null, 'it is a lead now: off the list');
+    assert.deepEqual(h.notes, [], 'no new-lead note: the owner vouched for it himself');
+    const audited = h.app.audit.recent(50).find((r) => r.action === 'inbox_move');
+    assert.equal(audited.target, id);
+    assert.deepEqual(audited.meta, { lead_id: leadId });
+    assert.equal(audited.user_id, h.owner.user_id);
+    const staff = await h.staff();
+    assert.ok((await (await h.get('/dashboard/inbox', { cookie: staff })).text()).includes('Candi Date'), 'the team sees it now');
+    const again = await h.postForm(`/v1/admin/inbox/candidates/${id}/move`, {}, { cookie: boss });
+    assert.equal(again.headers.get('location'), '/dashboard/inbox?tab=unsure&error=candidate_gone');
+    const dump = JSON.stringify([h.app.audit.recent(50), h.logs]);
+    for (const secret of [CAND_PHONE, '500000091', 'Candi', 'شقة']) assert.ok(!dump.includes(secret), secret);
+  });
+});
+
+test('Not a client on a chat to check: off the list, not listed again, audited by its id only', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const id = noteCand(h);
+    const boss = await h.boss();
+    const res = await h.postForm(`/v1/admin/inbox/candidates/${id}/dismiss`, {}, { cookie: boss });
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), '/dashboard/inbox?tab=unsure&ok=dismissed');
+    assert.equal(h.inboxStore.getCandidate(id).state, 'dismissed');
+    assert.equal(h.db.getLeadByPhone(CAND_PHONE), null, 'not a lead either');
+    const html = await (await h.get('/dashboard/inbox?tab=unsure&ok=dismissed', { cookie: boss })).text();
+    assert.ok(!html.includes('Candi Date'));
+    assert.match(html, /<div class="ok">Marked not a client/);
+    assert.equal(h.inboxStore.noteCandidate({ phone: CAND_PHONE, ts: NOW + 99_000, words: ['villa'], dir: 'in' }).state, 'dismissed', 'a later message does not ask again');
+    const audited = h.app.audit.recent(50).find((r) => r.action === 'inbox_out');
+    assert.equal(audited.target, id);
+    const again = await h.postForm(`/v1/admin/inbox/candidates/${id}/dismiss`, {}, { cookie: boss });
+    assert.equal(again.headers.get('location'), '/dashboard/inbox?tab=unsure&error=candidate_gone');
+    assert.ok(!JSON.stringify([h.app.audit.recent(50), h.logs]).includes('500000091'));
+  });
+});
+
+test('a chat to check whose number is a colleague\'s or on the never list is never moved in, and leaves the list', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const never = noteCand(h, { phone: '966500000092', name: 'Never Cand' });
+    const colleague = noteCand(h, { phone: '966500000001', name: 'Sara Again' });
+    h.team.addNever({ phone: '966500000092' });
+    const boss = await h.boss();
+    const leadsBefore = h.db.countLeads();
+    for (const id of [never, colleague]) {
+      const res = await h.postForm(`/v1/admin/inbox/candidates/${id}/move`, {}, { cookie: boss });
+      assert.equal(res.headers.get('location'), '/dashboard/inbox?tab=unsure&error=excluded', id);
+      assert.equal(h.inboxStore.getCandidate(id), null, id);
+    }
+    assert.equal(h.db.countLeads(), leadsBefore);
+    assert.deepEqual(h.spy.history, []);
+  });
+});
+
+test('move and Not a client on a chat to check are the owner\'s alone', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const id = noteCand(h);
+    const staff = await h.staff();
+    for (const what of ['move', 'dismiss']) {
+      const res = await h.postForm(`/v1/admin/inbox/candidates/${id}/${what}`, {}, { cookie: staff });
+      assert.equal(res.status, 403, what);
+      assertLocked(res);
+      assert.deepEqual(await res.json(), { error: 'owner_only' }, what);
+      assert.ok(h.logs.some((e) => e.evt === 'dash.owner_only' && e.path === `/v1/admin/inbox/candidates/:id/${what}`), what);
+    }
+    assert.equal(h.inboxStore.getCandidate(id).state, 'open');
+    assert.equal(h.db.getLeadByPhone(CAND_PHONE), null);
+    assert.deepEqual(h.spy.history, []);
+  });
+});
+
+test('a number added to the never list or the team leaves the list of chats to check at once', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const never = noteCand(h, { phone: '966500000093', name: 'Cousin' });
+    const hire = noteCand(h, { phone: '966500000094', name: 'New Hire' });
+    const boss = await h.boss();
+    assert.equal((await h.postForm('/v1/admin/never', { phone: '0500000093' }, { cookie: boss })).headers.get('location'), '/dashboard/team?ok=never_added');
+    assert.equal(h.inboxStore.getCandidate(never), null);
+    assert.equal((await h.postForm('/v1/admin/team', { name: 'New Hire', phone: '0500000094', role: 'staff' }, { cookie: boss })).headers.get('location'), '/dashboard/team?ok=added');
+    assert.equal(h.inboxStore.getCandidate(hire), null);
+  });
+});
+
+test('Add chat by phone number, and Move on a lead, take that chat off the list of chats to check at once', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const added = noteCand(h, { phone: '966500000095', name: 'Added Later' });
+    const umar = noteCand(h, { phone: '966500000078', name: 'Umar Again' });
+    const boss = await h.boss();
+    assert.match((await h.postForm('/v1/admin/inbox/add', { phone: '0500000095' }, { cookie: boss })).headers.get('location'), /\?ok=added$/);
+    assert.equal(h.inboxStore.getCandidate(added), null, 'a lead now: the row is gone, not only hidden');
+    assert.equal((await h.postForm('/v1/admin/inbox/LEAD-U/move', {}, { cookie: boss })).headers.get('location'), '/dashboard/inbox/LEAD-U?ok=moved');
+    assert.equal(h.inboxStore.getCandidate(umar), null, 'LEAD-U holds that number, and it is in now');
+  });
+});
+
+test('a chat to check with no phone number, a lid alone or a WhatsApp channel, is never moved in, and leaves the list', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const note = (ids) => h.inboxStore.noteCandidate({ ...ids, name: 'No Number', ts: NOW + 10_000, words: ['villa'], dir: 'in' }).cand_id;
+    const lidOnly = note({ lid: '272516946294599@lid' });
+    const channel = note({ phone: '12036302524', jid: '12036302524@newsletter' });
+    const boss = await h.boss();
+    const leadsBefore = h.db.countLeads();
+    for (const id of [lidOnly, channel]) {
+      const res = await h.postForm(`/v1/admin/inbox/candidates/${id}/move`, {}, { cookie: boss });
+      assert.equal(res.headers.get('location'), '/dashboard/inbox?tab=unsure&error=candidate_no_number', id);
+      assert.equal(h.inboxStore.getCandidate(id), null, id);
+    }
+    assert.equal(h.db.countLeads(), leadsBefore);
+    assert.deepEqual(h.spy.history, []);
+  });
+});
+```
+
+In `services/api/test/inbox-wiring.test.mjs` (Task 11), the upkeep's counts gain two keys. Find:
+
+```js
+    assert.deepEqual(counts, { excludedOut: 0, purgedChats: 1, purgedMessages: 1, codeRows: 1, interrupted: 1, caughtUp: 2, caughtUpStored: 3 });
+```
+
+Replace with:
+
+```js
+    assert.deepEqual(counts, { excludedOut: 0, purgedChats: 1, purgedMessages: 1, codeRows: 1, interrupted: 1, candidatesExpired: 0, dismissalsExpired: 0, caughtUp: 2, caughtUpStored: 3 });
+```
+
+Find:
+
+```js
+    assert.deepEqual(counts, { excludedOut: 3, purgedChats: 0, purgedMessages: 0, codeRows: 0, interrupted: 0, caughtUp: 1, caughtUpStored: 0 });
+```
+
+Replace with:
+
+```js
+    assert.deepEqual(counts, { excludedOut: 3, purgedChats: 0, purgedMessages: 0, codeRows: 0, interrupted: 0, candidatesExpired: 0, dismissalsExpired: 0, caughtUp: 1, caughtUpStored: 0 });
+```
+
+and append to the end of that file:
+
+```js
+
+test('the daily upkeep prunes the real-estate chats to check: open ones after 30 days, dismissed ones after a year', async () => {
+  const h = build();
+  try {
+    const { app, db } = h;
+    // Rows written at other moments: the same store over the same file, another clock.
+    const at = (ts) => createInboxStore(db, { now: () => ts });
+    const note = (phone, ts) => app.inboxStore.noteCandidate({ phone, ts, words: ['villa'], dir: 'in' }).cand_id;
+    const stale = note('966500000071', NOW - 31 * DAY);
+    const fresh = note('966500000072', NOW - 29 * DAY);
+    const oldNo = note('966500000073', NOW - 400 * DAY);
+    const newNo = note('966500000074', NOW - 400 * DAY);
+    at(NOW - 366 * DAY).dismissCandidate(oldNo);
+    at(NOW - 10 * DAY).dismissCandidate(newNo);
+
+    const counts = await app.inboxMaintenance();
+    assert.equal(counts.candidatesExpired, 1);
+    assert.equal(counts.dismissalsExpired, 1);
+    assert.equal(app.inboxStore.getCandidate(stale), null);
+    assert.ok(app.inboxStore.getCandidate(fresh));
+    assert.equal(app.inboxStore.getCandidate(oldNo), null);
+    assert.equal(app.inboxStore.getCandidate(newNo).state, 'dismissed', 'still not listed again');
+    assert.deepEqual(h.logs.find((e) => e.evt === 'inbox.maintenance'), { evt: 'inbox.maintenance', ...counts });
+    assert.ok(!JSON.stringify(h.logs).includes('96650000007'), 'counts only');
+  } finally {
+    await h.close();
+  }
+});
+```
+
+- [ ] **Step 16: Run to see them fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/dashboard-render-inbox.test.mjs api/test/dashboard-inbox.test.mjs api/test/inbox-wiring.test.mjs`
+Expected: FAIL — render: 4 of the 5 new tests (the page ignores `candidates`, so there is no section, no count and no banner; "only an owner's page ever draws a chat to check" passes already, since nothing draws one yet); routes: 9 of the 10 new tests (the tab shows no candidates, `/v1/admin/inbox/candidates/:id/move|dismiss` answers `404 {"error":"not_found"}` even for staff, the never-list and team adds, *Add chat* and *Move* on a lead leave the candidate; "staff never see a chat to check" passes already); wiring: the two edited upkeep tests and the new one (no `candidatesExpired` / `dismissalsExpired`, nothing pruned). Every other test passes.
+
+- [ ] **Step 17: The screen** — in `services/api/lib/dashboard/render-inbox.mjs` (as Tasks 10 and 14 left it), two edits.
+
+Find:
+
+```js
+  added: 'Added to the Bona inbox.',
+};
+```
+
+Replace with:
+
+```js
+  added: 'Added to the Bona inbox.',
+  dismissed: 'Marked not a client. It is off the list, and only its number is kept, so it is not listed again.',
+};
+```
+
+Find the function `unsurePage` as Task 10 left it — from its doc comment line `/** Chats that might be about Bona. Only the owner decides, so only the owner sees them. */` through the function's closing `}` — and replace that whole block with:
+
+```js
+/* ------------------------------------------------------------------ */
+/* Real-estate chats to check (owner only, D17)                        */
+/* ------------------------------------------------------------------ */
+
+const candidateHref = (candId, what) => `/v1/admin/inbox/candidates/${encodeURIComponent(candId)}/${what}`;
+
+/**
+ * One chat that talks about property with nothing that says Bona. No lead is behind it and
+ * nothing it said was kept: the name WhatsApp shows for the client, or the masked number
+ * when there is none; the property words; when it first and last wrote; how many messages;
+ * and whether the last one was the owner's or theirs.
+ */
+function candidateRow(c, now) {
+  const name = String(c.name ?? '').trim();
+  const masked = maskPhone(c.phone_e164);
+  const words = (Array.isArray(c.words) ? c.words : String(c.words ?? '').split(',')).filter((w) => typeof w === 'string' && w);
+  const hits = Number(c.hits) || 0;
+  const when = (ts) => {
+    const a = agoSince(now, ts);
+    return a === '—' || a === 'just now' ? a : `${a} ago`;
+  };
+  const last = c.last_dir === 'out' ? 'you wrote last' : c.last_dir === 'in' ? 'they wrote last' : '';
+  const facts = [
+    name ? `<span class="tel">${esc(masked)}</span>` : '',
+    `<span>first ${esc(when(c.first_ts))}</span>`,
+    `<span>last ${esc(when(c.last_ts))}</span>`,
+    hits ? `<span>${esc(hits)} ${hits === 1 ? 'message' : 'messages'}</span>` : '',
+    last ? `<span>${esc(last)}</span>` : '',
+  ].filter(Boolean).join('<span>·</span>');
+  return `<div class="lr ix">
+  <span class="av2" aria-hidden="true"><span dir="auto">${esc(firstLetter(name))}</span></span>
+  <div>
+    <div class="l1"><span class="nm">${name ? `<bdi>${esc(name)}</bdi>` : `<span class="tel">${esc(masked)}</span>`}</span>${words.length ? `<span class="pl warm" dir="auto">${esc(words.join(' · '))}</span>` : ''}</div>
+    <div class="l2">${facts}</div>
+    <div class="acts" style="margin-top:8px">${postButton(candidateHref(c.cand_id, 'move'), 'Move to Bona inbox')}${postButton(candidateHref(c.cand_id, 'dismiss'), 'Not a client')}</div>
+  </div>
+</div>`;
+}
+
+/**
+ * Chats that might be about Bona: the guessed leads, then the real-estate chats to check
+ * (D17). Only the owner decides, so only the owner sees them; the chats to check are drawn
+ * only for an owner even if a caller passes them for someone else. The tab counts both.
+ */
+export function unsurePage({ me, rows, candidates = [], ok = null, error = null, now = Date.now() }) {
+  const list = Array.isArray(rows) ? rows : [];
+  const cands = me?.role === 'owner' && Array.isArray(candidates) ? candidates : [];
+  const guesses = list.length
+    ? `<div class="card cp">${list.map((r) => unsureRow(r, now)).join('')}</div>`
+    : `<p class="muted">${cands.length ? 'No chats that mention Bona to decide.' : 'Nothing to decide.'}</p>`;
+  const toCheck = cands.length
+    ? `<h2 style="margin-top:22px">Real-estate chats to check</h2>
+<p class="sub">Chats on your number that talk about property but carry nothing that says Bona: a TK client, someone you know, or a new Bona client. Nothing they wrote is kept, only the number, the name WhatsApp shows and the property words, until 30 days after the last such message. <b>Move to Bona inbox</b> makes it a Bona chat and copies in its last 30 days; <b>Not a client</b> takes it off this list, and it is not listed again for a year.</p>
+<div class="card cp">${cands.map((c) => candidateRow(c, now)).join('')}</div>`
+    : '';
+  const body = `${flash(ok, error)}
+<p class="sub">Chats that might be about Bona but carry no ad, Ref code or listing number. Only owners see this list. <b>Move to Bona inbox</b> copies in the chat's last 30 days so the team can read and reply; <b>Not a client</b> keeps it out of the inbox, and it never comes back on its own.</p>
+${guesses}${toCheck}`;
+  return layout({ title: 'Unsure', active: '/dashboard/inbox', me, actions: tabs('unsure', list.length + cands.length), body });
+}
+```
+
+(The `/* One chat */` banner that follows stays as it is, one blank line below.)
+
+In `services/api/lib/dashboard/render.mjs`, find (Task 10's `MESSAGES`):
+
+```js
+  not_a_chat: 'That lead has no WhatsApp chat yet — it joins once they write on WhatsApp.',
+```
+
+Replace with:
+
+```js
+  not_a_chat: 'That lead has no WhatsApp chat yet — it joins once they write on WhatsApp.',
+  candidate_gone: 'That chat is no longer on the list: it was moved or marked already.',
+  candidate_no_number: 'That chat has no phone number, so it cannot be moved in. If you know the number, use Add chat by phone number.',
+```
+
+- [ ] **Step 18: The routes** — nine edits in `services/api/lib/dashboard/routes.mjs`, on the file as Tasks 12 and 14 left it.
+
+(a) A number that joins the team or the never list leaves the list too. Replace the whole function `leaveInboxFor` (with its doc comment) as Task 12 left it:
+
+```js
+  /**
+   * A number that has just become a colleague's or a never-list one is never a client
+   * (§3.5, P2-7): the chat stored under it, if any, leaves the inbox and its transcript
+   * goes now, not at the next daily upkeep. Audited by lead id only. Built without the
+   * inbox (older tests, tools), there is nothing stored to take out.
+   */
+  function leaveInboxFor(digits, me) {
+    if (!inbox || !digits) return;
+    const lead = db.getLeadByPhone(digits) ?? db.getLeadByJid(`${digits}@s.whatsapp.net`);
+    if (!lead || lead.inbox_state === 'out') return;
+    inbox.leaveInbox(lead.lead_id);
+    audit?.record({ userId: me.user_id, action: 'inbox_out', target: lead.lead_id });
+  }
+```
+
+with:
+
+```js
+  /**
+   * A number that has just become a colleague's or a never-list one is never a client
+   * (§3.5, P2-7): the chat stored under it, if any, leaves the inbox and its transcript
+   * goes now, not at the next daily upkeep, and it leaves the owner's list of real-estate
+   * chats to check (D17). Audited by lead id only. Built without the inbox (older tests,
+   * tools), there is nothing stored to take out.
+   */
+  function leaveInboxFor(digits, me) {
+    if (!inbox || !digits) return;
+    inbox.removeCandidatesFor({ phone: digits, jid: `${digits}@s.whatsapp.net` });
+    const lead = db.getLeadByPhone(digits) ?? db.getLeadByJid(`${digits}@s.whatsapp.net`);
+    if (!lead || lead.inbox_state === 'out') return;
+    inbox.leaveInbox(lead.lead_id);
+    audit?.record({ userId: me.user_id, action: 'inbox_out', target: lead.lead_id });
+  }
+```
+
+(b) The Unsure tab lists the candidates and both tab labels count them. Replace the whole function `inboxList` as Task 12 left it (from `  function inboxList({ res, url, me }) {` through its closing `  }`) with:
+
+```js
+  /**
+   * A real-estate chat to check (D17) whose number is a colleague's or a never-list one is
+   * on no list and in no count, like a lead rule 1 hides: the store knows no team.
+   */
+  const excludedCandidate = (c) => excludedLead({ phone_e164: c.phone_e164, wa_jid: c.jid, wa_lid: c.lid });
+  /**
+   * The lead a chat to check has become since it was noted (a web form, *Add chat by phone
+   * number* …), if any: that lead's own inbox state decides the chat from then on.
+   */
+  const leadOfCandidate = (c) => (c.phone_e164 ? db.getLeadByPhone(c.phone_e164) : null)
+    ?? (c.jid ? db.getLeadByJid(c.jid) : null) ?? (c.lid ? db.getLeadByJid(c.lid) : null);
+  /** The most chats to check the Unsure tab lists, and counts: one list for both. */
+  const CANDIDATES_SHOWN = 200;
+  /**
+   * The owner's real-estate chats to check, as his Unsure tab lists and counts them. The
+   * store already leaves out, in SQL, a chat that has become a lead; a colleague's or a
+   * never-list number is left out here (one team check per row, at most 200 rows).
+   */
+  const candidatesShown = () => inbox.listCandidates({ limit: CANDIDATES_SHOWN }).filter((c) => !excludedCandidate(c));
+
+  function inboxList({ res, url, me }) {
+    if (!inbox) return noSuchPage(res, me);
+    const ok = inboxOk(url.searchParams.get('ok'));
+    const error = knownError(url.searchParams.get('error'));
+    const owner = me.role === 'owner';
+    if (url.searchParams.get('tab') === 'unsure') {
+      if (!owner) return sendHtml(res, 403, messagePage({ title: 'Owners only', message: 'Only an owner can see the Unsure list.', me }));
+      return sendHtml(res, 200, unsurePage({
+        me, rows: inbox.listUnsure().filter((l) => !excludedLead(l)), candidates: candidatesShown(), ok, error, now: now(),
+      }));
+    }
+    return sendHtml(res, 200, inboxPage({
+      me,
+      rows: inbox.listInbox({ userId: me.user_id, userCreated: me.created ?? 0 }).filter((l) => !excludedLead(l)),
+      // Counted from the rows the Unsure tab shows (the guesses and the chats to check),
+      // never the store's raw counts. Staff get none: the tab is not theirs.
+      unsureCount: owner ? inbox.listUnsure({ limit: 1000 }).filter((l) => !excludedLead(l)).length + candidatesShown().length : 0,
+      ok,
+      error,
+      now: now(),
+    }));
+  }
+```
+
+(c) Move and dismiss. Find:
+
+```js
+  /* -------------------- dispatch -------------------- */
+```
+
+Replace with:
+
+```js
+  /**
+   * *Move to Bona inbox* on a real-estate chat to check (D17). The owner vouches for it, so
+   * it becomes an `owner_added` lead through the one lead write path — no ad fan-out, no
+   * new-lead note, born answered (P2-5) — goes `in`, brings its last 30 days, and leaves
+   * the list. A colleague's or a never-list number is refused and taken off the list, and
+   * so is a row with no phone number (a lid alone, or a WhatsApp channel's jid): A7 makes no
+   * lead of one, and the poller notes none. Audited and logged by the candidate's and the
+   * lead's ids, never a number.
+   */
+  async function candidateMove({ res, form, me }, candId) {
+    const unsure = '/dashboard/inbox?tab=unsure';
+    const c = inbox.getCandidate(candId);
+    if (!c || c.state !== 'open') return answer(res, { form, back: `${unsure}&error=candidate_gone`, status: 404, payload: { error: 'not_found' } });
+    if (!c.phone_e164 || (c.jid && !c.jid.endsWith('@s.whatsapp.net'))) {
+      inbox.removeCandidate(c.cand_id);
+      return answer(res, { form, back: `${unsure}&error=candidate_no_number`, status: 400, payload: { error: 'candidate_no_number' } });
+    }
+    const ids = { phone: c.phone_e164, jid: c.jid, lid: c.lid };
+    const existing = leadOfCandidate(c);
+    if (excludedCandidate(c) || (existing && excludedLead(existing))) {
+      inbox.removeCandidatesFor(ids);
+      return answer(res, { form, back: `${unsure}&error=excluded`, status: 400, payload: { error: 'excluded' } });
+    }
+    const t = now();
+    const { lead } = createOrMergeLead(db, { name: c.name, phone: c.phone_e164, waJid: c.jid, waLid: c.lid }, {
+      channel: 'whatsapp', matchMethod: 'owner_added', now: t, dataDir: cfg.dataDir,
+    });
+    inbox.setInboxState(lead.lead_id, 'in', { since: t });
+    inbox.removeCandidatesFor(ids);
+    audit?.record({ userId: me.user_id, action: 'inbox_move', target: c.cand_id, meta: { lead_id: lead.lead_id } });
+    log({ evt: 'dash.candidate_move', candId: c.cand_id, leadId: lead.lead_id });
+    await joinHistory(lead.lead_id, t);
+    const back = openChat(db.getLead(lead.lead_id)) ? `/dashboard/inbox/${encodeURIComponent(lead.lead_id)}?ok=moved` : '/dashboard/inbox?ok=moved';
+    return answer(res, { form, back, status: 200, payload: { ok: true, lead_id: lead.lead_id } });
+  }
+
+  /** *Not a client* on a real-estate chat to check: off the list, and not listed again (D17). */
+  function candidateDismiss({ res, form, me }, candId) {
+    const unsure = '/dashboard/inbox?tab=unsure';
+    if (!inbox.dismissCandidate(candId)) return answer(res, { form, back: `${unsure}&error=candidate_gone`, status: 404, payload: { error: 'not_found' } });
+    audit?.record({ userId: me.user_id, action: 'inbox_out', target: candId });
+    log({ evt: 'dash.candidate_dismiss', candId });
+    return answer(res, { form, back: `${unsure}&ok=dismissed`, status: 200, payload: { ok: true } });
+  }
+
+  /* -------------------- dispatch -------------------- */
+```
+
+(d) Their paths. Find:
+
+```js
+  const OWNER_INBOX_WRITES = new Set(['move', 'out']);
+```
+
+Replace with:
+
+```js
+  const OWNER_INBOX_WRITES = new Set(['move', 'out']);
+  /** The owner's decisions on a real-estate chat to check (D17): his alone. */
+  const ADMIN_CANDIDATE = /^\/v1\/admin\/inbox\/candidates\/([A-Za-z0-9_-]{1,64})\/(move|dismiss)$/;
+```
+
+(`ADMIN_INBOX` cannot match these paths: its id segment admits no `/`.)
+
+(e) They are owner writes of the inbox. Find:
+
+```js
+    const inboxMatch = ADMIN_INBOX.exec(p);
+    const ownerWrite = Boolean(teamMatch || tiktokMatch || OWNER_WRITES.has(p) || (inboxMatch && OWNER_INBOX_WRITES.has(inboxMatch[2])));
+    const writes = (leadMatch && leadMatch[2]) || (p === '/v1/admin/spend' ? 'spend' : null)
+      || ((inboxMatch || p === '/v1/admin/inbox/add') ? 'inbox' : null) || (ownerWrite ? 'team' : null);
+```
+
+Replace with:
+
+```js
+    const inboxMatch = ADMIN_INBOX.exec(p);
+    const candMatch = ADMIN_CANDIDATE.exec(p);
+    const ownerWrite = Boolean(teamMatch || tiktokMatch || candMatch || OWNER_WRITES.has(p) || (inboxMatch && OWNER_INBOX_WRITES.has(inboxMatch[2])));
+    const writes = (leadMatch && leadMatch[2]) || (p === '/v1/admin/spend' ? 'spend' : null)
+      || ((inboxMatch || candMatch || p === '/v1/admin/inbox/add') ? 'inbox' : null) || (ownerWrite ? 'team' : null);
+```
+
+(f) The owner gate logs the path without the id. Find:
+
+```js
+      const shown = teamMatch ? '/v1/admin/team/:id' : inboxMatch ? `/v1/admin/inbox/:id/${inboxMatch[2]}` : p;
+```
+
+Replace with:
+
+```js
+      const shown = teamMatch ? '/v1/admin/team/:id' : inboxMatch ? `/v1/admin/inbox/:id/${inboxMatch[2]}`
+        : candMatch ? `/v1/admin/inbox/candidates/:id/${candMatch[2]}` : p;
+```
+
+(g) Dispatch. Find:
+
+```js
+      if (!inbox) return sendJson(res, 404, { error: 'not_found' });
+      if (!inboxMatch) return inboxAdd(ctx);
+```
+
+Replace with:
+
+```js
+      if (!inbox) return sendJson(res, 404, { error: 'not_found' });
+      if (candMatch) return candMatch[2] === 'move' ? candidateMove(ctx, candMatch[1]) : candidateDismiss(ctx, candMatch[1]);
+      if (!inboxMatch) return inboxAdd(ctx);
+```
+
+(h) *Add chat by phone number* takes the chat off the list: it is a lead now. In the function `inboxAdd` as Task 12 left it, find:
+
+```js
+    inbox.setInboxState(lead.lead_id, 'in', { since: t });
+    audit?.record({ userId: me.user_id, action: 'inbox_add', target: lead.lead_id });
+```
+
+Replace with:
+
+```js
+    inbox.setInboxState(lead.lead_id, 'in', { since: t });
+    // A lead now: off the owner's list of real-estate chats to check (D17).
+    inbox.removeCandidatesFor({ phone: digits, jid: `${digits}@s.whatsapp.net` });
+    audit?.record({ userId: me.user_id, action: 'inbox_add', target: lead.lead_id });
+```
+
+(i) So does *Move to Bona inbox* on a lead. In the function `inboxMove` as Task 12 left it, find:
+
+```js
+    inbox.setInboxState(leadId, 'in', { since: t });
+    audit?.record({ userId: me.user_id, action: 'inbox_move', target: leadId });
+```
+
+Replace with:
+
+```js
+    inbox.setInboxState(leadId, 'in', { since: t });
+    // Off the owner's list of real-estate chats to check, if it was there (D17).
+    inbox.removeCandidatesFor({ phone: lead.phone_e164, jid: lead.wa_jid, lid: lead.wa_lid });
+    audit?.record({ userId: me.user_id, action: 'inbox_move', target: leadId });
+```
+
+(`createOrMergeLead`, `excludedLead`, `openChat`, `joinHistory`, `answer`, `inboxOk` and `knownError` are all already in the file from Task 12; nothing new is imported.)
+
+- [ ] **Step 19: The upkeep prunes the list** — two edits in `services/api/index.mjs` (as Task 11 left it).
+
+Find:
+
+```js
+import { createInboxStore, RETENTION_MS } from './lib/inbox/store.mjs';
+```
+
+Replace with:
+
+```js
+import { createInboxStore, RETENTION_MS, CANDIDATE_KEEP_MS, DISMISSED_KEEP_MS } from './lib/inbox/store.mjs';
+```
+
+Find:
+
+```js
+      const retention = inboxStore.retentionPurge(t - RETENTION_MS);
+      const counts = {
+        excludedOut,
+        purgedChats: retention.leads,
+        purgedMessages: retention.messages,
+        codeRows: inboxStore.pruneCodeRows(t - CODE_ROW_TTL_MS),
+        interrupted: inboxStore.markStalePending(t - INTERRUPTED_SEND_MS),
+        caughtUp: 0,
+        caughtUpStored: 0,
+      };
+```
+
+Replace with:
+
+```js
+      const retention = inboxStore.retentionPurge(t - RETENTION_MS);
+      // The owner's list of real-estate chats to check (D17): an open one 30 days after its
+      // last property message, a dismissed one a year after he dismissed it.
+      const candidates = inboxStore.pruneCandidates({ openBefore: t - CANDIDATE_KEEP_MS, dismissedBefore: t - DISMISSED_KEEP_MS });
+      const counts = {
+        excludedOut,
+        purgedChats: retention.leads,
+        purgedMessages: retention.messages,
+        codeRows: inboxStore.pruneCodeRows(t - CODE_ROW_TTL_MS),
+        interrupted: inboxStore.markStalePending(t - INTERRUPTED_SEND_MS),
+        candidatesExpired: candidates.open,
+        dismissalsExpired: candidates.dismissed,
+        caughtUp: 0,
+        caughtUpStored: 0,
+      };
+```
+
+- [ ] **Step 20: Run, then the hostile-input render scripts**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/dashboard-render-inbox.test.mjs api/test/dashboard-inbox.test.mjs api/test/inbox-wiring.test.mjs api/test/dashboard-routes.test.mjs`
+Expected: PASS, 0 fail.
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node api/test/dashboard-hostile.mjs && node api/test/dashboard-regression.mjs`
+Expected: the last lines are `ALL PAGES RENDER CLEAN UNDER HOSTILE INPUT` and `ALL REGRESSION CHECKS PASS`.
+
+- [ ] **Step 21: Run the full suite**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/*.test.mjs`
+Expected: all pass, 0 fail — 16 more tests than after Part B (930 → 946).
+
+- [ ] **Step 22: Commit**
+
+```bash
+cd /home/azoz778/bona-wt/team-inbox && git add services/api/lib/dashboard/render-inbox.mjs services/api/lib/dashboard/render.mjs services/api/lib/dashboard/routes.mjs services/api/index.mjs services/api/test/dashboard-render-inbox.test.mjs services/api/test/dashboard-inbox.test.mjs services/api/test/inbox-wiring.test.mjs
+git commit -m "dashboard: the owner's real-estate chats to check — on his Unsure tab, moved in or marked not a client (D17)
+
+The Unsure tab gains the candidates (name or masked number, words, times,
+count, who wrote last) and both tab labels count the one list it shows. Move
+makes an owner_added lead, puts it in and pulls 30 days, and refuses a row
+with no phone number; Not a client keeps only its ids. Owner-only, audited by
+ids. A candidate that became a lead, or whose number is a colleague's or on
+the never list, is never shown; never-list and team adds, Add chat and Move
+on a lead remove it. The daily upkeep prunes the list.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+#### Part D — the privacy page and the README
+
+- [ ] **Step 23: Write the failing test** — append to the end of `scripts/test/privacy-policy.test.mjs` (Task 13):
+
+```js
+
+test('the chats kept only to be checked are named: what is kept, for how long, and that the conversation is not (D17)', () => {
+  const s = section('whatsapp-conversations');
+  assert.ok(s, 'the section is missing');
+  const en = body(s, 'en');
+  assert.match(en, /looks like a property enquiry/);
+  assert.match(en, /the property words it used/);
+  assert.match(en, /until 30 days after the last such message/);
+  assert.doesNotMatch(en, /for up to 30 days/, 'a chat that keeps writing is kept as long as it does');
+  assert.match(en, /The conversation itself is not stored unless/);
+  assert.match(en, /for up to a year/);
+  const ar = body(s, 'ar');
+  assert.match(ar, /استفساراً عقارياً/);
+  assert.match(ar, /الكلمات العقارية/);
+  assert.match(ar, /حتى ثلاثين يوماً من آخر رسالة من هذا النوع/);
+  assert.match(ar, /ولا تُحفظ المحادثة نفسها/);
+  assert.match(ar, /مدةً أقصاها سنة/);
+});
+```
+
+- [ ] **Step 24: Run to see it fail**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox && node --test scripts/test/privacy-policy.test.mjs`
+Expected: FAIL — `ℹ pass 3`, `ℹ fail 1`: the new test, at its first `looks like a property enquiry` match.
+
+- [ ] **Step 25: The privacy page** — in `src/data/privacy.json`, in the `whatsapp-conversations` section as Task 13 left it, a second paragraph in each language, right after the first (the shape test needs the same number of paragraphs in both).
+
+Find the end of the first English paragraph:
+
+```json
+the messages we stored from it are deleted straight away.",
+```
+
+Replace with:
+
+```json
+the messages we stored from it are deleted straight away.",
+          "There is one narrow exception. When a message on our number looks like a property enquiry but does not make clear that it is for Bona, we keep only the number, the name WhatsApp shows for it and the property words it used (such as “villa” or “for rent”), until 30 days after the last such message, so that the owner of Bona can check whether it is a Bona enquiry. The conversation itself is not stored unless he adds it to the Bona inbox. If he marks it as not a Bona client, only the number, or the id WhatsApp gives the chat, is kept, for up to a year, so that it is not shown to him again.",
+```
+
+Find the end of the first Arabic paragraph:
+
+```json
+حُذفت الرسائل التي حفظناها منها فوراً.",
+```
+
+Replace with:
+
+```json
+حُذفت الرسائل التي حفظناها منها فوراً.",
+          "وهناك استثناء محدود: إذا بدت رسالة على رقمنا استفساراً عقارياً دون أن يتضح أنها موجّهة إلى بونا، لا نحتفظ منها إلا بالرقم، والاسم الذي يُظهره واتساب له، والكلمات العقارية الواردة فيها (مثل «فيلا» أو «للإيجار»)، وذلك حتى ثلاثين يوماً من آخر رسالة من هذا النوع، ليتحقق مالك بونا مما إذا كانت استفساراً لدى بونا. ولا تُحفظ المحادثة نفسها ما لم يُضفها إلى صندوق محادثات بونا. وإذا حدّد أنها لا تخص عميلاً لبونا، لا نحتفظ إلا بالرقم أو بمعرّف واتساب للمحادثة، مدةً أقصاها سنة، حتى لا تُعرض عليه مجدداً.",
+```
+
+(The first paragraph's "Private chats on the same number are not stored" stays true of the conversations themselves; the new paragraph, which follows it at once, names the one thing that is kept.)
+
+- [ ] **Step 26: README** — three edits in `services/README.md`, in what Task 13 wrote under `### Dashboard`.
+
+(a) Find the line that starts `- *Never*: team numbers and the never-a-client list are not matched, stored or shown.` and insert, directly above it:
+
+```markdown
+- *Real-estate chats to check* (D17): a chat with no lead behind it whose message uses
+  property words (`propertyWordsIn`: villa, apartment, rent, land, فيلا, شقة, للإيجار, أرض,
+  عقار …) or a property-document word (brochure, price list, بروشور …), in either direction,
+  or a document of the owner's that names TK, goes on a second list on the owner's
+  **Unsure** tab (`inbox_candidates`) — so does every property document he sends that did
+  not join (one that names Bona, or a name cut too close to the word). Only a chat with a
+  phone number: never a lid alone or a WhatsApp channel. Kept: the number and jid (and lid),
+  the name WhatsApp shows for the client (never the name on a message the owner sent), the
+  property words, first and last time, how many messages and who wrote last — never the
+  text, never a lead, no note to anyone — until 30 days after its last such message.
+  *Move to Bona inbox* makes it an `owner_added` lead, puts it `in` and pulls its last 30
+  days; *Not a client* keeps only its ids, so it is not listed again. A chat that becomes a
+  lead leaves the list, team and never-list numbers are never on it, and staff never see
+  it. This is how TK clients who write to this number stay out of the inbox: nothing joins
+  without a sure signal.
+```
+
+(b) Find the sentence that ends the *Polling and upkeep.* paragraph:
+
+```markdown
+history comes back empty stays empty and is asked again on the next run.
+```
+
+Replace with:
+
+```markdown
+history comes back empty stays empty and is asked again on the next run. The upkeep also
+prunes the real-estate chats to check: an open one 30 days after its last property message, a
+dismissed one a year after it was dismissed (`candidatesExpired`, `dismissalsExpired` in the
+`inbox.maintenance` line).
+```
+
+(c) In the route table, find the row that starts ``| `POST /v1/admin/inbox/add` |`` and insert, directly below it:
+
+```markdown
+| `POST /v1/admin/inbox/candidates/:candId/move` · `…/dismiss` | owner: a real-estate chat to check → *Move to Bona inbox* (an `owner_added` lead, `in`, pulls 30 days, off the list; a team or never-list number is refused `excluded` and taken off) · *Not a client* (off the list; kept dismissed for a year so it is not listed again) |
+```
+
+- [ ] **Step 27: Run the test, check the JSON and the README**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox && node --test scripts/test/privacy-policy.test.mjs`
+Expected: PASS (4 tests, `ℹ fail 0`).
+
+Run: `cd /home/azoz778/bona-wt/team-inbox && node -e "const p = JSON.parse(require('fs').readFileSync('src/data/privacy.json', 'utf8')); const s = p.sections.find((x) => x.id === 'whatsapp-conversations'); console.log(s.body.en.length, s.body.ar.length)"`
+Expected: `4 4`.
+
+Run: `cd /home/azoz778/bona-wt/team-inbox && grep -c -e '^- \*Real-estate chats to check\* (D17)' -e 'prunes the real-estate chats to check' -e '^| `POST /v1/admin/inbox/candidates/:candId/move`' services/README.md`
+Expected: `3`.
+
+- [ ] **Step 28: Run the suites**
+
+Run: `cd /home/azoz778/bona-wt/team-inbox && node --test $(ls scripts/test/*.test.mjs | grep -v -e approval-package -e social-quality)`
+Expected: all pass, `ℹ fail 0` — one test more than after Task 13 (the two left out need `sharp`, which this worktree does not install; see Task 13).
+
+Run: `cd /home/azoz778/bona-wt/team-inbox/services && node --test api/test/*.test.mjs`
+Expected: all pass, 0 fail — the same count as after Part C.
+
+- [ ] **Step 29: Commit**
+
+```bash
+cd /home/azoz778/bona-wt/team-inbox && git add scripts/test/privacy-policy.test.mjs src/data/privacy.json services/README.md
+git commit -m "Privacy page and README: the real-estate chats kept only for the owner to check (D17)
+
+For a message that looks like a property enquiry but is not clearly for
+Bona, only the number, the WhatsApp name and the property words are kept,
+until 30 days after the last such message; the conversation is not stored
+unless the owner moves it in, and a chat he marks not a client keeps only
+its number for a year.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+#### Controller notes for Task 16 (binding; from the Task 11–14 reviews)
+- Review fixes after this text was drafted moved several anchors: the upkeep block in `services/api/index.mjs` (Task 11 fixes 10c373c/1accb15: each step runs on its own, never rejects), the count assertions in `test/inbox-wiring.test.mjs`, the privacy section in `src/data/privacy.json` and its test, and the README Inbox paragraphs (Task 13 fixes 5c6f166/1b90e96, Task 14 48b965a). Find the equivalent place in the code as it is now and make the same change; keep the upkeep's "each step on its own, never rejects, counts only" style for the new prune step.
+- The privacy page and README currently say (section 10 of privacy.json / the README privacy boundary) that everything else the poller sees is never written to disk. Candidates make that partly untrue: reword it in EN and AR to say that, for a message that looks like a property enquiry but is not clearly for Bona, only the chat's number, the name WhatsApp shows and the property words are kept until 30 days after the last such message (a dismissed chat keeps only its ids for a year) — and update the privacy test to match.
+- Set `updated` in privacy.json to the day this task is committed (2026-09-29 or later).
+- Task 15's owner answer (brochure alone; the other document words only next to a property noun / listing id / link) is binding: the `'property document'` candidate marker uses `PROPERTY_DOC_RE` (the union), so a qualified-word document that did not join still reaches the Unsure list. Add a poller test for `Price List Sep.pdf` sent by the owner to a stranger → candidate with `'property document'`, no lead.
+
+---
+
+### Task 17: Reviews, migration rehearsal, ship Phase 2, STOP for the owner
 
 **Files:** none new (fixes from the reviews land in the files they concern, each with a test).
 
@@ -12579,7 +15949,7 @@ const out = {
   to: s.db.prepare('PRAGMA user_version').get().user_version,
   states: Object.fromEntries(s.db.prepare('SELECT lead_id, inbox_state FROM leads ORDER BY lead_id').all().map((r) => [r.lead_id, r.inbox_state])),
   since: s.db.prepare("SELECT COUNT(*) n FROM leads WHERE inbox_state = 'in' AND inbox_since = created").get().n,
-  tables: s.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('wa_messages','wa_outbox','inbox_reads','wa_gaps') ORDER BY name").all().map((r) => r.name),
+  tables: s.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('wa_messages','wa_outbox','inbox_reads','wa_gaps','inbox_candidates') ORDER BY name").all().map((r) => r.name),
   sessionsKept: s.db.prepare('SELECT COUNT(*) n FROM auth_sessions').get().n,
 };
 s.close();
@@ -12588,7 +15958,7 @@ console.log(JSON.stringify(out));
 EOF
 node $SP/rehearse-v4.mjs $SP/live-schema.json $SP/rehearse.db 2>&1 | grep -v ExperimentalWarning
 ```
-Expected: `{"from":3,"to":4,"states":{"L-ad":"in","L-badjson":"unsure","L-kw":"unsure","L-kwid":"in","L-legacy":"unsure","L-ref":"in","L-tw":"unsure"},"since":3,"tables":["inbox_reads","wa_gaps","wa_messages","wa_outbox"],"sessionsKept":0}`. Any SQL error here stops the ship: fix the migration (a NEW commit on this branch), re-run Steps 1–2. (Task 14's replies switch needs no migration: with no `settings` row, `inbox_replies` reads as its default `'0'`.)
+Expected: `{"from":3,"to":4,"states":{"L-ad":"in","L-badjson":"unsure","L-kw":"unsure","L-kwid":"in","L-legacy":"unsure","L-ref":"in","L-tw":"unsure"},"since":3,"tables":["inbox_candidates","inbox_reads","wa_gaps","wa_messages","wa_outbox"],"sessionsKept":0}`. Any SQL error here stops the ship: fix the migration (a NEW commit on this branch), re-run Steps 1–2. (Task 14's replies switch needs no migration: with no `settings` row, `inbox_replies` reads as its default `'0'`.)
 
 - [ ] **Step 3: Claude review** — use superpowers:requesting-code-review on `git diff origin/main...HEAD -- services/ src/data/privacy.json`. Focus: (1) a guessed/unsure/out/never-list/team chat can never be read or sent to; (2) staff cannot reach Unsure, move, out or add; (3) every send passes the one sender's gate (switch, 20/min, 6/min per recipient, 30/min per user, durable 500/day) and an uncertain send is never retried; (4) the history floor (A1) holds on every per-chat read; (5) no message text, phone number, name or code in logs, audit meta, URLs or redirects; (6) migration v4 on the live schema; (7) `first_reply_ts` behaviour the Hermes watchdog depends on; (8) the poller's no-silent-loss read and cursor; (9) no reply can reach a client while `settings.inbox_replies` is not `'1'` (Task 14: it ships `'0'`; `sender.reply` refuses before writing, the thread draws no box, only an owner can switch it, and login codes do not depend on it).
 
@@ -12603,7 +15973,7 @@ cd ~/bona-wt/team-inbox && codex exec --sandbox read-only "Review the diff origi
 ```bash
 cd ~/bona-wt/team-inbox && git fetch origin && ROLLBACK=$(git rev-parse origin/main) && echo "rollback=$ROLLBACK"
 git push -u origin feat/team-inbox-p2
-gh pr create --base main --head feat/team-inbox-p2 --title "Dashboard: Bona WhatsApp inbox (Phase 2)" --body "Phase 2 of docs/superpowers/specs/2026-09-27-dashboard-team-inbox-design.md (§4): certain-match chats join a team inbox (unsure list, owner-started chats, never list), transcripts stored for inbox chats only (5-year retention), replies from the owner's number through the one sender (outbox, send_id idempotency, uncertain never retried, stale-view guard, lid-only refused, durable day cap, 30/min per person), no-silent-loss poller reads (behaviour change: a 2xx from Evolution with no readable records now fails the tick as \`wa.poll.failed\` with the cursor held instead of reading as an empty window and advancing), privacy page. Dashboard replies ship switched off (Team page switch the owner turns on for the first send, D14). Schema v4 (additive). Claude + Codex reviewed. Rollback point: ${ROLLBACK}.
+gh pr create --base main --head feat/team-inbox-p2 --title "Dashboard: Bona WhatsApp inbox (Phase 2)" --body "Phase 2 of docs/superpowers/specs/2026-09-27-dashboard-team-inbox-design.md (§4): certain-match chats join a team inbox (unsure list, owner-started chats, never list), transcripts stored for inbox chats only (5-year retention), replies from the owner's number through the one sender (outbox, send_id idempotency, uncertain never retried, stale-view guard, lid-only refused, durable day cap, 30/min per person), no-silent-loss poller reads, privacy page. Dashboard replies ship switched off (Team page switch the owner turns on for the first send, D14). Schema v4 (additive). Claude + Codex reviewed. Rollback point: ${ROLLBACK}.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)"
 gh pr merge --squash --delete-branch=false
