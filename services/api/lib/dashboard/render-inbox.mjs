@@ -270,7 +270,8 @@ function outboxStatus(row) {
  *
  * `hidden` is how many stored messages older than the first one drawn the page leaves out
  * (the route draws every unread message, up to 1,000); the thread says so above the first
- * one rather than looking like the start of the chat.
+ * one rather than looking like the start of the chat, and leaves out the gaps and
+ * unconfirmed replies older than that first one too.
  */
 export function threadPage({
   me, lead, messages, gaps = [], outbox = [], users = [], sendId, seenTs, sendingEnabled, canReply, repliesEnabled = false,
@@ -282,6 +283,11 @@ export function threadPage({
   const msgs = Array.isArray(messages) ? messages : [];
   const shown = new Set(msgs.map((m) => m.key_id));
   const who = { owner, names };
+  const left = Number.isInteger(hidden) && hidden > 0 ? hidden : 0;
+  // With older messages left out, a gap or an unconfirmed reply older than the first one
+  // drawn sits among them: drawn at the top of the thread, it would read as coming after them.
+  const from = left && msgs.length ? msgs.reduce((min, m) => Math.min(min, Number(m.ts) || 0), Infinity) : -Infinity;
+  const drawnSpan = (ts) => (Number(ts) || 0) >= from;
 
   const items = [
     ...msgs.map((m) => ({
@@ -294,13 +300,13 @@ export function threadPage({
         ts: m.ts,
       }),
     })),
-    ...(Array.isArray(gaps) ? gaps : []).map((g) => ({
+    ...(Array.isArray(gaps) ? gaps : []).filter((g) => drawnSpan(g.ts)).map((g) => ({
       ts: Number(g.ts) || 0,
       html: '<div class="wgap">A message could not be loaded — check WhatsApp.</div>',
     })),
     // A row whose WhatsApp id is already a stored message is that message; showing both
     // would print one reply twice.
-    ...(Array.isArray(outbox) ? outbox : []).filter((o) => !(o.key_id && shown.has(o.key_id))).map((o) => ({
+    ...(Array.isArray(outbox) ? outbox : []).filter((o) => !(o.key_id && shown.has(o.key_id)) && drawnSpan(o.created)).map((o) => ({
       ts: Number(o.created) || 0,
       html: bubble({
         side: 'out',
@@ -322,7 +328,6 @@ export function threadPage({
     <a class="r" href="${esc(leadHref(lead.lead_id))}">Lead record →</a></div>
 </div>`;
 
-  const left = Number.isInteger(hidden) && hidden > 0 ? hidden : 0;
   const earlier = left
     ? `<p class="muted">${esc(left.toLocaleString('en-US'))} earlier ${left === 1 ? 'message is' : 'messages are'} not shown here.</p>`
     : '';

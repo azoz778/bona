@@ -931,7 +931,8 @@ messages newer than the newest one that person saw when they last opened the thr
 member starts from the day the account was made); the total is the Inbox count in the nav.
 A thread draws its newest 200 messages, or every message from the oldest unread one on
 (replies between unread messages included) and the 20 before them, up to 1,000; it says how
-many older ones it does not show, and marks read only up to the newest message it drew.
+many older ones it does not show (their gaps and unconfirmed replies are left out with them),
+and marks read only up to the newest message it drew.
 Past the cap (more than 980 unread messages in one chat for one person) the unread ones it
 cannot draw count as read too: the read mark is one timestamp, and a page drawn from the
 oldest unread one forward would leave out the newest messages and make every reply from it
