@@ -594,6 +594,59 @@ test('a member deactivated while the chat refreshes before their reply is signed
   });
 });
 
+test('no reply outcome answers 502 or 504 (Cloudflare replaces those pages, and the typed words with them): a refusal upstream draws the thread with 503', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    const failed = (error) => ({ ok: false, error, status: 'failed', sendId: 'send-any-0000000000001' });
+    const uncertain = (error) => ({ ok: false, error, status: 'uncertain', sendId: 'send-any-0000000000001', uncertain: true });
+    const again = (status, error) => ({ ok: status === 'accepted', duplicate: true, status, sendId: 'send-any-0000000000001', error, ...(status === 'pending' || status === 'uncertain' ? { uncertain: true } : {}) });
+    // Every answer lib/wa-send.mjs `reply` can give: its own refusals, the gate's, what came
+    // back from Evolution, and a resubmit of every outbox status.
+    const outcomes = [
+      { ok: true, status: 'accepted', sendId: 'send-any-0000000000001', keyId: 'KEY-X' },
+      ...['bad_send_id', 'replies_off', 'bad_text', 'not_found', 'not_in_inbox', 'lid_only', 'excluded', 'stale', 'inactive_user']
+        .map((error) => ({ ok: false, error })),
+      ...['bad_recipient', 'bad_kind', 'bad_text', 'sending_disabled', 'disabled', 'evolution-not-configured', 'rate_limited', 'duplicate', 'network', 'http_400', 'http_404', 'http_429', 'mystery']
+        .map(failed),
+      ...['timeout', 'network', 'no_ack', 'http_500', 'http_502', 'http_503', 'http_504'].map(uncertain),
+      again('accepted', null), again('pending', 'pending'), again('uncertain', 'http_502'), again('failed', 'http_400'), again('failed', 'sending_disabled'),
+    ];
+    for (const out of outcomes) {
+      h.app.sender.reply = async () => out;
+      const label = JSON.stringify(out);
+      const form = await replyTo(h, 'LEAD-A', { text: 'Words worth keeping', send_id: 'send-any-0000000000001', seen_ts: String(NOW + 60_000) }, staff);
+      assert.ok(![502, 504].includes(form.status), `form ${form.status}: ${label}`);
+      if (form.headers.get('content-type')?.startsWith('application/json')) assert.fail(`a form never gets raw JSON: ${label}`);
+      await form.arrayBuffer();
+      const json = await h.postJson('/v1/admin/inbox/LEAD-A/reply', { text: 'x', send_id: 'send-any-0000000000001', seen_ts: NOW + 60_000 }, { cookie: staff });
+      assert.ok(![502, 504].includes(json.status), `json ${json.status}: ${label}`);
+      await json.arrayBuffer();
+    }
+  });
+
+  // The real thing: Evolution turns a reply away (a 4xx), then the same form is sent again.
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    h.tick(120_000);
+    h.evo.reply = () => ({ status: 400, body: {} });
+    const form = { text: 'Turned away upstream', send_id: 'send-4xx-00000000000001', seen_ts: String(NOW + 60_000) };
+    const res = await replyTo(h, 'LEAD-A', form, staff);
+    assert.equal(res.status, 503);
+    assertLocked(res);
+    const html = await res.text();
+    assert.ok(html.includes('Turned away upstream'), 'the thread again, the words still in the box');
+    assert.ok(html.includes('WhatsApp would not take the message.'));
+    const resubmit = await replyTo(h, 'LEAD-A', form, staff);
+    assert.equal(resubmit.status, 503, 'a resubmit of a failed send too');
+    const json = await h.postJson('/v1/admin/inbox/LEAD-A/reply', form, { cookie: staff });
+    assert.equal(json.status, 503);
+    assert.deepEqual(await json.json(), { error: 'send_failed' });
+    assert.equal(h.evo.calls.length, 1);
+  });
+});
+
 test('a refused reply is drawn again with the words kept and a fresh send_id, and nothing is sent', async () => {
   await withInbox(async (h) => {
     seedScene(h);

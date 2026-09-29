@@ -989,8 +989,11 @@ text kept in the box, a fresh `send_id` and the HTTP status listed below. A JSON
 - 404 `{error: 'not_in_inbox'}`: a chat that may not be answered.
 - 401 `{error: 'unauthorised'}`: the writer is no longer signed in; nothing was sent.
 - `{error}` with 409 (`stale`, `lid_only`), 400 (`bad_text`, `bad_send_id`), 429
-  (`reply_rate_limited`), 503 (`sending_disabled`, `replies_off`) or 502 (`send_failed`: anything else,
-  and a resubmit of a send that failed).
+  (`reply_rate_limited`) or 503 (`sending_disabled`, `replies_off`, and `send_failed`: anything
+  else, and a resubmit of a send that failed).
+
+No reply answer is ever 502 or 504: Cloudflare replaces those pages with its own, and the
+thread with the typed words would never reach the browser.
 
 *Polling and upkeep.* The poller runs every 20 s (`BONA_WA_POLL_MS`, §4). The VPS sets it in
 `~/.secrets/bona-services.env`, and a value there wins over the default — a stale
