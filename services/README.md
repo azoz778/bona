@@ -995,6 +995,12 @@ text kept in the box, a fresh `send_id` and the HTTP status listed below. A JSON
 No reply answer is ever 502 or 504: Cloudflare replaces those pages with its own, and the
 thread with the typed words would never reach the browser.
 
+A reply's body may be up to 64 KiB — 4,096 characters, each at most nine bytes once a form
+percent-encodes it, plus the other fields; every other dashboard write keeps the 16 KB cap
+(`BONA_MAX_BODY_BYTES`). A form reply bigger than that is not read: the thread comes back
+(413) with `bad_text` and an empty box, never raw JSON; a JSON call gets 413
+`{error: 'payload_too_large'}`.
+
 *Polling and upkeep.* The poller runs every 20 s (`BONA_WA_POLL_MS`, §4). The VPS sets it in
 `~/.secrets/bona-services.env`, and a value there wins over the default — a stale
 `BONA_WA_POLL_MS=45000` keeps the old pace. Opening a thread also reads that chat at once,
