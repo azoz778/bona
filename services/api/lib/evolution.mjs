@@ -39,6 +39,8 @@
  *     real phone jid is then on `key.remoteJidAlt`.
  */
 
+import { BONA_WORD_RE, TK_RE } from './inbox/eligibility.mjs';
+
 /**
  * The most pages one read asks for; `readWindow` cuts a window that holds more than
  * `MAX_PAGES × PAGE_SIZE`.
@@ -211,15 +213,22 @@ function flatFileName(name) {
 
 /**
  * A record's document name made safe to show (`name`, null when there is no document or
- * nothing usable is left) and whether it had to be cut at `MAX_FILE_NAME` code points to get
- * there (`truncated`; what cleaning removes is not a cut). The one place both are worked out,
- * so `mediaOf`'s placeholder and `normaliseRecord`'s `fileName`/`fileNameTruncated` agree.
- * @returns {{ name: string|null, truncated: boolean }}
+ * nothing usable is left), whether it had to be cut at `MAX_FILE_NAME` code points to get
+ * there (`truncated`; what cleaning removes is not a cut), and whether the whole cleaned
+ * name, before any cut, names TK or Bona (`tk`, `bona`: lib/inbox/eligibility.mjs `TK_RE`,
+ * `BONA_WORD_RE`). The one place all four are worked out, so `mediaOf`'s placeholder and
+ * `normaliseRecord`'s `fileName`/`fileNameTruncated`/`fileNameTk`/`fileNameBona` agree.
+ * @returns {{ name: string|null, truncated: boolean, tk: boolean, bona: boolean }}
  */
 function fileNameOf(record) {
   const flat = flatFileName(unwrapMessage(record?.message)?.documentMessage?.fileName);
   const name = capCodePoints(flat, MAX_FILE_NAME).trim() || null;
-  return { name, truncated: name !== null && name !== flat };
+  return {
+    name,
+    truncated: name !== null && name !== flat,
+    tk: name !== null && TK_RE.test(flat),
+    bona: name !== null && BONA_WORD_RE.test(flat),
+  };
 }
 
 /**
@@ -305,20 +314,22 @@ export function isNoise(record) {
  * `media` is `mediaOf`'s placeholder, `fileName` a document's cleaned name (null for
  * anything else), `fileNameTruncated` true when that name was cut at 120 code points (its
  * last word may then be the start of a longer one, so lib/inbox/eligibility.mjs does not
- * read the end of it), both from `fileNameOf`, `noise` is `isNoise`. A document's name is chosen by its sender
+ * read the end of it), `fileNameTk` / `fileNameBona` true when the whole name, cut or not,
+ * names TK / Bona — the two things about the part a cut hides that the inbox rules need
+ * (D16) — all four from `fileNameOf`, `noise` is `isNoise`. A document's name is chosen by its sender
  * and is often a person's name or a phone number, so `media` and `fileName` are never
  * logged — the same care as `text`, `pushName` and the jids.
  * @typedef {{ id: string|null, jid: string|null, jidAlt: string|null, fromMe: boolean,
  *             ts: number|null, text: string, pushName: string|null,
  *             contextInfo: object|null, messageType: string|null,
  *             media: string|null, fileName: string|null, fileNameTruncated: boolean,
- *             noise: boolean }} NormalisedRecord
+ *             fileNameTk: boolean, fileNameBona: boolean, noise: boolean }} NormalisedRecord
  */
 export function normaliseRecord(record) {
   const key = record?.key ?? {};
   const jid = typeof key.remoteJid === 'string' ? key.remoteJid : null;
   const alt = key.remoteJidAlt ?? record?.remoteJidAlt ?? key.senderPn ?? null;
-  const { name: fileName, truncated: fileNameTruncated } = fileNameOf(record);
+  const { name: fileName, truncated: fileNameTruncated, tk: fileNameTk, bona: fileNameBona } = fileNameOf(record);
   return {
     id: typeof key.id === 'string' && key.id ? key.id : null,
     jid,
@@ -332,6 +343,8 @@ export function normaliseRecord(record) {
     media: mediaOf(record),
     fileName,
     fileNameTruncated,
+    fileNameTk,
+    fileNameBona,
     noise: isNoise(record),
   };
 }

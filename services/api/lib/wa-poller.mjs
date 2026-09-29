@@ -52,11 +52,12 @@
  * inbound message (a Ref line as the site writes it or a code a site session holds, ad
  * context, a listing id) puts the chat `in`; a guess (the word "bona", a bare Ref-shaped
  * code no session holds, the click window) puts it on the owner's Unsure list; the owner's
- * own message puts a chat `in` only when it carries a Bona link, a listing number or a Bona
- * brochure (D12 — TK and private chats share this number, so nothing else he types
- * counts). Only `in` chats are kept as transcripts (lib/inbox/ingest.mjs), both directions,
- * from the joining message plus the 24 h before it. An `out` chat never comes back on its
- * own. Every other conversation is still discarded exactly as above.
+ * own message puts a chat `in` only when it carries a Bona link or a listing number, or is a
+ * property document that names neither TK nor Bona (D12, D16 — TK and private chats share
+ * this number, so nothing else he sends counts; lib/inbox/eligibility.mjs has the rules).
+ * Only `in` chats are kept as transcripts (lib/inbox/ingest.mjs), both directions, from the
+ * joining message plus the 24 h before it. An `out` chat never comes back on its own.
+ * Every other conversation is still discarded exactly as above.
  */
 import { parseRef } from './attribution.mjs';
 import { MAX_PAGES, PAGE_SIZE, bareJid, oldestFirst, readWindow } from './evolution.mjs';
@@ -600,11 +601,12 @@ export function createPoller({
    * `first_reply_ts`). In an `in` chat it is stored: typed on his phone or sent by Lisa,
    * which nothing can tell apart, unless lib/inbox/ingest.mjs finds our own dashboard send
    * in the outbox. An `out` chat never comes back on its own. Any other chat joins only on
-   * a Bona link, a listing number or a Bona brochure (D12), judged on the normalised record
-   * as it is, so a document name cut at 120 code points is read as cut (A8). A stranger he
-   * writes to that way becomes an `owner_outbound` lead — no ad fan-out and no new-lead
-   * note, because he started it (lib/leads.mjs `OWNER_METHODS`) — with no name: a `fromMe`
-   * record's pushName is his own.
+   * a Bona link, a listing number or a property document that names neither TK nor Bona
+   * (D12, D16), judged on the normalised record as it is, so a document name cut at 120
+   * code points is read as cut, with what the whole name said (A8, `fileNameTk`,
+   * `fileNameBona`). A stranger he writes to that way becomes an `owner_outbound` lead — no
+   * ad fan-out and no new-lead note, because he started it (lib/leads.mjs `OWNER_METHODS`) —
+   * with no name: a `fromMe` record's pushName is his own.
    *
    * Our own new-lead note passes that rule too (it carries a Bona link, the listing id and
    * a Ref line), and so does a Bona link he saves in his chat with himself. The tick skips

@@ -132,6 +132,8 @@ test('a text message flattens to the shape the poller reasons about', () => {
     media: null,
     fileName: null,
     fileNameTruncated: false,
+    fileNameTk: false,
+    fileNameBona: false,
     noise: false,
   });
 });
@@ -1116,6 +1118,51 @@ test('the placeholder and the record name the same file, and say it was cut only
   }
 });
 
+test('fileNameTk and fileNameBona say whether the whole name names TK or Bona, even where the cut hides it (D16)', () => {
+  const rec = (fileName) => normaliseRecord({ key: { id: 'D4' }, message: { documentMessage: { fileName } } });
+  // TK after the 120th code point: the name the record carries no longer shows it.
+  const hidden = rec(`Villa Brochure ${'x'.repeat(120)} TK.pdf`);
+  assert.equal(hidden.fileNameTruncated, true);
+  assert.ok(!hidden.fileName.includes('TK'), 'the cut hides it');
+  assert.equal(hidden.fileNameTk, true, 'but the record still says so');
+  assert.equal(hidden.fileNameBona, false);
+  const bona = rec(`Villa Brochure ${'x'.repeat(120)} Bona.pdf`);
+  assert.ok(!bona.fileName.includes('Bona'), 'the cut hides our name too');
+  assert.deepEqual([bona.fileNameBona, bona.fileNameTk], [true, false], 'and the record says so');
+  for (const [fileName, tk] of [
+    ['TK Brochure Villa.pdf', true],
+    ['T.K. Estates brochure.pdf', true],
+    ['tk-estates price list.pdf', true],
+    ['TKEstates_floorplan.pdf', true],
+    ['بروشور تي كي.pdf', true],
+    ['بروشور تى كى.pdf', true],
+    ['بروشور تي كى.pdf', true],
+    // An invisible character cannot hide it: the name is cleaned before it is read.
+    ['T\u200BK Brochure.pdf', true],
+    [`Villa Brochure ${'x'.repeat(120)}.pdf`, false],
+    ['TKO brochure.pdf', false],
+    ['Stock2TK9.pdf', false],
+    ['بلاستيكي.pdf', false],
+    ['بلاستيكى.pdf', false],
+    ['Knightsbridge_Phase 2_Brochure_EN.pdf', false],
+  ]) {
+    assert.equal(rec(fileName).fileNameTk, tk, JSON.stringify(fileName));
+  }
+  for (const [fileName, named] of [
+    ['Bona Traffic HD brochure.pdf', true],
+    ['BONA-W003 brochure.pdf', true],
+    ['بونا - فيلا الشاطئ.pdf', true],
+    ['Bona Fide Purchaser Declaration.pdf', false],
+    ['Bonanza brochure.pdf', false],
+    ['Knightsbridge_Phase 2_Brochure_EN.pdf', false],
+  ]) {
+    assert.equal(rec(fileName).fileNameBona, named, JSON.stringify(fileName));
+  }
+  for (const r of [rec(''), normaliseRecord(textRecord())]) {
+    assert.deepEqual([r.fileNameTk, r.fileNameBona], [false, false], 'no usable name, or no document');
+  }
+});
+
 test('reactions, deletes and edits, poll votes and key-distribution records are noise; a message is not', () => {
   const n = (message, messageType) => isNoise({ message, messageType });
   assert.equal(n({ reactionMessage: { text: '👍', key: { id: 'X' } } }), true);
@@ -1191,6 +1238,8 @@ test('normaliseRecord carries the placeholder, the cleaned file name and the noi
   assert.equal(voice.text, '');
   assert.equal(voice.fileName, null);
   assert.equal(voice.fileNameTruncated, false);
+  assert.equal(voice.fileNameTk, false);
+  assert.equal(voice.fileNameBona, false);
   assert.equal(voice.noise, false);
 
   const brochure = normaliseRecord(textRecord({
@@ -1200,6 +1249,8 @@ test('normaliseRecord carries the placeholder, the cleaned file name and the noi
   assert.equal(brochure.media, '[document: BONA-W014.pdf]');
   assert.equal(brochure.fileName, 'BONA-W014.pdf');
   assert.equal(brochure.fileNameTruncated, false);
+  assert.equal(brochure.fileNameTk, false);
+  assert.equal(brochure.fileNameBona, true, 'a listing id names Bona too (it joins by the id)');
   assert.equal(brochure.text, 'as promised');
   assert.equal(brochure.noise, false);
 

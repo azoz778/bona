@@ -1445,9 +1445,10 @@ test('(t) nothing else the owner types to a stranger counts — not chat, not ev
   h.cleanup();
 });
 
-test('(t) a Bona brochure the owner sends starts a chat; a file that only looks like one does not', async () => {
+test('(t) a brochure the owner sends starts a chat; a file that only looks like one does not, nor one that names Bona (D16)', async () => {
   const h = harness({ inbox: true, windows: [[
-    msg({ id: 'DOC', fromMe: true, jid: STRANGER, pushName: null, messageType: 'documentMessage', media: '[document: Bona Brochure.pdf]', fileName: 'Bona Brochure.pdf' }),
+    msg({ id: 'DOC', fromMe: true, jid: STRANGER, pushName: null, messageType: 'documentMessage', media: '[document: Palm Villa Brochure.pdf]', fileName: 'Palm Villa Brochure.pdf' }),
+    msg({ id: 'BONADOC', fromMe: true, jid: '966544444444@s.whatsapp.net', pushName: null, ts: NOW - 40_000, messageType: 'documentMessage', media: '[document: Bona Brochure.pdf]', fileName: 'Bona Brochure.pdf' }),
     msg({ id: 'NOTDOC', fromMe: true, jid: STRANGER2, pushName: null, ts: NOW - 30_000, messageType: 'documentMessage', media: '[document: Bonanza menu.pdf]', fileName: 'Bonanza menu.pdf' }),
   ]] });
   await h.poller.tick();
@@ -1457,7 +1458,7 @@ test('(t) a Bona brochure the owner sends starts a chat; a file that only looks 
   assert.equal(lead.match_method, 'owner_outbound');
   assert.equal(lead.inbox_state, 'in');
   assert.deepEqual(h.inbox.messagesFor(lead.lead_id).map((m) => [m.key_id, m.direction, m.sender_kind, m.text, m.media_type]), [
-    ['DOC', 'out', 'owner_number', null, '[document: Bona Brochure.pdf]'],
+    ['DOC', 'out', 'owner_number', null, '[document: Palm Villa Brochure.pdf]'],
   ]);
   h.cleanup();
 });
@@ -1599,16 +1600,20 @@ test("(t) our own new-lead note would pass as a Bona chat, but the owner's chat 
   bare.cleanup();
 });
 
-test('(t) a document name cut at 120 characters starts a chat only where the whole name would (A8)', async () => {
-  // What is left of "… Bonanza menu.pdf" and of a real brochure's long name after the cut.
+test('(t) a document name cut at 120 characters starts a chat only where the whole name would (A8, D16)', async () => {
+  // What is left of "… Bonanza menu.pdf" and of a real brochure's long name after the cut;
+  // the record says whether the whole name named TK or Bona (lib/evolution.mjs `fileNameTk`,
+  // `fileNameBona`). A brochure that names Bona would stay out now, so this one does not.
   const cutBonanza = `${'x'.repeat(115)} Bona`;
-  const cutBrochure = `Bona Villa brochure ${'x'.repeat(100)}`;
+  const cutBrochure = `Palm Villa brochure ${'x'.repeat(100)}`;
+  const cut = { messageType: 'documentMessage', fileNameTruncated: true, fileNameTk: false, fileNameBona: false };
   const h = harness({ inbox: true, windows: [[
-    msg({ id: 'CUT1', fromMe: true, jid: STRANGER, pushName: null, ts: NOW - 60_000, messageType: 'documentMessage', media: `[document: ${cutBonanza}]`, fileName: cutBonanza, fileNameTruncated: true }),
-    msg({ id: 'CUT2', fromMe: true, jid: STRANGER2, pushName: null, ts: NOW - 30_000, messageType: 'documentMessage', media: `[document: ${cutBrochure}]`, fileName: cutBrochure, fileNameTruncated: true }),
+    msg({ ...cut, id: 'CUT1', fromMe: true, jid: STRANGER, pushName: null, ts: NOW - 60_000, media: `[document: ${cutBonanza}]`, fileName: cutBonanza }),
+    msg({ ...cut, id: 'CUT2', fromMe: true, jid: STRANGER2, pushName: null, ts: NOW - 30_000, media: `[document: ${cutBrochure}]`, fileName: cutBrochure }),
+    msg({ ...cut, id: 'CUT3', fromMe: true, jid: '966544444444@s.whatsapp.net', pushName: null, ts: NOW - 20_000, media: `[document: ${cutBrochure}]`, fileName: cutBrochure, fileNameTk: true }),
   ]] });
   const tally = await h.poller.tick();
-  assert.equal(h.db.countLeads(), 1, 'only the brochure');
+  assert.equal(h.db.countLeads(), 1, 'only the brochure whose whole name did not name TK');
   const [lead] = h.leads();
   assert.equal(lead.phone_e164, '966533333333');
   assert.equal(lead.inbox_state, 'in');
@@ -1946,5 +1951,27 @@ test('(t) an Unsure chat that later writes from a click-to-WhatsApp ad joins, an
   assert.equal(tally.joined, 1);
   assertHistoryWindow(h, NOW - 30_000);
   assert.deepEqual(rows(h, lead.lead_id), [['U1', 'in', 'client'], ['U2', 'in', 'client']]);
+  h.cleanup();
+});
+
+test('(t) a price list for a property the owner sends starts a chat; a bare price list, a floor-finish brochure named Bona and a TK brochure do not (D16)', async () => {
+  const doc = (id, jid, fileName, ts, extra = {}) => msg({
+    id, fromMe: true, jid, pushName: null, ts, messageType: 'documentMessage', media: `[document: ${fileName}]`, fileName, ...extra,
+  });
+  const h = harness({ inbox: true, windows: [[
+    doc('D-PRICE', STRANGER, 'Palm Villa Price List Sep.pdf', NOW - 60_000),
+    // A price list alone may be TK fit-out work (owner answer, 2026-09-28): Task 16 lists it for the owner.
+    doc('D-BARE', '966555555555@s.whatsapp.net', 'Price List Sep.pdf', NOW - 55_000),
+    doc('D-BONA', STRANGER2, 'Bona Traffic HD brochure.pdf', NOW - 50_000),
+    doc('D-TK', '966544444444@s.whatsapp.net', 'TK Brochure Villa.pdf', NOW - 40_000, { fileNameTk: true }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 1, 'only the price list for a villa');
+  const [lead] = h.leads();
+  assert.equal(lead.phone_e164, '966522222222');
+  assert.equal(lead.match_method, 'owner_outbound');
+  assert.equal(lead.inbox_state, 'in');
+  assert.deepEqual(rows(h, lead.lead_id), [['D-PRICE', 'out', 'owner_number']]);
+  assert.equal(tally.joined, 1);
   h.cleanup();
 });

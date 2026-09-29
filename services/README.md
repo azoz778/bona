@@ -795,18 +795,30 @@ with a `wa_jid` or a `wa_lid`. Whether it belongs is **stored** in `leads.inbox_
   by itself, together with the 24 h of that chat before it (the "Hi" before the Ref line).
   Web-form and concierge leads are certain too; they become a chat once that person writes
   on WhatsApp.
+  Ad context stays certain: TK runs no click-to-WhatsApp ads to this number (owner,
+  2026-09-28, D15), so an ad-origin chat here is a Bona client.
 - *Unsure*: only the word Bona/بونا, a bare Ref-shaped code no session holds, or only the
   ±15-min click window. The lead is kept for the statistics as before and goes to the
   owner-only **Unsure** tab (`?tab=unsure`; staff get 403), where *Move to Bona inbox* or
   *Not a client* settles it.
-- *Owner-started*: the owner's own message in a 1:1 chat that carries a Bona site link
-  (`bona-real-estate.com`, legacy `bona.azoz.uk`), a listing id, or a document whose name or
-  caption says Bona or a listing id, puts that chat `in` (a new lead gets `match_method =
-  'owner_outbound'`) with the 24 h before it. Nothing else he types counts — TK and private
-  chats share the number. These leads fan out to no ad platform (no click is behind them),
-  send him no new-lead note, and are born answered (`first_reply_ts` set, `first_inbound_ts`
-  empty), so neither the waiting queue nor the Hermes `bona-unanswered-leads` watchdog flags
-  them.
+- *Owner-started*: the owner's own message in a 1:1 chat puts that chat `in` (a new lead gets
+  `match_method = 'owner_outbound'`) with the 24 h before it when it carries a Bona site link
+  (`bona-real-estate.com`, legacy `bona.azoz.uk`) or a listing id, or when it is a property
+  document (D16): a brochure from any developer, on its own; a floor plan, price list,
+  payment plan, master plan, fact sheet, booklet (كتيب) or plan (مخطط) only with a property
+  word (villa, apartment, unit, project, فيلا, شقة, مشروع …) in the same file name or caption,
+  because TK's fit-out work sends those papers too (owner, 2026-09-28); each in English or
+  Arabic, named in its file name or caption; or a document whose file name carries a listing
+  id or a site link. A document whose file name or caption names TK (`TK`, `T.K.`,
+  `tk-estates`, `تي كي` / `تى كى`) never joins, whatever else it says. A document that names
+  Bona joins only by a listing id or a site link: Bona AB also makes wood-floor finishes, with
+  brochures and price lists of its own, so "Bona Traffic HD brochure.pdf" goes on the owner's
+  list of real-estate chats to check instead. A document name cut at 120 characters joins
+  only where the whole name would (`fileNameTk` and `fileNameBona` carry whether the whole
+  name named TK or Bona). Nothing else he types counts — TK and private chats share the
+  number. These leads fan out to no ad platform (no click is behind them), send him no
+  new-lead note, and are born answered (`first_reply_ts` set, `first_inbound_ts` empty), so
+  neither the waiting queue nor the Hermes `bona-unanswered-leads` watchdog flags them.
 - *Owner buttons*: *Move to Bona inbox* (Unsure tab or the lead page) and *Add chat by phone
   number* (`owner_added`) put a chat `in` and pull its last 30 days — he vouched for it.
   *Not a client* puts it `out`: its transcript is purged there and then, and it never comes
