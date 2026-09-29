@@ -6,13 +6,15 @@
  * chat joins only on something that can only be about Bona:
  *
  *   - a client's message carrying a site Ref line (with its listing part, or a code a site
- *     session holds), click-to-WhatsApp ad context or a listing id (`BONA-W003`) is certain.
- *     TK runs no click-to-WhatsApp ads to this number (owner, D15), so ad context stays
- *     certain;
+ *     session holds), a listing id (`BONA-W003`) or real click-to-WhatsApp ad evidence
+ *     (`hasAdEvidence`) is certain. TK runs no click-to-WhatsApp ads to this number (owner,
+ *     D15), so an ad is a Bona client; but D15 is about ads, and WhatsApp also attaches
+ *     context to organic entry points — a wa.me link, its own search, a tapped phone number
+ *     (every ad_meta lead in the live db on 2026-09-29) — which prove nothing about Bona;
  *   - a client's message that only says "bona" / "بونا", or carries a bare Ref-shaped code
  *     no session holds, is a guess. It goes to the owner's Unsure list, never into the
- *     inbox by itself. The other guess, the ±15-min click window, arrives here as the
- *     lead's match method (`time_window`);
+ *     inbox by itself. The other guesses arrive here as the lead's match method: the
+ *     ±15-min click window (`time_window`), and ad context with no ad evidence (`ad_meta`);
  *   - a message the OWNER sends joins a chat when it carries a Bona site link or a listing
  *     id, or when it is a property document (D16), by its file name or caption: a brochure,
  *     from any developer, on its own; a floor plan, price list, payment plan, master plan,
@@ -349,14 +351,37 @@ function namesPropertyDocument(s, cut) {
   return (cut ? QUALIFIED_DOC_CUT_RE : QUALIFIED_DOC_RE).test(s) && (cut ? PROPERTY_NOUN_CUT_RE : PROPERTY_NOUN_RE).test(s);
 }
 
+/** A value `adMetaOf` kept: a string with something in it. */
+const present = (v) => typeof v === 'string' && v.trim() !== '';
+
+/**
+ * Is this click-to-WhatsApp context (lib/wa-poller.mjs `adMetaOf`) real ad evidence (D15)?
+ * Only a click id (`ctwa_clid`), a conversion source, the `ctwa_ad` entry point or an ad
+ * source type (`source_type` containing "ad", any case) says an ad was clicked. The
+ * organic entry points WhatsApp reports the same way — `click_to_chat_link` (a wa.me link),
+ * `global_search_new_chat`, `phone_number_hyperlink` — do not, nor does an app name, a
+ * source id or utm fields on their own. Migration v4 in lib/db.mjs asks the same of the
+ * lead_created touchpoint's `ad_meta`.
+ * @param {unknown} adMeta
+ * @returns {boolean}
+ */
+export function hasAdEvidence(adMeta) {
+  if (!adMeta || typeof adMeta !== 'object') return false;
+  return present(adMeta.ctwa_clid)
+    || present(adMeta.conversion_source)
+    || adMeta.entry_point_conversion_source === 'ctwa_ad'
+    || (present(adMeta.source_type) && /ad/i.test(adMeta.source_type));
+}
+
 /**
  * What one message from a client says about the chat.
  *
  * A Ref line is certain only in the shape the site writes it (`SITE_REF_RE`), or when the
  * poller found a site session holding the code (`refKnown`, from `db.getSessionByRef`).
  * `parseRef` checks only the shape, so a bare `Ref K7Q2X` is also "ref please", "Ref check
- * done" or a TK booking reference: a guess, never a join by itself. `hasAdMeta` and
- * `refKnown` count only when exactly `true`, like the text, never coerced. A site link
+ * done" or a TK booking reference: a guess, never a join by itself. `hasAdMeta` is real ad
+ * evidence (`hasAdEvidence`), not any ad context. `hasAdMeta` and `refKnown` count only
+ * when exactly `true`, like the text, never coerced. A site link
  * with no listing id is only a guess too (spec §4.1 does not name it); the owner decides.
  * @param {{ text?: unknown, hasAdMeta?: boolean, refKnown?: boolean }|null} [o]
  * @returns {'certain'|'unsure'|null}
@@ -427,11 +452,15 @@ export function ownerOutboundJoins(o) {
   return namesPropertyDocument(t, false) || namesPropertyDocument(readable, cut);
 }
 
+/** Match methods that are guesses by themselves: the word, the click window, and ad context with no ad evidence. */
+const GUESS_METHODS = new Set(['keyword', 'time_window', 'ad_meta']);
+
 /**
  * The chat's inbox state after one inbound message. `in` and `out` stay as they are; an
  * undecided or unsure chat becomes `in` on anything certain and `unsure` on a guess (the
- * word, or a lead the poller matched only by keyword or click window); otherwise it is
- * left as it was. A `current` that is not one of the three states reads as undecided
+ * word, or a lead the poller matched only by keyword, click window, or ad context whose
+ * message carried no ad evidence — a certain signal would have come first); otherwise it
+ * is left as it was. A `current` that is not one of the three states reads as undecided
  * (the store's CHECK allows only those and NULL), so the answer is always a state or null.
  * @param {'in'|'unsure'|'out'|null|undefined} current
  * @param {{ signal?: 'certain'|'unsure'|null, method?: string|null }|null} [o]
@@ -442,6 +471,6 @@ export function nextInboxState(current, o) {
   const cur = INBOX_STATES.includes(current) ? current : null;
   if (cur === 'out' || cur === 'in') return cur;
   if (signal === 'certain') return 'in';
-  if (signal === 'unsure' || method === 'keyword' || method === 'time_window') return 'unsure';
+  if (signal === 'unsure' || GUESS_METHODS.has(method)) return 'unsure';
   return cur;
 }

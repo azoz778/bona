@@ -49,9 +49,10 @@
  * **The Bona inbox** (2026-09-27 design §4). Wired only when `ingest` is passed; without it
  * this loop is exactly the matched-only poller described above. With it, a lead also
  * carries an inbox state, judged by lib/inbox/eligibility.mjs: a certain signal on an
- * inbound message (a Ref line as the site writes it or a code a site session holds, ad
- * context, a listing id) puts the chat `in`; a guess (the word "bona", a bare Ref-shaped
- * code no session holds, the click window) puts it on the owner's Unsure list; the owner's
+ * inbound message (a Ref line as the site writes it or a code a site session holds, real ad
+ * evidence, a listing id) puts the chat `in`; a guess (the word "bona", a bare Ref-shaped
+ * code no session holds, the click window, ad context from an organic entry point) puts it
+ * on the owner's Unsure list; the owner's
  * own message puts a chat `in` only when it carries a Bona link or a listing number, or is a
  * property document that names neither TK nor Bona (D12, D16 — TK and private chats share
  * this number, so nothing else he sends counts; lib/inbox/eligibility.mjs has the rules).
@@ -73,8 +74,8 @@ import { parseRef } from './attribution.mjs';
 import { MAX_PAGES, PAGE_SIZE, bareJid, oldestFirst, readWindow } from './evolution.mjs';
 import { JOIN_HISTORY_MS } from './inbox/backfill.mjs';
 import {
-  BONA_WORD_RE, LISTING_ID_RE, MAX_PROPERTY_WORDS, PROPERTY_DOC_RE, inboundSignal, isTkDocument, nextInboxState, ownerOutboundJoins,
-  propertyWordsIn,
+  BONA_WORD_RE, LISTING_ID_RE, MAX_PROPERTY_WORDS, PROPERTY_DOC_RE, hasAdEvidence, inboundSignal, isTkDocument, nextInboxState,
+  ownerOutboundJoins, propertyWordsIn,
 } from './inbox/eligibility.mjs';
 import { createOrMergeLead, leadNote } from './leads.mjs';
 import { normalisePhone } from './phone.mjs';
@@ -620,7 +621,11 @@ export function createPoller({
    * certain signal puts the chat `in`, a guess puts it on the Unsure list, and `in`/`out`
    * never move from here (lib/inbox/eligibility.mjs `nextInboxState`). Unsure keeps
    * nothing: a guessed chat is never stored or shown until the owner moves it in. A bare
-   * Ref-shaped code is certain only when a site session holds it (`refKnown`, A6).
+   * Ref-shaped code is certain only when a site session holds it (`refKnown`, A6), and ad
+   * context only when it is real ad evidence (`hasAdEvidence`: a click id, a conversion
+   * source, the ctwa_ad entry point, an ad source type). An organic entry point — a wa.me
+   * link, WhatsApp search, a tapped number — still makes an `ad_meta` lead for the
+   * statistics, and that lead goes to the Unsure list.
    *
    * Decided on the lead as it is NOW, not as `handleInbound` read it: the owner's note was
    * sent in between (and a retried record carries the lead from its first attempt), and a
@@ -630,7 +635,7 @@ export function createPoller({
     const lead = db.getLead(seen.lead_id);
     if (!lead) return;
     const text = typeof rec.text === 'string' ? rec.text : '';
-    const signal = inboundSignal({ text, hasAdMeta: Boolean(adMetaOf(rec.contextInfo)), refKnown });
+    const signal = inboundSignal({ text, hasAdMeta: hasAdEvidence(adMetaOf(rec.contextInfo)), refKnown });
     const next = nextInboxState(lead.inbox_state, { signal, method });
     if (next === 'in' && lead.inbox_state !== 'in') await join(lead.lead_id, ts, 'inbound', tally);
     else if (next && next !== lead.inbox_state) inboxStore.setInboxState(lead.lead_id, next, { since: ts });
