@@ -174,18 +174,22 @@ const MIGRATIONS = [
     // silently skipping it. Their text keys are NOT NULL because a rowid table's TEXT
     // PRIMARY KEY otherwise takes NULL, as many times as it is given one.
     // The two UPDATEs place the leads that already exist (P2-13). Certain → `in`, counted
-    // from the day the lead was created: a Ref code or ad context, or a listing id in the
-    // first message. Everything else — the keyword and click-window guesses, web-form and
+    // from the day the lead was created: a Ref code, real ad evidence on the lead_created
+    // touchpoint's `ad_meta` (D15; the same test as lib/inbox/eligibility.mjs `hasAdEvidence`:
+    // a click id, a conversion source, the ctwa_ad entry point or an ad source type — every
+    // live ad_meta lead on 2026-09-29 came from an organic entry point and has none), or a
+    // listing id in the first message. Everything else — the keyword and click-window guesses, web-form and
     // concierge leads (a phone nobody verified never decides the chat under it: owner rule
     // D9, 2026-09-29), legacy imports — goes to the owner's Unsure list. The GLOBs
     // are deliberately a little looser than LISTING_ID_RE in lib/inbox/eligibility.mjs (no
     // word boundary on either side) and were checked against the live data on 2026-09-28
-    // (18 in / 9 unsure). Each lead put `in` gets the floor an automatic join would have:
+    // (only the 2 Ref leads' snippets carry a listing id: 2 in, every other lead unsure). Each lead put `in` gets the floor an automatic join would have:
     // 24 h before it was created. `json_extract` raises on malformed JSON, and one bad touchpoint
     // must not stop bona-api starting, so it only runs in the last branch of a CASE, after
     // json_valid(...) and json_type(...) = 'text': SQLite evaluates a CASE lazily, but
     // promises no order for the two sides of an AND. Only a string snippet counts, since
-    // json_extract returns an object or array as its JSON text, which a GLOB would match.
+    // json_extract returns an object or array as its JSON text, which a GLOB would match;
+    // likewise only an object `ad_meta`, and only its string fields.
     // Team and never-list numbers are not excluded here; app.inboxMaintenance() moves them
     // out on start (P2-20).
     // `inbox_candidates` (added to v4 on 2026-09-28 in a later commit than the rest of v4,
@@ -236,7 +240,16 @@ const MIGRATIONS = [
       );
       CREATE INDEX IF NOT EXISTS inbox_candidates_state ON inbox_candidates(state, last_ts);
       UPDATE leads SET
-        inbox_state = CASE WHEN match_method IN ('ref','ad_meta')
+        inbox_state = CASE WHEN match_method = 'ref'
+            OR (match_method = 'ad_meta' AND EXISTS (SELECT 1 FROM touchpoints t WHERE t.lead_id = leads.lead_id AND t.event_type = 'lead_created'
+                       AND CASE WHEN json_valid(t.meta) IS NOT 1 THEN 0
+                                WHEN json_type(t.meta, '$.ad_meta') IS NOT 'object' THEN 0
+                                ELSE (json_type(t.meta, '$.ad_meta.ctwa_clid') IS 'text' AND trim(json_extract(t.meta, '$.ad_meta.ctwa_clid'), char(32, 9, 10, 11, 12, 13)) <> '')
+                                  OR (json_type(t.meta, '$.ad_meta.conversion_source') IS 'text' AND trim(json_extract(t.meta, '$.ad_meta.conversion_source'), char(32, 9, 10, 11, 12, 13)) <> '')
+                                  OR (json_type(t.meta, '$.ad_meta.entry_point_conversion_source') IS 'text'
+                                      AND json_extract(t.meta, '$.ad_meta.entry_point_conversion_source') = 'ctwa_ad')
+                                  OR (json_type(t.meta, '$.ad_meta.source_type') IS 'text'
+                                      AND instr(lower(json_extract(t.meta, '$.ad_meta.source_type')), 'ad') > 0) END))
             OR EXISTS (SELECT 1 FROM touchpoints t WHERE t.lead_id = leads.lead_id AND t.event_type = 'lead_created'
                        AND CASE WHEN json_valid(t.meta) IS NOT 1 THEN 0
                                 WHEN json_type(t.meta, '$.snippet') IS NOT 'text' THEN 0

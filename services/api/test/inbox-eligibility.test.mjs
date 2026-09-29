@@ -10,7 +10,7 @@ import {
   LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE, PROPERTY_WORD_RE, MAX_PROPERTY_WORDS, INBOX_STATES,
   // The two kinds of document word and the property words (owner answer, 2026-09-28).
   BROCHURE_RE, QUALIFIED_DOC_RE, PROPERTY_NOUN_RE,
-  inboundSignal, ownerOutboundJoins, isTkDocument, namesTk, namesBona, propertyWordsIn, nextInboxState,
+  inboundSignal, ownerOutboundJoins, isTkDocument, namesTk, namesBona, propertyWordsIn, nextInboxState, hasAdEvidence,
 } from '../lib/inbox/eligibility.mjs';
 import { normaliseRecord } from '../lib/evolution.mjs';
 
@@ -886,6 +886,30 @@ test('no text makes the rules slow: every input is read in linear time', () => {
   }
 });
 
+/* ---------------- ad evidence (D15) ---------------- */
+
+/**
+ * The entry points every ad_meta lead in the live db came from (2026-09-29: 11, 4 and 2 of
+ * the 17): a wa.me link, WhatsApp's own search, a tapped phone number. Organic, all of them.
+ */
+const ORGANIC_ENTRY = ['click_to_chat_link', 'global_search_new_chat', 'phone_number_hyperlink']
+  .map((source) => ({ entry_point_conversion_source: source, entry_point_conversion_app: 'whatsapp' }));
+/** A real click-to-WhatsApp ad, as lib/wa-poller.mjs `adMetaOf` keeps it. */
+const CTWA = { source_id: '120210987654321', source_type: 'ad', source_app: 'instagram', source_url: 'https://fb.me/ad', ctwa_clid: 'ARZ1xyz', conversion_source: 'FB_Ads' };
+
+test('only real ad evidence is ad context: a click id, a conversion source, a ctwa_ad entry point or an ad source type (D15)', () => {
+  for (const meta of ORGANIC_ENTRY) assert.equal(hasAdEvidence(meta), false, meta.entry_point_conversion_source);
+  assert.equal(hasAdEvidence(CTWA), true);
+  for (const meta of [{ ctwa_clid: 'ARZ1xyz' }, { conversion_source: 'FB_Ads' }, { entry_point_conversion_source: 'ctwa_ad' }, { source_type: 'ad' }, { source_type: 'AD' }]) {
+    assert.equal(hasAdEvidence(meta), true, JSON.stringify(meta));
+  }
+  for (const meta of [
+    null, undefined, 'ctwa_ad', {}, { external_ad: true }, { utm: { utm_source: 'facebook' } }, { source_type: 'post', source_app: 'instagram' },
+    { ctwa_clid: '' }, { ctwa_clid: '   ' }, { ctwa_clid: 123 }, { conversion_source: '' }, { entry_point_conversion_source: 'CTWA_AD' },
+    { entry_point_conversion_app: 'facebook' }, { source_id: '120210987654321' },
+  ]) assert.equal(hasAdEvidence(meta), false, JSON.stringify(meta));
+});
+
 /* ---------------- the next state ---------------- */
 
 const SIGNALS = [null, 'unsure', 'certain'];
@@ -910,15 +934,17 @@ test('an undecided or unsure chat becomes in on anything certain, whatever rule 
   }
 });
 
-test('a guess — the word, or a keyword or click-window match — makes it unsure', () => {
+test('a guess — the word, or a keyword, click-window or ad-context match with no ad evidence — makes it unsure', () => {
   for (const current of OPEN) {
     for (const method of METHODS) assert.equal(nextInboxState(current, { signal: 'unsure', method }), 'unsure', `${current} unsure ${method}`);
-    for (const method of ['keyword', 'time_window']) assert.equal(nextInboxState(current, { signal: null, method }), 'unsure', `${current} ${method}`);
+    // An ad_meta lead whose message carried no ad evidence (an organic entry point) comes
+    // with no certain signal: it is the owner's to decide.
+    for (const method of ['keyword', 'time_window', 'ad_meta']) assert.equal(nextInboxState(current, { signal: null, method }), 'unsure', `${current} ${method}`);
   }
 });
 
 test('with no signal and no guessing rule the state is left as it was', () => {
-  for (const method of [null, 'ref', 'phone', 'ad_meta', 'concierge', 'form']) {
+  for (const method of [null, 'ref', 'phone', 'concierge', 'form']) {
     assert.equal(nextInboxState(null, { method }), null, `null ${method}`);
     assert.equal(nextInboxState(undefined, { method }), null, `undefined ${method}`);
     assert.equal(nextInboxState('unsure', { method }), 'unsure', `unsure ${method}`);

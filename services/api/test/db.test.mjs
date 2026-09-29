@@ -175,7 +175,25 @@ test('a v3 file db moves to v4: each existing lead is placed by what is certain 
   // json_extract hands back an object or array as its JSON text, which a GLOB would match.
   const cases = [
     { id: 'L-ref', channel: 'whatsapp', method: 'ref', snippet: 'Hello\nRef K7Q2XR', want: 'in' },
-    { id: 'L-ad', channel: 'whatsapp', method: 'ad_meta', snippet: 'Hi', want: 'in' },
+    // Ad context is certain only with real ad evidence on the lead_created touchpoint (D15):
+    // a click id, a conversion source, a ctwa_ad entry point or an ad source type. The three
+    // organic entry points every live ad_meta lead had on 2026-09-29 are not.
+    { id: 'L-ad', channel: 'whatsapp', method: 'ad_meta', snippet: 'Hi', want: 'unsure' },
+    ...['click_to_chat_link', 'global_search_new_chat', 'phone_number_hyperlink'].map((source) => (
+      { id: `L-ad-${source}`, channel: 'whatsapp', method: 'ad_meta', snippet: 'Hi', adMeta: { entry_point_conversion_source: source, entry_point_conversion_app: 'whatsapp' }, want: 'unsure' })),
+    { id: 'L-ad-ctwa', channel: 'whatsapp', method: 'ad_meta', snippet: 'Hi', adMeta: { source_id: '120210987654321', source_type: 'ad', source_app: 'instagram', ctwa_clid: 'ARZ1xyz', conversion_source: 'FB_Ads' }, want: 'in' },
+    { id: 'L-ad-clid', channel: 'whatsapp', method: 'ad_meta', adMeta: { ctwa_clid: 'ARZ1xyz' }, want: 'in' },
+    { id: 'L-ad-conv', channel: 'whatsapp', method: 'ad_meta', adMeta: { conversion_source: 'FB_Ads' }, want: 'in' },
+    { id: 'L-ad-entry', channel: 'whatsapp', method: 'ad_meta', adMeta: { entry_point_conversion_source: 'ctwa_ad', entry_point_conversion_app: 'facebook' }, want: 'in' },
+    { id: 'L-ad-type', channel: 'whatsapp', method: 'ad_meta', adMeta: { source_type: 'AD' }, want: 'in' },
+    { id: 'L-ad-post', channel: 'whatsapp', method: 'ad_meta', adMeta: { source_type: 'post', source_app: 'instagram' }, want: 'unsure' },
+    { id: 'L-ad-empty', channel: 'whatsapp', method: 'ad_meta', adMeta: { ctwa_clid: ' \t\n ', conversion_source: '' }, want: 'unsure' },
+    { id: 'L-ad-num', channel: 'whatsapp', method: 'ad_meta', adMeta: { ctwa_clid: 123 }, want: 'unsure' },
+    { id: 'L-ad-string', channel: 'whatsapp', method: 'ad_meta', meta: { ad_meta: 'ctwa_clid' }, want: 'unsure' },
+    { id: 'L-ad-bad-json', channel: 'whatsapp', method: 'ad_meta', rawMeta: '{"ad_meta": {"ctwa_clid": "ARZ1xyz"}', want: 'unsure' },
+    { id: 'L-ad-id', channel: 'whatsapp', method: 'ad_meta', snippet: 'BONA-W003?', adMeta: { entry_point_conversion_source: 'click_to_chat_link' }, want: 'in' },
+    // Evidence on a later touchpoint is not how the lead was made.
+    { id: 'L-ad-later', channel: 'whatsapp', method: 'ad_meta', snippet: 'Hi', laterMeta: { ad_meta: { ctwa_clid: 'ARZ1xyz' } }, want: 'unsure' },
     // A phone from the web form or Dana was never verified: it does not decide the chat
     // under that number (D9). Only a listing id in the first message would.
     { id: 'L-form', channel: 'form', method: 'form', want: 'unsure' },
@@ -204,9 +222,10 @@ test('a v3 file db moves to v4: each existing lead is placed by what is certain 
   cases.forEach((c, i) => {
     insLead.run(c.id, createdOf(i), createdOf(i) + 1, c.channel, c.method, c.legacy ?? null, 'new', i % 2 ? createdOf(i) + 60_000 : null);
     const meta = 'rawMeta' in c ? c.rawMeta
-      : JSON.stringify(c.meta ?? { match_method: c.method, ref: null, session_id: null, event_id: null, ad_meta: null, snippet: c.snippet ?? null });
+      : JSON.stringify(c.meta ?? { match_method: c.method, ref: null, session_id: null, event_id: null, ad_meta: c.adMeta ?? null, snippet: c.snippet ?? null });
     if (!c.noTouchpoint) insTp.run(`tp-${c.id}`, c.id, createdOf(i), c.channel, 'lead_created', meta);
     if (c.later) insTp.run(`tp-${c.id}-2`, c.id, createdOf(i) + 5000, c.channel, 'inbound_message', JSON.stringify({ snippet: c.later }));
+    if (c.laterMeta) insTp.run(`tp-${c.id}-3`, c.id, createdOf(i) + 6000, c.channel, 'inbound_message', JSON.stringify(c.laterMeta));
   });
   const snapshot = (db) => db.prepare('SELECT * FROM leads ORDER BY lead_id').all().map((r) => ({ ...r }));
   const countOf = (db, table) => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;

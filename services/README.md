@@ -811,7 +811,7 @@ with a `wa_jid` or a `wa_lid`. Whether it belongs is **stored** in `leads.inbox_
 
 - *Certain*: an inbound message with a Ref line as the site writes it
   (`Ref BONA-W003 · K7Q2XR`, with its listing part) or a code a site session holds,
-  click-to-WhatsApp ad context, or a listing id (`BONA-###`, `BONA-W###`) puts the chat `in`
+  click-to-WhatsApp ad evidence, or a listing id (`BONA-###`, `BONA-W###`) puts the chat `in`
   by itself, together with the 24 h of that chat before it (the "Hi" before the Ref line).
   A web-form or concierge lead is not a signal: its phone number is whatever someone typed or
   told Dana, never verified, so it is born with no inbox state and a later form or concierge
@@ -819,10 +819,16 @@ with a `wa_jid` or a `wa_lid`. Whether it belongs is **stored** in `leads.inbox_
   decision P2-6 on 2026-09-29). When that person writes on WhatsApp, the poller matches the
   chat to the lead and judges it like any other: with no certain signal it goes on the Unsure
   tab.
-  Ad context stays certain: TK runs no click-to-WhatsApp ads to this number (owner,
-  2026-09-28, D15), so an ad-origin chat here is a Bona client.
-- *Unsure*: only the word Bona/بونا, a bare Ref-shaped code no session holds, or only the
-  ±15-min click window. The lead is kept for the statistics as before and goes to the
+  TK runs no click-to-WhatsApp ads to this number (owner, 2026-09-28, D15), so an ad-origin
+  chat here is a Bona client — but only real ad evidence counts (`hasAdEvidence`): a click id
+  (`ctwa_clid`), a conversion source, the `ctwa_ad` entry point or an ad source type. WhatsApp
+  attaches the same kind of context to organic entry points — a wa.me link
+  (`click_to_chat_link`), its own search (`global_search_new_chat`), a tapped phone number
+  (`phone_number_hyperlink`) — and every live `ad_meta` lead on 2026-09-29 was one of those.
+  Such a message still makes an `ad_meta` lead with the same attribution as before; its chat
+  goes to the Unsure tab.
+- *Unsure*: only the word Bona/بونا, a bare Ref-shaped code no session holds, ad context
+  from an organic entry point, or only the ±15-min click window. The lead is kept for the statistics as before and goes to the
   owner-only **Unsure** tab (`?tab=unsure`; staff get 403), where *Move to Bona inbox* or
   *Not a client* settles it.
 - *Owner-started*: the owner's own message in a 1:1 chat puts that chat `in` (a new lead gets
@@ -868,10 +874,13 @@ with a `wa_jid` or a `wa_lid`. Whether it belongs is **stored** in `leads.inbox_
   excluded, and every inbox page, reply, handover, move and add also refuses an excluded
   number.
 
-Schema v4 sorted the leads that already existed: `in` for `ref` / `ad_meta` and for a listing
-id in the first snippet; everything else — web-form and concierge leads included — `unsure`,
-for the owner to settle (a read-only count of the live db on
-2026-09-28 gave 18 in and 9 unsure; the Phase 2 deploy checks it).
+Schema v4 sorted the leads that already existed: `in` for `ref`, for `ad_meta` only when its
+`lead_created` touchpoint's `meta.ad_meta` shows ad evidence (the same test as
+`hasAdEvidence`), and for a listing id in the first snippet; everything else — organic
+`ad_meta` leads, web-form and concierge leads included — `unsure`, for the owner to settle.
+On the live db that is 2 in (the two Ref leads) and every other lead unsure (read-only checks
+on 2026-09-28 and 2026-09-29: no `ad_meta` lead carries ad evidence, and only the Ref leads'
+first snippets carry a listing id); the Phase 2 deploy checks it.
 
 *What is stored* (`wa_messages`, `in` chats only): every message in both directions and who
 sent it — the client, a team member (by user id), Dana (from Phase 4), or `owner_number`

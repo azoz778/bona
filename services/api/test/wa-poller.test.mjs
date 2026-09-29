@@ -1991,6 +1991,23 @@ test('(t) a click-to-WhatsApp ad message is certain: a new ad_meta lead goes in,
   h.cleanup();
 });
 
+test('(t) an organic entry point is no ad evidence: a wa.me link, WhatsApp search or a tapped number makes an ad_meta lead that goes to Unsure', async () => {
+  // The three shapes every live ad_meta lead had on 2026-09-29.
+  for (const source of ['click_to_chat_link', 'global_search_new_chat', 'phone_number_hyperlink']) {
+    const first = msg({ id: `ORG-${source}`, ts: NOW - 60_000, text: 'مرحبا، عندكم فلل؟', contextInfo: { entryPointConversionSource: source, entryPointConversionApp: 'whatsapp' } });
+    const h = harness({ inbox: true, history: [first], windows: [[first]] });
+    const tally = await h.poller.tick();
+    const [lead] = h.leads();
+    assert.equal(lead.match_method, 'ad_meta', `${source}: still a lead, attributed as before`);
+    assert.equal(h.db.touchpointsForLead(lead.lead_id)[0].meta.ad_meta.entry_point_conversion_source, source);
+    assert.equal(lead.inbox_state, 'unsure', `${source}: the owner decides`);
+    assert.equal(h.inbox.hasMessages(lead.lead_id), false, `${source}: nothing stored`);
+    assert.equal(h.findCalls.length, 0, `${source}: no history pulled`);
+    assert.equal(tally.joined, 0);
+    h.cleanup();
+  }
+});
+
 test('(t) an Unsure chat that later writes from a click-to-WhatsApp ad joins, and its earlier messages come with it', async () => {
   const guess = msg({ id: 'U1', ts: NOW - 120_000, text: 'مرحبا بونا' });
   const ad = msg({ id: 'U2', ts: NOW - 30_000, text: 'مهتم', contextInfo: AD_CONTEXT });
