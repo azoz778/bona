@@ -10,6 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
+import net from 'node:net';
 import path from 'node:path';
 import { createApp } from '../index.mjs';
 import { openDb } from '../lib/db.mjs';
@@ -19,6 +20,7 @@ import { createTeam } from '../lib/team.mjs';
 import { createInboxStore } from '../lib/inbox/store.mjs';
 import { OWNER_HISTORY_MS } from '../lib/inbox/backfill.mjs';
 import { createSender } from '../lib/wa-send.mjs';
+import { REPLY_MAX_BODY_BYTES, REPLY_DRAIN_MAX_BYTES } from '../lib/dashboard/routes.mjs';
 
 const NOW = 1_790_500_000_000;
 const CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
@@ -198,6 +200,34 @@ function seedScene(h) {
 }
 
 const replyTo = (h, leadId, fields, cookie) => h.postForm(`/v1/admin/inbox/${leadId}/reply`, fields, { cookie });
+/**
+ * A form POST over a bare socket that says its body is `claimed` bytes long and sends only
+ * `body`, then waits for the server to close the connection. fetch cannot stop part-way
+ * through a body it has been handed, and the point is a body the server stops reading.
+ */
+function partialPost(h, p, { cookie, claimed, body }) {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(h.app.server.address().port, '127.0.0.1');
+    const got = [];
+    socket.setTimeout(3000, () => { socket.destroy(); reject(new Error('the server kept the connection open')); });
+    socket.on('data', (chunk) => got.push(chunk));
+    socket.on('error', reject);
+    // `end`: the server closed its side, having sent everything it was going to.
+    socket.on('end', () => {
+      socket.end();
+      const all = Buffer.concat(got).toString('utf8');
+      const cut = all.indexOf('\r\n\r\n');
+      const [statusLine, ...lines] = all.slice(0, cut).split('\r\n');
+      const headers = Object.fromEntries(lines.map((l) => [l.slice(0, l.indexOf(':')).trim().toLowerCase(), l.slice(l.indexOf(':') + 1).trim()]));
+      resolve({ status: Number(statusLine.split(' ')[1]), headers, text: all.slice(cut + 4) });
+    });
+    socket.write([
+      `POST ${p} HTTP/1.1`, 'Host: 127.0.0.1', 'Connection: keep-alive',
+      'Content-Type: application/x-www-form-urlencoded', `Content-Length: ${claimed}`, `Cookie: ${cookie}`, '', '',
+    ].join('\r\n'));
+    socket.write(body);
+  });
+}
 /** The chat's revision now, as a form carries it: what a page drawn at this moment would say it saw. */
 const revOf = (h, leadId) => String(h.inboxStore.revision(leadId));
 
@@ -671,18 +701,40 @@ test('a 4,096-character Arabic reply reaches WhatsApp whole; a body too big even
     assert.equal(worst.headers.get('location'), '/dashboard/inbox/LEAD-A?ok=sent');
     assert.equal(h.evo.calls[1].body.text, ligatures);
 
-    // Past 64 KiB it is not read at all: the thread comes back with a message a person can act on.
+    // Past 64 KiB (72 KB here) the words are read to the end and thrown away: the thread comes
+    // back with a message a person can act on, as any other over-long reply does. The body was
+    // read whole, so the connection is not closed under a browser still sending it — closing
+    // it then could cut the page off and show a connection error instead.
     const huge = await replyTo(h, 'LEAD-A', { text: 'ب'.repeat(12_000), send_id: 'send-long-000000000003', seen_rev: revOf(h, 'LEAD-A') }, staff);
-    assert.equal(huge.status, 413);
+    assert.equal(huge.status, 400, 'the ordinary bad_text answer');
     assertLocked(huge);
     assert.equal(huge.headers.get('content-type'), 'text/html; charset=utf-8', 'the page, never raw JSON');
-    assert.equal(huge.headers.get('connection'), 'close', 'the unread rest of the body goes with the connection');
+    assert.equal(huge.headers.get('connection'), 'keep-alive', 'read to its end, so the connection stays');
     const html = await huge.text();
     assert.ok(html.includes('A reply has to have some text, and at most 4,096 characters.'));
     assert.ok(html.includes('Is BONA-012 still free?'), 'the thread itself');
     assert.match(fieldOf(html, 'send_id'), /^[A-Za-z0-9_-]{16,64}$/, 'with a fresh form to send from');
+    assert.match(html, /<textarea id="r-text"[^>]*><\/textarea>/, 'the words were thrown away unread: the box is empty');
     assert.equal(h.evo.calls.length, 2, 'nothing more went');
     assert.equal(h.inboxStore.getOutbox('send-long-000000000003'), null, 'and nothing was written');
+
+    // Past the 1 MiB ceiling it is not read to its end: the same page at 413, and the
+    // connection goes with it. This body says it is 2 MiB and stops one byte past the
+    // ceiling — the byte the server answers on — so nothing unread is left on the socket.
+    assert.ok(REPLY_DRAIN_MAX_BYTES === 1024 * 1024 && REPLY_DRAIN_MAX_BYTES > REPLY_MAX_BODY_BYTES);
+    const head = '_dash=1&send_id=send-long-000000000005&text=';
+    const past = await partialPost(h, '/v1/admin/inbox/LEAD-A/reply', {
+      cookie: staff, claimed: 2 * 1024 * 1024, body: head + 'x'.repeat(REPLY_DRAIN_MAX_BYTES + 1 - head.length),
+    });
+    assert.equal(past.status, 413);
+    assert.equal(past.headers.connection, 'close', 'the unread rest of the body goes with the connection');
+    assert.equal(past.headers['content-type'], 'text/html; charset=utf-8', 'the page, never raw JSON');
+    assert.equal(past.headers['cache-control'], 'no-store');
+    assert.ok(past.text.includes('A reply has to have some text, and at most 4,096 characters.'));
+    assert.ok(past.text.includes('Is BONA-012 still free?'), 'the thread itself');
+    assert.equal(Buffer.byteLength(past.text), Number(past.headers['content-length']), 'the whole page arrived');
+    assert.equal(h.evo.calls.length, 2, 'nothing more went');
+    assert.equal(h.inboxStore.getOutbox('send-long-000000000005'), null, 'and nothing was written');
 
     // A JSON caller still gets JSON, and every other write keeps the ordinary 16 KiB cap.
     const json = await h.postJson('/v1/admin/inbox/LEAD-A/reply', { text: 'x'.repeat(70_000), send_id: 'send-long-000000000004', seen_rev: h.inboxStore.revision('LEAD-A') }, { cookie: staff });

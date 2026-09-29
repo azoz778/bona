@@ -1013,8 +1013,10 @@ thread with the typed words would never reach the browser.
 
 A reply's body may be up to 64 KiB — 4,096 characters, each at most nine bytes once a form
 percent-encodes it, plus the other fields; every other dashboard write keeps the 16 KB cap
-(`BONA_MAX_BODY_BYTES`). A form reply bigger than that is not read: the thread comes back
-(413) with `bad_text` and an empty box, never raw JSON; a JSON call gets 413
+(`BONA_MAX_BODY_BYTES`). A form reply bigger than that, up to 1 MiB, is read to its end and
+thrown away: the thread comes back (400) with `bad_text` and an empty box, never raw JSON, on a
+connection that stays open. Past 1 MiB the rest is never read: the same page at 413, and the
+connection closes with it (`Connection: close`). A JSON call gets 413
 `{error: 'payload_too_large'}`.
 
 *Polling and upkeep.* The poller runs every 20 s (`BONA_WA_POLL_MS`, §4). The VPS sets it in

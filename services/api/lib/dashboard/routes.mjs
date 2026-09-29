@@ -70,6 +70,14 @@ export const MAX_NOTE = 2000;
  * fields. Every other write keeps `cfg.maxBodyBytes`.
  */
 export const REPLY_MAX_BODY_BYTES = 64 * 1024;
+/**
+ * How far past `REPLY_MAX_BODY_BYTES` a FORM reply is still read (and thrown away), so the
+ * thread can be answered on a connection that stays. A refusal made mid-body has to close
+ * the socket while the browser is still sending, and that close can cut the answer off —
+ * a connection error instead of the page. Past this the rest is never read, and the
+ * connection goes with the answer.
+ */
+export const REPLY_DRAIN_MAX_BYTES = 1024 * 1024;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** `2026-09-08` and a date that exists. `9999-99-99` matches the shape and nothing else. */
@@ -110,21 +118,38 @@ const asRev = (v) => {
   return /^\d{1,15}$/.test(s) ? Number(s) : NaN;
 };
 
-/** Read a body with a hard cap; an oversized one is refused rather than buffered. */
-export function readBody(req, maxBytes) {
+/**
+ * Read a body with a hard cap; an oversized one is refused rather than buffered.
+ *
+ * With `drainTo` above `maxBytes`, a body over the cap but not past `drainTo` is still read
+ * to its end — every byte past the cap thrown away — and refused only then, with
+ * `drained: true`: nothing is left unread on the connection. Past `drainTo` (or with no
+ * `drainTo`) reading stops at once and the refusal says `drained: false`.
+ */
+export function readBody(req, maxBytes, { drainTo = 0 } = {}) {
+  const ceiling = Math.max(maxBytes, drainTo);
+  const tooLarge = (drained) => Object.assign(new Error('body too large'), { code: 'BODY_TOO_LARGE', drained });
   return new Promise((resolve, reject) => {
     let size = 0;
-    const chunks = [];
-    req.on('data', (chunk) => {
+    let over = false;
+    let chunks = [];
+    const onData = (chunk) => {
       size += chunk.length;
-      if (size > maxBytes) {
+      if (size > ceiling) {
+        req.off('data', onData);
         req.pause();
-        reject(Object.assign(new Error('body too large'), { code: 'BODY_TOO_LARGE' }));
+        reject(tooLarge(false));
+        return;
+      }
+      if (size > maxBytes) {
+        over = true;
+        chunks = [];
         return;
       }
       chunks.push(chunk);
-    });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    };
+    req.on('data', onData);
+    req.on('end', () => (over ? reject(tooLarge(true)) : resolve(Buffer.concat(chunks).toString('utf8'))));
     req.on('error', reject);
   });
 }
@@ -272,18 +297,19 @@ export function createDashboardRoutes({
   const signedIn = (req) => Boolean(currentUser(req));
 
   /**
-   * Read and parse a write body.
-   * @returns {{ ok: true, fields: object, form: boolean } | { ok: false, status: number, error: string, form?: boolean }}
+   * Read and parse a write body. `drainFormTo` applies to a form body only (readBody's
+   * `drainTo`); a JSON one over `maxBytes` is always left unread.
+   * @returns {{ ok: true, fields: object, form: boolean } | { ok: false, status: number, error: string, form?: boolean, drained?: boolean }}
    */
-  async function fieldsOf(req, maxBytes = maxBodyBytes) {
+  async function fieldsOf(req, maxBytes = maxBodyBytes, { drainFormTo = 0 } = {}) {
     const ct = req.headers['content-type'];
     const form = isForm(ct);
     if (!form && !isJson(ct)) return { ok: false, status: 415, error: 'unsupported_media_type' };
     let text;
     try {
-      text = await readBody(req, maxBytes);
+      text = await readBody(req, maxBytes, { drainTo: form ? drainFormTo : 0 });
     } catch (err) {
-      if (err?.code === 'BODY_TOO_LARGE') return { ok: false, status: 413, error: 'payload_too_large', form };
+      if (err?.code === 'BODY_TOO_LARGE') return { ok: false, status: 413, error: 'payload_too_large', form, drained: err.drained === true };
       return { ok: false, status: 400, error: 'bad_request' };
     }
     if (form) return { ok: true, form: true, fields: Object.fromEntries(new URLSearchParams(text)) };
@@ -1110,18 +1136,23 @@ export function createDashboardRoutes({
 
   /**
    * A form reply whose body is over `REPLY_MAX_BODY_BYTES`: the thread again with `bad_text`
-   * (the words were never read, so there is no draft to keep). Only a page is drawn — no
-   * write, nothing sent — so it asks only what a page asks: a signed-in person, an open chat.
+   * (the words were thrown away unread, so there is no draft to keep). Only a page is drawn
+   * — no write, nothing sent — so it asks only what a page asks: a signed-in person, an open
+   * chat.
+   *
+   * `drained`: the body was read to its end (it stopped short of `REPLY_DRAIN_MAX_BYTES`),
+   * so this is the ordinary over-long-reply answer on a connection that stays. Otherwise the
+   * rest was never read: 413, and the connection goes with the answer (refuseBody).
    */
-  function replyTooLarge(req, res, leadId) {
-    // The rest of the body is never read, so the connection goes with the answer (refuseBody).
-    res.setHeader('Connection', 'close');
+  function replyTooLarge(req, res, leadId, drained) {
+    if (!drained) res.setHeader('Connection', 'close');
     const me = currentUser(req);
     if (!me) return toLogin(res, '', 303);
     if (!inbox || !sender) return sendJson(res, 404, { error: 'not_found' });
     const lead = db.getLead(leadId);
     if (!openChat(lead)) return notInInbox(res, withUnread(me));
-    return renderThread(res, { status: 413, user: me, lead, error: 'bad_text' });
+    const [status, error] = drained ? REPLY_REFUSALS.bad_text : [413, 'bad_text'];
+    return renderThread(res, { status, user: me, lead, error });
   }
 
   function inboxHandler({ res, fields, form, me }, leadId) {
@@ -1337,11 +1368,13 @@ export function createDashboardRoutes({
     if (!writes) return sendJson(res, 404, { error: 'not_found' });
 
     const replyWrite = Boolean(inboxMatch && inboxMatch[2] === 'reply');
-    const parsed = await fieldsOf(req, replyWrite ? Math.max(maxBodyBytes, REPLY_MAX_BODY_BYTES) : maxBodyBytes);
+    const parsed = replyWrite
+      ? await fieldsOf(req, Math.max(maxBodyBytes, REPLY_MAX_BODY_BYTES), { drainFormTo: REPLY_DRAIN_MAX_BYTES })
+      : await fieldsOf(req, maxBodyBytes);
     if (!parsed.ok) {
       // A form reply too big even for its own cap comes back as the thread, with a message
       // a person can act on — never a raw JSON answer in the browser.
-      if (replyWrite && parsed.status === 413 && parsed.form) return replyTooLarge(req, res, inboxMatch[1]);
+      if (replyWrite && parsed.status === 413 && parsed.form) return replyTooLarge(req, res, inboxMatch[1], parsed.drained);
       return refuseBody(req, res, parsed);
     }
     if (!hasMarker(req, parsed.fields)) {
