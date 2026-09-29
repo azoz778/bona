@@ -572,6 +572,34 @@ test('reply: sent to the phone jid, stored as the member\'s message, and the cha
   h.s.close();
 });
 
+test('reply: stored at the moment its send started, to the whole second — a client message during the round trip reads as newer, unread and stale', async () => {
+  const h = harness({
+    reply: () => {
+      // While the call is out the client writes (WhatsApp stamps whole seconds), the poller
+      // stores it, and the round trip takes its time.
+      h.inbox.upsertMessage({ key_id: 'IN-during', lead_id: 'L-1', jid: CLIENT_JID, direction: 'in', sender_kind: 'client', text: 'and parking?', ts: NOW + 1_000 });
+      h.tick(3_000);
+      return { status: 201, body: { key: { id: 'KEY-1' } } };
+    },
+  });
+  const staff = staffOf(h);
+  seedChat(h);
+  h.tick(700);
+  assert.equal((await h.sender.reply(replyArgs(staff))).ok, true);
+  assert.equal(h.inbox.getOutbox(SID).created, NOW + 700, 'the send started here');
+  const mine = h.inbox.messageByKey('KEY-1');
+  assert.equal(mine.ts, NOW, "the outbox row's created, floored to the second — not the moment WhatsApp answered");
+  assert.deepEqual(h.inbox.messagesFor('L-1').map((m) => m.key_id), ['IN-L-1', 'KEY-1', 'IN-during'], 'the client\'s message reads after the reply that never saw it');
+  assert.equal(h.inbox.newestTs('L-1'), NOW + 1_000);
+  // The writer's page, drawn with their reply as the newest they saw, still counts it unread…
+  h.inbox.markRead(staff.user_id, 'L-1', mine.ts);
+  assert.equal(h.inbox.listInbox({ userId: staff.user_id }).find((l) => l.lead_id === 'L-1').unread, 1);
+  // …and a reply from that page is held as stale until they have read it.
+  assert.deepEqual(await h.sender.reply(replyArgs(staff, { sendId: 'sid_fedcba9876543210', seenTs: mine.ts })), { ok: false, error: 'stale' });
+  assert.equal(h.s.getLead('L-1').first_reply_ts, NOW + 3_700, "the watchdog's first reply is when WhatsApp took it");
+  h.s.close();
+});
+
 test('reply: an existing handler and an earlier first reply are left alone', async () => {
   const h = harness();
   const staff = staffOf(h);

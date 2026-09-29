@@ -346,6 +346,13 @@ export function createSender({
 
     try {
       const t = now();
+      // The message is stored at the moment its send started — the outbox row's `created`,
+      // floored to the whole second WhatsApp stamps its own messages with — not when
+      // WhatsApp answered. A client message sent during the round trip is then newer than
+      // the reply that never saw it: unread for its writer, and a stale view for the next
+      // reply, instead of tucked in before it. The watchdog's first reply is when it went.
+      const startedAt = Number.isFinite(ins.row?.created) ? ins.row.created : t;
+      const storedTs = Math.floor(startedAt / 1000) * 1000;
       db.transaction(() => {
         // Re-read: the lead may have changed while the message was on its way. If the owner
         // marked it *Not a client*, or put its number on the never list, its transcript was
@@ -355,7 +362,7 @@ export function createSender({
         if (fresh?.inbox_state === 'in') {
           inbox.upsertMessage({
             key_id: out.keyId, lead_id: lead.lead_id, jid, direction: 'out', sender_kind: 'staff',
-            sender_user_id: userId ?? null, text: body, ts: t, status: 'sent',
+            sender_user_id: userId ?? null, text: body, ts: storedTs, status: 'sent',
           });
           if (!fresh.handler_user_id && userId) inbox.setHandler(lead.lead_id, userId);
           inbox.setNeedsHuman(lead.lead_id, 0);
