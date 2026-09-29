@@ -19,11 +19,11 @@
  *     fact sheet, booklet (كتيب) or plan (مخطط) only with a property word (villa, unit,
  *     فيلا, شقة …) in the same name or caption, because TK's fit-out work sends those too
  *     (owner, 2026-09-28). A document that names TK (`TK`, `T.K.`, `tk-estates`, `تي كي`)
- *     never joins by itself: TK chats stay out (D17). Nor does a document that names Bona
- *     without a listing id or a site link: Bona AB makes wood-floor finishes, so "Bona
- *     Traffic HD brochure.pdf" to a TK contractor proves nothing (the poller puts such a
- *     chat on the owner's list to check, D17). Nothing else he sends counts, and the word
- *     "Bona" joins nothing by itself.
+ *     never joins, whatever else it carries (even a listing id or a site link): TK chats
+ *     stay out (D17). Nor does a document that names Bona without a listing id or a site
+ *     link: Bona AB makes wood-floor finishes, so "Bona Traffic HD brochure.pdf" to a TK
+ *     contractor proves nothing (the poller puts such a chat on the owner's list to check,
+ *     D17). Nothing else he sends counts, and the word "Bona" joins nothing by itself.
  *
  * The answer is stored on the lead (`leads.inbox_state`), and a message only ever moves it
  * forward: a guess can become certain, but `in` is never demoted by a later message and
@@ -97,14 +97,15 @@ const QUALIFIED_WORDS = String.raw`(?:floor[\s_-]?plans?|price[\s_-]?lists?|paym
   + String.raw`|(?:قائمة|جدول)[\s_-]?(?:ال)?[أا]سعار|خطة[\s_-]?(?:الدفع|السداد)|جدول[\s_-]?(?:الدفعات|السداد))`;
 /**
  * The property words that let a `QUALIFIED_WORDS` document join (owner, 2026-09-28). The
- * Arabic nouns also count with the article (الشقق, المشروع), except أرض / أراضي: with it,
- * الأرض is also "the ground" (and الأرضي the ground floor). `فله` and `شقه` are how people
- * type فلة and شقة.
+ * Arabic nouns also count with the article (الشقق, المشروع), except أرض / أراضي and عمارة:
+ * with it, الأرض is also "the ground" (and الأرضي the ground floor), and العمارة is also
+ * architecture (العمارة الداخلية, the interior architecture TK's design work draws). `فله` and
+ * `شقه` are how people type فلة and شقة.
  */
 const PROPERTY_NOUN_WORDS = String.raw`(?:villas?|apartments?|units?|projects?|towers?|residences?|town[\s_-]?houses?|duplex|penthouses?`
   + String.raw`|compound|plots?|land|propert(?:y|ies)`
   + String.raw`|(?:ال)?(?:فيلا|فلل|فله|فلة)|(?:ال)?(?:شقة|شقق|شقه)|(?:ال)?(?:مشروع|مشاريع)|(?:ال)?(?:وحدة|وحدات)|(?:ال)?(?:برج|أبراج)`
-  + String.raw`|(?:ال)?عمارة|(?:ال)?دوبلكس|(?:ال)?بنتهاوس|تاون[\s_-]?هاوس|مجمع[\s_-]?سكني|[أا]رض|[أا]راضي|(?:ال)?عقار(?:ات)?)`;
+  + String.raw`|عمارة|(?:ال)?دوبلكس|(?:ال)?بنتهاوس|تاون[\s_-]?هاوس|مجمع[\s_-]?سكني|[أا]رض|[أا]راضي|(?:ال)?عقار(?:ات)?)`;
 /** `words` as a whole word: nothing that is a letter or a mark on either side. */
 const wholeWord = (words) => new RegExp(String.raw`(?<![\p{L}\p{M}])${words}(?![\p{L}\p{M}])`, 'iu');
 /**
@@ -147,9 +148,10 @@ const LISTING_ID_NAME_CUT_RE = /(?<![A-Za-z0-9])BONA-W?\d{3}(?=[^A-Za-z0-9٠-٩�
  * كى), bounded like `بونا` (بلاستيكي, بلاستيكى and أوتوماتيكي only contain the letters). The
  * two Arabic words may be written together or apart by up to four spaces, `_`, `.` or `-`
  * (`تي  كي` typed with two spaces, `تي - كي`); a longer run is cleaned to one space first
- * (`namesTk`). A document that matches never joins a chat by itself (D16, D17). Every
- * alternative starts with a fixed letter and repeats nothing unbounded, so a failed match
- * costs a bounded amount at each position: linear in the text.
+ * (`namesTk`). A document that matches never joins a chat, whatever else it carries, even a
+ * listing id or a site link (D16, D17). Every alternative starts with a fixed letter and
+ * repeats nothing unbounded, so a failed match costs a bounded amount at each position:
+ * linear in the text.
  */
 export const TK_RE = /(?<![\p{L}\p{N}])tk(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])t\.k\.?(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])tk[\s_-]?estates?|(?<![\p{L}\p{M}])ت[يى][\s_.-]{0,4}ك[يى](?![\p{L}\p{M}])/iu;
 
@@ -188,20 +190,38 @@ export const namesTk = (s) => TK_RE.test(s) || TK_RE.test(readsAs(s));
 export const namesBona = (s) => BONA_WORD_RE.test(s) || BONA_WORD_RE.test(readsAs(s));
 
 /**
- * A file name's extension (`.pdf`), which is not part of a host in it: `bona-real-estate.com.pdf`.
+ * A document's own extension, which is not part of a host in its name:
+ * `bona-real-estate.com.pdf`. Only the kinds of file a brochure or a plan comes as, and none
+ * that is also a top-level domain (`.zip` is one, so `bona-real-estate.com.zip` is a longer
+ * host and stays one). Any other label after a full stop is read as in a text, so
+ * `bona-real-estate.com.sa` is still not ours (A7).
  */
-const FILE_EXTENSION_RE = /\.[a-z0-9]{1,5}$/i;
+const DOC_EXTENSION_RE = /\.(?:pdf|docx?|xlsx?|pptx?|jpe?g|png|heic|txt|csv)$/i;
 
 /**
- * Does a whole file name carry a site link? In a file name `_` stands for a space, as for a
- * listing id (`bona-real-estate.com_brochure.pdf`), and the name is read with and without its
- * extension (`bona-real-estate.com.pdf`); otherwise the link is read exactly as in a text
- * (`SITE_LINK_RE`), so `bona-real-estate.company_profile.pdf` and
- * `bona-real-estate.com.evil.pdf` still are not ours. Never asked of a cut name.
+ * `SITE_LINK_RE` for a file name, where `_` stands for a space as it does for a listing id:
+ * the host may also be followed by `_` and a run with no full stop, `@` or `:` in it up to the
+ * next space or the end (`bona-real-estate.com_brochure`, `Villa_bona.azoz.uk_EN`). Such a
+ * run could only make a top-level domain no one can have (`com_brochure`). A run with one of
+ * them could carry the host on or make it the user part of another, so there `_` is a host
+ * character, as in a text: `bona.azoz.uk_evil.example` and `bona.azoz.uk_x@evil.example` are
+ * not ours, nor (fewer joins) `bona-real-estate.com_brochure.v2`. The run stops at the first
+ * full stop, and every copy of the host holds one, so this stays linear in the name's length.
+ */
+const SITE_LINK_NAME_RE = new RegExp(
+  String.raw`(?:${SITE_LINK_RE.source})|(?:^|[^a-z0-9.-])(?:www\.)?(?:bona-real-estate\.com|bona\.azoz\.uk)_[^\s.。．｡@:]*(?:\s|$)`,
+  'iu',
+);
+
+/**
+ * Does a whole file name carry a site link (`SITE_LINK_NAME_RE`)? The name is read with and
+ * without a document's own extension (`DOC_EXTENSION_RE`), so `bona-real-estate.com.pdf` and
+ * `bona-real-estate.com_brochure.pdf` are ours, while `bona-real-estate.company_profile.pdf`,
+ * `bona-real-estate.com.evil.pdf`, `bona-real-estate.com.sa` and
+ * `bona.azoz.uk_evil.example.pdf` are not. Never asked of a cut name.
  */
 function nameHasSiteLink(name) {
-  const spaced = name.replace(/_/g, ' ');
-  return SITE_LINK_RE.test(spaced) || SITE_LINK_RE.test(spaced.replace(FILE_EXTENSION_RE, ''));
+  return SITE_LINK_NAME_RE.test(name) || SITE_LINK_NAME_RE.test(name.replace(DOC_EXTENSION_RE, ''));
 }
 
 /**

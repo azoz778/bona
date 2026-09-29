@@ -212,20 +212,29 @@ function flatFileName(name) {
 }
 
 /**
- * A record's document name made safe to show (`name`, null when there is no document or
- * nothing usable is left), whether it had to be cut at `MAX_FILE_NAME` code points to get
- * there (`truncated`; what cleaning removes is not a cut), and whether the whole cleaned
- * name, before any cut, names TK or Bona (`tk`, `bona`: lib/inbox/eligibility.mjs `namesTk`,
+ * A record's whole cleaned document name (`flat`, empty when there is none) and that name
+ * made safe to show (`name`, cut at `MAX_FILE_NAME` code points; null when there is no
+ * document or nothing usable is left). The one place the shown name is worked out, so
+ * `mediaOf`'s placeholder and `normaliseRecord`'s `fileName` agree.
+ * @returns {{ flat: string, name: string|null }}
+ */
+function shownFileName(record) {
+  const flat = flatFileName(unwrapMessage(record?.message)?.documentMessage?.fileName);
+  return { flat, name: capCodePoints(flat, MAX_FILE_NAME).trim() || null };
+}
+
+/**
+ * A record's shown document name (`shownFileName`), whether it had to be cut to get there
+ * (`truncated`; what cleaning removes is not a cut), and whether the whole cleaned name,
+ * before any cut, names TK or Bona (`tk`, `bona`: lib/inbox/eligibility.mjs `namesTk`,
  * `namesBona`, which also read through the joiners the shown name keeps). That holds even
  * when nothing of the name can be shown (a first grapheme longer than the cap), so a name
- * that is left out never drops what it said. The one place all four are worked out, so
- * `mediaOf`'s placeholder and `normaliseRecord`'s
- * `fileName`/`fileNameTruncated`/`fileNameTk`/`fileNameBona` agree.
+ * that is left out never drops what it said. Worked out once per record, in
+ * `normaliseRecord`, for its `fileName`/`fileNameTruncated`/`fileNameTk`/`fileNameBona`.
  * @returns {{ name: string|null, truncated: boolean, tk: boolean, bona: boolean }}
  */
 function fileNameOf(record) {
-  const flat = flatFileName(unwrapMessage(record?.message)?.documentMessage?.fileName);
-  const name = capCodePoints(flat, MAX_FILE_NAME).trim() || null;
+  const { flat, name } = shownFileName(record);
   return {
     name,
     truncated: name !== null && name !== flat,
@@ -249,7 +258,7 @@ export function mediaOf(record) {
   // ptvMessage is the round "video note".
   if (m.videoMessage || m.ptvMessage) return '[video]';
   if (m.documentMessage) {
-    const { name } = fileNameOf(record);
+    const { name } = shownFileName(record);
     return name ? `[document: ${name}]` : '[document]';
   }
   if (m.locationMessage || m.liveLocationMessage) return '[location]';

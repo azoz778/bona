@@ -304,6 +304,10 @@ test('the other document words need a property word, a listing id or a link next
     doc('Unity price list.pdf'),
     doc('Villager fact sheet.pdf'),
     doc('مخطط الأرض.pdf'),
+    // العمارة with the article is also architecture (العمارة الداخلية, interior architecture,
+    // which TK's design work draws): the owner's word is عمارة, without it.
+    doc('مخطط العمارة الداخلية.pdf'),
+    doc('مخطط العمارة الداخلية - مطبخ.pdf'),
     // ... and only in the same name or caption as the document word.
     doc('Price List.pdf', 'for the villa'),
     doc('villa.pdf', 'price list'),
@@ -314,13 +318,15 @@ test('the other document words need a property word, a listing id or a link next
 });
 
 test('the property words are the owner\'s list as it stands: unit, project and مشروع let a fit-out paper join (open for the owner)', () => {
-  // Some of the owner's property words (2026-09-28) are also fit-out words, so these join
-  // today. Whether unit, project and مشروع should go, or a fit-out word (kitchen, أعمال,
-  // ديكور …) next to them should keep the chat out, is his call: an answer changes this test
-  // on purpose.
+  // Some of the owner's property words (2026-09-28) are also fit-out words, or other words
+  // altogether (land in Land Cruiser, compound in compound interest), so these join today.
+  // Whether unit, project and مشروع should go, or a fit-out word (kitchen, أعمال, ديكور,
+  // كهرباء …) next to them should keep the chat out, is his call (context.md, D16): an answer
+  // changes this test on purpose.
   const doc = (fileName) => ({ text: null, fileName, media: `[document: ${fileName}]` });
   for (const fileName of ['Kitchen unit price list.pdf', 'AC unit fact sheet.pdf', 'Payment plan - kitchen project.pdf',
-    'جدول الدفعات - مشروع الديكور.pdf', 'Floor plan - villa kitchen.pdf']) {
+    'جدول الدفعات - مشروع الديكور.pdf', 'Floor plan - villa kitchen.pdf', 'Toyota Land Cruiser price list.pdf',
+    'Compound interest fact sheet.pdf', 'مخطط كهرباء الفيلا.pdf', 'مخطط عمارة داخلية.pdf']) {
     assert.equal(ownerOutboundJoins(doc(fileName)), true, fileName);
   }
 });
@@ -363,7 +369,8 @@ test('the three document patterns: a brochure, a document word that needs a prop
     assert.equal(PROPERTY_NOUN_RE.test(s), true, s);
   }
   // Longer words that only start with one, and أرض with the article (the ground; الأرضي is the ground floor).
-  for (const s of ['Villager', 'Landscape', 'Unity', 'Projector', 'Propertyless', 'Compounding', 'الأرض', 'الأرضي', 'وحده']) {
+  // العمارة with the article is also architecture: the owner's word is عمارة without it.
+  for (const s of ['Villager', 'Landscape', 'Unity', 'Projector', 'Propertyless', 'Compounding', 'الأرض', 'الأرضي', 'وحده', 'العمارة']) {
     assert.equal(PROPERTY_NOUN_RE.test(s), false, s);
   }
 });
@@ -417,6 +424,40 @@ test('the word Bona, or any other file, no longer joins a chat by itself, and a 
   }
   assert.equal(ownerOutboundJoins({ text: 'bona.azoz.uk/villas', media: '[image]' }), true, 'a link in a caption still counts');
   assert.equal(ownerOutboundJoins({ text: 'BONA-W003 on the photo', media: '[image]' }), true, 'so does a listing id');
+});
+
+test('a longer host in a file name is not ours: only a document\'s own extension comes off, and `_` is a space only where nothing can carry the host on (A7)', () => {
+  const doc = (fileName) => ({ text: null, fileName, media: `[document: ${fileName}]` });
+  const read = (fileName) => normaliseRecord({ key: { id: 'D5', fromMe: true }, message: { documentMessage: { fileName } } });
+  for (const fileName of [
+    // A7: a longer host is someone else's, in a file name as in a text.
+    'bona-real-estate.com.sa',
+    'bona-real-estate.com.sa.pdf',
+    'bona.azoz.uk.evil',
+    // `_` then a run with a full stop in it carries the host on ...
+    'bona-real-estate.com_evil.example',
+    'bona.azoz.uk_evil.example.pdf',
+    'bona.azoz.uk_x_y.example.pdf',
+    'bona.azoz.uk_evil。example.pdf',
+    // ... and with `@` or `:` it makes the host the user part of another one.
+    'bona.azoz.uk_x@evil.example.pdf',
+    'bona.azoz.uk_:443@evil.example.pdf',
+    // `.zip` is a top-level domain too, so it does not come off as an extension.
+    'bona-real-estate.com.zip',
+    // Fewer joins: a full stop after `_` is read as carrying the host on, even in a version.
+    'bona-real-estate.com_brochure.v2.pdf',
+  ]) {
+    assert.equal(ownerOutboundJoins(doc(fileName)), false, fileName);
+    assert.equal(ownerOutboundJoins(read(fileName)), false, `${fileName}, read from Evolution`);
+    assert.equal(ownerOutboundJoins({ text: fileName, media: '[image]' }), false, `${fileName} in a caption`);
+  }
+  // `_` followed by no full stop, `@` or `:` before the next space could only make a top-level
+  // domain no one can have (`com_brochure`): there it is a space, as for a listing id.
+  for (const fileName of ['bona-real-estate.com_brochure.pdf', 'bona-real-estate.com.pdf', 'Villa_bona.azoz.uk_EN.pdf', 'bona.azoz.uk.PDF',
+    'bona-real-estate.com_villa_EN.docx', 'bona-real-estate.com_Phase 2.v3.pdf', 'bona.azoz.uk_ar', 'Villa_bona-real-estate.com.JPEG']) {
+    assert.equal(ownerOutboundJoins(doc(fileName)), true, fileName);
+    assert.equal(ownerOutboundJoins(read(fileName)), true, `${fileName}, read from Evolution`);
+  }
 });
 
 test('a document that names TK never joins, whatever else it says, and isTkDocument says so (D16, D17)', () => {
@@ -747,6 +788,7 @@ test('no text makes the rules slow: every input is read in linear time', () => {
     fill('تي  كي', n), fill('تى  كى', n), fill('تي - كي', n), fill('تي    ', n), fill('تي - ', n), fill('تى _ .', n),
     `تي${' '.repeat(n)}كي`, `T${'\u200B'.repeat(n)}K`, fill('T\u200C', n), fill('\u200D ', n), fill(' \uFEFF\n', n),
     fill('bona.azoz.uk_', n), fill('bona-real-estate.com.', n), `bona-real-estate.com${'.pdf'.repeat(n / 4)}`,
+    `bona.azoz.uk_${'x'.repeat(n)}`, `bona.azoz.uk_${'_'.repeat(n)}.pdf`, fill('bona-real-estate.com_x', n), fill('bona.azoz.uk_x ', n),
   ];
   const calls = [
     ['inboundSignal', (s) => inboundSignal({ text: s })],
