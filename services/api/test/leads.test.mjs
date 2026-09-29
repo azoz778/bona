@@ -427,3 +427,29 @@ test('a number the owner only added is owed a reply once the client writes; a ch
   assert.equal(h.db.countWaitingLeads(), 0);
   h.cleanup();
 });
+
+test('a message older than the owner\'s add, read late, neither starts the clock nor takes the add\'s answer back', () => {
+  // A poller days behind (an outage) reads a message sent before the owner added the chat.
+  // On time it would have been read while there was no lead to merge into, so the added
+  // chat would still be answered: late, it must come out the same. Its later messages do
+  // start the clock.
+  const h = harness();
+  const added = createOrMergeLead(h.db, { phone: '0500000062', waJid: '966500000062@s.whatsapp.net' }, { channel: 'whatsapp', matchMethod: 'owner_added', now: NOW });
+  const old = createOrMergeLead(h.db, { phone: '0500000062' }, { channel: 'whatsapp', matchMethod: 'phone', now: NOW - 40 * 86_400_000 });
+  assert.equal(old.lead.lead_id, added.lead.lead_id);
+  assert.equal(old.lead.first_inbound_ts, null, 'the clock does not start 40 days before the chat was added');
+  assert.equal(old.lead.first_reply_ts, NOW, 'the add\'s stamp stays');
+  assert.equal(h.db.countWaitingLeads(), 0);
+  const recent = createOrMergeLead(h.db, { phone: '0500000062' }, { channel: 'whatsapp', matchMethod: 'phone', now: NOW - 1 });
+  assert.equal(recent.lead.first_inbound_ts, null, 'nor a millisecond before');
+  const after = createOrMergeLead(h.db, { phone: '0500000062' }, { channel: 'whatsapp', matchMethod: 'phone', now: NOW + 60_000 });
+  assert.equal(after.lead.first_inbound_ts, NOW + 60_000, 'a message after the add is owed a reply');
+  assert.equal(after.lead.first_reply_ts, null);
+  assert.equal(h.db.countWaitingLeads(), 1);
+  // Any other lead keeps the Phase 1 rule: a late message sets an empty clock whenever it was sent.
+  const form = createOrMergeLead(h.db, { phone: '0500000063' }, { channel: 'form', matchMethod: 'form', now: NOW });
+  const late = createOrMergeLead(h.db, { phone: '0500000063' }, { channel: 'whatsapp', matchMethod: 'phone', now: NOW - 86_400_000 });
+  assert.equal(late.lead.lead_id, form.lead.lead_id);
+  assert.equal(late.lead.first_inbound_ts, NOW - 86_400_000);
+  h.cleanup();
+});

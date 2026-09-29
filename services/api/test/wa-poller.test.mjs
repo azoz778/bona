@@ -1381,6 +1381,25 @@ test('(t) a poller 45 days behind after the owner moved a chat in today stores o
   h.cleanup();
 });
 
+test('(t) a poller 45 days behind after the owner added a chat by phone today: its older messages do not put it in the waiting queue', async () => {
+  const h = harness({ inbox: true });
+  // What *Add chat by phone number* writes: an owner_added lead, in, born answered.
+  const { lead: added } = createOrMergeLead(h.db, { phone: '0500000000', waJid: SENDER }, { channel: 'whatsapp', matchMethod: 'owner_added', now: NOW });
+  assert.equal(added.first_reply_ts, NOW);
+  h.db.waCursorSet(h.poller.status().instance, { lastTs: NOW - 45 * 86_400_000, lastRun: NOW - 45 * 86_400_000, unmatched: 0 });
+  h.push([
+    msg({ id: 'ADD-40', ts: NOW - 40 * 86_400_000, text: 'forty days ago' }),
+    msg({ id: 'ADD-20', ts: NOW - 20 * 86_400_000, text: 'twenty days ago' }),
+  ]);
+  await h.poller.tick();
+  assert.deepEqual(rows(h, added.lead_id), [['ADD-20', 'in', 'client']], 'only what is inside the 30 days is stored');
+  const lead = h.db.getLead(added.lead_id);
+  assert.equal(lead.first_inbound_ts, null, 'both messages came before the add');
+  assert.equal(lead.first_reply_ts, NOW, 'the add still answers the chat');
+  assert.equal(h.db.countWaitingLeads(), 0, 'not waiting since 40 days ago');
+  h.cleanup();
+});
+
 test('(t) a web-form number that writes on WhatsApp with no sure sign goes on the owner\'s Unsure list: the form never decides the chat', async () => {
   const f1 = msg({ id: 'F1', ts: NOW - 120_000, text: 'السلام عليكم' });
   const f2 = msg({ id: 'F2', ts: NOW - 30_000, text: 'BONA-W012 السعر؟' });

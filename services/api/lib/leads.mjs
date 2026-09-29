@@ -211,8 +211,12 @@ export function createOrMergeLead(db, input = {}, meta = {}) {
         patch.ref = ref;
       }
       // The owner writing to (or vouching for) a lead is not the client writing in: the
-      // response clock starts only at the client's own first message.
-      if (channel === 'whatsapp' && !ownerStarted && !existing.first_inbound_ts) {
+      // response clock starts only at the client's own first message. A message sent before
+      // the owner added the chat, read late (the poller behind after an outage), is not one:
+      // on time it would have been read while there was no lead to merge into, and the add
+      // (which pulls those 30 days in) still answers it.
+      const beforeAdd = existing.match_method === 'owner_added' && now < existing.created;
+      if (channel === 'whatsapp' && !ownerStarted && !existing.first_inbound_ts && !beforeAdd) {
         patch.first_inbound_ts = now;
         // A number the owner only added was born "answered" so it would not wait in the
         // queue before anyone had written. Now the client has: whatever was said before,
