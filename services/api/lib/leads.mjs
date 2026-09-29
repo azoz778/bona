@@ -16,6 +16,7 @@ import { randomId } from './store.mjs';
 import { normalisePhone } from './phone.mjs';
 import { sourceFromTouch } from './attribution.mjs';
 import { newId } from './db.mjs';
+import { JOIN_HISTORY_MS, OWNER_HISTORY_MS } from './inbox/store.mjs';
 
 export const LEAD_FIELDS = ['name', 'phone', 'interest', 'budget', 'timeline', 'notes', 'language', 'district', 'listingId'];
 
@@ -121,7 +122,9 @@ const asRef = (v) => { const s = oneLine(v, 8)?.toUpperCase(); return s && /^[A-
  *
  * The Bona inbox state is set here only where this call is certain (2026-09-28 plan P2-5):
  * a chat the owner started is `in`, and an owner-started merge lifts a missing or `unsure`
- * state to `in`; it never touches `out` — "not a client" is the owner's word. A web-form or
+ * state to `in`; it never touches `out` — "not a client" is the owner's word. Joining sets
+ * the chat's history floor (`history_from`): 24 h before his message for `owner_outbound`,
+ * an automatic join like a client's; 30 days back for `owner_added`, which he vouched for. A web-form or
  * concierge lead gets no state, on create or on merge (owner rule D9, which supersedes
  * planning decision P2-6 since 2026-09-29): its phone number is whatever someone typed or
  * told Dana, never verified, so it cannot decide the WhatsApp chat under that number. When
@@ -137,6 +140,9 @@ export function createOrMergeLead(db, input = {}, meta = {}) {
     ? meta.matchMethod
     : (channel === 'form' ? 'form' : channel.startsWith('concierge') ? 'concierge' : 'phone');
   const ownerStarted = OWNER_METHODS.has(matchMethod);
+  const joined = ownerStarted
+    ? { inbox_state: 'in', inbox_since: now, history_from: now - (matchMethod === 'owner_added' ? OWNER_HISTORY_MS : JOIN_HISTORY_MS) }
+    : { inbox_state: null, inbox_since: null, history_from: null };
 
   const phone = normalisePhone(input.phone);
   const waJid = oneLine(input.waJid, 100);
@@ -215,7 +221,7 @@ export function createOrMergeLead(db, input = {}, meta = {}) {
         // real reply only ever fills an empty one), so it is the add's to take back.
         if (existing.match_method === 'owner_added' && existing.first_reply_ts === existing.created) patch.first_reply_ts = null;
       }
-      if (ownerStarted && (existing.inbox_state == null || existing.inbox_state === 'unsure')) Object.assign(patch, { inbox_state: 'in', inbox_since: now });
+      if (ownerStarted && (existing.inbox_state == null || existing.inbox_state === 'unsure')) Object.assign(patch, joined);
       db.updateLead(existing.lead_id, patch);
       db.addTouchpoint({
         lead_id: existing.lead_id, ts: now, channel, event_type: ownerStarted ? 'owner_contact' : MERGE_EVENT[channel],
@@ -236,7 +242,7 @@ export function createOrMergeLead(db, input = {}, meta = {}) {
       stage: 'new', stage_ts: now, value_sar: null,
       first_inbound_ts: channel === 'whatsapp' && !ownerStarted ? now : null, first_reply_ts: ownerStarted ? now : null, legacy_id: null,
       consent_ads: session?.consent_ads ?? 0, consent_analytics: session?.consent_analytics ?? 0,
-      inbox_state: ownerStarted ? 'in' : null, inbox_since: ownerStarted ? now : null,
+      ...joined,
     });
     db.setStage(id, 'new', { actor: 'system', now });
     db.addTouchpoint({

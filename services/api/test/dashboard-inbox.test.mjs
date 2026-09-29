@@ -879,6 +879,27 @@ test('the owner moves a chat to check into the inbox: an owner_added lead, in, 3
   });
 });
 
+test('every owner join floors the chat\'s history 30 days back: Move, Add chat by phone number, and Move on a chat to check', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const cand = noteCand(h);
+    const boss = await h.boss();
+    // The routes keep their own clock: the floor is 30 days before the moment it joined.
+    const floorOf = (lead) => [lead.history_from, lead.inbox_since - OWNER_HISTORY_MS];
+    assert.equal((await h.postForm('/v1/admin/inbox/LEAD-O/move', {}, { cookie: boss })).status, 303);
+    assert.deepEqual(...floorOf(h.db.getLead('LEAD-O')), 'Move of a chat that was out');
+    assert.equal((await h.postForm('/v1/admin/inbox/add', { phone: '0500000088' }, { cookie: boss })).status, 303);
+    assert.deepEqual(...floorOf(h.db.getLeadByPhone('966500000088')), 'Add chat by phone number');
+    assert.equal((await h.postForm(`/v1/admin/inbox/candidates/${cand}/move`, {}, { cookie: boss })).status, 303);
+    assert.deepEqual(...floorOf(h.db.getLeadByPhone(CAND_PHONE)), 'Move on a chat to check');
+    // A chat already in keeps the floor it joined with: a Move or Add of it changes nothing.
+    h.db.updateLead('LEAD-A', { history_from: NOW - 3_600_000 - 86_400_000 });
+    await h.postForm('/v1/admin/inbox/LEAD-A/move', {}, { cookie: boss });
+    await h.postForm('/v1/admin/inbox/add', { phone: '0500000077' }, { cookie: boss });
+    assert.equal(h.db.getLead('LEAD-A').history_from, NOW - 3_600_000 - 86_400_000);
+  });
+});
+
 test('Not a client on a chat to check: off the list, not listed again, audited by its id only', async () => {
   await withInbox(async (h) => {
     seedScene(h);

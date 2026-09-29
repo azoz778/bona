@@ -10,6 +10,7 @@ import { createTeam } from '../lib/team.mjs';
 import {
   createInboxStore, RETENTION_MS, MAX_STORED_TEXT, SENDER_KINDS, OUTBOX_KINDS, OUTBOX_STATUSES, CANDIDATE_KEEP_MS, DISMISSED_KEEP_MS,
 } from '../lib/inbox/store.mjs';
+import { JOIN_HISTORY_MS, OWNER_HISTORY_MS } from '../lib/inbox/backfill.mjs';
 
 const NOW = 1_790_500_000_000;
 const DAY = 86_400_000;
@@ -586,6 +587,33 @@ test('setInboxState keeps the first joining time, sets it on joining, and clears
   assert.throws(() => inbox.setInboxState('X', null), RangeError);
   assert.equal(s.getLead('X').inbox_state, 'out');
   assert.equal(inbox.setInboxState('L-nope', 'in'), false);
+  s.close();
+});
+
+test('setInboxState records the history floor on joining, keeps it while the chat stays in, and clears it on leaving', () => {
+  const { s, inbox } = harness();
+  lead(s, 'X', { wa_jid: JID, inbox_state: 'unsure' });
+  lead(s, 'Y', { wa_jid: '966500000041@s.whatsapp.net' });
+  lead(s, 'Z', { wa_jid: '966500000042@s.whatsapp.net', inbox_state: 'in', inbox_since: NOW - DAY });
+
+  assert.equal(inbox.setInboxState('X', 'in', { since: NOW, historyFrom: NOW - OWNER_HISTORY_MS }), true);
+  assert.equal(s.getLead('X').history_from, NOW - OWNER_HISTORY_MS, 'the owner vouched: 30 days back');
+  inbox.setInboxState('X', 'in', { since: NOW + 5, historyFrom: NOW + 5 - JOIN_HISTORY_MS });
+  assert.equal(s.getLead('X').history_from, NOW - OWNER_HISTORY_MS, 'already in: the floor it joined with stays');
+  inbox.setInboxState('Y', 'in', { since: NOW - 100 });
+  assert.equal(s.getLead('Y').history_from, NOW - 100 - JOIN_HISTORY_MS, 'a join always has a floor: by default the 24 h an automatic join keeps');
+  inbox.setInboxState('Z', 'in', { since: NOW, historyFrom: NOW - 7 });
+  assert.equal(s.getLead('Z').history_from, NOW - 7, 'an in chat missing its floor gets one');
+
+  inbox.setInboxState('X', 'unsure');
+  assert.equal(s.getLead('X').history_from, null, 'back on the Unsure list: no floor');
+  inbox.setInboxState('X', 'in', { since: NOW + 10, historyFrom: NOW + 10 - JOIN_HISTORY_MS });
+  assert.equal(s.getLead('X').history_from, NOW + 10 - JOIN_HISTORY_MS, 'joining again starts again');
+  inbox.setInboxState('X', 'out');
+  assert.equal(s.getLead('X').history_from, null, 'out: no floor');
+  inbox.setInboxState('Y', 'in', { since: NOW, historyFrom: NOW - DAY });
+  inbox.leaveInbox('Y');
+  assert.equal(s.getLead('Y').history_from, null, 'Not a client clears it too');
   s.close();
 });
 

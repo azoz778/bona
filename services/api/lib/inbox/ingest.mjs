@@ -21,6 +21,11 @@
  *     maintenance sweep (P2-20) do.
  *   - a record with no id cannot be de-duplicated, and noise — reactions, deletes and edits,
  *     poll votes, key-distribution records — is never a bubble (P2-14). Neither is stored.
+ *   - nothing older than the chat's history floor (`leads.history_from`, set when it joined:
+ *     24 h before an automatic join, 30 days before the owner's Move or Add) is stored or
+ *     learned from, whichever read brings it — the poller (whose window can reach weeks back
+ *     after an outage), a join's history, a thread refresh or the daily catch-up. A record
+ *     with no time of its own is stored at now(), inside any floor.
  *   - a login code is never stored (§4.2: the code lives only in the WhatsApp message, P2-21).
  *     Its outbox row keeps the message id for the day's count, so the record is recognised
  *     by that id — however it is filed, sent or received — and refused before anything is
@@ -221,7 +226,7 @@ export function createIngest({
   /**
    * @param {object|null} lead  a `leads` row; only its `lead_id` is trusted, the row is read again
    * @param {import('../evolution.mjs').NormalisedRecord} rec
-   * @returns {{ stored: false, reason: 'not_in_inbox'|'excluded'|'no_id'|'noise'|'code' }
+   * @returns {{ stored: false, reason: 'not_in_inbox'|'excluded'|'no_id'|'noise'|'before_floor'|'code' }
    *          | { stored: true, inserted: boolean, senderKind: 'client'|'staff'|'dana'|'owner_number' }}
    */
   function ingest(lead, rec) {
@@ -232,6 +237,9 @@ export function createIngest({
       if (isExcluded(current)) return { stored: false, reason: 'excluded' };
       if (!rec?.id) return { stored: false, reason: 'no_id' };
       if (rec.noise) return { stored: false, reason: 'noise' };
+      if (Number.isFinite(rec.ts) && Number.isFinite(current.history_from) && rec.ts < current.history_from) {
+        return { stored: false, reason: 'before_floor' };
+      }
       if (recordNamesExcluded(current, rec, isExcluded, rec.fromMe ? ownersNumber() : null)) {
         // A row that learns the number excludes itself from then on; otherwise the lead id is
         // logged. Learning is from a received record only (see `learnable`).

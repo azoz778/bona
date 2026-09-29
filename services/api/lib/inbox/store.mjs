@@ -18,6 +18,14 @@ import { INBOX_STATES, MAX_PROPERTY_WORDS } from './eligibility.mjs';
 
 /** Transcripts are kept for 5 years after the chat's last message (D11). */
 export const RETENTION_MS = Math.round(5 * 365.25 * 86_400_000);
+/**
+ * A chat's history floor (`leads.history_from`), measured back from when it joined: an
+ * automatic join keeps the 24 h before the joining message (design §4.1), an owner-button
+ * join (Move to Bona inbox, Add chat by phone number) the last 30 days. lib/inbox/backfill.mjs
+ * re-exports both.
+ */
+export const JOIN_HISTORY_MS = 24 * 3_600_000;
+export const OWNER_HISTORY_MS = 30 * 86_400_000;
 export const MAX_STORED_TEXT = 8000;
 export const SENDER_KINDS = ['client', 'staff', 'dana', 'owner_number'];
 export const OUTBOX_KINDS = ['staff', 'dana', 'code', 'note'];
@@ -363,20 +371,28 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
   /* -------------------- inbox columns on the lead -------------------- */
 
   /**
-   * Joining keeps the time a chat first joined: a chat already `in` keeps its
-   * `inbox_since` (one still missing it gets `since`). Leaving — `out` or back to
-   * `unsure` — clears it.
+   * Joining keeps the time a chat first joined and the history floor it joined with: a chat
+   * already `in` keeps its `inbox_since` and `history_from` (one still missing either gets
+   * `since` / `historyFrom`). `historyFrom` is how far back this chat's messages may be
+   * stored (lib/inbox/ingest.mjs refuses anything older): the caller's join rule decides it,
+   * and without one it is the 24 h before `since` that an automatic join keeps, so no join
+   * is ever without a floor. Leaving — `out` or back to `unsure` — clears both.
    */
-  function setInboxState(leadId, state, { since = now() } = {}) {
+  function setInboxState(leadId, state, { since = now(), historyFrom = null } = {}) {
     if (!INBOX_STATES.includes(state)) throw new RangeError(`unknown inbox state ${state}`);
     const t = now();
     const id = String(leadId ?? '');
     if (state === 'in') {
       const at = hasNumber(since) ? toTs(since) : t;
-      return prep("UPDATE leads SET inbox_since = CASE WHEN inbox_state = 'in' THEN COALESCE(inbox_since, ?) ELSE ? END, inbox_state = 'in', updated = ? WHERE lead_id = ?")
-        .run(at, at, t, id).changes === 1;
+      const floor = hasNumber(historyFrom) ? toTs(historyFrom) : at - JOIN_HISTORY_MS;
+      return prep(`UPDATE leads SET
+                     inbox_since = CASE WHEN inbox_state = 'in' THEN COALESCE(inbox_since, ?) ELSE ? END,
+                     history_from = CASE WHEN inbox_state = 'in' THEN COALESCE(history_from, ?) ELSE ? END,
+                     inbox_state = 'in', updated = ?
+                   WHERE lead_id = ?`)
+        .run(at, at, floor, floor, t, id).changes === 1;
     }
-    return prep('UPDATE leads SET inbox_state = ?, inbox_since = NULL, updated = ? WHERE lead_id = ?').run(state, t, id).changes === 1;
+    return prep('UPDATE leads SET inbox_state = ?, inbox_since = NULL, history_from = NULL, updated = ? WHERE lead_id = ?').run(state, t, id).changes === 1;
   }
 
   /** `userId` null clears it. Who may be a handler is the caller's check (an active user). */

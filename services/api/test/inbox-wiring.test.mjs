@@ -322,6 +322,28 @@ test('the daily upkeep: old transcripts and code rows go, stale sends become unc
   }
 });
 
+test('the catch-up reads an empty chat from its durable history floor: an owner join\'s 30 days, not 24 h', async () => {
+  const asked = [];
+  const backfill = {
+    configured: true,
+    phoneJidOf: () => null,
+    history: async (lead, { sinceTs, untilTs }) => { asked.push({ leadId: lead.lead_id, sinceTs, untilTs }); return { stored: 0, scanned: 0, truncated: false }; },
+    refresh: async () => ({ stored: 0, scanned: 0, truncated: false }),
+  };
+  const h = build({ backfill });
+  try {
+    h.db.insertLead({
+      lead_id: 'LEAD-moved', created: NOW - 60 * DAY, updated: NOW - DAY, phone_e164: '966500000077', wa_jid: '966500000077@s.whatsapp.net',
+      channel: 'whatsapp', match_method: 'keyword', stage: 'new', stage_ts: NOW - 60 * DAY, inbox_state: 'in', inbox_since: NOW - DAY,
+      history_from: NOW - DAY - 30 * DAY,
+    });
+    await h.app.inboxMaintenance();
+    assert.deepEqual(asked, [{ leadId: 'LEAD-moved', sinceTs: NOW - DAY - 30 * DAY, untilTs: NOW }]);
+  } finally {
+    await h.close();
+  }
+});
+
 test('the upkeep takes a colleague\'s or a never-list number\'s chat out of the inbox before any history is fetched', async () => {
   const asked = [];
   const backfill = {

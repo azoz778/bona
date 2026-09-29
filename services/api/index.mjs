@@ -373,7 +373,10 @@ export function createApp(options = {}) {
             // A number that joined the team while an earlier fetch was running is not fetched.
             if (excludedLead(lead)) continue;
             const joinedAt = lead.inbox_since ?? lead.created ?? t;
-            const sinceTs = Math.max(joinedAt - JOIN_HISTORY_MS, t - RETENTION_MS);
+            // From the chat's own history floor (30 days back for an owner join), else the
+            // 24 h an automatic join keeps.
+            const floor = Number.isFinite(lead.history_from) ? lead.history_from : joinedAt - JOIN_HISTORY_MS;
+            const sinceTs = Math.max(floor, t - RETENTION_MS);
             const got = await backfill.history(lead, { sinceTs, untilTs: t });
             // Keyed like the poller's join gap (wa-poller.mjs `join`), so one join never shows two.
             const gapKey = `join:${lead.lead_id}:${joinedAt}`;

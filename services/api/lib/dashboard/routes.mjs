@@ -1092,7 +1092,8 @@ export function createDashboardRoutes({
     // Nothing to read a chat by: no jid, no lid, no phone to make a jid of.
     if (!lead.wa_jid && !lead.wa_lid && !lead.phone_e164) return answer(res, { form, back: `${leadPage}?error=not_a_chat`, status: 400, payload: { error: 'not_a_chat' } });
     const t = now();
-    inbox.setInboxState(leadId, 'in', { since: t });
+    // He vouched for it: its last 30 days may be stored, and nothing older (ingest's floor).
+    inbox.setInboxState(leadId, 'in', { since: t, historyFrom: t - OWNER_HISTORY_MS });
     // Off the owner's list of real-estate chats to check, if it was there (D17).
     inbox.removeCandidatesFor({ phone: lead.phone_e164, jid: lead.wa_jid, lid: lead.wa_lid });
     audit?.record({ userId: me.user_id, action: 'inbox_move', target: leadId });
@@ -1126,7 +1127,7 @@ export function createDashboardRoutes({
     const { lead } = createOrMergeLead(db, { phone: digits, waJid: `${digits}@s.whatsapp.net` }, {
       channel: 'whatsapp', matchMethod: 'owner_added', now: t, dataDir: cfg.dataDir,
     });
-    inbox.setInboxState(lead.lead_id, 'in', { since: t });
+    inbox.setInboxState(lead.lead_id, 'in', { since: t, historyFrom: t - OWNER_HISTORY_MS });
     // A lead now: off the owner's list of real-estate chats to check (D17).
     inbox.removeCandidatesFor({ phone: digits, jid: `${digits}@s.whatsapp.net` });
     audit?.record({ userId: me.user_id, action: 'inbox_add', target: lead.lead_id });
@@ -1162,7 +1163,7 @@ export function createDashboardRoutes({
     const { lead } = createOrMergeLead(db, { name: c.name, phone: c.phone_e164, waJid: c.jid, waLid: c.lid }, {
       channel: 'whatsapp', matchMethod: 'owner_added', now: t, dataDir: cfg.dataDir,
     });
-    inbox.setInboxState(lead.lead_id, 'in', { since: t });
+    inbox.setInboxState(lead.lead_id, 'in', { since: t, historyFrom: t - OWNER_HISTORY_MS });
     inbox.removeCandidatesFor(ids);
     audit?.record({ userId: me.user_id, action: 'inbox_move', target: c.cand_id, meta: { lead_id: lead.lead_id } });
     log({ evt: 'dash.candidate_move', candId: c.cand_id, leadId: lead.lead_id });
