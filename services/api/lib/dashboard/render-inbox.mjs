@@ -265,8 +265,9 @@ function outboxStatus(row) {
  * no phone number (an `@lid` is not something we send to), the owner's Sending switch
  * off, or replies from the dashboard not switched on yet (they ship off, design D14,
  * and only a real `true` turns them on). The form carries `send_id` (a double tap sends
- * once) and `seen_ts`, the newest message this page showed, so a reply written against
- * an old view is held back.
+ * once) and `seen_rev`, the chat's revision when this page was drawn, so a reply written
+ * against an old view is held back (lib/wa-send.mjs `reply`). `seen_ts`, the newest
+ * message this page showed, rides along too; the guard no longer reads it.
  *
  * `hidden` is how many stored messages older than the first one drawn the page leaves out
  * (the route draws every unread message, up to 1,000); the thread says so above the first
@@ -274,7 +275,7 @@ function outboxStatus(row) {
  * unconfirmed replies older than that first one too.
  */
 export function threadPage({
-  me, lead, messages, gaps = [], outbox = [], users = [], sendId, seenTs, sendingEnabled, canReply, repliesEnabled = false,
+  me, lead, messages, gaps = [], outbox = [], users = [], sendId, seenTs, seenRev, sendingEnabled, canReply, repliesEnabled = false,
   draft = '', ok = null, error = null, now = Date.now(), hidden = 0,
 }) {
   const owner = me?.role === 'owner';
@@ -352,6 +353,7 @@ export function threadPage({
     reply = `<form class="reply" method="post" action="${esc(writeHref(lead.lead_id, 'reply'))}">
   <input type="hidden" name="_dash" value="1">
   <input type="hidden" name="send_id" value="${esc(sendId)}">
+  <input type="hidden" name="seen_rev" value="${esc(seenRev)}">
   <input type="hidden" name="seen_ts" value="${esc(seenTs)}">
   <label for="r-text">${esc(owner ? 'Reply — it goes from your WhatsApp' : "Reply — it goes from the owner's WhatsApp")}</label>
   <textarea id="r-text" name="text" maxlength="${esc(MAX_TEXT_LEN)}" dir="auto" required>${esc(draft)}</textarea>

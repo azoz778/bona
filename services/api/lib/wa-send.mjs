@@ -287,13 +287,14 @@ export function createSender({
   /**
    * A team member's reply from the inbox thread (spec §4.5). Every check that can refuse
    * runs before anything is written, in this order, so the answer names the first reason.
-   * @param {{ sendId: string, leadId: string, userId: string, text: string, seenTs: number }} o
+   * @param {{ sendId: string, leadId: string, userId: string, text: string, seenRev: number }} o
+   *   `seenRev` is the chat's revision (inbox `revision`) when the writer's page was drawn.
    * @returns {Promise<{ ok: true, status: 'accepted', sendId: string, keyId: string }
    *   | { ok: false, error: string, status?: string, sendId?: string, duplicate?: true, uncertain?: true }>}
    *   `status` here is the outbox status ('accepted', 'pending', 'uncertain', 'failed') —
    *   not the HTTP status `sendTo` reports.
    */
-  async function reply({ sendId, leadId, userId, text, seenTs } = {}) {
+  async function reply({ sendId, leadId, userId, text, seenRev } = {}) {
     if (!db) throw new TypeError('reply needs the db store: pass `db` to createSender');
     if (typeof sendId !== 'string' || !SEND_ID_RE.test(sendId)) return { ok: false, error: 'bad_send_id' };
     const existing = inbox.getOutbox(sendId);
@@ -317,14 +318,17 @@ export function createSender({
     if (team.isExcludedPhone(bareDigits(jid)) || (lead.phone_e164 && team.isExcludedPhone(lead.phone_e164))) {
       return { ok: false, error: 'excluded' };
     }
-    // The form carries the newest message the writer saw. Anything newer, in either
-    // direction, means they are answering a conversation that has moved on.
-    const newest = inbox.newestTs(lead.lead_id);
-    if (!Number.isFinite(seenTs) || (newest !== null && newest > seenTs)) return { ok: false, error: 'stale' };
-    // Nor may it cross another reply to this chat that is still on its way: that one is
-    // stored only once WhatsApp answers, so two people answering the same message at the
-    // same moment would both pass the check above. A row pending for longer than a send
-    // can take was cut off by a restart (`recoverInterrupted`), not in flight.
+    // The form carries the chat's revision when the writer's page was drawn. Anything
+    // written to the thread since — a message in either direction, whatever WhatsApp
+    // stamped it, or another send to this chat, whatever became of it — means they are
+    // answering a conversation that has moved on. Not the newest message time: a reply is
+    // stored at the second its send started, so an accepted one can carry the very
+    // timestamp another page shows as its newest, and that page would pass.
+    if (!Number.isSafeInteger(seenRev) || inbox.revision(lead.lead_id) > seenRev) return { ok: false, error: 'stale' };
+    // Nor may it cross another reply to this chat that is still on its way, even one the
+    // page showed as such: that one is stored only once WhatsApp answers. A row pending for
+    // longer than a send can take was cut off by a restart (`recoverInterrupted`), not in
+    // flight.
     const onItsWay = inbox.openOutboxFor(lead.lead_id, { sinceTs: now() - INTERRUPTED_MS }).some((r) => r.status === 'pending');
     if (onItsWay) return { ok: false, error: 'stale' };
     // The author, read again as the last thing before the row: a member deactivated while

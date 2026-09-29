@@ -159,6 +159,33 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
   }
 
   const newestTs = (leadId) => prep('SELECT MAX(ts) AS ts FROM wa_messages WHERE lead_id = ?').get(String(leadId ?? '')).ts ?? null;
+  /**
+   * A whole number that grows whenever something is written to one chat's thread that a
+   * person must see before answering it: a stored message (either direction, whatever its
+   * WhatsApp timestamp) or a staff or Dana send of any status (one still on its way, or
+   * "not sure it went"). The reply form carries the revision its page was drawn at, and
+   * the sender holds a reply as `stale` once it is higher (lib/wa-send.mjs `reply`).
+   * Timestamps cannot do this job: WhatsApp stamps whole seconds, a reply is stored at the
+   * second its send started, and a message read late can carry any time at all.
+   *
+   * It is the sum of the chat's highest `rowid` in `wa_messages` and in its staff/Dana
+   * `wa_outbox` rows. Neither table has AUTOINCREMENT, so SQLite gives a new row the
+   * table's highest rowid + 1 — above every row there, this chat's included. A message
+   * seen again (`upsertMessage`'s ON CONFLICT) or a send settled (`updateOutbox`) keeps its
+   * rowid, so neither counts as news. Each maximum can only fall when rows of this chat
+   * are deleted, and only `purgeLead` does that: when the chat leaves the inbox (a reply
+   * to it is then refused `not_in_inbox`), and in the 5-year retention purge. After a
+   * purge a rowid freed at the top of a table can be handed out again, so a page drawn
+   * before the chat left and was moved back in could, in principle, match a revision
+   * after it. Gaps are left out: one is deleted when its message is stored after all, and
+   * the message then counts.
+   */
+  const revision = (leadId) => {
+    const id = String(leadId ?? '');
+    return prep(`SELECT (SELECT COALESCE(MAX(rowid), 0) FROM wa_messages WHERE lead_id = ?)
+                      + (SELECT COALESCE(MAX(rowid), 0) FROM wa_outbox WHERE lead_id = ? AND sender_kind IN ('staff','dana')) AS rev`)
+      .get(id, id).rev;
+  };
   const hasMessages = (leadId) => Boolean(prep('SELECT 1 FROM wa_messages WHERE lead_id = ? LIMIT 1').get(String(leadId ?? '')));
   /** Every stored message of one chat, both directions. */
   const countMessages = (leadId) => prep('SELECT COUNT(*) AS n FROM wa_messages WHERE lead_id = ?').get(String(leadId ?? '')).n;
@@ -647,7 +674,7 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
   }
 
   return {
-    upsertMessage, messagesFor, newestTs, hasMessages, countMessages, unreadSpan, messageByKey,
+    upsertMessage, messagesFor, newestTs, revision, hasMessages, countMessages, unreadSpan, messageByKey,
     insertOutbox, getOutbox, outboxByKey, updateOutbox, resolveUncertain, openOutboxFor, countSentSince, markStalePending, pruneCodeRows,
     markRead, listInbox, unreadTotal, listUnsure, countUnsure, inChatsWithoutMessages, listedLeads,
     addGap, gapsFor, clearGap, clearJoinGaps,

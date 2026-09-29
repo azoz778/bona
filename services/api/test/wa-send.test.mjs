@@ -84,7 +84,12 @@ function seedChat(h, patch = {}) {
 }
 
 const staffOf = (h) => h.team.addUser({ name: 'Sara', phone: '966500000077' });
-const replyArgs = (staff, patch = {}) => ({ sendId: SID, leadId: 'L-1', userId: staff.user_id, text: 'hello', seenTs: NOW - 60_000, ...patch });
+/**
+ * The revision `seedChat` leaves L-1 at: its one message is the chat's first row. A test
+ * that stores more in L-1 before replying passes the revision its page was drawn at.
+ */
+const SEEN_REV = 1;
+const replyArgs = (staff, patch = {}) => ({ sendId: SID, leadId: 'L-1', userId: staff.user_id, text: 'hello', seenRev: SEEN_REV, ...patch });
 
 /* ------------------------------ the gate (Phase 1, kept) ------------------------------ */
 
@@ -343,7 +348,7 @@ test('createSender needs the inbox store; reply also needs the db', async () => 
   assert.throws(() => createSender({ env: ENV, team }), TypeError);
   assert.throws(() => createSender({ env: ENV, inbox: createInboxStore(s) }), TypeError);
   const noDb = createSender({ env: ENV, team, inbox: createInboxStore(s), fetchImpl: async () => { throw new Error('never called'); } });
-  await assert.rejects(noDb.reply({ sendId: SID, leadId: 'L-1', userId: 'U', text: 'x', seenTs: 0 }), TypeError);
+  await assert.rejects(noDb.reply({ sendId: SID, leadId: 'L-1', userId: 'U', text: 'x', seenRev: 0 }), TypeError);
   s.close();
 });
 
@@ -549,6 +554,7 @@ test('reply: sent to the phone jid, stored as the member\'s message, and the cha
   const h = harness();
   const staff = staffOf(h);
   seedChat(h, { needs_human: 1 });
+  assert.equal(h.inbox.revision('L-1'), SEEN_REV, 'the revision replyArgs says its page was drawn at');
   const out = await h.sender.reply(replyArgs(staff));
   assert.deepEqual(out, { ok: true, status: 'accepted', sendId: SID, keyId: 'KEY-1' });
   assert.equal(h.calls.length, 1);
@@ -591,11 +597,11 @@ test('reply: stored at the moment its send started, to the whole second — a cl
   assert.equal(mine.ts, NOW, "the outbox row's created, floored to the second — not the moment WhatsApp answered");
   assert.deepEqual(h.inbox.messagesFor('L-1').map((m) => m.key_id), ['IN-L-1', 'KEY-1', 'IN-during'], 'the client\'s message reads after the reply that never saw it');
   assert.equal(h.inbox.newestTs('L-1'), NOW + 1_000);
-  // The writer's page, drawn with their reply as the newest they saw, still counts it unread…
+  // A read mark up to the writer's own reply still counts the client's message unread…
   h.inbox.markRead(staff.user_id, 'L-1', mine.ts);
   assert.equal(h.inbox.listInbox({ userId: staff.user_id }).find((l) => l.lead_id === 'L-1').unread, 1);
-  // …and a reply from that page is held as stale until they have read it.
-  assert.deepEqual(await h.sender.reply(replyArgs(staff, { sendId: 'sid_fedcba9876543210', seenTs: mine.ts })), { ok: false, error: 'stale' });
+  // …and another reply from the page the first was written on is held as stale.
+  assert.deepEqual(await h.sender.reply(replyArgs(staff, { sendId: 'sid_fedcba9876543210' })), { ok: false, error: 'stale' });
   assert.equal(h.s.getLead('L-1').first_reply_ts, NOW + 3_700, "the watchdog's first reply is when WhatsApp took it");
   h.s.close();
 });
@@ -760,18 +766,77 @@ test('reply: excluded for a team number or a never-list number, even on an in ch
   h.s.close();
 });
 
-test('reply: stale when a newer message exists (either direction) or the form did not say what it saw', async () => {
+test('reply: stale when a newer message exists (either direction) or the form did not say what revision it saw', async () => {
   const h = harness();
   const staff = staffOf(h);
   seedChat(h);
   h.inbox.upsertMessage({ key_id: 'OUT-phone', lead_id: 'L-1', jid: CLIENT_JID, direction: 'out', sender_kind: 'owner_number', text: 'on it', ts: NOW - 10_000 });
   assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: false, error: 'stale' }, 'the owner answered from his phone meanwhile');
-  for (const seenTs of [undefined, null, NaN, String(NOW)]) {
-    assert.deepEqual(await h.sender.reply(replyArgs(staff, { seenTs })), { ok: false, error: 'stale' }, String(seenTs));
+  const current = h.inbox.revision('L-1');
+  for (const seenRev of [undefined, null, NaN, Infinity, -Infinity, 1.5, String(current), [current], {}]) {
+    assert.deepEqual(await h.sender.reply(replyArgs(staff, { seenRev })), { ok: false, error: 'stale' }, String(seenRev));
   }
   assert.equal(h.calls.length, 0);
   assert.equal(outboxRows(h).length, 0);
-  assert.equal((await h.sender.reply(replyArgs(staff, { seenTs: NOW - 10_000 }))).ok, true, 'having seen the newest, it goes');
+  assert.equal((await h.sender.reply(replyArgs(staff, { seenRev: current }))).ok, true, 'having seen the newest, it goes');
+  h.s.close();
+});
+
+test('reply: a second member on a page drawn before an accepted reply is stale, though that reply is stored in the same second as the newest message both saw', async () => {
+  // WhatsApp takes three seconds to answer, as in the reproduction.
+  const h = harness({ reply: () => { h.tick(3_000); return { status: 201, body: { key: { id: 'KEY-1' } } }; } });
+  const sara = staffOf(h);
+  const omar = h.team.addUser({ name: 'Omar', phone: '966500000088' });
+  seedChat(h);
+  // The newest message, stamped T on a whole second as WhatsApp stamps them.
+  const T = NOW;
+  h.inbox.upsertMessage({ key_id: 'IN-T', lead_id: 'L-1', jid: CLIENT_JID, direction: 'in', sender_kind: 'client', text: 'still free?', ts: T });
+  // Sara and Omar both draw the chat now: revision R, newest message T.
+  const R = h.inbox.revision('L-1');
+  h.tick(700);
+  const first = await h.sender.reply(replyArgs(sara, { seenRev: R }));
+  assert.deepEqual(first, { ok: true, status: 'accepted', sendId: SID, keyId: 'KEY-1' });
+  assert.equal(h.inbox.messageByKey('KEY-1').ts, T, "stored at the second its send started: T+700 ms floors to T");
+  assert.equal(h.inbox.newestTs('L-1'), T, "so no timestamp can tell that Omar's page is out of date");
+  const OTHER_SID = 'sid_fedcba9876543210';
+  assert.deepEqual(await h.sender.reply(replyArgs(omar, { sendId: OTHER_SID, seenRev: R })), { ok: false, error: 'stale' });
+  assert.equal(h.calls.length, 1, 'the client got one answer, not two');
+  assert.equal(h.inbox.getOutbox(OTHER_SID), null, 'nothing written for the refused one');
+  h.s.close();
+});
+
+test('reply: stale when a message is stored after the page was drawn, whatever its timestamp; a page drawn after it sends', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  seedChat(h);
+  const drawn = h.inbox.revision('L-1');
+  // The poller stores a client message it read late, stamped in the same second as the
+  // newest message the page showed.
+  h.inbox.upsertMessage({ key_id: 'IN-late', lead_id: 'L-1', jid: CLIENT_JID, direction: 'in', sender_kind: 'client', text: 'and parking?', ts: NOW - 60_000 });
+  assert.deepEqual(await h.sender.reply(replyArgs(staff, { seenRev: drawn })), { ok: false, error: 'stale' });
+  assert.equal(h.calls.length, 0);
+  assert.equal(outboxRows(h).length, 0);
+  assert.equal((await h.sender.reply(replyArgs(staff, { seenRev: h.inbox.revision('L-1') }))).ok, true, 'drawn after everything, it goes');
+  assert.equal(h.calls.length, 1);
+  h.s.close();
+});
+
+test('reply: stale when another member\'s send that may have gone was written after the page was drawn', async () => {
+  const h = harness({ reply: (n) => (n === 1 ? { status: 504 } : { status: 201, body: { key: { id: 'KEY-2' } } }) });
+  const sara = staffOf(h);
+  const omar = h.team.addUser({ name: 'Omar', phone: '966500000088' });
+  seedChat(h);
+  const drawn = h.inbox.revision('L-1');
+  assert.equal((await h.sender.reply(replyArgs(sara, { seenRev: drawn }))).uncertain, true);
+  // Nothing new in the stored thread: only the outbox row that says "not sure it went".
+  assert.equal(h.inbox.newestTs('L-1'), NOW - 60_000);
+  const OTHER_SID = 'sid_fedcba9876543210';
+  assert.deepEqual(await h.sender.reply(replyArgs(omar, { sendId: OTHER_SID, seenRev: drawn })), { ok: false, error: 'stale' });
+  assert.equal(h.inbox.getOutbox(OTHER_SID), null, 'nothing written for the refused one');
+  assert.equal(h.calls.length, 1);
+  // A page drawn after it shows that bubble; from there the reply goes.
+  assert.equal((await h.sender.reply(replyArgs(omar, { sendId: OTHER_SID, seenRev: h.inbox.revision('L-1') }))).ok, true);
+  assert.equal(h.calls.length, 2);
   h.s.close();
 });
 
@@ -800,8 +865,8 @@ test('reply: the member is read again right before the outbox row, after the sta
   const staff = staffOf(h);
   seedChat(h);
   // The last thing read before the row is written: deactivated at that moment, nothing goes.
-  const realNewest = h.inbox.newestTs;
-  const inbox = { ...h.inbox, newestTs: (id) => { h.team.deactivateUser(staff.user_id); return realNewest(id); } };
+  const realRevision = h.inbox.revision;
+  const inbox = { ...h.inbox, revision: (id) => { h.team.deactivateUser(staff.user_id); return realRevision(id); } };
   const sender = createSender({ env: ENV, team: h.team, inbox, db: h.s, fetchImpl: async () => { throw new Error('must not be called'); }, now: h.now });
   assert.deepEqual(await sender.reply(replyArgs(staff)), { ok: false, error: 'inactive_user' });
   assert.equal(outboxRows(h).length, 0);
@@ -984,10 +1049,12 @@ test('reply: stale while another reply to the chat is on its way; a send stuck p
   const member = staffOf(k);
   seedChat(k);
   k.inbox.insertOutbox({ send_id: 'SND-stuck', lead_id: 'L-1', jid: CLIENT_JID, text: 'x', user_id: member.user_id, sender_kind: 'staff' });
+  // A page drawn with the stuck row on it: only the row's age decides.
+  const drawn = k.inbox.revision('L-1');
   k.tick(120_000);
-  assert.deepEqual(await k.sender.reply(replyArgs(member)), { ok: false, error: 'stale' }, 'two minutes exactly');
+  assert.deepEqual(await k.sender.reply(replyArgs(member, { seenRev: drawn })), { ok: false, error: 'stale' }, 'two minutes exactly');
   k.tick(1);
-  assert.equal((await k.sender.reply(replyArgs(member))).ok, true, 'past that it was cut off, not on its way');
+  assert.equal((await k.sender.reply(replyArgs(member, { seenRev: drawn }))).ok, true, 'past that it was cut off, not on its way');
   k.s.close();
 });
 
@@ -999,9 +1066,9 @@ test('reply: a chat purged and moved back in never sends an old form again, and 
   h.inbox.leaveInbox('L-1');
   assert.equal(h.inbox.countSentSince(NOW - DAY), 1, 'the reply went, so it still counts');
   // The owner moves it back in, and the history has not come back (Evolution down, say),
-  // so the stale check has nothing newer to see.
+  // so the stale check has nothing newer to see: the purge took the chat's revision to 0.
   h.inbox.setInboxState('L-1', 'in');
-  assert.equal(h.inbox.newestTs('L-1'), null);
+  assert.equal(h.inbox.revision('L-1'), 0);
   assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: false, error: 'bad_send_id' });
   assert.equal(h.calls.length, 1);
   h.s.close();
@@ -1049,6 +1116,7 @@ test('recoverInterrupted: a reply the last process left pending seconds ago no l
   h.tick(5_000);
   assert.equal(h.sender.recoverInterrupted(), 1);
   assert.equal(h.inbox.getOutbox('SND-cut-off').status, 'uncertain');
-  assert.equal((await h.sender.reply(replyArgs(staff))).ok, true, 'shown as "not sure it went", not as a send on its way');
+  const drawn = h.inbox.revision('L-1');
+  assert.equal((await h.sender.reply(replyArgs(staff, { seenRev: drawn }))).ok, true, 'shown as "not sure it went", not as a send on its way');
   h.s.close();
 });

@@ -173,6 +173,51 @@ test('newestTs and hasMessages look at one chat only', () => {
   s.close();
 });
 
+test('revision grows with every message and every staff or Dana send written for one chat, never with one seen again or settled', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-1');
+  chat(s, 'L-2', { wa_jid: '966500000002@s.whatsapp.net' });
+  assert.equal(inbox.revision('L-1'), 0, 'nothing stored yet');
+  let last = 0;
+  const grew = (label) => {
+    const r = inbox.revision('L-1');
+    assert.ok(Number.isSafeInteger(r), `${label}: a whole number`);
+    assert.ok(r > last, `${label}: ${r} > ${last}`);
+    last = r;
+  };
+  const same = (label) => assert.equal(inbox.revision('L-1'), last, label);
+
+  inbox.upsertMessage(msg({ key_id: 'K-1', ts: NOW }));
+  grew('a message');
+  // Timestamps cannot tell these apart from what a page already showed; the revision can.
+  inbox.upsertMessage(msg({ key_id: 'K-2', ts: NOW, direction: 'out', sender_kind: 'owner_number' }));
+  grew('a message in the same second as the newest');
+  inbox.upsertMessage(msg({ key_id: 'K-0', ts: NOW - 5_000 }));
+  grew('a message stamped before the newest');
+  inbox.upsertMessage(msg({ key_id: 'K-2', ts: NOW, direction: 'out', sender_kind: 'staff', sender_user_id: 'USR-1', status: 'sent' }));
+  same('a message seen again — its sender corrected, its status set — is nothing new');
+
+  inbox.insertOutbox(out({ send_id: 'SND-1' }));
+  grew('a staff send on its way');
+  inbox.updateOutbox('SND-1', { status: 'uncertain', error: 'timeout' });
+  same('a send settled is nothing new');
+  inbox.insertOutbox(out({ send_id: 'SND-2', sender_kind: 'dana', status: 'failed' }));
+  grew('a Dana send, whatever its status');
+
+  inbox.upsertMessage(msg({ key_id: 'K-other', lead_id: 'L-2', jid: '966500000002@s.whatsapp.net' }));
+  inbox.insertOutbox(out({ send_id: 'SND-other', lead_id: 'L-2' }));
+  inbox.insertOutbox(out({ send_id: 'SND-code', lead_id: null, sender_kind: 'code', text: null }));
+  inbox.insertOutbox(out({ send_id: 'SND-note', sender_kind: 'note' }));
+  same("another chat's messages and sends, a login code and a note are not this chat's thread");
+  assert.ok(inbox.revision('L-2') > 0);
+  inbox.upsertMessage(msg({ key_id: 'K-3', ts: NOW + 1_000 }));
+  grew('a message after rows of other chats');
+
+  assert.equal(inbox.revision('L-nope'), 0);
+  assert.equal(inbox.revision(null), 0);
+  s.close();
+});
+
 test('messageByKey returns the stored message with that WhatsApp id, or null', () => {
   const { s, inbox } = harness();
   chat(s, 'L-1');
