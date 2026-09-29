@@ -82,7 +82,7 @@ render() {
   out=${out//@TUNNEL_ID@/"$BONA_TUNNEL_ID"}
   out=${out//@EVOLUTION_URL@/"$BONA_VPS_EVOLUTION_URL"}
   out=${out//@GIT@/"$GIT_BIN"}
-  if printf '%s\n' "$out" | grep -q '@[A-Z_][A-Z_]*@'; then die "unrendered placeholder in $1"; fi
+  if printf '%s\n' "$out" | grep '@[A-Z_][A-Z_]*@' >/dev/null; then die "unrendered placeholder in $1"; fi
   printf '%s\n' "$out"
 }
 
