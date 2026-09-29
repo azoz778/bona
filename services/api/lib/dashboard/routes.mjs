@@ -439,6 +439,41 @@ export function createDashboardRoutes({
     return { counts, dests };
   }
 
+  /* -------------------- who sees which lead -------------------- */
+  //
+  // An owner sees every lead. Anyone else sees only the leads of the Bona inbox: `in`, and
+  // not under a colleague's or a never-list number (lib/team.mjs `isExcludedLead`). Every
+  // other lead — a guess on the Unsure list, "not a client", one nobody has placed yet, a
+  // TK or private chat that is a lead only for the statistics — is to them a lead that does
+  // not exist: on no list, in no count, and 404 on its page, its JSON and its stage and
+  // note writes. Its touchpoints keep the first message's snippet, so they are never shown
+  // either. The aggregates (charts, sources, pipeline counts, response times) stay as they
+  // are: numbers, with no person in them.
+
+  const ownerSees = (me) => me?.role === 'owner';
+  /** A lead of the Bona inbox: the only kind a staff member sees. */
+  const inBonaInbox = (lead) => Boolean(lead) && lead.inbox_state === 'in' && !isExcludedLead(team, db, lead);
+  /** The lead as `me` may see it, else null — the same null as a lead that does not exist. */
+  function leadFor(me, leadId) {
+    const lead = db.getLead(leadId);
+    return lead && (ownerSees(me) || inBonaInbox(lead)) ? lead : null;
+  }
+  /** Rows per read of a staff member's filtered list: the most `waitingLeads` gives at once. */
+  const STAFF_PAGE = 500;
+  /**
+   * Every lead `page` gives that a staff member may see, in its order: `in` leads from SQL,
+   * each then put to the exclusion test, read to the end so a count is a count, not a slice.
+   * @param {(o: { inboxState: 'in', limit: number, offset: number }) => object[]} page
+   */
+  function staffRows(page) {
+    const out = [];
+    for (let offset = 0; ; offset += STAFF_PAGE) {
+      const rows = page({ inboxState: 'in', limit: STAFF_PAGE, offset });
+      for (const lead of rows) if (inBonaInbox(lead)) out.push(lead);
+      if (rows.length < STAFF_PAGE) return out;
+    }
+  }
+
   /* -------------------- HTML pages -------------------- */
 
   function overview({ res, url, me }) {
@@ -446,7 +481,8 @@ export function createDashboardRoutes({
     // Every section is fetched defensively: one failing aggregate must not take the
     // whole desk page down, and the queue at the top is the part the owner actually
     // needs. `waitingTotal` is a real COUNT(*) — `waiting` is capped at 50, so its
-    // length is a slice and must never be rendered as the headline number.
+    // length is a slice and must never be rendered as the headline number. A staff
+    // member's queue is the Bona inbox's leads only, counted row by row.
     const safe = (label, fn, fallback) => {
       try {
         return fn();
@@ -455,6 +491,7 @@ export function createDashboardRoutes({
         return fallback;
       }
     };
+    const staffWaiting = ownerSees(me) ? null : safe('waiting', () => staffRows((o) => db.waitingLeads(o)), null);
     return sendHtml(res, 200, overviewPage({
       days,
       daily: safe('daily', () => statistics.overviewDaily(days), []),
@@ -462,8 +499,8 @@ export function createDashboardRoutes({
       matchQuality: safe('matchQuality', () => statistics.matchQuality(), []),
       pipeline: safe('pipeline', () => statistics.pipeline(), []),
       responseTimes: safe('responseTimes', () => statistics.responseTimes(), { median_min: null, p90_min: null, count: 0 }),
-      waiting: safe('waiting', () => db.waitingLeads({ limit: 50 }), []),
-      waitingTotal: safe('waitingTotal', () => db.countWaitingLeads(), null),
+      waiting: ownerSees(me) ? safe('waiting', () => db.waitingLeads({ limit: 50 }), []) : (staffWaiting ?? []).slice(0, 50),
+      waitingTotal: ownerSees(me) ? safe('waitingTotal', () => db.countWaitingLeads(), null) : (staffWaiting?.length ?? null),
       now: now(),
       me,
     }));
@@ -476,21 +513,25 @@ export function createDashboardRoutes({
     const stage = STAGES.includes(url.searchParams.get('stage')) ? url.searchParams.get('stage') : '';
     const q = String(url.searchParams.get('q') ?? '').slice(0, 100);
     const board = Object.fromEntries(STAGES.map((s) => [s, []]));
-    for (const lead of db.listLeads({ limit: BOARD_CARDS })) board[lead.stage]?.push(lead);
+    // A staff member's board, list and total are the Bona inbox's leads only; the stage
+    // counts are the pipeline's aggregate for everyone.
+    const mine = ownerSees(me) ? null : staffRows((o) => db.listLeads(o));
+    for (const lead of mine ? mine.slice(0, BOARD_CARDS) : db.listLeads({ limit: BOARD_CARDS })) board[lead.stage]?.push(lead);
     // The cards are the newest few hundred leads; the number on the column heading is the
     // truth. A count that quietly becomes a slice is worse than a slow page.
     const counts = Object.fromEntries(statistics.pipeline().map((p) => [p.stage, p.count]));
+    const filter = { stage: stage || null, q: q || null };
     return sendHtml(res, 200, leadsPage({
       board,
       counts,
-      leads: db.listLeads({ stage: stage || null, q: q || null, limit: 200 }),
-      stage, q, now: now(), total: db.countLeads(),
+      leads: mine ? staffRows((o) => db.listLeads({ ...o, ...filter })).slice(0, 200) : db.listLeads({ ...filter, limit: 200 }),
+      stage, q, now: now(), total: mine ? mine.length : db.countLeads(),
       me,
     }));
   }
 
   function leadDetail({ res, url, me }, leadId) {
-    const lead = db.getLead(leadId);
+    const lead = leadFor(me, leadId);
     if (!lead) return sendHtml(res, 404, messagePage({ title: 'Not found', message: 'No lead with that id.', me }));
     const saved = url.searchParams.get('ok');
     const error = url.searchParams.get('error');
@@ -600,7 +641,7 @@ export function createDashboardRoutes({
     (form ? redirect(res, back) : sendJson(res, status, payload));
 
   function setStage({ res, fields, form, me }, leadId) {
-    const lead = db.getLead(leadId);
+    const lead = leadFor(me, leadId);
     if (!lead) return answer(res, { form, back: '/dashboard/leads', status: 404, payload: { error: 'not_found' } });
 
     const stage = String(fields.stage ?? '');
@@ -632,7 +673,7 @@ export function createDashboardRoutes({
   }
 
   function addNote({ res, fields, form, me }, leadId) {
-    const lead = db.getLead(leadId);
+    const lead = leadFor(me, leadId);
     const back = `/dashboard/leads/${encodeURIComponent(leadId)}`;
     if (!lead) return answer(res, { form, back: '/dashboard/leads', status: 404, payload: { error: 'not_found' } });
     const note = trimTo(fields.note, MAX_NOTE);
@@ -686,17 +727,24 @@ export function createDashboardRoutes({
     return sendJson(res, 200, statistics.overview(days));
   }
 
-  function adminLeads({ res, url }) {
+  function adminLeads({ res, url, me }) {
     const stageParam = url.searchParams.get('stage');
     const stage = STAGES.includes(stageParam) ? stageParam : null;
     const q = String(url.searchParams.get('q') ?? '').slice(0, 100) || null;
     const limit = Math.max(1, Math.min(500, Number(url.searchParams.get('limit')) || 100));
+    if (!ownerSees(me)) {
+      // `total` counts by stage alone, as the owner's does; both only what staff may see.
+      const rows = staffRows((o) => db.listLeads({ ...o, stage, q }));
+      const total = q ? staffRows((o) => db.listLeads({ ...o, stage })).length : rows.length;
+      const shown = rows.slice(0, limit);
+      return sendJson(res, 200, { count: shown.length, total, leads: shown.map(withMaskedPhone) });
+    }
     const rows = db.listLeads({ stage, q, limit });
     return sendJson(res, 200, { count: rows.length, total: db.countLeads({ stage }), leads: rows.map(withMaskedPhone) });
   }
 
-  function adminLead({ res }, leadId) {
-    const lead = db.getLead(leadId);
+  function adminLead({ res, me }, leadId) {
+    const lead = leadFor(me, leadId);
     if (!lead) return sendJson(res, 404, { error: 'not_found' });
     return sendJson(res, 200, {
       lead: withFullPhone(lead),
@@ -1197,7 +1245,8 @@ export function createDashboardRoutes({
   }
 
   async function handleAdmin({ req, res, url, p, ip }) {
-    if (!currentUser(req)) return sendJson(res, 401, { error: 'unauthorised' });
+    const viewer = currentUser(req);
+    if (!viewer) return sendJson(res, 401, { error: 'unauthorised' });
     // A stated foreign origin on a route that answers with the owner's leads is refused
     // whatever the method — CORS would stop a browser reading it, but not a script that
     // is not a browser, and this costs nothing.
@@ -1210,9 +1259,9 @@ export function createDashboardRoutes({
 
     if (req.method === 'GET' || req.method === 'HEAD') {
       if (p === '/v1/admin/stats') return adminStats({ res, url });
-      if (p === '/v1/admin/leads') return adminLeads({ res, url });
+      if (p === '/v1/admin/leads') return adminLeads({ res, url, me: viewer });
       if (p === '/v1/admin/listings') return adminListings({ res });
-      if (leadMatch && !leadMatch[2]) return adminLead({ res }, leadMatch[1]);
+      if (leadMatch && !leadMatch[2]) return adminLead({ res, me: viewer }, leadMatch[1]);
       return sendJson(res, 404, { error: 'not_found' });
     }
 

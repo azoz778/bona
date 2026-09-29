@@ -144,11 +144,18 @@ async function withInbox(fn) {
     return `bona_dash=${cookieOf(verified, 'bona_dash')}`;
   }
 
+  /** A JSON write, marked with the header our own scripts would send. */
+  const postJson = (p, body, { cookie } = {}) => go(p, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Bona-Dash': '1', ...(cookie ? { Cookie: cookie } : {}) },
+    body: JSON.stringify(body),
+  });
+
   const staffUser = team.addUser({ name: 'Sara', phone: STAFF_PHONE, role: 'staff' });
   const owner = team.getUserByPhone(OWNER_PHONE);
   try {
     await fn({
-      app, db, team, inboxStore, evo, spy, notes, logs, staffUser, owner, get, postForm,
+      app, db, team, inboxStore, evo, spy, notes, logs, staffUser, owner, get, postForm, postJson,
       staff: () => login('0500000001'),
       boss: () => login('0593296933'),
       tick: (ms) => { clock += ms; },
@@ -229,6 +236,105 @@ test('the inbox lists only chats that are in, to everyone; the Unsure list is th
     assert.ok(list.includes('Umar Unsure'));
     assert.ok(!list.includes('Alya Client'), 'the Unsure list is the guesses only');
     assert.ok(!list.includes('Noor Never Guess'));
+  });
+});
+
+/**
+ * seedScene plus an undecided lead (no inbox state yet), and the first-message snippets
+ * the lead_created touchpoints keep: the one a staff member must never read, and one they may.
+ */
+function seedLeadsScene(h) {
+  seedScene(h);
+  seedChat(h, { id: 'LEAD-X', name: 'Xena Undecided', phone: '966500000083', state: null });
+  h.db.addTouchpoint({ lead_id: 'LEAD-U', ts: NOW - 3_600_000, channel: 'whatsapp', event_type: 'lead_created', meta: { snippet: 'umar secret words' } });
+  h.db.addTouchpoint({ lead_id: 'LEAD-A', ts: NOW - 3_600_000, channel: 'whatsapp', event_type: 'lead_created', meta: { snippet: 'alya first words' } });
+}
+/** Staff see the leads that are in the Bona inbox (a chat or not yet), and nothing else. */
+const STAFF_SEES = { 'LEAD-A': 'Alya Client', 'LEAD-L': 'Layla Lid', 'LEAD-F': 'Farah Form' };
+/** Unsure, out, undecided, and `in` under a never-list or a colleague's number. */
+const STAFF_NEVER = { 'LEAD-U': 'Umar Unsure', 'LEAD-O': 'Omar Out', 'LEAD-X': 'Xena Undecided', 'LEAD-N': 'Nadia Never', 'LEAD-T': 'Tariq Team' };
+
+test('staff see only Bona-inbox leads on the Leads board and list, and on the Desk; the owner sees every lead', async () => {
+  await withInbox(async (h) => {
+    seedLeadsScene(h);
+    const staff = await h.staff();
+    const boss = await h.boss();
+    for (const p of ['/dashboard/leads', '/dashboard/leads?stage=new', '/dashboard/leads?q=a']) {
+      const html = await (await h.get(p, { cookie: staff })).text();
+      for (const [id, name] of Object.entries(STAFF_SEES)) assert.ok(html.includes(name) && html.includes(id), `${p}: ${name}`);
+      for (const [id, name] of Object.entries(STAFF_NEVER)) assert.ok(!html.includes(name) && !html.includes(id), `${p}: ${name}`);
+      assert.ok(!html.includes('umar secret words'), p);
+    }
+    // The list's own count is what staff may see; the stage counts are the pipeline's
+    // aggregate and stay as they are.
+    assert.match(await (await h.get('/dashboard/leads', { cookie: staff })).text(), /3 leads\. 3 are waiting on your first reply\./);
+    const all = await (await h.get('/dashboard/leads', { cookie: boss })).text();
+    for (const name of [...Object.values(STAFF_SEES), ...Object.values(STAFF_NEVER)]) assert.ok(all.includes(name), name);
+    assert.match(all, /8 leads\. 8 are waiting on your first reply\./);
+
+    // The Desk: the waiting queue and its count.
+    const desk = await (await h.get('/dashboard', { cookie: staff })).text();
+    assert.match(desk, /Waiting on you<\/u><b class="alert"><span class="n">3<\/span>/);
+    for (const name of Object.values(STAFF_NEVER)) assert.ok(!desk.includes(name), `Desk: ${name}`);
+    assert.match(await (await h.get('/dashboard', { cookie: boss })).text(), /Waiting on you<\/u><b class="alert"><span class="n">8<\/span>/);
+  });
+});
+
+test('staff cannot open, read over JSON, move or note a lead outside the Bona inbox: it answers as one that does not exist', async () => {
+  await withInbox(async (h) => {
+    seedLeadsScene(h);
+    const staff = await h.staff();
+    const boss = await h.boss();
+    const nope = await (await h.get('/dashboard/leads/LEAD-nope', { cookie: staff })).text();
+    for (const id of Object.keys(STAFF_NEVER)) {
+      const page = await h.get(`/dashboard/leads/${id}`, { cookie: staff });
+      assert.equal(page.status, 404, id);
+      assertLocked(page);
+      assert.equal(await page.text(), nope, `${id}: the same page as a lead that does not exist`);
+      const json = await h.get(`/v1/admin/leads/${id}`, { cookie: staff });
+      assert.equal(json.status, 404, id);
+      assert.deepEqual(await json.json(), { error: 'not_found' }, id);
+      assert.equal((await h.get(`/dashboard/leads/${id}`, { cookie: boss })).status, 200, `${id}: the owner still opens it`);
+
+      const stage = await h.postJson(`/v1/admin/leads/${id}/stage`, { stage: 'contacted' }, { cookie: staff });
+      assert.equal(stage.status, 404, id);
+      assert.deepEqual(await stage.json(), { error: 'not_found' }, id);
+      const note = await h.postJson(`/v1/admin/leads/${id}/note`, { note: 'called' }, { cookie: staff });
+      assert.equal(note.status, 404, id);
+      assert.deepEqual(await note.json(), { error: 'not_found' }, id);
+      // A form answers as it does for a lead that does not exist: back to the list.
+      const form = await h.postForm(`/v1/admin/leads/${id}/stage`, { stage: 'contacted' }, { cookie: staff });
+      assert.equal(form.status, 303, id);
+      assert.equal(form.headers.get('location'), '/dashboard/leads', id);
+      assert.equal(h.db.getLead(id).stage, 'new', `${id}: not moved`);
+      assert.ok(!h.db.touchpointsForLead(id).some((tp) => tp.event_type === 'note'), `${id}: no note`);
+    }
+    assert.ok(!h.app.audit.recent(50).some((r) => r.action === 'stage' || r.action === 'note'), 'nothing to audit');
+
+    // The JSON list, and a lead staff may see, whose touchpoints they may read.
+    const list = await (await h.get('/v1/admin/leads', { cookie: staff })).json();
+    assert.deepEqual(list.leads.map((l) => l.lead_id).sort(), Object.keys(STAFF_SEES).sort());
+    assert.equal(list.count, 3);
+    assert.equal(list.total, 3);
+    const staged = await (await h.get('/v1/admin/leads?stage=new', { cookie: staff })).json();
+    assert.equal(staged.total, 3);
+    assert.ok(!JSON.stringify(list).includes('umar secret words'));
+    const alya = await h.get('/v1/admin/leads/LEAD-A', { cookie: staff });
+    assert.equal(alya.status, 200);
+    assert.ok(JSON.stringify(await alya.json()).includes('alya first words'));
+    assert.equal((await h.postJson('/v1/admin/leads/LEAD-A/stage', { stage: 'contacted' }, { cookie: staff })).status, 200);
+    assert.equal((await h.postJson('/v1/admin/leads/LEAD-A/note', { note: 'called' }, { cookie: staff })).status, 200);
+
+    // The owner reads and moves every lead, as before, snippet included.
+    const everyone = await (await h.get('/v1/admin/leads', { cookie: boss })).json();
+    assert.equal(everyone.count, 8);
+    assert.equal(everyone.total, 8);
+    const umar = await h.get('/v1/admin/leads/LEAD-U', { cookie: boss });
+    assert.equal(umar.status, 200);
+    assert.ok(JSON.stringify(await umar.json()).includes('umar secret words'));
+    assert.equal((await h.postJson('/v1/admin/leads/LEAD-U/stage', { stage: 'contacted' }, { cookie: boss })).status, 200);
+    assert.equal((await h.postJson('/v1/admin/leads/LEAD-U/note', { note: 'called' }, { cookie: boss })).status, 200);
+    assert.equal(h.db.getLead('LEAD-U').stage, 'contacted');
   });
 });
 

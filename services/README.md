@@ -746,6 +746,18 @@ Phone numbers are masked to `…6933` in every list — pages and JSON alike —
 on `GET /dashboard/leads/:id`, `GET /v1/admin/leads/:id` and the header of a chat
 (`GET /dashboard/inbox/:leadId`).
 
+**Who sees which lead.** An owner sees every lead. A staff member sees only the Bona inbox's
+leads — `inbox_state = 'in'` and a number that is neither a colleague's nor on the never list
+(`team.isExcludedLead`) — on the Leads board and list (and its total), the Desk's waiting queue
+and its count, the lead page, `GET /v1/admin/leads` (and its `total`) and
+`GET /v1/admin/leads/:id`, and only such a lead takes their stage change or note. Any other
+lead (a guess on the Unsure list, *Not a client*, one no rule has placed, a TK or private chat
+that is a lead only for the statistics) answers them exactly as a lead that does not exist:
+absent from lists, 404 on its page, its JSON and its writes (a form lands back on
+`/dashboard/leads`), so its touchpoints and the first-message snippet they keep are never
+shown to them. The aggregates — charts, sources, match quality, pipeline counts (the Leads
+rail's stage numbers too), response times — stay as they are for everyone.
+
 | Route | What |
 |---|---|
 | `GET /dashboard` | Overview — a 14-day strip (sessions, WA clicks, leads, viewings) as inline SVG, `?days=` 1–90. Everything below the strip — sources with first-touch and last-touch columns side by side, match quality, first-reply median and p90 — is **all time**, and the page says so |
