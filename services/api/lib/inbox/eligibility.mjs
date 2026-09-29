@@ -365,15 +365,21 @@ export const mentionsPropertyDocument = (s) => typeof s === 'string' && s !== ''
 
 /** A value `adMetaOf` kept: a string with something in it. */
 const present = (v) => typeof v === 'string' && v.trim() !== '';
+/**
+ * An ad source type: the token `ad` or `ads`, any case, with only ASCII whitespace around it
+ * (what SQLite's `trim(x, char(32, 9, 10, 11, 12, 13))` takes off, so migration v4 reads it
+ * the same). Not any word with the two letters in it: `broadcast`, `thread`, `upload`.
+ */
+const AD_SOURCE_TYPE_RE = /^[ \t\n\v\f\r]*ads?[ \t\n\v\f\r]*$/i;
 
 /**
  * Is this click-to-WhatsApp context (lib/wa-poller.mjs `adMetaOf`) real ad evidence (D15)?
  * Only a click id (`ctwa_clid`), a conversion source, the `ctwa_ad` entry point or an ad
- * source type (`source_type` containing "ad", any case) says an ad was clicked. The
- * organic entry points WhatsApp reports the same way — `click_to_chat_link` (a wa.me link),
- * `global_search_new_chat`, `phone_number_hyperlink` — do not, nor does an app name, a
- * source id or utm fields on their own. Migration v4 in lib/db.mjs asks the same of the
- * lead_created touchpoint's `ad_meta`.
+ * source type (`source_type` the token "ad" or "ads", any case: `AD_SOURCE_TYPE_RE`) says an
+ * ad was clicked. The organic entry points WhatsApp reports the same way —
+ * `click_to_chat_link` (a wa.me link), `global_search_new_chat`, `phone_number_hyperlink` —
+ * do not, nor does an app name, a source id or utm fields on their own. Migration v4 in
+ * lib/db.mjs asks the same of the lead_created touchpoint's `ad_meta`.
  * @param {unknown} adMeta
  * @returns {boolean}
  */
@@ -382,7 +388,7 @@ export function hasAdEvidence(adMeta) {
   return present(adMeta.ctwa_clid)
     || present(adMeta.conversion_source)
     || adMeta.entry_point_conversion_source === 'ctwa_ad'
-    || (present(adMeta.source_type) && /ad/i.test(adMeta.source_type));
+    || (typeof adMeta.source_type === 'string' && AD_SOURCE_TYPE_RE.test(adMeta.source_type));
 }
 
 /**

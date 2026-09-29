@@ -982,8 +982,13 @@ const CTWA = { source_id: '120210987654321', source_type: 'ad', source_app: 'ins
 test('only real ad evidence is ad context: a click id, a conversion source, a ctwa_ad entry point or an ad source type (D15)', () => {
   for (const meta of ORGANIC_ENTRY) assert.equal(hasAdEvidence(meta), false, meta.entry_point_conversion_source);
   assert.equal(hasAdEvidence(CTWA), true);
-  for (const meta of [{ ctwa_clid: 'ARZ1xyz' }, { conversion_source: 'FB_Ads' }, { entry_point_conversion_source: 'ctwa_ad' }, { source_type: 'ad' }, { source_type: 'AD' }]) {
+  for (const meta of [{ ctwa_clid: 'ARZ1xyz' }, { conversion_source: 'FB_Ads' }, { entry_point_conversion_source: 'ctwa_ad' }, { source_type: 'ad' }, { source_type: 'AD' },
+    { source_type: 'Ads' }, { source_type: ' ad\t' }]) {
     assert.equal(hasAdEvidence(meta), true, JSON.stringify(meta));
+  }
+  // The source type is the token "ad" (or "ads"), not any word with the two letters in it.
+  for (const source_type of ['broadcast', 'thread', 'upload', 'shadow', 'download', 'ad_hoc', 'adult', 'lead', 'a d', 'ad ad', '\u00a0ad', 'ad\u200b', '']) {
+    assert.equal(hasAdEvidence({ source_type }), false, JSON.stringify(source_type));
   }
   for (const meta of [
     null, undefined, 'ctwa_ad', {}, { external_ad: true }, { utm: { utm_source: 'facebook' } }, { source_type: 'post', source_app: 'instagram' },
