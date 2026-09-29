@@ -1069,7 +1069,10 @@ export function createDashboardRoutes({
     // and the words are not kept for a resubmit that could send them twice.
     if (outcome === 'uncertain') return answer(res, { form, back: `${back}?error=send_uncertain`, status: 202, payload: { ok: false, error: 'send_uncertain', send_id: out.sendId } });
     if (NOT_ANSWERABLE.has(out.error)) return refuseChat(res, form, me);
-    const [status, error] = !out.duplicate && Object.hasOwn(REPLY_REFUSALS, out.error) ? REPLY_REFUSALS[out.error] : [502, 'send_failed'];
+    // Anything else was turned away upstream (Evolution, the gate) or is a resubmit of a
+    // send that failed: 503, never 502 or 504 — Cloudflare puts its own page in place of
+    // those, and the thread with the words still in the box would never reach the writer.
+    const [status, error] = !out.duplicate && Object.hasOwn(REPLY_REFUSALS, out.error) ? REPLY_REFUSALS[out.error] : [503, 'send_failed'];
     if (!form) return sendJson(res, status, { error });
     const lead = db.getLead(leadId);
     if (!openChat(lead)) return notInInbox(res, withUnread(me));
