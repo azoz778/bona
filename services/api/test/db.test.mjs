@@ -76,10 +76,16 @@ test('schema v4 gives leads their inbox columns and adds the transcript, outbox,
   const info = (table) => s.db.prepare(`PRAGMA table_info(${table})`).all();
   const names = (table) => info(table).map((c) => c.name);
   const leadCols = info('leads');
-  assert.deepEqual(leadCols.slice(-6).map((c) => c.name), ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from']);
+  assert.deepEqual(leadCols.slice(-7).map((c) => c.name), ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from', 'chat_rev']);
   const needsHuman = leadCols.find((c) => c.name === 'needs_human');
   assert.equal(needsHuman.notnull, 1);
   assert.equal(needsHuman.dflt_value, '0');
+  // The stale-view guard's counter (lib/inbox/store.mjs `revision`): on the lead row, which
+  // is never deleted, so it never goes down.
+  const chatRev = leadCols.find((c) => c.name === 'chat_rev');
+  assert.equal(chatRev.type, 'INTEGER');
+  assert.equal(chatRev.notnull, 1);
+  assert.equal(chatRev.dflt_value, '0');
   assert.deepEqual(names('wa_messages'), ['key_id', 'lead_id', 'jid', 'direction', 'sender_kind', 'sender_user_id', 'text', 'media_type', 'ts', 'status']);
   assert.deepEqual(names('wa_outbox'), ['send_id', 'lead_id', 'jid', 'text', 'user_id', 'sender_kind', 'status', 'key_id', 'created', 'updated', 'error']);
   assert.deepEqual(names('inbox_reads'), ['user_id', 'lead_id', 'last_read_ts']);
@@ -239,7 +245,7 @@ test('a v3 file db moves to v4: each existing lead is placed by what is certain 
 
   const a = openDb(file);
   assert.equal(a.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
-  const added = ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from'];
+  const added = ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from', 'chat_rev'];
   const after = snapshot(a.db);
   assert.equal(after.length, before.length, 'no lead is added or lost');
   assert.equal(countOf(a.db, 'touchpoints'), touchpointsBefore);
@@ -253,6 +259,7 @@ test('a v3 file db moves to v4: each existing lead is placed by what is certain 
     assert.equal(row.needs_human, 0, c.id);
     assert.equal(row.handler_user_id, null, c.id);
     assert.equal(row.last_msg_ts, null, c.id);
+    assert.equal(row.chat_rev, 0, `${c.id}: its chat revision starts at 0`);
   });
   for (const table of ['wa_messages', 'wa_outbox', 'inbox_reads', 'wa_gaps', 'inbox_candidates']) assert.equal(countOf(a.db, table), 0, table);
 
@@ -297,6 +304,7 @@ test('a v4 step that fails part-way leaves a clean v3 file, and a retry upgrades
   const check = new DatabaseSync(file);
   assert.equal(check.prepare('PRAGMA user_version').get().user_version, 3, 'still v3');
   assert.ok(!check.prepare('PRAGMA table_info(leads)').all().some((c) => c.name === 'inbox_state'), 'the ALTERs were rolled back');
+  assert.ok(!check.prepare('PRAGMA table_info(leads)').all().some((c) => c.name === 'chat_rev'), 'chat_rev too');
   assert.equal(check.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'wa_messages'").get().n, 0, 'the CREATEs were rolled back');
   assert.equal(check.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'inbox_candidates'").get().n, 0, 'the candidates table too');
   assert.equal(check.prepare('SELECT COUNT(*) AS n FROM leads').get().n, 2, 'no lead lost');
@@ -311,12 +319,14 @@ test('a v4 step that fails part-way leaves a clean v3 file, and a retry upgrades
   assert.equal(a.getLead('L-kw').inbox_state, 'unsure');
   assert.equal(a.getLead('L-kw').inbox_since, null);
   assert.equal(a.getLead('L-kw').history_from, null);
+  assert.deepEqual([a.getLead('L-ref').chat_rev, a.getLead('L-kw').chat_rev], [0, 0], 'and every lead has its chat revision, at 0');
   a.close();
   cleanup();
 });
 
 test('insertLead and updateLead carry the inbox columns', () => {
   const s = openDb(':memory:');
+  assert.equal(s.insertLead({ lead_id: 'L0', created: 1, updated: 1 }).chat_rev, 0, 'a new lead starts at chat revision 0');
   const l = s.insertLead({
     lead_id: 'L1', created: 1, updated: 1, wa_jid: '966500000001@s.whatsapp.net',
     inbox_state: 'in', inbox_since: 1, handler_user_id: 'USR-1', last_msg_ts: 7, needs_human: true, history_from: -5,
