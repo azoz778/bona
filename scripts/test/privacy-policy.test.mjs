@@ -125,3 +125,25 @@ test('Dana is not named in that section until she answers on WhatsApp (Phase 4)'
   const all = [s.heading.en, s.heading.ar, body(s, 'en'), body(s, 'ar')].join(' ');
   assert.doesNotMatch(all, /\bDana\b|دانة|دانا|\bAI\b|artificial intelligence|الذكاء الاصطناعي|المساعد الذكي|الكونسيرج/i);
 });
+
+test('the chats kept only to be checked are named: what is kept, for how long, and that the conversation is not (D17)', () => {
+  const s = section('whatsapp-conversations');
+  assert.ok(s, 'the section is missing');
+  const en = body(s, 'en');
+  assert.match(en, /looks like a property enquiry/);
+  assert.match(en, /the property words it used/);
+  assert.match(en, /until 30 days after the last such message/);
+  assert.doesNotMatch(en, /for up to 30 days/, 'a chat that keeps writing is kept as long as it does');
+  assert.match(en, /The conversation itself is not stored unless/);
+  assert.match(en, /for up to a year/);
+  // The first paragraph's "not stored" no longer stands alone: it points to the exception.
+  assert.match(en, /are not stored; the next paragraph describes the one narrow exception/);
+  assert.ok(policy.updated >= '2026-09-29', 'the version date moves with this change');
+  const ar = body(s, 'ar');
+  assert.match(ar, /استفساراً عقارياً/);
+  assert.match(ar, /الكلمات العقارية/);
+  assert.match(ar, /حتى ثلاثين يوماً من آخر رسالة من هذا النوع/);
+  assert.match(ar, /ولا تُحفظ المحادثة نفسها/);
+  assert.match(ar, /مدةً أقصاها سنة/);
+  assert.match(ar, /باستثناء محدود نبيّنه في الفقرة التالية/);
+});

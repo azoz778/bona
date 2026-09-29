@@ -566,10 +566,12 @@ Design: `docs/superpowers/specs/2026-09-06-client-acquisition-tracking-design.md
 side: `docs/OWNER-RUNBOOK.md` §4, §9–§11 and `docs/checklists/`.
 
 **Store.** `${BONA_DATA}/bona.db` (SQLite, WAL, mode 0600): sessions, events, leads,
-touchpoints, stage history, spend, fan-out queue, dashboard auth, and the transcripts of
-the chats in the Bona inbox ([Dashboard → Inbox](#inbox), below). The JSONL files stay as
-the append-only raw log and are imported once on start-up. Ad platforms get hashed
-identifiers only. The transcripts are shown only to signed-in team members, and the
+touchpoints, stage history, spend, fan-out queue, dashboard auth, the transcripts of the
+chats in the Bona inbox ([Dashboard → Inbox](#inbox), below) and the owner's list of
+real-estate chats to check (ids, the WhatsApp name and property words, never text). The
+JSONL files stay as the append-only raw log and are imported once on start-up. Ad platforms
+get hashed identifiers only. The transcripts are shown only to signed-in team members, the
+list to check only to the owner, and the
 WhatsApp gateway (Evolution) is sent only what a message it delivers needs: your new-lead
 note, a login code, a dashboard reply.
 
@@ -606,8 +608,13 @@ because it is the weakest: two visitors clicking in the same quarter hour are to
 nothing, which is why its leads are marked *inferred*.
 
 Everything else — your private conversations, which this loop can also see — is discarded
-in memory: counted in `poller.unmatched`, never written to disk, never sent anywhere. No
-log line here carries a phone number, a name or message text.
+in memory: counted in `poller.unmatched`, never sent anywhere, and never written to disk,
+with one exception (D17): for a message that looks like a property enquiry but is not
+clearly for Bona, only the chat's number, the name WhatsApp shows and the property words
+are kept, until 30 days after the last such message, on the owner's list of real-estate
+chats to check (a chat he marks *Not a client* keeps only its ids, for a year; see
+[Dashboard → Inbox](#inbox)). Never its text. No log line here carries a phone number, a
+name or message text.
 
 Two exceptions since Phase 2 of the team inbox ([Dashboard → Inbox](#inbox)). Leads are also
 made without the table: from the owner's own message when it passes the *Owner-started* rule
@@ -760,6 +767,7 @@ on `GET /dashboard/leads/:id`, `GET /v1/admin/leads/:id` and the header of a cha
 | `POST /v1/admin/inbox/:leadId/handler` | any member: hand the chat to an active member, or to nobody |
 | `POST /v1/admin/inbox/:leadId/move` · `…/out` | owner: *Move to Bona inbox* (pulls 30 days) · *Not a client* (`out`, transcript purged now) |
 | `POST /v1/admin/inbox/add` | owner: *Add chat by phone number* — creates or reuses the lead (`owner_added`), puts it `in`, pulls 30 days |
+| `POST /v1/admin/inbox/candidates/:candId/move` · `…/dismiss` | owner: a real-estate chat to check → *Move to Bona inbox* (an `owner_added` lead, `in`, pulls 30 days, off the list; a team or never-list number is refused `excluded` and taken off) · *Not a client* (off the list; kept dismissed for a year so it is not listed again) |
 
 Spend is matched to leads on **platform and campaign id together**, never the id alone —
 Meta and Snap can both run a campaign `1203`. The two vocabularies are folded by
@@ -823,6 +831,21 @@ with a `wa_jid` or a `wa_lid`. Whether it belongs is **stored** in `leads.inbox_
   number* (`owner_added`) put a chat `in` and pull its last 30 days — he vouched for it.
   *Not a client* puts it `out`: its transcript is purged there and then, and it never comes
   back on its own.
+- *Real-estate chats to check* (D17): a chat with no lead behind it whose message uses
+  property words (`propertyWordsIn`: villa, apartment, rent, land, فيلا, شقة, للإيجار, أرض,
+  عقار …) or a property-document word (brochure, price list, بروشور …), in either direction,
+  or a document of the owner's that names TK, goes on a second list on the owner's
+  **Unsure** tab (`inbox_candidates`) — so does every property document he sends that did
+  not join (one that names Bona, or a name cut too close to the word). Only a chat with a
+  phone number: never a lid alone or a WhatsApp channel. Kept: the number and jid (and lid),
+  the name WhatsApp shows for the client (never the name on a message the owner sent), the
+  property words, first and last time, how many messages and who wrote last — never the
+  text, never a lead, no note to anyone — until 30 days after its last such message.
+  *Move to Bona inbox* makes it an `owner_added` lead, puts it `in` and pulls its last 30
+  days; *Not a client* keeps only its ids, so it is not listed again. A chat that becomes a
+  lead leaves the list, team and never-list numbers are never on it, and staff never see
+  it. This is how TK clients who write to this number stay out of the inbox: nothing joins
+  without a sure signal.
 - *Never*: team numbers and the never-a-client list are not matched, stored or shown.
   Adding a number to the team or to the never list moves its lead `out` and purges its
   transcript at once, the daily upkeep (below) does the same for any chat whose number is
@@ -922,4 +945,7 @@ cannot know whether the message went); then every `in` chat with nothing stored 
 most 200 a run, the longest-joined first — fetches the history an automatic join takes,
 never from before the 5-year horizon (logged `inbox.catchup`; a read that fails leaves a
 gap). That is how the chats schema v4 put `in` get a thread on day one; one whose
-history comes back empty stays empty and is asked again on the next run.
+history comes back empty stays empty and is asked again on the next run. The upkeep also
+prunes the real-estate chats to check: an open one 30 days after its last property message, a
+dismissed one a year after it was dismissed (`candidatesExpired`, `dismissalsExpired` in the
+`inbox.maintenance` line).
