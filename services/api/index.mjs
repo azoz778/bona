@@ -360,6 +360,8 @@ export function createApp(options = {}) {
         excludedOut,
         purgedChats: retention?.leads ?? null,
         purgedMessages: retention?.messages ?? null,
+        // Staff and Dana sends it deleted: a purged chat's, and old ones of chats with no message.
+        purgedSends: retention?.outbox ?? null,
         codeRows: step('code_rows', () => inboxStore.pruneCodeRows(t - CODE_ROW_TTL_MS)),
         interrupted: step('interrupted', () => inboxStore.markStalePending(t - INTERRUPTED_SEND_MS)),
         candidatesExpired: candidates?.open ?? null,

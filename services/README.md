@@ -1019,7 +1019,8 @@ percent-encodes it, plus the other fields; every other dashboard write keeps the
 but only messages since the chat's history floor, and never for more than ~3 s.
 Inbox upkeep (`app.inboxMaintenance()`) runs at start-up and then every 24 h: first every
 listed chat whose number is a team or never-list number goes `out` with its transcript
-(logged `inbox.excluded_out`); then the 5-year purge, code rows and stubs older than 2 days,
+(logged `inbox.excluded_out`); then the 5-year purge (`purgedChats`, `purgedMessages`, and
+`purgedSends` for the staff and Dana sends it deleted), code rows and stubs older than 2 days,
 and `pending` sends older than 2 minutes marked `uncertain` (a process that died mid-send
 cannot know whether the message went; the start-up recovery before it has already marked
 every row that was pending when the process started); then every `in` chat with nothing stored yet — at
