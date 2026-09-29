@@ -760,7 +760,7 @@ rail's stage numbers too), response times — stay as they are for everyone.
 
 | Route | What |
 |---|---|
-| `GET /dashboard` | Overview — a 14-day strip (sessions, WA clicks, leads, viewings) as inline SVG, `?days=` 1–90. Everything below the strip — sources with first-touch and last-touch columns side by side, match quality, first-reply median and p90 — is **all time**, and the page says so |
+| `GET /dashboard` | Overview — a 14-day strip (sessions, WA clicks, leads, viewings) as inline SVG, `?days=` 1–90. Everything below the strip — sources with first-touch and last-touch columns side by side, match quality, first-reply median and p90 — is **all time**, and the page says so. Leads the owner started himself (`owner_outbound`, `owner_added`) are not acquisitions: they are left out of the strip's and the KPI's lead counts, the sources table and the Spend page's cost per lead and ROI, and stay on the pipeline board and in match quality |
 | `GET /dashboard/leads` | pipeline board (one column per stage: name, masked phone, source, listing, age, response) and a list below with `?stage=&q=` |
 | `GET /dashboard/leads/:id` | the whole record, the journey (events + touchpoints + stage moves + notes, oldest first), the stage form and the note form |
 | `GET /dashboard/listings` | per-listing funnel (views → gallery/tour/brochure → WA clicks → leads) and REGA flags: `no_ad_licence`, `expiring_30d`, `expired`, `wafi_missing` (off-plan) |
@@ -904,13 +904,18 @@ Text is capped at 8,000 characters. Media are placeholders only (`[voice note]`,
 `[image]`, `[video]`, `[document: name]`, `[location]`, `[contact]`, `[sticker]`, else
 `[message]`) plus the caption, never the file. Reactions, deletes and edits, poll votes and
 key-distribution records are noise and are never stored, and neither is a login code, even
-in an `in` chat. Evolution files one conversation under two jids — what arrives and what the
+in an `in` chat. Noise never touches a lead either, whoever sent it: no touchpoint, no reply
+clock (`first_inbound_ts` / `first_reply_ts`), no reopened add, no inbox state, and it never
+creates one — not from a Ref line or a Bona link in an edit's new text. Evolution files one conversation under two jids — what arrives and what the
 owner types under the `@lid`, what the API sends to a number under the phone jid — so every
 per-chat read (join history, opening a thread, the check before a reply) asks for both and
 de-duplicates on `key.id`. A message the poller writes off after three tries, or gives up on
 once the window has moved past it, becomes a `wa_gaps` row, shown in the thread as a message
 that could not be loaded, instead of vanishing; so does a failed history read of an
-automatic join or of the catch-up. The owner's *Move* and *Add* do not write one yet: their
+automatic join or of the catch-up. A later per-chat read that covers that join's whole window
+— from the chat's history floor to when it joined, every question read to its last page, not
+cut by the refresh budget, not failed — takes the join's gap back (`join:<lead>:…`), so
+opening the thread once Evolution is back clears it. The owner's *Move* and *Add* do not write one yet: their
 failed 30-day read is only logged (`inbox.backfill.failed`); if the chat is still empty the
 next catch-up asks for the same 30 days (it reads from the chat's history floor, below).
 *History floor* (`leads.history_from`): every join records how far back that chat may be
@@ -924,15 +929,18 @@ history, a thread refresh or the catch-up — and the refresh and the catch-up s
 Unread means inbound
 messages newer than the newest one that person saw when they last opened the thread (a new
 member starts from the day the account was made); the total is the Inbox count in the nav.
+A thread draws its newest 200 messages, or every unread one and the 20 before them, up to
+1,000; it says how many older ones it does not show, and marks read only up to the newest
+message it drew.
 
 *Retention.* Five years after a chat's last message (`leads.last_msg_ts`) its transcript —
 messages, reply outbox rows, gaps and read marks — is deleted; the lead row stays for
 attribution. *Not a client*, a team add and a never-list add purge at once. A purged send
 of the last 24 h is cut to a stub (no text, no chat) that still counts toward the day cap. A
 login code's outbox row never holds the code (`text` is NULL); code rows and stubs are
-pruned after 2 days. Known limit: the purge finds chats by their stored messages, so a
-failed or uncertain reply into a chat with nothing stored keeps its text in `wa_outbox`
-until the purge also looks at outbox rows. The privacy page (*WhatsApp conversations with
+pruned after 2 days. A failed or uncertain reply into a chat with nothing stored is only its
+outbox row, and it has text too: a chat with no stored message loses its staff and Dana
+outbox rows five years after they were written. The privacy page (*WhatsApp conversations with
 our team*) tells clients the five years, the at-once purge of a chat that is not about a
 Bona enquiry (the first-message snippet stays with the lead), and the copies this retention
 does not reach: Evolution's own database — "the WhatsApp gateway server that Bona runs for
