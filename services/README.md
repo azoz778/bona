@@ -960,7 +960,11 @@ newest message time the person saw, and the chat is refreshed from Evolution jus
 the check — best effort: at most ~3 s, the newest 50 records per question, skipped within
 5 s of the last refresh, and a failed read leaves only what is already stored. Anything
 newer that is stored by then, in either direction, holds the reply (`stale`) with the text
-kept in the box. The first person to reply becomes the chat's handler when it has none (a
+kept in the box. An accepted reply is stored at the moment its send started (its outbox
+row's `created`, to the whole second), not when WhatsApp answered, so a client message sent
+during the round trip reads after it — unread, and `stale` for the next reply from a page
+that did not show it; the lead's `first_reply_ts` is when WhatsApp took it. The first
+person to reply becomes the chat's handler when it has none (a
 reply typed on the owner's phone makes the owner the handler); anyone can hand it to
 another active member or to nobody. Audit rows name the chat's lead as their target and
 carry little else: `reply_sent` its outcome (`{status}`: `accepted`, `uncertain` or
