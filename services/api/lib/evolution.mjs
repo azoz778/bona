@@ -212,34 +212,42 @@ function flatFileName(name) {
 }
 
 /**
- * A record's whole cleaned document name (`flat`, empty when there is none) and that name
- * made safe to show (`name`, cut at `MAX_FILE_NAME` code points; null when there is no
- * document or nothing usable is left). The one place the shown name is worked out, so
- * `mediaOf`'s placeholder and `normaliseRecord`'s `fileName` agree.
- * @returns {{ flat: string, name: string|null }}
+ * A record's document name as it was sent (`sent`: empty when there is none or it is not a
+ * string), that name cleaned (`flat`, `flatFileName`) and made safe to show (`name`, cut at
+ * `MAX_FILE_NAME` code points; null when there is no document or nothing usable is left).
+ * The one place the shown name is worked out, so `mediaOf`'s placeholder and
+ * `normaliseRecord`'s `fileName` agree.
+ * @returns {{ sent: string, flat: string, name: string|null }}
  */
 function shownFileName(record) {
-  const flat = flatFileName(unwrapMessage(record?.message)?.documentMessage?.fileName);
-  return { flat, name: capCodePoints(flat, MAX_FILE_NAME).trim() || null };
+  const raw = unwrapMessage(record?.message)?.documentMessage?.fileName;
+  const sent = typeof raw === 'string' ? raw : '';
+  const flat = flatFileName(sent);
+  return { sent, flat, name: capCodePoints(flat, MAX_FILE_NAME).trim() || null };
 }
 
 /**
  * A record's shown document name (`shownFileName`), whether it had to be cut to get there
- * (`truncated`; what cleaning removes is not a cut), and whether the whole cleaned name,
- * before any cut, names TK or Bona (`tk`, `bona`: lib/inbox/eligibility.mjs `namesTk`,
- * `namesBona`, which also read through the joiners the shown name keeps). That holds even
- * when nothing of the name can be shown (a first grapheme longer than the cap), so a name
- * that is left out never drops what it said. Worked out once per record, in
- * `normaliseRecord`, for its `fileName`/`fileNameTruncated`/`fileNameTk`/`fileNameBona`.
+ * (`truncated`; what cleaning removes is not a cut), and whether the whole name, before any
+ * cut, names TK or Bona (`tk`, `bona`). Those two read the whole name exactly as a caption
+ * is read (lib/inbox/eligibility.mjs `namesTk`, `namesBona`, asked of the name as it was
+ * sent): as it is, where an invisible character keeps the words either side apart, and with
+ * every invisible character gone. "X\u200BTK" reads "X TK" one way and "XTK" the other, and
+ * either reading naming TK or Bona sets the flag, so the same string never joins as a file
+ * name while it stays out as a caption. The cleaned name (`flat`, which keeps U+200C and
+ * U+200D) is asked as well: another reading can only mean fewer joins. That holds even when
+ * nothing of the name can be shown (a first grapheme longer than the cap), so a name that is
+ * left out never drops what it said. Worked out once per record, in `normaliseRecord`, for
+ * its `fileName`/`fileNameTruncated`/`fileNameTk`/`fileNameBona`.
  * @returns {{ name: string|null, truncated: boolean, tk: boolean, bona: boolean }}
  */
 function fileNameOf(record) {
-  const { flat, name } = shownFileName(record);
+  const { sent, flat, name } = shownFileName(record);
   return {
     name,
     truncated: name !== null && name !== flat,
-    tk: namesTk(flat),
-    bona: namesBona(flat),
+    tk: namesTk(sent) || namesTk(flat),
+    bona: namesBona(sent) || namesBona(flat),
   };
 }
 
