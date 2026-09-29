@@ -554,6 +554,7 @@ export function createDashboardRoutes({
       users: team.listUsers(),
       never: team.listNever(),
       sendingEnabled: team.sendingEnabled(),
+      repliesEnabled: team.repliesEnabled(),
       ok: url.searchParams.get('ok'),
       error: url.searchParams.get('error'),
     }));
@@ -797,18 +798,25 @@ export function createDashboardRoutes({
     }, 'never_added');
   }
 
+  /** The owner's switches, as the Team page posts them: one per form. */
+  const SWITCHES = ['sending_enabled', 'inbox_replies'];
+
   function saveSetting(ctx) {
     const { fields, me } = ctx;
     return teamWrite(ctx, () => {
-      if (!Object.hasOwn(fields, 'sending_enabled')) throw new TeamError('bad_setting');
+      // Exactly one switch per post, the way the Team page's buttons send it: none, or
+      // two at once, is refused rather than guessed at.
+      const keys = SWITCHES.filter((k) => Object.hasOwn(fields, k));
+      if (keys.length !== 1) throw new TeamError('bad_setting');
+      const [key] = keys;
       // Fails closed: `asText` turns anything that is not literally a string (a JSON
       // `false`, `null`, a number) into `''`, and `team.setSetting` itself refuses any
       // value outside `SETTINGS_ALLOWED` — including `''`, `"off"`, `"true"` — before
       // it ever reaches the row. Coercing here (the old `=== '0' ? '0' : '1'`) would
       // have defeated that check by handing it only ever '0' or '1' to approve.
-      const value = asText(fields.sending_enabled);
-      team.setSetting('sending_enabled', value, { by: me.user_id });
-      audit?.record({ userId: me.user_id, action: 'setting', target: 'sending_enabled', meta: { value } });
+      const value = asText(fields[key]);
+      team.setSetting(key, value, { by: me.user_id });
+      audit?.record({ userId: me.user_id, action: 'setting', target: key, meta: { value } });
     }, 'setting');
   }
 
@@ -906,6 +914,7 @@ export function createDashboardRoutes({
       seenTs,
       sendingEnabled: team.sendingEnabled(),
       canReply: replyJidFor(lead) !== null,
+      repliesEnabled: team.repliesEnabled(),
       draft,
       ok: inboxOk(ok),
       error: knownError(error),
@@ -949,6 +958,7 @@ export function createDashboardRoutes({
     bad_text: [400, 'bad_text'],
     bad_send_id: [400, 'bad_send_id'],
     sending_disabled: [503, 'sending_disabled'],
+    replies_off: [503, 'replies_off'],
     rate_limited: [429, 'reply_rate_limited'],
   };
   /** Refusals that mean the chat itself may not be answered (rule 1): no page of it is drawn. */

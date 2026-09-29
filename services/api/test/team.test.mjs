@@ -111,6 +111,23 @@ test('settings default to on, can be switched, and refuse unknown keys', () => {
   s.close();
 });
 
+test('replies to clients from the dashboard ship off, go on only with an exact "1", and fail closed', () => {
+  const { s, team } = teamHarness();
+  assert.equal(team.getSetting('inbox_replies'), '0');
+  assert.equal(team.repliesEnabled(), false, 'off until the owner turns them on (design D14)');
+  assert.equal(team.sendingEnabled(), true, 'a separate switch: login codes do not wait for it');
+  team.setSetting('inbox_replies', '1', { by: 'USR-1' });
+  assert.equal(team.repliesEnabled(), true);
+  assert.equal(s.db.prepare("SELECT updated_by FROM settings WHERE key = 'inbox_replies'").get().updated_by, 'USR-1');
+  team.setSetting('inbox_replies', '0');
+  assert.equal(team.repliesEnabled(), false);
+  assert.equal(codeOf(() => team.setSetting('inbox_replies', 'yes')), 'bad_setting_value');
+  assert.equal(codeOf(() => team.setSetting('inbox_replies', '')), 'bad_setting_value');
+  s.db.prepare("INSERT OR REPLACE INTO settings (key, value, updated, updated_by) VALUES ('inbox_replies','true',?,NULL)").run(NOW);
+  assert.equal(team.repliesEnabled(), false, "fail closed on anything but exactly '1'");
+  s.close();
+});
+
 test('ensureOwner promotes an existing staff member found at the env phone number', () => {
   const { s, team } = teamHarness();
   team.ensureOwner({ phone: '966593296933', name: 'Abdulaziz' });

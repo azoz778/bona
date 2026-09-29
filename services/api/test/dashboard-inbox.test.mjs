@@ -52,6 +52,9 @@ async function withInbox(fn) {
   // The team's clock is pinned too: `users.created` is where a person's unread count
   // starts (P2-8), and every seeded message below is newer than it.
   const team = createTeam(db, { now });
+  // Dashboard replies ship switched off (design D14). These tests are about what a reply
+  // does once the owner has turned them on; the switch itself has its own test.
+  team.setSetting('inbox_replies', '1');
   const inboxStore = createInboxStore(db, { now });
 
   // Evolution's sendText, faked. Every request is counted; `evo.reply` decides the answer
@@ -428,6 +431,56 @@ test('a reply keeps its author\'s name after they leave the team, and they are n
     assert.ok(html.includes('<bdi>Hadi Former</bdi>'), 'the bubble still names who wrote it, not just "Team"');
     assert.ok(!html.includes(`value="${gone.user_id}"`), 'but nobody can hand the chat to someone who has left');
     assert.ok(html.includes(`value="${h.staffUser.user_id}"`), 'the control: the picker is on the page');
+  });
+});
+
+test('replies ship switched off: the chat reads but has no reply box, a posted reply goes nowhere, and only the owner turns them on', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    h.team.setSetting('inbox_replies', '0');
+    const staff = await h.staff();
+    const boss = await h.boss();
+
+    const page = await h.get('/dashboard/inbox/LEAD-A', { cookie: staff });
+    assert.equal(page.status, 200, 'the chat can still be read');
+    const html = await page.text();
+    assert.ok(html.includes('Is BONA-012 still free?'));
+    assert.match(html, /Replies from the dashboard are not switched on yet/);
+    assert.doesNotMatch(html, /action="\/v1\/admin\/inbox\/LEAD-A\/reply"/);
+
+    h.tick(120_000);
+    const form = { text: 'First words to a client', send_id: 'send-off-0000000000001', seen_ts: String(NOW + 60_000) };
+    const refused = await replyTo(h, 'LEAD-A', form, staff);
+    assert.equal(refused.status, 503);
+    assertLocked(refused);
+    assert.match(await refused.text(), /<div class="err">Replies from the dashboard are not switched on yet\.<\/div>/);
+    assert.equal(h.evo.calls.length, 0, 'nothing reached WhatsApp');
+    assert.equal(h.inboxStore.getOutbox('send-off-0000000000001'), null, 'and nothing was written');
+    assert.ok(!h.app.audit.recent(50).some((r) => r.action === 'reply_sent'));
+
+    const denied = await h.postForm('/v1/admin/settings', { inbox_replies: '1' }, { cookie: staff });
+    assert.equal(denied.status, 403);
+    assert.deepEqual(await denied.json(), { error: 'owner_only' });
+    assert.equal(h.team.repliesEnabled(), false);
+
+    const both = await h.postForm('/v1/admin/settings', { inbox_replies: '1', sending_enabled: '1' }, { cookie: boss });
+    assert.equal(both.headers.get('location'), '/dashboard/team?error=bad_setting', 'one switch per post');
+    assert.equal(h.team.repliesEnabled(), false);
+
+    assert.match(await (await h.get('/dashboard/team', { cookie: boss })).text(), /name="inbox_replies" value="1"/, 'the Team page offers to turn them on');
+    const on = await h.postForm('/v1/admin/settings', { inbox_replies: '1' }, { cookie: boss });
+    assert.equal(on.status, 303);
+    assert.equal(on.headers.get('location'), '/dashboard/team?ok=setting');
+    assert.equal(h.team.repliesEnabled(), true);
+    const audited = h.app.audit.recent(50).filter((r) => r.action === 'setting');
+    assert.equal(audited.length, 1);
+    assert.equal(audited[0].user_id, h.owner.user_id);
+    assert.equal(audited[0].target, 'inbox_replies');
+    assert.deepEqual(audited[0].meta, { value: '1' });
+
+    const sent = await replyTo(h, 'LEAD-A', form, staff);
+    assert.equal(sent.headers.get('location'), '/dashboard/inbox/LEAD-A?ok=sent', 'the same form goes once they are on');
+    assert.equal(h.evo.calls.length, 1);
   });
 });
 

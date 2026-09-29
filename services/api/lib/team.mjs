@@ -15,10 +15,15 @@ import { bareJid } from './evolution.mjs';
 import { normalisePhone } from './phone.mjs';
 
 export const ROLES = ['owner', 'staff'];
-/** Every setting that exists, with its default. Phase 4 adds `dana_enabled: '0'`. */
-export const SETTINGS_DEFAULTS = { sending_enabled: '1' };
+/**
+ * Every setting that exists, with its default. Phase 4 adds `dana_enabled: '0'`.
+ * `inbox_replies` ships '0': the team can read the Bona inbox from the day it goes live,
+ * but no reply reaches a client until the owner turns replies on — the first real client
+ * message from the dashboard is sent with him (design D14).
+ */
+export const SETTINGS_DEFAULTS = { sending_enabled: '1', inbox_replies: '0' };
 /** The only values each setting may hold. A key with no entry here accepts any string. */
-export const SETTINGS_ALLOWED = { sending_enabled: ['0', '1'] };
+export const SETTINGS_ALLOWED = { sending_enabled: ['0', '1'], inbox_replies: ['0', '1'] };
 export const MAX_NAME = 80;
 export const MAX_NEVER_NOTE = 120;
 
@@ -224,11 +229,13 @@ export function createTeam(store, { now = () => Date.now(), log = () => {} } = {
   }
   /** Fail closed: only an exact `'1'` is ON. Anything else — including old or corrupt data — is OFF. */
   const sendingEnabled = () => getSetting('sending_enabled') === '1';
+  /** Replies to clients from the dashboard: fails closed the same way, and ships off. */
+  const repliesEnabled = () => getSetting('inbox_replies') === '1';
 
   return {
     ensureOwner, getUser, getUserByPhone, listUsers, addUser, deactivateUser, reactivateUser, setRole, touchLogin,
     addNever, removeNever, listNever, isExcludedPhone,
-    getSetting, setSetting, sendingEnabled,
+    getSetting, setSetting, sendingEnabled, repliesEnabled,
   };
 }
 

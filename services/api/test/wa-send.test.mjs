@@ -29,10 +29,13 @@ const netError = (code) => Object.assign(new Error('boom'), { cause: { code } })
  * make the call itself fail. Each call also records how many outbox rows were
  * `pending` at that moment — the row must be written before the call, not after.
  */
-function harness({ reply = () => ({ status: 201, body: { key: { id: 'KEY-1' } } }), env = ENV, limits } = {}) {
+function harness({ reply = () => ({ status: 201, body: { key: { id: 'KEY-1' } } }), env = ENV, limits, replies = true } = {}) {
   const s = openDb(':memory:');
   let clock = NOW;
   const team = createTeam(s, { now: () => clock });
+  // Dashboard replies ship switched off (design D14). These tests are about what a reply
+  // does once the owner has turned them on; `replies: false` is the state that ships.
+  if (replies) team.setSetting('inbox_replies', '1');
   const inbox = createInboxStore(s, { now: () => clock });
   const calls = [];
   const logs = [];
@@ -715,6 +718,34 @@ test('reply: with the sending switch off nothing is sent and the row is closed a
   const lead = h.s.getLead('L-1');
   assert.equal(lead.handler_user_id, null);
   assert.equal(lead.first_reply_ts, null);
+  h.s.close();
+});
+
+test('reply: replies_off until the owner turns dashboard replies on — nothing written, nothing sent, codes still go', async () => {
+  const h = harness({ replies: false, reply: (n) => ({ status: 201, body: { key: { id: `KEY-${n}` } } }) });
+  const staff = staffOf(h);
+  seedChat(h);
+  assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: false, error: 'replies_off' });
+  assert.equal(h.calls.length, 0);
+  assert.equal(outboxRows(h).length, 0, 'no row, so the same send id still works once replies are on');
+  const lead = h.s.getLead('L-1');
+  assert.equal(lead.handler_user_id, null);
+  assert.equal(lead.first_reply_ts, null);
+
+  // A login code is not a reply: the team can still sign in while replies are off.
+  const code = await h.sender.sendTo({ jid: '966500000077@s.whatsapp.net', text: 'Bona dashboard code: 123456 (valid 10 min)', kind: 'code' });
+  assert.equal(code.ok, true);
+  assert.equal(h.calls.length, 1);
+
+  h.team.setSetting('inbox_replies', '1');
+  assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: true, status: 'accepted', sendId: SID, keyId: 'KEY-2' });
+
+  // Off again: the reply that went keeps its answer; a new one is refused before anything is written.
+  h.team.setSetting('inbox_replies', '0');
+  assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: true, duplicate: true, status: 'accepted', sendId: SID, error: null });
+  assert.deepEqual(await h.sender.reply(replyArgs(staff, { sendId: 'sid_fedcba9876543210' })), { ok: false, error: 'replies_off' });
+  assert.equal(h.inbox.getOutbox('sid_fedcba9876543210'), null);
+  assert.equal(h.calls.length, 2);
   h.s.close();
 });
 

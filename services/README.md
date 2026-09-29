@@ -879,8 +879,12 @@ reply typed on the owner's phone makes the owner the handler); anyone can hand i
 another active member or to nobody. Audit rows name the chat's lead as their target and
 carry little else: `reply_sent` its outcome (`{status}`: `accepted`, `uncertain` or
 `failed`), `handler` the new handler's user id (`{to}`, null for nobody), and `inbox_move`,
-`inbox_out` and `inbox_add` nothing more — never text or a number.
-The first real client reply from the dashboard is sent with the owner beside it (design D14).
+`inbox_out` and `inbox_add` nothing more — never text or a number. Replies ship
+**switched off** (`settings.inbox_replies` = `'0'`): the thread shows "not switched on yet"
+in place of the box, and `reply` refuses `replies_off` (503) before anything is written,
+until the owner switches *Replies to clients from the dashboard* on from the Team page
+(one switch per post, audited `setting`). That is how the first real client reply from the
+dashboard is sent with the owner beside it (design D14). Login codes do not wait for it.
 
 *Reply answers.* A form: sent → 303 to the thread `?ok=sent`; uncertain → 303
 `?error=send_uncertain` (the text is not kept: it may have gone); a chat that may not be
@@ -891,7 +895,7 @@ text kept in the box, a fresh `send_id` and the HTTP status listed below. A JSON
 - 202 `{ok: false, error: 'send_uncertain', send_id}`: it may have gone; check WhatsApp.
 - 404 `{error: 'not_in_inbox'}`: a chat that may not be answered.
 - `{error}` with 409 (`stale`, `lid_only`), 400 (`bad_text`, `bad_send_id`), 429
-  (`reply_rate_limited`), 503 (`sending_disabled`) or 502 (`send_failed`: anything else,
+  (`reply_rate_limited`), 503 (`sending_disabled`, `replies_off`) or 502 (`send_failed`: anything else,
   and a resubmit of a send that failed).
 
 *Polling and upkeep.* The poller runs every 20 s (`BONA_WA_POLL_MS`, §4). The VPS sets it in
