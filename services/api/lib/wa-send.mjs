@@ -47,9 +47,10 @@
  * A send is `accepted` only when the response is 2xx AND its body carries a `key.id`
  * string — the WhatsApp message id. Anything else (a non-2xx status, a 2xx with no id, a
  * timeout reading the body, or any other thrown error) is a failure we come back with
- * honestly: `uncertain` whenever the message might still have gone out. Only a handful of
- * pre-connection errors (`ECONNREFUSED`, `ENOTFOUND`, `EAI_AGAIN`) are treated as
- * definitely-not-sent (`failed`). Nothing here retries, and a send id that has been
+ * honestly: `uncertain` whenever the message might still have gone out — any 5xx included.
+ * Only a 4xx (Evolution turned the request away) and a handful of pre-connection errors
+ * (`ECONNREFUSED`, `ENOTFOUND`, `EAI_AGAIN`) are treated as definitely-not-sent
+ * (`failed`). Nothing here retries, and a send id that has been
  * decided once is never sent again: the reply form carries a `send_id`, and a second
  * submit of it gets the first one's answer back — an `uncertain` one included.
  *
@@ -145,9 +146,12 @@ export function createSender({
       }
 
       if (!res.ok) {
-        const uncertain = res.status === 502 || res.status === 504;
-        log({ level: 'warn', evt: 'wa.send.failed', kind, status: res.status, uncertain: uncertain || undefined });
-        return uncertain ? { ok: false, error: `http_${res.status}`, uncertain: true } : { ok: false, error: `http_${res.status}` };
+        // Only a 4xx is Evolution turning the request away before it did anything. A 5xx
+        // cannot say whether the message went: a 500 thrown after WhatsApp took it, a 503
+        // from a proxy in front of a send that went, a 502/504 gateway.
+        const refused = res.status >= 400 && res.status < 500;
+        log({ level: 'warn', evt: refused ? 'wa.send.failed' : 'wa.send.uncertain', kind, status: res.status });
+        return refused ? { ok: false, error: `http_${res.status}` } : { ok: false, error: `http_${res.status}`, uncertain: true };
       }
 
       let text2xx;
