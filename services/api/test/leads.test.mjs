@@ -307,6 +307,9 @@ test('a chat the owner started is in the inbox from birth, already answered, and
     assert.equal(lead.channel, 'whatsapp');
     assert.equal(lead.inbox_state, 'in', `${matchMethod}: the owner already vouched for it`);
     assert.equal(lead.inbox_since, NOW);
+    // Its history floor: 24 h before his message (an automatic join, like a client's),
+    // 30 days when he added the number himself.
+    assert.equal(lead.history_from, NOW - (matchMethod === 'owner_added' ? 30 * 86_400_000 : 24 * 3_600_000), matchMethod);
     assert.equal(lead.first_inbound_ts, null, `${matchMethod}: the client has not written in — the owner did`);
     assert.equal(lead.first_reply_ts, NOW, `${matchMethod}: so nobody is waiting for a first reply`);
     assert.deepEqual(h.db.touchpointsForLead(lead.lead_id).map((t) => [t.event_type, t.meta.match_method]), [['lead_created', matchMethod]]);
@@ -330,6 +333,7 @@ test('an owner method merging into a lead never moves when the client first wrot
   assert.equal(added.lead.first_reply_ts, null, 'the owner vouching for a chat does not answer it');
   assert.equal(added.lead.inbox_state, 'in');
   assert.equal(added.lead.inbox_since, NOW + 5000);
+  assert.equal(added.lead.history_from, NOW + 5000 - 30 * 86_400_000, 'lifted in by the owner: 30 days back');
   assert.deepEqual(h.db.touchpointsForLead(wrote.lead.lead_id).map((t) => t.event_type), ['lead_created', 'owner_contact'], 'the owner reaching out is not an inbound message');
 
   // A lead that never wrote in at all keeps no inbound time through an owner merge either.

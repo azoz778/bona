@@ -8,10 +8,11 @@
  *     owner's opening line), 30 days when the owner vouched for the chat himself.
  *   - `refresh`: someone opens a thread or is about to reply, so fetch its newest messages
  *     first — the page, and the stale-view check before a send, must not be one poll behind.
- *     Never from further back than the chat's history floor, 24 h before it joined
- *     (amendment A1): an automatic join only ever brings that much of a chat's past, and
- *     without the floor, opening the thread would store months of the owner's earlier
- *     private conversation. And cheap (A2): about 3 s at most, whatever Evolution is
+ *     Never from further back than the chat's history floor (`leads.history_from`, set when
+ *     it joined: 24 h before an automatic join, 30 days before an owner-button join;
+ *     amendment A1): without the floor, opening the thread would store months of the
+ *     owner's earlier private conversation. lib/inbox/ingest.mjs refuses anything older
+ *     than the floor, whatever read brings it. And cheap (A2): about 3 s at most, whatever Evolution is
  *     doing, and the same chat is not read again within 5 s.
  *
  * Evolution files one WhatsApp chat under two jids (verified live 2026-09-28): what the
@@ -41,12 +42,14 @@
 import { EvolutionError, PAGE_SIZE, findMessagesPage, oldestFirst } from '../evolution.mjs';
 import { waConfig } from '../wa.mjs';
 import { loggableName } from './loggable.mjs';
-import { RETENTION_MS } from './store.mjs';
+import { JOIN_HISTORY_MS, OWNER_HISTORY_MS, RETENTION_MS } from './store.mjs';
 
-/** An automatic join stores this much of the chat before the joining message. */
-export const JOIN_HISTORY_MS = 24 * 3_600_000;
-/** An owner-button join (Move to Bona inbox, Add chat by phone number) stores this much. */
-export const OWNER_HISTORY_MS = 30 * 86_400_000;
+/**
+ * An automatic join stores this much of the chat before the joining message; an owner-button
+ * join (Move to Bona inbox, Add chat by phone number) this much. Defined beside the history
+ * floor they set (lib/inbox/store.mjs `setInboxState`), and exported here as they always were.
+ */
+export { JOIN_HISTORY_MS, OWNER_HISTORY_MS };
 /** Pages per question on a history read: 10 × 100 records is more than any real chat window. */
 export const BACKFILL_MAX_PAGES = 10;
 /** How many of the newest records a refresh asks for, per question. */
@@ -310,9 +313,9 @@ export function createBackfill({
 
   /**
    * Store a chat's newest `REFRESH_LIMIT` records per question, from its history floor to
-   * now (A1). The floor is 24 h before the chat joined — an owner-button join already stored
-   * its 30 days when it joined, so a refresh never needs to reach further — and never past
-   * the retention horizon, or a refresh would store again what the daily purge removed.
+   * now (A1). The floor is the chat's own (`history_from`: 24 h before an automatic join, 30
+   * days before an owner-button join), else 24 h before it joined, and never past the
+   * retention horizon, or a refresh would store again what the daily purge removed.
    * Reading only the newest page is the point, so `truncated` is always false: what lies
    * further back is the join history's to store, and a refresh saying otherwise would flag
    * every active chat.
@@ -348,7 +351,8 @@ export function createBackfill({
       refreshedAt.delete(leadId); // re-added at the end: the most recently refreshed
       refreshedAt.set(leadId, t);
       if (refreshedAt.size > REFRESH_MEMORY) refreshedAt.delete(refreshedAt.keys().next().value);
-      const floor = Math.max((current.inbox_since ?? t) - JOIN_HISTORY_MS, t - RETENTION_MS);
+      const own = Number.isFinite(current.history_from) ? current.history_from : (current.inbox_since ?? t) - JOIN_HISTORY_MS;
+      const floor = Math.max(own, t - RETENTION_MS);
       const run = readChat(current, {
         sinceMs: floor, untilMs: t, offset: REFRESH_LIMIT, maxPages: 1, noteTruncation: false, deadline: t + budget,
       });

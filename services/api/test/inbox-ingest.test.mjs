@@ -69,6 +69,27 @@ function assertClean(logs) {
   for (const needle of PERSONAL) assert.equal(out.includes(needle), false, 'a log line carries personal data');
 }
 
+test('a record from before the chat\'s history floor is refused: nothing stored, nothing learned', () => {
+  const FLOOR = NOW - 86_400_000;
+  // No lid yet: a record older than the floor must not teach it one.
+  const h = harness({ lead: { history_from: FLOOR, wa_lid: null } });
+  assert.deepEqual(h.ingest(h.lead(), rec({ id: 'OLD', ts: FLOOR - 1 })), { stored: false, reason: 'before_floor' });
+  assert.deepEqual(h.ingest(h.lead(), rec({ id: 'OLD-OUT', fromMe: true, jidAlt: null, jid: PHONE_JID, ts: FLOOR - 60_000, text: TYPED })), { stored: false, reason: 'before_floor' });
+  // Even a record naming a colleague's lid teaches the row nothing from before the floor.
+  learnTeamLid(h.s, '966500000009', TEAM_LID);
+  assert.deepEqual(h.ingest(h.lead(), rec({ id: 'OLD-TEAM', jid: TEAM_LID, jidAlt: null, ts: FLOOR - 1 })), { stored: false, reason: 'before_floor' });
+  assert.equal(h.inbox.hasMessages(LEAD_ID), false);
+  assert.equal(h.lead().wa_lid, null, 'nothing learned');
+  assert.equal(h.ingest(h.lead(), rec({ id: 'EDGE', ts: FLOOR })).stored, true, 'exactly at the floor is inside it');
+  assert.equal(h.ingest(h.lead(), rec({ id: 'UNDATED', ts: null })).stored, true, 'a record with no time is stored at now, after any floor');
+  assert.equal(h.lead().wa_lid, LID, 'learned from a record inside the floor');
+  // A chat with no floor recorded keeps every record, as before.
+  const open = harness();
+  assert.equal(open.ingest(open.lead(), rec({ id: 'ANY', ts: FLOOR - 90 * 86_400_000 })).stored, true);
+  h.s.close();
+  open.s.close();
+});
+
 test('refuses a chat outside the inbox, a record with no id and noise — and stores nothing', () => {
   const h = harness();
   assert.throws(() => createIngest({ db: h.s }), TypeError);

@@ -76,7 +76,7 @@ test('schema v4 gives leads their inbox columns and adds the transcript, outbox,
   const info = (table) => s.db.prepare(`PRAGMA table_info(${table})`).all();
   const names = (table) => info(table).map((c) => c.name);
   const leadCols = info('leads');
-  assert.deepEqual(leadCols.slice(-5).map((c) => c.name), ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human']);
+  assert.deepEqual(leadCols.slice(-6).map((c) => c.name), ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from']);
   const needsHuman = leadCols.find((c) => c.name === 'needs_human');
   assert.equal(needsHuman.notnull, 1);
   assert.equal(needsHuman.dflt_value, '0');
@@ -216,7 +216,7 @@ test('a v3 file db moves to v4: each existing lead is placed by what is certain 
 
   const a = openDb(file);
   assert.equal(a.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
-  const added = ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human'];
+  const added = ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from'];
   const after = snapshot(a.db);
   assert.equal(after.length, before.length, 'no lead is added or lost');
   assert.equal(countOf(a.db, 'touchpoints'), touchpointsBefore);
@@ -225,6 +225,8 @@ test('a v3 file db moves to v4: each existing lead is placed by what is certain 
     const row = a.getLead(c.id);
     assert.equal(row.inbox_state, c.want, c.id);
     assert.equal(row.inbox_since, c.want === 'in' ? createdOf(i) : null, `${c.id}: in since the lead was created, and only if in`);
+    // The durable history floor: what an automatic join keeps, the 24 h before it joined.
+    assert.equal(row.history_from, c.want === 'in' ? createdOf(i) - 86_400_000 : null, `${c.id}: its history floor`);
     assert.equal(row.needs_human, 0, c.id);
     assert.equal(row.handler_user_id, null, c.id);
     assert.equal(row.last_msg_ts, null, c.id);
@@ -282,8 +284,10 @@ test('a v4 step that fails part-way leaves a clean v3 file, and a retry upgrades
   assert.equal(a.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION, 'the retry upgrades the file');
   assert.equal(a.getLead('L-ref').inbox_state, 'in');
   assert.equal(a.getLead('L-ref').inbox_since, 1000);
+  assert.equal(a.getLead('L-ref').history_from, 1000 - 86_400_000);
   assert.equal(a.getLead('L-kw').inbox_state, 'unsure');
   assert.equal(a.getLead('L-kw').inbox_since, null);
+  assert.equal(a.getLead('L-kw').history_from, null);
   a.close();
   cleanup();
 });
@@ -292,12 +296,12 @@ test('insertLead and updateLead carry the inbox columns', () => {
   const s = openDb(':memory:');
   const l = s.insertLead({
     lead_id: 'L1', created: 1, updated: 1, wa_jid: '966500000001@s.whatsapp.net',
-    inbox_state: 'in', inbox_since: 1, handler_user_id: 'USR-1', last_msg_ts: 7, needs_human: true,
+    inbox_state: 'in', inbox_since: 1, handler_user_id: 'USR-1', last_msg_ts: 7, needs_human: true, history_from: -5,
   });
-  assert.deepEqual([l.inbox_state, l.inbox_since, l.handler_user_id, l.last_msg_ts, l.needs_human], ['in', 1, 'USR-1', 7, 1]);
-  assert.equal(s.updateLead('L1', { inbox_state: 'out', inbox_since: null, handler_user_id: null, last_msg_ts: null, needs_human: false }), true);
+  assert.deepEqual([l.inbox_state, l.inbox_since, l.handler_user_id, l.last_msg_ts, l.needs_human, l.history_from], ['in', 1, 'USR-1', 7, 1, -5]);
+  assert.equal(s.updateLead('L1', { inbox_state: 'out', inbox_since: null, handler_user_id: null, last_msg_ts: null, needs_human: false, history_from: null }), true);
   const after = s.getLead('L1');
-  assert.deepEqual([after.inbox_state, after.inbox_since, after.handler_user_id, after.last_msg_ts, after.needs_human], ['out', null, null, null, 0]);
+  assert.deepEqual([after.inbox_state, after.inbox_since, after.handler_user_id, after.last_msg_ts, after.needs_human, after.history_from], ['out', null, null, null, 0, null]);
   s.close();
 });
 

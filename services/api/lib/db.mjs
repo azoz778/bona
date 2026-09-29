@@ -160,6 +160,10 @@ const MIGRATIONS = [
     // yet) and never re-derived from the match rules, so a lead that was only guessed (the
     // word "bona", the ±15-min click window) cannot drift into the inbox later through the
     // `phone` rule. `needs_human` is Phase 4's hand-over flag; any human reply clears it.
+    // `history_from` is the chat's durable history floor: nothing older than it is ever stored
+    // for that chat, whichever read brings it (the poller, a join's history, a thread refresh,
+    // the daily catch-up). A join sets it — 24 h before the joining message for an automatic
+    // join, 30 days back for the owner's Move and Add — and leaving the inbox clears it.
     // `wa_messages` holds the transcripts of `in` chats only; only the client writes `in`,
     // and everyone on the owner's side writes `out`, which a CHECK holds. `wa_outbox` is
     // every send from the owner's number through lib/wa-send.mjs, and its rolling-24 h
@@ -176,7 +180,8 @@ const MIGRATIONS = [
     // D9, 2026-09-29), legacy imports — goes to the owner's Unsure list. The GLOBs
     // are deliberately a little looser than LISTING_ID_RE in lib/inbox/eligibility.mjs (no
     // word boundary on either side) and were checked against the live data on 2026-09-28
-    // (18 in / 9 unsure). `json_extract` raises on malformed JSON, and one bad touchpoint
+    // (18 in / 9 unsure). Each lead put `in` gets the floor an automatic join would have:
+    // 24 h before it was created. `json_extract` raises on malformed JSON, and one bad touchpoint
     // must not stop bona-api starting, so it only runs in the last branch of a CASE, after
     // json_valid(...) and json_type(...) = 'text': SQLite evaluates a CASE lazily, but
     // promises no order for the two sides of an AND. Only a string snippet counts, since
@@ -200,6 +205,7 @@ const MIGRATIONS = [
       ALTER TABLE leads ADD COLUMN handler_user_id TEXT;
       ALTER TABLE leads ADD COLUMN last_msg_ts INTEGER;
       ALTER TABLE leads ADD COLUMN needs_human INTEGER NOT NULL DEFAULT 0 CHECK (needs_human IN (0,1));
+      ALTER TABLE leads ADD COLUMN history_from INTEGER;
       CREATE INDEX IF NOT EXISTS leads_inbox ON leads(inbox_state, last_msg_ts);
       CREATE TABLE IF NOT EXISTS wa_messages (
         key_id TEXT NOT NULL PRIMARY KEY, lead_id TEXT NOT NULL, jid TEXT,
@@ -237,7 +243,7 @@ const MIGRATIONS = [
                                 ELSE upper(json_extract(t.meta, '$.snippet')) GLOB '*BONA-[0-9][0-9][0-9]*'
                                   OR upper(json_extract(t.meta, '$.snippet')) GLOB '*BONA-W[0-9][0-9][0-9]*' END)
           THEN 'in' ELSE 'unsure' END;
-      UPDATE leads SET inbox_since = created WHERE inbox_state = 'in';
+      UPDATE leads SET inbox_since = created, history_from = created - 86400000 WHERE inbox_state = 'in';
     `,
   },
 ];
@@ -250,7 +256,7 @@ const COLUMNS = {
   leads: ['lead_id', 'created', 'updated', 'phone_e164', 'wa_jid', 'wa_lid', 'name', 'channel', 'source', 'medium', 'campaign', 'campaign_id',
     'content', 'click_ids', 'ref', 'match_method', 'session_id', 'anon_id', 'listing_id', 'first_touch', 'last_touch', 'interest', 'budget',
     'timeline', 'district', 'language', 'notes', 'stage', 'stage_ts', 'value_sar', 'first_inbound_ts', 'first_reply_ts', 'legacy_id',
-    'consent_ads', 'consent_analytics', 'inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human'],
+    'consent_ads', 'consent_analytics', 'inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from'],
   touchpoints: ['id', 'lead_id', 'ts', 'channel', 'event_type', 'source', 'medium', 'campaign', 'campaign_id', 'listing_id', 'meta'],
 };
 

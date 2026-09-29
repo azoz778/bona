@@ -887,8 +887,17 @@ de-duplicates on `key.id`. A message the poller writes off after three tries, or
 once the window has moved past it, becomes a `wa_gaps` row, shown in the thread as a message
 that could not be loaded, instead of vanishing; so does a failed history read of an
 automatic join or of the catch-up. The owner's *Move* and *Add* do not write one yet: their
-failed 30-day read is only logged (`inbox.backfill.failed`), and if the chat is still empty
-the next catch-up asks for the 24 h before it joined, not the 30 days. Unread means inbound
+failed 30-day read is only logged (`inbox.backfill.failed`); if the chat is still empty the
+next catch-up asks for the same 30 days (it reads from the chat's history floor, below).
+*History floor* (`leads.history_from`): every join records how far back that chat may be
+stored — 24 h before the joining message for an automatic join (a certain inbound signal, or
+the owner's Bona link or property document), 30 days back for *Move* and *Add* (the Unsure
+tab's, a lead page's and a chat to check's), `created − 24 h` for every lead schema v4 put `in`.
+A chat already `in` keeps the floor it joined with; `out` and `unsure` clear it. Ingest
+refuses any record older than it (`before_floor`: nothing stored, nothing learned), whichever
+read brings it — the poller (whose window can reach weeks back after an outage), a join's
+history, a thread refresh or the catch-up — and the refresh and the catch-up start from it.
+Unread means inbound
 messages newer than the newest one that person saw when they last opened the thread (a new
 member starts from the day the account was made); the total is the Inbox count in the nav.
 
@@ -952,14 +961,15 @@ text kept in the box, a fresh `send_id` and the HTTP status listed below. A JSON
 *Polling and upkeep.* The poller runs every 20 s (`BONA_WA_POLL_MS`, §4). The VPS sets it in
 `~/.secrets/bona-services.env`, and a value there wins over the default — a stale
 `BONA_WA_POLL_MS=45000` keeps the old pace. Opening a thread also reads that chat at once,
-but only messages since 24 h before it joined the inbox, and never for more than ~3 s.
+but only messages since the chat's history floor, and never for more than ~3 s.
 Inbox upkeep (`app.inboxMaintenance()`) runs at start-up and then every 24 h: first every
 listed chat whose number is a team or never-list number goes `out` with its transcript
 (logged `inbox.excluded_out`); then the 5-year purge, code rows and stubs older than 2 days,
 and `pending` sends older than 2 minutes marked `uncertain` (a process that died mid-send
 cannot know whether the message went); then every `in` chat with nothing stored yet — at
-most 200 a run, the longest-joined first — fetches the history an automatic join takes,
-never from before the 5-year horizon (logged `inbox.catchup`; a read that fails leaves a
+most 200 a run, the longest-joined first — fetches its history from its history floor (the
+24 h an automatic join takes, the 30 days of an owner join), never from before the 5-year
+horizon (logged `inbox.catchup`; a read that fails leaves a
 gap). That is how the chats schema v4 put `in` get a thread on day one; one whose
 history comes back empty stays empty and is asked again on the next run. The upkeep also
 prunes the real-estate chats to check: an open one 30 days after its last property message, a

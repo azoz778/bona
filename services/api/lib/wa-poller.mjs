@@ -595,7 +595,9 @@ export function createPoller({
    * no `await` between them, so nothing in this process can move the chat in between.
    */
   async function join(leadId, ts, via, tally, extra = {}) {
-    inboxStore.setInboxState(leadId, 'in', { since: ts });
+    // The history floor goes with the state: nothing of this chat from before the 24 h is
+    // ever stored, whichever read brings it (lib/inbox/ingest.mjs).
+    inboxStore.setInboxState(leadId, 'in', { since: ts, historyFrom: ts - JOIN_HISTORY_MS });
     if (backfill) {
       const got = await backfill.history(db.getLead(leadId), { sinceTs: ts - JOIN_HISTORY_MS, untilTs: ts });
       if (got?.error) {

@@ -18,7 +18,7 @@ import {
   CLICK_WINDOW_MS, FIRST_RUN_LOOKBACK_MS, MAX_RECORD_ATTEMPTS, MAX_WINDOW_MS, OVERLAP_MS,
   SEEN_TTL_MS, PROPERTY_DOCUMENT_WORD, TK_DOCUMENT_WORD, adMetaOf, adSourceOf, candidateWordsOf, createPoller, isIgnorableChat, jidsOf,
 } from '../lib/wa-poller.mjs';
-import { JOIN_HISTORY_MS, createBackfill } from '../lib/inbox/backfill.mjs';
+import { JOIN_HISTORY_MS, OWNER_HISTORY_MS, createBackfill } from '../lib/inbox/backfill.mjs';
 import { ownerOutboundJoins } from '../lib/inbox/eligibility.mjs';
 import { createIngest } from '../lib/inbox/ingest.mjs';
 import { createInboxStore } from '../lib/inbox/store.mjs';
@@ -1348,6 +1348,39 @@ test('(t) a click-window match is a guess too: Unsure, nothing stored', async ()
   h.cleanup();
 });
 
+test('(t) an automatic join keeps its history floor: a record of that chat from more than 24 h before the joining message is refused, however it arrives', async () => {
+  const ref = msg({ id: 'REF', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const floor = NOW - 60_000 - JOIN_HISTORY_MS;
+  const h = harness({ inbox: true, history: [ref], windows: [[ref], [
+    // The poller's own window can reach further back than a join ever may (a cursor held
+    // back by an outage, a delivery WhatsApp sat on): the floor still holds.
+    msg({ id: 'BEFORE', ts: floor - 1, text: 'from before the chat was about Bona' }),
+    msg({ id: 'INSIDE', ts: floor + 1000, text: 'inside the 24 h' }),
+  ]] });
+  await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.history_from, floor);
+  await h.poller.tick();
+  assert.deepEqual(rows(h, lead.lead_id), [['INSIDE', 'in', 'client'], ['REF', 'in', 'client']]);
+  h.cleanup();
+});
+
+test('(t) a poller 45 days behind after the owner moved a chat in today stores only its last 30 days', async () => {
+  const h = harness({ inbox: true });
+  seedInLead(h, { lead_id: 'LEAD-moved', inbox_state: 'unsure', inbox_since: null });
+  // What *Move to Bona inbox* writes (lib/dashboard/routes.mjs `inboxMove`): in since now,
+  // its history floored 30 days back.
+  h.inbox.setInboxState('LEAD-moved', 'in', { since: NOW, historyFrom: NOW - OWNER_HISTORY_MS });
+  h.db.waCursorSet(h.poller.status().instance, { lastTs: NOW - 45 * 86_400_000, lastRun: NOW - 45 * 86_400_000, unmatched: 0 });
+  h.push([
+    msg({ id: 'DAY-40', ts: NOW - 40 * 86_400_000, text: 'forty days ago' }),
+    msg({ id: 'DAY-20', ts: NOW - 20 * 86_400_000, text: 'twenty days ago' }),
+  ]);
+  await h.poller.tick();
+  assert.deepEqual(rows(h, 'LEAD-moved'), [['DAY-20', 'in', 'client']], 'the 40-day-old record is older than the floor the owner joined it with');
+  h.cleanup();
+});
+
 test('(t) a web-form number that writes on WhatsApp with no sure sign goes on the owner\'s Unsure list: the form never decides the chat', async () => {
   const f1 = msg({ id: 'F1', ts: NOW - 120_000, text: 'السلام عليكم' });
   const f2 = msg({ id: 'F2', ts: NOW - 30_000, text: 'BONA-W012 السعر؟' });
@@ -1441,6 +1474,7 @@ test('(t) a Bona link the owner sends to a stranger starts a chat: in, no note, 
   assert.equal(lead.listing_id, 'BONA-W003');
   assert.equal(lead.inbox_state, 'in');
   assert.equal(lead.inbox_since, NOW - 60_000);
+  assert.equal(lead.history_from, NOW - 60_000 - JOIN_HISTORY_MS, 'an automatic join: its history floor is the 24 h before his message');
   assert.equal(lead.first_inbound_ts, null);
   assert.equal(lead.first_reply_ts, NOW - 60_000, 'he wrote first, so nobody is waiting on him');
   assert.equal(lead.handler_user_id, h.owner.user_id);

@@ -424,6 +424,20 @@ test('a record outside the window asked for is never stored, whatever Evolution 
   joined.s.close();
 });
 
+test('refresh reads from the chat\'s durable history floor when it has one: an owner join\'s 30 days, a later join\'s own floor', async () => {
+  const vouched = harness({ lead: { inbox_since: NOW - 3_600_000, history_from: NOW - OWNER_HISTORY_MS } });
+  await vouched.backfill.refresh(vouched.lead());
+  const month = { gte: new Date(NOW - OWNER_HISTORY_MS).toISOString(), lte: SINCE_JOIN.lte };
+  assert.deepEqual(vouched.calls.map((c) => c.where.messageTimestamp), [month, month, month]);
+  vouched.s.close();
+
+  const later = harness({ lead: { inbox_since: NOW - 3_600_000, history_from: NOW - 60_000 } });
+  await later.backfill.refresh(later.lead());
+  const floor = { gte: new Date(NOW - 60_000).toISOString(), lte: SINCE_JOIN.lte };
+  assert.deepEqual(later.calls.map((c) => c.where.messageTimestamp), [floor, floor, floor], 'the floor, not 24 h before inbox_since');
+  later.s.close();
+});
+
 test('the floor never reaches past the retention horizon, and is 24 h before now for a row with no join time', async () => {
   const old = harness({ lead: { inbox_since: NOW - 6 * 365 * 86_400_000 } });
   await old.backfill.refresh(old.lead());
