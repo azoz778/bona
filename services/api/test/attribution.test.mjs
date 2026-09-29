@@ -54,6 +54,28 @@ test('the rewritten pattern finds the same line, listing and code as the old one
   }
 });
 
+/**
+ * How long `call` takes, in milliseconds: the fastest of three runs of it. One run's wall
+ * time can be stretched by a garbage-collection pause or by other processes loading the
+ * machine (a full-suite run under CPU load once failed a 100 ms check on a single run), so
+ * a time check takes the minimum of three runs of the same call and allows 500 ms
+ * (`TIME_LIMIT_MS`). It stops at the first run under the limit: the minimum of all three
+ * would be under it too, so the verdict is the same in a third of the time. That still
+ * catches what the check is for: the old pattern took 2.3 s on 2,000 spaces and grows with
+ * the cube of the run, so on these 20,000-character inputs it takes far longer than 500 ms,
+ * on every run.
+ */
+const TIME_LIMIT_MS = 500;
+function fastestOfThree(call) {
+  let fastest = Infinity;
+  for (let run = 0; run < 3 && fastest >= TIME_LIMIT_MS; run += 1) {
+    const started = performance.now();
+    call();
+    fastest = Math.min(fastest, performance.now() - started);
+  }
+  return fastest;
+}
+
 test('a long run of spaces after Ref is read in linear time', () => {
   // The old pattern had three whitespace runs that could share the same spaces
   // (`\s+ (BONA)? \s* [·-:|]? \s*`), so a failed match tried every split of them: 2,000
@@ -66,10 +88,9 @@ test('a long run of spaces after Ref is read in linear time', () => {
       `Ref BONA${space.repeat(10_000)}-${space.repeat(10_000)}x`,
       `Ref${space.repeat(10_000)}·${space.repeat(10_000)}x`,
     ]) {
-      const started = performance.now();
       assert.equal(parseRef(text), null);
-      const ms = performance.now() - started;
-      assert.ok(ms < 100, `${JSON.stringify(space)} × ${text.length}: ${ms.toFixed(1)} ms`);
+      const ms = fastestOfThree(() => parseRef(text));
+      assert.ok(ms < TIME_LIMIT_MS, `${JSON.stringify(space)} × ${text.length}: ${ms.toFixed(1)} ms`);
     }
   }
 });

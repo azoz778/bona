@@ -10,6 +10,7 @@ import {
   findMessagesPage, findMessagesWindow, isNoise, mediaOf, normaliseRecord, oldestFirst,
   readWindow, recordsOf, textOf, toMs,
 } from '../lib/evolution.mjs';
+import { isTkDocument, namesBona, namesTk, ownerOutboundJoins } from '../lib/inbox/eligibility.mjs';
 
 const GTE = Date.UTC(2026, 8, 6, 11, 58, 0);
 const LTE = Date.UTC(2026, 8, 6, 12, 0, 0);
@@ -1173,6 +1174,42 @@ test('fileNameTk and fileNameBona say whether the whole name names TK or Bona, e
   assert.deepEqual([zalgoBona.fileName, zalgoBona.fileNameTk, zalgoBona.fileNameBona], [null, false, true]);
   for (const r of [rec(''), normaliseRecord(textRecord())]) {
     assert.deepEqual([r.fileNameTk, r.fileNameBona], [false, false], 'no usable name, or no document');
+  }
+});
+
+test('a file name is read both ways for TK and Bona, as a caption is: the same string gets the same answer (D16)', () => {
+  // "X​TK" reads "XTK" with the invisible character gone and "X TK" with it keeping
+  // the words apart. A caption is read both ways (namesTk, namesBona) and names TK when
+  // either reading does; a file name used to be read only with it gone, so the same string
+  // joined as a file name and stayed out as a caption.
+  const asName = (s) => normaliseRecord({ key: { id: 'N', fromMe: true }, message: { documentMessage: { fileName: s } } });
+  const asCaption = (s) => normaliseRecord({ key: { id: 'C', fromMe: true }, message: { documentMessage: { fileName: 'document.pdf', caption: s } } });
+  for (const [s, tk, bona] of [
+    ['Villa brochure X​TK.pdf', true, false],
+    ['Villa brochure X‎TK.pdf', true, false],
+    ['Villa brochure X‏TK.pdf', true, false],
+    ['Villa brochure X­TK.pdf', true, false],
+    ['Villa brochure X﻿TK.pdf', true, false],
+    ['Villa brochure TK⁠X.pdf', true, false],
+    ['بروشور فيلا​تي كي.pdf', true, false],
+    ['بروشور تي كي​فيلا.pdf', true, false],
+    ['Villa brochure X​Bona.pdf', false, true],
+    ['Bona​fide villa brochure.pdf', false, true],
+    // Neither reading names TK or Bona: both join, by the brochure.
+    ['Villa brochure X​Y.pdf', false, false],
+    ['Villa brochure XTK.pdf', false, false],
+    ['Bona fide villa brochure.pdf', false, false],
+  ]) {
+    const name = asName(s);
+    const caption = asCaption(s);
+    assert.equal(caption.text, s, 'the caption is read as it was sent');
+    assert.deepEqual([namesTk(caption.text), namesBona(caption.text)], [tk, bona], `caption ${JSON.stringify(s)}`);
+    assert.deepEqual([name.fileNameTk, name.fileNameBona], [tk, bona], `file name ${JSON.stringify(s)}`);
+    const joins = !tk && !bona;
+    assert.equal(ownerOutboundJoins(name), joins, `joins as a file name ${JSON.stringify(s)}`);
+    assert.equal(ownerOutboundJoins(caption), joins, `joins as a caption ${JSON.stringify(s)}`);
+    assert.equal(isTkDocument(name), tk, `TK document by its file name ${JSON.stringify(s)}`);
+    assert.equal(isTkDocument(caption), tk, `TK document by its caption ${JSON.stringify(s)}`);
   }
 });
 
