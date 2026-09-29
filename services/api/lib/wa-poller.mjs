@@ -724,6 +724,17 @@ export function createPoller({
    * at, so it never fails the record: a failure is logged by its kind only (`errorKind`: no
    * message, so no numbers, no words) and the record is not retried for it — a retry would
    * handle the record a second time.
+   *
+   * Noise (an edit, a reaction …) is no message of its own, so it notes nothing: an edit's
+   * text is the new text of a message already counted, and counting it again would also
+   * move `last_ts`, and with it the 30-day deletion, later. It still takes a chat that has
+   * become a lead off the list.
+   *
+   * Known edge, accepted: the note is written before the record is marked seen, and the two
+   * are not one transaction (the list never fails the record, D17). If `waSeenAdd` throws
+   * right after a note, the record is retried and noted again, so `hits` — the "N messages"
+   * the owner's list shows — is one too high for that chat; its times and words come out the
+   * same. It needs a failure between two synchronous writes, so it is left as it is.
    */
   function noteCandidateSafely(rec, ts, tally) {
     try {
@@ -734,7 +745,7 @@ export function createPoller({
         inboxStore.removeCandidatesFor({ phone: jids.phone, jid: jids.waJid, lid: jids.waLid });
         return;
       }
-      if (!jids.phone) return;
+      if (!jids.phone || rec.noise) return;
       const words = candidateWordsOf(rec);
       if (!words.length) return;
       const res = inboxStore.noteCandidate({

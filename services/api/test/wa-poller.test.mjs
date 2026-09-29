@@ -2163,6 +2163,36 @@ test('(u) a dismissed chat stays dismissed: later property messages neither reop
   h.cleanup();
 });
 
+test('(u) an edit or a reaction is no message: it neither notes a chat nor counts one, nor moves its last time on', async () => {
+  // An edit Baileys-style (an editedMessage wrapper, no kind of its own) is noise, but its
+  // text is the new text: the villa in it must not count as one more property message, nor
+  // push the 30-day deletion later.
+  const h = harness({ inbox: true, windows: [[msg({ id: 'Q1', jid: STRANGER, ts: NOW - 120_000, text: 'أبغى فيلا' })]] });
+  await h.poller.tick();
+  const [before] = candidates(h);
+  h.push([
+    msg({ id: 'E1', jid: STRANGER, ts: NOW - 60_000, text: 'أبغى فيلا أو شقة للإيجار', messageType: null, noise: true }),
+    msg({ id: 'E2', jid: STRANGER2, ts: NOW - 50_000, text: 'the villa is 3M', messageType: null, noise: true }),
+    msg({ id: 'R1', jid: STRANGER2, ts: NOW - 40_000, text: '', messageType: 'reactionMessage', noise: true }),
+  ]);
+  const tally = await h.poller.tick();
+  assert.equal(tally.candidates, 0);
+  assert.deepEqual(candidates(h), [before], 'the row is exactly as it was, and no chat is noted from an edit');
+  assert.equal(h.db.waSeenHas('E1'), true, 'handled all the same');
+  h.cleanup();
+});
+
+test('(u) an edit on a chat that has become a lead still takes it off the list', async () => {
+  const h = harness({ inbox: true, windows: [[msg({ id: 'Q1', jid: STRANGER, ts: NOW - 120_000, text: 'أبغى فيلا' })]] });
+  await h.poller.tick();
+  assert.equal(candidates(h).length, 1);
+  h.db.insertLead({ lead_id: 'LEAD-later', phone_e164: '966522222222', wa_jid: STRANGER, inbox_state: 'unsure', created: NOW - 90_000, updated: NOW - 90_000 });
+  h.push([msg({ id: 'E1', jid: STRANGER, ts: NOW - 60_000, text: 'أبغى فيلا', messageType: null, noise: true })]);
+  await h.poller.tick();
+  assert.deepEqual(candidates(h), [], 'it is a lead now: its own inbox state decides');
+  h.cleanup();
+});
+
 test('(u) team and never-list numbers never become candidates', async () => {
   const h = harness({ inbox: true, isExcluded: (digits) => digits === '966522222222' || digits === '966533333333' });
   h.push([

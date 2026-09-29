@@ -6,8 +6,9 @@
 // how long, where other copies stay, and how to have it deleted. Dana is left out of it on
 // purpose until she answers on WhatsApp (Phase 4) — a policy that promises what the service
 // does not do is as wrong as one that hides what it does. A dated line in *Changes* flags a
-// material change for the 30 days the page promises and is then removed: nothing here
-// needs it to be there, and the pointer test checks the page without it too.
+// material change for the 30 days the page promises and is then removed: a test that asks
+// for one asks only until its 30 days are up, and the pointer test checks the page without
+// them too.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { test } from 'node:test';
@@ -136,6 +137,14 @@ test('the chats kept only to be checked are named: what is kept, for how long, a
   assert.doesNotMatch(en, /for up to 30 days/, 'a chat that keeps writing is kept as long as it does');
   assert.match(en, /The conversation itself is not stored unless/);
   assert.match(en, /for up to a year/);
+  // "Only" lists every field the row keeps (lib/inbox/store.mjs `inbox_candidates`): the
+  // ids, the name, the words, the times, the count and who wrote last.
+  assert.match(en, /we keep only the number \(and the ids WhatsApp gives the chat\), the name WhatsApp shows for it, the property words it used/);
+  assert.match(en, /when such messages were sent, how many there were and who sent the last one/);
+  assert.doesNotMatch(en, /we keep only the number, the name WhatsApp shows for it and the property words/);
+  // A later sure sign joins the chat on its own, and the join copies its earlier messages.
+  assert.match(en, /unless he adds it to the Bona inbox or it later becomes a Bona enquiry/);
+  assert.match(en, /only the number and the ids WhatsApp gives the chat are kept, for up to a year/);
   // The first paragraph's "not stored" no longer stands alone: it points to the exception.
   assert.match(en, /are not stored; the next paragraph describes the one narrow exception/);
   assert.ok(policy.updated >= '2026-09-29', 'the version date moves with this change');
@@ -146,4 +155,32 @@ test('the chats kept only to be checked are named: what is kept, for how long, a
   assert.match(ar, /ولا تُحفظ المحادثة نفسها/);
   assert.match(ar, /مدةً أقصاها سنة/);
   assert.match(ar, /باستثناء محدود نبيّنه في الفقرة التالية/);
+  assert.match(ar, /إلا بالرقم \(ومعرّفات واتساب للمحادثة\)، والاسم الذي يُظهره واتساب له، والكلمات العقارية/);
+  assert.match(ar, /ووقت هذه الرسائل وعددها ومَن أرسل آخرها/);
+  assert.match(ar, /ما لم يُضفها إلى صندوق محادثات بونا أو تصبح لاحقاً استفساراً لدى بونا/);
+  assert.match(ar, /لا نحتفظ إلا بالرقم ومعرّفات واتساب للمحادثة، مدةً أقصاها سنة/);
+});
+
+test('the Changes section flags the chats kept only to be checked, in both languages, for its 30 days (D17)', () => {
+  const changes = section('changes');
+  assert.ok(changes, 'the Changes section is missing');
+  // The page promises to flag a material change here for 30 days; this line comes out on
+  // or after 2026-10-29, and from then on nothing asks for it.
+  if (new Date().toISOString().slice(0, 10) >= '2026-10-29') return;
+  const line = (locale, start) => changes.body[locale].find((p) => p.startsWith(start));
+  const en = line('en', '29 September 2026:');
+  assert.ok(en, 'the version date moved to 29 September for this change, so Changes says what changed');
+  assert.match(en, /“WhatsApp conversations with our team”/);
+  assert.match(en, /looks like a property enquiry but does not make clear that it is for Bona/);
+  assert.match(en, /the number, the name WhatsApp shows and the property words it used, not the conversation/);
+  assert.match(en, /until 30 days after the last such message/);
+  assert.match(en, /for up to a year/);
+  const ar = line('ar', '29 سبتمبر 2026:');
+  assert.ok(ar, 'the Arabic text says everything the English does');
+  assert.match(ar, /«محادثات واتساب مع فريق بونا»/);
+  assert.match(ar, /استفساراً عقارياً دون أن يتضح أنها موجّهة إلى بونا/);
+  assert.match(ar, /الرقم، والاسم الذي يُظهره واتساب، والكلمات العقارية الواردة فيها، دون المحادثة نفسها/);
+  assert.match(ar, /حتى ثلاثين يوماً من آخر رسالة من هذا النوع/);
+  assert.match(ar, /مدةً أقصاها سنة/);
+  assert.ok(policy.updated >= '2026-09-29', 'the version date is the newest change');
 });

@@ -4,6 +4,13 @@
  * owner's action already happened, and refusing to show it would only hide it.
  * The inbox actions carry no text and no number either: a reply is audited with its
  * send status, a handler change with the user it went to.
+ *
+ * `inbox_move` and `inbox_out` also stand for the owner's real-estate chats to check (D17):
+ * *Move to Bona inbox* is `inbox_move` with the candidate as `target` (`CND-…`) and the lead
+ * it became as `meta.lead_id`; *Not a client* is `inbox_out` with the candidate as `target`.
+ * On a lead both have the lead (`LEAD-…`) as `target`. So the id's prefix tells the two
+ * apart, and a lead's whole history is its `target` rows plus `inbox_move` rows whose
+ * `meta.lead_id` is that lead.
  */
 import { newId } from './db.mjs';
 
