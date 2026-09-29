@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { openDb } from '../lib/db.mjs';
 import { createTeam } from '../lib/team.mjs';
 import {
-  createInboxStore, RETENTION_MS, MAX_STORED_TEXT, SENDER_KINDS, OUTBOX_KINDS, OUTBOX_STATUSES,
+  createInboxStore, RETENTION_MS, MAX_STORED_TEXT, SENDER_KINDS, OUTBOX_KINDS, OUTBOX_STATUSES, CANDIDATE_KEEP_MS, DISMISSED_KEEP_MS,
 } from '../lib/inbox/store.mjs';
 
 const NOW = 1_790_500_000_000;
@@ -776,5 +776,169 @@ test('listedLeads: every in lead (a chat or not) and every lead on the Unsure li
   assert.deepEqual(inbox.listedLeads().find((l) => l.lead_id === 'L-in'),
     { lead_id: 'L-in', phone_e164: '966500000002', wa_jid: '966500000002@s.whatsapp.net', wa_lid: null, inbox_state: 'in' },
     'only what the exclusion test reads');
+  s.close();
+});
+
+/* ---------------- real-estate chats to check (D17) ---------------- */
+
+const PHONE = '966500000077';
+const PJID = `${PHONE}@s.whatsapp.net`;
+const LID = '272516946294519@lid';
+const cand = (s, id) => ({ ...s.db.prepare('SELECT * FROM inbox_candidates WHERE cand_id = ?').get(id) });
+
+test('a candidate is kept 30 days after its last property message, a dismissed one a year', () => {
+  assert.equal(CANDIDATE_KEEP_MS, 30 * DAY);
+  assert.equal(DISMISSED_KEEP_MS, 365 * DAY);
+});
+
+test('noteCandidate makes one row per chat: who, when, which words and who wrote last — never what was written', () => {
+  const { s, inbox, at } = harness();
+  const first = inbox.noteCandidate({ jid: PJID, phone: PHONE, name: '  Umm   Khalid ', ts: NOW - 5000, words: ['شقة', 'إيجار'], dir: 'in' });
+  assert.equal(first.state, 'open');
+  assert.equal(first.created, true);
+  assert.match(first.cand_id, /^CND-[0-9a-z]+-[0-9a-f]{4}$/);
+  assert.deepEqual(cand(s, first.cand_id), {
+    cand_id: first.cand_id, jid: PJID, lid: null, phone_e164: PHONE, name: 'Umm Khalid',
+    first_ts: NOW - 5000, last_ts: NOW - 5000, hits: 1, words: 'شقة,إيجار', last_dir: 'in', state: 'open', updated: NOW,
+  });
+
+  // The same chat again, now by its lid with the phone jid alongside: the same row.
+  at(NOW + 1000);
+  const again = inbox.noteCandidate({ jid: PJID, lid: LID, name: 'Someone Else', ts: NOW - 1000, words: ['villa', 'شقة'], dir: 'out' });
+  assert.deepEqual(again, { state: 'open', cand_id: first.cand_id, created: false });
+  assert.deepEqual(cand(s, first.cand_id), {
+    cand_id: first.cand_id, jid: PJID, lid: LID, phone_e164: PHONE, name: 'Umm Khalid',
+    first_ts: NOW - 5000, last_ts: NOW - 1000, hits: 2, words: 'شقة,إيجار,villa', last_dir: 'out', state: 'open', updated: NOW + 1000,
+  }, 'a name it has is kept; the lid it lacked is filled');
+
+  // An older message read late (the poll overlap) counts, but moves neither the last time nor the last writer.
+  inbox.noteCandidate({ lid: LID, ts: NOW - 9000, words: [], dir: 'in' });
+  const row = cand(s, first.cand_id);
+  assert.deepEqual([row.first_ts, row.last_ts, row.last_dir, row.hits], [NOW - 9000, NOW - 1000, 'out', 3]);
+  assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM inbox_candidates').get().n, 1);
+  s.close();
+});
+
+test('noteCandidate keeps at most eight words, each once, no commas, strings only', () => {
+  const { s, inbox } = harness();
+  const { cand_id } = inbox.noteCandidate({ phone: PHONE, ts: NOW, words: ['villa', 'villa', 'a,b', 42, null, '  ', 'flat'], dir: 'in' });
+  assert.equal(cand(s, cand_id).words, 'villa,a b,flat');
+  inbox.noteCandidate({ phone: PHONE, ts: NOW, words: ['land', 'plot', 'rent', 'lease', 'sqm', 'broker', 'duplex'], dir: 'in' });
+  assert.equal(cand(s, cand_id).words, 'villa,a b,flat,land,plot,rent,lease,sqm', 'the first eight, in order');
+  assert.deepEqual(inbox.getCandidate(cand_id).words, ['villa', 'a b', 'flat', 'land', 'plot', 'rent', 'lease', 'sqm']);
+  const none = inbox.noteCandidate({ jid: 'x@s.whatsapp.net', ts: NOW, dir: 'out' });
+  assert.equal(cand(s, none.cand_id).words, null);
+  assert.deepEqual(inbox.getCandidate(none.cand_id).words, []);
+  s.close();
+});
+
+test('noteCandidate never fills an id another row already holds, and refuses a chat with no id, no time or no direction', () => {
+  const { s, inbox } = harness();
+  const byLid = inbox.noteCandidate({ lid: LID, ts: NOW, words: ['villa'], dir: 'in' });
+  const byPhone = inbox.noteCandidate({ phone: PHONE, ts: NOW, words: ['flat'], dir: 'in' });
+  // A record that shows both: found by its number first, and the lid stays with its own row.
+  assert.equal(inbox.noteCandidate({ phone: PHONE, lid: LID, ts: NOW + 1, words: [], dir: 'in' }).cand_id, byPhone.cand_id);
+  assert.equal(cand(s, byPhone.cand_id).lid, null);
+  assert.equal(cand(s, byLid.cand_id).lid, LID);
+  assert.throws(() => inbox.noteCandidate({ ts: NOW, dir: 'in' }), RangeError);
+  assert.throws(() => inbox.noteCandidate({ phone: '  ', jid: '', ts: NOW, dir: 'in' }), RangeError);
+  assert.throws(() => inbox.noteCandidate({ phone: PHONE, ts: 'soon', dir: 'in' }), RangeError);
+  assert.throws(() => inbox.noteCandidate({ phone: PHONE, ts: NOW, dir: 'sideways' }), RangeError);
+  assert.throws(() => inbox.noteCandidate(), RangeError);
+  s.close();
+});
+
+test('a dismissed candidate stays dismissed: a later message neither reopens nor counts it, and only its ids are left', () => {
+  const { s, inbox, at } = harness();
+  const { cand_id } = inbox.noteCandidate({ jid: PJID, phone: PHONE, name: 'Umm Khalid', ts: NOW - 9000, words: ['villa'], dir: 'in' });
+  inbox.noteCandidate({ phone: PHONE, ts: NOW - 1000, words: ['شقة'], dir: 'out' });
+  at(NOW + 5000);
+  assert.equal(inbox.dismissCandidate(cand_id), true);
+  assert.equal(inbox.dismissCandidate(cand_id), false, 'once');
+  assert.equal(inbox.dismissCandidate('CND-nope'), false);
+  const row = cand(s, cand_id);
+  assert.deepEqual(row, {
+    cand_id, jid: PJID, lid: null, phone_e164: PHONE, name: null,
+    first_ts: NOW + 5000, last_ts: NOW + 5000, hits: 0, words: null, last_dir: null, state: 'dismissed', updated: NOW + 5000,
+  }, 'no name, words, count, last writer or message times: only the ids and when it was dismissed');
+  at(NOW + 9000);
+  assert.deepEqual(inbox.noteCandidate({ phone: PHONE, name: 'Umm Khalid', ts: NOW + 8000, words: ['شقة'], dir: 'in' }), { state: 'dismissed', cand_id, created: false });
+  assert.deepEqual(cand(s, cand_id), row, 'not touched at all');
+  assert.equal(inbox.countCandidates(), 0);
+  assert.deepEqual(inbox.listCandidates(), []);
+  s.close();
+});
+
+test('listCandidates and countCandidates: open rows only, the latest message first', () => {
+  const { s, inbox } = harness();
+  const a = inbox.noteCandidate({ phone: '966500000001', ts: NOW - 3000, words: ['villa'], dir: 'in' });
+  const b = inbox.noteCandidate({ phone: '966500000002', ts: NOW - 1000, words: ['flat'], dir: 'out' });
+  const c = inbox.noteCandidate({ phone: '966500000003', ts: NOW - 2000, words: ['land'], dir: 'in' });
+  const d = inbox.noteCandidate({ phone: '966500000004', ts: NOW, words: ['plot'], dir: 'in' });
+  inbox.dismissCandidate(d.cand_id);
+  assert.deepEqual(inbox.listCandidates().map((r) => r.cand_id), [b.cand_id, c.cand_id, a.cand_id]);
+  assert.deepEqual(inbox.listCandidates({ limit: 1 }).map((r) => r.cand_id), [b.cand_id]);
+  assert.equal(inbox.countCandidates(), 3);
+  assert.deepEqual(inbox.listCandidates()[0].words, ['flat']);
+  assert.equal(inbox.getCandidate('CND-nope'), null);
+  s.close();
+});
+
+test('listCandidates and countCandidates leave out a chat that has become a lead since, by its number, jid or lid', () => {
+  const { s, inbox } = harness();
+  const byPhone = inbox.noteCandidate({ phone: '966500000001', ts: NOW - 1000, words: ['villa'], dir: 'in' });
+  const byJid = inbox.noteCandidate({ phone: '966500000002', jid: '966500000002@s.whatsapp.net', ts: NOW - 2000, words: ['villa'], dir: 'in' });
+  const byLid = inbox.noteCandidate({ phone: '966500000003', lid: LID, ts: NOW - 3000, words: ['villa'], dir: 'in' });
+  const stays = inbox.noteCandidate({ phone: '966500000004', ts: NOW - 4000, words: ['villa'], dir: 'in' });
+  assert.equal(inbox.countCandidates(), 4);
+  lead(s, 'LEAD-p', { phone_e164: '966500000001' });
+  lead(s, 'LEAD-j', { wa_jid: '966500000002@s.whatsapp.net' });
+  lead(s, 'LEAD-l', { wa_lid: LID });
+  assert.deepEqual(inbox.listCandidates().map((r) => r.cand_id), [stays.cand_id]);
+  assert.equal(inbox.countCandidates(), 1, 'the count is the list');
+  // Still there to be read and removed: the lead decides, the row waits for the poller or the prune.
+  for (const c of [byPhone, byJid, byLid]) assert.equal(inbox.getCandidate(c.cand_id).state, 'open');
+  s.close();
+});
+
+test('removeCandidate and removeCandidatesFor: one row, or every row of a chat by any of its ids, open or dismissed', () => {
+  const { s, inbox } = harness();
+  const byPhone = inbox.noteCandidate({ phone: PHONE, ts: NOW, words: ['villa'], dir: 'in' });
+  const byLid = inbox.noteCandidate({ lid: LID, ts: NOW, words: ['villa'], dir: 'in' });
+  const other = inbox.noteCandidate({ phone: '966500000001', jid: '966500000001@s.whatsapp.net', ts: NOW, words: ['flat'], dir: 'in' });
+  inbox.dismissCandidate(byLid.cand_id);
+  assert.equal(inbox.removeCandidatesFor({ phone: PHONE, jid: PJID, lid: LID }), 2);
+  assert.equal(inbox.getCandidate(byPhone.cand_id), null);
+  assert.equal(inbox.getCandidate(byLid.cand_id), null);
+  assert.ok(inbox.getCandidate(other.cand_id), 'another chat stays');
+  assert.equal(inbox.removeCandidatesFor({}), 0, 'no id, nothing removed');
+  assert.equal(inbox.removeCandidatesFor({ phone: null, jid: '', lid: undefined }), 0);
+  assert.equal(inbox.removeCandidatesFor({ jid: '966500000001@s.whatsapp.net' }), 1);
+  const last = inbox.noteCandidate({ phone: PHONE, ts: NOW, words: [], dir: 'in' });
+  assert.equal(inbox.removeCandidate(last.cand_id), true);
+  assert.equal(inbox.removeCandidate(last.cand_id), false);
+  s.close();
+});
+
+test('pruneCandidates: open rows by their last message, dismissed rows by when they were dismissed; a cutoff is not older than itself', () => {
+  const { s, inbox, at } = harness();
+  const openOld = inbox.noteCandidate({ phone: '966500000001', ts: NOW - 31 * DAY, words: ['villa'], dir: 'in' });
+  const openEdge = inbox.noteCandidate({ phone: '966500000002', ts: NOW - 30 * DAY, words: ['villa'], dir: 'in' });
+  const openNew = inbox.noteCandidate({ phone: '966500000003', ts: NOW - DAY, words: ['villa'], dir: 'in' });
+  const gone = inbox.noteCandidate({ phone: '966500000004', ts: NOW - 400 * DAY, words: ['villa'], dir: 'in' });
+  const kept = inbox.noteCandidate({ phone: '966500000005', ts: NOW - 400 * DAY, words: ['villa'], dir: 'in' });
+  at(NOW - 366 * DAY);
+  inbox.dismissCandidate(gone.cand_id);
+  at(NOW - 365 * DAY);
+  inbox.dismissCandidate(kept.cand_id);
+  at(NOW);
+  assert.deepEqual(inbox.pruneCandidates({ openBefore: NOW - 30 * DAY, dismissedBefore: NOW - 365 * DAY }), { open: 1, dismissed: 1 });
+  assert.equal(inbox.getCandidate(openOld.cand_id), null);
+  assert.ok(inbox.getCandidate(openEdge.cand_id), 'exactly 30 days is not older than the cutoff');
+  assert.ok(inbox.getCandidate(openNew.cand_id));
+  assert.equal(inbox.getCandidate(gone.cand_id), null);
+  assert.ok(inbox.getCandidate(kept.cand_id), 'dismissed exactly a year ago stays, so it is still not listed again');
+  assert.deepEqual(inbox.pruneCandidates({ openBefore: 'x', dismissedBefore: null }), { open: 0, dismissed: 0 }, 'garbage deletes nothing');
+  assert.deepEqual(inbox.pruneCandidates(), { open: 0, dismissed: 0 });
   s.close();
 });

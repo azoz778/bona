@@ -4,7 +4,8 @@
  * goes, who has read what, the messages that could not be loaded, and the inbox columns
  * on the lead itself.
  *
- * Only this file writes SQL for `wa_messages`, `wa_outbox`, `inbox_reads` and `wa_gaps`.
+ * Only this file writes SQL for `wa_messages`, `wa_outbox`, `inbox_reads`, `wa_gaps` and
+ * `inbox_candidates` (the owner's list of real-estate chats to check, D17).
  * Which chat belongs in the inbox is decided in `eligibility.mjs` and by the owner; this
  * file only records the outcome, so a guessed lead can never slip in by being re-derived.
  *
@@ -12,7 +13,8 @@
  * error message. A login code never reaches the file: a `code` outbox row stores NULL
  * text whatever the caller passes (design §4.2).
  */
-import { INBOX_STATES } from './eligibility.mjs';
+import { newId } from '../db.mjs';
+import { INBOX_STATES, MAX_PROPERTY_WORDS } from './eligibility.mjs';
 
 /** Transcripts are kept for 5 years after the chat's last message (D11). */
 export const RETENTION_MS = Math.round(5 * 365.25 * 86_400_000);
@@ -24,6 +26,15 @@ const DIRECTIONS = ['in', 'out'];
 const MAX_ERROR = 200;
 /** The day cap's window (lib/wa-send.mjs): a send younger than this still counts against it. */
 const SEND_DAY_MS = 86_400_000;
+/**
+ * A real-estate chat to check (D17) is kept this long after its last property message, and
+ * a dismissed one (the owner's "Not a client") this long after he dismissed it, only so it
+ * is not listed again. The privacy page states both.
+ */
+export const CANDIDATE_KEEP_MS = 30 * 86_400_000;
+export const DISMISSED_KEEP_MS = 365 * 86_400_000;
+/** Longest name kept for a candidate, in code points: what WhatsApp shows, never more. */
+const MAX_CANDIDATE_NAME = 100;
 
 /** JSON columns of `leads` — the same three `db.mjs` parses — so a list row reads like `getLead()`. */
 const LEAD_JSON = ['click_ids', 'first_touch', 'last_touch'];
@@ -437,6 +448,134 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
     });
   }
 
+  /* -------------------- real-estate chats to check (D17) -------------------- */
+  //
+  // A chat that used property words (lib/inbox/eligibility.mjs `propertyWordsIn`) but gave
+  // no sure sign it is about Bona: not a lead, never shown to staff, and never its words —
+  // only who, when, how often, which property words and who wrote last.
+
+  const idOf = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+  const nameOf = (v) => {
+    if (typeof v !== 'string') return null;
+    return Array.from(v.replace(/\s+/g, ' ').trim()).slice(0, MAX_CANDIDATE_NAME).join('') || null;
+  };
+  /** Strings only, no commas (the column is comma-joined), each once, at most `MAX_PROPERTY_WORDS`. */
+  function wordsOf(list) {
+    const out = [];
+    for (const w of Array.isArray(list) ? list : []) {
+      const v = typeof w === 'string' ? w.replace(/,/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40) : '';
+      if (v && !out.includes(v)) out.push(v);
+      if (out.length === MAX_PROPERTY_WORDS) break;
+    }
+    return out;
+  }
+  const splitWords = (v) => (typeof v === 'string' && v ? v.split(',') : []);
+  const candidateRow = (row) => (row ? { ...row, words: splitWords(row.words) } : null);
+
+  /** One chat's row: by number first, then jid, then lid. */
+  function findCandidate({ phone, jid, lid }) {
+    return (phone ? prep('SELECT * FROM inbox_candidates WHERE phone_e164 = ?').get(phone) : null)
+      ?? (jid ? prep('SELECT * FROM inbox_candidates WHERE jid = ?').get(jid) : null)
+      ?? (lid ? prep('SELECT * FROM inbox_candidates WHERE lid = ?').get(lid) : null)
+      ?? null;
+  }
+
+  /**
+   * One more property message from a chat that is not a lead. A new chat gets a row; an
+   * open row counts it (`hits`), moves `last_ts` forward, adds the words (at most 8), fills
+   * a number, jid, lid or name it did not have yet (never one another row holds: each is
+   * UNIQUE) and says who wrote last. A dismissed row is left exactly as it is: the owner
+   * said "Not a client", and a later message does not ask him again.
+   *
+   * @returns {{ state: 'open'|'dismissed', cand_id: string, created: boolean }}
+   */
+  function noteCandidate({ jid = null, lid = null, phone = null, name = null, ts, words = [], dir } = {}) {
+    const ids = { phone: idOf(phone), jid: idOf(jid), lid: idOf(lid) };
+    if (!ids.phone && !ids.jid && !ids.lid) throw new RangeError('a candidate needs a phone, jid or lid');
+    if (!hasNumber(ts)) throw new RangeError('ts is required');
+    if (!DIRECTIONS.includes(dir)) throw new RangeError(`unknown direction ${dir}`);
+    const at = toTs(ts);
+    const said = wordsOf(words);
+    const who = nameOf(name);
+    return transaction(() => {
+      const found = findCandidate(ids);
+      if (found?.state === 'dismissed') return { state: 'dismissed', cand_id: found.cand_id, created: false };
+      if (found) {
+        const free = (col, v) => (found[col] || !v || prep(`SELECT 1 FROM inbox_candidates WHERE ${col} = ?`).get(v) ? found[col] : v);
+        const all = wordsOf([...splitWords(found.words), ...said]);
+        prep(`UPDATE inbox_candidates SET phone_e164 = ?, jid = ?, lid = ?, name = COALESCE(name, ?),
+                first_ts = MIN(first_ts, ?), last_dir = CASE WHEN ? >= last_ts THEN ? ELSE last_dir END,
+                last_ts = MAX(last_ts, ?), hits = hits + 1, words = ?, updated = ?
+              WHERE cand_id = ?`)
+          .run(free('phone_e164', ids.phone), free('jid', ids.jid), free('lid', ids.lid), who,
+            at, at, dir, at, all.join(',') || null, now(), found.cand_id);
+        return { state: 'open', cand_id: found.cand_id, created: false };
+      }
+      const candId = newId('CND');
+      prep(`INSERT INTO inbox_candidates (cand_id, jid, lid, phone_e164, name, first_ts, last_ts, hits, words, last_dir, state, updated)
+            VALUES (?,?,?,?,?,?,?,1,?,?,'open',?)`)
+        .run(candId, ids.jid, ids.lid, ids.phone, who, at, at, said.join(',') || null, dir, now());
+      return { state: 'open', cand_id: candId, created: true };
+    });
+  }
+
+  /**
+   * Open rows whose chat is not a lead by now: no lead holds the candidate's number, jid or
+   * lid (a web form or *Add chat* may have made one since it was noted, and that lead's own
+   * inbox state decides the chat). In SQL, so a hidden row never takes a listed one's place.
+   */
+  const OPEN_NOT_A_LEAD = `c.state = 'open' AND NOT EXISTS (
+      SELECT 1 FROM leads l WHERE l.phone_e164 = c.phone_e164 OR l.wa_jid IN (c.jid, c.lid) OR l.wa_lid IN (c.jid, c.lid))`;
+
+  /** The owner's list: open rows of chats that are not leads, the latest message first. `words` comes back as an array. */
+  function listCandidates({ limit = 200 } = {}) {
+    return prep(`SELECT c.* FROM inbox_candidates c WHERE ${OPEN_NOT_A_LEAD} ORDER BY c.last_ts DESC, c.rowid DESC LIMIT ?`)
+      .all(clampLimit(limit, 200)).map(candidateRow);
+  }
+
+  /** How many rows `listCandidates` would list with no limit. */
+  const countCandidates = () => prep(`SELECT COUNT(*) AS n FROM inbox_candidates c WHERE ${OPEN_NOT_A_LEAD}`).get().n;
+  const getCandidate = (candId) => candidateRow(prep('SELECT * FROM inbox_candidates WHERE cand_id = ?').get(String(candId ?? '')));
+
+  /**
+   * *Not a client*: the row stays only so the chat is not listed again, so everything but
+   * its ids goes now — the name, the words, the count, who wrote last, and the times (both
+   * become the moment of the dismissal). An unknown or already dismissed id is `false`.
+   */
+  function dismissCandidate(candId) {
+    const t = now();
+    return prep(`UPDATE inbox_candidates SET state = 'dismissed', name = NULL, words = NULL, hits = 0, last_dir = NULL,
+                   first_ts = ?, last_ts = ?, updated = ?
+                 WHERE cand_id = ? AND state = 'open'`).run(t, t, t, String(candId ?? '')).changes === 1;
+  }
+
+  const removeCandidate = (candId) => prep('DELETE FROM inbox_candidates WHERE cand_id = ?').run(String(candId ?? '')).changes === 1;
+
+  /**
+   * Every row of one chat, open or dismissed, by any of its ids: the chat became a lead (its
+   * own inbox state rules from now on), or its number went on the never list. Returns how
+   * many rows went.
+   */
+  function removeCandidatesFor({ phone = null, jid = null, lid = null } = {}) {
+    const ids = [idOf(phone), idOf(jid), idOf(lid)];
+    if (!ids.some(Boolean)) return 0;
+    return prep('DELETE FROM inbox_candidates WHERE phone_e164 = ? OR jid = ? OR lid = ?').run(...ids).changes;
+  }
+
+  /**
+   * Open rows whose last property message is older than `openBefore`, and dismissed rows
+   * dismissed before `dismissedBefore`. Exactly at a cutoff is not older than it; a cutoff
+   * that is not a number deletes nothing.
+   *
+   * @returns {{ open: number, dismissed: number }}
+   */
+  function pruneCandidates({ openBefore, dismissedBefore } = {}) {
+    return transaction(() => ({
+      open: prep("DELETE FROM inbox_candidates WHERE state = 'open' AND last_ts < ?").run(num(openBefore)).changes,
+      dismissed: prep("DELETE FROM inbox_candidates WHERE state = 'dismissed' AND updated < ?").run(num(dismissedBefore)).changes,
+    }));
+  }
+
   return {
     upsertMessage, messagesFor, newestTs, hasMessages, messageByKey,
     insertOutbox, getOutbox, outboxByKey, updateOutbox, resolveUncertain, openOutboxFor, countSentSince, markStalePending, pruneCodeRows,
@@ -444,5 +583,6 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
     addGap, gapsFor, clearGap,
     setInboxState, setHandler, setNeedsHuman,
     purgeLead, leaveInbox, retentionPurge,
+    noteCandidate, listCandidates, countCandidates, getCandidate, dismissCandidate, removeCandidate, removeCandidatesFor, pruneCandidates,
   };
 }
