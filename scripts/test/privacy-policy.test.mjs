@@ -112,7 +112,7 @@ function checkPointers(p) {
 test('what the WhatsApp conversations section and a dated change line point to is a real heading, the same in both languages', () => {
   checkPointers(policy);
   // The page flags a material change for 30 days, so the dated Changes line comes out
-  // again (this one on or after 2026-10-28). Doing that must not turn this test red.
+  // again (these on or after 2026-10-30). Doing that must not turn this test red.
   const later = structuredClone(policy);
   const changes = later.sections.find((x) => x.id === 'changes');
   for (const locale of ['en', 'ar']) changes.body[locale] = changes.body[locale].filter((para) => !DATED_LINE.test(para));
@@ -183,18 +183,17 @@ test('the Changes section flags the chats kept only to be checked, in both langu
   const changes = section('changes');
   assert.ok(changes, 'the Changes section is missing');
   // The page promises to flag a material change here for 30 days; this line comes out on
-  // or after 2026-10-29, and from then on nothing asks for it.
-  if (new Date().toISOString().slice(0, 10) >= '2026-10-29') return;
-  const line = (locale, start) => changes.body[locale].find((p) => p.startsWith(start));
-  const en = line('en', '29 September 2026:');
-  assert.ok(en, 'the version date moved to 29 September for this change, so Changes says what changed');
+  // or after 2026-10-30, and from then on nothing asks for it.
+  if (new Date().toISOString().slice(0, 10) >= '2026-10-30') return;
+  const en = changes.body.en.filter((p) => p.startsWith('30 September 2026:')).find((p) => p.includes('exception'));
+  assert.ok(en, 'the version date moved to 30 September for this change (the day it went public), so Changes says what changed');
   assert.match(en, /“WhatsApp conversations with our team”/);
   assert.match(en, /When a message sent or received on our number uses one of the property words that section lists, or mentions a property document as that section defines it, or the owner of Bona sends one of the kinds of document it lists or a document of TK Estate & Design, and the chat is not already a Bona enquiry/);
   assert.doesNotMatch(en, /looks like a property enquiry/);
   assert.match(en, /the number, the name WhatsApp shows and those words, not the conversation/);
   assert.match(en, /until 30 days after the last such message/);
   assert.match(en, /for up to a year/);
-  const ar = line('ar', '29 سبتمبر 2026:');
+  const ar = changes.body.ar.filter((p) => p.startsWith('30 سبتمبر 2026:')).find((p) => p.includes('استثناء'));
   assert.ok(ar, 'the Arabic text says everything the English does');
   assert.match(ar, /«محادثات واتساب مع فريق بونا»/);
   assert.match(ar, /فإذا استُخدمت في رسالة مُرسلة أو واردة على رقمنا إحدى الكلمات العقارية التي يذكرها القسم، أو ذُكر فيها مستند عقاري بالمعنى الذي يحدده القسم، أو أرسل مالك بونا أحد أنواع المستندات التي يذكرها أو مستنداً لـ TK Estate & Design، ولم تكن المحادثة استفساراً لدى بونا أصلاً/);
