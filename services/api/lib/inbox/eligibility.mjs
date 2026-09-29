@@ -225,6 +225,82 @@ function nameHasSiteLink(name) {
 }
 
 /**
+ * Words that say a chat is about property, each with the one form the owner's list shows
+ * (D17). English and Arabic, bounded like `BONA_WORD_RE` by anything that is not a letter or
+ * a mark (`3villas` and `villa2` count, `villager` does not). Arabic words written with ه
+ * for ة (فله, شقه) count too, as people type them, and most Arabic nouns also with the
+ * article (الفيلا, العقار); أرض and غرفة do not, because with it they are everyday words (the
+ * ground, the room). A clitic before a word (والفيلا, بالإيجار) is missed: that only means
+ * the owner does not see that chat on his list, never that anything joins.
+ *
+ * A match only ever puts a chat on the owner's list of chats to check; it never joins one.
+ * Every alternative starts with a fixed word and repeats nothing: linear in the text.
+ */
+const PROPERTY_WORDS = [
+  ['villa', 'villas?'],
+  ['apartment', 'apartments?'],
+  ['flat', 'flats?'],
+  ['rent', 'rent(?:al)?s?'],
+  ['lease', 'leases?'],
+  ['land', 'lands?'],
+  ['plot', 'plots?'],
+  ['property', 'propert(?:y|ies)'],
+  ['real estate', String.raw`real[\s_-]?estate`],
+  ['duplex', 'duplex(?:es)?'],
+  ['penthouse', 'penthouses?'],
+  ['townhouse', String.raw`town[\s_-]?houses?`],
+  ['compound', 'compounds?'],
+  ['bedroom', 'bedrooms?'],
+  ['sqm', 'sqm|m²'],
+  ['listing', 'listings?'],
+  ['broker', 'brokers?'],
+  ['commission', 'commissions?'],
+  ['فيلا', '(?:ال)?(?:فيلا|فلل|فلة|فله)'],
+  ['شقة', '(?:ال)?(?:شقة|شقه|شقق)'],
+  ['إيجار', '(?:ال|لل)?[إا]يجار'],
+  ['للبيع', 'للبيع'],
+  ['أرض', '[أا]رض|(?:ال)?[أا]راضي'],
+  ['عقار', '(?:ال)?عقارات?'],
+  ['دوبلكس', '(?:ال)?دوبلكس'],
+  ['بنتهاوس', '(?:ال)?بنتهاوس'],
+  ['تاون هاوس', String.raw`تاون[\s_-]?هاوس`],
+  ['مجمع سكني', String.raw`مجمع[\s_-]?سكني`],
+  ['غرفة', 'غرفة|غرفه|غرف'],
+  ['صك', '(?:ال)?صك'],
+  ['سمسار', '(?:ال)?سمسار'],
+  ['عمولة', '(?:ال)?(?:عمولة|عموله)'],
+  ['مخطط', '(?:ال)?مخطط'],
+];
+const WORDS_SOURCE = String.raw`(?<![\p{L}\p{M}])(?:${PROPERTY_WORDS.map(([, src]) => `(${src})`).join('|')})(?![\p{L}\p{M}])`;
+/**
+ * Any property word (one capture group per word, in `PROPERTY_WORDS` order). No `g`, like
+ * every pattern here, so `.test()` never carries a position over; `propertyWordsIn` scans
+ * with its own global copy.
+ */
+export const PROPERTY_WORD_RE = new RegExp(WORDS_SOURCE, 'iu');
+const PROPERTY_WORDS_ALL = new RegExp(WORDS_SOURCE, 'giu');
+/** At most this many words are kept for one chat. */
+export const MAX_PROPERTY_WORDS = 8;
+
+/**
+ * The property words a text uses, as the forms the owner's list shows (`villa`, `شقة`,
+ * `إيجار` …): lower case, each once, in the order they first appear, at most
+ * `MAX_PROPERTY_WORDS`. Never the text itself. Anything that is not a string has none.
+ * @param {unknown} text
+ * @returns {string[]}
+ */
+export function propertyWordsIn(text) {
+  const out = [];
+  if (typeof text !== 'string' || !text) return out;
+  for (const m of text.matchAll(PROPERTY_WORDS_ALL)) {
+    const word = PROPERTY_WORDS[m.findIndex((g, i) => i > 0 && g !== undefined) - 1][0];
+    if (!out.includes(word)) out.push(word);
+    if (out.length === MAX_PROPERTY_WORDS) break;
+  }
+  return out;
+}
+
+/**
  * Code points left out at the end of a document name that was cut (`fileNameTruncated`):
  * nothing close to the cut is read.
  */

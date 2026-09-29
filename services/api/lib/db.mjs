@@ -182,7 +182,17 @@ const MIGRATIONS = [
     // promises no order for the two sides of an AND. Only a string snippet counts, since
     // json_extract returns an object or array as its JSON text, which a GLOB would match.
     // Team and never-list numbers are not excluded here; app.inboxMaintenance() moves them
-    // out on start (P2-20). No foreign keys, as in v3. Migrations here only ever add.
+    // out on start (P2-20).
+    // `inbox_candidates` (added to v4 on 2026-09-28 in a later commit than the rest of v4,
+    // before v4 ever shipped: no file anywhere is at v4 without it) is the owner's list of
+    // real-estate chats to check (D17): a chat that used property words, in either
+    // direction, but gave no sure sign it is about Bona. It is not a lead and holds no
+    // message text: only who (number, jid, lid, the name WhatsApp shows for them), when
+    // (first and last message, how many), which property words (`words`, comma-joined, at
+    // most 8) and who wrote last. `dismissed` is the owner's "Not a client": the row stays,
+    // emptied of everything but its ids, only so the chat is not listed again. One row per
+    // number, jid and lid (UNIQUE; NULLs do not collide). No foreign keys, as in v3.
+    // Migrations here only ever add.
     version: 4,
     sql: `
       ALTER TABLE leads ADD COLUMN inbox_state TEXT CHECK (inbox_state IN ('in','unsure','out'));
@@ -212,6 +222,13 @@ const MIGRATIONS = [
       CREATE TABLE IF NOT EXISTS inbox_reads (user_id TEXT NOT NULL, lead_id TEXT NOT NULL, last_read_ts INTEGER NOT NULL, PRIMARY KEY (user_id, lead_id));
       CREATE TABLE IF NOT EXISTS wa_gaps (key_id TEXT NOT NULL PRIMARY KEY, lead_id TEXT, jid TEXT, ts INTEGER, reason TEXT);
       CREATE INDEX IF NOT EXISTS wa_gaps_lead ON wa_gaps(lead_id, ts);
+      CREATE TABLE IF NOT EXISTS inbox_candidates (
+        cand_id TEXT NOT NULL PRIMARY KEY, jid TEXT UNIQUE, lid TEXT UNIQUE, phone_e164 TEXT UNIQUE, name TEXT,
+        first_ts INTEGER NOT NULL, last_ts INTEGER NOT NULL, hits INTEGER NOT NULL DEFAULT 1, words TEXT,
+        last_dir TEXT CHECK (last_dir IN ('in','out')),
+        state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open','dismissed')), updated INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS inbox_candidates_state ON inbox_candidates(state, last_ts);
       UPDATE leads SET
         inbox_state = CASE WHEN match_method IN ('ref','ad_meta')
             OR (channel IN ('form','concierge_chat','concierge_voice') AND legacy_id IS NULL)

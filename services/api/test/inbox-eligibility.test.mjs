@@ -7,10 +7,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE, INBOX_STATES,
+  LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE, PROPERTY_WORD_RE, MAX_PROPERTY_WORDS, INBOX_STATES,
   // The two kinds of document word and the property words (owner answer, 2026-09-28).
   BROCHURE_RE, QUALIFIED_DOC_RE, PROPERTY_NOUN_RE,
-  inboundSignal, ownerOutboundJoins, isTkDocument, namesTk, namesBona, nextInboxState,
+  inboundSignal, ownerOutboundJoins, isTkDocument, namesTk, namesBona, propertyWordsIn, nextInboxState,
 } from '../lib/inbox/eligibility.mjs';
 import { normaliseRecord } from '../lib/evolution.mjs';
 
@@ -19,15 +19,15 @@ import { normaliseRecord } from '../lib/evolution.mjs';
 test('the states and patterns are what the store and the poller rely on', () => {
   assert.deepEqual(INBOX_STATES, ['in', 'unsure', 'out']);
   assert.ok(Object.isFrozen(INBOX_STATES), 'nothing that imports the list can change it');
-  for (const re of [LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE]) {
+  for (const re of [LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE, PROPERTY_WORD_RE]) {
     assert.ok(re instanceof RegExp);
     assert.equal(re.global, false, `${re} has no /g, so .test() never carries a position over`);
     assert.equal(re.sticky, false, `${re} has no /y`);
   }
   // The bounds are \p{…} classes, which mean something only with /u: rebuilt from `.source`
   // with 'i' alone, [\p{L}\p{M}] is a set of literal characters and كوبونات matches again.
-  for (const re of [BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE]) assert.equal(re.unicode, true, `${re} needs /u`);
-  for (const re of [PROPERTY_DOC_RE, TK_RE]) assert.equal(re.ignoreCase, true, `${re} ignores case`);
+  for (const re of [BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE, PROPERTY_WORD_RE]) assert.equal(re.unicode, true, `${re} needs /u`);
+  for (const re of [PROPERTY_DOC_RE, TK_RE, PROPERTY_WORD_RE]) assert.equal(re.ignoreCase, true, `${re} ignores case`);
   for (const re of [BROCHURE_RE, QUALIFIED_DOC_RE, PROPERTY_NOUN_RE]) {
     assert.ok(re instanceof RegExp);
     assert.equal(re.global, false, `${re} has no /g`);
@@ -764,6 +764,43 @@ test('any truthy cut flag reads the name as cut: that only ever means fewer join
   assert.equal(ownerOutboundJoins(doc(`${land.slice(0, -16)}`)), true, 'read as a whole name, it would join');
 });
 
+/* ---------------- property words (D17) ---------------- */
+
+test('property words come out as the forms the owner\'s list shows: each once, in order, at most eight', () => {
+  assert.equal(MAX_PROPERTY_WORDS, 8);
+  for (const [text, words] of [
+    ['عندكم شقة للإيجار؟', ['شقة', 'إيجار']],
+    ['the villa is 3M', ['villa']],
+    ['Villas and apartments for rent, 300m², 4 bedrooms', ['villa', 'apartment', 'rent', 'sqm', 'bedroom']],
+    ['Flat to let? Lease or rental, a plot of land, 2 properties', ['flat', 'lease', 'rent', 'plot', 'land', 'property']],
+    ['Real-estate broker, commission 2.5%', ['real estate', 'broker', 'commission']],
+    ['DUPLEX penthouse Town House compound listing 250 sqm', ['duplex', 'penthouse', 'townhouse', 'compound', 'listing', 'sqm']],
+    ['الفيلا فله فلل فلة فيلا', ['فيلا']],
+    ['شقه، الشقق', ['شقة']],
+    ['ايجار الإيجار للايجار', ['إيجار']],
+    ['أرض للبيع، ارض، الأراضي', ['أرض', 'للبيع']],
+    ['عقار العقارات دوبلكس البنتهاوس', ['عقار', 'دوبلكس', 'بنتهاوس']],
+    ['تاون هاوس في مجمع سكني', ['تاون هاوس', 'مجمع سكني']],
+    ['غرفة غرف غرفه', ['غرفة']],
+    ['الصك مع السمسار، العمولة ٢٫٥', ['صك', 'سمسار', 'عمولة']],
+    ['مخطط الشاطئ', ['مخطط']],
+    ['villa apartment flat rent lease land plot property duplex penthouse', ['villa', 'apartment', 'flat', 'rent', 'lease', 'land', 'plot', 'property']],
+  ]) {
+    assert.deepEqual(propertyWordsIn(text), words, text);
+  }
+});
+
+test('words that only contain a property word, everyday Arabic and non-strings are no property words', () => {
+  for (const text of ['Hello', 'villager', 'parent', 'current', 'island', 'landlord', 'flatter', 'rented a car', 'plotted',
+    'commissioner', 'broken', 'propertyX', 'km²', 'طحت على الأرض', 'الغرفة باردة', 'والفيلا', 'بالإيجار', 'كوبونات', 'Bona', '']) {
+    assert.deepEqual(propertyWordsIn(text), [], text);
+    assert.equal(PROPERTY_WORD_RE.test(text), false, text);
+  }
+  for (const text of [null, undefined, 42, {}, ['villa']]) assert.deepEqual(propertyWordsIn(text), [], String(text));
+  assert.equal(PROPERTY_WORD_RE.test('a villa'), true);
+  assert.equal(PROPERTY_WORD_RE.lastIndex, 0, 'no /g: nothing is carried over');
+});
+
 /* ---------------- time ---------------- */
 
 /**
@@ -810,6 +847,8 @@ test('no text makes the rules slow: every input is read in linear time', () => {
     `تي${' '.repeat(n)}كي`, `T${'\u200B'.repeat(n)}K`, fill('T\u200C', n), fill('\u200D ', n), fill(' \uFEFF\n', n),
     fill('bona.azoz.uk_', n), fill('bona-real-estate.com.', n), `bona-real-estate.com${'.pdf'.repeat(n / 4)}`,
     `bona.azoz.uk_${'x'.repeat(n)}`, `bona.azoz.uk_${'_'.repeat(n)}.pdf`, fill('bona-real-estate.com_x', n), fill('bona.azoz.uk_x ', n),
+    fill('villa ', n), fill('villax', n), fill('real ', n), fill('town-', n), fill('rent', n), fill('الفي', n), fill('ال', n),
+    fill('تاون ', n), fill('مجمع ', n), fill('شقة ', n),
   ];
   const calls = [
     ['inboundSignal', (s) => inboundSignal({ text: s })],
@@ -825,6 +864,8 @@ test('no text makes the rules slow: every input is read in linear time', () => {
     ['TK_RE', (s) => TK_RE.test(s)],
     ['namesTk', (s) => namesTk(s)],
     ['namesBona', (s) => namesBona(s)],
+    ['propertyWordsIn', (s) => propertyWordsIn(s)],
+    ['PROPERTY_WORD_RE', (s) => PROPERTY_WORD_RE.test(s)],
   ];
   for (const n of [20_000, 200_000]) {
     for (const [i, s] of inputs(n).entries()) {

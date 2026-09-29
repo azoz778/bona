@@ -33,7 +33,7 @@ test('openDb creates an owner-only file inside an owner-only directory and migra
   const b = openDb(file);
   assert.equal(b.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION, 'a second open is a no-op');
   const tables = b.db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map((r) => r.name);
-  for (const name of ['sessions', 'events', 'leads', 'touchpoints', 'lead_stage_history', 'wa_cursor', 'wa_seen', 'ad_spend', 'fanout', 'auth_codes', 'auth_sessions', 'users', 'auth_challenges', 'audit_log', 'never_list', 'settings', 'wa_messages', 'wa_outbox', 'inbox_reads', 'wa_gaps']) {
+  for (const name of ['sessions', 'events', 'leads', 'touchpoints', 'lead_stage_history', 'wa_cursor', 'wa_seen', 'ad_spend', 'fanout', 'auth_codes', 'auth_sessions', 'users', 'auth_challenges', 'audit_log', 'never_list', 'settings', 'wa_messages', 'wa_outbox', 'inbox_reads', 'wa_gaps', 'inbox_candidates']) {
     assert.ok(tables.includes(name), name);
   }
   assert.equal(b.ping(), true);
@@ -69,7 +69,7 @@ test('a v2-era file db upgrades to the current schema, an existing session survi
   cleanup();
 });
 
-test('schema v4 gives leads their inbox columns and adds the transcript, outbox, read-mark and gap tables', () => {
+test('schema v4 gives leads their inbox columns and adds the transcript, outbox, read-mark, gap and candidate tables', () => {
   const s = openDb(':memory:');
   assert.equal(SCHEMA_VERSION, 4);
   assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 4);
@@ -84,8 +84,10 @@ test('schema v4 gives leads their inbox columns and adds the transcript, outbox,
   assert.deepEqual(names('wa_outbox'), ['send_id', 'lead_id', 'jid', 'text', 'user_id', 'sender_kind', 'status', 'key_id', 'created', 'updated', 'error']);
   assert.deepEqual(names('inbox_reads'), ['user_id', 'lead_id', 'last_read_ts']);
   assert.deepEqual(names('wa_gaps'), ['key_id', 'lead_id', 'jid', 'ts', 'reason']);
+  assert.deepEqual(names('inbox_candidates'), ['cand_id', 'jid', 'lid', 'phone_e164', 'name', 'first_ts', 'last_ts', 'hits', 'words', 'last_dir', 'state', 'updated']);
+  assert.ok(!names('inbox_candidates').some((c) => /text|snippet|body/.test(c)), 'a candidate never holds what was written');
   const indexes = new Set(s.db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map((r) => r.name));
-  for (const name of ['leads_inbox', 'wa_messages_lead', 'wa_outbox_key', 'wa_outbox_lead', 'wa_outbox_created', 'wa_gaps_lead']) assert.ok(indexes.has(name), name);
+  for (const name of ['leads_inbox', 'wa_messages_lead', 'wa_outbox_key', 'wa_outbox_lead', 'wa_outbox_created', 'wa_gaps_lead', 'inbox_candidates_state']) assert.ok(indexes.has(name), name);
   s.close();
 });
 
@@ -138,6 +140,22 @@ test('the v4 CHECKs refuse an inbox state, direction, sender, outbox status or m
   read.run('USR-1', 'L1', 5);
   read.run('USR-2', 'L1', 6);
   assert.throws(() => read.run('USR-1', 'L1', 7), /UNIQUE/, 'one read mark per person per chat');
+
+  const cand = s.db.prepare('INSERT INTO inbox_candidates (cand_id, jid, lid, phone_e164, first_ts, last_ts, last_dir, state, updated) VALUES (?,?,?,?,?,?,?,?,?)');
+  cand.run('CND-1', '966500000001@s.whatsapp.net', null, '966500000001', 1, 1, 'in', 'open', 1);
+  cand.run('CND-2', null, '111@lid', null, 1, 1, 'out', 'dismissed', 1);
+  cand.run('CND-3', null, null, '966500000003', 1, 1, null, 'open', 1);
+  cand.run('CND-4', null, null, null, 1, 1, null, 'open', 1);
+  cand.run('CND-5', null, null, null, 1, 1, null, 'open', 1);
+  assert.equal(s.db.prepare("SELECT hits FROM inbox_candidates WHERE cand_id = 'CND-1'").get().hits, 1, 'a new row is one message');
+  assert.throws(() => cand.run('CND-6', null, null, '966500000001', 1, 1, 'in', 'open', 1), /UNIQUE/, 'one row per number');
+  assert.throws(() => cand.run('CND-7', '966500000001@s.whatsapp.net', null, null, 1, 1, 'in', 'open', 1), /UNIQUE/, 'one row per jid');
+  assert.throws(() => cand.run('CND-8', null, '111@lid', null, 1, 1, 'in', 'open', 1), /UNIQUE/, 'one row per lid');
+  assert.throws(() => cand.run('CND-9', null, null, null, 1, 1, 'sideways', 'open', 1), /CHECK/);
+  assert.throws(() => cand.run('CND-10', null, null, null, 1, 1, 'in', 'maybe', 1), /CHECK/);
+  assert.throws(() => cand.run(null, null, null, null, 1, 1, 'in', 'open', 1), /NOT NULL/, 'a candidate always has its id');
+  assert.throws(() => cand.run('CND-11', null, null, null, null, 1, 'in', 'open', 1), /NOT NULL/);
+  assert.throws(() => cand.run('CND-12', null, null, null, 1, 1, 'in', 'open', null), /NOT NULL/);
   s.close();
 });
 
@@ -208,7 +226,7 @@ test('a v3 file db moves to v4: each existing lead is placed by what is certain 
     assert.equal(row.handler_user_id, null, c.id);
     assert.equal(row.last_msg_ts, null, c.id);
   });
-  for (const table of ['wa_messages', 'wa_outbox', 'inbox_reads', 'wa_gaps']) assert.equal(countOf(a.db, table), 0, table);
+  for (const table of ['wa_messages', 'wa_outbox', 'inbox_reads', 'wa_gaps', 'inbox_candidates']) assert.equal(countOf(a.db, table), 0, table);
 
   // The owner moves one guess in and rules one certain lead out. Reopening must not run
   // the v4 placement again and undo either.
@@ -252,6 +270,7 @@ test('a v4 step that fails part-way leaves a clean v3 file, and a retry upgrades
   assert.equal(check.prepare('PRAGMA user_version').get().user_version, 3, 'still v3');
   assert.ok(!check.prepare('PRAGMA table_info(leads)').all().some((c) => c.name === 'inbox_state'), 'the ALTERs were rolled back');
   assert.equal(check.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'wa_messages'").get().n, 0, 'the CREATEs were rolled back');
+  assert.equal(check.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'inbox_candidates'").get().n, 0, 'the candidates table too');
   assert.equal(check.prepare('SELECT COUNT(*) AS n FROM leads').get().n, 2, 'no lead lost');
   check.exec('DROP TRIGGER t');
   check.close();
