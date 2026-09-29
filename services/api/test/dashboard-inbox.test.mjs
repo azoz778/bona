@@ -980,6 +980,42 @@ test('unread: the nav badge counts it on every page, and opening the thread mark
   });
 });
 
+test('a thread draws every unread message past 200 (up to 1,000), says how many earlier ones it leaves out, and marks read only what it drew', async () => {
+  await withInbox(async (h) => {
+    const burst = (id, phone, n) => seedChat(h, {
+      id, name: id, phone,
+      messages: Array.from({ length: n }, (_, i) => ({ key_id: `${id}-${i}`, text: `${id} message ${i}`, ts: NOW + 1_000 + i * 1_000 })),
+    });
+    const bubbles = (html) => (html.match(/class="bub in"/g) ?? []).length;
+    const readMark = (leadId) => h.db.db.prepare('SELECT last_read_ts FROM inbox_reads WHERE user_id = ? AND lead_id = ?').get(h.staffUser.user_id, leadId)?.last_read_ts;
+    const staff = await h.staff();
+
+    // 250 messages, every one unread (the account is older than all of them): all drawn.
+    burst('LEAD-250', '966500000091', 250);
+    const all = await (await h.get('/dashboard/inbox/LEAD-250', { cookie: staff })).text();
+    assert.equal(bubbles(all), 250, 'not only the newest 200');
+    assert.doesNotMatch(all, /not shown here/);
+    assert.equal(readMark('LEAD-250'), NOW + 250_000);
+
+    // 300 messages, the first 150 already read: 150 unread fit the usual 200, and 100 older ones are left out.
+    burst('LEAD-300', '966500000092', 300);
+    h.inboxStore.markRead(h.staffUser.user_id, 'LEAD-300', NOW + 150_000);
+    const some = await (await h.get('/dashboard/inbox/LEAD-300', { cookie: staff })).text();
+    assert.equal(bubbles(some), 200);
+    assert.match(some, /100 earlier messages are not shown here\./);
+    assert.match(some, /LEAD-300 message 100</, 'the oldest drawn');
+    assert.doesNotMatch(some, /LEAD-300 message 99</);
+
+    // 1,100 unread: the thread stops at 1,000, says so, and marks read up to the newest it drew.
+    burst('LEAD-1100', '966500000093', 1_100);
+    const capped = await (await h.get('/dashboard/inbox/LEAD-1100', { cookie: staff })).text();
+    assert.equal(bubbles(capped), 1_000);
+    assert.match(capped, /100 earlier messages are not shown here\./);
+    assert.equal(readMark('LEAD-1100'), NOW + 1_100_000, 'the newest drawn message');
+    assert.equal(fieldOf(capped, 'seen_ts'), String(NOW + 1_100_000), 'and that is what a reply was written against');
+  });
+});
+
 test('nothing the inbox writes to the log carries message text, a phone number or a name', async () => {
   await withInbox(async (h) => {
     seedScene(h);

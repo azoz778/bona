@@ -472,6 +472,22 @@ test('unread counts only messages after the person\'s read mark, or after their 
   s.close();
 });
 
+test('unreadIn and countMessages: one chat, the same unread rule as the list, and every message it holds', () => {
+  const { s, inbox, owner, sara } = listScene();
+  for (const leadId of ['A', 'B', 'C', 'G']) {
+    const listed = (userId, userCreated) => inbox.listInbox({ userId, userCreated }).find((r) => r.lead_id === leadId).unread;
+    assert.equal(inbox.unreadIn(leadId, { userId: owner.user_id }), listed(owner.user_id, 0), `${leadId} for the owner`);
+    assert.equal(inbox.unreadIn(leadId, { userId: sara.user_id, userCreated: NOW - 10_000 }), listed(sara.user_id, NOW - 10_000), `${leadId} for Sara`);
+  }
+  inbox.markRead(owner.user_id, 'B', NOW - 9000);
+  assert.equal(inbox.unreadIn('B', { userId: owner.user_id }), 1);
+  assert.equal(inbox.unreadIn('nope', { userId: owner.user_id }), 0);
+  assert.equal(inbox.countMessages('B'), s.db.prepare("SELECT COUNT(*) AS n FROM wa_messages WHERE lead_id = 'B'").get().n);
+  assert.ok(inbox.countMessages('B') >= 2);
+  assert.equal(inbox.countMessages('nope'), 0);
+  s.close();
+});
+
 test('unreadTotal is the same rule summed over every inbox chat, and nothing outside it', () => {
   const { s, inbox, owner, sara } = listScene();
   const sum = (rows) => rows.reduce((n, r) => n + r.unread, 0);

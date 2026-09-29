@@ -160,6 +160,13 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
 
   const newestTs = (leadId) => prep('SELECT MAX(ts) AS ts FROM wa_messages WHERE lead_id = ?').get(String(leadId ?? '')).ts ?? null;
   const hasMessages = (leadId) => Boolean(prep('SELECT 1 FROM wa_messages WHERE lead_id = ? LIMIT 1').get(String(leadId ?? '')));
+  /** Every stored message of one chat, both directions. */
+  const countMessages = (leadId) => prep('SELECT COUNT(*) AS n FROM wa_messages WHERE lead_id = ?').get(String(leadId ?? '')).n;
+  /** One chat's unread count for one person: the rule `listInbox` counts by (P2-8). */
+  const unreadIn = (leadId, { userId = null, userCreated = 0 } = {}) => prep(`SELECT COUNT(*) AS n FROM wa_messages m
+      WHERE m.lead_id = ? AND m.direction = 'in'
+        AND m.ts > COALESCE((SELECT r.last_read_ts FROM inbox_reads r WHERE r.user_id = ? AND r.lead_id = m.lead_id), ?)`)
+    .get(String(leadId ?? ''), str(userId), num(userCreated)).n;
   /** The stored message with this WhatsApp id, or null. */
   const messageByKey = (keyId) => (keyId ? plain(prep('SELECT * FROM wa_messages WHERE key_id = ?').get(String(keyId))) : null);
 
@@ -630,7 +637,7 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
   }
 
   return {
-    upsertMessage, messagesFor, newestTs, hasMessages, messageByKey,
+    upsertMessage, messagesFor, newestTs, hasMessages, countMessages, unreadIn, messageByKey,
     insertOutbox, getOutbox, outboxByKey, updateOutbox, resolveUncertain, openOutboxFor, countSentSince, markStalePending, pruneCodeRows,
     markRead, listInbox, unreadTotal, listUnsure, countUnsure, inChatsWithoutMessages, listedLeads,
     addGap, gapsFor, clearGap, clearJoinGaps,

@@ -461,3 +461,15 @@ test('a chat to check has its own banners: dismissed, gone, and no number to mov
   assert.ok(unsurePage({ me: OWNER, rows: [], ok: 'dismissed', now: NOW }).includes(`<div class="ok">${INBOX_OK.dismissed}</div>`));
   assert.match(unsurePage({ me: OWNER, rows: [], error: 'candidate_gone', now: NOW }), /<div class="err">That chat is no longer on the list/);
 });
+
+/* ---------------- final review fixes 2026-09-29: a long thread ---------------- */
+
+test('a thread that does not draw every message says how many earlier ones are not shown, before the first it draws', () => {
+  const many = thread({ messages: [msg({ key_id: 'K9', text: 'the newest' })], hidden: 1250 });
+  assert.match(many, /1,250 earlier messages are not shown here\./);
+  assert.ok(many.indexOf('earlier messages are not shown') < many.indexOf('the newest'), 'above the messages it draws');
+  assert.match(thread({ messages: [msg()], hidden: 1 }), /1 earlier message is not shown here\./);
+  for (const hidden of [0, undefined, null, -3, 'x']) {
+    assert.doesNotMatch(thread({ messages: [msg()], hidden }), /not shown here/, String(hidden));
+  }
+});
