@@ -789,6 +789,32 @@ test('property words come out as the forms the owner\'s list shows: each once, i
   }
 });
 
+test('every form of a property word counts on its own, singular and plural, with and without the article', () => {
+  // One string with several forms passes as soon as any one of them matches, so each form
+  // is asked alone: "عقار العقارات" once hid a pattern that needed the plural (عقارا + ت?).
+  for (const [word, forms] of [
+    ['villa', ['villa', 'villas']],
+    ['apartment', ['apartment', 'apartments']],
+    ['rent', ['rent', 'rental', 'rentals', 'for rent']],
+    ['for sale', ['for sale', 'for-sale', 'for_sale']],
+    ['real estate', ['real estate', 'real-estate', 'realestate']],
+    ['property', ['property', 'properties']],
+    ['duplex', ['duplex', 'duplexes']],
+    ['penthouse', ['penthouse', 'penthouses']],
+    ['townhouse', ['townhouse', 'town house', 'townhouses']],
+    ['فيلا', ['فيلا', 'الفيلا', 'فلل', 'الفلل', 'فلة', 'فله']],
+    ['شقة', ['شقة', 'الشقة', 'شقه', 'شقق', 'الشقق']],
+    ['إيجار', ['إيجار', 'ايجار', 'الإيجار', 'للإيجار', 'للايجار']],
+    ['للبيع', ['للبيع']],
+    ['عقار', ['عقار', 'العقار', 'عقارات', 'العقارات']],
+    ['دوبلكس', ['دوبلكس', 'الدوبلكس']],
+    ['بنتهاوس', ['بنتهاوس', 'البنتهاوس']],
+    ['تاون هاوس', ['تاون هاوس', 'تاونهاوس']],
+  ]) {
+    for (const form of forms) assert.deepEqual(propertyWordsIn(form), [word], form);
+  }
+});
+
 test('the property words are strong real-estate terms only, and the privacy page names exactly them (D17)', () => {
   assert.deepEqual(PROPERTY_WORD_FORMS, [
     'villa', 'apartment', 'rent', 'for sale', 'real estate', 'property', 'duplex', 'penthouse', 'townhouse',
