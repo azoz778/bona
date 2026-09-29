@@ -456,6 +456,32 @@ test('owner-started leads are not acquisitions: out of the Desk new-lead counts,
   assert.equal(stats.overview(14).totals.leads, 6, 'the book still holds them');
 });
 
+test('a lead with no match method is an acquisition: on the Desk, in the sources table and in ROI', () => {
+  const { db, stats } = seeded();
+  const window = { fromDay: day(3), toDay: day(0) };
+  const leadsOf = (rows) => rows.reduce((n, r) => n + r.leads, 0);
+  const sourceRow = () => stats.sources().find((r) => r.source === 'meta' && r.campaign_id === '1203');
+  const roiRow = () => stats.roi(window).campaigns.find((r) => r.campaign_id === '1203');
+  const cplRow = () => stats.cplByCampaign().find((r) => r.campaign_id === '1203');
+  const before = {
+    daily: leadsOf(stats.overviewDaily(14)), sources: sourceRow().last_touch_leads,
+    roi: roiRow().leads, roiTotal: stats.roi(window).totals.leads, cpl: cplRow().leads,
+  };
+  // A lead from before match methods were recorded (NULL): `NOT IN` alone would drop it.
+  db.insertLead({
+    lead_id: 'LEAD-NULL', created: NOW - DAY_MS, updated: NOW - DAY_MS, phone_e164: '966500000013',
+    channel: 'whatsapp', source: 'meta', medium: 'paid', campaign: 'villas_sep', campaign_id: '1203', match_method: null,
+    stage: 'new', stage_ts: NOW - DAY_MS,
+  });
+  assert.equal(db.getLead('LEAD-NULL').match_method, null);
+
+  assert.equal(leadsOf(stats.overviewDaily(14)), before.daily + 1, 'a new lead on the Desk');
+  assert.equal(sourceRow().last_touch_leads, before.sources + 1, 'the campaign\'s lead in the sources table');
+  assert.equal(roiRow().leads, before.roi + 1, 'and in ROI');
+  assert.equal(stats.roi(window).totals.leads, before.roiTotal + 1);
+  assert.equal(cplRow().leads, before.cpl + 1, 'and in the Spend page\'s cost per lead');
+});
+
 test('overview() carries every section plus the totals', () => {
   const { stats } = seeded();
   const o = stats.overview(7);
