@@ -8,10 +8,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE, INBOX_STATES,
-  inboundSignal, ownerOutboundJoins, isTkDocument, nextInboxState,
+  // The two kinds of document word and the property words (owner answer, 2026-09-28).
+  BROCHURE_RE, QUALIFIED_DOC_RE, PROPERTY_NOUN_RE,
+  inboundSignal, ownerOutboundJoins, isTkDocument, namesTk, namesBona, nextInboxState,
 } from '../lib/inbox/eligibility.mjs';
-// The two kinds of document word and the property words (owner answer, 2026-09-28).
-import { BROCHURE_RE, QUALIFIED_DOC_RE, PROPERTY_NOUN_RE } from '../lib/inbox/eligibility.mjs';
 import { normaliseRecord } from '../lib/evolution.mjs';
 
 /* ---------------- shared patterns ---------------- */
@@ -257,6 +257,12 @@ test('a property document the owner sends joins the chat, from any developer (D1
     doc('Villa_BONA-W003_EN.pdf'),
     doc('Bona Villa BONA-W003 brochure.pdf'),
     doc('bona-real-estate.com villa.pdf'),
+    // In a file name `_` stands for a space, for a site link as for a listing id, and the
+    // extension is not part of the host.
+    doc('bona-real-estate.com_brochure.pdf'),
+    doc('bona-real-estate.com.pdf'),
+    doc('Villa_bona.azoz.uk_EN.pdf'),
+    doc('bona.azoz.uk.PDF'),
     doc('Bona brochure.pdf', 'https://bona-real-estate.com/ar/'),
     doc('scan.pdf', 'BONA-005'),
     doc('scan.pdf', 'https://bona-real-estate.com/ar/'),
@@ -304,6 +310,33 @@ test('the other document words need a property word, a listing id or a link next
   ]) {
     assert.equal(ownerOutboundJoins(rec), false, `${rec.fileName} / ${rec.text}`);
     assert.equal(PROPERTY_DOC_RE.test(`${rec.fileName ?? ''} ${rec.text ?? ''}`), true, `${rec.fileName} / ${rec.text}: still a property-document word`);
+  }
+});
+
+test('the property words are the owner\'s list as it stands: unit, project and مشروع let a fit-out paper join (open for the owner)', () => {
+  // Some of the owner's property words (2026-09-28) are also fit-out words, so these join
+  // today. Whether unit, project and مشروع should go, or a fit-out word (kitchen, أعمال,
+  // ديكور …) next to them should keep the chat out, is his call: an answer changes this test
+  // on purpose.
+  const doc = (fileName) => ({ text: null, fileName, media: `[document: ${fileName}]` });
+  for (const fileName of ['Kitchen unit price list.pdf', 'AC unit fact sheet.pdf', 'Payment plan - kitchen project.pdf',
+    'جدول الدفعات - مشروع الديكور.pdf', 'Floor plan - villa kitchen.pdf']) {
+    assert.equal(ownerOutboundJoins(doc(fileName)), true, fileName);
+  }
+});
+
+test('namesTk and namesBona read a caption or a name as it is and with its spaces and invisible characters cleaned', () => {
+  for (const s of ['TK', 'تي  كي', 'تى - كى', 'تي. كي', 'تي _ كي', 'T\u200BK', 'T\u200CK', 'X\u200BTK', 'تي\u200Dكي', `تي${' '.repeat(50)}كي`]) {
+    assert.equal(namesTk(s), true, JSON.stringify(s));
+  }
+  for (const s of ['', 'TKO', 'بلاستيكي', 'تي كيس', 'تي , كي', 'تي -- - كي', 'St.Kitts']) {
+    assert.equal(namesTk(s), false, JSON.stringify(s));
+  }
+  for (const s of ['Bona', 'B\u200Bona', 'بو\u200Cنا', 'Bona\u200Bfide', 'Bona  Villa']) {
+    assert.equal(namesBona(s), true, JSON.stringify(s));
+  }
+  for (const s of ['', 'Bonanza', 'bona  fide', 'كوبونات']) {
+    assert.equal(namesBona(s), false, JSON.stringify(s));
   }
 });
 
@@ -364,6 +397,15 @@ test('the word Bona, or any other file, no longer joins a chat by itself, and a 
     doc('وبروشور.pdf'),
     doc('Bona Fide Purchaser Declaration.pdf'),
     doc(null),
+    // Our name with an invisible character in it, or a run of spaces, is still our name.
+    doc('brochure.pdf', 'B\u200Bona'),
+    doc('B\u200Cona Villa Brochure.pdf'),
+    doc('brochure.pdf', 'from   بو\u200Dنا'),
+    // A site link is read in a file name with `_` as a space and without the extension; a
+    // host that only starts like ours is still not ours, and the name then says Bona.
+    doc('bona-real-estate.company_profile.pdf'),
+    doc('bona-real-estate.com.evil.pdf'),
+    doc('bona-real-estate.com-brochure.pdf'),
   ]) {
     assert.equal(ownerOutboundJoins(rec), false, `${rec.fileName} / ${rec.text}`);
   }
@@ -393,6 +435,24 @@ test('a document that names TK never joins, whatever else it says, and isTkDocum
     doc('scan.pdf', 'TK · https://bona-real-estate.com/ar/'),
     doc('Brochure.pdf', 'from تي كي'),
     doc('TK villa floor plan.pdf'),
+    // A caption is not cleaned the way a file name is: two spaces (a common phone typo), a
+    // spaced hyphen or a line break between the two Arabic words still name TK ...
+    doc('scan.pdf', 'بروشور تي  كي'),
+    doc('scan.pdf', 'بروشور تى  كى'),
+    doc('scan.pdf', 'بروشور تي - كي'),
+    doc('scan.pdf', 'بروشور تي\n\n  كي'),
+    doc('بروشور تي - كي.pdf'),
+    doc('بروشور تي _ كي.pdf'),
+    // ... and so does TK with an invisible character inside it, in a caption or in the
+    // joiners a file name keeps (U+200C, U+200D).
+    doc('Brochure.pdf', 'T\u200BK'),
+    doc('Brochure.pdf', 'T\u2060K\uFEFF'),
+    doc('T\u200CK Brochure.pdf'),
+    doc('T\u200DK Brochure.pdf'),
+    doc('بروشور تي\u200Cكي.pdf'),
+    // What the invisible character ends counts as well ("X\u200BTK" reads "XTK"): both readings
+    // are asked, and either keeps the chat out.
+    doc('Brochure.pdf', 'X\u200BTK'),
   ]) {
     assert.equal(ownerOutboundJoins(rec), false, `${rec.fileName} / ${rec.text}`);
     assert.equal(isTkDocument(rec), true, `${rec.fileName} / ${rec.text}`);
@@ -481,6 +541,14 @@ test('a document name cut at 120 characters cannot make a word or an id at the c
   assert.equal(ownerOutboundJoins(rec('Villa brochure ' + 'x'.repeat(200) + ' TK.pdf')), false);
   assert.equal(ownerOutboundJoins(rec('Villa brochure ' + 'x'.repeat(200) + ' Bona.pdf')), false);
   assert.equal(ownerOutboundJoins(rec('BONA-W003 brochure ' + 'x'.repeat(200) + ' Bona.pdf')), true, 'a listing id joins whatever names Bona');
+  // A first grapheme longer than the whole cap leaves no name at all, but the whole name
+  // still said TK or Bona, so a caption's brochure stays out.
+  for (const tail of [' TK.pdf', ' Bona.pdf']) {
+    const zalgo = rec(`a${'\u0301'.repeat(120)}${tail}`, 'brochure');
+    assert.equal(zalgo.fileName, null, 'nothing of the name is left');
+    assert.equal(ownerOutboundJoins(zalgo), false, tail);
+    assert.equal(ownerOutboundJoins({ ...zalgo, text: 'brochure BONA-W003' }), tail === ' Bona.pdf', `${tail}: a listing id still beats our name, never TK`);
+  }
   // A name that was not cut ends where it ends.
   const short = rec('Villa Brochure');
   assert.equal(short.fileNameTruncated, false);
@@ -676,6 +744,9 @@ test('no text makes the rules slow: every input is read in linear time', () => {
     fill('town_house', n), fill('propert', n), fill('الفيل', n), fill('تاون ', n), fill('مجمع ', n), fill('الشقق', n), fill('floor plan land', n),
     fill('tk', n), fill('tk ', n), fill('tk-estate', n), fill('tk_', n), fill('تي ', n), fill('تي', n), fill('تيكي', n),
     fill('t.k', n), fill('t.', n), fill('تى ', n), fill('تى', n), fill('تيكى', n),
+    fill('تي  كي', n), fill('تى  كى', n), fill('تي - كي', n), fill('تي    ', n), fill('تي - ', n), fill('تى _ .', n),
+    `تي${' '.repeat(n)}كي`, `T${'\u200B'.repeat(n)}K`, fill('T\u200C', n), fill('\u200D ', n), fill(' \uFEFF\n', n),
+    fill('bona.azoz.uk_', n), fill('bona-real-estate.com.', n), `bona-real-estate.com${'.pdf'.repeat(n / 4)}`,
   ];
   const calls = [
     ['inboundSignal', (s) => inboundSignal({ text: s })],
@@ -689,6 +760,8 @@ test('no text makes the rules slow: every input is read in linear time', () => {
     ['QUALIFIED_DOC_RE', (s) => QUALIFIED_DOC_RE.test(s)],
     ['PROPERTY_NOUN_RE', (s) => PROPERTY_NOUN_RE.test(s)],
     ['TK_RE', (s) => TK_RE.test(s)],
+    ['namesTk', (s) => namesTk(s)],
+    ['namesBona', (s) => namesBona(s)],
   ];
   for (const n of [20_000, 200_000]) {
     for (const [i, s] of inputs(n).entries()) {

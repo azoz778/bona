@@ -144,11 +144,65 @@ const LISTING_ID_NAME_CUT_RE = /(?<![A-Za-z0-9])BONA-W?\d{3}(?=[^A-Za-z0-9٠-٩�
  * (bounded by anything that is not a letter or a digit, so `TK_Villa` and `TK-Estates`
  * count and `TKO` or `TK2` do not), `T.K.` / `T.K`, `tk-estates` / `TKEstates`, or `تي كي`
  * as its own word, with ي or ى in either place (Saudi typing often ends a word with ى: تى
- * كى), bounded like `بونا` (بلاستيكي, بلاستيكى and أوتوماتيكي only contain the letters). A
- * document that matches never joins a chat by itself (D16, D17). Every alternative starts
- * with a fixed letter and repeats nothing: linear in the text.
+ * كى), bounded like `بونا` (بلاستيكي, بلاستيكى and أوتوماتيكي only contain the letters). The
+ * two Arabic words may be written together or apart by up to four spaces, `_`, `.` or `-`
+ * (`تي  كي` typed with two spaces, `تي - كي`); a longer run is cleaned to one space first
+ * (`namesTk`). A document that matches never joins a chat by itself (D16, D17). Every
+ * alternative starts with a fixed letter and repeats nothing unbounded, so a failed match
+ * costs a bounded amount at each position: linear in the text.
  */
-export const TK_RE = /(?<![\p{L}\p{N}])tk(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])t\.k\.?(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])tk[\s_-]?estates?|(?<![\p{L}\p{M}])ت[يى][\s_.-]?ك[يى](?![\p{L}\p{M}])/iu;
+export const TK_RE = /(?<![\p{L}\p{N}])tk(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])t\.k\.?(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])tk[\s_-]?estates?|(?<![\p{L}\p{M}])ت[يى][\s_.-]{0,4}ك[يى](?![\p{L}\p{M}])/iu;
+
+/**
+ * Runs of whitespace, and every invisible character (controls, format characters and the
+ * rest of Unicode's default-ignorable set). JavaScript counts U+FEFF as whitespace, but it is
+ * a zero-width no-break space: it goes with the invisible characters instead of becoming a
+ * space. Unlike a shown file name (lib/evolution.mjs), nothing is spared: the zero-width
+ * joiner and non-joiner go too.
+ */
+const SPACES_RE = /[\s--\u{FEFF}]+/gv;
+const INVISIBLE_RE = /[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;
+
+/**
+ * `s` as it reads for the TK and Bona checks: every run of whitespace one space and every
+ * invisible character gone. A caption is never cleaned the way a file name is, and a file
+ * name keeps U+200C and U+200D, so "تي  كي" typed with two spaces, "T\u200BK" or "T\u200CK"
+ * would otherwise not read as TK. Whitespace first, so a line break between two words leaves
+ * a space, not a join.
+ */
+function readsAs(s) {
+  return s.replace(SPACES_RE, ' ').replace(INVISIBLE_RE, '').replace(SPACES_RE, ' ');
+}
+
+/**
+ * Does `s` (a caption or a file name) name TK (`TK_RE`) / Bona (`BONA_WORD_RE`), as it is or
+ * as it reads (`readsAs`)? Both readings are asked because cleaning can also end a word
+ * ("X\u200BTK" reads "XTK", "Bona\u200Bfide" reads "Bonafide"), and these checks only ever
+ * keep a chat out: either one saying so means fewer joins, never more. lib/evolution.mjs asks
+ * the same of the whole file name before it is cut (`fileNameTk`, `fileNameBona`).
+ * @param {string} s
+ * @returns {boolean}
+ */
+export const namesTk = (s) => TK_RE.test(s) || TK_RE.test(readsAs(s));
+/** @see namesTk */
+export const namesBona = (s) => BONA_WORD_RE.test(s) || BONA_WORD_RE.test(readsAs(s));
+
+/**
+ * A file name's extension (`.pdf`), which is not part of a host in it: `bona-real-estate.com.pdf`.
+ */
+const FILE_EXTENSION_RE = /\.[a-z0-9]{1,5}$/i;
+
+/**
+ * Does a whole file name carry a site link? In a file name `_` stands for a space, as for a
+ * listing id (`bona-real-estate.com_brochure.pdf`), and the name is read with and without its
+ * extension (`bona-real-estate.com.pdf`); otherwise the link is read exactly as in a text
+ * (`SITE_LINK_RE`), so `bona-real-estate.company_profile.pdf` and
+ * `bona-real-estate.com.evil.pdf` still are not ours. Never asked of a cut name.
+ */
+function nameHasSiteLink(name) {
+  const spaced = name.replace(/_/g, ' ');
+  return SITE_LINK_RE.test(spaced) || SITE_LINK_RE.test(spaced.replace(FILE_EXTENSION_RE, ''));
+}
 
 /**
  * Code points left out at the end of a document name that was cut (`fileNameTruncated`):
@@ -175,7 +229,7 @@ const str = (v) => (typeof v === 'string' ? v : '');
 const isDocument = (media) => str(media).startsWith('[document');
 
 /**
- * Does the document's file name name TK (`TK_RE`) or Bona (`BONA_WORD_RE`)? A name cut at
+ * Does the document's file name name TK (`namesTk`) or Bona (`namesBona`)? A name cut at
  * 120 code points hides its end, so for a cut name the answer comes from what
  * lib/evolution.mjs worked out on the whole name before it was cut (`fileNameTk`,
  * `fileNameBona`: `wholeSays`); a cut name without that answer may name it in the part
@@ -183,8 +237,8 @@ const isDocument = (media) => str(media).startsWith('[document');
  * not ("…TK" cut from "…TKO" reads as TK): either way that only ever means fewer joins.
  * A `wholeSays` of exactly `true` counts for a name that was not cut too.
  */
-function nameSays(re, name, fileNameTruncated, wholeSays) {
-  return (fileNameTruncated ? wholeSays !== false : wholeSays === true) || re.test(name);
+function nameSays(says, name, fileNameTruncated, wholeSays) {
+  return (fileNameTruncated ? wholeSays !== false : wholeSays === true) || says(name);
 }
 
 /**
@@ -230,7 +284,7 @@ export function inboundSignal(o) {
 export function isTkDocument(o) {
   const { text = '', fileName = null, fileNameTruncated = false, fileNameTk = null, media = null } = o ?? {};
   if (!isDocument(media)) return false;
-  return TK_RE.test(str(text)) || nameSays(TK_RE, str(fileName), Boolean(fileNameTruncated), fileNameTk);
+  return namesTk(str(text)) || nameSays(namesTk, str(fileName), Boolean(fileNameTruncated), fileNameTk);
 }
 
 /**
@@ -240,14 +294,14 @@ export function isTkDocument(o) {
  * `fileNameTk` / `fileNameBona` whether the whole name named TK / Bona.
  *
  * Any message: a Bona site link or a listing id in the text or caption joins. A document
- * that names TK (`TK_RE`) in its file name or caption never joins, whatever else it says.
- * Otherwise a document joins by a site link or a listing id in its caption or file name,
- * or by its words (`namesPropertyDocument`), read in the caption and in the file name
- * each on its own: a brochure, or a floor plan, price list … with a property word beside
- * it — but a document that names Bona (`BONA_WORD_RE`) joins only by a site link or a
- * listing id: "Bona Traffic HD brochure.pdf" is Bona AB's floor finish as often as ours,
- * and the poller puts it on the owner's list to check instead (D17). The word "Bona" joins
- * nothing by itself.
+ * that names TK (`namesTk`) in its file name or caption never joins, whatever else it says.
+ * Otherwise a document joins by a site link or a listing id in its caption or file name
+ * (`nameHasSiteLink`), or by its words (`namesPropertyDocument`), read in the caption and
+ * in the file name each on its own: a brochure, or a floor plan, price list … with a
+ * property word beside it — but a document that names Bona (`namesBona`) joins only by a
+ * site link or a listing id: "Bona Traffic HD brochure.pdf" is Bona AB's floor finish as
+ * often as ours, and the poller puts it on the owner's list to check instead (D17). The
+ * word "Bona" joins nothing by itself.
  *
  * A name cut at 120 code points (`fileNameTruncated`) may go on past the cut: "…Brochure"
  * may be "…BrochureX", "…BONA-W003" may be "…BONA-W0031", "…Land" may be "…Landscape". So a
@@ -267,11 +321,11 @@ export function ownerOutboundJoins(o) {
   if (!isDocument(media)) return SITE_LINK_RE.test(t) || LISTING_ID_RE.test(t);
   const name = str(fileName);
   const cut = Boolean(fileNameTruncated);
-  if (TK_RE.test(t) || nameSays(TK_RE, name, cut, fileNameTk)) return false;
+  if (namesTk(t) || nameSays(namesTk, name, cut, fileNameTk)) return false;
   const readable = cut ? readableCutName(name) : name;
   if (SITE_LINK_RE.test(t) || LISTING_ID_RE.test(t)) return true;
-  if (cut ? LISTING_ID_NAME_CUT_RE.test(readable) : LISTING_ID_NAME_RE.test(name) || SITE_LINK_RE.test(name)) return true;
-  if (BONA_WORD_RE.test(t) || nameSays(BONA_WORD_RE, name, cut, fileNameBona)) return false;
+  if (cut ? LISTING_ID_NAME_CUT_RE.test(readable) : (LISTING_ID_NAME_RE.test(name) || nameHasSiteLink(name))) return true;
+  if (namesBona(t) || nameSays(namesBona, name, cut, fileNameBona)) return false;
   return namesPropertyDocument(t, false) || namesPropertyDocument(readable, cut);
 }
 

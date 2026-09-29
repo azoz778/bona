@@ -39,7 +39,7 @@
  *     real phone jid is then on `key.remoteJidAlt`.
  */
 
-import { BONA_WORD_RE, TK_RE } from './inbox/eligibility.mjs';
+import { namesBona, namesTk } from './inbox/eligibility.mjs';
 
 /**
  * The most pages one read asks for; `readWindow` cuts a window that holds more than
@@ -215,9 +215,12 @@ function flatFileName(name) {
  * A record's document name made safe to show (`name`, null when there is no document or
  * nothing usable is left), whether it had to be cut at `MAX_FILE_NAME` code points to get
  * there (`truncated`; what cleaning removes is not a cut), and whether the whole cleaned
- * name, before any cut, names TK or Bona (`tk`, `bona`: lib/inbox/eligibility.mjs `TK_RE`,
- * `BONA_WORD_RE`). The one place all four are worked out, so `mediaOf`'s placeholder and
- * `normaliseRecord`'s `fileName`/`fileNameTruncated`/`fileNameTk`/`fileNameBona` agree.
+ * name, before any cut, names TK or Bona (`tk`, `bona`: lib/inbox/eligibility.mjs `namesTk`,
+ * `namesBona`, which also read through the joiners the shown name keeps). That holds even
+ * when nothing of the name can be shown (a first grapheme longer than the cap), so a name
+ * that is left out never drops what it said. The one place all four are worked out, so
+ * `mediaOf`'s placeholder and `normaliseRecord`'s
+ * `fileName`/`fileNameTruncated`/`fileNameTk`/`fileNameBona` agree.
  * @returns {{ name: string|null, truncated: boolean, tk: boolean, bona: boolean }}
  */
 function fileNameOf(record) {
@@ -226,8 +229,8 @@ function fileNameOf(record) {
   return {
     name,
     truncated: name !== null && name !== flat,
-    tk: name !== null && TK_RE.test(flat),
-    bona: name !== null && BONA_WORD_RE.test(flat),
+    tk: namesTk(flat),
+    bona: namesBona(flat),
   };
 }
 
