@@ -824,6 +824,36 @@ test('two people on one page: once the first reply is accepted the second is sta
   });
 });
 
+test('a page drawn before the chat was marked Not a client never sends once it is moved back in and the client writes again', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    // The client's newest message is also the newest row of the whole transcript table, so
+    // the purge below frees its rowid for the next message stored.
+    h.inboxStore.upsertMessage({
+      key_id: 'A-2', lead_id: 'LEAD-A', jid: `${CLIENT}@s.whatsapp.net`, direction: 'in', sender_kind: 'client', text: 'Tomorrow at five?', ts: NOW + 61_000,
+    });
+    const staff = await h.staff();
+    const boss = await h.boss();
+    const opened = await (await h.get('/dashboard/inbox/LEAD-A', { cookie: staff })).text();
+    assert.equal((await h.postForm('/v1/admin/inbox/LEAD-A/out', {}, { cookie: boss })).status, 303);
+    assert.equal((await h.postForm('/v1/admin/inbox/LEAD-A/move', {}, { cookie: boss })).status, 303);
+    h.inboxStore.upsertMessage({
+      key_id: 'A-3', lead_id: 'LEAD-A', jid: `${CLIENT}@s.whatsapp.net`, direction: 'in', sender_kind: 'client', text: 'Different question: the duplex?', ts: NOW + 120_000,
+    });
+    const draft = 'Yes, five works';
+    const res = await replyTo(h, 'LEAD-A', {
+      text: draft, send_id: fieldOf(opened, 'send_id'), seen_rev: fieldOf(opened, 'seen_rev'), seen_ts: fieldOf(opened, 'seen_ts'),
+    }, staff);
+    assert.equal(res.status, 409, 'the page Sara typed on is not the conversation now');
+    const html = await res.text();
+    assert.ok(html.includes(draft), 'the words are still in the box');
+    assert.ok(html.includes('Different question: the duplex?'), 'under the message the old page never showed');
+    assert.ok(!html.includes('Tomorrow at five?'), 'and without the purged one');
+    assert.equal(h.evo.calls.length, 0, 'nothing reached WhatsApp');
+    assert.equal(h.inboxStore.getOutbox(fieldOf(opened, 'send_id')), null, 'nothing written for it');
+  });
+});
+
 test('a reply keeps its author\'s name after they leave the team, and they are no longer offered as handler', async () => {
   await withInbox(async (h) => {
     seedScene(h);

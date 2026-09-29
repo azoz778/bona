@@ -173,7 +173,7 @@ test('newestTs and hasMessages look at one chat only', () => {
   s.close();
 });
 
-test('revision grows with every message and every staff or Dana send written for one chat, never with one seen again or settled', () => {
+test('revision is the chat\'s own counter on its lead row: one up for every message and staff or Dana send written for it, never for one seen again or settled', () => {
   const { s, inbox } = harness();
   chat(s, 'L-1');
   chat(s, 'L-2', { wa_jid: '966500000002@s.whatsapp.net' });
@@ -181,8 +181,8 @@ test('revision grows with every message and every staff or Dana send written for
   let last = 0;
   const grew = (label) => {
     const r = inbox.revision('L-1');
-    assert.ok(Number.isSafeInteger(r), `${label}: a whole number`);
-    assert.ok(r > last, `${label}: ${r} > ${last}`);
+    assert.equal(r, last + 1, `${label}: ${r} is one more than ${last}`);
+    assert.equal(s.getLead('L-1').chat_rev, r, `${label}: kept on the lead row`);
     last = r;
   };
   const same = (label) => assert.equal(inbox.revision('L-1'), last, label);
@@ -199,8 +199,12 @@ test('revision grows with every message and every staff or Dana send written for
 
   inbox.insertOutbox(out({ send_id: 'SND-1' }));
   grew('a staff send on its way');
+  inbox.insertOutbox(out({ send_id: 'SND-1', text: 'a double submit' }));
+  same('a double submit of the same send id writes nothing');
   inbox.updateOutbox('SND-1', { status: 'uncertain', error: 'timeout' });
   same('a send settled is nothing new');
+  inbox.markStalePending(Number.MAX_SAFE_INTEGER);
+  same('nor is a pending send marked interrupted');
   inbox.insertOutbox(out({ send_id: 'SND-2', sender_kind: 'dana', status: 'failed' }));
   grew('a Dana send, whatever its status');
 
@@ -208,13 +212,101 @@ test('revision grows with every message and every staff or Dana send written for
   inbox.insertOutbox(out({ send_id: 'SND-other', lead_id: 'L-2' }));
   inbox.insertOutbox(out({ send_id: 'SND-code', lead_id: null, sender_kind: 'code', text: null }));
   inbox.insertOutbox(out({ send_id: 'SND-note', sender_kind: 'note' }));
-  same("another chat's messages and sends, a login code and a note are not this chat's thread");
-  assert.ok(inbox.revision('L-2') > 0);
+  inbox.insertOutbox(out({ send_id: 'SND-nolead', lead_id: null }));
+  same("another chat's messages and sends, a login code, a note and a send with no chat are not this chat's thread");
+  assert.equal(inbox.revision('L-2'), 2);
   inbox.upsertMessage(msg({ key_id: 'K-3', ts: NOW + 1_000 }));
   grew('a message after rows of other chats');
+  inbox.addGap({ key_id: 'K-gap', lead_id: 'L-1', ts: NOW, reason: 'failed' });
+  inbox.markRead('USR-1', 'L-1', NOW + 1_000);
+  inbox.setHandler('L-1', 'USR-1');
+  same('a gap, a read mark or a handler is not a message or a send');
 
   assert.equal(inbox.revision('L-nope'), 0);
   assert.equal(inbox.revision(null), 0);
+  s.close();
+});
+
+test('revision never goes down and never comes back: leaving the inbox, a purge and each retention delete move it on', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-1');
+  chat(s, 'L-2', { wa_jid: '966500000002@s.whatsapp.net' });
+  chat(s, 'L-3', { wa_jid: '966500000003@s.whatsapp.net' });
+  // L-1's rows are the newest in both tables, so the rowids a purge frees are its own:
+  // a revision read off rowids would hand out the same numbers again after it.
+  inbox.upsertMessage(msg({ key_id: 'K-2a', lead_id: 'L-2', jid: '966500000002@s.whatsapp.net', ts: NOW + 10 * DAY }));
+  inbox.insertOutbox(out({ send_id: 'SND-2a', lead_id: 'L-2' }));
+  inbox.upsertMessage(msg({ key_id: 'K-1' }));
+  inbox.insertOutbox(out({ send_id: 'SND-1' }));
+  const seen = [inbox.revision('L-1')];
+  const moved = (label) => {
+    const r = inbox.revision('L-1');
+    assert.ok(Number.isSafeInteger(r), `${label}: a whole number`);
+    assert.ok(r > Math.max(...seen), `${label}: ${r} is above every revision this chat had before (${seen.join(', ')})`);
+    seen.push(r);
+  };
+  const l2 = inbox.revision('L-2');
+
+  inbox.leaveInbox('L-1');
+  moved('Not a client: the thread is emptied');
+  inbox.setInboxState('L-1', 'in');
+  inbox.upsertMessage(msg({ key_id: 'K-again' }));
+  moved('moved back in, the client writes again');
+  inbox.insertOutbox(out({ send_id: 'SND-again' }));
+  moved('and is answered again');
+  inbox.purgeLead('L-1');
+  moved('a purge on its own (a number put on the never list)');
+  inbox.upsertMessage(msg({ key_id: 'K-late', ts: NOW + 60_000 }));
+  moved('a message after it');
+
+  // Retention (D11): L-1's last message (NOW + 60 s) is past the cutoff, L-2's is not.
+  const before = inbox.revision('L-1');
+  // `outbox`: the two stubs L-1's earlier purges left (no text, no chat) go with it.
+  assert.deepEqual(inbox.retentionPurge(NOW + DAY), { leads: 1, messages: 1, outbox: 2 });
+  moved('the retention purge takes its messages');
+  assert.ok(inbox.revision('L-1') > before);
+  assert.equal(inbox.revision('L-2'), l2, 'a chat the purge did not touch keeps its revision');
+
+  // A chat with no message left keeps only its sends, and retention deletes those directly.
+  inbox.insertOutbox(out({ send_id: 'SND-3', lead_id: 'L-3', jid: '966500000003@s.whatsapp.net', status: 'failed' }));
+  const l3 = inbox.revision('L-3');
+  const l1 = inbox.revision('L-1');
+  assert.deepEqual(inbox.retentionPurge(NOW + DAY), { leads: 0, messages: 0, outbox: 1 }, "L-3's failed send");
+  assert.equal(inbox.revision('L-3'), l3 + 1, 'a send deleted by retention moves its chat on');
+  assert.equal(inbox.revision('L-1'), l1, 'nothing of L-1 was left to delete');
+  assert.equal(inbox.revision('L-2'), l2);
+  assert.deepEqual(inbox.retentionPurge(NOW + DAY), { leads: 0, messages: 0, outbox: 0 });
+  assert.equal(inbox.revision('L-3'), l3 + 1, 'a purge that deletes nothing moves nothing');
+  s.close();
+});
+
+test('the revision moves in the same transaction as the write it counts: when it cannot move, nothing is written', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-1');
+  chat(s, 'L-2', { wa_jid: '966500000002@s.whatsapp.net' });
+  inbox.upsertMessage(msg({ key_id: 'K-1', ts: NOW + 10 * DAY }));
+  inbox.insertOutbox(out({ send_id: 'SND-1' }));
+  inbox.insertOutbox(out({ send_id: 'SND-2', lead_id: 'L-2', jid: '966500000002@s.whatsapp.net', status: 'failed' }));
+  s.db.exec("CREATE TRIGGER no_rev BEFORE UPDATE OF chat_rev ON leads BEGIN SELECT RAISE(ABORT, 'no_rev'); END");
+
+  assert.throws(() => inbox.upsertMessage(msg({ key_id: 'K-new' })), /no_rev/);
+  assert.equal(inbox.messageByKey('K-new'), null, 'the message is not stored');
+  assert.equal(s.getLead('L-1').last_msg_ts, NOW + 10 * DAY);
+  assert.throws(() => inbox.insertOutbox(out({ send_id: 'SND-new' })), /no_rev/);
+  assert.equal(inbox.getOutbox('SND-new'), null, 'the send is not written');
+  assert.throws(() => inbox.leaveInbox('L-1'), /no_rev/);
+  assert.equal(inbox.countMessages('L-1'), 1, 'the thread is not purged');
+  assert.equal(s.getLead('L-1').inbox_state, 'in', 'and the chat has not left');
+  // L-1's last message is ten days out, so only L-2's lone send is due: the direct delete.
+  assert.throws(() => inbox.retentionPurge(NOW + DAY), /no_rev/);
+  assert.equal(inbox.getOutbox('SND-2').status, 'failed', "retention's send delete is undone");
+  assert.equal(inbox.revision('L-1'), 2);
+
+  // What the revision does not count still goes through.
+  inbox.upsertMessage(msg({ key_id: 'K-1', status: 'read' }));
+  inbox.updateOutbox('SND-1', { status: 'accepted', key_id: 'K-1' });
+  assert.equal(row(s, 'K-1').status, 'read');
+  s.db.exec('DROP TRIGGER no_rev');
   s.close();
 });
 

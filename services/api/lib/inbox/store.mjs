@@ -103,6 +103,11 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
     if (!s) { s = db.prepare(sql); stmts.set(sql, s); }
     return s;
   };
+  /**
+   * One up on a chat's revision (`revision`). Every caller runs it inside the transaction of
+   * the write it counts, so the two are committed or rolled back together.
+   */
+  const bump = (leadId) => prep('UPDATE leads SET chat_rev = chat_rev + 1 WHERE lead_id = ?').run(String(leadId));
 
   /* -------------------- messages -------------------- */
 
@@ -124,6 +129,9 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
    * the `failed` gap its failure left under the same WhatsApp id, in the same transaction:
    * otherwise the thread shows the message and "a message could not be loaded" for it.
    * Only that one row: a join's `history_failed` gap is keyed `join:…`, never a message id.
+   *
+   * A message stored for the first time moves the chat's revision on (`revision`); one seen
+   * again does not.
    *
    * @returns {{ inserted: boolean }}
    */
@@ -147,6 +155,7 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
         .run(String(key_id), String(lead_id), str(jid), direction, sender_kind, str(sender_user_id), capText(text), str(media_type), toTs(ts), str(status));
       const at = existing ?? { lead_id: String(lead_id), ts: toTs(ts) };
       prep('UPDATE leads SET last_msg_ts = MAX(COALESCE(last_msg_ts, 0), ?) WHERE lead_id = ?').run(at.ts, at.lead_id);
+      if (!existing) bump(lead_id);
       prep('DELETE FROM wa_gaps WHERE key_id = ?').run(String(key_id));
       return { inserted: !existing };
     });
@@ -160,32 +169,27 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
 
   const newestTs = (leadId) => prep('SELECT MAX(ts) AS ts FROM wa_messages WHERE lead_id = ?').get(String(leadId ?? '')).ts ?? null;
   /**
-   * A whole number that grows whenever something is written to one chat's thread that a
-   * person must see before answering it: a stored message (either direction, whatever its
-   * WhatsApp timestamp) or a staff or Dana send of any status (one still on its way, or
-   * "not sure it went"). The reply form carries the revision its page was drawn at, and
-   * the sender holds a reply as `stale` once it is higher (lib/wa-send.mjs `reply`).
-   * Timestamps cannot do this job: WhatsApp stamps whole seconds, a reply is stored at the
-   * second its send started, and a message read late can carry any time at all.
+   * The chat's revision: a whole number kept on its lead row (`leads.chat_rev`) that goes up
+   * by one, in the same transaction as the write, whenever something a person must see
+   * before answering is written to the chat's thread — a message stored for the first time
+   * (either direction, whatever its WhatsApp timestamp) or a staff or Dana send of any
+   * status (one still on its way, or "not sure it went") — and whenever rows are taken out
+   * of it: `purgeLead` (leaving the inbox, a team or never-list number, the 5-year
+   * retention) and the retention purge's delete of old sends. A message seen again
+   * (`upsertMessage`'s ON CONFLICT) or a send settled (`updateOutbox`, `markStalePending`)
+   * leaves it alone, and so do gaps (one is deleted when its message is stored after all,
+   * and the message then counts), read marks and handlers.
    *
-   * It is the sum of the chat's highest `rowid` in `wa_messages` and in its staff/Dana
-   * `wa_outbox` rows. Neither table has AUTOINCREMENT, so SQLite gives a new row the
-   * table's highest rowid + 1 — above every row there, this chat's included. A message
-   * seen again (`upsertMessage`'s ON CONFLICT) or a send settled (`updateOutbox`) keeps its
-   * rowid, so neither counts as news. Each maximum can only fall when rows of this chat
-   * are deleted, and only `purgeLead` does that: when the chat leaves the inbox (a reply
-   * to it is then refused `not_in_inbox`), and in the 5-year retention purge. After a
-   * purge a rowid freed at the top of a table can be handed out again, so a page drawn
-   * before the chat left and was moved back in could, in principle, match a revision
-   * after it. Gaps are left out: one is deleted when its message is stored after all, and
-   * the message then counts.
+   * The lead row is never deleted, so the number never goes down and is never handed out
+   * twice: two reads that agree mean nothing it counts happened in between (short of
+   * restoring the whole file from a backup). The reply form carries the revision its page
+   * was drawn at, and the sender sends only while the chat is still at exactly that number
+   * (lib/wa-send.mjs `reply`); anything else, lower or higher, is `stale`. Timestamps
+   * cannot do this job: WhatsApp stamps whole seconds, a reply is stored at the second its
+   * send started, and a message read late can carry any time at all. 0 for a lead that does
+   * not exist.
    */
-  const revision = (leadId) => {
-    const id = String(leadId ?? '');
-    return prep(`SELECT (SELECT COALESCE(MAX(rowid), 0) FROM wa_messages WHERE lead_id = ?)
-                      + (SELECT COALESCE(MAX(rowid), 0) FROM wa_outbox WHERE lead_id = ? AND sender_kind IN ('staff','dana')) AS rev`)
-      .get(id, id).rev;
-  };
+  const revision = (leadId) => prep('SELECT chat_rev FROM leads WHERE lead_id = ?').get(String(leadId ?? ''))?.chat_rev ?? 0;
   const hasMessages = (leadId) => Boolean(prep('SELECT 1 FROM wa_messages WHERE lead_id = ? LIMIT 1').get(String(leadId ?? '')));
   /** Every stored message of one chat, both directions. */
   const countMessages = (leadId) => prep('SELECT COUNT(*) AS n FROM wa_messages WHERE lead_id = ?').get(String(leadId ?? '')).n;
@@ -218,7 +222,8 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
   /**
    * Written before the HTTP call, so a send that dies half-way still counts against the
    * day cap and can still be matched to the message it became. A `send_id` already there
-   * is left exactly as it is: a double submit gets the row the first submit made.
+   * is left exactly as it is: a double submit gets the row the first submit made. A new
+   * staff or Dana row of a chat moves that chat's revision on (`revision`).
    *
    * @returns {{ inserted: boolean, row: object }}
    */
@@ -229,10 +234,14 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
     if (!OUTBOX_STATUSES.includes(status)) throw new RangeError(`unknown outbox status ${status}`);
     const t = now();
     const stored = sender_kind === 'code' ? null : capText(text);
-    const { changes } = prep(`INSERT OR IGNORE INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error)
-                              VALUES (?,?,?,?,?,?,?,NULL,?,?,NULL)`)
-      .run(String(send_id), str(lead_id), String(jid), stored, str(user_id), sender_kind, status, t, t);
-    return { inserted: changes === 1, row: getOutbox(send_id) };
+    const chatId = str(lead_id);
+    return transaction(() => {
+      const { changes } = prep(`INSERT OR IGNORE INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error)
+                                VALUES (?,?,?,?,?,?,?,NULL,?,?,NULL)`)
+        .run(String(send_id), chatId, String(jid), stored, str(user_id), sender_kind, status, t, t);
+      if (changes === 1 && chatId !== null && (sender_kind === 'staff' || sender_kind === 'dana')) bump(chatId);
+      return { inserted: changes === 1, row: getOutbox(send_id) };
+    });
   }
 
   /** `key_id`/`error` left out (undefined) are kept as they are; null clears them. */
@@ -475,6 +484,9 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
    * form submitted again after the chat was moved back in is `bad_send_id`, since the
    * stub belongs to no chat). `pruneCodeRows` removes stubs once the day is over.
    *
+   * The chat's revision moves on (`revision`), so no page drawn before the purge matches
+   * one drawn after it, however the thread fills again.
+   *
    * @returns {{ messages: number, outbox: number, gaps: number, reads: number }}
    */
   function purgeLead(leadId) {
@@ -490,6 +502,7 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
         reads: prep('DELETE FROM inbox_reads WHERE lead_id = ?').run(id).changes,
       };
       prep('UPDATE leads SET last_msg_ts = NULL WHERE lead_id = ?').run(id);
+      bump(id);
       return counts;
     });
   }
@@ -517,6 +530,8 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
    * than `beforeTs` as well, whatever their status. A chat that still has messages keeps
    * its sends with them until its last message is older than the cutoff. Login-code rows
    * hold no text; `pruneCodeRows` removes them. `outbox` counts every send row removed.
+   * Every chat that loses a row moves its revision on (`revision`): the purged ones through
+   * `purgeLead`, the ones that lose only sends here.
    *
    * @returns {{ leads: number, messages: number, outbox: number }}
    */
@@ -533,9 +548,11 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
         messages += purged.messages;
         outbox += purged.outbox;
       }
-      outbox += prep(`DELETE FROM wa_outbox
-                      WHERE sender_kind IN ('staff','dana') AND created < ?
-                        AND NOT EXISTS (SELECT 1 FROM wa_messages m WHERE m.lead_id = wa_outbox.lead_id)`).run(cutoff).changes;
+      const due = `sender_kind IN ('staff','dana') AND created < ?
+                   AND NOT EXISTS (SELECT 1 FROM wa_messages m WHERE m.lead_id = wa_outbox.lead_id)`;
+      prep(`UPDATE leads SET chat_rev = chat_rev + 1
+            WHERE lead_id IN (SELECT lead_id FROM wa_outbox WHERE lead_id IS NOT NULL AND ${due})`).run(cutoff);
+      outbox += prep(`DELETE FROM wa_outbox WHERE ${due}`).run(cutoff).changes;
       return { leads: ids.length, messages, outbox };
     });
   }

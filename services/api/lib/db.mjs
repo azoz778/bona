@@ -201,6 +201,12 @@ const MIGRATIONS = [
     // most 8) and who wrote last. `dismissed` is the owner's "Not a client": the row stays,
     // emptied of everything but its ids, only so the chat is not listed again. One row per
     // number, jid and lid (UNIQUE; NULLs do not collide). No foreign keys, as in v3.
+    // `chat_rev` (added to v4 on 2026-09-30, also before v4 shipped) is the chat's revision
+    // for the reply form's stale-view guard (lib/inbox/store.mjs `revision`): lib/inbox/store.mjs
+    // adds 1 in the same transaction as every new message, every staff or Dana send and
+    // every purge of the chat. It lives on the lead row because that row is never deleted,
+    // so the number never goes down or comes back after a purge; every existing lead starts
+    // at 0.
     // Migrations here only ever add.
     version: 4,
     sql: `
@@ -210,6 +216,7 @@ const MIGRATIONS = [
       ALTER TABLE leads ADD COLUMN last_msg_ts INTEGER;
       ALTER TABLE leads ADD COLUMN needs_human INTEGER NOT NULL DEFAULT 0 CHECK (needs_human IN (0,1));
       ALTER TABLE leads ADD COLUMN history_from INTEGER;
+      ALTER TABLE leads ADD COLUMN chat_rev INTEGER NOT NULL DEFAULT 0;
       CREATE INDEX IF NOT EXISTS leads_inbox ON leads(inbox_state, last_msg_ts);
       CREATE TABLE IF NOT EXISTS wa_messages (
         key_id TEXT NOT NULL PRIMARY KEY, lead_id TEXT NOT NULL, jid TEXT,
@@ -269,7 +276,8 @@ const COLUMNS = {
   leads: ['lead_id', 'created', 'updated', 'phone_e164', 'wa_jid', 'wa_lid', 'name', 'channel', 'source', 'medium', 'campaign', 'campaign_id',
     'content', 'click_ids', 'ref', 'match_method', 'session_id', 'anon_id', 'listing_id', 'first_touch', 'last_touch', 'interest', 'budget',
     'timeline', 'district', 'language', 'notes', 'stage', 'stage_ts', 'value_sar', 'first_inbound_ts', 'first_reply_ts', 'legacy_id',
-    'consent_ads', 'consent_analytics', 'inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from'],
+    'consent_ads', 'consent_analytics', 'inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from',
+    'chat_rev'],
   touchpoints: ['id', 'lead_id', 'ts', 'channel', 'event_type', 'source', 'medium', 'campaign', 'campaign_id', 'listing_id', 'meta'],
 };
 
