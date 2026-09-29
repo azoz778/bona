@@ -381,3 +381,83 @@ test('the lead page offers the inbox controls that fit the viewer and the lead',
   const odd = page({ lead_id: 'LEAD/1?x=1', inbox_state: 'unsure' }, OWNER);
   assert.match(odd, /action="\/v1\/admin\/inbox\/LEAD%2F1%3Fx%3D1\/move"/);
 });
+
+/* ---------------- real-estate chats to check (D17) ---------------- */
+
+const cand = (over = {}) => ({
+  cand_id: 'CND-mf3k2a-1a2b', jid: '966512340077@s.whatsapp.net', lid: null, phone_e164: '966512340077', name: 'Umm Khalid',
+  first_ts: NOW - 50 * HOUR, last_ts: NOW - HOUR, hits: 3, words: ['شقة', 'إيجار'], last_dir: 'in', state: 'open', updated: NOW - HOUR, ...over,
+});
+
+test('the owner\'s Unsure tab lists the real-estate chats to check: name or masked number, words, times, count, who wrote last, two decisions', () => {
+  const html = unsurePage({
+    me: OWNER,
+    now: NOW,
+    rows: [],
+    candidates: [
+      cand(),
+      cand({ cand_id: 'CND/1?x=1', name: EVIL, phone_e164: '966598760011', words: ['villa', '<b>x</b>'], hits: 1, last_dir: 'out', first_ts: NOW - 30_000, last_ts: NOW - 30_000 }),
+      cand({ cand_id: 'CND-3', name: null, phone_e164: '966555550022', words: [], last_dir: null }),
+    ],
+  });
+  assert.match(html, /<h2[^>]*>Real-estate chats to check<\/h2>/);
+  assert.match(html, /<bdi>Umm Khalid<\/bdi>/);
+  assert.match(html, /<bdi>&lt;img src=x onerror=alert\(1\)&gt;<\/bdi>/);
+  assert.ok(!html.includes('<img'), 'a name is text, never markup');
+  assert.ok(!html.includes('<b>x</b>'), 'so is a word');
+  assert.match(html, /شقة · إيجار/);
+  assert.match(html, /…0077/);
+  assert.match(html, /<span class="nm"><span class="tel">…0022<\/span><\/span>/, 'no name: the masked number stands in');
+  assert.doesNotMatch(html, /966512340077|966598760011|966555550022/, 'never a whole number');
+  assert.match(html, /first 2\sd ago/);
+  assert.match(html, /last 1\sh ago/);
+  assert.match(html, /last just now/);
+  assert.match(html, /3 messages/);
+  assert.match(html, /1 message</);
+  assert.match(html, /they wrote last/);
+  assert.match(html, /you wrote last/);
+  assert.match(html, /action="\/v1\/admin\/inbox\/candidates\/CND-mf3k2a-1a2b\/move"/);
+  assert.match(html, /action="\/v1\/admin\/inbox\/candidates\/CND-mf3k2a-1a2b\/dismiss"/);
+  assert.match(html, /action="\/v1\/admin\/inbox\/candidates\/CND%2F1%3Fx%3D1\/move"/, 'an odd id stays one path segment');
+  assert.equal(html.match(/>Move to Bona inbox<\/button>/g).length, 3);
+  assert.equal(html.match(/>Not a client<\/button>/g).length, 3);
+  assert.match(html, /Unsure · 3<\/a>/, 'the tab counts the chats to check');
+  assert.match(html, /until 30 days after the last such message/, 'how long, as the privacy page says');
+  assert.match(html, /No chats that mention Bona to decide/);
+  assert.doesNotMatch(html, /Nothing to decide/);
+});
+
+test('the Unsure tab counts guesses and chats to check together, and says so when there is neither', () => {
+  const both = unsurePage({ me: OWNER, now: NOW, rows: [{ ...LEAD, inbox_state: 'unsure', match_method: 'keyword', snippet: 'bona?' }], candidates: [cand()] });
+  assert.match(both, /Unsure · 2<\/a>/);
+  assert.match(both, /wrote the word “bona”/);
+  assert.match(both, /Real-estate chats to check/);
+  const none = unsurePage({ me: OWNER, now: NOW, rows: [], candidates: [] });
+  assert.match(none, /Nothing to decide/);
+  assert.doesNotMatch(none, /Real-estate chats to check/);
+});
+
+test('only an owner\'s page ever draws a chat to check, even when one is passed', () => {
+  for (const me of [STAFF, null, { ...OWNER, role: 'staff' }]) {
+    const html = unsurePage({ me, now: NOW, rows: [], candidates: [cand()] });
+    assert.doesNotMatch(html, /Umm Khalid|Real-estate chats to check|\/candidates\/|…0077|شقة/, JSON.stringify(me?.role ?? null));
+    assert.doesNotMatch(html, /Unsure · \d/, 'and it counts none');
+  }
+});
+
+test('a chat to check full of nulls renders without "undefined", "NaN", "[object" or a 1970 date', () => {
+  const blank = Object.fromEntries(Object.keys(cand()).map((k) => [k, null]));
+  blank.cand_id = 'n';
+  const html = unsurePage({ me: OWNER, now: NOW, rows: [], candidates: [blank, { cand_id: 'w', words: 'villa,flat' }] });
+  assert.doesNotMatch(html, /undefined|NaN|\[object|1970-01-01/);
+  assert.match(html, /villa · flat/, 'words stored as text still read as words');
+  assert.match(html, /action="\/v1\/admin\/inbox\/candidates\/n\/dismiss"/);
+});
+
+test('a chat to check has its own banners: dismissed, gone, and no number to move in', () => {
+  assert.equal(knownError('candidate_gone'), 'candidate_gone');
+  assert.equal(knownError('candidate_no_number'), 'candidate_no_number');
+  assert.match(unsurePage({ me: OWNER, rows: [], error: 'candidate_no_number', now: NOW }), /<div class="err">That chat has no phone number/);
+  assert.ok(unsurePage({ me: OWNER, rows: [], ok: 'dismissed', now: NOW }).includes(`<div class="ok">${INBOX_OK.dismissed}</div>`));
+  assert.match(unsurePage({ me: OWNER, rows: [], error: 'candidate_gone', now: NOW }), /<div class="err">That chat is no longer on the list/);
+});

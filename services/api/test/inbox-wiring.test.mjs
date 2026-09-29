@@ -288,7 +288,7 @@ test('the daily upkeep: old transcripts and code rows go, stale sends become unc
     at(NOW - 30_000).insertOutbox({ send_id: 'SND-fresh', lead_id: 'LEAD-recent', jid: client, text: 'hello again', user_id: 'USR-1', sender_kind: 'staff' });
 
     const counts = await app.inboxMaintenance();
-    assert.deepEqual(counts, { excludedOut: 0, purgedChats: 1, purgedMessages: 1, codeRows: 1, interrupted: 1, caughtUp: 2, caughtUpStored: 3, caughtUpFailed: 0 });
+    assert.deepEqual(counts, { excludedOut: 0, purgedChats: 1, purgedMessages: 1, codeRows: 1, interrupted: 1, candidatesExpired: 0, dismissalsExpired: 0, caughtUp: 2, caughtUpStored: 3, caughtUpFailed: 0 });
 
     assert.equal(app.inboxStore.hasMessages('LEAD-old'), false, 'five years after the last message the transcript goes');
     assert.ok(db.getLead('LEAD-old'), 'the lead row stays: it is the attribution record');
@@ -354,7 +354,7 @@ test('the upkeep takes a colleague\'s or a never-list number\'s chat out of the 
     assert.equal(app.inboxStore.unreadTotal({ userId: 'USR-anyone' }), 1, 'the control: before the upkeep it counts');
 
     const counts = await app.inboxMaintenance();
-    assert.deepEqual(counts, { excludedOut: 3, purgedChats: 0, purgedMessages: 0, codeRows: 0, interrupted: 0, caughtUp: 1, caughtUpStored: 0, caughtUpFailed: 0 });
+    assert.deepEqual(counts, { excludedOut: 3, purgedChats: 0, purgedMessages: 0, codeRows: 0, interrupted: 0, candidatesExpired: 0, dismissalsExpired: 0, caughtUp: 1, caughtUpStored: 0, caughtUpFailed: 0 });
     for (const id of ['LEAD-staff', 'LEAD-never', 'LEAD-never-guess']) assert.equal(db.getLead(id).inbox_state, 'out', id);
     assert.equal(app.inboxStore.hasMessages('LEAD-staff'), false, 'her words are gone, not merely hidden');
     assert.equal(app.inboxStore.unreadTotal({ userId: 'USR-anyone' }), 0, 'and no badge counts them');
@@ -426,7 +426,7 @@ test('a catch-up read that fails leaves the thread a gap where its history belon
     });
 
     const first = await app.inboxMaintenance();
-    assert.deepEqual(first, { excludedOut: 0, purgedChats: 0, purgedMessages: 0, codeRows: 0, interrupted: 0, caughtUp: 0, caughtUpStored: 0, caughtUpFailed: 4 });
+    assert.deepEqual(first, { excludedOut: 0, purgedChats: 0, purgedMessages: 0, codeRows: 0, interrupted: 0, candidatesExpired: 0, dismissalsExpired: 0, caughtUp: 0, caughtUpStored: 0, caughtUpFailed: 4 });
     assert.deepEqual(h.logs.find((e) => e.evt === 'inbox.catchup'), { evt: 'inbox.catchup', chats: 0, stored: 0, failed: 4 },
       'a run where every read failed does not read like a run with nothing to do');
     // Keyed like the poller's join gap, at the start of the window the read was asked for.
@@ -520,7 +520,7 @@ test('a step that fails is one log line naming the step and the kind of failure,
     // message can carry a jid; its name and code are logged only in shapes that cannot.
     fail = Object.assign(new TypeError('no chat for 966500000077@s.whatsapp.net'), { code: 'ERR_SQLITE_ERROR' });
     const counts = await app.inboxMaintenance();
-    assert.deepEqual(counts, { excludedOut: 0, purgedChats: 0, purgedMessages: 0, codeRows: 0, interrupted: 0, caughtUp: 0, caughtUpStored: 0, caughtUpFailed: 0 });
+    assert.deepEqual(counts, { excludedOut: 0, purgedChats: 0, purgedMessages: 0, codeRows: 0, interrupted: 0, candidatesExpired: 0, dismissalsExpired: 0, caughtUp: 0, caughtUpStored: 0, caughtUpFailed: 0 });
     assert.deepEqual(h.logs.find((e) => e.evt === 'inbox.maintenance'), { evt: 'inbox.maintenance', ...counts }, 'the run still reports');
     fail = Object.assign(new Error('boom'), { name: 'Chat966500000077', code: '966500000077' });
     await app.inboxMaintenance();
@@ -588,7 +588,7 @@ test('upkeep never rejects, and a logger that throws costs no step and fails no 
       send_id: 'SND-stale', lead_id: 'LEAD-empty', jid: '966500000077@s.whatsapp.net', text: 'hello', user_id: 'USR-1', sender_kind: 'staff',
     });
     assert.deepEqual(await app.inboxMaintenance(),
-      { excludedOut: 1, purgedChats: 0, purgedMessages: 0, codeRows: 0, interrupted: 1, caughtUp: 1, caughtUpStored: 0, caughtUpFailed: 0 },
+      { excludedOut: 1, purgedChats: 0, purgedMessages: 0, codeRows: 0, interrupted: 1, candidatesExpired: 0, dismissalsExpired: 0, caughtUp: 1, caughtUpStored: 0, caughtUpFailed: 0 },
       'the sweep\'s line threw, and every step after it ran; the closing lines threw, and the run is still a finished one');
 
     backfill.history = async () => { throw new Error('read failed'); };
@@ -614,6 +614,46 @@ test('without Evolution the upkeep still runs its local steps, and skips the cat
     assert.equal(counts.caughtUpStored, 0);
     assert.equal(h.logs.some((e) => e.evt === 'inbox.catchup'), false, 'no catch-up line when there is nothing to read from');
     assert.deepEqual(h.logs.find((e) => e.evt === 'inbox.maintenance'), { evt: 'inbox.maintenance', ...counts });
+  } finally {
+    await h.close();
+  }
+});
+
+test('the daily upkeep prunes the real-estate chats to check: open ones after 30 days, dismissed ones after a year', async () => {
+  const h = build();
+  try {
+    const { app, db } = h;
+    // Rows written at other moments: the same store over the same file, another clock.
+    const at = (ts) => createInboxStore(db, { now: () => ts });
+    const note = (phone, ts) => app.inboxStore.noteCandidate({ phone, ts, words: ['villa'], dir: 'in' }).cand_id;
+    const stale = note('966500000071', NOW - 31 * DAY);
+    const fresh = note('966500000072', NOW - 29 * DAY);
+    const oldNo = note('966500000073', NOW - 400 * DAY);
+    const newNo = note('966500000074', NOW - 400 * DAY);
+    at(NOW - 366 * DAY).dismissCandidate(oldNo);
+    at(NOW - 10 * DAY).dismissCandidate(newNo);
+
+    const counts = await app.inboxMaintenance();
+    assert.equal(counts.candidatesExpired, 1);
+    assert.equal(counts.dismissalsExpired, 1);
+    assert.equal(app.inboxStore.getCandidate(stale), null);
+    assert.ok(app.inboxStore.getCandidate(fresh));
+    assert.equal(app.inboxStore.getCandidate(oldNo), null);
+    assert.equal(app.inboxStore.getCandidate(newNo).state, 'dismissed', 'still not listed again');
+    assert.deepEqual(h.logs.find((e) => e.evt === 'inbox.maintenance'), { evt: 'inbox.maintenance', ...counts });
+    assert.ok(!JSON.stringify(h.logs).includes('96650000007'), 'counts only');
+
+    // A step of its own, like every other: a prune that fails reads null and the run goes on.
+    const prune = app.inboxStore.pruneCandidates;
+    app.inboxStore.pruneCandidates = () => { throw new RangeError('966500000072'); };
+    const partial = await app.inboxMaintenance();
+    app.inboxStore.pruneCandidates = prune;
+    assert.equal(partial.candidatesExpired, null);
+    assert.equal(partial.dismissalsExpired, null);
+    assert.equal(partial.codeRows, 0, 'the other steps still ran');
+    assert.deepEqual(h.logs.filter((e) => e.evt === 'inbox.maintenance_failed'),
+      [{ level: 'error', evt: 'inbox.maintenance_failed', step: 'candidates', name: 'RangeError', code: null }]);
+    assert.ok(!JSON.stringify(h.logs).includes('96650000007'), 'no number in the failure either');
   } finally {
     await h.close();
   }

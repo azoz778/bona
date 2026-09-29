@@ -48,7 +48,7 @@ import { sendText, waConfig } from './lib/wa.mjs';
 import { createTeam, TeamError, isExcludedLead } from './lib/team.mjs';
 import { createAudit } from './lib/audit.mjs';
 import { createSender, INTERRUPTED_MS as INTERRUPTED_SEND_MS } from './lib/wa-send.mjs';
-import { createInboxStore, RETENTION_MS } from './lib/inbox/store.mjs';
+import { createInboxStore, RETENTION_MS, CANDIDATE_KEEP_MS, DISMISSED_KEEP_MS } from './lib/inbox/store.mjs';
 import { createIngest } from './lib/inbox/ingest.mjs';
 import { createBackfill, JOIN_HISTORY_MS } from './lib/inbox/backfill.mjs';
 import { loggableName, loggableCode } from './lib/inbox/loggable.mjs';
@@ -302,7 +302,9 @@ export function createApp(options = {}) {
    * joined); transcripts of chats silent for five years go (the lead rows stay — they are
    * the attribution record); login-code outbox rows, and the send stubs a purged chat
    * leaves, go once they are two days old (they only ever counted the day's sends); a
-   * send left pending by a process that died becomes uncertain; then every `in` chat with
+   * send left pending by a process that died becomes uncertain; the owner's list of
+   * real-estate chats to check (D17) drops an open one 30 days after its last property
+   * message and a dismissed one a year after he dismissed it; then every `in` chat with
    * nothing stored yet gets the history an automatic join takes — never reaching past the
    * retention horizon, or the purge would be undone the same morning (at most 200 chats a
    * run: see `inChatsWithoutMessages` for the limit). Counts only in the log: never a
@@ -350,12 +352,17 @@ export function createApp(options = {}) {
         return out;
       });
       const retention = step('retention', () => inboxStore.retentionPurge(t - RETENTION_MS));
+      // The owner's list of real-estate chats to check (D17): an open one 30 days after its
+      // last property message, a dismissed one a year after he dismissed it.
+      const candidates = step('candidates', () => inboxStore.pruneCandidates({ openBefore: t - CANDIDATE_KEEP_MS, dismissedBefore: t - DISMISSED_KEEP_MS }));
       const counts = {
         excludedOut,
         purgedChats: retention?.leads ?? null,
         purgedMessages: retention?.messages ?? null,
         codeRows: step('code_rows', () => inboxStore.pruneCodeRows(t - CODE_ROW_TTL_MS)),
         interrupted: step('interrupted', () => inboxStore.markStalePending(t - INTERRUPTED_SEND_MS)),
+        candidatesExpired: candidates?.open ?? null,
+        dismissalsExpired: candidates?.dismissed ?? null,
         caughtUp: 0,
         caughtUpStored: 0,
         caughtUpFailed: 0,

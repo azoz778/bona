@@ -751,6 +751,8 @@ export const MESSAGES = {
   bad_handler: 'A handler has to be an active member of the team, or nobody.',
   reply_rate_limited: 'Too many messages from your number this minute. Wait a minute and send again.',
   not_a_chat: 'That lead has no WhatsApp chat yet — it joins once they write on WhatsApp.',
+  candidate_gone: 'That chat is no longer on the list: it was moved or marked already.',
+  candidate_no_number: 'That chat has no phone number, so it cannot be moved in. If you know the number, use Add chat by phone number.',
   replies_off: 'Replies from the dashboard are not switched on yet.',
 };
 
