@@ -74,3 +74,20 @@ test('the Team page URL-encodes a user id before it reaches a form action, so "/
   assert.match(html, /action="\/v1\/admin\/team\/USR%2F1%3Fx%3D1\/deactivate"/);
   assert.doesNotMatch(html, /action="\/v1\/admin\/team\/USR\/1/);
 });
+
+test('the Team page carries the owner\'s switch for replies to clients, off until he turns it on', () => {
+  const off = teamPage({ me: OWNER, users: [OWNER], sendingEnabled: true });
+  assert.match(off, /<h2 style="margin-top:28px">Replies to clients from the dashboard<\/h2>/);
+  assert.match(off, /Off\. Nobody can send a client a message from the dashboard yet/);
+  assert.match(off, /name="inbox_replies" value="1"/, 'offers to turn replies on');
+  assert.match(off, /Turn replies on/);
+  assert.match(off, /name="sending_enabled" value="0"/, 'the Sending switch is still its own form');
+
+  const on = teamPage({ me: OWNER, users: [OWNER], sendingEnabled: true, repliesEnabled: true });
+  assert.match(on, /On\. Everyone on the team can answer Bona inbox chats/);
+  assert.match(on, /name="inbox_replies" value="0"/);
+  assert.match(on, /Turn replies off/);
+  assert.doesNotMatch(on, /name="inbox_replies" value="1"/);
+
+  assert.match(teamPage({ me: OWNER, users: [OWNER], repliesEnabled: 'yes' }), /name="inbox_replies" value="1"/, 'only a real true counts as on');
+});

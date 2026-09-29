@@ -12,6 +12,90 @@ test('the Ref line is read out of a WhatsApp message in every spelling the site 
   assert.deepEqual(parseRef('Ref BONA-W012 | XYZ234 thanks'), { listingId: 'BONA-W012', code: 'XYZ234' });
 });
 
+test('every site shape, separator and line break reads as before', () => {
+  for (const [text, want] of [
+    ['Ref BONA-W003 · K7Q2XR', { listingId: 'BONA-W003', code: 'K7Q2XR' }],
+    ['Ref BONA · K7Q2XR', { listingId: 'BONA', code: 'K7Q2XR' }],
+    ['Ref K7Q2XR', { listingId: null, code: 'K7Q2XR' }],
+    ['Ref BONA-W003 - K7Q2XR', { listingId: 'BONA-W003', code: 'K7Q2XR' }],
+    ['Ref BONA-W003:K7Q2XR', { listingId: 'BONA-W003', code: 'K7Q2XR' }],
+    ['Ref BONA-W003|K7Q2XR', { listingId: 'BONA-W003', code: 'K7Q2XR' }],
+    ['Ref BONA-W003K7Q2XR', { listingId: 'BONA-W003', code: 'K7Q2XR' }],
+    ['Ref · K7Q2XR', { listingId: null, code: 'K7Q2XR' }],
+    ['Ref\nBONA-W003\n·\nK7Q2XR', { listingId: 'BONA-W003', code: 'K7Q2XR' }],
+    ['Ref\u00A0BONA\u00A0·\u00A0K7Q2XR', { listingId: 'BONA', code: 'K7Q2XR' }],
+    ['Ref\tBONA\t-\tK7Q2XR', { listingId: 'BONA', code: 'K7Q2XR' }],
+    ['Ref BONA-W2345Z', { listingId: 'BONA', code: 'W2345Z' }],
+    // Only the shape is checked (lib/inbox/eligibility.mjs decides what a bare code is worth).
+    ['ref please', { listingId: null, code: 'PLEASE' }],
+    ['Ref bona please', { listingId: 'BONA', code: 'PLEASE' }],
+    ['TK booking Ref ABCDEF', { listingId: null, code: 'ABCDEF' }],
+  ]) {
+    assert.deepEqual(parseRef(text), want, JSON.stringify(text));
+  }
+  for (const text of ['Refund 12345', 'Ref\n\n', 'Ref BONA', 'Ref BONA-W003 ·', 'xRef K7Q2XR']) {
+    assert.equal(parseRef(text), null, JSON.stringify(text));
+  }
+});
+
+test('the rewritten pattern finds the same line, listing and code as the old one', () => {
+  // The pattern before 2026-09-28, kept here only to compare on short strings (it is cubic
+  // on long runs of whitespace, see the next test). Same language, same captures.
+  const OLD_REF_RE = /\bRef\s+(BONA(?:-W?\d{3})?)?\s*[·\-:|]?\s*([A-HJ-NP-Z2-9]{5,6})\b/i;
+  const pieces = ['Ref', 'ref', 'Refund', ' ', '  ', '\n', '\u00A0', '\t', 'BONA', 'bona', '-W003', '-005',
+    '-W', '003', '·', ' · ', '-', ':', '|', 'K7Q2XR', 'k7q2x', 'ABCDEF', 'Z', '2', 'x', 'O', '1', 'please', 'é', '_', '٤'];
+  const shape = (m) => (m ? [m.index, m[0], m[1] ?? null, m[2]] : null);
+  let seed = 20260928;
+  const next = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed; };
+  for (let i = 0; i < 5000; i += 1) {
+    let text = next() % 10 < 7 ? 'Ref' : '';
+    for (let n = 1 + (next() % 8); n > 0; n -= 1) text += pieces[next() % pieces.length];
+    assert.deepEqual(shape(REF_RE.exec(text)), shape(OLD_REF_RE.exec(text)), JSON.stringify(text));
+  }
+});
+
+/**
+ * How long `call` takes, in milliseconds: the fastest of five runs of it. One run's wall
+ * time can be stretched by a garbage-collection pause or by other processes loading the
+ * machine (a full-suite run under CPU load once failed a 100 ms check on a single run, and
+ * the fastest of three once took 1,087 ms against a 500 ms limit while another heavy
+ * process loaded the machine), so a time check takes the minimum of five runs of the same
+ * call and allows 2,000 ms (`TIME_LIMIT_MS`). It stops at the first run under the limit:
+ * the minimum of all five would be under it too, so the verdict is the same in a fifth of
+ * the time. That still catches what the check is for: the old pattern took 2.3 s on 2,000
+ * spaces and grows with the cube of the run, so on these 20,000-character inputs it takes
+ * minutes, on every run.
+ */
+const TIME_LIMIT_MS = 2_000;
+function fastestOfFive(call) {
+  let fastest = Infinity;
+  for (let run = 0; run < 5 && fastest >= TIME_LIMIT_MS; run += 1) {
+    const started = performance.now();
+    call();
+    fastest = Math.min(fastest, performance.now() - started);
+  }
+  return fastest;
+}
+
+test('a long run of spaces after Ref is read in linear time', () => {
+  // The old pattern had three whitespace runs that could share the same spaces
+  // (`\s+ (BONA)? \s* [·-:|]? \s*`), so a failed match tried every split of them: 2,000
+  // spaces took seconds, and any stranger's WhatsApp message (up to 65,536 characters)
+  // could block the event loop, since the poller reads every inbound text with parseRef.
+  for (const space of [' ', '\n', '\u00A0']) {
+    for (const text of [
+      `Ref${space.repeat(20_000)}x`,
+      `Ref BONA${space.repeat(20_000)}x`,
+      `Ref BONA${space.repeat(10_000)}-${space.repeat(10_000)}x`,
+      `Ref${space.repeat(10_000)}·${space.repeat(10_000)}x`,
+    ]) {
+      assert.equal(parseRef(text), null);
+      const ms = fastestOfFive(() => parseRef(text));
+      assert.ok(ms < TIME_LIMIT_MS, `${JSON.stringify(space)} × ${text.length}: ${ms.toFixed(1)} ms`);
+    }
+  }
+});
+
 test('things that are not a Ref line are left alone', () => {
   assert.equal(parseRef('no ref'), null);
   assert.equal(parseRef('Refund 12345'), null);

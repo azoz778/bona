@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { openDb, newId, STAGES, FANOUT_DESTS, SCHEMA_VERSION } from '../lib/db.mjs';
+import { openDb, newId, STAGES, FANOUT_DESTS, SCHEMA_VERSION, migrate } from '../lib/db.mjs';
 
 function tmp() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-db-'));
@@ -33,7 +33,7 @@ test('openDb creates an owner-only file inside an owner-only directory and migra
   const b = openDb(file);
   assert.equal(b.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION, 'a second open is a no-op');
   const tables = b.db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map((r) => r.name);
-  for (const name of ['sessions', 'events', 'leads', 'touchpoints', 'lead_stage_history', 'wa_cursor', 'wa_seen', 'ad_spend', 'fanout', 'auth_codes', 'auth_sessions', 'users', 'auth_challenges', 'audit_log', 'never_list', 'settings']) {
+  for (const name of ['sessions', 'events', 'leads', 'touchpoints', 'lead_stage_history', 'wa_cursor', 'wa_seen', 'ad_spend', 'fanout', 'auth_codes', 'auth_sessions', 'users', 'auth_challenges', 'audit_log', 'never_list', 'settings', 'wa_messages', 'wa_outbox', 'inbox_reads', 'wa_gaps', 'inbox_candidates']) {
     assert.ok(tables.includes(name), name);
   }
   assert.equal(b.ping(), true);
@@ -41,40 +41,301 @@ test('openDb creates an owner-only file inside an owner-only directory and migra
   cleanup();
 });
 
-test('a v2-era file db upgrades to v3, an existing session survives with a null user_id, and reopening is a no-op', () => {
-  // `MIGRATIONS` and `migrate()` are internal to lib/db.mjs, and there's no exported hook
-  // to stop the real migration chain partway through — reasonably so, since nothing else
-  // needs one. Reimplementing the v1 SQL here to build a "real" v2 file would duplicate
-  // (and could silently drift from) that internal SQL without testing anything the v1
-  // migration doesn't already cover elsewhere in this file.
-  //
-  // What v3 actually risks is narrower: every v3 statement is `CREATE ... IF NOT EXISTS`
-  // except one bare `ALTER TABLE auth_sessions ADD COLUMN user_id`, which is exactly the
-  // statement fix #1 above is about (two concurrent openers both reading user_version=2
-  // and both trying to add the column). So the minimal state that genuinely exercises the
-  // v2->v3 upgrade path is a from-scratch file with just the pre-v3 shape of
-  // `auth_sessions` (the same columns the real v1 migration creates it with — no `user_id`)
-  // holding a live row, and `user_version` left at 2. Opening it for real with `openDb`
-  // then runs the actual, unmodified `migrate()`.
+test('a v2-era file db upgrades to the current schema, an existing session survives with a null user_id, and reopening is a no-op', () => {
+  // `migrate(db, { upTo })` runs the real migration chain only as far as asked, so the
+  // file below is a genuine v2 database — every table v1 and v2 made, from the same SQL
+  // start-up runs — not a hand-built imitation that could drift from it. (v4 alters
+  // `leads` and reads `touchpoints`, so a file holding only `auth_sessions` would no
+  // longer open at all.) `openDb` then applies the rest of the chain exactly as start-up
+  // on the VPS does, including v3's bare `ALTER TABLE auth_sessions ADD COLUMN user_id`.
   const { file, cleanup } = tmp();
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const seed = new DatabaseSync(file);
-  seed.exec('CREATE TABLE auth_sessions (token_hash TEXT PRIMARY KEY, created INTEGER, expires INTEGER, ua TEXT)');
+  migrate(seed, { upTo: 2 });
+  assert.equal(seed.prepare('PRAGMA user_version').get().user_version, 2);
   seed.prepare('INSERT INTO auth_sessions (token_hash, created, expires, ua) VALUES (?,?,?,?)').run('deadbeef', 1000, 99_999_999_999, 'UA');
-  seed.exec('PRAGMA user_version = 2');
   seed.close();
 
   const a = openDb(file);
-  assert.equal(a.db.prepare('PRAGMA user_version').get().user_version, 3, 'v3 is applied on top of the v2 file');
+  assert.equal(a.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION, 'v3 onwards is applied on top of the v2 file');
   const row = a.db.prepare('SELECT * FROM auth_sessions WHERE token_hash = ?').get('deadbeef');
   assert.ok(row, 'the pre-existing session row survives the migration');
   assert.equal(row.user_id, null, 'a session opened before user accounts existed has no user');
   a.close();
 
   const b = openDb(file);
-  assert.equal(b.db.prepare('PRAGMA user_version').get().user_version, 3, 'reopening an up-to-date file is a no-op');
+  assert.equal(b.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION, 'reopening an up-to-date file is a no-op');
   b.close();
   cleanup();
+});
+
+test('schema v4 gives leads their inbox columns and adds the transcript, outbox, read-mark, gap and candidate tables', () => {
+  const s = openDb(':memory:');
+  assert.equal(SCHEMA_VERSION, 4);
+  assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 4);
+  const info = (table) => s.db.prepare(`PRAGMA table_info(${table})`).all();
+  const names = (table) => info(table).map((c) => c.name);
+  const leadCols = info('leads');
+  assert.deepEqual(leadCols.slice(-7).map((c) => c.name), ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from', 'chat_rev']);
+  const needsHuman = leadCols.find((c) => c.name === 'needs_human');
+  assert.equal(needsHuman.notnull, 1);
+  assert.equal(needsHuman.dflt_value, '0');
+  // The stale-view guard's counter (lib/inbox/store.mjs `revision`): on the lead row, which
+  // is never deleted, so it never goes down.
+  const chatRev = leadCols.find((c) => c.name === 'chat_rev');
+  assert.equal(chatRev.type, 'INTEGER');
+  assert.equal(chatRev.notnull, 1);
+  assert.equal(chatRev.dflt_value, '0');
+  assert.deepEqual(names('wa_messages'), ['key_id', 'lead_id', 'jid', 'direction', 'sender_kind', 'sender_user_id', 'text', 'media_type', 'ts', 'status']);
+  assert.deepEqual(names('wa_outbox'), ['send_id', 'lead_id', 'jid', 'text', 'user_id', 'sender_kind', 'status', 'key_id', 'created', 'updated', 'error']);
+  assert.deepEqual(names('inbox_reads'), ['user_id', 'lead_id', 'last_read_ts']);
+  assert.deepEqual(names('wa_gaps'), ['key_id', 'lead_id', 'jid', 'ts', 'reason']);
+  assert.deepEqual(names('inbox_candidates'), ['cand_id', 'jid', 'lid', 'phone_e164', 'name', 'first_ts', 'last_ts', 'hits', 'words', 'last_dir', 'state', 'updated']);
+  assert.ok(!names('inbox_candidates').some((c) => /text|snippet|body/.test(c)), 'a candidate never holds what was written');
+  const indexes = new Set(s.db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map((r) => r.name));
+  for (const name of ['leads_inbox', 'wa_messages_lead', 'wa_outbox_key', 'wa_outbox_lead', 'wa_outbox_created', 'wa_gaps_lead', 'inbox_candidates_state']) assert.ok(indexes.has(name), name);
+  s.close();
+});
+
+test('the v4 CHECKs refuse an inbox state, direction, sender, outbox status or missing key the inbox never writes, a sender on the wrong side, and a login code\'s text', () => {
+  const s = openDb(':memory:');
+  s.insertLead({ lead_id: 'L1', created: 1, updated: 1 });
+  assert.equal(s.getLead('L1').inbox_state, null, 'undecided until a rule or the owner decides');
+  assert.equal(s.getLead('L1').needs_human, 0, 'nobody has asked for a human yet');
+  for (const state of ['in', 'unsure', 'out']) assert.equal(s.updateLead('L1', { inbox_state: state }), true, state);
+  assert.throws(() => s.updateLead('L1', { inbox_state: 'maybe' }), /CHECK/);
+  assert.throws(() => s.updateLead('L1', { needs_human: 2 }), /CHECK/);
+  assert.throws(() => s.updateLead('L1', { needs_human: null }), /NOT NULL/);
+
+  const msg = s.db.prepare('INSERT INTO wa_messages (key_id, lead_id, direction, sender_kind, ts) VALUES (?,?,?,?,?)');
+  msg.run('K-client', 'L1', 'in', 'client', 10);
+  for (const kind of ['staff', 'dana', 'owner_number']) msg.run(`K-${kind}`, 'L1', 'out', kind, 11);
+  assert.throws(() => msg.run('K-2', 'L1', 'sideways', 'client', 12), /CHECK/);
+  assert.throws(() => msg.run('K-3', 'L1', 'out', 'owner', 12), /CHECK/);
+  assert.throws(() => msg.run('K-4', 'L1', 'in', 'client', null), /NOT NULL/, 'a message always has a time');
+  assert.throws(() => msg.run('K-client', 'L1', 'in', 'client', 13), /UNIQUE/, 'one row per WhatsApp message id');
+  // A TEXT PRIMARY KEY on a rowid table takes NULL — several at once — unless NOT NULL says otherwise.
+  assert.throws(() => msg.run(null, 'L1', 'in', 'client', 14), /NOT NULL/, 'a message always has its WhatsApp id');
+  // Only the client writes in; only the owner's side (a team member, Dana, the owner's phone) writes out.
+  for (const [dir, kind] of [['in', 'staff'], ['in', 'dana'], ['in', 'owner_number'], ['out', 'client']]) {
+    assert.throws(() => msg.run(`K-${dir}-${kind}`, 'L1', dir, kind, 15), /CHECK/, `${dir} from ${kind}`);
+  }
+  assert.throws(() => s.db.prepare("UPDATE wa_messages SET sender_kind = 'staff' WHERE key_id = 'K-client'").run(), /CHECK/, 'a stored message cannot change sides');
+
+  const out = s.db.prepare('INSERT INTO wa_outbox (send_id, jid, sender_kind, status, created, updated) VALUES (?,?,?,?,?,?)');
+  for (const kind of ['staff', 'dana', 'code', 'note']) out.run(`S-${kind}`, '966500000001@s.whatsapp.net', kind, 'pending', 1, 1);
+  for (const status of ['accepted', 'failed', 'uncertain']) out.run(`S-${status}`, '966500000001@s.whatsapp.net', 'staff', status, 1, 1);
+  assert.throws(() => out.run('S-x', '966500000001@s.whatsapp.net', 'client', 'pending', 1, 1), /CHECK/);
+  assert.throws(() => out.run('S-y', '966500000001@s.whatsapp.net', 'staff', 'sent', 1, 1), /CHECK/);
+  assert.throws(() => out.run('S-z', null, 'staff', 'pending', 1, 1), /NOT NULL/, 'a send always names its recipient');
+  assert.throws(() => out.run(null, '966500000001@s.whatsapp.net', 'staff', 'pending', 1, 1), /NOT NULL/, 'a send always has its id');
+  // A login code is only ever hashed (auth_challenges.code_hash): its outbox row can never
+  // hold the text, whether it is written with it or given it later.
+  const outText = s.db.prepare('INSERT INTO wa_outbox (send_id, jid, text, sender_kind, status, created, updated) VALUES (?,?,?,?,?,?,?)');
+  outText.run('S-code-blank', '966500000001@s.whatsapp.net', null, 'code', 'pending', 1, 1);
+  for (const kind of ['staff', 'dana', 'note']) outText.run(`S-${kind}-text`, '966500000001@s.whatsapp.net', 'hello', kind, 'pending', 1, 1);
+  assert.throws(() => outText.run('S-code-text', '966500000001@s.whatsapp.net', '123456', 'code', 'pending', 1, 1), /CHECK/);
+  assert.throws(() => s.db.prepare("UPDATE wa_outbox SET text = '123456' WHERE send_id = 'S-code-blank'").run(), /CHECK/);
+  assert.throws(() => s.db.prepare("UPDATE wa_outbox SET sender_kind = 'code' WHERE send_id = 'S-staff-text'").run(), /CHECK/);
+
+  const gap = s.db.prepare('INSERT INTO wa_gaps (key_id, lead_id, ts, reason) VALUES (?,?,?,?)');
+  gap.run('G-1', 'L1', 1, 'failed');
+  assert.throws(() => gap.run(null, 'L1', 2, 'failed'), /NOT NULL/, 'a gap always names the message it stands for');
+
+  const read = s.db.prepare('INSERT INTO inbox_reads (user_id, lead_id, last_read_ts) VALUES (?,?,?)');
+  read.run('USR-1', 'L1', 5);
+  read.run('USR-2', 'L1', 6);
+  assert.throws(() => read.run('USR-1', 'L1', 7), /UNIQUE/, 'one read mark per person per chat');
+
+  const cand = s.db.prepare('INSERT INTO inbox_candidates (cand_id, jid, lid, phone_e164, first_ts, last_ts, last_dir, state, updated) VALUES (?,?,?,?,?,?,?,?,?)');
+  cand.run('CND-1', '966500000001@s.whatsapp.net', null, '966500000001', 1, 1, 'in', 'open', 1);
+  cand.run('CND-2', null, '111@lid', null, 1, 1, 'out', 'dismissed', 1);
+  cand.run('CND-3', null, null, '966500000003', 1, 1, null, 'open', 1);
+  cand.run('CND-4', null, null, null, 1, 1, null, 'open', 1);
+  cand.run('CND-5', null, null, null, 1, 1, null, 'open', 1);
+  assert.equal(s.db.prepare("SELECT hits FROM inbox_candidates WHERE cand_id = 'CND-1'").get().hits, 1, 'a new row is one message');
+  assert.throws(() => cand.run('CND-6', null, null, '966500000001', 1, 1, 'in', 'open', 1), /UNIQUE/, 'one row per number');
+  assert.throws(() => cand.run('CND-7', '966500000001@s.whatsapp.net', null, null, 1, 1, 'in', 'open', 1), /UNIQUE/, 'one row per jid');
+  assert.throws(() => cand.run('CND-8', null, '111@lid', null, 1, 1, 'in', 'open', 1), /UNIQUE/, 'one row per lid');
+  assert.throws(() => cand.run('CND-9', null, null, null, 1, 1, 'sideways', 'open', 1), /CHECK/);
+  assert.throws(() => cand.run('CND-10', null, null, null, 1, 1, 'in', 'maybe', 1), /CHECK/);
+  assert.throws(() => cand.run(null, null, null, null, 1, 1, 'in', 'open', 1), /NOT NULL/, 'a candidate always has its id');
+  assert.throws(() => cand.run('CND-11', null, null, null, null, 1, 'in', 'open', 1), /NOT NULL/);
+  assert.throws(() => cand.run('CND-12', null, null, null, 1, 1, 'in', 'open', null), /NOT NULL/);
+  s.close();
+});
+
+test('a v3 file db moves to v4: each existing lead is placed by what is certain about it, nothing else changes, and reopening is a no-op', () => {
+  const { file, cleanup } = tmp();
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const seed = new DatabaseSync(file);
+  migrate(seed, { upTo: 3 });
+  assert.equal(seed.prepare('PRAGMA user_version').get().user_version, 3);
+  assert.ok(!seed.prepare('PRAGMA table_info(leads)').all().some((c) => c.name === 'inbox_state'), 'a genuine v3 file: no inbox columns yet');
+
+  // One lead per P2-13 rule. Each gets the lead_created touchpoint lib/leads.mjs writes,
+  // with `snippet` as its first message; `meta` replaces that JSON (a legacy import's),
+  // `rawMeta` replaces the stored text outright (a broken row, or NULL), `later` adds a
+  // second, non-creation touchpoint whose snippet must not count, `noTouchpoint` leaves
+  // the lead without its lead_created touchpoint. Only a snippet that is a string counts:
+  // json_extract hands back an object or array as its JSON text, which a GLOB would match.
+  const cases = [
+    { id: 'L-ref', channel: 'whatsapp', method: 'ref', snippet: 'Hello\nRef K7Q2XR', want: 'in' },
+    // Ad context is certain only with real ad evidence on the lead_created touchpoint (D15):
+    // a click id, a conversion source, a ctwa_ad entry point or an ad source type. The three
+    // organic entry points every live ad_meta lead had on 2026-09-29 are not.
+    { id: 'L-ad', channel: 'whatsapp', method: 'ad_meta', snippet: 'Hi', want: 'unsure' },
+    ...['click_to_chat_link', 'global_search_new_chat', 'phone_number_hyperlink'].map((source) => (
+      { id: `L-ad-${source}`, channel: 'whatsapp', method: 'ad_meta', snippet: 'Hi', adMeta: { entry_point_conversion_source: source, entry_point_conversion_app: 'whatsapp' }, want: 'unsure' })),
+    { id: 'L-ad-ctwa', channel: 'whatsapp', method: 'ad_meta', snippet: 'Hi', adMeta: { source_id: '120210987654321', source_type: 'ad', source_app: 'instagram', ctwa_clid: 'ARZ1xyz', conversion_source: 'FB_Ads' }, want: 'in' },
+    { id: 'L-ad-clid', channel: 'whatsapp', method: 'ad_meta', adMeta: { ctwa_clid: 'ARZ1xyz' }, want: 'in' },
+    { id: 'L-ad-conv', channel: 'whatsapp', method: 'ad_meta', adMeta: { conversion_source: 'FB_Ads' }, want: 'in' },
+    { id: 'L-ad-entry', channel: 'whatsapp', method: 'ad_meta', adMeta: { entry_point_conversion_source: 'ctwa_ad', entry_point_conversion_app: 'facebook' }, want: 'in' },
+    { id: 'L-ad-type', channel: 'whatsapp', method: 'ad_meta', adMeta: { source_type: 'AD' }, want: 'in' },
+    { id: 'L-ad-types', channel: 'whatsapp', method: 'ad_meta', adMeta: { source_type: ' Ads\t' }, want: 'in' },
+    { id: 'L-ad-post', channel: 'whatsapp', method: 'ad_meta', adMeta: { source_type: 'post', source_app: 'instagram' }, want: 'unsure' },
+    // The source type is the token "ad", not any word with the two letters in it (hasAdEvidence).
+    ...['broadcast', 'thread', 'upload', 'ad_hoc', '\u00a0ad'].map((sourceType, i) => (
+      { id: `L-ad-word-${i}`, channel: 'whatsapp', method: 'ad_meta', adMeta: { source_type: sourceType }, want: 'unsure' })),
+    { id: 'L-ad-empty', channel: 'whatsapp', method: 'ad_meta', adMeta: { ctwa_clid: ' \t\n ', conversion_source: '' }, want: 'unsure' },
+    { id: 'L-ad-num', channel: 'whatsapp', method: 'ad_meta', adMeta: { ctwa_clid: 123 }, want: 'unsure' },
+    { id: 'L-ad-string', channel: 'whatsapp', method: 'ad_meta', meta: { ad_meta: 'ctwa_clid' }, want: 'unsure' },
+    { id: 'L-ad-bad-json', channel: 'whatsapp', method: 'ad_meta', rawMeta: '{"ad_meta": {"ctwa_clid": "ARZ1xyz"}', want: 'unsure' },
+    { id: 'L-ad-id', channel: 'whatsapp', method: 'ad_meta', snippet: 'BONA-W003?', adMeta: { entry_point_conversion_source: 'click_to_chat_link' }, want: 'in' },
+    // Evidence on a later touchpoint is not how the lead was made.
+    { id: 'L-ad-later', channel: 'whatsapp', method: 'ad_meta', snippet: 'Hi', laterMeta: { ad_meta: { ctwa_clid: 'ARZ1xyz' } }, want: 'unsure' },
+    // A phone from the web form or Dana was never verified: it does not decide the chat
+    // under that number (D9). Only a listing id in the first message would.
+    { id: 'L-form', channel: 'form', method: 'form', want: 'unsure' },
+    { id: 'L-chat', channel: 'concierge_chat', method: 'concierge', want: 'unsure' },
+    { id: 'L-voice', channel: 'concierge_voice', method: 'concierge', want: 'unsure' },
+    { id: 'L-form-id', channel: 'form', method: 'form', snippet: 'About BONA-W003', want: 'in' },
+    { id: 'L-old-form', channel: 'form', method: 'form', legacy: 'lead-2025-017', meta: { legacy_id: 'lead-2025-017', conversation_id: null, page: null }, want: 'unsure' },
+    { id: 'L-old-chat', channel: 'concierge_chat', method: 'concierge', legacy: 'lead-2025-018', meta: { legacy_id: 'lead-2025-018', conversation_id: null, page: null }, want: 'unsure' },
+    { id: 'L-kw-id', channel: 'whatsapp', method: 'keyword', snippet: 'Is BONA-W003 still available?', want: 'in' },
+    { id: 'L-kw-id-ar', channel: 'whatsapp', method: 'keyword', snippet: 'السلام عليكم، أبغى تفاصيل bona-012', want: 'in' },
+    { id: 'L-kw-word', channel: 'whatsapp', method: 'keyword', snippet: 'I saw Bona on Instagram', later: 'and BONA-W009?', want: 'unsure' },
+    { id: 'L-tw', channel: 'whatsapp', method: 'time_window', snippet: 'Hello', want: 'unsure' },
+    { id: 'L-tw-id', channel: 'whatsapp', method: 'time_window', snippet: 'Hello, BONA-W021 please', want: 'in' },
+    { id: 'L-bad-json', channel: 'whatsapp', method: 'keyword', rawMeta: '{"snippet": "BONA-W003"', want: 'unsure' },
+    { id: 'L-null-meta', channel: 'whatsapp', method: 'keyword', rawMeta: null, want: 'unsure' },
+    { id: 'L-obj-snippet', channel: 'whatsapp', method: 'keyword', meta: { snippet: { text: 'BONA-W003' } }, want: 'unsure' },
+    { id: 'L-arr-snippet', channel: 'whatsapp', method: 'time_window', meta: { snippet: ['BONA-012'] }, want: 'unsure' },
+    { id: 'L-no-tp', channel: 'whatsapp', method: 'keyword', noTouchpoint: true, want: 'unsure' },
+    { id: 'L-manual', channel: 'manual', method: 'phone', snippet: 'Called about the villas', want: 'unsure' },
+    { id: 'L-ref-legacy', channel: 'whatsapp', method: 'ref', legacy: 'lead-2025-019', snippet: 'Ref K7Q2XR', want: 'in' },
+  ];
+  const T0 = 1_757_140_000_000;
+  const createdOf = (i) => T0 + i * 1000;
+  const insLead = seed.prepare('INSERT INTO leads (lead_id, created, updated, channel, match_method, legacy_id, stage, first_reply_ts) VALUES (?,?,?,?,?,?,?,?)');
+  const insTp = seed.prepare('INSERT INTO touchpoints (id, lead_id, ts, channel, event_type, meta) VALUES (?,?,?,?,?,?)');
+  cases.forEach((c, i) => {
+    insLead.run(c.id, createdOf(i), createdOf(i) + 1, c.channel, c.method, c.legacy ?? null, 'new', i % 2 ? createdOf(i) + 60_000 : null);
+    const meta = 'rawMeta' in c ? c.rawMeta
+      : JSON.stringify(c.meta ?? { match_method: c.method, ref: null, session_id: null, event_id: null, ad_meta: c.adMeta ?? null, snippet: c.snippet ?? null });
+    if (!c.noTouchpoint) insTp.run(`tp-${c.id}`, c.id, createdOf(i), c.channel, 'lead_created', meta);
+    if (c.later) insTp.run(`tp-${c.id}-2`, c.id, createdOf(i) + 5000, c.channel, 'inbound_message', JSON.stringify({ snippet: c.later }));
+    if (c.laterMeta) insTp.run(`tp-${c.id}-3`, c.id, createdOf(i) + 6000, c.channel, 'inbound_message', JSON.stringify(c.laterMeta));
+  });
+  const snapshot = (db) => db.prepare('SELECT * FROM leads ORDER BY lead_id').all().map((r) => ({ ...r }));
+  const countOf = (db, table) => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
+  const before = snapshot(seed);
+  const touchpointsBefore = countOf(seed, 'touchpoints');
+  seed.close();
+
+  const a = openDb(file);
+  assert.equal(a.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
+  const added = ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from', 'chat_rev'];
+  const after = snapshot(a.db);
+  assert.equal(after.length, before.length, 'no lead is added or lost');
+  assert.equal(countOf(a.db, 'touchpoints'), touchpointsBefore);
+  assert.deepEqual(after.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !added.includes(k)))), before, 'every v3 column is untouched');
+  cases.forEach((c, i) => {
+    const row = a.getLead(c.id);
+    assert.equal(row.inbox_state, c.want, c.id);
+    assert.equal(row.inbox_since, c.want === 'in' ? createdOf(i) : null, `${c.id}: in since the lead was created, and only if in`);
+    // The durable history floor: what an automatic join keeps, the 24 h before it joined.
+    assert.equal(row.history_from, c.want === 'in' ? createdOf(i) - 86_400_000 : null, `${c.id}: its history floor`);
+    assert.equal(row.needs_human, 0, c.id);
+    assert.equal(row.handler_user_id, null, c.id);
+    assert.equal(row.last_msg_ts, null, c.id);
+    assert.equal(row.chat_rev, 0, `${c.id}: its chat revision starts at 0`);
+  });
+  for (const table of ['wa_messages', 'wa_outbox', 'inbox_reads', 'wa_gaps', 'inbox_candidates']) assert.equal(countOf(a.db, table), 0, table);
+
+  // The owner moves one guess in and rules one certain lead out. Reopening must not run
+  // the v4 placement again and undo either.
+  a.updateLead('L-kw-word', { inbox_state: 'in', inbox_since: T0 + 99_000 });
+  a.updateLead('L-ref', { inbox_state: 'out', inbox_since: null });
+  a.close();
+  const b = openDb(file);
+  assert.equal(b.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION, 'reopening an up-to-date file is a no-op');
+  assert.equal(b.getLead('L-kw-word').inbox_state, 'in');
+  assert.equal(b.getLead('L-kw-word').inbox_since, T0 + 99_000);
+  assert.equal(b.getLead('L-ref').inbox_state, 'out');
+  assert.equal(b.getLead('L-ref').inbox_since, null);
+  b.close();
+  cleanup();
+});
+
+test('a v4 step that fails part-way leaves a clean v3 file, and a retry upgrades it', () => {
+  // v4 is several statements (ALTERs, CREATEs, then two UPDATEs over existing leads). If
+  // the last of them fails, the ALTERs and CREATEs before it must go too — a half-migrated
+  // file at user_version 3 would crash the retry on "duplicate column". The trigger makes
+  // the placement UPDATE fail after every ALTER and CREATE has already run.
+  const { file, cleanup } = tmp();
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const seed = new DatabaseSync(file);
+  migrate(seed, { upTo: 3 });
+  const insLead = seed.prepare('INSERT INTO leads (lead_id, created, updated, channel, match_method) VALUES (?,?,?,?,?)');
+  const insTp = seed.prepare('INSERT INTO touchpoints (id, lead_id, ts, channel, event_type, meta) VALUES (?,?,?,?,?,?)');
+  insLead.run('L-ref', 1000, 1001, 'whatsapp', 'ref');
+  insTp.run('tp-ref', 'L-ref', 1000, 'whatsapp', 'lead_created', JSON.stringify({ snippet: 'Hello\nRef K7Q2XR' }));
+  insLead.run('L-kw', 2000, 2001, 'whatsapp', 'keyword');
+  insTp.run('tp-kw', 'L-kw', 2000, 'whatsapp', 'lead_created', JSON.stringify({ snippet: 'I saw Bona on Instagram' }));
+  seed.exec("CREATE TRIGGER t BEFORE UPDATE ON leads BEGIN SELECT RAISE(ABORT,'x'); END");
+  seed.close();
+
+  assert.throws(() => openDb(file), { message: 'x' }, 'the v4 placement UPDATE hits the trigger');
+  // SQLite deletes the WAL file when the last connection to the file closes, so a WAL
+  // file left behind means the failed open kept its handle.
+  assert.equal(fs.existsSync(`${file}-wal`), false, 'a failed open closes the connection it opened');
+
+  const check = new DatabaseSync(file);
+  assert.equal(check.prepare('PRAGMA user_version').get().user_version, 3, 'still v3');
+  assert.ok(!check.prepare('PRAGMA table_info(leads)').all().some((c) => c.name === 'inbox_state'), 'the ALTERs were rolled back');
+  assert.ok(!check.prepare('PRAGMA table_info(leads)').all().some((c) => c.name === 'chat_rev'), 'chat_rev too');
+  assert.equal(check.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'wa_messages'").get().n, 0, 'the CREATEs were rolled back');
+  assert.equal(check.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'inbox_candidates'").get().n, 0, 'the candidates table too');
+  assert.equal(check.prepare('SELECT COUNT(*) AS n FROM leads').get().n, 2, 'no lead lost');
+  check.exec('DROP TRIGGER t');
+  check.close();
+
+  const a = openDb(file);
+  assert.equal(a.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION, 'the retry upgrades the file');
+  assert.equal(a.getLead('L-ref').inbox_state, 'in');
+  assert.equal(a.getLead('L-ref').inbox_since, 1000);
+  assert.equal(a.getLead('L-ref').history_from, 1000 - 86_400_000);
+  assert.equal(a.getLead('L-kw').inbox_state, 'unsure');
+  assert.equal(a.getLead('L-kw').inbox_since, null);
+  assert.equal(a.getLead('L-kw').history_from, null);
+  assert.deepEqual([a.getLead('L-ref').chat_rev, a.getLead('L-kw').chat_rev], [0, 0], 'and every lead has its chat revision, at 0');
+  a.close();
+  cleanup();
+});
+
+test('insertLead and updateLead carry the inbox columns', () => {
+  const s = openDb(':memory:');
+  assert.equal(s.insertLead({ lead_id: 'L0', created: 1, updated: 1 }).chat_rev, 0, 'a new lead starts at chat revision 0');
+  const l = s.insertLead({
+    lead_id: 'L1', created: 1, updated: 1, wa_jid: '966500000001@s.whatsapp.net',
+    inbox_state: 'in', inbox_since: 1, handler_user_id: 'USR-1', last_msg_ts: 7, needs_human: true, history_from: -5,
+  });
+  assert.deepEqual([l.inbox_state, l.inbox_since, l.handler_user_id, l.last_msg_ts, l.needs_human, l.history_from], ['in', 1, 'USR-1', 7, 1, -5]);
+  assert.equal(s.updateLead('L1', { inbox_state: 'out', inbox_since: null, handler_user_id: null, last_msg_ts: null, needs_human: false, history_from: null }), true);
+  const after = s.getLead('L1');
+  assert.deepEqual([after.inbox_state, after.inbox_since, after.handler_user_id, after.last_msg_ts, after.needs_human, after.history_from], ['out', null, null, null, 0, null]);
+  s.close();
 });
 
 test('newId is prefix, base-36 time and four hex characters', () => {

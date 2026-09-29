@@ -10,7 +10,7 @@ import { openDb } from '../lib/db.mjs';
 import { createTeam } from '../lib/team.mjs';
 import { createAudit } from '../lib/audit.mjs';
 import {
-  createAuth, COOKIE_NAME, TRY_COOKIE_NAME, parseCookies, hashEquals, generateCode, codeMessage,
+  createAuth, COOKIE_NAME, TRY_COOKIE_NAME, parseCookies, hashEquals, generateCode, codeMessage, isCodeMessage,
   PHONE_CODES, GLOBAL_PER_MIN, CODE_TTL_MS, MAX_CODE_ATTEMPTS, DAY_MS,
   canonicalPhone, ipBucket, sendErrorLabel, USER_CODES_PER_HOUR, USER_CODES_PER_DAY,
 } from '../lib/dashboard/auth.mjs';
@@ -190,6 +190,11 @@ test('createAuth refuses to be built without a team store or a code sender', () 
 test('helpers: code shape, message, constant-time compare, cookies', () => {
   assert.equal(generateCode(() => 42), '000042');
   assert.equal(codeMessage('123456'), 'Bona dashboard code: 123456 (valid 10 min)');
+  assert.equal(isCodeMessage(codeMessage(generateCode())), true, 'every code message is recognised');
+  assert.equal(isCodeMessage(`  ${codeMessage('000042')}\n`), true, 'spaces around it aside');
+  for (const other of ['Your viewing code is 123456', `${codeMessage('123456')} thanks`, codeMessage('12345'), null, 123456]) {
+    assert.equal(isCodeMessage(other), false, String(other));
+  }
   assert.equal(hashEquals(sha256('a'), sha256('a')), true);
   assert.equal(hashEquals(sha256('a'), sha256('b')), false);
   assert.equal(hashEquals('ab', 'abcd'), false);

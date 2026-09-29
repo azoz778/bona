@@ -6,15 +6,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { openDb, SCHEMA_VERSION } from '../lib/db.mjs';
-import { createTeam, TeamError, isTeamLid, learnTeamLid } from '../lib/team.mjs';
+import { createTeam, TeamError, isTeamLid, learnTeamLid, isExcludedLead } from '../lib/team.mjs';
 import { createAudit, AUDIT_ACTIONS } from '../lib/audit.mjs';
+import { jidsOf } from '../lib/wa-poller.mjs';
 
 const NOW = 1_790_500_000_000;
 
 test('schema v3 adds the team tables and a user on every session', () => {
   const s = openDb(':memory:');
-  assert.equal(SCHEMA_VERSION, 3);
-  assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 3);
+  // The newest schema's number is pinned in db.test.mjs; this test only needs v3's tables.
+  assert.ok(SCHEMA_VERSION >= 3);
+  assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
   const tables = new Set(s.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name));
   for (const name of ['users', 'auth_challenges', 'audit_log', 'never_list', 'settings']) assert.ok(tables.has(name), name);
   const cols = s.db.prepare('PRAGMA table_info(auth_sessions)').all().map((c) => c.name);
@@ -106,6 +108,23 @@ test('settings default to on, can be switched, and refuse unknown keys', () => {
   assert.equal(team.sendingEnabled(), false);
   assert.equal(s.db.prepare("SELECT updated_by FROM settings WHERE key = 'sending_enabled'").get().updated_by, 'USR-1');
   assert.equal(codeOf(() => team.setSetting('dana_enabled', '1')), 'bad_setting', 'Phase 4 adds that key');
+  s.close();
+});
+
+test('replies to clients from the dashboard ship off, go on only with an exact "1", and fail closed', () => {
+  const { s, team } = teamHarness();
+  assert.equal(team.getSetting('inbox_replies'), '0');
+  assert.equal(team.repliesEnabled(), false, 'off until the owner turns them on (design D14)');
+  assert.equal(team.sendingEnabled(), true, 'a separate switch: login codes do not wait for it');
+  team.setSetting('inbox_replies', '1', { by: 'USR-1' });
+  assert.equal(team.repliesEnabled(), true);
+  assert.equal(s.db.prepare("SELECT updated_by FROM settings WHERE key = 'inbox_replies'").get().updated_by, 'USR-1');
+  team.setSetting('inbox_replies', '0');
+  assert.equal(team.repliesEnabled(), false);
+  assert.equal(codeOf(() => team.setSetting('inbox_replies', 'yes')), 'bad_setting_value');
+  assert.equal(codeOf(() => team.setSetting('inbox_replies', '')), 'bad_setting_value');
+  s.db.prepare("INSERT OR REPLACE INTO settings (key, value, updated, updated_by) VALUES ('inbox_replies','true',?,NULL)").run(NOW);
+  assert.equal(team.repliesEnabled(), false, "fail closed on anything but exactly '1'");
   s.close();
 });
 
@@ -330,5 +349,62 @@ test('the audit log records who did what, newest first, and refuses an unknown a
   assert.equal(first.ts, NOW);
   assert.throws(() => audit.record({ userId: 'USR-1', action: 'made_up' }), /unknown audit action/);
   assert.ok(AUDIT_ACTIONS.includes('stage'));
+  s.close();
+});
+
+test('the audit log accepts the inbox actions, with a target and no text', () => {
+  const s = openDb(':memory:');
+  const audit = createAudit(s, { now: () => NOW });
+  for (const action of ['reply_sent', 'inbox_move', 'inbox_out', 'inbox_add', 'handler']) {
+    assert.ok(AUDIT_ACTIONS.includes(action), action);
+    audit.record({ userId: 'USR-1', action, target: 'LEAD-1', meta: action === 'handler' ? { to: 'USR-2' } : null });
+  }
+  const rows = audit.recent(10);
+  assert.deepEqual(rows.map((r) => r.action).sort(), ['handler', 'inbox_add', 'inbox_move', 'inbox_out', 'reply_sent']);
+  assert.deepEqual(rows.find((r) => r.action === 'handler').meta, { to: 'USR-2' });
+  assert.ok(rows.every((r) => r.target === 'LEAD-1'));
+  s.close();
+});
+
+test('isExcludedLead: a lead is a colleague\'s or a never-list number\'s by its phone, its phone jid or a learned team lid', () => {
+  const { s, team } = teamHarness();
+  team.addUser({ name: 'Sara', phone: '0500000001', role: 'staff' });
+  const gone = team.addUser({ name: 'Old Hand', phone: '0500000002', role: 'staff' });
+  team.deactivateUser(gone.user_id);
+  team.addNever({ phone: '0500000003' });
+  learnTeamLid(s, '966500000001', '272516946294519@lid');
+  const lead = (over) => ({ lead_id: 'LEAD-1', phone_e164: null, wa_jid: null, wa_lid: null, ...over });
+  assert.equal(isExcludedLead(team, s, lead({ phone_e164: '966500000001' })), true, 'a team number');
+  assert.equal(isExcludedLead(team, s, lead({ phone_e164: '966500000002' })), true, 'a deactivated one too');
+  assert.equal(isExcludedLead(team, s, lead({ phone_e164: '966500000003' })), true, 'a never-list number');
+  assert.equal(isExcludedLead(team, s, lead({ wa_jid: '966500000003:12@s.whatsapp.net' })), true, 'by its phone jid, device suffix and all');
+  assert.equal(isExcludedLead(team, s, lead({ wa_lid: '272516946294519@lid' })), true, 'by a lid learned as a colleague\'s');
+  assert.equal(isExcludedLead(team, s, lead({ phone_e164: '966500000077', wa_jid: '966500000077@s.whatsapp.net', wa_lid: '111@lid' })), false, 'a client');
+  // A lid's digits are an opaque id, never a phone number, even when they spell a colleague's.
+  assert.equal(isExcludedLead(team, s, lead({ wa_jid: '966500000001@lid' })), false);
+  assert.equal(isExcludedLead(team, s, null), false);
+  s.close();
+});
+
+test('isExcludedLead reads a jid the way ingest does, and only the identifiers it is handed', () => {
+  const { s, team } = teamHarness();
+  team.addNever({ phone: '0500000003' });
+  const lead = (over) => ({ lead_id: 'LEAD-1', phone_e164: null, wa_jid: null, wa_lid: null, ...over });
+  // Ingest (lib/inbox/ingest.mjs) takes a jid's number with lib/wa-poller.mjs `jidsOf`: any
+  // jid that is not a lid, a group or a broadcast. The one exclusion rule must agree with it.
+  const cases = [
+    ['966500000003@s.whatsapp.net', true], ['966500000003:7@s.whatsapp.net', true], ['966500000003@c.us', true],
+    ['966500000003@lid', false], ['966500000003@g.us', false], ['966500000003@broadcast', false], ['status@broadcast', false],
+    ['966500000077@s.whatsapp.net', false], ['', false],
+  ];
+  for (const [jid, excluded] of cases) {
+    assert.equal(isExcludedLead(team, s, lead({ wa_jid: jid })), excluded, jid);
+    assert.equal(team.isExcludedPhone(jidsOf({ jid }).phone), excluded, `jidsOf agrees on ${jid}`);
+  }
+  // Callers hand in per-identifier views of a lead (ingest checks each number a record
+  // names as if the row held it): the stored row is never read back by its id.
+  s.insertLead({ lead_id: 'LEAD-1', created: NOW, updated: NOW, channel: 'whatsapp', stage: 'new', phone_e164: '966500000003' });
+  assert.equal(isExcludedLead(team, s, lead({ wa_jid: '966500000077@s.whatsapp.net' })), false, 'the row\'s own phone is not looked up');
+  assert.equal(isExcludedLead(team, s, s.getLead('LEAD-1')), true);
   s.close();
 });
