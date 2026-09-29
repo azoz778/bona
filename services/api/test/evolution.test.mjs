@@ -1137,8 +1137,13 @@ test('fileNameTk and fileNameBona say whether the whole name names TK or Bona, e
     ['بروشور تي كي.pdf', true],
     ['بروشور تى كى.pdf', true],
     ['بروشور تي كى.pdf', true],
-    // An invisible character cannot hide it: the name is cleaned before it is read.
+    ['بروشور تي - كي.pdf', true],
+    // An invisible character cannot hide it: the name is cleaned before it is shown, and the
+    // two joiners the shown name keeps (U+200C, U+200D) are read through as well.
     ['T\u200BK Brochure.pdf', true],
+    ['T\u200CK Brochure.pdf', true],
+    ['T\u200DK Brochure.pdf', true],
+    ['بروشور تي\u200Cكي.pdf', true],
     [`Villa Brochure ${'x'.repeat(120)}.pdf`, false],
     ['TKO brochure.pdf', false],
     ['Stock2TK9.pdf', false],
@@ -1152,12 +1157,20 @@ test('fileNameTk and fileNameBona say whether the whole name names TK or Bona, e
     ['Bona Traffic HD brochure.pdf', true],
     ['BONA-W003 brochure.pdf', true],
     ['بونا - فيلا الشاطئ.pdf', true],
+    ['B\u200Cona Villa brochure.pdf', true],
     ['Bona Fide Purchaser Declaration.pdf', false],
     ['Bonanza brochure.pdf', false],
     ['Knightsbridge_Phase 2_Brochure_EN.pdf', false],
   ]) {
     assert.equal(rec(fileName).fileNameBona, named, JSON.stringify(fileName));
   }
+  assert.ok(rec('T\u200CK Brochure.pdf').fileName.includes('\u200C'), 'the shown name keeps its joiner');
+  // A first grapheme longer than the whole cap leaves no name to show, but the whole name
+  // still named TK or Bona, and the record says so.
+  const zalgoTk = rec(`a${'\u0301'.repeat(120)} TK.pdf`);
+  assert.deepEqual([zalgoTk.fileName, zalgoTk.fileNameTruncated, zalgoTk.fileNameTk, zalgoTk.fileNameBona], [null, false, true, false]);
+  const zalgoBona = rec(`a${'\u0301'.repeat(120)} Bona.pdf`);
+  assert.deepEqual([zalgoBona.fileName, zalgoBona.fileNameTk, zalgoBona.fileNameBona], [null, false, true]);
   for (const r of [rec(''), normaliseRecord(textRecord())]) {
     assert.deepEqual([r.fileNameTk, r.fileNameBona], [false, false], 'no usable name, or no document');
   }
