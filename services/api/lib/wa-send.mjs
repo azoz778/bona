@@ -293,6 +293,11 @@ export function createSender({
     if (typeof sendId !== 'string' || !SEND_ID_RE.test(sendId)) return { ok: false, error: 'bad_send_id' };
     const existing = inbox.getOutbox(sendId);
     if (existing) return answerFor(existing, { leadId, userId });
+    // Replies to clients ship switched off; the owner turns them on from the Team page
+    // (design D14: the first real client message from the dashboard is sent with him).
+    // Asked before anything is written, so a refusal leaves no row and the same send id
+    // still works once they are on. A send id decided above keeps its own answer.
+    if (!team.repliesEnabled()) return { ok: false, error: 'replies_off' };
 
     // A browser posts a textarea's line breaks as CRLF; WhatsApp keeps LF. The outbox row
     // must hold exactly what WhatsApp will hand back, or the poller could not match it.

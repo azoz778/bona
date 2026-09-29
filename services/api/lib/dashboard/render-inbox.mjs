@@ -209,12 +209,14 @@ function outboxStatus(row) {
  * dashboard's own replies that WhatsApp has not confirmed yet, merged by time.
  *
  * The reply box is replaced by one plain sentence when a reply cannot go: a chat with
- * no phone number (an `@lid` is not something we send to), or the owner's Sending switch
- * off. The form carries `send_id` (a double tap sends once) and `seen_ts`, the newest
- * message this page showed, so a reply written against an old view is held back.
+ * no phone number (an `@lid` is not something we send to), the owner's Sending switch
+ * off, or replies from the dashboard not switched on yet (they ship off, design D14,
+ * and only a real `true` turns them on). The form carries `send_id` (a double tap sends
+ * once) and `seen_ts`, the newest message this page showed, so a reply written against
+ * an old view is held back.
  */
 export function threadPage({
-  me, lead, messages, gaps = [], outbox = [], users = [], sendId, seenTs, sendingEnabled, canReply,
+  me, lead, messages, gaps = [], outbox = [], users = [], sendId, seenTs, sendingEnabled, canReply, repliesEnabled = false,
   draft = '', ok = null, error = null, now = Date.now(),
 }) {
   const owner = me?.role === 'owner';
@@ -274,6 +276,12 @@ export function threadPage({
     // Only an owner can open the Team page, so only an owner gets it as a link: a
     // staff page never contains that link at all (Phase 1 rule).
     reply = `<p class="muted">Sending is off (${owner ? '<a href="/dashboard/team">Team page</a>' : 'Team page'}).</p>`;
+  } else if (repliesEnabled !== true) {
+    // Replies ship switched off until the owner turns them on (design D14). Same link
+    // rule as above; the sender refuses a posted reply (`replies_off`) on its own too.
+    reply = owner
+      ? '<p class="muted">Replies from the dashboard are not switched on yet (<a href="/dashboard/team">Team page</a>).</p>'
+      : '<p class="muted">Replies from the dashboard are not switched on yet — the owner turns them on.</p>';
   } else {
     reply = `<form class="reply" method="post" action="${esc(writeHref(lead.lead_id, 'reply'))}">
   <input type="hidden" name="_dash" value="1">

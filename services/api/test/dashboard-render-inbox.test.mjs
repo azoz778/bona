@@ -36,7 +36,7 @@ const msg = (over = {}) => ({
 
 const thread = (over = {}) => threadPage({
   me: OWNER, lead: LEAD, messages: [], gaps: [], outbox: [], users: USERS,
-  sendId: 'SND-abcdefghijklmnop', seenTs: NOW - HOUR, sendingEnabled: true, canReply: true, now: NOW, ...over,
+  sendId: 'SND-abcdefghijklmnop', seenTs: NOW - HOUR, sendingEnabled: true, canReply: true, repliesEnabled: true, now: NOW, ...over,
 });
 
 /* ---------------- the rail ---------------- */
@@ -263,6 +263,35 @@ test('no reply box for a chat with no phone number, or while sending is off', ()
   const both = thread({ lead: { ...LEAD, phone_e164: null, wa_jid: null }, canReply: false, sendingEnabled: false });
   assert.match(both, /reply from your phone/, 'turning sending on would not help a chat with no number, so that is what it says');
   assert.doesNotMatch(both, /Sending is off/);
+});
+
+test('no reply box until the owner turns dashboard replies on, and only an owner is pointed to the Team page', () => {
+  const offOwner = thread({ repliesEnabled: false });
+  assert.match(offOwner, /Replies from the dashboard are not switched on yet \(<a href="\/dashboard\/team">Team page<\/a>\)\./);
+  assert.doesNotMatch(offOwner, /\/reply"/);
+  assert.doesNotMatch(offOwner, /name="text"/);
+  assert.doesNotMatch(offOwner, /name="send_id"/);
+
+  const offStaff = thread({ me: STAFF, repliesEnabled: false });
+  assert.match(offStaff, /Replies from the dashboard are not switched on yet — the owner turns them on\./);
+  assert.doesNotMatch(offStaff, /\/reply"/);
+  assert.doesNotMatch(offStaff, /href="\/dashboard\/team"/, 'a staff page never carries the Team link');
+
+  assert.match(thread({ repliesEnabled: 'yes' }), /not switched on yet/, 'only a real true turns the box on');
+  const leftOut = threadPage({
+    me: OWNER, lead: LEAD, messages: [], users: USERS, sendId: 'SND-abcdefghijklmnop', seenTs: NOW, sendingEnabled: true, canReply: true, now: NOW,
+  });
+  assert.match(leftOut, /not switched on yet/, 'a caller that does not say gets no reply box');
+
+  const bothOff = thread({ repliesEnabled: false, sendingEnabled: false });
+  assert.match(bothOff, /Sending is off/, 'the switch that stops everything is named first');
+  assert.doesNotMatch(bothOff, /not switched on yet/);
+  const lid = thread({ repliesEnabled: false, lead: { ...LEAD, phone_e164: null, wa_jid: null }, canReply: false });
+  assert.match(lid, /reply from your phone/, 'a chat with no number says so, whatever the switches are');
+
+  assert.match(thread({ repliesEnabled: false, error: 'replies_off' }), /<div class="err">Replies from the dashboard are not switched on yet\.<\/div>/);
+  assert.equal(knownError('replies_off'), 'replies_off');
+  assert.doesNotMatch(loginPage({ step: 'request', error: 'replies_off' }), /class="err"/, 'never on the login page');
 });
 
 test('the handler picker offers active people and Nobody, with the current handler chosen', () => {

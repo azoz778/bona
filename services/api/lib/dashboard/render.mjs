@@ -751,6 +751,7 @@ export const MESSAGES = {
   bad_handler: 'A handler has to be an active member of the team, or nobody.',
   reply_rate_limited: 'Too many messages from your number this minute. Wait a minute and send again.',
   not_a_chat: 'That lead has no WhatsApp chat yet — it joins once they write on WhatsApp.',
+  replies_off: 'Replies from the dashboard are not switched on yet.',
 };
 
 /** A code the templates will render, or null. Anything unrecognised is nothing at all. */
