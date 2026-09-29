@@ -954,7 +954,8 @@ thread says to check WhatsApp, the text is not put back (it may have gone), it c
 toward the day cap, and nothing retries it. Only a 4xx or a refused connection / failed
 DNS lookup is `failed` (never reached WhatsApp: the text is kept in the box). When the message turns up in a poll the row is settled — by its `key.id`, or
 else the same lead and the same text within 2 minutes — and the bubble gets its sender; a
-row interrupted by a restart becomes `uncertain` (`interrupted`). The form also carries the
+row interrupted by a restart becomes `uncertain` (`interrupted`): at start-up every `pending`
+row does, however young (the new process has sent nothing yet). The form also carries the
 newest message time the person saw, and the chat is refreshed from Evolution just before
 the check — best effort: at most ~3 s, the newest 50 records per question, skipped within
 5 s of the last refresh, and a failed read leaves only what is already stored. Anything
@@ -995,7 +996,8 @@ Inbox upkeep (`app.inboxMaintenance()`) runs at start-up and then every 24 h: fi
 listed chat whose number is a team or never-list number goes `out` with its transcript
 (logged `inbox.excluded_out`); then the 5-year purge, code rows and stubs older than 2 days,
 and `pending` sends older than 2 minutes marked `uncertain` (a process that died mid-send
-cannot know whether the message went); then every `in` chat with nothing stored yet — at
+cannot know whether the message went; the start-up recovery before it has already marked
+every row that was pending when the process started); then every `in` chat with nothing stored yet — at
 most 200 a run, the longest-joined first — fetches its history from its history floor (the
 24 h an automatic join takes, the 30 days of an owner join), never from before the 5-year
 horizon (logged `inbox.catchup`; a read that fails leaves a

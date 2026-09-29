@@ -126,17 +126,23 @@ test('the ingest createApp builds keeps the one exclusion rule, and knows the in
   }
 });
 
-test('a send the last process left pending is "uncertain" as soon as the app is built', async () => {
+test('every send the last process left pending is "uncertain" as soon as the app is built — one seconds old too', async () => {
   const db = openDb(':memory:');
   createInboxStore(db, { now: () => NOW - 10 * 60_000 }).insertOutbox({
     send_id: 'SND-left-pending', lead_id: 'LEAD-x', jid: '966500000077@s.whatsapp.net', text: 'hello', user_id: 'USR-1', sender_kind: 'staff',
+  });
+  // Written a few seconds before the restart: this process has no send in flight, so it is not on its way.
+  createInboxStore(db, { now: () => NOW - 4_000 }).insertOutbox({
+    send_id: 'SND-just-now', lead_id: 'LEAD-x', jid: '966500000077@s.whatsapp.net', text: 'hello again', user_id: 'USR-1', sender_kind: 'staff',
   });
   const h = build({ db });
   try {
     const row = h.app.inboxStore.getOutbox('SND-left-pending');
     assert.equal(row.status, 'uncertain', 'nobody knows whether it went, so it is never retried');
     assert.equal(row.error, 'interrupted');
-    assert.deepEqual(h.logs.filter((e) => e.evt === 'wa.send.interrupted'), [{ level: 'warn', evt: 'wa.send.interrupted', count: 1 }],
+    const young = h.app.inboxStore.getOutbox('SND-just-now');
+    assert.deepEqual({ status: young.status, error: young.error }, { status: 'uncertain', error: 'interrupted' }, 'however young');
+    assert.deepEqual(h.logs.filter((e) => e.evt === 'wa.send.interrupted'), [{ level: 'warn', evt: 'wa.send.interrupted', count: 2 }],
       'said once, as a count: never the number or the text');
   } finally {
     await h.close();

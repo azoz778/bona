@@ -75,8 +75,9 @@ const SEND_ID_RE = /^[A-Za-z0-9_-]{16,64}$/;
 const DEFINITE_NETWORK_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']);
 const DAY_MS = 86_400_000;
 /**
- * A send still `pending` this long after it was written was cut off by a restart. One rule
- * for the start-up recovery, the reply stale guard and the daily upkeep (index.mjs).
+ * A send still `pending` this long after it was written is no longer on its way. The rule
+ * for the reply stale guard and the daily upkeep (index.mjs); the start-up recovery needs
+ * no cutoff at all (`recoverInterrupted`).
  */
 export const INTERRUPTED_MS = 120_000;
 
@@ -371,8 +372,13 @@ export function createSender({
     return { ok: true, status: 'accepted', sendId, keyId: out.keyId };
   }
 
-  /** On start-up: a send still `pending` after two minutes was cut off mid-flight. */
-  const recoverInterrupted = () => inbox.markStalePending(now() - INTERRUPTED_MS);
+  /**
+   * On start-up: EVERY send still `pending` was cut off mid-flight, however young — a
+   * process that has only just started has no send of its own on its way, and a row a few
+   * seconds old left pending would hold its chat as "on its way" (stale) for two minutes.
+   * Only the daily upkeep keeps the two-minute cutoff: by then this process may be sending.
+   */
+  const recoverInterrupted = () => inbox.markStalePending(Number.MAX_SAFE_INTEGER);
 
   return { sendTo, reply, recoverInterrupted };
 }

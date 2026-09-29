@@ -224,6 +224,7 @@ export function createApp(options = {}) {
   const sender = options.sender ?? createSender({ env: cfg.env ?? {}, team, inbox: inboxStore, db, fetchImpl, now: clock, log });
   // A send that was in flight when the last process died is not known to have failed:
   // it becomes "uncertain" — shown as such, never retried — rather than pending for ever.
+  // Every pending row, however young: nothing has been sent from this process yet.
   const interrupted = sender.recoverInterrupted?.() ?? 0;
   if (interrupted) log({ level: 'warn', evt: 'wa.send.interrupted', count: interrupted });
   const sendCode = options.sendCode ?? ((o) => sender.sendTo({ ...o, kind: 'code' }));
