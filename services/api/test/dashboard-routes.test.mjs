@@ -124,7 +124,11 @@ async function withDash(overrides = {}, fn) {
 }
 
 /** A lead with a session behind it, so the journey and the fan-out have something to work with. */
-function seedLead(db, { id = 'LEAD-20260908-aaaa0001', name = 'Sara Ahmed', now = Date.now() } = {}) {
+/**
+ * `phone` and `inboxState` for a lead a staff member may act on: staff see only the Bona
+ * inbox's leads (`in`, and not a colleague's or a never-list number, such as the owner's own).
+ */
+function seedLead(db, { id = 'LEAD-20260908-aaaa0001', name = 'Sara Ahmed', now = Date.now(), phone = '966593296933', inboxState = null } = {}) {
   db.upsertSession({
     session_id: 'sess-aaa1', anon_id: 'a'.repeat(32), ref: 'K7Q2XR', started: now - 3600_000, last_seen: now, pages: 3, locale: 'en',
     first_touch: { ts: now - 3600_000, utm_source: 'meta', utm_medium: 'paid', utm_campaign: 'villas_sep', utm_id: '1203' },
@@ -132,10 +136,11 @@ function seedLead(db, { id = 'LEAD-20260908-aaaa0001', name = 'Sara Ahmed', now 
     ip: '2.2.2.2', ua: 'iPhone', country: 'SA', consent_analytics: 1, consent_ads: 1,
   });
   db.insertLead({
-    lead_id: id, created: now - 3600_000, updated: now, phone_e164: '966593296933', name,
+    lead_id: id, created: now - 3600_000, updated: now, phone_e164: phone, name,
     channel: 'whatsapp', source: 'meta', medium: 'paid', campaign: 'villas_sep', campaign_id: '1203',
     match_method: 'ref', session_id: 'sess-aaa1', anon_id: 'a'.repeat(32), listing_id: 'BONA-001',
     stage: 'new', stage_ts: now - 3600_000, consent_ads: 1, consent_analytics: 1,
+    inbox_state: inboxState, inbox_since: inboxState === 'in' ? now - 3600_000 : null,
   });
   db.setStage(id, 'new', { actor: 'system', now: now - 3600_000 });
   return id;
@@ -1123,7 +1128,7 @@ test('removing a number that was never on the never list is reported, not silent
 
 test('a stage change and a note carry the person who made them', async () => {
   await withTeamRoutes(async ({ db, audit, staffUser, postForm, login }) => {
-    const id = seedLead(db);
+    const id = seedLead(db, { phone: '966500000055', inboxState: 'in' });
     const staff = await login('0500000001');
     await postForm(`/v1/admin/leads/${id}/stage`, { _dash: '1', stage: 'contacted' }, { cookie: staff });
     assert.equal(db.stageHistory(id).at(-1).actor, 'Sara');
@@ -1284,7 +1289,7 @@ test('deactivating a person logs them out everywhere at once', async () => {
 
 test('a stage change and a note carry the name of the person who made them', async () => {
   await withDash({}, async ({ app, db, postForm, login }) => {
-    const id = seedLead(db);
+    const id = seedLead(db, { phone: '966500000055', inboxState: 'in' });
     const owner = await login();
     await postForm('/v1/admin/team', { _dash: '1', name: 'Sara', phone: '0500000001' }, { cookie: owner.cookie });
     const staff = await login({ phone: '0500000001' });

@@ -433,10 +433,15 @@ export function openDb(file = ':memory:') {
     return prep(sql).run(...cols.map((c) => bind('leads', c, patch[c])), String(leadId)).changes === 1;
   }
 
-  function listLeads({ stage = null, q = null, limit = 100, offset = 0 } = {}) {
+  /**
+   * `inboxState` keeps only leads in that inbox state (the dashboard asks for `'in'` on a
+   * staff member's behalf: staff see only the Bona inbox's leads).
+   */
+  function listLeads({ stage = null, q = null, limit = 100, offset = 0, inboxState = null } = {}) {
     const where = [];
     const vals = [];
     if (stage) { where.push('stage = ?'); vals.push(String(stage)); }
+    if (inboxState) { where.push('inbox_state = ?'); vals.push(String(inboxState)); }
     if (q && String(q).trim()) {
       const like = `%${String(q).trim().toLowerCase()}%`;
       where.push('(lower(name) LIKE ? OR phone_e164 LIKE ? OR lower(notes) LIKE ? OR lower(district) LIKE ? OR lower(interest) LIKE ? OR listing_id LIKE ? OR lead_id LIKE ?)');
@@ -466,14 +471,17 @@ export function openDb(file = ':memory:') {
   const WAITING_WHERE = `WHERE first_reply_ts IS NULL
                            AND (stage IS NULL OR stage NOT IN ('won','lost'))`;
 
-  function waitingLeads({ limit = 50 } = {}) {
+  /** `inboxState` and `offset` as for `listLeads`. */
+  function waitingLeads({ limit = 50, offset = 0, inboxState = null } = {}) {
     // better-sqlite3 refuses a non-integer binding ("datatype mismatch"), so a
     // fractional limit must be truncated rather than passed through.
     const n = Math.trunc(Math.max(1, Math.min(500, Number(limit) || 50)));
-    const sql = `SELECT * FROM leads ${WAITING_WHERE}
+    const skip = Math.trunc(Math.max(0, Number(offset) || 0));
+    const sql = `SELECT * FROM leads ${WAITING_WHERE} ${inboxState ? 'AND inbox_state = ?' : ''}
                  ORDER BY COALESCE(first_inbound_ts, created) ASC, rowid ASC
-                 LIMIT ?`;
-    return prep(sql).all(n).map((r) => unwrap('leads', r));
+                 LIMIT ? OFFSET ?`;
+    const vals = inboxState ? [String(inboxState), n, skip] : [n, skip];
+    return prep(sql).all(...vals).map((r) => unwrap('leads', r));
   }
 
   /**
