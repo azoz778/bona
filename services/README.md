@@ -932,6 +932,10 @@ member starts from the day the account was made); the total is the Inbox count i
 A thread draws its newest 200 messages, or every message from the oldest unread one on
 (replies between unread messages included) and the 20 before them, up to 1,000; it says how
 many older ones it does not show, and marks read only up to the newest message it drew.
+Past the cap (more than 980 unread messages in one chat for one person) the unread ones it
+cannot draw count as read too: the read mark is one timestamp, and a page drawn from the
+oldest unread one forward would leave out the newest messages and make every reply from it
+`stale`.
 
 *Retention.* Five years after a chat's last message (`leads.last_msg_ts`) its transcript —
 messages, reply outbox rows, gaps and read marks — is deleted; the lead row stays for
