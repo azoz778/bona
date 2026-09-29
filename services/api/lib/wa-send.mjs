@@ -320,12 +320,13 @@ export function createSender({
     }
     // The form carries the chat's revision when the writer's page was drawn. Anything
     // written to the thread since — a message in either direction, whatever WhatsApp
-    // stamped it, another send to this chat, whatever became of it, or a purge of the
-    // chat — has moved the revision on: they are answering a conversation that has moved
-    // on. The revision never goes down or comes back, so only the exact number sends; one
-    // above it was never drawn (a forged form). Not the newest message time: a reply is
-    // stored at the second its send started, so an accepted one can carry the very
-    // timestamp another page shows as its newest, and that page would pass.
+    // stamped it, another send to this chat, whatever became of it, a send the page showed
+    // on its way since settled (it may have gone), a message that could not be loaded, or
+    // a purge of the chat — has moved the revision on: they are answering a conversation
+    // that has moved on. The revision never goes down or comes back, so only the exact
+    // number sends; one above it was never drawn (a forged form). Not the newest message
+    // time: a reply is stored at the second its send started, so an accepted one can carry
+    // the very timestamp another page shows as its newest, and that page would pass.
     if (!Number.isSafeInteger(seenRev) || seenRev !== inbox.revision(lead.lead_id)) return { ok: false, error: 'stale' };
     // Nor may it cross another reply to this chat that is still on its way, even one the
     // page showed as such: that one is stored only once WhatsApp answers. A row pending for

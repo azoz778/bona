@@ -172,13 +172,17 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
    * The chat's revision: a whole number kept on its lead row (`leads.chat_rev`) that goes up
    * by one, in the same transaction as the write, whenever something a person must see
    * before answering is written to the chat's thread — a message stored for the first time
-   * (either direction, whatever its WhatsApp timestamp) or a staff or Dana send of any
-   * status (one still on its way, or "not sure it went") — and whenever rows are taken out
-   * of it: `purgeLead` (leaving the inbox, a team or never-list number, the 5-year
-   * retention) and the retention purge's delete of old sends. A message seen again
-   * (`upsertMessage`'s ON CONFLICT) or a send settled (`updateOutbox`, `markStalePending`)
-   * leaves it alone, and so do gaps (one is deleted when its message is stored after all,
-   * and the message then counts), read marks and handlers.
+   * (either direction, whatever its WhatsApp timestamp), a staff or Dana send of any status
+   * (one still on its way, or "not sure it went"), such a send leaving `pending`
+   * (`updateOutbox` to accepted, uncertain or failed, `markStalePending`: a page drawn while
+   * it was on its way does not show what became of it, and "not sure it went" may mean the
+   * client already has an answer) and a new gap ("a message could not be loaded") — and
+   * whenever rows are taken out of it: `purgeLead` (leaving the inbox, a team or never-list
+   * number, the 5-year retention) and the retention purge's delete of old sends. A message
+   * seen again (`upsertMessage`'s ON CONFLICT), a gap seen again, a send moving between
+   * settled statuses or written again with the same one, a gap taken back (`clearGap`,
+   * `clearJoinGaps`, or deleted when its message is stored after all, and the message then
+   * counts), read marks and handlers leave it alone.
    *
    * The lead row is never deleted, so the number never goes down and is never handed out
    * twice: two reads that agree mean nothing it counts happened in between (short of
@@ -244,15 +248,26 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
     });
   }
 
-  /** `key_id`/`error` left out (undefined) are kept as they are; null clears them. */
+  /**
+   * `key_id`/`error` left out (undefined) are kept as they are; null clears them. A staff or
+   * Dana row of a chat leaving `pending` moves that chat's revision on (`revision`), in the
+   * same transaction.
+   */
   function updateOutbox(sendId, { status, key_id = undefined, error = undefined } = {}) {
     if (!OUTBOX_STATUSES.includes(status)) throw new RangeError(`unknown outbox status ${status}`);
     const sets = ['status = ?', 'updated = ?'];
     const vals = [status, now()];
     if (key_id !== undefined) { sets.push('key_id = ?'); vals.push(str(key_id)); }
     if (error !== undefined) { sets.push('error = ?'); vals.push(error === null ? null : String(error).slice(0, MAX_ERROR)); }
-    vals.push(String(sendId ?? ''));
-    return prep(`UPDATE wa_outbox SET ${sets.join(', ')} WHERE send_id = ?`).run(...vals).changes === 1;
+    const id = String(sendId ?? '');
+    vals.push(id);
+    return transaction(() => {
+      const before = prep('SELECT status, lead_id, sender_kind FROM wa_outbox WHERE send_id = ?').get(id);
+      const updated = prep(`UPDATE wa_outbox SET ${sets.join(', ')} WHERE send_id = ?`).run(...vals).changes === 1;
+      if (updated && before.status === 'pending' && status !== 'pending' && before.lead_id !== null
+          && (before.sender_kind === 'staff' || before.sender_kind === 'dana')) bump(before.lead_id);
+      return updated;
+    });
   }
 
   /**
@@ -291,9 +306,22 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
       .get(num(sinceTs), ex, ex).n;
   }
 
-  /** A `pending` row this old belongs to a process that died mid-send: it may have gone. */
-  const markStalePending = (beforeTs) => prep("UPDATE wa_outbox SET status = 'uncertain', error = 'interrupted', updated = ? WHERE status = 'pending' AND created < ?")
-    .run(now(), num(beforeTs)).changes;
+  /**
+   * A `pending` row this old belongs to a process that died mid-send: it may have gone. Every
+   * chat with a staff or Dana row marked here moves its revision on by one (`revision`), in
+   * the same transaction.
+   */
+  function markStalePending(beforeTs) {
+    const cutoff = num(beforeTs);
+    return transaction(() => {
+      prep(`UPDATE leads SET chat_rev = chat_rev + 1
+            WHERE lead_id IN (SELECT lead_id FROM wa_outbox
+                              WHERE status = 'pending' AND created < ? AND sender_kind IN ('staff','dana') AND lead_id IS NOT NULL)`)
+        .run(cutoff);
+      return prep("UPDATE wa_outbox SET status = 'uncertain', error = 'interrupted', updated = ? WHERE status = 'pending' AND created < ?")
+        .run(now(), cutoff).changes;
+    });
+  }
 
   /**
    * Rows that only ever feed the day cap go once they are out of its window: login codes,
@@ -405,11 +433,20 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
 
   /* -------------------- gaps -------------------- */
 
-  /** A message that could not be read, shown in the thread instead of silently missing. */
+  /**
+   * A message that could not be read, shown in the thread instead of silently missing. A new
+   * gap of a chat moves its revision on (`revision`), in the same transaction: "a message
+   * could not be loaded" is a line a replier must see. One already there writes nothing.
+   */
   function addGap({ key_id, lead_id, jid = null, ts, reason } = {}) {
     if (!key_id) throw new RangeError('key_id is required');
-    return prep('INSERT OR IGNORE INTO wa_gaps (key_id, lead_id, jid, ts, reason) VALUES (?,?,?,?,?)')
-      .run(String(key_id), str(lead_id), str(jid), hasNumber(ts) ? toTs(ts) : null, reason === null || reason === undefined ? null : String(reason).slice(0, MAX_ERROR)).changes === 1;
+    const chatId = str(lead_id);
+    return transaction(() => {
+      const { changes } = prep('INSERT OR IGNORE INTO wa_gaps (key_id, lead_id, jid, ts, reason) VALUES (?,?,?,?,?)')
+        .run(String(key_id), chatId, str(jid), hasNumber(ts) ? toTs(ts) : null, reason === null || reason === undefined ? null : String(reason).slice(0, MAX_ERROR));
+      if (changes === 1 && chatId !== null) bump(chatId);
+      return changes === 1;
+    });
   }
 
   const gapsFor = (leadId) => prep('SELECT * FROM wa_gaps WHERE lead_id = ? ORDER BY ts ASC, rowid ASC').all(String(leadId ?? '')).map(plain);
