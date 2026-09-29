@@ -467,16 +467,32 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
    * D11: the transcript of every chat whose last message is older than `beforeTs`. Lead
    * rows stay. A chat with nothing left to delete is not counted.
    *
-   * @returns {{ leads: number, messages: number }}
+   * A staff or Dana send carries text too, and it is not always a message: a reply that
+   * failed, or one never read back, is only its outbox row. So a chat with no stored
+   * message at all (none ever, or it left the inbox) loses its staff and Dana sends older
+   * than `beforeTs` as well, whatever their status. A chat that still has messages keeps
+   * its sends with them until its last message is older than the cutoff. Login-code rows
+   * hold no text; `pruneCodeRows` removes them. `outbox` counts every send row removed.
+   *
+   * @returns {{ leads: number, messages: number, outbox: number }}
    */
   function retentionPurge(beforeTs) {
     return transaction(() => {
+      const cutoff = num(beforeTs);
       const ids = prep(`SELECT lead_id FROM leads
                         WHERE last_msg_ts < ? AND EXISTS (SELECT 1 FROM wa_messages m WHERE m.lead_id = leads.lead_id)`)
-        .all(num(beforeTs)).map((r) => r.lead_id);
+        .all(cutoff).map((r) => r.lead_id);
       let messages = 0;
-      for (const id of ids) messages += purgeLead(id).messages;
-      return { leads: ids.length, messages };
+      let outbox = 0;
+      for (const id of ids) {
+        const purged = purgeLead(id);
+        messages += purged.messages;
+        outbox += purged.outbox;
+      }
+      outbox += prep(`DELETE FROM wa_outbox
+                      WHERE sender_kind IN ('staff','dana') AND created < ?
+                        AND NOT EXISTS (SELECT 1 FROM wa_messages m WHERE m.lead_id = wa_outbox.lead_id)`).run(cutoff).changes;
+      return { leads: ids.length, messages, outbox };
     });
   }
 

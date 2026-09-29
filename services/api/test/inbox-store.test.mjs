@@ -748,7 +748,7 @@ test('retentionPurge deletes the transcripts of chats silent since before the cu
   inbox.upsertMessage(msg({ key_id: 'E-1', lead_id: 'EDGE', ts: cutoff }));
   inbox.upsertMessage(msg({ key_id: 'N-1', lead_id: 'NEW', ts: NOW - 1000 }));
 
-  assert.deepEqual(inbox.retentionPurge(cutoff), { leads: 1, messages: 2 });
+  assert.deepEqual(inbox.retentionPurge(cutoff), { leads: 1, messages: 2, outbox: 1 });
   assert.ok(s.getLead('OLD'), 'the lead row stays: it is attribution data');
   assert.equal(s.getLead('OLD').last_msg_ts, null);
   assert.equal(inbox.hasMessages('OLD'), false);
@@ -756,7 +756,37 @@ test('retentionPurge deletes the transcripts of chats silent since before the cu
   assert.equal(inbox.hasMessages('EDGE'), true, 'exactly at the cutoff is not older than it');
   assert.equal(inbox.hasMessages('NEW'), true);
   assert.equal(s.getLead('EMPTY').last_msg_ts, cutoff - 99, 'nothing to delete: not counted, not touched');
-  assert.deepEqual(inbox.retentionPurge(cutoff), { leads: 0, messages: 0 });
+  assert.deepEqual(inbox.retentionPurge(cutoff), { leads: 0, messages: 0, outbox: 0 });
+  s.close();
+});
+
+test('retentionPurge also deletes the staff and Dana sends older than the cutoff of a chat with no stored message', () => {
+  const { s, inbox, at } = harness();
+  const cutoff = NOW - RETENTION_MS;
+  // A chat whose replies never became messages (failed, or never read back), one that has
+  // left the inbox, and one still talking: only the last keeps its old sends.
+  chat(s, 'NOMSG');
+  lead(s, 'GONE', { wa_jid: '966500000061@s.whatsapp.net', inbox_state: 'out' });
+  chat(s, 'ALIVE', { wa_jid: '966500000062@s.whatsapp.net' });
+  at(cutoff - 5000);
+  inbox.insertOutbox(out({ send_id: 'SND-dana', lead_id: 'NOMSG', sender_kind: 'dana', user_id: null, text: 'Dana here' }));
+  inbox.insertOutbox(out({ send_id: 'SND-gone', lead_id: 'GONE', jid: '966500000061@s.whatsapp.net', status: 'failed' }));
+  inbox.insertOutbox(out({ send_id: 'SND-alive', lead_id: 'ALIVE', jid: '966500000062@s.whatsapp.net', status: 'accepted' }));
+  inbox.insertOutbox(out({ send_id: 'SND-code', lead_id: null, jid: OWNER_JID, sender_kind: 'code', user_id: null, text: null, status: 'accepted' }));
+  at(cutoff - 1);
+  inbox.insertOutbox(out({ send_id: 'SND-staff', lead_id: 'NOMSG', status: 'failed' }));
+  at(cutoff);
+  inbox.insertOutbox(out({ send_id: 'SND-edge', lead_id: 'NOMSG', status: 'failed' }));
+  at(NOW);
+  inbox.upsertMessage(msg({ key_id: 'A-1', lead_id: 'ALIVE', ts: NOW - 1000 }));
+
+  assert.deepEqual(inbox.retentionPurge(cutoff), { leads: 0, messages: 0, outbox: 3 });
+  for (const id of ['SND-dana', 'SND-staff', 'SND-gone']) assert.equal(inbox.getOutbox(id), null, `${id}: its text is five years old`);
+  assert.ok(inbox.getOutbox('SND-edge'), 'exactly at the cutoff is not older than it');
+  assert.ok(inbox.getOutbox('SND-alive'), 'a chat with a recent message keeps its transcript, sends included');
+  assert.ok(inbox.getOutbox('SND-code'), 'a login-code row holds no text: pruneCodeRows is its purge');
+  assert.ok(s.getLead('NOMSG') && s.getLead('GONE'), 'lead rows stay');
+  assert.deepEqual(inbox.retentionPurge(cutoff), { leads: 0, messages: 0, outbox: 0 });
   s.close();
 });
 
