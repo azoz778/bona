@@ -7,9 +7,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE, INBOX_STATES,
-  inboundSignal, ownerOutboundJoins, nextInboxState,
+  LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE, INBOX_STATES,
+  inboundSignal, ownerOutboundJoins, isTkDocument, nextInboxState,
 } from '../lib/inbox/eligibility.mjs';
+// The two kinds of document word and the property words (owner answer, 2026-09-28).
+import { BROCHURE_RE, QUALIFIED_DOC_RE, PROPERTY_NOUN_RE } from '../lib/inbox/eligibility.mjs';
 import { normaliseRecord } from '../lib/evolution.mjs';
 
 /* ---------------- shared patterns ---------------- */
@@ -17,14 +19,22 @@ import { normaliseRecord } from '../lib/evolution.mjs';
 test('the states and patterns are what the store and the poller rely on', () => {
   assert.deepEqual(INBOX_STATES, ['in', 'unsure', 'out']);
   assert.ok(Object.isFrozen(INBOX_STATES), 'nothing that imports the list can change it');
-  for (const re of [LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE]) {
+  for (const re of [LISTING_ID_RE, BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE]) {
     assert.ok(re instanceof RegExp);
     assert.equal(re.global, false, `${re} has no /g, so .test() never carries a position over`);
     assert.equal(re.sticky, false, `${re} has no /y`);
   }
   // The bounds are \p{…} classes, which mean something only with /u: rebuilt from `.source`
   // with 'i' alone, [\p{L}\p{M}] is a set of literal characters and كوبونات matches again.
-  for (const re of [BONA_WORD_RE, SITE_LINK_RE]) assert.equal(re.unicode, true, `${re} needs /u`);
+  for (const re of [BONA_WORD_RE, SITE_LINK_RE, PROPERTY_DOC_RE, TK_RE]) assert.equal(re.unicode, true, `${re} needs /u`);
+  for (const re of [PROPERTY_DOC_RE, TK_RE]) assert.equal(re.ignoreCase, true, `${re} ignores case`);
+  for (const re of [BROCHURE_RE, QUALIFIED_DOC_RE, PROPERTY_NOUN_RE]) {
+    assert.ok(re instanceof RegExp);
+    assert.equal(re.global, false, `${re} has no /g`);
+    assert.equal(re.sticky, false, `${re} has no /y`);
+    assert.equal(re.unicode, true, `${re} needs /u`);
+    assert.equal(re.ignoreCase, true, `${re} ignores case`);
+  }
 });
 
 /* ---------------- a client's message ---------------- */
@@ -116,8 +126,8 @@ test('"bona fide" is Latin, not our name', () => {
     assert.equal(inboundSignal({ text }), null, text);
     assert.equal(BONA_WORD_RE.test(text), false, text);
   }
-  assert.equal(ownerOutboundJoins(doc('Bona_Villa.pdf')), true);
-  assert.equal(ownerOutboundJoins(doc('offer.pdf', 'Bona villa, a bona fide offer')), true, 'the name next to the phrase still counts');
+  assert.equal(inboundSignal({ text: 'Bona villa, a bona fide offer' }), 'unsure', 'the name next to the phrase still counts');
+  assert.equal(ownerOutboundJoins(doc('Bona Fide Purchaser Declaration - Brochure.pdf')), true, 'a brochure joins, whatever Latin is on it');
 });
 
 test('an Arabic word that only contains بونا is not the name', () => {
@@ -207,55 +217,241 @@ test('lookalike links and plain mentions of bona do not join a chat', () => {
   }
 });
 
-test('a document joins when its file name or caption says Bona or a listing id', () => {
+test('a property document the owner sends joins the chat, from any developer (D16)', () => {
   const doc = (fileName, text = null) => ({ text, fileName, media: fileName ? `[document: ${fileName}]` : '[document]' });
   for (const rec of [
-    doc('Bona_Villa.pdf'),
-    doc('Villa-Bona.pdf'),
-    doc('BONA brochure.pdf'),
+    // A brochure joins on its own (owner, 2026-09-28).
+    doc('Knightsbridge_Phase 2_Brochure_EN.pdf'),
+    doc('brochure2.pdf'),
+    doc('Brochures.zip'),
+    doc('بروشور المشروع.pdf'),
+    doc('البروشور.pdf'),
+    doc('بروشورات.pdf'),
+    doc('scan.pdf', 'هذا البروشور'),
+    // The other document words join next to a property word in the same name or caption.
+    doc('Villa floor plan.pdf'),
+    doc('مخطط فيلا.pdf'),
+    doc('Project price list.pdf'),
+    doc('Unit payment plan.pdf'),
+    doc('قائمة أسعار الشقق.pdf'),
+    doc('Tower A fact sheet.pdf'),
+    doc('doc.pdf', 'price list for the villa'),
+    doc('Villa_Floor-Plan_Type-A.pdf'),
+    doc('Apartments floorplan.pdf'),
+    doc('Townhouse pricelist.pdf'),
+    doc('Plots master-plan.pdf'),
+    doc('Properties fact sheets.pdf'),
+    doc('كتيّب المشروع.pdf'),
+    doc('مخططات الفلل.pdf'),
+    doc('قائمة_الاسعار_عقارات.pdf'),
+    doc('جدول الدفعات - الوحدة 12.pdf'),
+    doc('خطة السداد - شقة.pdf'),
+    doc('مخطط أرض.pdf'),
+    doc(null, 'Floor plan of the penthouse'),
+    // Or next to a listing id or a site link, which join any document by themselves.
+    doc('floor plan BONA-W003.pdf'),
+    doc('Price List Sep.pdf', 'BONA-W003'),
+    doc('BONA-W003 brochure.pdf'),
+    doc('Brochure BONA-W014.pdf'),
     doc('BONA-W003.pdf'),
-    doc('brochure bona-005 v2.pdf'),
-    doc('بونا - فيلا الشاطئ.pdf'),
-    doc('بونا_فيلا.pdf'),
-    doc('فيلا-بونا.pdf'),
-    doc('villa.pdf', 'Brochure from Bona'),
-    doc('villa.pdf', 'بروشور بونا'),
-    doc('villa.pdf', 'بروشور (بونا)'),
-    doc('Bona2026.pdf'),
-    doc(null, 'bona'),
+    doc('Villa_BONA-W003_EN.pdf'),
+    doc('Bona Villa BONA-W003 brochure.pdf'),
+    doc('bona-real-estate.com villa.pdf'),
+    doc('Bona brochure.pdf', 'https://bona-real-estate.com/ar/'),
+    doc('scan.pdf', 'BONA-005'),
+    doc('scan.pdf', 'https://bona-real-estate.com/ar/'),
   ]) {
     assert.equal(ownerOutboundJoins(rec), true, `${rec.fileName} / ${rec.text}`);
   }
+});
+
+test('the other document words need a property word, a listing id or a link next to them: TK design work uses them too (owner answer, D16)', () => {
+  // Floor plans, price lists, payment plans, master plans, fact sheets, booklets and plans
+  // (مخطط) are fit-out papers as often as property papers. Alone they do not join; they are
+  // still property-document words (PROPERTY_DOC_RE), which Task 16 lists for the owner.
+  const doc = (fileName, text = null) => ({ text, fileName, media: fileName ? `[document: ${fileName}]` : '[document]' });
   for (const rec of [
-    doc('Bonanza.pdf'),
-    doc('Kabona_offer.pdf'),
-    doc('TK_Villa.pdf', 'here you go'),
-    doc(null),
-    // Arabic words that only contain the four letters: coupons, "our father", "they asked
-    // us", a customer, "try us", "bill us". Each would pull a private or TK chat in.
-    doc('كوبونات الخصم.pdf'),
-    doc('أبونا.pdf'),
-    doc('villa.pdf', 'طلبونا نرسل لكم العقد'),
-    doc('villa.pdf', 'كن زبوناً معنا'),
-    doc('villa.pdf', 'جربونا'),
-    doc('villa.pdf', 'حاسبونا على الدفعة'),
-    doc('Bonaé.pdf'),
+    doc('Floor-Plan_Type-A.pdf'),
+    doc('Price List Sep.pdf'),
+    doc('payment_plan.pdf'),
+    doc('مخطط الدور الأرضي.pdf'),
+    doc('قائمة الأسعار.pdf'),
+    doc('Payment plan - kitchen works.pdf'),
+    doc('مخطط الكهرباء.pdf'),
+    doc('كتيب الصيانة.pdf'),
+    doc('Master plan.pdf'),
+    doc('جدول الدفعات - أعمال الديكور.pdf'),
+    doc('floorplan.pdf'),
+    doc('pricelist.pdf'),
+    doc('Fact sheet 2026.pdf'),
+    doc('كتيب.pdf'),
+    doc('المخططات.pdf'),
+    doc('قائمة_الاسعار.pdf'),
+    doc('جدول الأسعار.pdf'),
+    doc('خطة الدفع.pdf'),
+    doc('خطة السداد.pdf'),
+    doc('جدول السداد.pdf'),
+    doc('doc.pdf', 'price list attached'),
+    doc(null, 'Floor plan'),
+    // A property word counts only as its own word ...
+    doc('Landscape floor plan.pdf'),
+    doc('Unity price list.pdf'),
+    doc('Villager fact sheet.pdf'),
+    doc('مخطط الأرض.pdf'),
+    // ... and only in the same name or caption as the document word.
+    doc('Price List.pdf', 'for the villa'),
+    doc('villa.pdf', 'price list'),
   ]) {
     assert.equal(ownerOutboundJoins(rec), false, `${rec.fileName} / ${rec.text}`);
+    assert.equal(PROPERTY_DOC_RE.test(`${rec.fileName ?? ''} ${rec.text ?? ''}`), true, `${rec.fileName} / ${rec.text}: still a property-document word`);
   }
 });
 
-test('the word bona counts only on a document, never on plain text, a photo or a voice note', () => {
-  assert.equal(ownerOutboundJoins({ text: 'bona', media: null }), false);
-  assert.equal(ownerOutboundJoins({ text: 'bona', media: '[image]' }), false);
-  assert.equal(ownerOutboundJoins({ text: 'Bona villa', media: '[voice note]' }), false);
-  assert.equal(ownerOutboundJoins({ text: 'bona.azoz.uk/villas', media: '[image]' }), true, 'a link in a caption still counts');
-  assert.equal(ownerOutboundJoins({ text: null, fileName: null, media: null }), false);
-  assert.equal(ownerOutboundJoins({ text: null, fileName: 'Bona_Villa.pdf', media: '[document: Bona_Villa.pdf]' }), true, 'a document without a caption');
-  assert.equal(ownerOutboundJoins({}), false);
-  assert.equal(ownerOutboundJoins(), false);
-  assert.equal(ownerOutboundJoins(null), false);
+test('the three document patterns: a brochure, a document word that needs a property word, the property words', () => {
+  for (const s of ['brochure', 'Brochures', 'بروشور', 'البروشور', 'بروشورات', 'x_Brochure_EN']) {
+    assert.equal(BROCHURE_RE.test(s), true, s);
+    assert.equal(QUALIFIED_DOC_RE.test(s), false, s);
+    assert.equal(PROPERTY_DOC_RE.test(s), true, s);
+  }
+  for (const s of ['floor plan', 'Floor-Plans', 'floorplan', 'price_list', 'pricelists', 'payment plan', 'Master-Plan', 'fact sheets',
+    'كتيب', 'كتيّب', 'الكتيب', 'مخطط', 'مخططات', 'المخطط', 'قائمة الأسعار', 'قائمة الاسعار', 'قائمة أسعار', 'جدول الأسعار', 'جدول_الاسعار',
+    'خطة الدفع', 'خطة السداد', 'جدول الدفعات', 'جدول السداد']) {
+    assert.equal(QUALIFIED_DOC_RE.test(s), true, s);
+    assert.equal(BROCHURE_RE.test(s), false, s);
+    assert.equal(PROPERTY_DOC_RE.test(s), true, s);
+  }
+  for (const s of ['brochureX', 'Brochureware', 'وبروشور', 'floor', 'plan', 'Floor Planner', 'Price Listing', 'datasheet', 'كتيبة', 'مخططين']) {
+    assert.equal(PROPERTY_DOC_RE.test(s), false, s);
+  }
+  for (const s of ['villa', 'Villas', 'apartment', 'units', 'Project', 'towers', 'residence', 'Townhouses', 'duplex', 'penthouse',
+    'compound', 'plots', 'land', 'property', 'properties', 'Tower_A', '3villas', 'villa2',
+    'فيلا', 'الفيلا', 'فلل', 'فله', 'فلة', 'شقة', 'شقق', 'الشقق', 'شقه', 'مشروع', 'المشروع', 'مشاريع', 'وحدة', 'الوحدات', 'برج', 'أبراج',
+    'عمارة', 'دوبلكس', 'بنتهاوس', 'تاون هاوس', 'مجمع سكني', 'أرض', 'ارض', 'أراضي', 'عقار', 'العقارات']) {
+    assert.equal(PROPERTY_NOUN_RE.test(s), true, s);
+  }
+  // Longer words that only start with one, and أرض with the article (the ground; الأرضي is the ground floor).
+  for (const s of ['Villager', 'Landscape', 'Unity', 'Projector', 'Propertyless', 'Compounding', 'الأرض', 'الأرضي', 'وحده']) {
+    assert.equal(PROPERTY_NOUN_RE.test(s), false, s);
+  }
 });
+
+test('the word Bona, or any other file, no longer joins a chat by itself, and a document that names Bona needs a listing id or a link (D16)', () => {
+  const doc = (fileName, text = null) => ({ text, fileName, media: fileName ? `[document: ${fileName}]` : '[document]' });
+  // Bona AB makes wood-floor finishes, with brochures, price lists and fact sheets of its own:
+  // TK Estate & Design sends them to TK clients.
+  for (const rec of [
+    doc('Bona Traffic HD datasheet.pdf'),
+    doc('Bona Traffic HD brochure.pdf'),
+    doc('Bona Price List 2026.pdf'),
+    doc('Bona Traffic HD Fact Sheet.pdf'),
+    doc('Bona_Villa_Brochure.pdf'),
+    doc('بروشور بونا.pdf'),
+    doc('brochure.pdf', 'Bona'),
+    doc('Floor plan.pdf', 'from بونا'),
+    doc('Bona Villa floor plan.pdf'),
+    doc('Bona.pdf'),
+    doc('Bona_Villa.pdf'),
+    doc('بونا - فيلا الشاطئ.pdf'),
+    doc('villa.pdf', 'Files from Bona'),
+    doc(null, 'bona'),
+    doc('Invoice 1234.pdf'),
+    doc('XBONA-W003.pdf'),
+    doc('BONA-W0031.pdf'),
+    doc('Stock brochureX.pdf'),
+    doc('Brochureware.pdf'),
+    doc('datasheet.pdf'),
+    doc('Floor.pdf'),
+    doc('وبروشور.pdf'),
+    doc('Bona Fide Purchaser Declaration.pdf'),
+    doc(null),
+  ]) {
+    assert.equal(ownerOutboundJoins(rec), false, `${rec.fileName} / ${rec.text}`);
+  }
+  // "brochure" typed as text, or on a photo, is not a document.
+  for (const media of [null, '[image]', '[voice note]']) {
+    assert.equal(ownerOutboundJoins({ text: 'BONA brochure', media }), false, String(media));
+    assert.equal(ownerOutboundJoins({ text: 'price list', media }), false, String(media));
+    assert.equal(ownerOutboundJoins({ text: 'villa floor plan', media }), false, String(media));
+  }
+  assert.equal(ownerOutboundJoins({ text: 'bona.azoz.uk/villas', media: '[image]' }), true, 'a link in a caption still counts');
+  assert.equal(ownerOutboundJoins({ text: 'BONA-W003 on the photo', media: '[image]' }), true, 'so does a listing id');
+});
+
+test('a document that names TK never joins, whatever else it says, and isTkDocument says so (D16, D17)', () => {
+  const doc = (fileName, text = null) => ({ text, fileName, media: fileName ? `[document: ${fileName}]` : '[document]' });
+  for (const rec of [
+    doc('TK Brochure Villa.pdf'),
+    doc('brochure.pdf', 'TK Estates brochure'),
+    doc('بروشور تي كي.pdf'),
+    doc('بروشور تى كى.pdf'),
+    doc('بروشور تي كى.pdf'),
+    doc('T.K. Estates brochure.pdf'),
+    doc('TK_Price_List.pdf'),
+    doc('tk-estates floor plan.pdf'),
+    doc('TKEstates brochure.pdf'),
+    doc('Brochure BONA-W014 TK.pdf'),
+    doc('scan.pdf', 'TK · https://bona-real-estate.com/ar/'),
+    doc('Brochure.pdf', 'from تي كي'),
+    doc('TK villa floor plan.pdf'),
+  ]) {
+    assert.equal(ownerOutboundJoins(rec), false, `${rec.fileName} / ${rec.text}`);
+    assert.equal(isTkDocument(rec), true, `${rec.fileName} / ${rec.text}`);
+  }
+  // TK only as part of a longer word or number, and Arabic words that only contain the letters.
+  for (const rec of [doc('TKO brochure.pdf'), doc('Brochure TK2.pdf'), doc('Stock brochure.pdf', 'atk ok'), doc('St.Kitts brochure.pdf'),
+    doc('بروشور بلاستيكي.pdf'), doc('مخطط فيلا بلاستيكى.pdf'), doc('بلاستيكى villa floor plan.pdf'), doc('brochure.pdf', 'أوتوماتيكي')]) {
+    assert.equal(isTkDocument(rec), false, `${rec.fileName} / ${rec.text}`);
+    assert.equal(ownerOutboundJoins(rec), true, `${rec.fileName} / ${rec.text}`);
+  }
+  // Only a document is a TK document: text and photos keep the rules they had.
+  assert.equal(isTkDocument({ text: 'TK brochure', media: null }), false);
+  assert.equal(isTkDocument({ text: 'TK brochure', media: '[image]' }), false);
+  assert.equal(ownerOutboundJoins({ text: 'TK · BONA-W003', media: null }), true, 'a listing id in a text still joins');
+  assert.equal(isTkDocument({}), false);
+  assert.equal(isTkDocument(), false);
+  assert.equal(isTkDocument(null), false);
+  assert.equal(isTkDocument({ fileName: 42, text: {}, media: '[document]' }), false);
+});
+
+test('a cut name is TK or Bona by what the whole name said and by what is left of it; without the answer it may be either', () => {
+  const cutName = `Villa Brochure ${'x'.repeat(100)}`;
+  const cut = (over = {}) => ({ fileName: cutName, fileNameTruncated: true, fileNameTk: false, fileNameBona: false, media: `[document: ${cutName}]`, ...over });
+  const withFlag = (key, v) => {
+    const rec = cut();
+    if (v === undefined) delete rec[key]; else rec[key] = v;
+    return rec;
+  };
+  assert.equal(ownerOutboundJoins(cut()), true, 'the whole name named neither');
+  assert.equal(isTkDocument(cut()), false);
+  assert.equal(ownerOutboundJoins(cut({ fileNameTk: true })), false, 'it named TK, past the cut');
+  assert.equal(isTkDocument(cut({ fileNameTk: true })), true);
+  assert.equal(ownerOutboundJoins(cut({ fileNameBona: true })), false, 'it named Bona, past the cut');
+  assert.equal(isTkDocument(cut({ fileNameBona: true })), false, 'which is not TK');
+  for (const v of [undefined, null, 0, 'false']) {
+    assert.equal(ownerOutboundJoins(withFlag('fileNameTk', v)), false, `TK unknown (${JSON.stringify(v)}): fewer joins, never more`);
+    assert.equal(isTkDocument(withFlag('fileNameTk', v)), true, JSON.stringify(v));
+    assert.equal(ownerOutboundJoins(withFlag('fileNameBona', v)), false, `Bona unknown (${JSON.stringify(v)})`);
+  }
+  // What is left of the name counts too, whatever the bits say ("…TK" may be the start of "…TKO").
+  const shows = (fileName) => cut({ fileName, media: `[document: ${fileName}]` });
+  assert.equal(ownerOutboundJoins(shows(`Villa Brochure TK ${'x'.repeat(100)}`)), false);
+  assert.equal(isTkDocument(shows(`Villa Brochure TK ${'x'.repeat(100)}`)), true);
+  assert.equal(ownerOutboundJoins(shows(`Bona Villa Brochure ${'x'.repeat(100)}`)), false);
+  assert.equal(ownerOutboundJoins(shows(`Bona Villa BONA-W003 ${'x'.repeat(100)}`)), true, 'a listing id still joins');
+  // A name that was not cut is read as it is; a bit of exactly true still counts.
+  const whole = (over = {}) => ({ fileName: 'Villa Brochure.pdf', media: '[document: Villa Brochure.pdf]', ...over });
+  assert.equal(ownerOutboundJoins(whole()), true);
+  assert.equal(ownerOutboundJoins(whole({ fileNameTk: true })), false);
+  assert.equal(ownerOutboundJoins(whole({ fileNameBona: true })), false);
+});
+
+/** A document record sent by the owner, through normaliseRecord (which cuts the name). */
+const ownerDoc = (fileName) => normaliseRecord({
+  key: { id: 'D1', fromMe: true, remoteJid: '1@lid' },
+  message: { documentMessage: { fileName } },
+});
+/** The same document if its whole name had been kept (normaliseRecord cleans before it cuts). */
+const wholeDoc = (fileName) => ({ text: '', fileName, fileNameTruncated: false, media: `[document: ${fileName}]` });
 
 test('a document name cut at 120 characters cannot make a word or an id at the cut', () => {
   // Through normaliseRecord, which cuts the name: what follows the cut is unknown, so the
@@ -268,30 +464,41 @@ test('a document name cut at 120 characters cannot make a word or an id at the c
   assert.ok(bonanza.fileName.endsWith(' Bona'), 'the cut leaves "Bona" at the end');
   assert.equal(bonanza.fileNameTruncated, true);
   assert.equal(ownerOutboundJoins(bonanza), false);
+  // "…BrochureX.pdf" cut straight after "Brochure": the word is not read at the cut.
+  const brochureX = rec(`${'x'.repeat(111)} BrochureX.pdf`);
+  assert.ok(brochureX.fileName.endsWith(' Brochure'), 'the cut leaves "Brochure" at the end');
+  assert.equal(ownerOutboundJoins(brochureX), false);
+  assert.equal(ownerOutboundJoins(wholeDoc(`${'x'.repeat(111)} BrochureX.pdf`)), false, 'nor does the whole name join');
   // Anything before the cut still counts, and a caption is never cut.
-  assert.equal(ownerOutboundJoins(rec('Bona brochure ' + 'x'.repeat(200) + '.pdf')), true);
+  assert.equal(ownerOutboundJoins(rec('Villa brochure ' + 'x'.repeat(200) + '.pdf')), true);
+  assert.equal(ownerOutboundJoins(rec('Villa floor plan ' + 'x'.repeat(200) + '.pdf')), true);
   assert.equal(ownerOutboundJoins(rec('BONA-W003 ' + 'x'.repeat(200) + '.pdf')), true);
-  assert.equal(ownerOutboundJoins(rec('x'.repeat(115) + ' Bonanza.pdf', 'brochure from Bona')), true);
+  assert.equal(ownerOutboundJoins(rec(`${'x'.repeat(111)} BrochureX.pdf`, 'price list for the villa')), true);
+  // But "Bona" left at the cut may be our name as much as the start of Bonanza, so it keeps
+  // a caption's brochure out, as our name does anywhere on a document (fewer joins, never more).
+  assert.equal(ownerOutboundJoins(rec('x'.repeat(115) + ' Bonanza.pdf', 'the brochure')), false);
+  // TK or Bona past the cut is still there: the record says so (fileNameTk, fileNameBona).
+  assert.equal(ownerOutboundJoins(rec('Villa brochure ' + 'x'.repeat(200) + ' TK.pdf')), false);
+  assert.equal(ownerOutboundJoins(rec('Villa brochure ' + 'x'.repeat(200) + ' Bona.pdf')), false);
+  assert.equal(ownerOutboundJoins(rec('BONA-W003 brochure ' + 'x'.repeat(200) + ' Bona.pdf')), true, 'a listing id joins whatever names Bona');
   // A name that was not cut ends where it ends.
-  const short = rec('Villa Bona');
+  const short = rec('Villa Brochure');
   assert.equal(short.fileNameTruncated, false);
   assert.equal(ownerOutboundJoins(short), true);
 });
 
-/** A document record sent by the owner, through normaliseRecord (which cuts the name). */
-const ownerDoc = (fileName) => normaliseRecord({
-  key: { id: 'D1', fromMe: true, remoteJid: '1@lid' },
-  message: { documentMessage: { fileName } },
-});
-/** The same document if its whole name had been kept (normaliseRecord cleans before it cuts). */
-const wholeDoc = (fileName) => ({ text: '', fileName, fileNameTruncated: false, media: `[document: ${fileName}]` });
-
-test('a cut name never joins where the whole name would not: "bona fide" and Bonanza at every cut', () => {
+test('a cut name never joins where the whole name would not: "bona fide", Bonanza, BrochureX, TK and Bona AB at every cut', () => {
   // Reading the cut as if a letter followed it turned "…Bona fi|de declaration" into
   // "…Bona fix", which is not the Latin phrase, so the cut name joined. Leaving the end out
-  // is not enough on its own either: "…Bona| fide" left "…Bona" at the new end.
+  // is not enough on its own either: "…Bona| fide" left "…Bona" at the new end. The same
+  // goes for a property word at the cut (…Brochure|X, …Price List|ing, …Villa|ger,
+  // …Land|scape), a listing id (…BONA-W003|1), a TK brochure, whichever side of the cut TK
+  // falls, and Bona AB's papers.
   let cuts = 0;
-  for (const tail of ['Bona fide declaration.pdf', 'Bonanza.pdf', 'Bona-fides.pdf', 'بونات.pdf']) {
+  for (const tail of ['Bona fide declaration.pdf', 'Bonanza.pdf', 'Bona-fides.pdf', 'بونات.pdf',
+    'BrochureX.pdf', 'Price Listing.pdf', 'Floor Planner.pdf', 'BONA-W0031.pdf', '_TK Brochure.pdf', 'Brochure TK.pdf',
+    'بروشور تي كي.pdf', 'بروشور تى كى.pdf', '_T.K. Brochure.pdf', 'Bona Traffic HD datasheet.pdf', 'Bona Traffic HD brochure.pdf',
+    'Bona Price List 2026.pdf', 'Floor plan Landscape.pdf', 'Price list Unity.pdf', 'Villager price list.pdf', '_TK villa floor plan.pdf']) {
     for (const sep of [' ', '_', '-', '1']) {
       for (let pad = 80; pad <= 125; pad += 1) {
         const name = `${'x'.repeat(pad)}${sep}${tail}`;
@@ -302,40 +509,150 @@ test('a cut name never joins where the whole name would not: "bona fide" and Bon
       }
     }
   }
-  assert.ok(cuts > 300, `the longer ones are cut (${cuts})`);
+  assert.ok(cuts > 1500, `the longer ones are cut (${cuts})`);
+});
+
+test('a brochure at every cut: the whole name joins, the cut one only where what is read holds the word', () => {
+  let cuts = 0;
+  let cutJoins = 0;
+  for (const tail of ['Brochure.pdf', 'Villa Floor Plan.pdf', 'BONA-W003 plan.pdf', 'قائمة أسعار الشقق.pdf']) {
+    for (const sep of [' ', '_', '-']) {
+      for (let pad = 80; pad <= 125; pad += 1) {
+        const name = `${'x'.repeat(pad)}${sep}${tail}`;
+        const rec = ownerDoc(name);
+        assert.equal(ownerOutboundJoins(wholeDoc(name)), true, `${pad} ${tail}: the whole name joins`);
+        if (!rec.fileNameTruncated) {
+          assert.equal(ownerOutboundJoins(rec), true, `${pad} ${tail}: not cut, so it joins`);
+          continue;
+        }
+        cuts += 1;
+        if (ownerOutboundJoins(rec)) cutJoins += 1;
+      }
+    }
+  }
+  assert.ok(cuts > 200, `the longer ones are cut (${cuts})`);
+  // Each word sits in the last 16 code points of what a cut leaves, so no cut one joins by
+  // it: a missed join, which the owner's list of real-estate chats catches (D17; Task 16
+  // notes it there as a `property document`).
+  assert.equal(cutJoins, 0);
+  // A property word before the cut, TK after it: the whole name names TK, so neither joins.
+  for (const word of ['Brochure', 'BONA-W003', 'Villa Floor Plan', 'بروشور']) {
+    for (let pad = 90; pad <= 130; pad += 5) {
+      const name = `${word} ${'x'.repeat(pad)} TK.pdf`;
+      assert.equal(ownerOutboundJoins(wholeDoc(name)), false, `${word} ${pad}: the whole name names TK`);
+      assert.equal(ownerOutboundJoins(ownerDoc(name)), false, `${word} ${pad}: so the cut one does not join`);
+    }
+  }
+  // Our name before the cut or after it: such a document joins only by a listing id, cut or not.
+  for (let pad = 90; pad <= 130; pad += 5) {
+    for (const [name, joins] of [
+      [`Brochure ${'x'.repeat(pad)} Bona.pdf`, false],
+      [`Bona ${'x'.repeat(pad)} Brochure.pdf`, false],
+      [`BONA-W003 ${'x'.repeat(pad)} Bona.pdf`, true],
+    ]) {
+      assert.equal(ownerOutboundJoins(wholeDoc(name)), joins, `${name.slice(0, 12)} ${pad}: the whole name`);
+      assert.equal(ownerOutboundJoins(ownerDoc(name)), joins, `${name.slice(0, 12)} ${pad}: the one the record carries`);
+    }
+  }
 });
 
 test('a cut name joins only where the whole name joins, whatever the name is made of', () => {
   // Names built from the pieces that decide the rules, cut through normaliseRecord at every
-  // kind of place: whenever the cut record joins, the whole name must join too.
+  // kind of place: whenever the cut record joins, the whole name must join too. The pieces
+  // are picked by mulberry32: the old `(seed * 1103515245 + 12345) & 0x7fffffff` repeats in
+  // its low bits, so with 48 pieces `% pieces.length` reached only 10 of them (51 now).
   const pieces = ['bona', 'Bona', 'BONA', 'بونا', 'fide', 'fides', 'fi', 'f', 'fid', 'nza', 'x', 'é', 'ſ', ' ', ' ',
-    '_', '-', '.', '-W003', '-005', 'W', '1', '٤', '\u0301', 'ت', 'BONA-W003', 'BONA-005', 'pdf', '(', 'ب', 'bon', 'de', 's'];
+    '_', '-', '.', '-W003', '-005', 'W', '1', '٤', '\u0301', 'ت', 'BONA-W003', 'BONA-005', 'pdf', '(', 'ب', 'bon', 'de', 's',
+    'brochure', 'Brochure', 'floor', 'Plan', 'price', 'list', 'بروشور', 'مخطط', 'قائمة', 'الأسعار', 'X', 'TK', 'tk', 'تي', 'كي',
+    'تى', 'كى', 'T.K.'];
   let seed = 20260928;
-  const next = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed; };
+  const next = () => {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return (t ^ (t >>> 14)) >>> 0;
+  };
   let cuts = 0;
   let cutJoins = 0;
+  let keptOutByTk = 0;
+  let keptOutByBona = 0;
   for (let i = 0; i < 4000; i += 1) {
     let name = `${'x'.repeat(60 + (next() % 45))} `;
     while (Array.from(name).length < 125 + (next() % 15)) name += pieces[next() % pieces.length];
     const rec = ownerDoc(name);
     if (!rec.fileNameTruncated) continue;
     cuts += 1;
+    // Would have joined but for TK, or our name, in the part of the whole name the cut hid.
+    if (rec.fileNameTk && ownerOutboundJoins({ ...rec, fileNameTk: false })) keptOutByTk += 1;
+    if (rec.fileNameBona && ownerOutboundJoins({ ...rec, fileNameBona: false })) keptOutByBona += 1;
     if (!ownerOutboundJoins(rec)) continue;
     cutJoins += 1;
     const whole = name.replace(/\s+/g, ' ').trim();
     assert.equal(ownerOutboundJoins(wholeDoc(whole)), true, JSON.stringify(name));
   }
   assert.ok(cuts > 3900, `the names are cut (${cuts})`);
-  assert.ok(cutJoins > 500, `and a cut name can still join (${cutJoins})`);
+  assert.ok(cutJoins > 150, `and a cut name can still join (${cutJoins})`);
+  assert.ok(keptOutByTk > 2, `and TK in the whole name keeps some out (${keptOutByTk})`);
+  assert.ok(keptOutByBona > 50, `and so does our name (${keptOutByBona})`);
+});
+
+test('a cut name joins by a document word and a property word only where the whole name joins', () => {
+  // The same sweep for the words the owner's answer of 2026-09-28 added: a floor plan, price
+  // list … joins only with a property word, and in a cut name each of the two must be whole
+  // inside what is read (…Villa|ger, …Land|scape, …floor plan|ner). Brochures, ids, TK and
+  // Bona are left out here (the sweep above has them), so every cut join is by the pair.
+  const pieces = ['floor', 'plan', 'Plan', 'plans', 'floor plan', 'price_list', 'price', 'list', 'payment', 'master', 'fact', 'sheet',
+    'مخطط', 'مخططات', 'كتيب', 'قائمة', 'أسعار', 'الأسعار', 'villa', 'Villa', 'villas', 'unit', 'land', 'Land', 'scape', 'ger', 'ity',
+    'y', 's', 'X', 'ſ', 'فيلا', 'الشقق', 'شقة', 'أرض', 'ال', 'ات', 'ي', 'x', ' ', ' ', ' ', ' ', ' ', ' ', '_', '_', '-', '.', '1', '٤', '\u0301'];
+  let seed = 20260929;
+  const next = () => {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return (t ^ (t >>> 14)) >>> 0;
+  };
+  let cuts = 0;
+  let cutJoins = 0;
+  let missedAtCut = 0;
+  for (let i = 0; i < 3000; i += 1) {
+    let name = `${'x'.repeat(30 + (next() % 60))} `;
+    while (Array.from(name).length < 125 + (next() % 15)) name += pieces[next() % pieces.length];
+    const rec = ownerDoc(name);
+    if (!rec.fileNameTruncated) continue;
+    cuts += 1;
+    const whole = ownerOutboundJoins(wholeDoc(name.replace(/\s+/g, ' ').trim()));
+    if (ownerOutboundJoins(rec)) {
+      cutJoins += 1;
+      assert.equal(whole, true, JSON.stringify(name));
+    } else if (whole) {
+      missedAtCut += 1;
+    }
+  }
+  assert.ok(cuts > 2900, `the names are cut (${cuts})`);
+  assert.ok(cutJoins > 30, `a cut name can join by the pair (${cutJoins})`);
+  // A pair the cut reaches is not read: a missed join, never a wrong one (the owner's list catches it, D17).
+  assert.ok(missedAtCut > 30, `and some whole names join where the cut one does not (${missedAtCut})`);
 });
 
 test('any truthy cut flag reads the name as cut: that only ever means fewer joins', () => {
-  const name = `${'x'.repeat(100)} Bona fi`;
-  assert.equal(ownerOutboundJoins({ fileName: name, media: '[document: …]' }), true, 'uncut, "Bona fi" is the name');
+  const doc = (fileName, over = {}) => ({ fileName, fileNameTk: false, fileNameBona: false, media: '[document: …]', ...over });
+  const name = `${'x'.repeat(100)} Brochure`;
+  assert.equal(ownerOutboundJoins(doc(name)), true, 'uncut, it ends with the word');
   for (const fileNameTruncated of [true, 1, 'yes']) {
-    assert.equal(ownerOutboundJoins({ fileName: name, fileNameTruncated, media: '[document: …]' }), false, String(fileNameTruncated));
+    assert.equal(ownerOutboundJoins(doc(name, { fileNameTruncated })), false, String(fileNameTruncated));
   }
-  assert.equal(ownerOutboundJoins({ fileName: `Bona_Villa ${'x'.repeat(100)}`, fileNameTruncated: true, media: '[document: …]' }), true, 'far from the cut, the name counts');
+  assert.equal(ownerOutboundJoins(doc(`Villa_Brochure ${'x'.repeat(100)}`, { fileNameTruncated: true })), true, 'far from the cut, the word counts');
+  assert.equal(ownerOutboundJoins(doc(`BONA-W003 ${'x'.repeat(100)}`, { fileNameTruncated: true })), true, 'and so does a listing id');
+  assert.equal(ownerOutboundJoins(doc(`bona-real-estate.com ${'x'.repeat(100)}`, { fileNameTruncated: true })), false, 'a site link is not read in a cut name');
+  assert.equal(ownerOutboundJoins(doc(`bona-real-estate.com ${'x'.repeat(100)}`)), true, 'it is in a whole one');
+  // A document word that needs a property word needs it inside what is read, and whole there.
+  assert.equal(ownerOutboundJoins(doc(`Villa floor plan ${'x'.repeat(100)}`, { fileNameTruncated: true })), true, 'both far from the cut');
+  assert.equal(ownerOutboundJoins(doc(`Floor plan ${'x'.repeat(95)} Villa`, { fileNameTruncated: true })), false, 'the property word sits in what is not read');
+  assert.equal(ownerOutboundJoins(doc(`Floor plan ${'x'.repeat(95)} Villa`)), true, 'it is read in a whole one');
+  // "…Land" at the end of what is read may be "…Landscape": nothing after it inside what is read.
+  const land = `Floor plan ${'x'.repeat(84)} Landscape_garden.pdf`;
+  assert.equal(ownerOutboundJoins(doc(land, { fileNameTruncated: true })), false, 'Land at the edge of what is read');
+  assert.equal(ownerOutboundJoins(doc(`${land.slice(0, -16)}`)), true, 'read as a whole name, it would join');
 });
 
 /* ---------------- time ---------------- */
@@ -353,13 +670,25 @@ test('no text makes the rules slow: every input is read in linear time', () => {
     fill('بونا ', n), fill('BONA-W00', n), fill('BONA-W003٤', n),
     `${fill('bona.azoz.uk:', n)}@`, `${fill('bona-real-estate.com:', n)}@`, `${fill('www.bona.azoz.uk:', n)}@`,
     fill('bona.azoz.uk.', n), fill('bona.azoz.uk@', n), fill('bona.azoz.uk_', n),
+    fill('floor ', n), fill('floor-', n), fill('floor_plan', n), fill('brochur', n), fill('brochureX', n), fill('price ', n),
+    fill('payment_', n), fill('fact sheet', n), fill('قائمة ', n), fill('جدول ال', n), fill('خطة ', n), fill('البروشور', n), fill('كتي', n),
+    fill('floor plan ', n), fill('price list_', n), fill('قائمة أسعار ', n), fill('villa', n), fill('villax', n), fill('town ', n),
+    fill('town_house', n), fill('propert', n), fill('الفيل', n), fill('تاون ', n), fill('مجمع ', n), fill('الشقق', n), fill('floor plan land', n),
+    fill('tk', n), fill('tk ', n), fill('tk-estate', n), fill('tk_', n), fill('تي ', n), fill('تي', n), fill('تيكي', n),
+    fill('t.k', n), fill('t.', n), fill('تى ', n), fill('تى', n), fill('تيكى', n),
   ];
   const calls = [
     ['inboundSignal', (s) => inboundSignal({ text: s })],
     ['ownerOutboundJoins text', (s) => ownerOutboundJoins({ text: s })],
     ['ownerOutboundJoins caption', (s) => ownerOutboundJoins({ text: s, media: '[document: x.pdf]' })],
     ['ownerOutboundJoins name', (s) => ownerOutboundJoins({ fileName: s, media: '[document: x.pdf]' })],
-    ['ownerOutboundJoins cut name', (s) => ownerOutboundJoins({ fileName: s, fileNameTruncated: true, media: '[document: x.pdf]' })],
+    ['ownerOutboundJoins cut name', (s) => ownerOutboundJoins({ fileName: s, fileNameTruncated: true, fileNameTk: false, fileNameBona: false, media: '[document: x.pdf]' })],
+    ['isTkDocument', (s) => isTkDocument({ text: s, fileName: s, media: '[document: x.pdf]' })],
+    ['PROPERTY_DOC_RE', (s) => PROPERTY_DOC_RE.test(s)],
+    ['BROCHURE_RE', (s) => BROCHURE_RE.test(s)],
+    ['QUALIFIED_DOC_RE', (s) => QUALIFIED_DOC_RE.test(s)],
+    ['PROPERTY_NOUN_RE', (s) => PROPERTY_NOUN_RE.test(s)],
+    ['TK_RE', (s) => TK_RE.test(s)],
   ];
   for (const n of [20_000, 200_000]) {
     for (const [i, s] of inputs(n).entries()) {

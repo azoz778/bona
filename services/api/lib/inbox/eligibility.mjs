@@ -1,20 +1,29 @@
 /**
- * Which WhatsApp chats belong in the Bona inbox (2026-09-27 design §4.1, D9 and D12).
+ * Which WhatsApp chats belong in the Bona inbox (2026-09-27 design §4.1, D9, D12, D16).
  *
  * The team reads and answers these chats from the dashboard, and they arrive on the
  * owner's personal number, which his TK clients and private conversations share. So a
  * chat joins only on something that can only be about Bona:
  *
  *   - a client's message carrying a site Ref line (with its listing part, or a code a site
- *     session holds), click-to-WhatsApp ad context or a listing id (`BONA-W003`) is certain;
+ *     session holds), click-to-WhatsApp ad context or a listing id (`BONA-W003`) is certain.
+ *     TK runs no click-to-WhatsApp ads to this number (owner, D15), so ad context stays
+ *     certain;
  *   - a client's message that only says "bona" / "بونا", or carries a bare Ref-shaped code
  *     no session holds, is a guess. It goes to the owner's Unsure list, never into the
  *     inbox by itself. The other guess, the ±15-min click window, arrives here as the
  *     lead's match method (`time_window`);
- *   - a message the OWNER sends joins a chat only when it carries a Bona site link, a
- *     listing id, or a document (a brochure) whose file name or caption says Bona or a
- *     listing id. Nothing else he types counts: "bona" in a text to a TK client proves
- *     nothing.
+ *   - a message the OWNER sends joins a chat when it carries a Bona site link or a listing
+ *     id, or when it is a property document (D16), by its file name or caption: a brochure,
+ *     from any developer, on its own; a floor plan, price list, payment plan, master plan,
+ *     fact sheet, booklet (كتيب) or plan (مخطط) only with a property word (villa, unit,
+ *     فيلا, شقة …) in the same name or caption, because TK's fit-out work sends those too
+ *     (owner, 2026-09-28). A document that names TK (`TK`, `T.K.`, `tk-estates`, `تي كي`)
+ *     never joins by itself: TK chats stay out (D17). Nor does a document that names Bona
+ *     without a listing id or a site link: Bona AB makes wood-floor finishes, so "Bona
+ *     Traffic HD brochure.pdf" to a TK contractor proves nothing (the poller puts such a
+ *     chat on the owner's list to check, D17). Nothing else he sends counts, and the word
+ *     "Bona" joins nothing by itself.
  *
  * The answer is stored on the lead (`leads.inbox_state`), and a message only ever moves it
  * forward: a guess can become certain, but `in` is never demoted by a later message and
@@ -33,10 +42,10 @@ export const LISTING_ID_RE = /\bBONA-W?\d{3}(?![\w٠-٩۰-۹])/i;
 /**
  * Our name as a word, in either script. A guess on its own: TK and private chats say it too.
  * Both scripts are bounded by anything that is not a letter or a mark, so `_`, digits and
- * punctuation end the word (`Bona_Villa.pdf`, `Bona2026.pdf`, `(بونا)`) while `Bonanza`,
- * `Bonaé` and the Arabic words that only contain the four letters do not count: كوبونات
- * (coupons), أبونا (our father), طلبونا, زبوناً … A clitic form (وبونا) is missed on purpose:
- * that fails safe, the owner still has the Move button.
+ * punctuation end the word (`Bona_Villa`, `Bona2026`, `(بونا)`) while `Bonanza`, `Bonaé` and
+ * the Arabic words that only contain the four letters do not count: كوبونات (coupons),
+ * أبونا (our father), طلبونا, زبوناً … A clitic form (وبونا) is missed on purpose: that
+ * fails safe, the owner still has the Move button.
  *
  * "bona fide" / "bona fides" is Latin, common in English real-estate papers ("Bona Fide
  * Purchaser Declaration"), and never our name.
@@ -64,24 +73,92 @@ export const SITE_LINK_RE = /(?:^|[^a-z0-9.-])(?:www\.)?(?:bona-real-estate\.com
 export const INBOX_STATES = Object.freeze(['in', 'unsure', 'out']);
 
 /**
- * Code points left out at the end of a document name that was cut (`fileNameTruncated`),
- * so nothing close to the cut is read: more than "bona", a separator and "fides".
+ * The kinds of property document a developer or an agent sends (D16), in English and
+ * Arabic, each a whole word: bounded, like `BONA_WORD_RE`, by anything that is not a letter
+ * or a mark, so `_`, `-`, digits and punctuation end it (`Phase 2_Brochure_EN.pdf`,
+ * `brochure2.pdf`) while `brochureX` does not count. Two English words may be written with a
+ * space, `-`, `_` or nothing between them (`Floor-Plan`, `floorplan`, `price_list`). The
+ * Arabic single words also count with the article (البروشور, المخطط); a clitic before them
+ * (وبروشور) is missed on purpose, which fails safe like وبونا. `كتيّب` may carry its shadda,
+ * and a price list may be `قائمة أسعار` (of the apartments) as well as `قائمة الأسعار`.
+ *
+ * Two kinds (owner, 2026-09-28). A brochure (`BROCHURE_WORDS`) is a property document on
+ * its own. The other words (`QUALIFIED_WORDS`) are TK fit-out papers as often ("Payment
+ * plan - kitchen works.pdf", "مخطط الكهرباء.pdf", "كتيب الصيانة.pdf"), so they count only
+ * with a property word (`PROPERTY_NOUN_WORDS`) in the same file name or caption, or a
+ * listing id or a site link, which join any document by themselves.
+ *
+ * Every alternative starts with a fixed word and repeats nothing, so a failed match costs a
+ * bounded amount at each position: linear in the text's length.
  */
-const CUT_MARGIN = 16;
+const BROCHURE_WORDS = String.raw`(?:brochures?|(?:ال)?بروشور(?:ات)?)`;
+const QUALIFIED_WORDS = String.raw`(?:floor[\s_-]?plans?|price[\s_-]?lists?|payment[\s_-]?plans?|master[\s_-]?plans?|fact[\s_-]?sheets?`
+  + String.raw`|(?:ال)?كتي\u0651?ب|(?:ال)?مخطط(?:ات)?`
+  + String.raw`|(?:قائمة|جدول)[\s_-]?(?:ال)?[أا]سعار|خطة[\s_-]?(?:الدفع|السداد)|جدول[\s_-]?(?:الدفعات|السداد))`;
 /**
- * Our name at the very end of what is left of a cut name, where the characters left out
- * decide it: as the last word (`…Bona` of Bonanza, `…بونا` of بونات), or followed only by
- * separators and the start of "fides" (`…Bona fi` of "Bona fide", `…BONA-` of BONA-fide).
- * The same bounds and separators as `BONA_WORD_RE`: keep the two in step.
+ * The property words that let a `QUALIFIED_WORDS` document join (owner, 2026-09-28). The
+ * Arabic nouns also count with the article (الشقق, المشروع), except أرض / أراضي: with it,
+ * الأرض is also "the ground" (and الأرضي the ground floor). `فله` and `شقه` are how people
+ * type فلة and شقة.
  */
-const WORD_AT_END_RE = /(?<![\p{L}\p{M}])(?:bona[\s_.-]*(?:f(?:i(?:d(?:es?)?)?)?)?|بونا)$/iu;
+const PROPERTY_NOUN_WORDS = String.raw`(?:villas?|apartments?|units?|projects?|towers?|residences?|town[\s_-]?houses?|duplex|penthouses?`
+  + String.raw`|compound|plots?|land|propert(?:y|ies)`
+  + String.raw`|(?:ال)?(?:فيلا|فلل|فله|فلة)|(?:ال)?(?:شقة|شقق|شقه)|(?:ال)?(?:مشروع|مشاريع)|(?:ال)?(?:وحدة|وحدات)|(?:ال)?(?:برج|أبراج)`
+  + String.raw`|(?:ال)?عمارة|(?:ال)?دوبلكس|(?:ال)?بنتهاوس|تاون[\s_-]?هاوس|مجمع[\s_-]?سكني|[أا]رض|[أا]راضي|(?:ال)?عقار(?:ات)?)`;
+/** `words` as a whole word: nothing that is a letter or a mark on either side. */
+const wholeWord = (words) => new RegExp(String.raw`(?<![\p{L}\p{M}])${words}(?![\p{L}\p{M}])`, 'iu');
+/**
+ * `words` inside a cut document name, where the end of what is read is not the end of the
+ * name: a word counts only when something that is not a letter or a mark follows it inside
+ * what is read, so `…brochure` cut from `…brochureX` is never read as `brochure`.
+ */
+const wholeWordInCut = (words) => new RegExp(String.raw`(?<![\p{L}\p{M}])${words}(?=[^\p{L}\p{M}])`, 'iu');
+/** A brochure: a property document on its own. */
+export const BROCHURE_RE = wholeWord(BROCHURE_WORDS);
+/**
+ * A floor plan, price list, payment plan, master plan, fact sheet, booklet or plan: a property
+ * document only next to a property word (`PROPERTY_NOUN_RE`), a listing id or a site link.
+ */
+export const QUALIFIED_DOC_RE = wholeWord(QUALIFIED_WORDS);
+/** A property word (villa, unit, فيلا, شقة …), which lets a `QUALIFIED_DOC_RE` document join. */
+export const PROPERTY_NOUN_RE = wholeWord(PROPERTY_NOUN_WORDS);
+/**
+ * Any property-document word, either kind (`BROCHURE_RE` or `QUALIFIED_DOC_RE`). It does not
+ * decide a join by itself; the owner's list of real-estate chats to check notes it (D17).
+ */
+export const PROPERTY_DOC_RE = wholeWord(`(?:${BROCHURE_WORDS}|${QUALIFIED_WORDS})`);
+const BROCHURE_CUT_RE = wholeWordInCut(BROCHURE_WORDS);
+const QUALIFIED_DOC_CUT_RE = wholeWordInCut(QUALIFIED_WORDS);
+const PROPERTY_NOUN_CUT_RE = wholeWordInCut(PROPERTY_NOUN_WORDS);
+/**
+ * A listing id in a file name, where `_` stands for a space (`Villa_BONA-W003_EN.pdf`):
+ * `LISTING_ID_RE` with `_` allowed on either side. `XBONA-W003` and `BONA-W0031` still do
+ * not count. The second is the same inside a cut name: something that cannot carry the id
+ * on follows it inside what is read.
+ */
+const LISTING_ID_NAME_RE = /(?<![A-Za-z0-9])BONA-W?\d{3}(?![A-Za-z0-9٠-٩۰-۹])/i;
+const LISTING_ID_NAME_CUT_RE = /(?<![A-Za-z0-9])BONA-W?\d{3}(?=[^A-Za-z0-9٠-٩۰-۹])/i;
 
 /**
- * What a cut document name can be read by: all but its last `CUT_MARGIN` code points, and
- * without our name at the new end when what followed it could change how it reads.
+ * TK Estate & Design, the owner's other company, named on a document: `TK` as a word
+ * (bounded by anything that is not a letter or a digit, so `TK_Villa` and `TK-Estates`
+ * count and `TKO` or `TK2` do not), `T.K.` / `T.K`, `tk-estates` / `TKEstates`, or `تي كي`
+ * as its own word, with ي or ى in either place (Saudi typing often ends a word with ى: تى
+ * كى), bounded like `بونا` (بلاستيكي, بلاستيكى and أوتوماتيكي only contain the letters). A
+ * document that matches never joins a chat by itself (D16, D17). Every alternative starts
+ * with a fixed letter and repeats nothing: linear in the text.
  */
+export const TK_RE = /(?<![\p{L}\p{N}])tk(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])t\.k\.?(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])tk[\s_-]?estates?|(?<![\p{L}\p{M}])ت[يى][\s_.-]?ك[يى](?![\p{L}\p{M}])/iu;
+
+/**
+ * Code points left out at the end of a document name that was cut (`fileNameTruncated`):
+ * nothing close to the cut is read.
+ */
+const CUT_MARGIN = 16;
+
+/** What a cut document name can be read by: all but its last `CUT_MARGIN` code points. */
 function readableCutName(name) {
-  return Array.from(name).slice(0, -CUT_MARGIN).join('').replace(WORD_AT_END_RE, '');
+  return Array.from(name).slice(0, -CUT_MARGIN).join('');
 }
 
 /**
@@ -95,6 +172,30 @@ const SITE_REF_RE = /\bRef\s+BONA(?:-W?\d{3})?\s*[·:|-]\s*[A-HJ-NP-Z2-9]{5,6}(?
 
 /** Anything that is not a string reads as empty: a record's text or caption may be null. */
 const str = (v) => (typeof v === 'string' ? v : '');
+const isDocument = (media) => str(media).startsWith('[document');
+
+/**
+ * Does the document's file name name TK (`TK_RE`) or Bona (`BONA_WORD_RE`)? A name cut at
+ * 120 code points hides its end, so for a cut name the answer comes from what
+ * lib/evolution.mjs worked out on the whole name before it was cut (`fileNameTk`,
+ * `fileNameBona`: `wholeSays`); a cut name without that answer may name it in the part
+ * nobody saw, and is read as if it did. What is left of the name is read as well, cut or
+ * not ("…TK" cut from "…TKO" reads as TK): either way that only ever means fewer joins.
+ * A `wholeSays` of exactly `true` counts for a name that was not cut too.
+ */
+function nameSays(re, name, fileNameTruncated, wholeSays) {
+  return (fileNameTruncated ? wholeSays !== false : wholeSays === true) || re.test(name);
+}
+
+/**
+ * Is `s` (one file name or one caption) a property document by its words: a brochure, or a
+ * `QUALIFIED_DOC_RE` word with a property word beside it in the same `s`? `cut` reads a cut
+ * name's readable part, where a word counts only when something follows it there.
+ */
+function namesPropertyDocument(s, cut) {
+  if ((cut ? BROCHURE_CUT_RE : BROCHURE_RE).test(s)) return true;
+  return (cut ? QUALIFIED_DOC_CUT_RE : QUALIFIED_DOC_RE).test(s) && (cut ? PROPERTY_NOUN_CUT_RE : PROPERTY_NOUN_RE).test(s);
+}
 
 /**
  * What one message from a client says about the chat.
@@ -119,30 +220,59 @@ export function inboundSignal(o) {
 }
 
 /**
- * Does a message the owner sent make this a Bona chat (D12)? Takes a normalised record
- * (lib/evolution.mjs): `text` is the body or the caption, `media` the placeholder
- * (`[document: name]`, `[image]`, …) and `fileName` a document's cleaned name.
+ * Is this a document that names TK, by its file name or its caption (D16)? The poller
+ * puts such a chat on the owner's list of real-estate chats to check instead of joining
+ * it (D17). Takes a normalised record (lib/evolution.mjs); a cut name is judged as in
+ * `nameSays`.
+ * @param {{ text?: unknown, fileName?: unknown, fileNameTruncated?: boolean, fileNameTk?: boolean, media?: unknown }|null} [o]
+ * @returns {boolean}
+ */
+export function isTkDocument(o) {
+  const { text = '', fileName = null, fileNameTruncated = false, fileNameTk = null, media = null } = o ?? {};
+  if (!isDocument(media)) return false;
+  return TK_RE.test(str(text)) || nameSays(TK_RE, str(fileName), Boolean(fileNameTruncated), fileNameTk);
+}
+
+/**
+ * Does a message the owner sent make this a Bona chat (D12, D16)? Takes a normalised
+ * record (lib/evolution.mjs): `text` is the body or the caption, `media` the placeholder
+ * (`[document: name]`, `[image]`, …), `fileName` a document's cleaned name, and
+ * `fileNameTk` / `fileNameBona` whether the whole name named TK / Bona.
  *
- * A name cut at 120 code points (`fileNameTruncated`) may go on past the cut: "…Bonanza.pdf"
- * becomes "…Bona", "…Bona fide declaration.pdf" becomes "…Bona fi". So a cut name is read
- * without its last 16 code points (`CUT_MARGIN`) and without our name at the new end when
- * what was left out could change how it reads (`WORD_AT_END_RE`: "…Bona| fide" leaves
- * "…Bona"), and only by the word rule (an id at the new end may be the start of a longer
- * one, `BONA-W003` of `BONA-W0031`; a listing id still counts through its `BONA`). Whatever
- * is then found in it is found in the whole name too, so a cut name joins only where the
- * whole name would join. Any truthy flag counts as cut: that only ever means fewer joins.
- * @param {{ text?: unknown, fileName?: unknown, fileNameTruncated?: boolean, media?: unknown }|null} [o]
+ * Any message: a Bona site link or a listing id in the text or caption joins. A document
+ * that names TK (`TK_RE`) in its file name or caption never joins, whatever else it says.
+ * Otherwise a document joins by a site link or a listing id in its caption or file name,
+ * or by its words (`namesPropertyDocument`), read in the caption and in the file name
+ * each on its own: a brochure, or a floor plan, price list … with a property word beside
+ * it — but a document that names Bona (`BONA_WORD_RE`) joins only by a site link or a
+ * listing id: "Bona Traffic HD brochure.pdf" is Bona AB's floor finish as often as ours,
+ * and the poller puts it on the owner's list to check instead (D17). The word "Bona" joins
+ * nothing by itself.
+ *
+ * A name cut at 120 code points (`fileNameTruncated`) may go on past the cut: "…Brochure"
+ * may be "…BrochureX", "…BONA-W003" may be "…BONA-W0031", "…Land" may be "…Landscape". So a
+ * cut name is read without its last 16 code points (`CUT_MARGIN`), and there a word or an
+ * id counts only when a character that cannot carry it on follows it inside what is read;
+ * a site link, whose look-ahead reaches much further, is not read in a cut name at all.
+ * Whatever is then found in it is found in the whole name too, and TK and Bona are judged
+ * on the whole name (`fileNameTk`, `fileNameBona`) as well as on what is left of it, so a
+ * cut name joins only where the whole name would join. Any truthy flag counts as cut: that
+ * only ever means fewer joins.
+ * @param {{ text?: unknown, fileName?: unknown, fileNameTruncated?: boolean, fileNameTk?: boolean, fileNameBona?: boolean, media?: unknown }|null} [o]
  * @returns {boolean}
  */
 export function ownerOutboundJoins(o) {
-  const { text = '', fileName = null, fileNameTruncated = false, media = null } = o ?? {};
+  const { text = '', fileName = null, fileNameTruncated = false, fileNameTk = null, fileNameBona = null, media = null } = o ?? {};
   const t = str(text);
-  if (SITE_LINK_RE.test(t) || LISTING_ID_RE.test(t)) return true;
-  if (!str(media).startsWith('[document')) return false;
-  if (BONA_WORD_RE.test(t)) return true;
+  if (!isDocument(media)) return SITE_LINK_RE.test(t) || LISTING_ID_RE.test(t);
   const name = str(fileName);
-  if (fileNameTruncated) return BONA_WORD_RE.test(readableCutName(name));
-  return LISTING_ID_RE.test(name) || BONA_WORD_RE.test(name);
+  const cut = Boolean(fileNameTruncated);
+  if (TK_RE.test(t) || nameSays(TK_RE, name, cut, fileNameTk)) return false;
+  const readable = cut ? readableCutName(name) : name;
+  if (SITE_LINK_RE.test(t) || LISTING_ID_RE.test(t)) return true;
+  if (cut ? LISTING_ID_NAME_CUT_RE.test(readable) : LISTING_ID_NAME_RE.test(name) || SITE_LINK_RE.test(name)) return true;
+  if (BONA_WORD_RE.test(t) || nameSays(BONA_WORD_RE, name, cut, fileNameBona)) return false;
+  return namesPropertyDocument(t, false) || namesPropertyDocument(readable, cut);
 }
 
 /**
