@@ -78,7 +78,7 @@ function harness({ serve = router({}), lead = {}, env = {}, injectFind = true, f
   const ingested = [];
   const calls = [];
   const backfill = createBackfill({
-    env, db: s, log, now: () => clock,
+    env, db: s, inbox, log, now: () => clock,
     ingest: ingest ?? ((l, r) => { ingested.push(r.id); return real.ingest(l, r); }),
     ...(injectFind ? { find: async (q) => { calls.push(q); return serve(q, { tick }); } } : {}),
     ...(fetchImpl ? { fetchImpl } : {}),
@@ -775,4 +775,67 @@ test('default wiring: the real findMessages request body, answered and stored th
   assert.deepEqual(requests[0].body, { where: { key: { remoteJidAlt: PHONE_JID }, messageTimestamp: SINCE_JOIN }, page: 1, offset: REFRESH_LIMIT });
   assert.ok(requests.every((r) => r.body.where.messageTimestamp.gte === SINCE_JOIN.gte), 'no request reaches before the floor');
   h.s.close();
+});
+
+/* ---------------- final review fixes 2026-09-29: a later whole read takes back a join's gap ---------------- */
+
+/** LEAD with its durable floor, and the gap a failed join history left (wa-poller.mjs `join`). */
+const JOIN_GAP = `join:${LEAD_ID}:${LEAD.inbox_since}`;
+function gapped(opts = {}) {
+  const h = harness({ ...opts, lead: { history_from: FLOOR, ...(opts.lead ?? {}) } });
+  h.inbox.addGap({ key_id: JOIN_GAP, lead_id: LEAD_ID, ts: LEAD.inbox_since - 1, reason: 'history_failed' });
+  // A record the poller gave up on, and another chat's join gap: neither is this read's to take back.
+  h.inbox.addGap({ key_id: 'LOST-1', lead_id: LEAD_ID, jid: LID, ts: NOW - 120_000, reason: 'failed' });
+  h.inbox.addGap({ key_id: 'join:LEAD-20260928-0000bbbb:1', lead_id: 'LEAD-20260928-0000bbbb', ts: NOW - 60_000, reason: 'history_failed' });
+  return h;
+}
+const gapKeys = (h, leadId = LEAD_ID) => h.inbox.gapsFor(leadId).map((g) => g.key_id);
+const inWindow = pool([
+  rec({ id: 'K1', ts: FLOOR + 60_000 }),
+  rec({ id: 'API', jid: PHONE_JID, jidAlt: null, fromMe: true, text: 'Welcome', ts: NOW - 30_000 }),
+]);
+
+test("a later history read of the chat's whole join window takes back the join's history_failed gap, and only that", async () => {
+  const h = gapped({ serve: inWindow });
+  assert.deepEqual(await h.backfill.history(h.lead(), { sinceTs: FLOOR, untilTs: NOW }), { stored: 2, scanned: 3, truncated: false });
+  assert.deepEqual(gapKeys(h), ['LOST-1'], 'the whole window came back, so the gap was never true');
+  assert.deepEqual(gapKeys(h, 'LEAD-20260928-0000bbbb'), ['join:LEAD-20260928-0000bbbb:1']);
+  h.s.close();
+
+  // The catch-up's own key for the same join (index.mjs), and any other join of the chat.
+  const again = gapped({ serve: router({}) });
+  again.inbox.addGap({ key_id: `join:${LEAD_ID}:${NOW - 7_200_000}`, lead_id: LEAD_ID, ts: FLOOR, reason: 'history_failed' });
+  await again.backfill.history(again.lead(), { sinceTs: FLOOR - 60_000, untilTs: NOW });
+  assert.deepEqual(gapKeys(again), ['LOST-1'], 'an empty window read whole is whole too');
+  again.s.close();
+});
+
+test("a refresh that reads the whole join window takes back the join's gap", async () => {
+  const h = gapped({ serve: inWindow });
+  assert.deepEqual(await h.backfill.refresh(h.lead()), { stored: 2, scanned: 3, truncated: false });
+  assert.deepEqual(gapKeys(h), ['LOST-1']);
+  h.s.close();
+});
+
+test("a read that does not cover the whole join window leaves the join's gap", async () => {
+  const cases = [
+    ['a history window that starts after the floor', { serve: inWindow }, (h) => h.backfill.history(h.lead(), { sinceTs: FLOOR + 1, untilTs: NOW })],
+    ['a history window that ends before the join', { serve: inWindow }, (h) => h.backfill.history(h.lead(), { sinceTs: FLOOR, untilTs: LEAD.inbox_since - 1 })],
+    ['a history read cut at its page cap', { serve: router({ [`alt:${PHONE_JID}`]: [[rec({ id: 'P1' })], [rec({ id: 'P2', ts: NOW - 700_000 })]] }) },
+      (h) => h.backfill.history(h.lead(), { sinceTs: FLOOR, untilTs: NOW, maxPages: 1 })],
+    ['a refresh with more than its one page to read', {
+      serve: pool(Array.from({ length: REFRESH_LIMIT + 1 }, (_, i) => rec({ id: `R-${i}`, ts: NOW - 100_000 + i }))),
+    }, (h) => h.backfill.refresh(h.lead())],
+    ['a refresh cut short by its budget', { serve: (q, { tick }) => { tick(1_500); return inWindow(q); } }, (h) => h.backfill.refresh(h.lead())],
+    ['a failed read', { serve: (q) => { if (q.where.key.remoteJid === LID) throw new EvolutionError('POST /chat/findMessages/abdulaziz-personal failed', 503, null); return inWindow(q); } },
+      (h) => h.backfill.history(h.lead(), { sinceTs: FLOOR, untilTs: NOW })],
+    ['a chat with neither a phone nor a lid, where nothing can be asked', { serve: inWindow, lead: { phone_e164: null, wa_jid: null, wa_lid: null } },
+      (h) => h.backfill.history(h.lead(), { sinceTs: FLOOR, untilTs: NOW })],
+  ];
+  for (const [label, opts, read] of cases) {
+    const h = gapped(opts);
+    await read(h); // eslint-disable-line no-await-in-loop
+    assert.deepEqual(gapKeys(h), [JOIN_GAP, 'LOST-1'], `${label}: the gap stays`);
+    h.s.close();
+  }
 });

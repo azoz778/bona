@@ -686,3 +686,32 @@ test('the daily upkeep prunes the real-estate chats to check: open ones after 30
     await h.close();
   }
 });
+
+test("the backfill createApp builds takes back a join's history gap once a thread refresh reads the whole join window", async () => {
+  const JID = '966500000077@s.whatsapp.net';
+  const LEAD = 'LEAD-20260929-0000cccc';
+  // Every per-chat question: the chat's one message, inside the window, one page.
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    const records = body.where?.key?.remoteJid === JID ? [{
+      key: { id: 'HIST-1', fromMe: false, remoteJid: JID }, pushName: null, messageType: 'conversation',
+      message: { conversation: 'hello' }, messageTimestamp: Math.floor((NOW - 3_600_000) / 1000),
+    }] : [];
+    return { ok: true, status: 200, text: async () => JSON.stringify({ messages: { total: records.length, pages: 1, currentPage: 1, records } }) };
+  };
+  const h = build({ env: ENV, fetchImpl });
+  try {
+    const { app, db } = h;
+    db.insertLead({
+      lead_id: LEAD, created: NOW - DAY, updated: NOW - DAY, phone_e164: '966500000077', wa_jid: JID,
+      channel: 'whatsapp', match_method: 'ref', stage: 'new', stage_ts: NOW - DAY, inbox_state: 'in', inbox_since: NOW - DAY,
+      history_from: NOW - DAY - JOIN_HISTORY_MS,
+    });
+    app.inboxStore.addGap({ key_id: `join:${LEAD}:${NOW - DAY}`, lead_id: LEAD, ts: NOW - DAY - 1, reason: 'history_failed' });
+    const out = await app.backfill.refresh(db.getLead(LEAD));
+    assert.equal(out.stored, 1);
+    assert.deepEqual(app.inboxStore.gapsFor(LEAD), [], 'the join window came back whole');
+  } finally {
+    await h.close();
+  }
+});
