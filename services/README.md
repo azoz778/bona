@@ -929,9 +929,9 @@ history, a thread refresh or the catch-up — and the refresh and the catch-up s
 Unread means inbound
 messages newer than the newest one that person saw when they last opened the thread (a new
 member starts from the day the account was made); the total is the Inbox count in the nav.
-A thread draws its newest 200 messages, or every unread one and the 20 before them, up to
-1,000; it says how many older ones it does not show, and marks read only up to the newest
-message it drew.
+A thread draws its newest 200 messages, or every message from the oldest unread one on
+(replies between unread messages included) and the 20 before them, up to 1,000; it says how
+many older ones it does not show, and marks read only up to the newest message it drew.
 
 *Retention.* Five years after a chat's last message (`leads.last_msg_ts`) its transcript —
 messages, reply outbox rows, gaps and read marks — is deleted; the lead row stays for

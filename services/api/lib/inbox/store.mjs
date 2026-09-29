@@ -162,11 +162,21 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
   const hasMessages = (leadId) => Boolean(prep('SELECT 1 FROM wa_messages WHERE lead_id = ? LIMIT 1').get(String(leadId ?? '')));
   /** Every stored message of one chat, both directions. */
   const countMessages = (leadId) => prep('SELECT COUNT(*) AS n FROM wa_messages WHERE lead_id = ?').get(String(leadId ?? '')).n;
-  /** One chat's unread count for one person: the rule `listInbox` counts by (P2-8). */
-  const unreadIn = (leadId, { userId = null, userCreated = 0 } = {}) => prep(`SELECT COUNT(*) AS n FROM wa_messages m
-      WHERE m.lead_id = ? AND m.direction = 'in'
-        AND m.ts > COALESCE((SELECT r.last_read_ts FROM inbox_reads r WHERE r.user_id = ? AND r.lead_id = m.lead_id), ?)`)
-    .get(String(leadId ?? ''), str(userId), num(userCreated)).n;
+  /**
+   * How many of one chat's messages, both directions, are at or after this person's oldest
+   * unread one (the rule `listInbox` counts by, P2-8); 0 with nothing unread. The newest
+   * that many messages hold every unread one even when replies sit between them — a count
+   * of the unread messages alone would not (P4).
+   */
+  function unreadSpan(leadId, { userId = null, userCreated = 0 } = {}) {
+    const id = String(leadId ?? '');
+    return prep(`SELECT COUNT(*) AS n FROM wa_messages m
+                 WHERE m.lead_id = ?
+                   AND m.ts >= (SELECT MIN(u.ts) FROM wa_messages u
+                                 WHERE u.lead_id = ? AND u.direction = 'in'
+                                   AND u.ts > COALESCE((SELECT r.last_read_ts FROM inbox_reads r WHERE r.user_id = ? AND r.lead_id = u.lead_id), ?))`)
+      .get(id, id, str(userId), num(userCreated)).n;
+  }
   /** The stored message with this WhatsApp id, or null. */
   const messageByKey = (keyId) => (keyId ? plain(prep('SELECT * FROM wa_messages WHERE key_id = ?').get(String(keyId))) : null);
 
@@ -637,7 +647,7 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
   }
 
   return {
-    upsertMessage, messagesFor, newestTs, hasMessages, countMessages, unreadIn, messageByKey,
+    upsertMessage, messagesFor, newestTs, hasMessages, countMessages, unreadSpan, messageByKey,
     insertOutbox, getOutbox, outboxByKey, updateOutbox, resolveUncertain, openOutboxFor, countSentSince, markStalePending, pruneCodeRows,
     markRead, listInbox, unreadTotal, listUnsure, countUnsure, inChatsWithoutMessages, listedLeads,
     addGap, gapsFor, clearGap, clearJoinGaps,

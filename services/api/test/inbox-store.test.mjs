@@ -472,16 +472,25 @@ test('unread counts only messages after the person\'s read mark, or after their 
   s.close();
 });
 
-test('unreadIn and countMessages: one chat, the same unread rule as the list, and every message it holds', () => {
+test('unreadSpan and countMessages: every message from the oldest unread one on (the list\'s unread rule, both directions), and every message a chat holds', () => {
   const { s, inbox, owner, sara } = listScene();
-  for (const leadId of ['A', 'B', 'C', 'G']) {
+  // B, C and G hold client messages only: the span is the unread count the list shows.
+  for (const leadId of ['B', 'C', 'G']) {
     const listed = (userId, userCreated) => inbox.listInbox({ userId, userCreated }).find((r) => r.lead_id === leadId).unread;
-    assert.equal(inbox.unreadIn(leadId, { userId: owner.user_id }), listed(owner.user_id, 0), `${leadId} for the owner`);
-    assert.equal(inbox.unreadIn(leadId, { userId: sara.user_id, userCreated: NOW - 10_000 }), listed(sara.user_id, NOW - 10_000), `${leadId} for Sara`);
+    assert.equal(inbox.unreadSpan(leadId, { userId: owner.user_id }), listed(owner.user_id, 0), `${leadId} for the owner`);
+    assert.equal(inbox.unreadSpan(leadId, { userId: sara.user_id, userCreated: NOW - 10_000 }), listed(sara.user_id, NOW - 10_000), `${leadId} for Sara`);
   }
+  // A: the owner read A-1, so Sara's reply after it is not unread and there is no span.
+  assert.equal(inbox.unreadSpan('A', { userId: owner.user_id }), 0);
+  // Sara never opened A: A-1 is unread and her reply after it is inside the span.
+  assert.equal(inbox.unreadSpan('A', { userId: sara.user_id, userCreated: NOW - 10_000 }), 2);
+  // A new client message: the owner's span starts at it, not at the reply before it.
+  inbox.upsertMessage(msg({ key_id: 'A-3', lead_id: 'A', text: 'and the price?', ts: NOW - 3000 }));
+  assert.equal(inbox.unreadSpan('A', { userId: owner.user_id }), 1);
+  assert.equal(inbox.unreadSpan('A', { userId: sara.user_id, userCreated: NOW - 10_000 }), 3);
   inbox.markRead(owner.user_id, 'B', NOW - 9000);
-  assert.equal(inbox.unreadIn('B', { userId: owner.user_id }), 1);
-  assert.equal(inbox.unreadIn('nope', { userId: owner.user_id }), 0);
+  assert.equal(inbox.unreadSpan('B', { userId: owner.user_id }), 1);
+  assert.equal(inbox.unreadSpan('nope', { userId: owner.user_id }), 0);
   assert.equal(inbox.countMessages('B'), s.db.prepare("SELECT COUNT(*) AS n FROM wa_messages WHERE lead_id = 'B'").get().n);
   assert.ok(inbox.countMessages('B') >= 2);
   assert.equal(inbox.countMessages('nope'), 0);
