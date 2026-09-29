@@ -821,7 +821,8 @@ with a `wa_jid` or a `wa_lid`. Whether it belongs is **stored** in `leads.inbox_
   tab.
   TK runs no click-to-WhatsApp ads to this number (owner, 2026-09-28, D15), so an ad-origin
   chat here is a Bona client — but only real ad evidence counts (`hasAdEvidence`): a click id
-  (`ctwa_clid`), a conversion source, the `ctwa_ad` entry point or an ad source type. WhatsApp
+  (`ctwa_clid`), a conversion source, the `ctwa_ad` entry point or an ad source type (the
+  token `ad` / `ads`, never `broadcast` or `thread`; migration v4 reads it the same). WhatsApp
   attaches the same kind of context to organic entry points — a wa.me link
   (`click_to_chat_link`), its own search (`global_search_new_chat`), a tapped phone number
   (`phone_number_hyperlink`) — and every live `ad_meta` lead on 2026-09-29 was one of those.

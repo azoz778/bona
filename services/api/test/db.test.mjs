@@ -186,7 +186,11 @@ test('a v3 file db moves to v4: each existing lead is placed by what is certain 
     { id: 'L-ad-conv', channel: 'whatsapp', method: 'ad_meta', adMeta: { conversion_source: 'FB_Ads' }, want: 'in' },
     { id: 'L-ad-entry', channel: 'whatsapp', method: 'ad_meta', adMeta: { entry_point_conversion_source: 'ctwa_ad', entry_point_conversion_app: 'facebook' }, want: 'in' },
     { id: 'L-ad-type', channel: 'whatsapp', method: 'ad_meta', adMeta: { source_type: 'AD' }, want: 'in' },
+    { id: 'L-ad-types', channel: 'whatsapp', method: 'ad_meta', adMeta: { source_type: ' Ads\t' }, want: 'in' },
     { id: 'L-ad-post', channel: 'whatsapp', method: 'ad_meta', adMeta: { source_type: 'post', source_app: 'instagram' }, want: 'unsure' },
+    // The source type is the token "ad", not any word with the two letters in it (hasAdEvidence).
+    ...['broadcast', 'thread', 'upload', 'ad_hoc', '\u00a0ad'].map((sourceType, i) => (
+      { id: `L-ad-word-${i}`, channel: 'whatsapp', method: 'ad_meta', adMeta: { source_type: sourceType }, want: 'unsure' })),
     { id: 'L-ad-empty', channel: 'whatsapp', method: 'ad_meta', adMeta: { ctwa_clid: ' \t\n ', conversion_source: '' }, want: 'unsure' },
     { id: 'L-ad-num', channel: 'whatsapp', method: 'ad_meta', adMeta: { ctwa_clid: 123 }, want: 'unsure' },
     { id: 'L-ad-string', channel: 'whatsapp', method: 'ad_meta', meta: { ad_meta: 'ctwa_clid' }, want: 'unsure' },

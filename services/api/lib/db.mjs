@@ -249,7 +249,7 @@ const MIGRATIONS = [
                                   OR (json_type(t.meta, '$.ad_meta.entry_point_conversion_source') IS 'text'
                                       AND json_extract(t.meta, '$.ad_meta.entry_point_conversion_source') = 'ctwa_ad')
                                   OR (json_type(t.meta, '$.ad_meta.source_type') IS 'text'
-                                      AND instr(lower(json_extract(t.meta, '$.ad_meta.source_type')), 'ad') > 0) END))
+                                      AND lower(trim(json_extract(t.meta, '$.ad_meta.source_type'), char(32, 9, 10, 11, 12, 13))) IN ('ad', 'ads')) END))
             OR EXISTS (SELECT 1 FROM touchpoints t WHERE t.lead_id = leads.lead_id AND t.event_type = 'lead_created'
                        AND CASE WHEN json_valid(t.meta) IS NOT 1 THEN 0
                                 WHEN json_type(t.meta, '$.snippet') IS NOT 'text' THEN 0
