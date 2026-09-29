@@ -949,9 +949,10 @@ do not count), so a restart does not reset it. The form
 carries a random `send_id`, and its outbox row is written before the HTTP call, so a double
 submit gets the first answer back, never a second message. A reply is `accepted` only when
 Evolution answers with a `key.id`. A timeout, a network error other than a refused
-connection or a failed DNS lookup, a 502/504 or a 2xx without an id is `uncertain`: the
-thread says to check WhatsApp, the text is not put back (it may have gone), and nothing
-retries it. When the message turns up in a poll the row is settled — by its `key.id`, or
+connection or a failed DNS lookup, any 5xx or a 2xx without an id is `uncertain`: the
+thread says to check WhatsApp, the text is not put back (it may have gone), it counts
+toward the day cap, and nothing retries it. Only a 4xx or a refused connection / failed
+DNS lookup is `failed` (never reached WhatsApp: the text is kept in the box). When the message turns up in a poll the row is settled — by its `key.id`, or
 else the same lead and the same text within 2 minutes — and the bubble gets its sender; a
 row interrupted by a restart becomes `uncertain` (`interrupted`). The form also carries the
 newest message time the person saw, and the chat is refreshed from Evolution just before

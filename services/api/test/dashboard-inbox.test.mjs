@@ -512,6 +512,46 @@ test('a timeout is "not sure it went", shown as such, and resubmitting it sends 
   });
 });
 
+test('an HTTP 500 or 503 from Evolution is "not sure it went": no draft kept, counted against the day, never retried; a 400 keeps the draft', async () => {
+  for (const status of [500, 503]) {
+    await withInbox(async (h) => {
+      seedScene(h);
+      const staff = await h.staff();
+      h.tick(120_000);
+      h.evo.reply = (n) => (n === 1 ? { status, body: {} } : { status: 201, body: { key: { id: `KEY-${n}` } } });
+      const sendId = `send-${status}-00000000000001`;
+      const form = { text: 'Upstream words', send_id: sendId, seen_ts: String(NOW + 60_000) };
+      const res = await replyTo(h, 'LEAD-A', form, staff);
+      assert.equal(res.status, 303, String(status));
+      assert.equal(res.headers.get('location'), '/dashboard/inbox/LEAD-A?error=send_uncertain', `${status}: no page, so no draft to send twice`);
+      assert.equal(h.inboxStore.getOutbox(sendId).status, 'uncertain', String(status));
+      assert.equal(h.inboxStore.countSentSince(NOW), 1, `${status}: it may have gone, so it counts against the day`);
+      assert.deepEqual(h.app.audit.recent(50).find((r) => r.action === 'reply_sent').meta, { status: 'uncertain' }, String(status));
+      const json = await h.postJson('/v1/admin/inbox/LEAD-A/reply', form, { cookie: staff });
+      assert.equal(json.status, 202, `${status}: a JSON resubmit is told the same`);
+      assert.deepEqual(await json.json(), { ok: false, error: 'send_uncertain', send_id: sendId });
+      const again = await replyTo(h, 'LEAD-A', form, staff);
+      assert.equal(again.headers.get('location'), '/dashboard/inbox/LEAD-A?error=send_uncertain', String(status));
+      assert.equal(h.evo.calls.length, 1, `${status}: never retried`);
+    });
+  }
+
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    h.tick(120_000);
+    h.evo.reply = () => ({ status: 400, body: {} });
+    const draft = 'Refused words';
+    const res = await replyTo(h, 'LEAD-A', { text: draft, send_id: 'send-400-00000000000001', seen_ts: String(NOW + 60_000) }, staff);
+    assert.equal(res.headers.get('content-type'), 'text/html; charset=utf-8', 'WhatsApp refused it: the thread again');
+    const html = await res.text();
+    assert.ok(html.includes(draft), 'the words are still in the box');
+    assert.notEqual(fieldOf(html, 'send_id'), 'send-400-00000000000001', 'and a fresh send_id');
+    assert.equal(h.inboxStore.getOutbox('send-400-00000000000001').status, 'failed');
+    assert.equal(h.inboxStore.countSentSince(NOW), 0, 'a refused request costs nothing');
+  });
+});
+
 test('a refused reply is drawn again with the words kept and a fresh send_id, and nothing is sent', async () => {
   await withInbox(async (h) => {
     seedScene(h);

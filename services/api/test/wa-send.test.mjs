@@ -214,9 +214,9 @@ test('bypass is still subject to the per-recipient limit', async () => {
   h.s.close();
 });
 
-test('an HTTP error fails; a timeout is "uncertain", never retried here', async () => {
-  const bad = harness({ reply: () => ({ status: 500, body: {} }) });
-  assert.deepEqual(withoutSendId(await bad.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' })), { ok: false, error: 'http_500' });
+test('a 4xx fails; a timeout is "uncertain", never retried here', async () => {
+  const bad = harness({ reply: () => ({ status: 400, body: {} }) });
+  assert.deepEqual(withoutSendId(await bad.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' })), { ok: false, error: 'http_400' });
   bad.s.close();
 
   const s = openDb(':memory:');
@@ -229,14 +229,27 @@ test('an HTTP error fails; a timeout is "uncertain", never retried here', async 
   s.close();
 });
 
-test('a 502 or 504 is "uncertain": the request may well have gone through', async () => {
-  for (const status of [502, 504]) {
+test('any 5xx (500, 502, 503, 504) is "uncertain": the request may well have gone through', async () => {
+  for (const status of [500, 502, 503, 504]) {
     const h = harness({ reply: () => ({ status, body: {} }) });
     assert.deepEqual(
       withoutSendId(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' })),
       { ok: false, error: `http_${status}`, uncertain: true },
       String(status),
     );
+    h.s.close();
+  }
+});
+
+test('only a 4xx is a definite HTTP failure: 400, 401, 404, 422 and 429 all fail', async () => {
+  for (const status of [400, 401, 404, 422, 429]) {
+    const h = harness({ reply: () => ({ status, body: {} }) });
+    assert.deepEqual(
+      withoutSendId(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' })),
+      { ok: false, error: `http_${status}` },
+      String(status),
+    );
+    assert.equal(outboxRows(h)[0].status, 'failed', String(status));
     h.s.close();
   }
 });
@@ -623,6 +636,35 @@ test('reply: an uncertain first attempt is never retried by a second submit', as
   assert.equal(h.calls.length, 1, 'the second submit never reached the network');
   assert.equal(h.inbox.messagesFor('L-1').filter((m) => m.direction === 'out').length, 0, 'nothing stored: the poller decides once WhatsApp shows it');
   assert.equal(h.s.getLead('L-1').first_reply_ts, null);
+  h.s.close();
+});
+
+test('reply: a 500 or a 503 is "not sure it went" — counted against the day, stored nowhere, never retried; a 400 failed', async () => {
+  for (const status of [500, 503]) {
+    const h = harness({ reply: (n) => (n === 1 ? { status } : { status: 201, body: { key: { id: 'KEY-2' } } }) });
+    const staff = staffOf(h);
+    seedChat(h);
+    assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: false, error: `http_${status}`, status: 'uncertain', sendId: SID, uncertain: true }, String(status));
+    const row = h.inbox.getOutbox(SID);
+    assert.deepEqual({ status: row.status, error: row.error }, { status: 'uncertain', error: `http_${status}` }, String(status));
+    assert.equal(h.inbox.countSentSince(NOW - DAY), 1, `${status}: it may have gone, so it counts against the day`);
+    assert.deepEqual(
+      await h.sender.reply(replyArgs(staff)),
+      { ok: false, duplicate: true, status: 'uncertain', sendId: SID, error: `http_${status}`, uncertain: true },
+      `${status}: a second submit is told the same`,
+    );
+    assert.equal(h.calls.length, 1, `${status}: never retried`);
+    assert.equal(h.inbox.messagesFor('L-1').filter((m) => m.direction === 'out').length, 0, `${status}: not stored as sent`);
+    assert.equal(h.s.getLead('L-1').first_reply_ts, null, String(status));
+    h.s.close();
+  }
+
+  const h = harness({ reply: () => ({ status: 400 }) });
+  const staff = staffOf(h);
+  seedChat(h);
+  assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: false, error: 'http_400', status: 'failed', sendId: SID });
+  assert.equal(h.inbox.getOutbox(SID).status, 'failed');
+  assert.equal(h.inbox.countSentSince(NOW - DAY), 0, 'a refused request never reached WhatsApp: it costs nothing');
   h.s.close();
 });
 
