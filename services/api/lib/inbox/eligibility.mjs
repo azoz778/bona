@@ -127,7 +127,8 @@ export const QUALIFIED_DOC_RE = wholeWord(QUALIFIED_WORDS);
 export const PROPERTY_NOUN_RE = wholeWord(PROPERTY_NOUN_WORDS);
 /**
  * Any property-document word, either kind (`BROCHURE_RE` or `QUALIFIED_DOC_RE`). It does not
- * decide a join by itself; the owner's list of real-estate chats to check notes it (D17).
+ * decide a join by itself; the owner's list of real-estate chats to check notes it on a
+ * document the owner sent (D17). Any other message is asked `mentionsPropertyDocument`.
  */
 export const PROPERTY_DOC_RE = wholeWord(`(?:${BROCHURE_WORDS}|${QUALIFIED_WORDS})`);
 const BROCHURE_CUT_RE = wholeWordInCut(BROCHURE_WORDS);
@@ -234,7 +235,9 @@ function nameHasSiteLink(name) {
  * everyday words are left out on purpose (final review, 2026-09-29): land, flat, plot,
  * compound, listing, bedroom, broker, lease, commission, sqm; أرض, غرفة, مخطط, صك, سمسار,
  * عمولة — "My flight will land at 9", "flat tyre" and "غرفة النوم" are nobody's property
- * enquiry, and the privacy page promises only these words keep a chat. Each is bounded like
+ * enquiry, and the privacy page promises only these words keep a chat, and a property
+ * document (`mentionsPropertyDocument`): مخطط and "land" count only inside one ("مخطط أرض",
+ * "floor plan of the land"), never alone. Each is bounded like
  * `BONA_WORD_RE` by anything that is not a letter or a mark (`3villas` and `villa2` count,
  * `villager` and `rented` do not). Arabic words written with ه for ة (فله, شقه) count too,
  * as people type them, and the nouns also with the article (الفيلا, العقار). A clitic before
@@ -345,6 +348,20 @@ function namesPropertyDocument(s, cut) {
   if ((cut ? BROCHURE_CUT_RE : BROCHURE_RE).test(s)) return true;
   return (cut ? QUALIFIED_DOC_CUT_RE : QUALIFIED_DOC_RE).test(s) && (cut ? PROPERTY_NOUN_CUT_RE : PROPERTY_NOUN_RE).test(s);
 }
+
+/**
+ * Does `s` (a text, a caption or one file name) mention a property document: a brochure, or
+ * a floor plan, price list … with a property word beside it — the test a document the owner
+ * sends joins by (`namesPropertyDocument`, D16)? The poller's list of real-estate chats to
+ * check asks it of a client's or a stranger's message and of the owner's own text (D17): a
+ * document word on its own is as often an everyday word ("عندي مخطط للسفر", a travel plan; a
+ * car's payment plan; a restaurant's price list; كتيب السيارة, a car manual) and keeps
+ * nothing, like "land" and غرفة (final review, 2026-09-29). Anything that is not a string
+ * mentions none.
+ * @param {unknown} s
+ * @returns {boolean}
+ */
+export const mentionsPropertyDocument = (s) => typeof s === 'string' && s !== '' && namesPropertyDocument(s, false);
 
 /** A value `adMetaOf` kept: a string with something in it. */
 const present = (v) => typeof v === 'string' && v.trim() !== '';

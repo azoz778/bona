@@ -2060,11 +2060,13 @@ test('(u) candidateWordsOf: property words from the text and a document\'s name,
   assert.deepEqual(candidateWordsOf(msg({ text: 'عندكم شقة للإيجار؟' })), ['شقة', 'إيجار']);
   assert.deepEqual(candidateWordsOf(msg({ text: 'see the plan', media: '[document: Villa 12 photos.pdf]', fileName: 'Villa 12 photos.pdf' })), ['villa']);
   assert.deepEqual(candidateWordsOf(msg({ text: 'villa', media: '[image]', fileName: 'Flat.pdf' })), ['villa'], 'only a document has a file name');
-  // A document word, in either direction, in the text or a document's name (D16's words).
-  assert.deepEqual(candidateWordsOf(msg({ text: 'Can I get the price list and payment plan?' })), [PROPERTY_DOCUMENT_WORD]);
+  // A property document, in either direction, in the text or a document's name: a brochure,
+  // or another document word with a property word beside it (D16's own test for a document).
+  assert.deepEqual(candidateWordsOf(msg({ text: 'Can I get the price list and payment plan?' })), [], 'a bare price list is not a property document');
   assert.deepEqual(candidateWordsOf(msg({ text: 'ابغى البروشور وقائمة الأسعار' })), [PROPERTY_DOCUMENT_WORD]);
+  assert.deepEqual(candidateWordsOf(msg({ text: 'send me the floor plan of the unit' })), [PROPERTY_DOCUMENT_WORD]);
   assert.deepEqual(candidateWordsOf(msg({ fromMe: true, text: '', media: '[document: Bona Traffic HD brochure.pdf]', fileName: 'Bona Traffic HD brochure.pdf' })), [PROPERTY_DOCUMENT_WORD]);
-  assert.deepEqual(candidateWordsOf(msg({ text: 'price list', media: '[image]', fileName: 'x' })), [PROPERTY_DOCUMENT_WORD], 'a caption counts');
+  assert.deepEqual(candidateWordsOf(msg({ text: 'price list of the project', media: '[image]', fileName: 'x' })), [PROPERTY_DOCUMENT_WORD], 'a caption counts');
   const tkDoc = { fromMe: true, text: '', media: '[document: TK Brochure Villa.pdf]', fileName: 'TK Brochure Villa.pdf', fileNameTruncated: false, fileNameTk: true };
   assert.deepEqual(candidateWordsOf(msg(tkDoc)), [TK_DOCUMENT_WORD, PROPERTY_DOCUMENT_WORD, 'villa']);
   assert.deepEqual(candidateWordsOf(msg({ ...tkDoc, fromMe: false })), [PROPERTY_DOCUMENT_WORD, 'villa'], 'a client\'s file that says TK is only its words');
@@ -2074,6 +2076,30 @@ test('(u) candidateWordsOf: property words from the text and a document\'s name,
     [TK_DOCUMENT_WORD, PROPERTY_DOCUMENT_WORD, 'villa', 'apartment', 'rent', 'property', 'duplex', 'penthouse'], 'the markers first, then at most eight in all');
   assert.deepEqual(candidateWordsOf(msg({ text: 'see you at 6' })), []);
   assert.deepEqual(candidateWordsOf(null), []);
+});
+
+test('(u) a plan, a price list or a booklet on its own is nobody\'s property document: a trip, a car, a loan, a restaurant keep nothing', () => {
+  // Everyday words, like "land" and غرفة (final review, 2026-09-29): only a brochure, or one
+  // of these next to a property word, is a property document in a message or a file name.
+  for (const text of ['عندي مخطط للسفر بكرة', 'مخطط الشاطئ', 'المخطط', 'what is the payment plan for the car?', 'send me the price list of the restaurant',
+    'كتيب السيارة', 'خطة السداد للقرض', 'fact sheet for the fund', 'the master plan for the wedding', 'قائمة الأسعار عندكم؟', 'Can I get the price list and payment plan?']) {
+    assert.deepEqual(candidateWordsOf(msg({ text })), [], text);
+    assert.deepEqual(candidateWordsOf(msg({ fromMe: true, text })), [], `the owner's own text: ${text}`);
+    assert.deepEqual(candidateWordsOf(msg({ text: '', media: `[document: ${text}.pdf]`, fileName: `${text}.pdf` })), [], `a client's file: ${text}`);
+  }
+  // Next to a property word it is one, in the text, a caption or a client's file name.
+  for (const text of ['ابغى البروشور', 'the brochure please', 'send me the floor plan of the unit', 'مخطط أرض في الشمال', 'price list for the project', 'جدول الدفعات - مشروع الشاطئ']) {
+    assert.deepEqual(candidateWordsOf(msg({ text })), [PROPERTY_DOCUMENT_WORD], text);
+    assert.deepEqual(candidateWordsOf(msg({ text: '', media: `[document: ${text}.pdf]`, fileName: `${text}.pdf` })), [PROPERTY_DOCUMENT_WORD], `a client's file: ${text}`);
+  }
+  // A document the owner sends keeps its marker for any document word (D16 owner answer):
+  // a price list with no property word does not join (it may be TK fit-out work), so the
+  // owner's list is where he sees it.
+  for (const name of ['Price List Sep.pdf', 'payment_plan.pdf', 'قائمة الأسعار.pdf', 'مخطط الكهرباء.pdf']) {
+    assert.deepEqual(candidateWordsOf(msg({ fromMe: true, text: '', media: `[document: ${name}]`, fileName: name })), [PROPERTY_DOCUMENT_WORD], name);
+  }
+  assert.deepEqual(candidateWordsOf(msg({ fromMe: true, text: 'price list', media: '[document: Sep.pdf]', fileName: 'Sep.pdf' })), [PROPERTY_DOCUMENT_WORD], 'or its caption');
+  assert.deepEqual(candidateWordsOf(msg({ fromMe: true, text: 'price list', media: '[image]', fileName: 'x' })), [], 'an image he sends is not a document');
 });
 
 test('(u) a stranger asking about property goes on the owner\'s list: no lead, no note, no text, no history', async () => {
@@ -2178,10 +2204,15 @@ test('(u) a bare price list the owner sends a stranger is a chat to check, never
   h.cleanup();
 });
 
-test('(u) a stranger asking for the price list is a chat to check', async () => {
+test('(u) a stranger asking for a brochure or a property\'s floor plan is a chat to check; a plan for a trip or a car\'s price list is not', async () => {
   const h = harness({ inbox: true, windows: [[
-    msg({ id: 'PL1', jid: STRANGER, pushName: 'Umm Fahad', ts: NOW - 60_000, text: 'Can I get the price list and payment plan?' }),
+    msg({ id: 'PL1', jid: STRANGER, pushName: 'Umm Fahad', ts: NOW - 60_000, text: 'Can I get the floor plan of the unit?' }),
     msg({ id: 'PL2', jid: STRANGER2, pushName: null, ts: NOW - 30_000, text: 'ابغى البروشور وقائمة الأسعار' }),
+    msg({ id: 'PL3', jid: '966541000001@s.whatsapp.net', pushName: 'Traveller', ts: NOW - 20_000, text: 'عندي مخطط للسفر بكرة' }),
+    msg({ id: 'PL4', jid: '966541000002@s.whatsapp.net', pushName: 'Car Dealer', ts: NOW - 15_000, text: 'what is the payment plan for the car?' }),
+    msg({ id: 'PL5', jid: '966541000003@s.whatsapp.net', pushName: 'Diner', ts: NOW - 10_000, text: 'send me the price list of the restaurant' }),
+    msg({ id: 'PL6', jid: '966541000004@s.whatsapp.net', pushName: 'Driver', ts: NOW - 5_000, text: '', messageType: 'documentMessage',
+      media: '[document: كتيب السيارة.pdf]', fileName: 'كتيب السيارة.pdf' }),
   ]] });
   const tally = await h.poller.tick();
   assert.equal(h.db.countLeads(), 0);
@@ -2189,7 +2220,7 @@ test('(u) a stranger asking for the price list is a chat to check', async () => 
   assert.deepEqual(candidates(h).map((r) => [r.phone_e164, r.name, r.words, r.last_dir]), [
     ['966522222222', 'Umm Fahad', 'property document', 'in'],
     ['966533333333', null, 'property document', 'in'],
-  ]);
+  ], 'no number or name is kept for the trip, the car, the restaurant or the car manual');
   h.cleanup();
 });
 

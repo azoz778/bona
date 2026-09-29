@@ -61,21 +61,22 @@
  *
  * **Real-estate chats to check** (D17). A message that ends up with no lead behind it — a
  * stranger's that matched no rule, or the owner's to a stranger that did not join — but
- * uses property words (`propertyWordsIn`) or a property-document word (`PROPERTY_DOC_RE`),
- * or is a document of his that names TK, puts its chat on the owner's list
- * (lib/inbox/store.mjs `noteCandidate`) when the chat has a phone number: the number and
- * jid (and lid, when WhatsApp shows one), the name WhatsApp shows for a client (never the
- * owner's own, on a message he sent), the property words and the time. Never the text,
- * never a lead, never a note to anyone; the owner moves it into the inbox or marks it not a
- * client. A chat that becomes a lead leaves the list. Every other conversation is still
- * discarded exactly as above.
+ * uses property words (`propertyWordsIn`) or mentions a property document (a brochure, or a
+ * floor plan, price list … next to a property word; any document word on a document the
+ * owner sent: `candidateWordsOf`), or is a document of his that names TK, puts its chat on
+ * the owner's list (lib/inbox/store.mjs `noteCandidate`) when the chat has a phone number:
+ * the number and jid (and lid, when WhatsApp shows one), the name WhatsApp shows for a
+ * client (never the owner's own, on a message he sent), the property words and the time.
+ * Never the text, never a lead, never a note to anyone; the owner moves it into the inbox or
+ * marks it not a client. A chat that becomes a lead leaves the list. Every other
+ * conversation is still discarded exactly as above.
  */
 import { parseRef } from './attribution.mjs';
 import { MAX_PAGES, PAGE_SIZE, bareJid, oldestFirst, readWindow } from './evolution.mjs';
 import { JOIN_HISTORY_MS } from './inbox/backfill.mjs';
 import {
-  BONA_WORD_RE, LISTING_ID_RE, MAX_PROPERTY_WORDS, PROPERTY_DOC_RE, hasAdEvidence, inboundSignal, isTkDocument, nextInboxState,
-  ownerOutboundJoins, propertyWordsIn,
+  BONA_WORD_RE, LISTING_ID_RE, MAX_PROPERTY_WORDS, PROPERTY_DOC_RE, hasAdEvidence, inboundSignal, isTkDocument, mentionsPropertyDocument,
+  nextInboxState, ownerOutboundJoins, propertyWordsIn,
 } from './inbox/eligibility.mjs';
 import { createOrMergeLead, leadNote } from './leads.mjs';
 import { normalisePhone } from './phone.mjs';
@@ -125,8 +126,10 @@ export const MAX_RECORD_ATTEMPTS = 3;
 /** What the owner's list shows for a document of his that names TK (D16, D17). */
 export const TK_DOCUMENT_WORD = 'tk document';
 /**
- * What it shows for a property-document word (lib/inbox/eligibility.mjs `PROPERTY_DOC_RE`:
- * brochure, price list, بروشور …) in a message or a document's name that did not join.
+ * What it shows for a property document in a message or a document's name that did not join:
+ * a brochure, or a floor plan, price list … next to a property word
+ * (lib/inbox/eligibility.mjs `mentionsPropertyDocument`), or any property-document word
+ * (`PROPERTY_DOC_RE`) on a document the owner sent.
  */
 export const PROPERTY_DOCUMENT_WORD = 'property document';
 
@@ -134,12 +137,23 @@ export const PROPERTY_DOCUMENT_WORD = 'property document';
  * Why a record's chat belongs on the owner's list of real-estate chats to check (D17): the
  * property words in its text or caption and, for a document, in its file name — after
  * `tk document` when it is a document the owner sent that names TK, and `property document`
- * when the text, the caption or a document's name has a property-document word, in either
- * direction. So every owner-sent property document that did not join (it names Bona, or its
- * name was cut too close to the word, Task 15) is on the list, and so is a client asking
- * for "the price list". Canonical words only, never the text. A word at the end of a name
- * cut at 120 characters may be the start of a longer one; that only ever puts a chat on the
- * list to check, never in the inbox.
+ * when the record mentions a property document.
+ *
+ * - A document the owner sent: any property-document word (`PROPERTY_DOC_RE`) in its caption
+ *   or file name. So every owner-sent property document that did not join — it names Bona, its
+ *   name was cut too close to the word (Task 15), or it is a price list with no property word
+ *   beside it (D16 owner answer: it may be TK fit-out work) — is on the list.
+ * - Any other record, in either direction (a client's or a stranger's message or file, the
+ *   owner's own text): only a property document by D16's own test (`mentionsPropertyDocument`:
+ *   a brochure, or a floor plan, price list … with a property word beside it), read in the text
+ *   or caption and in a document's file name each on its own. A document word alone is as
+ *   often an everyday word — a travel plan (مخطط للسفر), a car's payment plan, a restaurant's
+ *   price list, a car manual (كتيب السيارة) — and keeps no stranger's number or name (final
+ *   review, 2026-09-29).
+ *
+ * Canonical words only, never the text. A word at the end of a name cut at 120 characters may
+ * be the start of a longer one; that only ever puts a chat on the list to check, never in the
+ * inbox.
  * @returns {string[]} at most `MAX_PROPERTY_WORDS`
  */
 export function candidateWordsOf(rec) {
@@ -148,7 +162,9 @@ export function candidateWordsOf(rec) {
   const name = doc && typeof rec.fileName === 'string' ? rec.fileName : '';
   const markers = [];
   if (rec?.fromMe === true && isTkDocument(rec)) markers.push(TK_DOCUMENT_WORD);
-  if (PROPERTY_DOC_RE.test(text) || (name && PROPERTY_DOC_RE.test(name))) markers.push(PROPERTY_DOCUMENT_WORD);
+  const ownerDocument = rec?.fromMe === true && doc;
+  const mentions = ownerDocument ? (s) => PROPERTY_DOC_RE.test(s) : mentionsPropertyDocument;
+  if (mentions(text) || (name && mentions(name))) markers.push(PROPERTY_DOCUMENT_WORD);
   return [...markers, ...propertyWordsIn(name ? `${text}\n${name}` : text)].slice(0, MAX_PROPERTY_WORDS);
 }
 
