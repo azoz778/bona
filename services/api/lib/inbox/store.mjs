@@ -368,6 +368,21 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
    */
   const clearGap = (keyId) => (keyId ? prep('DELETE FROM wa_gaps WHERE key_id = ?').run(String(keyId)).changes === 1 : false);
 
+  /**
+   * Take back every `history_failed` gap a join of this chat left (keyed `join:<lead>:…` by
+   * the poller's join and the daily catch-up), once a later per-chat read covered the whole
+   * join window (lib/inbox/backfill.mjs). Never a `failed` gap: that one is a message id,
+   * and only the message itself, stored after all, clears it (`upsertMessage`).
+   * @returns {number} how many were taken back
+   */
+  function clearJoinGaps(leadId) {
+    const id = String(leadId ?? '');
+    if (!id) return 0;
+    const prefix = `join:${id}:`;
+    return prep(`DELETE FROM wa_gaps WHERE lead_id = ? AND reason = 'history_failed' AND substr(key_id, 1, ?) = ?`)
+      .run(id, prefix.length, prefix).changes;
+  }
+
   /* -------------------- inbox columns on the lead -------------------- */
 
   /**
@@ -602,7 +617,7 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
     upsertMessage, messagesFor, newestTs, hasMessages, messageByKey,
     insertOutbox, getOutbox, outboxByKey, updateOutbox, resolveUncertain, openOutboxFor, countSentSince, markStalePending, pruneCodeRows,
     markRead, listInbox, unreadTotal, listUnsure, countUnsure, inChatsWithoutMessages, listedLeads,
-    addGap, gapsFor, clearGap,
+    addGap, gapsFor, clearGap, clearJoinGaps,
     setInboxState, setHandler, setNeedsHuman,
     purgeLead, leaveInbox, retentionPurge,
     noteCandidate, listCandidates, countCandidates, getCandidate, dismissCandidate, removeCandidate, removeCandidatesFor, pruneCandidates,

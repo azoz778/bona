@@ -120,12 +120,15 @@ function answers(key, rec) {
  *        injected in tests; defaults to `findMessagesPage` against the instance in `env`.
  *        A refresh adds `timeoutMs`, its per-question share of the budget.
  * @param {typeof globalThis.fetch} [o.fetchImpl]
+ * @param {{ clearJoinGaps: (leadId: string) => number }|null} [o.inbox]  lib/inbox/store.mjs: a read
+ *        that covers a chat's whole join window takes back the `history_failed` gap a failed
+ *        join history left (without it, nothing is taken back)
  * @param {(e: object) => void} [o.log]
  * @param {() => number} [o.now]
  * @param {number} [o.timeoutMs]  a history question's timeout
  */
 export function createBackfill({
-  env = {}, db, ingest, find = null, fetchImpl = globalThis.fetch, log = () => {}, now = () => Date.now(), timeoutMs = 8000,
+  env = {}, db, ingest, find = null, fetchImpl = globalThis.fetch, inbox = null, log = () => {}, now = () => Date.now(), timeoutMs = 8000,
 } = {}) {
   if (!db) throw new TypeError('createBackfill needs the store');
   if (typeof ingest !== 'function') throw new TypeError('createBackfill needs the ingest function');
@@ -169,12 +172,21 @@ export function createBackfill({
    * Only a history read (`noteTruncation`) reports a question with more pages than it may
    * read: a refresh reads only the newest page on purpose. Once the chat has left the
    * inbox, nothing more is asked.
+   *
+   * A read that was whole — at least one question asked, every question the chat has asked
+   * to its last page, none cut by the budget, none failed — and whose window reaches from
+   * the chat's history floor to when it joined takes back the gap a failed join history
+   * left there (`takeBackJoinGap`): the thread no longer says a message could not be loaded
+   * where nothing is missing. A failed read throws before it gets there.
    */
   async function readChat(lead, { sinceMs, untilMs, offset, maxPages, noteTruncation, deadline = null }) {
     const leadId = lead.lead_id;
     const time = { gte: iso(sinceMs), lte: iso(untilMs) };
     const seen = new Set();
     const tally = { stored: 0, scanned: 0, truncated: false };
+    /** Questions asked, and whether any stopped with pages it did not read or was never asked. */
+    let asked = 0;
+    let cut = false;
     /** The lead as it is now while it is still in the inbox, else null. */
     const stillIn = () => {
       const current = db.getLead(leadId);
@@ -186,6 +198,7 @@ export function createBackfill({
      * comes, so when a later page fails, what the earlier ones brought is still there to store.
      */
     async function ask(clause, key, into) {
+      asked += 1;
       const where = { key, messageTimestamp: time };
       let foreign = 0;
       let outside = 0;
@@ -234,12 +247,15 @@ export function createBackfill({
           const pages = Number.isFinite(answer?.pages) ? answer.pages : null;
           const more = pages === null ? records.length >= offset : page < pages;
           if (!more) break;
-          if (page === maxPages && noteTruncation) {
-            tally.truncated = true;
-            note({
-              level: 'warn', evt: 'inbox.backfill.truncated', leadId, clause, pages,
-              total: Number.isFinite(answer?.total) ? answer.total : null, maxPages,
-            });
+          if (page === maxPages) {
+            cut = true;
+            if (noteTruncation) {
+              tally.truncated = true;
+              note({
+                level: 'warn', evt: 'inbox.backfill.truncated', leadId, clause, pages,
+                total: Number.isFinite(answer?.total) ? answer.total : null, maxPages,
+              });
+            }
           }
         }
       } finally {
@@ -267,6 +283,7 @@ export function createBackfill({
       try {
         await ask('phone_alt', { remoteJidAlt: phoneJid }, found);
         if (stillIn()) await ask('phone', { remoteJid: phoneJid }, found);
+        else cut = true;
       } finally {
         await store(found);
       }
@@ -282,7 +299,30 @@ export function createBackfill({
         await store(found);
       }
     }
+    if (asked > 0 && !cut && !tally.partial) takeBackJoinGap(leadId, sinceMs, untilMs);
     return tally;
+  }
+
+  /**
+   * After a whole read of `[sinceMs, untilMs]`: when that window reaches from the chat's
+   * history floor (`history_from`, else 24 h before it joined, as a refresh reads it) to
+   * when it joined (`inbox_since`), everything a join history could have missed has been
+   * read, so the `history_failed` gap its failure left is taken back (lib/inbox/store.mjs
+   * `clearJoinGaps`). Only for a chat still `in`. A gap that cannot be taken back is logged,
+   * never a failed read: what the read stored is stored.
+   */
+  function takeBackJoinGap(leadId, sinceMs, untilMs) {
+    if (typeof inbox?.clearJoinGaps !== 'function') return;
+    try {
+      const current = db.getLead(leadId);
+      if (current?.inbox_state !== 'in' || !Number.isFinite(current.inbox_since)) return;
+      const floor = Number.isFinite(current.history_from) ? current.history_from : current.inbox_since - JOIN_HISTORY_MS;
+      if (sinceMs > floor || untilMs < current.inbox_since) return;
+      const count = inbox.clearJoinGaps(leadId);
+      if (count > 0) note({ evt: 'inbox.join_gap_cleared', leadId, count });
+    } catch (err) {
+      note({ level: 'warn', evt: 'inbox.join_gap_clear_failed', leadId, name: loggableName(err) });
+    }
   }
 
   /**

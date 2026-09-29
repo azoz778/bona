@@ -76,7 +76,7 @@ function inboxWiring({ db, history, historyFails = false, logs, now }) {
   const ingestor = createIngest({ db, inbox, ownerUserId: () => owner.user_id, log, now });
   const ingest = (lead, rec) => ingestor.ingest(lead, rec);
   const reader = chatReader(history, { fail: historyFails });
-  const backfill = createBackfill({ env: {}, db, ingest, find: reader.find, log, now });
+  const backfill = createBackfill({ env: {}, db, ingest, inbox, find: reader.find, log, now });
   return { team, owner, inbox, ingestor, ingest, backfill, findCalls: reader.calls };
 }
 

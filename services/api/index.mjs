@@ -251,7 +251,7 @@ export function createApp(options = {}) {
   const ingest = typeof given === 'function' ? { ingest: given } : given;
   // Per-chat reads from Evolution: history when a chat joins, a refresh when a thread is
   // opened or answered. Read-only, like the poller; constructing it contacts nothing.
-  const backfill = options.backfill ?? createBackfill({ env: cfg.env ?? {}, db, ingest: ingestRecord, fetchImpl, log, now: clock });
+  const backfill = options.backfill ?? createBackfill({ env: cfg.env ?? {}, db, ingest: ingestRecord, inbox: inboxStore, fetchImpl, log, now: clock });
   // The WhatsApp Ref-code poller. Read-only, and only when `BONA_WA_POLL` says so —
   // constructing it contacts nothing; the real server (below) is what puts it on a timer.
   // Handed the inbox, so every live client message of an `in` chat is stored as it is
