@@ -35,7 +35,13 @@ import { createAuth } from './auth.mjs';
 import { createTiktokAccounts, AccountsError } from '../tiktok-accounts.mjs';
 import { tiktokAccountsPage, tiktokContinuePage, validateTiktokDraft } from './render-tiktok.mjs';
 import { teamPage } from './render-team.mjs';
-import { TeamError } from '../team.mjs';
+import { inboxPage, unsurePage, threadPage, INBOX_OK } from './render-inbox.mjs';
+import { TeamError, isExcludedLead } from '../team.mjs';
+import { createOrMergeLead } from '../leads.mjs';
+import { normalisePhone } from '../phone.mjs';
+import { randomId } from '../store.mjs';
+import { replyJidFor } from '../wa-send.mjs';
+import { OWNER_HISTORY_MS } from '../inbox/backfill.mjs';
 import {
   knownError,
   loginPage, logoutPage, overviewPage, leadsPage, leadDetailPage, listingsPage, spendPage, integrationsPage, messagePage,
@@ -57,6 +63,21 @@ export const SECURITY_HEADERS = {
 };
 
 export const MAX_NOTE = 2000;
+/**
+ * The reply route's body cap. A reply may be 4,096 characters (lib/wa-send.mjs
+ * MAX_TEXT_LEN), and a form percent-encodes each one to at most nine bytes (a three-byte
+ * UTF-8 character; a four-byte one is two of the 4,096): 36,864 bytes before the other
+ * fields. Every other write keeps `cfg.maxBodyBytes`.
+ */
+export const REPLY_MAX_BODY_BYTES = 64 * 1024;
+/**
+ * How far past `REPLY_MAX_BODY_BYTES` a FORM reply is still read (and thrown away), so the
+ * thread can be answered on a connection that stays. A refusal made mid-body has to close
+ * the socket while the browser is still sending, and that close can cut the answer off —
+ * a connection error instead of the page. Past this the rest is never read, and the
+ * connection goes with the answer.
+ */
+export const REPLY_DRAIN_MAX_BYTES = 1024 * 1024;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** `2026-09-08` and a date that exists. `9999-99-99` matches the shape and nothing else. */
@@ -87,22 +108,48 @@ const posInt = (v) => {
   const n = Number(v);
   return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
 };
+/**
+ * The reply form's `seen_rev`: digits from a form, a number from JSON. Anything else is
+ * NaN, which the sender reads as "cannot tell what you saw" and holds as stale.
+ */
+const asRev = (v) => {
+  if (typeof v === 'number') return v;
+  const s = typeof v === 'string' ? v.trim() : '';
+  return /^\d{1,15}$/.test(s) ? Number(s) : NaN;
+};
 
-/** Read a body with a hard cap; an oversized one is refused rather than buffered. */
-export function readBody(req, maxBytes) {
+/**
+ * Read a body with a hard cap; an oversized one is refused rather than buffered.
+ *
+ * With `drainTo` above `maxBytes`, a body over the cap but not past `drainTo` is still read
+ * to its end — every byte past the cap thrown away — and refused only then, with
+ * `drained: true`: nothing is left unread on the connection. Past `drainTo` (or with no
+ * `drainTo`) reading stops at once and the refusal says `drained: false`.
+ */
+export function readBody(req, maxBytes, { drainTo = 0 } = {}) {
+  const ceiling = Math.max(maxBytes, drainTo);
+  const tooLarge = (drained) => Object.assign(new Error('body too large'), { code: 'BODY_TOO_LARGE', drained });
   return new Promise((resolve, reject) => {
     let size = 0;
-    const chunks = [];
-    req.on('data', (chunk) => {
+    let over = false;
+    let chunks = [];
+    const onData = (chunk) => {
       size += chunk.length;
-      if (size > maxBytes) {
+      if (size > ceiling) {
+        req.off('data', onData);
         req.pause();
-        reject(Object.assign(new Error('body too large'), { code: 'BODY_TOO_LARGE' }));
+        reject(tooLarge(false));
+        return;
+      }
+      if (size > maxBytes) {
+        over = true;
+        chunks = [];
         return;
       }
       chunks.push(chunk);
-    });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    };
+    req.on('data', onData);
+    req.on('end', () => (over ? reject(tooLarge(true)) : resolve(Buffer.concat(chunks).toString('utf8'))));
     req.on('error', reject);
   });
 }
@@ -119,11 +166,15 @@ export function readBody(req, maxBytes) {
  * @param {ReturnType<import('../team.mjs').createTeam>} o.team   who may log in, and the Team page's data
  * @param {ReturnType<import('../audit.mjs').createAudit>} [o.audit]
  * @param {Function} [o.sendCode]                     the shared sender's `sendTo`, for login codes
+ * @param {ReturnType<import('../inbox/store.mjs').createInboxStore>} [o.inbox]     the Bona inbox; without it the inbox pages are 404
+ * @param {ReturnType<import('../wa-send.mjs').createSender>} [o.sender]             the one sender; its `reply` answers a chat
+ * @param {ReturnType<import('../inbox/backfill.mjs').createBackfill>} [o.backfill]  per-chat Evolution reads: refresh, join history
  */
 export function createDashboardRoutes({
   db, cfg = {}, inventory = null, fanout = null, app = null,
   sendWhatsApp = null, probeRetell = null,
   team = null, audit = null, sendCode = null,
+  inbox = null, sender = null, backfill = null,
   auth = null, stats = null, tiktokAccounts = null, log = () => {}, now = () => Date.now(),
 } = {}) {
   const statistics = stats ?? createStats({ db, now });
@@ -246,18 +297,19 @@ export function createDashboardRoutes({
   const signedIn = (req) => Boolean(currentUser(req));
 
   /**
-   * Read and parse a write body.
-   * @returns {{ ok: true, fields: object, form: boolean } | { ok: false, status: number, error: string }}
+   * Read and parse a write body. `drainFormTo` applies to a form body only (readBody's
+   * `drainTo`); a JSON one over `maxBytes` is always left unread.
+   * @returns {{ ok: true, fields: object, form: boolean } | { ok: false, status: number, error: string, form?: boolean, drained?: boolean }}
    */
-  async function fieldsOf(req) {
+  async function fieldsOf(req, maxBytes = maxBodyBytes, { drainFormTo = 0 } = {}) {
     const ct = req.headers['content-type'];
     const form = isForm(ct);
     if (!form && !isJson(ct)) return { ok: false, status: 415, error: 'unsupported_media_type' };
     let text;
     try {
-      text = await readBody(req, maxBodyBytes);
+      text = await readBody(req, maxBytes, { drainTo: form ? drainFormTo : 0 });
     } catch (err) {
-      if (err?.code === 'BODY_TOO_LARGE') return { ok: false, status: 413, error: 'payload_too_large' };
+      if (err?.code === 'BODY_TOO_LARGE') return { ok: false, status: 413, error: 'payload_too_large', form, drained: err.drained === true };
       return { ok: false, status: 400, error: 'bad_request' };
     }
     if (form) return { ok: true, form: true, fields: Object.fromEntries(new URLSearchParams(text)) };
@@ -420,6 +472,41 @@ export function createDashboardRoutes({
     return { counts, dests };
   }
 
+  /* -------------------- who sees which lead -------------------- */
+  //
+  // An owner sees every lead. Anyone else sees only the leads of the Bona inbox: `in`, and
+  // not under a colleague's or a never-list number (lib/team.mjs `isExcludedLead`). Every
+  // other lead — a guess on the Unsure list, "not a client", one nobody has placed yet, a
+  // TK or private chat that is a lead only for the statistics — is to them a lead that does
+  // not exist: on no list, in no count, and 404 on its page, its JSON and its stage and
+  // note writes. Its touchpoints keep the first message's snippet, so they are never shown
+  // either. The aggregates (charts, sources, pipeline counts, response times) stay as they
+  // are: numbers, with no person in them.
+
+  const ownerSees = (me) => me?.role === 'owner';
+  /** A lead of the Bona inbox: the only kind a staff member sees. */
+  const inBonaInbox = (lead) => Boolean(lead) && lead.inbox_state === 'in' && !isExcludedLead(team, db, lead);
+  /** The lead as `me` may see it, else null — the same null as a lead that does not exist. */
+  function leadFor(me, leadId) {
+    const lead = db.getLead(leadId);
+    return lead && (ownerSees(me) || inBonaInbox(lead)) ? lead : null;
+  }
+  /** Rows per read of a staff member's filtered list: the most `waitingLeads` gives at once. */
+  const STAFF_PAGE = 500;
+  /**
+   * Every lead `page` gives that a staff member may see, in its order: `in` leads from SQL,
+   * each then put to the exclusion test, read to the end so a count is a count, not a slice.
+   * @param {(o: { inboxState: 'in', limit: number, offset: number }) => object[]} page
+   */
+  function staffRows(page) {
+    const out = [];
+    for (let offset = 0; ; offset += STAFF_PAGE) {
+      const rows = page({ inboxState: 'in', limit: STAFF_PAGE, offset });
+      for (const lead of rows) if (inBonaInbox(lead)) out.push(lead);
+      if (rows.length < STAFF_PAGE) return out;
+    }
+  }
+
   /* -------------------- HTML pages -------------------- */
 
   function overview({ res, url, me }) {
@@ -427,7 +514,8 @@ export function createDashboardRoutes({
     // Every section is fetched defensively: one failing aggregate must not take the
     // whole desk page down, and the queue at the top is the part the owner actually
     // needs. `waitingTotal` is a real COUNT(*) — `waiting` is capped at 50, so its
-    // length is a slice and must never be rendered as the headline number.
+    // length is a slice and must never be rendered as the headline number. A staff
+    // member's queue is the Bona inbox's leads only, counted row by row.
     const safe = (label, fn, fallback) => {
       try {
         return fn();
@@ -436,6 +524,7 @@ export function createDashboardRoutes({
         return fallback;
       }
     };
+    const staffWaiting = ownerSees(me) ? null : safe('waiting', () => staffRows((o) => db.waitingLeads(o)), null);
     return sendHtml(res, 200, overviewPage({
       days,
       daily: safe('daily', () => statistics.overviewDaily(days), []),
@@ -443,8 +532,8 @@ export function createDashboardRoutes({
       matchQuality: safe('matchQuality', () => statistics.matchQuality(), []),
       pipeline: safe('pipeline', () => statistics.pipeline(), []),
       responseTimes: safe('responseTimes', () => statistics.responseTimes(), { median_min: null, p90_min: null, count: 0 }),
-      waiting: safe('waiting', () => db.waitingLeads({ limit: 50 }), []),
-      waitingTotal: safe('waitingTotal', () => db.countWaitingLeads(), null),
+      waiting: ownerSees(me) ? safe('waiting', () => db.waitingLeads({ limit: 50 }), []) : (staffWaiting ?? []).slice(0, 50),
+      waitingTotal: ownerSees(me) ? safe('waitingTotal', () => db.countWaitingLeads(), null) : (staffWaiting?.length ?? null),
       now: now(),
       me,
     }));
@@ -457,21 +546,25 @@ export function createDashboardRoutes({
     const stage = STAGES.includes(url.searchParams.get('stage')) ? url.searchParams.get('stage') : '';
     const q = String(url.searchParams.get('q') ?? '').slice(0, 100);
     const board = Object.fromEntries(STAGES.map((s) => [s, []]));
-    for (const lead of db.listLeads({ limit: BOARD_CARDS })) board[lead.stage]?.push(lead);
+    // A staff member's board, list and total are the Bona inbox's leads only; the stage
+    // counts are the pipeline's aggregate for everyone.
+    const mine = ownerSees(me) ? null : staffRows((o) => db.listLeads(o));
+    for (const lead of mine ? mine.slice(0, BOARD_CARDS) : db.listLeads({ limit: BOARD_CARDS })) board[lead.stage]?.push(lead);
     // The cards are the newest few hundred leads; the number on the column heading is the
     // truth. A count that quietly becomes a slice is worse than a slow page.
     const counts = Object.fromEntries(statistics.pipeline().map((p) => [p.stage, p.count]));
+    const filter = { stage: stage || null, q: q || null };
     return sendHtml(res, 200, leadsPage({
       board,
       counts,
-      leads: db.listLeads({ stage: stage || null, q: q || null, limit: 200 }),
-      stage, q, now: now(), total: db.countLeads(),
+      leads: mine ? staffRows((o) => db.listLeads({ ...o, ...filter })).slice(0, 200) : db.listLeads({ ...filter, limit: 200 }),
+      stage, q, now: now(), total: mine ? mine.length : db.countLeads(),
       me,
     }));
   }
 
   function leadDetail({ res, url, me }, leadId) {
-    const lead = db.getLead(leadId);
+    const lead = leadFor(me, leadId);
     if (!lead) return sendHtml(res, 404, messagePage({ title: 'Not found', message: 'No lead with that id.', me }));
     const saved = url.searchParams.get('ok');
     const error = url.searchParams.get('error');
@@ -535,6 +628,7 @@ export function createDashboardRoutes({
       users: team.listUsers(),
       never: team.listNever(),
       sendingEnabled: team.sendingEnabled(),
+      repliesEnabled: team.repliesEnabled(),
       ok: url.searchParams.get('ok'),
       error: url.searchParams.get('error'),
     }));
@@ -580,7 +674,7 @@ export function createDashboardRoutes({
     (form ? redirect(res, back) : sendJson(res, status, payload));
 
   function setStage({ res, fields, form, me }, leadId) {
-    const lead = db.getLead(leadId);
+    const lead = leadFor(me, leadId);
     if (!lead) return answer(res, { form, back: '/dashboard/leads', status: 404, payload: { error: 'not_found' } });
 
     const stage = String(fields.stage ?? '');
@@ -612,7 +706,7 @@ export function createDashboardRoutes({
   }
 
   function addNote({ res, fields, form, me }, leadId) {
-    const lead = db.getLead(leadId);
+    const lead = leadFor(me, leadId);
     const back = `/dashboard/leads/${encodeURIComponent(leadId)}`;
     if (!lead) return answer(res, { form, back: '/dashboard/leads', status: 404, payload: { error: 'not_found' } });
     const note = trimTo(fields.note, MAX_NOTE);
@@ -666,17 +760,24 @@ export function createDashboardRoutes({
     return sendJson(res, 200, statistics.overview(days));
   }
 
-  function adminLeads({ res, url }) {
+  function adminLeads({ res, url, me }) {
     const stageParam = url.searchParams.get('stage');
     const stage = STAGES.includes(stageParam) ? stageParam : null;
     const q = String(url.searchParams.get('q') ?? '').slice(0, 100) || null;
     const limit = Math.max(1, Math.min(500, Number(url.searchParams.get('limit')) || 100));
+    if (!ownerSees(me)) {
+      // `total` counts by stage alone, as the owner's does; both only what staff may see.
+      const rows = staffRows((o) => db.listLeads({ ...o, stage, q }));
+      const total = q ? staffRows((o) => db.listLeads({ ...o, stage })).length : rows.length;
+      const shown = rows.slice(0, limit);
+      return sendJson(res, 200, { count: shown.length, total, leads: shown.map(withMaskedPhone) });
+    }
     const rows = db.listLeads({ stage, q, limit });
     return sendJson(res, 200, { count: rows.length, total: db.countLeads({ stage }), leads: rows.map(withMaskedPhone) });
   }
 
-  function adminLead({ res }, leadId) {
-    const lead = db.getLead(leadId);
+  function adminLead({ res, me }, leadId) {
+    const lead = leadFor(me, leadId);
     if (!lead) return sendJson(res, 404, { error: 'not_found' });
     return sendJson(res, 200, {
       lead: withFullPhone(lead),
@@ -706,11 +807,28 @@ export function createDashboardRoutes({
     }
   }
 
+  /**
+   * A number that has just become a colleague's or a never-list one is never a client
+   * (§3.5, P2-7): the chat stored under it, if any, leaves the inbox and its transcript
+   * goes now, not at the next daily upkeep, and it leaves the owner's list of real-estate
+   * chats to check (D17). Audited by lead id only. Built without the inbox (older tests,
+   * tools), there is nothing stored to take out.
+   */
+  function leaveInboxFor(digits, me) {
+    if (!inbox || !digits) return;
+    inbox.removeCandidatesFor({ phone: digits, jid: `${digits}@s.whatsapp.net` });
+    const lead = db.getLeadByPhone(digits) ?? db.getLeadByJid(`${digits}@s.whatsapp.net`);
+    if (!lead || lead.inbox_state === 'out') return;
+    inbox.leaveInbox(lead.lead_id);
+    audit?.record({ userId: me.user_id, action: 'inbox_out', target: lead.lead_id });
+  }
+
   function addPerson(ctx) {
     const { fields, me } = ctx;
     return teamWrite(ctx, () => {
       const u = team.addUser({ name: asText(fields.name), phone: asText(fields.phone), role: fields.role === 'owner' ? 'owner' : 'staff' });
       audit?.record({ userId: me.user_id, action: 'team_add', target: u.user_id, meta: { role: u.role } });
+      leaveInboxFor(u.phone_e164, me);
     }, 'added');
   }
 
@@ -757,32 +875,409 @@ export function createDashboardRoutes({
       }, 'never_removed');
     }
     return teamWrite(ctx, () => {
-      team.addNever({ phone: asText(fields.phone), note: asText(fields.note), by: me.user_id });
+      const row = team.addNever({ phone: asText(fields.phone), note: asText(fields.note), by: me.user_id });
       audit?.record({ userId: me.user_id, action: 'never_add' });
+      leaveInboxFor(row.phone_e164, me);
     }, 'never_added');
   }
+
+  /** The owner's switches, as the Team page posts them: one per form. */
+  const SWITCHES = ['sending_enabled', 'inbox_replies'];
 
   function saveSetting(ctx) {
     const { fields, me } = ctx;
     return teamWrite(ctx, () => {
-      if (!Object.hasOwn(fields, 'sending_enabled')) throw new TeamError('bad_setting');
+      // Exactly one switch per post, the way the Team page's buttons send it: none, or
+      // two at once, is refused rather than guessed at.
+      const keys = SWITCHES.filter((k) => Object.hasOwn(fields, k));
+      if (keys.length !== 1) throw new TeamError('bad_setting');
+      const [key] = keys;
       // Fails closed: `asText` turns anything that is not literally a string (a JSON
       // `false`, `null`, a number) into `''`, and `team.setSetting` itself refuses any
       // value outside `SETTINGS_ALLOWED` — including `''`, `"off"`, `"true"` — before
       // it ever reaches the row. Coercing here (the old `=== '0' ? '0' : '1'`) would
       // have defeated that check by handing it only ever '0' or '1' to approve.
-      const value = asText(fields.sending_enabled);
-      team.setSetting('sending_enabled', value, { by: me.user_id });
-      audit?.record({ userId: me.user_id, action: 'setting', target: 'sending_enabled', meta: { value } });
+      const value = asText(fields[key]);
+      team.setSetting(key, value, { by: me.user_id });
+      audit?.record({ userId: me.user_id, action: 'setting', target: key, meta: { value } });
     }, 'setting');
+  }
+
+  /* -------------------- the Bona inbox -------------------- */
+  //
+  // Phase 2 of the 2026-09-27 design (§4). Three rules hold on every route here; the
+  // sender (lib/wa-send.mjs `reply`) checks the send-side ones again on its own:
+  //
+  //   1. A chat can be read or answered only while it is `in`, has a WhatsApp jid or lid
+  //      (P2-1), and its number is neither a team member's nor on the never list (§3.5,
+  //      P2-7). Anything else is the same 404, so no page tells anyone which numbers are
+  //      guesses, private, or colleagues.
+  //   2. Message text stays on the page it was typed on. A refused reply is drawn again
+  //      with the words still in the box (P2-9); a redirect, the audit log and the
+  //      process log carry ids and outcomes — never words, never numbers.
+  //   3. The Unsure list, Move, Not a client and Add by phone are the owner's (D9).
+
+  /** A colleague's or a never-list number, however the lead row holds it (lib/team.mjs). */
+  const excludedLead = (lead) => isExcludedLead(team, db, lead);
+
+  /** Rule 1: the one test every inbox read and write goes through first. */
+  const openChat = (lead) => Boolean(lead && lead.inbox_state === 'in' && (lead.wa_jid || lead.wa_lid) && !excludedLead(lead));
+
+  /**
+   * The signed-in person as a page draws them: their row plus `unread`, the Inbox badge.
+   * Summed over the very rows the inbox list shows, so the badge never counts a chat
+   * rule 1 hides (the store's `unreadTotal` knows nothing of the team or the never list).
+   * Unread chats sort first, so the list's cap only ever leaves out chats that add 0.
+   * Built without the inbox (older tests, tools), the row stays as it was. A count that
+   * fails is a missing badge, never a page that will not open.
+   */
+  function withUnread(user) {
+    if (!inbox) return user;
+    try {
+      const rows = inbox.listInbox({ userId: user.user_id, userCreated: user.created ?? 0, limit: 1000 }).filter((l) => !excludedLead(l));
+      return { ...user, unread: rows.reduce((n, r) => n + (Number(r.unread) || 0), 0) };
+    } catch (err) {
+      log({ level: 'warn', evt: 'dash.unread_failed', error: String(err?.message ?? err).slice(0, 200) });
+      return { ...user, unread: 0 };
+    }
+  }
+
+  /** `?ok=` codes the inbox pages know; own properties only, like `knownError`. */
+  const inboxOk = (v) => (typeof v === 'string' && Object.hasOwn(INBOX_OK, v) ? v : null);
+  const noSuchPage = (res, me) => sendHtml(res, 404, messagePage({ title: 'Not found', message: 'There is no such page.', me }));
+  const notInInbox = (res, me) => sendHtml(res, 404, messagePage({ title: 'Not in the inbox', message: 'That chat is not in the Bona inbox.', me }));
+  /** Rule 1's refusal for both callers: a form gets the page, JSON gets the code. */
+  const refuseChat = (res, form, me) => (form ? notInInbox(res, withUnread(me)) : sendJson(res, 404, { error: 'not_in_inbox' }));
+  /** One reply form's id: 24 hex characters, inside wa-send's SEND_ID_RE. */
+  const newSendId = () => randomId(12);
+
+  /**
+   * Fetch the chat from WhatsApp before it is drawn or answered (P2-10), so a reply is
+   * checked against what is really there rather than the last poll. The backfill bounds
+   * it (amendment A2) and promises never to throw; this catch is for one that breaks the
+   * promise. Either way a slow Evolution leaves the page with what is already stored.
+   */
+  async function refreshChat(lead) {
+    if (!backfill) return;
+    try {
+      await backfill.refresh(lead);
+    } catch (err) {
+      log({ level: 'warn', evt: 'dash.refresh_failed', leadId: lead.lead_id, error: String(err?.message ?? err).slice(0, 200) });
+    }
+  }
+
+  /** The owner vouched for this chat, so it brings its last 30 days (design §4.1). */
+  async function joinHistory(leadId, t) {
+    if (!backfill) return;
+    try {
+      await backfill.history(db.getLead(leadId), { sinceTs: t - OWNER_HISTORY_MS, untilTs: t });
+    } catch (err) {
+      log({ level: 'warn', evt: 'dash.history_failed', leadId, error: String(err?.message ?? err).slice(0, 200) });
+    }
+  }
+
+  /**
+   * A thread draws at least this many messages, every message from the oldest unread one
+   * on plus this much before them, and never more than the most.
+   */
+  const THREAD_MESSAGES = 200;
+  const THREAD_CONTEXT = 20;
+  const THREAD_MOST = 1000;
+
+  /**
+   * Draw one chat and mark it read — up to the newest message the page drew, never "now":
+   * a message the poller stores a moment later with an earlier WhatsApp timestamp must
+   * still count as unread. `seenRev`, the chat's revision read with the messages drawn (no
+   * await between them), rides in the form for the sender's stale-view guard; `seenTs`,
+   * the newest message drawn, is the read mark and rides along too.
+   *
+   * Every unread message is drawn, not only the newest 200: the newest max(200, span + 20)
+   * messages, at most 1,000, where the span is every message, both directions, from this
+   * person's oldest unread one on — replies between unread messages take room on the page
+   * too. The page says how many older ones it leaves out.
+   */
+  function renderThread(res, { status = 200, user, lead, draft = '', ok = null, error = null }) {
+    const span = inbox.unreadSpan(lead.lead_id, { userId: user.user_id, userCreated: user.created ?? 0 });
+    const messages = inbox.messagesFor(lead.lead_id, { limit: Math.min(THREAD_MOST, Math.max(THREAD_MESSAGES, span + THREAD_CONTEXT)) });
+    const seenRev = inbox.revision(lead.lead_id);
+    const hidden = Math.max(0, inbox.countMessages(lead.lead_id) - messages.length);
+    const seenTs = messages.reduce((max, m) => (Number(m.ts) > max ? Number(m.ts) : max), 0);
+    if (seenTs) inbox.markRead(user.user_id, lead.lead_id, seenTs);
+    return sendHtml(res, status, threadPage({
+      me: withUnread(user),
+      lead,
+      messages,
+      hidden,
+      gaps: inbox.gapsFor(lead.lead_id),
+      outbox: inbox.openOutboxFor(lead.lead_id),
+      // Everyone, not only the active: a reply keeps its author's name after they leave.
+      // threadPage offers only active people as handlers.
+      users: team.listUsers(),
+      sendId: newSendId(),
+      seenTs,
+      seenRev,
+      sendingEnabled: team.sendingEnabled(),
+      canReply: replyJidFor(lead) !== null,
+      repliesEnabled: team.repliesEnabled(),
+      draft,
+      ok: inboxOk(ok),
+      error: knownError(error),
+      now: now(),
+    }));
+  }
+
+  /**
+   * A real-estate chat to check (D17) whose number is a colleague's or a never-list one is
+   * on no list and in no count, like a lead rule 1 hides: the store knows no team.
+   */
+  const excludedCandidate = (c) => excludedLead({ phone_e164: c.phone_e164, wa_jid: c.jid, wa_lid: c.lid });
+  /**
+   * The lead a chat to check has become since it was noted (a web form, *Add chat by phone
+   * number* …), if any: that lead's own inbox state decides the chat from then on.
+   */
+  const leadOfCandidate = (c) => (c.phone_e164 ? db.getLeadByPhone(c.phone_e164) : null)
+    ?? (c.jid ? db.getLeadByJid(c.jid) : null) ?? (c.lid ? db.getLeadByJid(c.lid) : null);
+  /** The most chats to check the Unsure tab lists, and counts: one list for both. */
+  const CANDIDATES_SHOWN = 200;
+  /**
+   * The owner's real-estate chats to check, as his Unsure tab lists and counts them. The
+   * store already leaves out, in SQL, a chat that has become a lead; a colleague's or a
+   * never-list number is left out here (one team check per row, at most 200 rows).
+   */
+  const candidatesShown = () => inbox.listCandidates({ limit: CANDIDATES_SHOWN }).filter((c) => !excludedCandidate(c));
+
+  function inboxList({ res, url, me }) {
+    if (!inbox) return noSuchPage(res, me);
+    const ok = inboxOk(url.searchParams.get('ok'));
+    const error = knownError(url.searchParams.get('error'));
+    const owner = me.role === 'owner';
+    if (url.searchParams.get('tab') === 'unsure') {
+      if (!owner) return sendHtml(res, 403, messagePage({ title: 'Owners only', message: 'Only an owner can see the Unsure list.', me }));
+      return sendHtml(res, 200, unsurePage({
+        me, rows: inbox.listUnsure().filter((l) => !excludedLead(l)), candidates: candidatesShown(), ok, error, now: now(),
+      }));
+    }
+    return sendHtml(res, 200, inboxPage({
+      me,
+      rows: inbox.listInbox({ userId: me.user_id, userCreated: me.created ?? 0 }).filter((l) => !excludedLead(l)),
+      // Counted from the rows the Unsure tab shows (the guesses and the chats to check),
+      // never the store's raw counts. Staff get none: the tab is not theirs.
+      unsureCount: owner ? inbox.listUnsure({ limit: 1000 }).filter((l) => !excludedLead(l)).length + candidatesShown().length : 0,
+      ok,
+      error,
+      now: now(),
+    }));
+  }
+
+  async function inboxThread({ res, url, user }, leadId) {
+    if (!inbox) return noSuchPage(res, withUnread(user));
+    if (!openChat(db.getLead(leadId))) return notInInbox(res, withUnread(user));
+    await refreshChat(db.getLead(leadId));
+    // Read again: the refresh may have learned the chat's lid or phone jid.
+    const lead = db.getLead(leadId);
+    if (!openChat(lead)) return notInInbox(res, withUnread(user));
+    return renderThread(res, { user, lead, ok: url.searchParams.get('ok'), error: url.searchParams.get('error') });
+  }
+
+  /** How each of `sender.reply`'s refusals is answered: HTTP status, then the page's message code. */
+  const REPLY_REFUSALS = {
+    stale: [409, 'stale'],
+    lid_only: [409, 'lid_only'],
+    bad_text: [400, 'bad_text'],
+    bad_send_id: [400, 'bad_send_id'],
+    sending_disabled: [503, 'sending_disabled'],
+    replies_off: [503, 'replies_off'],
+    rate_limited: [429, 'reply_rate_limited'],
+  };
+  /** Refusals that mean the chat itself may not be answered (rule 1): no page of it is drawn. */
+  const NOT_ANSWERABLE = new Set(['not_found', 'not_in_inbox', 'excluded']);
+  /** A writer who is no longer signed in: a form goes to the login, JSON gets a 401. */
+  const signedOut = (res, form) => (form ? toLogin(res, '', 303) : sendJson(res, 401, { error: 'unauthorised' }));
+
+  async function inboxReply({ req, res, fields, form, me }, leadId) {
+    if (!sender) return sendJson(res, 404, { error: 'not_found' });
+    const back = `/dashboard/inbox/${encodeURIComponent(leadId)}`;
+    // Asked here as well as in the sender, and before the refresh: a chat that is not in
+    // the inbox must not cost an Evolution read, let alone a send.
+    if (!openChat(db.getLead(leadId))) return refuseChat(res, form, me);
+    await refreshChat(db.getLead(leadId));
+    // The session, asked again now the refresh is done: it can take seconds, and a person
+    // deactivated (or signed out) meanwhile must not send on the strength of a check made
+    // before. The sender reads the member again right before its outbox row as well.
+    if (!currentUser(req)) return signedOut(res, form);
+
+    const text = asText(fields.text).replace(/\r\n?/g, '\n').trim();
+    const out = await sender.reply({ sendId: asText(fields.send_id), leadId, userId: me.user_id, text, seenRev: asRev(fields.seen_rev) });
+    if (out.error === 'inactive_user') return signedOut(res, form);
+    const inFlight = out.duplicate && (out.status === 'pending' || out.status === 'uncertain');
+    const outcome = out.ok ? 'accepted' : (out.uncertain || inFlight) ? 'uncertain' : 'failed';
+    // Audited once per request that reached WhatsApp (sent, perhaps sent, or turned away
+    // by it) — never a refusal made here first, never a resubmit — with the outcome only.
+    const attempted = out.ok || out.uncertain || out.error === 'network' || String(out.error ?? '').startsWith('http_');
+    if (!out.duplicate && attempted) {
+      audit?.record({ userId: me.user_id, action: 'reply_sent', target: leadId, meta: { status: outcome } });
+      log({ evt: 'dash.reply', leadId, status: outcome });
+    }
+    if (outcome === 'accepted') return answer(res, { form, back: `${back}?ok=sent`, status: 200, payload: { ok: true, status: outcome, send_id: out.sendId } });
+    // It may well have gone. Say so and let the person look at WhatsApp: never retried,
+    // and the words are not kept for a resubmit that could send them twice.
+    if (outcome === 'uncertain') return answer(res, { form, back: `${back}?error=send_uncertain`, status: 202, payload: { ok: false, error: 'send_uncertain', send_id: out.sendId } });
+    if (NOT_ANSWERABLE.has(out.error)) return refuseChat(res, form, me);
+    // Anything else was turned away upstream (Evolution, the gate) or is a resubmit of a
+    // send that failed: 503, never 502 or 504 — Cloudflare puts its own page in place of
+    // those, and the thread with the words still in the box would never reach the writer.
+    const [status, error] = !out.duplicate && Object.hasOwn(REPLY_REFUSALS, out.error) ? REPLY_REFUSALS[out.error] : [503, 'send_failed'];
+    if (!form) return sendJson(res, status, { error });
+    const lead = db.getLead(leadId);
+    if (!openChat(lead)) return notInInbox(res, withUnread(me));
+    // The page again, the words still in the box and a fresh send_id: nothing in a URL (P2-9).
+    return renderThread(res, { status, user: me, lead, draft: text, error });
+  }
+
+  /**
+   * A form reply whose body is over `REPLY_MAX_BODY_BYTES`: the thread again with `bad_text`
+   * (the words were thrown away unread, so there is no draft to keep). Only a page is drawn
+   * — no write, nothing sent — so it asks only what a page asks: a signed-in person, an open
+   * chat.
+   *
+   * `drained`: the body was read to its end (it stopped short of `REPLY_DRAIN_MAX_BYTES`),
+   * so this is the ordinary over-long-reply answer on a connection that stays. Otherwise the
+   * rest was never read: 413, and the connection goes with the answer (refuseBody).
+   */
+  function replyTooLarge(req, res, leadId, drained) {
+    if (!drained) res.setHeader('Connection', 'close');
+    const me = currentUser(req);
+    if (!me) return toLogin(res, '', 303);
+    if (!inbox || !sender) return sendJson(res, 404, { error: 'not_found' });
+    const lead = db.getLead(leadId);
+    if (!openChat(lead)) return notInInbox(res, withUnread(me));
+    const [status, error] = drained ? REPLY_REFUSALS.bad_text : [413, 'bad_text'];
+    return renderThread(res, { status, user: me, lead, error });
+  }
+
+  function inboxHandler({ res, fields, form, me }, leadId) {
+    const back = `/dashboard/inbox/${encodeURIComponent(leadId)}`;
+    if (!openChat(db.getLead(leadId))) return refuseChat(res, form, me);
+    // Anyone on the team may hand a chat to any active person, or to nobody (P2-15).
+    const raw = asText(fields.user_id).trim();
+    const target = raw ? team.getUser(raw) : null;
+    if (raw && !(target && target.active)) return answer(res, { form, back: `${back}?error=bad_handler`, status: 400, payload: { error: 'bad_handler' } });
+    const to = target ? target.user_id : null;
+    inbox.setHandler(leadId, to);
+    audit?.record({ userId: me.user_id, action: 'handler', target: leadId, meta: { to } });
+    log({ evt: 'dash.handler', leadId });
+    return answer(res, { form, back: `${back}?ok=handler`, status: 200, payload: { ok: true, handler_user_id: to } });
+  }
+
+  async function inboxMove({ res, form, me }, leadId) {
+    const lead = db.getLead(leadId);
+    const leadPage = `/dashboard/leads/${encodeURIComponent(leadId)}`;
+    if (!lead) return answer(res, { form, back: '/dashboard/inbox?error=not_a_chat', status: 404, payload: { error: 'not_found' } });
+    if (excludedLead(lead)) return answer(res, { form, back: `${leadPage}?error=excluded`, status: 400, payload: { error: 'excluded' } });
+    // Nothing to read a chat by: no jid, no lid, no phone to make a jid of.
+    if (!lead.wa_jid && !lead.wa_lid && !lead.phone_e164) return answer(res, { form, back: `${leadPage}?error=not_a_chat`, status: 400, payload: { error: 'not_a_chat' } });
+    const t = now();
+    // He vouched for it: its last 30 days may be stored, and nothing older (ingest's floor).
+    inbox.setInboxState(leadId, 'in', { since: t, historyFrom: t - OWNER_HISTORY_MS });
+    // Off the owner's list of real-estate chats to check, if it was there (D17).
+    inbox.removeCandidatesFor({ phone: lead.phone_e164, jid: lead.wa_jid, lid: lead.wa_lid });
+    audit?.record({ userId: me.user_id, action: 'inbox_move', target: leadId });
+    log({ evt: 'dash.inbox_move', leadId });
+    await joinHistory(leadId, t);
+    // A phone-only lead becomes a chat once its history names a jid; until then, the list.
+    const back = openChat(db.getLead(leadId)) ? `/dashboard/inbox/${encodeURIComponent(leadId)}?ok=moved` : '/dashboard/inbox?ok=moved';
+    return answer(res, { form, back, status: 200, payload: { ok: true, lead_id: leadId } });
+  }
+
+  function inboxOut({ res, form, me }, leadId) {
+    const lead = db.getLead(leadId);
+    if (!lead) return answer(res, { form, back: '/dashboard/inbox?error=not_a_chat', status: 404, payload: { error: 'not_found' } });
+    // Not a client (design §4.1): out now, the transcript gone now, and it never comes
+    // back on its own — only the owner's Move or Add brings it in again.
+    const purged = inbox.leaveInbox(leadId);
+    audit?.record({ userId: me.user_id, action: 'inbox_out', target: leadId });
+    log({ evt: 'dash.inbox_out', leadId, messages: purged.messages });
+    const back = lead.inbox_state === 'in' ? '/dashboard/inbox?ok=out' : '/dashboard/inbox?tab=unsure&ok=out';
+    return answer(res, { form, back, status: 200, payload: { ok: true, purged } });
+  }
+
+  async function inboxAdd({ res, fields, form, me }) {
+    const raw = asText(fields.phone);
+    // A number the owner typed: never a lid or a jid, and international once normalised.
+    const digits = /[@:a-zA-Z]/.test(raw) ? null : normalisePhone(raw);
+    if (!digits || digits.startsWith('0')) return answer(res, { form, back: '/dashboard/inbox?error=bad_phone', status: 400, payload: { error: 'bad_phone' } });
+    if (team.isExcludedPhone(digits)) return answer(res, { form, back: '/dashboard/inbox?error=excluded', status: 400, payload: { error: 'excluded' } });
+    const t = now();
+    // The one lead write path; `owner_added` never fans out and is born in the inbox (P2-5).
+    const { lead } = createOrMergeLead(db, { phone: digits, waJid: `${digits}@s.whatsapp.net` }, {
+      channel: 'whatsapp', matchMethod: 'owner_added', now: t, dataDir: cfg.dataDir,
+    });
+    inbox.setInboxState(lead.lead_id, 'in', { since: t, historyFrom: t - OWNER_HISTORY_MS });
+    // A lead now: off the owner's list of real-estate chats to check (D17).
+    inbox.removeCandidatesFor({ phone: digits, jid: `${digits}@s.whatsapp.net` });
+    audit?.record({ userId: me.user_id, action: 'inbox_add', target: lead.lead_id });
+    log({ evt: 'dash.inbox_add', leadId: lead.lead_id });
+    await joinHistory(lead.lead_id, t);
+    return answer(res, { form, back: `/dashboard/inbox/${encodeURIComponent(lead.lead_id)}?ok=added`, status: 200, payload: { ok: true, lead_id: lead.lead_id } });
+  }
+
+  /**
+   * *Move to Bona inbox* on a real-estate chat to check (D17). The owner vouches for it, so
+   * it becomes an `owner_added` lead through the one lead write path — no ad fan-out, no
+   * new-lead note, born answered (P2-5) — goes `in`, brings its last 30 days, and leaves
+   * the list. A colleague's or a never-list number is refused and taken off the list, and
+   * so is a row with no phone number (a lid alone, or a WhatsApp channel's jid): A7 makes no
+   * lead of one, and the poller notes none. Audited and logged by the candidate's and the
+   * lead's ids, never a number.
+   */
+  async function candidateMove({ res, form, me }, candId) {
+    const unsure = '/dashboard/inbox?tab=unsure';
+    const c = inbox.getCandidate(candId);
+    if (!c || c.state !== 'open') return answer(res, { form, back: `${unsure}&error=candidate_gone`, status: 404, payload: { error: 'not_found' } });
+    if (!c.phone_e164 || (c.jid && !c.jid.endsWith('@s.whatsapp.net'))) {
+      inbox.removeCandidate(c.cand_id);
+      return answer(res, { form, back: `${unsure}&error=candidate_no_number`, status: 400, payload: { error: 'candidate_no_number' } });
+    }
+    const ids = { phone: c.phone_e164, jid: c.jid, lid: c.lid };
+    const existing = leadOfCandidate(c);
+    if (excludedCandidate(c) || (existing && excludedLead(existing))) {
+      inbox.removeCandidatesFor(ids);
+      return answer(res, { form, back: `${unsure}&error=excluded`, status: 400, payload: { error: 'excluded' } });
+    }
+    const t = now();
+    const { lead } = createOrMergeLead(db, { name: c.name, phone: c.phone_e164, waJid: c.jid, waLid: c.lid }, {
+      channel: 'whatsapp', matchMethod: 'owner_added', now: t, dataDir: cfg.dataDir,
+    });
+    inbox.setInboxState(lead.lead_id, 'in', { since: t, historyFrom: t - OWNER_HISTORY_MS });
+    inbox.removeCandidatesFor(ids);
+    audit?.record({ userId: me.user_id, action: 'inbox_move', target: c.cand_id, meta: { lead_id: lead.lead_id } });
+    log({ evt: 'dash.candidate_move', candId: c.cand_id, leadId: lead.lead_id });
+    await joinHistory(lead.lead_id, t);
+    const back = openChat(db.getLead(lead.lead_id)) ? `/dashboard/inbox/${encodeURIComponent(lead.lead_id)}?ok=moved` : '/dashboard/inbox?ok=moved';
+    return answer(res, { form, back, status: 200, payload: { ok: true, lead_id: lead.lead_id } });
+  }
+
+  /** *Not a client* on a real-estate chat to check: off the list, and not listed again (D17). */
+  function candidateDismiss({ res, form, me }, candId) {
+    const unsure = '/dashboard/inbox?tab=unsure';
+    if (!inbox.dismissCandidate(candId)) return answer(res, { form, back: `${unsure}&error=candidate_gone`, status: 404, payload: { error: 'not_found' } });
+    audit?.record({ userId: me.user_id, action: 'inbox_out', target: candId });
+    log({ evt: 'dash.candidate_dismiss', candId });
+    return answer(res, { form, back: `${unsure}&ok=dismissed`, status: 200, payload: { ok: true } });
   }
 
   /* -------------------- dispatch -------------------- */
 
   const LEAD_PATH = /^\/dashboard\/leads\/([A-Za-z0-9_-]{1,64})$/;
+  const INBOX_PATH = /^\/dashboard\/inbox\/([A-Za-z0-9_-]{1,64})$/;
   const ADMIN_LEAD = /^\/v1\/admin\/leads\/([A-Za-z0-9_-]{1,64})(?:\/(stage|note))?$/;
   const ADMIN_TEAM = /^\/v1\/admin\/team\/([A-Za-z0-9_-]{1,64})\/(deactivate|reactivate|role)$/;
-  const OWNER_WRITES = new Set(['/v1/admin/team', '/v1/admin/never', '/v1/admin/never/remove', '/v1/admin/settings']);
+  const ADMIN_INBOX = /^\/v1\/admin\/inbox\/([A-Za-z0-9_-]{1,64})\/(reply|handler|move|out)$/;
+  /** Inbox writes only an owner makes (D9); reply and handler are anyone's on the team. */
+  const OWNER_INBOX_WRITES = new Set(['move', 'out']);
+  /** The owner's decisions on a real-estate chat to check (D17): his alone. */
+  const ADMIN_CANDIDATE = /^\/v1\/admin\/inbox\/candidates\/([A-Za-z0-9_-]{1,64})\/(move|dismiss)$/;
+  const OWNER_WRITES = new Set(['/v1/admin/team', '/v1/admin/never', '/v1/admin/never/remove', '/v1/admin/settings', '/v1/admin/inbox/add']);
 
   const owns = ownsDashboardPath;
 
@@ -810,9 +1305,14 @@ export function createDashboardRoutes({
     }
 
     /* --- everything else needs a signed-in, active member --- */
-    const me = currentUser(req);
-    if (!me) return toLogin(res);
+    const user = currentUser(req);
+    if (!user) return toLogin(res);
     if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method_not_allowed' });
+    // A thread marks itself read before it is drawn, so it counts its own badge.
+    const threadMatch = INBOX_PATH.exec(p);
+    if (threadMatch) return inboxThread({ res, url, user }, threadMatch[1]);
+    // Every other signed-in page carries the person's unread count for the Inbox badge.
+    const me = withUnread(user);
 
     if (p === '/dashboard') return overview({ res, url, me });
     if (p === '/dashboard/leads') return leads({ res, url, me });
@@ -826,11 +1326,13 @@ export function createDashboardRoutes({
       return sendHtml(res, 200, tiktokAccountsPage({ me, state: accounts.status(), error: url.searchParams.get('error'), ok: url.searchParams.get('ok') }));
     }
     if (p === '/dashboard/team') return teamView({ res, url, me });
+    if (p === '/dashboard/inbox') return inboxList({ res, url, me });
     return sendHtml(res, 404, messagePage({ title: 'Not found', message: 'There is no such page.', me }));
   }
 
   async function handleAdmin({ req, res, url, p, ip }) {
-    if (!currentUser(req)) return sendJson(res, 401, { error: 'unauthorised' });
+    const viewer = currentUser(req);
+    if (!viewer) return sendJson(res, 401, { error: 'unauthorised' });
     // A stated foreign origin on a route that answers with the owner's leads is refused
     // whatever the method — CORS would stop a browser reading it, but not a script that
     // is not a browser, and this costs nothing.
@@ -843,9 +1345,9 @@ export function createDashboardRoutes({
 
     if (req.method === 'GET' || req.method === 'HEAD') {
       if (p === '/v1/admin/stats') return adminStats({ res, url });
-      if (p === '/v1/admin/leads') return adminLeads({ res, url });
+      if (p === '/v1/admin/leads') return adminLeads({ res, url, me: viewer });
       if (p === '/v1/admin/listings') return adminListings({ res });
-      if (leadMatch && !leadMatch[2]) return adminLead({ res }, leadMatch[1]);
+      if (leadMatch && !leadMatch[2]) return adminLead({ res, me: viewer }, leadMatch[1]);
       return sendJson(res, 404, { error: 'not_found' });
     }
 
@@ -858,12 +1360,23 @@ export function createDashboardRoutes({
       if (!origin || req.headers.origin !== origin) return sendHtml(res, 403, messagePage({ title: 'Request origin could not be verified', message: 'Open the TikTok setup page on the canonical API address in your signed-in owner browser and try again. Your browser must send its same-origin Origin header.' }));
     }
     const teamMatch = ADMIN_TEAM.exec(p);
-    const ownerWrite = Boolean(teamMatch || tiktokMatch) || OWNER_WRITES.has(p);
-    const writes = (leadMatch && leadMatch[2]) || (p === '/v1/admin/spend' ? 'spend' : null) || (ownerWrite ? 'team' : null);
+    const inboxMatch = ADMIN_INBOX.exec(p);
+    const candMatch = ADMIN_CANDIDATE.exec(p);
+    const ownerWrite = Boolean(teamMatch || tiktokMatch || candMatch || OWNER_WRITES.has(p) || (inboxMatch && OWNER_INBOX_WRITES.has(inboxMatch[2])));
+    const writes = (leadMatch && leadMatch[2]) || (p === '/v1/admin/spend' ? 'spend' : null)
+      || ((inboxMatch || candMatch || p === '/v1/admin/inbox/add') ? 'inbox' : null) || (ownerWrite ? 'team' : null);
     if (!writes) return sendJson(res, 404, { error: 'not_found' });
 
-    const parsed = await fieldsOf(req);
-    if (!parsed.ok) return refuseBody(req, res, parsed);
+    const replyWrite = Boolean(inboxMatch && inboxMatch[2] === 'reply');
+    const parsed = replyWrite
+      ? await fieldsOf(req, Math.max(maxBodyBytes, REPLY_MAX_BODY_BYTES), { drainFormTo: REPLY_DRAIN_MAX_BYTES })
+      : await fieldsOf(req, maxBodyBytes);
+    if (!parsed.ok) {
+      // A form reply too big even for its own cap comes back as the thread, with a message
+      // a person can act on — never a raw JSON answer in the browser.
+      if (replyWrite && parsed.status === 413 && parsed.form) return replyTooLarge(req, res, inboxMatch[1], parsed.drained);
+      return refuseBody(req, res, parsed);
+    }
     if (!hasMarker(req, parsed.fields)) {
       log({ level: 'warn', evt: 'dash.marker_missing', path: p, ip });
       return sendJson(res, 403, { error: 'forbidden', message: 'X-Bona-Dash: 1 (or _dash=1) is required on a write' });
@@ -874,12 +1387,25 @@ export function createDashboardRoutes({
     const me = currentUser(req);
     if (!me) return sendJson(res, 401, { error: 'unauthorised' });
     if (ownerWrite && me.role !== 'owner') {
-      log({ level: 'warn', evt: 'dash.owner_only', path: teamMatch ? '/v1/admin/team/:id' : p });
+      const shown = teamMatch ? '/v1/admin/team/:id' : inboxMatch ? `/v1/admin/inbox/:id/${inboxMatch[2]}`
+        : candMatch ? `/v1/admin/inbox/candidates/:id/${candMatch[2]}` : p;
+      log({ level: 'warn', evt: 'dash.owner_only', path: shown });
       return sendJson(res, 403, { error: 'owner_only' });
     }
 
     const ctx = { res, fields: parsed.fields, form: parsed.form, me };
-    if (tiktokMatch) return tiktokWrite({ ...ctx, req }, tiktokMatch[1]);
+    if (tiktokMatch) return tiktokWrite({ ...ctx, req, me: withUnread(me) }, tiktokMatch[1]);
+    if (writes === 'inbox') {
+      // index.mjs always wires the inbox; routes built without it (older tests, tools) have none.
+      if (!inbox) return sendJson(res, 404, { error: 'not_found' });
+      if (candMatch) return candMatch[2] === 'move' ? candidateMove(ctx, candMatch[1]) : candidateDismiss(ctx, candMatch[1]);
+      if (!inboxMatch) return inboxAdd(ctx);
+      const [, leadId, what] = inboxMatch;
+      if (what === 'reply') return inboxReply({ ...ctx, req }, leadId);
+      if (what === 'handler') return inboxHandler(ctx, leadId);
+      if (what === 'move') return inboxMove(ctx, leadId);
+      return inboxOut(ctx, leadId);
+    }
     if (writes === 'stage') return setStage(ctx, leadMatch[1]);
     if (writes === 'note') return addNote(ctx, leadMatch[1]);
     if (writes === 'spend') return saveSpend(ctx);

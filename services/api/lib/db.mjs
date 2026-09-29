@@ -13,7 +13,11 @@
  * user_version` and are idempotent — opening the file twice is a no-op.
  *
  * The file holds personal data: it is created 0600 inside a 0700 directory, and
- * WAL/shm side files inherit that mode from SQLite.
+ * WAL/shm side files inherit that mode from SQLite. Since schema v4 it also holds
+ * the WhatsApp transcripts of the Bona inbox chats (`wa_messages`) and the text of
+ * the team's replies (`wa_outbox`) — the most sensitive personal data in it. They
+ * are kept 5 years after a chat's last message (the retention purge in
+ * lib/inbox/store.mjs); a login code's outbox row never carries its text.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,7 +25,7 @@ import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { randomId } from './store.mjs';
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const STAGES = ['new', 'contacted', 'qualified', 'viewing', 'offer', 'negotiation', 'won', 'lost'];
 export const FANOUT_DESTS = ['meta', 'ga4', 'snap', 'tiktok'];
@@ -150,6 +154,118 @@ const MIGRATIONS = [
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT, updated INTEGER, updated_by TEXT);
     `,
   },
+  {
+    // The Bona inbox (2026-09-27 design §4.1–4.2, Phase 2). Whether the team may read a
+    // chat is STORED on the lead (`inbox_state`: 'in' | 'unsure' | 'out', NULL = not decided
+    // yet) and never re-derived from the match rules, so a lead that was only guessed (the
+    // word "bona", the ±15-min click window) cannot drift into the inbox later through the
+    // `phone` rule. `needs_human` is Phase 4's hand-over flag; any human reply clears it.
+    // `history_from` is the chat's durable history floor: nothing older than it is ever stored
+    // for that chat, whichever read brings it (the poller, a join's history, a thread refresh,
+    // the daily catch-up). A join sets it — 24 h before the joining message for an automatic
+    // join, 30 days back for the owner's Move and Add — and leaving the inbox clears it.
+    // `wa_messages` holds the transcripts of `in` chats only; only the client writes `in`,
+    // and everyone on the owner's side writes `out`, which a CHECK holds. `wa_outbox` is
+    // every send from the owner's number through lib/wa-send.mjs, and its rolling-24 h
+    // count is the daily cap, so a restart cannot reset it. A login `code` row never holds
+    // its text (the code itself is only ever stored hashed, in auth_challenges); that is a
+    // CHECK too, because SQLite cannot add one to a table later without rebuilding it.
+    // `wa_gaps` is a message the poller could not read: the thread says so instead of
+    // silently skipping it. Their text keys are NOT NULL because a rowid table's TEXT
+    // PRIMARY KEY otherwise takes NULL, as many times as it is given one.
+    // The two UPDATEs place the leads that already exist (P2-13). Certain → `in`, counted
+    // from the day the lead was created: a Ref code, real ad evidence on the lead_created
+    // touchpoint's `ad_meta` (D15; the same test as lib/inbox/eligibility.mjs `hasAdEvidence`:
+    // a click id, a conversion source, the ctwa_ad entry point or an ad source type — every
+    // live ad_meta lead on 2026-09-29 came from an organic entry point and has none), or a
+    // listing id in the first message. Everything else — the keyword and click-window guesses, web-form and
+    // concierge leads (a phone nobody verified never decides the chat under it: owner rule
+    // D9, 2026-09-29), legacy imports — goes to the owner's Unsure list. The GLOBs
+    // are deliberately a little looser than LISTING_ID_RE in lib/inbox/eligibility.mjs (no
+    // word boundary on either side) and were checked against the live data on 2026-09-28
+    // (only the 2 Ref leads' snippets carry a listing id: 2 in, every other lead unsure). Each lead put `in` gets the floor an automatic join would have:
+    // 24 h before it was created. `json_extract` raises on malformed JSON, and one bad touchpoint
+    // must not stop bona-api starting, so it only runs in the last branch of a CASE, after
+    // json_valid(...) and json_type(...) = 'text': SQLite evaluates a CASE lazily, but
+    // promises no order for the two sides of an AND. Only a string snippet counts, since
+    // json_extract returns an object or array as its JSON text, which a GLOB would match;
+    // likewise only an object `ad_meta`, and only its string fields.
+    // Team and never-list numbers are not excluded here; app.inboxMaintenance() moves them
+    // out on start (P2-20).
+    // `inbox_candidates` (added to v4 on 2026-09-28 in a later commit than the rest of v4,
+    // before v4 ever shipped: no file anywhere is at v4 without it) is the owner's list of
+    // real-estate chats to check (D17): a chat that used property words, in either
+    // direction, but gave no sure sign it is about Bona. It is not a lead and holds no
+    // message text: only who (number, jid, lid, the name WhatsApp shows for them), when
+    // (first and last message, how many), which property words (`words`, comma-joined, at
+    // most 8) and who wrote last. `dismissed` is the owner's "Not a client": the row stays,
+    // emptied of everything but its ids, only so the chat is not listed again. One row per
+    // number, jid and lid (UNIQUE; NULLs do not collide). No foreign keys, as in v3.
+    // `chat_rev` (added to v4 on 2026-09-30, also before v4 shipped) is the chat's revision
+    // for the reply form's stale-view guard (lib/inbox/store.mjs `revision`): lib/inbox/store.mjs
+    // adds 1 in the same transaction as every new message, every staff or Dana send (and
+    // again when it leaves pending), every new gap and every purge of the chat. It lives on
+    // the lead row because that row is never deleted, so the number never goes down or
+    // comes back after a purge; every existing lead starts at 0.
+    // Migrations here only ever add.
+    version: 4,
+    sql: `
+      ALTER TABLE leads ADD COLUMN inbox_state TEXT CHECK (inbox_state IN ('in','unsure','out'));
+      ALTER TABLE leads ADD COLUMN inbox_since INTEGER;
+      ALTER TABLE leads ADD COLUMN handler_user_id TEXT;
+      ALTER TABLE leads ADD COLUMN last_msg_ts INTEGER;
+      ALTER TABLE leads ADD COLUMN needs_human INTEGER NOT NULL DEFAULT 0 CHECK (needs_human IN (0,1));
+      ALTER TABLE leads ADD COLUMN history_from INTEGER;
+      ALTER TABLE leads ADD COLUMN chat_rev INTEGER NOT NULL DEFAULT 0;
+      CREATE INDEX IF NOT EXISTS leads_inbox ON leads(inbox_state, last_msg_ts);
+      CREATE TABLE IF NOT EXISTS wa_messages (
+        key_id TEXT NOT NULL PRIMARY KEY, lead_id TEXT NOT NULL, jid TEXT,
+        direction TEXT NOT NULL CHECK (direction IN ('in','out')),
+        sender_kind TEXT NOT NULL CHECK (sender_kind IN ('client','staff','dana','owner_number')),
+        sender_user_id TEXT, text TEXT, media_type TEXT, ts INTEGER NOT NULL, status TEXT,
+        CHECK ((direction = 'in') = (sender_kind = 'client'))
+      );
+      CREATE INDEX IF NOT EXISTS wa_messages_lead ON wa_messages(lead_id, ts);
+      CREATE TABLE IF NOT EXISTS wa_outbox (
+        send_id TEXT NOT NULL PRIMARY KEY, lead_id TEXT, jid TEXT NOT NULL, text TEXT, user_id TEXT,
+        sender_kind TEXT NOT NULL CHECK (sender_kind IN ('staff','dana','code','note')),
+        status TEXT NOT NULL CHECK (status IN ('pending','accepted','failed','uncertain')),
+        key_id TEXT, created INTEGER NOT NULL, updated INTEGER NOT NULL, error TEXT,
+        CHECK (sender_kind <> 'code' OR text IS NULL)
+      );
+      CREATE INDEX IF NOT EXISTS wa_outbox_key ON wa_outbox(key_id);
+      CREATE INDEX IF NOT EXISTS wa_outbox_lead ON wa_outbox(lead_id, created);
+      CREATE INDEX IF NOT EXISTS wa_outbox_created ON wa_outbox(created);
+      CREATE TABLE IF NOT EXISTS inbox_reads (user_id TEXT NOT NULL, lead_id TEXT NOT NULL, last_read_ts INTEGER NOT NULL, PRIMARY KEY (user_id, lead_id));
+      CREATE TABLE IF NOT EXISTS wa_gaps (key_id TEXT NOT NULL PRIMARY KEY, lead_id TEXT, jid TEXT, ts INTEGER, reason TEXT);
+      CREATE INDEX IF NOT EXISTS wa_gaps_lead ON wa_gaps(lead_id, ts);
+      CREATE TABLE IF NOT EXISTS inbox_candidates (
+        cand_id TEXT NOT NULL PRIMARY KEY, jid TEXT UNIQUE, lid TEXT UNIQUE, phone_e164 TEXT UNIQUE, name TEXT,
+        first_ts INTEGER NOT NULL, last_ts INTEGER NOT NULL, hits INTEGER NOT NULL DEFAULT 1, words TEXT,
+        last_dir TEXT CHECK (last_dir IN ('in','out')),
+        state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open','dismissed')), updated INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS inbox_candidates_state ON inbox_candidates(state, last_ts);
+      UPDATE leads SET
+        inbox_state = CASE WHEN match_method = 'ref'
+            OR (match_method = 'ad_meta' AND EXISTS (SELECT 1 FROM touchpoints t WHERE t.lead_id = leads.lead_id AND t.event_type = 'lead_created'
+                       AND CASE WHEN json_valid(t.meta) IS NOT 1 THEN 0
+                                WHEN json_type(t.meta, '$.ad_meta') IS NOT 'object' THEN 0
+                                ELSE (json_type(t.meta, '$.ad_meta.ctwa_clid') IS 'text' AND trim(json_extract(t.meta, '$.ad_meta.ctwa_clid'), char(32, 9, 10, 11, 12, 13)) <> '')
+                                  OR (json_type(t.meta, '$.ad_meta.conversion_source') IS 'text' AND trim(json_extract(t.meta, '$.ad_meta.conversion_source'), char(32, 9, 10, 11, 12, 13)) <> '')
+                                  OR (json_type(t.meta, '$.ad_meta.entry_point_conversion_source') IS 'text'
+                                      AND json_extract(t.meta, '$.ad_meta.entry_point_conversion_source') = 'ctwa_ad')
+                                  OR (json_type(t.meta, '$.ad_meta.source_type') IS 'text'
+                                      AND lower(trim(json_extract(t.meta, '$.ad_meta.source_type'), char(32, 9, 10, 11, 12, 13))) IN ('ad', 'ads')) END))
+            OR EXISTS (SELECT 1 FROM touchpoints t WHERE t.lead_id = leads.lead_id AND t.event_type = 'lead_created'
+                       AND CASE WHEN json_valid(t.meta) IS NOT 1 THEN 0
+                                WHEN json_type(t.meta, '$.snippet') IS NOT 'text' THEN 0
+                                ELSE upper(json_extract(t.meta, '$.snippet')) GLOB '*BONA-[0-9][0-9][0-9]*'
+                                  OR upper(json_extract(t.meta, '$.snippet')) GLOB '*BONA-W[0-9][0-9][0-9]*' END)
+          THEN 'in' ELSE 'unsure' END;
+      UPDATE leads SET inbox_since = created, history_from = created - 86400000 WHERE inbox_state = 'in';
+    `,
+  },
 ];
 
 /** Columns of each table, in order — the single source for the insert/update helpers. */
@@ -160,7 +276,8 @@ const COLUMNS = {
   leads: ['lead_id', 'created', 'updated', 'phone_e164', 'wa_jid', 'wa_lid', 'name', 'channel', 'source', 'medium', 'campaign', 'campaign_id',
     'content', 'click_ids', 'ref', 'match_method', 'session_id', 'anon_id', 'listing_id', 'first_touch', 'last_touch', 'interest', 'budget',
     'timeline', 'district', 'language', 'notes', 'stage', 'stage_ts', 'value_sar', 'first_inbound_ts', 'first_reply_ts', 'legacy_id',
-    'consent_ads', 'consent_analytics'],
+    'consent_ads', 'consent_analytics', 'inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from',
+    'chat_rev'],
   touchpoints: ['id', 'lead_id', 'ts', 'channel', 'event_type', 'source', 'medium', 'campaign', 'campaign_id', 'listing_id', 'meta'],
 };
 
@@ -218,7 +335,8 @@ export function openDb(file = ':memory:') {
   db.exec('PRAGMA journal_mode=WAL');
   db.exec('PRAGMA foreign_keys=ON');
   db.exec('PRAGMA busy_timeout=3000');
-  migrate(db);
+  // A failed migration is rolled back inside migrate(); the handle must not outlive it.
+  try { migrate(db); } catch (err) { try { db.close(); } catch { /* already unusable */ } throw err; }
 
   const stmts = new Map();
   /** Prepared-statement cache: the same SQL text is compiled once per open. */
@@ -341,10 +459,15 @@ export function openDb(file = ':memory:') {
     return prep(sql).run(...cols.map((c) => bind('leads', c, patch[c])), String(leadId)).changes === 1;
   }
 
-  function listLeads({ stage = null, q = null, limit = 100, offset = 0 } = {}) {
+  /**
+   * `inboxState` keeps only leads in that inbox state (the dashboard asks for `'in'` on a
+   * staff member's behalf: staff see only the Bona inbox's leads).
+   */
+  function listLeads({ stage = null, q = null, limit = 100, offset = 0, inboxState = null } = {}) {
     const where = [];
     const vals = [];
     if (stage) { where.push('stage = ?'); vals.push(String(stage)); }
+    if (inboxState) { where.push('inbox_state = ?'); vals.push(String(inboxState)); }
     if (q && String(q).trim()) {
       const like = `%${String(q).trim().toLowerCase()}%`;
       where.push('(lower(name) LIKE ? OR phone_e164 LIKE ? OR lower(notes) LIKE ? OR lower(district) LIKE ? OR lower(interest) LIKE ? OR listing_id LIKE ? OR lead_id LIKE ?)');
@@ -374,14 +497,17 @@ export function openDb(file = ':memory:') {
   const WAITING_WHERE = `WHERE first_reply_ts IS NULL
                            AND (stage IS NULL OR stage NOT IN ('won','lost'))`;
 
-  function waitingLeads({ limit = 50 } = {}) {
+  /** `inboxState` and `offset` as for `listLeads`. */
+  function waitingLeads({ limit = 50, offset = 0, inboxState = null } = {}) {
     // better-sqlite3 refuses a non-integer binding ("datatype mismatch"), so a
     // fractional limit must be truncated rather than passed through.
     const n = Math.trunc(Math.max(1, Math.min(500, Number(limit) || 50)));
-    const sql = `SELECT * FROM leads ${WAITING_WHERE}
+    const skip = Math.trunc(Math.max(0, Number(offset) || 0));
+    const sql = `SELECT * FROM leads ${WAITING_WHERE} ${inboxState ? 'AND inbox_state = ?' : ''}
                  ORDER BY COALESCE(first_inbound_ts, created) ASC, rowid ASC
-                 LIMIT ?`;
-    return prep(sql).all(n).map((r) => unwrap('leads', r));
+                 LIMIT ? OFFSET ?`;
+    const vals = inboxState ? [String(inboxState), n, skip] : [n, skip];
+    return prep(sql).all(...vals).map((r) => unwrap('leads', r));
   }
 
   /**
@@ -547,8 +673,15 @@ export function openDb(file = ':memory:') {
   };
 }
 
-function migrate(db) {
+/**
+ * Bring `db` (a raw DatabaseSync) up to `upTo`, one migration per transaction. `openDb`
+ * always runs the whole chain; `upTo` exists so the tests can stop it early, build a
+ * genuine older file and upgrade that — the only honest way to test a step that places
+ * rows already in the file (v4).
+ */
+export function migrate(db, { upTo = SCHEMA_VERSION } = {}) {
   for (const m of MIGRATIONS) {
+    if (m.version > upTo) continue;
     // BEGIN IMMEDIATE takes the write lock up front, so a concurrent opener (another
     // process's openDb on the same file) either gets here first and finishes its COMMIT
     // before we acquire the lock, or blocks (busy_timeout) until we finish ours — either

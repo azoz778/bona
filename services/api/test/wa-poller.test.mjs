@@ -16,8 +16,14 @@ import { openDb } from '../lib/db.mjs';
 import { createTeam } from '../lib/team.mjs';
 import {
   CLICK_WINDOW_MS, FIRST_RUN_LOOKBACK_MS, MAX_RECORD_ATTEMPTS, MAX_WINDOW_MS, OVERLAP_MS,
-  SEEN_TTL_MS, adMetaOf, adSourceOf, createPoller, isIgnorableChat, jidsOf,
+  SEEN_TTL_MS, PROPERTY_DOCUMENT_WORD, TK_DOCUMENT_WORD, adMetaOf, adSourceOf, candidateWordsOf, createPoller, isIgnorableChat, jidsOf,
 } from '../lib/wa-poller.mjs';
+import { JOIN_HISTORY_MS, OWNER_HISTORY_MS, createBackfill } from '../lib/inbox/backfill.mjs';
+import { ownerOutboundJoins } from '../lib/inbox/eligibility.mjs';
+import { createIngest } from '../lib/inbox/ingest.mjs';
+import { createInboxStore } from '../lib/inbox/store.mjs';
+import { createOrMergeLead, leadNote } from '../lib/leads.mjs';
+import { loadConfig } from '../lib/config.mjs';
 
 const NOW = Date.UTC(2026, 8, 6, 12, 0, 0);
 const ANON = '9f1c'.repeat(8);
@@ -39,10 +45,57 @@ const msg = (over = {}) => ({
 });
 
 /**
+ * Evolution's per-chat read (`findMessages` with a `key` filter) over a fixed pool: the
+ * `remoteJid` / `remoteJidAlt` filters and the time window honoured the way the live
+ * instance honours them (2026-09-28 pre-work), newest first, paged by `offset`. `fail`
+ * records the question and then throws, the way a read does while Evolution is down.
+ */
+function chatReader(pool, { fail = false } = {}) {
+  const calls = [];
+  const find = async ({ where = {}, page = 1, offset = 100 } = {}) => {
+    calls.push({ where, page, offset });
+    if (fail) throw new Error('connect ECONNREFUSED 127.0.0.1:8085');
+    const key = where.key ?? {};
+    const t = where.messageTimestamp ?? null;
+    const hits = pool
+      .filter((r) => (key.remoteJid === undefined || r.jid === key.remoteJid)
+        && (key.remoteJidAlt === undefined || r.jidAlt === key.remoteJidAlt)
+        && (!t || (r.ts >= Date.parse(t.gte) && r.ts <= Date.parse(t.lte))))
+      .sort((a, b) => b.ts - a.ts);
+    return { records: hits.slice((page - 1) * offset, page * offset), total: hits.length, pages: Math.max(1, Math.ceil(hits.length / offset)) };
+  };
+  return { calls, find };
+}
+
+/** The Bona inbox wired the way index.mjs wires it, with the owner seeded and the per-chat reader spied on. */
+function inboxWiring({ db, history, historyFails = false, logs, now }) {
+  const team = createTeam(db, { now });
+  const owner = team.ensureOwner({ phone: '966593296933', name: 'Abdulaziz' });
+  const inbox = createInboxStore(db, { now });
+  const log = (obj) => logs.push(obj);
+  const ingestor = createIngest({ db, inbox, ownerUserId: () => owner.user_id, log, now });
+  const ingest = (lead, rec) => ingestor.ingest(lead, rec);
+  const reader = chatReader(history, { fail: historyFails });
+  const backfill = createBackfill({ env: {}, db, ingest, inbox, find: reader.find, log, now });
+  return { team, owner, inbox, ingestor, ingest, backfill, findCalls: reader.calls };
+}
+
+/**
  * A store with the visitor session behind Ref `K7Q2XR`, a poller wired to a queue of
  * windows (one per tick), and the owner's note sender recorded rather than sent.
+ *
+ * `inbox: true` also wires the Bona inbox (`inboxWiring` above): the real inbox store,
+ * ingest and backfill over the same db, except that the backfill's per-chat reader is a
+ * spy over `history`, so no test reaches Evolution; `historyFails` makes that reader throw,
+ * as it does when Evolution is down. `ingestOverride` replaces only the poller's ingest
+ * (the backfill keeps the real one), for a store that fails. `rewire(wiring)` returns any of
+ * `inboxStore`/`ingest`/`backfill` to hand the poller instead of the defaults (the rest of
+ * the wiring keeps the real ones). `onNote` runs while the owner's note is being sent.
  */
-function harness({ windows = [], env = {}, seedSession = true, isExcluded } = {}) {
+function harness({
+  windows = [], env = {}, seedSession = true, isExcluded, inbox = false, history = [], historyFails = false, ingestOverride = null,
+  rewire = null, onNote = null,
+} = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-poller-'));
   const db = openDb(':memory:');
   if (seedSession) {
@@ -57,17 +110,20 @@ function harness({ windows = [], env = {}, seedSession = true, isExcluded } = {}
   const sent = [];
   const logs = [];
   let clock = NOW;
+  const wiring = inbox ? inboxWiring({ db, history, historyFails, logs, now: () => clock }) : null;
   const poller = createPoller({
     db,
     cfg: { env: { BONA_OWNER_JID: OWNER, ...env }, siteUrl: 'https://bona-real-estate.com', dataDir, waPollMs: 0 },
     findMessages: async (window) => { asked.push(window); return { records: queue.length ? queue.shift() : [] }; },
-    sendWhatsApp: async (text) => { sent.push(text); return { ok: true }; },
+    sendWhatsApp: async (text) => { sent.push(text); if (onNote) await onNote(text); return { ok: true }; },
     ...(isExcluded ? { isExcluded } : {}),
+    ...(wiring ? { inboxStore: wiring.inbox, ingest: ingestOverride ?? wiring.ingest, backfill: wiring.backfill, ...(rewire ? rewire(wiring) : {}) } : {}),
     log: (obj) => logs.push(obj),
     now: () => clock,
   });
   return {
     db, poller, asked, sent, logs, dataDir,
+    inbox: wiring?.inbox ?? null, team: wiring?.team ?? null, owner: wiring?.owner ?? null, findCalls: wiring?.findCalls ?? [],
     push: (records) => queue.push(records),
     setClock: (t) => { clock = t; },
     leads: () => db.listLeads({ limit: 50 }),
@@ -709,6 +765,22 @@ test('start() puts the tick on an unref\'d timer and stop() takes it off', async
   h.cleanup();
 });
 
+test('start() with no interval and a cfg without one polls on lib/config.mjs\'s default', (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const everyMs = loadConfig({ env: {}, ids: {} }).waPollMs;
+  const db = openDb(':memory:');
+  const logs = [];
+  // Not configured, so a tick only logs that it skipped — synchronously, as it starts.
+  const poller = createPoller({ db, cfg: { env: {} }, log: (o) => logs.push(o), now: () => NOW });
+  assert.equal(poller.start(), true);
+  t.mock.timers.tick(everyMs - 1);
+  assert.equal(logs.length, 0);
+  t.mock.timers.tick(1);
+  assert.deepEqual(logs.map((l) => l.evt), ['wa.poll.skipped'], 'one default, not a stale second copy');
+  poller.stop();
+  db.close();
+});
+
 test('with no Evolution credentials the loop does nothing at all — it does not guess a URL', async () => {
   const db = openDb(':memory:');
   const logs = [];
@@ -785,6 +857,32 @@ test('(l) the bare-array shape and an ISO timestamp are read the same way', asyn
   });
   const [lead] = db.listLeads({ limit: 5 });
   assert.equal(lead.first_inbound_ts, NOW - 90_000);
+  db.close();
+});
+
+test('(l) an injected fetchImpl is what the default reader goes out through, never the global fetch', async () => {
+  const db = openDb(':memory:');
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, body: JSON.parse(init.body) });
+    return { ok: true, status: 200, text: async () => JSON.stringify({ messages: { total: 1, pages: 1, currentPage: 1, records: [wire()] } }) };
+  };
+  const poller = createPoller({
+    db,
+    cfg: { env: { EVOLUTION_API_URL: 'https://wa-api.example', EVOLUTION_API_KEY: 'evo-key', BONA_OWNER_JID: OWNER } },
+    fetchImpl,
+    now: () => NOW,
+  });
+  const real = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('the global fetch was used'); };
+  try {
+    const tally = await poller.tick();
+    assert.equal(tally.matched, 1);
+  } finally {
+    globalThis.fetch = real;
+  }
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://wa-api.example/chat/findMessages/abdulaziz-personal');
   db.close();
 });
 
@@ -1096,5 +1194,1269 @@ test('(s) an isExcluded failure defers just that record; the tick completes and 
   const second = await h.poller.tick();
   assert.equal(second.matched, 1, 'the deferred record is picked up and judged normally next time');
   assert.equal(h.db.countLeads(), 2);
+  h.cleanup();
+});
+
+/* ---------------- (l) the default reader trusts the size Evolution states ---------------- */
+
+test('(l) one full page that says it is the whole window is read once, not paged to the cap', async () => {
+  const db = openDb(':memory:');
+  const logs = [];
+  const poller = createPoller({
+    db,
+    cfg: { env: { EVOLUTION_API_URL: 'https://wa-api.example', EVOLUTION_API_KEY: 'evo-key', BONA_OWNER_JID: OWNER } },
+    log: (o) => logs.push(o),
+    now: () => NOW,
+  });
+  const page = Array.from({ length: 100 }, (_, i) => wire({ key: { id: `P${i}`, fromMe: false, remoteJid: SENDER }, message: { conversation: 'hi' } }));
+  await withStubbedFetch({ messages: { total: 100, pages: 1, currentPage: 1, records: page } }, async (calls) => {
+    const tally = await poller.tick();
+    assert.equal(calls.length, 1, 'total says 100 on one page, so there is no page 2 to ask for');
+    assert.equal(tally.scanned, 100);
+  });
+  assert.equal(logs.some((l) => l.evt === 'wa.poll.truncated'), false);
+  db.close();
+});
+
+test('a truncated window says how many messages it could not read', async () => {
+  const db = openDb(':memory:');
+  const logs = [];
+  const poller = createPoller({
+    db,
+    cfg: { env: { BONA_OWNER_JID: OWNER } },
+    findMessages: async () => ({ records: [msg({ text: 'hi' })], truncated: true, missing: 42 }),
+    log: (o) => logs.push(o),
+    now: () => NOW,
+  });
+  await poller.tick();
+  const warned = logs.find((l) => l.evt === 'wa.poll.truncated');
+  assert.equal(warned.level, 'warn');
+  assert.equal(warned.missing, 42);
+  db.close();
+});
+
+/* ---------------- (t) the Bona inbox (2026-09-27 design §4) ---------------- */
+
+const iso = (ms) => new Date(ms).toISOString();
+const STRANGER = '966522222222@s.whatsapp.net';
+const STRANGER2 = '966533333333@s.whatsapp.net';
+/** A chat's stored transcript, oldest first, as [id, direction, sender]. */
+const rows = (h, leadId) => h.inbox.messagesFor(leadId).map((m) => [m.key_id, m.direction, m.sender_kind]);
+/** Every per-chat read the backfill made asked for exactly the 24 h before the join. */
+function assertHistoryWindow(h, joinTs) {
+  assert.ok(h.findCalls.length > 0, 'the history before the join was asked for');
+  for (const c of h.findCalls) assert.deepEqual(c.where.messageTimestamp, { gte: iso(joinTs - JOIN_HISTORY_MS), lte: iso(joinTs) });
+}
+/** A lead already in the inbox, as a certain match (or the migration) would have left it. */
+const seedInLead = (h, over = {}) => h.db.insertLead({
+  lead_id: 'LEAD-in', phone_e164: '966500000000', wa_jid: SENDER, inbox_state: 'in', inbox_since: NOW - 3_600_000,
+  created: NOW - 3_600_000, updated: NOW - 3_600_000, ...over,
+});
+
+test('(t) with no inbox wired the poller stays the Phase 1 poller: no state, no transcript', async () => {
+  const h = harness({ windows: [[
+    msg({ text: 'Ref BONA-W003 · K7Q2XR' }),
+    msg({ id: 'OUT', fromMe: true, ts: NOW - 30_000, pushName: null, text: 'Ahlan!' }),
+  ]] });
+  const tally = await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.inbox_state, null);
+  assert.equal(lead.first_reply_ts, NOW - 30_000);
+  assert.equal(createInboxStore(h.db).hasMessages(lead.lead_id), false);
+  assert.deepEqual({ joined: tally.joined, stored: tally.stored }, { joined: 0, stored: 0 });
+  h.cleanup();
+});
+
+test('(t) an inbox ingest without the inbox store is a wiring mistake, refused at once', () => {
+  const db = openDb(':memory:');
+  assert.throws(() => createPoller({ db, ingest: () => ({ stored: false }) }), TypeError);
+  db.close();
+});
+
+test('(t) a Ref line puts the chat in the inbox: stored, with the 24 h before it', async () => {
+  const hi = msg({ id: 'HI', ts: NOW - 3_600_000, text: 'Hi' });
+  const ref = msg({ id: 'REF', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const h = harness({ inbox: true, history: [hi, ref], windows: [[ref]] });
+  const tally = await h.poller.tick();
+
+  const [lead] = h.leads();
+  assert.equal(lead.inbox_state, 'in');
+  assert.equal(lead.inbox_since, NOW - 60_000, 'in since the message that joined it');
+  assertHistoryWindow(h, NOW - 60_000);
+  assert.deepEqual(rows(h, lead.lead_id), [['HI', 'in', 'client'], ['REF', 'in', 'client']], 'the "Hi" before the Ref line is there too, and nothing twice');
+  assert.deepEqual(h.inbox.gapsFor(lead.lead_id), [], 'a history that was read leaves no gap');
+  assert.deepEqual({ joined: tally.joined, stored: tally.stored }, { joined: 1, stored: 1 });
+  assert.equal(h.sent.length, 1, 'a client-started lead still tells the owner');
+  const joined = h.logs.find((l) => l.evt === 'inbox.join');
+  assert.equal(joined.leadId, lead.lead_id);
+  assert.equal(joined.via, 'inbound');
+  h.cleanup();
+});
+
+test('(t) the word "bona" alone is a guess: the Unsure list, nothing stored, no history pulled', async () => {
+  const h = harness({ inbox: true, windows: [[msg({ text: 'مرحبا بونا، عندكم شقق في الشاطئ؟' })]] });
+  const tally = await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.match_method, 'keyword', 'still a lead, for the stats');
+  assert.equal(lead.inbox_state, 'unsure');
+  assert.equal(lead.inbox_since, null);
+  assert.equal(h.inbox.hasMessages(lead.lead_id), false);
+  assert.equal(h.findCalls.length, 0);
+  assert.deepEqual({ joined: tally.joined, stored: tally.stored }, { joined: 0, stored: 0 });
+  h.cleanup();
+});
+
+test('(t) a join whose history Evolution cannot give leaves a gap where that history belongs, and keeps the joining message', async () => {
+  const hi = msg({ id: 'HI', ts: NOW - 3_600_000, text: 'Hi' });
+  const ref = msg({ id: 'REF', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const h = harness({ inbox: true, history: [hi, ref], historyFails: true, windows: [[ref]] });
+  const tally = await h.poller.tick();
+
+  const [lead] = h.leads();
+  assert.equal(lead.inbox_state, 'in');
+  assert.equal(tally.joined, 1);
+  assert.ok(h.findCalls.length > 0, 'the history was asked for');
+  assert.deepEqual(rows(h, lead.lead_id), [['REF', 'in', 'client']], 'the joining message is kept; the "Hi" before it could not be read');
+  assert.deepEqual(h.inbox.gapsFor(lead.lead_id).map((g) => [g.key_id, g.lead_id, g.jid, g.ts, g.reason]), [
+    [`join:${lead.lead_id}:${NOW - 60_000}`, lead.lead_id, null, NOW - 60_001, 'history_failed'],
+  ], 'the chat now has a message, so the daily catch-up will not ask again: the thread has to say what is missing, just before the joining message');
+  const warned = h.logs.find((l) => l.evt === 'inbox.join_history_failed');
+  assert.deepEqual([warned.level, warned.leadId, warned.error], ['warn', lead.lead_id, 'failed']);
+  assert.equal(JSON.stringify(h.logs).includes('966500000000'), false, 'no number in any log line');
+  h.cleanup();
+});
+
+test('(t) a listing id is certain: in, and stored', async () => {
+  const h = harness({ inbox: true, windows: [[msg({ text: 'BONA-W012 السعر؟' })]] });
+  await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.match_method, 'keyword');
+  assert.equal(lead.inbox_state, 'in');
+  assert.deepEqual(rows(h, lead.lead_id), [['KEY1', 'in', 'client']]);
+  h.cleanup();
+});
+
+test('(t) a click-window match is a guess too: Unsure, nothing stored', async () => {
+  const h = harness({ inbox: true, windows: [[msg({ text: 'مرحبا' })]] });
+  h.db.upsertSession({ session_id: 'clk1-9zad', anon_id: ANON2, started: NOW - 700_000, last_seen: NOW - 300_000, pages: 2, locale: 'ar' });
+  h.db.insertEvent({ event_id: 'ev-click-1', ts: NOW - 300_000, name: 'whatsapp_click', anon_id: ANON2, session_id: 'clk1-9zad', listing_id: 'BONA-W007' });
+  await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.match_method, 'time_window');
+  assert.equal(lead.inbox_state, 'unsure');
+  assert.equal(h.inbox.hasMessages(lead.lead_id), false);
+  h.cleanup();
+});
+
+test('(t) an automatic join keeps its history floor: a record of that chat from more than 24 h before the joining message is refused, however it arrives', async () => {
+  const ref = msg({ id: 'REF', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const floor = NOW - 60_000 - JOIN_HISTORY_MS;
+  const h = harness({ inbox: true, history: [ref], windows: [[ref], [
+    // The poller's own window can reach further back than a join ever may (a cursor held
+    // back by an outage, a delivery WhatsApp sat on): the floor still holds.
+    msg({ id: 'BEFORE', ts: floor - 1, text: 'from before the chat was about Bona' }),
+    msg({ id: 'INSIDE', ts: floor + 1000, text: 'inside the 24 h' }),
+  ]] });
+  await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.history_from, floor);
+  await h.poller.tick();
+  assert.deepEqual(rows(h, lead.lead_id), [['INSIDE', 'in', 'client'], ['REF', 'in', 'client']]);
+  h.cleanup();
+});
+
+test('(t) a poller 45 days behind after the owner moved a chat in today stores only its last 30 days', async () => {
+  const h = harness({ inbox: true });
+  seedInLead(h, { lead_id: 'LEAD-moved', inbox_state: 'unsure', inbox_since: null });
+  // What *Move to Bona inbox* writes (lib/dashboard/routes.mjs `inboxMove`): in since now,
+  // its history floored 30 days back.
+  h.inbox.setInboxState('LEAD-moved', 'in', { since: NOW, historyFrom: NOW - OWNER_HISTORY_MS });
+  h.db.waCursorSet(h.poller.status().instance, { lastTs: NOW - 45 * 86_400_000, lastRun: NOW - 45 * 86_400_000, unmatched: 0 });
+  h.push([
+    msg({ id: 'DAY-40', ts: NOW - 40 * 86_400_000, text: 'forty days ago' }),
+    msg({ id: 'DAY-20', ts: NOW - 20 * 86_400_000, text: 'twenty days ago' }),
+  ]);
+  await h.poller.tick();
+  assert.deepEqual(rows(h, 'LEAD-moved'), [['DAY-20', 'in', 'client']], 'the 40-day-old record is older than the floor the owner joined it with');
+  h.cleanup();
+});
+
+test('(t) a poller 45 days behind after the owner added a chat by phone today: its older messages do not put it in the waiting queue', async () => {
+  const h = harness({ inbox: true });
+  // What *Add chat by phone number* writes: an owner_added lead, in, born answered.
+  const { lead: added } = createOrMergeLead(h.db, { phone: '0500000000', waJid: SENDER }, { channel: 'whatsapp', matchMethod: 'owner_added', now: NOW });
+  assert.equal(added.first_reply_ts, NOW);
+  h.db.waCursorSet(h.poller.status().instance, { lastTs: NOW - 45 * 86_400_000, lastRun: NOW - 45 * 86_400_000, unmatched: 0 });
+  h.push([
+    msg({ id: 'ADD-40', ts: NOW - 40 * 86_400_000, text: 'forty days ago' }),
+    msg({ id: 'ADD-20', ts: NOW - 20 * 86_400_000, text: 'twenty days ago' }),
+  ]);
+  await h.poller.tick();
+  assert.deepEqual(rows(h, added.lead_id), [['ADD-20', 'in', 'client']], 'only what is inside the 30 days is stored');
+  const lead = h.db.getLead(added.lead_id);
+  assert.equal(lead.first_inbound_ts, null, 'both messages came before the add');
+  assert.equal(lead.first_reply_ts, NOW, 'the add still answers the chat');
+  assert.equal(h.db.countWaitingLeads(), 0, 'not waiting since 40 days ago');
+  h.cleanup();
+});
+
+test('(t) a web-form number that writes on WhatsApp with no sure sign goes on the owner\'s Unsure list: the form never decides the chat', async () => {
+  const f1 = msg({ id: 'F1', ts: NOW - 120_000, text: 'السلام عليكم' });
+  const f2 = msg({ id: 'F2', ts: NOW - 30_000, text: 'BONA-W012 السعر؟' });
+  const h = harness({ inbox: true, history: [f1, f2], windows: [[f1], [f2]] });
+  // Anyone can type this number into the form: it proves nothing about the chat under it.
+  const { lead: form } = createOrMergeLead(h.db, { phone: '0500000000', name: 'Form Name' }, { channel: 'form', matchMethod: 'form', now: NOW - 600_000 });
+  assert.equal(form.inbox_state, null);
+  const first = await h.poller.tick();
+  const merged = h.db.getLead(form.lead_id);
+  assert.equal(merged.wa_jid, SENDER, 'the same person: the chat is matched to the form lead');
+  assert.notEqual(merged.inbox_state, 'in');
+  assert.equal(h.inbox.hasMessages(form.lead_id), false, 'nothing stored');
+  assert.equal(h.findCalls.length, 0, 'no history pulled');
+  assert.deepEqual(h.inbox.listUnsure().map((l) => l.lead_id), [form.lead_id], 'the owner decides');
+  assert.equal(first.joined, 0);
+  // A sure sign on WhatsApp itself joins it, as it would any chat.
+  await h.poller.tick();
+  assert.equal(h.db.getLead(form.lead_id).inbox_state, 'in');
+  assert.deepEqual(rows(h, form.lead_id), [['F1', 'in', 'client'], ['F2', 'in', 'client']]);
+  h.cleanup();
+});
+
+test('(t) an Unsure chat that later sends a Ref line joins, and its earlier messages come with it', async () => {
+  const guess = msg({ id: 'W1', ts: NOW - 120_000, text: 'مرحبا بونا' });
+  const ref = msg({ id: 'W2', ts: NOW - 30_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const h = harness({ inbox: true, history: [guess, ref], windows: [[guess], [ref]] });
+  await h.poller.tick();
+  const [before] = h.leads();
+  assert.equal(before.inbox_state, 'unsure');
+  assert.equal(h.inbox.hasMessages(before.lead_id), false);
+
+  const tally = await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.inbox_state, 'in');
+  assert.equal(lead.inbox_since, NOW - 30_000);
+  assert.equal(tally.joined, 1);
+  assertHistoryWindow(h, NOW - 30_000);
+  assert.deepEqual(rows(h, lead.lead_id), [['W1', 'in', 'client'], ['W2', 'in', 'client']], 'the message the poller already saw as a guess is pulled back in');
+  h.cleanup();
+});
+
+test('(t) an out chat never comes back on its own — not on a Ref line, not on a Bona link', async () => {
+  const h = harness({ inbox: true });
+  seedInLead(h, { lead_id: 'LEAD-out', inbox_state: 'out', inbox_since: null });
+  h.push([
+    msg({ id: 'O-IN', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' }),
+    msg({ id: 'O-OUT', fromMe: true, ts: NOW - 30_000, pushName: null, text: 'https://bona-real-estate.com/properties/bona-w003/' }),
+  ]);
+  const tally = await h.poller.tick();
+  assert.equal(h.db.getLead('LEAD-out').inbox_state, 'out');
+  assert.equal(h.inbox.hasMessages('LEAD-out'), false);
+  assert.equal(h.findCalls.length, 0);
+  assert.deepEqual({ joined: tally.joined, stored: tally.stored }, { joined: 0, stored: 0 });
+  h.cleanup();
+});
+
+test("(t) an in chat is stored both ways; the owner's own reply is 'owner_number', makes him the handler, and still stops the clock", async () => {
+  const h = harness({ inbox: true, windows: [
+    [msg({ id: 'IN1', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' })],
+    [
+      msg({ id: 'IN2', ts: NOW - 50_000, text: 'أي جديد؟' }),
+      msg({ id: 'OUT1', fromMe: true, ts: NOW - 40_000, pushName: 'Abdulaziz', text: 'Ahlan! Let me check.' }),
+    ],
+  ] });
+  await h.poller.tick();
+  const second = await h.poller.tick();
+  assert.equal(second.replies, 1);
+  assert.equal(second.stored, 2);
+  const [lead] = h.leads();
+  assert.equal(lead.first_reply_ts, NOW - 40_000, 'the reply clock stops exactly as before — the Hermes watchdog reads it');
+  assert.equal(lead.handler_user_id, h.owner.user_id, 'his number answered first, so the chat is his until someone takes it');
+  assert.deepEqual(h.inbox.messagesFor(lead.lead_id).map((m) => [m.key_id, m.direction, m.sender_kind, m.text]), [
+    ['IN1', 'in', 'client', 'Ref BONA-W003 · K7Q2XR'],
+    ['IN2', 'in', 'client', 'أي جديد؟'],
+    ['OUT1', 'out', 'owner_number', 'Ahlan! Let me check.'],
+  ]);
+  h.cleanup();
+});
+
+test('(t) a Bona link the owner sends to a stranger starts a chat: in, no note, already answered, no ad fan-out', async () => {
+  const opener = msg({ id: 'OPEN', fromMe: true, jid: STRANGER, pushName: 'Abdulaziz', ts: NOW - 600_000, text: 'Salam, this is Abdulaziz from Bona' });
+  const link = msg({ id: 'LINK', fromMe: true, jid: STRANGER, pushName: 'Abdulaziz', ts: NOW - 60_000, text: 'Here it is: https://bona-real-estate.com/properties/bona-w003/' });
+  const h = harness({ inbox: true, history: [opener, link], windows: [[link]] });
+  const tally = await h.poller.tick();
+
+  const [lead] = h.leads();
+  assert.equal(lead.match_method, 'owner_outbound');
+  assert.equal(lead.channel, 'whatsapp');
+  assert.equal(lead.phone_e164, '966522222222');
+  assert.equal(lead.name, null, "a fromMe pushName is the owner's own, never the client's");
+  assert.equal(lead.listing_id, 'BONA-W003');
+  assert.equal(lead.inbox_state, 'in');
+  assert.equal(lead.inbox_since, NOW - 60_000);
+  assert.equal(lead.history_from, NOW - 60_000 - JOIN_HISTORY_MS, 'an automatic join: its history floor is the 24 h before his message');
+  assert.equal(lead.first_inbound_ts, null);
+  assert.equal(lead.first_reply_ts, NOW - 60_000, 'he wrote first, so nobody is waiting on him');
+  assert.equal(lead.handler_user_id, h.owner.user_id);
+  assert.equal(h.db.countWaitingLeads(), 0);
+  assert.equal(h.sent.length, 0, 'no new-lead note: the owner started this chat himself');
+  assert.deepEqual(h.db.dueFanout(NOW + 1000), [], 'no click behind it, so the ad platforms hear nothing');
+  assertHistoryWindow(h, NOW - 60_000);
+  assert.deepEqual(rows(h, lead.lead_id), [['OPEN', 'out', 'owner_number'], ['LINK', 'out', 'owner_number']], 'his opening line comes with it');
+  assert.equal(tally.joined, 1);
+  const joined = h.logs.find((l) => l.evt === 'inbox.join');
+  assert.deepEqual({ leadId: joined.leadId, via: joined.via, created: joined.created }, { leadId: lead.lead_id, via: 'owner_outbound', created: true });
+  h.cleanup();
+});
+
+test('(t) nothing else the owner types to a stranger counts — not chat, not even the word Bona', async () => {
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'P1', fromMe: true, jid: STRANGER, pushName: null, text: 'see you at 6' }),
+    msg({ id: 'P2', fromMe: true, jid: STRANGER2, pushName: null, ts: NOW - 30_000, text: 'I work at Bona now' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0);
+  assert.equal(h.findCalls.length, 0);
+  assert.deepEqual({ joined: tally.joined, stored: tally.stored }, { joined: 0, stored: 0 });
+  h.cleanup();
+});
+
+test('(t) a brochure the owner sends starts a chat; a file that only looks like one does not, nor one that names Bona (D16)', async () => {
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'DOC', fromMe: true, jid: STRANGER, pushName: null, messageType: 'documentMessage', media: '[document: Palm Villa Brochure.pdf]', fileName: 'Palm Villa Brochure.pdf' }),
+    msg({ id: 'BONADOC', fromMe: true, jid: '966544444444@s.whatsapp.net', pushName: null, ts: NOW - 40_000, messageType: 'documentMessage', media: '[document: Bona Brochure.pdf]', fileName: 'Bona Brochure.pdf' }),
+    msg({ id: 'NOTDOC', fromMe: true, jid: STRANGER2, pushName: null, ts: NOW - 30_000, messageType: 'documentMessage', media: '[document: Bonanza menu.pdf]', fileName: 'Bonanza menu.pdf' }),
+  ]] });
+  await h.poller.tick();
+  assert.equal(h.db.countLeads(), 1);
+  const [lead] = h.leads();
+  assert.equal(lead.phone_e164, '966522222222');
+  assert.equal(lead.match_method, 'owner_outbound');
+  assert.equal(lead.inbox_state, 'in');
+  assert.deepEqual(h.inbox.messagesFor(lead.lead_id).map((m) => [m.key_id, m.direction, m.sender_kind, m.text, m.media_type]), [
+    ['DOC', 'out', 'owner_number', null, '[document: Palm Villa Brochure.pdf]'],
+  ]);
+  h.cleanup();
+});
+
+test("(t) an outbound record carrying our own outbox row's WhatsApp id is the staff member's, not the owner's", async () => {
+  const h = harness({ inbox: true, windows: [[msg({ id: 'IN1', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' })]] });
+  await h.poller.tick();
+  const [lead] = h.leads();
+  const mona = h.team.addUser({ name: 'Mona', phone: '0511112222', role: 'staff' });
+  h.inbox.insertOutbox({ send_id: 'SND-test-0001', lead_id: lead.lead_id, jid: SENDER, text: 'Welcome to Bona', user_id: mona.user_id, sender_kind: 'staff' });
+  h.inbox.updateOutbox('SND-test-0001', { status: 'accepted', key_id: 'K-STAFF' });
+  h.push([msg({ id: 'K-STAFF', fromMe: true, ts: NOW - 30_000, pushName: null, text: 'Welcome to Bona' })]);
+
+  const tally = await h.poller.tick();
+  assert.equal(tally.stored, 1);
+  const row = h.inbox.messagesFor(lead.lead_id).find((m) => m.key_id === 'K-STAFF');
+  assert.equal(row.direction, 'out');
+  assert.equal(row.sender_kind, 'staff');
+  assert.equal(row.sender_user_id, mona.user_id);
+  assert.equal(h.db.getLead(lead.lead_id).first_reply_ts, NOW - 30_000, 'a staff reply stops the clock too');
+  h.cleanup();
+});
+
+test('(t) a team or never-list number is never stored, even when its lead is in the inbox', async () => {
+  const h = harness({ inbox: true, isExcluded: (digits) => digits === '966500000000' });
+  seedInLead(h);
+  h.push([
+    msg({ id: 'X-IN', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' }),
+    msg({ id: 'X-OUT', fromMe: true, ts: NOW - 30_000, pushName: null, text: 'https://bona-real-estate.com/properties/bona-w003/' }),
+  ]);
+  const tally = await h.poller.tick();
+  assert.equal(tally.ignored, 2);
+  assert.equal(tally.stored, 0);
+  assert.equal(h.inbox.hasMessages('LEAD-in'), false);
+  assert.equal(h.findCalls.length, 0);
+  h.cleanup();
+});
+
+test('(t) a record of an in chat that is written off leaves a gap in the thread, not silence', async () => {
+  const h = harness({ inbox: true, ingestOverride: () => { throw new Error('disk I/O error'); } });
+  seedInLead(h);
+  const bad = msg({ id: 'BAD', ts: NOW - 60_000, text: 'أي جديد؟' });
+  for (let i = 1; i <= MAX_RECORD_ATTEMPTS; i += 1) {
+    h.push([bad]);
+    await h.poller.tick(); // eslint-disable-line no-await-in-loop
+    if (i < MAX_RECORD_ATTEMPTS) assert.deepEqual(h.inbox.gapsFor('LEAD-in'), [], 'while it is still owed a retry it is not a gap');
+  }
+  assert.equal(h.logs.filter((l) => l.evt === 'wa.poll.record_failed').at(-1).writtenOff, true);
+  assert.deepEqual(h.inbox.gapsFor('LEAD-in').map((g) => [g.key_id, g.lead_id, g.jid, g.ts, g.reason]), [['BAD', 'LEAD-in', SENDER, NOW - 60_000, 'failed']]);
+  assert.equal(h.inbox.hasMessages('LEAD-in'), false);
+  h.cleanup();
+});
+
+test('(t) the inbox never puts a number, a name or a message into a log line', async () => {
+  const lid = '272516946294519@lid';
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'L-IN', jid: lid, jidAlt: SENDER, ts: NOW - 90_000, text: 'Hi there, Ref BONA-W003 · K7Q2XR' }),
+    msg({ id: 'L-OUT', jid: lid, jidAlt: SENDER, fromMe: true, pushName: 'Abdulaziz', ts: NOW - 60_000, text: 'Ahlan Sara, sending photos' }),
+    msg({ id: 'S-OUT', fromMe: true, jid: STRANGER, pushName: 'Abdulaziz', ts: NOW - 30_000, text: 'Here it is: https://bona-real-estate.com/properties/bona-w003/' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(tally.joined, 2, 'both kinds of join happened, so both kinds of log line were written');
+  assert.equal(tally.stored, 3);
+  const dump = JSON.stringify(h.logs);
+  for (const secret of ['966500000000', '966522222222', '272516946294519', 'Hi there', 'Ahlan', 'Here it is', 'Sara', 'Abdulaziz']) {
+    assert.ok(!dump.includes(secret), `a log line carries ${secret}`);
+  }
+  h.cleanup();
+});
+
+/* ---------------- (t) amendments A5–A8 (2026-09-28 quality reviews of Task 3) ---------------- */
+
+test('(t) a bare Ref code that a site session holds is certain: in, stored, with the 24 h before it (A6)', async () => {
+  const h = harness({ inbox: true, windows: [[msg({ id: 'BARE', text: 'Ref K7Q2XR' })]] });
+  const tally = await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.match_method, 'ref');
+  assert.equal(lead.session_id, 'mf3k2a-7b1c', 'the code is a real visit');
+  assert.equal(lead.inbox_state, 'in');
+  assertHistoryWindow(h, NOW - 60_000);
+  assert.deepEqual(rows(h, lead.lead_id), [['BARE', 'in', 'client']]);
+  assert.equal(tally.joined, 1);
+  h.cleanup();
+});
+
+test('(t) the same bare Ref code with no session behind it is a guess: Unsure, nothing stored, no history pulled (A6)', async () => {
+  const h = harness({ inbox: true, seedSession: false, windows: [[msg({ id: 'BARE', text: 'Ref K7Q2XR' })]] });
+  const tally = await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.match_method, 'ref', 'still a lead, for the stats');
+  assert.equal(lead.session_id, null);
+  assert.equal(lead.inbox_state, 'unsure', '"TK booking Ref ABCDEF" has this shape too');
+  assert.equal(h.inbox.hasMessages(lead.lead_id), false);
+  assert.equal(h.findCalls.length, 0);
+  assert.deepEqual({ joined: tally.joined, stored: tally.stored }, { joined: 0, stored: 0 });
+  h.cleanup();
+});
+
+test('(t) "coupons" and "bona fide" are not our name: no lead at all (A5, A8)', async () => {
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'C1', text: 'عندكم كوبونات؟' }),
+    msg({ id: 'C2', jid: STRANGER, ts: NOW - 30_000, text: 'Is this a bona fide offer?' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(tally.unmatched, 2);
+  assert.equal(h.db.countLeads(), 0);
+  h.cleanup();
+});
+
+test("(t) our own new-lead note would pass as a Bona chat, but the owner's chat never reaches that rule (A7)", async () => {
+  const note = leadNote({
+    name: 'Sara', phone_e164: '966500000000', listing_id: 'BONA-W003', source: 'meta', medium: 'paid', ref: 'K7Q2XR', channel: 'whatsapp', created: NOW,
+  }, { siteUrl: 'https://bona-real-estate.com' });
+  assert.equal(ownerOutboundJoins({ text: note }), true, 'it carries a Bona link, a listing id and a Ref line');
+  const notes = [
+    msg({ id: 'N-OUT', fromMe: true, jid: OWNER, pushName: 'Abdulaziz', ts: NOW - 90_000, text: note }),
+    msg({ id: 'N-LID', fromMe: true, jid: '101010101010101@lid', jidAlt: OWNER, pushName: 'Abdulaziz', ts: NOW - 60_000, text: note }),
+    msg({ id: 'N-IN', jid: OWNER, pushName: 'Abdulaziz', ts: NOW - 30_000, text: note }),
+  ];
+
+  // The owner's own chat is skipped before anything else: the note is sent there.
+  const own = harness({ inbox: true, windows: [notes] });
+  const first = await own.poller.tick();
+  assert.equal(first.ignored, 3);
+  assert.equal(own.db.countLeads(), 0);
+  assert.equal(own.findCalls.length, 0);
+  assert.deepEqual({ joined: first.joined, stored: first.stored }, { joined: 0, stored: 0 });
+  own.cleanup();
+
+  // With no owner chat configured, his number is still a team number, so the team check skips it.
+  let team = null;
+  const bare = harness({ inbox: true, env: { BONA_OWNER_JID: '' }, isExcluded: (digits) => team.isExcludedPhone(digits), windows: [notes] });
+  team = bare.team;
+  const second = await bare.poller.tick();
+  assert.equal(second.ignored, 3);
+  assert.equal(bare.db.countLeads(), 0);
+  assert.equal(bare.findCalls.length, 0);
+  assert.deepEqual({ joined: second.joined, stored: second.stored }, { joined: 0, stored: 0 });
+  bare.cleanup();
+});
+
+test('(t) a document name cut at 120 characters starts a chat only where the whole name would (A8, D16)', async () => {
+  // What is left of "… Bonanza menu.pdf" and of a real brochure's long name after the cut;
+  // the record says whether the whole name named TK or Bona (lib/evolution.mjs `fileNameTk`,
+  // `fileNameBona`). A brochure that names Bona would stay out now, so this one does not.
+  const cutBonanza = `${'x'.repeat(115)} Bona`;
+  const cutBrochure = `Palm Villa brochure ${'x'.repeat(100)}`;
+  const cut = { messageType: 'documentMessage', fileNameTruncated: true, fileNameTk: false, fileNameBona: false };
+  const h = harness({ inbox: true, windows: [[
+    msg({ ...cut, id: 'CUT1', fromMe: true, jid: STRANGER, pushName: null, ts: NOW - 60_000, media: `[document: ${cutBonanza}]`, fileName: cutBonanza }),
+    msg({ ...cut, id: 'CUT2', fromMe: true, jid: STRANGER2, pushName: null, ts: NOW - 30_000, media: `[document: ${cutBrochure}]`, fileName: cutBrochure }),
+    msg({ ...cut, id: 'CUT3', fromMe: true, jid: '966544444444@s.whatsapp.net', pushName: null, ts: NOW - 20_000, media: `[document: ${cutBrochure}]`, fileName: cutBrochure, fileNameTk: true }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 1, 'only the brochure whose whole name did not name TK');
+  const [lead] = h.leads();
+  assert.equal(lead.phone_e164, '966533333333');
+  assert.equal(lead.inbox_state, 'in');
+  assert.deepEqual(rows(h, lead.lead_id), [['CUT2', 'out', 'owner_number']]);
+  assert.equal(tally.joined, 1);
+  h.cleanup();
+});
+
+/* ---------------- (t) the 2026-09-28 quality review of Task 9 ---------------- */
+
+/** The owner's chat with himself, filed under a privacy-mode lid with no alt: nothing in the record says whose it is. */
+const SELF_LID = '101010101010101@lid';
+const ownNote = () => leadNote({
+  name: 'Sara', phone_e164: '966500000000', listing_id: 'BONA-W003', source: 'meta', medium: 'paid', ref: 'K7Q2XR', channel: 'whatsapp', created: NOW,
+}, { siteUrl: 'https://bona-real-estate.com' });
+
+test("(t) the owner's self-chat seen as a bare @lid starts no chat: not our note, not a Bona link he saves there (A7)", async () => {
+  const self = [
+    msg({ id: 'SELF-TODO', fromMe: true, jid: SELF_LID, pushName: 'Abdulaziz', ts: NOW - 120_000, text: 'call the dentist at 5' }),
+    msg({ id: 'SELF-NOTE', fromMe: true, jid: SELF_LID, pushName: 'Abdulaziz', ts: NOW - 90_000, text: ownNote() }),
+    msg({ id: 'SELF-LINK', fromMe: true, jid: SELF_LID, pushName: 'Abdulaziz', ts: NOW - 60_000, text: 'https://bona-real-estate.com/properties/bona-w003/' }),
+  ];
+  let team = null;
+  const h = harness({ inbox: true, isExcluded: (digits) => team.isExcludedPhone(digits), history: self, windows: [self] });
+  team = h.team;
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0, 'no lead for a lid alone: it cannot be checked against the team or never list, nor replied to');
+  assert.equal(h.findCalls.length, 0, 'and not one message of that chat is read');
+  assert.deepEqual({ joined: tally.joined, stored: tally.stored }, { joined: 0, stored: 0 });
+  h.cleanup();
+});
+
+test("(t) our own note is refused by its first line, even where nothing else knows the owner's number (A7)", async () => {
+  const h = harness({ inbox: true, env: { BONA_OWNER_JID: '' }, windows: [[
+    msg({ id: 'N-OUT', fromMe: true, jid: OWNER, pushName: 'Abdulaziz', text: ownNote() }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0);
+  assert.equal(h.findCalls.length, 0);
+  assert.deepEqual({ joined: tally.joined, stored: tally.stored }, { joined: 0, stored: 0 });
+  h.cleanup();
+});
+
+test('(t) a Bona link to a known client seen only by @lid still joins: the lead already carries the number', async () => {
+  const lid = '272516946294519@lid';
+  const link = msg({ id: 'L-LINK', fromMe: true, jid: lid, pushName: null, ts: NOW - 60_000, text: 'https://bona-real-estate.com/properties/bona-w003/' });
+  const h = harness({ inbox: true, history: [link], windows: [[link]] });
+  seedInLead(h, { lead_id: 'LEAD-unsure', wa_lid: lid, inbox_state: 'unsure', inbox_since: null });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.getLead('LEAD-unsure').inbox_state, 'in');
+  assert.equal(tally.joined, 1);
+  assert.deepEqual(rows(h, 'LEAD-unsure'), [['L-LINK', 'out', 'owner_number']]);
+  h.cleanup();
+});
+
+test('(t) a record retried because its store failed is not matched again: one touchpoint, one wa.lead line', async () => {
+  const h = harness({ inbox: true, ingestOverride: () => { throw new Error('disk I/O error'); } });
+  seedInLead(h);
+  const bad = msg({ id: 'AGAIN', ts: NOW - 60_000, text: 'أي جديد؟' });
+  for (let i = 1; i <= MAX_RECORD_ATTEMPTS; i += 1) {
+    h.push([bad]);
+    await h.poller.tick(); // eslint-disable-line no-await-in-loop
+  }
+  assert.equal(h.logs.filter((l) => l.evt === 'wa.poll.record_failed').length, MAX_RECORD_ATTEMPTS, 'the store itself was retried every time');
+  assert.equal(h.db.touchpointsForLead('LEAD-in').filter((t) => t.event_type === 'inbound_message').length, 1);
+  assert.equal(h.logs.filter((l) => l.evt === 'wa.lead').length, 1);
+  assert.equal(h.poller.status().matched, 1);
+  h.cleanup();
+});
+
+test("(t) a chat marked 'Not a client' while its note is being sent stays out", async () => {
+  const h = harness({
+    inbox: true,
+    windows: [[msg({ text: 'BONA-W012 السعر؟' })]],
+    onNote: () => { const [lead] = h.leads(); h.inbox.setInboxState(lead.lead_id, 'out'); },
+  });
+  await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(h.sent.length, 1);
+  assert.equal(lead.inbox_state, 'out', 'out is absolute: a certain signal read before it does not undo it');
+  assert.equal(h.inbox.hasMessages(lead.lead_id), false);
+  assert.equal(h.findCalls.length, 0);
+  h.cleanup();
+});
+
+test('(t) a join whose history and whose gap both fail says so, and does not throw the message into a retry', async () => {
+  const ref = msg({ id: 'REF', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const h = harness({
+    inbox: true, history: [ref], historyFails: true, windows: [[ref]],
+    rewire: ({ inbox }) => ({ inboxStore: { ...inbox, addGap: () => { throw new Error('database is locked'); } } }),
+  });
+  const tally = await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.inbox_state, 'in');
+  assert.equal(tally.joined, 1);
+  assert.deepEqual(rows(h, lead.lead_id), [['REF', 'in', 'client']]);
+  assert.equal(h.logs.some((l) => l.evt === 'wa.poll.record_failed'), false, 'a retry would skip the join, so it would never redo the history either');
+  const failed = h.logs.find((l) => l.evt === 'inbox.gap_failed');
+  assert.deepEqual([failed.level, failed.leadId, failed.reason], ['warn', lead.lead_id, 'history_failed']);
+  assert.equal(JSON.stringify(h.logs.filter((l) => l.evt === 'inbox.gap_failed')).includes('locked'), false, 'no raw error text');
+  h.cleanup();
+});
+
+test('(t) a written-off reaction, or a record the join history already stored, leaves no gap', async () => {
+  const noisy = harness({ inbox: true });
+  seedInLead(noisy);
+  // Noise never reaches the merge or the ingest (final review fixes 2026-09-29), so what
+  // fails it is marking it seen; the write-off's own mark goes through.
+  const seen = noisy.db.waSeenAdd;
+  let seenCalls = 0;
+  noisy.db.waSeenAdd = (id, ts) => {
+    if (id === 'REACT' && (seenCalls += 1) <= MAX_RECORD_ATTEMPTS) throw new Error('disk I/O error');
+    return seen(id, ts);
+  };
+  const react = msg({ id: 'REACT', ts: NOW - 60_000, text: '', messageType: 'reactionMessage', noise: true });
+  for (let i = 1; i <= MAX_RECORD_ATTEMPTS; i += 1) {
+    noisy.push([react]);
+    await noisy.poller.tick(); // eslint-disable-line no-await-in-loop
+  }
+  assert.equal(noisy.logs.filter((l) => l.evt === 'wa.poll.record_failed').at(-1).writtenOff, true);
+  assert.deepEqual(noisy.inbox.gapsFor('LEAD-in'), [], 'a reaction is never a bubble, so it is never a missing one');
+  noisy.cleanup();
+
+  const ref = msg({ id: 'REF', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const h = harness({ inbox: true, history: [ref], ingestOverride: () => { throw new Error('disk I/O error'); } });
+  for (let i = 1; i <= MAX_RECORD_ATTEMPTS; i += 1) {
+    h.push([ref]);
+    await h.poller.tick(); // eslint-disable-line no-await-in-loop
+  }
+  const [lead] = h.leads();
+  assert.equal(h.logs.filter((l) => l.evt === 'wa.poll.record_failed').at(-1).writtenOff, true);
+  assert.deepEqual(rows(h, lead.lead_id), [['REF', 'in', 'client']], 'the join history stored it');
+  assert.deepEqual(h.inbox.gapsFor(lead.lead_id), [], 'so the thread does not say it could not be loaded');
+  h.cleanup();
+});
+
+test('(t) with no backfill wired a join stores from its own message on, and reads nothing', async () => {
+  const hi = msg({ id: 'HI', ts: NOW - 3_600_000, text: 'Hi' });
+  const ref = msg({ id: 'REF', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const h = harness({ inbox: true, history: [hi, ref], windows: [[ref]], rewire: () => ({ backfill: null }) });
+  const tally = await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.inbox_state, 'in');
+  assert.equal(tally.joined, 1);
+  assert.deepEqual(rows(h, lead.lead_id), [['REF', 'in', 'client']]);
+  assert.equal(h.findCalls.length, 0);
+  h.cleanup();
+});
+
+test('(t) the ingest can be handed over the way createIngest() returns it, as { ingest }', async () => {
+  const h = harness({ inbox: true, windows: [[msg({ text: 'BONA-W012 السعر؟' })]], rewire: ({ ingestor }) => ({ ingest: ingestor }) });
+  const tally = await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.inbox_state, 'in');
+  assert.equal(tally.stored, 1);
+  assert.deepEqual(rows(h, lead.lead_id), [['KEY1', 'in', 'client']]);
+  h.cleanup();
+});
+
+/* ---------------- (t) the second 2026-09-28 quality review of Task 9 ---------------- */
+
+test('(t) a record of an in chat given up on after an outage leaves a gap too, not silence', async () => {
+  // After downtime the first window reaches far back, but the cursor may not stay behind
+  // `now - MAX_WINDOW_MS`: a record that fails there is out of reach at once, so it is
+  // abandoned after one try, never written off. That is as lost as a write-off.
+  const h = harness({ inbox: true, ingestOverride: () => { throw new Error('disk I/O error'); } });
+  seedInLead(h);
+  h.db.waCursorSet(INSTANCE, { lastTs: NOW - 3_600_000, lastRun: NOW - 3_600_000, unmatched: 0 });
+  const old = msg({ id: 'OLD', ts: NOW - 50 * 60_000, text: 'أي جديد؟' });
+  assert.ok(old.ts < NOW - MAX_WINDOW_MS - OVERLAP_MS, 'older than the next window can reach');
+  h.push([old]);
+  await h.poller.tick();
+  await h.poller.tick();
+
+  const failed = h.logs.filter((l) => l.evt === 'wa.poll.record_failed');
+  assert.deepEqual(failed.map((l) => [l.attempts, l.writtenOff]), [[1, false]], 'one try, never written off');
+  assert.equal(h.logs.find((l) => l.evt === 'wa.poll.abandoned').count, 1);
+  assert.deepEqual(h.inbox.gapsFor('LEAD-in').map((g) => [g.key_id, g.lead_id, g.jid, g.ts, g.reason]), [['OLD', 'LEAD-in', SENDER, old.ts, 'failed']]);
+  assert.equal(h.inbox.hasMessages('LEAD-in'), false);
+  h.cleanup();
+});
+
+test('(t) an abandoned reaction, or a record of a chat that is not in, leaves no gap', async () => {
+  const h = harness({ inbox: true });
+  seedInLead(h);
+  // Noise never reaches the merge or the ingest, so what fails it is marking it seen.
+  const seen = h.db.waSeenAdd;
+  h.db.waSeenAdd = (id, ts) => {
+    if (id === 'REACT') throw new Error('disk I/O error');
+    return seen(id, ts);
+  };
+  h.db.waCursorSet(INSTANCE, { lastTs: NOW - 3_600_000, lastRun: NOW - 3_600_000, unmatched: 0 });
+  h.push([msg({ id: 'REACT', ts: NOW - 50 * 60_000, text: '', messageType: 'reactionMessage', noise: true })]);
+  await h.poller.tick();
+  assert.equal(h.logs.find((l) => l.evt === 'wa.poll.abandoned').count, 1);
+  assert.deepEqual(h.inbox.gapsFor('LEAD-in'), [], 'a reaction is never a bubble, so it is never a missing one');
+  h.cleanup();
+
+  // A Phase 1 poller (no inbox) gives up exactly as before and writes nothing.
+  const plain = harness({ windows: [[msg({ id: 'P1', ts: NOW - 50 * 60_000, text: 'Ref BONA-W003 · K7Q2XR' })]] });
+  plain.db.waCursorSet(INSTANCE, { lastTs: NOW - 3_600_000, lastRun: NOW - 3_600_000, unmatched: 0 });
+  const realCreate = plain.db.insertLead;
+  plain.db.insertLead = () => { throw new Error('disk I/O error'); };
+  await plain.poller.tick();
+  plain.db.insertLead = realCreate;
+  assert.equal(plain.logs.find((l) => l.evt === 'wa.poll.abandoned').count, 1);
+  assert.equal(plain.db.db.prepare('SELECT COUNT(*) AS n FROM wa_gaps').get().n, 0);
+  plain.cleanup();
+});
+
+test("(t) a chat marked 'Not a client' while its join history is read gets no history gap", async () => {
+  const ref = msg({ id: 'REF', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const h = harness({
+    inbox: true, windows: [[ref]],
+    rewire: ({ inbox }) => ({ backfill: { history: async (lead) => { inbox.leaveInbox(lead.lead_id); return { error: 'failed' }; } } }),
+  });
+  await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.inbox_state, 'out');
+  assert.deepEqual(h.inbox.gapsFor(lead.lead_id), [], 'the purge that put it out is not undone by a gap written after it');
+  assert.equal(h.inbox.hasMessages(lead.lead_id), false);
+  assert.equal(h.logs.some((l) => l.evt === 'wa.poll.record_failed'), false);
+  h.cleanup();
+});
+
+test('(t) an error that carries a number or a message never reaches a log line', async () => {
+  const leak = 'ingest failed for 966500000000: "Hi there Sara"';
+  const thrown = Object.assign(new RangeError(leak), { code: 'ERR 966500000000' });
+  const h = harness({
+    inbox: true, windows: [[msg({ id: 'REF', text: 'Ref BONA-W003 · K7Q2XR' })]],
+    ingestOverride: () => { throw thrown; },
+    rewire: () => ({ backfill: { history: async () => ({ error: 'http 966522222222 Ahlan' }) } }),
+  });
+  await h.poller.tick();
+  const failed = h.logs.find((l) => l.evt === 'wa.poll.record_failed');
+  assert.equal(failed.error, 'RangeError', 'the kind of error, not its message');
+  assert.equal(failed.code, undefined, 'a code that is not in the shape Node gives one is left out');
+  assert.equal(h.logs.find((l) => l.evt === 'inbox.join_history_failed').error, 'failed');
+  const dump = JSON.stringify(h.logs);
+  for (const secret of ['966500000000', '966522222222', 'Hi there', 'Sara', 'Ahlan']) {
+    assert.ok(!dump.includes(secret), `a log line carries ${secret}`);
+  }
+  h.cleanup();
+});
+
+test("(t) a failed record's log line keeps what is safe to know: an allowed name, Node's code, SQLite's number", async () => {
+  const h = harness({ inbox: true, ingestOverride: () => { throw Object.assign(new Error('UNIQUE constraint failed: wa_messages.key_id'), { code: 'ERR_SQLITE_ERROR', errcode: 1555 }); } });
+  seedInLead(h);
+  h.push([msg({ id: 'X', ts: NOW - 60_000, text: 'أي جديد؟' })]);
+  await h.poller.tick();
+  const failed = h.logs.find((l) => l.evt === 'wa.poll.record_failed');
+  assert.deepEqual([failed.error, failed.code, failed.errcode], ['Error', 'ERR_SQLITE_ERROR', 1555]);
+
+  const odd = harness({ inbox: true, ingestOverride: () => { throw Object.assign(new Error('x'), { name: 'Sara 966500000000' }); } });
+  seedInLead(odd);
+  odd.push([msg({ id: 'Y', ts: NOW - 60_000, text: 'أي جديد؟' })]);
+  await odd.poller.tick();
+  assert.equal(odd.logs.find((l) => l.evt === 'wa.poll.record_failed').error, 'Error', 'a name outside the kinds this loop meets is not logged');
+  h.cleanup();
+  odd.cleanup();
+});
+
+test('(t) an ingest or a backfill that cannot be used is a wiring mistake, refused at once', () => {
+  const db = openDb(':memory:');
+  const inboxStore = createInboxStore(db);
+  const ingest = () => ({ stored: false });
+  assert.throws(() => createPoller({ db, inboxStore, ingest: {} }), TypeError, 'an object with no ingest in it');
+  assert.throws(() => createPoller({ db, inboxStore, ingest: { ingest: 'yes' } }), TypeError);
+  assert.throws(() => createPoller({ db, inboxStore, backfill: { history: async () => ({}) } }), TypeError, 'a backfill with no ingest would be ignored');
+  assert.throws(() => createPoller({ db, inboxStore, ingest, backfill: {} }), TypeError, 'a backfill with no history');
+  assert.doesNotThrow(() => createPoller({ db, inboxStore, ingest, backfill: null }));
+  assert.doesNotThrow(() => createPoller({ db, inboxStore, ingest: { ingest } }));
+  assert.doesNotThrow(() => createPoller({ db }));
+  db.close();
+});
+
+/* ---------------- (t) the third 2026-09-28 review of Task 9 ---------------- */
+
+test('(t) a lead known only by its @lid does not join on a Bona link or brochure: no number could be checked; once it has one, it does', async () => {
+  const lid = '272516946294519@lid';
+  const link = msg({ id: 'L-LINK', fromMe: true, jid: lid, jidAlt: null, pushName: null, ts: NOW - 90_000, text: 'https://bona-real-estate.com/properties/bona-w003/' });
+  const doc = msg({ id: 'L-DOC', fromMe: true, jid: lid, jidAlt: null, pushName: null, ts: NOW - 60_000, messageType: 'documentMessage', media: '[document: Bona Brochure.pdf]', fileName: 'Bona Brochure.pdf' });
+  const later = msg({ id: 'L-LATER', fromMe: true, jid: lid, jidAlt: null, pushName: null, ts: NOW - 30_000, text: 'https://bona-real-estate.com/properties/bona-w007/' });
+  for (const state of ['unsure', null]) {
+    let team = null;
+    const h = harness({ inbox: true, isExcluded: (digits) => team.isExcludedPhone(digits), history: [link, doc, later], windows: [[link, doc]] });
+    team = h.team;
+    seedInLead(h, { lead_id: 'LEAD-lid', phone_e164: null, wa_jid: null, wa_lid: lid, inbox_state: state, inbox_since: null });
+    const tally = await h.poller.tick();
+    const lead = h.db.getLead('LEAD-lid');
+    assert.equal(lead.inbox_state, state, `a lid alone moves nothing (${state})`);
+    assert.equal(lead.inbox_since, null);
+    assert.equal(h.inbox.hasMessages('LEAD-lid'), false, 'nothing is stored');
+    assert.equal(h.findCalls.length, 0, 'and not one message of that chat is read');
+    assert.deepEqual({ joined: tally.joined, stored: tally.stored }, { joined: 0, stored: 0 });
+    assert.equal(h.logs.some((l) => l.evt === 'inbox.join'), false);
+
+    // The lead learns its number (a client message with the alt, or the owner's Add chat):
+    // now the tick checks that number for this lid, and the next Bona link joins.
+    h.db.updateLead('LEAD-lid', { phone_e164: '966500000000' });
+    h.push([later]);
+    const second = await h.poller.tick();
+    assert.equal(h.db.getLead('LEAD-lid').inbox_state, 'in', `joins once a number is known (${state})`);
+    assert.equal(second.joined, 1);
+    assertHistoryWindow(h, NOW - 30_000);
+    assert.deepEqual(rows(h, 'LEAD-lid'), [['L-LINK', 'out', 'owner_number'], ['L-DOC', 'out', 'owner_number'], ['L-LATER', 'out', 'owner_number']]);
+    h.cleanup();
+  }
+});
+
+/** Click-to-WhatsApp context as Meta attaches it to the first message of an ad chat. */
+const AD_CONTEXT = {
+  externalAdReply: { title: 'Sea-view villas', sourceId: '120210987654321', sourceUrl: 'https://fb.me/ad', sourceType: 'ad', sourceApp: 'instagram', ctwaClid: 'ARZ1xyz' },
+  conversionSource: 'FB_Ads',
+  entryPointConversionApp: 'instagram',
+};
+
+test('(t) a click-to-WhatsApp ad message is certain: a new ad_meta lead goes in, stored as the client\'s, with the 24 h before it', async () => {
+  const hi = msg({ id: 'AD-HI', ts: NOW - 3_600_000, text: 'Hello' });
+  const ad = msg({ id: 'AD-1', ts: NOW - 60_000, text: 'مهتم، كم السعر؟', contextInfo: AD_CONTEXT });
+  const h = harness({ inbox: true, history: [hi, ad], windows: [[ad]] });
+  const tally = await h.poller.tick();
+
+  const [lead] = h.leads();
+  assert.equal(lead.match_method, 'ad_meta');
+  assert.equal(lead.inbox_state, 'in', 'ad context alone puts the chat in (design §4.1): nothing else in this message says Bona');
+  assert.equal(lead.inbox_since, NOW - 60_000);
+  assertHistoryWindow(h, NOW - 60_000);
+  assert.deepEqual(rows(h, lead.lead_id), [['AD-HI', 'in', 'client'], ['AD-1', 'in', 'client']]);
+  assert.deepEqual({ joined: tally.joined, stored: tally.stored }, { joined: 1, stored: 1 });
+  const joined = h.logs.find((l) => l.evt === 'inbox.join');
+  assert.deepEqual([joined.leadId, joined.via], [lead.lead_id, 'inbound']);
+  h.cleanup();
+});
+
+test('(t) an organic entry point is no ad evidence: a wa.me link, WhatsApp search or a tapped number makes an ad_meta lead that goes to Unsure', async () => {
+  // The three shapes every live ad_meta lead had on 2026-09-29.
+  for (const source of ['click_to_chat_link', 'global_search_new_chat', 'phone_number_hyperlink']) {
+    const first = msg({ id: `ORG-${source}`, ts: NOW - 60_000, text: 'مرحبا، عندكم فلل؟', contextInfo: { entryPointConversionSource: source, entryPointConversionApp: 'whatsapp' } });
+    const h = harness({ inbox: true, history: [first], windows: [[first]] });
+    const tally = await h.poller.tick();
+    const [lead] = h.leads();
+    assert.equal(lead.match_method, 'ad_meta', `${source}: still a lead, attributed as before`);
+    assert.equal(h.db.touchpointsForLead(lead.lead_id)[0].meta.ad_meta.entry_point_conversion_source, source);
+    assert.equal(lead.inbox_state, 'unsure', `${source}: the owner decides`);
+    assert.equal(h.inbox.hasMessages(lead.lead_id), false, `${source}: nothing stored`);
+    assert.equal(h.findCalls.length, 0, `${source}: no history pulled`);
+    assert.equal(tally.joined, 0);
+    h.cleanup();
+  }
+});
+
+test('(t) an Unsure chat that later writes from a click-to-WhatsApp ad joins, and its earlier messages come with it', async () => {
+  const guess = msg({ id: 'U1', ts: NOW - 120_000, text: 'مرحبا بونا' });
+  const ad = msg({ id: 'U2', ts: NOW - 30_000, text: 'مهتم', contextInfo: AD_CONTEXT });
+  const h = harness({ inbox: true, history: [guess, ad], windows: [[guess], [ad]] });
+  await h.poller.tick();
+  const [before] = h.leads();
+  assert.equal(before.inbox_state, 'unsure');
+
+  const tally = await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.lead_id, before.lead_id, 'the same lead, matched by its number');
+  assert.equal(lead.inbox_state, 'in');
+  assert.equal(lead.inbox_since, NOW - 30_000);
+  assert.equal(tally.joined, 1);
+  assertHistoryWindow(h, NOW - 30_000);
+  assert.deepEqual(rows(h, lead.lead_id), [['U1', 'in', 'client'], ['U2', 'in', 'client']]);
+  h.cleanup();
+});
+
+test('(t) a price list for a property the owner sends starts a chat; a bare price list, a floor-finish brochure named Bona and a TK brochure do not (D16)', async () => {
+  const doc = (id, jid, fileName, ts, extra = {}) => msg({
+    id, fromMe: true, jid, pushName: null, ts, messageType: 'documentMessage', media: `[document: ${fileName}]`, fileName, ...extra,
+  });
+  const h = harness({ inbox: true, windows: [[
+    doc('D-PRICE', STRANGER, 'Palm Villa Price List Sep.pdf', NOW - 60_000),
+    // A price list alone may be TK fit-out work (owner answer, 2026-09-28): Task 16 lists it for the owner.
+    doc('D-BARE', '966555555555@s.whatsapp.net', 'Price List Sep.pdf', NOW - 55_000),
+    doc('D-BONA', STRANGER2, 'Bona Traffic HD brochure.pdf', NOW - 50_000),
+    doc('D-TK', '966544444444@s.whatsapp.net', 'TK Brochure Villa.pdf', NOW - 40_000, { fileNameTk: true }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 1, 'only the price list for a villa');
+  const [lead] = h.leads();
+  assert.equal(lead.phone_e164, '966522222222');
+  assert.equal(lead.match_method, 'owner_outbound');
+  assert.equal(lead.inbox_state, 'in');
+  assert.deepEqual(rows(h, lead.lead_id), [['D-PRICE', 'out', 'owner_number']]);
+  assert.equal(tally.joined, 1);
+  h.cleanup();
+});
+
+/* ---------------- (u) real-estate chats to check (D17) ---------------- */
+
+/** Every candidate row, as stored. */
+const candidates = (h) => h.db.db.prepare('SELECT * FROM inbox_candidates ORDER BY rowid').all().map((r) => ({ ...r }));
+
+test('(u) candidateWordsOf: property words from the text and a document\'s name, "property document" for a document word, "tk document" for a TK document the owner sent', () => {
+  assert.equal(TK_DOCUMENT_WORD, 'tk document');
+  assert.equal(PROPERTY_DOCUMENT_WORD, 'property document');
+  assert.deepEqual(candidateWordsOf(msg({ text: 'عندكم شقة للإيجار؟' })), ['شقة', 'إيجار']);
+  assert.deepEqual(candidateWordsOf(msg({ text: 'see the plan', media: '[document: Villa 12 photos.pdf]', fileName: 'Villa 12 photos.pdf' })), ['villa']);
+  assert.deepEqual(candidateWordsOf(msg({ text: 'villa', media: '[image]', fileName: 'Flat.pdf' })), ['villa'], 'only a document has a file name');
+  // A property document, in either direction, in the text or a document's name: a brochure,
+  // or another document word with a property word beside it (D16's own test for a document).
+  assert.deepEqual(candidateWordsOf(msg({ text: 'Can I get the price list and payment plan?' })), [], 'a bare price list is not a property document');
+  assert.deepEqual(candidateWordsOf(msg({ text: 'ابغى البروشور وقائمة الأسعار' })), [PROPERTY_DOCUMENT_WORD]);
+  assert.deepEqual(candidateWordsOf(msg({ text: 'send me the floor plan of the unit' })), [PROPERTY_DOCUMENT_WORD]);
+  assert.deepEqual(candidateWordsOf(msg({ fromMe: true, text: '', media: '[document: Bona Traffic HD brochure.pdf]', fileName: 'Bona Traffic HD brochure.pdf' })), [PROPERTY_DOCUMENT_WORD]);
+  assert.deepEqual(candidateWordsOf(msg({ text: 'price list of the project', media: '[image]', fileName: 'x' })), [PROPERTY_DOCUMENT_WORD], 'a caption counts');
+  const tkDoc = { fromMe: true, text: '', media: '[document: TK Brochure Villa.pdf]', fileName: 'TK Brochure Villa.pdf', fileNameTruncated: false, fileNameTk: true };
+  assert.deepEqual(candidateWordsOf(msg(tkDoc)), [TK_DOCUMENT_WORD, PROPERTY_DOCUMENT_WORD, 'villa']);
+  assert.deepEqual(candidateWordsOf(msg({ ...tkDoc, fromMe: false })), [PROPERTY_DOCUMENT_WORD, 'villa'], 'a client\'s file that says TK is only its words');
+  assert.deepEqual(candidateWordsOf(msg({ ...tkDoc, fileName: 'TK Villa 12.pdf', media: '[document: TK Villa 12.pdf]' })), [TK_DOCUMENT_WORD, 'villa']);
+  assert.deepEqual(candidateWordsOf(msg({ ...tkDoc, fileName: 'TK invoice.pdf', media: '[document: TK invoice.pdf]' })), [TK_DOCUMENT_WORD]);
+  assert.deepEqual(candidateWordsOf(msg({ ...tkDoc, text: 'villa apartment flat rent lease land plot property duplex penthouse townhouse' })),
+    [TK_DOCUMENT_WORD, PROPERTY_DOCUMENT_WORD, 'villa', 'apartment', 'rent', 'property', 'duplex', 'penthouse'], 'the markers first, then at most eight in all');
+  assert.deepEqual(candidateWordsOf(msg({ text: 'see you at 6' })), []);
+  assert.deepEqual(candidateWordsOf(null), []);
+});
+
+test('(u) a plan, a price list or a booklet on its own is nobody\'s property document: a trip, a car, a loan, a restaurant keep nothing', () => {
+  // Everyday words, like "land" and غرفة (final review, 2026-09-29): only a brochure, or one
+  // of these next to a property word, is a property document in a message or a file name.
+  for (const text of ['عندي مخطط للسفر بكرة', 'مخطط الشاطئ', 'المخطط', 'what is the payment plan for the car?', 'send me the price list of the restaurant',
+    'كتيب السيارة', 'خطة السداد للقرض', 'fact sheet for the fund', 'the master plan for the wedding', 'قائمة الأسعار عندكم؟', 'Can I get the price list and payment plan?']) {
+    assert.deepEqual(candidateWordsOf(msg({ text })), [], text);
+    assert.deepEqual(candidateWordsOf(msg({ fromMe: true, text })), [], `the owner's own text: ${text}`);
+    assert.deepEqual(candidateWordsOf(msg({ text: '', media: `[document: ${text}.pdf]`, fileName: `${text}.pdf` })), [], `a client's file: ${text}`);
+  }
+  // Next to a property word it is one, in the text, a caption or a client's file name.
+  for (const text of ['ابغى البروشور', 'the brochure please', 'send me the floor plan of the unit', 'مخطط أرض في الشمال', 'price list for the project', 'جدول الدفعات - مشروع الشاطئ']) {
+    assert.deepEqual(candidateWordsOf(msg({ text })), [PROPERTY_DOCUMENT_WORD], text);
+    assert.deepEqual(candidateWordsOf(msg({ text: '', media: `[document: ${text}.pdf]`, fileName: `${text}.pdf` })), [PROPERTY_DOCUMENT_WORD], `a client's file: ${text}`);
+  }
+  // A document the owner sends keeps its marker for any document word (D16 owner answer):
+  // a price list with no property word does not join (it may be TK fit-out work), so the
+  // owner's list is where he sees it.
+  for (const name of ['Price List Sep.pdf', 'payment_plan.pdf', 'قائمة الأسعار.pdf', 'مخطط الكهرباء.pdf']) {
+    assert.deepEqual(candidateWordsOf(msg({ fromMe: true, text: '', media: `[document: ${name}]`, fileName: name })), [PROPERTY_DOCUMENT_WORD], name);
+  }
+  assert.deepEqual(candidateWordsOf(msg({ fromMe: true, text: 'price list', media: '[document: Sep.pdf]', fileName: 'Sep.pdf' })), [PROPERTY_DOCUMENT_WORD], 'or its caption');
+  assert.deepEqual(candidateWordsOf(msg({ fromMe: true, text: 'price list', media: '[image]', fileName: 'x' })), [], 'an image he sends is not a document');
+});
+
+test('(u) a stranger asking about property goes on the owner\'s list: no lead, no note, no text, no history', async () => {
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'Q1', jid: STRANGER, pushName: 'Umm Khalid', ts: NOW - 60_000, text: 'عندكم شقة للإيجار؟' }),
+    msg({ id: 'Q2', jid: STRANGER2, pushName: null, ts: NOW - 30_000, text: '', messageType: 'documentMessage', media: '[document: Villa 12 photos.pdf]', fileName: 'Villa 12 photos.pdf' }),
+    msg({ id: 'P1', jid: '966544444444@s.whatsapp.net', ts: NOW - 20_000, text: 'see you at 6' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0, 'nothing sure: not a lead');
+  assert.equal(h.sent.length, 0, 'the owner is not sent a note');
+  assert.equal(h.findCalls.length, 0, 'no history is read');
+  assert.equal(tally.unmatched, 3);
+  assert.equal(tally.candidates, 2);
+  const rows = candidates(h);
+  assert.deepEqual(rows.map((r) => [r.phone_e164, r.jid, r.name, r.words, r.last_dir, r.hits, r.first_ts, r.state]), [
+    ['966522222222', STRANGER, 'Umm Khalid', 'شقة,إيجار', 'in', 1, NOW - 60_000, 'open'],
+    ['966533333333', STRANGER2, null, 'villa', 'in', 1, NOW - 30_000, 'open'],
+  ]);
+  assert.ok(!JSON.stringify(rows).includes('عندكم'), 'never the text');
+  assert.equal(h.db.db.prepare('SELECT COUNT(*) AS n FROM wa_messages').get().n, 0);
+  h.cleanup();
+});
+
+test('(u) only strong property terms make a chat to check: a flight that will land, a flat tyre, a bedroom do not', async () => {
+  const chats = [
+    ['966541000001', 'My flight will land at 9'],
+    ['966541000002', 'flat tyre'],
+    ['966541000003', 'غرفة النوم'],
+    ['966541000004', 'شقة للإيجار'],
+    ['966541000005', 'villa for sale'],
+  ];
+  const h = harness({ inbox: true, windows: [chats.map(([phone, text], i) => msg({ id: `S${i}`, jid: `${phone}@s.whatsapp.net`, ts: NOW - 60_000 + i, text }))] });
+  const tally = await h.poller.tick();
+  assert.equal(tally.candidates, 2);
+  assert.deepEqual(candidates(h).map((r) => [r.phone_e164, r.words]), [['966541000004', 'شقة,إيجار'], ['966541000005', 'villa,for sale']]);
+  for (const [, text] of chats.slice(0, 3)) assert.deepEqual(candidateWordsOf(msg({ text })), [], text);
+  h.cleanup();
+});
+
+test('(u) the owner writing about property to a stranger puts that chat on the list too — as "you wrote", never with his own name', async () => {
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'O1', fromMe: true, jid: STRANGER, pushName: 'Abdulaziz', ts: NOW - 60_000, text: 'the villa is 3M' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0);
+  assert.equal(tally.candidates, 1);
+  const [row] = candidates(h);
+  assert.deepEqual([row.phone_e164, row.name, row.words, row.last_dir], ['966522222222', null, 'villa', 'out']);
+  h.cleanup();
+});
+
+test('(u) a TK document the owner sends is a chat to check, never a join', async () => {
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'TK1', fromMe: true, jid: STRANGER, pushName: 'Abdulaziz', ts: NOW - 60_000, text: '', messageType: 'documentMessage',
+      media: '[document: TK Brochure Villa.pdf]', fileName: 'TK Brochure Villa.pdf', fileNameTruncated: false, fileNameTk: true }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0, 'TK chats stay out of the Bona inbox');
+  assert.equal(tally.joined, 0);
+  assert.equal(h.findCalls.length, 0);
+  const [row] = candidates(h);
+  assert.deepEqual([row.phone_e164, row.name, row.words, row.last_dir], ['966522222222', null, 'tk document,property document,villa', 'out']);
+  h.cleanup();
+});
+
+test('(u) a property document the owner sends that does not join is a chat to check: a cut name, or one that names Bona', async () => {
+  // "…(111 x) Brochure.pdf" cut at 120 code points: the word is in the part a cut name is not
+  // read by (Task 15), so it cannot join; the owner's list is where he sees it.
+  const cutName = `${'x'.repeat(111)} Brochure`;
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'CUTB', fromMe: true, jid: STRANGER, pushName: 'Abdulaziz', ts: NOW - 60_000, text: '', messageType: 'documentMessage',
+      media: `[document: ${cutName}]`, fileName: cutName, fileNameTruncated: true, fileNameTk: false, fileNameBona: false }),
+    msg({ id: 'BONAB', fromMe: true, jid: STRANGER2, pushName: 'Abdulaziz', ts: NOW - 30_000, text: '', messageType: 'documentMessage',
+      media: '[document: Bona Traffic HD brochure.pdf]', fileName: 'Bona Traffic HD brochure.pdf' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0, 'no lead');
+  assert.equal(tally.joined, 0);
+  assert.equal(h.findCalls.length, 0);
+  assert.equal(tally.candidates, 2);
+  assert.deepEqual(candidates(h).map((r) => [r.phone_e164, r.name, r.words, r.last_dir]), [
+    ['966522222222', null, 'property document', 'out'],
+    ['966533333333', null, 'property document', 'out'],
+  ]);
+  h.cleanup();
+});
+
+test('(u) a bare price list the owner sends a stranger is a chat to check, never a join (D16 owner answer)', async () => {
+  // A price list with no property word beside it may be TK fit-out work (owner answer,
+  // 2026-09-28), so it does not join (Task 15); the owner's list is where he sees it.
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'PLS', fromMe: true, jid: STRANGER, pushName: 'Abdulaziz', ts: NOW - 60_000, text: '', messageType: 'documentMessage',
+      media: '[document: Price List Sep.pdf]', fileName: 'Price List Sep.pdf' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0, 'no lead');
+  assert.equal(tally.joined, 0);
+  assert.equal(h.findCalls.length, 0, 'no history is read');
+  assert.equal(tally.candidates, 1);
+  assert.deepEqual(candidates(h).map((r) => [r.phone_e164, r.name, r.words, r.last_dir]), [['966522222222', null, 'property document', 'out']]);
+  h.cleanup();
+});
+
+test('(u) a stranger asking for a brochure or a property\'s floor plan is a chat to check; a plan for a trip or a car\'s price list is not', async () => {
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'PL1', jid: STRANGER, pushName: 'Umm Fahad', ts: NOW - 60_000, text: 'Can I get the floor plan of the unit?' }),
+    msg({ id: 'PL2', jid: STRANGER2, pushName: null, ts: NOW - 30_000, text: 'ابغى البروشور وقائمة الأسعار' }),
+    msg({ id: 'PL3', jid: '966541000001@s.whatsapp.net', pushName: 'Traveller', ts: NOW - 20_000, text: 'عندي مخطط للسفر بكرة' }),
+    msg({ id: 'PL4', jid: '966541000002@s.whatsapp.net', pushName: 'Car Dealer', ts: NOW - 15_000, text: 'what is the payment plan for the car?' }),
+    msg({ id: 'PL5', jid: '966541000003@s.whatsapp.net', pushName: 'Diner', ts: NOW - 10_000, text: 'send me the price list of the restaurant' }),
+    msg({ id: 'PL6', jid: '966541000004@s.whatsapp.net', pushName: 'Driver', ts: NOW - 5_000, text: '', messageType: 'documentMessage',
+      media: '[document: كتيب السيارة.pdf]', fileName: 'كتيب السيارة.pdf' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(h.db.countLeads(), 0);
+  assert.equal(tally.candidates, 2);
+  assert.deepEqual(candidates(h).map((r) => [r.phone_e164, r.name, r.words, r.last_dir]), [
+    ['966522222222', 'Umm Fahad', 'property document', 'in'],
+    ['966533333333', null, 'property document', 'in'],
+  ], 'no number or name is kept for the trip, the car, the restaurant or the car manual');
+  h.cleanup();
+});
+
+test('(u) a chat with no number is never a candidate: a lid alone, or a WhatsApp channel', async () => {
+  const h = harness({ inbox: true, windows: [[
+    // A lid alone may be a colleague whose lid is not learned yet: it cannot be checked (A7).
+    msg({ id: 'LID1', jid: '272516946294519@lid', jidAlt: null, pushName: 'Maybe Mona', ts: NOW - 60_000, text: 'the villa keys are with me' }),
+    msg({ id: 'LID2', fromMe: true, jid: '272516946294520@lid', jidAlt: null, pushName: null, ts: NOW - 50_000, text: 'rent is due' }),
+    // A channel the instance follows posts listings all day long.
+    msg({ id: 'CH1', jid: '120363025246125486@newsletter', pushName: 'Jeddah Villas', ts: NOW - 40_000, text: 'فيلا للبيع في الشاطئ' }),
+    msg({ id: 'CH2', jid: '12036302524@newsletter', pushName: 'Villas', ts: NOW - 30_000, text: 'villa for rent' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(tally.candidates, 0);
+  assert.deepEqual(candidates(h), []);
+  assert.equal(h.db.countLeads(), 0);
+  h.cleanup();
+});
+
+test('(u) a chat on the list that later sends a Ref line becomes a lead and leaves the list', async () => {
+  const h = harness({ inbox: true, windows: [[msg({ id: 'Q1', jid: STRANGER, ts: NOW - 120_000, text: 'Is the apartment still for rent?' })]] });
+  await h.poller.tick();
+  assert.equal(candidates(h).length, 1);
+  h.push([msg({ id: 'R1', jid: STRANGER, ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' })]);
+  await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.phone_e164, '966522222222');
+  assert.equal(lead.inbox_state, 'in');
+  assert.deepEqual(candidates(h), [], 'it is a lead now: its own inbox state decides');
+  h.cleanup();
+});
+
+test('(u) a chat that is already a lead is never a candidate, whatever it says', async () => {
+  const h = harness({ inbox: true });
+  seedInLead(h, { inbox_state: 'out', inbox_since: null });
+  h.db.insertLead({ lead_id: 'LEAD-guess', phone_e164: '966522222222', wa_jid: STRANGER, inbox_state: 'unsure', created: NOW - 3_600_000, updated: NOW - 3_600_000 });
+  h.push([
+    msg({ id: 'A1', ts: NOW - 60_000, text: 'still want the villa' }),
+    msg({ id: 'A2', fromMe: true, pushName: null, ts: NOW - 50_000, text: 'the villa is sold' }),
+    msg({ id: 'B1', jid: STRANGER, ts: NOW - 40_000, text: 'any apartment?' }),
+  ]);
+  const tally = await h.poller.tick();
+  assert.equal(tally.candidates, 0);
+  assert.deepEqual(candidates(h), []);
+  assert.equal(h.db.getLead('LEAD-in').inbox_state, 'out', '"Not a client" stays');
+  h.cleanup();
+});
+
+test('(u) a dismissed chat stays dismissed: later property messages neither reopen nor count it', async () => {
+  const h = harness({ inbox: true, windows: [[msg({ id: 'Q1', jid: STRANGER, ts: NOW - 120_000, text: 'أبغى فيلا' })]] });
+  await h.poller.tick();
+  const [row] = candidates(h);
+  h.inbox.dismissCandidate(row.cand_id);
+  h.push([msg({ id: 'Q2', jid: STRANGER, ts: NOW - 60_000, text: 'وش صار على الفيلا؟ عندكم شقة؟' })]);
+  const tally = await h.poller.tick();
+  assert.equal(tally.candidates, 0);
+  const [after] = candidates(h);
+  assert.deepEqual([after.state, after.hits, after.words, after.name, after.last_dir], ['dismissed', 0, null, null, null]);
+  assert.equal(h.inbox.countCandidates(), 0);
+  h.cleanup();
+});
+
+test('(u) an edit or a reaction is no message: it neither notes a chat nor counts one, nor moves its last time on', async () => {
+  // An edit Baileys-style (an editedMessage wrapper, no kind of its own) is noise, but its
+  // text is the new text: the villa in it must not count as one more property message, nor
+  // push the 30-day deletion later.
+  const h = harness({ inbox: true, windows: [[msg({ id: 'Q1', jid: STRANGER, ts: NOW - 120_000, text: 'أبغى فيلا' })]] });
+  await h.poller.tick();
+  const [before] = candidates(h);
+  h.push([
+    msg({ id: 'E1', jid: STRANGER, ts: NOW - 60_000, text: 'أبغى فيلا أو شقة للإيجار', messageType: null, noise: true }),
+    msg({ id: 'E2', jid: STRANGER2, ts: NOW - 50_000, text: 'the villa is 3M', messageType: null, noise: true }),
+    msg({ id: 'R1', jid: STRANGER2, ts: NOW - 40_000, text: '', messageType: 'reactionMessage', noise: true }),
+  ]);
+  const tally = await h.poller.tick();
+  assert.equal(tally.candidates, 0);
+  assert.deepEqual(candidates(h), [before], 'the row is exactly as it was, and no chat is noted from an edit');
+  assert.equal(h.db.waSeenHas('E1'), true, 'handled all the same');
+  h.cleanup();
+});
+
+test('(u) an edit on a chat that has become a lead still takes it off the list', async () => {
+  const h = harness({ inbox: true, windows: [[msg({ id: 'Q1', jid: STRANGER, ts: NOW - 120_000, text: 'أبغى فيلا' })]] });
+  await h.poller.tick();
+  assert.equal(candidates(h).length, 1);
+  h.db.insertLead({ lead_id: 'LEAD-later', phone_e164: '966522222222', wa_jid: STRANGER, inbox_state: 'unsure', created: NOW - 90_000, updated: NOW - 90_000 });
+  h.push([msg({ id: 'E1', jid: STRANGER, ts: NOW - 60_000, text: 'أبغى فيلا', messageType: null, noise: true })]);
+  await h.poller.tick();
+  assert.deepEqual(candidates(h), [], 'it is a lead now: its own inbox state decides');
+  h.cleanup();
+});
+
+test('(u) team and never-list numbers never become candidates', async () => {
+  const h = harness({ inbox: true, isExcluded: (digits) => digits === '966522222222' || digits === '966533333333' });
+  h.push([
+    msg({ id: 'T1', jid: STRANGER, ts: NOW - 60_000, text: 'the villa keys are with me' }),
+    msg({ id: 'T2', fromMe: true, jid: STRANGER2, pushName: null, ts: NOW - 30_000, text: 'rent is due' }),
+  ]);
+  const tally = await h.poller.tick();
+  assert.equal(tally.ignored, 2);
+  assert.deepEqual(candidates(h), []);
+  h.cleanup();
+});
+
+test('(u) without the inbox the poller keeps no list: Phase 1 is unchanged', async () => {
+  const h = harness({ windows: [[msg({ id: 'Q1', jid: STRANGER, text: 'عندكم شقة للإيجار؟' })]] });
+  const tally = await h.poller.tick();
+  assert.equal(tally.unmatched, 1);
+  assert.equal(tally.candidates, 0);
+  assert.equal(createInboxStore(h.db).countCandidates(), 0);
+  h.cleanup();
+});
+
+test('(u) a list that cannot be written never fails the record, and says so by the kind of error only', async () => {
+  const h = harness({ inbox: true, windows: [[msg({ id: 'Q1', jid: STRANGER, pushName: 'Umm Khalid', text: 'عندكم شقة للإيجار؟' })]] });
+  h.inbox.noteCandidate = () => { throw new Error('disk I/O error on 966522222222'); };
+  const tally = await h.poller.tick();
+  assert.equal(tally.unmatched, 1);
+  assert.equal(h.db.waSeenHas('Q1'), true, 'handled: it is not read again');
+  assert.ok(!h.logs.some((l) => l.evt === 'wa.poll.record_failed'));
+  const failed = h.logs.find((l) => l.evt === 'inbox.candidate_failed');
+  assert.deepEqual(failed, { level: 'warn', evt: 'inbox.candidate_failed', error: 'Error' }, 'the kind of error, never its message (Task 9, c9e3145)');
+  const dump = JSON.stringify(h.logs);
+  for (const secret of ['disk I/O', '966522222222']) assert.ok(!dump.includes(secret), secret);
+  h.cleanup();
+});
+
+test('(u) nothing about a candidate reaches a log line: no number, name, lid or word', async () => {
+  const lid = '272516946294519@lid';
+  const h = harness({ inbox: true, windows: [[
+    msg({ id: 'Q1', jid: lid, jidAlt: STRANGER, pushName: 'Umm Khalid', ts: NOW - 60_000, text: 'عندكم شقة للإيجار؟' }),
+    msg({ id: 'O1', fromMe: true, jid: STRANGER2, pushName: 'Abdulaziz', ts: NOW - 30_000, text: 'the villa is 3M' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(tally.candidates, 2);
+  const tick = h.logs.find((l) => l.evt === 'wa.poll.tick');
+  assert.equal(tick.candidates, 2, 'the count is logged');
+  const dump = JSON.stringify(h.logs);
+  for (const secret of ['966522222222', '966533333333', '272516946294519', 'Umm Khalid', 'Abdulaziz', 'شقة', 'villa', 'عندكم']) {
+    assert.ok(!dump.includes(secret), `a log line carries ${secret}`);
+  }
+  h.cleanup();
+});
+
+/* ---------------- (v) final review fixes 2026-09-29: poller, data and screens ---------------- */
+
+test('(v) a reaction, an edit or a delete from an existing lead is no message: no touchpoint, no reply clock, no reopened add', async () => {
+  const h = harness({ inbox: true });
+  // What *Add chat by phone number* writes: an owner_added lead, in, born answered.
+  const { lead: added } = createOrMergeLead(h.db, { phone: '0500000000', waJid: SENDER }, { channel: 'whatsapp', matchMethod: 'owner_added', now: NOW - 3_600_000 });
+  const before = h.db.getLead(added.lead_id);
+  assert.equal(before.first_reply_ts, NOW - 3_600_000);
+  h.push([
+    msg({ id: 'REACT', ts: NOW - 60_000, text: '', messageType: 'reactionMessage', noise: true }),
+    // An edit on the wire: no kind of its own, the new text inside.
+    msg({ id: 'EDIT', ts: NOW - 50_000, text: 'Ref BONA-W003 · K7Q2XR', messageType: null, noise: true }),
+    msg({ id: 'DEL', ts: NOW - 40_000, text: '', messageType: 'protocolMessage', noise: true }),
+  ]);
+  const tally = await h.poller.tick();
+  const after = h.db.getLead(added.lead_id);
+  assert.deepEqual(h.db.touchpointsForLead(added.lead_id).map((t) => t.event_type), ['lead_created'], 'no inbound_message touchpoint');
+  assert.equal(after.first_inbound_ts, null, 'nobody wrote: the reply clock stays shut');
+  assert.equal(after.first_reply_ts, NOW - 3_600_000, "the add's stamp is not taken back");
+  assert.equal(after.updated, before.updated, 'the lead is not touched at all');
+  assert.equal(h.db.countWaitingLeads(), 0, 'nobody is waiting on a reaction');
+  assert.deepEqual([tally.matched, tally.merged, tally.created], [0, 0, 0]);
+  assert.equal(h.logs.some((l) => l.evt === 'wa.lead'), false);
+  for (const id of ['REACT', 'EDIT', 'DEL']) assert.equal(h.db.waSeenHas(id), true, `${id} handled all the same`);
+  assert.equal(h.inbox.hasMessages(added.lead_id), false, 'and never a bubble');
+  h.cleanup();
+});
+
+test('(v) noise never creates a lead: an edit carrying a Ref line or a keyword, or a reaction, from an unknown number', async () => {
+  for (const inbox of [true, false]) {
+    const h = harness({ inbox, windows: [[
+      msg({ id: 'E1', jid: STRANGER, ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR', messageType: null, noise: true }),
+      msg({ id: 'E2', jid: STRANGER2, ts: NOW - 50_000, text: 'Bona BONA-W012', messageType: 'editedMessage', noise: true }),
+      msg({ id: 'R1', ts: NOW - 40_000, text: '', messageType: 'reactionMessage', noise: true }),
+    ]] });
+    const tally = await h.poller.tick();
+    assert.deepEqual(h.leads(), [], `no lead (inbox ${inbox})`);
+    assert.deepEqual(h.jsonl(), [], 'nothing in the raw log');
+    assert.deepEqual(h.sent, [], 'the owner hears nothing');
+    assert.equal(tally.created, 0);
+    assert.equal(tally.unmatched, 0, 'noise is not an unmatched message either');
+    assert.equal(h.db.waSeenHas('E1'), true);
+    h.cleanup();
+  }
+});
+
+test("(v) the owner's own reaction, edit or delete neither answers a lead nor starts one", async () => {
+  const h = harness({ inbox: true });
+  h.db.insertLead({ lead_id: 'LEAD-wait', phone_e164: '966500000000', wa_jid: SENDER, created: NOW - 3_600_000, updated: NOW - 3_600_000, first_inbound_ts: NOW - 3_600_000 });
+  h.push([
+    msg({ id: 'OR', fromMe: true, pushName: null, ts: NOW - 60_000, text: '', messageType: 'reactionMessage', noise: true }),
+    msg({ id: 'OD', fromMe: true, pushName: null, ts: NOW - 55_000, text: '', messageType: 'protocolMessage', noise: true }),
+    // An edit of his message to a stranger, now carrying a Bona link and a listing id.
+    msg({ id: 'OE', fromMe: true, pushName: null, jid: STRANGER, ts: NOW - 50_000, text: 'https://bona-real-estate.com/properties/bona-w003/ BONA-W003', messageType: null, noise: true }),
+  ]);
+  const tally = await h.poller.tick();
+  assert.equal(h.db.getLead('LEAD-wait').first_reply_ts, null, 'a reaction or a delete is no reply');
+  assert.equal(tally.replies, 0);
+  assert.deepEqual(h.leads().map((l) => l.lead_id), ['LEAD-wait'], 'no owner_outbound lead from an edit');
+  assert.equal(tally.joined, 0);
   h.cleanup();
 });

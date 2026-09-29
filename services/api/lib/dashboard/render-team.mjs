@@ -1,6 +1,7 @@
 /**
  * The Team page (owner only): who can log in, the numbers that are never a client, and
- * the switch for everything the dashboard sends from the owner's WhatsApp.
+ * the switches for what the dashboard sends from the owner's WhatsApp — everything
+ * (Sending), and replies to clients (off until the owner turns them on, design D14).
  * Every write is a form post to /v1/admin/*, like the rest of the dashboard.
  */
 import { esc, fullPhone, dateTime, layout, scrollTable, knownError, messageFor } from './render.mjs';
@@ -20,7 +21,9 @@ const post = (action, label, fields = {}, cls = '') => `<form method="post" acti
   Object.entries(fields).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('') +
   `<button type="submit"${cls ? ` class="${esc(cls)}"` : ''}>${esc(label)}</button></form>`;
 
-export function teamPage({ me, users = [], never = [], sendingEnabled = true, ok = null, error = null }) {
+export function teamPage({ me, users = [], never = [], sendingEnabled = true, repliesEnabled = false, ok = null, error = null }) {
+  // Fails closed like the setting itself: only a real `true` from team.repliesEnabled() is on.
+  const repliesOn = repliesEnabled === true;
   const flash = knownError(error)
     ? `<div class="err">${esc(messageFor(error))}</div>`
     : (ok && Object.hasOwn(TEAM_OK, ok) ? `<div class="ok">${esc(TEAM_OK[ok])}</div>` : '');
@@ -75,7 +78,13 @@ ${scrollTable('<th>Number</th><th>Note</th><th></th>', nevers, 'The list is empt
 <p class="sub">${sendingEnabled
     ? 'On. The dashboard may send login codes to your team (and, later, replies to clients) from your number.'
     : 'Off. Nothing is sent from your number except your own login code.'}</p>
-${post('/v1/admin/settings', sendingEnabled ? 'Turn sending off' : 'Turn sending on', { sending_enabled: sendingEnabled ? '0' : '1' })}`;
+${post('/v1/admin/settings', sendingEnabled ? 'Turn sending off' : 'Turn sending on', { sending_enabled: sendingEnabled ? '0' : '1' })}
+
+<h2 style="margin-top:28px">Replies to clients from the dashboard</h2>
+<p class="sub">${repliesOn
+    ? 'On. Everyone on the team can answer Bona inbox chats from the dashboard; the reply goes from your number (while sending above is on).'
+    : 'Off. Nobody can send a client a message from the dashboard yet; the team can still read the inbox, and login codes still go.'}</p>
+${post('/v1/admin/settings', repliesOn ? 'Turn replies off' : 'Turn replies on', { inbox_replies: repliesOn ? '0' : '1' })}`;
 
   return layout({ title: 'Team', active: '/dashboard/team', me, body: `<h1>Team</h1>${body}` });
 }

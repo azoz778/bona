@@ -11,13 +11,19 @@
  * code first (`normalisePhone`).
  */
 import { newId } from './db.mjs';
+import { bareJid } from './evolution.mjs';
 import { normalisePhone } from './phone.mjs';
 
 export const ROLES = ['owner', 'staff'];
-/** Every setting that exists, with its default. Phase 4 adds `dana_enabled: '0'`. */
-export const SETTINGS_DEFAULTS = { sending_enabled: '1' };
+/**
+ * Every setting that exists, with its default. Phase 4 adds `dana_enabled: '0'`.
+ * `inbox_replies` ships '0': the team can read the Bona inbox from the day it goes live,
+ * but no reply reaches a client until the owner turns replies on — the first real client
+ * message from the dashboard is sent with him (design D14).
+ */
+export const SETTINGS_DEFAULTS = { sending_enabled: '1', inbox_replies: '0' };
 /** The only values each setting may hold. A key with no entry here accepts any string. */
-export const SETTINGS_ALLOWED = { sending_enabled: ['0', '1'] };
+export const SETTINGS_ALLOWED = { sending_enabled: ['0', '1'], inbox_replies: ['0', '1'] };
 export const MAX_NAME = 80;
 export const MAX_NEVER_NOTE = 120;
 
@@ -223,11 +229,13 @@ export function createTeam(store, { now = () => Date.now(), log = () => {} } = {
   }
   /** Fail closed: only an exact `'1'` is ON. Anything else — including old or corrupt data — is OFF. */
   const sendingEnabled = () => getSetting('sending_enabled') === '1';
+  /** Replies to clients from the dashboard: fails closed the same way, and ships off. */
+  const repliesEnabled = () => getSetting('inbox_replies') === '1';
 
   return {
     ensureOwner, getUser, getUserByPhone, listUsers, addUser, deactivateUser, reactivateUser, setRole, touchLogin,
     addNever, removeNever, listNever, isExcludedPhone,
-    getSetting, setSetting, sendingEnabled,
+    getSetting, setSetting, sendingEnabled, repliesEnabled,
   };
 }
 
@@ -282,4 +290,39 @@ export function learnTeamLid(store, phone, lid) {
 export function isTeamLid(store, lid) {
   if (!lid) return false;
   return Boolean(lidStmt(store.db, 'SELECT 1 FROM users WHERE wa_lid = ?').get(String(lid)));
+}
+
+/**
+ * The phone number in a jid, read the way lib/wa-poller.mjs `jidsOf` reads it (and so the
+ * way ingest does): any jid that is not a lid, a group or a broadcast, device suffix
+ * stripped. `jidsOf` itself is not imported: the poller imports this file.
+ */
+function phoneOfJid(jid) {
+  if (typeof jid !== 'string' || !jid) return null;
+  if (jid.endsWith('@lid') || jid.endsWith('@g.us') || jid.endsWith('@broadcast')) return null;
+  return normalisePhone(bareJid(jid));
+}
+
+/**
+ * True when a lead's chat is a team member's (active or not) or a never-list number's,
+ * however the row holds it: its phone, the number in its phone jid, or a lid learned as
+ * a colleague's by `learnTeamLid`. The Bona inbox's one exclusion test (§3.5, P2-7): the
+ * dashboard routes refuse such a chat, ingest refuses its records, and the daily upkeep
+ * takes it out of the inbox. A lid's own digits are an opaque id, never read as a phone
+ * number.
+ *
+ * It decides from the identifier fields of the object it is handed — `phone_e164`,
+ * `wa_jid`, `wa_lid` — and nothing else: it never reads the row again by `lead_id`.
+ * Ingest calls it with per-identifier views of a lead (the row as if it held one number
+ * or lid a record names), and a re-read would answer for the stored row instead.
+ *
+ * @param {ReturnType<typeof createTeam>} team
+ * @param {ReturnType<import('./db.mjs').openDb>} store
+ * @param {{ phone_e164?: string|null, wa_jid?: string|null, wa_lid?: string|null }|null} lead
+ */
+export function isExcludedLead(team, store, lead) {
+  if (!lead) return false;
+  return team.isExcludedPhone(lead.phone_e164)
+    || team.isExcludedPhone(phoneOfJid(lead.wa_jid))
+    || isTeamLid(store, lead.wa_lid);
 }
