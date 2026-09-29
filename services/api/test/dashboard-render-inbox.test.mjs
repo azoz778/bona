@@ -473,3 +473,28 @@ test('a thread that does not draw every message says how many earlier ones are n
     assert.doesNotMatch(thread({ messages: [msg()], hidden }), /not shown here/, String(hidden));
   }
 });
+
+test('a thread that leaves earlier messages out leaves out the gaps and unconfirmed replies among them too', () => {
+  const window = {
+    messages: [msg({ key_id: 'K1', text: 'first drawn', ts: NOW - 5 * HOUR }), msg({ key_id: 'K9', text: 'last drawn', ts: NOW - HOUR })],
+    gaps: [
+      { key_id: 'G0', lead_id: LEAD.lead_id, jid: LEAD.wa_lid, ts: NOW - 9 * HOUR, reason: 'failed' },
+      { key_id: 'G1', lead_id: LEAD.lead_id, jid: LEAD.wa_lid, ts: NOW - 4 * HOUR, reason: 'failed' },
+    ],
+    outbox: [
+      { send_id: 'S0', lead_id: LEAD.lead_id, text: 'an old failed reply', user_id: 'USR-s', sender_kind: 'staff', status: 'failed', key_id: null, created: NOW - 8 * HOUR, error: 'http_500' },
+      { send_id: 'S1', lead_id: LEAD.lead_id, text: 'a newer failed reply', user_id: 'USR-s', sender_kind: 'staff', status: 'failed', key_id: null, created: NOW - 3 * HOUR, error: 'http_500' },
+    ],
+  };
+  const gapCount = (html) => (html.match(/class="wgap"/g) ?? []).length;
+
+  const cut = thread({ ...window, hidden: 300 });
+  assert.equal(gapCount(cut), 1, 'the gap among the hidden messages is not drawn under "not shown here"');
+  assert.doesNotMatch(cut, /an old failed reply/);
+  assert.match(cut, /a newer failed reply/, 'what sits among the drawn messages stays');
+  assert.ok(cut.indexOf('not shown here') < cut.indexOf('first drawn'));
+
+  const whole = thread(window);
+  assert.equal(gapCount(whole), 2, 'with nothing left out, a gap before the first message is the chat\'s own start');
+  assert.match(whole, /an old failed reply/);
+});
