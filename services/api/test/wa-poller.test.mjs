@@ -22,7 +22,7 @@ import { JOIN_HISTORY_MS, createBackfill } from '../lib/inbox/backfill.mjs';
 import { ownerOutboundJoins } from '../lib/inbox/eligibility.mjs';
 import { createIngest } from '../lib/inbox/ingest.mjs';
 import { createInboxStore } from '../lib/inbox/store.mjs';
-import { leadNote } from '../lib/leads.mjs';
+import { createOrMergeLead, leadNote } from '../lib/leads.mjs';
 import { loadConfig } from '../lib/config.mjs';
 
 const NOW = Date.UTC(2026, 8, 6, 12, 0, 0);
@@ -1345,6 +1345,28 @@ test('(t) a click-window match is a guess too: Unsure, nothing stored', async ()
   assert.equal(lead.match_method, 'time_window');
   assert.equal(lead.inbox_state, 'unsure');
   assert.equal(h.inbox.hasMessages(lead.lead_id), false);
+  h.cleanup();
+});
+
+test('(t) a web-form number that writes on WhatsApp with no sure sign goes on the owner\'s Unsure list: the form never decides the chat', async () => {
+  const f1 = msg({ id: 'F1', ts: NOW - 120_000, text: 'السلام عليكم' });
+  const f2 = msg({ id: 'F2', ts: NOW - 30_000, text: 'BONA-W012 السعر؟' });
+  const h = harness({ inbox: true, history: [f1, f2], windows: [[f1], [f2]] });
+  // Anyone can type this number into the form: it proves nothing about the chat under it.
+  const { lead: form } = createOrMergeLead(h.db, { phone: '0500000000', name: 'Form Name' }, { channel: 'form', matchMethod: 'form', now: NOW - 600_000 });
+  assert.equal(form.inbox_state, null);
+  const first = await h.poller.tick();
+  const merged = h.db.getLead(form.lead_id);
+  assert.equal(merged.wa_jid, SENDER, 'the same person: the chat is matched to the form lead');
+  assert.notEqual(merged.inbox_state, 'in');
+  assert.equal(h.inbox.hasMessages(form.lead_id), false, 'nothing stored');
+  assert.equal(h.findCalls.length, 0, 'no history pulled');
+  assert.deepEqual(h.inbox.listUnsure().map((l) => l.lead_id), [form.lead_id], 'the owner decides');
+  assert.equal(first.joined, 0);
+  // A sure sign on WhatsApp itself joins it, as it would any chat.
+  await h.poller.tick();
+  assert.equal(h.db.getLead(form.lead_id).inbox_state, 'in');
+  assert.deepEqual(rows(h, form.lead_id), [['F1', 'in', 'client'], ['F2', 'in', 'client']]);
   h.cleanup();
 });
 

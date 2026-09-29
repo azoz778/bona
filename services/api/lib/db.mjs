@@ -170,10 +170,10 @@ const MIGRATIONS = [
     // silently skipping it. Their text keys are NOT NULL because a rowid table's TEXT
     // PRIMARY KEY otherwise takes NULL, as many times as it is given one.
     // The two UPDATEs place the leads that already exist (P2-13). Certain → `in`, counted
-    // from the day the lead was created: a Ref code or ad context, a web form or concierge
-    // lead with no legacy_id (neither imported from nor merged with the old leads.jsonl
-    // log), or a listing id in the first message. Everything else — the keyword and
-    // click-window guesses, legacy imports — goes to the owner's Unsure list. The GLOBs
+    // from the day the lead was created: a Ref code or ad context, or a listing id in the
+    // first message. Everything else — the keyword and click-window guesses, web-form and
+    // concierge leads (a phone nobody verified never decides the chat under it: owner rule
+    // D9, 2026-09-29), legacy imports — goes to the owner's Unsure list. The GLOBs
     // are deliberately a little looser than LISTING_ID_RE in lib/inbox/eligibility.mjs (no
     // word boundary on either side) and were checked against the live data on 2026-09-28
     // (18 in / 9 unsure). `json_extract` raises on malformed JSON, and one bad touchpoint
@@ -231,7 +231,6 @@ const MIGRATIONS = [
       CREATE INDEX IF NOT EXISTS inbox_candidates_state ON inbox_candidates(state, last_ts);
       UPDATE leads SET
         inbox_state = CASE WHEN match_method IN ('ref','ad_meta')
-            OR (channel IN ('form','concierge_chat','concierge_voice') AND legacy_id IS NULL)
             OR EXISTS (SELECT 1 FROM touchpoints t WHERE t.lead_id = leads.lead_id AND t.event_type = 'lead_created'
                        AND CASE WHEN json_valid(t.meta) IS NOT 1 THEN 0
                                 WHEN json_type(t.meta, '$.snippet') IS NOT 'text' THEN 0
