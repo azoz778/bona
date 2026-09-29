@@ -26,6 +26,7 @@ export const INBOX_OK = {
   moved: 'Moved to the Bona inbox.',
   out: 'Marked not a client. What the dashboard stored from that chat is deleted.',
   added: 'Added to the Bona inbox.',
+  dismissed: 'Marked not a client. It is off the list, and only its number is kept, so it is not listed again.',
 };
 
 /** One banner. A known error wins over an ok; a code nobody knows shows nothing. */
@@ -148,13 +149,65 @@ function unsureRow(row, now) {
 </div>`;
 }
 
-/** Chats that might be about Bona. Only the owner decides, so only the owner sees them. */
-export function unsurePage({ me, rows, ok = null, error = null, now = Date.now() }) {
+/* ------------------------------------------------------------------ */
+/* Real-estate chats to check (owner only, D17)                        */
+/* ------------------------------------------------------------------ */
+
+const candidateHref = (candId, what) => `/v1/admin/inbox/candidates/${encodeURIComponent(candId)}/${what}`;
+
+/**
+ * One chat that talks about property with nothing that says Bona. No lead is behind it and
+ * nothing it said was kept: the name WhatsApp shows for the client, or the masked number
+ * when there is none; the property words; when it first and last wrote; how many messages;
+ * and whether the last one was the owner's or theirs.
+ */
+function candidateRow(c, now) {
+  const name = String(c.name ?? '').trim();
+  const masked = maskPhone(c.phone_e164);
+  const words = (Array.isArray(c.words) ? c.words : String(c.words ?? '').split(',')).filter((w) => typeof w === 'string' && w);
+  const hits = Number(c.hits) || 0;
+  const when = (ts) => {
+    const a = agoSince(now, ts);
+    return a === '—' || a === 'just now' ? a : `${a} ago`;
+  };
+  const last = c.last_dir === 'out' ? 'you wrote last' : c.last_dir === 'in' ? 'they wrote last' : '';
+  const facts = [
+    name ? `<span class="tel">${esc(masked)}</span>` : '',
+    `<span>first ${esc(when(c.first_ts))}</span>`,
+    `<span>last ${esc(when(c.last_ts))}</span>`,
+    hits ? `<span>${esc(hits)} ${hits === 1 ? 'message' : 'messages'}</span>` : '',
+    last ? `<span>${esc(last)}</span>` : '',
+  ].filter(Boolean).join('<span>·</span>');
+  return `<div class="lr ix">
+  <span class="av2" aria-hidden="true"><span dir="auto">${esc(firstLetter(name))}</span></span>
+  <div>
+    <div class="l1"><span class="nm">${name ? `<bdi>${esc(name)}</bdi>` : `<span class="tel">${esc(masked)}</span>`}</span>${words.length ? `<span class="pl warm" dir="auto">${esc(words.join(' · '))}</span>` : ''}</div>
+    <div class="l2">${facts}</div>
+    <div class="acts" style="margin-top:8px">${postButton(candidateHref(c.cand_id, 'move'), 'Move to Bona inbox')}${postButton(candidateHref(c.cand_id, 'dismiss'), 'Not a client')}</div>
+  </div>
+</div>`;
+}
+
+/**
+ * Chats that might be about Bona: the guessed leads, then the real-estate chats to check
+ * (D17). Only the owner decides, so only the owner sees them; the chats to check are drawn
+ * only for an owner even if a caller passes them for someone else. The tab counts both.
+ */
+export function unsurePage({ me, rows, candidates = [], ok = null, error = null, now = Date.now() }) {
   const list = Array.isArray(rows) ? rows : [];
+  const cands = me?.role === 'owner' && Array.isArray(candidates) ? candidates : [];
+  const guesses = list.length
+    ? `<div class="card cp">${list.map((r) => unsureRow(r, now)).join('')}</div>`
+    : `<p class="muted">${cands.length ? 'No chats that mention Bona to decide.' : 'Nothing to decide.'}</p>`;
+  const toCheck = cands.length
+    ? `<h2 style="margin-top:22px">Real-estate chats to check</h2>
+<p class="sub">Chats on your number that talk about property but carry nothing that says Bona: a TK client, someone you know, or a new Bona client. Nothing they wrote is kept, only the number, the name WhatsApp shows and the property words, until 30 days after the last such message. <b>Move to Bona inbox</b> makes it a Bona chat and copies in its last 30 days; <b>Not a client</b> takes it off this list, and it is not listed again for a year.</p>
+<div class="card cp">${cands.map((c) => candidateRow(c, now)).join('')}</div>`
+    : '';
   const body = `${flash(ok, error)}
 <p class="sub">Chats that might be about Bona but carry no ad, Ref code or listing number. Only owners see this list. <b>Move to Bona inbox</b> copies in the chat's last 30 days so the team can read and reply; <b>Not a client</b> keeps it out of the inbox, and it never comes back on its own.</p>
-${list.length ? `<div class="card cp">${list.map((r) => unsureRow(r, now)).join('')}</div>` : '<p class="muted">Nothing to decide.</p>'}`;
-  return layout({ title: 'Unsure', active: '/dashboard/inbox', me, actions: tabs('unsure', list.length), body });
+${guesses}${toCheck}`;
+  return layout({ title: 'Unsure', active: '/dashboard/inbox', me, actions: tabs('unsure', list.length + cands.length), body });
 }
 
 /* ------------------------------------------------------------------ */

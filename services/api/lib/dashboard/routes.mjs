@@ -729,11 +729,13 @@ export function createDashboardRoutes({
   /**
    * A number that has just become a colleague's or a never-list one is never a client
    * (§3.5, P2-7): the chat stored under it, if any, leaves the inbox and its transcript
-   * goes now, not at the next daily upkeep. Audited by lead id only. Built without the
-   * inbox (older tests, tools), there is nothing stored to take out.
+   * goes now, not at the next daily upkeep, and it leaves the owner's list of real-estate
+   * chats to check (D17). Audited by lead id only. Built without the inbox (older tests,
+   * tools), there is nothing stored to take out.
    */
   function leaveInboxFor(digits, me) {
     if (!inbox || !digits) return;
+    inbox.removeCandidatesFor({ phone: digits, jid: `${digits}@s.whatsapp.net` });
     const lead = db.getLeadByPhone(digits) ?? db.getLeadByJid(`${digits}@s.whatsapp.net`);
     if (!lead || lead.inbox_state === 'out') return;
     inbox.leaveInbox(lead.lead_id);
@@ -922,19 +924,43 @@ export function createDashboardRoutes({
     }));
   }
 
+  /**
+   * A real-estate chat to check (D17) whose number is a colleague's or a never-list one is
+   * on no list and in no count, like a lead rule 1 hides: the store knows no team.
+   */
+  const excludedCandidate = (c) => excludedLead({ phone_e164: c.phone_e164, wa_jid: c.jid, wa_lid: c.lid });
+  /**
+   * The lead a chat to check has become since it was noted (a web form, *Add chat by phone
+   * number* …), if any: that lead's own inbox state decides the chat from then on.
+   */
+  const leadOfCandidate = (c) => (c.phone_e164 ? db.getLeadByPhone(c.phone_e164) : null)
+    ?? (c.jid ? db.getLeadByJid(c.jid) : null) ?? (c.lid ? db.getLeadByJid(c.lid) : null);
+  /** The most chats to check the Unsure tab lists, and counts: one list for both. */
+  const CANDIDATES_SHOWN = 200;
+  /**
+   * The owner's real-estate chats to check, as his Unsure tab lists and counts them. The
+   * store already leaves out, in SQL, a chat that has become a lead; a colleague's or a
+   * never-list number is left out here (one team check per row, at most 200 rows).
+   */
+  const candidatesShown = () => inbox.listCandidates({ limit: CANDIDATES_SHOWN }).filter((c) => !excludedCandidate(c));
+
   function inboxList({ res, url, me }) {
     if (!inbox) return noSuchPage(res, me);
     const ok = inboxOk(url.searchParams.get('ok'));
     const error = knownError(url.searchParams.get('error'));
+    const owner = me.role === 'owner';
     if (url.searchParams.get('tab') === 'unsure') {
-      if (me.role !== 'owner') return sendHtml(res, 403, messagePage({ title: 'Owners only', message: 'Only an owner can see the Unsure list.', me }));
-      return sendHtml(res, 200, unsurePage({ me, rows: inbox.listUnsure().filter((l) => !excludedLead(l)), ok, error, now: now() }));
+      if (!owner) return sendHtml(res, 403, messagePage({ title: 'Owners only', message: 'Only an owner can see the Unsure list.', me }));
+      return sendHtml(res, 200, unsurePage({
+        me, rows: inbox.listUnsure().filter((l) => !excludedLead(l)), candidates: candidatesShown(), ok, error, now: now(),
+      }));
     }
     return sendHtml(res, 200, inboxPage({
       me,
       rows: inbox.listInbox({ userId: me.user_id, userCreated: me.created ?? 0 }).filter((l) => !excludedLead(l)),
-      // Counted from the rows the Unsure list shows, never the store's raw `countUnsure`.
-      unsureCount: me.role === 'owner' ? inbox.listUnsure({ limit: 1000 }).filter((l) => !excludedLead(l)).length : 0,
+      // Counted from the rows the Unsure tab shows (the guesses and the chats to check),
+      // never the store's raw counts. Staff get none: the tab is not theirs.
+      unsureCount: owner ? inbox.listUnsure({ limit: 1000 }).filter((l) => !excludedLead(l)).length + candidatesShown().length : 0,
       ok,
       error,
       now: now(),
@@ -1019,6 +1045,8 @@ export function createDashboardRoutes({
     if (!lead.wa_jid && !lead.wa_lid && !lead.phone_e164) return answer(res, { form, back: `${leadPage}?error=not_a_chat`, status: 400, payload: { error: 'not_a_chat' } });
     const t = now();
     inbox.setInboxState(leadId, 'in', { since: t });
+    // Off the owner's list of real-estate chats to check, if it was there (D17).
+    inbox.removeCandidatesFor({ phone: lead.phone_e164, jid: lead.wa_jid, lid: lead.wa_lid });
     audit?.record({ userId: me.user_id, action: 'inbox_move', target: leadId });
     log({ evt: 'dash.inbox_move', leadId });
     await joinHistory(leadId, t);
@@ -1051,10 +1079,57 @@ export function createDashboardRoutes({
       channel: 'whatsapp', matchMethod: 'owner_added', now: t, dataDir: cfg.dataDir,
     });
     inbox.setInboxState(lead.lead_id, 'in', { since: t });
+    // A lead now: off the owner's list of real-estate chats to check (D17).
+    inbox.removeCandidatesFor({ phone: digits, jid: `${digits}@s.whatsapp.net` });
     audit?.record({ userId: me.user_id, action: 'inbox_add', target: lead.lead_id });
     log({ evt: 'dash.inbox_add', leadId: lead.lead_id });
     await joinHistory(lead.lead_id, t);
     return answer(res, { form, back: `/dashboard/inbox/${encodeURIComponent(lead.lead_id)}?ok=added`, status: 200, payload: { ok: true, lead_id: lead.lead_id } });
+  }
+
+  /**
+   * *Move to Bona inbox* on a real-estate chat to check (D17). The owner vouches for it, so
+   * it becomes an `owner_added` lead through the one lead write path — no ad fan-out, no
+   * new-lead note, born answered (P2-5) — goes `in`, brings its last 30 days, and leaves
+   * the list. A colleague's or a never-list number is refused and taken off the list, and
+   * so is a row with no phone number (a lid alone, or a WhatsApp channel's jid): A7 makes no
+   * lead of one, and the poller notes none. Audited and logged by the candidate's and the
+   * lead's ids, never a number.
+   */
+  async function candidateMove({ res, form, me }, candId) {
+    const unsure = '/dashboard/inbox?tab=unsure';
+    const c = inbox.getCandidate(candId);
+    if (!c || c.state !== 'open') return answer(res, { form, back: `${unsure}&error=candidate_gone`, status: 404, payload: { error: 'not_found' } });
+    if (!c.phone_e164 || (c.jid && !c.jid.endsWith('@s.whatsapp.net'))) {
+      inbox.removeCandidate(c.cand_id);
+      return answer(res, { form, back: `${unsure}&error=candidate_no_number`, status: 400, payload: { error: 'candidate_no_number' } });
+    }
+    const ids = { phone: c.phone_e164, jid: c.jid, lid: c.lid };
+    const existing = leadOfCandidate(c);
+    if (excludedCandidate(c) || (existing && excludedLead(existing))) {
+      inbox.removeCandidatesFor(ids);
+      return answer(res, { form, back: `${unsure}&error=excluded`, status: 400, payload: { error: 'excluded' } });
+    }
+    const t = now();
+    const { lead } = createOrMergeLead(db, { name: c.name, phone: c.phone_e164, waJid: c.jid, waLid: c.lid }, {
+      channel: 'whatsapp', matchMethod: 'owner_added', now: t, dataDir: cfg.dataDir,
+    });
+    inbox.setInboxState(lead.lead_id, 'in', { since: t });
+    inbox.removeCandidatesFor(ids);
+    audit?.record({ userId: me.user_id, action: 'inbox_move', target: c.cand_id, meta: { lead_id: lead.lead_id } });
+    log({ evt: 'dash.candidate_move', candId: c.cand_id, leadId: lead.lead_id });
+    await joinHistory(lead.lead_id, t);
+    const back = openChat(db.getLead(lead.lead_id)) ? `/dashboard/inbox/${encodeURIComponent(lead.lead_id)}?ok=moved` : '/dashboard/inbox?ok=moved';
+    return answer(res, { form, back, status: 200, payload: { ok: true, lead_id: lead.lead_id } });
+  }
+
+  /** *Not a client* on a real-estate chat to check: off the list, and not listed again (D17). */
+  function candidateDismiss({ res, form, me }, candId) {
+    const unsure = '/dashboard/inbox?tab=unsure';
+    if (!inbox.dismissCandidate(candId)) return answer(res, { form, back: `${unsure}&error=candidate_gone`, status: 404, payload: { error: 'not_found' } });
+    audit?.record({ userId: me.user_id, action: 'inbox_out', target: candId });
+    log({ evt: 'dash.candidate_dismiss', candId });
+    return answer(res, { form, back: `${unsure}&ok=dismissed`, status: 200, payload: { ok: true } });
   }
 
   /* -------------------- dispatch -------------------- */
@@ -1066,6 +1141,8 @@ export function createDashboardRoutes({
   const ADMIN_INBOX = /^\/v1\/admin\/inbox\/([A-Za-z0-9_-]{1,64})\/(reply|handler|move|out)$/;
   /** Inbox writes only an owner makes (D9); reply and handler are anyone's on the team. */
   const OWNER_INBOX_WRITES = new Set(['move', 'out']);
+  /** The owner's decisions on a real-estate chat to check (D17): his alone. */
+  const ADMIN_CANDIDATE = /^\/v1\/admin\/inbox\/candidates\/([A-Za-z0-9_-]{1,64})\/(move|dismiss)$/;
   const OWNER_WRITES = new Set(['/v1/admin/team', '/v1/admin/never', '/v1/admin/never/remove', '/v1/admin/settings', '/v1/admin/inbox/add']);
 
   const owns = ownsDashboardPath;
@@ -1149,9 +1226,10 @@ export function createDashboardRoutes({
     }
     const teamMatch = ADMIN_TEAM.exec(p);
     const inboxMatch = ADMIN_INBOX.exec(p);
-    const ownerWrite = Boolean(teamMatch || tiktokMatch || OWNER_WRITES.has(p) || (inboxMatch && OWNER_INBOX_WRITES.has(inboxMatch[2])));
+    const candMatch = ADMIN_CANDIDATE.exec(p);
+    const ownerWrite = Boolean(teamMatch || tiktokMatch || candMatch || OWNER_WRITES.has(p) || (inboxMatch && OWNER_INBOX_WRITES.has(inboxMatch[2])));
     const writes = (leadMatch && leadMatch[2]) || (p === '/v1/admin/spend' ? 'spend' : null)
-      || ((inboxMatch || p === '/v1/admin/inbox/add') ? 'inbox' : null) || (ownerWrite ? 'team' : null);
+      || ((inboxMatch || candMatch || p === '/v1/admin/inbox/add') ? 'inbox' : null) || (ownerWrite ? 'team' : null);
     if (!writes) return sendJson(res, 404, { error: 'not_found' });
 
     const parsed = await fieldsOf(req);
@@ -1166,7 +1244,8 @@ export function createDashboardRoutes({
     const me = currentUser(req);
     if (!me) return sendJson(res, 401, { error: 'unauthorised' });
     if (ownerWrite && me.role !== 'owner') {
-      const shown = teamMatch ? '/v1/admin/team/:id' : inboxMatch ? `/v1/admin/inbox/:id/${inboxMatch[2]}` : p;
+      const shown = teamMatch ? '/v1/admin/team/:id' : inboxMatch ? `/v1/admin/inbox/:id/${inboxMatch[2]}`
+        : candMatch ? `/v1/admin/inbox/candidates/:id/${candMatch[2]}` : p;
       log({ level: 'warn', evt: 'dash.owner_only', path: shown });
       return sendJson(res, 403, { error: 'owner_only' });
     }
@@ -1176,6 +1255,7 @@ export function createDashboardRoutes({
     if (writes === 'inbox') {
       // index.mjs always wires the inbox; routes built without it (older tests, tools) have none.
       if (!inbox) return sendJson(res, 404, { error: 'not_found' });
+      if (candMatch) return candMatch[2] === 'move' ? candidateMove(ctx, candMatch[1]) : candidateDismiss(ctx, candMatch[1]);
       if (!inboxMatch) return inboxAdd(ctx);
       const [, leadId, what] = inboxMatch;
       if (what === 'reply') return inboxReply(ctx, leadId);

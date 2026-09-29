@@ -684,3 +684,193 @@ test('nothing the inbox writes to the log carries message text, a phone number o
     }
   });
 });
+
+/* ---------------- real-estate chats to check (D17) ---------------- */
+
+const CAND_PHONE = '966500000091';
+/** One chat on the owner's list, as the poller would have noted it. */
+const noteCand = (h, { phone = CAND_PHONE, name = 'Candi Date', words = ['شقة', 'إيجار'], dir = 'in', ts = NOW + 10_000 } = {}) =>
+  h.inboxStore.noteCandidate({ phone, jid: `${phone}@s.whatsapp.net`, name, ts, words, dir }).cand_id;
+
+test('the owner\'s Unsure tab lists and counts the real-estate chats to check; a never-list one is on no list', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const id = noteCand(h);
+    h.team.addNever({ phone: '966500000092' });
+    noteCand(h, { phone: '966500000092', name: 'Never Cand' });
+    const boss = await h.boss();
+    assert.match(await (await h.get('/dashboard/inbox', { cookie: boss })).text(), /Unsure · 2<\/a>/, 'Umar and Candi, not the never-list chat');
+    const res = await h.get('/dashboard/inbox?tab=unsure', { cookie: boss });
+    assert.equal(res.status, 200);
+    assertLocked(res);
+    const html = await res.text();
+    assert.match(html, /Real-estate chats to check/);
+    assert.ok(html.includes('Candi Date'));
+    assert.ok(html.includes('Umar Unsure'), 'the guesses are still there');
+    assert.match(html, /شقة · إيجار/);
+    assert.ok(html.includes(`action="/v1/admin/inbox/candidates/${id}/move"`));
+    assert.ok(html.includes(`action="/v1/admin/inbox/candidates/${id}/dismiss"`));
+    assert.ok(!html.includes('Never Cand'));
+    assert.ok(!html.includes(CAND_PHONE), 'a masked number only');
+  });
+});
+
+test('a chat to check that has become a lead meanwhile is on no list and in no count: the lead decides', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    noteCand(h);
+    noteCand(h, { phone: '966500000078', name: 'Umar Again' });
+    const boss = await h.boss();
+    const html = await (await h.get('/dashboard/inbox?tab=unsure', { cookie: boss })).text();
+    assert.ok(html.includes('Candi Date'));
+    assert.ok(!html.includes('Umar Again'), 'LEAD-U already holds that number');
+    assert.match(await (await h.get('/dashboard/inbox', { cookie: boss })).text(), /Unsure · 2<\/a>/, 'Umar once, as the guess he is, and Candi');
+  });
+});
+
+test('staff never see a chat to check: not on any page, not in any JSON', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    noteCand(h);
+    const staff = await h.staff();
+    for (const p of ['/dashboard', '/dashboard/inbox', '/dashboard/leads', '/dashboard/inbox?tab=unsure', '/v1/admin/leads']) {
+      const res = await h.get(p, { cookie: staff });
+      const body = await res.text();
+      for (const secret of ['Candi Date', 'candidates/', 'شقة · إيجار', CAND_PHONE, '…0091']) assert.ok(!body.includes(secret), `${p}: ${secret}`);
+    }
+  });
+});
+
+test('the owner moves a chat to check into the inbox: an owner_added lead, in, 30 days of history, off the list, audited by ids only', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const id = noteCand(h);
+    const boss = await h.boss();
+    const res = await h.postForm(`/v1/admin/inbox/candidates/${id}/move`, {}, { cookie: boss });
+    assert.equal(res.status, 303);
+    const leadId = /^\/dashboard\/inbox\/(LEAD-[A-Za-z0-9-]+)\?ok=moved$/.exec(res.headers.get('location'))?.[1];
+    assert.ok(leadId, res.headers.get('location'));
+    const lead = h.db.getLead(leadId);
+    assert.equal(lead.phone_e164, CAND_PHONE);
+    assert.equal(lead.wa_jid, `${CAND_PHONE}@s.whatsapp.net`);
+    assert.equal(lead.name, 'Candi Date');
+    assert.equal(lead.match_method, 'owner_added');
+    assert.equal(lead.inbox_state, 'in');
+    assert.equal(h.spy.history.at(-1).leadId, leadId);
+    assert.equal(h.spy.history.at(-1).untilTs - h.spy.history.at(-1).sinceTs, OWNER_HISTORY_MS);
+    assert.equal(h.inboxStore.getCandidate(id), null, 'it is a lead now: off the list');
+    assert.deepEqual(h.notes, [], 'no new-lead note: the owner vouched for it himself');
+    const audited = h.app.audit.recent(50).find((r) => r.action === 'inbox_move');
+    assert.equal(audited.target, id);
+    assert.deepEqual(audited.meta, { lead_id: leadId });
+    assert.equal(audited.user_id, h.owner.user_id);
+    const staff = await h.staff();
+    assert.ok((await (await h.get('/dashboard/inbox', { cookie: staff })).text()).includes('Candi Date'), 'the team sees it now');
+    const again = await h.postForm(`/v1/admin/inbox/candidates/${id}/move`, {}, { cookie: boss });
+    assert.equal(again.headers.get('location'), '/dashboard/inbox?tab=unsure&error=candidate_gone');
+    const dump = JSON.stringify([h.app.audit.recent(50), h.logs]);
+    for (const secret of [CAND_PHONE, '500000091', 'Candi', 'شقة']) assert.ok(!dump.includes(secret), secret);
+  });
+});
+
+test('Not a client on a chat to check: off the list, not listed again, audited by its id only', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const id = noteCand(h);
+    const boss = await h.boss();
+    const res = await h.postForm(`/v1/admin/inbox/candidates/${id}/dismiss`, {}, { cookie: boss });
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), '/dashboard/inbox?tab=unsure&ok=dismissed');
+    assert.equal(h.inboxStore.getCandidate(id).state, 'dismissed');
+    assert.equal(h.db.getLeadByPhone(CAND_PHONE), null, 'not a lead either');
+    const html = await (await h.get('/dashboard/inbox?tab=unsure&ok=dismissed', { cookie: boss })).text();
+    assert.ok(!html.includes('Candi Date'));
+    assert.match(html, /<div class="ok">Marked not a client/);
+    assert.equal(h.inboxStore.noteCandidate({ phone: CAND_PHONE, ts: NOW + 99_000, words: ['villa'], dir: 'in' }).state, 'dismissed', 'a later message does not ask again');
+    const audited = h.app.audit.recent(50).find((r) => r.action === 'inbox_out');
+    assert.equal(audited.target, id);
+    const again = await h.postForm(`/v1/admin/inbox/candidates/${id}/dismiss`, {}, { cookie: boss });
+    assert.equal(again.headers.get('location'), '/dashboard/inbox?tab=unsure&error=candidate_gone');
+    assert.ok(!JSON.stringify([h.app.audit.recent(50), h.logs]).includes('500000091'));
+  });
+});
+
+test('a chat to check whose number is a colleague\'s or on the never list is never moved in, and leaves the list', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const never = noteCand(h, { phone: '966500000092', name: 'Never Cand' });
+    const colleague = noteCand(h, { phone: '966500000001', name: 'Sara Again' });
+    h.team.addNever({ phone: '966500000092' });
+    const boss = await h.boss();
+    const leadsBefore = h.db.countLeads();
+    for (const id of [never, colleague]) {
+      const res = await h.postForm(`/v1/admin/inbox/candidates/${id}/move`, {}, { cookie: boss });
+      assert.equal(res.headers.get('location'), '/dashboard/inbox?tab=unsure&error=excluded', id);
+      assert.equal(h.inboxStore.getCandidate(id), null, id);
+    }
+    assert.equal(h.db.countLeads(), leadsBefore);
+    assert.deepEqual(h.spy.history, []);
+  });
+});
+
+test('move and Not a client on a chat to check are the owner\'s alone', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const id = noteCand(h);
+    const staff = await h.staff();
+    for (const what of ['move', 'dismiss']) {
+      const res = await h.postForm(`/v1/admin/inbox/candidates/${id}/${what}`, {}, { cookie: staff });
+      assert.equal(res.status, 403, what);
+      assertLocked(res);
+      assert.deepEqual(await res.json(), { error: 'owner_only' }, what);
+      assert.ok(h.logs.some((e) => e.evt === 'dash.owner_only' && e.path === `/v1/admin/inbox/candidates/:id/${what}`), what);
+    }
+    assert.equal(h.inboxStore.getCandidate(id).state, 'open');
+    assert.equal(h.db.getLeadByPhone(CAND_PHONE), null);
+    assert.deepEqual(h.spy.history, []);
+  });
+});
+
+test('a number added to the never list or the team leaves the list of chats to check at once', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const never = noteCand(h, { phone: '966500000093', name: 'Cousin' });
+    const hire = noteCand(h, { phone: '966500000094', name: 'New Hire' });
+    const boss = await h.boss();
+    assert.equal((await h.postForm('/v1/admin/never', { phone: '0500000093' }, { cookie: boss })).headers.get('location'), '/dashboard/team?ok=never_added');
+    assert.equal(h.inboxStore.getCandidate(never), null);
+    assert.equal((await h.postForm('/v1/admin/team', { name: 'New Hire', phone: '0500000094', role: 'staff' }, { cookie: boss })).headers.get('location'), '/dashboard/team?ok=added');
+    assert.equal(h.inboxStore.getCandidate(hire), null);
+  });
+});
+
+test('Add chat by phone number, and Move on a lead, take that chat off the list of chats to check at once', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const added = noteCand(h, { phone: '966500000095', name: 'Added Later' });
+    const umar = noteCand(h, { phone: '966500000078', name: 'Umar Again' });
+    const boss = await h.boss();
+    assert.match((await h.postForm('/v1/admin/inbox/add', { phone: '0500000095' }, { cookie: boss })).headers.get('location'), /\?ok=added$/);
+    assert.equal(h.inboxStore.getCandidate(added), null, 'a lead now: the row is gone, not only hidden');
+    assert.equal((await h.postForm('/v1/admin/inbox/LEAD-U/move', {}, { cookie: boss })).headers.get('location'), '/dashboard/inbox/LEAD-U?ok=moved');
+    assert.equal(h.inboxStore.getCandidate(umar), null, 'LEAD-U holds that number, and it is in now');
+  });
+});
+
+test('a chat to check with no phone number, a lid alone or a WhatsApp channel, is never moved in, and leaves the list', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const note = (ids) => h.inboxStore.noteCandidate({ ...ids, name: 'No Number', ts: NOW + 10_000, words: ['villa'], dir: 'in' }).cand_id;
+    const lidOnly = note({ lid: '272516946294599@lid' });
+    const channel = note({ phone: '12036302524', jid: '12036302524@newsletter' });
+    const boss = await h.boss();
+    const leadsBefore = h.db.countLeads();
+    for (const id of [lidOnly, channel]) {
+      const res = await h.postForm(`/v1/admin/inbox/candidates/${id}/move`, {}, { cookie: boss });
+      assert.equal(res.headers.get('location'), '/dashboard/inbox?tab=unsure&error=candidate_no_number', id);
+      assert.equal(h.inboxStore.getCandidate(id), null, id);
+    }
+    assert.equal(h.db.countLeads(), leadsBefore);
+    assert.deepEqual(h.spy.history, []);
+  });
+});
