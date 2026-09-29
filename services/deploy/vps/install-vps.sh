@@ -77,7 +77,7 @@ check_state() { # prints one line per item; returns the number of missing items
   _label="node $NODE_VERSION at $NODE_BIN/node";            item test -x "$NODE_BIN/node"
   _label="node reports $NODE_VERSION";                       item bash -c "[ -x '$NODE_BIN/node' ] && [ \"\$('$NODE_BIN/node' -v)\" = '$NODE_VERSION' ]"
   _label="node:sqlite loads";                                item bash -c "[ -x '$NODE_BIN/node' ] && '$NODE_BIN/node' -e 'require(\"node:sqlite\")'"
-  _label="cloudflared $CLOUDFLARED_VERSION at $CLOUDFLARED_BIN"; item bash -c "[ -x '$CLOUDFLARED_BIN' ] && '$CLOUDFLARED_BIN' --version 2>/dev/null | grep -q '$CLOUDFLARED_VERSION'"
+  _label="cloudflared $CLOUDFLARED_VERSION at $CLOUDFLARED_BIN"; item bash -c "[ -x '$CLOUDFLARED_BIN' ] && '$CLOUDFLARED_BIN' --version 2>/dev/null | grep '$CLOUDFLARED_VERSION' >/dev/null"
   _label="git at $GIT_BIN (bona-repo-sync.service execs that path)"; item test -x "$GIT_BIN"
   _label="repo checkout $BONA_VPS_REPO (services/api/index.mjs)"; item test -f "$BONA_VPS_REPO/services/api/index.mjs"
   _label="repo has src/data/listings.json";                  item test -f "$BONA_VPS_REPO/src/data/listings.json"
@@ -109,7 +109,10 @@ if [ "$MODE" = smoke ]; then
   [ -x "$NODE_BIN/node" ] || die "run install-vps.sh first (node missing)"
   [ -f "$BONA_VPS_REPO/services/api/index.mjs" ] || die "run install-vps.sh first (repo missing)"
   port=$((BONA_VPS_PORT + 1))
-  if ss -ltn 2>/dev/null | grep -q ":$port "; then die "port $port is already listening — refusing the smoke run (an earlier smoke still up?)"; fi
+  # A consuming grep, not `grep -q`: under `pipefail`, `grep -q` stops reading at the first match
+  # and a still-writing `ss` dies of SIGPIPE, which fails the pipeline and reads as "port free"
+  # exactly when many sockets are open (the deploy's full test run hit it).
+  if ss -ltn 2>/dev/null | grep ":$port " >/dev/null; then die "port $port is already listening — refusing the smoke run (an earlier smoke still up?)"; fi
   tmp=$(mktemp -d)
   say "Smoke: API on 127.0.0.1:$port, data in $tmp, poller OFF, 15 s"
   # exec: $pid is then node itself, not a subshell around it, so the kill below stops the API.
@@ -149,7 +152,7 @@ fi
 "$NODE_BIN/node" -e 'require("node:sqlite")' || die "node:sqlite is not available in $NODE_VERSION"
 
 say "cloudflared $CLOUDFLARED_VERSION"
-if [ -x "$CLOUDFLARED_BIN" ] && "$CLOUDFLARED_BIN" --version 2>/dev/null | grep -q "$CLOUDFLARED_VERSION"; then
+if [ -x "$CLOUDFLARED_BIN" ] && "$CLOUDFLARED_BIN" --version 2>/dev/null | grep "$CLOUDFLARED_VERSION" >/dev/null; then
   ok "already installed"
 else
   tmp=$(mktemp -d)

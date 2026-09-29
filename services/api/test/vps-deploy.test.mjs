@@ -416,9 +416,22 @@ function fakeVpsHome() {
 test('install-vps.sh --smoke refuses to start when the smoke port is already listening', async () => {
   if (spawnSync('ss', ['-V'], { encoding: 'utf8' }).error) return; // no `ss` here: the check cannot run
   const { env } = fakeVpsHome();
-  const server = net.createServer();
-  await new Promise((resolve) => { server.once('error', resolve); server.listen(4121, '127.0.0.1', resolve); }); // EADDRINUSE is fine: still listening
+  // The port is held by THIS test's own socket while the script runs: bind for real (a moment's
+  // EADDRINUSE is waited out, any other error fails at once) rather than taking every listen
+  // error as "someone else is listening", and prove with `ss` that it shows before asking.
+  let server = null;
+  let lastError = null;
+  for (let attempt = 0; attempt < 50 && !server; attempt += 1) {
+    const candidate = net.createServer();
+    lastError = await new Promise((resolve) => { candidate.once('error', resolve); candidate.listen(4121, '127.0.0.1', () => resolve(null)); });
+    if (!lastError) server = candidate;
+    else if (lastError.code === 'EADDRINUSE') await new Promise((r) => setTimeout(r, 100));
+    else break;
+  }
+  assert.ok(server, `could not hold 127.0.0.1:4121 for the test: ${lastError?.code ?? lastError}`);
   try {
+    const listening = spawnSync('ss', ['-ltn'], { encoding: 'utf8', timeout: 10_000 }).stdout ?? '';
+    assert.match(listening, /:4121 /, 'ss must show the test\'s own listener before the script checks the port');
     const r = bash([path.join(VPS, 'install-vps.sh'), '--smoke'], { env });
     assert.notEqual(r.status, 0, r.stdout + r.stderr);
     assert.match(r.stderr, /4121.*listening/);
@@ -427,6 +440,25 @@ test('install-vps.sh --smoke refuses to start when the smoke port is already lis
   }
   // and when it does start, the API is exec'd (so the pid we kill is node, not a subshell)
   assert.match(readFileSync(path.join(VPS, 'install-vps.sh'), 'utf8'), /exec "\$NODE_BIN\/node" api\/index\.mjs \) &$/m);
+});
+
+test('install-vps.sh --smoke still sees a busy port when ss has much more to say after it (pipefail + an early-exit grep)', () => {
+  // The deploy's full test run failed the test above twice: with many sockets open, `ss` was
+  // still writing when `grep -q` stopped at the match, so `ss` died of SIGPIPE, `pipefail`
+  // failed the pipeline, and the guard read "port free". A stand-in `ss` that prints the busy
+  // port first and a megabyte after it makes that deterministic.
+  const { env } = fakeVpsHome();
+  const bin = mkdtempSync(path.join(tmpdir(), 'bona-ss-'));
+  writeFileSync(path.join(bin, 'ss'), [
+    '#!/usr/bin/env bash',
+    'echo "LISTEN 0 511 127.0.0.1:4121 0.0.0.0:*"',
+    'for i in $(seq 1 20000); do echo "LISTEN 0 511 127.0.0.1:$((20000 + i % 20000)) 0.0.0.0:* padding-padding-padding"; done',
+  ].join('\n'));
+  chmodSync(path.join(bin, 'ss'), 0o755);
+  const r = bash([path.join(VPS, 'install-vps.sh'), '--smoke'], { env: { ...env, PATH: `${bin}:${env.PATH}` } });
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /4121.*listening/);
+  assert.doesNotMatch(r.stdout, /smoke passed/);
 });
 
 test('sync-secrets.sh chmods the four named secret files on the VPS, not *.env', () => {
