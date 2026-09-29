@@ -552,6 +552,48 @@ test('an HTTP 500 or 503 from Evolution is "not sure it went": no draft kept, co
   });
 });
 
+test('a member deactivated while the chat refreshes before their reply is signed out: nothing sent, nothing written', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    h.tick(120_000);
+    h.spy.onRefresh = () => h.team.deactivateUser(h.staffUser.user_id);
+    const form = { text: 'Words from someone who just left', send_id: 'send-gone-000000000001', seen_ts: String(NOW + 60_000) };
+    const res = await replyTo(h, 'LEAD-A', form, staff);
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), '/dashboard/login', 'a form goes to the login, like any signed-out page');
+    assert.deepEqual(h.spy.refresh, ['LEAD-A'], 'the refresh ran; the session was asked again after it');
+    assert.equal(h.evo.calls.length, 0, 'nothing reached WhatsApp');
+    assert.equal(h.inboxStore.getOutbox('send-gone-000000000001'), null, 'and nothing was written');
+    assert.ok(!h.app.audit.recent(50).some((r) => r.action === 'reply_sent'));
+  });
+
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    h.tick(120_000);
+    h.spy.onRefresh = () => h.team.deactivateUser(h.staffUser.user_id);
+    const res = await h.postJson('/v1/admin/inbox/LEAD-A/reply', { text: 'x', send_id: 'send-gone-000000000002', seen_ts: NOW + 60_000 }, { cookie: staff });
+    assert.equal(res.status, 401);
+    assert.deepEqual(await res.json(), { error: 'unauthorised' });
+    assert.equal(h.evo.calls.length, 0);
+    assert.equal(h.inboxStore.getOutbox('send-gone-000000000002'), null);
+  });
+
+  // The sender's own last look at the member (lib/wa-send.mjs) is answered the same way.
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    h.app.sender.reply = async () => ({ ok: false, error: 'inactive_user' });
+    const form = await replyTo(h, 'LEAD-A', { text: 'x', send_id: 'send-gone-000000000003', seen_ts: String(NOW + 60_000) }, staff);
+    assert.equal(form.status, 303);
+    assert.equal(form.headers.get('location'), '/dashboard/login');
+    const json = await h.postJson('/v1/admin/inbox/LEAD-A/reply', { text: 'x', send_id: 'send-gone-000000000003', seen_ts: NOW + 60_000 }, { cookie: staff });
+    assert.equal(json.status, 401);
+    assert.deepEqual(await json.json(), { error: 'unauthorised' });
+  });
+});
+
 test('a refused reply is drawn again with the words kept and a fresh send_id, and nothing is sent', async () => {
   await withInbox(async (h) => {
     seedScene(h);

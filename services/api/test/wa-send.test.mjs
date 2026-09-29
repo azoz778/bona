@@ -747,6 +747,39 @@ test('reply: stale when a newer message exists (either direction) or the form di
   h.s.close();
 });
 
+test('reply: inactive_user for a member who has left the team, an unknown id or none — nothing written, nothing sent', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  seedChat(h);
+  h.team.deactivateUser(staff.user_id);
+  assert.deepEqual(await h.sender.reply(replyArgs(staff)), { ok: false, error: 'inactive_user' });
+  for (const userId of ['USR-nobody', null, undefined]) {
+    assert.deepEqual(await h.sender.reply(replyArgs(staff, { userId })), { ok: false, error: 'inactive_user' }, String(userId));
+  }
+  assert.equal(h.calls.length, 0);
+  assert.equal(outboxRows(h).length, 0, 'no row: nothing is pending, nothing counts against the day');
+  const lead = h.s.getLead('L-1');
+  assert.equal(lead.handler_user_id, null);
+  assert.equal(lead.first_reply_ts, null);
+
+  h.team.reactivateUser(staff.user_id);
+  assert.equal((await h.sender.reply(replyArgs(staff))).ok, true, 'back on the team, the same form goes');
+  h.s.close();
+});
+
+test('reply: the member is read again right before the outbox row, after the stale checks', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  seedChat(h);
+  // The last thing read before the row is written: deactivated at that moment, nothing goes.
+  const realNewest = h.inbox.newestTs;
+  const inbox = { ...h.inbox, newestTs: (id) => { h.team.deactivateUser(staff.user_id); return realNewest(id); } };
+  const sender = createSender({ env: ENV, team: h.team, inbox, db: h.s, fetchImpl: async () => { throw new Error('must not be called'); }, now: h.now });
+  assert.deepEqual(await sender.reply(replyArgs(staff)), { ok: false, error: 'inactive_user' });
+  assert.equal(outboxRows(h).length, 0);
+  h.s.close();
+});
+
 test('reply: with the sending switch off nothing is sent and the row is closed as failed', async () => {
   const h = harness();
   const staff = staffOf(h);

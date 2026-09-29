@@ -973,12 +973,16 @@ dashboard is sent with the owner beside it (design D14). Login codes do not wait
 
 *Reply answers.* A form: sent → 303 to the thread `?ok=sent`; uncertain → 303
 `?error=send_uncertain` (the text is not kept: it may have gone); a chat that may not be
-answered → the same 404 page as the thread; any other refusal → the thread again with the
+answered → the same 404 page as the thread; a writer deactivated (or signed out) while the
+chat refreshed → 303 to the login, nothing sent or written (the session is asked again after
+the refresh, and the sender reads the member again right before its outbox row,
+`inactive_user`); any other refusal → the thread again with the
 text kept in the box, a fresh `send_id` and the HTTP status listed below. A JSON call:
 
 - 200 `{ok: true, status: 'accepted', send_id}`: sent.
 - 202 `{ok: false, error: 'send_uncertain', send_id}`: it may have gone; check WhatsApp.
 - 404 `{error: 'not_in_inbox'}`: a chat that may not be answered.
+- 401 `{error: 'unauthorised'}`: the writer is no longer signed in; nothing was sent.
 - `{error}` with 409 (`stale`, `lid_only`), 400 (`bad_text`, `bad_send_id`), 429
   (`reply_rate_limited`), 503 (`sending_disabled`, `replies_off`) or 502 (`send_failed`: anything else,
   and a resubmit of a send that failed).

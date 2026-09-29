@@ -1037,17 +1037,24 @@ export function createDashboardRoutes({
   };
   /** Refusals that mean the chat itself may not be answered (rule 1): no page of it is drawn. */
   const NOT_ANSWERABLE = new Set(['not_found', 'not_in_inbox', 'excluded']);
+  /** A writer who is no longer signed in: a form goes to the login, JSON gets a 401. */
+  const signedOut = (res, form) => (form ? toLogin(res, '', 303) : sendJson(res, 401, { error: 'unauthorised' }));
 
-  async function inboxReply({ res, fields, form, me }, leadId) {
+  async function inboxReply({ req, res, fields, form, me }, leadId) {
     if (!sender) return sendJson(res, 404, { error: 'not_found' });
     const back = `/dashboard/inbox/${encodeURIComponent(leadId)}`;
     // Asked here as well as in the sender, and before the refresh: a chat that is not in
     // the inbox must not cost an Evolution read, let alone a send.
     if (!openChat(db.getLead(leadId))) return refuseChat(res, form, me);
     await refreshChat(db.getLead(leadId));
+    // The session, asked again now the refresh is done: it can take seconds, and a person
+    // deactivated (or signed out) meanwhile must not send on the strength of a check made
+    // before. The sender reads the member again right before its outbox row as well.
+    if (!currentUser(req)) return signedOut(res, form);
 
     const text = asText(fields.text).replace(/\r\n?/g, '\n').trim();
     const out = await sender.reply({ sendId: asText(fields.send_id), leadId, userId: me.user_id, text, seenTs: asTs(fields.seen_ts) });
+    if (out.error === 'inactive_user') return signedOut(res, form);
     const inFlight = out.duplicate && (out.status === 'pending' || out.status === 'uncertain');
     const outcome = out.ok ? 'accepted' : (out.uncertain || inFlight) ? 'uncertain' : 'failed';
     // Audited once per request that reached WhatsApp (sent, perhaps sent, or turned away
@@ -1308,7 +1315,7 @@ export function createDashboardRoutes({
       if (candMatch) return candMatch[2] === 'move' ? candidateMove(ctx, candMatch[1]) : candidateDismiss(ctx, candMatch[1]);
       if (!inboxMatch) return inboxAdd(ctx);
       const [, leadId, what] = inboxMatch;
-      if (what === 'reply') return inboxReply(ctx, leadId);
+      if (what === 'reply') return inboxReply({ ...ctx, req }, leadId);
       if (what === 'handler') return inboxHandler(ctx, leadId);
       if (what === 'move') return inboxMove(ctx, leadId);
       return inboxOut(ctx, leadId);

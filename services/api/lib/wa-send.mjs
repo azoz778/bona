@@ -326,6 +326,10 @@ export function createSender({
     // can take was cut off by a restart (`recoverInterrupted`), not in flight.
     const onItsWay = inbox.openOutboxFor(lead.lead_id, { sinceTs: now() - INTERRUPTED_MS }).some((r) => r.status === 'pending');
     if (onItsWay) return { ok: false, error: 'stale' };
+    // The author, read again as the last thing before the row: a member deactivated while
+    // the chat was being refreshed, or at any moment before, sends nothing — whoever called.
+    // No await separates this from the row, and the row from the call.
+    if (!team.getUser(userId)?.active) return { ok: false, error: 'inactive_user' };
 
     const ins = inbox.insertOutbox({
       send_id: sendId, lead_id: lead.lead_id, jid, text: body, user_id: userId ?? null, sender_kind: 'staff', status: 'pending',
