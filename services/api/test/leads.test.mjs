@@ -295,7 +295,7 @@ test('appendLead takes an id and a time when the caller already has them', () =>
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-/* ---------------- the Bona inbox state (2026-09-28 plan P2-5, P2-6) ---------------- */
+/* ---------------- the Bona inbox state (2026-09-28 plan P2-5; P2-6 superseded 2026-09-29) ---------------- */
 
 test('a chat the owner started is in the inbox from birth, already answered, and never reported as an ad lead', () => {
   const h = harness();
@@ -342,19 +342,21 @@ test('an owner method merging into a lead never moves when the client first wrot
   h.cleanup();
 });
 
-test('a form or a concierge conversation is a certain enquiry: in the inbox the moment it exists', () => {
+test('a form or a concierge lead is born undecided: a phone nobody verified never decides a WhatsApp chat (D9)', () => {
   const h = harness();
   for (const [channel, matchMethod, phone] of [['form', 'form', '0500000020'], ['concierge_chat', 'concierge', '0500000021'], ['concierge_voice', 'concierge', '0500000022']]) {
     const { lead } = createOrMergeLead(h.db, { phone }, { channel, matchMethod, now: NOW });
-    assert.equal(lead.inbox_state, 'in', channel);
-    assert.equal(lead.inbox_since, NOW, channel);
+    // Anyone can type anyone's number into the form or tell it to Dana: the chat under that
+    // number is decided by a certain signal on WhatsApp, or by the owner, never by this.
+    assert.equal(lead.inbox_state, null, channel);
+    assert.equal(lead.inbox_since, null, channel);
     assert.equal(lead.first_reply_ts, null, `${channel}: a real enquiry is still owed a reply`);
   }
   assert.equal(h.db.fanoutCounts().pending, 12, 'and each is still reported to the ad platforms');
   h.cleanup();
 });
 
-test('a form or concierge merge lifts a missing or unsure state to in, and never pulls a chat back from out', () => {
+test('a form or concierge merge never lifts a missing or unsure state, and never moves an in or out chat', () => {
   const h = harness();
   const make = (phone, state) => {
     const { lead } = createOrMergeLead(h.db, { phone }, { channel: 'whatsapp', matchMethod: 'keyword', now: NOW });
@@ -370,8 +372,8 @@ test('a form or concierge merge lifts a missing or unsure state to in, and never
   createOrMergeLead(h.db, { phone: '0500000032' }, { channel: 'form', matchMethod: 'form', now: NOW + 1000 });
   createOrMergeLead(h.db, { phone: '0500000033' }, { channel: 'concierge_voice', matchMethod: 'concierge', now: NOW + 1000 });
   const state = (id) => { const l = h.db.getLead(id); return [l.inbox_state, l.inbox_since]; };
-  assert.deepEqual(state(none), ['in', NOW + 1000]);
-  assert.deepEqual(state(unsure), ['in', NOW + 1000]);
+  assert.deepEqual(state(none), [null, null], 'a number typed into the form proves nothing about the chat under it');
+  assert.deepEqual(state(unsure), ['unsure', null], 'still the owner\'s to decide');
   assert.deepEqual(state(out), ['out', null], '"not a client" is the owner\'s word, and a form cannot overrule it');
   assert.deepEqual(state(already), ['in', NOW], 'already in: the date it joined stays');
   h.cleanup();

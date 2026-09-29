@@ -813,8 +813,12 @@ with a `wa_jid` or a `wa_lid`. Whether it belongs is **stored** in `leads.inbox_
   (`Ref BONA-W003 · K7Q2XR`, with its listing part) or a code a site session holds,
   click-to-WhatsApp ad context, or a listing id (`BONA-###`, `BONA-W###`) puts the chat `in`
   by itself, together with the 24 h of that chat before it (the "Hi" before the Ref line).
-  Web-form and concierge leads are certain too; they become a chat once that person writes
-  on WhatsApp.
+  A web-form or concierge lead is not a signal: its phone number is whatever someone typed or
+  told Dana, never verified, so it is born with no inbox state and a later form or concierge
+  merge never lifts a missing or `unsure` state to `in` (owner rule D9; this replaced planning
+  decision P2-6 on 2026-09-29). When that person writes on WhatsApp, the poller matches the
+  chat to the lead and judges it like any other: with no certain signal it goes on the Unsure
+  tab.
   Ad context stays certain: TK runs no click-to-WhatsApp ads to this number (owner,
   2026-09-28, D15), so an ad-origin chat here is a Bona client.
 - *Unsure*: only the word Bona/بونا, a bare Ref-shaped code no session holds, or only the
@@ -864,9 +868,9 @@ with a `wa_jid` or a `wa_lid`. Whether it belongs is **stored** in `leads.inbox_
   excluded, and every inbox page, reply, handover, move and add also refuses an excluded
   number.
 
-Schema v4 sorted the leads that already existed: `in` for `ref` / `ad_meta`, for web-form and
-concierge leads that are not legacy imports, and for a listing id in the first snippet;
-everything else `unsure`, for the owner to settle (a read-only count of the live db on
+Schema v4 sorted the leads that already existed: `in` for `ref` / `ad_meta` and for a listing
+id in the first snippet; everything else — web-form and concierge leads included — `unsure`,
+for the owner to settle (a read-only count of the live db on
 2026-09-28 gave 18 in and 9 unsure; the Phase 2 deploy checks it).
 
 *What is stored* (`wa_messages`, `in` chats only): every message in both directions and who

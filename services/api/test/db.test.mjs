@@ -176,9 +176,12 @@ test('a v3 file db moves to v4: each existing lead is placed by what is certain 
   const cases = [
     { id: 'L-ref', channel: 'whatsapp', method: 'ref', snippet: 'Hello\nRef K7Q2XR', want: 'in' },
     { id: 'L-ad', channel: 'whatsapp', method: 'ad_meta', snippet: 'Hi', want: 'in' },
-    { id: 'L-form', channel: 'form', method: 'form', want: 'in' },
-    { id: 'L-chat', channel: 'concierge_chat', method: 'concierge', want: 'in' },
-    { id: 'L-voice', channel: 'concierge_voice', method: 'concierge', want: 'in' },
+    // A phone from the web form or Dana was never verified: it does not decide the chat
+    // under that number (D9). Only a listing id in the first message would.
+    { id: 'L-form', channel: 'form', method: 'form', want: 'unsure' },
+    { id: 'L-chat', channel: 'concierge_chat', method: 'concierge', want: 'unsure' },
+    { id: 'L-voice', channel: 'concierge_voice', method: 'concierge', want: 'unsure' },
+    { id: 'L-form-id', channel: 'form', method: 'form', snippet: 'About BONA-W003', want: 'in' },
     { id: 'L-old-form', channel: 'form', method: 'form', legacy: 'lead-2025-017', meta: { legacy_id: 'lead-2025-017', conversation_id: null, page: null }, want: 'unsure' },
     { id: 'L-old-chat', channel: 'concierge_chat', method: 'concierge', legacy: 'lead-2025-018', meta: { legacy_id: 'lead-2025-018', conversation_id: null, page: null }, want: 'unsure' },
     { id: 'L-kw-id', channel: 'whatsapp', method: 'keyword', snippet: 'Is BONA-W003 still available?', want: 'in' },

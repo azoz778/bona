@@ -31,8 +31,6 @@ export const MATCH_METHODS = ['ref', 'phone', 'keyword', 'time_window', 'concier
  * the reply clock again (an `owner_outbound` client is answering him, so it stays shut).
  */
 export const OWNER_METHODS = new Set(['owner_outbound', 'owner_added']);
-/** Channels whose every lead is a real enquiry, so it joins the Bona inbox at once (P2-6). */
-const CERTAIN_CHANNELS = new Set(['form', 'concierge_chat', 'concierge_voice']);
 
 /** Where a lead came from when there is no session to say better. */
 const DEFAULT_SOURCE = { whatsapp: 'whatsapp_organic', form: 'form', concierge_chat: 'concierge', concierge_voice: 'concierge', manual: 'manual' };
@@ -121,11 +119,15 @@ const asRef = (v) => { const s = oneLine(v, 8)?.toUpperCase(); return s && /^[A-
  *   `dataDir` is where the raw log lives (defaults to the directory of the db file);
  *   `raw` holds extra fields for the raw-log line only (e.g. the Retell conversation id).
  *
- * The Bona inbox state is set here only where this call is certain (2026-09-28 plan P2-5,
- * P2-6): a form or concierge lead, and a chat the owner started, are `in`; a merge of one of
- * those lifts a missing or `unsure` state to `in` and never touches `out` — "not a client"
- * is the owner's word. A WhatsApp message gets no state from here: the poller judges those
- * (lib/inbox/eligibility.mjs).
+ * The Bona inbox state is set here only where this call is certain (2026-09-28 plan P2-5):
+ * a chat the owner started is `in`, and an owner-started merge lifts a missing or `unsure`
+ * state to `in`; it never touches `out` — "not a client" is the owner's word. A web-form or
+ * concierge lead gets no state, on create or on merge (owner rule D9, which supersedes
+ * planning decision P2-6 since 2026-09-29): its phone number is whatever someone typed or
+ * told Dana, never verified, so it cannot decide the WhatsApp chat under that number. When
+ * that person writes on WhatsApp the poller judges the chat like any other, and with no
+ * certain signal it lands on the owner's Unsure list. A WhatsApp message gets no state from
+ * here either: the poller judges those (lib/inbox/eligibility.mjs).
  * @returns {{ lead: object, created: boolean }}
  */
 export function createOrMergeLead(db, input = {}, meta = {}) {
@@ -135,7 +137,6 @@ export function createOrMergeLead(db, input = {}, meta = {}) {
     ? meta.matchMethod
     : (channel === 'form' ? 'form' : channel.startsWith('concierge') ? 'concierge' : 'phone');
   const ownerStarted = OWNER_METHODS.has(matchMethod);
-  const certain = ownerStarted || CERTAIN_CHANNELS.has(channel);
 
   const phone = normalisePhone(input.phone);
   const waJid = oneLine(input.waJid, 100);
@@ -214,7 +215,7 @@ export function createOrMergeLead(db, input = {}, meta = {}) {
         // real reply only ever fills an empty one), so it is the add's to take back.
         if (existing.match_method === 'owner_added' && existing.first_reply_ts === existing.created) patch.first_reply_ts = null;
       }
-      if (certain && (existing.inbox_state == null || existing.inbox_state === 'unsure')) Object.assign(patch, { inbox_state: 'in', inbox_since: now });
+      if (ownerStarted && (existing.inbox_state == null || existing.inbox_state === 'unsure')) Object.assign(patch, { inbox_state: 'in', inbox_since: now });
       db.updateLead(existing.lead_id, patch);
       db.addTouchpoint({
         lead_id: existing.lead_id, ts: now, channel, event_type: ownerStarted ? 'owner_contact' : MERGE_EVENT[channel],
@@ -235,7 +236,7 @@ export function createOrMergeLead(db, input = {}, meta = {}) {
       stage: 'new', stage_ts: now, value_sar: null,
       first_inbound_ts: channel === 'whatsapp' && !ownerStarted ? now : null, first_reply_ts: ownerStarted ? now : null, legacy_id: null,
       consent_ads: session?.consent_ads ?? 0, consent_analytics: session?.consent_analytics ?? 0,
-      inbox_state: certain ? 'in' : null, inbox_since: certain ? now : null,
+      inbox_state: ownerStarted ? 'in' : null, inbox_since: ownerStarted ? now : null,
     });
     db.setStage(id, 'new', { actor: 'system', now });
     db.addTouchpoint({

@@ -75,8 +75,9 @@ function capText(v) {
   return Array.from(s.slice(0, MAX_STORED_TEXT * 2)).slice(0, MAX_STORED_TEXT).join('');
 }
 
-// A chat is a lead in the inbox that has a WhatsApp id (P2-1): a form lead with only a
-// phone number is `in` but has nothing to show until that person writes.
+// A chat is a lead in the inbox that has a WhatsApp id (P2-1): a lead with only a phone
+// number (a form lead the owner moved in) is `in` but has nothing to show until that
+// person writes.
 const IN_CHAT = "l.inbox_state = 'in' AND (l.wa_jid IS NOT NULL OR l.wa_lid IS NOT NULL)";
 // NULL counts as unsure: a WhatsApp lead the poller has not placed yet is a guess until
 // the owner decides.
@@ -331,8 +332,8 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
   }
 
   /**
-   * Every `in` lead (a chat or not: a form lead with no chat yet is swept too, before it
-   * ever gets one) and every lead on the Unsure list, with only what the exclusion test
+   * Every `in` lead (a chat or not: a lead the owner moved in with no chat yet is swept
+   * too, before it ever gets one) and every lead on the Unsure list, with only what the exclusion test
    * reads. The daily upkeep puts out any whose number is a colleague's or on the never list
    * (index.mjs `inboxMaintenance`). No limit: a sweep that stopped part-way would leave the
    * rest listed.
