@@ -18,6 +18,7 @@
  */
 import { STAGES } from '../db.mjs';
 import { sourceFromTouch } from '../attribution.mjs';
+import { OWNER_METHODS } from '../leads.mjs';
 
 /** Asia/Riyadh, permanently UTC+3. */
 export const TZ_OFFSET_MS = 3 * 3_600_000;
@@ -31,6 +32,19 @@ export const dayKey = (ts, offsetMs = TZ_OFFSET_MS) => new Date(Number(ts) + off
 export const dayStart = (day, offsetMs = TZ_OFFSET_MS) => Date.parse(`${day}T00:00:00Z`) - offsetMs;
 /** …and the last millisecond of it, which is when a licence dated that day stops being valid. */
 export const dayEnd = (day, offsetMs = TZ_OFFSET_MS) => dayStart(day, offsetMs) + DAY_MS - 1;
+
+/**
+ * A lead the business acquired, as SQL: every lead but the ones the owner started himself
+ * (`owner_outbound`, `owner_added`: lib/leads.mjs `OWNER_METHODS`). Nobody clicked anything
+ * to become those, so they are not new leads on the Desk, not a source's leads and not a
+ * campaign's in ROI; they stay on the pipeline board, in match quality and in the book. A
+ * lead with no match method is an acquisition. The method names are fixed strings, checked
+ * before they are written into the statement.
+ */
+const ACQUIRED = `COALESCE(match_method, '') NOT IN (${[...OWNER_METHODS].map((m) => {
+  if (!/^[a-z_]+$/.test(m)) throw new Error('an owner method must be a plain word');
+  return `'${m}'`;
+}).join(', ')})`;
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const round1 = (v) => Math.round(v * 10) / 10;
@@ -170,7 +184,7 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
       const row = byDay.get(r.day);
       if (row) { row.sessions = num(r.sessions); row.wa_clicks = num(r.wa_clicks); }
     }
-    for (const r of all(`SELECT ${DAY_EXPR('created')} AS day, COUNT(*) AS n FROM leads WHERE created >= ? GROUP BY day`, from)) {
+    for (const r of all(`SELECT ${DAY_EXPR('created')} AS day, COUNT(*) AS n FROM leads WHERE created >= ? AND ${ACQUIRED} GROUP BY day`, from)) {
       const row = byDay.get(r.day);
       if (row) row.leads = num(r.n);
     }
@@ -204,7 +218,8 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
    * meant to add up to the same total, and the difference is the point.
    *
    * A lead with no session behind it (a WhatsApp match with no click to tie it to)
-   * has one touch, not two: its first-touch row is its last-touch row.
+   * has one touch, not two: its first-touch row is its last-touch row. A lead the owner
+   * started himself is no source's (`ACQUIRED`).
    */
   function sources() {
     const rows = new Map();
@@ -218,7 +233,7 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
       return r;
     };
 
-    for (const l of all('SELECT source, medium, campaign, campaign_id, first_touch FROM leads')) {
+    for (const l of all(`SELECT source, medium, campaign, campaign_id, first_touch FROM leads WHERE ${ACQUIRED}`)) {
       const last = {
         source: l.source ?? '(direct)', medium: l.medium ?? '(none)',
         campaign: l.campaign ?? null, campaign_id: l.campaign_id ?? null,
@@ -339,7 +354,8 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
 
   /**
    * Date-filtered campaign ROI plus an explicit unknown bucket. Leads are joined only
-   * on canonical platform + campaign id; spend-only campaigns remain visible.
+   * on canonical platform + campaign id; spend-only campaigns remain visible. Only
+   * acquired leads count (`ACQUIRED`): an owner-started chat is nobody's return on spend.
    */
   function roi({ fromDay = null, toDay = null } = {}) {
     const from = fromDay ? String(fromDay) : null;
@@ -348,7 +364,7 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
     const spendArgs = [];
     if (from) { spendWhere.push('day >= ?'); spendArgs.push(from); }
     if (to) { spendWhere.push('day <= ?'); spendArgs.push(to); }
-    const leadWhere = [];
+    const leadWhere = [ACQUIRED];
     const leadArgs = [];
     if (from) { leadWhere.push('created >= ?'); leadArgs.push(dayStart(from, offset)); }
     if (to) { leadWhere.push('created < ?'); leadArgs.push(dayStart(to, offset) + DAY_MS); }
@@ -444,6 +460,7 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
   /**
    * Money against leads, per campaign. Rows come from `ad_spend`, so a campaign that
    * has taken money and produced nothing still appears — that is the row worth seeing.
+   * Acquired leads only, like `roi` on the same page.
    */
   function cplByCampaign() {
     const leads = new Map();
@@ -451,7 +468,7 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
     // platform label. When the pair finds nothing but this does, the row has not failed
     // — the two vocabularies failed to meet, and the page says which.
     const byIdAlone = new Map();
-    for (const r of all("SELECT source, campaign_id, COUNT(*) AS n FROM leads WHERE campaign_id IS NOT NULL AND campaign_id != '' GROUP BY source, campaign_id")) {
+    for (const r of all(`SELECT source, campaign_id, COUNT(*) AS n FROM leads WHERE campaign_id IS NOT NULL AND campaign_id != '' AND ${ACQUIRED} GROUP BY source, campaign_id`)) {
       const key = campaignKey(r.source, r.campaign_id);
       leads.set(key, (leads.get(key) ?? 0) + num(r.n));
       const id = String(r.campaign_id);
