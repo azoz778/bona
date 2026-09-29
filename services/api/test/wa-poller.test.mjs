@@ -1793,8 +1793,16 @@ test('(t) a join whose history and whose gap both fail says so, and does not thr
 });
 
 test('(t) a written-off reaction, or a record the join history already stored, leaves no gap', async () => {
-  const noisy = harness({ inbox: true, ingestOverride: () => { throw new Error('disk I/O error'); } });
+  const noisy = harness({ inbox: true });
   seedInLead(noisy);
+  // Noise never reaches the merge or the ingest (final review fixes 2026-09-29), so what
+  // fails it is marking it seen; the write-off's own mark goes through.
+  const seen = noisy.db.waSeenAdd;
+  let seenCalls = 0;
+  noisy.db.waSeenAdd = (id, ts) => {
+    if (id === 'REACT' && (seenCalls += 1) <= MAX_RECORD_ATTEMPTS) throw new Error('disk I/O error');
+    return seen(id, ts);
+  };
   const react = msg({ id: 'REACT', ts: NOW - 60_000, text: '', messageType: 'reactionMessage', noise: true });
   for (let i = 1; i <= MAX_RECORD_ATTEMPTS; i += 1) {
     noisy.push([react]);
@@ -1864,8 +1872,14 @@ test('(t) a record of an in chat given up on after an outage leaves a gap too, n
 });
 
 test('(t) an abandoned reaction, or a record of a chat that is not in, leaves no gap', async () => {
-  const h = harness({ inbox: true, ingestOverride: () => { throw new Error('disk I/O error'); } });
+  const h = harness({ inbox: true });
   seedInLead(h);
+  // Noise never reaches the merge or the ingest, so what fails it is marking it seen.
+  const seen = h.db.waSeenAdd;
+  h.db.waSeenAdd = (id, ts) => {
+    if (id === 'REACT') throw new Error('disk I/O error');
+    return seen(id, ts);
+  };
   h.db.waCursorSet(INSTANCE, { lastTs: NOW - 3_600_000, lastRun: NOW - 3_600_000, unmatched: 0 });
   h.push([msg({ id: 'REACT', ts: NOW - 50 * 60_000, text: '', messageType: 'reactionMessage', noise: true })]);
   await h.poller.tick();
@@ -2381,5 +2395,68 @@ test('(u) nothing about a candidate reaches a log line: no number, name, lid or 
   for (const secret of ['966522222222', '966533333333', '272516946294519', 'Umm Khalid', 'Abdulaziz', 'شقة', 'villa', 'عندكم']) {
     assert.ok(!dump.includes(secret), `a log line carries ${secret}`);
   }
+  h.cleanup();
+});
+
+/* ---------------- (v) final review fixes 2026-09-29: poller, data and screens ---------------- */
+
+test('(v) a reaction, an edit or a delete from an existing lead is no message: no touchpoint, no reply clock, no reopened add', async () => {
+  const h = harness({ inbox: true });
+  // What *Add chat by phone number* writes: an owner_added lead, in, born answered.
+  const { lead: added } = createOrMergeLead(h.db, { phone: '0500000000', waJid: SENDER }, { channel: 'whatsapp', matchMethod: 'owner_added', now: NOW - 3_600_000 });
+  const before = h.db.getLead(added.lead_id);
+  assert.equal(before.first_reply_ts, NOW - 3_600_000);
+  h.push([
+    msg({ id: 'REACT', ts: NOW - 60_000, text: '', messageType: 'reactionMessage', noise: true }),
+    // An edit on the wire: no kind of its own, the new text inside.
+    msg({ id: 'EDIT', ts: NOW - 50_000, text: 'Ref BONA-W003 · K7Q2XR', messageType: null, noise: true }),
+    msg({ id: 'DEL', ts: NOW - 40_000, text: '', messageType: 'protocolMessage', noise: true }),
+  ]);
+  const tally = await h.poller.tick();
+  const after = h.db.getLead(added.lead_id);
+  assert.deepEqual(h.db.touchpointsForLead(added.lead_id).map((t) => t.event_type), ['lead_created'], 'no inbound_message touchpoint');
+  assert.equal(after.first_inbound_ts, null, 'nobody wrote: the reply clock stays shut');
+  assert.equal(after.first_reply_ts, NOW - 3_600_000, "the add's stamp is not taken back");
+  assert.equal(after.updated, before.updated, 'the lead is not touched at all');
+  assert.equal(h.db.countWaitingLeads(), 0, 'nobody is waiting on a reaction');
+  assert.deepEqual([tally.matched, tally.merged, tally.created], [0, 0, 0]);
+  assert.equal(h.logs.some((l) => l.evt === 'wa.lead'), false);
+  for (const id of ['REACT', 'EDIT', 'DEL']) assert.equal(h.db.waSeenHas(id), true, `${id} handled all the same`);
+  assert.equal(h.inbox.hasMessages(added.lead_id), false, 'and never a bubble');
+  h.cleanup();
+});
+
+test('(v) noise never creates a lead: an edit carrying a Ref line or a keyword, or a reaction, from an unknown number', async () => {
+  for (const inbox of [true, false]) {
+    const h = harness({ inbox, windows: [[
+      msg({ id: 'E1', jid: STRANGER, ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR', messageType: null, noise: true }),
+      msg({ id: 'E2', jid: STRANGER2, ts: NOW - 50_000, text: 'Bona BONA-W012', messageType: 'editedMessage', noise: true }),
+      msg({ id: 'R1', ts: NOW - 40_000, text: '', messageType: 'reactionMessage', noise: true }),
+    ]] });
+    const tally = await h.poller.tick();
+    assert.deepEqual(h.leads(), [], `no lead (inbox ${inbox})`);
+    assert.deepEqual(h.jsonl(), [], 'nothing in the raw log');
+    assert.deepEqual(h.sent, [], 'the owner hears nothing');
+    assert.equal(tally.created, 0);
+    assert.equal(tally.unmatched, 0, 'noise is not an unmatched message either');
+    assert.equal(h.db.waSeenHas('E1'), true);
+    h.cleanup();
+  }
+});
+
+test("(v) the owner's own reaction, edit or delete neither answers a lead nor starts one", async () => {
+  const h = harness({ inbox: true });
+  h.db.insertLead({ lead_id: 'LEAD-wait', phone_e164: '966500000000', wa_jid: SENDER, created: NOW - 3_600_000, updated: NOW - 3_600_000, first_inbound_ts: NOW - 3_600_000 });
+  h.push([
+    msg({ id: 'OR', fromMe: true, pushName: null, ts: NOW - 60_000, text: '', messageType: 'reactionMessage', noise: true }),
+    msg({ id: 'OD', fromMe: true, pushName: null, ts: NOW - 55_000, text: '', messageType: 'protocolMessage', noise: true }),
+    // An edit of his message to a stranger, now carrying a Bona link and a listing id.
+    msg({ id: 'OE', fromMe: true, pushName: null, jid: STRANGER, ts: NOW - 50_000, text: 'https://bona-real-estate.com/properties/bona-w003/ BONA-W003', messageType: null, noise: true }),
+  ]);
+  const tally = await h.poller.tick();
+  assert.equal(h.db.getLead('LEAD-wait').first_reply_ts, null, 'a reaction or a delete is no reply');
+  assert.equal(tally.replies, 0);
+  assert.deepEqual(h.leads().map((l) => l.lead_id), ['LEAD-wait'], 'no owner_outbound lead from an edit');
+  assert.equal(tally.joined, 0);
   h.cleanup();
 });
