@@ -280,6 +280,41 @@ test('staff see only Bona-inbox leads on the Leads board and list, and on the De
   });
 });
 
+test('staff counts and lists read past the first 500 in-inbox leads: a count is a count, never a slice', async () => {
+  // staffRows reads `in` leads 500 at a time until a short page; with 513 a count that
+  // stopped after one page would say 500 (or fewer once the exclusion test ran).
+  await withInbox(async (h) => {
+    seedLeadsScene(h);
+    const extra = 510;
+    for (let i = 0; i < extra; i += 1) {
+      seedChat(h, { id: `LEAD-P${String(i).padStart(3, '0')}`, name: `Page Client ${i}`, phone: `9665100${String(i).padStart(5, '0')}` });
+    }
+    const seen = Object.keys(STAFF_SEES).length + extra;
+    const staff = await h.staff();
+
+    // The Leads page's total (its "waiting" figure is of the 200 rows it lists, for everyone).
+    const html = await (await h.get('/dashboard/leads', { cookie: staff })).text();
+    assert.match(html, new RegExp(`>${seen} leads\\. `));
+    const desk = await (await h.get('/dashboard', { cookie: staff })).text();
+    assert.match(desk, new RegExp(`Waiting on you</u><b class="alert"><span class="n">${seen}</span>`));
+
+    const list = await (await h.get('/v1/admin/leads?limit=500', { cookie: staff })).json();
+    assert.equal(list.count, 500, 'the list is capped by limit');
+    assert.equal(list.total, seen, 'the total is every lead staff may see');
+    const staged = await (await h.get('/v1/admin/leads?stage=new&q=Client&limit=500', { cookie: staff })).json();
+    assert.equal(staged.total, seen, 'the total counts by stage alone');
+    assert.equal(staged.count, 500);
+    // Every lead is reachable: none of the ones past the first page is lost to a slice.
+    const ids = new Set();
+    for (let d = 0; d < 10; d += 1) {
+      const found = await (await h.get(`/v1/admin/leads?q=${encodeURIComponent(`Page Client ${d}`)}&limit=500`, { cookie: staff })).json();
+      for (const l of found.leads) ids.add(l.lead_id);
+    }
+    assert.equal(ids.size, extra, 'all 510 page clients, each found by a search');
+    for (const id of Object.keys(STAFF_NEVER)) assert.ok(!ids.has(id), id);
+  });
+});
+
 test('staff cannot open, read over JSON, move or note a lead outside the Bona inbox: it answers as one that does not exist', async () => {
   await withInbox(async (h) => {
     seedLeadsScene(h);
