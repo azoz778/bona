@@ -1007,11 +1007,15 @@ test('a thread draws every unread message past 200 (up to 1,000), says how many 
     assert.doesNotMatch(some, /LEAD-300 message 99</);
 
     // 1,100 unread: the thread stops at 1,000, says so, and marks read up to the newest it drew.
+    // Accepted (plan P4, README): the 100 unread ones past the cap count as read too — the
+    // read mark is one timestamp, and a page drawn from the oldest unread one forward would
+    // leave out the newest messages and make every reply from it `stale`.
     burst('LEAD-1100', '966500000093', 1_100);
     const capped = await (await h.get('/dashboard/inbox/LEAD-1100', { cookie: staff })).text();
     assert.equal(bubbles(capped), 1_000);
     assert.match(capped, /100 earlier messages are not shown here\./);
     assert.equal(readMark('LEAD-1100'), NOW + 1_100_000, 'the newest drawn message');
+    assert.equal(h.inboxStore.unreadSpan('LEAD-1100', { userId: h.staffUser.user_id, userCreated: h.staffUser.created }), 0, 'the ones past the cap are not left unread');
     assert.equal(fieldOf(capped, 'seen_ts'), String(NOW + 1_100_000), 'and that is what a reply was written against');
   });
 });
