@@ -935,8 +935,7 @@ many older ones it does not show (their gaps and unconfirmed replies are left ou
 and marks read only up to the newest message it drew.
 Past the cap (more than 980 unread messages in one chat for one person) the unread ones it
 cannot draw count as read too: the read mark is one timestamp, and a page drawn from the
-oldest unread one forward would leave out the newest messages and make every reply from it
-`stale`.
+oldest unread one forward would leave out the newest messages, the ones a reply answers.
 
 *Retention.* Five years after a chat's last message (`leads.last_msg_ts`) its transcript —
 messages, reply outbox rows, gaps and read marks — is deleted; the lead row stays for
@@ -969,14 +968,18 @@ DNS lookup is `failed` (never reached WhatsApp: the text is kept in the box). Wh
 else the same lead and the same text within 2 minutes — and the bubble gets its sender; a
 row interrupted by a restart becomes `uncertain` (`interrupted`): at start-up every `pending`
 row does, however young (the new process has sent nothing yet). The form also carries the
-newest message time the person saw, and the chat is refreshed from Evolution just before
+chat's revision when the page was drawn (`seen_rev`: it grows with every message stored for
+the chat, whatever its WhatsApp time, and every staff or Dana send to it, whatever became
+of the send), and the chat is refreshed from Evolution just before
 the check — best effort: at most ~3 s, the newest 50 records per question, skipped within
 5 s of the last refresh, and a failed read leaves only what is already stored. Anything
-newer that is stored by then, in either direction, holds the reply (`stale`) with the text
-kept in the box. An accepted reply is stored at the moment its send started (its outbox
-row's `created`, to the whole second), not when WhatsApp answered, so a client message sent
-during the round trip reads after it — unread, and `stale` for the next reply from a page
-that did not show it; the lead's `first_reply_ts` is when WhatsApp took it. The first
+written to the chat by then that the page did not have, in either direction, holds the
+reply (`stale`) with the text kept in the box, and so does another reply to it still on its
+way. The check is not by time: an accepted reply is stored at the moment its send started
+(its outbox row's `created`, to the whole second), not when WhatsApp answered, so it can
+carry the same second as the newest message on another person's page. A client message sent
+during the round trip reads after the reply — unread for its writer; the lead's
+`first_reply_ts` is when WhatsApp took it. The first
 person to reply becomes the chat's handler when it has none (a
 reply typed on the owner's phone makes the owner the handler); anyone can hand it to
 another active member or to nobody. Audit rows name the chat's lead as their target and

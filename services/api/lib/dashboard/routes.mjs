@@ -101,13 +101,13 @@ const posInt = (v) => {
   return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
 };
 /**
- * The reply form's `seen_ts`: digits from a form, a number from JSON. Anything else is
+ * The reply form's `seen_rev`: digits from a form, a number from JSON. Anything else is
  * NaN, which the sender reads as "cannot tell what you saw" and holds as stale.
  */
-const asTs = (v) => {
+const asRev = (v) => {
   if (typeof v === 'number') return v;
   const s = typeof v === 'string' ? v.trim() : '';
-  return /^\d{1,16}$/.test(s) ? Number(s) : NaN;
+  return /^\d{1,15}$/.test(s) ? Number(s) : NaN;
 };
 
 /** Read a body with a hard cap; an oversized one is refused rather than buffered. */
@@ -961,7 +961,9 @@ export function createDashboardRoutes({
   /**
    * Draw one chat and mark it read — up to the newest message the page drew, never "now":
    * a message the poller stores a moment later with an earlier WhatsApp timestamp must
-   * still count as unread. `seenTs` rides in the form for the sender's stale-view guard.
+   * still count as unread. `seenRev`, the chat's revision read with the messages drawn (no
+   * await between them), rides in the form for the sender's stale-view guard; `seenTs`,
+   * the newest message drawn, is the read mark and rides along too.
    *
    * Every unread message is drawn, not only the newest 200: the newest max(200, span + 20)
    * messages, at most 1,000, where the span is every message, both directions, from this
@@ -971,6 +973,7 @@ export function createDashboardRoutes({
   function renderThread(res, { status = 200, user, lead, draft = '', ok = null, error = null }) {
     const span = inbox.unreadSpan(lead.lead_id, { userId: user.user_id, userCreated: user.created ?? 0 });
     const messages = inbox.messagesFor(lead.lead_id, { limit: Math.min(THREAD_MOST, Math.max(THREAD_MESSAGES, span + THREAD_CONTEXT)) });
+    const seenRev = inbox.revision(lead.lead_id);
     const hidden = Math.max(0, inbox.countMessages(lead.lead_id) - messages.length);
     const seenTs = messages.reduce((max, m) => (Number(m.ts) > max ? Number(m.ts) : max), 0);
     if (seenTs) inbox.markRead(user.user_id, lead.lead_id, seenTs);
@@ -986,6 +989,7 @@ export function createDashboardRoutes({
       users: team.listUsers(),
       sendId: newSendId(),
       seenTs,
+      seenRev,
       sendingEnabled: team.sendingEnabled(),
       canReply: replyJidFor(lead) !== null,
       repliesEnabled: team.repliesEnabled(),
@@ -1077,7 +1081,7 @@ export function createDashboardRoutes({
     if (!currentUser(req)) return signedOut(res, form);
 
     const text = asText(fields.text).replace(/\r\n?/g, '\n').trim();
-    const out = await sender.reply({ sendId: asText(fields.send_id), leadId, userId: me.user_id, text, seenTs: asTs(fields.seen_ts) });
+    const out = await sender.reply({ sendId: asText(fields.send_id), leadId, userId: me.user_id, text, seenRev: asRev(fields.seen_rev) });
     if (out.error === 'inactive_user') return signedOut(res, form);
     const inFlight = out.duplicate && (out.status === 'pending' || out.status === 'uncertain');
     const outcome = out.ok ? 'accepted' : (out.uncertain || inFlight) ? 'uncertain' : 'failed';

@@ -198,6 +198,8 @@ function seedScene(h) {
 }
 
 const replyTo = (h, leadId, fields, cookie) => h.postForm(`/v1/admin/inbox/${leadId}/reply`, fields, { cookie });
+/** The chat's revision now, as a form carries it: what a page drawn at this moment would say it saw. */
+const revOf = (h, leadId) => String(h.inboxStore.revision(leadId));
 
 /* ---------------- who sees what ---------------- */
 
@@ -388,7 +390,7 @@ test('a chat that is not in the inbox cannot be opened or answered, and nothing 
         const html = await page.text();
         assert.ok(!html.includes('never words') && !html.includes('team words'), id);
       }
-      const reply = await replyTo(h, id, { text: 'hello there', send_id: `send-${id}-000000000000`, seen_ts: String(NOW + 60_000) }, staff);
+      const reply = await replyTo(h, id, { text: 'hello there', send_id: `send-${id}-000000000000`, seen_rev: revOf(h, id) }, staff);
       assert.equal(reply.status, 404, id);
     }
     assert.equal(h.evo.calls.length, 0, 'not one request reached WhatsApp');
@@ -406,7 +408,7 @@ test('a lid-only chat opens but has no reply box, and a reply to it is refused u
     const html = await page.text();
     assert.ok(html.includes('hello from a lid chat'));
     assert.doesNotMatch(html, /action="\/v1\/admin\/inbox\/LEAD-L\/reply"/, 'WhatsApp gave no number to send to');
-    const reply = await replyTo(h, 'LEAD-L', { text: 'hi', send_id: 'send-lid-0000000000001', seen_ts: String(NOW + 60_000) }, staff);
+    const reply = await replyTo(h, 'LEAD-L', { text: 'hi', send_id: 'send-lid-0000000000001', seen_rev: revOf(h, 'LEAD-L') }, staff);
     assert.equal(reply.status, 409);
     assertLocked(reply);
     assert.equal(h.evo.calls.length, 0);
@@ -427,10 +429,13 @@ test('a reply goes out once from the owner\'s number: 303 ok=sent, in the thread
     assert.ok(html.includes('Is BONA-012 still free?'));
     assert.match(html, /action="\/v1\/admin\/inbox\/LEAD-A\/reply"/);
     assert.deepEqual(h.spy.refresh, ['LEAD-A'], 'opening the thread fetched it from WhatsApp first');
+    assert.match(html, /<input type="hidden" name="seen_rev" value="\d+">/, 'the form carries the revision the page was drawn at');
+    assert.equal(fieldOf(html, 'seen_rev'), revOf(h, 'LEAD-A'));
+    assert.equal(fieldOf(html, 'seen_ts'), String(NOW + 60_000), 'and the newest message it showed');
 
     h.tick(120_000);
     const text = 'Yes it is, when can you visit';
-    const res = await replyTo(h, 'LEAD-A', { text, send_id: 'send-ok-000000000000001', seen_ts: String(NOW + 60_000) }, staff);
+    const res = await replyTo(h, 'LEAD-A', { text, send_id: 'send-ok-000000000000001', seen_rev: fieldOf(html, 'seen_rev') }, staff);
     assert.equal(res.status, 303);
     assert.equal(res.headers.get('location'), '/dashboard/inbox/LEAD-A?ok=sent');
     assert.deepEqual(h.spy.refresh, ['LEAD-A', 'LEAD-A'], 'and again right before the reply was checked');
@@ -465,7 +470,7 @@ test('a double submit with one send_id sends once, whether the second click land
     seedScene(h);
     const staff = await h.staff();
     h.tick(120_000);
-    const form = { text: 'On my way', send_id: 'send-twice-00000000001', seen_ts: String(NOW + 60_000) };
+    const form = { text: 'On my way', send_id: 'send-twice-00000000001', seen_rev: revOf(h, 'LEAD-A') };
     const first = await replyTo(h, 'LEAD-A', form, staff);
     const again = await replyTo(h, 'LEAD-A', form, staff);
     assert.equal(first.headers.get('location'), '/dashboard/inbox/LEAD-A?ok=sent');
@@ -474,7 +479,7 @@ test('a double submit with one send_id sends once, whether the second click land
 
     // The real double click: the second post arrives while the first is still at WhatsApp.
     h.tick(60_000);
-    const race = { text: 'See you at five', send_id: 'send-race-000000000001', seen_ts: String(NOW + 120_000) };
+    const race = { text: 'See you at five', send_id: 'send-race-000000000001', seen_rev: revOf(h, 'LEAD-A') };
     const held = h.evo.hold();
     const firstOfRace = replyTo(h, 'LEAD-A', race, staff);
     await held.reached;
@@ -496,7 +501,7 @@ test('a timeout is "not sure it went", shown as such, and resubmitting it sends 
     const staff = await h.staff();
     h.tick(120_000);
     h.evo.reply = () => 'timeout';
-    const form = { text: 'Calling you now', send_id: 'send-slow-000000000001', seen_ts: String(NOW + 60_000) };
+    const form = { text: 'Calling you now', send_id: 'send-slow-000000000001', seen_rev: revOf(h, 'LEAD-A') };
     const res = await replyTo(h, 'LEAD-A', form, staff);
     assert.equal(res.status, 303);
     assert.equal(res.headers.get('location'), '/dashboard/inbox/LEAD-A?error=send_uncertain', 'and no words in the URL');
@@ -520,7 +525,7 @@ test('an HTTP 500 or 503 from Evolution is "not sure it went": no draft kept, co
       h.tick(120_000);
       h.evo.reply = (n) => (n === 1 ? { status, body: {} } : { status: 201, body: { key: { id: `KEY-${n}` } } });
       const sendId = `send-${status}-00000000000001`;
-      const form = { text: 'Upstream words', send_id: sendId, seen_ts: String(NOW + 60_000) };
+      const form = { text: 'Upstream words', send_id: sendId, seen_rev: revOf(h, 'LEAD-A') };
       const res = await replyTo(h, 'LEAD-A', form, staff);
       assert.equal(res.status, 303, String(status));
       assert.equal(res.headers.get('location'), '/dashboard/inbox/LEAD-A?error=send_uncertain', `${status}: no page, so no draft to send twice`);
@@ -542,7 +547,7 @@ test('an HTTP 500 or 503 from Evolution is "not sure it went": no draft kept, co
     h.tick(120_000);
     h.evo.reply = () => ({ status: 400, body: {} });
     const draft = 'Refused words';
-    const res = await replyTo(h, 'LEAD-A', { text: draft, send_id: 'send-400-00000000000001', seen_ts: String(NOW + 60_000) }, staff);
+    const res = await replyTo(h, 'LEAD-A', { text: draft, send_id: 'send-400-00000000000001', seen_rev: revOf(h, 'LEAD-A') }, staff);
     assert.equal(res.headers.get('content-type'), 'text/html; charset=utf-8', 'WhatsApp refused it: the thread again');
     const html = await res.text();
     assert.ok(html.includes(draft), 'the words are still in the box');
@@ -558,7 +563,7 @@ test('a member deactivated while the chat refreshes before their reply is signed
     const staff = await h.staff();
     h.tick(120_000);
     h.spy.onRefresh = () => h.team.deactivateUser(h.staffUser.user_id);
-    const form = { text: 'Words from someone who just left', send_id: 'send-gone-000000000001', seen_ts: String(NOW + 60_000) };
+    const form = { text: 'Words from someone who just left', send_id: 'send-gone-000000000001', seen_rev: revOf(h, 'LEAD-A') };
     const res = await replyTo(h, 'LEAD-A', form, staff);
     assert.equal(res.status, 303);
     assert.equal(res.headers.get('location'), '/dashboard/login', 'a form goes to the login, like any signed-out page');
@@ -573,7 +578,7 @@ test('a member deactivated while the chat refreshes before their reply is signed
     const staff = await h.staff();
     h.tick(120_000);
     h.spy.onRefresh = () => h.team.deactivateUser(h.staffUser.user_id);
-    const res = await h.postJson('/v1/admin/inbox/LEAD-A/reply', { text: 'x', send_id: 'send-gone-000000000002', seen_ts: NOW + 60_000 }, { cookie: staff });
+    const res = await h.postJson('/v1/admin/inbox/LEAD-A/reply', { text: 'x', send_id: 'send-gone-000000000002', seen_rev: h.inboxStore.revision('LEAD-A') }, { cookie: staff });
     assert.equal(res.status, 401);
     assert.deepEqual(await res.json(), { error: 'unauthorised' });
     assert.equal(h.evo.calls.length, 0);
@@ -585,10 +590,10 @@ test('a member deactivated while the chat refreshes before their reply is signed
     seedScene(h);
     const staff = await h.staff();
     h.app.sender.reply = async () => ({ ok: false, error: 'inactive_user' });
-    const form = await replyTo(h, 'LEAD-A', { text: 'x', send_id: 'send-gone-000000000003', seen_ts: String(NOW + 60_000) }, staff);
+    const form = await replyTo(h, 'LEAD-A', { text: 'x', send_id: 'send-gone-000000000003', seen_rev: revOf(h, 'LEAD-A') }, staff);
     assert.equal(form.status, 303);
     assert.equal(form.headers.get('location'), '/dashboard/login');
-    const json = await h.postJson('/v1/admin/inbox/LEAD-A/reply', { text: 'x', send_id: 'send-gone-000000000003', seen_ts: NOW + 60_000 }, { cookie: staff });
+    const json = await h.postJson('/v1/admin/inbox/LEAD-A/reply', { text: 'x', send_id: 'send-gone-000000000003', seen_rev: h.inboxStore.revision('LEAD-A') }, { cookie: staff });
     assert.equal(json.status, 401);
     assert.deepEqual(await json.json(), { error: 'unauthorised' });
   });
@@ -615,11 +620,11 @@ test('no reply outcome answers 502 or 504 (Cloudflare replaces those pages, and 
     for (const out of outcomes) {
       h.app.sender.reply = async () => out;
       const label = JSON.stringify(out);
-      const form = await replyTo(h, 'LEAD-A', { text: 'Words worth keeping', send_id: 'send-any-0000000000001', seen_ts: String(NOW + 60_000) }, staff);
+      const form = await replyTo(h, 'LEAD-A', { text: 'Words worth keeping', send_id: 'send-any-0000000000001', seen_rev: revOf(h, 'LEAD-A') }, staff);
       assert.ok(![502, 504].includes(form.status), `form ${form.status}: ${label}`);
       if (form.headers.get('content-type')?.startsWith('application/json')) assert.fail(`a form never gets raw JSON: ${label}`);
       await form.arrayBuffer();
-      const json = await h.postJson('/v1/admin/inbox/LEAD-A/reply', { text: 'x', send_id: 'send-any-0000000000001', seen_ts: NOW + 60_000 }, { cookie: staff });
+      const json = await h.postJson('/v1/admin/inbox/LEAD-A/reply', { text: 'x', send_id: 'send-any-0000000000001', seen_rev: h.inboxStore.revision('LEAD-A') }, { cookie: staff });
       assert.ok(![502, 504].includes(json.status), `json ${json.status}: ${label}`);
       await json.arrayBuffer();
     }
@@ -631,7 +636,7 @@ test('no reply outcome answers 502 or 504 (Cloudflare replaces those pages, and 
     const staff = await h.staff();
     h.tick(120_000);
     h.evo.reply = () => ({ status: 400, body: {} });
-    const form = { text: 'Turned away upstream', send_id: 'send-4xx-00000000000001', seen_ts: String(NOW + 60_000) };
+    const form = { text: 'Turned away upstream', send_id: 'send-4xx-00000000000001', seen_rev: revOf(h, 'LEAD-A') };
     const res = await replyTo(h, 'LEAD-A', form, staff);
     assert.equal(res.status, 503);
     assertLocked(res);
@@ -654,7 +659,7 @@ test('a 4,096-character Arabic reply reaches WhatsApp whole; a body too big even
     h.tick(120_000);
     // Two bytes a letter in UTF-8, six once a form percent-encodes it: 24 KiB of body.
     const arabic = 'ب'.repeat(4096);
-    const res = await replyTo(h, 'LEAD-A', { text: arabic, send_id: 'send-long-000000000001', seen_ts: String(NOW + 60_000) }, staff);
+    const res = await replyTo(h, 'LEAD-A', { text: arabic, send_id: 'send-long-000000000001', seen_rev: revOf(h, 'LEAD-A') }, staff);
     assert.equal(res.status, 303);
     assert.equal(res.headers.get('location'), '/dashboard/inbox/LEAD-A?ok=sent');
     assert.equal(h.evo.calls.length, 1);
@@ -662,12 +667,12 @@ test('a 4,096-character Arabic reply reaches WhatsApp whole; a body too big even
 
     // The worst a character can be: three bytes in UTF-8 (ﻻ, the lam-alef ligature), nine encoded — 36 KiB.
     const ligatures = 'ﻻ'.repeat(4096);
-    const worst = await replyTo(h, 'LEAD-A', { text: ligatures, send_id: 'send-long-000000000002', seen_ts: String(NOW + 120_000) }, staff);
+    const worst = await replyTo(h, 'LEAD-A', { text: ligatures, send_id: 'send-long-000000000002', seen_rev: revOf(h, 'LEAD-A') }, staff);
     assert.equal(worst.headers.get('location'), '/dashboard/inbox/LEAD-A?ok=sent');
     assert.equal(h.evo.calls[1].body.text, ligatures);
 
     // Past 64 KiB it is not read at all: the thread comes back with a message a person can act on.
-    const huge = await replyTo(h, 'LEAD-A', { text: 'ب'.repeat(12_000), send_id: 'send-long-000000000003', seen_ts: String(NOW + 120_000) }, staff);
+    const huge = await replyTo(h, 'LEAD-A', { text: 'ب'.repeat(12_000), send_id: 'send-long-000000000003', seen_rev: revOf(h, 'LEAD-A') }, staff);
     assert.equal(huge.status, 413);
     assertLocked(huge);
     assert.equal(huge.headers.get('content-type'), 'text/html; charset=utf-8', 'the page, never raw JSON');
@@ -680,7 +685,7 @@ test('a 4,096-character Arabic reply reaches WhatsApp whole; a body too big even
     assert.equal(h.inboxStore.getOutbox('send-long-000000000003'), null, 'and nothing was written');
 
     // A JSON caller still gets JSON, and every other write keeps the ordinary 16 KiB cap.
-    const json = await h.postJson('/v1/admin/inbox/LEAD-A/reply', { text: 'x'.repeat(70_000), send_id: 'send-long-000000000004', seen_ts: NOW + 120_000 }, { cookie: staff });
+    const json = await h.postJson('/v1/admin/inbox/LEAD-A/reply', { text: 'x'.repeat(70_000), send_id: 'send-long-000000000004', seen_rev: h.inboxStore.revision('LEAD-A') }, { cookie: staff });
     assert.equal(json.status, 413);
     assert.deepEqual(await json.json(), { error: 'payload_too_large' });
     const handler = await h.postForm('/v1/admin/inbox/LEAD-A/handler', { user_id: '', pad: 'x'.repeat(20_000) }, { cookie: staff });
@@ -693,7 +698,7 @@ test('a refused reply is drawn again with the words kept and a fresh send_id, an
   await withInbox(async (h) => {
     seedScene(h);
     const staff = await h.staff();
-    await h.get('/dashboard/inbox/LEAD-A', { cookie: staff });
+    const opened = await (await h.get('/dashboard/inbox/LEAD-A', { cookie: staff })).text();
     // A message that arrived while the page was open, found by the refresh the reply makes.
     let played = false;
     h.spy.onRefresh = (lead) => {
@@ -705,7 +710,7 @@ test('a refused reply is drawn again with the words kept and a fresh send_id, an
       });
     };
     const draft = 'Draft about the villa';
-    const stale = await replyTo(h, 'LEAD-A', { text: draft, send_id: 'send-stale-00000000001', seen_ts: String(NOW + 60_000) }, staff);
+    const stale = await replyTo(h, 'LEAD-A', { text: draft, send_id: 'send-stale-00000000001', seen_rev: fieldOf(opened, 'seen_rev') }, staff);
     assert.equal(stale.status, 409, 'new activity since the page was opened');
     assertLocked(stale);
     const html = await stale.text();
@@ -715,20 +720,55 @@ test('a refused reply is drawn again with the words kept and a fresh send_id, an
     const fresh = fieldOf(html, 'send_id');
     assert.match(fresh, /^[A-Za-z0-9_-]{16,64}$/);
     assert.equal(fieldOf(html, 'seen_ts'), String(NOW + 90_000));
+    assert.equal(fieldOf(html, 'seen_rev'), revOf(h, 'LEAD-A'), 'and a revision that covers it');
+    assert.ok(Number(fieldOf(html, 'seen_rev')) > Number(fieldOf(opened, 'seen_rev')));
 
-    const empty = await replyTo(h, 'LEAD-A', { text: '   ', send_id: fresh, seen_ts: String(NOW + 90_000) }, staff);
+    const empty = await replyTo(h, 'LEAD-A', { text: '   ', send_id: fresh, seen_rev: fieldOf(html, 'seen_rev') }, staff);
     assert.equal(empty.status, 400);
 
     h.team.setSetting('sending_enabled', '0');
-    const off = await replyTo(h, 'LEAD-A', { text: draft, send_id: fresh, seen_ts: String(NOW + 90_000) }, staff);
+    const off = await replyTo(h, 'LEAD-A', { text: draft, send_id: fresh, seen_rev: fieldOf(html, 'seen_rev') }, staff);
     assert.equal(off.status, 503, 'the owner switched sending off');
     assert.equal(h.evo.calls.length, 0, 'none of the three reached WhatsApp');
+    assert.equal(fieldOf(await off.text(), 'seen_rev'), null, 'with sending off the page has no reply box to send from');
 
     h.team.setSetting('sending_enabled', '1');
     h.tick(120_000);
-    const sent = await replyTo(h, 'LEAD-A', { text: draft, send_id: 'send-after-00000000001', seen_ts: String(NOW + 90_000) }, staff);
+    // Opened again once sending is back on: the refused send is on that page, and in its revision.
+    const reopened = await (await h.get('/dashboard/inbox/LEAD-A', { cookie: staff })).text();
+    assert.ok(Number(fieldOf(reopened, 'seen_rev')) > Number(fieldOf(html, 'seen_rev')), "the refused send's row counts");
+    const sent = await replyTo(h, 'LEAD-A', { text: draft, send_id: 'send-after-00000000001', seen_rev: fieldOf(reopened, 'seen_rev') }, staff);
     assert.equal(sent.headers.get('location'), '/dashboard/inbox/LEAD-A?ok=sent');
     assert.equal(h.evo.calls.length, 1);
+  });
+});
+
+test('two people on one page: once the first reply is accepted the second is stale, though the first is stored in the same second as the newest message both saw', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    const boss = await h.boss();
+    // Both open the chat in the second its newest message was stamped with.
+    h.tick(60_000);
+    const saras = await (await h.get('/dashboard/inbox/LEAD-A', { cookie: staff })).text();
+    const owners = await (await h.get('/dashboard/inbox/LEAD-A', { cookie: boss })).text();
+    assert.equal(fieldOf(owners, 'seen_rev'), fieldOf(saras, 'seen_rev'));
+    assert.equal(fieldOf(owners, 'seen_ts'), String(NOW + 60_000));
+    // Every field each form carries, as a browser posts it.
+    const formOf = (page, text) => ({ text, send_id: fieldOf(page, 'send_id'), seen_rev: fieldOf(page, 'seen_rev'), seen_ts: fieldOf(page, 'seen_ts') });
+
+    h.tick(700);
+    const first = await replyTo(h, 'LEAD-A', formOf(saras, 'Yes, still free'), staff);
+    assert.equal(first.headers.get('location'), '/dashboard/inbox/LEAD-A?ok=sent');
+    assert.equal(h.inboxStore.newestTs('LEAD-A'), NOW + 60_000, "stored in the second of the newest message the owner's page showed");
+
+    const second = await replyTo(h, 'LEAD-A', formOf(owners, 'It is, come by'), boss);
+    assert.equal(second.status, 409);
+    const html = await second.text();
+    assert.ok(html.includes('It is, come by'), 'the words are still in the box');
+    assert.ok(html.includes('Yes, still free'), 'under the reply that page had not shown');
+    assert.equal(h.evo.calls.length, 1, 'the client got one answer, not two');
+    assert.equal(h.inboxStore.getOutbox(fieldOf(owners, 'send_id')), null, 'nothing written for the refused one');
   });
 });
 
@@ -767,7 +807,7 @@ test('replies ship switched off: the chat reads but has no reply box, a posted r
     assert.doesNotMatch(html, /action="\/v1\/admin\/inbox\/LEAD-A\/reply"/);
 
     h.tick(120_000);
-    const form = { text: 'First words to a client', send_id: 'send-off-0000000000001', seen_ts: String(NOW + 60_000) };
+    const form = { text: 'First words to a client', send_id: 'send-off-0000000000001', seen_rev: revOf(h, 'LEAD-A') };
     const refused = await replyTo(h, 'LEAD-A', form, staff);
     assert.equal(refused.status, 503);
     assertLocked(refused);
@@ -1009,14 +1049,15 @@ test('a thread draws every unread message past 200 (up to 1,000), says how many 
     // 1,100 unread: the thread stops at 1,000, says so, and marks read up to the newest it drew.
     // Accepted (plan P4, README): the 100 unread ones past the cap count as read too — the
     // read mark is one timestamp, and a page drawn from the oldest unread one forward would
-    // leave out the newest messages and make every reply from it `stale`.
+    // leave out the newest messages — the ones a reply answers.
     burst('LEAD-1100', '966500000093', 1_100);
     const capped = await (await h.get('/dashboard/inbox/LEAD-1100', { cookie: staff })).text();
     assert.equal(bubbles(capped), 1_000);
     assert.match(capped, /100 earlier messages are not shown here\./);
     assert.equal(readMark('LEAD-1100'), NOW + 1_100_000, 'the newest drawn message');
     assert.equal(h.inboxStore.unreadSpan('LEAD-1100', { userId: h.staffUser.user_id, userCreated: h.staffUser.created }), 0, 'the ones past the cap are not left unread');
-    assert.equal(fieldOf(capped, 'seen_ts'), String(NOW + 1_100_000), 'and that is what a reply was written against');
+    assert.equal(fieldOf(capped, 'seen_ts'), String(NOW + 1_100_000), 'the form names the newest message it drew');
+    assert.equal(fieldOf(capped, 'seen_rev'), revOf(h, 'LEAD-1100'), 'and the chat\'s revision, which a reply is checked against');
   });
 });
 
@@ -1053,9 +1094,9 @@ test('nothing the inbox writes to the log carries message text, a phone number o
     await h.get('/dashboard/inbox', { cookie: staff });
     await h.get('/dashboard/inbox/LEAD-A', { cookie: staff });
     h.tick(120_000);
-    await replyTo(h, 'LEAD-A', { text: 'Secret reply words', send_id: 'send-log-0000000000001', seen_ts: String(NOW + 60_000) }, staff);
+    await replyTo(h, 'LEAD-A', { text: 'Secret reply words', send_id: 'send-log-0000000000001', seen_rev: revOf(h, 'LEAD-A') }, staff);
     h.evo.reply = () => 'timeout';
-    await replyTo(h, 'LEAD-A', { text: 'Second secret words', send_id: 'send-log-0000000000002', seen_ts: String(NOW + 120_000) }, staff);
+    await replyTo(h, 'LEAD-A', { text: 'Second secret words', send_id: 'send-log-0000000000002', seen_rev: revOf(h, 'LEAD-A') }, staff);
     await h.postForm('/v1/admin/inbox/LEAD-A/handler', { user_id: h.owner.user_id }, { cookie: staff });
     await h.postForm('/v1/admin/inbox/add', { phone: '0500000088' }, { cookie: boss });
     await h.postForm('/v1/admin/inbox/LEAD-U/move', {}, { cookie: boss });

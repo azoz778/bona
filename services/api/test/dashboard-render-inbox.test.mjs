@@ -36,7 +36,7 @@ const msg = (over = {}) => ({
 
 const thread = (over = {}) => threadPage({
   me: OWNER, lead: LEAD, messages: [], gaps: [], outbox: [], users: USERS,
-  sendId: 'SND-abcdefghijklmnop', seenTs: NOW - HOUR, sendingEnabled: true, canReply: true, repliesEnabled: true, now: NOW, ...over,
+  sendId: 'SND-abcdefghijklmnop', seenTs: NOW - HOUR, seenRev: 42, sendingEnabled: true, canReply: true, repliesEnabled: true, now: NOW, ...over,
 });
 
 /* ---------------- the rail ---------------- */
@@ -232,11 +232,12 @@ test('gaps and unconfirmed replies sit in time order with an honest status line'
   assert.equal(html.match(/>last</g).length, 1, 'an outbox row that is already a stored message is not shown twice');
 });
 
-test('the reply form carries send_id, seen_ts and the kept draft, and posts to this chat', () => {
+test('the reply form carries send_id, seen_rev, seen_ts and the kept draft, and posts to this chat', () => {
   const html = thread({ draft: 'my text </textarea><script>x</script>', error: 'stale' });
   assert.match(html, /<form class="reply" method="post" action="\/v1\/admin\/inbox\/LEAD-20260928-aaaa0001\/reply">/);
   assert.match(html, /<input type="hidden" name="_dash" value="1">/);
   assert.match(html, /<input type="hidden" name="send_id" value="SND-abcdefghijklmnop">/);
+  assert.match(html, /<input type="hidden" name="seen_rev" value="42">/, 'the revision the stale-view guard compares');
   assert.match(html, new RegExp(`<input type="hidden" name="seen_ts" value="${NOW - HOUR}">`));
   assert.match(html, /<textarea id="r-text" name="text" maxlength="4096" dir="auto" required>my text &lt;\/textarea&gt;&lt;script&gt;x&lt;\/script&gt;<\/textarea>/);
   assert.ok(!/<script/i.test(html));
@@ -328,6 +329,7 @@ test('rows full of nulls render without "undefined", "NaN", "[object" or a 1970 
       me: null, lead: blank, messages: [blankMsg], gaps: [{ ts: null }], outbox: [{ status: 'failed', created: null, error: null, text: null }],
       users: null, sendId: null, seenTs: null, sendingEnabled: true, canReply: true,
     }),
+    threadPage({ me: null, lead: blank, messages: null, users: null, sendingEnabled: true, canReply: true, repliesEnabled: true }),
     threadPage({ me: null, lead: blank, messages: null, gaps: null, outbox: null, users: null }),
   ];
   for (const html of pages) assert.doesNotMatch(html, /undefined|NaN|\[object|1970-01-01/);
