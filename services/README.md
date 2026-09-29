@@ -895,7 +895,9 @@ Schema v4 sorted the leads that already existed: `in` for `ref`, for `ad_meta` o
 `ad_meta` leads, web-form and concierge leads included — `unsure`, for the owner to settle.
 On the live db that is 2 in (the two Ref leads) and every other lead unsure (read-only checks
 on 2026-09-28 and 2026-09-29: no `ad_meta` lead carries ad evidence, and only the Ref leads'
-first snippets carry a listing id); the Phase 2 deploy checks it.
+first snippets carry a listing id); the Phase 2 deploy checks it. A thread page left open
+across the deploy by a build whose form has no `seen_rev` (it posts only `seen_ts`) is
+refused `stale` on every send, the words kept in the box, until it is reloaded.
 
 *What is stored* (`wa_messages`, `in` chats only): every message in both directions and who
 sent it — the client, a team member (by user id), Dana (from Phase 4), or `owner_number`
@@ -968,14 +970,20 @@ DNS lookup is `failed` (never reached WhatsApp: the text is kept in the box). Wh
 else the same lead and the same text within 2 minutes — and the bubble gets its sender; a
 row interrupted by a restart becomes `uncertain` (`interrupted`): at start-up every `pending`
 row does, however young (the new process has sent nothing yet). The form also carries the
-chat's revision when the page was drawn (`seen_rev`: it grows with every message stored for
-the chat, whatever its WhatsApp time, and every staff or Dana send to it, whatever became
-of the send), and the chat is refreshed from Evolution just before
+chat's revision when the page was drawn (`seen_rev`): a counter on the chat's lead row
+(`leads.chat_rev`, schema v4, 0 for every lead that already existed) that goes up by one,
+in the same transaction, with every message stored for the chat, whatever its WhatsApp
+time, every staff or Dana send to it, whatever became of the send, and every purge of it
+(leaving the inbox, a team or never-list number, the retention purge). The lead row is
+never deleted, so the number never goes down and never comes back: a page drawn before a
+purge never matches one drawn after it, however the thread fills again. The chat is
+refreshed from Evolution just before
 the check — best effort: at most ~3 s, the newest 50 records per question, skipped within
-5 s of the last refresh, and a failed read leaves only what is already stored. Anything
-written to the chat by then that the page did not have, in either direction, holds the
-reply (`stale`) with the text kept in the box, and so does another reply to it still on its
-way. The check is not by time: an accepted reply is stored at the moment its send started
+5 s of the last refresh, and a failed read leaves only what is already stored. A reply goes
+only while the chat is still at exactly the page's revision: anything written to the chat
+by then that the page did not have, in either direction, holds the reply (`stale`) with the
+text kept in the box, and so does a `seen_rev` above the chat's (never drawn, so forged)
+and another reply to it still on its way. The check is not by time: an accepted reply is stored at the moment its send started
 (its outbox row's `created`, to the whole second), not when WhatsApp answered, so it can
 carry the same second as the newest message on another person's page. A client message sent
 during the round trip reads after the reply — unread for its writer; the lead's
