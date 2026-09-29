@@ -898,7 +898,16 @@ export function createPoller({
 
         let handled = inboxOn ? (failures.get(rec.id)?.handled ?? null) : null;
         try {
-          if (rec.fromMe) {
+          if (rec.noise) {
+            // A reaction, an edit, a delete (lib/evolution.mjs `isNoise`) is no message of
+            // its own, whoever sent it: it never goes through the merge (no touchpoint, no
+            // `first_inbound_ts`, no reopened add), never answers a lead, never creates one
+            // (not from a Ref line or a Bona link in an edit's new text either) and never
+            // moves a chat's inbox state. Ingest would refuse to store it anyway. The
+            // candidate list below still hears of it, only to take a chat that has become
+            // a lead off the list.
+            tally.ignored += 1;
+          } else if (rec.fromMe) {
             if (recordReply(rec, ts)) tally.replies += 1;
             if (inboxOn) await inboxAfterOutbound(rec, ts, tally);
           } else if (handled) {
