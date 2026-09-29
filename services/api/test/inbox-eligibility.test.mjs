@@ -895,19 +895,21 @@ test('only strong property terms count: everyday words, words that only contain 
 /* ---------------- time ---------------- */
 
 /**
- * How long `call` takes, in milliseconds: the fastest of three runs of it. One run's wall
+ * How long `call` takes, in milliseconds: the fastest of five runs of it. One run's wall
  * time can be stretched by a garbage-collection pause or by other processes loading the
- * machine (a full-suite run under CPU load once failed a 100 ms check on a single run), so
- * a time check takes the minimum of three runs of the same call and allows 500 ms
- * (`TIME_LIMIT_MS`). It stops at the first run under the limit: the minimum of all three
- * would be under it too, so the verdict is the same in a third of the time. That still
- * catches what the check is for: a quadratic pattern such as `\s+x` takes about 8 s on a
- * 200,000-character input, on every run, while these linear ones stay in single digits.
+ * machine (a full-suite run under CPU load once failed a 100 ms check on a single run, and
+ * the fastest of three once took 1,087 ms against a 500 ms limit while another heavy
+ * process loaded the machine), so a time check takes the minimum of five runs of the same
+ * call and allows 2,000 ms (`TIME_LIMIT_MS`). It stops at the first run under the limit:
+ * the minimum of all five would be under it too, so the verdict is the same in a fifth of
+ * the time. That still catches what the check is for: a quadratic pattern such as `\s+x`
+ * takes about 8 s on a 200,000-character input and the old cubic Ref pattern minutes, on
+ * every run, while these linear ones stay in single digits.
  */
-const TIME_LIMIT_MS = 500;
-function fastestOfThree(call) {
+const TIME_LIMIT_MS = 2_000;
+function fastestOfFive(call) {
   let fastest = Infinity;
-  for (let run = 0; run < 3 && fastest >= TIME_LIMIT_MS; run += 1) {
+  for (let run = 0; run < 5 && fastest >= TIME_LIMIT_MS; run += 1) {
     const started = performance.now();
     call();
     fastest = Math.min(fastest, performance.now() - started);
@@ -919,7 +921,7 @@ test('no text makes the rules slow: every input is read in linear time', () => {
   // Every inbound WhatsApp text reaches inboundSignal and every owner message
   // ownerOutboundJoins, up to 65,536 characters. Each case below defeated a pattern with a
   // run that could be re-read from many places; at 200,000 characters a quadratic pattern
-  // takes seconds (`fastestOfThree`) while a linear one stays in single digits.
+  // takes seconds (`fastestOfFive`) while a linear one stays in single digits.
   const fill = (unit, n) => unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
   const inputs = (n) => [
     `Ref${' '.repeat(n)}x`, `Ref${'\n'.repeat(n)}x`, `Ref${'\u00A0'.repeat(n)}x`,
@@ -961,7 +963,7 @@ test('no text makes the rules slow: every input is read in linear time', () => {
   for (const n of [20_000, 200_000]) {
     for (const [i, s] of inputs(n).entries()) {
       for (const [label, call] of calls) {
-        const ms = fastestOfThree(() => call(s));
+        const ms = fastestOfFive(() => call(s));
         assert.ok(ms < TIME_LIMIT_MS, `${label}, input ${i} × ${n}: ${ms.toFixed(1)} ms`);
       }
     }

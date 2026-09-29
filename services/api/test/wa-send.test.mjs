@@ -888,6 +888,37 @@ test('reply: stale when another member\'s send that may have gone was written af
   h.s.close();
 });
 
+test('reply: a page drawn while another member\'s send was on its way is stale once that send settles failed or "not sure it went"', async () => {
+  // Omar's page shows Sara's reply as on its way. Once it settles "not sure it went" it may
+  // have reached the client, and his page does not say so: sending from it risks a second
+  // answer to the same message.
+  const OTHER_SID = 'sid_fedcba9876543210';
+  for (const [status, answer] of [['failed', { status: 400 }], ['uncertain', { status: 504 }]]) {
+    let settle;
+    const held = new Promise((resolve) => { settle = resolve; });
+    const h = harness({ reply: (n) => (n === 1 ? held : { status: 201, body: { key: { id: 'KEY-2' } } }) });
+    const sara = staffOf(h);
+    const omar = h.team.addUser({ name: 'Omar', phone: '966500000088' });
+    seedChat(h);
+    const going = h.sender.reply(replyArgs(sara, { seenRev: h.inbox.revision('L-1') }));
+    assert.equal(h.inbox.getOutbox(SID).status, 'pending', `${status}: Sara's reply is on its way`);
+    const drawn = h.inbox.revision('L-1');
+    assert.deepEqual(await h.sender.reply(replyArgs(omar, { sendId: OTHER_SID, seenRev: drawn })), { ok: false, error: 'stale' },
+      `${status}: never across a reply still on its way`);
+    settle(answer);
+    assert.equal((await going).status, status);
+    assert.equal(h.inbox.getOutbox(SID).status, status);
+    assert.deepEqual(await h.sender.reply(replyArgs(omar, { sendId: OTHER_SID, seenRev: drawn })), { ok: false, error: 'stale' },
+      `${status}: nor once it settled, which the page drawn while it was on its way does not show`);
+    assert.equal(h.inbox.getOutbox(OTHER_SID), null, `${status}: nothing written for the refused one`);
+    assert.equal(h.calls.length, 1, `${status}: one call to WhatsApp, Sara's`);
+    assert.equal((await h.sender.reply(replyArgs(omar, { sendId: OTHER_SID, seenRev: h.inbox.revision('L-1') }))).ok, true,
+      `${status}: a page drawn after it settled sends`);
+    assert.equal(h.calls.length, 2);
+    h.s.close();
+  }
+});
+
 test('reply: inactive_user for a member who has left the team, an unknown id or none — nothing written, nothing sent', async () => {
   const h = harness();
   const staff = staffOf(h);
@@ -1169,5 +1200,21 @@ test('recoverInterrupted: a reply the last process left pending seconds ago no l
   assert.equal(h.inbox.getOutbox('SND-cut-off').status, 'uncertain');
   const drawn = h.inbox.revision('L-1');
   assert.equal((await h.sender.reply(replyArgs(staff, { seenRev: drawn }))).ok, true, 'shown as "not sure it went", not as a send on its way');
+  h.s.close();
+});
+
+test('recoverInterrupted: a page drawn while a send was pending is stale once the restart marks it "not sure it went"', async () => {
+  const h = harness();
+  const staff = staffOf(h);
+  seedChat(h);
+  h.inbox.insertOutbox({ send_id: 'SND-cut-off', lead_id: 'L-1', jid: CLIENT_JID, text: 'x', user_id: 'USR-other', sender_kind: 'staff' });
+  // This page shows that send as on its way.
+  const drawn = h.inbox.revision('L-1');
+  h.tick(5_000);
+  assert.equal(h.sender.recoverInterrupted(), 1);
+  assert.deepEqual(await h.sender.reply(replyArgs(staff, { seenRev: drawn })), { ok: false, error: 'stale' }, 'it may have gone, which the page does not show');
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.inbox.getOutbox(SID), null);
+  assert.equal((await h.sender.reply(replyArgs(staff, { seenRev: h.inbox.revision('L-1') }))).ok, true, 'a page drawn after the restart sends');
   h.s.close();
 });

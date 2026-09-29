@@ -173,7 +173,7 @@ test('newestTs and hasMessages look at one chat only', () => {
   s.close();
 });
 
-test('revision is the chat\'s own counter on its lead row: one up for every message and staff or Dana send written for it, never for one seen again or settled', () => {
+test('revision is the chat\'s own counter on its lead row: one up for every message, gap and staff or Dana send written for it and every such send leaving pending, never for one seen again', () => {
   const { s, inbox } = harness();
   chat(s, 'L-1');
   chat(s, 'L-2', { wa_jid: '966500000002@s.whatsapp.net' });
@@ -201,26 +201,62 @@ test('revision is the chat\'s own counter on its lead row: one up for every mess
   grew('a staff send on its way');
   inbox.insertOutbox(out({ send_id: 'SND-1', text: 'a double submit' }));
   same('a double submit of the same send id writes nothing');
+  // A page drawn while the send was on its way showed it pending; whatever became of it
+  // (failed, or "not sure it went") is news that page does not have.
   inbox.updateOutbox('SND-1', { status: 'uncertain', error: 'timeout' });
-  same('a send settled is nothing new');
-  inbox.markStalePending(Number.MAX_SAFE_INTEGER);
-  same('nor is a pending send marked interrupted');
+  grew('a send leaving pending');
+  inbox.updateOutbox('SND-1', { status: 'uncertain', error: 'timeout again' });
+  same('a settled send written again with the same status');
+  inbox.updateOutbox('SND-1', { status: 'accepted', key_id: 'K-2' });
+  same('only leaving pending counts, not moving between settled statuses');
+  assert.equal(inbox.updateOutbox('SND-nope', { status: 'failed' }), false);
+  same('a send id with no row');
+  // A pending send cut off by a restart is marked "not sure it went": the same news.
+  inbox.insertOutbox(out({ send_id: 'SND-cut' }));
+  grew('another staff send on its way');
+  assert.equal(inbox.markStalePending(Number.MAX_SAFE_INTEGER), 1, 'the one pending send');
+  assert.equal(inbox.getOutbox('SND-cut').status, 'uncertain');
+  grew('a pending send marked interrupted');
+  assert.equal(inbox.markStalePending(Number.MAX_SAFE_INTEGER), 0);
+  same('nothing left pending, nothing marked');
   inbox.insertOutbox(out({ send_id: 'SND-2', sender_kind: 'dana', status: 'failed' }));
   grew('a Dana send, whatever its status');
+  inbox.insertOutbox(out({ send_id: 'SND-3', sender_kind: 'dana' }));
+  grew('a Dana send on its way');
+  inbox.updateOutbox('SND-3', { status: 'failed', error: 'http_400' });
+  grew('a Dana send leaving pending');
 
   inbox.upsertMessage(msg({ key_id: 'K-other', lead_id: 'L-2', jid: '966500000002@s.whatsapp.net' }));
   inbox.insertOutbox(out({ send_id: 'SND-other', lead_id: 'L-2' }));
+  inbox.insertOutbox(out({ send_id: 'SND-other-2', lead_id: 'L-2' }));
   inbox.insertOutbox(out({ send_id: 'SND-code', lead_id: null, sender_kind: 'code', text: null }));
+  inbox.insertOutbox(out({ send_id: 'SND-code-2', lead_id: null, sender_kind: 'code', text: null }));
   inbox.insertOutbox(out({ send_id: 'SND-note', sender_kind: 'note' }));
+  inbox.insertOutbox(out({ send_id: 'SND-note-2', sender_kind: 'note' }));
   inbox.insertOutbox(out({ send_id: 'SND-nolead', lead_id: null }));
   same("another chat's messages and sends, a login code, a note and a send with no chat are not this chat's thread");
-  assert.equal(inbox.revision('L-2'), 2);
+  assert.equal(inbox.revision('L-2'), 3);
+  inbox.updateOutbox('SND-code', { status: 'accepted', key_id: 'K-code' });
+  inbox.updateOutbox('SND-note', { status: 'accepted', key_id: 'K-note' });
+  inbox.updateOutbox('SND-nolead', { status: 'failed', error: 'http_400' });
+  same('a login code, a note of this chat or a send with no chat leaving pending');
+  assert.equal(inbox.revision('L-2'), 3);
+  assert.equal(inbox.markStalePending(Number.MAX_SAFE_INTEGER), 4, "L-2's two sends, a login code and a note");
+  same('a note of this chat marked interrupted is not a send to its client');
+  assert.equal(inbox.revision('L-2'), 4, "L-2's two sends marked interrupted move L-2 on, once");
   inbox.upsertMessage(msg({ key_id: 'K-3', ts: NOW + 1_000 }));
   grew('a message after rows of other chats');
-  inbox.addGap({ key_id: 'K-gap', lead_id: 'L-1', ts: NOW, reason: 'failed' });
+  // "A message could not be loaded" is a line in the thread a replier must see.
+  assert.equal(inbox.addGap({ key_id: 'K-gap', lead_id: 'L-1', ts: NOW, reason: 'failed' }), true);
+  grew('a gap');
+  assert.equal(inbox.addGap({ key_id: 'K-gap', lead_id: 'L-1', ts: NOW, reason: 'failed' }), false);
+  same('the same gap again writes nothing');
+  inbox.addGap({ key_id: 'K-gap-2', lead_id: 'L-2', ts: NOW, reason: 'failed' });
+  inbox.addGap({ key_id: 'K-gap-3', lead_id: null, ts: NOW, reason: 'failed' });
+  assert.equal(inbox.revision('L-2'), 5, "L-2's gap moves L-2");
   inbox.markRead('USR-1', 'L-1', NOW + 1_000);
   inbox.setHandler('L-1', 'USR-1');
-  same('a gap, a read mark or a handler is not a message or a send');
+  same("another chat's gap, a gap of no chat, a read mark or a handler is not this chat's thread");
 
   assert.equal(inbox.revision('L-nope'), 0);
   assert.equal(inbox.revision(null), 0);
@@ -294,6 +330,12 @@ test('the revision moves in the same transaction as the write it counts: when it
   assert.equal(s.getLead('L-1').last_msg_ts, NOW + 10 * DAY);
   assert.throws(() => inbox.insertOutbox(out({ send_id: 'SND-new' })), /no_rev/);
   assert.equal(inbox.getOutbox('SND-new'), null, 'the send is not written');
+  assert.throws(() => inbox.updateOutbox('SND-1', { status: 'accepted', key_id: 'K-1' }), /no_rev/);
+  assert.deepEqual([inbox.getOutbox('SND-1').status, inbox.getOutbox('SND-1').key_id], ['pending', null], 'the send is not settled');
+  assert.throws(() => inbox.markStalePending(Number.MAX_SAFE_INTEGER), /no_rev/);
+  assert.equal(inbox.getOutbox('SND-1').status, 'pending', 'nor marked interrupted');
+  assert.throws(() => inbox.addGap({ key_id: 'K-gap', lead_id: 'L-1', ts: NOW, reason: 'failed' }), /no_rev/);
+  assert.deepEqual(inbox.gapsFor('L-1'), [], 'the gap is not written');
   assert.throws(() => inbox.leaveInbox('L-1'), /no_rev/);
   assert.equal(inbox.countMessages('L-1'), 1, 'the thread is not purged');
   assert.equal(s.getLead('L-1').inbox_state, 'in', 'and the chat has not left');
@@ -304,8 +346,9 @@ test('the revision moves in the same transaction as the write it counts: when it
 
   // What the revision does not count still goes through.
   inbox.upsertMessage(msg({ key_id: 'K-1', status: 'read' }));
-  inbox.updateOutbox('SND-1', { status: 'accepted', key_id: 'K-1' });
+  assert.equal(inbox.updateOutbox('SND-2', { status: 'failed', error: 'http_400' }), true, 'a settled send written again');
   assert.equal(row(s, 'K-1').status, 'read');
+  assert.equal(inbox.getOutbox('SND-2').error, 'http_400');
   s.db.exec('DROP TRIGGER no_rev');
   s.close();
 });

@@ -897,7 +897,8 @@ On the live db that is 2 in (the two Ref leads) and every other lead unsure (rea
 on 2026-09-28 and 2026-09-29: no `ad_meta` lead carries ad evidence, and only the Ref leads'
 first snippets carry a listing id); the Phase 2 deploy checks it. A thread page left open
 across the deploy by a build whose form has no `seen_rev` (it posts only `seen_ts`) is
-refused `stale` on every send, the words kept in the box, until it is reloaded.
+refused `stale` once: that 409 answer draws the thread again with the words kept in the box
+and a fresh `send_id` and `seen_rev`, so the next send from it goes through.
 
 *What is stored* (`wa_messages`, `in` chats only): every message in both directions and who
 sent it — the client, a team member (by user id), Dana (from Phase 4), or `owner_number`
@@ -973,8 +974,11 @@ row does, however young (the new process has sent nothing yet). The form also ca
 chat's revision when the page was drawn (`seen_rev`): a counter on the chat's lead row
 (`leads.chat_rev`, schema v4, 0 for every lead that already existed) that goes up by one,
 in the same transaction, with every message stored for the chat, whatever its WhatsApp
-time, every staff or Dana send to it, whatever became of the send, and every purge of it
-(leaving the inbox, a team or never-list number, the retention purge). The lead row is
+time, every staff or Dana send to it, whatever became of the send, and that send again when
+it leaves `pending` (accepted, failed, or "not sure it went", a send a restart interrupted
+included: a page drawn while it was on its way does not show that it may have gone), every
+new "a message could not be loaded" line, and every purge of it (leaving the inbox, a team
+or never-list number, the retention purge). The lead row is
 never deleted, so the number never goes down and never comes back: a page drawn before a
 purge never matches one drawn after it, however the thread fills again. The chat is
 refreshed from Evolution just before

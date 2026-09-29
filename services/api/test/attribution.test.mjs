@@ -55,20 +55,21 @@ test('the rewritten pattern finds the same line, listing and code as the old one
 });
 
 /**
- * How long `call` takes, in milliseconds: the fastest of three runs of it. One run's wall
+ * How long `call` takes, in milliseconds: the fastest of five runs of it. One run's wall
  * time can be stretched by a garbage-collection pause or by other processes loading the
- * machine (a full-suite run under CPU load once failed a 100 ms check on a single run), so
- * a time check takes the minimum of three runs of the same call and allows 500 ms
- * (`TIME_LIMIT_MS`). It stops at the first run under the limit: the minimum of all three
- * would be under it too, so the verdict is the same in a third of the time. That still
- * catches what the check is for: the old pattern took 2.3 s on 2,000 spaces and grows with
- * the cube of the run, so on these 20,000-character inputs it takes far longer than 500 ms,
- * on every run.
+ * machine (a full-suite run under CPU load once failed a 100 ms check on a single run, and
+ * the fastest of three once took 1,087 ms against a 500 ms limit while another heavy
+ * process loaded the machine), so a time check takes the minimum of five runs of the same
+ * call and allows 2,000 ms (`TIME_LIMIT_MS`). It stops at the first run under the limit:
+ * the minimum of all five would be under it too, so the verdict is the same in a fifth of
+ * the time. That still catches what the check is for: the old pattern took 2.3 s on 2,000
+ * spaces and grows with the cube of the run, so on these 20,000-character inputs it takes
+ * minutes, on every run.
  */
-const TIME_LIMIT_MS = 500;
-function fastestOfThree(call) {
+const TIME_LIMIT_MS = 2_000;
+function fastestOfFive(call) {
   let fastest = Infinity;
-  for (let run = 0; run < 3 && fastest >= TIME_LIMIT_MS; run += 1) {
+  for (let run = 0; run < 5 && fastest >= TIME_LIMIT_MS; run += 1) {
     const started = performance.now();
     call();
     fastest = Math.min(fastest, performance.now() - started);
@@ -89,7 +90,7 @@ test('a long run of spaces after Ref is read in linear time', () => {
       `Ref${space.repeat(10_000)}·${space.repeat(10_000)}x`,
     ]) {
       assert.equal(parseRef(text), null);
-      const ms = fastestOfThree(() => parseRef(text));
+      const ms = fastestOfFive(() => parseRef(text));
       assert.ok(ms < TIME_LIMIT_MS, `${JSON.stringify(space)} × ${text.length}: ${ms.toFixed(1)} ms`);
     }
   }

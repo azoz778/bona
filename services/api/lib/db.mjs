@@ -203,10 +203,10 @@ const MIGRATIONS = [
     // number, jid and lid (UNIQUE; NULLs do not collide). No foreign keys, as in v3.
     // `chat_rev` (added to v4 on 2026-09-30, also before v4 shipped) is the chat's revision
     // for the reply form's stale-view guard (lib/inbox/store.mjs `revision`): lib/inbox/store.mjs
-    // adds 1 in the same transaction as every new message, every staff or Dana send and
-    // every purge of the chat. It lives on the lead row because that row is never deleted,
-    // so the number never goes down or comes back after a purge; every existing lead starts
-    // at 0.
+    // adds 1 in the same transaction as every new message, every staff or Dana send (and
+    // again when it leaves pending), every new gap and every purge of the chat. It lives on
+    // the lead row because that row is never deleted, so the number never goes down or
+    // comes back after a purge; every existing lead starts at 0.
     // Migrations here only ever add.
     version: 4,
     sql: `
