@@ -533,7 +533,12 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
       .all(clampLimit(limit, 200)).map(candidateRow);
   }
 
-  /** How many rows `listCandidates` would list with no limit. */
+  /**
+   * How many rows `listCandidates` would list with no limit — the store's raw count, with no
+   * cap and no team check. Not for the Unsure tab's label: that counts the rows the tab
+   * shows, `candidatesShown()` in lib/dashboard/routes.mjs (at most 200, colleagues and
+   * never-list numbers left out), so the label and the list never disagree.
+   */
   const countCandidates = () => prep(`SELECT COUNT(*) AS n FROM inbox_candidates c WHERE ${OPEN_NOT_A_LEAD}`).get().n;
   const getCandidate = (candId) => candidateRow(prep('SELECT * FROM inbox_candidates WHERE cand_id = ?').get(String(candId ?? '')));
 

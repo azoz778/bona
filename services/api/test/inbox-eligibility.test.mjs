@@ -790,6 +790,15 @@ test('property words come out as the forms the owner\'s list shows: each once, i
   }
 });
 
+test('a property word is found by its own named group, never by its position among the groups', () => {
+  // Labels by position would all shift the day a word's source gains a plain ( ) group.
+  const m = PROPERTY_WORD_RE.exec('a duplex for sale');
+  assert.ok(m?.groups, 'one named group per word');
+  assert.deepEqual(Object.keys(m.groups).filter((k) => m.groups[k] !== undefined), ['w9'], 'duplex is the tenth word');
+  assert.ok(Object.keys(m.groups).every((k, i) => k === `w${i}`), 'named w0, w1 … in the table\'s order');
+  assert.deepEqual(propertyWordsIn('a duplex for sale'), ['duplex']);
+});
+
 test('words that only contain a property word, everyday Arabic and non-strings are no property words', () => {
   for (const text of ['Hello', 'villager', 'parent', 'current', 'island', 'landlord', 'flatter', 'rented a car', 'plotted',
     'commissioner', 'broken', 'propertyX', 'km²', 'طحت على الأرض', 'الغرفة باردة', 'والفيلا', 'بالإيجار', 'كوبونات', 'Bona', '']) {

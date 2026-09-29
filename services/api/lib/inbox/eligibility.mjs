@@ -271,11 +271,12 @@ const PROPERTY_WORDS = [
   ['عمولة', '(?:ال)?(?:عمولة|عموله)'],
   ['مخطط', '(?:ال)?مخطط'],
 ];
-const WORDS_SOURCE = String.raw`(?<![\p{L}\p{M}])(?:${PROPERTY_WORDS.map(([, src]) => `(${src})`).join('|')})(?![\p{L}\p{M}])`;
+const WORDS_SOURCE = String.raw`(?<![\p{L}\p{M}])(?:${PROPERTY_WORDS.map(([, src], i) => `(?<w${i}>${src})`).join('|')})(?![\p{L}\p{M}])`;
 /**
- * Any property word (one capture group per word, in `PROPERTY_WORDS` order). No `g`, like
- * every pattern here, so `.test()` never carries a position over; `propertyWordsIn` scans
- * with its own global copy.
+ * Any property word: one named group per word, `w<index in PROPERTY_WORDS>`, so a word is
+ * found by its group's name, never by its position — a plain `( )` group inside a word's
+ * source cannot shift the labels of the words after it. No `g`, like every pattern here, so
+ * `.test()` never carries a position over; `propertyWordsIn` scans with its own global copy.
  */
 export const PROPERTY_WORD_RE = new RegExp(WORDS_SOURCE, 'iu');
 const PROPERTY_WORDS_ALL = new RegExp(WORDS_SOURCE, 'giu');
@@ -293,7 +294,8 @@ export function propertyWordsIn(text) {
   const out = [];
   if (typeof text !== 'string' || !text) return out;
   for (const m of text.matchAll(PROPERTY_WORDS_ALL)) {
-    const word = PROPERTY_WORDS[m.findIndex((g, i) => i > 0 && g !== undefined) - 1][0];
+    const group = Object.keys(m.groups).find((name) => m.groups[name] !== undefined);
+    const word = PROPERTY_WORDS[Number(group.slice(1))][0];
     if (!out.includes(word)) out.push(word);
     if (out.length === MAX_PROPERTY_WORDS) break;
   }

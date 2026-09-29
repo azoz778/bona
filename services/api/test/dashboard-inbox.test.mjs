@@ -813,6 +813,45 @@ test('a chat to check whose number is a colleague\'s or on the never list is nev
   });
 });
 
+test('Move on a chat to check that became an excluded lead after the page was drawn is refused, and the row leaves the list', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const id = noteCand(h);
+    const boss = await h.boss();
+    assert.ok((await (await h.get('/dashboard/inbox?tab=unsure', { cookie: boss })).text()).includes('Candi Date'), 'the page is drawn with it');
+    // Since then a lead holds the candidate's jid, and that lead's own number is on the never
+    // list: the candidate's ids alone are not excluded, the lead it has become is.
+    seedChat(h, { id: 'LEAD-X', name: 'Stale Page', phone: '966500000096', jid: `${CAND_PHONE}@s.whatsapp.net`, state: 'unsure' });
+    h.team.addNever({ phone: '966500000096' });
+    const leadsBefore = h.db.countLeads();
+    const res = await h.postForm(`/v1/admin/inbox/candidates/${id}/move`, {}, { cookie: boss });
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), '/dashboard/inbox?tab=unsure&error=excluded');
+    assert.equal(h.inboxStore.getCandidate(id), null, 'off the list');
+    assert.equal(h.db.countLeads(), leadsBefore, 'no new lead');
+    assert.equal(h.db.getLead('LEAD-X').inbox_state, 'unsure', 'the excluded lead is not moved in either');
+    assert.equal(h.db.getLeadByPhone(CAND_PHONE), null);
+    assert.deepEqual(h.spy.history, [], 'no history is read');
+    assert.ok(!h.app.audit.recent(50).some((r) => r.action === 'inbox_move'), 'nothing to audit');
+  });
+});
+
+test('Move on a chat to check that became a lead after the page was drawn moves that lead in: no second lead', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const id = noteCand(h);
+    seedChat(h, { id: 'LEAD-G', name: 'Guess Since', phone: CAND_PHONE, state: 'unsure' });
+    const boss = await h.boss();
+    const leadsBefore = h.db.countLeads();
+    const res = await h.postForm(`/v1/admin/inbox/candidates/${id}/move`, {}, { cookie: boss });
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), '/dashboard/inbox/LEAD-G?ok=moved');
+    assert.equal(h.db.countLeads(), leadsBefore, 'merged into the lead that holds the number');
+    assert.equal(h.db.getLead('LEAD-G').inbox_state, 'in');
+    assert.equal(h.inboxStore.getCandidate(id), null);
+  });
+});
+
 test('move and Not a client on a chat to check are the owner\'s alone', async () => {
   await withInbox(async (h) => {
     seedScene(h);

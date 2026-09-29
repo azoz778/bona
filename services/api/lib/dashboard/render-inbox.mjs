@@ -26,7 +26,7 @@ export const INBOX_OK = {
   moved: 'Moved to the Bona inbox.',
   out: 'Marked not a client. What the dashboard stored from that chat is deleted.',
   added: 'Added to the Bona inbox.',
-  dismissed: 'Marked not a client. It is off the list, and only its number is kept, so it is not listed again.',
+  dismissed: 'Marked not a client. It is off the list; only its number and WhatsApp id are kept, for a year, so it is not listed again.',
 };
 
 /** One banner. A known error wins over an ok; a code nobody knows shows nothing. */
