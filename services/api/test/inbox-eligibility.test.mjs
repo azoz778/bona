@@ -12,6 +12,7 @@ import {
   // The two kinds of document word and the property words (owner answer, 2026-09-28).
   BROCHURE_RE, QUALIFIED_DOC_RE, PROPERTY_NOUN_RE,
   inboundSignal, ownerOutboundJoins, isTkDocument, namesTk, namesBona, propertyWordsIn, nextInboxState, hasAdEvidence, PROPERTY_WORD_FORMS,
+  mentionsPropertyDocument,
 } from '../lib/inbox/eligibility.mjs';
 import { normaliseRecord } from '../lib/evolution.mjs';
 
@@ -373,6 +374,18 @@ test('the three document patterns: a brochure, a document word that needs a prop
   // العمارة with the article is also architecture: the owner's word is عمارة without it.
   for (const s of ['Villager', 'Landscape', 'Unity', 'Projector', 'Propertyless', 'Compounding', 'الأرض', 'الأرضي', 'وحده', 'العمارة']) {
     assert.equal(PROPERTY_NOUN_RE.test(s), false, s);
+  }
+});
+
+test('mentionsPropertyDocument: a brochure, or another document word with a property word beside it — the test a document joins by', () => {
+  for (const s of ['the brochure please', 'ابغى البروشور', 'Villa_Brochure_EN.pdf', 'send me the floor plan of the unit', 'مخطط أرض في الشمال',
+    'price list for the project', 'جدول الدفعات - مشروع الشاطئ', 'Payment plan - Tower B', 'كتيب المشروع']) {
+    assert.equal(mentionsPropertyDocument(s), true, s);
+  }
+  for (const s of ['عندي مخطط للسفر بكرة', 'مخطط الشاطئ', 'المخطط', 'what is the payment plan for the car?', 'send me the price list of the restaurant',
+    'كتيب السيارة', 'خطة السداد للقرض', 'fact sheet for the fund', 'Price List Sep.pdf', 'Payment plan - kitchen works.pdf', 'مخطط الكهرباء.pdf',
+    'كتيب الصيانة.pdf', 'brochureX', 'villa', '', null, undefined, 42, { text: 'brochure' }]) {
+    assert.equal(mentionsPropertyDocument(s), false, String(s));
   }
 });
 
@@ -834,6 +847,23 @@ test('the property words are strong real-estate terms only, and the privacy page
     }
     for (const word of ['أرض', 'غرفة', 'صك', 'سمسار', 'عمولة']) assert.ok(!exception[locale].includes(word), `${locale} does not list ${word}`);
   }
+});
+
+test('the privacy page says what a property document is: a brochure, or another kind only with a property word; any kind on a document the owner sends (D17)', () => {
+  // The poller's rule (wa-poller.mjs candidateWordsOf, mentionsPropertyDocument): a plan, a
+  // price list or a booklet on its own keeps nothing, so the page must not suggest it does.
+  const policy = JSON.parse(fs.readFileSync(new URL('../../../src/data/privacy.json', import.meta.url), 'utf8'));
+  const s = policy.sections.find((x) => x.id === 'whatsapp-conversations');
+  const en = s.body.en.find((p) => p.startsWith('There is one narrow exception'));
+  const ar = s.body.ar.find((p) => p.startsWith('وهناك استثناء محدود'));
+  assert.doesNotMatch(en, /such as a brochure, a floor plan or a price list/, 'a floor plan or a price list alone does not keep a chat');
+  assert.match(en, /a brochure, or a floor plan, plan, price list, payment plan, master plan, fact sheet or booklet mentioned together with a property/);
+  assert.match(en, /A plan, a price list or a booklet mentioned on its own does not count/);
+  assert.match(en, /sends a document whose name or caption calls it a brochure, floor plan, plan, price list, payment plan, master plan, fact sheet or booklet/);
+  assert.doesNotMatch(ar, /مستند عقاري مثل بروشور أو مخطط أو قائمة أسعار/);
+  assert.match(ar, /بروشور، أو مخطط أو قائمة أسعار أو خطة دفع أو نشرة معلومات أو كتيب مذكوراً مع عقار/);
+  assert.match(ar, /ولا يكفي ذكر مخطط أو قائمة أسعار أو كتيب وحده/);
+  assert.match(ar, /أرسل مالك بونا مستنداً يصفه اسمه أو النص المرفق به بأنه بروشور أو مخطط أو قائمة أسعار أو خطة دفع أو نشرة معلومات أو كتيب/);
 });
 
 test('a property word is found by its own named group, never by its position among the groups', () => {

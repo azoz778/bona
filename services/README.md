@@ -858,13 +858,19 @@ with a `wa_jid` or a `wa_lid`. Whether it belongs is **stored** in `leads.inbox_
   villa, apartment, rent / rental / for rent, for sale, real estate, property, duplex,
   penthouse, townhouse; فيلا, شقة, إيجار / للإيجار, للبيع, عقار, دوبلكس, بنتهاوس, تاون هاوس —
   and nothing else: everyday words such as land, flat, plot, compound, bedroom, broker, lease,
-  listing, commission, أرض, غرفة, مخطط, صك, سمسار or عمولة never count, so "My flight will land
-  at 9" or "غرفة النوم" keeps nothing), or mentions a property-document word (brochure, floor
-  plan, price list, بروشور …, in its text or a file's name), or where the owner sends a
-  property document or a document that names TK, goes on a second list on the owner's
-  **Unsure** tab (`inbox_candidates`) — so does every property document he sends that did
-  not join (one that names Bona, or a name cut too close to the word). The privacy page lists
-  exactly these words, and a test holds the two together. Only a chat with a
+  listing, commission, أرض, غرفة, مخطط, صك, سمسار or عمولة never count by themselves, so "My
+  flight will land at 9" or "غرفة النوم" keeps nothing), or mentions a property document by
+  D16's own test (`mentionsPropertyDocument`, in its text or caption or a document's file
+  name): a brochure (بروشور), or a floor plan, plan (مخطط), price list, payment plan, master
+  plan, fact sheet or booklet (كتيب) with a property word beside it (unit, project, tower,
+  land, مشروع, وحدة, أرض …) — a plan, a price list or a booklet on its own is as often a
+  trip's plan (مخطط للسفر), a car's payment plan, a restaurant's price list or a car manual
+  (كتيب السيارة) and keeps nothing; or where the owner sends a document whose file name or
+  caption has any of those document words (`PROPERTY_DOC_RE`) or names TK, goes on a second
+  list on the owner's **Unsure** tab (`inbox_candidates`) — so every property document he
+  sends that did not join (one that names Bona, a name cut too close to the word, or a price
+  list with no property word beside it) is on it. The privacy page lists exactly these words
+  and says the same of documents, and tests hold the page to both. Only a chat with a
   phone number: never a lid alone or a WhatsApp channel. Kept: the number and jid (and lid),
   the name WhatsApp shows for the client (never the name on a message the owner sent), the
   property words, first and last time, how many messages and who wrote last — never the

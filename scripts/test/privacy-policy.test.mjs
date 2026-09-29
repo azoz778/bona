@@ -133,13 +133,18 @@ test('the chats kept only to be checked are named: what is kept, for how long, a
   const en = body(s, 'en');
   // What keeps a chat, exactly as the code decides it (lib/inbox/eligibility.mjs
   // PROPERTY_WORDS, lib/wa-poller.mjs candidateWordsOf): one of the listed property words,
-  // in a message sent or received; a property document named in a message or a file name;
-  // a property or TK document the owner sends. Not "looks like a property enquiry": that
-  // promised a judgement the code does not make.
+  // in a message sent or received; a property document named in a message or a file name
+  // (a brochure, or another kind next to a property word: eligibility.mjs
+  // mentionsPropertyDocument); a document the owner sends that calls itself one of the kinds,
+  // or names TK. Not "looks like a property enquiry": that promised a judgement the code does
+  // not make, nor "such as a brochure, a floor plan or a price list": a floor plan or a price
+  // list alone keeps nothing (final review, 2026-09-29).
   assert.doesNotMatch(en, /looks like a property enquiry/);
   assert.match(en, /When a message sent or received on our number uses one of these property words — villa, apartment, rent \(rental, for rent\), for sale, real estate, property, duplex, penthouse, townhouse, or in Arabic فيلا, شقة, إيجار \(للإيجار\), للبيع, عقار, دوبلكس, بنتهاوس, تاون هاوس —/);
-  assert.match(en, /or mentions a property document such as a brochure, a floor plan or a price list/);
-  assert.match(en, /or when the owner of Bona sends a property document or a document of TK Estate & Design, his other company/);
+  assert.doesNotMatch(en, /such as a brochure, a floor plan or a price list/);
+  assert.match(en, /or mentions a property document, meaning a brochure, or a floor plan, plan, price list, payment plan, master plan, fact sheet or booklet mentioned together with a property such as a unit, a project or a tower/);
+  assert.match(en, /or when the owner of Bona sends a document whose name or caption calls it a brochure, floor plan, plan, price list, payment plan, master plan, fact sheet or booklet, or names TK Estate & Design, his other company/);
+  assert.match(en, /A plan, a price list or a booklet mentioned on its own does not count/);
   assert.match(en, /and the chat is not already a Bona enquiry/);
   assert.match(en, /until 30 days after the last such message/);
   assert.doesNotMatch(en, /for up to 30 days/, 'a chat that keeps writing is kept as long as it does');
@@ -159,8 +164,10 @@ test('the chats kept only to be checked are named: what is kept, for how long, a
   const ar = body(s, 'ar');
   assert.doesNotMatch(ar, /استفساراً عقارياً/);
   assert.match(ar, /إذا استُخدمت في رسالة مُرسلة أو واردة على رقمنا إحدى هذه الكلمات العقارية — فيلا، شقة، إيجار \(للإيجار\)، للبيع، عقار، دوبلكس، بنتهاوس، تاون هاوس، أو بالإنجليزية villa وapartment وrent \(rental وfor rent\) وfor sale وreal estate وproperty وduplex وpenthouse وtownhouse —/);
-  assert.match(ar, /أو ذُكر فيها مستند عقاري مثل بروشور أو مخطط أو قائمة أسعار/);
-  assert.match(ar, /أو أرسل مالك بونا مستنداً عقارياً أو مستنداً لشركته الأخرى TK Estate & Design/);
+  assert.doesNotMatch(ar, /مستند عقاري مثل بروشور أو مخطط أو قائمة أسعار/);
+  assert.match(ar, /أو ذُكر فيها مستند عقاري، أي بروشور، أو مخطط أو قائمة أسعار أو خطة دفع أو نشرة معلومات أو كتيب مذكوراً مع عقار مثل وحدة أو مشروع أو برج/);
+  assert.match(ar, /أو أرسل مالك بونا مستنداً يصفه اسمه أو النص المرفق به بأنه بروشور أو مخطط أو قائمة أسعار أو خطة دفع أو نشرة معلومات أو كتيب، أو يذكر شركته الأخرى TK Estate & Design/);
+  assert.match(ar, /ولا يكفي ذكر مخطط أو قائمة أسعار أو كتيب وحده/);
   assert.match(ar, /ولم تكن المحادثة استفساراً لدى بونا أصلاً/);
   assert.match(ar, /حتى ثلاثين يوماً من آخر رسالة من هذا النوع/);
   assert.match(ar, /ولا تُحفظ المحادثة نفسها/);
@@ -182,7 +189,7 @@ test('the Changes section flags the chats kept only to be checked, in both langu
   const en = line('en', '29 September 2026:');
   assert.ok(en, 'the version date moved to 29 September for this change, so Changes says what changed');
   assert.match(en, /“WhatsApp conversations with our team”/);
-  assert.match(en, /When a message sent or received on our number uses one of the property words that section lists, or mentions a property document, or the owner of Bona sends a property document or a document of TK Estate & Design, and the chat is not already a Bona enquiry/);
+  assert.match(en, /When a message sent or received on our number uses one of the property words that section lists, or mentions a property document as that section defines it, or the owner of Bona sends one of the kinds of document it lists or a document of TK Estate & Design, and the chat is not already a Bona enquiry/);
   assert.doesNotMatch(en, /looks like a property enquiry/);
   assert.match(en, /the number, the name WhatsApp shows and those words, not the conversation/);
   assert.match(en, /until 30 days after the last such message/);
@@ -190,7 +197,7 @@ test('the Changes section flags the chats kept only to be checked, in both langu
   const ar = line('ar', '29 سبتمبر 2026:');
   assert.ok(ar, 'the Arabic text says everything the English does');
   assert.match(ar, /«محادثات واتساب مع فريق بونا»/);
-  assert.match(ar, /فإذا استُخدمت في رسالة مُرسلة أو واردة على رقمنا إحدى الكلمات العقارية التي يذكرها القسم، أو ذُكر فيها مستند عقاري، أو أرسل مالك بونا مستنداً عقارياً أو مستنداً لـ TK Estate & Design، ولم تكن المحادثة استفساراً لدى بونا أصلاً/);
+  assert.match(ar, /فإذا استُخدمت في رسالة مُرسلة أو واردة على رقمنا إحدى الكلمات العقارية التي يذكرها القسم، أو ذُكر فيها مستند عقاري بالمعنى الذي يحدده القسم، أو أرسل مالك بونا أحد أنواع المستندات التي يذكرها أو مستنداً لـ TK Estate & Design، ولم تكن المحادثة استفساراً لدى بونا أصلاً/);
   assert.doesNotMatch(ar, /استفساراً عقارياً دون أن يتضح/);
   assert.match(ar, /الرقم، والاسم الذي يُظهره واتساب، وهذه الكلمات، دون المحادثة نفسها/);
   assert.match(ar, /حتى ثلاثين يوماً من آخر رسالة من هذا النوع/);
