@@ -852,7 +852,9 @@ with a `wa_jid` or a `wa_lid`. Whether it belongs is **stored** in `leads.inbox_
   neither the waiting queue nor the Hermes `bona-unanswered-leads` watchdog flags them.
 - *Owner buttons*: *Move to Bona inbox* (Unsure tab or the lead page) and *Add chat by phone
   number* (`owner_added`) put a chat `in` and pull its last 30 days — he vouched for it.
-  *Not a client* puts it `out`: its transcript is purged there and then, and it never comes
+  An added chat is born answered and starts the reply clock at the client's first message
+  after the add; a message from before the add that the poller reads late (behind after an
+  outage) does not put it in the waiting queue. *Not a client* puts it `out`: its transcript is purged there and then, and it never comes
   back on its own.
 - *Real-estate chats to check* (D17): a chat with no lead behind it where a message sent or
   received uses one of these property words (`PROPERTY_WORD_FORMS`, `propertyWordsIn`:
