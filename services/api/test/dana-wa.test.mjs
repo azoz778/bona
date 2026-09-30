@@ -473,6 +473,7 @@ test('a hand-over for a chat that turned lid-only meanwhile flags and alerts, an
   assert.equal(h.lead().needs_human, 1);
   assert.deepEqual(h.notified, [[LEAD, { reason: 'needs_human' }]]);
   assert.equal(h.calls.length, 0, 'nothing went to Evolution');
+  assert.deepEqual(h.inbox.openOutboxFor(LEAD), [], 'no outbox row either');
   assert.ok(!h.logs.some((l) => l.evt === 'dana.failed'));
   assert.deepEqual(h.logs.find((l) => l.evt === 'dana.handover'), { evt: 'dana.handover', leadId: LEAD, why: 'request_human', sent: false });
   assertClean(h.logs);

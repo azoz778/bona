@@ -46,6 +46,8 @@ function build({ env = {}, config = {}, ...options } = {}) {
       },
       inventory, probeRetell: async () => 'ok', sendWhatsApp: async () => ({ ok: true }),
       log: (e) => logs.push(e), now: () => NOW,
+      // Dana on the Retell mock only because a test says so; no 2 s batch wait here.
+      danaOnMock: true, danaBatchMs: 0,
       ...options,
       db,
     });
@@ -58,6 +60,7 @@ function build({ env = {}, config = {}, ...options } = {}) {
   return {
     app, db, logs,
     close: async () => {
+      await app.dana.stop();
       await app.dashboard.auth.flush();
       db.close();
       fs.rmSync(dataDir, { recursive: true, force: true });
@@ -811,9 +814,13 @@ test('a client message the poller stores wakes Dana; off she answers nobody, on 
     }
     const body = JSON.parse(init.body);
     seq += 1;
-    const records = body.where?.messageTimestamp && seq <= 1 ? [{
+    // One record per tick, and only for the first two: the first while she is off, the second on.
+    const records = body.where?.messageTimestamp && seq <= 2 ? [seq === 1 ? {
       key: { id: 'POLL-D1', fromMe: false, remoteJid: JID }, pushName: null, messageType: 'conversation',
       message: { conversation: 'hello, is anyone there?' }, messageTimestamp: Math.floor((NOW - 5_000) / 1000),
+    } : {
+      key: { id: 'POLL-D2', fromMe: false, remoteJid: JID }, pushName: null, messageType: 'conversation',
+      message: { conversation: 'still there?' }, messageTimestamp: Math.floor((NOW - 4_000) / 1000),
     }] : [];
     return { ok: true, status: 200, text: async () => JSON.stringify({ messages: { total: records.length, pages: 1, currentPage: 1, records } }) };
   };
@@ -827,13 +834,14 @@ test('a client message the poller stores wakes Dana; off she answers nobody, on 
       channel: 'whatsapp', match_method: 'ref', stage: 'new', stage_ts: NOW - DAY, inbox_state: 'in', inbox_since: NOW - DAY,
     });
     assert.equal((await app.poller.tick()).stored, 1);
+    assert.equal(app.dana.status().pending, 1, 'the poller hook armed a batch, even while she is off');
     await app.dana.flush();
     await app.alerts.flush();
     assert.equal(sends.length, 0, 'Dana ships off (dana_enabled = 0)');
     assert.equal(db.getLead(LEAD).dana_chat_id, null);
 
     app.team.setSetting('dana_enabled', '1');
-    app.dana.wake(LEAD, NOW - 5_000);
+    assert.equal((await app.poller.tick()).stored, 1, 'the next client message, woken by the poller alone');
     await app.dana.flush();
     assert.equal(sends.length, 1);
     assert.equal(sends[0].number, '966500000088');
@@ -844,7 +852,7 @@ test('a client message the poller stores wakes Dana; off she answers nobody, on 
     assert.equal(lead.dana_introduced, 1);
     assert.equal(lead.first_reply_ts, null, 'Dana is not a human answer for the watchdog');
     assert.equal(app.inboxStore.messagesFor(LEAD).filter((m) => m.sender_kind === 'dana').length, 1);
-    assert.ok(h.logs.some((l) => l.evt === 'dana.answered' && l.leadId === LEAD && l.batch === 1));
+    assert.ok(h.logs.some((l) => l.evt === 'dana.answered' && l.leadId === LEAD && l.batch === 2), 'one answer for both unanswered messages');
     assert.doesNotMatch(JSON.stringify(h.logs), /966500000088|anyone there|chat_mock/);
     assert.deepEqual(app.dana.status(), { configured: true, enabled: true, pending: 0, inflight: 0 });
   } finally {
@@ -856,10 +864,22 @@ test('without a WhatsApp agent id Dana is not configured, and the app still buil
   const h = build({ env: ENV, config: { waPoll: true, retellMock: true } });
   try {
     assert.equal(h.app.dana.configured, false);
+    await h.app.poller.tick();
+    assert.equal(h.app.dana.status().pending, 0, 'not configured: a wake arms nothing');
     assert.equal(h.app.dana.status().configured, false);
     h.app.dana.wake('LEAD-x', NOW);
     await h.app.dana.flush();
     assert.equal(typeof h.app.dana.stop, 'function');
+  } finally {
+    await h.close();
+  }
+});
+
+test('on the Retell mock Dana is off unless a test opts in, and says so once', async () => {
+  const h = build({ env: ENV, config: { waPoll: true, retellMock: true, waChatAgentId: 'agent_wa' }, danaOnMock: undefined });
+  try {
+    assert.equal(h.app.dana.configured, false, 'a mock answer never reaches a real client');
+    assert.equal(h.logs.filter((l) => l.evt === 'dana.mock_off' && l.level === 'warn').length, 1);
   } finally {
     await h.close();
   }
