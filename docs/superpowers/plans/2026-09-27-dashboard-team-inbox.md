@@ -16168,9 +16168,9 @@ Each task: implementer subagent (TDD) → spec review → quality review, fix lo
 
 **`lib/alerts.mjs`**
 - `ALERT_EVERY_MS = 120_000`, `ALERT_FRESH_MS = 1_800_000`, `MAX_DEVICES_PER_USER = 10`.
-- `createAlerts({ db, pusher = null, isExcludedLead = () => false, now = Date.now, log = () => {} })` →
+- `createAlerts({ db, pusher = null, isExcludedLead, now = Date.now, log = () => {} })` (`isExcludedLead` is REQUIRED — a `TypeError` without it; Task 3 review) →
   `{ configured: boolean, publicKey: string | null,`
-  ` subscribe({ userId, sessionHash, endpoint, keys }) → { ok: true } | { ok: false, error: 'bad_endpoint' | 'bad_keys' | 'bad_request' },`
+  ` subscribe({ userId, sessionHash, endpoint, keys }) → { ok: true } | { ok: false, error: 'bad_endpoint' | 'bad_keys' | 'bad_request' }` (`bad_request` also when `sessionHash` is not a live, unexpired session of `userId` — Task 3 review),`
   ` unsubscribe({ userId, endpoint }) → boolean,`
   ` forgetSession(sessionHash) → number, pruneOrphans() → number, countFor(userId) → number,`
   ` recipients(lead, { reason = 'inbound', exceptUserId = null } = {}) → string[],`
