@@ -681,20 +681,34 @@ checks each one and updates the site's Integrations board.
 ### Dashboard
 
 `https://api.bona-real-estate.com/dashboard` — the owner's private view of everything above,
-server-rendered by this same process. No CDN, no framework and **no JavaScript at all**:
-every page is HTML with one embedded stylesheet, every chart is inline SVG, every filter
-is a GET and every write is a form post. That is what lets the response headers be as
-tight as they are, on every dashboard and admin answer, HTML or JSON:
+server-rendered by this same process. No CDN, no framework: every page is HTML with one
+embedded stylesheet, every chart is inline SVG, every filter is a GET and every write is a
+form post. The one script a signed-in page carries is our own `/dashboard/app.js` (phone
+alerts and the live refresh, *Phone alerts* below) — nothing inline, no event-handler
+attributes, and every screen works without it. That is what lets the response headers be
+as tight as they are, on every dashboard and admin answer. Three sets, exactly as the code
+sends them:
 
 ```
+# every answer
 Cache-Control: no-store
-Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'
 X-Frame-Options: DENY
-Referrer-Policy: no-referrer
+Referrer-Policy: same-origin
 X-Content-Type-Options: nosniff
+
+# an HTML page: our own script, worker, fetches and manifest, and nothing else
+Content-Security-Policy: default-src 'none'; base-uri 'none'; frame-ancestors 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'
+
+# JSON answers and redirects
+Content-Security-Policy: default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'
+
+# /dashboard/sw.js (the service worker loads nothing but the notification icon)
+Content-Security-Policy: default-src 'none'; img-src 'self'
 ```
 
-Nothing here is CORS-enabled, so no other origin can read a byte of it.
+`Referrer-Policy: same-origin`, not `no-referrer`: under `no-referrer` Chrome sends
+`Origin: null` on the login form's own same-origin POST, which the origin check rightly
+refuses. Nothing here is CORS-enabled, so no other origin can read a byte of it.
 
 **Login (team accounts, since 2026-09).** `GET /dashboard/login` asks for a WhatsApp number.
 `POST /dashboard/login/code` — if the number belongs to an active member of the team
@@ -1059,4 +1073,4 @@ dismissed one a year after it was dismissed (`candidatesExpired`, `dismissalsExp
 - **Which devices:** alerts belong to the login they were turned on in. Logging out on a device ends alerts on that device only. Deactivating a member ends all their devices' alerts. A login that expires (30 days) ends its device's alerts until the member signs in again on it, when they come back by themselves. At most 10 devices per member.
 - **Live refresh:** the Inbox list and an open chat check every 15 s and reload by themselves when something changed, so nobody reloads by hand. While any field on the page holds text or is being typed in (the reply box, the owner's *Add chat by phone number* field), the page does not reload; a "new activity" note with a link appears instead (in a chat: "New activity in this chat"), and nothing typed is touched.
 - **Keys:** generated once on the VPS: `node /opt/bona/services/api/bin/vapid-keys.mjs --file ~/.secrets/bona-services.env`, then `deploy.sh` (bona-api reads them at start). Never generate a second pair: every phone's alerts would end until each member turns them on again. `/health` shows `push.configured`; the daily upkeep's `inbox.maintenance` line counts `pushOrphans` (devices whose login has gone).
-- **Logs:** `push.sent` (counts), `push.refused` (a push service's status), `push.subscribed` (once per device) / `push.unsubscribed` (member id), `push.keys_invalid` (keys malformed or mismatched: alerts stay off), `poll.alert_failed` (an alert that could not be started). Never an endpoint, a key, a name, a number or message text.
+- **Logs:** `push.sent` (counts), `push.refused` (a push service's status), `push.subscribed` (a new device, or one that changed hands: member id and `moved`) / `push.unsubscribed` (member id), `push.failed` (an alert whose run threw: the error's class name only), `push.keys_invalid` (keys malformed or mismatched: alerts stay off), `poll.alert_failed` (an alert that could not be started). Never an endpoint, a key, a name, a number or message text.

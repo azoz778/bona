@@ -14,6 +14,9 @@
  *      — only when no text box or field on it holds words or focus (a half-typed reply, a
  *      number being typed into "Add chat"); otherwise a note says there is something new,
  *      and the draft is never touched. A page the person is already leaving is left alone.
+ *   3. A tapped alert. The service worker asks this page (a `bona:open` message) before
+ *      anything moves: with nothing being typed the page goes to the chat itself, else it
+ *      says no and the worker opens a fresh window — a draft is never navigated over.
  *
  * No inline code anywhere (the CSP allows only this file), no HTML built from strings,
  * nothing stored in the browser. Every write carries X-Bona-Dash: 1, like every dashboard write.
@@ -30,20 +33,46 @@
   /* ---------------- live refresh ---------------- */
 
   // A navigation the person started (a tap on Send, a link) must never be raced by a reload.
-  // iOS Safari never fires beforeunload, so a submitted form counts too (capture: before any
-  // handler could stop it). A page brought back from the back-forward cache is not leaving
-  // any more: pageshow fires on every restore and clears the flag.
+  // iOS Safari never fires beforeunload, so pagehide, a submitted form and a tap on one of
+  // our own links count too (capture: before any handler could stop them; a tap that opens
+  // a new tab — a modifier key, a middle button, target=_blank — leaves this page where it
+  // is). A page brought back from the back-forward cache is not leaving any more: pageshow
+  // fires on every restore and clears the flag.
   var leaving = false;
   if (typeof window !== 'undefined' && window.addEventListener) {
     window.addEventListener('beforeunload', function () { leaving = true; });
+    window.addEventListener('pagehide', function () { leaving = true; });
     window.addEventListener('pageshow', function () { leaving = false; });
     document.addEventListener('submit', function () { leaving = true; }, true);
+    document.addEventListener('click', function (e) {
+      if (e.defaultPrevented || e.button > 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      var link = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+      if (link && link.origin === location.origin && link.target !== '_blank') leaving = true;
+    }, true);
   }
 
-  /** Any field with words in it, or the one being typed in: the page holds a draft. */
+  /**
+   * Any field with words in it, or the one being typed in — or a select being picked from
+   * (it holds no words, but a reload would drop the pick): the page holds a draft.
+   */
   function drafting() {
+    var active = document.activeElement;
     var fields = document.querySelectorAll('textarea, input:not([type]), input[type=text], input[type=tel], input[type=search]');
-    return Array.prototype.some.call(fields, function (f) { return f.value.trim() !== '' || document.activeElement === f; });
+    if (Array.prototype.some.call(fields, function (f) { return f.value.trim() !== '' || active === f; })) return true;
+    return Boolean(active && typeof active.tagName === 'string' && active.tagName.toUpperCase() === 'SELECT');
+  }
+
+  // A tapped alert (sw.js `notificationclick`): the worker asks before it moves this tab.
+  // Only a same-origin path is ever followed — never a full URL, never a protocol-relative one.
+  if (typeof navigator !== 'undefined' && navigator.serviceWorker && navigator.serviceWorker.addEventListener) {
+    navigator.serviceWorker.addEventListener('message', function (e) {
+      var d = e.data;
+      var port = e.ports && e.ports[0];
+      if (!d || d.type !== 'bona:open' || typeof d.url !== 'string' || d.url.charAt(0) !== '/' || d.url.indexOf('//') === 0) return;
+      var ok = !drafting();
+      if (port) port.postMessage({ ok: ok });
+      if (ok) { leaving = true; location.assign(d.url); }
+    });
   }
 
   var pulse = document.querySelector('[data-pulse]');
@@ -102,13 +131,14 @@
     iosOld: 'Alerts need iOS 16.4 or later.',
     unsupported: 'This browser cannot show alerts.',
     error: 'Alerts could not be turned on. Try again, or reload the page.',
+    offFailed: 'Alerts could not be turned off on this device — try again.',
   };
   function show(state) {
     if (!panel) return;
     panel.hidden = false;
     if (text) text.textContent = WORDS[state] || '';
     if (onBtn) onBtn.hidden = !(state === 'off' || state === 'error');
-    if (offBtn) offBtn.hidden = state !== 'on';
+    if (offBtn) offBtn.hidden = !(state === 'on' || state === 'offFailed');
   }
 
   function keyBytes(b64u) {
@@ -141,14 +171,18 @@
   async function turnOff() {
     var sub = null;
     try { sub = registration && await registration.pushManager.getSubscription(); } catch (e) { sub = null; }
+    var gone = true; // nothing subscribed: nothing to turn off
     if (sub) {
-      // Both, whatever the other answers: the browser must stop receiving even if the server
-      // could not be told (it forgets the row at logout, or when the push service says gone),
-      // and the server must forget even if the browser would not let go.
+      // The server first, whatever the browser then says: it must forget the row even if the
+      // browser will not let go (it forgets anyway at logout, or when the push service says
+      // the device is gone). Then the browser — and only its own word counts: the endpoint
+      // stays live at the push service until it is unsubscribed, so "off" is not said until
+      // it says so.
       try { await post('/v1/admin/push/unsubscribe', { endpoint: sub.endpoint }); } catch (e) { /* told next time */ }
-      try { await sub.unsubscribe(); } catch (e) { /* the row is gone; a push to it is a 410 */ }
+      gone = false;
+      try { gone = await sub.unsubscribe() === true; } catch (e) { gone = false; }
     }
-    show('off');
+    show(gone ? 'off' : 'offFailed');
   }
   if (onBtn) onBtn.addEventListener('click', turnOn);
   if (offBtn) offBtn.addEventListener('click', turnOff);

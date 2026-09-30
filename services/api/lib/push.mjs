@@ -22,6 +22,12 @@ export const PUSH_TIMEOUT_MS = 10_000;
 export const JWT_TTL_S = 12 * 3600;
 export const JWT_REUSE_MS = 3_600_000;
 export const MAX_ENDPOINT_LEN = 1024;
+/**
+ * The VAPID subject (RFC 8292 `sub`): where a push service may write about our pushes — a
+ * `mailto:` or an `https:` URI, nothing else and no whitespace. Apple answers every push
+ * 403 without one. The one rule for the server's start-up check and the key CLI alike.
+ */
+export const VAPID_SUBJECT_RE = /^(?:mailto:|https:)\S+$/;
 const MAX_KEY_TEXT = 200;
 
 const EXACT_HOSTS = new Set(['fcm.googleapis.com', 'updates.push.services.mozilla.com', 'web.push.apple.com']);

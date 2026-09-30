@@ -1358,7 +1358,8 @@ export function createDashboardRoutes({
    * — what `auth_sessions` holds — never by the cookie's token. The endpoint and the keys are
    * validated in lib/alerts.mjs (only the real push services, a real P-256 point) and never
    * logged: the endpoint is a bearer capability. app.js re-posts a device on every page load
-   * (P3-11), so only a device seen for the first time makes a log line.
+   * (P3-11), so only a device seen for the first time, or one that has changed hands (a
+   * shared phone signed in as someone else), makes a log line.
    */
   function pushWrite({ req, res, fields, me }, p) {
     if (p === '/v1/admin/push/unsubscribe') {
@@ -1369,7 +1370,7 @@ export function createDashboardRoutes({
     if (!alerts?.configured) return sendJson(res, 503, { error: 'push_off' });
     const out = alerts.subscribe({ userId: me.user_id, sessionHash: tokenHash(sessionToken(req)), endpoint: fields.endpoint, keys: fields.keys });
     if (!out.ok) return sendJson(res, 400, { error: out.error });
-    if (out.created) log({ evt: 'push.subscribed', userId: me.user_id });
+    if (out.created || out.moved) log({ evt: 'push.subscribed', userId: me.user_id, moved: out.moved });
     return sendJson(res, 200, { ok: true });
   }
 

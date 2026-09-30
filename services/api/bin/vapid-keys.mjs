@@ -5,7 +5,8 @@
  *   node /opt/bona/services/api/bin/vapid-keys.mjs --file ~/.secrets/bona-services.env [--subject mailto:…]
  *
  * (The flag is --file, not --env-file: node itself intercepts --env-file anywhere in argv and exits if the file is missing.)
- * A half-configured file (only one key) is an error, and --subject must be mailto:… or https://…
+ * A half-configured file (only one key) is an error, and --subject must be mailto:… or https:…
+ * (lib/push.mjs VAPID_SUBJECT_RE — the same rule the server applies at start).
  * Appends BONA_VAPID_PUBLIC / BONA_VAPID_PRIVATE (and BONA_VAPID_SUBJECT when given) and
  * keeps the file 0600. Never overwrites keys that are there: every phone's subscription is
  * tied to the public key it was made with, so a new pair silently ends every alert until
@@ -14,11 +15,11 @@
  */
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { generateVapidKeys } from '../lib/push.mjs';
+import { generateVapidKeys, VAPID_SUBJECT_RE } from '../lib/push.mjs';
 import { parseEnvText } from '../lib/env.mjs';
 
 export function writeVapidKeys(file, { subject = null } = {}) {
-  if (subject !== null && !/^(?:mailto:|https:\/\/)\S+$/.test(subject)) return { written: false, reason: 'bad_subject' };
+  if (subject !== null && !VAPID_SUBJECT_RE.test(subject)) return { written: false, reason: 'bad_subject' };
   const exists = fs.existsSync(file);
   const text = exists ? fs.readFileSync(file, 'utf8') : '';
   const env = parseEnvText(text);
@@ -47,11 +48,11 @@ if (main === import.meta.url) {
   const at = (flag) => { const i = args.indexOf(flag); return i >= 0 ? args[i + 1] : null; };
   const file = at('--file');
   if (!file) {
-    console.error('usage: vapid-keys.mjs --file <path> [--subject mailto:…|https://…]');
+    console.error('usage: vapid-keys.mjs --file <path> [--subject mailto:…|https:…]');
     process.exit(2);
   }
   const out = writeVapidKeys(file, { subject: at('--subject') });
-  if (out.reason === 'bad_subject') { console.error('The subject must be mailto:… or https://…'); process.exit(2); }
+  if (out.reason === 'bad_subject') { console.error('The subject must be mailto:… or https:…'); process.exit(2); }
   if (out.reason === 'partial') { console.error('Only one of BONA_VAPID_PUBLIC / BONA_VAPID_PRIVATE is set — fix the file by hand; nothing changed.'); process.exit(1); }
   console.log(out.written ? `VAPID keys written. Public key: ${out.publicKey}` : 'VAPID keys already present — nothing changed.');
 }
