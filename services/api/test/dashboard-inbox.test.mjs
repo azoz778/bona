@@ -1447,3 +1447,46 @@ test('a chat to check with no phone number, a lid alone or a WhatsApp channel, i
     assert.deepEqual(h.spy.history, []);
   });
 });
+
+test('the per-chat Dana switches: anyone turns her off here, only an owner starts a test, both audited; a bad post is refused', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    const owner = await h.boss();
+    let res = await h.postForm('/v1/admin/inbox/LEAD-A/dana', { dana_off: '1' }, { cookie: staff });
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), '/dashboard/inbox/LEAD-A?ok=dana');
+    assert.equal(h.db.getLead('LEAD-A').dana_off, 1);
+    res = await h.postForm('/v1/admin/inbox/LEAD-A/dana', { dana_test: '1' }, { cookie: staff });
+    assert.equal(res.status, 403);
+    assert.deepEqual(await res.json(), { error: 'owner_only' });
+    assert.equal(h.db.getLead('LEAD-A').dana_test, 0);
+    res = await h.postForm('/v1/admin/inbox/LEAD-A/dana', { dana_test: '1' }, { cookie: owner });
+    assert.equal(res.status, 303);
+    assert.equal(h.db.getLead('LEAD-A').dana_test, 1);
+    res = await h.postForm('/v1/admin/inbox/LEAD-A/dana', { dana_off: '0' }, { cookie: owner });
+    assert.equal(res.status, 303);
+    assert.equal(h.db.getLead('LEAD-A').dana_off, 0);
+    for (const bad of [{}, { dana_off: '1', dana_test: '1' }, { dana_off: 'yes' }, { dana_test: '2' }]) {
+      res = await h.postForm('/v1/admin/inbox/LEAD-A/dana', bad, { cookie: owner });
+      assert.equal(res.status, 303, JSON.stringify(bad));
+      assert.equal(res.headers.get('location'), '/dashboard/inbox/LEAD-A?error=bad_dana');
+      res = await h.postJson('/v1/admin/inbox/LEAD-A/dana', bad, { cookie: owner });
+      assert.equal(res.status, 400, JSON.stringify(bad));
+      assert.deepEqual(await res.json(), { error: 'bad_dana' });
+    }
+    assert.deepEqual([h.db.getLead('LEAD-A').dana_off, h.db.getLead('LEAD-A').dana_test], [0, 1], 'nothing written by a refused post');
+    const audited = h.app.audit.recent(50).filter((r) => r.action === 'dana_chat');
+    assert.deepEqual(audited.map((r) => [r.target, r.meta]), [['LEAD-A', { dana_off: 0 }], ['LEAD-A', { dana_test: 1 }], ['LEAD-A', { dana_off: 1 }]]);
+    assert.equal(audited[2].user_id, h.staffUser.user_id);
+    res = await h.postJson('/v1/admin/inbox/LEAD-U/dana', { dana_off: '1' }, { cookie: owner });
+    assert.equal(res.status, 404, 'an Unsure chat is not a chat (rule 1)');
+    assert.deepEqual(await res.json(), { error: 'not_in_inbox' });
+    assert.equal(h.db.getLead('LEAD-U').dana_off, 0);
+    const page = await h.get('/dashboard/inbox/LEAD-A', { cookie: owner });
+    const html = await page.text();
+    assert.match(html, /Dana is testing on this chat/);
+    assert.match(html, /Stop the Dana test here/);
+    assert.ok(!JSON.stringify(h.logs.filter((l) => l.evt === 'dash.dana_chat')).includes(CLIENT), 'no number in the log line');
+  });
+});

@@ -30,6 +30,7 @@ export const INBOX_OK = {
   moved: 'Moved to the Bona inbox.',
   out: 'Marked not a client. What the dashboard stored from that chat is deleted.',
   added: 'Added to the Bona inbox.',
+  dana: 'Dana setting saved.',
   dismissed: 'Marked not a client. It is off the list; only its number and WhatsApp id are kept, for a year, so it is not listed again.',
 };
 
@@ -302,6 +303,7 @@ function outboxStatus(row) {
 export function threadPage({
   me, lead, messages, gaps = [], outbox = [], users = [], sendId, seenTs, seenRev, sendingEnabled, canReply, repliesEnabled = false,
   draft = '', ok = null, error = null, now = Date.now(), hidden = 0, pulseToken = '',
+  danaEnabled = false, danaConfigured = false,
 }) {
   const owner = me?.role === 'owner';
   const people = Array.isArray(users) ? users : [];
@@ -400,6 +402,19 @@ export function threadPage({
   <div><button type="submit">Save handler</button></div>
 </form>`;
 
+  // Dana on WhatsApp (Phase 4, P4-4): her state in this chat, anyone's off switch, the owner's
+  // test switch (she answers here even while off everywhere). Same Team-page link rule as above.
+  const danaOff = Number(lead.dana_off) === 1;
+  const danaTest = Number(lead.dana_test) === 1;
+  const danaState = danaOff ? 'Dana is off for this chat.'
+    : danaTest ? 'Dana is testing on this chat: she answers here even while she is off everywhere.'
+      : danaEnabled === true ? 'Dana answers this chat when nobody on the team has replied for 24 hours.'
+        : `Dana is off everywhere${owner ? ' (<a href="/dashboard/team">Team page</a>)' : ''}; she does not answer here.`;
+  const danaNote = danaConfigured ? '' : ' <span class="muted">Dana is not provisioned for WhatsApp yet, so nothing is sent either way.</span>';
+  const danaButtons = postButton(writeHref(lead.lead_id, 'dana'), danaOff ? 'Let Dana answer here' : 'Turn Dana off for this chat', { dana_off: danaOff ? '0' : '1' })
+    + (owner && !danaOff ? postButton(writeHref(lead.lead_id, 'dana'), danaTest ? 'Stop the Dana test here' : 'Let Dana test on this chat', { dana_test: danaTest ? '0' : '1' }) : '');
+  const danaRow = `<div style="margin-top:18px"><p class="sub" style="margin:0 0 6px">${danaState}${danaNote}</p>${danaButtons}</div>`;
+
   const notClient = owner
     ? `<div style="margin-top:18px">${postButton(writeHref(lead.lead_id, 'out'), 'Not a client')}<span class="muted">Deletes what the dashboard stored from this chat; it never comes back on its own.</span></div>`
     : '';
@@ -409,6 +424,6 @@ export function threadPage({
     active: '/dashboard/inbox',
     me,
     actions: `<div class="seg"><a href="/dashboard/inbox">← Inbox</a><a href="${esc(threadHref(lead.lead_id))}">Reload</a></div>`,
-    body: `${flash(ok, error)}${head}${pulsed}${note}${reply}${picker}${notClient}`,
+    body: `${flash(ok, error)}${head}${pulsed}${note}${reply}${picker}${danaRow}${notClient}`,
   });
 }
