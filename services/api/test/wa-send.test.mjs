@@ -1221,18 +1221,37 @@ test('recoverInterrupted: a page drawn while a send was pending is stale once th
 test("kind 'dana' passes the gate like a staff reply: a text row with no user, through the same limits", async () => {
   const h = harness();
   h.s.insertLead({ lead_id: 'LEAD-D', created: NOW, updated: NOW, phone_e164: CLIENT, wa_jid: CLIENT_JID, channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
-  const out = await h.sender.sendTo({ jid: CLIENT_JID, text: 'Dana here', kind: 'dana', leadId: 'LEAD-D' });
+  // Dana writes her row first, with what it answers; the sender only ever sends a row it is given.
+  let n = 0;
+  const danaRow = (text) => {
+    n += 1;
+    const send_id = `SND-dana-000000${String(n).padStart(4, '0')}`;
+    h.inbox.insertOutbox({ send_id, lead_id: 'LEAD-D', jid: CLIENT_JID, text, user_id: null, sender_kind: 'dana', covers_ts: NOW - 1000 });
+    return send_id;
+  };
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'Dana here', kind: 'dana', leadId: 'LEAD-D' }), { ok: false, error: 'bad_send_id' },
+    'a Dana send with no row written first is refused');
+  assert.equal(h.calls.length, 0);
+  const first = danaRow('Dana here');
+  const out = await h.sender.sendTo({ jid: CLIENT_JID, text: 'Dana here', kind: 'dana', leadId: 'LEAD-D', sendId: first });
   assert.equal(out.ok, true);
   assert.equal(out.keyId, 'KEY-1');
+  assert.equal(out.sendId, first);
   const row = h.inbox.getOutbox(out.sendId);
-  assert.deepEqual([row.sender_kind, row.user_id, row.lead_id, row.text, row.status, row.key_id], ['dana', null, 'LEAD-D', 'Dana here', 'accepted', 'KEY-1']);
+  assert.deepEqual([row.sender_kind, row.user_id, row.lead_id, row.text, row.status, row.key_id, row.covers_ts], ['dana', null, 'LEAD-D', 'Dana here', 'accepted', 'KEY-1', NOW - 1000]);
   assert.deepEqual(h.calls[0].body, { number: CLIENT, text: 'Dana here' });
   assert.ok(h.logs.some((l) => l.evt === 'wa.send.ok' && l.kind === 'dana'));
-  for (let i = 1; i < PER_RECIPIENT_PER_MIN; i += 1) assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: `Dana ${i}`, kind: 'dana', leadId: 'LEAD-D' })).ok, true);
-  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'one too many', kind: 'dana', leadId: 'LEAD-D' }), { ok: false, error: 'rate_limited' },
+  for (let i = 1; i < PER_RECIPIENT_PER_MIN; i += 1) {
+    const id = danaRow(`Dana ${i}`);
+    assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: `Dana ${i}`, kind: 'dana', leadId: 'LEAD-D', sendId: id })).ok, true);
+  }
+  const over = danaRow('one too many');
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'one too many', kind: 'dana', leadId: 'LEAD-D', sendId: over }), { ok: false, error: 'rate_limited', sendId: over },
     'the per-recipient limit binds her like anyone');
+  assert.equal(h.inbox.getOutbox(over).status, 'failed', 'a refusal closes her row');
   h.team.setSetting('sending_enabled', '0');
-  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'again', kind: 'dana', leadId: 'LEAD-D' }), { ok: false, error: 'sending_disabled' }, "the owner's Sending switch stops her too");
+  const off = danaRow('again');
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'again', kind: 'dana', leadId: 'LEAD-D', sendId: off }), { ok: false, error: 'sending_disabled', sendId: off }, "the owner's Sending switch stops her too");
   assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'robot' }), { ok: false, error: 'bad_kind' }, 'still only the three kinds');
 });
 
