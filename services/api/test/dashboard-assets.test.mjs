@@ -231,4 +231,9 @@ test('app.js live refresh: reloads a changed list, never a thread with a draft i
   leaving.windowListeners.beforeunload();
   await leaving.run();
   assert.equal(leaving.reloads.length, 0);
+  // Back from the back-forward cache, the page is not leaving any more.
+  assert.equal(typeof leaving.windowListeners.pageshow, 'function', 'the script listens for a restore');
+  leaving.windowListeners.pageshow();
+  await leaving.run();
+  assert.equal(leaving.reloads.length, 1, 'refreshes again after a restore');
 });
