@@ -18087,6 +18087,13 @@ test('without VAPID keys the app has no alerts; a pair that does not match is re
   } finally {
     await broken.close();
   }
+  const badSubject = build({ config: { vapidPublic: a.publicKey, vapidPrivate: a.privateKey, vapidSubject: 'ops@example.com' } });
+  try {
+    assert.equal(badSubject.app.alerts.configured, false, 'a subject that is not mailto: or https: would earn a 403 from Apple');
+    assert.ok(badSubject.logs.some((l) => l.evt === 'push.keys_invalid' && l.subject === false));
+  } finally {
+    await badSubject.close();
+  }
 });
 ```
 (The existing upkeep tests that `deepEqual` the whole `inbox.maintenance` counts gain `pushOrphans: 0`. `/health`'s `push` is asserted in `dashboard-push.test.mjs`, Task 7, which has a listening server.)
@@ -18121,10 +18128,13 @@ Expected: the new tests fail.
   // by bin/vapid-keys.mjs); none, or a pair that does not match, means no alerts at all —
   // said once, loudly, never half-used.
   const pushKeys = vapidKeys({ publicKey: cfg.vapidPublic, privateKey: cfg.vapidPrivate });
-  if ((cfg.vapidPublic || cfg.vapidPrivate) && !pushKeys) log({ level: 'error', evt: 'push.keys_invalid' });
+  // The subject is what a push service may write to about our pushes (RFC 8292): a mailto:
+  // or https: URI, or Apple answers every push 403 without a word here.
+  const pushSubject = /^(?:mailto:|https:)\S+$/.test(cfg.vapidSubject) ? cfg.vapidSubject : null;
+  if ((cfg.vapidPublic || cfg.vapidPrivate) && !(pushKeys && pushSubject)) log({ level: 'error', evt: 'push.keys_invalid', subject: Boolean(pushSubject) });
   const alerts = options.alerts ?? createAlerts({
     db,
-    pusher: pushKeys ? createPusher({ keys: pushKeys, subject: cfg.vapidSubject || cfg.siteUrl, fetchImpl, now: clock }) : null,
+    pusher: pushKeys && pushSubject ? createPusher({ keys: pushKeys, subject: pushSubject, fetchImpl, now: clock }) : null,
     isExcludedLead: excludedLead, now: clock, log,
   });
 ```
