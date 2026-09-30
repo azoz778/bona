@@ -464,6 +464,20 @@ test('a hand-over runs the pre-send check: a person who answered, or a switch tu
   assertClean(h.logs.concat(off.logs, global.logs, flagged.logs));
 });
 
+test('a hand-over for a chat that turned lid-only meanwhile flags and alerts, and sends nothing (no phone jid to send to)', async () => {
+  const asks = { messages: [{ role: 'tool_call_invocation', tool_call_id: 't', name: 'request_human', arguments: '{}' }, { role: 'agent', content: 'One moment.' }] };
+  let h;
+  h = harness({ answer: () => { h.s.updateLead(LEAD, { wa_jid: '123456789012345@lid', phone_e164: null }); return asks; } });
+  h.client('C1', NOW - 5000, 'can I see it?');
+  assert.deepEqual(await h.dana.answer(LEAD, { ts: NOW - 5000 }), { handover: 'request_human', sent: false });
+  assert.equal(h.lead().needs_human, 1);
+  assert.deepEqual(h.notified, [[LEAD, { reason: 'needs_human' }]]);
+  assert.equal(h.calls.length, 0, 'nothing went to Evolution');
+  assert.ok(!h.logs.some((l) => l.evt === 'dana.failed'));
+  assert.deepEqual(h.logs.find((l) => l.evt === 'dana.handover'), { evt: 'dana.handover', leadId: LEAD, why: 'request_human', sent: false });
+  assertClean(h.logs);
+});
+
 test('a cap reached while Dana composes is a hand-over at the pre-send check, not a silent skip', async () => {
   let h;
   h = harness({ answer: () => {

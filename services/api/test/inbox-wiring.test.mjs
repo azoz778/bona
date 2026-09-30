@@ -798,3 +798,69 @@ test('without VAPID keys the app has no alerts; a pair that does not match is re
     await badSubject.close();
   }
 });
+
+test('a client message the poller stores wakes Dana; off she answers nobody, on she answers through the one sender with the disclosure', async () => {
+  const LEAD = 'LEAD-20260930-0000eeee';
+  const JID = '966500000088@s.whatsapp.net';
+  const sends = [];
+  let seq = 0;
+  const fetchImpl = async (url, init) => {
+    if (String(url).includes('/message/sendText/')) {
+      sends.push(JSON.parse(init.body));
+      return { ok: true, status: 201, text: async () => JSON.stringify({ key: { id: `KEY-D${sends.length}` } }) };
+    }
+    const body = JSON.parse(init.body);
+    seq += 1;
+    const records = body.where?.messageTimestamp && seq <= 1 ? [{
+      key: { id: 'POLL-D1', fromMe: false, remoteJid: JID }, pushName: null, messageType: 'conversation',
+      message: { conversation: 'hello, is anyone there?' }, messageTimestamp: Math.floor((NOW - 5_000) / 1000),
+    }] : [];
+    return { ok: true, status: 200, text: async () => JSON.stringify({ messages: { total: records.length, pages: 1, currentPage: 1, records } }) };
+  };
+  const h = build({ env: ENV, config: { waPoll: true, waChatAgentId: 'agent_wa', retellMock: true }, fetchImpl });
+  try {
+    const { app, db } = h;
+    assert.equal(app.dana.configured, true);
+    assert.equal(typeof app.dana.wake, 'function');
+    db.insertLead({
+      lead_id: LEAD, created: NOW - DAY, updated: NOW - DAY, phone_e164: '966500000088', wa_jid: JID,
+      channel: 'whatsapp', match_method: 'ref', stage: 'new', stage_ts: NOW - DAY, inbox_state: 'in', inbox_since: NOW - DAY,
+    });
+    assert.equal((await app.poller.tick()).stored, 1);
+    await app.dana.flush();
+    await app.alerts.flush();
+    assert.equal(sends.length, 0, 'Dana ships off (dana_enabled = 0)');
+    assert.equal(db.getLead(LEAD).dana_chat_id, null);
+
+    app.team.setSetting('dana_enabled', '1');
+    app.dana.wake(LEAD, NOW - 5_000);
+    await app.dana.flush();
+    assert.equal(sends.length, 1);
+    assert.equal(sends[0].number, '966500000088');
+    assert.ok(sends[0].text.startsWith("Dana — Bona's AI assistant\n\n"), sends[0].text);
+    assert.ok(sends[0].text.includes('Which district'), 'the Retell mock answered');
+    const lead = db.getLead(LEAD);
+    assert.match(lead.dana_chat_id, /^chat_mock_/);
+    assert.equal(lead.dana_introduced, 1);
+    assert.equal(lead.first_reply_ts, null, 'Dana is not a human answer for the watchdog');
+    assert.equal(app.inboxStore.messagesFor(LEAD).filter((m) => m.sender_kind === 'dana').length, 1);
+    assert.ok(h.logs.some((l) => l.evt === 'dana.answered' && l.leadId === LEAD && l.batch === 1));
+    assert.doesNotMatch(JSON.stringify(h.logs), /966500000088|anyone there|chat_mock/);
+    assert.deepEqual(app.dana.status(), { configured: true, enabled: true, pending: 0, inflight: 0 });
+  } finally {
+    await h.close();
+  }
+});
+
+test('without a WhatsApp agent id Dana is not configured, and the app still builds and polls', async () => {
+  const h = build({ env: ENV, config: { waPoll: true, retellMock: true } });
+  try {
+    assert.equal(h.app.dana.configured, false);
+    assert.equal(h.app.dana.status().configured, false);
+    h.app.dana.wake('LEAD-x', NOW);
+    await h.app.dana.flush();
+    assert.equal(typeof h.app.dana.stop, 'function');
+  } finally {
+    await h.close();
+  }
+});
