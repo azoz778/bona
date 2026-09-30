@@ -17,7 +17,8 @@
  * the WhatsApp transcripts of the Bona inbox chats (`wa_messages`) and the text of
  * the team's replies (`wa_outbox`) — the most sensitive personal data in it. They
  * are kept 5 years after a chat's last message (the retention purge in
- * lib/inbox/store.mjs); a login code's outbox row never carries its text.
+ * lib/inbox/store.mjs); a login code's outbox row never carries its text. Since v5 it
+ * holds push subscription endpoints (bearer URLs for a member's device; never logged).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,7 +26,7 @@ import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { randomId } from './store.mjs';
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const STAGES = ['new', 'contacted', 'qualified', 'viewing', 'offer', 'negotiation', 'won', 'lost'];
 export const FANOUT_DESTS = ['meta', 'ga4', 'snap', 'tiktok'];
@@ -37,6 +38,9 @@ export function newId(prefix) {
 }
 
 const sha256 = (s) => createHash('sha256').update(String(s), 'utf8').digest('hex');
+
+/** The hash `auth_sessions.token_hash` holds for a session token (push subscriptions are bound to it). */
+export const tokenHash = (token) => sha256(token ?? '');
 
 /* ------------------------------------------------------------------ */
 /* Schema                                                              */
@@ -264,6 +268,27 @@ const MIGRATIONS = [
                                   OR upper(json_extract(t.meta, '$.snippet')) GLOB '*BONA-W[0-9][0-9][0-9]*' END)
           THEN 'in' ELSE 'unsure' END;
       UPDATE leads SET inbox_since = created, history_from = created - 86400000 WHERE inbox_state = 'in';
+    `,
+  },
+  {
+    // Phone alerts (2026-09-27 design §5, Phase 3). One row per browser push subscription
+    // (its endpoint is UNIQUE: posting it again moves it to whoever posted it). It belongs
+    // to a member AND to the login session that posted it (`session_hash` = that
+    // `auth_sessions.token_hash`): a push goes only to a subscription whose session is still
+    // there and is the same member's, so logging out on one device ends alerts on that
+    // device only, and a session that expires takes its device's alerts with it until the
+    // next signed-in page posts the subscription again (lib/alerts.mjs). `p256dh`/`auth` are
+    // kept though a payload-less push never uses them. No message text, name or number is
+    // ever stored here. Migrations here only ever add.
+    version: 5,
+    sql: `
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id TEXT NOT NULL PRIMARY KEY, user_id TEXT NOT NULL, endpoint TEXT NOT NULL UNIQUE,
+        p256dh TEXT NOT NULL, auth TEXT NOT NULL, session_hash TEXT,
+        created INTEGER NOT NULL, updated INTEGER NOT NULL, last_ok INTEGER, fail_count INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS push_subscriptions_user ON push_subscriptions(user_id);
+      CREATE INDEX IF NOT EXISTS push_subscriptions_session ON push_subscriptions(session_hash);
     `,
   },
 ];
