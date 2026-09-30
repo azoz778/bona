@@ -22,10 +22,11 @@ const post = (action, label, fields = {}, cls = '') => `<form method="post" acti
   Object.entries(fields).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('') +
   `<button type="submit"${cls ? ` class="${esc(cls)}"` : ''}>${esc(label)}</button></form>`;
 
-export function teamPage({ me, users = [], never = [], sendingEnabled = true, repliesEnabled = false, danaEnabled = false, danaConfigured = false, ok = null, error = null }) {
+export function teamPage({ me, users = [], never = [], sendingEnabled = true, repliesEnabled = false, danaEnabled = false, danaConfigured = false, danaTests = 0, ok = null, error = null }) {
   // Fails closed like the setting itself: only a real `true` from team.repliesEnabled() is on.
   const repliesOn = repliesEnabled === true;
   const danaOn = danaEnabled === true;
+  const tests = Number.isInteger(danaTests) && danaTests > 0 ? danaTests : 0;
   const flash = knownError(error)
     ? `<div class="err">${esc(messageFor(error))}</div>`
     : (ok && Object.hasOwn(TEAM_OK, ok) ? `<div class="ok">${esc(TEAM_OK[ok])}</div>` : '');
@@ -91,7 +92,7 @@ ${post('/v1/admin/settings', repliesOn ? 'Turn replies off' : 'Turn replies on',
 <h2 style="margin-top:28px">Dana on WhatsApp</h2>
 <p class="sub">${danaOn
     ? 'On. Dana answers Bona inbox chats when nobody on the team has replied for 24 hours. She says she is Bona’s AI assistant, quotes only published prices, sends links instead of cards, and hands the chat to the team for a viewing, an offer, a complaint, or when asked for a person. Turn her off for one chat from that chat’s page.'
-    : 'Off. Dana answers nobody on WhatsApp. To try her on one chat first, open that chat and choose “Let Dana test on this chat”.'}${danaConfigured ? '' : ' Dana is not provisioned for WhatsApp yet (services/api/retell/provision.mjs --whatsapp-only), so nothing would be sent either way.'}</p>
+    : `Off. Dana answers nobody on WhatsApp${tests > 0 ? `, except ${tests} chat${tests === 1 ? '' : 's'} under test` : ''}. To try her on one chat first, open that chat and choose “Let Dana test on this chat”.`}${danaConfigured ? '' : ' Dana is not provisioned for WhatsApp yet (services/api/retell/provision.mjs --whatsapp-only), so nothing would be sent either way.'}</p>
 ${post('/v1/admin/settings', danaOn ? 'Turn Dana off' : 'Turn Dana on', { dana_enabled: danaOn ? '0' : '1' })}`;
 
   return layout({ title: 'Team', active: '/dashboard/team', me, body: `<h1>Team</h1>${body}` });

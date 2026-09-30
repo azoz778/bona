@@ -566,3 +566,19 @@ test("the thread's Dana row: her state, anyone's off switch, the owner's test sw
   assert.match(thread({ ok: 'dana' }), /Dana setting saved\./);
   assert.match(thread({ error: 'bad_dana' }), /not one of the two/);
 });
+
+test('the thread\'s Dana row: off wins over a test, the testing sentence names the hand-over rules, and on-but-unprovisioned says so once', () => {
+  const both = thread({ lead: { ...LEAD, dana_off: 1, dana_test: 1 }, danaEnabled: true, danaConfigured: true });
+  assert.match(both, /Dana is off for this chat\./);
+  assert.doesNotMatch(both, /name="dana_test"/, 'off wins: no test control');
+  assert.doesNotMatch(both, /Dana is testing/);
+
+  const testing = thread({ lead: { ...LEAD, dana_test: 1 }, danaEnabled: false, danaConfigured: true });
+  assert.match(testing, /Dana is testing on this chat: she answers here even while she is off everywhere \(the usual hand-over rules still apply\)\./);
+
+  const bare = thread({ danaEnabled: true, danaConfigured: false });
+  assert.match(bare, /Dana would answer this chat when nobody on the team has replied for 24 hours, but she is not provisioned yet, so nothing is sent\./);
+  assert.doesNotMatch(bare, /Dana answers this chat when/, 'no self-contradiction');
+  assert.doesNotMatch(bare, /nothing is sent either way/, 'no second note');
+  assert.match(thread({ danaEnabled: false, danaConfigured: false }), /nothing is sent either way/, 'the note stays for the other states');
+});

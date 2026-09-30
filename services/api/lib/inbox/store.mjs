@@ -540,6 +540,14 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
   }
 
   /**
+   * How many chats in the Bona inbox Dana is testing on (P4-4): the Team page's "Off" line
+   * must not deny a test the owner armed. A chat that left the inbox had its flag reset.
+   */
+  function countDanaTests() {
+    return prep("SELECT COUNT(*) AS n FROM leads WHERE dana_test = 1 AND inbox_state = 'in'").get().n;
+  }
+
+  /**
    * Has a person answered this chat after `ts`? A stored staff/owner message stamped later,
    * or a team member's reply still on its way (P4-13: Dana drops her answer then).
    */
@@ -799,7 +807,7 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
     insertOutbox, getOutbox, outboxByKey, updateOutbox, resolveUncertain, openOutboxFor, countSentSince, markStalePending, pruneCodeRows,
     markRead, listInbox, unreadTotal, listUnsure, countUnsure, inChatsWithoutMessages, listedLeads,
     addGap, gapsFor, clearGap, clearJoinGaps,
-    setInboxState, setHandler, setNeedsHuman, noteHumanOutbound, countDanaSends, humanOutboundAfter, unansweredClientMessages,
+    setInboxState, setHandler, setNeedsHuman, noteHumanOutbound, countDanaSends, countDanaTests, humanOutboundAfter, unansweredClientMessages,
     purgeLead, leaveInbox, retentionPurge,
     noteCandidate, listCandidates, countCandidates, getCandidate, dismissCandidate, removeCandidate, removeCandidatesFor, pruneCandidates,
   };

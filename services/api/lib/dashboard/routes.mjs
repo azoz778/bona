@@ -670,6 +670,7 @@ export function createDashboardRoutes({
       repliesEnabled: team.repliesEnabled(),
       danaEnabled: team.danaEnabled(),
       danaConfigured: Boolean(app?.dana?.configured),
+      danaTests: inbox ? inbox.countDanaTests() : 0,
       ok: url.searchParams.get('ok'),
       error: url.searchParams.get('error'),
     }));
@@ -1273,10 +1274,13 @@ export function createDashboardRoutes({
       log({ level: 'warn', evt: 'dash.owner_only', path: '/v1/admin/inbox/:id/dana' });
       return sendJson(res, 403, { error: 'owner_only' });
     }
-    db.updateLead(leadId, { [key]: Number(value) });
-    audit?.record({ userId: me.user_id, action: 'dana_chat', target: leadId, meta: { [key]: Number(value) } });
+    // The kill switch ends a test too (P4-4 amended): "off here" wins, and the page never
+    // shows the two at once.
+    const patch = key === 'dana_off' && value === '1' ? { dana_off: 1, dana_test: 0 } : { [key]: Number(value) };
+    db.updateLead(leadId, patch);
+    audit?.record({ userId: me.user_id, action: 'dana_chat', target: leadId, meta: patch });
     log({ evt: 'dash.dana_chat', leadId, [key]: Number(value) });
-    return answer(res, { form, back: `${back}?ok=dana`, status: 200, payload: { ok: true, [key]: Number(value) } });
+    return answer(res, { form, back: `${back}?ok=dana`, status: 200, payload: { ok: true, ...patch } });
   }
 
   async function inboxMove({ res, form, me }, leadId) {

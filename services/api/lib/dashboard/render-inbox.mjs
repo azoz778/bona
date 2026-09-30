@@ -407,10 +407,13 @@ export function threadPage({
   const danaOff = Number(lead.dana_off) === 1;
   const danaTest = Number(lead.dana_test) === 1;
   const danaState = danaOff ? 'Dana is off for this chat.'
-    : danaTest ? 'Dana is testing on this chat: she answers here even while she is off everywhere.'
-      : danaEnabled === true ? 'Dana answers this chat when nobody on the team has replied for 24 hours.'
+    : danaTest ? 'Dana is testing on this chat: she answers here even while she is off everywhere (the usual hand-over rules still apply).'
+      : danaEnabled === true ? (danaConfigured
+        ? 'Dana answers this chat when nobody on the team has replied for 24 hours.'
+        : 'Dana would answer this chat when nobody on the team has replied for 24 hours, but she is not provisioned yet, so nothing is sent.')
         : `Dana is off everywhere${owner ? ' (<a href="/dashboard/team">Team page</a>)' : ''}; she does not answer here.`;
-  const danaNote = danaConfigured ? '' : ' <span class="muted">Dana is not provisioned for WhatsApp yet, so nothing is sent either way.</span>';
+  const onUnprovisioned = !danaOff && !danaTest && danaEnabled === true && !danaConfigured;
+  const danaNote = danaConfigured || onUnprovisioned ? '' : ' <span class="muted">Dana is not provisioned for WhatsApp yet, so nothing is sent either way.</span>';
   const danaButtons = postButton(writeHref(lead.lead_id, 'dana'), danaOff ? 'Let Dana answer here' : 'Turn Dana off for this chat', { dana_off: danaOff ? '0' : '1' })
     + (owner && !danaOff ? postButton(writeHref(lead.lead_id, 'dana'), danaTest ? 'Stop the Dana test here' : 'Let Dana test on this chat', { dana_test: danaTest ? '0' : '1' }) : '');
   const danaRow = `<div style="margin-top:18px"><p class="sub" style="margin:0 0 6px">${danaState}${danaNote}</p>${danaButtons}</div>`;
