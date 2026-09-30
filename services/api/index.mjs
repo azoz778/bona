@@ -53,6 +53,8 @@ import { createIngest } from './lib/inbox/ingest.mjs';
 import { createBackfill, JOIN_HISTORY_MS } from './lib/inbox/backfill.mjs';
 import { loggableName, loggableCode } from './lib/inbox/loggable.mjs';
 import { bareJid } from './lib/evolution.mjs';
+import { createPusher, vapidKeys } from './lib/push.mjs';
+import { createAlerts } from './lib/alerts.mjs';
 import { createDashboardRoutes } from './lib/dashboard/routes.mjs';
 
 const GREETING = {
@@ -243,6 +245,20 @@ export function createApp(options = {}) {
   };
   // The inbox's one exclusion rule (lib/team.mjs), the same the upkeep and the routes use.
   const excludedLead = (lead) => isExcludedLead(team, db, lead);
+  // Phone alerts (design §5, Phase 3). Keys from ~/.secrets/bona-services.env (generated once
+  // by bin/vapid-keys.mjs); none, or a pair that does not match, means no alerts at all —
+  // said once, loudly, never half-used. Neither key is ever logged: only whether the subject
+  // passed, and /health's `push.configured`.
+  const pushKeys = vapidKeys({ publicKey: cfg.vapidPublic, privateKey: cfg.vapidPrivate });
+  // The subject is what a push service may write to about our pushes (RFC 8292): a mailto:
+  // or https: URI, or Apple answers every push 403 without a word here.
+  const pushSubject = /^(?:mailto:|https:)\S+$/.test(cfg.vapidSubject ?? '') ? cfg.vapidSubject : null;
+  if ((cfg.vapidPublic || cfg.vapidPrivate) && !(pushKeys && pushSubject)) log({ level: 'error', evt: 'push.keys_invalid', subject: Boolean(pushSubject) });
+  const alerts = options.alerts ?? createAlerts({
+    db,
+    pusher: pushKeys && pushSubject ? createPusher({ keys: pushKeys, subject: pushSubject, fetchImpl, now: clock }) : null,
+    isExcludedLead: excludedLead, now: clock, log,
+  });
   const given = options.ingest ?? createIngest({
     db, inbox: inboxStore, ownerUserId, ownerPhone: ownerDigits || null, isExcludedLead: excludedLead, log, now: clock,
   });
@@ -259,8 +275,11 @@ export function createApp(options = {}) {
   // constructing it contacts nothing; the real server (below) is what puts it on a timer.
   // Handed the inbox, so every live client message of an `in` chat is stored as it is
   // read; without `ingest` it would run in Phase 1 mode and store nothing, silently.
+  // A client message it stores is the one thing that raises a phone alert (P3-9): fired,
+  // never awaited — `notify` never rejects, and a slow push service never slows a tick.
   const poller = options.poller ?? (cfg.waPoll ? createPoller({
     db, cfg, sendWhatsApp, isExcluded: team.isExcludedPhone, log, now: clock, fetchImpl, inboxStore, ingest: ingestRecord, backfill,
+    onClientMessage: (leadId, ts) => { alerts.notify(leadId, { ts }); },
   }) : null);
   const tools = createToolHandlers({
     inventory, units, store, db, dataDir: cfg.dataDir, siteUrl: cfg.siteUrl, env: cfg.env, sendWhatsApp, log,
@@ -294,7 +313,7 @@ export function createApp(options = {}) {
   // rather than a second wiring step. `server` and `handle` are added at the end.
   const app = {
     cfg, inventory, store, db, retell, tools, limiters, fanout, budget, team, audit, sender,
-    inboxStore, ingest, backfill,
+    inboxStore, ingest, backfill, alerts,
     poller: options.poller ?? null,
   };
 
@@ -308,7 +327,9 @@ export function createApp(options = {}) {
    * leaves, go once they are two days old (they only ever counted the day's sends); a
    * send left pending by a process that died becomes uncertain; the owner's list of
    * real-estate chats to check (D17) drops an open one 30 days after its last property
-   * message and a dismissed one a year after he dismissed it; then every `in` chat with
+   * message and a dismissed one a year after he dismissed it; a phone's push subscription
+   * whose login session is gone goes (P3-5: an expired session ends that device's alerts,
+   * and the next signed-in page load re-posts it); then every `in` chat with
    * nothing stored yet gets the history an automatic join takes — never reaching past the
    * retention horizon, or the purge would be undone the same morning (at most 200 chats a
    * run: see `inChatsWithoutMessages` for the limit). Counts only in the log: never a
@@ -369,6 +390,9 @@ export function createApp(options = {}) {
         interrupted: step('interrupted', () => inboxStore.markStalePending(t - INTERRUPTED_SEND_MS)),
         candidatesExpired: candidates?.open ?? null,
         dismissalsExpired: candidates?.dismissed ?? null,
+        // Phone alerts (P3-5): devices whose login session is gone (expired, or deleted by a
+        // path that did not forget them). The README names this count.
+        pushOrphans: step('push_orphans', () => alerts.pruneOrphans()),
         caughtUp: 0,
         caughtUpStored: 0,
         caughtUpFailed: 0,
@@ -443,7 +467,7 @@ export function createApp(options = {}) {
   // security headers and its own limiter; nothing about it is CORS-enabled.
   const dashboard = options.dashboard ?? createDashboardRoutes({
     db, cfg, inventory, fanout, app, log, sendWhatsApp, probeRetell, team, audit, sendCode,
-    inbox: inboxStore, sender, backfill, alerts: options.alerts ?? null,
+    inbox: inboxStore, sender, backfill, alerts,
   });
 
   function dynamicVariables({ locale, page, sessionId }) {
@@ -522,6 +546,9 @@ export function createApp(options = {}) {
       // outage must not take the concierge down with it — it is a gap in attribution, not
       // a site that stopped answering.
       ...(poller ? { poller: poller.status() } : {}),
+      // Phone alerts: only whether VAPID keys are loaded (P3-14) — never a key, a count of
+      // devices, or anything a push carries.
+      push: { configured: alerts.configured },
       inventory: inventory.count(),
       budget: budget.counters(),
       mock: cfg.retellMock || undefined,
@@ -1001,10 +1028,16 @@ if (isMain) {
   app.server.listen(app.cfg.port, app.cfg.host, () => {
     jsonLog('info', { evt: 'listening', ...redacted(app.cfg) });
   });
-  const shutdown = (signal) => {
+  const shutdown = async (signal) => {
     jsonLog('info', { evt: 'shutdown', signal });
-    app.server.close(() => process.exit(0));
+    // Bounded as before: five seconds for the pushes in flight and the open connections.
     setTimeout(() => process.exit(0), 5000).unref();
+    // The poller first, so no tick raises another alert; then the pushes already on their
+    // way get their answers (each writes to the store: `last_ok`, a gone device); then the
+    // server, whose close stops the fan-out and closes the store.
+    app.poller?.stop();
+    await app.alerts.flush();
+    app.server.close(() => process.exit(0));
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));

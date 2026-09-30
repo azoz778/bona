@@ -286,9 +286,7 @@ test('a tap on an alert opens the newest unread chat, else the newest chat, else
   });
 });
 
-// `/health`'s `push` field is wired in Task 9: a `todo` until then keeps the suite green
-// without hiding the test. Task 9 drops the `todo`.
-test('/health says whether alerts are configured, and nothing more about them', { todo: 'wired in Task 9' }, async () => {
+test('/health says whether alerts are configured, and nothing more about them', async () => {
   await withPush(async (h) => {
     const health = await (await fetch(h.base + '/health')).json();
     assert.deepEqual(health.push, { configured: true });
