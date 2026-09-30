@@ -52,6 +52,11 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
   const inflight = new Set();
   const say = (entry) => { try { log(entry); } catch { /* a logger never stops an alert */ } };
 
+  /**
+   * `created` says whether this endpoint is new (the INSERT ran) or was posted again (the
+   * same device on every page load, or a shared device now signed in as someone else): the
+   * route logs a new device only, not every re-post.
+   */
   function subscribe({ userId, sessionHash, endpoint, keys } = {}) {
     const url = pushEndpoint(endpoint);
     if (!url) return { ok: false, error: 'bad_endpoint' };
@@ -70,7 +75,7 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
       prep(`DELETE FROM push_subscriptions WHERE user_id = ? AND id NOT IN
               (SELECT id FROM push_subscriptions WHERE user_id = ? ORDER BY updated DESC, rowid DESC LIMIT ?)`)
         .run(userId, userId, MAX_DEVICES_PER_USER);
-      return { ok: true };
+      return { ok: true, created: !moved };
     });
   }
 

@@ -164,7 +164,10 @@ test('a signed-in member subscribes their device; the row is bound to this login
     const row = h.db.db.prepare('SELECT user_id, session_hash FROM push_subscriptions').get();
     assert.equal(row.user_id, h.staffUser.user_id);
     assert.equal(row.session_hash, tokenHash(cookie.split('=')[1]));
-    assert.ok(h.logs.some((l) => l.evt === 'push.subscribed' && l.userId === h.staffUser.user_id));
+    // app.js re-posts the device on every page load: one log line for a new device, none after.
+    assert.deepEqual(await (await h.postJson('/v1/admin/push/subscribe', { endpoint: EP, keys: KEYS }, { cookie })).json(), { ok: true });
+    assert.equal(h.logs.filter((l) => l.evt === 'push.subscribed' && l.userId === h.staffUser.user_id).length, 1);
+    assert.equal(h.db.db.prepare('SELECT COUNT(*) n FROM push_subscriptions').get().n, 1);
     assert.doesNotMatch(JSON.stringify(h.logs), /phone-1|fcm\.googleapis/);
   });
 });
@@ -220,6 +223,8 @@ test('a signed-in page carries the push key and our script; the inbox list and a
     assert.match(list, /<meta name="bona-push-key" content="BPUBLICKEY">/);
     assert.match(list, /<script src="\/dashboard\/app\.js" defer><\/script>/);
     assert.match(list, /data-pulse="\/v1\/admin\/inbox\/pulse" data-pulse-token="1:1:\d+"/);
+    const drawn = /data-pulse-token="([^"]+)"/.exec(list)[1];
+    assert.deepEqual(await (await h.get('/v1/admin/inbox/pulse', { cookie })).json(), { token: drawn }, 'the list pulse answers what the page was drawn from');
     const thread = await (await h.get('/dashboard/inbox/LEAD-A', { cookie })).text();
     const rev = h.inboxStore.revision('LEAD-A');
     assert.match(thread, new RegExp(`data-pulse="/v1/admin/inbox/pulse\\?lead=LEAD-A" data-pulse-token="${rev}"`));
@@ -246,24 +251,35 @@ test('the pulse answers the same token the page was drawn with, and a new one af
 test('the pulse of a chat the member may not read is 404, like every inbox read (rule 1)', async () => {
   await withPush(async (h) => {
     const cookie = await h.staff();
+    // A chat that is not in the inbox, one that does not exist, and an `in` chat under a
+    // colleague's number: the same answer for all three, so the pulse tells nobody apart.
     h.db.db.prepare("UPDATE leads SET inbox_state = 'unsure' WHERE lead_id = 'LEAD-A'").run();
-    const res = await h.get('/v1/admin/inbox/pulse?lead=LEAD-A', { cookie });
-    assert.equal(res.status, 404);
-    assert.deepEqual(await res.json(), { error: 'not_in_inbox' });
+    seedChat(h, { id: 'LEAD-T', name: 'Tariq Team', phone: STAFF_PHONE, messages: [{ key_id: 'T-1', text: 'team words', ts: NOW + 30_000 }] });
+    for (const leadId of ['LEAD-A', 'NOPE', 'LEAD-T']) {
+      const res = await h.get(`/v1/admin/inbox/pulse?lead=${leadId}`, { cookie });
+      assert.equal(res.status, 404, leadId);
+      assert.deepEqual(await res.json(), { error: 'not_in_inbox' }, leadId);
+    }
     assert.equal((await h.get('/v1/admin/inbox/pulse?lead=../../x', { cookie })).status, 404);
     assert.equal((await h.get('/v1/admin/inbox/pulse')).status, 401, 'signed out');
   });
 });
 
-test('a tap on an alert opens the newest unread chat, else the inbox; signed out, the login', async () => {
+test('a tap on an alert opens the newest unread chat, else the newest chat, else the inbox; signed out, the login', async () => {
   await withPush(async (h) => {
     const cookie = await h.staff();
+    // An older chat that is unread sorts first; a newer one that is read does not win.
+    seedChat(h, { id: 'LEAD-B', name: 'Badr Client', phone: '966500000078', messages: [{ key_id: 'B-1', text: 'BONA-020?', ts: NOW + 90_000 }] });
+    await h.get('/dashboard/inbox/LEAD-B', { cookie }); // reading it marks it read
     const open = await h.get('/dashboard/push/open', { cookie });
     assert.equal(open.status, 302);
-    assert.equal(open.headers.get('location'), '/dashboard/inbox/LEAD-A');
-    await h.get('/dashboard/inbox/LEAD-A', { cookie }); // reading it marks it read
+    assert.equal(open.headers.get('location'), '/dashboard/inbox/LEAD-A', 'the unread chat, not the newest');
+    await h.get('/dashboard/inbox/LEAD-A', { cookie });
+    const read = await h.get('/dashboard/push/open', { cookie });
+    assert.equal(read.headers.get('location'), '/dashboard/inbox/LEAD-B', 'nothing unread (a colleague got there first): the newest chat');
+    h.db.db.prepare("UPDATE leads SET inbox_state = 'unsure' WHERE lead_id IN ('LEAD-A', 'LEAD-B')").run();
     const none = await h.get('/dashboard/push/open', { cookie });
-    assert.equal(none.headers.get('location'), '/dashboard/inbox');
+    assert.equal(none.headers.get('location'), '/dashboard/inbox', 'no chat the member may see: the list');
     const out = await h.get('/dashboard/push/open');
     assert.equal(out.status, 302);
     assert.match(out.headers.get('location'), /^\/dashboard\/login/);

@@ -350,10 +350,13 @@ color:var(--t3);margin:0 .2rem .2rem 0}
 border-radius:8px;margin-bottom:12px;font-size:12.5px}
 .ok{border:1px solid var(--bd);background:var(--greent);color:var(--green);padding:10px 12px;
 border-radius:8px;margin-bottom:12px;font-size:12.5px}
-/* A note, not an outcome: the thread's "new activity" line app.js shows over a draft. */
+/* A note, not an outcome: the "new activity" line app.js shows over a draft (inbox list, thread). */
 .flash{border:1px solid var(--bd);background:var(--goldt);color:var(--gold);padding:10px 12px;
 border-radius:8px;margin-bottom:12px;font-size:12.5px}
 .flash a{color:inherit;text-decoration:underline}
+/* The Phone alerts panel sits above the chat list, shown by app.js once it knows the device. */
+.alerts{margin-bottom:14px}
+.alerts h2{margin-top:0}
 .chips{margin-top:8px;display:flex;flex-wrap:wrap;gap:5px}
 .chip{font-size:10.5px;padding:1px 6px;border-radius:99px;border:1px solid var(--bd);color:var(--t3);
 max-width:100%;overflow-wrap:anywhere}

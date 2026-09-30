@@ -38,7 +38,8 @@ test('createAlerts refuses to run without the exclusion rule', () => {
 
 test('subscribe checks the endpoint and keys, stores one row per endpoint, bound to the session', () => {
   const s = scene();
-  assert.deepEqual(s.sub('sara', 1), { ok: true });
+  assert.deepEqual(s.sub('sara', 1), { ok: true, created: true });
+  assert.deepEqual(s.sub('sara', 1), { ok: true, created: false }, 'the same device posted again is no new device');
   assert.deepEqual(s.alerts.subscribe({ userId: s.sara.user_id, sessionHash: s.sessions.sara, endpoint: 'https://evil.example/x', keys: KEYS }), { ok: false, error: 'bad_endpoint' });
   assert.deepEqual(s.alerts.subscribe({ userId: s.sara.user_id, sessionHash: s.sessions.sara, endpoint: ep(2), keys: { p256dh: 'x', auth: 'y' } }), { ok: false, error: 'bad_keys' });
   assert.deepEqual(s.alerts.subscribe({ userId: '', sessionHash: s.sessions.sara, endpoint: ep(2), keys: KEYS }), { ok: false, error: 'bad_request' });
@@ -55,7 +56,7 @@ test('subscribe binds only to a live session of the member posting it', () => {
   s.db.db.prepare('UPDATE auth_sessions SET expires = ? WHERE token_hash = ?').run(NOW - 1, s.sessions.sara);
   assert.deepEqual(post(s.sara.user_id, s.sessions.sara), { ok: false, error: 'bad_request' }, 'her own session, expired');
   assert.equal(s.db.db.prepare('SELECT COUNT(*) AS n FROM push_subscriptions').get().n, 0, 'nothing was stored');
-  assert.deepEqual(post(s.omar.user_id, s.sessions.omar), { ok: true });
+  assert.deepEqual(post(s.omar.user_id, s.sessions.omar), { ok: true, created: true });
 });
 
 test('the same endpoint posted by someone else (a shared phone) moves to them, it is never two rows', () => {
@@ -176,7 +177,7 @@ test('only live sessions of active members get pushes: logged out, expired, deac
   const lina = s.team.addUser({ name: 'Lina', phone: '966500000003', role: 'staff' });
   const linaSession = s.session(lina);
   s.sub('sara', 1); s.sub('omar', 2); s.sub('owner', 3);
-  assert.deepEqual(s.alerts.subscribe({ userId: lina.user_id, sessionHash: linaSession, endpoint: ep(4), keys: KEYS }), { ok: true });
+  assert.deepEqual(s.alerts.subscribe({ userId: lina.user_id, sessionHash: linaSession, endpoint: ep(4), keys: KEYS }), { ok: true, created: true });
   s.db.db.prepare('DELETE FROM auth_sessions WHERE token_hash = ?').run(s.sessions.sara); // logged out
   s.db.db.prepare('UPDATE auth_sessions SET expires = ? WHERE token_hash = ?').run(NOW - 1, s.sessions.omar); // expired
   s.db.db.prepare('UPDATE push_subscriptions SET session_hash = ? WHERE endpoint = ?').run(linaSession, ep(3)); // a colleague's live session
@@ -216,7 +217,7 @@ test('a late answer never touches a device re-posted while the push was in fligh
   const p = s.alerts.notify('LEAD-A', { ts: NOW });
   await new Promise((r) => setImmediate(r)); // the push has left; the service has not answered
   s.tick(1);
-  assert.deepEqual(s.sub('omar', 1), { ok: true }, 'the shared phone is now signed in as Omar');
+  assert.deepEqual(s.sub('omar', 1), { ok: true, created: false }, 'the shared phone is now signed in as Omar');
   release();
   assert.deepEqual(await p, { users: 1, devices: 1, ok: 0, gone: 1, failed: 0 });
   const rows = s.db.db.prepare('SELECT user_id, endpoint, fail_count FROM push_subscriptions').all().map((r) => ({ ...r }));

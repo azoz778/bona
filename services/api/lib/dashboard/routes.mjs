@@ -1116,11 +1116,14 @@ export function createDashboardRoutes({
 
   /**
    * `GET /dashboard/push/open`: where a tapped alert lands (P3-4). The first row with
-   * unread messages of the member's own list (unread first, newest first, rule 1 applied),
-   * else the list. The notification carries nothing, so the chat is chosen here, signed in.
+   * unread messages of the member's own list (unread first, newest first, rule 1 applied);
+   * with nothing unread — a colleague read it first, or the tap came late — the newest
+   * chat, which is the list's first row; with no chat at all, the list. The notification
+   * carries nothing, so the chat is chosen here, signed in.
    */
   function pushOpen({ res, me }) {
-    const first = inbox ? inboxRowsFor(me).find((r) => (Number(r.unread) || 0) > 0) : null;
+    const rows = inbox ? inboxRowsFor(me) : [];
+    const first = rows.find((r) => (Number(r.unread) || 0) > 0) ?? rows[0] ?? null;
     return redirect(res, first ? `/dashboard/inbox/${encodeURIComponent(first.lead_id)}` : '/dashboard/inbox', 302);
   }
 
@@ -1349,11 +1352,13 @@ export function createDashboardRoutes({
   /* -------------------- phone alerts -------------------- */
 
   /**
-   * A member's own device, alerts on or off (P3-5, P3-6). JSON only (the keys are nested);
-   * the row is bound to the session making the call, so logging out here ends alerts here.
-   * The session is named by its hash — what `auth_sessions` holds — never by the cookie's
-   * token. The endpoint and the keys are validated in lib/alerts.mjs (only the real push
-   * services, a real P-256 point) and never logged: the endpoint is a bearer capability.
+   * A member's own device, alerts on or off (P3-5, P3-6). Meant for JSON (a form body cannot
+   * carry the nested keys and is refused as `bad_keys`); the row is bound to the session
+   * making the call, so logging out here ends alerts here. The session is named by its hash
+   * — what `auth_sessions` holds — never by the cookie's token. The endpoint and the keys are
+   * validated in lib/alerts.mjs (only the real push services, a real P-256 point) and never
+   * logged: the endpoint is a bearer capability. app.js re-posts a device on every page load
+   * (P3-11), so only a device seen for the first time makes a log line.
    */
   function pushWrite({ req, res, fields, me }, p) {
     if (p === '/v1/admin/push/unsubscribe') {
@@ -1364,7 +1369,7 @@ export function createDashboardRoutes({
     if (!alerts?.configured) return sendJson(res, 503, { error: 'push_off' });
     const out = alerts.subscribe({ userId: me.user_id, sessionHash: tokenHash(sessionToken(req)), endpoint: fields.endpoint, keys: fields.keys });
     if (!out.ok) return sendJson(res, 400, { error: out.error });
-    log({ evt: 'push.subscribed', userId: me.user_id });
+    if (out.created) log({ evt: 'push.subscribed', userId: me.user_id });
     return sendJson(res, 200, { ok: true });
   }
 
