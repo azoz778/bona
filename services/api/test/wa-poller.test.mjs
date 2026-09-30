@@ -769,6 +769,31 @@ test('start() puts the tick on an unref\'d timer and stop() takes it off', async
   h.cleanup();
 });
 
+test('stop() takes the loop off its timer at once, and resolves only once the tick in flight has finished', async () => {
+  const db = openDb(':memory:');
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  // A read that hangs until the test lets it go: the tick is in flight for as long as we like.
+  const poller = createPoller({
+    db, cfg: { env: { BONA_OWNER_JID: OWNER } }, findMessages: async () => { await gate; return { records: [] }; }, now: () => NOW,
+  });
+  assert.equal(poller.start({ intervalMs: 60_000 }), true);
+  const inFlight = poller.tick();
+  assert.deepEqual(await poller.tick(), { busy: true }, 'one at a time, as before');
+  let stopped = false;
+  const stopping = poller.stop().then(() => { stopped = true; });
+  assert.equal(poller.started, false, 'off its timer at once');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(stopped, false, 'not settled while the read is still out');
+  release();
+  await stopping;
+  assert.equal(stopped, true);
+  assert.equal((await inFlight).scanned, 0, 'the tick ran to its end');
+  await poller.stop();
+  assert.equal(poller.started, false, 'with nothing in flight it settles at once, and twice is harmless');
+  db.close();
+});
+
 test('start() with no interval and a cfg without one polls on lib/config.mjs\'s default', (t) => {
   t.mock.timers.enable({ apis: ['setInterval'] });
   const everyMs = loadConfig({ env: {}, ids: {} }).waPollMs;
