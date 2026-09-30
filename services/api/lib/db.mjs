@@ -26,7 +26,7 @@ import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { randomId } from './store.mjs';
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export const STAGES = ['new', 'contacted', 'qualified', 'viewing', 'offer', 'negotiation', 'won', 'lost'];
 export const FANOUT_DESTS = ['meta', 'ga4', 'snap', 'tiktok'];
@@ -292,6 +292,27 @@ const MIGRATIONS = [
       CREATE INDEX IF NOT EXISTS push_subscriptions_session ON push_subscriptions(session_hash);
     `,
   },
+  {
+    // Dana on WhatsApp (2026-09-27 design §6, Phase 4). Per chat: her kill switch (`dana_off`),
+    // the owner's "answer here even while she is off everywhere" test flag (`dana_test`), the
+    // Retell chat she keeps for this WhatsApp chat and when it was last used (renewed after
+    // 23 h idle), whether her first message — the one that says who she is — has gone, and
+    // when a human (a team member's reply, the owner's phone, Lisa) last wrote to the client:
+    // she stays quiet for 24 h after that (D13). The backfill reads the newest human outbound
+    // already stored for every `in` chat, so on the day she goes live she is quiet in every
+    // chat a person answered in the last day. Migrations here only ever add.
+    version: 6,
+    sql: `
+      ALTER TABLE leads ADD COLUMN dana_off INTEGER NOT NULL DEFAULT 0 CHECK (dana_off IN (0,1));
+      ALTER TABLE leads ADD COLUMN dana_test INTEGER NOT NULL DEFAULT 0 CHECK (dana_test IN (0,1));
+      ALTER TABLE leads ADD COLUMN dana_chat_id TEXT;
+      ALTER TABLE leads ADD COLUMN dana_chat_ts INTEGER;
+      ALTER TABLE leads ADD COLUMN dana_introduced INTEGER NOT NULL DEFAULT 0 CHECK (dana_introduced IN (0,1));
+      ALTER TABLE leads ADD COLUMN last_human_out_ts INTEGER;
+      UPDATE leads SET last_human_out_ts = (SELECT MAX(m.ts) FROM wa_messages m WHERE m.lead_id = leads.lead_id AND m.direction = 'out' AND m.sender_kind IN ('staff','owner_number'))
+        WHERE inbox_state = 'in';
+    `,
+  },
 ];
 
 /** Columns of each table, in order — the single source for the insert/update helpers. */
@@ -303,7 +324,7 @@ const COLUMNS = {
     'content', 'click_ids', 'ref', 'match_method', 'session_id', 'anon_id', 'listing_id', 'first_touch', 'last_touch', 'interest', 'budget',
     'timeline', 'district', 'language', 'notes', 'stage', 'stage_ts', 'value_sar', 'first_inbound_ts', 'first_reply_ts', 'legacy_id',
     'consent_ads', 'consent_analytics', 'inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from',
-    'chat_rev'],
+    'chat_rev', 'dana_off', 'dana_test', 'dana_chat_id', 'dana_chat_ts', 'dana_introduced', 'last_human_out_ts'],
   touchpoints: ['id', 'lead_id', 'ts', 'channel', 'event_type', 'source', 'medium', 'campaign', 'campaign_id', 'listing_id', 'meta'],
 };
 
