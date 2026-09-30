@@ -75,7 +75,7 @@ test('schema v4 gives leads their inbox columns and adds the transcript, outbox,
   const info = (table) => s.db.prepare(`PRAGMA table_info(${table})`).all();
   const names = (table) => info(table).map((c) => c.name);
   const leadCols = info('leads');
-  assert.deepEqual(leadCols.slice(-7).map((c) => c.name), ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from', 'chat_rev']);
+  assert.deepEqual(leadCols.slice(-13).map((c) => c.name), ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from', 'chat_rev', 'dana_off', 'dana_test', 'dana_chat_id', 'dana_chat_ts', 'dana_introduced', 'last_human_out_ts']);
   const needsHuman = leadCols.find((c) => c.name === 'needs_human');
   assert.equal(needsHuman.notnull, 1);
   assert.equal(needsHuman.dflt_value, '0');
@@ -86,7 +86,7 @@ test('schema v4 gives leads their inbox columns and adds the transcript, outbox,
   assert.equal(chatRev.notnull, 1);
   assert.equal(chatRev.dflt_value, '0');
   assert.deepEqual(names('wa_messages'), ['key_id', 'lead_id', 'jid', 'direction', 'sender_kind', 'sender_user_id', 'text', 'media_type', 'ts', 'status']);
-  assert.deepEqual(names('wa_outbox'), ['send_id', 'lead_id', 'jid', 'text', 'user_id', 'sender_kind', 'status', 'key_id', 'created', 'updated', 'error']);
+  assert.deepEqual(names('wa_outbox'), ['send_id', 'lead_id', 'jid', 'text', 'user_id', 'sender_kind', 'status', 'key_id', 'created', 'updated', 'error', 'covers_ts']);
   assert.deepEqual(names('inbox_reads'), ['user_id', 'lead_id', 'last_read_ts']);
   assert.deepEqual(names('wa_gaps'), ['key_id', 'lead_id', 'jid', 'ts', 'reason']);
   assert.deepEqual(names('inbox_candidates'), ['cand_id', 'jid', 'lid', 'phone_e164', 'name', 'first_ts', 'last_ts', 'hits', 'words', 'last_dir', 'state', 'updated']);
@@ -244,7 +244,7 @@ test('a v3 file db moves to v4: each existing lead is placed by what is certain 
 
   const a = openDb(file);
   assert.equal(a.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
-  const added = ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from', 'chat_rev'];
+  const added = ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from', 'chat_rev', 'dana_off', 'dana_test', 'dana_chat_id', 'dana_chat_ts', 'dana_introduced', 'last_human_out_ts'];
   const after = snapshot(a.db);
   assert.equal(after.length, before.length, 'no lead is added or lost');
   assert.equal(countOf(a.db, 'touchpoints'), touchpointsBefore);
@@ -541,10 +541,10 @@ test('ad spend upserts per day, platform and campaign', () => {
   s.close();
 });
 
-test('schema v5: push_subscriptions, one row per endpoint, bound to a member and a session', () => {
+test('the latest schema keeps push_subscriptions, one row per endpoint, bound to a member and a session', () => {
   const s = openDb(':memory:');
-  assert.equal(SCHEMA_VERSION, 5);
-  assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 5);
+  assert.ok(SCHEMA_VERSION >= 5, 'push_subscriptions arrived in v5 and stays');
+  assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
   const cols = s.db.prepare('PRAGMA table_info(push_subscriptions)').all().map((c) => c.name);
   assert.deepEqual(cols, ['id', 'user_id', 'endpoint', 'p256dh', 'auth', 'session_hash', 'created', 'updated', 'last_ok', 'fail_count']);
   const ins = s.db.prepare('INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, session_hash, created, updated) VALUES (?,?,?,?,?,?,?,?)');
@@ -569,7 +569,7 @@ test('a v4 file upgrades to v5 with every lead, session, message and setting kep
   raw.prepare("INSERT INTO settings (key, value) VALUES ('inbox_replies', '1')").run();
   raw.close();
   const s = openDb(file);
-  assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 5);
+  assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
   assert.equal(s.db.prepare('SELECT chat_rev FROM leads WHERE lead_id = ?').get('L1').chat_rev, 3);
   assert.equal(s.db.prepare('SELECT COUNT(*) n FROM auth_sessions').get().n, 1);
   assert.equal(s.db.prepare('SELECT COUNT(*) n FROM wa_messages').get().n, 1);
@@ -587,4 +587,48 @@ test('tokenHash is the hash auth_sessions keeps for a session token', () => {
   assert.match(tokenHash(token), /^[0-9a-f]{64}$/);
   assert.equal(tokenHash(null), tokenHash(''), 'a missing token hashes as the empty string and never throws');
   s.close();
+});
+
+test('v6: the Dana columns, and last_human_out_ts backfilled from the newest human outbound of each in chat', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-v6-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'bona.db');
+  const raw = new DatabaseSync(file);
+  migrate(raw, { upTo: 5 });
+  assert.equal(raw.prepare('PRAGMA user_version').get().user_version, 5, 'a genuine v5 file');
+  raw.prepare(`INSERT INTO leads (lead_id, created, updated, phone_e164, channel, stage, inbox_state) VALUES
+    ('L1',1,1,'966500000001','whatsapp','new','in'), ('L2',1,1,'966500000002','whatsapp','new','in'), ('L3',1,1,'966500000003','whatsapp','new','unsure')`).run();
+  const ins = raw.prepare('INSERT INTO wa_messages (key_id, lead_id, direction, sender_kind, text, ts) VALUES (?,?,?,?,?,?)');
+  ins.run('K1', 'L1', 'out', 'owner_number', 'hi', 1000);
+  ins.run('K2', 'L1', 'out', 'staff', 'later', 5000);
+  ins.run('K3', 'L1', 'out', 'dana', 'dana said', 9000);
+  ins.run('K4', 'L1', 'in', 'client', 'q', 7000);
+  ins.run('K5', 'L3', 'out', 'owner_number', 'x', 3000);
+  raw.close();
+
+  let s;
+  try {
+    s = openDb(file);
+    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
+    const cols = s.db.prepare('PRAGMA table_info(leads)').all().map((c) => c.name);
+    for (const c of ['dana_off', 'dana_test', 'dana_chat_id', 'dana_chat_ts', 'dana_introduced', 'last_human_out_ts']) assert.ok(cols.includes(c), c);
+    assert.ok(s.db.prepare('PRAGMA table_info(wa_outbox)').all().some((c) => c.name === 'covers_ts'), "wa_outbox.covers_ts: what a Dana send answers");
+    const l1 = s.getLead('L1');
+    assert.equal(l1.last_human_out_ts, 5000, "the newest staff/owner message — never Dana's");
+    assert.deepEqual([l1.dana_off, l1.dana_test, l1.dana_chat_id, l1.dana_chat_ts, l1.dana_introduced], [0, 0, null, null, 0]);
+    assert.equal(s.getLead('L2').last_human_out_ts, null, 'nothing human stored');
+    assert.equal(s.getLead('L3').last_human_out_ts, null, 'only in chats are backfilled');
+    assert.equal(s.updateLead('L1', { dana_off: 1, dana_test: 1, dana_chat_id: 'chat_1', dana_chat_ts: 10, dana_introduced: 1, last_human_out_ts: 20 }), true, 'every new column is writable through updateLead');
+    assert.deepEqual(Object.fromEntries(['dana_off', 'dana_test', 'dana_chat_id', 'dana_chat_ts', 'dana_introduced', 'last_human_out_ts'].map((k) => [k, s.getLead('L1')[k]])),
+      { dana_off: 1, dana_test: 1, dana_chat_id: 'chat_1', dana_chat_ts: 10, dana_introduced: 1, last_human_out_ts: 20 });
+    for (const col of ['dana_off', 'dana_test', 'dana_introduced']) {
+      assert.throws(() => s.db.prepare(`UPDATE leads SET ${col} = 2 WHERE lead_id = 'L1'`).run(), /CHECK/, `${col} is 0 or 1`);
+    }
+    s.close();
+    s = openDb(file);
+    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION, 'opening again is a no-op');
+    assert.equal(s.getLead('L1').dana_off, 1, 'the second open kept what was written');
+  } finally {
+    s?.close();
+  }
 });

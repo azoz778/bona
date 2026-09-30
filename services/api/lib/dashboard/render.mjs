@@ -777,6 +777,7 @@ export const MESSAGES = {
   bad_text: 'A reply has to have some text, and at most 4,096 characters.',
   bad_send_id: 'That reply form is out of date. Reload the chat and send again.',
   bad_handler: 'A handler has to be an active member of the team, or nobody.',
+  bad_dana: 'That Dana switch is not one of the two on this page.',
   reply_rate_limited: 'Too many messages from your number this minute. Wait a minute and send again.',
   not_a_chat: 'That lead has no WhatsApp chat yet — it joins once they write on WhatsApp.',
   candidate_gone: 'That chat is no longer on the list: it was moved or marked already.',

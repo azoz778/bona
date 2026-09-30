@@ -16,7 +16,10 @@ import { createOrMergeLead, leadNote } from './leads.mjs';
 import { normaliseSearchArgs } from './actions.mjs';
 import { toAsciiDigits } from './inventory.mjs';
 
-export const TOOL_NAMES = ['search_properties', 'show_property', 'search_units', 'create_lead'];
+export const TOOL_NAMES = ['search_properties', 'show_property', 'search_units', 'create_lead', 'request_human'];
+/** The WhatsApp agent's hand-over tool (Phase 4): its invocation in a completion is what lib/dana-wa.mjs looks for. */
+export const HANDOVER_TOOL = 'request_human';
+const LEAD_ID_RE = /^LEAD-[A-Za-z0-9-]{1,60}$/;
 
 /** A duplicate `create_lead` inside this window returns the first lead's id. */
 export const LEAD_DEDUPE_MS = 10 * 60 * 1000;
@@ -94,7 +97,7 @@ export function toolArgs(body = {}) {
 }
 
 /**
- * Build the three handlers.
+ * Build the handlers.
  * @param {{ inventory, store, db, dataDir: string, siteUrl: string, env: object,
  *           sendWhatsApp?: (text: string) => Promise<any>, log?: Function,
  *           now?: () => number, leadDedupeMs?: number }} deps
@@ -253,7 +256,20 @@ export function createToolHandlers({
     return { saved: true, id: record.lead_id, note: 'Enquiry saved. Tell the visitor a Bona principal will be in touch, and offer WhatsApp +966 59 329 6933 to speak now.' };
   }
 
-  const handlers = { search_properties, show_property, search_units, create_lead };
+  /**
+   * Dana on WhatsApp hands the conversation to the team (design §6, P4-19). The tool result
+   * only tells the model what to say; the hand-over itself (the flag, the alert, the one
+   * line) is lib/dana-wa.mjs's, read off the completion. The `reason` argument is the
+   * model's words about the client and is never logged; the lead id from the chat's
+   * metadata is, when it looks like one.
+   */
+  async function request_human(args, ctx) {
+    const leadId = typeof ctx.attr?.lead_id === 'string' && LEAD_ID_RE.test(ctx.attr.lead_id) ? ctx.attr.lead_id : null;
+    log({ evt: 'tool.request_human', leadId });
+    return { ok: true, note: 'A Bona team member will take this conversation over. Tell the client, in one short sentence, that the team will reply shortly — and say nothing else.' };
+  }
+
+  const handlers = { search_properties, show_property, search_units, create_lead, request_human };
 
   /**
    * Run a tool by name.

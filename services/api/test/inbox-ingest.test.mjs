@@ -691,3 +691,23 @@ test("a record carrying a login code's message id is refused whichever way it is
   assert.equal(JSON.stringify(h.logs).includes('482913'), false);
   h.s.close();
 });
+
+test('a human outbound stored for the first time stamps last_human_out_ts; Dana and the client never do; a re-read never moves it back', () => {
+  const h = harness();
+  const lead = h.lead();
+  const rec = (id, ts, fromMe, text) => ({ id, jid: lead.wa_jid, jidAlt: null, fromMe, ts, text, pushName: null, contextInfo: null, messageType: 'conversation' });
+  assert.equal(h.ingest(lead, rec('IN-1', NOW - 50_000, false, 'hello')).stored, true);
+  assert.equal(h.lead().last_human_out_ts, null, 'a client message is not a human answer');
+  assert.deepEqual(h.ingest(lead, rec('OUT-1', NOW - 40_000, true, 'typed on the phone')), { stored: true, inserted: true, senderKind: 'owner_number' });
+  assert.equal(h.lead().last_human_out_ts, NOW - 40_000);
+  // A Dana send: the outbox row names the record by its id.
+  h.inbox.insertOutbox({ send_id: 'SND-dana000000001', lead_id: lead.lead_id, jid: lead.wa_jid, text: 'from dana', sender_kind: 'dana' });
+  h.inbox.updateOutbox('SND-dana000000001', { status: 'accepted', key_id: 'OUT-D' });
+  assert.deepEqual(h.ingest(lead, rec('OUT-D', NOW - 30_000, true, 'from dana')), { stored: true, inserted: true, senderKind: 'dana' });
+  assert.equal(h.lead().last_human_out_ts, NOW - 40_000, 'Dana is not a human');
+  assert.deepEqual(h.ingest(lead, rec('OUT-0', NOW - 90_000, true, 'older, read by a history backfill')), { stored: true, inserted: true, senderKind: 'owner_number' });
+  assert.equal(h.lead().last_human_out_ts, NOW - 40_000, 'never back');
+  assert.deepEqual(h.ingest(lead, rec('OUT-1', NOW - 40_000, true, 'typed on the phone')), { stored: true, inserted: false, senderKind: 'owner_number' });
+  assert.equal(h.lead().last_human_out_ts, NOW - 40_000);
+  assertClean(h.logs);
+});

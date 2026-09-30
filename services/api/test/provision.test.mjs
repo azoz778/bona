@@ -10,6 +10,7 @@ import {
   knowledgeBasePayload, knowledgeBaseFreshness, toolsPayload, llmPayload, voiceAgentPayload,
   chatAgentPayload, redactPayload, provision, PROMPT_FILE, PREFERRED_MODEL, FALLBACK_MODEL,
   BEGIN_MESSAGE, KB_NAME, VOICE_AGENT_NAME, CHAT_AGENT_NAME,
+  WA_PROMPT_FILE, WA_LLM_NAME, WA_CHAT_AGENT_NAME, WA_SESSION_MS, whatsappToolsPayload, whatsappLlmPayload, whatsappChatAgentPayload,
 } from '../retell/provision.mjs';
 import { writeIds } from '../lib/config.mjs';
 
@@ -186,32 +187,52 @@ test('redaction removes the tool token from anything printed', () => {
 function fakeClient({ rejectModels = [], existing = {} } = {}) {
   // `order` is what proves the KB swap is safe: it records the calls as they arrive, so a
   // test can insist the old base is deleted only after the LLM points at the new one.
+  // A plain run also provisions Dana's WhatsApp LLM and chat agent (P4-1); they are told
+  // apart by their bodies and recorded as `wa-llm` / `wa-chat-agent`, so every site
+  // assertion below still reads the site's objects only.
+  const waLlm = (body) => Boolean(body.general_tools?.some((t) => t.name === 'request_human'));
+  const waAgent = (body) => body.agent_name === WA_CHAT_AGENT_NAME;
   const seen = { created: [], updated: [], published: [], deleted: [], order: [] };
   const client = {
     seen,
     async listKnowledgeBases() { return existing.kb ? [existing.kb] : []; },
-    async getKnowledgeBase(id) { if (existing.kb?.knowledge_base_id === id) return existing.kb; throw new Error('404'); },
+    async getKnowledgeBase(id) { if (existing.kb?.knowledge_base_id === id) return existing.kb; throw Object.assign(new Error('404'), { status: 404 }); },
     async createKnowledgeBase(body) { seen.created.push(['kb', body]); seen.order.push('create-kb'); return { knowledge_base_id: 'kb_new', status: 'in_progress' }; },
     async deleteKnowledgeBase(id) { seen.deleted.push(id); seen.order.push('delete-kb'); return null; },
     async createLlm(body) {
       if (rejectModels.includes(body.model)) throw Object.assign(new Error('bad model'), { name: 'RetellError', status: 400 });
+      if (waLlm(body)) {
+        seen.created.push(['wa-llm', body]);
+        seen.order.push('create-wa-llm');
+        return { llm_id: 'llm_wa_new' };
+      }
       seen.created.push(['llm', body]);
       seen.order.push('create-llm');
       return { llm_id: 'llm_new' };
     },
-    async getLlm(id) { if (existing.llmId === id) return { llm_id: id }; throw new Error('404'); },
+    async getLlm(id) { if (existing.llmId === id || existing.waLlmId === id) return { llm_id: id }; throw Object.assign(new Error('404'), { status: 404 }); },
     async updateLlm(id, body) {
       if (rejectModels.includes(body.model)) throw Object.assign(new Error('bad model'), { name: 'RetellError', status: 400 });
-      seen.updated.push(['llm', id, body]);
-      seen.order.push('update-llm');
+      const kind = waLlm(body) ? 'wa-llm' : 'llm';
+      seen.updated.push([kind, id, body]);
+      seen.order.push(`update-${kind}`);
       return { llm_id: id };
     },
-    async getAgent(id) { if (existing.voiceAgentId === id) return { agent_id: id }; throw new Error('404'); },
+    async getAgent(id) { if (existing.voiceAgentId === id) return { agent_id: id }; throw Object.assign(new Error('404'), { status: 404 }); },
     async createAgent(body) { seen.created.push(['agent', body]); return { agent_id: 'agent_voice_new' }; },
     async updateAgent(id, body) { seen.updated.push(['agent', id, body]); seen.order.push('update-agent'); return { agent_id: id }; },
-    async getChatAgent(id) { if (existing.chatAgentId === id) return { agent_id: id }; throw new Error('404'); },
-    async createChatAgent(body) { seen.created.push(['chat-agent', body]); return { agent_id: 'agent_chat_new' }; },
-    async updateChatAgent(id, body) { seen.updated.push(['chat-agent', id, body]); seen.order.push('update-chat-agent'); return { agent_id: id }; },
+    async getChatAgent(id) { if (existing.chatAgentId === id || existing.waChatAgentId === id) return { agent_id: id }; throw Object.assign(new Error('404'), { status: 404 }); },
+    async createChatAgent(body) {
+      if (waAgent(body)) { seen.created.push(['wa-chat-agent', body]); return { agent_id: 'agent_wa_new' }; }
+      seen.created.push(['chat-agent', body]);
+      return { agent_id: 'agent_chat_new' };
+    },
+    async updateChatAgent(id, body) {
+      const kind = waAgent(body) ? 'wa-chat-agent' : 'chat-agent';
+      seen.updated.push([kind, id, body]);
+      seen.order.push(`update-${kind}`);
+      return { agent_id: id };
+    },
     async publishAgent(id) { seen.published.push(id); seen.order.push('publish'); return {}; },
   };
   return client;
@@ -247,16 +268,21 @@ test('--dry-run prints payloads and calls nothing', async () => {
   cleanup();
 });
 
-test('a first run creates all four objects and records their ids', async () => {
+test('a first run creates all six objects (the site\'s four, then Dana\'s WhatsApp two) and records their ids', async () => {
   const { home, cleanup } = tempHome();
   const client = fakeClient();
   const { result, ids } = await run({}, { home, client });
-  assert.deepEqual(client.seen.created.map(([k]) => k), ['kb', 'llm', 'agent', 'chat-agent']);
+  assert.deepEqual(client.seen.created.map(([k]) => k), ['kb', 'llm', 'agent', 'chat-agent', 'wa-llm', 'wa-chat-agent']);
   assert.equal(result.knowledgeBaseId, 'kb_new');
   assert.equal(ids.llmId, 'llm_new');
   assert.equal(ids.voiceAgentId, 'agent_voice_new');
   assert.equal(ids.chatAgentId, 'agent_chat_new');
   assert.equal(ids.model, PREFERRED_MODEL);
+  assert.equal(ids.waLlmId, 'llm_wa_new');
+  assert.equal(ids.waChatAgentId, 'agent_wa_new');
+  assert.equal(ids.waModel, PREFERRED_MODEL);
+  const [, waBody] = client.seen.created.find(([k]) => k === 'wa-llm');
+  assert.deepEqual(waBody.knowledge_base_ids, ['kb_new'], 'her LLM reads the site\'s knowledge base');
   assert.ok(ids.updatedAt);
   cleanup();
 });
@@ -264,12 +290,14 @@ test('a first run creates all four objects and records their ids', async () => {
 test('a second run updates in place — no duplicate agents in the Retell account', async () => {
   const { home, cleanup } = tempHome();
   const client = fakeClient({
-    existing: { kb: { knowledge_base_id: 'kb_1', knowledge_base_name: KB_NAME, status: 'complete' }, llmId: 'llm_1', voiceAgentId: 'agent_v', chatAgentId: 'agent_c' },
+    existing: { kb: { knowledge_base_id: 'kb_1', knowledge_base_name: KB_NAME, status: 'complete' }, llmId: 'llm_1', voiceAgentId: 'agent_v', chatAgentId: 'agent_c', waLlmId: 'llm_wa_1', waChatAgentId: 'agent_wa_1' },
   });
-  const { ids } = await run({}, { home, client, ids: { knowledgeBaseId: 'kb_1', llmId: 'llm_1', voiceAgentId: 'agent_v', chatAgentId: 'agent_c' } });
+  const { ids } = await run({}, { home, client, ids: { knowledgeBaseId: 'kb_1', llmId: 'llm_1', voiceAgentId: 'agent_v', chatAgentId: 'agent_c', waLlmId: 'llm_wa_1', waChatAgentId: 'agent_wa_1' } });
   assert.deepEqual(client.seen.created, []);
-  assert.deepEqual(client.seen.updated.map(([k, id]) => `${k}:${id}`), ['llm:llm_1', 'agent:agent_v', 'chat-agent:agent_c']);
+  assert.deepEqual(client.seen.updated.map(([k, id]) => `${k}:${id}`), ['llm:llm_1', 'agent:agent_v', 'chat-agent:agent_c', 'wa-llm:llm_wa_1', 'wa-chat-agent:agent_wa_1']);
   assert.equal(ids.voiceAgentId, 'agent_v');
+  assert.equal(ids.waLlmId, 'llm_wa_1');
+  assert.equal(ids.waChatAgentId, 'agent_wa_1');
   cleanup();
 });
 
@@ -353,6 +381,19 @@ test('--rebuild-kb deletes the old base only after the agents serve the new one'
       `delete-kb must come after ${step}, or a live agent can be left reading from nothing`,
     );
   }
+  cleanup();
+});
+
+test('--rebuild-kb moves Dana\'s WhatsApp LLM to the new base before the old one is deleted', async () => {
+  const { home, cleanup } = tempHome();
+  const { client, ids: idsIn } = movedSite();
+  await run({ argv: ['--rebuild-kb'], env: { BONA_SITE: NEW_SITE } }, { home, client, ids: idsIn });
+  const [, waBody] = client.seen.created.find(([k]) => k === 'wa-llm');
+  assert.deepEqual(waBody.knowledge_base_ids, ['kb_new']);
+  assert.ok(
+    client.seen.order.indexOf('delete-kb') > client.seen.order.indexOf('create-wa-llm'),
+    'her LLM must not be left reading a deleted base',
+  );
   cleanup();
 });
 
@@ -442,10 +483,11 @@ test('--dry-run --rebuild-kb prints the swap in order and still calls nothing', 
 test('a model Retell rejects falls back to gpt-4.1', async () => {
   const { home, cleanup } = tempHome();
   const client = fakeClient({ rejectModels: [PREFERRED_MODEL] });
-  const { ids } = await run({}, { home, client });
+  const { result, ids } = await run({}, { home, client });
   assert.equal(ids.model, FALLBACK_MODEL);
   const [, llmBody] = client.seen.created.find(([k]) => k === 'llm');
   assert.equal(llmBody.model, FALLBACK_MODEL);
+  assert.equal(result.waModel, FALLBACK_MODEL, 'her LLM falls back the same way');
   cleanup();
 });
 
@@ -458,7 +500,7 @@ test('BONA_RETELL_SEPARATE_CHAT_AGENT=0 reuses the voice agent for chat', async 
   cleanup();
 });
 
-test('--publish publishes both agents; without it they stay drafts', async () => {
+test('--publish publishes every agent (Dana\'s WhatsApp one too); without it they stay drafts', async () => {
   const { home, cleanup } = tempHome();
   const draft = fakeClient();
   await run({}, { home, client: draft });
@@ -466,7 +508,7 @@ test('--publish publishes both agents; without it they stay drafts', async () =>
 
   const published = fakeClient();
   await run({ argv: ['--publish'] }, { home, client: published });
-  assert.deepEqual(published.seen.published, ['agent_voice_new', 'agent_chat_new']);
+  assert.deepEqual(published.seen.published, ['agent_voice_new', 'agent_chat_new', 'agent_wa_new']);
   cleanup();
 });
 
@@ -516,4 +558,319 @@ test('writeIds only rewrites the file when an id actually changed', () => {
   assert.equal(moved.changed, true);
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).voiceAgentId, 'agent_9');
   cleanup();
+});
+
+/* ---------------- Dana on WhatsApp (Phase 4, P4-1) ---------------- */
+
+const waPrompt = fs.readFileSync(WA_PROMPT_FILE, 'utf8');
+
+test('the WhatsApp tools are the two inventory searches plus request_human — no cards, no create_lead', () => {
+  const tools = whatsappToolsPayload({ publicApi: PUBLIC_API, toolToken: TOKEN });
+  assert.deepEqual(tools.map((t) => t.name), ['search_properties', 'search_units', 'request_human']);
+  const site = toolsPayload({ publicApi: PUBLIC_API, toolToken: TOKEN });
+  const SAME = ['type', 'name', 'url', 'headers', 'description', 'parameters', 'timeout_ms'];
+  for (const [i, name] of [[0, 'search_properties'], [1, 'search_units']]) {
+    const siteTool = site.find((t) => t.name === name);
+    for (const k of SAME) assert.deepEqual(tools[i][k], siteTool[k], `${name}.${k} is the same as the site's`);
+    assert.equal(tools[i].speak_during_execution, false, 'no "one moment" message on WhatsApp');
+    assert.equal('execution_message_type' in tools[i], false);
+    assert.equal('execution_message_description' in tools[i], false);
+  }
+  const hand = tools[2];
+  assert.equal(hand.type, 'custom');
+  assert.equal(hand.url, `${PUBLIC_API}/v1/tools/request_human`);
+  assert.equal(hand.headers['X-Bona-Token'], TOKEN, 'the token rides in the header, never the URL');
+  assert.deepEqual(hand.parameters.required, ['reason']);
+  assert.match(hand.description, /viewing|negotiat|person/i);
+});
+
+test('the WhatsApp LLM: its own prompt, the same knowledge base, the client speaks first, the four dynamic variables', () => {
+  const llm = whatsappLlmPayload({ prompt: waPrompt, model: 'claude-4.6-sonnet', knowledgeBaseIds: ['kb_1'], publicApi: PUBLIC_API, toolToken: TOKEN });
+  assert.equal(llm.general_prompt, waPrompt);
+  assert.equal(llm.model, 'claude-4.6-sonnet');
+  assert.equal(llm.start_speaker, 'user');
+  assert.equal(llm.begin_message, undefined, 'the first message on WhatsApp is the client\'s');
+  assert.deepEqual(llm.knowledge_base_ids, ['kb_1']);
+  assert.deepEqual(llm.general_tools.map((t) => t.name), ['search_properties', 'search_units', 'request_human']);
+  assert.deepEqual(llm.default_dynamic_variables, { channel: 'whatsapp', language: 'en', lead_facts: '', recent_messages: '' });
+  assert.equal(whatsappLlmPayload({ prompt: waPrompt, model: 'gpt-4.1', knowledgeBaseIds: [], publicApi: PUBLIC_API, toolToken: TOKEN }).knowledge_base_ids, undefined);
+});
+
+test('the WhatsApp chat agent lives 24 h between messages and has no webhook', () => {
+  const agent = whatsappChatAgentPayload({ llmId: 'llm_wa' });
+  assert.equal(agent.agent_name, WA_CHAT_AGENT_NAME);
+  assert.deepEqual(agent.response_engine, { type: 'retell-llm', llm_id: 'llm_wa' });
+  assert.deepEqual(agent.language, ['ar-SA', 'en-US']);
+  assert.equal(agent.end_chat_after_silence_ms, WA_SESSION_MS);
+  assert.equal(WA_SESSION_MS, 86_400_000);
+  assert.equal('webhook_url' in agent, false);
+  assert.equal('webhook_events' in agent, false);
+});
+
+test('the WhatsApp prompt: her language, links not cards, tools-only prices, no TK, hands over, never introduces herself', () => {
+  for (const v of ['{{language}}', '{{lead_facts}}', '{{recent_messages}}', '{{channel}}']) assert.ok(waPrompt.includes(v), v);
+  assert.match(waPrompt, /request_human/);
+  assert.match(waPrompt, /url_en|url_ar|link/i);
+  assert.match(waPrompt, /never (invent|estimate|guess)/i);
+  assert.match(waPrompt, /TK/, 'the rule that names TK as forbidden');
+  assert.match(waPrompt, /Dana — Bona's AI assistant/, 'tells her the first message already carries the disclosure');
+  assert.doesNotMatch(waPrompt, /\[\[navigate|\[\[whatsapp|show_property|create_lead|recorded/);
+  assert.ok(waPrompt.length > 2000 && waPrompt.length < 12_000);
+});
+
+/** A double that answers the WhatsApp calls and throws on every site call. */
+function whatsappOnlyClient(calls) {
+  const never = (name) => () => { throw new Error(`site object touched: ${name}`); };
+  return {
+    getKnowledgeBase: never('getKnowledgeBase'), listKnowledgeBases: never('listKnowledgeBases'), createKnowledgeBase: never('createKnowledgeBase'), deleteKnowledgeBase: never('deleteKnowledgeBase'),
+    getAgent: never('getAgent'), updateAgent: never('updateAgent'), createAgent: never('createAgent'),
+    async getLlm(id) { calls.push(['getLlm', id]); if (id === 'llm_e978e39556e56a661a08fcdf0a22') throw new Error('site object touched: getLlm'); if (id === 'llm_wa_old') return { llm_id: id }; const e = new Error('404'); e.status = 404; throw e; },
+    async updateLlm(id, body) { calls.push(['updateLlm', id, body]); return { llm_id: id }; },
+    async createLlm(body) { calls.push(['createLlm', body]); return { llm_id: 'llm_wa_new' }; },
+    async getChatAgent(id) { calls.push(['getChatAgent', id]); if (id === 'agent_c435e260fdd645681b5b6a07d3') throw new Error('site object touched: getChatAgent'); if (id === 'agent_wa_old') return { agent_id: id }; const e = new Error('404'); e.status = 404; throw e; },
+    async updateChatAgent(id, body) { calls.push(['updateChatAgent', id, body]); return { agent_id: id }; },
+    async createChatAgent(body) { calls.push(['createChatAgent', body]); return { agent_id: 'agent_wa_new' }; },
+    async publishAgent(id) { calls.push(['publishAgent', id]); return {}; },
+  };
+}
+
+const SITE_IDS = {
+  knowledgeBaseId: 'kb_site', llmId: 'llm_e978e39556e56a661a08fcdf0a22', voiceAgentId: 'agent_00ccf63b9fd9800da7d40d344c',
+  chatAgentId: 'agent_c435e260fdd645681b5b6a07d3', model: 'claude-4.6-sonnet', voiceId: '11labs-Nyla', publicApi: PUBLIC_API, siteUrl: NEW_SITE,
+  separateChatAgent: true, published: false, note: 'Ids are not secrets. Regenerate with: node services/api/retell/provision.mjs',
+};
+
+test('--whatsapp-only creates her LLM on the site\'s knowledge base and her chat agent, touches nothing of the site, keeps every existing id', async () => {
+  const { home, cleanup } = tempHome();
+  const idsFile = path.join(home, 'ids.json');
+  writeIds(SITE_IDS, idsFile);
+  const calls = [];
+  const logs = [];
+  try {
+    const record = await provision({
+      argv: ['--whatsapp-only'], env: { RETELL_API_KEY: 'k', BONA_TOOL_TOKEN: TOKEN, BONA_PUBLIC_API: PUBLIC_API, BONA_SITE: NEW_SITE },
+      idsFile, home, log: (l) => logs.push(l), clientFactory: () => whatsappOnlyClient(calls),
+    });
+    assert.deepEqual(calls.map((c) => c[0]), ['createLlm', 'createChatAgent']);
+    const llmBody = calls[0][1];
+    assert.equal(llmBody.general_prompt, waPrompt);
+    assert.deepEqual(llmBody.knowledge_base_ids, ['kb_site'], 'the same knowledge base, by id — never re-created');
+    assert.equal(llmBody.general_tools.find((t) => t.name === 'request_human').headers['X-Bona-Token'], TOKEN);
+    assert.deepEqual(calls[1][1].response_engine, { type: 'retell-llm', llm_id: 'llm_wa_new' });
+    assert.deepEqual({ ...record }, { ...SITE_IDS, waLlmId: 'llm_wa_new', waChatAgentId: 'agent_wa_new', waModel: 'claude-4.6-sonnet' });
+    const { updatedAt, ...written } = JSON.parse(fs.readFileSync(idsFile, 'utf8'));
+    assert.deepEqual(written, record, 'the site ids survive, the WhatsApp ids are added');
+    assert.ok(logs.some((l) => /WhatsApp LLM .* created/.test(l)) && logs.some((l) => /WhatsApp chat agent .* created/.test(l)));
+    assert.ok(logs.some((l) => l.includes('BONA_RETELL_WA_CHAT_AGENT_ID=agent_wa_new')));
+    assert.doesNotMatch(logs.join('\n'), new RegExp(TOKEN));
+  } finally {
+    cleanup();
+  }
+});
+
+test('--whatsapp-only updates her objects in place when they exist, and refuses without a knowledge base id', async () => {
+  const { home, cleanup } = tempHome();
+  const idsFile = path.join(home, 'ids.json');
+  writeIds({ ...SITE_IDS, waLlmId: 'llm_wa_old', waChatAgentId: 'agent_wa_old', waModel: 'claude-4.6-sonnet' }, idsFile);
+  const calls = [];
+  try {
+    const record = await provision({ argv: ['--whatsapp-only'], env: { RETELL_API_KEY: 'k', BONA_TOOL_TOKEN: TOKEN }, idsFile, home, log: () => {}, clientFactory: () => whatsappOnlyClient(calls) });
+    assert.deepEqual(calls.map((c) => c[0]), ['getLlm', 'updateLlm', 'getChatAgent', 'updateChatAgent']);
+    assert.equal(record.waLlmId, 'llm_wa_old');
+    assert.equal(record.waChatAgentId, 'agent_wa_old');
+    writeIds({ llmId: 'x' }, idsFile);
+    await assert.rejects(
+      () => provision({ argv: ['--whatsapp-only'], env: { RETELL_API_KEY: 'k', BONA_TOOL_TOKEN: TOKEN }, idsFile, home, log: () => {}, clientFactory: () => whatsappOnlyClient([]) }),
+      /knowledge base/,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('--dry-run --whatsapp-only prints her payloads and calls nothing', async () => {
+  const { home, cleanup } = tempHome();
+  const idsFile = path.join(home, 'ids.json');
+  writeIds(SITE_IDS, idsFile);
+  const logs = [];
+  try {
+    const out = await provision({ argv: ['--dry-run', '--whatsapp-only'], env: { BONA_TOOL_TOKEN: TOKEN }, idsFile, home, log: (l) => logs.push(l), clientFactory: () => { throw new Error('no client in a dry run'); } });
+    assert.equal(out.dryRun, true);
+    const text = logs.join('\n');
+    assert.match(text, /create-retell-llm .*WhatsApp/);
+    assert.match(text, /create-chat-agent .*WhatsApp/);
+    assert.ok(text.includes('request_human'));
+    assert.doesNotMatch(text, new RegExp(TOKEN));
+    assert.doesNotMatch(text, /create-knowledge-base|create-agent\b/, 'no site payloads');
+  } finally {
+    cleanup();
+  }
+});
+
+test('--rebuild-kb --publish keeps the old knowledge base when only her publish fails', async () => {
+  const { home, cleanup } = tempHome();
+  const { client, ids: idsIn } = movedSite();
+  const sitePublish = client.publishAgent;
+  client.publishAgent = async (id) => {
+    if (id === 'agent_wa_new') throw new Error('Retell refused to publish');
+    return sitePublish(id);
+  };
+  const lines = [];
+  await run({ argv: ['--rebuild-kb', '--publish'], env: { BONA_SITE: NEW_SITE }, log: (l) => lines.push(l) }, { home, client, ids: idsIn });
+  assert.deepEqual(client.seen.published, ['agent_v', 'agent_c'], 'the site agents did publish');
+  assert.deepEqual(client.seen.deleted, [], 'her live agent may still be serving the old base');
+  assert.match(lines.join('\n'), /publish WhatsApp chat agent failed/);
+  cleanup();
+});
+
+test('--whatsapp-only recreates her LLM when its id is gone (404), and records the new id', async () => {
+  const { home, cleanup } = tempHome();
+  const idsFile = path.join(home, 'ids.json');
+  writeIds({ ...SITE_IDS, waLlmId: 'llm_wa_gone', waChatAgentId: 'agent_wa_old', waModel: 'claude-4.6-sonnet' }, idsFile);
+  const calls = [];
+  try {
+    const record = await provision({ argv: ['--whatsapp-only'], env: { RETELL_API_KEY: 'k', BONA_TOOL_TOKEN: TOKEN }, idsFile, home, log: () => {}, clientFactory: () => whatsappOnlyClient(calls) });
+    assert.deepEqual(calls.map((c) => c[0]), ['getLlm', 'createLlm', 'getChatAgent', 'updateChatAgent']);
+    assert.equal(record.waLlmId, 'llm_wa_new');
+    assert.equal(JSON.parse(fs.readFileSync(idsFile, 'utf8')).waLlmId, 'llm_wa_new');
+    assert.deepEqual(calls[3][2].response_engine, { type: 'retell-llm', llm_id: 'llm_wa_new' });
+  } finally {
+    cleanup();
+  }
+});
+
+test('--whatsapp-only --publish publishes her chat agent only', async () => {
+  const { home, cleanup } = tempHome();
+  const idsFile = path.join(home, 'ids.json');
+  writeIds({ ...SITE_IDS, waLlmId: 'llm_wa_old', waChatAgentId: 'agent_wa_old' }, idsFile);
+  const calls = [];
+  try {
+    await provision({ argv: ['--whatsapp-only', '--publish'], env: { RETELL_API_KEY: 'k', BONA_TOOL_TOKEN: TOKEN }, idsFile, home, log: () => {}, clientFactory: () => whatsappOnlyClient(calls) });
+    assert.deepEqual(calls.filter((c) => c[0] === 'publishAgent'), [['publishAgent', 'agent_wa_old']]);
+  } finally {
+    cleanup();
+  }
+});
+
+test('--whatsapp-only raises a lookup failure that is not a 404 instead of creating a duplicate', async () => {
+  const { home, cleanup } = tempHome();
+  const idsFile = path.join(home, 'ids.json');
+  writeIds({ ...SITE_IDS, waLlmId: 'llm_wa_old', waChatAgentId: 'agent_wa_old' }, idsFile);
+  const calls = [];
+  const client = whatsappOnlyClient(calls);
+  client.getLlm = async (id) => { calls.push(['getLlm', id]); throw Object.assign(new Error('Retell 500'), { status: 500 }); };
+  try {
+    await assert.rejects(
+      () => provision({ argv: ['--whatsapp-only'], env: { RETELL_API_KEY: 'k', BONA_TOOL_TOKEN: TOKEN }, idsFile, home, log: () => {}, clientFactory: () => client }),
+      /Retell 500/,
+    );
+    assert.deepEqual(calls.map((c) => c[0]), ['getLlm'], 'nothing created');
+  } finally {
+    cleanup();
+  }
+});
+
+test('--whatsapp-only raises a rejected chat agent update instead of creating a second agent', async () => {
+  const { home, cleanup } = tempHome();
+  const idsFile = path.join(home, 'ids.json');
+  writeIds({ ...SITE_IDS, waLlmId: 'llm_wa_old', waChatAgentId: 'agent_wa_old' }, idsFile);
+  const calls = [];
+  const client = whatsappOnlyClient(calls);
+  client.updateChatAgent = async (id) => { calls.push(['updateChatAgent', id]); throw Object.assign(new Error('Retell rejected the agent payload'), { status: 400 }); };
+  try {
+    await assert.rejects(
+      () => provision({ argv: ['--whatsapp-only'], env: { RETELL_API_KEY: 'k', BONA_TOOL_TOKEN: TOKEN }, idsFile, home, log: () => {}, clientFactory: () => client }),
+      /rejected/,
+    );
+    assert.equal(calls.some((c) => c[0] === 'createChatAgent'), false);
+  } finally {
+    cleanup();
+  }
+});
+
+test('her LLM id is recorded as soon as it is created, so a failed chat agent does not orphan it', async () => {
+  const { home, cleanup } = tempHome();
+  const idsFile = path.join(home, 'ids.json');
+  writeIds(SITE_IDS, idsFile);
+  const calls = [];
+  const client = whatsappOnlyClient(calls);
+  client.createChatAgent = async () => { throw new Error('Retell 502'); };
+  try {
+    await assert.rejects(() => provision({ argv: ['--whatsapp-only'], env: { RETELL_API_KEY: 'k', BONA_TOOL_TOKEN: TOKEN }, idsFile, home, log: () => {}, clientFactory: () => client }), /502/);
+    const { updatedAt, ...written } = JSON.parse(fs.readFileSync(idsFile, 'utf8'));
+    assert.deepEqual(written, { ...SITE_IDS, waLlmId: 'llm_wa_new' });
+  } finally {
+    cleanup();
+  }
+});
+
+test('on a plain run the interim record carries the site ids made so far, so a failed chat agent of hers leaves no stale site ids', async () => {
+  const { home, cleanup } = tempHome();
+  const client = fakeClient();
+  const siteChatAgent = client.createChatAgent;
+  client.createChatAgent = async (body) => {
+    if (body.agent_name === WA_CHAT_AGENT_NAME) throw new Error('Retell 502');
+    return siteChatAgent(body);
+  };
+  try {
+    await assert.rejects(() => run({}, { home, client, ids: { llmId: 'llm_stale', voiceAgentId: 'agent_stale' } }), /502/);
+    const { updatedAt, ...written } = JSON.parse(fs.readFileSync(path.join(home, 'ids.json'), 'utf8'));
+    assert.deepEqual(written, {
+      knowledgeBaseId: 'kb_new', llmId: 'llm_new', voiceAgentId: 'agent_voice_new', chatAgentId: 'agent_chat_new', model: PREFERRED_MODEL, waLlmId: 'llm_wa_new',
+    });
+  } finally {
+    cleanup();
+  }
+});
+
+test('a hand-edited ids.json that points her at a site object is refused before any call', async () => {
+  const { home, cleanup } = tempHome();
+  const idsFile = path.join(home, 'ids.json');
+  try {
+    for (const bad of [{ waLlmId: SITE_IDS.llmId }, { waChatAgentId: SITE_IDS.chatAgentId }, { waChatAgentId: SITE_IDS.voiceAgentId }]) {
+      writeIds({ ...SITE_IDS, ...bad }, idsFile);
+      const calls = [];
+      await assert.rejects(
+        () => provision({ argv: ['--whatsapp-only'], env: { RETELL_API_KEY: 'k', BONA_TOOL_TOKEN: TOKEN }, idsFile, home, log: () => {}, clientFactory: () => whatsappOnlyClient(calls) }),
+        /ids\.json: wa/,
+      );
+      assert.deepEqual(calls, []);
+    }
+  } finally {
+    cleanup();
+  }
+});
+
+test('--whatsapp-only ignores --rebuild-kb and says so', async () => {
+  const { home, cleanup } = tempHome();
+  const idsFile = path.join(home, 'ids.json');
+  writeIds(SITE_IDS, idsFile);
+  const logs = [];
+  try {
+    const out = await provision({ argv: ['--dry-run', '--whatsapp-only', '--rebuild-kb'], env: { BONA_TOOL_TOKEN: TOKEN }, idsFile, home, log: (l) => logs.push(l), clientFactory: () => { throw new Error('no client in a dry run'); } });
+    assert.equal(out.rebuildKb, false);
+    const text = logs.join('\n');
+    assert.match(text, /--rebuild-kb is ignored with --whatsapp-only/);
+    assert.doesNotMatch(text, /delete-knowledge-base|new_knowledge_base_id/);
+    assert.ok(text.includes('"kb_site"'), 'her preview keeps the site base');
+  } finally {
+    cleanup();
+  }
+});
+
+test('--dry-run --rebuild-kb shows her LLM moving to the new base too', async () => {
+  const { home, cleanup } = tempHome();
+  const idsFile = path.join(home, 'ids.json');
+  writeIds({ ...SITE_IDS, waLlmId: 'llm_wa_1' }, idsFile);
+  const logs = [];
+  try {
+    await provision({ argv: ['--dry-run', '--rebuild-kb'], env: { BONA_TOOL_TOKEN: TOKEN, BONA_PUBLIC_API: PUBLIC_API, BONA_SITE: NEW_SITE }, idsFile, home, log: (l) => logs.push(l), clientFactory: () => { throw new Error('no client'); } });
+    const text = logs.join('\n');
+    assert.match(text, /update-retell-llm\/llm_wa_1/);
+    const wa = text.slice(text.indexOf('— WhatsApp'));
+    assert.match(wa, /<new_knowledge_base_id>/);
+    assert.doesNotMatch(text, new RegExp(TOKEN));
+  } finally {
+    cleanup();
+  }
 });

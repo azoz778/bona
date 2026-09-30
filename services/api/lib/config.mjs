@@ -89,6 +89,10 @@ export function loadConfig({ env = loadEnv(), ids = readIds(), home = os.homedir
     retellMock: truthy(env.BONA_RETELL_MOCK, false),
     chatAgentId: env.BONA_RETELL_CHAT_AGENT_ID ?? ids.chatAgentId ?? ids.voiceAgentId ?? null,
     voiceAgentId: env.BONA_RETELL_VOICE_AGENT_ID ?? ids.voiceAgentId ?? null,
+    // Dana on WhatsApp (Phase 4): her own chat agent, provisioned by `retell/provision.mjs
+    // --whatsapp-only`. No fallback to the site's agent: the web prompt (cards, markers, the
+    // recording sentence) must never answer a WhatsApp client. Missing → Dana is not configured.
+    waChatAgentId: env.BONA_RETELL_WA_CHAT_AGENT_ID ?? ids.waChatAgentId ?? null,
     waNumber: env.BONA_WHATSAPP ?? '966593296933',
     maxBodyBytes: Number(env.BONA_MAX_BODY_BYTES ?? 16 * 1024),
     chatRatePerMin: Number(env.BONA_RATE_CHAT ?? 30),
@@ -147,7 +151,7 @@ export function redacted(cfg) {
     retellMock: cfg.retellMock, hasRetellKey: Boolean(cfg.retellApiKey),
     hasToolToken: Boolean(cfg.toolToken), allowQueryToken: cfg.allowQueryToken,
     trustedProxies: cfg.trustedProxies, chatAgentId: cfg.chatAgentId,
-    voiceAgentId: cfg.voiceAgentId, version: cfg.version,
+    voiceAgentId: cfg.voiceAgentId, waChatAgentId: cfg.waChatAgentId ?? null, version: cfg.version,
     maxChatsPerDay: cfg.maxChatsPerDay, maxCallsPerDay: cfg.maxCallsPerDay,
     maxTurnsPerSession: cfg.maxTurnsPerSession,
     dbFile: cfg.dbFile, eventsRatePerMin: cfg.eventsRatePerMin, enquiryRatePerMin: cfg.enquiryRatePerMin,
