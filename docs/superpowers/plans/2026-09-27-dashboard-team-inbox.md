@@ -18333,14 +18333,14 @@ Expected: `/health` has `push: { configured: true }`; the four files 200 with th
 - **P4-4 Per-chat switches on the thread page.** Anyone on the team: "Turn Dana off for this chat" / "Let Dana answer here" (`dana_off`). Owner only: "Let Dana test on this chat" / "Stop the Dana test here" (`dana_test`). One route `POST /v1/admin/inbox/:id/dana` with exactly one of `dana_off`/`dana_test` = `'0'|'1'`; `dana_test` by a staff member is 403 `owner_only`; audited as a new action `dana_chat` with `{ dana_off }` or `{ dana_test }`. A chat that leaves the inbox (`leaveInbox`) resets both to 0.
 - **P4-5 Who counts as a human.** `last_human_out_ts` = the newest outbound stored with `sender_kind` `staff` or `owner_number` (the owner's phone and Lisa's sends, which cannot be told apart — spec §2). Stamped by `ingest` when such a record is stored for the first time (`inbox.noteHumanOutbound`, a MAX so history reads never move it back) and by `wa-send.mjs#reply` when a dashboard reply is stored. Dana's own sends never stamp it, and **Dana never stamps `first_reply_ts`**: the Hermes `bona-unanswered-leads` watchdog means "no human answered", and that stays true. (Told to the owner; a one-line change if he wants Dana's answer to count.)
 - **P4-6 When she answers** (`eligible`, in this order, the first failing reason is the answer): configured (agent id + Retell client + sender) → the chat is `in` and not a team/never-list number (`isExcludedLead`) → `team.danaEnabled()` OR `dana_test = 1` → not `dana_off` → not `needs_human` → `last_human_out_ts` is null or ≥ 24 h ago (`HUMAN_QUIET_MS`) → the chat has a phone jid (`replyJidFor`; a lid-only chat is `lid_only`, no Retell spend) → the triggering message is at most 30 min old (`FRESH_MS`: the poller catching up after an outage must not make Dana answer hours-old messages the team already sees as unread) → fewer than 6 Dana sends to this chat in the last hour (`PER_CHAT_PER_HOUR`) and fewer than 200 Dana sends in the last 24 h (`PER_DAY`), both counted from `wa_outbox` rows of kind `dana` whose status is not `failed`, so a restart cannot reset them. A cap hit is not a silent skip: it is a hand-over (P4-11), so the team learns the client is waiting.
-- **P4-7 Batching.** `wake(leadId, ts)` is called by the poller hook for every client record it stores; one timer per chat (`BATCH_MS` = 2 s, re-armed by each wake) turns a tick's burst into one run. A wake while a run is in flight marks the chat `again`; when the run lands, it runs once more. A run reads the batch itself: the chat's client messages newer than its newest outbound (any sender, stored or in the outbox and not failed), at most the newest 10, oldest first — so a message that arrives during a run is answered by the next run, and a message the poller stored just before a human answered is never answered twice.
+- **P4-7 Batching.** `wake(leadId, ts)` is called by the poller hook for every client record it stores; one timer per chat (`BATCH_MS` = 2 s, re-armed by each wake) turns a tick's burst into one run. A wake while a run is in flight marks the chat `again`; when the run lands, it runs once more. A run reads the batch itself: the chat's client messages newer than the newest HUMAN outbound stored and newer than what the newest staff/Dana send in the outbox answered (`covers_ts`, the batch's newest ts, written with Dana's row before the call; a staff row's `created`), at most the newest 10, oldest first — so a message that arrives during a run (between the batch read and the send) is answered by the next run, and a message the poller stored just before a human answered is never answered twice. Accepted edge (Task 3 review, both models): a message stamped the same second as the batch's newest is counted as answered; the alternative re-answers the batch.
 - **P4-8 One Retell chat per WhatsApp chat.** `dana_chat_id` is reused while `dana_chat_ts` is under 23 h old (`SESSION_IDLE_MS`; the agent's own silence limit is 24 h, so a reused chat is always still `ongoing`). Otherwise — or when a completion on a reused chat fails — a new chat is created (one `budget.take('chats')`; refunded if creation fails) with dynamic variables `channel: 'whatsapp'`, `language`, `lead_facts` (name, interest, budget, district, listing, stage — only what is set; never the phone number), `recent_messages` (the last 10 stored messages before the batch as `Client:` / `Team:` / `Dana:` lines, media as placeholders, 300 chars a line, 3,000 in all) and `metadata { source: 'bona-whatsapp', lead_id }` (what the tool handlers see). A completion that fails once on a fresh chat is a hand-over (`retell_error`).
 - **P4-9 The client's language** decides the disclosure, the hand-over line and the link titles: Arabic letters in the batch → `ar`; Latin letters and none Arabic → `en`; a batch with no letters (media only) → the lead's `language` when it is `ar`/`en`, else `ar` (Jeddah).
 - **P4-10 From completion to WhatsApp text.** `extractActions` (lib/actions.mjs) strips the widget's `[[navigate:…]]`/`[[whatsapp:…]]` markers and yields the agent text and the listing cards the tools surfaced; `plainText` flattens markdown; then up to 3 cards whose URL is not already in the text are appended as `Title — https://…` lines in the client's language (`withLinks`); the whole is clipped to 1,500 characters at a whitespace boundary (`MAX_ANSWER_LEN`; the sender's hard cap is 4,096). An answer with no agent text is a hand-over (`empty`).
 - **P4-11 Hand-over** (`request_human` invoked in the completion, a Retell error, an empty answer, a spent budget, or a send that failed): `needs_human = 1` is set FIRST (a wake that lands meanwhile sees it), then `alerts.notify(leadId, { reason: 'needs_human' })` (everyone, P3-8), then ONE line `HANDOVER[language]` is sent — unless `needs_human` was already 1 (the line goes once). Dana's own text from that completion is dropped. She then stays quiet in that chat until a human outbound clears `needs_human` (ingest / reply do that already, P2-16) — and the 24 h rule keeps her quiet after that reply.
 - **P4-12 Disclosure in code.** The first Dana message in a chat (`dana_introduced = 0`) is prefixed with `DISCLOSURE[language]` + a blank line: `Dana — Bona's AI assistant` / `دانة — مساعدة بونا الذكية`. `dana_introduced` becomes 1 after a send that was accepted OR uncertain (it may have gone). A purge (`purgeLead`: Not a client, retention) resets `dana_chat_id`, `dana_chat_ts` and `dana_introduced`, so a chat that comes back is introduced again. The prompt tells her NOT to introduce herself.
 - **P4-13 Pre-send re-fetch.** Right before sending, the run calls `backfill.refresh(lead)` (the bounded read the reply route uses; `recent` waits for the read in flight), reads the lead again, re-runs the eligibility checks (except freshness), and drops the answer (`dropped_human`) when `inbox.humanOutboundAfter(leadId, newestBatchTs)` is true: a `staff`/`owner_number` message stored with a newer time, or a staff outbox row for the chat created after the batch and not failed. A newer CLIENT message does not drop it (the answer still addresses the earlier ones; the next run answers the rest).
-- **P4-14 One sender.** `sender.sendTo({ jid: replyJidFor(lead), text, kind: 'dana', leadId })` — `VALID_KINDS` gains `dana`; every gate of §4.5 still applies (Sending switch, 20/min, 6/min per recipient, 500/day). A send that is `ok` is stored like a staff reply (`upsertMessage` kind `dana`, `ts` = the outbox row's `created` floored to the second, `status 'sent'`), `dana_chat_ts = now`, `dana_introduced = 1`; `uncertain` marks `dana_introduced = 1` and `dana_chat_ts`, is never retried; `failed` (`rate_limited`, `sending_disabled`, `disabled`, `evolution-not-configured`, `bad_recipient`, an HTTP 4xx, a definite network error) logs `dana.send_failed { leadId, error }` and, since the client got nothing, sets `needs_human = 1` + alerts everyone (without a line — the line could not go either).
+- **P4-14 One sender.** Dana writes her outbox row FIRST — `inbox.insertOutbox({ send_id, lead_id, jid, text, user_id: null, sender_kind: 'dana', covers_ts: <newest batch ts> })`, the text normalised like a staff reply (`\r\n` → `\n`, trimmed: the poller matches an unconfirmed send by exact text) — then `sender.sendTo({ jid: replyJidFor(lead), text, kind: 'dana', leadId, sendId })`; `VALID_KINDS` gains `dana`; every gate of §4.5 still applies (Sending switch, 20/min, 6/min per recipient, 500/day) and a refusal closes her row as `failed` (so the batch is not "answered"). A send that is `ok` is stored like a staff reply (`upsertMessage` kind `dana`, `ts` = the outbox row's `created` floored to the second, `status 'sent'`), `dana_chat_ts = now`, `dana_introduced = 1`; `uncertain` marks `dana_introduced = 1` and `dana_chat_ts`, is never retried; `failed` (`rate_limited`, `sending_disabled`, `disabled`, `evolution-not-configured`, `bad_recipient`, an HTTP 4xx, a definite network error) logs `dana.send_failed { leadId, error }` and, since the client got nothing, sets `needs_human = 1` + alerts everyone (without a line — the line could not go either).
 - **P4-15 Logs** (never text, a name, a number, a Retell chat id or a key): `dana.answered { leadId, batch, chars, links, newChat }`, `dana.session { leadId, renewed }` (a Retell chat created), `dana.handover { leadId, why, sent }`, `dana.retell_failed { leadId, status | error }`, `dana.send_failed { leadId, error }`, `dana.skipped { leadId, reason }` only for `human_recent`, `needs_human`, `lid_only`, `old`, `cap_chat`, `cap_day`, `nothing`, `dropped_human` (never for `off`/`chat_off`/`not_configured`: those are states, and would fire on every client message), `dana.failed { name }` (a run that threw: the error's class name only). The tool logs `tool.request_human { leadId }`.
 - **P4-16 The trigger never blocks or fails a tick.** `wake` is synchronous and only arms a timer; `answer` never rejects; the poller hook becomes `(leadId, ts) => { alerts.notify(leadId, { ts }); dana.wake(leadId, ts); }`. Shutdown: `poller.stop()` → `dana.stop()` (clears timers, awaits runs in flight) → `alerts.flush()` → close. Tests use `batchMs: 0` and `flush()`.
 - **P4-17 `/health`** gains `dana: { configured, enabled }`; the Team page says "not provisioned" when `configured` is false; a build without `waChatAgentId` has `configured: false` and sends nothing, everything else unchanged. `cfg.waChatAgentId` comes from `BONA_RETELL_WA_CHAT_AGENT_ID`, else `ids.waChatAgentId`, else null — **never** the site's chat agent as a fallback (the web prompt must not answer WhatsApp).
@@ -18391,7 +18391,9 @@ ALTER TABLE leads ADD COLUMN dana_introduced INTEGER NOT NULL DEFAULT 0 CHECK (d
 ALTER TABLE leads ADD COLUMN last_human_out_ts INTEGER;
 UPDATE leads SET last_human_out_ts = (SELECT MAX(m.ts) FROM wa_messages m WHERE m.lead_id = leads.lead_id AND m.direction = 'out' AND m.sender_kind IN ('staff','owner_number'))
   WHERE inbox_state = 'in';
+ALTER TABLE wa_outbox ADD COLUMN covers_ts INTEGER;
 ```
+(`covers_ts` — added after the Task 3 review, before v6 shipped: the newest client message a Dana send answers, written with her outbox row BEFORE the call, so a message that arrives while she composes is not counted as answered by a row stamped later. NULL on every other row.)
 `COLUMNS.leads` gains `'dana_off', 'dana_test', 'dana_chat_id', 'dana_chat_ts', 'dana_introduced', 'last_human_out_ts'` (so `db.updateLead(id, { dana_off: 1 })` works).
 
 **`lib/team.mjs`** — `SETTINGS_DEFAULTS = { sending_enabled: '1', inbox_replies: '0', dana_enabled: '0' }`, `SETTINGS_ALLOWED.dana_enabled = ['0', '1']`, `danaEnabled = () => getSetting('dana_enabled') === '1'` (returned by `createTeam`).
@@ -18402,9 +18404,11 @@ UPDATE leads SET last_human_out_ts = (SELECT MAX(m.ts) FROM wa_messages m WHERE 
 
 **`lib/inbox/store.mjs`**
 - `noteHumanOutbound(leadId, ts) → boolean` — `UPDATE leads SET last_human_out_ts = MAX(COALESCE(last_human_out_ts, 0), ?) WHERE lead_id = ?`.
-- `countDanaSends({ leadId = null, sinceTs }) → number` — `wa_outbox` rows with `sender_kind = 'dana'`, `status <> 'failed'`, `created >= sinceTs`, and `lead_id = leadId` when given.
+- `countDanaSends({ leadId = null, sinceTs }) → number` — `wa_outbox` rows with `sender_kind = 'dana'`, `status <> 'failed'`, `created >= sinceTs`, and `lead_id = leadId` when given. A `sinceTs` that is not a finite number is a `RangeError` (a cap read must never fail open). `noteHumanOutbound` answers `false` for a non-finite `ts` (it only ever moves forward; NaN would bind as NULL and reset the clock).
+- `insertOutbox({ …, covers_ts = null })` — the new column, stored as given (Dana's rows carry the newest client message ts they answer; everything else NULL).
+- `upsertMessage` — when a stored `owner_number` message is corrected to `staff`/`dana` (a late key), `last_human_out_ts` is recomputed from the stored messages (`MAX(ts)` of `out` rows with `sender_kind IN ('staff','owner_number')`, the v6 backfill's own definition), so a Dana message that was read back before its key arrived does not leave the human clock stamped.
 - `humanOutboundAfter(leadId, ts) → boolean` — true when a `wa_messages` row of the lead has `direction = 'out'`, `sender_kind IN ('staff','owner_number')` and `ts > ?`, OR a `wa_outbox` row of the lead has `sender_kind = 'staff'`, `status <> 'failed'` and `created > ?`.
-- `unansweredClientMessages(leadId, { limit = 10 } = {}) → rows` (oldest first; the newest `limit`): `direction = 'in'` rows with `ts` greater than the newest `out` message's `ts` AND greater than the newest not-failed `staff`/`dana` outbox row's `created` (each `COALESCE(…, 0)`).
+- `unansweredClientMessages(leadId, { limit = 10 } = {}) → rows` (oldest first; the newest `limit`, `clampLimit(limit, 10)`): `direction = 'in'` rows with `ts` greater than the newest stored HUMAN outbound message's `ts` (`direction = 'out' AND sender_kind IN ('staff','owner_number')`) AND greater than the newest not-failed `staff`/`dana` outbox row's `COALESCE(covers_ts, created)` (each `COALESCE(…, 0)`). Dana's own stored message never bounds it — her outbox row does, through `covers_ts`, so a client message stamped while she composed stays unanswered. A message stamped the very same second as the newest one she answered is treated as answered (WhatsApp stamps whole seconds; `>=` would re-answer her own batch, the worse failure).
 - `purgeLead` also runs `UPDATE leads SET dana_chat_id = NULL, dana_chat_ts = NULL, dana_introduced = 0 WHERE lead_id = ?`; `leaveInbox` also sets `dana_off = 0, dana_test = 0`.
 
 **`lib/inbox/ingest.mjs`** — when an outbound record is `inserted` with a sender in `HUMAN_SENDERS`: `inbox.noteHumanOutbound(current.lead_id, ts)` (next to the needs_human/handler updates).
@@ -19830,6 +19834,29 @@ test('a wake during a run runs once more when it lands; stop() drops an armed ba
   assert.equal(armed.calls.length, 0, 'an armed batch is dropped');
 });
 
+test('a client message that arrives while Dana composes is not covered by her answer; her row says what it answered', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const h = harness({ answer: async () => { await gate; return defaultAnswer(); } });
+  h.client('C1', NOW - 5000, 'hello');
+  const run = h.dana.answer(LEAD, { ts: NOW - 5000 });
+  await new Promise((r) => setTimeout(r, 5));
+  h.tick(4000);
+  h.client('C2', h.now() - 1000, 'and a villa in Obhur?');
+  release();
+  assert.equal((await run).answered, true);
+  const row = h.s.db.prepare("SELECT * FROM wa_outbox WHERE lead_id = ? AND sender_kind = 'dana'").get(LEAD);
+  assert.equal(row.covers_ts, NOW - 5000, 'the newest message of the batch she answered');
+  assert.equal(row.status, 'accepted');
+  assert.equal(row.text, h.calls[0].body.text, 'the row holds exactly what went out');
+  assert.deepEqual(h.inbox.unansweredClientMessages(LEAD).map((m) => m.key_id), ['C2'], 'stamped during the round trip: still hers to answer');
+  h.dana.wake(LEAD, h.now() - 1000);
+  await h.dana.flush();
+  assert.equal(h.retell.completions.length, 2);
+  assert.equal(h.retell.completions[1].content, 'and a villa in Obhur?');
+  assert.deepEqual(h.inbox.unansweredClientMessages(LEAD), []);
+});
+
 test('nothing to answer, and a run that throws, are a line each and never a rejection', async () => {
   const h = harness();
   assert.deepEqual(await h.dana.answer(LEAD, { ts: NOW }), { skipped: 'nothing' });
@@ -19871,6 +19898,7 @@ Expected: the module is missing.
 import { extractActions, plainText } from './actions.mjs';
 import { replyJidFor } from './wa-send.mjs';
 import { HANDOVER_TOOL } from './tools.mjs';
+import { randomId } from './store.mjs';
 
 export const HUMAN_QUIET_MS = 24 * 3_600_000;
 export const SESSION_IDLE_MS = 23 * 3_600_000;
@@ -20067,15 +20095,22 @@ export function createDana({
     }
   }
 
-  /** One message out through the one sender; stored at the second it went (P4-12, P4-14). */
-  async function send(lead, text, language) {
-    const body = Number(lead.dana_introduced) === 1 ? text : `${DISCLOSURE[language]}\n\n${text}`;
+  /**
+   * One message out through the one sender (P4-12, P4-14). Her outbox row goes in FIRST, with
+   * `covers_ts` = the newest client message this answers and the text normalised the way a
+   * staff reply is (the poller matches an unconfirmed send by exact text), so a client message
+   * stamped while she composed is not counted as answered, and a crash mid-send leaves a row.
+   */
+  async function send(lead, text, language, coversTs) {
+    const body = (Number(lead.dana_introduced) === 1 ? text : `${DISCLOSURE[language]}\n\n${text}`).replace(/\r\n?/g, '\n').trim();
     const jid = replyJidFor(lead);
-    const out = await sender.sendTo({ jid, text: body, kind: 'dana', leadId: lead.lead_id });
+    const sendId = `SND-${now().toString(36)}-${randomId(8)}`;
+    const ins = inbox.insertOutbox({ send_id: sendId, lead_id: lead.lead_id, jid, text: body, user_id: null, sender_kind: 'dana', status: 'pending', covers_ts: coversTs });
+    if (!ins.inserted) return { sent: false, error: 'bad_send_id' };
+    const out = await sender.sendTo({ jid, text: body, kind: 'dana', leadId: lead.lead_id, sendId });
     const t = now();
     if (out.ok) {
-      const row = out.sendId ? inbox.getOutbox(out.sendId) : null;
-      const startedAt = Number.isFinite(row?.created) ? row.created : t;
+      const startedAt = Number.isFinite(ins.row?.created) ? ins.row.created : t;
       try {
         db.transaction(() => {
           if (db.getLead(lead.lead_id)?.inbox_state !== 'in') return;
@@ -20096,13 +20131,13 @@ export function createDana({
   }
 
   /** The hand-over (P4-11): the flag first, then the alert, then the one line — unless it went already. */
-  async function handover(leadId, language, why) {
+  async function handover(leadId, language, why, coversTs) {
     const fresh = db.getLead(leadId);
     if (!fresh || fresh.inbox_state !== 'in') return { handover: why, sent: false };
     const already = Number(fresh.needs_human) === 1;
     if (!already) inbox.setNeedsHuman(leadId, 1);
     if (alerts) alerts.notify(leadId, { reason: 'needs_human' });
-    const sent = already ? false : (await send(fresh, HANDOVER[language], language)).sent;
+    const sent = already ? false : (await send(fresh, HANDOVER[language], language, coversTs)).sent;
     say({ evt: 'dana.handover', leadId, why, sent });
     return { handover: why, sent };
   }
@@ -20112,7 +20147,8 @@ export function createDana({
     if (!e.ok) {
       if (e.reason === 'cap_chat' || e.reason === 'cap_day') {
         const lead = db.getLead(leadId);
-        return handover(leadId, languageOf({ lead, texts: inbox.unansweredClientMessages(leadId, { limit: CONTEXT_MESSAGES }).map((m) => m.text) }), e.reason);
+        const waiting = inbox.unansweredClientMessages(leadId, { limit: CONTEXT_MESSAGES });
+        return handover(leadId, languageOf({ lead, texts: waiting.map((m) => m.text) }), e.reason, waiting.length ? waiting[waiting.length - 1].ts : now());
       }
       if (LOGGED_SKIPS.has(e.reason)) say({ evt: 'dana.skipped', leadId, reason: e.reason });
       return { skipped: e.reason };
@@ -20123,11 +20159,12 @@ export function createDana({
       return { skipped: 'nothing' };
     }
     const language = languageOf({ lead: e.lead, texts: batch.map((m) => m.text) });
+    const coversTs = batch[batch.length - 1].ts;
     const c = await complete(e.lead, batch, language);
-    if (c.error) return handover(leadId, language, c.error);
+    if (c.error) return handover(leadId, language, c.error, coversTs);
     const { text, handover: asked, links } = answerFrom(c.completion, { inventory, siteUrl, language });
-    if (asked) return handover(leadId, language, 'request_human');
-    if (!text) return handover(leadId, language, 'empty');
+    if (asked) return handover(leadId, language, 'request_human', coversTs);
+    if (!text) return handover(leadId, language, 'empty', coversTs);
     // Pre-send (P4-13): the chat as WhatsApp has it now, then the lead again, then a person's answer.
     if (backfill && typeof backfill.refresh === 'function') {
       try { await backfill.refresh(e.lead); } catch { /* the checks below read what is stored */ }
@@ -20137,11 +20174,11 @@ export function createDana({
       if (LOGGED_SKIPS.has(again.reason)) say({ evt: 'dana.skipped', leadId, reason: again.reason });
       return { skipped: again.reason };
     }
-    if (inbox.humanOutboundAfter(leadId, batch[batch.length - 1].ts)) {
+    if (inbox.humanOutboundAfter(leadId, coversTs)) {
       say({ evt: 'dana.skipped', leadId, reason: 'dropped_human' });
       return { skipped: 'dropped_human' };
     }
-    const r = await send(again.lead, text, language);
+    const r = await send(again.lead, text, language, coversTs);
     if (!r.sent) {
       inbox.setNeedsHuman(leadId, 1);
       if (alerts) alerts.notify(leadId, { reason: 'needs_human' });
@@ -20666,6 +20703,7 @@ const out = {
   from: version,
   to: s.db.prepare('PRAGMA user_version').get().user_version,
   dana: ['dana_off', 'dana_test', 'dana_chat_id', 'dana_chat_ts', 'dana_introduced', 'last_human_out_ts'].filter((c) => cols.includes(c)).length,
+  coversTs: s.db.prepare('PRAGMA table_info(wa_outbox)').all().some((c) => c.name === 'covers_ts'),
   humanTs: [s.getLead('L1').last_human_out_ts, s.getLead('L2').last_human_out_ts],
   sessionsKept: s.db.prepare('SELECT COUNT(*) n FROM auth_sessions').get().n,
   chatRev: s.getLead('L1').chat_rev,
@@ -20685,7 +20723,7 @@ s.close();" 2>&1 | grep -v ExperimentalWarning
 git -C ~/bona-wt/team-inbox worktree remove --force $SP/main-v5
 rm -f $SP/rehearse6.db $SP/rehearse6.db-wal $SP/rehearse6.db-shm
 ```
-Expected: `{"from":5,"to":6,"dana":6,"humanTs":[5000,null],"sessionsKept":1,"chatRev":7,"updatable":true}` then `{"v":6,"lead":true,"listed":1}`. Any SQL error stops the ship.
+Expected: `{"from":5,"to":6,"dana":6,"coversTs":true,"humanTs":[5000,null],"sessionsKept":1,"chatRev":7,"updatable":true}` then `{"v":6,"lead":true,"listed":1}`. Any SQL error stops the ship.
 
 - [ ] **Step 3: Claude review** — superpowers:requesting-code-review on `git diff origin/main...HEAD -- services/`. Focus: (1) Dana can NEVER send while `dana_enabled` is `'0'` unless `dana_test = 1` on that one chat, and never in a chat with `dana_off = 1`, `needs_human = 1`, a human outbound under 24 h, or that is unsure/out/excluded/lid-only; (2) the disclosure prefix is in code and goes exactly once per chat (and again after a purge); (3) the pre-send re-fetch and the drop on a human outbound (stored or on its way); (4) hand-over sets the flag before the line, alerts everyone, sends the line once, and she stays quiet after; (5) caps counted from the outbox (restart-proof), the Retell budget taken per new chat and refunded on failure; (6) every send goes through `app.sender` with kind `dana` (no second fetch to Evolution anywhere), uncertain never retried; (7) no message text, name, number or Retell chat id in any log line, and never the phone number in the dynamic variables; (8) the site's Retell objects and Lisa's are never read or written by `--whatsapp-only`, and `cfg.waChatAgentId` never falls back to the site agent; (9) migration v6 on the live schema and the v5 build on a v6 file; (10) the poller hook never awaits Dana, a run never rejects, shutdown order; (11) the `dana` route: exactly one switch, `dana_test` owner-only, rule 1; (12) the prompt: no markers, no cards, no prices from memory, no TK, no self-introduction, hand-over list complete.
 
@@ -20779,4 +20817,5 @@ Expected: `/health` has `dana: { configured: true, enabled: false }` and `push.c
 
 - **Task 1 (schema v6)** — Claude + Codex approved. Codex proved the v6 step rolls back whole (injected trigger); Claude proved the v5 build opens a v6 file. Three test-hygiene items folded into Task 2. No disagreement.
 - **Task 2 (switch, agent id, audit)** — Codex found the test lost its only unknown-key assertion (restored). Both: stale comments (fixed). **Disagreement:** `setSetting`'s `String(value)` coercion accepts number `1`/`0` and `['1']` — Codex Important, Claude Minor (pre-existing across all three switches; the only entry point, the settings route, turns non-strings into `''` which is refused; a cross-switch tightening is its own change). Left as is; told to the owner. Forward note for Task 8: an empty env `BONA_RETELL_WA_CHAT_AGENT_ID=` yields `''`, so `dana.configured` must be `Boolean(agentId && …)` (it is, in `createDana`).
+- **Task 3 (store, ingest, sender)** — the commit executed the plan verbatim; the findings were the PLAN's. Codex found (Claude confirmed against Task 6's run order) that `unansweredClientMessages` keyed "answered" on the send row's `created`, stamped after the Retell round trip, so a client message arriving while Dana composed would never be answered by her → fixed by `wa_outbox.covers_ts` (v6, unshipped) written with her row before the call, and the human-sender restriction on the stored-message bound (P4-7, P4-14, contract). Claude found (verified) that `noteHumanOutbound` with a non-finite `ts` reset the clock to NULL and `countDanaSends` with an undefined `sinceTs` counted 0 → guards. Both: a Dana record read back before its key was stored as `owner_number` and stamped the human clock → Dana's text is normalised like a reply and `upsertMessage` recomputes the clock on an `owner_number → staff/dana` correction (Codex wanted stamp provenance; Claude's smaller fix taken). **Disagreements:** the same-second tie (Codex: unsafe; Claude: the right side to err on once `covers_ts` exists — kept, pinned by a test); a `pending` staff row older than `INTERRUPTED_MS` counting as a human answer (Codex: Important, wants escalation to `needs_human`; Claude: bounded and correct — kept, an upkeep follow-up if the owner wants it).
 
