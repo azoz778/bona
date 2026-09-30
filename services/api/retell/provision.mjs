@@ -2,13 +2,15 @@
 /**
  * Idempotent provisioning of the Retell objects behind Dana (دانة).
  *
- * Creates — or updates in place — four things and records their ids in `ids.json`
+ * Creates — or updates in place — six things and records their ids in `ids.json`
  * (committed; ids are not secret):
  *
  *   1. Knowledge base "Bona site"   ← <site>/llms-full.txt + /llms.txt
- *   2. Retell LLM "Bona Dana"       ← prompt.md, begin message, KB, 3 custom tools
+ *   2. Retell LLM "Bona Dana"       ← prompt.md, begin message, KB, 4 custom tools
  *   3. Voice agent "Bona Dana (voice)"
  *   4. Chat agent  "Bona Dana (chat)"
+ *   5. Retell LLM "Bona Dana (WhatsApp)"  ← prompt-whatsapp.md, same KB, 3 tools
+ *   6. Chat agent "Bona Dana (WhatsApp)"
  *
  * WHY A SEPARATE CHAT AGENT: Retell models chat agents as their own object. The API
  * has `POST /create-chat-agent` / `PATCH /update-chat-agent/{id}` distinct from
@@ -34,6 +36,7 @@
  *   node services/api/retell/provision.mjs --publish     # also publish both agents
  *   node services/api/retell/provision.mjs --rebuild-kb  # replace the KB after a site move
  *   node services/api/retell/provision.mjs --ensure-env  # only create ~/.secrets/bona-services.env
+ *   node services/api/retell/provision.mjs --whatsapp-only  # only Dana's WhatsApp LLM + chat agent (the site's objects are not touched)
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -53,6 +56,67 @@ export const KB_NAME = 'Bona site';
 export const LLM_NAME = 'Bona Dana';
 export const VOICE_AGENT_NAME = 'Bona Dana (voice)';
 export const CHAT_AGENT_NAME = 'Bona Dana (chat)';
+
+/* ---------------- Dana on WhatsApp (design §6, Phase 4, P4-1) ---------------- */
+export const WA_PROMPT_FILE = path.join(HERE, 'prompt-whatsapp.md');
+export const WA_LLM_NAME = 'Bona Dana (WhatsApp)';
+export const WA_CHAT_AGENT_NAME = 'Bona Dana (WhatsApp)';
+/** How long a WhatsApp Retell chat lives between messages: the reuse window lib/dana-wa.mjs keeps (23 h) plus a margin. Retell allows up to 72 h. */
+export const WA_SESSION_MS = 86_400_000;
+
+/**
+ * The WhatsApp agent's tools: the two inventory searches exactly as the site has them, and
+ * `request_human`, the hand-over. No `show_property` — nothing is on a screen, links are
+ * put in the text by lib/dana-wa.mjs — and no `create_lead` — the chat IS the lead.
+ */
+export function whatsappToolsPayload({ publicApi, toolToken }) {
+  const site = toolsPayload({ publicApi, toolToken });
+  const url = (name) => `${String(publicApi).replace(/\/+$/, '')}/v1/tools/${name}`;
+  const headers = { 'X-Bona-Token': toolToken, 'Content-Type': 'application/json' };
+  return [
+    site.find((t) => t.name === 'search_properties'),
+    site.find((t) => t.name === 'search_units'),
+    {
+      type: 'custom',
+      name: 'request_human',
+      url: url('request_human'),
+      headers,
+      description:
+        'Hand this WhatsApp conversation to the Bona team. Call it when the client asks to see or visit a property, makes or asks about an offer, a discount, a negotiation, a contract, a deposit or a payment, asks for a person or a call, complains, wants to sell or value their own property, keeps sending voice notes or photos you cannot open, or asks anything you cannot answer from the tools. After it returns, tell the client in one short sentence that the team will reply shortly, and say nothing else.',
+      speak_during_execution: false,
+      speak_after_execution: true,
+      timeout_ms: 10_000,
+      parameters: {
+        type: 'object',
+        properties: { reason: { type: 'string', description: 'Why, in two or three words: viewing, offer, wants a person, complaint, own property, unsure.' } },
+        required: ['reason'],
+      },
+    },
+  ];
+}
+
+export function whatsappLlmPayload({ prompt, model, knowledgeBaseIds, publicApi, toolToken }) {
+  return {
+    model,
+    model_temperature: 0.3,
+    general_prompt: prompt,
+    // The client writes first; there is no scripted opening (the disclosure line is added in code).
+    start_speaker: 'user',
+    general_tools: whatsappToolsPayload({ publicApi, toolToken }),
+    ...(knowledgeBaseIds?.length ? { knowledge_base_ids: knowledgeBaseIds } : {}),
+    default_dynamic_variables: { channel: 'whatsapp', language: 'en', lead_facts: '', recent_messages: '' },
+  };
+}
+
+/** No webhook: bona-api holds the transcript itself, and there is nothing else to be told. */
+export function whatsappChatAgentPayload({ llmId }) {
+  return {
+    agent_name: WA_CHAT_AGENT_NAME,
+    response_engine: { type: 'retell-llm', llm_id: llmId },
+    language: ['ar-SA', 'en-US'],
+    end_chat_after_silence_ms: WA_SESSION_MS,
+  };
+}
 
 /**
  * What Dana says first on a CALL (`start_speaker: agent`): the PDPL disclosure — who she is
@@ -102,7 +166,7 @@ export function knowledgeBaseFreshness(kb, { siteUrl }) {
 }
 
 /**
- * The three custom tools.
+ * The four custom tools.
  *
  * The token rides in an `X-Bona-Token` header, not in the query string: Retell's
  * CustomTool schema takes a `headers` object (verified against
@@ -333,6 +397,7 @@ async function withModelFallback(fn, { preferred, fallback, log }) {
 export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE, home = os.homedir(), log = console.log, clientFactory = createRetellClient } = {}) {
   const dryRun = argv.includes('--dry-run');
   const rebuildKb = argv.includes('--rebuild-kb');
+  const whatsappOnly = argv.includes('--whatsapp-only');
   const publish = argv.includes('--publish') || truthy(env.BONA_RETELL_PUBLISH, false);
   const separateChatAgent = truthy(env.BONA_RETELL_SEPARATE_CHAT_AGENT, true);
 
@@ -354,13 +419,18 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
 
   const prompt = fs.readFileSync(PROMPT_FILE, 'utf8');
   const ids = readIds(idsFile);
+  // The record written below starts from `kept`, so neither run drops the other run's ids.
+  const { updatedAt: _wasUpdated, ...kept } = ids;
+  const waPrompt = fs.readFileSync(WA_PROMPT_FILE, 'utf8');
+  const waLlmBody = (model, kbIds) => whatsappLlmPayload({ prompt: waPrompt, model, knowledgeBaseIds: kbIds, publicApi, toolToken });
 
   const kbBody = knowledgeBasePayload({ siteUrl });
   const llmBody = (model, kbIds) => llmPayload({ prompt, model, knowledgeBaseIds: kbIds, publicApi, toolToken, siteUrl });
 
   if (dryRun) {
     log('--- DRY RUN — nothing is sent to Retell. Tool token shown as <BONA_TOOL_TOKEN>. ---\n');
-    if (rebuildKb) {
+    if (whatsappOnly) log('# --whatsapp-only: the site\'s knowledge base, LLM and agents are not touched\n');
+    if (!whatsappOnly && rebuildKb) {
       log(`# --rebuild-kb: the knowledge base would be REPLACED so it indexes ${siteUrl}, in this order:`);
       log('#   1. POST   /create-knowledge-base                       (the payload below)');
       log(`#   2. PATCH  /update-retell-llm/${ids.llmId ?? '<llm_id>'}   knowledge_base_ids: ["<new_knowledge_base_id>"]`);
@@ -368,121 +438,176 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
       log('#      … and POST /publish-agent-version for each, when --publish is given');
       log(`#   4. DELETE /delete-knowledge-base/${ids.knowledgeBaseId ?? '<old_knowledge_base_id>'}   — last, once the agents are on the new base\n`);
     }
-    log(`# POST /create-knowledge-base  (multipart/form-data)\n${JSON.stringify(redactPayload(kbBody, toolToken), null, 2)}\n`);
-    log(`# POST /create-retell-llm  (model: "${preferred}", fallback on 4xx: "${fallback}")\n${JSON.stringify(redactPayload({ ...llmBody(preferred, ['<knowledge_base_id>']), general_prompt: `<prompt.md — ${prompt.length} chars>` }, toolToken), null, 2)}\n`);
-    log(`# POST /create-agent\n${JSON.stringify(redactPayload(voiceAgentPayload({ llmId: '<llm_id>', publicApi, toolToken, voiceId }), toolToken), null, 2)}\n`);
-    if (separateChatAgent) log(`# POST /create-chat-agent\n${JSON.stringify(redactPayload(chatAgentPayload({ llmId: '<llm_id>', publicApi, toolToken }), toolToken), null, 2)}\n`);
-    else log('# chat agent: disabled (BONA_RETELL_SEPARATE_CHAT_AGENT=0) — /create-chat would reuse the voice agent id\n');
+    if (!whatsappOnly) {
+      log(`# POST /create-knowledge-base  (multipart/form-data)\n${JSON.stringify(redactPayload(kbBody, toolToken), null, 2)}\n`);
+      log(`# POST /create-retell-llm  (model: "${preferred}", fallback on 4xx: "${fallback}")\n${JSON.stringify(redactPayload({ ...llmBody(preferred, ['<knowledge_base_id>']), general_prompt: `<prompt.md — ${prompt.length} chars>` }, toolToken), null, 2)}\n`);
+      log(`# POST /create-agent\n${JSON.stringify(redactPayload(voiceAgentPayload({ llmId: '<llm_id>', publicApi, toolToken, voiceId }), toolToken), null, 2)}\n`);
+      if (separateChatAgent) log(`# POST /create-chat-agent\n${JSON.stringify(redactPayload(chatAgentPayload({ llmId: '<llm_id>', publicApi, toolToken }), toolToken), null, 2)}\n`);
+      else log('# chat agent: disabled (BONA_RETELL_SEPARATE_CHAT_AGENT=0) — /create-chat would reuse the voice agent id\n');
+    }
+    log(`# POST /create-retell-llm  — WhatsApp (model: "${preferred}")\n${JSON.stringify(redactPayload({ ...waLlmBody(preferred, [ids.knowledgeBaseId ?? '<knowledge_base_id>']), general_prompt: `<prompt-whatsapp.md — ${waPrompt.length} chars>` }, toolToken), null, 2)}\n`);
+    log(`# POST /create-chat-agent  — WhatsApp\n${JSON.stringify(whatsappChatAgentPayload({ llmId: ids.waLlmId ?? '<wa_llm_id>' }), null, 2)}\n`);
     log(`# publish step: ${publish ? 'POST /publish-agent-version/{agent_id}' : 'skipped (drafts work for create-web-call / create-chat; pass --publish to force)'}`);
     log(`# ids file: ${idsFile}`);
-    return { dryRun: true, ids, model: preferred, rebuildKb };
+    return { dryRun: true, ids, model: preferred, rebuildKb, whatsappOnly };
   }
 
   if (!merged.RETELL_API_KEY) throw new Error('RETELL_API_KEY is missing — expected in ~/.secrets/retell.env');
   const client = clientFactory({ apiKey: merged.RETELL_API_KEY });
 
-  /* 1. Knowledge base ------------------------------------------------ */
+  // Declared here so the record below can read them whichever steps ran.
   let knowledgeBaseId = ids.knowledgeBaseId ?? null;
-  let kb = null;
-  if (knowledgeBaseId) {
-    try { kb = await client.getKnowledgeBase(knowledgeBaseId); } catch { kb = null; knowledgeBaseId = null; }
-  }
-  if (!kb) kb = await findKnowledgeBase(client, KB_NAME);
-  // Set when --rebuild-kb replaced a base, and acted on only after the LLM points at the
-  // replacement — see the retirement step below.
-  let retiredKnowledgeBaseId = null;
-  if (kb && rebuildKb) {
-    retiredKnowledgeBaseId = kb.knowledge_base_id;
-    kb = await client.createKnowledgeBase(kbBody);
-    knowledgeBaseId = kb.knowledge_base_id;
-    log(`+ knowledge base "${KB_NAME}" rebuilt (${knowledgeBaseId}) from ${kbBody.knowledge_base_urls.join(' + ')}`);
-    log(`~ old knowledge base ${retiredKnowledgeBaseId} kept until the LLM points at the new one`);
-  } else if (kb) {
-    knowledgeBaseId = kb.knowledge_base_id;
-    log(`= knowledge base "${KB_NAME}" exists (${knowledgeBaseId}, status ${kb.status})`);
-    const freshness = knowledgeBaseFreshness(kb, { siteUrl });
-    if (freshness.stale) {
-      log(`  ! it indexes ${freshness.urls.join(' + ')}, not ${freshness.wanted.join(' + ')}`);
-      log("  ! auto-refresh keeps re-fetching those URLs, so Dana's knowledge decays with no error anywhere");
-      log('  ! re-run with --rebuild-kb to replace it — Retell cannot re-point a knowledge base in place');
-    }
-  } else {
-    kb = await client.createKnowledgeBase(kbBody);
-    knowledgeBaseId = kb.knowledge_base_id;
-    log(`+ knowledge base "${KB_NAME}" created (${knowledgeBaseId})`);
-  }
-
-  /* 2. Retell LLM ---------------------------------------------------- */
   let llmId = ids.llmId ?? null;
-  let existingLlm = null;
-  if (llmId) {
-    try { existingLlm = await client.getLlm(llmId); } catch { existingLlm = null; llmId = null; }
-  }
-  let model;
-  if (existingLlm) {
-    const updated = await withModelFallback((m) => client.updateLlm(llmId, llmBody(m, [knowledgeBaseId])), { preferred, fallback, log });
-    model = updated.model;
-    log(`= Retell LLM "${LLM_NAME}" updated (${llmId}, model ${model})`);
-  } else {
-    const created = await withModelFallback((m) => client.createLlm(llmBody(m, [knowledgeBaseId])), { preferred, fallback, log });
-    llmId = created.result.llm_id;
-    model = created.model;
-    log(`+ Retell LLM "${LLM_NAME}" created (${llmId}, model ${model})`);
-  }
-
-  /* 3. Voice agent --------------------------------------------------- */
   let voiceAgentId = ids.voiceAgentId ?? null;
-  const voiceBody = voiceAgentPayload({ llmId, publicApi, toolToken, voiceId });
-  if (voiceAgentId) {
-    try {
-      await client.getAgent(voiceAgentId);
-      await client.updateAgent(voiceAgentId, voiceBody);
-      log(`= voice agent updated (${voiceAgentId})`);
-    } catch { voiceAgentId = null; }
-  }
-  if (!voiceAgentId) {
-    const agent = await client.createAgent(voiceBody);
-    voiceAgentId = agent.agent_id;
-    log(`+ voice agent "${VOICE_AGENT_NAME}" created (${voiceAgentId})`);
-  }
-
-  /* 4. Chat agent ---------------------------------------------------- */
   let chatAgentId = ids.chatAgentId ?? null;
-  if (separateChatAgent) {
-    const chatBody = chatAgentPayload({ llmId, publicApi, toolToken });
-    if (chatAgentId) {
-      try {
-        await client.getChatAgent(chatAgentId);
-        await client.updateChatAgent(chatAgentId, chatBody);
-        log(`= chat agent updated (${chatAgentId})`);
-      } catch { chatAgentId = null; }
-    }
-    if (!chatAgentId) {
-      const agent = await client.createChatAgent(chatBody);
-      chatAgentId = agent.agent_id;
-      log(`+ chat agent "${CHAT_AGENT_NAME}" created (${chatAgentId})`);
-    }
-  } else {
-    chatAgentId = voiceAgentId;
-    log('~ chat agent disabled — /create-chat will be given the voice agent id');
-  }
-
-  /* 5. Publish (optional) -------------------------------------------- */
+  let model = ids.model ?? null;
+  // Set when --rebuild-kb replaced a base, and acted on only after every LLM and agent
+  // points at the replacement — see the retirement step (6), which runs dead last.
+  let retiredKnowledgeBaseId = null;
   // Tracked because on an account where published versions are what callers actually reach,
   // an agent update only changes the draft — the live agent moves to the new knowledge base
   // at publish time, not before. A swallowed publish failure must therefore still block the
   // retirement below, or the live agent keeps serving a base that has just been deleted.
   let publishFailed = false;
-  if (publish) {
-    for (const [label, id] of [['voice', voiceAgentId], ['chat', chatAgentId]]) {
-      if (!id || (label === 'chat' && !separateChatAgent)) continue;
-      try {
-        await client.publishAgent(id);
-        log(`+ published ${label} agent (${id})`);
-      } catch (err) {
-        publishFailed = true;
-        log(`  ! publish ${label} agent failed: ${err.message}`);
+
+  if (whatsappOnly) {
+    // Steps 1–5 are the site's: never read, updated or created here (P4-1).
+    if (!knowledgeBaseId) throw new Error('no knowledge base id in ids.json — run the full provisioning (no flag) first');
+  } else {
+    /* 1. Knowledge base ------------------------------------------------ */
+    let kb = null;
+    if (knowledgeBaseId) {
+      try { kb = await client.getKnowledgeBase(knowledgeBaseId); } catch { kb = null; knowledgeBaseId = null; }
+    }
+    if (!kb) kb = await findKnowledgeBase(client, KB_NAME);
+    if (kb && rebuildKb) {
+      retiredKnowledgeBaseId = kb.knowledge_base_id;
+      kb = await client.createKnowledgeBase(kbBody);
+      knowledgeBaseId = kb.knowledge_base_id;
+      log(`+ knowledge base "${KB_NAME}" rebuilt (${knowledgeBaseId}) from ${kbBody.knowledge_base_urls.join(' + ')}`);
+      log(`~ old knowledge base ${retiredKnowledgeBaseId} kept until the LLM points at the new one`);
+    } else if (kb) {
+      knowledgeBaseId = kb.knowledge_base_id;
+      log(`= knowledge base "${KB_NAME}" exists (${knowledgeBaseId}, status ${kb.status})`);
+      const freshness = knowledgeBaseFreshness(kb, { siteUrl });
+      if (freshness.stale) {
+        log(`  ! it indexes ${freshness.urls.join(' + ')}, not ${freshness.wanted.join(' + ')}`);
+        log("  ! auto-refresh keeps re-fetching those URLs, so Dana's knowledge decays with no error anywhere");
+        log('  ! re-run with --rebuild-kb to replace it — Retell cannot re-point a knowledge base in place');
       }
+    } else {
+      kb = await client.createKnowledgeBase(kbBody);
+      knowledgeBaseId = kb.knowledge_base_id;
+      log(`+ knowledge base "${KB_NAME}" created (${knowledgeBaseId})`);
+    }
+
+    /* 2. Retell LLM ---------------------------------------------------- */
+    let existingLlm = null;
+    if (llmId) {
+      try { existingLlm = await client.getLlm(llmId); } catch { existingLlm = null; llmId = null; }
+    }
+    if (existingLlm) {
+      const updated = await withModelFallback((m) => client.updateLlm(llmId, llmBody(m, [knowledgeBaseId])), { preferred, fallback, log });
+      model = updated.model;
+      log(`= Retell LLM "${LLM_NAME}" updated (${llmId}, model ${model})`);
+    } else {
+      const created = await withModelFallback((m) => client.createLlm(llmBody(m, [knowledgeBaseId])), { preferred, fallback, log });
+      llmId = created.result.llm_id;
+      model = created.model;
+      log(`+ Retell LLM "${LLM_NAME}" created (${llmId}, model ${model})`);
+    }
+
+    /* 3. Voice agent --------------------------------------------------- */
+    const voiceBody = voiceAgentPayload({ llmId, publicApi, toolToken, voiceId });
+    if (voiceAgentId) {
+      try {
+        await client.getAgent(voiceAgentId);
+        await client.updateAgent(voiceAgentId, voiceBody);
+        log(`= voice agent updated (${voiceAgentId})`);
+      } catch { voiceAgentId = null; }
+    }
+    if (!voiceAgentId) {
+      const agent = await client.createAgent(voiceBody);
+      voiceAgentId = agent.agent_id;
+      log(`+ voice agent "${VOICE_AGENT_NAME}" created (${voiceAgentId})`);
+    }
+
+    /* 4. Chat agent ---------------------------------------------------- */
+    if (separateChatAgent) {
+      const chatBody = chatAgentPayload({ llmId, publicApi, toolToken });
+      if (chatAgentId) {
+        try {
+          await client.getChatAgent(chatAgentId);
+          await client.updateChatAgent(chatAgentId, chatBody);
+          log(`= chat agent updated (${chatAgentId})`);
+        } catch { chatAgentId = null; }
+      }
+      if (!chatAgentId) {
+        const agent = await client.createChatAgent(chatBody);
+        chatAgentId = agent.agent_id;
+        log(`+ chat agent "${CHAT_AGENT_NAME}" created (${chatAgentId})`);
+      }
+    } else {
+      chatAgentId = voiceAgentId;
+      log('~ chat agent disabled — /create-chat will be given the voice agent id');
+    }
+
+    /* 5. Publish (optional) -------------------------------------------- */
+    if (publish) {
+      for (const [label, id] of [['voice', voiceAgentId], ['chat', chatAgentId]]) {
+        if (!id || (label === 'chat' && !separateChatAgent)) continue;
+        try {
+          await client.publishAgent(id);
+          log(`+ published ${label} agent (${id})`);
+        } catch (err) {
+          publishFailed = true;
+          log(`  ! publish ${label} agent failed: ${err.message}`);
+        }
+      }
+    }
+
+  }
+
+  /* 7. Dana on WhatsApp: her own LLM and chat agent (P4-1) --------- */
+  // Before the retirement step: on --rebuild-kb her LLM must be on the new base too before
+  // the old one is deleted, like the site's.
+  let waLlmId = ids.waLlmId ?? null;
+  let existingWaLlm = null;
+  if (waLlmId) {
+    try { existingWaLlm = await client.getLlm(waLlmId); } catch { existingWaLlm = null; waLlmId = null; }
+  }
+  let waModel;
+  if (existingWaLlm) {
+    const updated = await withModelFallback((m) => client.updateLlm(waLlmId, waLlmBody(m, [knowledgeBaseId])), { preferred, fallback, log });
+    waModel = updated.model;
+    log(`= WhatsApp LLM "${WA_LLM_NAME}" updated (${waLlmId}, model ${waModel})`);
+  } else {
+    const created = await withModelFallback((m) => client.createLlm(waLlmBody(m, [knowledgeBaseId])), { preferred, fallback, log });
+    waLlmId = created.result.llm_id;
+    waModel = created.model;
+    log(`+ WhatsApp LLM "${WA_LLM_NAME}" created (${waLlmId}, model ${waModel})`);
+  }
+  let waChatAgentId = ids.waChatAgentId ?? null;
+  const waAgentBody = whatsappChatAgentPayload({ llmId: waLlmId });
+  if (waChatAgentId) {
+    try {
+      await client.getChatAgent(waChatAgentId);
+      await client.updateChatAgent(waChatAgentId, waAgentBody);
+      log(`= WhatsApp chat agent updated (${waChatAgentId})`);
+    } catch { waChatAgentId = null; }
+  }
+  if (!waChatAgentId) {
+    const agent = await client.createChatAgent(waAgentBody);
+    waChatAgentId = agent.agent_id;
+    log(`+ WhatsApp chat agent "${WA_CHAT_AGENT_NAME}" created (${waChatAgentId})`);
+  }
+  if (publish) {
+    try {
+      await client.publishAgent(waChatAgentId);
+      log(`+ published WhatsApp chat agent (${waChatAgentId})`);
+    } catch (err) {
+      publishFailed = true;
+      log(`  ! publish WhatsApp chat agent failed: ${err.message}`);
     }
   }
 
@@ -506,16 +631,21 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
     }
   }
 
-  const record = {
-    knowledgeBaseId, llmId, voiceAgentId, chatAgentId, model,
-    voiceId, publicApi, siteUrl, separateChatAgent, published: publish,
-    note: 'Ids are not secrets. Regenerate with: node services/api/retell/provision.mjs',
-  };
+  const record = whatsappOnly
+    ? { ...kept, waLlmId, waChatAgentId, waModel }
+    : {
+      ...kept,
+      knowledgeBaseId, llmId, voiceAgentId, chatAgentId, model,
+      voiceId, publicApi, siteUrl, separateChatAgent, published: publish,
+      note: 'Ids are not secrets. Regenerate with: node services/api/retell/provision.mjs',
+      waLlmId, waChatAgentId, waModel,
+    };
   const written = writeIds(record, idsFile);
   log(written.changed ? `\nwrote ${idsFile}` : `\n${idsFile} unchanged`);
   log('Add to ~/.secrets/bona-services.env (or leave to ids.json):');
   log(`  BONA_RETELL_VOICE_AGENT_ID=${voiceAgentId}`);
   log(`  BONA_RETELL_CHAT_AGENT_ID=${chatAgentId}`);
+  log(`  BONA_RETELL_WA_CHAT_AGENT_ID=${waChatAgentId}`);
   return record;
 }
 
