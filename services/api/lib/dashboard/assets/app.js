@@ -30,9 +30,14 @@
   /* ---------------- live refresh ---------------- */
 
   // A navigation the person started (a tap on Send, a link) must never be raced by a reload.
+  // iOS Safari never fires beforeunload, so a submitted form counts too (capture: before any
+  // handler could stop it). A page brought back from the back-forward cache is not leaving
+  // any more: pageshow fires on every restore and clears the flag.
   var leaving = false;
   if (typeof window !== 'undefined' && window.addEventListener) {
     window.addEventListener('beforeunload', function () { leaving = true; });
+    window.addEventListener('pageshow', function () { leaving = false; });
+    document.addEventListener('submit', function () { leaving = true; }, true);
   }
 
   /** Any field with words in it, or the one being typed in: the page holds a draft. */
