@@ -283,9 +283,14 @@ export function createApp(options = {}) {
   // --whatsapp-only; never the site's), the one sender, the alerts for her hand-over, the
   // bounded per-chat re-read before she sends, and the Retell day budget. Without an agent id
   // she is not configured: nothing is sent, the Team page says so. She ships off (P4-3).
+  // Never on the Retell mock unless a test opts in (`danaOnMock`): a mock's canned answer must
+  // not reach a real client's WhatsApp. `danaBatchMs` is a test-only batch delay.
+  const danaOnMock = Boolean(options.danaOnMock);
+  if (!options.dana && cfg.retellMock && !danaOnMock) log({ level: 'warn', evt: 'dana.mock_off' });
   const dana = options.dana ?? createDana({
-    db, inbox: inboxStore, team, sender, retell, alerts, inventory, siteUrl: cfg.siteUrl, agentId: cfg.waChatAgentId ?? null,
-    isExcludedLead: excludedLead, backfill, budget, now: clock, log,
+    db, inbox: inboxStore, team, sender, retell: cfg.retellMock && !danaOnMock ? null : retell, alerts, inventory,
+    siteUrl: cfg.siteUrl, agentId: cfg.waChatAgentId ?? null, isExcludedLead: excludedLead, backfill, budget, now: clock, log,
+    ...(Number.isFinite(options.danaBatchMs) ? { batchMs: options.danaBatchMs } : {}),
   });
   // The WhatsApp Ref-code poller. Read-only, and only when `BONA_WA_POLL` says so —
   // constructing it contacts nothing; the real server (below) is what puts it on a timer.
@@ -1001,7 +1006,7 @@ export function createApp(options = {}) {
   server.requestTimeout = 60_000;
   // The store is owned by the app when the app opened it; a caller who injected one
   // (tests, tools) closes it themselves.
-  if (ownsDb) server.on('close', () => { fanout.stop(); poller?.stop(); db.close(); });
+  if (ownsDb) server.on('close', () => { fanout.stop(); poller?.stop(); app.dana.stop().catch(() => {}); db.close(); });
 
   app.server = server;
   app.handle = handle;
@@ -1047,13 +1052,16 @@ if (isMain) {
     // Bounded as before: five seconds for the tick in flight, the pushes and the open connections.
     setTimeout(() => process.exit(0), 5000).unref();
     // The poller first — off its timer, and the tick in flight finished, so every alert it
-    // raises and every Dana wake is in; then Dana — armed batches dropped, the answers in
-    // flight finished (each may raise a push); then the pushes on their way get their answers
-    // (each writes to the store: `last_ok`, a gone device); then the server, whose close
-    // stops the fan-out and closes the store.
+    // raises and every Dana wake is in. Then Dana (armed batches dropped, the answers in flight
+    // finished — each may raise a push) and the pushes on their way (each writes to the store:
+    // `last_ok`, a gone device), given up to 4 s together: a Retell call can take 30 s. A run
+    // cut before its send leaves no row — the next client message wakes her; one cut mid-send
+    // is `uncertain` at start-up. Then the server, whose close stops the fan-out and the store.
     await app.poller?.stop();
-    await app.dana.stop();
-    await app.alerts.flush();
+    await Promise.race([
+      Promise.resolve().then(() => app.dana.stop()).then(() => app.alerts.flush()),
+      new Promise((r) => { setTimeout(r, 4000).unref(); }),
+    ]);
     app.server.close(() => process.exit(0));
   };
   // Nothing in `shutdown` rejects (`stop` and `flush` swallow their own failures); should one
