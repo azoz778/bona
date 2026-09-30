@@ -16922,9 +16922,12 @@ export function createAlerts({ db, pusher = null, isExcludedLead = () => false, 
         WHERE s.user_id IN (SELECT value FROM json_each(?))
         ORDER BY s.rowid`).all(t, JSON.stringify(due));
     if (!devices.length) return { skipped: 'no_devices' };
-    const users = new Set(devices.map((d) => d.user_id));
-    for (const u of users) marks.set(markKey(u, leadId), t);
+    // Every member due is marked, not only those a device was found for: the alert for this
+    // burst is going out now, so a second message in the same two minutes is quiet for all of
+    // them (a member who subscribes inside that window hears of the next burst).
+    for (const u of due) marks.set(markKey(u, leadId), t);
     prune(t);
+    const users = new Set(devices.map((d) => d.user_id));
     const answers = await Promise.all(devices.map(async (d) => ({ d, a: await pusher.send(d.endpoint) })));
     let ok = 0;
     let gone = 0;
