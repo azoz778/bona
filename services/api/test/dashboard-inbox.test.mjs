@@ -1461,12 +1461,12 @@ test('the per-chat Dana switches: anyone turns her off here, only an owner start
     assert.equal(res.status, 403);
     assert.deepEqual(await res.json(), { error: 'owner_only' });
     assert.equal(h.db.getLead('LEAD-A').dana_test, 0);
-    res = await h.postForm('/v1/admin/inbox/LEAD-A/dana', { dana_test: '1' }, { cookie: owner });
-    assert.equal(res.status, 303);
-    assert.equal(h.db.getLead('LEAD-A').dana_test, 1);
     res = await h.postForm('/v1/admin/inbox/LEAD-A/dana', { dana_off: '0' }, { cookie: owner });
     assert.equal(res.status, 303);
     assert.equal(h.db.getLead('LEAD-A').dana_off, 0);
+    res = await h.postForm('/v1/admin/inbox/LEAD-A/dana', { dana_test: '1' }, { cookie: owner });
+    assert.equal(res.status, 303);
+    assert.equal(h.db.getLead('LEAD-A').dana_test, 1);
     for (const bad of [{}, { dana_off: '1', dana_test: '1' }, { dana_off: 'yes' }, { dana_test: '2' }]) {
       res = await h.postForm('/v1/admin/inbox/LEAD-A/dana', bad, { cookie: owner });
       assert.equal(res.status, 303, JSON.stringify(bad));
@@ -1477,7 +1477,7 @@ test('the per-chat Dana switches: anyone turns her off here, only an owner start
     }
     assert.deepEqual([h.db.getLead('LEAD-A').dana_off, h.db.getLead('LEAD-A').dana_test], [0, 1], 'nothing written by a refused post');
     const audited = h.app.audit.recent(50).filter((r) => r.action === 'dana_chat');
-    assert.deepEqual(audited.map((r) => [r.target, r.meta]), [['LEAD-A', { dana_off: 0 }], ['LEAD-A', { dana_test: 1 }], ['LEAD-A', { dana_off: 1, dana_test: 0 }]]);
+    assert.deepEqual(audited.map((r) => [r.target, r.meta]), [['LEAD-A', { dana_test: 1 }], ['LEAD-A', { dana_off: 0 }], ['LEAD-A', { dana_off: 1, dana_test: 0 }]]);
     assert.equal(audited[2].user_id, h.staffUser.user_id);
     res = await h.postJson('/v1/admin/inbox/LEAD-U/dana', { dana_off: '1' }, { cookie: owner });
     assert.equal(res.status, 404, 'an Unsure chat is not a chat (rule 1)');
@@ -1488,6 +1488,26 @@ test('the per-chat Dana switches: anyone turns her off here, only an owner start
     assert.match(html, /Dana is testing on this chat/);
     assert.match(html, /Stop the Dana test here/);
     assert.ok(!JSON.stringify(h.logs.filter((l) => l.evt === 'dash.dana_chat')).includes(CLIENT), 'no number in the log line');
+  });
+});
+
+test('a Dana test is refused on a chat where she is off: the page never offers it, and nothing is written', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    const owner = await h.boss();
+    let res = await h.postForm('/v1/admin/inbox/LEAD-A/dana', { dana_off: '1' }, { cookie: staff });
+    assert.equal(h.db.getLead('LEAD-A').dana_off, 1);
+    res = await h.postForm('/v1/admin/inbox/LEAD-A/dana', { dana_test: '1' }, { cookie: owner });
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), '/dashboard/inbox/LEAD-A?error=bad_dana');
+    res = await h.postJson('/v1/admin/inbox/LEAD-A/dana', { dana_test: '1' }, { cookie: owner });
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: 'bad_dana' });
+    assert.deepEqual([h.db.getLead('LEAD-A').dana_off, h.db.getLead('LEAD-A').dana_test], [1, 0], 'the flag is unchanged');
+    assert.deepEqual(h.app.audit.recent(50).filter((r) => r.action === 'dana_chat').map((r) => r.meta), [{ dana_off: 1, dana_test: 0 }], 'only the switch-off is audited');
+    res = await h.postJson('/v1/admin/inbox/LEAD-A/dana', { dana_test: '0' }, { cookie: owner });
+    assert.equal(res.status, 200, 'ending a test is always allowed');
   });
 });
 

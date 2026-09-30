@@ -4,7 +4,8 @@
  * The poller wakes this module once per client message it stores in a Bona inbox chat
  * (`wake`, never awaited); a two-second timer turns a tick's burst into one run. A run
  * decides whether Dana may answer at all — configured, the chat `in` and nobody's colleague,
- * the owner's global switch (or his test flag on this one chat), the chat's own switch, no
+ * the owner's global switch (or his test flag on this one chat), the chat's own switch, the
+ * Sending switch (`sending_off`, a state like `off`: never logged), no
  * hand-over pending, no human answer in the last 24 h, a phone jid to send to, a message
  * that is fresh, her caps — then reads the messages nobody answered yet, keeps one Retell
  * chat per WhatsApp chat (reused under 23 h idle, else made anew with the conversation so
@@ -56,7 +57,10 @@ const PLACEHOLDER_RE = /^\[[^\]\n]{1,40}\]$/;
 /** Skips worth a log line; the rest are states, not events (P4-15). */
 const CAPS = new Set(['cap_chat', 'cap_day']);
 /** A hand-over re-check that finds one of these does nothing at all: no flag, no alert, no line. */
-const HANDOVER_SKIPS = new Set(['dropped_human', 'not_in_inbox', 'off', 'chat_off', 'not_configured']);
+// `human_recent`: a person active in the chat within 24 h (a message older than the batch,
+// stored during the round trip) owns it — no hand-over over their head (whole-branch review).
+// `sending_off`: the owner's Sending switch stops every send, the hand-over line included.
+const HANDOVER_SKIPS = new Set(['dropped_human', 'human_recent', 'not_in_inbox', 'off', 'chat_off', 'sending_off', 'not_configured']);
 const LOGGED_SKIPS = new Set(['human_recent', 'needs_human', 'lid_only', 'old', 'cap_chat', 'cap_day', 'nothing', 'dropped_human']);
 
 /** Whitespace folded, cut on whole characters. */
@@ -197,6 +201,9 @@ export function createDana({
     if (!lead || lead.inbox_state !== 'in' || isExcludedLead(lead)) return { ok: false, reason: 'not_in_inbox' };
     if (!(team.danaEnabled() || Number(lead.dana_test) === 1)) return { ok: false, reason: 'off' };
     if (Number(lead.dana_off) === 1) return { ok: false, reason: 'chat_off' };
+    // Every send stops with the Sending switch; asking Retell for an answer that cannot go
+    // would only spend budget and end in a `send_failed` hand-over.
+    if (!team.sendingEnabled()) return { ok: false, reason: 'sending_off' };
     if (Number(lead.needs_human) === 1) return { ok: false, reason: 'needs_human' };
     const t = now();
     if (Number.isFinite(lead.last_human_out_ts) && t - lead.last_human_out_ts < HUMAN_QUIET_MS) return { ok: false, reason: 'human_recent' };
@@ -268,7 +275,12 @@ export function createDana({
    * stamped while she composed is not counted as answered, and a crash mid-send leaves a row.
    */
   async function send(lead, text, language, coversTs) {
-    const body = (Number(lead.dana_introduced) === 1 ? text : `${DISCLOSURE[language]}\n\n${text}`).replace(/\r\n?/g, '\n').trim();
+    // Introduced = the flag OR any Dana row for this chat that is not `failed` (P4-12): a run
+    // that crashed after its row was written may have sent her first message without setting
+    // the flag. Read before this run's own row goes in. A purge stubs rows with lead_id NULL,
+    // so a chat that comes back is introduced again.
+    const introduced = Number(lead.dana_introduced) === 1 || inbox.countDanaSends({ leadId: lead.lead_id, sinceTs: 0 }) > 0;
+    const body = (introduced ? text : `${DISCLOSURE[language]}\n\n${text}`).replace(/\r\n?/g, '\n').trim();
     const jid = replyJidFor(lead);
     const sendId = `SND-${now().toString(36)}-${randomId(8)}`;
     const ins = inbox.insertOutbox({ send_id: sendId, lead_id: lead.lead_id, jid, text: body, user_id: null, sender_kind: 'dana', status: 'pending', covers_ts: coversTs });
@@ -348,7 +360,10 @@ export function createDana({
       if (CAPS.has(e.reason)) {
         const lead = db.getLead(leadId);
         const waiting = inbox.unansweredClientMessages(leadId, { limit: CONTEXT_MESSAGES });
-        return handover(leadId, languageOf({ lead, texts: waiting.map((m) => m.text) }), e.reason, waiting.length ? waiting[waiting.length - 1].ts : now());
+        // A cap hands over only a client who is waiting: with nothing unanswered (a wake for a
+        // batch another run answered) there is nobody to hand over — no flag, alert or line.
+        if (!waiting.length) return skip(leadId, 'nothing');
+        return handover(leadId, languageOf({ lead, texts: waiting.map((m) => m.text) }), e.reason, waiting[waiting.length - 1].ts);
       }
       return skip(leadId, e.reason);
     }

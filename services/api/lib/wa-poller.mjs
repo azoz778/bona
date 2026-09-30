@@ -964,19 +964,16 @@ export function createPoller({
             // The lead as it is BEFORE the inbox steps: a stranger this record makes into an
             // `owner_outbound` lead is not stamped by it (as before). The stamp itself waits
             // for ingest, which is what tells Dana's own message from a human's
-            // (`isDanaRecordSafely`); an ingest that throws still lets a human reply stamp
-            // before the record is retried, so a record later written off keeps its clock.
+            // (`isDanaRecordSafely`). An ingest that throws stamps nothing on that attempt:
+            // the record's kind is unknown, and an `uncertain` Dana send that ingest matches
+            // by text has no key until it succeeds, so it would read as human. The retry
+            // stamps once ingest succeeds. The cost: a human record whose ingest fails on
+            // every attempt and is written off never stamps `first_reply_ts`, so the Hermes
+            // watchdog nags about a lead that was answered — the harmless direction; a Dana
+            // record silencing the watchdog for an unanswered lead is the harmful one.
             const seen = findLead(jidsOf(rec));
-            let inboxErr = null;
-            if (inboxOn) {
-              try {
-                await inboxAfterOutbound(rec, ts, tally);
-              } catch (err) {
-                inboxErr = err;
-              }
-            }
+            if (inboxOn) await inboxAfterOutbound(rec, ts, tally);
             if (!isDanaRecordSafely(rec) && recordReply(seen, ts)) tally.replies += 1;
-            if (inboxErr) throw inboxErr;
           } else if (handled) {
             // Matched and merged on an earlier attempt; only the inbox steps failed.
             await inboxAfterInbound(rec, ts, handled, tally);

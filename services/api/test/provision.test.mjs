@@ -804,6 +804,25 @@ test('her LLM id is recorded as soon as it is created, so a failed chat agent do
   }
 });
 
+test('on a plain run the interim record carries the site ids made so far, so a failed chat agent of hers leaves no stale site ids', async () => {
+  const { home, cleanup } = tempHome();
+  const client = fakeClient();
+  const siteChatAgent = client.createChatAgent;
+  client.createChatAgent = async (body) => {
+    if (body.agent_name === WA_CHAT_AGENT_NAME) throw new Error('Retell 502');
+    return siteChatAgent(body);
+  };
+  try {
+    await assert.rejects(() => run({}, { home, client, ids: { llmId: 'llm_stale', voiceAgentId: 'agent_stale' } }), /502/);
+    const { updatedAt, ...written } = JSON.parse(fs.readFileSync(path.join(home, 'ids.json'), 'utf8'));
+    assert.deepEqual(written, {
+      knowledgeBaseId: 'kb_new', llmId: 'llm_new', voiceAgentId: 'agent_voice_new', chatAgentId: 'agent_chat_new', model: PREFERRED_MODEL, waLlmId: 'llm_wa_new',
+    });
+  } finally {
+    cleanup();
+  }
+});
+
 test('a hand-edited ids.json that points her at a site object is refused before any call', async () => {
   const { home, cleanup } = tempHome();
   const idsFile = path.join(home, 'ids.json');

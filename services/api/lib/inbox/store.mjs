@@ -541,10 +541,11 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
 
   /**
    * How many chats in the Bona inbox Dana is testing on (P4-4): the Team page's "Off" line
-   * must not deny a test the owner armed. A chat that left the inbox had its flag reset.
+   * must not deny a test the owner armed. A chat that left the inbox had its flag reset; a
+   * chat where Dana is switched off is no test (`chat_off` wins in `eligible`).
    */
   function countDanaTests() {
-    return prep("SELECT COUNT(*) AS n FROM leads WHERE dana_test = 1 AND inbox_state = 'in'").get().n;
+    return prep("SELECT COUNT(*) AS n FROM leads WHERE dana_test = 1 AND dana_off = 0 AND inbox_state = 'in'").get().n;
   }
 
   /**

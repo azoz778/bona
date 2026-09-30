@@ -1628,6 +1628,33 @@ test("(t) an uncertain Dana send that ingest matches by its text is hers too: st
   h.cleanup();
 });
 
+test("(t) an ingest that throws on a fromMe record stamps nothing on that attempt: an uncertain Dana send it could not match yet is never taken for a human reply", async () => {
+  let throws = 1;
+  const h = harness({
+    inbox: true, windows: [[msg({ id: 'IN1', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' })]],
+    rewire: ({ ingest }) => ({ ingest: (lead, rec) => { if (rec.fromMe && throws > 0) { throws -= 1; throw new Error('database is locked'); } return ingest(lead, rec); } }),
+  });
+  await h.poller.tick();
+  const [lead] = h.leads();
+  h.inbox.insertOutbox({ send_id: 'SND-dana-0003', lead_id: lead.lead_id, jid: SENDER, text: 'عندنا فيلا في أبحر', sender_kind: 'dana' });
+  h.inbox.updateOutbox('SND-dana-0003', { status: 'uncertain' });
+  const record = msg({ id: 'DANA-U', fromMe: true, ts: NOW + 30_000, pushName: null, text: 'عندنا فيلا في أبحر' });
+  h.push([record]);
+  h.setClock(NOW + 40_000);
+
+  await h.poller.tick();
+  assert.equal(throws, 0, 'the ingest threw once');
+  assert.equal(h.db.getLead(lead.lead_id).first_reply_ts, null, 'classification unknown: no stamp');
+  assert.equal(h.inbox.messageByKey('DANA-U'), null, 'not stored yet');
+
+  h.setClock(NOW + 60_000);
+  h.push([record]); // the next window reads it again
+  await h.poller.tick();
+  assert.equal(h.inbox.messageByKey('DANA-U').sender_kind, 'dana', 'the retry matched it by its text');
+  assert.equal(h.db.getLead(lead.lead_id).first_reply_ts, null, 'and still no stamp');
+  h.cleanup();
+});
+
 test('(t) a team or never-list number is never stored, even when its lead is in the inbox', async () => {
   const h = harness({ inbox: true, isExcluded: (digits) => digits === '966500000000' });
   seedInLead(h);

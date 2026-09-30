@@ -1388,4 +1388,6 @@ test('countDanaTests counts the chats in the Bona inbox under a Dana test, and n
   assert.equal(inbox.countDanaTests(), 2, 'an Unsure lead flagged by hand does not count');
   inbox.leaveInbox('LEAD-T2');
   assert.equal(inbox.countDanaTests(), 1, 'leaving the inbox ends the test');
+  s.updateLead('LEAD-T1', { dana_off: 1 });
+  assert.equal(inbox.countDanaTests(), 0, 'a test on a chat where Dana is off is no test');
 });
