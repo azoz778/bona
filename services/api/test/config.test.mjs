@@ -77,7 +77,7 @@ test('VAPID keys come from the env; the subject defaults to the site; redacted()
 });
 
 test('the WhatsApp chat agent id comes from the env, else ids.json, and never falls back to the site agent', () => {
-  const base = { env: {}, ids: { chatAgentId: 'agent_site', voiceAgentId: 'agent_voice' } };
+  const base = { env: { BONA_RETELL_CHAT_AGENT_ID: 'agent_site_env' }, ids: { chatAgentId: 'agent_site', voiceAgentId: 'agent_voice' } };
   assert.equal(loadConfig(base).waChatAgentId, null, 'the web prompt must never answer WhatsApp');
   assert.equal(loadConfig({ ...base, ids: { ...base.ids, waChatAgentId: 'agent_wa' } }).waChatAgentId, 'agent_wa');
   assert.equal(loadConfig({ env: { BONA_RETELL_WA_CHAT_AGENT_ID: 'agent_env' }, ids: { waChatAgentId: 'agent_wa' } }).waChatAgentId, 'agent_env');

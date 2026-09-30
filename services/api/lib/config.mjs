@@ -91,7 +91,7 @@ export function loadConfig({ env = loadEnv(), ids = readIds(), home = os.homedir
     voiceAgentId: env.BONA_RETELL_VOICE_AGENT_ID ?? ids.voiceAgentId ?? null,
     // Dana on WhatsApp (Phase 4): her own chat agent, provisioned by `retell/provision.mjs
     // --whatsapp-only`. No fallback to the site's agent: the web prompt (cards, markers, the
-    // recording sentence) must never answer a WhatsApp client. Missing -> Dana is not configured.
+    // recording sentence) must never answer a WhatsApp client. Missing → Dana is not configured.
     waChatAgentId: env.BONA_RETELL_WA_CHAT_AGENT_ID ?? ids.waChatAgentId ?? null,
     waNumber: env.BONA_WHATSAPP ?? '966593296933',
     maxBodyBytes: Number(env.BONA_MAX_BODY_BYTES ?? 16 * 1024),
