@@ -46,7 +46,8 @@ export function generateVapidKeys() {
  * private scalar and must equal the one given: a mismatched pair would sign JWTs every push
  * service refuses, while the browsers subscribed with the other key.
  */
-export function vapidKeys({ publicKey, privateKey } = {}) {
+export function vapidKeys(pair) {
+  const { publicKey, privateKey } = pair ?? {};
   const pub = fromB64u(publicKey);
   const d = fromB64u(privateKey);
   if (!pub || pub.length !== 65 || pub[0] !== 4 || !d || d.length !== 32) return null;
@@ -79,8 +80,8 @@ export function pushEndpoint(raw) {
   let u;
   try { u = new URL(raw); } catch { return null; }
   if (u.protocol !== 'https:' || u.username || u.password || u.port) return null;
-  const host = u.hostname.toLowerCase();
-  const known = EXACT_HOSTS.has(host) || HOST_SUFFIXES.some((s) => host.endsWith(s) && host.length > s.length);
+  const host = u.hostname;
+  const known = EXACT_HOSTS.has(host) || HOST_SUFFIXES.some((s) => host.endsWith(s) && /^[a-z0-9-]+(?:\.[a-z0-9-]+)*$/.test(host.slice(0, -s.length)));
   return known && u.href.length <= MAX_ENDPOINT_LEN ? u.href : null;
 }
 
@@ -94,7 +95,7 @@ export function subscriptionKeys(keys) {
 
 /**
  * Sends one empty push to one endpoint. `send` never rejects: it answers the push
- * service's status, or the kind of failure (`timeout`, `network`) — never an error's
+ * service's status, or the kind of failure (`timeout`, `network`, `bad_endpoint`) — never an error's
  * message, which could carry the endpoint.
  */
 export function createPusher({ keys, subject, fetchImpl = globalThis.fetch, now = () => Date.now(), timeoutMs = PUSH_TIMEOUT_MS }) {
@@ -108,14 +109,16 @@ export function createPusher({ keys, subject, fetchImpl = globalThis.fetch, now 
     return jwt;
   }
   async function send(endpoint) {
+    const url = pushEndpoint(endpoint);
+    if (!url) return { error: 'bad_endpoint' };
     try {
-      const res = await fetchImpl(endpoint, {
+      const res = await fetchImpl(url, {
         method: 'POST',
-        headers: { TTL: String(PUSH_TTL_S), Urgency: 'high', Authorization: `vapid t=${jwtFor(new URL(endpoint).origin)}, k=${keys.publicKey}` },
-        body: '',
+        headers: { TTL: String(PUSH_TTL_S), Urgency: 'high', Authorization: `vapid t=${jwtFor(new URL(url).origin)}, k=${keys.publicKey}` },
+        redirect: 'manual',
         signal: AbortSignal.timeout(timeoutMs),
       });
-      try { await res.arrayBuffer?.(); } catch { /* the status is all we need */ }
+      try { await res.arrayBuffer?.(); } catch { /* the body is read only to hand the socket back to the pool */ }
       return { status: Number(res.status) };
     } catch (err) {
       return { error: err?.name === 'TimeoutError' || err?.name === 'AbortError' ? 'timeout' : 'network' };
