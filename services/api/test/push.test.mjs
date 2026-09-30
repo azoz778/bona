@@ -24,6 +24,7 @@ test('a generated pair is a 65-byte P-256 point and a 32-byte scalar that load b
 test('keys that are missing, malformed or not one pair are refused, never half-used', () => {
   const a = generateVapidKeys();
   const b = generateVapidKeys();
+  assert.equal(vapidKeys(null), null);
   assert.equal(vapidKeys({}), null);
   assert.equal(vapidKeys({ publicKey: a.publicKey }), null);
   assert.equal(vapidKeys({ publicKey: a.publicKey, privateKey: b.privateKey }), null, 'a public key from another pair');
@@ -54,10 +55,13 @@ test('only a real push service endpoint is accepted (the server POSTs to it)', (
     'https://api.push.apple.com/x',
     'https://wns2-par02p.notify.windows.com/w/?token=BQYAAA',
   ]) assert.equal(pushEndpoint(ok), new URL(ok).href, ok);
+  assert.equal(pushEndpoint('https://FCM.googleapis.com:443/fcm/send/x'), 'https://fcm.googleapis.com/fcm/send/x');
+  for (const ok of [
+  ]) assert.equal(pushEndpoint(ok), new URL(ok).href, ok);
   for (const bad of [
     'http://fcm.googleapis.com/fcm/send/a', 'https://evil.example/fcm.googleapis.com', 'https://fcm.googleapis.com.evil.example/x',
     'https://notify.windows.com/x', 'https://push.apple.com/x', 'https://user@fcm.googleapis.com/x', 'https://fcm.googleapis.com:8443/x',
-    'https://127.0.0.1/x', 'https://localhost/x', 'javascript:alert(1)', '', null, 42, { href: 'https://fcm.googleapis.com/x' },
+    'https://..push.apple.com/x', 'https://fcm.googleapis.com./x', 'https://evil.example\\@fcm.googleapis.com/x', 'https://127.0.0.1/x', 'https://localhost/x', 'javascript:alert(1)', '', null, 42, { href: 'https://fcm.googleapis.com/x' },
     `https://fcm.googleapis.com/${'a'.repeat(MAX_ENDPOINT_LEN)}`,
   ]) assert.equal(pushEndpoint(bad), null, String(bad).slice(0, 60));
 });
@@ -66,6 +70,7 @@ test('subscription keys: a 65-byte uncompressed point and a 16-byte secret, as b
   const point = Buffer.concat([Buffer.from([4]), crypto.randomBytes(64)]);
   const auth = crypto.randomBytes(16);
   assert.deepEqual(subscriptionKeys({ p256dh: b64u(point), auth: b64u(auth) }), { p256dh: b64u(point), auth: b64u(auth) });
+  assert.deepEqual(subscriptionKeys({ p256dh: b64u(point) + '=', auth: b64u(auth) + '==' }), { p256dh: b64u(point), auth: b64u(auth) });
   assert.equal(subscriptionKeys({ p256dh: b64u(point.subarray(1)), auth: b64u(auth) }), null);
   assert.equal(subscriptionKeys({ p256dh: b64u(point), auth: b64u(auth.subarray(1)) }), null);
   assert.equal(subscriptionKeys({ p256dh: b64u(Buffer.concat([Buffer.from([2]), point.subarray(1)])), auth: b64u(auth) }), null, 'not uncompressed');
@@ -94,7 +99,8 @@ test('a push is an empty POST with TTL, high urgency and the VAPID authorization
   const [{ url, init }] = f.calls;
   assert.equal(url, 'https://fcm.googleapis.com/fcm/send/abc');
   assert.equal(init.method, 'POST');
-  assert.equal(init.body, '');
+  assert.equal(init.body, undefined);
+  assert.equal(init.redirect, 'manual');
   assert.equal(init.headers.TTL, String(PUSH_TTL_S));
   assert.equal(init.headers.Urgency, 'high');
   assert.match(init.headers.Authorization, new RegExp(`^vapid t=[\\w-]+\\.[\\w-]+\\.[\\w-]+, k=${keys.publicKey}$`));
@@ -129,4 +135,11 @@ test('send never rejects: a timeout and a network failure come back as kinds, ne
   assert.deepEqual(await down.send('https://fcm.googleapis.com/x'), { error: 'network' });
   const gone = createPusher({ keys, subject: 's', fetchImpl: fakeFetch(() => ({ status: 410 })).fetchImpl });
   assert.deepEqual(await gone.send('https://fcm.googleapis.com/x'), { status: 410 });
+});
+
+test('send re-checks its endpoint and never fetches a bad one', async () => {
+  const f = fakeFetch();
+  const pusher = createPusher({ keys: vapidKeys(generateVapidKeys()), subject: 's', fetchImpl: f.fetchImpl });
+  assert.deepEqual(await pusher.send('http://127.0.0.1/x'), { error: 'bad_endpoint' });
+  assert.equal(f.calls.length, 0);
 });
