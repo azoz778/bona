@@ -278,8 +278,9 @@ const MIGRATIONS = [
     // there and is the same member's, so logging out on one device ends alerts on that
     // device only, and a session that expires takes its device's alerts with it until the
     // next signed-in page posts the subscription again (lib/alerts.mjs). `p256dh`/`auth` are
-    // kept though a payload-less push never uses them. No message text, name or number is
-    // ever stored here. Migrations here only ever add.
+    // kept though a payload-less push never uses them. A NULL `session_hash` is a subscription
+    // with no session: it is never pushed to, and the daily upkeep sweeps it. No message text,
+    // name or number is ever stored here. Migrations here only ever add.
     version: 5,
     sql: `
       CREATE TABLE IF NOT EXISTS push_subscriptions (
@@ -623,19 +624,19 @@ export function openDb(file = ':memory:') {
   function createAuthSession(token, { now = Date.now(), ttlMs = 30 * 86_400_000, ua = null, userId } = {}) {
     if (typeof userId !== 'string' || !userId) throw new TypeError('createAuthSession needs a userId');
     prep('INSERT OR REPLACE INTO auth_sessions (token_hash, created, expires, ua, user_id) VALUES (?,?,?,?,?)')
-      .run(sha256(token), toInt(now), toInt(now + ttlMs), ua == null ? null : String(ua).slice(0, 300), userId);
+      .run(tokenHash(token), toInt(now), toInt(now + ttlMs), ua == null ? null : String(ua).slice(0, 300), userId);
     return { expires: now + ttlMs };
   }
 
   function checkAuthSession(token, { now = Date.now() } = {}) {
     if (!token) return null;
-    const row = prep('SELECT * FROM auth_sessions WHERE token_hash = ?').get(sha256(token));
+    const row = prep('SELECT * FROM auth_sessions WHERE token_hash = ?').get(tokenHash(token));
     if (!row) return null;
     if (row.expires < now) { prep('DELETE FROM auth_sessions WHERE token_hash = ?').run(row.token_hash); return null; }
     return { ...row };
   }
 
-  const deleteAuthSession = (token) => prep('DELETE FROM auth_sessions WHERE token_hash = ?').run(sha256(token ?? '')).changes === 1;
+  const deleteAuthSession = (token) => prep('DELETE FROM auth_sessions WHERE token_hash = ?').run(tokenHash(token)).changes === 1;
 
   /* -------------------- WhatsApp poller state -------------------- */
 
