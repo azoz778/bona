@@ -807,6 +807,7 @@ test('a client message the poller stores wakes Dana; off she answers nobody, on 
   const JID = '966500000088@s.whatsapp.net';
   const sends = [];
   let seq = 0;
+  let readBack = false;
   const fetchImpl = async (url, init) => {
     if (String(url).includes('/message/sendText/')) {
       sends.push(JSON.parse(init.body));
@@ -815,13 +816,22 @@ test('a client message the poller stores wakes Dana; off she answers nobody, on 
     const body = JSON.parse(init.body);
     seq += 1;
     // One record per tick, and only for the first two: the first while she is off, the second on.
-    const records = body.where?.messageTimestamp && seq <= 2 ? [seq === 1 ? {
+    // Once she has sent, the next read hands her own answer back from the owner's number
+    // (P4-5) — once, and never before her send (her pre-send check reads the chat too).
+    let records = body.where?.messageTimestamp && seq <= 2 ? [seq === 1 ? {
       key: { id: 'POLL-D1', fromMe: false, remoteJid: JID }, pushName: null, messageType: 'conversation',
       message: { conversation: 'hello, is anyone there?' }, messageTimestamp: Math.floor((NOW - 5_000) / 1000),
     } : {
       key: { id: 'POLL-D2', fromMe: false, remoteJid: JID }, pushName: null, messageType: 'conversation',
       message: { conversation: 'still there?' }, messageTimestamp: Math.floor((NOW - 4_000) / 1000),
     }] : [];
+    if (body.where?.messageTimestamp && sends.length && !readBack) {
+      readBack = true;
+      records = [{
+        key: { id: 'KEY-D1', fromMe: true, remoteJid: JID }, pushName: null, messageType: 'conversation',
+        message: { conversation: sends[0].text }, messageTimestamp: Math.floor((NOW - 3_000) / 1000),
+      }];
+    }
     return { ok: true, status: 200, text: async () => JSON.stringify({ messages: { total: records.length, pages: 1, currentPage: 1, records } }) };
   };
   const h = build({ env: ENV, config: { waPoll: true, waChatAgentId: 'agent_wa', retellMock: true }, fetchImpl });
@@ -855,6 +865,15 @@ test('a client message the poller stores wakes Dana; off she answers nobody, on 
     assert.ok(h.logs.some((l) => l.evt === 'dana.answered' && l.leadId === LEAD && l.batch === 2), 'one answer for both unanswered messages');
     assert.doesNotMatch(JSON.stringify(h.logs), /966500000088|anyone there|chat_mock/);
     assert.deepEqual(app.dana.status(), { configured: true, enabled: true, pending: 0, inflight: 0 });
+
+    // The next poll reads her answer back from the owner's number: still hers, still no stamp.
+    const back = await app.poller.tick();
+    assert.equal(back.replies, 0, 'her own message is not a reply');
+    assert.equal(db.getLead(LEAD).first_reply_ts, null, 'reading her message back does not stamp the human clock (P4-5)');
+    const danas = app.inboxStore.messagesFor(LEAD).filter((m) => m.sender_kind === 'dana');
+    assert.equal(danas.length, 1, 'one dana message, not two');
+    assert.equal(danas[0].key_id, 'KEY-D1');
+    assert.equal(app.inboxStore.messagesFor(LEAD).filter((m) => m.direction === 'out').length, 1);
   } finally {
     await h.close();
   }
