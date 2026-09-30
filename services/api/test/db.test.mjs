@@ -71,8 +71,7 @@ test('a v2-era file db upgrades to the current schema, an existing session survi
 
 test('schema v4 gives leads their inbox columns and adds the transcript, outbox, read-mark, gap and candidate tables', () => {
   const s = openDb(':memory:');
-  assert.ok(SCHEMA_VERSION >= 4);
-  assert.ok(s.db.prepare('PRAGMA user_version').get().user_version >= 4);
+  assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
   const info = (table) => s.db.prepare(`PRAGMA table_info(${table})`).all();
   const names = (table) => info(table).map((c) => c.name);
   const leadCols = info('leads');
@@ -586,6 +585,6 @@ test('tokenHash is the hash auth_sessions keeps for a session token', () => {
   s.createAuthSession(token, { userId: 'U1' });
   assert.ok(s.db.prepare('SELECT 1 FROM auth_sessions WHERE token_hash = ?').get(tokenHash(token)));
   assert.match(tokenHash(token), /^[0-9a-f]{64}$/);
-  assert.equal(tokenHash(null), tokenHash(''), 'nothing hashes like the empty string, never throws');
+  assert.equal(tokenHash(null), tokenHash(''), 'a missing token hashes as the empty string and never throws');
   s.close();
 });
