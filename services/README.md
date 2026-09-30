@@ -316,6 +316,7 @@ never logged. `process.env` always wins over a file.
 | `BONA_CORS_ORIGINS` | site, Pages, localhost:4321 | comma separated |
 | `BONA_LEGACY_HOSTS` | `bona.azoz.uk` | comma separated; each is 301'd to `BONA_SITE`, path and query kept. Anything listed must also be routed to the tunnel via `BONA_EXTRA_HOSTNAMES` |
 | `BONA_RETELL_VOICE_AGENT_ID` / `_CHAT_AGENT_ID` | from `ids.json` | env wins |
+| `BONA_RETELL_WA_CHAT_AGENT_ID` | `waChatAgentId` from `ids.json` | Dana's WhatsApp chat agent (Phase 4); env wins. Without one, `/health` says `dana.configured: false` and nothing is sent |
 | `BONA_RETELL_MODEL` / `_MODEL_FALLBACK` | `claude-4.6-sonnet` / `gpt-4.1` | |
 | `BONA_RETELL_SEPARATE_CHAT_AGENT` | `1` | `0` reuses the voice agent for chat |
 | `BONA_RETELL_MOCK` | `0` | `1` answers chat locally, contacts no one |
@@ -355,6 +356,7 @@ node api/retell/provision.mjs             # creates or updates, writes retell/id
 node api/retell/provision.mjs --publish   # also publishes both agent versions
 node api/retell/provision.mjs --rebuild-kb  # replace the knowledge base after a site move
 node api/retell/provision.mjs --ensure-env  # only create ~/.secrets/bona-services.env
+node api/retell/provision.mjs --whatsapp-only  # only Dana's WhatsApp LLM + chat agent
 ```
 
 Idempotent: it reads `api/retell/ids.json` (committed — ids are not secrets), verifies
@@ -399,6 +401,8 @@ changes.
 **Publishing.** Not required: the existing "Lisa" agent runs unpublished (draft
 version 0) and `create-web-call` / `create-chat` accept it. `--publish` is there if a
 future account setting demands a published version.
+
+**`--whatsapp-only`** creates or updates only Dana's WhatsApp objects: the Retell LLM "Bona Dana (WhatsApp)" (`prompt-whatsapp.md`, the same knowledge base, three tools: `search_properties`, `search_units`, `request_human`) and the chat agent "Bona Dana (WhatsApp)". The site's objects and Lisa's are not touched. Ids go to `retell/ids.json` as `waLlmId`, `waChatAgentId` and `waModel`. `--rebuild-kb` is ignored with it.
 
 After provisioning, restart the service so it picks up the new ids (the live one is on the VPS;
 `ids.json` reaches `/opt/bona` with the next `bona-repo-sync` pull, or run `deploy.sh`):
@@ -1073,5 +1077,19 @@ dismissed one a year after it was dismissed (`candidatesExpired`, `dismissalsExp
 - **Turning it on:** Inbox page → *Phone alerts* (the panel sits above the chat list) → *Turn on alerts*. Android: Chrome, any recent version. iPhone: iOS 16.4 or later, and only from the Home-Screen app: Safari → Share → *Add to Home Screen*, open Bona from the Home Screen, sign in there (it keeps its own login), then turn alerts on.
 - **Which devices:** alerts belong to the login they were turned on in. Logging out on a device ends alerts on that device only. Deactivating a member ends all their devices' alerts. A login that expires (30 days) ends its device's alerts until the member signs in again on it, when they come back by themselves. At most 10 devices per member.
 - **Live refresh:** the Inbox list and an open chat check every 15 s and reload by themselves when something changed, so nobody reloads by hand. While any field on the page holds text or is being typed in (the reply box, the owner's *Add chat by phone number* field), the page does not reload; a "new activity" note with a link appears instead (in a chat: "New activity in this chat"), and nothing typed is touched.
-- **Keys:** generated once on the VPS: `node /opt/bona/services/api/bin/vapid-keys.mjs --file ~/.secrets/bona-services.env`, then `deploy.sh` (bona-api reads them at start). Never generate a second pair: every phone's alerts would end until each member turns them on again. `/health` shows `push.configured`; the daily upkeep's `inbox.maintenance` line counts `pushOrphans` (devices whose login has gone).
+- **Keys:** generated once on the VPS: `node /opt/bona/services/api/bin/vapid-keys.mjs --file ~/.secrets/bona-services.env`, then `deploy.sh` (bona-api reads them at start). Never generate a second pair: every phone's alerts would end until each member turns them on again. The generator always writes a 32-byte private scalar (about 1 key in 256 used to come out short and was refused at start-up); a pair already stored short still loads. `/health` shows `push.configured`; the daily upkeep's `inbox.maintenance` line counts `pushOrphans` (devices whose login has gone).
 - **Logs:** `push.sent` (counts), `push.refused` (a push service's status), `push.subscribed` (a new device, or one that changed hands: member id and `moved`) / `push.unsubscribed` (member id), `push.failed` (an alert whose run threw: the error's class name only), `push.keys_invalid` (keys malformed or mismatched: alerts stay off), `poll.alert_failed` (an alert that could not be started). Never an endpoint, a key, a name, a number or message text.
+
+#### Dana on WhatsApp (Phase 4)
+
+When a client writes in a Bona inbox chat and nobody on the team has answered for 24 hours, Dana answers on WhatsApp from the owner's number, through the same sender as a team member's reply. She ships **off**: `settings.dana_enabled` is `'0'` until an owner turns her on from the Team page ("Dana on WhatsApp"). Before that, an owner can let her **test on one chat** from that chat's page ("Let Dana test on this chat"); anyone on the team can turn her **off for one chat** ("Turn Dana off for this chat"). Off for a chat also ends a test on it. While she is off, the Team page says how many chats are under test.
+
+She is a separate Retell LLM and chat agent (`retell/provision.mjs --whatsapp-only`; ids `waLlmId` / `waChatAgentId` in `retell/ids.json`, or `BONA_RETELL_WA_CHAT_AGENT_ID`) on the site's knowledge base, with `search_properties`, `search_units` and `request_human`. Without an agent id `/health` shows `dana.configured: false` and nothing is sent. She is never built on the Retell mock: with `BONA_RETELL_MOCK=1` she is not configured and start-up logs one `dana.mock_off` warning. On shutdown she is given up to 4 s to finish what is in flight.
+
+What she does, in `lib/dana-wa.mjs`:
+
+- **When.** The poller stores a client message in an `in` chat and wakes her; a 2 s timer turns a burst into one run. She answers only if the chat is `in` and not a colleague's number, she is on (globally, or testing on this chat), she is not off for this chat, the chat is not flagged "Needs a human", no staff, owner or Lisa message went out in the last 24 h (`leads.last_human_out_ts`), the chat has a phone jid, the message is under 30 min old, and she has sent fewer than 6 messages to this chat in the hour and 200 in the day (counted from `wa_outbox`, kind `dana`).
+- **What she reads.** The client messages nobody has answered yet (newer than the chat's newest outbound), at most 10, sent to Retell as one message. There is one Retell chat per WhatsApp chat (`leads.dana_chat_id`), reused while under 23 h idle, else created anew with the client's language, the lead's facts (never the number) and the last 10 stored messages as context.
+- **What she sends.** Plain text: markdown and widget markers stripped, up to 3 listing links appended in the client's language, 1,500 characters at most. Her first message in a chat is prefixed in code with `Dana — Bona's AI assistant` / `دانة — مساعدة بونا الذكية`. Her outbox row is written before the send and carries `covers_ts`, the newest client message it answers; a client message that arrives while she composes is not counted as answered and gets the next run. Right before sending she re-reads the chat from WhatsApp and drops the answer if a person answered meanwhile. The message is stored as `sender_kind 'dana'` and never stamps `first_reply_ts` (the unanswered-leads watchdog means "no human answered"). A run that throws after the row is written leaves it `pending`; start-up or the daily upkeep turns it `uncertain`, the batch counts as answered and the chat is not flagged.
+- **Hand-over.** The model calling `request_human`, a Retell failure, an empty answer, a spent budget or cap, or a failed send sets `needs_human = 1`, sends a phone alert to everyone and sends one line ("a member of the Bona team will reply to you shortly"). She then stays silent in that chat until a person replies and 24 h pass. A hand-over runs the same pre-send check: if a person answered meanwhile, or a switch went off, there is no flag, no alert and no line.
+- **Logs:** `dana.answered`, `dana.session`, `dana.handover`, `dana.skipped`, `dana.retell_failed`, `dana.send_failed`, `dana.record_failed`, `dana.failed`, `dana.mock_off` and `tool.request_human` carry ids, counts and reasons only. Never message text, a name, a number or a Retell chat id.
