@@ -44,7 +44,11 @@ function fromB64u(s) {
 export function generateVapidKeys() {
   const ecdh = crypto.createECDH('prime256v1');
   ecdh.generateKeys();
-  return { publicKey: b64u(ecdh.getPublicKey(null, 'uncompressed')), privateKey: b64u(ecdh.getPrivateKey()) };
+  // getPrivateKey() gives the scalar at its minimal width: one in 256 has a leading zero byte
+  // and comes back 31 bytes long (a 42-char key). Left-padded to the curve's 32 bytes, so every
+  // generated key is 43 chars and loads (it made one suite run in 256 red).
+  const d = ecdh.getPrivateKey();
+  return { publicKey: b64u(ecdh.getPublicKey(null, 'uncompressed')), privateKey: b64u(Buffer.concat([Buffer.alloc(32 - d.length), d])) };
 }
 
 /**
@@ -55,7 +59,11 @@ export function generateVapidKeys() {
 export function vapidKeys(pair) {
   const { publicKey, privateKey } = pair ?? {};
   const pub = fromB64u(publicKey);
-  const d = fromB64u(privateKey);
+  const raw = fromB64u(privateKey);
+  // A scalar written short (1-31 bytes: a leading zero dropped, as generateVapidKeys did before
+  // it padded) is the same key: left-padded to 32 bytes, then held to the same checks. A pair
+  // already on disk keeps loading; keys are never regenerated.
+  const d = raw && raw.length >= 1 && raw.length < 32 ? Buffer.concat([Buffer.alloc(32 - raw.length), raw]) : raw;
   if (!pub || pub.length !== 65 || pub[0] !== 4 || !d || d.length !== 32) return null;
   try {
     const ecdh = crypto.createECDH('prime256v1');

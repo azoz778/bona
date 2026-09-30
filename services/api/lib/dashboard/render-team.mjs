@@ -1,7 +1,8 @@
 /**
  * The Team page (owner only): who can log in, the numbers that are never a client, and
  * the switches for what the dashboard sends from the owner's WhatsApp — everything
- * (Sending), and replies to clients (off until the owner turns them on, design D14).
+ * (Sending), replies to clients (off until the owner turns them on, design D14), and Dana
+ * on WhatsApp (off until the owner turns her on, D14).
  * Every write is a form post to /v1/admin/*, like the rest of the dashboard.
  */
 import { esc, fullPhone, dateTime, layout, scrollTable, knownError, messageFor } from './render.mjs';
@@ -21,9 +22,11 @@ const post = (action, label, fields = {}, cls = '') => `<form method="post" acti
   Object.entries(fields).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('') +
   `<button type="submit"${cls ? ` class="${esc(cls)}"` : ''}>${esc(label)}</button></form>`;
 
-export function teamPage({ me, users = [], never = [], sendingEnabled = true, repliesEnabled = false, ok = null, error = null }) {
+export function teamPage({ me, users = [], never = [], sendingEnabled = true, repliesEnabled = false, danaEnabled = false, danaConfigured = false, danaTests = 0, ok = null, error = null }) {
   // Fails closed like the setting itself: only a real `true` from team.repliesEnabled() is on.
   const repliesOn = repliesEnabled === true;
+  const danaOn = danaEnabled === true;
+  const tests = Number.isInteger(danaTests) && danaTests > 0 ? danaTests : 0;
   const flash = knownError(error)
     ? `<div class="err">${esc(messageFor(error))}</div>`
     : (ok && Object.hasOwn(TEAM_OK, ok) ? `<div class="ok">${esc(TEAM_OK[ok])}</div>` : '');
@@ -84,7 +87,13 @@ ${post('/v1/admin/settings', sendingEnabled ? 'Turn sending off' : 'Turn sending
 <p class="sub">${repliesOn
     ? 'On. Everyone on the team can answer Bona inbox chats from the dashboard; the reply goes from your number (while sending above is on).'
     : 'Off. Nobody can send a client a message from the dashboard yet; the team can still read the inbox, and login codes still go.'}</p>
-${post('/v1/admin/settings', repliesOn ? 'Turn replies off' : 'Turn replies on', { inbox_replies: repliesOn ? '0' : '1' })}`;
+${post('/v1/admin/settings', repliesOn ? 'Turn replies off' : 'Turn replies on', { inbox_replies: repliesOn ? '0' : '1' })}
+
+<h2 style="margin-top:28px">Dana on WhatsApp</h2>
+<p class="sub">${danaOn
+    ? 'On. Dana answers Bona inbox chats when nobody on the team has replied for 24 hours. She says she is Bona’s AI assistant, quotes only published prices, sends links instead of cards, and hands the chat to the team for a viewing, an offer, a complaint, or when asked for a person. Turn her off for one chat from that chat’s page.'
+    : `Off. Dana answers nobody on WhatsApp${tests > 0 ? `, except ${tests} chat${tests === 1 ? '' : 's'} under test` : ''}. To try her on one chat first, open that chat and choose “Let Dana test on this chat”.`}${danaConfigured ? '' : ' Dana is not provisioned for WhatsApp yet (services/api/retell/provision.mjs --whatsapp-only), so nothing would be sent either way.'}</p>
+${post('/v1/admin/settings', danaOn ? 'Turn Dana off' : 'Turn Dana on', { dana_enabled: danaOn ? '0' : '1' })}`;
 
   return layout({ title: 'Team', active: '/dashboard/team', me, body: `<h1>Team</h1>${body}` });
 }

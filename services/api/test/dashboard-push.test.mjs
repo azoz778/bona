@@ -36,7 +36,8 @@ const CLIENT = '966500000077';
  */
 async function withPush(opts, fn) {
   if (typeof opts === 'function') { fn = opts; opts = {}; }
-  const { configured = true } = opts;
+  // `config` and `appOptions` extend what createApp is given (the /health test builds Dana).
+  const { configured = true, config = {}, appOptions = {} } = opts;
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-push-'));
   const db = openDb(':memory:');
   let clock = NOW;
@@ -76,8 +77,10 @@ async function withPush(opts, fn) {
       maxBodyBytes: 16 * 1024, chatRatePerMin: 30, tokenRatePerMin: 6, env: ENV, ids: {}, version: '1.0.0',
       toolRatePerMin: 600, toolAuthFailRatePerMin: 10, allowQueryToken: false, trustedProxies: [],
       maxChatsPerDay: 300, maxCallsPerDay: 60, maxTurnsPerSession: 40, dashCookieDays: 30,
+      ...config,
     },
     inventory, db, team, inboxStore, sender, backfill, alerts, now, log,
+    ...appOptions,
     probeRetell: async () => 'ok',
     sendWhatsApp: async (text) => { notes.push(text); return { ok: true }; },
     sendCode: async ({ text }) => { codes.push(text); return { ok: true }; },
@@ -296,8 +299,12 @@ test('/health says whether alerts are configured, and nothing more about them', 
   await withPush(async (h) => {
     const health = await (await fetch(h.base + '/health')).json();
     assert.deepEqual(health.push, { configured: true });
+    assert.deepEqual(health.dana, { configured: false, enabled: false }, 'no WhatsApp agent id here: Dana is not configured, and she ships off');
   });
   await withPush({ configured: false }, async (h) => {
     assert.deepEqual((await (await fetch(h.base + '/health')).json()).push, { configured: false });
+  });
+  await withPush({ config: { waChatAgentId: 'agent_wa' }, appOptions: { danaOnMock: true } }, async (h) => {
+    assert.deepEqual((await (await fetch(h.base + '/health')).json()).dana, { configured: true, enabled: false }, 'provisioned, still off');
   });
 });

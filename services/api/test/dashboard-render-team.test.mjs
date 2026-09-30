@@ -91,3 +91,31 @@ test('the Team page carries the owner\'s switch for replies to clients, off unti
 
   assert.match(teamPage({ me: OWNER, users: [OWNER], repliesEnabled: 'yes' }), /name="inbox_replies" value="1"/, 'only a real true counts as on');
 });
+
+test('the Dana switch: off by default with the way to test her on one chat, on with what she does, and a note when she is not provisioned', () => {
+  const off = teamPage({ me: OWNER, users: [OWNER], danaEnabled: false, danaConfigured: true });
+  assert.match(off, /<h2[^>]*>Dana on WhatsApp<\/h2>/);
+  assert.match(off, /Off\. Dana answers nobody on WhatsApp/);
+  assert.match(off, /Let Dana test on this chat/);
+  assert.match(off, /name="dana_enabled" value="1"/);
+  assert.match(off, /Turn Dana on/);
+  assert.doesNotMatch(off, /not provisioned/);
+  const on = teamPage({ me: OWNER, users: [OWNER], danaEnabled: true, danaConfigured: true });
+  assert.match(on, /On\. Dana answers Bona inbox chats when nobody on the team has replied for 24 hours/);
+  assert.match(on, /AI assistant/);
+  assert.match(on, /name="dana_enabled" value="0"/);
+  assert.match(on, /Turn Dana off/);
+  assert.doesNotMatch(on, /name="dana_enabled" value="1"/);
+  assert.match(teamPage({ me: OWNER, users: [OWNER], danaEnabled: 'yes' }), /name="dana_enabled" value="1"/, 'only a real true counts as on');
+  const bare = teamPage({ me: OWNER, users: [OWNER], danaEnabled: false, danaConfigured: false });
+  assert.match(bare, /not provisioned for WhatsApp yet/);
+  assert.match(bare, /provision\.mjs --whatsapp-only/);
+});
+
+test('the Team page\'s "Off" line does not deny a test the owner armed', () => {
+  const page = (danaTests) => teamPage({ me: OWNER, users: [OWNER], danaEnabled: false, danaConfigured: true, danaTests });
+  assert.match(page(2), /Off\. Dana answers nobody on WhatsApp, except 2 chats under test\. To try her/);
+  assert.match(page(1), /Off\. Dana answers nobody on WhatsApp, except 1 chat under test\. To try her/);
+  assert.match(page(0), /Off\. Dana answers nobody on WhatsApp\. To try her/);
+  assert.match(teamPage({ me: OWNER, users: [OWNER] }), /Off\. Dana answers nobody on WhatsApp\. To try her/, 'the default is no tests');
+});

@@ -519,11 +519,31 @@ export function createPoller({
    * A message from the owner to somebody who is already a lead is the reply that stops the
    * response clock. Nothing is created here — an outbound message to a stranger is not a lead.
    */
-  function recordReply(rec, ts) {
-    const lead = findLead(jidsOf(rec));
+  function recordReply(seen, ts) {
+    const lead = seen ? db.getLead(seen.lead_id) : null;
     if (!lead || lead.first_reply_ts) return false;
     db.updateLead(lead.lead_id, { first_reply_ts: ts, updated: ts });
     return true;
+  }
+
+  /**
+   * Dana's own message read back (P4-5): she sends from the owner's number, so the next
+   * poll sees it as a `fromMe` record, and it must not stamp `first_reply_ts` — the Hermes
+   * `bona-unanswered-leads` watchdog reads that column as "a human answered". Asked after
+   * ingest has run for the record: an accepted Dana send carries its WhatsApp key in the
+   * outbox, and an `uncertain` one that ingest matched by exact text (P2-17) has been given
+   * the key and stored as `dana` by then. Only with the inbox wired: without it nothing
+   * knows Dana, and the Phase-1 poller stamps as before. A lookup that throws counts as
+   * "not Dana" — the reply clock is the older contract.
+   */
+  function isDanaRecordSafely(rec) {
+    if (!inboxOn || !rec.id) return false;
+    try {
+      return inboxStore.outboxByKey?.(rec.id)?.sender_kind === 'dana'
+        || inboxStore.messageByKey?.(rec.id)?.sender_kind === 'dana';
+    } catch {
+      return false;
+    }
   }
 
   async function handleInbound(rec, ts) {
@@ -681,9 +701,9 @@ export function createPoller({
   }
 
   /**
-   * What the owner's own message means for the inbox, once `recordReply` has stamped the
-   * reply clock exactly as before (the Hermes `bona-unanswered-leads` watchdog reads
-   * `first_reply_ts`). In an `in` chat it is stored: typed on his phone or sent by Lisa,
+   * What the owner's own message means for the inbox; `recordReply` stamps the reply clock
+   * right after this (the Hermes `bona-unanswered-leads` watchdog reads `first_reply_ts`),
+   * unless the record turns out to be Dana's own (P4-5). In an `in` chat it is stored: typed on his phone or sent by Lisa,
    * which nothing can tell apart, unless lib/inbox/ingest.mjs finds our own dashboard send
    * in the outbox. An `out` chat never comes back on its own. Any other chat joins only on
    * a Bona link, a listing number or a property document that names neither TK nor Bona
@@ -941,8 +961,19 @@ export function createPoller({
             // a lead off the list.
             tally.ignored += 1;
           } else if (rec.fromMe) {
-            if (recordReply(rec, ts)) tally.replies += 1;
+            // The lead as it is BEFORE the inbox steps: a stranger this record makes into an
+            // `owner_outbound` lead is not stamped by it (as before). The stamp itself waits
+            // for ingest, which is what tells Dana's own message from a human's
+            // (`isDanaRecordSafely`). An ingest that throws stamps nothing on that attempt:
+            // the record's kind is unknown, and an `uncertain` Dana send that ingest matches
+            // by text has no key until it succeeds, so it would read as human. The retry
+            // stamps once ingest succeeds. The cost: a human record whose ingest fails on
+            // every attempt and is written off never stamps `first_reply_ts`, so the Hermes
+            // watchdog nags about a lead that was answered — the harmless direction; a Dana
+            // record silencing the watchdog for an unanswered lead is the harmful one.
+            const seen = findLead(jidsOf(rec));
             if (inboxOn) await inboxAfterOutbound(rec, ts, tally);
+            if (!isDanaRecordSafely(rec) && recordReply(seen, ts)) tally.replies += 1;
           } else if (handled) {
             // Matched and merged on an earlier attempt; only the inbox steps failed.
             await inboxAfterInbound(rec, ts, handled, tally);

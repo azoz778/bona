@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { openDb, SCHEMA_VERSION } from '../lib/db.mjs';
-import { createTeam, TeamError, isTeamLid, learnTeamLid, isExcludedLead } from '../lib/team.mjs';
+import { createTeam, SETTINGS_DEFAULTS, SETTINGS_ALLOWED, TeamError, isTeamLid, learnTeamLid, isExcludedLead } from '../lib/team.mjs';
 import { createAudit, AUDIT_ACTIONS } from '../lib/audit.mjs';
 import { jidsOf } from '../lib/wa-poller.mjs';
 
@@ -14,7 +14,7 @@ const NOW = 1_790_500_000_000;
 
 test('schema v3 adds the team tables and a user on every session', () => {
   const s = openDb(':memory:');
-  // The newest schema's number is pinned in db.test.mjs; this test only needs v3's tables.
+  // db.test.mjs proves a v5 file upgrades to SCHEMA_VERSION and gains the v6 columns (no exact number is pinned here); this test only needs v3's tables.
   assert.ok(SCHEMA_VERSION >= 3);
   assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
   const tables = new Set(s.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name));
@@ -107,7 +107,7 @@ test('settings default to on, can be switched, and refuse unknown keys', () => {
   team.setSetting('sending_enabled', '0', { by: 'USR-1' });
   assert.equal(team.sendingEnabled(), false);
   assert.equal(s.db.prepare("SELECT updated_by FROM settings WHERE key = 'sending_enabled'").get().updated_by, 'USR-1');
-  assert.equal(codeOf(() => team.setSetting('dana_enabled', '1')), 'bad_setting', 'Phase 4 adds that key');
+  assert.equal(codeOf(() => team.setSetting('no_such_setting', '1')), 'bad_setting');
   s.close();
 });
 
@@ -424,5 +424,30 @@ test('deactivating a member deletes their push subscriptions in the same transac
   assert.deepEqual(left, ['P3']);
   team.reactivateUser(sara.user_id);
   assert.deepEqual(s.db.prepare('SELECT id FROM push_subscriptions ORDER BY id').all().map((r) => r.id), ['P3'], 'reactivating brings no device back');
+  s.close();
+});
+
+test('dana_enabled: ships off, fails closed, and is a switch like the other two', () => {
+  const { s, team } = teamHarness();
+  assert.equal(SETTINGS_DEFAULTS.dana_enabled, '0');
+  assert.deepEqual(SETTINGS_ALLOWED.dana_enabled, ['0', '1']);
+  assert.equal(team.getSetting('dana_enabled'), '0');
+  assert.equal(team.danaEnabled(), false);
+  assert.equal(team.setSetting('dana_enabled', '1', { by: 'USR-1' }), '1');
+  assert.equal(team.danaEnabled(), true);
+  assert.equal(s.db.prepare("SELECT updated_by FROM settings WHERE key = 'dana_enabled'").get().updated_by, 'USR-1');
+  assert.equal(codeOf(() => team.setSetting('dana_enabled', 'yes')), 'bad_setting_value');
+  assert.equal(codeOf(() => team.setSetting('dana_enabled', '')), 'bad_setting_value');
+  s.db.prepare("INSERT OR REPLACE INTO settings (key, value, updated, updated_by) VALUES ('dana_enabled','true',?,NULL)").run(NOW);
+  assert.equal(team.danaEnabled(), false, 'only the exact string 1 is on');
+  assert.equal(team.repliesEnabled(), false, 'the other switches are untouched');
+  s.close();
+});
+
+test('dana_chat is an audit action', () => {
+  const s = openDb(':memory:');
+  const audit = createAudit(s, { now: () => NOW });
+  audit.record({ userId: 'USR-1', action: 'dana_chat', target: 'LEAD-1', meta: { dana_off: 1 } });
+  assert.deepEqual(audit.recent(1).map((r) => [r.action, r.target, r.meta]), [['dana_chat', 'LEAD-1', { dana_off: 1 }]]);
   s.close();
 });

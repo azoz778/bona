@@ -1586,6 +1586,75 @@ test("(t) an outbound record carrying our own outbox row's WhatsApp id is the st
   h.cleanup();
 });
 
+test("(t) Dana's own message read back never stamps first_reply_ts (P4-5); the owner's typed reply after it still does", async () => {
+  const h = harness({ inbox: true, windows: [[msg({ id: 'IN1', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' })]] });
+  await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.inbox_state, 'in');
+  h.inbox.insertOutbox({ send_id: 'SND-dana-0001', lead_id: lead.lead_id, jid: SENDER, text: 'أهلاً، أنا دانة', sender_kind: 'dana' });
+  h.inbox.updateOutbox('SND-dana-0001', { status: 'accepted', key_id: 'DANA-1' });
+  h.push([msg({ id: 'DANA-1', fromMe: true, ts: NOW - 30_000, pushName: null, text: 'أهلاً، أنا دانة' })]);
+
+  const tally = await h.poller.tick();
+  assert.equal(tally.stored, 1);
+  assert.equal(tally.replies, 0, "Dana's message is not a reply in the tally");
+  assert.equal(h.inbox.messageByKey('DANA-1').sender_kind, 'dana');
+  assert.equal(h.db.getLead(lead.lead_id).first_reply_ts, null, 'the Hermes watchdog reads this column as "a human answered"');
+
+  h.push([msg({ id: 'OWN-1', fromMe: true, ts: NOW - 10_000, pushName: null, text: 'أنا عبدالعزيز، أتصل بك الآن' })]);
+  const next = await h.poller.tick();
+  assert.equal(next.replies, 1);
+  assert.equal(h.inbox.messageByKey('OWN-1').sender_kind, 'owner_number');
+  assert.equal(h.db.getLead(lead.lead_id).first_reply_ts, NOW - 10_000, "the owner's own reply stops the clock");
+  h.cleanup();
+});
+
+test("(t) an uncertain Dana send that ingest matches by its text is hers too: stored as dana, no stamp", async () => {
+  const h = harness({ inbox: true, windows: [[msg({ id: 'IN1', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' })]] });
+  await h.poller.tick();
+  const [lead] = h.leads();
+  h.inbox.insertOutbox({ send_id: 'SND-dana-0002', lead_id: lead.lead_id, jid: SENDER, text: 'عندنا ثلاث فلل في الشاطئ', sender_kind: 'dana' });
+  h.inbox.updateOutbox('SND-dana-0002', { status: 'uncertain' });
+  assert.equal(h.inbox.getOutbox('SND-dana-0002').key_id, null, 'no key: only the text can match it');
+  h.push([msg({ id: 'DANA-T', fromMe: true, ts: NOW + 30_000, pushName: null, text: 'عندنا ثلاث فلل في الشاطئ' })]);
+  h.setClock(NOW + 40_000);
+
+  const tally = await h.poller.tick();
+  assert.equal(tally.stored, 1);
+  assert.equal(tally.replies, 0);
+  assert.equal(h.inbox.messageByKey('DANA-T').sender_kind, 'dana');
+  assert.equal(h.inbox.getOutbox('SND-dana-0002').status, 'accepted');
+  assert.equal(h.db.getLead(lead.lead_id).first_reply_ts, null);
+  h.cleanup();
+});
+
+test("(t) an ingest that throws on a fromMe record stamps nothing on that attempt: an uncertain Dana send it could not match yet is never taken for a human reply", async () => {
+  let throws = 1;
+  const h = harness({
+    inbox: true, windows: [[msg({ id: 'IN1', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' })]],
+    rewire: ({ ingest }) => ({ ingest: (lead, rec) => { if (rec.fromMe && throws > 0) { throws -= 1; throw new Error('database is locked'); } return ingest(lead, rec); } }),
+  });
+  await h.poller.tick();
+  const [lead] = h.leads();
+  h.inbox.insertOutbox({ send_id: 'SND-dana-0003', lead_id: lead.lead_id, jid: SENDER, text: 'عندنا فيلا في أبحر', sender_kind: 'dana' });
+  h.inbox.updateOutbox('SND-dana-0003', { status: 'uncertain' });
+  const record = msg({ id: 'DANA-U', fromMe: true, ts: NOW + 30_000, pushName: null, text: 'عندنا فيلا في أبحر' });
+  h.push([record]);
+  h.setClock(NOW + 40_000);
+
+  await h.poller.tick();
+  assert.equal(throws, 0, 'the ingest threw once');
+  assert.equal(h.db.getLead(lead.lead_id).first_reply_ts, null, 'classification unknown: no stamp');
+  assert.equal(h.inbox.messageByKey('DANA-U'), null, 'not stored yet');
+
+  h.setClock(NOW + 60_000);
+  h.push([record]); // the next window reads it again
+  await h.poller.tick();
+  assert.equal(h.inbox.messageByKey('DANA-U').sender_kind, 'dana', 'the retry matched it by its text');
+  assert.equal(h.db.getLead(lead.lead_id).first_reply_ts, null, 'and still no stamp');
+  h.cleanup();
+});
+
 test('(t) a team or never-list number is never stored, even when its lead is in the inbox', async () => {
   const h = harness({ inbox: true, isExcluded: (digits) => digits === '966500000000' });
   seedInLead(h);

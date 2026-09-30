@@ -33,6 +33,32 @@ test('keys that are missing, malformed or not one pair are refused, never half-u
   assert.equal(vapidKeys({ publicKey: a.publicKey, privateKey: b64u(Buffer.alloc(32)) }), null, 'a zero scalar is no key');
 });
 
+test('every generated pair is a 43-char scalar that loads: a leading zero byte is padded, not dropped (1 in 256)', () => {
+  for (let i = 0; i < 3000; i += 1) {
+    const k = generateVapidKeys();
+    assert.equal(k.privateKey.length, 43, `pair ${i}`);
+    assert.ok(vapidKeys(k), `pair ${i} loads`);
+  }
+});
+
+test('a scalar already written short (its leading zero byte dropped) still loads, as the same key as its padded form', () => {
+  let scalar;
+  let ecdh;
+  for (;;) {
+    scalar = Buffer.concat([Buffer.alloc(1), crypto.randomBytes(31)]);
+    ecdh = crypto.createECDH('prime256v1');
+    try { ecdh.setPrivateKey(scalar); break; } catch { /* outside the range: draw again */ }
+  }
+  const publicKey = b64u(ecdh.getPublicKey(null, 'uncompressed'));
+  const short = vapidKeys({ publicKey, privateKey: b64u(scalar.subarray(1)) });
+  const padded = vapidKeys({ publicKey, privateKey: b64u(scalar) });
+  assert.ok(short, 'the 31-byte form loads');
+  assert.ok(padded);
+  assert.equal(short.publicKey, padded.publicKey);
+  assert.deepEqual(short.key.export({ format: 'jwk' }), padded.key.export({ format: 'jwk' }));
+  assert.equal(vapidKeys({ publicKey, privateKey: b64u(Buffer.alloc(1)) }), null, 'a short zero is still no key');
+});
+
 test('the JWT is ES256 over the push service origin, 12 h, signed raw r‖s, and verifies with the public key', () => {
   const k = vapidKeys(generateVapidKeys());
   const jwt = vapidJwt({ audience: 'https://fcm.googleapis.com', subject: 'https://bona-real-estate.com', key: k.key, nowMs: NOW });

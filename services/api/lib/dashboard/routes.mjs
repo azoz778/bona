@@ -668,6 +668,9 @@ export function createDashboardRoutes({
       never: team.listNever(),
       sendingEnabled: team.sendingEnabled(),
       repliesEnabled: team.repliesEnabled(),
+      danaEnabled: team.danaEnabled(),
+      danaConfigured: Boolean(app?.dana?.configured),
+      danaTests: inbox ? inbox.countDanaTests() : 0,
       ok: url.searchParams.get('ok'),
       error: url.searchParams.get('error'),
     }));
@@ -921,7 +924,7 @@ export function createDashboardRoutes({
   }
 
   /** The owner's switches, as the Team page posts them: one per form. */
-  const SWITCHES = ['sending_enabled', 'inbox_replies'];
+  const SWITCHES = ['sending_enabled', 'inbox_replies', 'dana_enabled'];
 
   function saveSetting(ctx) {
     const { fields, me } = ctx;
@@ -1066,6 +1069,8 @@ export function createDashboardRoutes({
       sendingEnabled: team.sendingEnabled(),
       canReply: replyJidFor(lead) !== null,
       repliesEnabled: team.repliesEnabled(),
+      danaEnabled: team.danaEnabled(),
+      danaConfigured: Boolean(app?.dana?.configured),
       draft,
       ok: inboxOk(ok),
       error: knownError(error),
@@ -1252,6 +1257,36 @@ export function createDashboardRoutes({
     return answer(res, { form, back: `${back}?ok=handler`, status: 200, payload: { ok: true, handler_user_id: to } });
   }
 
+  /**
+   * The chat's Dana switches (P4-4): `dana_off` is anyone's on the team, `dana_test` — she
+   * answers here even while off everywhere, the owner's way to try her on his own second
+   * phone's chat — is the owner's alone. Exactly one of the two, '0' or '1', or nothing is
+   * written. A test on a chat where she is off is refused (`bad_dana`): the page never offers
+   * it, and "off here" wins. Audited with the switch and its value; the log line carries the
+   * lead id only.
+   */
+  function inboxDana({ res, fields, form, me }, leadId) {
+    const back = `/dashboard/inbox/${encodeURIComponent(leadId)}`;
+    const lead = db.getLead(leadId);
+    if (!openChat(lead)) return refuseChat(res, form, me);
+    const keys = ['dana_off', 'dana_test'].filter((k) => Object.hasOwn(fields, k));
+    const value = keys.length === 1 ? asText(fields[keys[0]]) : '';
+    if (keys.length !== 1 || !['0', '1'].includes(value)) return answer(res, { form, back: `${back}?error=bad_dana`, status: 400, payload: { error: 'bad_dana' } });
+    const [key] = keys;
+    if (key === 'dana_test' && me.role !== 'owner') {
+      log({ level: 'warn', evt: 'dash.owner_only', path: '/v1/admin/inbox/:id/dana' });
+      return sendJson(res, 403, { error: 'owner_only' });
+    }
+    if (key === 'dana_test' && value === '1' && Number(lead.dana_off) === 1) return answer(res, { form, back: `${back}?error=bad_dana`, status: 400, payload: { error: 'bad_dana' } });
+    // The kill switch ends a test too (P4-4 amended): "off here" wins, and the page never
+    // shows the two at once.
+    const patch = key === 'dana_off' && value === '1' ? { dana_off: 1, dana_test: 0 } : { [key]: Number(value) };
+    db.updateLead(leadId, patch);
+    audit?.record({ userId: me.user_id, action: 'dana_chat', target: leadId, meta: patch });
+    log({ evt: 'dash.dana_chat', leadId, [key]: Number(value) });
+    return answer(res, { form, back: `${back}?ok=dana`, status: 200, payload: { ok: true, ...patch } });
+  }
+
   async function inboxMove({ res, form, me }, leadId) {
     const lead = db.getLead(leadId);
     const leadPage = `/dashboard/leads/${encodeURIComponent(leadId)}`;
@@ -1380,7 +1415,7 @@ export function createDashboardRoutes({
   const INBOX_PATH = /^\/dashboard\/inbox\/([A-Za-z0-9_-]{1,64})$/;
   const ADMIN_LEAD = /^\/v1\/admin\/leads\/([A-Za-z0-9_-]{1,64})(?:\/(stage|note))?$/;
   const ADMIN_TEAM = /^\/v1\/admin\/team\/([A-Za-z0-9_-]{1,64})\/(deactivate|reactivate|role)$/;
-  const ADMIN_INBOX = /^\/v1\/admin\/inbox\/([A-Za-z0-9_-]{1,64})\/(reply|handler|move|out)$/;
+  const ADMIN_INBOX = /^\/v1\/admin\/inbox\/([A-Za-z0-9_-]{1,64})\/(reply|handler|move|out|dana)$/;
   /** Inbox writes only an owner makes (D9); reply and handler are anyone's on the team. */
   const OWNER_INBOX_WRITES = new Set(['move', 'out']);
   /** The owner's decisions on a real-estate chat to check (D17): his alone. */
@@ -1522,6 +1557,7 @@ export function createDashboardRoutes({
       const [, leadId, what] = inboxMatch;
       if (what === 'reply') return inboxReply({ ...ctx, req }, leadId);
       if (what === 'handler') return inboxHandler(ctx, leadId);
+      if (what === 'dana') return inboxDana(ctx, leadId);
       if (what === 'move') return inboxMove(ctx, leadId);
       return inboxOut(ctx, leadId);
     }

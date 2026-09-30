@@ -533,3 +533,52 @@ test('the list and the thread carry their pulse, each with a hidden "new activit
   const note = html.indexOf('data-pulse-note');
   assert.ok(html.indexOf('class="thread"') < note && note < html.indexOf('<form class="reply"'), 'the note sits between the messages and the reply box');
 });
+
+test("the thread's Dana row: her state, anyone's off switch, the owner's test switch", () => {
+  const html = thread({ danaEnabled: true, danaConfigured: true });
+  assert.match(html, /Dana answers this chat when nobody on the team has replied for 24 hours/);
+  assert.match(html, new RegExp(`action="/v1/admin/inbox/${LEAD.lead_id}/dana"`));
+  assert.match(html, /name="dana_off" value="1"/);
+  assert.match(html, /Turn Dana off for this chat/);
+  assert.match(html, /name="dana_test" value="1"/);
+  assert.match(html, /Let Dana test on this chat/);
+
+  const off = thread({ lead: { ...LEAD, dana_off: 1 }, danaEnabled: true, danaConfigured: true });
+  assert.match(off, /Dana is off for this chat\./);
+  assert.match(off, /name="dana_off" value="0"/);
+  assert.match(off, /Let Dana answer here/);
+  assert.doesNotMatch(off, /name="dana_test"/, 'no test switch while she is off here');
+
+  const testing = thread({ lead: { ...LEAD, dana_test: 1 }, danaEnabled: false, danaConfigured: true });
+  assert.match(testing, /Dana is testing on this chat/);
+  assert.match(testing, /name="dana_test" value="0"/);
+  assert.match(testing, /Stop the Dana test here/);
+
+  const global = thread({ danaEnabled: false, danaConfigured: true });
+  assert.match(global, /Dana is off everywhere \(<a href="\/dashboard\/team">Team page<\/a>\)/);
+  const staff = thread({ me: STAFF, danaEnabled: false, danaConfigured: true });
+  assert.match(staff, /Dana is off everywhere;/);
+  assert.doesNotMatch(staff, /href="\/dashboard\/team"|name="dana_test"/, 'a staff page never links the Team page nor offers the test');
+  assert.match(staff, /name="dana_off" value="1"/, 'but may turn her off here');
+
+  const bare = thread({ danaEnabled: true, danaConfigured: false });
+  assert.match(bare, /not provisioned/);
+  assert.match(thread({ ok: 'dana' }), /Dana setting saved\./);
+  assert.match(thread({ error: 'bad_dana' }), /not one of the two/);
+});
+
+test('the thread\'s Dana row: off wins over a test, the testing sentence names the hand-over rules, and on-but-unprovisioned says so once', () => {
+  const both = thread({ lead: { ...LEAD, dana_off: 1, dana_test: 1 }, danaEnabled: true, danaConfigured: true });
+  assert.match(both, /Dana is off for this chat\./);
+  assert.doesNotMatch(both, /name="dana_test"/, 'off wins: no test control');
+  assert.doesNotMatch(both, /Dana is testing/);
+
+  const testing = thread({ lead: { ...LEAD, dana_test: 1 }, danaEnabled: false, danaConfigured: true });
+  assert.match(testing, /Dana is testing on this chat: she answers here even while she is off everywhere \(the usual hand-over rules still apply\)\./);
+
+  const bare = thread({ danaEnabled: true, danaConfigured: false });
+  assert.match(bare, /Dana would answer this chat when nobody on the team has replied for 24 hours, but she is not provisioned yet, so nothing is sent\./);
+  assert.doesNotMatch(bare, /Dana answers this chat when/, 'no self-contradiction');
+  assert.doesNotMatch(bare, /nothing is sent either way/, 'no second note');
+  assert.match(thread({ danaEnabled: false, danaConfigured: false }), /nothing is sent either way/, 'the note stays for the other states');
+});

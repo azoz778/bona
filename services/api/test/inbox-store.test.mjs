@@ -370,7 +370,7 @@ test('insertOutbox writes a pending row once; a second insert of the same send_i
   assert.equal(first.inserted, true);
   assert.deepEqual(first.row, {
     send_id: 'SND-1', lead_id: 'L-1', jid: JID, text: 'on my way', user_id: 'USR-1', sender_kind: 'staff',
-    status: 'pending', key_id: null, created: NOW, updated: NOW, error: null,
+    status: 'pending', key_id: null, created: NOW, updated: NOW, error: null, covers_ts: null,
   });
   tick(1000);
   const again = inbox.insertOutbox(out({ text: 'something else', user_id: 'USR-2' }));
@@ -1204,4 +1204,190 @@ test('pruneCandidates: open rows by their last message, dismissed rows by when t
   assert.deepEqual(inbox.pruneCandidates({ openBefore: 'x', dismissedBefore: null }), { open: 0, dismissed: 0 }, 'garbage deletes nothing');
   assert.deepEqual(inbox.pruneCandidates(), { open: 0, dismissed: 0 });
   s.close();
+});
+
+test('the human clock: noteHumanOutbound only ever moves forward', () => {
+  const { s, inbox } = harness();
+  s.insertLead({ lead_id: 'LEAD-H', created: 1, updated: 1, phone_e164: '966500000031', wa_jid: '966500000031@s.whatsapp.net', channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
+  assert.equal(inbox.noteHumanOutbound('LEAD-H', 5000), true);
+  assert.equal(s.getLead('LEAD-H').last_human_out_ts, 5000);
+  inbox.noteHumanOutbound('LEAD-H', 3000);
+  assert.equal(s.getLead('LEAD-H').last_human_out_ts, 5000, 'a history read of an older message never moves it back');
+  inbox.noteHumanOutbound('LEAD-H', 9000);
+  assert.equal(s.getLead('LEAD-H').last_human_out_ts, 9000);
+  assert.equal(inbox.noteHumanOutbound('LEAD-none', 1), false);
+});
+
+test("Dana's sends are counted from the outbox, per chat and in all, failed ones left out", () => {
+  const { s, inbox } = harness();
+  const NOW_ = 1_790_600_000_000;
+  const row = (send_id, lead_id, created, status = 'accepted', kind = 'dana') => s.db.prepare(
+    'INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated) VALUES (?,?,?,?,NULL,?,?,NULL,?,?)',
+  ).run(send_id, lead_id, '966500000031@s.whatsapp.net', 't', kind, status, created, created);
+  row('D1', 'LEAD-A', NOW_ - 10_000);
+  row('D2', 'LEAD-A', NOW_ - 20_000, 'uncertain');
+  row('D3', 'LEAD-A', NOW_ - 30_000, 'pending');
+  row('D4', 'LEAD-A', NOW_ - 40_000, 'failed');
+  row('D5', 'LEAD-B', NOW_ - 50_000);
+  row('S1', 'LEAD-A', NOW_ - 5_000, 'accepted', 'staff');
+  row('D6', 'LEAD-A', NOW_ - 2 * 3_600_000);
+  assert.equal(inbox.countDanaSends({ leadId: 'LEAD-A', sinceTs: NOW_ - 3_600_000 }), 3, 'accepted + uncertain + pending, not failed, not staff, not older');
+  assert.equal(inbox.countDanaSends({ sinceTs: NOW_ - 3_600_000 }), 4, 'every chat');
+  assert.equal(inbox.countDanaSends({ sinceTs: NOW_ - 86_400_000 }), 5);
+});
+
+test('humanOutboundAfter: a stored staff/owner message newer than the time, or a staff send on its way', () => {
+  const { s, inbox } = harness();
+  s.insertLead({ lead_id: 'LEAD-A', created: 1, updated: 1, phone_e164: '966500000031', wa_jid: '966500000031@s.whatsapp.net', channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
+  const T = 1_790_600_000_000;
+  inbox.upsertMessage({ key_id: 'C1', lead_id: 'LEAD-A', direction: 'in', sender_kind: 'client', text: 'hi', ts: T });
+  assert.equal(inbox.humanOutboundAfter('LEAD-A', T), false);
+  inbox.upsertMessage({ key_id: 'D1', lead_id: 'LEAD-A', direction: 'out', sender_kind: 'dana', text: 'hello', ts: T + 1000 });
+  assert.equal(inbox.humanOutboundAfter('LEAD-A', T), false, 'Dana is not a human');
+  inbox.upsertMessage({ key_id: 'O1', lead_id: 'LEAD-A', direction: 'out', sender_kind: 'owner_number', text: 'typed', ts: T + 2000 });
+  assert.equal(inbox.humanOutboundAfter('LEAD-A', T), true);
+  assert.equal(inbox.humanOutboundAfter('LEAD-A', T + 2000), false, 'strictly newer');
+  s.db.prepare("INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, created, updated) VALUES ('SND-s1','LEAD-A','966500000031@s.whatsapp.net','on its way','U1','staff','pending',?,?)").run(T + 3000, T + 3000);
+  assert.equal(inbox.humanOutboundAfter('LEAD-A', T + 2000), true, 'a pending staff reply counts');
+  inbox.updateOutbox('SND-s1', { status: 'failed', error: 'x' });
+  assert.equal(inbox.humanOutboundAfter('LEAD-A', T + 2000), false, 'a failed one does not');
+});
+
+test('unansweredClientMessages: the client messages after the newest outbound, oldest first, at most the newest limit', () => {
+  const { s, inbox } = harness();
+  s.insertLead({ lead_id: 'LEAD-A', created: 1, updated: 1, phone_e164: '966500000031', wa_jid: '966500000031@s.whatsapp.net', channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
+  const T = 1_790_600_000_000;
+  const c = (k, ts, text) => inbox.upsertMessage({ key_id: k, lead_id: 'LEAD-A', direction: 'in', sender_kind: 'client', text, ts });
+  c('C1', T, 'one');
+  inbox.upsertMessage({ key_id: 'O1', lead_id: 'LEAD-A', direction: 'out', sender_kind: 'owner_number', text: 'answered', ts: T + 1000 });
+  c('C2', T + 2000, 'two');
+  c('C3', T + 3000, 'three');
+  assert.deepEqual(inbox.unansweredClientMessages('LEAD-A').map((m) => m.text), ['two', 'three']);
+  assert.deepEqual(inbox.unansweredClientMessages('LEAD-A', { limit: 1 }).map((m) => m.text), ['three'], 'the newest ones');
+  s.db.prepare("INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, created, updated) VALUES ('SND-d1','LEAD-A','966500000031@s.whatsapp.net','dana',NULL,'dana','pending',?,?)").run(T + 4000, T + 4000);
+  assert.deepEqual(inbox.unansweredClientMessages('LEAD-A'), [], 'a Dana send just written counts as an answer');
+  inbox.updateOutbox('SND-d1', { status: 'failed', error: 'x' });
+  assert.deepEqual(inbox.unansweredClientMessages('LEAD-A').map((m) => m.text), ['two', 'three'], 'a failed send answered nothing');
+  assert.deepEqual(inbox.unansweredClientMessages('LEAD-none'), []);
+});
+
+test('a purge forgets the Retell chat and the introduction; leaving the inbox also clears both per-chat switches', () => {
+  const { s, inbox } = harness();
+  s.insertLead({ lead_id: 'LEAD-A', created: 1, updated: 1, phone_e164: '966500000031', wa_jid: '966500000031@s.whatsapp.net', channel: 'whatsapp', stage: 'new', inbox_state: 'in',
+    dana_off: 1, dana_test: 1, dana_chat_id: 'chat_1', dana_chat_ts: 5, dana_introduced: 1 });
+  inbox.purgeLead('LEAD-A');
+  let l = s.getLead('LEAD-A');
+  assert.deepEqual([l.dana_chat_id, l.dana_chat_ts, l.dana_introduced, l.dana_off, l.dana_test], [null, null, 0, 1, 1]);
+  s.updateLead('LEAD-A', { dana_chat_id: 'chat_2', dana_chat_ts: 6, dana_introduced: 1 });
+  inbox.leaveInbox('LEAD-A');
+  l = s.getLead('LEAD-A');
+  assert.deepEqual([l.inbox_state, l.dana_chat_id, l.dana_chat_ts, l.dana_introduced, l.dana_off, l.dana_test], ['out', null, null, 0, 0, 0]);
+});
+
+/** Task 3 review: covers_ts, the guards, the owner_number correction. */
+const IN_CHAT = { created: 1, updated: 1, phone_e164: '966500000031', wa_jid: '966500000031@s.whatsapp.net', channel: 'whatsapp', stage: 'new', inbox_state: 'in' };
+const T3 = 1_790_600_000_000;
+function rawOutbox(s, { send_id, lead_id, created, kind = 'dana', status = 'accepted', covers_ts = null }) {
+  s.db.prepare(`INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, covers_ts)
+                VALUES (?,?,?,?,NULL,?,?,NULL,?,?,?)`).run(send_id, lead_id, '966500000031@s.whatsapp.net', 't', kind, status, created, created, covers_ts);
+}
+const clientMsg = (inbox, lead_id, key_id, ts, text) => inbox.upsertMessage({ key_id, lead_id, direction: 'in', sender_kind: 'client', text, ts });
+
+test('unansweredClientMessages: a client message that arrives while Dana composes stays unanswered (covers_ts); a staff send answers it', () => {
+  const { s, inbox } = harness();
+  s.insertLead({ lead_id: 'LEAD-A', ...IN_CHAT });
+  clientMsg(inbox, 'LEAD-A', 'C1', T3, 'batch');
+  rawOutbox(s, { send_id: 'SND-d1', lead_id: 'LEAD-A', created: T3 + 8000, covers_ts: T3 });
+  inbox.upsertMessage({ key_id: 'D1', lead_id: 'LEAD-A', direction: 'out', sender_kind: 'dana', text: 'answer', ts: T3 + 8000 });
+  clientMsg(inbox, 'LEAD-A', 'C2', T3 + 3000, 'while she composed');
+  assert.deepEqual(inbox.unansweredClientMessages('LEAD-A').map((m) => m.key_id), ['C2'], "neither her stored message nor her row's created bounds it");
+  rawOutbox(s, { send_id: 'SND-s1', lead_id: 'LEAD-A', created: T3 + 9000, kind: 'staff' });
+  assert.deepEqual(inbox.unansweredClientMessages('LEAD-A'), [], "a staff row answers up to its created");
+});
+
+test('unansweredClientMessages: a client message stamped the same second as covers_ts counts as answered', () => {
+  const { s, inbox } = harness();
+  s.insertLead({ lead_id: 'LEAD-A', ...IN_CHAT });
+  clientMsg(inbox, 'LEAD-A', 'C1', T3 - 1000, 'earlier');
+  clientMsg(inbox, 'LEAD-A', 'C2', T3, 'the batch newest');
+  rawOutbox(s, { send_id: 'SND-d1', lead_id: 'LEAD-A', created: T3 + 5000, covers_ts: T3 });
+  clientMsg(inbox, 'LEAD-A', 'C3', T3, 'same second');
+  assert.deepEqual(inbox.unansweredClientMessages('LEAD-A'), []);
+});
+
+test("another chat's Dana row bounds nothing here: not the counts, not the batch", () => {
+  const { s, inbox } = harness();
+  s.insertLead({ lead_id: 'LEAD-A', ...IN_CHAT });
+  s.insertLead({ lead_id: 'LEAD-B', ...IN_CHAT, phone_e164: '966500000032', wa_jid: '966500000032@s.whatsapp.net' });
+  clientMsg(inbox, 'LEAD-A', 'C1', T3, 'a');
+  rawOutbox(s, { send_id: 'SND-b1', lead_id: 'LEAD-B', created: T3 + 5000, covers_ts: T3 + 4000 });
+  assert.deepEqual(inbox.unansweredClientMessages('LEAD-A').map((m) => m.key_id), ['C1']);
+  assert.equal(inbox.countDanaSends({ leadId: 'LEAD-A', sinceTs: T3 - 3_600_000 }), 0);
+  assert.equal(inbox.countDanaSends({ leadId: 'LEAD-B', sinceTs: T3 - 3_600_000 }), 1);
+});
+
+test('countDanaSends: a row exactly at sinceTs counts; a missing sinceTs is a RangeError, never an open cap', () => {
+  const { s, inbox } = harness();
+  rawOutbox(s, { send_id: 'SND-d1', lead_id: 'LEAD-A', created: T3 });
+  assert.equal(inbox.countDanaSends({ leadId: 'LEAD-A', sinceTs: T3 }), 1);
+  assert.equal(inbox.countDanaSends({ leadId: 'LEAD-A', sinceTs: T3 + 1 }), 0);
+  assert.throws(() => inbox.countDanaSends({ leadId: 'LEAD-A', sinceTs: undefined }), RangeError);
+  assert.throws(() => inbox.countDanaSends(), RangeError);
+});
+
+test('noteHumanOutbound: a time that is not a number changes nothing', () => {
+  const { s, inbox } = harness();
+  s.insertLead({ lead_id: 'LEAD-H', ...IN_CHAT });
+  inbox.noteHumanOutbound('LEAD-H', 5000);
+  assert.equal(inbox.noteHumanOutbound('LEAD-H', NaN), false);
+  assert.equal(inbox.noteHumanOutbound('LEAD-H', undefined), false);
+  assert.equal(s.getLead('LEAD-H').last_human_out_ts, 5000);
+});
+
+test('humanOutboundAfter ignores a Dana outbox row', () => {
+  const { s, inbox } = harness();
+  s.insertLead({ lead_id: 'LEAD-A', ...IN_CHAT });
+  rawOutbox(s, { send_id: 'SND-d1', lead_id: 'LEAD-A', created: T3 + 5000, status: 'pending', covers_ts: T3 });
+  assert.equal(inbox.humanOutboundAfter('LEAD-A', T3), false);
+});
+
+test('an owner_number message corrected to dana recomputes the human clock; corrected to staff it stays', () => {
+  const { s, inbox } = harness();
+  s.insertLead({ lead_id: 'LEAD-A', ...IN_CHAT });
+  inbox.upsertMessage({ key_id: 'O9', lead_id: 'LEAD-A', direction: 'out', sender_kind: 'owner_number', text: 'read back early', ts: 9000 });
+  inbox.noteHumanOutbound('LEAD-A', 9000);
+  inbox.upsertMessage({ key_id: 'S5', lead_id: 'LEAD-A', direction: 'out', sender_kind: 'staff', text: 'older', ts: 5000 });
+  inbox.noteHumanOutbound('LEAD-A', 5000);
+  assert.equal(s.getLead('LEAD-A').last_human_out_ts, 9000);
+  inbox.upsertMessage({ key_id: 'O9', lead_id: 'LEAD-A', direction: 'out', sender_kind: 'dana', text: 'read back early', ts: 9000 });
+  assert.equal(s.getLead('LEAD-A').last_human_out_ts, 5000, "it was Dana's: the clock falls back to the newest human message");
+
+  s.insertLead({ lead_id: 'LEAD-B', ...IN_CHAT, phone_e164: '966500000032', wa_jid: '966500000032@s.whatsapp.net' });
+  inbox.upsertMessage({ key_id: 'P9', lead_id: 'LEAD-B', direction: 'out', sender_kind: 'owner_number', text: 'x', ts: 9000 });
+  inbox.noteHumanOutbound('LEAD-B', 9000);
+  inbox.upsertMessage({ key_id: 'P9', lead_id: 'LEAD-B', direction: 'out', sender_kind: 'staff', text: 'x', ts: 9000 });
+  assert.equal(s.getLead('LEAD-B').last_human_out_ts, 9000, 'a staff message is still a human one');
+});
+
+test('insertOutbox keeps covers_ts as given, NULL when left out', () => {
+  const { inbox } = harness();
+  inbox.insertOutbox({ send_id: 'SND-c1', lead_id: 'LEAD-A', jid: '966500000031@s.whatsapp.net', text: 'd', sender_kind: 'dana', covers_ts: T3 });
+  inbox.insertOutbox({ send_id: 'SND-c2', lead_id: 'LEAD-A', jid: '966500000031@s.whatsapp.net', text: 's', user_id: 'USR-1', sender_kind: 'staff' });
+  assert.equal(inbox.getOutbox('SND-c1').covers_ts, T3);
+  assert.equal(inbox.getOutbox('SND-c2').covers_ts, null);
+});
+
+test('countDanaTests counts the chats in the Bona inbox under a Dana test, and nothing else', () => {
+  const { s, inbox } = harness();
+  assert.equal(inbox.countDanaTests(), 0);
+  chat(s, 'LEAD-T1');
+  chat(s, 'LEAD-T2');
+  chat(s, 'LEAD-N');
+  lead(s, 'LEAD-U', { inbox_state: 'unsure' });
+  for (const id of ['LEAD-T1', 'LEAD-T2', 'LEAD-U']) s.updateLead(id, { dana_test: 1 });
+  assert.equal(inbox.countDanaTests(), 2, 'an Unsure lead flagged by hand does not count');
+  inbox.leaveInbox('LEAD-T2');
+  assert.equal(inbox.countDanaTests(), 1, 'leaving the inbox ends the test');
+  s.updateLead('LEAD-T1', { dana_off: 1 });
+  assert.equal(inbox.countDanaTests(), 0, 'a test on a chat where Dana is off is no test');
 });
