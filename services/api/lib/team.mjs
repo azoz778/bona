@@ -16,11 +16,10 @@ import { normalisePhone } from './phone.mjs';
 
 export const ROLES = ['owner', 'staff'];
 /**
- * Every setting that exists, with its default. Phase 4 adds `dana_enabled: '0'`.
- * `inbox_replies` ships '0': the team can read the Bona inbox from the day it goes live,
- * but no reply reaches a client until the owner turns replies on — the first real client
- * message from the dashboard is sent with him (design D14). `dana_enabled` ships '0' for the
- * same reason: Dana answers nobody on WhatsApp until the owner turns her on (P4-3).
+ * Every setting that exists, with its default. `inbox_replies` ships '0': the team can read
+ * the Bona inbox from the day it goes live, but no reply reaches a client until the owner
+ * turns replies on (design D14). `dana_enabled` ships '0' for the same reason: Dana answers
+ * nobody on WhatsApp until the owner turns her on, after a test on one chat (§6, P4-3).
  */
 export const SETTINGS_DEFAULTS = { sending_enabled: '1', inbox_replies: '0', dana_enabled: '0' };
 /** The only values each setting may hold. A key with no entry here accepts any string. */

@@ -18539,7 +18539,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Write the failing tests**
 
-In `test/team.test.mjs`, the line `assert.equal(codeOf(() => team.setSetting('dana_enabled', '1')), 'bad_setting', 'Phase 4 adds that key');` becomes part of a new test (delete that line from the test it is in) — append:
+In `test/team.test.mjs`, the line `assert.equal(codeOf(() => team.setSetting('dana_enabled', '1')), 'bad_setting', 'Phase 4 adds that key');` is REPLACED in place by `assert.equal(codeOf(() => team.setSetting('no_such_setting', '1')), 'bad_setting');` (it was that test's only unknown-key assertion — Task 2 review, Codex) — then append:
 ```js
 test('dana_enabled: ships off, fails closed, and is a switch like the other two', () => {
   const { s, team } = harness();
@@ -20774,3 +20774,9 @@ Expected: `/health` has `dana: { configured: true, enabled: false }` and `push.c
   - AR: "إذا لم يرد أحد من فريقنا على استفسارك عبر واتساب خلال يوم، فقد تردّ عليك دانة، مساعدتنا الذكية، من رقمنا. تذكر رسالتها الأولى من هي. تُرسل رسائلك في تلك المحادثة إلى Retell ومزوّدي الذكاء الاصطناعي لديها لإعداد الرد؛ ولا تذكر دانة إلا الأسعار المنشورة في هذا الموقع، وتحوّل المحادثة إلى شخص من الفريق عندما تطلب ذلك أو تطلب معاينة أو تقدّم عرضاً. راسلنا لحذف تلك الرسائل."
 
 - [ ] **Step 14: Memory and handoff** — update Claude memory `bona-dashboard-team-inbox-2026-09-27.md` (Phase 4 status, main SHA, rollback, backup, the Retell ids, review disagreements, the STOP), its `MEMORY.md` line, and the shared-memory handoff (same id: `--scope claude-project:fed94f6b4de219192b28 --id bona-dashboard-team-inbox-handoff`).
+
+### Final review notes (Phase 4, per task — what the reviews found, what was left)
+
+- **Task 1 (schema v6)** — Claude + Codex approved. Codex proved the v6 step rolls back whole (injected trigger); Claude proved the v5 build opens a v6 file. Three test-hygiene items folded into Task 2. No disagreement.
+- **Task 2 (switch, agent id, audit)** — Codex found the test lost its only unknown-key assertion (restored). Both: stale comments (fixed). **Disagreement:** `setSetting`'s `String(value)` coercion accepts number `1`/`0` and `['1']` — Codex Important, Claude Minor (pre-existing across all three switches; the only entry point, the settings route, turns non-strings into `''` which is refused; a cross-switch tightening is its own change). Left as is; told to the owner. Forward note for Task 8: an empty env `BONA_RETELL_WA_CHAT_AGENT_ID=` yields `''`, so `dana.configured` must be `Boolean(agentId && …)` (it is, in `createDana`).
+

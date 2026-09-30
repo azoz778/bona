@@ -14,7 +14,7 @@ const NOW = 1_790_500_000_000;
 
 test('schema v3 adds the team tables and a user on every session', () => {
   const s = openDb(':memory:');
-  // The newest schema's number is pinned in db.test.mjs; this test only needs v3's tables.
+  // db.test.mjs proves a v5 file upgrades to SCHEMA_VERSION and gains the v6 columns (no exact number is pinned here); this test only needs v3's tables.
   assert.ok(SCHEMA_VERSION >= 3);
   assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
   const tables = new Set(s.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name));
@@ -107,6 +107,7 @@ test('settings default to on, can be switched, and refuse unknown keys', () => {
   team.setSetting('sending_enabled', '0', { by: 'USR-1' });
   assert.equal(team.sendingEnabled(), false);
   assert.equal(s.db.prepare("SELECT updated_by FROM settings WHERE key = 'sending_enabled'").get().updated_by, 'USR-1');
+  assert.equal(codeOf(() => team.setSetting('no_such_setting', '1')), 'bad_setting');
   s.close();
 });
 
