@@ -334,7 +334,10 @@ export function createDana({
     const already = Number(fresh.needs_human) === 1;
     if (!already) inbox.setNeedsHuman(leadId, 1);
     if (alerts) alerts.notify(leadId, { reason: 'needs_human' });
-    const sent = already ? false : (await send(fresh, HANDOVER[language], language, coversTs)).sent;
+    // A chat that turned lid-only meanwhile has no phone jid to send to: flagged and alerted
+    // like any hand-over, but no line — as if it had gone already (Task 6 re-review).
+    const noJid = !replyJidFor(fresh);
+    const sent = already || noJid ? false : (await send(fresh, HANDOVER[language], language, coversTs)).sent;
     say({ evt: 'dana.handover', leadId, why, sent });
     return { handover: why, sent };
   }

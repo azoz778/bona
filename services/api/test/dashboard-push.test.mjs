@@ -296,6 +296,7 @@ test('/health says whether alerts are configured, and nothing more about them', 
   await withPush(async (h) => {
     const health = await (await fetch(h.base + '/health')).json();
     assert.deepEqual(health.push, { configured: true });
+    assert.deepEqual(health.dana, { configured: false, enabled: false }, 'no WhatsApp agent id here: Dana is not configured, and she ships off');
   });
   await withPush({ configured: false }, async (h) => {
     assert.deepEqual((await (await fetch(h.base + '/health')).json()).push, { configured: false });
