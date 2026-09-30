@@ -19116,7 +19116,7 @@ Preferred language: {{language}}.
   "Dana — Bona's AI assistant" / "دانة — مساعدة بونا الذكية"; it is added before your words.
   If asked whether you are a person, say plainly that you are Bona's AI assistant and that a
   member of the team is reading along and will reply.
-- Never say "recorded", never mention systems, tools, databases or errors.
+- Never say you have "noted" or "saved" anything, never mention systems, tools, databases or errors.
 
 ## The rules that cannot be broken
 
@@ -19278,7 +19278,7 @@ before the `ids file:` line; return `{ dryRun: true, ids, model: preferred, rebu
 
 Live run: wrap steps 1–6 (knowledge base … retire) in `if (!whatsappOnly) { … }`, declaring `let knowledgeBaseId = ids.knowledgeBaseId ?? null; let llmId = …; let voiceAgentId = …; let chatAgentId = …; let model = ids.model ?? null; let publishFailed = false;` BEFORE the block so the record below can read them either way. In `--whatsapp-only` mode, first: `if (!knowledgeBaseId) throw new Error('no knowledge base id in ids.json — run the full provisioning (no flag) first');`.
 
-Then, always (step 7):
+Then, always — placed AFTER step 5 (publish) and BEFORE step 6 (retire the replaced knowledge base), because retirement must stay dead last: on a plain `--rebuild-kb` run her LLM must already point at the new base when the old one is deleted, and a failed publish of her agent sets `publishFailed` too (Task 5 implementer's correction to this plan; a test covers it):
 ```js
   /* 7. Dana on WhatsApp: her own LLM and chat agent (P4-1) --------- */
   let waLlmId = ids.waLlmId ?? null;
@@ -20818,5 +20818,6 @@ Expected: `/health` has `dana: { configured: true, enabled: false }` and `push.c
 - **Task 1 (schema v6)** — Claude + Codex approved. Codex proved the v6 step rolls back whole (injected trigger); Claude proved the v5 build opens a v6 file. Three test-hygiene items folded into Task 2. No disagreement.
 - **Task 2 (switch, agent id, audit)** — Codex found the test lost its only unknown-key assertion (restored). Both: stale comments (fixed). **Disagreement:** `setSetting`'s `String(value)` coercion accepts number `1`/`0` and `['1']` — Codex Important, Claude Minor (pre-existing across all three switches; the only entry point, the settings route, turns non-strings into `''` which is refused; a cross-switch tightening is its own change). Left as is; told to the owner. Forward note for Task 8: an empty env `BONA_RETELL_WA_CHAT_AGENT_ID=` yields `''`, so `dana.configured` must be `Boolean(agentId && …)` (it is, in `createDana`).
 - **Task 3 (store, ingest, sender)** — re-review approved 131cd3d (all closed); one follow-up carried into Task 6: `sendTo` refuses `kind: 'dana'` without a `sendId`. The commit executed the plan verbatim; the findings were the PLAN's. Codex found (Claude confirmed against Task 6's run order) that `unansweredClientMessages` keyed "answered" on the send row's `created`, stamped after the Retell round trip, so a client message arriving while Dana composed would never be answered by her → fixed by `wa_outbox.covers_ts` (v6, unshipped) written with her row before the call, and the human-sender restriction on the stored-message bound (P4-7, P4-14, contract). Claude found (verified) that `noteHumanOutbound` with a non-finite `ts` reset the clock to NULL and `countDanaSends` with an undefined `sinceTs` counted 0 → guards. Both: a Dana record read back before its key was stored as `owner_number` and stamped the human clock → Dana's text is normalised like a reply and `upsertMessage` recomputes the clock on an `owner_number → staff/dana` correction (Codex wanted stamp provenance; Claude's smaller fix taken). **Disagreements:** the same-second tie (Codex: unsafe; Claude: the right side to err on once `covers_ts` exists — kept, pinned by a test); a `pending` staff row older than `INTERRUPTED_MS` counting as a human answer (Codex: Important, wants escalation to `needs_human`; Claude: bounded and correct — kept, an upkeep follow-up if the owner wants it).
+- **Task 5 (provisioning + prompt)** — the implementer corrected the plan twice, rightly: the prompt's own "never say recorded" line tripped the plan's test that forbids the word (reworded), and the WhatsApp step runs before the knowledge-base retirement (retire stays dead last; a `--rebuild-kb` test added). Plan text synced.
 - **Task 4 (`request_human` tool)** — Claude + Codex approved, no disagreement. Minor carried into Task 6: the tool test asserts no side effects (`h.sent` empty, no `leads.jsonl` written) and the reason-leak check runs after the last call; the log line may add `channel: ctx.channel` (server-originated) to tell a WhatsApp call from a stray site call. Pre-existing stale JSDoc counts fixed in Task 5.
 
