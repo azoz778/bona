@@ -97,7 +97,7 @@ export function toolArgs(body = {}) {
 }
 
 /**
- * Build the three handlers.
+ * Build the handlers.
  * @param {{ inventory, store, db, dataDir: string, siteUrl: string, env: object,
  *           sendWhatsApp?: (text: string) => Promise<any>, log?: Function,
  *           now?: () => number, leadDedupeMs?: number }} deps
