@@ -14,10 +14,10 @@ self.addEventListener('install', () => { self.skipWaiting(); });
 self.addEventListener('activate', (event) => { event.waitUntil(self.clients.claim()); });
 
 self.addEventListener('push', (event) => {
+  // No `badge`: Android draws it as a monochrome blob and iOS ignores it.
   event.waitUntil(self.registration.showNotification('New Bona message', {
     body: 'A client wrote in the Bona inbox.',
     icon: '/dashboard/icon-192.png',
-    badge: '/dashboard/icon-192.png',
     tag: 'bona-inbox',
     renotify: true,
   }));
@@ -28,13 +28,13 @@ self.addEventListener('notificationclick', (event) => {
   const target = '/dashboard/push/open';
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    for (const w of windows) {
-      if (new URL(w.url).pathname.startsWith('/dashboard/') && 'focus' in w) {
-        await w.focus();
-        if ('navigate' in w) return w.navigate(target);
-        return undefined;
-      }
+    const ours = windows.find((w) => { const p = new URL(w.url).pathname; return p === '/dashboard' || p.startsWith('/dashboard/'); });
+    if (ours) {
+      try {
+        const w = await ours.focus();
+        if (w && 'navigate' in w) { await w.navigate(target); return; }
+      } catch { /* an uncontrolled or gone window cannot be navigated: open a fresh one */ }
     }
-    return self.clients.openWindow(target);
+    await self.clients.openWindow(target);
   })());
 });

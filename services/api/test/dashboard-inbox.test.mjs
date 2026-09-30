@@ -23,9 +23,9 @@ import { createSender } from '../lib/wa-send.mjs';
 import { REPLY_MAX_BODY_BYTES, REPLY_DRAIN_MAX_BYTES } from '../lib/dashboard/routes.mjs';
 
 const NOW = 1_790_500_000_000;
-const CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
+const CSP = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
 /** An HTML page's CSP (P3-1): the same, plus our own script, worker, fetches and manifest — nothing inline. */
-const PAGE_CSP = "default-src 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
+const PAGE_CSP = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
 const OWN_SCRIPT = '<script src="/dashboard/app.js" defer></script>';
 /** The one script a signed-in page may carry is our own app.js; nothing else, nothing inline. */
 const onlyOurScript = (html) => !/<script/i.test(html.split(OWN_SCRIPT).join(''));
@@ -253,6 +253,7 @@ test('the inbox lists only chats that are in, to everyone; the Unsure list is th
       assertLocked(res);
       const html = await res.text();
       assert.ok(onlyOurScript(html), 'no script but our own app.js');
+      assert.equal(html.split(OWN_SCRIPT).length, 2, 'exactly one script tag, ours');
       for (const name of ['Alya Client', 'Layla Lid']) assert.ok(html.includes(name), name);
       for (const hidden of ['Umar Unsure', 'Omar Out', 'Nadia Never', 'Tariq Team', 'Farah Form', 'Noor Never Guess', 'never words', 'team words']) {
         assert.ok(!html.includes(hidden), hidden);

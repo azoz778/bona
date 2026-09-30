@@ -93,6 +93,9 @@ function sendRaw(res, status, jsonText, extraHeaders = {}) {
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': Buffer.byteLength(jsonText),
     'Cache-Control': 'no-store',
+    // The dashboard's page CSP trusts every same-origin GET (`script-src 'self'`), so no
+    // answer on this origin may be sniffed into a script.
+    'X-Content-Type-Options': 'nosniff',
     ...extraHeaders,
   });
   res.end(jsonText);

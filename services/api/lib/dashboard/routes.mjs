@@ -55,7 +55,9 @@ import {
 /** Set on every dashboard and admin response, HTML or JSON, success or failure. */
 export const SECURITY_HEADERS = {
   'Cache-Control': 'no-store',
-  'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'",
+  // `base-uri` does not inherit from `default-src`: without it an injected `<base>` would
+  // redirect every root-relative link and form on the page.
+  'Content-Security-Policy': "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'",
   'X-Frame-Options': 'DENY',
   // `no-referrer` here is what broke the login: with no referrer at all Chrome sends
   // `Origin: null` on the login form's own same-origin POST, which is indistinguishable
@@ -71,8 +73,10 @@ export const SECURITY_HEADERS = {
  * own service worker, fetches to ourselves (the pulse, the push subscription) and our own
  * manifest. Still no inline script: a lead's name that slipped past an escape cannot run.
  * JSON answers and redirects keep SECURITY_HEADERS' `default-src 'none'`.
+ * `'self'` trusts every same-origin GET, so every route that answers a body must keep
+ * `X-Content-Type-Options: nosniff`.
  */
-export const PAGE_CSP = "default-src 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
+export const PAGE_CSP = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
 export const PAGE_SECURITY_HEADERS = { ...SECURITY_HEADERS, 'Content-Security-Policy': PAGE_CSP };
 /** The service worker's own CSP: it loads nothing but the notification icon. */
 const WORKER_CSP = "default-src 'none'; img-src 'self'";
@@ -223,7 +227,7 @@ export function createDashboardRoutes({
 
   /** One of the fixed app files (P3-2): public, GET/HEAD only, never cached. */
   function sendAsset(req, res, asset, p) {
-    if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method_not_allowed' });
+    if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method_not_allowed' }, { Allow: 'GET, HEAD' });
     res.writeHead(200, {
       'Content-Type': asset.type,
       'Content-Length': asset.body.length,
@@ -1311,8 +1315,9 @@ export function createDashboardRoutes({
 
   async function handleHtml({ req, res, url, p, ip }) {
     /* --- the app's fixed files: public, whoever asks (P3-2) --- */
+    // `p` has its trailing slash stripped by index.mjs; `/dashboard/sw.js/` is not a file.
     const asset = ASSETS.get(p);
-    if (asset) return sendAsset(req, res, asset, p);
+    if (asset && !url.pathname.endsWith('/')) return sendAsset(req, res, asset, p);
     if (p === '/dashboard/tiktok/callback') return tiktokCallback({ req, res, url });
     /* --- login, the only pages reachable signed out --- */
     if (p === '/dashboard/login') {

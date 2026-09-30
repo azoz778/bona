@@ -643,21 +643,29 @@ export function layout({ title, body, active = null, chrome = true, counts = {},
     ? `<div class="bar"><div><h1>${esc(title)}</h1>${subtitle ? `<div class="cr">${esc(subtitle)}</div>` : ''}</div>${actions}</div>`
     : '';
 
+  // Only a signed-in page carries the push key and our one script (P3-13); the login and
+  // logout pages have neither. The key may be empty: push is off until keys exist.
+  const app = me
+    ? [`<meta name="bona-push-key" content="${esc(me.pushKey ?? '')}">`, '<script src="/dashboard/app.js" defer></script>']
+    : [];
+
   return `<!doctype html>
 <html lang="en" translate="no">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="robots" content="noindex, nofollow, notranslate">
-<meta name="google" content="notranslate">
-<meta name="theme-color" content="#0a0b0c">
-<link rel="manifest" href="/dashboard/manifest.webmanifest">
-<link rel="icon" href="/dashboard/icon-192.png">
-<link rel="apple-touch-icon" href="/dashboard/apple-touch-icon.png">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Bona">
-${me ? `<meta name="bona-push-key" content="${esc(me.pushKey ?? '')}">\n<script src="/dashboard/app.js" defer></script>` : ''}
+${[
+    '<meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',
+    '<meta name="robots" content="noindex, nofollow, notranslate">',
+    '<meta name="google" content="notranslate">',
+    '<meta name="theme-color" content="#0a0b0c">',
+    '<link rel="manifest" href="/dashboard/manifest.webmanifest">',
+    '<link rel="icon" href="/dashboard/icon-192.png">',
+    '<link rel="apple-touch-icon" href="/dashboard/apple-touch-icon.png">',
+    '<meta name="apple-mobile-web-app-capable" content="yes">',
+    '<meta name="mobile-web-app-capable" content="yes">',
+    '<meta name="apple-mobile-web-app-title" content="Bona">',
+    ...app,
+  ].join('\n')}
 <title>${esc(title)} · Bona</title>
 <style>${STYLE}</style>
 </head>
@@ -856,9 +864,9 @@ export function replyLine(lead, now) {
  * A lead, and the two taps that matter: WhatsApp and Call.
  *
  * The action bar is three top-level links, so it works with script disabled, without
- * `/dashboard/app.js` (the only script the CSP allows), and on a lock-screened phone. `wa.me` takes bare digits;
- * `tel:` takes E.164. Neither can carry markup, because both are rebuilt from
- * `/\D/`-stripped digits before they are printed.
+ * `/dashboard/app.js` (the only script the CSP allows), and on a lock-screened phone.
+ * `wa.me` takes bare digits; `tel:` takes E.164. Neither can carry markup, because both
+ * are rebuilt from `/\D/`-stripped digits before they are printed.
  *
  * Names and districts are Arabic as often as not, so every element that can hold one
  * carries `dir="auto"` and the browser decides which way it runs.
@@ -992,11 +1000,12 @@ const ICON_TEL = '<path d="M5.2 2.6 6.9 6 5.4 7.5a8 8 0 0 0 3.1 3.1L10 9.1l3.4 1
  * One waiting lead as a Desk row: who, how long, and the two taps that matter.
  *
  * Both actions are plain links, so they work with script disabled, without
- * `/dashboard/app.js` (the only script the CSP allows), and on a lock-screened phone. `wa.me` takes bare digits and
- * `tel:` takes E.164 — both are rebuilt from `/\D/`-stripped digits before printing,
- * so neither can carry markup. Names and districts are Arabic as often as not, so
- * every element that can hold one carries `dir="auto"` on an INLINE span: putting it
- * on the block would right-align the whole row and look broken beside a Latin name.
+ * `/dashboard/app.js` (the only script the CSP allows), and on a lock-screened phone.
+ * `wa.me` takes bare digits and `tel:` takes E.164 — both are rebuilt from
+ * `/\D/`-stripped digits before printing, so neither can carry markup. Names and
+ * districts are Arabic as often as not, so every element that can hold one carries
+ * `dir="auto"` on an INLINE span: putting it on the block would right-align the whole
+ * row and look broken beside a Latin name.
  */
 export function leadRow(lead, now) {
   const st = waitState(lead, now);
