@@ -311,6 +311,10 @@ const MIGRATIONS = [
       ALTER TABLE leads ADD COLUMN last_human_out_ts INTEGER;
       UPDATE leads SET last_human_out_ts = (SELECT MAX(m.ts) FROM wa_messages m WHERE m.lead_id = leads.lead_id AND m.direction = 'out' AND m.sender_kind IN ('staff','owner_number'))
         WHERE inbox_state = 'in';
+      -- The newest client message a Dana send answers, written with her row before the call
+      -- (so a message that arrives while she composes is not counted as answered); NULL on
+      -- every other row.
+      ALTER TABLE wa_outbox ADD COLUMN covers_ts INTEGER;
     `,
   },
 ];
