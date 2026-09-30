@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createToolHandlers, tokenMatches, extractToken, conversationId, conversationLocale, toolArgs, leadKey } from '../lib/tools.mjs';
+import { createToolHandlers, tokenMatches, extractToken, conversationId, conversationLocale, toolArgs, leadKey, HANDOVER_TOOL, TOOL_NAMES } from '../lib/tools.mjs';
 import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
 import { createStore } from '../lib/store.mjs';
 import { normaliseLead, leadNote, appendLead, appendJsonl } from '../lib/leads.mjs';
@@ -17,12 +17,13 @@ function harness() {
   const sent = [];
   const store = createStore();
   const db = openDb(':memory:');
-  const tools = createToolHandlers({
+  const deps = {
     inventory, store, db, dataDir, siteUrl: 'https://bona.azoz.uk', env: {},
     // The real Evolution API is NEVER touched from tests.
     sendWhatsApp: async (text) => { sent.push(text); return { ok: true }; },
-  });
-  return { dataDir, sent, store, db, tools, cleanup: () => { db.close(); fs.rmSync(dataDir, { recursive: true, force: true }); } };
+  };
+  const tools = createToolHandlers(deps);
+  return { deps, dataDir, sent, store, db, tools, cleanup: () => { db.close(); fs.rmSync(dataDir, { recursive: true, force: true }); } };
 }
 
 /* ---------------- auth ---------------- */
@@ -334,4 +335,25 @@ test('the data directory and its files are owner-only — enquiries are personal
     assert.equal(fs.statSync(path.join(dataDir, name)).mode & 0o777, 0o600, name);
   }
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('request_human answers a note that hands the chat over, logs the lead id only, never the reason', async () => {
+  const logs = [];
+  const h = harness();
+  const tools = createToolHandlers({ ...h.deps, log: (o) => logs.push(o) });
+  try {
+    assert.equal(HANDOVER_TOOL, 'request_human');
+    assert.ok(TOOL_NAMES.includes('request_human'));
+    const body = { chat: { chat_id: 'chat_wa_1', metadata: { source: 'bona-whatsapp', lead_id: 'LEAD-20260930-0000dddd' } }, name: 'request_human', args: { reason: 'wants a viewing with Sara 0500000009' } };
+    const out = JSON.parse(await tools.run('request_human', body));
+    assert.equal(out.ok, true);
+    assert.match(out.note, /team will reply shortly/);
+    assert.deepEqual(logs.filter((l) => l.evt === 'tool.request_human'), [{ evt: 'tool.request_human', leadId: 'LEAD-20260930-0000dddd' }]);
+    assert.doesNotMatch(JSON.stringify(logs), /viewing|Sara|0500000009/);
+    const odd = JSON.parse(await tools.run('request_human', { chat: { chat_id: 'c', metadata: { lead_id: '../etc' } }, name: 'request_human', args: {} }));
+    assert.equal(odd.ok, true);
+    assert.equal(logs.at(-1).leadId, null, 'a lead id that does not look like one is not logged');
+  } finally {
+    h.cleanup();
+  }
 });
