@@ -16101,8 +16101,8 @@ P10. **Hidden messages take their gaps and unconfirmed replies with them**: with
 
 ### Decisions taken while expanding (inside the spec; each is binding for the tasks below)
 
-- **P3-1 Two CSPs.** HTML answers (`sendHtml`) carry `PAGE_CSP` = `default-src 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'` (spec §5: only those four directives open). JSON answers and redirects keep `SECURITY_HEADERS`' `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'` unchanged. No inline script and no inline event handler anywhere: `script-src 'self'` has no `'unsafe-inline'`, so an escaped-by-mistake `<script>` in a lead's name still cannot run.
-- **P3-2 Static assets are fixed, public and uncached.** `/dashboard/sw.js`, `/dashboard/app.js`, `/dashboard/manifest.webmanifest`, `/dashboard/icon-192.png`, `/dashboard/icon-512.png`, `/dashboard/apple-touch-icon.png` are read once at start from `lib/dashboard/assets/` into a fixed map (no URL ever reaches the filesystem), served on GET/HEAD without a login (a manifest is fetched without cookies, and a browser re-checks `sw.js` in the background whether or not the member is still signed in; none of them holds anything private), with `Cache-Control: no-store` (the service worker picks up a new build at once) and `nosniff`. `sw.js` gets its own CSP `default-src 'none'; img-src 'self'` (a worker's CSP is its script's response header; it loads nothing but the notification icon).
+- **P3-1 Two CSPs.** HTML answers (`sendHtml`) carry `PAGE_CSP` = `default-src 'none'; base-uri 'none'; frame-ancestors 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'` (spec §5: only those four directives open). JSON answers and redirects keep `SECURITY_HEADERS`' `default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'` (both policies gained `base-uri 'none'; frame-ancestors 'none'` in the Task 6 review: `base-uri` does not inherit from `default-src`, and an injected `<base>` would redirect every root-relative link). No inline script and no inline event handler anywhere: `script-src 'self'` has no `'unsafe-inline'`, so an escaped-by-mistake `<script>` in a lead's name still cannot run.
+- **P3-2 Static assets are fixed, public and uncached.** (Task 6 review: the manifest's `scope` is `/dashboard` without a slash, so the overview at `/dashboard` — where every login lands — is inside the installed app; the service worker's own scope stays `/dashboard/`, which is all it may claim from `/dashboard/sw.js`.) `/dashboard/sw.js`, `/dashboard/app.js`, `/dashboard/manifest.webmanifest`, `/dashboard/icon-192.png`, `/dashboard/icon-512.png`, `/dashboard/apple-touch-icon.png` are read once at start from `lib/dashboard/assets/` into a fixed map (no URL ever reaches the filesystem), served on GET/HEAD without a login (a manifest is fetched without cookies, and a browser re-checks `sw.js` in the background whether or not the member is still signed in; none of them holds anything private), with `Cache-Control: no-store` (the service worker picks up a new build at once) and `nosniff`. `sw.js` gets its own CSP `default-src 'none'; img-src 'self'` (a worker's CSP is its script's response header; it loads nothing but the notification icon).
 - **P3-3 The service worker never caches and never intercepts.** It has `install` (skipWaiting), `activate` (clients.claim), `push` (always `showNotification('New Bona message', …)` — iOS revokes a subscription that receives pushes without showing one) and `notificationclick` (focus a dashboard window and navigate it to `/dashboard/push/open`, else open one). No `fetch` listener, no `caches`, no `importScripts`. A test holds the source to that.
 - **P3-4 A tap lands on the chat through a redirect, not a payload.** `GET /dashboard/push/open` (signed in) → `302` to `/dashboard/inbox/<leadId>` of the member's first inbox row with unread messages (the list's own order: unread first, newest first, rule 1 applied), else `302 /dashboard/inbox`. Signed out → the login, like every page. This replaces the spec's `/dashboard/push/latest` JSON: the service worker needs no fetch, and the cookie rides a top-level navigation (`SameSite=Lax`).
 - **P3-5 A subscription belongs to a member and a login session.** `push_subscriptions` gains `session_hash` (the `auth_sessions.token_hash` of the session that posted it) and `updated`. Pushes go only to subscriptions whose session still exists, is unexpired and is the same member's, and whose member is active. So logging out (which deletes that session and, explicitly, its subscriptions) stops alerts on THAT device only — a member who logs out on a laptop keeps alerts on their phone (spec §5 said "logout deletes the user's subscriptions"; deleting every device's on one logout would silently end the phone's alerts). Deactivation deletes all the member's subscriptions in the same transaction as their sessions (§3.4). A session that expires ends its device's alerts; the next signed-in page load re-posts the browser's subscription and binds it to the new session (P3-11). The daily upkeep deletes subscriptions whose session is gone.
@@ -17265,7 +17265,7 @@ test('app.js is one classic script that compiles', () => {
 
 test('the manifest makes /dashboard/ an app that starts on the inbox', () => {
   const m = JSON.parse(ASSETS.get('/dashboard/manifest.webmanifest').body.toString('utf8'));
-  assert.equal(m.scope, '/dashboard/');
+  assert.equal(m.scope, '/dashboard');
   assert.equal(m.start_url, '/dashboard/inbox');
   assert.equal(m.id, '/dashboard/');
   assert.equal(m.display, 'standalone');
@@ -17273,9 +17273,9 @@ test('the manifest makes /dashboard/ an app that starts on the inbox', () => {
 });
 
 test('pages open script, worker, connect and manifest to self only; JSON keeps default-src none (P3-1)', () => {
-  assert.equal(PAGE_CSP, "default-src 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'");
+  assert.equal(PAGE_CSP, "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'");
   assert.equal(PAGE_SECURITY_HEADERS['Content-Security-Policy'], PAGE_CSP);
-  assert.equal(SECURITY_HEADERS['Content-Security-Policy'], "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'");
+  assert.equal(SECURITY_HEADERS['Content-Security-Policy'], "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'");
   assert.doesNotMatch(PAGE_CSP, /unsafe-inline'[^;]*script|script-src[^;]*unsafe/);
 });
 
@@ -17294,7 +17294,7 @@ test('the layout links the manifest and icons on every page; app.js and the push
 
 In `dashboard-routes.test.mjs` and `dashboard-inbox.test.mjs`, replace `assertLocked`'s CSP line with a check by content type, and add the page constant beside `CSP`:
 ```js
-const PAGE_CSP = "default-src 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
+const PAGE_CSP = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
 // in assertLocked:
   const html = String(res.headers.get('content-type') ?? '').startsWith('text/html');
   assert.equal(res.headers.get('content-security-policy'), html ? PAGE_CSP : CSP);
@@ -17395,7 +17395,7 @@ self.addEventListener('notificationclick', (event) => {
   "short_name": "Bona",
   "id": "/dashboard/",
   "start_url": "/dashboard/inbox",
-  "scope": "/dashboard/",
+  "scope": "/dashboard",
   "display": "standalone",
   "background_color": "#0a0b0c",
   "theme_color": "#0a0b0c",
@@ -17443,7 +17443,7 @@ import { ASSETS } from './assets.mjs';
  * manifest. Still no inline script: a lead's name that slipped past an escape cannot run.
  * JSON answers and redirects keep SECURITY_HEADERS' `default-src 'none'`.
  */
-export const PAGE_CSP = "default-src 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
+export const PAGE_CSP = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
 export const PAGE_SECURITY_HEADERS = { ...SECURITY_HEADERS, 'Content-Security-Policy': PAGE_CSP };
 /** The service worker's own CSP: it loads nothing but the notification icon. */
 const WORKER_CSP = "default-src 'none'; img-src 'self'";
@@ -17584,7 +17584,7 @@ test('the pulse answers the same token the page was drawn with, and a new one af
     const drawn = /data-pulse-token="(\d+)"/.exec(page)[1];
     const first = await h.get('/v1/admin/inbox/pulse?lead=LEAD-A', { cookie });
     assert.equal(first.status, 200);
-    assert.equal(first.headers.get('content-security-policy'), "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'");
+    assert.equal(first.headers.get('content-security-policy'), "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'");
     assert.deepEqual(await first.json(), { token: drawn });
     h.inboxStore.upsertMessage({ key_id: 'A-2', lead_id: 'LEAD-A', jid: '966500000077@s.whatsapp.net', direction: 'in', sender_kind: 'client', text: 'hello?', ts: NOW + 120_000 });
     assert.notDeepEqual(await (await h.get('/v1/admin/inbox/pulse?lead=LEAD-A', { cookie })).json(), { token: drawn });
@@ -18294,7 +18294,7 @@ console.log(JSON.stringify({ v: db.prepare(\"PRAGMA user_version\").get().user_v
 ~/.claude/scripts/chrome-debug.sh
 node ~/.claude/scripts/browse.mjs https://api.bona-real-estate.com/dashboard/login /tmp/claude-1001/p3-login.png
 ```
-Expected: `/health` has `push: { configured: true }`; the four files 200 with their types; the login page's CSP is `PAGE_CSP`; `push/open` signed out → `302 …/dashboard/login`; no `push.keys_invalid`; `v: 5`, states as before (plus new leads), `subs: 0`; the login page renders.
+Expected: `/health` has `push: { configured: true }`; the four files 200 with their types; the login page's CSP is `PAGE_CSP` (and no Cloudflare-injected script — Rocket Loader / email obfuscation on the api zone would be blocked by it; check the browser console is clean on the live host); `push/open` signed out → `302 …/dashboard/login`; no `push.keys_invalid`; `v: 5`, states as before (plus new leads), `subs: 0`; the login page renders.
 
 - [ ] **Step 10: STOP — device tests with the owner.** Tell him Phase 3 is live and ask which phones to test (Android Chrome; iPhone needs iOS 16.4+ and the Home-Screen app). With him: (1) on each phone open `https://api.bona-real-estate.com/dashboard/inbox` (iPhone: Share → Add to Home Screen → open it from the Home Screen → sign in there); (2) Inbox → *Phone alerts* → *Turn on alerts* → allow; confirm the panel says "Alerts are on for this device" and `push_subscriptions` has one row per phone (read-only count); (3) lock the phone; from his second phone send a message in an inbox chat whose handler is nobody or the tester (or use his second phone's own inbox chat from Step 0); (4) within about a minute "New Bona message" shows; a tap opens that chat; the logs show `push.sent` with `ok ≥ 1` and no `push.refused`; (5) a second message within 2 minutes brings no second alert; (6) log out on the phone → the next client message brings no alert there. If Apple answers 403 (`push.refused status 403`), check the JWT `sub`/`aud` against Apple's rules before anything else; if an iPhone receives nothing while Android does, the payload-less push is the suspect: report and stop (the fallback is an RFC 8291-encrypted constant payload — a design change for the owner).
 
