@@ -334,7 +334,8 @@ const NO_EXCLUSIONS = () => false;
  *        pulls the 24 h before a join; without it a join stores from its own message on
  * @param {(leadId: string, ts: number) => void} [o.onClientMessage]
  *        Phase 3 phone alerts: called, never awaited, when a client record the poller read
- *        is stored in an `in` chat (design §5, P3-9). Never for a join's history, the
+ *        is stored in an `in` chat (design §5, P3-9), with the record's time as the tick
+ *        settled it (its own, or the tick's when it has none). Never for a join's history, the
  *        owner's side, or anything the poller did not read itself; one that throws is a
  *        `poll.alert_failed` warn line, not a failed record.
  */
@@ -591,16 +592,22 @@ export function createPoller({
 
   /* -------------------- the Bona inbox -------------------- */
 
-  /** One record into the transcript of an `in` chat, the lead read fresh (a backfill may just have filled its jids). */
-  async function storeRecord(leadId, rec, tally) {
+  /**
+   * One record into the transcript of an `in` chat, the lead read fresh (a backfill may just
+   * have filled its jids). `ts` is the record's time as the tick settled it (its own, or the
+   * tick's when it carries none) — the one the alert reports.
+   */
+  async function storeRecord(leadId, rec, ts, tally) {
     const res = await ingestOne(db.getLead(leadId), rec);
     if (res?.stored) tally.stored += 1;
     // A client wrote in an inbox chat: phone alerts (Phase 3, P3-9). Whether this stored it or
     // a thread refresh had a moment before, the poller reads each record once, so this is its
-    // first sight of it. Never awaited; one that throws is a warn line, not a failed record.
+    // first sight of it (a record retried after `waSeenAdd` failed fires again; the two-minute
+    // mark in lib/alerts.mjs keeps that quiet at the 20 s interval). Never awaited; one that
+    // throws is a warn line, not a failed record.
     if (res?.stored && res.senderKind === 'client' && onClientMessage) {
       try {
-        onClientMessage(leadId, Number.isFinite(rec.ts) ? rec.ts : now());
+        onClientMessage(leadId, ts);
       } catch {
         log({ level: 'warn', evt: 'poll.alert_failed', leadId });
       }
@@ -670,7 +677,7 @@ export function createPoller({
     const next = nextInboxState(lead.inbox_state, { signal, method });
     if (next === 'in' && lead.inbox_state !== 'in') await join(lead.lead_id, ts, 'inbound', tally);
     else if (next && next !== lead.inbox_state) inboxStore.setInboxState(lead.lead_id, next, { since: ts });
-    if (next === 'in') await storeRecord(lead.lead_id, rec, tally);
+    if (next === 'in') await storeRecord(lead.lead_id, rec, ts, tally);
   }
 
   /**
@@ -720,7 +727,7 @@ export function createPoller({
       }
       await join(lead.lead_id, ts, 'owner_outbound', tally, { created });
     }
-    await storeRecord(lead.lead_id, rec, tally);
+    await storeRecord(lead.lead_id, rec, ts, tally);
   }
 
   /**
@@ -804,9 +811,20 @@ export function createPoller({
    * Nothing in here may throw. An Evolution outage leaves the cursor exactly where it was,
    * so the window simply widens and the messages are picked up when it comes back; what
    * the outage does change is `status().lagS`, which is the number `/health` publishes.
+   *
+   * One at a time: a tick that finds one running answers `{ busy: true }` at once. The
+   * running one's promise is kept so `stop()` can hand it back — a shutdown waits for the
+   * tick in flight (and the alert it may raise) before it flushes the alerts and closes.
    */
+  let running = Promise.resolve();
   async function tick() {
     if (busy) return { busy: true };
+    const p = tickInner();
+    running = p.catch(() => {});
+    return p;
+  }
+
+  async function tickInner() {
     busy = true;
     try {
       if (!configured) {
@@ -1047,9 +1065,11 @@ export function createPoller({
     return true;
   }
 
+  /** Takes the loop off its timer; resolves once the tick in flight, if any, has finished. */
   function stop() {
     if (timer) clearInterval(timer);
     timer = null;
+    return running;
   }
 
   return { tick, start, stop, status, get started() { return Boolean(timer); } };

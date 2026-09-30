@@ -781,17 +781,19 @@ test('without VAPID keys the app has no alerts; a pair that does not match is re
   try { assert.equal(off.app.alerts.configured, false); } finally { await off.close(); }
   const a = generateVapidKeys();
   const b = generateVapidKeys();
-  const broken = build({ config: { vapidPublic: a.publicKey, vapidPrivate: b.privateKey } });
+  const broken = build({ config: { vapidPublic: a.publicKey, vapidPrivate: b.privateKey, vapidSubject: 'https://bona.azoz.uk' } });
   try {
     assert.equal(broken.app.alerts.configured, false);
-    assert.ok(broken.logs.some((l) => l.evt === 'push.keys_invalid' && l.level === 'error'));
+    assert.ok(broken.logs.some((l) => l.evt === 'push.keys_invalid' && l.level === 'error' && l.keys === false && l.subject === true),
+      'the line names the half that failed: the pair, not the subject');
+    assert.doesNotMatch(JSON.stringify(broken.logs), new RegExp(`${a.publicKey}|${b.privateKey}`), 'never a key');
   } finally {
     await broken.close();
   }
   const badSubject = build({ config: { vapidPublic: a.publicKey, vapidPrivate: a.privateKey, vapidSubject: 'ops@example.com' } });
   try {
     assert.equal(badSubject.app.alerts.configured, false, 'a subject that is not mailto: or https: would earn a 403 from Apple');
-    assert.ok(badSubject.logs.some((l) => l.evt === 'push.keys_invalid' && l.subject === false));
+    assert.ok(badSubject.logs.some((l) => l.evt === 'push.keys_invalid' && l.level === 'error' && l.keys === true && l.subject === false));
   } finally {
     await badSubject.close();
   }

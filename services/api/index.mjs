@@ -253,7 +253,7 @@ export function createApp(options = {}) {
   // The subject is what a push service may write to about our pushes (RFC 8292): a mailto:
   // or https: URI, or Apple answers every push 403 without a word here.
   const pushSubject = /^(?:mailto:|https:)\S+$/.test(cfg.vapidSubject ?? '') ? cfg.vapidSubject : null;
-  if ((cfg.vapidPublic || cfg.vapidPrivate) && !(pushKeys && pushSubject)) log({ level: 'error', evt: 'push.keys_invalid', subject: Boolean(pushSubject) });
+  if ((cfg.vapidPublic || cfg.vapidPrivate) && !(pushKeys && pushSubject)) log({ level: 'error', evt: 'push.keys_invalid', keys: Boolean(pushKeys), subject: Boolean(pushSubject) });
   const alerts = options.alerts ?? createAlerts({
     db,
     pusher: pushKeys && pushSubject ? createPusher({ keys: pushKeys, subject: pushSubject, fetchImpl, now: clock }) : null,
@@ -1030,15 +1030,18 @@ if (isMain) {
   });
   const shutdown = async (signal) => {
     jsonLog('info', { evt: 'shutdown', signal });
-    // Bounded as before: five seconds for the pushes in flight and the open connections.
+    // Bounded as before: five seconds for the tick in flight, the pushes and the open connections.
     setTimeout(() => process.exit(0), 5000).unref();
-    // The poller first, so no tick raises another alert; then the pushes already on their
-    // way get their answers (each writes to the store: `last_ok`, a gone device); then the
-    // server, whose close stops the fan-out and closes the store.
-    app.poller?.stop();
+    // The poller first — off its timer, and the tick in flight finished, so every alert it
+    // raises is in flight before the flush; then the pushes on their way get their answers
+    // (each writes to the store: `last_ok`, a gone device); then the server, whose close
+    // stops the fan-out and closes the store.
+    await app.poller?.stop();
     await app.alerts.flush();
     app.server.close(() => process.exit(0));
   };
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  // Nothing in `shutdown` rejects (`stop` and `flush` swallow their own failures); should one
+  // ever slip, an exit is still an exit, not a process hanging on a floating promise.
+  process.on('SIGTERM', () => shutdown('SIGTERM').catch(() => process.exit(1)));
+  process.on('SIGINT', () => shutdown('SIGINT').catch(() => process.exit(1)));
 }
