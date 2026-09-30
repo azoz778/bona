@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { writeVapidKeys } from '../bin/vapid-keys.mjs';
 import { parseEnvText } from '../lib/env.mjs';
-import { vapidKeys } from '../lib/push.mjs';
+import { vapidKeys, VAPID_SUBJECT_RE } from '../lib/push.mjs';
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../bin/vapid-keys.mjs');
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'bona-vapid-'));
@@ -85,6 +85,10 @@ test('a bad subject is refused before the file is touched', () => {
   const dir = tmp();
   const file = path.join(dir, 'b.env');
   assert.deepEqual(writeVapidKeys(file, { subject: 'ops@example.com\nEVIL=1' }), { written: false, reason: 'bad_subject' });
+  assert.deepEqual(writeVapidKeys(file, { subject: 'http://bona-real-estate.com' }), { written: false, reason: 'bad_subject' }, 'not https');
   assert.equal(fs.existsSync(file), false);
+  // One rule for the CLI and the server's start-up check (lib/push.mjs): mailto: or https:, no whitespace.
+  for (const good of ['mailto:ops@example.com', 'https://bona-real-estate.com']) assert.ok(VAPID_SUBJECT_RE.test(good), good);
+  for (const bad of ['', 'http://x', 'https://x y', 'mailto:', 'ftp://x']) assert.equal(VAPID_SUBJECT_RE.test(bad), false, JSON.stringify(bad));
   fs.rmSync(dir, { recursive: true, force: true });
 });

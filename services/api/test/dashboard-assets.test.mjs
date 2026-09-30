@@ -32,20 +32,31 @@ test('the service worker shows a fixed notification and caches nothing, intercep
   assert.match(src, /showNotification\(\s*'New Bona message'/);
   assert.match(src, /addEventListener\(\s*'notificationclick'/);
   assert.match(src, /'\/dashboard\/push\/open'/);
+  // A tap asks the page (a `bona:open` message) and never drives an existing tab itself.
+  assert.match(src, /type: 'bona:open'/);
+  assert.doesNotMatch(src, /\.navigate\(/, 'no navigate(): a tab may hold a draft');
 });
 
 /**
  * Run the worker's source against a stub `self` and hand back its handlers and the calls
- * it made. `windows` is what `clients.matchAll` answers; each window may throw from
- * `navigate` (a window the worker does not control) by passing `navigateRejects`.
+ * it made. `windows` is what `clients.matchAll` answers; each window answers the worker's
+ * `bona:open` question with `answer` (`true`: the page goes there itself; `false`: it holds
+ * a draft; left out: it never answers — a tab without our script, or one asleep). With
+ * `immediateTimeout`, the worker's half-second wait fires at once.
  */
-function runWorker({ windows = [] } = {}) {
-  const calls = { showNotification: [], openWindow: [], focus: [], navigate: [], skipWaiting: 0, claim: 0 };
+function runWorker({ windows = [], immediateTimeout = false } = {}) {
+  const calls = { showNotification: [], openWindow: [], focus: [], asked: [], skipWaiting: 0, claim: 0 };
   const handlers = {};
   const windowClients = windows.map((w) => ({
     url: w.url,
     async focus() { calls.focus.push(w.url); return this; },
-    async navigate(target) { if (w.navigateRejects) throw new TypeError('not controlled'); calls.navigate.push(target); return this; },
+    postMessage(msg, transfer) {
+      calls.asked.push({ type: msg.type, url: msg.url }); // copied: the worker's object is from the VM's realm
+      const port = transfer && transfer[0];
+      if (!port) return;
+      if (w.answer !== undefined) port.postMessage({ ok: w.answer });
+      port.close();
+    },
   }));
   const self = {
     addEventListener(name, fn) { handlers[name] = fn; },
@@ -57,7 +68,10 @@ function runWorker({ windows = [] } = {}) {
       async openWindow(target) { calls.openWindow.push(target); return null; },
     },
   };
-  vm.runInNewContext(ASSETS.get('/dashboard/sw.js').body.toString('utf8'), { self, URL }, { filename: 'sw.js' });
+  const timers = immediateTimeout
+    ? { setTimeout: (fn) => { fn(); return 0; }, clearTimeout() {} }
+    : { setTimeout, clearTimeout };
+  vm.runInNewContext(ASSETS.get('/dashboard/sw.js').body.toString('utf8'), { self, URL, MessageChannel, ...timers }, { filename: 'sw.js' });
   /** Fire one event and wait for what the handler put in `waitUntil`. */
   const fire = async (name, event = {}) => {
     let pending = Promise.resolve();
@@ -67,7 +81,7 @@ function runWorker({ windows = [] } = {}) {
   return { calls, handlers, fire };
 }
 
-test('the worker: a push always shows the one notification; a tap focuses and navigates our window, else opens one (P3-3)', async () => {
+test('the worker: a push always shows the one notification; a tap asks our window first and opens a fresh one only when it says no or nothing (P3-3)', async () => {
   const pushed = runWorker();
   assert.deepEqual(Object.keys(pushed.handlers).sort(), ['activate', 'install', 'notificationclick', 'push']);
   await pushed.fire('push');
@@ -80,30 +94,36 @@ test('the worker: a push always shows the one notification; a tap focuses and na
   await pushed.fire('activate');
   assert.equal(pushed.calls.claim, 1);
 
-  // A controlled dashboard window: focus it and send it to the newest unread chat.
-  const controlled = runWorker({ windows: [{ url: 'https://bona-api.azoz.uk/dashboard/inbox' }] });
-  await controlled.fire('notificationclick');
-  assert.deepEqual(controlled.calls.focus, ['https://bona-api.azoz.uk/dashboard/inbox']);
-  assert.deepEqual(controlled.calls.navigate, ['/dashboard/push/open']);
-  assert.deepEqual(controlled.calls.openWindow, [], 'no second window');
+  // A dashboard window with nothing being typed: focused, asked, and it goes there itself.
+  const willing = runWorker({ windows: [{ url: 'https://bona-api.azoz.uk/dashboard/inbox', answer: true }] });
+  await willing.fire('notificationclick');
+  assert.deepEqual(willing.calls.focus, ['https://bona-api.azoz.uk/dashboard/inbox']);
+  assert.deepEqual(willing.calls.asked, [{ type: 'bona:open', url: '/dashboard/push/open' }]);
+  assert.deepEqual(willing.calls.openWindow, [], 'no second window: the page navigates');
 
   // The overview at /dashboard itself (no trailing slash) is ours too.
-  const overview = runWorker({ windows: [{ url: 'https://bona-api.azoz.uk/dashboard' }] });
+  const overview = runWorker({ windows: [{ url: 'https://bona-api.azoz.uk/dashboard', answer: true }] });
   await overview.fire('notificationclick');
-  assert.deepEqual(overview.calls.navigate, ['/dashboard/push/open']);
+  assert.equal(overview.calls.asked.length, 1);
   assert.deepEqual(overview.calls.openWindow, []);
 
-  // A window the worker does not control: `navigate` rejects, and the tap must not be lost.
-  const uncontrolled = runWorker({ windows: [{ url: 'https://bona-api.azoz.uk/dashboard/leads', navigateRejects: true }] });
-  await uncontrolled.fire('notificationclick');
-  assert.deepEqual(uncontrolled.calls.focus, ['https://bona-api.azoz.uk/dashboard/leads']);
-  assert.deepEqual(uncontrolled.calls.navigate, []);
-  assert.deepEqual(uncontrolled.calls.openWindow, ['/dashboard/push/open'], 'one fresh window instead');
+  // A window holding a draft says no: it is left exactly as it is, and a fresh one opens.
+  const drafting = runWorker({ windows: [{ url: 'https://bona-api.azoz.uk/dashboard/inbox/L', answer: false }] });
+  await drafting.fire('notificationclick');
+  assert.deepEqual(drafting.calls.focus, ['https://bona-api.azoz.uk/dashboard/inbox/L']);
+  assert.deepEqual(drafting.calls.openWindow, ['/dashboard/push/open'], 'one fresh window instead');
 
-  // No window at all, or none of ours: open one.
-  const none = runWorker({ windows: [{ url: 'https://bona-api.azoz.uk/' }] });
+  // A window that never answers (no script, asleep): the wait runs out, a fresh one opens.
+  const silent = runWorker({ windows: [{ url: 'https://bona-api.azoz.uk/dashboard/leads' }], immediateTimeout: true });
+  await silent.fire('notificationclick');
+  assert.equal(silent.calls.asked.length, 1);
+  assert.deepEqual(silent.calls.openWindow, ['/dashboard/push/open']);
+
+  // No window at all, or none of ours: open one, and ask nobody.
+  const none = runWorker({ windows: [{ url: 'https://bona-api.azoz.uk/', answer: true }] });
   await none.fire('notificationclick');
   assert.deepEqual(none.calls.focus, [], 'a window outside /dashboard is not ours');
+  assert.deepEqual(none.calls.asked, []);
   assert.deepEqual(none.calls.openWindow, ['/dashboard/push/open']);
   const empty = runWorker();
   await empty.fire('notificationclick');
@@ -172,25 +192,26 @@ test('app.js live refresh: reloads a changed list, never a thread with a draft i
     const fields = thread ? [box] : [phoneField];
     const el = { dataset: { pulse, pulseToken: token } };
     const windowListeners = {};
+    const documentListeners = {};
     const document = {
       visibilityState: 'visible',
       activeElement: focused ? box : null,
       querySelector: (sel) => ({ '[data-pulse]': el, '[data-pulse-note]': note, '#r-text': thread ? box : null })[sel] ?? null,
       querySelectorAll: () => fields,
-      addEventListener() {},
+      addEventListener: (name, fn) => { documentListeners[name] = fn; },
     };
     let tick = null;
     const ctx = {
       document, navigator: {},
       window: { matchMedia: () => ({ matches: false }), addEventListener: (name, fn) => { windowListeners[name] = fn; } },
-      location: { reload: () => reloads.push('reload'), replace: (href) => reloads.push(href) },
+      location: { origin: 'https://bona-api.azoz.uk', reload: () => reloads.push('reload'), replace: (href) => reloads.push(href) },
       fetch: async () => (typeof answer === 'object'
         ? { ok: false, status: answer.status, json: async () => ({}) }
         : { ok: true, status: 200, json: async () => ({ token: answer }) }),
       setInterval: (fn) => { tick = fn; return 1; }, clearInterval() {}, console,
     };
     vm.runInNewContext(src, ctx);
-    return { run: async () => { await tick(); await new Promise((r) => setImmediate(r)); }, reloads, note, windowListeners };
+    return { run: async () => { await tick(); await new Promise((r) => setImmediate(r)); }, reloads, note, windowListeners, documentListeners };
   };
   const same = make({ pulse: '/v1/admin/inbox/pulse', token: '1:0:5', answer: '1:0:5' });
   await same.run();
@@ -236,4 +257,144 @@ test('app.js live refresh: reloads a changed list, never a thread with a draft i
   leaving.windowListeners.pageshow();
   await leaving.run();
   assert.equal(leaving.reloads.length, 1, 'refreshes again after a restore');
+  // iOS Safari never fires beforeunload: pagehide counts too.
+  leaving.windowListeners.pagehide();
+  await leaving.run();
+  assert.equal(leaving.reloads.length, 1, 'no reload after pagehide');
+
+  // A tap on one of our own links is a navigation the person started; a link elsewhere, a
+  // tap that opens a new tab (a modifier key, target=_blank) or one a handler cancelled is not.
+  const tapped = make({ pulse: '/v1/admin/inbox/pulse', token: '1:0:5', answer: '2:1:9', link: '/dashboard/inbox' });
+  const click = (link, over = {}) => tapped.documentListeners.click({ target: { closest: () => link }, button: 0, ...over });
+  click({ href: 'https://evil.example/x', origin: 'https://evil.example', target: '' });
+  click({ href: 'https://bona-api.azoz.uk/dashboard/leads', origin: 'https://bona-api.azoz.uk', target: '_blank' });
+  click({ href: 'https://bona-api.azoz.uk/dashboard/leads', origin: 'https://bona-api.azoz.uk', target: '' }, { ctrlKey: true });
+  click({ href: 'https://bona-api.azoz.uk/dashboard/leads', origin: 'https://bona-api.azoz.uk', target: '' }, { defaultPrevented: true });
+  click(null);
+  await tapped.run();
+  assert.equal(tapped.reloads.length, 1, 'none of those is leaving: the list still refreshes');
+  click({ href: 'https://bona-api.azoz.uk/dashboard/leads', origin: 'https://bona-api.azoz.uk', target: '' });
+  await tapped.run();
+  assert.equal(tapped.reloads.length, 1, 'a plain tap on our own link: no reload over it');
+});
+
+/**
+ * A signed-in Inbox page as app.js sees it, with the alerts panel and a browser that can do
+ * push: the worker registers at once, `Notification.permission` is `granted`, and the
+ * browser already holds `sub` (or none). `fields` are what a draft could sit in. Hands back
+ * the listeners the script registered, the panel's state, and what it navigated to or posted.
+ */
+function signedInPage({ sub = null, draft = '', fields = null, active = null } = {}) {
+  const src = ASSETS.get('/dashboard/app.js').body.toString('utf8');
+  const posts = [];
+  const navigations = [];
+  const listeners = { window: {}, document: {}, sw: {}, onBtn: {}, offBtn: {} };
+  const panel = { hidden: true };
+  const text = { textContent: '' };
+  const onBtn = { hidden: true, addEventListener: (n, fn) => { listeners.onBtn[n] = fn; } };
+  const offBtn = { hidden: true, addEventListener: (n, fn) => { listeners.offBtn[n] = fn; } };
+  const box = { value: draft };
+  const el = { dataset: {} };
+  const document = {
+    visibilityState: 'visible',
+    activeElement: active,
+    querySelector: (sel) => ({
+      '[data-pulse]': el, 'meta[name="bona-push-key"]': { content: 'BKEY' }, '[data-alerts]': panel,
+      '[data-alerts-text]': text, '[data-alerts-on]': onBtn, '[data-alerts-off]': offBtn, '#r-text': box,
+    })[sel] ?? null,
+    querySelectorAll: () => fields ?? [box],
+    addEventListener: (n, fn) => { listeners.document[n] = fn; },
+  };
+  const registration = { pushManager: { getSubscription: async () => sub, subscribe: async () => sub } };
+  const ctx = {
+    document,
+    navigator: {
+      serviceWorker: { register: async () => registration, addEventListener: (n, fn) => { listeners.sw[n] = fn; } },
+      userAgent: 'test',
+    },
+    window: { PushManager: {}, Notification: {}, matchMedia: () => ({ matches: false }), addEventListener: (n, fn) => { listeners.window[n] = fn; } },
+    Notification: { permission: 'granted' },
+    location: { origin: 'https://bona-api.azoz.uk', assign: (url) => navigations.push(url), replace: (url) => navigations.push(url), reload: () => navigations.push('reload') },
+    fetch: async (path, init) => { posts.push({ path, body: JSON.parse(init.body) }); return { ok: true, status: 200, json: async () => ({ ok: true }) }; },
+    setInterval: () => 1, clearInterval() {}, console, JSON, Uint8Array, atob: (s) => Buffer.from(s, 'base64').toString('binary'),
+  };
+  vm.runInNewContext(src, ctx);
+  const settle = async () => { for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r)); };
+  return { listeners, panel, text, onBtn, offBtn, posts, navigations, settle };
+}
+
+test('app.js answers the worker\'s bona:open: goes there itself with no draft, refuses over one, ignores anything but a same-origin path', async () => {
+  const ask = (page, url) => {
+    const answers = [];
+    // `{ ok }` copied: the page's answer object is from the VM's realm.
+    page.listeners.sw.message({ data: { type: 'bona:open', url }, ports: [{ postMessage: (m) => answers.push({ ok: m.ok }) }] });
+    return answers;
+  };
+  const clean = signedInPage();
+  await clean.settle();
+  assert.equal(typeof clean.listeners.sw.message, 'function', 'the script listens to the worker');
+  assert.deepEqual(ask(clean, '/dashboard/push/open'), [{ ok: true }]);
+  assert.deepEqual(clean.navigations, ['/dashboard/push/open'], 'the page navigates itself');
+
+  const drafting = signedInPage({ draft: 'half a reply' });
+  await drafting.settle();
+  assert.deepEqual(ask(drafting, '/dashboard/push/open'), [{ ok: false }]);
+  assert.deepEqual(drafting.navigations, [], 'the draft stays: the worker opens a fresh window instead');
+
+  // A select being picked from (the handler picker) counts as a draft: a reload drops the pick.
+  const picking = signedInPage({ fields: [], active: { tagName: 'select' } });
+  await picking.settle();
+  assert.deepEqual(ask(picking, '/dashboard/push/open'), [{ ok: false }]);
+  assert.deepEqual(picking.navigations, []);
+
+  for (const bad of ['https://evil.example/x', '//evil.example', 'javascript:alert(1)', '', 42, null]) {
+    const page = signedInPage();
+    await page.settle();
+    assert.deepEqual(ask(page, bad), [], `${JSON.stringify(bad)} is not answered`);
+    assert.deepEqual(page.navigations, [], `${JSON.stringify(bad)} is not followed`);
+  }
+  // A message that is not ours at all is ignored too.
+  const other = signedInPage();
+  await other.settle();
+  other.listeners.sw.message({ data: { type: 'something-else', url: '/dashboard' }, ports: [] });
+  other.listeners.sw.message({ data: null, ports: [] });
+  assert.deepEqual(other.navigations, []);
+});
+
+test('app.js turn off is honest: "off" only when the browser lets the subscription go, else it says so and keeps the button', async () => {
+  const device = (unsubscribeAnswers) => ({
+    endpoint: 'https://fcm.googleapis.com/fcm/send/phone-1',
+    toJSON: () => ({ endpoint: 'https://fcm.googleapis.com/fcm/send/phone-1', keys: { p256dh: 'P', auth: 'A' } }),
+    unsubscribe: async () => { const next = unsubscribeAnswers.shift(); if (next instanceof Error) throw next; return next; },
+  });
+  // Turned on already: the page re-posts the device (binds it to this login) and shows "on".
+  const stuck = signedInPage({ sub: device([false, new Error('busy'), true]) });
+  await stuck.settle();
+  assert.equal(stuck.panel.hidden, false);
+  assert.equal(stuck.offBtn.hidden, false, 'shown as on');
+  assert.deepEqual(stuck.posts.map((p) => p.path), ['/v1/admin/push/subscribe']);
+  assert.equal(typeof stuck.listeners.offBtn.click, 'function');
+
+  await stuck.listeners.offBtn.click();
+  assert.deepEqual(stuck.posts.map((p) => p.path), ['/v1/admin/push/subscribe', '/v1/admin/push/unsubscribe'], 'the server is told first');
+  assert.match(stuck.text.textContent, /could not be turned off on this device/);
+  assert.equal(stuck.offBtn.hidden, false, 'the Off button stays: the browser still holds the subscription');
+  assert.equal(stuck.onBtn.hidden, true);
+
+  await stuck.listeners.offBtn.click(); // unsubscribe() throws
+  assert.match(stuck.text.textContent, /could not be turned off/);
+  assert.equal(stuck.offBtn.hidden, false);
+
+  await stuck.listeners.offBtn.click(); // unsubscribe() → true
+  assert.doesNotMatch(stuck.text.textContent, /could not/);
+  assert.equal(stuck.offBtn.hidden, true, 'off at last');
+  assert.equal(stuck.onBtn.hidden, false);
+
+  // Nothing subscribed: nothing to turn off, and honestly off.
+  const none = signedInPage({ sub: null });
+  await none.settle();
+  assert.equal(none.onBtn.hidden, false, 'shown as off');
+  await none.listeners.offBtn.click();
+  assert.equal(none.offBtn.hidden, true);
+  assert.deepEqual(none.posts, [], 'nothing to tell the server');
 });

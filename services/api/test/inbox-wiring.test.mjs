@@ -754,7 +754,7 @@ test('a client message the poller stores sends a phone alert through the one fet
     const sara = app.team.addUser({ name: 'Sara', phone: '966500000001', role: 'staff' });
     const token = 'ab'.repeat(16);
     db.createAuthSession(token, { now: NOW, userId: sara.user_id });
-    assert.deepEqual(app.alerts.subscribe({ userId: sara.user_id, sessionHash: tokenHash(token), endpoint: 'https://fcm.googleapis.com/fcm/send/w1', keys: KEYS }), { ok: true, created: true });
+    assert.deepEqual(app.alerts.subscribe({ userId: sara.user_id, sessionHash: tokenHash(token), endpoint: 'https://fcm.googleapis.com/fcm/send/w1', keys: KEYS }), { ok: true, created: true, moved: false });
 
     const tally = await app.poller.tick();
     assert.equal(tally.stored, 1);

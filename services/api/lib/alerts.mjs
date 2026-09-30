@@ -54,8 +54,8 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
 
   /**
    * `created` says whether this endpoint is new (the INSERT ran) or was posted again (the
-   * same device on every page load, or a shared device now signed in as someone else): the
-   * route logs a new device only, not every re-post.
+   * same device on every page load); `moved` that it was another member's until now (a
+   * shared device signed in as someone else). The route logs those two, not every re-post.
    */
   function subscribe({ userId, sessionHash, endpoint, keys } = {}) {
     const url = pushEndpoint(endpoint);
@@ -66,16 +66,17 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     const t = now();
     return transaction(() => {
       if (!prep('SELECT 1 FROM auth_sessions WHERE token_hash = ? AND user_id = ? AND expires >= ?').get(sessionHash, userId, t)) return { ok: false, error: 'bad_request' };
-      const moved = prep(`UPDATE push_subscriptions SET user_id = ?, session_hash = ?, p256dh = ?, auth = ?, updated = ?, fail_count = 0
-                          WHERE endpoint = ?`).run(userId, sessionHash, k.p256dh, k.auth, t, url).changes;
-      if (!moved) {
+      const prev = prep('SELECT user_id FROM push_subscriptions WHERE endpoint = ?').get(url) ?? null;
+      const updated = prep(`UPDATE push_subscriptions SET user_id = ?, session_hash = ?, p256dh = ?, auth = ?, updated = ?, fail_count = 0
+                            WHERE endpoint = ?`).run(userId, sessionHash, k.p256dh, k.auth, t, url).changes;
+      if (!updated) {
         prep(`INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, session_hash, created, updated, last_ok, fail_count)
               VALUES (?,?,?,?,?,?,?,?,NULL,0)`).run(newId('PSH'), userId, url, k.p256dh, k.auth, sessionHash, t, t);
       }
       prep(`DELETE FROM push_subscriptions WHERE user_id = ? AND id NOT IN
               (SELECT id FROM push_subscriptions WHERE user_id = ? ORDER BY updated DESC, rowid DESC LIMIT ?)`)
         .run(userId, userId, MAX_DEVICES_PER_USER);
-      return { ok: true, created: !moved };
+      return { ok: true, created: !updated, moved: Boolean(prev && prev.user_id !== userId) };
     });
   }
 

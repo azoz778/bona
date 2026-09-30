@@ -166,8 +166,14 @@ test('a signed-in member subscribes their device; the row is bound to this login
     assert.equal(row.session_hash, tokenHash(cookie.split('=')[1]));
     // app.js re-posts the device on every page load: one log line for a new device, none after.
     assert.deepEqual(await (await h.postJson('/v1/admin/push/subscribe', { endpoint: EP, keys: KEYS }, { cookie })).json(), { ok: true });
-    assert.equal(h.logs.filter((l) => l.evt === 'push.subscribed' && l.userId === h.staffUser.user_id).length, 1);
+    const subscribed = () => h.logs.filter((l) => l.evt === 'push.subscribed').map(({ userId, moved }) => ({ userId, moved }));
+    assert.deepEqual(subscribed(), [{ userId: h.staffUser.user_id, moved: false }]);
     assert.equal(h.db.db.prepare('SELECT COUNT(*) n FROM push_subscriptions').get().n, 1);
+    // A shared phone signed in as someone else: the device changes hands, and that is logged.
+    const boss = await h.boss();
+    assert.deepEqual(await (await h.postJson('/v1/admin/push/subscribe', { endpoint: EP, keys: KEYS }, { cookie: boss })).json(), { ok: true });
+    assert.deepEqual(subscribed(), [{ userId: h.staffUser.user_id, moved: false }, { userId: h.owner.user_id, moved: true }]);
+    assert.equal(h.db.db.prepare('SELECT user_id FROM push_subscriptions').get().user_id, h.owner.user_id);
     assert.doesNotMatch(JSON.stringify(h.logs), /phone-1|fcm\.googleapis/);
   });
 });

@@ -53,7 +53,7 @@ import { createIngest } from './lib/inbox/ingest.mjs';
 import { createBackfill, JOIN_HISTORY_MS } from './lib/inbox/backfill.mjs';
 import { loggableName, loggableCode } from './lib/inbox/loggable.mjs';
 import { bareJid } from './lib/evolution.mjs';
-import { createPusher, vapidKeys } from './lib/push.mjs';
+import { createPusher, vapidKeys, VAPID_SUBJECT_RE } from './lib/push.mjs';
 import { createAlerts } from './lib/alerts.mjs';
 import { createDashboardRoutes } from './lib/dashboard/routes.mjs';
 
@@ -252,7 +252,7 @@ export function createApp(options = {}) {
   const pushKeys = vapidKeys({ publicKey: cfg.vapidPublic, privateKey: cfg.vapidPrivate });
   // The subject is what a push service may write to about our pushes (RFC 8292): a mailto:
   // or https: URI, or Apple answers every push 403 without a word here.
-  const pushSubject = /^(?:mailto:|https:)\S+$/.test(cfg.vapidSubject ?? '') ? cfg.vapidSubject : null;
+  const pushSubject = VAPID_SUBJECT_RE.test(cfg.vapidSubject ?? '') ? cfg.vapidSubject : null;
   if ((cfg.vapidPublic || cfg.vapidPrivate) && !(pushKeys && pushSubject)) log({ level: 'error', evt: 'push.keys_invalid', keys: Boolean(pushKeys), subject: Boolean(pushSubject) });
   const alerts = options.alerts ?? createAlerts({
     db,
