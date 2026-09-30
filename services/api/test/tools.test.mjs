@@ -349,10 +349,12 @@ test('request_human answers a note that hands the chat over, logs the lead id on
     assert.equal(out.ok, true);
     assert.match(out.note, /team will reply shortly/);
     assert.deepEqual(logs.filter((l) => l.evt === 'tool.request_human'), [{ evt: 'tool.request_human', leadId: 'LEAD-20260930-0000dddd' }]);
-    assert.doesNotMatch(JSON.stringify(logs), /viewing|Sara|0500000009/);
     const odd = JSON.parse(await tools.run('request_human', { chat: { chat_id: 'c', metadata: { lead_id: '../etc' } }, name: 'request_human', args: {} }));
     assert.equal(odd.ok, true);
     assert.equal(logs.at(-1).leadId, null, 'a lead id that does not look like one is not logged');
+    assert.doesNotMatch(JSON.stringify(logs), /viewing|Sara|0500000009/);
+    assert.equal(h.sent.length, 0, 'no WhatsApp note is sent');
+    assert.ok(!fs.existsSync(path.join(h.dataDir, 'leads.jsonl')), 'no lead is written');
   } finally {
     h.cleanup();
   }
