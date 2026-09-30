@@ -507,6 +507,48 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
   const setNeedsHuman = (leadId, flag) => prep('UPDATE leads SET needs_human = ? WHERE lead_id = ?')
     .run(flag ? 1 : 0, String(leadId ?? '')).changes === 1;
 
+  /**
+   * When a human — a team member's reply, the owner's phone, Lisa — last wrote to the client
+   * (P4-5). Only ever forward: a history read brings old messages, and they must not make
+   * Dana think the team fell silent long ago.
+   */
+  const noteHumanOutbound = (leadId, ts) => prep('UPDATE leads SET last_human_out_ts = MAX(COALESCE(last_human_out_ts, 0), ?) WHERE lead_id = ?')
+    .run(toTs(ts), String(leadId ?? '')).changes === 1;
+
+  /**
+   * Dana's sends since `sinceTs` — one chat's, or everyone's — counted from the outbox so a
+   * restart cannot hand out a fresh hour or day (P4-6). A `failed` row sent nothing.
+   */
+  function countDanaSends({ leadId = null, sinceTs } = {}) {
+    return prep(`SELECT COUNT(*) AS n FROM wa_outbox WHERE sender_kind = 'dana' AND status <> 'failed' AND created >= ?
+                   AND (? IS NULL OR lead_id = ?)`).get(toTs(sinceTs), str(leadId), str(leadId)).n;
+  }
+
+  /**
+   * Has a person answered this chat after `ts`? A stored staff/owner message stamped later,
+   * or a team member's reply still on its way (P4-13: Dana drops her answer then).
+   */
+  function humanOutboundAfter(leadId, ts) {
+    const id = String(leadId ?? '');
+    const t = toTs(ts);
+    return Boolean(prep(`SELECT 1 FROM wa_messages WHERE lead_id = ? AND direction = 'out' AND sender_kind IN ('staff','owner_number') AND ts > ? LIMIT 1`).get(id, t))
+      || Boolean(prep(`SELECT 1 FROM wa_outbox WHERE lead_id = ? AND sender_kind = 'staff' AND status <> 'failed' AND created > ? LIMIT 1`).get(id, t));
+  }
+
+  /**
+   * What Dana has not answered yet: the chat's client messages newer than its newest
+   * outbound — a stored message of any sender, or a staff/Dana send written to the outbox
+   * and not failed (a send on its way is an answer; one that failed is not). The newest
+   * `limit`, returned oldest first (P4-7).
+   */
+  function unansweredClientMessages(leadId, { limit = 10 } = {}) {
+    const id = String(leadId ?? '');
+    return prep(`SELECT * FROM wa_messages WHERE lead_id = ? AND direction = 'in'
+                   AND ts > COALESCE((SELECT MAX(o.ts) FROM wa_messages o WHERE o.lead_id = ? AND o.direction = 'out'), 0)
+                   AND ts > COALESCE((SELECT MAX(x.created) FROM wa_outbox x WHERE x.lead_id = ? AND x.sender_kind IN ('staff','dana') AND x.status <> 'failed'), 0)
+                 ORDER BY ts DESC, rowid DESC LIMIT ?`).all(id, id, id, clampLimit(limit, 200)).map(plain).reverse();
+  }
+
   /* -------------------- purge -------------------- */
 
   /**
@@ -524,6 +566,10 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
    * The chat's revision moves on (`revision`), so no page drawn before the purge matches
    * one drawn after it, however the thread fills again.
    *
+   * Dana's Retell chat and her introduction are forgotten too (`dana_chat_id`, `dana_chat_ts`,
+   * `dana_introduced`): a chat that comes back is a fresh conversation, and she introduces
+   * herself again (P4-12).
+   *
    * @returns {{ messages: number, outbox: number, gaps: number, reads: number }}
    */
   function purgeLead(leadId) {
@@ -539,6 +585,7 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
         reads: prep('DELETE FROM inbox_reads WHERE lead_id = ?').run(id).changes,
       };
       prep('UPDATE leads SET last_msg_ts = NULL WHERE lead_id = ?').run(id);
+      prep('UPDATE leads SET dana_chat_id = NULL, dana_chat_ts = NULL, dana_introduced = 0 WHERE lead_id = ?').run(id);
       bump(id);
       return counts;
     });
@@ -546,13 +593,13 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
 
   /**
    * *Not a client*: out of the inbox, transcript gone, nobody handling it, nothing
-   * pending — all or nothing, so a failure half-way never leaves a purged chat `in`.
+   * pending, both of Dana's per-chat switches back to 0 (P4-4) — all or nothing, so a failure half-way never leaves a purged chat `in`.
    */
   function leaveInbox(leadId) {
     return transaction(() => {
       setInboxState(leadId, 'out');
       const counts = purgeLead(leadId);
-      prep('UPDATE leads SET handler_user_id = NULL, needs_human = 0 WHERE lead_id = ?').run(String(leadId ?? ''));
+      prep('UPDATE leads SET handler_user_id = NULL, needs_human = 0, dana_off = 0, dana_test = 0 WHERE lead_id = ?').run(String(leadId ?? ''));
       return counts;
     });
   }
@@ -732,7 +779,7 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
     insertOutbox, getOutbox, outboxByKey, updateOutbox, resolveUncertain, openOutboxFor, countSentSince, markStalePending, pruneCodeRows,
     markRead, listInbox, unreadTotal, listUnsure, countUnsure, inChatsWithoutMessages, listedLeads,
     addGap, gapsFor, clearGap, clearJoinGaps,
-    setInboxState, setHandler, setNeedsHuman,
+    setInboxState, setHandler, setNeedsHuman, noteHumanOutbound, countDanaSends, humanOutboundAfter, unansweredClientMessages,
     purgeLead, leaveInbox, retentionPurge,
     noteCandidate, listCandidates, countCandidates, getCandidate, dismissCandidate, removeCandidate, removeCandidatesFor, pruneCandidates,
   };

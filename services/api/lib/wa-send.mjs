@@ -12,9 +12,9 @@
  *     `0`). A group, a broadcast, an `…@lid`, or a local-format number that never got
  *     turned into an international one, is refused: `lid` digits are an opaque id, not a
  *     phone number (see wa-poller.mjs).
- *   - a real `kind` — 'code' (a login code) or 'staff' (a team member's reply; 'dana' is
- *     refused until Phase 4 builds her own caps) — and a `text` that is a non-empty string
- *     of at most 4096 characters.
+ *   - a real `kind` — 'code' (a login code), 'staff' (a team member's reply) or 'dana'
+ *     (Dana's WhatsApp answers, lib/dana-wa.mjs, which pass this same gate after her own
+ *     caps) — and a `text` that is a non-empty string of at most 4096 characters.
  *   - the owner's Sending switch (`settings.sending_enabled`). It is bypassed only when
  *     the recipient IS the owner's own jid (`cfg.ownerJid`) AND the message is a login
  *     `code` — `bypassSwitch` is a hint from the caller, never trusted on its own, because
@@ -66,8 +66,11 @@ export const SEND_PER_DAY = 500;
 export const PER_RECIPIENT_PER_MIN = 6;
 export const PER_USER_PER_MIN = 30;
 export const MAX_TEXT_LEN = 4096;
-/** The kinds Phase 2 sends. Extend this, not the gate, when Phase 4 adds Dana. */
-const VALID_KINDS = new Set(['code', 'staff']);
+/**
+ * The kinds that may be sent. 'dana' = Dana's WhatsApp answers (lib/dana-wa.mjs), which pass
+ * this same gate after her own caps.
+ */
+const VALID_KINDS = new Set(['code', 'staff', 'dana']);
 const PHONE_JID_RE = /^(\d{8,15})@s\.whatsapp\.net$/;
 /** What the reply form's hidden `send_id` must look like; anything else is not ours. */
 const SEND_ID_RE = /^[A-Za-z0-9_-]{16,64}$/;
@@ -373,6 +376,8 @@ export function createSender({
           });
           if (!fresh.handler_user_id && userId) inbox.setHandler(lead.lead_id, userId);
           inbox.setNeedsHuman(lead.lead_id, 0);
+          // The human clock Dana's 24 h silence runs on (P4-5).
+          inbox.noteHumanOutbound(lead.lead_id, storedTs);
         }
         // The client was answered either way. The Hermes `bona-unanswered-leads` watchdog
         // reads this column.

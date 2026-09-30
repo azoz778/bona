@@ -125,11 +125,10 @@ test('bad_text: empty, oversized, or not a string at all', async () => {
   h.s.close();
 });
 
-test('bad_kind: "code" and "staff" are the real kinds in Phase 2; Dana waits for Phase 4', async () => {
+test('bad_kind: "code", "staff" and "dana" are the real kinds; a note is never sent', async () => {
   const h = harness();
   const jid = '966500000001@s.whatsapp.net';
   assert.deepEqual(await h.sender.sendTo({ jid, text: 'x', kind: 'reply' }), { ok: false, error: 'bad_kind' });
-  assert.deepEqual(await h.sender.sendTo({ jid, text: 'x', kind: 'dana' }), { ok: false, error: 'bad_kind' });
   assert.deepEqual(await h.sender.sendTo({ jid, text: 'x', kind: 'note' }), { ok: false, error: 'bad_kind' });
   assert.deepEqual(await h.sender.sendTo({ jid, text: 'x' }), { ok: false, error: 'bad_kind' });
   assert.equal(h.calls.length, 0);
@@ -1217,4 +1216,28 @@ test('recoverInterrupted: a page drawn while a send was pending is stale once th
   assert.equal(h.inbox.getOutbox(SID), null);
   assert.equal((await h.sender.reply(replyArgs(staff, { seenRev: h.inbox.revision('L-1') }))).ok, true, 'a page drawn after the restart sends');
   h.s.close();
+});
+
+test("kind 'dana' passes the gate like a staff reply: a text row with no user, through the same limits", async () => {
+  const h = harness();
+  h.s.insertLead({ lead_id: 'LEAD-D', created: NOW, updated: NOW, phone_e164: CLIENT, wa_jid: CLIENT_JID, channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
+  const out = await h.sender.sendTo({ jid: CLIENT_JID, text: 'Dana here', kind: 'dana', leadId: 'LEAD-D' });
+  assert.equal(out.ok, true);
+  assert.equal(out.keyId, 'KEY-1');
+  const row = h.inbox.getOutbox(out.sendId);
+  assert.deepEqual([row.sender_kind, row.user_id, row.lead_id, row.text, row.status, row.key_id], ['dana', null, 'LEAD-D', 'Dana here', 'accepted', 'KEY-1']);
+  assert.deepEqual(h.calls[0].body, { number: CLIENT, text: 'Dana here' });
+  assert.ok(h.logs.some((l) => l.evt === 'wa.send.ok' && l.kind === 'dana'));
+  h.team.setSetting('sending_enabled', '0');
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'again', kind: 'dana', leadId: 'LEAD-D' }), { ok: false, error: 'sending_disabled' }, "the owner's Sending switch stops her too");
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'robot' }), { ok: false, error: 'bad_kind' }, 'still only the three kinds');
+});
+
+test('a dashboard reply stamps the human clock at the second it went', async () => {
+  const h = harness();
+  const staff = h.team.addUser({ name: 'Sara', phone: '0500000009', role: 'staff' });
+  h.s.insertLead({ lead_id: 'LEAD-R', created: NOW, updated: NOW, phone_e164: CLIENT, wa_jid: CLIENT_JID, channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
+  const out = await h.sender.reply({ sendId: SID, leadId: 'LEAD-R', userId: staff.user_id, text: 'hello', seenRev: h.inbox.revision('LEAD-R') });
+  assert.equal(out.ok, true);
+  assert.equal(h.s.getLead('LEAD-R').last_human_out_ts, Math.floor(h.inbox.getOutbox(SID).created / 1000) * 1000);
 });

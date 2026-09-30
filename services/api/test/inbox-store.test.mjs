@@ -1205,3 +1205,81 @@ test('pruneCandidates: open rows by their last message, dismissed rows by when t
   assert.deepEqual(inbox.pruneCandidates(), { open: 0, dismissed: 0 });
   s.close();
 });
+
+test('the human clock: noteHumanOutbound only ever moves forward', () => {
+  const { s, inbox } = harness();
+  s.insertLead({ lead_id: 'LEAD-H', created: 1, updated: 1, phone_e164: '966500000031', wa_jid: '966500000031@s.whatsapp.net', channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
+  assert.equal(inbox.noteHumanOutbound('LEAD-H', 5000), true);
+  assert.equal(s.getLead('LEAD-H').last_human_out_ts, 5000);
+  inbox.noteHumanOutbound('LEAD-H', 3000);
+  assert.equal(s.getLead('LEAD-H').last_human_out_ts, 5000, 'a history read of an older message never moves it back');
+  inbox.noteHumanOutbound('LEAD-H', 9000);
+  assert.equal(s.getLead('LEAD-H').last_human_out_ts, 9000);
+  assert.equal(inbox.noteHumanOutbound('LEAD-none', 1), false);
+});
+
+test("Dana's sends are counted from the outbox, per chat and in all, failed ones left out", () => {
+  const { s, inbox } = harness();
+  const NOW_ = 1_790_600_000_000;
+  const row = (send_id, lead_id, created, status = 'accepted', kind = 'dana') => s.db.prepare(
+    'INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated) VALUES (?,?,?,?,NULL,?,?,NULL,?,?)',
+  ).run(send_id, lead_id, '966500000031@s.whatsapp.net', 't', kind, status, created, created);
+  row('D1', 'LEAD-A', NOW_ - 10_000);
+  row('D2', 'LEAD-A', NOW_ - 20_000, 'uncertain');
+  row('D3', 'LEAD-A', NOW_ - 30_000, 'pending');
+  row('D4', 'LEAD-A', NOW_ - 40_000, 'failed');
+  row('D5', 'LEAD-B', NOW_ - 50_000);
+  row('S1', 'LEAD-A', NOW_ - 5_000, 'accepted', 'staff');
+  row('D6', 'LEAD-A', NOW_ - 2 * 3_600_000);
+  assert.equal(inbox.countDanaSends({ leadId: 'LEAD-A', sinceTs: NOW_ - 3_600_000 }), 3, 'accepted + uncertain + pending, not failed, not staff, not older');
+  assert.equal(inbox.countDanaSends({ sinceTs: NOW_ - 3_600_000 }), 4, 'every chat');
+  assert.equal(inbox.countDanaSends({ sinceTs: NOW_ - 86_400_000 }), 5);
+});
+
+test('humanOutboundAfter: a stored staff/owner message newer than the time, or a staff send on its way', () => {
+  const { s, inbox } = harness();
+  s.insertLead({ lead_id: 'LEAD-A', created: 1, updated: 1, phone_e164: '966500000031', wa_jid: '966500000031@s.whatsapp.net', channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
+  const T = 1_790_600_000_000;
+  inbox.upsertMessage({ key_id: 'C1', lead_id: 'LEAD-A', direction: 'in', sender_kind: 'client', text: 'hi', ts: T });
+  assert.equal(inbox.humanOutboundAfter('LEAD-A', T), false);
+  inbox.upsertMessage({ key_id: 'D1', lead_id: 'LEAD-A', direction: 'out', sender_kind: 'dana', text: 'hello', ts: T + 1000 });
+  assert.equal(inbox.humanOutboundAfter('LEAD-A', T), false, 'Dana is not a human');
+  inbox.upsertMessage({ key_id: 'O1', lead_id: 'LEAD-A', direction: 'out', sender_kind: 'owner_number', text: 'typed', ts: T + 2000 });
+  assert.equal(inbox.humanOutboundAfter('LEAD-A', T), true);
+  assert.equal(inbox.humanOutboundAfter('LEAD-A', T + 2000), false, 'strictly newer');
+  s.db.prepare("INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, created, updated) VALUES ('SND-s1','LEAD-A','966500000031@s.whatsapp.net','on its way','U1','staff','pending',?,?)").run(T + 3000, T + 3000);
+  assert.equal(inbox.humanOutboundAfter('LEAD-A', T + 2000), true, 'a pending staff reply counts');
+  inbox.updateOutbox('SND-s1', { status: 'failed', error: 'x' });
+  assert.equal(inbox.humanOutboundAfter('LEAD-A', T + 2000), false, 'a failed one does not');
+});
+
+test('unansweredClientMessages: the client messages after the newest outbound, oldest first, at most the newest limit', () => {
+  const { s, inbox } = harness();
+  s.insertLead({ lead_id: 'LEAD-A', created: 1, updated: 1, phone_e164: '966500000031', wa_jid: '966500000031@s.whatsapp.net', channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
+  const T = 1_790_600_000_000;
+  const c = (k, ts, text) => inbox.upsertMessage({ key_id: k, lead_id: 'LEAD-A', direction: 'in', sender_kind: 'client', text, ts });
+  c('C1', T, 'one');
+  inbox.upsertMessage({ key_id: 'O1', lead_id: 'LEAD-A', direction: 'out', sender_kind: 'owner_number', text: 'answered', ts: T + 1000 });
+  c('C2', T + 2000, 'two');
+  c('C3', T + 3000, 'three');
+  assert.deepEqual(inbox.unansweredClientMessages('LEAD-A').map((m) => m.text), ['two', 'three']);
+  assert.deepEqual(inbox.unansweredClientMessages('LEAD-A', { limit: 1 }).map((m) => m.text), ['three'], 'the newest ones');
+  s.db.prepare("INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, created, updated) VALUES ('SND-d1','LEAD-A','966500000031@s.whatsapp.net','dana',NULL,'dana','pending',?,?)").run(T + 4000, T + 4000);
+  assert.deepEqual(inbox.unansweredClientMessages('LEAD-A'), [], 'a Dana send just written counts as an answer');
+  inbox.updateOutbox('SND-d1', { status: 'failed', error: 'x' });
+  assert.deepEqual(inbox.unansweredClientMessages('LEAD-A').map((m) => m.text), ['two', 'three'], 'a failed send answered nothing');
+  assert.deepEqual(inbox.unansweredClientMessages('LEAD-none'), []);
+});
+
+test('a purge forgets the Retell chat and the introduction; leaving the inbox also clears both per-chat switches', () => {
+  const { s, inbox } = harness();
+  s.insertLead({ lead_id: 'LEAD-A', created: 1, updated: 1, phone_e164: '966500000031', wa_jid: '966500000031@s.whatsapp.net', channel: 'whatsapp', stage: 'new', inbox_state: 'in',
+    dana_off: 1, dana_test: 1, dana_chat_id: 'chat_1', dana_chat_ts: 5, dana_introduced: 1 });
+  inbox.purgeLead('LEAD-A');
+  let l = s.getLead('LEAD-A');
+  assert.deepEqual([l.dana_chat_id, l.dana_chat_ts, l.dana_introduced, l.dana_off, l.dana_test], [null, null, 0, 1, 1]);
+  s.updateLead('LEAD-A', { dana_chat_id: 'chat_2', dana_chat_ts: 6, dana_introduced: 1 });
+  inbox.leaveInbox('LEAD-A');
+  l = s.getLead('LEAD-A');
+  assert.deepEqual([l.inbox_state, l.dana_chat_id, l.dana_chat_ts, l.dana_introduced, l.dana_off, l.dana_test], ['out', null, null, 0, 0, 0]);
+});
