@@ -72,4 +72,6 @@ test('VAPID keys come from the env; the subject defaults to the site; redacted()
   assert.equal(r.hasVapid, true);
   assert.doesNotMatch(JSON.stringify(r), /PUB|PRIV/);
   assert.equal(redacted(loadConfig({ env: {}, ids: {} })).hasVapid, false);
+  assert.doesNotMatch(JSON.stringify(redacted(loadConfig({ env: { BONA_VAPID_PUBLIC: 'P', BONA_VAPID_PRIVATE: 'K', BONA_VAPID_SUBJECT: 'mailto:ops@example.com' }, ids: {} }))), /ops@example/);
+  assert.equal(redacted(loadConfig({ env: { BONA_VAPID_PUBLIC: 'P' }, ids: {} })).hasVapid, false);
 });
