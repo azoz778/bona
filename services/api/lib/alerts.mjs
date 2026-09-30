@@ -3,8 +3,11 @@
  *
  * A member's browser subscribes (lib/dashboard/routes.mjs → `subscribe`); the subscription
  * belongs to that member AND to the login session that posted it (P3-5), so a push reaches
- * only a device someone is still signed in on. When the poller stores a client message of an
- * `in` chat, `notify` decides who hears of it, as the chat is at that moment:
+ * only a device someone is still signed in on. A subscription is only ever bound to a live
+ * session of the member posting it: a hash that is unknown, expired or another member's is
+ * refused, so no row can start life pointing at a session that would never push. When the
+ * poller stores a client message of an `in` chat, `notify` decides who hears of it, as the
+ * chat is at that moment:
  *
  *   - the chat must be `in` the inbox and not a colleague's or a never-list number;
  *   - "needs a human" (Phase 4's hand-over) → every active member; otherwise its handler,
@@ -25,10 +28,19 @@ import { pushEndpoint, subscriptionKeys } from './push.mjs';
 export const ALERT_EVERY_MS = 120_000;
 export const ALERT_FRESH_MS = 30 * 60_000;
 export const MAX_DEVICES_PER_USER = 10;
-/** How many (member, chat) marks the 2-minute rule remembers before it forgets the old ones. */
+/**
+ * How many (member, chat) marks the 2-minute rule remembers before it forgets the old ones:
+ * a prune trigger, not a bound — fresh marks are never evicted (a three-member team never
+ * gets near it).
+ */
 const MARKS_MAX = 5000;
+/** The reasons a push can be sent for; anything else is logged as `other` and follows the `inbound` rules. */
+const REASONS = new Set(['inbound', 'needs_human']);
+/** The failure kinds lib/push.mjs `send` answers, plus `threw` for a send that rejected after all. */
+const SEND_ERRORS = new Set(['timeout', 'network', 'bad_endpoint', 'threw']);
 
-export function createAlerts({ db, pusher = null, isExcludedLead = () => false, now = () => Date.now(), log = () => {} }) {
+export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Date.now(), log = () => {} }) {
+  if (typeof isExcludedLead !== 'function') throw new TypeError('createAlerts needs isExcludedLead (lib/team.mjs)');
   const { transaction } = db;
   const stmts = new Map();
   const prep = (sql) => {
@@ -47,7 +59,8 @@ export function createAlerts({ db, pusher = null, isExcludedLead = () => false, 
     if (!k) return { ok: false, error: 'bad_keys' };
     if (typeof userId !== 'string' || !userId || typeof sessionHash !== 'string' || !sessionHash) return { ok: false, error: 'bad_request' };
     const t = now();
-    transaction(() => {
+    return transaction(() => {
+      if (!prep('SELECT 1 FROM auth_sessions WHERE token_hash = ? AND user_id = ? AND expires >= ?').get(sessionHash, userId, t)) return { ok: false, error: 'bad_request' };
       const moved = prep(`UPDATE push_subscriptions SET user_id = ?, session_hash = ?, p256dh = ?, auth = ?, updated = ?, fail_count = 0
                           WHERE endpoint = ?`).run(userId, sessionHash, k.p256dh, k.auth, t, url).changes;
       if (!moved) {
@@ -57,8 +70,8 @@ export function createAlerts({ db, pusher = null, isExcludedLead = () => false, 
       prep(`DELETE FROM push_subscriptions WHERE user_id = ? AND id NOT IN
               (SELECT id FROM push_subscriptions WHERE user_id = ? ORDER BY updated DESC, rowid DESC LIMIT ?)`)
         .run(userId, userId, MAX_DEVICES_PER_USER);
+      return { ok: true };
     });
-    return { ok: true };
   }
 
   function unsubscribe({ userId, endpoint } = {}) {
@@ -68,8 +81,10 @@ export function createAlerts({ db, pusher = null, isExcludedLead = () => false, 
   }
 
   const forgetSession = (sessionHash) => Number(prep('DELETE FROM push_subscriptions WHERE session_hash = ?').run(String(sessionHash ?? '')).changes);
-  const pruneOrphans = () => Number(prep(`DELETE FROM push_subscriptions WHERE session_hash IS NULL
-      OR session_hash NOT IN (SELECT token_hash FROM auth_sessions WHERE expires >= ?)`).run(now()).changes);
+  /** Sweeps every row whose session is NULL, gone, expired or another member's: none of those can ever push. */
+  const pruneOrphans = () => Number(prep(`DELETE FROM push_subscriptions WHERE NOT EXISTS
+      (SELECT 1 FROM auth_sessions a WHERE a.token_hash = push_subscriptions.session_hash AND a.user_id = push_subscriptions.user_id AND a.expires >= ?)`)
+    .run(now()).changes);
   const countFor = (userId) => prep('SELECT COUNT(*) AS n FROM push_subscriptions WHERE user_id = ?').get(String(userId ?? '')).n;
 
   function recipients(lead, { reason = 'inbound', exceptUserId = null } = {}) {
@@ -89,11 +104,13 @@ export function createAlerts({ db, pusher = null, isExcludedLead = () => false, 
 
   async function run(leadId, { reason, exceptUserId, ts }) {
     if (!pusher) return { skipped: 'off' };
+    const why = REASONS.has(reason) ? reason : 'other';
     const t = now();
     if (ts != null && Number.isFinite(Number(ts)) && Number(ts) < t - ALERT_FRESH_MS) return { skipped: 'old' };
     const lead = db.getLead(leadId);
     if (!lead || lead.inbox_state !== 'in' || isExcludedLead(lead)) return { skipped: 'not_in_inbox' };
-    const due = recipients(lead, { reason, exceptUserId }).filter((u) => {
+    // Nothing above the sends may await: the marks must be set before another notify for this chat runs.
+    const due = recipients(lead, { reason: why, exceptUserId }).filter((u) => {
       const at = marks.get(markKey(u, leadId));
       return at === undefined || t - at >= ALERT_EVERY_MS;
     });
@@ -110,25 +127,35 @@ export function createAlerts({ db, pusher = null, isExcludedLead = () => false, 
     for (const u of due) marks.set(markKey(u, leadId), t);
     prune(t);
     const users = new Set(devices.map((d) => d.user_id));
-    const answers = await Promise.all(devices.map(async (d) => ({ d, a: await pusher.send(d.endpoint) })));
+    // A send that rejects after all is that device's failure, never the batch's.
+    const answers = await Promise.all(devices.map(async (d) => ({
+      d, a: await Promise.resolve().then(() => pusher.send(d.endpoint)).catch(() => ({ error: 'threw' })),
+    })));
+    // Each answer writes only to the row as it was when the push left (`updated <= t`): a device
+    // re-posted during the send — by this member or, on a shared phone, by someone else — is a
+    // new binding this answer says nothing about.
     let ok = 0;
     let gone = 0;
     let failed = 0;
     for (const { d, a } of answers) {
       if (a?.status >= 200 && a.status < 300) {
         ok += 1;
-        prep('UPDATE push_subscriptions SET last_ok = ?, fail_count = 0 WHERE id = ?').run(now(), d.id);
+        prep('UPDATE push_subscriptions SET last_ok = ?, fail_count = 0 WHERE id = ? AND updated <= ?').run(now(), d.id, t);
       } else if (a?.status === 404 || a?.status === 410) {
         gone += 1;
-        prep('DELETE FROM push_subscriptions WHERE id = ?').run(d.id);
+        prep('DELETE FROM push_subscriptions WHERE id = ? AND updated <= ?').run(d.id, t);
       } else {
         failed += 1;
-        prep('UPDATE push_subscriptions SET fail_count = fail_count + 1 WHERE id = ?').run(d.id);
-        say({ level: 'warn', evt: 'push.refused', ...(a?.status ? { status: a.status } : { error: a?.error ?? 'unknown' }) });
+        prep('UPDATE push_subscriptions SET fail_count = fail_count + 1 WHERE id = ? AND updated <= ?').run(d.id, t);
+        say({
+          level: 'warn',
+          evt: 'push.refused',
+          ...(Number.isInteger(a?.status) ? { status: a.status } : { error: SEND_ERRORS.has(a?.error) ? a.error : 'unknown' }),
+        });
       }
     }
     const out = { users: users.size, devices: devices.length, ok, gone, failed };
-    say({ evt: 'push.sent', leadId, reason, ...out });
+    say({ evt: 'push.sent', leadId, reason: why, ...out });
     return out;
   }
 
@@ -136,7 +163,8 @@ export function createAlerts({ db, pusher = null, isExcludedLead = () => false, 
     const p = Promise.resolve()
       .then(() => run(String(leadId ?? ''), { reason, exceptUserId, ts }))
       .catch((err) => {
-        say({ level: 'error', evt: 'push.failed', name: typeof err?.name === 'string' ? err.name.slice(0, 40) : 'Error' });
+        // Only a plain error class name is logged: a message, or a name that is not one, could carry anything.
+        say({ level: 'error', evt: 'push.failed', name: typeof err?.name === 'string' && /^[A-Za-z]{1,40}$/.test(err.name) ? err.name : 'Error' });
         return { error: 'failed' };
       });
     inflight.add(p);
