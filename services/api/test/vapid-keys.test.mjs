@@ -48,3 +48,43 @@ test('the CLI prints the public key only, never the private one', () => {
   assert.match(execFileSync(process.execPath, [BIN, '--file', file], { encoding: 'utf8' }), /already/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('the CLI guard works through a symlink', () => {
+  const dir = tmp();
+  const link = path.join(dir, 'link.mjs');
+  fs.symlinkSync(BIN, link);
+  const file = path.join(dir, 'y.env');
+  execFileSync(process.execPath, [link, '--file', file], { encoding: 'utf8' });
+  assert.ok(parseEnvText(fs.readFileSync(file, 'utf8')).BONA_VAPID_PRIVATE);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('only one key present is an error, the file untouched', () => {
+  const dir = tmp();
+  const file = path.join(dir, 'p.env');
+  fs.writeFileSync(file, 'BONA_VAPID_PUBLIC=x\n', { mode: 0o600 });
+  assert.deepEqual(writeVapidKeys(file), { written: false, reason: 'partial' });
+  assert.equal(fs.readFileSync(file, 'utf8'), 'BONA_VAPID_PUBLIC=x\n');
+  let status = null;
+  try { execFileSync(process.execPath, [BIN, '--file', file], { encoding: 'utf8', stdio: 'pipe' }); } catch (err) { status = err.status; }
+  assert.equal(status, 1);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('a pre-existing 0644 file ends 0600 with the keys appended', () => {
+  const dir = tmp();
+  const file = path.join(dir, 'm.env');
+  fs.writeFileSync(file, 'A=1\n');
+  fs.chmodSync(file, 0o644);
+  assert.equal(writeVapidKeys(file).written, true);
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('a bad subject is refused before the file is touched', () => {
+  const dir = tmp();
+  const file = path.join(dir, 'b.env');
+  assert.deepEqual(writeVapidKeys(file, { subject: 'ops@example.com\nEVIL=1' }), { written: false, reason: 'bad_subject' });
+  assert.equal(fs.existsSync(file), false);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
