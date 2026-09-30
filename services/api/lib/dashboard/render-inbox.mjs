@@ -109,8 +109,9 @@ export function inboxPage({ me, rows, unsureCount = 0, ok = null, error = null, 
 <div class="card cp">${list.map((r) => inboxRow(r, now)).join('')}</div>`
     : '<p class="muted">No chats in the Bona inbox yet. A chat joins when a client writes from an ad, with a Ref code or with a listing number, or when the owner\'s number sends them a Bona link, a brochure or a listing number.</p>';
 
-  // Phone alerts (Phase 3): drawn only when the server has push keys, hidden until app.js
-  // has worked out what this device can do (P3-11). Without script the page is as before.
+  // Phone alerts (Phase 3): drawn above the list only when the server has push keys, hidden
+  // until app.js has worked out what this device can do (P3-11) — a new member sees "Turn
+  // on alerts" without scrolling past the chats. Without script the page is as before.
   const alerts = me?.pushKey
     ? `<section class="card cp alerts" data-alerts hidden>
   <h2>Phone alerts</h2>
@@ -129,12 +130,16 @@ export function inboxPage({ me, rows, unsureCount = 0, ok = null, error = null, 
 </form>`
     : '';
 
+  // The pulse (P3-12): what this page was drawn from, and the note app.js shows instead of
+  // reloading while the owner is typing a number into "Add chat by phone number".
+  const note = '<p class="flash" data-pulse-note hidden>New messages — <a href="/dashboard/inbox">reload</a> to see them.</p>';
+
   return layout({
     title: 'Inbox',
     active: '/dashboard/inbox',
     me,
     actions: owner ? tabs('inbox', unsureCount) : '',
-    body: `${flash(ok, error)}<div data-pulse="/v1/admin/inbox/pulse" data-pulse-token="${esc(pulseToken)}">${block}</div>${alerts}${add}`,
+    body: `${flash(ok, error)}${alerts}${note}<div data-pulse="/v1/admin/inbox/pulse" data-pulse-token="${esc(pulseToken)}">${block}</div>${add}`,
   });
 }
 
@@ -356,8 +361,8 @@ export function threadPage({
     ? `${earlier}<div class="thread">${items.map((it) => it.html).join('')}</div>`
     : '<p class="muted">No messages stored for this chat yet.</p>';
   // The pulse (P3-12): what this page was drawn from, and a note app.js shows when the chat
-  // has moved on but the reply box is in use. The note is a plain link: a reload the person
-  // chooses, never one the script forces over a draft.
+  // has moved on but the reply box is in use. Drawn right above the reply box, where the
+  // person typing sees it; a plain link, a reload they choose, never one forced over a draft.
   const note = `<p class="flash" data-pulse-note hidden>New activity in this chat — <a href="${esc(threadHref(lead.lead_id))}">reload</a> to see it.</p>`;
   const pulsed = `<div data-pulse="/v1/admin/inbox/pulse?lead=${esc(encodeURIComponent(lead.lead_id))}" data-pulse-token="${esc(pulseToken)}">${thread}</div>`;
 
@@ -404,6 +409,6 @@ export function threadPage({
     active: '/dashboard/inbox',
     me,
     actions: `<div class="seg"><a href="/dashboard/inbox">← Inbox</a><a href="${esc(threadHref(lead.lead_id))}">Reload</a></div>`,
-    body: `${flash(ok, error)}${head}${note}${pulsed}${reply}${picker}${notClient}`,
+    body: `${flash(ok, error)}${head}${pulsed}${note}${reply}${picker}${notClient}`,
   });
 }

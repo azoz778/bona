@@ -157,33 +157,50 @@ test('app.js registers the worker, subscribes only on a click, posts with the wr
 
 test('app.js live refresh: reloads a changed list, never a thread with a draft in the box', async () => {
   const src = ASSETS.get('/dashboard/app.js').body.toString('utf8');
-  const make = ({ pulse, token, answer, draft = '', focused = false }) => {
+  /**
+   * The page as app.js sees it: the pulse element, the note (with its reload link when the
+   * page has one), and the fields a draft could sit in — the thread's reply box `#r-text`,
+   * the list's `#a-phone`. `reloads` records what the script navigated to: the note's link
+   * (`location.replace`) or a bare `reload`. `answer` may be a token or `{ status }`.
+   */
+  const make = ({ pulse, token, answer, draft = '', focused = false, phone = '', link = null }) => {
     const reloads = [];
-    const note = { hidden: true };
+    const note = { hidden: true, querySelector: (sel) => (sel === 'a' && link ? { href: link } : null) };
     const box = { value: draft };
+    const phoneField = { value: phone };
+    const thread = pulse.includes('?lead=');
+    const fields = thread ? [box] : [phoneField];
     const el = { dataset: { pulse, pulseToken: token } };
+    const windowListeners = {};
     const document = {
       visibilityState: 'visible',
       activeElement: focused ? box : null,
-      querySelector: (sel) => ({ '[data-pulse]': el, '[data-pulse-note]': note, '#r-text': box })[sel] ?? null,
+      querySelector: (sel) => ({ '[data-pulse]': el, '[data-pulse-note]': note, '#r-text': thread ? box : null })[sel] ?? null,
+      querySelectorAll: () => fields,
       addEventListener() {},
     };
     let tick = null;
     const ctx = {
-      document, navigator: {}, window: { matchMedia: () => ({ matches: false }) },
-      location: { reload: () => reloads.push(1) },
-      fetch: async () => ({ ok: true, status: 200, json: async () => ({ token: answer }) }),
+      document, navigator: {},
+      window: { matchMedia: () => ({ matches: false }), addEventListener: (name, fn) => { windowListeners[name] = fn; } },
+      location: { reload: () => reloads.push('reload'), replace: (href) => reloads.push(href) },
+      fetch: async () => (typeof answer === 'object'
+        ? { ok: false, status: answer.status, json: async () => ({}) }
+        : { ok: true, status: 200, json: async () => ({ token: answer }) }),
       setInterval: (fn) => { tick = fn; return 1; }, clearInterval() {}, console,
     };
     vm.runInNewContext(src, ctx);
-    return { run: async () => { await tick(); await new Promise((r) => setImmediate(r)); }, reloads, note };
+    return { run: async () => { await tick(); await new Promise((r) => setImmediate(r)); }, reloads, note, windowListeners };
   };
   const same = make({ pulse: '/v1/admin/inbox/pulse', token: '1:0:5', answer: '1:0:5' });
   await same.run();
   assert.equal(same.reloads.length, 0);
-  const list = make({ pulse: '/v1/admin/inbox/pulse', token: '1:0:5', answer: '2:1:9' });
+  const list = make({ pulse: '/v1/admin/inbox/pulse', token: '1:0:5', answer: '2:1:9', link: '/dashboard/inbox' });
   await list.run();
-  assert.equal(list.reloads.length, 1);
+  assert.deepEqual(list.reloads, ['/dashboard/inbox'], "by the note's own link: a GET, never a re-post");
+  const bare = make({ pulse: '/v1/admin/inbox/pulse', token: '1:0:5', answer: '2:1:9' });
+  await bare.run();
+  assert.deepEqual(bare.reloads, ['reload'], 'a page without a note link reloads');
   const draft = make({ pulse: '/v1/admin/inbox/pulse?lead=L', token: '4', answer: '5', draft: 'half a reply' });
   await draft.run();
   assert.equal(draft.reloads.length, 0);
@@ -191,7 +208,27 @@ test('app.js live refresh: reloads a changed list, never a thread with a draft i
   const focused = make({ pulse: '/v1/admin/inbox/pulse?lead=L', token: '4', answer: '5', focused: true });
   await focused.run();
   assert.equal(focused.reloads.length, 0);
-  const empty = make({ pulse: '/v1/admin/inbox/pulse?lead=L', token: '4', answer: '5' });
+  assert.equal(focused.note.hidden, false);
+  const empty = make({ pulse: '/v1/admin/inbox/pulse?lead=L', token: '4', answer: '5', link: '/dashboard/inbox/L' });
   await empty.run();
-  assert.equal(empty.reloads.length, 1);
+  assert.deepEqual(empty.reloads, ['/dashboard/inbox/L']);
+
+  // The owner half-way through typing a number into "Add chat by phone number" keeps it.
+  const adding = make({ pulse: '/v1/admin/inbox/pulse', token: '1:0:5', answer: '2:1:9', phone: '05000', link: '/dashboard/inbox' });
+  await adding.run();
+  assert.equal(adding.reloads.length, 0);
+  assert.equal(adding.note.hidden, false, 'the list notes the new messages instead');
+
+  // A pulse the server turned away (rate limited, signed out): nothing happens at all.
+  const refused = make({ pulse: '/v1/admin/inbox/pulse', token: '1:0:5', answer: { status: 429 }, link: '/dashboard/inbox' });
+  await refused.run();
+  assert.equal(refused.reloads.length, 0);
+  assert.equal(refused.note.hidden, true);
+
+  // A navigation the person started (Send tapped, a link followed) is never raced by a reload.
+  const leaving = make({ pulse: '/v1/admin/inbox/pulse?lead=L', token: '4', answer: '5', link: '/dashboard/inbox/L' });
+  assert.equal(typeof leaving.windowListeners.beforeunload, 'function', 'the script listens for the page leaving');
+  leaving.windowListeners.beforeunload();
+  await leaving.run();
+  assert.equal(leaving.reloads.length, 0);
 });

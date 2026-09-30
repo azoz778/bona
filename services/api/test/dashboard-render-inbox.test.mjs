@@ -515,12 +515,21 @@ test('the inbox list draws the Phone alerts panel, hidden until app.js shows it,
   assert.match(html, /<p class="sub" data-alerts-text><\/p>/);
   assert.doesNotMatch(inboxPage({ me: { ...me, pushKey: '' }, rows: [] }), /data-alerts/);
   assert.doesNotMatch(html, /onclick|onload|javascript:/i, 'no inline handlers: the CSP would block them');
+  // Above the list: a new member finds "Turn on alerts" without scrolling past the chats.
+  const listed = inboxPage({ me, rows: [row({ unread: 1 })], pulseToken: '1:1:5', now: NOW });
+  assert.ok(listed.indexOf('data-alerts') < listed.indexOf('data-pulse='), 'the panel comes before the list');
 });
 
-test('the list and the thread carry their pulse; the thread has a hidden "new activity" note', () => {
+test('the list and the thread carry their pulse, each with a hidden "new activity" note', () => {
   const me = { user_id: 'U1', name: 'Sara', role: 'staff' };
-  assert.match(inboxPage({ me, rows: [], pulseToken: '3:1:17"x' }), /<div data-pulse="\/v1\/admin\/inbox\/pulse" data-pulse-token="3:1:17&quot;x">/);
-  const html = thread({ pulseToken: '42' }); // the file's `thread(over)` helper, with threadPage's usual fields
+  const list = inboxPage({ me, rows: [], pulseToken: '3:1:17"x' });
+  assert.match(list, /<div data-pulse="\/v1\/admin\/inbox\/pulse" data-pulse-token="3:1:17&quot;x">/);
+  // The list's note (shown over a half-typed "Add chat" number) links to the list's own GET.
+  assert.match(list, /<p class="flash" data-pulse-note hidden>New messages — <a href="\/dashboard\/inbox">reload<\/a> to see them\.<\/p>/);
+  const html = thread({ pulseToken: '42', messages: [msg()] }); // the file's `thread(over)` helper, with threadPage's usual fields
   assert.match(html, /data-pulse="\/v1\/admin\/inbox\/pulse\?lead=[A-Za-z0-9_-]+" data-pulse-token="42"/);
   assert.match(html, /<p class="flash" data-pulse-note hidden>New activity in this chat — <a href="[^"]+">reload<\/a> to see it\.<\/p>/);
+  // Right above the reply box, after the messages: where the person typing is looking.
+  const note = html.indexOf('data-pulse-note');
+  assert.ok(html.indexOf('class="thread"') < note && note < html.indexOf('<form class="reply"'), 'the note sits between the messages and the reply box');
 });
