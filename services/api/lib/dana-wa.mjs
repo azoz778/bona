@@ -16,6 +16,13 @@
  * failed — flags the chat for a human, alerts everyone and (once) tells the client the team
  * will reply shortly; she then stays quiet until a person answers and 24 h pass.
  *
+ * A hand-over runs the same pre-send check as an answer: a person who answered during the
+ * Retell round trip, or a switch turned off meanwhile, means no flag, no alert and no line.
+ *
+ * A run that throws after Dana's outbox row is written leaves that row `pending`; start-up
+ * or daily upkeep turns it `uncertain` (it may have gone), the batch counts as answered and
+ * the chat is not flagged — exactly like a staff reply cut off mid-send.
+ *
  * Never logged: message text, a name, a number, a Retell chat id. Never rejects.
  */
 import { extractActions, plainText } from './actions.mjs';
@@ -47,6 +54,9 @@ const ARABIC_RE = /[؀-ۿ]/;
 const LATIN_RE = /[A-Za-z]/;
 const PLACEHOLDER_RE = /^\[[^\]\n]{1,40}\]$/;
 /** Skips worth a log line; the rest are states, not events (P4-15). */
+const CAPS = new Set(['cap_chat', 'cap_day']);
+/** A hand-over re-check that finds one of these does nothing at all: no flag, no alert, no line. */
+const HANDOVER_SKIPS = new Set(['dropped_human', 'not_in_inbox', 'off', 'chat_off', 'not_configured']);
 const LOGGED_SKIPS = new Set(['human_recent', 'needs_human', 'lid_only', 'old', 'cap_chat', 'cap_day', 'nothing', 'dropped_human']);
 
 /** Whitespace folded, cut on whole characters. */
@@ -106,9 +116,33 @@ export function withLinks(text, cards, language, { max = MAX_LINKS } = {}) {
 export function clip(text, max = MAX_ANSWER_LEN) {
   const s = String(text ?? '').trim();
   if (s.length <= max) return s;
-  const cut = s.slice(0, max);
+  // Whole characters only: a surrogate pair is never split (the sender measures `.length`).
+  let cut = '';
+  for (const ch of s) {
+    if (cut.length + ch.length > max) break;
+    cut += ch;
+  }
   const at = Math.max(cut.lastIndexOf('\n'), cut.lastIndexOf(' '));
   return (at > max / 2 ? cut.slice(0, at) : cut).trim();
+}
+
+/** Ids and slugs the completion's tool results carried (the content is JSON, sometimes encoded twice). */
+function resultIds(messages) {
+  const ids = new Set();
+  for (const m of messages) {
+    if (m?.role !== 'tool_call_result') continue;
+    let payload = m.content;
+    for (let i = 0; i < 2 && typeof payload === 'string'; i += 1) {
+      try { payload = JSON.parse(payload); } catch { payload = null; }
+    }
+    const rows = Array.isArray(payload) ? payload : payload?.results;
+    if (!Array.isArray(rows)) continue;
+    for (const row of rows) {
+      if (typeof row?.id === 'string' && row.id) ids.add(row.id);
+      if (typeof row?.slug === 'string' && row.slug) ids.add(row.slug);
+    }
+  }
+  return ids;
 }
 
 /** The completion as WhatsApp text, and whether the model asked for a person (P4-10, P4-11). */
@@ -116,8 +150,14 @@ export function answerFrom(completion, { inventory, siteUrl, language }) {
   const messages = Array.isArray(completion?.messages) ? completion.messages : [];
   const handover = messages.some((m) => m?.role === 'tool_call_invocation' && m?.name === HANDOVER_TOOL);
   const r = extractActions(messages, { inventory, siteUrl, maxCards: MAX_LINKS });
-  const cards = r.actions.filter((a) => a.type === 'show_listing').map((a) => a.listing);
   const body = clip(plainText(r.messages.map((m) => m.text).join('\n\n')));
+  // Links never go out alone: no words is the `empty` hand-over.
+  if (!body) return { text: '', handover, links: 0 };
+  // Only homes a tool actually returned — never the widget's local fallback search, which
+  // would link homes Dana never described.
+  const returned = resultIds(messages);
+  const cards = r.actions.filter((a) => a.type === 'show_listing').map((a) => a.listing)
+    .filter((c) => returned.has(c?.id) || returned.has(c?.slug));
   const { text, links } = withLinks(body, cards, language);
   return { text, handover, links };
 }
@@ -149,6 +189,7 @@ export function createDana({
   const timers = new Map();       // leadId → { timer, ts, done, settle }
   const inflight = new Map();     // leadId → the run's promise
   const pendingAgain = new Map(); // leadId → the newest ts woken while a run was in flight
+  let stopped = false;            // stop() is final: no wake arms a run after it
 
   function eligible(leadId, { ts = null } = {}) {
     if (!configured) return { ok: false, reason: 'not_configured' };
@@ -248,17 +289,48 @@ export function createDana({
       return { sent: true, chars: body.length };
     }
     if (out.uncertain) {
-      db.updateLead(lead.lead_id, { dana_chat_ts: t, dana_introduced: 1 });
+      db.transaction(() => {
+        if (db.getLead(lead.lead_id)?.inbox_state !== 'in') return;
+        db.updateLead(lead.lead_id, { dana_chat_ts: t, dana_introduced: 1 });
+      });
       return { sent: true, chars: body.length };
     }
     say({ level: 'warn', evt: 'dana.send_failed', leadId: lead.lead_id, error: String(out.error ?? 'error').slice(0, 40) });
     return { sent: false, error: out.error };
   }
 
-  /** The hand-over (P4-11): the flag first, then the alert, then the one line — unless it went already. */
-  async function handover(leadId, language, why, coversTs) {
+  /**
+   * The pre-send check (P4-13), for an answer and a hand-over alike: the chat as WhatsApp has
+   * it now, then a person's answer since the batch, then the lead again (freshness aside).
+   */
+  async function preSend(leadId, coversTs) {
+    const lead = db.getLead(leadId);
+    if (lead && backfill && typeof backfill.refresh === 'function') {
+      try { await backfill.refresh(lead); } catch { /* the checks below read what is stored */ }
+    }
+    // A person's answer stored by the refresh also stamps `last_human_out_ts`, so the re-check
+    // alone would say `human_recent`; it is named for what happened — `dropped_human`.
+    if (inbox.humanOutboundAfter(leadId, coversTs)) return { ok: false, reason: 'dropped_human' };
+    return eligible(leadId);
+  }
+
+  const skip = (leadId, reason) => {
+    if (LOGGED_SKIPS.has(reason)) say({ evt: 'dana.skipped', leadId, reason });
+    return { skipped: reason };
+  };
+
+  /**
+   * The hand-over (P4-11): the flag first, then the alert, then the one line — unless it went
+   * already. A person who answered meanwhile, or the chat leaving the inbox or switched off,
+   * means nothing at all happens.
+   */
+  async function handover(leadId, language, why, coversTs, { checked = false } = {}) {
+    if (!checked) {
+      const pre = await preSend(leadId, coversTs);
+      if (!pre.ok && HANDOVER_SKIPS.has(pre.reason)) return skip(leadId, pre.reason);
+    }
     const fresh = db.getLead(leadId);
-    if (!fresh || fresh.inbox_state !== 'in') return { handover: why, sent: false };
+    if (!fresh || fresh.inbox_state !== 'in') return skip(leadId, 'not_in_inbox');
     const already = Number(fresh.needs_human) === 1;
     if (!already) inbox.setNeedsHuman(leadId, 1);
     if (alerts) alerts.notify(leadId, { reason: 'needs_human' });
@@ -270,19 +342,15 @@ export function createDana({
   async function run(leadId, ts) {
     const e = eligible(leadId, { ts });
     if (!e.ok) {
-      if (e.reason === 'cap_chat' || e.reason === 'cap_day') {
+      if (CAPS.has(e.reason)) {
         const lead = db.getLead(leadId);
         const waiting = inbox.unansweredClientMessages(leadId, { limit: CONTEXT_MESSAGES });
         return handover(leadId, languageOf({ lead, texts: waiting.map((m) => m.text) }), e.reason, waiting.length ? waiting[waiting.length - 1].ts : now());
       }
-      if (LOGGED_SKIPS.has(e.reason)) say({ evt: 'dana.skipped', leadId, reason: e.reason });
-      return { skipped: e.reason };
+      return skip(leadId, e.reason);
     }
     const batch = inbox.unansweredClientMessages(leadId, { limit: CONTEXT_MESSAGES });
-    if (!batch.length) {
-      say({ evt: 'dana.skipped', leadId, reason: 'nothing' });
-      return { skipped: 'nothing' };
-    }
+    if (!batch.length) return skip(leadId, 'nothing');
     const language = languageOf({ lead: e.lead, texts: batch.map((m) => m.text) });
     const coversTs = batch[batch.length - 1].ts;
     const c = await complete(e.lead, batch, language);
@@ -290,20 +358,13 @@ export function createDana({
     const { text, handover: asked, links } = answerFrom(c.completion, { inventory, siteUrl, language });
     if (asked) return handover(leadId, language, 'request_human', coversTs);
     if (!text) return handover(leadId, language, 'empty', coversTs);
-    // Pre-send (P4-13): the chat as WhatsApp has it now, then the lead again, then a person's answer.
-    if (backfill && typeof backfill.refresh === 'function') {
-      try { await backfill.refresh(e.lead); } catch { /* the checks below read what is stored */ }
+    const pre = await preSend(leadId, coversTs);
+    if (!pre.ok) {
+      // A cap reached meanwhile is still a hand-over: the client is waiting (P4-6).
+      if (CAPS.has(pre.reason)) return handover(leadId, language, pre.reason, coversTs, { checked: true });
+      return skip(leadId, pre.reason);
     }
-    // A person's answer stored by the refresh also stamps `last_human_out_ts`, so the re-check
-    // alone would say `human_recent`; the answer is named for what happened — `dropped_human`.
-    const again = eligible(leadId);
-    const humanAnswered = inbox.humanOutboundAfter(leadId, coversTs);
-    if (!again.ok || humanAnswered) {
-      const reason = humanAnswered ? 'dropped_human' : again.reason;
-      if (LOGGED_SKIPS.has(reason)) say({ evt: 'dana.skipped', leadId, reason });
-      return { skipped: reason };
-    }
-    const r = await send(again.lead, text, language, coversTs);
+    const r = await send(pre.lead, text, language, coversTs);
     if (!r.sent) {
       inbox.setNeedsHuman(leadId, 1);
       if (alerts) alerts.notify(leadId, { reason: 'needs_human' });
@@ -314,33 +375,40 @@ export function createDana({
     return { answered: true, chars: r.chars, links, newChat: c.newChat };
   }
 
+  /**
+   * One run per chat at a time: a call made while a run is in flight waits for it, so two
+   * runs never read the same batch. Never rejects.
+   */
   function answer(leadId, { ts = null } = {}) {
     const id = String(leadId ?? '');
-    return Promise.resolve().then(() => run(id, ts)).catch((err) => {
+    const prev = inflight.get(id) ?? Promise.resolve();
+    const p = prev.then(() => run(id, ts)).catch((err) => {
       say({ level: 'error', evt: 'dana.failed', name: typeof err?.name === 'string' && /^[A-Za-z]{1,40}$/.test(err.name) ? err.name : 'Error' });
       return { error: 'failed' };
     });
-  }
-
-  function fire(id) {
-    const entry = timers.get(id);
-    timers.delete(id);
-    if (!entry) return;
-    const p = answer(id, { ts: entry.ts }).finally(() => {
+    inflight.set(id, p);
+    p.then(() => {
+      if (inflight.get(id) !== p) return; // a later call chained on; it cleans up
       inflight.delete(id);
-      entry.settle();
       if (pendingAgain.has(id)) {
         const t = pendingAgain.get(id);
         pendingAgain.delete(id);
         wake(id, t);
       }
     });
-    inflight.set(id, p);
+    return p;
+  }
+
+  function fire(id) {
+    const entry = timers.get(id);
+    timers.delete(id);
+    if (!entry) return;
+    answer(id, { ts: entry.ts }).then(() => entry.settle());
   }
 
   /** Called by the poller for every client message it stores (P4-7, P4-16). Synchronous, never throws. */
   function wake(leadId, ts) {
-    if (!configured) return;
+    if (!configured || stopped) return;
     const id = String(leadId ?? '');
     const t = Number.isFinite(Number(ts)) ? Number(ts) : now();
     if (inflight.has(id)) {
@@ -370,6 +438,7 @@ export function createDana({
 
   /** Drop every armed batch, forget every `again`, wait for the runs in flight (shutdown). */
   async function stop() {
+    stopped = true;
     for (const [id, e] of timers) {
       clearTimeout(e.timer);
       timers.delete(id);
