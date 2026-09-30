@@ -19,7 +19,7 @@ export const AUDIT_ACTIONS = [
   'team_add', 'team_deactivate', 'team_reactivate', 'team_role',
   'never_add', 'never_remove', 'setting',
   'stage', 'note',
-  'reply_sent', 'inbox_move', 'inbox_out', 'inbox_add', 'handler',
+  'reply_sent', 'inbox_move', 'inbox_out', 'inbox_add', 'handler', 'dana_chat',
 ];
 
 export function createAudit(store, { now = () => Date.now(), log = () => {} } = {}) {
