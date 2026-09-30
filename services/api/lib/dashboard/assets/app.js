@@ -14,9 +14,12 @@
  *      — only when no text box or field on it holds words or focus (a half-typed reply, a
  *      number being typed into "Add chat"); otherwise a note says there is something new,
  *      and the draft is never touched. A page the person is already leaving is left alone.
- *   3. A tapped alert. The service worker asks this page (a `bona:open` message) before
- *      anything moves: with nothing being typed the page goes to the chat itself, else it
- *      says no and the worker opens a fresh window — a draft is never navigated over.
+ *   3. A tapped alert. The service worker asks this page before anything moves, in two
+ *      steps: `bona:open` (may you go?) — with nothing being typed the page says yes; else
+ *      it says no and shows its "new activity" note with the chat's link, and the worker
+ *      leaves it be — then `bona:go`, and only on that does the page navigate (checking
+ *      again first). A draft is never navigated over, and only our own /dashboard/push/open
+ *      is ever followed.
  *
  * No inline code anywhere (the CSP allows only this file), no HTML built from strings,
  * nothing stored in the browser. Every write carries X-Bona-Dash: 1, like every dashboard write.
@@ -62,16 +65,42 @@
     return Boolean(active && typeof active.tagName === 'string' && active.tagName.toUpperCase() === 'SELECT');
   }
 
-  // A tapped alert (sw.js `notificationclick`): the worker asks before it moves this tab.
-  // Only a same-origin path is ever followed — never a full URL, never a protocol-relative one.
+  /** The page must not be moved: it is already going somewhere, or something is being typed. */
+  function busy() { return leaving || drafting(); }
+
+  /** Point the "new activity" note at `href` and show it; a page without one shows nothing. */
+  function noteWithLink(href) {
+    var note = document.querySelector('[data-pulse-note]');
+    if (!note) return;
+    var link = note.querySelector ? note.querySelector('a') : null;
+    if (link) link.href = href;
+    note.hidden = false;
+  }
+
+  // A tapped alert (sw.js `notificationclick`): two steps over the worker's port. `bona:open`
+  // asks; the page navigates only on the `bona:go` that follows a yes, and looks again then.
+  // The one address ever followed is our own /dashboard/push/open on this origin: an exact
+  // allowlist, so no message can send the page anywhere else.
   if (typeof navigator !== 'undefined' && navigator.serviceWorker && navigator.serviceWorker.addEventListener) {
     navigator.serviceWorker.addEventListener('message', function (e) {
       var d = e.data;
       var port = e.ports && e.ports[0];
-      if (!d || d.type !== 'bona:open' || typeof d.url !== 'string' || d.url.charAt(0) !== '/' || d.url.indexOf('//') === 0) return;
-      var ok = !drafting();
-      if (port) port.postMessage({ ok: ok });
-      if (ok) { leaving = true; location.assign(d.url); }
+      if (!d || d.type !== 'bona:open' || typeof d.url !== 'string' || !port) return;
+      var u;
+      try { u = new URL(d.url, location.origin); } catch (err) { return; }
+      if (u.origin !== location.origin || u.pathname !== '/dashboard/push/open') return;
+      if (busy()) {
+        noteWithLink(u.href);
+        port.postMessage({ ok: false });
+        return;
+      }
+      port.onmessage = function (ev) {
+        if (!ev.data || ev.data.type !== 'bona:go') return;
+        if (busy()) { noteWithLink(u.href); return; }
+        leaving = true;
+        location.assign(u.href);
+      };
+      port.postMessage({ ok: true });
     });
   }
 
@@ -168,19 +197,29 @@
       show(Notification.permission === 'denied' ? 'denied' : 'error');
     }
   }
+  /** The browser's subscription, or null when it truly has none; throws when it cannot say. */
+  function subscription() {
+    if (!registration) throw new Error('no registration');
+    return registration.pushManager.getSubscription();
+  }
   async function turnOff() {
-    var sub = null;
-    try { sub = registration && await registration.pushManager.getSubscription(); } catch (e) { sub = null; }
+    // Only a lookup that answers — null included — proves anything; one that fails proves
+    // nothing, and "off" is not said on nothing.
+    var sub;
+    try { sub = await subscription(); } catch (e) { return show('offFailed'); }
     var gone = true; // nothing subscribed: nothing to turn off
     if (sub) {
       // The server first, whatever the browser then says: it must forget the row even if the
       // browser will not let go (it forgets anyway at logout, or when the push service says
       // the device is gone). Then the browser — and only its own word counts: the endpoint
       // stays live at the push service until it is unsubscribed, so "off" is not said until
-      // it says so.
+      // it says so. `unsubscribe()` answers false for a subscription that was already
+      // inactive; alerts are off then too, and a fresh lookup finding nothing proves it.
       try { await post('/v1/admin/push/unsubscribe', { endpoint: sub.endpoint }); } catch (e) { /* told next time */ }
-      gone = false;
-      try { gone = await sub.unsubscribe() === true; } catch (e) { gone = false; }
+      var r = false;
+      try { r = await sub.unsubscribe(); } catch (e) { r = false; }
+      gone = r === true;
+      if (!gone) { try { gone = !(await subscription()); } catch (e) { gone = false; } }
     }
     show(gone ? 'off' : 'offFailed');
   }

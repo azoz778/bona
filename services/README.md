@@ -690,7 +690,7 @@ as tight as they are, on every dashboard and admin answer. Three sets, exactly a
 sends them:
 
 ```
-# every answer
+# every answer (the TikTok callback answers Referrer-Policy: no-referrer)
 Cache-Control: no-store
 X-Frame-Options: DENY
 Referrer-Policy: same-origin
@@ -708,7 +708,8 @@ Content-Security-Policy: default-src 'none'; img-src 'self'
 
 `Referrer-Policy: same-origin`, not `no-referrer`: under `no-referrer` Chrome sends
 `Origin: null` on the login form's own same-origin POST, which the origin check rightly
-refuses. Nothing here is CORS-enabled, so no other origin can read a byte of it.
+refuses (the TikTok callback answers `no-referrer`: its URL carries a code). Nothing here
+is CORS-enabled, so no other origin can read a byte of it.
 
 **Login (team accounts, since 2026-09).** `GET /dashboard/login` asks for a WhatsApp number.
 `POST /dashboard/login/code` — if the number belongs to an active member of the team
@@ -1067,7 +1068,7 @@ dismissed one a year after it was dismissed (`candidatesExpired`, `dismissalsExp
 
 #### Phone alerts (Phase 3)
 
-- **What a member sees:** "New Bona message" on their phone within about a minute of a client writing in a Bona inbox chat (the poll interval). Tapping it opens their newest unread chat, else their newest inbox chat. The notification never says who wrote or what: the push carries no data, so no client text, name or number passes through Google, Apple or Mozilla.
+- **What a member sees:** "New Bona message" on their phone within about a minute of a client writing in a Bona inbox chat (the poll interval). Tapping it opens their newest unread chat, else their newest inbox chat — in the dashboard tab already open when it has nothing half-typed; when it has (a reply, a number in *Add chat*), that tab is only brought to the front and shows a "new activity" note with the chat's link, and nothing typed is touched. The notification never says who wrote or what: the push carries no data, so no client text, name or number passes through Google, Apple or Mozilla.
 - **Who is alerted:** the chat's handler; nobody handling it → everyone active; a chat that needs a human → everyone. Never the member whose own action caused it. At most one alert per chat per member every 2 minutes. A message more than 30 minutes old (the poller catching up after an outage) waits as unread instead.
 - **Turning it on:** Inbox page → *Phone alerts* (the panel sits above the chat list) → *Turn on alerts*. Android: Chrome, any recent version. iPhone: iOS 16.4 or later, and only from the Home-Screen app: Safari → Share → *Add to Home Screen*, open Bona from the Home Screen, sign in there (it keeps its own login), then turn alerts on.
 - **Which devices:** alerts belong to the login they were turned on in. Logging out on a device ends alerts on that device only. Deactivating a member ends all their devices' alerts. A login that expires (30 days) ends its device's alerts until the member signs in again on it, when they come back by themselves. At most 10 devices per member.

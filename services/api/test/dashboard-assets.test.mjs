@@ -32,30 +32,35 @@ test('the service worker shows a fixed notification and caches nothing, intercep
   assert.match(src, /showNotification\(\s*'New Bona message'/);
   assert.match(src, /addEventListener\(\s*'notificationclick'/);
   assert.match(src, /'\/dashboard\/push\/open'/);
-  // A tap asks the page (a `bona:open` message) and never drives an existing tab itself.
+  // A tap asks the page (`bona:open`), tells it to go only on a yes (`bona:go`), and never drives an existing tab itself.
   assert.match(src, /type: 'bona:open'/);
+  assert.match(src, /type: 'bona:go'/);
   assert.doesNotMatch(src, /\.navigate\(/, 'no navigate(): a tab may hold a draft');
 });
 
 /**
  * Run the worker's source against a stub `self` and hand back its handlers and the calls
  * it made. `windows` is what `clients.matchAll` answers; each window answers the worker's
- * `bona:open` question with `answer` (`true`: the page goes there itself; `false`: it holds
- * a draft; left out: it never answers — a tab without our script, or one asleep). With
- * `immediateTimeout`, the worker's half-second wait fires at once.
+ * `bona:open` question with `answer` (`true`: nothing being typed; `false`: it holds a
+ * draft and has shown its note; left out: it never answers — a tab without our script, or
+ * one asleep) and records any `bona:go` the worker then sends it in `calls.go`. With
+ * `late`, the window answers only after the worker's wait has run out. With
+ * `immediateTimeout`, that half-second wait fires at once.
  */
 function runWorker({ windows = [], immediateTimeout = false } = {}) {
-  const calls = { showNotification: [], openWindow: [], focus: [], asked: [], skipWaiting: 0, claim: 0 };
+  const calls = { showNotification: [], openWindow: [], focus: [], asked: [], go: [], skipWaiting: 0, claim: 0 };
   const handlers = {};
   const windowClients = windows.map((w) => ({
     url: w.url,
     async focus() { calls.focus.push(w.url); return this; },
     postMessage(msg, transfer) {
-      calls.asked.push({ type: msg.type, url: msg.url }); // copied: the worker's object is from the VM's realm
+      calls.asked.push({ type: msg.type, url: msg.url, to: w.url }); // copied: the worker's object is from the VM's realm
       const port = transfer && transfer[0];
       if (!port) return;
-      if (w.answer !== undefined) port.postMessage({ ok: w.answer });
-      port.close();
+      port.onmessage = (e) => { calls.go.push({ type: e.data.type, url: e.data.url }); };
+      const answer = () => port.postMessage({ ok: w.answer });
+      if (w.answer === undefined) return;
+      if (w.late) setImmediate(answer); else answer();
     },
   }));
   const self = {
@@ -72,16 +77,17 @@ function runWorker({ windows = [], immediateTimeout = false } = {}) {
     ? { setTimeout: (fn) => { fn(); return 0; }, clearTimeout() {} }
     : { setTimeout, clearTimeout };
   vm.runInNewContext(ASSETS.get('/dashboard/sw.js').body.toString('utf8'), { self, URL, MessageChannel, ...timers }, { filename: 'sw.js' });
-  /** Fire one event and wait for what the handler put in `waitUntil`. */
+  /** Fire one event, wait for what the handler put in `waitUntil`, then let any port traffic settle. */
   const fire = async (name, event = {}) => {
     let pending = Promise.resolve();
     handlers[name]({ notification: { close() {} }, waitUntil(p) { pending = Promise.resolve(p); }, ...event });
     await pending;
+    for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r));
   };
   return { calls, handlers, fire };
 }
 
-test('the worker: a push always shows the one notification; a tap asks our window first and opens a fresh one only when it says no or nothing (P3-3)', async () => {
+test('the worker: a push always shows the one notification; a tap asks our window and says go only on a yes, opens a fresh one only with no answer (P3-3)', async () => {
   const pushed = runWorker();
   assert.deepEqual(Object.keys(pushed.handlers).sort(), ['activate', 'install', 'notificationclick', 'push']);
   await pushed.fire('push');
@@ -94,30 +100,56 @@ test('the worker: a push always shows the one notification; a tap asks our windo
   await pushed.fire('activate');
   assert.equal(pushed.calls.claim, 1);
 
-  // A dashboard window with nothing being typed: focused, asked, and it goes there itself.
+  // A dashboard window with nothing being typed: focused, asked, told to go; no second window.
   const willing = runWorker({ windows: [{ url: 'https://bona-api.azoz.uk/dashboard/inbox', answer: true }] });
   await willing.fire('notificationclick');
   assert.deepEqual(willing.calls.focus, ['https://bona-api.azoz.uk/dashboard/inbox']);
-  assert.deepEqual(willing.calls.asked, [{ type: 'bona:open', url: '/dashboard/push/open' }]);
-  assert.deepEqual(willing.calls.openWindow, [], 'no second window: the page navigates');
+  assert.deepEqual(willing.calls.asked, [{ type: 'bona:open', url: '/dashboard/push/open', to: 'https://bona-api.azoz.uk/dashboard/inbox' }]);
+  assert.deepEqual(willing.calls.go, [{ type: 'bona:go', url: '/dashboard/push/open' }], 'the page navigates on this, and only this');
+  assert.deepEqual(willing.calls.openWindow, []);
 
   // The overview at /dashboard itself (no trailing slash) is ours too.
   const overview = runWorker({ windows: [{ url: 'https://bona-api.azoz.uk/dashboard', answer: true }] });
   await overview.fire('notificationclick');
-  assert.equal(overview.calls.asked.length, 1);
+  assert.equal(overview.calls.go.length, 1);
   assert.deepEqual(overview.calls.openWindow, []);
 
-  // A window holding a draft says no: it is left exactly as it is, and a fresh one opens.
+  // A window holding a draft says no (it has shown its own note with the link): it is left
+  // exactly as it is — focused, no go, and no second window either.
   const drafting = runWorker({ windows: [{ url: 'https://bona-api.azoz.uk/dashboard/inbox/L', answer: false }] });
   await drafting.fire('notificationclick');
   assert.deepEqual(drafting.calls.focus, ['https://bona-api.azoz.uk/dashboard/inbox/L']);
-  assert.deepEqual(drafting.calls.openWindow, ['/dashboard/push/open'], 'one fresh window instead');
+  assert.deepEqual(drafting.calls.go, []);
+  assert.deepEqual(drafting.calls.openWindow, [], 'never a fresh window for a page that refused');
 
   // A window that never answers (no script, asleep): the wait runs out, a fresh one opens.
   const silent = runWorker({ windows: [{ url: 'https://bona-api.azoz.uk/dashboard/leads' }], immediateTimeout: true });
   await silent.fire('notificationclick');
   assert.equal(silent.calls.asked.length, 1);
+  assert.deepEqual(silent.calls.go, []);
   assert.deepEqual(silent.calls.openWindow, ['/dashboard/push/open']);
+
+  // An answer that arrives after the wait ran out changes nothing: no go ever follows it.
+  const late = runWorker({ windows: [{ url: 'https://bona-api.azoz.uk/dashboard/leads', answer: true, late: true }], immediateTimeout: true });
+  await late.fire('notificationclick');
+  assert.deepEqual(late.calls.openWindow, ['/dashboard/push/open']);
+  assert.deepEqual(late.calls.go, [], 'a late yes is never turned into a go');
+
+  // The login and logout pages carry no script: a signed-in window beside one is the one asked.
+  const beside = runWorker({ windows: [
+    { url: 'https://bona-api.azoz.uk/dashboard/login?step=code', answer: true },
+    { url: 'https://bona-api.azoz.uk/dashboard/logout', answer: true },
+    { url: 'https://bona-api.azoz.uk/dashboard/inbox', answer: true },
+  ] });
+  await beside.fire('notificationclick');
+  assert.deepEqual(beside.calls.focus, ['https://bona-api.azoz.uk/dashboard/inbox']);
+  assert.deepEqual(beside.calls.asked.map((a) => a.to), ['https://bona-api.azoz.uk/dashboard/inbox']);
+  assert.deepEqual(beside.calls.openWindow, []);
+  // Only a login window: not ours to ask; a fresh window instead of a second login tab's wait.
+  const loginOnly = runWorker({ windows: [{ url: 'https://bona-api.azoz.uk/dashboard/login', answer: true }] });
+  await loginOnly.fire('notificationclick');
+  assert.deepEqual(loginOnly.calls.asked, []);
+  assert.deepEqual(loginOnly.calls.openWindow, ['/dashboard/push/open']);
 
   // No window at all, or none of ours: open one, and ask nobody.
   const none = runWorker({ windows: [{ url: 'https://bona-api.azoz.uk/', answer: true }] });
@@ -295,17 +327,24 @@ function signedInPage({ sub = null, draft = '', fields = null, active = null } =
   const offBtn = { hidden: true, addEventListener: (n, fn) => { listeners.offBtn[n] = fn; } };
   const box = { value: draft };
   const el = { dataset: {} };
+  const noteLink = { href: '' };
+  const note = { hidden: true, querySelector: (sel) => (sel === 'a' ? noteLink : null) };
   const document = {
     visibilityState: 'visible',
     activeElement: active,
     querySelector: (sel) => ({
       '[data-pulse]': el, 'meta[name="bona-push-key"]': { content: 'BKEY' }, '[data-alerts]': panel,
-      '[data-alerts-text]': text, '[data-alerts-on]': onBtn, '[data-alerts-off]': offBtn, '#r-text': box,
+      '[data-alerts-text]': text, '[data-alerts-on]': onBtn, '[data-alerts-off]': offBtn, '#r-text': box, '[data-pulse-note]': note,
     })[sel] ?? null,
     querySelectorAll: () => fields ?? [box],
     addEventListener: (n, fn) => { listeners.document[n] = fn; },
   };
-  const registration = { pushManager: { getSubscription: async () => sub, subscribe: async () => sub } };
+  // `lookups` scripts what later `getSubscription()` calls answer (an Error rejects); empty → `sub` as before.
+  const lookups = [];
+  const registration = { pushManager: {
+    getSubscription: async () => { if (!lookups.length) return sub; const next = lookups.shift(); if (next instanceof Error) throw next; return next; },
+    subscribe: async () => sub,
+  } };
   const ctx = {
     document,
     navigator: {
@@ -316,56 +355,89 @@ function signedInPage({ sub = null, draft = '', fields = null, active = null } =
     Notification: { permission: 'granted' },
     location: { origin: 'https://bona-api.azoz.uk', assign: (url) => navigations.push(url), replace: (url) => navigations.push(url), reload: () => navigations.push('reload') },
     fetch: async (path, init) => { posts.push({ path, body: JSON.parse(init.body) }); return { ok: true, status: 200, json: async () => ({ ok: true }) }; },
-    setInterval: () => 1, clearInterval() {}, console, JSON, Uint8Array, atob: (s) => Buffer.from(s, 'base64').toString('binary'),
+    setInterval: () => 1, clearInterval() {}, console, JSON, Uint8Array, URL, atob: (s) => Buffer.from(s, 'base64').toString('binary'),
   };
   vm.runInNewContext(src, ctx);
   const settle = async () => { for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r)); };
-  return { listeners, panel, text, onBtn, offBtn, posts, navigations, settle };
+  return { listeners, panel, text, onBtn, offBtn, posts, navigations, settle, box, note, noteLink, lookups };
 }
 
-test('app.js answers the worker\'s bona:open: goes there itself with no draft, refuses over one, ignores anything but a same-origin path', async () => {
-  const ask = (page, url) => {
+test('app.js and the worker\'s two steps: yes then go, no with the note over a draft, and only our own address ever followed', async () => {
+  const TARGET = 'https://bona-api.azoz.uk/dashboard/push/open';
+  /** Post `bona:open` as the worker does; hands back the page's answers and the port to send `go` on. */
+  const open = (page, url) => {
     const answers = [];
-    // `{ ok }` copied: the page's answer object is from the VM's realm.
-    page.listeners.sw.message({ data: { type: 'bona:open', url }, ports: [{ postMessage: (m) => answers.push({ ok: m.ok }) }] });
-    return answers;
+    const port = { postMessage: (m) => answers.push({ ok: m.ok }), onmessage: null }; // `{ ok }` copied: the answer is from the VM's realm
+    page.listeners.sw.message({ data: { type: 'bona:open', url }, ports: [port] });
+    return { answers, go: () => port.onmessage && port.onmessage({ data: { type: 'bona:go', url } }) };
   };
   const clean = signedInPage();
   await clean.settle();
   assert.equal(typeof clean.listeners.sw.message, 'function', 'the script listens to the worker');
-  assert.deepEqual(ask(clean, '/dashboard/push/open'), [{ ok: true }]);
-  assert.deepEqual(clean.navigations, ['/dashboard/push/open'], 'the page navigates itself');
+  const yes = open(clean, '/dashboard/push/open');
+  assert.deepEqual(yes.answers, [{ ok: true }]);
+  assert.deepEqual(clean.navigations, [], 'a yes moves nothing yet');
+  yes.go();
+  assert.deepEqual(clean.navigations, [TARGET], 'the page goes on the go, to the full same-origin address');
 
+  // A draft on the page: no, and the note now carries the chat's link; nothing moves.
   const drafting = signedInPage({ draft: 'half a reply' });
   await drafting.settle();
-  assert.deepEqual(ask(drafting, '/dashboard/push/open'), [{ ok: false }]);
-  assert.deepEqual(drafting.navigations, [], 'the draft stays: the worker opens a fresh window instead');
+  const no = open(drafting, '/dashboard/push/open');
+  assert.deepEqual(no.answers, [{ ok: false }]);
+  assert.equal(drafting.note.hidden, false, 'the note is shown');
+  assert.equal(drafting.noteLink.href, TARGET, 'and points at the chat');
+  no.go(); // a go the worker would never send after a no: still nothing
+  assert.deepEqual(drafting.navigations, []);
+
+  // Typing began between the yes and the go: the go is refused too, with the note.
+  const between = signedInPage();
+  await between.settle();
+  const later = open(between, '/dashboard/push/open');
+  assert.deepEqual(later.answers, [{ ok: true }]);
+  between.box.value = 'started typ';
+  later.go();
+  assert.deepEqual(between.navigations, [], 'a go never lands on a draft');
+  assert.equal(between.note.hidden, false);
+  assert.equal(between.noteLink.href, TARGET);
 
   // A select being picked from (the handler picker) counts as a draft: a reload drops the pick.
   const picking = signedInPage({ fields: [], active: { tagName: 'select' } });
   await picking.settle();
-  assert.deepEqual(ask(picking, '/dashboard/push/open'), [{ ok: false }]);
-  assert.deepEqual(picking.navigations, []);
+  assert.deepEqual(open(picking, '/dashboard/push/open').answers, [{ ok: false }]);
 
-  for (const bad of ['https://evil.example/x', '//evil.example', 'javascript:alert(1)', '', 42, null]) {
+  // The person already tapped Send (the submit capture): the page is leaving, so no.
+  const sending = signedInPage();
+  await sending.settle();
+  sending.listeners.document.submit();
+  assert.deepEqual(open(sending, '/dashboard/push/open').answers, [{ ok: false }]);
+  assert.deepEqual(sending.navigations, []);
+
+  // Anything but our own /dashboard/push/open on this origin is not answered, not followed.
+  for (const bad of ['https://evil.example/x', '//evil.example', '/\\evil.example/x', '/dashboard/inbox', 'javascript:x', '', 42, null]) {
     const page = signedInPage();
     await page.settle();
-    assert.deepEqual(ask(page, bad), [], `${JSON.stringify(bad)} is not answered`);
+    const out = open(page, bad);
+    assert.deepEqual(out.answers, [], `${JSON.stringify(bad)} is not answered`);
+    out.go();
     assert.deepEqual(page.navigations, [], `${JSON.stringify(bad)} is not followed`);
+    assert.equal(page.note.hidden, true);
   }
-  // A message that is not ours at all is ignored too.
+  // A message that is not ours at all, or without a port, is ignored too.
   const other = signedInPage();
   await other.settle();
-  other.listeners.sw.message({ data: { type: 'something-else', url: '/dashboard' }, ports: [] });
+  other.listeners.sw.message({ data: { type: 'something-else', url: '/dashboard/push/open' }, ports: [] });
+  other.listeners.sw.message({ data: { type: 'bona:open', url: '/dashboard/push/open' }, ports: [] });
   other.listeners.sw.message({ data: null, ports: [] });
   assert.deepEqual(other.navigations, []);
 });
 
 test('app.js turn off is honest: "off" only when the browser lets the subscription go, else it says so and keeps the button', async () => {
-  const device = (unsubscribeAnswers) => ({
+  /** A held subscription whose `unsubscribe()` answers in turn; `afterwards` runs on each call (to script what the browser then holds). */
+  const device = (unsubscribeAnswers, afterwards = () => {}) => ({
     endpoint: 'https://fcm.googleapis.com/fcm/send/phone-1',
     toJSON: () => ({ endpoint: 'https://fcm.googleapis.com/fcm/send/phone-1', keys: { p256dh: 'P', auth: 'A' } }),
-    unsubscribe: async () => { const next = unsubscribeAnswers.shift(); if (next instanceof Error) throw next; return next; },
+    unsubscribe: async () => { const next = unsubscribeAnswers.shift(); afterwards(); if (next instanceof Error) throw next; return next; },
   });
   // Turned on already: the page re-posts the device (binds it to this login) and shows "on".
   const stuck = signedInPage({ sub: device([false, new Error('busy'), true]) });
@@ -389,6 +461,31 @@ test('app.js turn off is honest: "off" only when the browser lets the subscripti
   assert.doesNotMatch(stuck.text.textContent, /could not/);
   assert.equal(stuck.offBtn.hidden, true, 'off at last');
   assert.equal(stuck.onBtn.hidden, false);
+
+  // unsubscribe() answers false for a subscription already inactive: a fresh lookup finding
+  // nothing proves alerts are off; one still finding it, or failing, does not.
+  const inactive = signedInPage({ sub: device([false], () => inactive.lookups.push(null)) }); // after the false, the browser holds nothing
+  await inactive.settle();
+  await inactive.listeners.offBtn.click();
+  assert.deepEqual(inactive.posts.map((p) => p.path), ['/v1/admin/push/subscribe', '/v1/admin/push/unsubscribe'], 'it was a real turn-off, not an empty one');
+  assert.equal(inactive.offBtn.hidden, true, 'off: the browser holds nothing any more');
+  const stillThere = signedInPage({ sub: device([false]) });
+  await stillThere.settle();
+  await stillThere.listeners.offBtn.click(); // the lookup still finds the same device
+  assert.match(stillThere.text.textContent, /could not be turned off/);
+  const lookupFails = signedInPage({ sub: device([false], () => lookupFails.lookups.push(new Error('no'))) });
+  await lookupFails.settle();
+  await lookupFails.listeners.offBtn.click();
+  assert.match(lookupFails.text.textContent, /could not be turned off/);
+
+  // A lookup that fails before anything proves nothing: not "off".
+  const blind = signedInPage({ sub: device([true]) });
+  await blind.settle();
+  blind.lookups.push(new Error('no'));
+  await blind.listeners.offBtn.click();
+  assert.match(blind.text.textContent, /could not be turned off/);
+  assert.equal(blind.offBtn.hidden, false);
+  assert.deepEqual(blind.posts.map((p) => p.path), ['/v1/admin/push/subscribe'], 'the server was not told either');
 
   // Nothing subscribed: nothing to turn off, and honestly off.
   const none = signedInPage({ sub: null });
