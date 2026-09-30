@@ -1261,11 +1261,14 @@ export function createDashboardRoutes({
    * The chat's Dana switches (P4-4): `dana_off` is anyone's on the team, `dana_test` — she
    * answers here even while off everywhere, the owner's way to try her on his own second
    * phone's chat — is the owner's alone. Exactly one of the two, '0' or '1', or nothing is
-   * written. Audited with the switch and its value; the log line carries the lead id only.
+   * written. A test on a chat where she is off is refused (`bad_dana`): the page never offers
+   * it, and "off here" wins. Audited with the switch and its value; the log line carries the
+   * lead id only.
    */
   function inboxDana({ res, fields, form, me }, leadId) {
     const back = `/dashboard/inbox/${encodeURIComponent(leadId)}`;
-    if (!openChat(db.getLead(leadId))) return refuseChat(res, form, me);
+    const lead = db.getLead(leadId);
+    if (!openChat(lead)) return refuseChat(res, form, me);
     const keys = ['dana_off', 'dana_test'].filter((k) => Object.hasOwn(fields, k));
     const value = keys.length === 1 ? asText(fields[keys[0]]) : '';
     if (keys.length !== 1 || !['0', '1'].includes(value)) return answer(res, { form, back: `${back}?error=bad_dana`, status: 400, payload: { error: 'bad_dana' } });
@@ -1274,6 +1277,7 @@ export function createDashboardRoutes({
       log({ level: 'warn', evt: 'dash.owner_only', path: '/v1/admin/inbox/:id/dana' });
       return sendJson(res, 403, { error: 'owner_only' });
     }
+    if (key === 'dana_test' && value === '1' && Number(lead.dana_off) === 1) return answer(res, { form, back: `${back}?error=bad_dana`, status: 400, payload: { error: 'bad_dana' } });
     // The kill switch ends a test too (P4-4 amended): "off here" wins, and the page never
     // shows the two at once.
     const patch = key === 'dana_off' && value === '1' ? { dana_off: 1, dana_test: 0 } : { [key]: Number(value) };

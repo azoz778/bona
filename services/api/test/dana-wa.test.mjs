@@ -488,7 +488,7 @@ test('a cap reached while Dana composes is a hand-over at the pre-send check, no
   h.client('C1', NOW - 5000, 'hello');
   assert.deepEqual(await h.dana.answer(LEAD, { ts: NOW - 5000 }), { handover: 'cap_chat', sent: true });
   assert.equal(h.calls.length, 1);
-  assert.equal(h.calls[0].body.text, `${DISCLOSURE.en}\n\n${HANDOVER.en}`);
+  assert.equal(h.calls[0].body.text, HANDOVER.en, 'six sends of hers in this chat: she introduced herself already');
   assert.equal(h.lead().needs_human, 1);
   assertClean(h.logs);
 });
@@ -608,4 +608,65 @@ test('nothing to answer, and a run that throws, are a line each and never a reje
   assert.deepEqual(await h.dana.answer(LEAD, { ts: NOW }), { error: 'failed' });
   assert.deepEqual(h.logs.filter((l) => l.evt === 'dana.failed'), [{ level: 'error', evt: 'dana.failed', name: 'TypeError' }]);
   assertClean(h.logs);
+});
+
+/* ---------------- whole-branch review fixes (Claude + Codex) ---------------- */
+
+const asksHuman = () => ({ messages: [{ role: 'tool_call_invocation', tool_call_id: 't', name: 'request_human', arguments: '{}' }, { role: 'agent', content: 'One moment.' }] });
+const rawDanaRow = (h, sendId, status, created, leadId = LEAD) => h.s.db.prepare("INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, created, updated) VALUES (?,?,?,?,NULL,'dana',?,?,?)").run(sendId, leadId, CLIENT_JID, 't', status, created, created);
+
+test('a cap with no client message waiting is no hand-over: no flag, no alert, no line', async () => {
+  const h = harness();
+  for (let i = 0; i < PER_CHAT_PER_HOUR; i += 1) rawDanaRow(h, `D${i}`, 'accepted', NOW - 10_000 - i);
+  assert.equal(h.dana.eligible(LEAD).reason, 'cap_chat');
+  assert.deepEqual(await h.dana.answer(LEAD), { skipped: 'nothing' });
+  assert.deepEqual([h.lead().needs_human, h.notified.length, h.calls.length], [0, 0, 0]);
+  assert.ok(h.logs.some((l) => l.evt === 'dana.skipped' && l.reason === 'nothing'));
+  assert.ok(!h.logs.some((l) => l.evt === 'dana.handover'));
+  assertClean(h.logs);
+});
+
+test('a person active within 24 h (a message older than the batch, stored meanwhile) stops a hand-over', async () => {
+  let h;
+  h = harness({ answer: () => {
+    h.inbox.upsertMessage({ key_id: 'O8', lead_id: LEAD, jid: CLIENT_JID, direction: 'out', sender_kind: 'owner_number', text: 'typed earlier', ts: NOW - 5000 - 1000 });
+    h.inbox.noteHumanOutbound(LEAD, NOW - 5000 - 1000);
+    return asksHuman();
+  } });
+  h.client('C1', NOW - 5000, 'can I see it?');
+  assert.deepEqual(await h.dana.answer(LEAD, { ts: NOW - 5000 }), { skipped: 'human_recent' });
+  assert.deepEqual([h.lead().needs_human, h.notified.length, h.calls.length], [0, 0, 0]);
+  assert.ok(!h.logs.some((l) => l.evt === 'dana.handover'));
+  assertClean(h.logs);
+});
+
+test('the disclosure is decided from her sends, not only the flag: an uncertain send counts, a failed one does not', async () => {
+  const h = harness();
+  rawDanaRow(h, 'SND-crashed000001', 'uncertain', NOW - 60_000);
+  assert.equal(h.lead().dana_introduced, 0);
+  h.client('C1', NOW - 5000, 'hello');
+  assert.equal((await h.dana.answer(LEAD, { ts: NOW - 5000 })).answered, true);
+  assert.equal(h.calls[0].body.text, 'Of course. Which district do you prefer?', 'a send that may have gone introduced her');
+
+  const f = harness();
+  rawDanaRow(f, 'SND-failed0000001', 'failed', NOW - 60_000);
+  f.client('C1', NOW - 5000, 'hello');
+  assert.equal((await f.dana.answer(LEAD, { ts: NOW - 5000 })).answered, true);
+  assert.equal(f.calls[0].body.text, `${DISCLOSURE.en}\n\nOf course. Which district do you prefer?`, 'a failed send never went');
+});
+
+test('the Sending switch off: Dana is not eligible, Retell is not asked, and a hand-over does nothing', async () => {
+  const h = harness();
+  h.team.setSetting('sending_enabled', '0');
+  h.client('C1', NOW - 5000, 'hello');
+  assert.deepEqual(h.dana.eligible(LEAD, { ts: NOW - 5000 }), { ok: false, reason: 'sending_off' });
+  assert.deepEqual(await h.dana.answer(LEAD, { ts: NOW - 5000 }), { skipped: 'sending_off' });
+  assert.equal(h.retell.chats.length, 0);
+  assert.ok(!h.logs.some((l) => l.evt === 'dana.skipped'), 'a state, not logged');
+
+  let g;
+  g = harness({ answer: () => { g.team.setSetting('sending_enabled', '0'); return asksHuman(); } });
+  g.client('C1', NOW - 5000, 'hello');
+  assert.deepEqual(await g.dana.answer(LEAD, { ts: NOW - 5000 }), { skipped: 'sending_off' });
+  assert.deepEqual([g.lead().needs_human, g.notified.length, g.calls.length], [0, 0, 0]);
 });

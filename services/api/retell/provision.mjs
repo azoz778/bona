@@ -598,8 +598,10 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
     const created = await withModelFallback((m) => client.createLlm(waLlmBody(m, [knowledgeBaseId])), { preferred, fallback, log });
     waLlmId = created.result.llm_id;
     waModel = created.model;
-    // Recorded at once, so a failure at the chat agent below does not orphan this LLM.
-    writeIds({ ...kept, waLlmId }, idsFile);
+    // Recorded at once, so a failure at the chat agent below does not orphan this LLM. A
+    // plain run records the site ids made or re-found above too: `kept` still holds the ones
+    // read at the start, which may be stale by now.
+    writeIds(whatsappOnly ? { ...kept, waLlmId } : { ...kept, knowledgeBaseId, llmId, voiceAgentId, chatAgentId, model, waLlmId }, idsFile);
     log(`+ WhatsApp LLM "${WA_LLM_NAME}" created (${waLlmId}, model ${waModel})`);
   }
   const waAgentBody = whatsappChatAgentPayload({ llmId: waLlmId });
