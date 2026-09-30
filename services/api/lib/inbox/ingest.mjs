@@ -47,6 +47,8 @@
  *     chat nobody handles a handler (P2-15): the staff member who replied, or the owner for
  *     his own number. Only the first time — a refresh reads old records again, and must not
  *     undo a later "needs a human" or somebody's reassignment of the chat to nobody.
+ *     A human outbound seen for the first time also stamps `last_human_out_ts`, the clock
+ *     Dana's 24 h silence runs on (P4-5); only forward, so a history read never moves it back.
  *   - a lead learns its lid, phone jid and phone from a record it RECEIVED, into empty
  *     fields only, from a record of its own chat only, and never a number another lead
  *     holds as a phone or as a phone jid.
@@ -288,6 +290,7 @@ export function createIngest({
       }
 
       if (inserted && HUMAN_SENDERS.has(senderKind)) {
+        inbox.noteHumanOutbound(current.lead_id, ts);
         if (current.needs_human) inbox.setNeedsHuman(current.lead_id, 0);
         if (!current.handler_user_id) {
           const handler = senderKind === 'staff' ? senderUserId : ownerUserId();
