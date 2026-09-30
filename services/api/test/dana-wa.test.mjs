@@ -145,6 +145,10 @@ test('clip cuts a long answer at whitespace, never mid-word when it can help it'
   assert.match(out, /word\d+$/);
   assert.equal(clip('short', 100), 'short');
   assert.equal(clip('x'.repeat(200), 100).length, 100, 'one endless word is simply cut');
+  const emoji = clip('😀'.repeat(60), 101);
+  assert.ok(emoji.length <= 101);
+  assert.ok(emoji.isWellFormed(), 'a surrogate pair is never split');
+  assert.equal(emoji, '😀'.repeat(50));
 });
 
 test('answerFrom: markers and markdown gone, cards become links, request_human is seen', () => {
@@ -162,6 +166,13 @@ test('answerFrom: markers and markdown gone, cards become links, request_human i
   const hand = answerFrom({ messages: [{ role: 'tool_call_invocation', tool_call_id: 't2', name: 'request_human', arguments: '{"reason":"viewing"}' }, { role: 'agent', content: 'The team will reply shortly.' }] }, { inventory, siteUrl: SITE, language: 'en' });
   assert.equal(hand.handover, true);
   assert.deepEqual(answerFrom({ messages: [] }, { inventory, siteUrl: SITE, language: 'en' }), { text: '', handover: false, links: 0 });
+  const unreturned = answerFrom({ messages: [
+    { role: 'tool_call_invocation', tool_call_id: 't3', name: 'search_properties', arguments: JSON.stringify({ query: 'villa' }) },
+    { role: 'agent', content: 'We have a few villas.' },
+  ] }, { inventory, siteUrl: SITE, language: 'en' });
+  assert.deepEqual(unreturned, { text: 'We have a few villas.', handover: false, links: 0 }, 'no link to a home no tool returned');
+  const cardsOnly = answerFrom({ messages: completion.messages.slice(0, 2) }, { inventory, siteUrl: SITE, language: 'en' });
+  assert.deepEqual(cardsOnly, { text: '', handover: false, links: 0 }, 'links never go out alone');
   assert.deepEqual(answerFrom(null, { inventory, siteUrl: SITE, language: 'en' }), { text: '', handover: false, links: 0 });
 });
 
@@ -235,7 +246,7 @@ test('one answer: a Retell chat with the facts and context, the batch as one mes
   h.dana.wake(LEAD, NOW - 10_000);
   await h.dana.flush();
 
-  assert.equal(h.retell.chats.length, 1, 'three wakes, one run, one chat');
+  assert.equal(h.retell.chats.length, 1, 'two wakes, one run, one chat');
   const chat = h.retell.chats[0];
   assert.equal(chat.agent_id, 'agent_wa');
   assert.deepEqual(chat.metadata, { source: 'bona-whatsapp', lead_id: LEAD });
@@ -388,6 +399,13 @@ test('an answer with no words is a hand-over', async () => {
   const h = harness({ answer: () => ({ messages: [{ role: 'agent', content: '[[navigate:/tours/]]' }] }) });
   h.client('C1', NOW - 5000, 'hello');
   assert.deepEqual(await h.dana.answer(LEAD, { ts: NOW - 5000 }), { handover: 'empty', sent: true });
+  const cards = harness({ answer: () => ({ messages: [
+    { role: 'tool_call_invocation', tool_call_id: 't1', name: 'search_properties', arguments: JSON.stringify({ query: 'villa' }) },
+    { role: 'tool_call_result', tool_call_id: 't1', content: JSON.stringify(JSON.stringify({ count: 1, results: [{ id: FIRST.id, slug: FIRST.slug }] })) },
+  ] }) });
+  cards.client('C1', NOW - 5000, 'hello');
+  assert.deepEqual(await cards.dana.answer(LEAD, { ts: NOW - 5000 }), { handover: 'empty', sent: true }, 'cards with no words are no answer');
+  assert.equal(cards.calls[0].body.text, `${DISCLOSURE.en}\n\n${HANDOVER.en}`, 'the line only, no links');
 });
 
 test('pre-send: the chat is re-read and a human answer that landed meanwhile drops Dana\'s; a newer client message does not', async () => {
@@ -414,6 +432,78 @@ test('pre-send: the chat is re-read and a human answer that landed meanwhile dro
   const broken = harness({ backfill: { refresh: async () => { throw new Error('evo down'); } } });
   broken.client('C1', NOW - 5000, 'hello');
   assert.equal((await broken.dana.answer(LEAD, { ts: NOW - 5000 })).answered, true, 'a refresh that throws is not a reason to stay silent');
+});
+
+test('a hand-over runs the pre-send check: a person who answered, or a switch turned off, meanwhile means nothing happens', async () => {
+  const asks = { messages: [{ role: 'tool_call_invocation', tool_call_id: 't', name: 'request_human', arguments: '{}' }, { role: 'agent', content: 'One moment.' }] };
+  let h;
+  h = harness({ answer: () => { h.human('O9', h.now(), 'typed on the phone meanwhile'); return asks; } });
+  h.client('C1', NOW - 5000, 'can I see it?');
+  assert.deepEqual(await h.dana.answer(LEAD, { ts: NOW - 5000 }), { skipped: 'dropped_human' });
+  assert.deepEqual([h.calls.length, h.notified.length, h.lead().needs_human], [0, 0, 0]);
+  assert.ok(!h.logs.some((l) => l.evt === 'dana.handover'));
+
+  let off;
+  off = harness({ answer: () => { off.s.updateLead(LEAD, { dana_off: 1 }); throw new Error('boom'); } });
+  off.client('C1', NOW - 5000, 'hello');
+  assert.deepEqual(await off.dana.answer(LEAD, { ts: NOW - 5000 }), { skipped: 'chat_off' });
+  assert.deepEqual([off.calls.length, off.notified.length, off.lead().needs_human], [0, 0, 0]);
+
+  let global;
+  global = harness({ answer: () => { global.team.setSetting('dana_enabled', '0'); return asks; } });
+  global.client('C1', NOW - 5000, 'hello');
+  assert.deepEqual(await global.dana.answer(LEAD, { ts: NOW - 5000 }), { skipped: 'off' });
+  assert.deepEqual([global.calls.length, global.notified.length], [0, 0]);
+
+  let flagged;
+  flagged = harness({ answer: () => { flagged.s.updateLead(LEAD, { needs_human: 1 }); return asks; } });
+  flagged.client('C1', NOW - 5000, 'hello');
+  assert.deepEqual(await flagged.dana.answer(LEAD, { ts: NOW - 5000 }), { handover: 'request_human', sent: false }, 'flagged meanwhile: the line went already');
+  assert.equal(flagged.calls.length, 0);
+  assert.deepEqual(flagged.notified, [[LEAD, { reason: 'needs_human' }]]);
+  assertClean(h.logs.concat(off.logs, global.logs, flagged.logs));
+});
+
+test('a cap reached while Dana composes is a hand-over at the pre-send check, not a silent skip', async () => {
+  let h;
+  h = harness({ answer: () => {
+    for (let i = 0; i < PER_CHAT_PER_HOUR; i += 1) h.s.db.prepare("INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, created, updated) VALUES (?,?,?,?,NULL,'dana','accepted',?,?)").run(`D${i}`, LEAD, CLIENT_JID, 't', h.now() - 100, h.now() - 100);
+    return defaultAnswer();
+  } });
+  h.client('C1', NOW - 5000, 'hello');
+  assert.deepEqual(await h.dana.answer(LEAD, { ts: NOW - 5000 }), { handover: 'cap_chat', sent: true });
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0].body.text, `${DISCLOSURE.en}\n\n${HANDOVER.en}`);
+  assert.equal(h.lead().needs_human, 1);
+  assertClean(h.logs);
+});
+
+test('two answers for one chat at once: the second waits for the first and never answers the same batch', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const h = harness({ answer: async () => { await gate; return defaultAnswer(); } });
+  h.client('C1', NOW - 5000, 'hello');
+  const a = h.dana.answer(LEAD, { ts: NOW - 5000 });
+  const b = h.dana.answer(LEAD, { ts: NOW - 5000 });
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(h.dana.status().inflight, 1);
+  release();
+  const [ra, rb] = await Promise.all([a, b]);
+  assert.equal(ra.answered, true);
+  assert.deepEqual(rb, { skipped: 'nothing' });
+  assert.equal(h.calls.length, 1, 'one send');
+  assert.equal(h.retell.completions.length, 1);
+  assert.equal(h.dana.status().inflight, 0);
+});
+
+test('stop() is final: a wake after it arms nothing', async () => {
+  const h = harness();
+  await h.dana.stop();
+  h.client('C1', NOW - 5000, 'hello');
+  h.dana.wake(LEAD, NOW - 5000);
+  assert.equal(h.dana.status().pending, 0);
+  await h.dana.flush();
+  assert.equal(h.calls.length, 0);
 });
 
 test('a send that fails leaves the client flagged for the team; an uncertain one is not retried and counts as the introduction', async () => {
