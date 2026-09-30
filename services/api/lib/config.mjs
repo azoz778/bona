@@ -110,6 +110,12 @@ export function loadConfig({ env = loadEnv(), ids = readIds(), home = os.homedir
     // waits for the visitor's ads consent (PDPL). Set to 0 only with a different legal basis.
     fanoutRequireConsent: truthy(env.BONA_FANOUT_REQUIRE_CONSENT, true),
     dashCookieDays: Number(env.BONA_DASH_COOKIE_DAYS ?? 30),
+    // Phone alerts (Web Push, Phase 3): generated once on the VPS by bin/vapid-keys.mjs into
+    // ~/.secrets/bona-services.env. Missing → no alerts, everything else unchanged. The
+    // subject is the contact RFC 8292 asks for: the site's URL, so no address is published.
+    vapidPublic: String(env.BONA_VAPID_PUBLIC ?? '').trim(),
+    vapidPrivate: String(env.BONA_VAPID_PRIVATE ?? '').trim(),
+    vapidSubject: String(env.BONA_VAPID_SUBJECT ?? '').trim() || siteUrl,
     // Ad-platform server-side APIs (~/.secrets/bona-marketing.env). All optional: a
     // missing key means that destination is skipped, never an error.
     metaPixelId: env.META_PIXEL_ID ?? '',
@@ -146,6 +152,7 @@ export function redacted(cfg) {
     maxTurnsPerSession: cfg.maxTurnsPerSession,
     dbFile: cfg.dbFile, eventsRatePerMin: cfg.eventsRatePerMin, enquiryRatePerMin: cfg.enquiryRatePerMin,
     waPoll: cfg.waPoll, waPollMs: cfg.waPollMs, fanoutMs: cfg.fanoutMs, fanoutRequireConsent: cfg.fanoutRequireConsent, dashCookieDays: cfg.dashCookieDays,
+    hasVapid: Boolean(cfg.vapidPublic && cfg.vapidPrivate),
     // Pixel / measurement ids are printed on every page of the site; the tokens are not.
     metaPixelId: cfg.metaPixelId || null, ga4MeasurementId: cfg.ga4MeasurementId || null, snapPixelId: cfg.snapPixelId || null,
     hasTiktokAccountsAppId: Boolean(cfg.tiktokAccountsAppId), hasTiktokAccountsAppSecret: Boolean(cfg.tiktokAccountsAppSecret), hasTiktokAccountsAuthUrl: Boolean(cfg.tiktokAccountsAuthUrl),
