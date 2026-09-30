@@ -13,6 +13,10 @@ const JS = 'text/javascript; charset=utf-8';
 const FILES = [
   ['/dashboard/sw.js', 'sw.js', JS],
   ['/dashboard/app.js', 'app.js', JS],
+  // The manifest's `scope` is `/dashboard` with no trailing slash (a manifest cannot hold
+  // this comment): the overview lives at `/dashboard` itself and every login lands there,
+  // and a `/dashboard/` scope would open it out of scope — on an iPhone that is a second
+  // login in a browser sheet. `id` and `start_url` keep their own values.
   ['/dashboard/manifest.webmanifest', 'manifest.webmanifest', 'application/manifest+json; charset=utf-8'],
   ['/dashboard/icon-192.png', 'icon-192.png', 'image/png'],
   ['/dashboard/icon-512.png', 'icon-512.png', 'image/png'],

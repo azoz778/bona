@@ -3,7 +3,7 @@
   "short_name": "Bona",
   "id": "/dashboard/",
   "start_url": "/dashboard/inbox",
-  "scope": "/dashboard/",
+  "scope": "/dashboard",
   "display": "standalone",
   "background_color": "#0a0b0c",
   "theme_color": "#0a0b0c",
