@@ -353,7 +353,7 @@ cd ~/bona/services
 
 node api/retell/provision.mjs --dry-run   # prints every payload, calls nothing
 node api/retell/provision.mjs             # creates or updates, writes retell/ids.json
-node api/retell/provision.mjs --publish   # also publishes both agent versions
+node api/retell/provision.mjs --publish   # also publishes the three agents (voice, chat, WhatsApp chat)
 node api/retell/provision.mjs --rebuild-kb  # replace the knowledge base after a site move
 node api/retell/provision.mjs --ensure-env  # only create ~/.secrets/bona-services.env
 node api/retell/provision.mjs --whatsapp-only  # only Dana's WhatsApp LLM + chat agent
@@ -388,6 +388,10 @@ What it creates:
    `language: ["ar-SA","en-US"]`, responsiveness 1, interruption sensitivity 0.8,
    backchannel on, 30 s silence hang-up, 15 min cap, webhook → `/v1/retell/webhook`.
 4. **Chat agent "Bona Dana (chat)"** — the same LLM through `POST /create-chat-agent`.
+5. **Retell LLM "Bona Dana (WhatsApp)"** — Dana's WhatsApp LLM (`prompt-whatsapp.md`) on the
+   same knowledge base, with three tools: `search_properties`, `search_units`, `request_human`.
+6. **Chat agent "Bona Dana (WhatsApp)"** — her WhatsApp chat agent on that LLM: 24 h
+   session (`end_chat_after_silence_ms`), no webhook (bona-api keeps the transcript itself).
 
 **Why two agents.** Retell models chat agents as their own object: `/create-chat-agent`
 and `/update-chat-agent/{id}` are separate endpoints from `/create-agent`, an agent
@@ -402,7 +406,7 @@ changes.
 version 0) and `create-web-call` / `create-chat` accept it. `--publish` is there if a
 future account setting demands a published version.
 
-**`--whatsapp-only`** creates or updates only Dana's WhatsApp objects: the Retell LLM "Bona Dana (WhatsApp)" (`prompt-whatsapp.md`, the same knowledge base, three tools: `search_properties`, `search_units`, `request_human`) and the chat agent "Bona Dana (WhatsApp)". The site's objects and Lisa's are not touched. Ids go to `retell/ids.json` as `waLlmId`, `waChatAgentId` and `waModel`. `--rebuild-kb` is ignored with it.
+**`--whatsapp-only`** creates or updates only Dana's WhatsApp objects: the Retell LLM "Bona Dana (WhatsApp)" (`prompt-whatsapp.md`, the same knowledge base, three tools: `search_properties`, `search_units`, `request_human`) and the chat agent "Bona Dana (WhatsApp)". The site's objects and Lisa's are not touched. It needs a knowledge base id already in `ids.json`; without one it stops and says to run the full provisioning (no flag) first. Ids go to `retell/ids.json` as `waLlmId`, `waChatAgentId` and `waModel`. `--rebuild-kb` is ignored with it.
 
 After provisioning, restart the service so it picks up the new ids (the live one is on the VPS;
 `ids.json` reaches `/opt/bona` with the next `bona-repo-sync` pull, or run `deploy.sh`):
@@ -1088,8 +1092,8 @@ She is a separate Retell LLM and chat agent (`retell/provision.mjs --whatsapp-on
 
 What she does, in `lib/dana-wa.mjs`:
 
-- **When.** The poller stores a client message in an `in` chat and wakes her; a 2 s timer turns a burst into one run. She answers only if the chat is `in` and not a colleague's number, she is on (globally, or testing on this chat), she is not off for this chat, the chat is not flagged "Needs a human", no staff, owner or Lisa message went out in the last 24 h (`leads.last_human_out_ts`), the chat has a phone jid, the message is under 30 min old, and she has sent fewer than 6 messages to this chat in the hour and 200 in the day (counted from `wa_outbox`, kind `dana`).
-- **What she reads.** The client messages nobody has answered yet (newer than the chat's newest outbound), at most 10, sent to Retell as one message. There is one Retell chat per WhatsApp chat (`leads.dana_chat_id`), reused while under 23 h idle, else created anew with the client's language, the lead's facts (never the number) and the last 10 stored messages as context.
-- **What she sends.** Plain text: markdown and widget markers stripped, up to 3 listing links appended in the client's language, 1,500 characters at most. Her first message in a chat is prefixed in code with `Dana — Bona's AI assistant` / `دانة — مساعدة بونا الذكية`. Her outbox row is written before the send and carries `covers_ts`, the newest client message it answers; a client message that arrives while she composes is not counted as answered and gets the next run. Right before sending she re-reads the chat from WhatsApp and drops the answer if a person answered meanwhile. The message is stored as `sender_kind 'dana'` and never stamps `first_reply_ts` (the unanswered-leads watchdog means "no human answered"). A run that throws after the row is written leaves it `pending`; start-up or the daily upkeep turns it `uncertain`, the batch counts as answered and the chat is not flagged.
-- **Hand-over.** The model calling `request_human`, a Retell failure, an empty answer, a spent budget or cap, or a failed send sets `needs_human = 1`, sends a phone alert to everyone and sends one line ("a member of the Bona team will reply to you shortly"). She then stays silent in that chat until a person replies and 24 h pass. A hand-over runs the same pre-send check: if a person answered meanwhile, or a switch went off, there is no flag, no alert and no line.
+- **When:** The poller stores a client message in an `in` chat and wakes her; a 2 s timer turns a burst into one run. She answers only if the chat is `in` and not a colleague's number, she is on (globally, or testing on this chat), she is not off for this chat, the chat is not flagged "Needs a human", no staff, owner or Lisa message went out in the last 24 h (`leads.last_human_out_ts`), the chat has a phone jid, the message is under 30 min old, and she has sent fewer than 6 messages to this chat in the hour and 200 in the day (counted from `wa_outbox`, kind `dana`). The 30-minute freshness is checked when she wakes, not again right before sending.
+- **What she reads:** The client messages nobody has answered yet (newer than the newest human reply and than what her last answer covered, `covers_ts`), at most 10, sent to Retell as one message. There is one Retell chat per WhatsApp chat (`leads.dana_chat_id`), reused while under 23 h idle, else created anew with the client's language, the lead's facts (never the number) and the last 10 stored messages as context.
+- **What she sends:** Plain text: markdown and widget markers stripped, her words cut at 1,500 characters, then up to 3 listing links appended in the client's language and, on her first message in a chat, the disclosure line added in code in front: `Dana — Bona's AI assistant` / `دانة — مساعدة بونا الذكية`. Her outbox row is written before the send and carries `covers_ts`, the newest client message it answers; a client message that arrives while she composes is not counted as answered and gets the next run. Right before sending she re-reads the chat from WhatsApp and drops the answer if a person answered meanwhile. The message is stored as `sender_kind 'dana'` and never stamps `first_reply_ts` (the unanswered-leads watchdog means "no human answered"). A run that throws after the row is written leaves it `pending`; start-up or the daily upkeep turns it `uncertain`, the batch counts as answered and the chat is not flagged.
+- **Hand-over:** The model calling `request_human`, a Retell failure, an empty answer, or a spent budget or cap sets `needs_human = 1`, sends a phone alert to everyone and sends one line ("a member of the Bona team will reply to you shortly") — once: not when the chat is already flagged, and not when it has no phone jid to send to. Such a hand-over runs the same pre-send check first: if a person answered meanwhile, or a switch went off, there is no flag, no alert and no line. A **failed send** is different: it flags the chat and alerts everyone, but runs no pre-send check and sends no line (it cannot send). Either way she then stays silent in that chat until a person replies and 24 h pass.
 - **Logs:** `dana.answered`, `dana.session`, `dana.handover`, `dana.skipped`, `dana.retell_failed`, `dana.send_failed`, `dana.record_failed`, `dana.failed`, `dana.mock_off` and `tool.request_human` carry ids, counts and reasons only. Never message text, a name, a number or a Retell chat id.
