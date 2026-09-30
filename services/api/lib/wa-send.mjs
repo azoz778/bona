@@ -183,7 +183,7 @@ export function createSender({
   }
 
   /**
-   * @param {{ jid: string, text: string, kind: 'code'|'staff', userId?: string|null, bypassSwitch?: boolean,
+   * @param {{ jid: string, text: string, kind: 'code'|'staff'|'dana', userId?: string|null, bypassSwitch?: boolean,
    *           leadId?: string|null, sendId?: string|null }} o
    * @returns {Promise<{ ok: true, keyId: string, status?: number, sendId: string }
    *                 | { ok: false, error: string, uncertain?: true, sendId?: string }>}

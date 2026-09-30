@@ -1228,16 +1228,39 @@ test("kind 'dana' passes the gate like a staff reply: a text row with no user, t
   assert.deepEqual([row.sender_kind, row.user_id, row.lead_id, row.text, row.status, row.key_id], ['dana', null, 'LEAD-D', 'Dana here', 'accepted', 'KEY-1']);
   assert.deepEqual(h.calls[0].body, { number: CLIENT, text: 'Dana here' });
   assert.ok(h.logs.some((l) => l.evt === 'wa.send.ok' && l.kind === 'dana'));
+  for (let i = 1; i < PER_RECIPIENT_PER_MIN; i += 1) assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: `Dana ${i}`, kind: 'dana', leadId: 'LEAD-D' })).ok, true);
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'one too many', kind: 'dana', leadId: 'LEAD-D' }), { ok: false, error: 'rate_limited' },
+    'the per-recipient limit binds her like anyone');
   h.team.setSetting('sending_enabled', '0');
   assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'again', kind: 'dana', leadId: 'LEAD-D' }), { ok: false, error: 'sending_disabled' }, "the owner's Sending switch stops her too");
   assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'robot' }), { ok: false, error: 'bad_kind' }, 'still only the three kinds');
 });
 
 test('a dashboard reply stamps the human clock at the second it went', async () => {
-  const h = harness();
+  // The row is written at NOW + 700 and the round trip takes 300 ms: the stamp is the row's
+  // time floored to the second (NOW), not the time the answer came back (NOW + 1000).
+  let h;
+  h = harness({ reply: () => { h.tick(300); return { status: 201, body: { key: { id: 'KEY-1' } } }; } });
+  const staff = h.team.addUser({ name: 'Sara', phone: '0500000009', role: 'staff' });
+  h.s.insertLead({ lead_id: 'LEAD-R', created: NOW, updated: NOW, phone_e164: CLIENT, wa_jid: CLIENT_JID, channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
+  h.tick(700);
+  const out = await h.sender.reply({ sendId: SID, leadId: 'LEAD-R', userId: staff.user_id, text: 'hello', seenRev: h.inbox.revision('LEAD-R') });
+  assert.equal(out.ok, true);
+  assert.equal(h.inbox.getOutbox(SID).created, NOW + 700);
+  assert.equal(h.now(), NOW + 1000);
+  assert.equal(h.s.getLead('LEAD-R').last_human_out_ts, NOW);
+});
+
+test('a chat that leaves the inbox while the reply is on its way gets no human-clock stamp', async () => {
+  let h;
+  h = harness({ reply: () => {
+    h.s.db.prepare("UPDATE leads SET inbox_state = 'unsure' WHERE lead_id = 'LEAD-R'").run();
+    return { status: 201, body: { key: { id: 'KEY-1' } } };
+  } });
   const staff = h.team.addUser({ name: 'Sara', phone: '0500000009', role: 'staff' });
   h.s.insertLead({ lead_id: 'LEAD-R', created: NOW, updated: NOW, phone_e164: CLIENT, wa_jid: CLIENT_JID, channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
   const out = await h.sender.reply({ sendId: SID, leadId: 'LEAD-R', userId: staff.user_id, text: 'hello', seenRev: h.inbox.revision('LEAD-R') });
   assert.equal(out.ok, true);
-  assert.equal(h.s.getLead('LEAD-R').last_human_out_ts, Math.floor(h.inbox.getOutbox(SID).created / 1000) * 1000);
+  assert.equal(h.s.getLead('LEAD-R').inbox_state, 'unsure');
+  assert.equal(h.s.getLead('LEAD-R').last_human_out_ts, null);
 });

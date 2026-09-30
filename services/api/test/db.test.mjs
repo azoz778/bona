@@ -86,7 +86,7 @@ test('schema v4 gives leads their inbox columns and adds the transcript, outbox,
   assert.equal(chatRev.notnull, 1);
   assert.equal(chatRev.dflt_value, '0');
   assert.deepEqual(names('wa_messages'), ['key_id', 'lead_id', 'jid', 'direction', 'sender_kind', 'sender_user_id', 'text', 'media_type', 'ts', 'status']);
-  assert.deepEqual(names('wa_outbox'), ['send_id', 'lead_id', 'jid', 'text', 'user_id', 'sender_kind', 'status', 'key_id', 'created', 'updated', 'error']);
+  assert.deepEqual(names('wa_outbox'), ['send_id', 'lead_id', 'jid', 'text', 'user_id', 'sender_kind', 'status', 'key_id', 'created', 'updated', 'error', 'covers_ts']);
   assert.deepEqual(names('inbox_reads'), ['user_id', 'lead_id', 'last_read_ts']);
   assert.deepEqual(names('wa_gaps'), ['key_id', 'lead_id', 'jid', 'ts', 'reason']);
   assert.deepEqual(names('inbox_candidates'), ['cand_id', 'jid', 'lid', 'phone_e164', 'name', 'first_ts', 'last_ts', 'hits', 'words', 'last_dir', 'state', 'updated']);
@@ -612,6 +612,7 @@ test('v6: the Dana columns, and last_human_out_ts backfilled from the newest hum
     assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
     const cols = s.db.prepare('PRAGMA table_info(leads)').all().map((c) => c.name);
     for (const c of ['dana_off', 'dana_test', 'dana_chat_id', 'dana_chat_ts', 'dana_introduced', 'last_human_out_ts']) assert.ok(cols.includes(c), c);
+    assert.ok(s.db.prepare('PRAGMA table_info(wa_outbox)').all().some((c) => c.name === 'covers_ts'), "wa_outbox.covers_ts: what a Dana send answers");
     const l1 = s.getLead('L1');
     assert.equal(l1.last_human_out_ts, 5000, "the newest staff/owner message — never Dana's");
     assert.deepEqual([l1.dana_off, l1.dana_test, l1.dana_chat_id, l1.dana_chat_ts, l1.dana_introduced], [0, 0, null, null, 0]);
