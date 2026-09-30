@@ -8,9 +8,12 @@
  *
  * Three things are deliberate:
  *
- *   1. Every response carries `default-src 'none'` — the pages have no JavaScript at
- *      all, so the strictest possible policy is also a free one, and a lead named
- *      `<script>` has nowhere to run even if an escape were missed.
+ *   1. Every response carries `default-src 'none'`. An HTML page (P3-1) opens exactly
+ *      four things to itself and nothing else: our own `/dashboard/app.js`, our own
+ *      `/dashboard/sw.js`, fetches to this API and our own manifest. Nothing inline —
+ *      `script-src 'self'` has no `'unsafe-inline'` — so a lead named `<script>` still
+ *      has nowhere to run even if an escape were missed. JSON answers and redirects
+ *      keep the plain `default-src 'none'`.
  *   2. What actually stops a cross-site write is `SameSite=Lax` — the cookie does not
  *      ride a cross-site POST at all — backed by the `Origin`/`Referer` check below.
  *      On top of that every write carries a marker: `X-Bona-Dash: 1` on a JSON call, a
@@ -27,7 +30,7 @@
  * Phone numbers are masked everywhere a list is rendered and whole only on the one
  * page (and the one JSON route) that exists to show a single person's record.
  */
-import { STAGES } from '../db.mjs';
+import { STAGES, tokenHash } from '../db.mjs';
 import { createLimiter } from '../ratelimit.mjs';
 import { enqueueStage } from '../fanout.mjs';
 import { createStats, dayKey } from './stats.mjs';
@@ -36,6 +39,7 @@ import { createTiktokAccounts, AccountsError } from '../tiktok-accounts.mjs';
 import { tiktokAccountsPage, tiktokContinuePage, validateTiktokDraft } from './render-tiktok.mjs';
 import { teamPage } from './render-team.mjs';
 import { inboxPage, unsurePage, threadPage, INBOX_OK } from './render-inbox.mjs';
+import { ASSETS } from './assets.mjs';
 import { TeamError, isExcludedLead } from '../team.mjs';
 import { createOrMergeLead } from '../leads.mjs';
 import { normalisePhone } from '../phone.mjs';
@@ -51,7 +55,9 @@ import {
 /** Set on every dashboard and admin response, HTML or JSON, success or failure. */
 export const SECURITY_HEADERS = {
   'Cache-Control': 'no-store',
-  'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'",
+  // `base-uri` does not inherit from `default-src`: without it an injected `<base>` would
+  // redirect every root-relative link and form on the page.
+  'Content-Security-Policy': "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'",
   'X-Frame-Options': 'DENY',
   // `no-referrer` here is what broke the login: with no referrer at all Chrome sends
   // `Origin: null` on the login form's own same-origin POST, which is indistinguishable
@@ -61,6 +67,19 @@ export const SECURITY_HEADERS = {
   'Referrer-Policy': 'same-origin',
   'X-Content-Type-Options': 'nosniff',
 };
+
+/**
+ * The CSP of an HTML page (design §5, P3-1): as locked as before, plus our own script, our
+ * own service worker, fetches to ourselves (the pulse, the push subscription) and our own
+ * manifest. Still no inline script: a lead's name that slipped past an escape cannot run.
+ * JSON answers and redirects keep SECURITY_HEADERS' `default-src 'none'`.
+ * `'self'` trusts every same-origin GET, so every route that answers a body must keep
+ * `X-Content-Type-Options: nosniff`.
+ */
+export const PAGE_CSP = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
+export const PAGE_SECURITY_HEADERS = { ...SECURITY_HEADERS, 'Content-Security-Policy': PAGE_CSP };
+/** The service worker's own CSP: it loads nothing but the notification icon. */
+const WORKER_CSP = "default-src 'none'; img-src 'self'";
 
 export const MAX_NOTE = 2000;
 /**
@@ -169,12 +188,13 @@ export function readBody(req, maxBytes, { drainTo = 0 } = {}) {
  * @param {ReturnType<import('../inbox/store.mjs').createInboxStore>} [o.inbox]     the Bona inbox; without it the inbox pages are 404
  * @param {ReturnType<import('../wa-send.mjs').createSender>} [o.sender]             the one sender; its `reply` answers a chat
  * @param {ReturnType<import('../inbox/backfill.mjs').createBackfill>} [o.backfill]  per-chat Evolution reads: refresh, join history
+ * @param {ReturnType<import('../alerts.mjs').createAlerts>} [o.alerts]              phone alerts (design §5); without it push is off and the pulse still works
  */
 export function createDashboardRoutes({
   db, cfg = {}, inventory = null, fanout = null, app = null,
   sendWhatsApp = null, probeRetell = null,
   team = null, audit = null, sendCode = null,
-  inbox = null, sender = null, backfill = null,
+  inbox = null, sender = null, backfill = null, alerts = null,
   auth = null, stats = null, tiktokAccounts = null, log = () => {}, now = () => Date.now(),
 } = {}) {
   const statistics = stats ?? createStats({ db, now });
@@ -194,15 +214,28 @@ export function createDashboardRoutes({
 
   /* -------------------- responses -------------------- */
 
+  /** A page: the one kind of answer whose CSP opens our own script, worker, fetches and manifest (P3-1). */
   function sendHtml(res, status, html, extra = {}) {
     const body = Buffer.from(html, 'utf8');
     res.writeHead(status, {
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Length': body.length,
-      ...SECURITY_HEADERS,
+      ...PAGE_SECURITY_HEADERS,
       ...extra,
     });
     res.end(body);
+  }
+
+  /** One of the fixed app files (P3-2): public, GET/HEAD only, never cached. */
+  function sendAsset(req, res, asset, p) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method_not_allowed' }, { Allow: 'GET, HEAD' });
+    res.writeHead(200, {
+      'Content-Type': asset.type,
+      'Content-Length': asset.body.length,
+      ...SECURITY_HEADERS,
+      ...(p === '/dashboard/sw.js' ? { 'Content-Security-Policy': WORKER_CSP } : {}),
+    });
+    res.end(req.method === 'HEAD' ? undefined : asset.body);
   }
 
   function sendJson(res, status, payload, extra = {}) {
@@ -390,7 +423,12 @@ export function createDashboardRoutes({
     if (!parsed.ok) return refuseBody(req, res, parsed);
     if (!hasMarker(req, parsed.fields)) return toLogin(res, '?error=forbidden', 303);
     const token = sessionToken(req);
-    if (token) authenticator.logout(token, currentUser(req));
+    if (token) {
+      // This device's alerts end with its session (P3-5); the member's other devices keep
+      // theirs. The subscriptions are keyed by the session's hash, never the token itself.
+      alerts?.forgetSession(tokenHash(token));
+      authenticator.logout(token, currentUser(req));
+    }
     authenticator.clearCookie(res);
     authenticator.clearTryCookie(res);
     return toLogin(res, '', 303);
@@ -420,6 +458,7 @@ export function createDashboardRoutes({
       { label: 'Retell — API key', present: Boolean(cfg.retellApiKey) },
       { label: 'Retell — tool token', present: Boolean(cfg.toolToken) },
       { label: 'Evolution — owner WhatsApp', present: Boolean(env.EVOLUTION_API_URL && env.EVOLUTION_API_KEY), note: 'sends the login code and the lead notes' },
+      { label: 'Phone alerts — VAPID keys', present: Boolean(alerts?.configured), note: 'generated once on the VPS by bin/vapid-keys.mjs' },
     ];
   }
 
@@ -924,21 +963,29 @@ export function createDashboardRoutes({
   const openChat = (lead) => Boolean(lead && lead.inbox_state === 'in' && (lead.wa_jid || lead.wa_lid) && !excludedLead(lead));
 
   /**
-   * The signed-in person as a page draws them: their row plus `unread`, the Inbox badge.
-   * Summed over the very rows the inbox list shows, so the badge never counts a chat
-   * rule 1 hides (the store's `unreadTotal` knows nothing of the team or the never list).
-   * Unread chats sort first, so the list's cap only ever leaves out chats that add 0.
-   * Built without the inbox (older tests, tools), the row stays as it was. A count that
-   * fails is a missing badge, never a page that will not open.
+   * The push key rides on `me` (P3-13): the VAPID public key when push is configured,
+   * nothing otherwise. `layout` prints it as a meta tag for app.js; the inbox list draws
+   * its Phone alerts panel only when it is there. Public by design — it is what every
+   * browser hands the push service — so it is no secret on a page.
+   */
+  const withKey = (u) => (alerts?.configured ? { ...u, pushKey: alerts.publicKey } : u);
+
+  /**
+   * The signed-in person as a page draws them: their row plus `unread`, the Inbox badge,
+   * and `pushKey`. The badge is summed over the very rows the inbox list shows, so it never
+   * counts a chat rule 1 hides (the store's `unreadTotal` knows nothing of the team or the
+   * never list). Unread chats sort first, so the list's cap only ever leaves out chats that
+   * add 0. Built without the inbox (older tests, tools), the row stays as it was. A count
+   * that fails is a missing badge, never a page that will not open.
    */
   function withUnread(user) {
-    if (!inbox) return user;
+    if (!inbox) return withKey(user);
     try {
       const rows = inbox.listInbox({ userId: user.user_id, userCreated: user.created ?? 0, limit: 1000 }).filter((l) => !excludedLead(l));
-      return { ...user, unread: rows.reduce((n, r) => n + (Number(r.unread) || 0), 0) };
+      return withKey({ ...user, unread: rows.reduce((n, r) => n + (Number(r.unread) || 0), 0) });
     } catch (err) {
       log({ level: 'warn', evt: 'dash.unread_failed', error: String(err?.message ?? err).slice(0, 200) });
-      return { ...user, unread: 0 };
+      return withKey({ ...user, unread: 0 });
     }
   }
 
@@ -1023,6 +1070,8 @@ export function createDashboardRoutes({
       ok: inboxOk(ok),
       error: knownError(error),
       now: now(),
+      // The same revision the reply form's stale guard carries: what the pulse compares (P3-12).
+      pulseToken: String(seenRev),
     }));
   }
 
@@ -1046,6 +1095,38 @@ export function createDashboardRoutes({
    */
   const candidatesShown = () => inbox.listCandidates({ limit: CANDIDATES_SHOWN }).filter((c) => !excludedCandidate(c));
 
+  /** The Inbox list's rows for one person, in the list's own order, with rule 1 applied. */
+  const inboxRowsFor = (me) => inbox.listInbox({ userId: me.user_id, userCreated: me.created ?? 0 }).filter((l) => !excludedLead(l));
+  /** What the Inbox list is drawn from (P3-12): a change in any of it redraws the list. */
+  const listToken = (rows) => `${rows.length}:${rows.reduce((n, r) => n + (Number(r.unread) || 0), 0)}:${rows.reduce((m, r) => Math.max(m, Number(r.last_msg_ts) || 0), 0)}`;
+
+  /**
+   * `GET /v1/admin/inbox/pulse[?lead=]`: what app.js compares with the page it has (P3-12).
+   * The list's token is over exactly the rows the page draws; a thread's is its revision,
+   * the number the reply form's stale guard uses. A chat the member may not read is 404
+   * here as everywhere (rule 1): the pulse must not say whether a hidden chat moved.
+   */
+  function inboxPulse({ res, url, me }) {
+    if (!inbox) return sendJson(res, 404, { error: 'not_found' });
+    const leadId = url.searchParams.get('lead');
+    if (leadId === null) return sendJson(res, 200, { token: listToken(inboxRowsFor(me)) });
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(leadId) || !openChat(db.getLead(leadId))) return sendJson(res, 404, { error: 'not_in_inbox' });
+    return sendJson(res, 200, { token: String(inbox.revision(leadId)) });
+  }
+
+  /**
+   * `GET /dashboard/push/open`: where a tapped alert lands (P3-4). The first row with
+   * unread messages of the member's own list (unread first, newest first, rule 1 applied);
+   * with nothing unread — a colleague read it first, or the tap came late — the newest
+   * chat, which is the list's first row; with no chat at all, the list. The notification
+   * carries nothing, so the chat is chosen here, signed in.
+   */
+  function pushOpen({ res, me }) {
+    const rows = inbox ? inboxRowsFor(me) : [];
+    const first = rows.find((r) => (Number(r.unread) || 0) > 0) ?? rows[0] ?? null;
+    return redirect(res, first ? `/dashboard/inbox/${encodeURIComponent(first.lead_id)}` : '/dashboard/inbox', 302);
+  }
+
   function inboxList({ res, url, me }) {
     if (!inbox) return noSuchPage(res, me);
     const ok = inboxOk(url.searchParams.get('ok'));
@@ -1057,15 +1138,17 @@ export function createDashboardRoutes({
         me, rows: inbox.listUnsure().filter((l) => !excludedLead(l)), candidates: candidatesShown(), ok, error, now: now(),
       }));
     }
+    const rows = inboxRowsFor(me);
     return sendHtml(res, 200, inboxPage({
       me,
-      rows: inbox.listInbox({ userId: me.user_id, userCreated: me.created ?? 0 }).filter((l) => !excludedLead(l)),
+      rows,
       // Counted from the rows the Unsure tab shows (the guesses and the chats to check),
       // never the store's raw counts. Staff get none: the tab is not theirs.
       unsureCount: owner ? inbox.listUnsure({ limit: 1000 }).filter((l) => !excludedLead(l)).length + candidatesShown().length : 0,
       ok,
       error,
       now: now(),
+      pulseToken: listToken(rows),
     }));
   }
 
@@ -1266,6 +1349,31 @@ export function createDashboardRoutes({
     return answer(res, { form, back: `${unsure}&ok=dismissed`, status: 200, payload: { ok: true } });
   }
 
+  /* -------------------- phone alerts -------------------- */
+
+  /**
+   * A member's own device, alerts on or off (P3-5, P3-6). Meant for JSON (a form body cannot
+   * carry the nested keys and is refused as `bad_keys`); the row is bound to the session
+   * making the call, so logging out here ends alerts here. The session is named by its hash
+   * — what `auth_sessions` holds — never by the cookie's token. The endpoint and the keys are
+   * validated in lib/alerts.mjs (only the real push services, a real P-256 point) and never
+   * logged: the endpoint is a bearer capability. app.js re-posts a device on every page load
+   * (P3-11), so only a device seen for the first time, or one that has changed hands (a
+   * shared phone signed in as someone else), makes a log line.
+   */
+  function pushWrite({ req, res, fields, me }, p) {
+    if (p === '/v1/admin/push/unsubscribe') {
+      const removed = alerts ? alerts.unsubscribe({ userId: me.user_id, endpoint: fields.endpoint }) : false;
+      if (removed) log({ evt: 'push.unsubscribed', userId: me.user_id });
+      return sendJson(res, 200, { ok: true, removed });
+    }
+    if (!alerts?.configured) return sendJson(res, 503, { error: 'push_off' });
+    const out = alerts.subscribe({ userId: me.user_id, sessionHash: tokenHash(sessionToken(req)), endpoint: fields.endpoint, keys: fields.keys });
+    if (!out.ok) return sendJson(res, 400, { error: out.error });
+    if (out.created || out.moved) log({ evt: 'push.subscribed', userId: me.user_id, moved: out.moved });
+    return sendJson(res, 200, { ok: true });
+  }
+
   /* -------------------- dispatch -------------------- */
 
   const LEAD_PATH = /^\/dashboard\/leads\/([A-Za-z0-9_-]{1,64})$/;
@@ -1278,10 +1386,16 @@ export function createDashboardRoutes({
   /** The owner's decisions on a real-estate chat to check (D17): his alone. */
   const ADMIN_CANDIDATE = /^\/v1\/admin\/inbox\/candidates\/([A-Za-z0-9_-]{1,64})\/(move|dismiss)$/;
   const OWNER_WRITES = new Set(['/v1/admin/team', '/v1/admin/never', '/v1/admin/never/remove', '/v1/admin/settings', '/v1/admin/inbox/add']);
+  /** A member's own device's alerts (P3-5): anyone on the team, their own subscriptions only. */
+  const PUSH_WRITES = new Set(['/v1/admin/push/subscribe', '/v1/admin/push/unsubscribe']);
 
   const owns = ownsDashboardPath;
 
   async function handleHtml({ req, res, url, p, ip }) {
+    /* --- the app's fixed files: public, whoever asks (P3-2) --- */
+    // `p` has its trailing slash stripped by index.mjs; `/dashboard/sw.js/` is not a file.
+    const asset = ASSETS.get(p);
+    if (asset && !url.pathname.endsWith('/')) return sendAsset(req, res, asset, p);
     if (p === '/dashboard/tiktok/callback') return tiktokCallback({ req, res, url });
     /* --- login, the only pages reachable signed out --- */
     if (p === '/dashboard/login') {
@@ -1314,6 +1428,8 @@ export function createDashboardRoutes({
     // Every other signed-in page carries the person's unread count for the Inbox badge.
     const me = withUnread(user);
 
+    // A tapped alert (P3-4): a redirect, so the notification itself carries nothing.
+    if (p === '/dashboard/push/open') return pushOpen({ res, me });
     if (p === '/dashboard') return overview({ res, url, me });
     if (p === '/dashboard/leads') return leads({ res, url, me });
     const leadMatch = LEAD_PATH.exec(p);
@@ -1347,6 +1463,7 @@ export function createDashboardRoutes({
       if (p === '/v1/admin/stats') return adminStats({ res, url });
       if (p === '/v1/admin/leads') return adminLeads({ res, url, me: viewer });
       if (p === '/v1/admin/listings') return adminListings({ res });
+      if (p === '/v1/admin/inbox/pulse') return inboxPulse({ res, url, me: viewer });
       if (leadMatch && !leadMatch[2]) return adminLead({ res, me: viewer }, leadMatch[1]);
       return sendJson(res, 404, { error: 'not_found' });
     }
@@ -1364,7 +1481,8 @@ export function createDashboardRoutes({
     const candMatch = ADMIN_CANDIDATE.exec(p);
     const ownerWrite = Boolean(teamMatch || tiktokMatch || candMatch || OWNER_WRITES.has(p) || (inboxMatch && OWNER_INBOX_WRITES.has(inboxMatch[2])));
     const writes = (leadMatch && leadMatch[2]) || (p === '/v1/admin/spend' ? 'spend' : null)
-      || ((inboxMatch || candMatch || p === '/v1/admin/inbox/add') ? 'inbox' : null) || (ownerWrite ? 'team' : null);
+      || ((inboxMatch || candMatch || p === '/v1/admin/inbox/add') ? 'inbox' : null) || (PUSH_WRITES.has(p) ? 'push' : null)
+      || (ownerWrite ? 'team' : null);
     if (!writes) return sendJson(res, 404, { error: 'not_found' });
 
     const replyWrite = Boolean(inboxMatch && inboxMatch[2] === 'reply');
@@ -1395,6 +1513,7 @@ export function createDashboardRoutes({
 
     const ctx = { res, fields: parsed.fields, form: parsed.form, me };
     if (tiktokMatch) return tiktokWrite({ ...ctx, req, me: withUnread(me) }, tiktokMatch[1]);
+    if (writes === 'push') return pushWrite({ ...ctx, req }, p);
     if (writes === 'inbox') {
       // index.mjs always wires the inbox; routes built without it (older tests, tools) have none.
       if (!inbox) return sendJson(res, 404, { error: 'not_found' });

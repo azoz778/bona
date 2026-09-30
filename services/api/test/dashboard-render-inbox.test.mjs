@@ -12,6 +12,9 @@ import { inboxPage, unsurePage, threadPage, INBOX_OK } from '../lib/dashboard/re
 const NOW = 1_790_500_000_000;
 const HOUR = 3_600_000;
 const EVIL = '<img src=x onerror=alert(1)>';
+const OWN_SCRIPT = '<script src="/dashboard/app.js" defer></script>';
+/** The one script a signed-in page may carry is our own app.js; nothing else, nothing inline. */
+const onlyOurScript = (html) => !/<script/i.test(html.split(OWN_SCRIPT).join(''));
 
 const OWNER = { user_id: 'USR-o', name: 'Abdulaziz Zidan', role: 'owner', phone_e164: '966593296933', active: 1, created: 1 };
 const STAFF = { user_id: 'USR-s', name: 'Sara', role: 'staff', phone_e164: '966500000001', active: 1, created: 1 };
@@ -83,7 +86,7 @@ test('the chat list: escaped names in bdi, masked numbers, last message, time, s
     ],
   });
   assert.ok(!html.includes('<img'), 'a name is text, never markup');
-  assert.ok(!html.includes('<script'), 'a message is text, never markup');
+  assert.ok(onlyOurScript(html), 'a message is text, never markup: no script but our own app.js');
   assert.match(html, /<bdi>&lt;img src=x onerror=alert\(1\)&gt;<\/bdi>/);
   assert.match(html, /…5678/);
   assert.match(html, /…5432/);
@@ -105,7 +108,7 @@ test('the chat list: escaped names in bdi, masked numbers, last message, time, s
   assert.match(html, /href="\/dashboard\/inbox\/LEAD-20260928-aaaa0001"/);
   assert.match(html, /href="\/dashboard\/inbox\/LEAD-20260928-aaaa0002"/);
   assert.match(html, /3 chats, 1 with new messages/);
-  assert.ok(!/<script/i.test(html));
+  assert.ok(onlyOurScript(html), 'no script but our own app.js');
 });
 
 test('only the owner sees the Unsure tab, its count and "Add chat by phone number"', () => {
@@ -240,7 +243,7 @@ test('the reply form carries send_id, seen_rev, seen_ts and the kept draft, and 
   assert.match(html, /<input type="hidden" name="seen_rev" value="42">/, 'the revision the stale-view guard compares');
   assert.match(html, new RegExp(`<input type="hidden" name="seen_ts" value="${NOW - HOUR}">`));
   assert.match(html, /<textarea id="r-text" name="text" maxlength="4096" dir="auto" required>my text &lt;\/textarea&gt;&lt;script&gt;x&lt;\/script&gt;<\/textarea>/);
-  assert.ok(!/<script/i.test(html));
+  assert.ok(onlyOurScript(html), 'no script but our own app.js');
   assert.match(html, /<div class="err">New activity since you opened this chat/);
   assert.match(html, /it goes from your WhatsApp/);
   assert.match(thread({ me: STAFF }), /it goes from the owner&#39;s WhatsApp/);
@@ -499,4 +502,34 @@ test('a thread that leaves earlier messages out leaves out the gaps and unconfir
   const whole = thread(window);
   assert.equal(gapCount(whole), 2, 'with nothing left out, a gap before the first message is the chat\'s own start');
   assert.match(whole, /an old failed reply/);
+});
+
+/* ---------------- phone alerts and the pulse (Phase 3) ---------------- */
+
+test('the inbox list draws the Phone alerts panel, hidden until app.js shows it, only when push is configured', () => {
+  const me = { user_id: 'U1', name: 'Sara', role: 'staff', pushKey: 'BKEY' };
+  const html = inboxPage({ me, rows: [], pulseToken: '0:0:0' });
+  assert.match(html, /<section class="card cp alerts" data-alerts hidden>/);
+  assert.match(html, /<button type="button" data-alerts-on hidden>Turn on alerts<\/button>/);
+  assert.match(html, /<button type="button" data-alerts-off hidden>Turn off alerts on this device<\/button>/);
+  assert.match(html, /<p class="sub" data-alerts-text><\/p>/);
+  assert.doesNotMatch(inboxPage({ me: { ...me, pushKey: '' }, rows: [] }), /data-alerts/);
+  assert.doesNotMatch(html, /onclick|onload|javascript:/i, 'no inline handlers: the CSP would block them');
+  // Above the list: a new member finds "Turn on alerts" without scrolling past the chats.
+  const listed = inboxPage({ me, rows: [row({ unread: 1 })], pulseToken: '1:1:5', now: NOW });
+  assert.ok(listed.indexOf('data-alerts') < listed.indexOf('data-pulse='), 'the panel comes before the list');
+});
+
+test('the list and the thread carry their pulse, each with a hidden "new activity" note', () => {
+  const me = { user_id: 'U1', name: 'Sara', role: 'staff' };
+  const list = inboxPage({ me, rows: [], pulseToken: '3:1:17"x' });
+  assert.match(list, /<div data-pulse="\/v1\/admin\/inbox\/pulse" data-pulse-token="3:1:17&quot;x">/);
+  // The list's note (shown over a half-typed "Add chat" number) links to the list's own GET.
+  assert.match(list, /<p class="flash" data-pulse-note hidden>New messages — <a href="\/dashboard\/inbox">reload<\/a> to see them\.<\/p>/);
+  const html = thread({ pulseToken: '42', messages: [msg()] }); // the file's `thread(over)` helper, with threadPage's usual fields
+  assert.match(html, /data-pulse="\/v1\/admin\/inbox\/pulse\?lead=[A-Za-z0-9_-]+" data-pulse-token="42"/);
+  assert.match(html, /<p class="flash" data-pulse-note hidden>New activity in this chat — <a href="[^"]+">reload<\/a> to see it\.<\/p>/);
+  // Right above the reply box, after the messages: where the person typing is looking.
+  const note = html.indexOf('data-pulse-note');
+  assert.ok(html.indexOf('class="thread"') < note && note < html.indexOf('<form class="reply"'), 'the note sits between the messages and the reply box');
 });

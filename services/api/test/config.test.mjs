@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { loadConfig, siteDefaults, SITE_FILE } from '../lib/config.mjs';
+import { loadConfig, redacted, siteDefaults, SITE_FILE } from '../lib/config.mjs';
 import { DEFAULT_ORIGINS } from '../lib/cors.mjs';
 
 /** A throwaway site.json with whatever shape the test needs. */
@@ -60,4 +60,18 @@ test('the WhatsApp poller reads every 20 s by default, and the environment still
   // to see a client's message. The VPS env file pins its own value, which still wins.
   assert.equal(loadConfig({ env: {}, ids: {} }).waPollMs, 20_000);
   assert.equal(loadConfig({ env: { BONA_WA_POLL_MS: '45000' }, ids: {} }).waPollMs, 45_000);
+});
+
+test('VAPID keys come from the env; the subject defaults to the site; redacted() says only whether keys exist', () => {
+  const cfg = loadConfig({ env: { BONA_VAPID_PUBLIC: ' PUB ', BONA_VAPID_PRIVATE: 'PRIV' }, ids: {} });
+  assert.equal(cfg.vapidPublic, 'PUB');
+  assert.equal(cfg.vapidPrivate, 'PRIV');
+  assert.equal(cfg.vapidSubject, cfg.siteUrl);
+  assert.equal(loadConfig({ env: { BONA_VAPID_SUBJECT: 'mailto:ops@example.com' }, ids: {} }).vapidSubject, 'mailto:ops@example.com');
+  const r = redacted(cfg);
+  assert.equal(r.hasVapid, true);
+  assert.doesNotMatch(JSON.stringify(r), /PUB|PRIV/);
+  assert.equal(redacted(loadConfig({ env: {}, ids: {} })).hasVapid, false);
+  assert.doesNotMatch(JSON.stringify(redacted(loadConfig({ env: { BONA_VAPID_PUBLIC: 'P', BONA_VAPID_PRIVATE: 'K', BONA_VAPID_SUBJECT: 'mailto:ops@example.com' }, ids: {} }))), /ops@example/);
+  assert.equal(redacted(loadConfig({ env: { BONA_VAPID_PUBLIC: 'P' }, ids: {} })).hasVapid, false);
 });
