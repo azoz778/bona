@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { openDb, newId, STAGES, FANOUT_DESTS, SCHEMA_VERSION, migrate } from '../lib/db.mjs';
+import { openDb, newId, STAGES, FANOUT_DESTS, SCHEMA_VERSION, migrate, tokenHash } from '../lib/db.mjs';
 
 function tmp() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-db-'));
@@ -71,8 +71,8 @@ test('a v2-era file db upgrades to the current schema, an existing session survi
 
 test('schema v4 gives leads their inbox columns and adds the transcript, outbox, read-mark, gap and candidate tables', () => {
   const s = openDb(':memory:');
-  assert.equal(SCHEMA_VERSION, 4);
-  assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 4);
+  assert.ok(SCHEMA_VERSION >= 4);
+  assert.ok(s.db.prepare('PRAGMA user_version').get().user_version >= 4);
   const info = (table) => s.db.prepare(`PRAGMA table_info(${table})`).all();
   const names = (table) => info(table).map((c) => c.name);
   const leadCols = info('leads');
@@ -539,5 +539,53 @@ test('ad spend upserts per day, platform and campaign', () => {
   assert.equal(all.find((r) => r.platform === 'meta').spend_sar, 120, 'the later entry replaces the earlier one');
   assert.deepEqual(s.listSpend({ fromDay: '2026-09-02' }).map((r) => r.platform), ['snap']);
   assert.deepEqual(s.listSpend({ platform: 'meta' }).map((r) => r.day), ['2026-09-01']);
+  s.close();
+});
+
+test('schema v5: push_subscriptions, one row per endpoint, bound to a member and a session', () => {
+  const s = openDb(':memory:');
+  assert.equal(SCHEMA_VERSION, 5);
+  assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 5);
+  const cols = s.db.prepare('PRAGMA table_info(push_subscriptions)').all().map((c) => c.name);
+  assert.deepEqual(cols, ['id', 'user_id', 'endpoint', 'p256dh', 'auth', 'session_hash', 'created', 'updated', 'last_ok', 'fail_count']);
+  const ins = s.db.prepare('INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, session_hash, created, updated) VALUES (?,?,?,?,?,?,?,?)');
+  ins.run('P1', 'U1', 'https://fcm.googleapis.com/fcm/send/a', 'k', 'a', 'h', 1, 1);
+  assert.throws(() => ins.run('P2', 'U2', 'https://fcm.googleapis.com/fcm/send/a', 'k', 'a', 'h', 1, 1), /UNIQUE/);
+  assert.throws(() => ins.run(null, 'U2', 'https://fcm.googleapis.com/fcm/send/b', 'k', 'a', 'h', 1, 1), /NOT NULL/);
+  assert.equal(s.db.prepare('SELECT fail_count FROM push_subscriptions WHERE id = ?').get('P1').fail_count, 0);
+  const idx = s.db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'push_subscriptions' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name);
+  assert.deepEqual(idx, ['push_subscriptions_session', 'push_subscriptions_user']);
+  s.close();
+});
+
+test('a v4 file upgrades to v5 with every lead, session, message and setting kept', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-v5-'));
+  const file = path.join(dir, 'bona.db');
+  const raw = new DatabaseSync(file);
+  migrate(raw, { upTo: 4 });
+  assert.equal(raw.prepare('PRAGMA user_version').get().user_version, 4);
+  raw.prepare("INSERT INTO leads (lead_id, created, updated, phone_e164, channel, stage, inbox_state, chat_rev) VALUES ('L1', 1, 1, '966500000001', 'whatsapp', 'new', 'in', 3)").run();
+  raw.prepare("INSERT INTO auth_sessions (token_hash, created, expires, ua, user_id) VALUES ('h1', 1, 9e15, 'ua', 'U1')").run();
+  raw.prepare("INSERT INTO wa_messages (key_id, lead_id, jid, direction, sender_kind, text, ts) VALUES ('K1', 'L1', 'j', 'in', 'client', 'hi', 1)").run();
+  raw.prepare("INSERT INTO settings (key, value) VALUES ('inbox_replies', '1')").run();
+  raw.close();
+  const s = openDb(file);
+  assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 5);
+  assert.equal(s.db.prepare('SELECT chat_rev FROM leads WHERE lead_id = ?').get('L1').chat_rev, 3);
+  assert.equal(s.db.prepare('SELECT COUNT(*) n FROM auth_sessions').get().n, 1);
+  assert.equal(s.db.prepare('SELECT COUNT(*) n FROM wa_messages').get().n, 1);
+  assert.equal(s.db.prepare("SELECT value FROM settings WHERE key = 'inbox_replies'").get().value, '1');
+  assert.equal(s.db.prepare('SELECT COUNT(*) n FROM push_subscriptions').get().n, 0);
+  s.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('tokenHash is the hash auth_sessions keeps for a session token', () => {
+  const s = openDb(':memory:');
+  const token = 'ab'.repeat(16);
+  s.createAuthSession(token, { userId: 'U1' });
+  assert.ok(s.db.prepare('SELECT 1 FROM auth_sessions WHERE token_hash = ?').get(tokenHash(token)));
+  assert.match(tokenHash(token), /^[0-9a-f]{64}$/);
+  assert.equal(tokenHash(null), tokenHash(''), 'nothing hashes like the empty string, never throws');
   s.close();
 });
