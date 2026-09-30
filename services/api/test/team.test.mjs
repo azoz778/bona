@@ -408,3 +408,21 @@ test('isExcludedLead reads a jid the way ingest does, and only the identifiers i
   assert.equal(isExcludedLead(team, s, s.getLead('LEAD-1')), true);
   s.close();
 });
+
+test('deactivating a member deletes their push subscriptions in the same transaction as their sessions (§3.4)', () => {
+  const s = openDb(':memory:');
+  const team = createTeam(s);
+  team.ensureOwner({ phone: '966593296933' });
+  const sara = team.addUser({ name: 'Sara', phone: '966500000001' });
+  const omar = team.addUser({ name: 'Omar', phone: '966500000002' });
+  const ins = s.db.prepare('INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, session_hash, created, updated) VALUES (?,?,?,?,?,?,1,1)');
+  ins.run('P1', sara.user_id, 'https://fcm.googleapis.com/fcm/send/1', 'k', 'a', 'h1');
+  ins.run('P2', sara.user_id, 'https://web.push.apple.com/2', 'k', 'a', 'h2');
+  ins.run('P3', omar.user_id, 'https://fcm.googleapis.com/fcm/send/3', 'k', 'a', 'h3');
+  team.deactivateUser(sara.user_id);
+  const left = s.db.prepare('SELECT id FROM push_subscriptions ORDER BY id').all().map((r) => r.id);
+  assert.deepEqual(left, ['P3']);
+  team.reactivateUser(sara.user_id);
+  assert.deepEqual(s.db.prepare('SELECT id FROM push_subscriptions ORDER BY id').all().map((r) => r.id), ['P3'], 'reactivating brings no device back');
+  s.close();
+});

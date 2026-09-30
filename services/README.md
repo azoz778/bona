@@ -681,20 +681,35 @@ checks each one and updates the site's Integrations board.
 ### Dashboard
 
 `https://api.bona-real-estate.com/dashboard` — the owner's private view of everything above,
-server-rendered by this same process. No CDN, no framework and **no JavaScript at all**:
-every page is HTML with one embedded stylesheet, every chart is inline SVG, every filter
-is a GET and every write is a form post. That is what lets the response headers be as
-tight as they are, on every dashboard and admin answer, HTML or JSON:
+server-rendered by this same process. No CDN, no framework: every page is HTML with one
+embedded stylesheet, every chart is inline SVG, every filter is a GET and every write is a
+form post. The one script a signed-in page carries is our own `/dashboard/app.js` (phone
+alerts and the live refresh, *Phone alerts* below) — nothing inline, no event-handler
+attributes, and every screen works without it. That is what lets the response headers be
+as tight as they are, on every dashboard and admin answer. Three sets, exactly as the code
+sends them:
 
 ```
+# every answer (the TikTok callback answers Referrer-Policy: no-referrer)
 Cache-Control: no-store
-Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'
 X-Frame-Options: DENY
-Referrer-Policy: no-referrer
+Referrer-Policy: same-origin
 X-Content-Type-Options: nosniff
+
+# an HTML page: our own script, worker, fetches and manifest, and nothing else
+Content-Security-Policy: default-src 'none'; base-uri 'none'; frame-ancestors 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'
+
+# JSON answers and redirects
+Content-Security-Policy: default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'
+
+# /dashboard/sw.js (the service worker loads nothing but the notification icon)
+Content-Security-Policy: default-src 'none'; img-src 'self'
 ```
 
-Nothing here is CORS-enabled, so no other origin can read a byte of it.
+`Referrer-Policy: same-origin`, not `no-referrer`: under `no-referrer` Chrome sends
+`Origin: null` on the login form's own same-origin POST, which the origin check rightly
+refuses (the TikTok callback answers `no-referrer`: its URL carries a code). Nothing here
+is CORS-enabled, so no other origin can read a byte of it.
 
 **Login (team accounts, since 2026-09).** `GET /dashboard/login` asks for a WhatsApp number.
 `POST /dashboard/login/code` — if the number belongs to an active member of the team
@@ -1050,3 +1065,13 @@ history comes back empty stays empty and is asked again on the next run. The upk
 prunes the real-estate chats to check: an open one 30 days after its last property message, a
 dismissed one a year after it was dismissed (`candidatesExpired`, `dismissalsExpired` in the
 `inbox.maintenance` line).
+
+#### Phone alerts (Phase 3)
+
+- **What a member sees:** "New Bona message" on their phone within about a minute of a client writing in a Bona inbox chat (the poll interval). Tapping it opens their newest unread chat, else their newest inbox chat — in the dashboard tab already open when it has nothing half-typed; when it has (a reply, a number in *Add chat*), that tab is only brought to the front and shows a "new activity" note with the chat's link, and nothing typed is touched. The notification never says who wrote or what: the push carries no data, so no client text, name or number passes through Google, Apple or Mozilla.
+- **Who is alerted:** the chat's handler; nobody handling it → everyone active; a chat that needs a human → everyone. Never the member whose own action caused it. At most one alert per chat per member every 2 minutes. A message more than 30 minutes old (the poller catching up after an outage) waits as unread instead.
+- **Turning it on:** Inbox page → *Phone alerts* (the panel sits above the chat list) → *Turn on alerts*. Android: Chrome, any recent version. iPhone: iOS 16.4 or later, and only from the Home-Screen app: Safari → Share → *Add to Home Screen*, open Bona from the Home Screen, sign in there (it keeps its own login), then turn alerts on.
+- **Which devices:** alerts belong to the login they were turned on in. Logging out on a device ends alerts on that device only. Deactivating a member ends all their devices' alerts. A login that expires (30 days) ends its device's alerts until the member signs in again on it, when they come back by themselves. At most 10 devices per member.
+- **Live refresh:** the Inbox list and an open chat check every 15 s and reload by themselves when something changed, so nobody reloads by hand. While any field on the page holds text or is being typed in (the reply box, the owner's *Add chat by phone number* field), the page does not reload; a "new activity" note with a link appears instead (in a chat: "New activity in this chat"), and nothing typed is touched.
+- **Keys:** generated once on the VPS: `node /opt/bona/services/api/bin/vapid-keys.mjs --file ~/.secrets/bona-services.env`, then `deploy.sh` (bona-api reads them at start). Never generate a second pair: every phone's alerts would end until each member turns them on again. `/health` shows `push.configured`; the daily upkeep's `inbox.maintenance` line counts `pushOrphans` (devices whose login has gone).
+- **Logs:** `push.sent` (counts), `push.refused` (a push service's status), `push.subscribed` (a new device, or one that changed hands: member id and `moved`) / `push.unsubscribed` (member id), `push.failed` (an alert whose run threw: the error's class name only), `push.keys_invalid` (keys malformed or mismatched: alerts stay off), `poll.alert_failed` (an alert that could not be started). Never an endpoint, a key, a name, a number or message text.

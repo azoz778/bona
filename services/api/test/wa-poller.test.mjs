@@ -91,10 +91,11 @@ function inboxWiring({ db, history, historyFails = false, logs, now }) {
  * (the backfill keeps the real one), for a store that fails. `rewire(wiring)` returns any of
  * `inboxStore`/`ingest`/`backfill` to hand the poller instead of the defaults (the rest of
  * the wiring keeps the real ones). `onNote` runs while the owner's note is being sent.
+ * `onClientMessage` is the phone-alert trigger (Phase 3), handed to the poller with the inbox.
  */
 function harness({
   windows = [], env = {}, seedSession = true, isExcluded, inbox = false, history = [], historyFails = false, ingestOverride = null,
-  rewire = null, onNote = null,
+  rewire = null, onNote = null, onClientMessage = null,
 } = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-poller-'));
   const db = openDb(':memory:');
@@ -117,7 +118,10 @@ function harness({
     findMessages: async (window) => { asked.push(window); return { records: queue.length ? queue.shift() : [] }; },
     sendWhatsApp: async (text) => { sent.push(text); if (onNote) await onNote(text); return { ok: true }; },
     ...(isExcluded ? { isExcluded } : {}),
-    ...(wiring ? { inboxStore: wiring.inbox, ingest: ingestOverride ?? wiring.ingest, backfill: wiring.backfill, ...(rewire ? rewire(wiring) : {}) } : {}),
+    ...(wiring ? {
+      inboxStore: wiring.inbox, ingest: ingestOverride ?? wiring.ingest, backfill: wiring.backfill,
+      ...(onClientMessage ? { onClientMessage } : {}), ...(rewire ? rewire(wiring) : {}),
+    } : {}),
     log: (obj) => logs.push(obj),
     now: () => clock,
   });
@@ -763,6 +767,31 @@ test('start() puts the tick on an unref\'d timer and stop() takes it off', async
   h.poller.stop();
   assert.equal(h.poller.started, false);
   h.cleanup();
+});
+
+test('stop() takes the loop off its timer at once, and resolves only once the tick in flight has finished', async () => {
+  const db = openDb(':memory:');
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  // A read that hangs until the test lets it go: the tick is in flight for as long as we like.
+  const poller = createPoller({
+    db, cfg: { env: { BONA_OWNER_JID: OWNER } }, findMessages: async () => { await gate; return { records: [] }; }, now: () => NOW,
+  });
+  assert.equal(poller.start({ intervalMs: 60_000 }), true);
+  const inFlight = poller.tick();
+  assert.deepEqual(await poller.tick(), { busy: true }, 'one at a time, as before');
+  let stopped = false;
+  const stopping = poller.stop().then(() => { stopped = true; });
+  assert.equal(poller.started, false, 'off its timer at once');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(stopped, false, 'not settled while the read is still out');
+  release();
+  await stopping;
+  assert.equal(stopped, true);
+  assert.equal((await inFlight).scanned, 0, 'the tick ran to its end');
+  await poller.stop();
+  assert.equal(poller.started, false, 'with nothing in flight it settles at once, and twice is harmless');
+  db.close();
 });
 
 test('start() with no interval and a cfg without one polls on lib/config.mjs\'s default', (t) => {
@@ -2458,5 +2487,37 @@ test("(v) the owner's own reaction, edit or delete neither answers a lead nor st
   assert.equal(tally.replies, 0);
   assert.deepEqual(h.leads().map((l) => l.lead_id), ['LEAD-wait'], 'no owner_outbound lead from an edit');
   assert.equal(tally.joined, 0);
+  h.cleanup();
+});
+
+/* -------------------- phone alerts (Phase 3, P3-9) -------------------- */
+
+test('(u) a client message stored in an inbox chat raises one alert with its time; nothing else does', async () => {
+  const calls = [];
+  const ref = msg({ id: 'REF', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const h = harness({ inbox: true, history: [ref], windows: [[ref]], onClientMessage: (leadId, ts) => calls.push([leadId, ts]) });
+  await h.poller.tick();
+  const [lead] = h.leads();
+  assert.deepEqual(calls, [[lead.lead_id, NOW - 60_000]], 'the joining message; never the history the join read');
+  h.push([msg({ id: 'OWN', fromMe: true, jid: SENDER, ts: NOW - 30_000, text: 'Welcome' })]);
+  await h.poller.tick();
+  assert.equal(calls.length, 1, 'the owner\'s own message is no alert');
+  h.push([msg({ id: 'BONA', jid: '966500000009@s.whatsapp.net', ts: NOW - 20_000, text: 'مرحبا بونا' })]);
+  await h.poller.tick();
+  assert.equal(calls.length, 1, 'an Unsure guess is no alert');
+  h.push([msg({ id: 'MORE', ts: NOW - 10_000, text: 'Is it still available?' })]);
+  await h.poller.tick();
+  assert.deepEqual(calls.at(-1), [lead.lead_id, NOW - 10_000]);
+  h.cleanup();
+});
+
+test('(u) an alert that throws is logged and changes nothing about the tick', async () => {
+  const ref = msg({ id: 'REF', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const h = harness({ inbox: true, history: [ref], windows: [[ref]], onClientMessage: () => { throw new Error('966500000000 boom'); } });
+  const tally = await h.poller.tick();
+  assert.equal(tally.stored, 1);
+  const line = h.logs.find((l) => l.evt === 'poll.alert_failed');
+  assert.equal(line.level, 'warn');
+  assert.doesNotMatch(JSON.stringify(line), /966|boom/);
   h.cleanup();
 });

@@ -16073,3 +16073,2229 @@ P7. **Past the 1,000 cap, undrawn unread messages count as read: accepted** (Cod
 P8. **The upkeep logs purged sends**: `inbox.maintenance` counts gain `purgedSends` (`retentionPurge`'s `outbox`; null when the purge step fails), asserted in the inbox-wiring upkeep tests and named in the README.
 P9. **A lead with no match method is an acquisition, tested**: a NULL-`match_method` lead counts in `overviewDaily`, `sources()`, `roi()` and `cplByCampaign()` (the test fails if `ACQUIRED` becomes a bare `match_method NOT IN (…)`).
 P10. **Hidden messages take their gaps and unconfirmed replies with them**: with `hidden > 0`, `threadPage` draws only the gaps and open outbox rows at or after the first drawn message, so none sit under "N earlier messages are not shown here." as if they came after them; with nothing hidden, all are drawn as before.
+
+
+---
+
+## Phase 3 — detailed (expanded 2026-09-30 against origin/main 0f2b015)
+
+> Branch `feat/team-inbox-p3`, cut from `origin/main` (0f2b015 = Phase 2 #29 + deploy-guard fix #30; live schema v4).
+> Worktree `~/bona-wt/team-inbox`. Baseline: `cd ~/bona-wt/team-inbox/services && node --test api/test/*.test.mjs` → **1035 pass, 0 fail** (re-run it in Task 1 Step 0 and write the real number here if it differs).
+> Commit trailer for this phase: `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
+> Spec: §5 of `docs/superpowers/specs/2026-09-27-dashboard-team-inbox-design.md` (and §3.4: deactivation deletes push subscriptions).
+
+**Goal:** a team member's phone shows "New Bona message" within about a minute of a client writing in a Bona inbox chat, taps it and lands on that chat — without any client text, name or number passing through Google, Apple or Mozilla — and the inbox list and thread refresh themselves.
+
+**Architecture:** the dashboard becomes an installable web app scoped to `/dashboard/` (manifest, a service worker that never caches, one `app.js`), which only the HTML pages' CSP opens for. Phones subscribe with the server's VAPID public key; `push_subscriptions` (schema v5) binds each subscription to the member AND the login session it was made in. When the poller stores a client message of an `in` chat, `lib/alerts.mjs` picks the recipients (handler / everyone / needs-a-human; never the sender; one per chat per member per 2 min) and `lib/push.mjs` sends each device an empty Web Push signed with an ES256 VAPID JWT from `node:crypto`. The service worker always shows the same fixed notification; a tap opens `/dashboard/push/open`, which redirects the signed-in member to their newest unread chat.
+
+**Tech stack:** Node 24 built-ins only (`node:crypto` ECDSA P-256 / `ieee-p1363` signatures, `node:sqlite`, global `fetch`), Web Push protocol (RFC 8030) with VAPID (RFC 8292), no payload (so no RFC 8291 encryption), Service Worker + Push API + Notifications API in the browser.
+
+### Pre-work results (live, read-only, 2026-09-30)
+
+1. **The VPS reaches every push service**: an empty `POST` from hermes-vps got an HTTP answer over TLS from `fcm.googleapis.com` (404, 0.09 s), `web.push.apple.com` (403, 0.44 s), `updates.push.services.mozilla.com` (406, 0.11 s) and `wns2-par02p.notify.windows.com` (411, 0.16 s). Nothing blocks outbound 443 to them.
+2. **No VAPID keys exist yet**: `~/.secrets/bona-services.env` has no `BONA_VAPID_*` line.
+3. **The VPS Node signs ES256**: `crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' })` and `crypto.sign` work on `/home/azoz/.local/opt/node-v24.19.0-linux-x64/bin/node`.
+4. **Live db**: `user_version 4`; 1 owner + 2 staff users, all active; 5 sessions; `in` 2, `unsure` 25, `out` 2.
+5. **The VPS checkout is sparse** (`services` + `src/data`, `install-vps.sh`): the site's `public/icon-*.png` are NOT on the VPS, so the dashboard's icons are copied into `services/api/lib/dashboard/assets/`.
+6. **The env file is read by Node** (`lib/env.mjs` loads `~/.secrets/bona-services.env` at start), so keys written there take effect on the next restart (`deploy.sh`).
+
+### Decisions taken while expanding (inside the spec; each is binding for the tasks below)
+
+- **P3-1 Two CSPs.** HTML answers (`sendHtml`) carry `PAGE_CSP` = `default-src 'none'; base-uri 'none'; frame-ancestors 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'` (spec §5: only those four directives open). JSON answers and redirects keep `SECURITY_HEADERS`' `default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'` (both policies gained `base-uri 'none'; frame-ancestors 'none'` in the Task 6 review: `base-uri` does not inherit from `default-src`, and an injected `<base>` would redirect every root-relative link). No inline script and no inline event handler anywhere: `script-src 'self'` has no `'unsafe-inline'`, so an escaped-by-mistake `<script>` in a lead's name still cannot run.
+- **P3-2 Static assets are fixed, public and uncached.** (Task 6 review: the manifest's `scope` is `/dashboard` without a slash, so the overview at `/dashboard` — where every login lands — is inside the installed app; the service worker's own scope stays `/dashboard/`, which is all it may claim from `/dashboard/sw.js`.) `/dashboard/sw.js`, `/dashboard/app.js`, `/dashboard/manifest.webmanifest`, `/dashboard/icon-192.png`, `/dashboard/icon-512.png`, `/dashboard/apple-touch-icon.png` are read once at start from `lib/dashboard/assets/` into a fixed map (no URL ever reaches the filesystem), served on GET/HEAD without a login (a manifest is fetched without cookies, and a browser re-checks `sw.js` in the background whether or not the member is still signed in; none of them holds anything private), with `Cache-Control: no-store` (the service worker picks up a new build at once) and `nosniff`. `sw.js` gets its own CSP `default-src 'none'; img-src 'self'` (a worker's CSP is its script's response header; it loads nothing but the notification icon).
+- **P3-3 The service worker never caches and never intercepts.** It has `install` (skipWaiting), `activate` (clients.claim), `push` (always `showNotification('New Bona message', …)` — iOS revokes a subscription that receives pushes without showing one) and `notificationclick` (focus a dashboard window and ASK it, by `postMessage` with a reply port and a 500 ms wait, to go to `/dashboard/push/open`; the page goes only when it holds no draft; a page that is busy, or does not answer, gets a new window instead — whole-branch review, Codex: a tap must never navigate over a half-typed reply). No `fetch` listener, no `caches`, no `importScripts`. A test holds the source to that.
+- **P3-4 A tap lands on the chat through a redirect, not a payload.** `GET /dashboard/push/open` (signed in) → `302` to `/dashboard/inbox/<leadId>` of the member's first inbox row with unread messages, else (Task 8 review: a laptop tab that refreshed itself may have read the chat seconds before the tap) the member's newest inbox chat, i.e. the first row of the list as it is ordered (unread first, then newest; rule 1 applied), and only with no visible chat at all `302 /dashboard/inbox`. Signed out → the login, like every page. This replaces the spec's `/dashboard/push/latest` JSON: the service worker needs no fetch, and the cookie rides a top-level navigation (`SameSite=Lax`).
+- **P3-5 A subscription belongs to a member and a login session.** `push_subscriptions` gains `session_hash` (the `auth_sessions.token_hash` of the session that posted it) and `updated`. Pushes go only to subscriptions whose session still exists, is unexpired and is the same member's, and whose member is active. So logging out (which deletes that session and, explicitly, its subscriptions) stops alerts on THAT device only — a member who logs out on a laptop keeps alerts on their phone (spec §5 said "logout deletes the user's subscriptions"; deleting every device's on one logout would silently end the phone's alerts). Deactivation deletes all the member's subscriptions in the same transaction as their sessions (§3.4). A session that expires ends its device's alerts; the next signed-in page load re-posts the browser's subscription and binds it to the new session (P3-11). The daily upkeep deletes subscriptions whose session is gone.
+- **P3-6 Only real push services.** A subscription's endpoint must be `https:`, no user info, no port, and its host exactly `fcm.googleapis.com`, `updates.push.services.mozilla.com` or `web.push.apple.com`, or ending in `.push.apple.com` or `.notify.windows.com`; at most 1,024 characters. Anything else is refused (`bad_endpoint`): the server POSTs to that URL, and a free-form one would let any signed-in member make bona-api call any host (SSRF). `p256dh` must decode (base64url) to a 65-byte uncompressed P-256 point, `auth` to 16 bytes; both are stored as the browser sent them (canonical base64url) though a payload-less push never uses them (spec §5 keeps them for a later payload).
+- **P3-7 At most 10 devices per member.** A new subscription beyond ten deletes that member's least recently posted ones. An endpoint posted again (same device, or a shared device now signed in as someone else) moves to the poster: member, session, keys and `updated` replaced, `fail_count` back to 0.
+- **P3-8 Who is alerted** (spec §5), decided when the push goes out, on the lead as it is then: the chat must be `in` and not a team/never-list number (`isExcludedLead`). `needs_human = 1` (or a push with `reason: 'needs_human'`, for Phase 4) → every active member; else the handler, when set and active; else every active member. Never `exceptUserId` (the member whose own action caused it; Phase 3's only trigger is a client message, so nobody is excepted yet — Phase 4's Dana hand-over passes none either; the parameter exists and is tested so a later trigger cannot forget it). At most one push per chat per member per 2 minutes (`ALERT_EVERY_MS`), in memory (a restart may allow one extra); the mark is set before the sends start, so two client messages in one tick make one push.
+- **P3-9 What triggers a push**: the poller storing a client record of an `in` chat (`ingest` answered `{ stored: true, senderKind: 'client' }`, whether it inserted it or a thread refresh had just stored it first — the poller reads each record once (`waSeenHas`), so this is the first time the poller sees it). Only when the record is at most 30 minutes old (`ALERT_FRESH_MS`): after an outage the poller catches up on hours of messages, and those show as unread, not as a burst of alerts. Never from a join's history, the daily catch-up or a thread refresh (old messages, or a member already looking). Never for anything sent from the owner's side. Not awaited by the poller: a slow push service never slows a tick, and a push that fails is a log line.
+- **P3-10 Payload-less push request**: `POST <endpoint>` with an empty body, `TTL: 3600` (an alert over an hour late is not an alert), `Urgency: high`, `Authorization: vapid t=<JWT>, k=<public key>`. JWT header `{"typ":"JWT","alg":"ES256"}`, claims `{ aud: <endpoint origin>, exp: now + 12 h, sub: BONA_VAPID_SUBJECT }`, signature raw `r‖s` (`dsaEncoding: 'ieee-p1363'`), base64url without padding. One JWT per push-service origin is reused for an hour. 10 s timeout per request. Answers: 2xx → `last_ok`, `fail_count = 0`; 404/410 → the subscription is deleted (spec); anything else, a timeout or a network error → `fail_count + 1` and a `push.refused` warn line with the status or error kind only. Nothing is retried.
+- **P3-11 `app.js`** (one classic script, `defer`, on every signed-in page; none on the login and logout pages): registers `/dashboard/sw.js` (scope `/dashboard/`) when the page carries a push key; when notifications are already granted and the browser has a subscription, re-posts it (binds it to this session, P3-5); drives the Inbox page's *Phone alerts* panel (Turn on / Turn off, the iPhone Home-Screen hint, "blocked", "not supported"); and refreshes the inbox list and a thread (P3-12). `pushManager.subscribe` is called directly inside the click handler (iOS needs the user gesture).
+- **P3-12 Live refresh by a pulse, not by a socket.** The Inbox list and a thread carry `data-pulse` (the URL to ask) and `data-pulse-token` (what the page was drawn from). `app.js` asks `GET /v1/admin/inbox/pulse` (list) or `GET /v1/admin/inbox/pulse?lead=<id>` (thread) every 15 s while the page is visible, and at once when it becomes visible again. A different token reloads the page — never while any text field on it holds text or has focus (the reply box, the owner's *Add chat by phone number* field): then a note by the reply box (thread) or above the list says there is something new, with a link, and no draft is ever touched; never over a navigation the person just started (`beforeunload`); a thread reached by a POST is left by following the note's link, not by `reload()` (Task 8 review). Tokens: a thread's is its `chat_rev` (`inbox.revision`, the same number the reply form's stale guard uses); the list's is `<chats>:<unread>:<newest last_msg_ts>` over exactly the rows the page draws. A thread the member may not read answers 404 like everything else under rule 1.
+- **P3-13 The push key rides on `me`**: routes add `pushKey` (the VAPID public key, or nothing when push is not configured) to the signed-in person object every page already receives (`withUnread`); `layout` prints `<meta name="bona-push-key" content="…">` and the `app.js` tag only when `me` is there. The *Phone alerts* panel is drawn (hidden until `app.js` shows it) only when `me.pushKey` is set. Without keys nothing breaks: no panel, `subscribe` answers 503 `push_off`, no push is ever sent, the pulse still works.
+- **P3-14 Keys are generated once, on the VPS**, by `services/api/bin/vapid-keys.mjs --file ~/.secrets/bona-services.env`, which appends `BONA_VAPID_PUBLIC` / `BONA_VAPID_PRIVATE` (base64url: the 65-byte public point and the 32-byte private scalar) and never overwrites existing keys (a new pair silently ends every phone's alerts: each subscription is tied to the public key it was made with). `BONA_VAPID_SUBJECT` defaults to the site URL (`https://bona-real-estate.com`: a contact URL, as RFC 8292 allows; no email address is published). A key pair that is malformed or does not match is refused at start (`push.keys_invalid`, push off), never half-used. Neither key is ever logged; `/health` says only `push.configured`.
+- **P3-15 Logs**: `push.sent { leadId, reason, users, devices, ok, gone, failed }`, `push.refused { status | error }`, `push.subscribed { userId, moved }` (a new device, or one that changed hands) / `push.unsubscribed { userId }`, `push.failed { name }` (an alert whose run threw: the error's class name only), `push.keys_invalid { keys, subject }`, `poll.alert_failed { leadId }`. Never an endpoint (it is a bearer capability), a key, a name, a number or message text.
+
+### Task order
+
+1 Schema v5 · 2 `lib/push.mjs` · 3 `lib/alerts.mjs` · 4 Deactivation deletes subscriptions · 5 Config + `bin/vapid-keys.mjs` · 6 Assets, the page CSP and the layout head · 7 Routes: subscribe, unsubscribe, logout, push/open, pulse · 8 Inbox screens: the alerts panel, the pulse, `app.js` · 9 Poller trigger + wiring + upkeep + health · 10 README · 11 Reviews, rehearsal, keys, ship, device tests (STOP).
+Each task: implementer subagent (TDD) → spec review → quality review, fix loops until both pass (superpowers:subagent-driven-development). Tasks run in order.
+
+### File map — Phase 3
+
+| File | Status | Responsibility |
+|---|---|---|
+| `services/api/lib/db.mjs` | modify | schema v5 (`push_subscriptions`); export `tokenHash(token)` |
+| `services/api/lib/push.mjs` | create | VAPID keys (generate / load / check), ES256 JWT, endpoint and key validation, one payload-less push (`createPusher`) |
+| `services/api/lib/alerts.mjs` | create | subscriptions (session-bound), recipient rules, throttle, `notify`, cleanup, `flush` |
+| `services/api/lib/team.mjs` | modify | `deactivateUser` deletes push subscriptions in its transaction |
+| `services/api/lib/config.mjs` | modify | `vapidPublic`, `vapidPrivate`, `vapidSubject`; `redacted().hasVapid` |
+| `services/api/bin/vapid-keys.mjs` | create | generate the key pair once into the env file |
+| `services/api/lib/dashboard/assets/{sw.js,app.js,manifest.webmanifest,icon-192.png,icon-512.png,apple-touch-icon.png}` | create | the installable app's static files (icons copied from `public/`) |
+| `services/api/lib/dashboard/assets.mjs` | create | the fixed asset map, read once |
+| `services/api/lib/dashboard/routes.mjs` | modify | `PAGE_CSP`/`PAGE_SECURITY_HEADERS`, asset serving, subscribe/unsubscribe, logout forgets the session's subscriptions, `/dashboard/push/open`, pulse, `me.pushKey`, key presence |
+| `services/api/lib/dashboard/render.mjs` | modify | layout head (manifest, icons, push key meta, `app.js`), `[hidden]` rule |
+| `services/api/lib/dashboard/render-inbox.mjs` | modify | *Phone alerts* panel; `data-pulse` on the list and the thread; the thread's "new activity" note |
+| `services/api/lib/wa-poller.mjs` | modify | `onClientMessage(leadId, ts)` after a client record is stored |
+| `services/api/index.mjs` | modify | build pusher + alerts, hand them to the poller, the routes, the upkeep and `/health` |
+| `services/README.md` | modify | Dashboard → Phone alerts |
+| tests | create/modify | `push`, `alerts`, `vapid-keys`, `dashboard-push` (new); `db`, `team`, `config`, `wa-poller`, `inbox-wiring`, `dashboard-routes`, `dashboard-inbox`, `dashboard-render-inbox`, `tiktok-accounts` (modify) |
+
+### Interface contract (every task must match these names and shapes exactly)
+
+**`lib/db.mjs`**
+- `SCHEMA_VERSION = 5`. Migration `{ version: 5, sql }`:
+  ```sql
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id TEXT NOT NULL PRIMARY KEY, user_id TEXT NOT NULL, endpoint TEXT NOT NULL UNIQUE,
+    p256dh TEXT NOT NULL, auth TEXT NOT NULL, session_hash TEXT,
+    created INTEGER NOT NULL, updated INTEGER NOT NULL, last_ok INTEGER, fail_count INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS push_subscriptions_user ON push_subscriptions(user_id);
+  CREATE INDEX IF NOT EXISTS push_subscriptions_session ON push_subscriptions(session_hash);
+  ```
+- `export const tokenHash = (token) => sha256(token ?? '')` — the hash `auth_sessions.token_hash` holds.
+
+**`lib/push.mjs`**
+- `PUSH_TTL_S = 3600`, `PUSH_TIMEOUT_MS = 10_000`, `JWT_TTL_S = 43_200`, `JWT_REUSE_MS = 3_600_000`, `MAX_ENDPOINT_LEN = 1024`.
+- `generateVapidKeys() → { publicKey: string, privateKey: string }` (base64url, 65-byte point / 32-byte scalar).
+- `vapidKeys({ publicKey, privateKey }) → { publicKey: string, key: KeyObject } | null` (null when missing, malformed or not a pair).
+- `vapidJwt({ audience, subject, key, nowMs }) → string`.
+- `pushEndpoint(raw) → string | null` (the normalised `URL.href`, or null — P3-6).
+- `subscriptionKeys({ p256dh, auth }) → { p256dh, auth } | null`.
+- `createPusher({ keys, subject, fetchImpl = globalThis.fetch, now = Date.now, timeoutMs = PUSH_TIMEOUT_MS }) → { publicKey, send(endpoint) → Promise<{ status: number } | { error: 'timeout' | 'network' }> }` (never rejects).
+
+**`lib/alerts.mjs`**
+- `ALERT_EVERY_MS = 120_000`, `ALERT_FRESH_MS = 1_800_000`, `MAX_DEVICES_PER_USER = 10`.
+- `createAlerts({ db, pusher = null, isExcludedLead, now = Date.now, log = () => {} })` (`isExcludedLead` is REQUIRED — a `TypeError` without it; Task 3 review) →
+  `{ configured: boolean, publicKey: string | null,`
+  ` subscribe({ userId, sessionHash, endpoint, keys }) → { ok: true, created: boolean } | { ok: false, error: 'bad_endpoint' | 'bad_keys' | 'bad_request' }` (`bad_request` also when `sessionHash` is not a live, unexpired session of `userId` — Task 3 review; `created` is false on a re-post, so the route logs `push.subscribed` once per device — Task 8 review),`
+  ` unsubscribe({ userId, endpoint }) → boolean,`
+  ` forgetSession(sessionHash) → number, pruneOrphans() → number, countFor(userId) → number,`
+  ` recipients(lead, { reason = 'inbound', exceptUserId = null } = {}) → string[],`
+  ` notify(leadId, { reason = 'inbound', exceptUserId = null, ts = null } = {}) → Promise<{ skipped: 'off'|'old'|'not_in_inbox'|'quiet'|'no_devices' } | { users, devices, ok, gone, failed } | { error: 'failed' }>` (never rejects),`
+  ` flush() → Promise<void> }` (awaits every notify still in flight; tests and shutdown).
+
+**`lib/wa-poller.mjs`** — `createPoller({ …, onClientMessage = null })`: called as `onClientMessage(leadId, ts)` (not awaited, a throw is logged `poll.alert_failed` and swallowed) right after `ingest` answers `{ stored: true, senderKind: 'client' }` for a record the poller itself read.
+
+**`lib/dashboard/routes.mjs`**
+- `export const PAGE_CSP` (P3-1) and `export const PAGE_SECURITY_HEADERS = { ...SECURITY_HEADERS, 'Content-Security-Policy': PAGE_CSP }`. `SECURITY_HEADERS` is unchanged.
+- `createDashboardRoutes({ …, alerts = null })`.
+- Routes: `GET|HEAD` the six asset paths (public); `GET /dashboard/push/open` (signed in); `GET /v1/admin/inbox/pulse[?lead=ID]` → `200 { token: string }` / `404 { error: 'not_in_inbox' }`; `POST /v1/admin/push/subscribe` JSON `{ endpoint, keys: { p256dh, auth } }` → `200 { ok: true }` / `400 { error }` / `503 { error: 'push_off' }`; `POST /v1/admin/push/unsubscribe` JSON `{ endpoint }` → `200 { ok: true, removed: boolean }`. Both POSTs: any active member, the usual origin check and write marker.
+
+**`lib/dashboard/render.mjs`** — `layout` prints the manifest/icon links always, and `<meta name="bona-push-key" content="…">` + `<script src="/dashboard/app.js" defer></script>` only when `me` is given (the key's content may be empty).
+
+**`lib/dashboard/render-inbox.mjs`** — `inboxPage({ …, pulseToken = '' })`, `threadPage({ …, pulseToken = '' })` (the route passes `String(seenRev)`); the list's alerts panel when `me.pushKey`.
+
+---
+
+### Task 1: Schema v5 — `push_subscriptions` (`lib/db.mjs`)
+
+**Files:**
+- Modify: `services/api/lib/db.mjs` (MIGRATIONS, `SCHEMA_VERSION`, export `tokenHash`)
+- Test: `services/api/test/db.test.mjs`
+
+- [ ] **Step 0: Baseline**
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/*.test.mjs 2>&1 | tail -5`
+Expected: `fail 0`. Note the pass count in the phase header if it is not 1035.
+
+- [ ] **Step 1: Write the failing tests** (append to `db.test.mjs`; replace the existing `SCHEMA_VERSION, 4` / `user_version, 4` assertions at lines ~74–75 with the v4 file check below, since v4 is no longer the newest)
+
+```js
+import { tokenHash } from '../lib/db.mjs'; // add to the existing import line instead
+
+test('schema v5: push_subscriptions, one row per endpoint, bound to a member and a session', () => {
+  const s = openDb(':memory:');
+  assert.equal(SCHEMA_VERSION, 5);
+  assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 5);
+  const cols = s.db.prepare('PRAGMA table_info(push_subscriptions)').all().map((c) => c.name);
+  assert.deepEqual(cols, ['id', 'user_id', 'endpoint', 'p256dh', 'auth', 'session_hash', 'created', 'updated', 'last_ok', 'fail_count']);
+  const ins = s.db.prepare('INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, session_hash, created, updated) VALUES (?,?,?,?,?,?,?,?)');
+  ins.run('P1', 'U1', 'https://fcm.googleapis.com/fcm/send/a', 'k', 'a', 'h', 1, 1);
+  assert.throws(() => ins.run('P2', 'U2', 'https://fcm.googleapis.com/fcm/send/a', 'k', 'a', 'h', 1, 1), /UNIQUE/);
+  assert.throws(() => ins.run(null, 'U2', 'https://fcm.googleapis.com/fcm/send/b', 'k', 'a', 'h', 1, 1), /NOT NULL/);
+  assert.equal(s.db.prepare('SELECT fail_count FROM push_subscriptions WHERE id = ?').get('P1').fail_count, 0);
+  const idx = s.db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'push_subscriptions' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name);
+  assert.deepEqual(idx, ['push_subscriptions_session', 'push_subscriptions_user']);
+  s.close();
+});
+
+test('a v4 file upgrades to v5 with every lead, session, message and setting kept', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-v5-'));
+  const file = path.join(dir, 'bona.db');
+  const raw = new DatabaseSync(file);
+  migrate(raw, { upTo: 4 });
+  assert.equal(raw.prepare('PRAGMA user_version').get().user_version, 4);
+  raw.prepare("INSERT INTO leads (lead_id, created, updated, phone_e164, channel, stage, inbox_state, chat_rev) VALUES ('L1', 1, 1, '966500000001', 'whatsapp', 'new', 'in', 3)").run();
+  raw.prepare("INSERT INTO auth_sessions (token_hash, created, expires, ua, user_id) VALUES ('h1', 1, 9e15, 'ua', 'U1')").run();
+  raw.prepare("INSERT INTO wa_messages (key_id, lead_id, jid, direction, sender_kind, text, ts) VALUES ('K1', 'L1', 'j', 'in', 'client', 'hi', 1)").run();
+  raw.prepare("INSERT INTO settings (key, value) VALUES ('inbox_replies', '1')").run();
+  raw.close();
+  const s = openDb(file);
+  assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 5);
+  assert.equal(s.db.prepare('SELECT chat_rev FROM leads WHERE lead_id = ?').get('L1').chat_rev, 3);
+  assert.equal(s.db.prepare('SELECT COUNT(*) n FROM auth_sessions').get().n, 1);
+  assert.equal(s.db.prepare('SELECT COUNT(*) n FROM wa_messages').get().n, 1);
+  assert.equal(s.db.prepare("SELECT value FROM settings WHERE key = 'inbox_replies'").get().value, '1');
+  assert.equal(s.db.prepare('SELECT COUNT(*) n FROM push_subscriptions').get().n, 0);
+  s.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('tokenHash is the hash auth_sessions keeps for a session token', () => {
+  const s = openDb(':memory:');
+  const token = 'ab'.repeat(16);
+  s.createAuthSession(token, { userId: 'U1' });
+  assert.ok(s.db.prepare('SELECT 1 FROM auth_sessions WHERE token_hash = ?').get(tokenHash(token)));
+  assert.match(tokenHash(token), /^[0-9a-f]{64}$/);
+  assert.equal(tokenHash(null), tokenHash(''), 'nothing hashes like the empty string, never throws');
+  s.close();
+});
+```
+
+- [ ] **Step 2: Run to see them fail**
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/db.test.mjs 2>&1 | grep -E "^not ok|tokenHash|SCHEMA" | head`
+Expected: FAIL — `tokenHash` is not exported; `SCHEMA_VERSION` is 4.
+
+- [ ] **Step 3: Implement** — in `lib/db.mjs` set `export const SCHEMA_VERSION = 5;`, export the hash, and add the migration after v4 (comment in the house style):
+
+```js
+/** The hash `auth_sessions.token_hash` holds for a session token (push subscriptions are bound to it). */
+export const tokenHash = (token) => sha256(token ?? '');
+```
+
+```js
+  {
+    // Phone alerts (2026-09-27 design §5, Phase 3). One row per browser push subscription
+    // (its endpoint is UNIQUE: posting it again moves it to whoever posted it). It belongs
+    // to a member AND to the login session that posted it (`session_hash` = that
+    // `auth_sessions.token_hash`): a push goes only to a subscription whose session is still
+    // there and is the same member's, so logging out on one device ends alerts on that
+    // device only, and a session that expires takes its device's alerts with it until the
+    // next signed-in page posts the subscription again (lib/alerts.mjs). `p256dh`/`auth` are
+    // kept though a payload-less push never uses them. No message text, name or number is
+    // ever stored here. Migrations here only ever add.
+    version: 5,
+    sql: `
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id TEXT NOT NULL PRIMARY KEY, user_id TEXT NOT NULL, endpoint TEXT NOT NULL UNIQUE,
+        p256dh TEXT NOT NULL, auth TEXT NOT NULL, session_hash TEXT,
+        created INTEGER NOT NULL, updated INTEGER NOT NULL, last_ok INTEGER, fail_count INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS push_subscriptions_user ON push_subscriptions(user_id);
+      CREATE INDEX IF NOT EXISTS push_subscriptions_session ON push_subscriptions(session_hash);
+    `,
+  },
+```
+Also add a sentence to the module header comment: since v5 the file holds push subscription endpoints (bearer URLs for a member's device; never logged).
+
+- [ ] **Step 4: Run the db and team tests, then the whole suite**
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/db.test.mjs api/test/team.test.mjs 2>&1 | tail -4 && node --test api/test/*.test.mjs 2>&1 | tail -4`
+Expected: `fail 0` both times.
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd ~/bona-wt/team-inbox && git add services/api/lib/db.mjs services/api/test/db.test.mjs
+git commit -m "db: schema v5 — push subscriptions bound to a member and a session
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 2: `lib/push.mjs` — VAPID keys, the JWT, one payload-less push
+
+**Files:**
+- Create: `services/api/lib/push.mjs`
+- Test: `services/api/test/push.test.mjs`
+
+- [ ] **Step 1: Write the failing tests** (`test/push.test.mjs`)
+
+```js
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import {
+  generateVapidKeys, vapidKeys, vapidJwt, pushEndpoint, subscriptionKeys, createPusher,
+  PUSH_TTL_S, JWT_TTL_S, JWT_REUSE_MS, MAX_ENDPOINT_LEN,
+} from '../lib/push.mjs';
+
+const NOW = 1_790_600_000_000;
+const b64u = (b) => Buffer.from(b).toString('base64url');
+
+test('a generated pair is a 65-byte P-256 point and a 32-byte scalar that load back as a pair', () => {
+  const k = generateVapidKeys();
+  const pub = Buffer.from(k.publicKey, 'base64url');
+  assert.equal(pub.length, 65);
+  assert.equal(pub[0], 4);
+  assert.equal(Buffer.from(k.privateKey, 'base64url').length, 32);
+  assert.doesNotMatch(k.publicKey + k.privateKey, /[+/=]/, 'base64url without padding');
+  const loaded = vapidKeys(k);
+  assert.equal(loaded.publicKey, k.publicKey);
+  assert.equal(loaded.key.asymmetricKeyType, 'ec');
+});
+
+test('keys that are missing, malformed or not one pair are refused, never half-used', () => {
+  const a = generateVapidKeys();
+  const b = generateVapidKeys();
+  assert.equal(vapidKeys({}), null);
+  assert.equal(vapidKeys({ publicKey: a.publicKey }), null);
+  assert.equal(vapidKeys({ publicKey: a.publicKey, privateKey: b.privateKey }), null, 'a public key from another pair');
+  assert.equal(vapidKeys({ publicKey: a.publicKey.slice(2), privateKey: a.privateKey }), null);
+  assert.equal(vapidKeys({ publicKey: 'not base64!', privateKey: a.privateKey }), null);
+  assert.equal(vapidKeys({ publicKey: a.publicKey, privateKey: b64u(Buffer.alloc(32)) }), null, 'a zero scalar is no key');
+});
+
+test('the JWT is ES256 over the push service origin, 12 h, signed raw r‖s, and verifies with the public key', () => {
+  const k = vapidKeys(generateVapidKeys());
+  const jwt = vapidJwt({ audience: 'https://fcm.googleapis.com', subject: 'https://bona-real-estate.com', key: k.key, nowMs: NOW });
+  const [h, c, s] = jwt.split('.');
+  assert.deepEqual(JSON.parse(Buffer.from(h, 'base64url')), { typ: 'JWT', alg: 'ES256' });
+  assert.deepEqual(JSON.parse(Buffer.from(c, 'base64url')), { aud: 'https://fcm.googleapis.com', exp: Math.floor(NOW / 1000) + JWT_TTL_S, sub: 'https://bona-real-estate.com' });
+  const sig = Buffer.from(s, 'base64url');
+  assert.equal(sig.length, 64);
+  const pub = Buffer.from(k.publicKey, 'base64url');
+  const verifyKey = crypto.createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: b64u(pub.subarray(1, 33)), y: b64u(pub.subarray(33)) }, format: 'jwk' });
+  assert.ok(crypto.verify('sha256', Buffer.from(`${h}.${c}`), { key: verifyKey, dsaEncoding: 'ieee-p1363' }, sig));
+  assert.doesNotMatch(jwt, /[+/=]/);
+});
+
+test('only a real push service endpoint is accepted (the server POSTs to it)', () => {
+  for (const ok of [
+    'https://fcm.googleapis.com/fcm/send/abc:APA91b-xyz',
+    'https://updates.push.services.mozilla.com/wpush/v2/gAAAA',
+    'https://web.push.apple.com/QGuQyavXutnMhyq0',
+    'https://api.push.apple.com/x',
+    'https://wns2-par02p.notify.windows.com/w/?token=BQYAAA',
+  ]) assert.equal(pushEndpoint(ok), new URL(ok).href, ok);
+  for (const bad of [
+    'http://fcm.googleapis.com/fcm/send/a', 'https://evil.example/fcm.googleapis.com', 'https://fcm.googleapis.com.evil.example/x',
+    'https://notify.windows.com/x', 'https://push.apple.com/x', 'https://user@fcm.googleapis.com/x', 'https://fcm.googleapis.com:8443/x',
+    'https://127.0.0.1/x', 'https://localhost/x', 'javascript:alert(1)', '', null, 42, { href: 'https://fcm.googleapis.com/x' },
+    `https://fcm.googleapis.com/${'a'.repeat(MAX_ENDPOINT_LEN)}`,
+  ]) assert.equal(pushEndpoint(bad), null, String(bad).slice(0, 60));
+});
+
+test('subscription keys: a 65-byte uncompressed point and a 16-byte secret, as base64url', () => {
+  const point = Buffer.concat([Buffer.from([4]), crypto.randomBytes(64)]);
+  const auth = crypto.randomBytes(16);
+  assert.deepEqual(subscriptionKeys({ p256dh: b64u(point), auth: b64u(auth) }), { p256dh: b64u(point), auth: b64u(auth) });
+  assert.equal(subscriptionKeys({ p256dh: b64u(point.subarray(1)), auth: b64u(auth) }), null);
+  assert.equal(subscriptionKeys({ p256dh: b64u(point), auth: b64u(auth.subarray(1)) }), null);
+  assert.equal(subscriptionKeys({ p256dh: b64u(Buffer.concat([Buffer.from([2]), point.subarray(1)])), auth: b64u(auth) }), null, 'not uncompressed');
+  assert.equal(subscriptionKeys({ p256dh: 'x'.repeat(5000), auth: b64u(auth) }), null);
+  assert.equal(subscriptionKeys(null), null);
+});
+
+function fakeFetch(answer = () => ({ status: 201 })) {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    const a = answer(calls.length, url);
+    if (a instanceof Error) throw a;
+    return { status: a.status, arrayBuffer: async () => new ArrayBuffer(0) };
+  };
+  return { calls, fetchImpl };
+}
+
+test('a push is an empty POST with TTL, high urgency and the VAPID authorization, nothing else', async () => {
+  const keys = vapidKeys(generateVapidKeys());
+  const f = fakeFetch();
+  const pusher = createPusher({ keys, subject: 'https://bona-real-estate.com', fetchImpl: f.fetchImpl, now: () => NOW });
+  assert.equal(pusher.publicKey, keys.publicKey);
+  const out = await pusher.send('https://fcm.googleapis.com/fcm/send/abc');
+  assert.deepEqual(out, { status: 201 });
+  const [{ url, init }] = f.calls;
+  assert.equal(url, 'https://fcm.googleapis.com/fcm/send/abc');
+  assert.equal(init.method, 'POST');
+  assert.equal(init.body, '');
+  assert.equal(init.headers.TTL, String(PUSH_TTL_S));
+  assert.equal(init.headers.Urgency, 'high');
+  assert.match(init.headers.Authorization, new RegExp(`^vapid t=[\\w-]+\\.[\\w-]+\\.[\\w-]+, k=${keys.publicKey}$`));
+  assert.deepEqual(Object.keys(init.headers).sort(), ['Authorization', 'TTL', 'Urgency']);
+  assert.ok(init.signal, 'a timeout rides on every request');
+});
+
+test('one JWT per push service origin, reused for an hour, then made again', async () => {
+  const keys = vapidKeys(generateVapidKeys());
+  let clock = NOW;
+  const f = fakeFetch();
+  const pusher = createPusher({ keys, subject: 'https://bona-real-estate.com', fetchImpl: f.fetchImpl, now: () => clock });
+  const jwtOf = (i) => /t=([^,]+),/.exec(f.calls[i].init.headers.Authorization)[1];
+  const audOf = (i) => JSON.parse(Buffer.from(jwtOf(i).split('.')[1], 'base64url')).aud;
+  await pusher.send('https://fcm.googleapis.com/fcm/send/a');
+  await pusher.send('https://fcm.googleapis.com/fcm/send/b');
+  await pusher.send('https://web.push.apple.com/c');
+  assert.equal(jwtOf(0), jwtOf(1));
+  assert.equal(audOf(2), 'https://web.push.apple.com');
+  clock += JWT_REUSE_MS + 1;
+  await pusher.send('https://fcm.googleapis.com/fcm/send/a');
+  assert.notEqual(jwtOf(3), jwtOf(0));
+});
+
+test('send never rejects: a timeout and a network failure come back as kinds, never messages', async () => {
+  const keys = vapidKeys(generateVapidKeys());
+  const timeout = createPusher({ keys, subject: 's', fetchImpl: fakeFetch(() => Object.assign(new Error('x'), { name: 'TimeoutError' })).fetchImpl });
+  assert.deepEqual(await timeout.send('https://fcm.googleapis.com/x'), { error: 'timeout' });
+  const abort = createPusher({ keys, subject: 's', fetchImpl: fakeFetch(() => Object.assign(new Error('x'), { name: 'AbortError' })).fetchImpl });
+  assert.deepEqual(await abort.send('https://fcm.googleapis.com/x'), { error: 'timeout' });
+  const down = createPusher({ keys, subject: 's', fetchImpl: fakeFetch(() => new Error('getaddrinfo EAI_AGAIN fcm.googleapis.com')).fetchImpl });
+  assert.deepEqual(await down.send('https://fcm.googleapis.com/x'), { error: 'network' });
+  const gone = createPusher({ keys, subject: 's', fetchImpl: fakeFetch(() => ({ status: 410 })).fetchImpl });
+  assert.deepEqual(await gone.send('https://fcm.googleapis.com/x'), { status: 410 });
+});
+```
+
+- [ ] **Step 2: Run to see them fail**
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/push.test.mjs 2>&1 | tail -3`
+Expected: FAIL — `Cannot find module '../lib/push.mjs'`.
+
+- [ ] **Step 3: Implement** `services/api/lib/push.mjs`:
+
+```js
+/**
+ * Web Push without a payload (2026-09-27 design §5, Phase 3).
+ *
+ * A push here carries NOTHING: an empty POST to the device's push service (Google's FCM,
+ * Apple's, Mozilla's, Microsoft's), so no client text, name or number ever passes through
+ * them, and there is no RFC 8291 encryption to get wrong. The service worker shows the same
+ * fixed notification for every push, and the tap asks the dashboard where to go.
+ *
+ * The request is authorised with VAPID (RFC 8292): an ES256 JWT for the push service's
+ * origin, signed with the server's P-256 key through `node:crypto`, plus the public key the
+ * browser subscribed with. Keys are base64url: the public key the 65-byte uncompressed point
+ * the browser's `applicationServerKey` takes, the private key the 32-byte scalar.
+ *
+ * The server POSTs to whatever endpoint a signed-in member's browser posted, so only real
+ * push services are accepted (`pushEndpoint`): anything else would let a member make this
+ * process call any host. An endpoint is a bearer capability for that device: never logged.
+ */
+import crypto from 'node:crypto';
+
+export const PUSH_TTL_S = 3600;
+export const PUSH_TIMEOUT_MS = 10_000;
+export const JWT_TTL_S = 12 * 3600;
+export const JWT_REUSE_MS = 3_600_000;
+export const MAX_ENDPOINT_LEN = 1024;
+const MAX_KEY_TEXT = 200;
+
+const EXACT_HOSTS = new Set(['fcm.googleapis.com', 'updates.push.services.mozilla.com', 'web.push.apple.com']);
+const HOST_SUFFIXES = ['.push.apple.com', '.notify.windows.com'];
+
+const b64u = (buf) => Buffer.from(buf).toString('base64url');
+/** Bytes from base64url text, or null for anything that is not (padding tolerated). */
+function fromB64u(s) {
+  if (typeof s !== 'string' || !s || s.length > MAX_KEY_TEXT || !/^[A-Za-z0-9_-]+={0,2}$/.test(s)) return null;
+  return Buffer.from(s, 'base64url');
+}
+
+/** A fresh P-256 pair, as the env file keeps it. */
+export function generateVapidKeys() {
+  const ecdh = crypto.createECDH('prime256v1');
+  ecdh.generateKeys();
+  return { publicKey: b64u(ecdh.getPublicKey(null, 'uncompressed')), privateKey: b64u(ecdh.getPrivateKey()) };
+}
+
+/**
+ * The env's two strings as a usable pair, or null. The public key is derived again from the
+ * private scalar and must equal the one given: a mismatched pair would sign JWTs every push
+ * service refuses, while the browsers subscribed with the other key.
+ */
+export function vapidKeys({ publicKey, privateKey } = {}) {
+  const pub = fromB64u(publicKey);
+  const d = fromB64u(privateKey);
+  if (!pub || pub.length !== 65 || pub[0] !== 4 || !d || d.length !== 32) return null;
+  try {
+    const ecdh = crypto.createECDH('prime256v1');
+    ecdh.setPrivateKey(d);
+    if (!ecdh.getPublicKey(null, 'uncompressed').equals(pub)) return null;
+    const key = crypto.createPrivateKey({
+      key: { kty: 'EC', crv: 'P-256', d: b64u(d), x: b64u(pub.subarray(1, 33)), y: b64u(pub.subarray(33)) },
+      format: 'jwk',
+    });
+    return { publicKey: b64u(pub), key };
+  } catch {
+    return null; // a scalar outside the curve's range (zero, too large)
+  }
+}
+
+/** The VAPID JWT for one push service origin. */
+export function vapidJwt({ audience, subject, key, nowMs }) {
+  const header = b64u(JSON.stringify({ typ: 'JWT', alg: 'ES256' }));
+  const claims = b64u(JSON.stringify({ aud: audience, exp: Math.floor(nowMs / 1000) + JWT_TTL_S, sub: subject }));
+  const input = `${header}.${claims}`;
+  const sig = crypto.sign('sha256', Buffer.from(input), { key, dsaEncoding: 'ieee-p1363' });
+  return `${input}.${b64u(sig)}`;
+}
+
+/** The endpoint as a URL string when it is a real push service's, else null (P3-6). */
+export function pushEndpoint(raw) {
+  if (typeof raw !== 'string' || !raw || raw.length > MAX_ENDPOINT_LEN) return null;
+  let u;
+  try { u = new URL(raw); } catch { return null; }
+  if (u.protocol !== 'https:' || u.username || u.password || u.port) return null;
+  const host = u.hostname.toLowerCase();
+  const known = EXACT_HOSTS.has(host) || HOST_SUFFIXES.some((s) => host.endsWith(s) && host.length > s.length);
+  return known && u.href.length <= MAX_ENDPOINT_LEN ? u.href : null;
+}
+
+/** The browser's `keys`, checked: a 65-byte uncompressed P-256 point and a 16-byte secret. */
+export function subscriptionKeys(keys) {
+  const p = fromB64u(keys?.p256dh);
+  const a = fromB64u(keys?.auth);
+  if (!p || p.length !== 65 || p[0] !== 4 || !a || a.length !== 16) return null;
+  return { p256dh: b64u(p), auth: b64u(a) };
+}
+
+/**
+ * Sends one empty push to one endpoint. `send` never rejects: it answers the push
+ * service's status, or the kind of failure (`timeout`, `network`) — never an error's
+ * message, which could carry the endpoint.
+ */
+export function createPusher({ keys, subject, fetchImpl = globalThis.fetch, now = () => Date.now(), timeoutMs = PUSH_TIMEOUT_MS }) {
+  const jwts = new Map(); // push service origin → { jwt, at }
+  function jwtFor(audience) {
+    const t = now();
+    const hit = jwts.get(audience);
+    if (hit && t - hit.at < JWT_REUSE_MS) return hit.jwt;
+    const jwt = vapidJwt({ audience, subject, key: keys.key, nowMs: t });
+    jwts.set(audience, { jwt, at: t });
+    return jwt;
+  }
+  async function send(endpoint) {
+    try {
+      const res = await fetchImpl(endpoint, {
+        method: 'POST',
+        headers: { TTL: String(PUSH_TTL_S), Urgency: 'high', Authorization: `vapid t=${jwtFor(new URL(endpoint).origin)}, k=${keys.publicKey}` },
+        body: '',
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      try { await res.arrayBuffer?.(); } catch { /* the status is all we need */ }
+      return { status: Number(res.status) };
+    } catch (err) {
+      return { error: err?.name === 'TimeoutError' || err?.name === 'AbortError' ? 'timeout' : 'network' };
+    }
+  }
+  return { publicKey: keys.publicKey, send };
+}
+```
+
+- [ ] **Step 4: Run the tests**
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/push.test.mjs 2>&1 | tail -4`
+Expected: `fail 0`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd ~/bona-wt/team-inbox && git add services/api/lib/push.mjs services/api/test/push.test.mjs
+git commit -m "push: VAPID keys, ES256 JWT and a payload-less Web Push with node:crypto
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 3: `lib/alerts.mjs` — subscriptions, who is alerted, the 2-minute rule
+
+**Files:**
+- Create: `services/api/lib/alerts.mjs`
+- Test: `services/api/test/alerts.test.mjs`
+
+- [ ] **Step 1: Write the failing tests** (`test/alerts.test.mjs`)
+
+```js
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import { openDb, tokenHash } from '../lib/db.mjs';
+import { createTeam, isExcludedLead } from '../lib/team.mjs';
+import { createAlerts, ALERT_EVERY_MS, ALERT_FRESH_MS, MAX_DEVICES_PER_USER } from '../lib/alerts.mjs';
+
+const NOW = 1_790_600_000_000;
+const b64u = (b) => Buffer.from(b).toString('base64url');
+const KEYS = { p256dh: b64u(Buffer.concat([Buffer.from([4]), crypto.randomBytes(64)])), auth: b64u(crypto.randomBytes(16)) };
+const ep = (n) => `https://fcm.googleapis.com/fcm/send/device-${n}`;
+
+/** A db with the owner, two staff members each signed in once, one `in` chat, and a fake pusher. */
+function scene({ answer = () => ({ status: 201 }), configured = true } = {}) {
+  const db = openDb(':memory:');
+  let clock = NOW;
+  const now = () => clock;
+  const team = createTeam(db, { now });
+  const owner = team.ensureOwner({ phone: '966593296933', name: 'Owner' });
+  const sara = team.addUser({ name: 'Sara', phone: '966500000001', role: 'staff' });
+  const omar = team.addUser({ name: 'Omar', phone: '966500000002', role: 'staff' });
+  const session = (u) => { const t = crypto.randomBytes(16).toString('hex'); db.createAuthSession(t, { now: clock, userId: u.user_id }); return tokenHash(t); };
+  const sessions = { owner: session(owner), sara: session(sara), omar: session(omar) };
+  db.insertLead({ lead_id: 'LEAD-A', created: NOW, updated: NOW, phone_e164: '966500000077', wa_jid: '966500000077@s.whatsapp.net', channel: 'whatsapp', stage: 'new', inbox_state: 'in', inbox_since: NOW });
+  const sent = [];
+  const pusher = configured ? { publicKey: 'PUB', send: async (endpoint) => { sent.push(endpoint); return answer(endpoint, sent.length); } } : null;
+  const logs = [];
+  const alerts = createAlerts({ db, pusher, isExcludedLead: (l) => isExcludedLead(team, db, l), now, log: (e) => logs.push(e) });
+  const sub = (who, n) => alerts.subscribe({ userId: { owner, sara, omar }[who].user_id, sessionHash: sessions[who], endpoint: ep(n), keys: KEYS });
+  return { db, team, owner, sara, omar, sessions, alerts, sent, logs, sub, tick: (ms) => { clock += ms; }, now };
+}
+
+test('subscribe checks the endpoint and keys, stores one row per endpoint, bound to the session', () => {
+  const s = scene();
+  assert.deepEqual(s.sub('sara', 1), { ok: true });
+  assert.deepEqual(s.alerts.subscribe({ userId: s.sara.user_id, sessionHash: s.sessions.sara, endpoint: 'https://evil.example/x', keys: KEYS }), { ok: false, error: 'bad_endpoint' });
+  assert.deepEqual(s.alerts.subscribe({ userId: s.sara.user_id, sessionHash: s.sessions.sara, endpoint: ep(2), keys: { p256dh: 'x', auth: 'y' } }), { ok: false, error: 'bad_keys' });
+  assert.deepEqual(s.alerts.subscribe({ userId: '', sessionHash: s.sessions.sara, endpoint: ep(2), keys: KEYS }), { ok: false, error: 'bad_request' });
+  assert.deepEqual(s.alerts.subscribe({ userId: s.sara.user_id, sessionHash: '', endpoint: ep(2), keys: KEYS }), { ok: false, error: 'bad_request' });
+  const rows = s.db.db.prepare('SELECT user_id, endpoint, session_hash, fail_count FROM push_subscriptions').all().map((r) => ({ ...r }));
+  assert.deepEqual(rows, [{ user_id: s.sara.user_id, endpoint: ep(1), session_hash: s.sessions.sara, fail_count: 0 }]);
+});
+
+test('the same endpoint posted by someone else (a shared phone) moves to them, it is never two rows', () => {
+  const s = scene();
+  s.sub('sara', 1);
+  s.db.db.prepare('UPDATE push_subscriptions SET fail_count = 3').run();
+  s.tick(1000);
+  s.sub('omar', 1);
+  const rows = s.db.db.prepare('SELECT user_id, session_hash, fail_count, updated FROM push_subscriptions').all().map((r) => ({ ...r }));
+  assert.deepEqual(rows, [{ user_id: s.omar.user_id, session_hash: s.sessions.omar, fail_count: 0, updated: NOW + 1000 }]);
+  assert.equal(s.alerts.countFor(s.sara.user_id), 0);
+});
+
+test(`at most ${MAX_DEVICES_PER_USER} devices a member: the least recently posted goes`, () => {
+  const s = scene();
+  for (let i = 1; i <= MAX_DEVICES_PER_USER + 2; i += 1) { s.sub('sara', i); s.tick(10); }
+  assert.equal(s.alerts.countFor(s.sara.user_id), MAX_DEVICES_PER_USER);
+  const kept = s.db.db.prepare('SELECT endpoint FROM push_subscriptions ORDER BY updated').all().map((r) => r.endpoint);
+  assert.deepEqual(kept, Array.from({ length: MAX_DEVICES_PER_USER }, (_, i) => ep(i + 3)));
+});
+
+test('unsubscribe removes only the member\'s own endpoint; forgetSession removes that session\'s devices', () => {
+  const s = scene();
+  s.sub('sara', 1); s.sub('sara', 2); s.sub('omar', 3);
+  assert.equal(s.alerts.unsubscribe({ userId: s.omar.user_id, endpoint: ep(1) }), false, 'not his');
+  assert.equal(s.alerts.unsubscribe({ userId: s.sara.user_id, endpoint: ep(1) }), true);
+  assert.equal(s.alerts.unsubscribe({ userId: s.sara.user_id, endpoint: 'nonsense' }), false);
+  assert.equal(s.alerts.forgetSession(s.sessions.sara), 1);
+  assert.equal(s.alerts.countFor(s.sara.user_id), 0);
+  assert.equal(s.alerts.countFor(s.omar.user_id), 1);
+});
+
+test('recipients: the handler; nobody handling → everyone active; needs a human → everyone; never the one excepted', () => {
+  const s = scene();
+  const lead = () => s.db.getLead('LEAD-A');
+  const all = [s.owner.user_id, s.sara.user_id, s.omar.user_id].sort();
+  assert.deepEqual(s.alerts.recipients(lead()).sort(), all);
+  s.db.db.prepare('UPDATE leads SET handler_user_id = ? WHERE lead_id = ?').run(s.sara.user_id, 'LEAD-A');
+  assert.deepEqual(s.alerts.recipients(lead()), [s.sara.user_id]);
+  s.team.deactivateUser(s.sara.user_id);
+  assert.deepEqual(s.alerts.recipients(lead()).sort(), [s.owner.user_id, s.omar.user_id].sort(), 'an inactive handler is nobody');
+  s.team.reactivateUser(s.sara.user_id);
+  s.db.db.prepare('UPDATE leads SET needs_human = 1 WHERE lead_id = ?').run('LEAD-A');
+  assert.deepEqual(s.alerts.recipients(lead()).sort(), all);
+  s.db.db.prepare('UPDATE leads SET needs_human = 0 WHERE lead_id = ?').run('LEAD-A');
+  assert.deepEqual(s.alerts.recipients(lead(), { reason: 'needs_human' }).sort(), all);
+  assert.deepEqual(s.alerts.recipients(lead(), { reason: 'needs_human', exceptUserId: s.omar.user_id }).sort(), [s.owner.user_id, s.sara.user_id].sort());
+});
+
+test('notify pushes every live device of every recipient once, and logs counts only', async () => {
+  const s = scene();
+  s.sub('owner', 1); s.sub('sara', 2); s.sub('sara', 3); s.sub('omar', 4);
+  const out = await s.alerts.notify('LEAD-A', { ts: NOW });
+  assert.deepEqual(out, { users: 3, devices: 4, ok: 4, gone: 0, failed: 0 });
+  assert.deepEqual(s.sent.sort(), [ep(1), ep(2), ep(3), ep(4)]);
+  const line = s.logs.find((l) => l.evt === 'push.sent');
+  assert.deepEqual(line, { evt: 'push.sent', leadId: 'LEAD-A', reason: 'inbound', users: 3, devices: 4, ok: 4, gone: 0, failed: 0 });
+  assert.doesNotMatch(JSON.stringify(s.logs), /fcm\.googleapis|device-|966|Sara|Omar/);
+  assert.equal(s.db.db.prepare('SELECT COUNT(*) n FROM push_subscriptions WHERE last_ok = ?').get(NOW).n, 4);
+});
+
+test('one push per chat per member per 2 minutes, however many messages; marked before the sends', async () => {
+  const s = scene();
+  s.sub('sara', 1);
+  const [a, b] = await Promise.all([s.alerts.notify('LEAD-A', { ts: NOW }), s.alerts.notify('LEAD-A', { ts: NOW })]);
+  assert.equal(a.ok, 1);
+  assert.deepEqual(b, { skipped: 'quiet' });
+  s.tick(ALERT_EVERY_MS - 1);
+  assert.deepEqual(await s.alerts.notify('LEAD-A', { ts: NOW }), { skipped: 'quiet' });
+  s.tick(1);
+  assert.equal((await s.alerts.notify('LEAD-A', { ts: NOW })).ok, 1);
+  assert.equal(s.sent.length, 2);
+});
+
+test('the rule is per member: a member who was just alerted is skipped, the others are not', async () => {
+  const s = scene();
+  s.sub('sara', 1); s.sub('omar', 2);
+  s.db.db.prepare('UPDATE leads SET handler_user_id = ? WHERE lead_id = ?').run(s.sara.user_id, 'LEAD-A');
+  await s.alerts.notify('LEAD-A', { ts: NOW });
+  s.db.db.prepare('UPDATE leads SET handler_user_id = NULL WHERE lead_id = ?').run('LEAD-A');
+  const out = await s.alerts.notify('LEAD-A', { ts: NOW });
+  assert.deepEqual({ users: out.users, devices: out.devices }, { users: 1, devices: 1 });
+  assert.deepEqual(s.sent, [ep(1), ep(2)]);
+});
+
+test('no push for a chat that is not in the inbox, or is a colleague\'s or never-list number', async () => {
+  const s = scene();
+  s.sub('sara', 1);
+  s.db.db.prepare("UPDATE leads SET inbox_state = 'unsure' WHERE lead_id = 'LEAD-A'").run();
+  assert.deepEqual(await s.alerts.notify('LEAD-A', { ts: NOW }), { skipped: 'not_in_inbox' });
+  s.db.db.prepare("UPDATE leads SET inbox_state = 'in' WHERE lead_id = 'LEAD-A'").run();
+  s.team.addNever({ phone: '966500000077' });
+  assert.deepEqual(await s.alerts.notify('LEAD-A', { ts: NOW }), { skipped: 'not_in_inbox' });
+  assert.deepEqual(await s.alerts.notify('LEAD-NOPE', { ts: NOW }), { skipped: 'not_in_inbox' });
+  assert.equal(s.sent.length, 0);
+});
+
+test(`a message older than ${ALERT_FRESH_MS / 60_000} minutes is not an alert (an outage's catch-up)`, async () => {
+  const s = scene();
+  s.sub('sara', 1);
+  assert.deepEqual(await s.alerts.notify('LEAD-A', { ts: NOW - ALERT_FRESH_MS - 1 }), { skipped: 'old' });
+  assert.equal((await s.alerts.notify('LEAD-A', { ts: NOW - ALERT_FRESH_MS })).ok, 1);
+});
+
+test('only live sessions of active members get pushes: logged out, expired, deactivated, another member\'s session', async () => {
+  const s = scene();
+  s.sub('sara', 1); s.sub('omar', 2); s.sub('owner', 3);
+  s.db.db.prepare('DELETE FROM auth_sessions WHERE token_hash = ?').run(s.sessions.sara);
+  s.db.db.prepare('UPDATE auth_sessions SET expires = ? WHERE token_hash = ?').run(NOW - 1, s.sessions.omar);
+  s.db.db.prepare('UPDATE push_subscriptions SET session_hash = ? WHERE endpoint = ?').run(s.sessions.sara, ep(3));
+  assert.deepEqual(await s.alerts.notify('LEAD-A', { ts: NOW }), { skipped: 'no_devices' });
+  assert.equal(s.sent.length, 0);
+  assert.equal(s.alerts.pruneOrphans(), 3, 'gone and expired sessions take their devices with them');
+});
+
+test('404/410 delete the device; any other answer counts a failure, is logged by status, and is not retried', async () => {
+  const answers = { [ep(1)]: { status: 410 }, [ep(2)]: { status: 404 }, [ep(3)]: { status: 403 }, [ep(4)]: { error: 'timeout' }, [ep(5)]: { status: 201 } };
+  const s = scene({ answer: (endpoint) => answers[endpoint] });
+  for (let i = 1; i <= 5; i += 1) s.sub('sara', i);
+  const out = await s.alerts.notify('LEAD-A', { ts: NOW });
+  assert.deepEqual(out, { users: 1, devices: 5, ok: 1, gone: 2, failed: 2 }, 'everyone is due, only Sara has devices');
+  assert.equal(s.sent.length, 5, 'one try each');
+  const left = s.db.db.prepare('SELECT endpoint, fail_count FROM push_subscriptions ORDER BY endpoint').all().map((r) => [r.endpoint, r.fail_count]);
+  assert.deepEqual(left, [[ep(3), 1], [ep(4), 1], [ep(5), 0]]);
+  const refused = s.logs.filter((l) => l.evt === 'push.refused').map(({ level, status, error }) => ({ level, status, error }));
+  assert.deepEqual(refused, [{ level: 'warn', status: 403, error: undefined }, { level: 'warn', status: undefined, error: 'timeout' }]);
+});
+
+test('without keys nothing is ever sent, and notify still resolves', async () => {
+  const s = scene({ configured: false });
+  assert.equal(s.alerts.configured, false);
+  assert.equal(s.alerts.publicKey, null);
+  s.sub('sara', 1);
+  assert.deepEqual(await s.alerts.notify('LEAD-A', { ts: NOW }), { skipped: 'off' });
+});
+
+test('notify never rejects, even when the db throws; flush waits for every push in flight', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const s = scene({ answer: async () => { await gate; return { status: 201 }; } });
+  s.sub('sara', 1);
+  const p = s.alerts.notify('LEAD-A', { ts: NOW });
+  let flushed = false;
+  const f = s.alerts.flush().then(() => { flushed = true; });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(flushed, false);
+  release();
+  await f;
+  assert.equal((await p).ok, 1);
+  s.db.close();
+  const broken = await s.alerts.notify('LEAD-A', { ts: NOW });
+  assert.deepEqual(broken, { error: 'failed' });
+  assert.ok(s.logs.some((l) => l.evt === 'push.failed' && l.level === 'error'));
+});
+```
+
+- [ ] **Step 2: Run to see them fail**
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/alerts.test.mjs 2>&1 | tail -3`
+Expected: FAIL — `Cannot find module '../lib/alerts.mjs'`.
+
+- [ ] **Step 3: Implement** `services/api/lib/alerts.mjs`:
+
+```js
+/**
+ * Phone alerts for the Bona inbox (2026-09-27 design §5, Phase 3).
+ *
+ * A member's browser subscribes (lib/dashboard/routes.mjs → `subscribe`); the subscription
+ * belongs to that member AND to the login session that posted it (P3-5), so a push reaches
+ * only a device someone is still signed in on. When the poller stores a client message of an
+ * `in` chat, `notify` decides who hears of it, as the chat is at that moment:
+ *
+ *   - the chat must be `in` the inbox and not a colleague's or a never-list number;
+ *   - "needs a human" (Phase 4's hand-over) → every active member; otherwise its handler,
+ *     when it has an active one; otherwise every active member; never `exceptUserId`;
+ *   - at most one push per chat per member every two minutes (in memory), marked before the
+ *     sends start, so a burst of messages is one alert;
+ *   - a message more than 30 minutes old is not an alert (the poller catching up after an
+ *     outage): it waits in the list as unread.
+ *
+ * Each of the recipients' live devices gets one empty push (lib/push.mjs). 404/410 means the
+ * browser dropped the subscription: the row goes. Anything else counts a failure and is
+ * logged by its status only. Nothing is retried. `notify` never rejects. No endpoint, name,
+ * number or message text is ever logged: counts and ids only.
+ */
+import { newId } from './db.mjs';
+import { pushEndpoint, subscriptionKeys } from './push.mjs';
+
+export const ALERT_EVERY_MS = 120_000;
+export const ALERT_FRESH_MS = 30 * 60_000;
+export const MAX_DEVICES_PER_USER = 10;
+/** How many (member, chat) marks the 2-minute rule remembers before it forgets the old ones. */
+const MARKS_MAX = 5000;
+
+export function createAlerts({ db, pusher = null, isExcludedLead = () => false, now = () => Date.now(), log = () => {} }) {
+  const { transaction } = db;
+  const stmts = new Map();
+  const prep = (sql) => {
+    let s = stmts.get(sql);
+    if (!s) { s = db.db.prepare(sql); stmts.set(sql, s); }
+    return s;
+  };
+  const marks = new Map(); // `${userId}\n${leadId}` → ts of the last push
+  const inflight = new Set();
+  const say = (entry) => { try { log(entry); } catch { /* a logger never stops an alert */ } };
+
+  function subscribe({ userId, sessionHash, endpoint, keys } = {}) {
+    const url = pushEndpoint(endpoint);
+    if (!url) return { ok: false, error: 'bad_endpoint' };
+    const k = subscriptionKeys(keys);
+    if (!k) return { ok: false, error: 'bad_keys' };
+    if (typeof userId !== 'string' || !userId || typeof sessionHash !== 'string' || !sessionHash) return { ok: false, error: 'bad_request' };
+    const t = now();
+    transaction(() => {
+      const moved = prep(`UPDATE push_subscriptions SET user_id = ?, session_hash = ?, p256dh = ?, auth = ?, updated = ?, fail_count = 0
+                          WHERE endpoint = ?`).run(userId, sessionHash, k.p256dh, k.auth, t, url).changes;
+      if (!moved) {
+        prep(`INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, session_hash, created, updated, last_ok, fail_count)
+              VALUES (?,?,?,?,?,?,?,?,NULL,0)`).run(newId('PSH'), userId, url, k.p256dh, k.auth, sessionHash, t, t);
+      }
+      prep(`DELETE FROM push_subscriptions WHERE user_id = ? AND id NOT IN
+              (SELECT id FROM push_subscriptions WHERE user_id = ? ORDER BY updated DESC, rowid DESC LIMIT ?)`)
+        .run(userId, userId, MAX_DEVICES_PER_USER);
+    });
+    return { ok: true };
+  }
+
+  function unsubscribe({ userId, endpoint } = {}) {
+    const url = pushEndpoint(endpoint);
+    if (!url || typeof userId !== 'string' || !userId) return false;
+    return prep('DELETE FROM push_subscriptions WHERE endpoint = ? AND user_id = ?').run(url, userId).changes === 1;
+  }
+
+  const forgetSession = (sessionHash) => Number(prep('DELETE FROM push_subscriptions WHERE session_hash = ?').run(String(sessionHash ?? '')).changes);
+  const pruneOrphans = () => Number(prep(`DELETE FROM push_subscriptions WHERE session_hash IS NULL
+      OR session_hash NOT IN (SELECT token_hash FROM auth_sessions WHERE expires >= ?)`).run(now()).changes);
+  const countFor = (userId) => prep('SELECT COUNT(*) AS n FROM push_subscriptions WHERE user_id = ?').get(String(userId ?? '')).n;
+
+  function recipients(lead, { reason = 'inbound', exceptUserId = null } = {}) {
+    const everyone = () => prep('SELECT user_id FROM users WHERE active = 1 ORDER BY user_id').all().map((r) => r.user_id);
+    let users;
+    if (reason === 'needs_human' || Number(lead?.needs_human) === 1) users = everyone();
+    else if (lead?.handler_user_id && prep('SELECT 1 FROM users WHERE user_id = ? AND active = 1').get(lead.handler_user_id)) users = [lead.handler_user_id];
+    else users = everyone();
+    return users.filter((u) => u !== exceptUserId);
+  }
+
+  const markKey = (userId, leadId) => `${userId}\n${leadId}`;
+  function prune(t) {
+    if (marks.size <= MARKS_MAX) return;
+    for (const [k, at] of marks) if (t - at >= ALERT_EVERY_MS) marks.delete(k);
+  }
+
+  async function run(leadId, { reason, exceptUserId, ts }) {
+    if (!pusher) return { skipped: 'off' };
+    const t = now();
+    if (ts != null && Number.isFinite(Number(ts)) && Number(ts) < t - ALERT_FRESH_MS) return { skipped: 'old' };
+    const lead = db.getLead(leadId);
+    if (!lead || lead.inbox_state !== 'in' || isExcludedLead(lead)) return { skipped: 'not_in_inbox' };
+    const due = recipients(lead, { reason, exceptUserId }).filter((u) => {
+      const at = marks.get(markKey(u, leadId));
+      return at === undefined || t - at >= ALERT_EVERY_MS;
+    });
+    if (!due.length) return { skipped: 'quiet' };
+    const devices = prep(`SELECT s.id, s.user_id, s.endpoint FROM push_subscriptions s
+        JOIN users u ON u.user_id = s.user_id AND u.active = 1
+        JOIN auth_sessions a ON a.token_hash = s.session_hash AND a.user_id = s.user_id AND a.expires >= ?
+        WHERE s.user_id IN (SELECT value FROM json_each(?))
+        ORDER BY s.rowid`).all(t, JSON.stringify(due));
+    if (!devices.length) return { skipped: 'no_devices' };
+    // Every member due is marked, not only those a device was found for: the alert for this
+    // burst is going out now, so a second message in the same two minutes is quiet for all of
+    // them (a member who subscribes inside that window hears of the next burst).
+    for (const u of due) marks.set(markKey(u, leadId), t);
+    prune(t);
+    const users = new Set(devices.map((d) => d.user_id));
+    const answers = await Promise.all(devices.map(async (d) => ({ d, a: await pusher.send(d.endpoint) })));
+    let ok = 0;
+    let gone = 0;
+    let failed = 0;
+    for (const { d, a } of answers) {
+      if (a?.status >= 200 && a.status < 300) {
+        ok += 1;
+        prep('UPDATE push_subscriptions SET last_ok = ?, fail_count = 0 WHERE id = ?').run(now(), d.id);
+      } else if (a?.status === 404 || a?.status === 410) {
+        gone += 1;
+        prep('DELETE FROM push_subscriptions WHERE id = ?').run(d.id);
+      } else {
+        failed += 1;
+        prep('UPDATE push_subscriptions SET fail_count = fail_count + 1 WHERE id = ?').run(d.id);
+        say({ level: 'warn', evt: 'push.refused', ...(a?.status ? { status: a.status } : { error: a?.error ?? 'unknown' }) });
+      }
+    }
+    const out = { users: users.size, devices: devices.length, ok, gone, failed };
+    say({ evt: 'push.sent', leadId, reason, ...out });
+    return out;
+  }
+
+  function notify(leadId, { reason = 'inbound', exceptUserId = null, ts = null } = {}) {
+    const p = Promise.resolve()
+      .then(() => run(String(leadId ?? ''), { reason, exceptUserId, ts }))
+      .catch((err) => {
+        say({ level: 'error', evt: 'push.failed', name: typeof err?.name === 'string' ? err.name.slice(0, 40) : 'Error' });
+        return { error: 'failed' };
+      });
+    inflight.add(p);
+    p.finally(() => inflight.delete(p));
+    return p;
+  }
+
+  const flush = async () => { await Promise.allSettled([...inflight]); };
+
+  return {
+    configured: Boolean(pusher), publicKey: pusher?.publicKey ?? null,
+    subscribe, unsubscribe, forgetSession, pruneOrphans, countFor, recipients, notify, flush,
+  };
+}
+```
+Note the throttle-marking happens synchronously inside `run` before the first `await`, and two `notify` calls started in the same tick run their `run`s one after the other (each is a `.then` on a resolved promise), so the second sees the first's marks — the test "marked before the sends" holds. The `db.close()` case makes `db.getLead` throw → `{ error: 'failed' }`.
+
+- [ ] **Step 4: Run the tests**
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/alerts.test.mjs 2>&1 | tail -4`
+Expected: `fail 0`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd ~/bona-wt/team-inbox && git add services/api/lib/alerts.mjs services/api/test/alerts.test.mjs
+git commit -m "alerts: session-bound push subscriptions, recipient rules, one push per chat per member per 2 min
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 4: Deactivation deletes the member's push subscriptions (`lib/team.mjs`, §3.4)
+
+**Files:**
+- Modify: `services/api/lib/team.mjs` (`deactivateUser`)
+- Test: `services/api/test/team.test.mjs`
+
+- [ ] **Step 1: Write the failing test** (append to `team.test.mjs`)
+
+```js
+test('deactivating a member deletes their push subscriptions in the same transaction as their sessions (§3.4)', () => {
+  const s = openDb(':memory:');
+  const team = createTeam(s);
+  team.ensureOwner({ phone: '966593296933' });
+  const sara = team.addUser({ name: 'Sara', phone: '966500000001' });
+  const omar = team.addUser({ name: 'Omar', phone: '966500000002' });
+  const ins = s.db.prepare('INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, session_hash, created, updated) VALUES (?,?,?,?,?,?,1,1)');
+  ins.run('P1', sara.user_id, 'https://fcm.googleapis.com/fcm/send/1', 'k', 'a', 'h1');
+  ins.run('P2', sara.user_id, 'https://web.push.apple.com/2', 'k', 'a', 'h2');
+  ins.run('P3', omar.user_id, 'https://fcm.googleapis.com/fcm/send/3', 'k', 'a', 'h3');
+  team.deactivateUser(sara.user_id);
+  const left = s.db.prepare('SELECT id FROM push_subscriptions ORDER BY id').all().map((r) => r.id);
+  assert.deepEqual(left, ['P3']);
+  team.reactivateUser(sara.user_id);
+  assert.deepEqual(s.db.prepare('SELECT id FROM push_subscriptions ORDER BY id').all().map((r) => r.id), ['P3'], 'reactivating brings no device back');
+  s.close();
+});
+```
+(If `createTeam`'s import in this file lacks anything used here, add it; `openDb` and `createTeam` are already imported.)
+
+- [ ] **Step 2: Run to see it fail**
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/team.test.mjs 2>&1 | grep -E "^not ok" | head`
+Expected: the new test fails (`['P1','P2','P3']` left).
+
+- [ ] **Step 3: Implement** — in `deactivateUser`, after the `DELETE FROM auth_sessions` line:
+
+```js
+      // Their phones stop getting alerts at once (§3.4, Phase 3): every device, not only the
+      // sessions' ones — a subscription whose session was already gone is theirs too.
+      prep('DELETE FROM push_subscriptions WHERE user_id = ?').run(user.user_id);
+```
+and change the function's comment to `/** Off, logged out everywhere, codes void, phone alerts gone — one transaction. */`.
+
+- [ ] **Step 4: Run team + whole suite**
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/team.test.mjs 2>&1 | tail -3 && node --test api/test/*.test.mjs 2>&1 | tail -3`
+Expected: `fail 0`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd ~/bona-wt/team-inbox && git add services/api/lib/team.mjs services/api/test/team.test.mjs
+git commit -m "team: deactivation deletes the member's push subscriptions
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 5: Config and `bin/vapid-keys.mjs`
+
+**Files:**
+- Modify: `services/api/lib/config.mjs` (`loadConfig`, `redacted`)
+- Create: `services/api/bin/vapid-keys.mjs`
+- Test: `services/api/test/config.test.mjs`, `services/api/test/vapid-keys.test.mjs`
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `config.test.mjs`:
+```js
+test('VAPID keys come from the env; the subject defaults to the site; redacted() says only whether keys exist', () => {
+  const cfg = loadConfig({ env: { BONA_VAPID_PUBLIC: ' PUB ', BONA_VAPID_PRIVATE: 'PRIV' }, ids: {} });
+  assert.equal(cfg.vapidPublic, 'PUB');
+  assert.equal(cfg.vapidPrivate, 'PRIV');
+  assert.equal(cfg.vapidSubject, cfg.siteUrl);
+  assert.equal(loadConfig({ env: { BONA_VAPID_SUBJECT: 'mailto:ops@example.com' }, ids: {} }).vapidSubject, 'mailto:ops@example.com');
+  const r = redacted(cfg);
+  assert.equal(r.hasVapid, true);
+  assert.doesNotMatch(JSON.stringify(r), /PUB|PRIV/);
+  assert.equal(redacted(loadConfig({ env: {}, ids: {} })).hasVapid, false);
+});
+```
+(`loadConfig` and `redacted` are already imported in that file; if not, import them from `../lib/config.mjs`.)
+
+Create `test/vapid-keys.test.mjs`:
+```js
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { writeVapidKeys } from '../bin/vapid-keys.mjs';
+import { parseEnvText } from '../lib/env.mjs';
+import { vapidKeys } from '../lib/push.mjs';
+
+const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../bin/vapid-keys.mjs');
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'bona-vapid-'));
+
+test('keys are appended once to the env file, as a working pair, and the file stays 0600', () => {
+  const dir = tmp();
+  const file = path.join(dir, 'bona-services.env');
+  fs.writeFileSync(file, 'BONA_WA_POLL_MS=20000', { mode: 0o600 });
+  const out = writeVapidKeys(file);
+  assert.equal(out.written, true);
+  const env = parseEnvText(fs.readFileSync(file, 'utf8'));
+  assert.equal(env.BONA_WA_POLL_MS, '20000', 'what was there is kept');
+  assert.ok(vapidKeys({ publicKey: env.BONA_VAPID_PUBLIC, privateKey: env.BONA_VAPID_PRIVATE }), 'a pair that loads');
+  assert.equal(out.publicKey, env.BONA_VAPID_PUBLIC);
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  const again = writeVapidKeys(file);
+  assert.deepEqual(again, { written: false, reason: 'present' });
+  assert.equal(parseEnvText(fs.readFileSync(file, 'utf8')).BONA_VAPID_PRIVATE, env.BONA_VAPID_PRIVATE, 'never overwritten');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('a subject is written only when given; a missing file is created 0600', () => {
+  const dir = tmp();
+  const file = path.join(dir, 'new.env');
+  writeVapidKeys(file, { subject: 'mailto:ops@example.com' });
+  assert.equal(parseEnvText(fs.readFileSync(file, 'utf8')).BONA_VAPID_SUBJECT, 'mailto:ops@example.com');
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('the CLI prints the public key only, never the private one', () => {
+  const dir = tmp();
+  const file = path.join(dir, 'x.env');
+  const printed = execFileSync(process.execPath, [BIN, '--file', file], { encoding: 'utf8' });
+  const env = parseEnvText(fs.readFileSync(file, 'utf8'));
+  assert.ok(printed.includes(env.BONA_VAPID_PUBLIC));
+  assert.ok(!printed.includes(env.BONA_VAPID_PRIVATE));
+  assert.match(execFileSync(process.execPath, [BIN, '--file', file], { encoding: 'utf8' }), /already/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+```
+
+- [ ] **Step 2: Run to see them fail**
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/config.test.mjs api/test/vapid-keys.test.mjs 2>&1 | grep -E "^not ok|Cannot find" | head`
+Expected: FAIL — no `vapidPublic`; `Cannot find module '../bin/vapid-keys.mjs'`.
+
+- [ ] **Step 3: Implement**
+
+In `loadConfig`'s returned object (after `dashCookieDays`):
+```js
+    // Phone alerts (Web Push, Phase 3): generated once on the VPS by bin/vapid-keys.mjs into
+    // ~/.secrets/bona-services.env. Missing → no alerts, everything else unchanged. The
+    // subject is the contact RFC 8292 asks for: the site's URL, so no address is published.
+    vapidPublic: String(env.BONA_VAPID_PUBLIC ?? '').trim(),
+    vapidPrivate: String(env.BONA_VAPID_PRIVATE ?? '').trim(),
+    vapidSubject: String(env.BONA_VAPID_SUBJECT ?? '').trim() || siteUrl,
+```
+In `redacted`, add `hasVapid: Boolean(cfg.vapidPublic && cfg.vapidPrivate),`.
+
+Create `services/api/bin/vapid-keys.mjs`:
+```js
+#!/usr/bin/env node
+/**
+ * Generate the Web Push (VAPID) key pair for phone alerts — ONCE, on the VPS (design §5):
+ *
+ *   node /opt/bona/services/api/bin/vapid-keys.mjs --file ~/.secrets/bona-services.env [--subject mailto:…]
+ *
+ * Appends BONA_VAPID_PUBLIC / BONA_VAPID_PRIVATE (and BONA_VAPID_SUBJECT when given) and
+ * keeps the file 0600. Never overwrites keys that are there: every phone's subscription is
+ * tied to the public key it was made with, so a new pair silently ends every alert until
+ * each member turns alerts on again. Prints the public key only. bona-api reads the keys
+ * at its next start (deploy.sh).
+ */
+import fs from 'node:fs';
+import { pathToFileURL } from 'node:url';
+import { generateVapidKeys } from '../lib/push.mjs';
+import { parseEnvText } from '../lib/env.mjs';
+
+export function writeVapidKeys(file, { subject = null } = {}) {
+  const text = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  const env = parseEnvText(text);
+  if (env.BONA_VAPID_PUBLIC || env.BONA_VAPID_PRIVATE) return { written: false, reason: 'present' };
+  const k = generateVapidKeys();
+  const lines = [
+    `# Web Push (phone alerts), ${new Date().toISOString().slice(0, 10)}, services/api/bin/vapid-keys.mjs. Do not rotate: every phone's alerts would end.`,
+    `BONA_VAPID_PUBLIC=${k.publicKey}`,
+    `BONA_VAPID_PRIVATE=${k.privateKey}`,
+    ...(subject ? [`BONA_VAPID_SUBJECT=${subject}`] : []),
+  ];
+  const sep = text && !text.endsWith('\n') ? '\n' : '';
+  fs.appendFileSync(file, `${sep}${lines.join('\n')}\n`, { mode: 0o600 });
+  fs.chmodSync(file, 0o600);
+  return { written: true, publicKey: k.publicKey };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const args = process.argv.slice(2);
+  const at = (flag) => { const i = args.indexOf(flag); return i >= 0 ? args[i + 1] : null; };
+  const file = at('--file');
+  if (!file) {
+    console.error('usage: vapid-keys.mjs --file <path> [--subject mailto:…|https://…]');
+    process.exit(2);
+  }
+  const out = writeVapidKeys(file, { subject: at('--subject') });
+  console.log(out.written ? `VAPID keys written. Public key: ${out.publicKey}` : 'VAPID keys already present — nothing changed.');
+}
+```
+
+- [ ] **Step 4: Run the tests**
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/config.test.mjs api/test/vapid-keys.test.mjs 2>&1 | tail -3`
+Expected: `fail 0`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd ~/bona-wt/team-inbox && git add services/api/lib/config.mjs services/api/bin/vapid-keys.mjs services/api/test/config.test.mjs services/api/test/vapid-keys.test.mjs
+git commit -m "config: VAPID keys; bin/vapid-keys.mjs writes them once, never overwrites
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 6: The installable app — assets, the page CSP, the layout head
+
+**Files:**
+- Create: `services/api/lib/dashboard/assets/sw.js`, `assets/app.js` (a stub here; Task 8 fills it), `assets/manifest.webmanifest`, `assets/icon-192.png`, `assets/icon-512.png`, `assets/apple-touch-icon.png`
+- Create: `services/api/lib/dashboard/assets.mjs`
+- Modify: `services/api/lib/dashboard/routes.mjs` (`PAGE_CSP`, `PAGE_SECURITY_HEADERS`, `sendHtml`, asset serving), `services/api/lib/dashboard/render.mjs` (layout head, `[hidden]` rule, header comments that say "no script")
+- Test: `services/api/test/dashboard-assets.test.mjs` (new); modify `dashboard-routes.test.mjs`, `dashboard-inbox.test.mjs`, `dashboard-render-inbox.test.mjs` (CSP constant and the "no script" assertions)
+
+- [ ] **Step 1: Copy the icons** (the VPS checkout has no `public/`, pre-work 5)
+
+```bash
+cd ~/bona-wt/team-inbox && mkdir -p services/api/lib/dashboard/assets
+cp public/icon-192.png public/icon-512.png public/apple-touch-icon.png services/api/lib/dashboard/assets/
+file services/api/lib/dashboard/assets/*.png
+```
+Expected: three PNGs, 192×192, 512×512, 180×180.
+
+- [ ] **Step 2: Write the failing tests** — create `test/dashboard-assets.test.mjs`:
+
+```js
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import { ASSETS } from '../lib/dashboard/assets.mjs';
+import { PAGE_CSP, PAGE_SECURITY_HEADERS, SECURITY_HEADERS } from '../lib/dashboard/routes.mjs';
+import { layout } from '../lib/dashboard/render.mjs';
+
+const PATHS = ['/dashboard/sw.js', '/dashboard/app.js', '/dashboard/manifest.webmanifest', '/dashboard/icon-192.png', '/dashboard/icon-512.png', '/dashboard/apple-touch-icon.png'];
+
+test('the asset map is exactly the six files, each with its type', () => {
+  assert.deepEqual([...ASSETS.keys()].sort(), [...PATHS].sort());
+  assert.equal(ASSETS.get('/dashboard/sw.js').type, 'text/javascript; charset=utf-8');
+  assert.equal(ASSETS.get('/dashboard/app.js').type, 'text/javascript; charset=utf-8');
+  assert.equal(ASSETS.get('/dashboard/manifest.webmanifest').type, 'application/manifest+json; charset=utf-8');
+  for (const p of PATHS.filter((x) => x.endsWith('.png'))) {
+    assert.equal(ASSETS.get(p).type, 'image/png');
+    assert.deepEqual([...ASSETS.get(p).body.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47], `${p} is a PNG`);
+  }
+});
+
+test('the service worker shows a fixed notification and caches nothing, intercepts nothing (P3-3)', () => {
+  const src = ASSETS.get('/dashboard/sw.js').body.toString('utf8');
+  new vm.Script(src, { filename: 'sw.js' });
+  assert.doesNotMatch(src, /\bcaches\b|addEventListener\(\s*['"]fetch['"]|importScripts|onfetch/);
+  assert.match(src, /addEventListener\(\s*'push'/);
+  assert.match(src, /showNotification\(\s*'New Bona message'/);
+  assert.match(src, /addEventListener\(\s*'notificationclick'/);
+  assert.match(src, /'\/dashboard\/push\/open'/);
+});
+
+test('app.js is one classic script that compiles', () => {
+  new vm.Script(ASSETS.get('/dashboard/app.js').body.toString('utf8'), { filename: 'app.js' });
+});
+
+test('the manifest makes /dashboard/ an app that starts on the inbox', () => {
+  const m = JSON.parse(ASSETS.get('/dashboard/manifest.webmanifest').body.toString('utf8'));
+  assert.equal(m.scope, '/dashboard');
+  assert.equal(m.start_url, '/dashboard/inbox');
+  assert.equal(m.id, '/dashboard/');
+  assert.equal(m.display, 'standalone');
+  assert.deepEqual(m.icons.map((i) => [i.src, i.sizes]), [['/dashboard/icon-192.png', '192x192'], ['/dashboard/icon-512.png', '512x512']]);
+});
+
+test('pages open script, worker, connect and manifest to self only; JSON keeps default-src none (P3-1)', () => {
+  assert.equal(PAGE_CSP, "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'");
+  assert.equal(PAGE_SECURITY_HEADERS['Content-Security-Policy'], PAGE_CSP);
+  assert.equal(SECURITY_HEADERS['Content-Security-Policy'], "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'");
+  assert.doesNotMatch(PAGE_CSP, /unsafe-inline'[^;]*script|script-src[^;]*unsafe/);
+});
+
+test('the layout links the manifest and icons on every page; app.js and the push key only for a signed-in person', () => {
+  const out = layout({ title: 'Login', body: '', chrome: false });
+  assert.match(out, /<link rel="manifest" href="\/dashboard\/manifest\.webmanifest">/);
+  assert.match(out, /<link rel="apple-touch-icon" href="\/dashboard\/apple-touch-icon\.png">/);
+  assert.doesNotMatch(out, /<script|bona-push-key/);
+  const me = { user_id: 'U1', name: 'Sara', role: 'staff', pushKey: 'BKey"<x>' };
+  const signed = layout({ title: 'Inbox', body: '', me });
+  assert.equal((signed.match(/<script\b[^>]*>/g) ?? []).join('|'), '<script src="/dashboard/app.js" defer>', 'one script, ours, no inline code');
+  assert.match(signed, /<meta name="bona-push-key" content="BKey&quot;&lt;x&gt;">/);
+  assert.match(layout({ title: 'x', body: '', me: { ...me, pushKey: undefined } }), /<meta name="bona-push-key" content="">/);
+});
+```
+
+In `dashboard-routes.test.mjs` and `dashboard-inbox.test.mjs`, replace `assertLocked`'s CSP line with a check by content type, and add the page constant beside `CSP`:
+```js
+const PAGE_CSP = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
+// in assertLocked:
+  const html = String(res.headers.get('content-type') ?? '').startsWith('text/html');
+  assert.equal(res.headers.get('content-security-policy'), html ? PAGE_CSP : CSP);
+```
+Replace every "ships no script" assertion (`dashboard-routes.test.mjs` ~188 and ~351, `dashboard-inbox.test.mjs` ~249, `dashboard-render-inbox.test.mjs` ~86 and ~108 when the page has a `me`) with "only our own script":
+```js
+const OWN_SCRIPT = '<script src="/dashboard/app.js" defer></script>';
+const onlyOurScript = (html) => !/<script/i.test(html.split(OWN_SCRIPT).join(''));
+assert.ok(onlyOurScript(html), 'no script but our own app.js');
+```
+(Keep the XSS assertions that check a hostile name is escaped: they still hold.) In `tiktok-accounts.test.mjs:118` nothing changes (it matches `form-action 'self'`, present in both policies).
+
+Add to `dashboard-routes.test.mjs` (inside its `withDash` harness; `get` is its unauthenticated fetch helper — use the helper the file already has for a signed-out GET):
+```js
+test('the app files are served signed out, with their types, never cached; a POST is refused', async () => {
+  await withDash({}, async (h) => {
+    for (const [p, type] of [['/dashboard/sw.js', 'text/javascript; charset=utf-8'], ['/dashboard/app.js', 'text/javascript; charset=utf-8'],
+      ['/dashboard/manifest.webmanifest', 'application/manifest+json; charset=utf-8'], ['/dashboard/icon-192.png', 'image/png']]) {
+      const res = await h.get(p);
+      assert.equal(res.status, 200, p);
+      assert.equal(res.headers.get('content-type'), type, p);
+      assert.equal(res.headers.get('cache-control'), 'no-store', p);
+      assert.equal(res.headers.get('x-content-type-options'), 'nosniff', p);
+      assert.ok((await res.arrayBuffer()).byteLength > 0, p);
+    }
+    assert.equal((await h.get('/dashboard/sw.js')).headers.get('content-security-policy'), "default-src 'none'; img-src 'self'");
+    const head = await fetch(h.base + '/dashboard/app.js', { method: 'HEAD' });
+    assert.equal(head.status, 200);
+    const post = await fetch(h.base + '/dashboard/sw.js', { method: 'POST' });
+    assert.equal(post.status, 405);
+    assert.equal((await h.get('/dashboard/sw.js/../team')).status, 302, 'not a file path: an ordinary page, which needs a login');
+  });
+});
+```
+(If `withDash`'s handle does not expose `base`, add it to the object it hands the test, as `dashboard-inbox.test.mjs` builds it: `` `http://127.0.0.1:${app.server.address().port}` ``.)
+
+- [ ] **Step 3: Run to see them fail**
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/dashboard-assets.test.mjs 2>&1 | tail -3`
+Expected: FAIL — `Cannot find module '../lib/dashboard/assets.mjs'`.
+
+- [ ] **Step 4: Implement**
+
+`services/api/lib/dashboard/assets/sw.js`:
+```js
+/*
+ * The Bona dashboard's service worker (design §5, Phase 3). Scope /dashboard/.
+ *
+ * It exists only to show phone alerts. It keeps no copy of anything and never intercepts
+ * a request: there is no fetch listener, so every page and every answer comes from the
+ * server, `no-store`, as before. A push carries no data; every push shows the same notification
+ * (iOS withdraws the subscription of a worker that receives a push without showing one),
+ * and a tap opens /dashboard/push/open, which sends the signed-in member to their newest
+ * unread chat.
+ */
+'use strict';
+
+self.addEventListener('install', () => { self.skipWaiting(); });
+self.addEventListener('activate', (event) => { event.waitUntil(self.clients.claim()); });
+
+self.addEventListener('push', (event) => {
+  event.waitUntil(self.registration.showNotification('New Bona message', {
+    body: 'A client wrote in the Bona inbox.',
+    icon: '/dashboard/icon-192.png',
+    badge: '/dashboard/icon-192.png',
+    tag: 'bona-inbox',
+    renotify: true,
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = '/dashboard/push/open';
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const w of windows) {
+      if (new URL(w.url).pathname.startsWith('/dashboard/') && 'focus' in w) {
+        await w.focus();
+        if ('navigate' in w) return w.navigate(target);
+        return undefined;
+      }
+    }
+    return self.clients.openWindow(target);
+  })());
+});
+```
+
+`services/api/lib/dashboard/assets/app.js` (stub for now; Task 8 replaces it):
+```js
+/* The Bona dashboard's one script (design §5, Phase 3): phone alerts and live refresh. Filled in by Task 8. */
+'use strict';
+```
+
+`services/api/lib/dashboard/assets/manifest.webmanifest`:
+```json
+{
+  "name": "Bona dashboard",
+  "short_name": "Bona",
+  "id": "/dashboard/",
+  "start_url": "/dashboard/inbox",
+  "scope": "/dashboard",
+  "display": "standalone",
+  "background_color": "#0a0b0c",
+  "theme_color": "#0a0b0c",
+  "icons": [
+    { "src": "/dashboard/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/dashboard/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
+```
+
+`services/api/lib/dashboard/assets.mjs`:
+```js
+/**
+ * The dashboard's static files (design §5, P3-2): a fixed map from URL to a file read once
+ * at start. No part of a request's path ever reaches the filesystem. They are public — a
+ * manifest is fetched without cookies, and a browser re-checks the service worker whether
+ * or not its member is still signed in — and hold nothing private.
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets');
+const JS = 'text/javascript; charset=utf-8';
+const FILES = [
+  ['/dashboard/sw.js', 'sw.js', JS],
+  ['/dashboard/app.js', 'app.js', JS],
+  ['/dashboard/manifest.webmanifest', 'manifest.webmanifest', 'application/manifest+json; charset=utf-8'],
+  ['/dashboard/icon-192.png', 'icon-192.png', 'image/png'],
+  ['/dashboard/icon-512.png', 'icon-512.png', 'image/png'],
+  ['/dashboard/apple-touch-icon.png', 'apple-touch-icon.png', 'image/png'],
+];
+
+/** URL path → { body: Buffer, type } */
+export const ASSETS = new Map(FILES.map(([url, file, type]) => [url, { body: fs.readFileSync(path.join(DIR, file)), type }]));
+```
+
+In `routes.mjs`:
+```js
+import { ASSETS } from './assets.mjs';
+
+/**
+ * The CSP of an HTML page (design §5, P3-1): as locked as before, plus our own script, our
+ * own service worker, fetches to ourselves (the pulse, the push subscription) and our own
+ * manifest. Still no inline script: a lead's name that slipped past an escape cannot run.
+ * JSON answers and redirects keep SECURITY_HEADERS' `default-src 'none'`.
+ */
+export const PAGE_CSP = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
+export const PAGE_SECURITY_HEADERS = { ...SECURITY_HEADERS, 'Content-Security-Policy': PAGE_CSP };
+/** The service worker's own CSP: it loads nothing but the notification icon. */
+const WORKER_CSP = "default-src 'none'; img-src 'self'";
+```
+`sendHtml` spreads `PAGE_SECURITY_HEADERS` instead of `SECURITY_HEADERS`. Add, inside `createDashboardRoutes`:
+```js
+  /** One of the fixed app files (P3-2): public, GET/HEAD only, never cached. */
+  function sendAsset(req, res, asset, p) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method_not_allowed' });
+    res.writeHead(200, {
+      'Content-Type': asset.type,
+      'Content-Length': asset.body.length,
+      ...SECURITY_HEADERS,
+      ...(p === '/dashboard/sw.js' ? { 'Content-Security-Policy': WORKER_CSP } : {}),
+    });
+    res.end(req.method === 'HEAD' ? undefined : asset.body);
+  }
+```
+and at the top of `handleHtml` (before the TikTok callback line): `const asset = ASSETS.get(p); if (asset) return sendAsset(req, res, asset, p);`. Update the module header's point 1 to say HTML pages now allow our own `app.js`/`sw.js`/fetches/manifest and nothing inline (P3-1), JSON stays `default-src 'none'`.
+
+In `render.mjs` `layout`, in `<head>` after the theme-color meta:
+```js
+<link rel="manifest" href="/dashboard/manifest.webmanifest">
+<link rel="icon" href="/dashboard/icon-192.png">
+<link rel="apple-touch-icon" href="/dashboard/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bona">
+${me ? `<meta name="bona-push-key" content="${esc(me.pushKey ?? '')}">\n<script src="/dashboard/app.js" defer></script>` : ''}
+```
+Add `[hidden]{display:none!important}` at the start of `STYLE` (the alerts panel and the pulse note are `hidden` until `app.js` shows them, and `.card` and friends set `display`). Update the header comments of `render.mjs` (line ~6, ~111, ~598, ~846, ~981) and `render-inbox.mjs` (line ~5) that say the CSP forbids script: pages may run our own `/dashboard/app.js` and nothing inline; the pages still work without it.
+
+- [ ] **Step 5: Run the new tests and the whole suite**
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/dashboard-assets.test.mjs 2>&1 | tail -3 && node --test api/test/*.test.mjs 2>&1 | tail -3`
+Expected: `fail 0`. Any other test that pinned the old page CSP or "no script" gets the same two replacements above (content-type-aware CSP; `onlyOurScript`).
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd ~/bona-wt/team-inbox && git add services/api/lib/dashboard/assets services/api/lib/dashboard/assets.mjs services/api/lib/dashboard/routes.mjs services/api/lib/dashboard/render.mjs services/api/lib/dashboard/render-inbox.mjs services/api/test
+git commit -m "dashboard: installable app — manifest, a service worker that never caches, page CSP opens self only
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 7: Routes — subscribe, unsubscribe, logout, `/dashboard/push/open`, the pulse, `me.pushKey`
+
+**Files:**
+- Modify: `services/api/lib/dashboard/routes.mjs`
+- Modify: `services/api/index.mjs` (only: `createDashboardRoutes({ …, alerts: options.alerts ?? null })` for now — Task 9 builds the real one)
+- Test: `services/api/test/dashboard-push.test.mjs` (new, real HTTP server)
+
+- [ ] **Step 1: Write the failing tests** — create `test/dashboard-push.test.mjs`. Build the harness by copying `withInbox` from `dashboard-inbox.test.mjs` (same config, team, inbox store, spy backfill, `login`, `postJson`, `get`), with two changes: `createApp({ …, alerts })` where `alerts = createAlerts({ db, pusher: fakePusher, isExcludedLead: (l) => isExcludedLead(team, db, l), now, log })` and `fakePusher = { publicKey: 'BPUBLICKEY', send: async (endpoint) => { pushes.push(endpoint); return { status: 201 }; } }`; and the harness also hands the test `alerts`, `pushes`, `base`. Seed one `in` chat `LEAD-A` with one unread client message (the file's `seedChat` shape). Then:
+
+```js
+const b64u = (b) => Buffer.from(b).toString('base64url');
+const KEYS = { p256dh: b64u(Buffer.concat([Buffer.from([4]), crypto.randomBytes(64)])), auth: b64u(crypto.randomBytes(16)) };
+const EP = 'https://fcm.googleapis.com/fcm/send/phone-1';
+
+test('a signed-in member subscribes their device; the row is bound to this login session', async () => {
+  await withPush(async (h) => {
+    const cookie = await h.staff();
+    const res = await h.postJson('/v1/admin/push/subscribe', { endpoint: EP, keys: KEYS }, { cookie });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ok: true });
+    const row = h.db.db.prepare('SELECT user_id, session_hash FROM push_subscriptions').get();
+    assert.equal(row.user_id, h.staffUser.user_id);
+    assert.equal(row.session_hash, tokenHash(cookie.split('=')[1]));
+    assert.ok(h.logs.some((l) => l.evt === 'push.subscribed' && l.userId === h.staffUser.user_id));
+    assert.doesNotMatch(JSON.stringify(h.logs), /phone-1|fcm\.googleapis/);
+  });
+});
+
+test('subscribe refuses: signed out 401, no marker 403, foreign origin 403, a bad endpoint or keys 400, no keys configured 503', async () => {
+  await withPush(async (h) => {
+    const cookie = await h.staff();
+    assert.equal((await h.postJson('/v1/admin/push/subscribe', { endpoint: EP, keys: KEYS })).status, 401);
+    const noMarker = await fetch(h.base + '/v1/admin/push/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify({ endpoint: EP, keys: KEYS }) });
+    assert.equal(noMarker.status, 403);
+    const foreign = await fetch(h.base + '/v1/admin/push/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Bona-Dash': '1', Origin: 'https://evil.example', Cookie: cookie }, body: JSON.stringify({ endpoint: EP, keys: KEYS }) });
+    assert.equal(foreign.status, 403);
+    const bad = await h.postJson('/v1/admin/push/subscribe', { endpoint: 'https://127.0.0.1/steal', keys: KEYS }, { cookie });
+    assert.equal(bad.status, 400);
+    assert.deepEqual(await bad.json(), { error: 'bad_endpoint' });
+    assert.deepEqual(await (await h.postJson('/v1/admin/push/subscribe', { endpoint: EP, keys: { p256dh: 'x', auth: 'y' } }, { cookie })).json(), { error: 'bad_keys' });
+    assert.equal(h.db.db.prepare('SELECT COUNT(*) n FROM push_subscriptions').get().n, 0);
+  });
+  await withPush({ configured: false }, async (h) => {
+    const cookie = await h.staff();
+    const off = await h.postJson('/v1/admin/push/subscribe', { endpoint: EP, keys: KEYS }, { cookie });
+    assert.equal(off.status, 503);
+    assert.deepEqual(await off.json(), { error: 'push_off' });
+  });
+});
+
+test('unsubscribe removes the member\'s own device only', async () => {
+  await withPush(async (h) => {
+    const staff = await h.staff();
+    const boss = await h.boss();
+    await h.postJson('/v1/admin/push/subscribe', { endpoint: EP, keys: KEYS }, { cookie: staff });
+    assert.deepEqual(await (await h.postJson('/v1/admin/push/unsubscribe', { endpoint: EP }, { cookie: boss })).json(), { ok: true, removed: false });
+    assert.deepEqual(await (await h.postJson('/v1/admin/push/unsubscribe', { endpoint: EP }, { cookie: staff })).json(), { ok: true, removed: true });
+  });
+});
+
+test('logging out ends alerts on this device only (P3-5)', async () => {
+  await withPush(async (h) => {
+    const phone = await h.staff();
+    const laptop = await h.staff();
+    await h.postJson('/v1/admin/push/subscribe', { endpoint: EP, keys: KEYS }, { cookie: phone });
+    await h.postJson('/v1/admin/push/subscribe', { endpoint: 'https://web.push.apple.com/laptop', keys: KEYS }, { cookie: laptop });
+    const out = await h.postForm('/dashboard/logout', {}, { cookie: laptop });
+    assert.equal(out.status, 303);
+    assert.deepEqual(h.db.db.prepare('SELECT endpoint FROM push_subscriptions').all().map((r) => r.endpoint), [EP]);
+  });
+});
+
+test('a signed-in page carries the push key and our script; the inbox list and a thread carry their pulse tokens', async () => {
+  await withPush(async (h) => {
+    const cookie = await h.staff();
+    const list = await (await h.get('/dashboard/inbox', { cookie })).text();
+    assert.match(list, /<meta name="bona-push-key" content="BPUBLICKEY">/);
+    assert.match(list, /<script src="\/dashboard\/app\.js" defer><\/script>/);
+    assert.match(list, /data-pulse="\/v1\/admin\/inbox\/pulse" data-pulse-token="1:1:\d+"/);
+    const thread = await (await h.get('/dashboard/inbox/LEAD-A', { cookie })).text();
+    const rev = h.inboxStore.revision('LEAD-A');
+    assert.match(thread, new RegExp(`data-pulse="/v1/admin/inbox/pulse\\?lead=LEAD-A" data-pulse-token="${rev}"`));
+  });
+});
+
+test('the pulse answers the same token the page was drawn with, and a new one after a client message', async () => {
+  await withPush(async (h) => {
+    const cookie = await h.staff();
+    const page = await (await h.get('/dashboard/inbox/LEAD-A', { cookie })).text();
+    const drawn = /data-pulse-token="(\d+)"/.exec(page)[1];
+    const first = await h.get('/v1/admin/inbox/pulse?lead=LEAD-A', { cookie });
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get('content-security-policy'), "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'");
+    assert.deepEqual(await first.json(), { token: drawn });
+    h.inboxStore.upsertMessage({ key_id: 'A-2', lead_id: 'LEAD-A', jid: '966500000077@s.whatsapp.net', direction: 'in', sender_kind: 'client', text: 'hello?', ts: NOW + 120_000 });
+    assert.notDeepEqual(await (await h.get('/v1/admin/inbox/pulse?lead=LEAD-A', { cookie })).json(), { token: drawn });
+    const list1 = (await (await h.get('/v1/admin/inbox/pulse', { cookie })).json()).token;
+    h.inboxStore.upsertMessage({ key_id: 'A-3', lead_id: 'LEAD-A', jid: '966500000077@s.whatsapp.net', direction: 'in', sender_kind: 'client', text: 'hi again', ts: NOW + 180_000 });
+    assert.notEqual((await (await h.get('/v1/admin/inbox/pulse', { cookie })).json()).token, list1);
+  });
+});
+
+test('the pulse of a chat the member may not read is 404, like every inbox read (rule 1)', async () => {
+  await withPush(async (h) => {
+    const cookie = await h.staff();
+    h.db.db.prepare("UPDATE leads SET inbox_state = 'unsure' WHERE lead_id = 'LEAD-A'").run();
+    const res = await h.get('/v1/admin/inbox/pulse?lead=LEAD-A', { cookie });
+    assert.equal(res.status, 404);
+    assert.deepEqual(await res.json(), { error: 'not_in_inbox' });
+    assert.equal((await h.get('/v1/admin/inbox/pulse?lead=../../x', { cookie })).status, 404);
+    assert.equal((await h.get('/v1/admin/inbox/pulse')).status, 401, 'signed out');
+  });
+});
+
+test('a tap on an alert opens the newest unread chat, else the inbox; signed out, the login', async () => {
+  await withPush(async (h) => {
+    const cookie = await h.staff();
+    const open = await h.get('/dashboard/push/open', { cookie });
+    assert.equal(open.status, 302);
+    assert.equal(open.headers.get('location'), '/dashboard/inbox/LEAD-A');
+    await h.get('/dashboard/inbox/LEAD-A', { cookie }); // reading it marks it read
+    const none = await h.get('/dashboard/push/open', { cookie });
+    assert.equal(none.headers.get('location'), '/dashboard/inbox');
+    const out = await h.get('/dashboard/push/open');
+    assert.equal(out.status, 302);
+    assert.match(out.headers.get('location'), /^\/dashboard\/login/);
+  });
+});
+
+test('/health says whether alerts are configured, and nothing more about them', async () => {
+  await withPush(async (h) => {
+    const health = await (await fetch(h.base + '/health')).json();
+    assert.deepEqual(health.push, { configured: true });
+  });
+  await withPush({ configured: false }, async (h) => {
+    assert.deepEqual((await (await fetch(h.base + '/health')).json()).push, { configured: false });
+  });
+});
+```
+(`/health`'s `push` field is wired in Task 9; this test passes once Task 9 lands — run it again then.)
+(`withPush(opts?, fn)` accepts an optional first argument `{ configured: false }`, which builds `createAlerts` with `pusher: null`. Import `crypto`, `tokenHash` from `../lib/db.mjs`, `createAlerts` from `../lib/alerts.mjs`, `isExcludedLead` from `../lib/team.mjs`.)
+
+- [ ] **Step 2: Run to see them fail**
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/dashboard-push.test.mjs 2>&1 | grep -cE "^not ok"`
+Expected: every test fails (404s / missing attributes).
+
+- [ ] **Step 3: Implement** in `routes.mjs`:
+
+1. `createDashboardRoutes({ …, alerts = null, … })`; `import { tokenHash } from '../db.mjs';` (next to `STAGES`).
+2. `withUnread(user)`: every path returns the person with `pushKey` — `const withKey = (u) => (alerts?.configured ? { ...u, pushKey: alerts.publicKey } : u);`, and `withUnread` returns `withKey(user)` / `withKey({ ...user, unread })`.
+3. Logout: before `authenticator.logout(token, …)`, `alerts?.forgetSession(tokenHash(token));` (comment: this device's alerts end with its session, P3-5; the member's other devices keep theirs).
+4. The list token and pulse (next to `inboxList`):
+```js
+  /** What the Inbox list is drawn from (P3-12): a change in any of it redraws the list. */
+  const listToken = (rows) => `${rows.length}:${rows.reduce((n, r) => n + (Number(r.unread) || 0), 0)}:${rows.reduce((m, r) => Math.max(m, Number(r.last_msg_ts) || 0), 0)}`;
+  const inboxRowsFor = (me) => inbox.listInbox({ userId: me.user_id, userCreated: me.created ?? 0 }).filter((l) => !excludedLead(l));
+
+  /** `GET /v1/admin/inbox/pulse[?lead=]`: what app.js compares with the page it has (P3-12). */
+  function inboxPulse({ res, url, me }) {
+    if (!inbox) return sendJson(res, 404, { error: 'not_found' });
+    const leadId = url.searchParams.get('lead');
+    if (leadId === null) return sendJson(res, 200, { token: listToken(inboxRowsFor(me)) });
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(leadId) || !openChat(db.getLead(leadId))) return sendJson(res, 404, { error: 'not_in_inbox' });
+    return sendJson(res, 200, { token: String(inbox.revision(leadId)) });
+  }
+
+  /** `GET /dashboard/push/open`: where a tapped alert lands (P3-4). */
+  function pushOpen({ res, me }) {
+    const first = inbox ? inboxRowsFor(me).find((r) => (Number(r.unread) || 0) > 0) : null;
+    return redirect(res, first ? `/dashboard/inbox/${encodeURIComponent(first.lead_id)}` : '/dashboard/inbox', 302);
+  }
+```
+   `inboxList` uses `inboxRowsFor(me)` for its rows and passes `pulseToken: listToken(rows)` to `inboxPage`; `renderThread` passes `pulseToken: String(seenRev)` to `threadPage` (Task 8 draws them; until then the render functions ignore the unknown field — Task 8's tests pin the markup, so land Task 7's render assertions together with Task 8 if the implementer prefers; the route tests above need Task 8's attributes, so run Step 4 of this task after Task 8's Step 3 if they are built by one implementer).
+5. `handleHtml`: after `const me = withUnread(user);` add `if (p === '/dashboard/push/open') return pushOpen({ res, me });`.
+6. `handleAdmin`: in the GET block `if (p === '/v1/admin/inbox/pulse') return inboxPulse({ res, url, me: viewer });`. For the POSTs, add `const PUSH_WRITES = new Set(['/v1/admin/push/subscribe', '/v1/admin/push/unsubscribe']);` next to `OWNER_WRITES`, include `(PUSH_WRITES.has(p) ? 'push' : null)` in the `writes` chain, and after the owner-only check:
+```js
+    if (writes === 'push') return pushWrite({ ...ctx, req }, p);
+```
+with
+```js
+  /**
+   * A member's own device, alerts on or off (P3-5, P3-6). JSON only (the keys are nested); the
+   * row is bound to the session making the call, so logging out here ends alerts here.
+   */
+  function pushWrite({ req, res, fields, me }, p) {
+    if (p === '/v1/admin/push/unsubscribe') {
+      const removed = alerts ? alerts.unsubscribe({ userId: me.user_id, endpoint: fields.endpoint }) : false;
+      if (removed) log({ evt: 'push.unsubscribed', userId: me.user_id });
+      return sendJson(res, 200, { ok: true, removed });
+    }
+    if (!alerts?.configured) return sendJson(res, 503, { error: 'push_off' });
+    const out = alerts.subscribe({ userId: me.user_id, sessionHash: tokenHash(sessionToken(req)), endpoint: fields.endpoint, keys: fields.keys });
+    if (!out.ok) return sendJson(res, 400, { error: out.error });
+    log({ evt: 'push.subscribed', userId: me.user_id });
+    return sendJson(res, 200, { ok: true });
+  }
+```
+7. `keyPresence()`: add `{ label: 'Phone alerts — VAPID keys', present: Boolean(alerts?.configured), note: 'generated once on the VPS by bin/vapid-keys.mjs' }`.
+
+- [ ] **Step 4: Run the new tests and the whole suite**
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/dashboard-push.test.mjs 2>&1 | tail -3 && node --test api/test/*.test.mjs 2>&1 | tail -3`
+Expected: `fail 0` (after Task 8 Step 3 for the two page-attribute tests, see item 4).
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd ~/bona-wt/team-inbox && git add services/api/lib/dashboard/routes.mjs services/api/index.mjs services/api/test/dashboard-push.test.mjs
+git commit -m "dashboard: subscribe/unsubscribe a device, logout ends its alerts, push/open and the inbox pulse
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 8: Inbox screens — the *Phone alerts* panel, the pulse markup, `app.js`
+
+**Files:**
+- Modify: `services/api/lib/dashboard/render-inbox.mjs` (`inboxPage`, `threadPage`)
+- Replace: `services/api/lib/dashboard/assets/app.js`
+- Test: `services/api/test/dashboard-render-inbox.test.mjs`, `services/api/test/dashboard-assets.test.mjs`
+
+- [ ] **Step 1: Write the failing tests** (append to `dashboard-render-inbox.test.mjs`; `me` objects as that file builds them)
+
+```js
+test('the inbox list draws the Phone alerts panel, hidden until app.js shows it, only when push is configured', () => {
+  const me = { user_id: 'U1', name: 'Sara', role: 'staff', pushKey: 'BKEY' };
+  const html = inboxPage({ me, rows: [], pulseToken: '0:0:0' });
+  assert.match(html, /<section class="card cp alerts" data-alerts hidden>/);
+  assert.match(html, /<button type="button" data-alerts-on hidden>Turn on alerts<\/button>/);
+  assert.match(html, /<button type="button" data-alerts-off hidden>Turn off alerts on this device<\/button>/);
+  assert.match(html, /<p class="sub" data-alerts-text><\/p>/);
+  assert.doesNotMatch(inboxPage({ me: { ...me, pushKey: '' }, rows: [] }), /data-alerts/);
+  assert.doesNotMatch(html, /onclick|onload|javascript:/i, 'no inline handlers: the CSP would block them');
+});
+
+test('the list and the thread carry their pulse; the thread has a hidden "new activity" note', () => {
+  const me = { user_id: 'U1', name: 'Sara', role: 'staff' };
+  assert.match(inboxPage({ me, rows: [], pulseToken: '3:1:17"x' }), /<div data-pulse="\/v1\/admin\/inbox\/pulse" data-pulse-token="3:1:17&quot;x">/);
+  const html = thread({ pulseToken: '42' }); // the file's `thread(over)` helper, with threadPage's usual fields
+  assert.match(html, /data-pulse="\/v1\/admin\/inbox\/pulse\?lead=[A-Za-z0-9_-]+" data-pulse-token="42"/);
+  assert.match(html, /<p class="flash" data-pulse-note hidden>New activity in this chat — <a href="[^"]+">reload<\/a> to see it\.<\/p>/);
+});
+```
+Append to `dashboard-assets.test.mjs`:
+```js
+test('app.js registers the worker, subscribes only on a click, posts with the write marker, and never uses innerHTML', () => {
+  const src = ASSETS.get('/dashboard/app.js').body.toString('utf8');
+  new vm.Script(src);
+  assert.match(src, /serviceWorker\.register\('\/dashboard\/sw\.js', \{ scope: '\/dashboard\/' \}\)/);
+  assert.match(src, /pushManager\.subscribe\(\{ userVisibleOnly: true, applicationServerKey:/);
+  assert.match(src, /'X-Bona-Dash': '1'/);
+  assert.match(src, /'\/v1\/admin\/push\/subscribe'/);
+  assert.match(src, /'\/v1\/admin\/push\/unsubscribe'/);
+  assert.doesNotMatch(src, /innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|new Function/);
+  assert.doesNotMatch(src, /localStorage|sessionStorage|indexedDB/, 'nothing kept in the browser');
+});
+
+test('app.js live refresh: reloads a changed list, never a thread with a draft in the box', async () => {
+  const src = ASSETS.get('/dashboard/app.js').body.toString('utf8');
+  const make = ({ pulse, token, answer, draft = '', focused = false }) => {
+    const reloads = [];
+    const note = { hidden: true };
+    const box = { value: draft };
+    const el = { dataset: { pulse, pulseToken: token } };
+    const document = {
+      visibilityState: 'visible',
+      activeElement: focused ? box : null,
+      querySelector: (sel) => ({ '[data-pulse]': el, '[data-pulse-note]': note, '#r-text': box })[sel] ?? null,
+      addEventListener() {},
+    };
+    let tick = null;
+    const ctx = {
+      document, navigator: {}, window: { matchMedia: () => ({ matches: false }) },
+      location: { reload: () => reloads.push(1) },
+      fetch: async () => ({ ok: true, status: 200, json: async () => ({ token: answer }) }),
+      setInterval: (fn) => { tick = fn; return 1; }, clearInterval() {}, console,
+    };
+    vm.runInNewContext(src, ctx);
+    return { run: async () => { await tick(); await new Promise((r) => setImmediate(r)); }, reloads, note };
+  };
+  const same = make({ pulse: '/v1/admin/inbox/pulse', token: '1:0:5', answer: '1:0:5' });
+  await same.run();
+  assert.equal(same.reloads.length, 0);
+  const list = make({ pulse: '/v1/admin/inbox/pulse', token: '1:0:5', answer: '2:1:9' });
+  await list.run();
+  assert.equal(list.reloads.length, 1);
+  const draft = make({ pulse: '/v1/admin/inbox/pulse?lead=L', token: '4', answer: '5', draft: 'half a reply' });
+  await draft.run();
+  assert.equal(draft.reloads.length, 0);
+  assert.equal(draft.note.hidden, false, 'the note says there is something new');
+  const focused = make({ pulse: '/v1/admin/inbox/pulse?lead=L', token: '4', answer: '5', focused: true });
+  await focused.run();
+  assert.equal(focused.reloads.length, 0);
+  const empty = make({ pulse: '/v1/admin/inbox/pulse?lead=L', token: '4', answer: '5' });
+  await empty.run();
+  assert.equal(empty.reloads.length, 1);
+});
+```
+
+- [ ] **Step 2: Run to see them fail**
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/dashboard-render-inbox.test.mjs api/test/dashboard-assets.test.mjs 2>&1 | grep -E "^not ok" | head`
+Expected: the new tests fail.
+
+- [ ] **Step 3: Implement**
+
+`render-inbox.mjs` `inboxPage({ me, rows, unsureCount = 0, ok = null, error = null, now = Date.now(), pulseToken = '' })`:
+```js
+  // Phone alerts (Phase 3): drawn only when the server has push keys, hidden until app.js
+  // has worked out what this device can do (P3-11). Without script the page is as before.
+  const alerts = me?.pushKey
+    ? `<section class="card cp alerts" data-alerts hidden>
+  <h2>Phone alerts</h2>
+  <p class="sub" data-alerts-text></p>
+  <div class="row"><button type="button" data-alerts-on hidden>Turn on alerts</button><button type="button" data-alerts-off hidden>Turn off alerts on this device</button></div>
+</section>`
+    : '';
+```
+The list's sentence drops "Reload the page to see new messages." (the page refreshes itself; without script the browser's reload still works). The body becomes `` `${flash(ok, error)}<div data-pulse="/v1/admin/inbox/pulse" data-pulse-token="${esc(pulseToken)}">${block}</div>${alerts}${add}` ``.
+
+`threadPage({ …, pulseToken = '' })`: wrap `thread` as `` `<div data-pulse="/v1/admin/inbox/pulse?lead=${esc(encodeURIComponent(lead.lead_id))}" data-pulse-token="${esc(pulseToken)}">${thread}</div>` `` and put, right before it, `` `<p class="flash" data-pulse-note hidden>New activity in this chat — <a href="${esc(threadHref(lead.lead_id))}">reload</a> to see it.</p>` ``. (`.flash` is the existing flash-message class; if `render-inbox.mjs` names it differently, use that class.)
+
+Replace `assets/app.js`:
+```js
+/*
+ * The Bona dashboard's one script (design §5, Phase 3). Everything works without it; it adds:
+ *
+ *   1. Phone alerts. Registers the service worker (/dashboard/sw.js, scope /dashboard/) when
+ *      the page carries the server's push key. The Inbox page's "Phone alerts" panel turns
+ *      alerts on (pushManager.subscribe, called straight from the click: iOS needs the tap)
+ *      or off for THIS device. A device that already has alerts posts its subscription again
+ *      on every page, which binds it to the current login (a new login after the old one
+ *      expired brings its alerts back). On an iPhone outside the Home-Screen app it explains
+ *      how to add it first (iOS 16.4 or later).
+ *   2. Live refresh. The Inbox list and a thread carry a pulse URL and the token they were
+ *      drawn from; every 15 s while visible (and at once on coming back) the token is asked
+ *      again. A changed list reloads. A changed thread reloads only when the reply box is
+ *      empty and not being typed in; otherwise a note says there is something new, and the
+ *      draft is never touched.
+ *
+ * No inline code anywhere (the CSP allows only this file), no HTML built from strings,
+ * nothing stored in the browser. Every write carries X-Bona-Dash: 1, like every dashboard write.
+ */
+(function () {
+  'use strict';
+
+  var PULSE_MS = 15000;
+  var headers = { 'Content-Type': 'application/json', 'X-Bona-Dash': '1' };
+  function post(path, body) {
+    return fetch(path, { method: 'POST', headers: headers, body: JSON.stringify(body), credentials: 'same-origin' });
+  }
+
+  /* ---------------- live refresh ---------------- */
+
+  var pulse = document.querySelector('[data-pulse]');
+  if (pulse && pulse.dataset && pulse.dataset.pulse) {
+    var asking = false;
+    var check = async function () {
+      if (asking || document.visibilityState !== 'visible') return;
+      asking = true;
+      try {
+        var res = await fetch(pulse.dataset.pulse, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+        if (!res.ok) return;
+        var body = await res.json();
+        if (!body || typeof body.token !== 'string' || body.token === pulse.dataset.pulseToken) return;
+        var box = document.querySelector('#r-text');
+        var busy = box && (box.value.trim() !== '' || document.activeElement === box);
+        if (busy) {
+          var note = document.querySelector('[data-pulse-note]');
+          if (note) note.hidden = false;
+          return;
+        }
+        location.reload();
+      } catch (e) {
+        /* offline for a moment: the next pulse asks again */
+      } finally {
+        asking = false;
+      }
+    };
+    setInterval(check, PULSE_MS);
+    document.addEventListener('visibilitychange', check);
+  }
+
+  /* ---------------- phone alerts ---------------- */
+
+  var keyMeta = document.querySelector('meta[name="bona-push-key"]');
+  var pushKey = keyMeta ? keyMeta.content : '';
+  var panel = document.querySelector('[data-alerts]');
+  var text = document.querySelector('[data-alerts-text]');
+  var onBtn = document.querySelector('[data-alerts-on]');
+  var offBtn = document.querySelector('[data-alerts-off]');
+  var supported = typeof navigator !== 'undefined' && 'serviceWorker' in navigator
+    && typeof window !== 'undefined' && 'PushManager' in window && 'Notification' in window;
+  var ios = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent || '')
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+  var standalone = typeof window !== 'undefined' && ((window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+    || navigator.standalone === true);
+  var registration = null;
+
+  var WORDS = {
+    on: 'Alerts are on for this device.',
+    off: 'Get a notification on this device when a client writes in the Bona inbox.',
+    denied: 'Notifications are blocked for this site. Allow them in the browser settings, then reload this page.',
+    ios: 'On iPhone: tap Share, then "Add to Home Screen". Open Bona from the Home Screen, sign in there, and turn alerts on (iOS 16.4 or later).',
+    unsupported: 'This browser cannot show alerts.',
+    error: 'Alerts could not be turned on. Try again, or reload the page.',
+  };
+  function show(state) {
+    if (!panel) return;
+    panel.hidden = false;
+    if (text) text.textContent = WORDS[state] || '';
+    if (onBtn) onBtn.hidden = !(state === 'off' || state === 'error');
+    if (offBtn) offBtn.hidden = state !== 'on';
+  }
+
+  function keyBytes(b64u) {
+    var pad = '='.repeat((4 - (b64u.length % 4)) % 4);
+    var raw = atob((b64u + pad).replace(/-/g, '+').replace(/_/g, '/'));
+    var out = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i += 1) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+  function plain(sub) {
+    var j = sub.toJSON();
+    return { endpoint: j.endpoint, keys: { p256dh: j.keys && j.keys.p256dh, auth: j.keys && j.keys.auth } };
+  }
+
+  async function turnOn() {
+    if (!registration) return show('error');
+    try {
+      // Called first thing in the click: Safari asks for permission only inside the tap.
+      var sub = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(pushKey) });
+      var res = await post('/v1/admin/push/subscribe', plain(sub));
+      show(res.ok ? 'on' : 'error');
+    } catch (e) {
+      show(Notification.permission === 'denied' ? 'denied' : 'error');
+    }
+  }
+  async function turnOff() {
+    try {
+      var sub = registration && await registration.pushManager.getSubscription();
+      if (sub) {
+        await post('/v1/admin/push/unsubscribe', { endpoint: sub.endpoint });
+        await sub.unsubscribe();
+      }
+    } catch (e) { /* shown as off either way: the server forgets it at logout or when the push service says it is gone */ }
+    show('off');
+  }
+  if (onBtn) onBtn.addEventListener('click', turnOn);
+  if (offBtn) offBtn.addEventListener('click', turnOff);
+
+  if (pushKey) {
+    if (!supported) {
+      show(ios && !standalone ? 'ios' : 'unsupported');
+    } else {
+      navigator.serviceWorker.register('/dashboard/sw.js', { scope: '/dashboard/' }).then(async function (reg) {
+        registration = reg;
+        if (Notification.permission === 'denied') return show('denied');
+        var sub = await reg.pushManager.getSubscription();
+        if (sub && Notification.permission === 'granted') {
+          // Bind this device to the current login (P3-5).
+          var res = await post('/v1/admin/push/subscribe', plain(sub));
+          return show(res.ok ? 'on' : 'off');
+        }
+        return show('off');
+      }).catch(function () { show('unsupported'); });
+    }
+  }
+}());
+```
+(The live-refresh test runs this file in a bare context with no `navigator.serviceWorker` and no push key, so only the pulse part acts; the typeof guards keep the rest quiet.)
+
+- [ ] **Step 4: Run the tests** (and Task 7's route tests, which need this markup)
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/dashboard-render-inbox.test.mjs api/test/dashboard-assets.test.mjs api/test/dashboard-push.test.mjs 2>&1 | tail -3 && node --test api/test/*.test.mjs 2>&1 | tail -3`
+Expected: `fail 0`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd ~/bona-wt/team-inbox && git add services/api/lib/dashboard/render-inbox.mjs services/api/lib/dashboard/assets/app.js services/api/test
+git commit -m "inbox: Phone alerts panel, live refresh by pulse, app.js
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 9: The trigger — the poller alerts on a client message; wiring, upkeep, `/health`
+
+**Files:**
+- Modify: `services/api/lib/wa-poller.mjs` (`createPoller` option `onClientMessage`, `storeRecord`)
+- Modify: `services/api/index.mjs` (pusher + alerts, poller, routes, upkeep step, `/health`, `app.alerts`)
+- Test: `services/api/test/wa-poller.test.mjs`, `services/api/test/inbox-wiring.test.mjs`
+
+- [ ] **Step 1: Write the failing tests**
+
+In `wa-poller.test.mjs`, give `harness` an `onClientMessage = null` parameter passed through to `createPoller` (inside the `wiring ? {…}` spread: `...(onClientMessage ? { onClientMessage } : {})`), then append:
+```js
+test('(u) a client message stored in an inbox chat raises one alert with its time; nothing else does', async () => {
+  const calls = [];
+  const ref = msg({ id: 'REF', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const h = harness({ inbox: true, history: [ref], windows: [[ref]], onClientMessage: (leadId, ts) => calls.push([leadId, ts]) });
+  await h.poller.tick();
+  const [lead] = h.leads();
+  assert.deepEqual(calls, [[lead.lead_id, NOW - 60_000]], 'the joining message; never the history the join read');
+  h.push([msg({ id: 'OWN', fromMe: true, jid: SENDER, ts: NOW - 30_000, text: 'Welcome' })]);
+  await h.poller.tick();
+  assert.equal(calls.length, 1, 'the owner\'s own message is no alert');
+  h.push([msg({ id: 'BONA', jid: '966500000009@s.whatsapp.net', ts: NOW - 20_000, text: 'مرحبا بونا' })]);
+  await h.poller.tick();
+  assert.equal(calls.length, 1, 'an Unsure guess is no alert');
+  h.push([msg({ id: 'MORE', ts: NOW - 10_000, text: 'Is it still available?' })]);
+  await h.poller.tick();
+  assert.deepEqual(calls.at(-1), [lead.lead_id, NOW - 10_000]);
+  h.cleanup();
+});
+
+test('(u) an alert that throws is logged and changes nothing about the tick', async () => {
+  const ref = msg({ id: 'REF', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' });
+  const h = harness({ inbox: true, history: [ref], windows: [[ref]], onClientMessage: () => { throw new Error('966500000000 boom'); } });
+  const tally = await h.poller.tick();
+  assert.equal(tally.stored, 1);
+  const line = h.logs.find((l) => l.evt === 'poll.alert_failed');
+  assert.equal(line.level, 'warn');
+  assert.doesNotMatch(JSON.stringify(line), /966|boom/);
+  h.cleanup();
+});
+```
+In `inbox-wiring.test.mjs` (its `build()` harness; add `import crypto from 'node:crypto';`, `import { tokenHash } from '../lib/db.mjs';`, `import { generateVapidKeys } from '../lib/push.mjs';`), append:
+```js
+const b64u = (b) => Buffer.from(b).toString('base64url');
+const KEYS = { p256dh: b64u(Buffer.concat([Buffer.from([4]), crypto.randomBytes(64)])), auth: b64u(crypto.randomBytes(16)) };
+
+test('a client message the poller stores sends a phone alert through the one fetch; the upkeep prunes devices whose login is gone', async () => {
+  const LEAD = 'LEAD-20260928-0000cccc';
+  const JID = '966500000077@s.whatsapp.net';
+  const pushes = [];
+  const fetchImpl = async (url, init) => {
+    if (String(url).startsWith('https://fcm.googleapis.com/')) {
+      pushes.push({ url, init });
+      return { status: 201, arrayBuffer: async () => new ArrayBuffer(0) };
+    }
+    const body = JSON.parse(init.body);
+    const records = body.where?.messageTimestamp ? [{
+      key: { id: 'POLL-2', fromMe: false, remoteJid: JID }, pushName: null, messageType: 'conversation',
+      message: { conversation: 'hello?' }, messageTimestamp: Math.floor((NOW - 5_000) / 1000),
+    }] : [];
+    return { ok: true, status: 200, text: async () => JSON.stringify({ messages: { total: records.length, pages: 1, currentPage: 1, records } }) };
+  };
+  const pair = generateVapidKeys();
+  const h = build({ env: ENV, config: { waPoll: true, vapidPublic: pair.publicKey, vapidPrivate: pair.privateKey, vapidSubject: 'https://bona.azoz.uk' }, fetchImpl });
+  try {
+    const { app, db } = h;
+    assert.equal(app.alerts.configured, true);
+    db.insertLead({
+      lead_id: LEAD, created: NOW - DAY, updated: NOW - DAY, phone_e164: '966500000077', wa_jid: JID,
+      channel: 'whatsapp', match_method: 'ref', stage: 'new', stage_ts: NOW - DAY, inbox_state: 'in', inbox_since: NOW - DAY,
+    });
+    const sara = app.team.addUser({ name: 'Sara', phone: '966500000001', role: 'staff' });
+    const token = 'ab'.repeat(16);
+    db.createAuthSession(token, { now: NOW, userId: sara.user_id });
+    assert.deepEqual(app.alerts.subscribe({ userId: sara.user_id, sessionHash: tokenHash(token), endpoint: 'https://fcm.googleapis.com/fcm/send/w1', keys: KEYS }), { ok: true });
+
+    const tally = await app.poller.tick();
+    assert.equal(tally.stored, 1);
+    await app.alerts.flush();
+    assert.equal(pushes.length, 1, 'one device, one push');
+    assert.equal(pushes[0].url, 'https://fcm.googleapis.com/fcm/send/w1');
+    assert.equal(pushes[0].init.method, 'POST');
+    assert.equal(pushes[0].init.body, '');
+    assert.match(pushes[0].init.headers.Authorization, /^vapid t=[\w-]+\.[\w-]+\.[\w-]+, k=[\w-]+$/);
+    assert.ok(h.logs.some((l) => l.evt === 'push.sent' && l.ok === 1 && l.leadId === LEAD));
+    assert.doesNotMatch(JSON.stringify(h.logs), /fcm\.googleapis|send\/w1|966500000077|hello\?/);
+
+    assert.equal((await app.inboxMaintenance()).pushOrphans, 0);
+    db.deleteAuthSession(token);
+    assert.equal((await app.inboxMaintenance()).pushOrphans, 1, 'a device whose login is gone');
+    assert.equal(app.alerts.countFor(sara.user_id), 0);
+  } finally {
+    await h.close();
+  }
+});
+
+test('without VAPID keys the app has no alerts; a pair that does not match is refused out loud', async () => {
+  const off = build({});
+  try { assert.equal(off.app.alerts.configured, false); } finally { await off.close(); }
+  const a = generateVapidKeys();
+  const b = generateVapidKeys();
+  const broken = build({ config: { vapidPublic: a.publicKey, vapidPrivate: b.privateKey } });
+  try {
+    assert.equal(broken.app.alerts.configured, false);
+    assert.ok(broken.logs.some((l) => l.evt === 'push.keys_invalid' && l.level === 'error'));
+  } finally {
+    await broken.close();
+  }
+  const badSubject = build({ config: { vapidPublic: a.publicKey, vapidPrivate: a.privateKey, vapidSubject: 'ops@example.com' } });
+  try {
+    assert.equal(badSubject.app.alerts.configured, false, 'a subject that is not mailto: or https: would earn a 403 from Apple');
+    assert.ok(badSubject.logs.some((l) => l.evt === 'push.keys_invalid' && l.subject === false));
+  } finally {
+    await badSubject.close();
+  }
+});
+```
+(The existing upkeep tests that `deepEqual` the whole `inbox.maintenance` counts gain `pushOrphans: 0`. `/health`'s `push` is asserted in `dashboard-push.test.mjs`, Task 7, which has a listening server.)
+
+- [ ] **Step 2: Run to see them fail**
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/wa-poller.test.mjs api/test/inbox-wiring.test.mjs 2>&1 | grep -E "^not ok" | head`
+Expected: the new tests fail.
+
+- [ ] **Step 3: Implement**
+
+`wa-poller.mjs`: document the option in the JSDoc (`@param {(leadId: string, ts: number) => void} [o.onClientMessage]` — Phase 3 phone alerts: called, never awaited, when a client record the poller read is stored in an `in` chat) and add it to the destructured options (`onClientMessage = null`). `storeRecord` becomes:
+```js
+  async function storeRecord(leadId, rec, tally) {
+    const res = await ingestOne(db.getLead(leadId), rec);
+    if (res?.stored) tally.stored += 1;
+    // A client wrote in an inbox chat: phone alerts (Phase 3, P3-9). Whether this stored it or
+    // a thread refresh had a moment before, the poller reads each record once, so this is its
+    // first sight of it. Never awaited; one that throws is a warn line, not a failed record.
+    if (res?.stored && res.senderKind === 'client' && onClientMessage) {
+      try {
+        onClientMessage(leadId, Number.isFinite(rec.ts) ? rec.ts : now());
+      } catch {
+        log({ level: 'warn', evt: 'poll.alert_failed', leadId });
+      }
+    }
+  }
+```
+`index.mjs` — imports: `import { createPusher, vapidKeys } from './lib/push.mjs';`, `import { createAlerts } from './lib/alerts.mjs';`. After `excludedLead` is defined:
+```js
+  // Phone alerts (design §5, Phase 3). Keys from ~/.secrets/bona-services.env (generated once
+  // by bin/vapid-keys.mjs); none, or a pair that does not match, means no alerts at all —
+  // said once, loudly, never half-used.
+  const pushKeys = vapidKeys({ publicKey: cfg.vapidPublic, privateKey: cfg.vapidPrivate });
+  // The subject is what a push service may write to about our pushes (RFC 8292): a mailto:
+  // or https: URI, or Apple answers every push 403 without a word here.
+  const pushSubject = /^(?:mailto:|https:)\S+$/.test(cfg.vapidSubject) ? cfg.vapidSubject : null;
+  if ((cfg.vapidPublic || cfg.vapidPrivate) && !(pushKeys && pushSubject)) log({ level: 'error', evt: 'push.keys_invalid', subject: Boolean(pushSubject) });
+  const alerts = options.alerts ?? createAlerts({
+    db,
+    pusher: pushKeys && pushSubject ? createPusher({ keys: pushKeys, subject: pushSubject, fetchImpl, now: clock }) : null,
+    isExcludedLead: excludedLead, now: clock, log,
+  });
+```
+Pass `onClientMessage: (leadId, ts) => { alerts.notify(leadId, { ts }); }` to `createPoller`; add `alerts` to `app` and to `createDashboardRoutes({ …, alerts })` (replacing Task 7's `options.alerts ?? null`); in `inboxMaintenance` add, after `candidates`, `pushOrphans: step('push_orphans', () => alerts.pruneOrphans()),` to `counts` (the README names it); in the `/health` payload add `push: { configured: alerts.configured },`.
+
+- [ ] **Step 4: Run the tests and the whole suite**
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/wa-poller.test.mjs api/test/inbox-wiring.test.mjs 2>&1 | tail -3 && node --test api/test/*.test.mjs 2>&1 | tail -3`
+Expected: `fail 0`. (Existing upkeep tests that `deepEqual` the whole `inbox.maintenance` counts gain `pushOrphans: 0`.)
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd ~/bona-wt/team-inbox && git add services/api/lib/wa-poller.mjs services/api/index.mjs services/api/test
+git commit -m "alerts: the poller alerts on a client message; wiring, upkeep and /health
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 10: README — Dashboard → Phone alerts
+
+**Files:** Modify `services/README.md` (the Dashboard section, after Inbox)
+
+- [ ] **Step 1: Write the section** (plain words, like the Inbox section):
+
+```markdown
+### Phone alerts (Phase 3)
+
+- **What a member sees:** "New Bona message" on their phone within about a minute of a client writing in a Bona inbox chat (the poll interval). Tapping it opens their newest unread chat. The notification never says who wrote or what: the push carries no data, so no client text, name or number passes through Google, Apple or Mozilla.
+- **Who is alerted:** the chat's handler; nobody handling it → everyone active; a chat that needs a human → everyone. Never the member whose own action caused it. At most one alert per chat per member every 2 minutes. A message more than 30 minutes old (the poller catching up after an outage) waits as unread instead.
+- **Turning it on:** Inbox page → *Phone alerts* → *Turn on alerts*. Android: Chrome, any recent version. iPhone: iOS 16.4 or later, and only from the Home-Screen app: Safari → Share → *Add to Home Screen*, open Bona from the Home Screen, sign in there (it keeps its own login), then turn alerts on.
+- **Which devices:** alerts belong to the login they were turned on in. Logging out on a device ends alerts on that device only. Deactivating a member ends all their devices' alerts. A login that expires (30 days) ends its device's alerts until the member signs in again on it, when they come back by themselves. At most 10 devices per member.
+- **Live refresh:** the Inbox list and an open chat check every 15 s and reload when something changed; a chat with a half-typed reply shows "New activity in this chat" instead of reloading.
+- **Keys:** generated once on the VPS: `node /opt/bona/services/api/bin/vapid-keys.mjs --file ~/.secrets/bona-services.env`, then `deploy.sh` (bona-api reads them at start). Never generate a second pair: every phone's alerts would end until each member turns them on again. `/health` shows `push.configured`; the daily upkeep's `inbox.maintenance` line counts `pushOrphans` (devices whose login has gone).
+- **Logs:** `push.sent` (counts), `push.refused` (a push service's status), `push.subscribed` / `push.unsubscribed` (member id). Never an endpoint, a key, a name, a number or message text.
+```
+Also change the Inbox section's "reload the page to see new messages" wording, if present, to point at live refresh.
+
+- [ ] **Step 2: Commit**
+
+```bash
+cd ~/bona-wt/team-inbox && git add services/README.md
+git commit -m "README: phone alerts
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 11: Reviews, migration rehearsal, keys, ship Phase 3, device tests (STOP)
+
+**Files:** none new (fixes land where they belong, each with a test).
+
+- [ ] **Step 1: Full suite on the finished branch**
+
+Run: `cd ~/bona-wt/team-inbox/services && node --test api/test/*.test.mjs 2>&1 | tail -8`
+Expected: `fail 0`.
+
+- [ ] **Step 2: Rehearse migration v5 on the live SCHEMA** (same method as Phase 2 Task 17 Step 2: read-only schema dump, local rebuild, the branch's `openDb`)
+```bash
+SP=/tmp/claude-1001/-mnt-c-Users-ASUS/e6564aeb-4a4f-4432-ac6a-a54407bee974/scratchpad
+ssh hermes-vps '/home/azoz/.local/opt/node-v24.19.0-linux-x64/bin/node --input-type=module -e "
+import { DatabaseSync } from \"node:sqlite\";
+const db = new DatabaseSync(process.env.HOME + \"/bona-data/bona.db\", { readOnly: true });
+console.log(JSON.stringify({ version: db.prepare(\"PRAGMA user_version\").get().user_version,
+  objects: db.prepare(\"SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE ? ORDER BY rowid\").all(\"sqlite_%\") }));
+" 2>/dev/null' > $SP/live-schema-v4.json
+cat > $SP/rehearse-v5.mjs <<'EOF'
+import fs from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+const [schemaFile, file] = process.argv.slice(2);
+const { version, objects } = JSON.parse(fs.readFileSync(schemaFile, 'utf8'));
+fs.rmSync(file, { force: true });
+const raw = new DatabaseSync(file);
+for (const o of objects.filter((x) => x.type === 'table')) raw.exec(o.sql);
+for (const o of objects.filter((x) => x.type !== 'table')) raw.exec(o.sql);
+raw.exec(`PRAGMA user_version = ${version}`);
+raw.prepare("INSERT INTO users (user_id, name, phone_e164, wa_jid, role, active, created) VALUES ('U1','O','966500000001','966500000001@s.whatsapp.net','owner',1,1)").run();
+raw.prepare("INSERT INTO auth_sessions (token_hash, created, expires, ua, user_id) VALUES ('h', 1, 9e15, 'ua', 'U1')").run();
+raw.prepare("INSERT INTO leads (lead_id, created, updated, phone_e164, channel, stage, inbox_state, chat_rev) VALUES ('L1',1,1,'966500000002','whatsapp','new','in',7)").run();
+raw.close();
+const { openDb } = await import(process.env.HOME + '/bona-wt/team-inbox/services/api/lib/db.mjs');
+const s = openDb(file);
+const out = {
+  from: version,
+  to: s.db.prepare('PRAGMA user_version').get().user_version,
+  push: s.db.prepare('PRAGMA table_info(push_subscriptions)').all().map((c) => c.name),
+  sessionsKept: s.db.prepare('SELECT COUNT(*) n FROM auth_sessions').get().n,
+  chatRev: s.db.prepare("SELECT chat_rev FROM leads WHERE lead_id = 'L1'").get().chat_rev,
+};
+s.close();
+for (const f of [file, `${file}-wal`, `${file}-shm`]) fs.rmSync(f, { force: true });
+console.log(JSON.stringify(out));
+EOF
+node $SP/rehearse-v5.mjs $SP/live-schema-v4.json $SP/rehearse5.db 2>&1 | grep -v ExperimentalWarning
+```
+Expected: `{"from":4,"to":5,"push":["id","user_id","endpoint","p256dh","auth","session_hash","created","updated","last_ok","fail_count"],"sessionsKept":1,"chatRev":7}`. Any SQL error stops the ship.
+
+- [ ] **Step 3: Claude review** — superpowers:requesting-code-review on `git diff origin/main...HEAD -- services/`. Focus: (1) the page CSP opens only `script-src/worker-src/connect-src/manifest-src 'self'`, JSON stays `default-src 'none'`, no inline script or handler anywhere; (2) the service worker never caches or intercepts; (3) no client text, name or number in a push, a log line, an endpoint table or a URL; no endpoint or key logged; (4) the endpoint allowlist (SSRF) and key validation; (5) recipient rules, the 2-minute rule, "never the sender", pushes only to live sessions of active members, rule 1 (unsure/out/excluded chats never alert, and the pulse of one is 404); (6) logout ends this device's alerts, deactivation all of the member's, in the same transaction; (7) the poller trigger never blocks or fails a tick, never fires for history/refresh/owner messages, and the 30-minute freshness; (8) migration v5 on the live schema, and a v4 build (rollback) opening a v5 file; (9) `app.js` never loses a draft and never builds HTML from strings; (10) `bin/vapid-keys.mjs` never overwrites and never prints the private key.
+
+- [ ] **Step 4: Codex review** (second opinion, owner rule):
+```bash
+cd ~/bona-wt/team-inbox && codex exec --sandbox read-only "Review the diff origin/main...HEAD in services/ (Bona dashboard Phase 3: phone alerts via payload-less Web Push). Spec: docs/superpowers/specs/2026-09-27-dashboard-team-inbox-design.md section 5; plan: docs/superpowers/plans/2026-09-27-dashboard-team-inbox.md '## Phase 3 — detailed' (decisions P3-1..P3-15). Look for: CSP opened wider than script/worker/connect/manifest 'self' on HTML pages, or any inline script/handler; a service worker that caches or intercepts; client text, names or numbers reaching a push service, a log line or a URL; push endpoints or VAPID keys logged; SSRF through the subscription endpoint; wrong VAPID JWT (claims, ES256 raw signature, base64url) or a key pair that is used half-valid; alerts to the wrong people (unsure/out/team/never-list chats, inactive members, logged-out or expired sessions, the sender, more than one per chat per member per 2 min); logout/deactivation not removing subscriptions; the poller blocked or failed by a push; migration v5 failing on an existing bona.db; app.js losing a reply draft; bin/vapid-keys.mjs overwriting keys or printing the private key. Verdict first, then findings ranked by severity with file:line and a fix."
+```
+
+- [ ] **Step 5: Fix what is real, report the disagreement.** Each finding from either model: reproduce with a failing test, fix, re-run the suite, commit with the trailer. Record which model found what and where they disagree (for the owner's report and the memory file).
+
+- [ ] **Step 6: PR and squash-merge**
+```bash
+cd ~/bona-wt/team-inbox && git fetch origin && ROLLBACK=$(git rev-parse origin/main) && echo "rollback=$ROLLBACK"
+git push -u origin feat/team-inbox-p3
+gh pr create --base main --head feat/team-inbox-p3 --title "Dashboard: phone alerts (Phase 3)" --body "Phase 3 of docs/superpowers/specs/2026-09-27-dashboard-team-inbox-design.md (§5): the dashboard is an installable web app (manifest, a service worker that never caches, app.js; the page CSP opens script/worker/connect/manifest to 'self' only). A client message in a Bona inbox chat sends the handler (or everyone; everyone when it needs a human) an empty Web Push signed with a VAPID ES256 JWT from node:crypto — no client data through Google/Apple/Mozilla; one per chat per member per 2 min; only to live logins of active members; tap → newest unread chat. Subscriptions (schema v5, additive) are bound to the login session: logout ends that device's alerts, deactivation all of the member's. Inbox list and threads refresh themselves (15 s pulse; a draft is never lost). Keys: bin/vapid-keys.mjs, once on the VPS. Claude + Codex reviewed. Rollback point: ${ROLLBACK}.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+gh pr merge --squash --delete-branch=false
+git fetch origin && git log --oneline -1 origin/main
+```
+If `main` moved and the merge conflicts: rebase onto a NEW branch name (force-push is blocked), re-run Steps 1–2, PR from that branch.
+
+- [ ] **Step 7: Back up the live db (VACUUM INTO, WAL included)**
+```bash
+ssh hermes-vps 'cd ~/bona-data && STAMP=$(date +%Y%m%d-%H%M%S) && /home/azoz/.local/opt/node-v24.19.0-linux-x64/bin/node --input-type=module -e "
+import { DatabaseSync } from \"node:sqlite\";
+const db = new DatabaseSync(\"bona.db\");
+db.exec(\"VACUUM INTO \x27bona.db.snap-$STAMP\x27\");
+db.close();" 2>/dev/null && chmod 600 bona.db.snap-$STAMP && ls -la bona.db.snap-$STAMP'
+```
+Expected: one new `bona.db.snap-<stamp>`, mode `-rw-------`.
+
+- [ ] **Step 8: Deploy, then generate the keys once, then deploy again**
+```bash
+ssh hermes-vps bash /opt/bona/services/deploy/vps/deploy.sh
+ssh hermes-vps '/home/azoz/.local/opt/node-v24.19.0-linux-x64/bin/node /opt/bona/services/api/bin/vapid-keys.mjs --file ~/.secrets/bona-services.env && stat -c %a ~/.secrets/bona-services.env && grep -c "^BONA_VAPID_P" ~/.secrets/bona-services.env'
+ssh hermes-vps bash /opt/bona/services/deploy/vps/deploy.sh
+```
+Expected: first deploy green (v5 migrated, `push.configured: false`); keys written, `600`, `2`; second deploy green. A red run leaves the old process: stop and fix.
+
+- [ ] **Step 9: Verify live** (read-only)
+```bash
+curl -s https://api.bona-real-estate.com/health | head -c 900; echo
+for p in sw.js app.js manifest.webmanifest icon-192.png; do curl -s -o /dev/null -w "$p %{http_code} %{content_type}\n" https://api.bona-real-estate.com/dashboard/$p; done
+curl -s -D - -o /dev/null https://api.bona-real-estate.com/dashboard/login | grep -i content-security-policy
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' https://api.bona-real-estate.com/dashboard/push/open
+ssh hermes-vps 'journalctl -u bona-api --since "-10 min" --no-pager -o cat | grep -oE "\"evt\":\"(push\.[a-z_]+|wa\.poll\.init|inbox\.maintenance)\"[^}]{0,160}" | tail -10'
+ssh hermes-vps '/home/azoz/.local/opt/node-v24.19.0-linux-x64/bin/node --input-type=module -e "
+import { DatabaseSync } from \"node:sqlite\";
+const db = new DatabaseSync(process.env.HOME + \"/bona-data/bona.db\", { readOnly: true });
+console.log(JSON.stringify({ v: db.prepare(\"PRAGMA user_version\").get().user_version,
+  states: db.prepare(\"SELECT inbox_state, COUNT(*) n FROM leads GROUP BY 1\").all(),
+  subs: db.prepare(\"SELECT COUNT(*) n FROM push_subscriptions\").get().n }));
+" 2>/dev/null'
+~/.claude/scripts/chrome-debug.sh
+node ~/.claude/scripts/browse.mjs https://api.bona-real-estate.com/dashboard/login /tmp/claude-1001/p3-login.png
+```
+Expected: `/health` has `push: { configured: true }`; the four files 200 with their types; the login page's CSP is `PAGE_CSP` (and no Cloudflare-injected script — Rocket Loader / email obfuscation on the api zone would be blocked by it; check the browser console is clean on the live host); `push/open` signed out → `302 …/dashboard/login`; no `push.keys_invalid`; `v: 5`, states as before (plus new leads), `subs: 0`; the login page renders.
+
+- [ ] **Step 10: STOP — device tests with the owner.** Tell him Phase 3 is live and ask which phones to test (Android Chrome; iPhone needs iOS 16.4+ and the Home-Screen app). With him: (1) on each phone open `https://api.bona-real-estate.com/dashboard/inbox` (iPhone: Share → Add to Home Screen → open it from the Home Screen → sign in there); (2) Inbox → *Phone alerts* → *Turn on alerts* → allow; confirm the panel says "Alerts are on for this device" and `push_subscriptions` has one row per phone (read-only count); (3) lock the phone; from his second phone send a message in an inbox chat whose handler is nobody or the tester (or use his second phone's own inbox chat from Step 0); (4) within about a minute "New Bona message" shows; a tap opens that chat; the logs show `push.sent` with `ok ≥ 1` and no `push.refused`; (5) a second message within 2 minutes brings no second alert; (6) log out on the phone → the next client message brings no alert there. If Apple answers 403 (`push.refused status 403`), check the JWT `sub`/`aud` against Apple's rules before anything else; if an iPhone receives nothing while Android does, the payload-less push is the suspect: report and stop (the fallback is an RFC 8291-encrypted constant payload — a design change for the owner).
+
+- [ ] **Step 11: Memory and handoff** — update Claude memory `bona-dashboard-team-inbox-2026-09-27.md` (Phase 3 status, main SHA, rollback, backup, review disagreements, device results) and its `MEMORY.md` line, and the shared-memory handoff (same id: `--scope claude-project:fed94f6b4de219192b28 --id bona-dashboard-team-inbox-handoff`).

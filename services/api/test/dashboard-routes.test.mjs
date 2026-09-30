@@ -21,12 +21,18 @@ import { createAudit } from '../lib/audit.mjs';
 
 const TOKEN = 'a'.repeat(32);
 const inventory = createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk' });
-const CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
+const CSP = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
+/** An HTML page's CSP (P3-1): the same, plus our own script, worker, fetches and manifest — nothing inline. */
+const PAGE_CSP = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
+const OWN_SCRIPT = '<script src="/dashboard/app.js" defer></script>';
+/** The one script a signed-in page may carry is our own app.js; nothing else, nothing inline. */
+const onlyOurScript = (html) => !/<script/i.test(html.split(OWN_SCRIPT).join(''));
 
-/** Every dashboard and admin answer, whatever it says, carries the same four headers. */
+/** Every dashboard and admin answer, whatever it says, carries the same four headers; a page's CSP opens self only. */
 function assertLocked(res) {
   assert.equal(res.headers.get('cache-control'), 'no-store');
-  assert.equal(res.headers.get('content-security-policy'), CSP);
+  const html = String(res.headers.get('content-type') ?? '').startsWith('text/html');
+  assert.equal(res.headers.get('content-security-policy'), html ? PAGE_CSP : CSP);
   assert.equal(res.headers.get('x-frame-options'), 'DENY');
   // NOT `no-referrer`: that made Chrome send `Origin: null` on the login form's own
   // same-origin POST, and `sameOrigin()` refused it — the owner could not log in at
@@ -185,7 +191,7 @@ test('the login round trip: ask, receive on WhatsApp, type it back', async () =>
     assertLocked(page);
     const html = await page.text();
     assert.match(html, /Send me a code/);
-    assert.ok(!/<script/i.test(html), 'the dashboard ships no script at all');
+    assert.ok(!/<script/i.test(html), 'the login page ships no script at all: app.js rides only on a signed-in page');
 
     const { cookie, res } = await login();
     assert.equal(res.status, 303);
@@ -306,7 +312,9 @@ test('logout ends the session on the server, not just in the browser', async () 
     // navigation, so a link on any page could otherwise log the owner out.
     const offered = await get('/dashboard/logout', { cookie });
     assert.equal(offered.status, 200);
-    assert.match(await offered.text(), /Log out of the dashboard on this device\?/);
+    const offer = await offered.text();
+    assert.match(offer, /Log out of the dashboard on this device\?/);
+    assert.ok(!/<script/i.test(offer), 'the logout page ships no script at all: app.js rides only on a signed-in page');
     assert.equal((await get('/dashboard', { cookie })).status, 200, 'still signed in');
 
     const out = await postForm('/dashboard/logout', { _dash: '1' }, { cookie });
@@ -348,10 +356,72 @@ test('every page renders for a signed-in owner', async () => {
       assertLocked(res);
       const html = await res.text();
       assert.match(html, needle, p);
-      assert.ok(!/<script/i.test(html), `${p} must ship no script`);
+      assert.ok(onlyOurScript(html), `${p}: no script but our own app.js`);
+      assert.equal(html.split(OWN_SCRIPT).length, 2, 'exactly one script tag, ours');
     }
     const missing = await get('/dashboard/leads/LEAD-nope', { cookie });
     assert.equal(missing.status, 404);
+  });
+});
+
+/**
+ * A request sent exactly as written: `fetch` normalises `..`, and this test needs the
+ * server to see the literal target. Resolves once the whole body is in.
+ */
+function rawRequest(base, { path: target, method = 'GET' }) {
+  const { hostname, port } = new URL(base);
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: hostname, port, path: target, method }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+test('the app files are served signed out, with their types, never cached; a POST is refused; nothing but the six literal paths', async () => {
+  await withDash({}, async (h) => {
+    const files = [
+      ['/dashboard/sw.js', 'text/javascript; charset=utf-8'],
+      ['/dashboard/app.js', 'text/javascript; charset=utf-8'],
+      ['/dashboard/manifest.webmanifest', 'application/manifest+json; charset=utf-8'],
+      ['/dashboard/icon-192.png', 'image/png'],
+      ['/dashboard/icon-512.png', 'image/png'],
+      ['/dashboard/apple-touch-icon.png', 'image/png'],
+    ];
+    for (const [p, type] of files) {
+      const res = await h.get(p);
+      assert.equal(res.status, 200, p);
+      assert.equal(res.headers.get('content-type'), type, p);
+      assert.equal(res.headers.get('cache-control'), 'no-store', p);
+      assert.equal(res.headers.get('x-content-type-options'), 'nosniff', p);
+      assert.equal(res.headers.get('x-frame-options'), 'DENY', p);
+      assert.ok((await res.arrayBuffer()).byteLength > 0, p);
+    }
+    assert.equal((await h.get('/dashboard/sw.js')).headers.get('content-security-policy'), "default-src 'none'; img-src 'self'");
+    assert.equal((await h.get('/dashboard/app.js')).headers.get('content-security-policy'), CSP, 'only the worker gets its own policy');
+
+    // HEAD: the same headers, no body.
+    const got = await rawRequest(h.base, { path: '/dashboard/app.js' });
+    const head = await rawRequest(h.base, { path: '/dashboard/app.js', method: 'HEAD' });
+    assert.equal(head.status, 200);
+    assert.equal(head.headers['content-length'], got.headers['content-length'], 'HEAD states the same length as GET');
+    assert.ok(Number(got.headers['content-length']) > 0);
+    assert.equal(head.body.length, 0, 'HEAD sends no body');
+
+    const post = await rawRequest(h.base, { path: '/dashboard/sw.js', method: 'POST' });
+    assert.equal(post.status, 405);
+    assert.equal(post.headers.allow, 'GET, HEAD');
+
+    // Sent literally (fetch would normalise the `..`): none of these is a file, so each is
+    // an ordinary page, which needs a login.
+    for (const target of ['/dashboard/sw.js/../team', '/dashboard/sw%2Ejs', '/dashboard/SW.js', '/dashboard/sw.js/']) {
+      const res = await rawRequest(h.base, { path: target });
+      assert.equal(res.status, 302, target);
+      assert.equal(res.headers.location, '/dashboard/login', target);
+    }
   });
 });
 

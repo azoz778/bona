@@ -7,15 +7,17 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createApp } from '../index.mjs';
-import { openDb } from '../lib/db.mjs';
+import { openDb, tokenHash } from '../lib/db.mjs';
 import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
 import { DEFAULT_ORIGINS } from '../lib/cors.mjs';
 import { createInboxStore, RETENTION_MS } from '../lib/inbox/store.mjs';
 import { JOIN_HISTORY_MS } from '../lib/inbox/backfill.mjs';
+import { generateVapidKeys } from '../lib/push.mjs';
 
 const NOW = 1_790_500_000_000;
 const DAY = 86_400_000;
@@ -296,7 +298,7 @@ test('the daily upkeep: old transcripts and code rows go, stale sends become unc
     at(NOW - RETENTION_MS - DAY).insertOutbox({ send_id: 'SND-staff-old', lead_id: 'LEAD-old', jid: '966500000077@s.whatsapp.net', text: 'an old answer', user_id: 'USR-1', sender_kind: 'staff', status: 'accepted' });
 
     const counts = await app.inboxMaintenance();
-    assert.deepEqual(counts, { excludedOut: 0, purgedChats: 1, purgedMessages: 1, purgedSends: 1, codeRows: 1, interrupted: 1, candidatesExpired: 0, dismissalsExpired: 0, caughtUp: 2, caughtUpStored: 3, caughtUpFailed: 0 });
+    assert.deepEqual(counts, { excludedOut: 0, purgedChats: 1, purgedMessages: 1, purgedSends: 1, codeRows: 1, interrupted: 1, candidatesExpired: 0, dismissalsExpired: 0, pushOrphans: 0, caughtUp: 2, caughtUpStored: 3, caughtUpFailed: 0 });
 
     assert.equal(app.inboxStore.hasMessages('LEAD-old'), false, 'five years after the last message the transcript goes');
     assert.ok(db.getLead('LEAD-old'), 'the lead row stays: it is the attribution record');
@@ -384,7 +386,7 @@ test('the upkeep takes a colleague\'s or a never-list number\'s chat out of the 
     assert.equal(app.inboxStore.unreadTotal({ userId: 'USR-anyone' }), 1, 'the control: before the upkeep it counts');
 
     const counts = await app.inboxMaintenance();
-    assert.deepEqual(counts, { excludedOut: 3, purgedChats: 0, purgedMessages: 0, purgedSends: 0, codeRows: 0, interrupted: 0, candidatesExpired: 0, dismissalsExpired: 0, caughtUp: 1, caughtUpStored: 0, caughtUpFailed: 0 });
+    assert.deepEqual(counts, { excludedOut: 3, purgedChats: 0, purgedMessages: 0, purgedSends: 0, codeRows: 0, interrupted: 0, candidatesExpired: 0, dismissalsExpired: 0, pushOrphans: 0, caughtUp: 1, caughtUpStored: 0, caughtUpFailed: 0 });
     for (const id of ['LEAD-staff', 'LEAD-never', 'LEAD-never-guess']) assert.equal(db.getLead(id).inbox_state, 'out', id);
     assert.equal(app.inboxStore.hasMessages('LEAD-staff'), false, 'her words are gone, not merely hidden');
     assert.equal(app.inboxStore.unreadTotal({ userId: 'USR-anyone' }), 0, 'and no badge counts them');
@@ -456,7 +458,7 @@ test('a catch-up read that fails leaves the thread a gap where its history belon
     });
 
     const first = await app.inboxMaintenance();
-    assert.deepEqual(first, { excludedOut: 0, purgedChats: 0, purgedMessages: 0, purgedSends: 0, codeRows: 0, interrupted: 0, candidatesExpired: 0, dismissalsExpired: 0, caughtUp: 0, caughtUpStored: 0, caughtUpFailed: 4 });
+    assert.deepEqual(first, { excludedOut: 0, purgedChats: 0, purgedMessages: 0, purgedSends: 0, codeRows: 0, interrupted: 0, candidatesExpired: 0, dismissalsExpired: 0, pushOrphans: 0, caughtUp: 0, caughtUpStored: 0, caughtUpFailed: 4 });
     assert.deepEqual(h.logs.find((e) => e.evt === 'inbox.catchup'), { evt: 'inbox.catchup', chats: 0, stored: 0, failed: 4 },
       'a run where every read failed does not read like a run with nothing to do');
     // Keyed like the poller's join gap, at the start of the window the read was asked for.
@@ -550,7 +552,7 @@ test('a step that fails is one log line naming the step and the kind of failure,
     // message can carry a jid; its name and code are logged only in shapes that cannot.
     fail = Object.assign(new TypeError('no chat for 966500000077@s.whatsapp.net'), { code: 'ERR_SQLITE_ERROR' });
     const counts = await app.inboxMaintenance();
-    assert.deepEqual(counts, { excludedOut: 0, purgedChats: 0, purgedMessages: 0, purgedSends: 0, codeRows: 0, interrupted: 0, candidatesExpired: 0, dismissalsExpired: 0, caughtUp: 0, caughtUpStored: 0, caughtUpFailed: 0 });
+    assert.deepEqual(counts, { excludedOut: 0, purgedChats: 0, purgedMessages: 0, purgedSends: 0, codeRows: 0, interrupted: 0, candidatesExpired: 0, dismissalsExpired: 0, pushOrphans: 0, caughtUp: 0, caughtUpStored: 0, caughtUpFailed: 0 });
     assert.deepEqual(h.logs.find((e) => e.evt === 'inbox.maintenance'), { evt: 'inbox.maintenance', ...counts }, 'the run still reports');
     fail = Object.assign(new Error('boom'), { name: 'Chat966500000077', code: '966500000077' });
     await app.inboxMaintenance();
@@ -619,7 +621,7 @@ test('upkeep never rejects, and a logger that throws costs no step and fails no 
       send_id: 'SND-stale', lead_id: 'LEAD-empty', jid: '966500000077@s.whatsapp.net', text: 'hello', user_id: 'USR-1', sender_kind: 'staff',
     });
     assert.deepEqual(await app.inboxMaintenance(),
-      { excludedOut: 1, purgedChats: 0, purgedMessages: 0, purgedSends: 0, codeRows: 0, interrupted: 1, candidatesExpired: 0, dismissalsExpired: 0, caughtUp: 1, caughtUpStored: 0, caughtUpFailed: 0 },
+      { excludedOut: 1, purgedChats: 0, purgedMessages: 0, purgedSends: 0, codeRows: 0, interrupted: 1, candidatesExpired: 0, dismissalsExpired: 0, pushOrphans: 0, caughtUp: 1, caughtUpStored: 0, caughtUpFailed: 0 },
       'the sweep\'s line threw, and every step after it ran; the closing lines threw, and the run is still a finished one');
 
     backfill.history = async () => { throw new Error('read failed'); };
@@ -716,5 +718,83 @@ test("the backfill createApp builds takes back a join's history gap once a threa
     assert.deepEqual(app.inboxStore.gapsFor(LEAD), [], 'the join window came back whole');
   } finally {
     await h.close();
+  }
+});
+
+/* -------------------- phone alerts (Phase 3): the trigger, the upkeep, the keys -------------------- */
+
+const b64u = (b) => Buffer.from(b).toString('base64url');
+const KEYS = { p256dh: b64u(Buffer.concat([Buffer.from([4]), crypto.randomBytes(64)])), auth: b64u(crypto.randomBytes(16)) };
+
+test('a client message the poller stores sends a phone alert through the one fetch; the upkeep prunes devices whose login is gone', async () => {
+  const LEAD = 'LEAD-20260928-0000cccc';
+  const JID = '966500000077@s.whatsapp.net';
+  const pushes = [];
+  const fetchImpl = async (url, init) => {
+    if (String(url).startsWith('https://fcm.googleapis.com/')) {
+      pushes.push({ url, init });
+      return { status: 201, arrayBuffer: async () => new ArrayBuffer(0) };
+    }
+    const body = JSON.parse(init.body);
+    const records = body.where?.messageTimestamp ? [{
+      key: { id: 'POLL-2', fromMe: false, remoteJid: JID }, pushName: null, messageType: 'conversation',
+      message: { conversation: 'hello?' }, messageTimestamp: Math.floor((NOW - 5_000) / 1000),
+    }] : [];
+    return { ok: true, status: 200, text: async () => JSON.stringify({ messages: { total: records.length, pages: 1, currentPage: 1, records } }) };
+  };
+  const pair = generateVapidKeys();
+  const h = build({ env: ENV, config: { waPoll: true, vapidPublic: pair.publicKey, vapidPrivate: pair.privateKey, vapidSubject: 'https://bona.azoz.uk' }, fetchImpl });
+  try {
+    const { app, db } = h;
+    assert.equal(app.alerts.configured, true);
+    db.insertLead({
+      lead_id: LEAD, created: NOW - DAY, updated: NOW - DAY, phone_e164: '966500000077', wa_jid: JID,
+      channel: 'whatsapp', match_method: 'ref', stage: 'new', stage_ts: NOW - DAY, inbox_state: 'in', inbox_since: NOW - DAY,
+    });
+    const sara = app.team.addUser({ name: 'Sara', phone: '966500000001', role: 'staff' });
+    const token = 'ab'.repeat(16);
+    db.createAuthSession(token, { now: NOW, userId: sara.user_id });
+    assert.deepEqual(app.alerts.subscribe({ userId: sara.user_id, sessionHash: tokenHash(token), endpoint: 'https://fcm.googleapis.com/fcm/send/w1', keys: KEYS }), { ok: true, created: true, moved: false });
+
+    const tally = await app.poller.tick();
+    assert.equal(tally.stored, 1);
+    await app.alerts.flush();
+    assert.equal(pushes.length, 1, 'one device, one push');
+    assert.equal(pushes[0].url, 'https://fcm.googleapis.com/fcm/send/w1');
+    assert.equal(pushes[0].init.method, 'POST');
+    assert.equal(pushes[0].init.body, undefined, 'payload-less (P3-10): no body at all, as lib/push.mjs sends it');
+    assert.match(pushes[0].init.headers.Authorization, /^vapid t=[\w-]+\.[\w-]+\.[\w-]+, k=[\w-]+$/);
+    assert.ok(h.logs.some((l) => l.evt === 'push.sent' && l.ok === 1 && l.leadId === LEAD));
+    assert.doesNotMatch(JSON.stringify(h.logs), /fcm\.googleapis|send\/w1|966500000077|hello\?/);
+
+    assert.equal((await app.inboxMaintenance()).pushOrphans, 0);
+    db.deleteAuthSession(token);
+    assert.equal((await app.inboxMaintenance()).pushOrphans, 1, 'a device whose login is gone');
+    assert.equal(app.alerts.countFor(sara.user_id), 0);
+  } finally {
+    await h.close();
+  }
+});
+
+test('without VAPID keys the app has no alerts; a pair that does not match is refused out loud', async () => {
+  const off = build({});
+  try { assert.equal(off.app.alerts.configured, false); } finally { await off.close(); }
+  const a = generateVapidKeys();
+  const b = generateVapidKeys();
+  const broken = build({ config: { vapidPublic: a.publicKey, vapidPrivate: b.privateKey, vapidSubject: 'https://bona.azoz.uk' } });
+  try {
+    assert.equal(broken.app.alerts.configured, false);
+    assert.ok(broken.logs.some((l) => l.evt === 'push.keys_invalid' && l.level === 'error' && l.keys === false && l.subject === true),
+      'the line names the half that failed: the pair, not the subject');
+    assert.doesNotMatch(JSON.stringify(broken.logs), new RegExp(`${a.publicKey}|${b.privateKey}`), 'never a key');
+  } finally {
+    await broken.close();
+  }
+  const badSubject = build({ config: { vapidPublic: a.publicKey, vapidPrivate: a.privateKey, vapidSubject: 'ops@example.com' } });
+  try {
+    assert.equal(badSubject.app.alerts.configured, false, 'a subject that is not mailto: or https: would earn a 403 from Apple');
+    assert.ok(badSubject.logs.some((l) => l.evt === 'push.keys_invalid' && l.level === 'error' && l.keys === true && l.subject === false));
+  } finally {
+    await badSubject.close();
   }
 });
