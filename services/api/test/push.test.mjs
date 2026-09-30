@@ -56,8 +56,6 @@ test('only a real push service endpoint is accepted (the server POSTs to it)', (
     'https://wns2-par02p.notify.windows.com/w/?token=BQYAAA',
   ]) assert.equal(pushEndpoint(ok), new URL(ok).href, ok);
   assert.equal(pushEndpoint('https://FCM.googleapis.com:443/fcm/send/x'), 'https://fcm.googleapis.com/fcm/send/x');
-  for (const ok of [
-  ]) assert.equal(pushEndpoint(ok), new URL(ok).href, ok);
   for (const bad of [
     'http://fcm.googleapis.com/fcm/send/a', 'https://evil.example/fcm.googleapis.com', 'https://fcm.googleapis.com.evil.example/x',
     'https://notify.windows.com/x', 'https://push.apple.com/x', 'https://user@fcm.googleapis.com/x', 'https://fcm.googleapis.com:8443/x',
