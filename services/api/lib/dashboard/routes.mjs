@@ -8,9 +8,12 @@
  *
  * Three things are deliberate:
  *
- *   1. Every response carries `default-src 'none'` — the pages have no JavaScript at
- *      all, so the strictest possible policy is also a free one, and a lead named
- *      `<script>` has nowhere to run even if an escape were missed.
+ *   1. Every response carries `default-src 'none'`. An HTML page (P3-1) opens exactly
+ *      four things to itself and nothing else: our own `/dashboard/app.js`, our own
+ *      `/dashboard/sw.js`, fetches to this API and our own manifest. Nothing inline —
+ *      `script-src 'self'` has no `'unsafe-inline'` — so a lead named `<script>` still
+ *      has nowhere to run even if an escape were missed. JSON answers and redirects
+ *      keep the plain `default-src 'none'`.
  *   2. What actually stops a cross-site write is `SameSite=Lax` — the cookie does not
  *      ride a cross-site POST at all — backed by the `Origin`/`Referer` check below.
  *      On top of that every write carries a marker: `X-Bona-Dash: 1` on a JSON call, a
@@ -36,6 +39,7 @@ import { createTiktokAccounts, AccountsError } from '../tiktok-accounts.mjs';
 import { tiktokAccountsPage, tiktokContinuePage, validateTiktokDraft } from './render-tiktok.mjs';
 import { teamPage } from './render-team.mjs';
 import { inboxPage, unsurePage, threadPage, INBOX_OK } from './render-inbox.mjs';
+import { ASSETS } from './assets.mjs';
 import { TeamError, isExcludedLead } from '../team.mjs';
 import { createOrMergeLead } from '../leads.mjs';
 import { normalisePhone } from '../phone.mjs';
@@ -61,6 +65,17 @@ export const SECURITY_HEADERS = {
   'Referrer-Policy': 'same-origin',
   'X-Content-Type-Options': 'nosniff',
 };
+
+/**
+ * The CSP of an HTML page (design §5, P3-1): as locked as before, plus our own script, our
+ * own service worker, fetches to ourselves (the pulse, the push subscription) and our own
+ * manifest. Still no inline script: a lead's name that slipped past an escape cannot run.
+ * JSON answers and redirects keep SECURITY_HEADERS' `default-src 'none'`.
+ */
+export const PAGE_CSP = "default-src 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
+export const PAGE_SECURITY_HEADERS = { ...SECURITY_HEADERS, 'Content-Security-Policy': PAGE_CSP };
+/** The service worker's own CSP: it loads nothing but the notification icon. */
+const WORKER_CSP = "default-src 'none'; img-src 'self'";
 
 export const MAX_NOTE = 2000;
 /**
@@ -194,15 +209,28 @@ export function createDashboardRoutes({
 
   /* -------------------- responses -------------------- */
 
+  /** A page: the one kind of answer whose CSP opens our own script, worker, fetches and manifest (P3-1). */
   function sendHtml(res, status, html, extra = {}) {
     const body = Buffer.from(html, 'utf8');
     res.writeHead(status, {
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Length': body.length,
-      ...SECURITY_HEADERS,
+      ...PAGE_SECURITY_HEADERS,
       ...extra,
     });
     res.end(body);
+  }
+
+  /** One of the fixed app files (P3-2): public, GET/HEAD only, never cached. */
+  function sendAsset(req, res, asset, p) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method_not_allowed' });
+    res.writeHead(200, {
+      'Content-Type': asset.type,
+      'Content-Length': asset.body.length,
+      ...SECURITY_HEADERS,
+      ...(p === '/dashboard/sw.js' ? { 'Content-Security-Policy': WORKER_CSP } : {}),
+    });
+    res.end(req.method === 'HEAD' ? undefined : asset.body);
   }
 
   function sendJson(res, status, payload, extra = {}) {
@@ -1282,6 +1310,9 @@ export function createDashboardRoutes({
   const owns = ownsDashboardPath;
 
   async function handleHtml({ req, res, url, p, ip }) {
+    /* --- the app's fixed files: public, whoever asks (P3-2) --- */
+    const asset = ASSETS.get(p);
+    if (asset) return sendAsset(req, res, asset, p);
     if (p === '/dashboard/tiktok/callback') return tiktokCallback({ req, res, url });
     /* --- login, the only pages reachable signed out --- */
     if (p === '/dashboard/login') {
