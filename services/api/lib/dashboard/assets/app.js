@@ -68,13 +68,33 @@
   /** The page must not be moved: it is already going somewhere, or something is being typed. */
   function busy() { return leaving || drafting(); }
 
-  /** Point the "new activity" note at `href` and show it; a page without one shows nothing. */
+  /**
+   * Point the "new activity" note at `href` and show it. A page that has no note of its own
+   * (Leads with a search typed, a lead record with an unfinished note) gets one, built from
+   * DOM nodes — never from an HTML string — at the top of its content, so a tap that finds
+   * the page busy is never lost.
+   */
   function noteWithLink(href) {
     var note = document.querySelector('[data-pulse-note]');
-    if (!note) return;
-    var link = note.querySelector ? note.querySelector('a') : null;
-    if (link) link.href = href;
-    note.hidden = false;
+    if (note) {
+      var link = note.querySelector ? note.querySelector('a') : null;
+      if (link) { link.href = href; link.textContent = 'open it'; }
+      note.hidden = false;
+      return;
+    }
+    var p = document.createElement('p');
+    p.className = 'flash';
+    p.setAttribute('data-pulse-note', '');
+    p.appendChild(document.createTextNode('New Bona message — '));
+    var a = document.createElement('a');
+    a.href = href;
+    a.textContent = 'open it';
+    p.appendChild(a);
+    p.appendChild(document.createTextNode('.'));
+    var host = document.querySelector('.content') || document.body;
+    if (!host) return;
+    host.insertBefore(p, host.firstChild || null);
+    p.hidden = false;
   }
 
   // A tapped alert (sw.js `notificationclick`): two steps over the worker's port. `bona:open`
@@ -104,6 +124,11 @@
     });
   }
 
+  // The page's own address, read once from its note before anything can repoint the note
+  // at a tapped alert's chat (`noteWithLink`): what a refresh goes to, never that chat.
+  var noteEl = document.querySelector('[data-pulse-note]');
+  var refreshHref = noteEl ? ((noteEl.querySelector && noteEl.querySelector('a')) || {}).href || null : null;
+
   var pulse = document.querySelector('[data-pulse]');
   if (pulse && pulse.dataset && pulse.dataset.pulse) {
     var asking = false;
@@ -121,10 +146,9 @@
           return;
         }
         if (leaving) return;
-        // The note's own link is the page's GET address: a thread drawn by a refused reply
-        // (a POST) is fetched again, not re-posted with a "confirm resubmission" prompt.
-        var link = note && note.querySelector ? note.querySelector('a') : null;
-        if (link) location.replace(link.href);
+        // The page's own GET address (its note's link as drawn): a thread drawn by a refused
+        // reply (a POST) is fetched again, not re-posted with a "confirm resubmission" prompt.
+        if (refreshHref) location.replace(refreshHref);
         else location.reload();
       } catch (e) {
         /* offline for a moment: the next pulse asks again */
