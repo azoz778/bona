@@ -142,3 +142,56 @@ test('the layout links the manifest and icons on every page; app.js and the push
   assert.match(signed, /<meta name="bona-push-key" content="BKey&quot;&lt;x&gt;">/);
   assert.match(layout({ title: 'x', body: '', me: { ...me, pushKey: undefined } }), /<meta name="bona-push-key" content="">/);
 });
+
+test('app.js registers the worker, subscribes only on a click, posts with the write marker, and never uses innerHTML', () => {
+  const src = ASSETS.get('/dashboard/app.js').body.toString('utf8');
+  new vm.Script(src);
+  assert.match(src, /serviceWorker\.register\('\/dashboard\/sw\.js', \{ scope: '\/dashboard\/' \}\)/);
+  assert.match(src, /pushManager\.subscribe\(\{ userVisibleOnly: true, applicationServerKey:/);
+  assert.match(src, /'X-Bona-Dash': '1'/);
+  assert.match(src, /'\/v1\/admin\/push\/subscribe'/);
+  assert.match(src, /'\/v1\/admin\/push\/unsubscribe'/);
+  assert.doesNotMatch(src, /innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|new Function/);
+  assert.doesNotMatch(src, /localStorage|sessionStorage|indexedDB/, 'nothing kept in the browser');
+});
+
+test('app.js live refresh: reloads a changed list, never a thread with a draft in the box', async () => {
+  const src = ASSETS.get('/dashboard/app.js').body.toString('utf8');
+  const make = ({ pulse, token, answer, draft = '', focused = false }) => {
+    const reloads = [];
+    const note = { hidden: true };
+    const box = { value: draft };
+    const el = { dataset: { pulse, pulseToken: token } };
+    const document = {
+      visibilityState: 'visible',
+      activeElement: focused ? box : null,
+      querySelector: (sel) => ({ '[data-pulse]': el, '[data-pulse-note]': note, '#r-text': box })[sel] ?? null,
+      addEventListener() {},
+    };
+    let tick = null;
+    const ctx = {
+      document, navigator: {}, window: { matchMedia: () => ({ matches: false }) },
+      location: { reload: () => reloads.push(1) },
+      fetch: async () => ({ ok: true, status: 200, json: async () => ({ token: answer }) }),
+      setInterval: (fn) => { tick = fn; return 1; }, clearInterval() {}, console,
+    };
+    vm.runInNewContext(src, ctx);
+    return { run: async () => { await tick(); await new Promise((r) => setImmediate(r)); }, reloads, note };
+  };
+  const same = make({ pulse: '/v1/admin/inbox/pulse', token: '1:0:5', answer: '1:0:5' });
+  await same.run();
+  assert.equal(same.reloads.length, 0);
+  const list = make({ pulse: '/v1/admin/inbox/pulse', token: '1:0:5', answer: '2:1:9' });
+  await list.run();
+  assert.equal(list.reloads.length, 1);
+  const draft = make({ pulse: '/v1/admin/inbox/pulse?lead=L', token: '4', answer: '5', draft: 'half a reply' });
+  await draft.run();
+  assert.equal(draft.reloads.length, 0);
+  assert.equal(draft.note.hidden, false, 'the note says there is something new');
+  const focused = make({ pulse: '/v1/admin/inbox/pulse?lead=L', token: '4', answer: '5', focused: true });
+  await focused.run();
+  assert.equal(focused.reloads.length, 0);
+  const empty = make({ pulse: '/v1/admin/inbox/pulse?lead=L', token: '4', answer: '5' });
+  await empty.run();
+  assert.equal(empty.reloads.length, 1);
+});
