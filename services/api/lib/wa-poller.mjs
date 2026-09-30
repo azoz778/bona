@@ -332,10 +332,15 @@ const NO_EXCLUSIONS = () => false;
  *        every Phase 1 test) means no inbox at all — the poller behaves exactly as before.
  * @param {ReturnType<import('./inbox/backfill.mjs').createBackfill>} [o.backfill]
  *        pulls the 24 h before a join; without it a join stores from its own message on
+ * @param {(leadId: string, ts: number) => void} [o.onClientMessage]
+ *        Phase 3 phone alerts: called, never awaited, when a client record the poller read
+ *        is stored in an `in` chat (design §5, P3-9). Never for a join's history, the
+ *        owner's side, or anything the poller did not read itself; one that throws is a
+ *        `poll.alert_failed` warn line, not a failed record.
  */
 export function createPoller({
   db, cfg = {}, findMessages = null, sendWhatsApp = null, isExcluded = NO_EXCLUSIONS, log = () => {}, now = () => Date.now(),
-  inboxStore = null, ingest = null, backfill = null, fetchImpl = undefined,
+  inboxStore = null, ingest = null, backfill = null, fetchImpl = undefined, onClientMessage = null,
 } = {}) {
   // `createIngest()` hands back `{ ingest }`; the bare function is accepted as well. Every
   // other shape is refused here rather than read as "no inbox": a wiring slip that passes
@@ -590,6 +595,16 @@ export function createPoller({
   async function storeRecord(leadId, rec, tally) {
     const res = await ingestOne(db.getLead(leadId), rec);
     if (res?.stored) tally.stored += 1;
+    // A client wrote in an inbox chat: phone alerts (Phase 3, P3-9). Whether this stored it or
+    // a thread refresh had a moment before, the poller reads each record once, so this is its
+    // first sight of it. Never awaited; one that throws is a warn line, not a failed record.
+    if (res?.stored && res.senderKind === 'client' && onClientMessage) {
+      try {
+        onClientMessage(leadId, Number.isFinite(rec.ts) ? rec.ts : now());
+      } catch {
+        log({ level: 'warn', evt: 'poll.alert_failed', leadId });
+      }
+    }
   }
 
   /**
