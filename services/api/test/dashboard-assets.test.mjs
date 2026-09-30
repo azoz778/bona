@@ -316,7 +316,7 @@ test('app.js live refresh: reloads a changed list, never a thread with a draft i
  * browser already holds `sub` (or none). `fields` are what a draft could sit in. Hands back
  * the listeners the script registered, the panel's state, and what it navigated to or posted.
  */
-function signedInPage({ sub = null, draft = '', fields = null, active = null } = {}) {
+function signedInPage({ sub = null, draft = '', fields = null, active = null, withNote = true, noteHref = '', pulse = null } = {}) {
   const src = ASSETS.get('/dashboard/app.js').body.toString('utf8');
   const posts = [];
   const navigations = [];
@@ -326,18 +326,33 @@ function signedInPage({ sub = null, draft = '', fields = null, active = null } =
   const onBtn = { hidden: true, addEventListener: (n, fn) => { listeners.onBtn[n] = fn; } };
   const offBtn = { hidden: true, addEventListener: (n, fn) => { listeners.offBtn[n] = fn; } };
   const box = { value: draft };
-  const el = { dataset: {} };
-  const noteLink = { href: '' };
+  // With `pulse` (`{ url, token, answer }`), the page carries a live refresh whose fetch answers `answer`.
+  const el = { dataset: pulse ? { pulse: pulse.url, pulseToken: pulse.token } : {} };
+  const noteLink = { href: noteHref, textContent: 'reload' };
   const note = { hidden: true, querySelector: (sel) => (sel === 'a' ? noteLink : null) };
+  // Just enough DOM for a note built from nodes: elements with children, attributes and text.
+  const element = (tag) => ({
+    tagName: tag.toUpperCase(), className: '', hidden: false, textContent: '', attributes: {}, children: [], firstChild: null,
+    setAttribute(k, v) { this.attributes[k] = v; },
+    appendChild(c) { this.children.push(c); this.firstChild = this.children[0]; return c; },
+    insertBefore(c, before) { const i = before ? this.children.indexOf(before) : -1; if (i < 0) this.children.push(c); else this.children.splice(i, 0, c); this.firstChild = this.children[0]; return c; },
+  });
+  const content = element('div');
+  content.appendChild(element('h2')); // the page's own first element, which the note must go before
   const document = {
     visibilityState: 'visible',
     activeElement: active,
     querySelector: (sel) => ({
       '[data-pulse]': el, 'meta[name="bona-push-key"]': { content: 'BKEY' }, '[data-alerts]': panel,
-      '[data-alerts-text]': text, '[data-alerts-on]': onBtn, '[data-alerts-off]': offBtn, '#r-text': box, '[data-pulse-note]': note,
+      '[data-alerts-text]': text, '[data-alerts-on]': onBtn, '[data-alerts-off]': offBtn, '#r-text': box,
+      '[data-pulse-note]': withNote ? note : (content.children.find((c) => c.attributes && 'data-pulse-note' in c.attributes) ?? null),
+      '.content': content,
     })[sel] ?? null,
     querySelectorAll: () => fields ?? [box],
     addEventListener: (n, fn) => { listeners.document[n] = fn; },
+    createElement: element,
+    createTextNode: (t) => ({ nodeType: 3, textContent: t }),
+    body: element('body'),
   };
   // `lookups` scripts what later `getSubscription()` calls answer (an Error rejects); empty → `sub` as before.
   const lookups = [];
@@ -354,12 +369,19 @@ function signedInPage({ sub = null, draft = '', fields = null, active = null } =
     window: { PushManager: {}, Notification: {}, matchMedia: () => ({ matches: false }), addEventListener: (n, fn) => { listeners.window[n] = fn; } },
     Notification: { permission: 'granted' },
     location: { origin: 'https://bona-api.azoz.uk', assign: (url) => navigations.push(url), replace: (url) => navigations.push(url), reload: () => navigations.push('reload') },
-    fetch: async (path, init) => { posts.push({ path, body: JSON.parse(init.body) }); return { ok: true, status: 200, json: async () => ({ ok: true }) }; },
-    setInterval: () => 1, clearInterval() {}, console, JSON, Uint8Array, URL, atob: (s) => Buffer.from(s, 'base64').toString('binary'),
+    fetch: async (path, init) => {
+      if (!init || init.method !== 'POST') return { ok: true, status: 200, json: async () => ({ token: pulse ? pulse.answer : '' }) };
+      posts.push({ path, body: JSON.parse(init.body) });
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    },
+    setInterval: (fn) => { timers.tick = fn; return 1; }, clearInterval() {}, console, JSON, Uint8Array, URL, atob: (s) => Buffer.from(s, 'base64').toString('binary'),
   };
+  const timers = { tick: null };
   vm.runInNewContext(src, ctx);
   const settle = async () => { for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r)); };
-  return { listeners, panel, text, onBtn, offBtn, posts, navigations, settle, box, note, noteLink, lookups };
+  /** One pulse tick, as the interval would fire it. */
+  const tick = async () => { await timers.tick(); await settle(); };
+  return { listeners, panel, text, onBtn, offBtn, posts, navigations, settle, tick, box, note, noteLink, lookups, content };
 }
 
 test('app.js and the worker\'s two steps: yes then go, no with the note over a draft, and only our own address ever followed', async () => {
@@ -381,14 +403,21 @@ test('app.js and the worker\'s two steps: yes then go, no with the note over a d
   assert.deepEqual(clean.navigations, [TARGET], 'the page goes on the go, to the full same-origin address');
 
   // A draft on the page: no, and the note now carries the chat's link; nothing moves.
-  const drafting = signedInPage({ draft: 'half a reply' });
+  const THREAD = 'https://bona-api.azoz.uk/dashboard/inbox/L';
+  const drafting = signedInPage({ draft: 'half a reply', noteHref: THREAD, pulse: { url: '/v1/admin/inbox/pulse?lead=L', token: '4', answer: '5' } });
   await drafting.settle();
   const no = open(drafting, '/dashboard/push/open');
   assert.deepEqual(no.answers, [{ ok: false }]);
   assert.equal(drafting.note.hidden, false, 'the note is shown');
   assert.equal(drafting.noteLink.href, TARGET, 'and points at the chat');
+  assert.equal(drafting.noteLink.textContent, 'open it', 'and says so');
   no.go(); // a go the worker would never send after a no: still nothing
   assert.deepEqual(drafting.navigations, []);
+  // The draft sent, a later change of the chat refreshes the page to ITS OWN address — the
+  // note's repointed link is the alert's chat, not where a refresh goes.
+  drafting.box.value = '';
+  await drafting.tick();
+  assert.deepEqual(drafting.navigations, [THREAD], 'refreshed to the thread, not sent to the alert');
 
   // Typing began between the yes and the go: the go is refused too, with the note.
   const between = signedInPage();
@@ -400,6 +429,27 @@ test('app.js and the worker\'s two steps: yes then go, no with the note over a d
   assert.deepEqual(between.navigations, [], 'a go never lands on a draft');
   assert.equal(between.note.hidden, false);
   assert.equal(between.noteLink.href, TARGET);
+
+  // A busy page with no note of its own (Leads with a search typed, a lead record with an
+  // unfinished note) gets one built from DOM nodes at the top of its content: the tap is not lost.
+  const noteless = signedInPage({ draft: 'a search', withNote: false });
+  await noteless.settle();
+  assert.deepEqual(open(noteless, '/dashboard/push/open').answers, [{ ok: false }]);
+  assert.deepEqual(noteless.navigations, []);
+  const made = noteless.content.firstChild;
+  assert.equal(made.tagName, 'P');
+  assert.equal(made.className, 'flash');
+  assert.deepEqual(made.attributes, { 'data-pulse-note': '' });
+  assert.equal(made.hidden, false);
+  assert.deepEqual(made.children.map((c) => c.tagName ?? c.textContent), ['New Bona message — ', 'A', '.']);
+  assert.equal(made.children[1].href, TARGET, 'its link is the chat');
+  assert.equal(made.children[1].textContent, 'open it');
+  assert.equal(noteless.content.children.length, 2, 'inserted before the page\'s own content, nothing replaced');
+  // Asked again, the same note is reused rather than a second one made.
+  open(noteless, '/dashboard/push/open');
+  assert.equal(noteless.content.children.filter((c) => c.attributes && 'data-pulse-note' in c.attributes).length, 1);
+  // And the go that would never come still moves nothing.
+  assert.deepEqual(noteless.navigations, []);
 
   // A select being picked from (the handler picker) counts as a draft: a reload drops the pick.
   const picking = signedInPage({ fields: [], active: { tagName: 'select' } });
