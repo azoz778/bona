@@ -1376,3 +1376,16 @@ test('insertOutbox keeps covers_ts as given, NULL when left out', () => {
   assert.equal(inbox.getOutbox('SND-c1').covers_ts, T3);
   assert.equal(inbox.getOutbox('SND-c2').covers_ts, null);
 });
+
+test('countDanaTests counts the chats in the Bona inbox under a Dana test, and nothing else', () => {
+  const { s, inbox } = harness();
+  assert.equal(inbox.countDanaTests(), 0);
+  chat(s, 'LEAD-T1');
+  chat(s, 'LEAD-T2');
+  chat(s, 'LEAD-N');
+  lead(s, 'LEAD-U', { inbox_state: 'unsure' });
+  for (const id of ['LEAD-T1', 'LEAD-T2', 'LEAD-U']) s.updateLead(id, { dana_test: 1 });
+  assert.equal(inbox.countDanaTests(), 2, 'an Unsure lead flagged by hand does not count');
+  inbox.leaveInbox('LEAD-T2');
+  assert.equal(inbox.countDanaTests(), 1, 'leaving the inbox ends the test');
+});

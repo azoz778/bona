@@ -1477,7 +1477,7 @@ test('the per-chat Dana switches: anyone turns her off here, only an owner start
     }
     assert.deepEqual([h.db.getLead('LEAD-A').dana_off, h.db.getLead('LEAD-A').dana_test], [0, 1], 'nothing written by a refused post');
     const audited = h.app.audit.recent(50).filter((r) => r.action === 'dana_chat');
-    assert.deepEqual(audited.map((r) => [r.target, r.meta]), [['LEAD-A', { dana_off: 0 }], ['LEAD-A', { dana_test: 1 }], ['LEAD-A', { dana_off: 1 }]]);
+    assert.deepEqual(audited.map((r) => [r.target, r.meta]), [['LEAD-A', { dana_off: 0 }], ['LEAD-A', { dana_test: 1 }], ['LEAD-A', { dana_off: 1, dana_test: 0 }]]);
     assert.equal(audited[2].user_id, h.staffUser.user_id);
     res = await h.postJson('/v1/admin/inbox/LEAD-U/dana', { dana_off: '1' }, { cookie: owner });
     assert.equal(res.status, 404, 'an Unsure chat is not a chat (rule 1)');
@@ -1488,5 +1488,84 @@ test('the per-chat Dana switches: anyone turns her off here, only an owner start
     assert.match(html, /Dana is testing on this chat/);
     assert.match(html, /Stop the Dana test here/);
     assert.ok(!JSON.stringify(h.logs.filter((l) => l.evt === 'dash.dana_chat')).includes(CLIENT), 'no number in the log line');
+  });
+});
+
+test('the kill switch ends a test: anyone turning Dana off in a chat clears the owner\'s test there too', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    const owner = await h.boss();
+    let res = await h.postForm('/v1/admin/inbox/LEAD-A/dana', { dana_test: '1' }, { cookie: owner });
+    assert.equal(res.status, 303);
+    assert.equal(h.db.getLead('LEAD-A').dana_test, 1);
+    res = await h.postJson('/v1/admin/inbox/LEAD-A/dana', { dana_off: '1' }, { cookie: staff });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ok: true, dana_off: 1, dana_test: 0 });
+    assert.deepEqual([h.db.getLead('LEAD-A').dana_off, h.db.getLead('LEAD-A').dana_test], [1, 0]);
+    const last = h.app.audit.recent(50).filter((r) => r.action === 'dana_chat')[0];
+    assert.deepEqual([last.user_id, last.meta], [h.staffUser.user_id, { dana_off: 1, dana_test: 0 }]);
+    const line = h.logs.filter((l) => l.evt === 'dash.dana_chat').at(-1);
+    assert.deepEqual(line, { evt: 'dash.dana_chat', leadId: 'LEAD-A', dana_off: 1 });
+  });
+});
+
+test('a demoted owner cannot start a Dana test: the role is read again at the write', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    // The only owner cannot be demoted (last_owner), so a colleague is promoted, logs in
+    // as an owner, and is demoted with the session still open.
+    h.team.setRole(h.staffUser.user_id, 'owner');
+    const cookie = await h.staff();
+    h.team.setRole(h.staffUser.user_id, 'staff');
+    const res = await h.postForm('/v1/admin/inbox/LEAD-A/dana', { dana_test: '1' }, { cookie });
+    assert.equal(res.status, 403);
+    assert.deepEqual(await res.json(), { error: 'owner_only' });
+    assert.equal(h.db.getLead('LEAD-A').dana_test, 0);
+    assert.ok(!h.app.audit.recent(50).some((r) => r.action === 'dana_chat'));
+  });
+});
+
+test('the Dana switch ships off and only the owner turns her on, with a value the setting allows', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const staff = await h.staff();
+    const boss = await h.boss();
+    assert.equal(h.team.danaEnabled(), false, 'she ships off');
+
+    const denied = await h.postForm('/v1/admin/settings', { dana_enabled: '1' }, { cookie: staff });
+    assert.equal(denied.status, 403);
+    assert.deepEqual(await denied.json(), { error: 'owner_only' });
+    assert.equal(h.team.danaEnabled(), false);
+
+    const odd = await h.postForm('/v1/admin/settings', { dana_enabled: 'yes' }, { cookie: boss });
+    assert.equal(odd.status, 303);
+    assert.equal(odd.headers.get('location'), '/dashboard/team?error=bad_setting_value');
+    assert.equal(h.team.danaEnabled(), false);
+
+    assert.match(await (await h.get('/dashboard/team', { cookie: boss })).text(), /name="dana_enabled" value="1"/, 'the Team page offers to turn her on');
+    const on = await h.postForm('/v1/admin/settings', { dana_enabled: '1' }, { cookie: boss });
+    assert.equal(on.status, 303);
+    assert.equal(on.headers.get('location'), '/dashboard/team?ok=setting');
+    assert.equal(h.team.danaEnabled(), true);
+    const audited = h.app.audit.recent(50).filter((r) => r.action === 'setting');
+    assert.equal(audited.length, 1);
+    assert.equal(audited[0].user_id, h.owner.user_id);
+    assert.equal(audited[0].target, 'dana_enabled');
+    assert.deepEqual(audited[0].meta, { value: '1' });
+
+    const off = await h.postForm('/v1/admin/settings', { dana_enabled: '0' }, { cookie: boss });
+    assert.equal(off.status, 303);
+    assert.equal(h.team.danaEnabled(), false);
+  });
+});
+
+test('the Team page counts the chats under a Dana test in its "Off" line', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const boss = await h.boss();
+    await h.postForm('/v1/admin/inbox/LEAD-A/dana', { dana_test: '1' }, { cookie: boss });
+    const html = await (await h.get('/dashboard/team', { cookie: boss })).text();
+    assert.match(html, /Off\. Dana answers nobody on WhatsApp, except 1 chat under test\./);
   });
 });

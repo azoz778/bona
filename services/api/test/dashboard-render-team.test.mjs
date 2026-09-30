@@ -111,3 +111,11 @@ test('the Dana switch: off by default with the way to test her on one chat, on w
   assert.match(bare, /not provisioned for WhatsApp yet/);
   assert.match(bare, /provision\.mjs --whatsapp-only/);
 });
+
+test('the Team page\'s "Off" line does not deny a test the owner armed', () => {
+  const page = (danaTests) => teamPage({ me: OWNER, users: [OWNER], danaEnabled: false, danaConfigured: true, danaTests });
+  assert.match(page(2), /Off\. Dana answers nobody on WhatsApp, except 2 chats under test\. To try her/);
+  assert.match(page(1), /Off\. Dana answers nobody on WhatsApp, except 1 chat under test\. To try her/);
+  assert.match(page(0), /Off\. Dana answers nobody on WhatsApp\. To try her/);
+  assert.match(teamPage({ me: OWNER, users: [OWNER] }), /Off\. Dana answers nobody on WhatsApp\. To try her/, 'the default is no tests');
+});
