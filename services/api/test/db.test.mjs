@@ -541,9 +541,9 @@ test('ad spend upserts per day, platform and campaign', () => {
   s.close();
 });
 
-test('schema v5: push_subscriptions, one row per endpoint, bound to a member and a session', () => {
+test('the latest schema keeps push_subscriptions, one row per endpoint, bound to a member and a session', () => {
   const s = openDb(':memory:');
-  assert.equal(SCHEMA_VERSION, 6);
+  assert.ok(SCHEMA_VERSION >= 5, 'push_subscriptions arrived in v5 and stays');
   assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
   const cols = s.db.prepare('PRAGMA table_info(push_subscriptions)').all().map((c) => c.name);
   assert.deepEqual(cols, ['id', 'user_id', 'endpoint', 'p256dh', 'auth', 'session_hash', 'created', 'updated', 'last_ok', 'fail_count']);
@@ -589,8 +589,9 @@ test('tokenHash is the hash auth_sessions keeps for a session token', () => {
   s.close();
 });
 
-test('v6: the Dana columns, and last_human_out_ts backfilled from the newest human outbound of each in chat', () => {
+test('v6: the Dana columns, and last_human_out_ts backfilled from the newest human outbound of each in chat', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-v6-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'bona.db');
   const raw = new DatabaseSync(file);
   migrate(raw, { upTo: 5 });
@@ -605,9 +606,10 @@ test('v6: the Dana columns, and last_human_out_ts backfilled from the newest hum
   ins.run('K5', 'L3', 'out', 'owner_number', 'x', 3000);
   raw.close();
 
-  const s = openDb(file);
+  let s;
   try {
-    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 6);
+    s = openDb(file);
+    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
     const cols = s.db.prepare('PRAGMA table_info(leads)').all().map((c) => c.name);
     for (const c of ['dana_off', 'dana_test', 'dana_chat_id', 'dana_chat_ts', 'dana_introduced', 'last_human_out_ts']) assert.ok(cols.includes(c), c);
     const l1 = s.getLead('L1');
@@ -621,9 +623,11 @@ test('v6: the Dana columns, and last_human_out_ts backfilled from the newest hum
     for (const col of ['dana_off', 'dana_test', 'dana_introduced']) {
       assert.throws(() => s.db.prepare(`UPDATE leads SET ${col} = 2 WHERE lead_id = 'L1'`).run(), /CHECK/, `${col} is 0 or 1`);
     }
-    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 6, 'opening again is a no-op');
-  } finally {
     s.close();
-    fs.rmSync(dir, { recursive: true, force: true });
+    s = openDb(file);
+    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION, 'opening again is a no-op');
+    assert.equal(s.getLead('L1').dana_off, 1, 'the second open kept what was written');
+  } finally {
+    s?.close();
   }
 });
