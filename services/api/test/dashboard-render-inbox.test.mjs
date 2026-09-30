@@ -503,3 +503,24 @@ test('a thread that leaves earlier messages out leaves out the gaps and unconfir
   assert.equal(gapCount(whole), 2, 'with nothing left out, a gap before the first message is the chat\'s own start');
   assert.match(whole, /an old failed reply/);
 });
+
+/* ---------------- phone alerts and the pulse (Phase 3) ---------------- */
+
+test('the inbox list draws the Phone alerts panel, hidden until app.js shows it, only when push is configured', () => {
+  const me = { user_id: 'U1', name: 'Sara', role: 'staff', pushKey: 'BKEY' };
+  const html = inboxPage({ me, rows: [], pulseToken: '0:0:0' });
+  assert.match(html, /<section class="card cp alerts" data-alerts hidden>/);
+  assert.match(html, /<button type="button" data-alerts-on hidden>Turn on alerts<\/button>/);
+  assert.match(html, /<button type="button" data-alerts-off hidden>Turn off alerts on this device<\/button>/);
+  assert.match(html, /<p class="sub" data-alerts-text><\/p>/);
+  assert.doesNotMatch(inboxPage({ me: { ...me, pushKey: '' }, rows: [] }), /data-alerts/);
+  assert.doesNotMatch(html, /onclick|onload|javascript:/i, 'no inline handlers: the CSP would block them');
+});
+
+test('the list and the thread carry their pulse; the thread has a hidden "new activity" note', () => {
+  const me = { user_id: 'U1', name: 'Sara', role: 'staff' };
+  assert.match(inboxPage({ me, rows: [], pulseToken: '3:1:17"x' }), /<div data-pulse="\/v1\/admin\/inbox\/pulse" data-pulse-token="3:1:17&quot;x">/);
+  const html = thread({ pulseToken: '42' }); // the file's `thread(over)` helper, with threadPage's usual fields
+  assert.match(html, /data-pulse="\/v1\/admin\/inbox\/pulse\?lead=[A-Za-z0-9_-]+" data-pulse-token="42"/);
+  assert.match(html, /<p class="flash" data-pulse-note hidden>New activity in this chat — <a href="[^"]+">reload<\/a> to see it\.<\/p>/);
+});
