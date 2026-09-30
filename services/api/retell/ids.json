@@ -10,5 +10,8 @@
   "separateChatAgent": true,
   "published": false,
   "note": "Ids are not secrets. Regenerate with: node services/api/retell/provision.mjs",
-  "updatedAt": "2026-09-08T09:50:03.030Z"
+  "waLlmId": "llm_d2b51db66e0273e3ecac9078f12d",
+  "waChatAgentId": "agent_a1cd69a1d6ab2fcb755698cfb5",
+  "waModel": "claude-4.6-sonnet",
+  "updatedAt": "2026-09-30T19:23:43.557Z"
 }
