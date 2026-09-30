@@ -22,11 +22,17 @@ import { createAudit } from '../lib/audit.mjs';
 const TOKEN = 'a'.repeat(32);
 const inventory = createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk' });
 const CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
+/** An HTML page's CSP (P3-1): the same, plus our own script, worker, fetches and manifest — nothing inline. */
+const PAGE_CSP = "default-src 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
+const OWN_SCRIPT = '<script src="/dashboard/app.js" defer></script>';
+/** The one script a signed-in page may carry is our own app.js; nothing else, nothing inline. */
+const onlyOurScript = (html) => !/<script/i.test(html.split(OWN_SCRIPT).join(''));
 
-/** Every dashboard and admin answer, whatever it says, carries the same four headers. */
+/** Every dashboard and admin answer, whatever it says, carries the same four headers; a page's CSP opens self only. */
 function assertLocked(res) {
   assert.equal(res.headers.get('cache-control'), 'no-store');
-  assert.equal(res.headers.get('content-security-policy'), CSP);
+  const html = String(res.headers.get('content-type') ?? '').startsWith('text/html');
+  assert.equal(res.headers.get('content-security-policy'), html ? PAGE_CSP : CSP);
   assert.equal(res.headers.get('x-frame-options'), 'DENY');
   // NOT `no-referrer`: that made Chrome send `Origin: null` on the login form's own
   // same-origin POST, and `sameOrigin()` refused it — the owner could not log in at
@@ -185,7 +191,7 @@ test('the login round trip: ask, receive on WhatsApp, type it back', async () =>
     assertLocked(page);
     const html = await page.text();
     assert.match(html, /Send me a code/);
-    assert.ok(!/<script/i.test(html), 'the dashboard ships no script at all');
+    assert.ok(!/<script/i.test(html), 'the login page ships no script at all: app.js rides only on a signed-in page');
 
     const { cookie, res } = await login();
     assert.equal(res.status, 303);
@@ -348,10 +354,30 @@ test('every page renders for a signed-in owner', async () => {
       assertLocked(res);
       const html = await res.text();
       assert.match(html, needle, p);
-      assert.ok(!/<script/i.test(html), `${p} must ship no script`);
+      assert.ok(onlyOurScript(html), `${p}: no script but our own app.js`);
     }
     const missing = await get('/dashboard/leads/LEAD-nope', { cookie });
     assert.equal(missing.status, 404);
+  });
+});
+
+test('the app files are served signed out, with their types, never cached; a POST is refused', async () => {
+  await withDash({}, async (h) => {
+    for (const [p, type] of [['/dashboard/sw.js', 'text/javascript; charset=utf-8'], ['/dashboard/app.js', 'text/javascript; charset=utf-8'],
+      ['/dashboard/manifest.webmanifest', 'application/manifest+json; charset=utf-8'], ['/dashboard/icon-192.png', 'image/png']]) {
+      const res = await h.get(p);
+      assert.equal(res.status, 200, p);
+      assert.equal(res.headers.get('content-type'), type, p);
+      assert.equal(res.headers.get('cache-control'), 'no-store', p);
+      assert.equal(res.headers.get('x-content-type-options'), 'nosniff', p);
+      assert.ok((await res.arrayBuffer()).byteLength > 0, p);
+    }
+    assert.equal((await h.get('/dashboard/sw.js')).headers.get('content-security-policy'), "default-src 'none'; img-src 'self'");
+    const head = await fetch(h.base + '/dashboard/app.js', { method: 'HEAD' });
+    assert.equal(head.status, 200);
+    const post = await fetch(h.base + '/dashboard/sw.js', { method: 'POST' });
+    assert.equal(post.status, 405);
+    assert.equal((await h.get('/dashboard/sw.js/../team')).status, 302, 'not a file path: an ordinary page, which needs a login');
   });
 });
 

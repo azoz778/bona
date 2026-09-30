@@ -1,0 +1,14 @@
+{
+  "name": "Bona dashboard",
+  "short_name": "Bona",
+  "id": "/dashboard/",
+  "start_url": "/dashboard/inbox",
+  "scope": "/dashboard/",
+  "display": "standalone",
+  "background_color": "#0a0b0c",
+  "theme_color": "#0a0b0c",
+  "icons": [
+    { "src": "/dashboard/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/dashboard/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

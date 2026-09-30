@@ -2,10 +2,11 @@
  * The dashboard's HTML.
  *
  * Server-rendered strings with one embedded stylesheet and charts drawn as inline
- * SVG. There is no JavaScript on these pages at all — not "no framework", none: the
- * CSP the routes set is `default-src 'none'`, which forbids script outright, so a
- * stored cross-site script has nowhere to run even if one of the escapes below were
- * wrong. Every form is a plain form post; every filter is a GET.
+ * SVG. Every page works with no JavaScript at all — not "no framework", none: every
+ * form is a plain form post; every filter is a GET. The one script a signed-in page
+ * carries is our own `/dashboard/app.js` (phone alerts and a live refresh, design §5);
+ * the CSP the routes set allows that file and nothing inline, so a stored cross-site
+ * script has nowhere to run even if one of the escapes below were wrong.
  *
  * That also means the page is legible on a phone with a bad connection in a lift,
  * which is where the owner actually reads it.
@@ -108,14 +109,19 @@ export const STYLE = `
    dark-on-dark. Borders are whisper-thin semi-transparent white.
    Text is never pure white.
 
-   No webfonts: the production CSP is default-src 'none', so an
-   external font can never load. Identity is carried by weight,
-   tracking and tabular numerals instead.
+   No webfonts: the production CSP is default-src 'none' for
+   everything but our own files, so an external font can never
+   load. Identity is carried by weight, tracking and tabular
+   numerals instead.
 
    Dark is the default. The light theme is a re-tune, not an
    inversion, and is switched by a checkbox + :has() — the page
-   ships zero JavaScript by design.
+   works with no JavaScript at all; the one script it may carry
+   (/dashboard/app.js) only adds phone alerts and a live refresh.
    ============================================================ */
+/* The hidden attribute wins over every display a class sets: the alerts panel and the
+   "new activity" note are hidden until app.js shows them. */
+[hidden]{display:none!important}
 :root{
 --l0:#0a0b0c;--l1:rgba(255,255,255,.022);--l2:rgba(255,255,255,.04);--l3:rgba(255,255,255,.06);
 --panel:#101214;--bd:rgba(255,255,255,.07);--bd2:rgba(255,255,255,.11);
@@ -595,9 +601,9 @@ export const byUrgency = (now) => (a, b) => {
 };
 
 export function layout({ title, body, active = null, chrome = true, counts = {}, subtitle = null, actions = '', me = null }) {
-  // Each rail item is drawn inline: the CSP is `default-src 'none'`, so an icon font
-  // or a sprite sheet from anywhere — including our own /img — is one more thing that
-  // can fail to load. An inline path cannot.
+  // Each rail item is drawn inline: the CSP opens nothing but our own app files, so an
+  // icon font or a sprite sheet from anywhere — including our own /img — is one more
+  // thing that can fail to load. An inline path cannot.
   const entries = me?.role === 'owner' ? [...NAV, ...OWNER_NAV] : NAV;
   // The Inbox count is the signed-in person's own unread messages. It rides on `me` so
   // every page shows it without each route having to pass it; a page that passes its
@@ -645,6 +651,13 @@ export function layout({ title, body, active = null, chrome = true, counts = {},
 <meta name="robots" content="noindex, nofollow, notranslate">
 <meta name="google" content="notranslate">
 <meta name="theme-color" content="#0a0b0c">
+<link rel="manifest" href="/dashboard/manifest.webmanifest">
+<link rel="icon" href="/dashboard/icon-192.png">
+<link rel="apple-touch-icon" href="/dashboard/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bona">
+${me ? `<meta name="bona-push-key" content="${esc(me.pushKey ?? '')}">\n<script src="/dashboard/app.js" defer></script>` : ''}
 <title>${esc(title)} · Bona</title>
 <style>${STYLE}</style>
 </head>
@@ -842,8 +855,8 @@ export function replyLine(lead, now) {
 /**
  * A lead, and the two taps that matter: WhatsApp and Call.
  *
- * The action bar is three top-level links, so it works with script disabled, with a
- * CSP of `default-src 'none'`, and on a lock-screened phone. `wa.me` takes bare digits;
+ * The action bar is three top-level links, so it works with script disabled, without
+ * `/dashboard/app.js` (the only script the CSP allows), and on a lock-screened phone. `wa.me` takes bare digits;
  * `tel:` takes E.164. Neither can carry markup, because both are rebuilt from
  * `/\D/`-stripped digits before they are printed.
  *
@@ -978,8 +991,8 @@ const ICON_TEL = '<path d="M5.2 2.6 6.9 6 5.4 7.5a8 8 0 0 0 3.1 3.1L10 9.1l3.4 1
 /**
  * One waiting lead as a Desk row: who, how long, and the two taps that matter.
  *
- * Both actions are plain links, so they work with script disabled, under a CSP of
- * `default-src 'none'`, and on a lock-screened phone. `wa.me` takes bare digits and
+ * Both actions are plain links, so they work with script disabled, without
+ * `/dashboard/app.js` (the only script the CSP allows), and on a lock-screened phone. `wa.me` takes bare digits and
  * `tel:` takes E.164 — both are rebuilt from `/\D/`-stripped digits before printing,
  * so neither can carry markup. Names and districts are Arabic as often as not, so
  * every element that can hold one carries `dir="auto"` on an INLINE span: putting it

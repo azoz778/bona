@@ -2,9 +2,11 @@
  * The Bona inbox (2026-09-27 design §4.4): the chat list, the owner's Unsure list, and
  * one chat's thread with its reply box.
  *
- * Same rules as render.mjs: no script (the CSP forbids it), every value through `esc`,
- * every write a plain form post to /v1/admin/*. Without script a page is as fresh as
- * its last load, so the list says so: reload to see new messages.
+ * Same rules as render.mjs: no script of its own — a signed-in page may run our own
+ * `/dashboard/app.js` and nothing inline (the CSP allows nothing else), and every screen
+ * works without it — every value through `esc`, every write a plain form post to
+ * /v1/admin/*. Without script a page is as fresh as its last load, so the list says so:
+ * reload to see new messages.
  *
  * Numbers: a list shows the last four digits only; the thread header shows the whole
  * number, because that page exists to talk to that one person. Names sit in `<bdi>`, so

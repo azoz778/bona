@@ -12,6 +12,9 @@ import { inboxPage, unsurePage, threadPage, INBOX_OK } from '../lib/dashboard/re
 const NOW = 1_790_500_000_000;
 const HOUR = 3_600_000;
 const EVIL = '<img src=x onerror=alert(1)>';
+const OWN_SCRIPT = '<script src="/dashboard/app.js" defer></script>';
+/** The one script a signed-in page may carry is our own app.js; nothing else, nothing inline. */
+const onlyOurScript = (html) => !/<script/i.test(html.split(OWN_SCRIPT).join(''));
 
 const OWNER = { user_id: 'USR-o', name: 'Abdulaziz Zidan', role: 'owner', phone_e164: '966593296933', active: 1, created: 1 };
 const STAFF = { user_id: 'USR-s', name: 'Sara', role: 'staff', phone_e164: '966500000001', active: 1, created: 1 };
@@ -83,7 +86,7 @@ test('the chat list: escaped names in bdi, masked numbers, last message, time, s
     ],
   });
   assert.ok(!html.includes('<img'), 'a name is text, never markup');
-  assert.ok(!html.includes('<script'), 'a message is text, never markup');
+  assert.ok(onlyOurScript(html), 'a message is text, never markup: no script but our own app.js');
   assert.match(html, /<bdi>&lt;img src=x onerror=alert\(1\)&gt;<\/bdi>/);
   assert.match(html, /…5678/);
   assert.match(html, /…5432/);
@@ -105,7 +108,7 @@ test('the chat list: escaped names in bdi, masked numbers, last message, time, s
   assert.match(html, /href="\/dashboard\/inbox\/LEAD-20260928-aaaa0001"/);
   assert.match(html, /href="\/dashboard\/inbox\/LEAD-20260928-aaaa0002"/);
   assert.match(html, /3 chats, 1 with new messages/);
-  assert.ok(!/<script/i.test(html));
+  assert.ok(onlyOurScript(html), 'no script but our own app.js');
 });
 
 test('only the owner sees the Unsure tab, its count and "Add chat by phone number"', () => {
@@ -240,7 +243,7 @@ test('the reply form carries send_id, seen_rev, seen_ts and the kept draft, and 
   assert.match(html, /<input type="hidden" name="seen_rev" value="42">/, 'the revision the stale-view guard compares');
   assert.match(html, new RegExp(`<input type="hidden" name="seen_ts" value="${NOW - HOUR}">`));
   assert.match(html, /<textarea id="r-text" name="text" maxlength="4096" dir="auto" required>my text &lt;\/textarea&gt;&lt;script&gt;x&lt;\/script&gt;<\/textarea>/);
-  assert.ok(!/<script/i.test(html));
+  assert.ok(onlyOurScript(html), 'no script but our own app.js');
   assert.match(html, /<div class="err">New activity since you opened this chat/);
   assert.match(html, /it goes from your WhatsApp/);
   assert.match(thread({ me: STAFF }), /it goes from the owner&#39;s WhatsApp/);
