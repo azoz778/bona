@@ -16114,7 +16114,7 @@ P10. **Hidden messages take their gaps and unconfirmed replies with them**: with
 - **P3-11 `app.js`** (one classic script, `defer`, on every signed-in page; none on the login and logout pages): registers `/dashboard/sw.js` (scope `/dashboard/`) when the page carries a push key; when notifications are already granted and the browser has a subscription, re-posts it (binds it to this session, P3-5); drives the Inbox page's *Phone alerts* panel (Turn on / Turn off, the iPhone Home-Screen hint, "blocked", "not supported"); and refreshes the inbox list and a thread (P3-12). `pushManager.subscribe` is called directly inside the click handler (iOS needs the user gesture).
 - **P3-12 Live refresh by a pulse, not by a socket.** The Inbox list and a thread carry `data-pulse` (the URL to ask) and `data-pulse-token` (what the page was drawn from). `app.js` asks `GET /v1/admin/inbox/pulse` (list) or `GET /v1/admin/inbox/pulse?lead=<id>` (thread) every 15 s while the page is visible, and at once when it becomes visible again. A different token reloads the list; on a thread it reloads only when the reply box is empty and not focused, otherwise it shows "New activity in this chat — reload to see it." and never touches the draft. Tokens: a thread's is its `chat_rev` (`inbox.revision`, the same number the reply form's stale guard uses); the list's is `<chats>:<unread>:<newest last_msg_ts>` over exactly the rows the page draws. A thread the member may not read answers 404 like everything else under rule 1.
 - **P3-13 The push key rides on `me`**: routes add `pushKey` (the VAPID public key, or nothing when push is not configured) to the signed-in person object every page already receives (`withUnread`); `layout` prints `<meta name="bona-push-key" content="…">` and the `app.js` tag only when `me` is there. The *Phone alerts* panel is drawn (hidden until `app.js` shows it) only when `me.pushKey` is set. Without keys nothing breaks: no panel, `subscribe` answers 503 `push_off`, no push is ever sent, the pulse still works.
-- **P3-14 Keys are generated once, on the VPS**, by `services/api/bin/vapid-keys.mjs --env-file ~/.secrets/bona-services.env`, which appends `BONA_VAPID_PUBLIC` / `BONA_VAPID_PRIVATE` (base64url: the 65-byte public point and the 32-byte private scalar) and never overwrites existing keys (a new pair silently ends every phone's alerts: each subscription is tied to the public key it was made with). `BONA_VAPID_SUBJECT` defaults to the site URL (`https://bona-real-estate.com`: a contact URL, as RFC 8292 allows; no email address is published). A key pair that is malformed or does not match is refused at start (`push.keys_invalid`, push off), never half-used. Neither key is ever logged; `/health` says only `push.configured`.
+- **P3-14 Keys are generated once, on the VPS**, by `services/api/bin/vapid-keys.mjs --file ~/.secrets/bona-services.env`, which appends `BONA_VAPID_PUBLIC` / `BONA_VAPID_PRIVATE` (base64url: the 65-byte public point and the 32-byte private scalar) and never overwrites existing keys (a new pair silently ends every phone's alerts: each subscription is tied to the public key it was made with). `BONA_VAPID_SUBJECT` defaults to the site URL (`https://bona-real-estate.com`: a contact URL, as RFC 8292 allows; no email address is published). A key pair that is malformed or does not match is refused at start (`push.keys_invalid`, push off), never half-used. Neither key is ever logged; `/health` says only `push.configured`.
 - **P3-15 Logs**: `push.sent { leadId, reason, users, devices, ok, gone, failed }`, `push.refused { status | error }`, `push.subscribed { userId }` / `push.unsubscribed { userId }`, `push.keys_invalid`, `poll.alert_failed`. Never an endpoint (it is a bearer capability), a key, a name, a number or message text.
 
 ### Task order
@@ -17117,11 +17117,11 @@ test('a subject is written only when given; a missing file is created 0600', () 
 test('the CLI prints the public key only, never the private one', () => {
   const dir = tmp();
   const file = path.join(dir, 'x.env');
-  const printed = execFileSync(process.execPath, [BIN, '--env-file', file], { encoding: 'utf8' });
+  const printed = execFileSync(process.execPath, [BIN, '--file', file], { encoding: 'utf8' });
   const env = parseEnvText(fs.readFileSync(file, 'utf8'));
   assert.ok(printed.includes(env.BONA_VAPID_PUBLIC));
   assert.ok(!printed.includes(env.BONA_VAPID_PRIVATE));
-  assert.match(execFileSync(process.execPath, [BIN, '--env-file', file], { encoding: 'utf8' }), /already/);
+  assert.match(execFileSync(process.execPath, [BIN, '--file', file], { encoding: 'utf8' }), /already/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 ```
@@ -17150,7 +17150,7 @@ Create `services/api/bin/vapid-keys.mjs`:
 /**
  * Generate the Web Push (VAPID) key pair for phone alerts — ONCE, on the VPS (design §5):
  *
- *   node /opt/bona/services/api/bin/vapid-keys.mjs --env-file ~/.secrets/bona-services.env [--subject mailto:…]
+ *   node /opt/bona/services/api/bin/vapid-keys.mjs --file ~/.secrets/bona-services.env [--subject mailto:…]
  *
  * Appends BONA_VAPID_PUBLIC / BONA_VAPID_PRIVATE (and BONA_VAPID_SUBJECT when given) and
  * keeps the file 0600. Never overwrites keys that are there: every phone's subscription is
@@ -17183,9 +17183,9 @@ export function writeVapidKeys(file, { subject = null } = {}) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2);
   const at = (flag) => { const i = args.indexOf(flag); return i >= 0 ? args[i + 1] : null; };
-  const file = at('--env-file');
+  const file = at('--file');
   if (!file) {
-    console.error('usage: vapid-keys.mjs --env-file <path> [--subject mailto:…|https://…]');
+    console.error('usage: vapid-keys.mjs --file <path> [--subject mailto:…|https://…]');
     process.exit(2);
   }
   const out = writeVapidKeys(file, { subject: at('--subject') });
@@ -18173,7 +18173,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - **Turning it on:** Inbox page → *Phone alerts* → *Turn on alerts*. Android: Chrome, any recent version. iPhone: iOS 16.4 or later, and only from the Home-Screen app: Safari → Share → *Add to Home Screen*, open Bona from the Home Screen, sign in there (it keeps its own login), then turn alerts on.
 - **Which devices:** alerts belong to the login they were turned on in. Logging out on a device ends alerts on that device only. Deactivating a member ends all their devices' alerts. A login that expires (30 days) ends its device's alerts until the member signs in again on it, when they come back by themselves. At most 10 devices per member.
 - **Live refresh:** the Inbox list and an open chat check every 15 s and reload when something changed; a chat with a half-typed reply shows "New activity in this chat" instead of reloading.
-- **Keys:** generated once on the VPS: `node /opt/bona/services/api/bin/vapid-keys.mjs --env-file ~/.secrets/bona-services.env`, then `deploy.sh` (bona-api reads them at start). Never generate a second pair: every phone's alerts would end until each member turns them on again. `/health` shows `push.configured`; the daily upkeep's `inbox.maintenance` line counts `pushOrphans` (devices whose login has gone).
+- **Keys:** generated once on the VPS: `node /opt/bona/services/api/bin/vapid-keys.mjs --file ~/.secrets/bona-services.env`, then `deploy.sh` (bona-api reads them at start). Never generate a second pair: every phone's alerts would end until each member turns them on again. `/health` shows `push.configured`; the daily upkeep's `inbox.maintenance` line counts `pushOrphans` (devices whose login has gone).
 - **Logs:** `push.sent` (counts), `push.refused` (a push service's status), `push.subscribed` / `push.unsubscribed` (member id). Never an endpoint, a key, a name, a number or message text.
 ```
 Also change the Inbox section's "reload the page to see new messages" wording, if present, to point at live refresh.
@@ -18272,7 +18272,7 @@ Expected: one new `bona.db.snap-<stamp>`, mode `-rw-------`.
 - [ ] **Step 8: Deploy, then generate the keys once, then deploy again**
 ```bash
 ssh hermes-vps bash /opt/bona/services/deploy/vps/deploy.sh
-ssh hermes-vps '/home/azoz/.local/opt/node-v24.19.0-linux-x64/bin/node /opt/bona/services/api/bin/vapid-keys.mjs --env-file ~/.secrets/bona-services.env && stat -c %a ~/.secrets/bona-services.env && grep -c "^BONA_VAPID_P" ~/.secrets/bona-services.env'
+ssh hermes-vps '/home/azoz/.local/opt/node-v24.19.0-linux-x64/bin/node /opt/bona/services/api/bin/vapid-keys.mjs --file ~/.secrets/bona-services.env && stat -c %a ~/.secrets/bona-services.env && grep -c "^BONA_VAPID_P" ~/.secrets/bona-services.env'
 ssh hermes-vps bash /opt/bona/services/deploy/vps/deploy.sh
 ```
 Expected: first deploy green (v5 migrated, `push.configured: false`); keys written, `600`, `2`; second deploy green. A red run leaves the old process: stop and fix.
