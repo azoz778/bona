@@ -443,7 +443,7 @@ export function createApp(options = {}) {
   // security headers and its own limiter; nothing about it is CORS-enabled.
   const dashboard = options.dashboard ?? createDashboardRoutes({
     db, cfg, inventory, fanout, app, log, sendWhatsApp, probeRetell, team, audit, sendCode,
-    inbox: inboxStore, sender, backfill,
+    inbox: inboxStore, sender, backfill, alerts: options.alerts ?? null,
   });
 
   function dynamicVariables({ locale, page, sessionId }) {
