@@ -128,15 +128,15 @@ test('Dana is named in that section now that she answers on WhatsApp (Phase 4, s
   // What the system does (lib/dana-wa.mjs): she answers new messages when no human wrote in
   // the chat for 24 h, discloses she is an AI, sends the chat and the enquiry facts (never the
   // number) to Retell and its providers, quotes only published prices, hands over on request.
-  assert.match(en, /in the last 24 hours, Dana, our AI assistant, may answer your new messages from our number/);
+  assert.match(en, /When nobody on our team has written in your WhatsApp chat with us in the last 24 hours, Dana, our AI assistant, may answer your new messages from our number/);
   assert.match(en, /Her first message identifies her as an AI assistant/);
   assert.match(en, /our earlier replies in it and what we hold about your enquiry \(such as your name, interest, budget and district\) are sent to Retell and the AI providers it uses/);
   assert.match(en, /only prices published on this site/);
   assert.match(en, /hands the conversation to a team member when you ask to speak to a person, ask to view a home or make an offer/);
   assert.match(en, /deleted from our records/);
-  assert.match(ar, /خلال الساعات الأربع والعشرين الماضية، فقد تردّ دانة، مساعدتنا التي تعمل بالذكاء الاصطناعي، على رسائلك الجديدة من رقمنا/);
+  assert.match(ar, /إذا لم يكتب أحد من فريقنا في محادثتك معنا عبر واتساب خلال الساعات الأربع والعشرين الماضية، فقد تردّ دانة، مساعدتنا التي تعمل بالذكاء الاصطناعي، على رسائلك الجديدة من رقمنا/);
   assert.match(ar, /في أول رسالة منها أنها مساعدة تعمل بالذكاء الاصطناعي/);
-  assert.match(ar, /وردودنا السابقة فيها وما لدينا عن استفسارك/);
+  assert.match(ar, /وردودنا السابقة فيها وما لدينا عن استفسارك \(كاسمك واهتمامك وميزانيتك والحي\)/);
   assert.match(ar, /إلى Retell ومزوّدي الذكاء الاصطناعي الذين تستعين بهم/);
   assert.match(ar, /الأسعار المنشورة في هذا الموقع/);
   assert.match(ar, /تُحيل المحادثة إلى أحد أعضاء الفريق إذا طلبت التحدث إلى شخص، أو طلبت معاينة، أو قدّمت عرضاً/);
@@ -144,7 +144,12 @@ test('Dana is named in that section now that she answers on WhatsApp (Phase 4, s
   assert.doesNotMatch(body(s, 'ar') + body(section('ai-concierge'), 'ar'), /دانا/, 'one spelling of her name, the one clients see');
   const sharing = section('sharing');
   assert.match(body(sharing, 'en'), /Retell and its AI service providers for the concierge and for Dana’s WhatsApp replies/);
-  assert.match(body(sharing, 'ar'), /للمساعد وللردود عبر واتساب/);
+  assert.match(body(sharing, 'ar'), /للمساعد ولردود دانة عبر واتساب/);
+  // The concierge section no longer sells WhatsApp as the AI-free route: Dana may answer there too.
+  const concierge = section('ai-concierge');
+  assert.match(body(concierge, 'en'), /on WhatsApp, Dana may also answer when nobody on our team has written in the chat in the last 24 hours/);
+  assert.match(body(concierge, 'ar'), /وعلى واتساب قد تردّ دانة أيضاً إذا لم يكتب أحد من فريقنا/);
+  assert.doesNotMatch(body(concierge, 'en'), /Use WhatsApp instead if you do not want to use the AI concierge\./);
   assert.ok(policy.updated >= '2026-10-01', 'the page date moved on when she went live');
 });
 
