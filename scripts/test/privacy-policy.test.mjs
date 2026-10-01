@@ -120,11 +120,25 @@ test('what the WhatsApp conversations section and a dated change line point to i
   checkPointers(later);
 });
 
-test('Dana is not named in that section until she answers on WhatsApp (Phase 4)', () => {
+test('Dana is named in that section now that she answers on WhatsApp (Phase 4, switched on 2026-10-01)', () => {
   const s = section('whatsapp-conversations');
   assert.ok(s, 'the section is missing');
-  const all = [s.heading.en, s.heading.ar, body(s, 'en'), body(s, 'ar')].join(' ');
-  assert.doesNotMatch(all, /\bDana\b|دانة|دانا|\bAI\b|artificial intelligence|الذكاء الاصطناعي|المساعد الذكي|الكونسيرج/i);
+  const en = body(s, 'en');
+  const ar = body(s, 'ar');
+  assert.match(en, /Dana, our AI assistant, may reply from our number/, 'says who may reply, and that she is an AI');
+  assert.match(en, /Her first message says who she is/, 'the disclosure');
+  assert.match(en, /sent to Retell/, 'names the processor');
+  assert.match(en, /only prices published on this site/);
+  assert.match(en, /hands the conversation to a person/);
+  assert.match(en, /Write to us to have those messages deleted/);
+  assert.match(ar, /دانة، مساعدتنا الذكية/);
+  assert.match(ar, /Retell/);
+  assert.match(ar, /لحذف تلك الرسائل/);
+  const changes = section('changes');
+  const line = (locale, start) => changes.body[locale].find((p) => p.startsWith(start));
+  assert.match(line('en', '1 October 2026:') ?? '', /Dana, our AI assistant/, 'Changes flags the day she went live');
+  assert.match(line('ar', '1 أكتوبر 2026:') ?? '', /دانة/);
+  assert.equal(policy.updated, '2026-10-01');
 });
 
 test('the chats kept only to be checked are named: what is kept, for how long, and that the conversation is not (D17)', () => {
