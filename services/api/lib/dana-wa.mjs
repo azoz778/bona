@@ -41,7 +41,7 @@ export const CONTEXT_MESSAGES = 10;
 export const MAX_LINKS = 3;
 export const MAX_ANSWER_LEN = 1500;
 /** Prefixed, in code, to her first message in a chat (P4-12). */
-export const DISCLOSURE = { en: "Dana — Bona's AI assistant", ar: 'دانة — مساعدة بونا الذكية' };
+export const DISCLOSURE = { en: "Dana — Bona's AI assistant", ar: 'دانة — مساعدة بونا بالذكاء الاصطناعي' };
 /** The one line a hand-over sends (P4-11). */
 export const HANDOVER = { en: 'Thank you — a member of the Bona team will reply to you shortly.', ar: 'شكراً لك، أحد أعضاء فريق بونا بيرد عليك قريباً.' };
 
