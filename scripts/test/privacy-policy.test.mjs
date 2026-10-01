@@ -120,11 +120,51 @@ test('what the WhatsApp conversations section and a dated change line point to i
   checkPointers(later);
 });
 
-test('Dana is not named in that section until she answers on WhatsApp (Phase 4)', () => {
+test('Dana is named in that section now that she answers on WhatsApp (Phase 4, switched on 2026-10-01)', () => {
   const s = section('whatsapp-conversations');
   assert.ok(s, 'the section is missing');
-  const all = [s.heading.en, s.heading.ar, body(s, 'en'), body(s, 'ar')].join(' ');
-  assert.doesNotMatch(all, /\bDana\b|دانة|دانا|\bAI\b|artificial intelligence|الذكاء الاصطناعي|المساعد الذكي|الكونسيرج/i);
+  const en = body(s, 'en');
+  const ar = body(s, 'ar');
+  // What the system does (lib/dana-wa.mjs): she answers new messages when no human wrote in
+  // the chat for 24 h, discloses she is an AI, sends the chat and the enquiry facts (never the
+  // number) to Retell and its providers, quotes only published prices, hands over on request.
+  assert.match(en, /When nobody on our team has written in your WhatsApp chat with us in the last 24 hours, Dana, our AI assistant, may answer your new messages from our number/);
+  assert.match(en, /Her first message identifies her as an AI assistant/);
+  assert.match(en, /our earlier replies in it and what we hold about your enquiry \(such as your name, interest, budget and district\) are sent to Retell and the AI providers it uses/);
+  assert.match(en, /only prices published on this site/);
+  assert.match(en, /hands the conversation to a team member when you ask to speak to a person, ask to view a home or make an offer/);
+  assert.match(en, /deleted from our records/);
+  assert.match(ar, /إذا لم يكتب أحد من فريقنا في محادثتك معنا عبر واتساب خلال الساعات الأربع والعشرين الماضية، فقد تردّ دانة، مساعدتنا التي تعمل بالذكاء الاصطناعي، على رسائلك الجديدة من رقمنا/);
+  assert.match(ar, /في أول رسالة منها أنها مساعدة تعمل بالذكاء الاصطناعي/);
+  assert.match(ar, /وردودنا السابقة فيها وما لدينا عن استفسارك \(كاسمك واهتمامك وميزانيتك والحي\)/);
+  assert.match(ar, /إلى Retell ومزوّدي الذكاء الاصطناعي الذين تستعين بهم/);
+  assert.match(ar, /الأسعار المنشورة في هذا الموقع/);
+  assert.match(ar, /تُحيل المحادثة إلى أحد أعضاء الفريق إذا طلبت التحدث إلى شخص، أو طلبت معاينة، أو قدّمت عرضاً/);
+  assert.match(ar, /لحذف تلك الرسائل من سجلاتنا/);
+  assert.doesNotMatch(body(s, 'ar') + body(section('ai-concierge'), 'ar'), /دانا/, 'one spelling of her name, the one clients see');
+  const sharing = section('sharing');
+  assert.match(body(sharing, 'en'), /Retell and its AI service providers for the concierge and for Dana’s WhatsApp replies/);
+  assert.match(body(sharing, 'ar'), /للمساعد ولردود دانة عبر واتساب/);
+  // The concierge section no longer sells WhatsApp as the AI-free route: Dana may answer there too.
+  const concierge = section('ai-concierge');
+  assert.match(body(concierge, 'en'), /on WhatsApp, Dana may also answer when nobody on our team has written in the chat in the last 24 hours/);
+  assert.match(body(concierge, 'ar'), /وعلى واتساب قد تردّ دانة أيضاً إذا لم يكتب أحد من فريقنا/);
+  assert.doesNotMatch(body(concierge, 'en'), /Use WhatsApp instead if you do not want to use the AI concierge\./);
+  assert.ok(policy.updated >= '2026-10-01', 'the page date moved on when she went live');
+});
+
+// The page flags a material change for 30 days (like the 30 September lines): the two dated
+// lines and this test's asserts come out on or after 2026-10-31.
+test('the Changes section flags the day Dana went live, in both languages (30 days)', () => {
+  if (new Date().toISOString().slice(0, 10) >= '2026-10-31') return;
+  const changes = section('changes');
+  const line = (locale, start) => changes.body[locale].find((p) => p.startsWith(start)) ?? '';
+  assert.match(line('en', '1 October 2026:'), /Dana, our AI assistant/);
+  assert.match(line('en', '1 October 2026:'), /“WhatsApp conversations with our team”/);
+  assert.match(line('en', '1 October 2026:'), /sent to Retell/);
+  assert.match(line('ar', '1 أكتوبر 2026:'), /دانة، مساعدتنا التي تعمل بالذكاء الاصطناعي/);
+  assert.match(line('ar', '1 أكتوبر 2026:'), /«محادثات واتساب مع فريق بونا»/);
+  assert.match(line('ar', '1 أكتوبر 2026:'), /إلى Retell/);
 });
 
 test('the chats kept only to be checked are named: what is kept, for how long, and that the conversation is not (D17)', () => {

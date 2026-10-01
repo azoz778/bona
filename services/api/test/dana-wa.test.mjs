@@ -79,7 +79,7 @@ test('the constants are the spec\'s numbers', () => {
   assert.equal(FRESH_MS, 30 * 60_000);
   assert.deepEqual([PER_CHAT_PER_HOUR, PER_DAY, CONTEXT_MESSAGES, MAX_LINKS, MAX_ANSWER_LEN], [6, 200, 10, 3, 1500]);
   assert.equal(DISCLOSURE.en, "Dana — Bona's AI assistant");
-  assert.match(DISCLOSURE.ar, /دانة/);
+  assert.equal(DISCLOSURE.ar, 'دانة — مساعدة بونا بالذكاء الاصطناعي', 'says AI explicitly, not just "smart"');
   assert.match(HANDOVER.en, /team will reply/);
   assert.match(HANDOVER.ar, /فريق بونا/);
 });
