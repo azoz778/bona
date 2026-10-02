@@ -2,7 +2,7 @@
 // builder and the WhatsApp intake (services/intake/lib/{claude,listing}.mjs). One
 // definition, so a listing the intake accepts can never fail the build afterwards.
 
-import { FAQ_PLACEHOLDERS, isSheetDate, MAX_SHEET_AGE_DAYS, sheetAgeDays } from '../../src/lib/units-summary.mjs';
+import { FAQ_PLACEHOLDERS, isDeliveryDate, isSheetDate, MAX_SHEET_AGE_DAYS, sheetAgeDays } from '../../src/lib/units-summary.mjs';
 
 /** Words the house voice never uses. */
 export const HYPE_WORDS = ['amazing', 'stunning', 'breathtaking', 'unparalleled', "don't miss", 'dream home'];
@@ -221,6 +221,8 @@ export function faqProblems(faq) {
   const out = []; const seen = new Set();
   faq.forEach((it, i) => {
     const at = `faq[${i}]`;
+    if (!it || typeof it !== 'object' || Array.isArray(it)) { out.push(`${at} must be an object`); return; }
+    for (const lang of ['en', 'ar']) if (/[{}]/.test(String(it.q?.[lang] ?? ''))) out.push(`${at}.q.${lang} may not contain { } — only answers take sheet placeholders`);
     if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(it?.id ?? '')) out.push(`${at}.id must be lowercase-hyphenated`);
     else if (seen.has(it.id)) out.push(`${at}.id "${it.id}" is a duplicate`);
     seen.add(it?.id);
@@ -230,7 +232,10 @@ export function faqProblems(faq) {
       const a = it?.a?.[lang];
       if (!Array.isArray(a) || !a.length || !a.every(nonEmpty)) out.push(`${at}.a.${lang} must be a non-empty array of paragraphs`);
       else if (lang === 'ar' && !a.every((p) => AR_RE.test(p))) out.push(`${at}.a.ar must be Arabic`);
-      for (const p of Array.isArray(a) ? a : []) for (const [, k] of String(p).matchAll(/\{(\w+)\}/g)) if (!FAQ_PLACEHOLDERS.includes(k)) out.push(`${at}.a.${lang} uses unknown placeholder {${k}} (allowed: ${FAQ_PLACEHOLDERS.join(', ')})`);
+      for (const p of Array.isArray(a) ? a : []) {
+        for (const [, k] of String(p).matchAll(/\{([^{}]*)\}/g)) if (!FAQ_PLACEHOLDERS.includes(k)) out.push(`${at}.a.${lang} uses unknown placeholder {${k}} (allowed: ${FAQ_PLACEHOLDERS.join(', ')})`);
+        if (/[{}]/.test(String(p).replace(/\{[^{}]*\}/g, ''))) out.push(`${at}.a.${lang} has an unbalanced { or }`);
+      }
     }
   });
   return out;
@@ -238,6 +243,7 @@ export function faqProblems(faq) {
 
 export function seoTitleProblems(t) {
   if (t === undefined || t === null) return [];
+  if (typeof t !== 'object' || Array.isArray(t)) return ['seoTitle must be { en, ar }'];
   const out = [];
   if (!nonEmpty(t.en)) out.push('seoTitle.en required');
   if (!nonEmpty(t.ar) || !AR_RE.test(t.ar)) out.push('seoTitle.ar required (Arabic)');
@@ -247,6 +253,7 @@ export function seoTitleProblems(t) {
 
 export function projectFactsProblems(f) {
   if (f === undefined || f === null) return [];
+  if (typeof f !== 'object' || Array.isArray(f)) return ['projectFacts must be an object'];
   const out = [];
   for (const k of Object.keys(f)) if (!['totalUnits', 'buildings'].includes(k)) out.push(`projectFacts.${k} is unknown`);
   for (const k of ['totalUnits', 'buildings']) if (k in f && !(Number.isInteger(f[k]) && f[k] > 0)) out.push(`projectFacts.${k} must be a positive integer`);
@@ -261,6 +268,7 @@ export function unitsSheetProblems(record, now = new Date()) {
   const age = sheetAgeDays(record.updated, now);
   if (age < 0) return [`units.json sheet for ${record.listingId} is dated in the future (${record.updated}), so the site does not show it`];
   if (age > MAX_SHEET_AGE_DAYS) return [`units.json sheet for ${record.listingId} is ${age} days old (limit ${MAX_SHEET_AGE_DAYS}): its prices are hidden on the site until the owner sends a fresh developer sheet`];
+  if (record.delivery != null && !isDeliveryDate(record.delivery)) return [`units.json sheet for ${record.listingId} has an impossible delivery "${record.delivery}", so the handover date is not shown`];
   if (age > MAX_SHEET_AGE_DAYS - 15) return [`units.json sheet for ${record.listingId} is ${age} days old: its prices come off the site after day ${MAX_SHEET_AGE_DAYS}, ask the owner for a fresh developer sheet`];
   return [];
 }

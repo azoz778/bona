@@ -95,3 +95,12 @@ test('localFaq fills placeholders from the sheet and drops what it cannot fill',
   assert.deepEqual(localFaq(faq, 'ar', sheetVars(unitSummary(fixture), 'ar'))[1].a, ['من 750,000 ريال (2 سبتمبر 2026).']);
   assert.deepEqual(localFaq(faq, 'en', null).map((x) => x.id), ['dev'], 'no live sheet: the price answer goes, the rest stays');
 });
+
+test('an impossible delivery is dropped from the summary, so no invented date is printed (Codex review)', () => {
+  assert.equal(unitSummary({ ...fixture, delivery: '2028-02-30' }).delivery, null);
+  assert.equal(unitSummary({ ...fixture, delivery: '2028-13' }).delivery, null);
+  assert.equal(unitSummary({ ...fixture, delivery: '2028-06' }).delivery, '2028-06');
+  const vars = sheetVars(unitSummary({ ...fixture, delivery: '2028-13' }), 'en');
+  const faq = [{ id: 'h', q: { en: 'When?', ar: 'متى؟' }, a: { en: ['Handover {delivery}.'], ar: ['التسليم {delivery}.'] } }];
+  assert.deepEqual(localFaq(faq, 'en', vars), [], 'the handover answer is dropped, not filled with a made-up month');
+});
