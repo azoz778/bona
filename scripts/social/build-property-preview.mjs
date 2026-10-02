@@ -10,10 +10,14 @@ const [id,output,selection]=process.argv.slice(2);
 if(!id || !output || !/^\d+(,\d+){2,5}$/.test(selection ?? ''))throw new Error('Usage: build-property-preview.mjs BONA-ID NEW_OUTPUT_DIR 3,6,4');
 const out=path.resolve(output);
 if(fs.existsSync(out))throw new Error('Choose a new output directory; existing previews are preserved');
-const listing=JSON.parse(fs.readFileSync(path.join(root,'src/data/listings.json'),'utf8')).find(p=>p.id===id);
-if(!listing)throw new Error('Listing not found');
-const site=JSON.parse(fs.readFileSync(path.join(root,'src/data/site.json'),'utf8'));
-const advertiser={...site.advertiser,phone:site.phone.e164};
+const response=await fetch('https://bona-real-estate.com/social-catalogue.json',{redirect:'error',cache:'no-store',signal:AbortSignal.timeout(20000)});
+if(!response.ok)throw new Error('Live catalogue unavailable; do not draft from stale local stock');
+const live=await response.json();
+const generated=Date.parse(live.generatedAt);
+if(live.version!==1||!Array.isArray(live.listings)||!Number.isFinite(generated)||Date.now()-generated>48*3600000||generated>Date.now())throw new Error('Live catalogue invalid or stale');
+const listing=live.listings.find(p=>p.id===id);
+if(!listing || listing.status!=='available')throw new Error('Listing is not currently available; no promotional draft created');
+const advertiser=live.advertiser;
 const photos=[];fs.mkdirSync(out,{recursive:true});
 for(const [n,index] of selection.split(',').map(x=>Number(x)-1).entries()) {
   const source=listing.images[index];if(!source)throw new Error('Image selection out of bounds');
