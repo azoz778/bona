@@ -73,7 +73,7 @@ shapes, rejects empty strings and requires both languages.
 - `faq` (5 items, every answer traceable to the sheet or brochure): developer; handover date;
   unit sizes and bedrooms; starting cash price + sheet date; instalment plans (exist, ask us).
 
-## Staleness guard
+## Staleness guard (SUPERSEDED — see the amendment at the end: warn, never hide or fail)
 `validate.mjs` fails CI when a `units.json` record's `updated` is older than **90 days**. Prices
 cannot sit on the site silently out of date. The owner refreshes the sheet, or the record is
 removed and the block disappears.
