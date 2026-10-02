@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FORBIDDEN, HYPE, isLandPublic, isLocalSrc, isPublishable, LAND_PRICE_CAP, licenceProblems, LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, sarAmount, videoEntryProblems } from './rules.mjs';
+import { FORBIDDEN, HYPE, isLandPublic, isLocalSrc, isPublishable, LAND_PRICE_CAP, faqProblems, licenceProblems, LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, projectFactsProblems, sarAmount, seoTitleProblems, unitsSheetProblems, videoEntryProblems } from './rules.mjs';
 
 function matterportIdOf(value) {
   if (typeof value !== 'string') return null;
@@ -197,8 +197,21 @@ for (const l of data) {
     err(id, `land is at/above the SAR ${LAND_PRICE_CAP.toLocaleString('en-US')} public-site cap (${sar === null ? 'no published price' : `${Math.round(sar).toLocaleString('en-US')} SAR eq.`}) — re-run scripts/curate/build.mjs`);
   }
 
+  // Project-page extras (rules.mjs): optional, but whole when present.
+  for (const p of [...faqProblems(l.faq), ...seoTitleProblems(l.seoTitle), ...projectFactsProblems(l.projectFacts)]) err(id, p);
+  for (const it of Array.isArray(l.faq) ? l.faq : []) for (const [label, str] of [['faq.q.en', it.q?.en], ['faq.q.ar', it.q?.ar], ...(it.a?.en ?? []).map((x) => ['faq.a.en', x]), ...(it.a?.ar ?? []).map((x) => ['faq.a.ar', x])]) if (isStr(str)) checkCopy(id, label, str);
   // copy hygiene
   for (const [label, str] of [['title.en', l.title?.en], ['title.ar', l.title?.ar], ['description.en', l.description?.en], ['description.ar', l.description?.ar], ['project.name.en', l.project?.name?.en], ['project.name.ar', l.project?.name?.ar], ...((h.en ?? []).map((x, i) => [`highlights.en[${i}]`, x])), ...((h.ar ?? []).map((x, i) => [`highlights.ar[${i}]`, x]))]) if (isStr(str)) checkCopy(id, label, str);
+}
+
+// Developer unit sheet: prices on the site must not outlive the sheet they came from.
+const UNITS_FILE = path.join(ROOT, 'src', 'data', 'units.json');
+if (fs.existsSync(UNITS_FILE)) {
+  const sheet = JSON.parse(fs.readFileSync(UNITS_FILE, 'utf8'));
+  for (const rec of Array.isArray(sheet) ? sheet : [sheet]) {
+    if (!ids.has(rec.listingId)) err('units', `units.json record ${rec.listingId} has no listing`);
+    for (const p of unitsSheetProblems(rec)) err('units', p);
+  }
 }
 
 const featured = data.filter((l) => l.featured).length;
