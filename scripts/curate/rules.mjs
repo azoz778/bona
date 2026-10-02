@@ -2,6 +2,8 @@
 // builder and the WhatsApp intake (services/intake/lib/{claude,listing}.mjs). One
 // definition, so a listing the intake accepts can never fail the build afterwards.
 
+import { sheetAgeDays, MAX_SHEET_AGE_DAYS } from '../../src/lib/units-summary.mjs';
+
 /** Words the house voice never uses. */
 export const HYPE_WORDS = ['amazing', 'stunning', 'breathtaking', 'unparalleled', "don't miss", 'dream home'];
 export const HYPE = new RegExp(`\\b(${HYPE_WORDS.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`, 'i');
@@ -204,4 +206,56 @@ export function licenceProblems(lc) {
   if (typeof lc.adExpiry === 'string' && !isCalendarDate(lc.adExpiry)) e.push(`licence.adExpiry must be YYYY-MM-DD, got ${lc.adExpiry}`);
   if (typeof lc.adExpiry === 'string' && !lc.adNumber) e.push('licence.adExpiry without licence.adNumber');
   return e;
+}
+
+// ---- Optional listing fields for project pages (2026-10-02, SEO audit rec. 1) --------------------
+// faq / seoTitle / projectFacts are optional on any listing; when present both languages are required,
+// because the page renders whichever locale it is building and a blank half would ship silently.
+
+const AR_RE = /[؀-ۿ]/;
+const nonEmpty = (v) => typeof v === 'string' && v.trim().length > 0;
+
+export function faqProblems(faq) {
+  if (faq === undefined || faq === null) return [];
+  if (!Array.isArray(faq) || faq.length < 3 || faq.length > 8) return ['faq must be an array of 3–8 items'];
+  const out = []; const seen = new Set();
+  faq.forEach((it, i) => {
+    const at = `faq[${i}]`;
+    if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(it?.id ?? '')) out.push(`${at}.id must be lowercase-hyphenated`);
+    else if (seen.has(it.id)) out.push(`${at}.id "${it.id}" is a duplicate`);
+    seen.add(it?.id);
+    if (!nonEmpty(it?.q?.en)) out.push(`${at}.q.en required`);
+    if (!nonEmpty(it?.q?.ar) || !AR_RE.test(it.q.ar)) out.push(`${at}.q.ar required (Arabic)`);
+    for (const lang of ['en', 'ar']) {
+      const a = it?.a?.[lang];
+      if (!Array.isArray(a) || !a.length || !a.every(nonEmpty)) out.push(`${at}.a.${lang} must be a non-empty array of paragraphs`);
+      else if (lang === 'ar' && !a.every((p) => AR_RE.test(p))) out.push(`${at}.a.ar must be Arabic`);
+    }
+  });
+  return out;
+}
+
+export function seoTitleProblems(t) {
+  if (t === undefined || t === null) return [];
+  const out = [];
+  if (!nonEmpty(t.en)) out.push('seoTitle.en required');
+  if (!nonEmpty(t.ar) || !AR_RE.test(t.ar)) out.push('seoTitle.ar required (Arabic)');
+  for (const lang of ['en', 'ar']) if (nonEmpty(t[lang]) && t[lang].length > 70) out.push(`seoTitle.${lang} is ${t[lang].length} characters, keep it to 70 (the brand is appended)`);
+  return out;
+}
+
+export function projectFactsProblems(f) {
+  if (f === undefined || f === null) return [];
+  const out = [];
+  for (const k of Object.keys(f)) if (!['totalUnits', 'buildings'].includes(k)) out.push(`projectFacts.${k} is unknown`);
+  for (const k of ['totalUnits', 'buildings']) if (k in f && !(Number.isInteger(f[k]) && f[k] > 0)) out.push(`projectFacts.${k} must be a positive integer`);
+  return out;
+}
+
+export function unitsSheetProblems(record, now = new Date()) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(record?.updated ?? '') || Number.isNaN(Date.parse(record.updated))) return ['units.json updated must be a YYYY-MM-DD sheet date'];
+  const age = sheetAgeDays(record.updated, now);
+  return age > MAX_SHEET_AGE_DAYS
+    ? [`units.json sheet for ${record.listingId} is ${age} days old (limit ${MAX_SHEET_AGE_DAYS}): ask the owner for a fresh developer sheet, or remove the record so the prices come off the site`]
+    : [];
 }
