@@ -281,7 +281,10 @@ for (const [route, name] of [
     const p = requireBuiltListing(route);
     const ar = route.startsWith('/ar/');
     assert.equal(p.h1, name);
-    assert.ok(p.title.startsWith(name), `title "${p.title}" should start with the listing name`);
+    // A listing may carry an seoTitle (project pages, 2026-10-02): then the title tag leads with that instead
+    // of the listing name; H1, breadcrumb and the listing node still carry the name.
+    const seoTitle = listingsSource.find((l) => l.slug === slug)?.seoTitle?.[ar ? 'ar' : 'en'];
+    assert.ok(p.title.startsWith(seoTitle ?? name), `title "${p.title}" should start with ${seoTitle ? 'the seoTitle' : 'the listing name'}`);
     assert.ok(p.title.includes(ar ? 'جدة' : 'Jeddah'), 'the title carries the city');
     assert.ok(p.title.endsWith(ar ? '| بونا' : '| Bona'), 'brand suffix');
     const [crumb] = nodesOf(p, 'BreadcrumbList');
@@ -296,10 +299,13 @@ for (const [route, name] of [
 
 // ---- FAQ: schema only where the questions are visible ----------------------------------------------
 
-test('FAQPage appears only on /faq/ and its questions are the visible ones', () => {
+test('FAQPage appears only where questions are visible (/faq/ and listings with an faq), matching them', () => {
+  const listingFaqSlugs = new Set(listingsSource.filter((l) => Array.isArray(l.faq) && l.faq.length).map((l) => l.slug));
   for (const p of indexable) {
     const isFaq = /^(\/ar)?\/faq\/$/.test(p.route);
-    assert.equal(nodesOf(p, 'FAQPage').length, isFaq ? 1 : 0, `${p.route}: FAQPage where ${isFaq ? 'expected' : 'no FAQ is visible'}`);
+    const listingSlug = p.route.match(/^(?:\/ar)?\/properties\/([^/]+)\/$/)?.[1];
+    const expected = isFaq || (listingSlug && listingFaqSlugs.has(listingSlug)) ? 1 : 0;
+    assert.equal(nodesOf(p, 'FAQPage').length, expected, `${p.route}: FAQPage where ${expected ? 'expected' : 'no FAQ is visible'}`);
   }
   for (const route of ['/faq/', '/ar/faq/']) {
     const p = page(route);
@@ -324,4 +330,35 @@ test('Organization sameAs lists only verified, live profiles', () => {
   for (const u of org.sameAs) {
     assert.ok(/^https:\/\/(www\.instagram\.com\/bonarealestatesa\/|wa\.me\/966593296933)$/.test(u), `unverified profile in sameAs: ${u}`);
   }
+});
+
+// ---- project pages: unit sheet + listing FAQ (2026-10-02) -------------------------------------------
+
+for (const [route, lang] of [['/properties/darco-prime-waterfront-al-shati/', 'en'], ['/ar/properties/darco-prime-waterfront-al-shati/', 'ar']]) {
+  const slug = 'darco-prime-waterfront-al-shati';
+  const src = listingsSource.find((l) => l.slug === slug);
+  test(`${route}: seoTitle, units table, sheet note, and a separate FAQPage beside the ItemPage`, { skip: listingSkipReason(slug) ?? undefined }, () => {
+    const p = requireBuiltListing(route);
+    assert.ok(p.title.startsWith(src.seoTitle[lang]), `${route}: title "${p.title}" should start with the seoTitle`);
+    assert.match(p.html, /data-project-details/, 'units block missing');
+    const rows = [...p.html.matchAll(/<tr[^>]*>\s*<th scope="row"[^>]*>([\s\S]*?)<\/th>/g)].map((m) => text(m[1]));
+    assert.ok(rows.length >= 4, `expected ≥3 type rows + total, got ${rows.length}`);
+    assert.match(text(p.html.match(/<p[^>]*data-units-note[^>]*>([\s\S]*?)<\/p>/)[1]), lang === 'ar' ? /2026/ : /2 September 2026/);
+    const url = `${SITE}${route}`;
+    const [faq] = nodesOf(p, 'FAQPage');
+    assert.equal(faq['@id'], `${url}#faq`);
+    assert.ok(nodesOf(p, 'RealEstateListing').length === 1, 'listing node must survive');
+    assert.equal(nodesOf(p, 'ItemPage')[0]?.['@id'], `${url}#webpage`, 'the automatic ItemPage node must survive');
+    assert.equal(faq.isPartOf['@id'], `${url}#webpage`, 'FAQPage must point at the page node that exists');
+    const visible = [...p.html.matchAll(/<section[^>]*data-listing-faq[\s\S]*?<\/section>/g)].flatMap((s) => [...s[0].matchAll(/<h3[^>]*>([\s\S]*?)<\/h3>/g)].map((m) => text(m[1])));
+    assert.deepEqual(faq.mainEntity.map((q) => q.name), visible, 'FAQ JSON-LD must match the visible questions');
+    assert.deepEqual(faq.mainEntity.map((q) => q.name), src.faq.map((it) => it.q[lang]));
+  });
+}
+
+test('a listing without a unit sheet or faq has neither block', () => {
+  const plain = listingsSource.find((l) => !l.faq && l.id !== 'BONA-W014');
+  const p = requireBuiltListing(`/properties/${plain.slug}/`);
+  assert.doesNotMatch(p.html, /data-project-details|data-listing-faq/);
+  assert.equal(nodesOf(p, 'FAQPage').length, 0);
 });

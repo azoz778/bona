@@ -603,7 +603,7 @@ export function listingFaqJsonLd(listing: Listing, locale: Locale): object | und
     '@id': `${url}#faq`,
     url,
     inLanguage: locale === 'ar' ? 'ar-SA' : 'en',
-    isPartOf: { '@id': url },
+    isPartOf: { '@id': `${url}#webpage` },
     mainEntity: items.map((it) => ({
       '@type': 'Question',
       '@id': `${url}#faq-${it.id}`,
