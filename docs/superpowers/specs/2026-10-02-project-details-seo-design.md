@@ -100,3 +100,9 @@ an owner checklist); category-page retitles (audit runner-up); the full 111-unit
 ## Ship
 Branch `feat/project-details` → PR → Claude + Codex review → CI green → merge (Developer
 autonomy rule) → record the rollback commit → verify live → notify the owner.
+
+## Amendment 2026-10-02 (owner): warn, never hide
+After launch the owner decided an old sheet must stay on the page ("it can warn me, but not disappear").
+`isSheetCurrent` now only rejects an impossible or future date; age produces validator warnings from day 76
+and a Google Calendar reminder for the owner. The table always prints the sheet date. A listing that is not
+`available` still hides the block.

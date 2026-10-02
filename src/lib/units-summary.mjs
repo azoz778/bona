@@ -73,11 +73,12 @@ export function isDeliveryDate(s) {
   return isSheetDate(s);
 }
 
-/** A sheet may be shown while its date is real, not in the future, and at most MAX_SHEET_AGE_DAYS old. */
+/** A sheet is shown while its date is real and not in the future. Its AGE never hides it: owner decision
+    2026-10-02 ("it can warn me, but not disappear"). The table always prints the sheet date, and an old sheet
+    only produces warnings (rules.mjs::unitsSheetProblems) and the owner's calendar reminder. */
 export function isSheetCurrent(record, now = new Date()) {
   if (!isSheetDate(record?.updated)) return false;
-  const age = sheetAgeDays(record.updated, now);
-  return age >= 0 && age <= MAX_SHEET_AGE_DAYS;
+  return sheetAgeDays(record.updated, now) >= 0;
 }
 
 /** The record for a listing from units.json (one object today, an array once a second project has a sheet). */
@@ -87,8 +88,7 @@ export function recordFor(unitsData, listingId) {
 }
 
 /** What the page may publish from the sheet: the summary, or null when the listing is not available or the
-    sheet is stale. Checked at BUILD time, so the daily scheduled build takes stale prices down on its own
-    instead of failing (a failed run would leave the last good build — with the stale prices — live). */
+    sheet's date is impossible or in the future. Checked at BUILD time; never fails the build. */
 export function liveSummary(record, listing, now = new Date()) {
   if (!record || listing?.status !== 'available' || !isSheetCurrent(record, now)) return null;
   return unitSummary(record);

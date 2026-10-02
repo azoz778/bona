@@ -35,11 +35,11 @@ test('projectFacts: positive integers only', () => {
   assert.match(projectFactsProblems({ floors: 3 }).join(), /unknown/);
 });
 
-test('unit sheet warnings: none while fresh, a heads-up from day 76, hidden past 90, bad or future dates', () => {
+test('unit sheet warnings: none while fresh, a heads-up from day 76, still shown past 90, bad or future dates', () => {
   const now = new Date('2026-10-02T00:00:00Z');
   assert.deepEqual(unitsSheetProblems({ listingId: 'X', updated: '2026-09-02' }, now), []);
-  assert.match(unitsSheetProblems({ listingId: 'X', updated: '2026-07-15' }, now).join(), /79 days old: its prices come off/);
-  assert.match(unitsSheetProblems({ listingId: 'X', updated: '2026-06-01' }, now).join(), /123 days old .*hidden/);
+  assert.match(unitsSheetProblems({ listingId: 'X', updated: '2026-07-15' }, now).join(), /79 days old: nearly 90/);
+  assert.match(unitsSheetProblems({ listingId: 'X', updated: '2026-06-01' }, now).join(), /123 days old .*still shown/);
   assert.match(unitsSheetProblems({ listingId: 'X', updated: '2026-02-30' }, now).join(), /no real YYYY-MM-DD/);
   assert.match(unitsSheetProblems({ listingId: 'X', updated: '2026-11-01' }, now).join(), /future/);
 });

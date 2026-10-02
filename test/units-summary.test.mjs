@@ -61,10 +61,11 @@ test('the real Darco sheet summarises to the published figures', () => {
   assert.deepEqual([s.count, s.cashFrom], [111, 708164]);
 });
 
-test('a sheet shows through day 90, not day 91, never with a future or impossible date', () => {
+test('an old sheet stays shown (owner: warn, never disappear); a future or impossible date does not', () => {
   const rec = { ...fixture, updated: '2026-09-02' };
   assert.equal(isSheetCurrent(rec, new Date('2026-12-01T23:00:00Z')), true);   // day 90
-  assert.equal(isSheetCurrent(rec, new Date('2026-12-02T00:00:00Z')), false);  // day 91
+  assert.equal(isSheetCurrent(rec, new Date('2026-12-02T00:00:00Z')), true);   // day 91: still shown
+  assert.equal(isSheetCurrent(rec, new Date('2027-09-02T00:00:00Z')), true);   // a year on: still shown, warned
   assert.equal(isSheetCurrent(rec, new Date('2026-09-01T00:00:00Z')), false);  // dated tomorrow
   assert.equal(isSheetCurrent({ ...rec, updated: '2026-02-30' }, new Date('2026-03-05T00:00:00Z')), false);
 });
@@ -74,7 +75,7 @@ test('liveSummary: only for an available listing with a current sheet', () => {
   assert.ok(liveSummary(fixture, { status: 'available' }, now));
   assert.equal(liveSummary(fixture, { status: 'sold' }, now), null);
   assert.equal(liveSummary(fixture, { status: 'reserved' }, now), null);
-  assert.equal(liveSummary(fixture, { status: 'available' }, new Date('2027-01-01T00:00:00Z')), null);
+  assert.ok(liveSummary(fixture, { status: 'available' }, new Date('2027-01-01T00:00:00Z')), 'age alone never hides the sheet');
   assert.equal(liveSummary(null, { status: 'available' }, now), null);
 });
 
