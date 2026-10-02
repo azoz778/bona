@@ -36,6 +36,12 @@ export interface Listing {
       listing on the FAL platform; wafiNumber = the off-plan project's Wafi licence; escrowAccount = its escrow account.
       Curated listings take theirs from scripts/curate/licences.json, intake listings carry it in their inbox JSON. */
   licence?: { adNumber?: string | null; adExpiry?: string | null; wafiNumber?: string | null; escrowAccount?: string | null } | null;
+  /** Project pages (2026-10-02): short bilingual FAQ, rendered with FAQPage JSON-LD. Facts only from developer documents. */
+  faq?: { id: string; q: Localised; a: { en: string[]; ar: string[] } }[];
+  /** Replaces the auto-built title tag (brand still appended by <Head>). */
+  seoTitle?: Localised;
+  /** Brochure-sourced project counts shown beside the unit sheet. */
+  projectFacts?: { totalUnits?: number; buildings?: number } | null;
 }
 
 export const listings: Listing[] = raw as Listing[];
