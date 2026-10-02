@@ -591,6 +591,31 @@ export function faqPageJsonLd(opts: {
   });
 }
 
+/** FAQPage node for a listing's own FAQ — `items` are the ALREADY localised and filled questions the page shows
+    (units-summary.mjs::localFaq), so the markup can never say more than the page. Its @id is <url>#faq — NOT the page @id — so it sits beside
+    Head's automatic ItemPage node instead of replacing it. Undefined when the listing has no FAQ. */
+export function listingFaqJsonLd(listing: Pick<Listing, 'slug'>, locale: Locale, items: { id: string; q: string; a: string[] }[]): object | undefined {
+  if (!items.length) return undefined;
+  const url = absoluteUrl(listingPath(listing, locale));
+  return {
+    '@type': 'FAQPage',
+    '@id': `${url}#faq`,
+    url,
+    inLanguage: L(locale),
+    isPartOf: { '@id': `${url}#webpage` },
+    mainEntity: items.map((it) => ({
+      '@type': 'Question',
+      '@id': `${url}#faq-${it.id}`,
+      name: it.q,
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: it.a.map((p) => `<p>${p.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</p>`).join(''),
+        url: `${url}#faq-${it.id}`,
+      },
+    })),
+  };
+}
+
 // ---------- Breadcrumbs ----------
 
 /** BreadcrumbList. items = [{name, path}] in order; path may be relative or absolute.

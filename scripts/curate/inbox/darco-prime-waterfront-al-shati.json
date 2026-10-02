@@ -211,5 +211,90 @@
     ],
     "createdAt": "2026-09-07T10:35:28.944Z",
     "site": "https://bona.azoz.uk"
-  }
+  },
+  "seoTitle": {
+    "en": "Darco Prime Waterfront Apartments for Sale, Al Shati Jeddah",
+    "ar": "شقق داركو برايم للبيع، الشاطئ جدة"
+  },
+  "projectFacts": {
+    "totalUnits": 534,
+    "buildings": 22
+  },
+  "faq": [
+    {
+      "id": "developer",
+      "q": {
+        "en": "Who is developing Darco Prime Waterfront?",
+        "ar": "من مطور مشروع داركو برايم الواجهة البحرية؟"
+      },
+      "a": {
+        "en": [
+          "Darco Real Estate Company. The project sits in the Al-Shati district of Jeddah, near the Red Sea, and comprises 22 buildings with 534 residential units."
+        ],
+        "ar": [
+          "شركة داركو العقارية. يقع المشروع في حي الشاطئ بمدينة جدة بالقرب من البحر الأحمر، ويضم 22 مبنى تحتوي على 534 وحدة سكنية."
+        ]
+      }
+    },
+    {
+      "id": "handover",
+      "q": {
+        "en": "When is handover expected?",
+        "ar": "متى موعد التسليم المتوقع؟"
+      },
+      "a": {
+        "en": [
+          "The developer’s unit sheet dated {sheetDate} gives an expected delivery of {delivery}."
+        ],
+        "ar": [
+          "يحدد كشف وحدات المطور بتاريخ {sheetDate} موعد التسليم المتوقع في {delivery}."
+        ]
+      }
+    },
+    {
+      "id": "sizes",
+      "q": {
+        "en": "What unit sizes are available?",
+        "ar": "ما مساحات الوحدات المتاحة؟"
+      },
+      "a": {
+        "en": [
+          "According to the developer’s sheet dated {sheetDate}, {count} units are available, with built areas from {areaMin} to {areaMax} square metres. The table above breaks them down by bedrooms, penthouses included."
+        ],
+        "ar": [
+          "بحسب كشف المطور بتاريخ {sheetDate}، تتوفر {count} وحدة بمساحات بناء من {areaMin} إلى {areaMax} متراً مربعاً. ويعرض الجدول أعلاه تفصيلها حسب عدد غرف النوم، ومنها وحدات البنتهاوس."
+        ]
+      }
+    },
+    {
+      "id": "price",
+      "q": {
+        "en": "What is the starting price?",
+        "ar": "ما السعر الابتدائي؟"
+      },
+      "a": {
+        "en": [
+          "Cash prices start from SAR {cashFrom} on the developer’s sheet dated {sheetDate}. Prices and availability change; we confirm the current figure for any unit before you commit."
+        ],
+        "ar": [
+          "تبدأ أسعار الكاش من {cashFrom} ريال سعودي بحسب كشف المطور بتاريخ {sheetDate}. تتغير الأسعار والتوافر، ونؤكد لك السعر الحالي لأي وحدة قبل الالتزام."
+        ]
+      }
+    },
+    {
+      "id": "instalments",
+      "q": {
+        "en": "Is there an instalment plan?",
+        "ar": "هل يتوفر التقسيط؟"
+      },
+      "a": {
+        "en": [
+          "Yes. Besides the cash price, the developer offers instalment plans over six months, one year and two years. Ask us and we will send the schedule for the unit you are considering."
+        ],
+        "ar": [
+          "نعم. إلى جانب سعر الكاش، يقدم المطور خطط تقسيط على ستة أشهر وسنة وسنتين. تواصل معنا ونرسل لك جدول السداد للوحدة التي تهمك."
+        ]
+      }
+    }
+  ]
 }
