@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { publicListing,sha256,fingerprint,advertiserFingerprint,eligibility,propertyCaption,chooseProperty,dayState,realDate } from '../social/lib/property-daily.mjs';
-import { propertyDaily,legacyDayState } from '../social/property-publish.mjs';
+import { propertyDaily,legacyDayState,assertNoPendingInstagram } from '../social/property-publish.mjs';
 const now=new Date('2026-10-02T17:30:00Z');
 function fixture() {
   const advertiser={name:{ar:'المعلن التجريبي',en:'Fixture advertiser'},fal:'1100000000',phone:'+966500000000'};
@@ -49,6 +49,11 @@ test('existing editorial publication occupies the same daily slot; uncertain att
   assert.equal(legacyDayState([{date:'2026-10-02',status:'publishing'}],'2026-10-02'),'uncertain');
   assert.equal(dayState([{channel:'instagram',date:'2026-10-02',status:'intent'}],'instagram','2026-10-02'),'uncertain');
   assert.equal(dayState([{channel:'instagram',date:'2026-10-02',status:'published'},{channel:'instagram',date:'2026-10-02',status:'intent'}],'instagram','2026-10-02'),'published');
+});
+test('an older unsettled Instagram container cannot enter the legacy automatic reconciliation path',()=>{
+  const pending={id:'old-editorial',date:'2026-09-30',status:'publishing',containerId:'test-container',ts:'2026-09-30T17:30:00Z'};
+  assert.throws(()=>assertNoPendingInstagram([pending]),/no backfill/);
+  assert.doesNotThrow(()=>assertNoPendingInstagram([pending,{...pending,status:'published'}]));
 });
 test('public catalogue deliberately excludes internal notes and client/source references',()=>{
   const {listing:p}=fixture();const out=publicListing({...p,notes:'private',sourceRef:'private',client:'private'});
