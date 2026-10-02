@@ -591,18 +591,17 @@ export function faqPageJsonLd(opts: {
   });
 }
 
-/** FAQPage node for a listing's own FAQ. Its @id is <url>#faq — NOT the page @id — so it sits beside
+/** FAQPage node for a listing's own FAQ — `items` are the ALREADY localised and filled questions the page shows
+    (units-summary.mjs::localFaq), so the markup can never say more than the page. Its @id is <url>#faq — NOT the page @id — so it sits beside
     Head's automatic ItemPage node instead of replacing it. Undefined when the listing has no FAQ. */
-export function listingFaqJsonLd(listing: Listing, locale: Locale): object | undefined {
-  const items = (listing.faq ?? []).map((it) => ({ id: it.id, q: it.q[locale] ?? it.q.en, a: it.a[locale] ?? it.a.en }))
-    .filter((it) => it.q && it.a.length);
+export function listingFaqJsonLd(listing: Pick<Listing, 'slug'>, locale: Locale, items: { id: string; q: string; a: string[] }[]): object | undefined {
   if (!items.length) return undefined;
   const url = absoluteUrl(listingPath(listing, locale));
   return {
     '@type': 'FAQPage',
     '@id': `${url}#faq`,
     url,
-    inLanguage: locale === 'ar' ? 'ar-SA' : 'en',
+    inLanguage: L(locale),
     isPartOf: { '@id': `${url}#webpage` },
     mainEntity: items.map((it) => ({
       '@type': 'Question',

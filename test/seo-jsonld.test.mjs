@@ -343,10 +343,13 @@ for (const [route, lang] of [['/properties/darco-prime-waterfront-al-shati/', 'e
     assert.match(p.html, /data-project-details/, 'units block missing');
     const rows = [...p.html.matchAll(/<tr[^>]*>\s*<th scope="row"[^>]*>([\s\S]*?)<\/th>/g)].map((m) => text(m[1]));
     assert.ok(rows.length >= 4, `expected ≥3 type rows + total, got ${rows.length}`);
-    assert.match(text(p.html.match(/<p[^>]*data-units-note[^>]*>([\s\S]*?)<\/p>/)[1]), lang === 'ar' ? /2026/ : /2 September 2026/);
+    assert.match(text(p.html.match(/<p[^>]*data-units-note[^>]*>([\s\S]*?)<\/p>/)[1]), lang === 'ar' ? /2 سبتمبر 2026/ : /2 September 2026/);
     const url = `${SITE}${route}`;
     const [faq] = nodesOf(p, 'FAQPage');
     assert.equal(faq['@id'], `${url}#faq`);
+    const answers = faq.mainEntity.map((q) => q.acceptedAnswer.text).join(' ');
+    assert.doesNotMatch(answers, /\{\w+\}/, 'every FAQ placeholder must be filled');
+    assert.match(answers, /708,164/, 'the price answer quotes the live sheet');
     assert.ok(nodesOf(p, 'RealEstateListing').length === 1, 'listing node must survive');
     assert.equal(nodesOf(p, 'ItemPage')[0]?.['@id'], `${url}#webpage`, 'the automatic ItemPage node must survive');
     assert.equal(faq.isPartOf['@id'], `${url}#webpage`, 'FAQPage must point at the page node that exists');

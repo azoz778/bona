@@ -204,13 +204,14 @@ for (const l of data) {
   for (const [label, str] of [['title.en', l.title?.en], ['title.ar', l.title?.ar], ['description.en', l.description?.en], ['description.ar', l.description?.ar], ['project.name.en', l.project?.name?.en], ['project.name.ar', l.project?.name?.ar], ...((h.en ?? []).map((x, i) => [`highlights.en[${i}]`, x])), ...((h.ar ?? []).map((x, i) => [`highlights.ar[${i}]`, x]))]) if (isStr(str)) checkCopy(id, label, str);
 }
 
-// Developer unit sheet: prices on the site must not outlive the sheet they came from.
+// Developer unit sheet: WARN only. The site itself hides a stale sheet at build time, and an error here would
+// also stop the WhatsApp intake (it runs this validator before every push) — sold/hide/price would all fail.
 const UNITS_FILE = path.join(ROOT, 'src', 'data', 'units.json');
 if (fs.existsSync(UNITS_FILE)) {
   const sheet = JSON.parse(fs.readFileSync(UNITS_FILE, 'utf8'));
   for (const rec of Array.isArray(sheet) ? sheet : [sheet]) {
-    if (!ids.has(rec.listingId)) err('units', `units.json record ${rec.listingId} has no listing`);
-    for (const p of unitsSheetProblems(rec)) err('units', p);
+    if (!ids.has(rec.listingId)) console.warn(`warning: units.json record ${rec.listingId} has no published listing (hidden or removed); nothing is shown`);
+    for (const p of unitsSheetProblems(rec)) console.warn(`warning: ${p}`);
   }
 }
 
