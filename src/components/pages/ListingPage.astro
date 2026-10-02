@@ -60,7 +60,7 @@ const autoTitle = [title, [categoryText, !titleHasCity && cityText].filter(Boole
   .filter(Boolean).join(' — ');
 const metaTitle = l.seoTitle?.[locale]?.trim() || autoTitle;
 /* FAQ answers may carry {cashFrom}/{count}/… filled from the live unit sheet; an item needing a value the
-   sheet cannot give (stale, sold, no sheet) is dropped, so the FAQ never outlives the table it quotes. */
+   sheet cannot give (sold, no sheet, bad date) is dropped, so the FAQ never outlives the table it quotes. */
 const faq = localFaq(l.faq, locale, sheetVars(liveSummary(recordFor(unitsData, l.id), l), locale));
 const locationLine = [t(l.location.district, locale), t(l.location.city, locale), t(l.location.country, locale)].filter(Boolean).join(locale === 'ar' ? '، ' : ', ');
 const project = l.project?.name ? t(l.project.name, locale) : '';
