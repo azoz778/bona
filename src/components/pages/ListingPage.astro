@@ -8,11 +8,12 @@ import ListingCard from '../ListingCard.astro';
 import SectionHead from '../SectionHead.astro';
 import EnquiryForm from '../EnquiryForm.astro';
 import RegaBlock from '../RegaBlock.astro';
+import ProjectDetails from '../ProjectDetails.astro';
 import Icon from '../Icon.astro';
 import site from '../../data/site.json';
 import { localePath, formatPrice, formatNumber, t, ui, fill, waLink, type Locale } from '../../lib/i18n';
 import { localeTitle, categoryLabel, categorySlug, typeLabel, similar, kindOf, kindLabel, kindLabelPlural, kindSlug, matterportId, type Listing } from '../../lib/listings';
-import { listingJsonLd, breadcrumbJsonLd, metaDescription } from '../../lib/seo';
+import { listingJsonLd, breadcrumbJsonLd, listingFaqJsonLd, metaDescription } from '../../lib/seo';
 interface Props { locale: Locale; listing: Listing }
 const { locale, listing: l } = Astro.props;
 const path = localePath(locale, `/properties/${l.slug}/`);
@@ -53,8 +54,10 @@ const categoryText = l.category === 'international' && locale !== 'ar'
   ? 'International property'
   : t(categoryLabel[l.category], locale);
 const titleHasCity = cityText ? title.includes(cityText) : true;
-const metaTitle = [title, [categoryText, !titleHasCity && cityText].filter(Boolean).join(locale === 'ar' ? ' في ' : ' in ')]
+const autoTitle = [title, [categoryText, !titleHasCity && cityText].filter(Boolean).join(locale === 'ar' ? ' في ' : ' in ')]
   .filter(Boolean).join(' — ');
+const metaTitle = l.seoTitle?.[locale]?.trim() || autoTitle;
+const faq = (l.faq ?? []).map((it) => ({ id: it.id, q: t(it.q, locale), a: it.a[locale] ?? it.a.en }));
 const locationLine = [t(l.location.district, locale), t(l.location.city, locale), t(l.location.country, locale)].filter(Boolean).join(locale === 'ar' ? '، ' : ', ');
 const project = l.project?.name ? t(l.project.name, locale) : '';
 const developer = l.project?.developer ? t(l.project.developer, locale) : '';
@@ -66,7 +69,7 @@ const danaMessage = fill(t(ui.conciergeAskAboutHomeMsg, locale), { title, id: l.
 const kindText = t(kindLabel[kind], locale);
 ---
 <Base title={metaTitle} description={description} locale={locale} path={path} image={l.images?.[0]?.src} waMessage={waMessage} listingId={l.id}
-      jsonLd={[listingJsonLd(l, locale), breadcrumbJsonLd(crumbs)]}>
+      jsonLd={[listingJsonLd(l, locale), breadcrumbJsonLd(crumbs), listingFaqJsonLd(l, locale)].filter(Boolean)}>
   <article class="pt-6 lg:pt-8">
     <div class="wrap">
       <Breadcrumb locale={locale} items={crumbs.map(c => ({ name: c.name, href: c.path }))} />
@@ -118,6 +121,22 @@ const kindText = t(kindLabel[kind], locale);
               <ul class="mt-5 grid gap-x-10 gap-y-3 sm:grid-cols-2">
                 {highlights.map(h => <li class="flex items-start gap-3 text-[15px]"><span class="rule mt-3 !w-4 shrink-0"></span><span>{h}</span></li>)}
               </ul>
+            </section>
+          )}
+
+          <ProjectDetails listing={l} locale={locale} class="mt-14" />
+
+          {faq.length > 0 && (
+            <section id="faq" class="mt-14 scroll-mt-28" aria-labelledby={`faq-${l.id}`} data-listing-faq>
+              <h2 id={`faq-${l.id}`} class="label text-stone-2">{t(ui.faqSectionTitle, locale)}</h2>
+              <div class="mt-5 divide-y divide-ink/10 border-y border-ink/10">
+                {faq.map((it) => (
+                  <div id={`faq-${it.id}`} class="scroll-mt-28 py-5">
+                    <h3 class="text-[15px] font-semibold md:text-base">{it.q}</h3>
+                    <div class="mt-2 text-[15px] leading-relaxed text-ink/85">{it.a.map((p) => <p class="mt-2 first:mt-0">{p}</p>)}</div>
+                  </div>
+                ))}
+              </div>
             </section>
           )}
 
