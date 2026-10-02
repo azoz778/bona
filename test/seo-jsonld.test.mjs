@@ -336,8 +336,8 @@ test('Organization sameAs lists only verified, live profiles', () => {
 
 // ---- project pages: unit sheet + listing FAQ (2026-10-02) -------------------------------------------
 // Expectations are DERIVED from the sheet date and the listing status, exactly as the build decides them
-// (units-summary.mjs::liveSummary). A hard-coded "the table must be there" would fail the daily deploy on the
-// day the sheet goes stale — and a failed deploy leaves the previous build, stale prices and all, live.
+// (units-summary.mjs::liveSummary). A hard-coded "the table must be there" would fail the daily deploy the
+// day Darco is marked sold — and a failed deploy leaves the previous build live.
 
 const unitsData = JSON.parse(readFileSync(path.join(root, 'src', 'data', 'units.json'), 'utf8'));
 const NOW = new Date();

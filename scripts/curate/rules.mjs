@@ -260,15 +260,15 @@ export function projectFactsProblems(f) {
   return out;
 }
 
-/** Warnings (never errors) about a developer unit sheet. The site hides a stale sheet at build time
-    (units-summary.mjs::liveSummary), so these only tell the owner it is time for a fresh one — failing the
-    validator here would block every deploy and every WhatsApp-intake command (sold, hide, price) as well. */
+/** Warnings (never errors) about a developer unit sheet. An old sheet stays on the site with its date
+    (owner decision 2026-10-02); these only say it is time for a fresh one. Failing the validator here would
+    block every deploy and every WhatsApp-intake command (sold, hide, price) as well. */
 export function unitsSheetProblems(record, now = new Date()) {
   if (!isSheetDate(record?.updated)) return [`units.json sheet for ${record?.listingId} has no real YYYY-MM-DD date, so the site does not show it`];
   const age = sheetAgeDays(record.updated, now);
   if (age < 0) return [`units.json sheet for ${record.listingId} is dated in the future (${record.updated}), so the site does not show it`];
-  if (age > MAX_SHEET_AGE_DAYS) return [`units.json sheet for ${record.listingId} is ${age} days old (limit ${MAX_SHEET_AGE_DAYS}): its prices are hidden on the site until the owner sends a fresh developer sheet`];
+  if (age > MAX_SHEET_AGE_DAYS) return [`units.json sheet for ${record.listingId} is ${age} days old (over ${MAX_SHEET_AGE_DAYS}): still shown with its date, ask the owner for a fresh developer sheet`];
   if (record.delivery != null && !isDeliveryDate(record.delivery)) return [`units.json sheet for ${record.listingId} has an impossible delivery "${record.delivery}", so the handover date is not shown`];
-  if (age > MAX_SHEET_AGE_DAYS - 15) return [`units.json sheet for ${record.listingId} is ${age} days old: its prices come off the site after day ${MAX_SHEET_AGE_DAYS}, ask the owner for a fresh developer sheet`];
+  if (age > MAX_SHEET_AGE_DAYS - 15) return [`units.json sheet for ${record.listingId} is ${age} days old: nearly ${MAX_SHEET_AGE_DAYS}, ask the owner for a fresh developer sheet`];
   return [];
 }
