@@ -73,3 +73,20 @@ test('an impossible delivery is reported, not rolled over (Codex review)', () =>
   assert.match(unitsSheetProblems({ listingId: 'X', updated: '2026-09-02', delivery: '2028-13' }, now).join(), /impossible delivery/);
   assert.deepEqual(unitsSheetProblems({ listingId: 'X', updated: '2026-09-02', delivery: '2028-06' }, now), []);
 });
+
+// The REAL validator, with the clock moved forward: an old unit sheet must warn and still exit 0, because the
+// WhatsApp intake runs validate.mjs before every push (sold/hide/price) and the deploy runs it daily. (Codex review)
+import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+const repo = fileURLToPath(new URL('..', import.meta.url));
+const sheetDate = JSON.parse(readFileSync(new URL('../src/data/units.json', import.meta.url), 'utf8')).updated;
+const dayOf = (n) => new Date(Date.parse(`${sheetDate}T12:00:00Z`) + n * 86_400_000).toISOString();
+for (const [day, warns] of [[30, false], [75, false], [76, true], [90, true], [91, true], [365, true]]) {
+  test(`validate.mjs exits 0 with the unit sheet ${day} days old${warns ? ' (and warns)' : ''}`, () => {
+    const r = spawnSync(process.execPath, ['--import', './test/fixtures/fake-clock.mjs', 'scripts/curate/validate.mjs'],
+      { cwd: repo, env: { ...process.env, FAKE_NOW: dayOf(day) }, encoding: 'utf8' });
+    assert.equal(r.status, 0, `validate.mjs failed on day ${day}:\n${r.stderr}`);
+    assert.equal(/units\.json sheet for .* days old/.test(r.stderr + r.stdout), warns, `warning expected: ${warns}`);
+  });
+}
