@@ -1,7 +1,7 @@
 ---
 /* Units-and-prices summary + key facts for a listing backed by a developer unit sheet
-   (src/data/units.json). Renders nothing when the listing has no sheet, is not available, or the sheet is
-   older than MAX_SHEET_AGE_DAYS at build time (the daily build then takes the prices down). Spec:
+   (src/data/units.json). Renders nothing when the listing has no sheet, is not available, or the sheet's
+   date is impossible or in the future. An OLD sheet stays, with its date printed (owner decision). Spec:
    docs/superpowers/specs/2026-10-02-project-details-seo-design.md */
 import unitsData from '../data/units.json';
 import { liveSummary, recordFor, sheetDateText } from '../lib/units-summary.mjs';

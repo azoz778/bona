@@ -73,7 +73,7 @@ shapes, rejects empty strings and requires both languages.
 - `faq` (5 items, every answer traceable to the sheet or brochure): developer; handover date;
   unit sizes and bedrooms; starting cash price + sheet date; instalment plans (exist, ask us).
 
-## Staleness guard
+## Staleness guard (SUPERSEDED — see the amendment at the end: warn, never hide or fail)
 `validate.mjs` fails CI when a `units.json` record's `updated` is older than **90 days**. Prices
 cannot sit on the site silently out of date. The owner refreshes the sheet, or the record is
 removed and the block disappears.
@@ -100,3 +100,9 @@ an owner checklist); category-page retitles (audit runner-up); the full 111-unit
 ## Ship
 Branch `feat/project-details` → PR → Claude + Codex review → CI green → merge (Developer
 autonomy rule) → record the rollback commit → verify live → notify the owner.
+
+## Amendment 2026-10-02 (owner): warn, never hide
+After launch the owner decided an old sheet must stay on the page ("it can warn me, but not disappear").
+`isSheetCurrent` now only rejects an impossible or future date; age produces validator warnings from day 76
+and a Google Calendar reminder for the owner. The table always prints the sheet date. A listing that is not
+`available` still hides the block.

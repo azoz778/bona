@@ -336,13 +336,13 @@ test('Organization sameAs lists only verified, live profiles', () => {
 
 // ---- project pages: unit sheet + listing FAQ (2026-10-02) -------------------------------------------
 // Expectations are DERIVED from the sheet date and the listing status, exactly as the build decides them
-// (units-summary.mjs::liveSummary). A hard-coded "the table must be there" would fail the daily deploy on the
-// day the sheet goes stale — and a failed deploy leaves the previous build, stale prices and all, live.
+// (units-summary.mjs::liveSummary). A hard-coded "the table must be there" would fail the daily deploy the
+// day Darco is marked sold — and a failed deploy leaves the previous build live.
 
 const unitsData = JSON.parse(readFileSync(path.join(root, 'src', 'data', 'units.json'), 'utf8'));
 const NOW = new Date();
-/** The live summary for a listing as the build saw it, or a skip reason when the build may have run on the
-    other side of the 90-day boundary from this test (they run minutes apart; allow 6 hours). */
+/** The live summary for a listing as the build saw it, plus whether the build may have run on the other side
+    of a date boundary from this test (a sheet dated "today" becomes valid at UTC midnight; allow 6 hours). */
 function liveFor(listing) {
   const rec = recordFor(unitsData, listing.id);
   const a = liveSummary(rec, listing, NOW);
@@ -354,8 +354,8 @@ const faqFor = (listing, lang) => localFaq(listing.faq, lang, sheetVars(liveFor(
 for (const [route, lang] of [['/properties/darco-prime-waterfront-al-shati/', 'en'], ['/ar/properties/darco-prime-waterfront-al-shati/', 'ar']]) {
   const slug = 'darco-prime-waterfront-al-shati';
   const src = listingsSource.find((l) => l.slug === slug);
-  const skip = listingSkipReason(slug) ?? (src && liveFor(src).boundary ? 'the unit sheet crosses its 90-day limit within hours of now' : undefined);
-  test(`${route}: seoTitle, units table only while the sheet is live, FAQ filled from it, #faq beside the ItemPage`, { skip }, () => {
+  const skip = listingSkipReason(slug) ?? (src && liveFor(src).boundary ? 'the unit sheet date becomes valid within hours of now' : undefined);
+  test(`${route}: seoTitle, units table while the sheet is valid, FAQ filled from it, #faq beside the ItemPage`, { skip }, () => {
     const p = requireBuiltListing(route);
     const { live } = liveFor(src);
     assert.ok(p.title.startsWith(src.seoTitle[lang]), `${route}: title "${p.title}" should start with the seoTitle`);
@@ -366,7 +366,7 @@ for (const [route, lang] of [['/properties/darco-prime-waterfront-al-shati/', 'e
       const note = text(p.html.match(/<p[^>]*data-units-note[^>]*>([\s\S]*?)<\/p>/)[1]);
       assert.ok(note.includes(sheetDateText(live.updated, lang)), `sheet note "${note}" should carry the sheet date`);
     } else {
-      assert.doesNotMatch(p.html, /data-project-details/, 'a stale or unavailable sheet must not be shown');
+      assert.doesNotMatch(p.html, /data-project-details/, 'a sold/reserved listing or a sheet with an impossible date must not show the table');
     }
     const expected = faqFor(src, lang);
     const url = `${SITE}${route}`;

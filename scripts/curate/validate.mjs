@@ -205,7 +205,7 @@ for (const l of data) {
   for (const [label, str] of [['title.en', l.title?.en], ['title.ar', l.title?.ar], ['description.en', l.description?.en], ['description.ar', l.description?.ar], ['project.name.en', l.project?.name?.en], ['project.name.ar', l.project?.name?.ar], ...((h.en ?? []).map((x, i) => [`highlights.en[${i}]`, x])), ...((h.ar ?? []).map((x, i) => [`highlights.ar[${i}]`, x]))]) if (isStr(str)) checkCopy(id, label, str);
 }
 
-// Developer unit sheet: WARN only. The site itself hides a stale sheet at build time, and an error here would
+// Developer unit sheet: WARN only. An old sheet stays on the site with its date (owner decision), and an error here would
 // also stop the WhatsApp intake (it runs this validator before every push) — sold/hide/price would all fail.
 const UNITS_FILE = path.join(ROOT, 'src', 'data', 'units.json');
 if (fs.existsSync(UNITS_FILE)) {
