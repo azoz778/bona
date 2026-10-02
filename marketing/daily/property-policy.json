@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "mode": "property-photography",
+  "time": "20:30",
+  "timezone": "Asia/Riyadh",
+  "repeatDays": 30,
+  "catalogueUrl": "https://bona-real-estate.com/social-catalogue.json",
+  "channels": ["instagram", "facebook"],
+  "noEligibleProperty": "skip-with-reason",
+  "missedSlot": "skip-after-23:00-no-backfill",
+  "authorization": "Owner requested daily promotion of current website properties with clear actual photographs on 2026-10-02."
+}
