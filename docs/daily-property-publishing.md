@@ -14,12 +14,13 @@ publication. The policy intentionally skips with a reason instead of using old
 editorial cards, filling licence placeholders, or promoting an unverified listing.
 The owner's FAL brokerage number is not a property advertisement licence.
 
-The first private photographic draft is BONA-005, Al Khalidiyah: original pool,
-open kitchen and entrance images, each 1920×1080. No generative artwork, crop,
-stretch, upscaling, retouching, ROI claim or urgency claim is used. The source
-website's image 6 alt label says living room; visual inspection identifies the open
-kitchen, and the private draft uses that corrected label. No website caption was
-changed as part of this work.
+The first Al Khalidiyah (BONA-005) draft was withdrawn before publication: the
+live catalogue marks it sold while the local checkout still said available.
+The draft builder now reads the live feed and refuses unavailable stock. The
+replacement private draft is BONA-001, Durrat Al Arous, with original pool,
+beach-access and living-room photographs, each 1920×1280. It is available in the
+live catalogue but remains blocked by missing advertising-licence evidence.
+No generative artwork, crop, stretch, upscaling, ROI or urgency claim is used.
 
 ## Admission and publication
 
