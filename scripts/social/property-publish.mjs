@@ -6,7 +6,7 @@ import { ROOT, ksaNow } from './lib/daily-pack.mjs';
 import { ACCOUNT, SITE, sha256, fingerprint, eligibility, chooseProperty, dayState, entryFor } from './lib/property-daily.mjs';
 import { withLock, whoami, pageToken, publishEntry, appendLedger } from './lib/facebook.mjs';
 import { createGraph, checkCaption } from './lib/graph.mjs';
-import { run as publishInstagram } from './publish.mjs';
+import { run as publishInstagram, indexLedger } from './publish.mjs';
 
 const read = file => JSON.parse(fs.readFileSync(file,'utf8'));
 const rows = file => fs.existsSync(file) ? fs.readFileSync(file,'utf8').split('\n').filter(Boolean).map(JSON.parse) : [];
@@ -21,6 +21,10 @@ export function legacyDayState(events,date) {
   if(matching.some(e=>e.status==='published' || (!e.status && (e.postId || e.mediaId)))) return 'published';
   if(matching.some(e=>['publishing','intent','uncertain'].includes(e.status))) return 'uncertain';
   return 'ready';
+}
+export function assertNoPendingInstagram(events) {
+  if([...indexLedger(events).values()].some(r=>r.inFlight&&!r.published))throw new Error('Earlier Instagram container is unsettled; manual reconciliation required, no backfill');
+  return events;
 }
 async function catalogue(fetchImpl=fetch,now=new Date()) {
   const res=await fetchImpl(`${SITE}/social-catalogue.json`,{redirect:'error',cache:'no-store',signal:AbortSignal.timeout(20000)});
@@ -72,6 +76,7 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
     const legacy=legacyDayState(channel==='instagram'?rows(path.join(data,'ig/published.jsonl')):[...rows(path.join(dir,'facebook.jsonl')),...rows(path.join(data,'fb/published.jsonl'))],date);
     if(state==='published'||legacy==='published'){console.log('Daily slot already published');return {status:'already-published'};}
     if(state==='uncertain'||legacy==='uncertain')throw new Error('Uncertain daily publication; reconcile before retry');
+    if(channel==='instagram')assertNoPendingInstagram(rows(path.join(data,'ig/published.jsonl')));
     if(history.some(e=>e.channel===channel&&['intent','uncertain'].includes(e.status)&&!history.some(p=>p.channel===channel&&p.id===e.id&&p.status==='published')))throw new Error('Earlier property publication remains uncertain');
     const live=await catalogue(fetchImpl,now),reviews=read(path.join(root,'marketing/daily/property-reviews.json'));
     const selected=chooseProperty(live.listings,reviews,live.advertiser,history,channel,now,policy.repeatDays);
@@ -103,7 +108,8 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
       let receipt;
       if(channel==='instagram') {
         const result=await publishInstagram({dryRun:false,limit:1,graceHours:2.5,ledger:path.join(data,'ig/published.jsonl')},
-          {now:+now,token:env.META_ACCESS_TOKEN,igId:ACCOUNT.instagram,loadEntries:()=>[entry],fetch:fetchImpl});
+          {now:+now,token:env.META_ACCESS_TOKEN,igId:ACCOUNT.instagram,loadEntries:()=>[entry],
+           readLedger:()=>assertNoPendingInstagram(rows(path.join(data,'ig/published.jsonl'))),fetch:fetchImpl});
         receipt=rows(path.join(data,'ig/published.jsonl')).find(x=>x.id===entry.id&&x.status==='published');
         if(result.code!==0||!receipt)throw new Error('Instagram did not confirm publication');
       } else {
