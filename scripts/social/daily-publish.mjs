@@ -13,6 +13,11 @@ fs.mkdirSync(dir,{recursive:true});
 function record(file,obj){const fd=fs.openSync(file,"a",0o600);try{fs.writeSync(fd,JSON.stringify({...obj,at:new Date().toISOString()})+"\n");fs.fsyncSync(fd)}finally{fs.closeSync(fd)}}
 function rows(file){if(!fs.existsSync(file))return [];return fs.readFileSync(file,"utf8").trim().split("\n").filter(Boolean).map(x=>JSON.parse(x))}
 try{
+ if(fs.existsSync(path.join(ROOT,"marketing/daily/property-policy.json"))){
+  const {propertyDaily}=await import("./property-publish.mjs");
+  await propertyDaily(channel,{dry,now:dry&&process.env.BONA_DAILY_TEST_NOW?new Date(process.env.BONA_DAILY_TEST_NOW):new Date()});
+  process.exit(0);
+ }
  const pack=verifyPack();
  // Positive isolation: a legacy timer accidentally restored by an installer is a stop.
  if(!dry)for(const name of ["bona-ig-publish.timer","bona-fb-publish.timer"]){
