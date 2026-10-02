@@ -591,6 +591,32 @@ export function faqPageJsonLd(opts: {
   });
 }
 
+/** FAQPage node for a listing's own FAQ. Its @id is <url>#faq — NOT the page @id — so it sits beside
+    Head's automatic ItemPage node instead of replacing it. Undefined when the listing has no FAQ. */
+export function listingFaqJsonLd(listing: Listing, locale: Locale): object | undefined {
+  const items = (listing.faq ?? []).map((it) => ({ id: it.id, q: it.q[locale] ?? it.q.en, a: it.a[locale] ?? it.a.en }))
+    .filter((it) => it.q && it.a.length);
+  if (!items.length) return undefined;
+  const url = absoluteUrl(listingPath(listing, locale));
+  return {
+    '@type': 'FAQPage',
+    '@id': `${url}#faq`,
+    url,
+    inLanguage: locale === 'ar' ? 'ar-SA' : 'en',
+    isPartOf: { '@id': url },
+    mainEntity: items.map((it) => ({
+      '@type': 'Question',
+      '@id': `${url}#faq-${it.id}`,
+      name: it.q,
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: it.a.map((p) => `<p>${p.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</p>`).join(''),
+        url: `${url}#faq-${it.id}`,
+      },
+    })),
+  };
+}
+
 // ---------- Breadcrumbs ----------
 
 /** BreadcrumbList. items = [{name, path}] in order; path may be relative or absolute.
