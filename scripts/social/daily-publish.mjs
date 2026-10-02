@@ -56,6 +56,6 @@ try{
  }
 }catch(e){
  // Errors deliberately contain no token or provider request/response body.
- record(path.join(dir,"alerts.jsonl"),{channel,status:"needs-attention",reason:String(e.message).replace(/EAA[A-Za-z0-9]+/g,"[redacted]").slice(0,800)});
+ if(!dry)record(path.join(dir,"alerts.jsonl"),{channel,status:"needs-attention",reason:String(e.message).replace(/EAA[A-Za-z0-9]+/g,"[redacted]").slice(0,800)});
  console.error(`Daily ${channel} failed; see ${path.join(dir,"alerts.jsonl")}. No fallback was used.`);process.exitCode=1;
 }
