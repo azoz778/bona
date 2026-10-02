@@ -11,3 +11,4 @@ export function liveSummary(record: unknown, listing: { status?: string } | null
 export function sheetDateText(iso: string, locale: 'en' | 'ar'): string;
 export function sheetVars(summary: Summary | null, locale: 'en' | 'ar'): Record<string, string | null> | null;
 export function localFaq(faq: unknown, locale: 'en' | 'ar', vars: Record<string, string | null> | null): { id: string; q: string; a: string[] }[];
+export function isDeliveryDate(s: unknown): boolean;

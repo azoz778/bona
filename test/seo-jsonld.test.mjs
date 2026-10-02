@@ -21,6 +21,7 @@ import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
+import { liveSummary, localFaq, recordFor, sheetDateText, sheetVars } from '../src/lib/units-summary.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dist = path.join(root, 'dist');
@@ -300,11 +301,12 @@ for (const [route, name] of [
 // ---- FAQ: schema only where the questions are visible ----------------------------------------------
 
 test('FAQPage appears only where questions are visible (/faq/ and listings with an faq), matching them', () => {
-  const listingFaqSlugs = new Set(listingsSource.filter((l) => Array.isArray(l.faq) && l.faq.length).map((l) => l.slug));
   for (const p of indexable) {
     const isFaq = /^(\/ar)?\/faq\/$/.test(p.route);
     const listingSlug = p.route.match(/^(?:\/ar)?\/properties\/([^/]+)\/$/)?.[1];
-    const expected = isFaq || (listingSlug && listingFaqSlugs.has(listingSlug)) ? 1 : 0;
+    const listing = listingSlug && listingsSource.find((l) => l.slug === listingSlug);
+    const lang = p.route.startsWith('/ar/') ? 'ar' : 'en';
+    const expected = isFaq || (listing && Array.isArray(listing.faq) && faqFor(listing, lang).length) ? 1 : 0;
     assert.equal(nodesOf(p, 'FAQPage').length, expected, `${p.route}: FAQPage where ${expected ? 'expected' : 'no FAQ is visible'}`);
   }
   for (const route of ['/faq/', '/ar/faq/']) {
@@ -333,29 +335,54 @@ test('Organization sameAs lists only verified, live profiles', () => {
 });
 
 // ---- project pages: unit sheet + listing FAQ (2026-10-02) -------------------------------------------
+// Expectations are DERIVED from the sheet date and the listing status, exactly as the build decides them
+// (units-summary.mjs::liveSummary). A hard-coded "the table must be there" would fail the daily deploy on the
+// day the sheet goes stale — and a failed deploy leaves the previous build, stale prices and all, live.
+
+const unitsData = JSON.parse(readFileSync(path.join(root, 'src', 'data', 'units.json'), 'utf8'));
+const NOW = new Date();
+/** The live summary for a listing as the build saw it, or a skip reason when the build may have run on the
+    other side of the 90-day boundary from this test (they run minutes apart; allow 6 hours). */
+function liveFor(listing) {
+  const rec = recordFor(unitsData, listing.id);
+  const a = liveSummary(rec, listing, NOW);
+  const b = liveSummary(rec, listing, new Date(NOW.getTime() - 6 * 3600_000));
+  return { live: a, boundary: Boolean(a) !== Boolean(b) };
+}
+const faqFor = (listing, lang) => localFaq(listing.faq, lang, sheetVars(liveFor(listing).live, lang));
 
 for (const [route, lang] of [['/properties/darco-prime-waterfront-al-shati/', 'en'], ['/ar/properties/darco-prime-waterfront-al-shati/', 'ar']]) {
   const slug = 'darco-prime-waterfront-al-shati';
   const src = listingsSource.find((l) => l.slug === slug);
-  test(`${route}: seoTitle, units table, sheet note, and a separate FAQPage beside the ItemPage`, { skip: listingSkipReason(slug) ?? undefined }, () => {
+  const skip = listingSkipReason(slug) ?? (src && liveFor(src).boundary ? 'the unit sheet crosses its 90-day limit within hours of now' : undefined);
+  test(`${route}: seoTitle, units table only while the sheet is live, FAQ filled from it, #faq beside the ItemPage`, { skip }, () => {
     const p = requireBuiltListing(route);
+    const { live } = liveFor(src);
     assert.ok(p.title.startsWith(src.seoTitle[lang]), `${route}: title "${p.title}" should start with the seoTitle`);
-    assert.match(p.html, /data-project-details/, 'units block missing');
-    const rows = [...p.html.matchAll(/<tr[^>]*>\s*<th scope="row"[^>]*>([\s\S]*?)<\/th>/g)].map((m) => text(m[1]));
-    assert.ok(rows.length >= 4, `expected ≥3 type rows + total, got ${rows.length}`);
-    assert.match(text(p.html.match(/<p[^>]*data-units-note[^>]*>([\s\S]*?)<\/p>/)[1]), lang === 'ar' ? /2 سبتمبر 2026/ : /2 September 2026/);
+    if (live) {
+      assert.match(p.html, /data-project-details/, 'units block missing while the sheet is live');
+      const rows = [...p.html.matchAll(/<tr[^>]*>\s*<th scope="row"[^>]*>([\s\S]*?)<\/th>/g)].map((m) => text(m[1]));
+      assert.equal(rows.length, live.rows.length + 1, 'one row per summary row, plus the total');
+      const note = text(p.html.match(/<p[^>]*data-units-note[^>]*>([\s\S]*?)<\/p>/)[1]);
+      assert.ok(note.includes(sheetDateText(live.updated, lang)), `sheet note "${note}" should carry the sheet date`);
+    } else {
+      assert.doesNotMatch(p.html, /data-project-details/, 'a stale or unavailable sheet must not be shown');
+    }
+    const expected = faqFor(src, lang);
     const url = `${SITE}${route}`;
-    const [faq] = nodesOf(p, 'FAQPage');
+    const visible = [...p.html.matchAll(/<section[^>]*data-listing-faq[\s\S]*?<\/section>/g)].flatMap((sec) => [...sec[0].matchAll(/<h3[^>]*>([\s\S]*?)<\/h3>/g)].map((m) => text(m[1])));
+    assert.deepEqual(visible, expected.map((it) => it.q), 'visible questions = the ones the sheet can answer');
+    const faqs = nodesOf(p, 'FAQPage');
+    if (!expected.length) { assert.equal(faqs.length, 0); return; }
+    const [faq] = faqs;
     assert.equal(faq['@id'], `${url}#faq`);
-    const answers = faq.mainEntity.map((q) => q.acceptedAnswer.text).join(' ');
-    assert.doesNotMatch(answers, /\{\w+\}/, 'every FAQ placeholder must be filled');
-    assert.match(answers, /708,164/, 'the price answer quotes the live sheet');
-    assert.ok(nodesOf(p, 'RealEstateListing').length === 1, 'listing node must survive');
-    assert.equal(nodesOf(p, 'ItemPage')[0]?.['@id'], `${url}#webpage`, 'the automatic ItemPage node must survive');
     assert.equal(faq.isPartOf['@id'], `${url}#webpage`, 'FAQPage must point at the page node that exists');
-    const visible = [...p.html.matchAll(/<section[^>]*data-listing-faq[\s\S]*?<\/section>/g)].flatMap((s) => [...s[0].matchAll(/<h3[^>]*>([\s\S]*?)<\/h3>/g)].map((m) => text(m[1])));
     assert.deepEqual(faq.mainEntity.map((q) => q.name), visible, 'FAQ JSON-LD must match the visible questions');
-    assert.deepEqual(faq.mainEntity.map((q) => q.name), src.faq.map((it) => it.q[lang]));
+    const answers = faq.mainEntity.map((q) => q.acceptedAnswer.text).join(' ');
+    assert.doesNotMatch(answers, /[{}]/, 'every FAQ placeholder must be filled');
+    if (live) assert.ok(answers.includes(new Intl.NumberFormat('en-US').format(live.cashFrom)), 'the price answer quotes the live sheet');
+    assert.equal(nodesOf(p, 'RealEstateListing').length, 1, 'listing node must survive');
+    assert.equal(nodesOf(p, 'ItemPage')[0]?.['@id'], `${url}#webpage`, 'the automatic ItemPage node must survive');
   });
 }
 

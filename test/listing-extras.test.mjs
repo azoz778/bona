@@ -50,3 +50,26 @@ test('faq placeholders must be ones the sheet can fill', () => {
   const bad = { ...ok, a: { en: ['From SAR {price}.'], ar: ['من {cashFrom} ريال.'] } };
   assert.match(faqProblems([q('a'), q('b'), bad]).join(), /unknown placeholder \{price\}/);
 });
+
+test('malformed optional fields come back as problems, never as a crash (Codex review)', () => {
+  assert.deepEqual(projectFactsProblems(534), ['projectFacts must be an object']);
+  assert.deepEqual(seoTitleProblems('title'), ['seoTitle must be { en, ar }']);
+  assert.match(faqProblems([q('a'), q('b'), null]).join(), /faq\[2\] must be an object/);
+  const strAnswer = { ...q('c'), a: { en: 'not an array', ar: ['نص'] } };
+  assert.match(faqProblems([q('a'), q('b'), strAnswer]).join(), /a\.en must be a non-empty array/);
+});
+
+test('placeholders: never in questions, no unbalanced or malformed braces in answers (Codex review)', () => {
+  const inQ = { ...q('c'), q: { en: 'Price as of {sheetDate}?', ar: 'السعر؟' } };
+  assert.match(faqProblems([q('a'), q('b'), inQ]).join(), /q\.en may not contain/);
+  const typo = { ...q('c'), a: { en: ['From SAR {cash-from}.'], ar: ['من ريال.'] } };
+  assert.match(faqProblems([q('a'), q('b'), typo]).join(), /unknown placeholder \{cash-from\}/);
+  const stray = { ...q('c'), a: { en: ['From SAR {cashFrom.'], ar: ['من ريال.'] } };
+  assert.match(faqProblems([q('a'), q('b'), stray]).join(), /unbalanced/);
+});
+
+test('an impossible delivery is reported, not rolled over (Codex review)', () => {
+  const now = new Date('2026-10-02T00:00:00Z');
+  assert.match(unitsSheetProblems({ listingId: 'X', updated: '2026-09-02', delivery: '2028-13' }, now).join(), /impossible delivery/);
+  assert.deepEqual(unitsSheetProblems({ listingId: 'X', updated: '2026-09-02', delivery: '2028-06' }, now), []);
+});

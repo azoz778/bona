@@ -199,7 +199,8 @@ for (const l of data) {
 
   // Project-page extras (rules.mjs): optional, but whole when present.
   for (const p of [...faqProblems(l.faq), ...seoTitleProblems(l.seoTitle), ...projectFactsProblems(l.projectFacts)]) err(id, p);
-  for (const it of Array.isArray(l.faq) ? l.faq : []) for (const [label, str] of [['faq.q.en', it.q?.en], ['faq.q.ar', it.q?.ar], ...(it.a?.en ?? []).map((x) => ['faq.a.en', x]), ...(it.a?.ar ?? []).map((x) => ['faq.a.ar', x])]) if (isStr(str)) checkCopy(id, label, str);
+  const paras = (v) => (Array.isArray(v) ? v : []);
+  for (const it of Array.isArray(l.faq) ? l.faq.filter((x) => x && typeof x === 'object') : []) for (const [label, str] of [['faq.q.en', it.q?.en], ['faq.q.ar', it.q?.ar], ...paras(it.a?.en).map((x) => ['faq.a.en', x]), ...paras(it.a?.ar).map((x) => ['faq.a.ar', x])]) if (isStr(str)) checkCopy(id, label, str);
   // copy hygiene
   for (const [label, str] of [['title.en', l.title?.en], ['title.ar', l.title?.ar], ['description.en', l.description?.en], ['description.ar', l.description?.ar], ['project.name.en', l.project?.name?.en], ['project.name.ar', l.project?.name?.ar], ...((h.en ?? []).map((x, i) => [`highlights.en[${i}]`, x])), ...((h.ar ?? []).map((x, i) => [`highlights.ar[${i}]`, x]))]) if (isStr(str)) checkCopy(id, label, str);
 }

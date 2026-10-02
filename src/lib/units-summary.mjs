@@ -48,7 +48,8 @@ export function unitSummary(record) {
   const all = rowOf('all', { en: '', ar: '' }, units);
   return {
     rows, count: all.count, areaMin: all.areaMin, areaMax: all.areaMax, cashFrom: all.cashFrom,
-    delivery: record.delivery ?? null, updated: record.updated ?? null,
+    // An impossible delivery ("2028-02-30", "2028-13") is dropped, never rolled over into a date the sheet does not give.
+    delivery: isDeliveryDate(record.delivery) ? record.delivery : null, updated: record.updated ?? null,
   };
 }
 
@@ -63,6 +64,13 @@ export function isSheetDate(s) {
   const [y, m, d] = s.split('-').map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d));
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
+/** A delivery is a real YYYY-MM month or a real YYYY-MM-DD date. */
+export function isDeliveryDate(s) {
+  if (typeof s !== 'string') return false;
+  if (/^\d{4}-\d{2}$/.test(s)) { const m = Number(s.slice(5)); return m >= 1 && m <= 12; }
+  return isSheetDate(s);
 }
 
 /** A sheet may be shown while its date is real, not in the future, and at most MAX_SHEET_AGE_DAYS old. */
