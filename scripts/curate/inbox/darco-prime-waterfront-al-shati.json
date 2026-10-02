@@ -211,5 +211,90 @@
     ],
     "createdAt": "2026-09-07T10:35:28.944Z",
     "site": "https://bona.azoz.uk"
-  }
+  },
+  "seoTitle": {
+    "en": "Darco Prime Waterfront Apartments for Sale, Al Shati Jeddah",
+    "ar": "شقق داركو برايم للبيع، الشاطئ جدة"
+  },
+  "projectFacts": {
+    "totalUnits": 534,
+    "buildings": 22
+  },
+  "faq": [
+    {
+      "id": "developer",
+      "q": {
+        "en": "Who is developing Darco Prime Waterfront?",
+        "ar": "من مطور مشروع داركو برايم الواجهة البحرية؟"
+      },
+      "a": {
+        "en": [
+          "Darco Real Estate Company. The project sits in the Al-Shati district of Jeddah, near the Red Sea, and comprises 22 buildings with 534 residential units."
+        ],
+        "ar": [
+          "شركة داركو العقارية. يقع المشروع في حي الشاطئ بمدينة جدة بالقرب من البحر الأحمر، ويضم 22 مبنى تحتوي على 534 وحدة سكنية."
+        ]
+      }
+    },
+    {
+      "id": "handover",
+      "q": {
+        "en": "When is handover expected?",
+        "ar": "متى موعد التسليم المتوقع؟"
+      },
+      "a": {
+        "en": [
+          "The developer’s unit sheet dated 2 September 2026 gives an expected delivery of June 2028."
+        ],
+        "ar": [
+          "يحدد كشف وحدات المطور بتاريخ 2 سبتمبر 2026 موعد التسليم المتوقع في يونيو 2028."
+        ]
+      }
+    },
+    {
+      "id": "sizes",
+      "q": {
+        "en": "What unit sizes are available?",
+        "ar": "ما مساحات الوحدات المتاحة؟"
+      },
+      "a": {
+        "en": [
+          "According to the developer’s sheet dated 2 September 2026, 111 units are available: one-, two- and three-bedroom apartments from 55.45 to 139.39 square metres, including three penthouses."
+        ],
+        "ar": [
+          "بحسب كشف المطور بتاريخ 2 سبتمبر 2026، تتوفر 111 وحدة: شقق بغرفة وغرفتين وثلاث غرف نوم بمساحات من 55.45 إلى 139.39 متراً مربعاً، منها ثلاث وحدات بنتهاوس."
+        ]
+      }
+    },
+    {
+      "id": "price",
+      "q": {
+        "en": "What is the starting price?",
+        "ar": "ما السعر الابتدائي؟"
+      },
+      "a": {
+        "en": [
+          "Cash prices start from SAR 708,164 on the developer’s sheet dated 2 September 2026. Prices and availability change; we confirm the current figure for any unit before you commit."
+        ],
+        "ar": [
+          "تبدأ أسعار الكاش من 708,164 ريال سعودي بحسب كشف المطور بتاريخ 2 سبتمبر 2026. تتغير الأسعار والتوافر، ونؤكد لك السعر الحالي لأي وحدة قبل الالتزام."
+        ]
+      }
+    },
+    {
+      "id": "instalments",
+      "q": {
+        "en": "Is there an instalment plan?",
+        "ar": "هل يتوفر التقسيط؟"
+      },
+      "a": {
+        "en": [
+          "Yes. Besides the cash price, the developer offers instalment plans over six months, one year and two years. Ask us and we will send the schedule for the unit you are considering."
+        ],
+        "ar": [
+          "نعم. إلى جانب سعر الكاش، يقدم المطور خطط تقسيط على ستة أشهر وسنة وسنتين. تواصل معنا ونرسل لك جدول السداد للوحدة التي تهمك."
+        ]
+      }
+    }
+  ]
 }
