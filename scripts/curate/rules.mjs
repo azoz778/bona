@@ -2,7 +2,7 @@
 // builder and the WhatsApp intake (services/intake/lib/{claude,listing}.mjs). One
 // definition, so a listing the intake accepts can never fail the build afterwards.
 
-import { sheetAgeDays, MAX_SHEET_AGE_DAYS } from '../../src/lib/units-summary.mjs';
+import { FAQ_PLACEHOLDERS, isSheetDate, MAX_SHEET_AGE_DAYS, sheetAgeDays } from '../../src/lib/units-summary.mjs';
 
 /** Words the house voice never uses. */
 export const HYPE_WORDS = ['amazing', 'stunning', 'breathtaking', 'unparalleled', "don't miss", 'dream home'];
@@ -230,6 +230,7 @@ export function faqProblems(faq) {
       const a = it?.a?.[lang];
       if (!Array.isArray(a) || !a.length || !a.every(nonEmpty)) out.push(`${at}.a.${lang} must be a non-empty array of paragraphs`);
       else if (lang === 'ar' && !a.every((p) => AR_RE.test(p))) out.push(`${at}.a.ar must be Arabic`);
+      for (const p of Array.isArray(a) ? a : []) for (const [, k] of String(p).matchAll(/\{(\w+)\}/g)) if (!FAQ_PLACEHOLDERS.includes(k)) out.push(`${at}.a.${lang} uses unknown placeholder {${k}} (allowed: ${FAQ_PLACEHOLDERS.join(', ')})`);
     }
   });
   return out;
@@ -252,10 +253,14 @@ export function projectFactsProblems(f) {
   return out;
 }
 
+/** Warnings (never errors) about a developer unit sheet. The site hides a stale sheet at build time
+    (units-summary.mjs::liveSummary), so these only tell the owner it is time for a fresh one — failing the
+    validator here would block every deploy and every WhatsApp-intake command (sold, hide, price) as well. */
 export function unitsSheetProblems(record, now = new Date()) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(record?.updated ?? '') || Number.isNaN(Date.parse(record.updated))) return ['units.json updated must be a YYYY-MM-DD sheet date'];
+  if (!isSheetDate(record?.updated)) return [`units.json sheet for ${record?.listingId} has no real YYYY-MM-DD date, so the site does not show it`];
   const age = sheetAgeDays(record.updated, now);
-  return age > MAX_SHEET_AGE_DAYS
-    ? [`units.json sheet for ${record.listingId} is ${age} days old (limit ${MAX_SHEET_AGE_DAYS}): ask the owner for a fresh developer sheet, or remove the record so the prices come off the site`]
-    : [];
+  if (age < 0) return [`units.json sheet for ${record.listingId} is dated in the future (${record.updated}), so the site does not show it`];
+  if (age > MAX_SHEET_AGE_DAYS) return [`units.json sheet for ${record.listingId} is ${age} days old (limit ${MAX_SHEET_AGE_DAYS}): its prices are hidden on the site until the owner sends a fresh developer sheet`];
+  if (age > MAX_SHEET_AGE_DAYS - 15) return [`units.json sheet for ${record.listingId} is ${age} days old: its prices come off the site after day ${MAX_SHEET_AGE_DAYS}, ask the owner for a fresh developer sheet`];
+  return [];
 }

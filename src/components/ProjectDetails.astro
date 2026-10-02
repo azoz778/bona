@@ -1,27 +1,24 @@
 ---
 /* Units-and-prices summary + key facts for a listing backed by a developer unit sheet
-   (src/data/units.json). Renders nothing when the listing has no sheet. Spec:
+   (src/data/units.json). Renders nothing when the listing has no sheet, is not available, or the sheet is
+   older than MAX_SHEET_AGE_DAYS at build time (the daily build then takes the prices down). Spec:
    docs/superpowers/specs/2026-10-02-project-details-seo-design.md */
 import unitsData from '../data/units.json';
-import { unitSummary } from '../lib/units-summary.mjs';
+import { liveSummary, recordFor, sheetDateText } from '../lib/units-summary.mjs';
 import { t, ui, fill, formatNumber, formatPrice, type Locale } from '../lib/i18n';
 import type { Listing } from '../lib/listings';
 
 interface Props { listing: Listing; locale: Locale; class?: string }
 const { listing: l, locale, class: cls = '' } = Astro.props;
-const records = (Array.isArray(unitsData) ? unitsData : [unitsData]) as any[];
-const record = records.find((r) => r.listingId === l.id) ?? null;
-const summary = unitSummary(record);
-const dateFmt = (iso: string, withDay: boolean) => new Intl.DateTimeFormat(locale === 'ar' ? 'ar-u-ca-gregory-nu-latn' : 'en-GB',
-  withDay ? { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' } : { month: 'long', year: 'numeric', timeZone: 'UTC' }
-).format(new Date(withDay ? `${iso}T00:00:00Z` : `${iso}-01T00:00:00Z`));
+const record = recordFor(unitsData, l.id);
+const summary = liveSummary(record, l);
 const cash = (n: number) => formatPrice({ amount: n, currency: record?.currency ?? 'SAR' }, locale);
 const area = (lo: number, hi: number) => (lo === hi ? formatNumber(lo) : `${formatNumber(lo)}–${formatNumber(hi)}`);
 const developer = record?.developer ? t(record.developer, locale) : (l.project?.developer ? t(l.project.developer, locale) : '');
 const total = l.projectFacts?.totalUnits;
 const facts = summary ? [
   developer ? { k: t(ui.factDeveloper, locale), v: developer } : null,
-  summary.delivery ? { k: t(ui.factHandover, locale), v: dateFmt(summary.delivery, false) } : null,
+  summary.delivery ? { k: t(ui.factHandover, locale), v: sheetDateText(summary.delivery, locale) } : null,
   { k: t(ui.factUnitsAvailable, locale), v: total ? fill(t(ui.factUnitsOfTotal, locale), { n: formatNumber(summary.count), total: formatNumber(total) }) : formatNumber(summary.count) },
   l.projectFacts?.buildings ? { k: t(ui.factBuildings, locale), v: formatNumber(l.projectFacts.buildings) } : null,
 ].filter(Boolean) as { k: string; v: string }[] : [];
@@ -43,21 +40,21 @@ const facts = summary ? [
           {summary.rows.map((r) => (
             <tr class="border-b border-ink/10">
               <th scope="row" class="py-3 pe-4 text-start font-normal">{t(r.label, locale)}</th>
-              <td class="py-3 pe-4 text-end tabular-nums" dir="ltr">{area(r.areaMin, r.areaMax)}</td>
+              <td class="py-3 pe-4 text-end tabular-nums"><span dir="ltr">{area(r.areaMin, r.areaMax)}</span></td>
               <td class="py-3 pe-4 text-end tabular-nums">{cash(r.cashFrom)}</td>
               <td class="py-3 text-end tabular-nums">{formatNumber(r.count)}</td>
             </tr>
           ))}
           <tr class="font-semibold">
             <th scope="row" class="py-3 pe-4 text-start">{t(ui.unitsAllRow, locale)}</th>
-            <td class="py-3 pe-4 text-end tabular-nums" dir="ltr">{area(summary.areaMin, summary.areaMax)}</td>
+            <td class="py-3 pe-4 text-end tabular-nums"><span dir="ltr">{area(summary.areaMin, summary.areaMax)}</span></td>
             <td class="py-3 pe-4 text-end tabular-nums">{cash(summary.cashFrom)}</td>
             <td class="py-3 text-end tabular-nums">{formatNumber(summary.count)}</td>
           </tr>
         </tbody>
       </table>
     </div>
-    {summary.updated && <p class="mt-4 max-w-[60ch] text-sm leading-relaxed text-stone-2" data-units-note>{fill(t(ui.unitsSheetNote, locale), { date: dateFmt(summary.updated, true) })}</p>}
+    {summary.updated && <p class="mt-4 max-w-[60ch] text-sm leading-relaxed text-stone-2" data-units-note>{fill(t(ui.unitsSheetNote, locale), { date: sheetDateText(summary.updated, locale) })}</p>}
     {facts.length > 0 && (
       <>
         <h3 class="label mt-10 text-stone-2">{t(ui.keyFacts, locale)}</h3>

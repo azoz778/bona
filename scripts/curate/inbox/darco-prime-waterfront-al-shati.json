@@ -244,10 +244,10 @@
       },
       "a": {
         "en": [
-          "The developer’s unit sheet dated 2 September 2026 gives an expected delivery of June 2028."
+          "The developer’s unit sheet dated {sheetDate} gives an expected delivery of {delivery}."
         ],
         "ar": [
-          "يحدد كشف وحدات المطور بتاريخ 2 سبتمبر 2026 موعد التسليم المتوقع في يونيو 2028."
+          "يحدد كشف وحدات المطور بتاريخ {sheetDate} موعد التسليم المتوقع في {delivery}."
         ]
       }
     },
@@ -259,10 +259,10 @@
       },
       "a": {
         "en": [
-          "According to the developer’s sheet dated 2 September 2026, 111 units are available: one-, two- and three-bedroom apartments from 55.45 to 139.39 square metres, including three penthouses."
+          "According to the developer’s sheet dated {sheetDate}, {count} units are available, with built areas from {areaMin} to {areaMax} square metres. The table above breaks them down by bedrooms, penthouses included."
         ],
         "ar": [
-          "بحسب كشف المطور بتاريخ 2 سبتمبر 2026، تتوفر 111 وحدة: شقق بغرفة وغرفتين وثلاث غرف نوم بمساحات من 55.45 إلى 139.39 متراً مربعاً، منها ثلاث وحدات بنتهاوس."
+          "بحسب كشف المطور بتاريخ {sheetDate}، تتوفر {count} وحدة بمساحات بناء من {areaMin} إلى {areaMax} متراً مربعاً. ويعرض الجدول أعلاه تفصيلها حسب عدد غرف النوم، ومنها وحدات البنتهاوس."
         ]
       }
     },
@@ -274,10 +274,10 @@
       },
       "a": {
         "en": [
-          "Cash prices start from SAR 708,164 on the developer’s sheet dated 2 September 2026. Prices and availability change; we confirm the current figure for any unit before you commit."
+          "Cash prices start from SAR {cashFrom} on the developer’s sheet dated {sheetDate}. Prices and availability change; we confirm the current figure for any unit before you commit."
         ],
         "ar": [
-          "تبدأ أسعار الكاش من 708,164 ريال سعودي بحسب كشف المطور بتاريخ 2 سبتمبر 2026. تتغير الأسعار والتوافر، ونؤكد لك السعر الحالي لأي وحدة قبل الالتزام."
+          "تبدأ أسعار الكاش من {cashFrom} ريال سعودي بحسب كشف المطور بتاريخ {sheetDate}. تتغير الأسعار والتوافر، ونؤكد لك السعر الحالي لأي وحدة قبل الالتزام."
         ]
       }
     },

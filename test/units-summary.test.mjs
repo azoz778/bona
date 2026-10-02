@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { unitSummary, sheetAgeDays, MAX_SHEET_AGE_DAYS } from '../src/lib/units-summary.mjs';
+import { unitSummary, sheetAgeDays, MAX_SHEET_AGE_DAYS, isSheetCurrent, liveSummary, localFaq, sheetVars, sheetDateText } from '../src/lib/units-summary.mjs';
 
 const u = (beds, cls, areaSqm, cash) => ({ beds, class: cls, areaSqm, price: { cash } });
 const fixture = { listingId: 'BONA-W999', delivery: '2028-06', updated: '2026-09-02', units: [
@@ -27,7 +27,7 @@ test('labels are bilingual and the penthouse label carries its bed range', () =>
   assert.equal(rows[0].label.en, '1 bedroom'); assert.equal(rows[0].label.ar, 'غرفة نوم واحدة');
   assert.equal(rows[1].label.en, '2 bedrooms'); assert.equal(rows[1].label.ar, 'غرفتا نوم');
   assert.equal(rows[2].label.en, '3 bedrooms'); assert.equal(rows[2].label.ar, '3 غرف نوم');
-  assert.equal(rows[3].label.en, 'Penthouse, 1–2 bedrooms'); assert.equal(rows[3].label.ar, 'بنتهاوس، 1–2 غرف نوم');
+  assert.equal(rows[3].label.en, 'Penthouse, 1–2 bedrooms'); assert.equal(rows[3].label.ar, 'بنتهاوس، من غرفة إلى غرفتي نوم');
 });
 
 test('totals cover every unit', () => {
@@ -59,4 +59,39 @@ test('the real Darco sheet summarises to the published figures', () => {
     ['3', 9, 123.49, 139.39, 1346754], ['penthouse', 3, 57.82, 91.56, 881368],
   ]);
   assert.deepEqual([s.count, s.cashFrom], [111, 708164]);
+});
+
+test('a sheet shows through day 90, not day 91, never with a future or impossible date', () => {
+  const rec = { ...fixture, updated: '2026-09-02' };
+  assert.equal(isSheetCurrent(rec, new Date('2026-12-01T23:00:00Z')), true);   // day 90
+  assert.equal(isSheetCurrent(rec, new Date('2026-12-02T00:00:00Z')), false);  // day 91
+  assert.equal(isSheetCurrent(rec, new Date('2026-09-01T00:00:00Z')), false);  // dated tomorrow
+  assert.equal(isSheetCurrent({ ...rec, updated: '2026-02-30' }, new Date('2026-03-05T00:00:00Z')), false);
+});
+
+test('liveSummary: only for an available listing with a current sheet', () => {
+  const now = new Date('2026-10-02T00:00:00Z');
+  assert.ok(liveSummary(fixture, { status: 'available' }, now));
+  assert.equal(liveSummary(fixture, { status: 'sold' }, now), null);
+  assert.equal(liveSummary(fixture, { status: 'reserved' }, now), null);
+  assert.equal(liveSummary(fixture, { status: 'available' }, new Date('2027-01-01T00:00:00Z')), null);
+  assert.equal(liveSummary(null, { status: 'available' }, now), null);
+});
+
+test('dates read in the page language, Gregorian with Western digits', () => {
+  assert.equal(sheetDateText('2026-09-02', 'en'), '2 September 2026');
+  assert.equal(sheetDateText('2026-09-02', 'ar'), '2 سبتمبر 2026');
+  assert.equal(sheetDateText('2028-06', 'en'), 'June 2028');
+  assert.equal(sheetDateText('2028-06', 'ar'), 'يونيو 2028');
+});
+
+test('localFaq fills placeholders from the sheet and drops what it cannot fill', () => {
+  const faq = [
+    { id: 'dev', q: { en: 'Who?', ar: 'من؟' }, a: { en: ['Darco.'], ar: ['داركو.'] } },
+    { id: 'price', q: { en: 'Price?', ar: 'السعر؟' }, a: { en: ['From SAR {cashFrom} ({sheetDate}).'], ar: ['من {cashFrom} ريال ({sheetDate}).'] } },
+  ];
+  const vars = sheetVars(unitSummary(fixture), 'en');
+  assert.deepEqual(localFaq(faq, 'en', vars).map((x) => x.a[0]), ['Darco.', 'From SAR 750,000 (2 September 2026).']);
+  assert.deepEqual(localFaq(faq, 'ar', sheetVars(unitSummary(fixture), 'ar'))[1].a, ['من 750,000 ريال (2 سبتمبر 2026).']);
+  assert.deepEqual(localFaq(faq, 'en', null).map((x) => x.id), ['dev'], 'no live sheet: the price answer goes, the rest stays');
 });

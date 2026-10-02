@@ -1,4 +1,13 @@
 export const MAX_SHEET_AGE_DAYS: number;
+export const FAQ_PLACEHOLDERS: string[];
 export type SummaryRow = { key: string; label: { en: string; ar: string }; count: number; areaMin: number; areaMax: number; cashFrom: number };
-export function unitSummary(record: unknown): null | { rows: SummaryRow[]; count: number; areaMin: number; areaMax: number; cashFrom: number; delivery: string | null; updated: string | null };
+export type Summary = { rows: SummaryRow[]; count: number; areaMin: number; areaMax: number; cashFrom: number; delivery: string | null; updated: string | null };
+export function unitSummary(record: unknown): Summary | null;
 export function sheetAgeDays(updated: string, now?: Date): number;
+export function isSheetDate(s: unknown): boolean;
+export function isSheetCurrent(record: unknown, now?: Date): boolean;
+export function recordFor(unitsData: unknown, listingId: string): any;
+export function liveSummary(record: unknown, listing: { status?: string } | null | undefined, now?: Date): Summary | null;
+export function sheetDateText(iso: string, locale: 'en' | 'ar'): string;
+export function sheetVars(summary: Summary | null, locale: 'en' | 'ar'): Record<string, string | null> | null;
+export function localFaq(faq: unknown, locale: 'en' | 'ar', vars: Record<string, string | null> | null): { id: string; q: string; a: string[] }[];
