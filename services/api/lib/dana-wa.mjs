@@ -24,6 +24,14 @@
  * or daily upkeep turns it `uncertain` (it may have gone), the batch counts as answered and
  * the chat is not flagged — exactly like a staff reply cut off mid-send.
  *
+ * Her answer is the chat's first reply when it has none yet (2026-10-05 design R1), the way a
+ * staff reply is: the Hermes `bona-unanswered-leads` watchdog stops pinging for it. The
+ * hand-over line is not — the client is waiting for a person — and neither is a send that
+ * may not have gone (`uncertain`).
+ *
+ * Every Retell call tells the optional funds watch (lib/dana-funds.mjs, R2) how it went: a
+ * 402 is `funds.out()`, a call that worked `funds.ok()`. The client sees no difference.
+ *
  * Never logged: message text, a name, a number, a Retell chat id. Never rejects.
  */
 import { extractActions, plainText } from './actions.mjs';
@@ -180,9 +188,10 @@ export function answerFrom(completion, { inventory, siteUrl, language }) {
  * @param {(lead: object) => boolean} o.isExcludedLead
  * @param {{ refresh: Function }|null} [o.backfill]
  * @param {{ take: Function, refund: Function }|null} [o.budget]
+ * @param {{ out: Function, ok: Function }|null} [o.funds]  Retell's out-of-credit watch (lib/dana-funds.mjs)
  */
 export function createDana({
-  db, inbox, team, sender, retell, alerts = null, inventory, siteUrl, agentId, isExcludedLead, backfill = null, budget = null,
+  db, inbox, team, sender, retell, alerts = null, inventory, siteUrl, agentId, isExcludedLead, backfill = null, budget = null, funds = null,
   now = () => Date.now(), log = () => {}, batchMs = BATCH_MS,
 } = {}) {
   if (!db || !inbox || !team) throw new TypeError('createDana needs the store, the inbox store and the team');
@@ -215,6 +224,13 @@ export function createDana({
   }
 
   const failure = (err) => (Number.isInteger(err?.status) ? { status: err.status } : { error: err?.name === 'RetellError' ? 'request' : 'error' });
+  // The funds watch hears of every Retell call (R2). It never throws, and is guarded anyway:
+  // a broken watch must not turn an answer into a hand-over.
+  const funded = () => { try { funds?.ok(); } catch { /* the answer goes on */ } };
+  const refused = (err) => {
+    if (err?.status !== 402) return;
+    try { funds?.out(); } catch { /* the hand-over goes on */ }
+  };
 
   /**
    * The Retell chat for this WhatsApp chat: the stored one while fresh, else a new one (P4-8).
@@ -236,12 +252,14 @@ export function createDana({
         },
         metadata: { source: 'bona-whatsapp', lead_id: lead.lead_id },
       });
+      funded();
       if (typeof chat?.chat_id !== 'string' || !chat.chat_id) throw new Error('no chat id');
       db.updateLead(lead.lead_id, { dana_chat_id: chat.chat_id, dana_chat_ts: t });
       say({ evt: 'dana.session', leadId: lead.lead_id, renewed: Boolean(lead.dana_chat_id) });
       return { chatId: chat.chat_id, created: true };
     } catch (err) {
       if (budget) budget.refund('chats');
+      refused(err);
       say({ level: 'warn', evt: 'dana.retell_failed', leadId: lead.lead_id, ...failure(err) });
       return { error: 'retell_error' };
     }
@@ -250,20 +268,29 @@ export function createDana({
   /** Ask the model; a reused chat that fails (ended on Retell's side, say) is replaced once. */
   async function complete(lead, batch, language) {
     const content = batchText(batch);
+    const ask = async (chatId) => {
+      const completion = await retell.createChatCompletion({ chat_id: chatId, content });
+      funded();
+      return completion;
+    };
+    const failed = (err) => {
+      refused(err);
+      say({ level: 'warn', evt: 'dana.retell_failed', leadId: lead.lead_id, ...failure(err) });
+    };
     let s = await session(lead, batch, language);
     if (s.error) return s;
     try {
-      return { completion: await retell.createChatCompletion({ chat_id: s.chatId, content }), newChat: s.created };
+      return { completion: await ask(s.chatId), newChat: s.created };
     } catch (err) {
-      say({ level: 'warn', evt: 'dana.retell_failed', leadId: lead.lead_id, ...failure(err) });
+      failed(err);
       if (s.created) return { error: 'retell_error' };
     }
     s = await session(lead, batch, language, { fresh: true });
     if (s.error) return s;
     try {
-      return { completion: await retell.createChatCompletion({ chat_id: s.chatId, content }), newChat: true };
+      return { completion: await ask(s.chatId), newChat: true };
     } catch (err) {
-      say({ level: 'warn', evt: 'dana.retell_failed', leadId: lead.lead_id, ...failure(err) });
+      failed(err);
       return { error: 'retell_error' };
     }
   }
@@ -273,8 +300,10 @@ export function createDana({
    * `covers_ts` = the newest client message this answers and the text normalised the way a
    * staff reply is (the poller matches an unconfirmed send by exact text), so a client message
    * stamped while she composed is not counted as answered, and a crash mid-send leaves a row.
+   * `answer` says it is her answer, not the hand-over line: only an answer that went is the
+   * chat's first reply (R1).
    */
-  async function send(lead, text, language, coversTs) {
+  async function send(lead, text, language, coversTs, { answer = false } = {}) {
     // Introduced = the flag OR any Dana row for this chat that is not `failed` (P4-12): a run
     // that crashed after its row was written may have sent her first message without setting
     // the flag. Read before this run's own row goes in. A purge stubs rows with lead_id NULL,
@@ -291,9 +320,13 @@ export function createDana({
       const startedAt = Number.isFinite(ins.row?.created) ? ins.row.created : t;
       try {
         db.transaction(() => {
-          if (db.getLead(lead.lead_id)?.inbox_state !== 'in') return;
+          const fresh = db.getLead(lead.lead_id);
+          if (fresh?.inbox_state !== 'in') return;
           inbox.upsertMessage({ key_id: out.keyId, lead_id: lead.lead_id, jid, direction: 'out', sender_kind: 'dana', text: body, ts: Math.floor(startedAt / 1000) * 1000, status: 'sent' });
-          db.updateLead(lead.lead_id, { dana_chat_ts: t, dana_introduced: 1 });
+          // The client was answered: the Hermes `bona-unanswered-leads` watchdog reads this
+          // column (same rule as a staff reply, lib/wa-send.mjs). Never the hand-over line.
+          const firstReply = answer && fresh.first_reply_ts == null ? { first_reply_ts: t } : {};
+          db.updateLead(lead.lead_id, { dana_chat_ts: t, dana_introduced: 1, ...firstReply });
         });
       } catch (err) {
         say({ level: 'error', evt: 'dana.record_failed', leadId: lead.lead_id, name: typeof err?.name === 'string' && /^[A-Za-z]{1,40}$/.test(err.name) ? err.name : 'Error' });
@@ -382,7 +415,7 @@ export function createDana({
       if (CAPS.has(pre.reason)) return handover(leadId, language, pre.reason, coversTs, { checked: true });
       return skip(leadId, pre.reason);
     }
-    const r = await send(pre.lead, text, language, coversTs);
+    const r = await send(pre.lead, text, language, coversTs, { answer: true });
     if (!r.sent) {
       inbox.setNeedsHuman(leadId, 1);
       if (alerts) alerts.notify(leadId, { reason: 'needs_human' });
