@@ -295,6 +295,65 @@ test('a tap on an alert opens the newest unread chat, else the newest chat, else
   });
 });
 
+const JSON_CSP = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
+/** An owner's device: subscribed under the login it posted from, so a check alert finds it. */
+async function subscribedBoss(h) {
+  const cookie = await h.boss();
+  assert.equal((await h.postJson('/v1/admin/push/subscribe', { endpoint: EP, keys: KEYS }, { cookie })).status, 200);
+  return cookie;
+}
+const latest = async (h, cookie) => (await (await h.get('/dashboard/push/latest', { cookie })).json()).kind;
+const openTo = async (h, cookie) => (await h.get('/dashboard/push/open', { cookie })).headers.get('location');
+
+test('push/latest: signed out 401 JSON (the worker asks, not a browser); a member with no check gets inbound, locked and no-store (U3)', async () => {
+  await withPush(async (h) => {
+    const out = await h.get('/dashboard/push/latest');
+    assert.equal(out.status, 401, 'not the login redirect');
+    assert.deepEqual(await out.json(), { error: 'unauthorised' });
+    const cookie = await h.staff();
+    const res = await h.get('/dashboard/push/latest', { cookie });
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type'), /^application\/json/);
+    assert.equal(res.headers.get('content-security-policy'), JSON_CSP);
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+    assert.match(res.headers.get('cache-control'), /no-store/);
+    assert.deepEqual(await res.json(), { kind: 'inbound' });
+  });
+});
+
+test('a check newer than the owner\'s unread messages: push/latest says check and the tap opens it first on the Unsure page; staff land as before (U3, U4)', async () => {
+  await withPush(async (h) => {
+    const boss = await subscribedBoss(h);
+    const staff = await h.staff();
+    seedChat(h, { id: 'LEAD-U', name: 'Umar Unsure', phone: '966500000078', state: 'unsure' });
+    // The check comes after Alya's unread message (NOW + 60 s).
+    h.tick(120_000);
+    const sent = await h.alerts.notify('LEAD-U', { reason: 'check', ts: NOW + 120_000 });
+    assert.equal(sent.ok, 1, 'the owner\'s device was pushed');
+    assert.equal(await latest(h, boss), 'check');
+    const open = await h.get('/dashboard/push/open', { cookie: boss });
+    assert.equal(open.status, 302);
+    assert.equal(open.headers.get('location'), '/dashboard/inbox?tab=unsure&focus=LEAD-U');
+    assert.equal(await latest(h, staff), 'inbound', 'a check is the owners\' only');
+    assert.equal(await openTo(h, staff), '/dashboard/inbox/LEAD-A', 'staff land on the newest unread chat, as before');
+
+    // (c) A client message newer than the check, unread: the inbox wins again.
+    h.tick(60_000);
+    h.inboxStore.upsertMessage({ key_id: 'A-2', lead_id: 'LEAD-A', jid: `${CLIENT}@s.whatsapp.net`, direction: 'in', sender_kind: 'client', text: 'still there?', ts: NOW + 180_000 });
+    assert.equal(await latest(h, boss), 'inbound');
+    assert.equal(await openTo(h, boss), '/dashboard/inbox/LEAD-A');
+    // Read it: the check is the newest thing again.
+    await h.get('/dashboard/inbox/LEAD-A', { cookie: boss });
+    assert.equal(await latest(h, boss), 'check');
+
+    // (d) The chat leaves the Unsure list: the check is forgotten.
+    h.db.updateLead('LEAD-U', { inbox_state: 'in', inbox_since: NOW + 180_000 });
+    assert.equal(await latest(h, boss), 'inbound');
+    assert.equal(h.alerts.pendingCheck(h.owner.user_id), null);
+    assert.notEqual(await openTo(h, boss), '/dashboard/inbox?tab=unsure&focus=LEAD-U');
+  });
+});
+
 test('/health says whether alerts are configured, and nothing more about them', async () => {
   await withPush(async (h) => {
     const health = await (await fetch(h.base + '/health')).json();

@@ -278,6 +278,32 @@ test('the inbox lists only chats that are in, to everyone; the Unsure list is th
   });
 });
 
+test('the Unsure tab with focus: the tapped chat first and marked; a bad focus is ignored; staff still 403 (U4)', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    seedChat(h, { id: 'LEAD-U2', name: 'Usama Second', phone: '966500000084', state: 'unsure' });
+    const staff = await h.staff();
+    const boss = await h.boss();
+    const PILL = '<span class="pl hot">new chat to check</span>';
+    const focused = await h.get('/dashboard/inbox?tab=unsure&focus=LEAD-U', { cookie: boss });
+    assert.equal(focused.status, 200);
+    assertLocked(focused);
+    const html = await focused.text();
+    const first = html.indexOf('<div class="lr ix');
+    assert.equal(html.indexOf('<div class="lr ix focus">'), first, 'the focused row is the first row');
+    assert.ok(html.indexOf('Umar Unsure') < html.indexOf('Usama Second'));
+    assert.equal(html.split(PILL).length, 2);
+    for (const bad of ['../x', '..%2Fx', 'a'.repeat(65), '<b>']) {
+      const res = await h.get(`/dashboard/inbox?tab=unsure&focus=${encodeURIComponent(bad)}`, { cookie: boss });
+      assert.equal(res.status, 200, bad);
+      const page = await res.text();
+      assert.ok(!page.includes(PILL), bad);
+      assert.ok(!page.includes('lr ix focus'), bad);
+    }
+    assert.equal((await h.get('/dashboard/inbox?tab=unsure&focus=LEAD-U', { cookie: staff })).status, 403);
+  });
+});
+
 /**
  * seedScene plus an undecided lead (no inbox state yet), and the first-message snippets
  * the lead_created touchpoints keep: the one a staff member must never read, and one they may.

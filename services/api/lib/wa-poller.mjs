@@ -683,8 +683,11 @@ export function createPoller({
   /**
    * What an inbound message means for the inbox, once `handleInbound` has matched it. A
    * certain signal puts the chat `in`, a guess puts it on the Unsure list, and `in`/`out`
-   * never move from here (lib/inbox/eligibility.mjs `nextInboxState`). Unsure keeps
-   * nothing: a guessed chat is never stored or shown until the owner moves it in. A bare
+   * never move from here (lib/inbox/eligibility.mjs `nextInboxState`). A known lead with no
+   * inbox state (a form or web-chat enquiry) whose message carries no sure signal enters
+   * the Unsure list too (U1, amended), and either way the owners are told (`onUnsureLead`).
+   * Unsure keeps no transcript: the chat is drawn only on the owners' Unsure page, never in
+   * the team's inbox, until an owner moves it in. A bare
    * Ref-shaped code is certain only when a site session holds it (`refKnown`, A6), and ad
    * context only when it is real ad evidence (`hasAdEvidence`: a click id, a conversion
    * source, the ctwa_ad entry point, an ad source type). An organic entry point — a wa.me
