@@ -411,6 +411,8 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
   }
 
   const countUnsure = () => prep(`SELECT COUNT(*) AS n FROM leads l WHERE ${UNSURE_CHAT}`).get().n;
+  /** Whether this lead is a row of the Unsure list (the same rule as `listUnsure`). */
+  const isUnsureChat = (leadId) => typeof leadId === 'string' && Boolean(prep(`SELECT 1 FROM leads l WHERE l.lead_id = ? AND ${UNSURE_CHAT}`).get(leadId));
 
   /**
    * `in` chats with nothing stored yet (amendment A3): the chats migration v4 let in
@@ -810,7 +812,7 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
   return {
     upsertMessage, messagesFor, newestTs, revision, hasMessages, countMessages, unreadSpan, messageByKey,
     insertOutbox, getOutbox, outboxByKey, updateOutbox, resolveUncertain, openOutboxFor, countSentSince, markStalePending, pruneCodeRows,
-    markRead, listInbox, unreadTotal, listUnsure, countUnsure, inChatsWithoutMessages, listedLeads,
+    markRead, listInbox, unreadTotal, listUnsure, countUnsure, isUnsureChat, inChatsWithoutMessages, listedLeads,
     addGap, gapsFor, clearGap, clearJoinGaps,
     setInboxState, setHandler, setNeedsHuman, noteHumanOutbound, countDanaSends, countDanaTests, humanOutboundAfter, unansweredClientMessages,
     purgeLead, leaveInbox, retentionPurge,

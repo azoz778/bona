@@ -295,7 +295,7 @@ test("reason 'check': an Unsure chat alerts active owners only, once per 2 min, 
   const out = await s.alerts.notify('LEAD-U', { reason: 'check', ts: NOW - 1000 });
   assert.deepEqual(out, { users: 1, devices: 1, ok: 1, gone: 0, failed: 0 });
   assert.deepEqual(s.sent, [ep(1)], 'the owner only, never staff');
-  assert.deepEqual(s.alerts.pendingCheck(s.owner.user_id), { leadId: 'LEAD-U', ts: NOW });
+  assert.deepEqual(s.alerts.pendingCheck(s.owner.user_id), { leadId: 'LEAD-U', ts: NOW, msgTs: NOW - 1000 });
   assert.equal(s.alerts.pendingCheck(s.sara.user_id), null);
   assert.deepEqual(await s.alerts.notify('LEAD-U', { reason: 'check', ts: NOW }), { skipped: 'quiet' }, 'one per chat per owner per 2 min');
   setLead(s, "inbox_state = 'in'");
@@ -314,7 +314,7 @@ test('a pending check ages out after CHECK_PENDING_MS (longer than the push TTL:
   const s = checkScene();
   await s.alerts.notify('LEAD-U', { reason: 'check', ts: NOW });
   s.tick(CHECK_PENDING_MS);
-  assert.deepEqual(s.alerts.pendingCheck(s.owner.user_id), { leadId: 'LEAD-U', ts: NOW }, 'at exactly 2 h, still pending');
+  assert.deepEqual(s.alerts.pendingCheck(s.owner.user_id), { leadId: 'LEAD-U', ts: NOW, msgTs: NOW }, 'at exactly 2 h, still pending');
   s.tick(1);
   assert.equal(s.alerts.pendingCheck(s.owner.user_id), null, 'a millisecond past: gone');
   s.tick(-1);
@@ -348,7 +348,7 @@ test('a newer check replaces the older one; pendingCheck answers only an active 
   await s.alerts.notify('LEAD-U', { reason: 'check', ts: NOW });
   s.tick(5000);
   await s.alerts.notify('LEAD-V', { reason: 'check', ts: s.now() });
-  assert.deepEqual(s.alerts.pendingCheck(s.owner.user_id), { leadId: 'LEAD-V', ts: NOW + 5000 }, 'A → B: the newest check');
+  assert.deepEqual(s.alerts.pendingCheck(s.owner.user_id), { leadId: 'LEAD-V', ts: NOW + 5000, msgTs: NOW + 5000 }, 'A → B: the newest check');
   s.team.setRole(s.omar.user_id, 'owner');
   s.team.setRole(s.owner.user_id, 'staff');
   assert.equal(s.alerts.pendingCheck(s.owner.user_id), null, 'no longer an owner');
@@ -370,4 +370,28 @@ test("a check's mark never quiets the inbound alert of the same chat once it is 
   assert.notDeepEqual(out, { skipped: 'quiet' });
   assert.equal(out.ok, 2, 'the owner and Sara (nobody handles it yet)');
   assert.deepEqual(s.sent, [ep(1), ep(1), ep(2)]);
+});
+
+test('pendingCheck forgets a check whose chat became excluded (never list, or a team number) and it stays forgotten', async () => {
+  const s = checkScene();
+  await s.alerts.notify('LEAD-U', { reason: 'check', ts: NOW });
+  assert.equal(s.alerts.pendingCheck(s.owner.user_id)?.leadId, 'LEAD-U');
+  s.team.addNever({ phone: '966500000088' });
+  assert.equal(s.alerts.pendingCheck(s.owner.user_id), null, 'a never-list number is no check');
+  s.team.removeNever('966500000088');
+  assert.equal(s.alerts.pendingCheck(s.owner.user_id), null, 'and stays forgotten');
+
+  const t = checkScene();
+  await t.alerts.notify('LEAD-U', { reason: 'check', ts: NOW });
+  t.db.db.prepare("UPDATE leads SET phone_e164 = ?, wa_jid = ? WHERE lead_id = 'LEAD-U'").run(t.sara.phone_e164, t.sara.wa_jid);
+  assert.equal(t.alerts.pendingCheck(t.owner.user_id), null, "a colleague's number is no check");
+});
+
+test('a pending check carries the triggering message time (msgTs) apart from when it was sent (ts)', async () => {
+  const s = checkScene();
+  await s.alerts.notify('LEAD-U', { reason: 'check', ts: NOW - 60_000 });
+  assert.deepEqual(s.alerts.pendingCheck(s.owner.user_id), { leadId: 'LEAD-U', ts: NOW, msgTs: NOW - 60_000 });
+  s.tick(ALERT_EVERY_MS);
+  await s.alerts.notify('LEAD-U', { reason: 'check' });
+  assert.deepEqual(s.alerts.pendingCheck(s.owner.user_id), { leadId: 'LEAD-U', ts: NOW + ALERT_EVERY_MS, msgTs: NOW + ALERT_EVERY_MS }, 'no ts given: the clock');
 });

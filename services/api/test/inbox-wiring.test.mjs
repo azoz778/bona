@@ -817,7 +817,7 @@ test('a stranger the poller puts in the Unsure list sends one "chat to check" pu
     await app.alerts.flush();
     assert.deepEqual(pushes.map((p) => p.url), ['https://fcm.googleapis.com/fcm/send/own1'], 'one push, to the owner; staff never hear of a chat to check');
     assert.ok(h.logs.some((l) => l.evt === 'push.sent' && l.reason === 'check' && l.leadId === lead.lead_id && l.ok === 1));
-    assert.deepEqual(app.alerts.pendingCheck(owner.user_id), { leadId: lead.lead_id, ts: NOW });
+    assert.deepEqual(app.alerts.pendingCheck(owner.user_id), { leadId: lead.lead_id, ts: NOW, msgTs: NOW - 5_000 });
     assert.doesNotMatch(JSON.stringify(h.logs), /fcm\.googleapis|own1|staff1|966500000099|مرحبا|Stranger/);
   } finally {
     await h.close();

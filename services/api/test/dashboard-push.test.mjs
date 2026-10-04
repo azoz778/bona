@@ -354,6 +354,22 @@ test('a check newer than the owner\'s unread messages: push/latest says check an
   });
 });
 
+test('a check is ranked by its message, not by when it was sent: an older message than an unread inbox one is inbound (U3, U4)', async () => {
+  await withPush(async (h) => {
+    const boss = await subscribedBoss(h);
+    seedChat(h, { id: 'LEAD-U', name: 'Umar Unsure', phone: '966500000078', state: 'unsure' });
+    // The check is SENT after Alya's unread message (NOW + 60 s), but its message came before it.
+    h.tick(120_000);
+    assert.equal((await h.alerts.notify('LEAD-U', { reason: 'check', ts: NOW + 30_000 })).ok, 1);
+    assert.deepEqual(h.alerts.pendingCheck(h.owner.user_id), { leadId: 'LEAD-U', ts: NOW + 120_000, msgTs: NOW + 30_000 });
+    assert.equal(await latest(h, boss), 'inbound');
+    assert.equal(await openTo(h, boss), '/dashboard/inbox/LEAD-A');
+    // Read Alya: nothing unread is newer, so the check leads again.
+    await h.get('/dashboard/inbox/LEAD-A', { cookie: boss });
+    assert.equal(await latest(h, boss), 'check');
+  });
+});
+
 test('/health says whether alerts are configured, and nothing more about them', async () => {
   await withPush(async (h) => {
     const health = await (await fetch(h.base + '/health')).json();
