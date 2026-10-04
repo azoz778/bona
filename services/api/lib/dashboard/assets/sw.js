@@ -9,7 +9,7 @@
  * "Bona: new chat to check" for an owner's new Unsure chat, else "New Bona message". The
  * answer is a kind, never a name or a text. Any failure — signed out, a non-2xx answer, no
  * answer within 2 s, a throw — shows the generic one, so every push always shows exactly
- * one notification (iOS withdraws the subscription of a worker that receives a push
+ * one notification whenever `showNotification` itself succeeds (iOS withdraws the subscription of a worker that receives a push
  * without showing one). A tap opens /dashboard/push/open, which sends the signed-in member
  * to the chat to check or to their newest unread chat.
  *

@@ -175,6 +175,7 @@ test('the Unsure list: the focused chat (a tapped "chat to check") is drawn firs
   assert.ok(row.includes('Basma Second') && row.includes(PILL), 'the pill is on the focused row');
   assert.ok(row.indexOf('Basma Second') < row.indexOf(PILL), 'after its name');
   assert.match(row, /action="\/v1\/admin\/inbox\/LEAD-B2\/move"/, 'its Move button right there');
+  assert.match(focused, /\.lr\.ix\.focus\{border-inline-start:3px solid var\(--red\)\}/, 'the stylesheet marks it as the hot lead card does');
 
   const plain = unsurePage({ me: OWNER, now: NOW, rows: [A, B] });
   assert.ok(plain.indexOf('Ali First') < plain.indexOf('Basma Second'), 'no focus: the order as given');

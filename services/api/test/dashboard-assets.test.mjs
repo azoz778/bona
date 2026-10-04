@@ -55,7 +55,7 @@ test('the service worker shows one of two fixed notifications and caches nothing
  * `late`, the window answers only after the worker's wait has run out. With
  * `immediateTimeout`, that half-second wait fires at once.
  */
-function runWorker({ windows = [], immediateTimeout = false, fetch: fetchStub = undefined } = {}) {
+function runWorker({ windows = [], immediateTimeout = false, fetch: fetchStub = undefined, AbortSignal: abortSignal = AbortSignal } = {}) {
   const calls = { showNotification: [], openWindow: [], focus: [], asked: [], go: [], skipWaiting: 0, claim: 0, fetched: [] };
   const handlers = {};
   const windowClients = windows.map((w) => ({
@@ -87,7 +87,7 @@ function runWorker({ windows = [], immediateTimeout = false, fetch: fetchStub = 
   // With `fetch`, the worker's one request is answered by the stub (and recorded); without it
   // the context has no fetch at all, so the request throws and the worker falls back.
   const net = fetchStub === undefined ? {} : {
-    AbortSignal,
+    AbortSignal: abortSignal,
     fetch: async (url, init) => { calls.fetched.push({ url, credentials: init?.credentials, cache: init?.cache, signal: Boolean(init?.signal) }); return fetchStub(url, init); },
   };
   vm.runInNewContext(ASSETS.get('/dashboard/sw.js').body.toString('utf8'), { self, URL, MessageChannel, ...timers, ...net }, { filename: 'sw.js' });
@@ -195,6 +195,11 @@ test('the worker asks once which notification a push is: a check only for { kind
   assert.deepEqual(await shown(json(401, { kind: 'check' })), INBOUND, 'a non-2xx answer is never trusted');
   assert.deepEqual(await shown(async () => { throw new Error('timeout'); }), INBOUND, 'a timeout or a network error');
   assert.deepEqual(await shown(async () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('bad'); } })), INBOUND, 'a body that is not JSON');
+  // fetch is there but AbortSignal has no timeout(): the throw inside the try still shows the inbox one.
+  const noTimeout = runWorker({ fetch: json(200, { kind: 'check' }), AbortSignal: {} });
+  await noTimeout.fire('push');
+  assert.deepEqual(noTimeout.calls.fetched, [], 'it threw before the request');
+  assert.deepEqual(JSON.parse(JSON.stringify(noTimeout.calls.showNotification)), [INBOUND]);
   // No fetch in the context at all: the inbox notification still shows.
   const bare = runWorker();
   await bare.fire('push');

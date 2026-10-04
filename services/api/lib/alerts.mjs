@@ -20,8 +20,9 @@
  * The reason `check` (2026-10-04 design, U1–U4) is a chat that has just entered the Unsure
  * list: it must be `unsure` and not excluded, it goes to the active owners only (the Unsure
  * list is theirs), under the same two-minute and 30-minute rules, and each owner it is due
- * for is remembered in memory (`pendingCheck`) until a newer check replaces it or the chat
- * leaves the Unsure list. A check's two-minute mark is its own: it never quiets the
+ * for is remembered in memory (`pendingCheck`) until a newer check replaces it, the chat
+ * leaves the Unsure list, or CHECK_PENDING_MS (2 h) passes — longer than the push's 1 h TTL,
+ * so a push delivered late to a phone that was offline still reads as a check. A check's two-minute mark is its own: it never quiets the
  * `inbound` alert of the same chat once the owner has moved it in.
  *
  * Each of the recipients' live devices gets one empty push (lib/push.mjs). 404/410 means the
@@ -33,6 +34,8 @@ import { newId } from './db.mjs';
 import { pushEndpoint, subscriptionKeys } from './push.mjs';
 
 export const ALERT_EVERY_MS = 120_000;
+/** How long an owner's newest check stays pending (U4): longer than the push TTL of 1 h. */
+export const CHECK_PENDING_MS = 2 * 3_600_000;
 export const ALERT_FRESH_MS = 30 * 60_000;
 export const MAX_DEVICES_PER_USER = 10;
 /**
@@ -186,6 +189,7 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     const id = String(userId ?? '');
     const c = checks.get(id);
     if (!c) return null;
+    if (now() - c.ts > CHECK_PENDING_MS) { checks.delete(id); return null; }
     const lead = db.getLead(c.leadId);
     const owner = prep("SELECT 1 FROM users WHERE user_id = ? AND active = 1 AND role = 'owner'").get(id);
     if (!owner || !lead || lead.inbox_state !== 'unsure') { checks.delete(id); return null; }

@@ -1166,7 +1166,7 @@ export function createDashboardRoutes({
       const focusRaw = url.searchParams.get('focus');
       const focus = /^[A-Za-z0-9_-]{1,64}$/.test(focusRaw ?? '') ? focusRaw : null;
       return sendHtml(res, 200, unsurePage({
-        me, rows: inbox.listUnsure().filter((l) => !excludedLead(l)), candidates: candidatesShown(), ok, error, now: now(), focus,
+        me, rows: inbox.listUnsure({ first: focus }).filter((l) => !excludedLead(l)), candidates: candidatesShown(), ok, error, now: now(), focus,
       }));
     }
     const rows = inboxRowsFor(me);
