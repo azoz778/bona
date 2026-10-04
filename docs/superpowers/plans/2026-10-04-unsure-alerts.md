@@ -39,9 +39,9 @@
 
 **Files:** modify `services/api/lib/alerts.mjs`, `services/api/lib/wa-poller.mjs`, `services/api/index.mjs`; tests `services/api/test/alerts.test.mjs`, `services/api/test/wa-poller.test.mjs`, `services/api/test/inbox-wiring.test.mjs`.
 
-- [ ] **Step 0: Baseline** — `cd ~/bona-wt/team-inbox/services && node --test api/test/*.test.mjs 2>&1 | tail -4`; write the pass count here: 1196 (2026-10-04, fail 0). (main moved since Phase 4; the count may differ from 1196.)
+- [x] **Step 0: Baseline** — `cd ~/bona-wt/team-inbox/services && node --test api/test/*.test.mjs 2>&1 | tail -4`; write the pass count here: 1196 (2026-10-04, fail 0). (main moved since Phase 4; the count may differ from 1196.)
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 `test/alerts.test.mjs` (read its harness first — it builds `createAlerts` over an in-memory store with a fake pusher, seeds users/sessions/subscriptions; use its helpers):
 ```js
@@ -107,9 +107,9 @@ test('(u) a check hook that throws is a warn line and changes nothing', async ()
 ```
 `test/inbox-wiring.test.mjs` (its `build()`; copy the shape of the Phase 3 push wiring test): the poller stores a `مرحبا بونا` record from an unknown number → the lead is `unsure` → exactly one push, to the OWNER's device (subscribe the owner; also subscribe a staff member and assert that device got nothing); log `push.sent` has `reason: 'check'`; no number/text in logs.
 
-- [ ] **Step 2: Run to see them fail** — `node --test api/test/alerts.test.mjs api/test/wa-poller.test.mjs api/test/inbox-wiring.test.mjs 2>&1 | grep -E "^not ok" | head`.
+- [x] **Step 2: Run to see them fail** — `node --test api/test/alerts.test.mjs api/test/wa-poller.test.mjs api/test/inbox-wiring.test.mjs 2>&1 | grep -E "^not ok" | head`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `lib/alerts.mjs`: `REASONS` gains `'check'`; a `checks = new Map()`; `recipients`: `if (reason === 'check') users = owners();` where `owners = () => prep("SELECT user_id FROM users WHERE active = 1 AND role = 'owner' ORDER BY user_id").all().map((r) => r.user_id)` (before the `needs_human` branch); in `run`, replace the one state check with:
 ```js
@@ -146,8 +146,8 @@ exported; header comment: the `check` reason in one sentence. `notify`'s JSDoc r
 ```
 `index.mjs`: the poller gets `onUnsureLead: (leadId, ts) => { alerts.notify(leadId, { reason: 'check', ts }); },` next to `onClientMessage` (comment: U1/U2).
 
-- [ ] **Step 4: Run the three files, then the whole suite** → `fail 0`.
-- [ ] **Step 5: Commit** — `git add` the six files by name; message `alerts: "new chat to check" — the poller tells the owners when a chat enters the Unsure list`.
+- [x] **Step 4: Run the three files, then the whole suite** → `fail 0`.
+- [x] **Step 5: Commit** — `git add` the six files by name; message `alerts: "new chat to check" — the poller tells the owners when a chat enters the Unsure list`.
 
 ---
 
