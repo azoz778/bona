@@ -341,7 +341,8 @@ const NO_EXCLUSIONS = () => false;
  * @param {(leadId: string, ts: number) => void} [o.onUnsureLead]
  *        "New chat to check" alerts (2026-10-04 design, U1): called, never awaited, when an
  *        inbound record moves a lead INTO the Unsure list — a new lead, or one that had no
- *        inbox state yet — with the record's time. Never for a chat already Unsure writing
+ *        inbox state yet (a form or web-chat lead's first WhatsApp message with no sure signal
+ *        included) — with the record's time. Never for a chat already Unsure writing
  *        again, a join, or the owner's side; one that throws is a `poll.alert_failed` warn line.
  */
 export function createPoller({
@@ -701,11 +702,18 @@ export function createPoller({
     const signal = inboundSignal({ text, hasAdMeta: hasAdEvidence(adMetaOf(rec.contextInfo)), refKnown });
     const next = nextInboxState(lead.inbox_state, { signal, method });
     if (next === 'in' && lead.inbox_state !== 'in') await join(lead.lead_id, ts, 'inbound', tally);
-    else if (next && next !== lead.inbox_state) {
-      inboxStore.setInboxState(lead.lead_id, next, { since: ts });
-      // The chat has just entered the Unsure list from the client's side: the owners are told (U1).
-      if (next === 'unsure' && onUnsureLead) {
-        try { onUnsureLead(lead.lead_id, ts); } catch { log({ level: 'warn', evt: 'poll.alert_failed', leadId: lead.lead_id }); }
+    else {
+      // A known lead with no inbox state yet (a website-form or web-chat lead) whose WhatsApp
+      // message carries no sure signal is already drawn on the Unsure list (it has a jid now,
+      // lib/inbox/store.mjs UNSURE_CHAT): it enters `unsure` explicitly, once (U1, amended).
+      // Strictly NULL: `in` and `out` never move from here.
+      const target = next ?? (lead.inbox_state == null ? 'unsure' : null);
+      if (target && target !== lead.inbox_state) {
+        inboxStore.setInboxState(lead.lead_id, target, { since: ts });
+        // The chat has just entered the Unsure list from the client's side: the owners are told (U1).
+        if (target === 'unsure' && onUnsureLead) {
+          try { onUnsureLead(lead.lead_id, ts); } catch { log({ level: 'warn', evt: 'poll.alert_failed', leadId: lead.lead_id }); }
+        }
       }
     }
     if (next === 'in') await storeRecord(lead.lead_id, rec, ts, tally);

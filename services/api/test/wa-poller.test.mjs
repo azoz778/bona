@@ -2612,6 +2612,7 @@ test('(u) a chat entering the Unsure list from the client\'s side raises one che
   assert.equal(checks.length, 1, 'an Unsure chat that joins the inbox is not a check');
   h.push([msg({ id: 'REF', ts: NOW - 30_000, text: 'Ref BONA-W003 · K7Q2XR' })]);
   await h.poller.tick();
+  assert.equal(h.leads().find((l) => l.wa_jid === SENDER)?.inbox_state, 'in', 'that chat joined');
   assert.equal(checks.length, 1, 'a new chat that joins the inbox is not a check');
   h.push([msg({ id: 'OWN', fromMe: true, pushName: null, jid: '966500000011@s.whatsapp.net', ts: NOW - 20_000, text: 'bona?' })]);
   await h.poller.tick();
@@ -2650,5 +2651,63 @@ test('(u) a check hook that throws is a warn line and changes nothing', async ()
   const line = h.logs.find((l) => l.evt === 'poll.alert_failed');
   assert.equal(line.level, 'warn');
   assert.doesNotMatch(JSON.stringify(line), /966|boom/);
+  h.cleanup();
+});
+
+test('(u) a form lead (NULL state, a phone, no jid) whose plain WhatsApp "hi" lands it on the Unsure list enters unsure and raises one check', async () => {
+  const checks = [];
+  const JID = '966500000009@s.whatsapp.net';
+  const h = harness({ inbox: true, history: [], onUnsureLead: (leadId, ts) => checks.push([leadId, ts]) });
+  h.db.insertLead({ lead_id: 'LEAD-form', created: NOW - 86_400_000, updated: NOW - 86_400_000, phone_e164: '966500000009', channel: 'web', stage: 'new', inbox_state: null });
+  h.push([msg({ id: 'HI', jid: JID, ts: NOW - 60_000, text: 'hi' })]);
+  await h.poller.tick();
+  const lead = h.db.getLead('LEAD-form');
+  assert.equal(lead.inbox_state, 'unsure');
+  assert.equal(lead.wa_jid, JID);
+  assert.deepEqual(checks, [['LEAD-form', NOW - 60_000]]);
+  h.push([msg({ id: 'HI2', jid: JID, ts: NOW - 30_000, text: 'are you there?' })]);
+  await h.poller.tick();
+  assert.equal(checks.length, 1, 'once');
+  assert.equal(h.db.getLead('LEAD-form').inbox_state, 'unsure');
+  h.cleanup();
+});
+
+test('(u) a NULL-state lead that already has a jid enters unsure on a plain message, once', async () => {
+  const checks = [];
+  const JID = '966500000009@s.whatsapp.net';
+  const h = harness({ inbox: true, history: [], onUnsureLead: (leadId, ts) => checks.push([leadId, ts]) });
+  h.db.insertLead({ lead_id: 'LEAD-jid', created: NOW - 86_400_000, updated: NOW - 86_400_000, phone_e164: '966500000009', wa_jid: JID, channel: 'whatsapp', stage: 'new', inbox_state: null });
+  h.push([msg({ id: 'HI', jid: JID, ts: NOW - 60_000, text: 'hello' })]);
+  await h.poller.tick();
+  h.push([msg({ id: 'HI2', jid: JID, ts: NOW - 30_000, text: 'hello?' })]);
+  await h.poller.tick();
+  assert.equal(h.db.getLead('LEAD-jid').inbox_state, 'unsure');
+  assert.deepEqual(checks, [['LEAD-jid', NOW - 60_000]]);
+  h.cleanup();
+});
+
+test('(u) an out chat writing again is untouched: no state change, no check', async () => {
+  const checks = [];
+  const JID = '966500000009@s.whatsapp.net';
+  const h = harness({ inbox: true, history: [], onUnsureLead: (leadId, ts) => checks.push([leadId, ts]) });
+  h.db.insertLead({ lead_id: 'LEAD-out', created: NOW - 86_400_000, updated: NOW - 86_400_000, phone_e164: '966500000009', wa_jid: JID, channel: 'whatsapp', stage: 'new', inbox_state: 'out', inbox_since: NOW - 86_400_000 });
+  h.push([msg({ id: 'HI', jid: JID, ts: NOW - 60_000, text: 'مرحبا بونا' })]);
+  await h.poller.tick();
+  const lead = h.db.getLead('LEAD-out');
+  assert.equal(lead.inbox_state, 'out');
+  assert.equal(lead.inbox_since, NOW - 86_400_000);
+  assert.deepEqual(checks, []);
+  h.cleanup();
+});
+
+test('(u) a NULL-state lead whose message names a listing joins the inbox, and is no check', async () => {
+  const checks = [];
+  const JID = '966500000009@s.whatsapp.net';
+  const h = harness({ inbox: true, history: [], onUnsureLead: (leadId, ts) => checks.push([leadId, ts]) });
+  h.db.insertLead({ lead_id: 'LEAD-lst', created: NOW - 86_400_000, updated: NOW - 86_400_000, phone_e164: '966500000009', channel: 'web', stage: 'new', inbox_state: null });
+  h.push([msg({ id: 'LST', jid: JID, ts: NOW - 60_000, text: 'Is BONA-W003 still available?' })]);
+  await h.poller.tick();
+  assert.equal(h.db.getLead('LEAD-lst').inbox_state, 'in');
+  assert.deepEqual(checks, []);
   h.cleanup();
 });
