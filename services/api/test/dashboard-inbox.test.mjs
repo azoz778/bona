@@ -304,6 +304,25 @@ test('the Unsure tab with focus: the tapped chat first and marked; a bad focus i
   });
 });
 
+test('the Unsure tab with focus keeps an old chat on the page and first past 200 newer ones (U4)', async () => {
+  await withInbox(async (h) => {
+    seedScene(h); // LEAD-U, created an hour before NOW
+    for (let i = 0; i < 205; i += 1) {
+      h.db.insertLead({ lead_id: `LEAD-N${i}`, created: NOW + i, updated: NOW + i, phone_e164: `9665100${String(i).padStart(5, '0')}`, wa_jid: `9665100${String(i).padStart(5, '0')}@s.whatsapp.net`, name: `Newer ${i}`, channel: 'whatsapp', stage: 'new', inbox_state: 'unsure' });
+    }
+    const boss = await h.boss();
+    const plain = await (await h.get('/dashboard/inbox?tab=unsure', { cookie: boss })).text();
+    assert.ok(!plain.includes('Umar Unsure'), 'without focus it has fallen off the page');
+    const res = await h.get('/dashboard/inbox?tab=unsure&focus=LEAD-U', { cookie: boss });
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    const first = html.indexOf('<div class="lr ix');
+    assert.equal(html.indexOf('<div class="lr ix focus">'), first, 'the focused row is the first row');
+    assert.ok(html.indexOf('Umar Unsure') > first && html.indexOf('Umar Unsure') < html.indexOf('Newer 204'), 'before the newest of the rest');
+    assert.match(html, /action="\/v1\/admin\/inbox\/LEAD-U\/move"/, 'its Move button is there');
+  });
+});
+
 /**
  * seedScene plus an undecided lead (no inbox state yet), and the first-message snippets
  * the lead_created touchpoints keep: the one a staff member must never read, and one they may.

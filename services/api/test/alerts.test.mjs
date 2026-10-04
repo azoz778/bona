@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { openDb, tokenHash } from '../lib/db.mjs';
 import { createTeam, isExcludedLead } from '../lib/team.mjs';
-import { createAlerts, ALERT_EVERY_MS, ALERT_FRESH_MS, MAX_DEVICES_PER_USER } from '../lib/alerts.mjs';
+import { createAlerts, ALERT_EVERY_MS, ALERT_FRESH_MS, MAX_DEVICES_PER_USER, CHECK_PENDING_MS } from '../lib/alerts.mjs';
 
 const NOW = 1_790_600_000_000;
 const b64u = (b) => Buffer.from(b).toString('base64url');
@@ -307,6 +307,18 @@ test("reason 'check': an Unsure chat alerts active owners only, once per 2 min, 
   assert.deepEqual(await s.alerts.notify('LEAD-U', { reason: 'check', ts: s.now() }), { skipped: 'not_unsure' }, 'an in chat is not a check');
   assert.ok(s.logs.some((l) => l.evt === 'push.sent' && l.reason === 'check' && l.users === 1));
   assert.doesNotMatch(JSON.stringify(s.logs), /fcm\.googleapis|device-|966/);
+});
+
+test('a pending check ages out after CHECK_PENDING_MS (longer than the push TTL: a late delivery still reads as a check)', async () => {
+  assert.equal(CHECK_PENDING_MS, 2 * 3_600_000);
+  const s = checkScene();
+  await s.alerts.notify('LEAD-U', { reason: 'check', ts: NOW });
+  s.tick(CHECK_PENDING_MS);
+  assert.deepEqual(s.alerts.pendingCheck(s.owner.user_id), { leadId: 'LEAD-U', ts: NOW }, 'at exactly 2 h, still pending');
+  s.tick(1);
+  assert.equal(s.alerts.pendingCheck(s.owner.user_id), null, 'a millisecond past: gone');
+  s.tick(-1);
+  assert.equal(s.alerts.pendingCheck(s.owner.user_id), null, 'and forgotten, not just hidden');
 });
 
 test("reason 'check' keeps the freshness rule and the excluded rule", async () => {
