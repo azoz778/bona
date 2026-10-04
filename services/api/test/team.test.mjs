@@ -451,3 +451,18 @@ test('dana_chat is an audit action', () => {
   assert.deepEqual(audit.recent(1).map((r) => [r.action, r.target, r.meta]), [['dana_chat', 'LEAD-1', { dana_off: 1 }]]);
   s.close();
 });
+
+test('retell_funds_out / retell_funds_alerted: absent is \'\', only \'\' or a ms timestamp is stored, and the Team page form cannot set them', () => {
+  const { s, team } = teamHarness();
+  for (const key of ['retell_funds_out', 'retell_funds_alerted']) {
+    assert.equal(SETTINGS_DEFAULTS[key], '', `${key} ships empty: fine`);
+    assert.equal(team.getSetting(key), '');
+    assert.equal(team.setSetting(key, String(NOW)), String(NOW));
+    assert.equal(team.setSetting(key, ''), '');
+    for (const bad of ['yes', '-1', '1.5', ' 1', '1e12', '12345678901234567', 'NaN']) {
+      assert.equal(codeOf(() => team.setSetting(key, bad)), 'bad_setting_value', `${key} = ${bad}`);
+    }
+  }
+  assert.deepEqual(SETTINGS_ALLOWED.dana_enabled, ['0', '1'], 'the switches keep their lists');
+  s.close();
+});

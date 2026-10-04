@@ -128,6 +128,7 @@ async function withPush(opts, fn) {
     staff: () => login('0500000001'),
     boss: () => login('0593296933'),
     tick: (ms) => { clock += ms; },
+    now,
   };
   // One `in` chat with one unread client message: what every alert and pulse test starts from.
   seedChat(h, { id: 'LEAD-A', name: 'Alya Client', messages: [{ key_id: 'A-1', text: 'Is BONA-012 still free?', ts: NOW + 60_000 }] });
@@ -374,12 +375,166 @@ test('/health says whether alerts are configured, and nothing more about them', 
   await withPush(async (h) => {
     const health = await (await fetch(h.base + '/health')).json();
     assert.deepEqual(health.push, { configured: true });
-    assert.deepEqual(health.dana, { configured: false, enabled: false }, 'no WhatsApp agent id here: Dana is not configured, and she ships off');
+    assert.deepEqual(health.dana, { configured: false, enabled: false, fundsOut: false }, 'no WhatsApp agent id here: Dana is not configured, and she ships off');
   });
   await withPush({ configured: false }, async (h) => {
     assert.deepEqual((await (await fetch(h.base + '/health')).json()).push, { configured: false });
   });
   await withPush({ config: { waChatAgentId: 'agent_wa' }, appOptions: { danaOnMock: true } }, async (h) => {
-    assert.deepEqual((await (await fetch(h.base + '/health')).json()).dana, { configured: true, enabled: false }, 'provisioned, still off');
+    assert.deepEqual((await (await fetch(h.base + '/health')).json()).dana, { configured: true, enabled: false, fundsOut: false }, 'provisioned, still off');
+  });
+});
+
+/* ---------------- Retell out of credit (2026-10-05 design R2) ---------------- */
+
+const outOfCredit = (h, at = NOW) => h.team.setSetting('retell_funds_out', String(at));
+/** What lib/dana-funds.mjs does on a 402: the flag, the alert time, the owners' push. */
+async function fundsAlert(h, at) {
+  outOfCredit(h, at);
+  h.team.setSetting('retell_funds_alerted', String(at));
+  return h.alerts.notifyOwners({ reason: 'funds' });
+}
+
+test('funds: push/latest says funds to an owner while the flag is set and the alert is under an hour old, above a check; the tap opens the Team page', async () => {
+  await withPush(async (h) => {
+    const boss = await subscribedBoss(h);
+    const staff = await h.staff();
+    assert.equal((await h.postJson('/v1/admin/push/subscribe', { endpoint: `${EP}-staff`, keys: KEYS }, { cookie: staff })).status, 200);
+    // A pending check newer than the unread inbox message: on its own, it would be a check.
+    seedChat(h, { id: 'LEAD-U', name: 'Umar Unsure', phone: '966500000078', state: 'unsure' });
+    h.tick(120_000);
+    assert.equal((await h.alerts.notify('LEAD-U', { reason: 'check', ts: NOW + 120_000 })).ok, 1);
+    assert.equal(await latest(h, boss), 'check');
+
+    outOfCredit(h, NOW + 120_000);
+    assert.equal(await latest(h, boss), 'check', 'flagged, but no funds alert went: not funds');
+    h.tick(1000);
+    const before = h.pushes.length;
+    const sent = await fundsAlert(h, NOW + 121_000);
+    assert.deepEqual(sent, { users: 1, devices: 1, ok: 1, gone: 0, failed: 0 });
+    assert.deepEqual(h.pushes.slice(before), [EP], "the owner's device only, never staff's");
+    assert.equal(await latest(h, boss), 'funds', 'funds > check');
+    assert.equal(await openTo(h, boss), '/dashboard/inbox/LEAD-A', 'a client may be waiting: the tap opens the unread chat');
+    assert.equal(await latest(h, staff), 'inbound', 'staff never get the funds kind');
+    assert.equal(await openTo(h, staff), '/dashboard/inbox/LEAD-A');
+
+    // The push's TTL is an hour: a push that old is no longer what the worker is showing.
+    h.tick(3_600_000 - 1);
+    assert.equal(await latest(h, boss), 'funds');
+    h.tick(1);
+    assert.notEqual(await latest(h, boss), 'funds');
+    assert.notEqual(await openTo(h, boss), '/dashboard/team');
+  });
+});
+
+test('funds: the 402\'s own hand-over push, ms to a second later, still reads as funds; a chat push 3 min later reads as its own kind', async () => {
+  await withPush(async (h) => {
+    const boss = await subscribedBoss(h);
+    await fundsAlert(h, NOW);
+    h.db.updateLead('LEAD-A', { needs_human: 1 });
+    h.tick(7);
+    assert.equal((await h.alerts.notify('LEAD-A', { reason: 'needs_human', ts: h.now() })).ok, 1);
+    assert.equal(await latest(h, boss), 'funds', 'a few ms later');
+    h.tick(1000);
+    seedChat(h, { id: 'LEAD-B', name: 'Badr', phone: '966500000079', messages: [{ key_id: 'B-1', text: 'hi', ts: NOW + 1007 }] });
+    h.db.updateLead('LEAD-B', { needs_human: 1 });
+    assert.equal((await h.alerts.notify('LEAD-B', { reason: 'needs_human', ts: h.now() })).ok, 1);
+    assert.equal(await latest(h, boss), 'funds', 'about a second later');
+    assert.equal(await openTo(h, boss), '/dashboard/inbox/LEAD-A', 'the tap still reaches a waiting client');
+    h.tick(180_000);
+    assert.equal((await h.alerts.notify('LEAD-A', { reason: 'needs_human', ts: h.now() })).ok, 1);
+    assert.equal(await latest(h, boss), 'inbound', '3 min later: its own kind');
+    assert.equal(await openTo(h, boss), '/dashboard/inbox/LEAD-A');
+  });
+});
+
+test('funds: with nothing unread the tap opens the Team page, where the banner says what to do', async () => {
+  await withPush(async (h) => {
+    const boss = await subscribedBoss(h);
+    await h.get('/dashboard/inbox/LEAD-A', { cookie: boss });
+    await fundsAlert(h, NOW);
+    assert.equal(await latest(h, boss), 'funds');
+    assert.equal(await openTo(h, boss), '/dashboard/team');
+  });
+});
+
+test('funds: the inbox list shows the same red banner, to owners only, while flagged', async () => {
+  await withPush(async (h) => {
+    const boss = await h.boss();
+    const staff = await h.staff();
+    const page = async (cookie) => (await h.get('/dashboard/inbox', { cookie })).text();
+    assert.doesNotMatch(await page(boss), /Retell credit ran out/);
+    outOfCredit(h, Date.UTC(2026, 9, 3, 9, 30));
+    assert.match(await page(boss), /<div class="err">Dana can’t answer: Retell credit ran out at 2026-10-03 12:30 Riyadh time\./);
+    assert.doesNotMatch(await page(staff), /Retell credit/);
+  });
+});
+
+test('funds: durable — with the flag and an alert under an hour old, a restarted process (nothing in memory) still says funds', async () => {
+  await withPush(async (h) => {
+    const boss = await h.boss();
+    // No push from this process at all: as after a restart, with the funds push still queued.
+    outOfCredit(h, NOW - 30 * 60_000);
+    h.team.setSetting('retell_funds_alerted', String(NOW - 30 * 60_000));
+    assert.equal(await latest(h, boss), 'funds');
+    h.team.setSetting('retell_funds_alerted', String(NOW - 3_600_000));
+    assert.equal(await latest(h, boss), 'inbound', 'an alert an hour old is not funds');
+    assert.equal(await latest(h, await h.staff()), 'inbound');
+  });
+});
+
+test('funds: a cleared flag is not funds, even right after the push', async () => {
+  await withPush(async (h) => {
+    const boss = await subscribedBoss(h);
+    await fundsAlert(h, NOW);
+    assert.equal(await latest(h, boss), 'funds');
+    h.team.setSetting('retell_funds_out', '');
+    assert.equal(await latest(h, boss), 'inbound');
+    assert.equal(await openTo(h, boss), '/dashboard/inbox/LEAD-A');
+  });
+});
+
+test('funds: the settings form cannot set the funds keys, even for an owner', async () => {
+  await withPush(async (h) => {
+    const boss = await h.boss();
+    for (const key of ['retell_funds_out', 'retell_funds_alerted']) {
+      const res = await h.postForm('/v1/admin/settings', { [key]: '1' }, { cookie: boss });
+      assert.equal(res.status, 303);
+      assert.match(res.headers.get('location'), /error=bad_setting(?:&|$)/);
+      assert.equal(h.team.getSetting(key), '', `${key} unchanged`);
+    }
+  });
+});
+
+test('funds: the Team page carries the red banner only while the flag is set; /health says fundsOut', async () => {
+  await withPush(async (h) => {
+    const boss = await h.boss();
+    const page = async () => (await h.get('/dashboard/team', { cookie: boss })).text();
+    assert.doesNotMatch(await page(), /Retell credit ran out/);
+    assert.equal((await (await fetch(h.base + '/health')).json()).dana.fundsOut, false);
+    outOfCredit(h, Date.UTC(2026, 9, 3, 9, 30));
+    assert.match(await page(), /<div class="err">Dana can’t answer: Retell credit ran out at 2026-10-03 12:30 Riyadh time\./);
+    assert.equal((await (await fetch(h.base + '/health')).json()).dana.fundsOut, true);
+    h.team.setSetting('retell_funds_out', '');
+    assert.doesNotMatch(await page(), /Retell credit ran out/);
+    assert.equal((await (await fetch(h.base + '/health')).json()).dana.fundsOut, false);
+  });
+});
+
+test('funds: the app wires the watch into Dana — a 402 from Retell flags the owners and pushes them once', async () => {
+  const refuse = { async createChat() { const e = new Error('Retell POST -> 402'); e.status = 402; throw e; }, async createChatCompletion() { throw new Error('unused'); } };
+  await withPush({ config: { waChatAgentId: 'agent_wa' }, appOptions: { danaOnMock: true, retell: refuse } }, async (h) => {
+    await subscribedBoss(h);
+    assert.ok(h.app.funds, 'the app exposes the watch');
+    h.team.setSetting('dana_enabled', '1');
+    assert.deepEqual(await h.app.dana.answer('LEAD-A', { ts: NOW + 60_000 }), { handover: 'retell_error', sent: true }, 'the client still gets the hand-over');
+    await h.alerts.flush();
+    assert.equal(h.team.getSetting('retell_funds_out'), String(NOW));
+    assert.equal(h.team.getSetting('retell_funds_alerted'), String(NOW));
+    const sent = (reason) => h.logs.filter((l) => l.evt === 'push.sent' && l.reason === reason);
+    assert.equal(sent('funds').length, 1, 'one owner alert about the credit');
+    assert.equal(sent('needs_human').length, 1, 'and the hand-over alert as before');
+    assert.equal((await (await fetch(h.base + '/health')).json()).dana.fundsOut, true);
+    assert.ok(h.logs.some((l) => l.evt === 'dana.funds_out'));
   });
 });

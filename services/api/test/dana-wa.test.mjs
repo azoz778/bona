@@ -35,7 +35,7 @@ function assertClean(logs) {
   for (const needle of PERSONAL) assert.equal(out.includes(needle), false, `a log line carries "${needle}"`);
 }
 
-function harness({ answer = defaultAnswer, agentId = 'agent_wa', enabled = true, lead = {}, alerts = true, budget = null, backfill = null, evo = null } = {}) {
+function harness({ answer = defaultAnswer, agentId = 'agent_wa', enabled = true, lead = {}, alerts = true, budget = null, backfill = null, evo = null, funds = null } = {}) {
   const s = openDb(':memory:');
   let clock = NOW;
   const team = createTeam(s, { now: () => clock });
@@ -62,7 +62,7 @@ function harness({ answer = defaultAnswer, agentId = 'agent_wa', enabled = true,
     match_method: 'ref', stage: 'new', stage_ts: NOW - DAY, inbox_state: 'in', inbox_since: NOW - DAY, interest: 'villa in Al Khalidiyah', ...lead,
   });
   const dana = createDana({
-    db: s, inbox, team, sender, retell, inventory, siteUrl: SITE, agentId, budget, backfill,
+    db: s, inbox, team, sender, retell, inventory, siteUrl: SITE, agentId, budget, backfill, ...(funds ? { funds: funds(team, () => clock) } : {}),
     alerts: alerts ? { notify: (id, o) => { notified.push([id, o]); return Promise.resolve({ users: 1 }); } } : null,
     isExcludedLead: (l) => isExcludedLead(team, s, l), now: () => clock, log: (o) => logs.push(o), batchMs: 0,
   });
@@ -264,7 +264,8 @@ test('one answer: a Retell chat with the facts and context, the batch as one mes
   assert.equal(stored[0].direction, 'out');
   assert.equal(stored[0].sender_user_id, null);
   const lead = h.lead();
-  assert.deepEqual([lead.dana_chat_id, lead.dana_chat_ts, lead.dana_introduced, lead.needs_human, lead.first_reply_ts, lead.last_human_out_ts], ['chat_1', NOW, 1, 0, null, NOW - 2 * DAY + 2000]);
+  // Her answer counts as the first reply (2026-10-05 design R1); the human clock is untouched.
+  assert.deepEqual([lead.dana_chat_id, lead.dana_chat_ts, lead.dana_introduced, lead.needs_human, lead.first_reply_ts, lead.last_human_out_ts], ['chat_1', NOW, 1, 0, NOW, NOW - 2 * DAY + 2000]);
   assert.deepEqual(h.inbox.unansweredClientMessages(LEAD), [], 'answered');
   const line = h.logs.find((l) => l.evt === 'dana.answered');
   assert.deepEqual(line, { evt: 'dana.answered', leadId: LEAD, batch: 2, chars: h.calls[0].body.text.length, links: 0, newChat: true });
@@ -669,4 +670,161 @@ test('the Sending switch off: Dana is not eligible, Retell is not asked, and a h
   g.client('C1', NOW - 5000, 'hello');
   assert.deepEqual(await g.dana.answer(LEAD, { ts: NOW - 5000 }), { skipped: 'sending_off' });
   assert.deepEqual([g.lead().needs_human, g.notified.length, g.calls.length], [0, 0, 0]);
+});
+
+/* ---------------- R1: Dana's answer counts as the first reply (2026-10-05 design) ---------------- */
+
+test('an answer stamps first_reply_ts only while it is NULL; a later answer, or one already answered, leaves it', async () => {
+  const h = harness();
+  h.client('C1', NOW - 5000, 'hello');
+  await h.dana.answer(LEAD, { ts: NOW - 5000 });
+  assert.equal(h.lead().first_reply_ts, NOW);
+  h.tick(HOUR);
+  h.client('C2', h.now() - 1000, 'and the price?');
+  assert.equal((await h.dana.answer(LEAD, { ts: h.now() - 1000 })).answered, true);
+  assert.equal(h.lead().first_reply_ts, NOW, 'the first reply is the first');
+
+  const earlier = harness({ lead: { first_reply_ts: NOW - DAY } });
+  earlier.client('C1', NOW - 5000, 'hello');
+  await earlier.dana.answer(LEAD, { ts: NOW - 5000 });
+  assert.equal(earlier.lead().first_reply_ts, NOW - DAY);
+});
+
+test('an answer to a chat that left the inbox while it was on its way stamps nothing', async () => {
+  let h = null;
+  h = harness({ evo: (n) => { h.s.updateLead(LEAD, { inbox_state: 'unsure' }); return { status: 201, body: { key: { id: `KEY-${n}` } } }; } });
+  h.client('C1', NOW - 5000, 'hello');
+  assert.equal((await h.dana.answer(LEAD, { ts: NOW - 5000 })).answered, true);
+  assert.equal(h.lead().first_reply_ts, null);
+});
+
+test('the hand-over line never stamps first_reply_ts: the client waits for a person, the watchdog keeps pinging', async () => {
+  const h = harness({ answer: () => ({ messages: [{ role: 'tool_call_invocation', tool_call_id: 't', name: 'request_human', arguments: '{}' }] }) });
+  h.client('C1', NOW - 5000, 'can I see it?');
+  assert.deepEqual(await h.dana.answer(LEAD, { ts: NOW - 5000 }), { handover: 'request_human', sent: true });
+  assert.equal(h.calls.length, 1, 'the line went');
+  assert.equal(h.lead().first_reply_ts, null);
+});
+
+test('an uncertain send does not stamp first_reply_ts (a missed ping is worse than an extra one)', async () => {
+  const h = harness({ evo: () => ({ status: 500, body: {} }) });
+  h.client('C1', NOW - 5000, 'hello');
+  assert.equal((await h.dana.answer(LEAD, { ts: NOW - 5000 })).answered, true);
+  assert.equal(h.lead().dana_introduced, 1);
+  assert.equal(h.lead().first_reply_ts, null);
+});
+
+/* ---------------- R2: Retell out of credit (2026-10-05 design) ---------------- */
+
+const paymentRequired = () => { const e = new Error('Retell POST -> 402'); e.name = 'RetellError'; e.status = 402; return e; };
+/** A funds watch double that counts what Dana told it. */
+const fundsSpy = () => {
+  const seen = { out: 0, ok: 0 };
+  return { seen, make: () => ({ out: () => { seen.out += 1; return Promise.resolve(null); }, ok: () => { seen.ok += 1; } }) };
+};
+
+test('a 402 on createChat is funds.out() and still a hand-over for the client', async () => {
+  const f = fundsSpy();
+  const h = harness({ funds: f.make });
+  h.retell.createChat = async () => { throw paymentRequired(); };
+  h.client('C1', NOW - 5000, 'hello');
+  assert.deepEqual(await h.dana.answer(LEAD, { ts: NOW - 5000 }), { handover: 'retell_error', sent: true });
+  assert.deepEqual(f.seen, { out: 1, ok: 0 });
+  assert.deepEqual(h.notified, [[LEAD, { reason: 'needs_human' }]], 'the team still hears of the client');
+  assert.equal(h.calls[0].body.text, `${DISCLOSURE.en}\n\n${HANDOVER.en}`);
+  assert.deepEqual(h.logs.find((l) => l.evt === 'dana.retell_failed'), { level: 'warn', evt: 'dana.retell_failed', leadId: LEAD, status: 402 });
+  assertClean(h.logs);
+});
+
+test('a 402 on createChatCompletion is funds.out(); a createChat that worked clears nothing', async () => {
+  const f = fundsSpy();
+  const h = harness({ funds: f.make, answer: () => { throw paymentRequired(); } });
+  h.client('C1', NOW - 5000, 'hello');
+  assert.deepEqual(await h.dana.answer(LEAD, { ts: NOW - 5000 }), { handover: 'retell_error', sent: true });
+  assert.deepEqual(f.seen, { out: 1, ok: 0 }, 'only a completion that works says the credit is back');
+
+  // A reused chat whose completion is refused: asked again on a new chat, refused again.
+  const g = fundsSpy();
+  const r = harness({ funds: g.make, lead: { dana_chat_id: 'chat_old', dana_chat_ts: NOW - 1000 }, answer: () => { throw paymentRequired(); } });
+  r.client('C1', NOW - 5000, 'hello');
+  assert.equal((await r.dana.answer(LEAD, { ts: NOW - 5000 })).handover, 'retell_error');
+  assert.deepEqual(g.seen, { out: 2, ok: 0 });
+});
+
+test('a completion that works is funds.ok(); other errors never touch the funds', async () => {
+  const f = fundsSpy();
+  const h = harness({ funds: f.make });
+  h.client('C1', NOW - 5000, 'hello');
+  assert.equal((await h.dana.answer(LEAD, { ts: NOW - 5000 })).answered, true);
+  assert.deepEqual(f.seen, { out: 0, ok: 1 }, 'the completion, not the createChat');
+
+  for (const status of [400, 401, 404, 429, 500, undefined]) {
+    const g = fundsSpy();
+    const bad = harness({ funds: g.make });
+    bad.retell.createChat = async () => { const e = new Error('nope'); e.status = status; throw e; };
+    bad.client('C1', NOW - 5000, 'hello');
+    assert.equal((await bad.dana.answer(LEAD, { ts: NOW - 5000 })).handover, 'retell_error');
+    assert.deepEqual(g.seen, { out: 0, ok: 0 }, `status ${status}`);
+  }
+});
+
+test('a funds watch that throws never costs the client the answer or the hand-over', async () => {
+  const boom = () => ({ out: () => { throw new Error('watch down'); }, ok: () => { throw new Error('watch down'); } });
+  const h = harness({ funds: boom });
+  h.client('C1', NOW - 5000, 'hello');
+  assert.equal((await h.dana.answer(LEAD, { ts: NOW - 5000 })).answered, true);
+  const r = harness({ funds: boom });
+  r.retell.createChat = async () => { throw paymentRequired(); };
+  r.client('C1', NOW - 5000, 'hello');
+  assert.deepEqual(await r.dana.answer(LEAD, { ts: NOW - 5000 }), { handover: 'retell_error', sent: true });
+});
+
+test('end to end with the real watch: two 402s push the owners once, a later success clears the flag', async () => {
+  const { createFundsWatch, fundsOutSince } = await import('../lib/dana-funds.mjs');
+  const pushed = [];
+  let fail = true;
+  const h = harness({
+    funds: (team, now) => createFundsWatch({ team, now, alerts: { notifyOwners: (o) => { pushed.push(o); return Promise.resolve({ users: 1, devices: 1, ok: 1, gone: 0, failed: 0 }); } } }),
+    answer: () => { if (fail) throw paymentRequired(); return defaultAnswer(); },
+  });
+  h.client('C1', NOW - 5000, 'hello');
+  await h.dana.answer(LEAD, { ts: NOW - 5000 });
+  assert.equal(fundsOutSince(h.team), NOW);
+  assert.deepEqual(pushed, [{ reason: 'funds' }]);
+  // The flag cleared by hand (no human message, so no 24 h quiet), an hour later: refused again.
+  h.inbox.setNeedsHuman(LEAD, 0);
+  h.tick(HOUR);
+  h.client('C2', h.now() - 1000, 'hello again');
+  assert.equal((await h.dana.answer(LEAD, { ts: h.now() - 1000 })).handover, 'retell_error');
+  assert.equal(pushed.length, 1, 'no second push within 6 h');
+  // The stored chat's completion is refused, the new chat made for the retry works (no ok:
+  // only a completion says the credit is back), its completion is refused — out since the first refusal.
+  assert.equal(fundsOutSince(h.team), NOW);
+  // Topped up: the next answer clears the flag.
+  fail = false;
+  h.inbox.setNeedsHuman(LEAD, 0);
+  h.tick(HOUR);
+  h.client('C3', h.now() - 1000, 'anyone?');
+  assert.equal((await h.dana.answer(LEAD, { ts: h.now() - 1000 })).answered, true);
+  assert.equal(fundsOutSince(h.team), null);
+  assert.equal(pushed.length, 1);
+});
+
+test('createChat working and the completion refused never clears the flag in between', async () => {
+  const { createFundsWatch, fundsOutSince } = await import('../lib/dana-funds.mjs');
+  const seen = [];
+  const h = harness({
+    funds: (team, now) => {
+      const real = createFundsWatch({ team, now, alerts: { notifyOwners: () => Promise.resolve({ ok: 1 }) } });
+      return { out: () => { seen.push(['out', fundsOutSince(team)]); return real.out(); }, ok: () => { seen.push(['ok', fundsOutSince(team)]); real.ok(); } };
+    },
+    lead: { dana_chat_id: 'chat_old', dana_chat_ts: NOW - 1000 },
+    answer: () => { throw paymentRequired(); },
+  });
+  h.team.setSetting('retell_funds_out', String(NOW - HOUR));
+  h.client('C1', NOW - 5000, 'hello');
+  assert.equal((await h.dana.answer(LEAD, { ts: NOW - 5000 })).handover, 'retell_error');
+  assert.equal(h.retell.chats.length, 1, 'a new chat was made for the retry, and it worked');
+  assert.deepEqual(seen, [['out', NOW - HOUR], ['out', NOW - HOUR]], 'no ok() at any point');
+  assert.equal(fundsOutSince(h.team), NOW - HOUR, 'out since the first refusal');
 });

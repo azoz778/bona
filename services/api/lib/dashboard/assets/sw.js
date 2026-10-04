@@ -5,13 +5,16 @@
  * a request: there is no fetch listener and no cache, so every page and every answer comes
  * from the server, `no-store`, as before. A push carries no data. On each push the worker
  * makes one same-origin request of its own, `GET /dashboard/push/latest` with the member's
- * cookie (2026-10-04 design, U3), to learn which of its two fixed notifications to show:
- * "Bona: new chat to check" for an owner's new Unsure chat, else "New Bona message". The
+ * cookie (2026-10-04 design, U3), to learn which of its three fixed notifications to show:
+ * "Bona: Dana is out of Retell credit" for an owner while Retell refuses Dana for lack of
+ * credit (2026-10-05 design, R2), "Bona: new chat to check" for an owner's new Unsure chat,
+ * else "New Bona message". The
  * answer is a kind, never a name or a text. Any failure — signed out, a non-2xx answer, no
  * answer within 2 s, a throw — shows the generic one, so every push always shows exactly
  * one notification whenever `showNotification` itself succeeds (iOS withdraws the subscription of a worker that receives a push
  * without showing one). A tap opens /dashboard/push/open, which sends the signed-in member
- * to the chat to check or to their newest unread chat.
+ * to the chat to check or their newest unread chat — or, for the funds alert with nothing
+ * unread, the Team page.
  *
  * A tap never moves a dashboard tab on its own: the tab may hold a half-typed reply. The
  * worker focuses it and asks, in two steps over one message channel: `bona:open` (may
@@ -28,31 +31,33 @@ self.addEventListener('install', () => { self.skipWaiting(); });
 self.addEventListener('activate', (event) => { event.waitUntil(self.clients.claim()); });
 
 /**
- * The worker's two fixed notifications (U3). No `badge`: Android draws it as a monochrome
- * blob and iOS ignores it. Each kind has its own tag, so a check never hides an inbox alert.
+ * The worker's three fixed notifications (U3, R2). No `badge`: Android draws it as a
+ * monochrome blob and iOS ignores it. Each kind has its own tag, so no kind hides another.
  */
 const NOTIFICATIONS = {
+  funds: ['Bona: Dana is out of Retell credit', { body: 'Dana can’t answer until Retell is topped up. A client may be waiting — tap to open.', icon: '/dashboard/icon-192.png', tag: 'bona-funds', renotify: true }],
   check: ['Bona: new chat to check', { body: 'Someone new wrote to you. Tap to decide.', icon: '/dashboard/icon-192.png', tag: 'bona-check', renotify: true }],
   inbound: ['New Bona message', { body: 'A client wrote in the Bona inbox.', icon: '/dashboard/icon-192.png', tag: 'bona-inbox', renotify: true }],
 };
 
 /**
- * Which notification this push is: `'check'` only when the server answers 2xx with
- * `{ kind: 'check' }`; anything else — a non-2xx answer, a timeout, a throw — `'inbound'`.
+ * Which notification this push is: `'funds'` or `'check'` only when the server answers 2xx
+ * with that kind; anything else — another kind, a non-2xx answer, a timeout, a throw —
+ * `'inbound'`.
  */
 const latestKind = async () => {
   try {
     const res = await fetch('/dashboard/push/latest', { credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout(2000) });
     if (!res.ok) return 'inbound';
     const body = await res.json();
-    return body && body.kind === 'check' ? 'check' : 'inbound';
+    return body && (body.kind === 'funds' || body.kind === 'check') ? body.kind : 'inbound';
   } catch {
     return 'inbound';
   }
 };
 
 const show = (kind) => {
-  const [title, options] = NOTIFICATIONS[kind === 'check' ? 'check' : 'inbound'];
+  const [title, options] = NOTIFICATIONS[kind === 'funds' || kind === 'check' ? kind : 'inbound'];
   return self.registration.showNotification(title, options);
 };
 

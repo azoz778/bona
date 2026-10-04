@@ -25,13 +25,22 @@
  * so a push delivered late to a phone that was offline still reads as a check. A check's two-minute mark is its own: it never quiets the
  * `inbound` alert of the same chat once the owner has moved it in.
  *
+ * The reason `funds` (2026-10-05 design R2) is about no chat at all: Retell refusing Dana for
+ * lack of credit. `notifyOwners` pushes it to the active owners' live devices, with no
+ * two-minute or freshness rule of its own (lib/dana-funds.mjs spaces it, six hours apart,
+ * from a flag that survives a restart). Which notification an owner's worker shows is decided
+ * from durable state (`fundsPending`): the funds alert under an hour old (the push TTL) and no
+ * chat push that reached that member more than two minutes after it. Those chat pushes are
+ * remembered in memory per member; after a restart there are none, so a funds push still
+ * queued reads as funds.
+ *
  * Each of the recipients' live devices gets one empty push (lib/push.mjs). 404/410 means the
  * browser dropped the subscription: the row goes. Anything else counts a failure and is
  * logged by its status only. Nothing is retried. `notify` never rejects. No endpoint, name,
  * number or message text is ever logged: counts and ids only.
  */
 import { newId } from './db.mjs';
-import { pushEndpoint, subscriptionKeys } from './push.mjs';
+import { pushEndpoint, subscriptionKeys, PUSH_TTL_S } from './push.mjs';
 
 export const ALERT_EVERY_MS = 120_000;
 /** How long an owner's newest check stays pending (U4): longer than the push TTL of 1 h. */
@@ -46,6 +55,8 @@ export const MAX_DEVICES_PER_USER = 10;
 const MARKS_MAX = 5000;
 /** The reasons a push can be sent for; anything else is logged as `other` and follows the `inbound` rules. */
 const REASONS = new Set(['inbound', 'needs_human', 'check']);
+/** The owner-wide reasons, about no chat (`notifyOwners`). */
+const OWNER_REASONS = new Set(['funds']);
 /** The failure kinds lib/push.mjs `send` answers, plus `threw` for a send that rejected after all. */
 const SEND_ERRORS = new Set(['timeout', 'network', 'bad_endpoint', 'threw']);
 
@@ -60,6 +71,7 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
   };
   const marks = new Map(); // `${userId}\n${leadId}` → when that member was last alerted about that chat
   const checks = new Map(); // owner's user_id → { leadId, ts, msgTs } of their newest "chat to check" alert (U4): ts = when it was sent, msgTs = the triggering message's time
+  const lastOther = new Map(); // user_id → when a push about a chat (any reason but `funds`) last reached one of that member's devices
   const inflight = new Set();
   const say = (entry) => { try { log(entry); } catch { /* a logger never stops an alert */ } };
 
@@ -139,11 +151,7 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
       return at === undefined || t - at >= ALERT_EVERY_MS;
     });
     if (!due.length) return { skipped: 'quiet' };
-    const devices = prep(`SELECT s.id, s.user_id, s.endpoint FROM push_subscriptions s
-        JOIN users u ON u.user_id = s.user_id AND u.active = 1
-        JOIN auth_sessions a ON a.token_hash = s.session_hash AND a.user_id = s.user_id AND a.expires >= ?
-        WHERE s.user_id IN (SELECT value FROM json_each(?))
-        ORDER BY s.rowid`).all(t, JSON.stringify(due));
+    const devices = liveDevices(due, t);
     if (!devices.length) return { skipped: 'no_devices' };
     // Every member due is marked, not only those a device was found for: the alert for this
     // burst is going out now, so a second message in the same two minutes is quiet for all of
@@ -154,10 +162,33 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
       for (const u of due) checks.set(u, { leadId, ts: t, msgTs });
     }
     prune(t);
+    // Only a member a device answered 2xx for has this push on a phone (`fundsPending`):
+    // recorded the moment that device answers, never lowering a newer batch's time.
+    const out = await deliver(devices, t, (u) => { if (!(lastOther.get(u) >= t)) lastOther.set(u, t); });
+    say({ evt: 'push.sent', leadId, reason: why, ...out });
+    return out;
+  }
+
+  /** The live devices of these members: an active member, a session still signed in. */
+  const liveDevices = (userIds, t) => prep(`SELECT s.id, s.user_id, s.endpoint FROM push_subscriptions s
+      JOIN users u ON u.user_id = s.user_id AND u.active = 1
+      JOIN auth_sessions a ON a.token_hash = s.session_hash AND a.user_id = s.user_id AND a.expires >= ?
+      WHERE s.user_id IN (SELECT value FROM json_each(?))
+      ORDER BY s.rowid`).all(t, JSON.stringify(userIds));
+
+  /**
+   * One empty push to each device, and what each answer means for its row — the one loop
+   * every reason shares. `t` is when the batch started. `onReached(userId)` is called as each
+   * device answers 2xx, without waiting for the others. Counts only: the caller logs them.
+   */
+  async function deliver(devices, t, onReached = null) {
     const users = new Set(devices.map((d) => d.user_id));
     // A send that rejects after all is that device's failure, never the batch's.
     const answers = await Promise.all(devices.map(async (d) => ({
-      d, a: await Promise.resolve().then(() => pusher.send(d.endpoint)).catch(() => ({ error: 'threw' })),
+      d, a: await Promise.resolve().then(() => pusher.send(d.endpoint)).catch(() => ({ error: 'threw' })).then((a) => {
+        if (onReached && a?.status >= 200 && a.status < 300) onReached(d.user_id);
+        return a;
+      }),
     })));
     // Each answer writes only to the row as it was when the push left (`updated <= t`): a device
     // re-posted during the send — by this member or, on a shared phone, by someone else — is a
@@ -182,8 +213,18 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
         });
       }
     }
-    const out = { users: users.size, devices: devices.length, ok, gone, failed };
-    say({ evt: 'push.sent', leadId, reason: why, ...out });
+    return { users: users.size, devices: devices.length, ok, gone, failed };
+  }
+
+  /** An owner-wide alert (`funds`): the active owners' live devices, each owner marked before the sends. */
+  async function runOwners(why) {
+    if (!pusher) return { skipped: 'off' };
+    const t = now();
+    const owners = prep("SELECT user_id FROM users WHERE active = 1 AND role = 'owner' ORDER BY user_id").all().map((r) => r.user_id);
+    const devices = liveDevices(owners, t);
+    if (!devices.length) return { skipped: 'no_devices' };
+    const out = await deliver(devices, t);
+    say({ evt: 'push.sent', reason: why, ...out });
     return out;
   }
 
@@ -210,8 +251,13 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
    *   | { error: 'failed' }>}
    */
   function notify(leadId, { reason = 'inbound', exceptUserId = null, ts = null } = {}) {
+    return guarded(() => run(String(leadId ?? ''), { reason, exceptUserId, ts }));
+  }
+
+  /** A push run that never rejects and that `flush` waits for. */
+  function guarded(fn) {
     const p = Promise.resolve()
-      .then(() => run(String(leadId ?? ''), { reason, exceptUserId, ts }))
+      .then(fn)
       .catch((err) => {
         // Only a plain error class name is logged: a message, or a name that is not one, could carry anything.
         say({ level: 'error', evt: 'push.failed', name: typeof err?.name === 'string' && /^[A-Za-z]{1,40}$/.test(err.name) ? err.name : 'Error' });
@@ -222,10 +268,39 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     return p;
   }
 
+  /**
+   * Pushes one owner-wide alert (reason `funds`) to every active owner's live devices. Never
+   * rejects; a reason that is not owner-wide is refused, never sent as something else.
+   * @returns {Promise<{ users: number, devices: number, ok: number, gone: number, failed: number }
+   *   | { skipped: 'bad_reason' | 'off' | 'no_devices' } | { error: 'failed' }>}
+   */
+  function notifyOwners({ reason = null } = {}) {
+    if (!OWNER_REASONS.has(reason)) return Promise.resolve({ skipped: 'bad_reason' });
+    return guarded(() => runOwners(reason));
+  }
+
+  /**
+   * Whether this member's phone should read a push as the funds alert sent at `alertedAt`
+   * (the durable `retell_funds_alerted`, lib/dana-funds.mjs): an active owner, that alert
+   * under an hour old (the push TTL), and no chat push that reached them more than
+   * ALERT_EVERY_MS (2 min) after it. The grace is for the 402's own hand-over, whose
+   * needs_human push follows the funds one by milliseconds to seconds: without it the owner
+   * would never read the funds text. The tap still reaches a waiting client
+   * (/dashboard/push/open). The caller checks the flag itself.
+   */
+  function fundsPending(userId, alertedAt) {
+    const at = Number(alertedAt);
+    if (alertedAt == null || !Number.isFinite(at) || at <= 0) return false;
+    if (now() - at >= PUSH_TTL_S * 1000) return false;
+    const id = String(userId ?? '');
+    if ((lastOther.get(id) ?? -Infinity) > at + ALERT_EVERY_MS) return false;
+    return Boolean(prep("SELECT 1 FROM users WHERE user_id = ? AND active = 1 AND role = 'owner'").get(id));
+  }
+
   const flush = async () => { await Promise.allSettled([...inflight]); };
 
   return {
     configured: Boolean(pusher), publicKey: pusher?.publicKey ?? null,
-    subscribe, unsubscribe, forgetSession, pruneOrphans, countFor, recipients, notify, pendingCheck, flush,
+    subscribe, unsubscribe, forgetSession, pruneOrphans, countFor, recipients, notify, pendingCheck, notifyOwners, fundsPending, flush,
   };
 }

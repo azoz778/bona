@@ -395,3 +395,146 @@ test('a pending check carries the triggering message time (msgTs) apart from whe
   await s.alerts.notify('LEAD-U', { reason: 'check' });
   assert.deepEqual(s.alerts.pendingCheck(s.owner.user_id), { leadId: 'LEAD-U', ts: NOW + ALERT_EVERY_MS, msgTs: NOW + ALERT_EVERY_MS }, 'no ts given: the clock');
 });
+
+/* ---------------- reason 'funds' (2026-10-05 design R2): owner-wide, no chat ---------------- */
+
+test("notifyOwners 'funds': every live device of the active owners, never staff; logged with counts and no lead", async () => {
+  const s = scene();
+  const boss2 = s.team.addUser({ name: 'Second Owner', phone: '966500000003', role: 'owner' });
+  const h2 = s.session(boss2);
+  s.sub('owner', 1); s.sub('owner', 2); s.sub('sara', 3); s.sub('omar', 4);
+  s.alerts.subscribe({ userId: boss2.user_id, sessionHash: h2, endpoint: ep(5), keys: KEYS });
+  const out = await s.alerts.notifyOwners({ reason: 'funds' });
+  assert.deepEqual(out, { users: 2, devices: 3, ok: 3, gone: 0, failed: 0 });
+  assert.deepEqual(s.sent.sort(), [ep(1), ep(2), ep(5)], 'the owners only');
+  assert.deepEqual(s.logs.find((l) => l.evt === 'push.sent'), { evt: 'push.sent', reason: 'funds', users: 2, devices: 3, ok: 3, gone: 0, failed: 0 });
+  assert.doesNotMatch(JSON.stringify(s.logs), /fcm\.googleapis|device-|966|Owner/);
+});
+
+test("notifyOwners 'funds' shares the device handling: 410 deletes, a failure counts, a deactivated owner hears nothing", async () => {
+  const answers = { [ep(1)]: { status: 410 }, [ep(2)]: { status: 500 } };
+  const s = scene({ answer: (endpoint) => answers[endpoint] ?? { status: 201 } });
+  s.sub('owner', 1); s.sub('owner', 2);
+  assert.deepEqual(await s.alerts.notifyOwners({ reason: 'funds' }), { users: 1, devices: 2, ok: 0, gone: 1, failed: 1 });
+  assert.deepEqual(s.db.db.prepare('SELECT endpoint, fail_count FROM push_subscriptions').all().map((r) => [r.endpoint, r.fail_count]), [[ep(2), 1]]);
+  assert.ok(s.logs.some((l) => l.evt === 'push.refused' && l.status === 500));
+  // A second owner keeps the team owned; the first is deactivated: no devices left to push.
+  const boss2 = s.team.addUser({ name: 'Second Owner', phone: '966500000003', role: 'owner' });
+  s.team.deactivateUser(s.owner.user_id);
+  assert.deepEqual(await s.alerts.notifyOwners({ reason: 'funds' }), { skipped: 'no_devices' });
+});
+
+test("notifyOwners: off without keys, a reason that is not an owner-wide one is refused, and it never rejects", async () => {
+  const off = scene({ configured: false });
+  off.sub('owner', 1);
+  assert.deepEqual(await off.alerts.notifyOwners({ reason: 'funds' }), { skipped: 'off' });
+  const s = scene();
+  s.sub('owner', 1);
+  assert.deepEqual(await s.alerts.notifyOwners({ reason: 'inbound' }), { skipped: 'bad_reason' });
+  assert.deepEqual(await s.alerts.notifyOwners(), { skipped: 'bad_reason' });
+  assert.deepEqual(s.sent, []);
+  const broken = scene();
+  broken.db.close();
+  assert.deepEqual(await broken.alerts.notifyOwners({ reason: 'funds' }), { error: 'failed' });
+  assert.ok(broken.logs.some((l) => l.evt === 'push.failed'));
+});
+
+test('fundsPending: an active owner, an alert under an hour old, and no other push to them since', async () => {
+  const s = scene();
+  s.sub('owner', 1); s.sub('sara', 2);
+  const alerted = NOW;
+  await s.alerts.notifyOwners({ reason: 'funds' });
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, alerted), true);
+  assert.equal(s.alerts.fundsPending(s.sara.user_id, alerted), false, 'staff never');
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, null), false, 'no alert time, no funds');
+  s.tick(3_600_000 - 1);
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, alerted), true);
+  s.tick(1);
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, alerted), false, 'an hour on, the push is gone (its TTL)');
+});
+
+test('fundsPending: the hand-over push that follows the funds alert within 2 minutes does not hide it; a chat push later than that does', async () => {
+  const s = scene();
+  s.sub('owner', 1);
+  await s.alerts.notifyOwners({ reason: 'funds' });
+  // The 402's own hand-over: a few ms, then about a second after the funds alert.
+  s.tick(5);
+  assert.equal((await s.alerts.notify('LEAD-A', { reason: 'needs_human', ts: s.now() })).ok, 1);
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, NOW), true, 'a few ms after: still funds');
+  s.tick(1000);
+  s.db.insertLead({ lead_id: 'LEAD-B', created: NOW, updated: NOW, phone_e164: '966500000099', wa_jid: '966500000099@s.whatsapp.net', channel: 'whatsapp', stage: 'new', inbox_state: 'in', inbox_since: NOW });
+  assert.equal((await s.alerts.notify('LEAD-B', { reason: 'needs_human', ts: s.now() })).ok, 1);
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, NOW), true, 'about a second after: still funds');
+  s.tick(ALERT_EVERY_MS);
+  assert.equal((await s.alerts.notify('LEAD-A', { ts: s.now() })).ok, 1);
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, NOW), false, 'a chat push more than 2 min after the alert is what the phone shows now');
+  // A later funds alert is newer than that push again.
+  s.tick(1000);
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, s.now()), true);
+});
+
+test('fundsPending: only a chat push that reached one of that member\'s devices counts', async () => {
+  // Every send to the owner's device fails (503): the funds alert is still what the phone shows.
+  const failing = scene({ answer: (endpoint, n) => (n === 1 ? { status: 201 } : { status: 503 }) });
+  failing.sub('owner', 1);
+  assert.equal((await failing.alerts.notifyOwners({ reason: 'funds' })).ok, 1);
+  failing.tick(ALERT_EVERY_MS + 1000);
+  assert.deepEqual(await failing.alerts.notify('LEAD-A', { ts: failing.now() }), { users: 1, devices: 1, ok: 0, gone: 0, failed: 1 });
+  assert.equal(failing.alerts.fundsPending(failing.owner.user_id, NOW), true);
+
+  // The owner has no device left for the chat push, while staff got it.
+  const s = scene();
+  s.sub('owner', 1); s.sub('sara', 2);
+  await s.alerts.notifyOwners({ reason: 'funds' });
+  s.alerts.unsubscribe({ userId: s.owner.user_id, endpoint: ep(1) });
+  s.tick(ALERT_EVERY_MS + 1000);
+  assert.deepEqual(await s.alerts.notify('LEAD-A', { reason: 'needs_human', ts: s.now() }), { users: 1, devices: 1, ok: 1, gone: 0, failed: 0 });
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, NOW), true, 'nothing new reached the owner');
+  // The two-minute marks are unchanged: every member due was marked, delivered or not.
+  assert.deepEqual(await s.alerts.notify('LEAD-A', { reason: 'needs_human', ts: s.now() }), { skipped: 'quiet' });
+});
+
+test('fundsPending survives a restart: a new alerts instance over the same db has no later pushes to weigh, so the alert still reads as funds', async () => {
+  const s = scene();
+  s.sub('owner', 1);
+  await s.alerts.notifyOwners({ reason: 'funds' });
+  await s.alerts.notify('LEAD-A', { reason: 'needs_human', ts: NOW });
+  const again = createAlerts({ db: s.db, pusher: null, isExcludedLead: () => false, now: s.now });
+  s.tick(60_000);
+  assert.equal(again.fundsPending(s.owner.user_id, NOW - 1), true);
+  s.team.addUser({ name: 'Second Owner', phone: '966500000003', role: 'owner' });
+  s.team.deactivateUser(s.owner.user_id);
+  assert.equal(again.fundsPending(s.owner.user_id, NOW - 1), false, 'a deactivated owner: never');
+});
+
+test('fundsPending: an older chat batch that completes last never lowers the recorded time', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const s = scene({ answer: (endpoint, n) => (n === 2 ? gate.then(() => ({ status: 201 })) : { status: 201 }) });
+  s.db.insertLead({ lead_id: 'LEAD-B', created: NOW, updated: NOW, phone_e164: '966500000099', wa_jid: '966500000099@s.whatsapp.net', channel: 'whatsapp', stage: 'new', inbox_state: 'in', inbox_since: NOW });
+  s.sub('owner', 1);
+  assert.equal((await s.alerts.notifyOwners({ reason: 'funds' })).ok, 1);
+  s.tick(60_000);
+  const older = s.alerts.notify('LEAD-A', { reason: 'needs_human', ts: s.now() }); // within the grace, stalls
+  await new Promise((r) => setImmediate(r));
+  s.tick(120_000);
+  assert.equal((await s.alerts.notify('LEAD-B', { reason: 'needs_human', ts: s.now() })).ok, 1); // past the grace
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, NOW), false);
+  release();
+  assert.equal((await older).ok, 1);
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, NOW), false, 'the older batch finishing last does not bring funds back');
+});
+
+test('fundsPending: a member is recorded as soon as one of their devices answers 2xx, not when the slowest one does', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const s = scene({ answer: (endpoint, n) => (endpoint === ep(2) && n > 2 ? gate.then(() => ({ status: 201 })) : { status: 201 }) });
+  s.sub('owner', 1); s.sub('owner', 2);
+  assert.equal((await s.alerts.notifyOwners({ reason: 'funds' })).ok, 2);
+  s.tick(ALERT_EVERY_MS + 1000);
+  const p = s.alerts.notify('LEAD-A', { ts: s.now() });
+  for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r));
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, NOW), false, 'device 1 answered: the chat push is on that phone');
+  release();
+  assert.equal((await p).ok, 2);
+});

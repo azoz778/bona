@@ -604,3 +604,10 @@ test('the thread\'s Dana row: off wins over a test, the testing sentence names t
   assert.doesNotMatch(bare, /nothing is sent either way/, 'no second note');
   assert.match(thread({ danaEnabled: false, danaConfigured: false }), /nothing is sent either way/, 'the note stays for the other states');
 });
+
+test('the inbox list carries the Retell out-of-credit banner for an owner while flagged; never for staff (2026-10-05 R2)', () => {
+  const at = Date.UTC(2026, 9, 3, 9, 30);
+  assert.match(inboxPage({ me: OWNER, rows: [row()], now: NOW, fundsOut: at }), /<div class="err">Dana can’t answer: Retell credit ran out at 2026-10-03 12:30 Riyadh time\./);
+  assert.doesNotMatch(inboxPage({ me: STAFF, rows: [row()], now: NOW, fundsOut: at }), /Retell credit/);
+  assert.doesNotMatch(inboxPage({ me: OWNER, rows: [row()], now: NOW, fundsOut: null }), /Retell credit/);
+});
