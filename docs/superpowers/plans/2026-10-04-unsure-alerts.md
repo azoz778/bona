@@ -14,7 +14,7 @@
 
 **`lib/alerts.mjs`**
 - `REASONS = inbound | needs_human | check`. `notify(leadId, { reason: 'check', ts })`: the lead must be `unsure` and not excluded (else `{ skipped: 'not_unsure' }`); recipients = every active user with `role = 'owner'` (never `exceptUserId`-filtered differently); the 2-minute mark and the 30-minute freshness as for `inbound`; every owner due is remembered: `checks.set(userId, { leadId, ts: now })` (in memory); `push.sent { reason: 'check', … }`.
-- `pendingCheck(userId) → { leadId, ts } | null` — the remembered check, only while that lead is still `unsure`, the user is still an active owner, and it is at most `CHECK_PENDING_MS = 2 h` old (otherwise it is forgotten and `null` comes back). Check marks are keyed apart from inbound marks.
+- `pendingCheck(userId) → { leadId, ts, msgTs } | null` — the remembered check (`ts` = when it was sent, for the 2 h expiry; `msgTs` = the triggering message's time, the notify `ts`, else the clock), only while that lead is still `unsure` and not excluded, the user is still an active owner, and it is at most `CHECK_PENDING_MS = 2 h` old (otherwise it is forgotten and `null` comes back). Check marks are keyed apart from inbound marks.
 - `lib/inbox/store.mjs`: `listUnsure({ limit = 200, first = null })` — `first` is a lead id that is always included and drawn first (SQL `ORDER BY CASE WHEN lead_id = ? THEN 0 ELSE 1 END, created DESC, rowid DESC`).
 - `recipients(lead, { reason: 'check' })` → active owners' ids.
 
@@ -25,10 +25,10 @@
 **`lib/dashboard/routes.mjs`**
 - `export const MOVE_ANSWER_WINDOW_MS = 6 * 3_600_000`.
 - `WORKER_CSP = "default-src 'none'; connect-src 'self'; img-src 'self'"`.
-- `GET /dashboard/push/latest` (signed in; otherwise `401 { error: 'unauthorised' }`) → `200 { kind: 'check' | 'inbound' }`. `check` when the member is an owner, `alerts.pendingCheck(me.user_id)` exists, and its `ts` is greater than the newest `last_msg_ts` among the member's inbox rows with `unread > 0` (0 when none).
+- `GET /dashboard/push/latest` (signed in; otherwise `401 { error: 'unauthorised' }`) → `200 { kind: 'check' | 'inbound' }`. `check` when the member is an owner, `alerts.pendingCheck(me.user_id)` exists, and its `msgTs` is greater than the newest `last_msg_ts` among the member's inbox rows with `unread > 0` (0 when none).
 - `GET /dashboard/push/open`: with kind `check` → `302 /dashboard/inbox?tab=unsure&focus=<leadId>`; else as today.
-- Unsure tab: `focus` query parameter (`/^[A-Za-z0-9_-]{1,64}$/`, else ignored) passed to `listUnsure({ first })` and `unsurePage`.
-- `wakeDanaAfterJoin(leadId) → boolean`: after `joinHistory` in `inboxMove`, `candidateMove`, `inboxAdd`: when `app.dana?.answer` exists and `inbox.unansweredClientMessages(leadId, { limit: 1 })` has a message with `ts >= now() - MOVE_ANSWER_WINDOW_MS` → `app.dana.answer(leadId, { ts: now() })` (not awaited) and `log({ evt: 'dash.dana_woken', leadId })`, returns true; else false.
+- Unsure tab: `focus` query parameter (`/^[A-Za-z0-9_-]{1,64}$/`, else ignored) passed to `listUnsure({ first })` and `unsurePage` only when that lead exists, is an Unsure-list chat (`inbox.isUnsureChat`) and is not excluded — otherwise ignored, so a focus never changes the page.
+- `wakeDanaAfterJoin(leadId) → boolean`: after `joinHistory` in `inboxMove`, `candidateMove`, `inboxAdd`: when `app.dana` is `configured === true`, `app.dana.answer` exists, and `inbox.unansweredClientMessages(leadId, { limit: 1 })` has a message with `ts >= now() - MOVE_ANSWER_WINDOW_MS` → `app.dana.answer(leadId, { ts: now() })` (not awaited) and `log({ evt: 'dash.dana_woken', leadId })`, returns true; else false.
 
 **`lib/dashboard/render-inbox.mjs`** — `unsurePage({ …, focus = null })`: the row whose `lead_id === focus` is drawn first with class `lr ix focus` and a `<span class="pl hot">new chat to check</span>` pill after its name.
 

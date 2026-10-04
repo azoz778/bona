@@ -59,7 +59,7 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     return s;
   };
   const marks = new Map(); // `${userId}\n${leadId}` → when that member was last alerted about that chat
-  const checks = new Map(); // owner's user_id → { leadId, ts } of their newest "chat to check" alert (U4)
+  const checks = new Map(); // owner's user_id → { leadId, ts, msgTs } of their newest "chat to check" alert (U4): ts = when it was sent, msgTs = the triggering message's time
   const inflight = new Set();
   const say = (entry) => { try { log(entry); } catch { /* a logger never stops an alert */ } };
 
@@ -149,7 +149,10 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     // burst is going out now, so a second message in the same two minutes is quiet for all of
     // them (a member who subscribes inside that window hears of the next burst).
     for (const u of due) marks.set(markKey(u, leadId, why), t);
-    if (why === 'check') for (const u of due) checks.set(u, { leadId, ts: t });
+    if (why === 'check') {
+      const msgTs = ts != null && Number.isFinite(Number(ts)) ? Number(ts) : t;
+      for (const u of due) checks.set(u, { leadId, ts: t, msgTs });
+    }
     prune(t);
     const users = new Set(devices.map((d) => d.user_id));
     // A send that rejects after all is that device's failure, never the batch's.
@@ -184,7 +187,11 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     return out;
   }
 
-  /** The owner's newest "chat to check" alert, while that chat is still in the Unsure list (U4). */
+  /**
+   * The owner's newest "chat to check" alert, while that chat is still in the Unsure list and
+   * not excluded (U4). `ts` is when it was sent (the 2 h expiry); `msgTs` the triggering
+   * message's time, which the dashboard ranks against unread inbox messages.
+   */
   function pendingCheck(userId) {
     const id = String(userId ?? '');
     const c = checks.get(id);
@@ -192,8 +199,8 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     if (now() - c.ts > CHECK_PENDING_MS) { checks.delete(id); return null; }
     const lead = db.getLead(c.leadId);
     const owner = prep("SELECT 1 FROM users WHERE user_id = ? AND active = 1 AND role = 'owner'").get(id);
-    if (!owner || !lead || lead.inbox_state !== 'unsure') { checks.delete(id); return null; }
-    return { leadId: c.leadId, ts: c.ts };
+    if (!owner || !lead || lead.inbox_state !== 'unsure' || isExcludedLead(lead)) { checks.delete(id); return null; }
+    return { leadId: c.leadId, ts: c.ts, msgTs: c.msgTs };
   }
 
   /**

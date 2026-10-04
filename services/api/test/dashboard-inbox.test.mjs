@@ -324,6 +324,44 @@ test('the Unsure tab with focus keeps an old chat on the page and first past 200
   });
 });
 
+test('focus on an excluded or non-Unsure chat changes nothing on the page: no existence oracle at the 200-row cut', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    // An older Unsure chat whose number is on the never list: never on the page, focused or not.
+    h.db.insertLead({ lead_id: 'LEAD-X', created: NOW - 7_200_000, updated: NOW, phone_e164: '966500000085', wa_jid: '966500000085@s.whatsapp.net', name: 'Xena Excluded', channel: 'whatsapp', stage: 'new', inbox_state: 'unsure' });
+    h.team.addNever({ phone: '966500000085' });
+    for (let i = 0; i < 205; i += 1) {
+      h.db.insertLead({ lead_id: `LEAD-N${i}`, created: NOW + i, updated: NOW + i, phone_e164: `9665100${String(i).padStart(5, '0')}`, wa_jid: `9665100${String(i).padStart(5, '0')}@s.whatsapp.net`, name: `Newer ${i}`, channel: 'whatsapp', stage: 'new', inbox_state: 'unsure' });
+    }
+    const boss = await h.boss();
+    const ids = (html) => [...html.matchAll(/action="\/v1\/admin\/inbox\/(LEAD-[A-Za-z0-9_-]+)\/move"/g)].map((m) => m[1]);
+    const plain = await (await h.get('/dashboard/inbox?tab=unsure', { cookie: boss })).text();
+    const base = ids(plain);
+    assert.equal(base.length, 200);
+    for (const focus of ['LEAD-X', 'LEAD-A', 'LEAD-N']) {
+      const res = await h.get(`/dashboard/inbox?tab=unsure&focus=${focus}`, { cookie: boss });
+      assert.equal(res.status, 200, focus);
+      const html = await res.text();
+      assert.deepEqual(ids(html), base, `${focus}: the same rows, in the same order`);
+      assert.ok(!html.includes('lr ix focus'), focus);
+      assert.ok(!html.includes('new chat to check'), focus);
+    }
+  });
+});
+
+test('Dana that is not configured is never woken by a Move, and nothing is logged (U5)', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const calls = [];
+    h.app.dana = { configured: false, answer: (id, o) => { calls.push([id, o]); return Promise.resolve({ skipped: 'off' }); }, stop: async () => {} };
+    const boss = await h.boss();
+    historyBrings(h, [{ key_id: 'U-1', text: 'is the villa free?', ts: Date.now() - 60_000 }]);
+    assert.equal((await h.postForm('/v1/admin/inbox/LEAD-U/move', {}, { cookie: boss })).status, 303);
+    assert.equal(calls.length, 0);
+    assert.ok(!h.logs.some((e) => e.evt === 'dash.dana_woken'));
+  });
+});
+
 /**
  * seedScene plus an undecided lead (no inbox state yet), and the first-message snippets
  * the lead_created touchpoints keep: the one a staff member must never read, and one they may.

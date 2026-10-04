@@ -1039,7 +1039,7 @@ export function createDashboardRoutes({
    */
   function wakeDanaAfterJoin(leadId) {
     const dana = app?.dana;
-    if (!dana || typeof dana.answer !== 'function') return false;
+    if (!dana || dana.configured !== true || typeof dana.answer !== 'function') return false;
     const waiting = inbox.unansweredClientMessages(leadId, { limit: 1 });
     const newest = waiting.length ? Number(waiting[waiting.length - 1].ts) : NaN;
     if (!Number.isFinite(newest) || newest < now() - MOVE_ANSWER_WINDOW_MS) return false;
@@ -1151,7 +1151,8 @@ export function createDashboardRoutes({
     if (!check) return { kind: 'inbound', check: null };
     const rows = inbox ? inboxRowsFor(me) : [];
     const newestUnread = rows.filter((r) => (Number(r.unread) || 0) > 0).reduce((m, r) => Math.max(m, Number(r.last_msg_ts) || 0), 0);
-    return check.ts > newestUnread ? { kind: 'check', check } : { kind: 'inbound', check: null };
+    // Like with like: the check's triggering message against the newest unread message.
+    return check.msgTs > newestUnread ? { kind: 'check', check } : { kind: 'inbound', check: null };
   }
 
   /** `GET /dashboard/push/latest`: the worker's one question per push (U3). A kind, never a name or text. */
@@ -1181,9 +1182,12 @@ export function createDashboardRoutes({
     const owner = me.role === 'owner';
     if (url.searchParams.get('tab') === 'unsure') {
       if (!owner) return sendHtml(res, 403, messagePage({ title: 'Owners only', message: 'Only an owner can see the Unsure list.', me }));
-      // A tapped "chat to check" (U4): that chat first. An id-shaped value only, else ignored.
+      // A tapped "chat to check" (U4): that chat first. Only an id of a chat the list would
+      // show anyway (Unsure, not excluded); anything else is ignored, so a focus can never
+      // change the page — no telling an excluded or unknown id apart at the 200-row cut.
       const focusRaw = url.searchParams.get('focus');
-      const focus = /^[A-Za-z0-9_-]{1,64}$/.test(focusRaw ?? '') ? focusRaw : null;
+      const focusLead = /^[A-Za-z0-9_-]{1,64}$/.test(focusRaw ?? '') ? db.getLead(focusRaw) : null;
+      const focus = focusLead && inbox.isUnsureChat(focusLead.lead_id) && !excludedLead(focusLead) ? focusLead.lead_id : null;
       return sendHtml(res, 200, unsurePage({
         me, rows: inbox.listUnsure({ first: focus }).filter((l) => !excludedLead(l)), candidates: candidatesShown(), ok, error, now: now(), focus,
       }));

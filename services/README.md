@@ -858,9 +858,11 @@ with a `wa_jid` or a `wa_lid`. Whether it belongs is **stored** in `leads.inbox_
   alert, "Bona: new chat to check" (*Phone alerts* below); tapping it opens the Unsure tab with
   that chat first, marked "new chat to check" (`?focus=<lead id>`). *Move* pulls its last 30
   days and, when the client's newest unanswered message is under 6 hours old
-  (`MOVE_ANSWER_WINDOW_MS`), wakes Dana, who answers it within about a minute under all her
-  usual rules (*Dana on WhatsApp* below: her switch or the chat's test, no human in 24 h, caps,
-  hand-over). An older waiting message is left to the team. *Add chat by phone number* and
+  (`MOVE_ANSWER_WINDOW_MS`), wakes Dana (when she is configured), who answers it within about a
+  minute under her usual rules (*Dana on WhatsApp* below: her switch or the chat's test, no
+  human in 24 h, caps, hand-over) — with one difference: the Move itself counts as the fresh
+  trigger, so for that one answer her 30-minute freshness rule is replaced by the 6-hour
+  window. An older waiting message is left to the team. *Add chat by phone number* and
   *Move* on a chat to check do the same (log `dash.dana_woken`, the lead id only).
 - *Owner-started*: the owner's own message in a 1:1 chat puts that chat `in` (a new lead gets
   `match_method = 'owner_outbound'`) with the 24 h before it when it carries a Bona site link
