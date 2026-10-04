@@ -38,12 +38,23 @@ hand-over line because Retell answered 402 and nobody knew why).
   lead), same device/session/410 handling as the lead alerts. The worker's one
   `/dashboard/push/latest` question answers `{ kind: 'funds' }` iff the member is an active
   owner AND `retell_funds_out` is set AND `now - retell_funds_alerted < 1 h` (push TTL) AND
-  that owner has had no push for another reason (inbound / needs_human / check) after the
-  funds alert time (kept in memory; empty after a restart, so a queued funds push still reads
-  as funds). Otherwise the usual check > inbound. Worker text: **"Bona: Dana is out of Retell credit"**, body
-  "Dana can't answer clients until Retell is topped up. Tap for details.", tag `bona-funds`.
-  `/dashboard/push/open` for kind `funds` → `/dashboard/team`.
+  no push for another reason (inbound / needs_human / check) **that reached one of that
+  owner's devices (2xx)** more than 2 min (`ALERT_EVERY_MS`) after the funds alert time. The
+  grace is for the 402's own hand-over, whose needs_human push follows the funds push by
+  milliseconds to seconds; without it the owner would never read the funds text. Those chat
+  push times are kept in memory (empty after a restart, so a queued funds push still reads as
+  funds); the two-minute cooldown marks are unchanged (set for every member due, before the
+  sends). Otherwise the usual check > inbound. Worker text: **"Bona: Dana is out of Retell
+  credit"**, body "Dana can't answer until Retell is topped up. A client may be waiting — tap
+  to open.", tag `bona-funds`.
+  `/dashboard/push/open` for kind `funds` → the same chat an inbound alert would open (the
+  first unread row of the member's list) when anything is unread — a client may be waiting —
+  else `/dashboard/team`.
+- Accepted noise: while no owner device accepts the push (sends failing, not 404/410), the
+  alert time is rolled back each time, so every later 402 tries the funds push again until
+  one is delivered or the device is dropped.
 - Team page (owners): while `retell_funds_out` is set, a red banner at the top: "Dana can't
   answer: Retell credit ran out at <Riyadh time>. Top up Retell and she resumes by herself;
-  until then clients get the hand-over line." `/health` `dana` gains `fundsOut: true|false`.
+  until then clients get the hand-over line." The same banner tops the owners' inbox list,
+  where a tapped funds alert usually lands. `/health` `dana` gains `fundsOut: true|false`.
 - Nothing logs names, numbers, text or endpoints (counts and ids only, as everywhere).

@@ -1178,7 +1178,8 @@ export function createDashboardRoutes({
 
   /**
    * `GET /dashboard/push/open`: where a tapped alert lands (P3-4, U4, R2). Retell out of
-   * credit opens the Team page, where the banner says what to do. An owner's pending
+   * credit opens the first unread chat like an inbox alert (the list carries the banner), or
+   * the Team page when nothing is unread. An owner's pending
    * "chat to check", when it is newer than their unread messages, opens the Unsure page with
    * that chat first. Otherwise the first row with unread messages of the member's own list
    * (unread first, newest first, rule 1 applied); with nothing unread — a colleague read it
@@ -1188,10 +1189,13 @@ export function createDashboardRoutes({
    */
   function pushOpen({ res, me }) {
     const { kind, check } = alertKind(me);
-    if (kind === 'funds') return redirect(res, '/dashboard/team', 302);
     if (kind === 'check') return redirect(res, `/dashboard/inbox?tab=unsure&focus=${encodeURIComponent(check.leadId)}`, 302);
     const rows = inbox ? inboxRowsFor(me) : [];
-    const first = rows.find((r) => (Number(r.unread) || 0) > 0) ?? rows[0] ?? null;
+    const unread = rows.find((r) => (Number(r.unread) || 0) > 0) ?? null;
+    // Funds: a client may be waiting (the 402's own hand-over), so an unread chat comes first;
+    // with nothing unread, the Team page, where the banner says what to do.
+    if (kind === 'funds' && !unread) return redirect(res, '/dashboard/team', 302);
+    const first = unread ?? rows[0] ?? null;
     return redirect(res, first ? `/dashboard/inbox/${encodeURIComponent(first.lead_id)}` : '/dashboard/inbox', 302);
   }
 
@@ -1223,6 +1227,7 @@ export function createDashboardRoutes({
       error,
       now: now(),
       pulseToken: listToken(rows),
+      fundsOut: owner ? fundsOutSince(team) : null,
     }));
   }
 

@@ -24,8 +24,11 @@ const post = (action, label, fields = {}, cls = '') => `<form method="post" acti
   Object.entries(fields).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('') +
   `<button type="submit"${cls ? ` class="${esc(cls)}"` : ''}>${esc(label)}</button></form>`;
 
-/** The out-of-credit banner, or '' while Retell is fine. `fundsOut` is when it started (ms). */
-function fundsBanner(fundsOut) {
+/**
+ * The out-of-credit banner, or '' while Retell is fine. `fundsOut` is when it started (ms).
+ * Also drawn on the owners' inbox list, where a tapped funds alert lands (render-inbox.mjs).
+ */
+export function fundsBanner(fundsOut) {
   if (typeof fundsOut !== 'number' || !Number.isFinite(fundsOut) || fundsOut <= 0) return '';
   // `dateTime` writes UTC; shifted by Riyadh's fixed +03:00 it reads as the owner's clock.
   const at = `${dateTime(fundsOut + TZ_OFFSET_MS)} Riyadh time`;

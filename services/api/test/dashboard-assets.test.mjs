@@ -39,7 +39,7 @@ test('the service worker shows one of three fixed notifications and caches nothi
   assert.match(src, /'A client wrote in the Bona inbox\.'/);
   assert.match(src, /tag: 'bona-inbox'/);
   assert.match(src, /'Bona: Dana is out of Retell credit'/);
-  assert.match(src, /'Dana can’t answer clients until Retell is topped up\. Tap for details\.'/);
+  assert.match(src, /'Dana can’t answer until Retell is topped up\. A client may be waiting — tap to open\.'/);
   assert.match(src, /tag: 'bona-funds'/);
   assert.match(src, /addEventListener\(\s*'notificationclick'/);
   assert.match(src, /'\/dashboard\/push\/open'/);
@@ -182,7 +182,7 @@ test('the worker: a push always shows the one notification; a tap asks our windo
 test('the worker asks once which notification a push is: a check only for { kind: check }, anything else the inbox one (U3)', async () => {
   const CHECK = ['Bona: new chat to check', { body: 'Someone new wrote to you. Tap to decide.', icon: '/dashboard/icon-192.png', tag: 'bona-check', renotify: true }];
   const INBOUND = ['New Bona message', { body: 'A client wrote in the Bona inbox.', icon: '/dashboard/icon-192.png', tag: 'bona-inbox', renotify: true }];
-  const FUNDS = ['Bona: Dana is out of Retell credit', { body: 'Dana can’t answer clients until Retell is topped up. Tap for details.', icon: '/dashboard/icon-192.png', tag: 'bona-funds', renotify: true }];
+  const FUNDS = ['Bona: Dana is out of Retell credit', { body: 'Dana can’t answer until Retell is topped up. A client may be waiting — tap to open.', icon: '/dashboard/icon-192.png', tag: 'bona-funds', renotify: true }];
   const json = (status, body) => async () => ({ ok: status >= 200 && status < 300, status, json: async () => body });
   const shown = async (fetchStub) => {
     const w = runWorker({ fetch: fetchStub });

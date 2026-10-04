@@ -128,6 +128,7 @@ async function withPush(opts, fn) {
     staff: () => login('0500000001'),
     boss: () => login('0593296933'),
     tick: (ms) => { clock += ms; },
+    now,
   };
   // One `in` chat with one unread client message: what every alert and pulse test starts from.
   seedChat(h, { id: 'LEAD-A', name: 'Alya Client', messages: [{ key_id: 'A-1', text: 'Is BONA-012 still free?', ts: NOW + 60_000 }] });
@@ -413,7 +414,7 @@ test('funds: push/latest says funds to an owner while the flag is set and the al
     assert.deepEqual(sent, { users: 1, devices: 1, ok: 1, gone: 0, failed: 0 });
     assert.deepEqual(h.pushes.slice(before), [EP], "the owner's device only, never staff's");
     assert.equal(await latest(h, boss), 'funds', 'funds > check');
-    assert.equal(await openTo(h, boss), '/dashboard/team');
+    assert.equal(await openTo(h, boss), '/dashboard/inbox/LEAD-A', 'a client may be waiting: the tap opens the unread chat');
     assert.equal(await latest(h, staff), 'inbound', 'staff never get the funds kind');
     assert.equal(await openTo(h, staff), '/dashboard/inbox/LEAD-A');
 
@@ -426,16 +427,46 @@ test('funds: push/latest says funds to an owner while the flag is set and the al
   });
 });
 
-test('funds: a push about a chat after the funds alert reads as its own kind and opens the chat', async () => {
+test('funds: the 402\'s own hand-over push, ms to a second later, still reads as funds; a chat push 3 min later reads as its own kind', async () => {
   await withPush(async (h) => {
     const boss = await subscribedBoss(h);
     await fundsAlert(h, NOW);
-    assert.equal(await latest(h, boss), 'funds');
-    h.tick(1000);
     h.db.updateLead('LEAD-A', { needs_human: 1 });
-    assert.equal((await h.alerts.notify('LEAD-A', { reason: 'needs_human', ts: NOW + 1000 })).ok, 1);
-    assert.equal(await latest(h, boss), 'inbound');
-    assert.equal(await openTo(h, boss), '/dashboard/inbox/LEAD-A', 'the waiting chat, not the Team page');
+    h.tick(7);
+    assert.equal((await h.alerts.notify('LEAD-A', { reason: 'needs_human', ts: h.now() })).ok, 1);
+    assert.equal(await latest(h, boss), 'funds', 'a few ms later');
+    h.tick(1000);
+    seedChat(h, { id: 'LEAD-B', name: 'Badr', phone: '966500000079', messages: [{ key_id: 'B-1', text: 'hi', ts: NOW + 1007 }] });
+    h.db.updateLead('LEAD-B', { needs_human: 1 });
+    assert.equal((await h.alerts.notify('LEAD-B', { reason: 'needs_human', ts: h.now() })).ok, 1);
+    assert.equal(await latest(h, boss), 'funds', 'about a second later');
+    assert.equal(await openTo(h, boss), '/dashboard/inbox/LEAD-A', 'the tap still reaches a waiting client');
+    h.tick(180_000);
+    assert.equal((await h.alerts.notify('LEAD-A', { reason: 'needs_human', ts: h.now() })).ok, 1);
+    assert.equal(await latest(h, boss), 'inbound', '3 min later: its own kind');
+    assert.equal(await openTo(h, boss), '/dashboard/inbox/LEAD-A');
+  });
+});
+
+test('funds: with nothing unread the tap opens the Team page, where the banner says what to do', async () => {
+  await withPush(async (h) => {
+    const boss = await subscribedBoss(h);
+    await h.get('/dashboard/inbox/LEAD-A', { cookie: boss });
+    await fundsAlert(h, NOW);
+    assert.equal(await latest(h, boss), 'funds');
+    assert.equal(await openTo(h, boss), '/dashboard/team');
+  });
+});
+
+test('funds: the inbox list shows the same red banner, to owners only, while flagged', async () => {
+  await withPush(async (h) => {
+    const boss = await h.boss();
+    const staff = await h.staff();
+    const page = async (cookie) => (await h.get('/dashboard/inbox', { cookie })).text();
+    assert.doesNotMatch(await page(boss), /Retell credit ran out/);
+    outOfCredit(h, Date.UTC(2026, 9, 3, 9, 30));
+    assert.match(await page(boss), /<div class="err">Dana can’t answer: Retell credit ran out at 2026-10-03 12:30 Riyadh time\./);
+    assert.doesNotMatch(await page(staff), /Retell credit/);
   });
 });
 
@@ -446,7 +477,6 @@ test('funds: durable — with the flag and an alert under an hour old, a restart
     outOfCredit(h, NOW - 30 * 60_000);
     h.team.setSetting('retell_funds_alerted', String(NOW - 30 * 60_000));
     assert.equal(await latest(h, boss), 'funds');
-    assert.equal(await openTo(h, boss), '/dashboard/team');
     h.team.setSetting('retell_funds_alerted', String(NOW - 3_600_000));
     assert.equal(await latest(h, boss), 'inbound', 'an alert an hour old is not funds');
     assert.equal(await latest(h, await h.staff()), 'inbound');

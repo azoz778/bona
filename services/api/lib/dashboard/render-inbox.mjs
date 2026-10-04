@@ -23,6 +23,7 @@ import {
   esc, maskPhone, fullPhone, agoSince, dateTime, layout, knownError, messageFor, stageName, postButton,
 } from './render.mjs';
 import { MAX_TEXT_LEN } from '../wa-send.mjs';
+import { fundsBanner } from './render-team.mjs';
 
 export const INBOX_OK = {
   sent: 'Sent.',
@@ -100,7 +101,7 @@ function inboxRow(row, now) {
  * member sees neither, not even as a link. `pulseToken` is what the list was drawn from
  * (the route's `listToken`, P3-12); app.js reloads the page when the pulse answers another.
  */
-export function inboxPage({ me, rows, unsureCount = 0, ok = null, error = null, now = Date.now(), pulseToken = '' }) {
+export function inboxPage({ me, rows, unsureCount = 0, ok = null, error = null, now = Date.now(), pulseToken = '', fundsOut = null }) {
   const owner = me?.role === 'owner';
   const list = Array.isArray(rows) ? rows : [];
   const withNew = list.filter((r) => (Number(r.unread) || 0) > 0).length;
@@ -140,7 +141,8 @@ export function inboxPage({ me, rows, unsureCount = 0, ok = null, error = null, 
     active: '/dashboard/inbox',
     me,
     actions: owner ? tabs('inbox', unsureCount) : '',
-    body: `${flash(ok, error)}${alerts}${note}<div data-pulse="/v1/admin/inbox/pulse" data-pulse-token="${esc(pulseToken)}">${block}</div>${add}`,
+    // Retell out of credit (2026-10-05 R2): the owners' red banner, where a funds alert's tap lands.
+    body: `${owner ? fundsBanner(fundsOut) : ''}${flash(ok, error)}${alerts}${note}<div data-pulse="/v1/admin/inbox/pulse" data-pulse-token="${esc(pulseToken)}">${block}</div>${add}`,
   });
 }
 

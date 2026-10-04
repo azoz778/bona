@@ -30,8 +30,9 @@
  * two-minute or freshness rule of its own (lib/dana-funds.mjs spaces it, six hours apart,
  * from a flag that survives a restart). Which notification an owner's worker shows is decided
  * from durable state (`fundsPending`): the funds alert under an hour old (the push TTL) and no
- * push for any other reason to that member since. Those other pushes are remembered in memory
- * per member; after a restart there are none, so a funds push still queued reads as funds.
+ * chat push that reached that member more than two minutes after it. Those chat pushes are
+ * remembered in memory per member; after a restart there are none, so a funds push still
+ * queued reads as funds.
  *
  * Each of the recipients' live devices gets one empty push (lib/push.mjs). 404/410 means the
  * browser dropped the subscription: the row goes. Anything else counts a failure and is
@@ -70,7 +71,7 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
   };
   const marks = new Map(); // `${userId}\n${leadId}` → when that member was last alerted about that chat
   const checks = new Map(); // owner's user_id → { leadId, ts, msgTs } of their newest "chat to check" alert (U4): ts = when it was sent, msgTs = the triggering message's time
-  const lastOther = new Map(); // user_id → when that member was last pushed for a chat (any reason but `funds`)
+  const lastOther = new Map(); // user_id → when a push about a chat (any reason but `funds`) last reached one of that member's devices
   const inflight = new Set();
   const say = (entry) => { try { log(entry); } catch { /* a logger never stops an alert */ } };
 
@@ -155,16 +156,15 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     // Every member due is marked, not only those a device was found for: the alert for this
     // burst is going out now, so a second message in the same two minutes is quiet for all of
     // them (a member who subscribes inside that window hears of the next burst).
-    for (const u of due) {
-      marks.set(markKey(u, leadId, why), t);
-      lastOther.set(u, t);
-    }
+    for (const u of due) marks.set(markKey(u, leadId, why), t);
     if (why === 'check') {
       const msgTs = ts != null && Number.isFinite(Number(ts)) ? Number(ts) : t;
       for (const u of due) checks.set(u, { leadId, ts: t, msgTs });
     }
     prune(t);
-    const out = await deliver(devices, t);
+    const { reached, ...out } = await deliver(devices, t);
+    // Only a member a device answered 2xx for has this push on a phone (`fundsPending`).
+    for (const u of reached) lastOther.set(u, t);
     say({ evt: 'push.sent', leadId, reason: why, ...out });
     return out;
   }
@@ -178,7 +178,8 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
 
   /**
    * One empty push to each device, and what each answer means for its row — the one loop
-   * every reason shares. `t` is when the batch started. Counts only: the caller logs them.
+   * every reason shares. `t` is when the batch started. Counts only, which the caller logs,
+   * and `reached`: the members a device answered 2xx for.
    */
   async function deliver(devices, t) {
     const users = new Set(devices.map((d) => d.user_id));
@@ -190,11 +191,13 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     // re-posted during the send — by this member or, on a shared phone, by someone else — is a
     // new binding this answer says nothing about.
     let ok = 0;
+    const reached = new Set();
     let gone = 0;
     let failed = 0;
     for (const { d, a } of answers) {
       if (a?.status >= 200 && a.status < 300) {
         ok += 1;
+        reached.add(d.user_id);
         prep('UPDATE push_subscriptions SET last_ok = ?, fail_count = 0 WHERE id = ? AND updated <= ?').run(now(), d.id, t);
       } else if (a?.status === 404 || a?.status === 410) {
         gone += 1;
@@ -209,7 +212,7 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
         });
       }
     }
-    return { users: users.size, devices: devices.length, ok, gone, failed };
+    return { users: users.size, devices: devices.length, ok, gone, failed, reached };
   }
 
   /** An owner-wide alert (`funds`): the active owners' live devices, each owner marked before the sends. */
@@ -219,7 +222,7 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     const owners = prep("SELECT user_id FROM users WHERE active = 1 AND role = 'owner' ORDER BY user_id").all().map((r) => r.user_id);
     const devices = liveDevices(owners, t);
     if (!devices.length) return { skipped: 'no_devices' };
-    const out = await deliver(devices, t);
+    const { reached, ...out } = await deliver(devices, t);
     say({ evt: 'push.sent', reason: why, ...out });
     return out;
   }
@@ -276,16 +279,20 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
   }
 
   /**
-   * Whether this member's newest push is the funds alert sent at `alertedAt` (the durable
-   * `retell_funds_alerted`, lib/dana-funds.mjs): an active owner, that alert under an hour old
-   * (the push TTL), and no push for a chat to them after it. The caller checks the flag itself.
+   * Whether this member's phone should read a push as the funds alert sent at `alertedAt`
+   * (the durable `retell_funds_alerted`, lib/dana-funds.mjs): an active owner, that alert
+   * under an hour old (the push TTL), and no chat push that reached them more than
+   * ALERT_EVERY_MS (2 min) after it. The grace is for the 402's own hand-over, whose
+   * needs_human push follows the funds one by milliseconds to seconds: without it the owner
+   * would never read the funds text. The tap still reaches a waiting client
+   * (/dashboard/push/open). The caller checks the flag itself.
    */
   function fundsPending(userId, alertedAt) {
     const at = Number(alertedAt);
     if (alertedAt == null || !Number.isFinite(at) || at <= 0) return false;
     if (now() - at >= PUSH_TTL_S * 1000) return false;
     const id = String(userId ?? '');
-    if ((lastOther.get(id) ?? -Infinity) > at) return false;
+    if ((lastOther.get(id) ?? -Infinity) > at + ALERT_EVERY_MS) return false;
     return Boolean(prep("SELECT 1 FROM users WHERE user_id = ? AND active = 1 AND role = 'owner'").get(id));
   }
 
