@@ -46,6 +46,7 @@ import { normalisePhone } from '../phone.mjs';
 import { randomId } from '../store.mjs';
 import { replyJidFor } from '../wa-send.mjs';
 import { OWNER_HISTORY_MS } from '../inbox/backfill.mjs';
+import { fundsOutSince, fundsAlertedAt } from '../dana-funds.mjs';
 import {
   knownError,
   loginPage, logoutPage, overviewPage, leadsPage, leadDetailPage, listingsPage, spendPage, integrationsPage, messagePage,
@@ -676,6 +677,8 @@ export function createDashboardRoutes({
       danaEnabled: team.danaEnabled(),
       danaConfigured: Boolean(app?.dana?.configured),
       danaTests: inbox ? inbox.countDanaTests() : 0,
+      // Since when Retell has refused Dana for lack of credit (2026-10-05 R2): the red banner.
+      fundsOut: fundsOutSince(team),
       ok: url.searchParams.get('ok'),
       error: url.searchParams.get('error'),
     }));
@@ -1142,11 +1145,26 @@ export function createDashboardRoutes({
   }
 
   /**
-   * Which of the worker's two fixed notifications a push is (U3/U4): an owner's newest "chat
-   * to check" while it is newer than their newest unread inbox message; otherwise an inbox
-   * message. Decided here, signed in: the push itself carries nothing.
+   * Retell out of credit (2026-10-05 R2), for this member's worker: an active owner, the flag
+   * still set, a funds push that reached a device under an hour ago (the push TTL), and no
+   * push about a chat to this member since — that one is what the phone shows now, and the tap
+   * should open its chat. All but the last are durable, so a restart changes nothing.
+   */
+  function fundsDue(me) {
+    if (me.role !== 'owner' || typeof alerts?.fundsPending !== 'function') return false;
+    if (fundsOutSince(team) === null) return false;
+    return alerts.fundsPending(me.user_id, fundsAlertedAt(team));
+  }
+
+  /**
+   * Which of the worker's three fixed notifications a push is (U3/U4, R2): Retell out of
+   * credit, for an owner it was pushed to (above all else: Dana is down for every client);
+   * else an owner's newest "chat to check" while it is newer than their newest unread inbox
+   * message; otherwise an inbox message. Decided here, signed in: the push itself carries
+   * nothing.
    */
   function alertKind(me) {
+    if (fundsDue(me)) return { kind: 'funds', check: null };
     const check = me.role === 'owner' && alerts ? alerts.pendingCheck(me.user_id) : null;
     if (!check) return { kind: 'inbound', check: null };
     const rows = inbox ? inboxRowsFor(me) : [];
@@ -1159,7 +1177,9 @@ export function createDashboardRoutes({
   function pushLatest({ res, me }) { return sendJson(res, 200, { kind: alertKind(me).kind }); }
 
   /**
-   * `GET /dashboard/push/open`: where a tapped alert lands (P3-4, U4). An owner's pending
+   * `GET /dashboard/push/open`: where a tapped alert lands (P3-4, U4, R2). Retell out of
+   * credit opens the first unread chat like an inbox alert (the list carries the banner), or
+   * the Team page when nothing is unread. An owner's pending
    * "chat to check", when it is newer than their unread messages, opens the Unsure page with
    * that chat first. Otherwise the first row with unread messages of the member's own list
    * (unread first, newest first, rule 1 applied); with nothing unread — a colleague read it
@@ -1171,7 +1191,11 @@ export function createDashboardRoutes({
     const { kind, check } = alertKind(me);
     if (kind === 'check') return redirect(res, `/dashboard/inbox?tab=unsure&focus=${encodeURIComponent(check.leadId)}`, 302);
     const rows = inbox ? inboxRowsFor(me) : [];
-    const first = rows.find((r) => (Number(r.unread) || 0) > 0) ?? rows[0] ?? null;
+    const unread = rows.find((r) => (Number(r.unread) || 0) > 0) ?? null;
+    // Funds: a client may be waiting (the 402's own hand-over), so an unread chat comes first;
+    // with nothing unread, the Team page, where the banner says what to do.
+    if (kind === 'funds' && !unread) return redirect(res, '/dashboard/team', 302);
+    const first = unread ?? rows[0] ?? null;
     return redirect(res, first ? `/dashboard/inbox/${encodeURIComponent(first.lead_id)}` : '/dashboard/inbox', 302);
   }
 
@@ -1203,6 +1227,7 @@ export function createDashboardRoutes({
       error,
       now: now(),
       pulseToken: listToken(rows),
+      fundsOut: owner ? fundsOutSince(team) : null,
     }));
   }
 

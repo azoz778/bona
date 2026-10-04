@@ -2,10 +2,12 @@
  * The Team page (owner only): who can log in, the numbers that are never a client, and
  * the switches for what the dashboard sends from the owner's WhatsApp — everything
  * (Sending), replies to clients (off until the owner turns them on, design D14), and Dana
- * on WhatsApp (off until the owner turns her on, D14).
+ * on WhatsApp (off until the owner turns her on, D14). While Retell refuses Dana for lack of
+ * credit (lib/dana-funds.mjs, 2026-10-05 design R2), a red banner says so at the top.
  * Every write is a form post to /v1/admin/*, like the rest of the dashboard.
  */
 import { esc, fullPhone, dateTime, layout, scrollTable, knownError, messageFor } from './render.mjs';
+import { TZ_OFFSET_MS } from './stats.mjs';
 
 export const TEAM_OK = {
   added: 'Added. They can log in with their WhatsApp number now.',
@@ -22,7 +24,18 @@ const post = (action, label, fields = {}, cls = '') => `<form method="post" acti
   Object.entries(fields).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('') +
   `<button type="submit"${cls ? ` class="${esc(cls)}"` : ''}>${esc(label)}</button></form>`;
 
-export function teamPage({ me, users = [], never = [], sendingEnabled = true, repliesEnabled = false, danaEnabled = false, danaConfigured = false, danaTests = 0, ok = null, error = null }) {
+/**
+ * The out-of-credit banner, or '' while Retell is fine. `fundsOut` is when it started (ms).
+ * Also drawn on the owners' inbox list, where a tapped funds alert lands (render-inbox.mjs).
+ */
+export function fundsBanner(fundsOut) {
+  if (typeof fundsOut !== 'number' || !Number.isFinite(fundsOut) || fundsOut <= 0) return '';
+  // `dateTime` writes UTC; shifted by Riyadh's fixed +03:00 it reads as the owner's clock.
+  const at = `${dateTime(fundsOut + TZ_OFFSET_MS)} Riyadh time`;
+  return `<div class="err">Dana can’t answer: Retell credit ran out at ${esc(at)}. Top up Retell and she resumes by herself; until then clients get the hand-over line.</div>`;
+}
+
+export function teamPage({ me, users = [], never = [], sendingEnabled = true, repliesEnabled = false, danaEnabled = false, danaConfigured = false, danaTests = 0, fundsOut = null, ok = null, error = null }) {
   // Fails closed like the setting itself: only a real `true` from team.repliesEnabled() is on.
   const repliesOn = repliesEnabled === true;
   const danaOn = danaEnabled === true;
@@ -54,7 +67,7 @@ export function teamPage({ me, users = [], never = [], sendingEnabled = true, re
   const nevers = never.map((n) => `<tr><td dir="ltr">${esc(fullPhone(n.phone_e164))}</td><td dir="auto">${esc(n.note ?? '')}</td>` +
     `<td>${post('/v1/admin/never/remove', 'Remove', { phone: n.phone_e164 })}</td></tr>`);
 
-  const body = `${flash}
+  const body = `${fundsBanner(fundsOut)}${flash}
 <h2>People</h2>
 <p class="sub">Everyone here logs in with a 6-digit code sent to their own WhatsApp from your number, and sees the same dashboard you do. Only owners see this page.</p>
 ${scrollTable('<th>Name</th><th>WhatsApp</th><th>Role</th><th>Status</th><th>Last login</th><th></th>', people, 'Nobody yet.')}

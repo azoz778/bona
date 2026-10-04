@@ -21,9 +21,22 @@ export const ROLES = ['owner', 'staff'];
  * turns replies on (design D14). `dana_enabled` ships '0' for the same reason: Dana answers
  * nobody on WhatsApp until the owner turns her on, after a test on one chat (§6, P4-3).
  */
-export const SETTINGS_DEFAULTS = { sending_enabled: '1', inbox_replies: '0', dana_enabled: '0' };
-/** The only values each setting may hold. A key with no entry here accepts any string. */
-export const SETTINGS_ALLOWED = { sending_enabled: ['0', '1'], inbox_replies: ['0', '1'], dana_enabled: ['0', '1'] };
+export const SETTINGS_DEFAULTS = { sending_enabled: '1', inbox_replies: '0', dana_enabled: '0', retell_funds_out: '', retell_funds_alerted: '' };
+/**
+ * A stored instant: `''` (none) or a whole ms timestamp. The Retell funds watch
+ * (lib/dana-funds.mjs, 2026-10-05 design R2) keeps two of these: `retell_funds_out`, when
+ * Retell started refusing for lack of credit, and `retell_funds_alerted`, the owners' last
+ * alert about it. Neither is a switch: the Team page's form cannot post them.
+ */
+const INSTANT = /^(?:|\d{1,16})$/;
+/**
+ * The values each setting may hold: a list, or a pattern the whole value must match. A key
+ * with no entry here accepts any string.
+ */
+export const SETTINGS_ALLOWED = {
+  sending_enabled: ['0', '1'], inbox_replies: ['0', '1'], dana_enabled: ['0', '1'],
+  retell_funds_out: INSTANT, retell_funds_alerted: INSTANT,
+};
 export const MAX_NAME = 80;
 export const MAX_NEVER_NOTE = 120;
 
@@ -224,7 +237,8 @@ export function createTeam(store, { now = () => Date.now(), log = () => {} } = {
   function setSetting(key, value, { by = null } = {}) {
     if (!Object.hasOwn(SETTINGS_DEFAULTS, key)) throw new TeamError('bad_setting');
     const allowed = SETTINGS_ALLOWED[key];
-    if (allowed && !allowed.includes(String(value))) throw new TeamError('bad_setting_value');
+    const v = String(value);
+    if (allowed && !(Array.isArray(allowed) ? allowed.includes(v) : allowed.test(v))) throw new TeamError('bad_setting_value');
     prep(`INSERT INTO settings (key, value, updated, updated_by) VALUES (?,?,?,?)
           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated = excluded.updated, updated_by = excluded.updated_by`)
       .run(String(key), String(value), now(), by);
