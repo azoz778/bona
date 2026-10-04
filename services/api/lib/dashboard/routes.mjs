@@ -85,6 +85,8 @@ export const PAGE_SECURITY_HEADERS = { ...SECURITY_HEADERS, 'Content-Security-Po
 const WORKER_CSP = "default-src 'none'; connect-src 'self'; img-src 'self'";
 
 export const MAX_NOTE = 2000;
+/** After an owner's join, Dana answers the waiting message only when it is this recent (U5). */
+export const MOVE_ANSWER_WINDOW_MS = 6 * 3_600_000;
 /**
  * The reply route's body cap. A reply may be 4,096 characters (lib/wa-send.mjs
  * MAX_TEXT_LEN), and a form percent-encodes each one to at most nine bytes (a three-byte
@@ -1030,6 +1032,23 @@ export function createDashboardRoutes({
   }
 
   /**
+   * The owner just vouched for this chat (Move, a candidate's Move, Add by number) and its
+   * history is in: if the client's newest unanswered message is recent, Dana answers it now
+   * under all her own rules (U5). Never awaited; `answer` never rejects. An older message is
+   * the team's to answer — a bot must not answer a two-week-old "hi". Logged by lead id only.
+   */
+  function wakeDanaAfterJoin(leadId) {
+    const dana = app?.dana;
+    if (!dana || typeof dana.answer !== 'function') return false;
+    const waiting = inbox.unansweredClientMessages(leadId, { limit: 1 });
+    const newest = waiting.length ? Number(waiting[waiting.length - 1].ts) : NaN;
+    if (!Number.isFinite(newest) || newest < now() - MOVE_ANSWER_WINDOW_MS) return false;
+    dana.answer(leadId, { ts: now() });
+    log({ evt: 'dash.dana_woken', leadId });
+    return true;
+  }
+
+  /**
    * A thread draws at least this many messages, every message from the oldest unread one
    * on plus this much before them, and never more than the most.
    */
@@ -1328,6 +1347,7 @@ export function createDashboardRoutes({
     audit?.record({ userId: me.user_id, action: 'inbox_move', target: leadId });
     log({ evt: 'dash.inbox_move', leadId });
     await joinHistory(leadId, t);
+    wakeDanaAfterJoin(leadId);
     // A phone-only lead becomes a chat once its history names a jid; until then, the list.
     const back = openChat(db.getLead(leadId)) ? `/dashboard/inbox/${encodeURIComponent(leadId)}?ok=moved` : '/dashboard/inbox?ok=moved';
     return answer(res, { form, back, status: 200, payload: { ok: true, lead_id: leadId } });
@@ -1362,6 +1382,7 @@ export function createDashboardRoutes({
     audit?.record({ userId: me.user_id, action: 'inbox_add', target: lead.lead_id });
     log({ evt: 'dash.inbox_add', leadId: lead.lead_id });
     await joinHistory(lead.lead_id, t);
+    wakeDanaAfterJoin(lead.lead_id);
     return answer(res, { form, back: `/dashboard/inbox/${encodeURIComponent(lead.lead_id)}?ok=added`, status: 200, payload: { ok: true, lead_id: lead.lead_id } });
   }
 
@@ -1397,6 +1418,7 @@ export function createDashboardRoutes({
     audit?.record({ userId: me.user_id, action: 'inbox_move', target: c.cand_id, meta: { lead_id: lead.lead_id } });
     log({ evt: 'dash.candidate_move', candId: c.cand_id, leadId: lead.lead_id });
     await joinHistory(lead.lead_id, t);
+    wakeDanaAfterJoin(lead.lead_id);
     const back = openChat(db.getLead(lead.lead_id)) ? `/dashboard/inbox/${encodeURIComponent(lead.lead_id)}?ok=moved` : '/dashboard/inbox?ok=moved';
     return answer(res, { form, back, status: 200, payload: { ok: true, lead_id: lead.lead_id } });
   }
