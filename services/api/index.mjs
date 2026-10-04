@@ -302,6 +302,9 @@ export function createApp(options = {}) {
   const poller = options.poller ?? (cfg.waPoll ? createPoller({
     db, cfg, sendWhatsApp, isExcluded: team.isExcludedPhone, log, now: clock, fetchImpl, inboxStore, ingest: ingestRecord, backfill,
     onClientMessage: (leadId, ts) => { alerts.notify(leadId, { ts }); dana.wake(leadId, ts); },
+    // A stranger's chat that has just entered the Unsure list: the owners' phones say
+    // "new chat to check" (2026-10-04 design, U1/U2).
+    onUnsureLead: (leadId, ts) => { alerts.notify(leadId, { reason: 'check', ts }); },
   }) : null);
   const tools = createToolHandlers({
     inventory, units, store, db, dataDir: cfg.dataDir, siteUrl: cfg.siteUrl, env: cfg.env, sendWhatsApp, log,

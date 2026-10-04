@@ -720,6 +720,20 @@ test('listUnsure and countUnsure: unsure or unplaced chats only, newest first, w
   s.close();
 });
 
+test('listUnsure({ first }): the tapped chat is always on the page and first, however many newer Unsure chats there are (U4)', () => {
+  const { s, inbox } = harness();
+  lead(s, 'OLD', { created: NOW - 30 * DAY, wa_jid: '966500000090@s.whatsapp.net', inbox_state: 'unsure' });
+  for (let i = 0; i < 205; i += 1) lead(s, `N${i}`, { created: NOW - i, wa_jid: `9665100${String(i).padStart(5, '0')}@s.whatsapp.net`, inbox_state: 'unsure' });
+  assert.ok(!inbox.listUnsure().some((r) => r.lead_id === 'OLD'), 'without first, the oldest falls off the 200');
+  const rows = inbox.listUnsure({ first: 'OLD' });
+  assert.equal(rows.length, 200);
+  assert.equal(rows[0].lead_id, 'OLD');
+  assert.deepEqual(rows.slice(1, 3).map((r) => r.lead_id), ['N0', 'N1'], 'the rest newest first');
+  assert.equal(inbox.listUnsure({ first: 'NOPE' })[0].lead_id, 'N0', 'a first that matches nothing changes nothing');
+  assert.equal(inbox.listUnsure({ first: 'OLD', limit: 1 })[0].lead_id, 'OLD');
+  s.close();
+});
+
 test('addGap records a message that could not be read, once; gapsFor lists one chat oldest first', () => {
   const { s, inbox } = harness();
   assert.equal(inbox.addGap({ key_id: 'G-2', lead_id: 'L-1', jid: JID, ts: NOW + 10, reason: 'failed' }), true);

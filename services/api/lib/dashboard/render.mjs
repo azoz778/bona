@@ -364,6 +364,7 @@ max-width:100%;overflow-wrap:anywhere}
 .chip.money{background:var(--greent);color:var(--green);border-color:transparent;font-variant-numeric:tabular-nums}
 .leadcard{background:var(--l1);border:1px solid var(--bd);border-radius:10px;margin-bottom:10px;overflow:hidden}
 .leadcard.hot{border-inline-start:3px solid var(--red)}
+.lr.ix.focus{border-inline-start:3px solid var(--red)}
 .leadcard.warm{border-inline-start:3px solid var(--gold)}
 .leadcard.cool{border-inline-start:3px solid var(--bd2)}
 .leadcard .body{display:block;padding:12px 14px}

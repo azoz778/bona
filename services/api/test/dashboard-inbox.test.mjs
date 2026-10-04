@@ -91,12 +91,13 @@ async function withInbox(fn) {
   };
   const sender = createSender({ env: ENV, team, inbox: inboxStore, db, fetchImpl, now, log });
 
-  const spy = { history: [], refresh: [], onRefresh: null };
+  const spy = { history: [], refresh: [], onRefresh: null, onHistory: null };
   const backfill = {
     configured: true,
     phoneJidOf: (lead) => (lead?.phone_e164 ? `${lead.phone_e164}@s.whatsapp.net` : null),
     async history(lead, opts = {}) {
       spy.history.push({ leadId: lead?.lead_id ?? null, sinceTs: opts.sinceTs, untilTs: opts.untilTs });
+      spy.onHistory?.(lead, opts);
       return { stored: 0, scanned: 0, truncated: false };
     },
     async refresh(lead) {
@@ -275,6 +276,89 @@ test('the inbox lists only chats that are in, to everyone; the Unsure list is th
     assert.ok(list.includes('Umar Unsure'));
     assert.ok(!list.includes('Alya Client'), 'the Unsure list is the guesses only');
     assert.ok(!list.includes('Noor Never Guess'));
+  });
+});
+
+test('the Unsure tab with focus: the tapped chat first and marked; a bad focus is ignored; staff still 403 (U4)', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    seedChat(h, { id: 'LEAD-U2', name: 'Usama Second', phone: '966500000084', state: 'unsure' });
+    const staff = await h.staff();
+    const boss = await h.boss();
+    const PILL = '<span class="pl hot">new chat to check</span>';
+    const focused = await h.get('/dashboard/inbox?tab=unsure&focus=LEAD-U', { cookie: boss });
+    assert.equal(focused.status, 200);
+    assertLocked(focused);
+    const html = await focused.text();
+    const first = html.indexOf('<div class="lr ix');
+    assert.equal(html.indexOf('<div class="lr ix focus">'), first, 'the focused row is the first row');
+    assert.ok(html.indexOf('Umar Unsure') < html.indexOf('Usama Second'));
+    assert.equal(html.split(PILL).length, 2);
+    for (const bad of ['../x', '..%2Fx', 'a'.repeat(65), '<b>']) {
+      const res = await h.get(`/dashboard/inbox?tab=unsure&focus=${encodeURIComponent(bad)}`, { cookie: boss });
+      assert.equal(res.status, 200, bad);
+      const page = await res.text();
+      assert.ok(!page.includes(PILL), bad);
+      assert.ok(!page.includes('lr ix focus'), bad);
+    }
+    assert.equal((await h.get('/dashboard/inbox?tab=unsure&focus=LEAD-U', { cookie: staff })).status, 403);
+  });
+});
+
+test('the Unsure tab with focus keeps an old chat on the page and first past 200 newer ones (U4)', async () => {
+  await withInbox(async (h) => {
+    seedScene(h); // LEAD-U, created an hour before NOW
+    for (let i = 0; i < 205; i += 1) {
+      h.db.insertLead({ lead_id: `LEAD-N${i}`, created: NOW + i, updated: NOW + i, phone_e164: `9665100${String(i).padStart(5, '0')}`, wa_jid: `9665100${String(i).padStart(5, '0')}@s.whatsapp.net`, name: `Newer ${i}`, channel: 'whatsapp', stage: 'new', inbox_state: 'unsure' });
+    }
+    const boss = await h.boss();
+    const plain = await (await h.get('/dashboard/inbox?tab=unsure', { cookie: boss })).text();
+    assert.ok(!plain.includes('Umar Unsure'), 'without focus it has fallen off the page');
+    const res = await h.get('/dashboard/inbox?tab=unsure&focus=LEAD-U', { cookie: boss });
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    const first = html.indexOf('<div class="lr ix');
+    assert.equal(html.indexOf('<div class="lr ix focus">'), first, 'the focused row is the first row');
+    assert.ok(html.indexOf('Umar Unsure') > first && html.indexOf('Umar Unsure') < html.indexOf('Newer 204'), 'before the newest of the rest');
+    assert.match(html, /action="\/v1\/admin\/inbox\/LEAD-U\/move"/, 'its Move button is there');
+  });
+});
+
+test('focus on an excluded or non-Unsure chat changes nothing on the page: no existence oracle at the 200-row cut', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    // An older Unsure chat whose number is on the never list: never on the page, focused or not.
+    h.db.insertLead({ lead_id: 'LEAD-X', created: NOW - 7_200_000, updated: NOW, phone_e164: '966500000085', wa_jid: '966500000085@s.whatsapp.net', name: 'Xena Excluded', channel: 'whatsapp', stage: 'new', inbox_state: 'unsure' });
+    h.team.addNever({ phone: '966500000085' });
+    for (let i = 0; i < 205; i += 1) {
+      h.db.insertLead({ lead_id: `LEAD-N${i}`, created: NOW + i, updated: NOW + i, phone_e164: `9665100${String(i).padStart(5, '0')}`, wa_jid: `9665100${String(i).padStart(5, '0')}@s.whatsapp.net`, name: `Newer ${i}`, channel: 'whatsapp', stage: 'new', inbox_state: 'unsure' });
+    }
+    const boss = await h.boss();
+    const ids = (html) => [...html.matchAll(/action="\/v1\/admin\/inbox\/(LEAD-[A-Za-z0-9_-]+)\/move"/g)].map((m) => m[1]);
+    const plain = await (await h.get('/dashboard/inbox?tab=unsure', { cookie: boss })).text();
+    const base = ids(plain);
+    assert.equal(base.length, 200);
+    for (const focus of ['LEAD-X', 'LEAD-A', 'LEAD-N']) {
+      const res = await h.get(`/dashboard/inbox?tab=unsure&focus=${focus}`, { cookie: boss });
+      assert.equal(res.status, 200, focus);
+      const html = await res.text();
+      assert.deepEqual(ids(html), base, `${focus}: the same rows, in the same order`);
+      assert.ok(!html.includes('lr ix focus'), focus);
+      assert.ok(!html.includes('new chat to check'), focus);
+    }
+  });
+});
+
+test('Dana that is not configured is never woken by a Move, and nothing is logged (U5)', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const calls = [];
+    h.app.dana = { configured: false, answer: (id, o) => { calls.push([id, o]); return Promise.resolve({ skipped: 'off' }); }, stop: async () => {} };
+    const boss = await h.boss();
+    historyBrings(h, [{ key_id: 'U-1', text: 'is the villa free?', ts: Date.now() - 60_000 }]);
+    assert.equal((await h.postForm('/v1/admin/inbox/LEAD-U/move', {}, { cookie: boss })).status, 303);
+    assert.equal(calls.length, 0);
+    assert.ok(!h.logs.some((e) => e.evt === 'dash.dana_woken'));
   });
 });
 
@@ -1304,6 +1388,115 @@ test('every owner join floors the chat\'s history 30 days back: Move, Add chat b
     await h.postForm('/v1/admin/inbox/LEAD-A/move', {}, { cookie: boss });
     await h.postForm('/v1/admin/inbox/add', { phone: '0500000077' }, { cookie: boss });
     assert.equal(h.db.getLead('LEAD-A').history_from, NOW - 3_600_000 - 86_400_000);
+  });
+});
+
+/* ---------------- the owner's join wakes Dana (U5) ---------------- */
+
+/**
+ * Dana as a spy: what `answer` was asked. The routes read `app.dana` live, so the spy
+ * replaces her after the build. The routes keep their own clock (`Date.now()`), so the
+ * messages the "30 days" bring are stamped against it.
+ */
+function danaSpy(h) {
+  const calls = [];
+  h.app.dana = {
+    configured: true,
+    answer: (id, o) => { calls.push([id, o]); return Promise.resolve({ answered: true }); },
+    stop: async () => {},
+  };
+  return calls;
+}
+/** The join's history "finds" these messages for the chat it is asked about. */
+function historyBrings(h, messages) {
+  h.spy.onHistory = (lead) => {
+    for (const m of messages) {
+      h.inboxStore.upsertMessage({ lead_id: lead.lead_id, jid: lead.wa_jid, direction: 'in', sender_kind: 'client', ...m });
+    }
+  };
+}
+
+test('Move wakes Dana when the client\'s newest unanswered message, brought by the 30 days, is recent (U5)', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const calls = danaSpy(h);
+    const boss = await h.boss();
+    historyBrings(h, [{ key_id: 'U-1', text: 'is the villa free?', ts: Date.now() - 10 * 60_000 }]);
+    const before = Date.now();
+    const res = await h.postForm('/v1/admin/inbox/LEAD-U/move', {}, { cookie: boss });
+    const after = Date.now();
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), '/dashboard/inbox/LEAD-U?ok=moved');
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][0], 'LEAD-U');
+    assert.deepEqual(Object.keys(calls[0][1]), ['ts']);
+    assert.ok(calls[0][1].ts >= before && calls[0][1].ts <= after, 'stamped at the join');
+    const woken = h.logs.filter((e) => e.evt === 'dash.dana_woken');
+    assert.deepEqual(woken, [{ evt: 'dash.dana_woken', leadId: 'LEAD-U' }]);
+  });
+});
+
+test('Move leaves an old waiting message to the team: 7 hours is past the window (U5)', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const calls = danaSpy(h);
+    const boss = await h.boss();
+    historyBrings(h, [
+      { key_id: 'U-1', text: 'hello', ts: Date.now() - 8 * 3_600_000 },
+      { key_id: 'U-2', text: 'anyone?', ts: Date.now() - 7 * 3_600_000 },
+    ]);
+    assert.equal((await h.postForm('/v1/admin/inbox/LEAD-U/move', {}, { cookie: boss })).status, 303);
+    assert.equal(calls.length, 0);
+    assert.ok(!h.logs.some((e) => e.evt === 'dash.dana_woken'));
+  });
+});
+
+test('Move does not wake Dana when the owner answered last: nothing is waiting (U5)', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const calls = danaSpy(h);
+    const boss = await h.boss();
+    historyBrings(h, [
+      { key_id: 'U-1', text: 'is it free?', ts: Date.now() - 20 * 60_000 },
+      { key_id: 'U-2', text: 'yes it is', ts: Date.now() - 10 * 60_000, direction: 'out', sender_kind: 'owner_number' },
+    ]);
+    assert.equal((await h.postForm('/v1/admin/inbox/LEAD-U/move', {}, { cookie: boss })).status, 303);
+    assert.equal(calls.length, 0);
+    assert.ok(!h.logs.some((e) => e.evt === 'dash.dana_woken'));
+  });
+});
+
+test('Move on a chat to check and Add chat by phone number wake Dana the same way (U5)', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    const cand = noteCand(h);
+    const calls = danaSpy(h);
+    const boss = await h.boss();
+    historyBrings(h, [{ key_id: 'W-1', text: 'price?', ts: Date.now() - 5 * 60_000 }]);
+    assert.equal((await h.postForm(`/v1/admin/inbox/candidates/${cand}/move`, {}, { cookie: boss })).status, 303);
+    const candLead = h.db.getLeadByPhone(CAND_PHONE).lead_id;
+    historyBrings(h, [{ key_id: 'W-2', text: 'price?', ts: Date.now() - 5 * 60_000 }]);
+    assert.equal((await h.postForm('/v1/admin/inbox/add', { phone: '0500000088' }, { cookie: boss })).status, 303);
+    const added = h.db.getLeadByPhone('966500000088').lead_id;
+    assert.deepEqual(calls.map(([id]) => id), [candLead, added]);
+    for (const [, o] of calls) assert.ok(Number.isFinite(o.ts));
+    assert.deepEqual(h.logs.filter((e) => e.evt === 'dash.dana_woken'), [
+      { evt: 'dash.dana_woken', leadId: candLead },
+      { evt: 'dash.dana_woken', leadId: added },
+    ]);
+  });
+});
+
+test('without Dana on the app a Move still joins and nothing throws (U5)', async () => {
+  await withInbox(async (h) => {
+    seedScene(h);
+    h.app.dana = undefined;
+    const boss = await h.boss();
+    historyBrings(h, [{ key_id: 'U-1', text: 'hi', ts: Date.now() - 60_000 }]);
+    const res = await h.postForm('/v1/admin/inbox/LEAD-U/move', {}, { cookie: boss });
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), '/dashboard/inbox/LEAD-U?ok=moved');
+    assert.ok(!h.logs.some((e) => e.evt === 'dash.dana_woken'));
   });
 });
 

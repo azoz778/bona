@@ -24,12 +24,20 @@ test('the asset map is exactly the six files, each with its type', () => {
   }
 });
 
-test('the service worker shows a fixed notification and caches nothing, intercepts nothing (P3-3)', () => {
+test('the service worker shows one of two fixed notifications and caches nothing, intercepts nothing (P3-3)', () => {
   const src = ASSETS.get('/dashboard/sw.js').body.toString('utf8');
   new vm.Script(src, { filename: 'sw.js' });
   assert.doesNotMatch(src, /\bcaches\b|addEventListener\(\s*['"]fetch['"]|importScripts|onfetch/);
   assert.match(src, /addEventListener\(\s*'push'/);
-  assert.match(src, /showNotification\(\s*'New Bona message'/);
+  // One same-origin request per push, to learn which fixed notification it is (U3): never a cache.
+  assert.equal(src.split('fetch(').length, 2, 'exactly one fetch( call');
+  assert.match(src, /fetch\('\/dashboard\/push\/latest', \{ credentials: 'include', cache: 'no-store', signal: AbortSignal\.timeout\(2000\) \}\)/);
+  assert.match(src, /'Bona: new chat to check'/);
+  assert.match(src, /'Someone new wrote to you\. Tap to decide\.'/);
+  assert.match(src, /tag: 'bona-check'/);
+  assert.match(src, /'New Bona message'/);
+  assert.match(src, /'A client wrote in the Bona inbox\.'/);
+  assert.match(src, /tag: 'bona-inbox'/);
   assert.match(src, /addEventListener\(\s*'notificationclick'/);
   assert.match(src, /'\/dashboard\/push\/open'/);
   // A tap asks the page (`bona:open`), tells it to go only on a yes (`bona:go`), and never drives an existing tab itself.
@@ -47,8 +55,8 @@ test('the service worker shows a fixed notification and caches nothing, intercep
  * `late`, the window answers only after the worker's wait has run out. With
  * `immediateTimeout`, that half-second wait fires at once.
  */
-function runWorker({ windows = [], immediateTimeout = false } = {}) {
-  const calls = { showNotification: [], openWindow: [], focus: [], asked: [], go: [], skipWaiting: 0, claim: 0 };
+function runWorker({ windows = [], immediateTimeout = false, fetch: fetchStub = undefined, AbortSignal: abortSignal = AbortSignal } = {}) {
+  const calls = { showNotification: [], openWindow: [], focus: [], asked: [], go: [], skipWaiting: 0, claim: 0, fetched: [] };
   const handlers = {};
   const windowClients = windows.map((w) => ({
     url: w.url,
@@ -76,7 +84,13 @@ function runWorker({ windows = [], immediateTimeout = false } = {}) {
   const timers = immediateTimeout
     ? { setTimeout: (fn) => { fn(); return 0; }, clearTimeout() {} }
     : { setTimeout, clearTimeout };
-  vm.runInNewContext(ASSETS.get('/dashboard/sw.js').body.toString('utf8'), { self, URL, MessageChannel, ...timers }, { filename: 'sw.js' });
+  // With `fetch`, the worker's one request is answered by the stub (and recorded); without it
+  // the context has no fetch at all, so the request throws and the worker falls back.
+  const net = fetchStub === undefined ? {} : {
+    AbortSignal: abortSignal,
+    fetch: async (url, init) => { calls.fetched.push({ url, credentials: init?.credentials, cache: init?.cache, signal: Boolean(init?.signal) }); return fetchStub(url, init); },
+  };
+  vm.runInNewContext(ASSETS.get('/dashboard/sw.js').body.toString('utf8'), { self, URL, MessageChannel, ...timers, ...net }, { filename: 'sw.js' });
   /** Fire one event, wait for what the handler put in `waitUntil`, then let any port traffic settle. */
   const fire = async (name, event = {}) => {
     let pending = Promise.resolve();
@@ -160,6 +174,36 @@ test('the worker: a push always shows the one notification; a tap asks our windo
   const empty = runWorker();
   await empty.fire('notificationclick');
   assert.deepEqual(empty.calls.openWindow, ['/dashboard/push/open']);
+});
+
+test('the worker asks once which notification a push is: a check only for { kind: check }, anything else the inbox one (U3)', async () => {
+  const CHECK = ['Bona: new chat to check', { body: 'Someone new wrote to you. Tap to decide.', icon: '/dashboard/icon-192.png', tag: 'bona-check', renotify: true }];
+  const INBOUND = ['New Bona message', { body: 'A client wrote in the Bona inbox.', icon: '/dashboard/icon-192.png', tag: 'bona-inbox', renotify: true }];
+  const json = (status, body) => async () => ({ ok: status >= 200 && status < 300, status, json: async () => body });
+  const shown = async (fetchStub) => {
+    const w = runWorker({ fetch: fetchStub });
+    await w.fire('push');
+    assert.equal(w.calls.fetched.length, 1, 'one request per push');
+    assert.deepEqual(w.calls.fetched[0], { url: '/dashboard/push/latest', credentials: 'include', cache: 'no-store', signal: true });
+    assert.equal(w.calls.showNotification.length, 1, 'always exactly one notification (iOS)');
+    // Copied out of the VM's realm so deepEqual compares plain objects.
+    return JSON.parse(JSON.stringify(w.calls.showNotification[0]));
+  };
+  assert.deepEqual(await shown(json(200, { kind: 'check' })), CHECK);
+  assert.deepEqual(await shown(json(200, { kind: 'inbound' })), INBOUND);
+  assert.deepEqual(await shown(json(200, { kind: 'other' })), INBOUND);
+  assert.deepEqual(await shown(json(401, { kind: 'check' })), INBOUND, 'a non-2xx answer is never trusted');
+  assert.deepEqual(await shown(async () => { throw new Error('timeout'); }), INBOUND, 'a timeout or a network error');
+  assert.deepEqual(await shown(async () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('bad'); } })), INBOUND, 'a body that is not JSON');
+  // fetch is there but AbortSignal has no timeout(): the throw inside the try still shows the inbox one.
+  const noTimeout = runWorker({ fetch: json(200, { kind: 'check' }), AbortSignal: {} });
+  await noTimeout.fire('push');
+  assert.deepEqual(noTimeout.calls.fetched, [], 'it threw before the request');
+  assert.deepEqual(JSON.parse(JSON.stringify(noTimeout.calls.showNotification)), [INBOUND]);
+  // No fetch in the context at all: the inbox notification still shows.
+  const bare = runWorker();
+  await bare.fire('push');
+  assert.deepEqual(JSON.parse(JSON.stringify(bare.calls.showNotification)), [INBOUND]);
 });
 
 test('app.js is one classic script that compiles', () => {
