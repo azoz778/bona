@@ -17,6 +17,11 @@
  *   - a message more than 30 minutes old is not an alert (the poller catching up after an
  *     outage): it waits in the list as unread.
  *
+ * The reason `check` (2026-10-04 design, U1–U4) is a chat that has just entered the Unsure
+ * list: it must be `unsure` and not excluded, it goes to the active owners only (the Unsure
+ * list is theirs), under the same two-minute and 30-minute rules, and each owner it is due
+ * for is remembered in memory (`pendingCheck`) until that chat leaves the Unsure list.
+ *
  * Each of the recipients' live devices gets one empty push (lib/push.mjs). 404/410 means the
  * browser dropped the subscription: the row goes. Anything else counts a failure and is
  * logged by its status only. Nothing is retried. `notify` never rejects. No endpoint, name,
@@ -35,7 +40,7 @@ export const MAX_DEVICES_PER_USER = 10;
  */
 const MARKS_MAX = 5000;
 /** The reasons a push can be sent for; anything else is logged as `other` and follows the `inbound` rules. */
-const REASONS = new Set(['inbound', 'needs_human']);
+const REASONS = new Set(['inbound', 'needs_human', 'check']);
 /** The failure kinds lib/push.mjs `send` answers, plus `threw` for a send that rejected after all. */
 const SEND_ERRORS = new Set(['timeout', 'network', 'bad_endpoint', 'threw']);
 
@@ -49,6 +54,7 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     return s;
   };
   const marks = new Map(); // `${userId}\n${leadId}` → when that member was last alerted about that chat
+  const checks = new Map(); // owner's user_id → { leadId, ts } of their newest "chat to check" alert (U4)
   const inflight = new Set();
   const say = (entry) => { try { log(entry); } catch { /* a logger never stops an alert */ } };
 
@@ -95,8 +101,11 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
 
   function recipients(lead, { reason = 'inbound', exceptUserId = null } = {}) {
     const everyone = () => prep('SELECT user_id FROM users WHERE active = 1 ORDER BY user_id').all().map((r) => r.user_id);
+    const owners = () => prep("SELECT user_id FROM users WHERE active = 1 AND role = 'owner' ORDER BY user_id").all().map((r) => r.user_id);
     let users;
-    if (reason === 'needs_human' || Number(lead?.needs_human) === 1) users = everyone();
+    // A chat to check is in the Unsure list, which only the owners see (D9, U2).
+    if (reason === 'check') users = owners();
+    else if (reason === 'needs_human' || Number(lead?.needs_human) === 1) users = everyone();
     else if (lead?.handler_user_id && prep('SELECT 1 FROM users WHERE user_id = ? AND active = 1').get(lead.handler_user_id)) users = [lead.handler_user_id];
     else users = everyone();
     return users.filter((u) => u !== exceptUserId);
@@ -114,7 +123,10 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     const t = now();
     if (ts != null && Number.isFinite(Number(ts)) && Number(ts) < t - ALERT_FRESH_MS) return { skipped: 'old' };
     const lead = db.getLead(leadId);
-    if (!lead || lead.inbox_state !== 'in' || isExcludedLead(lead)) return { skipped: 'not_in_inbox' };
+    if (why === 'check') {
+      // A chat to check lives in the Unsure list (U1); once it joins or leaves, it is no check.
+      if (!lead || lead.inbox_state !== 'unsure' || isExcludedLead(lead)) return { skipped: 'not_unsure' };
+    } else if (!lead || lead.inbox_state !== 'in' || isExcludedLead(lead)) return { skipped: 'not_in_inbox' };
     // Nothing above the sends may await: the marks must be set before another notify for this chat runs.
     const due = recipients(lead, { reason: why, exceptUserId }).filter((u) => {
       const at = marks.get(markKey(u, leadId));
@@ -131,6 +143,7 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     // burst is going out now, so a second message in the same two minutes is quiet for all of
     // them (a member who subscribes inside that window hears of the next burst).
     for (const u of due) marks.set(markKey(u, leadId), t);
+    if (why === 'check') for (const u of due) checks.set(u, { leadId, ts: t });
     prune(t);
     const users = new Set(devices.map((d) => d.user_id));
     // A send that rejects after all is that device's failure, never the batch's.
@@ -165,6 +178,16 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     return out;
   }
 
+  /** The owner's newest "chat to check" alert, while that chat is still in the Unsure list (U4). */
+  function pendingCheck(userId) {
+    const id = String(userId ?? '');
+    const c = checks.get(id);
+    if (!c) return null;
+    const lead = db.getLead(c.leadId);
+    if (!lead || lead.inbox_state !== 'unsure') { checks.delete(id); return null; }
+    return { leadId: c.leadId, ts: c.ts };
+  }
+
   function notify(leadId, { reason = 'inbound', exceptUserId = null, ts = null } = {}) {
     const p = Promise.resolve()
       .then(() => run(String(leadId ?? ''), { reason, exceptUserId, ts }))
@@ -182,6 +205,6 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
 
   return {
     configured: Boolean(pusher), publicKey: pusher?.publicKey ?? null,
-    subscribe, unsubscribe, forgetSession, pruneOrphans, countFor, recipients, notify, flush,
+    subscribe, unsubscribe, forgetSession, pruneOrphans, countFor, recipients, notify, pendingCheck, flush,
   };
 }

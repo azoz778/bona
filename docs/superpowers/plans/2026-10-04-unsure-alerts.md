@@ -39,7 +39,7 @@
 
 **Files:** modify `services/api/lib/alerts.mjs`, `services/api/lib/wa-poller.mjs`, `services/api/index.mjs`; tests `services/api/test/alerts.test.mjs`, `services/api/test/wa-poller.test.mjs`, `services/api/test/inbox-wiring.test.mjs`.
 
-- [ ] **Step 0: Baseline** — `cd ~/bona-wt/team-inbox/services && node --test api/test/*.test.mjs 2>&1 | tail -4`; write the pass count here: ______. (main moved since Phase 4; the count may differ from 1196.)
+- [ ] **Step 0: Baseline** — `cd ~/bona-wt/team-inbox/services && node --test api/test/*.test.mjs 2>&1 | tail -4`; write the pass count here: 1196 (2026-10-04, fail 0). (main moved since Phase 4; the count may differ from 1196.)
 
 - [ ] **Step 1: Failing tests**
 

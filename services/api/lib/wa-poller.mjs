@@ -338,10 +338,15 @@ const NO_EXCLUSIONS = () => false;
  *        settled it (its own, or the tick's when it has none). Never for a join's history, the
  *        owner's side, or anything the poller did not read itself; one that throws is a
  *        `poll.alert_failed` warn line, not a failed record.
+ * @param {(leadId: string, ts: number) => void} [o.onUnsureLead]
+ *        "New chat to check" alerts (2026-10-04 design, U1): called, never awaited, when an
+ *        inbound record moves a lead INTO the Unsure list — a new lead, or one that had no
+ *        inbox state yet — with the record's time. Never for a chat already Unsure writing
+ *        again, a join, or the owner's side; one that throws is a `poll.alert_failed` warn line.
  */
 export function createPoller({
   db, cfg = {}, findMessages = null, sendWhatsApp = null, isExcluded = NO_EXCLUSIONS, log = () => {}, now = () => Date.now(),
-  inboxStore = null, ingest = null, backfill = null, fetchImpl = undefined, onClientMessage = null,
+  inboxStore = null, ingest = null, backfill = null, fetchImpl = undefined, onClientMessage = null, onUnsureLead = null,
 } = {}) {
   // `createIngest()` hands back `{ ingest }`; the bare function is accepted as well. Every
   // other shape is refused here rather than read as "no inbox": a wiring slip that passes
@@ -696,7 +701,13 @@ export function createPoller({
     const signal = inboundSignal({ text, hasAdMeta: hasAdEvidence(adMetaOf(rec.contextInfo)), refKnown });
     const next = nextInboxState(lead.inbox_state, { signal, method });
     if (next === 'in' && lead.inbox_state !== 'in') await join(lead.lead_id, ts, 'inbound', tally);
-    else if (next && next !== lead.inbox_state) inboxStore.setInboxState(lead.lead_id, next, { since: ts });
+    else if (next && next !== lead.inbox_state) {
+      inboxStore.setInboxState(lead.lead_id, next, { since: ts });
+      // The chat has just entered the Unsure list from the client's side: the owners are told (U1).
+      if (next === 'unsure' && onUnsureLead) {
+        try { onUnsureLead(lead.lead_id, ts); } catch { log({ level: 'warn', evt: 'poll.alert_failed', leadId: lead.lead_id }); }
+      }
+    }
     if (next === 'in') await storeRecord(lead.lead_id, rec, ts, tally);
   }
 

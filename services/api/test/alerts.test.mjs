@@ -280,3 +280,52 @@ test('a logger that throws changes nothing: notify still answers what happened',
   const rows = s.db.db.prepare('SELECT endpoint, fail_count FROM push_subscriptions ORDER BY endpoint').all().map((r) => [r.endpoint, r.fail_count]);
   assert.deepEqual(rows, [[ep(1), 0], [ep(2), 1]]);
 });
+
+/** The scene plus one chat in the Unsure list (no handler), and a device each for the owner and Sara. */
+function checkScene() {
+  const s = scene();
+  s.db.insertLead({ lead_id: 'LEAD-U', created: NOW, updated: NOW, phone_e164: '966500000088', wa_jid: '966500000088@s.whatsapp.net', channel: 'whatsapp', stage: 'new', inbox_state: 'unsure', inbox_since: NOW });
+  s.sub('owner', 1); s.sub('sara', 2);
+  return s;
+}
+const setLead = (s, sql, ...args) => s.db.db.prepare(`UPDATE leads SET ${sql} WHERE lead_id = 'LEAD-U'`).run(...args);
+
+test("reason 'check': an Unsure chat alerts active owners only, once per 2 min, and is remembered until the chat leaves Unsure", async () => {
+  const s = checkScene();
+  const out = await s.alerts.notify('LEAD-U', { reason: 'check', ts: NOW - 1000 });
+  assert.deepEqual(out, { users: 1, devices: 1, ok: 1, gone: 0, failed: 0 });
+  assert.deepEqual(s.sent, [ep(1)], 'the owner only, never staff');
+  assert.deepEqual(s.alerts.pendingCheck(s.owner.user_id), { leadId: 'LEAD-U', ts: NOW });
+  assert.equal(s.alerts.pendingCheck(s.sara.user_id), null);
+  assert.deepEqual(await s.alerts.notify('LEAD-U', { reason: 'check', ts: NOW }), { skipped: 'quiet' }, 'one per chat per owner per 2 min');
+  setLead(s, "inbox_state = 'in'");
+  assert.equal(s.alerts.pendingCheck(s.owner.user_id), null, 'forgotten once the chat is no longer Unsure');
+  setLead(s, "inbox_state = 'unsure'");
+  assert.equal(s.alerts.pendingCheck(s.owner.user_id), null, 'and stays forgotten');
+  setLead(s, "inbox_state = 'in'");
+  s.tick(ALERT_EVERY_MS);
+  assert.deepEqual(await s.alerts.notify('LEAD-U', { reason: 'check', ts: s.now() }), { skipped: 'not_unsure' }, 'an in chat is not a check');
+  assert.ok(s.logs.some((l) => l.evt === 'push.sent' && l.reason === 'check' && l.users === 1));
+  assert.doesNotMatch(JSON.stringify(s.logs), /fcm\.googleapis|device-|966/);
+});
+
+test("reason 'check' keeps the freshness rule and the excluded rule", async () => {
+  const s = checkScene();
+  assert.deepEqual(await s.alerts.notify('LEAD-U', { reason: 'check', ts: NOW - 31 * 60_000 }), { skipped: 'old' });
+  setLead(s, 'phone_e164 = ?, wa_jid = ?', s.sara.phone_e164, s.sara.wa_jid);
+  assert.deepEqual(await s.alerts.notify('LEAD-U', { reason: 'check', ts: NOW }), { skipped: 'not_unsure' }, "a colleague's number is never a chat to check");
+  assert.deepEqual(await s.alerts.notify('LEAD-NOPE', { reason: 'check', ts: NOW }), { skipped: 'not_unsure' });
+  assert.equal(s.sent.length, 0);
+  assert.equal(s.alerts.pendingCheck(s.owner.user_id), null);
+});
+
+test('recipients for check are the active owners, whoever handles the chat', () => {
+  const s = checkScene();
+  setLead(s, 'handler_user_id = ?', s.sara.user_id);
+  const lead = () => s.db.getLead('LEAD-U');
+  assert.deepEqual(s.alerts.recipients(lead(), { reason: 'check' }), [s.owner.user_id]);
+  s.team.setRole(s.omar.user_id, 'owner');
+  assert.deepEqual(s.alerts.recipients(lead(), { reason: 'check' }).sort(), [s.owner.user_id, s.omar.user_id].sort());
+  s.team.deactivateUser(s.omar.user_id);
+  assert.deepEqual(s.alerts.recipients(lead(), { reason: 'check' }), [s.owner.user_id], 'a deactivated owner is not a recipient');
+});
