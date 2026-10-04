@@ -13,7 +13,8 @@
  * answer within 2 s, a throw — shows the generic one, so every push always shows exactly
  * one notification whenever `showNotification` itself succeeds (iOS withdraws the subscription of a worker that receives a push
  * without showing one). A tap opens /dashboard/push/open, which sends the signed-in member
- * to the Team page (funds), the chat to check, or their newest unread chat.
+ * to the chat to check or their newest unread chat — or, for the funds alert with nothing
+ * unread, the Team page.
  *
  * A tap never moves a dashboard tab on its own: the tab may hold a half-typed reply. The
  * worker focuses it and asks, in two steps over one message channel: `bona:open` (may
@@ -34,7 +35,7 @@ self.addEventListener('activate', (event) => { event.waitUntil(self.clients.clai
  * monochrome blob and iOS ignores it. Each kind has its own tag, so no kind hides another.
  */
 const NOTIFICATIONS = {
-  funds: ['Bona: Dana is out of Retell credit', { body: 'Dana can’t answer clients until Retell is topped up. Tap for details.', icon: '/dashboard/icon-192.png', tag: 'bona-funds', renotify: true }],
+  funds: ['Bona: Dana is out of Retell credit', { body: 'Dana can’t answer until Retell is topped up. A client may be waiting — tap to open.', icon: '/dashboard/icon-192.png', tag: 'bona-funds', renotify: true }],
   check: ['Bona: new chat to check', { body: 'Someone new wrote to you. Tap to decide.', icon: '/dashboard/icon-192.png', tag: 'bona-check', renotify: true }],
   inbound: ['New Bona message', { body: 'A client wrote in the Bona inbox.', icon: '/dashboard/icon-192.png', tag: 'bona-inbox', renotify: true }],
 };
