@@ -119,3 +119,16 @@ test('the Team page\'s "Off" line does not deny a test the owner armed', () => {
   assert.match(page(0), /Off\. Dana answers nobody on WhatsApp\. To try her/);
   assert.match(teamPage({ me: OWNER, users: [OWNER] }), /Off\. Dana answers nobody on WhatsApp\. To try her/, 'the default is no tests');
 });
+
+test('a red banner at the top of the Team page while Retell is out of credit, with the time in Riyadh; none otherwise (2026-10-05 R2)', () => {
+  // 2026-10-03 09:30 UTC is 12:30 in Riyadh (UTC+3, no DST).
+  const at = Date.UTC(2026, 9, 3, 9, 30);
+  const html = teamPage({ me: OWNER, users: [OWNER], fundsOut: at, ok: 'setting' });
+  const banner = /<div class="err">Dana can’t answer: Retell credit ran out at 2026-10-03 12:30 Riyadh time\. Top up Retell and she resumes by herself; until then clients get the hand-over line\.<\/div>/;
+  assert.match(html, banner);
+  assert.ok(html.indexOf('Retell credit ran out') < html.indexOf('<h2>People</h2>'), 'at the top');
+  assert.ok(html.indexOf('Retell credit ran out') < html.indexOf('class="ok"'), 'above the flash too');
+  for (const fine of [null, undefined, 0, NaN, '1790', 'x']) {
+    assert.doesNotMatch(teamPage({ me: OWNER, users: [OWNER], fundsOut: fine }), /Retell credit/, String(fine));
+  }
+});

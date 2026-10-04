@@ -56,6 +56,7 @@ import { bareJid } from './lib/evolution.mjs';
 import { createPusher, vapidKeys, VAPID_SUBJECT_RE } from './lib/push.mjs';
 import { createAlerts } from './lib/alerts.mjs';
 import { createDana } from './lib/dana-wa.mjs';
+import { createFundsWatch, fundsOutSince } from './lib/dana-funds.mjs';
 import { createDashboardRoutes } from './lib/dashboard/routes.mjs';
 
 const GREETING = {
@@ -287,8 +288,11 @@ export function createApp(options = {}) {
   // not reach a real client's WhatsApp. `danaBatchMs` is a test-only batch delay.
   const danaOnMock = Boolean(options.danaOnMock);
   if (!options.dana && cfg.retellMock && !danaOnMock) log({ level: 'warn', evt: 'dana.mock_off' });
+  // Retell out of credit (2026-10-05 design R2): every Retell call Dana makes tells this watch
+  // how it went; a 402 flags it in settings and pushes the owners, six hours apart at most.
+  const funds = options.funds ?? createFundsWatch({ team, alerts, now: clock, log });
   const dana = options.dana ?? createDana({
-    db, inbox: inboxStore, team, sender, retell: cfg.retellMock && !danaOnMock ? null : retell, alerts, inventory,
+    db, inbox: inboxStore, team, sender, retell: cfg.retellMock && !danaOnMock ? null : retell, alerts, inventory, funds,
     siteUrl: cfg.siteUrl, agentId: cfg.waChatAgentId ?? null, isExcludedLead: excludedLead, backfill, budget, now: clock, log,
     ...(Number.isFinite(options.danaBatchMs) ? { batchMs: options.danaBatchMs } : {}),
   });
@@ -332,7 +336,7 @@ export function createApp(options = {}) {
   // rather than a second wiring step. `server` and `handle` are added at the end.
   const app = {
     cfg, inventory, store, db, retell, tools, limiters, fanout, budget, team, audit, sender,
-    inboxStore, ingest, backfill, alerts, dana,
+    inboxStore, ingest, backfill, alerts, dana, funds,
     poller: options.poller ?? null,
   };
 
@@ -570,7 +574,8 @@ export function createApp(options = {}) {
       push: { configured: alerts.configured },
       // Dana on WhatsApp (P4-17): whether her agent id is set, and the global switch — never a
       // chat, a count of answers, or anything she said.
-      dana: { configured: dana.configured, enabled: team.danaEnabled() },
+      // `fundsOut`: Retell is refusing her for lack of credit (R2) — a yes or no, never when.
+      dana: { configured: dana.configured, enabled: team.danaEnabled(), fundsOut: fundsOutSince(team) !== null },
       inventory: inventory.count(),
       budget: budget.counters(),
       mock: cfg.retellMock || undefined,
