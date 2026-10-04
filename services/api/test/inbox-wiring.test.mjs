@@ -779,6 +779,51 @@ test('a client message the poller stores sends a phone alert through the one fet
   }
 });
 
+test('a stranger the poller puts in the Unsure list sends one "chat to check" push, to the owner\'s device only', async () => {
+  const JID = '966500000099@s.whatsapp.net';
+  const pushes = [];
+  const fetchImpl = async (url, init) => {
+    if (String(url).startsWith('https://fcm.googleapis.com/')) {
+      pushes.push({ url, init });
+      return { status: 201, arrayBuffer: async () => new ArrayBuffer(0) };
+    }
+    const body = JSON.parse(init.body);
+    const records = body.where?.messageTimestamp ? [{
+      key: { id: 'POLL-U', fromMe: false, remoteJid: JID }, pushName: 'Stranger', messageType: 'conversation',
+      message: { conversation: 'مرحبا بونا' }, messageTimestamp: Math.floor((NOW - 5_000) / 1000),
+    }] : [];
+    return { ok: true, status: 200, text: async () => JSON.stringify({ messages: { total: records.length, pages: 1, currentPage: 1, records } }) };
+  };
+  const pair = generateVapidKeys();
+  const h = build({
+    env: { ...ENV, BONA_OWNER_JID: '966593296933@s.whatsapp.net' },
+    config: { waPoll: true, vapidPublic: pair.publicKey, vapidPrivate: pair.privateKey, vapidSubject: 'https://bona.azoz.uk' }, fetchImpl,
+  });
+  try {
+    const { app, db } = h;
+    const owner = db.db.prepare("SELECT user_id FROM users WHERE role = 'owner' AND active = 1").get();
+    assert.ok(owner, 'the owner is seeded from BONA_OWNER_JID');
+    const sara = app.team.addUser({ name: 'Sara', phone: '966500000001', role: 'staff' });
+    const ownerToken = 'cd'.repeat(16);
+    const saraToken = 'ef'.repeat(16);
+    db.createAuthSession(ownerToken, { now: NOW, userId: owner.user_id });
+    db.createAuthSession(saraToken, { now: NOW, userId: sara.user_id });
+    assert.equal(app.alerts.subscribe({ userId: owner.user_id, sessionHash: tokenHash(ownerToken), endpoint: 'https://fcm.googleapis.com/fcm/send/own1', keys: KEYS }).ok, true);
+    assert.equal(app.alerts.subscribe({ userId: sara.user_id, sessionHash: tokenHash(saraToken), endpoint: 'https://fcm.googleapis.com/fcm/send/staff1', keys: KEYS }).ok, true);
+
+    await app.poller.tick();
+    const lead = db.getLeadByJid(JID);
+    assert.equal(lead?.inbox_state, 'unsure', 'a keyword guess: the Unsure list');
+    await app.alerts.flush();
+    assert.deepEqual(pushes.map((p) => p.url), ['https://fcm.googleapis.com/fcm/send/own1'], 'one push, to the owner; staff never hear of a chat to check');
+    assert.ok(h.logs.some((l) => l.evt === 'push.sent' && l.reason === 'check' && l.leadId === lead.lead_id && l.ok === 1));
+    assert.deepEqual(app.alerts.pendingCheck(owner.user_id), { leadId: lead.lead_id, ts: NOW });
+    assert.doesNotMatch(JSON.stringify(h.logs), /fcm\.googleapis|own1|staff1|966500000099|مرحبا|Stranger/);
+  } finally {
+    await h.close();
+  }
+});
+
 test('without VAPID keys the app has no alerts; a pair that does not match is refused out loud', async () => {
   const off = build({});
   try { assert.equal(off.app.alerts.configured, false); } finally { await off.close(); }

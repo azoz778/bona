@@ -91,11 +91,12 @@ function inboxWiring({ db, history, historyFails = false, logs, now }) {
  * (the backfill keeps the real one), for a store that fails. `rewire(wiring)` returns any of
  * `inboxStore`/`ingest`/`backfill` to hand the poller instead of the defaults (the rest of
  * the wiring keeps the real ones). `onNote` runs while the owner's note is being sent.
- * `onClientMessage` is the phone-alert trigger (Phase 3), handed to the poller with the inbox.
+ * `onClientMessage` is the phone-alert trigger (Phase 3), handed to the poller with the inbox;
+ * `onUnsureLead` the "new chat to check" trigger, handed over the same way.
  */
 function harness({
   windows = [], env = {}, seedSession = true, isExcluded, inbox = false, history = [], historyFails = false, ingestOverride = null,
-  rewire = null, onNote = null, onClientMessage = null,
+  rewire = null, onNote = null, onClientMessage = null, onUnsureLead = null,
 } = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-poller-'));
   const db = openDb(':memory:');
@@ -120,7 +121,7 @@ function harness({
     ...(isExcluded ? { isExcluded } : {}),
     ...(wiring ? {
       inboxStore: wiring.inbox, ingest: ingestOverride ?? wiring.ingest, backfill: wiring.backfill,
-      ...(onClientMessage ? { onClientMessage } : {}), ...(rewire ? rewire(wiring) : {}),
+      ...(onClientMessage ? { onClientMessage } : {}), ...(onUnsureLead ? { onUnsureLead } : {}), ...(rewire ? rewire(wiring) : {}),
     } : {}),
     log: (obj) => logs.push(obj),
     now: () => clock,
@@ -2585,6 +2586,67 @@ test('(u) an alert that throws is logged and changes nothing about the tick', as
   const h = harness({ inbox: true, history: [ref], windows: [[ref]], onClientMessage: () => { throw new Error('966500000000 boom'); } });
   const tally = await h.poller.tick();
   assert.equal(tally.stored, 1);
+  const line = h.logs.find((l) => l.evt === 'poll.alert_failed');
+  assert.equal(line.level, 'warn');
+  assert.doesNotMatch(JSON.stringify(line), /966|boom/);
+  h.cleanup();
+});
+
+/* -------------------- "new chat to check" alerts (2026-10-04, U1) -------------------- */
+
+test('(u) a chat entering the Unsure list from the client\'s side raises one check; a repeat message, a join and the owner\'s side raise none', async () => {
+  const checks = [];
+  const STRANGER = '966500000009@s.whatsapp.net';
+  const bona = msg({ id: 'BONA', jid: STRANGER, ts: NOW - 60_000, text: 'مرحبا بونا' });
+  const h = harness({ inbox: true, history: [], windows: [[bona]], onUnsureLead: (leadId, ts) => checks.push([leadId, ts]) });
+  await h.poller.tick();
+  const [lead] = h.leads();
+  assert.equal(lead.inbox_state, 'unsure');
+  assert.deepEqual(checks, [[lead.lead_id, NOW - 60_000]]);
+  h.push([msg({ id: 'BONA2', jid: STRANGER, ts: NOW - 50_000, text: 'still bona?' })]);
+  await h.poller.tick();
+  assert.equal(checks.length, 1, 'already in Unsure: no second check');
+  h.push([msg({ id: 'BONA3', jid: STRANGER, ts: NOW - 40_000, text: 'Ref BONA-W003 · K7Q2XR' })]);
+  await h.poller.tick();
+  assert.equal(h.db.getLead(lead.lead_id).inbox_state, 'in');
+  assert.equal(checks.length, 1, 'an Unsure chat that joins the inbox is not a check');
+  h.push([msg({ id: 'REF', ts: NOW - 30_000, text: 'Ref BONA-W003 · K7Q2XR' })]);
+  await h.poller.tick();
+  assert.equal(checks.length, 1, 'a new chat that joins the inbox is not a check');
+  h.push([msg({ id: 'OWN', fromMe: true, pushName: null, jid: '966500000011@s.whatsapp.net', ts: NOW - 20_000, text: 'bona?' })]);
+  await h.poller.tick();
+  assert.equal(checks.length, 1, 'the owner\'s side never raises a check');
+  h.cleanup();
+});
+
+test('(u) a lead that had no inbox state yet raises a check when a guess puts it in Unsure', async () => {
+  const checks = [];
+  const STRANGER = '966500000009@s.whatsapp.net';
+  const h = harness({ inbox: true, history: [], onUnsureLead: (leadId, ts) => checks.push([leadId, ts]) });
+  h.db.insertLead({ lead_id: 'LEAD-old', created: NOW - 86_400_000, updated: NOW - 86_400_000, phone_e164: '966500000009', wa_jid: STRANGER, channel: 'whatsapp', stage: 'new' });
+  assert.equal(h.db.getLead('LEAD-old').inbox_state, null);
+  h.push([msg({ id: 'BONA', jid: STRANGER, ts: NOW - 60_000, text: 'مرحبا بونا' })]);
+  await h.poller.tick();
+  assert.equal(h.db.getLead('LEAD-old').inbox_state, 'unsure');
+  assert.deepEqual(checks, [['LEAD-old', NOW - 60_000]]);
+  h.cleanup();
+});
+
+test('(u) an excluded number never raises a check', async () => {
+  const checks = [];
+  const bona = msg({ id: 'BONA', jid: '966500000009@s.whatsapp.net', ts: NOW - 60_000, text: 'مرحبا بونا' });
+  const h = harness({ inbox: true, history: [], windows: [[bona]], isExcluded: (digits) => digits === '966500000009', onUnsureLead: (leadId, ts) => checks.push([leadId, ts]) });
+  await h.poller.tick();
+  assert.equal(h.leads().length, 0);
+  assert.deepEqual(checks, []);
+  h.cleanup();
+});
+
+test('(u) a check hook that throws is a warn line and changes nothing', async () => {
+  const bona = msg({ id: 'BONA', jid: '966500000009@s.whatsapp.net', ts: NOW - 60_000, text: 'مرحبا بونا' });
+  const h = harness({ inbox: true, history: [], windows: [[bona]], onUnsureLead: () => { throw new Error('966500000009 boom'); } });
+  await h.poller.tick();
+  assert.equal(h.leads()[0].inbox_state, 'unsure');
   const line = h.logs.find((l) => l.evt === 'poll.alert_failed');
   assert.equal(line.level, 'warn');
   assert.doesNotMatch(JSON.stringify(line), /966|boom/);
