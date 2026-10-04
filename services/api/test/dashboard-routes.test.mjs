@@ -400,7 +400,7 @@ test('the app files are served signed out, with their types, never cached; a POS
       assert.equal(res.headers.get('x-frame-options'), 'DENY', p);
       assert.ok((await res.arrayBuffer()).byteLength > 0, p);
     }
-    assert.equal((await h.get('/dashboard/sw.js')).headers.get('content-security-policy'), "default-src 'none'; img-src 'self'");
+    assert.equal((await h.get('/dashboard/sw.js')).headers.get('content-security-policy'), "default-src 'none'; connect-src 'self'; img-src 'self'");
     assert.equal((await h.get('/dashboard/app.js')).headers.get('content-security-policy'), CSP, 'only the worker gets its own policy');
 
     // HEAD: the same headers, no body.

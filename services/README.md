@@ -710,8 +710,8 @@ Content-Security-Policy: default-src 'none'; base-uri 'none'; frame-ancestors 'n
 # JSON answers and redirects
 Content-Security-Policy: default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'
 
-# /dashboard/sw.js (the service worker loads nothing but the notification icon)
-Content-Security-Policy: default-src 'none'; img-src 'self'
+# /dashboard/sw.js (the service worker loads the notification icon and asks /dashboard/push/latest, nothing else)
+Content-Security-Policy: default-src 'none'; connect-src 'self'; img-src 'self'
 ```
 
 `Referrer-Policy: same-origin`, not `no-referrer`: under `no-referrer` Chrome sends
@@ -854,7 +854,16 @@ with a `wa_jid` or a `wa_lid`. Whether it belongs is **stored** in `leads.inbox_
 - *Unsure*: only the word Bona/بونا, a bare Ref-shaped code no session holds, ad context
   from an organic entry point, or only the ±15-min click window. The lead is kept for the statistics as before and goes to the
   owner-only **Unsure** tab (`?tab=unsure`; staff get 403), where *Move to Bona inbox* or
-  *Not a client* settles it.
+  *Not a client* settles it. A chat that newly enters the Unsure list sends the owners a phone
+  alert, "Bona: new chat to check" (*Phone alerts* below); tapping it opens the Unsure tab with
+  that chat first, marked "new chat to check" (`?focus=<lead id>`). *Move* pulls its last 30
+  days and, when the client's newest unanswered message is under 6 hours old
+  (`MOVE_ANSWER_WINDOW_MS`), wakes Dana (when she is configured), who answers it within about a
+  minute under her usual rules (*Dana on WhatsApp* below: her switch or the chat's test, no
+  human in 24 h, caps, hand-over) — with one difference: the Move itself counts as the fresh
+  trigger, so for that one answer her 30-minute freshness rule is replaced by the 6-hour
+  window. An older waiting message is left to the team. *Add chat by phone number* and
+  *Move* on a chat to check do the same (log `dash.dana_woken`, the lead id only).
 - *Owner-started*: the owner's own message in a 1:1 chat puts that chat `in` (a new lead gets
   `match_method = 'owner_outbound'`) with the 24 h before it when it carries a Bona site link
   (`bona-real-estate.com`, legacy `bona.azoz.uk`) or a listing id, or when it is a property
@@ -1078,11 +1087,13 @@ dismissed one a year after it was dismissed (`candidatesExpired`, `dismissalsExp
 
 - **What a member sees:** "New Bona message" on their phone within about a minute of a client writing in a Bona inbox chat (the poll interval). Tapping it opens their newest unread chat, else their newest inbox chat — in the dashboard tab already open when it has nothing half-typed; when it has (a reply, a number in *Add chat*), that tab is only brought to the front and shows a "new activity" note with the chat's link, and nothing typed is touched. The notification never says who wrote or what: the push carries no data, so no client text, name or number passes through Google, Apple or Mozilla.
 - **Who is alerted:** the chat's handler; nobody handling it → everyone active; a chat that needs a human → everyone. Never the member whose own action caused it. At most one alert per chat per member every 2 minutes. A message more than 30 minutes old (the poller catching up after an outage) waits as unread instead.
+- **New chat to check (owners):** when a client's message puts a chat on the Unsure list, the active owners (never staff) get "Bona: new chat to check" — "Someone new wrote to you. Tap to decide." — under the same 2-minute and 30-minute rules. Each owner's newest check stays pending for 2 hours, until a newer one replaces it, or until the chat leaves the Unsure list. A tap opens the Unsure tab with that chat first and marked; *Move to Bona inbox* there brings its 30 days and wakes Dana for a waiting message under 6 hours old (*Inbox → Unsure* above).
+- **The worker's two notifications:** the push carries nothing, so on each push the service worker (`/dashboard/sw.js`) makes one same-origin request, `GET /dashboard/push/latest` (signed in by the member's cookie; `401` otherwise), which answers only `{ "kind": "check" }` or `{ "kind": "inbound" }` — `check` when the member is an owner with a pending check newer than their newest unread inbox message. It shows "Bona: new chat to check" (tag `bona-check`) for `check`, and "New Bona message" (tag `bona-inbox`) for anything else, including a failed request, a non-2xx answer or no answer within 2 s, so every push shows exactly one notification. The worker still has no fetch listener and no cache; its CSP allows `connect-src 'self'` for that one request. `GET /dashboard/push/open` (the tap) decides the same way: a check → `/dashboard/inbox?tab=unsure&focus=<lead id>`, else the newest unread chat.
 - **Turning it on:** Inbox page → *Phone alerts* (the panel sits above the chat list) → *Turn on alerts*. Android: Chrome, any recent version. iPhone: iOS 16.4 or later, and only from the Home-Screen app: Safari → Share → *Add to Home Screen*, open Bona from the Home Screen, sign in there (it keeps its own login), then turn alerts on.
 - **Which devices:** alerts belong to the login they were turned on in. Logging out on a device ends alerts on that device only. Deactivating a member ends all their devices' alerts. A login that expires (30 days) ends its device's alerts until the member signs in again on it, when they come back by themselves. At most 10 devices per member.
 - **Live refresh:** the Inbox list and an open chat check every 15 s and reload by themselves when something changed, so nobody reloads by hand. While any field on the page holds text or is being typed in (the reply box, the owner's *Add chat by phone number* field), the page does not reload; a "new activity" note with a link appears instead (in a chat: "New activity in this chat"), and nothing typed is touched.
 - **Keys:** generated once on the VPS: `node /opt/bona/services/api/bin/vapid-keys.mjs --file ~/.secrets/bona-services.env`, then `deploy.sh` (bona-api reads them at start). Never generate a second pair: every phone's alerts would end until each member turns them on again. The generator always writes a 32-byte private scalar (about 1 key in 256 used to come out short and was refused at start-up); a pair already stored short still loads. `/health` shows `push.configured`; the daily upkeep's `inbox.maintenance` line counts `pushOrphans` (devices whose login has gone).
-- **Logs:** `push.sent` (counts), `push.refused` (a push service's status), `push.subscribed` (a new device, or one that changed hands: member id and `moved`) / `push.unsubscribed` (member id), `push.failed` (an alert whose run threw: the error's class name only), `push.keys_invalid` (keys malformed or mismatched: alerts stay off), `poll.alert_failed` (an alert that could not be started). Never an endpoint, a key, a name, a number or message text.
+- **Logs:** `push.sent` (counts and the reason: `inbound`, `needs_human` or `check`), `push.refused` (a push service's status), `push.subscribed` (a new device, or one that changed hands: member id and `moved`) / `push.unsubscribed` (member id), `push.failed` (an alert whose run threw: the error's class name only), `push.keys_invalid` (keys malformed or mismatched: alerts stay off), `poll.alert_failed` (an alert that could not be started). Never an endpoint, a key, a name, a number or message text.
 
 #### Dana on WhatsApp (Phase 4)
 

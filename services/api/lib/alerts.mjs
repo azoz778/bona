@@ -17,6 +17,14 @@
  *   - a message more than 30 minutes old is not an alert (the poller catching up after an
  *     outage): it waits in the list as unread.
  *
+ * The reason `check` (2026-10-04 design, U1–U4) is a chat that has just entered the Unsure
+ * list: it must be `unsure` and not excluded, it goes to the active owners only (the Unsure
+ * list is theirs), under the same two-minute and 30-minute rules, and each owner it is due
+ * for is remembered in memory (`pendingCheck`) until a newer check replaces it, the chat
+ * leaves the Unsure list, or CHECK_PENDING_MS (2 h) passes — longer than the push's 1 h TTL,
+ * so a push delivered late to a phone that was offline still reads as a check. A check's two-minute mark is its own: it never quiets the
+ * `inbound` alert of the same chat once the owner has moved it in.
+ *
  * Each of the recipients' live devices gets one empty push (lib/push.mjs). 404/410 means the
  * browser dropped the subscription: the row goes. Anything else counts a failure and is
  * logged by its status only. Nothing is retried. `notify` never rejects. No endpoint, name,
@@ -26,6 +34,8 @@ import { newId } from './db.mjs';
 import { pushEndpoint, subscriptionKeys } from './push.mjs';
 
 export const ALERT_EVERY_MS = 120_000;
+/** How long an owner's newest check stays pending (U4): longer than the push TTL of 1 h. */
+export const CHECK_PENDING_MS = 2 * 3_600_000;
 export const ALERT_FRESH_MS = 30 * 60_000;
 export const MAX_DEVICES_PER_USER = 10;
 /**
@@ -35,7 +45,7 @@ export const MAX_DEVICES_PER_USER = 10;
  */
 const MARKS_MAX = 5000;
 /** The reasons a push can be sent for; anything else is logged as `other` and follows the `inbound` rules. */
-const REASONS = new Set(['inbound', 'needs_human']);
+const REASONS = new Set(['inbound', 'needs_human', 'check']);
 /** The failure kinds lib/push.mjs `send` answers, plus `threw` for a send that rejected after all. */
 const SEND_ERRORS = new Set(['timeout', 'network', 'bad_endpoint', 'threw']);
 
@@ -49,6 +59,7 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     return s;
   };
   const marks = new Map(); // `${userId}\n${leadId}` → when that member was last alerted about that chat
+  const checks = new Map(); // owner's user_id → { leadId, ts, msgTs } of their newest "chat to check" alert (U4): ts = when it was sent, msgTs = the triggering message's time
   const inflight = new Set();
   const say = (entry) => { try { log(entry); } catch { /* a logger never stops an alert */ } };
 
@@ -95,14 +106,18 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
 
   function recipients(lead, { reason = 'inbound', exceptUserId = null } = {}) {
     const everyone = () => prep('SELECT user_id FROM users WHERE active = 1 ORDER BY user_id').all().map((r) => r.user_id);
+    const owners = () => prep("SELECT user_id FROM users WHERE active = 1 AND role = 'owner' ORDER BY user_id").all().map((r) => r.user_id);
     let users;
-    if (reason === 'needs_human' || Number(lead?.needs_human) === 1) users = everyone();
+    // A chat to check is in the Unsure list, which only the owners see (D9, U2).
+    if (reason === 'check') users = owners();
+    else if (reason === 'needs_human' || Number(lead?.needs_human) === 1) users = everyone();
     else if (lead?.handler_user_id && prep('SELECT 1 FROM users WHERE user_id = ? AND active = 1').get(lead.handler_user_id)) users = [lead.handler_user_id];
     else users = everyone();
     return users.filter((u) => u !== exceptUserId);
   }
 
-  const markKey = (userId, leadId) => `${userId}\n${leadId}`;
+  // A check is marked apart (U5: alert → Move within two minutes → the client's reply still alerts).
+  const markKey = (userId, leadId, why = null) => (why === 'check' ? `check\n${userId}\n${leadId}` : `${userId}\n${leadId}`);
   function prune(t) {
     if (marks.size <= MARKS_MAX) return;
     for (const [k, at] of marks) if (t - at >= ALERT_EVERY_MS) marks.delete(k);
@@ -114,10 +129,13 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     const t = now();
     if (ts != null && Number.isFinite(Number(ts)) && Number(ts) < t - ALERT_FRESH_MS) return { skipped: 'old' };
     const lead = db.getLead(leadId);
-    if (!lead || lead.inbox_state !== 'in' || isExcludedLead(lead)) return { skipped: 'not_in_inbox' };
+    if (why === 'check') {
+      // A chat to check lives in the Unsure list (U1); once it joins or leaves, it is no check.
+      if (!lead || lead.inbox_state !== 'unsure' || isExcludedLead(lead)) return { skipped: 'not_unsure' };
+    } else if (!lead || lead.inbox_state !== 'in' || isExcludedLead(lead)) return { skipped: 'not_in_inbox' };
     // Nothing above the sends may await: the marks must be set before another notify for this chat runs.
     const due = recipients(lead, { reason: why, exceptUserId }).filter((u) => {
-      const at = marks.get(markKey(u, leadId));
+      const at = marks.get(markKey(u, leadId, why));
       return at === undefined || t - at >= ALERT_EVERY_MS;
     });
     if (!due.length) return { skipped: 'quiet' };
@@ -130,7 +148,11 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     // Every member due is marked, not only those a device was found for: the alert for this
     // burst is going out now, so a second message in the same two minutes is quiet for all of
     // them (a member who subscribes inside that window hears of the next burst).
-    for (const u of due) marks.set(markKey(u, leadId), t);
+    for (const u of due) marks.set(markKey(u, leadId, why), t);
+    if (why === 'check') {
+      const msgTs = ts != null && Number.isFinite(Number(ts)) ? Number(ts) : t;
+      for (const u of due) checks.set(u, { leadId, ts: t, msgTs });
+    }
     prune(t);
     const users = new Set(devices.map((d) => d.user_id));
     // A send that rejects after all is that device's failure, never the batch's.
@@ -165,6 +187,28 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     return out;
   }
 
+  /**
+   * The owner's newest "chat to check" alert, while that chat is still in the Unsure list and
+   * not excluded (U4). `ts` is when it was sent (the 2 h expiry); `msgTs` the triggering
+   * message's time, which the dashboard ranks against unread inbox messages.
+   */
+  function pendingCheck(userId) {
+    const id = String(userId ?? '');
+    const c = checks.get(id);
+    if (!c) return null;
+    if (now() - c.ts > CHECK_PENDING_MS) { checks.delete(id); return null; }
+    const lead = db.getLead(c.leadId);
+    const owner = prep("SELECT 1 FROM users WHERE user_id = ? AND active = 1 AND role = 'owner'").get(id);
+    if (!owner || !lead || lead.inbox_state !== 'unsure' || isExcludedLead(lead)) { checks.delete(id); return null; }
+    return { leadId: c.leadId, ts: c.ts, msgTs: c.msgTs };
+  }
+
+  /**
+   * Pushes one alert about a chat to the members it is due for. Never rejects.
+   * @returns {Promise<{ users: number, devices: number, ok: number, gone: number, failed: number }
+   *   | { skipped: 'off' | 'old' | 'not_in_inbox' | 'not_unsure' | 'quiet' | 'no_devices' }
+   *   | { error: 'failed' }>}
+   */
   function notify(leadId, { reason = 'inbound', exceptUserId = null, ts = null } = {}) {
     const p = Promise.resolve()
       .then(() => run(String(leadId ?? ''), { reason, exceptUserId, ts }))
@@ -182,6 +226,6 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
 
   return {
     configured: Boolean(pusher), publicKey: pusher?.publicKey ?? null,
-    subscribe, unsubscribe, forgetSession, pruneOrphans, countFor, recipients, notify, flush,
+    subscribe, unsubscribe, forgetSession, pruneOrphans, countFor, recipients, notify, pendingCheck, flush,
   };
 }

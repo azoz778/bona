@@ -394,19 +394,25 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
    * can decide without opening WhatsApp. The snippet comes from the `lead_created`
    * touchpoint; a row whose meta is not valid JSON shows none rather than failing the page.
    */
-  function listUnsure({ limit = 200 } = {}) {
+  /**
+   * The Unsure list, newest first. `first` (a tapped "chat to check", U4) is put at the top
+   * whatever its age, so it is always on the page, never past the limit.
+   */
+  function listUnsure({ limit = 200, first = null } = {}) {
     return prep(`SELECT l.*,
                    (SELECT CASE WHEN json_valid(t.meta) THEN json_extract(t.meta, '$.snippet') END
                       FROM touchpoints t WHERE t.lead_id = l.lead_id AND t.event_type = 'lead_created'
                       ORDER BY t.ts ASC, t.rowid ASC LIMIT 1) AS snippet
                  FROM leads l
                  WHERE ${UNSURE_CHAT}
-                 ORDER BY l.created DESC, l.rowid DESC
+                 ORDER BY CASE WHEN l.lead_id = ? THEN 0 ELSE 1 END, l.created DESC, l.rowid DESC
                  LIMIT ?`)
-      .all(clampLimit(limit, 200)).map(leadRow);
+      .all(typeof first === 'string' ? first : '', clampLimit(limit, 200)).map(leadRow);
   }
 
   const countUnsure = () => prep(`SELECT COUNT(*) AS n FROM leads l WHERE ${UNSURE_CHAT}`).get().n;
+  /** Whether this lead is a row of the Unsure list (the same rule as `listUnsure`). */
+  const isUnsureChat = (leadId) => typeof leadId === 'string' && Boolean(prep(`SELECT 1 FROM leads l WHERE l.lead_id = ? AND ${UNSURE_CHAT}`).get(leadId));
 
   /**
    * `in` chats with nothing stored yet (amendment A3): the chats migration v4 let in
@@ -806,7 +812,7 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
   return {
     upsertMessage, messagesFor, newestTs, revision, hasMessages, countMessages, unreadSpan, messageByKey,
     insertOutbox, getOutbox, outboxByKey, updateOutbox, resolveUncertain, openOutboxFor, countSentSince, markStalePending, pruneCodeRows,
-    markRead, listInbox, unreadTotal, listUnsure, countUnsure, inChatsWithoutMessages, listedLeads,
+    markRead, listInbox, unreadTotal, listUnsure, countUnsure, isUnsureChat, inChatsWithoutMessages, listedLeads,
     addGap, gapsFor, clearGap, clearJoinGaps,
     setInboxState, setHandler, setNeedsHuman, noteHumanOutbound, countDanaSends, countDanaTests, humanOutboundAfter, unansweredClientMessages,
     purgeLead, leaveInbox, retentionPurge,
