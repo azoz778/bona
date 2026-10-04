@@ -46,6 +46,7 @@ import { normalisePhone } from '../phone.mjs';
 import { randomId } from '../store.mjs';
 import { replyJidFor } from '../wa-send.mjs';
 import { OWNER_HISTORY_MS } from '../inbox/backfill.mjs';
+import { fundsOutSince } from '../dana-funds.mjs';
 import {
   knownError,
   loginPage, logoutPage, overviewPage, leadsPage, leadDetailPage, listingsPage, spendPage, integrationsPage, messagePage,
@@ -676,6 +677,8 @@ export function createDashboardRoutes({
       danaEnabled: team.danaEnabled(),
       danaConfigured: Boolean(app?.dana?.configured),
       danaTests: inbox ? inbox.countDanaTests() : 0,
+      // Since when Retell has refused Dana for lack of credit (2026-10-05 R2): the red banner.
+      fundsOut: fundsOutSince(team),
       ok: url.searchParams.get('ok'),
       error: url.searchParams.get('error'),
     }));
@@ -1142,11 +1145,24 @@ export function createDashboardRoutes({
   }
 
   /**
-   * Which of the worker's two fixed notifications a push is (U3/U4): an owner's newest "chat
-   * to check" while it is newer than their newest unread inbox message; otherwise an inbox
-   * message. Decided here, signed in: the push itself carries nothing.
+   * Retell out of credit (2026-10-05 R2), for this owner's worker: the flag is still set AND
+   * this owner was pushed about it within the push's TTL — an older push is not the one the
+   * phone is showing now.
+   */
+  function fundsDue(me) {
+    if (me.role !== 'owner' || typeof alerts?.recentOwnerPush !== 'function') return false;
+    return alerts.recentOwnerPush(me.user_id, 'funds') !== null && fundsOutSince(team) !== null;
+  }
+
+  /**
+   * Which of the worker's three fixed notifications a push is (U3/U4, R2): Retell out of
+   * credit, for an owner it was pushed to (above all else: Dana is down for every client);
+   * else an owner's newest "chat to check" while it is newer than their newest unread inbox
+   * message; otherwise an inbox message. Decided here, signed in: the push itself carries
+   * nothing.
    */
   function alertKind(me) {
+    if (fundsDue(me)) return { kind: 'funds', check: null };
     const check = me.role === 'owner' && alerts ? alerts.pendingCheck(me.user_id) : null;
     if (!check) return { kind: 'inbound', check: null };
     const rows = inbox ? inboxRowsFor(me) : [];
@@ -1159,7 +1175,8 @@ export function createDashboardRoutes({
   function pushLatest({ res, me }) { return sendJson(res, 200, { kind: alertKind(me).kind }); }
 
   /**
-   * `GET /dashboard/push/open`: where a tapped alert lands (P3-4, U4). An owner's pending
+   * `GET /dashboard/push/open`: where a tapped alert lands (P3-4, U4, R2). Retell out of
+   * credit opens the Team page, where the banner says what to do. An owner's pending
    * "chat to check", when it is newer than their unread messages, opens the Unsure page with
    * that chat first. Otherwise the first row with unread messages of the member's own list
    * (unread first, newest first, rule 1 applied); with nothing unread — a colleague read it
@@ -1169,6 +1186,7 @@ export function createDashboardRoutes({
    */
   function pushOpen({ res, me }) {
     const { kind, check } = alertKind(me);
+    if (kind === 'funds') return redirect(res, '/dashboard/team', 302);
     if (kind === 'check') return redirect(res, `/dashboard/inbox?tab=unsure&focus=${encodeURIComponent(check.leadId)}`, 302);
     const rows = inbox ? inboxRowsFor(me) : [];
     const first = rows.find((r) => (Number(r.unread) || 0) > 0) ?? rows[0] ?? null;
