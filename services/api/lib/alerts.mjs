@@ -28,9 +28,10 @@
  * The reason `funds` (2026-10-05 design R2) is about no chat at all: Retell refusing Dana for
  * lack of credit. `notifyOwners` pushes it to the active owners' live devices, with no
  * two-minute or freshness rule of its own (lib/dana-funds.mjs spaces it, six hours apart,
- * from a flag that survives a restart). The time each owner was last pushed for it is kept in
- * memory (`recentOwnerPush`) for as long as the push itself lives (its 1 h TTL), so
- * /dashboard/push/latest can tell that owner's worker which notification a push is.
+ * from a flag that survives a restart). Which notification an owner's worker shows is decided
+ * from durable state (`fundsPending`): the funds alert under an hour old (the push TTL) and no
+ * push for any other reason to that member since. Those other pushes are remembered in memory
+ * per member; after a restart there are none, so a funds push still queued reads as funds.
  *
  * Each of the recipients' live devices gets one empty push (lib/push.mjs). 404/410 means the
  * browser dropped the subscription: the row goes. Anything else counts a failure and is
@@ -69,7 +70,7 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
   };
   const marks = new Map(); // `${userId}\n${leadId}` → when that member was last alerted about that chat
   const checks = new Map(); // owner's user_id → { leadId, ts, msgTs } of their newest "chat to check" alert (U4): ts = when it was sent, msgTs = the triggering message's time
-  const ownerPushes = new Map(); // `${reason}\n${userId}` → when that owner was last pushed for that owner-wide reason
+  const lastOther = new Map(); // user_id → when that member was last pushed for a chat (any reason but `funds`)
   const inflight = new Set();
   const say = (entry) => { try { log(entry); } catch { /* a logger never stops an alert */ } };
 
@@ -154,7 +155,10 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     // Every member due is marked, not only those a device was found for: the alert for this
     // burst is going out now, so a second message in the same two minutes is quiet for all of
     // them (a member who subscribes inside that window hears of the next burst).
-    for (const u of due) marks.set(markKey(u, leadId, why), t);
+    for (const u of due) {
+      marks.set(markKey(u, leadId, why), t);
+      lastOther.set(u, t);
+    }
     if (why === 'check') {
       const msgTs = ts != null && Number.isFinite(Number(ts)) ? Number(ts) : t;
       for (const u of due) checks.set(u, { leadId, ts: t, msgTs });
@@ -215,9 +219,6 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     const owners = prep("SELECT user_id FROM users WHERE active = 1 AND role = 'owner' ORDER BY user_id").all().map((r) => r.user_id);
     const devices = liveDevices(owners, t);
     if (!devices.length) return { skipped: 'no_devices' };
-    // Only an owner a push is going to is marked: the dashboard says `funds` to that owner's
-    // worker, and to nobody else's.
-    for (const u of new Set(devices.map((d) => d.user_id))) ownerPushes.set(`${why}\n${u}`, t);
     const out = await deliver(devices, t);
     say({ evt: 'push.sent', reason: why, ...out });
     return out;
@@ -275,18 +276,23 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
   }
 
   /**
-   * When this owner was last pushed for an owner-wide reason, while that push can still be
-   * on its way or on screen (its TTL, 1 h); null otherwise. In memory: a restart forgets it.
+   * Whether this member's newest push is the funds alert sent at `alertedAt` (the durable
+   * `retell_funds_alerted`, lib/dana-funds.mjs): an active owner, that alert under an hour old
+   * (the push TTL), and no push for a chat to them after it. The caller checks the flag itself.
    */
-  function recentOwnerPush(userId, reason) {
-    const at = ownerPushes.get(`${reason}\n${String(userId ?? '')}`);
-    return at !== undefined && now() - at <= PUSH_TTL_S * 1000 ? at : null;
+  function fundsPending(userId, alertedAt) {
+    const at = Number(alertedAt);
+    if (alertedAt == null || !Number.isFinite(at) || at <= 0) return false;
+    if (now() - at >= PUSH_TTL_S * 1000) return false;
+    const id = String(userId ?? '');
+    if ((lastOther.get(id) ?? -Infinity) > at) return false;
+    return Boolean(prep("SELECT 1 FROM users WHERE user_id = ? AND active = 1 AND role = 'owner'").get(id));
   }
 
   const flush = async () => { await Promise.allSettled([...inflight]); };
 
   return {
     configured: Boolean(pusher), publicKey: pusher?.publicKey ?? null,
-    subscribe, unsubscribe, forgetSession, pruneOrphans, countFor, recipients, notify, pendingCheck, notifyOwners, recentOwnerPush, flush,
+    subscribe, unsubscribe, forgetSession, pruneOrphans, countFor, recipients, notify, pendingCheck, notifyOwners, fundsPending, flush,
   };
 }

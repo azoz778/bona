@@ -3,14 +3,16 @@
  *
  * Dana's first real client got only the hand-over line because Retell answered 402 and
  * nobody knew why. lib/dana-wa.mjs now tells this watch about every Retell call it makes:
- * a 402 is `out()`, any call that works is `ok()`; no other status is about money.
+ * a 402 is `out()`, a completion that works is `ok()`; no other status is about money.
  *
  * The state lives in `settings`, so it survives a restart:
  *
  *   - `retell_funds_out`: when Retell started refusing (ms), `''` while it is fine. Set on the
- *     first 402 of an outage, kept through the next ones, cleared by the next call that works.
- *   - `retell_funds_alerted`: when the owners were last pushed about it (ms). Never cleared:
- *     a balance that flaps cannot alert more than once every six hours.
+ *     first 402 of an outage, kept through the next ones, cleared by the next completion that works.
+ *   - `retell_funds_alerted`: when a push about it last reached an owner's device (ms). Never
+ *     cleared by `ok()`: a balance that flaps cannot alert more than once every six hours. A
+ *     push that reached nobody (push off, no owner device, every send failed) does not count:
+ *     the stamp goes back to what it was, and the next 402 tries again.
  *
  * Clients are unchanged: the failed completion still becomes a hand-over. The owners' push is
  * the owner-wide `funds` alert (lib/alerts.mjs `notifyOwners`); the Team page shows a red banner
@@ -30,6 +32,8 @@ const instant = (v) => {
 
 /** Since when Retell has been refusing Dana for lack of credit (ms), or null while it is fine. */
 export const fundsOutSince = (team) => instant(team.getSetting('retell_funds_out'));
+/** When a funds push last reached an owner's device (ms), or null. */
+export const fundsAlertedAt = (team) => instant(team.getSetting('retell_funds_alerted'));
 
 /**
  * @param {object} o
@@ -53,11 +57,23 @@ export function createFundsWatch({ team, alerts = null, now = () => Date.now(), 
         say({ level: 'warn', evt: 'dana.funds_out' });
       }
       if (!alerts) return Promise.resolve(null);
-      const last = instant(team.getSetting('retell_funds_alerted'));
+      const last = fundsAlertedAt(team);
       if (last !== null && t - last < FUNDS_ALERT_EVERY_MS) return Promise.resolve(null);
-      // Stored before the push leaves: a second 402 during the send is quiet.
-      team.setSetting('retell_funds_alerted', String(t));
-      return Promise.resolve(alerts.notifyOwners({ reason: 'funds' })).catch((err) => { failed(err); return null; });
+      // Stored before the push leaves: a second 402 during the send is quiet. Rolled back
+      // when the push reached no device, so it never quiets the next 402.
+      const prev = team.getSetting('retell_funds_alerted');
+      const stamp = String(t);
+      team.setSetting('retell_funds_alerted', stamp);
+      return Promise.resolve()
+        .then(() => alerts.notifyOwners({ reason: 'funds' }))
+        .catch((err) => { failed(err); return null; })
+        .then((result) => {
+          if (Number(result?.ok) > 0) return result;
+          try {
+            if (team.getSetting('retell_funds_alerted') === stamp) team.setSetting('retell_funds_alerted', prev ?? '');
+          } catch (err) { failed(err); }
+          return result;
+        });
     } catch (err) {
       failed(err);
       return Promise.resolve(null);
@@ -77,7 +93,7 @@ export function createFundsWatch({ team, alerts = null, now = () => Date.now(), 
 
   function status() {
     try {
-      return { out: fundsOutSince(team), alerted: instant(team.getSetting('retell_funds_alerted')) };
+      return { out: fundsOutSince(team), alerted: fundsAlertedAt(team) };
     } catch {
       return { out: null, alerted: null };
     }

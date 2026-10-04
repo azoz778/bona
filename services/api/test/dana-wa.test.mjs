@@ -736,27 +736,27 @@ test('a 402 on createChat is funds.out() and still a hand-over for the client', 
   assertClean(h.logs);
 });
 
-test('a 402 on createChatCompletion is funds.out(); the createChat that worked was funds.ok()', async () => {
+test('a 402 on createChatCompletion is funds.out(); a createChat that worked clears nothing', async () => {
   const f = fundsSpy();
   const h = harness({ funds: f.make, answer: () => { throw paymentRequired(); } });
   h.client('C1', NOW - 5000, 'hello');
   assert.deepEqual(await h.dana.answer(LEAD, { ts: NOW - 5000 }), { handover: 'retell_error', sent: true });
-  assert.deepEqual(f.seen, { out: 1, ok: 1 });
+  assert.deepEqual(f.seen, { out: 1, ok: 0 }, 'only a completion that works says the credit is back');
 
   // A reused chat whose completion is refused: asked again on a new chat, refused again.
   const g = fundsSpy();
   const r = harness({ funds: g.make, lead: { dana_chat_id: 'chat_old', dana_chat_ts: NOW - 1000 }, answer: () => { throw paymentRequired(); } });
   r.client('C1', NOW - 5000, 'hello');
   assert.equal((await r.dana.answer(LEAD, { ts: NOW - 5000 })).handover, 'retell_error');
-  assert.deepEqual(g.seen, { out: 2, ok: 1 });
+  assert.deepEqual(g.seen, { out: 2, ok: 0 });
 });
 
-test('every Retell call that works is funds.ok(); other errors never touch the funds', async () => {
+test('a completion that works is funds.ok(); other errors never touch the funds', async () => {
   const f = fundsSpy();
   const h = harness({ funds: f.make });
   h.client('C1', NOW - 5000, 'hello');
   assert.equal((await h.dana.answer(LEAD, { ts: NOW - 5000 })).answered, true);
-  assert.deepEqual(f.seen, { out: 0, ok: 2 }, 'createChat and createChatCompletion');
+  assert.deepEqual(f.seen, { out: 0, ok: 1 }, 'the completion, not the createChat');
 
   for (const status of [400, 401, 404, 429, 500, undefined]) {
     const g = fundsSpy();
@@ -784,7 +784,7 @@ test('end to end with the real watch: two 402s push the owners once, a later suc
   const pushed = [];
   let fail = true;
   const h = harness({
-    funds: (team, now) => createFundsWatch({ team, now, alerts: { notifyOwners: (o) => { pushed.push(o); return Promise.resolve({}); } } }),
+    funds: (team, now) => createFundsWatch({ team, now, alerts: { notifyOwners: (o) => { pushed.push(o); return Promise.resolve({ users: 1, devices: 1, ok: 1, gone: 0, failed: 0 }); } } }),
     answer: () => { if (fail) throw paymentRequired(); return defaultAnswer(); },
   });
   h.client('C1', NOW - 5000, 'hello');
@@ -797,9 +797,9 @@ test('end to end with the real watch: two 402s push the owners once, a later suc
   h.client('C2', h.now() - 1000, 'hello again');
   assert.equal((await h.dana.answer(LEAD, { ts: h.now() - 1000 })).handover, 'retell_error');
   assert.equal(pushed.length, 1, 'no second push within 6 h');
-  // The stored chat's completion is refused, the new chat made for the retry works (ok: the
-  // flag clears), its completion is refused (out: set again) — still out, still one push.
-  assert.equal(fundsOutSince(h.team), h.now());
+  // The stored chat's completion is refused, the new chat made for the retry works (no ok:
+  // only a completion says the credit is back), its completion is refused — out since the first refusal.
+  assert.equal(fundsOutSince(h.team), NOW);
   // Topped up: the next answer clears the flag.
   fail = false;
   h.inbox.setNeedsHuman(LEAD, 0);
@@ -808,4 +808,23 @@ test('end to end with the real watch: two 402s push the owners once, a later suc
   assert.equal((await h.dana.answer(LEAD, { ts: h.now() - 1000 })).answered, true);
   assert.equal(fundsOutSince(h.team), null);
   assert.equal(pushed.length, 1);
+});
+
+test('createChat working and the completion refused never clears the flag in between', async () => {
+  const { createFundsWatch, fundsOutSince } = await import('../lib/dana-funds.mjs');
+  const seen = [];
+  const h = harness({
+    funds: (team, now) => {
+      const real = createFundsWatch({ team, now, alerts: { notifyOwners: () => Promise.resolve({ ok: 1 }) } });
+      return { out: () => { seen.push(['out', fundsOutSince(team)]); return real.out(); }, ok: () => { seen.push(['ok', fundsOutSince(team)]); real.ok(); } };
+    },
+    lead: { dana_chat_id: 'chat_old', dana_chat_ts: NOW - 1000 },
+    answer: () => { throw paymentRequired(); },
+  });
+  h.team.setSetting('retell_funds_out', String(NOW - HOUR));
+  h.client('C1', NOW - 5000, 'hello');
+  assert.equal((await h.dana.answer(LEAD, { ts: NOW - 5000 })).handover, 'retell_error');
+  assert.equal(h.retell.chats.length, 1, 'a new chat was made for the retry, and it worked');
+  assert.deepEqual(seen, [['out', NOW - HOUR], ['out', NOW - HOUR]], 'no ok() at any point');
+  assert.equal(fundsOutSince(h.team), NOW - HOUR, 'out since the first refusal');
 });
