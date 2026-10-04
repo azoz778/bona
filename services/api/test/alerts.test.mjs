@@ -506,3 +506,35 @@ test('fundsPending survives a restart: a new alerts instance over the same db ha
   s.team.deactivateUser(s.owner.user_id);
   assert.equal(again.fundsPending(s.owner.user_id, NOW - 1), false, 'a deactivated owner: never');
 });
+
+test('fundsPending: an older chat batch that completes last never lowers the recorded time', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const s = scene({ answer: (endpoint, n) => (n === 2 ? gate.then(() => ({ status: 201 })) : { status: 201 }) });
+  s.db.insertLead({ lead_id: 'LEAD-B', created: NOW, updated: NOW, phone_e164: '966500000099', wa_jid: '966500000099@s.whatsapp.net', channel: 'whatsapp', stage: 'new', inbox_state: 'in', inbox_since: NOW });
+  s.sub('owner', 1);
+  assert.equal((await s.alerts.notifyOwners({ reason: 'funds' })).ok, 1);
+  s.tick(60_000);
+  const older = s.alerts.notify('LEAD-A', { reason: 'needs_human', ts: s.now() }); // within the grace, stalls
+  await new Promise((r) => setImmediate(r));
+  s.tick(120_000);
+  assert.equal((await s.alerts.notify('LEAD-B', { reason: 'needs_human', ts: s.now() })).ok, 1); // past the grace
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, NOW), false);
+  release();
+  assert.equal((await older).ok, 1);
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, NOW), false, 'the older batch finishing last does not bring funds back');
+});
+
+test('fundsPending: a member is recorded as soon as one of their devices answers 2xx, not when the slowest one does', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const s = scene({ answer: (endpoint, n) => (endpoint === ep(2) && n > 2 ? gate.then(() => ({ status: 201 })) : { status: 201 }) });
+  s.sub('owner', 1); s.sub('owner', 2);
+  assert.equal((await s.alerts.notifyOwners({ reason: 'funds' })).ok, 2);
+  s.tick(ALERT_EVERY_MS + 1000);
+  const p = s.alerts.notify('LEAD-A', { ts: s.now() });
+  for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r));
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, NOW), false, 'device 1 answered: the chat push is on that phone');
+  release();
+  assert.equal((await p).ok, 2);
+});
