@@ -78,8 +78,11 @@ export const SECURITY_HEADERS = {
  */
 export const PAGE_CSP = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'";
 export const PAGE_SECURITY_HEADERS = { ...SECURITY_HEADERS, 'Content-Security-Policy': PAGE_CSP };
-/** The service worker's own CSP: it loads nothing but the notification icon. */
-const WORKER_CSP = "default-src 'none'; img-src 'self'";
+/**
+ * The service worker's own CSP: it loads nothing but the notification icon, and makes one
+ * same-origin request per push, to learn which of its two fixed notifications to show (U3).
+ */
+const WORKER_CSP = "default-src 'none'; connect-src 'self'; img-src 'self'";
 
 export const MAX_NOTE = 2000;
 /**
@@ -1120,13 +1123,33 @@ export function createDashboardRoutes({
   }
 
   /**
-   * `GET /dashboard/push/open`: where a tapped alert lands (P3-4). The first row with
-   * unread messages of the member's own list (unread first, newest first, rule 1 applied);
-   * with nothing unread — a colleague read it first, or the tap came late — the newest
-   * chat, which is the list's first row; with no chat at all, the list. The notification
-   * carries nothing, so the chat is chosen here, signed in.
+   * Which of the worker's two fixed notifications a push is (U3/U4): an owner's newest "chat
+   * to check" while it is newer than their newest unread inbox message; otherwise an inbox
+   * message. Decided here, signed in: the push itself carries nothing.
+   */
+  function alertKind(me) {
+    const check = me.role === 'owner' && alerts ? alerts.pendingCheck(me.user_id) : null;
+    if (!check) return { kind: 'inbound', check: null };
+    const rows = inbox ? inboxRowsFor(me) : [];
+    const newestUnread = rows.filter((r) => (Number(r.unread) || 0) > 0).reduce((m, r) => Math.max(m, Number(r.last_msg_ts) || 0), 0);
+    return check.ts > newestUnread ? { kind: 'check', check } : { kind: 'inbound', check: null };
+  }
+
+  /** `GET /dashboard/push/latest`: the worker's one question per push (U3). A kind, never a name or text. */
+  function pushLatest({ res, me }) { return sendJson(res, 200, { kind: alertKind(me).kind }); }
+
+  /**
+   * `GET /dashboard/push/open`: where a tapped alert lands (P3-4, U4). An owner's pending
+   * "chat to check", when it is newer than their unread messages, opens the Unsure page with
+   * that chat first. Otherwise the first row with unread messages of the member's own list
+   * (unread first, newest first, rule 1 applied); with nothing unread — a colleague read it
+   * first, or the tap came late — the newest chat, which is the list's first row; with no
+   * chat at all, the list. The notification carries nothing, so the chat is chosen here,
+   * signed in.
    */
   function pushOpen({ res, me }) {
+    const { kind, check } = alertKind(me);
+    if (kind === 'check') return redirect(res, `/dashboard/inbox?tab=unsure&focus=${encodeURIComponent(check.leadId)}`, 302);
     const rows = inbox ? inboxRowsFor(me) : [];
     const first = rows.find((r) => (Number(r.unread) || 0) > 0) ?? rows[0] ?? null;
     return redirect(res, first ? `/dashboard/inbox/${encodeURIComponent(first.lead_id)}` : '/dashboard/inbox', 302);
@@ -1139,8 +1162,11 @@ export function createDashboardRoutes({
     const owner = me.role === 'owner';
     if (url.searchParams.get('tab') === 'unsure') {
       if (!owner) return sendHtml(res, 403, messagePage({ title: 'Owners only', message: 'Only an owner can see the Unsure list.', me }));
+      // A tapped "chat to check" (U4): that chat first. An id-shaped value only, else ignored.
+      const focusRaw = url.searchParams.get('focus');
+      const focus = /^[A-Za-z0-9_-]{1,64}$/.test(focusRaw ?? '') ? focusRaw : null;
       return sendHtml(res, 200, unsurePage({
-        me, rows: inbox.listUnsure().filter((l) => !excludedLead(l)), candidates: candidatesShown(), ok, error, now: now(),
+        me, rows: inbox.listUnsure().filter((l) => !excludedLead(l)), candidates: candidatesShown(), ok, error, now: now(), focus,
       }));
     }
     const rows = inboxRowsFor(me);
@@ -1455,6 +1481,13 @@ export function createDashboardRoutes({
 
     /* --- everything else needs a signed-in, active member --- */
     const user = currentUser(req);
+    // The worker's question (U3): JSON both ways — its caller is the service worker, which
+    // cannot follow a login page, so signed out is a plain 401 and it shows the generic alert.
+    if (p === '/dashboard/push/latest') {
+      if (!user) return sendJson(res, 401, { error: 'unauthorised' });
+      if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method_not_allowed' });
+      return pushLatest({ res, me: user });
+    }
     if (!user) return toLogin(res);
     if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method_not_allowed' });
     // A thread marks itself read before it is drawn, so it counts its own badge.

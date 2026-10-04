@@ -153,16 +153,17 @@ const WHY_UNSURE = {
   time_window: 'wrote within 15 minutes of a tap on the site',
 };
 
-function unsureRow(row, now) {
+/** One Unsure chat; `focused` is the tapped "chat to check" (U4): marked, its decisions right there. */
+function unsureRow(row, now, { focused = false } = {}) {
   const name = String(row.name ?? '').trim();
   const why = typeof row.match_method === 'string' && Object.hasOwn(WHY_UNSURE, row.match_method)
     ? WHY_UNSURE[row.match_method]
     : 'no sure sign it is about Bona';
   const snippet = preview(row.snippet, 160);
-  return `<div class="lr ix">
+  return `<div class="lr ix${focused ? ' focus' : ''}">
   <span class="av2" aria-hidden="true"><span dir="auto">${esc(firstLetter(name))}</span></span>
   <div>
-    <div class="l1"><span class="nm"><a href="${esc(leadHref(row.lead_id))}"><bdi>${esc(name || 'Unnamed')}</bdi></a></span><span class="pl warm">${esc(why)}</span></div>
+    <div class="l1"><span class="nm"><a href="${esc(leadHref(row.lead_id))}"><bdi>${esc(name || 'Unnamed')}</bdi></a></span>${focused ? '<span class="pl hot">new chat to check</span>' : ''}<span class="pl warm">${esc(why)}</span></div>
     <div class="l2"><span class="tel">${esc(maskPhone(row.phone_e164))}</span><span>·</span><span>${esc(agoSince(now, row.created))}</span></div>
     ${snippet ? `<div class="l2"><span dir="auto">${esc(snippet)}</span></div>` : ''}
     <div class="acts" style="margin-top:8px">${postButton(writeHref(row.lead_id, 'move'), 'Move to Bona inbox')}${postButton(writeHref(row.lead_id, 'out'), 'Not a client')}</div>
@@ -214,11 +215,13 @@ function candidateRow(c, now) {
  * (D17). Only the owner decides, so only the owner sees them; the chats to check are drawn
  * only for an owner even if a caller passes them for someone else. The tab counts both.
  */
-export function unsurePage({ me, rows, candidates = [], ok = null, error = null, now = Date.now() }) {
+export function unsurePage({ me, rows, candidates = [], ok = null, error = null, now = Date.now(), focus = null }) {
   const list = Array.isArray(rows) ? rows : [];
   const cands = me?.role === 'owner' && Array.isArray(candidates) ? candidates : [];
+  // A tapped "chat to check" (U4) is drawn first; a focus that matches no row changes nothing.
+  const ordered = focus ? [...list.filter((r) => r.lead_id === focus), ...list.filter((r) => r.lead_id !== focus)] : list;
   const guesses = list.length
-    ? `<div class="card cp">${list.map((r) => unsureRow(r, now)).join('')}</div>`
+    ? `<div class="card cp">${ordered.map((r) => unsureRow(r, now, { focused: focus != null && r.lead_id === focus })).join('')}</div>`
     : `<p class="muted">${cands.length ? 'No chats that mention Bona to decide.' : 'Nothing to decide.'}</p>`;
   const toCheck = cands.length
     ? `<h2 style="margin-top:22px">Real-estate chats to check</h2>

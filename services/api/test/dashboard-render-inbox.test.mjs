@@ -163,6 +163,27 @@ test('the Unsure list: escaped snippet, masked number, why it is unsure, and the
   assert.match(unsurePage({ me: OWNER, rows: [], now: NOW }), /Nothing to decide/);
 });
 
+test('the Unsure list: the focused chat (a tapped "chat to check") is drawn first, marked, its decisions right there (U4)', () => {
+  const A = { ...LEAD, lead_id: 'LEAD-A1', inbox_state: 'unsure', match_method: 'keyword', name: 'Ali First' };
+  const B = { ...LEAD, lead_id: 'LEAD-B2', inbox_state: 'unsure', match_method: null, name: 'Basma Second' };
+  const PILL = '<span class="pl hot">new chat to check</span>';
+  const focused = unsurePage({ me: OWNER, now: NOW, rows: [A, B], focus: B.lead_id });
+  assert.ok(focused.indexOf('Basma Second') < focused.indexOf('Ali First'), 'the focused chat first');
+  assert.equal(focused.split('class="lr ix focus"').length, 2, 'exactly one focused row');
+  assert.equal(focused.split(PILL).length, 2, 'exactly one pill');
+  const row = focused.slice(focused.indexOf('class="lr ix focus"'), focused.indexOf('Ali First'));
+  assert.ok(row.includes('Basma Second') && row.includes(PILL), 'the pill is on the focused row');
+  assert.ok(row.indexOf('Basma Second') < row.indexOf(PILL), 'after its name');
+  assert.match(row, /action="\/v1\/admin\/inbox\/LEAD-B2\/move"/, 'its Move button right there');
+
+  const plain = unsurePage({ me: OWNER, now: NOW, rows: [A, B] });
+  assert.ok(plain.indexOf('Ali First') < plain.indexOf('Basma Second'), 'no focus: the order as given');
+  assert.ok(!plain.includes('new chat to check'));
+  assert.ok(!plain.includes(' focus"'));
+  assert.equal(unsurePage({ me: OWNER, now: NOW, rows: [A, B], focus: 'LEAD-nope' }), plain, 'a focus that matches nothing changes nothing');
+  assert.ok(!unsurePage({ me: OWNER, now: NOW, rows: [A, B], focus: EVIL }).includes('<img'), 'nothing of the focus is drawn');
+});
+
 /* ---------------- one chat ---------------- */
 
 test('a thread: client bubbles left, ours right, each labelled; media shows its placeholder and caption', () => {
