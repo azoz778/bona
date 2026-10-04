@@ -25,13 +25,20 @@
  * so a push delivered late to a phone that was offline still reads as a check. A check's two-minute mark is its own: it never quiets the
  * `inbound` alert of the same chat once the owner has moved it in.
  *
+ * The reason `funds` (2026-10-05 design R2) is about no chat at all: Retell refusing Dana for
+ * lack of credit. `notifyOwners` pushes it to the active owners' live devices, with no
+ * two-minute or freshness rule of its own (lib/dana-funds.mjs spaces it, six hours apart,
+ * from a flag that survives a restart). The time each owner was last pushed for it is kept in
+ * memory (`recentOwnerPush`) for as long as the push itself lives (its 1 h TTL), so
+ * /dashboard/push/latest can tell that owner's worker which notification a push is.
+ *
  * Each of the recipients' live devices gets one empty push (lib/push.mjs). 404/410 means the
  * browser dropped the subscription: the row goes. Anything else counts a failure and is
  * logged by its status only. Nothing is retried. `notify` never rejects. No endpoint, name,
  * number or message text is ever logged: counts and ids only.
  */
 import { newId } from './db.mjs';
-import { pushEndpoint, subscriptionKeys } from './push.mjs';
+import { pushEndpoint, subscriptionKeys, PUSH_TTL_S } from './push.mjs';
 
 export const ALERT_EVERY_MS = 120_000;
 /** How long an owner's newest check stays pending (U4): longer than the push TTL of 1 h. */
@@ -46,6 +53,8 @@ export const MAX_DEVICES_PER_USER = 10;
 const MARKS_MAX = 5000;
 /** The reasons a push can be sent for; anything else is logged as `other` and follows the `inbound` rules. */
 const REASONS = new Set(['inbound', 'needs_human', 'check']);
+/** The owner-wide reasons, about no chat (`notifyOwners`). */
+const OWNER_REASONS = new Set(['funds']);
 /** The failure kinds lib/push.mjs `send` answers, plus `threw` for a send that rejected after all. */
 const SEND_ERRORS = new Set(['timeout', 'network', 'bad_endpoint', 'threw']);
 
@@ -60,6 +69,7 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
   };
   const marks = new Map(); // `${userId}\n${leadId}` → when that member was last alerted about that chat
   const checks = new Map(); // owner's user_id → { leadId, ts, msgTs } of their newest "chat to check" alert (U4): ts = when it was sent, msgTs = the triggering message's time
+  const ownerPushes = new Map(); // `${reason}\n${userId}` → when that owner was last pushed for that owner-wide reason
   const inflight = new Set();
   const say = (entry) => { try { log(entry); } catch { /* a logger never stops an alert */ } };
 
@@ -139,11 +149,7 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
       return at === undefined || t - at >= ALERT_EVERY_MS;
     });
     if (!due.length) return { skipped: 'quiet' };
-    const devices = prep(`SELECT s.id, s.user_id, s.endpoint FROM push_subscriptions s
-        JOIN users u ON u.user_id = s.user_id AND u.active = 1
-        JOIN auth_sessions a ON a.token_hash = s.session_hash AND a.user_id = s.user_id AND a.expires >= ?
-        WHERE s.user_id IN (SELECT value FROM json_each(?))
-        ORDER BY s.rowid`).all(t, JSON.stringify(due));
+    const devices = liveDevices(due, t);
     if (!devices.length) return { skipped: 'no_devices' };
     // Every member due is marked, not only those a device was found for: the alert for this
     // burst is going out now, so a second message in the same two minutes is quiet for all of
@@ -154,6 +160,23 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
       for (const u of due) checks.set(u, { leadId, ts: t, msgTs });
     }
     prune(t);
+    const out = await deliver(devices, t);
+    say({ evt: 'push.sent', leadId, reason: why, ...out });
+    return out;
+  }
+
+  /** The live devices of these members: an active member, a session still signed in. */
+  const liveDevices = (userIds, t) => prep(`SELECT s.id, s.user_id, s.endpoint FROM push_subscriptions s
+      JOIN users u ON u.user_id = s.user_id AND u.active = 1
+      JOIN auth_sessions a ON a.token_hash = s.session_hash AND a.user_id = s.user_id AND a.expires >= ?
+      WHERE s.user_id IN (SELECT value FROM json_each(?))
+      ORDER BY s.rowid`).all(t, JSON.stringify(userIds));
+
+  /**
+   * One empty push to each device, and what each answer means for its row — the one loop
+   * every reason shares. `t` is when the batch started. Counts only: the caller logs them.
+   */
+  async function deliver(devices, t) {
     const users = new Set(devices.map((d) => d.user_id));
     // A send that rejects after all is that device's failure, never the batch's.
     const answers = await Promise.all(devices.map(async (d) => ({
@@ -182,8 +205,21 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
         });
       }
     }
-    const out = { users: users.size, devices: devices.length, ok, gone, failed };
-    say({ evt: 'push.sent', leadId, reason: why, ...out });
+    return { users: users.size, devices: devices.length, ok, gone, failed };
+  }
+
+  /** An owner-wide alert (`funds`): the active owners' live devices, each owner marked before the sends. */
+  async function runOwners(why) {
+    if (!pusher) return { skipped: 'off' };
+    const t = now();
+    const owners = prep("SELECT user_id FROM users WHERE active = 1 AND role = 'owner' ORDER BY user_id").all().map((r) => r.user_id);
+    const devices = liveDevices(owners, t);
+    if (!devices.length) return { skipped: 'no_devices' };
+    // Only an owner a push is going to is marked: the dashboard says `funds` to that owner's
+    // worker, and to nobody else's.
+    for (const u of new Set(devices.map((d) => d.user_id))) ownerPushes.set(`${why}\n${u}`, t);
+    const out = await deliver(devices, t);
+    say({ evt: 'push.sent', reason: why, ...out });
     return out;
   }
 
@@ -210,8 +246,13 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
    *   | { error: 'failed' }>}
    */
   function notify(leadId, { reason = 'inbound', exceptUserId = null, ts = null } = {}) {
+    return guarded(() => run(String(leadId ?? ''), { reason, exceptUserId, ts }));
+  }
+
+  /** A push run that never rejects and that `flush` waits for. */
+  function guarded(fn) {
     const p = Promise.resolve()
-      .then(() => run(String(leadId ?? ''), { reason, exceptUserId, ts }))
+      .then(fn)
       .catch((err) => {
         // Only a plain error class name is logged: a message, or a name that is not one, could carry anything.
         say({ level: 'error', evt: 'push.failed', name: typeof err?.name === 'string' && /^[A-Za-z]{1,40}$/.test(err.name) ? err.name : 'Error' });
@@ -222,10 +263,30 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     return p;
   }
 
+  /**
+   * Pushes one owner-wide alert (reason `funds`) to every active owner's live devices. Never
+   * rejects; a reason that is not owner-wide is refused, never sent as something else.
+   * @returns {Promise<{ users: number, devices: number, ok: number, gone: number, failed: number }
+   *   | { skipped: 'bad_reason' | 'off' | 'no_devices' } | { error: 'failed' }>}
+   */
+  function notifyOwners({ reason = null } = {}) {
+    if (!OWNER_REASONS.has(reason)) return Promise.resolve({ skipped: 'bad_reason' });
+    return guarded(() => runOwners(reason));
+  }
+
+  /**
+   * When this owner was last pushed for an owner-wide reason, while that push can still be
+   * on its way or on screen (its TTL, 1 h); null otherwise. In memory: a restart forgets it.
+   */
+  function recentOwnerPush(userId, reason) {
+    const at = ownerPushes.get(`${reason}\n${String(userId ?? '')}`);
+    return at !== undefined && now() - at <= PUSH_TTL_S * 1000 ? at : null;
+  }
+
   const flush = async () => { await Promise.allSettled([...inflight]); };
 
   return {
     configured: Boolean(pusher), publicKey: pusher?.publicKey ?? null,
-    subscribe, unsubscribe, forgetSession, pruneOrphans, countFor, recipients, notify, pendingCheck, flush,
+    subscribe, unsubscribe, forgetSession, pruneOrphans, countFor, recipients, notify, pendingCheck, notifyOwners, recentOwnerPush, flush,
   };
 }

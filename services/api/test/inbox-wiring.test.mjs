@@ -905,7 +905,7 @@ test('a client message the poller stores wakes Dana; off she answers nobody, on 
     const lead = db.getLead(LEAD);
     assert.match(lead.dana_chat_id, /^chat_mock_/);
     assert.equal(lead.dana_introduced, 1);
-    assert.equal(lead.first_reply_ts, null, 'Dana is not a human answer for the watchdog');
+    assert.equal(typeof lead.first_reply_ts, 'number', 'Dana counts as a reply for the watchdog (2026-10-05 R1)');
     assert.equal(app.inboxStore.messagesFor(LEAD).filter((m) => m.sender_kind === 'dana').length, 1);
     assert.ok(h.logs.some((l) => l.evt === 'dana.answered' && l.leadId === LEAD && l.batch === 2), 'one answer for both unanswered messages');
     assert.doesNotMatch(JSON.stringify(h.logs), /966500000088|anyone there|chat_mock/);
@@ -914,7 +914,8 @@ test('a client message the poller stores wakes Dana; off she answers nobody, on 
     // The next poll reads her answer back from the owner's number: still hers, still no stamp.
     const back = await app.poller.tick();
     assert.equal(back.replies, 0, 'her own message is not a reply');
-    assert.equal(db.getLead(LEAD).first_reply_ts, null, 'reading her message back does not stamp the human clock (P4-5)');
+    assert.equal(db.getLead(LEAD).first_reply_ts, lead.first_reply_ts, 'reading her message back stamps nothing again: the poller never stamps on her echo');
+    assert.equal(db.getLead(LEAD).last_human_out_ts, lead.last_human_out_ts, 'nor the human clock (P4-5)');
     const danas = app.inboxStore.messagesFor(LEAD).filter((m) => m.sender_kind === 'dana');
     assert.equal(danas.length, 1, 'one dana message, not two');
     assert.equal(danas[0].key_id, 'KEY-D1');

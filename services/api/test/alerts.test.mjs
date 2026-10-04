@@ -395,3 +395,56 @@ test('a pending check carries the triggering message time (msgTs) apart from whe
   await s.alerts.notify('LEAD-U', { reason: 'check' });
   assert.deepEqual(s.alerts.pendingCheck(s.owner.user_id), { leadId: 'LEAD-U', ts: NOW + ALERT_EVERY_MS, msgTs: NOW + ALERT_EVERY_MS }, 'no ts given: the clock');
 });
+
+/* ---------------- reason 'funds' (2026-10-05 design R2): owner-wide, no chat ---------------- */
+
+test("notifyOwners 'funds': every live device of the active owners, never staff; logged with counts and no lead", async () => {
+  const s = scene();
+  const boss2 = s.team.addUser({ name: 'Second Owner', phone: '966500000003', role: 'owner' });
+  const h2 = s.session(boss2);
+  s.sub('owner', 1); s.sub('owner', 2); s.sub('sara', 3); s.sub('omar', 4);
+  s.alerts.subscribe({ userId: boss2.user_id, sessionHash: h2, endpoint: ep(5), keys: KEYS });
+  const out = await s.alerts.notifyOwners({ reason: 'funds' });
+  assert.deepEqual(out, { users: 2, devices: 3, ok: 3, gone: 0, failed: 0 });
+  assert.deepEqual(s.sent.sort(), [ep(1), ep(2), ep(5)], 'the owners only');
+  assert.deepEqual(s.logs.find((l) => l.evt === 'push.sent'), { evt: 'push.sent', reason: 'funds', users: 2, devices: 3, ok: 3, gone: 0, failed: 0 });
+  assert.equal(s.alerts.recentOwnerPush(s.owner.user_id, 'funds'), NOW);
+  assert.equal(s.alerts.recentOwnerPush(boss2.user_id, 'funds'), NOW);
+  assert.equal(s.alerts.recentOwnerPush(s.sara.user_id, 'funds'), null, 'staff never get it');
+  assert.equal(s.alerts.recentOwnerPush(s.owner.user_id, 'check'), null, 'kept per reason');
+  s.tick(3_600_000);
+  assert.equal(s.alerts.recentOwnerPush(s.owner.user_id, 'funds'), NOW, 'for the push TTL (1 h)');
+  s.tick(1);
+  assert.equal(s.alerts.recentOwnerPush(s.owner.user_id, 'funds'), null, 'then it is no longer what the phone shows');
+  assert.doesNotMatch(JSON.stringify(s.logs), /fcm\.googleapis|device-|966|Owner/);
+});
+
+test("notifyOwners 'funds' shares the device handling: 410 deletes, a failure counts, a deactivated owner hears nothing", async () => {
+  const answers = { [ep(1)]: { status: 410 }, [ep(2)]: { status: 500 } };
+  const s = scene({ answer: (endpoint) => answers[endpoint] ?? { status: 201 } });
+  s.sub('owner', 1); s.sub('owner', 2);
+  assert.deepEqual(await s.alerts.notifyOwners({ reason: 'funds' }), { users: 1, devices: 2, ok: 0, gone: 1, failed: 1 });
+  assert.deepEqual(s.db.db.prepare('SELECT endpoint, fail_count FROM push_subscriptions').all().map((r) => [r.endpoint, r.fail_count]), [[ep(2), 1]]);
+  assert.ok(s.logs.some((l) => l.evt === 'push.refused' && l.status === 500));
+  // A second owner keeps the team owned; the first is deactivated: no devices left to push.
+  const boss2 = s.team.addUser({ name: 'Second Owner', phone: '966500000003', role: 'owner' });
+  s.team.deactivateUser(s.owner.user_id);
+  assert.deepEqual(await s.alerts.notifyOwners({ reason: 'funds' }), { skipped: 'no_devices' });
+  assert.equal(s.alerts.recentOwnerPush(boss2.user_id, 'funds'), null, 'nobody was pushed, nobody is marked');
+});
+
+test("notifyOwners: off without keys, a reason that is not an owner-wide one is refused, and it never rejects", async () => {
+  const off = scene({ configured: false });
+  off.sub('owner', 1);
+  assert.deepEqual(await off.alerts.notifyOwners({ reason: 'funds' }), { skipped: 'off' });
+  assert.equal(off.alerts.recentOwnerPush(off.owner.user_id, 'funds'), null);
+  const s = scene();
+  s.sub('owner', 1);
+  assert.deepEqual(await s.alerts.notifyOwners({ reason: 'inbound' }), { skipped: 'bad_reason' });
+  assert.deepEqual(await s.alerts.notifyOwners(), { skipped: 'bad_reason' });
+  assert.deepEqual(s.sent, []);
+  const broken = scene();
+  broken.db.close();
+  assert.deepEqual(await broken.alerts.notifyOwners({ reason: 'funds' }), { error: 'failed' });
+  assert.ok(broken.logs.some((l) => l.evt === 'push.failed'));
+});
