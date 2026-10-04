@@ -162,9 +162,9 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
       for (const u of due) checks.set(u, { leadId, ts: t, msgTs });
     }
     prune(t);
-    const { reached, ...out } = await deliver(devices, t);
-    // Only a member a device answered 2xx for has this push on a phone (`fundsPending`).
-    for (const u of reached) lastOther.set(u, t);
+    // Only a member a device answered 2xx for has this push on a phone (`fundsPending`):
+    // recorded the moment that device answers, never lowering a newer batch's time.
+    const out = await deliver(devices, t, (u) => { if (!(lastOther.get(u) >= t)) lastOther.set(u, t); });
     say({ evt: 'push.sent', leadId, reason: why, ...out });
     return out;
   }
@@ -178,26 +178,27 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
 
   /**
    * One empty push to each device, and what each answer means for its row — the one loop
-   * every reason shares. `t` is when the batch started. Counts only, which the caller logs,
-   * and `reached`: the members a device answered 2xx for.
+   * every reason shares. `t` is when the batch started. `onReached(userId)` is called as each
+   * device answers 2xx, without waiting for the others. Counts only: the caller logs them.
    */
-  async function deliver(devices, t) {
+  async function deliver(devices, t, onReached = null) {
     const users = new Set(devices.map((d) => d.user_id));
     // A send that rejects after all is that device's failure, never the batch's.
     const answers = await Promise.all(devices.map(async (d) => ({
-      d, a: await Promise.resolve().then(() => pusher.send(d.endpoint)).catch(() => ({ error: 'threw' })),
+      d, a: await Promise.resolve().then(() => pusher.send(d.endpoint)).catch(() => ({ error: 'threw' })).then((a) => {
+        if (onReached && a?.status >= 200 && a.status < 300) onReached(d.user_id);
+        return a;
+      }),
     })));
     // Each answer writes only to the row as it was when the push left (`updated <= t`): a device
     // re-posted during the send — by this member or, on a shared phone, by someone else — is a
     // new binding this answer says nothing about.
     let ok = 0;
-    const reached = new Set();
     let gone = 0;
     let failed = 0;
     for (const { d, a } of answers) {
       if (a?.status >= 200 && a.status < 300) {
         ok += 1;
-        reached.add(d.user_id);
         prep('UPDATE push_subscriptions SET last_ok = ?, fail_count = 0 WHERE id = ? AND updated <= ?').run(now(), d.id, t);
       } else if (a?.status === 404 || a?.status === 410) {
         gone += 1;
@@ -212,7 +213,7 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
         });
       }
     }
-    return { users: users.size, devices: devices.length, ok, gone, failed, reached };
+    return { users: users.size, devices: devices.length, ok, gone, failed };
   }
 
   /** An owner-wide alert (`funds`): the active owners' live devices, each owner marked before the sends. */
@@ -222,7 +223,7 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     const owners = prep("SELECT user_id FROM users WHERE active = 1 AND role = 'owner' ORDER BY user_id").all().map((r) => r.user_id);
     const devices = liveDevices(owners, t);
     if (!devices.length) return { skipped: 'no_devices' };
-    const { reached, ...out } = await deliver(devices, t);
+    const out = await deliver(devices, t);
     say({ evt: 'push.sent', reason: why, ...out });
     return out;
   }
