@@ -12,12 +12,12 @@ import { createFundsWatch, fundsOutSince, FUNDS_ALERT_EVERY_MS } from '../lib/da
 const NOW = 1_790_600_000_000;
 const HOUR = 3_600_000;
 
-function scene({ alerts = true } = {}) {
+function scene({ alerts = true, result = () => ({ users: 1, devices: 1, ok: 1, gone: 0, failed: 0 }) } = {}) {
   const s = openDb(':memory:');
   let clock = NOW;
   const team = createTeam(s, { now: () => clock });
   const pushed = [];
-  const spy = alerts ? { notifyOwners: (o) => { pushed.push(o); return Promise.resolve({ users: 1 }); } } : null;
+  const spy = alerts ? { notifyOwners: (o) => { pushed.push(o); return Promise.resolve(result(pushed.length)); } } : null;
   const logs = [];
   const make = () => createFundsWatch({ team, alerts: spy, now: () => clock, log: (e) => logs.push(e) });
   return { s, team, pushed, logs, funds: make(), make, tick: (ms) => { clock += ms; }, now: () => clock };
@@ -114,4 +114,52 @@ test('fundsOutSince reads only a real timestamp: anything else is "fine"', () =>
   assert.equal(fundsOutSince(h.team), null);
   h.s.db.prepare("INSERT OR REPLACE INTO settings (key, value, updated, updated_by) VALUES ('retell_funds_out','0',?,NULL)").run(NOW);
   assert.equal(fundsOutSince(h.team), null);
+});
+
+test('the alert time stands only when a push reached a device: off, no devices, all failed, an error each leave the previous value', async () => {
+  for (const [label, answer] of [
+    ['pusher off', { skipped: 'off' }],
+    ['no owner devices', { skipped: 'no_devices' }],
+    ['every send failed', { users: 1, devices: 2, ok: 0, gone: 1, failed: 1 }],
+    ['the push threw', { error: 'failed' }],
+    ['no answer at all', null],
+  ]) {
+    const h = scene({ result: () => answer });
+    await h.funds.out();
+    assert.equal(h.team.getSetting('retell_funds_alerted'), '', `${label}: rolled back to none`);
+    assert.equal(fundsOutSince(h.team), NOW, `${label}: the flag stays`);
+    // A previous alert, more than 6 h ago, is what it goes back to.
+    h.team.setSetting('retell_funds_alerted', String(NOW - 7 * HOUR));
+    h.tick(1000);
+    await h.funds.out();
+    assert.equal(h.team.getSetting('retell_funds_alerted'), String(NOW - 7 * HOUR), `${label}: back to the previous alert`);
+    assert.equal(h.pushed.length, 2, `${label}: tried each time`);
+  }
+});
+
+test('a later 402 after the owner subscribes does push: a push that reached nobody never quiets the next', async () => {
+  const h = scene({ result: (n) => (n === 1 ? { skipped: 'no_devices' } : { users: 1, devices: 1, ok: 1, gone: 0, failed: 0 }) });
+  await h.funds.out();
+  assert.equal(h.team.getSetting('retell_funds_alerted'), '');
+  h.tick(10 * 60_000);
+  await h.funds.out();
+  assert.equal(h.pushed.length, 2);
+  assert.equal(h.team.getSetting('retell_funds_alerted'), String(NOW + 10 * 60_000));
+  h.tick(60_000);
+  await h.funds.out();
+  assert.equal(h.pushed.length, 2, 'delivered: quiet for 6 h now');
+});
+
+test('the alert time is stamped before the push leaves: a 402 during the send is quiet', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const pushed = [];
+  const h = scene();
+  const funds = createFundsWatch({ team: h.team, now: h.now, alerts: { notifyOwners: (o) => { pushed.push(o); return gate; } } });
+  const first = funds.out();
+  await funds.out();
+  assert.equal(pushed.length, 1);
+  release({ users: 1, devices: 1, ok: 1, gone: 0, failed: 0 });
+  await first;
+  assert.equal(h.team.getSetting('retell_funds_alerted'), String(NOW));
 });

@@ -29,8 +29,10 @@
  * hand-over line is not — the client is waiting for a person — and neither is a send that
  * may not have gone (`uncertain`).
  *
- * Every Retell call tells the optional funds watch (lib/dana-funds.mjs, R2) how it went: a
- * 402 is `funds.out()`, a call that worked `funds.ok()`. The client sees no difference.
+ * Every Retell call tells the optional funds watch (lib/dana-funds.mjs, R2) of a 402
+ * (`funds.out()`); only a completion that worked says the credit is back (`funds.ok()`) — a
+ * chat Retell lets her open says nothing about whether it will answer. The client sees no
+ * difference.
  *
  * Never logged: message text, a name, a number, a Retell chat id. Never rejects.
  */
@@ -224,7 +226,8 @@ export function createDana({
   }
 
   const failure = (err) => (Number.isInteger(err?.status) ? { status: err.status } : { error: err?.name === 'RetellError' ? 'request' : 'error' });
-  // The funds watch hears of every Retell call (R2). It never throws, and is guarded anyway:
+  // The funds watch (R2): a 402 from any Retell call is `out`, only a completion that worked
+  // is `ok`. It never throws, and is guarded anyway:
   // a broken watch must not turn an answer into a hand-over.
   const funded = () => { try { funds?.ok(); } catch { /* the answer goes on */ } };
   const refused = (err) => {
@@ -252,7 +255,6 @@ export function createDana({
         },
         metadata: { source: 'bona-whatsapp', lead_id: lead.lead_id },
       });
-      funded();
       if (typeof chat?.chat_id !== 'string' || !chat.chat_id) throw new Error('no chat id');
       db.updateLead(lead.lead_id, { dana_chat_id: chat.chat_id, dana_chat_ts: t });
       say({ evt: 'dana.session', leadId: lead.lead_id, renewed: Boolean(lead.dana_chat_id) });

@@ -46,7 +46,7 @@ import { normalisePhone } from '../phone.mjs';
 import { randomId } from '../store.mjs';
 import { replyJidFor } from '../wa-send.mjs';
 import { OWNER_HISTORY_MS } from '../inbox/backfill.mjs';
-import { fundsOutSince } from '../dana-funds.mjs';
+import { fundsOutSince, fundsAlertedAt } from '../dana-funds.mjs';
 import {
   knownError,
   loginPage, logoutPage, overviewPage, leadsPage, leadDetailPage, listingsPage, spendPage, integrationsPage, messagePage,
@@ -1145,13 +1145,15 @@ export function createDashboardRoutes({
   }
 
   /**
-   * Retell out of credit (2026-10-05 R2), for this owner's worker: the flag is still set AND
-   * this owner was pushed about it within the push's TTL — an older push is not the one the
-   * phone is showing now.
+   * Retell out of credit (2026-10-05 R2), for this member's worker: an active owner, the flag
+   * still set, a funds push that reached a device under an hour ago (the push TTL), and no
+   * push about a chat to this member since — that one is what the phone shows now, and the tap
+   * should open its chat. All but the last are durable, so a restart changes nothing.
    */
   function fundsDue(me) {
-    if (me.role !== 'owner' || typeof alerts?.recentOwnerPush !== 'function') return false;
-    return alerts.recentOwnerPush(me.user_id, 'funds') !== null && fundsOutSince(team) !== null;
+    if (me.role !== 'owner' || typeof alerts?.fundsPending !== 'function') return false;
+    if (fundsOutSince(team) === null) return false;
+    return alerts.fundsPending(me.user_id, fundsAlertedAt(team));
   }
 
   /**

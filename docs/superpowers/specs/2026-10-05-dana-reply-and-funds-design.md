@@ -19,21 +19,28 @@ hand-over line because Retell answered 402 and nobody knew why).
 ## R2. Retell out-of-credit watch
 
 - Detection: any Retell call in `dana-wa.mjs` (createChat, createChatCompletion) that fails
-  with `err.status === 402` → `funds.out()`. Any successful Retell call → `funds.ok()`.
-  Other statuses are not funds.
+  with `err.status === 402` → `funds.out()`. Only a successful **completion**
+  (createChatCompletion) → `funds.ok()`: a chat Retell lets her open says nothing about
+  whether it will answer, so a working createChat clears nothing. Other statuses are not funds.
 - State is durable in `settings`: `retell_funds_out` = ms timestamp of when it started
-  (`''`/absent = fine), `retell_funds_alerted` = ms of the last owner alert. Survives a restart.
+  (`''`/absent = fine), `retell_funds_alerted` = ms of the last owner alert that reached a
+  device. Survives a restart.
 - `out()`: sets `retell_funds_out` if not already set (log `dana.funds_out`); if the last
-  alert is older than 6 h (or none), pushes **active owners only** and stores the alert time.
+  alert is older than 6 h (or none), stores the alert time (before the send, so a concurrent
+  402 is quiet) and pushes **active owners only**. When the push reached no device — push off,
+  no owner device, every send failed, an error — the alert time goes back to its previous
+  value, so the next 402 tries again.
 - `ok()`: clears `retell_funds_out` if set (log `dana.funds_ok`). The alert time stays (so a
   flapping balance cannot alert more than once per 6 h).
 - Clients: unchanged — the failed completion still becomes a hand-over (line + needs-human
   alert to everyone).
 - Push: payload-less as always. New reason `funds` in `alerts.mjs` (owner-wide, not tied to a
   lead), same device/session/410 handling as the lead alerts. The worker's one
-  `/dashboard/push/latest` question answers `{ kind: 'funds' }` for an owner while the flag
-  is set AND this owner got a funds push within the last hour (push TTL); priority
-  funds > check > inbound. Worker text: **"Bona: Dana is out of Retell credit"**, body
+  `/dashboard/push/latest` question answers `{ kind: 'funds' }` iff the member is an active
+  owner AND `retell_funds_out` is set AND `now - retell_funds_alerted < 1 h` (push TTL) AND
+  that owner has had no push for another reason (inbound / needs_human / check) after the
+  funds alert time (kept in memory; empty after a restart, so a queued funds push still reads
+  as funds). Otherwise the usual check > inbound. Worker text: **"Bona: Dana is out of Retell credit"**, body
   "Dana can't answer clients until Retell is topped up. Tap for details.", tag `bona-funds`.
   `/dashboard/push/open` for kind `funds` → `/dashboard/team`.
 - Team page (owners): while `retell_funds_out` is set, a red banner at the top: "Dana can't

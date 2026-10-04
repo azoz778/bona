@@ -408,14 +408,6 @@ test("notifyOwners 'funds': every live device of the active owners, never staff;
   assert.deepEqual(out, { users: 2, devices: 3, ok: 3, gone: 0, failed: 0 });
   assert.deepEqual(s.sent.sort(), [ep(1), ep(2), ep(5)], 'the owners only');
   assert.deepEqual(s.logs.find((l) => l.evt === 'push.sent'), { evt: 'push.sent', reason: 'funds', users: 2, devices: 3, ok: 3, gone: 0, failed: 0 });
-  assert.equal(s.alerts.recentOwnerPush(s.owner.user_id, 'funds'), NOW);
-  assert.equal(s.alerts.recentOwnerPush(boss2.user_id, 'funds'), NOW);
-  assert.equal(s.alerts.recentOwnerPush(s.sara.user_id, 'funds'), null, 'staff never get it');
-  assert.equal(s.alerts.recentOwnerPush(s.owner.user_id, 'check'), null, 'kept per reason');
-  s.tick(3_600_000);
-  assert.equal(s.alerts.recentOwnerPush(s.owner.user_id, 'funds'), NOW, 'for the push TTL (1 h)');
-  s.tick(1);
-  assert.equal(s.alerts.recentOwnerPush(s.owner.user_id, 'funds'), null, 'then it is no longer what the phone shows');
   assert.doesNotMatch(JSON.stringify(s.logs), /fcm\.googleapis|device-|966|Owner/);
 });
 
@@ -430,14 +422,12 @@ test("notifyOwners 'funds' shares the device handling: 410 deletes, a failure co
   const boss2 = s.team.addUser({ name: 'Second Owner', phone: '966500000003', role: 'owner' });
   s.team.deactivateUser(s.owner.user_id);
   assert.deepEqual(await s.alerts.notifyOwners({ reason: 'funds' }), { skipped: 'no_devices' });
-  assert.equal(s.alerts.recentOwnerPush(boss2.user_id, 'funds'), null, 'nobody was pushed, nobody is marked');
 });
 
 test("notifyOwners: off without keys, a reason that is not an owner-wide one is refused, and it never rejects", async () => {
   const off = scene({ configured: false });
   off.sub('owner', 1);
   assert.deepEqual(await off.alerts.notifyOwners({ reason: 'funds' }), { skipped: 'off' });
-  assert.equal(off.alerts.recentOwnerPush(off.owner.user_id, 'funds'), null);
   const s = scene();
   s.sub('owner', 1);
   assert.deepEqual(await s.alerts.notifyOwners({ reason: 'inbound' }), { skipped: 'bad_reason' });
@@ -447,4 +437,50 @@ test("notifyOwners: off without keys, a reason that is not an owner-wide one is 
   broken.db.close();
   assert.deepEqual(await broken.alerts.notifyOwners({ reason: 'funds' }), { error: 'failed' });
   assert.ok(broken.logs.some((l) => l.evt === 'push.failed'));
+});
+
+test('fundsPending: an active owner, an alert under an hour old, and no other push to them since', async () => {
+  const s = scene();
+  s.sub('owner', 1); s.sub('sara', 2);
+  const alerted = NOW;
+  await s.alerts.notifyOwners({ reason: 'funds' });
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, alerted), true);
+  assert.equal(s.alerts.fundsPending(s.sara.user_id, alerted), false, 'staff never');
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, null), false, 'no alert time, no funds');
+  s.tick(3_600_000 - 1);
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, alerted), true);
+  s.tick(1);
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, alerted), false, 'an hour on, the push is gone (its TTL)');
+});
+
+test('fundsPending: any other push to that owner after the funds alert (inbound, needs_human, check) is what the phone shows now', async () => {
+  const s = scene();
+  s.sub('owner', 1);
+  await s.alerts.notifyOwners({ reason: 'funds' });
+  s.tick(1000);
+  assert.equal((await s.alerts.notify('LEAD-A', { reason: 'needs_human', ts: s.now() })).ok, 1);
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, NOW), false);
+  // A later funds alert is newer than that push again.
+  s.tick(1000);
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, s.now()), true);
+  // Another member's push says nothing about the owner's phone.
+  const t = s.now();
+  s.sub('sara', 2);
+  s.db.db.prepare('UPDATE leads SET handler_user_id = ? WHERE lead_id = ?').run(s.sara.user_id, 'LEAD-A');
+  s.tick(ALERT_EVERY_MS);
+  assert.equal((await s.alerts.notify('LEAD-A', { ts: s.now() })).users, 1);
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, t), true);
+});
+
+test('fundsPending survives a restart: a new alerts instance over the same db has no later pushes to weigh, so the alert still reads as funds', async () => {
+  const s = scene();
+  s.sub('owner', 1);
+  await s.alerts.notifyOwners({ reason: 'funds' });
+  await s.alerts.notify('LEAD-A', { reason: 'needs_human', ts: NOW });
+  const again = createAlerts({ db: s.db, pusher: null, isExcludedLead: () => false, now: s.now });
+  s.tick(60_000);
+  assert.equal(again.fundsPending(s.owner.user_id, NOW - 1), true);
+  s.team.addUser({ name: 'Second Owner', phone: '966500000003', role: 'owner' });
+  s.team.deactivateUser(s.owner.user_id);
+  assert.equal(again.fundsPending(s.owner.user_id, NOW - 1), false, 'a deactivated owner: never');
 });
