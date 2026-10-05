@@ -1,7 +1,10 @@
 // Helpers for drafting and approving property photo/caption reviews (docs/daily-property-publishing.md).
 // Nothing here publishes; the approve script is the only writer of marketing/daily/property-reviews.json.
 import sharp from 'sharp';
-import { SITE, sha256, fingerprint, advertiserFingerprint, reviewedCopy } from './property-daily.mjs';
+import { SITE, sha256, fingerprint, advertiserFingerprint, reviewedCopy, aspectConsistent } from './property-daily.mjs';
+
+/** Instagram crops a carousel to its first frame's aspect; eligibility() and buildReview() share the rule. */
+export { aspectConsistent };
 
 /** The publisher's own photo rules (eligibility() checks the same numbers). */
 export const FRAME_RULES = Object.freeze({ minWidth: 1080, minHeight: 720, minAspect: 0.8, maxAspect: 1.91, maxBytes: 8_000_000 });
@@ -25,12 +28,6 @@ export function frameProblem({ contentType, bytes, width, height }) {
   const aspect = width / height;
   if (aspect < FRAME_RULES.minAspect || aspect > FRAME_RULES.maxAspect) return 'aspect';
   return null;
-}
-/** Instagram crops every carousel frame to the first frame's aspect ratio; keep that crop small. */
-export function aspectConsistent(photos, tolerance = 0.15) {
-  if (!photos.length) return false;
-  const first = photos[0].width / photos[0].height;
-  return photos.every(p => Math.abs(p.width / p.height - first) / first <= tolerance);
 }
 /** "BONA-022:1,2r,5p" → { id, frames: [{ index, kind }] }; kind null means the category default. */
 export function parseSelection(s) {

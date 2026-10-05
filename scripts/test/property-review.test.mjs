@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
-import { policyRules, eligibility, sha256, reviewedCopy, propertyHashtags } from '../social/lib/property-daily.mjs';
+import { policyRules, eligibility, sha256, reviewedCopy, propertyHashtags, aspectConsistent as dailyAspectConsistent } from '../social/lib/property-daily.mjs';
 import { frameProblem, aspectConsistent, parseSelection, disclosuresFor, buildReview, sameReview, liveCatalogue } from '../social/lib/property-review.mjs';
 import { main as draft } from '../social/draft-property-reviews.mjs';
 import { main as approve } from '../social/approve-property-review.mjs';
@@ -54,6 +54,7 @@ test('frame rules match the publisher: JPEG, at most 8 MB, at least 1080x720, as
 test('a carousel keeps frames within 15% of the first frame aspect, and selections are 3 to 6 distinct frames', () => {
   assert.equal(aspectConsistent([{ width: 1920, height: 1280 }, { width: 1800, height: 1200 }, { width: 1920, height: 1200 }]), true);
   assert.equal(aspectConsistent([{ width: 1920, height: 1280 }, { width: 1080, height: 1350 }]), false);
+  assert.equal(aspectConsistent, dailyAspectConsistent, 'one rule: eligibility and the approve script share it');
   assert.deepEqual(parseSelection('BONA-W013:1,2r,5p'), { id: 'BONA-W013', frames: [{ index: 1, kind: null }, { index: 2, kind: 'render' }, { index: 5, kind: 'photograph' }] });
   assert.throws(() => parseSelection('BONA-001:1,2'), /3–6 frames/);
   assert.throws(() => parseSelection('BONA-001:1,2,3,4,5,6,7'), /3–6 frames/);
