@@ -452,3 +452,41 @@ test('reconciling an Instagram attempt: the journal line settles the journal; th
     await assert.rejects(run(now), /Uncertain daily publication/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+// ---- the send path: a temp BONA_DATA, a fake fetch, and stand-ins for systemctl and the clock ----
+/** A temp repo root with the waiver policy and one reviewed unlicensed listing; data goes to a temp BONA_DATA. */
+function sendFixture(prefix) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  writePolicy(root, WAIVER_POLICY);
+  const { listing, advertiser: a } = fixture(); const p = { ...listing, licence: null }; const r = waivedReview(p, a);
+  fs.writeFileSync(path.join(root, 'marketing/daily/property-reviews.json'), JSON.stringify({ [p.id]: r }));
+  const data = path.join(root, 'data');
+  return { root, p, a, r, data, env: { ...LIVE_ENV, BONA_DATA: data }, journal: path.join(data, 'daily/property.jsonl'), igLedger: path.join(data, 'ig/published.jsonl') };
+}
+const jsonl = file => fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map(JSON.parse) : [];
+/**
+ * liveStub for the preflight reads; `provider(url, init)` answers first (a Response, a throw, or
+ * undefined to pass). Every request is logged as "METHOD host/path"; an unanswered write throws,
+ * which the publishers swallow as a network error, so tests assert on `calls` instead.
+ */
+function sendStub(f, provider = () => undefined) {
+  const read = liveStub(f.p, f.a, f.r), calls = [];
+  const fetchImpl = async (url, init = {}) => {
+    const u = new URL(url), method = init.method ?? 'GET';
+    calls.push(`${method} ${u.hostname}${u.pathname}`);
+    const answer = await provider(u, init);
+    if (answer !== undefined) return answer;
+    if (method !== 'GET') throw new Error(`unexpected ${method} ${u.pathname}`);
+    return read(url, init);
+  };
+  return { fetchImpl, calls, writes: () => calls.filter(c => !c.startsWith('GET ')) };
+}
+const send = (channel, f, fetchImpl, over = {}) => propertyDaily(channel, { now, root: f.root, env: f.env, fetchImpl, legacyTimersDisabled: () => true, ...over });
+test('a live run refuses while a legacy publisher timer is on, before any intent record', async () => {
+  const f = sendFixture('bona-property-legacy-');
+  try {
+    const s = sendStub(f);
+    await assert.rejects(send('instagram', f, s.fetchImpl, { legacyTimersDisabled: () => false }), /Legacy publisher must remain disabled/);
+    assert.deepEqual(jsonl(f.journal), []);
+    assert.deepEqual(s.writes(), []);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
