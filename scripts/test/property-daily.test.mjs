@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { publicListing,sha256,fingerprint,advertiserFingerprint,eligibility,propertyCaption,chooseProperty,dayState,realDate,policyRules,STRICT_RULES,renderShare,captionFor,propertyHashtags,entryFor,unsettled } from '../social/lib/property-daily.mjs';
-import { propertyDaily,legacyDayState,assertNoPendingInstagram } from '../social/property-publish.mjs';
+import { ACCOUNT,publicListing,sha256,fingerprint,advertiserFingerprint,eligibility,propertyCaption,chooseProperty,dayState,realDate,policyRules,STRICT_RULES,renderShare,captionFor,propertyHashtags,entryFor,unsettled } from '../social/lib/property-daily.mjs';
+import { propertyDaily,legacyDayState,assertNoPendingInstagram,publisherRefusal } from '../social/property-publish.mjs';
 const now=new Date('2026-10-02T17:30:00Z');
 function fixture() {
   const advertiser={name:{ar:'المعلن التجريبي',en:'Fixture advertiser'},fal:'1100000000',phone:'+966500000000'};
@@ -297,4 +297,104 @@ test('the repository policy is the owner waiver for Saudi ready and off-plan sto
   assert.equal(r.reviewValidDays, 90);
   assert.equal(policy.adLicence.by, 'owner');
   assert.equal(policy.adLicence.on, '2026-10-05');
+});
+const LIVE_ENV = { META_ACCESS_TOKEN: 'not-a-real-token', IG_BUSINESS_ID: ACCOUNT.instagram, FB_PAGE_ID: ACCOUNT.facebook };
+/** Read-only stand-in for the live site and Graph API: catalogue, both identities, the reviewed photo bytes. */
+function liveStub(p, a, r, clock = () => now) {
+  return async (url, opts) => {
+    assert.ok(!opts?.method || opts.method === 'GET', 'preflight must never mutate');
+    const u = new URL(url);
+    if (u.pathname === '/social-catalogue.json') return Response.json({ version: 1, generatedAt: clock().toISOString(), advertiser: a, listings: [p] });
+    if (u.hostname === 'graph.facebook.com') {
+      if (u.pathname.endsWith('/content_publishing_limit')) return Response.json({ data: [{ quota_usage: 0, config: { quota_total: 100 } }] });
+      if (u.pathname.endsWith('/me')) return Response.json({ id: 'fixture-user', name: 'Fixture user' });
+      if (u.pathname.endsWith(`/${ACCOUNT.facebook}`)) return Response.json({ id: ACCOUNT.facebook, name: 'Bona Real Estate', access_token: 'not-a-real-page-token', is_published: true });
+      return Response.json({ id: ACCOUNT.instagram, username: 'bonarealestatesa' });
+    }
+    const i = r.photos.findIndex(x => x.url === url); assert.ok(i >= 0, url);
+    return new Response('fixture ' + i, { headers: { 'content-type': 'image/jpeg' } });
+  };
+}
+test('waived policy: a licence that is present must be valid and current; the caption never prints a broken one', () => {
+  const { listing, advertiser: a } = fixture();
+  const valid = { ...listing, licence: { adNumber: '7200012345', adExpiry: '2026-12-31' } };
+  assert.deepEqual(eligibility(valid, waivedReview(valid, a), a, now, WAIVED), []);
+  assert.match(captionFor(valid, a, waivedReview(valid, a)).en, /^Ad licence 7200012345 · Expires 2026-12-31$/m);
+  assert.match(captionFor(valid, a, waivedReview(valid, a)).ar, /^ترخيص الإعلان: 7200012345 · ينتهي 2026-12-31$/m);
+  const today = { ...listing, licence: { adNumber: '7200012345', adExpiry: '2026-10-02' } };
+  assert.deepEqual(eligibility(today, waivedReview(today, a), a, now, WAIVED), [], 'a licence expiring today is still current');
+  const wafiOnly = { ...listing, licence: { adNumber: null, adExpiry: null, wafiNumber: 'W-1234' } };
+  assert.deepEqual(eligibility(wafiOnly, waivedReview(wafiOnly, a), a, now, WAIVED), []);
+  assert.doesNotMatch(captionFor(wafiOnly, a, waivedReview(wafiOnly, a)).en, /Ad licence/);
+  const broken = [{ adNumber: '7200012345', adExpiry: null }, { adNumber: '7200012345' }, { adNumber: '7200012345', adExpiry: '2026-02-31' },
+    { adNumber: 'pending' }, { adNumber: '{{AD_LICENCE}}', adExpiry: '2026-12-31' }, { adNumber: '72000', adExpiry: '2026-12-31' }];
+  for (const licence of broken) {
+    const p = { ...listing, licence }, r = waivedReview(p, a), c = captionFor(p, a, r);
+    assert.ok(eligibility(p, r, a, now, WAIVED).includes('ad_licence_invalid_or_expired'), JSON.stringify(licence));
+    assert.doesNotMatch(c.en, /Ad licence|Expires|\bnull\b|\bundefined\b|\{\{/, JSON.stringify(licence));
+    assert.doesNotMatch(c.ar, /ترخيص الإعلان|ينتهي|\{\{/, JSON.stringify(licence));
+  }
+  const expired = { ...listing, licence: { adNumber: '7200012345', adExpiry: '2026-10-01' } };
+  assert.ok(eligibility(expired, waivedReview(expired, a), a, now, WAIVED).includes('ad_licence_invalid_or_expired'));
+  const strict = eligibility({ ...listing, licence: broken[0] }, fixture().review, a, now);
+  assert.ok(strict.includes('missing_or_expired_ad_licence') && !strict.includes('ad_licence_invalid_or_expired'), 'the strict gate keeps its own reasons');
+});
+test("publisherRefusal applies each channel publisher's own pre-network gate", () => {
+  const { listing, advertiser: a } = fixture(); const p = { ...listing, licence: null }; const r = waivedReview(p, a);
+  const files = ['1.jpg', '2.jpg', '3.jpg'];
+  const ig = entryFor(p, r, a, 'instagram', '2026-10-02', files), fb = entryFor(p, r, a, 'facebook', '2026-10-02', files);
+  const say = (e, text) => ({ ...e, caption: { ...e.caption, en: `${e.caption.en}\n${text}` } });
+  assert.equal(publisherRefusal(ig, 'instagram', { now }), null);
+  assert.equal(publisherRefusal(fb, 'facebook', { now }), null);
+  for (const [e, channel] of [[ig, 'instagram'], [fb, 'facebook']])
+    for (const placeholder of ['{{AD_LICENCE}}', '[add number before publishing]', '[يُضاف قبل النشر]'])
+      assert.match(publisherRefusal(say(e, placeholder), channel, { now }) ?? '', /placeholder/, `${channel} ${placeholder}`);
+  assert.match(publisherRefusal(say(fb, 'Free valuation on request'), 'facebook', { now }) ?? '', /forbidden phrase/);
+  assert.match(publisherRefusal(ig, 'instagram', { now, igLedger: [{ id: ig.id, date: ig.date, status: 'skipped:manual' }] }) ?? '', /already settled/);
+});
+test('a post its own publisher would refuse stops in the preflight, before any intent record', async () => {
+  const cases = [['instagram', 'Fixture villa [add number before publishing]', 'placeholder'], ['facebook', 'Fixture villa [add number before publishing]', 'placeholder'],
+    ['facebook', 'Fixture villa, free valuation included', 'forbidden phrase']];
+  for (const [channel, title, why] of cases) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-property-refusal-'));
+    try {
+      writePolicy(root, WAIVER_POLICY);
+      const { listing, advertiser: a } = fixture(); const p = { ...listing, licence: null, title: { ...listing.title, en: title } }; const r = waivedReview(p, a);
+      assert.deepEqual(eligibility(p, r, a, now, WAIVED), [], 'eligible, so the rotation offers it');
+      fs.writeFileSync(path.join(root, 'marketing/daily/property-reviews.json'), JSON.stringify({ [p.id]: r }));
+      const env = { ...LIVE_ENV, BONA_DATA: path.join(root, 'data') }, fetchImpl = liveStub(p, a, r);
+      const refused = new RegExp(`${channel} publisher would refuse.*${why}`);
+      await assert.rejects(propertyDaily(channel, { dry: true, now, root, env, fetchImpl }), refused, `${channel} dry run`);
+      await assert.rejects(propertyDaily(channel, { now, root, env, fetchImpl }), refused, `${channel} live run`);
+      assert.equal(fs.existsSync(path.join(env.BONA_DATA, 'daily/property.jsonl')), false, `${channel}: no intent, so nothing to reconcile`);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  }
+});
+test('reconciling an Instagram attempt: the journal line settles the journal; the Instagram ledger needs its own line, and that date stays closed', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-property-reconcile-'));
+  try {
+    writePolicy(root, WAIVER_POLICY);
+    const { listing, advertiser: a } = fixture(); const p = { ...listing, licence: null }; const r = waivedReview(p, a);
+    fs.writeFileSync(path.join(root, 'marketing/daily/property-reviews.json'), JSON.stringify({ [p.id]: r }));
+    const data = path.join(root, 'data'), env = { ...LIVE_ENV, BONA_DATA: data };
+    let clock = now; const fetchImpl = liveStub(p, a, r, () => clock);
+    const run = at => { clock = at; return propertyDaily('instagram', { dry: true, now: at, root, env, fetchImpl }); };
+    const lines = (file, xs) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, xs.map(x => JSON.stringify(x) + '\n').join('')); };
+    const D = '2026-10-02', id = `bona-daily-ig-${D}`, nextDay = new Date('2026-10-03T17:30:00Z');
+    const intent = { channel: 'instagram', date: D, id, listingId: p.id, status: 'intent', at: '2026-10-02T17:30:05Z' };
+    lines(path.join(data, 'daily/property.jsonl'), [intent, { ...intent, status: 'uncertain', at: '2026-10-02T17:31:30Z' },
+      { ...intent, status: 'confirmed-not-published', evidence: 'fixture', at: '2026-10-02T18:10:00Z' }]);
+    // No container was created: the journal line alone settles the attempt, the same evening included.
+    assert.equal((await run(now)).status, 'ready');
+    assert.equal((await run(nextDay)).status, 'ready');
+    // A container was in flight: the journal line is not enough, and the error says where to settle it.
+    const publishing = { id, date: D, slot: '20:30', kind: 'carousel', status: 'publishing', containerId: 'fixture-container', ts: '2026-10-02T17:30:40Z' };
+    lines(path.join(data, 'ig/published.jsonl'), [publishing]);
+    await assert.rejects(run(nextDay), e => /Earlier Instagram container is unsettled/.test(e.message) && e.message.includes(id) && e.message.includes('ig/published.jsonl'));
+    // An error line after it settles the ledger, so the next day's slot is ready ...
+    lines(path.join(data, 'ig/published.jsonl'), [publishing, { id, date: D, status: 'error', detail: 'fixture: absent from the account media', ts: '2026-10-02T18:10:00Z' }]);
+    assert.equal((await run(nextDay)).status, 'ready');
+    // ... and the attempted date stays closed: no same-day retry once a container existed.
+    await assert.rejects(run(now), /Uncertain daily publication/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
