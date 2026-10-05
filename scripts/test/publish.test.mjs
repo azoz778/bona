@@ -7,9 +7,9 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   absoluteImageUrl, acquireLock, composeCaption, decide, DEFAULTS, fmtKsa, hasLicencePlaceholder, indexLedger,
-  isQuietHours, jpegCandidates, ksaToEpoch, main, maskToken, normaliseEntry, parseArgs, parseLedger, parseNow, resolveImage, run, TERMINAL,
+  isQuietHours, jpegCandidates, ksaToEpoch, main, maskToken, normaliseEntry, parseArgs, parseLedger, parseNow, resolveImage, run, TERMINAL, verifyJpeg,
 } from '../social/publish.mjs';
-import { contentHash, DEFAULT_LEDGER_PATH, lockPathFor, readLedgerFile, resolveLedgerPath } from '../social/lib/ledger.mjs';
+import { contentHash, dataDir, DEFAULT_LEDGER_PATH, lockPathFor, readLedgerFile, resolveLedgerPath } from '../social/lib/ledger.mjs';
 
 const H = 3_600_000;
 const mk = (over = {}) => normaliseEntry({
@@ -198,6 +198,16 @@ test('ledger location: outside the repo — ~/bona-data/ig by default, $BONA_IG_
   assert.deepEqual(readLedgerFile(path.join(os.tmpdir(), 'bona-no-such-ledger-' + process.pid + '.jsonl')), [], 'a missing ledger reads as empty');
 });
 
+test('data directory: $BONA_DATA, else ~/bona-data; a leading ~ is the home directory; always absolute', () => {
+  const home = os.homedir();
+  assert.equal(dataDir({}), path.join(home, 'bona-data'));
+  assert.equal(dataDir({ BONA_DATA: '~' }), home);
+  assert.equal(dataDir({ BONA_DATA: '~/x' }), path.join(home, 'x'));
+  assert.equal(dataDir({ BONA_DATA: '/srv/bona-data/' }), '/srv/bona-data');
+  assert.equal(dataDir({ BONA_DATA: 'rel/data' }), path.resolve('rel/data'));
+  assert.equal(dataDir({ BONA_DATA: '~other/x' }), path.resolve('~other/x'), 'only ~ and ~/ mean the home directory');
+});
+
 test('ledger parsing: JSON lines, corrupt lines skipped, last line per id wins, error count resets on publish', () => {
   const recs = parseLedger('{"id":"a","status":"error"}\nnot json\n\n{"id":"a","status":"error"}\n{"id":"b","status":"published","ts":"t"}\n{"id":"a","status":"published"}\n{"id":"a","status":"error"}\n{"status":"published"}\n');
   assert.equal(recs.length, 5);
@@ -248,6 +258,28 @@ test('resolveImage: HEAD-verified JPEG, twin lookup, no twin → no-jpeg, HEAD r
   assert.equal((await resolveImage('http://h/a.jpg', { fetch: imageFetch({}) })).reason, 'no-image', 'plain http is refused before any request — structural');
   assert.equal((await resolveImage('marketing/queue/a.jpg', { fetch: imageFetch({}) })).reason, 'no-image', 'a local path is not hosted — structural');
   assert.equal((await resolveImage('https://h/a.jpg', { fetch: imageFetch({ 'https://h/a.jpg': { status: 503, ct: 'text/html' } }) })).reason, 'no-jpeg', 'a 5xx is the server having a moment, not the image missing');
+});
+
+test('verifyJpeg: a network failure is retried once after a short pause, on the HEAD and on the ranged GET; nothing else is retried', async () => {
+  /** Answers from a script, in order: a function is called with the init, an Error is thrown. */
+  const scripted = (...steps) => { const methods = []; return { methods, fetch: async (url, init = {}) => { methods.push(init.method); const s = steps.shift(); if (s instanceof Error) throw s; return s(init); } }; };
+  const jpeg = (status = 200) => () => ({ status, headers: headers('image/jpeg'), body: { cancel: async () => {} } });
+  const slept = [], sleep = async (ms) => { slept.push(ms); };
+  const once = scripted(new TypeError('fetch failed'), jpeg());
+  assert.deepEqual(await verifyJpeg('https://h/a.jpg', once.fetch, { sleep }), { ok: true, network: false, status: 200, contentType: 'image/jpeg', detail: '200 image/jpeg' });
+  assert.deepEqual(once.methods, ['HEAD', 'HEAD']);
+  assert.equal(slept.length, 1);
+  assert.ok(slept[0] > 0 && slept[0] <= 1000, `a short pause (${slept[0]} ms)`);
+  const ranged = scripted(() => ({ status: 405, headers: headers('') }), new TypeError('fetch failed'), jpeg(206));
+  assert.equal((await verifyJpeg('https://h/a.jpg', ranged.fetch, { sleep })).ok, true, 'the ranged GET fallback retries too');
+  assert.deepEqual(ranged.methods, ['HEAD', 'GET', 'GET']);
+  const twice = scripted(new TypeError('fetch failed'), new TypeError('fetch failed'), jpeg());
+  assert.deepEqual(await verifyJpeg('https://h/a.jpg', twice.fetch, { sleep }), { ok: false, network: true, status: 0, contentType: null, detail: 'fetch failed' });
+  assert.deepEqual(twice.methods, ['HEAD', 'HEAD'], 'one retry, no more');
+  const missing = scripted(() => ({ status: 404, headers: headers('text/html') }));
+  assert.equal((await verifyJpeg('https://h/a.jpg', missing.fetch, { sleep })).status, 404);
+  assert.deepEqual(missing.methods, ['HEAD'], 'an answer is not retried');
+  assert.equal(slept.length, 3);
 });
 
 test('normaliseEntry: content-calendar.json shape and queue.json shape both map to one form', () => {
@@ -363,6 +395,17 @@ test('run: publishes what is due in slot order, 60 s apart, records the ledger, 
   assert.deepEqual(h2.calls, []);
   assert.deepEqual(h2.appended, [], 'same status as last time → no new ledger line');
   assert.ok(h2.logs.some((l) => l.startsWith('skipped:ad-licence')), 'but it is still logged');
+});
+
+test('run: the default ledger appender adds every line to the end of the ledger file and creates it owner-only', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-publish-append-'));
+  try {
+    const ledger = path.join(dir, 'ig', 'published.jsonl');
+    const r = await run({ dryRun: false, ledger }, { ...harness({ entries: [raw({ n: 'a' })] }).deps, appendLedger: undefined });
+    assert.equal(r.code, 0);
+    assert.deepEqual(readLedgerFile(ledger).map((x) => `${x.id} ${x.status}`), ['ig-2026-09-10-post-a publishing', 'ig-2026-09-10-post-a published'], 'the publishing line, then the published line after it');
+    assert.equal(fs.statSync(ledger).mode & 0o777, 0o600);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('run: a failure after the publishing line is needs-reconcile — no error line, never re-posted; the next run asks Instagram', async () => {
@@ -528,9 +571,12 @@ test('run: PNG with no JPEG twin → skipped:no-jpeg, written once, re-checked u
   assert.equal(local.appended[0].status, 'skipped:no-image');
   assert.ok(TERMINAL.has('skipped:no-image'));
   const net = harness({ entries: [raw({ n: 'a' })] });
-  net.deps.fetch = async () => { throw new Error('ENOTFOUND media.example'); };
+  const sent = [];
+  net.deps.fetch = async (url, init) => { sent.push(init?.method); throw new Error('ENOTFOUND media.example'); };
   const rn = await run({ dryRun: false }, net.deps);
   assert.equal(rn.code, 2);
+  assert.deepEqual(sent, ['HEAD', 'HEAD'], 'asked twice before giving up');
+  assert.equal(net.slept.length, 1, "the pause between the two goes through the run's own sleep");
   assert.equal(net.appended[0].status, 'error');
   assert.equal(net.appended[0].transient, true, 'a HEAD that never answered says nothing about the post');
   assert.equal(TERMINAL.has('error'), false);
