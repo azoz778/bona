@@ -53,8 +53,15 @@ is claimed.
 - Each channel re-checks the account identity, downloads the reviewed images and compares their
   SHA-256 with the review, and re-reads the live catalogue just before upload. Any change stops
   that run.
-- A per-channel lock, the existing ledgers and a durable `intent` record prevent duplicates. A
-  failed or unconfirmed send records `uncertain` and stops automatic retries on that channel.
+- A per-channel lock, the existing ledgers and a durable `intent` record prevent duplicates.
+- A failure that provably sent nothing is recorded as `confirmed-not-published` automatically,
+  and the next run retries. On Instagram that means no `publishing` line for the attempt in
+  `~/bona-data/ig/published.jsonl`: the publisher writes that line before `media_publish`, the
+  only call that makes a post visible. On Facebook it means a failure before the Page feed
+  request, when only unpublished photo uploads were made (the Page token is fetched before the
+  `intent` record, so failing to get it records nothing). Such a run still fails and alerts
+  ("Instagram post not sent …" or "Facebook post not sent …"). Only an unknown outcome records
+  `uncertain`, which stops automatic retries on that channel until it is reconciled.
 - **Reconciling an uncertain attempt.** An `intent` or `uncertain` line in
   `~/bona-data/daily/property.jsonl` that no later line settles keeps that channel blocked.
   Settle it by appending lines, never by deleting any:
