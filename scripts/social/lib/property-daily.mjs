@@ -77,7 +77,17 @@ export function eligibility(p, review, advertiser, now = new Date()) {
   if (review.captionSha256 !== sha256(JSON.stringify(propertyCaption(p,advertiser,review.legalDisclosures)))) reasons.push('caption_changed_since_review');
   return [...new Set(reasons)];
 }
-export function propertyCaption(p, advertiser, disclosures = {}) {
+/** 'none' | 'some' | 'all' — how many reviewed photographs are developer renders. */
+export function renderShare(review) {
+  const kinds = (review?.photos ?? []).map(x => x.kind);
+  const renders = kinds.filter(k => k === 'render').length;
+  return renders === 0 ? 'none' : renders === kinds.length ? 'all' : 'some';
+}
+const RENDER_NOTE = Object.freeze({
+  all: { ar: 'الصور تصاميم تصوّرية من المطوّر.', en: "Images are the developer's artist's impressions." },
+  some: { ar: 'بعض الصور تصاميم تصوّرية من المطوّر.', en: "Some images are the developer's artist's impressions." },
+});
+export function propertyCaption(p, advertiser, disclosures = {}, { renders = 'none' } = {}) {
   const n = x => Number(x).toLocaleString('en-US');
   const ar = [], en = [];
   if (p.specs?.beds) { ar.push(`${n(p.specs.beds)} غرف نوم`); en.push(`${n(p.specs.beds)} bedrooms`); }
@@ -88,12 +98,56 @@ export function propertyCaption(p, advertiser, disclosures = {}) {
     en.push(`${p.price.from ? 'From ' : ''}SAR ${n(p.price.amount)}${p.category === 'rent' ? ' / '+(p.price.period ?? 'enquire for rental period') : ''}`);
   }
   const url = `${SITE}/properties/${encodeURIComponent(p.slug)}/`;
-  const disclosureAr = p.licence?.adNumber ? `المعلن: ${advertiser.name.ar} | فال ${advertiser.fal}\nترخيص الإعلان: ${p.licence.adNumber} | ينتهي ${p.licence.adExpiry}\n${advertiser.phone}` : '';
-  const disclosureEn = p.licence?.adNumber ? `Advertiser: ${advertiser.name.en} | FAL ${advertiser.fal}\nAd licence ${p.licence.adNumber} | Expires ${p.licence.adExpiry}` : '';
+  const deal = p.category === 'rent' ? { ar: 'للإيجار', en: 'For rent' } : p.category === 'off-plan' ? { ar: 'على الخارطة', en: 'Off-plan' } : { ar: 'للبيع', en: 'For sale' };
+  const place = l => [p.location?.district?.[l], p.location?.city?.[l]].filter(Boolean).join(l === 'ar' ? '، ' : ', ');
+  const lines = (...xs) => xs.filter(Boolean).join('\n');
+  const blocks = (...xs) => xs.filter(Boolean).join('\n\n');
+  const note = RENDER_NOTE[renders] ?? {};
+  const licence = p.licence?.adNumber
+    ? { ar: `ترخيص الإعلان: ${p.licence.adNumber} · ينتهي ${p.licence.adExpiry}`, en: `Ad licence ${p.licence.adNumber} · Expires ${p.licence.adExpiry}` }
+    : {};
   return {
-    ar: `${p.title.ar}\n${p.location?.city?.ar ?? ''} · ${p.category==='rent'?'للإيجار':'للبيع'}\n\n${ar.join(' · ')}\n\nتبحث عن منزل بهذه المواصفات؟ راسل بونا بالرقم ${p.id} لمعرفة التوفر وترتيب معاينة.\n${url}\n\n${disclosures.ar ?? ''}\n${disclosureAr}`.trim(),
-    en: `${p.title.en} · ${p.category==='rent'?'For rent':'For sale'}\n${en.join(' · ')}\n\nInterested? Message Bona with ${p.id} for current availability and a viewing.\n\n${disclosures.en ?? ''}\n${disclosureEn}`.trim()
+    ar: blocks(
+      lines(p.title.ar, [place('ar'), deal.ar].filter(Boolean).join(' · ')),
+      ar.join(' · '),
+      lines(`تبحث عن منزل بهذه المواصفات؟ راسل بونا بالرقم ${p.id} لمعرفة التوفر وترتيب معاينة.`, url),
+      lines(disclosures.ar, `المعلن: ${advertiser.name.ar} · فال ${advertiser.fal} · ${advertiser.phone}`, licence.ar, note.ar)),
+    en: blocks(
+      lines(p.title.en, [place('en'), deal.en].filter(Boolean).join(' · ')),
+      en.join(' · '),
+      `Interested? Message Bona with ${p.id} for current availability and a viewing.`,
+      lines(disclosures.en, `Advertiser: ${advertiser.name.en} · FAL ${advertiser.fal} · ${advertiser.phone}`, licence.en, note.en)),
   };
+}
+/** The caption a review binds: its disclosures and whether its photographs are renders. */
+export const captionFor = (p, advertiser, review) => propertyCaption(p, advertiser, review?.legalDisclosures ?? {}, { renders: renderShare(review) });
+
+const TYPE_WORDS = Object.freeze({
+  villa: { ar: 'فلل', en: 'Villas' }, mansion: { ar: 'قصور', en: 'Mansions' },
+  apartment: { ar: 'شقق', en: 'Apartments' }, penthouse: { ar: 'بنتهاوس', en: 'Penthouses' },
+  duplex: { ar: 'دوبلكس', en: 'Duplexes' }, townhouse: { ar: 'تاون_هاوس', en: 'Townhouses' },
+  land: { ar: 'أراضي', en: 'Land' },
+});
+const firstPart = s => String(s ?? '').split(/[،,]/)[0].trim();
+const wordCount = s => firstPart(s).split(/\s+/).filter(Boolean).length;
+const arTag = s => firstPart(s).replace(/\s+/g, '_').replace(/[^\p{L}\p{N}_]/gu, '');
+const enTag = s => firstPart(s).split(/[\s-]+/).map(w => w.replace(/[^\p{L}\p{N}]/gu, '')).filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join('');
+/** Deterministic hashtags from listing facts (bound by the review's factsSha256): at most twelve. */
+export function propertyHashtags(p) {
+  const city = p.location?.city ?? {}, district = p.location?.district ?? {};
+  const cityAr = arTag(city.ar), cityEn = enTag(city.en), word = TYPE_WORDS[p.type];
+  const deal = p.category === 'rent' ? 'للإيجار' : 'للبيع';
+  const out = ['#بونا', '#BonaRealEstate'];
+  if (cityAr) out.push(`#عقارات_${cityAr}`);
+  if (cityEn) out.push(`#${cityEn}RealEstate`);
+  if (word && cityAr) out.push(`#${word.ar}_${cityAr}`);
+  if (word) out.push(`#${word.ar}_${deal}`);
+  if (word && cityEn) out.push(`#${cityEn}${word.en}`);
+  if (p.category === 'off-plan') out.push('#مشاريع_على_الخارطة', '#OffPlan');
+  if (district.ar && wordCount(district.ar) <= 3 && arTag(district.ar)) out.push(`#${arTag(district.ar)}`);
+  if (district.en && wordCount(district.en) <= 3 && enTag(district.en)) out.push(`#${enTag(district.en)}`);
+  out.push('#عقارات_فاخرة');
+  return [...new Set(out)].slice(0, 12);
 }
 export function dayState(events, channel, date) {
   const records = events.filter(x => x.channel === channel && x.date === date);
@@ -114,7 +168,7 @@ export function chooseProperty(listings, reviews, advertiser, events, channel, n
 }
 export function entryFor(p, review, advertiser, channel, date, assets = []) {
   return {id:`bona-daily-${channel==='instagram'?'ig':'fb'}-${date}`,date,time:'20:30',platform:channel,
-    listingId:p.id,topic:p.title,format:'carousel',caption:propertyCaption(p,advertiser,review.legalDisclosures),hashtags:['#بونا','#عقارات'],
+    listingId:p.id,topic:p.title,format:'carousel',caption:captionFor(p,advertiser,review),hashtags:propertyHashtags(p),
     reviewStatus:'approved',adLicenceRequired:false,adLicenceVerified:true,blocked:false,
     images:review.photos.map(x=>x.url),assets,assetsJpg:assets,alt:review.photos[0].alt,status:'planned'};
 }
