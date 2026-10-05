@@ -1,7 +1,7 @@
 // Helpers for drafting and approving property photo/caption reviews (docs/daily-property-publishing.md).
 // Nothing here publishes; the approve script is the only writer of marketing/daily/property-reviews.json.
 import sharp from 'sharp';
-import { SITE, sha256, fingerprint, advertiserFingerprint, captionFor } from './property-daily.mjs';
+import { SITE, sha256, fingerprint, advertiserFingerprint, reviewedCopy } from './property-daily.mjs';
 
 /** The publisher's own photo rules (eligibility() checks the same numbers). */
 export const FRAME_RULES = Object.freeze({ minWidth: 1080, minHeight: 720, minAspect: 0.8, maxAspect: 1.91, maxBytes: 8_000_000 });
@@ -51,7 +51,7 @@ export function buildReview(p, advertiser, draftFrames, selection, { reviewedAt,
   if (!aspectConsistent(photos)) throw new Error(`${p.id}: selected frames differ in aspect ratio by more than 15% (Instagram crops a carousel to its first frame)`);
   const review = { status: 'approved', reviewedAt, reviewer, factsSha256: fingerprint(p), advertiserSha256: advertiserFingerprint(advertiser),
     captionSha256: null, licenceEvidence: null, legalDisclosuresVerified: true, legalDisclosures: disclosuresFor(p), photos };
-  review.captionSha256 = sha256(JSON.stringify(captionFor(p, advertiser, review)));
+  review.captionSha256 = sha256(JSON.stringify(reviewedCopy(p, advertiser, review)));
   return review;
 }
 /** Equal apart from who approved it and when. */

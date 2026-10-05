@@ -87,7 +87,7 @@ export function eligibility(p, review, advertiser, now = new Date(), rules = STR
         !/^[a-f0-9]{64}$/.test(photo.sha256 ?? '') || photo.width < 1080 || photo.height < 720 ||
         photo.width/photo.height < 0.8 || photo.width/photo.height > 1.91 || !photo.alt?.ar || !photo.alt?.en) reasons.push('photo_quality_or_provenance_unverified');
   }
-  if (review.captionSha256 !== sha256(JSON.stringify(captionFor(p,advertiser,review)))) reasons.push('caption_changed_since_review');
+  if (review.captionSha256 !== sha256(JSON.stringify(reviewedCopy(p,advertiser,review)))) reasons.push('caption_changed_since_review');
   return [...new Set(reasons)];
 }
 /** 'none' | 'some' | 'all' — how many reviewed photographs are developer renders. */
@@ -134,6 +134,8 @@ export function propertyCaption(p, advertiser, disclosures = {}, { renders = 'no
 }
 /** The caption a review binds: its disclosures and whether its photographs are renders. */
 export const captionFor = (p, advertiser, review) => propertyCaption(p, advertiser, review?.legalDisclosures ?? {}, { renders: renderShare(review) });
+/** Everything a review's captionSha256 binds: the caption and the generated hashtags, as they would be posted. */
+export const reviewedCopy = (p, advertiser, review) => ({ ...captionFor(p, advertiser, review), hashtags: propertyHashtags(p) });
 
 const TYPE_WORDS = Object.freeze({
   villa: { ar: 'فلل', en: 'Villas' }, mansion: { ar: 'قصور', en: 'Mansions' },
