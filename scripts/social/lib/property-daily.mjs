@@ -46,35 +46,41 @@ export function policyRules(policy = {}, now = new Date()) {
   if (!Number.isInteger(reviewValidDays) || reviewValidDays < 1 || reviewValidDays > 180) throw new Error('Invalid reviewValidDays in the property policy');
   return Object.freeze({ licenceRequired: licence.requirement === 'required', countries: Object.freeze([...countries]), categories: Object.freeze([...categories]), renders, reviewValidDays });
 }
-export function eligibility(p, review, advertiser, now = new Date()) {
+export function eligibility(p, review, advertiser, now = new Date(), rules = STRICT_RULES) {
   const reasons = [];
   if (p?.status !== 'available') reasons.push('not_available');
-  if (p?.location?.countryCode !== 'SA' || !['buy','rent'].includes(p?.category)) reasons.push('requires_separate_market_or_offplan_review');
+  if (!rules.countries.includes(p?.location?.countryCode) || !rules.categories.includes(p?.category)) reasons.push('outside_policy_scope');
   const licence = p?.licence;
-  if (!/^\d{8,15}$/.test(licence?.adNumber ?? '')) reasons.push('missing_ad_licence');
-  if (!realDate(licence?.adExpiry) || licence.adExpiry < ksaNow(now).date) reasons.push('missing_or_expired_ad_licence');
+  if (rules.licenceRequired) {
+    if (!/^\d{8,15}$/.test(licence?.adNumber ?? '')) reasons.push('missing_ad_licence');
+    if (!realDate(licence?.adExpiry) || licence.adExpiry < ksaNow(now).date) reasons.push('missing_or_expired_ad_licence');
+  }
   if (!review || review.status !== 'approved') reasons.push('photo_and_copy_review_pending');
   if (!review) return reasons;
   if (review.factsSha256 !== fingerprint(p)) reasons.push('listing_changed_since_review');
   if (review.advertiserSha256 !== advertiserFingerprint(advertiser)) reasons.push('advertiser_changed_since_review');
-  if (!fresh(review.reviewedAt,now,30)) reasons.push('review_expired');
-  const e = review.licenceEvidence;
-  if (!e || e.adNumber !== licence?.adNumber || e.adExpiry !== licence?.adExpiry ||
-      !e.sourceReference || !e.marketingAuthorizationReference || e.socialMediaAllowed !== true ||
-      e.contactMatches !== true || !fresh(e.verifiedAt,now,30)) reasons.push('licence_and_marketing_authority_unverified');
+  if (!fresh(review.reviewedAt,now,rules.reviewValidDays)) reasons.push('review_expired');
+  if (rules.licenceRequired) {
+    const e = review.licenceEvidence;
+    if (!e || e.adNumber !== licence?.adNumber || e.adExpiry !== licence?.adExpiry ||
+        !e.sourceReference || !e.marketingAuthorizationReference || e.socialMediaAllowed !== true ||
+        e.contactMatches !== true || !fresh(e.verifiedAt,now,30)) reasons.push('licence_and_marketing_authority_unverified');
+  }
   if (review.legalDisclosuresVerified !== true || !review.legalDisclosures?.ar?.trim() || !review.legalDisclosures?.en?.trim()) reasons.push('property_condition_services_and_rights_disclosures_pending');
   if (!advertiser?.name?.ar || !advertiser?.name?.en || !/^\d{8,15}$/.test(advertiser?.fal ?? '') ||
       !/^\+\d{8,15}$/.test(advertiser?.phone ?? '')) reasons.push('advertiser_details_incomplete');
   const photos = review.photos ?? [];
   if (photos.length < 3 || photos.length > 6 || new Set(photos.map(x=>x.url)).size !== photos.length) reasons.push('need_three_to_six_distinct_photos');
   const allowed = new Set((p.images ?? []).map(x=>{try{return imageUrl(x.src)}catch{return null}}));
+  const rendersAllowed = rules.renders === 'off-plan-only' && p?.category === 'off-plan';
   for (const photo of photos) {
     let url; try { url = imageUrl(photo.url); } catch { reasons.push('unapproved_photo_source'); continue; }
-    if (!allowed.has(url) || photo.kind !== 'photograph' || photo.visuallyApproved !== true ||
+    if (photo.kind === 'render' && !rendersAllowed) reasons.push('render_not_allowed');
+    if (!allowed.has(url) || !['photograph','render'].includes(photo.kind) || photo.visuallyApproved !== true ||
         !/^[a-f0-9]{64}$/.test(photo.sha256 ?? '') || photo.width < 1080 || photo.height < 720 ||
         photo.width/photo.height < 0.8 || photo.width/photo.height > 1.91 || !photo.alt?.ar || !photo.alt?.en) reasons.push('photo_quality_or_provenance_unverified');
   }
-  if (review.captionSha256 !== sha256(JSON.stringify(propertyCaption(p,advertiser,review.legalDisclosures)))) reasons.push('caption_changed_since_review');
+  if (review.captionSha256 !== sha256(JSON.stringify(captionFor(p,advertiser,review)))) reasons.push('caption_changed_since_review');
   return [...new Set(reasons)];
 }
 /** 'none' | 'some' | 'all' — how many reviewed photographs are developer renders. */
@@ -155,11 +161,11 @@ export function dayState(events, channel, date) {
   if (records.some(x=>['intent','uncertain'].includes(x.status))) return 'uncertain';
   return 'ready';
 }
-export function chooseProperty(listings, reviews, advertiser, events, channel, now = new Date(), repeatDays = 30) {
+export function chooseProperty(listings, reviews, advertiser, events, channel, now = new Date(), repeatDays = 30, rules = STRICT_RULES) {
   const rejected = [];
   const last = id => Math.max(0,...events.filter(x=>x.channel===channel && x.listingId===id && x.status==='published').map(x=>Date.parse(x.at)||0));
   const candidates = listings.filter(p=>{
-    const why = eligibility(p,reviews[p.id],advertiser,now);
+    const why = eligibility(p,reviews[p.id],advertiser,now,rules);
     if (+now-last(p.id) < repeatDays*86400000) why.push('recently_published');
     if (why.length) { rejected.push({id:p.id,reasons:why}); return false; }
     return true;

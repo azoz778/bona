@@ -23,13 +23,21 @@ function offPlanFixture() {
     images: [1,2,3].map(i => ({ src: `/listings/tower/${i}.jpg` })), licence: null };
   return { listing, advertiser };
 }
+const WAIVED = policyRules({ adLicence: { requirement: 'waived', by: 'owner', on: '2026-10-02' }, countries: ['SA'], categories: ['buy','rent','off-plan'], renders: 'off-plan-only', reviewValidDays: 90 }, now);
+function waivedReview(p, a, kind = 'photograph') {
+  const { review: base } = fixture();
+  const review = { ...base, factsSha256: fingerprint(p), advertiserSha256: advertiserFingerprint(a), licenceEvidence: null,
+    photos: p.images.map((x, i) => ({ ...base.photos[0], url: 'https://bona-real-estate.com' + x.src, sha256: sha256('fixture ' + i), kind })) };
+  review.captionSha256 = sha256(JSON.stringify(captionFor(p, a, review)));
+  return review;
+}
 test('publication eligibility needs a current licence, matching evidence, reviewed facts and photographs',()=>{
   const {listing:p,advertiser:a,review:r}=fixture();assert.deepEqual(eligibility(p,r,a,now),[]);
   assert.ok(eligibility({...p,licence:null},r,a,now).includes('missing_ad_licence'));
   assert.ok(eligibility({...p,status:'sold'},r,a,now).includes('not_available'));
-  assert.ok(eligibility({...p,category:'off-plan'},r,a,now).includes('requires_separate_market_or_offplan_review'));
+  assert.ok(eligibility({...p,category:'off-plan'},r,a,now).includes('outside_policy_scope'));
   assert.ok(eligibility(p,{...r,licenceEvidence:{...r.licenceEvidence,socialMediaAllowed:false}},a,now).includes('licence_and_marketing_authority_unverified'));
-  assert.ok(eligibility(p,{...r,photos:r.photos.map(x=>({...x,kind:'render'}))},a,now).includes('photo_quality_or_provenance_unverified'));
+  assert.ok(eligibility(p,{...r,photos:r.photos.map(x=>({...x,kind:'render'}))},a,now).includes('render_not_allowed'));
   assert.ok(eligibility(p,{...r,photos:r.photos.map(x=>({...x,width:600}))},a,now).includes('photo_quality_or_provenance_unverified'));
 });
 test('changed prices, captions, photos or advertiser invalidate approval',()=>{
@@ -197,4 +205,35 @@ test('entryFor carries the reviewed caption and the generated hashtags', () => {
   assert.deepEqual(e.caption, captionFor(p, a, r));
   assert.deepEqual(e.hashtags, propertyHashtags(p));
   assert.deepEqual(e.images, r.photos.map(x => x.url));
+});
+test('waived policy: an unlicensed Saudi listing with a current review is eligible; the strict policy still refuses it', () => {
+  const { listing, advertiser: a } = fixture(); const p = { ...listing, licence: null };
+  const r = waivedReview(p, a);
+  assert.deepEqual(eligibility(p, r, a, now, WAIVED), []);
+  const strict = eligibility(p, r, a, now);
+  for (const why of ['missing_ad_licence','missing_or_expired_ad_licence','licence_and_marketing_authority_unverified']) assert.ok(strict.includes(why), why);
+});
+test('waived policy: off-plan may use renders; ready stock may not; foreign stock is out of scope', () => {
+  const { listing: p, advertiser: a } = offPlanFixture();
+  assert.deepEqual(eligibility(p, waivedReview(p, a, 'render'), a, now, WAIVED), []);
+  const { listing: ready } = fixture(); const bare = { ...ready, licence: null };
+  assert.ok(eligibility(bare, waivedReview(bare, a, 'render'), a, now, WAIVED).includes('render_not_allowed'));
+  const oman = { ...p, location: { ...p.location, countryCode: 'OM' } };
+  assert.ok(eligibility(oman, waivedReview(oman, a, 'render'), a, now, WAIVED).includes('outside_policy_scope'));
+  assert.ok(eligibility(p, waivedReview(p, a, 'sketch'), a, now, WAIVED).includes('photo_quality_or_provenance_unverified'));
+});
+test('waived policy: reviews last reviewValidDays and changed facts or captions still invalidate them', () => {
+  const { listing, advertiser: a } = fixture(); const p = { ...listing, licence: null };
+  const r = { ...waivedReview(p, a), reviewedAt: '2026-08-10T12:00:00Z' };
+  assert.deepEqual(eligibility(p, r, a, now, WAIVED), []);
+  assert.ok(eligibility(p, r, a, now).includes('review_expired'));
+  assert.ok(eligibility(p, { ...r, reviewedAt: '2026-06-30T12:00:00Z' }, a, now, WAIVED).includes('review_expired'));
+  assert.ok(eligibility({ ...p, price: { ...p.price, amount: 2 } }, r, a, now, WAIVED).includes('listing_changed_since_review'));
+  assert.ok(eligibility(p, { ...r, captionSha256: 'bad' }, a, now, WAIVED).includes('caption_changed_since_review'));
+});
+test('rotation applies the policy rules it is given', () => {
+  const { listing, advertiser: a } = fixture(); const p = { ...listing, licence: null };
+  const reviews = { [p.id]: waivedReview(p, a) };
+  assert.equal(chooseProperty([p], reviews, a, [], 'instagram', now).listing, null);
+  assert.equal(chooseProperty([p], reviews, a, [], 'instagram', now, 30, WAIVED).listing.id, p.id);
 });
