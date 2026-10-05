@@ -507,14 +507,30 @@ test('Instagram: a send stopped before any publishing line is confirmed not publ
     assert.deepEqual(s.writes(), ['HEAD bona-real-estate.com/listings/fixture/1.jpg', 'HEAD bona-real-estate.com/listings/fixture/1.jpg'], 'the first image asked twice; nothing sent to Instagram');
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
+/** A live process (this one) holds the Instagram publisher's lock, so run() returns before any request. */
+function holdPublisherLock(f) {
+  fs.mkdirSync(path.dirname(f.igLedger), { recursive: true });
+  fs.writeFileSync(path.join(path.dirname(f.igLedger), '.publish.lock'), JSON.stringify({ pid: process.pid, ts: now.toISOString() }));
+}
 test('Instagram: a run that never got the publisher lock sent nothing either', async () => {
   const f = sendFixture('bona-property-ig-locked-');
   try {
-    fs.mkdirSync(path.dirname(f.igLedger), { recursive: true });
-    fs.writeFileSync(path.join(path.dirname(f.igLedger), '.publish.lock'), JSON.stringify({ pid: process.pid, ts: now.toISOString() }));
+    holdPublisherLock(f);
+    fs.writeFileSync(f.igLedger, JSON.stringify({ id: 'bona-daily-ig-2026-10-01', date: '2026-10-01', status: 'published', ts: '2026-10-01T17:31:00Z' }) + '\n');
     const s = sendStub(f);
     await assert.rejects(send('instagram', f, s.fetchImpl), e => e.message.startsWith('Instagram post not sent;'));
     assert.deepEqual(jsonl(f.journal).map(x => x.status), ['intent', 'confirmed-not-published']);
+    assert.deepEqual(s.writes(), []);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+test('Instagram: a missing ledger file proves nothing, so the attempt stays uncertain', async () => {
+  const f = sendFixture('bona-property-ig-noledger-');
+  try {
+    holdPublisherLock(f);
+    const s = sendStub(f);
+    await assert.rejects(send('instagram', f, s.fetchImpl), e => e.message === 'Property publication unconfirmed; automatic retry stopped');
+    assert.deepEqual(jsonl(f.journal).map(x => x.status), ['intent', 'uncertain']);
+    assert.equal(fs.existsSync(f.igLedger), false);
     assert.deepEqual(s.writes(), []);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
@@ -551,6 +567,7 @@ test('provenNotSent: only an Instagram ledger with no publishing or published li
   assert.equal(provenNotSent('instagram', IG_ID, null, ledger({ id: IG_ID, status: 'publishing' }, { id: IG_ID, status: 'error' })), null, 'a publishing line keeps it unknown, whatever follows');
   assert.equal(provenNotSent('instagram', IG_ID, null, ledger({ id: IG_ID, status: 'published' })), null);
   assert.equal(provenNotSent('instagram', IG_ID, null, () => { throw new SyntaxError('Unexpected end of JSON input'); }), null, 'an unreadable ledger proves nothing');
+  assert.equal(provenNotSent('instagram', IG_ID, null, () => null), null, 'a missing ledger file proves nothing');
   assert.equal(provenNotSent('instagram', IG_ID, { notPublished: true }, ledger({ id: IG_ID, status: 'publishing' })), null, 'the Facebook marker means nothing on Instagram');
 });
 test('provenNotSent: on Facebook only an error marked notPublished by postPhotos() proves nothing went out', () => {
