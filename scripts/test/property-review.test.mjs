@@ -30,15 +30,15 @@ async function world() {
     title: { ar: 'فيلا تجريبية', en: 'Fixture villa' }, price: { amount: 5000000, currency: 'SAR', from: false, onRequest: false }, specs: { beds: 5 },
     images: Object.keys(images).map((src, i) => ({ src, alt: { ar: `صورة ${i + 1}`, en: `Photo ${i + 1}` } })), licence: null };
   const muscat = { ...villa, id: 'BONA-T2', slug: 'muscat', location: { ...villa.location, countryCode: 'OM' } };
-  const state = { listings: [villa, muscat] };
+  const state = { listings: [villa, muscat], advertiser, generatedAt: '2026-10-05T06:00:00Z' };
   const fetchImpl = async (url) => {
     const u = new URL(url);
-    if (u.pathname === '/social-catalogue.json') return Response.json({ version: 1, generatedAt: '2026-10-05T06:00:00Z', advertiser, listings: state.listings });
+    if (u.pathname === '/social-catalogue.json') return Response.json({ version: 1, generatedAt: state.generatedAt, advertiser: state.advertiser, listings: state.listings });
     const body = images[u.pathname];
     if (!body) return new Response('missing', { status: 404 });
     return new Response(body, { headers: { 'content-type': 'image/jpeg' } });
   };
-  return { root, fetchImpl, state, villa, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
+  return { root, fetchImpl, state, villa, images, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
 
 test('frame rules match the publisher: JPEG, at most 8 MB, at least 1080x720, aspect 0.8 to 1.91', () => {
@@ -129,6 +129,68 @@ test('approving writes eligible reviews, refuses rejected frames or changed list
     w.state.listings = [{ ...w.villa, price: { ...w.villa.price, amount: 4900000 } }];
     assert.match((await run('BONA-T1:1,2,3', now, 'r')).refused[0], /changed since drafting/);
     assert.equal(fs.readFileSync(reg, 'utf8'), before);
+  } finally { w.cleanup(); }
+});
+const quiet = () => {};
+const approveWith = (w, drafts, selects, at = now, fetchImpl = w.fetchImpl) =>
+  approve(['--drafts', drafts, '--reviewer', 'test reviewer', ...selects.flatMap(s => ['--select', s])], { fetchImpl, now: at, root: w.root, log: quiet });
+const register = w => fs.readFileSync(path.join(w.root, 'marketing/daily/property-reviews.json'), 'utf8');
+test('approval refuses every selection when the advertiser changed since drafting', async () => {
+  const w = await world();
+  try {
+    const out = path.join(w.root, 'drafts');
+    await draft(['--out', out], { fetchImpl: w.fetchImpl, now, root: w.root, log: quiet });
+    w.state.advertiser = { ...advertiser, phone: '+966500000001' };
+    const r = await approveWith(w, path.join(out, 'drafts.json'), ['BONA-T1:1,2,3', 'BONA-T1:1,3,2']);
+    assert.equal(r.written, 0);
+    assert.deepEqual(r.refused, ['BONA-T1: advertiser changed since drafting — draft again', 'BONA-T1: advertiser changed since drafting — draft again']);
+    assert.equal(register(w), '{}\n');
+  } finally { w.cleanup(); }
+});
+test('approval re-fetches the selected frames and refuses a listing whose photo bytes changed since drafting', async () => {
+  const w = await world();
+  try {
+    const out = path.join(w.root, 'drafts'), drafts = path.join(out, 'drafts.json');
+    await draft(['--out', out], { fetchImpl: w.fetchImpl, now, root: w.root, log: quiet });
+    const frames = [];
+    const watching = async (url, opts) => { if (!String(url).endsWith('/social-catalogue.json')) frames.push({ url, opts }); return w.fetchImpl(url, opts); };
+    const original = w.images['/listings/villa/2.jpg'];
+    w.images['/listings/villa/2.jpg'] = await jpeg(1920, 1280, '#000000');
+    const changed = await approveWith(w, drafts, ['BONA-T1:1,2,3'], now, watching);
+    assert.equal(changed.written, 0);
+    assert.match(changed.refused[0] ?? '', /^BONA-T1: photo bytes changed since drafting/);
+    assert.equal(register(w), '{}\n');
+    assert.ok(frames.length >= 2, 'the selected frames were fetched again');
+    for (const { url, opts } of frames) {
+      assert.match(url, /^https:\/\/bona-real-estate\.com\/listings\/villa\/[123]\.jpg$/);
+      assert.equal(opts.redirect, 'error');
+      assert.equal(opts.headers['User-Agent'], 'BonaPropertyPublisher/1.0');
+      assert.ok(opts.signal instanceof AbortSignal);
+    }
+    delete w.images['/listings/villa/2.jpg'];
+    assert.match((await approveWith(w, drafts, ['BONA-T1:1,2,3'])).refused[0] ?? '', /^BONA-T1: photo bytes could not be re-checked/);
+    assert.equal(register(w), '{}\n');
+    w.images['/listings/villa/2.jpg'] = original;
+    frames.length = 0;
+    assert.deepEqual(await approveWith(w, drafts, ['BONA-T1:1,2,3'], now, watching), { written: 1, unchanged: 0, refused: [] });
+    assert.deepEqual(frames.map(f => new URL(f.url).pathname), ['/listings/villa/1.jpg', '/listings/villa/2.jpg', '/listings/villa/3.jpg']);
+  } finally { w.cleanup(); }
+});
+test('an identical review that has expired is renewed rather than reported unchanged', async () => {
+  const w = await world();
+  try {
+    await draft(['--out', path.join(w.root, 'd1')], { fetchImpl: w.fetchImpl, now, root: w.root, log: quiet });
+    assert.deepEqual(await approveWith(w, path.join(w.root, 'd1/drafts.json'), ['BONA-T1:1,2,3']), { written: 1, unchanged: 0, refused: [] });
+    const later = new Date(+now + 100 * 86_400_000);
+    w.state.generatedAt = new Date(+later - 4 * 3_600_000).toISOString();
+    const old = JSON.parse(register(w))['BONA-T1'];
+    assert.ok(eligibility(w.villa, old, advertiser, later, policyRules(WAIVER, later)).includes('review_expired'));
+    await draft(['--out', path.join(w.root, 'd2')], { fetchImpl: w.fetchImpl, now: later, root: w.root, log: quiet });
+    assert.deepEqual(await approveWith(w, path.join(w.root, 'd2/drafts.json'), ['BONA-T1:1,2,3'], later), { written: 1, unchanged: 0, refused: [] });
+    const renewed = JSON.parse(register(w))['BONA-T1'];
+    assert.equal(renewed.reviewedAt, later.toISOString());
+    assert.deepEqual(eligibility(w.villa, renewed, advertiser, later, policyRules(WAIVER, later)), []);
+    assert.deepEqual(await approveWith(w, path.join(w.root, 'd2/drafts.json'), ['BONA-T1:1,2,3'], new Date(+later + 3_600_000)), { written: 0, unchanged: 1, refused: [] }, 'a still-valid identical review stays untouched');
   } finally { w.cleanup(); }
 });
 test('every entry in the repository review register is well-formed', () => {
