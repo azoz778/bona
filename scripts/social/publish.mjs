@@ -455,7 +455,7 @@ export async function run(opts = {}, deps = {}) {
 
     if (!dryRun && deps.lock !== false) {
       lock = acquireLock(lockPath, { now: deps.wallClock ?? Date.now() });
-      if (!lock.ok) { log(`lock: ${lock.reason} — leaving this run to it`); return { code: 0, results, published: 0, errors: 0, skippedForLock: true }; }
+      if (!lock.ok) { log(`lock: ${lock.reason} — leaving this run to it`); return { code: 0, results, published: 0, errors: 0, skippedForLock: true, lockReason: lock.reason }; }
     }
 
     let rawEntries;

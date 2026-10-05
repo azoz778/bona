@@ -59,8 +59,9 @@ export function provenNotSent(channel,id,error,readIgLedger) {
   try{const all=readIgLedger();if(!Array.isArray(all))return null;mine=all.filter(x=>x.id===id);}catch{return null;}
   if(mine.some(x=>x.status==='publishing'||x.status==='published'))return null;
   const last=mine.at(-1)?.status;
+  const notes=[error?.lockReason&&`publisher lock held: ${error.lockReason}`,last&&`last ledger status for ${id}: ${last}`].filter(Boolean);
   return {evidence:`no publishing line for ${id} in ig/published.jsonl; media_publish was never sent`,
-    message:`Instagram post not sent${last?` (last ledger status for ${id}: ${last})`:''}`};
+    message:`Instagram post not sent${notes.length?` (${notes.join('; ')})`:''}`};
 }
 /**
  * Why this channel's own publisher would turn the entry down before any network call, or null.
@@ -178,7 +179,7 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
           {now:+now,token:env.META_ACCESS_TOKEN,igId:ACCOUNT.instagram,loadEntries:()=>[entry],
            readLedger:()=>assertNoPendingInstagram(rows(igLedger)),fetch:fetchImpl});
         receipt=rows(igLedger).find(x=>x.id===entry.id&&x.status==='published');
-        if(result.code!==0||!receipt)throw new Error('Instagram did not confirm publication');
+        if(result.code!==0||!receipt)throw Object.assign(new Error('Instagram did not confirm publication'),result.skippedForLock?{lockReason:result.lockReason}:{});
       } else {
         receipt=await publishEntry(entry,{fetch:fetchImpl,pageToken:page.token,pageId:ACCOUNT.facebook,root});
         appendLedger(path.join(data,'fb/published.jsonl'),{id:entry.id,date,listingId:p.id,status:'published',...receipt,at:new Date().toISOString()});

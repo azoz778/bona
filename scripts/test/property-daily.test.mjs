@@ -512,13 +512,14 @@ function holdPublisherLock(f) {
   fs.mkdirSync(path.dirname(f.igLedger), { recursive: true });
   fs.writeFileSync(path.join(path.dirname(f.igLedger), '.publish.lock'), JSON.stringify({ pid: process.pid, ts: now.toISOString() }));
 }
-test('Instagram: a run that never got the publisher lock sent nothing either', async () => {
+test('Instagram: a run that never got the publisher lock sent nothing either, and the alert names the lock holder', async () => {
   const f = sendFixture('bona-property-ig-locked-');
   try {
     holdPublisherLock(f);
     fs.writeFileSync(f.igLedger, JSON.stringify({ id: 'bona-daily-ig-2026-10-01', date: '2026-10-01', status: 'published', ts: '2026-10-01T17:31:00Z' }) + '\n');
     const s = sendStub(f);
-    await assert.rejects(send('instagram', f, s.fetchImpl), e => e.message.startsWith('Instagram post not sent;'));
+    const alert = new RegExp(`^Instagram post not sent \\(publisher lock held: another run holds the lock \\(pid ${process.pid}, -?\\d+ s old\\)\\); recorded confirmed-not-published, the next run retries$`);
+    await assert.rejects(send('instagram', f, s.fetchImpl), e => alert.test(e.message));
     assert.deepEqual(jsonl(f.journal).map(x => x.status), ['intent', 'confirmed-not-published']);
     assert.deepEqual(s.writes(), []);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
@@ -568,6 +569,8 @@ test('provenNotSent: only an Instagram ledger with no publishing or published li
   assert.equal(provenNotSent('instagram', IG_ID, null, ledger({ id: IG_ID, status: 'published' })), null);
   assert.equal(provenNotSent('instagram', IG_ID, null, () => { throw new SyntaxError('Unexpected end of JSON input'); }), null, 'an unreadable ledger proves nothing');
   assert.equal(provenNotSent('instagram', IG_ID, null, () => null), null, 'a missing ledger file proves nothing');
+  assert.equal(provenNotSent('instagram', IG_ID, { lockReason: 'another run holds the lock (pid 7, 5 s old)' }, ledger({ id: IG_ID, status: 'error' })).message,
+    `Instagram post not sent (publisher lock held: another run holds the lock (pid 7, 5 s old); last ledger status for ${IG_ID}: error)`);
   assert.equal(provenNotSent('instagram', IG_ID, { notPublished: true }, ledger({ id: IG_ID, status: 'publishing' })), null, 'the Facebook marker means nothing on Instagram');
 });
 test('provenNotSent: on Facebook only an error marked notPublished by postPhotos() proves nothing went out', () => {
