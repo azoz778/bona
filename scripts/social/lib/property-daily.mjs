@@ -27,6 +27,13 @@ function fresh(ts, now, maxDays) {
   const n = Date.parse(ts);
   return Number.isFinite(n) && n <= +now && +now - n <= maxDays*86400000;
 }
+/**
+ * A licence line the caption may carry: an 8–15 digit number with a real expiry date (eligibility
+ * also refuses one that has expired). Stricter than lib/listing.mjs adLicence(), which takes a number
+ * without an expiry for the legacy queue: this caption always pairs the number with its expiry, as
+ * the 2 October licence gate does, and a line that cannot be shown to be current is worse than none.
+ */
+const showsLicence = l => /^\d{8,15}$/.test(l?.adNumber ?? '') && realDate(l?.adExpiry);
 const CATEGORIES = ['buy', 'rent', 'off-plan'];
 /** What a policy without the 2026-10-05 fields means: licensed Saudi sale/rent stock, real photographs, 30-day reviews. */
 export const STRICT_RULES = Object.freeze({ licenceRequired: true, countries: Object.freeze(['SA']), categories: Object.freeze(['buy', 'rent']), renders: 'none', reviewValidDays: 30 });
@@ -54,7 +61,7 @@ export function eligibility(p, review, advertiser, now = new Date(), rules = STR
   if (rules.licenceRequired) {
     if (!/^\d{8,15}$/.test(licence?.adNumber ?? '')) reasons.push('missing_ad_licence');
     if (!realDate(licence?.adExpiry) || licence.adExpiry < ksaNow(now).date) reasons.push('missing_or_expired_ad_licence');
-  }
+  } else if (licence?.adNumber && (!showsLicence(licence) || licence.adExpiry < ksaNow(now).date)) reasons.push('ad_licence_invalid_or_expired');
   if (!review || review.status !== 'approved') reasons.push('photo_and_copy_review_pending');
   if (!review) return reasons;
   if (review.factsSha256 !== fingerprint(p)) reasons.push('listing_changed_since_review');
@@ -109,7 +116,7 @@ export function propertyCaption(p, advertiser, disclosures = {}, { renders = 'no
   const lines = (...xs) => xs.filter(Boolean).join('\n');
   const blocks = (...xs) => xs.filter(Boolean).join('\n\n');
   const note = RENDER_NOTE[renders] ?? {};
-  const licence = p.licence?.adNumber
+  const licence = showsLicence(p.licence)
     ? { ar: `ترخيص الإعلان: ${p.licence.adNumber} · ينتهي ${p.licence.adExpiry}`, en: `Ad licence ${p.licence.adNumber} · Expires ${p.licence.adExpiry}` }
     : {};
   return {

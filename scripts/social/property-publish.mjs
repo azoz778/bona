@@ -4,9 +4,9 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT, ksaNow } from './lib/daily-pack.mjs';
 import { ACCOUNT, SITE, sha256, fingerprint, eligibility, chooseProperty, dayState, entryFor, policyRules, unsettled } from './lib/property-daily.mjs';
-import { withLock, whoami, pageToken, publishEntry, appendLedger } from './lib/facebook.mjs';
+import { withLock, whoami, pageToken, publishEntry, appendLedger, refusal } from './lib/facebook.mjs';
 import { createGraph, checkCaption } from './lib/graph.mjs';
-import { run as publishInstagram, indexLedger } from './publish.mjs';
+import { run as publishInstagram, indexLedger, composeCaption, hasLicencePlaceholder, decide, normaliseEntry } from './publish.mjs';
 
 const read = file => JSON.parse(fs.readFileSync(file,'utf8'));
 const rows = file => fs.existsSync(file) ? fs.readFileSync(file,'utf8').split('\n').filter(Boolean).map(JSON.parse) : [];
@@ -22,9 +22,29 @@ export function legacyDayState(events,date) {
   if(matching.some(e=>['publishing','intent','uncertain'].includes(e.status))) return 'uncertain';
   return 'ready';
 }
+/**
+ * A `publishing` line in the Instagram ledger is settled only by a line in that ledger. A
+ * confirmed-not-published record in the property journal does not settle it on purpose: the
+ * Instagram publisher reconciles an in-flight container by re-sending media_publish while the
+ * container is still FINISHED (up to 24 h), which would post the earlier attempt's copy without
+ * the live-catalogue re-check.
+ */
 export function assertNoPendingInstagram(events) {
-  if([...indexLedger(events).values()].some(r=>r.inFlight&&!r.published))throw new Error('Earlier Instagram container is unsettled; manual reconciliation required, no backfill');
+  const pending=[...indexLedger(events)].filter(([,r])=>r.inFlight&&!r.published).map(([id])=>id);
+  if(pending.length)throw new Error(`Earlier Instagram container is unsettled (${pending.slice(0,3).join(', ')}): check the account, then append a published or error line for it to ig/published.jsonl; no backfill`);
   return events;
+}
+const IG_GRACE_HOURS=2.5;
+/**
+ * Why this channel's own publisher would turn the entry down before any network call, or null.
+ * Checked before the intent record: a refusal that is certain in advance stops the run cleanly
+ * instead of being journalled as an uncertain attempt that blocks the channel until reconciled.
+ */
+export function publisherRefusal(entry,channel,{igLedger=[],now=new Date()}={}) {
+  if(hasLicencePlaceholder(composeCaption(entry)))return 'caption carries a licence placeholder';
+  if(channel==='facebook')return refusal(entry);
+  const d=decide(normaliseEntry(entry),{now:+now,graceMs:IG_GRACE_HOURS*3600000,ledger:indexLedger(igLedger)});
+  return d.status==='candidate'?null:d.status?`${d.status}: ${d.detail}`:'not due, or already settled in the Instagram ledger';
 }
 async function catalogue(fetchImpl=fetch,now=new Date()) {
   const res=await fetchImpl(`${SITE}/social-catalogue.json`,{redirect:'error',cache:'no-store',signal:AbortSignal.timeout(20000)});
@@ -93,7 +113,9 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
     if(!dry)fs.mkdirSync(assetDir,{recursive:true});
     const assets=await photos(review,assetDir,dry,fetchImpl);
     const entry=entryFor(p,review,live.advertiser,channel,date,assets);
-    if(checkCaption(entry.caption.ar+'\n\n—\n\n'+entry.caption.en+'\n\n'+entry.hashtags.join(' ')).problems.length)throw new Error('Reviewed caption does not fit platform limits');
+    if(checkCaption(composeCaption(entry)).problems.length)throw new Error('Reviewed caption does not fit platform limits');
+    const refused=publisherRefusal(entry,channel,{igLedger:channel==='instagram'?rows(path.join(data,'ig/published.jsonl')):[],now});
+    if(refused)throw new Error(`The ${channel} publisher would refuse this post (${refused}); stopped before any record`);
     // Re-read the live source immediately before intent/upload: changed facts, withdrawn
     // stock, expired licence and changed advertiser all stop this run.
     const current=await catalogue(fetchImpl,now),updated=current.listings.find(x=>x.id===p.id);
@@ -108,7 +130,7 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
     try {
       let receipt;
       if(channel==='instagram') {
-        const result=await publishInstagram({dryRun:false,limit:1,graceHours:2.5,ledger:path.join(data,'ig/published.jsonl')},
+        const result=await publishInstagram({dryRun:false,limit:1,graceHours:IG_GRACE_HOURS,ledger:path.join(data,'ig/published.jsonl')},
           {now:+now,token:env.META_ACCESS_TOKEN,igId:ACCOUNT.instagram,loadEntries:()=>[entry],
            readLedger:()=>assertNoPendingInstagram(rows(path.join(data,'ig/published.jsonl'))),fetch:fetchImpl});
         receipt=rows(path.join(data,'ig/published.jsonl')).find(x=>x.id===entry.id&&x.status==='published');

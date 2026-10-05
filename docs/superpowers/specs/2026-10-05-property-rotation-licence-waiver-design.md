@@ -13,7 +13,7 @@ that. No license required." The regulatory exposure was stated once and accepted
 September research found the 2026 advertising bylaw treats a broker's own listing posts as
 advertisements that need a per-property licence number; a Jeddah first offence is a warning
 or about SAR 5,000. The owner's FAL number, advertiser name and phone stay on every post,
-and an ad-licence line is added automatically whenever a listing carries a number.
+and an ad-licence line is added automatically whenever a listing carries a valid, current number.
 
 Scope chosen by the owner: Saudi ready stock plus Saudi off-plan projects. International
 listings stay out. Approach chosen: the waiver plus a visual review of every listing's photo
@@ -63,6 +63,11 @@ callers and tests keep their meaning).
   driven by `policy.countries` and `policy.categories`.
 - Skipped under a waiver: `missing_ad_licence`, `missing_or_expired_ad_licence`,
   `licence_and_marketing_authority_unverified`. Under `"required"` they behave exactly as today.
+- New under a waiver: `ad_licence_invalid_or_expired` when `licence.adNumber` is set but is not
+  8–15 digits, or its `adExpiry` is missing, not a real date or before today (Riyadh). A licence
+  that is present gets printed, so it must be valid and current; the listing returns once the
+  catalogue is corrected. This is stricter than `lib/listing.mjs` `adLicence()`, which accepts a
+  number without an expiry for the legacy queue: this caption always pairs the two.
 - New: `render_not_allowed` when a photo has `kind: "render"` and the policy or the listing
   category does not allow it. Any other `kind` remains `photo_quality_or_provenance_unverified`.
 - `review_expired` uses `policy.reviewValidDays`.
@@ -80,7 +85,7 @@ Arabic first, then English, then hashtags (the publishers already join these).
 
 {legalDisclosures.ar}
 المعلن: {advertiser.name.ar} · فال {advertiser.fal} · {advertiser.phone}
-ترخيص الإعلان: N · ينتهي YYYY-MM-DD          ← only when the listing carries a number
+ترخيص الإعلان: N · ينتهي YYYY-MM-DD          ← only with an 8–15 digit number and a real expiry date
 الصور تصاميم تصوّرية من المطوّر.                ← all photos renders («بعض الصور …» when only some are)
 ```
 
@@ -180,14 +185,19 @@ Rotation stays oldest-first with a 30-day repeat interval, one post per channel 
 ## Tests
 
 - `eligibility`: waiver skips exactly the three licence reasons; `required` keeps them;
+  a present but malformed or expired licence is `ad_licence_invalid_or_expired` under the waiver;
   `outside_policy_scope` for OM/AE/ES and for categories not listed; `render_not_allowed`
   outside off-plan; `reviewValidDays` honoured; policy validation rejects a waiver without
   `by`/`on` or with a future date.
-- `propertyCaption`: advertiser line always present; licence line only with a number; render
-  note only with a render; off-plan wording; hashtag builder ≤ 12 and ≤ 30 total.
+- `propertyCaption`: advertiser line always present; licence line only with a valid number and a
+  real expiry date; render note only with a render; off-plan wording; hashtag builder ≤ 12 and
+  ≤ 30 total.
 - Publisher flow: a skipped property result continues into the pack path; published / ready
-  / not-due stop. Heartbeat: up on publication, down only at or after 22:30, silent without
-  the URL file, never throws.
+  / not-due stop. A post the channel's own publisher would refuse stops before the `intent`
+  record. Reconciliation: a `confirmed-not-published` line alone frees a channel whose attempt
+  made no container; an Instagram container also needs its ledger line, and its date stays
+  closed. Heartbeat: up on publication, down only at or after 22:30, silent without the URL
+  file, never throws.
 - Draft/approve scripts: fixture catalogue and sharp-generated JPEGs; size and aspect
   filtering, order, contact-sheet creation, register refusal of ineligible entries,
   idempotent rewrite.
@@ -218,7 +228,20 @@ Instagram bio website → `https://bona-real-estate.com/ig/`; GA4 key events for
 - **Settling an uncertain attempt.** Today any failure after `intent` blocks the channel until
   someone edits the journal. A `confirmed-not-published` record (channel, date, id, evidence)
   written after the attempt now settles it, so recovery is an append after checking the
-  provider, never a deletion and never a false `published`.
+  provider, never a deletion and never a false `published`. It settles the property journal
+  only (added in review). When the failed Instagram attempt had created a container,
+  `~/bona-data/ig/published.jsonl` also holds a `publishing` line for the id, and Instagram stays
+  blocked until that ledger gets its own line: `error` when the post is absent, `published` when
+  it exists. The journal record deliberately does not settle the ledger, because the Instagram
+  publisher reconciles an in-flight container by re-sending `media_publish` while the container
+  is still FINISHED (up to 24 hours). That would post the earlier attempt's copy without the
+  live-catalogue re-check. A date whose Instagram ledger holds a `publishing` line stays closed
+  even once settled (`legacyDayState`), and posting resumes from the next daily slot.
+- **Certain refusals stop before `intent` (added in review).** Before the `intent` record, the
+  preflight applies each publisher's own pure gate to the composed entry: the licence
+  placeholders on both channels, Facebook's `refusal()`, and Instagram's `decide()`. A post the
+  publisher would turn down is then a clean failure with nothing to reconcile, instead of an
+  `uncertain` record that blocks the channel.
 - **Meta can fetch the image hosts.** An unpublished Instagram carousel-item container created
   from a `tk-storage.azoz.uk` JPEG reached `FINISHED` (container 18116337718922966; it expires
   unpublished after 24 h). Both hosts answer `facebookexternalhit` with `image/jpeg`.
