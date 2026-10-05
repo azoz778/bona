@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT, ksaNow } from './lib/daily-pack.mjs';
@@ -7,7 +6,7 @@ import { ACCOUNT, SITE, sha256, fingerprint, eligibility, chooseProperty, daySta
 import { withLock, whoami, pageToken, publishEntry, appendLedger, refusal } from './lib/facebook.mjs';
 import { createGraph, checkCaption } from './lib/graph.mjs';
 import { run as publishInstagram, indexLedger, composeCaption, hasLicencePlaceholder, decide, normaliseEntry } from './publish.mjs';
-import { resolveLedgerPath } from './lib/ledger.mjs';
+import { dataDir, resolveLedgerPath } from './lib/ledger.mjs';
 
 const read = file => JSON.parse(fs.readFileSync(file,'utf8'));
 const rows = file => fs.existsSync(file) ? fs.readFileSync(file,'utf8').split('\n').filter(Boolean).map(JSON.parse) : [];
@@ -123,7 +122,8 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
   const rules=policyRules(policy,now);
   const {date,time}=ksaNow(now);
   if(time<'20:30'||time>='23:00'){console.log('Outside daily slot; no catch-up or off-schedule post');return {status:'not-due'};}
-  const data=env.BONA_DATA||path.join(os.homedir(),'bona-data'),dir=path.join(data,'daily'),journal=path.join(dir,'property.jsonl');
+  // One absolute data directory (~ expanded) for the journal, both Facebook ledgers, the assets and the locks.
+  const data=dataDir(env),dir=path.join(data,'daily'),journal=path.join(dir,'property.jsonl');
   // The Instagram ledger exactly as publish.mjs run() resolves it (~ expanded, absolute), so every
   // read here, the not-sent proof included, sees the file run() appends to.
   const igLedger=resolveLedgerPath(path.join(data,'ig/published.jsonl'));

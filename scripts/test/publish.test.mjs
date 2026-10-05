@@ -9,7 +9,7 @@ import {
   absoluteImageUrl, acquireLock, composeCaption, decide, DEFAULTS, fmtKsa, hasLicencePlaceholder, indexLedger,
   isQuietHours, jpegCandidates, ksaToEpoch, main, maskToken, normaliseEntry, parseArgs, parseLedger, parseNow, resolveImage, run, TERMINAL, verifyJpeg,
 } from '../social/publish.mjs';
-import { contentHash, DEFAULT_LEDGER_PATH, lockPathFor, readLedgerFile, resolveLedgerPath } from '../social/lib/ledger.mjs';
+import { contentHash, dataDir, DEFAULT_LEDGER_PATH, lockPathFor, readLedgerFile, resolveLedgerPath } from '../social/lib/ledger.mjs';
 
 const H = 3_600_000;
 const mk = (over = {}) => normaliseEntry({
@@ -196,6 +196,16 @@ test('ledger location: outside the repo — ~/bona-data/ig by default, $BONA_IG_
   assert.equal(lockPathFor('/srv/ig/l.jsonl'), '/srv/ig/.publish.lock');
   assert.ok(!DEFAULT_LEDGER_PATH.includes(path.join(home, 'bona') + path.sep), 'never inside the working tree');
   assert.deepEqual(readLedgerFile(path.join(os.tmpdir(), 'bona-no-such-ledger-' + process.pid + '.jsonl')), [], 'a missing ledger reads as empty');
+});
+
+test('data directory: $BONA_DATA, else ~/bona-data; a leading ~ is the home directory; always absolute', () => {
+  const home = os.homedir();
+  assert.equal(dataDir({}), path.join(home, 'bona-data'));
+  assert.equal(dataDir({ BONA_DATA: '~' }), home);
+  assert.equal(dataDir({ BONA_DATA: '~/x' }), path.join(home, 'x'));
+  assert.equal(dataDir({ BONA_DATA: '/srv/bona-data/' }), '/srv/bona-data');
+  assert.equal(dataDir({ BONA_DATA: 'rel/data' }), path.resolve('rel/data'));
+  assert.equal(dataDir({ BONA_DATA: '~other/x' }), path.resolve('~other/x'), 'only ~ and ~/ mean the home directory');
 });
 
 test('ledger parsing: JSON lines, corrupt lines skipped, last line per id wins, error count resets on publish', () => {

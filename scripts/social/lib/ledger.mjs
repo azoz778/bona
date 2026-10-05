@@ -23,11 +23,14 @@ export const LEDGER_ENV = 'BONA_IG_LEDGER';
 export const DEFAULT_LEDGER_DIR = path.join(os.homedir(), 'bona-data', 'ig');
 export const DEFAULT_LEDGER_PATH = path.join(DEFAULT_LEDGER_DIR, 'published.jsonl');
 
+/** A leading "~" or "~/" is the home directory (systemd does not expand it); the result is absolute. */
+const expandHome = (p) => path.resolve(String(p).replace(/^~(?=\/|$)/, os.homedir()));
 /** Where the ledger is: an explicit path (e.g. --ledger), else $BONA_IG_LEDGER, else the default. */
 export function resolveLedgerPath(explicit = null, env = process.env) {
-  const p = explicit || env[LEDGER_ENV] || DEFAULT_LEDGER_PATH;
-  return path.resolve(String(p).replace(/^~(?=\/|$)/, os.homedir()));
+  return expandHome(explicit || env[LEDGER_ENV] || DEFAULT_LEDGER_PATH);
 }
+/** The data directory, $BONA_DATA else ~/bona-data, resolved like the ledger path. Every path under it is derived from this one value. */
+export const dataDir = (env = process.env) => expandHome(env.BONA_DATA || path.join(os.homedir(), 'bona-data'));
 /** The run lock is always next to the ledger, whatever the ledger path is. */
 export const lockPathFor = (ledgerPath) => path.join(path.dirname(ledgerPath), '.publish.lock');
 
