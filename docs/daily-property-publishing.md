@@ -56,13 +56,15 @@ is claimed.
   whose preflight ends at or after 23:00 records nothing and posts nothing.
 - A per-channel lock, the existing ledgers and a durable `intent` record prevent duplicates.
 - A failure that provably sent nothing is recorded as `confirmed-not-published` automatically,
-  and the next run retries. On Instagram that means no `publishing` line for the attempt in
-  `~/bona-data/ig/published.jsonl`: the publisher writes that line before `media_publish`, the
-  only call that makes a post visible. On Facebook it means a failure before the Page feed
-  request, when only unpublished photo uploads were made (the Page token is fetched before the
-  `intent` record, so failing to get it records nothing). Such a run still fails and alerts
-  ("Instagram post not sent …" or "Facebook post not sent …"). Only an unknown outcome records
-  `uncertain`, which stops automatic retries on that channel until it is reconciled.
+  and the next run retries. On Instagram that means no `publishing` or `published` line for the
+  day's id in `~/bona-data/ig/published.jsonl`: the publisher writes the `publishing` line before
+  `media_publish`, the only call that makes a post visible. A missing Instagram ledger file is
+  treated as unknown, so the attempt stays `uncertain`. On Facebook it means a failure before the
+  Page feed request, when only unpublished photo uploads were made (the Page token is fetched
+  before the `intent` record, so failing to get it records no intent and sends nothing). Such a
+  run still fails and alerts ("Instagram post not sent …" or "Facebook post not sent …"). Only an
+  unknown outcome records `uncertain`, which stops automatic retries on that channel until it is
+  reconciled.
 - **Reconciling an uncertain attempt.** An `intent` or `uncertain` line in
   `~/bona-data/daily/property.jsonl` that no later line settles keeps that channel blocked.
   Settle it by appending lines, never by deleting any:
