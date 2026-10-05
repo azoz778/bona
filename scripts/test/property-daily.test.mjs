@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { publicListing,sha256,fingerprint,advertiserFingerprint,eligibility,propertyCaption,chooseProperty,dayState,realDate,policyRules,STRICT_RULES,renderShare,captionFor,propertyHashtags,entryFor } from '../social/lib/property-daily.mjs';
+import { publicListing,sha256,fingerprint,advertiserFingerprint,eligibility,propertyCaption,chooseProperty,dayState,realDate,policyRules,STRICT_RULES,renderShare,captionFor,propertyHashtags,entryFor,unsettled } from '../social/lib/property-daily.mjs';
 import { propertyDaily,legacyDayState,assertNoPendingInstagram } from '../social/property-publish.mjs';
 const now=new Date('2026-10-02T17:30:00Z');
 function fixture() {
@@ -236,4 +236,65 @@ test('rotation applies the policy rules it is given', () => {
   const reviews = { [p.id]: waivedReview(p, a) };
   assert.equal(chooseProperty([p], reviews, a, [], 'instagram', now).listing, null);
   assert.equal(chooseProperty([p], reviews, a, [], 'instagram', now, 30, WAIVED).listing.id, p.id);
+});
+test('a later confirmed-not-published record settles an attempt; an earlier one does not', () => {
+  const intent = { channel: 'instagram', date: '2026-10-05', id: 'bona-daily-ig-2026-10-05', status: 'intent' };
+  const uncertain = { ...intent, status: 'uncertain' };
+  const cleared = { ...intent, status: 'confirmed-not-published', evidence: 'fixture' };
+  assert.equal(dayState([intent, uncertain, cleared], 'instagram', '2026-10-05'), 'ready');
+  assert.equal(dayState([cleared, intent], 'instagram', '2026-10-05'), 'uncertain');
+  assert.equal(unsettled([intent, uncertain], 'instagram'), true);
+  assert.equal(unsettled([intent, uncertain, cleared], 'instagram'), false);
+  assert.equal(unsettled([cleared, intent], 'instagram'), true);
+  assert.equal(unsettled([intent, { ...intent, status: 'published' }], 'instagram'), false);
+  assert.equal(unsettled([intent], 'facebook'), false);
+});
+function writePolicy(root, extra = {}) {
+  fs.mkdirSync(path.join(root, 'marketing/daily'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'marketing/daily/property-policy.json'), JSON.stringify({ version: 1, mode: 'property-photography', time: '20:30', timezone: 'Asia/Riyadh', repeatDays: 30, catalogueUrl: 'https://bona-real-estate.com/social-catalogue.json', channels: ['instagram', 'facebook'], ...extra }));
+}
+const WAIVER_POLICY = { adLicence: { requirement: 'waived', by: 'owner', on: '2026-10-02' }, countries: ['SA'], categories: ['buy', 'rent', 'off-plan'], renders: 'off-plan-only', reviewValidDays: 90 };
+test('waived policy: an unlicensed off-plan listing with reviewed renders passes the dry preflight without writes', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-property-waiver-'));
+  try {
+    writePolicy(root, WAIVER_POLICY);
+    const { listing: p, advertiser: a } = offPlanFixture(); const r = waivedReview(p, a, 'render');
+    fs.writeFileSync(path.join(root, 'marketing/daily/property-reviews.json'), JSON.stringify({ [p.id]: r }));
+    const env = { BONA_DATA: path.join(root, 'data'), META_ACCESS_TOKEN: 'not-a-real-token', IG_BUSINESS_ID: '17841427688957180' };
+    const fetchImpl = async (url, opts) => {
+      assert.ok(!opts?.method || opts.method === 'GET', 'preflight must never mutate');
+      const u = new URL(url);
+      if (u.pathname === '/social-catalogue.json') return Response.json({ version: 1, generatedAt: now.toISOString(), advertiser: a, listings: [p] });
+      if (u.hostname === 'graph.facebook.com') return Response.json(u.pathname.endsWith('content_publishing_limit') ? { data: [{ quota_usage: 0, config: { quota_total: 100 } }] } : { id: env.IG_BUSINESS_ID, username: 'bonarealestatesa' });
+      const i = r.photos.findIndex(x => x.url === url); assert.ok(i >= 0);
+      return new Response('fixture ' + i, { headers: { 'content-type': 'image/jpeg' } });
+    };
+    const ready = await propertyDaily('instagram', { dry: true, now, root, env, fetchImpl });
+    assert.equal(ready.status, 'ready');
+    assert.equal(ready.entry.listingId, p.id);
+    assert.match(ready.entry.caption.en, /artist's impressions/);
+    assert.ok(ready.entry.hashtags.includes('#OffPlan'));
+    assert.equal(fs.existsSync(env.BONA_DATA), false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+test('a waiver without a name or date stops the run before any network call', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-property-badwaiver-'));
+  try {
+    writePolicy(root, { adLicence: { requirement: 'waived' } });
+    fs.writeFileSync(path.join(root, 'marketing/daily/property-reviews.json'), '{}');
+    let calls = 0; const fetchImpl = async () => { calls++; throw new Error('no network expected'); };
+    await assert.rejects(propertyDaily('instagram', { dry: true, now, root, env: { BONA_DATA: path.join(root, 'data') }, fetchImpl }), /waiver/);
+    assert.equal(calls, 0);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+test('the repository policy is the owner waiver for Saudi ready and off-plan stock', () => {
+  const policy = JSON.parse(fs.readFileSync(new URL('../../marketing/daily/property-policy.json', import.meta.url), 'utf8'));
+  const r = policyRules(policy, new Date('2026-10-05T17:30:00Z'));
+  assert.equal(r.licenceRequired, false);
+  assert.deepEqual([...r.countries], ['SA']);
+  assert.deepEqual([...r.categories], ['buy', 'rent', 'off-plan']);
+  assert.equal(r.renders, 'off-plan-only');
+  assert.equal(r.reviewValidDays, 90);
+  assert.equal(policy.adLicence.by, 'owner');
+  assert.equal(policy.adLicence.on, '2026-10-05');
 });

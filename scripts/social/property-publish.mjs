@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT, ksaNow } from './lib/daily-pack.mjs';
-import { ACCOUNT, SITE, sha256, fingerprint, eligibility, chooseProperty, dayState, entryFor } from './lib/property-daily.mjs';
+import { ACCOUNT, SITE, sha256, fingerprint, eligibility, chooseProperty, dayState, entryFor, policyRules, unsettled } from './lib/property-daily.mjs';
 import { withLock, whoami, pageToken, publishEntry, appendLedger } from './lib/facebook.mjs';
 import { createGraph, checkCaption } from './lib/graph.mjs';
 import { run as publishInstagram, indexLedger } from './publish.mjs';
@@ -68,6 +68,7 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
   if(policy.version!==1 || policy.mode!=='property-photography' || policy.time!=='20:30' || policy.timezone!=='Asia/Riyadh' ||
      policy.catalogueUrl!==`${SITE}/social-catalogue.json` || policy.repeatDays<30 ||
      policy.channels?.join(',')!=='instagram,facebook' || !policy.channels.includes(channel))throw new Error('Invalid property publishing policy');
+  const rules=policyRules(policy,now);
   const {date,time}=ksaNow(now);
   if(time<'20:30'||time>='23:00'){console.log('Outside daily slot; no catch-up or off-schedule post');return {status:'not-due'};}
   const data=env.BONA_DATA||path.join(os.homedir(),'bona-data'),dir=path.join(data,'daily'),journal=path.join(dir,'property.jsonl');
@@ -77,9 +78,9 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
     if(state==='published'||legacy==='published'){console.log('Daily slot already published');return {status:'already-published'};}
     if(state==='uncertain'||legacy==='uncertain')throw new Error('Uncertain daily publication; reconcile before retry');
     if(channel==='instagram')assertNoPendingInstagram(rows(path.join(data,'ig/published.jsonl')));
-    if(history.some(e=>e.channel===channel&&['intent','uncertain'].includes(e.status)&&!history.some(p=>p.channel===channel&&p.id===e.id&&p.status==='published')))throw new Error('Earlier property publication remains uncertain');
+    if(unsettled(history,channel))throw new Error('Earlier property publication remains uncertain; reconcile it before retrying');
     const live=await catalogue(fetchImpl,now),reviews=read(path.join(root,'marketing/daily/property-reviews.json'));
-    const selected=chooseProperty(live.listings,reviews,live.advertiser,history,channel,now,policy.repeatDays);
+    const selected=chooseProperty(live.listings,reviews,live.advertiser,history,channel,now,policy.repeatDays,rules);
     if(!selected.listing){
       const reasons={};for(const r of selected.rejected)for(const why of r.reasons)reasons[why]=(reasons[why]||0)+1;
       const row={channel,date,status:'skipped-no-eligible-property',catalogueCount:live.listings.length,reasons};
@@ -96,7 +97,7 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
     // Re-read the live source immediately before intent/upload: changed facts, withdrawn
     // stock, expired licence and changed advertiser all stop this run.
     const current=await catalogue(fetchImpl,now),updated=current.listings.find(x=>x.id===p.id);
-    if(!updated || fingerprint(updated)!==fingerprint(p) || eligibility(updated,review,current.advertiser,now).length)throw new Error('Property changed during preflight');
+    if(!updated || fingerprint(updated)!==fingerprint(p) || eligibility(updated,review,current.advertiser,now,rules).length)throw new Error('Property changed during preflight');
     if(dry){console.log(`Ready after read-only preflight: ${entry.id}, ${p.id}; no post`);return {status:'ready',entry};}
     for(const name of ['bona-ig-publish.timer','bona-fb-publish.timer']) {
       const enabled=spawnSync('systemctl',['--user','is-enabled',name],{encoding:'utf8'}).stdout.trim();

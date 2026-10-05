@@ -157,9 +157,14 @@ export function propertyHashtags(p) {
 }
 export function dayState(events, channel, date) {
   const records = events.filter(x => x.channel === channel && x.date === date);
-  if (records.some(x=>x.status === 'published')) return 'published';
-  if (records.some(x=>['intent','uncertain'].includes(x.status))) return 'uncertain';
+  if (records.some(x => x.status === 'published')) return 'published';
+  if (records.some((x, i) => ['intent', 'uncertain'].includes(x.status) && !records.slice(i + 1).some(y => y.status === 'confirmed-not-published'))) return 'uncertain';
   return 'ready';
+}
+/** True while an intent/uncertain attempt on this channel has no 'published' record, nor a 'confirmed-not-published' record written after it. */
+export function unsettled(events, channel) {
+  return events.some((e, i) => e.channel === channel && ['intent', 'uncertain'].includes(e.status) &&
+    !events.some((p, j) => p.channel === channel && p.id === e.id && (p.status === 'published' || (p.status === 'confirmed-not-published' && j > i))));
 }
 export function chooseProperty(listings, reviews, advertiser, events, channel, now = new Date(), repeatDays = 30, rules = STRICT_RULES) {
   const rejected = [];
