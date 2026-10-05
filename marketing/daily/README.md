@@ -11,14 +11,14 @@ posting permission is inferred. This release is the first reserve, Sept 28–Oct
 - New `bona-daily@instagram.timer` and `bona-daily@facebook.timer` own daily dispatch.
   Old bona-ig-publish.timer / bona-fb-publish.timer must stay masked AND inactive; runner
   refuses otherwise. No missing-source, empty-batch or exhausted-batch fallback exists.
-- Coordinator has created ACTIVE heartbeats, owned centrally (do not duplicate):
-  `bona-weekly-social-replenishment`: Thursday10:00 Riyadh, first Oct1. Produces the next
-  original useful seven-day pack, preserving historical daily IDs, visual inspection, actual
-  Fable5 review, tests and release hash receipt before coordinated deployment. Notify if the
-  reserve cannot be replenished. Quality failure means stop, never recycle the rejected queue.
-  `bona-daily-publishing-checks`: 20:45,21:45,22:45 Riyadh. Check actual provider IDs/permalinks,
-  service state and alerts; report first verified publication and meaningful failures. Quiet
-  on unchanged state. These are agent workflows, not evidence that posts are already live.
+- Since 2026-10-02 the timers run the property policy first (`docs/daily-property-publishing.md`).
+  Since 2026-10-05 this reviewed pack is used only when no property is eligible and a pack day
+  is due.
+- Codex app automations, outside this repo, inspect and replenish this pipeline:
+  `bona-weekly-social-replenishment` (Thursdays 10:00 Riyadh) and `bona-daily-publishing-checks`
+  (20:45, 21:45, 22:45 Riyadh). They report into their Codex chat; they are not evidence that a
+  post is live. Alerting to the owner's phone is the Uptime Kuma heartbeat described in
+  `docs/daily-property-publishing.md`.
 
 ## Exact-release approval
 `build-daily.mjs` creates 24 original typographic JPEGs and seven posts per channel. No
