@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { publicListing,sha256,fingerprint,advertiserFingerprint,eligibility,propertyCaption,chooseProperty,dayState,realDate,policyRules,STRICT_RULES } from '../social/lib/property-daily.mjs';
+import { publicListing,sha256,fingerprint,advertiserFingerprint,eligibility,propertyCaption,chooseProperty,dayState,realDate,policyRules,STRICT_RULES,renderShare,captionFor,propertyHashtags,entryFor } from '../social/lib/property-daily.mjs';
 import { propertyDaily,legacyDayState,assertNoPendingInstagram } from '../social/property-publish.mjs';
 const now=new Date('2026-10-02T17:30:00Z');
 function fixture() {
@@ -14,6 +14,14 @@ function fixture() {
   review.legalDisclosures={ar:'بيانات اختبار فقط: حالة العقار والخدمات والحقوق.',en:'Test fixture only: property condition, services and rights.'};
   review.captionSha256=sha256(JSON.stringify(propertyCaption(listing,advertiser,review.legalDisclosures)));
   return {listing,advertiser,review};
+}
+function offPlanFixture() {
+  const { advertiser } = fixture();
+  const listing = { id: 'BONA-OP', slug: 'tower', status: 'available', category: 'off-plan', type: 'apartment',
+    location: { countryCode: 'SA', district: { ar: 'الشاطئ، الكورنيش', en: 'Al Shati, Corniche' }, city: { ar: 'جدة', en: 'Jeddah' } },
+    title: { ar: 'برج تجريبي', en: 'Fixture Tower' }, price: { amount: 3200000, currency: 'SAR', from: true }, specs: {},
+    images: [1,2,3].map(i => ({ src: `/listings/tower/${i}.jpg` })), licence: null };
+  return { listing, advertiser };
 }
 test('publication eligibility needs a current licence, matching evidence, reviewed facts and photographs',()=>{
   const {listing:p,advertiser:a,review:r}=fixture();assert.deepEqual(eligibility(p,r,a,now),[]);
@@ -126,4 +134,67 @@ test('policy rules: a malformed waiver or scope stops the run', () => {
     { reviewValidDays: 0 }, { reviewValidDays: 181 }, { reviewValidDays: 1.5 },
   ];
   for (const policy of bad) assert.throws(() => policyRules(policy, now), /property policy|waiver/, JSON.stringify(policy));
+});
+test('caption: advertiser line always, licence line only with a number, renders disclosed', () => {
+  const { listing: p, advertiser: a } = fixture();
+  const d = { ar: 'إفصاح.', en: 'Disclosure.' };
+  const licensed = propertyCaption(p, a, d);
+  assert.match(licensed.ar, /المعلن: المعلن التجريبي · فال 1100000000 · \+966500000000/);
+  assert.match(licensed.en, /Advertiser: Fixture advertiser · FAL 1100000000 · \+966500000000/);
+  assert.match(licensed.ar, /ترخيص الإعلان: 7200000000 · ينتهي 2026-12-31/);
+  assert.match(licensed.en, /Ad licence 7200000000 · Expires 2026-12-31/);
+  const bare = propertyCaption({ ...p, licence: null }, a, d);
+  assert.doesNotMatch(bare.ar, /ترخيص الإعلان/);
+  assert.doesNotMatch(bare.en, /Ad licence/);
+  assert.match(bare.ar, /المعلن: /);
+  assert.match(bare.en, /Advertiser: /);
+  assert.doesNotMatch(bare.en, /artist's impressions/);
+  assert.match(propertyCaption(p, a, d, { renders: 'all' }).en, /^Images are the developer's artist's impressions\.$/m);
+  assert.match(propertyCaption(p, a, d, { renders: 'all' }).ar, /^الصور تصاميم تصوّرية من المطوّر\.$/m);
+  assert.match(propertyCaption(p, a, d, { renders: 'some' }).en, /^Some images are the developer's artist's impressions\.$/m);
+  assert.match(propertyCaption(p, a, d, { renders: 'some' }).ar, /^بعض الصور تصاميم تصوّرية من المطوّر\.$/m);
+});
+test('caption: place and deal line, off-plan wording and the from-price exactly as the site shows it', () => {
+  const { listing: p, advertiser: a } = offPlanFixture();
+  const c = propertyCaption(p, a, {});
+  assert.equal(c.ar.split('\n')[0], 'برج تجريبي');
+  assert.equal(c.ar.split('\n')[1], 'الشاطئ، الكورنيش، جدة · على الخارطة');
+  assert.equal(c.en.split('\n')[0], 'Fixture Tower');
+  assert.equal(c.en.split('\n')[1], 'Al Shati, Corniche, Jeddah · Off-plan');
+  assert.match(c.ar, /تبدأ الأسعار من 3,200,000 ريال/);
+  assert.match(c.en, /From SAR 3,200,000/);
+  assert.match(c.ar, /راسل بونا بالرقم BONA-OP/);
+  assert.match(c.ar, /https:\/\/bona-real-estate\.com\/properties\/tower\//);
+  const ready = propertyCaption(fixture().listing, a, {});
+  assert.match(ready.ar.split('\n')[1], /· للبيع$/);
+  assert.match(ready.en.split('\n')[1], /· For sale$/);
+});
+test('renderShare and captionFor follow the reviewed photo kinds', () => {
+  const { listing: p, advertiser: a, review: r } = fixture();
+  assert.equal(renderShare(r), 'none');
+  assert.equal(renderShare({ photos: r.photos.map(x => ({ ...x, kind: 'render' })) }), 'all');
+  assert.equal(renderShare({ photos: r.photos.map((x, i) => ({ ...x, kind: i ? 'render' : 'photograph' })) }), 'some');
+  assert.equal(renderShare(undefined), 'none');
+  assert.deepEqual(captionFor(p, a, r), propertyCaption(p, a, r.legalDisclosures, { renders: 'none' }));
+});
+test('hashtags: brand, city, type, off-plan, district and luxury, at most twelve, valid characters only', () => {
+  const { listing: p } = offPlanFixture();
+  assert.deepEqual(propertyHashtags(p), ['#بونا','#BonaRealEstate','#عقارات_جدة','#JeddahRealEstate','#شقق_جدة','#شقق_للبيع','#JeddahApartments','#مشاريع_على_الخارطة','#OffPlan','#الشاطئ','#AlShati','#عقارات_فاخرة']);
+  const villa = { ...p, category: 'buy', type: 'villa', location: { ...p.location, district: { ar: 'درة العروس', en: 'Durrat Al Arous' } } };
+  assert.deepEqual(propertyHashtags(villa), ['#بونا','#BonaRealEstate','#عقارات_جدة','#JeddahRealEstate','#فلل_جدة','#فلل_للبيع','#JeddahVillas','#درة_العروس','#DurratAlArous','#عقارات_فاخرة']);
+  const riyadh = { ...villa, location: { countryCode: 'SA', city: { ar: 'الرياض', en: 'Riyadh' }, district: { ar: 'شمال الرياض الجديد الكبير', en: 'North Riyadh New Big Area' } } };
+  const tags = propertyHashtags(riyadh);
+  assert.ok(tags.includes('#عقارات_الرياض') && tags.includes('#RiyadhVillas'));
+  assert.ok(!tags.some(t => /جدة|Jeddah/.test(t)));
+  assert.ok(!tags.includes('#شمال_الرياض_الجديد_الكبير'), 'districts longer than three words are left out');
+  for (const t of [...propertyHashtags(p), ...tags]) assert.match(t, /^#[\p{L}\p{N}_]+$/u);
+  assert.ok(propertyHashtags(p).length <= 12);
+});
+test('entryFor carries the reviewed caption and the generated hashtags', () => {
+  const { listing: p, advertiser: a, review: r } = fixture();
+  const e = entryFor(p, r, a, 'instagram', '2026-10-05', []);
+  assert.equal(e.id, 'bona-daily-ig-2026-10-05');
+  assert.deepEqual(e.caption, captionFor(p, a, r));
+  assert.deepEqual(e.hashtags, propertyHashtags(p));
+  assert.deepEqual(e.images, r.photos.map(x => x.url));
 });
