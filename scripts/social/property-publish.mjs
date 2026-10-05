@@ -36,6 +36,22 @@ export function assertNoPendingInstagram(events) {
 }
 const IG_GRACE_HOURS=2.5;
 /**
+ * Proof that a failed attempt made nothing visible, as {evidence, message}, or null when the
+ * outcome is unknown. Instagram: publish.mjs run() appends a `publishing` line for the entry
+ * before media_publish, the only call that makes a post visible; with neither that line nor a
+ * `published` one for the id in the ledger, media_publish was never sent. A ledger that cannot be
+ * read proves nothing.
+ */
+export function provenNotSent(channel,id,error,readIgLedger) {
+  if(channel!=='instagram')return null;
+  let mine;
+  try{mine=readIgLedger().filter(x=>x.id===id);}catch{return null;}
+  if(mine.some(x=>x.status==='publishing'||x.status==='published'))return null;
+  const last=mine.at(-1)?.status;
+  return {evidence:`no publishing line for ${id} in ig/published.jsonl; media_publish was never sent`,
+    message:`Instagram post not sent${last?` (last ledger status for ${id}: ${last})`:''}`};
+}
+/**
  * Why this channel's own publisher would turn the entry down before any network call, or null.
  * Checked before the intent record: a refusal that is certain in advance stops the run cleanly
  * instead of being journalled as an uncertain attempt that blocks the channel until reconciled.
@@ -132,13 +148,14 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
     if(dry){console.log(`Ready after read-only preflight: ${entry.id}, ${p.id}; no post`);return {status:'ready',entry};}
     if(legacyTimersDisabled()!==true)throw new Error('Legacy publisher must remain disabled');
     record(journal,{channel,date,id:entry.id,listingId:p.id,status:'intent'});
+    const igLedger=path.join(data,'ig/published.jsonl');
     try {
       let receipt;
       if(channel==='instagram') {
-        const result=await publishInstagram({dryRun:false,limit:1,graceHours:IG_GRACE_HOURS,ledger:path.join(data,'ig/published.jsonl')},
+        const result=await publishInstagram({dryRun:false,limit:1,graceHours:IG_GRACE_HOURS,ledger:igLedger},
           {now:+now,token:env.META_ACCESS_TOKEN,igId:ACCOUNT.instagram,loadEntries:()=>[entry],
-           readLedger:()=>assertNoPendingInstagram(rows(path.join(data,'ig/published.jsonl'))),fetch:fetchImpl});
-        receipt=rows(path.join(data,'ig/published.jsonl')).find(x=>x.id===entry.id&&x.status==='published');
+           readLedger:()=>assertNoPendingInstagram(rows(igLedger)),fetch:fetchImpl});
+        receipt=rows(igLedger).find(x=>x.id===entry.id&&x.status==='published');
         if(result.code!==0||!receipt)throw new Error('Instagram did not confirm publication');
       } else {
         const page=await pageToken({fetch:fetchImpl,token:env.META_ACCESS_TOKEN,pageId:ACCOUNT.facebook});
@@ -149,7 +166,15 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
       record(journal,{channel,date,id:entry.id,listingId:p.id,status:'published',mediaId:receipt.mediaId,postId:receipt.postId,permalink:receipt.permalink});
       console.log(JSON.stringify({status:'published',channel,id:entry.id,listingId:p.id,mediaId:receipt.mediaId,postId:receipt.postId,permalink:receipt.permalink}));
       return {status:'published',receipt};
-    } catch(e) {record(journal,{channel,date,id:entry.id,listingId:p.id,status:'uncertain'});throw new Error('Property publication unconfirmed; automatic retry stopped');}
+    } catch(e) {
+      // Only a failure that provably made nothing visible settles itself; anything else stays uncertain.
+      const notSent=provenNotSent(channel,entry.id,e,()=>rows(igLedger));
+      if(notSent){
+        record(journal,{channel,date,id:entry.id,listingId:p.id,status:'confirmed-not-published',evidence:notSent.evidence});
+        throw new Error(`${notSent.message}; recorded confirmed-not-published, the next run retries`);
+      }
+      record(journal,{channel,date,id:entry.id,listingId:p.id,status:'uncertain'});throw new Error('Property publication unconfirmed; automatic retry stopped');
+    }
   };
   if(dry)return operation();
   fs.mkdirSync(dir,{recursive:true});

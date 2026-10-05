@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ACCOUNT,publicListing,sha256,fingerprint,advertiserFingerprint,eligibility,propertyCaption,chooseProperty,dayState,realDate,policyRules,STRICT_RULES,renderShare,captionFor,propertyHashtags,entryFor,unsettled,reviewedCopy } from '../social/lib/property-daily.mjs';
-import { propertyDaily,legacyDayState,assertNoPendingInstagram,publisherRefusal } from '../social/property-publish.mjs';
+import { propertyDaily,legacyDayState,assertNoPendingInstagram,publisherRefusal,provenNotSent } from '../social/property-publish.mjs';
 const now=new Date('2026-10-02T17:30:00Z');
 function fixture() {
   const advertiser={name:{ar:'المعلن التجريبي',en:'Fixture advertiser'},fal:'1100000000',phone:'+966500000000'};
@@ -489,4 +489,62 @@ test('a live run refuses while a legacy publisher timer is on, before any intent
     assert.deepEqual(jsonl(f.journal), []);
     assert.deepEqual(s.writes(), []);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+const IG_ID = 'bona-daily-ig-2026-10-02';
+const without = (row, ...keys) => Object.fromEntries(Object.entries(row).filter(([k]) => !keys.includes(k)));
+test('Instagram: a send stopped before any publishing line is confirmed not published and the channel stays open', async () => {
+  const f = sendFixture('bona-property-ig-unsent-');
+  try {
+    const s = sendStub(f, (u, init) => { if (init.method === 'HEAD') throw new TypeError('fetch failed'); });
+    await assert.rejects(send('instagram', f, s.fetchImpl), e => e.message.startsWith(`Instagram post not sent (last ledger status for ${IG_ID}: error)`));
+    const rows = jsonl(f.journal);
+    assert.deepEqual(rows.map(x => x.status), ['intent', 'confirmed-not-published']);
+    assert.deepEqual(without(rows[1], 'at'), { channel: 'instagram', date: '2026-10-02', id: IG_ID, listingId: f.p.id, status: 'confirmed-not-published',
+      evidence: `no publishing line for ${IG_ID} in ig/published.jsonl; media_publish was never sent` });
+    assert.equal(unsettled(rows, 'instagram'), false);
+    assert.equal(dayState(rows, 'instagram', '2026-10-02'), 'ready');
+    assert.deepEqual(jsonl(f.igLedger).map(x => `${x.id} ${x.status}`), [`${IG_ID} error`]);
+    assert.deepEqual(s.writes(), ['HEAD bona-real-estate.com/listings/fixture/1.jpg', 'HEAD bona-real-estate.com/listings/fixture/1.jpg'], 'the first image asked twice; nothing sent to Instagram');
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+test('Instagram: a run that never got the publisher lock sent nothing either', async () => {
+  const f = sendFixture('bona-property-ig-locked-');
+  try {
+    fs.mkdirSync(path.dirname(f.igLedger), { recursive: true });
+    fs.writeFileSync(path.join(path.dirname(f.igLedger), '.publish.lock'), JSON.stringify({ pid: process.pid, ts: now.toISOString() }));
+    const s = sendStub(f);
+    await assert.rejects(send('instagram', f, s.fetchImpl), e => e.message.startsWith('Instagram post not sent;'));
+    assert.deepEqual(jsonl(f.journal).map(x => x.status), ['intent', 'confirmed-not-published']);
+    assert.deepEqual(s.writes(), []);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+test('Instagram: once a publishing line exists the outcome is unknown, so the attempt stays uncertain and blocks the channel', async () => {
+  const f = sendFixture('bona-property-ig-unknown-');
+  try {
+    let n = 0;
+    const s = sendStub(f, (u, init) => {
+      if (init.method === 'HEAD') return new Response(null, { headers: { 'content-type': 'image/jpeg' } });
+      if (u.hostname !== 'graph.facebook.com') return undefined;
+      if (u.pathname.endsWith('/media_publish')) throw new TypeError('fetch failed');
+      if (u.pathname.endsWith('/media')) return Response.json({ id: `container-${++n}` });
+      if (/\/container-\d+$/.test(u.pathname)) return Response.json({ status_code: 'FINISHED' });
+      return undefined;
+    });
+    await assert.rejects(send('instagram', f, s.fetchImpl), e => e.message === 'Property publication unconfirmed; automatic retry stopped');
+    const rows = jsonl(f.journal);
+    assert.deepEqual(rows.map(x => x.status), ['intent', 'uncertain']);
+    assert.equal(unsettled(rows, 'instagram'), true);
+    assert.equal(dayState(rows, 'instagram', '2026-10-02'), 'uncertain');
+    assert.deepEqual(jsonl(f.igLedger).map(x => `${x.id} ${x.status}`), [`${IG_ID} publishing`]);
+    assert.equal(s.writes().filter(c => c.endsWith('/media_publish')).length, 1);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+test('provenNotSent: only an Instagram ledger with no publishing or published line for the id proves nothing went out', () => {
+  const ledger = (...xs) => () => xs;
+  assert.equal(provenNotSent('instagram', IG_ID, null, ledger()).message, 'Instagram post not sent');
+  assert.equal(provenNotSent('instagram', IG_ID, null, ledger({ id: IG_ID, status: 'error' }, { id: IG_ID, status: 'skipped:no-jpeg' })).message, `Instagram post not sent (last ledger status for ${IG_ID}: skipped:no-jpeg)`);
+  assert.ok(provenNotSent('instagram', IG_ID, null, ledger({ id: 'bona-daily-ig-2026-10-01', status: 'publishing' })), "another id's line says nothing about this attempt");
+  assert.equal(provenNotSent('instagram', IG_ID, null, ledger({ id: IG_ID, status: 'publishing' }, { id: IG_ID, status: 'error' })), null, 'a publishing line keeps it unknown, whatever follows');
+  assert.equal(provenNotSent('instagram', IG_ID, null, ledger({ id: IG_ID, status: 'published' })), null);
+  assert.equal(provenNotSent('instagram', IG_ID, null, () => { throw new SyntaxError('Unexpected end of JSON input'); }), null, 'an unreadable ledger proves nothing');
 });
