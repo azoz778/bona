@@ -81,23 +81,21 @@ Arabic first, then English, then hashtags (the publishers already join these).
 {legalDisclosures.ar}
 المعلن: {advertiser.name.ar} · فال {advertiser.fal} · {advertiser.phone}
 ترخيص الإعلان: N · ينتهي YYYY-MM-DD          ← only when the listing carries a number
-الصور تصاميم تصوّرية من المطوّر.                ← only when any reviewed photo is a render
+الصور تصاميم تصوّرية من المطوّر.                ← all photos renders («بعض الصور …» when only some are)
 ```
 
 English mirrors it (`Advertiser: … · FAL … · …`, `Ad licence N · Expires …`,
-`Images are the developer's artist's impressions.`). Off-plan listings read "Off-plan" /
+`Images are the developer's artist's impressions.` or `Some images are …`). Off-plan listings read "Off-plan" /
 "على الخارطة" instead of "For sale". Price stays exactly as the website shows it: asking
 price, or "From" when `price.from` is true, omitted when `onRequest`.
 
-Hashtags come from a deterministic builder, at most 12, counted against the platform limit
-of 30 together with any `#` in the caption:
-
-- always: `#بونا #Bona #عقارات_جدة #JeddahRealEstate #جدة #Jeddah`
-- by type: villa → `#فلل_جدة #فلل_للبيع #JeddahVillas`; apartment → `#شقق_جدة #شقق_للبيع`;
-  townhouse → `#تاون_هاوس_جدة`; land → `#أراضي_جدة #أراضي_للبيع`; plus
-  off-plan → `#مشاريع_على_الخارطة #OffPlanJeddah`
-- district: `#` + Arabic district with spaces → `_`, and `#` + English district without
-  spaces or punctuation, when the district is at most three words.
+Hashtags come from a deterministic builder over listing facts (already bound by the review's
+`factsSha256`), at most 12, in this order: brand `#بونا #BonaRealEstate`; city
+`#عقارات_<city>` `#<City>RealEstate`; type `#<type>_<city>` `#<type>_للبيع|للإيجار` `#<City><Type>`
+(villa فلل/Villas, apartment شقق/Apartments, duplex دوبلكس/Duplexes, townhouse تاون_هاوس/Townhouses,
+penthouse, mansion, land); off-plan `#مشاريع_على_الخارطة #OffPlan`; district (first part before a
+comma, at most three words) in Arabic and English; `#عقارات_فاخرة`. City-aware because the
+in-scope stock includes Riyadh and Madinah projects.
 
 ## Review register — `marketing/daily/property-reviews.json`
 
@@ -120,11 +118,10 @@ Keyed by listing id. Entries written only by the approve script.
 
 Standard disclosures (no invented condition or service claims):
 
-- ar: «الأسعار المعروضة هي أسعار الطلب من البائع وقابلة للتغيير. التفاصيل والحالة والخدمات
-  تُؤكَّد عند المعاينة.» Off-plan adds: «التسليم والمواصفات حسب المطوّر.»
-- en: "Prices shown are the seller's asking prices and may change. Details, condition and
-  services are confirmed at viewing." Off-plan adds: "Delivery and specifications are per the
-  developer."
+- ar: «الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. تُؤكَّد التفاصيل والحالة والخدمات
+  عند المعاينة.» Off-plan adds: «مواعيد التسليم والمواصفات حسب المطوّر.»
+- en: "Prices shown are asking prices and may change. Details, condition and services are
+  confirmed at viewing." Off-plan adds: "Delivery dates and specifications are per the developer."
 
 ## Review tooling
 
@@ -137,13 +134,17 @@ Standard disclosures (no invented condition or service claims):
   `DIR/drafts.json` with the candidate photos, the composed caption and any blocking reasons.
 - Never writes the register, never uploads.
 
-`scripts/social/approve-property-review.mjs --drafts DIR/drafts.json --select BONA-001:1,2,3 …`
+`scripts/social/approve-property-review.mjs --drafts DIR/drafts.json --reviewer "who looked" --select BONA-001:1,2,3 …`
 
-- Writes approved entries for the selected frames (3–6, in the given order) with
-  `kind` = `render` for off-plan listings unless `--photograph BONA-022` says the frames are
-  real photographs, stamps `reviewedAt`, fills the standard disclosures, computes the hashes,
-  re-runs `eligibility()` with the policy and refuses to write any entry that is not eligible.
-- Idempotent: re-running with the same selection rewrites an identical entry.
+- Writes approved entries for the selected frames (3–6, in the given order). `kind` defaults to
+  `render` for off-plan listings and `photograph` otherwise; a per-frame suffix overrides it
+  (`BONA-022:1,2p,4` marks frame 2 a real photograph, `r` marks a render). Selected frames must
+  sit within 15% of the first frame's aspect ratio, because Instagram crops every carousel frame
+  to the first one. Stamps `reviewedAt` and the named `reviewer`, fills the standard
+  disclosures, computes the hashes, re-reads the live catalogue, refuses a listing whose facts
+  changed since drafting, re-runs `eligibility()` with the policy and refuses anything not
+  eligible.
+- Idempotent: an existing entry that differs only in `reviewedAt`/`reviewer` is left untouched.
 
 The reviewer (Claude, this session) looks at every contact sheet before selecting frames.
 A listing with fewer than three acceptable frames is left out and listed in the PR.
@@ -170,7 +171,11 @@ Rotation stays oldest-first with a 30-day repeat interval, one post per channel 
   2 h grace, attached to the existing Telegram notification. Created through the Kuma API
   with the credentials in `~/.secrets/uptime-kuma.env`; if that path is blocked, the owner
   creates them (one minute each) and pastes the two URLs.
-- The phantom Hermes heartbeats in `marketing/daily/README.md` are removed from the docs.
+- Correction (found while planning): the agent heartbeats named in `marketing/daily/README.md`
+  are real. They are ACTIVE Codex app automations (`bona-daily-publishing-checks` 20:45/21:45/22:45,
+  `bona-weekly-social-replenishment` Thursdays 10:00) that report into a Codex chat thread, not
+  Hermes jobs. They stay; the README now says where they live, and the Kuma heartbeat adds the
+  path to the owner's Telegram.
 
 ## Tests
 
@@ -207,3 +212,18 @@ inert under a `required` policy. Published posts and ledgers are untouched.
 
 Instagram bio website → `https://bona-real-estate.com/ig/`; GA4 key events for
 `lead_created` and `whatsapp_click`; work the 28 leads still in stage "new".
+
+## Additions during planning (2026-10-05)
+
+- **Settling an uncertain attempt.** Today any failure after `intent` blocks the channel until
+  someone edits the journal. A `confirmed-not-published` record (channel, date, id, evidence)
+  written after the attempt now settles it, so recovery is an append after checking the
+  provider, never a deletion and never a false `published`.
+- **Meta can fetch the image hosts.** An unpublished Instagram carousel-item container created
+  from a `tk-storage.azoz.uk` JPEG reached `FINISHED` (container 18116337718922966; it expires
+  unpublished after 24 h). Both hosts answer `facebookexternalhit` with `image/jpeg`.
+- **Live inventory probe.** 32 of the 42 in-scope listings have at least three frames that meet
+  the photo rules. Out: the eight land plots (1024×768 map images only), BONA-W010 (portrait
+  frames at aspect 0.77) and BONA-W016 (two usable frames). That is a month of daily posts
+  without a repeat.
+
