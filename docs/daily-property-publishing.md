@@ -26,11 +26,11 @@ and `bona-daily@facebook` timers run it; there is no other timer.
 ## Admitting properties (`marketing/daily/property-reviews.json`)
 
 1. **Draft:** `node scripts/social/draft-property-reviews.mjs --out NEW_DIR` (or add
-   `--ids BONA-001,BONA-022`). It reads the live catalogue, downloads up to ten images per
-   in-scope listing that is not already approved, keeps the ones that meet the publisher's rules
-   (JPEG, at most 8 MB, at least 1080×720, aspect 0.8–1.91), and writes one contact sheet per
-   listing plus `drafts.json` with a caption preview. It never writes the register and never
-   uploads.
+   `--ids BONA-001,BONA-022`). It reads the live catalogue, downloads up to ten images for each
+   in-scope listing that is not currently eligible (no review yet, or one that has expired or no
+   longer matches), keeps the ones that meet the publisher's rules (JPEG, at most 8 MB, at least
+   1080×720, aspect 0.8–1.91), and writes one contact sheet per listing plus `drafts.json` with a
+   caption preview. It never writes the register and never uploads.
 2. **Look** at every contact sheet, and at full frames where detail matters. Leave out other
    brokers' watermarks, people, price or text banners, floor plans, duplicates and anything that
    does not show this property. Put the strongest frame first.
@@ -38,8 +38,8 @@ and `bona-daily@facebook` timers run it; there is no other timer.
    Frames default to `render` for off-plan listings and `photograph` otherwise; a `p` or `r`
    suffix overrides one frame. Selected frames must sit within 15% of the first frame's aspect
    ratio because Instagram crops a carousel to its first frame. The script re-reads the live
-   catalogue, refuses anything changed since drafting or not eligible, and leaves an identical
-   existing review untouched.
+   catalogue, refuses anything changed since drafting or not eligible, and leaves an identical,
+   still-valid review untouched; an expired one is renewed.
 4. **Commit** the register through a PR. The publisher reads it from `origin/main`.
 
 Disclosures written with every review: prices are asking prices and may change; details,
@@ -53,14 +53,33 @@ specifications are per the developer. Nothing else is claimed.
   that run.
 - A per-channel lock, the existing ledgers and a durable `intent` record prevent duplicates. A
   failed or unconfirmed send records `uncertain` and stops automatic retries on that channel.
-- **Reconciling an uncertain attempt.** Check the provider (Instagram media, Facebook Page posts)
-  for that channel and date. If the post exists, append a `published` record with its ids. If it
-  conclusively does not, append
-  `{"channel":"instagram","date":"YYYY-MM-DD","id":"bona-daily-ig-YYYY-MM-DD","status":"confirmed-not-published","evidence":"<what was checked>","at":"<ISO time>"}`
-  to `~/bona-data/daily/property.jsonl`. Only a record written after the attempt settles it.
-  For Instagram, also settle any `publishing` line for that id in `~/bona-data/ig/published.jsonl`
-  with a `published` line (post exists) or an `error` line (it does not); until then Instagram
-  stays blocked. Never delete journal lines.
+- **Reconciling an uncertain attempt.** An `intent` or `uncertain` line in
+  `~/bona-data/daily/property.jsonl` that no later line settles keeps that channel blocked.
+  Settle it by appending lines, never by deleting any:
+  1. Work only while no run holds `~/bona-data/daily/.property-<channel>.lock`. The file names the
+     run's process id; an `intent` under a live run is an attempt still in progress.
+  2. Look for the post with an authenticated API read of the account's Instagram media or the
+     Page's Facebook posts that covers the attempt time, and match it on caption and images. Only
+     such a read shows the post is absent: a failed or partial query is not absence, and a wrong
+     `confirmed-not-published` lets a later run post again, as soon as the same evening.
+  3. Append one line to `property.jsonl`, with `date`, `id` and `listingId` copied from the
+     attempt's `intent` line. If the post exists:
+     `{"channel":"instagram","date":"YYYY-MM-DD","id":"bona-daily-ig-YYYY-MM-DD","listingId":"BONA-…","status":"published","mediaId":"…","permalink":"…","evidence":"<what was checked>","at":"<publication time, ISO>"}`
+     or
+     `{"channel":"facebook","date":"YYYY-MM-DD","id":"bona-daily-fb-YYYY-MM-DD","listingId":"BONA-…","status":"published","postId":"…","evidence":"<what was checked>","at":"<publication time, ISO>"}`.
+     Its `at` is the provider's publication time; the 30-day repeat interval counts from it. If
+     the post is absent:
+     `{"channel":"instagram","date":"YYYY-MM-DD","id":"bona-daily-ig-YYYY-MM-DD","listingId":"BONA-…","status":"confirmed-not-published","evidence":"<what was checked>","at":"<now, ISO>"}`
+     or
+     `{"channel":"facebook","date":"YYYY-MM-DD","id":"bona-daily-fb-YYYY-MM-DD","listingId":"BONA-…","status":"confirmed-not-published","evidence":"<what was checked>","at":"<now, ISO>"}`.
+     Only a line written after the attempt settles it.
+  4. If the post exists, also append the same `published` line to `~/bona-data/ig/published.jsonl`
+     or `~/bona-data/fb/published.jsonl`, unless that ledger already has a `published` line for
+     the id; Instagram stays blocked without it. If it is absent and
+     `~/bona-data/ig/published.jsonl` has a `publishing` line for the id, append
+     `{"id":"bona-daily-ig-YYYY-MM-DD","date":"YYYY-MM-DD","status":"error","detail":"<what was checked>","ts":"<now, ISO>"}`
+     after it. Without that line Instagram stays blocked; with it, that date stays closed and
+     Instagram posts again from the next day's slot.
 
 ## Monitoring
 
@@ -77,12 +96,17 @@ specifications are per the developer. Nothing else is claimed.
 ## Verification
 
 ```bash
-set -a; . ~/.secrets/bona-meta-graph.env; set +a
-BONA_DAILY_TEST_NOW=2026-10-05T17:30:00Z node scripts/social/daily-publish.mjs instagram --dry-run
+( set -a; . ~/.secrets/bona-meta-graph.env; set +a; cd ~/bona-publish &&
+  BONA_DAILY_TEST_NOW="$(TZ=Asia/Riyadh date +%F)T17:30:00Z" node scripts/social/daily-publish.mjs instagram --dry-run )
 ```
 
-simulates the slot with read-only provider calls and prints
-`Ready after read-only preflight: <entry id>, <listing id>; no post`.
+simulates today's 20:30 Riyadh slot (17:30Z) in the publisher's checkout with read-only provider
+calls; run it again with `facebook`. The subshell keeps the Meta token out of your shell. A slot
+that will post prints `Ready after read-only preflight: <entry id>, <listing id>; no post`. Also
+normal: `Daily slot already published` once today's post is recorded, or, with no eligible
+property, the skip JSON, then `No eligible property today; checking the reviewed daily pack.` and
+`No daily content due …` (on a pack day, the pack's `Validated …; no publish` line instead).
+Anything else means the slot would not post.
 
 Runtime evidence: `~/bona-data/daily/property.jsonl`, `~/bona-data/ig/published.jsonl`,
 `~/bona-data/fb/published.jsonl`, `~/bona-data/daily/alerts.jsonl`.
