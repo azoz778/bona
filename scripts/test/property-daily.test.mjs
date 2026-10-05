@@ -573,20 +573,33 @@ test('provenNotSent: only an Instagram ledger with no publishing or published li
 test('provenNotSent: on Facebook only an error marked notPublished by postPhotos() proves nothing went out', () => {
   const unread = () => { throw new Error('the Instagram ledger is not consulted for Facebook'); };
   assert.deepEqual(provenNotSent('facebook', 'bona-daily-fb-2026-10-02', Object.assign(new Error('POST /x/photos: fetch failed'), { notPublished: true }), unread),
-    { evidence: 'failed before the Page feed request; only unpublished photo uploads were made', message: 'Facebook post not sent: a photo upload failed before the Page feed request' });
+    { evidence: 'failed before the Page feed request; only unpublished photo uploads were made', message: 'Facebook post not sent: a photo upload failed before the Page feed request (POST /x/photos: fetch failed)' });
+  const long = Object.assign(new Error(`POST /x/photos → HTTP 500 code=1: token EAAshort1 rejected\nhint: ${'x'.repeat(300)}`), { notPublished: true });
+  assert.equal(provenNotSent('facebook', 'bona-daily-fb-2026-10-02', long, unread).message,
+    `Facebook post not sent: a photo upload failed before the Page feed request (${`POST /x/photos → HTTP 500 code=1: token [redacted] rejected hint: ${'x'.repeat(300)}`.slice(0, 200)})`, 'redacted, one line, at most 200 characters');
   for (const e of [new Error('POST /x/feed: fetch failed'), Object.assign(new Error('x'), { notPublished: 'yes' }), null, undefined])
     assert.equal(provenNotSent('facebook', 'bona-daily-fb-2026-10-02', e, unread), null, String(e?.notPublished ?? e));
 });
 const FB_ID = 'bona-daily-fb-2026-10-02', FB_EDGE = `graph.facebook.com/v23.0/${ACCOUNT.facebook}`;
+/** The console.error lines written while `fn` runs. */
+async function errorLines(fn) {
+  const lines = [], orig = console.error;
+  console.error = (...a) => lines.push(a.join(' '));
+  try { await fn(); } finally { console.error = orig; }
+  return lines;
+}
 test('Facebook: a failed unpublished photo upload is confirmed not published and the channel stays open', async () => {
   const f = sendFixture('bona-property-fb-unsent-');
   try {
     let uploads = 0;
     const s = sendStub(f, (u, init) => {
-      if (init.method === 'POST' && u.pathname.endsWith(`/${ACCOUNT.facebook}/photos`)) { if (++uploads === 2) throw new TypeError('fetch failed'); return Response.json({ id: `photo-${uploads}` }); }
+      if (init.method === 'POST' && u.pathname.endsWith(`/${ACCOUNT.facebook}/photos`)) { if (++uploads === 2) throw new TypeError('fetch failed near EAAleak123'); return Response.json({ id: `photo-${uploads}` }); }
       return undefined;
     });
-    await assert.rejects(send('facebook', f, s.fetchImpl), e => e.message.startsWith('Facebook post not sent'));
+    const why = `POST /${ACCOUNT.facebook}/photos: fetch failed near [redacted]`;
+    const logged = await errorLines(() => assert.rejects(send('facebook', f, s.fetchImpl),
+      e => e.message === `Facebook post not sent: a photo upload failed before the Page feed request (${why}); recorded confirmed-not-published, the next run retries`));
+    assert.deepEqual(logged, [`Facebook send failed: ${why}`], 'the original reason is logged, token-shaped text redacted');
     const rows = jsonl(f.journal);
     assert.deepEqual(rows.map(x => x.status), ['intent', 'confirmed-not-published']);
     assert.deepEqual(without(rows[1], 'at'), { channel: 'facebook', date: '2026-10-02', id: FB_ID, listingId: f.p.id, status: 'confirmed-not-published',
@@ -607,7 +620,8 @@ test('Facebook: a failed Page feed request may have posted, so the attempt stays
       if (u.pathname.endsWith(`/${ACCOUNT.facebook}/feed`)) throw new TypeError('fetch failed');
       return undefined;
     });
-    await assert.rejects(send('facebook', f, s.fetchImpl), e => e.message === 'Property publication unconfirmed; automatic retry stopped');
+    const logged = await errorLines(() => assert.rejects(send('facebook', f, s.fetchImpl), e => e.message === 'Property publication unconfirmed; automatic retry stopped'));
+    assert.deepEqual(logged, [`Facebook send failed: POST /${ACCOUNT.facebook}/feed: fetch failed`]);
     const rows = jsonl(f.journal);
     assert.deepEqual(rows.map(x => x.status), ['intent', 'uncertain']);
     assert.equal(unsettled(rows, 'facebook'), true);

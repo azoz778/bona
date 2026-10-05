@@ -35,6 +35,8 @@ export function assertNoPendingInstagram(events) {
   return events;
 }
 const IG_GRACE_HOURS=2.5;
+/** A failure's message for logs and alerts, anything shaped like a Meta token redacted. */
+const reasonOf=e=>String(e?.message??e).replace(/EAA[A-Za-z0-9]+/g,'[redacted]');
 /**
  * Proof that a failed attempt made nothing visible, as {evidence, message}, or null when the
  * outcome is unknown. Instagram: publish.mjs run() appends a `publishing` line for the entry
@@ -46,8 +48,12 @@ const IG_GRACE_HOURS=2.5;
  * feed request.
  */
 export function provenNotSent(channel,id,error,readIgLedger) {
-  if(channel==='facebook')return error?.notPublished===true?{evidence:'failed before the Page feed request; only unpublished photo uploads were made',
-    message:'Facebook post not sent: a photo upload failed before the Page feed request'}:null;
+  if(channel==='facebook'){
+    if(error?.notPublished!==true)return null;
+    const why=reasonOf(error).replace(/\s+/g,' ').trim().slice(0,200);
+    return {evidence:'failed before the Page feed request; only unpublished photo uploads were made',
+      message:`Facebook post not sent: a photo upload failed before the Page feed request${why?` (${why})`:''}`};
+  }
   if(channel!=='instagram')return null;
   let mine;
   try{const all=readIgLedger();if(!Array.isArray(all))return null;mine=all.filter(x=>x.id===id);}catch{return null;}
@@ -183,6 +189,7 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
       return {status:'published',receipt};
     } catch(e) {
       // Only a failure that provably made nothing visible settles itself; anything else stays uncertain.
+      if(channel==='facebook')console.error(`Facebook send failed: ${reasonOf(e)}`);
       const notSent=provenNotSent(channel,entry.id,e,()=>rows(igLedger,null));
       if(notSent){
         record(journal,{channel,date,id:entry.id,listingId:p.id,status:'confirmed-not-published',evidence:notSent.evidence});
