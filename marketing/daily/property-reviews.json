@@ -1,1 +1,910 @@
-{}
+{
+  "BONA-001": {
+    "status": "approved",
+    "reviewedAt": "2026-10-05T19:23:41.552Z",
+    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "factsSha256": "ed40a21972d45d62882ad3b28eefc7a05c3d8b5189b6ec5f53fa0f6a75e065bc",
+    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
+    "captionSha256": "d0fd204ba8550a7d041115ae11ccb3e110bb54216f1ded8c1887785d23d08266",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. تُؤكَّد التفاصيل والحالة والخدمات عند المعاينة.",
+      "en": "Prices shown are asking prices and may change. Details, condition and services are confirmed at viewing."
+    },
+    "photos": [
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04852_2_-8b7bbc.jpg",
+        "sha256": "0d87344199af163dced991ba519e699c9eb1c80751f140895aa14930c035c5c6",
+        "width": 1920,
+        "height": 1279,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Façade at night — Private Beach Villa, Durrat Al Arous",
+          "ar": "الواجهة ليلاً — فيلا بشاطئ خاص، درة العروس"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04815-8e4c37de-63c764.jpeg",
+        "sha256": "30655b73966d7411170c50031e3ccc747830c4d37f0e3a34aaa98470dc7c4d63",
+        "width": 1920,
+        "height": 1280,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Private beach — Private Beach Villa, Durrat Al Arous",
+          "ar": "الشاطئ الخاص — فيلا بشاطئ خاص، درة العروس"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04827-858a47.jpeg",
+        "sha256": "d80c6089ea0173ad546e82740cfb628532c8c4f1a3a5f07e6087526bb23b59e6",
+        "width": 1920,
+        "height": 1280,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Living room — Private Beach Villa, Durrat Al Arous",
+          "ar": "غرفة المعيشة — فيلا بشاطئ خاص، درة العروس"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04792-30aad4.jpeg",
+        "sha256": "dc35c28312e74a1e53632f61728e2a6cab2a56687e03ca42052ae8daf5bc8c20",
+        "width": 1920,
+        "height": 1280,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Living room — Private Beach Villa, Durrat Al Arous",
+          "ar": "غرفة المعيشة — فيلا بشاطئ خاص، درة العروس"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/private-beach-villa-durrat-al-arous-jeddah/dsc04777-a64db2.jpeg",
+        "sha256": "9845d4e3e5a9e593f52df88c4c203de855177d7edb3bd97852bb56446adf9507",
+        "width": 1920,
+        "height": 1280,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Staircase — Private Beach Villa, Durrat Al Arous",
+          "ar": "الدرج — فيلا بشاطئ خاص، درة العروس"
+        }
+      }
+    ]
+  },
+  "BONA-015": {
+    "status": "approved",
+    "reviewedAt": "2026-10-05T19:21:56.781Z",
+    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "factsSha256": "d3f53cc89d93a03cba5443226a1f0ff1571fae499f406e7f19b24dd3b10574ef",
+    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
+    "captionSha256": "43d9fb6ea3aac6f91b3d3080bafa2906cb053d8c53f2f7c3f877a635f53995ab",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. تُؤكَّد التفاصيل والحالة والخدمات عند المعاينة.",
+      "en": "Prices shown are asking prices and may change. Details, condition and services are confirmed at viewing."
+    },
+    "photos": [
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_roof-apartment-25-3d6349.jpg",
+        "sha256": "bfeeb30dff5671ff5f9225bfd41ed6ea40f91a5e163658f77f381e2426855e84",
+        "width": 1920,
+        "height": 1281,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Façade at night — Al Zahra Residences",
+          "ar": "الواجهة ليلاً — شقق الزهراء"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-2-f509cb.jpg",
+        "sha256": "799c7c08a96b93999ff77ed33999ce15a7f0caea74bc8fb04a25fa09450d7630",
+        "width": 1920,
+        "height": 1281,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Exterior — Al Zahra Residences",
+          "ar": "الواجهة الخارجية — شقق الزهراء"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/al-zahrah-apartment/tk_apartment-8-0007dc.jpg",
+        "sha256": "783b30452fa80b909c2a7729f8fda07273328a0bfa8cb0c323eb3c7138b34a4e",
+        "width": 1920,
+        "height": 1281,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Balcony — Al Zahra Residences",
+          "ar": "الشرفة — شقق الزهراء"
+        }
+      }
+    ]
+  },
+  "BONA-022": {
+    "status": "approved",
+    "reviewedAt": "2026-10-05T19:21:56.781Z",
+    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "factsSha256": "cb7ebbb4bd22baebe010b4f69c2191df4e3ef639ad71e08d45b9aa12d58b62d3",
+    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
+    "captionSha256": "b6a3d9537f5596b30022a9c6a777bf24cac15254f1526e1ec50115dd6d2437fa",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. مواعيد التسليم والمواصفات حسب المطوّر.",
+      "en": "Prices shown are asking prices and may change. Delivery dates and specifications are per the developer."
+    },
+    "photos": [
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_4-1078483b-cd44eb.jpg",
+        "sha256": "c90f9e8d9a7c1e49bef1224b65598a85bffb5b6d37b4832763db5d792e24e4ad",
+        "width": 1920,
+        "height": 1201,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "The tower — Trump Tower Jeddah",
+          "ar": "البرج — برج ترامب جدة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_5-15f2dc.jpg",
+        "sha256": "6c3802d6fffd3019db237d70a0d2f6b075c23e57d5277e70710038c4c736f8f7",
+        "width": 1920,
+        "height": 1080,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Sea view — Trump Tower Jeddah",
+          "ar": "إطلالة على البحر — برج ترامب جدة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/trump_apartment_masterbedroom-46b7eb58-4af645.jpg",
+        "sha256": "30ab1303c249061fb5e481a03b4365be65d0aed8a2f1025ac7f8a053088eaa6b",
+        "width": 1920,
+        "height": 1280,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Master suite — Trump Tower Jeddah",
+          "ar": "الجناح الرئيسي — برج ترامب جدة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/ttj_8-87ea62.jpg",
+        "sha256": "8f921e69fb92ef16818b69e6b775967a6f944fcb4e0bdbf1357f8444fd3a2bde",
+        "width": 1920,
+        "height": 1200,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Façade at night — Trump Tower Jeddah",
+          "ar": "الواجهة ليلاً — برج ترامب جدة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-tower-jeddah/trump_private_club_reception-8c7bdc.jpg",
+        "sha256": "8d43f9ac3c363209ed06ac6f4ee8a0dd822df13f433728644c8f9ccf14874840",
+        "width": 1920,
+        "height": 1125,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Lobby — Trump Tower Jeddah",
+          "ar": "البهو — برج ترامب جدة"
+        }
+      }
+    ]
+  },
+  "BONA-023": {
+    "status": "approved",
+    "reviewedAt": "2026-10-05T19:23:41.552Z",
+    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "factsSha256": "2f639b312284fd5778ad1808d4a0c8e7fe30d4abc364b60e081e40da63a29fad",
+    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
+    "captionSha256": "7fe4c2f80aeb46bee4e71b9b3dc9c7e60a259bdf9cd1a1afac3be614f966c664",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. مواعيد التسليم والمواصفات حسب المطوّر.",
+      "en": "Prices shown are asking prices and may change. Delivery dates and specifications are per the developer."
+    },
+    "photos": [
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-plaza-jeddah/dgxtrump_plaza_front-entrance-02daae.jpg",
+        "sha256": "a08380ae617a152631f243e21c4b9682ab683832b8751e484886ec9b014df84b",
+        "width": 1920,
+        "height": 1080,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Exterior — Trump Plaza Jeddah",
+          "ar": "الواجهة الخارجية — ترامب بلازا جدة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-plaza-jeddah/dgxtrump_plaza_inner-park-72948e.jpg",
+        "sha256": "730647d0801ab3f7c8e5b4b1a86998e75de3a169681ee5c02e65cc577f49805a",
+        "width": 1920,
+        "height": 1080,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Courtyard — Trump Plaza Jeddah",
+          "ar": "الفناء الداخلي — ترامب بلازا جدة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-plaza-jeddah/dgxtrump_plaza_executive_residences_2-9fdc37.jpg",
+        "sha256": "f30edcf4b00b74ebaeb5c6c9d3533e63a53e398235606d72dfddb0b4ece2f6e3",
+        "width": 1920,
+        "height": 1119,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Living room — Trump Plaza Jeddah",
+          "ar": "غرفة المعيشة — ترامب بلازا جدة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-plaza-jeddah/dgxtrump_plaza_executive_residences_1-b3c705.jpg",
+        "sha256": "6e87d763476e501e833c0c380fe44008d8371e611b118c86b9847769be7f6e0e",
+        "width": 1920,
+        "height": 1078,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Dining room — Trump Plaza Jeddah",
+          "ar": "غرفة الطعام — ترامب بلازا جدة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/trump-plaza-jeddah/dgxtrump_plaza_executive_residences_3_1_-d1ba6e.jpg",
+        "sha256": "79ff02a9d9a440e7ceefbfc604346f4db4f54c9459f693d5a7f2f71d7c114771",
+        "width": 1920,
+        "height": 1078,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Master suite — Trump Plaza Jeddah",
+          "ar": "الجناح الرئيسي — ترامب بلازا جدة"
+        }
+      }
+    ]
+  },
+  "BONA-024": {
+    "status": "approved",
+    "reviewedAt": "2026-10-05T19:21:56.781Z",
+    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "factsSha256": "33d2b2eb246ff149175bc921f6888a374a59a0f24795f086c6e1d769e66f0046",
+    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
+    "captionSha256": "e28e94ded0dcd56cef04ba91f45a6895503ec014e559808adb1ee0cb71f6ab88",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. مواعيد التسليم والمواصفات حسب المطوّر.",
+      "en": "Prices shown are asking prices and may change. Delivery dates and specifications are per the developer."
+    },
+    "photos": [
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/aiease_1761726003950-0ca592.jpg",
+        "sha256": "e97370d9da8c57c13dc9f5a58a74bdd3c2748c43842ae315bda76325aa86ca7e",
+        "width": 1920,
+        "height": 1799,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Artist's impression — NOBAL Arista, Al Khalidiyah",
+          "ar": "تصور معماري — نوبال أريستا، الخالدية"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/screenshot_2025-10-29_174444-6942c9.jpg",
+        "sha256": "33c8cfc565a100320f58f1cfab8022fd85db13035ac14df5931e5a02975cafab",
+        "width": 1920,
+        "height": 1598,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Master suite — NOBAL Arista, Al Khalidiyah",
+          "ar": "الجناح الرئيسي — نوبال أريستا، الخالدية"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-arista/screenshot_2025-10-29_174502-a1df40.jpg",
+        "sha256": "b380b31d9c6807699dfc6b1b1bf2a5c6b500b4a26d2eaec11dc50301de09b0ef",
+        "width": 1920,
+        "height": 1917,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Bathroom — NOBAL Arista, Al Khalidiyah",
+          "ar": "الحمام — نوبال أريستا، الخالدية"
+        }
+      }
+    ]
+  },
+  "BONA-026": {
+    "status": "approved",
+    "reviewedAt": "2026-10-05T19:23:41.552Z",
+    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "factsSha256": "872dabd9406802cd03f38fb2a912a41dbfb224b5a36597d4548ffec86778f7d5",
+    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
+    "captionSha256": "dfc8ecbe61875dd4e163941ebcfd13d9965d3141f0f911e1e673f83ad9b07db9",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. مواعيد التسليم والمواصفات حسب المطوّر.",
+      "en": "Prices shown are asking prices and may change. Delivery dates and specifications are per the developer."
+    },
+    "photos": [
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776158984069-652361.jpg",
+        "sha256": "f03905368a52f86fc1fba26a4820162c5d7187c357184531bad98755916687fb",
+        "width": 1920,
+        "height": 1281,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Aerial view — Dari II, Al Salamah",
+          "ar": "منظر جوي — داري 2، السلامة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776157942045-975c1d.jpg",
+        "sha256": "be695e634803fd20755e5f7604da0856270b7f561acaab03f2c7a70f02f83e60",
+        "width": 1920,
+        "height": 1281,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Lobby — Dari II, Al Salamah",
+          "ar": "البهو — داري 2، السلامة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/tk2-50-20a796.jpg",
+        "sha256": "4cf4e68c175b8b8490d116b829573ef92c61ff5e9e15f6366ebd98e82e6e243c",
+        "width": 1920,
+        "height": 1281,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Lounge — Dari II, Al Salamah",
+          "ar": "الصالة — داري 2، السلامة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776158376378-509403.jpg",
+        "sha256": "db3dbb904434480d271836c33a4df8fb2e593bd140738a871218daf24c0d788d",
+        "width": 1920,
+        "height": 1281,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Living room — Dari II, Al Salamah",
+          "ar": "غرفة المعيشة — داري 2، السلامة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776171062974-087541.jpg",
+        "sha256": "8e9eb69e8d8906bc438ceebfc18b385a2e8067df5b81f350c2d15637dbe2efc0",
+        "width": 1920,
+        "height": 1281,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Event hall — Dari II, Al Salamah",
+          "ar": "قاعة المناسبات — داري 2، السلامة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776164971857-89dc4d.jpg",
+        "sha256": "2b25948d79965841431267ab49ecd066403988e5a34a84e877d0c0f4cc0288af",
+        "width": 1920,
+        "height": 1281,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Gym — Dari II, Al Salamah",
+          "ar": "النادي الرياضي — داري 2، السلامة"
+        }
+      }
+    ]
+  },
+  "BONA-033": {
+    "status": "approved",
+    "reviewedAt": "2026-10-05T19:21:56.781Z",
+    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "factsSha256": "6ebd8b9b5054b3abddd25feb7918f1de6fd98cc6c2b476b26e301c78c694fe79",
+    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
+    "captionSha256": "a7ae84968accaaac0284e5aae49686e826614f9a12283486315fbb2e27757f01",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. تُؤكَّد التفاصيل والحالة والخدمات عند المعاينة.",
+      "en": "Prices shown are asking prices and may change. Details, condition and services are confirmed at viewing."
+    },
+    "photos": [
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-46-1bc2ec.jpg",
+        "sha256": "6e7b5e7277c29c7ed7f6ac9921963b10b8ca7ea179db1180291872ce0346a755",
+        "width": 1920,
+        "height": 1080,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Illustrative — developer's finished unit at Kayan Residence, Al Nahda: Café terrace — Kayan Residence, 136 sqm Apartment, Al Nahda",
+          "ar": "صورة توضيحية — وحدة منجزة من المطوّر في كيان ريزيدنس، النهضة: تراس المقهى — كيان ريزيدنس، شقة 136 م²، النهضة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg",
+        "sha256": "00183b7e5292b643236252f3c1da63190b82ae97c1403ad29e354c9781409f1b",
+        "width": 1920,
+        "height": 1080,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Illustrative — developer's finished unit at Kayan Residence, Al Nahda: Lobby — Kayan Residence, 136 sqm Apartment, Al Nahda",
+          "ar": "صورة توضيحية — وحدة منجزة من المطوّر في كيان ريزيدنس، النهضة: البهو — كيان ريزيدنس، شقة 136 م²، النهضة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-10-48a86949-850b20.jpg",
+        "sha256": "c4b5136227e6ba472940bee43b01aea1abbc871e9a9bbe5d386f1660ef28a629",
+        "width": 1920,
+        "height": 1080,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Illustrative — developer's finished unit at Kayan Residence, Al Nahda: Living room — Kayan Residence, 136 sqm Apartment, Al Nahda",
+          "ar": "صورة توضيحية — وحدة منجزة من المطوّر في كيان ريزيدنس، النهضة: غرفة المعيشة — كيان ريزيدنس، شقة 136 م²، النهضة"
+        }
+      }
+    ]
+  },
+  "BONA-034": {
+    "status": "approved",
+    "reviewedAt": "2026-10-05T19:21:56.781Z",
+    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "factsSha256": "aaf4acdec6cb4ff40c570f6cd95d3fe87aa34803ace449563ef91dd8f4f9de22",
+    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
+    "captionSha256": "ccc473c5f4bf80b407a57e899214d240875563eaf7f020aeaf654845e7dfb2c0",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. تُؤكَّد التفاصيل والحالة والخدمات عند المعاينة.",
+      "en": "Prices shown are asking prices and may change. Details, condition and services are confirmed at viewing."
+    },
+    "photos": [
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-9-b8d887.jpg",
+        "sha256": "00183b7e5292b643236252f3c1da63190b82ae97c1403ad29e354c9781409f1b",
+        "width": 1920,
+        "height": 1080,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Illustrative — developer's finished unit at Kayan Residence, Al Nahda: Lobby — Kayan Residence, 120 sqm Apartment, Al Nahda",
+          "ar": "صورة توضيحية — وحدة منجزة من المطوّر في كيان ريزيدنس، النهضة: البهو — كيان ريزيدنس، شقة 120 م²، النهضة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-49-3dbda5.jpg",
+        "sha256": "797eb25c7ce5f4a55a607574dffca58cb5d21ddf5c03a65c9dbb8ecf8d2fc789",
+        "width": 1920,
+        "height": 1080,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Illustrative — developer's finished unit at Kayan Residence, Al Nahda: Café terrace — Kayan Residence, 120 sqm Apartment, Al Nahda",
+          "ar": "صورة توضيحية — وحدة منجزة من المطوّر في كيان ريزيدنس، النهضة: تراس المقهى — كيان ريزيدنس، شقة 120 م²، النهضة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-33-792ba2.jpg",
+        "sha256": "5788321502dcb02e118f0b386c103cc96c42031dd404a4fca73da5b1942e45be",
+        "width": 1920,
+        "height": 1080,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Illustrative — developer's finished unit at Kayan Residence, Al Nahda: Living room — Kayan Residence, 120 sqm Apartment, Al Nahda",
+          "ar": "صورة توضيحية — وحدة منجزة من المطوّر في كيان ريزيدنس، النهضة: غرفة المعيشة — كيان ريزيدنس، شقة 120 م²، النهضة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-35-fd1ebb.jpg",
+        "sha256": "6b388967ad4d519124e6bdf326af3db5a9a646fe51fbe637e127467d82aac305",
+        "width": 1920,
+        "height": 1080,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Illustrative — developer's finished unit at Kayan Residence, Al Nahda: Kitchen — Kayan Residence, 120 sqm Apartment, Al Nahda",
+          "ar": "صورة توضيحية — وحدة منجزة من المطوّر في كيان ريزيدنس، النهضة: المطبخ — كيان ريزيدنس، شقة 120 م²، النهضة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/kian-residence/tk2-18-fd9332.jpg",
+        "sha256": "60f195fc30c432e01260f9f27faed53fd44800b77db56c8c69620f71ce5fb23c",
+        "width": 1920,
+        "height": 1080,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Illustrative — developer's finished unit at Kayan Residence, Al Nahda: Bathroom — Kayan Residence, 120 sqm Apartment, Al Nahda",
+          "ar": "صورة توضيحية — وحدة منجزة من المطوّر في كيان ريزيدنس، النهضة: الحمام — كيان ريزيدنس، شقة 120 م²، النهضة"
+        }
+      }
+    ]
+  },
+  "BONA-043": {
+    "status": "approved",
+    "reviewedAt": "2026-10-05T19:21:56.781Z",
+    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "factsSha256": "e2649b5052616812b8febc097e0aa7de60ce2c009d9abb9cb701f7bd2d03f33b",
+    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
+    "captionSha256": "ba4d73e03951bc3745cc840e3ad4e6d700700d85920f663e05af65d9e414eabf",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. تُؤكَّد التفاصيل والحالة والخدمات عند المعاينة.",
+      "en": "Prices shown are asking prices and may change. Details, condition and services are confirmed at viewing."
+    },
+    "photos": [
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-12-bd8233.jpeg",
+        "sha256": "1108a06f88888e15ecb5485f2992ed5efb3006026324fc2193f23fe75ae94147",
+        "width": 1920,
+        "height": 1080,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Rooftop pool — Dari Q Apartments, Al Salamah",
+          "ar": "مسبح السطح — شقق داري كيو، السلامة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-5-669658.jpeg",
+        "sha256": "d1373054de2c0f17ab4eb9ed051f5cb51dc5c94e1de4171172b86b549f75d734",
+        "width": 1920,
+        "height": 1080,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Courtyard — Dari Q Apartments, Al Salamah",
+          "ar": "الفناء الداخلي — شقق داري كيو، السلامة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-26-20cb3e.jpeg",
+        "sha256": "11f48bbccab70447f15bf10c1c0d0a300f39fb4c288d615ec58e53ca42f5e540",
+        "width": 1920,
+        "height": 1080,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Living room — Dari Q Apartments, Al Salamah",
+          "ar": "غرفة المعيشة — شقق داري كيو، السلامة"
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-q-luxury-apartment/tk_pics-30-d9a124.jpeg",
+        "sha256": "db72f93a231f44412e027aa8401744137e643a89b3c559f7754afc6da6e26739",
+        "width": 1920,
+        "height": 1080,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Living room — Dari Q Apartments, Al Salamah",
+          "ar": "غرفة المعيشة — شقق داري كيو، السلامة"
+        }
+      }
+    ]
+  },
+  "BONA-W002": {
+    "status": "approved",
+    "reviewedAt": "2026-10-05T19:21:56.781Z",
+    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "factsSha256": "20c5abab84e3e7b0bf9903d29b0ea52b8f115d34cb80139353bc53f9aecb2004",
+    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
+    "captionSha256": "d1f8ea27c082348815f8929b3067d813f0149c60c3dbfcb122d6aa61af2ef54f",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "مواعيد التسليم والمواصفات حسب المطوّر.",
+      "en": "Delivery dates and specifications are per the developer."
+    },
+    "photos": [
+      {
+        "url": "https://bona-real-estate.com/listings/nuzul-khayala-residences-north-jeddah/03.jpg",
+        "sha256": "dda980a7493ad5aad3a4b10f37858ac627521567128e862f1364220924dbc425",
+        "width": 1600,
+        "height": 897,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Living room — Nuzul Khayala Residences, North Jeddah",
+          "ar": "غرفة المعيشة — نزل خيالة، شمال جدة"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/nuzul-khayala-residences-north-jeddah/05.jpg",
+        "sha256": "8801ef70b039ed913cfb06bf254985132e8cfdca725b34db3ffacce6afccb38b",
+        "width": 1600,
+        "height": 897,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Living room — Nuzul Khayala Residences, North Jeddah",
+          "ar": "غرفة المعيشة — نزل خيالة، شمال جدة"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/nuzul-khayala-residences-north-jeddah/04.jpg",
+        "sha256": "a6df44757dbb5e7c335dfda29f122da59a4f44f6118e389bb1030a4dd4ab267f",
+        "width": 1600,
+        "height": 897,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Dining room — Nuzul Khayala Residences, North Jeddah",
+          "ar": "غرفة الطعام — نزل خيالة، شمال جدة"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/nuzul-khayala-residences-north-jeddah/06.jpg",
+        "sha256": "3adfb07945605e46fbaa0f9d215054781721f0e0f230836e84d32ad39daaed80",
+        "width": 1600,
+        "height": 897,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Bathroom — Nuzul Khayala Residences, North Jeddah",
+          "ar": "الحمام — نزل خيالة، شمال جدة"
+        }
+      }
+    ]
+  },
+  "BONA-W006": {
+    "status": "approved",
+    "reviewedAt": "2026-10-05T19:21:56.781Z",
+    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "factsSha256": "2a191547236066c552e13c90da5cb5eaf2f56aa2a9e8e9fea54a52d941922749",
+    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
+    "captionSha256": "4c162e5f1114a4175219877419c17dbc5c8bd8d28eed7d999c2d1dcee90999d9",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "مواعيد التسليم والمواصفات حسب المطوّر.",
+      "en": "Delivery dates and specifications are per the developer."
+    },
+    "photos": [
+      {
+        "url": "https://bona-real-estate.com/listings/al-warf-district-jeddah/01.jpg",
+        "sha256": "a4c194b028beea6d412c13856871eb3a20c5884ca161275528dbaa31dda97feb",
+        "width": 1920,
+        "height": 1083,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Exterior — Al Warf District, Jeddah",
+          "ar": "الواجهة الخارجية — وجهة الويرف، جدة"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/al-warf-district-jeddah/04.jpg",
+        "sha256": "f051894af97d1f99324033519e748033d19aa98ec63d7f01fdfaace7e2e61d0f",
+        "width": 1920,
+        "height": 1082,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Exterior — Al Warf District, Jeddah",
+          "ar": "الواجهة الخارجية — وجهة الويرف، جدة"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/al-warf-district-jeddah/06.jpg",
+        "sha256": "a0f42d8491ab48ec128272c0ad6b64306d490d6287f3d0693e45bd63aa483191",
+        "width": 1920,
+        "height": 1083,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Exterior — Al Warf District, Jeddah",
+          "ar": "الواجهة الخارجية — وجهة الويرف، جدة"
+        }
+      }
+    ]
+  },
+  "BONA-W014": {
+    "status": "approved",
+    "reviewedAt": "2026-10-05T19:21:56.781Z",
+    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "factsSha256": "8e4c7fad4440e3ff18221715f52ac0ccfe9a4153bcaf6f3cdd3579ded433ecf5",
+    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
+    "captionSha256": "614551c059a65a47bb0f5730ed89119b86f6e6a20e54a4054b02d840f0c4ed8c",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. مواعيد التسليم والمواصفات حسب المطوّر.",
+      "en": "Prices shown are asking prices and may change. Delivery dates and specifications are per the developer."
+    },
+    "photos": [
+      {
+        "url": "https://bona-real-estate.com/listings/darco-prime-waterfront-al-shati/01.jpg",
+        "sha256": "9a533ad6c154f59f0b9216fb7e25697a73df0f739ffc96e2a3c6a0d2d1853208",
+        "width": 1920,
+        "height": 1436,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Exterior — Darco Prime Waterfront, Al-Shati",
+          "ar": "الواجهة الخارجية — داركو برايم الواجهة البحرية، الشاطئ"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/darco-prime-waterfront-al-shati/03.jpg",
+        "sha256": "5aa15b7a2fb6d5cf855e47c7abe490ae61c746b802b44a3be0efdba09744a0a8",
+        "width": 1920,
+        "height": 1442,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Courtyard — Darco Prime Waterfront, Al-Shati",
+          "ar": "الفناء الداخلي — داركو برايم الواجهة البحرية، الشاطئ"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/darco-prime-waterfront-al-shati/02.jpg",
+        "sha256": "047a20c6052bd58ed4cacaadcb286da05ff0ba4fec0163ecb2a3f83c4deb1d4a",
+        "width": 1920,
+        "height": 1441,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Façade at night — Darco Prime Waterfront, Al-Shati",
+          "ar": "الواجهة ليلاً — داركو برايم الواجهة البحرية، الشاطئ"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/darco-prime-waterfront-al-shati/04.jpg",
+        "sha256": "adf717fa2d4a75f5921ef9f97b56b93c95efd00bbc1b883d1dffef4d712cc614",
+        "width": 1920,
+        "height": 1441,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Living room — Darco Prime Waterfront, Al-Shati",
+          "ar": "غرفة المعيشة — داركو برايم الواجهة البحرية، الشاطئ"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/darco-prime-waterfront-al-shati/06.jpg",
+        "sha256": "24233fc51a7d2629b239518ff7970de26db1e58c4588316b871f52e715961867",
+        "width": 1920,
+        "height": 1439,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Living room — Darco Prime Waterfront, Al-Shati",
+          "ar": "غرفة المعيشة — داركو برايم الواجهة البحرية، الشاطئ"
+        }
+      }
+    ]
+  },
+  "BONA-W015": {
+    "status": "approved",
+    "reviewedAt": "2026-10-05T19:21:56.781Z",
+    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "factsSha256": "3e1fce83b4d6a486d02cce5ec8aa57fd9853587b4bf5a9669e022cd9e7cd7351",
+    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
+    "captionSha256": "1e4f23d95269e37915af1eeaf1a2bbefe4d2af01548b9f66eff520866b887842",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "مواعيد التسليم والمواصفات حسب المطوّر.",
+      "en": "Delivery dates and specifications are per the developer."
+    },
+    "photos": [
+      {
+        "url": "https://bona-real-estate.com/listings/aseel-al-ghoroub-2-al-madinah/02.jpg",
+        "sha256": "3242baf58dd24ec17b3a6dc2b545eb58e17a9ad70c697d6c313aed7ae59f8f8c",
+        "width": 1402,
+        "height": 1122,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Exterior — Aseel Al Ghoroub 2, Al Madinah",
+          "ar": "الواجهة الخارجية — أصيل الغروب ٢، المدينة المنورة"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/aseel-al-ghoroub-2-al-madinah/03.jpg",
+        "sha256": "fa57c665edb542384ed06194484c15d949db3fd4b8cc25e8281feecaeef9ef78",
+        "width": 1209,
+        "height": 930,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Entrance — Aseel Al Ghoroub 2, Al Madinah",
+          "ar": "المدخل — أصيل الغروب ٢، المدينة المنورة"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/aseel-al-ghoroub-2-al-madinah/08.jpg",
+        "sha256": "eef28c0e4be1ed367661dec6cf55f74ce941e2376e63d22c09c9343441eff5b1",
+        "width": 1209,
+        "height": 930,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Exterior — Aseel Al Ghoroub 2, Al Madinah",
+          "ar": "الواجهة الخارجية — أصيل الغروب ٢، المدينة المنورة"
+        }
+      }
+    ]
+  },
+  "BONA-W018": {
+    "status": "approved",
+    "reviewedAt": "2026-10-05T19:21:56.781Z",
+    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "factsSha256": "566a05a241fdd6576756b2b4d7c5ef826ddad20de5e416f3895e0d46967c3d53",
+    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
+    "captionSha256": "5640551e3387946271de5a3e91389bae88550629e12567d2ce56109788a4b8bd",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. مواعيد التسليم والمواصفات حسب المطوّر.",
+      "en": "Prices shown are asking prices and may change. Delivery dates and specifications are per the developer."
+    },
+    "photos": [
+      {
+        "url": "https://bona-real-estate.com/listings/elemental-residences-al-rawabi/02.jpg",
+        "sha256": "b84d7f41c376aecf20961c61828fb6f11dc9e3d89368086f7f4d728dfc0c03ec",
+        "width": 1160,
+        "height": 894,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Façade at night — Elemental Residences, Al Rawabi",
+          "ar": "الواجهة ليلاً — مشروع إيلمنتال، حي الروابي بجدة"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/elemental-residences-al-rawabi/05.jpg",
+        "sha256": "b437671e820882dc627a8594f076507c88de778921890b6be20519fef42d4866",
+        "width": 1160,
+        "height": 909,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Courtyard — Elemental Residences, Al Rawabi",
+          "ar": "الفناء الداخلي — مشروع إيلمنتال، حي الروابي بجدة"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/elemental-residences-al-rawabi/06.jpg",
+        "sha256": "d50ba4e510204f4c26e4662a359227e6f3935565ab42ccb95992bda6f9a1b777",
+        "width": 1323,
+        "height": 1058,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Gym — Elemental Residences, Al Rawabi",
+          "ar": "النادي الرياضي — مشروع إيلمنتال، حي الروابي بجدة"
+        }
+      }
+    ]
+  }
+}
