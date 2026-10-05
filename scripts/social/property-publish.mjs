@@ -83,7 +83,16 @@ async function identity(channel,env,fetchImpl=fetch) {
     if(info.page.id!==ACCOUNT.facebook || info.page.name!=='Bona Real Estate' || !info.page.published)throw new Error('Facebook identity changed');
   }
 }
-export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,env=process.env,fetchImpl=fetch}={}) {
+/** True when both legacy publisher timers are disabled, masked or absent, and not running. A failed systemctl call counts as not disabled. */
+function legacyTimersOff() {
+  return ['bona-ig-publish.timer','bona-fb-publish.timer'].every(name=>{
+    const enabled=String(spawnSync('systemctl',['--user','is-enabled',name],{encoding:'utf8'}).stdout??'').trim();
+    const active=String(spawnSync('systemctl',['--user','is-active',name],{encoding:'utf8'}).stdout??'').trim();
+    return ['disabled','masked','not-found'].includes(enabled)&&['inactive','unknown'].includes(active);
+  });
+}
+/** `legacyTimersDisabled` replaces the systemctl check in tests; anything but `true` refuses the send. */
+export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,env=process.env,fetchImpl=fetch,legacyTimersDisabled=legacyTimersOff}={}) {
   const policy=read(path.join(root,'marketing/daily/property-policy.json'));
   if(policy.version!==1 || policy.mode!=='property-photography' || policy.time!=='20:30' || policy.timezone!=='Asia/Riyadh' ||
      policy.catalogueUrl!==`${SITE}/social-catalogue.json` || policy.repeatDays<30 ||
@@ -121,11 +130,7 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
     const current=await catalogue(fetchImpl,now),updated=current.listings.find(x=>x.id===p.id);
     if(!updated || fingerprint(updated)!==fingerprint(p) || eligibility(updated,review,current.advertiser,now,rules).length)throw new Error('Property changed during preflight');
     if(dry){console.log(`Ready after read-only preflight: ${entry.id}, ${p.id}; no post`);return {status:'ready',entry};}
-    for(const name of ['bona-ig-publish.timer','bona-fb-publish.timer']) {
-      const enabled=spawnSync('systemctl',['--user','is-enabled',name],{encoding:'utf8'}).stdout.trim();
-      const active=spawnSync('systemctl',['--user','is-active',name],{encoding:'utf8'}).stdout.trim();
-      if(!['disabled','masked','not-found'].includes(enabled)||!['inactive','unknown'].includes(active))throw new Error('Legacy publisher must remain disabled');
-    }
+    if(legacyTimersDisabled()!==true)throw new Error('Legacy publisher must remain disabled');
     record(journal,{channel,date,id:entry.id,listingId:p.id,status:'intent'});
     try {
       let receipt;
