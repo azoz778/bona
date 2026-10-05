@@ -1,93 +1,121 @@
-# Daily property photography
+# Daily property posts
 
-The owner requested daily posts about current Bona website properties, using clear
-actual photographs. The existing Instagram and Facebook daily units remain at
-20:30 Asia/Riyadh. No second timer or cloud automation is installed. The property
-policy replaces the finite editorial pack at the existing entry point; the old
-pack, renderer, receipts and publication history remain intact for rollback.
+One Instagram post and one Facebook post a day at 20:30 Asia/Riyadh, each a carousel of three
+to six reviewed images of one current website property. The existing `bona-daily@instagram`
+and `bona-daily@facebook` timers run it; there is no other timer.
 
-## Current eligibility
+## Policy (`marketing/daily/property-policy.json`)
 
-On 2 October 2026, all 48 local and deployed catalogue records had no advertising
-licence, and the curated licence register was empty. No property is approved for
-publication. The policy intentionally skips with a reason instead of using old
-editorial cards, filling licence placeholders, or promoting an unverified listing.
-The owner's FAL brokerage number is not a property advertisement licence.
+- **Ad-licence waiver (owner, 2026-10-05).** The owner instructed daily posting of current
+  Saudi website properties without per-listing REGA ad-licence numbers and accepted the stated
+  exposure. `adLicence.requirement` is `"waived"` with `by` and `on`; a waiver missing either,
+  or dated in the future, stops every run. Setting it back to `"required"` restores the
+  licence gate exactly as it was. Every caption still carries the advertiser's name, FAL number
+  and phone, and a listing's ad-licence line appears automatically once `licence.adNumber` is set.
+- **Scope:** `countries: ["SA"]`, `categories: ["buy","rent","off-plan"]`. International
+  listings are out.
+- **Renders:** `renders: "off-plan-only"`. Developer renders may illustrate off-plan projects
+  only, and the caption then says so in both languages. Ready stock needs real photographs.
+- **Reviews** stay valid for `reviewValidDays` (90) while the listing facts, the advertiser and
+  the caption are unchanged; any change invalidates a review at once.
+- **Rotation:** one property per channel per day, oldest first, 30-day repeat interval. When no
+  property is eligible the run falls through to an approved reviewed pack in `marketing/daily/`
+  if one is due; otherwise it records a skip. Runs before 20:30 or from 23:00 do nothing, and
+  there is no backfill.
 
-The first Al Khalidiyah (BONA-005) draft was withdrawn before publication: the
-live catalogue marks it sold while the local checkout still said available.
-The draft builder now reads the live feed and refuses unavailable stock. The
-replacement private draft is BONA-001, Durrat Al Arous, with original pool,
-beach-access and living-room photographs, each 1920×1280. It is available in the
-live catalogue but remains blocked by missing advertising-licence evidence.
-No generative artwork, crop, stretch, upscaling, ROI or urgency claim is used.
+## Admitting properties (`marketing/daily/property-reviews.json`)
 
-## Admission and publication
+1. **Draft:** `node scripts/social/draft-property-reviews.mjs --out NEW_DIR` (or add
+   `--ids BONA-001,BONA-022`). It reads the live catalogue, downloads up to ten images for each
+   in-scope listing that is not currently eligible (no review yet, or one that has expired or no
+   longer matches), keeps the ones that meet the publisher's rules (JPEG, at most 8 MB, at least
+   1080×720, aspect 0.8–1.91), and writes one contact sheet per listing plus `drafts.json` with a
+   caption preview. It never writes the register and never uploads.
+2. **Look** at every contact sheet, and at full frames where detail matters. Leave out other
+   brokers' watermarks, people, price or text banners, floor plans, duplicates and anything that
+   does not show this property. Put the strongest frame first.
+3. **Approve:** `node scripts/social/approve-property-review.mjs --drafts NEW_DIR/drafts.json --reviewer "<who looked>" --select BONA-022:1,3,4 --select BONA-001:2,5,1,7`.
+   Frames default to `render` for off-plan listings and `photograph` otherwise; a `p` or `r`
+   suffix overrides one frame. Selected frames must sit within 15% of the first frame's aspect
+   ratio because Instagram crops a carousel to its first frame. The script re-reads the live
+   catalogue, refuses anything changed since drafting or not eligible, and leaves an identical,
+   still-valid review untouched; an expired one is renewed.
+4. **Commit** the register through a PR. The publisher reads it from `origin/main`.
 
-- `/social-catalogue.json` exposes only public listing fields and public advertiser
-  contact information. It is built by the existing website deployment, including
-  its daily 06:00 Riyadh refresh. Data older than 48 hours fails closed.
-- `marketing/daily/property-reviews.json` holds explicit reviewed photo selections.
-  An empty register means no property post. Do not insert fictional licence data.
-- A review binds the current listing, advertiser, bilingual caption, original photo
-  URLs and SHA-256 bytes. Three to six actual photographs must pass visual review
-  and size/aspect checks. Unseen photos, renders and altered source bytes fail.
-- Saudi ready-property sale/rental posts require a valid property ad number and
-  expiry, evidence of marketing authority/social channel coverage, matching contact
-  details, and verified bilingual disclosures of condition, services and rights.
-  Off-plan and non-Saudi listings need a separate verified workflow and are skipped.
-- Evidence and visual/copy reviews expire after 30 days. Any changed listing facts
-  require renewed review. No invented condition, encumbrance or service statement.
-- Each channel rechecks account identity and reads the live catalogue again just
-  before upload. Current stock, price, licence and advertiser must still match.
-- The existing daily ID is reused, so a previous editorial post occupies that day's
-  slot. A per-channel lock, existing ledgers and durable intent prevent duplicates.
-  An uncertain send stops retries until reconciled. Published properties rotate
-  oldest-first, with a minimum 30-day interval; exhaustion skips, never recycles.
-- Runs before 20:30 or from 23:00 onward do nothing. No missed-day backfill.
+Disclosures written with every review: prices are asking prices and may change; details,
+condition and services are confirmed at viewing; for off-plan, delivery dates and
+specifications are per the developer. Nothing else is claimed.
 
-## Preparing and admitting a property
+## Publication safety
 
-Run `node scripts/social/build-property-preview.mjs BONA-ID NEW_OUTPUT_DIR 3,6,4`
-with verified source image indices. It preserves original JPEG bytes and prepares
-a responsive Arabic-first HTML review, captions and a **draft** receipt; it never
-publishes, approves content or edits the live register.
+- Each channel re-checks the account identity, downloads the reviewed images and compares their
+  SHA-256 with the review, and re-reads the live catalogue just before upload. Any change stops
+  that run.
+- A per-channel lock, the existing ledgers and a durable `intent` record prevent duplicates. A
+  failed or unconfirmed send records `uncertain` and stops automatic retries on that channel.
+- **Reconciling an uncertain attempt.** An `intent` or `uncertain` line in
+  `~/bona-data/daily/property.jsonl` that no later line settles keeps that channel blocked.
+  Settle it by appending lines, never by deleting any:
+  1. Work only while no run holds `~/bona-data/daily/.property-<channel>.lock`. The file names the
+     run's process id; an `intent` under a live run is an attempt still in progress.
+  2. Look for the post with an authenticated API read of the account's Instagram media or the
+     Page's Facebook posts that covers the attempt time, and match it on caption and images. Only
+     such a read shows the post is absent: a failed or partial query is not absence, and a wrong
+     `confirmed-not-published` lets a later run post again, as soon as the same evening.
+  3. Append one line to `property.jsonl`, with `date`, `id` and `listingId` copied from the
+     attempt's `intent` line. If the post exists:
+     `{"channel":"instagram","date":"YYYY-MM-DD","id":"bona-daily-ig-YYYY-MM-DD","listingId":"BONA-…","status":"published","mediaId":"…","permalink":"…","evidence":"<what was checked>","at":"<publication time, ISO>"}`
+     or
+     `{"channel":"facebook","date":"YYYY-MM-DD","id":"bona-daily-fb-YYYY-MM-DD","listingId":"BONA-…","status":"published","postId":"…","evidence":"<what was checked>","at":"<publication time, ISO>"}`.
+     Its `at` is the provider's publication time; the 30-day repeat interval counts from it. If
+     the post is absent:
+     `{"channel":"instagram","date":"YYYY-MM-DD","id":"bona-daily-ig-YYYY-MM-DD","listingId":"BONA-…","status":"confirmed-not-published","evidence":"<what was checked>","at":"<now, ISO>"}`
+     or
+     `{"channel":"facebook","date":"YYYY-MM-DD","id":"bona-daily-fb-YYYY-MM-DD","listingId":"BONA-…","status":"confirmed-not-published","evidence":"<what was checked>","at":"<now, ISO>"}`.
+     Only a line written after the attempt settles it.
+  4. If the post exists, also append the same `published` line to `~/bona-data/ig/published.jsonl`
+     or `~/bona-data/fb/published.jsonl`, unless that ledger already has a `published` line for
+     the id; Instagram stays blocked without it. If it is absent and
+     `~/bona-data/ig/published.jsonl` has a `publishing` line for the id, append
+     `{"id":"bona-daily-ig-YYYY-MM-DD","date":"YYYY-MM-DD","status":"error","detail":"<what was checked>","ts":"<now, ISO>"}`
+     after it. Without that line Instagram stays blocked; with it, that date stays closed and
+     Instagram posts again from the next day's slot.
 
-Inspect every original image and the Arabic/English captions. Verify the actual
-licence, marketing authority, channel coverage, contact match and all mandatory
-property disclosures. Record evidence references, verifiedAt, matching adNumber
-and adExpiry in licenceEvidence; do not store private contracts in Git. Record
-legalDisclosures in both languages and legalDisclosuresVerified only after checking
-them. Recompute factsSha256, advertiserSha256 and captionSha256 using the exported
-helpers. Only then mark each photograph visuallyApproved, kind photograph, set
-reviewedAt and status approved, and add the review under its real listing ID.
+## Monitoring
 
-The runtime uses the original public JPEGs on Instagram and downloads those same
-hash-verified files for native Facebook photo uploads. Captions carry the property
-reference, viewing CTA and required verified disclosures. No new asset hosting is
-needed. Changed or unavailable photos stop publication.
+- `~/bona-data/daily/heartbeat-instagram.url` and `heartbeat-facebook.url` (mode 600, outside the
+  repo) hold the Uptime Kuma push URLs of the monitors "Bona daily post — instagram" and
+  "Bona daily post — facebook". A confirmed or already-recorded publication pushes `up`. The
+  22:30 and 22:45 runs push `down` with the reason when the day still has no post, which reaches
+  the owner's Telegram through the existing Kuma notification. The monitors also go down after
+  26 hours without a push. A missing URL file or a failed push is logged and never fails a run.
+- The Codex app automations `bona-daily-publishing-checks` (20:45, 21:45, 22:45) and
+  `bona-weekly-social-replenishment` (Thursdays 10:00) also inspect this pipeline and report into
+  their Codex chat. They are not part of this repository.
 
-## Verification and operations
+## Verification
 
-`BONA_DAILY_TEST_NOW=2026-10-02T17:30:00Z node scripts/social/daily-publish.mjs instagram --dry-run`
-simulates the slot with read-only provider calls. Use the current date for future
-checks. Dry run performs no media creation, publication or journal writes.
+```bash
+( set -a; . ~/.secrets/bona-meta-graph.env; set +a; cd ~/bona-publish &&
+  BONA_DAILY_TEST_NOW="$(TZ=Asia/Riyadh date +%F)T17:30:00Z" node scripts/social/daily-publish.mjs instagram --dry-run )
+```
 
-Runtime evidence is in `~/bona-data/daily/property.jsonl`; existing IG/FB ledgers
-remain authoritative for already-published posts. A failed preflight is recorded
-by the existing daily alert path. Never clear an intent to force a retry without
-checking the provider and existing ledger for the exact daily ID.
+simulates today's 20:30 Riyadh slot (17:30Z) in the publisher's checkout with read-only provider
+calls; run it again with `facebook`. The subshell keeps the Meta token out of your shell. A slot
+that will post prints `Ready after read-only preflight: <entry id>, <listing id>; no post`. Also
+normal: `Daily slot already published` once today's post is recorded, or, with no eligible
+property, the skip JSON, then `No eligible property today; checking the reviewed daily pack.` and
+`No daily content due …` (on a pack day, the pack's `Validated …; no publish` line instead).
+Anything else means the slot would not post.
 
-Instagram identity and publishing permissions and Facebook Page identity and
-posting permissions were verified live on 2 October. TikTok's Events integration
-is configured, but no production Accounts grant or app credentials were found;
-the implemented Accounts module explicitly disables publishing. Snapchat's tracked
-configuration is blank. Neither channel is enabled by this policy.
+Runtime evidence: `~/bona-data/daily/property.jsonl`, `~/bona-data/ig/published.jsonl`,
+`~/bona-data/fb/published.jsonl`, `~/bona-data/daily/alerts.jsonl`.
 
-Rollback: revert the property-pipeline commit through the normal repository flow.
-This restores the original finite pack without altering already-published posts or
-the timer. The publisher must remain a clean checkout of origin/main; do not edit
-the live detached worktree to bypass guard-main.sh.
+## Rollback
 
-Regulatory source checked 2 October 2026: Articles 3, 5 and 6 of
-https://www.uqn.gov.sa/decisions-and-regulations/authorities/4000857.
+Set `adLicence.requirement` to `"required"` (or revert the waiver commit). The register is inert
+under a licence requirement. Published posts and ledgers are untouched.
+
+Regulatory note: Articles 3, 5 and 6 of https://www.uqn.gov.sa/decisions-and-regulations/authorities/4000857
+(checked 2 October 2026) are why the licence gate was built; the waiver above is the owner's
+recorded business decision.
