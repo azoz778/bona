@@ -410,7 +410,12 @@ export async function run(opts = {}, deps = {}) {
   const lockPath = o.lock ? path.resolve(o.lock) : lockPathFor(ledgerPath);
   const loadEntries = deps.loadEntries ?? (() => JSON.parse(fs.readFileSync(sourcePath, 'utf8')));
   const readLedger = deps.readLedger ?? (() => readLedgerFile(ledgerPath));
-  const appendLedger = deps.appendLedger ?? ((rec) => { fs.mkdirSync(path.dirname(ledgerPath), { recursive: true }); fs.appendFileSync(ledgerPath, `${JSON.stringify(rec)}\n`); });
+  // Durable before the next step: the `publishing` line must be on disk before media_publish is sent.
+  const appendLedger = deps.appendLedger ?? ((rec) => {
+    fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
+    const fd = fs.openSync(ledgerPath, 'a', 0o600);
+    try { fs.writeSync(fd, `${JSON.stringify(rec)}\n`); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  });
   const readCaption = deps.readCaption ?? ((file) => fs.readFileSync(path.join(ROOT, o.captions, file), 'utf8'));
   const wall = () => new Date(deps.wallClock ?? Date.now()).toISOString();
   const detailOf = (e) => (e instanceof GraphError ? e.detail : (e?.message || String(e)));
