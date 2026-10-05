@@ -634,3 +634,23 @@ test('Instagram: the not-sent proof reads the ledger file the publisher writes, 
     assert.equal(s.writes().filter(c => c.endsWith('/media_publish')).length, 1);
   } finally { process.chdir(cwd); process.env.HOME = home; fs.rmSync(f.root, { recursive: true, force: true }); }
 });
+test('BONA_DATA starting with ~ is resolved once: the journal and both Facebook ledgers land under the home directory, nothing under the working directory', async () => {
+  const f = sendFixture('bona-property-fb-tilde-'), elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-property-cwd-'));
+  const home = process.env.HOME, cwd = process.cwd();
+  try {
+    process.env.HOME = f.root; process.chdir(elsewhere);
+    let uploads = 0;
+    const s = sendStub(f, (u, init) => {
+      if (init.method !== 'POST') return undefined;
+      if (u.pathname.endsWith(`/${ACCOUNT.facebook}/photos`)) return Response.json({ id: `photo-${++uploads}` });
+      if (u.pathname.endsWith(`/${ACCOUNT.facebook}/feed`)) return Response.json({ id: 'fixture-post' });
+      return undefined;
+    });
+    assert.equal((await send('facebook', f, s.fetchImpl, { env: { ...f.env, BONA_DATA: '~/x' } })).status, 'published');
+    const x = path.join(f.root, 'x');
+    assert.deepEqual(jsonl(path.join(x, 'daily/property.jsonl')).map(r => r.status), ['intent', 'published']);
+    for (const ledger of ['daily/facebook.jsonl', 'fb/published.jsonl'])
+      assert.deepEqual(jsonl(path.join(x, ledger)).map(r => `${r.id} ${r.status} ${r.postId}`), [`${FB_ID} published fixture-post`], ledger);
+    assert.deepEqual(fs.readdirSync(elsewhere), [], 'nothing relative to the working directory');
+  } finally { process.chdir(cwd); process.env.HOME = home; fs.rmSync(f.root, { recursive: true, force: true }); fs.rmSync(elsewhere, { recursive: true, force: true }); }
+});

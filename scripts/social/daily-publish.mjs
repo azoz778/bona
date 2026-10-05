@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 // Daily dispatch: reviewed property posts first; a reviewed finite pack only when no property is eligible and a pack day is due. Never reads the legacy queue/calendar.
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import {spawnSync} from "node:child_process";
 import {verifyPack,dueToday,ksaNow,verifyPublic,facebookState,ROOT} from "./lib/daily-pack.mjs";
 import {withLock,pageToken,publishEntry,appendLedger,captionFromEntry,filesFor} from "./lib/facebook.mjs";
 import {continueToPack,heartbeatFor,pushHeartbeat} from "./lib/heartbeat.mjs";
+import {dataDir} from "./lib/ledger.mjs";
 const channel=process.argv[2],dry=process.argv.includes("--dry-run");
 if(!["instagram","facebook"].includes(channel))throw new Error("Choose instagram or facebook");
-const data=process.env.BONA_DATA||path.join(os.homedir(),"bona-data"),dir=path.join(data,"daily");
+const data=dataDir(process.env),dir=path.join(data,"daily");
 fs.mkdirSync(dir,{recursive:true});
 const now=dry&&process.env.BONA_DAILY_TEST_NOW?new Date(process.env.BONA_DAILY_TEST_NOW):new Date();
 const beat=(status,error=null)=>pushHeartbeat(channel,heartbeatFor({status,error,now,dry}),{dataDir:data});
