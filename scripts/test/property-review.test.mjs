@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
-import { policyRules, eligibility, sha256 } from '../social/lib/property-daily.mjs';
+import { policyRules, eligibility, sha256, reviewedCopy, propertyHashtags } from '../social/lib/property-daily.mjs';
 import { frameProblem, aspectConsistent, parseSelection, disclosuresFor, buildReview, sameReview, liveCatalogue } from '../social/lib/property-review.mjs';
 import { main as draft } from '../social/draft-property-reviews.mjs';
 import { main as approve } from '../social/approve-property-review.mjs';
@@ -72,6 +72,7 @@ test('a built review passes eligibility under the waiver, renders default for of
     const frames = [1, 2, 3].map(index => ({ index, url: `https://bona-real-estate.com/listings/villa/${index}.jpg`, sha256: sha256('x' + index), width: 1920, height: 1280, alt: { ar: 'صورة', en: 'Photo' } }));
     const r = buildReview(w.villa, advertiser, frames, parseSelection('BONA-T1:1,2,3'), { reviewedAt: '2026-10-05T09:00:00Z', reviewer: 'test' });
     assert.deepEqual(eligibility(w.villa, r, advertiser, now, rules), []);
+    assert.equal(r.captionSha256, sha256(JSON.stringify(reviewedCopy(w.villa, advertiser, r))), 'the review binds caption and hashtags');
     assert.equal(r.licenceEvidence, null);
     assert.deepEqual(r.legalDisclosures, disclosuresFor(w.villa));
     assert.ok(r.photos.every(x => x.kind === 'photograph' && x.visuallyApproved === true));
@@ -94,6 +95,7 @@ test('drafting writes usable frames, a contact sheet and drafts.json for in-scop
     const t1 = d.listings['BONA-T1'];
     assert.deepEqual(t1.frames.map(f => f.index), [1, 2, 3, 5]);
     assert.deepEqual(t1.rejected, [{ index: 4, why: 'too_small', width: 800, height: 600 }]);
+    assert.deepEqual(t1.captionPreview.hashtags, propertyHashtags(w.villa), 'the preview shows the hashtags the review will bind');
     for (const f of t1.frames) { assert.equal(sha256(fs.readFileSync(path.join(out, f.file))), f.sha256); assert.equal(f.buffer, undefined); }
     const sheet = await sharp(path.join(out, t1.sheet)).metadata();
     assert.equal(sheet.format, 'jpeg');

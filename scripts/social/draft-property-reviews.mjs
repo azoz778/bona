@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import sharp from 'sharp';
-import { SITE, imageUrl, sha256, fingerprint, advertiserFingerprint, policyRules, eligibility, captionFor } from './lib/property-daily.mjs';
+import { SITE, imageUrl, sha256, fingerprint, advertiserFingerprint, policyRules, eligibility, reviewedCopy } from './lib/property-daily.mjs';
 import { frameProblem, contactSheet, disclosuresFor, liveCatalogue } from './lib/property-review.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -58,7 +58,7 @@ export async function main(argv = process.argv.slice(2), { fetchImpl = fetch, no
     const preview = { legalDisclosures: disclosuresFor(p), photos: [{ kind: p.category === 'off-plan' ? 'render' : 'photograph' }] };
     drafts.listings[p.id] = { title: p.title, category: p.category, type: p.type ?? null, city: p.location?.city?.en ?? null,
       factsSha256: fingerprint(p), page: `${SITE}/properties/${p.slug}/`, sheet, usable: frames.length,
-      frames: frames.map(({ buffer, ...f }) => f), rejected, captionPreview: captionFor(p, live.advertiser, preview) };
+      frames: frames.map(({ buffer, ...f }) => f), rejected, captionPreview: reviewedCopy(p, live.advertiser, preview) };
     log(`${p.id.padEnd(10)} ${String(frames.length).padStart(2)} usable / ${(p.images ?? []).length}  ${p.title?.en ?? ''}`);
   }
   fs.writeFileSync(path.join(out, 'drafts.json'), JSON.stringify(drafts, null, 2) + '\n');
