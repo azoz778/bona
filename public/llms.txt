@@ -2,7 +2,7 @@
 
 > Bona is a private luxury real estate boutique in Jeddah, representing a curated portfolio of villas, penthouses, waterfront residences and off-market homes across Saudi Arabia and select international destinations.
 
-Bona is a REGA-licensed real estate brokerage (FAL licence 1100313556) based in Al Rawdah District, Jeddah, Saudi Arabia, founded in 2026 by Abdulaziz Zidan (Founder & Principal). Bilingual site: English at https://bona-real-estate.com/ and Arabic at https://bona-real-estate.com/ar/. Enquiries are handled on WhatsApp +966 59 329 6933 (https://wa.me/966593296933). Prices shown are the seller's asking prices — Bona never publishes valuations or automated estimates.
+Bona is a REGA-licensed real estate brokerage (FAL licence 1100313556) based in Al Rawdah District, Jeddah, Saudi Arabia, founded in 2026 by Abdulaziz Zaidan (Founder & Principal). Bilingual site: English at https://bona-real-estate.com/ and Arabic at https://bona-real-estate.com/ar/. Enquiries are handled on WhatsApp +966 59 329 6933 (https://wa.me/966593296933). Prices shown are the seller's asking prices — Bona never publishes valuations or automated estimates.
 
 Markets: Jeddah, Riyadh, Dubai, Côte d'Azur, Costa del Sol, Oman.
 Services: buying, selling, letting, off-plan and international acquisitions, off-market introductions.
@@ -98,4 +98,4 @@ Instagram: https://www.instagram.com/bonarealestatesa/
 - [Arabic site](https://bona-real-estate.com/ar/)
 - [WhatsApp](https://wa.me/966593296933)
 
-Last generated: 2026-09-24
+Last generated: 2026-10-05
