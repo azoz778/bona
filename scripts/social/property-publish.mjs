@@ -9,7 +9,7 @@ import { run as publishInstagram, indexLedger, composeCaption, hasLicencePlaceho
 import { dataDir, resolveLedgerPath } from './lib/ledger.mjs';
 
 const read = file => JSON.parse(fs.readFileSync(file,'utf8'));
-const rows = file => fs.existsSync(file) ? fs.readFileSync(file,'utf8').split('\n').filter(Boolean).map(JSON.parse) : [];
+const rows = (file,missing=[]) => fs.existsSync(file) ? fs.readFileSync(file,'utf8').split('\n').filter(Boolean).map(JSON.parse) : missing;
 function record(file,row) {
   const fd=fs.openSync(file,'a',0o600);
   try { fs.writeSync(fd,JSON.stringify({...row,at:new Date().toISOString()})+'\n'); fs.fsyncSync(fd); }
@@ -39,16 +39,18 @@ const IG_GRACE_HOURS=2.5;
  * Proof that a failed attempt made nothing visible, as {evidence, message}, or null when the
  * outcome is unknown. Instagram: publish.mjs run() appends a `publishing` line for the entry
  * before media_publish, the only call that makes a post visible; with neither that line nor a
- * `published` one for the id in the ledger, media_publish was never sent. A ledger that cannot be
- * read proves nothing. Facebook: lib/facebook.mjs postPhotos() marks `notPublished` a failure among
- * the unpublished photo uploads, which all come before the one Page feed request.
+ * `published` one for the id in the ledger, media_publish was never sent. `readIgLedger` returns the
+ * ledger's rows, or null when the file does not exist: only an existing, readable and parseable
+ * ledger proves anything; a missing one is unknown. Facebook: lib/facebook.mjs postPhotos() marks
+ * `notPublished` a failure among the unpublished photo uploads, which all come before the one Page
+ * feed request.
  */
 export function provenNotSent(channel,id,error,readIgLedger) {
   if(channel==='facebook')return error?.notPublished===true?{evidence:'failed before the Page feed request; only unpublished photo uploads were made',
     message:'Facebook post not sent: a photo upload failed before the Page feed request'}:null;
   if(channel!=='instagram')return null;
   let mine;
-  try{mine=readIgLedger().filter(x=>x.id===id);}catch{return null;}
+  try{const all=readIgLedger();if(!Array.isArray(all))return null;mine=all.filter(x=>x.id===id);}catch{return null;}
   if(mine.some(x=>x.status==='publishing'||x.status==='published'))return null;
   const last=mine.at(-1)?.status;
   return {evidence:`no publishing line for ${id} in ig/published.jsonl; media_publish was never sent`,
@@ -181,7 +183,7 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
       return {status:'published',receipt};
     } catch(e) {
       // Only a failure that provably made nothing visible settles itself; anything else stays uncertain.
-      const notSent=provenNotSent(channel,entry.id,e,()=>rows(igLedger));
+      const notSent=provenNotSent(channel,entry.id,e,()=>rows(igLedger,null));
       if(notSent){
         record(journal,{channel,date,id:entry.id,listingId:p.id,status:'confirmed-not-published',evidence:notSent.evidence});
         throw new Error(`${notSent.message}; recorded confirmed-not-published, the next run retries`);
