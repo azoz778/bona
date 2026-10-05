@@ -42,9 +42,11 @@ and `bona-daily@facebook` timers run it; there is no other timer.
    still-valid review untouched; an expired one is renewed.
 4. **Commit** the register through a PR. The publisher reads it from `origin/main`.
 
-Disclosures written with every review: prices are asking prices and may change; details,
-condition and services are confirmed at viewing; for off-plan, delivery dates and
-specifications are per the developer. Nothing else is claimed.
+Disclosures written with every review: when the caption shows a price, that prices are asking
+prices and may change; for ready stock, that details, condition and services are confirmed at
+viewing; for off-plan instead, that delivery dates and specifications are per the developer.
+Off-plan captions ask about availability and details and never offer a viewing. Nothing else
+is claimed.
 
 ## Publication safety
 

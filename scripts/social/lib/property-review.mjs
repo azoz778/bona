@@ -1,24 +1,29 @@
 // Helpers for drafting and approving property photo/caption reviews (docs/daily-property-publishing.md).
 // Nothing here publishes; the approve script is the only writer of marketing/daily/property-reviews.json.
 import sharp from 'sharp';
-import { SITE, sha256, fingerprint, advertiserFingerprint, reviewedCopy, aspectConsistent } from './property-daily.mjs';
+import { SITE, sha256, fingerprint, advertiserFingerprint, reviewedCopy, aspectConsistent, showsPrice } from './property-daily.mjs';
 
 /** Instagram crops a carousel to its first frame's aspect; eligibility() and buildReview() share the rule. */
 export { aspectConsistent };
 
 /** The publisher's own photo rules (eligibility() checks the same numbers). */
 export const FRAME_RULES = Object.freeze({ minWidth: 1080, minHeight: 720, minAspect: 0.8, maxAspect: 1.91, maxBytes: 8_000_000 });
-export const STANDARD_DISCLOSURES = Object.freeze({
-  ar: 'الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. تُؤكَّد التفاصيل والحالة والخدمات عند المعاينة.',
-  en: 'Prices shown are asking prices and may change. Details, condition and services are confirmed at viewing.',
+export const PRICE_DISCLOSURE = Object.freeze({
+  ar: 'الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير.',
+  en: 'Prices shown are asking prices and may change.',
+});
+export const VIEWING_DISCLOSURE = Object.freeze({
+  ar: 'تُؤكَّد التفاصيل والحالة والخدمات عند المعاينة.',
+  en: 'Details, condition and services are confirmed at viewing.',
 });
 export const OFF_PLAN_DISCLOSURE = Object.freeze({
   ar: 'مواعيد التسليم والمواصفات حسب المطوّر.',
   en: 'Delivery dates and specifications are per the developer.',
 });
+/** The price sentence only when the caption prints a price; ready stock is confirmed at viewing, off-plan instead per the developer. */
 export function disclosuresFor(p) {
-  if (p?.category !== 'off-plan') return { ...STANDARD_DISCLOSURES };
-  return { ar: `${STANDARD_DISCLOSURES.ar} ${OFF_PLAN_DISCLOSURE.ar}`, en: `${STANDARD_DISCLOSURES.en} ${OFF_PLAN_DISCLOSURE.en}` };
+  const parts = [...(showsPrice(p) ? [PRICE_DISCLOSURE] : []), p?.category === 'off-plan' ? OFF_PLAN_DISCLOSURE : VIEWING_DISCLOSURE];
+  return { ar: parts.map(x => x.ar).join(' '), en: parts.map(x => x.en).join(' ') };
 }
 /** Why a downloaded frame cannot be used, or null. */
 export function frameProblem({ contentType, bytes, width, height }) {

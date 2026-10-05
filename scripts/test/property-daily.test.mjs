@@ -177,6 +177,29 @@ test('caption: place and deal line, off-plan wording and the from-price exactly 
   assert.match(ready.ar.split('\n')[1], /· للبيع$/);
   assert.match(ready.en.split('\n')[1], /· For sale$/);
 });
+test('caption: bedroom counts read correctly in Arabic and English', () => {
+  const { listing, advertiser: a } = fixture();
+  const beds = n => { const c = propertyCaption({ ...listing, specs: { beds: n } }, a, {}); return [c.ar.split('\n\n')[1].split(' · ')[0], c.en.split('\n\n')[1].split(' · ')[0]]; };
+  assert.deepEqual(beds(1), ['غرفة نوم واحدة', '1 bedroom']);
+  assert.deepEqual(beds(2), ['غرفتا نوم', '2 bedrooms']);
+  assert.deepEqual(beds(3), ['3 غرف نوم', '3 bedrooms']);
+  assert.deepEqual(beds(10), ['10 غرف نوم', '10 bedrooms']);
+  assert.deepEqual(beds(11), ['11 غرفة نوم', '11 bedrooms']);
+  assert.deepEqual(beds(24), ['24 غرفة نوم', '24 bedrooms']);
+});
+test('caption: off-plan asks about the project without promising a viewing; both languages give the page after the call to action', () => {
+  const { listing: op, advertiser: a } = offPlanFixture();
+  const after = (text, line) => { const xs = text.split('\n'), i = xs.indexOf(line); assert.ok(i >= 0, `has the line ${line}`); return xs[i + 1]; };
+  const c = propertyCaption(op, a, {});
+  assert.equal(after(c.ar, 'تبحث عن وحدة في هذا المشروع؟ راسل بونا بالرقم BONA-OP لمعرفة التوفر والتفاصيل.'), 'https://bona-real-estate.com/properties/tower/');
+  assert.equal(after(c.en, 'Interested? Message Bona with BONA-OP for availability and details.'), 'https://bona-real-estate.com/properties/tower/');
+  assert.doesNotMatch(c.ar, /معاينة/);
+  assert.doesNotMatch(c.en, /viewing/i);
+  const { listing: ready } = fixture();
+  const r = propertyCaption(ready, a, {});
+  assert.equal(after(r.ar, 'تبحث عن منزل بهذه المواصفات؟ راسل بونا بالرقم BONA-TEST لمعرفة التوفر وترتيب معاينة.'), 'https://bona-real-estate.com/properties/fixture/');
+  assert.equal(after(r.en, 'Interested? Message Bona with BONA-TEST for current availability and a viewing.'), 'https://bona-real-estate.com/properties/fixture/');
+});
 test('renderShare and captionFor follow the reviewed photo kinds', () => {
   const { listing: p, advertiser: a, review: r } = fixture();
   assert.equal(renderShare(r), 'none');
