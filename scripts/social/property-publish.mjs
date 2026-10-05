@@ -40,9 +40,12 @@ const IG_GRACE_HOURS=2.5;
  * outcome is unknown. Instagram: publish.mjs run() appends a `publishing` line for the entry
  * before media_publish, the only call that makes a post visible; with neither that line nor a
  * `published` one for the id in the ledger, media_publish was never sent. A ledger that cannot be
- * read proves nothing.
+ * read proves nothing. Facebook: lib/facebook.mjs postPhotos() marks `notPublished` a failure among
+ * the unpublished photo uploads, which all come before the one Page feed request.
  */
 export function provenNotSent(channel,id,error,readIgLedger) {
+  if(channel==='facebook')return error?.notPublished===true?{evidence:'failed before the Page feed request; only unpublished photo uploads were made',
+    message:'Facebook post not sent: a photo upload failed before the Page feed request'}:null;
   if(channel!=='instagram')return null;
   let mine;
   try{mine=readIgLedger().filter(x=>x.id===id);}catch{return null;}
@@ -147,6 +150,8 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
     if(!updated || fingerprint(updated)!==fingerprint(p) || eligibility(updated,review,current.advertiser,now,rules).length)throw new Error('Property changed during preflight');
     if(dry){console.log(`Ready after read-only preflight: ${entry.id}, ${p.id}; no post`);return {status:'ready',entry};}
     if(legacyTimersDisabled()!==true)throw new Error('Legacy publisher must remain disabled');
+    // Before the intent record: failing to get the Page token sends nothing and leaves nothing to reconcile.
+    const page=channel==='facebook'?await pageToken({fetch:fetchImpl,token:env.META_ACCESS_TOKEN,pageId:ACCOUNT.facebook}):null;
     record(journal,{channel,date,id:entry.id,listingId:p.id,status:'intent'});
     const igLedger=path.join(data,'ig/published.jsonl');
     try {
@@ -158,7 +163,6 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
         receipt=rows(igLedger).find(x=>x.id===entry.id&&x.status==='published');
         if(result.code!==0||!receipt)throw new Error('Instagram did not confirm publication');
       } else {
-        const page=await pageToken({fetch:fetchImpl,token:env.META_ACCESS_TOKEN,pageId:ACCOUNT.facebook});
         receipt=await publishEntry(entry,{fetch:fetchImpl,pageToken:page.token,pageId:ACCOUNT.facebook,root});
         appendLedger(path.join(data,'fb/published.jsonl'),{id:entry.id,date,listingId:p.id,status:'published',...receipt,at:new Date().toISOString()});
         record(path.join(dir,'facebook.jsonl'),{id:entry.id,date,status:'published',...receipt});
