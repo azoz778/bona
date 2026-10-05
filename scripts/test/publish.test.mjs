@@ -397,6 +397,17 @@ test('run: publishes what is due in slot order, 60 s apart, records the ledger, 
   assert.ok(h2.logs.some((l) => l.startsWith('skipped:ad-licence')), 'but it is still logged');
 });
 
+test('run: the default ledger appender adds every line to the end of the ledger file and creates it owner-only', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-publish-append-'));
+  try {
+    const ledger = path.join(dir, 'ig', 'published.jsonl');
+    const r = await run({ dryRun: false, ledger }, { ...harness({ entries: [raw({ n: 'a' })] }).deps, appendLedger: undefined });
+    assert.equal(r.code, 0);
+    assert.deepEqual(readLedgerFile(ledger).map((x) => `${x.id} ${x.status}`), ['ig-2026-09-10-post-a publishing', 'ig-2026-09-10-post-a published'], 'the publishing line, then the published line after it');
+    assert.equal(fs.statSync(ledger).mode & 0o777, 0o600);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('run: a failure after the publishing line is needs-reconcile — no error line, never re-posted; the next run asks Instagram', async () => {
   const { GraphError } = await import('../social/lib/graph.mjs');
   const entries = [raw({ n: 'a' }), raw({ n: 'b', time: '20:31' })];
