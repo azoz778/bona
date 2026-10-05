@@ -619,3 +619,22 @@ test('the slot is checked again on the real clock just before intent: a prefligh
     } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
   }
 });
+test('Instagram: the not-sent proof reads the ledger file the publisher writes, even when BONA_DATA starts with ~', async () => {
+  const f = sendFixture('bona-property-ig-tilde-');
+  const home = process.env.HOME, cwd = process.cwd();
+  try {
+    process.env.HOME = f.root; process.chdir(f.root); // '~' expands to the temp root; a literal '~' directory lands in it too
+    let n = 0;
+    const s = sendStub(f, (u, init) => {
+      if (init.method === 'HEAD') return new Response(null, { headers: { 'content-type': 'image/jpeg' } });
+      if (u.hostname !== 'graph.facebook.com') return undefined;
+      if (u.pathname.endsWith('/media_publish')) throw new TypeError('fetch failed');
+      if (u.pathname.endsWith('/media')) return Response.json({ id: `container-${++n}` });
+      if (/\/container-\d+$/.test(u.pathname)) return Response.json({ status_code: 'FINISHED' });
+      return undefined;
+    });
+    await assert.rejects(send('instagram', f, s.fetchImpl, { env: { ...f.env, BONA_DATA: '~/data' } }), e => e.message === 'Property publication unconfirmed; automatic retry stopped');
+    assert.deepEqual(jsonl(path.join(f.root, 'data/ig/published.jsonl')).map(x => x.status), ['publishing'], 'the publisher expanded ~');
+    assert.equal(s.writes().filter(c => c.endsWith('/media_publish')).length, 1);
+  } finally { process.chdir(cwd); process.env.HOME = home; fs.rmSync(f.root, { recursive: true, force: true }); }
+});

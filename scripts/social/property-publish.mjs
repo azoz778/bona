@@ -7,6 +7,7 @@ import { ACCOUNT, SITE, sha256, fingerprint, eligibility, chooseProperty, daySta
 import { withLock, whoami, pageToken, publishEntry, appendLedger, refusal } from './lib/facebook.mjs';
 import { createGraph, checkCaption } from './lib/graph.mjs';
 import { run as publishInstagram, indexLedger, composeCaption, hasLicencePlaceholder, decide, normaliseEntry } from './publish.mjs';
+import { resolveLedgerPath } from './lib/ledger.mjs';
 
 const read = file => JSON.parse(fs.readFileSync(file,'utf8'));
 const rows = file => fs.existsSync(file) ? fs.readFileSync(file,'utf8').split('\n').filter(Boolean).map(JSON.parse) : [];
@@ -123,12 +124,15 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
   const {date,time}=ksaNow(now);
   if(time<'20:30'||time>='23:00'){console.log('Outside daily slot; no catch-up or off-schedule post');return {status:'not-due'};}
   const data=env.BONA_DATA||path.join(os.homedir(),'bona-data'),dir=path.join(data,'daily'),journal=path.join(dir,'property.jsonl');
+  // The Instagram ledger exactly as publish.mjs run() resolves it (~ expanded, absolute), so every
+  // read here, the not-sent proof included, sees the file run() appends to.
+  const igLedger=resolveLedgerPath(path.join(data,'ig/published.jsonl'));
   const operation=async()=>{
     const history=rows(journal),state=dayState(history,channel,date);
-    const legacy=legacyDayState(channel==='instagram'?rows(path.join(data,'ig/published.jsonl')):[...rows(path.join(dir,'facebook.jsonl')),...rows(path.join(data,'fb/published.jsonl'))],date);
+    const legacy=legacyDayState(channel==='instagram'?rows(igLedger):[...rows(path.join(dir,'facebook.jsonl')),...rows(path.join(data,'fb/published.jsonl'))],date);
     if(state==='published'||legacy==='published'){console.log('Daily slot already published');return {status:'already-published'};}
     if(state==='uncertain'||legacy==='uncertain')throw new Error('Uncertain daily publication; reconcile before retry');
-    if(channel==='instagram')assertNoPendingInstagram(rows(path.join(data,'ig/published.jsonl')));
+    if(channel==='instagram')assertNoPendingInstagram(rows(igLedger));
     if(unsettled(history,channel))throw new Error('Earlier property publication remains uncertain; reconcile it before retrying');
     const live=await catalogue(fetchImpl,now),reviews=read(path.join(root,'marketing/daily/property-reviews.json'));
     const selected=chooseProperty(live.listings,reviews,live.advertiser,history,channel,now,policy.repeatDays,rules);
@@ -145,7 +149,7 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
     const assets=await photos(review,assetDir,dry,fetchImpl);
     const entry=entryFor(p,review,live.advertiser,channel,date,assets);
     if(checkCaption(composeCaption(entry)).problems.length)throw new Error('Reviewed caption does not fit platform limits');
-    const refused=publisherRefusal(entry,channel,{igLedger:channel==='instagram'?rows(path.join(data,'ig/published.jsonl')):[],now});
+    const refused=publisherRefusal(entry,channel,{igLedger:channel==='instagram'?rows(igLedger):[],now});
     if(refused)throw new Error(`The ${channel} publisher would refuse this post (${refused}); stopped before any record`);
     // Re-read the live source immediately before intent/upload: changed facts, withdrawn
     // stock, expired licence and changed advertiser all stop this run.
@@ -159,7 +163,6 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
     const sendAt=ksaNow(clock());
     if(sendAt.date!==date||sendAt.time<'20:30'||sendAt.time>='23:00'){console.log('Outside daily slot at send time; no post');return {status:'not-due'};}
     record(journal,{channel,date,id:entry.id,listingId:p.id,status:'intent'});
-    const igLedger=path.join(data,'ig/published.jsonl');
     try {
       let receipt;
       if(channel==='instagram') {
