@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { publicListing,sha256,fingerprint,advertiserFingerprint,eligibility,propertyCaption,chooseProperty,dayState,realDate } from '../social/lib/property-daily.mjs';
+import { publicListing,sha256,fingerprint,advertiserFingerprint,eligibility,propertyCaption,chooseProperty,dayState,realDate,policyRules,STRICT_RULES } from '../social/lib/property-daily.mjs';
 import { propertyDaily,legacyDayState,assertNoPendingInstagram } from '../social/property-publish.mjs';
 const now=new Date('2026-10-02T17:30:00Z');
 function fixture() {
@@ -101,4 +101,29 @@ test('approved dry preflight reads account and exact photo bytes, then rechecks 
     catalogueReads=0;withdraw=false;photoChanged=true;
     await assert.rejects(propertyDaily('instagram',{dry:true,now,root,env,fetchImpl}),/changed since visual review/);
   } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+test('policy rules: no new fields means the strict 2 October behaviour', () => {
+  assert.deepEqual({ ...policyRules({}, now) }, { ...STRICT_RULES });
+  assert.equal(policyRules({}, now).licenceRequired, true);
+});
+test('policy rules: an owner waiver with a past or current date lifts the licence requirement', () => {
+  const r = policyRules({ adLicence: { requirement: 'waived', by: 'owner', on: '2026-10-02' }, countries: ['SA'], categories: ['buy','rent','off-plan'], renders: 'off-plan-only', reviewValidDays: 90 }, now);
+  assert.equal(r.licenceRequired, false);
+  assert.deepEqual([...r.categories], ['buy','rent','off-plan']);
+  assert.equal(r.renders, 'off-plan-only');
+  assert.equal(r.reviewValidDays, 90);
+});
+test('policy rules: a malformed waiver or scope stops the run', () => {
+  const bad = [
+    { adLicence: { requirement: 'waived', on: '2026-10-02' } },
+    { adLicence: { requirement: 'waived', by: ' ', on: '2026-10-02' } },
+    { adLicence: { requirement: 'waived', by: 'owner', on: '2026-10-03' } },
+    { adLicence: { requirement: 'waived', by: 'owner', on: '2026-02-31' } },
+    { adLicence: { requirement: 'sometimes' } },
+    { countries: ['sa'] }, { countries: [] },
+    { categories: ['buy','auction'] }, { categories: [] },
+    { renders: 'all' },
+    { reviewValidDays: 0 }, { reviewValidDays: 181 }, { reviewValidDays: 1.5 },
+  ];
+  for (const policy of bad) assert.throws(() => policyRules(policy, now), /property policy|waiver/, JSON.stringify(policy));
 });

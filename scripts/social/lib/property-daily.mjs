@@ -27,6 +27,25 @@ function fresh(ts, now, maxDays) {
   const n = Date.parse(ts);
   return Number.isFinite(n) && n <= +now && +now - n <= maxDays*86400000;
 }
+const CATEGORIES = ['buy', 'rent', 'off-plan'];
+/** What a policy without the 2026-10-05 fields means: licensed Saudi sale/rent stock, real photographs, 30-day reviews. */
+export const STRICT_RULES = Object.freeze({ licenceRequired: true, countries: Object.freeze(['SA']), categories: Object.freeze(['buy', 'rent']), renders: 'none', reviewValidDays: 30 });
+/** property-policy.json → eligibility rules. Anything unreadable throws: no run proceeds on a policy it cannot read. */
+export function policyRules(policy = {}, now = new Date()) {
+  const licence = policy.adLicence ?? { requirement: 'required' };
+  if (!['required', 'waived'].includes(licence.requirement)) throw new Error('Invalid ad-licence requirement in the property policy');
+  if (licence.requirement === 'waived' && (typeof licence.by !== 'string' || !licence.by.trim() || !realDate(licence.on) || licence.on > ksaNow(now).date))
+    throw new Error('An ad-licence waiver must name who waived it and a date that is not in the future');
+  const countries = policy.countries ?? STRICT_RULES.countries;
+  if (!Array.isArray(countries) || !countries.length || countries.some(c => !/^[A-Z]{2}$/.test(c))) throw new Error('Invalid countries in the property policy');
+  const categories = policy.categories ?? STRICT_RULES.categories;
+  if (!Array.isArray(categories) || !categories.length || categories.some(c => !CATEGORIES.includes(c))) throw new Error('Invalid categories in the property policy');
+  const renders = policy.renders ?? STRICT_RULES.renders;
+  if (!['none', 'off-plan-only'].includes(renders)) throw new Error('Invalid renders rule in the property policy');
+  const reviewValidDays = policy.reviewValidDays ?? STRICT_RULES.reviewValidDays;
+  if (!Number.isInteger(reviewValidDays) || reviewValidDays < 1 || reviewValidDays > 180) throw new Error('Invalid reviewValidDays in the property policy');
+  return Object.freeze({ licenceRequired: licence.requirement === 'required', countries: Object.freeze([...countries]), categories: Object.freeze([...categories]), renders, reviewValidDays });
+}
 export function eligibility(p, review, advertiser, now = new Date()) {
   const reasons = [];
   if (p?.status !== 'available') reasons.push('not_available');
