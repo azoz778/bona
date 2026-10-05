@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { ksaNow } from './daily-pack.mjs';
+import { CAPTION_MAX_CHARS, CAPTION_MAX_HASHTAGS, countHashtags } from './graph.mjs';
 
 export const SITE = 'https://bona-real-estate.com';
 export const ACCOUNT = Object.freeze({ instagram: '17841427688957180', facebook: '1245646955305748' });
@@ -87,7 +88,11 @@ export function eligibility(p, review, advertiser, now = new Date(), rules = STR
         !/^[a-f0-9]{64}$/.test(photo.sha256 ?? '') || photo.width < 1080 || photo.height < 720 ||
         photo.width/photo.height < 0.8 || photo.width/photo.height > 1.91 || !photo.alt?.ar || !photo.alt?.en) reasons.push('photo_quality_or_provenance_unverified');
   }
-  if (review.captionSha256 !== sha256(JSON.stringify(reviewedCopy(p,advertiser,review)))) reasons.push('caption_changed_since_review');
+  const copy = reviewedCopy(p,advertiser,review);
+  if (review.captionSha256 !== sha256(JSON.stringify(copy))) reasons.push('caption_changed_since_review');
+  // The text publish.mjs composeCaption() sends to Instagram for a two-language caption, held to graph.mjs's limits.
+  const text = [copy.ar, copy.en].join('\n\n—\n\n') + '\n\n' + copy.hashtags.join(' ');
+  if (text.length > CAPTION_MAX_CHARS || countHashtags(text) > CAPTION_MAX_HASHTAGS) reasons.push('caption_exceeds_platform_limits');
   return [...new Set(reasons)];
 }
 /** 'none' | 'some' | 'all' — how many reviewed photographs are developer renders. */
