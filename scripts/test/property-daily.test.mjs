@@ -239,6 +239,18 @@ test('a review binds the generated hashtags as well as the caption', () => {
   const captionOnly = { ...r, captionSha256: sha256(JSON.stringify(captionFor(p, a, r))) };
   assert.ok(eligibility(p, captionOnly, a, now, WAIVED).includes('caption_changed_since_review'), 'hashtags that differ from the reviewed ones invalidate the review');
 });
+test('a listing is eligible only when its reviewed copy fits Instagram: 2,200 characters and 30 hashtags', () => {
+  const { listing, advertiser: a } = fixture(); const p = { ...listing, licence: null };
+  assert.deepEqual(eligibility(p, waivedReview(p, a), a, now, WAIVED), []);
+  const { listing: op } = offPlanFixture();
+  assert.deepEqual(eligibility(op, waivedReview(op, a, 'render'), a, now, WAIVED), []);
+  const long = { ...p, title: { ...p.title, en: 'x'.repeat(2500) } };
+  assert.deepEqual(eligibility(long, waivedReview(long, a), a, now, WAIVED), ['caption_exceeds_platform_limits']);
+  assert.equal(propertyHashtags(p).length, 5);
+  const tagged = n => ({ ...p, title: { ...p.title, en: Array.from({ length: n }, (_, i) => `#tag${i}`).join(' ') } });
+  assert.deepEqual(eligibility(tagged(25), waivedReview(tagged(25), a), a, now, WAIVED), [], '25 in the title + 5 generated = 30');
+  assert.deepEqual(eligibility(tagged(26), waivedReview(tagged(26), a), a, now, WAIVED), ['caption_exceeds_platform_limits'], '31 hashtags');
+});
 test('rotation applies the policy rules it is given', () => {
   const { listing, advertiser: a } = fixture(); const p = { ...listing, licence: null };
   const reviews = { [p.id]: waivedReview(p, a) };
