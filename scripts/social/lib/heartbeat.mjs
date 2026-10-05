@@ -1,6 +1,7 @@
 // Daily-run routing and the Uptime Kuma heartbeat. The push URL lives outside the repo:
 // ~/bona-data/daily/heartbeat-<channel>.url (mode 600). A missing file or a failed push is
-// logged and never changes the run's outcome.
+// logged and never changes the run's outcome. The URL is a secret (its path is the push token):
+// it is never logged, and a failure is logged only by category, never by its error message.
 import fs from 'node:fs';
 import path from 'node:path';
 import { ksaNow } from './daily-pack.mjs';
@@ -27,16 +28,25 @@ export async function pushHeartbeat(channel, beat, { dataDir, fetchImpl = fetch,
   let base;
   try { base = fs.readFileSync(file, 'utf8').trim(); }
   catch { log(`heartbeat: no ${path.basename(file)}; not pushed`); return { sent: false, reason: 'no-url' }; }
-  try {
-    const u = new URL(base);
-    if (u.protocol !== 'https:') throw new Error('heartbeat URL must be https');
-    u.search = new URLSearchParams({ status: beat.status, msg: `${channel}: ${beat.msg}` }).toString();
-    const res = await fetchImpl(u.href, { redirect: 'error', signal: AbortSignal.timeout(10_000) });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    log(`heartbeat: ${channel} ${beat.status}`);
-    return { sent: true };
-  } catch (e) {
-    log(`heartbeat: ${channel} push failed (${String(e.message).slice(0, 120)})`);
+  let u = null;
+  try { u = new URL(base); } catch { /* reported below without echoing the file */ }
+  if (!u || u.protocol !== 'https:' || u.username || u.password) {
+    log(`heartbeat: ${channel} push URL invalid`);
     return { sent: false, reason: 'error' };
   }
+  u.search = new URLSearchParams({ status: beat.status, msg: `${channel}: ${beat.msg}` }).toString();
+  let status;
+  try {
+    const res = await fetchImpl(u.href, { redirect: 'error', signal: AbortSignal.timeout(10_000) });
+    status = res.ok ? null : Number(res.status) || 0;
+  } catch {
+    log(`heartbeat: ${channel} push failed (network)`);
+    return { sent: false, reason: 'error' };
+  }
+  if (status !== null) {
+    log(`heartbeat: ${channel} push failed (http ${status})`);
+    return { sent: false, reason: 'error' };
+  }
+  log(`heartbeat: ${channel} ${beat.status}`);
+  return { sent: true };
 }
