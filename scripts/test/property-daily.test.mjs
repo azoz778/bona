@@ -251,6 +251,17 @@ test('a listing is eligible only when its reviewed copy fits Instagram: 2,200 ch
   assert.deepEqual(eligibility(tagged(25), waivedReview(tagged(25), a), a, now, WAIVED), [], '25 in the title + 5 generated = 30');
   assert.deepEqual(eligibility(tagged(26), waivedReview(tagged(26), a), a, now, WAIVED), ['caption_exceeds_platform_limits'], '31 hashtags');
 });
+test('reviewed photo sizes must be finite positive numbers, and the carousel must keep one aspect ratio', () => {
+  const { listing, advertiser: a } = fixture(); const p = { ...listing, licence: null };
+  const r = waivedReview(p, a);
+  const withPhoto = (i, dims) => ({ ...r, photos: r.photos.map((x, j) => j === i ? { ...x, ...dims } : x) });
+  for (const dims of [{ width: undefined }, { height: undefined }, { width: '1920' }, { height: '1280' }, { width: NaN }, { width: Infinity, height: Infinity }, { height: null }, { width: 0, height: 0 }])
+    assert.ok(eligibility(p, withPhoto(1, dims), a, now, WAIVED).includes('photo_quality_or_provenance_unverified'), JSON.stringify(dims));
+  assert.deepEqual(eligibility(p, withPhoto(1, { width: 1080, height: 1350 }), a, now, WAIVED), ['carousel_aspect_mismatch'], 'portrait frame in a landscape carousel');
+  assert.deepEqual(eligibility(p, withPhoto(1, { width: 1800, height: 1200 }), a, now, WAIVED), []);
+  assert.deepEqual(eligibility(p, withPhoto(2, { width: 1920, height: 1200 }), a, now, WAIVED), [], '16:10 is within 15% of 3:2');
+  assert.deepEqual(eligibility(p, withPhoto(2, { width: 1920, height: 1080 }), a, now, WAIVED), ['carousel_aspect_mismatch'], '16:9 is not');
+});
 test('rotation applies the policy rules it is given', () => {
   const { listing, advertiser: a } = fixture(); const p = { ...listing, licence: null };
   const reviews = { [p.id]: waivedReview(p, a) };

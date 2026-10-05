@@ -24,6 +24,13 @@ export function realDate(s) {
   const d = new Date(s+'T00:00:00Z');
   return Number.isFinite(+d) && d.toISOString().slice(0,10) === s;
 }
+/** Instagram crops every carousel frame to the first frame's aspect ratio; keep that crop small. */
+export function aspectConsistent(photos, tolerance = 0.15) {
+  if (!photos.length) return false;
+  const first = photos[0].width / photos[0].height;
+  return photos.every(p => Math.abs(p.width / p.height - first) / first <= tolerance);
+}
+const positive = n => Number.isFinite(n) && n > 0;
 function fresh(ts, now, maxDays) {
   const n = Date.parse(ts);
   return Number.isFinite(n) && n <= +now && +now - n <= maxDays*86400000;
@@ -85,9 +92,10 @@ export function eligibility(p, review, advertiser, now = new Date(), rules = STR
     let url; try { url = imageUrl(photo.url); } catch { reasons.push('unapproved_photo_source'); continue; }
     if (photo.kind === 'render' && !rendersAllowed) reasons.push('render_not_allowed');
     if (!allowed.has(url) || !['photograph','render'].includes(photo.kind) || photo.visuallyApproved !== true ||
-        !/^[a-f0-9]{64}$/.test(photo.sha256 ?? '') || photo.width < 1080 || photo.height < 720 ||
+        !/^[a-f0-9]{64}$/.test(photo.sha256 ?? '') || !positive(photo.width) || !positive(photo.height) || photo.width < 1080 || photo.height < 720 ||
         photo.width/photo.height < 0.8 || photo.width/photo.height > 1.91 || !photo.alt?.ar || !photo.alt?.en) reasons.push('photo_quality_or_provenance_unverified');
   }
+  if (photos.length && !aspectConsistent(photos)) reasons.push('carousel_aspect_mismatch');
   const copy = reviewedCopy(p,advertiser,review);
   if (review.captionSha256 !== sha256(JSON.stringify(copy))) reasons.push('caption_changed_since_review');
   // The text publish.mjs composeCaption() sends to Instagram for a two-language caption, held to graph.mjs's limits.
