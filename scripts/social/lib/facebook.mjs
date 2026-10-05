@@ -110,11 +110,19 @@ export async function uploadPhoto({ fetch, pageToken: tok, pageId, file, message
 /** A single-photo post. */
 export const postPhoto = (o) => uploadPhoto({ ...o, published: true });
 
-/** A multi-photo post: 2–10 unpublished uploads attached to one feed post that carries the caption. */
+/**
+ * A multi-photo post: 2–10 unpublished uploads attached to one feed post that carries the caption.
+ * Only the feed request can make anything visible, so an upload failure is rethrown with
+ * `notPublished = true` (same message, original as `cause`); a feed failure carries no marker.
+ */
 export async function postPhotos({ fetch, pageToken: tok, pageId, files, message }) {
   if (!Array.isArray(files) || files.length < 2 || files.length > 10) throw new Error(`a multi-photo post takes 2–10 photos, got ${files?.length ?? 0}`);
   const ids = [];
-  for (const f of files) ids.push((await uploadPhoto({ fetch, pageToken: tok, pageId, file: f, published: false })).photoId);
+  try {
+    for (const f of files) ids.push((await uploadPhoto({ fetch, pageToken: tok, pageId, file: f, published: false })).photoId);
+  } catch (e) {
+    throw Object.assign(new Error(e?.message ?? String(e), { cause: e }), { notPublished: true });
+  }
   const params = { message };
   ids.forEach((id, i) => { params[`attached_media[${i}]`] = JSON.stringify({ media_fbid: id }); });
   const r = await graph({ fetch, token: tok, method: 'POST', pathname: `${pageId}/feed`, params });

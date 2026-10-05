@@ -52,10 +52,11 @@
    SIGTERM/SIGINT set a flag read between entries only: the current publish always completes.
 
    Images: relative paths are prefixed with the site origin; a PNG (or anything not .jpg/.jpeg)
-   is swapped for its .jpg/.jpeg twin if one exists; every URL is HEAD-checked (200 + image/jpeg)
-   before a container is created. No twin served yet -> skipped:no-jpeg (re-checked every run
-   while the slot is in its grace window: a deploy fixes it); no image at all, a local path or a
-   non-https URL -> skipped:no-image (terminal: no deploy fixes that).
+   is swapped for its .jpg/.jpeg twin if one exists; every URL is HEAD-checked (200 + image/jpeg,
+   a request with no answer asked once more after 0.5 s) before a container is created. No twin
+   served yet -> skipped:no-jpeg (re-checked every run while the slot is in its grace window: a
+   deploy fixes it); no image at all, a local path or a non-https URL -> skipped:no-image
+   (terminal: no deploy fixes that).
 
    Limits: at most 3 publishes per run, >= 60 s apart, and the run stops when the account's
    rolling 24 h quota (GET /{ig-id}/content_publishing_limit) is at 20 of 25.
@@ -244,13 +245,21 @@ export function jpegCandidates(abs) {
   const stem = u.pathname.replace(/\.[a-z0-9]+$/i, '');
   return ['.jpg', '.jpeg'].map((ext) => { const c = new URL(u); c.pathname = `${stem}${ext}`; return c.toString(); });
 }
-/** HEAD (GET with a 1-byte range if HEAD is refused). ok = 200/206 and an image/jpeg content-type. */
-export async function verifyJpeg(url, fetchImpl = globalThis.fetch, { timeoutMs = 15_000 } = {}) {
+/**
+ * HEAD (GET with a 1-byte range if HEAD is refused). ok = 200/206 and an image/jpeg content-type.
+ * A request that gets no answer at all is sent once more after `retryDelayMs`: a HEAD to the media
+ * host fails now and then ("fetch failed") and answers on the next try. An answer is never retried.
+ */
+export async function verifyJpeg(url, fetchImpl = globalThis.fetch, { timeoutMs = 15_000, retryDelayMs = 500, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  const request = async (init) => {
+    const send = () => fetchImpl(url, { ...init, redirect: 'follow', signal: AbortSignal.timeout(timeoutMs) });
+    try { return await send(); } catch { await sleep(retryDelayMs); return send(); }
+  };
   let res;
   try {
-    res = await fetchImpl(url, { method: 'HEAD', redirect: 'follow', signal: AbortSignal.timeout(timeoutMs) });
+    res = await request({ method: 'HEAD' });
     if (res.status === 405 || res.status === 501) {
-      res = await fetchImpl(url, { method: 'GET', headers: { Range: 'bytes=0-0' }, redirect: 'follow', signal: AbortSignal.timeout(timeoutMs) });
+      res = await request({ method: 'GET', headers: { Range: 'bytes=0-0' } });
       try { await res.body?.cancel?.(); } catch { /* not interested in the bytes */ }
     }
   } catch (e) {
@@ -270,7 +279,7 @@ export async function verifyJpeg(url, fetchImpl = globalThis.fetch, { timeoutMs 
  *                                                        worth asking again next run
  *  | { ok:false, reason:'network',  detail, tried }      no answer at all
  */
-export async function resolveImage(u, { base = DEFAULTS.siteBase, fetch: fetchImpl = globalThis.fetch, onCheck = () => {} } = {}) {
+export async function resolveImage(u, { base = DEFAULTS.siteBase, fetch: fetchImpl = globalThis.fetch, onCheck = () => {}, sleep } = {}) {
   const abs = absoluteImageUrl(u, base);
   if (!abs) return { ok: false, reason: 'no-image', detail: `${u} is not an https URL or a site path`, tried: [] };
   const stat = checkImageUrl(abs);
@@ -278,7 +287,7 @@ export async function resolveImage(u, { base = DEFAULTS.siteBase, fetch: fetchIm
   const tried = [];
   let network = null;
   for (const cand of jpegCandidates(abs)) {
-    const v = await verifyJpeg(cand, fetchImpl);
+    const v = await verifyJpeg(cand, fetchImpl, { sleep });
     onCheck(cand, v);
     tried.push(`${cand} → ${v.detail}`);
     if (v.ok) return { ok: true, url: cand, tried };
@@ -401,7 +410,12 @@ export async function run(opts = {}, deps = {}) {
   const lockPath = o.lock ? path.resolve(o.lock) : lockPathFor(ledgerPath);
   const loadEntries = deps.loadEntries ?? (() => JSON.parse(fs.readFileSync(sourcePath, 'utf8')));
   const readLedger = deps.readLedger ?? (() => readLedgerFile(ledgerPath));
-  const appendLedger = deps.appendLedger ?? ((rec) => { fs.mkdirSync(path.dirname(ledgerPath), { recursive: true }); fs.appendFileSync(ledgerPath, `${JSON.stringify(rec)}\n`); });
+  // Durable before the next step: the `publishing` line must be on disk before media_publish is sent.
+  const appendLedger = deps.appendLedger ?? ((rec) => {
+    fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
+    const fd = fs.openSync(ledgerPath, 'a', 0o600);
+    try { fs.writeSync(fd, `${JSON.stringify(rec)}\n`); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  });
   const readCaption = deps.readCaption ?? ((file) => fs.readFileSync(path.join(ROOT, o.captions, file), 'utf8'));
   const wall = () => new Date(deps.wallClock ?? Date.now()).toISOString();
   const detailOf = (e) => (e instanceof GraphError ? e.detail : (e?.message || String(e)));
@@ -441,7 +455,7 @@ export async function run(opts = {}, deps = {}) {
 
     if (!dryRun && deps.lock !== false) {
       lock = acquireLock(lockPath, { now: deps.wallClock ?? Date.now() });
-      if (!lock.ok) { log(`lock: ${lock.reason} — leaving this run to it`); return { code: 0, results, published: 0, errors: 0, skippedForLock: true }; }
+      if (!lock.ok) { log(`lock: ${lock.reason} — leaving this run to it`); return { code: 0, results, published: 0, errors: 0, skippedForLock: true, lockReason: lock.reason }; }
     }
 
     let rawEntries;
@@ -546,7 +560,7 @@ export async function run(opts = {}, deps = {}) {
       const want = entry.kind === 'carousel' ? entry.images.slice(0, CAROUSEL_MAX) : entry.images.slice(0, 1);
       const urls = []; let failure = null;
       for (const u of want) {
-        const r = await resolveImage(u, { base: o.siteBase, fetch: fetchImpl, onCheck: (cand, v) => { if (dryRun) log(`[dry-run] HEAD ${cand} → ${v.detail}`); } });
+        const r = await resolveImage(u, { base: o.siteBase, fetch: fetchImpl, sleep, onCheck: (cand, v) => { if (dryRun) log(`[dry-run] HEAD ${cand} → ${v.detail}`); } });
         if (r.ok) urls.push(r.url); else { failure = r; break; }
       }
       if (failure) {

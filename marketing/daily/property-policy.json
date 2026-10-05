@@ -6,7 +6,17 @@
   "repeatDays": 30,
   "catalogueUrl": "https://bona-real-estate.com/social-catalogue.json",
   "channels": ["instagram", "facebook"],
-  "noEligibleProperty": "skip-with-reason",
+  "countries": ["SA"],
+  "categories": ["buy", "rent", "off-plan"],
+  "renders": "off-plan-only",
+  "reviewValidDays": 90,
+  "adLicence": {
+    "requirement": "waived",
+    "by": "owner",
+    "on": "2026-10-05",
+    "note": "Owner instruction 2026-10-05: post current Saudi website properties daily without per-listing REGA ad-licence numbers. The exposure was stated and accepted (2026 advertising bylaw; a Jeddah first offence is a warning or about SAR 5,000). Advertiser name, FAL 1100313556 and phone stay on every post; a listing's ad-licence line appears automatically once it carries a number."
+  },
+  "noEligibleProperty": "fallback-to-approved-pack-else-skip",
   "missedSlot": "skip-after-23:00-no-backfill",
-  "authorization": "Owner requested daily promotion of current website properties with clear actual photographs on 2026-10-02."
+  "authorization": "Owner requested daily promotion of current website properties with clear actual photographs on 2026-10-02; scope widened to Saudi ready and off-plan stock under the ad-licence waiver on 2026-10-05."
 }
