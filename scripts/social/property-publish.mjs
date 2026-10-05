@@ -110,8 +110,11 @@ function legacyTimersOff() {
     return ['disabled','masked','not-found'].includes(enabled)&&['inactive','unknown'].includes(active);
   });
 }
-/** `legacyTimersDisabled` replaces the systemctl check in tests; anything but `true` refuses the send. */
-export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,env=process.env,fetchImpl=fetch,legacyTimersDisabled=legacyTimersOff}={}) {
+/**
+ * `legacyTimersDisabled` replaces the systemctl check in tests; anything but `true` refuses the send.
+ * `now` (read when the run starts) picks the slot; `clock` is read again just before the intent record.
+ */
+export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,env=process.env,fetchImpl=fetch,legacyTimersDisabled=legacyTimersOff,clock=()=>new Date()}={}) {
   const policy=read(path.join(root,'marketing/daily/property-policy.json'));
   if(policy.version!==1 || policy.mode!=='property-photography' || policy.time!=='20:30' || policy.timezone!=='Asia/Riyadh' ||
      policy.catalogueUrl!==`${SITE}/social-catalogue.json` || policy.repeatDays<30 ||
@@ -152,6 +155,9 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
     if(legacyTimersDisabled()!==true)throw new Error('Legacy publisher must remain disabled');
     // Before the intent record: failing to get the Page token sends nothing and leaves nothing to reconcile.
     const page=channel==='facebook'?await pageToken({fetch:fetchImpl,token:env.META_ACCESS_TOKEN,pageId:ACCOUNT.facebook}):null;
+    // A slow preflight must not record intent or send after the slot: check it again on the real clock.
+    const sendAt=ksaNow(clock());
+    if(sendAt.date!==date||sendAt.time<'20:30'||sendAt.time>='23:00'){console.log('Outside daily slot at send time; no post');return {status:'not-due'};}
     record(journal,{channel,date,id:entry.id,listingId:p.id,status:'intent'});
     const igLedger=path.join(data,'ig/published.jsonl');
     try {

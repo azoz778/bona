@@ -480,7 +480,7 @@ function sendStub(f, provider = () => undefined) {
   };
   return { fetchImpl, calls, writes: () => calls.filter(c => !c.startsWith('GET ')) };
 }
-const send = (channel, f, fetchImpl, over = {}) => propertyDaily(channel, { now, root: f.root, env: f.env, fetchImpl, legacyTimersDisabled: () => true, ...over });
+const send = (channel, f, fetchImpl, over = {}) => propertyDaily(channel, { now, clock: () => now, root: f.root, env: f.env, fetchImpl, legacyTimersDisabled: () => true, ...over });
 test('a live run refuses while a legacy publisher timer is on, before any intent record', async () => {
   const f = sendFixture('bona-property-legacy-');
   try {
@@ -605,4 +605,17 @@ test('Facebook: the Page token is fetched before the intent record, so failing t
     assert.deepEqual(jsonl(f.journal), []);
     assert.deepEqual(s.writes(), []);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+test('the slot is checked again on the real clock just before intent: a preflight that ends at 23:00 records nothing and posts nothing', async () => {
+  const at2259 = new Date('2026-10-02T19:59:00Z'); // 22:59 Riyadh
+  for (const channel of ['instagram', 'facebook']) {
+    const f = sendFixture(`bona-property-clock-${channel}-`);
+    try {
+      const s = sendStub(f);
+      assert.deepEqual(await send(channel, f, s.fetchImpl, { now: at2259, clock: () => new Date('2026-10-02T20:00:05Z') }), { status: 'not-due' }, `${channel}: 23:00:05 Riyadh`);
+      assert.deepEqual(await send(channel, f, s.fetchImpl, { now: at2259, clock: () => new Date('2026-10-03T17:31:00Z') }), { status: 'not-due' }, `${channel}: inside the hours, but the next day`);
+      assert.deepEqual(jsonl(f.journal), [], `${channel}: no intent`);
+      assert.deepEqual(s.writes(), [], `${channel}: nothing sent`);
+    } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+  }
 });
