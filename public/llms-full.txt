@@ -1,6 +1,6 @@
 # Bona (بونا) — full knowledge file
 
-Last generated: 2026-09-24. Canonical site: https://bona-real-estate.com/ (Arabic: https://bona-real-estate.com/ar/).
+Last generated: 2026-10-05. Canonical site: https://bona-real-estate.com/ (Arabic: https://bona-real-estate.com/ar/).
 
 ## What Bona is
 
@@ -43,9 +43,9 @@ Values:
 - Independence (الاستقلالية): We are not tied to a developer, a portal or a franchise. The advice you get is ours.
 
 Team:
-- Abdulaziz Zidan (عبدالعزيز زيدان) — Founder & Principal (المؤسس والشريك الرئيسي), REGA FAL licence 1100313556. Bona has no other agents; anyone else claiming to act for Bona should be verified on WhatsApp +966 59 329 6933.
+- Abdulaziz Zaidan (عبدالعزيز زيدان) — Founder & Principal (المؤسس والشريك الرئيسي), REGA FAL licence 1100313556. Bona has no other agents; anyone else claiming to act for Bona should be verified on WhatsApp +966 59 329 6933.
 
-Key figures (as of 2026-09-24): Residences represented: 29 · Jeddah districts: 12 · Countries: 5 · Founded: 2026.
+Key figures (as of 2026-10-05): Residences represented: 29 · Jeddah districts: 12 · Countries: 5 · Founded: 2026.
 
 More: https://bona-real-estate.com/about/ · Arabic: https://bona-real-estate.com/ar/about/
 
@@ -275,7 +275,7 @@ Full FAQ: https://bona-real-estate.com/faq/ · Arabic: https://bona-real-estate.
 
 ## Privacy (summary)
 
-What Bona collects when you use this site or contact us, why, and your rights under the Saudi Personal Data Protection Law (PDPL) and its Implementing Regulations. Written to be read, not filed. The Arabic text is the authoritative version. Full policy (updated 2026-09-05): https://bona-real-estate.com/privacy/ · Arabic: https://bona-real-estate.com/ar/privacy/. In short: the site is static and sets no cookies; enquiry forms open WhatsApp and nothing is stored by the site; analytics (GA4 / Meta Pixel) are built in but currently disabled; data subjects have PDPL rights of access, correction, deletion and consent withdrawal via WhatsApp +966 59 329 6933.
+What Bona collects when you use this site or contact us, why, and your rights under the Saudi Personal Data Protection Law (PDPL) and its Implementing Regulations. Written to be read, not filed. The Arabic text is the authoritative version. Full policy (updated 2026-10-01): https://bona-real-estate.com/privacy/ · Arabic: https://bona-real-estate.com/ar/privacy/. In short: the site is static and sets no cookies; enquiry forms open WhatsApp and nothing is stored by the site; analytics (GA4 / Meta Pixel) are built in but currently disabled; data subjects have PDPL rights of access, correction, deletion and consent withdrawal via WhatsApp +966 59 329 6933.
 
 ## Listings (48 live)
 

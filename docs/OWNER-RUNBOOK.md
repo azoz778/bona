@@ -111,7 +111,7 @@ Full page: `docs/checklists/rega-ad-licences.md`. The short version:
    - Wrong number? `licence BONA-W003 clear` / `wafi BONA-W003 clear` takes it off again.
    - The reply is `✅ Licence recorded for BONA-W003: 7200012345, valid until 2027-03-01. Live in ~3 min.` — the page updates with the next deploy (~3 minutes).
 3. Until a listing has a number it stays on the site with the advertiser + FAL block only — **no Aqar, no paid ad, no Story naming it**. The dashboard's Listings view flags `no_ad_licence`, `expiring_30d`, `expired`, `wafi_missing`.
-4. The advertiser on every ad is **Abdulaziz Zidan — FAL 1100313556** until Bona has its own CR (682010) and establishment FAL; then `site.json → advertiser` changes and everything re-renders.
+4. The advertiser on every ad is **Abdulaziz Zaidan — FAL 1100313556** until Bona has its own CR (682010) and establishment FAL; then `site.json → advertiser` changes and everything re-renders.
 
 ## 11. bona.sa cutover — owner steps, then one script
 Owner (once): register **bona.sa** at https://nic.sa with Nafath → Cloudflare dashboard → *Add a site* → `bona.sa` (Free) → set the two Cloudflare nameservers at nic.sa → wait for the zone to show *Active* → make sure the token in `~/.secrets/cloudflare.env` may edit DNS on `bona.sa` (and redirects on `azoz.uk`).

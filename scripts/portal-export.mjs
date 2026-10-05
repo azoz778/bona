@@ -109,7 +109,7 @@ export function licenceStatus(listing) {
 }
 
 export function advertiserLine(site, locale) {
-  const adv = site.advertiser ?? { name: { en: 'Abdulaziz Zidan', ar: 'عبدالعزيز زيدان' }, fal: site.licences?.fal ?? '1100313556' };
+  const adv = site.advertiser ?? { name: { en: 'Abdulaziz Zaidan', ar: 'عبدالعزيز زيدان' }, fal: site.licences?.fal ?? '1100313556' };
   const name = adv.name?.[locale] ?? adv.name?.en ?? '';
   return locale === 'ar' ? `المُعلن: ${name} — رخصة فال ${adv.fal}` : `Advertiser: ${name} — FAL licence ${adv.fal}`;
 }

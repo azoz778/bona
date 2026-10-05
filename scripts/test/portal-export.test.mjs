@@ -9,7 +9,7 @@ const site = {
   url: 'https://bona.azoz.uk',
   whatsapp: { display: '+966 59 329 6933' },
   licences: { fal: '1100313556' },
-  advertiser: { name: { en: 'Abdulaziz Zidan', ar: 'عبدالعزيز زيدان' }, fal: '1100313556' },
+  advertiser: { name: { en: 'Abdulaziz Zaidan', ar: 'عبدالعزيز زيدان' }, fal: '1100313556' },
 };
 
 const villa = {
@@ -41,7 +41,7 @@ test('renderAqar: Arabic block first, then English, with every mandatory line', 
   assert.ok(en.includes('Villa For sale'));
   assert.ok(en.includes('Price: SAR 6,700,000'));
   assert.ok(en.includes('Advertising licence: 7200123456 · valid until 2027-05-01'));
-  assert.ok(en.includes('Advertiser: Abdulaziz Zidan — FAL licence 1100313556'));
+  assert.ok(en.includes('Advertiser: Abdulaziz Zaidan — FAL licence 1100313556'));
   assert.ok(en.includes('https://bona.azoz.uk/properties/contemporary-villa-al-khalidiyah/?utm_source=aqar&utm_medium=portal&utm_campaign=listing&utm_content=BONA-005'));
   assert.ok(text.endsWith('\n'));
   assert.equal(text.includes('TK'), false, 'Bona copy never mentions TK');

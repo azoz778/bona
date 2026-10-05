@@ -40,7 +40,7 @@ already carry the data model.
 The advert must name the **licensed person**, and the contact data must match the
 licence. So today every Bona advert carries:
 
-> **المُعلن: عبدالعزيز زيدان — رخصة فال 1100313556** · Advertiser: Abdulaziz Zidan —
+> **المُعلن: عبدالعزيز زيدان — رخصة فال 1100313556** · Advertiser: Abdulaziz Zaidan —
 > FAL 1100313556 · WhatsApp +966 59 329 6933
 
 "Bona" stays the brand on the site and the socials; the advertiser line is the person.
