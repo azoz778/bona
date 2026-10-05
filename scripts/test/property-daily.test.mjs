@@ -518,18 +518,22 @@ test('Instagram: a run that never got the publisher lock sent nothing either', a
     assert.deepEqual(s.writes(), []);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
+/** Images verify and every container finishes, then media_publish gets no answer: the publishing line is written, the outcome unknown. */
+function mediaPublishFails() {
+  let n = 0;
+  return (u, init) => {
+    if (init.method === 'HEAD') return new Response(null, { headers: { 'content-type': 'image/jpeg' } });
+    if (u.hostname !== 'graph.facebook.com') return undefined;
+    if (u.pathname.endsWith('/media_publish')) throw new TypeError('fetch failed');
+    if (u.pathname.endsWith('/media')) return Response.json({ id: `container-${++n}` });
+    if (/\/container-\d+$/.test(u.pathname)) return Response.json({ status_code: 'FINISHED' });
+    return undefined;
+  };
+}
 test('Instagram: once a publishing line exists the outcome is unknown, so the attempt stays uncertain and blocks the channel', async () => {
   const f = sendFixture('bona-property-ig-unknown-');
   try {
-    let n = 0;
-    const s = sendStub(f, (u, init) => {
-      if (init.method === 'HEAD') return new Response(null, { headers: { 'content-type': 'image/jpeg' } });
-      if (u.hostname !== 'graph.facebook.com') return undefined;
-      if (u.pathname.endsWith('/media_publish')) throw new TypeError('fetch failed');
-      if (u.pathname.endsWith('/media')) return Response.json({ id: `container-${++n}` });
-      if (/\/container-\d+$/.test(u.pathname)) return Response.json({ status_code: 'FINISHED' });
-      return undefined;
-    });
+    const s = sendStub(f, mediaPublishFails());
     await assert.rejects(send('instagram', f, s.fetchImpl), e => e.message === 'Property publication unconfirmed; automatic retry stopped');
     const rows = jsonl(f.journal);
     assert.deepEqual(rows.map(x => x.status), ['intent', 'uncertain']);
@@ -624,15 +628,7 @@ test('Instagram: the not-sent proof reads the ledger file the publisher writes, 
   const home = process.env.HOME, cwd = process.cwd();
   try {
     process.env.HOME = f.root; process.chdir(f.root); // '~' expands to the temp root; a literal '~' directory lands in it too
-    let n = 0;
-    const s = sendStub(f, (u, init) => {
-      if (init.method === 'HEAD') return new Response(null, { headers: { 'content-type': 'image/jpeg' } });
-      if (u.hostname !== 'graph.facebook.com') return undefined;
-      if (u.pathname.endsWith('/media_publish')) throw new TypeError('fetch failed');
-      if (u.pathname.endsWith('/media')) return Response.json({ id: `container-${++n}` });
-      if (/\/container-\d+$/.test(u.pathname)) return Response.json({ status_code: 'FINISHED' });
-      return undefined;
-    });
+    const s = sendStub(f, mediaPublishFails());
     await assert.rejects(send('instagram', f, s.fetchImpl, { env: { ...f.env, BONA_DATA: '~/data' } }), e => e.message === 'Property publication unconfirmed; automatic retry stopped');
     assert.deepEqual(jsonl(path.join(f.root, 'data/ig/published.jsonl')).map(x => x.status), ['publishing'], 'the publisher expanded ~');
     assert.equal(s.writes().filter(c => c.endsWith('/media_publish')).length, 1);
