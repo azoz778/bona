@@ -96,6 +96,17 @@ test('postPhotos: 2–10 unpublished uploads then one feed post with attached_me
   await assert.rejects(postPhotos({ fetch, pageToken: 'PAGE', pageId: 'PG', files: [png], message: 'm' }), /2–10 photos/);
 });
 
+test('postPhotos: a failed unpublished upload is marked notPublished and stops before the feed request; a failed feed request is not marked', async () => {
+  const { fetch, calls } = fakeFetch([{ body: { id: 'p1' } }, { ok: false, status: 500, body: { error: { message: 'upload broke', type: 'OAuthException', code: 1 } } }]);
+  await assert.rejects(postPhotos({ fetch, pageToken: 'PAGE', pageId: 'PG', files: [png, jpg, png], message: 'm' }),
+    (e) => e.notPublished === true && e.cause instanceof GraphError && e.message === e.cause.message && /POST \/PG\/photos → HTTP 500.*upload broke/.test(e.message));
+  assert.equal(calls.length, 2, 'neither the third upload nor the feed request is sent');
+  const offline = async () => { throw new TypeError('fetch failed'); };
+  await assert.rejects(postPhotos({ fetch: offline, pageToken: 'PAGE', pageId: 'PG', files: [png, jpg], message: 'm' }), (e) => e.notPublished === true && e.message === 'POST /PG/photos: fetch failed');
+  const feed = fakeFetch([{ body: { id: 'p1' } }, { body: { id: 'p2' } }, { ok: false, status: 500, body: { error: { message: 'feed broke', code: 1 } } }]);
+  await assert.rejects(postPhotos({ fetch: feed.fetch, pageToken: 'PAGE', pageId: 'PG', files: [png, jpg], message: 'm' }), (e) => e instanceof GraphError && e.notPublished === undefined && /feed broke/.test(e.message));
+});
+
 test('postPhoto / postLink / postVideo hit the right edges with the right field names', async () => {
   const { fetch, calls } = fakeFetch([{ body: { id: 'ph', post_id: 'PG_1' } }, { body: { id: 'PG_2' } }, { body: { id: 'v1' } }]);
   assert.deepEqual(await postPhoto({ fetch, pageToken: 'P', pageId: 'PG', file: jpg, message: 'a' }), { photoId: 'ph', postId: 'PG_1' });

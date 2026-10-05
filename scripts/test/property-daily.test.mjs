@@ -547,4 +547,62 @@ test('provenNotSent: only an Instagram ledger with no publishing or published li
   assert.equal(provenNotSent('instagram', IG_ID, null, ledger({ id: IG_ID, status: 'publishing' }, { id: IG_ID, status: 'error' })), null, 'a publishing line keeps it unknown, whatever follows');
   assert.equal(provenNotSent('instagram', IG_ID, null, ledger({ id: IG_ID, status: 'published' })), null);
   assert.equal(provenNotSent('instagram', IG_ID, null, () => { throw new SyntaxError('Unexpected end of JSON input'); }), null, 'an unreadable ledger proves nothing');
+  assert.equal(provenNotSent('instagram', IG_ID, { notPublished: true }, ledger({ id: IG_ID, status: 'publishing' })), null, 'the Facebook marker means nothing on Instagram');
+});
+test('provenNotSent: on Facebook only an error marked notPublished by postPhotos() proves nothing went out', () => {
+  const unread = () => { throw new Error('the Instagram ledger is not consulted for Facebook'); };
+  assert.deepEqual(provenNotSent('facebook', 'bona-daily-fb-2026-10-02', Object.assign(new Error('POST /x/photos: fetch failed'), { notPublished: true }), unread),
+    { evidence: 'failed before the Page feed request; only unpublished photo uploads were made', message: 'Facebook post not sent: a photo upload failed before the Page feed request' });
+  for (const e of [new Error('POST /x/feed: fetch failed'), Object.assign(new Error('x'), { notPublished: 'yes' }), null, undefined])
+    assert.equal(provenNotSent('facebook', 'bona-daily-fb-2026-10-02', e, unread), null, String(e?.notPublished ?? e));
+});
+const FB_ID = 'bona-daily-fb-2026-10-02', FB_EDGE = `graph.facebook.com/v23.0/${ACCOUNT.facebook}`;
+test('Facebook: a failed unpublished photo upload is confirmed not published and the channel stays open', async () => {
+  const f = sendFixture('bona-property-fb-unsent-');
+  try {
+    let uploads = 0;
+    const s = sendStub(f, (u, init) => {
+      if (init.method === 'POST' && u.pathname.endsWith(`/${ACCOUNT.facebook}/photos`)) { if (++uploads === 2) throw new TypeError('fetch failed'); return Response.json({ id: `photo-${uploads}` }); }
+      return undefined;
+    });
+    await assert.rejects(send('facebook', f, s.fetchImpl), e => e.message.startsWith('Facebook post not sent'));
+    const rows = jsonl(f.journal);
+    assert.deepEqual(rows.map(x => x.status), ['intent', 'confirmed-not-published']);
+    assert.deepEqual(without(rows[1], 'at'), { channel: 'facebook', date: '2026-10-02', id: FB_ID, listingId: f.p.id, status: 'confirmed-not-published',
+      evidence: 'failed before the Page feed request; only unpublished photo uploads were made' });
+    assert.equal(unsettled(rows, 'facebook'), false);
+    assert.equal(dayState(rows, 'facebook', '2026-10-02'), 'ready');
+    assert.deepEqual(s.writes(), [`POST ${FB_EDGE}/photos`, `POST ${FB_EDGE}/photos`], 'the second upload failed; no feed request');
+    assert.deepEqual(jsonl(path.join(f.data, 'fb/published.jsonl')), []);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+test('Facebook: a failed Page feed request may have posted, so the attempt stays uncertain and blocks the channel', async () => {
+  const f = sendFixture('bona-property-fb-unknown-');
+  try {
+    const auth = [];
+    const s = sendStub(f, (u, init) => {
+      if (init.method !== 'POST') return undefined;
+      if (u.pathname.endsWith(`/${ACCOUNT.facebook}/photos`)) { auth.push(init.headers?.Authorization); return Response.json({ id: `photo-${auth.length}` }); }
+      if (u.pathname.endsWith(`/${ACCOUNT.facebook}/feed`)) throw new TypeError('fetch failed');
+      return undefined;
+    });
+    await assert.rejects(send('facebook', f, s.fetchImpl), e => e.message === 'Property publication unconfirmed; automatic retry stopped');
+    const rows = jsonl(f.journal);
+    assert.deepEqual(rows.map(x => x.status), ['intent', 'uncertain']);
+    assert.equal(unsettled(rows, 'facebook'), true);
+    assert.equal(dayState(rows, 'facebook', '2026-10-02'), 'uncertain');
+    assert.deepEqual(auth, Array(3).fill('Bearer not-a-real-page-token'), 'every upload carried the Page token');
+    assert.deepEqual(s.writes(), [...Array(3).fill(`POST ${FB_EDGE}/photos`), `POST ${FB_EDGE}/feed`]);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+test('Facebook: the Page token is fetched before the intent record, so failing to get it leaves nothing to reconcile', async () => {
+  const f = sendFixture('bona-property-fb-token-');
+  try {
+    let tokenReads = 0;
+    const s = sendStub(f, u => { if (u.searchParams.get('fields') === 'id,name,access_token' && ++tokenReads === 2) throw new TypeError('fetch failed'); return undefined; });
+    await assert.rejects(send('facebook', f, s.fetchImpl), e => !/unconfirmed|not sent/.test(e.message));
+    assert.equal(tokenReads, 2, 'read once by the identity check, once more for the send');
+    assert.deepEqual(jsonl(f.journal), []);
+    assert.deepEqual(s.writes(), []);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
