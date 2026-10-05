@@ -52,7 +52,8 @@ is claimed.
 
 - Each channel re-checks the account identity, downloads the reviewed images and compares their
   SHA-256 with the review, and re-reads the live catalogue just before upload. Any change stops
-  that run.
+  that run. Just before the `intent` record the slot is checked again on the real clock, so a run
+  whose preflight ends at or after 23:00 records nothing and posts nothing.
 - A per-channel lock, the existing ledgers and a durable `intent` record prevent duplicates.
 - A failure that provably sent nothing is recorded as `confirmed-not-published` automatically,
   and the next run retries. On Instagram that means no `publishing` line for the attempt in
