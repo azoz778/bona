@@ -42,6 +42,8 @@ function fresh(ts, now, maxDays) {
  * the 2 October licence gate does, and a line that cannot be shown to be current is worse than none.
  */
 const showsLicence = l => /^\d{8,15}$/.test(l?.adNumber ?? '') && realDate(l?.adExpiry);
+/** Whether the caption prints a price: a SAR amount that is not "on request". disclosuresFor() follows the same test. */
+export const showsPrice = p => Boolean(p?.price?.amount && p.price.currency === 'SAR' && !p.price.onRequest);
 const CATEGORIES = ['buy', 'rent', 'off-plan'];
 /** What a policy without the 2026-10-05 fields means: licensed Saudi sale/rent stock, real photographs, 30-day reviews. */
 export const STRICT_RULES = Object.freeze({ licenceRequired: true, countries: Object.freeze(['SA']), categories: Object.freeze(['buy', 'rent']), renders: 'none', reviewValidDays: 30 });
@@ -116,15 +118,24 @@ const RENDER_NOTE = Object.freeze({
 export function propertyCaption(p, advertiser, disclosures = {}, { renders = 'none' } = {}) {
   const n = x => Number(x).toLocaleString('en-US');
   const ar = [], en = [];
-  if (p.specs?.beds) { ar.push(`${n(p.specs.beds)} غرف نوم`); en.push(`${n(p.specs.beds)} bedrooms`); }
+  if (p.specs?.beds) {
+    // Arabic number agreement: 1 and 2 have their own forms, 3–10 take the plural, 11 and more the singular.
+    const beds = Number(p.specs.beds);
+    ar.push(beds === 1 ? 'غرفة نوم واحدة' : beds === 2 ? 'غرفتا نوم' : beds >= 3 && beds <= 10 ? `${n(beds)} غرف نوم` : `${n(beds)} غرفة نوم`);
+    en.push(beds === 1 ? '1 bedroom' : `${n(beds)} bedrooms`);
+  }
   if (p.specs?.plotSqm) { ar.push(`مساحة الأرض ${n(p.specs.plotSqm)} م²`); en.push(`${n(p.specs.plotSqm)} m² plot`); }
   else if (p.specs?.areaSqm) { ar.push(`المساحة ${n(p.specs.areaSqm)} م²`); en.push(`${n(p.specs.areaSqm)} m²`); }
-  if (p.price?.amount && p.price?.currency === 'SAR' && !p.price?.onRequest) {
+  if (showsPrice(p)) {
     ar.push(`${p.price.from ? 'تبدأ الأسعار من ' : ''}${n(p.price.amount)} ريال${p.category === 'rent' ? ' — '+(p.price.period ?? 'مدة الإيجار عند الاستفسار') : ''}`);
     en.push(`${p.price.from ? 'From ' : ''}SAR ${n(p.price.amount)}${p.category === 'rent' ? ' / '+(p.price.period ?? 'enquire for rental period') : ''}`);
   }
   const url = `${SITE}/properties/${encodeURIComponent(p.slug)}/`;
   const deal = p.category === 'rent' ? { ar: 'للإيجار', en: 'For rent' } : p.category === 'off-plan' ? { ar: 'على الخارطة', en: 'Off-plan' } : { ar: 'للبيع', en: 'For sale' };
+  // Off-plan units are not viewed before delivery: ask about the project, promise no viewing.
+  const cta = p.category === 'off-plan'
+    ? { ar: `تبحث عن وحدة في هذا المشروع؟ راسل بونا بالرقم ${p.id} لمعرفة التوفر والتفاصيل.`, en: `Interested? Message Bona with ${p.id} for availability and details.` }
+    : { ar: `تبحث عن منزل بهذه المواصفات؟ راسل بونا بالرقم ${p.id} لمعرفة التوفر وترتيب معاينة.`, en: `Interested? Message Bona with ${p.id} for current availability and a viewing.` };
   const place = l => [p.location?.district?.[l], p.location?.city?.[l]].filter(Boolean).join(l === 'ar' ? '، ' : ', ');
   const lines = (...xs) => xs.filter(Boolean).join('\n');
   const blocks = (...xs) => xs.filter(Boolean).join('\n\n');
@@ -136,12 +147,12 @@ export function propertyCaption(p, advertiser, disclosures = {}, { renders = 'no
     ar: blocks(
       lines(p.title.ar, [place('ar'), deal.ar].filter(Boolean).join(' · ')),
       ar.join(' · '),
-      lines(`تبحث عن منزل بهذه المواصفات؟ راسل بونا بالرقم ${p.id} لمعرفة التوفر وترتيب معاينة.`, url),
+      lines(cta.ar, url),
       lines(disclosures.ar, `المعلن: ${advertiser.name.ar} · فال ${advertiser.fal} · ${advertiser.phone}`, licence.ar, note.ar)),
     en: blocks(
       lines(p.title.en, [place('en'), deal.en].filter(Boolean).join(' · ')),
       en.join(' · '),
-      `Interested? Message Bona with ${p.id} for current availability and a viewing.`,
+      lines(cta.en, url),
       lines(disclosures.en, `Advertiser: ${advertiser.name.en} · FAL ${advertiser.fal} · ${advertiser.phone}`, licence.en, note.en)),
   };
 }

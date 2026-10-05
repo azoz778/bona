@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
-import { policyRules, eligibility, sha256, reviewedCopy, propertyHashtags, aspectConsistent as dailyAspectConsistent } from '../social/lib/property-daily.mjs';
+import { policyRules, eligibility, sha256, reviewedCopy, propertyHashtags, propertyCaption, aspectConsistent as dailyAspectConsistent } from '../social/lib/property-daily.mjs';
 import { frameProblem, aspectConsistent, parseSelection, disclosuresFor, buildReview, sameReview, liveCatalogue } from '../social/lib/property-review.mjs';
 import { main as draft } from '../social/draft-property-reviews.mjs';
 import { main as approve } from '../social/approve-property-review.mjs';
@@ -59,6 +59,27 @@ test('a carousel keeps frames within 15% of the first frame aspect, and selectio
   assert.throws(() => parseSelection('BONA-001:1,2'), /3–6 frames/);
   assert.throws(() => parseSelection('BONA-001:1,2,3,4,5,6,7'), /3–6 frames/);
   assert.throws(() => parseSelection('BONA-001:1,1,2'), /Duplicate/);
+});
+test('disclosures: the price sentence only when the caption shows a price; ready stock is confirmed at viewing, off-plan is per the developer', () => {
+  const PRICE = { ar: 'الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير.', en: 'Prices shown are asking prices and may change.' };
+  const VIEWING = { ar: 'تُؤكَّد التفاصيل والحالة والخدمات عند المعاينة.', en: 'Details, condition and services are confirmed at viewing.' };
+  const DEVELOPER = { ar: 'مواعيد التسليم والمواصفات حسب المطوّر.', en: 'Delivery dates and specifications are per the developer.' };
+  const join = (...xs) => ({ ar: xs.map(x => x.ar).join(' '), en: xs.map(x => x.en).join(' ') });
+  const sale = { category: 'buy', price: { amount: 5000000, currency: 'SAR' } };
+  assert.deepEqual(disclosuresFor(sale), join(PRICE, VIEWING));
+  assert.deepEqual(disclosuresFor({ ...sale, category: 'rent', price: { amount: 250000, currency: 'SAR', period: 'سنوياً' } }), join(PRICE, VIEWING));
+  assert.deepEqual(disclosuresFor({ ...sale, price: { amount: 5000000, currency: 'SAR', onRequest: true } }), join(VIEWING));
+  assert.deepEqual(disclosuresFor({ ...sale, price: { amount: 5000000, currency: 'USD' } }), join(VIEWING), 'a price the caption does not print');
+  assert.deepEqual(disclosuresFor({ ...sale, price: null }), join(VIEWING));
+  assert.deepEqual(disclosuresFor({ category: 'off-plan', price: { amount: 3200000, currency: 'SAR', from: true } }), join(PRICE, DEVELOPER));
+  const tower = { id: 'BONA-T9', slug: 'tower', status: 'available', category: 'off-plan', type: 'apartment',
+    location: { countryCode: 'SA', city: { ar: 'جدة', en: 'Jeddah' } }, title: { ar: 'برج تجريبي', en: 'Fixture Tower' },
+    price: { amount: 3200000, currency: 'SAR', onRequest: true }, specs: {}, images: [] };
+  assert.deepEqual(disclosuresFor(tower), join(DEVELOPER), 'price on request: no price sentence');
+  const c = propertyCaption(tower, advertiser, disclosuresFor(tower), { renders: 'all' });
+  assert.doesNotMatch(c.ar, /ريال|الأسعار المعروضة|معاينة/);
+  assert.doesNotMatch(c.en, /SAR|Prices shown|viewing/i);
+  assert.match(c.en, /^Delivery dates and specifications are per the developer\.$/m);
 });
 test('the live catalogue must be fresh JSON', async () => {
   const stale = async () => Response.json({ version: 1, generatedAt: '2026-10-01T00:00:00Z', advertiser, listings: [] });
