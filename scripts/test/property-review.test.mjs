@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
 import { policyRules, eligibility, sha256, reviewedCopy, propertyHashtags, propertyCaption, aspectConsistent as dailyAspectConsistent } from '../social/lib/property-daily.mjs';
-import { frameProblem, aspectConsistent, parseSelection, disclosuresFor, buildReview, sameReview, liveCatalogue } from '../social/lib/property-review.mjs';
+import { frameProblem, aspectConsistent, parseSelection, disclosuresFor, defaultKind, buildReview, sameReview, liveCatalogue } from '../social/lib/property-review.mjs';
 import { main as draft } from '../social/draft-property-reviews.mjs';
 import { main as approve } from '../social/approve-property-review.mjs';
 
@@ -230,29 +230,37 @@ test('every entry in the repository review register is well-formed', () => {
   }
 });
 
-test('a photo note leads the disclosures, the review binds it, and a caption without it is refused at publish time', async () => {
+test('a photo note opens the caption, makes off-plan frames photographs by default, and keeps renders out', async () => {
   const w = await world();
   try {
     const rules = policyRules(WAIVER, now);
     const NOTE = { en: 'Photos show a completed sister project by the same developer, not Fixture villa.', ar: 'الصور لمشروع مكتمل آخر للمطوّر نفسه، وليست للفيلا التجريبية.' };
-    const sister = { ...w.villa, photoNote: NOTE };
-    const d = disclosuresFor(sister);
-    assert.ok(d.en.startsWith(NOTE.en + ' ') && d.ar.startsWith(NOTE.ar + ' '), 'the note comes first');
-    assert.deepEqual({ en: d.en.slice(NOTE.en.length + 1), ar: d.ar.slice(NOTE.ar.length + 1) }, disclosuresFor(w.villa), 'the usual sentences follow unchanged');
+    const offPlan = { ...w.villa, category: 'off-plan' };
+    const sister = { ...offPlan, photoNote: NOTE };
+    assert.equal(defaultKind(offPlan), 'render');
+    assert.equal(defaultKind(sister), 'photograph');
+    assert.equal(defaultKind(w.villa), 'photograph');
+    assert.deepEqual(disclosuresFor(sister), disclosuresFor(offPlan), 'the closing disclosures are the usual ones');
     const frames = [1, 2, 3].map(index => ({ index, url: `https://bona-real-estate.com/listings/villa/${index}.jpg`, sha256: sha256('x' + index), width: 1920, height: 1280, alt: { ar: 'صورة', en: 'Photo' } }));
     const r = buildReview(sister, advertiser, frames, parseSelection('BONA-T1:1,2,3'), { reviewedAt: '2026-10-05T09:00:00Z', reviewer: 'test' });
+    assert.deepEqual(r.photos.map(x => x.kind), ['photograph', 'photograph', 'photograph']);
     assert.deepEqual(eligibility(sister, r, advertiser, now, rules), []);
     const c = reviewedCopy(sister, advertiser, r);
-    assert.ok(c.en.includes(NOTE.en) && c.ar.includes(NOTE.ar), 'the posted caption carries the note');
+    for (const lang of ['ar', 'en']) {
+      assert.equal(c[lang].split('\n\n')[0].split('\n')[2], NOTE[lang], `${lang}: the note is the line under title and place`);
+      assert.equal(c[lang].split(NOTE[lang]).length, 2, `${lang}: once`);
+    }
+    assert.doesNotMatch(c.en, /artist's impressions/);
+    assert.doesNotMatch(c.ar, /تصاميم تصوّرية/);
+    // A frame marked as a render cannot go out with photos of another project.
+    const withRender = buildReview(sister, advertiser, frames, parseSelection('BONA-T1:1,2,3r'), { reviewedAt: '2026-10-05T09:00:00Z', reviewer: 'test' });
+    assert.deepEqual(eligibility(sister, withRender, advertiser, now, rules), ['photo_note_conflicts_with_renders']);
     // A review from before the note no longer matches the listing.
-    const old = buildReview(w.villa, advertiser, frames, parseSelection('BONA-T1:1,2,3'), { reviewedAt: '2026-10-05T09:00:00Z', reviewer: 'test' });
+    const old = buildReview(offPlan, advertiser, frames, parseSelection('BONA-T1:1p,2p,3p'), { reviewedAt: '2026-10-05T09:00:00Z', reviewer: 'test' });
     assert.ok(eligibility(sister, old, advertiser, now, rules).includes('listing_changed_since_review'));
-    // A hand-edited review that drops the note, even with a recomputed caption hash, cannot publish.
-    const stripped = { ...r, legalDisclosures: disclosuresFor(w.villa) };
-    stripped.captionSha256 = sha256(JSON.stringify(reviewedCopy(sister, advertiser, stripped)));
-    assert.deepEqual(eligibility(sister, stripped, advertiser, now, rules), ['photo_note_not_disclosed']);
-    // A half-written note stops the review and fails closed at publish time.
-    assert.throws(() => disclosuresFor({ ...w.villa, photoNote: { en: NOTE.en, ar: ' ' } }), /photoNote needs both/);
-    assert.ok(eligibility({ ...sister, photoNote: { en: NOTE.en, ar: null } }, r, advertiser, now, rules).includes('photo_note_not_disclosed'));
+    // Malformed notes fail closed.
+    for (const bad of [{ en: NOTE.en, ar: null }, { en: NOTE.en, ar: 'not arabic' }, { en: ' ', ar: NOTE.ar }, '', 0, false]) {
+      assert.ok(eligibility({ ...sister, photoNote: bad }, r, advertiser, now, rules).includes('photo_note_malformed'), JSON.stringify(bad));
+    }
   } finally { w.cleanup(); }
 });

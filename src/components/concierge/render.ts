@@ -11,6 +11,8 @@ export interface ConciergeConfig {
   name: string;
   waHref: string;
   propertiesBase: string;
+  /** slug → the listing's photoNote in the page locale, for listings whose photos show another project. */
+  photoNotes?: Record<string, string>;
   /* Only the strings JS has to invent at runtime; everything else is server-rendered in the panel markup. */
   strings: {
     opening: string;
@@ -92,6 +94,8 @@ export function listingCard(card: Card, cfg: ConciergeConfig): HTMLElement {
 
   const body = el('span', 'cg-card-body');
   body.append(el('span', 'cg-card-title', title));
+  const photoNote = card.slug && cfg.photoNotes && Object.prototype.hasOwnProperty.call(cfg.photoNotes, card.slug) ? cfg.photoNotes[card.slug] : null;
+  if (typeof photoNote === 'string' && photoNote) body.append(el('span', 'cg-card-note', photoNote));
 
   const district = card.district?.[loc] || card.district?.en || '';
   if (district) body.append(el('span', 'cg-card-meta', district));
