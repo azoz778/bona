@@ -4317,12 +4317,12 @@
     "kind": "house",
     "featured": false,
     "title": {
-      "en": "Al-Wareef Townhouse, Jeddah",
-      "ar": "تاون هاوس الوريف، جدة"
+      "en": "Malfa Jeddah, Maren Townhouse, Al-Wareef",
+      "ar": "ملفى جدة، تاون هاوس مرن، الوريف"
     },
     "location": {
       "district": {
-        "en": "Al Wareef",
+        "en": "Al-Wareef",
         "ar": "الوريف"
       },
       "city": {
@@ -4355,40 +4355,40 @@
         "src": "/listings/al-wareef-townhouse-jeddah/01.jpg",
         "thumb": "/listings/al-wareef-townhouse-jeddah/01-thumb.webp",
         "alt": {
-          "en": "Illustrative — developer's finished unit at Wajhat Al-Wareef: Exterior — Al-Wareef Townhouse, Jeddah",
-          "ar": "صورة توضيحية — وحدة منجزة من المطوّر في وجهة الوريف: الواجهة الخارجية — تاون هاوس الوريف، جدة"
+          "en": "Artist's impression of a Malfa Jeddah home facade — Malfa Jeddah, Maren Townhouse, Al-Wareef",
+          "ar": "تصور معماري لواجهة منزل في ملفى جدة — ملفى جدة، تاون هاوس مرن، الوريف"
         }
       },
       {
         "src": "/listings/al-wareef-townhouse-jeddah/02.jpg",
         "thumb": "/listings/al-wareef-townhouse-jeddah/02-thumb.webp",
         "alt": {
-          "en": "Illustrative — developer's finished unit at Wajhat Al-Wareef: Entrance — Al-Wareef Townhouse, Jeddah",
-          "ar": "صورة توضيحية — وحدة منجزة من المطوّر في وجهة الوريف: المدخل — تاون هاوس الوريف، جدة"
+          "en": "Artist's impression of the Maren townhouse entrance — Malfa Jeddah, Maren Townhouse, Al-Wareef",
+          "ar": "تصور معماري لمدخل تاون هاوس مرن — ملفى جدة، تاون هاوس مرن، الوريف"
         }
       },
       {
         "src": "/listings/al-wareef-townhouse-jeddah/03.jpg",
         "thumb": "/listings/al-wareef-townhouse-jeddah/03-thumb.webp",
         "alt": {
-          "en": "Illustrative — developer's finished unit at Wajhat Al-Wareef: Living room — Al-Wareef Townhouse, Jeddah",
-          "ar": "صورة توضيحية — وحدة منجزة من المطوّر في وجهة الوريف: غرفة المعيشة — تاون هاوس الوريف، جدة"
+          "en": "Artist's impression of a living room — Malfa Jeddah, Maren Townhouse, Al-Wareef",
+          "ar": "تصور معماري لغرفة المعيشة — ملفى جدة، تاون هاوس مرن، الوريف"
         }
       },
       {
         "src": "/listings/al-wareef-townhouse-jeddah/04.jpg",
         "thumb": "/listings/al-wareef-townhouse-jeddah/04-thumb.webp",
         "alt": {
-          "en": "Illustrative — developer's finished unit at Wajhat Al-Wareef: Exterior — Al-Wareef Townhouse, Jeddah",
-          "ar": "صورة توضيحية — وحدة منجزة من المطوّر في وجهة الوريف: الواجهة الخارجية — تاون هاوس الوريف، جدة"
+          "en": "Artist's impression of a row of Malfa Jeddah homes — Malfa Jeddah, Maren Townhouse, Al-Wareef",
+          "ar": "تصور معماري لصف من منازل ملفى جدة — ملفى جدة، تاون هاوس مرن، الوريف"
         }
       },
       {
         "src": "/listings/al-wareef-townhouse-jeddah/05.jpg",
         "thumb": "/listings/al-wareef-townhouse-jeddah/05-thumb.webp",
         "alt": {
-          "en": "Illustrative — developer's finished unit at Wajhat Al-Wareef: Aerial view — Al-Wareef Townhouse, Jeddah",
-          "ar": "صورة توضيحية — وحدة منجزة من المطوّر في وجهة الوريف: منظر جوي — تاون هاوس الوريف، جدة"
+          "en": "Aerial artist's impression of the wider Al-Wareef destination — Malfa Jeddah, Maren Townhouse, Al-Wareef",
+          "ar": "تصور جوي لوجهة الوريف — ملفى جدة، تاون هاوس مرن، الوريف"
         }
       }
     ],
@@ -4418,8 +4418,8 @@
     "brochureUrl": "https://bona-real-estate.com/listings/al-wareef-townhouse-jeddah/brochure.pdf",
     "project": {
       "name": {
-        "en": "Wajhat Al-Wareef",
-        "ar": "وجهة الوريف"
+        "en": "Malfa Jeddah",
+        "ar": "ملفى جدة"
       },
       "developer": {
         "en": "National Housing Company (NHC) and Faisal Bin Saedan Real Estate Development",
@@ -4449,13 +4449,13 @@
     "kind": "house",
     "featured": false,
     "title": {
-      "en": "Al Warf District, Jeddah",
-      "ar": "وجهة الويرف، جدة"
+      "en": "Malfa Jeddah, Al-Wareef",
+      "ar": "ملفى جدة، الوريف"
     },
     "location": {
       "district": {
-        "en": "Southeast Jeddah",
-        "ar": "جنوب شرق جدة"
+        "en": "Al-Wareef",
+        "ar": "الوريف"
       },
       "city": {
         "en": "Jeddah",
@@ -4487,70 +4487,70 @@
         "src": "/listings/al-warf-district-jeddah/01.jpg",
         "thumb": "/listings/al-warf-district-jeddah/01-thumb.webp",
         "alt": {
-          "en": "Exterior — Al Warf District, Jeddah",
-          "ar": "الواجهة الخارجية — وجهة الويرف، جدة"
+          "en": "Exterior — Malfa Jeddah, Al-Wareef",
+          "ar": "الواجهة الخارجية — ملفى جدة، الوريف"
         }
       },
       {
         "src": "/listings/al-warf-district-jeddah/02.jpg",
         "thumb": "/listings/al-warf-district-jeddah/02-thumb.webp",
         "alt": {
-          "en": "Exterior — Al Warf District, Jeddah",
-          "ar": "الواجهة الخارجية — وجهة الويرف، جدة"
+          "en": "Exterior — Malfa Jeddah, Al-Wareef",
+          "ar": "الواجهة الخارجية — ملفى جدة، الوريف"
         }
       },
       {
         "src": "/listings/al-warf-district-jeddah/03.jpg",
         "thumb": "/listings/al-warf-district-jeddah/03-thumb.webp",
         "alt": {
-          "en": "Entrance — Al Warf District, Jeddah",
-          "ar": "المدخل — وجهة الويرف، جدة"
+          "en": "Artist's impression of a Malfa Jeddah street — Malfa Jeddah, Al-Wareef",
+          "ar": "تصور معماري لشارع في ملفى جدة — ملفى جدة، الوريف"
         }
       },
       {
         "src": "/listings/al-warf-district-jeddah/04.jpg",
         "thumb": "/listings/al-warf-district-jeddah/04-thumb.webp",
         "alt": {
-          "en": "Exterior — Al Warf District, Jeddah",
-          "ar": "الواجهة الخارجية — وجهة الويرف، جدة"
+          "en": "Exterior — Malfa Jeddah, Al-Wareef",
+          "ar": "الواجهة الخارجية — ملفى جدة، الوريف"
         }
       },
       {
         "src": "/listings/al-warf-district-jeddah/05.jpg",
         "thumb": "/listings/al-warf-district-jeddah/05-thumb.webp",
         "alt": {
-          "en": "Sea view — Al Warf District, Jeddah",
-          "ar": "إطلالة على البحر — وجهة الويرف، جدة"
+          "en": "Seafront mosque in Jeddah, city context (not a view from the project) — Malfa Jeddah, Al-Wareef",
+          "ar": "مسجد على الواجهة البحرية في جدة، صورة للمدينة (ليست إطلالة من المشروع) — ملفى جدة، الوريف"
         }
       },
       {
         "src": "/listings/al-warf-district-jeddah/06.jpg",
         "thumb": "/listings/al-warf-district-jeddah/06-thumb.webp",
         "alt": {
-          "en": "Exterior — Al Warf District, Jeddah",
-          "ar": "الواجهة الخارجية — وجهة الويرف، جدة"
+          "en": "Exterior — Malfa Jeddah, Al-Wareef",
+          "ar": "الواجهة الخارجية — ملفى جدة، الوريف"
         }
       },
       {
         "src": "/listings/al-warf-district-jeddah/07.jpg",
         "thumb": "/listings/al-warf-district-jeddah/07-thumb.webp",
         "alt": {
-          "en": "Garden — Al Warf District, Jeddah",
-          "ar": "الحديقة — وجهة الويرف، جدة"
+          "en": "Artist's impression of a park in Al-Wareef — Malfa Jeddah, Al-Wareef",
+          "ar": "تصور معماري لحديقة في وجهة الوريف — ملفى جدة، الوريف"
         }
       },
       {
         "src": "/listings/al-warf-district-jeddah/08.jpg",
         "thumb": "/listings/al-warf-district-jeddah/08-thumb.webp",
         "alt": {
-          "en": "Aerial view — Al Warf District, Jeddah",
-          "ar": "منظر جوي — وجهة الويرف، جدة"
+          "en": "Aerial view — Malfa Jeddah, Al-Wareef",
+          "ar": "منظر جوي — ملفى جدة، الوريف"
         }
       }
     ],
     "description": {
-      "en": "Al Warf sits in southeast Jeddah, close to the historic city center and its main arteries. The development is planned as part of the wider Wjhat destinations program, with schools, mosques, health centers and retail reachable within a five- to ten-minute walk on a dedicated pedestrian network.\n\nThe residential collection comprises 693 villas and townhouses across eight models — A, B, C and D villas, the Ufuq and Maren townhouses, and the Saah and Rihab villas. Built-up areas range from about 161 sqm for the townhouses to 271 sqm for the largest villa model, with three to four bedrooms and four to six bathrooms depending on the model. Each home is arranged over a ground floor, first floor and roof level, with a private majlis, living and dining areas, and a private parking space.\n\nConstruction follows the Saudi Building Code, with porcelain flooring, washable paint, moisture-resistant gypsum ceilings and marble cladding to interior and exterior walls. Bathrooms use non-slip tiling and rust-resistant fittings, while doors and double-glazed windows are rated for water resistance and thermal insulation. The homes carry a ten-year structural warranty alongside shorter warranties on finishing, plumbing and electrical work.\n\nThe wider Wjhat Al Warf destination is planned for around 12,000 residential units, 21 retail centers, ten schools, twelve mosques, two health centers and landscaped green spaces exceeding a million square meters. Renderings throughout the brochure are for illustrative purposes, as the project remains under development.",
-      "ar": "تقع وجهة الويرف في جنوب شرق جدة، على مقربة من قلب المدينة التاريخية ومداخلها الرئيسية. يأتي المشروع ضمن برنامج «وجهات» التطويري الأوسع، حيث تتوزع المدارس والمساجد والمراكز الصحية والمرافق التجارية على مسافة خمس إلى عشر دقائق سيرًا عبر شبكة ممرات مخصصة للمشاة.\n\nتضم المجموعة السكنية 693 وحدة بين فلل وتاون هاوس موزعة على ثمانية نماذج: فلل A وB وC وD، وتاون هاوس أفق ومرن، وفلل سعة ورحاب. تتراوح مساحات البناء بين نحو 161 مترًا مربعًا للتاون هاوس و271 مترًا مربعًا لأكبر نماذج الفلل، بواقع ثلاث إلى أربع غرف نوم وأربع إلى ست دورات مياه بحسب النموذج. تتوزع كل وحدة على دور أرضي وأول وسطح، وتضم مجلسًا خاصًا وصالة معيشة وطعام وموقف سيارة خاص.\n\nيلتزم التنفيذ بكود البناء السعودي، مع أرضيات بورسلين ودهانات قابلة للغسل وأسقف جبسية مقاومة للرطوبة وكسوة رخامية داخلية وخارجية. تُجهَّز دورات المياه ببلاط مانع للانزلاق وتجهيزات مقاومة للصدأ، فيما تحمل الأبواب والنوافذ المزدوجة الزجاج مواصفات عزل مائي وحراري. وتشمل الضمانات عشر سنوات على الهيكل الإنشائي، إلى جانب ضمانات أقصر على التشطيبات والسباكة والكهرباء.\n\nتخطط وجهة الويرف الأوسع لتضم نحو 12,000 وحدة سكنية، و21 مركزًا تجاريًا، وعشر مدارس، و12 مسجدًا وجامعًا، ومركزين صحيين، ومساحات خضراء تتجاوز مليون متر مربع. الصور ثلاثية الأبعاد الواردة في الكتيب مخصصة للأغراض التوضيحية فقط، إذ ما يزال المشروع قيد التطوير."
+      "en": "Malfa Jeddah sits in southeast Jeddah, close to the historic city center and its main arteries. The development is planned as part of NHC's wider Al-Wareef destination, with schools, mosques, health centers and retail reachable within a five- to ten-minute walk on a dedicated pedestrian network.\n\nThe residential collection comprises 693 villas and townhouses across eight models — A, B, C and D villas, the Ufuq and Maren townhouses, and the Saah and Rihab villas. Built-up areas range from about 161 sqm for the townhouses to 271 sqm for the largest villa model, with three to four bedrooms and four to six bathrooms depending on the model. Each home is arranged over a ground floor, first floor and roof level, with a private majlis, living and dining areas, and a private parking space.\n\nConstruction follows the Saudi Building Code, with porcelain flooring, washable paint, moisture-resistant gypsum ceilings and marble cladding to interior and exterior walls. Bathrooms use non-slip tiling and rust-resistant fittings, while doors and double-glazed windows are rated for water resistance and thermal insulation. The homes carry a ten-year structural warranty alongside shorter warranties on finishing, plumbing and electrical work.\n\nThe wider Al-Wareef destination is planned for around 12,000 residential units, 21 retail centers, ten schools, twelve mosques, two health centers and landscaped green spaces exceeding a million square meters. Renderings throughout the brochure are for illustrative purposes, as the project remains under development.",
+      "ar": "يقع مشروع ملفى جدة في جنوب شرق جدة، على مقربة من قلب المدينة التاريخية ومداخلها الرئيسية. يأتي المشروع ضمن وجهة الوريف الأوسع التابعة للشركة الوطنية للإسكان، حيث تتوزع المدارس والمساجد والمراكز الصحية والمرافق التجارية على مسافة خمس إلى عشر دقائق سيرًا عبر شبكة ممرات مخصصة للمشاة.\n\nتضم المجموعة السكنية 693 وحدة بين فلل وتاون هاوس موزعة على ثمانية نماذج: فلل A وB وC وD، وتاون هاوس أفق ومرن، وفلل سعة ورحاب. تتراوح مساحات البناء بين نحو 161 مترًا مربعًا للتاون هاوس و271 مترًا مربعًا لأكبر نماذج الفلل، بواقع ثلاث إلى أربع غرف نوم وأربع إلى ست دورات مياه بحسب النموذج. تتوزع كل وحدة على دور أرضي وأول وسطح، وتضم مجلسًا خاصًا وصالة معيشة وطعام وموقف سيارة خاص.\n\nيلتزم التنفيذ بكود البناء السعودي، مع أرضيات بورسلين ودهانات قابلة للغسل وأسقف جبسية مقاومة للرطوبة وكسوة رخامية داخلية وخارجية. تُجهَّز دورات المياه ببلاط مانع للانزلاق وتجهيزات مقاومة للصدأ، فيما تحمل الأبواب والنوافذ المزدوجة الزجاج مواصفات عزل مائي وحراري. وتشمل الضمانات عشر سنوات على الهيكل الإنشائي، إلى جانب ضمانات أقصر على التشطيبات والسباكة والكهرباء.\n\nتخطط وجهة الوريف الأوسع لتضم نحو 12,000 وحدة سكنية، و21 مركزًا تجاريًا، وعشر مدارس، و12 مسجدًا وجامعًا، ومركزين صحيين، ومساحات خضراء تتجاوز مليون متر مربع. الصور ثلاثية الأبعاد الواردة في الكتيب مخصصة للأغراض التوضيحية فقط، إذ ما يزال المشروع قيد التطوير."
     },
     "highlights": {
       "en": [
@@ -4574,8 +4574,8 @@
     "brochureUrl": "https://bona-real-estate.com/listings/al-warf-district-jeddah/brochure.pdf",
     "project": {
       "name": {
-        "en": "Al Warf District",
-        "ar": "وجهة الويرف"
+        "en": "Malfa Jeddah",
+        "ar": "ملفى جدة"
       },
       "developer": {
         "en": "Faisal Bin Saedan Real Estate Investment & Development",
@@ -6337,13 +6337,13 @@
     "kind": "house",
     "featured": false,
     "title": {
-      "en": "Rihab Villas, Wajhat Al Warf",
-      "ar": "فلل رحاب في وجهة الويرف، جدة"
+      "en": "Malfa Jeddah, Rihab Villa, Al-Wareef",
+      "ar": "ملفى جدة، فيلا رحاب، الوريف"
     },
     "location": {
       "district": {
-        "en": "Wajhat Al Warf",
-        "ar": "وجهة الويرف"
+        "en": "Al-Wareef",
+        "ar": "الوريف"
       },
       "city": {
         "en": "Jeddah",
@@ -6375,38 +6375,38 @@
         "src": "/listings/rihab-villas-wajhat-al-warf/01.jpg",
         "thumb": "/listings/rihab-villas-wajhat-al-warf/01-thumb.webp",
         "alt": {
-          "en": "Exterior — Rihab Villas, Wajhat Al Warf",
-          "ar": "الواجهة الخارجية — فلل رحاب في وجهة الويرف، جدة"
+          "en": "Artist's impression of a Malfa Jeddah home facade — Malfa Jeddah, Rihab Villa, Al-Wareef",
+          "ar": "تصور معماري لواجهة منزل في ملفى جدة — ملفى جدة، فيلا رحاب، الوريف"
         }
       },
       {
         "src": "/listings/rihab-villas-wajhat-al-warf/02.jpg",
         "thumb": "/listings/rihab-villas-wajhat-al-warf/02-thumb.webp",
         "alt": {
-          "en": "Exterior — Rihab Villas, Wajhat Al Warf",
-          "ar": "الواجهة الخارجية — فلل رحاب في وجهة الويرف، جدة"
+          "en": "Artist's impression of a row of Malfa Jeddah homes — Malfa Jeddah, Rihab Villa, Al-Wareef",
+          "ar": "تصور معماري لصف من منازل ملفى جدة — ملفى جدة، فيلا رحاب، الوريف"
         }
       },
       {
         "src": "/listings/rihab-villas-wajhat-al-warf/03.jpg",
         "thumb": "/listings/rihab-villas-wajhat-al-warf/03-thumb.webp",
         "alt": {
-          "en": "Living room — Rihab Villas, Wajhat Al Warf",
-          "ar": "غرفة المعيشة — فلل رحاب في وجهة الويرف، جدة"
+          "en": "Artist's impression of a living room — Malfa Jeddah, Rihab Villa, Al-Wareef",
+          "ar": "تصور معماري لغرفة المعيشة — ملفى جدة، فيلا رحاب، الوريف"
         }
       },
       {
         "src": "/listings/rihab-villas-wajhat-al-warf/04.jpg",
         "thumb": "/listings/rihab-villas-wajhat-al-warf/04-thumb.webp",
         "alt": {
-          "en": "Aerial view — Rihab Villas, Wajhat Al Warf",
-          "ar": "منظر جوي — فلل رحاب في وجهة الويرف، جدة"
+          "en": "Aerial artist's impression of the wider Al-Wareef destination — Malfa Jeddah, Rihab Villa, Al-Wareef",
+          "ar": "تصور جوي لوجهة الوريف — ملفى جدة، فيلا رحاب، الوريف"
         }
       }
     ],
     "description": {
-      "en": "Rihab is a villa model within Wajhat Al Warf, a residential district developed in southeast Jeddah, close to the historic city core and the main business centers. A planned pedestrian network within the wider community places schools, mosques, health centers and shops within a five to ten minute walk.\n\nThe broader district spans more than 10 million square meters and includes over 12,000 residential units, 21 commercial centers, 10 schools, 7 mosques and 5 larger mosques, and two health centers, alongside green spaces and parks totalling more than 1.3 million square meters.\n\nThe Rihab villa sits on a 275 sqm plot with a total built-up area of 271.47 sqm across three floors. It has four bedrooms and a maid's room, six bathrooms, a ground-floor majlis and a separate family majlis on the first floor, a living and dining area, a kitchen, and front and back roof terraces, with one open parking space.\n\nConstruction follows the Saudi Building Code, with porcelain flooring, washable paint, moisture-resistant gypsum ceilings, and marble staircases inside and out. Doors and windows are water-resistant and thermally insulated with double glazing, and the villa has integrated electrical, air-conditioning and telecom wiring, LED lighting and irrigation for the garden. It carries a 10-year warranty on the concrete structure and soil treatment, 10 years on the building and insulation, and one year on finishes, plumbing and electrical work.",
-      "ar": "تقع فلل رحاب ضمن وجهة الويرف، وهي وجهة سكنية طُوّرت في جنوب شرق جدة، على مقربة من قلب المدينة التاريخي ومراكز الأعمال الرئيسية فيها. وتتيح شبكة مشي مخططة داخل الوجهة الوصول إلى المدارس والمساجد والمراكز الصحية والأسواق خلال خمس إلى عشر دقائق سيرًا على الأقدام.\n\nتمتد الضاحية التي تنتمي إليها الوجهة على مساحة تتجاوز 10 ملايين متر مربع، وتضم أكثر من 12,000 وحدة سكنية، و21 مركزًا تجاريًا، و10 مدارس، و7 مساجد و5 جوامع، ومركزين صحيين، إضافة إلى مساحات خضراء وحدائق تتجاوز مساحتها 1.3 مليون متر مربع.\n\nتقوم فيلا رحاب على أرض مساحتها 275 مترًا مربعًا، بمساحة بناء إجمالية تبلغ 271.47 مترًا مربعًا موزعة على ثلاثة طوابق. وتضم أربع غرف نوم وغرفة خادمة وست دورات مياه، إلى جانب مجلس في الدور الأرضي ومجلس عائلي مستقل في الدور الأول، وصالة معيشة وصالة طعام ومطبخ، وسطحين أمامي وخلفي، مع موقف سيارة واحد مفتوح.\n\nيُنفَّذ البناء وفق كود البناء السعودي للمباني السكنية، بأرضيات بورسلين ودهانات قابلة للغسل وأسقف جبسية مقاومة للرطوبة وسلالم رخامية داخلية وخارجية. وتأتي الأبواب مقاومة للماء والنوافذ بعزل حراري وزجاج مزدوج، مع تأسيس متكامل للكهرباء والتكييف والاتصالات، وإنارة LED وأنظمة ري للحديقة. وتشمل الضمانات عشر سنوات للهيكل الخرساني ومعالجة التربة، وعشر سنوات للمباني والعزل، وسنة كاملة للتشطيبات والسباكة والكهرباء."
+      "en": "Rihab is a villa model within Malfa Jeddah, a residential community in NHC's Al-Wareef destination in southeast Jeddah, close to the historic city core and the main business centers. A planned pedestrian network within the wider community places schools, mosques, health centers and shops within a five to ten minute walk.\n\nThe wider destination spans more than 10 million square meters and includes over 12,000 residential units, 21 commercial centers, 10 schools, 7 mosques and 5 larger mosques, and two health centers, alongside green spaces and parks totalling more than 1.3 million square meters.\n\nThe Rihab villa sits on a 275 sqm plot with a total built-up area of 271.47 sqm across three floors. It has four bedrooms and a maid's room, six bathrooms, a ground-floor majlis and a separate family majlis on the first floor, a living and dining area, a kitchen, and front and back roof terraces, with one open parking space.\n\nConstruction follows the Saudi Building Code, with porcelain flooring, washable paint, moisture-resistant gypsum ceilings, and marble staircases inside and out. Doors and windows are water-resistant and thermally insulated with double glazing, and the villa has integrated electrical, air-conditioning and telecom wiring, LED lighting and irrigation for the garden. It carries a 10-year warranty on the concrete structure and soil treatment, 10 years on the building and insulation, and one year on finishes, plumbing and electrical work.",
+      "ar": "تقع فلل رحاب ضمن مشروع ملفى جدة في وجهة الوريف التابعة للشركة الوطنية للإسكان، وهي وجهة سكنية طُوّرت في جنوب شرق جدة، على مقربة من قلب المدينة التاريخي ومراكز الأعمال الرئيسية فيها. وتتيح شبكة مشي مخططة داخل الوجهة الوصول إلى المدارس والمساجد والمراكز الصحية والأسواق خلال خمس إلى عشر دقائق سيرًا على الأقدام.\n\nتمتد الضاحية التي تنتمي إليها الوجهة على مساحة تتجاوز 10 ملايين متر مربع، وتضم أكثر من 12,000 وحدة سكنية، و21 مركزًا تجاريًا، و10 مدارس، و7 مساجد و5 جوامع، ومركزين صحيين، إضافة إلى مساحات خضراء وحدائق تتجاوز مساحتها 1.3 مليون متر مربع.\n\nتقوم فيلا رحاب على أرض مساحتها 275 مترًا مربعًا، بمساحة بناء إجمالية تبلغ 271.47 مترًا مربعًا موزعة على ثلاثة طوابق. وتضم أربع غرف نوم وغرفة خادمة وست دورات مياه، إلى جانب مجلس في الدور الأرضي ومجلس عائلي مستقل في الدور الأول، وصالة معيشة وصالة طعام ومطبخ، وسطحين أمامي وخلفي، مع موقف سيارة واحد مفتوح.\n\nيُنفَّذ البناء وفق كود البناء السعودي للمباني السكنية، بأرضيات بورسلين ودهانات قابلة للغسل وأسقف جبسية مقاومة للرطوبة وسلالم رخامية داخلية وخارجية. وتأتي الأبواب مقاومة للماء والنوافذ بعزل حراري وزجاج مزدوج، مع تأسيس متكامل للكهرباء والتكييف والاتصالات، وإنارة LED وأنظمة ري للحديقة. وتشمل الضمانات عشر سنوات للهيكل الخرساني ومعالجة التربة، وعشر سنوات للمباني والعزل، وسنة كاملة للتشطيبات والسباكة والكهرباء."
     },
     "highlights": {
       "en": [
@@ -6430,8 +6430,8 @@
     "brochureUrl": "https://bona-real-estate.com/listings/rihab-villas-wajhat-al-warf/brochure.pdf",
     "project": {
       "name": {
-        "en": "Wajhat Al Warf",
-        "ar": "وجهة الويرف"
+        "en": "Malfa Jeddah",
+        "ar": "ملفى جدة"
       },
       "developer": {
         "en": "Faisal Bin Saedan Real Estate Investment & Development",
@@ -6577,13 +6577,13 @@
     "kind": "house",
     "featured": false,
     "title": {
-      "en": "Wharf Destination Villas, Jeddah",
-      "ar": "فلل وجهة الويرف بجدة"
+      "en": "Malfa Jeddah, Saah Villa, Al-Wareef",
+      "ar": "ملفى جدة، فيلا سعة، الوريف"
     },
     "location": {
       "district": {
-        "en": "Southeast Jeddah",
-        "ar": "جنوب شرق جدة"
+        "en": "Al-Wareef",
+        "ar": "الوريف"
       },
       "city": {
         "en": "Jeddah",
@@ -6615,46 +6615,46 @@
         "src": "/listings/wharf-destination-villas-jeddah/01.jpg",
         "thumb": "/listings/wharf-destination-villas-jeddah/01-thumb.webp",
         "alt": {
-          "en": "Exterior — Wharf Destination Villas, Jeddah",
-          "ar": "الواجهة الخارجية — فلل وجهة الويرف بجدة"
+          "en": "Artist's impression of a Malfa Jeddah home facade — Malfa Jeddah, Saah Villa, Al-Wareef",
+          "ar": "تصور معماري لواجهة منزل في ملفى جدة — ملفى جدة، فيلا سعة، الوريف"
         }
       },
       {
         "src": "/listings/wharf-destination-villas-jeddah/02.jpg",
         "thumb": "/listings/wharf-destination-villas-jeddah/02-thumb.webp",
         "alt": {
-          "en": "Exterior — Wharf Destination Villas, Jeddah",
-          "ar": "الواجهة الخارجية — فلل وجهة الويرف بجدة"
+          "en": "Artist's impression of a row of Malfa Jeddah homes — Malfa Jeddah, Saah Villa, Al-Wareef",
+          "ar": "تصور معماري لصف من منازل ملفى جدة — ملفى جدة، فيلا سعة، الوريف"
         }
       },
       {
         "src": "/listings/wharf-destination-villas-jeddah/03.jpg",
         "thumb": "/listings/wharf-destination-villas-jeddah/03-thumb.webp",
         "alt": {
-          "en": "Entrance — Wharf Destination Villas, Jeddah",
-          "ar": "المدخل — فلل وجهة الويرف بجدة"
+          "en": "Artist's impression of the Saah villa entrance — Malfa Jeddah, Saah Villa, Al-Wareef",
+          "ar": "تصور معماري لمدخل فيلا سعة — ملفى جدة، فيلا سعة، الوريف"
         }
       },
       {
         "src": "/listings/wharf-destination-villas-jeddah/04.jpg",
         "thumb": "/listings/wharf-destination-villas-jeddah/04-thumb.webp",
         "alt": {
-          "en": "Living room — Wharf Destination Villas, Jeddah",
-          "ar": "غرفة المعيشة — فلل وجهة الويرف بجدة"
+          "en": "Artist's impression of a living room — Malfa Jeddah, Saah Villa, Al-Wareef",
+          "ar": "تصور معماري لغرفة المعيشة — ملفى جدة، فيلا سعة، الوريف"
         }
       },
       {
         "src": "/listings/wharf-destination-villas-jeddah/05.jpg",
         "thumb": "/listings/wharf-destination-villas-jeddah/05-thumb.webp",
         "alt": {
-          "en": "Aerial view — Wharf Destination Villas, Jeddah",
-          "ar": "منظر جوي — فلل وجهة الويرف بجدة"
+          "en": "Aerial artist's impression of the wider Al-Wareef destination — Malfa Jeddah, Saah Villa, Al-Wareef",
+          "ar": "تصور جوي لوجهة الوريف — ملفى جدة، فيلا سعة، الوريف"
         }
       }
     ],
     "description": {
-      "en": "Wharf Destination is a villa community in southeast Jeddah, developed within a large master-planned suburb close to historic Jeddah and the city's business districts. The neighbourhood layout places schools, health centres, mosques and retail within a five- to ten-minute walk of every home. The development occupies a plot of more than 188,000 square metres within a wider suburb spanning over 10 million square metres, of which more than 1.3 million square metres is set aside for green space and parks.\n\nThe project comprises 269 villas arranged over a ground floor, first floor and roof level. The standard villa spans 224.30 square metres of built-up area on a 250 square metre plot, with four bedrooms, five bathrooms, a main majlis and a separate family majlis, an open kitchen, and a rooftop terrace of close to 85 square metres. Each villa includes one covered parking space.\n\nConstruction follows the Saudi Building Code, with porcelain flooring, washable paint finishes, moisture-resistant gypsum ceilings, and marble staircases inside and out. Bathrooms are fitted with slip-resistant tiling and rust-resistant fixtures, and windows are double-glazed with thermal insulation. The villas carry a ten-year structural warranty, a ten-year insulation warranty and a ten-year warranty against soil-borne pests, alongside one-year warranties on finishes, plumbing and electrical work.",
-      "ar": "تقع وجهة الويرف في جنوب شرق جدة، ضمن ضاحية كبرى قريبة من جدة التاريخية ومراكز الأعمال في المدينة. يتيح التخطيط العمراني الوصول إلى المدارس والمراكز الصحية والمساجد والأسواق سيرًا على الأقدام خلال خمس إلى عشر دقائق. تمتد أرض المشروع على أكثر من 188 ألف متر مربع ضمن ضاحية تتجاوز مساحتها الإجمالية 10 ملايين متر مربع، منها أكثر من 1.3 مليون متر مربع من المساحات الخضراء والحدائق.\n\nيضم المشروع 269 فيلا موزعة على الدور الأرضي والدور الأول ودور السطح. تبلغ مساحة البناء في الفيلا النموذجية 224.30 مترًا مربعًا على أرض مساحتها 250 مترًا مربعًا، وتضم أربع غرف نوم وخمس دورات مياه ومجلسًا رئيسيًا ومجلسًا عائليًا ومطبخًا مفتوحًا وتراسًا على السطح تقارب مساحته 85 مترًا مربعًا. وتحتوي كل فيلا على موقف سيارة مغطى واحد.\n\nيُنفَّذ البناء وفق كود البناء السعودي، بأرضيات بورسلين ودهانات قابلة للغسل وأسقف جبسية مقاومة للرطوبة وسلالم رخامية داخلية وخارجية. أما دورات المياه فمجهزة ببلاط مانع للانزلاق وتجهيزات مقاومة للصدأ، والنوافذ مزدوجة الزجاج وذات عزل حراري. وتشمل الضمانات عشر سنوات على الهيكل الإنشائي وعشر سنوات على العزل وعشر سنوات لمعالجة التربة ضد الحشرات، إضافة إلى ضمان سنة كاملة على التشطيبات والسباكة والكهرباء."
+      "en": "Malfa Jeddah is a villa community in southeast Jeddah, developed within NHC's Al-Wareef destination, a large master-planned suburb close to historic Jeddah and the city's business districts. The neighbourhood layout places schools, health centres, mosques and retail within a five- to ten-minute walk of every home. The development occupies a plot of more than 188,000 square metres within a wider suburb spanning over 10 million square metres, of which more than 1.3 million square metres is set aside for green space and parks.\n\nThe Saah model accounts for 269 of the project's villas, each arranged over a ground floor, first floor and roof level. The standard villa spans 224.30 square metres of built-up area on a 250 square metre plot, with four bedrooms, five bathrooms, a main majlis and a separate family majlis, an open kitchen, and a rooftop terrace of close to 85 square metres. Each villa includes one covered parking space.\n\nConstruction follows the Saudi Building Code, with porcelain flooring, washable paint finishes, moisture-resistant gypsum ceilings, and marble staircases inside and out. Bathrooms are fitted with slip-resistant tiling and rust-resistant fixtures, and windows are double-glazed with thermal insulation. The villas carry a ten-year structural warranty, a ten-year insulation warranty and a ten-year warranty against soil-borne pests, alongside one-year warranties on finishes, plumbing and electrical work.",
+      "ar": "يقع مشروع ملفى جدة في جنوب شرق جدة، ضمن وجهة الوريف التابعة للشركة الوطنية للإسكان، وهي ضاحية كبرى قريبة من جدة التاريخية ومراكز الأعمال في المدينة. يتيح التخطيط العمراني الوصول إلى المدارس والمراكز الصحية والمساجد والأسواق سيرًا على الأقدام خلال خمس إلى عشر دقائق. تمتد أرض المشروع على أكثر من 188 ألف متر مربع ضمن ضاحية تتجاوز مساحتها الإجمالية 10 ملايين متر مربع، منها أكثر من 1.3 مليون متر مربع من المساحات الخضراء والحدائق.\n\nيضم نموذج سعة 269 فيلا من فلل المشروع، تتوزع كل منها على الدور الأرضي والدور الأول ودور السطح. تبلغ مساحة البناء في الفيلا النموذجية 224.30 مترًا مربعًا على أرض مساحتها 250 مترًا مربعًا، وتضم أربع غرف نوم وخمس دورات مياه ومجلسًا رئيسيًا ومجلسًا عائليًا ومطبخًا مفتوحًا وتراسًا على السطح تقارب مساحته 85 مترًا مربعًا. وتحتوي كل فيلا على موقف سيارة مغطى واحد.\n\nيُنفَّذ البناء وفق كود البناء السعودي، بأرضيات بورسلين ودهانات قابلة للغسل وأسقف جبسية مقاومة للرطوبة وسلالم رخامية داخلية وخارجية. أما دورات المياه فمجهزة ببلاط مانع للانزلاق وتجهيزات مقاومة للصدأ، والنوافذ مزدوجة الزجاج وذات عزل حراري. وتشمل الضمانات عشر سنوات على الهيكل الإنشائي وعشر سنوات على العزل وعشر سنوات لمعالجة التربة ضد الحشرات، إضافة إلى ضمان سنة كاملة على التشطيبات والسباكة والكهرباء."
     },
     "highlights": {
       "en": [
@@ -6678,8 +6678,8 @@
     "brochureUrl": "https://bona-real-estate.com/listings/wharf-destination-villas-jeddah/brochure.pdf",
     "project": {
       "name": {
-        "en": "Wharf Destination",
-        "ar": "وجهة الويرف"
+        "en": "Malfa Jeddah",
+        "ar": "ملفى جدة"
       },
       "developer": {
         "en": "Faisal Bin Saedan for Investment and Real Estate Development",
