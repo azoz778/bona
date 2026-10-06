@@ -155,19 +155,19 @@ export function propertyCaption(p, advertiser, disclosures = {}, { renders = 'no
   const lines = (...xs) => xs.filter(Boolean).join('\n');
   const blocks = (...xs) => xs.filter(Boolean).join('\n\n');
   const note = RENDER_NOTE[renders] ?? {};
-  // Photos of another project say so right under the title, where a feed preview still shows it.
+  // Photos of another project say so on the caption's first line, the only one a feed preview reliably shows.
   const photos = photoNoteText(p);
   const licence = showsLicence(p.licence)
     ? { ar: `ترخيص الإعلان: ${p.licence.adNumber} · ينتهي ${p.licence.adExpiry}`, en: `Ad licence ${p.licence.adNumber} · Expires ${p.licence.adExpiry}` }
     : {};
   return {
     ar: blocks(
-      lines(p.title.ar, [place('ar'), deal.ar].filter(Boolean).join(' · '), photos.ar),
+      lines(photos.ar, p.title.ar, [place('ar'), deal.ar].filter(Boolean).join(' · ')),
       ar.join(' · '),
       lines(cta.ar, url),
       lines(disclosures.ar, `المعلن: ${advertiser.name.ar} · فال ${advertiser.fal} · ${advertiser.phone}`, licence.ar, note.ar)),
     en: blocks(
-      lines(p.title.en, [place('en'), deal.en].filter(Boolean).join(' · '), photos.en),
+      lines(photos.en, p.title.en, [place('en'), deal.en].filter(Boolean).join(' · ')),
       en.join(' · '),
       lines(cta.en, url),
       lines(disclosures.en, `Advertiser: ${advertiser.name.en} · FAL ${advertiser.fal} · ${advertiser.phone}`, licence.en, note.en)),

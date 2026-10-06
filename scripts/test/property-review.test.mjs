@@ -247,7 +247,7 @@ test('a photo note opens the caption, makes off-plan frames photographs by defau
     assert.deepEqual(eligibility(sister, r, advertiser, now, rules), []);
     const c = reviewedCopy(sister, advertiser, r);
     for (const lang of ['ar', 'en']) {
-      assert.equal(c[lang].split('\n\n')[0].split('\n')[2], NOTE[lang], `${lang}: the note is the line under title and place`);
+      assert.deepEqual(c[lang].split('\n').slice(0, 2), [NOTE[lang], sister.title[lang]], `${lang}: the note is the first line, then the title`);
       assert.equal(c[lang].split(NOTE[lang]).length, 2, `${lang}: once`);
     }
     assert.doesNotMatch(c.en, /artist's impressions/);

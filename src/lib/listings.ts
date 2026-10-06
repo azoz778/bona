@@ -15,7 +15,7 @@ export interface Listing {
   specs: { beds?: number | null; baths?: number | null; areaSqm?: number | null; plotSqm?: number | null; yearBuilt?: number | null; floors?: number | null };
   images: { src: string; thumb?: string | null; alt?: Localised }[];
   /** Set only when the owner confirmed the photos show something else, e.g. the developer's completed sister project.
-      Shown under the gallery, carried in every image label, and printed in the daily post's disclosures. */
+      Shown under the gallery, carried in every image label, and opens the daily post's caption. */
   photoNote?: Localised | null;
   /**
    * Walkthrough clips. Optional; added post-publish by the WhatsApp intake, which transcodes

@@ -281,6 +281,7 @@ in the WhatsApp group.
   preview image from a listing without a note. `llms-full.txt` carries the note.
 - The social catalogue (`publicListing`) includes it whenever it is not null: it is part of the
   facts a daily-post review binds, and listings without one keep their existing `factsSha256`.
-- The daily-post caption opens with it, and frames default to photographs even when off-plan; see
+- The daily-post caption opens with it (first line of each language block), and frames default to
+  photographs even when off-plan; see
   `docs/daily-property-publishing.md` for the publisher's refusals.
 - `test/photo-note.test.mjs` checks every surface above on the built site.
