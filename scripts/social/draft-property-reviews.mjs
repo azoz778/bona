@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import { SITE, imageUrl, sha256, fingerprint, advertiserFingerprint, policyRules, eligibility, reviewedCopy } from './lib/property-daily.mjs';
-import { frameProblem, contactSheet, disclosuresFor, liveCatalogue } from './lib/property-review.mjs';
+import { frameProblem, contactSheet, disclosuresFor, defaultKind, liveCatalogue } from './lib/property-review.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -55,7 +55,7 @@ export async function main(argv = process.argv.slice(2), { fetchImpl = fetch, no
     }
     let sheet = null;
     if (frames.length) { sheet = `${p.id}.jpg`; fs.writeFileSync(path.join(out, sheet), await contactSheet(frames)); }
-    const preview = { legalDisclosures: disclosuresFor(p), photos: [{ kind: p.category === 'off-plan' ? 'render' : 'photograph' }] };
+    const preview = { legalDisclosures: disclosuresFor(p), photos: [{ kind: defaultKind(p) }] };
     drafts.listings[p.id] = { title: p.title, category: p.category, type: p.type ?? null, city: p.location?.city?.en ?? null,
       factsSha256: fingerprint(p), page: `${SITE}/properties/${p.slug}/`, sheet, usable: frames.length,
       frames: frames.map(({ buffer, ...f }) => f), rejected, captionPreview: reviewedCopy(p, live.advertiser, preview) };

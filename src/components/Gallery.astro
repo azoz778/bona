@@ -41,6 +41,7 @@ const rtl = locale === 'ar';
   <dialog class="lightbox" data-lightbox aria-label={t(ui.gallery, locale)}>
     <div class="absolute inset-x-0 top-0 z-[2] flex items-center justify-between px-4 py-4">
       <p class="label text-ivory/80" dir="ltr"><span data-lb-current>1</span> / {images.length}</p>
+      {l.photoNote && <p class="mx-4 min-w-0 flex-1 text-center text-[12px] leading-snug text-ivory/80" data-photo-note>{t(l.photoNote, locale)}</p>}
       <button type="button" class="lb-btn !static" data-lb-close aria-label={t(ui.close, locale)}><Icon name="close" size={22} /></button>
     </div>
     <button type="button" class="lb-btn top-1/2 -translate-y-1/2 start-3" data-lb-prev aria-label={t(ui.previousImage, locale)}><Icon name={rtl ? 'chevron-right' : 'chevron-left'} size={22} /></button>

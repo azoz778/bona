@@ -10,7 +10,7 @@ export function publicListing(p) {
   out.images = (p.images ?? []).map(({src,thumb,alt})=>({src,thumb,alt}));
   out.licence = p.licence ? {adNumber:p.licence.adNumber ?? null,adExpiry:p.licence.adExpiry ?? null,wafiNumber:p.licence.wafiNumber ?? null} : null;
   // Only when set: adding the key to every listing would change every reviewed listing's factsSha256.
-  if (p.photoNote) out.photoNote = {en:p.photoNote.en ?? null,ar:p.photoNote.ar ?? null};
+  if (p.photoNote != null) out.photoNote = {en:p.photoNote?.en ?? null,ar:p.photoNote?.ar ?? null};
   return out;
 }
 export const fingerprint = p => sha256(JSON.stringify(publicListing(p)));
@@ -86,9 +86,6 @@ export function eligibility(p, review, advertiser, now = new Date(), rules = STR
         e.contactMatches !== true || !fresh(e.verifiedAt,now,30)) reasons.push('licence_and_marketing_authority_unverified');
   }
   if (review.legalDisclosuresVerified !== true || !review.legalDisclosures?.ar?.trim() || !review.legalDisclosures?.en?.trim()) reasons.push('property_condition_services_and_rights_disclosures_pending');
-  // Photos of another project (an owner-confirmed photoNote) only go out with that note in the caption.
-  if (p?.photoNote && !(typeof p.photoNote.ar === 'string' && p.photoNote.ar.trim() && review.legalDisclosures?.ar?.includes(p.photoNote.ar.trim()) &&
-      typeof p.photoNote.en === 'string' && p.photoNote.en.trim() && review.legalDisclosures?.en?.includes(p.photoNote.en.trim()))) reasons.push('photo_note_not_disclosed');
   if (!advertiser?.name?.ar || !advertiser?.name?.en || !/^\d{8,15}$/.test(advertiser?.fal ?? '') ||
       !/^\+\d{8,15}$/.test(advertiser?.phone ?? '')) reasons.push('advertiser_details_incomplete');
   const photos = review.photos ?? [];
@@ -103,8 +100,14 @@ export function eligibility(p, review, advertiser, now = new Date(), rules = STR
         photo.width/photo.height < 0.8 || photo.width/photo.height > 1.91 || !photo.alt?.ar || !photo.alt?.en) reasons.push('photo_quality_or_provenance_unverified');
   }
   if (photos.length && !aspectConsistent(photos)) reasons.push('carousel_aspect_mismatch');
+  // Photos of another project (an owner-confirmed photoNote): the caption opens with the note, in both languages,
+  // and none of the frames may be presented as the developer's renders of this listing.
+  const note = p?.photoNote != null ? photoNoteText(p) : null;
+  if (note && !note.ar) reasons.push('photo_note_malformed');
+  if (note && photos.some(x => x.kind === 'render')) reasons.push('photo_note_conflicts_with_renders');
   const copy = reviewedCopy(p,advertiser,review);
   if (review.captionSha256 !== sha256(JSON.stringify(copy))) reasons.push('caption_changed_since_review');
+  if (note?.ar && !(copy.ar.includes(note.ar) && copy.en.includes(note.en))) reasons.push('photo_note_not_in_caption');
   // The text publish.mjs composeCaption() sends to Instagram for a two-language caption, held to graph.mjs's limits.
   const text = [copy.ar, copy.en].join('\n\n—\n\n') + '\n\n' + copy.hashtags.join(' ');
   if (text.length > CAPTION_MAX_CHARS || countHashtags(text) > CAPTION_MAX_HASHTAGS) reasons.push('caption_exceeds_platform_limits');
@@ -120,6 +123,11 @@ const RENDER_NOTE = Object.freeze({
   all: { ar: 'الصور تصاميم تصوّرية من المطوّر.', en: "Images are the developer's artist's impressions." },
   some: { ar: 'بعض الصور تصاميم تصوّرية من المطوّر.', en: "Some images are the developer's artist's impressions." },
 });
+/** A listing's photoNote when it is usable in both languages (Arabic really Arabic), else {}. */
+export function photoNoteText(p) {
+  const n = p?.photoNote, en = typeof n?.en === 'string' ? n.en.trim() : '', ar = typeof n?.ar === 'string' ? n.ar.trim() : '';
+  return en && ar && /[\u0600-\u06FF]/.test(ar) ? { ar, en } : {};
+}
 export function propertyCaption(p, advertiser, disclosures = {}, { renders = 'none' } = {}) {
   const n = x => Number(x).toLocaleString('en-US');
   const ar = [], en = [];
@@ -145,17 +153,19 @@ export function propertyCaption(p, advertiser, disclosures = {}, { renders = 'no
   const lines = (...xs) => xs.filter(Boolean).join('\n');
   const blocks = (...xs) => xs.filter(Boolean).join('\n\n');
   const note = RENDER_NOTE[renders] ?? {};
+  // Photos of another project say so right under the title, where a feed preview still shows it.
+  const photos = photoNoteText(p);
   const licence = showsLicence(p.licence)
     ? { ar: `ترخيص الإعلان: ${p.licence.adNumber} · ينتهي ${p.licence.adExpiry}`, en: `Ad licence ${p.licence.adNumber} · Expires ${p.licence.adExpiry}` }
     : {};
   return {
     ar: blocks(
-      lines(p.title.ar, [place('ar'), deal.ar].filter(Boolean).join(' · ')),
+      lines(p.title.ar, [place('ar'), deal.ar].filter(Boolean).join(' · '), photos.ar),
       ar.join(' · '),
       lines(cta.ar, url),
       lines(disclosures.ar, `المعلن: ${advertiser.name.ar} · فال ${advertiser.fal} · ${advertiser.phone}`, licence.ar, note.ar)),
     en: blocks(
-      lines(p.title.en, [place('en'), deal.en].filter(Boolean).join(' · ')),
+      lines(p.title.en, [place('en'), deal.en].filter(Boolean).join(' · '), photos.en),
       en.join(' · '),
       lines(cta.en, url),
       lines(disclosures.en, `Advertiser: ${advertiser.name.en} · FAL ${advertiser.fal} · ${advertiser.phone}`, licence.en, note.en)),
