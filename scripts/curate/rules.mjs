@@ -247,8 +247,8 @@ export function faqProblems(faq) {
  * gallery, appended to every image label, and printed in the daily post's disclosures.
  */
 const letters = (s, re) => (typeof s === 'string' ? s.match(re) ?? [] : []).length;
-/** Arabic letters proper: not the block's punctuation (،) or digits (١), which say nothing. */
-export const AR_LETTER_RE = /[\u0621-\u064A\u0671-\u06D3]/g;
+/** Arabic letters proper: not the block's punctuation (،), digits (١) or tatweel (ـ, U+0640), which say nothing. */
+export const AR_LETTER_RE = /[\u0621-\u063A\u0641-\u064A\u0671-\u06D3]/g;
 export const EN_LETTER_RE = /[A-Za-z]/g;
 export function photoNoteProblems(n) {
   if (n === undefined || n === null) return [];

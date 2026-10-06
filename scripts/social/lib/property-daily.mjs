@@ -128,7 +128,7 @@ const RENDER_NOTE = Object.freeze({
 export function photoNoteText(p) {
   const n = p?.photoNote, en = typeof n?.en === 'string' ? n.en.trim() : '', ar = typeof n?.ar === 'string' ? n.ar.trim() : '';
   const count = (s, re) => (s.match(re) ?? []).length;
-  return count(en, /[A-Za-z]/g) >= 3 && count(ar, /[\u0621-\u064A\u0671-\u06D3]/g) >= 3 ? { ar, en } : {};
+  return count(en, /[A-Za-z]/g) >= 3 && count(ar, /[\u0621-\u063A\u0641-\u064A\u0671-\u06D3]/g) >= 3 ? { ar, en } : {};
 }
 export function propertyCaption(p, advertiser, disclosures = {}, { renders = 'none' } = {}) {
   const n = x => Number(x).toLocaleString('en-US');
