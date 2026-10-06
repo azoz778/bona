@@ -246,12 +246,16 @@ export function faqProblems(faq) {
  * (for example the developer's completed sister project). One sentence per language; it is shown under the
  * gallery, appended to every image label, and printed in the daily post's disclosures.
  */
+const letters = (s, re) => (typeof s === 'string' ? s.match(re) ?? [] : []).length;
+/** Arabic letters proper: not the block's punctuation (،) or digits (١), which say nothing. */
+export const AR_LETTER_RE = /[\u0621-\u064A\u0671-\u06D3]/g;
+export const EN_LETTER_RE = /[A-Za-z]/g;
 export function photoNoteProblems(n) {
   if (n === undefined || n === null) return [];
   if (typeof n !== 'object' || Array.isArray(n)) return ['photoNote must be { en, ar }'];
   const out = [];
-  if (!nonEmpty(n.en)) out.push('photoNote.en required');
-  if (!nonEmpty(n.ar) || !AR_RE.test(n.ar)) out.push('photoNote.ar required (Arabic)');
+  if (!nonEmpty(n.en) || letters(n.en, EN_LETTER_RE) < 3) out.push('photoNote.en required (English)');
+  if (!nonEmpty(n.ar) || letters(n.ar, AR_LETTER_RE) < 3) out.push('photoNote.ar required (Arabic)');
   for (const lang of ['en', 'ar']) if (nonEmpty(n[lang]) && n[lang].length > 140) out.push(`photoNote.${lang} is ${n[lang].length} characters, keep it to one sentence of at most 140`);
   return out;
 }

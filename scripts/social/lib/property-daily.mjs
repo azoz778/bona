@@ -123,10 +123,12 @@ const RENDER_NOTE = Object.freeze({
   all: { ar: 'الصور تصاميم تصوّرية من المطوّر.', en: "Images are the developer's artist's impressions." },
   some: { ar: 'بعض الصور تصاميم تصوّرية من المطوّر.', en: "Some images are the developer's artist's impressions." },
 });
-/** A listing's photoNote when it is usable in both languages (Arabic really Arabic), else {}. */
+/** A listing's photoNote when it is usable in both languages (at least three Arabic / Latin letters; the Arabic
+    block's punctuation and digits do not count), else {}. Same rule as rules.mjs photoNoteProblems. */
 export function photoNoteText(p) {
   const n = p?.photoNote, en = typeof n?.en === 'string' ? n.en.trim() : '', ar = typeof n?.ar === 'string' ? n.ar.trim() : '';
-  return en && ar && /[\u0600-\u06FF]/.test(ar) ? { ar, en } : {};
+  const count = (s, re) => (s.match(re) ?? []).length;
+  return count(en, /[A-Za-z]/g) >= 3 && count(ar, /[\u0621-\u064A\u0671-\u06D3]/g) >= 3 ? { ar, en } : {};
 }
 export function propertyCaption(p, advertiser, disclosures = {}, { renders = 'none' } = {}) {
   const n = x => Number(x).toLocaleString('en-US');
