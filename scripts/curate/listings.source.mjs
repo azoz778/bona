@@ -359,7 +359,7 @@ export const LISTINGS = [
     images: [[1, 'facade_night'], [0, 'exterior'], [10, 'lobby'], [9, 'living'], [12, 'staircase'], [5, 'living'], [16, 'bathroom'], [18, 'bathroom']],
     description: {
       en: [
-        'NOBAL Five is a building of five residences in Al Rawdah, one apartment per floor, each occupying its entire level with a private elevator. The apartment measures 307 square metres and holds three master bedrooms, five bathrooms, a maid\'s room, a large living room and a modern kitchen.',
+        'NOBAL 5 is a building of five residences in Al Rawdah, one apartment per floor, each occupying its entire level with a private elevator. The apartment measures 307 square metres and holds three master bedrooms, five bathrooms, a maid\'s room, a large living room and a modern kitchen.',
         'Finishes include porcelain and parquet flooring and high-grade sanitaryware, with a smart-home system, central air conditioning and two private parking spaces. The developer provides a ten-year structural warranty backed by Malath Insurance, alongside warranties on plumbing, waterproofing, elevators and the underground tank.',
       ],
       ar: [
