@@ -1,6 +1,6 @@
 # Bona (بونا) — full knowledge file
 
-Last generated: 2026-09-24. Canonical site: https://bona-real-estate.com/ (Arabic: https://bona-real-estate.com/ar/).
+Last generated: 2026-10-06. Canonical site: https://bona-real-estate.com/ (Arabic: https://bona-real-estate.com/ar/).
 
 ## What Bona is
 
@@ -43,9 +43,9 @@ Values:
 - Independence (الاستقلالية): We are not tied to a developer, a portal or a franchise. The advice you get is ours.
 
 Team:
-- Abdulaziz Zidan (عبدالعزيز زيدان) — Founder & Principal (المؤسس والشريك الرئيسي), REGA FAL licence 1100313556. Bona has no other agents; anyone else claiming to act for Bona should be verified on WhatsApp +966 59 329 6933.
+- Abdulaziz Zaidan (عبدالعزيز زيدان) — Founder & Principal (المؤسس والشريك الرئيسي), REGA FAL licence 1100313556. Bona has no other agents; anyone else claiming to act for Bona should be verified on WhatsApp +966 59 329 6933.
 
-Key figures (as of 2026-09-24): Residences represented: 29 · Jeddah districts: 12 · Countries: 5 · Founded: 2026.
+Key figures (as of 2026-10-06): Residences represented: 29 · Jeddah districts: 12 · Countries: 5 · Founded: 2026.
 
 More: https://bona-real-estate.com/about/ · Arabic: https://bona-real-estate.com/ar/about/
 
@@ -275,7 +275,7 @@ Full FAQ: https://bona-real-estate.com/faq/ · Arabic: https://bona-real-estate.
 
 ## Privacy (summary)
 
-What Bona collects when you use this site or contact us, why, and your rights under the Saudi Personal Data Protection Law (PDPL) and its Implementing Regulations. Written to be read, not filed. The Arabic text is the authoritative version. Full policy (updated 2026-09-05): https://bona-real-estate.com/privacy/ · Arabic: https://bona-real-estate.com/ar/privacy/. In short: the site is static and sets no cookies; enquiry forms open WhatsApp and nothing is stored by the site; analytics (GA4 / Meta Pixel) are built in but currently disabled; data subjects have PDPL rights of access, correction, deletion and consent withdrawal via WhatsApp +966 59 329 6933.
+What Bona collects when you use this site or contact us, why, and your rights under the Saudi Personal Data Protection Law (PDPL) and its Implementing Regulations. Written to be read, not filed. The Arabic text is the authoritative version. Full policy (updated 2026-10-01): https://bona-real-estate.com/privacy/ · Arabic: https://bona-real-estate.com/ar/privacy/. In short: the site is static and sets no cookies; enquiry forms open WhatsApp and nothing is stored by the site; analytics (GA4 / Meta Pixel) are built in but currently disabled; data subjects have PDPL rights of access, correction, deletion and consent withdrawal via WhatsApp +966 59 329 6933.
 
 ## Listings (48 live)
 
@@ -418,11 +418,11 @@ Completion is scheduled for December 2028, with freehold ownership open to all n
 
 Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Trump%20Cliff%20Villas%2C%20AIDA%2C%20Muscat%20(BONA-032).
 
-### Neptune Villas, Interiors by Mouawad, North Riyadh — فلل نبتون بتصميم داخلي من معوض، شمال الرياض
+### Neptune, Interiors by Mouawad, SEDRA — نبتون من معوّض للتصميمات الداخلية، سدرة
 - ID: BONA-044 (ref VIL-029)
 - URL: https://bona-real-estate.com/properties/neptune-villas-north-riyadh/ · Arabic: https://bona-real-estate.com/ar/properties/neptune-villas-north-riyadh/
 - Kind: House · Type: Villa · Category: Off-plan · Status: available
-- Location: North Riyadh, Riyadh, Saudi Arabia (شمال الرياض، الرياض)
+- Location: SEDRA, Riyadh, Saudi Arabia (سدرة، الرياض)
 - Asking price: From SAR 4,600,000
 - Specs: 5 bed
 - Highlights: Interiors by Mouawad; Five bedrooms; 300 to 420 sqm; Under construction in north Riyadh; From SAR 4,600,000
@@ -430,7 +430,7 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 - Listed: 2026-03-21
 - Images: https://tk-storage.azoz.uk/tk-estate-media/media/neptune-interiors-by-mouawad/6-ea4d23.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/neptune-interiors-by-mouawad/8-ddced5.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/neptune-interiors-by-mouawad/1-b42395.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/neptune-interiors-by-mouawad/14-b96487.jpg
 
-Neptune Villas is a villa community under construction in north Riyadh, with interiors by the jeweller Mouawad. Each villa has five bedrooms, in sizes from 300 to 420 square metres; the renders show roof terraces and covered parking.
+Neptune, Interiors by Mouawad is a villa community under construction in north Riyadh, with interiors by the jeweller Mouawad. Each villa has five bedrooms, in sizes from 300 to 420 square metres; the renders show roof terraces and covered parking.
 
 The masterplan sets the houses along tree-lined streets around a central park and pool. Prices start from SAR 4,600,000.
 
@@ -438,15 +438,15 @@ The masterplan sets the houses along tree-lined streets around a central park an
 
 يوزع المخطط العام المنازل على شوارع تظللها الأشجار حول حديقة مركزية ومسبح. تبدأ الأسعار من 4,600,000 ريال سعودي.
 
-Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Neptune%20Villas%2C%20Interiors%20by%20Mouawad%2C%20North%20Riyadh%20(BONA-044).
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Neptune%2C%20Interiors%20by%20Mouawad%2C%20SEDRA%20(BONA-044).
 
-### Al-Wareef Townhouse, Jeddah — تاون هاوس الوريف، جدة
+### Malfa Jeddah, Maren Townhouse, Al-Wareef — ملفى جدة، تاون هاوس مرن، الوريف
 - ID: BONA-W003 (ref WA-20260906-ACB9C8)
 - URL: https://bona-real-estate.com/properties/al-wareef-townhouse-jeddah/ · Arabic: https://bona-real-estate.com/ar/properties/al-wareef-townhouse-jeddah/
 - Kind: House · Type: Villa · Category: Off-plan · Status: available
-- Location: Al Wareef, Jeddah, Saudi Arabia (الوريف، جدة)
+- Location: Al-Wareef, Jeddah, Saudi Arabia (الوريف، جدة)
 - Asking price: Price on request
-- Project: Wajhat Al-Wareef (وجهة الوريف) · Developer: National Housing Company (NHC) and Faisal Bin Saedan Real Estate Development
+- Project: Malfa Jeddah (ملفى جدة) · Developer: National Housing Company (NHC) and Faisal Bin Saedan Real Estate Development
 - Unit: unit Maren model
 - Specs: 3 bed, 4 bath, 192 m² built, 200 m² plot
 - Coordinates: 21.338, 39.304778
@@ -468,15 +468,15 @@ Construction follows the Saudi Building Code, with porcelain flooring, washable 
 
 يتبع البناء كود البناء السعودي، بأرضيات بورسلين ودهانات قابلة للغسل وأسقف جبسية مقاومة للرطوبة وسلالم رخامية داخلية وخارجية. تأتي الأبواب والنوافذ بمواصفات عزل حراري وزجاج مزدوج، مع إنارة LED في مختلف الأرجاء. ويحصل المنزل على ضمان لمدة سنة على التشطيبات والسباكة والأعمال الكهربائية، وضمان لعشر سنوات على الهيكل الإنشائي والعزل ومعالجة التربة ضد الحشرات.
 
-Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Al-Wareef%20Townhouse%2C%20Jeddah%20(BONA-W003).
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Malfa%20Jeddah%2C%20Maren%20Townhouse%2C%20Al-Wareef%20(BONA-W003).
 
-### Al Warf District, Jeddah — وجهة الويرف، جدة
+### Malfa Jeddah, Al-Wareef — ملفى جدة، الوريف
 - ID: BONA-W006 (ref WA-20260906-AC4C77)
 - URL: https://bona-real-estate.com/properties/al-warf-district-jeddah/ · Arabic: https://bona-real-estate.com/ar/properties/al-warf-district-jeddah/
 - Kind: House · Type: Villa · Category: Off-plan · Status: available
-- Location: Southeast Jeddah, Jeddah, Saudi Arabia (جنوب شرق جدة، جدة)
+- Location: Al-Wareef, Jeddah, Saudi Arabia (الوريف، جدة)
 - Asking price: Price on request
-- Project: Al Warf District (وجهة الويرف) · Developer: Faisal Bin Saedan Real Estate Investment & Development
+- Project: Malfa Jeddah (ملفى جدة) · Developer: Faisal Bin Saedan Real Estate Investment & Development
 - Coordinates: 21.338, 39.304778
 - Highlights: Eight villa & townhouse models; 693 units across the community; Green boulevard and parks; 5–10 minute walk to schools & mosques; 10-year structural warranty; Southeast Jeddah location
 - المميزات: ثمانية نماذج فلل وتاون هاوس؛ 693 وحدة سكنية؛ ممر أخضر وحدائق؛ خمس إلى عشر دقائق للمدارس والمساجد؛ ضمان إنشائي 10 سنوات؛ موقع في جنوب شرق جدة
@@ -484,23 +484,23 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 - Listed: 2026-09-06
 - Images: /listings/al-warf-district-jeddah/01.jpg , /listings/al-warf-district-jeddah/02.jpg , /listings/al-warf-district-jeddah/03.jpg , /listings/al-warf-district-jeddah/04.jpg , /listings/al-warf-district-jeddah/05.jpg , /listings/al-warf-district-jeddah/06.jpg
 
-Al Warf sits in southeast Jeddah, close to the historic city center and its main arteries. The development is planned as part of the wider Wjhat destinations program, with schools, mosques, health centers and retail reachable within a five- to ten-minute walk on a dedicated pedestrian network.
+Malfa Jeddah sits in southeast Jeddah, close to the historic city center and its main arteries. The development is planned as part of NHC's wider Al-Wareef destination, with schools, mosques, health centers and retail reachable within a five- to ten-minute walk on a dedicated pedestrian network.
 
 The residential collection comprises 693 villas and townhouses across eight models — A, B, C and D villas, the Ufuq and Maren townhouses, and the Saah and Rihab villas. Built-up areas range from about 161 sqm for the townhouses to 271 sqm for the largest villa model, with three to four bedrooms and four to six bathrooms depending on the model. Each home is arranged over a ground floor, first floor and roof level, with a private majlis, living and dining areas, and a private parking space.
 
 Construction follows the Saudi Building Code, with porcelain flooring, washable paint, moisture-resistant gypsum ceilings and marble cladding to interior and exterior walls. Bathrooms use non-slip tiling and rust-resistant fittings, while doors and double-glazed windows are rated for water resistance and thermal insulation. The homes carry a ten-year structural warranty alongside shorter warranties on finishing, plumbing and electrical work.
 
-The wider Wjhat Al Warf destination is planned for around 12,000 residential units, 21 retail centers, ten schools, twelve mosques, two health centers and landscaped green spaces exceeding a million square meters. Renderings throughout the brochure are for illustrative purposes, as the project remains under development.
+The wider Al-Wareef destination is planned for around 12,000 residential units, 21 retail centers, ten schools, twelve mosques, two health centers and landscaped green spaces exceeding a million square meters. Renderings throughout the brochure are for illustrative purposes, as the project remains under development.
 
-تقع وجهة الويرف في جنوب شرق جدة، على مقربة من قلب المدينة التاريخية ومداخلها الرئيسية. يأتي المشروع ضمن برنامج «وجهات» التطويري الأوسع، حيث تتوزع المدارس والمساجد والمراكز الصحية والمرافق التجارية على مسافة خمس إلى عشر دقائق سيرًا عبر شبكة ممرات مخصصة للمشاة.
+يقع مشروع ملفى جدة في جنوب شرق جدة، على مقربة من قلب المدينة التاريخية ومداخلها الرئيسية. يأتي المشروع ضمن وجهة الوريف الأوسع التابعة للشركة الوطنية للإسكان، حيث تتوزع المدارس والمساجد والمراكز الصحية والمرافق التجارية على مسافة خمس إلى عشر دقائق سيرًا عبر شبكة ممرات مخصصة للمشاة.
 
 تضم المجموعة السكنية 693 وحدة بين فلل وتاون هاوس موزعة على ثمانية نماذج: فلل A وB وC وD، وتاون هاوس أفق ومرن، وفلل سعة ورحاب. تتراوح مساحات البناء بين نحو 161 مترًا مربعًا للتاون هاوس و271 مترًا مربعًا لأكبر نماذج الفلل، بواقع ثلاث إلى أربع غرف نوم وأربع إلى ست دورات مياه بحسب النموذج. تتوزع كل وحدة على دور أرضي وأول وسطح، وتضم مجلسًا خاصًا وصالة معيشة وطعام وموقف سيارة خاص.
 
 يلتزم التنفيذ بكود البناء السعودي، مع أرضيات بورسلين ودهانات قابلة للغسل وأسقف جبسية مقاومة للرطوبة وكسوة رخامية داخلية وخارجية. تُجهَّز دورات المياه ببلاط مانع للانزلاق وتجهيزات مقاومة للصدأ، فيما تحمل الأبواب والنوافذ المزدوجة الزجاج مواصفات عزل مائي وحراري. وتشمل الضمانات عشر سنوات على الهيكل الإنشائي، إلى جانب ضمانات أقصر على التشطيبات والسباكة والكهرباء.
 
-تخطط وجهة الويرف الأوسع لتضم نحو 12,000 وحدة سكنية، و21 مركزًا تجاريًا، وعشر مدارس، و12 مسجدًا وجامعًا، ومركزين صحيين، ومساحات خضراء تتجاوز مليون متر مربع. الصور ثلاثية الأبعاد الواردة في الكتيب مخصصة للأغراض التوضيحية فقط، إذ ما يزال المشروع قيد التطوير.
+تخطط وجهة الوريف الأوسع لتضم نحو 12,000 وحدة سكنية، و21 مركزًا تجاريًا، وعشر مدارس، و12 مسجدًا وجامعًا، ومركزين صحيين، ومساحات خضراء تتجاوز مليون متر مربع. الصور ثلاثية الأبعاد الواردة في الكتيب مخصصة للأغراض التوضيحية فقط، إذ ما يزال المشروع قيد التطوير.
 
-Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Al%20Warf%20District%2C%20Jeddah%20(BONA-W006).
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Malfa%20Jeddah%2C%20Al-Wareef%20(BONA-W006).
 
 ### Aseel Al Ghoroub 2, Al Madinah — أصيل الغروب ٢، المدينة المنورة
 - ID: BONA-W015 (ref WA-20260907-AC53D4)
@@ -509,8 +509,8 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 - Location: Al Ghoroub Suburb, Al Madinah Al Munawwarah, Saudi Arabia (ضاحية الغروب، المدينة المنورة)
 - Asking price: Price on request
 - Project: Aseel Al Ghoroub 2 (أصيل الغروب ٢) · Developer: Ambatt Real Estate
-- Highlights: Within Ghoroub Destination community; Three villa layouts, 245–294 sqm; Steps from a 1,000,000 sqm park; Close to Al Madinah's main roads; Structural and waterproofing warranty; Private front, side and rear courtyards
-- المميزات: ضمن مجتمع وجهة الغروب؛ ثلاثة نماذج فلل بمساحات ٢٤٥-٢٩٤ م²؛ بجوار حديقة بمساحة مليون م²؛ قرب شبكة الطرق الرئيسية بالمدينة المنورة؛ ضمان على الهيكل الإنشائي والعزل المائي؛ أفنية أمامية وجانبية وخلفية خاصة
+- Highlights: Within Ghoroub Destination community; Three villa layouts, 232–294 sqm; Steps from a 1,000,000 sqm park; Close to Al Madinah's main roads; Structural and waterproofing warranty; Private front, side and rear courtyards
+- المميزات: ضمن مجتمع وجهة الغروب؛ ثلاثة نماذج فلل بمساحات ٢٣٢-٢٩٤ م²؛ بجوار حديقة بمساحة مليون م²؛ قرب شبكة الطرق الرئيسية بالمدينة المنورة؛ ضمان على الهيكل الإنشائي والعزل المائي؛ أفنية أمامية وجانبية وخلفية خاصة
 - Brochure: https://bona-real-estate.com/listings/aseel-al-ghoroub-2-al-madinah/brochure.pdf
 - Listed: 2026-09-07
 - Images: /listings/aseel-al-ghoroub-2-al-madinah/01.jpg , /listings/aseel-al-ghoroub-2-al-madinah/02.jpg , /listings/aseel-al-ghoroub-2-al-madinah/03.jpg , /listings/aseel-al-ghoroub-2-al-madinah/04.jpg , /listings/aseel-al-ghoroub-2-al-madinah/05.jpg , /listings/aseel-al-ghoroub-2-al-madinah/06.jpg
@@ -664,8 +664,8 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 - Asking price: Price on request
 - Specs: 4 bed, 7 bath, 550 m² built, 325 m² plot
 - Coordinates: 21.600939, 39.113731
-- Highlights: Private indoor pool; Rooftop terrace with garden; Four bedrooms, seven bathrooms; Home elevator; Two covered parking spaces; Ten-year structural warranty
-- المميزات: مسبح داخلي خاص؛ تراس على السطح بحديقة؛ أربع غرف نوم وسبعة حمامات؛ مصعد داخلي؛ موقفان مغطاة للسيارات؛ ضمان إنشائي لعشر سنوات
+- Highlights: Private pool; Rooftop terrace with garden; Four bedrooms, seven bathrooms; Home elevator; Two covered parking spaces; Ten-year structural warranty
+- المميزات: مسبح خاص؛ تراس على السطح بحديقة؛ أربع غرف نوم وسبعة حمامات؛ مصعد داخلي؛ موقفان مغطاة للسيارات؛ ضمان إنشائي لعشر سنوات
 - Brochure: https://bona-real-estate.com/listings/modern-villa-in-al-shati-jeddah/brochure.pdf
 - Listed: 2026-09-06
 - Images: /listings/modern-villa-in-al-shati-jeddah/01.jpg , /listings/modern-villa-in-al-shati-jeddah/02.jpg , /listings/modern-villa-in-al-shati-jeddah/03.jpg , /listings/modern-villa-in-al-shati-jeddah/04.jpg , /listings/modern-villa-in-al-shati-jeddah/05.jpg , /listings/modern-villa-in-al-shati-jeddah/06.jpg
@@ -688,13 +688,13 @@ The build carries a ten-year structural warranty, ten-year waterproofing, two-ye
 
 Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Modern%20Villa%20in%20Al%20Shati%2C%20Jeddah%20(BONA-W012).
 
-### Rihab Villas, Wajhat Al Warf — فلل رحاب في وجهة الويرف، جدة
+### Malfa Jeddah, Rihab Villa, Al-Wareef — ملفى جدة، فيلا رحاب، الوريف
 - ID: BONA-W005 (ref WA-20260906-AC7B92)
 - URL: https://bona-real-estate.com/properties/rihab-villas-wajhat-al-warf/ · Arabic: https://bona-real-estate.com/ar/properties/rihab-villas-wajhat-al-warf/
 - Kind: House · Type: Villa · Category: Off-plan · Status: available
-- Location: Wajhat Al Warf, Jeddah, Saudi Arabia (وجهة الويرف، جدة)
+- Location: Al-Wareef, Jeddah, Saudi Arabia (الوريف، جدة)
 - Asking price: Price on request
-- Project: Wajhat Al Warf (وجهة الويرف) · Developer: Faisal Bin Saedan Real Estate Investment & Development
+- Project: Malfa Jeddah (ملفى جدة) · Developer: Faisal Bin Saedan Real Estate Investment & Development
 - Specs: 4 bed, 6 bath, 271.47 m² built, 275 m² plot
 - Coordinates: 21.338, 39.304778
 - Highlights: 4 bedrooms plus maid's room; 6 bathrooms across 3 floors; Majlis and separate family majlis; Front and back roof terraces; 10-year structural warranty; Walkable community amenities
@@ -703,25 +703,25 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 - Listed: 2026-09-06
 - Images: /listings/rihab-villas-wajhat-al-warf/01.jpg , /listings/rihab-villas-wajhat-al-warf/02.jpg , /listings/rihab-villas-wajhat-al-warf/03.jpg , /listings/rihab-villas-wajhat-al-warf/04.jpg
 
-Rihab is a villa model within Wajhat Al Warf, a residential district developed in southeast Jeddah, close to the historic city core and the main business centers. A planned pedestrian network within the wider community places schools, mosques, health centers and shops within a five to ten minute walk.
+Rihab is a villa model within Malfa Jeddah, a residential community in NHC's Al-Wareef destination in southeast Jeddah, close to the historic city core and the main business centers. A planned pedestrian network within the wider community places schools, mosques, health centers and shops within a five to ten minute walk.
 
-The broader district spans more than 10 million square meters and includes over 12,000 residential units, 21 commercial centers, 10 schools, 7 mosques and 5 larger mosques, and two health centers, alongside green spaces and parks totalling more than 1.3 million square meters.
+The wider destination spans more than 10 million square meters and includes over 12,000 residential units, 21 commercial centers, 10 schools, 7 mosques and 5 larger mosques, and two health centers, alongside green spaces and parks totalling more than 1.3 million square meters.
 
 The Rihab villa sits on a 275 sqm plot with a total built-up area of 271.47 sqm across three floors. It has four bedrooms and a maid's room, six bathrooms, a ground-floor majlis and a separate family majlis on the first floor, a living and dining area, a kitchen, and front and back roof terraces, with one open parking space.
 
 Construction follows the Saudi Building Code, with porcelain flooring, washable paint, moisture-resistant gypsum ceilings, and marble staircases inside and out. Doors and windows are water-resistant and thermally insulated with double glazing, and the villa has integrated electrical, air-conditioning and telecom wiring, LED lighting and irrigation for the garden. It carries a 10-year warranty on the concrete structure and soil treatment, 10 years on the building and insulation, and one year on finishes, plumbing and electrical work.
 
-تقع فلل رحاب ضمن وجهة الويرف، وهي وجهة سكنية طُوّرت في جنوب شرق جدة، على مقربة من قلب المدينة التاريخي ومراكز الأعمال الرئيسية فيها. وتتيح شبكة مشي مخططة داخل الوجهة الوصول إلى المدارس والمساجد والمراكز الصحية والأسواق خلال خمس إلى عشر دقائق سيرًا على الأقدام.
+تقع فلل رحاب ضمن مشروع ملفى جدة في وجهة الوريف التابعة للشركة الوطنية للإسكان، وهي وجهة سكنية طُوّرت في جنوب شرق جدة، على مقربة من قلب المدينة التاريخي ومراكز الأعمال الرئيسية فيها. وتتيح شبكة مشي مخططة داخل الوجهة الوصول إلى المدارس والمساجد والمراكز الصحية والأسواق خلال خمس إلى عشر دقائق سيرًا على الأقدام.
 
-تمتد الضاحية التي تنتمي إليها الوجهة على مساحة تتجاوز 10 ملايين متر مربع، وتضم أكثر من 12,000 وحدة سكنية، و21 مركزًا تجاريًا، و10 مدارس، و7 مساجد و5 جوامع، ومركزين صحيين، إضافة إلى مساحات خضراء وحدائق تتجاوز مساحتها 1.3 مليون متر مربع.
+تمتد وجهة الوريف الأوسع على مساحة تتجاوز 10 ملايين متر مربع، وتضم أكثر من 12,000 وحدة سكنية، و21 مركزًا تجاريًا، و10 مدارس، و7 مساجد و5 جوامع، ومركزين صحيين، إضافة إلى مساحات خضراء وحدائق تتجاوز مساحتها 1.3 مليون متر مربع.
 
 تقوم فيلا رحاب على أرض مساحتها 275 مترًا مربعًا، بمساحة بناء إجمالية تبلغ 271.47 مترًا مربعًا موزعة على ثلاثة طوابق. وتضم أربع غرف نوم وغرفة خادمة وست دورات مياه، إلى جانب مجلس في الدور الأرضي ومجلس عائلي مستقل في الدور الأول، وصالة معيشة وصالة طعام ومطبخ، وسطحين أمامي وخلفي، مع موقف سيارة واحد مفتوح.
 
 يُنفَّذ البناء وفق كود البناء السعودي للمباني السكنية، بأرضيات بورسلين ودهانات قابلة للغسل وأسقف جبسية مقاومة للرطوبة وسلالم رخامية داخلية وخارجية. وتأتي الأبواب مقاومة للماء والنوافذ بعزل حراري وزجاج مزدوج، مع تأسيس متكامل للكهرباء والتكييف والاتصالات، وإنارة LED وأنظمة ري للحديقة. وتشمل الضمانات عشر سنوات للهيكل الخرساني ومعالجة التربة، وعشر سنوات للمباني والعزل، وسنة كاملة للتشطيبات والسباكة والكهرباء.
 
-Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Rihab%20Villas%2C%20Wajhat%20Al%20Warf%20(BONA-W005).
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Malfa%20Jeddah%2C%20Rihab%20Villa%2C%20Al-Wareef%20(BONA-W005).
 
-### Sadana Townhouse, Al Rawdah — تاون هاوس سدانة، الروضة
+### Sadana Townhouse, Al Rawdah — سدنة تاون هاوس، الروضة
 - ID: BONA-W011 (ref WA-20260906-AC5466)
 - URL: https://bona-real-estate.com/properties/sadana-townhouse-al-rawdah/ · Arabic: https://bona-real-estate.com/ar/properties/sadana-townhouse-al-rawdah/
 - Kind: House · Type: Duplex · Category: Off-plan · Status: available
@@ -741,7 +741,7 @@ The ground floor holds the majlis, a living room, a dining area, an open America
 
 Outdoor space includes a private garden and, on the roof level, a plunge pool with a seating area. An interior skylight brings daylight into the stairwell, and the layout allows some internal walls to be adjusted. The development includes a shared gym and lift infrastructure for future installation.
 
-تاون هاوس سدانة مشروع سكني مسوّر في حي الروضة بجدة، يتكوّن من صفّين متقابلين من الوحدات المتلاصقة. تبلغ مساحة الوحدة الواحدة 364.70 متراً مربعاً موزعة على ثلاثة طوابق: دور أرضي بمساحة 139.3 متراً مربعاً، ودور أول بمساحة 112.7 متراً مربعاً، وروف بمساحة 112.7 متراً مربعاً.
+سدنة تاون هاوس مشروع سكني مسوّر في حي الروضة بجدة، يتكوّن من صفّين متقابلين من الوحدات المتلاصقة. تبلغ مساحة الوحدة الواحدة 364.70 متراً مربعاً موزعة على ثلاثة طوابق: دور أرضي بمساحة 139.3 متراً مربعاً، ودور أول بمساحة 112.7 متراً مربعاً، وروف بمساحة 112.7 متراً مربعاً.
 
 يضم الدور الأرضي مجلساً وصالة معيشة وركن طعام ومطبخاً أمريكياً مفتوحاً ودورة مياه للضيوف وغرفة خادمة بحمام خاص. ويضم الدور الأول والروف معاً ثلاث غرف نوم ماستر، لكل منها غرفة ملابس خاصة، بالإضافة إلى صالة معيشة ثانية.
 
@@ -749,13 +749,13 @@ Outdoor space includes a private garden and, on the roof level, a plunge pool wi
 
 Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Sadana%20Townhouse%2C%20Al%20Rawdah%20(BONA-W011).
 
-### Wharf Destination Villas, Jeddah — فلل وجهة الويرف بجدة
+### Malfa Jeddah, Saah Villa, Al-Wareef — ملفى جدة، فيلا سعة، الوريف
 - ID: BONA-W004 (ref WA-20260906-ACBA8B)
 - URL: https://bona-real-estate.com/properties/wharf-destination-villas-jeddah/ · Arabic: https://bona-real-estate.com/ar/properties/wharf-destination-villas-jeddah/
 - Kind: House · Type: Villa · Category: Off-plan · Status: available
-- Location: Southeast Jeddah, Jeddah, Saudi Arabia (جنوب شرق جدة، جدة)
+- Location: Al-Wareef, Jeddah, Saudi Arabia (الوريف، جدة)
 - Asking price: Price on request
-- Project: Wharf Destination (وجهة الويرف) · Developer: Faisal Bin Saedan for Investment and Real Estate Development
+- Project: Malfa Jeddah (ملفى جدة) · Developer: Faisal Bin Saedan for Investment and Real Estate Development
 - Specs: 4 bed, 5 bath, 224.3 m² built, 250 m² plot
 - Coordinates: 21.338, 39.304778
 - Highlights: 269 villas; 4 bedrooms, 5 bathrooms; Rooftop terrace; Two majlis areas; Southeast Jeddah location; 10-year structural warranty
@@ -764,23 +764,23 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 - Listed: 2026-09-06
 - Images: /listings/wharf-destination-villas-jeddah/01.jpg , /listings/wharf-destination-villas-jeddah/02.jpg , /listings/wharf-destination-villas-jeddah/03.jpg , /listings/wharf-destination-villas-jeddah/04.jpg , /listings/wharf-destination-villas-jeddah/05.jpg
 
-Wharf Destination is a villa community in southeast Jeddah, developed within a large master-planned suburb close to historic Jeddah and the city's business districts. The neighbourhood layout places schools, health centres, mosques and retail within a five- to ten-minute walk of every home. The development occupies a plot of more than 188,000 square metres within a wider suburb spanning over 10 million square metres, of which more than 1.3 million square metres is set aside for green space and parks.
+Malfa Jeddah is a villa community in southeast Jeddah, developed within NHC's Al-Wareef destination, a large master-planned suburb close to historic Jeddah and the city's business districts. The neighbourhood layout places schools, health centres, mosques and retail within a five- to ten-minute walk of every home. The development occupies a plot of more than 188,000 square metres within a wider suburb spanning over 10 million square metres, of which more than 1.3 million square metres is set aside for green space and parks.
 
-The project comprises 269 villas arranged over a ground floor, first floor and roof level. The standard villa spans 224.30 square metres of built-up area on a 250 square metre plot, with four bedrooms, five bathrooms, a main majlis and a separate family majlis, an open kitchen, and a rooftop terrace of close to 85 square metres. Each villa includes one covered parking space.
+The Saah model accounts for 269 of the project's villas, each arranged over a ground floor, first floor and roof level. The standard villa spans 224.30 square metres of built-up area on a 250 square metre plot, with four bedrooms, five bathrooms, a main majlis and a separate family majlis, an open kitchen, and a rooftop terrace of close to 85 square metres. Each villa includes one open parking space.
 
 Construction follows the Saudi Building Code, with porcelain flooring, washable paint finishes, moisture-resistant gypsum ceilings, and marble staircases inside and out. Bathrooms are fitted with slip-resistant tiling and rust-resistant fixtures, and windows are double-glazed with thermal insulation. The villas carry a ten-year structural warranty, a ten-year insulation warranty and a ten-year warranty against soil-borne pests, alongside one-year warranties on finishes, plumbing and electrical work.
 
-تقع وجهة الويرف في جنوب شرق جدة، ضمن ضاحية كبرى قريبة من جدة التاريخية ومراكز الأعمال في المدينة. يتيح التخطيط العمراني الوصول إلى المدارس والمراكز الصحية والمساجد والأسواق سيرًا على الأقدام خلال خمس إلى عشر دقائق. تمتد أرض المشروع على أكثر من 188 ألف متر مربع ضمن ضاحية تتجاوز مساحتها الإجمالية 10 ملايين متر مربع، منها أكثر من 1.3 مليون متر مربع من المساحات الخضراء والحدائق.
+يقع مشروع ملفى جدة في جنوب شرق جدة، ضمن وجهة الوريف التابعة للشركة الوطنية للإسكان، وهي ضاحية كبرى قريبة من جدة التاريخية ومراكز الأعمال في المدينة. يتيح التخطيط العمراني الوصول إلى المدارس والمراكز الصحية والمساجد والأسواق سيرًا على الأقدام خلال خمس إلى عشر دقائق. تمتد أرض المشروع على أكثر من 188 ألف متر مربع ضمن ضاحية تتجاوز مساحتها الإجمالية 10 ملايين متر مربع، منها أكثر من 1.3 مليون متر مربع من المساحات الخضراء والحدائق.
 
-يضم المشروع 269 فيلا موزعة على الدور الأرضي والدور الأول ودور السطح. تبلغ مساحة البناء في الفيلا النموذجية 224.30 مترًا مربعًا على أرض مساحتها 250 مترًا مربعًا، وتضم أربع غرف نوم وخمس دورات مياه ومجلسًا رئيسيًا ومجلسًا عائليًا ومطبخًا مفتوحًا وتراسًا على السطح تقارب مساحته 85 مترًا مربعًا. وتحتوي كل فيلا على موقف سيارة مغطى واحد.
+يضم نموذج سعة 269 فيلا من فلل المشروع، تتوزع كل منها على الدور الأرضي والدور الأول ودور السطح. تبلغ مساحة البناء في الفيلا النموذجية 224.30 مترًا مربعًا على أرض مساحتها 250 مترًا مربعًا، وتضم أربع غرف نوم وخمس دورات مياه ومجلسًا رئيسيًا ومجلسًا عائليًا ومطبخًا مفتوحًا وتراسًا على السطح تقارب مساحته 85 مترًا مربعًا. وتحتوي كل فيلا على موقف سيارة مفتوح واحد.
 
 يُنفَّذ البناء وفق كود البناء السعودي، بأرضيات بورسلين ودهانات قابلة للغسل وأسقف جبسية مقاومة للرطوبة وسلالم رخامية داخلية وخارجية. أما دورات المياه فمجهزة ببلاط مانع للانزلاق وتجهيزات مقاومة للصدأ، والنوافذ مزدوجة الزجاج وذات عزل حراري. وتشمل الضمانات عشر سنوات على الهيكل الإنشائي وعشر سنوات على العزل وعشر سنوات لمعالجة التربة ضد الحشرات، إضافة إلى ضمان سنة كاملة على التشطيبات والسباكة والكهرباء.
 
-Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Wharf%20Destination%20Villas%2C%20Jeddah%20(BONA-W004).
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Malfa%20Jeddah%2C%20Saah%20Villa%2C%20Al-Wareef%20(BONA-W004).
 
 ## Apartments (23) — https://bona-real-estate.com/properties/apartments/
 
-### NOBAL Five, Al Rawdah — نوبال 5، الروضة
+### NOBAL 5, Al Rawdah — نوبال 5، الروضة
 - ID: BONA-014 (ref APT-030)
 - URL: https://bona-real-estate.com/properties/nobal-five-al-rawdah/ · Arabic: https://bona-real-estate.com/ar/properties/nobal-five-al-rawdah/
 - Kind: Apartment · Type: Apartment · Category: For sale · Status: available
@@ -793,7 +793,7 @@ Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20int
 - Listed: 2026-03-21
 - Images: https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/al_rawdah_-_apartment_5-648780.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/8y00u361s6sg9wdlbmw3_al_rawdah_-_apartment_5_1_.v2.0000000-56f287.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk2-10-1d4ca5.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk-70808e63-01c7cf.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk2-13-161b23.jpg , https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk-2-3a1acb9f-164e4e.jpg
 
-NOBAL Five is a building of five residences in Al Rawdah, one apartment per floor, each occupying its entire level with a private elevator. The apartment measures 307 square metres and holds three master bedrooms, five bathrooms, a maid's room, a large living room and a modern kitchen.
+NOBAL 5 is a building of five residences in Al Rawdah, one apartment per floor, each occupying its entire level with a private elevator. The apartment measures 307 square metres and holds three master bedrooms, five bathrooms, a maid's room, a large living room and a modern kitchen.
 
 Finishes include porcelain and parquet flooring and high-grade sanitaryware, with a smart-home system, central air conditioning and two private parking spaces. The developer provides a ten-year structural warranty backed by Malath Insurance, alongside warranties on plumbing, waterproofing, elevators and the underground tank.
 
@@ -801,9 +801,9 @@ Finishes include porcelain and parquet flooring and high-grade sanitaryware, wit
 
 تشمل التشطيبات أرضيات البورسلان والباركيه وأدوات صحية عالية الجودة، مع نظام منزل ذكي وتكييف مركزي وموقفين خاصين. يقدم المطور ضماناً إنشائياً لعشر سنوات بدعم من شركة ملاذ للتأمين، إلى جانب ضمانات على السباكة والعزل المائي والمصاعد والخزان الأرضي.
 
-Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20NOBAL%20Five%2C%20Al%20Rawdah%20(BONA-014).
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20NOBAL%205%2C%20Al%20Rawdah%20(BONA-014).
 
-### Al Zahra Residences — شقق الزهراء
+### Apartments, Al Zahra — شقق في الزهراء
 - ID: BONA-015 (ref APT-046)
 - URL: https://bona-real-estate.com/properties/al-zahra-residences/ · Arabic: https://bona-real-estate.com/ar/properties/al-zahra-residences/
 - Kind: Apartment · Type: Apartment · Category: For sale · Status: available
@@ -825,7 +825,7 @@ A rooftop residence of 400 square metres offers four master bedrooms, seven bath
 
 يوفر مسكن السطح البالغ 400 متر مربع أربع غرف نوم رئيسية وسبع دورات مياه وتراساً واسعاً. للمبنى مدخلان منفصلان ومصعد إلى كل الطوابق وموقف خاص لكل وحدة وتكييف مركزي وضمانات على التنفيذ. تتوفر جولة افتراضية ثلاثية الأبعاد كاملة داخل الشقة.
 
-Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Al%20Zahra%20Residences%20(BONA-015).
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Apartments%2C%20Al%20Zahra%20(BONA-015).
 
 ### Trump Tower Jeddah — برج ترامب جدة
 - ID: BONA-022 (ref APT-037)
@@ -1287,32 +1287,32 @@ On-site facilities include a mosque, a children's play area, a resident lounge, 
 
 Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Darco%20Prime%20Waterfront%2C%20Al-Shati%20(BONA-W014).
 
-### Elemental Residences, Al Rawabi — مشروع إيلمنتال، حي الروابي بجدة
+### Elemental, Al Rehab — إليمنتال، الرحاب
 - ID: BONA-W018 (ref WA-20260917-AC0D08)
 - URL: https://bona-real-estate.com/properties/elemental-residences-al-rawabi/ · Arabic: https://bona-real-estate.com/ar/properties/elemental-residences-al-rawabi/
 - Kind: Apartment · Type: Apartment · Category: Off-plan · Status: available
-- Location: Al Rawabi, Jeddah, Saudi Arabia (الروابي، جدة)
+- Location: Al Rehab, Jeddah, Saudi Arabia (الرحاب، جدة)
 - Asking price: From SAR 850,000
-- Project: Elemental (إيلمنتال) · Developer: Sadana
-- Highlights: Four themed buildings — Light, Water, Earth, Air; Two-level garden penthouse units; Private gardens up to 70 sqm; Ground-floor commercial units; Shared rooftop courtyard and gym; Direct views over shared garden
-- المميزات: أربعة مبانٍ بأسماء الضوء والماء والأرض والهواء؛ وحدات بنتهاوس بطابقين؛ حدائق خاصة حتى 70 م²؛ وحدات تجارية بالدور الأرضي؛ فناء مشترك وصالة رياضية على السطح؛ إطلالة مباشرة على الحديقة المشتركة
+- Project: Elemental (إليمنتال) · Developer: Sadana
+- Highlights: Four themed buildings — Light, Water, Earth, Air; Two-level garden penthouse units; Private gardens up to 70 sqm; Shared rooftop courtyard and gym; Direct views over shared garden
+- المميزات: أربعة مبانٍ بأسماء الضوء والماء والأرض والهواء؛ وحدات بنتهاوس بطابقين؛ حدائق خاصة حتى 70 م²؛ فناء مشترك وصالة رياضية على السطح؛ إطلالة مباشرة على الحديقة المشتركة
 - Brochure: https://bona-real-estate.com/listings/elemental-residences-al-rawabi/brochure.pdf
 - Listed: 2026-09-17
 - Images: /listings/elemental-residences-al-rawabi/01.jpg , /listings/elemental-residences-al-rawabi/02.jpg , /listings/elemental-residences-al-rawabi/03.jpg , /listings/elemental-residences-al-rawabi/04.jpg , /listings/elemental-residences-al-rawabi/05.jpg , /listings/elemental-residences-al-rawabi/06.jpg
 
-Elemental is a project by Sadana in the Al Rawabi district of Jeddah. It is built as four low-rise buildings named Light, Water, Earth and Air, arranged around a shared internal garden with direct views onto it.
+Elemental is a project by Sadana in the Al Rehab district of Jeddah. It is built as four low-rise buildings named Light, Water, Earth and Air, arranged around a shared internal garden with direct views onto it.
 
-Each building combines ground-floor commercial units with residential units above. Unit sizes across the four buildings range from roughly 191 to about 276 square metres, and selected upper-floor units are configured as two-level garden penthouses with a private garden of up to 70 square metres.
+Unit sizes across the four buildings range from roughly 191 to 275 square metres, and selected upper-floor units are configured as two-level garden penthouses with a private garden of up to 70 square metres.
 
-Renders show a shared rooftop-level courtyard with a water feature, a glazed gym pavilion, and a children's play area within the development. Ground-floor units are designed for commercial use, with frontages described in the brochure as corner or interior-facing.
+Renders show a shared rooftop-level courtyard with a water feature, a glazed gym pavilion, and a children's play area within the development.
 
-إيلمنتال مشروع لشركة سدانة في حي الروابي بجدة. يتكوّن من أربعة مبانٍ منخفضة الارتفاع تحمل أسماء الضوء والماء والأرض والهواء، وتحيط بحديقة داخلية مشتركة تطل عليها الوحدات مباشرة.
+إليمنتال مشروع لشركة سدنة في حي الرحاب بجدة. يتكوّن من أربعة مبانٍ منخفضة الارتفاع تحمل أسماء الضوء والماء والأرض والهواء، وتحيط بحديقة داخلية مشتركة تطل عليها الوحدات مباشرة.
 
-يجمع كل مبنى بين وحدات تجارية في الدور الأرضي ووحدات سكنية في الأدوار العلوية. تتراوح مساحات الوحدات بين المباني الأربعة من نحو 191 إلى نحو 276 مترًا مربعًا، وتُصمَّم بعض الوحدات العلوية كبنتهاوس بطابقين مع حديقة خاصة تصل مساحتها إلى 70 مترًا مربعًا.
+تتراوح مساحات الوحدات بين المباني الأربعة من نحو 191 إلى 275 مترًا مربعًا، وتُصمَّم بعض الوحدات العلوية كبنتهاوس بطابقين مع حديقة خاصة تصل مساحتها إلى 70 مترًا مربعًا.
 
-تُظهر التصاميم فناءً مشتركًا على مستوى السطح يضم نافورة مائية، وصالة رياضية زجاجية، ومنطقة ألعاب للأطفال ضمن المشروع. صُمِّمت الوحدات الأرضية للاستخدام التجاري، وتصفها الكتيبات بواجهات ركنية أو داخلية.
+تُظهر التصاميم فناءً مشتركًا على مستوى السطح يضم نافورة مائية، وصالة رياضية زجاجية، ومنطقة ألعاب للأطفال ضمن المشروع.
 
-Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Elemental%20Residences%2C%20Al%20Rawabi%20(BONA-W018).
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Elemental%2C%20Al%20Rehab%20(BONA-W018).
 
 ### Katheeb Residences, Laban District — مجمع كثيب السكني، حي لبن
 - ID: BONA-W017 (ref WA-20260916-AC0AEC)
@@ -1346,13 +1346,13 @@ Shared facilities include separate gyms for men and women, a residents' lounge, 
 
 Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Katheeb%20Residences%2C%20Laban%20District%20(BONA-W017).
 
-### Nuzul Khayala Residences, North Jeddah — نزل خيالة، شمال جدة
+### Nuzul Khayala Residences, North Jeddah — نزل خيالا، شمال جدة
 - ID: BONA-W002 (ref WA-20260906-AC20EE)
 - URL: https://bona-real-estate.com/properties/nuzul-khayala-residences-north-jeddah/ · Arabic: https://bona-real-estate.com/ar/properties/nuzul-khayala-residences-north-jeddah/
 - Kind: Apartment · Type: Apartment · Category: Off-plan · Status: available
-- Location: Khayala Suburb, Jeddah, Saudi Arabia (ضاحية خيالة، جدة)
+- Location: Khayala Suburb, Jeddah, Saudi Arabia (ضاحية خيالا، جدة)
 - Asking price: Price on request
-- Project: Nuzul Khayala (نزل خيالة) · Developer: Faisal Bin Saedan
+- Project: Nuzul Khayala (نزل خيالا) · Developer: Faisal Bin Saedan
 - Highlights: 18 residential buildings; Units from 147–202 sqm; Apartment and duplex layouts; Near Haramain Road; 10-year structural warranty; Close to King Abdulaziz Airport
 - المميزات: 18 مبنى سكنياً؛ وحدات من 147 إلى 202 م²؛ تصاميم شقق ودوبلكس؛ قريب من طريق الحرمين؛ ضمان إنشائي 10 سنوات؛ قرب مطار الملك عبدالعزيز
 - Brochure: https://bona-real-estate.com/listings/nuzul-khayala-residences-north-jeddah/brochure.pdf
@@ -1365,7 +1365,7 @@ The development comprises 18 residential buildings on a plot of roughly 30,000 s
 
 The project is built under the direct supervision of the Ministry of Housing, with materials meeting Saudi Standards Organization requirements. The structural frame, thermal piping and waterproofing each carry a 10-year warranty, and electrical panels are covered for 20 years. Finishes include double-glazed, thermally insulated windows, external thermal insulation, and ceramic and marble to Saudi specifications.
 
-يقع مشروع نزل خيالة في ضاحية خيالة شمال جدة، ضمن امتداد المدينة العقاري المستقبلي. يتميز الموقع بقربه من طريق الحرمين، ما يسهّل الوصول إلى مختلف أحياء جدة، كما يقع بالقرب من مستشفى الملك فيصل التخصصي ومحطة الرحيلي والجوهرة مول ومجمع الملك عبدالله الطبي. كذلك يقترب الموقع من مطار الملك عبدالعزيز الدولي ومدينة الملك عبدالله الرياضية واستاد الجوهرة، إلى جانب مشاريع مستقبلية كبرى في جدة مثل مرافئ.
+يقع مشروع نزل خيالا في ضاحية خيالا شمال جدة، ضمن امتداد المدينة العقاري المستقبلي. يتميز الموقع بقربه من طريق الحرمين، ما يسهّل الوصول إلى مختلف أحياء جدة، كما يقع بالقرب من مستشفى الملك فيصل التخصصي ومحطة الرحيلي والجوهرة مول ومجمع الملك عبدالله الطبي. كذلك يقترب الموقع من مطار الملك عبدالعزيز الدولي ومدينة الملك عبدالله الرياضية واستاد الجوهرة، إلى جانب مشاريع مستقبلية كبرى في جدة مثل مرافئ.
 
 يضم المشروع 18 مبنى سكنياً على أرض تبلغ مساحتها نحو 30,000 متر مربع، بمساحة بناء إجمالية تقارب 54,131 متر مربع، ليصل إجمالي عدد الوحدات السكنية إلى 312 وحدة. تتوزع الوحدات على عدة نماذج تصميمية (A وB وC وD وAB) تتراوح مساحاتها بين 147 و202 متر مربع تقريباً، سواء كشقق بطابق واحد أو دوبلكس على طابقين. تضم التصاميم من ثلاث إلى أربع غرف نوم، بعضها بغرفتي ماستر، إضافة إلى غرفة خادمة وحمام ضيوف وغرفة غسيل وملابس.
 

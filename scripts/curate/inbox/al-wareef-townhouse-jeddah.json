@@ -8,12 +8,12 @@
   "kind": "house",
   "featured": false,
   "title": {
-    "en": "Al-Wareef Townhouse, Jeddah",
-    "ar": "تاون هاوس الوريف، جدة"
+    "en": "Malfa Jeddah, Maren Townhouse, Al-Wareef",
+    "ar": "ملفى جدة، تاون هاوس مرن، الوريف"
   },
   "location": {
     "district": {
-      "en": "Al Wareef",
+      "en": "Al-Wareef",
       "ar": "الوريف"
     },
     "city": {
@@ -46,40 +46,40 @@
       "src": "/listings/al-wareef-townhouse-jeddah/01.jpg",
       "thumb": "/listings/al-wareef-townhouse-jeddah/01-thumb.webp",
       "alt": {
-        "en": "Illustrative — developer's finished unit at Wajhat Al-Wareef: Exterior — Al-Wareef Townhouse, Jeddah",
-        "ar": "صورة توضيحية — وحدة منجزة من المطوّر في وجهة الوريف: الواجهة الخارجية — تاون هاوس الوريف، جدة"
+        "en": "Artist's impression of a Malfa Jeddah home facade — Malfa Jeddah, Maren Townhouse, Al-Wareef",
+        "ar": "تصور معماري لواجهة منزل في ملفى جدة — ملفى جدة، تاون هاوس مرن، الوريف"
       }
     },
     {
       "src": "/listings/al-wareef-townhouse-jeddah/02.jpg",
       "thumb": "/listings/al-wareef-townhouse-jeddah/02-thumb.webp",
       "alt": {
-        "en": "Illustrative — developer's finished unit at Wajhat Al-Wareef: Entrance — Al-Wareef Townhouse, Jeddah",
-        "ar": "صورة توضيحية — وحدة منجزة من المطوّر في وجهة الوريف: المدخل — تاون هاوس الوريف، جدة"
+        "en": "Artist's impression of the Maren townhouse entrance — Malfa Jeddah, Maren Townhouse, Al-Wareef",
+        "ar": "تصور معماري لمدخل تاون هاوس مرن — ملفى جدة، تاون هاوس مرن، الوريف"
       }
     },
     {
       "src": "/listings/al-wareef-townhouse-jeddah/03.jpg",
       "thumb": "/listings/al-wareef-townhouse-jeddah/03-thumb.webp",
       "alt": {
-        "en": "Illustrative — developer's finished unit at Wajhat Al-Wareef: Living room — Al-Wareef Townhouse, Jeddah",
-        "ar": "صورة توضيحية — وحدة منجزة من المطوّر في وجهة الوريف: غرفة المعيشة — تاون هاوس الوريف، جدة"
+        "en": "Artist's impression of a living room — Malfa Jeddah, Maren Townhouse, Al-Wareef",
+        "ar": "تصور معماري لغرفة المعيشة — ملفى جدة، تاون هاوس مرن، الوريف"
       }
     },
     {
       "src": "/listings/al-wareef-townhouse-jeddah/04.jpg",
       "thumb": "/listings/al-wareef-townhouse-jeddah/04-thumb.webp",
       "alt": {
-        "en": "Illustrative — developer's finished unit at Wajhat Al-Wareef: Exterior — Al-Wareef Townhouse, Jeddah",
-        "ar": "صورة توضيحية — وحدة منجزة من المطوّر في وجهة الوريف: الواجهة الخارجية — تاون هاوس الوريف، جدة"
+        "en": "Artist's impression of a row of Malfa Jeddah homes — Malfa Jeddah, Maren Townhouse, Al-Wareef",
+        "ar": "تصور معماري لصف من منازل ملفى جدة — ملفى جدة، تاون هاوس مرن، الوريف"
       }
     },
     {
       "src": "/listings/al-wareef-townhouse-jeddah/05.jpg",
       "thumb": "/listings/al-wareef-townhouse-jeddah/05-thumb.webp",
       "alt": {
-        "en": "Illustrative — developer's finished unit at Wajhat Al-Wareef: Aerial view — Al-Wareef Townhouse, Jeddah",
-        "ar": "صورة توضيحية — وحدة منجزة من المطوّر في وجهة الوريف: منظر جوي — تاون هاوس الوريف، جدة"
+        "en": "Aerial artist's impression of the wider Al-Wareef destination — Malfa Jeddah, Maren Townhouse, Al-Wareef",
+        "ar": "تصور جوي لوجهة الوريف — ملفى جدة، تاون هاوس مرن، الوريف"
       }
     }
   ],
@@ -109,8 +109,8 @@
   "brochureUrl": "https://bona-real-estate.com/listings/al-wareef-townhouse-jeddah/brochure.pdf",
   "project": {
     "name": {
-      "en": "Wajhat Al-Wareef",
-      "ar": "وجهة الوريف"
+      "en": "Malfa Jeddah",
+      "ar": "ملفى جدة"
     },
     "developer": {
       "en": "National Housing Company (NHC) and Faisal Bin Saedan Real Estate Development",

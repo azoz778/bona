@@ -24,7 +24,7 @@ export const LISTINGS = [
     price: { amount: 8000000, currency: 'SAR', from: false, period: null, onRequest: false },
     specs: { beds: 5, baths: 8, areaSqm: 537, plotSqm: 537, yearBuilt: null, floors: 3 },
     folder: 'private-beach-villa-durrat-al-arous-jeddah',
-    images: [[23, 'facade_night'], [13, 'pool'], [14, 'beach'], [12, 'exterior'], [6, 'sea'], [0, 'terrace'], [19, 'living'], [5, 'staircase'], [8, 'living'], [25, 'pool_night']],
+    images: [[23, 'facade_night'], [13, 'pool'], [14, 'beach'], [12, 'exterior'], [6, 'sea'], [0, 'pool'], [19, 'living'], [5, 'staircase'], [8, 'bedroom'], [25, 'pool_night']],
     description: {
       en: [
         'Set directly on the shore at Durrat Al Arous, north of Jeddah, this five-bedroom villa opens onto its own stretch of beach and a private pool that looks straight out to sea. Full-height glazing carries the horizon through the ground floor, where the living room, dining area and kitchen face the water.',
@@ -351,7 +351,7 @@ export const LISTINGS = [
   },
   {
     slug: 'nobal-five-al-rawdah', sourceRef: 'APT-030', status: 'available', category: 'buy', type: 'apartment', featured: false,
-    title: { en: 'NOBAL Five, Al Rawdah', ar: 'نوبال 5، الروضة' },
+    title: { en: 'NOBAL 5, Al Rawdah', ar: 'نوبال 5، الروضة' },
     location: loc({ en: 'Al Rawdah', ar: 'الروضة' }),
     price: { amount: 1800000, currency: 'SAR', from: false, period: null, onRequest: false },
     specs: { beds: 3, baths: 5, areaSqm: 307, plotSqm: null, yearBuilt: null, floors: null },
@@ -359,7 +359,7 @@ export const LISTINGS = [
     images: [[1, 'facade_night'], [0, 'exterior'], [10, 'lobby'], [9, 'living'], [12, 'staircase'], [5, 'living'], [16, 'bathroom'], [18, 'bathroom']],
     description: {
       en: [
-        'NOBAL Five is a building of five residences in Al Rawdah, one apartment per floor, each occupying its entire level with a private elevator. The apartment measures 307 square metres and holds three master bedrooms, five bathrooms, a maid\'s room, a large living room and a modern kitchen.',
+        'NOBAL 5 is a building of five residences in Al Rawdah, one apartment per floor, each occupying its entire level with a private elevator. The apartment measures 307 square metres and holds three master bedrooms, five bathrooms, a maid\'s room, a large living room and a modern kitchen.',
         'Finishes include porcelain and parquet flooring and high-grade sanitaryware, with a smart-home system, central air conditioning and two private parking spaces. The developer provides a ten-year structural warranty backed by Malath Insurance, alongside warranties on plumbing, waterproofing, elevators and the underground tank.',
       ],
       ar: [
@@ -375,12 +375,12 @@ export const LISTINGS = [
   },
   {
     slug: 'al-zahra-residences', sourceRef: 'APT-046', status: 'available', category: 'buy', type: 'apartment', featured: false,
-    title: { en: 'Al Zahra Residences', ar: 'شقق الزهراء' },
+    title: { en: 'Apartments, Al Zahra', ar: 'شقق في الزهراء' },
     location: loc({ en: 'Al Zahra', ar: 'الزهراء' }),
     price: { amount: 1450000, currency: 'SAR', from: true, period: null, onRequest: false },
     specs: { beds: 3, baths: null, areaSqm: 200, plotSqm: null, yearBuilt: null, floors: null },
     folder: 'al-zahrah-apartment',
-    images: [[21, 'facade_night'], [10, 'exterior'], [11, 'lobby'], [25, 'living'], [14, 'balcony'], [12, 'living'], [18, 'view'], [4, 'bathroom'], [19, 'terrace']],
+    images: [[21, 'facade_night'], [10, 'exterior'], [11, 'lobby'], [25, 'living'], [14, 'view'], [12, 'living'], [18, 'view'], [4, 'bathroom'], [19, 'terrace']],
     virtualTourUrl: 'https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0',
     description: {
       en: [
@@ -1131,15 +1131,15 @@ export const LISTINGS = [
   },
   {
     slug: 'neptune-villas-north-riyadh', sourceRef: 'VIL-029', status: 'available', category: 'off-plan', type: 'villa', featured: false,
-    title: { en: 'Neptune Villas, Interiors by Mouawad, North Riyadh', ar: 'فلل نبتون بتصميم داخلي من معوض، شمال الرياض' },
-    location: loc({ en: 'North Riyadh', ar: 'شمال الرياض' }, { en: 'Riyadh', ar: 'الرياض' }),
+    title: { en: 'Neptune, Interiors by Mouawad, SEDRA', ar: 'نبتون من معوّض للتصميمات الداخلية، سدرة' },
+    location: loc({ en: 'SEDRA', ar: 'سدرة' }, { en: 'Riyadh', ar: 'الرياض' }),
     price: { amount: 4600000, currency: 'SAR', from: true, period: null, onRequest: false },
     specs: { beds: 5, baths: null, areaSqm: null, plotSqm: null, yearBuilt: null, floors: null },
     folder: 'neptune-interiors-by-mouawad',
     images: [[2, 'exterior'], [3, 'terrace'], [0, 'render'], [1, 'aerial']],
     description: {
       en: [
-        'Neptune Villas is a villa community under construction in north Riyadh, with interiors by the jeweller Mouawad. Each villa has five bedrooms, in sizes from 300 to 420 square metres; the renders show roof terraces and covered parking.',
+        'Neptune, Interiors by Mouawad is a villa community under construction in north Riyadh, with interiors by the jeweller Mouawad. Each villa has five bedrooms, in sizes from 300 to 420 square metres; the renders show roof terraces and covered parking.',
         'The masterplan sets the houses along tree-lined streets around a central park and pool. Prices start from SAR 4,600,000.',
       ],
       ar: [
