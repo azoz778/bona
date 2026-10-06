@@ -100,6 +100,6 @@ test('photoNote: absent is fine; when set, one English and one Arabic sentence o
   assert.match(photoNoteProblems({ en: ' ', ar: 'صور' }).join(), /photoNote\.en/);
   assert.match(photoNoteProblems({ en: 'x', ar: 'not arabic' }).join(), /Arabic/);
   assert.match(photoNoteProblems({ en: 'x'.repeat(141), ar: 'صور' }).join(), /140/);
-  for (const ar of ['،', '١٢٣', 'Photos show another project،']) assert.match(photoNoteProblems({ en: 'Photos show another project.', ar }).join(), /photoNote\.ar/, ar);
+  for (const ar of ['،', '١٢٣', 'ـــ', 'Photos show another project،']) assert.match(photoNoteProblems({ en: 'Photos show another project.', ar }).join(), /photoNote\.ar/, ar);
   assert.match(photoNoteProblems({ en: '،،،', ar: 'الصور لمشروع آخر.' }).join(), /photoNote\.en/);
 });
