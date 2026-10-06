@@ -18,6 +18,7 @@ const SITE = 'https://bona-real-estate.com';
 assert.ok(existsSync(path.join(dist, 'index.html')), `dist/ is missing — run \`npm run build\` first (looked in ${dist})`);
 
 const listings = JSON.parse(readFileSync(path.join(root, 'src/data/listings.json'), 'utf8'));
+const conciergeOn = JSON.parse(readFileSync(path.join(root, 'src/data/site.json'), 'utf8')).concierge?.enabled !== false;
 const noted = listings.filter((l) => l.photoNote);
 const decode = (s) => s
   .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#x27;/g, "'").replace(/&amp;/g, '&');
@@ -53,8 +54,12 @@ for (const l of noted) {
     test(`${l.id} ${route}: the note shows under the photo strip and in the lightbox`, () => {
       const p = byRoute.get(route);
       assert.ok(p, `${route} was built`);
-      const notes = notesIn(p.html);
-      assert.ok(notes.filter((n) => n === note).length >= 2, `strip + lightbox, got ${JSON.stringify(notes)}`);
+      const g0 = p.html.indexOf('data-gallery');
+      const d0 = p.html.indexOf('<dialog', g0);
+      const d1 = p.html.indexOf('</dialog>', d0);
+      assert.ok(g0 >= 0 && d0 > g0 && d1 > d0, 'gallery and lightbox found');
+      assert.deepEqual(notesIn(p.html.slice(g0, d0)), [note], 'once in the strip, outside the lightbox');
+      assert.deepEqual(notesIn(p.html.slice(d0, d1)), [note], 'once inside the lightbox');
     });
 
     test(`${l.id} ${route}: every label on the listing's photos carries the note; the link preview uses the brand image`, () => {
@@ -94,13 +99,29 @@ for (const l of noted) {
     }
   });
 
-  test(`${l.id}: concierge cards and the knowledge file carry the note`, () => {
+  test(`${l.id}: a concierge chat card rendered from the built page's config shows the note; others show none`, { skip: !conciergeOn && 'concierge switched off in site.json' }, async () => {
+    // A minimal DOM: render.ts builds cards with createElement / textContent only.
+    class El { constructor(tag) { this.tagName = tag; this.children = []; this.attrs = {}; this.className = ''; this.textContent = ''; }
+      append(...xs) { this.children.push(...xs); } setAttribute(k, v) { this.attrs[k] = String(v); } }
+    globalThis.document = { createElement: (t) => new El(t), createElementNS: (_ns, t) => new El(t) };
+    globalThis.window = { location: { origin: SITE } };
+    const { listingCard } = await import('../src/components/concierge/render.ts');
+    const walk = (n) => [n, ...(n.children ?? []).flatMap(walk)];
+    const other = listings.find((x) => !x.photoNote && x.status === 'available');
+    const card = (x) => ({ id: x.id, slug: x.slug, title: x.title, district: x.location.district, price: { en: 'SAR 1', ar: '1 ر.س' },
+      beds: null, baths: null, areaSqm: null, image: { src: x.images[0].src, thumb: x.images[0].src }, url: { en: `${SITE}/properties/${x.slug}/`, ar: `${SITE}/ar/properties/${x.slug}/` } });
     for (const locale of ['en', 'ar']) {
       const { html } = byRoute.get(locale === 'ar' ? '/ar/' : '/');
       const raw = html.match(/data-concierge data-config="([^"]*)"/)?.[1];
-      if (!raw) continue; // concierge switched off (site.json): no chat cards to label
-      assert.equal(JSON.parse(decode(raw)).photoNotes?.[l.slug], l.photoNote[locale], `${locale} concierge config`);
+      assert.ok(raw, `${locale}: concierge config on the home page`);
+      const cfg = JSON.parse(decode(raw));
+      const notes = (x) => walk(listingCard(card(x), cfg)).filter((n) => n.className === 'cg-card-note').map((n) => n.textContent);
+      assert.deepEqual(notes(l), [l.photoNote[locale]], `${locale}: the card carries the note`);
+      assert.deepEqual(notes(other), [], `${locale}: a listing without a note gets none`);
     }
+  });
+
+  test(`${l.id}: the knowledge file carries the note`, () => {
     const full = readFileSync(path.join(dist, 'llms-full.txt'), 'utf8');
     const section = full.slice(full.indexOf(`- ID: ${l.id}`), full.indexOf('\n### ', full.indexOf(`- ID: ${l.id}`)));
     assert.ok(section.includes(`- Photo note: ${l.photoNote.en} / ${l.photoNote.ar}`), 'llms-full.txt');

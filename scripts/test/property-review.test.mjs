@@ -259,7 +259,8 @@ test('a photo note opens the caption, makes off-plan frames photographs by defau
     const old = buildReview(offPlan, advertiser, frames, parseSelection('BONA-T1:1p,2p,3p'), { reviewedAt: '2026-10-05T09:00:00Z', reviewer: 'test' });
     assert.ok(eligibility(sister, old, advertiser, now, rules).includes('listing_changed_since_review'));
     // Malformed notes fail closed.
-    for (const bad of [{ en: NOTE.en, ar: null }, { en: NOTE.en, ar: 'not arabic' }, { en: ' ', ar: NOTE.ar }, '', 0, false]) {
+    for (const bad of [{ en: NOTE.en, ar: null }, { en: NOTE.en, ar: 'not arabic' }, { en: NOTE.en, ar: '،' }, { en: NOTE.en, ar: '١٢٣' },
+      { en: NOTE.en, ar: NOTE.en + '،' }, { en: '،،،', ar: NOTE.ar }, { en: ' ', ar: NOTE.ar }, '', 0, false]) {
       assert.ok(eligibility({ ...sister, photoNote: bad }, r, advertiser, now, rules).includes('photo_note_malformed'), JSON.stringify(bad));
     }
   } finally { w.cleanup(); }
