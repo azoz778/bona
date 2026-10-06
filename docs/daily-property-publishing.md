@@ -48,6 +48,12 @@ viewing; for off-plan instead, that delivery dates and specifications are per th
 Off-plan captions ask about availability and details and never offer a viewing. Nothing else
 is claimed.
 
+When a listing's photos show another project, the listing carries a `photoNote` (see
+`src/data/LISTING-SCHEMA.md`) and that sentence leads the disclosures, for example Dari II
+(BONA-026): "Photos show a completed sister project by the same developer, not Dari II." The
+note is part of the reviewed facts, and the publisher refuses a review whose disclosures lack
+it (`photo_note_not_disclosed`).
+
 ## Publication safety
 
 - Each channel re-checks the account identity, downloads the reviewed images and compares their
