@@ -15,8 +15,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 function tree(listings) {
   // realpath: the script runs main() only when argv[1] equals its own resolved path (a symlinked tmp dir would not).
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bona-sync-')));
-  // The script's whole import chain. If any of these gains an import, both tests fail with
-  // ERR_MODULE_NOT_FOUND naming the missing file: add it to this list.
+  // The script's whole import chain. If any of these gains an import, the tests fail with
+  // ERR_MODULE_NOT_FOUND naming the missing file (every test fails): add it to this list.
   for (const f of ['scripts/sync-listings.mjs', 'scripts/curate/rules.mjs', 'src/lib/units-summary.mjs']) {
     fs.mkdirSync(path.join(dir, path.dirname(f)), { recursive: true });
     fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
