@@ -375,7 +375,7 @@ export const LISTINGS = [
   },
   {
     slug: 'al-zahra-residences', sourceRef: 'APT-046', status: 'available', category: 'buy', type: 'apartment', featured: false,
-    title: { en: 'Apartments, Al Zahra', ar: 'شقق، الزهراء' },
+    title: { en: 'Apartments, Al Zahra', ar: 'شقق في الزهراء' },
     location: loc({ en: 'Al Zahra', ar: 'الزهراء' }),
     price: { amount: 1450000, currency: 'SAR', from: true, period: null, onRequest: false },
     specs: { beds: 3, baths: null, areaSqm: 200, plotSqm: null, yearBuilt: null, floors: null },
