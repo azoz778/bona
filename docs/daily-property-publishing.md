@@ -49,10 +49,13 @@ Off-plan captions ask about availability and details and never offer a viewing. 
 is claimed.
 
 When a listing's photos show another project, the listing carries a `photoNote` (see
-`src/data/LISTING-SCHEMA.md`) and that sentence leads the disclosures, for example Dari II
-(BONA-026): "Photos show a completed sister project by the same developer, not Dari II." The
-note is part of the reviewed facts, and the publisher refuses a review whose disclosures lack
-it (`photo_note_not_disclosed`).
+`src/data/LISTING-SCHEMA.md`), for example Dari II (BONA-026): "Photos show a completed sister
+project by the same developer, not Dari II." The caption then opens with that sentence, on the
+line under the title and place in both languages, where a feed preview still shows it. The note
+is part of the reviewed facts. Frames of such a listing default to photographs even when it is
+off-plan; the publisher refuses one marked as a render (`photo_note_conflicts_with_renders`), a
+malformed note (`photo_note_malformed`) and a caption without the note
+(`photo_note_not_in_caption`).
 
 ## Publication safety
 

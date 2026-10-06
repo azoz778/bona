@@ -274,8 +274,13 @@ in the WhatsApp group.
 - `build.mjs` writes every image label as `<room>. <note>` instead of `<room> — <title>`, so no
   label presents the photos as the listing; `validate.mjs` fails any label without the note. It
   cannot be combined with the unit-page "Illustrative" labels (`project` + `unit`).
-- The gallery prints the note under the photos on the listing page, in the page language.
-- The social catalogue (`publicListing`) includes it only when set: it is part of the facts a
-  daily-post review binds, and listings without a note keep their existing `factsSha256`.
-- The daily-post review puts it first in the caption disclosures, and the publisher refuses a
-  review whose disclosures lack it (`photo_note_not_disclosed`).
+- Shown in the page language under the photo strip, in the lightbox, on every listing card, and on
+  concierge chat cards (the page config maps slug to note; the API card is unchanged).
+- Never presented as the listing's own photos where no note fits: link previews of the listing use
+  the brand image, structured data declares none of its photos, and category pages take their
+  preview image from a listing without a note. `llms-full.txt` carries the note.
+- The social catalogue (`publicListing`) includes it whenever it is not null: it is part of the
+  facts a daily-post review binds, and listings without one keep their existing `factsSha256`.
+- The daily-post caption opens with it, and frames default to photographs even when off-plan; see
+  `docs/daily-property-publishing.md` for the publisher's refusals.
+- `test/photo-note.test.mjs` checks every surface above on the built site.
