@@ -41,8 +41,10 @@ const meta = (html, prop) => decode(html.match(new RegExp(`<meta (?:property|nam
 /** Every URL a listing's photos are served under (full size and thumbnail), as they appear in the HTML. */
 const urlsOf = (l) => l.images.flatMap((im) => [im.src, im.thumb]).filter(Boolean).flatMap((u) => [u, u.startsWith('/') ? SITE + u : u]);
 
-// While Dari II is listed it must carry its note; once it leaves the site (sold or withheld) this is skipped,
-// so a routine delisting can never fail the deploy and stall the daily refresh.
+// While Dari II is in listings.json it must carry its note. It leaves listings.json when withheld or when the
+// curated build drops it (TK no longer lists it); then this is skipped. The deploy's TK sync instead keeps a
+// sold listing with status "sold", and the checks below allow for what a sold listing loses (most cards and its
+// llms-full.txt section), so a routine sale or delisting never fails the deploy and stalls the daily refresh.
 const dari = listings.find((l) => l.id === 'BONA-026');
 test('Dari II (BONA-026) carries a photo note while it is listed', { skip: !dari && 'BONA-026 is not listed' }, () => {
   assert.ok(dari.photoNote, 'BONA-026 photoNote');
@@ -125,9 +127,12 @@ for (const l of noted) {
     }
   });
 
-  test(`${l.id}: the knowledge file carries the note`, () => {
+  test(`${l.id}: the knowledge file carries the note whenever it lists the listing`, () => {
     const full = readFileSync(path.join(dist, 'llms-full.txt'), 'utf8');
-    const section = full.slice(full.indexOf(`- ID: ${l.id}`), full.indexOf('\n### ', full.indexOf(`- ID: ${l.id}`)));
+    const at = full.indexOf(`- ID: ${l.id}`);
+    // gen-llms.mjs leaves sold listings out; any other listing must be there, with its note.
+    if (at < 0) { assert.equal(l.status, 'sold', `${l.id} is missing from llms-full.txt`); return; }
+    const section = full.slice(at, full.indexOf('\n### ', at));
     assert.ok(section.includes(`- Photo note: ${l.photoNote.en} / ${l.photoNote.ar}`), 'llms-full.txt');
   });
 }
