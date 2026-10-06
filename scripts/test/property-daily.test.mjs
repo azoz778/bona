@@ -688,3 +688,29 @@ test('BONA_DATA starting with ~ is resolved once: the journal and both Facebook 
     assert.deepEqual(fs.readdirSync(elsewhere), [], 'nothing relative to the working directory');
   } finally { process.chdir(cwd); process.env.HOME = home; fs.rmSync(f.root, { recursive: true, force: true }); fs.rmSync(elsewhere, { recursive: true, force: true }); }
 });
+
+test('a photo note joins the public facts only when set, so every existing review keeps its factsSha256',()=>{
+  const pinned={id:'BONA-PIN',slug:'pin',status:'available',category:'off-plan',type:'apartment',
+    title:{en:'Pin Tower',ar:'برج التثبيت'},location:{countryCode:'SA',district:{en:'Al Salamah',ar:'السلامة'},city:{en:'Jeddah',ar:'جدة'}},
+    price:{amount:1600000,currency:'SAR',from:true},specs:{beds:null},highlights:{en:['Pool'],ar:['مسبح']},
+    images:[{src:'/listings/pin/1.jpg',thumb:null,alt:{en:'Aerial view — Pin Tower',ar:'منظر جوي — برج التثبيت'}}],licence:null};
+  // Pinned before photoNote existed: a change here re-keys every review in marketing/daily/property-reviews.json.
+  assert.equal(fingerprint(pinned),'ff46ffde3e6a4a47f0f4c3763ae2410d84552f56ecf57a9f4a097a6ceb3a0fed');
+  assert.equal('photoNote' in publicListing(pinned),false);
+  assert.equal('photoNote' in publicListing({...pinned,photoNote:null}),false);
+  assert.deepEqual(publicListing({...pinned,photoNote:''}).photoNote,{en:null,ar:null},'a malformed note still reaches the catalogue, where eligibility refuses it');
+  const note={en:'Photos show a completed sister project by the same developer, not Pin Tower.',ar:'الصور لمشروع مكتمل آخر للمطوّر نفسه، وليست لبرج التثبيت.'};
+  assert.deepEqual(publicListing({...pinned,photoNote:{...note,internal:'x'}}).photoNote,note,'only en and ar are published');
+  assert.notEqual(fingerprint({...pinned,photoNote:note}),fingerprint(pinned),'adding, changing or removing the note invalidates the review');
+});
+
+test('captions of listings without a photo note are unchanged, so every existing review keeps its captionSha256',()=>{
+  const advertiser={name:{ar:'المعلن التجريبي',en:'Fixture advertiser'},fal:'1100000000',phone:'+966500000000'};
+  const pinned={id:'BONA-PIN',slug:'pin',status:'available',category:'off-plan',type:'apartment',
+    title:{en:'Pin Tower',ar:'برج التثبيت'},location:{countryCode:'SA',district:{en:'Al Salamah',ar:'السلامة'},city:{en:'Jeddah',ar:'جدة'}},
+    price:{amount:1600000,currency:'SAR',from:true},specs:{beds:3,areaSqm:164},highlights:{en:['Pool'],ar:['مسبح']},
+    images:[{src:'/listings/pin/1.jpg',thumb:null,alt:{en:'Aerial view — Pin Tower',ar:'منظر جوي — برج التثبيت'}}],licence:null};
+  const review={legalDisclosures:{ar:'إفصاح.',en:'Disclosure.'},photos:[{kind:'render'},{kind:'photograph'}]};
+  // Pinned with origin/main's caption code before photoNote existed.
+  assert.equal(sha256(JSON.stringify(reviewedCopy(pinned,advertiser,review))),'bf8803668e4ba84c1cdeba8eeaf9af36507055a7ca01fff47cca943488cd54e9');
+});

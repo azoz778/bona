@@ -1,7 +1,7 @@
 /** Shape rules for the optional listing fields faq / seoTitle / projectFacts, and the unit-sheet age rule. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { faqProblems, seoTitleProblems, projectFactsProblems, unitsSheetProblems } from '../scripts/curate/rules.mjs';
+import { faqProblems, seoTitleProblems, projectFactsProblems, unitsSheetProblems, photoNoteProblems } from '../scripts/curate/rules.mjs';
 
 const q = (id) => ({ id, q: { en: 'Who builds it?', ar: 'من المطور؟' }, a: { en: ['Darco Real Estate Company.'], ar: ['شركة داركو العقارية.'] } });
 
@@ -90,3 +90,16 @@ for (const [day, warns] of [[30, false], [75, false], [76, true], [90, true], [9
     assert.equal(/units\.json sheet for .* days old/.test(r.stderr + r.stdout), warns, `warning expected: ${warns}`);
   });
 }
+
+test('photoNote: absent is fine; when set, one English and one Arabic sentence of at most 140 characters', () => {
+  assert.deepEqual(photoNoteProblems(undefined), []);
+  assert.deepEqual(photoNoteProblems(null), []);
+  assert.deepEqual(photoNoteProblems({ en: 'Photos show a completed sister project by the same developer, not Dari II.', ar: 'الصور لمشروع مكتمل آخر للمطوّر نفسه، وليست لمشروع داري 2.' }), []);
+  assert.match(photoNoteProblems('x').join(), /\{ en, ar \}/);
+  assert.match(photoNoteProblems({ en: 'x' }).join(), /photoNote\.ar/);
+  assert.match(photoNoteProblems({ en: ' ', ar: 'صور' }).join(), /photoNote\.en/);
+  assert.match(photoNoteProblems({ en: 'x', ar: 'not arabic' }).join(), /Arabic/);
+  assert.match(photoNoteProblems({ en: 'x'.repeat(141), ar: 'صور' }).join(), /140/);
+  for (const ar of ['،', '١٢٣', 'ـــ', 'Photos show another project،']) assert.match(photoNoteProblems({ en: 'Photos show another project.', ar }).join(), /photoNote\.ar/, ar);
+  assert.match(photoNoteProblems({ en: '،،،', ar: 'الصور لمشروع آخر.' }).join(), /photoNote\.en/);
+});

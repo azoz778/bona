@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
 import { policyRules, eligibility, sha256, reviewedCopy, propertyHashtags, propertyCaption, aspectConsistent as dailyAspectConsistent } from '../social/lib/property-daily.mjs';
-import { frameProblem, aspectConsistent, parseSelection, disclosuresFor, buildReview, sameReview, liveCatalogue } from '../social/lib/property-review.mjs';
+import { frameProblem, aspectConsistent, parseSelection, disclosuresFor, defaultKind, buildReview, sameReview, liveCatalogue } from '../social/lib/property-review.mjs';
 import { main as draft } from '../social/draft-property-reviews.mjs';
 import { main as approve } from '../social/approve-property-review.mjs';
 
@@ -228,4 +228,40 @@ test('every entry in the repository review register is well-formed', () => {
       assert.ok(['photograph', 'render'].includes(p.kind) && p.visuallyApproved === true && /^[a-f0-9]{64}$/.test(p.sha256), id);
     }
   }
+});
+
+test('a photo note opens the caption, makes off-plan frames photographs by default, and keeps renders out', async () => {
+  const w = await world();
+  try {
+    const rules = policyRules(WAIVER, now);
+    const NOTE = { en: 'Photos show a completed sister project by the same developer, not Fixture villa.', ar: 'الصور لمشروع مكتمل آخر للمطوّر نفسه، وليست للفيلا التجريبية.' };
+    const offPlan = { ...w.villa, category: 'off-plan' };
+    const sister = { ...offPlan, photoNote: NOTE };
+    assert.equal(defaultKind(offPlan), 'render');
+    assert.equal(defaultKind(sister), 'photograph');
+    assert.equal(defaultKind(w.villa), 'photograph');
+    assert.deepEqual(disclosuresFor(sister), disclosuresFor(offPlan), 'the closing disclosures are the usual ones');
+    const frames = [1, 2, 3].map(index => ({ index, url: `https://bona-real-estate.com/listings/villa/${index}.jpg`, sha256: sha256('x' + index), width: 1920, height: 1280, alt: { ar: 'صورة', en: 'Photo' } }));
+    const r = buildReview(sister, advertiser, frames, parseSelection('BONA-T1:1,2,3'), { reviewedAt: '2026-10-05T09:00:00Z', reviewer: 'test' });
+    assert.deepEqual(r.photos.map(x => x.kind), ['photograph', 'photograph', 'photograph']);
+    assert.deepEqual(eligibility(sister, r, advertiser, now, rules), []);
+    const c = reviewedCopy(sister, advertiser, r);
+    for (const lang of ['ar', 'en']) {
+      assert.deepEqual(c[lang].split('\n').slice(0, 2), [NOTE[lang], sister.title[lang]], `${lang}: the note is the first line, then the title`);
+      assert.equal(c[lang].split(NOTE[lang]).length, 2, `${lang}: once`);
+    }
+    assert.doesNotMatch(c.en, /artist's impressions/);
+    assert.doesNotMatch(c.ar, /تصاميم تصوّرية/);
+    // A frame marked as a render cannot go out with photos of another project.
+    const withRender = buildReview(sister, advertiser, frames, parseSelection('BONA-T1:1,2,3r'), { reviewedAt: '2026-10-05T09:00:00Z', reviewer: 'test' });
+    assert.deepEqual(eligibility(sister, withRender, advertiser, now, rules), ['photo_note_conflicts_with_renders']);
+    // A review from before the note no longer matches the listing.
+    const old = buildReview(offPlan, advertiser, frames, parseSelection('BONA-T1:1p,2p,3p'), { reviewedAt: '2026-10-05T09:00:00Z', reviewer: 'test' });
+    assert.ok(eligibility(sister, old, advertiser, now, rules).includes('listing_changed_since_review'));
+    // Malformed notes fail closed.
+    for (const bad of [{ en: NOTE.en, ar: null }, { en: NOTE.en, ar: 'not arabic' }, { en: NOTE.en, ar: '،' }, { en: NOTE.en, ar: '١٢٣' }, { en: NOTE.en, ar: 'ـــ' },
+      { en: NOTE.en, ar: NOTE.en + '،' }, { en: '،،،', ar: NOTE.ar }, { en: ' ', ar: NOTE.ar }, '', 0, false]) {
+      assert.ok(eligibility({ ...sister, photoNote: bad }, r, advertiser, now, rules).includes('photo_note_malformed'), JSON.stringify(bad));
+    }
+  } finally { w.cleanup(); }
 });

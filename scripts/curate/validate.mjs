@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FORBIDDEN, HYPE, isLandPublic, isLocalSrc, isPublishable, LAND_PRICE_CAP, faqProblems, licenceProblems, LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, projectFactsProblems, sarAmount, seoTitleProblems, unitsSheetProblems, videoEntryProblems } from './rules.mjs';
+import { FORBIDDEN, HYPE, isLandPublic, isLocalSrc, isPublishable, LAND_PRICE_CAP, faqProblems, licenceProblems, LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, photoNoteProblems, projectFactsProblems, sarAmount, seoTitleProblems, unitsSheetProblems, videoEntryProblems } from './rules.mjs';
 
 function matterportIdOf(value) {
   if (typeof value !== 'string') return null;
@@ -198,11 +198,15 @@ for (const l of data) {
   }
 
   // Project-page extras (rules.mjs): optional, but whole when present.
-  for (const p of [...faqProblems(l.faq), ...seoTitleProblems(l.seoTitle), ...projectFactsProblems(l.projectFacts)]) err(id, p);
+  for (const p of [...faqProblems(l.faq), ...seoTitleProblems(l.seoTitle), ...projectFactsProblems(l.projectFacts), ...photoNoteProblems(l.photoNote)]) err(id, p);
+  // A photo note is repeated in every image label, so no label can still present the photos as this listing.
+  if (l.photoNote && isLoc(l.photoNote)) for (const [i, im] of (l.images ?? []).entries()) {
+    if (!String(im.alt?.en ?? '').includes(l.photoNote.en) || !String(im.alt?.ar ?? '').includes(l.photoNote.ar)) err(id, `images[${i}].alt does not carry the listing's photoNote`);
+  }
   const paras = (v) => (Array.isArray(v) ? v : []);
   for (const it of Array.isArray(l.faq) ? l.faq.filter((x) => x && typeof x === 'object') : []) for (const [label, str] of [['faq.q.en', it.q?.en], ['faq.q.ar', it.q?.ar], ...paras(it.a?.en).map((x) => ['faq.a.en', x]), ...paras(it.a?.ar).map((x) => ['faq.a.ar', x])]) if (isStr(str)) checkCopy(id, label, str);
   // copy hygiene
-  for (const [label, str] of [['title.en', l.title?.en], ['title.ar', l.title?.ar], ['description.en', l.description?.en], ['description.ar', l.description?.ar], ['project.name.en', l.project?.name?.en], ['project.name.ar', l.project?.name?.ar], ...((h.en ?? []).map((x, i) => [`highlights.en[${i}]`, x])), ...((h.ar ?? []).map((x, i) => [`highlights.ar[${i}]`, x]))]) if (isStr(str)) checkCopy(id, label, str);
+  for (const [label, str] of [['title.en', l.title?.en], ['title.ar', l.title?.ar], ['description.en', l.description?.en], ['description.ar', l.description?.ar], ['project.name.en', l.project?.name?.en], ['project.name.ar', l.project?.name?.ar], ['photoNote.en', l.photoNote?.en], ['photoNote.ar', l.photoNote?.ar], ...((h.en ?? []).map((x, i) => [`highlights.en[${i}]`, x])), ...((h.ar ?? []).map((x, i) => [`highlights.ar[${i}]`, x]))]) if (isStr(str)) checkCopy(id, label, str);
 }
 
 // Developer unit sheet: WARN only. An old sheet stays on the site with its date (owner decision), and an error here would
