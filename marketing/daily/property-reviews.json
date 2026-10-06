@@ -1,11 +1,11 @@
 {
   "BONA-001": {
     "status": "approved",
-    "reviewedAt": "2026-10-05T19:23:41.552Z",
-    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
-    "factsSha256": "ed40a21972d45d62882ad3b28eefc7a05c3d8b5189b6ec5f53fa0f6a75e065bc",
-    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
-    "captionSha256": "d0fd204ba8550a7d041115ae11ccb3e110bb54216f1ded8c1887785d23d08266",
+    "reviewedAt": "2026-10-06T03:12:05.702Z",
+    "reviewer": "Re-approval 2026-10-06 after the owner-name and listing-name corrections: same frames as the 2026-10-05 visual review (selector, adversarial skeptic and decider, workflow wf_b70ef0c5-ef3); captions re-read by the controller",
+    "factsSha256": "09a8be77350358b4f8f19d3da143431ff0cdaca99bf095f0485a03cfabdb3d60",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "f3cf9d7894de4a847a4f69e1692e70194734a7d1602c1d2c9600d3df9f420382",
     "licenceEvidence": null,
     "legalDisclosuresVerified": true,
     "legalDisclosures": {
@@ -57,8 +57,8 @@
         "kind": "photograph",
         "visuallyApproved": true,
         "alt": {
-          "en": "Living room — Private Beach Villa, Durrat Al Arous",
-          "ar": "غرفة المعيشة — فيلا بشاطئ خاص، درة العروس"
+          "en": "Bedroom — Private Beach Villa, Durrat Al Arous",
+          "ar": "غرفة النوم — فيلا بشاطئ خاص، درة العروس"
         }
       },
       {
@@ -77,11 +77,11 @@
   },
   "BONA-015": {
     "status": "approved",
-    "reviewedAt": "2026-10-05T19:21:56.781Z",
-    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
-    "factsSha256": "d3f53cc89d93a03cba5443226a1f0ff1571fae499f406e7f19b24dd3b10574ef",
-    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
-    "captionSha256": "43d9fb6ea3aac6f91b3d3080bafa2906cb053d8c53f2f7c3f877a635f53995ab",
+    "reviewedAt": "2026-10-06T03:12:05.702Z",
+    "reviewer": "Re-approval 2026-10-06 after the owner-name and listing-name corrections: same frames as the 2026-10-05 visual review (selector, adversarial skeptic and decider, workflow wf_b70ef0c5-ef3); captions re-read by the controller",
+    "factsSha256": "f70c3eed7237a9629103b0a8176e7d61eb875fc929541bf2036964f5ed99a2d4",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "ed8562a17ab8ceacec2960ad906988e17567e01f540b0d198cdbd86ad6090071",
     "licenceEvidence": null,
     "legalDisclosuresVerified": true,
     "legalDisclosures": {
@@ -97,8 +97,8 @@
         "kind": "photograph",
         "visuallyApproved": true,
         "alt": {
-          "en": "Façade at night — Al Zahra Residences",
-          "ar": "الواجهة ليلاً — شقق الزهراء"
+          "en": "Façade at night — Apartments, Al Zahra",
+          "ar": "الواجهة ليلاً — شقق في الزهراء"
         }
       },
       {
@@ -109,8 +109,8 @@
         "kind": "photograph",
         "visuallyApproved": true,
         "alt": {
-          "en": "Exterior — Al Zahra Residences",
-          "ar": "الواجهة الخارجية — شقق الزهراء"
+          "en": "Exterior — Apartments, Al Zahra",
+          "ar": "الواجهة الخارجية — شقق في الزهراء"
         }
       },
       {
@@ -121,19 +121,19 @@
         "kind": "photograph",
         "visuallyApproved": true,
         "alt": {
-          "en": "Balcony — Al Zahra Residences",
-          "ar": "الشرفة — شقق الزهراء"
+          "en": "View — Apartments, Al Zahra",
+          "ar": "الإطلالة — شقق في الزهراء"
         }
       }
     ]
   },
   "BONA-022": {
     "status": "approved",
-    "reviewedAt": "2026-10-05T19:21:56.781Z",
-    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "reviewedAt": "2026-10-06T03:12:05.702Z",
+    "reviewer": "Re-approval 2026-10-06 after the owner-name and listing-name corrections: same frames as the 2026-10-05 visual review (selector, adversarial skeptic and decider, workflow wf_b70ef0c5-ef3); captions re-read by the controller",
     "factsSha256": "cb7ebbb4bd22baebe010b4f69c2191df4e3ef639ad71e08d45b9aa12d58b62d3",
-    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
-    "captionSha256": "b6a3d9537f5596b30022a9c6a777bf24cac15254f1526e1ec50115dd6d2437fa",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "aecfab72d60f02cc8564627917fe8945cf617612d690ebd8eaa34f1282780c7e",
     "licenceEvidence": null,
     "legalDisclosuresVerified": true,
     "legalDisclosures": {
@@ -205,11 +205,11 @@
   },
   "BONA-023": {
     "status": "approved",
-    "reviewedAt": "2026-10-05T19:23:41.552Z",
-    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "reviewedAt": "2026-10-06T03:12:05.702Z",
+    "reviewer": "Re-approval 2026-10-06 after the owner-name and listing-name corrections: same frames as the 2026-10-05 visual review (selector, adversarial skeptic and decider, workflow wf_b70ef0c5-ef3); captions re-read by the controller",
     "factsSha256": "2f639b312284fd5778ad1808d4a0c8e7fe30d4abc364b60e081e40da63a29fad",
-    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
-    "captionSha256": "7fe4c2f80aeb46bee4e71b9b3dc9c7e60a259bdf9cd1a1afac3be614f966c664",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "065502405e482083fc9115ec19b52263387628b81e0c7b187d299ed9140f3176",
     "licenceEvidence": null,
     "legalDisclosuresVerified": true,
     "legalDisclosures": {
@@ -281,11 +281,11 @@
   },
   "BONA-024": {
     "status": "approved",
-    "reviewedAt": "2026-10-05T19:21:56.781Z",
-    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "reviewedAt": "2026-10-06T03:12:05.702Z",
+    "reviewer": "Re-approval 2026-10-06 after the owner-name and listing-name corrections: same frames as the 2026-10-05 visual review (selector, adversarial skeptic and decider, workflow wf_b70ef0c5-ef3); captions re-read by the controller",
     "factsSha256": "33d2b2eb246ff149175bc921f6888a374a59a0f24795f086c6e1d769e66f0046",
-    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
-    "captionSha256": "e28e94ded0dcd56cef04ba91f45a6895503ec014e559808adb1ee0cb71f6ab88",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "70fccd33d445f284c099ed00739ffedd3a7ac98335bbc890e94c188ef10eb5cc",
     "licenceEvidence": null,
     "legalDisclosuresVerified": true,
     "legalDisclosures": {
@@ -331,101 +331,13 @@
       }
     ]
   },
-  "BONA-026": {
-    "status": "approved",
-    "reviewedAt": "2026-10-05T19:23:41.552Z",
-    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
-    "factsSha256": "872dabd9406802cd03f38fb2a912a41dbfb224b5a36597d4548ffec86778f7d5",
-    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
-    "captionSha256": "dfc8ecbe61875dd4e163941ebcfd13d9965d3141f0f911e1e673f83ad9b07db9",
-    "licenceEvidence": null,
-    "legalDisclosuresVerified": true,
-    "legalDisclosures": {
-      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. مواعيد التسليم والمواصفات حسب المطوّر.",
-      "en": "Prices shown are asking prices and may change. Delivery dates and specifications are per the developer."
-    },
-    "photos": [
-      {
-        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776158984069-652361.jpg",
-        "sha256": "f03905368a52f86fc1fba26a4820162c5d7187c357184531bad98755916687fb",
-        "width": 1920,
-        "height": 1281,
-        "kind": "photograph",
-        "visuallyApproved": true,
-        "alt": {
-          "en": "Aerial view — Dari II, Al Salamah",
-          "ar": "منظر جوي — داري 2، السلامة"
-        }
-      },
-      {
-        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776157942045-975c1d.jpg",
-        "sha256": "be695e634803fd20755e5f7604da0856270b7f561acaab03f2c7a70f02f83e60",
-        "width": 1920,
-        "height": 1281,
-        "kind": "photograph",
-        "visuallyApproved": true,
-        "alt": {
-          "en": "Lobby — Dari II, Al Salamah",
-          "ar": "البهو — داري 2، السلامة"
-        }
-      },
-      {
-        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/tk2-50-20a796.jpg",
-        "sha256": "4cf4e68c175b8b8490d116b829573ef92c61ff5e9e15f6366ebd98e82e6e243c",
-        "width": 1920,
-        "height": 1281,
-        "kind": "photograph",
-        "visuallyApproved": true,
-        "alt": {
-          "en": "Lounge — Dari II, Al Salamah",
-          "ar": "الصالة — داري 2، السلامة"
-        }
-      },
-      {
-        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776158376378-509403.jpg",
-        "sha256": "db3dbb904434480d271836c33a4df8fb2e593bd140738a871218daf24c0d788d",
-        "width": 1920,
-        "height": 1281,
-        "kind": "photograph",
-        "visuallyApproved": true,
-        "alt": {
-          "en": "Living room — Dari II, Al Salamah",
-          "ar": "غرفة المعيشة — داري 2، السلامة"
-        }
-      },
-      {
-        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776171062974-087541.jpg",
-        "sha256": "8e9eb69e8d8906bc438ceebfc18b385a2e8067df5b81f350c2d15637dbe2efc0",
-        "width": 1920,
-        "height": 1281,
-        "kind": "photograph",
-        "visuallyApproved": true,
-        "alt": {
-          "en": "Event hall — Dari II, Al Salamah",
-          "ar": "قاعة المناسبات — داري 2، السلامة"
-        }
-      },
-      {
-        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/dari-2/aiease_1776164971857-89dc4d.jpg",
-        "sha256": "2b25948d79965841431267ab49ecd066403988e5a34a84e877d0c0f4cc0288af",
-        "width": 1920,
-        "height": 1281,
-        "kind": "photograph",
-        "visuallyApproved": true,
-        "alt": {
-          "en": "Gym — Dari II, Al Salamah",
-          "ar": "النادي الرياضي — داري 2، السلامة"
-        }
-      }
-    ]
-  },
   "BONA-033": {
     "status": "approved",
-    "reviewedAt": "2026-10-05T19:21:56.781Z",
-    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "reviewedAt": "2026-10-06T03:12:05.702Z",
+    "reviewer": "Re-approval 2026-10-06 after the owner-name and listing-name corrections: same frames as the 2026-10-05 visual review (selector, adversarial skeptic and decider, workflow wf_b70ef0c5-ef3); captions re-read by the controller",
     "factsSha256": "6ebd8b9b5054b3abddd25feb7918f1de6fd98cc6c2b476b26e301c78c694fe79",
-    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
-    "captionSha256": "a7ae84968accaaac0284e5aae49686e826614f9a12283486315fbb2e27757f01",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "8e038a67608f5617e18e6e70abc48c650d0dc4eaae53385aa3c87d7224d3fd03",
     "licenceEvidence": null,
     "legalDisclosuresVerified": true,
     "legalDisclosures": {
@@ -473,11 +385,11 @@
   },
   "BONA-034": {
     "status": "approved",
-    "reviewedAt": "2026-10-05T19:21:56.781Z",
-    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "reviewedAt": "2026-10-06T03:12:05.702Z",
+    "reviewer": "Re-approval 2026-10-06 after the owner-name and listing-name corrections: same frames as the 2026-10-05 visual review (selector, adversarial skeptic and decider, workflow wf_b70ef0c5-ef3); captions re-read by the controller",
     "factsSha256": "aaf4acdec6cb4ff40c570f6cd95d3fe87aa34803ace449563ef91dd8f4f9de22",
-    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
-    "captionSha256": "ccc473c5f4bf80b407a57e899214d240875563eaf7f020aeaf654845e7dfb2c0",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "1c61806d3ca8dc76a2848582b8f2e7073851d0987e0e26ece2c0a1c764b6e4b4",
     "licenceEvidence": null,
     "legalDisclosuresVerified": true,
     "legalDisclosures": {
@@ -549,11 +461,11 @@
   },
   "BONA-043": {
     "status": "approved",
-    "reviewedAt": "2026-10-05T19:21:56.781Z",
-    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "reviewedAt": "2026-10-06T03:12:05.702Z",
+    "reviewer": "Re-approval 2026-10-06 after the owner-name and listing-name corrections: same frames as the 2026-10-05 visual review (selector, adversarial skeptic and decider, workflow wf_b70ef0c5-ef3); captions re-read by the controller",
     "factsSha256": "e2649b5052616812b8febc097e0aa7de60ce2c009d9abb9cb701f7bd2d03f33b",
-    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
-    "captionSha256": "ba4d73e03951bc3745cc840e3ad4e6d700700d85920f663e05af65d9e414eabf",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "8c4592ab7edc848149be0b6b8a86f2008bfb790d3bc380f579507b611aabf493",
     "licenceEvidence": null,
     "legalDisclosuresVerified": true,
     "legalDisclosures": {
@@ -613,11 +525,11 @@
   },
   "BONA-W002": {
     "status": "approved",
-    "reviewedAt": "2026-10-05T19:21:56.781Z",
-    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
-    "factsSha256": "20c5abab84e3e7b0bf9903d29b0ea52b8f115d34cb80139353bc53f9aecb2004",
-    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
-    "captionSha256": "d1f8ea27c082348815f8929b3067d813f0149c60c3dbfcb122d6aa61af2ef54f",
+    "reviewedAt": "2026-10-06T03:12:05.702Z",
+    "reviewer": "Re-approval 2026-10-06 after the owner-name and listing-name corrections: same frames as the 2026-10-05 visual review (selector, adversarial skeptic and decider, workflow wf_b70ef0c5-ef3); captions re-read by the controller",
+    "factsSha256": "95a4c87092653205b98014981085c669418d1e06ac66924f4ffb5e0aeb00e35d",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "c42998a2aa157a810a4ec99f93c53ac57edd4f929db929dfcd6ea7c1bcb6ed68",
     "licenceEvidence": null,
     "legalDisclosuresVerified": true,
     "legalDisclosures": {
@@ -634,7 +546,7 @@
         "visuallyApproved": true,
         "alt": {
           "en": "Living room — Nuzul Khayala Residences, North Jeddah",
-          "ar": "غرفة المعيشة — نزل خيالة، شمال جدة"
+          "ar": "غرفة المعيشة — نزل خيالا، شمال جدة"
         }
       },
       {
@@ -646,7 +558,7 @@
         "visuallyApproved": true,
         "alt": {
           "en": "Living room — Nuzul Khayala Residences, North Jeddah",
-          "ar": "غرفة المعيشة — نزل خيالة، شمال جدة"
+          "ar": "غرفة المعيشة — نزل خيالا، شمال جدة"
         }
       },
       {
@@ -658,7 +570,7 @@
         "visuallyApproved": true,
         "alt": {
           "en": "Dining room — Nuzul Khayala Residences, North Jeddah",
-          "ar": "غرفة الطعام — نزل خيالة، شمال جدة"
+          "ar": "غرفة الطعام — نزل خيالا، شمال جدة"
         }
       },
       {
@@ -670,18 +582,18 @@
         "visuallyApproved": true,
         "alt": {
           "en": "Bathroom — Nuzul Khayala Residences, North Jeddah",
-          "ar": "الحمام — نزل خيالة، شمال جدة"
+          "ar": "الحمام — نزل خيالا، شمال جدة"
         }
       }
     ]
   },
   "BONA-W006": {
     "status": "approved",
-    "reviewedAt": "2026-10-05T19:21:56.781Z",
-    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
-    "factsSha256": "2a191547236066c552e13c90da5cb5eaf2f56aa2a9e8e9fea54a52d941922749",
-    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
-    "captionSha256": "4c162e5f1114a4175219877419c17dbc5c8bd8d28eed7d999c2d1dcee90999d9",
+    "reviewedAt": "2026-10-06T03:12:05.702Z",
+    "reviewer": "Re-approval 2026-10-06 after the owner-name and listing-name corrections: same frames as the 2026-10-05 visual review (selector, adversarial skeptic and decider, workflow wf_b70ef0c5-ef3); captions re-read by the controller",
+    "factsSha256": "55aa7639bd22a720aa39d60923614588ca4f90bf808fe27d31ef9660214622f6",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "3ec477a4ee45181472fc9126214e8bd139a047c434d09a4831307b1d31edaf0b",
     "licenceEvidence": null,
     "legalDisclosuresVerified": true,
     "legalDisclosures": {
@@ -697,8 +609,8 @@
         "kind": "render",
         "visuallyApproved": true,
         "alt": {
-          "en": "Exterior — Al Warf District, Jeddah",
-          "ar": "الواجهة الخارجية — وجهة الويرف، جدة"
+          "en": "Exterior — Malfa Jeddah, Al-Wareef",
+          "ar": "الواجهة الخارجية — ملفى جدة، الوريف"
         }
       },
       {
@@ -709,8 +621,8 @@
         "kind": "render",
         "visuallyApproved": true,
         "alt": {
-          "en": "Exterior — Al Warf District, Jeddah",
-          "ar": "الواجهة الخارجية — وجهة الويرف، جدة"
+          "en": "Exterior — Malfa Jeddah, Al-Wareef",
+          "ar": "الواجهة الخارجية — ملفى جدة، الوريف"
         }
       },
       {
@@ -721,19 +633,19 @@
         "kind": "render",
         "visuallyApproved": true,
         "alt": {
-          "en": "Exterior — Al Warf District, Jeddah",
-          "ar": "الواجهة الخارجية — وجهة الويرف، جدة"
+          "en": "Exterior — Malfa Jeddah, Al-Wareef",
+          "ar": "الواجهة الخارجية — ملفى جدة، الوريف"
         }
       }
     ]
   },
   "BONA-W014": {
     "status": "approved",
-    "reviewedAt": "2026-10-05T19:21:56.781Z",
-    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
+    "reviewedAt": "2026-10-06T03:12:05.702Z",
+    "reviewer": "Re-approval 2026-10-06 after the owner-name and listing-name corrections: same frames as the 2026-10-05 visual review (selector, adversarial skeptic and decider, workflow wf_b70ef0c5-ef3); captions re-read by the controller",
     "factsSha256": "8e4c7fad4440e3ff18221715f52ac0ccfe9a4153bcaf6f3cdd3579ded433ecf5",
-    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
-    "captionSha256": "614551c059a65a47bb0f5730ed89119b86f6e6a20e54a4054b02d840f0c4ed8c",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "a2c0ba712336c9137348c6b222b28f60a023335810d7cb826f31058e12761bb7",
     "licenceEvidence": null,
     "legalDisclosuresVerified": true,
     "legalDisclosures": {
@@ -805,11 +717,11 @@
   },
   "BONA-W015": {
     "status": "approved",
-    "reviewedAt": "2026-10-05T19:21:56.781Z",
-    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
-    "factsSha256": "3e1fce83b4d6a486d02cce5ec8aa57fd9853587b4bf5a9669e022cd9e7cd7351",
-    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
-    "captionSha256": "1e4f23d95269e37915af1eeaf1a2bbefe4d2af01548b9f66eff520866b887842",
+    "reviewedAt": "2026-10-06T03:12:05.702Z",
+    "reviewer": "Re-approval 2026-10-06 after the owner-name and listing-name corrections: same frames as the 2026-10-05 visual review (selector, adversarial skeptic and decider, workflow wf_b70ef0c5-ef3); captions re-read by the controller",
+    "factsSha256": "bd75b6960481957e30e495f3837d334e47bef5d5cbd25c61aba26bea8ad1a49c",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "c1e60bffb89d74f4598a352c1ad28c22ba81abb74471f98d2b6aec0fcf414be8",
     "licenceEvidence": null,
     "legalDisclosuresVerified": true,
     "legalDisclosures": {
@@ -837,8 +749,8 @@
         "kind": "render",
         "visuallyApproved": true,
         "alt": {
-          "en": "Entrance — Aseel Al Ghoroub 2, Al Madinah",
-          "ar": "المدخل — أصيل الغروب ٢، المدينة المنورة"
+          "en": "Exterior — Aseel Al Ghoroub 2, Al Madinah",
+          "ar": "الواجهة الخارجية — أصيل الغروب ٢، المدينة المنورة"
         }
       },
       {
@@ -851,58 +763,6 @@
         "alt": {
           "en": "Exterior — Aseel Al Ghoroub 2, Al Madinah",
           "ar": "الواجهة الخارجية — أصيل الغروب ٢، المدينة المنورة"
-        }
-      }
-    ]
-  },
-  "BONA-W018": {
-    "status": "approved",
-    "reviewedAt": "2026-10-05T19:21:56.781Z",
-    "reviewer": "Claude Opus 5.5 visual review 2026-10-05: per-listing selector, adversarial skeptic and decider (workflow wf_b70ef0c5-ef3) plus controller spot checks",
-    "factsSha256": "566a05a241fdd6576756b2b4d7c5ef826ddad20de5e416f3895e0d46967c3d53",
-    "advertiserSha256": "844e164d43375b13df6b8363768d3a264e11b55cfb2b41ef0dca64f522157c5c",
-    "captionSha256": "5640551e3387946271de5a3e91389bae88550629e12567d2ce56109788a4b8bd",
-    "licenceEvidence": null,
-    "legalDisclosuresVerified": true,
-    "legalDisclosures": {
-      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. مواعيد التسليم والمواصفات حسب المطوّر.",
-      "en": "Prices shown are asking prices and may change. Delivery dates and specifications are per the developer."
-    },
-    "photos": [
-      {
-        "url": "https://bona-real-estate.com/listings/elemental-residences-al-rawabi/02.jpg",
-        "sha256": "b84d7f41c376aecf20961c61828fb6f11dc9e3d89368086f7f4d728dfc0c03ec",
-        "width": 1160,
-        "height": 894,
-        "kind": "render",
-        "visuallyApproved": true,
-        "alt": {
-          "en": "Façade at night — Elemental Residences, Al Rawabi",
-          "ar": "الواجهة ليلاً — مشروع إيلمنتال، حي الروابي بجدة"
-        }
-      },
-      {
-        "url": "https://bona-real-estate.com/listings/elemental-residences-al-rawabi/05.jpg",
-        "sha256": "b437671e820882dc627a8594f076507c88de778921890b6be20519fef42d4866",
-        "width": 1160,
-        "height": 909,
-        "kind": "render",
-        "visuallyApproved": true,
-        "alt": {
-          "en": "Courtyard — Elemental Residences, Al Rawabi",
-          "ar": "الفناء الداخلي — مشروع إيلمنتال، حي الروابي بجدة"
-        }
-      },
-      {
-        "url": "https://bona-real-estate.com/listings/elemental-residences-al-rawabi/06.jpg",
-        "sha256": "d50ba4e510204f4c26e4662a359227e6f3935565ab42ccb95992bda6f9a1b777",
-        "width": 1323,
-        "height": 1058,
-        "kind": "render",
-        "visuallyApproved": true,
-        "alt": {
-          "en": "Gym — Elemental Residences, Al Rawabi",
-          "ar": "النادي الرياضي — مشروع إيلمنتال، حي الروابي بجدة"
         }
       }
     ]
