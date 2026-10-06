@@ -193,7 +193,7 @@ const H = {
     murjan: ['#المرجان', '#almurjan'], basateen: ['#البساتين', '#albasateen'],
     durrat: ['#درة_العروس', '#durratalarous'], andalus: ['#الأندلس', '#alandalus'], hamra: ['#الحمراء', '#alhamra'],
     nuzha: ['#النزهة', '#alnuzhah'], warf: ['#واجهة_الورف', '#alwarf'], wareef: ['#الوريف', '#alwareef'],
-    rayyan: ['#الريان', '#alrayyan'], khayala: ['#الخيالة', '#khayala'], madinah: ['#المدينة_المنورة', '#madinah'],
+    rayyan: ['#الريان', '#alrayyan'], khayala: ['#خيالا', '#khayala'], madinah: ['#المدينة_المنورة', '#madinah'],
     riyadh: ['#عقارات_الرياض', '#الرياض', '#riyadh'], 'wadi safar': ['#وادي_صفار', '#wadisafar'],
     dubai: ['#عقارات_دبي', '#دبي', '#dubai'], meydan: ['#ميدان', '#meydan', '#dubai'],
     muscat: ['#عقارات_عمان', '#مسقط', '#oman'], aida: ['#aidaoman', '#مسقط', '#oman'],
