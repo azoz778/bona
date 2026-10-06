@@ -6,6 +6,7 @@
 import Icon from '../Icon.astro';
 import WhatsAppFloat from '../WhatsAppFloat.astro';
 import site from '../../data/site.json';
+import listings from '../../data/listings.json';
 import { localePath, t, ui, waLink, countForms_, type Locale } from '../../lib/i18n';
 
 interface Props { locale: Locale; waMessage?: string }
@@ -24,6 +25,9 @@ const config = {
   name,
   waHref,
   propertiesBase: localePath(locale, '/properties/'),
+  // Listings whose photos show another project: the card under a chat message says so, like the site's own cards.
+  photoNotes: Object.fromEntries((listings as { slug: string; photoNote?: { en: string; ar: string } | null }[])
+    .filter((l) => l.photoNote).map((l) => [l.slug, t(l.photoNote!, locale)])),
   strings: {
     opening: t(ui.conciergeOpening, locale),
     view: t(ui.viewPill, locale),

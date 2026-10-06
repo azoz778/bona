@@ -163,6 +163,7 @@ const listingBlock = (l) => {
   if (tourOf(l)) lines.push(`- 3D virtual tour (Matterport): ${tourOf(l)}`);
   if (l.brochureUrl) lines.push(`- Brochure: ${l.brochureUrl}`);
   if (l.listedAt) lines.push(`- Listed: ${l.listedAt}`);
+  if (l.photoNote) lines.push(`- Photo note: ${l.photoNote.en} / ${l.photoNote.ar}`);
   if (l.images?.length) lines.push(`- Images: ${l.images.slice(0, 6).map((i) => i.src).join(' , ')}`);
   lines.push('', (l.description?.en || '').trim(), '', (l.description?.ar || '').trim(), '', `Enquire on WhatsApp: ${wa}?text=${encodeURIComponent(`Hello Bona, I'm interested in ${l.title.en} (${l.id}).`)}`, '');
   return lines.join('\n');

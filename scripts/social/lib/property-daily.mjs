@@ -9,6 +9,8 @@ export function publicListing(p) {
   const out = Object.fromEntries(['id','slug','status','category','type','title','location','price','specs','highlights'].map(k => [k,p[k] ?? null]));
   out.images = (p.images ?? []).map(({src,thumb,alt})=>({src,thumb,alt}));
   out.licence = p.licence ? {adNumber:p.licence.adNumber ?? null,adExpiry:p.licence.adExpiry ?? null,wafiNumber:p.licence.wafiNumber ?? null} : null;
+  // Only when set: adding the key to every listing would change every reviewed listing's factsSha256.
+  if (p.photoNote != null) out.photoNote = {en:p.photoNote?.en ?? null,ar:p.photoNote?.ar ?? null};
   return out;
 }
 export const fingerprint = p => sha256(JSON.stringify(publicListing(p)));
@@ -98,8 +100,14 @@ export function eligibility(p, review, advertiser, now = new Date(), rules = STR
         photo.width/photo.height < 0.8 || photo.width/photo.height > 1.91 || !photo.alt?.ar || !photo.alt?.en) reasons.push('photo_quality_or_provenance_unverified');
   }
   if (photos.length && !aspectConsistent(photos)) reasons.push('carousel_aspect_mismatch');
+  // Photos of another project (an owner-confirmed photoNote): the caption opens with the note, in both languages,
+  // and none of the frames may be presented as the developer's renders of this listing.
+  const note = p?.photoNote != null ? photoNoteText(p) : null;
+  if (note && !note.ar) reasons.push('photo_note_malformed');
+  if (note && photos.some(x => x.kind === 'render')) reasons.push('photo_note_conflicts_with_renders');
   const copy = reviewedCopy(p,advertiser,review);
   if (review.captionSha256 !== sha256(JSON.stringify(copy))) reasons.push('caption_changed_since_review');
+  if (note?.ar && !(copy.ar.includes(note.ar) && copy.en.includes(note.en))) reasons.push('photo_note_not_in_caption');
   // The text publish.mjs composeCaption() sends to Instagram for a two-language caption, held to graph.mjs's limits.
   const text = [copy.ar, copy.en].join('\n\n—\n\n') + '\n\n' + copy.hashtags.join(' ');
   if (text.length > CAPTION_MAX_CHARS || countHashtags(text) > CAPTION_MAX_HASHTAGS) reasons.push('caption_exceeds_platform_limits');
@@ -115,6 +123,13 @@ const RENDER_NOTE = Object.freeze({
   all: { ar: 'الصور تصاميم تصوّرية من المطوّر.', en: "Images are the developer's artist's impressions." },
   some: { ar: 'بعض الصور تصاميم تصوّرية من المطوّر.', en: "Some images are the developer's artist's impressions." },
 });
+/** A listing's photoNote when it is usable in both languages (at least three Arabic / Latin letters; the Arabic
+    block's punctuation and digits do not count), else {}. Same rule as rules.mjs photoNoteProblems. */
+export function photoNoteText(p) {
+  const n = p?.photoNote, en = typeof n?.en === 'string' ? n.en.trim() : '', ar = typeof n?.ar === 'string' ? n.ar.trim() : '';
+  const count = (s, re) => (s.match(re) ?? []).length;
+  return count(en, /[A-Za-z]/g) >= 3 && count(ar, /[\u0621-\u063A\u0641-\u064A\u0671-\u06D3]/g) >= 3 ? { ar, en } : {};
+}
 export function propertyCaption(p, advertiser, disclosures = {}, { renders = 'none' } = {}) {
   const n = x => Number(x).toLocaleString('en-US');
   const ar = [], en = [];
@@ -140,17 +155,19 @@ export function propertyCaption(p, advertiser, disclosures = {}, { renders = 'no
   const lines = (...xs) => xs.filter(Boolean).join('\n');
   const blocks = (...xs) => xs.filter(Boolean).join('\n\n');
   const note = RENDER_NOTE[renders] ?? {};
+  // Photos of another project say so on the caption's first line, the only one a feed preview reliably shows.
+  const photos = photoNoteText(p);
   const licence = showsLicence(p.licence)
     ? { ar: `ترخيص الإعلان: ${p.licence.adNumber} · ينتهي ${p.licence.adExpiry}`, en: `Ad licence ${p.licence.adNumber} · Expires ${p.licence.adExpiry}` }
     : {};
   return {
     ar: blocks(
-      lines(p.title.ar, [place('ar'), deal.ar].filter(Boolean).join(' · ')),
+      lines(photos.ar, p.title.ar, [place('ar'), deal.ar].filter(Boolean).join(' · ')),
       ar.join(' · '),
       lines(cta.ar, url),
       lines(disclosures.ar, `المعلن: ${advertiser.name.ar} · فال ${advertiser.fal} · ${advertiser.phone}`, licence.ar, note.ar)),
     en: blocks(
-      lines(p.title.en, [place('en'), deal.en].filter(Boolean).join(' · ')),
+      lines(photos.en, p.title.en, [place('en'), deal.en].filter(Boolean).join(' · ')),
       en.join(' · '),
       lines(cta.en, url),
       lines(disclosures.en, `Advertiser: ${advertiser.name.en} · FAL ${advertiser.fal} · ${advertiser.phone}`, licence.en, note.en)),

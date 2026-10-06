@@ -59,6 +59,9 @@ const titleHasCity = cityText ? title.includes(cityText) : true;
 const autoTitle = [title, [categoryText, !titleHasCity && cityText].filter(Boolean).join(locale === 'ar' ? ' في ' : ' in ')]
   .filter(Boolean).join(' — ');
 const metaTitle = l.seoTitle?.[locale]?.trim() || autoTitle;
+// Link previews (WhatsApp, Facebook, X) show the image beside the title and never its alt text, so photos of
+// another project (photoNote) never stand in for this listing there: the brand image is used instead.
+const shareImage = l.photoNote ? undefined : l.images?.[0]?.src;
 /* FAQ answers may carry {cashFrom}/{count}/… filled from the live unit sheet; an item needing a value the
    sheet cannot give (sold, no sheet, bad date) is dropped, so the FAQ never outlives the table it quotes. */
 const faq = localFaq(l.faq, locale, sheetVars(liveSummary(recordFor(unitsData, l.id), l), locale));
@@ -72,7 +75,7 @@ const conciergeOn = site.concierge?.enabled !== false;
 const danaMessage = fill(t(ui.conciergeAskAboutHomeMsg, locale), { title, id: l.id });
 const kindText = t(kindLabel[kind], locale);
 ---
-<Base title={metaTitle} description={description} locale={locale} path={path} image={l.images?.[0]?.src} waMessage={waMessage} listingId={l.id}
+<Base title={metaTitle} description={description} locale={locale} path={path} image={shareImage} waMessage={waMessage} listingId={l.id}
       jsonLd={[listingJsonLd(l, locale), breadcrumbJsonLd(crumbs), listingFaqJsonLd(l, locale, faq)].filter(Boolean)}>
   <article class="pt-6 lg:pt-8">
     <div class="wrap">

@@ -25,6 +25,9 @@ export function disclosuresFor(p) {
   const parts = [...(showsPrice(p) ? [PRICE_DISCLOSURE] : []), p?.category === 'off-plan' ? OFF_PLAN_DISCLOSURE : VIEWING_DISCLOSURE];
   return { ar: parts.map(x => x.ar).join(' '), en: parts.map(x => x.en).join(' ') };
 }
+/** A frame's kind when the reviewer gives none: developer renders for off-plan, except when the listing's photoNote
+    says its photos are photographs of another project. */
+export const defaultKind = p => (p?.category === 'off-plan' && p?.photoNote == null ? 'render' : 'photograph');
 /** Why a downloaded frame cannot be used, or null. */
 export function frameProblem({ contentType, bytes, width, height }) {
   if (!String(contentType ?? '').startsWith('image/jpeg')) return 'not_jpeg';
@@ -48,7 +51,7 @@ export function buildReview(p, advertiser, draftFrames, selection, { reviewedAt,
     const f = draftFrames.find(x => x.index === index);
     if (!f) throw new Error(`${p.id}: frame ${index} was not a usable draft frame`);
     return { url: f.url, sha256: f.sha256, width: f.width, height: f.height,
-      kind: kind ?? (p.category === 'off-plan' ? 'render' : 'photograph'), visuallyApproved: true, alt: f.alt };
+      kind: kind ?? defaultKind(p), visuallyApproved: true, alt: f.alt };
   });
   if (!aspectConsistent(photos)) throw new Error(`${p.id}: selected frames differ in aspect ratio by more than 15% (Instagram crops a carousel to its first frame)`);
   const review = { status: 'approved', reviewedAt, reviewer, factsSha256: fingerprint(p), advertiserSha256: advertiserFingerprint(advertiser),

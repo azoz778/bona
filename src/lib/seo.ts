@@ -351,12 +351,12 @@ export function collectionPageJsonLd(opts: {
       position: i + 1,
       url: pageUrl,
       name,
-      image: x.images?.[0]?.src,
+      image: x.photoNote ? undefined : x.images?.[0]?.src,
       item: tour,
     });
   });
   return compact({
-    ...(webPageJsonLd({ locale: opts.locale, path: opts.path, type: 'CollectionPage', title: opts.title, description: opts.description, image: opts.image ?? shown[0]?.images?.[0]?.src, breadcrumbId: opts.breadcrumbId }) as Record<string, unknown>),
+    ...(webPageJsonLd({ locale: opts.locale, path: opts.path, type: 'CollectionPage', title: opts.title, description: opts.description, image: opts.image ?? shown.find((x) => !x.photoNote)?.images?.[0]?.src, breadcrumbId: opts.breadcrumbId }) as Record<string, unknown>),
     mainEntity: {
       '@type': 'ItemList',
       '@id': `${url}#list`,
@@ -424,7 +424,7 @@ export function tourJsonLd(listing: Listing, locale: Locale): object | undefined
     embedUrl: u,
     encodingFormat: 'text/html',
     isAccessibleForFree: true,
-    thumbnailUrl: listing.images?.[0]?.src,
+    thumbnailUrl: listing.photoNote ? undefined : listing.images?.[0]?.src,
     inLanguage: l,
     about: { '@id': `${pageUrl}#residence` },
     mainEntityOfPage: pageUrl,
@@ -442,7 +442,8 @@ export function listingJsonLd(listing: Listing, locale: Locale): object {
   const residenceId = `${url}#residence`;
   const name = listing.title?.[l] ?? listing.title?.en ?? listing.id;
   const description = (listing.description?.[l] ?? listing.description?.en ?? '').trim();
-  const images = (listing.images ?? []).map((i) => i.src).filter(Boolean);
+  // A listing whose photos show another project (photoNote) declares no images: they are not of this residence.
+  const images = listing.photoNote ? [] : (listing.images ?? []).map((i) => i.src).filter(Boolean);
   const kind = kindOf(x);
   const residenceKind = residenceType[(listing.type || '').toLowerCase()] ?? kindResidenceType[kind] ?? 'Residence';
   const label = typeLabel[(listing.type || '').toLowerCase()]?.[l] ?? listing.type;
