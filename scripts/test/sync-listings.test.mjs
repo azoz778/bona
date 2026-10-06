@@ -1,7 +1,7 @@
 // scripts/sync-listings.mjs runs in every deploy against TK's public list, and its catch-all turns
 // any crash into "sync skipped" with exit code 0, so a broken branch never fails CI: it silently
 // stops every status and price update. These tests run the real script in a scratch tree, with the
-// TK list served as a data: URL, so each branch actually executes. (2026-10-06: the over-cap branch
+// TK list served as a data: URL, so its update and removal paths actually execute. (2026-10-06: the over-cap branch
 // referenced an undefined variable; the first plot priced over the cap would have frozen the sync.)
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,7 +13,10 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 function tree(listings) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-sync-'));
+  // realpath: the script runs main() only when argv[1] equals its own resolved path (a symlinked tmp dir would not).
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bona-sync-')));
+  // The script's whole import chain. If any of these gains an import, both tests fail with
+  // ERR_MODULE_NOT_FOUND naming the missing file: add it to this list.
   for (const f of ['scripts/sync-listings.mjs', 'scripts/curate/rules.mjs', 'src/lib/units-summary.mjs']) {
     fs.mkdirSync(path.join(dir, path.dirname(f)), { recursive: true });
     fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
@@ -54,5 +57,15 @@ test('an ordinary run updates status and price in place and removes nothing', ()
     const [l] = read(dir);
     assert.equal(l.status, 'reserved');
     assert.equal(l.price.amount, 1_250_000);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a withheld listing is removed and the file rewritten even when TK changed nothing else', () => {
+  const dir = tree([listing('BONA-002', 'VIL-2', { type: 'villa', kind: 'house' }), listing('BONA-T4', 'APT-4', { type: 'apartment', kind: 'apartment' })]);
+  try {
+    const out = sync(dir, [{ id: 'VIL-2', status: 'available', price: 'SAR 1,000,000' }, { id: 'APT-4', status: 'available', price: 'SAR 1,000,000' }]);
+    assert.doesNotMatch(out, /sync skipped/, out);
+    assert.match(out, /BONA-002 REMOVED — withheld from the public site by owner decision/);
+    assert.deepEqual(read(dir).map((l) => l.id), ['BONA-T4'], 'the only change is the removal, and it is written');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
