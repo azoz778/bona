@@ -121,7 +121,7 @@ async function main() {
         : `land at/above the SAR ${LAND_PRICE_CAP.toLocaleString('en-US')} cap (${sar === null ? 'no published price' : `${Math.round(sar).toLocaleString('en-US')} SAR eq.`})`;
       changes.push(`${l.id} REMOVED — ${which}`);
     }
-    const drop = new Set(withheld.map((l) => l.id));
+    const drop = new Set(overCap.map((l) => l.id));
     listings = listings.filter((l) => !drop.has(l.id));
   }
 
