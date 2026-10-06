@@ -35,8 +35,9 @@ and `bona-daily@facebook` timers run it; there is no other timer.
    brokers' watermarks, people, price or text banners, floor plans, duplicates and anything that
    does not show this property. Put the strongest frame first.
 3. **Approve:** `node scripts/social/approve-property-review.mjs --drafts NEW_DIR/drafts.json --reviewer "<who looked>" --select BONA-022:1,3,4 --select BONA-001:2,5,1,7`.
-   Frames default to `render` for off-plan listings and `photograph` otherwise; a `p` or `r`
-   suffix overrides one frame. Selected frames must sit within 15% of the first frame's aspect
+   Frames default to `render` for off-plan listings and `photograph` otherwise, and always to
+   `photograph` for a listing with a `photoNote` (photos of another project, see below); a `p`
+   or `r` suffix overrides one frame. Selected frames must sit within 15% of the first frame's aspect
    ratio because Instagram crops a carousel to its first frame. The script re-reads the live
    catalogue, refuses anything changed since drafting or not eligible, and leaves an identical,
    still-valid review untouched; an expired one is renewed.
@@ -50,8 +51,9 @@ is claimed.
 
 When a listing's photos show another project, the listing carries a `photoNote` (see
 `src/data/LISTING-SCHEMA.md`), for example Dari II (BONA-026): "Photos show a completed sister
-project by the same developer, not Dari II." The caption then opens with that sentence, on the
-line under the title and place in both languages, where a feed preview still shows it. The note
+project by the same developer, not Dari II." The caption then opens with that sentence: it is
+the first line of each language block, and the Arabic block is the first thing a feed preview
+shows. The note
 is part of the reviewed facts. Frames of such a listing default to photographs even when it is
 off-plan; the publisher refuses one marked as a render (`photo_note_conflicts_with_renders`), a
 malformed note (`photo_note_malformed`) and a caption without the note

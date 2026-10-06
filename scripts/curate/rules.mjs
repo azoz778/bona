@@ -244,12 +244,12 @@ export function faqProblems(faq) {
 /**
  * photoNote: set only when the owner has confirmed the photos show something other than the listing itself
  * (for example the developer's completed sister project). One sentence per language; it is shown under the
- * gallery, appended to every image label, and printed in the daily post's disclosures.
+ * gallery, appended to every image label, and opens the daily post's caption.
  */
 const letters = (s, re) => (typeof s === 'string' ? s.match(re) ?? [] : []).length;
 /** Arabic letters proper: not the block's punctuation (،), digits (١) or tatweel (ـ, U+0640), which say nothing. */
-export const AR_LETTER_RE = /[\u0621-\u063A\u0641-\u064A\u0671-\u06D3]/g;
-export const EN_LETTER_RE = /[A-Za-z]/g;
+const AR_LETTER_RE = /[\u0621-\u063A\u0641-\u064A\u0671-\u06D3]/g; // global: used with .match() only
+const EN_LETTER_RE = /[A-Za-z]/g;
 export function photoNoteProblems(n) {
   if (n === undefined || n === null) return [];
   if (typeof n !== 'object' || Array.isArray(n)) return ['photoNote must be { en, ar }'];

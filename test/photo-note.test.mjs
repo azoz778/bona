@@ -41,8 +41,11 @@ const meta = (html, prop) => decode(html.match(new RegExp(`<meta (?:property|nam
 /** Every URL a listing's photos are served under (full size and thumbnail), as they appear in the HTML. */
 const urlsOf = (l) => l.images.flatMap((im) => [im.src, im.thumb]).filter(Boolean).flatMap((u) => [u, u.startsWith('/') ? SITE + u : u]);
 
-test('Dari II (BONA-026) carries a photo note', () => {
-  assert.ok(noted.some((l) => l.id === 'BONA-026'));
+// While Dari II is listed it must carry its note; once it leaves the site (sold or withheld) this is skipped,
+// so a routine delisting can never fail the deploy and stall the daily refresh.
+const dari = listings.find((l) => l.id === 'BONA-026');
+test('Dari II (BONA-026) carries a photo note while it is listed', { skip: !dari && 'BONA-026 is not listed' }, () => {
+  assert.ok(dari.photoNote, 'BONA-026 photoNote');
 });
 
 for (const l of noted) {
@@ -88,7 +91,8 @@ for (const l of noted) {
         assert.ok(notesIn(m[0]).includes(l.photoNote[p.locale]), `${p.route}: card without the note`);
       }
     }
-    assert.ok(cards >= 2, `cards found: ${cards}`);
+    // Sold listings drop out of most card lists; while it is on sale its cards must be found and checked.
+    if (l.status !== 'sold') assert.ok(cards >= 2, `cards found: ${cards}`);
   });
 
   test(`${l.id}: no page declares its photos in structured data or uses one as its link preview`, () => {
