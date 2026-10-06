@@ -229,3 +229,30 @@ test('every entry in the repository review register is well-formed', () => {
     }
   }
 });
+
+test('a photo note leads the disclosures, the review binds it, and a caption without it is refused at publish time', async () => {
+  const w = await world();
+  try {
+    const rules = policyRules(WAIVER, now);
+    const NOTE = { en: 'Photos show a completed sister project by the same developer, not Fixture villa.', ar: 'الصور لمشروع مكتمل آخر للمطوّر نفسه، وليست للفيلا التجريبية.' };
+    const sister = { ...w.villa, photoNote: NOTE };
+    const d = disclosuresFor(sister);
+    assert.ok(d.en.startsWith(NOTE.en + ' ') && d.ar.startsWith(NOTE.ar + ' '), 'the note comes first');
+    assert.deepEqual({ en: d.en.slice(NOTE.en.length + 1), ar: d.ar.slice(NOTE.ar.length + 1) }, disclosuresFor(w.villa), 'the usual sentences follow unchanged');
+    const frames = [1, 2, 3].map(index => ({ index, url: `https://bona-real-estate.com/listings/villa/${index}.jpg`, sha256: sha256('x' + index), width: 1920, height: 1280, alt: { ar: 'صورة', en: 'Photo' } }));
+    const r = buildReview(sister, advertiser, frames, parseSelection('BONA-T1:1,2,3'), { reviewedAt: '2026-10-05T09:00:00Z', reviewer: 'test' });
+    assert.deepEqual(eligibility(sister, r, advertiser, now, rules), []);
+    const c = reviewedCopy(sister, advertiser, r);
+    assert.ok(c.en.includes(NOTE.en) && c.ar.includes(NOTE.ar), 'the posted caption carries the note');
+    // A review from before the note no longer matches the listing.
+    const old = buildReview(w.villa, advertiser, frames, parseSelection('BONA-T1:1,2,3'), { reviewedAt: '2026-10-05T09:00:00Z', reviewer: 'test' });
+    assert.ok(eligibility(sister, old, advertiser, now, rules).includes('listing_changed_since_review'));
+    // A hand-edited review that drops the note, even with a recomputed caption hash, cannot publish.
+    const stripped = { ...r, legalDisclosures: disclosuresFor(w.villa) };
+    stripped.captionSha256 = sha256(JSON.stringify(reviewedCopy(sister, advertiser, stripped)));
+    assert.deepEqual(eligibility(sister, stripped, advertiser, now, rules), ['photo_note_not_disclosed']);
+    // A half-written note stops the review and fails closed at publish time.
+    assert.throws(() => disclosuresFor({ ...w.villa, photoNote: { en: NOTE.en, ar: ' ' } }), /photoNote needs both/);
+    assert.ok(eligibility({ ...sister, photoNote: { en: NOTE.en, ar: null } }, r, advertiser, now, rules).includes('photo_note_not_disclosed'));
+  } finally { w.cleanup(); }
+});

@@ -36,6 +36,7 @@ const rtl = locale === 'ar';
       <p class="label ms-auto hidden text-stone sm:block">{count(images.length, 'photo', locale)}</p>
     </div>
   )}
+  {images.length > 0 && l.photoNote && <p class="wrap mt-3 text-[13px] text-stone-2" data-photo-note>{t(l.photoNote, locale)}</p>}
 
   <dialog class="lightbox" data-lightbox aria-label={t(ui.gallery, locale)}>
     <div class="absolute inset-x-0 top-0 z-[2] flex items-center justify-between px-4 py-4">

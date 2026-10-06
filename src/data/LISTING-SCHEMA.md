@@ -263,3 +263,19 @@ intake never estimates. As of 2026-09-06 eight listings show *Price on request* 
 their brochures genuinely print no price anywhere — verified in the text layer, in the link
 annotations and by the model's own reading. Set one with `price <id> <amount> [currency]`
 in the WhatsApp group.
+
+## Photos of another project — `photoNote` (owner, 2026-10-06)
+
+- Optional `{ en, ar }`: one sentence per language, at most 140 characters, Arabic really Arabic
+  (`rules.mjs` → `photoNoteProblems`, shared by the builder and the validator). Set it only when
+  the owner has confirmed the photos show something other than the listing itself, for example the
+  developer's completed sister project. First use: Dari II (BONA-026), whose photos show a completed
+  sister project by the same developer.
+- `build.mjs` writes every image label as `<room>. <note>` instead of `<room> — <title>`, so no
+  label presents the photos as the listing; `validate.mjs` fails any label without the note. It
+  cannot be combined with the unit-page "Illustrative" labels (`project` + `unit`).
+- The gallery prints the note under the photos on the listing page, in the page language.
+- The social catalogue (`publicListing`) includes it only when set: it is part of the facts a
+  daily-post review binds, and listings without a note keep their existing `factsSha256`.
+- The daily-post review puts it first in the caption disclosures, and the publisher refuses a
+  review whose disclosures lack it (`photo_note_not_disclosed`).

@@ -661,6 +661,8 @@ export const LISTINGS = [
     specs: { beds: null, baths: null, areaSqm: null, plotSqm: null, yearBuilt: null, floors: null },
     folder: 'dari-2',
     images: [[7, 'aerial'], [19, 'rooftop_pool'], [14, 'pool_night'], [4, 'lobby'], [25, 'lounge'], [5, 'living'], [6, 'kitchen'], [11, 'event_hall'], [8, 'gym'], [30, 'exterior']],
+    // Owner, 2026-10-06: real photographs of a completed sister project by the same developer, not of Dari II.
+    photoNote: { en: 'Photos show a completed sister project by the same developer, not Dari II.', ar: 'الصور لمشروع مكتمل آخر للمطوّر نفسه، وليست لمشروع داري 2.' },
     description: {
       en: [
         'Dari II is a residential community in Al Salamah, central Jeddah, designed around minimalist architecture and warm natural finishes. Three- and four-bedroom apartments and a penthouse range from 164 to 383 square metres across five floors.',

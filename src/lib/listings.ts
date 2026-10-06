@@ -14,6 +14,9 @@ export interface Listing {
   price: { amount: number | null; currency: string; from?: boolean; period?: string | null; onRequest?: boolean };
   specs: { beds?: number | null; baths?: number | null; areaSqm?: number | null; plotSqm?: number | null; yearBuilt?: number | null; floors?: number | null };
   images: { src: string; thumb?: string | null; alt?: Localised }[];
+  /** Set only when the owner confirmed the photos show something else, e.g. the developer's completed sister project.
+      Shown under the gallery, carried in every image label, and printed in the daily post's disclosures. */
+  photoNote?: Localised | null;
   /**
    * Walkthrough clips. Optional; added post-publish by the WhatsApp intake, which transcodes
    * each one (H.264/AAC, <=1080p, faststart) and cuts a `poster` frame out of it — so the

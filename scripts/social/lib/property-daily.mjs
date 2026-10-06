@@ -9,6 +9,8 @@ export function publicListing(p) {
   const out = Object.fromEntries(['id','slug','status','category','type','title','location','price','specs','highlights'].map(k => [k,p[k] ?? null]));
   out.images = (p.images ?? []).map(({src,thumb,alt})=>({src,thumb,alt}));
   out.licence = p.licence ? {adNumber:p.licence.adNumber ?? null,adExpiry:p.licence.adExpiry ?? null,wafiNumber:p.licence.wafiNumber ?? null} : null;
+  // Only when set: adding the key to every listing would change every reviewed listing's factsSha256.
+  if (p.photoNote) out.photoNote = {en:p.photoNote.en ?? null,ar:p.photoNote.ar ?? null};
   return out;
 }
 export const fingerprint = p => sha256(JSON.stringify(publicListing(p)));
@@ -84,6 +86,9 @@ export function eligibility(p, review, advertiser, now = new Date(), rules = STR
         e.contactMatches !== true || !fresh(e.verifiedAt,now,30)) reasons.push('licence_and_marketing_authority_unverified');
   }
   if (review.legalDisclosuresVerified !== true || !review.legalDisclosures?.ar?.trim() || !review.legalDisclosures?.en?.trim()) reasons.push('property_condition_services_and_rights_disclosures_pending');
+  // Photos of another project (an owner-confirmed photoNote) only go out with that note in the caption.
+  if (p?.photoNote && !(typeof p.photoNote.ar === 'string' && p.photoNote.ar.trim() && review.legalDisclosures?.ar?.includes(p.photoNote.ar.trim()) &&
+      typeof p.photoNote.en === 'string' && p.photoNote.en.trim() && review.legalDisclosures?.en?.includes(p.photoNote.en.trim()))) reasons.push('photo_note_not_disclosed');
   if (!advertiser?.name?.ar || !advertiser?.name?.en || !/^\d{8,15}$/.test(advertiser?.fal ?? '') ||
       !/^\+\d{8,15}$/.test(advertiser?.phone ?? '')) reasons.push('advertiser_details_incomplete');
   const photos = review.photos ?? [];

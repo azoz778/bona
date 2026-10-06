@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LISTINGS } from './listings.source.mjs';
 import { ROOMS } from './rooms.mjs';
-import { INTAKE_ID_RE, isLandPublic, isPublishable, LAND_PRICE_CAP, sarAmount, WITHHELD_LISTINGS } from './rules.mjs';
+import { INTAKE_ID_RE, isLandPublic, isPublishable, LAND_PRICE_CAP, photoNoteProblems, sarAmount, WITHHELD_LISTINGS } from './rules.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const GALLERY = path.join(ROOT, 'scripts', 'tk-gallery-data.json');
@@ -31,6 +31,12 @@ for (const p of gallery) {
 // kind is derived from type (LISTING-SCHEMA.md, Round 2): the site's Houses/Apartments sections key on it.
 const KIND_OF = JSON.parse(fs.readFileSync(new URL('../../src/data/kind-map.json', import.meta.url), 'utf8'));
 
+/** An image label names the listing, unless the listing's photos show another project (photoNote): then it says so. */
+function altFor(listing, room) {
+  if (listing.photoNote) return { en: `${room.en}. ${listing.photoNote.en}`, ar: `${room.ar}. ${listing.photoNote.ar}` };
+  return { en: `${room.en} — ${listing.title.en}`, ar: `${room.ar} — ${listing.title.ar}` };
+}
+
 function resolveImage(listing, entry) {
   const spec = Array.isArray(entry) ? { folder: listing.folder, i: entry[0], room: entry[1] } : entry;
   const room = ROOMS[spec.room];
@@ -39,7 +45,7 @@ function resolveImage(listing, entry) {
     // Site-hosted still (land satellite frames under public/land, produced by land-stills.mjs).
     if (!/^\/land\/[A-Za-z0-9-]+\.jpg$/.test(spec.local)) throw new Error(`${listing.slug}: local image must be /land/<name>.jpg, got ${spec.local}`);
     if (!fs.existsSync(path.join(ROOT, 'public', spec.local))) throw new Error(`${listing.slug}: missing public${spec.local}`);
-    return { src: spec.local, thumb: null, alt: { en: `${room.en} — ${listing.title.en}`, ar: `${room.ar} — ${listing.title.ar}` } };
+    return { src: spec.local, thumb: null, alt: altFor(listing, room) };
   }
   const photos = byFolder.get(spec.folder);
   if (!photos) throw new Error(`${listing.slug}: unknown gallery folder "${spec.folder}"`);
@@ -48,7 +54,7 @@ function resolveImage(listing, entry) {
   return {
     src: p.url,
     thumb: p.thumb || null,
-    alt: { en: `${room.en} — ${listing.title.en}`, ar: `${room.ar} — ${listing.title.ar}` },
+    alt: altFor(listing, room),
   };
 }
 
@@ -61,6 +67,9 @@ const out = LISTINGS.map((l, idx) => {
   }
   const kind = KIND_OF[l.type];
   if (!kind) throw new Error(`${l.slug}: no kind mapping for type "${l.type}"`);
+  const noteProblems = photoNoteProblems(l.photoNote);
+  if (noteProblems.length) throw new Error(`${l.slug}: ${noteProblems.join('; ')}`);
+  if (l.photoNote && l.project && l.unit) throw new Error(`${l.slug}: photoNote and the unit-page "Illustrative" labels cannot both apply`);
   return {
     id: `BONA-${String(idx + 1).padStart(3, '0')}`, // positional: append new listings at the END of LISTINGS, never insert
     slug: l.slug,
@@ -77,6 +86,7 @@ const out = LISTINGS.map((l, idx) => {
     images,
     description: { en: l.description.en.join('\n\n'), ar: l.description.ar.join('\n\n') },
     highlights: l.highlights,
+    ...(l.photoNote ? { photoNote: { en: l.photoNote.en, ar: l.photoNote.ar } } : {}), // optional: the photos show another project
     virtualTourUrl: l.virtualTourUrl ?? null,
     brochureUrl: l.brochureUrl ? brochureUrlFor(l.slug) : null,
     project: l.project ?? null,
