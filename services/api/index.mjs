@@ -24,6 +24,9 @@
  * request that arrives on a legacy site host (see `lib/legacy.mjs`): it is 301'd to
  * `BONA_SITE` before any of that runs.
  */
+import { createTelegramHandoffs } from './lib/telegram-handoff.mjs';
+import { ensureHandoff, taskCounts } from './lib/lead-tasks.mjs';
+import { previousEnquiry, saveEnquiryReceipt, recoverPendingNotifications } from './lib/enquiry-receipt.mjs';
 import http from 'node:http';
 import path from 'node:path';
 import { loadConfig, redacted } from './lib/config.mjs';
@@ -196,6 +199,7 @@ export function createApp(options = {}) {
   const store = options.store ?? createStore();
   const db = options.db ?? openDb(cfg.dbFile ?? path.join(cfg.dataDir, 'bona.db'));
   const ownsDb = !options.db;
+  if (ownsDb) recoverPendingNotifications(db);
   const retell = options.retell ?? createRetellClient({ apiKey: cfg.retellApiKey, mock: cfg.retellMock });
   // The queue behind `db.enqueueFanout()`. Constructed always, started only by the real
   // server (below): a test drains it by hand so nothing goes out on a timer.
@@ -247,6 +251,8 @@ export function createApp(options = {}) {
   };
   // The inbox's one exclusion rule (lib/team.mjs), the same the upkeep and the routes use.
   const excludedLead = (lead) => isExcludedLead(team, db, lead);
+  const handoffTelegram = createTelegramHandoffs({db,env:cfg.env??{},publicApi:cfg.publicApi,fetchImpl,isExcludedLead:excludedLead,log});
+  const notifyHandoff = handoffTelegram.notifyLead;
   // Phone alerts (design §5, Phase 3). Keys from ~/.secrets/bona-services.env (generated once
   // by bin/vapid-keys.mjs); none, or a pair that does not match, means no alerts at all —
   // said once, loudly, never half-used. Neither key is ever logged: only whether the subject
@@ -292,7 +298,7 @@ export function createApp(options = {}) {
   // how it went; a 402 flags it in settings and pushes the owners, six hours apart at most.
   const funds = options.funds ?? createFundsWatch({ team, alerts, now: clock, log });
   const dana = options.dana ?? createDana({
-    db, inbox: inboxStore, team, sender, retell: cfg.retellMock && !danaOnMock ? null : retell, alerts, inventory, funds,
+    db, inbox: inboxStore, team, sender, notifyHandoff, retell: cfg.retellMock && !danaOnMock ? null : retell, alerts, inventory, funds,
     siteUrl: cfg.siteUrl, agentId: cfg.waChatAgentId ?? null, isExcludedLead: excludedLead, backfill, budget, now: clock, log,
     ...(Number.isFinite(options.danaBatchMs) ? { batchMs: options.danaBatchMs } : {}),
   });
@@ -311,7 +317,7 @@ export function createApp(options = {}) {
     onUnsureLead: (leadId, ts) => { alerts.notify(leadId, { reason: 'check', ts }); },
   }) : null);
   const tools = createToolHandlers({
-    inventory, units, store, db, dataDir: cfg.dataDir, siteUrl: cfg.siteUrl, env: cfg.env, sendWhatsApp, log,
+    inventory, units, store, db, dataDir: cfg.dataDir, siteUrl: cfg.siteUrl, env: cfg.env, sendWhatsApp, notifyHandoff, log,
   });
 
   const perMin = 60_000;
@@ -336,7 +342,7 @@ export function createApp(options = {}) {
   // rather than a second wiring step. `server` and `handle` are added at the end.
   const app = {
     cfg, inventory, store, db, retell, tools, limiters, fanout, budget, team, audit, sender,
-    inboxStore, ingest, backfill, alerts, dana, funds,
+    inboxStore, ingest, backfill, alerts, dana, funds, handoffTelegram,
     poller: options.poller ?? null,
   };
 
@@ -536,7 +542,7 @@ export function createApp(options = {}) {
       db.insertEvent({
         event_id: newId('ev'), ts: server?.received ?? Date.now(), name,
         anon_id: attr.anon_id ?? session?.anon_id ?? null, session_id: attr.session_id, lead_id: null, listing_id: attr.listing_id,
-        path: page?.url ?? null, props: { conversation_id: conversationId, locale, ref: attr.ref },
+        path: page?.url ?? null, props: { conversation_id: conversationId, locale, ref: attr.ref, _consent_analytics: session?.consent_analytics === 1, _consent_ads: session?.consent_ads === 1 },
         src_first: session?.first_touch ?? null, src_last: session?.last_touch ?? null,
         ip: server?.ip ?? null, ua: server?.ua ?? null, country: server?.country ?? null,
       });
@@ -572,6 +578,7 @@ export function createApp(options = {}) {
       // Phone alerts: only whether VAPID keys are loaded (P3-14) — never a key, a count of
       // devices, or anything a push carries.
       push: { configured: alerts.configured },
+      leadReadiness: {...taskCounts(db),telegramConfigured:handoffTelegram.configured,telegramEnabled:handoffTelegram.enabled},
       // Dana on WhatsApp (P4-17): whether her agent id is set, and the global switch — never a
       // chat, a count of answers, or anything she said.
       // `fundsOut`: Retell is refusing her for lack of credit (R2) — a yes or no, never when.
@@ -703,6 +710,9 @@ export function createApp(options = {}) {
     if (!checked.ok) throw Object.assign(new Error(checked.message), { code: 'BAD_BODY' });
     const q = checked.enquiry;
     const now = server.received ?? Date.now();
+    const result = db.transaction(() => {
+    const previous = previousEnquiry(db, q);
+    if (previous) return { previous };
 
     if (q.ids.anon_id && q.ids.session_id) {
       const ev = validateEvent({
@@ -717,18 +727,33 @@ export function createApp(options = {}) {
       name: q.name, phone: q.phone, interest: q.interest, budget: q.budget, listingId: q.listing_id, language: q.locale, district: q.location, notes,
     }, {
       channel: 'form', matchMethod: 'form', sessionId: q.ids.session_id, anonId: q.ids.anon_id, ref: q.ids.ref, eventId: q.event_id,
-      now, dataDir: cfg.dataDir, raw: { form: q.form, page: q.page },
+      now, dataDir: cfg.dataDir, consent: q.consent, raw: { form: q.form, page: q.page },
     });
+    ensureHandoff(db, { leadId: lead.lead_id, source:'form', reason:'Enquiry received', details:{budget:q.budget,area:q.location,property_type:q.type}, now });
+    saveEnquiryReceipt(db, q, lead.lead_id, now);
+    // Every accepted enquiry, including an existing contact, gets one conversion event.
+    if (db.getEvent(q.event_id)) db.enqueueFanout(q.event_id, ['meta','ga4','snap','tiktok'], { now });
+    return { lead: db.getLead(lead.lead_id), created };
+    }, {immediate:true});
+    if (result.previous) return result.previous;
+    const {lead,created} = result;
     log({ evt: 'enquiry', leadId: lead.lead_id, created, form: q.form, source: lead.source, listingId: lead.listing_id });
 
     if (sendWhatsApp) {
       try {
-        const res = await sendWhatsApp(leadNote(lead, { siteUrl: cfg.siteUrl }));
+        let timer;
+        const res = await Promise.race([
+          sendWhatsApp(leadNote(lead, { siteUrl: cfg.siteUrl })),
+          new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('owner notification unconfirmed')), 4000); }),
+        ]).finally(() => clearTimeout(timer));
+        db.db.prepare('UPDATE enquiry_receipts SET notify_status=? WHERE event_id=?').run(res?.ok ? 'sent' : 'uncertain', q.event_id);
         if (!res?.ok) log({ evt: 'lead.wa_failed', id: lead.lead_id, error: res?.error ?? 'unknown' });
       } catch (err) {
+        db.db.prepare("UPDATE enquiry_receipts SET notify_status='uncertain' WHERE event_id=?").run(q.event_id);
         log({ evt: 'lead.wa_error', id: lead.lead_id, error: String(err?.message ?? err) });
       }
     }
+    await notifyHandoff(lead.lead_id);
     return { lead_id: lead.lead_id };
   }
 
@@ -972,6 +997,7 @@ export function createApp(options = {}) {
       // handler itself refused, or an agent that was never provisioned. Hand the unit back.
       if (charged) budget.refund(charged);
       if (err?.code === 'NO_SESSION') return sendJson(res, 404, { error: 'session_not_found' }, cors);
+      if (err?.code === 'ENQUIRY_CONFLICT') return sendJson(res, 409, { error: 'enquiry_conflict' }, cors);
       if (err?.code === 'BAD_BODY') return sendJson(res, 400, { error: 'bad_request', message: err.message }, cors);
       if (err?.code === 'SESSION_LIMIT') return sendJson(res, 429, { error: 'session_limit' }, cors);
       if (err?.code === 'NOT_PROVISIONED') return sendJson(res, 503, { error: 'not_provisioned', message: err.message }, cors);

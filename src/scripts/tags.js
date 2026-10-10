@@ -48,7 +48,7 @@
       window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
       gtag('consent', 'default', { ad_storage: 'denied', analytics_storage: 'denied', ad_user_data: 'denied', ad_personalization: 'denied' });
       gtag('js', new Date());
-      gtag('config', id, { send_page_view: false, anonymize_ip: true });
+      gtag('config', id, { send_page_view: false, anonymize_ip: true, page_location: location.origin + location.pathname, page_referrer: '' });
       inject('https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(id));
     }
     gtag('consent', 'update', {
@@ -113,18 +113,20 @@
 
   /** One page view per page, per loaded tag. Safe to call repeatedly (a consent accept mid-page, a navigation). */
   function pageView() {
+    if (window.bonaMeasurementAllowed && !window.bonaMeasurementAllowed()) return;
     var c = consent();
     if (!c || !(c.analytics || c.ads)) return;
     var href = location.href;
     if (viewed === href) return;
     viewed = href;
-    try { if (c.analytics && loaded.ga && typeof gtag === 'function') gtag('event', 'page_view'); } catch (e) { /* ignore */ }
+    try { if (c.analytics && loaded.ga && typeof gtag === 'function') gtag('event', 'page_view', { page_location: location.origin + location.pathname, page_referrer: '' }); } catch (e) { /* ignore */ }
     try { if (c.ads && loaded.meta && typeof fbq === 'function') fbq('track', 'PageView'); } catch (e) { /* ignore */ }
     try { if (c.ads && loaded.snap && typeof snaptr === 'function') snaptr('track', 'PAGE_VIEW'); } catch (e) { /* ignore */ }
     try { if (c.ads && loaded.tiktok && window.ttq) window.ttq.page(); } catch (e) { /* ignore */ }
   }
 
   function load() {
+    if (window.bonaMeasurementAllowed && !window.bonaMeasurementAllowed()) return;
     var c = consent();
     if (!c || !(c.analytics || c.ads)) return; // undecided or essential only: nothing loads
     var t = tags();

@@ -13,7 +13,7 @@
 /** What a browser may send. */
 export const EVENT_NAMES = [
   'page_view', 'listing_view', 'gallery_open', 'tour_open', 'video_play', 'brochure_download',
-  'whatsapp_click', 'call_click', 'form_submit', 'consent_update', 'concierge_open', 'map_click',
+  'whatsapp_click', 'call_click', 'form_submit', 'consent_update', 'concierge_open', 'map_click', 'enquiry_open',
 ];
 
 /** What only this server writes. A browser sending one of these is refused. */
@@ -114,7 +114,7 @@ function cleanProps(v) {
   if (!isObject(v)) return {};
   const out = {};
   for (const [k, val] of Object.entries(v)) {
-    if (!CLICK_KEY_RE.test(k)) continue;
+    if (!CLICK_KEY_RE.test(k) || ['href','url','text','name','phone','message','email'].includes(k.toLowerCase())) continue;
     if (typeof val === 'string') out[k] = val.slice(0, MAX_STRING);
     else if (typeof val === 'number' && Number.isFinite(val)) out[k] = val;
     else if (typeof val === 'boolean' || val === null) out[k] = val;
@@ -195,7 +195,7 @@ export function recordEvent(db, event, server = {}) {
     });
     const inserted = db.insertEvent({
       event_id: event.event_id, ts: event.ts, name: event.event, anon_id: event.anon_id, session_id: event.session_id,
-      lead_id: null, listing_id: event.listing_id, path: event.page, props: { ...event.props, _consent_ads: event.consent.ads === true },
+      lead_id: null, listing_id: event.listing_id, path: event.page, props: { ...event.props, _consent_ads: event.consent.ads === true, _consent_analytics: event.consent.analytics === true },
       src_first: a.first, src_last: a.last, ip, ua, country,
     });
     // A WhatsApp click is the strongest intent signal the site has, and it is exactly the

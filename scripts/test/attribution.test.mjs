@@ -142,7 +142,7 @@ test('a name that is not on the allowlist is refused rather than sent', () => {
 
 /* ---------------- the mirror into the vendor tags ---------------- */
 
-test('a WhatsApp click reaches GA4, Meta, Snap and TikTok under one event id', () => {
+test('a WhatsApp click mirrors deduplicating ad tags but leaves GA4 to the server', () => {
   const dom = onListing();
   const tags = installTags(dom);
   const a = anchor({ 'data-cta': 'listing_whatsapp', 'data-listing': LISTING }, { href: 'https://wa.me/966593296933' });
@@ -150,8 +150,7 @@ test('a WhatsApp click reaches GA4, Meta, Snap and TikTok under one event id', (
   const id = named(dom, 'whatsapp_click')[0].event_id;
 
   const ga = tags.ga.find((c) => c[1] === 'whatsapp_click');
-  assert.equal(ga[2].listing_id, LISTING);
-  assert.equal(ga[2].cta, 'listing_whatsapp');
+  assert.equal(ga, undefined, 'server owns the GA4 click to avoid double counting');
 
   const meta = tags.meta.find((c) => c[1] === 'Contact');
   assert.equal(meta[0], 'track');
@@ -228,4 +227,9 @@ test('withdrawing consent stops calls to already-loaded vendor tags and removes 
   assert.match(dom.win.document.cookie, /Max-Age=0/);
   for (const calls of Object.values(tags)) assert.equal(calls.length, 0);
   assert.equal(named(dom, 'whatsapp_click').at(-1).consent.ads, false);
+});
+
+test('accepted-form browser mirror leaves GA4 conversion delivery to the server',()=>{
+ const dom=onListing();const tags=installTags(dom);dom.win.bonaTrack('form_submit',{form:'listing'});
+ assert.equal(tags.ga.some(c=>c[1]==='generate_lead'),false);
 });

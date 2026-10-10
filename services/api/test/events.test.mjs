@@ -20,7 +20,7 @@ const sample = (over = {}) => ({
 });
 
 test('the taxonomy is split between what a browser may send and what only the server writes', () => {
-  assert.deepEqual(EVENT_NAMES, ['page_view', 'listing_view', 'gallery_open', 'tour_open', 'video_play', 'brochure_download', 'whatsapp_click', 'call_click', 'form_submit', 'consent_update', 'concierge_open', 'map_click']);
+  assert.deepEqual(EVENT_NAMES, ['page_view', 'listing_view', 'gallery_open', 'tour_open', 'video_play', 'brochure_download', 'whatsapp_click', 'call_click', 'form_submit', 'consent_update', 'concierge_open', 'map_click', 'enquiry_open']);
   assert.deepEqual(SERVER_EVENT_NAMES, ['concierge_chat_start', 'concierge_call_start', 'lead_created', 'lead_stage']);
   assert.equal(MAX_BODY_BYTES, 8 * 1024);
   assert.equal(MAX_PROPS_BYTES, 2 * 1024);
@@ -39,7 +39,7 @@ test('the C1 sample validates and comes back normalised', () => {
   assert.equal(e.listing_id, 'BONA-W003');
   assert.equal(e.page, '/properties/bona-w003/');
   assert.equal(e.locale, 'en');
-  assert.deepEqual(e.props, { cta: 'listing_whatsapp', href: 'https://wa.me/966593296933' });
+  assert.deepEqual(e.props, { cta: 'listing_whatsapp' });
   assert.equal(e.attr.first.utm_campaign, 'villas_sep');
   assert.deepEqual(e.attr.first.click_ids, { fbclid: 'IwAR1' });
   assert.equal(e.attr.last.ts, NOW - 1000);
@@ -165,7 +165,7 @@ test('recordEvent upserts the session, stores the event with the server context,
   assert.equal(rows[1].event_id, 'mf3k2a1b-9c4e7f21');
   assert.equal(rows[1].listing_id, 'BONA-W003');
   assert.equal(rows[1].path, '/properties/bona-w003/');
-  assert.deepEqual(rows[1].props, { cta: 'listing_whatsapp', href: 'https://wa.me/966593296933', _consent_ads: true });
+  assert.deepEqual(rows[1].props, { cta: 'listing_whatsapp', _consent_ads: true, _consent_analytics: true });
   assert.equal(rows[1].src_first.utm_campaign, 'villas_sep');
   assert.equal(rows[1].src_last.ts, NOW - 1000);
   assert.equal(rows[1].ip, '203.0.113.9');
@@ -190,4 +190,9 @@ test('event consent snapshot cannot be forged through props or upgraded by later
   assert.equal(db.getSession(denied.session_id).consent_ads, 1);
   assert.equal(db.getEvent(denied.event_id).props._consent_ads, false);
   db.close();
+});
+
+test('contact details and prefilled message URLs never enter event props', () => {
+ const r=validateEvent(sample({props:{cta:'form_whatsapp',name:'Private',phone:'0500000000',email:'private@example.test',message:'Private needs',text:'Private',url:'https://x/?text=private',href:'https://wa.me/1?text=private'}}),{now:NOW});
+ assert.deepEqual(r.event.props,{cta:'form_whatsapp'});
 });

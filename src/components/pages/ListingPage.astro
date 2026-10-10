@@ -1,6 +1,7 @@
 ---
 import Base from '../../layouts/Base.astro';
 import Gallery from '../Gallery.astro';
+import PropertyPilot from '../PropertyPilot.astro';
 import TourEmbed from '../TourEmbed.astro';
 import MapEmbed from '../MapEmbed.astro';
 import Breadcrumb from '../Breadcrumb.astro';
@@ -17,12 +18,30 @@ import { localePath, formatPrice, formatNumber, t, ui, fill, waLink, type Locale
 import { localeTitle, categoryLabel, categorySlug, typeLabel, similar, kindOf, kindLabel, kindLabelPlural, kindSlug, matterportId, type Listing } from '../../lib/listings';
 import { listingJsonLd, breadcrumbJsonLd, listingFaqJsonLd, metaDescription } from '../../lib/seo';
 interface Props { locale: Locale; listing: Listing }
-const { locale, listing: l } = Astro.props;
+const { locale, listing: sourceListing } = Astro.props;
+const pilot = sourceListing.id === 'BONA-001';
+// Existing, visually checked originals only. This changes the one detail page, never the source catalogue.
+const pilotNames = ['dsc04815-8e4c37de-63c764.jpeg', 'dsc04827-858a47.jpeg', 'dsc04787-08e5295a-732cd7.jpeg'];
+const pilotImages = pilotNames.flatMap(name => (sourceListing.images ?? []).filter(img => img.src.endsWith('/' + name)));
+if (pilot && pilotImages.length !== 3) throw new Error('Pilot photo verification failed: a selected original is missing.');
+const l: Listing = pilot ? { ...sourceListing,
+  images: pilotImages,
+  specs: { ...sourceListing.specs, areaSqm: null, baths: null },
+  description: {
+    en: 'A five-bedroom villa in Durrat Al Arous, Jeddah, on a 537 square metre plot across three floors. The existing photographs show direct access to the waterfront, a sea-facing terrace and an unfurnished living room.\n\nContact Bona to confirm the current asking price, availability and a suitable viewing time.',
+    ar: 'فيلا من خمس غرف نوم في درة العروس بجدة، على أرض مساحتها 537 متراً مربعاً ومكوّنة من ثلاثة طوابق. تُظهر الصور الوصول المباشر إلى الواجهة البحرية، وشرفة مطلّة على البحر، وغرفة معيشة غير مفروشة.\n\nتواصل مع بونا لتأكيد السعر الحالي والتوفر وترتيب موعد مناسب للمعاينة.'
+  },
+  highlights: { en: ['Direct waterfront access', 'Five bedrooms', '537 m² plot', 'Three floors'], ar: ['وصول مباشر إلى الواجهة البحرية', 'خمس غرف نوم', 'أرض بمساحة 537 م²', 'ثلاثة طوابق'] }
+} : sourceListing;
+const galleryListing = l;
 const path = localePath(locale, `/properties/${l.slug}/`);
 const title = localeTitle(l, locale);
 const absUrl = new URL(path, site.url).href;
 const waMessage = fill(t(ui.listingWaMessage, locale), { title, id: l.id, url: absUrl });
 const wa = waLink(site.whatsapp.wa, waMessage);
+const viewingWa = waLink(site.whatsapp.wa, locale === 'ar'
+  ? `أرغب في ترتيب معاينة للعقار ${l.id}: ${title}. يرجى تأكيد السعر والتوفر.\n${absUrl}`
+  : `I would like to arrange a viewing of ${l.id}: ${title}. Please confirm price and availability.\n${absUrl}`);
 const kind = kindOf(l);
 const crumbs = [
   { name: t(ui.home, locale), path: localePath(locale, '/') },
@@ -33,7 +52,7 @@ const crumbs = [
 const specs = [
   l.specs?.beds ? { k: t(ui.bedrooms, locale), v: String(l.specs.beds) } : null,
   l.specs?.baths ? { k: t(ui.bathrooms, locale), v: String(l.specs.baths) } : null,
-  l.specs?.areaSqm ? { k: t(ui.builtArea, locale), v: `${formatNumber(l.specs.areaSqm)} ${t(ui.sqm, locale)}` } : null,
+  !pilot && l.specs?.areaSqm ? { k: t(ui.builtArea, locale), v: `${formatNumber(l.specs.areaSqm)} ${t(ui.sqm, locale)}` } : null,
   l.specs?.plotSqm ? { k: t(ui.plot, locale), v: `${formatNumber(l.specs.plotSqm)} ${t(ui.sqm, locale)}` } : null,
   l.specs?.yearBuilt ? { k: t(ui.yearBuilt, locale), v: String(l.specs.yearBuilt) } : null,
   l.specs?.floors ? { k: t(ui.floors, locale), v: String(l.specs.floors) } : null,
@@ -81,12 +100,13 @@ const kindText = t(kindLabel[kind], locale);
     <div class="wrap">
       <Breadcrumb locale={locale} items={crumbs.map(c => ({ name: c.name, href: c.path }))} />
     </div>
-    <div class="mt-6"><Gallery listing={l} locale={locale} /></div>
+    <div class:list={['mt-6', pilot && 'pilot-gallery']}><Gallery listing={galleryListing} locale={locale} /></div>
+    {pilot && <PropertyPilot listing={l} locale={locale} viewingHref={viewingWa} />}
 
     <div class="wrap">
       <div class="mt-12 grid gap-14 lg:mt-16 lg:grid-cols-12 lg:gap-10">
         <div class="lg:col-span-7 xl:col-span-8">
-          <header>
+          {!pilot && <header>
             <div class="flex flex-wrap items-center gap-4">
               <p class="label flex flex-wrap items-center gap-x-2.5 text-stone-2">
                 <span class="kind-tag">{kindText}</span>
@@ -100,7 +120,7 @@ const kindText = t(kindLabel[kind], locale);
             )}
             <p class="mt-4 flex items-center gap-2 text-sm text-stone-2"><Icon name="pin" size={16} class="shrink-0 text-champagne" />{locationLine}{mapLink && <a href="#map" class="link ms-2 text-ink" data-track="map_click" data-cta="listing_map_jump" data-listing={l.id}>{t(ui.showMap, locale)}</a>}</p>
             <p class="mt-6 font-sans text-xl font-semibold">{formatPrice(l.price, locale)}</p>
-          </header>
+          </header>}
 
           {specs.length > 0 && (
             <dl class="mt-10 flex flex-wrap gap-x-12 gap-y-6 border-y border-ink/10 py-7">
@@ -186,7 +206,7 @@ const kindText = t(kindLabel[kind], locale);
             <p class="label text-stone-2">{t(ui.privateEnquiry, locale)}</p>
             <p class="display-md mt-3">{formatPrice(l.price, locale)}</p>
             <p class="mt-3 text-sm text-stone-2">{t(ui.enquiryPanelText, locale)}</p>
-            <a href={wa} target="_blank" rel="noopener" class="btn btn-ink mt-7 w-full" data-cta="listing_whatsapp" data-listing={l.id}><Icon name="whatsapp" size={17} />{t(ui.enquireWhatsApp, locale)}</a>
+            <a href={pilot ? viewingWa : wa} target="_blank" rel="noopener" class="btn btn-ink mt-7 w-full" data-cta={pilot ? "pilot_sidebar_viewing" : "listing_whatsapp"} data-listing={l.id}><Icon name="whatsapp" size={17} />{pilot ? (locale === "ar" ? "طلب معاينة" : "Arrange a viewing") : t(ui.enquireWhatsApp, locale)}</a>
             <a href={`tel:${site.phone.e164}`} class="btn btn-outline mt-3 w-full" data-cta="listing_tel" data-listing={l.id}><Icon name="phone" size={16} /><span dir="ltr">{site.phone.display}</span></a>
             {hasMatterport && <a href="#tour" class="link-label mt-6 inline-flex items-center gap-2 text-ink" data-tour-jump><Icon name="cube" size={14} />{t(ui.tour3dTitle, locale)}</a>}
             {conciergeOn && (
@@ -214,3 +234,8 @@ const kindText = t(kindLabel[kind], locale);
     )}
   </article>
 </Base>
+
+<style>
+  .pilot-gallery :global(.strip-slide) { height:clamp(240px,40vw,460px); }
+  @media(max-width:639px) { .pilot-gallery :global(.strip-slide) { height:auto; width:88vw; } }
+</style>

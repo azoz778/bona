@@ -29,7 +29,7 @@
   var CIDS = ['fbclid', 'gclid', 'gbraid', 'wbraid', 'gad_source', 'gad_campaignid', 'ttclid', 'ScCid', 'msclkid', 'li_fat_id', 'twclid', 'dclid'];
   var SOCIAL = /instagram|facebook|google|tiktok|snapchat|x\.com|twitter|linkedin|youtube|whatsapp/;
   var ALPHA = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  var EVENTS = ['page_view', 'listing_view', 'gallery_open', 'tour_open', 'video_play', 'brochure_download', 'whatsapp_click', 'call_click', 'form_submit', 'consent_update', 'concierge_open', 'map_click'];
+  var EVENTS = ['page_view', 'listing_view', 'gallery_open', 'tour_open', 'video_play', 'brochure_download', 'whatsapp_click', 'call_click', 'form_submit', 'consent_update', 'concierge_open', 'map_click', 'enquiry_open'];
   var LISTING_RE = /^BONA-W?\d{3}$/;
 
   /* ------------------------------------------------------------------ helpers */
@@ -59,7 +59,7 @@
     var id = document.body && document.body.getAttribute('data-listing');
     return id && LISTING_RE.test(id) ? id : null;
   }
-  function refHost(ref) { try { return ref ? new URL(ref).hostname.replace(/^www\./, '') : null; } catch (e) { return null; } }
+  function refHost(ref) { try { return ref ? new URL(ref.indexOf('://') >= 0 ? ref : 'https://' + ref).hostname.replace(/^www\./, '') : null; } catch (e) { return null; } }
 
   /* ------------------------------------------------------------------ consent */
   function consent() {
@@ -88,7 +88,7 @@
     return null;
   }
   function save(s) {
-    if (!s) return;
+    if (!s || (window.bonaMeasurementAllowed && !window.bonaMeasurementAllowed())) return;
     var raw;
     try { raw = JSON.stringify(s); } catch (e) { return; }
     var persist = granted();
@@ -110,7 +110,7 @@
   function touch(now, arrival) {
     var q;
     try { q = new URLSearchParams(location.search); } catch (e) { q = { get: function () { return null; } }; }
-    var t = { ts: now, landing: clip(location.pathname + location.search), referrer: arrival ? clip(document.referrer || null) : null, click_ids: {} };
+    var t = { ts: now, landing: clip(location.pathname), referrer: arrival ? refHost(document.referrer) : null, click_ids: {} };
     var i, tagged = false;
     for (i = 0; i < UTMS.length; i++) { var u = q.get(UTMS[i]); t[UTMS[i]] = u ? clip(u) : null; if (u) tagged = true; }
     for (i = 0; i < CIDS.length; i++) { var c = q.get(CIDS[i]); if (c) { t.click_ids[CIDS[i]] = clip(c); tagged = true; } }
@@ -155,6 +155,12 @@
     s.scid = clip(cookie('_scid')) || s.scid || null;
     s.ttp = clip(cookie('_ttp')) || s.ttp || null;
 
+    // Clean a touch saved by an older browser build before reusing it in events or enquiries.
+    [s.first, s.last].forEach(function (t) {
+      if (!t) return;
+      try { if (t.landing) t.landing = new URL(t.landing, location.origin).pathname; } catch (e) { t.landing = null; }
+      t.referrer = refHost(t.referrer);
+    });
     state = s;
     save(s);
     window.BONA_ATTR = s;
@@ -172,13 +178,14 @@
    *        posts to /v1/enquiry has to be the id the pixels fire Lead with, or Meta counts the same lead twice.
    */
   function send(event, props, listing, opts) {
+    if (window.bonaMeasurementAllowed && !window.bonaMeasurementAllowed()) return null;
     if (EVENTS.indexOf(event) < 0) return null;
     var s = state || arrive(!navigated);
     var id = (opts && typeof opts.eventId === 'string' && opts.eventId) ? opts.eventId : eventId();
     var lid = listing || listingOnPage();
     var p = {};
     if (props && typeof props === 'object') {
-      for (var k in props) if (Object.prototype.hasOwnProperty.call(props, k)) {
+      for (var k in props) if (Object.prototype.hasOwnProperty.call(props, k) && ['cta', 'form', 'tab', 'analytics', 'ads'].indexOf(k) >= 0) {
         var v = props[k];
         p[k] = typeof v === 'string' ? clip(v) : (typeof v === 'number' || typeof v === 'boolean' || v === null) ? v : clip(String(v));
       }
@@ -207,10 +214,11 @@
      sends the name through trackCustom instead of track. `page_view` is not here: tags.js owns it, so a view
      transition counts exactly once. `consent_update` is ours alone and is never mirrored. */
   var MIRROR = {
+    enquiry_open:      { ga4: 'enquiry_open', meta: null, snap: null, tiktok: null },
     listing_view:      { ga4: 'view_item',          meta: 'ViewContent',       snap: 'VIEW_CONTENT', tiktok: 'ViewContent' },
-    whatsapp_click:    { ga4: 'whatsapp_click',     meta: 'Contact',           snap: 'CUSTOM_EVENT_1', tiktok: 'Contact' },
+    whatsapp_click:    { ga4: null,     meta: 'Contact',           snap: 'CUSTOM_EVENT_1', tiktok: 'Contact' },
     call_click:        { ga4: 'call_click',         meta: 'Contact',           snap: null,           tiktok: 'Contact' },
-    form_submit:       { ga4: 'generate_lead',      meta: 'Lead',              snap: 'SIGN_UP',      tiktok: 'SubmitForm' },
+    form_submit:       { ga4: null,      meta: 'Lead',              snap: 'SIGN_UP',      tiktok: 'SubmitForm' },
     brochure_download: { ga4: 'brochure_download',  meta: 'BrochureDownload',  snap: null,           tiktok: 'Download', metaCustom: true },
     concierge_open:    { ga4: 'concierge_open',     meta: null,                snap: null,           tiktok: null },
     map_click:         { ga4: 'map_click',          meta: 'FindLocation',      snap: null,           tiktok: null },
@@ -285,11 +293,11 @@
       if (!state) arrive(!navigated);
       var listing = a.getAttribute('data-listing') || listingOnPage() || 'BONA';
       a.href = withRef(a.href, listing);
-      send('whatsapp_click', { cta: a.getAttribute('data-cta') || null, href: a.href }, LISTING_RE.test(listing) ? listing : null);
+      send('whatsapp_click', { cta: a.getAttribute('data-cta') || null }, LISTING_RE.test(listing) ? listing : null);
       return;
     }
     var tel = t.closest('a[href^="tel:"]');
-    if (tel) { send('call_click', { cta: tel.getAttribute('data-cta') || null, href: tel.getAttribute('href') }); return; }
+    if (tel) { send('call_click', { cta: tel.getAttribute('data-cta') || null }); return; }
     var tracked = t.closest('[data-track]');
     if (tracked) {
       var marked = tracked.getAttribute('data-listing');

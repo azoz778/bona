@@ -91,11 +91,7 @@ export const MAX_ATTEMPTS = 6;
 export const backoffMs = (attempts) => Math.min(2 ** Math.max(0, attempts) * 60_000, 6 * 3_600_000);
 
 const sha256 = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');
-/** Meta/Snap want lower-cased, whitespace-stripped values, hashed. Digits only for a phone. */
-const hashPhone = (v) => {
-  const digits = String(v ?? '').replace(/\D/g, '');
-  return digits ? sha256(digits) : null;
-};
+/** Country matching is hashed; contact names and phones are never matched. */
 const hashText = (v) => {
   const s = String(v ?? '').trim().toLowerCase();
   return s ? sha256(s) : null;
@@ -128,8 +124,8 @@ export const isRetryable = (status) => status === 0 || status === 429 || status 
 
 /**
  * The client context a Conversions API needs to match the event to a person: the
- * platform's own cookie ids where the browser handed them over, plus the lead's phone,
- * hashed. Nothing unhashed but the ids the platform itself set.
+ * platform's own cookie ids where the browser handed them over. Contact names and
+ * phone numbers, including hashes of them, stay in the private lead store.
  */
 function userData(session, lead, dest) {
   const ip = session?.ip ?? null;
@@ -138,14 +134,12 @@ function userData(session, lead, dest) {
     return compact({
       client_ip_address: ip, client_user_agent: ua,
       fbp: session?.fbp ?? null, fbc: session?.fbc ?? null,
-      ph: hashPhone(lead?.phone_e164), fn: hashText(lead?.name?.split(' ')[0]),
       country: hashText(session?.country),
     });
   }
   if (dest === 'snap') {
     return compact({
       client_ip_address: ip, client_user_agent: ua,
-      hashed_phone_number: hashPhone(lead?.phone_e164),
       uuid_c1: session?.scid ?? null,
     });
   }
@@ -292,7 +286,7 @@ export function enqueueStage(db, lead, { stage, valueSar = null, now = Date.now(
     lead_id: lead?.lead_id ?? null,
     listing_id: lead?.listing_id ?? null,
     path: null,
-    props: compact({ stage, value_sar: Number.isFinite(value) && value > 0 ? value : null }),
+    props: compact({ stage, _consent_analytics: session?.consent_analytics === 1, _consent_ads: session?.consent_ads === 1, value_sar: Number.isFinite(value) && value > 0 ? value : null }),
     src_first: lead?.first_touch ?? session?.first_touch ?? null,
     src_last: lead?.last_touch ?? session?.last_touch ?? null,
     ip: session?.ip ?? null,
@@ -326,6 +320,12 @@ export function createFanout({ db, cfg, log = () => {}, fetch: doFetch = globalT
   function verdict(dest, event, session) {
     if (!dests()[dest]) return { skip: 'no_credentials' };
     if (!BUILDERS[dest]) return { skip: 'unknown_dest' };
+    if (dest === 'ga4') {
+      if (event.props?._consent_analytics !== true) return {skip:'no_event_analytics_consent'};
+      if (session?.consent_analytics !== 1) return {skip:'no_analytics_consent'};
+      return {skip:null};
+    }
+    if (requireConsent && event.props?._consent_ads === false) return {skip:'no_event_ads_consent'};
     if (dest === 'tiktok' && event.props?._consent_ads !== true) return { skip: 'no_event_ads_consent' };
     if ((requireConsent || dest === 'tiktok') && session?.consent_ads !== 1) return { skip: 'no_ads_consent' };
     return { skip: null };

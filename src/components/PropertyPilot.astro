@@ -1,0 +1,50 @@
+---
+import Icon from './Icon.astro';
+import { t, formatPrice, formatNumber, type Locale } from '../lib/i18n';
+import type { Listing } from '../lib/listings';
+interface Props { listing: Listing; locale: Locale; viewingHref: string }
+const { listing: l, locale, viewingHref } = Astro.props;
+const ar = locale === 'ar';
+const available = l.status === 'available';
+---
+<header class="pilot wrap" data-property-pilot>
+  <div class="pilot-copy">
+    <p class="label text-stone-2">{ar ? 'درة العروس · جدة' : 'Durrat Al Arous · Jeddah'} <span class="pilot-ref" dir="ltr">{l.id}</span></p>
+    <h1>{ar ? 'على الشاطئ مباشرة.' : 'A home at the water’s edge.'}</h1>
+    <p class="pilot-name">{t(l.title, locale)}</p>
+    <p class="pilot-intro">{ar ? 'خمس غرف نوم، ومسبح خاص، ووصول مباشر إلى الشاطئ. تعرّف على الفيلا من صورها، ثم تواصل معنا لترتيب معاينة.' : 'Five bedrooms, a private pool and direct beach access. Explore the photographs, then arrange a viewing with Bona.'}</p>
+    <dl class="pilot-facts">
+      <div><dt>{ar ? 'غرف النوم' : 'Bedrooms'}</dt><dd>{l.specs.beds}</dd></div>
+      <div><dt>{ar ? 'مساحة الأرض' : 'Plot area'}</dt><dd>{formatNumber(l.specs.plotSqm!)} <small>{ar ? 'م²' : 'm²'}</small></dd></div>
+      <div><dt>{ar ? 'الطوابق' : 'Floors'}</dt><dd>{l.specs.floors}</dd></div>
+    </dl>
+  </div>
+  <div class="pilot-enquire">
+    <p class="label">{ar ? 'السعر المعروض' : 'Asking price'}</p>
+    <p class="pilot-price">{formatPrice(l.price, locale)}</p>
+    <p class="pilot-status"><span aria-hidden="true"></span>{available ? (ar ? 'متاح حسب الإعلان الحالي' : 'Currently listed as available') : (ar ? 'يرجى تأكيد التوفر' : 'Please confirm availability')}</p>
+    <a class="btn btn-ink" href={viewingHref} target="_blank" rel="noopener" data-cta="pilot_viewing_whatsapp" data-listing={l.id}><Icon name="whatsapp" size={18} />{ar ? 'طلب معاينة عبر واتساب' : 'Arrange a viewing'}</a>
+    <a class="pilot-form-link link" href="#enquiry-listing" data-track="enquiry_open" data-cta="pilot_enquiry_form" data-listing={l.id}>{ar ? 'أو أرسل استفسارك' : 'Or leave a private enquiry'}</a>
+    <p class="pilot-note">{ar ? 'نؤكد السعر والتوفر وموعد المعاينة معك قبل الزيارة.' : 'We’ll confirm price, availability and a suitable time before your visit.'}</p>
+  </div>
+</header>
+<style>
+  .pilot { display:grid; gap:2rem; padding-block:2.5rem; }
+  .pilot-copy { max-width:48rem; }
+  .pilot-ref { display:inline-block; margin-inline-start:1rem; opacity:.6; }
+  h1 { font-family:var(--font-display); font-size:clamp(2.4rem,4.3vw,4.8rem); line-height:1.06; letter-spacing:-.035em; margin:1rem 0; }
+  :global([lang="ar"]) h1 { font-family:var(--font-arabic-display); line-height:1.4; letter-spacing:0; }
+  .pilot-name { font-size:1.1rem; margin:0 0 .75rem; }
+  .pilot-intro { color:var(--color-stone-2); line-height:1.8; max-width:56ch; font-size:.95rem; }
+  .pilot-facts { display:flex; gap:2.5rem; margin:1.7rem 0 0; }
+  dt { font-size:.7rem; text-transform:uppercase; letter-spacing:.08em; color:var(--color-stone-2); }
+  dd { margin:.25rem 0 0; font-size:1.7rem; } dd small { font-size:1rem; }
+  .pilot-enquire { align-self:center; padding:1.8rem; border:1px solid var(--color-champagne); background:var(--color-ivory-2); }
+  .pilot-price { font-size:1.9rem; margin:.65rem 0; }
+  .pilot-status { display:flex; align-items:center; gap:.5rem; font-size:.8rem; margin-bottom:1.6rem; }
+  .pilot-status span { width:.4rem; height:.4rem; background:#657963; border-radius:50%; }
+  .pilot-enquire .btn { width:100%; } .pilot-form-link { display:block; width:fit-content; margin:1rem auto; font-size:.85rem; }
+  .pilot-note { font-size:.75rem; line-height:1.65; color:var(--color-stone-2); margin:1.2rem 0 0; }
+  @media(min-width:900px) { .pilot { grid-template-columns:minmax(0,1fr) 22rem; gap:4rem; padding-block:3.5rem; } }
+  @media(max-width:540px) { .pilot { padding-block:1.8rem; } .pilot-facts { gap:1.8rem; } .pilot-enquire { padding:1.3rem; } }
+</style>
