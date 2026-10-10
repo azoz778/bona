@@ -259,7 +259,7 @@ export function createOrMergeLead(db, input = {}, meta = {}) {
     // client context so the Conversions APIs can match the person to the click.
     const event = {
       event_id: newId('ev'), ts: now, name: 'lead_created', anon_id: anonId, session_id: sessionId, lead_id: id,
-      listing_id: fields.listing_id, path: null, props: { channel, match_method: matchMethod, source: src.source, medium: src.medium },
+      listing_id: fields.listing_id, path: null, props: { channel, match_method: matchMethod, source: src.source, medium: src.medium, _consent_analytics: meta.consent ? meta.consent.analytics === true : session?.consent_analytics === 1, _consent_ads: meta.consent ? meta.consent.ads === true : session?.consent_ads === 1 },
       src_first: session?.first_touch ?? null, src_last: session?.last_touch ?? null,
       ip: session?.ip ?? null, ua: session?.ua ?? null, country: session?.country ?? null,
     };

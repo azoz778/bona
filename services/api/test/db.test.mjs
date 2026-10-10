@@ -632,3 +632,23 @@ test('v6: the Dana columns, and last_human_out_ts backfilled from the newest hum
     s?.close();
   }
 });
+
+
+test('v6 upgrades preserve inbox and leads; v7 receipt and task rows survive reopen',()=>{
+ const {file,cleanup}=tmp();fs.mkdirSync(path.dirname(file),{recursive:true});const raw=new DatabaseSync(file);migrate(raw,{upTo:6});
+ raw.prepare("INSERT INTO leads(lead_id,created,updated,stage,inbox_state) VALUES('old-lead',1,2,'new','in')").run();raw.close();
+ let db=openDb(file);assert.equal(db.getLead('old-lead').inbox_state,'in');
+ db.db.prepare("INSERT INTO enquiry_receipts VALUES('evt-123456789','hash','old-lead',3,'sent')").run();
+ db.db.prepare("INSERT INTO lead_tasks(task_id,lead_id,kind,source,status,created,updated) VALUES('task1','old-lead','handoff','test','open',3,3)").run();db.close();
+ db=openDb(file);assert.equal(db.getLead('old-lead').updated,2);assert.equal(db.db.prepare('SELECT COUNT(*) n FROM enquiry_receipts').get().n,1);assert.equal(db.db.prepare('SELECT COUNT(*) n FROM lead_tasks').get().n,1);db.close();cleanup();
+});
+
+
+test('BEGIN IMMEDIATE lock timeout never poisons later transaction rollback',()=>{
+ const {file,cleanup}=tmp();const a=openDb(file);const b=openDb(file);try{
+  b.db.exec('PRAGMA busy_timeout=1');a.db.exec('BEGIN IMMEDIATE');
+  assert.throws(()=>b.transaction(()=>{}, {immediate:true}),/locked/);a.db.exec('ROLLBACK');
+  assert.throws(()=>b.transaction(()=>{b.insertLead({lead_id:'must-rollback',created:1,updated:1});throw Error('rollback proof');}),/rollback proof/);
+  assert.equal(b.getLead('must-rollback'),null);b.transaction(()=>b.insertLead({lead_id:'committed',created:1,updated:1}),{immediate:true});assert.ok(b.getLead('committed'));
+ }finally{a.close();b.close();cleanup();}
+});

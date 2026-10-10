@@ -16,6 +16,7 @@
  * Phone numbers are masked to their last four digits everywhere except the one page
  * that exists to show a single person's record.
  */
+import { leadTasksPanel, taskQueue } from './render-tasks.mjs';
 import { STAGES } from '../db.mjs';
 
 /** Everything that reaches HTML goes through here. No exceptions, no "this one is a number". */
@@ -754,6 +755,7 @@ export const MESSAGES = {
   attempts: 'Too many wrong attempts on that code. Ask for a new one.',
   no_request: 'Ask for a new code, then type it into this same browser — a code only works where it was requested.',
   forbidden: 'That request did not come from this page. Open api.bona-real-estate.com/dashboard directly, with translation off.',
+  bad_task: 'Task not saved. Check its status and a valid Riyadh date/time; a confirmed viewing needs a time.',
   bad_stage: 'That is not one of the stages.',
   bad_value: 'A deal value has to be a number.',
   empty_note: 'A note cannot be empty.',
@@ -1055,7 +1057,7 @@ export function leadRow(lead, now) {
 
 export function overviewPage({
   daily, sources, matchQuality, responseTimes, pipeline, days,
-  waiting = [], waitingTotal = null, now = Date.now(), me = null,
+  waiting = [], waitingTotal = null, tasks = [], tasksPage = 0, tasksTotal = tasks.length, now = Date.now(), me = null,
 }) {
   // Each of these is a separate query wrapped in its own try/catch in the route, so any
   // one of them can legitimately arrive as null after a failure. A default parameter
@@ -1190,7 +1192,8 @@ export function overviewPage({
   const seg = ['7', '14', '30', '90'].map((d) =>
     `<a${String(days) === d ? ' class="on"' : ''} href="/dashboard?days=${d}">${d} days</a>`).join('');
 
-  const body = `<div class="kpis">
+  const body = `${me?.role === 'owner' ? '<h2>Handoffs &amp; next actions</h2>' + taskQueue(tasks,{page:tasksPage,total:tasksTotal}) : ''}
+<div class="kpis">
   <div class="kc"><u>Waiting on you</u><b class="${trueWaiting ? 'alert' : 'good'}"><span class="n">${esc(trueWaiting)}</span></b>
     <div class="f">${trueWaiting ? `longest ${esc(ago(oldest))}${overnight ? ` · ${esc(overnight)} over a day` : ''}` : 'everyone has had a reply'}</div></div>
   <div class="kc"><u>Median first reply</u><b class="n">${medianReply === null ? '—' : `${esc(medianReply[0])}<i>${esc(medianReply[1])}</i>`}</b>
@@ -1421,7 +1424,7 @@ function inboxLabel(lead, owner) {
   return 'Not in the Bona inbox';
 }
 
-export function leadDetailPage({ lead, journey, saved = null, error = null, now = Date.now(), me = null }) {
+export function leadDetailPage({ lead, journey, tasks = [], notifications = [], saved = null, error = null, now = Date.now(), me = null }) {
   const field = (k, v) => `<dt>${esc(k)}</dt><dd dir="auto">${esc(v ?? '—')}</dd>`;
   const owner = me?.role === 'owner';
   const state = lead.inbox_state ?? null;
@@ -1441,7 +1444,7 @@ export function leadDetailPage({ lead, journey, saved = null, error = null, now 
   }).join('');
 
   const banner = error ? `<div class="err">${esc(messageFor(error))}</div>`
-    : saved ? `<div class="ok">${esc(saved === 'stage' ? 'Stage updated.' : 'Note added.')}</div>` : '';
+    : saved ? `<div class="ok">${esc(saved === 'stage' ? 'Stage updated.' : saved === 'task' ? 'Task saved. No message sent.' : 'Note added.')}</div>` : '';
 
   return layout({
     title: lead.name || lead.lead_id,
@@ -1483,6 +1486,8 @@ ${banner}
 <h2>Bona inbox</h2>
 <p class="sub">${esc(inboxLabel(lead, owner))}</p>
 ${inboxActions ? `<div class="acts" style="flex-wrap:wrap">${inboxActions}</div>` : ''}
+
+${leadTasksPanel(lead.lead_id, tasks, owner, notifications)}
 
 <h2>Notes</h2>
 <div class="card"><p dir="auto" style="white-space:pre-wrap;margin:0">${esc(lead.notes || '—')}</p></div>

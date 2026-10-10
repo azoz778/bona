@@ -31,7 +31,7 @@ function seeded({ consentAds = 1, name = 'lead_created', dests = ['meta', 'ga4',
   });
   db.insertEvent({
     event_id: 'ev-1', ts: NOW, name, anon_id: ANON, session_id: 'mf3k2a-7b1c', lead_id: 'LEAD-20260908-abcdef01',
-    listing_id: 'BONA-W003', path: '/ar/properties/bona-w003/', props: { form: 'listing' },
+    listing_id: 'BONA-W003', path: '/ar/properties/bona-w003/', props: { form: 'listing', _consent_analytics: true, _consent_ads: !!consentAds },
     ip: '2.2.2.2', ua: 'Mozilla/5.0', country: 'SA',
   });
   db.enqueueFanout('ev-1', dests, { now: NOW });
@@ -81,8 +81,9 @@ test('without the visitor\'s ads consent nothing reaches an ad platform', async 
   const { fetch, calls } = recorder();
   const fanout = createFanout({ db, cfg: CFG, fetch, now: () => NOW });
   const out = await fanout.drainOnce();
-  assert.equal(calls.length, 0);
-  assert.equal(out.skipped, 3);
+  assert.equal(calls.length, 1, 'analytics consent permits GA4 while ads stay off');
+  assert.equal(out.sent, 1);
+  assert.equal(out.skipped, 2);
   const row = db.dueFanout(NOW + 1, { limit: 10 });
   assert.deepEqual(row, [], 'skipped rows do not come round again');
   db.close();
@@ -110,7 +111,8 @@ test('the Meta payload carries the browser\'s event id, its cookies and a hashed
   assert.equal(d.event_time, Math.floor(NOW / 1000));
   assert.equal(d.event_source_url, 'https://bona-real-estate.com/ar/properties/bona-w003/');
   assert.equal(d.user_data.fbp, 'fb.1.1.2');
-  assert.equal(d.user_data.ph, crypto.createHash('sha256').update('966500000000').digest('hex'));
+  assert.equal(d.user_data.ph, undefined);
+  assert.equal(d.user_data.fn, undefined);
   assert.ok(!JSON.stringify(built.body).includes('966500000000'), 'no unhashed phone number leaves this process');
   assert.ok(!JSON.stringify(built.body).includes('Sara'), 'no unhashed name either');
   assert.deepEqual(d.custom_data.content_ids, ['BONA-W003']);
@@ -146,7 +148,7 @@ test('the Snap payload is a bearer-token POST with a hashed phone', () => {
   const built = buildSnap(db.getEvent('ev-1'), { session: db.getSession('mf3k2a-7b1c'), lead: db.getLead('LEAD-20260908-abcdef01'), cfg: CFG });
   assert.equal(built.headers.Authorization, 'Bearer snap-token');
   assert.equal(built.body.data[0].event_name, 'SIGN_UP');
-  assert.equal(built.body.data[0].user_data.hashed_phone_number, crypto.createHash('sha256').update('966500000000').digest('hex'));
+  assert.equal(built.body.data[0].user_data.hashed_phone_number, undefined);
   db.close();
 });
 
@@ -271,7 +273,7 @@ test('a stage move is recorded as a lead_stage event carrying the lead\'s contex
   assert.equal(event.lead_id, LEAD_ID);
   assert.equal(event.session_id, 'mf3k2a-7b1c');
   assert.equal(event.listing_id, 'BONA-W003');
-  assert.deepEqual(event.props, { stage: 'viewing' });
+  assert.deepEqual(event.props, { stage: 'viewing', _consent_ads: true, _consent_analytics: true });
   assert.equal(event.ip, '2.2.2.2', 'the session context travels so the platforms can still match the person');
   assert.equal(event.ua, 'Mozilla/5.0');
   assert.deepEqual(dests, ['meta', 'ga4']);
@@ -351,8 +353,9 @@ test('the consent gate applies to a stage move like any other event', async () =
   const { fetch, calls } = recorder();
   const fanout = createFanout({ db, cfg: CFG, fetch, now: () => NOW });
   const out = await fanout.drainOnce();
-  assert.equal(calls.length, 0);
-  assert.equal(out.skipped, 3);
+  assert.equal(calls.length, 1, 'analytics consent permits GA4 while ads stay off');
+  assert.equal(out.sent, 1);
+  assert.equal(out.skipped, 2);
   assert.equal(db.getEvent(event.event_id).name, 'lead_stage', 'the record stays, only the sending is refused');
   db.close();
 });
@@ -389,4 +392,21 @@ test('a row carrying a prototype member where a name belongs maps to nothing', (
   assert.equal(buildSnap(bogus, ctx), null);
   assert.equal(buildMeta({ event_id: 'ev-y', ts: NOW, name: 'valueOf', props: {} }, ctx), null);
   db.close();
+});
+
+
+test('GA4 uses independent event-time analytics consent and respects later revocation',async()=>{
+ for(const [analytics,ads,snapshot,want] of [[0,1,false,0],[1,0,true,1],[1,1,false,0],[0,1,true,0]]){
+  const db=seeded({consentAds:ads,dests:['ga4']});try{
+   db.db.prepare('UPDATE sessions SET consent_analytics=?').run(analytics);db.db.prepare('UPDATE events SET props=?').run(JSON.stringify({_consent_analytics:snapshot,_consent_ads:!!ads}));
+   const {fetch,calls}=recorder();await createFanout({db,cfg:CFG,fetch,now:()=>NOW}).drainOnce();assert.equal(calls.length,want,JSON.stringify({analytics,ads,snapshot}));
+  }finally{db.close();}
+ }
+});
+
+
+test('missing analytics event snapshot never borrows consent from a later session',async()=>{
+ const db=seeded({dests:['ga4']});try{
+  db.db.prepare("UPDATE events SET props='{}'").run();const {fetch,calls}=recorder();await createFanout({db,cfg:CFG,fetch,now:()=>NOW}).drainOnce();assert.equal(calls.length,0);
+ }finally{db.close();}
 });

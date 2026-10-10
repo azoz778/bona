@@ -1,11 +1,8 @@
 ---
-/* Enquiry form: builds a localised message and opens WhatsApp. Since the tracking round it also posts the lead to
-   the concierge API first (`POST /v1/enquiry` as text/plain JSON, fire-and-forget, keepalive so it survives the hand-off to WhatsApp)
-   and closes the message with the session's Ref line, so the WhatsApp conversation can be tied back to the visit.
-   The API is a nicety: if it is down or the attribution script did not run, WhatsApp still opens exactly as before. */
-import Icon from './Icon.astro';
+/* Save the private enquiry, acknowledge acceptance and offer an explicit WhatsApp continuation.
+   Failed or timed-out requests retain the fields and retry with the same id. */
 import site from '../data/site.json';
-import { t, ui, waLink, localePath, type Locale } from '../lib/i18n';
+import { t, ui, localePath, type Locale } from '../lib/i18n';
 import { typeLabel } from '../lib/listings';
 interface Props {
   locale: Locale;
@@ -24,9 +21,15 @@ const labels = {
   type: t(ui.labelType, locale), budget: t(ui.labelBudget, locale), location: t(ui.labelLocation, locale), ref: t(ui.labelRef, locale),
   message: t(ui.labelMessage, locale), sentFrom: t(ui.sentFrom, locale),
   errName: t(ui.formErrName, locale), errPhone: t(ui.formErrPhone, locale),
+  send: locale === 'ar' ? 'إرسال الاستفسار' : 'Send enquiry',
+  sending: locale === 'ar' ? 'جارٍ إرسال الاستفسار…' : 'Sending your enquiry…',
+  accepted: locale === 'ar' ? 'تم حفظ استفسارك لدى بونا. يمكنك أيضاً متابعة الحديث عبر واتساب.' : 'Your enquiry is saved with Bona. You can also continue on WhatsApp.',
+  failed: locale === 'ar' ? 'تعذّر تأكيد حفظ استفسارك. ما زالت بياناتك هنا؛ أعد المحاولة أو أرسلها عبر واتساب.' : 'We could not confirm that your enquiry was saved. Your details are still here. Retry or send them on WhatsApp.',
+  rateLimited: locale === 'ar' ? 'يرجى الانتظار قليلاً ثم إعادة المحاولة، أو التواصل عبر واتساب.' : 'Please wait a moment before retrying, or continue on WhatsApp.',
+  retry: locale === 'ar' ? 'إعادة المحاولة' : 'Retry enquiry',
+  preview: locale === 'ar' ? 'هذه معاينة محلية. لم يتم إرسال أي استفسار.' : 'This is a local preview. No enquiry has been sent.',
 };
 const pageUrl = new URL(listing?.path ?? path ?? '/', site.url).href;
-const fallbackHref = waLink(site.whatsapp.wa, labels.greeting);
 ---
 <form class:list={['enquiry', cls]} id={id} data-enquiry data-wa={site.whatsapp.wa} data-labels={JSON.stringify(labels)} data-page={pageUrl} data-variant={variant} data-listing={listing?.id} novalidate>
   {listing && <input type="hidden" name="ref" value={`${listing.title} (${listing.id})`} />}
@@ -79,35 +82,25 @@ const fallbackHref = waLink(site.whatsapp.wa, labels.greeting);
     </div>
   </div>
   <div class="mt-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-    <button type="submit" class="btn btn-ink"><Icon name="whatsapp" size={17} />{t(ui.formSubmit, locale)}</button>
-    <p class="text-xs text-stone">{t(ui.formNote, locale)} <a href={localePath(locale, '/privacy/')} class="link text-stone-2 hover:text-ink">{t(ui.navPrivacy, locale)}</a></p>
+    <button type="submit" class="btn btn-ink" data-submit><span data-submit-label>{labels.send}</span></button>
+    <p class="text-xs text-stone">{locale === "ar" ? "تُرسل بياناتك إلى بونا للرد على استفسارك." : "Your details go to Bona to answer your enquiry."} <a href={localePath(locale, '/privacy/')} class="link text-stone-2 hover:text-ink">{t(ui.navPrivacy, locale)}</a></p>
   </div>
   <div class="mt-8 border border-champagne/60 bg-ivory-2 p-6" data-thanks hidden>
-    <p class="flex items-start gap-3 text-sm"><Icon name="check" size={18} class="mt-0.5 shrink-0 text-champagne" /><span>{t(ui.formThanks, locale)} {t(ui.formThanksFallback, locale)}</span></p>
-    <a class="btn btn-outline mt-5" data-thanks-link data-cta="form_whatsapp" href={fallbackHref} target="_blank" rel="noopener">{t(ui.formOpenWhatsApp, locale)}</a>
+    <p class="text-sm" data-enquiry-status role="status" aria-live="polite" tabindex="-1"></p>
+    <button type="button" class="btn btn-outline mt-5" data-thanks-link data-cta="form_whatsapp">{t(ui.formOpenWhatsApp, locale)}</button>
   </div>
 </form>
 
 <script>
-  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  import { createEnquirySubmitter } from '../lib/enquiry-client.mjs';
   const LISTING_RE = /^BONA-W?\d{3}$/;
   type Attr = { anon_id?: string; session?: { id?: string; ref?: string } | null; first?: unknown; last?: unknown; fbp?: unknown; fbc?: unknown; ga?: unknown; scid?: unknown; ttp?: unknown };
-  type Hooks = Window & { BONA_API?: string; BONA_ATTR?: Attr; bonaEventId?: () => string; bonaTrack?: (e: string, p?: Record<string, unknown>, o?: { eventId?: string }) => unknown };
+  type Hooks = Window & { bonaMeasurementAllowed?: () => boolean; BONA_API?: string; BONA_ATTR?: Attr; bonaEventId?: () => string; bonaTrack?: (e: string, p?: Record<string, unknown>, o?: { eventId?: string }) => unknown };
   const w = window as Hooks;
 
   function consentFlags() {
     try { const c = JSON.parse(localStorage.getItem('bona_consent') || 'null'); return { analytics: c?.analytics === true, ads: c?.ads === true }; } catch { return { analytics: false, ads: false }; }
   }
-  /** POST the lead to the API, exactly like events: text/plain + keepalive is a CORS "simple request" (no preflight),
-      so it survives the immediate navigation to WhatsApp on mobile. Never awaited, never surfaced. */
-  function postLead(body: Record<string, unknown>) {
-    const api = (w.BONA_API || '').replace(/\/+$/, '');
-    if (!api) return;
-    try {
-      fetch(`${api}/v1/enquiry`, { method: 'POST', keepalive: true, credentials: 'omit', headers: { 'content-type': 'text/plain' }, body: JSON.stringify(body) }).catch(() => {});
-    } catch { /* ignore */ }
-  }
-
   function initForm(form: HTMLFormElement) {
     if (form.dataset.ready) return;
     form.dataset.ready = '1';
@@ -115,15 +108,45 @@ const fallbackHref = waLink(site.whatsapp.wa, labels.greeting);
     const wa = form.dataset.wa || '';
     const page = form.dataset.page || '';
     const thanks = form.querySelector<HTMLElement>('[data-thanks]');
-    const thanksLink = form.querySelector<HTMLAnchorElement>('[data-thanks-link]');
+    const thanksLink = form.querySelector<HTMLButtonElement>('[data-thanks-link]');
+    const status = form.querySelector<HTMLElement>('[data-enquiry-status]');
+    const submitButton = form.querySelector<HTMLButtonElement>('[data-submit]');
+    const submitLabel = form.querySelector<HTMLElement>('[data-submit-label]');
+    const submit = createEnquirySubmitter({ api: w.BONA_API || '', eventId: () => w.bonaEventId?.() || `${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}` });
+    let whatsappUrl = '';
+    let busy = false;
+    // A button holds no personal URL in the DOM for automatic outbound-link analytics to collect.
+    thanksLink?.addEventListener('click', () => {
+      if (!whatsappUrl || (w.bonaMeasurementAllowed && !w.bonaMeasurementAllowed())) return;
+      w.bonaTrack?.('whatsapp_click', { cta: 'form_whatsapp' });
+      const currentName = field('name')?.value.trim() || '';
+      const currentPhone = (field('phone')?.value || '').replace(/[٠-٩]/g,d=>String(d.charCodeAt(0)-0x660)).replace(/[۰-۹]/g,d=>String(d.charCodeAt(0)-0x6F0)).replace(/[\s\-().]/g,'');
+      setError('name', currentName.length < 2 ? labels.errName : '');
+      setError('phone', !/^\+?\d{7,15}$/.test(currentPhone) ? labels.errPhone : '');
+      if(currentName.length < 2 || !/^\+?\d{7,15}$/.test(currentPhone)) { (form.querySelector('.is-invalid') as HTMLElement | null)?.focus(); return; }
+      window.open(buildWhatsappUrl(), '_blank', 'noopener,noreferrer');
+    });
     const field = (n: string) => form.elements.namedItem(n) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null;
     const setError = (n: string, msg: string) => {
       const el = field(n); const p = form.querySelector<HTMLElement>(`[data-error-for="${n}"]`);
       if (el) { el.classList.toggle('is-invalid', !!msg); if (msg) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid'); }
       if (p) { p.textContent = msg; p.hidden = !msg; }
     };
-    form.addEventListener('submit', e => {
+    function buildWhatsappUrl() {
+      const lines = [labels.greeting, ''];
+      const ref = field('ref')?.value; if(ref) lines.push(`${labels.ref}: ${ref}`);
+      for(const [key,label] of [['name',labels.name],['phone',labels.phone],['interest',labels.interest],['type',labels.type],['budget',labels.budget],['location',labels.location]]) {
+        const value=field(key)?.value.trim();if(value)lines.push(`${label}: ${value}`);
+      }
+      const message=field('message')?.value.trim();if(message)lines.push('',`${labels.message}:`,message);
+      lines.push('',`${labels.sentFrom} ${page}`);
+      const listing=form.dataset.listing || document.body.dataset.listing || '';
+      const refCode=w.BONA_ATTR?.session?.ref;if(refCode)lines.push(`Ref ${LISTING_RE.test(listing)?listing:'BONA'} · ${refCode}`);
+      return `https://wa.me/${wa}?text=${encodeURIComponent(lines.join('\n'))}`;
+    }
+    form.addEventListener('submit', async e => {
       e.preventDefault();
+      if (busy) return;
       const name = field('name')?.value.trim() || '';
       // Normalise Arabic-Indic (٠-٩) and Persian (۰-۹) digits so AR keyboards validate.
       const phoneRaw = (field('phone')?.value.trim() || '').replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660)).replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x6F0));
@@ -151,31 +174,40 @@ const fallbackHref = waLink(site.whatsapp.wa, labels.greeting);
       const sessionRef = attr?.session?.ref;
       if (sessionRef) lines.push(`Ref ${listing || 'BONA'} \u00B7 ${sessionRef}`);
 
-      // The lead goes to the API before WhatsApp opens; the same event_id lets the browser and server Lead dedupe.
-      const eventId = w.bonaEventId?.() || `${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}`;
       const value = (n: string) => field(n)?.value.trim() || null;
-      postLead({
-        form: form.dataset.variant || 'contact',
-        name, phone: phoneRaw,
+      whatsappUrl = `https://wa.me/${wa}?text=${encodeURIComponent(lines.join('\n'))}`;
+      if (thanks) thanks.hidden = false;
+      if (w.bonaMeasurementAllowed && !w.bonaMeasurementAllowed()) {
+        if (status) status.textContent = labels.preview;
+        if (thanksLink) thanksLink.hidden = true;
+        return;
+      }
+      if (thanksLink) thanksLink.hidden = false;
+      busy = true;
+      const draftFields = Array.from(form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input,textarea,select')).filter(el => !el.disabled);
+      draftFields.forEach(el => { el.disabled = true; });
+      if (submitButton) submitButton.disabled = true;
+      form.setAttribute('aria-busy', 'true');
+      if (status) status.textContent = labels.sending;
+      const result = await submit({
+        form: form.dataset.variant || 'contact', name, phone: phoneRaw,
         interest: value('interest'), type: value('type'), budget: value('budget'), location: value('location'), message: msg || null,
         listing_id: listing, page: window.location.pathname, locale: document.documentElement.lang === 'ar' ? 'ar' : 'en',
-        event_id: eventId,
+      }, {
         attr: attr && attr.anon_id ? { anon_id: attr.anon_id, session_id: attr.session?.id ?? null, ref: sessionRef ?? null, first: attr.first ?? null, last: attr.last ?? null, fbp: attr.fbp ?? null, fbc: attr.fbc ?? null, ga: attr.ga ?? null, scid: attr.scid ?? null, ttp: attr.ttp ?? null } : null,
         consent: consentFlags(),
       });
-      // One call, one id: bonaTrack records the event first-party AND mirrors Lead into every tag that consent
-      // loaded (Meta, Snap, TikTok, GA4). It reuses `eventId` — the id already posted to /v1/enquiry — so the
-      // pixel's Lead and the server's Conversions-API Lead are the same event, not two.
-      try { w.bonaTrack?.('form_submit', { form: form.dataset.variant || 'contact' }, { eventId }); } catch { /* ignore */ }
+      busy = false;
+      draftFields.forEach(el => { el.disabled = false; });
+      if (submitButton) submitButton.disabled = false;
+      form.removeAttribute('aria-busy');
+      if (status) status.textContent = result.ok ? labels.accepted : result.reason === 'rate_limited' ? labels.rateLimited : labels.failed;
+      if (submitLabel) submitLabel.textContent = result.ok ? labels.send : labels.retry;
+      if (result.ok && !result.duplicate) {
+        try { w.bonaTrack?.('form_submit', { form: form.dataset.variant || 'contact' }, { eventId: result.eventId }); } catch { /* optional analytics */ }
+      }
+      status?.focus({ preventScroll: true });
 
-      const url = `https://wa.me/${wa}?text=${encodeURIComponent(lines.join('\n'))}`;
-      if (thanksLink) thanksLink.href = url;
-      if (thanks) { thanks.hidden = false; thanks.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
-      if (isMobile) { window.location.href = url; return; }
-      // window.open() returns null whenever 'noopener' is passed, so never use it as a success signal.
-      // Keep the visitor on the site: WhatsApp opens in a new tab; if blocked, the thanks panel carries the link.
-      const win = window.open(url, '_blank');
-      if (win) { try { win.opener = null; } catch {} } else { thanksLink?.focus(); }
     });
   }
   const init = () => document.querySelectorAll<HTMLFormElement>('form[data-enquiry]').forEach(initForm);

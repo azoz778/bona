@@ -359,3 +359,41 @@ test('request_human answers a note that hands the chat over, logs the lead id on
     h.cleanup();
   }
 });
+
+
+test('site chat and voice serious buyers create durable no-match handoffs and requested viewings', async()=>{
+ const h=harness();try {
+  const body={chat:{chat_id:'handoff-web'},args:{phone:'0500000077',budget:'Buyer stated amount',area:'Riyadh',property_type:'villa',timeline:'Soon',no_match:true,viewing_requested:true}};
+  const first=JSON.parse(await h.tools.run('create_lead',body));await h.tools.run('create_lead',body);
+  const tasks=h.db.db.prepare('SELECT kind,status,details FROM lead_tasks WHERE lead_id=?').all(first.id);
+  assert.equal(tasks.length,2);assert.equal(tasks.find(t=>t.kind==='viewing').status,'requested');
+  const detail=JSON.parse(tasks.find(t=>t.kind==='handoff').details);assert.equal(detail.no_match,true);assert.equal(detail.area,'Riyadh');assert.equal('financing' in detail,false);assert.equal(h.sent.length,1);
+ }finally{h.cleanup();}
+});
+
+
+
+test('qualification after initial contact capture enriches and corrects one existing handoff',async()=>{
+ const h=harness();try {
+  const chat={chat_id:'enriched-contact'};const first=JSON.parse(await h.tools.run('create_lead',{chat,args:{phone:'0500000078',budget:'4 million'}}));
+  const second=JSON.parse(await h.tools.run('create_lead',{chat,args:{phone:'0500000078',budget:'6 million',area:'Riyadh',property_type:'villa',timeline:'Next month',no_match:true,viewing_requested:true}}));
+  assert.equal(second.id,first.id);assert.equal(h.sent.length,1);const rows=h.db.db.prepare('SELECT kind,details FROM lead_tasks WHERE lead_id=?').all(first.id);
+  assert.equal(rows.length,2);const needs=JSON.parse(rows.find(r=>r.kind==='handoff').details);assert.equal(needs.budget,'6 million');assert.equal(needs.no_match,true);assert.equal(needs.timeframe,'Next month');assert.equal(h.db.getLead(first.id).budget,'6 million');
+ }finally{h.cleanup();}
+});
+
+
+test('a later concierge conversation notifies using the newly corrected requirements',async()=>{
+ const h=harness();try {
+  await h.tools.run('create_lead',{chat:{chat_id:'old'},args:{phone:'0500000076',budget:'4 million'}});
+  await h.tools.run('create_lead',{chat:{chat_id:'new'},args:{phone:'0500000076',budget:'6 million'}});
+  assert.match(h.sent.at(-1),/6 million/);assert.doesNotMatch(h.sent.at(-1),/4 million/);
+ }finally{h.cleanup();}
+});
+
+test('concierge wiring calls the handoff notifier after commit, including enriched repeated qualification',async()=>{
+ const h=harness();try{const called=[];const tools=createToolHandlers({...h.deps,notifyHandoff:async id=>{const task=h.db.db.prepare("SELECT * FROM lead_tasks WHERE lead_id=? AND kind='handoff'").get(id);assert.ok(task);called.push(JSON.parse(task.details));}});
+  const chat={chat_id:'telegram-wiring'};await tools.run('create_lead',{chat,args:{phone:'0500000074',budget:'4 million'}});await tools.run('create_lead',{chat,args:{phone:'0500000074',budget:'6 million',no_match:true}});
+  assert.equal(called.length,2);assert.equal(called[1].budget,'6 million');assert.equal(called[1].no_match,true);assert.equal(h.sent.length,1);
+ }finally{h.cleanup();}
+});

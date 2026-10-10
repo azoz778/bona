@@ -36,6 +36,7 @@
  *
  * Never logged: message text, a name, a number, a Retell chat id. Never rejects.
  */
+import { ensureHandoff, cleanNeeds } from './lead-tasks.mjs';
 import { extractActions, plainText } from './actions.mjs';
 import { replyJidFor } from './wa-send.mjs';
 import { HANDOVER_TOOL } from './tools.mjs';
@@ -159,6 +160,13 @@ function resultIds(messages) {
   return ids;
 }
 
+export function handoffDetails(completion) {
+  const call=(completion?.messages??[]).find(m=>m?.role==='tool_call_invocation'&&m?.name===HANDOVER_TOOL);
+  let args=call?.arguments;
+  try { if(typeof args==='string')args=JSON.parse(args); } catch { args=null; }
+  return cleanNeeds(args&&typeof args==='object'?args:{});
+}
+
 /** The completion as WhatsApp text, and whether the model asked for a person (P4-10, P4-11). */
 export function answerFrom(completion, { inventory, siteUrl, language }) {
   const messages = Array.isArray(completion?.messages) ? completion.messages : [];
@@ -194,7 +202,7 @@ export function answerFrom(completion, { inventory, siteUrl, language }) {
  */
 export function createDana({
   db, inbox, team, sender, retell, alerts = null, inventory, siteUrl, agentId, isExcludedLead, backfill = null, budget = null, funds = null,
-  now = () => Date.now(), log = () => {}, batchMs = BATCH_MS,
+  now = () => Date.now(), log = () => {}, batchMs = BATCH_MS, notifyHandoff = async () => {},
 } = {}) {
   if (!db || !inbox || !team) throw new TypeError('createDana needs the store, the inbox store and the team');
   if (!sender || typeof sender.sendTo !== 'function') throw new TypeError('createDana needs the one sender (app.sender)');
@@ -371,7 +379,7 @@ export function createDana({
    * already. A person who answered meanwhile, or the chat leaving the inbox or switched off,
    * means nothing at all happens.
    */
-  async function handover(leadId, language, why, coversTs, { checked = false } = {}) {
+  async function handover(leadId, language, why, coversTs, { checked = false, details = {} } = {}) {
     if (!checked) {
       const pre = await preSend(leadId, coversTs);
       if (!pre.ok && HANDOVER_SKIPS.has(pre.reason)) return skip(leadId, pre.reason);
@@ -379,12 +387,16 @@ export function createDana({
     const fresh = db.getLead(leadId);
     if (!fresh || fresh.inbox_state !== 'in') return skip(leadId, 'not_in_inbox');
     const already = Number(fresh.needs_human) === 1;
-    if (!already) inbox.setNeedsHuman(leadId, 1);
+    db.transaction(() => {
+      if (!already) inbox.setNeedsHuman(leadId, 1);
+      ensureHandoff(db, { leadId, source: "dana", reason: why, details, now: now() });
+    });
     if (alerts) alerts.notify(leadId, { reason: 'needs_human' });
     // A chat that turned lid-only meanwhile has no phone jid to send to: flagged and alerted
     // like any hand-over, but no line — as if it had gone already (Task 6 re-review).
     const noJid = !replyJidFor(fresh);
     const sent = already || noJid ? false : (await send(fresh, HANDOVER[language], language, coversTs)).sent;
+    await notifyHandoff(leadId);
     say({ evt: 'dana.handover', leadId, why, sent });
     return { handover: why, sent };
   }
@@ -409,7 +421,7 @@ export function createDana({
     const c = await complete(e.lead, batch, language);
     if (c.error) return handover(leadId, language, c.error, coversTs);
     const { text, handover: asked, links } = answerFrom(c.completion, { inventory, siteUrl, language });
-    if (asked) return handover(leadId, language, 'request_human', coversTs);
+    if (asked) return handover(leadId, language, 'request_human', coversTs, { details: handoffDetails(c.completion) });
     if (!text) return handover(leadId, language, 'empty', coversTs);
     const pre = await preSend(leadId, coversTs);
     if (!pre.ok) {
@@ -419,8 +431,12 @@ export function createDana({
     }
     const r = await send(pre.lead, text, language, coversTs, { answer: true });
     if (!r.sent) {
-      inbox.setNeedsHuman(leadId, 1);
+      db.transaction(() => {
+        inbox.setNeedsHuman(leadId, 1);
+        ensureHandoff(db, {leadId,source:'dana',reason:'send_failed',now:now()});
+      });
       if (alerts) alerts.notify(leadId, { reason: 'needs_human' });
+      await notifyHandoff(leadId);
       say({ evt: 'dana.handover', leadId, why: 'send_failed', sent: false });
       return { handover: 'send_failed', sent: false };
     }

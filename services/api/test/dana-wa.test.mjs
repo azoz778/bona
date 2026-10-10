@@ -35,7 +35,7 @@ function assertClean(logs) {
   for (const needle of PERSONAL) assert.equal(out.includes(needle), false, `a log line carries "${needle}"`);
 }
 
-function harness({ answer = defaultAnswer, agentId = 'agent_wa', enabled = true, lead = {}, alerts = true, budget = null, backfill = null, evo = null, funds = null } = {}) {
+function harness({ answer = defaultAnswer, agentId = 'agent_wa', enabled = true, lead = {}, alerts = true, budget = null, backfill = null, evo = null, funds = null, notifyHandoff = async () => {} } = {}) {
   const s = openDb(':memory:');
   let clock = NOW;
   const team = createTeam(s, { now: () => clock });
@@ -62,7 +62,7 @@ function harness({ answer = defaultAnswer, agentId = 'agent_wa', enabled = true,
     match_method: 'ref', stage: 'new', stage_ts: NOW - DAY, inbox_state: 'in', inbox_since: NOW - DAY, interest: 'villa in Al Khalidiyah', ...lead,
   });
   const dana = createDana({
-    db: s, inbox, team, sender, retell, inventory, siteUrl: SITE, agentId, budget, backfill, ...(funds ? { funds: funds(team, () => clock) } : {}),
+    db: s, inbox, team, sender, retell, inventory, notifyHandoff, siteUrl: SITE, agentId, budget, backfill, ...(funds ? { funds: funds(team, () => clock) } : {}),
     alerts: alerts ? { notify: (id, o) => { notified.push([id, o]); return Promise.resolve({ users: 1 }); } } : null,
     isExcludedLead: (l) => isExcludedLead(team, s, l), now: () => clock, log: (o) => logs.push(o), batchMs: 0,
   });
@@ -827,4 +827,36 @@ test('createChat working and the completion refused never clears the flag in bet
   assert.equal(h.retell.chats.length, 1, 'a new chat was made for the retry, and it worked');
   assert.deepEqual(seen, [['out', NOW - HOUR], ['out', NOW - HOUR]], 'no ok() at any point');
   assert.equal(fundsOutSince(h.team), NOW - HOUR, 'out since the first refusal');
+});
+
+
+test('Dana explicit no-match handoff records buyer needs once and stops bot replies',async()=>{
+ const h=harness({answer:()=>({messages:[{role:'tool_call_invocation',name:'request_human',arguments:JSON.stringify({reason:'serious buyer',no_match:true,budget:'3 million SAR',area:'Riyadh',property_type:'villa',timeframe:'This year'})}]})});
+ h.client('NEEDS1',NOW-5000,'Please ask Abdulaziz to help find a villa');
+ await h.dana.answer(LEAD,{ts:NOW-5000});
+ const rows=h.s.db.prepare("SELECT * FROM lead_tasks WHERE lead_id=? AND kind='handoff'").all(LEAD);
+ assert.equal(rows.length,1);assert.equal(JSON.parse(rows[0].details).no_match,true);assert.equal(JSON.parse(rows[0].details).area,'Riyadh');assert.equal(rows[0].telegram_status,'disabled');
+ h.client('NEEDS2',NOW-1000,'Any update?');assert.equal((await h.dana.answer(LEAD,{ts:NOW-1000})).skipped,'needs_human');assert.equal(h.calls.length,1);
+});
+
+
+
+test('handoff commit failure never leaves a paused bot without a task; retry recovers',async()=>{
+ const h=harness({answer:()=>({messages:[{role:'tool_call_invocation',name:'request_human',arguments:'{}'}]})});
+ h.client('ATOMIC1',NOW-5000,'I want a person');h.s.db.exec("CREATE TRIGGER fail_task BEFORE INSERT ON lead_tasks BEGIN SELECT RAISE(ABORT,'test interruption'); END");
+ assert.equal((await h.dana.answer(LEAD,{ts:NOW-5000})).error,'failed');assert.equal(h.lead().needs_human,0);assert.equal(h.calls.length,0);assert.equal(h.s.db.prepare('SELECT COUNT(*) n FROM lead_tasks').get().n,0);
+ h.s.db.exec('DROP TRIGGER fail_task');await h.dana.answer(LEAD,{ts:NOW-5000});assert.equal(h.lead().needs_human,1);assert.equal(h.s.db.prepare('SELECT COUNT(*) n FROM lead_tasks').get().n,1);
+});
+test('a rejected Dana send creates a durable owner handoff and pauses replies',async()=>{
+ const h=harness({evo:()=>({status:400,body:{}})});h.client('FAILSEND',NOW-5000,'Tell me about this home');
+ const result=await h.dana.answer(LEAD,{ts:NOW-5000});assert.equal(result.handover,'send_failed');assert.equal(h.lead().needs_human,1);assert.equal(h.s.db.prepare("SELECT reason FROM lead_tasks WHERE lead_id=?").get(LEAD).reason,'send_failed');
+});
+
+test('Dana handoff and rejected-send paths notify only after durable needs-human and task writes',async()=>{
+ for(const reject of [false,true]){
+  let h;const seen=[];h=harness({answer:reject?defaultAnswer:()=>({messages:[{role:'tool_call_invocation',name:'request_human',arguments:JSON.stringify({no_match:true,budget:'6 million'})},{role:'agent',content:'The team will reply shortly.'}]}),evo:reject?()=>({status:400}):null,notifyHandoff:async id=>{
+   assert.equal(h.s.getLead(id).needs_human,1);const task=h.s.db.prepare("SELECT * FROM lead_tasks WHERE lead_id=? AND kind='handoff'").get(id);assert.ok(task);seen.push(task);
+  }});
+  try{h.client('C-tg',NOW-5000,'I would like a villa');await h.dana.answer(LEAD,{ts:NOW-5000});assert.equal(seen.length,1);if(!reject)assert.equal(JSON.parse(seen[0].details).no_match,true);}finally{await h.dana.stop();h.s.close();}
+ }
 });
