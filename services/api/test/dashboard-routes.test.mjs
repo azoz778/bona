@@ -670,7 +670,7 @@ test('a stage change with the marker moves the lead, writes history and queues t
 
     const event = db.getEvent(body.event_id);
     assert.equal(event.name, 'lead_stage');
-    assert.deepEqual(event.props, { stage: 'won', value_sar: 2_400_000 });
+    assert.deepEqual(event.props, { stage: 'won', value_sar: 2_400_000, _consent_ads: true, _consent_analytics: true });
     assert.equal(event.lead_id, id);
 
     const queued = db.db.prepare('SELECT dest, status FROM fanout WHERE event_id = ? ORDER BY dest').all(body.event_id);
@@ -1440,4 +1440,36 @@ test('a malformed BONA_OWNER_JID is logged and does not stop the server from bei
     db.close();
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
+});
+
+
+test('task controls require owner session and same-origin form marker; viewing confirmation requires date',async()=>{
+ await withDash({},async({db,login,postJson,postForm,get,sent})=>{
+  const id=seedLead(db,{phone:'966500000088',inboxState:'in'});const route='/v1/admin/leads/'+id+'/task';
+  assert.equal((await postJson(route,{kind:'viewing',due_at:'2026-11-02T16:30'})).status,401);
+  const owner=await login();const sends=sent.length;
+  assert.equal((await postJson(route,{kind:'viewing',due_at:'2026-11-02T16:30'},{cookie:owner.cookie,headers:{Origin:'https://evil.test'}})).status,403);
+  const bad=await postForm(route,{kind:'viewing',due_at:'2026-11-02T16:30'},{cookie:owner.cookie});assert.equal(bad.status,403);
+  const saved=await postJson(route,{kind:'viewing',due_at:'2026-11-02T16:30'},{cookie:owner.cookie,headers:{'X-Bona-Dash':'1'}});assert.equal(saved.status,200);const task=(await saved.json()).task;
+  assert.equal(db.db.prepare("SELECT COUNT(*) n FROM audit_log WHERE action='lead_task'").get().n,1);
+  assert.equal(task.status,'requested');assert.equal(task.due_ts,Date.parse('2026-11-02T13:30:00Z'));
+  assert.equal((await postJson(route,{task_id:task.task_id,status:'confirmed'},{cookie:owner.cookie,headers:{'X-Bona-Dash':'1'}})).status,200);
+  assert.equal((await postJson(route,{task_id:task.task_id,status:'bad'},{cookie:owner.cookie,headers:{'X-Bona-Dash':'1'}})).status,400);
+  const team=createTeam(db);team.addUser({name:'Test Staff',phone:'0500000009',role:'staff'});const staff=await login({phone:'0500000009'});
+  assert.equal((await postJson(route,{kind:'followup',due_at:'2026-11-02T16:30'},{cookie:staff.cookie,headers:{'X-Bona-Dash':'1'}})).status,403);
+  const page=await(await get('/dashboard/leads/'+id,{cookie:staff.cookie})).text();assert.ok(!page.includes('Save task; do not send a message'));
+  assert.equal(sent.length,sends+1,'only the staff login code; no task notification');
+ });
+});
+
+
+
+test('task dates reject calendar rollover and queue pages show total and next link',async()=>{
+ await withDash({},async({db,login,postJson,get})=>{
+  const id=seedLead(db,{phone:'966500000089',inboxState:'in'});const {cookie}=await login();
+  const r=await postJson('/v1/admin/leads/'+id+'/task',{kind:'viewing',due_at:'2026-02-30T16:30'},{cookie,headers:{'X-Bona-Dash':'1'}});assert.equal(r.status,400);assert.equal(db.db.prepare('SELECT COUNT(*) n FROM lead_tasks').get().n,0);
+  const {addTask}=await import('../lib/lead-tasks.mjs');for(let n=0;n<105;n++)addTask(db,{leadId:id,kind:'followup',dueTs:Date.now()+86400000+n});
+  const html=await(await get('/dashboard',{cookie})).text();assert.match(html,/105 open tasks/);assert.match(html,/tasks_page=1/);
+  assert.match(await(await get('/dashboard?tasks_page=1',{cookie})).text(),/Previous/);
+ });
 });

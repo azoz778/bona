@@ -11,6 +11,7 @@ import site from '../../data/site.json';
 import type { Locale } from '../../lib/i18n';
 import privacy from '../../data/privacy.json';
 import { absoluteUrl, alternates, defaultOgImage, ogLocale, orgJsonLd, pageTitle, websiteJsonLd, compact, personJsonLd, webPageJsonLd, pageKindFromPath } from '../../lib/seo';
+import measurementSrc from '../../scripts/measurement.js?raw';
 import attributionSrc from '../../scripts/attribution.js?raw';
 import tagsSrc from '../../scripts/tags.js?raw';
 
@@ -193,5 +194,6 @@ const csp = [
     every page, including the very first paint; each script binds once (window.__bona* guards) and re-runs its
     per-page work on astro:page-load. */}
 <script is:inline set:html={tagConfig} />
+<script is:inline set:html={measurementSrc} />
 <script is:inline set:html={attributionSrc} />
 <script is:inline set:html={tagsSrc} />

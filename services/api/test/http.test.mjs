@@ -78,8 +78,9 @@ async function withServer(overrides, fn) {
     inventory: overrides.inventory ?? inventory,
     retell,
     probeRetell: overrides.probeRetell ?? (async () => 'ok'),
-    sendWhatsApp: async (text) => { sent.push(text); return { ok: true }; },
+    sendWhatsApp: overrides.sendWhatsApp ?? (async (text) => { sent.push(text); return { ok: true }; }),
     log: overrides.log ?? (() => {}),
+    fetchImpl: overrides.fetchImpl,
   });
   await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
   const { port } = app.server.address();
@@ -921,7 +922,7 @@ test('POST /v1/enquiry lands a form lead with the visitor\'s source, queues the 
     const submit = app.db.getEvent('mf3k2a1b-form0001');
     assert.equal(submit.name, 'form_submit', 'the server records the submit under the browser\'s event id');
     assert.equal(submit.lead_id, body.lead_id);
-    assert.deepEqual(submit.props, { form: 'listing', cta: 'enquiry', _consent_ads: true });
+    assert.deepEqual(submit.props, { form: 'listing', cta: 'enquiry', _consent_ads: true, _consent_analytics: true });
     const created = app.db.recentEvents({ name: 'lead_created' })[0];
     assert.equal(created.lead_id, body.lead_id);
     // The fan-out is keyed on the BROWSER's event id, not on this server-side record: the
@@ -1052,4 +1053,107 @@ test('a page title cannot smuggle instructions into the model prompt', async () 
     assert.equal(/[[\]{}<>\n]/.test(title), false, title);
     assert.ok(title.length <= 80);
   });
+});
+
+test('enquiry retries are durable and do not duplicate notes, conversions or owner alerts', async () => {
+ await withServer({},async({call,app,sent})=>{
+  const request=enquiryBody();const post=()=>call('/v1/enquiry',{method:'POST',body:JSON.stringify(request)});
+  const first=await(await post()).json();const count=app.db.touchpointsForLead(first.lead_id).length;
+  const second=await(await post()).json();assert.equal(second.lead_id,first.lead_id);assert.equal(sent.length,1);
+  assert.equal(app.db.touchpointsForLead(first.lead_id).length,count);
+  assert.equal(app.db.db.prepare('SELECT COUNT(*) n FROM enquiry_receipts').get().n,1);
+  const changed=await call('/v1/enquiry',{method:'POST',body:JSON.stringify({...request,message:'Changed under same id'})});
+  assert.equal(changed.status,409);assert.equal(sent.length,1);
+ });
+});
+test('replay protection also covers visitors without attribution or analytics consent',async()=>{
+ await withServer({},async({call,app,sent})=>{
+  const body={name:'Local Test',phone:'0500000099',event_id:'test-receipt-noattr'};
+  const send=()=>call('/v1/enquiry',{method:'POST',body:JSON.stringify(body)});
+  const a=await(await send()).json();const b=await(await send()).json();assert.equal(a.lead_id,b.lead_id);assert.equal(sent.length,1);
+  assert.equal(app.db.countLeads(),1);
+ });
+});
+
+test('accepted forms create an owner handoff but never auto-admit a phone chat or book a viewing',async()=>{
+ await withServer({},async({call,app,sent})=>{
+  const body=await(await call('/v1/enquiry',{method:'POST',body:JSON.stringify(enquiryBody())})).json();
+  const tasks=app.db.db.prepare('SELECT kind,status FROM lead_tasks WHERE lead_id=?').all(body.lead_id);
+  assert.equal(tasks.length,1);assert.equal(tasks[0].kind,'handoff');assert.equal(tasks[0].status,'open');
+  assert.notEqual(app.db.getLead(body.lead_id).inbox_state,'in');assert.equal(sent.length,1);
+  const h=await(await call('/health')).json();assert.equal(h.leadReadiness.handoff,1);assert.equal(h.leadReadiness.automaticReminders,false);assert.equal(h.leadReadiness.telegramConfigured,false);
+ });
+});
+
+
+test('accepted repeat-contact enquiry has exactly one conversion per event ID',async()=>{
+ await withServer({},async({call,app})=>{
+  const one=enquiryBody();const two={...one,event_id:'repeat-contact-0001',message:'A new enquiry'};
+  const a=await(await call('/v1/enquiry',{method:'POST',body:JSON.stringify(one)})).json();
+  const b=await(await call('/v1/enquiry',{method:'POST',body:JSON.stringify(two)})).json();
+  assert.equal(a.lead_id,b.lead_id);const rows=app.db.db.prepare('SELECT event_id,dest FROM fanout WHERE dest=?').all('ga4');
+  assert.deepEqual(rows.map(r=>r.event_id).sort(),[one.event_id,two.event_id].sort());
+ });
+});
+
+
+
+test('ambiguous owner notification failure is visible as uncertain and retries do not resend',async()=>{
+ let calls=0;await withServer({sendWhatsApp:async()=>{calls++;return {ok:false,error:'network'};}},async({call,app})=>{
+  const body=enquiryBody();const a=await(await call('/v1/enquiry',{method:'POST',body:JSON.stringify(body)})).json();
+  assert.ok(a.lead_id);assert.equal(app.db.db.prepare('SELECT notify_status FROM enquiry_receipts').get().notify_status,'uncertain');
+  await call('/v1/enquiry',{method:'POST',body:JSON.stringify(body)});assert.equal(calls,1);
+ });
+});
+test('two independent SQLite connections acknowledge the same enquiry once; changed replay is 409',async()=>{
+ const {Worker}=await import('node:worker_threads');const dataDir=fs.mkdtempSync(path.join(os.tmpdir(),'bona-multi-'));
+ const workerSource=`const {parentPort,workerData}=require('node:worker_threads');(async()=>{const {createApp}=await import(workerData.module);let sends=0;const app=createApp({config:{port:0,host:'127.0.0.1',siteUrl:'https://bona.azoz.uk',publicApi:'https://bona-api.azoz.uk',dataDir:workerData.dataDir,inventoryFile:workerData.inventoryFile,origins:['https://bona.azoz.uk'],maxBodyBytes:16384,env:{},retellMock:true,chatRatePerMin:30,tokenRatePerMin:6,toolRatePerMin:600,toolAuthFailRatePerMin:10,maxChatsPerDay:300,maxCallsPerDay:60,maxTurnsPerSession:40,trustedProxies:[]},sendWhatsApp:async()=>{sends++;return {ok:true}},log:()=>{}});app.server.listen(0,'127.0.0.1',()=>parentPort.postMessage({port:app.server.address().port}));parentPort.on('message',m=>{if(m==='count')parentPort.postMessage({sends});});})().catch(e=>{parentPort.postMessage({error:e.message});process.exitCode=1});`;
+ const workers=[];try{
+  const start=async()=>{const w=new Worker(workerSource,{eval:true,workerData:{module:new URL('../index.mjs',import.meta.url).href,dataDir,inventoryFile:WORKTREE_LISTINGS}});workers.push(w);const m=await new Promise((resolve,reject)=>{w.once('message',resolve);w.once('error',reject)});assert.ok(m.port,JSON.stringify(m));return {w,port:m.port};};
+  const a=await start();const b=await start();const body=enquiryBody();const send=(port,q)=>fetch('http://127.0.0.1:'+port+'/v1/enquiry',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://bona.azoz.uk'},body:JSON.stringify(q)});
+  const rs=await Promise.all([send(a.port,body),send(b.port,body)]);assert.deepEqual(rs.map(r=>r.status),[200,200]);const [one,two]=await Promise.all(rs.map(r=>r.json()));assert.equal(one.lead_id,two.lead_id);
+  const conflict=await send(b.port,{...body,message:'Different payload'});assert.equal(conflict.status,409);
+  const counts=await Promise.all(workers.map(w=>new Promise(resolve=>{w.once('message',m=>resolve(m.sends));w.postMessage('count')})));assert.equal(counts.reduce((a,b)=>a+b,0),1);
+ }finally{await Promise.all(workers.map(w=>w.terminate()));fs.rmSync(dataDir,{recursive:true,force:true});}
+});
+
+
+test('ref-only enquiry carries its denied consent on fallback lead_created event',async()=>{
+ await withServer({},async({call,app})=>{
+  app.db.upsertSession({session_id:'refonly-session',anon_id:'a'.repeat(32),ref:'K7Q2XR',started:1,last_seen:1,consent_analytics:1,consent_ads:1});
+  const req={name:'QA Ref Only',phone:'0500000044',event_id:'ref-only-denied-01',attr:{ref:'K7Q2XR'},consent:{analytics:false,ads:false}};
+  const r=await call('/v1/enquiry',{method:'POST',body:JSON.stringify(req)});assert.equal(r.status,200);
+  const event=app.db.recentEvents({name:'lead_created'})[0];assert.equal(event.props._consent_analytics,false);assert.equal(event.props._consent_ads,false);
+ });
+});
+test('owner notification quotes corrected buyer needs, not stale merged lead fields',async()=>{
+ await withServer({},async({call,sent})=>{
+  const one={...enquiryBody(),budget:'4 million'};const two={...one,event_id:'updated-budget-0001',budget:'6 million'};
+  await call('/v1/enquiry',{method:'POST',body:JSON.stringify(one)});await call('/v1/enquiry',{method:'POST',body:JSON.stringify(two)});
+  assert.match(sent.at(-1),/6 million/);assert.doesNotMatch(sent.at(-1),/4 million/);
+ });
+});
+
+test('application enquiry wiring sends one mocked private Telegram alert after durable capture and never on replay',async()=>{
+ const {SECRETARY_CHAT_ID,HERMES_BOT_ID}=await import('../lib/telegram-handoff.mjs');let n=0;
+ await withServer({config:{env:{BONA_TELEGRAM_HANDOFFS:'1',BONA_TELEGRAM_CHAT_ID:SECRETARY_CHAT_ID,BONA_TELEGRAM_BOT_TOKEN:HERMES_BOT_ID+':'+'synthetic_test_only_'.repeat(3)}},fetchImpl:async(url,init)=>{
+  n++;assert.match(url,/^https:\/\/api.telegram.org\/bot/);assert.equal(JSON.parse(init.body).chat_id,SECRETARY_CHAT_ID);
+  return new Response(JSON.stringify({ok:true,result:{message_id:456,chat:{id:SECRETARY_CHAT_ID,type:'private'},from:{id:HERMES_BOT_ID}}}));
+ }},async({call,app,sent})=>{
+  const body={...enquiryBody(),budget:'6 million'};
+  const first=await call('/v1/enquiry',{method:'POST',body:JSON.stringify(body)});assert.equal(first.status,200);const one=await first.json();
+  const replay=await call('/v1/enquiry',{method:'POST',body:JSON.stringify(body)});assert.deepEqual(await replay.json(),one);assert.equal(n,1);assert.equal(sent.length,1);
+  assert.equal(app.db.db.prepare('SELECT telegram_status FROM lead_tasks WHERE lead_id=?').get(one.lead_id).telegram_status,'sent');
+ });
+});
+
+test('slow owner providers cannot consume the form acknowledgement deadline; replay does not send again',async()=>{
+ const {SECRETARY_CHAT_ID,HERMES_BOT_ID}=await import('../lib/telegram-handoff.mjs');let telegram=0,whatsapp=0;
+ await withServer({config:{env:{BONA_TELEGRAM_HANDOFFS:'1',BONA_TELEGRAM_CHAT_ID:SECRETARY_CHAT_ID,BONA_TELEGRAM_BOT_TOKEN:HERMES_BOT_ID+':'+'synthetic_test_only_'.repeat(3)}},sendWhatsApp:()=>{whatsapp++;return new Promise(()=>{});},fetchImpl:async(_,init)=>{telegram++;return new Promise((_,reject)=>init.signal.addEventListener('abort',()=>reject(Error('mock timeout'))));}},async({call,app})=>{
+  const body=enquiryBody();const started=Date.now();
+  const res=await call('/v1/enquiry',{method:'POST',body:JSON.stringify(body),signal:AbortSignal.timeout(7800)});
+  assert.equal(res.status,200);const result=await res.json();assert.ok(Date.now()-started<7800);assert.ok(app.db.getLead(result.lead_id));
+  assert.equal(app.db.db.prepare('SELECT telegram_status FROM lead_tasks WHERE lead_id=?').get(result.lead_id).telegram_status,'uncertain');
+  const replay=await call('/v1/enquiry',{method:'POST',body:JSON.stringify(body)});assert.deepEqual(await replay.json(),result);assert.equal(telegram,1);assert.equal(whatsapp,1);
+ });
 });
