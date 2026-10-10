@@ -26,7 +26,7 @@ import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { randomId } from './store.mjs';
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export const STAGES = ['new', 'contacted', 'qualified', 'viewing', 'offer', 'negotiation', 'won', 'lost'];
 export const FANOUT_DESTS = ['meta', 'ga4', 'snap', 'tiktok'];
@@ -317,6 +317,28 @@ const MIGRATIONS = [
       ALTER TABLE wa_outbox ADD COLUMN covers_ts INTEGER;
     `,
   },
+  {
+    version: 7,
+    sql: `
+      CREATE TABLE enquiry_receipts (
+        event_id TEXT PRIMARY KEY, payload_hash TEXT NOT NULL,
+        lead_id TEXT NOT NULL REFERENCES leads(lead_id) ON DELETE CASCADE,
+        created INTEGER NOT NULL,
+        notify_status TEXT NOT NULL DEFAULT 'pending'
+      );
+      CREATE TABLE lead_tasks (
+        task_id TEXT PRIMARY KEY, lead_id TEXT NOT NULL REFERENCES leads(lead_id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK(kind IN ('handoff','followup','viewing')),
+        source TEXT NOT NULL, reason TEXT, details TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL CHECK(status IN ('open','requested','confirmed','done','cancelled')),
+        due_ts INTEGER, created INTEGER NOT NULL, updated INTEGER NOT NULL,
+        done_by TEXT, telegram_status TEXT NOT NULL DEFAULT 'disabled'
+      );
+      CREATE UNIQUE INDEX lead_tasks_open_handoff ON lead_tasks(lead_id)
+        WHERE kind='handoff' AND status='open';
+      CREATE INDEX lead_tasks_queue ON lead_tasks(status,due_ts,created);
+    `,
+  },
 ];
 
 /** Columns of each table, in order — the single source for the insert/update helpers. */
@@ -399,10 +421,10 @@ export function openDb(file = ':memory:') {
 
   let txDepth = 0;
   /** Run `fn` inside a transaction. Re-entrant: an inner call joins the outer one. */
-  function transaction(fn) {
+  function transaction(fn, { immediate = false } = {}) {
     if (txDepth > 0) return fn();
+    db.exec(immediate ? 'BEGIN IMMEDIATE' : 'BEGIN');
     txDepth += 1;
-    db.exec('BEGIN');
     try {
       const out = fn();
       db.exec('COMMIT');

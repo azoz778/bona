@@ -30,6 +30,8 @@
  * Phone numbers are masked everywhere a list is rendered and whole only on the one
  * page (and the one JSON route) that exists to show a single person's record.
  */
+import { enquiryNotifications } from '../enquiry-receipt.mjs';
+import { tasksForLead, openTasks, countOpenTasks, addTask, updateTask } from '../lead-tasks.mjs';
 import { STAGES, tokenHash } from '../db.mjs';
 import { createLimiter } from '../ratelimit.mjs';
 import { enqueueStage } from '../fanout.mjs';
@@ -569,9 +571,12 @@ export function createDashboardRoutes({
         return fallback;
       }
     };
+    const tasksPage = Math.max(0,Math.min(100000,Math.floor(Number(url.searchParams.get('tasks_page')))||0));
     const staffWaiting = ownerSees(me) ? null : safe('waiting', () => staffRows((o) => db.waitingLeads(o)), null);
     return sendHtml(res, 200, overviewPage({
       days,
+      tasks: ownerSees(me) ? safe('tasks', () => openTasks(db,{offset:tasksPage*100}), []) : [],
+      tasksPage, tasksTotal: ownerSees(me) ? safe('tasksTotal', () => countOpenTasks(db), 0) : 0,
       daily: safe('daily', () => statistics.overviewDaily(days), []),
       sources: safe('sources', () => statistics.sources(), []),
       matchQuality: safe('matchQuality', () => statistics.matchQuality(), []),
@@ -616,7 +621,9 @@ export function createDashboardRoutes({
     return sendHtml(res, 200, leadDetailPage({
       lead,
       journey: statistics.leadJourney(leadId),
-      saved: saved === 'stage' || saved === 'note' ? saved : null,
+      tasks: tasksForLead(db, leadId),
+      notifications: enquiryNotifications(db, leadId),
+      saved: saved === 'stage' || saved === 'note' || saved === 'task' ? saved : null,
       error: knownError(error),
       now: now(),
       me,
@@ -755,6 +762,24 @@ export function createDashboardRoutes({
     });
   }
 
+  function saveTask({res,fields,form,me},leadId) {
+    const back=`/dashboard/leads/${encodeURIComponent(leadId)}`;
+    if(me.role!=='owner'||!leadFor(me,leadId))return answer(res,{form,back,status:403,payload:{error:'forbidden'}});
+    const raw=String(fields.due_at??'').trim();
+    const dueTs=raw ? (/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d$/.test(raw)&&isDay(raw.slice(0,10))?Date.parse(raw+':00+03:00'):NaN) : undefined;
+    try {
+      let task;
+      if(fields.task_id)task=updateTask(db,{leadId,taskId:String(fields.task_id),status:String(fields.status),actor:me.name,dueTs,now:now()});
+      else {
+        if(!['followup','viewing'].includes(fields.kind)||!dueTs)throw new RangeError('Choose task and date');
+        task=addTask(db,{leadId,kind:fields.kind,source:'owner',details:{note:String(fields.note??'')},dueTs,now:now()});
+      }
+      if(!task)throw new RangeError('Task not found');
+      audit?.record({userId:me.user_id,action:'lead_task',target:leadId,meta:{taskId:task.task_id,kind:task.kind,status:task.status}});
+      return answer(res,{form,back:back+'?ok=task',status:200,payload:{ok:true,task}});
+    }catch{return answer(res,{form,back:back+'?error=bad_task',status:400,payload:{error:'bad_task'}});}
+  }
+
   function addNote({ res, fields, form, me }, leadId) {
     const lead = leadFor(me, leadId);
     const back = `/dashboard/leads/${encodeURIComponent(leadId)}`;
@@ -834,6 +859,8 @@ export function createDashboardRoutes({
       journey: statistics.leadJourney(leadId),
       stage_history: db.stageHistory(leadId),
       touchpoints: db.touchpointsForLead(leadId),
+      tasks: tasksForLead(db, leadId),
+      notifications: enquiryNotifications(db, leadId),
     });
   }
 
@@ -1490,7 +1517,7 @@ export function createDashboardRoutes({
 
   const LEAD_PATH = /^\/dashboard\/leads\/([A-Za-z0-9_-]{1,64})$/;
   const INBOX_PATH = /^\/dashboard\/inbox\/([A-Za-z0-9_-]{1,64})$/;
-  const ADMIN_LEAD = /^\/v1\/admin\/leads\/([A-Za-z0-9_-]{1,64})(?:\/(stage|note))?$/;
+  const ADMIN_LEAD = /^\/v1\/admin\/leads\/([A-Za-z0-9_-]{1,64})(?:\/(stage|note|task))?$/;
   const ADMIN_TEAM = /^\/v1\/admin\/team\/([A-Za-z0-9_-]{1,64})\/(deactivate|reactivate|role)$/;
   const ADMIN_INBOX = /^\/v1\/admin\/inbox\/([A-Za-z0-9_-]{1,64})\/(reply|handler|move|out|dana)$/;
   /** Inbox writes only an owner makes (D9); reply and handler are anyone's on the team. */
@@ -1598,7 +1625,7 @@ export function createDashboardRoutes({
     const teamMatch = ADMIN_TEAM.exec(p);
     const inboxMatch = ADMIN_INBOX.exec(p);
     const candMatch = ADMIN_CANDIDATE.exec(p);
-    const ownerWrite = Boolean(teamMatch || tiktokMatch || candMatch || OWNER_WRITES.has(p) || (inboxMatch && OWNER_INBOX_WRITES.has(inboxMatch[2])));
+    const ownerWrite = Boolean((leadMatch && leadMatch[2] === 'task') || teamMatch || tiktokMatch || candMatch || OWNER_WRITES.has(p) || (inboxMatch && OWNER_INBOX_WRITES.has(inboxMatch[2])));
     const writes = (leadMatch && leadMatch[2]) || (p === '/v1/admin/spend' ? 'spend' : null)
       || ((inboxMatch || candMatch || p === '/v1/admin/inbox/add') ? 'inbox' : null) || (PUSH_WRITES.has(p) ? 'push' : null)
       || (ownerWrite ? 'team' : null);
@@ -1645,6 +1672,7 @@ export function createDashboardRoutes({
       if (what === 'move') return inboxMove(ctx, leadId);
       return inboxOut(ctx, leadId);
     }
+    if (writes === 'task') return saveTask(ctx, leadMatch[1]);
     if (writes === 'stage') return setStage(ctx, leadMatch[1]);
     if (writes === 'note') return addNote(ctx, leadMatch[1]);
     if (writes === 'spend') return saveSpend(ctx);

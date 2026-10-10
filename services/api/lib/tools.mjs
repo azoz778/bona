@@ -15,6 +15,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { createOrMergeLead, leadNote } from './leads.mjs';
 import { normaliseSearchArgs } from './actions.mjs';
 import { toAsciiDigits } from './inventory.mjs';
+import { ensureHandoff } from './lead-tasks.mjs';
 
 export const TOOL_NAMES = ['search_properties', 'show_property', 'search_units', 'create_lead', 'request_human'];
 /** The WhatsApp agent's hand-over tool (Phase 4): its invocation in a completion is what lib/dana-wa.mjs looks for. */
@@ -105,7 +106,7 @@ export function toolArgs(body = {}) {
  */
 export function createToolHandlers({
   inventory, units = null, store, db, dataDir, siteUrl, env = {}, sendWhatsApp, log = () => {},
-  now = () => Date.now(), leadDedupeMs = LEAD_DEDUPE_MS,
+  now = () => Date.now(), leadDedupeMs = LEAD_DEDUPE_MS, notifyHandoff = async () => {},
 }) {
   if (!db) throw new TypeError('createToolHandlers needs the store (db)');
   /** leadKey → { at, id }. Bounded by the dedupe window, pruned on every save. */
@@ -226,7 +227,10 @@ export function createToolHandlers({
     const key = leadKey({ conversationId: ctx.conversationId, phone: lead.phone, name: lead.name });
     for (const [k, v] of recentLeads) if (t - v.at > leadDedupeMs) recentLeads.delete(k);
     const seen = recentLeads.get(key);
+    const handoff = id => ensureHandoff(db, {leadId:id,source:ctx.channel === 'chat' ? 'concierge_chat' : 'concierge_voice',reason:args.no_match === true ? 'External sourcing needed' : 'Concierge enquiry',details:{budget:args.budget,area:lead.district,property_type:args.property_type,timeframe:args.timeline,financing:args.financing,no_match:args.no_match,viewing_requested:args.viewing_requested},now:t});
     if (seen) {
+      handoff(seen.id);
+      await notifyHandoff(seen.id);
       log({ evt: 'lead.duplicate', id: seen.id, conversationId: ctx.conversationId ?? null });
       return {
         saved: true, id: seen.id, duplicate: true,
@@ -237,10 +241,14 @@ export function createToolHandlers({
     // The visitor's session came through Retell's metadata (set by /v1/chat/session
     // and /v1/call/token), so a concierge lead inherits the campaign that brought them.
     const attr = ctx.attr ?? {};
-    const { lead: record, created } = createOrMergeLead(db, lead, {
+    const { lead: record, created } = db.transaction(() => {
+    const saved = createOrMergeLead(db, lead, {
       channel: ctx.channel === 'chat' ? 'concierge_chat' : 'concierge_voice', matchMethod: 'concierge',
       sessionId: attr.session_id ?? null, anonId: attr.anon_id ?? null, ref: attr.ref ?? null,
       now: t, dataDir, raw: { conversationId: ctx.conversationId ?? null, page: ctx.page ?? null },
+    });
+    handoff(saved.lead.lead_id);
+    return {...saved,lead:db.getLead(saved.lead.lead_id)};
     });
     recentLeads.set(key, { at: t, id: record.lead_id });
     store.markLead(ctx.conversationId);
@@ -253,6 +261,7 @@ export function createToolHandlers({
         log({ evt: 'lead.wa_error', id: record.lead_id, error: String(err?.message ?? err) });
       }
     }
+    await notifyHandoff(record.lead_id);
     return { saved: true, id: record.lead_id, note: 'Enquiry saved. Tell the visitor a Bona principal will be in touch, and offer WhatsApp +966 59 329 6933 to speak now.' };
   }
 
