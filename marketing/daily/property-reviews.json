@@ -639,6 +639,82 @@
       }
     ]
   },
+  "BONA-W009": {
+    "status": "approved",
+    "reviewedAt": "2026-10-18T23:03:34.996Z",
+    "reviewer": "Owner approval 2026-10-19 in chat after Claude visual review of the contact sheet: frames 1 (exterior), 3 (living), 4 (kitchen), 5 (master suite), 9 (courtyard pool) are clean developer renders with no brochure text or logos; frame 2 excluded for its 'Redefining Living' text overlay. Off-plan, renders disclosed in the caption.",
+    "factsSha256": "13e03d000449bce5c9c3e22582be0e98e5980c2993a7f6620f0ea971e9aa9d44",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "6fd044589ccd75738e5ceb1822a1d03cd79cf5c1dbc9e88ef06aa084e363bafd",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "مواعيد التسليم والمواصفات حسب المطوّر.",
+      "en": "Delivery dates and specifications are per the developer."
+    },
+    "photos": [
+      {
+        "url": "https://bona-real-estate.com/listings/elvira-murjan-townhouses-in-al-murjan/01.jpg",
+        "sha256": "8c7a528b4f7f4b2cbf96809d2ad1394c1f11b9bfb1d1fa9720673ee4a3ecb845",
+        "width": 1920,
+        "height": 1080,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Exterior — Elvira Murjan Townhouses in Al-Murjan",
+          "ar": "الواجهة الخارجية — منازل إلفيرا مرجان في حي المرجان"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/elvira-murjan-townhouses-in-al-murjan/03.jpg",
+        "sha256": "d3d100ae1bb5c040a74c58e3e7695ffe7dbc34ee8ae50c7dd907973ba57bc25d",
+        "width": 1920,
+        "height": 1080,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Living room — Elvira Murjan Townhouses in Al-Murjan",
+          "ar": "غرفة المعيشة — منازل إلفيرا مرجان في حي المرجان"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/elvira-murjan-townhouses-in-al-murjan/04.jpg",
+        "sha256": "14d0735acdbdb688b0f041c22e2677d2c74b21133343144835f70ca3e849d74a",
+        "width": 1920,
+        "height": 1080,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Kitchen — Elvira Murjan Townhouses in Al-Murjan",
+          "ar": "المطبخ — منازل إلفيرا مرجان في حي المرجان"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/elvira-murjan-townhouses-in-al-murjan/05.jpg",
+        "sha256": "7d490534aaeb46c1f8b332052250af0110d5485971511243c37b1291dd191663",
+        "width": 1920,
+        "height": 1080,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Master suite — Elvira Murjan Townhouses in Al-Murjan",
+          "ar": "الجناح الرئيسي — منازل إلفيرا مرجان في حي المرجان"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/elvira-murjan-townhouses-in-al-murjan/09.jpg",
+        "sha256": "26c99a643fe6a1ce4178af22e716d7bb4a966ef9722eaa37cc4dc1bd1ee7566b",
+        "width": 1920,
+        "height": 1080,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Swimming pool — Elvira Murjan Townhouses in Al-Murjan",
+          "ar": "المسبح — منازل إلفيرا مرجان في حي المرجان"
+        }
+      }
+    ]
+  },
   "BONA-W014": {
     "status": "approved",
     "reviewedAt": "2026-10-06T03:12:05.702Z",
