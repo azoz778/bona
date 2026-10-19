@@ -263,8 +263,8 @@ export const ui = {
   housesPageIntro: s('Villas, mansions, duplexes and private houses represented by Bona: for sale, for rent and off-plan.', 'فلل وقصور ودوبلكس ومنازل خاصة تمثّلها بونا: للبيع وللإيجار وعلى الخارطة.'),
   apartmentsPageTitle: s('Apartments', 'الشقق'),
   apartmentsPageIntro: s('Apartments, penthouses and units in branded developments, in Jeddah, Riyadh and abroad.', 'شقق وبنتهاوس ووحدات في مشاريع بعلامات عالمية، في جدة والرياض وخارج المملكة.'),
-  landPageTitle: s('Land', 'الأراضي'),
-  landPageIntro: s('Plots for private houses and development projects, with aerial views and location maps.', 'قطع أراضٍ للمنازل الخاصة ومشاريع التطوير، مع صور جوية وخرائط للموقع.'),
+  landPageTitle: s('Land & Plots for Sale in Jeddah', 'أراضٍ وقطع للبيع في جدة'),
+  landPageIntro: s('Plots for private houses and development projects in Jeddah, with aerial views and location maps.', 'قطع أراضٍ للمنازل الخاصة ومشاريع التطوير في جدة، مع صور جوية وخرائط للموقع.'),
   landOffMarketTitle: s('Beyond what is listed', 'أراضٍ خارج السوق'),
   landOffMarketText: s(
     'Bona also holds a further selection of larger land, kept off-market out of respect for its owners. Write to us and a principal will share what is available, in confidence.',
