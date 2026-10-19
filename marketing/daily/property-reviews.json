@@ -715,6 +715,82 @@
       }
     ]
   },
+  "BONA-W012": {
+    "status": "approved",
+    "reviewedAt": "2026-10-19T02:33:35.441Z",
+    "reviewer": "Owner approval 2026-10-19 in chat ('approve everything') after Claude visual review of the contact sheet: frames 1 (exterior), 3 (living), 4 (dining), 5 (reception), 9 (indoor pool) are developer renders with only a thin dark brochure border and no text; frames 2, 7, 8 excluded for their Arabic brochure headline banners. Off-plan, renders disclosed in the caption.",
+    "factsSha256": "74d8f8c217935810ec3be8ac798e88ede5ddd01ec3e048b88680cebb609e4a9a",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "aed17a9625871872709ae0d23bc47f850f75b40baf607a8740225afa3b592f86",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "مواعيد التسليم والمواصفات حسب المطوّر.",
+      "en": "Delivery dates and specifications are per the developer."
+    },
+    "photos": [
+      {
+        "url": "https://bona-real-estate.com/listings/modern-villa-in-al-shati-jeddah/01.jpg",
+        "sha256": "ea60a530fb760168ca9fd6f188e22ac38c5d39f39067f2a92eead16412dc9821",
+        "width": 1600,
+        "height": 1521,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Exterior — Modern Villa in Al Shati, Jeddah",
+          "ar": "الواجهة الخارجية — فيلا عصرية في حي الشاطئ، جدة"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/modern-villa-in-al-shati-jeddah/03.jpg",
+        "sha256": "3ba71d8ae3fb82788f5c6eed9fd39b4ce54fe5eb2f965ba16e040c13505e1c4a",
+        "width": 1600,
+        "height": 1556,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Living room — Modern Villa in Al Shati, Jeddah",
+          "ar": "غرفة المعيشة — فيلا عصرية في حي الشاطئ، جدة"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/modern-villa-in-al-shati-jeddah/04.jpg",
+        "sha256": "e7230386c88a385d4e68bd4b21487beb353d0171386df175bb3c459ec7e2b6b6",
+        "width": 1600,
+        "height": 1556,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Dining room — Modern Villa in Al Shati, Jeddah",
+          "ar": "غرفة الطعام — فيلا عصرية في حي الشاطئ، جدة"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/modern-villa-in-al-shati-jeddah/05.jpg",
+        "sha256": "45a206ef81ac907a00482dd704430791ac126a08795297111d9dd9900158a8c8",
+        "width": 1600,
+        "height": 1556,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Reception salon — Modern Villa in Al Shati, Jeddah",
+          "ar": "المجلس — فيلا عصرية في حي الشاطئ، جدة"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/modern-villa-in-al-shati-jeddah/09.jpg",
+        "sha256": "67c9fcac7e0c18c8d57902c00473f6ad8e4f16502bce09ec4b74887eda355e28",
+        "width": 1600,
+        "height": 1556,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Pool — Modern Villa in Al Shati, Jeddah",
+          "ar": "المسبح — فيلا عصرية في حي الشاطئ، جدة"
+        }
+      }
+    ]
+  },
   "BONA-W014": {
     "status": "approved",
     "reviewedAt": "2026-10-06T03:12:05.702Z",
