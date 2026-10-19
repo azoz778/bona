@@ -23,7 +23,12 @@ const pool = ordered(listings).filter(l => l.images?.length);
 const aboutImg = editorialImage(1, 2);
 const aboutImgListing = pool[1 % Math.max(1, pool.length)];
 const wa = waLink(site.whatsapp.wa, t(ui.formGreeting, locale));
-const title = `${locale === 'ar' ? site.nameAr : site.name} — ${t(site.tagline, locale)}`;
+// Search title, not the hero. "bona" was still around position 43 in Search Console
+// (14 Sep–17 Oct 2026) while the tagline title never said the legal name or the city.
+// The H1 stays the tagline. English uses legalName. Arabic uses nameAr: there is
+// no Arabic legal name on file, so this does not invent one.
+const city = site.address[locale].city;
+const title = locale === 'ar' ? `${site.nameAr} — ${city}` : `${site.legalName} — ${city}`;
 const words = t(site.tagline, locale).split(/\s+/).filter(Boolean);
 const strips = ([{ kind: 'land', items: land }, { kind: 'building', items: buildings }] as { kind: Kind; items: typeof land }[]).filter(s => s.items.length > 0);
 ---
