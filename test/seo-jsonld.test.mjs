@@ -198,6 +198,39 @@ test('one BreadcrumbList per page, and the JSON-LD on every indexable page parse
 
 // ---- homepage snippet --------------------------------------------------------------------------------
 
+test('the homepage title names Bona Real Estate and Jeddah once; the hero keeps the tagline', () => {
+  const en = page('/');
+  const ar = page('/ar/');
+  assert.equal(en.title, 'Bona Real Estate — Jeddah');
+  assert.equal(ar.title, 'بونا — جدة');
+  // The hero puts each tagline word in its own span. Join those spans, so the
+  // check is the tagline itself and not the missing space characters between them.
+  const heroWords = (html) => {
+    const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/)?.[1] ?? '';
+    return [...h1.matchAll(/<span[^>]*>([\s\S]*?)<\/span>/g)].map((m) => text(m[1])).join(' ');
+  };
+  assert.equal(heroWords(en.html), 'Exceptional homes, quietly.');
+  assert.equal(heroWords(ar.html), 'منازل استثنائية، بهدوء.');
+  assert.match(en.html, /property="og:title" content="Bona Real Estate — Jeddah"/);
+  assert.match(ar.html, /property="og:title" content="بونا — جدة"/);
+});
+
+test('the land index names Jeddah in the title, H1 and description', () => {
+  const en = page('/properties/land/');
+  const ar = page('/ar/properties/land/');
+  assert.equal(en.title, 'Land & Plots for Sale in Jeddah — Bona');
+  assert.equal(en.h1, 'Land & Plots for Sale in Jeddah');
+  assert.match(en.description, /in Jeddah/);
+  assert.match(en.description, /aerial views and location maps/);
+  assert.equal(ar.title, 'أراضٍ وقطع للبيع في جدة — بونا');
+  assert.equal(ar.h1, 'أراضٍ وقطع للبيع في جدة');
+  assert.match(ar.description, /في جدة/);
+  const llms = readFileSync(path.join(dist, 'llms.txt'), 'utf8');
+  const line = llms.split('\n').find((l) => l.includes(`](${SITE}/properties/land/)`));
+  assert.ok(line, 'llms.txt has no entry for /properties/land/');
+  assert.equal(line.match(/^- \[([^\]]+)\]\(/)?.[1], en.h1);
+});
+
 test('the homepage meta description fits a conventional snippet and keeps the positioning', () => {
   const en = page('/');
   const ar = page('/ar/');
