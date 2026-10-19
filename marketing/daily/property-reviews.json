@@ -918,5 +918,57 @@
         }
       }
     ]
+  },
+  "BONA-W018": {
+    "status": "approved",
+    "reviewedAt": "2026-10-19T02:50:59.826Z",
+    "reviewer": "Owner 2026-10-19 in chat confirmed the project name is Elemental (the render's entrance sign reads 'Elemental LUXURY LIFE' with the Sadana logo) and approved posting. Claude visual review: frames 2 (facade at night), 5 (courtyard), 6 (gym) are clean developer renders; frames 1 and 3 dropped only because their aspect (1.60/1.56) differs >15% from the 1.25-1.30 set.",
+    "factsSha256": "799e8f7018d828c3d646580c373d55fa52b415f9814a4a76e0331be70980a02b",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "3216f9bdff28151af5d61b0bc799ece83fbff38603db39813007616038a52f86",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. مواعيد التسليم والمواصفات حسب المطوّر.",
+      "en": "Prices shown are asking prices and may change. Delivery dates and specifications are per the developer."
+    },
+    "photos": [
+      {
+        "url": "https://bona-real-estate.com/listings/elemental-residences-al-rawabi/02.jpg",
+        "sha256": "b84d7f41c376aecf20961c61828fb6f11dc9e3d89368086f7f4d728dfc0c03ec",
+        "width": 1160,
+        "height": 894,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Façade at night — Elemental, Al Rehab",
+          "ar": "الواجهة ليلاً — إليمنتال، الرحاب"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/elemental-residences-al-rawabi/05.jpg",
+        "sha256": "b437671e820882dc627a8594f076507c88de778921890b6be20519fef42d4866",
+        "width": 1160,
+        "height": 909,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Courtyard — Elemental, Al Rehab",
+          "ar": "الفناء الداخلي — إليمنتال، الرحاب"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/elemental-residences-al-rawabi/06.jpg",
+        "sha256": "d50ba4e510204f4c26e4662a359227e6f3935565ab42ccb95992bda6f9a1b777",
+        "width": 1323,
+        "height": 1058,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Gym — Elemental, Al Rehab",
+          "ar": "النادي الرياضي — إليمنتال، الرحاب"
+        }
+      }
+    ]
   }
 }
