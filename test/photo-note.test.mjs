@@ -41,15 +41,10 @@ const meta = (html, prop) => decode(html.match(new RegExp(`<meta (?:property|nam
 /** Every URL a listing's photos are served under (full size and thumbnail), as they appear in the HTML. */
 const urlsOf = (l) => l.images.flatMap((im) => [im.src, im.thumb]).filter(Boolean).flatMap((u) => [u, u.startsWith('/') ? SITE + u : u]);
 
-// While Dari II is in listings.json it must carry its note. It leaves listings.json when withheld or when the
-// curated build drops it (TK no longer lists it); then this is skipped. The deploy's TK sync instead keeps a
-// sold listing with status "sold", and the checks below allow for what a sold listing loses (most cards and its
-// llms-full.txt section), so a routine sale or delisting never fails the deploy and stalls the daily refresh.
-const dari = listings.find((l) => l.id === 'BONA-026');
-test('Dari II (BONA-026) carries a photo note while it is listed', { skip: !dari && 'BONA-026 is not listed' }, () => {
-  assert.ok(dari.photoNote, 'BONA-026 photoNote');
-});
-
+// Dari II (BONA-026) carried a note until the owner confirmed on 2026-10-19 that its photographs are Dari II
+// itself. The deploy's TK sync keeps a sold listing with status "sold", and the checks below allow for what a
+// sold listing loses (most cards and its llms-full.txt section), so a routine sale or delisting never fails the
+// deploy and stalls the daily refresh.
 for (const l of noted) {
   const urls = urlsOf(l);
   for (const locale of ['en', 'ar']) {
