@@ -2,8 +2,8 @@
   "_note": "Per-page <title>/<meta description> copy for the site agent. Titles ≤60 chars (brand suffix ' | Bona' / ' | بونا' is appended automatically by Head.astro unless the title already contains the brand). Descriptions ≤155 chars. Arabic keys are for the /ar/ mirror of the same path. Listing pages: use the '/properties/[slug]/' template. Round 2: /properties/houses/, /properties/apartments/, /properties/land/ (kind sections), /tours/ (Matterport), /privacy/ (PDPL policy, content in src/data/privacy.json).",
   "/": {
     "title": {
-      "en": "Bona — Private Luxury Real Estate in Jeddah",
-      "ar": "بونا — عقارات فاخرة خاصة في جدة"
+      "en": "Bona Real Estate — Jeddah",
+      "ar": "بونا — جدة"
     },
     "description": {
       "en": "Curated villas, penthouses and waterfront homes in Jeddah, Riyadh and abroad. A REGA-licensed boutique brokerage — homes shown by appointment. WhatsApp +966 59 329 6933.",
