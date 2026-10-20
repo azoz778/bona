@@ -741,6 +741,79 @@
       }
     ]
   },
+  "BONA-044": {
+    "status": "approved",
+    "reviewedAt": "2026-10-20T23:50:28.057Z",
+    "reviewer": "Owner 2026-10-21 approved 4:5 padding for mixed-aspect listings. Claude visual review: frames 3 (villa facade with two parked cars at dusk), 1 (row of villas along the landscaped cycle path), 2 (roof terrace at sunset) are clean developer renders of an off-plan project, no people, no text banners or other logos; padded because their aspects (1.16, 1.60, 1.77) differ by more than 15%.",
+    "factsSha256": "8991c9c8006fb672293e7dfebe97591676670650eb391deac2ee755ca37425b1",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "d066534ed7eedceb4c0b6dcb82b515571f7f14383de67546d925b74d5c4a4f24",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. مواعيد التسليم والمواصفات حسب المطوّر.",
+      "en": "Prices shown are asking prices and may change. Delivery dates and specifications are per the developer."
+    },
+    "photos": [
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/neptune-interiors-by-mouawad/1-b42395.jpg",
+        "sha256": "0f2be83a51a6c65d33d52b69d1067d7ada53100c31763920af93cd28837e53ff",
+        "width": 1920,
+        "height": 1659,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Artist's impression — Neptune, Interiors by Mouawad, SEDRA",
+          "ar": "تصور معماري — نبتون من معوّض للتصميمات الداخلية، سدرة"
+        },
+        "fit": "pad-4x5",
+        "media": {
+          "url": "https://bona-real-estate.com/social/property/BONA-044/pad-0f2be83a-9d15a9fe5970.jpg",
+          "sha256": "9d15a9fe59707ee062b2760da658e65833dfb34ce4d817461830e1ee18c6bd62",
+          "width": 1080,
+          "height": 1350
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/neptune-interiors-by-mouawad/6-ea4d23.jpg",
+        "sha256": "21c5a056636aa12a1ef90723a8468c15b2e7544c88df3bcea82467f72296cea4",
+        "width": 1920,
+        "height": 1200,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Exterior — Neptune, Interiors by Mouawad, SEDRA",
+          "ar": "الواجهة الخارجية — نبتون من معوّض للتصميمات الداخلية، سدرة"
+        },
+        "fit": "pad-4x5",
+        "media": {
+          "url": "https://bona-real-estate.com/social/property/BONA-044/pad-21c5a056-4a89ff20d9be.jpg",
+          "sha256": "4a89ff20d9be32250bb38b3d177394a6d35471c6522c233ee86b5a30c3d3ff3e",
+          "width": 1080,
+          "height": 1350
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/neptune-interiors-by-mouawad/8-ddced5.jpg",
+        "sha256": "8798f27bc5e2876e4c4807f962bd2370fbe8aae535b012705c4c7d5ea5743d7d",
+        "width": 1920,
+        "height": 1083,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Roof terrace — Neptune, Interiors by Mouawad, SEDRA",
+          "ar": "التراس العلوي — نبتون من معوّض للتصميمات الداخلية، سدرة"
+        },
+        "fit": "pad-4x5",
+        "media": {
+          "url": "https://bona-real-estate.com/social/property/BONA-044/pad-8798f27b-cae37c275930.jpg",
+          "sha256": "cae37c275930fb0167718184080d89d2546b996ef2c28375adbf22f5b442aa19",
+          "width": 1080,
+          "height": 1350
+        }
+      }
+    ]
+  },
   "BONA-W002": {
     "status": "approved",
     "reviewedAt": "2026-10-06T03:12:05.702Z",
