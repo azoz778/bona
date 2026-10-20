@@ -129,7 +129,7 @@ export async function connect(target, { WebSocketImpl = globalThis.WebSocket, co
       return p;
     },
     /** Focus the element, then type as the keyboard would (Input.insertText fires beforeinput/input, which rich editors need). */
-    async typeInto(expr, value, { clear = true } = {}) {
+    async typeInto(expr, value, { clear = true, lineDelayMs = 0 } = {}) {
       const ok = await ev(`(() => { const e = (${expr}); if (!e) return false; e.scrollIntoView({block:'center'}); e.focus(); return true; })()`);
       if (!ok) return false;
       await s.clickEl(expr);
@@ -143,6 +143,7 @@ export async function connect(target, { WebSocketImpl = globalThis.WebSocket, co
       const lines = String(value).split('\n');
       for (const [i, line] of lines.entries()) {
         if (line) await send('Input.insertText', { text: line });
+        if (lineDelayMs) await sleep(lineDelayMs);
         if (i < lines.length - 1) {
           await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, modifiers: 8 /* shift: soft break, no submit */ });
           await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, modifiers: 8 });
