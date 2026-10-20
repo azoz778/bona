@@ -231,6 +231,25 @@ test('the land index names Jeddah in the title, H1 and description', () => {
   assert.equal(line.match(/^- \[([^\]]+)\]\(/)?.[1], en.h1);
 });
 
+test('the notes restate cited answers, and llms.txt says when to use the site', () => {
+  const index = page('/journal/');
+  assert.equal(index.h1, 'Notes');
+  assert.match(index.html, /\/journal\/licensed-brokerage\//);
+  const article = page('/journal/licensed-brokerage/');
+  assert.match(article.h1, /licensed brokerage/);
+  assert.match(article.html, /1100313556/);
+  assert.match(article.html, /href="\/faq\/#licence"/);
+  const ar = page('/ar/journal/non-saudi-ownership-jeddah/');
+  assert.equal(ar.dir, 'rtl');
+  assert.match(ar.h1, /النطاقات الرسمية/);
+  const llms = readFileSync(path.join(dist, 'llms.txt'), 'utf8');
+  assert.match(llms, /## When to use Bona/);
+  assert.match(llms, /Do not use this site for a valuation/);
+  const line = llms.split('\n').find((l) => l.includes(`](${SITE}/journal/licensed-brokerage/)`));
+  assert.ok(line, 'llms.txt has no entry for the licence note');
+  assert.equal(line.match(/^- \[([^\]]+)\]\(/)?.[1], article.h1);
+});
+
 test('the homepage meta description fits a conventional snippet and keeps the positioning', () => {
   const en = page('/');
   const ar = page('/ar/');
