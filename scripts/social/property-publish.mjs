@@ -74,7 +74,7 @@ export function publisherRefusal(entry,channel,{igLedger=[],now=new Date()}={}) 
   const d=decide(normaliseEntry(entry),{now:+now,graceMs:IG_GRACE_HOURS*3600000,ledger:indexLedger(igLedger)});
   return d.status==='candidate'?null:d.status?`${d.status}: ${d.detail}`:'not due, or already settled in the Instagram ledger';
 }
-async function catalogue(fetchImpl=fetch,now=new Date()) {
+export async function catalogue(fetchImpl=fetch,now=new Date()) {
   const res=await fetchImpl(`${SITE}/social-catalogue.json`,{redirect:'error',cache:'no-store',signal:AbortSignal.timeout(20000)});
   if(!res.ok || !res.headers.get('content-type')?.includes('application/json')) throw new Error('Live catalogue unavailable');
   const text=await res.text(); if(Buffer.byteLength(text)>3000000)throw new Error('Live catalogue oversized');
@@ -84,7 +84,7 @@ async function catalogue(fetchImpl=fetch,now=new Date()) {
   if(!Number.isFinite(generated)||generated>+now||+now-generated>48*3600000)throw new Error('Live catalogue is stale; daily website refresh needs attention');
   return d;
 }
-async function photos(review,dir,dry,fetchImpl=fetch) {
+export async function photos(review,dir,dry,fetchImpl=fetch) {
   const paths=[];
   for(const [i,p] of review.photos.entries()) {
     const res=await fetchImpl(p.url,{redirect:'error',headers:{'User-Agent':'BonaPropertyPublisher/1.0'},signal:AbortSignal.timeout(20000)});
