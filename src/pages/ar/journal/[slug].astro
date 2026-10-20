@@ -1,0 +1,9 @@
+---
+import JournalArticle from '../../../components/pages/JournalArticle.astro';
+import journal from '../../../data/journal.json';
+export function getStaticPaths() {
+  return journal.posts.map((post) => ({ params: { slug: post.slug }, props: { post } }));
+}
+const { post } = Astro.props;
+---
+<JournalArticle locale="ar" post={post} />

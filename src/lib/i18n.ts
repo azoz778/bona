@@ -309,6 +309,8 @@ export const ui = {
 
   // FAQ
   navFaq: s('FAQ', 'أسئلة شائعة'),
+  navJournal: s('Notes', 'ملاحظات'),
+  journalFaqLink: s('The short answer is on the questions page.', 'الإجابة المختصرة في صفحة الأسئلة.'),
   faqMetaTitle: s('Buying property in Jeddah — frequently asked questions', 'شراء عقار في جدة — الأسئلة الشائعة'),
   faqMetaDesc: s('Can non-Saudis buy in Jeddah, what RETT and brokerage fees apply, how viewings and Najiz transfers work — answered plainly by a REGA-licensed Jeddah brokerage.', 'هل يستطيع غير السعوديين الشراء في جدة، وما ضريبة التصرفات العقارية وأتعاب الوساطة، وكيف تتم المعاينة والإفراغ عبر ناجز — إجابات مباشرة من وساطة مرخّصة في جدة.'),
   faqStillAsking: s('Still deciding?', 'ما زلت تفاضل؟'),

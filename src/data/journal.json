@@ -1,0 +1,85 @@
+{
+  "updated": "2026-10-20",
+  "title": { "en": "Notes", "ar": "ملاحظات" },
+  "intro": {
+    "en": "Longer versions of answers already on the questions page. A note is not a valuation, a tax opinion, or an advertisement for a home that is not listed.",
+    "ar": "نسخ أطول من إجابات موجودة أصلاً في صفحة الأسئلة. الملاحظة ليست تقييماً، ولا رأياً ضريبياً، ولا إعلاناً عن منزل غير مدرج."
+  },
+  "posts": [
+    {
+      "slug": "licensed-brokerage",
+      "date": "2026-10-20",
+      "faqId": "licence",
+      "title": {
+        "en": "Bona is a licensed brokerage. An advert still needs its own licence.",
+        "ar": "بونا وساطة مرخّصة. والإعلان يحتاج ترخيصه الخاص."
+      },
+      "description": {
+        "en": "FAL brokerage licence 1100313556 is not the same thing as the advertising licence a Saudi property advert must carry.",
+        "ar": "رخصة فال للوساطة رقم 1100313556 ليست هي ترخيص الإعلان الذي يجب أن يحمله كل إعلان عقاري في السعودية."
+      },
+      "body": {
+        "en": [
+          "Yes. Bona holds REGA brokerage licence (FAL) number 1100313556 and is based in Al Rawdah District, Jeddah. You can verify any Saudi brokerage licence yourself on the Real Estate General Authority's register at rega.gov.sa.",
+          "Separately from the brokerage licence, every real-estate advertisement in Saudi Arabia must carry its own advertising licence number tied to the property's deed and to the broker. If you see a listing anywhere without one, that is a reason to ask questions before you go further.",
+          "The short version of this answer, with the same wording, is on the questions page."
+        ],
+        "ar": [
+          "نعم. تحمل بونا رخصة الوساطة العقارية (فال) رقم 1100313556 الصادرة عن الهيئة العامة للعقار، ومقرّها حي الروضة بجدة. ويمكنك التحقق من أي رخصة وساطة سعودية بنفسك عبر سجل الهيئة العامة للعقار على rega.gov.sa.",
+          "وبمعزل عن رخصة الوساطة، يجب أن يحمل كل إعلان عقاري في المملكة رقم ترخيص إعلاني خاصاً به مرتبطاً بصك العقار وبالوسيط. وإن رأيت إعلاناً في أي مكان بلا رقم ترخيص، فذلك سبب كافٍ للسؤال قبل المضي قدماً.",
+          "النسخة المختصرة من هذه الإجابة، بالصيغة نفسها، في صفحة الأسئلة."
+        ]
+      }
+    },
+    {
+      "slug": "non-saudi-ownership-jeddah",
+      "date": "2026-10-20",
+      "faqId": "non-saudi-ownership",
+      "title": {
+        "en": "A non-Saudi can buy in Jeddah only inside the official zones.",
+        "ar": "يستطيع غير السعودي الشراء في جدة داخل النطاقات الرسمية فقط."
+      },
+      "description": {
+        "en": "The non-Saudi ownership law has been in force since 22 January 2026. The zone map, not a broker's summary, decides a specific home.",
+        "ar": "نظام تملّك غير السعوديين للعقار نافذ منذ 22 يناير 2026. خريطة النطاقات، لا ملخص الوسيط، هي التي تحسم أمر منزل بعينه."
+      },
+      "body": {
+        "en": [
+          "Yes, within designated geographic zones. The Law of Real Estate Ownership by Non-Saudis entered into force on 22 January 2026, and Jeddah is one of the cities it covers. Ownership is permitted inside zones approved by the Council of Ministers, not everywhere in the city.",
+          "Whether one particular home qualifies depends on where its title deed sits on the official zone map, so the honest answer for any specific property is \"let us check the deed\". REGA runs the official platform for this at saudiproperties.rega.gov.sa, and the zone map is the only authority that matters — press coverage and agent summaries, including this page, are not.",
+          "Makkah and Madinah are treated differently from the rest of the Kingdom and carry their own restrictions on who may own there. Send us the listing reference on WhatsApp and we will confirm the zone status before you spend time on a viewing."
+        ],
+        "ar": [
+          "نعم، ضمن نطاقات جغرافية محددة. دخل نظام تملّك غير السعوديين للعقار حيّز التنفيذ في 22 يناير 2026، وجدة من المدن التي يشملها. والتملّك مسموح داخل النطاقات المعتمدة بقرار من مجلس الوزراء، لا في كل أنحاء المدينة.",
+          "أما إن كان منزل بعينه مؤهلاً فيتوقف على موقع صكّه من خريطة النطاقات الرسمية، ولذلك فالإجابة الصادقة عن أي عقار محدد هي: دعنا نتحقق من الصك. وتُشغّل الهيئة العامة للعقار المنصة الرسمية لذلك على saudiproperties.rega.gov.sa، وخريطة النطاقات هي المرجع الوحيد المعتبر — لا التغطيات الصحفية ولا ملخصات الوسطاء، وهذه الصفحة منها.",
+          "وتُعامَل مكة المكرمة والمدينة المنورة معاملة مختلفة عن بقية المملكة، وعليهما قيود خاصة بمن يحق له التملّك فيهما. أرسل لنا رقم العقار على واتساب وسنؤكد وضعه النظامي قبل أن تصرف وقتاً في المعاينة."
+        ]
+      }
+    },
+    {
+      "slug": "asking-prices",
+      "date": "2026-10-20",
+      "faqId": "valuations",
+      "title": {
+        "en": "A price on this site is the seller's asking price.",
+        "ar": "السعر في هذا الموقع هو السعر الذي يطلبه البائع."
+      },
+      "description": {
+        "en": "Bona does not value homes. Valuation in Saudi Arabia belongs to a TAQEEM-accredited valuer, not a brokerage.",
+        "ar": "بونا لا تقيّم المنازل. تقييم العقار في السعودية لمقيّم معتمد من تقييم، لا للوساطة."
+      },
+      "body": {
+        "en": [
+          "No, and no licensed broker should. Property valuation in Saudi Arabia is a separate regulated profession under TAQEEM, the Saudi Authority for Accredited Valuers. A brokerage is not a valuer.",
+          "What we will do is tell you what comparable homes in your district have actually been marketed and transacted at, introduce you to an accredited valuer when you need a formal valuation, and give you a candid view on where a home is likely to find its buyer. Every price shown on this site is the seller's asking price, never our estimate.",
+          "Where a listing says price on request, the owner has not written a figure. That is not a hidden number of ours."
+        ],
+        "ar": [
+          "لا، ولا ينبغي لأي وسيط مرخّص أن يفعل. فتقييم العقار في المملكة مهنة منظّمة مستقلة تحت مظلة \"تقييم\"، الهيئة السعودية للمقيّمين المعتمدين. والوساطة ليست تقييماً.",
+          "لكننا نخبرك بما سُوّقت وتداولت به فعلاً منازل مماثلة في حيّك، ونحيلك إلى مقيّم معتمد حين تحتاج تقييماً رسمياً، ونعطيك رأياً صريحاً في المدى الذي يُرجّح أن يجد فيه المنزل مشتريه. وكل سعر معروض في هذا الموقع هو السعر المطلوب من البائع، وليس تقديراً منّا.",
+          "وحين يقول الإعلان إن السعر عند الطلب، فذلك لأن المالك لم يكتب رقماً. وليس رقماً نخفيه."
+        ]
+      }
+    }
+  ]
+}

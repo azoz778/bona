@@ -18,6 +18,7 @@ const listings = read('src/data/listings.json');
 const about = read('src/data/about.json', { story: { en: [], ar: [] }, values: [], team: [], stats: [] });
 const privacy = read('src/data/privacy.json', null);
 const faq = read('src/data/faq.json', { items: [] });
+const journal = read('src/data/journal.json', { title: { en: 'Notes' }, intro: { en: '' }, posts: [] });
 const pageMeta = read('marketing/page-meta.json', {});
 
 const base = site.url.replace(/\/$/, '');
@@ -121,9 +122,18 @@ Services: buying, selling, letting, off-plan and international acquisitions, off
 Hours: ${site.hours.en} (Asia/Riyadh).
 Instagram: ${site.instagram.url}
 
+## When to use Bona
+
+Use this site when you need a REGA-licensed Jeddah brokerage (FAL ${site.licences.fal}) for a home already listed here, for an off-plan project page such as Darco Prime, Dari II, Dari Q or Trump Tower Jeddah, or for a plain answer about buying in Jeddah that names REGA, ZATCA, TAQEEM, Ejar, Najiz or Wafi. Start at ${abs('/llms.txt')} for the page list, ${abs('/faq/')} for the cited answers, and ${abs('/journal/')} for the longer notes. WhatsApp is how a specific deed or viewing is checked. Do not use this site for a valuation, a tax opinion, or a home that is not listed here.
+
 ## Pages
 
 ${corePages.map(([p, t, d]) => pageLine(p, t, d)).join('\n')}
+
+## Notes
+
+- [${journal.title.en}](${abs('/journal/')}): ${journal.intro.en}
+${(journal.posts || []).map((post) => `- [${post.title.en}](${abs('/journal/' + post.slug + '/')}): ${post.description.en}`).join('\n')}
 
 ## Properties (${live.length} live listings)
 
