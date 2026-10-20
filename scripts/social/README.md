@@ -13,6 +13,7 @@ scripts/social/
   make-story.mjs       1080x1920 story cards: new / price / sold / district / editorial
   queue.mjs            builds marketing/queue/queue.json — 30 days, 7 platforms
   publish.mjs          the unattended Instagram publisher (timer-driven; see "Publishing — Instagram")
+  browser-publish.mjs  daily TikTok + LinkedIn Page posts through the logged-in Chrome (docs/browser-publishing.md)
   lib/                 fonts, design system, listing copy, photo resolution, cards
   lib/graph.mjs        the Instagram Graph API client shared with scripts/instagram-post.mjs
   fonts/               the six brand faces as .ttf (see fonts/README.md)
