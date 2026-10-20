@@ -1,0 +1,33 @@
+[Unit]
+Description=Bona daily %i post through the logged-in browser (CDP :9222)
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+WorkingDirectory=%h/bona-publish
+Environment=TZ=Asia/Riyadh
+Environment=NODE_ENV=production
+# npm's cache must be writable under ProtectHome=read-only (ensure-deps.sh).
+Environment=npm_config_cache=%h/bona-data/.npm
+Environment=PATH=%h/.local/bin:%h/.nvm/versions/node/v24.19.0/bin:/usr/local/bin:/usr/bin:/bin
+ExecStartPre=-/usr/bin/timeout 60 /usr/bin/env bash %h/bona-publish/ops/systemd/sync-publish-tree.sh %h/bona-publish
+ExecStartPre=/usr/bin/env bash %h/bona-publish/ops/systemd/guard-main.sh %h/bona-publish
+# sharp (rendering) is the one dependency; reinstalled only when package-lock.json changes.
+ExecStartPre=/usr/bin/timeout 600 /usr/bin/env bash %h/bona-publish/ops/systemd/ensure-deps.sh %h/bona-publish
+# Kernel lock for the whole run: fd 9 holds flock(LOCK_EX|LOCK_NB) on the channel lock and is
+# inherited by node (BONA_LOCK_FD=9), which verifies it; the kernel frees it when the run ends or
+# is killed. Exit 75 = another run (live or dry) holds it.
+ExecStart=/usr/bin/env bash -c 'mkdir -p "$(dirname "$1")" && exec 9>>"$1" && /usr/bin/flock -n -E 75 9 && BONA_LOCK_FD=9 exec node scripts/social/browser-publish.mjs "$2"' bona-browser %h/bona-data/%i/.publish.lock %i
+# Render (make-reel ~2 min on a loaded box), upload, then up to ~6 min of confirmation polling.
+TimeoutStartSec=40min
+TimeoutStopSec=3min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+# The Windows Chrome reads uploads from %LOCALAPPDATA%\bona-social-upload (WSL path below).
+ReadWritePaths=%h/bona-data %h/bona-publish %h/bona/.git %h/.cache /mnt/c/Users/ASUS/AppData/Local/bona-social-upload
+# make-reel's cross-fades peak around 1.4 GB (measured, scripts/social/make-reel.mjs).
+MemoryMax=3G
+StandardOutput=journal
+StandardError=journal

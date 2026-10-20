@@ -46,11 +46,17 @@ const { values: a } = parseArgs({
     listing: { type: 'string' }, photos: { type: 'string', default: '5' },
     seconds: { type: 'string', default: '20' }, out: { type: 'string' },
     centre: { type: 'boolean', default: false }, 'keep-work': { type: 'boolean', default: false },
+    // The daily browser publisher (browser-publish.mjs) renders from the REVIEWED frames of a
+    // LIVE catalogue listing: --listing-json is that listing, --frames the approved JPEGs in
+    // review order (3-7, no re-ranking), --licence-ar/--licence-en the CTA card's licence pair.
+    'listing-json': { type: 'string' }, frames: { type: 'string' },
+    'licence-ar': { type: 'string' }, 'licence-en': { type: 'string' },
     help: { type: 'boolean', default: false },
   },
 });
-if (a.help || !a.listing) {
-  console.log('usage: make-reel.mjs --listing <ID|slug> [--photos 4..7] [--seconds 12..25] [--out file.mp4] [--centre] [--keep-work]');
+if (a.help || !(a.listing || a['listing-json'])) {
+  console.log('usage: make-reel.mjs --listing <ID|slug> [--photos 4..7] [--seconds 12..25] [--out file.mp4] [--centre] [--keep-work]\n'
+    + '       make-reel.mjs --listing-json listing.json --frames 1.jpg,2.jpg,3.jpg [--licence-ar ... --licence-en ...] --out file.mp4');
   process.exit(a.help ? 0 : 1);
 }
 
@@ -105,11 +111,17 @@ function kenBurns(move, frames, { amount = 0.16 } = {}) {
   return { z, x: axis(move.x, 'w'), y: axis(move.y, 'h') };
 }
 
-const listings = loadListings();
-const l = findListing(listings, a.listing);
+const l = a['listing-json'] ? JSON.parse(fs.readFileSync(a['listing-json'], 'utf8')) : findListing(loadListings(), a.listing);
 requireFfmpeg();
+if ((a['licence-ar'] == null) !== (a['licence-en'] == null)) { console.error('--licence-ar and --licence-en go together'); process.exit(1); }
+const licenceLines = a['licence-ar'] != null ? { ar: a['licence-ar'], en: a['licence-en'] } : null;
 
-const photos = await bestPhotos(l, nPhotos);
+let photos;
+if (a.frames) {
+  const files = a.frames.split(',').filter(Boolean);
+  if (files.length > 7 || files.some((f) => !fs.existsSync(f))) { console.error('--frames: 3-7 existing files'); process.exit(1); }
+  photos = files.map((file) => ({ file }));
+} else photos = await bestPhotos(l, nPhotos);
 if (photos.length < 3) {
   console.error(`${l.id}: only ${photos.length} usable photograph(s) — a reel needs at least 3. Skipping.`);
   process.exit(2);
@@ -141,7 +153,7 @@ try {
   fs.writeFileSync(layerFiles.mark, await markLayer(W, H, { size: 42, top: 96 }));
   fs.writeFileSync(layerFiles.hook, await hookLayer(W, H, { ar: hook.ar, en: sub.en }, { top: 330 }));
   fs.writeFileSync(layerFiles.lower, await lowerThird(W, H, l));
-  fs.writeFileSync(layerFiles.cta, await ctaCard(W, H, { l }));
+  fs.writeFileSync(layerFiles.cta, await ctaCard(W, H, { l, licenceLines }));
 
   // ---- 3. timeline -----------------------------------------------------------------
   // total = nP*d - nP*X + CTA  =>  d = (total - CTA + nP*X) / nP

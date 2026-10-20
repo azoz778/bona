@@ -1,0 +1,11 @@
+[Unit]
+Description=Bona daily LinkedIn Page post at 09:30 Riyadh, Sunday-Thursday, two bounded retries
+[Timer]
+OnCalendar=Sun,Mon..Thu *-*-* 09:30 Asia/Riyadh
+OnCalendar=Sun,Mon..Thu *-*-* 10:00 Asia/Riyadh
+OnCalendar=Sun,Mon..Thu *-*-* 10:30 Asia/Riyadh
+Persistent=true
+AccuracySec=30s
+Unit=bona-browser@linkedin.service
+[Install]
+WantedBy=timers.target
