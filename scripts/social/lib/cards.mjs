@@ -166,7 +166,7 @@ export async function lowerThird(w, h, l, { bottom = SAFE.bottom, right = 170, w
  * developer-authorisation line for property outside the Kingdom) plus the FAL brokerage
  * licence, which is a real number.
  */
-export async function ctaCard(w, h, { l = null, lines = null, bg = C.ivory, fg = C.ink } = {}) {
+export async function ctaCard(w, h, { l = null, lines = null, licenceLines = null, bg = C.ivory, fg = C.ink } = {}) {
   const boxW = w - SAFE.left * 2;
   const mark = await wordmark({ size: 108, color: fg, accent: C.champagne, arabic: true });
   const tagAr = await text({ text: site.tagline.ar, face: 'ar-display', size: 50, color: C.stone2, align: 'centre', width: boxW });
@@ -183,8 +183,11 @@ export async function ctaCard(w, h, { l = null, lines = null, bg = C.ivory, fg =
 
   const lic = l ? adLicence(l) : { basis: 'rega-pending', number: null };
   const foreign = lic.basis === 'developer-authorisation';
-  const licAr = await text({ text: foreign ? 'عقار خارج المملكة — يُسوَّق بتفويض من المطوّر' : `رقم ترخيص الإعلان العقاري: ${iso(lic.number ?? AD_LICENCE_TOKEN)}`, face: 'ar-body', size: 26, color: C.stone, align: 'centre', width: boxW });
-  const licEn = await text({ text: foreign ? `Marketed under developer authorisation  ·  FAL ${FAL}` : `REGA ad licence ${lic.number ?? AD_LICENCE_TOKEN}  ·  FAL ${FAL}`, face: 'en-body', size: 24, color: C.stone, align: 'centre', width: boxW, dir: 'ltr', letterSpacing: 1.2 });
+  // licenceLines ({ar,en}) replaces the computed pair for Saudi stock: the daily browser publisher
+  // passes the advertiser/FAL lines its reviewed caption carries (ad-licence waiver), never a
+  // placeholder. Property outside the Kingdom keeps the developer-authorisation line regardless.
+  const licAr = licenceLines && !foreign ? await text({ text: licenceLines.ar, face: 'ar-body', size: 26, color: C.stone, align: 'centre', width: boxW }) : await text({ text: foreign ? 'عقار خارج المملكة — يُسوَّق بتفويض من المطوّر' : `رقم ترخيص الإعلان العقاري: ${iso(lic.number ?? AD_LICENCE_TOKEN)}`, face: 'ar-body', size: 26, color: C.stone, align: 'centre', width: boxW });
+  const licEn = licenceLines && !foreign ? await text({ text: licenceLines.en, face: 'en-body', size: 24, color: C.stone, align: 'centre', width: boxW, dir: 'ltr', letterSpacing: 1.2 }) : await text({ text: foreign ? `Marketed under developer authorisation  ·  FAL ${FAL}` : `REGA ad licence ${lic.number ?? AD_LICENCE_TOKEN}  ·  FAL ${FAL}`, face: 'en-body', size: 24, color: C.stone, align: 'centre', width: boxW, dir: 'ltr', letterSpacing: 1.2 });
   const ref = l ? await text({ text: `${l.id}`, face: 'en-body', size: 26, color: C.champagne, align: 'centre', width: boxW, dir: 'ltr', letterSpacing: 4 }) : null;
 
   const blocks = [
