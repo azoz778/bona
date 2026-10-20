@@ -181,7 +181,7 @@ alerts (exit 2) need the reconciliation above. A busy lock exits 75 from the uni
 | `truncated final ledger line repaired` (exit 2) | a crash mid-write | settle the day as above |
 | `TikTok session is @…, not @bonarealestatesa` / `wrong-actor` | another account logged in, or the composer is not the Page | fix the login / Page role; nothing was sent |
 | `baseline` (`grid did not load`, `… did not load`) | the account's post list did not load | retries next tick; nothing was sent |
-| `another run holds …/.publish.lock` | a live or dry run is in progress | wait; a dead holder's lock is taken over automatically |
+| `another run holds …/.publish.lock` | a live or dry run is in progress | wait; the kernel frees the lock the moment the holder exits or is killed. **Never delete the lock file**: a run holding the old file would overlap with one locking a new file |
 | exit 2, `uncertain` | see above | reconcile by hand |
 
 A half-filled draft is discarded on failure, and a leftover "video you were editing wasn't saved"
