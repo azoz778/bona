@@ -882,6 +882,74 @@
       }
     ]
   },
+  "BONA-047": {
+    "status": "approved",
+    "reviewedAt": "2026-10-20T23:54:49.623Z",
+    "reviewer": "Owner 2026-10-21 approved plot cards for land (cards: land-only). Claude visual review: card 1 the plot satellite still (ring on the plot, labelled approximate, Esri source), card 2 the facts (625 sqm corner plot, SAR 4,200,000; two 12 m streets north and east, 24 m by 26 m (the listing's own approximate dimensions); no price per sqm stated so none shown), card 3 the area still with district, city and country; Arabic connected and right-to-left, nothing cut off, numbers match the listing.",
+    "factsSha256": "430286fd9dbd4b755028529822988ab5c3cb0c728982e66a2fce3d24634a0ba0",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "6b43cd874bc1f657a8fc4ab0a5345741e8ad2718245c8fd81c0445b94683a39f",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. تُؤكَّد التفاصيل والحالة والخدمات عند المعاينة.",
+      "en": "Prices shown are asking prices and may change. Details, condition and services are confirmed at viewing."
+    },
+    "photos": [
+      {
+        "url": "https://bona-real-estate.com/social/property/BONA-047/card-satellite-6db8cee891e0.jpg",
+        "sha256": "6db8cee891e04a7fbad4fdb6dd306627697b93fdad8cab1744a9fe84fc81e871",
+        "width": 1080,
+        "height": 1350,
+        "kind": "card",
+        "card": "satellite",
+        "source": {
+          "url": "https://bona-real-estate.com/land/LND-004.jpg",
+          "sha256": "a13a944014195f8c7b03a3f9e5756e77bb9021805f0ac3a9a1cb8601185ff2fd",
+          "width": 1024,
+          "height": 768
+        },
+        "visuallyApproved": true,
+        "alt": {
+          "ar": "صورة جوية، الموقع تقريبي — أرض زاوية، الشاطئ",
+          "en": "Satellite view, approximate — Corner Plot, Al Shati"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/social/property/BONA-047/card-facts-0e8401b98961.jpg",
+        "sha256": "0e8401b98961d5902e4477da694fd51fd8d59dff0ae8169f0923f4dce26ab793",
+        "width": 1080,
+        "height": 1350,
+        "kind": "card",
+        "card": "facts",
+        "source": null,
+        "visuallyApproved": true,
+        "alt": {
+          "ar": "تفاصيل الأرض — أرض زاوية، الشاطئ",
+          "en": "Plot facts — Corner Plot, Al Shati"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/social/property/BONA-047/card-location-2a518e11fc94.jpg",
+        "sha256": "2a518e11fc94ac77d96956421bfeb54d6fd5e59bbcc2f283f3988decb542bdcb",
+        "width": 1080,
+        "height": 1350,
+        "kind": "card",
+        "card": "location",
+        "source": {
+          "url": "https://bona-real-estate.com/land/LND-004-z15.jpg",
+          "sha256": "5c75a6d3df2d6abe542f742626a8478e8f9248e3bfe677a73f0438c9e1c5af59",
+          "width": 1024,
+          "height": 768
+        },
+        "visuallyApproved": true,
+        "alt": {
+          "ar": "صورة جوية للمنطقة، الموقع تقريبي — أرض زاوية، الشاطئ",
+          "en": "Satellite view of the area, approximate — Corner Plot, Al Shati"
+        }
+      }
+    ]
+  },
   "BONA-W002": {
     "status": "approved",
     "reviewedAt": "2026-10-06T03:12:05.702Z",
