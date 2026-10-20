@@ -75,6 +75,136 @@
       }
     ]
   },
+  "BONA-014": {
+    "status": "approved",
+    "reviewedAt": "2026-10-20T23:49:58.495Z",
+    "reviewer": "Owner 2026-10-21 approved 4:5 padding for mixed-aspect listings. Claude visual review: frames 4 (living room, cover), 3 (lift lobby, black marble), 5 (staircase and entrance hall), 6 (living room toward the windows), 7 (bathroom with tub), 8 (bathroom, double basin) are clean photographs of the apartment, all padded whole; portrait sources 3 and 5 (0.56) are fine padded since nothing is cropped (size floor still met). Frame 1 dropped (dusk render; ready stock needs photographs), frame 2 dropped (TKEstate.sa watermark).",
+    "factsSha256": "e2d4cd1998ab3d4658c9d9bf95cd705a4235783cc39e100a34908aedf7582cb7",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "95c65edb155429e006600e7d325126514a061b538d0a71103fda16edf872859a",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. تُؤكَّد التفاصيل والحالة والخدمات عند المعاينة.",
+      "en": "Prices shown are asking prices and may change. Details, condition and services are confirmed at viewing."
+    },
+    "photos": [
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk-70808e63-01c7cf.jpg",
+        "sha256": "e52607aeaae672b904eed4b4fa175d76b952d8666c9f39f822adbf70f965a52f",
+        "width": 1920,
+        "height": 1080,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Living room — NOBAL 5, Al Rawdah",
+          "ar": "غرفة المعيشة — نوبال 5، الروضة"
+        },
+        "fit": "pad-4x5",
+        "media": {
+          "url": "https://bona-real-estate.com/social/property/BONA-014/pad-e52607ae-2a96f3e24e2e.jpg",
+          "sha256": "2a96f3e24e2e12b0ad1a9f515535ad070aefe171c25e0259c36c7e21a9f6b2fc",
+          "width": 1080,
+          "height": 1350
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk2-10-1d4ca5.jpg",
+        "sha256": "8981f1a6037718c4ab4cd45391cea04dbb2fd82e544002e29774707400b8a9f9",
+        "width": 1920,
+        "height": 3413,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Lobby — NOBAL 5, Al Rawdah",
+          "ar": "البهو — نوبال 5، الروضة"
+        },
+        "fit": "pad-4x5",
+        "media": {
+          "url": "https://bona-real-estate.com/social/property/BONA-014/pad-8981f1a6-d174ee7ee21f.jpg",
+          "sha256": "d174ee7ee21f44fc882500a87b5f1551525157b985f55b22c5e39d2f5c5e779a",
+          "width": 1080,
+          "height": 1350
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk2-13-161b23.jpg",
+        "sha256": "2c8c6795f242216a1902da8cea6e914047d941785a35451831fed74cf6e4a481",
+        "width": 1920,
+        "height": 3413,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Staircase — NOBAL 5, Al Rawdah",
+          "ar": "الدرج — نوبال 5، الروضة"
+        },
+        "fit": "pad-4x5",
+        "media": {
+          "url": "https://bona-real-estate.com/social/property/BONA-014/pad-2c8c6795-047f3c88ff85.jpg",
+          "sha256": "047f3c88ff85791e9741006b65915635c52f14b77dfe24c1f604dfda99deb409",
+          "width": 1080,
+          "height": 1350
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk-2-3a1acb9f-164e4e.jpg",
+        "sha256": "113c12b52fa58fe36b9b3a95843e44281dc3512da8ae8960490b67d50f1c2d94",
+        "width": 1920,
+        "height": 1080,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Living room — NOBAL 5, Al Rawdah",
+          "ar": "غرفة المعيشة — نوبال 5، الروضة"
+        },
+        "fit": "pad-4x5",
+        "media": {
+          "url": "https://bona-real-estate.com/social/property/BONA-014/pad-113c12b5-664f25c2c1b1.jpg",
+          "sha256": "664f25c2c1b1c2deab15df4b255e32b7400da4aa9449f6a0a573801c1689b4dc",
+          "width": 1080,
+          "height": 1350
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk2-4-c8524b25-b60052.jpg",
+        "sha256": "83e7d950e5bf783d504bb90616988403d911b9e7428e590cdceb6f69c8d0145b",
+        "width": 1920,
+        "height": 1536,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Bathroom — NOBAL 5, Al Rawdah",
+          "ar": "الحمام — نوبال 5، الروضة"
+        },
+        "fit": "pad-4x5",
+        "media": {
+          "url": "https://bona-real-estate.com/social/property/BONA-014/pad-83e7d950-dafeb7f2c9a0.jpg",
+          "sha256": "dafeb7f2c9a0c5f7ff96a80f8a7504213341150f5a005e16fa37924fbaa69e0b",
+          "width": 1080,
+          "height": 1350
+        }
+      },
+      {
+        "url": "https://tk-storage.azoz.uk/tk-estate-media/media/nobal-5/tk2-8-01ad9a.jpg",
+        "sha256": "8f72a9e831f6bb70940196991ff96514bc8ad81e232e73d0375d8687026830a2",
+        "width": 1920,
+        "height": 2400,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Bathroom — NOBAL 5, Al Rawdah",
+          "ar": "الحمام — نوبال 5، الروضة"
+        },
+        "fit": "pad-4x5",
+        "media": {
+          "url": "https://bona-real-estate.com/social/property/BONA-014/pad-8f72a9e8-ca7272d35064.jpg",
+          "sha256": "ca7272d350648f5bafa6c5dd84f35a58b1a3da355167bde1d48287b89fddc3fa",
+          "width": 1080,
+          "height": 1350
+        }
+      }
+    ]
+  },
   "BONA-015": {
     "status": "approved",
     "reviewedAt": "2026-10-06T03:12:05.702Z",
