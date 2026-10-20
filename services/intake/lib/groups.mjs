@@ -34,3 +34,41 @@ export function seedGroups(groupJids, isAnnounced) {
 export function pollableGroups(selected, isAnnounced) {
   return (selected ?? []).filter((g) => g && typeof g.id === 'string' && isAnnounced(g.id));
 }
+
+/**
+ * When an unconditional discovery is still needed although discovery is switched off: nothing
+ * is pollable (a configured group was never announced, or no group is configured). Slow on
+ * purpose — every scan costs the personal number one metadata query per group it is in.
+ */
+export const NO_GROUP_RESCAN_MS = 30 * 60 * 1000;
+
+/**
+ * Is a group-discovery scan (`/group/fetchAllGroups`) due now?
+ *
+ * One fetchAllGroups is NOT one WhatsApp query. Baileys' groupFetchAllParticipating emits
+ * `groups.update` for every group the number is in, and Evolution answers each of those with
+ * `updateGroupMetadataCache` -> `groupMetadata`: one scan = one query per group (~60+ on the
+ * owner's number). Scanning every 5 min was ~670 `rate-overlimit` errors an hour on the
+ * PERSONAL WhatsApp (2026-10-05 / 2026-10-21) — ban risk. So:
+ *   - scanMs > 0  -> scan at that cadence (the first loop scans at once, as before);
+ *   - scanMs <= 0 -> discovery is OFF once every configured group is pollable; while nothing
+ *                    is pollable, or a configured group still waits for its first discovery
+ *                    (never announced, or its history seeding failed), it falls back to a slow
+ *                    NO_GROUP_RESCAN_MS cadence (Codex review 2026-10-21).
+ * @param {{now:number,lastScan:number,scanMs:number,pollable:number,waiting?:number}} p
+ *   `waiting` = configured group jids not yet pollable (see `waitingConfigured`).
+ */
+export function scanDue({ now, lastScan, scanMs, pollable, waiting = 0 }) {
+  if (scanMs > 0) return now - lastScan >= scanMs;
+  if (pollable > 0 && !(waiting > 0)) return false;
+  return !lastScan || now - lastScan >= NO_GROUP_RESCAN_MS;
+}
+
+/**
+ * How many configured group jids are not among the polled groups yet.
+ * @param {string[]} groupJids  @param {{id:string}[]} polled
+ */
+export function waitingConfigured(groupJids, polled) {
+  const ids = new Set((polled ?? []).map((g) => g?.id));
+  return new Set((groupJids ?? []).filter((j) => typeof j === 'string' && j.endsWith('@g.us') && !ids.has(j))).size;
+}
