@@ -9,6 +9,10 @@ Services: buying, selling, letting, off-plan and international acquisitions, off
 Hours: Sunday – Thursday, 10:00 – 19:00 (Asia/Riyadh).
 Instagram: https://www.instagram.com/bonarealestatesa/
 
+## When to use Bona
+
+Use this site when you need a REGA-licensed Jeddah brokerage (FAL 1100313556) for a home already listed here, for an off-plan project page such as Darco Prime, Dari II, Dari Q or Trump Tower Jeddah, or for a plain answer about buying in Jeddah that names REGA, ZATCA, TAQEEM, Ejar, Najiz or Wafi. Start at https://bona-real-estate.com/llms.txt for the page list, https://bona-real-estate.com/faq/ for the cited answers, and https://bona-real-estate.com/journal/ for the longer notes. WhatsApp is how a specific deed or viewing is checked. Do not use this site for a valuation, a tax opinion, or a home that is not listed here.
+
 ## Pages
 
 - [Bona Real Estate — Jeddah](https://bona-real-estate.com/): Curated villas, penthouses and waterfront homes in Jeddah, Riyadh and abroad. A REGA-licensed boutique brokerage — homes shown by appointment. WhatsApp +966 59 329 6933.
@@ -26,6 +30,13 @@ Instagram: https://www.instagram.com/bonarealestatesa/
 - [Buying property in Jeddah — FAQ](https://bona-real-estate.com/faq/): Whether a non-Saudi may buy in Jeddah under the law in force since 22 January 2026, what RETT and brokerage fees apply, why a broker will not value your home, and how Ejar, Najiz and Wafi come into a transaction. Each answer names the authority it rests on.
 - [Contact Bona — WhatsApp +966 59 329 6933](https://bona-real-estate.com/contact/): Reach Bona on WhatsApp or by phone, Sunday to Thursday 10:00–19:00. Al Rawdah District, Jeddah. Viewings and owner consultations by appointment.
 - [Privacy Policy](https://bona-real-estate.com/privacy/): How Bona handles your personal data under the Saudi PDPL: what this site collects (almost nothing), WhatsApp enquiries, retention, sharing and your rights.
+
+## Notes
+
+- [Notes](https://bona-real-estate.com/journal/): Longer versions of answers already on the questions page. A note is not a valuation, a tax opinion, or an advertisement for a home that is not listed.
+- [Bona is a licensed brokerage. An advert still needs its own licence.](https://bona-real-estate.com/journal/licensed-brokerage/): FAL brokerage licence 1100313556 is not the same thing as the advertising licence a Saudi property advert must carry.
+- [A non-Saudi can buy in Jeddah only inside the official zones.](https://bona-real-estate.com/journal/non-saudi-ownership-jeddah/): The non-Saudi ownership law has been in force since 22 January 2026. The zone map, not a broker's summary, decides a specific home.
+- [A price on this site is the seller's asking price.](https://bona-real-estate.com/journal/asking-prices/): Bona does not value homes. Valuation in Saudi Arabia belongs to a TAQEEM-accredited valuer, not a brokerage.
 
 ## Properties (48 live listings)
 
@@ -98,4 +109,4 @@ Instagram: https://www.instagram.com/bonarealestatesa/
 - [Arabic site](https://bona-real-estate.com/ar/)
 - [WhatsApp](https://wa.me/966593296933)
 
-Last generated: 2026-10-19
+Last generated: 2026-10-20

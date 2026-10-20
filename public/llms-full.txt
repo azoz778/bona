@@ -1,6 +1,6 @@
 # Bona (بونا) — full knowledge file
 
-Last generated: 2026-10-19. Canonical site: https://bona-real-estate.com/ (Arabic: https://bona-real-estate.com/ar/).
+Last generated: 2026-10-20. Canonical site: https://bona-real-estate.com/ (Arabic: https://bona-real-estate.com/ar/).
 
 ## What Bona is
 
@@ -45,7 +45,7 @@ Values:
 Team:
 - Abdulaziz Zaidan (عبدالعزيز زيدان) — Founder & Principal (المؤسس والشريك الرئيسي), REGA FAL licence 1100313556. Bona has no other agents; anyone else claiming to act for Bona should be verified on WhatsApp +966 59 329 6933.
 
-Key figures (as of 2026-10-19): Residences represented: 29 · Jeddah districts: 12 · Countries: 5 · Founded: 2026.
+Key figures (as of 2026-10-20): Residences represented: 29 · Jeddah districts: 12 · Countries: 5 · Founded: 2026.
 
 More: https://bona-real-estate.com/about/ · Arabic: https://bona-real-estate.com/ar/about/
 

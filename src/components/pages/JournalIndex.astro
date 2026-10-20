@@ -1,0 +1,36 @@
+---
+import Base from '../../layouts/Base.astro';
+import Breadcrumb from '../Breadcrumb.astro';
+import journal from '../../data/journal.json';
+import { localePath, t, ui, type Locale } from '../../lib/i18n';
+import { breadcrumbJsonLd, metaDescription } from '../../lib/seo';
+interface Props { locale: Locale }
+const { locale } = Astro.props;
+const path = localePath(locale, '/journal/');
+const title = t(journal.title, locale);
+const intro = t(journal.intro, locale);
+const posts = [...journal.posts].sort((a, b) => b.date.localeCompare(a.date));
+const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { name: title, path }];
+const description = metaDescription(intro);
+---
+<Base title={title} description={description} locale={locale} path={path} jsonLd={breadcrumbJsonLd(crumbs)}>
+  <section class="section-tight pt-8 lg:pt-10">
+    <div class="wrap-narrow">
+      <Breadcrumb locale={locale} items={crumbs.map(c => ({ name: c.name, href: c.path }))} />
+      <div class="mt-10" data-reveal>
+        <span class="rule"></span>
+        <h1 class="display-lg mt-6">{title}</h1>
+        <p class="statement mt-8">{intro}</p>
+      </div>
+      <ul class="mt-14 divide-y divide-ink/10">
+        {posts.map((post) => (
+          <li class="py-8" data-reveal>
+            <p class="label text-stone-2"><time datetime={post.date} dir="ltr">{post.date}</time></p>
+            <h2 class="mt-3 font-display text-3xl leading-tight"><a href={localePath(locale, `/journal/${post.slug}/`)} class="link">{t(post.title, locale)}</a></h2>
+            <p class="mt-4 text-stone-2">{t(post.description, locale)}</p>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </section>
+</Base>

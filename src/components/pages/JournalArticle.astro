@@ -1,0 +1,45 @@
+---
+import Base from '../../layouts/Base.astro';
+import Breadcrumb from '../Breadcrumb.astro';
+import journal from '../../data/journal.json';
+import { localePath, t, ui, type Locale } from '../../lib/i18n';
+import { breadcrumbJsonLd, metaDescription } from '../../lib/seo';
+interface Post {
+  slug: string;
+  date: string;
+  faqId: string;
+  title: { en: string; ar: string };
+  description: { en: string; ar: string };
+  body: { en: string[]; ar: string[] };
+}
+interface Props { locale: Locale; post: Post }
+const { locale, post } = Astro.props;
+const path = localePath(locale, `/journal/${post.slug}/`);
+const title = t(post.title, locale);
+const description = metaDescription(t(post.description, locale));
+const notes = t(journal.title, locale);
+const crumbs = [
+  { name: t(ui.home, locale), path: localePath(locale, '/') },
+  { name: notes, path: localePath(locale, '/journal/') },
+  { name: title, path },
+];
+const faqHref = `${localePath(locale, '/faq/')}#${post.faqId}`;
+---
+<Base title={title} description={description} locale={locale} path={path} jsonLd={breadcrumbJsonLd(crumbs)}>
+  <article class="section-tight pt-8 lg:pt-10">
+    <div class="wrap-narrow">
+      <Breadcrumb locale={locale} items={crumbs.map(c => ({ name: c.name, href: c.path }))} />
+      <header class="mt-10" data-reveal>
+        <span class="rule"></span>
+        <p class="label mt-6 text-stone-2"><time datetime={post.date} dir="ltr">{post.date}</time></p>
+        <h1 class="display-lg mt-4">{title}</h1>
+      </header>
+      <div class="mt-10 space-y-6 text-[17px] leading-relaxed">
+        {post.body[locale].map((paragraph) => <p>{paragraph}</p>)}
+      </div>
+      <p class="mt-12 text-sm text-stone-2">
+        <a href={faqHref} class="link">{t(ui.journalFaqLink, locale)}</a>
+      </p>
+    </div>
+  </article>
+</Base>
