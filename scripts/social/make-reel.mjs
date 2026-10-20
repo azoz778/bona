@@ -35,9 +35,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { runTool } from '../../services/intake/lib/video.mjs';
-import { REEL } from './lib/brand.mjs';
+import { C, REEL } from './lib/brand.mjs';
 import { ctaCard, hookLayer, lowerThird, markLayer } from './lib/cards.mjs';
-import { bestPhotos, coverToFile } from './lib/photos.mjs';
+import { bestPhotos, containToFile, coverToFile } from './lib/photos.mjs';
 import { hookFor, loadListings, subhookFor } from './lib/listing.mjs';
 import { FFMPEG, OUT_ROOT, ensureDir, findListing, log, requireFfmpeg } from './lib/util.mjs';
 
@@ -51,6 +51,9 @@ const { values: a } = parseArgs({
     // review order (3-7, no re-ranking), --licence-ar/--licence-en the CTA card's licence pair.
     'listing-json': { type: 'string' }, frames: { type: 'string' },
     'licence-ar': { type: 'string' }, 'licence-en': { type: 'string' },
+    // --fit pad: contain each frame whole on a 9:16 ink canvas instead of cover-cropping it (padded 4:5
+    // property frames, owner 2026-10-21).
+    fit: { type: 'string' },
     help: { type: 'boolean', default: false },
   },
 });
@@ -115,6 +118,8 @@ const l = a['listing-json'] ? JSON.parse(fs.readFileSync(a['listing-json'], 'utf
 requireFfmpeg();
 if ((a['licence-ar'] == null) !== (a['licence-en'] == null)) { console.error('--licence-ar and --licence-en go together'); process.exit(1); }
 const licenceLines = a['licence-ar'] != null ? { ar: a['licence-ar'], en: a['licence-en'] } : null;
+if (a.fit != null && a.fit !== 'pad') { console.error('--fit: only "pad"'); process.exit(1); }
+const pad = a.fit === 'pad';
 
 let photos;
 if (a.frames) {
@@ -137,7 +142,8 @@ try {
   const stills = [];
   for (const [i, p] of photos.entries()) {
     const out = path.join(work, `bg-${String(i).padStart(2, '0')}.jpg`);
-    await coverToFile(p.file, out, W * SS, H * SS, { position, quality: 94 });
+    if (pad) await containToFile(p.file, out, W * SS, H * SS, { background: C.ink, quality: 94 });
+    else await coverToFile(p.file, out, W * SS, H * SS, { position, quality: 94 });
     stills.push(out);
   }
 

@@ -26,11 +26,34 @@ export function realDate(s) {
   const d = new Date(s+'T00:00:00Z');
   return Number.isFinite(+d) && d.toISOString().slice(0,10) === s;
 }
-/** Instagram crops every carousel frame to the first frame's aspect ratio; keep that crop small. */
+/**
+ * Derived 4:5 media (owner, 2026-10-21). A frame with `fit: 'pad-4x5'` is published as its padded
+ * variant (`media`): the source photo centred, whole, on a 1080x1350 brand canvas, rendered at
+ * approval by lib/property-media.mjs and hosted with the site under /social/property/<id>/. The
+ * source's and the padded variant's SHA-256 are both checked before anything is sent.
+ */
+export const PAD_FIT = 'pad-4x5';
+export const MEDIA_SIZE = Object.freeze({ width: 1080, height: 1350 });
+/** A padded frame's source aspect bounds: nothing is cropped, so portrait sources below 0.8 are fine; past 9:16 or 1.91 the photo is too small on the canvas. */
+export const PAD_ASPECT = Object.freeze({ min: 0.56, max: 1.91 });
+/** Where a listing's derived media is served (public/social/property/<id>/ in the repository). */
+export const mediaBase = id => `${SITE}/social/property/${encodeURIComponent(id)}/`;
+/** The size a frame is shown at: the padded variant's for a padded frame, else its own. */
+export const shownSize = x => (x?.fit === PAD_FIT && x.media ? x.media : x);
+/** The URL a frame is published from: the padded variant for a padded frame, else the frame itself. */
+export const mediaUrl = x => (x?.fit === PAD_FIT && x.media?.url ? x.media.url : x?.url);
+/** True when the derived media record is a hosted 1080x1350 JPEG of this listing with a SHA-256. */
+export function derivedMediaOk(m, id) {
+  if (!m || typeof m.url !== 'string' || !m.url.startsWith(mediaBase(id))) return false;
+  try { imageUrl(m.url); } catch { return false; }
+  return /^[a-f0-9]{64}$/.test(m.sha256 ?? '') && m.width === MEDIA_SIZE.width && m.height === MEDIA_SIZE.height;
+}
+/** Instagram crops every carousel frame to the first frame's aspect ratio; keep that crop small. Padded frames count at 4:5. */
 export function aspectConsistent(photos, tolerance = 0.15) {
   if (!photos.length) return false;
-  const first = photos[0].width / photos[0].height;
-  return photos.every(p => Math.abs(p.width / p.height - first) / first <= tolerance);
+  const ratio = p => { const s = shownSize(p); return s.width / s.height; };
+  const first = ratio(photos[0]);
+  return photos.every(p => Math.abs(ratio(p) - first) / first <= tolerance);
 }
 const positive = n => Number.isFinite(n) && n > 0;
 function fresh(ts, now, maxDays) {
@@ -105,9 +128,13 @@ export function eligibility(p, review, advertiser, now = new Date(), rules = STR
   for (const photo of photos) {
     let url; try { url = imageUrl(photo.url); } catch { reasons.push('unapproved_photo_source'); continue; }
     if (photo.kind === 'render' && !rendersAllowed) reasons.push('render_not_allowed');
+    // A padded frame is never cropped, so its source may be narrower than 0.8; the size floor still applies to the source.
+    const padded = photo.fit != null;
+    if (padded && (photo.fit !== PAD_FIT || !derivedMediaOk(photo.media, p?.id))) reasons.push('padded_media_unverified');
+    const [lo, hi] = padded ? [PAD_ASPECT.min, PAD_ASPECT.max] : [0.8, 1.91];
     if (!allowed.has(url) || !['photograph','render'].includes(photo.kind) || photo.visuallyApproved !== true ||
         !/^[a-f0-9]{64}$/.test(photo.sha256 ?? '') || !positive(photo.width) || !positive(photo.height) || photo.width < 1080 || photo.height < 720 ||
-        photo.width/photo.height < 0.8 || photo.width/photo.height > 1.91 || !photo.alt?.ar || !photo.alt?.en) reasons.push('photo_quality_or_provenance_unverified');
+        photo.width/photo.height < lo || photo.width/photo.height > hi || !photo.alt?.ar || !photo.alt?.en) reasons.push('photo_quality_or_provenance_unverified');
   }
   if (photos.length && !aspectConsistent(photos)) reasons.push('carousel_aspect_mismatch');
   // Photos of another project (an owner-confirmed photoNote): the caption opens with the note, in both languages,
@@ -319,5 +346,5 @@ export function entryFor(p, review, advertiser, channel, date, assets = []) {
   return {id:`bona-daily-${channel==='instagram'?'ig':'fb'}-${date}`,date,time:'20:30',platform:channel,
     listingId:p.id,topic:p.title,format:'carousel',caption:captionFor(p,advertiser,review),hashtags:propertyHashtags(p),
     reviewStatus:'approved',adLicenceRequired:false,adLicenceVerified:true,blocked:false,
-    images:review.photos.map(x=>x.url),assets,assetsJpg:assets,alt:review.photos[0].alt,status:'planned'};
+    images:review.photos.map(mediaUrl),assets,assetsJpg:assets,alt:review.photos[0].alt,status:'planned'};
 }

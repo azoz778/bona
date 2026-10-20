@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT, ksaNow } from './lib/daily-pack.mjs';
-import { ACCOUNT, SITE, sha256, fingerprint, eligibility, chooseProperty, dayState, entryFor, policyRules, unsettled, pickFrames, recentDuplicate, DEDUPE_DAYS } from './lib/property-daily.mjs';
+import { ACCOUNT, SITE, sha256, fingerprint, eligibility, chooseProperty, dayState, entryFor, policyRules, unsettled, pickFrames, recentDuplicate, DEDUPE_DAYS, PAD_FIT } from './lib/property-daily.mjs';
 import { withLock, whoami, pageToken, publishEntry, appendLedger, refusal, captionFromEntry } from './lib/facebook.mjs';
 import { createGraph, checkCaption } from './lib/graph.mjs';
 import { run as publishInstagram, indexLedger, composeCaption, hasLicencePlaceholder, decide, normaliseEntry } from './publish.mjs';
@@ -84,18 +84,31 @@ export async function catalogue(fetchImpl=fetch,now=new Date()) {
   if(!Number.isFinite(generated)||generated>+now||+now-generated>48*3600000)throw new Error('Live catalogue is stale; daily website refresh needs attention');
   return d;
 }
-export async function photos(review,dir,dry,fetchImpl=fetch) {
-  const paths=[];
-  for(const [i,p] of review.photos.entries()) {
-    const res=await fetchImpl(p.url,{redirect:'error',headers:{'User-Agent':'BonaPropertyPublisher/1.0'},signal:AbortSignal.timeout(20000)});
+/**
+ * Downloads each reviewed frame and checks its SHA-256 against the review. A padded frame
+ * (fit 'pad-4x5') is checked as its source photo AND as its hosted padded variant, and the padded
+ * bytes are what is written and posted. Returns the local files to post, or with
+ * `{sources: true}` one {media, source, fit, kind} per frame (source: the photo a padded frame was
+ * made from, for the TikTok reel's own 9:16 padding).
+ */
+export async function photos(review,dir,dry,fetchImpl=fetch,{sources=false}={}) {
+  const get=async(url,digest)=>{
+    const res=await fetchImpl(url,{redirect:'error',headers:{'User-Agent':'BonaPropertyPublisher/1.0'},signal:AbortSignal.timeout(20000)});
     if(!res.ok || !res.headers.get('content-type')?.startsWith('image/jpeg')) throw new Error('Reviewed source photo unavailable');
     const bytes=Buffer.from(await res.arrayBuffer());
-    if(bytes.length>8000000 || sha256(bytes)!==p.sha256)throw new Error('Source photo changed since visual review');
-    const file=path.join(dir,`${i+1}.jpg`);
-    if(!dry)fs.writeFileSync(file,bytes,{mode:0o600});
-    paths.push(file);
+    if(bytes.length>8000000 || sha256(bytes)!==digest)throw new Error('Source photo changed since visual review');
+    return bytes;
+  };
+  const out=[];
+  for(const [i,p] of review.photos.entries()) {
+    const bytes=await get(p.url,p.sha256);
+    const padded=p.fit===PAD_FIT&&p.media;
+    const media=padded?await get(p.media.url,p.media.sha256):bytes;
+    const file=path.join(dir,`${i+1}.jpg`),source=padded?path.join(dir,`${i+1}-source.jpg`):null;
+    if(!dry){fs.writeFileSync(file,media,{mode:0o600});if(source)fs.writeFileSync(source,bytes,{mode:0o600});}
+    out.push(sources?{media:file,source,fit:p.fit??null,kind:p.kind}:file);
   }
-  return paths;
+  return out;
 }
 async function identity(channel,env,fetchImpl=fetch) {
   if(!env.META_ACCESS_TOKEN)throw new Error('Existing Meta credential unavailable');

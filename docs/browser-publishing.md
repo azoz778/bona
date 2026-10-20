@@ -45,7 +45,10 @@ debug Chrome (CDP `http://localhost:9222`, started by `~/.claude/scripts/chrome-
   `make-reel.mjs --listing-json … --frames …` with the approved frames in this post's order and the
   advertiser/FAL pair on the closing card (no placeholder); TikTok education is a slideshow of
   the 1080x1920 cards. LinkedIn property images are the approved frames re-encoded at 1200 px with
-  a small BONA mark; LinkedIn education uses the dark 1080x1350 card variant (Instagram had the
+  a small BONA mark. A listing approved padded to 4:5 (`"fit": "pad-4x5"`,
+  docs/daily-property-publishing.md) gets a reel rendered with `--fit pad` from the source photos
+  (each whole on a 9:16 ink canvas, no cover crop) and LinkedIn images re-encoded from the padded
+  files without a second mark; both hashes of every frame are checked first. LinkedIn education uses the dark 1080x1350 card variant (Instagram had the
   light 1080x1350, Facebook the 1080x1080). Reels are silent by design.
 - **Repeats look different:** a listing's second and later posts on a channel use another cover
   and frame order of the same approved frames (`pickFrames()`, the rule in

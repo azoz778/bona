@@ -25,7 +25,7 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { ROOT, ksaNow } from './lib/daily-pack.mjs';
 import { dataDir } from './lib/ledger.mjs';
-import { fingerprint, eligibility, policyRules } from './lib/property-daily.mjs';
+import { fingerprint, eligibility, policyRules, PAD_FIT } from './lib/property-daily.mjs';
 import { catalogue, photos as downloadReviewedPhotos } from './property-publish.mjs';
 import {
   CHANNELS, acquireLock, appendRecord, assertRenderable, captionFor, channelState, chooseToday, educationPool, entryId, inWindow,
@@ -54,6 +54,11 @@ export async function defaultDeps() {
   return { cdp, sites, media, fal: FAL, catalogue, downloadReviewedPhotos };
 }
 
+/** How a review's frames are shown: `pad` when any frame is padded to 4:5. */
+export function mediaStyle(review) {
+  return { pad: (review?.photos ?? []).some(x => x.fit === PAD_FIT) };
+}
+
 /** Render this channel's own media for the choice. Returns local file paths. */
 async function renderMedia(channel, choice, dir, deps, advertiser) {
   fs.mkdirSync(dir, { recursive: true });
@@ -61,13 +66,19 @@ async function renderMedia(channel, choice, dir, deps, advertiser) {
   if (choice.kind === 'property') {
     // The approved frames in this post's order (a repeat gets another cover and order; TikTok re-renders the reel from it).
     // The media host resets ~1 in 4 connections from this box; a network failure is retried, a hash mismatch is not.
-    let frames;
+    let items;
     for (let attempt = 1; ; attempt++) {
-      try { frames = await deps.downloadReviewedPhotos(choice.frames ?? choice.review, dir, false, deps.fetchImpl ?? fetch); break; }
+      try { items = await deps.downloadReviewedPhotos(choice.frames ?? choice.review, dir, false, deps.fetchImpl ?? fetch, { sources: true }); break; }
       catch (e) { if (attempt >= 3 || /changed since visual review/.test(e.message)) throw e; await new Promise(r => setTimeout(r, 2000 * attempt)); }
     }
-    if (channel === 'tiktok') return [media.propertyReel(choice.listing, frames, reelLicenceLines(choice.listing, advertiser), path.join(dir, `tiktok-${choice.listing.id}.mp4`))];
-    return media.linkedinPropertyImages(frames, path.join(dir, 'linkedin'));
+    const style = mediaStyle(choice.frames ?? choice.review);
+    items = items.map(x => (typeof x === 'string' ? { media: x, source: null } : x));
+    const frames = items.map(x => x.media);
+    // Padded frames: the reel pads each frame's source photo to 9:16 instead of cover-cropping it.
+    if (channel === 'tiktok') return [media.propertyReel(choice.listing, style.pad ? items.map(x => x.source ?? x.media) : frames, reelLicenceLines(choice.listing, advertiser),
+      path.join(dir, `tiktok-${choice.listing.id}.mp4`), style.pad ? { fit: 'pad' } : {})];
+    // The padded frames already carry the BONA mark in their band: LinkedIn re-encodes them without a second one.
+    return media.linkedinPropertyImages(frames, path.join(dir, 'linkedin'), style.pad ? { mark: false } : {});
   }
   if (channel === 'tiktok') return [await media.educationReel(choice.item, path.join(dir, `tiktok-${choice.item.id}.mp4`))];
   return media.linkedinEducationImages(choice.item, path.join(dir, 'linkedin'));

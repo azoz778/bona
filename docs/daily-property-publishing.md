@@ -63,7 +63,26 @@ and `bona-daily@facebook` timers run it; there is no other timer.
    ratio because Instagram crops a carousel to its first frame. The script re-reads the live
    catalogue, refuses anything changed since drafting or not eligible, and leaves an identical,
    still-valid review untouched; an expired one is renewed.
-4. **Commit** the register through a PR. The publisher reads it from `origin/main`.
+   **Padded frames (owner, 2026-10-21):** add `--pad BONA-014` to publish every selected frame of
+   that listing padded to 4:5 instead (`"fit": "pad-4x5"` on each frame). The script renders each
+   frame whole and centred on a 1080x1350 ink canvas above a small BONA mark (no crop, no stretch,
+   a brochure's white margin trimmed; `lib/property-media.mjs padFrame()`, deterministic) and writes
+   it to `public/social/property/<id>/pad-<source sha8>-<sha12>.jpg`, which the site serves at
+   `https://bona-real-estate.com/social/property/<id>/…`: Instagram fetches carousel images from a
+   public URL and the publisher uploads nothing, the same path as the reviewed daily pack's cards.
+   The frame keeps its source `url`/`sha256`/size and gains `media` {url, sha256, 1080, 1350}. Every
+   slide is then 4:5, so frames of mixed aspect can share a carousel, and a portrait source down
+   to 9:16 (0.56) may be approved; the draft keeps such a frame and marks it `padOnly` (`PAD ONLY`
+   on the contact sheet), and approving it without `--pad` is refused. The size floor (1080x720)
+   and the 8 MB limit still apply to the source. Before publication every channel downloads the
+   source and the padded file and checks both hashes; Instagram and Facebook post the padded file,
+   TikTok's reel pads each source photo to 9:16 (`make-reel.mjs --fit pad`) and LinkedIn re-encodes
+   the padded files without a second mark. `--local-public public` (draft and approve) reads the
+   site's own images from the repository instead of the live site, for images committed but not yet
+   deployed; the publishers always check the live bytes.
+4. **Commit** the register through a PR, with any `public/social/property/` files it names. The
+   publisher reads the register from `origin/main`; until the site deploy has served the new files a
+   run stops before any record ("Reviewed source photo unavailable" or "changed since visual review").
 
 Disclosures written with every review: when the caption shows a price, that prices are asking
 prices and may change; for ready stock, that details, condition and services are confirmed at

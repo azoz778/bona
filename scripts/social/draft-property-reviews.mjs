@@ -1,20 +1,25 @@
 #!/usr/bin/env node
 // Drafts photo/caption reviews for in-scope listings: usable frames, one contact sheet per listing,
 // drafts.json with caption previews. Never writes the review register, never uploads anything.
-// Usage: node scripts/social/draft-property-reviews.mjs --out NEW_DIR [--ids BONA-001,BONA-022]
+// Usage: node scripts/social/draft-property-reviews.mjs --out NEW_DIR [--ids BONA-001,BONA-022] [--local-public DIR]
+// A frame outside the 0.8–1.91 aspect that would be fine padded to 4:5 is kept, marked padOnly.
+// --local-public DIR reads the site's own images (bona-real-estate.com/…) from DIR (the repository's
+// public/) instead of the live site: for reviewing re-cropped images before they are deployed. The
+// publisher still checks the live bytes, so such a review is eligible only once they are live.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import { SITE, imageUrl, sha256, fingerprint, advertiserFingerprint, policyRules, eligibility, reviewedCopy } from './lib/property-daily.mjs';
-import { frameProblem, contactSheet, disclosuresFor, defaultKind, liveCatalogue } from './lib/property-review.mjs';
+import { frameProblem, contactSheet, disclosuresFor, defaultKind, liveCatalogue, localFetch } from './lib/property-review.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 function parseArgs(argv) {
-  const a = { out: null, ids: null };
+  const a = { out: null, ids: null, localPublic: null };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') a.out = argv[++i];
+    else if (argv[i] === '--local-public') a.localPublic = argv[++i];
     else if (argv[i] === '--ids') a.ids = String(argv[++i] ?? '').split(',').filter(Boolean);
     else throw new Error(`Unknown argument ${argv[i]}`);
   }
@@ -23,6 +28,7 @@ function parseArgs(argv) {
 }
 export async function main(argv = process.argv.slice(2), { fetchImpl = fetch, now = new Date(), root = ROOT, log = console.log } = {}) {
   const args = parseArgs(argv);
+  if (args.localPublic) fetchImpl = localFetch(args.localPublic, fetchImpl);
   const out = path.resolve(args.out);
   if (fs.existsSync(out)) throw new Error('Choose a new output directory; earlier drafts are preserved');
   const rules = policyRules(readJson(path.join(root, 'marketing/daily/property-policy.json')), now);
@@ -45,12 +51,15 @@ export async function main(argv = process.argv.slice(2), { fetchImpl = fetch, no
         if (!res.ok) { rejected.push({ index, why: `http_${res.status}` }); continue; }
         const buffer = Buffer.from(await res.arrayBuffer());
         const meta = await sharp(buffer).metadata();
-        const why = frameProblem({ contentType: res.headers.get('content-type'), bytes: buffer.length, width: meta.width, height: meta.height });
-        if (why) { rejected.push({ index, why, width: meta.width, height: meta.height }); continue; }
+        const facts = { contentType: res.headers.get('content-type'), bytes: buffer.length, width: meta.width, height: meta.height };
+        const why = frameProblem(facts);
+        // Usable only padded to 4:5 (owner, 2026-10-21): kept, marked, and refused unless approved with --pad.
+        const padOnly = why === 'aspect' && !frameProblem(facts, { pad: true });
+        if (why && !padOnly) { rejected.push({ index, why, width: meta.width, height: meta.height }); continue; }
         const file = path.join(p.id, `${index}.jpg`);
         fs.mkdirSync(path.join(out, p.id), { recursive: true });
         fs.writeFileSync(path.join(out, file), buffer);
-        frames.push({ index, url, sha256: sha256(buffer), width: meta.width, height: meta.height, alt: im.alt, file, buffer });
+        frames.push({ index, url, sha256: sha256(buffer), width: meta.width, height: meta.height, alt: im.alt, file, buffer, ...(padOnly ? { padOnly: true } : {}) });
       } catch (e) { rejected.push({ index, why: `fetch_failed: ${String(e.message).slice(0, 60)}` }); }
     }
     let sheet = null;
