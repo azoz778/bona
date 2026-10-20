@@ -277,14 +277,23 @@ const cleanups = CLI.cleanups ?? new Set(), runCleanups = CLI.runCleanups;
 
 function fakeSession({ ev = () => null, clickEl = () => ({ w: 1 }), start = 'https://x/' } = {}) {
   let cur = start;
-  const log = { clicks: [], navs: [] };
+  const log = { clicks: [], navs: [], ops: [] };
   return { log,
-    navigate: async u => { cur = u; log.navs.push(u); },
-    waitFor: async () => true,
-    ev: async expr => ev(expr, cur),
-    clickEl: async expr => { log.clicks.push(expr); return clickEl(expr, cur); },
+    navigate: async u => { cur = u; log.navs.push(u); log.ops.push('navigate'); },
+    waitFor: async () => { log.ops.push('waitFor'); return true; },
+    ev: async expr => { log.ops.push(expr.includes('const linkedinActorProblem') ? 'actor-read' : 'ev'); return ev(expr, cur); },
+    clickEl: async expr => { log.clicks.push(expr); log.ops.push('clickEl'); return clickEl(expr, cur); },
+    clickAt: async (x, y) => { log.clicks.push(`clickAt ${x},${y}`); log.ops.push('clickAt'); return true; },
     url: async () => cur, key: async () => {}, typeInto: async () => true, setFiles: async () => true, screenshot: async f => f };
 }
+/** Runs the real actor+button evaluation against a fake composer DOM. */
+const composer = (actor = { name: 'Bona | بونا', asset: 'A1' }) => expr => {
+  const img = { src: actor.asset ? `https://media.licdn.com/dms/image/v2/${actor.asset}/company-logo_100_100/x` : 'https://media.licdn.com/dms/image/v2/P/profile-displayphoto/x' };
+  const box = { querySelector: q => (q.includes('img') ? img : { innerText: actor.name }) };
+  const btn = { disabled: false, scrollIntoView() {}, getBoundingClientRect: () => ({ x: 10, y: 20, width: 4, height: 6 }) };
+  return vm.runInNewContext(expr, { document: { querySelector: q => (q.includes('settings-entry') ? box : btn) } });
+};
+const isActorRead = e => e.includes('const linkedinActorProblem');
 const isIds = e => e.includes('matchAll(/@');
 const isAccount = e => e.includes('/passport/web/account/info/');
 const isVideoText = e => e.includes('browse-video-desc') && e.includes('closest');
@@ -372,7 +381,8 @@ test('fix 4: the LinkedIn actor must be company 145349037 itself, re-checked rig
   assert.match(linkedinActorProblem({ ...actor, asset: null }, company, o), /not a company logo/);
   assert.match(linkedinActorProblem({ ...actor, asset: 'OTHERASSET' }, company, o), /not the logo of company/);
   assert.match(linkedinActorProblem({ ...actor, name: 'Abdulaziz Zaidan' }, company, o), /posts as/);
-  const s = fakeSession({ ev: e => e.includes('/voyager/api/organization/companies/') ? company : e.includes('company-logo') ? { ...actor, asset: null } : 'cap' });
+  const member = composer({ name: 'Bona | بونا', asset: null });
+  const s = fakeSession({ ev: e => e.includes('/voyager/api/organization/companies/') ? company : isActorRead(e) ? member(e) : 'cap' });
   await assert.rejects(linkedinPost(s, { ...o, caption: 'cap' }), e => e.kind === 'wrong-actor' && e.beforeClick === true);
   assert.equal(s.log.clicks.length, 0, 'Post never clicked');
 });
@@ -447,13 +457,12 @@ test('fix 6: a literal {{AD_LICENCE}} anywhere in the caption or the rendered te
 
 test('fix 7: a dry run takes the channel lock, so it cannot discard a live run\'s draft', async () => {
   const sb = sandbox(), lock = lockPath(sb.data, 'tiktok');
-  fs.mkdirSync(path.dirname(lock), { recursive: true });
-  fs.writeFileSync(lock, `${process.pid} live\n`);
+  const held = acquireLock(lock); // a live run holding the kernel lock
   const x = deps();
   await assert.rejects(run('tiktok', { dry: true, env: sb.env, root: sb.root, now: NOW, clock: () => NOW, log: quiet, kind: 'property' }, x.d), /another run holds/);
   assert.deepEqual(x.calls, []);
+  held();
 });
-
 test('fix 8: ensure-deps never leaves the tree without node_modules when npm ci fails; the unit sets a writable npm cache', () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const script = path.join(here, '../../ops/systemd/ensure-deps.sh');
@@ -471,28 +480,23 @@ test('fix 8: ensure-deps never leaves the tree without node_modules when npm ci 
   assert.match(unit, /Environment=npm_config_cache=%h\/bona-data\/\.npm/);
 });
 
-test('fix 9: the lock outlives the unit timeout, a dead holder is taken over, and SIGTERM cleanup closes the tab, unstages and releases', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-lock-'));
-  const lock = path.join(dir, '.publish.lock');
-  fs.writeFileSync(lock, 'no pid here\n');
-  const t35 = Date.now() + 35 * 60_000;
-  assert.throws(() => acquireLock(lock, { now: () => t35 }), /another run holds/, 'a 35 min old lock is still inside the 40 min unit timeout');
-  fs.writeFileSync(lock, '999999999 dead\n');
-  const rel = acquireLock(lock); assert.ok(fs.readFileSync(lock, 'utf8').startsWith(String(process.pid))); rel();
-  assert.ok(!fs.existsSync(lock));
+test('fix 9: SIGTERM cleanup closes the tab, unstages and releases the lock', async () => {
   const sb = sandbox(), x = deps(), closed = [], unstaged = [];
   x.d.cdp.withTab = async (_u, fn, opts) => { opts.onOpen({ id: 'TAB9' }); try { return await fn({ screenshot: async f => f, ev: async () => null }); } finally { opts.onClose(); } };
   x.d.cdp.closeTab = async id => closed.push(id);
   x.d.cdp.unstage = id => unstaged.push(id);
-  let lockedDuring = null;
-  x.d.sites.tiktokFill = async () => { await runCleanups(); lockedDuring = fs.existsSync(lockPath(sb.data, 'tiktok')); throw Object.assign(new Error('stopped'), { kind: 'sigterm' }); };
+  let freeDuring = null;
+  x.d.sites.tiktokFill = async () => {
+    await runCleanups();
+    try { acquireLock(lockPath(sb.data, 'tiktok'))(); freeDuring = true; } catch { freeDuring = false; }
+    throw Object.assign(new Error('stopped'), { kind: 'sigterm' });
+  };
   await assert.rejects(run('tiktok', { env: sb.env, root: sb.root, now: NOW, clock: () => NOW, log: quiet, kind: 'property' }, x.d), /stopped/);
   assert.deepEqual(closed, ['TAB9']);
   assert.ok(unstaged.length >= 1);
-  assert.equal(lockedDuring, false, 'lock released by the SIGTERM cleanup');
+  assert.equal(freeDuring, true, 'lock released by the SIGTERM cleanup');
   assert.equal(cleanups.size, 0);
 });
-
 test('fix 9: reel licence line uses the caption rule (number AND real expiry); popups are only dismissed inside dialogs', async () => {
   assert.ok(!reelLicenceLines({ ...A, licence: { adNumber: '7200000000' } }, advertiser).en.includes('Ad licence'), 'no expiry → no licence line, like the caption');
   assert.ok(reelLicenceLines({ ...A, licence: { adNumber: '7200000000', adExpiry: '2026-12-31' } }, advertiser).en.includes('Ad licence 7200000000 · Expires 2026-12-31'));
@@ -524,6 +528,7 @@ import { spawn } from 'node:child_process';
 class El {
   constructor(tag, attrs = {}, kids = [], text = '') { this.tag = tag; this.attrs = attrs; this.kids = kids; this.text = text; this.parent = null; for (const k of kids) k.parent = this; }
   getAttribute(n) { return this.attrs[n] ?? null; }
+  get parentElement() { return this.parent; }
   get innerText() { return [this.text, ...this.kids.map(k => k.innerText)].filter(Boolean).join(' '); }
   matches(sel) {
     return sel.split(',').some(part => {
@@ -592,12 +597,11 @@ test('round 2 fix 4: account and Page actor are re-checked AFTER the last readin
   assert.equal(tt.log.clicks.length, 0);
   const company = { entityUrn: 'urn:li:fs_normalized_company:145349037', name: 'Bona | بونا', logoAsset: 'urn:li:digitalmediaAsset:A1', canAdmin: true };
   let waited = false;
-  const li = fakeSession({ ev: e => e.includes('/voyager/api/organization/companies/') ? (waited ? { ...company, canAdmin: false } : company) : e.includes('company-logo') ? { name: 'Bona | بونا', asset: 'A1' } : 'cap' });
+  const li = fakeSession({ ev: e => e.includes('/voyager/api/organization/companies/') ? (waited ? { ...company, canAdmin: false } : company) : isActorRead(e) ? composer()(e) : 'cap' });
   li.waitFor = async () => { waited = true; return true; };
   await assert.rejects(SITES.linkedinPost(li, { companyId: '145349037', pageName: 'Bona | بونا', caption: 'cap' }), e => e.kind === 'wrong-actor' && e.beforeClick);
   assert.equal(li.log.clicks.length, 0);
 });
-
 test('round 2 fix 5: a caption mismatch found before the click is confirmed-not-published, not uncertain', async () => {
   const s = fakeSession({ ev: e => isAccount(e) ? 'bonarealestatesa' : 'something else' });
   await assert.rejects(SITES.tiktokPost(s, { handle: 'bonarealestatesa', caption: 'cap', polls: 1, every: 0 }), e => e.kind === 'caption-mismatch' && e.beforeClick === true);
@@ -609,29 +613,98 @@ test('round 2 fix 5: a caption mismatch found before the click is confirmed-not-
   assert.deepEqual(readLedgerStrict(ledgerPath(sb.data, 'tiktok')).rows.map(r => r.status), ['intent', 'confirmed-not-published']);
 });
 
-test('round 2 fix 1: stale-lock takeover is atomic across real processes, and release honours the ownership token', async () => {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const mod = path.join(here, '../social/lib/browser-daily.mjs');
+
+// ================================================================== review round 3 (Codex HOLD)
+const libDaily = path.join(path.dirname(fileURLToPath(import.meta.url)), '../social/lib/browser-daily.mjs');
+const holder = (lock, extra = '') => spawn(process.execPath, ['--input-type=module', '-e',
+  `import { acquireLock } from ${JSON.stringify(libDaily)}; try { acquireLock(${JSON.stringify(lock)}); console.log('GOT'); } catch { console.log('NO'); } ${extra}`]);
+const firstLine = c => new Promise(res => { let out = ''; c.stdout.on('data', d => { out += d; if (out.includes('\n')) res(out.trim()); }); c.on('close', () => res(out.trim())); });
+
+test('round 3 fix 1: the channel lock is a kernel flock — one winner across processes, freed the instant a holder is SIGKILLed, file contents irrelevant', async () => {
   for (let round = 0; round < 3; round++) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-race-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-flock-'));
     const lock = path.join(dir, '.publish.lock'), go = path.join(dir, 'go');
     fs.writeFileSync(lock, '999999999 deadbeef stale\n');
-    const child = `import { acquireLock } from ${JSON.stringify(mod)}; import fs from 'node:fs';
-      while (!fs.existsSync(${JSON.stringify(go)})) {}
-      let r; try { r = acquireLock(${JSON.stringify(lock)}); console.log('GOT'); } catch { console.log('NO'); }
-      setTimeout(() => r?.(), 1500);`;
-    const kids = Array.from({ length: 10 }, () => new Promise(res => {
-      let out = ''; const c = spawn(process.execPath, ['--input-type=module', '-e', child]);
-      c.stdout.on('data', d => { out += d; }); c.on('close', () => res(out.trim()));
-    }));
+    const kids = Array.from({ length: 10 }, () => {
+      const c = spawn(process.execPath, ['--input-type=module', '-e', `import { acquireLock } from ${JSON.stringify(libDaily)}; import fs from 'node:fs';
+        while (!fs.existsSync(${JSON.stringify(go)})) {}
+        let r; try { r = acquireLock(${JSON.stringify(lock)}); console.log('GOT'); } catch { console.log('NO'); }
+        setTimeout(() => r?.(), 1500);`]);
+      return new Promise(res => { let out = ''; c.stdout.on('data', d => { out += d; }); c.on('close', () => res(out.trim())); });
+    });
     setTimeout(() => fs.writeFileSync(go, ''), 700);
-    const got = (await Promise.all(kids)).filter(x => x === 'GOT').length;
-    assert.equal(got, 1, `round ${round}: exactly one process may take a stale lock (got ${got})`);
+    assert.equal((await Promise.all(kids)).filter(x => x === 'GOT').length, 1, `round ${round}: exactly one winner`);
   }
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-token-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-flock-'));
   const lock = path.join(dir, '.publish.lock');
-  const release = DAILY.acquireLock(lock);
-  fs.writeFileSync(lock, `${process.pid} someone-elses-nonce\n`);
-  release();
-  assert.ok(fs.existsSync(lock), 'release() must not unlink a lock that is no longer ours');
+  const h = holder(lock, 'setInterval(() => {}, 1000);');
+  assert.equal(await firstLine(h), 'GOT');
+  // A dead pid written into the file means nothing: the kernel, not the file, says who holds it.
+  fs.writeFileSync(lock, '999999999 deadbeef\n');
+  assert.throws(() => acquireLock(lock), /another run holds/);
+  h.kill('SIGKILL');
+  await new Promise(r => h.on('close', r));
+  const mine = acquireLock(lock); // no staleness wait, no takeover: free at once
+  mine();
+});
+
+test('round 3 fix 1: under the unit, the inherited flock fd is verified, never trusted blind', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-flock-'));
+  const lock = path.join(dir, '.publish.lock'), other = path.join(dir, 'other.lock');
+  const probe = `import { acquireLock } from ${JSON.stringify(libDaily)}; try { acquireLock(process.argv[1]); console.log('verified'); } catch (e) { console.log('refused'); }`;
+  const wrap = (target) => spawnSync('bash', ['-c', `exec 9>>"$1" && /usr/bin/flock -n -E 75 9 && BONA_LOCK_FD=9 exec "$3" --input-type=module -e "$4" "$2"`, 'x', target, lock, process.execPath, probe], { encoding: 'utf8' }).stdout.trim();
+  assert.equal(wrap(lock), 'verified', 'ExecStart holds it on fd 9, node checks fd 9 is this file and holds it');
+  assert.equal(wrap(other), 'refused', 'an fd on some other file is refused');
+  const unit = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../../ops/systemd/bona-browser@.service'), 'utf8');
+  assert.match(unit, /ExecStart=.*\/usr\/bin\/flock -n -E 75 9 && BONA_LOCK_FD=9 exec node scripts\/social\/browser-publish\.mjs/);
+});
+
+test('round 3 fix 2: a nested / reshared container is never a candidate, even when it carries the submitted caption', async () => {
+  const caption = 'Villa BONA-A\nFor sale\n\n#BonaRealEstate';
+  const nested = new El('div', { 'data-urn': 'urn:li:share:3000000002' }, [new El('div', { class: 'update-components-text' }, [], 'Villa BONA-A For sale #BonaRealEstate')]);
+  const outer = new El('div', { 'data-urn': 'urn:li:activity:3000000001' }, [new El('div', { class: 'update-components-text' }, [], 'Reposting this'), nested]);
+  const root = new El('main', {}, [outer]);
+  const c = await SITES.linkedinPostCandidates(domSession(root));
+  assert.equal(c.map(x => x.key).join(','), 'activity:3000000001', 'only the top-level post');
+  assert.equal(SITES.bindNewPost(c, [], { caption, evidence: 'BONA-A' }), null);
+});
+
+test('round 3 fix 3: LinkedIn — company record first, then actor read and button target in ONE evaluation, then only the click', async () => {
+  const company = { entityUrn: 'urn:li:fs_normalized_company:145349037', name: 'Bona | بونا', logoAsset: 'urn:li:digitalmediaAsset:A1', canAdmin: true };
+  const s = fakeSession({ ev: e => e.includes('/voyager/api/organization/companies/') ? company : isActorRead(e) ? composer()(e) : e.includes('toast') ? 'https://www.linkedin.com/feed/update/urn:li:activity:1/' : 'cap' });
+  await SITES.linkedinPost(s, { companyId: '145349037', pageName: 'Bona | بونا', caption: 'cap' });
+  const ops = s.log.ops, i = ops.indexOf('actor-read');
+  assert.ok(i > 0, 'the actor is read in the combined evaluation');
+  assert.equal(ops[i + 1], 'clickAt', `nothing between the actor read and the click (got ${ops.slice(i, i + 3)})`);
+  assert.deepEqual(s.log.clicks, ['clickAt 12,23'], 'clicked at the button the same evaluation measured');
+});
+
+test('round 3 fix 4: long captions are read in full — LinkedIn from the post\'s own page with "see more" expanded, TikTok with "more" expanded', async () => {
+  const caption = 'Villa BONA-A\n' + 'Long line of the property description. '.repeat(12) + '\n#BonaRealEstate';
+  const full = caption.replace(/\n/g, ' '), clamped = full.slice(0, 120) + '…see more';
+  let expanded = false;
+  const li = fakeSession({ ev: (e, cur) => {
+    if (e.startsWith('/*expand*/')) { if (cur.includes('/feed/update/')) expanded = true; return 1; }
+    if (e.includes('flatMap')) return [{ key: 'activity:4000000001', text: cur.includes('/feed/update/') && expanded ? full : clamped }];
+    return null; } });
+  assert.equal(await linkedinConfirm(li, '145349037', [], { caption, evidence: 'BONA-A', timeoutMs: 30, every: 0, settleMs: 0 }), 'https://www.linkedin.com/feed/update/urn:li:activity:4000000001/');
+  assert.ok(li.log.navs.includes('https://www.linkedin.com/feed/update/urn:li:activity:4000000001/'));
+  let ttExpanded = false;
+  const tt = fakeSession({ ev: e => {
+    if (e.startsWith('/*expand*/')) { ttExpanded = true; return 1; }
+    if (isIds(e)) return ['555'];
+    if (isVideoText(e)) return ttExpanded ? full : full.slice(0, 90) + '… more';
+    return null; } });
+  assert.equal(await tiktokConfirm(tt, 'bonarealestatesa', [], { caption, evidence: 'BONA-A', timeoutMs: 30, every: 0, settleMs: 0 }), 'https://www.tiktok.com/@bonarealestatesa/video/555');
+  // Not loosened: a clamped text alone never binds.
+  assert.equal(SITES.bindNewPost([{ key: 'k', text: clamped }], [], { caption, evidence: 'BONA-A' }), null);
+});
+
+test('round 3 fix 5: the runbook names the Voyager fields relied on and shows what a refusal looks like in the journal', () => {
+  const doc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../../docs/browser-publishing.md'), 'utf8');
+  assert.match(doc, /## Voyager fields relied on/);
+  for (const f of ['entityUrn', 'name', 'logos.logo.digitalmediaAsset', 'viewerPermissions.canUpdateOrganizationProfile']) assert.ok(doc.includes(f), f);
+  assert.match(doc, /## What a refusal looks like/);
+  assert.match(doc, /"status":"needs-attention"/);
+  assert.match(doc, /wrong-actor/);
 });

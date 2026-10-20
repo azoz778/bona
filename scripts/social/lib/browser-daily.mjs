@@ -6,8 +6,8 @@
 // Instagram/Facebook daily posts (marketing/daily/property-reviews.json under the 2026-10-05
 // ad-licence waiver: same eligibility, same fingerprints, same reviewed caption and disclosures),
 // interleaved with licence-free education. One post per channel per Riyadh day, fully automatic.
-import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { ksaNow } from './daily-pack.mjs';
 import { SITE, dayState, unsettled, chooseProperty, reviewedCopy, propertyHashtags, sha256, showsPrice, showsLicence, photoNoteText } from './property-daily.mjs';
@@ -77,62 +77,37 @@ export function appendRecord(file, row, now = () => new Date()) {
     fs.fsyncSync(fd);
   } finally { fs.closeSync(fd); }
 }
-const alive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
-const sleepSync = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-/** A lock file's holder: { raw, pid, age } or null when it vanished meanwhile. */
-function holderOf(file, now) {
-  try {
-    const raw = fs.readFileSync(file, 'utf8');
-    return { raw, pid: Number.parseInt(raw, 10), age: now() - fs.statSync(file).mtimeMs };
-  } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
-}
-const staleHolder = (h, staleMs) => (Number.isInteger(h.pid) && h.pid > 0 ? !alive(h.pid) : h.age > staleMs);
-function createExclusive(file, body) {
-  const fd = fs.openSync(file, 'wx', 0o600);
-  try { fs.writeSync(fd, body); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-}
-/** Unlink only while the file still holds exactly `raw`: a lock is never removed on someone else's behalf. */
-function unlinkIfSame(file, raw) {
-  try { if (fs.readFileSync(file, 'utf8') === raw) fs.rmSync(file, { force: true }); } catch { /* gone */ }
-}
+export const FLOCK = process.env.BONA_FLOCK_BIN || '/usr/bin/flock';
+/** flock(LOCK_EX|LOCK_NB) on an fd we hold: flock(1) gets the fd as its fd 3, locks that open file description and exits; the lock stays with our fd. */
+const flockFd = fd => spawnSync(FLOCK, ['-n', '-E', '75', '3'], { stdio: ['ignore', 'ignore', 'pipe', fd] });
 /**
  * Exclusive per-channel lock, dry runs included (a dry run discards drafts, so it must never
- * overlap a live run). Atomic by construction:
- *   - the lock is only ever created with O_EXCL, holding "pid nonce time" (the ownership token);
- *   - a live holder is never displaced; a dead pid's lock (or a pid-less one older than staleMs,
- *     longer than the unit's 40 min) may be taken over, but only by whoever wins the O_EXCL
- *     `<lock>.takeover` mutex, who re-reads the lock and removes it only if it is still the same
- *     stale file — everyone else backs off and re-evaluates, then meets the new holder;
- *   - release() unlinks only while the file still carries this run's token.
- * A taker that crashed inside the takeover (milliseconds) leaves a mutex that is cleared the same
- * way once its pid is dead. Returns release().
+ * overlap a live run). A KERNEL lock: flock(2) on an open file description this process holds for
+ * the whole run. The kernel drops it when the process exits or is killed, so there is no stale
+ * lock, no takeover and no token. Under the unit, ExecStart already holds it on fd BONA_LOCK_FD
+ * (inherited); that fd is checked to be this lock file and to hold the lock, never trusted blind.
+ * Returns release().
  */
-export function acquireLock(file, { staleMs = 45 * 60_000, now = () => Date.now(), attempts = 40 } = {}) {
+export function acquireLock(file, { env = process.env } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const token = `${process.pid} ${crypto.randomBytes(12).toString('hex')}`;
-  const body = `${token} ${new Date(now()).toISOString()}\n`;
-  const mutex = `${file}.takeover`;
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    try {
-      createExclusive(file, body);
-      let released = false;
-      return () => { if (!released) { released = true; unlinkIfSame(file, body); } };
-    } catch (e) { if (e.code !== 'EEXIST') throw e; }
-    const h = holderOf(file, now);
-    if (!h) continue;
-    if (!staleHolder(h, staleMs)) throw new Error(`another run holds ${file} (pid ${Number.isInteger(h.pid) ? h.pid : '?'}, ${Math.round(h.age / 1000)} s old) — wait for it`);
-    try { createExclusive(mutex, body); }
-    catch (e) {
-      if (e.code !== 'EEXIST') throw e;
-      const m = holderOf(mutex, now);
-      if (m && staleHolder(m, 60_000)) unlinkIfSame(mutex, m.raw);
-      sleepSync(20 + Math.floor(Math.random() * 30));
-      continue;
-    }
-    try { const again = holderOf(file, now); if (again && again.raw === h.raw) fs.rmSync(file, { force: true }); }
-    finally { unlinkIfSame(mutex, body); }
+  const inherited = env.BONA_LOCK_FD != null && env.BONA_LOCK_FD !== '' ? Number(env.BONA_LOCK_FD) : null;
+  if (inherited != null) {
+    let same = false;
+    try { const a = fs.fstatSync(inherited), b = fs.statSync(file); same = a.ino === b.ino && a.dev === b.dev; } catch { /* not open */ }
+    if (!same) throw new Error(`BONA_LOCK_FD=${env.BONA_LOCK_FD} is not an open descriptor of ${file}`);
+    const r = flockFd(inherited);
+    if (r.status !== 0) throw new Error(`BONA_LOCK_FD=${env.BONA_LOCK_FD} does not hold the lock on ${file} (flock exit ${r.status ?? r.error?.code})`);
+    return () => {};
   }
-  throw new Error(`could not take ${file}`);
+  const fd = fs.openSync(file, 'a', 0o600);
+  const r = flockFd(fd);
+  if (r.status !== 0) {
+    fs.closeSync(fd);
+    if (r.status === 75) throw new Error(`another run holds ${file} — wait for it`);
+    throw new Error(`could not lock ${file}: ${r.error?.message ?? String(r.stderr ?? '').trim()} (exit ${r.status})`);
+  }
+  let released = false;
+  return () => { if (!released) { released = true; try { fs.closeSync(fd); } catch { /* closed */ } } };
 }
 export const entryId = (channel, date) => `bona-${channel}-${date}`;
 
