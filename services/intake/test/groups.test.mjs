@@ -29,9 +29,15 @@ test('a selected group whose history could not be seeded is not polled', () => {
   assert.deepEqual(pollableGroups(undefined, announced), []);
 });
 
-test('discovery off + a configured group pollable: never scans, not even on the first loop', () => {
-  assert.equal(scanDue({ now: 1e12, lastScan: 0, scanMs: 0, pollable: 1 }), false);
-  assert.equal(scanDue({ now: 1e12, lastScan: 1, scanMs: 0, pollable: 1 }), false);
+test('discovery off + a configured group pollable: one discovery per run, then never', () => {
+  const t = 1e12;
+  // first loop after a restart: the subject-matched groups are only found by a discovery
+  assert.equal(scanDue({ now: t, lastScan: 0, scanMs: 0, pollable: 1 }), true);
+  // that discovery failed (throttled): retried slowly, never every poll
+  assert.equal(scanDue({ now: t + 60000, lastScan: t, scanMs: 0, pollable: 1 }), false);
+  assert.equal(scanDue({ now: t + NO_GROUP_RESCAN_MS, lastScan: t, scanMs: 0, pollable: 1 }), true);
+  // it succeeded: off for the rest of the run
+  assert.equal(scanDue({ now: t + 365 * 864e5, lastScan: t, scanMs: 0, pollable: 1, discovered: true }), false);
 });
 
 test('discovery off + nothing pollable: scans once, then only every NO_GROUP_RESCAN_MS', () => {
@@ -53,9 +59,9 @@ test('discovery off: a second configured group still waiting keeps the slow resc
   const t = 1e12;
   const waiting = waitingConfigured(['120363135705763548@g.us', '999@g.us'], [{ id: '120363135705763548@g.us' }]);
   assert.equal(waiting, 1);
-  assert.equal(scanDue({ now: t, lastScan: 0, scanMs: 0, pollable: 1, waiting }), true);
-  assert.equal(scanDue({ now: t + 60000, lastScan: t, scanMs: 0, pollable: 1, waiting }), false);
-  assert.equal(scanDue({ now: t + NO_GROUP_RESCAN_MS, lastScan: t, scanMs: 0, pollable: 1, waiting }), true);
+  assert.equal(scanDue({ now: t, lastScan: 0, scanMs: 0, pollable: 1, waiting, discovered: true }), true);
+  assert.equal(scanDue({ now: t + 60000, lastScan: t, scanMs: 0, pollable: 1, waiting, discovered: true }), false);
+  assert.equal(scanDue({ now: t + NO_GROUP_RESCAN_MS, lastScan: t, scanMs: 0, pollable: 1, waiting, discovered: true }), true);
 });
 
 test('waitingConfigured ignores non-group jids, duplicates and groups already polled', () => {
