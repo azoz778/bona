@@ -1222,6 +1222,74 @@
       }
     ]
   },
+  "BONA-059": {
+    "status": "approved",
+    "reviewedAt": "2026-10-20T23:54:58.585Z",
+    "reviewer": "Owner 2026-10-21 approved plot cards for land (cards: land-only). Claude visual review: card 1 the plot satellite still (ring on the plot, labelled approximate, Esri source), card 2 the facts (625 sqm corner plot (25 m by 25 m) x SAR 6,300/sqm = SAR 3,937,500, matches; streets south and west), card 3 the area still with district, city and country; Arabic connected and right-to-left, nothing cut off, numbers match the listing.",
+    "factsSha256": "b69fad195af15aac941ec5b10986404cc6412527300ad03ff61274dc015e4a7a",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "e9c083a9f73ddac6bf24efae3f787eed78dddf4a34fae17efffea35b61a74295",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. تُؤكَّد التفاصيل والحالة والخدمات عند المعاينة.",
+      "en": "Prices shown are asking prices and may change. Details, condition and services are confirmed at viewing."
+    },
+    "photos": [
+      {
+        "url": "https://bona-real-estate.com/social/property/BONA-059/card-satellite-ffcd6ca2ca82.jpg",
+        "sha256": "ffcd6ca2ca82935d843d1af96ea3109143ac05b23fd3d87608287d5bed4ce469",
+        "width": 1080,
+        "height": 1350,
+        "kind": "card",
+        "card": "satellite",
+        "source": {
+          "url": "https://bona-real-estate.com/land/LND-023.jpg",
+          "sha256": "65261a3748d10a2c55ea9c0ccb86ba25c54fd2c2da09725bcaa3bc8ce737343e",
+          "width": 1024,
+          "height": 768
+        },
+        "visuallyApproved": true,
+        "alt": {
+          "ar": "صورة جوية، الموقع تقريبي — أرض زاوية، الخالدية",
+          "en": "Satellite view, approximate — Corner Plot, Al Khalidiyah"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/social/property/BONA-059/card-facts-d6b23592609e.jpg",
+        "sha256": "d6b23592609e10a03d1869f5c27f513711e27d7fb9be51c4b5315d1040177cc6",
+        "width": 1080,
+        "height": 1350,
+        "kind": "card",
+        "card": "facts",
+        "source": null,
+        "visuallyApproved": true,
+        "alt": {
+          "ar": "تفاصيل الأرض — أرض زاوية، الخالدية",
+          "en": "Plot facts — Corner Plot, Al Khalidiyah"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/social/property/BONA-059/card-location-4fe069dd6911.jpg",
+        "sha256": "4fe069dd691124497ec2470fd74ad24ab398b5a50a2d2635272d754176ef314a",
+        "width": 1080,
+        "height": 1350,
+        "kind": "card",
+        "card": "location",
+        "source": {
+          "url": "https://bona-real-estate.com/land/LND-023-z15.jpg",
+          "sha256": "52ae3d52ac9f0c86c48090355a9e76a8a6d401d3b875116724c7e84d3b18bbf2",
+          "width": 1024,
+          "height": 768
+        },
+        "visuallyApproved": true,
+        "alt": {
+          "ar": "صورة جوية للمنطقة، الموقع تقريبي — أرض زاوية، الخالدية",
+          "en": "Satellite view of the area, approximate — Corner Plot, Al Khalidiyah"
+        }
+      }
+    ]
+  },
   "BONA-W002": {
     "status": "approved",
     "reviewedAt": "2026-10-06T03:12:05.702Z",
