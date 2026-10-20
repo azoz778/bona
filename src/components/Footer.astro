@@ -46,6 +46,7 @@ const nav: [string, string][] = [
           <li><a href={`tel:${site.phone.e164}`} class="link text-ivory/85 hover:text-ivory" dir="ltr" data-cta="footer_tel">{site.phone.display}</a></li>
           {site.email && <li><a href={`mailto:${site.email}`} class="link text-ivory/85 hover:text-ivory" dir="ltr">{site.email}</a></li>}
           <li><a href={site.instagram.url} target="_blank" rel="noopener" class="link inline-flex items-center gap-2 text-ivory/85 hover:text-ivory"><Icon name="instagram" size={16} />@{site.instagram.handle}</a></li>
+          {site.social.map((s) => <li><a href={s.url} target="_blank" rel="noopener" class="link text-ivory/85 hover:text-ivory" dir="ltr">{s.name}</a></li>)}
         </ul>
       </div>
       <div class="lg:col-span-3">
