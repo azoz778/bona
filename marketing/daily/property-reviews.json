@@ -1225,6 +1225,94 @@
       }
     ]
   },
+  "BONA-W010": {
+    "status": "approved",
+    "reviewedAt": "2026-10-20T23:51:06.101Z",
+    "reviewer": "Owner 2026-10-21 approved re-cropping W010's photos to 4:5. Claude visual review of the re-cropped files (commit 1f02ef1): frames 6 (great hall, cover), 3 (living room), 4 (master suite with cove lighting), 2 (walnut entrance door), 5 (bedroom), 8 (bathroom, glass shower) are clean photographs of the apartment at 1355x1693 (0.80), no people, watermarks or text; frame 1 (exterior, landscape 1.33 after the page margin was trimmed) and 7 (second bedroom, near-duplicate of 5) left out. Reviewed from the repository's public/ before deploy: eligible on the publisher once the site serves these bytes.",
+    "factsSha256": "48d6be622bbb34861fe58c01750c04a7cc81de84089ec15a5af679ed41c2b496",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "f9bcde387b1be87461829c992234300af6cb4f68375c893dee6c6125189e65c9",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. تُؤكَّد التفاصيل والحالة والخدمات عند المعاينة.",
+      "en": "Prices shown are asking prices and may change. Details, condition and services are confirmed at viewing."
+    },
+    "photos": [
+      {
+        "url": "https://bona-real-estate.com/listings/alhayat-residence-al-salama/06.jpg",
+        "sha256": "7d67ffadcd91999cdd9d037502df52772f5e0852c3b4285c309ec655dd0691b2",
+        "width": 1355,
+        "height": 1693,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Great hall — Alhayat Residence, Al-Salama",
+          "ar": "القاعة الكبرى — الحياة ريزيدنس - السلامة"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/alhayat-residence-al-salama/03.jpg",
+        "sha256": "273c9fcfe0ed8af4f0583ef2f95a932d544038b6ba9bee99cb97ee2d3cda4e71",
+        "width": 1355,
+        "height": 1693,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Living room — Alhayat Residence, Al-Salama",
+          "ar": "غرفة المعيشة — الحياة ريزيدنس - السلامة"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/alhayat-residence-al-salama/04.jpg",
+        "sha256": "60f55483b70895598060114b5c22a57b3d70691ded7350f9f4b567ad223a5acc",
+        "width": 1355,
+        "height": 1693,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Master suite — Alhayat Residence, Al-Salama",
+          "ar": "الجناح الرئيسي — الحياة ريزيدنس - السلامة"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/alhayat-residence-al-salama/02.jpg",
+        "sha256": "aa162ee7559b562327537e51c0ca114547ad21995c3d1dd9c525957a6deb968f",
+        "width": 1355,
+        "height": 1693,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Entrance — Alhayat Residence, Al-Salama",
+          "ar": "المدخل — الحياة ريزيدنس - السلامة"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/alhayat-residence-al-salama/05.jpg",
+        "sha256": "fa87113e98927dd7b4eeebde347e49bb49d01a7b5628069b8f96a91f1308af18",
+        "width": 1355,
+        "height": 1693,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Bedroom — Alhayat Residence, Al-Salama",
+          "ar": "غرفة النوم — الحياة ريزيدنس - السلامة"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/alhayat-residence-al-salama/08.jpg",
+        "sha256": "2c9d9e3b0fc1039c02604b47ac5003c81780b6212c13f4298c1c65ab53d8b2a8",
+        "width": 1355,
+        "height": 1693,
+        "kind": "photograph",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Bathroom — Alhayat Residence, Al-Salama",
+          "ar": "الحمام — الحياة ريزيدنس - السلامة"
+        }
+      }
+    ]
+  },
   "BONA-W011": {
     "status": "approved",
     "reviewedAt": "2026-10-20T22:57:19.888Z",
