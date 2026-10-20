@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { ksaNow } from './daily-pack.mjs';
-import { SITE, dayState, unsettled, chooseProperty, reviewedCopy, propertyHashtags, sha256, showsPrice, showsLicence, photoNoteText, repeatIndex, variedReview } from './property-daily.mjs';
+import { SITE, dayState, unsettled, chooseProperty, reviewedCopy, propertyHashtags, sha256, showsPrice, showsLicence, photoNoteText, pickFrames } from './property-daily.mjs';
 import { hookFor, subhookFor, typeLabel, placeLabel, specChips, priceText, t as tr, site } from './listing.mjs';
 import { refuseText } from './facebook.mjs';
 import { EDITORIAL } from './editorial.mjs';
@@ -159,15 +159,16 @@ export function chooseEducation(pool, events, channel, now = new Date(), repeatD
  * `events` are this channel's ledger rows; property rows carry listingId so chooseProperty()'s
  * repeat interval (the policy's repeatDays, through `rules`) applies per channel, exactly as on
  * Instagram and Facebook. `frames` is the review with its approved frames in this post's order
- * (variedReview(): the reviewed order the first time, another cover and order on each repeat);
+ * (pickFrames(): the reviewed order the first time, another cover and order on each repeat, never
+ * the sequence last posted on this channel);
  * `review` stays the review itself, which the caption and the re-check are bound to.
  */
 export function chooseToday({ channel, date, now = new Date(), listings = [], reviews = {}, advertiser = null, events = [], pool = [], repeatDays, rules, only = null }) {
   const prop = () => {
     const sel = chooseProperty(listings, reviews, advertiser, events, channel, now, repeatDays, rules);
     if (!sel.listing) return null;
-    const review = reviews[sel.listing.id], { review: frames, order } = variedReview(review, repeatIndex(events, channel, sel.listing.id));
-    return { kind: 'property', listing: sel.listing, review, frames, frameOrder: order.map(i => i + 1), rejected: sel.rejected };
+    const review = reviews[sel.listing.id], { review: frames, frameOrder, images } = pickFrames(review, events, channel, sel.listing.id);
+    return { kind: 'property', listing: sel.listing, review, frames, frameOrder, images, rejected: sel.rejected };
   };
   const edu = () => { const item = chooseEducation(pool, events, channel, now); return item ? { kind: 'education', item } : null; };
   // `only` (a human's --kind) takes that kind or nothing, never the other.

@@ -2,11 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT, ksaNow } from './lib/daily-pack.mjs';
-import { ACCOUNT, SITE, sha256, fingerprint, eligibility, chooseProperty, dayState, entryFor, policyRules, unsettled, repeatIndex, variedReview } from './lib/property-daily.mjs';
-import { withLock, whoami, pageToken, publishEntry, appendLedger, refusal } from './lib/facebook.mjs';
+import { ACCOUNT, SITE, sha256, fingerprint, eligibility, chooseProperty, dayState, entryFor, policyRules, unsettled, pickFrames, recentDuplicate, DEDUPE_DAYS } from './lib/property-daily.mjs';
+import { withLock, whoami, pageToken, publishEntry, appendLedger, refusal, captionFromEntry } from './lib/facebook.mjs';
 import { createGraph, checkCaption } from './lib/graph.mjs';
 import { run as publishInstagram, indexLedger, composeCaption, hasLicencePlaceholder, decide, normaliseEntry } from './publish.mjs';
-import { dataDir, resolveLedgerPath } from './lib/ledger.mjs';
+import { dataDir, resolveLedgerPath, contentHash } from './lib/ledger.mjs';
 
 const read = file => JSON.parse(fs.readFileSync(file,'utf8'));
 const rows = (file,missing=[]) => fs.existsSync(file) ? fs.readFileSync(file,'utf8').split('\n').filter(Boolean).map(JSON.parse) : missing;
@@ -153,9 +153,9 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
       console.log(JSON.stringify(row));return row;
     }
     const p=selected.listing,review=reviews[p.id];
-    // A repeat of this listing on this channel gets another cover and frame order, from its approved frames only.
-    const {review:framed,order}=variedReview(review,repeatIndex(history,channel,p.id));
-    const frameOrder=order.map(i=>i+1);
+    // A repeat of this listing on this channel gets another cover and frame order, from its approved frames only,
+    // never the image sequence it was last posted with on this channel.
+    const {review:framed,frameOrder,images}=pickFrames(review,history,channel,p.id);
     console.log(`Frames for ${p.id} on ${channel}: ${frameOrder.join(',')} (reviewed order 1..${review.photos.length})`);
     await identity(channel,env,fetchImpl);
     const assetDir=path.join(dir,'property-assets',date,channel);
@@ -165,6 +165,12 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
     if(checkCaption(composeCaption(entry)).problems.length)throw new Error('Reviewed caption does not fit platform limits');
     const refused=publisherRefusal(entry,channel,{igLedger:channel==='instagram'?rows(igLedger):[],now});
     if(refused)throw new Error(`The ${channel} publisher would refuse this post (${refused}); stopped before any record`);
+    // The duplicate guard: the same images in the same order with the same caption as a post published in the last
+    // DEDUPE_DAYS×24 h. Instagram's is publish.mjs run()'s own (same hash, same ledger); Facebook's is this one.
+    const fbLedger=path.join(data,'fb/published.jsonl');
+    const hash=channel==='instagram'?contentHash(entry.images,checkCaption(composeCaption(entry)).text):contentHash(entry.images,captionFromEntry(entry));
+    const dup=recentDuplicate(channel==='instagram'?rows(igLedger):rows(fbLedger),hash,now);
+    if(dup&&dry)throw new Error(`The ${channel} post would repeat ${dup.id} (same images and caption within ${DEDUPE_DAYS} days); no post`);
     // Re-read the live source immediately before intent/upload: changed facts, withdrawn
     // stock, expired licence and changed advertiser all stop this run.
     const current=await catalogue(fetchImpl,now),updated=current.listings.find(x=>x.id===p.id);
@@ -176,7 +182,11 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
     // A slow preflight must not record intent or send after the slot: check it again on the real clock.
     const sendAt=ksaNow(clock());
     if(sendAt.date!==date||sendAt.time<'20:30'||sendAt.time>='23:00'){console.log('Outside daily slot at send time; no post');return {status:'not-due'};}
-    record(journal,{channel,date,id:entry.id,listingId:p.id,status:'intent',frameOrder});
+    record(journal,{channel,date,id:entry.id,listingId:p.id,status:'intent',frameOrder,images});
+    if(dup&&channel==='facebook'){
+      record(journal,{channel,date,id:entry.id,listingId:p.id,status:'confirmed-not-published',evidence:`duplicate of ${dup.id}: same images and caption within ${DEDUPE_DAYS} days; nothing was sent`});
+      throw new Error(`Facebook post not sent: same images and caption as ${dup.id}, published ${dup.ts??dup.at}; recorded confirmed-not-published, the next run retries`);
+    }
     try {
       let receipt;
       if(channel==='instagram') {
@@ -187,10 +197,10 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
         if(result.code!==0||!receipt)throw Object.assign(new Error('Instagram did not confirm publication'),result.skippedForLock?{lockReason:result.lockReason}:{});
       } else {
         receipt=await publishEntry(entry,{fetch:fetchImpl,pageToken:page.token,pageId:ACCOUNT.facebook,root});
-        appendLedger(path.join(data,'fb/published.jsonl'),{id:entry.id,date,listingId:p.id,status:'published',...receipt,at:new Date().toISOString()});
+        appendLedger(fbLedger,{id:entry.id,date,listingId:p.id,status:'published',...receipt,contentHash:hash,images,at:new Date().toISOString()});
         record(path.join(dir,'facebook.jsonl'),{id:entry.id,date,status:'published',...receipt});
       }
-      record(journal,{channel,date,id:entry.id,listingId:p.id,status:'published',frameOrder,mediaId:receipt.mediaId,postId:receipt.postId,permalink:receipt.permalink});
+      record(journal,{channel,date,id:entry.id,listingId:p.id,status:'published',frameOrder,images,mediaId:receipt.mediaId,postId:receipt.postId,permalink:receipt.permalink});
       console.log(JSON.stringify({status:'published',channel,id:entry.id,listingId:p.id,mediaId:receipt.mediaId,postId:receipt.postId,permalink:receipt.permalink}));
       return {status:'published',receipt};
     } catch(e) {

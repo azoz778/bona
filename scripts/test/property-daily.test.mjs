@@ -814,3 +814,178 @@ test('Instagram dry preflight: a repeat posts the approved frames under another 
     assert.deepEqual(ready.entry.caption, captionFor(p, a, r), 'the reviewed caption');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+// ------------------------------------------------ review of 8cc95c9: the duplicate boundary, end to end
+/** A 3-frame unlicensed listing approved 2026-10-05, policy repeatDays 14, posted on IG/FB on 2026-10-06 at 17:31Z. */
+const FIRST_POST_AT = '2026-10-06T17:31:00.000Z', REPEAT_AT = new Date('2026-10-20T17:30:00Z'); // D+14 at 20:30, 23 h 59 min short of 14×24 h
+function repeatFixture(prefix) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  writePolicy(root, { ...WAIVER_POLICY, repeatDays: 14 });
+  const { listing, advertiser: a } = fixture(); const p = { ...listing, licence: null };
+  const r = { ...waivedReview(p, a), reviewedAt: '2026-10-05T12:00:00Z' };
+  r.photos = r.photos.map((x, i) => ({ ...x, alt: { ar: `صورة ${i + 1}`, en: `Photo ${i + 1}` } }));
+  r.captionSha256 = sha256(JSON.stringify(reviewedCopy(p, a, r)));
+  fs.writeFileSync(path.join(root, 'marketing/daily/property-reviews.json'), JSON.stringify({ [p.id]: r }));
+  const data = path.join(root, 'data');
+  return { root, p, a, r, data, env: { ...LIVE_ENV, BONA_DATA: data }, journal: path.join(data, 'daily/property.jsonl'),
+    igLedger: path.join(data, 'ig/published.jsonl'), fbLedger: path.join(data, 'fb/published.jsonl') };
+}
+const writeRows = (file, xs) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, xs.map(x => JSON.stringify(x) + '\n').join('')); };
+/** The hash each publisher puts on its published lines, for `entry` with its photos in `order` (0-based). */
+async function hashes(f, order) {
+  const { contentHash } = await import('../social/lib/ledger.mjs');
+  const { composeCaption } = await import('../social/publish.mjs');
+  const { checkCaption } = await import('../social/lib/graph.mjs');
+  const { captionFromEntry } = await import('../social/lib/facebook.mjs');
+  const framed = { ...f.r, photos: order.map(i => f.r.photos[i]) }, urls = framed.photos.map(x => x.url);
+  return { urls,
+    instagram: contentHash(urls, checkCaption(composeCaption(entryFor(f.p, framed, f.a, 'instagram', '2026-10-20', ['a', 'b', 'c']))).text),
+    facebook: contentHash(urls, captionFromEntry(entryFor(f.p, framed, f.a, 'facebook', '2026-10-20', ['a', 'b', 'c']))) };
+}
+/** Seed the first post: journal (frameOrder 1,2,3) and the channel's own ledger with `hash` on it. */
+function seedFirstPost(f, channel, hash, urls) {
+  const id = `bona-daily-${channel === 'instagram' ? 'ig' : 'fb'}-2026-10-06`;
+  writeRows(f.journal, [{ channel, date: '2026-10-06', id, listingId: f.p.id, status: 'intent', at: '2026-10-06T17:30:05.000Z' },
+    { channel, date: '2026-10-06', id, listingId: f.p.id, status: 'published', frameOrder: [1, 2, 3], at: FIRST_POST_AT }]);
+  if (channel === 'instagram') writeRows(f.igLedger, [{ id, date: '2026-10-06', slot: '20:30', kind: 'carousel', status: 'published', mediaId: 'm-1', permalink: 'p-1', ts: FIRST_POST_AT, contentHash: hash, imageUrls: urls }]);
+  else writeRows(f.fbLedger, [{ id, date: '2026-10-06', listingId: f.p.id, status: 'published', postId: 'post-1', contentHash: hash, at: FIRST_POST_AT }]);
+  return id;
+}
+/** Graph stand-in that lets an Instagram carousel or a Facebook multi-photo post succeed, recording what was sent. */
+function graphOk(sent) {
+  let n = 0;
+  return async (u, init) => {
+    const method = init.method ?? 'GET';
+    if (method === 'HEAD') return new Response(null, { headers: { 'content-type': 'image/jpeg' } });
+    if (u.hostname !== 'graph.facebook.com') return undefined;
+    const params = new URLSearchParams(typeof init.body === 'string' ? init.body : init.body instanceof URLSearchParams ? init.body : '');
+    if (method === 'POST' && u.pathname.endsWith(`/${ACCOUNT.instagram}/media`)) { if (params.get('image_url') || u.searchParams.get('image_url')) sent.push(params.get('image_url') ?? u.searchParams.get('image_url')); return Response.json({ id: `container-${++n}` }); }
+    if (method === 'GET' && /\/container-\d+$/.test(u.pathname)) return Response.json({ status_code: 'FINISHED' });
+    if (method === 'POST' && u.pathname.endsWith('/media_publish')) return Response.json({ id: 'media-777' });
+    if (method === 'GET' && u.pathname.endsWith('/media-777')) return Response.json({ permalink: 'https://www.instagram.com/p/fixture/' });
+    if (method === 'POST' && u.pathname.endsWith(`/${ACCOUNT.facebook}/photos`)) { sent.push(await init.body.get('source').text()); return Response.json({ id: `photo-${++n}` }); }
+    if (method === 'POST' && u.pathname.endsWith(`/${ACCOUNT.facebook}/feed`)) return Response.json({ id: `${ACCOUNT.facebook}_999` });
+    return undefined;
+  };
+}
+const repeatSend = (channel, f, fetchImpl, over = {}) => propertyDaily(channel, { now: REPEAT_AT, clock: () => REPEAT_AT, root: f.root, env: f.env, fetchImpl, legacyTimersDisabled: () => true, ...over });
+function repeatStub(f, provider) {
+  const read = liveStub(f.p, f.a, f.r, () => REPEAT_AT), calls = [];
+  const fetchImpl = async (url, init = {}) => {
+    const u = new URL(url), method = init.method ?? 'GET';
+    calls.push(`${method} ${u.hostname}${u.pathname}`);
+    const answer = await provider(u, init);
+    if (answer !== undefined) return answer;
+    if (method !== 'GET') throw new Error(`unexpected ${method} ${u.pathname}`);
+    return read(url, init);
+  };
+  return { fetchImpl, writes: () => calls.filter(c => !c.startsWith('GET ') && !c.startsWith('HEAD ')) };
+}
+test('Instagram repeat on D+14 at 20:30, under 14×24 h after the first post: the reordered carousel has another content hash, so publish.mjs run() posts it', async () => {
+  const f = repeatFixture('bona-ig-repeat-ok-');
+  try {
+    const first = await hashes(f, [0, 1, 2]), repeat = await hashes(f, [1, 2, 0]);
+    assert.ok(REPEAT_AT - Date.parse(FIRST_POST_AT) < 14 * 86400000, 'inside publish.mjs\'s duplicate window');
+    assert.notEqual(repeat.instagram, first.instagram);
+    seedFirstPost(f, 'instagram', first.instagram, first.urls);
+    const sent = [], s = repeatStub(f, graphOk(sent));
+    const out = await repeatSend('instagram', f, s.fetchImpl);
+    assert.equal(out.status, 'published');
+    assert.deepEqual(sent, repeat.urls, 'the carousel children went out in the new order');
+    const rows = jsonl(f.igLedger), mine = rows.filter(x => x.id === 'bona-daily-ig-2026-10-20');
+    assert.deepEqual(mine.map(x => x.status), ['publishing', 'published']);
+    assert.equal(mine[1].contentHash, repeat.instagram, 'the preflight hash is exactly the one publish.mjs computes');
+    const journal = jsonl(f.journal).filter(x => x.date === '2026-10-20');
+    assert.deepEqual(journal.map(x => x.status), ['intent', 'published']);
+    assert.deepEqual(journal[1].frameOrder, [2, 3, 1]);
+    assert.deepEqual(journal[1].images, repeat.urls);
+    assert.equal(s.writes().filter(c => c.endsWith('/media_publish')).length, 1);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+test('Instagram: the SAME image order within 14×24 h is skipped as a duplicate by publish.mjs, nothing is sent, the attempt ends confirmed-not-published with an alert; a dry run says so first', async () => {
+  const f = repeatFixture('bona-ig-repeat-dup-');
+  try {
+    // The Instagram ledger knows a post with exactly the order the rotation will pick (2,3,1), e.g. one posted by hand.
+    const repeat = await hashes(f, [1, 2, 0]);
+    seedFirstPost(f, 'instagram', repeat.instagram, repeat.urls);
+    const dry = repeatStub(f, graphOk([]));
+    await assert.rejects(repeatSend('instagram', f, dry.fetchImpl, { dry: true }), /instagram post would repeat bona-daily-ig-2026-10-06/);
+    const sent = [], s = repeatStub(f, graphOk(sent));
+    const id = 'bona-daily-ig-2026-10-20';
+    await assert.rejects(repeatSend('instagram', f, s.fetchImpl), e => e.message === `Instagram post not sent (last ledger status for ${id}: skipped:duplicate); recorded confirmed-not-published, the next run retries`);
+    assert.deepEqual(sent, [], 'no container was created');
+    assert.deepEqual(s.writes(), [], 'nothing was sent to Instagram');
+    assert.deepEqual(jsonl(f.igLedger).filter(x => x.id === id).map(x => x.status), ['skipped:duplicate']);
+    const journal = jsonl(f.journal).filter(x => x.date === '2026-10-20');
+    assert.deepEqual(journal.map(x => x.status), ['intent', 'confirmed-not-published']);
+    assert.equal(unsettled(jsonl(f.journal), 'instagram'), false, 'the channel stays open');
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+test('Facebook repeat on D+14 at 20:30, under 14×24 h after the first post: the photos go up in the new order and the post is published, its hash kept for the next guard', async () => {
+  const f = repeatFixture('bona-fb-repeat-ok-');
+  try {
+    const first = await hashes(f, [0, 1, 2]), repeat = await hashes(f, [1, 2, 0]);
+    assert.notEqual(repeat.facebook, first.facebook);
+    seedFirstPost(f, 'facebook', first.facebook, first.urls);
+    assert.equal((await repeatSend('facebook', f, repeatStub(f, graphOk([])).fetchImpl, { dry: true })).status, 'ready');
+    const sent = [], s = repeatStub(f, graphOk(sent));
+    assert.equal((await repeatSend('facebook', f, s.fetchImpl)).status, 'published');
+    assert.deepEqual(sent, ['fixture 1', 'fixture 2', 'fixture 0'], 'the approved photo bytes, in the new order');
+    const row = jsonl(f.fbLedger).at(-1);
+    assert.equal(row.status, 'published');
+    assert.equal(row.contentHash, repeat.facebook);
+    assert.deepEqual(row.images, repeat.urls);
+    assert.deepEqual(jsonl(f.journal).at(-1).frameOrder, [2, 3, 1]);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+test('Facebook: the SAME images and caption within 14×24 h are refused: nothing sent, confirmed-not-published, an alert; a dry run says so first', async () => {
+  const f = repeatFixture('bona-fb-repeat-dup-');
+  try {
+    const repeat = await hashes(f, [1, 2, 0]);
+    seedFirstPost(f, 'facebook', repeat.facebook, repeat.urls);
+    await assert.rejects(repeatSend('facebook', f, repeatStub(f, graphOk([])).fetchImpl, { dry: true }), /facebook post would repeat bona-daily-fb-2026-10-06/);
+    const sent = [], s = repeatStub(f, graphOk(sent));
+    await assert.rejects(repeatSend('facebook', f, s.fetchImpl), e => e.message.startsWith('Facebook post not sent: same images and caption as bona-daily-fb-2026-10-06') && /recorded confirmed-not-published/.test(e.message));
+    assert.deepEqual(sent, []);
+    assert.deepEqual(s.writes(), [], 'no upload, no feed request');
+    const journal = jsonl(f.journal).filter(x => x.date === '2026-10-20');
+    assert.deepEqual(journal.map(x => x.status), ['intent', 'confirmed-not-published']);
+    assert.match(journal[1].evidence, /duplicate of bona-daily-fb-2026-10-06/);
+    assert.equal(unsettled(jsonl(f.journal), 'facebook'), false);
+    // Outside the window (15×24 h later) the same post is allowed again.
+    const later = new Date('2026-10-21T17:30:00Z');
+    assert.equal((await repeatSend('facebook', f, repeatStub(f, graphOk([])).fetchImpl, { dry: true, now: later, clock: () => later })).status, 'ready');
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+test('frames are picked from history: never the image sequence last posted on the channel, even after a re-review adds or removes frames', async () => {
+  const { pickFrames, lastPostedSequence } = await import('../social/lib/property-daily.mjs');
+  const u = n => `https://bona-real-estate.com/listings/fixture/${n}.jpg`;
+  const photo = n => ({ url: u(n), sha256: sha256(`f${n}`), width: 1920, height: 1280, kind: 'photograph', visuallyApproved: true, alt: { ar: 'ص', en: 'p' } });
+  const review = ns => ({ photos: ns.map(photo) });
+  const pub = (extra, at = '2026-10-06T17:31:00Z') => ({ channel: 'instagram', id: `x-${at}`, listingId: 'L', status: 'published', at, ...extra });
+  // Count-based alone would give the 1st repeat order [2,3,1]: here that is exactly what was last posted (by hand).
+  const r3 = review([1, 2, 3]);
+  const hand = [pub({ images: [u(2), u(3), u(1)] })];
+  const pick = pickFrames(r3, hand, 'instagram', 'L');
+  assert.notDeepEqual(pick.images, [u(2), u(3), u(1)]);
+  assert.deepEqual(pick.frameOrder, [3, 1, 2], 'the next order in the sequence');
+  // The review gained a frame (4) since the last post; the previous sequence is still avoided.
+  const grown = review([2, 3, 1, 4]);
+  for (const last of [[u(1), u(2), u(3)], [u(2), u(3), u(1)], [u(3), u(1), u(4), u(2)]]) {
+    for (const k of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      const events = Array.from({ length: k }, (_, i) => pub(i === k - 1 ? { images: last } : {}, `2026-0${1 + Math.min(i, 8)}-0${1 + (i % 8)}T17:31:00Z`));
+      const got = pickFrames(grown, events, 'instagram', 'L').images;
+      assert.notDeepEqual(got, last, `repeat ${k}, last ${last.map(x => x.slice(-5)).join(' ')}`);
+    }
+  }
+  // A frame was removed: the last post's frameOrder (positions in the OLD review) is not reused blindly.
+  const shrunk = review([1, 2, 3]);
+  const olderRow = [pub({ frameOrder: [1, 2, 3] })];
+  assert.deepEqual(lastPostedSequence(olderRow, 'instagram', 'L', shrunk), [u(1), u(2), u(3)]);
+  assert.notDeepEqual(pickFrames(shrunk, olderRow, 'instagram', 'L').images, [u(1), u(2), u(3)]);
+  // Pre-change rows (no images, no frameOrder) were the reviewed order.
+  assert.deepEqual(lastPostedSequence([pub({})], 'instagram', 'L', r3), [u(1), u(2), u(3)]);
+  assert.deepEqual(pickFrames(r3, [pub({})], 'instagram', 'L').frameOrder, [2, 3, 1]);
+  assert.equal(lastPostedSequence([], 'instagram', 'L', r3), null);
+  assert.deepEqual(pickFrames(r3, [], 'instagram', 'L').frameOrder, [1, 2, 3], 'first post: the reviewed order');
+});
