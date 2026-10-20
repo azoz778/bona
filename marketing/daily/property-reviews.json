@@ -1481,6 +1481,117 @@
       }
     ]
   },
+  "BONA-W017": {
+    "status": "approved",
+    "reviewedAt": "2026-10-20T23:50:40.090Z",
+    "reviewer": "Owner 2026-10-21 approved 4:5 padding for mixed-aspect listings. Claude visual review: frames 4 (dining room), 3 (living room, portrait 0.75 usable only padded), 6 (master suite with walk-in wardrobe), 5 (kitchen island), 7 (kitchen and table setting) are clean developer renders of an off-plan project, no people or text; padded (aspects 1.34, 0.75, 1.82, 1.34, 1.79). Frames 1, 2, 8 are under the size floor (1280 px wide).",
+    "factsSha256": "cf695b0350dfd7167c1839e85b32b14be710a62c66ecb05da397dd5e7298e401",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "45f3942277d53cffde4aeac2b7777503645337239af61bc329bcfbe3d884da9a",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "مواعيد التسليم والمواصفات حسب المطوّر.",
+      "en": "Delivery dates and specifications are per the developer."
+    },
+    "photos": [
+      {
+        "url": "https://bona-real-estate.com/listings/katheeb-residences-laban-district/04.jpg",
+        "sha256": "666ae2ec378047348f9991a31cbf1d1b34057948628727137593fc589240a69b",
+        "width": 1920,
+        "height": 1434,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Dining room — Katheeb Residences, Laban District",
+          "ar": "غرفة الطعام — مجمع كثيب السكني، حي لبن"
+        },
+        "fit": "pad-4x5",
+        "media": {
+          "url": "https://bona-real-estate.com/social/property/BONA-W017/pad-666ae2ec-eb1fd9538e46.jpg",
+          "sha256": "eb1fd9538e4600ec2bdf6530bdb709a2b100bfa128dfd18d0471b3cea62fa378",
+          "width": 1080,
+          "height": 1350
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/katheeb-residences-laban-district/03.jpg",
+        "sha256": "d4553b822cfe4183198a4bf61af52c294545b865818610696a31c79bc9efd43d",
+        "width": 1434,
+        "height": 1920,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Living room — Katheeb Residences, Laban District",
+          "ar": "غرفة المعيشة — مجمع كثيب السكني، حي لبن"
+        },
+        "fit": "pad-4x5",
+        "media": {
+          "url": "https://bona-real-estate.com/social/property/BONA-W017/pad-d4553b82-780f058daabc.jpg",
+          "sha256": "780f058daabcb998dace2d86af8d6607094108ed0bb82d9e3154bf7746db6018",
+          "width": 1080,
+          "height": 1350
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/katheeb-residences-laban-district/06.jpg",
+        "sha256": "5c75682ed0c16835ac15de64f4b1493f5e95f1a83d6d56f8fd3722f781d55f19",
+        "width": 1670,
+        "height": 918,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Master suite — Katheeb Residences, Laban District",
+          "ar": "الجناح الرئيسي — مجمع كثيب السكني، حي لبن"
+        },
+        "fit": "pad-4x5",
+        "media": {
+          "url": "https://bona-real-estate.com/social/property/BONA-W017/pad-5c75682e-ecc339f33630.jpg",
+          "sha256": "ecc339f3363028db614b249071e85bbd5926ad48ca147a74e935ca4d60803594",
+          "width": 1080,
+          "height": 1350
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/katheeb-residences-laban-district/05.jpg",
+        "sha256": "ebb55c8df69783221a3dd56ad3572647e3d0a617374df93322a60236a4031c54",
+        "width": 1600,
+        "height": 1194,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Kitchen — Katheeb Residences, Laban District",
+          "ar": "المطبخ — مجمع كثيب السكني، حي لبن"
+        },
+        "fit": "pad-4x5",
+        "media": {
+          "url": "https://bona-real-estate.com/social/property/BONA-W017/pad-ebb55c8d-dfadf7974c63.jpg",
+          "sha256": "dfadf7974c63eba1c10c9176ed837e1fb4289d14d79a326d4693624e0484242a",
+          "width": 1080,
+          "height": 1350
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/katheeb-residences-laban-district/07.jpg",
+        "sha256": "478beaa231355934e278df100641eeeb8ef40c2aff6aade9322a28e0c6d26c62",
+        "width": 1920,
+        "height": 1072,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Kitchen — Katheeb Residences, Laban District",
+          "ar": "المطبخ — مجمع كثيب السكني، حي لبن"
+        },
+        "fit": "pad-4x5",
+        "media": {
+          "url": "https://bona-real-estate.com/social/property/BONA-W017/pad-478beaa2-3ce79d4f3a21.jpg",
+          "sha256": "3ce79d4f3a21b29a40e9660921e7d3c529ced429c0c0b725a830f6737f02566c",
+          "width": 1080,
+          "height": 1350
+        }
+      }
+    ]
+  },
   "BONA-W018": {
     "status": "approved",
     "reviewedAt": "2026-10-19T02:50:59.826Z",
