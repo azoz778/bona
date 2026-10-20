@@ -62,12 +62,30 @@ export async function main(argv = process.argv.slice(2), { fetchImpl = fetch, no
         frames.push({ index, url, sha256: sha256(buffer), width: meta.width, height: meta.height, alt: im.alt, file, buffer, ...(padOnly ? { padOnly: true } : {}) });
       } catch (e) { rejected.push({ index, why: `fetch_failed: ${String(e.message).slice(0, 60)}` }); }
     }
+    // Land: the listing stills (1024x768 satellite views) are too small to post as photographs, but a plot card
+    // set is made from them (approve --cards). Kept here with their hashes; the contact sheet shows them.
+    const stills = [];
+    if (p.type === 'land') for (const [i, im] of (p.images ?? []).slice(0, 10).entries()) {
+      if (frames.some(f => f.index === i + 1)) continue;
+      try {
+        const url = imageUrl(im.src);
+        const res = await fetchImpl(url, { redirect: 'error', headers: { 'User-Agent': 'BonaPropertyPublisher/1.0' }, signal: AbortSignal.timeout(30_000) });
+        if (!res.ok || !String(res.headers.get('content-type')).startsWith('image/jpeg')) continue;
+        const buffer = Buffer.from(await res.arrayBuffer());
+        const meta = await sharp(buffer).metadata();
+        if (buffer.length > 8_000_000 || !(meta.width >= 640)) continue;
+        const file = path.join(p.id, `still-${i + 1}.jpg`);
+        fs.mkdirSync(path.join(out, p.id), { recursive: true });
+        fs.writeFileSync(path.join(out, file), buffer);
+        stills.push({ index: i + 1, url, sha256: sha256(buffer), width: meta.width, height: meta.height, alt: im.alt, file, buffer });
+      } catch { /* not a usable still */ }
+    }
     let sheet = null;
-    if (frames.length) { sheet = `${p.id}.jpg`; fs.writeFileSync(path.join(out, sheet), await contactSheet(frames)); }
+    if (frames.length || stills.length) { sheet = `${p.id}.jpg`; fs.writeFileSync(path.join(out, sheet), await contactSheet([...frames, ...stills])); }
     const preview = { legalDisclosures: disclosuresFor(p), photos: [{ kind: defaultKind(p) }] };
     drafts.listings[p.id] = { title: p.title, category: p.category, type: p.type ?? null, city: p.location?.city?.en ?? null,
       factsSha256: fingerprint(p), page: `${SITE}/properties/${p.slug}/`, sheet, usable: frames.length,
-      frames: frames.map(({ buffer, ...f }) => f), rejected, captionPreview: reviewedCopy(p, live.advertiser, preview) };
+      frames: frames.map(({ buffer, ...f }) => f), ...(stills.length ? { stills: stills.map(({ buffer, ...f }) => f) } : {}), rejected, captionPreview: reviewedCopy(p, live.advertiser, preview) };
     log(`${p.id.padEnd(10)} ${String(frames.length).padStart(2)} usable / ${(p.images ?? []).length}  ${p.title?.en ?? ''}`);
   }
   fs.writeFileSync(path.join(out, 'drafts.json'), JSON.stringify(drafts, null, 2) + '\n');

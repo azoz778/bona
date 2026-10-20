@@ -193,8 +193,8 @@ test('TikTok and LinkedIn: a padded review makes a 9:16 padded reel from the sou
   const r = paddedReview(p, MIXED, { media: i => ({ url: `${mediaBase(p.id)}pad-${i}.jpg`, sha256: sha256(pads[i]), ...MEDIA_SIZE }) });
   r.photos.forEach((x, i) => { x.sha256 = sha256(bytes[i]); });
   r.captionSha256 = sha256(JSON.stringify(reviewedCopy(p, advertiser, r)));
-  assert.deepEqual(mediaStyle(r), { pad: true });
-  assert.deepEqual(mediaStyle(unpadded(r)), { pad: false });
+  assert.deepEqual(mediaStyle(r), { pad: true, cards: false });
+  assert.deepEqual(mediaStyle(unpadded(r)), { pad: false, cards: false });
   const served = Object.fromEntries(r.photos.flatMap((x, i) => [[x.url, bytes[i]], [x.media.url, pads[i]]]));
   const fetchImpl = async url => new Response(served[url], { headers: { 'content-type': 'image/jpeg' } });
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-padrun-'));
@@ -215,7 +215,7 @@ test('TikTok and LinkedIn: a padded review makes a 9:16 padded reel from the sou
     const res = await browserRun(channel, { renderOnly: true, env: { BONA_DATA: path.join(dir, 'data') }, root, now: at[channel], clock: () => at[channel], log: quiet, kind: 'property' }, deps);
     assert.equal(res.status, 'rendered');
   }
-  assert.deepEqual(calls[0], ['reel', bytes.map(sha256), { fit: 'pad' }], 'the reel pads the source photos to 9:16');
+  assert.deepEqual(calls[0], ['reel', bytes.map(sha256), { fit: 'pad', plain: false }], 'the reel pads the source photos to 9:16');
   assert.deepEqual(calls[1], ['li', pads.map(sha256), { mark: false }], 'LinkedIn re-encodes the padded frames, no second mark');
   fs.rmSync(dir, { recursive: true, force: true });
 });

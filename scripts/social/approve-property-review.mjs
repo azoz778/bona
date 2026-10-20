@@ -4,23 +4,28 @@
 // (listing facts, advertiser, photo bytes) or not eligible under the policy, and leaves an identical,
 // still-eligible review untouched; an identical one that has expired is renewed.
 // Usage: node scripts/social/approve-property-review.mjs --drafts DIR/drafts.json --reviewer "who looked" --select BONA-022:1,3,4 [--select …]
-//          [--pad BONA-014[,BONA-044]] [--local-public DIR]
+//          [--pad BONA-014[,BONA-044]] [--cards BONA-046:1,2] [--local-public DIR]
 // --pad: every selected frame of that listing is published padded to 4:5 (owner, 2026-10-21): the
 //   padded JPEGs are rendered here (lib/property-media.mjs) and written under public/social/property/<id>/,
 //   which the site serves; commit them with the register. Mixed aspects are then fine, and a frame
 //   narrower than 0.8 (down to 9:16) can be approved; the size floor still applies to the source.
+// --cards BONA-ID:P,A: a land listing (policy `cards: "land-only"`) is published as a plot card set made
+//   from its satellite stills P (the plot) and A (the area) (lib/property-cards.mjs): (a) the plot still,
+//   (b) the facts, (c) the area still with district and city. Written under public/social/property/<id>/
+//   like the padded frames; refused when the listing's facts are missing or contradict each other.
 // --local-public DIR: the site's own images are read from DIR instead of the live site (see draft-property-reviews.mjs).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { fingerprint, advertiserFingerprint, imageUrl, sha256, policyRules, eligibility, PAD_FIT } from './lib/property-daily.mjs';
-import { buildReview, liveCatalogue, localFetch, parseSelection, sameReview } from './lib/property-review.mjs';
+import { buildReview, buildCardReview, liveCatalogue, localFetch, parseSelection, sameReview } from './lib/property-review.mjs';
+import { refuseText } from './lib/facebook.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 const ids = v => String(v ?? '').split(',').map(x => x.trim()).filter(Boolean);
 function parseArgs(argv) {
-  const a = { drafts: null, reviewer: null, select: [], pad: new Set(), localPublic: null };
+  const a = { drafts: null, reviewer: null, select: [], pad: new Set(), cards: [], localPublic: null };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i], v = argv[i + 1];
     if (k === '--drafts') { a.drafts = v; i++; }
@@ -28,9 +33,10 @@ function parseArgs(argv) {
     else if (k === '--select') { a.select.push(v); i++; }
     else if (k === '--pad') { for (const id of ids(v)) a.pad.add(id); i++; }
     else if (k === '--local-public') { a.localPublic = v; i++; }
+    else if (k === '--cards') { a.cards.push(v); i++; }
     else throw new Error(`Unknown argument ${k}`);
   }
-  if (!a.drafts || !a.reviewer?.trim() || !a.select.length) throw new Error('Usage: approve-property-review.mjs --drafts DIR/drafts.json --reviewer "who looked" --select BONA-ID:1,2,3 [--select …] [--pad BONA-ID] [--local-public DIR]');
+  if (!a.drafts || !a.reviewer?.trim() || !(a.select.length || a.cards.length)) throw new Error('Usage: approve-property-review.mjs --drafts DIR/drafts.json --reviewer "who looked" --select BONA-ID:1,2,3 [--select …] [--pad BONA-ID] [--cards BONA-ID:P,A] [--local-public DIR]');
   return a;
 }
 /** Fetches each selected frame again the way the draft script did: { problem } when its bytes cannot be approved, else { bytes } by website index. */
@@ -94,6 +100,37 @@ export async function main(argv = process.argv.slice(2), { fetchImpl = fetch, no
     const existing = register[sel.id];
     if (sameReview(existing, review) && !eligibility(p, existing, live.advertiser, now, rules).length) { unchanged++; continue; }
     register[sel.id] = review; written++;
+  }
+  for (const raw of args.cards) {
+    const m = /^([A-Z]+-[A-Z]?\d+):(\d+),(\d+)$/.exec(String(raw));
+    if (!m) { refused.push(`Bad --cards "${raw}" — use BONA-ID:P,A (plot still, area still)`); continue; }
+    const id = m[1], p = live.listings.find(x => x.id === id), d = drafts.listings?.[id];
+    if (advertiserChanged) { refused.push(`${id}: advertiser changed since drafting — draft again`); continue; }
+    if (!p || !d) { refused.push(`${id}: not in the live catalogue or the drafts`); continue; }
+    if (d.factsSha256 !== fingerprint(p)) { refused.push(`${id}: listing changed since drafting — draft it again`); continue; }
+    const stills = [m[2], m[3]].map(n => (d.stills ?? []).find(s => s.index === Number(n)));
+    if (stills.some(s => !s)) { refused.push(`${id}: still ${m[2]} or ${m[3]} is not a drafted listing still`); continue; }
+    const fetched = await photoBytes(stills, fetchImpl);
+    if (fetched.problem) { refused.push(`${id}: ${fetched.problem}`); continue; }
+    const bad = (await import('./lib/property-cards.mjs')).cardStrings(p).map(refuseText).find(Boolean);
+    if (bad) { refused.push(`${id}: card text refused: ${bad}`); continue; }
+    let set;
+    try {
+      const { cardSet } = await import('./lib/property-cards.mjs');
+      const still = s => ({ bytes: fetched.bytes.get(s.index), url: s.url, sha256: s.sha256, width: s.width, height: s.height });
+      set = await cardSet(p, { plot: still(stills[0]), area: still(stills[1]) });
+    } catch (e) { refused.push(e.message); continue; }
+    const { mediaTarget } = await import('./lib/property-media.mjs');
+    const cards = set.map(c => { const t = mediaTarget(root, id, `card-${c.card}`, c.bytes); return { ...c, url: t.url, file: t.file, sha256: sha256(c.bytes), width: 1080, height: 1350 }; });
+    let review;
+    try { review = buildCardReview(p, live.advertiser, cards, { reviewedAt: now.toISOString(), reviewer: args.reviewer.trim() }); }
+    catch (e) { refused.push(e.message); continue; }
+    const why = eligibility(p, review, live.advertiser, now, rules);
+    if (why.length) { refused.push(`${id}: ${why.join(', ')}`); continue; }
+    for (const c of cards) { fs.mkdirSync(path.dirname(c.file), { recursive: true }); fs.writeFileSync(c.file, c.bytes); files.push(c.file); }
+    const existing = register[id];
+    if (sameReview(existing, review) && !eligibility(p, existing, live.advertiser, now, rules).length) { unchanged++; continue; }
+    register[id] = review; written++;
   }
   for (const id of args.pad) if (!args.select.some(s => String(s).startsWith(`${id}:`))) refused.push(`${id}: --pad without a --select for it`);
   if (written) {

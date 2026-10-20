@@ -20,14 +20,14 @@ function ff(args, timeout = 600_000) {
 }
 
 /** TikTok, property: make-reel.mjs from the approved frames, in review order, with the advertiser/FAL CTA lines. */
-/** `fit: 'pad'` contains each frame on a 9:16 brand canvas instead of cover-cropping it. */
-export function propertyReel(listing, frameFiles, licenceLines, out, { seconds = 20, fit = null } = {}) {
+/** `fit: 'pad'` contains each frame on a 9:16 brand canvas instead of cover-cropping it; `plain` (plot cards) also drops the hook and lower third and holds each card still. */
+export function propertyReel(listing, frameFiles, licenceLines, out, { seconds = 20, fit = null, plain = false } = {}) {
   fs.mkdirSync(path.dirname(out), { recursive: true });
   const listingJson = path.join(path.dirname(out), `${listing.id}.listing.json`);
   fs.writeFileSync(listingJson, JSON.stringify(listing));
   const r = spawnSync(process.execPath, [path.join(SOCIAL, 'make-reel.mjs'), '--listing-json', listingJson, '--frames', frameFiles.join(','),
     '--licence-ar', licenceLines.ar, '--licence-en', licenceLines.en, '--seconds', String(seconds), '--out', out,
-    ...(fit === 'pad' ? ['--fit', 'pad'] : [])],
+    ...(fit === 'pad' ? ['--fit', 'pad'] : []), ...(plain ? ['--plain'] : [])],
   { encoding: 'utf8', timeout: 20 * 60_000, env: process.env });
   if (r.status !== 0 || !fs.existsSync(out)) throw new Error(`make-reel failed (exit ${r.status}): ${String(r.stderr || '').trim().slice(-400)}`);
   return out;
@@ -70,7 +70,7 @@ export async function educationReel(item, out) {
 }
 
 /** LinkedIn, property: each approved frame at 1200 px wide (aspect kept), the BONA wordmark bottom-left, its own JPEG.
-    `mark: false` for padded frames, which already carry the mark in their band. */
+    `mark: false` for padded frames and plot cards, which already carry the mark in their band. */
 export async function linkedinPropertyImages(frameFiles, dir, { mark: withMark = true } = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const out = [];

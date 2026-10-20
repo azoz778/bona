@@ -75,6 +75,19 @@ export function buildReview(p, advertiser, draftFrames, selection, { reviewedAt,
   review.captionSha256 = sha256(JSON.stringify(reviewedCopy(p, advertiser, review)));
   return review;
 }
+/**
+ * An approved review of plot cards (land only, policy `cards: "land-only"`): `cards` are the rendered
+ * set's media records in carousel order ({card, url, sha256, width, height, source, alt}).
+ */
+export function buildCardReview(p, advertiser, cards, { reviewedAt, reviewer }) {
+  if (p?.type !== 'land') throw new Error(`${p?.id}: plot cards are for land listings only`);
+  const photos = cards.map(c => ({ url: c.url, sha256: c.sha256, width: c.width, height: c.height, kind: 'card', card: c.card,
+    source: c.source ?? null, visuallyApproved: true, alt: c.alt }));
+  const review = { status: 'approved', reviewedAt, reviewer, factsSha256: fingerprint(p), advertiserSha256: advertiserFingerprint(advertiser),
+    captionSha256: null, licenceEvidence: null, legalDisclosuresVerified: true, legalDisclosures: disclosuresFor(p), photos };
+  review.captionSha256 = sha256(JSON.stringify(reviewedCopy(p, advertiser, review)));
+  return review;
+}
 /** Equal apart from who approved it and when. */
 export function sameReview(a, b) {
   const strip = r => JSON.stringify({ ...r, reviewedAt: null, reviewer: null });

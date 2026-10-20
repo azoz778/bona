@@ -52,8 +52,9 @@ const { values: a } = parseArgs({
     'listing-json': { type: 'string' }, frames: { type: 'string' },
     'licence-ar': { type: 'string' }, 'licence-en': { type: 'string' },
     // --fit pad: contain each frame whole on a 9:16 ink canvas instead of cover-cropping it (padded 4:5
-    // property frames, owner 2026-10-21).
-    fit: { type: 'string' },
+    // property frames, owner 2026-10-21). --plain: plot cards, which carry their own text: no hook or
+    // lower third, and no Ken Burns move, so nothing on a card is ever pushed out of frame.
+    fit: { type: 'string' }, plain: { type: 'boolean', default: false },
     help: { type: 'boolean', default: false },
   },
 });
@@ -142,7 +143,7 @@ try {
   const stills = [];
   for (const [i, p] of photos.entries()) {
     const out = path.join(work, `bg-${String(i).padStart(2, '0')}.jpg`);
-    if (pad) await containToFile(p.file, out, W * SS, H * SS, { background: C.ink, quality: 94 });
+    if (pad) await containToFile(p.file, out, W * SS, H * SS, { background: C.ink, quality: 94, trimBorder: !a.plain });
     else await coverToFile(p.file, out, W * SS, H * SS, { position, quality: 94 });
     stills.push(out);
   }
@@ -177,7 +178,7 @@ try {
   const segs = [];
   for (const [i, still] of stills.entries()) {
     const frames = Math.round(d * FPS);
-    const kb = kenBurns(MOVES[i % MOVES.length], frames);
+    const kb = kenBurns(MOVES[i % MOVES.length], frames, a.plain ? { amount: 0 } : {});
     const out = path.join(work, `seg-${String(i).padStart(2, '0')}.mp4`);
     const vf = [
       `scale=${W * SS}:${H * SS}:force_original_aspect_ratio=increase`,
@@ -241,7 +242,8 @@ try {
   const hookIn = 0.30;
   const hookOut = Math.min(4.4, ctaStart - 0.5);
   const lowerIn = 1.90;
-  const wins = [
+  // Plot cards carry their own BONA mark and text: a plain reel overlays nothing on them.
+  const wins = a.plain ? [] : [
     { file: layerFiles.mark, in: 0.0, out: ctaStart, fadeIn: 0.6, fadeOut: 0.5 },
     { file: layerFiles.hook, in: hookIn, out: hookOut, fadeIn: 0.45, fadeOut: 0.5 },
     { file: layerFiles.lower, in: lowerIn, out: ctaStart, fadeIn: 0.7, fadeOut: 0.5 },
@@ -262,6 +264,7 @@ try {
     chain.push(`[${last}][ov${i}]overlay=0:0:eof_action=pass:enable='between(t,${wdw.in.toFixed(2)},${wdw.out.toFixed(2)})'[${next}]`);
     last = next;
   });
+  if (!wins.length) chain.push('[0:v]null[vout]');
 
   const out = a.out ? path.resolve(a.out) : path.join(OUT_ROOT, 'reels', `reel-${l.id}.mp4`);
   ensureDir(path.dirname(out));
