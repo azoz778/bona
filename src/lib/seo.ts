@@ -195,7 +195,7 @@ export function orgJsonLd(locale: Locale): object {
     address: postalAddress(locale),
     geo: { '@type': 'GeoCoordinates', latitude: site.geo.lat, longitude: site.geo.lng },
     areaServed: site.markets[l].map((name) => ({ '@type': 'Place', name })),
-    sameAs: [site.instagram.url, waUrl],
+    sameAs: [site.instagram.url, ...site.social.map((s) => s.url), waUrl],
     openingHours: 'Su-Th 10:00-19:00',
     openingHoursSpecification: [
       {
