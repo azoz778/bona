@@ -51,16 +51,19 @@ export const NO_GROUP_RESCAN_MS = 30 * 60 * 1000;
  * owner's number). Scanning every 5 min was ~670 `rate-overlimit` errors an hour on the
  * PERSONAL WhatsApp (2026-10-05 / 2026-10-21) — ban risk. So:
  *   - scanMs > 0  -> scan at that cadence (the first loop scans at once, as before);
- *   - scanMs <= 0 -> discovery is OFF once every configured group is pollable; while nothing
- *                    is pollable, or a configured group still waits for its first discovery
- *                    (never announced, or its history seeding failed), it falls back to a slow
- *                    NO_GROUP_RESCAN_MS cadence (Codex review 2026-10-21).
- * @param {{now:number,lastScan:number,scanMs:number,pollable:number,waiting?:number}} p
- *   `waiting` = configured group jids not yet pollable (see `waitingConfigured`).
+ *   - scanMs <= 0 -> ONE successful discovery per process run (a restart only seeds the
+ *                    configured jids, so groups found by BONA_WA_GROUP_MATCH alone must be
+ *                    re-found once), then OFF once every configured group is pollable. Until
+ *                    that discovery succeeds, and while a configured group still waits for its
+ *                    first discovery (never announced, or its history seeding failed), it
+ *                    retries at a slow NO_GROUP_RESCAN_MS cadence (Codex reviews 2026-10-21).
+ * @param {{now:number,lastScan:number,scanMs:number,pollable:number,waiting?:number,discovered?:boolean}} p
+ *   `waiting` = configured group jids not yet pollable (see `waitingConfigured`);
+ *   `discovered` = since this process started, a discovery succeeded with every selected group pollable.
  */
-export function scanDue({ now, lastScan, scanMs, pollable, waiting = 0 }) {
+export function scanDue({ now, lastScan, scanMs, pollable, waiting = 0, discovered = false }) {
   if (scanMs > 0) return now - lastScan >= scanMs;
-  if (pollable > 0 && !(waiting > 0)) return false;
+  if (discovered && pollable > 0 && !(waiting > 0)) return false;
   return !lastScan || now - lastScan >= NO_GROUP_RESCAN_MS;
 }
 
