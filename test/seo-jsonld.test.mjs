@@ -377,12 +377,13 @@ test('FAQPage appears only where questions are visible (/faq/ and listings with 
 });
 
 // ---- entity: no invented profiles ------------------------------------------------------------------
+// TikTok, LinkedIn and Facebook verified live 2026-10-20 (owner-admin sessions + Graph page lookup).
 
 test('Organization sameAs lists only verified, live profiles', () => {
   const org = nodesOf(page('/'), 'RealEstateAgent')[0];
   assert.ok(Array.isArray(org.sameAs) && org.sameAs.includes('https://www.instagram.com/bonarealestatesa/'));
   for (const u of org.sameAs) {
-    assert.ok(/^https:\/\/(www\.instagram\.com\/bonarealestatesa\/|wa\.me\/966593296933)$/.test(u), `unverified profile in sameAs: ${u}`);
+    assert.ok(/^https:\/\/(www\.instagram\.com\/bonarealestatesa\/|www\.tiktok\.com\/@bonarealestatesa|www\.linkedin\.com\/company\/bonarealestate\/|www\.facebook\.com\/1245646955305748|wa\.me\/966593296933)$/.test(u), `unverified profile in sameAs: ${u}`);
   }
 });
 

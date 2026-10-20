@@ -30,6 +30,23 @@
     "handle": "bonarealestatesa",
     "url": "https://www.instagram.com/bonarealestatesa/"
   },
+  "social": [
+    {
+      "name": "TikTok",
+      "handle": "bonarealestatesa",
+      "url": "https://www.tiktok.com/@bonarealestatesa"
+    },
+    {
+      "name": "LinkedIn",
+      "handle": "bonarealestate",
+      "url": "https://www.linkedin.com/company/bonarealestate/"
+    },
+    {
+      "name": "Facebook",
+      "handle": "Bona Real Estate",
+      "url": "https://www.facebook.com/1245646955305748"
+    }
+  ],
   "address": {
     "en": {
       "street": "Al Rawdah District",
