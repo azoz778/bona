@@ -1086,6 +1086,74 @@
       }
     ]
   },
+  "BONA-057": {
+    "status": "approved",
+    "reviewedAt": "2026-10-20T23:54:54.877Z",
+    "reviewer": "Owner 2026-10-21 approved plot cards for land (cards: land-only). Claude visual review: card 1 the plot satellite still (ring on the plot, labelled approximate, Esri source), card 2 the facts (450 sqm x SAR 8,500/sqm = SAR 3,825,000, matches; on a 32 m street), card 3 the area still with district, city and country; Arabic connected and right-to-left, nothing cut off, numbers match the listing.",
+    "factsSha256": "c8e25386932241159e291429e6b4578d4c1065e0bf6484e72e38c880f47e235e",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "0d93bf1b8b4603d3c2354f73832d0dc57ff7dd649c8d7d861aa54310fd534f80",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. تُؤكَّد التفاصيل والحالة والخدمات عند المعاينة.",
+      "en": "Prices shown are asking prices and may change. Details, condition and services are confirmed at viewing."
+    },
+    "photos": [
+      {
+        "url": "https://bona-real-estate.com/social/property/BONA-057/card-satellite-d40a1879baec.jpg",
+        "sha256": "d40a1879baecca12682f5e759dbe5d89e57f680d0bc43eded13a8e6ce19b1095",
+        "width": 1080,
+        "height": 1350,
+        "kind": "card",
+        "card": "satellite",
+        "source": {
+          "url": "https://bona-real-estate.com/land/LND-020.jpg",
+          "sha256": "60c9f7833a6180d451d1677ac36d00409d22efc33ad90aca1a373ecf1757b80f",
+          "width": 1024,
+          "height": 768
+        },
+        "visuallyApproved": true,
+        "alt": {
+          "ar": "صورة جوية، الموقع تقريبي — أرض بمساحة 450 متراً مربعاً، الشاطئ 1",
+          "en": "Satellite view, approximate — Plot of 450 sqm, Al Shati 1"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/social/property/BONA-057/card-facts-d4587b451249.jpg",
+        "sha256": "d4587b451249e4ce3243a9f69060f5c0de03e004fb305ea0cdfb834f9e7aeb0c",
+        "width": 1080,
+        "height": 1350,
+        "kind": "card",
+        "card": "facts",
+        "source": null,
+        "visuallyApproved": true,
+        "alt": {
+          "ar": "تفاصيل الأرض — أرض بمساحة 450 متراً مربعاً، الشاطئ 1",
+          "en": "Plot facts — Plot of 450 sqm, Al Shati 1"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/social/property/BONA-057/card-location-dbe7a77bac30.jpg",
+        "sha256": "dbe7a77bac3042476dffb4d2c04a95783bdb528e609ca993b4df08e15fd3ca21",
+        "width": 1080,
+        "height": 1350,
+        "kind": "card",
+        "card": "location",
+        "source": {
+          "url": "https://bona-real-estate.com/land/LND-020-z15.jpg",
+          "sha256": "57773c4b9221089082174b3d280f9ff44aa97dd28a502465612d3b5050c6d4b3",
+          "width": 1024,
+          "height": 768
+        },
+        "visuallyApproved": true,
+        "alt": {
+          "ar": "صورة جوية للمنطقة، الموقع تقريبي — أرض بمساحة 450 متراً مربعاً، الشاطئ 1",
+          "en": "Satellite view of the area, approximate — Plot of 450 sqm, Al Shati 1"
+        }
+      }
+    ]
+  },
   "BONA-W002": {
     "status": "approved",
     "reviewedAt": "2026-10-06T03:12:05.702Z",
