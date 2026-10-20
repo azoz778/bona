@@ -7,6 +7,8 @@ Type=oneshot
 WorkingDirectory=%h/bona-publish
 Environment=TZ=Asia/Riyadh
 Environment=NODE_ENV=production
+# npm's cache must be writable under ProtectHome=read-only (ensure-deps.sh).
+Environment=npm_config_cache=%h/bona-data/.npm
 Environment=PATH=%h/.local/bin:%h/.nvm/versions/node/v24.19.0/bin:/usr/local/bin:/usr/bin:/bin
 ExecStartPre=-/usr/bin/timeout 60 /usr/bin/env bash %h/bona-publish/ops/systemd/sync-publish-tree.sh %h/bona-publish
 ExecStartPre=/usr/bin/env bash %h/bona-publish/ops/systemd/guard-main.sh %h/bona-publish

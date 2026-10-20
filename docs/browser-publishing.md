@@ -49,19 +49,37 @@ debug Chrome (CDP `http://localhost:9222`, started by `~/.claude/scripts/chrome-
 ## How a run goes
 
 1. Outside the channel's window (or on a Friday/Saturday for LinkedIn) it does nothing.
-2. Lock `~/bona-data/<channel>/.publish.lock`; read the ledger. `published` today → "already
+2. Lock `~/bona-data/<channel>/.publish.lock` — dry runs too, since a dry run discards drafts
+   (pid-checked: a live holder is never displaced, a dead one is taken over, a pid-less lock only
+   after 45 min, longer than the unit's 40 min). Read the ledger strictly (see below). `published` today → "already
    published", exit 0. Anything `intent`/`uncertain` without a later settling line → stop (exit 1).
 3. Choose, build the caption, render media into `~/bona-data/<channel>/assets/<date>/`, copy it to
    `C:\Users\ASUS\AppData\Local\bona-social-upload\<run>\` (the Windows Chrome cannot read WSL paths).
 4. Open **our own tab** (`PUT /json/new`), never touching other tabs; closed at the end.
-5. Identity first: TikTok must show *Edit profile* on `@bonarealestatesa` (only the owner sees
-   it); LinkedIn must show *Start a post* on the Page admin and the composer must say it posts
-   as **Bona | بونا** (not the personal profile). Existing video ids / post URNs are noted.
+5. Identity first. TikTok: *Edit profile* on `@bonarealestatesa` and TikTok's own session
+   endpoint (`/passport/web/account/info/`) must say `bonarealestatesa`. LinkedIn: the tab is
+   `/company/145349037/admin/…` with that company's admin-only Settings link, the composer actor is
+   named exactly **Bona | بونا** and its picture is that company's logo (the same image the admin
+   rail shows for 145349037), not a member photo. The baseline is then taken from BOTH places each
+   account lists posts, each only after it has loaded: TikTok profile grid + Studio `/content`;
+   LinkedIn admin post list + public `/posts/`. A page that does not load stops the run.
 6. Upload, type the caption, read the caption box back and compare (whitespace-normalised).
-7. Re-check the window on the real clock, append `intent`, click **Post**.
-8. Confirm: TikTok — a new `/@bonarealestatesa/video/<id>` on the profile or Studio content
-   list; LinkedIn — the "View post" toast URN or a new activity URN whose post shows the caption's
-   first line, on the Page's admin post list or public posts page. Append `published` with `url`.
+7. Re-check the window on the real clock, append `intent` (fsync'd before the click), then
+   re-check the account / Page actor and the caption box, and click **Post** once. If TikTok
+   answers with its "Post now" confirmation, that is pressed at most once too. Neither is ever
+   pressed again.
+8. Confirm — a post counts only if it is new (not in the baseline) AND its own page/element shows
+   the caption's first line (hashtags stripped): TikTok opens each new video's page and reads its
+   description; LinkedIn binds the URN to the post element carrying it (the toast's URN is only a
+   preference and must qualify the same way). The URL keeps the real URN type
+   (`urn:li:activity|share|ugcPost`). Anything less → `uncertain`. Append `published` with `url`.
+
+Everything burned into the media (reel hook, subhook, lower third, CTA lines, card slides) goes
+through the same refusal as the caption: no `{{…}}` placeholder, never «تقييم مجاني». The reel's
+ad-licence line follows the caption's rule exactly (a number with a real expiry); property
+outside the Kingdom keeps the developer-authorisation CTA. SIGTERM/SIGINT (stop, unit timeout)
+closes our tab, removes the staged copies and releases the lock; an intent already written stays,
+so the day is uncertain rather than posted twice.
 
 Screenshots of every stage land in `~/bona-data/<channel>/shots/`; failures also go to
 `~/bona-data/<channel>/alerts.jsonl`.
@@ -77,6 +95,12 @@ One JSON line per event, `{channel, date, id: "bona-<channel>-<date>", kind, ite
 | `uncertain` | Post was clicked but the post was not seen within the confirmation window | **blocks the channel**, every later day too |
 | `confirmed-not-published` | failed before any click reached Post (button disabled/vanished), or a human settled an uncertain one | retries |
 | `skipped-nothing-eligible` | nothing to post today | — |
+
+The ledger is read strictly: any line that is not a JSON record stops every run ("line N is not a
+ledger record") until it is fixed by hand — a corrupt audit trail never reads as "nothing
+published". The one exception is a final line with no newline (a crash mid-write): the run
+newline-terminates it, appends `{"status":"uncertain","reason":"truncated final ledger line repaired"}`
+for today and stops; settle that day as below.
 
 **To unblock `uncertain`** (exit 2, `systemctl --user --failed` shows it):
 
@@ -103,6 +127,11 @@ One JSON line per event, `{channel, date, id: "bona-<channel>-<date>", kind, ite
 | `Caption box does not hold the caption` | a popup stole focus mid-typing (retried 3×) or the editor changed | look at `failed-before-post.png`; adjust `lib/browser-sites.mjs` |
 | `upload-timeout` | slow upload / processing | retries next tick |
 | `caption refused` / `caption changed since review` | compliance stop | fix the review or the copy; nothing was sent |
+| `line N is not a ledger record` | hand edit or disk damage | fix that line (keep every real record); nothing runs until then |
+| `truncated final ledger line repaired` (exit 2) | a crash mid-write | settle the day as above |
+| `TikTok session is @…, not @bonarealestatesa` / `wrong-actor` | another account logged in, or the composer is not the Page | fix the login / Page role; nothing was sent |
+| `baseline` (`grid did not load`, `… did not load`) | the account's post list did not load | retries next tick; nothing was sent |
+| `another run holds …/.publish.lock` | a live or dry run is in progress | wait; a dead holder's lock is taken over automatically |
 | exit 2, `uncertain` | see above | reconcile by hand |
 
 A half-filled draft is discarded on failure, and a leftover "video you were editing wasn't saved"
@@ -111,19 +140,25 @@ TikTok draft is discarded before a new upload (never continued).
 ## Selectors (all in `scripts/social/lib/browser-sites.mjs` → `SELECTORS`)
 
 TikTok Studio (`/tiktokstudio/upload`): `[data-e2e="edit-profile-entrance"]` (own-profile proof),
+`/passport/web/account/info/?aid=1988` → `data.username` (account, also right before Post),
+`[data-e2e="user-post-item"]` / "Upload your first video" (profile grid loaded), "No posts yet" or
+`a[href*="/video/"]` (Studio list loaded), `[data-e2e="browse-video-desc"], [data-e2e="video-desc"]`
++ `og:description` (a video's description, for binding),
 `input[type="file"][accept*="video"]`, `[data-e2e="upload_status_container"]` ("Uploaded"),
 `[data-e2e="caption_container"] [contenteditable="true"]` (Draft.js editor),
 `[data-e2e="post_video_button"]`, `[data-e2e="discard_post_button"]`, `[role="dialog"] button`
 ("Discard" confirm, "Post now"); popups dismissed by button text "Cancel" (automatic content
-checks) and "Got it". Captcha: `#captcha-verify-container`, `.captcha-verify-container`,
+checks) and "Got it", only inside `[role="dialog"]`, popover or tooltip containers. Captcha: `#captcha-verify-container`, `.captcha-verify-container`,
 `#captcha_container`, `[class*="captcha_verify"]`, `iframe[src*="captcha"]`.
 
 LinkedIn Page admin (`/company/145349037/admin/page-posts/published/`): `main button` with text
 "Start a post", `.share-box-v2__modal`, `.share-unified-settings-entry-button` (actor = "Bona | بونا"),
 `button[aria-label="Add media"]`, `#media-editor-file-selector__file-input` (multiple, JPEG/GIF),
-modal button "Next", `.ql-editor` (Quill), `.share-actions__primary-action` (Post),
+modal button "Next", `.ql-editor` (Quill), `.share-actions__primary-action` (Post), actor proof:
+`.share-unified-settings-entry-button` name + `img[src*="company-logo"]` matched against the admin
+rail's logo and `a[href*="/company/145349037/admin/settings"]`,
 `button[aria-label="Dismiss"]` + `.artdeco-modal--layer-confirmation` "Discard",
-toast `a[href*="/feed/update/"]`; confirmation by `urn:li:activity:<id>` in the page markup.
+toast `a[href*="/feed/update/"]`; post elements `[data-urn], [data-id], [data-activity-urn]`.
 
 Typing goes through `Input.insertText` line by line with Shift+Enter between lines (both editors
 make paragraphs; a plain Enter would pick a hashtag suggestion). Clicks are real mouse events at
@@ -149,8 +184,10 @@ endpoint and the staging folder.
 Units: `ops/systemd/bona-browser@.service` (+ `bona-browser@.service.d/ipv4first.conf`),
 `bona-browser@tiktok.timer`, `bona-browser@linkedin.timer`. They run from `~/bona-publish`
 exactly like `bona-daily@` (sync to `origin/main`, `guard-main.sh`), plus `ensure-deps.sh`, which
-runs `npm ci --omit=dev` in the publish tree when `package-lock.json` changes (sharp is needed to
-render). `MemoryMax=3G` for the reel's cross-fades; `/mnt/c/…/bona-social-upload` is the one
+installs `npm ci --omit=dev` when `package-lock.json` changes (sharp is needed to render) — in
+`~/bona-data/.deps-build`, swapped into the tree only after it succeeded and sharp loads, with
+`npm_config_cache=~/bona-data/.npm` (home is read-only in the unit). Photo downloads retry twice on
+a network error (the media host resets connections from this box); a hash mismatch never retries. `MemoryMax=3G` for the reel's cross-fades; `/mnt/c/…/bona-social-upload` is the one
 writable path outside home.
 
 ```bash

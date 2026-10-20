@@ -9,7 +9,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ksaNow } from './daily-pack.mjs';
-import { SITE, dayState, unsettled, chooseProperty, reviewedCopy, propertyHashtags, sha256, showsPrice, photoNoteText } from './property-daily.mjs';
+import { SITE, dayState, unsettled, chooseProperty, reviewedCopy, propertyHashtags, sha256, showsPrice, showsLicence, photoNoteText } from './property-daily.mjs';
+import { hookFor, subhookFor, typeLabel, placeLabel, specChips, priceText, t as tr, site } from './listing.mjs';
 import { refuseText } from './facebook.mjs';
 import { EDITORIAL } from './editorial.mjs';
 
@@ -31,15 +32,75 @@ export const EDUCATION_REPEAT_DAYS = 28;
 export const EDUCATION_EXCLUDED = Object.freeze(['edu-ad-licence']);
 export const TIKTOK_CORE_TAGS = Object.freeze(['#عقارات_جدة', '#جدة', '#بونا']);
 
-const rows = file => fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean) : [];
 export const ledgerPath = (data, channel) => path.join(data, channel, 'published.jsonl');
 export const lockPath = (data, channel) => path.join(data, channel, '.publish.lock');
-export const readLedger = file => rows(file);
+/**
+ * The ledger, read strictly. Blank lines are skipped; any other line that is not a JSON record
+ * stops the run (a corrupt audit trail must never read as "nothing published"), except a final
+ * line with no newline after it, which is what a crash mid-write leaves: that is reported as
+ * `truncated` and the caller treats the day as uncertain.
+ */
+export const REPAIR_REASON = 'truncated final ledger line repaired';
+export function readLedgerStrict(file) {
+  if (!fs.existsSync(file)) return { rows: [], truncated: false };
+  const text = fs.readFileSync(file, 'utf8');
+  if (!text) return { rows: [], truncated: false };
+  const endsNl = text.endsWith('\n');
+  const lines = text.split('\n');
+  if (endsNl) lines.pop();
+  const rows = [];
+  let truncated = false;
+  const parse = line => { try { const r = JSON.parse(line); return r && typeof r === 'object' && typeof r.status === 'string' ? r : null; } catch { return null; } };
+  for (const [i, line] of lines.entries()) {
+    if (!line.trim()) continue;
+    const r = parse(line);
+    if (r) { rows.push(r); continue; }
+    if (i === lines.length - 1 && !endsNl) { truncated = true; continue; }
+    // A torn line this publisher already repaired: followed by its own uncertain marker.
+    const next = lines.slice(i + 1).find(l => l.trim());
+    if (next && parse(next)?.reason === REPAIR_REASON) continue;
+    throw new Error(`${file}: line ${i + 1} is not a ledger record; fix it by hand before anything is published (docs/browser-publishing.md)`);
+  }
+  return { rows, truncated };
+}
+export const readLedger = file => readLedgerStrict(file).rows;
+/** Append one record. A file whose last line has no newline (a truncated write) is newline-terminated first, so the record never merges into it. */
 export function appendRecord(file, row, now = () => new Date()) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const fd = fs.openSync(file, 'a', 0o600);
-  try { fs.writeSync(fd, JSON.stringify({ ...row, at: now().toISOString() }) + '\n'); fs.fsyncSync(fd); }
-  finally { fs.closeSync(fd); }
+  const fd = fs.openSync(file, 'a+', 0o600);
+  try {
+    const size = fs.fstatSync(fd).size;
+    let prefix = '';
+    if (size > 0) { const b = Buffer.alloc(1); fs.readSync(fd, b, 0, 1, size - 1); if (b[0] !== 0x0a) prefix = '\n'; }
+    fs.writeSync(fd, prefix + JSON.stringify({ ...row, at: now().toISOString() }) + '\n');
+    fs.fsyncSync(fd);
+  } finally { fs.closeSync(fd); }
+}
+const alive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+/**
+ * Exclusive per-channel lock, dry runs included (a dry run discards drafts, so it must never
+ * overlap a live run). A live holder is never displaced; a dead holder's lock is taken over at
+ * once; a lock with no readable pid falls back to age, staleMs (longer than the unit's 40 min).
+ * Returns release().
+ */
+export function acquireLock(file, { staleMs = 45 * 60_000, now = () => Date.now() } = {}) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = fs.openSync(file, 'wx', 0o600);
+      fs.writeSync(fd, `${process.pid} ${new Date(now()).toISOString()}\n`); fs.closeSync(fd);
+      let released = false;
+      return () => { if (!released) { released = true; try { fs.rmSync(file, { force: true }); } catch { /* gone */ } } };
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      let pid = NaN, age = 0;
+      try { pid = Number.parseInt(fs.readFileSync(file, 'utf8'), 10); age = now() - fs.statSync(file).mtimeMs; } catch { continue; }
+      const takeover = Number.isInteger(pid) && pid > 0 ? !alive(pid) : age > staleMs;
+      if (!takeover) throw new Error(`another run holds ${file} (pid ${Number.isInteger(pid) ? pid : '?'}, ${Math.round(age / 1000)} s old) — wait for it`);
+      fs.rmSync(file, { force: true });
+    }
+  }
+  throw new Error(`could not take ${file}`);
 }
 export const entryId = (channel, date) => `bona-${channel}-${date}`;
 
@@ -149,7 +210,7 @@ function finish(parts, max) {
   const text = parts.filter(Boolean).join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
   const why = refuseText(text);
   if (why) throw new Error(`caption refused: ${why}`);
-  if (/\[add number before publishing\]|\[يُضاف قبل النشر\]/.test(text)) throw new Error('caption refused: licence placeholder');
+  if (/\{\{|\[add number before publishing\]|\[يُضاف قبل النشر\]/.test(text)) throw new Error('caption refused: licence placeholder');
   if (text.length > max) throw new Error(`caption is ${text.length} characters, over ${max}`);
   return text;
 }
@@ -159,12 +220,34 @@ export function captionFor(channel, choice, { advertiser, fal }) {
     : linkedinPropertyCaption(choice.listing, advertiser, choice.review);
   return channel === 'tiktok' ? tiktokEducationCaption(choice.item, { fal }) : linkedinEducationCaption(choice.item, { fal });
 }
-/** The CTA card's licence pair for a property reel: the advertiser line every caption carries, plus the ad-licence line once the listing has one. */
+/** The CTA card's licence pair for a property reel: the advertiser line every caption carries, plus the
+    ad-licence line under exactly the caption's rule (showsLicence: a number with a real expiry). */
 export function reelLicenceLines(p, advertiser) {
-  const lic = /^\d{8,15}$/.test(p?.licence?.adNumber ?? '') ? p.licence.adNumber : null;
+  const lic = showsLicence(p?.licence) ? p.licence : null;
   return {
-    ar: [`المعلن: ${advertiser.name.ar} · فال ${advertiser.fal}`, lic && `ترخيص الإعلان ${lic}`].filter(Boolean).join(' · '),
-    en: [`Advertiser ${advertiser.name.en} · FAL ${advertiser.fal}`, lic && `Ad licence ${lic}`].filter(Boolean).join(' · '),
+    ar: [`المعلن: ${advertiser.name.ar} · فال ${advertiser.fal}`, lic && `ترخيص الإعلان ${lic.adNumber} · ينتهي ${lic.adExpiry}`].filter(Boolean).join(' · '),
+    en: [`Advertiser ${advertiser.name.en} · FAL ${advertiser.fal}`, lic && `Ad licence ${lic.adNumber} · Expires ${lic.adExpiry}`].filter(Boolean).join(' · '),
   };
+}
+/** Every string the media will burn into pixels for this choice (reel hook, subhook, lower third, CTA; card slides). */
+export function renderedStrings(choice, advertiser) {
+  if (choice.kind === 'property') {
+    const l = choice.listing, lines = reelLicenceLines(l, advertiser);
+    const out = [hookFor(l).ar, hookFor(l).en, subhookFor(l).ar, subhookFor(l).en, lines.ar, lines.en,
+      site.tagline?.ar, site.tagline?.en, `${l.id}`];
+    for (const lang of ['ar', 'en']) out.push(typeLabel(l, lang), placeLabel(l, lang), tr(l.title, lang), priceText(l, lang), ...specChips(l, lang));
+    return out.filter(x => x != null).map(String);
+  }
+  const it = choice.item, out = [it.topic?.ar, it.topic?.en, it.card?.ar, it.card?.en];
+  for (const sl of it.slides ?? []) out.push(sl.ar, sl.en, sl.intro, sl.sub, sl.note, sl.noteEn, ...(sl.rows ?? []).flat());
+  return out.filter(x => x != null).map(String);
+}
+/** Throws when any rendered string fails the same refusal as a caption (placeholder, forbidden phrase). */
+export function assertRenderable(strings) {
+  for (const x of strings) {
+    const why = refuseText(x) ?? (/\{\{|\[add number before publishing\]|\[يُضاف قبل النشر\]/.test(x) ? 'licence placeholder' : null);
+    if (why) throw new Error(`rendered text refused: ${why}: «${x.slice(0, 80)}»`);
+  }
+  return true;
 }
 export { showsPrice };
