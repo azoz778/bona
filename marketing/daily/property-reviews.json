@@ -803,6 +803,58 @@
       }
     ]
   },
+  "BONA-W011": {
+    "status": "approved",
+    "reviewedAt": "2026-10-20T22:57:19.888Z",
+    "reviewer": "Owner 2026-10-21 in chat approved Sadana Townhouse with 3 frames only. Claude visual review: frame 1 (front exterior) and frame 2 (corner facade) are developer exterior renders; frame 3 (living room) is a clean interior render. Frames 4 and 5 dropped: AI-looking interiors with a forest view implausible for Al Rawdah, Jeddah.",
+    "factsSha256": "b6c57423e5a0e0915266eaeda50bfcc967cadc73649983bd69fd854592a58afd",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "de02019b552c4304f648a88152af67e333d04012e3c7e765d9a379e4a82f7b8d",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "مواعيد التسليم والمواصفات حسب المطوّر.",
+      "en": "Delivery dates and specifications are per the developer."
+    },
+    "photos": [
+      {
+        "url": "https://bona-real-estate.com/listings/sadana-townhouse-al-rawdah/01.jpg",
+        "sha256": "1f992c2da9aef2974ab1cc9a606f4fb4036fbc270d187d3d0882a1d306521886",
+        "width": 1114,
+        "height": 1069,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Exterior — Sadana Townhouse, Al Rawdah",
+          "ar": "الواجهة الخارجية — سدنة تاون هاوس، الروضة"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/sadana-townhouse-al-rawdah/02.jpg",
+        "sha256": "f11792aef56c27b013155ef65454e06ac35e1c5ea1334ddbe3abca1a567d0685",
+        "width": 1600,
+        "height": 1694,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Façade — Sadana Townhouse, Al Rawdah",
+          "ar": "الواجهة — سدنة تاون هاوس، الروضة"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/sadana-townhouse-al-rawdah/03.jpg",
+        "sha256": "6d425ec978dd871ed78a78b998915cdd389cb9523e819a0b8099f39338f9eac0",
+        "width": 1114,
+        "height": 1000,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Living room — Sadana Townhouse, Al Rawdah",
+          "ar": "غرفة المعيشة — سدنة تاون هاوس، الروضة"
+        }
+      }
+    ]
+  },
   "BONA-W012": {
     "status": "approved",
     "reviewedAt": "2026-10-19T02:33:35.441Z",
