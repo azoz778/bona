@@ -47,8 +47,15 @@ export const showsLicence = l => /^\d{8,15}$/.test(l?.adNumber ?? '') && realDat
 /** Whether the caption prints a price: a SAR amount that is not "on request". disclosuresFor() follows the same test. */
 export const showsPrice = p => Boolean(p?.price?.amount && p.price.currency === 'SAR' && !p.price.onRequest);
 const CATEGORIES = ['buy', 'rent', 'off-plan'];
-/** What a policy without the 2026-10-05 fields means: licensed Saudi sale/rent stock, real photographs, 30-day reviews. */
-export const STRICT_RULES = Object.freeze({ licenceRequired: true, countries: Object.freeze(['SA']), categories: Object.freeze(['buy', 'rent']), renders: 'none', reviewValidDays: 30 });
+/** What a policy without the 2026-10-05 fields means: licensed Saudi sale/rent stock, real photographs, 30-day reviews, 30-day repeats. */
+export const STRICT_RULES = Object.freeze({ licenceRequired: true, countries: Object.freeze(['SA']), categories: Object.freeze(['buy', 'rent']), renders: 'none', reviewValidDays: 30, repeatDays: 30 });
+/**
+ * Bounds of the policy's repeatDays, the one repeat interval every daily channel reads (Instagram,
+ * Facebook, TikTok, LinkedIn). Never under 14: publish.mjs refuses an Instagram post with the same
+ * images and caption as one published in the last 14 days (dedupeDays), and a repeat must never be
+ * mistaken for, or be, a duplicate.
+ */
+export const REPEAT_DAYS_MIN = 14, REPEAT_DAYS_MAX = 90;
 /** property-policy.json → eligibility rules. Anything unreadable throws: no run proceeds on a policy it cannot read. */
 export function policyRules(policy = {}, now = new Date()) {
   const licence = policy.adLicence ?? { requirement: 'required' };
@@ -63,7 +70,9 @@ export function policyRules(policy = {}, now = new Date()) {
   if (!['none', 'off-plan-only'].includes(renders)) throw new Error('Invalid renders rule in the property policy');
   const reviewValidDays = policy.reviewValidDays ?? STRICT_RULES.reviewValidDays;
   if (!Number.isInteger(reviewValidDays) || reviewValidDays < 1 || reviewValidDays > 180) throw new Error('Invalid reviewValidDays in the property policy');
-  return Object.freeze({ licenceRequired: licence.requirement === 'required', countries: Object.freeze([...countries]), categories: Object.freeze([...categories]), renders, reviewValidDays });
+  const repeatDays = policy.repeatDays ?? STRICT_RULES.repeatDays;
+  if (!Number.isInteger(repeatDays) || repeatDays < REPEAT_DAYS_MIN || repeatDays > REPEAT_DAYS_MAX) throw new Error('Invalid repeatDays in the property policy');
+  return Object.freeze({ licenceRequired: licence.requirement === 'required', countries: Object.freeze([...countries]), categories: Object.freeze([...categories]), renders, reviewValidDays, repeatDays });
 }
 export function eligibility(p, review, advertiser, now = new Date(), rules = STRICT_RULES) {
   const reasons = [];
@@ -216,16 +225,62 @@ export function unsettled(events, channel) {
   return events.some((e, i) => e.channel === channel && ['intent', 'uncertain'].includes(e.status) &&
     !events.some((p, j) => p.channel === channel && p.id === e.id && (p.status === 'published' || (p.status === 'confirmed-not-published' && j > i))));
 }
-export function chooseProperty(listings, reviews, advertiser, events, channel, now = new Date(), repeatDays = 30, rules = STRICT_RULES) {
+/** Riyadh calendar day number of an instant: a repeat interval counts whole Riyadh days, not hours. */
+const riyadhDay = ms => Math.round(Date.parse(`${ksaNow(new Date(ms)).date}T00:00:00Z`) / 86400000);
+/** When this listing was last published on this channel (ms), 0 if never. */
+export const lastPublished = (events, channel, id) =>
+  Math.max(0, ...events.filter(x => x.channel === channel && x.listingId === id && x.status === 'published').map(x => Date.parse(x.at) || 0));
+/**
+ * Today's property on this channel. Eligible: everything eligibility() passes and not published on
+ * this channel within the last `repeatDays` Riyadh calendar days (posted on day D, it may return on
+ * day D + repeatDays; a future-dated record counts as recent). Order: least recently posted on this
+ * channel first, never-posted listings before all others (so a newly approved listing goes out
+ * next), then by id.
+ */
+export function chooseProperty(listings, reviews, advertiser, events, channel, now = new Date(), repeatDays = undefined, rules = STRICT_RULES) {
+  repeatDays ??= rules?.repeatDays ?? STRICT_RULES.repeatDays;
   const rejected = [];
-  const last = id => Math.max(0,...events.filter(x=>x.channel===channel && x.listingId===id && x.status==='published').map(x=>Date.parse(x.at)||0));
+  const last = id => lastPublished(events, channel, id);
+  const recent = id => { const t = last(id); return t > 0 && (t > +now || riyadhDay(+now) - riyadhDay(t) < repeatDays); };
   const candidates = listings.filter(p=>{
     const why = eligibility(p,reviews[p.id],advertiser,now,rules);
-    if (+now-last(p.id) < repeatDays*86400000) why.push('recently_published');
+    if (recent(p.id)) why.push('recently_published');
     if (why.length) { rejected.push({id:p.id,reasons:why}); return false; }
     return true;
   }).sort((a,b)=>last(a.id)-last(b.id)||a.id.localeCompare(b.id));
   return {listing:candidates[0] ?? null,rejected};
+}
+/** How many times this listing has been published on this channel (distinct post ids): 0 on its first post. */
+export function repeatIndex(events, channel, id) {
+  const ids = new Set(events.filter(x => x.channel === channel && x.listingId === id && x.status === 'published').map(x => x.id ?? x.at));
+  return ids.size;
+}
+/**
+ * The frame orders a repeat may use, all made only of the review's own approved frames: first the
+ * reviewed order, then each other frame as the cover with the rest following in review order
+ * (wrapping), then the same covers with the rest reversed. Orders whose frames would not all sit
+ * within the carousel aspect tolerance of the new cover (Instagram crops to the first frame) are
+ * dropped; the reviewed order always qualifies. Values are 0-based indexes into review.photos.
+ */
+export function frameOrders(photos = []) {
+  const n = photos.length, seen = new Set(), out = [];
+  const add = order => { const key = order.join(','); if (seen.has(key) || !aspectConsistent(order.map(i => photos[i]))) return; seen.add(key); out.push(order); };
+  const rest = c => Array.from({ length: n - 1 }, (_, j) => (c + 1 + j) % n);
+  for (let c = 0; c < n; c++) add([c, ...rest(c)]);
+  for (let c = 0; c < n; c++) add([c, ...rest(c).reverse()]);
+  return out;
+}
+/**
+ * The review with its approved frames in the order for this listing's `repeat`-th post on a channel
+ * (repeatIndex()): the reviewed order on the first post, a different cover and order on each repeat,
+ * deterministic. Only the order changes: same frames, hashes, kinds and alt texts, so the caption
+ * (captionSha256), renderShare() and eligibility() are exactly the review's.
+ */
+export function variedReview(review, repeat = 0) {
+  const orders = frameOrders(review?.photos ?? []);
+  if (!orders.length) return { review, order: [] };
+  const order = orders[((repeat % orders.length) + orders.length) % orders.length];
+  return { review: { ...review, photos: order.map(i => review.photos[i]) }, order };
 }
 export function entryFor(p, review, advertiser, channel, date, assets = []) {
   return {id:`bona-daily-${channel==='instagram'?'ig':'fb'}-${date}`,date,time:'20:30',platform:channel,

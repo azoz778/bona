@@ -59,10 +59,11 @@ async function renderMedia(channel, choice, dir, deps, advertiser) {
   fs.mkdirSync(dir, { recursive: true });
   const { media } = deps;
   if (choice.kind === 'property') {
+    // The approved frames in this post's order (a repeat gets another cover and order; TikTok re-renders the reel from it).
     // The media host resets ~1 in 4 connections from this box; a network failure is retried, a hash mismatch is not.
     let frames;
     for (let attempt = 1; ; attempt++) {
-      try { frames = await deps.downloadReviewedPhotos(choice.review, dir, false, deps.fetchImpl ?? fetch); break; }
+      try { frames = await deps.downloadReviewedPhotos(choice.frames ?? choice.review, dir, false, deps.fetchImpl ?? fetch); break; }
       catch (e) { if (attempt >= 3 || /changed since visual review/.test(e.message)) throw e; await new Promise(r => setTimeout(r, 2000 * attempt)); }
     }
     if (channel === 'tiktok') return [media.propertyReel(choice.listing, frames, reelLicenceLines(choice.listing, advertiser), path.join(dir, `tiktok-${choice.listing.id}.mp4`))];
@@ -149,7 +150,7 @@ export async function run(channel, opts = {}, deps = null) {
     catch (e) { log(`${channel}: live catalogue unavailable (${redact(e)}); property posts are off for this run`); }
     const reviews = read(path.join(root, 'marketing/daily/property-reviews.json'));
     const pool = educationPool(read(path.join(root, 'marketing/daily/content.json')));
-    const choice = chooseToday({ channel, date, now, listings: live?.listings ?? [], reviews, advertiser: live?.advertiser, events, pool, repeatDays: policy.repeatDays, rules, only: kind });
+    const choice = chooseToday({ channel, date, now, listings: live?.listings ?? [], reviews, advertiser: live?.advertiser, events, pool, repeatDays: rules.repeatDays, rules, only: kind });
     if (!choice) {
       const row = { channel, date, id: entryId(channel, date), status: 'skipped-nothing-eligible' };
       if (!dry && !events.some(e => e.channel === channel && e.date === date && e.status === row.status)) appendRecord(ledger, row);
@@ -162,12 +163,12 @@ export async function run(channel, opts = {}, deps = null) {
     // What a confirmed post must also show besides the full caption: the listing id, or the topic line.
     const evidence = choice.kind === 'property' ? choice.listing.id : (channel === 'tiktok' ? choice.item.topic.ar : choice.item.topic.en);
     if (!caption.includes(evidence)) throw new Error(`${channel}: caption does not carry its binding evidence "${evidence}"`);
-    log(`${channel}: ${date} → ${choice.kind} ${itemId} (${caption.length} chars)`);
+    log(`${channel}: ${date} → ${choice.kind} ${itemId}${choice.frameOrder ? ` frames ${choice.frameOrder.join(',')}` : ''} (${caption.length} chars)`);
 
     const workRoot = dry ? fs.mkdtempSync(path.join(os.tmpdir(), `bona-${channel}-dry-`)) : path.join(data, channel, 'assets', date);
     const files = await renderMedia(channel, choice, workRoot, deps, live?.advertiser);
     log(`${channel}: media ${files.map(f => path.basename(f)).join(', ')}`);
-    if (renderOnly) return { status: 'rendered', choice: { kind: choice.kind, itemId }, caption, files };
+    if (renderOnly) return { status: 'rendered', choice: { kind: choice.kind, itemId, frameOrder: choice.frameOrder }, caption, files };
 
     const recheck = async () => {
       if (choice.kind !== 'property') return;
@@ -178,7 +179,7 @@ export async function run(channel, opts = {}, deps = null) {
         throw Object.assign(new Error(`${choice.listing.id} changed during preflight`), { beforeClick: true });
     };
     await recheck();
-    const base = { channel, date, id: entryId(channel, date), kind: choice.kind, itemId, ...(choice.kind === 'property' ? { listingId: itemId } : {}) };
+    const base = { channel, date, id: entryId(channel, date), kind: choice.kind, itemId, ...(choice.kind === 'property' ? { listingId: itemId, frameOrder: choice.frameOrder } : {}) };
     const runId = `${channel}-${date}-${process.pid}`;
     const winFiles = deps.cdp.stageForUpload(files, runId);
     const unstageNow = () => deps.cdp.unstage(runId);
@@ -205,7 +206,7 @@ export async function run(channel, opts = {}, deps = null) {
         throw Object.assign(new Error(`${channel}: Post was clicked (${result.signal}) but the new post was not seen on the account; recorded uncertain, the channel is blocked until reconciled`), { uncertain: true });
       } else log(`${channel}: ${result.status}${result.preClick ? ` (pre-click checks ${result.preClick}; baseline ${result.existing} existing)` : ''}${result.screenshots ? ` — ${result.screenshots.join(', ')}` : ''}`);
       if (dry && result.preClick && result.preClick !== 'passed') throw new Error(`${channel}: dry run filled the form but the pre-click checks ${result.preClick}`);
-      return { ...result, choice: { kind: choice.kind, itemId }, caption, files };
+      return { ...result, choice: { kind: choice.kind, itemId, frameOrder: choice.frameOrder }, caption, files };
     } catch (e) {
       if (intent && !e.uncertain) {
         if (e.beforeClick) appendRecord(ledger, { ...base, status: 'confirmed-not-published', evidence: `failed before Post was clicked: ${redact(e)}` });

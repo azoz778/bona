@@ -1,8 +1,8 @@
 // docs/daily-property-publishing.md is followed by hand when a property attempt is uncertain, and
 // the publisher reads the lines it prescribes back: dayState and unsettled by channel, date and
-// id, the 30-day repeat rule by channel, listingId and an ISO `at`, the Instagram ledger by id.
+// id, the repeat rule (repeatDays) by channel, listingId and an ISO `at`, the Instagram ledger by id.
 // A template missing any of those leaves the channel blocked for good or lets the same property
-// return within 30 days. The verification command has to simulate today's slot, not the day
+// return within the repeat interval. The verification command has to simulate today's slot, not the day
 // the doc was written.
 import test from 'node:test';
 import assert from 'node:assert/strict';

@@ -714,3 +714,103 @@ test('captions of listings without a photo note are unchanged, so every existing
   // Pinned with origin/main's caption code before photoNote existed.
   assert.equal(sha256(JSON.stringify(reviewedCopy(pinned,advertiser,review))),'bf8803668e4ba84c1cdeba8eeaf9af36507055a7ca01fff47cca943488cd54e9');
 });
+
+// ------------------------------------------------ 2026-10-21: 14-day repeats, varied frames, newest approvals first
+test('the repository policy repeats a property after 14 days, and policyRules() is the one bound for every channel', () => {
+  const policy = JSON.parse(fs.readFileSync(new URL('../../marketing/daily/property-policy.json', import.meta.url), 'utf8'));
+  assert.equal(policyRules(policy, new Date('2026-10-21T17:30:00Z')).repeatDays, 14);
+  assert.equal(policyRules({}, now).repeatDays, 30, 'a policy without the field keeps the strict 30 days');
+  for (const bad of [0, 7, 13, 91, 14.5, '14'])
+    assert.throws(() => policyRules({ ...WAIVER_POLICY, repeatDays: bad }, now), /repeatDays/, String(bad));
+});
+test('repeat interval counts Riyadh calendar days: posted on day D, eligible again on day D+14 at the slot', () => {
+  const { listing, advertiser: a } = fixture(); const p = { ...listing, licence: null };
+  const reviews = { [p.id]: { ...waivedReview(p, a), reviewedAt: '2026-10-05T12:00:00Z' } };
+  const rules = policyRules({ ...WAIVER_POLICY, repeatDays: 14 }, now);
+  const events = [{ channel: 'instagram', id: 'bona-daily-ig-2026-10-06', listingId: p.id, status: 'published', at: '2026-10-06T17:36:06Z' }];
+  // 14 days later at 20:30 Riyadh: six minutes short of 14×24 h, but the 14th calendar day.
+  assert.equal(chooseProperty([p], reviews, a, events, 'instagram', new Date('2026-10-20T17:30:00Z'), undefined, rules).listing?.id, p.id);
+  const day13 = chooseProperty([p], reviews, a, events, 'instagram', new Date('2026-10-19T20:59:00Z'), undefined, rules);
+  assert.equal(day13.listing, null);
+  assert.ok(day13.rejected[0].reasons.includes('recently_published'));
+  assert.equal(chooseProperty([p], reviews, a, events, 'instagram', new Date('2026-10-20T17:30:00Z'), undefined, { ...rules, repeatDays: 30 }).listing, null, 'the rules carry the interval');
+});
+test('pool order: never-posted listings first, then the least recently posted on that channel', () => {
+  const { advertiser: a } = fixture();
+  const mk = id => { const { listing } = fixture(); return { ...listing, id, slug: id.toLowerCase(), licence: null, images: [1, 2, 3].map(i => ({ src: `/listings/${id.toLowerCase()}/${i}.jpg` })) }; };
+  const ps = ['BONA-001', 'BONA-002', 'BONA-099'].map(mk);
+  const reviews = Object.fromEntries(ps.map(p => [p.id, { ...waivedReview(p, a), reviewedAt: '2026-10-05T12:00:00Z' }]));
+  const rules = policyRules({ ...WAIVER_POLICY, repeatDays: 14 }, now), at = new Date('2026-10-23T17:30:00Z');
+  const pub = (id, d, channel = 'instagram') => ({ channel, id: `x-${channel}-${d}`, listingId: id, status: 'published', at: `${d}T17:30:30Z` });
+  const events = [pub('BONA-002', '2026-10-06'), pub('BONA-001', '2026-10-07')];
+  assert.equal(chooseProperty(ps, reviews, a, events, 'instagram', at, undefined, rules).listing.id, 'BONA-099', 'a new approval goes out before any repeat');
+  assert.equal(chooseProperty(ps.slice(0, 2), reviews, a, events, 'instagram', at, undefined, rules).listing.id, 'BONA-002', 'then the least recently posted');
+  assert.equal(chooseProperty(ps.slice(0, 2), reviews, a, events, 'facebook', at, undefined, rules).listing.id, 'BONA-001', 'per channel');
+});
+function mixedAspectFixture() {
+  const { listing, advertiser: a } = fixture();
+  const p = { ...listing, licence: null, images: [1, 2, 3, 4].map(i => ({ src: `/listings/fixture/${i}.jpg` })) };
+  const r = waivedReview(p, a);
+  // 1.5, 1.5, 1.6 and 1.3: within 15% of the first frame, but 1.6 and 1.3 are not within 15% of each other.
+  const dims = [[1920, 1280], [1920, 1280], [1920, 1200], [1820, 1400]];
+  r.photos = r.photos.map((x, i) => ({ ...x, width: dims[i][0], height: dims[i][1], alt: { ar: `صورة ${i + 1}`, en: `Photo ${i + 1}` } }));
+  r.reviewedAt = '2026-10-05T12:00:00Z';
+  r.captionSha256 = sha256(JSON.stringify(reviewedCopy(p, a, r)));
+  return { p, a, r };
+}
+test('repeats vary the cover and frame order, from the approved frames only, keeping the carousel aspect rule and the caption hash', async () => {
+  const { frameOrders, variedReview, repeatIndex, aspectConsistent } = await import('../social/lib/property-daily.mjs');
+  const { p, a, r } = mixedAspectFixture(), at = new Date('2026-10-20T17:30:00Z');
+  assert.deepEqual(eligibility(p, r, a, at, WAIVED), []);
+  const orders = frameOrders(r.photos);
+  assert.deepEqual(orders[0], [0, 1, 2, 3], 'the first post keeps the reviewed order');
+  assert.ok(orders.length >= 2);
+  for (const o of orders) {
+    assert.deepEqual([...o].sort(), [0, 1, 2, 3], 'every order is a permutation of the approved frames');
+    assert.ok(aspectConsistent(o.map(i => r.photos[i])), `order ${o} crops within 15% of its cover`);
+  }
+  assert.ok(!orders.some(o => o[0] === 2) && !orders.some(o => o[0] === 3), 'covers that would crop another frame by more than 15% are never used');
+  const first = variedReview(r, 0), second = variedReview(r, 1), third = variedReview(r, 2);
+  assert.deepEqual(first.review.photos, r.photos);
+  assert.notDeepEqual(second.review.photos.map(x => x.url), r.photos.map(x => x.url));
+  assert.notEqual(second.review.photos[0].url, r.photos[0].url, 'the first repeat has another cover');
+  assert.notDeepEqual(third.review.photos.map(x => x.url), second.review.photos.map(x => x.url));
+  assert.deepEqual(variedReview(r, 1), second, 'deterministic');
+  for (const v of [first, second, third]) {
+    assert.deepEqual(eligibility(p, v.review, a, at, WAIVED), [], 'same frames, same caption hash, same aspect rule');
+    assert.deepEqual(new Set(v.review.photos.map(x => x.sha256)), new Set(r.photos.map(x => x.sha256)));
+  }
+  const events = [{ channel: 'instagram', id: 'bona-daily-ig-2026-10-06', listingId: p.id, status: 'published', at: '2026-10-06T17:30:00Z' },
+    { channel: 'instagram', id: 'bona-daily-ig-2026-10-06', listingId: p.id, status: 'published', at: '2026-10-06T18:00:00Z', manual: true },
+    { channel: 'facebook', id: 'bona-daily-fb-2026-10-06', listingId: p.id, status: 'published', at: '2026-10-06T17:30:00Z' },
+    { channel: 'instagram', id: 'bona-daily-ig-2026-10-07', listingId: p.id, status: 'intent', at: '2026-10-07T17:30:00Z' }];
+  assert.equal(repeatIndex(events, 'instagram', p.id), 1, 'distinct published posts on that channel only');
+  assert.equal(repeatIndex([], 'instagram', p.id), 0);
+});
+test('Instagram dry preflight: a repeat posts the approved frames under another cover, the caption unchanged', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-property-repeat-'));
+  try {
+    const { p, a, r } = mixedAspectFixture();
+    writePolicy(root, { ...WAIVER_POLICY, repeatDays: 14 });
+    fs.writeFileSync(path.join(root, 'marketing/daily/property-reviews.json'), JSON.stringify({ [p.id]: r }));
+    const data = path.join(root, 'data'); fs.mkdirSync(path.join(data, 'daily'), { recursive: true });
+    fs.writeFileSync(path.join(data, 'daily/property.jsonl'), JSON.stringify({ channel: 'instagram', date: '2026-10-06', id: 'bona-daily-ig-2026-10-06', listingId: p.id, status: 'published', at: '2026-10-06T17:30:40Z' }) + '\n');
+    const at = new Date('2026-10-20T17:30:00Z');
+    const env = { BONA_DATA: data, META_ACCESS_TOKEN: 'not-a-real-token', IG_BUSINESS_ID: ACCOUNT.instagram };
+    const fetchImpl = async (url, opts) => {
+      assert.ok(!opts?.method || opts.method === 'GET', 'preflight must never mutate');
+      const u = new URL(url);
+      if (u.pathname === '/social-catalogue.json') return Response.json({ version: 1, generatedAt: at.toISOString(), advertiser: a, listings: [p] });
+      if (u.hostname === 'graph.facebook.com') return Response.json(u.pathname.endsWith('content_publishing_limit') ? { data: [{ quota_usage: 0, config: { quota_total: 100 } }] } : { id: ACCOUNT.instagram, username: 'bonarealestatesa' });
+      const i = r.photos.findIndex(x => x.url === url); assert.ok(i >= 0, 'only approved frames are fetched');
+      return new Response('fixture ' + i, { headers: { 'content-type': 'image/jpeg' } });
+    };
+    const ready = await propertyDaily('instagram', { dry: true, now: at, root, env, fetchImpl });
+    assert.equal(ready.status, 'ready');
+    assert.equal(ready.entry.listingId, p.id);
+    assert.deepEqual(ready.frameOrder, [2, 3, 4, 1]);
+    assert.deepEqual(ready.entry.images, [1, 2, 3, 0].map(i => r.photos[i].url));
+    assert.equal(ready.entry.alt.en, 'Photo 2', 'the alt text is the new cover\'s');
+    assert.deepEqual(ready.entry.caption, captionFor(p, a, r), 'the reviewed caption');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
