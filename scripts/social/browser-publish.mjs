@@ -220,7 +220,7 @@ export async function run(channel, opts = {}, deps = null) {
   };
   if (renderOnly) return operation();
   // Dry runs take the same lock: they discard drafts, so they must never overlap a live run.
-  const release = acquireLock(lockPath(data, channel));
+  const release = acquireLock(lockPath(data, channel), { env });
   cleanups.add(release);
   try { return await operation(); } finally { release(); cleanups.delete(release); }
 }

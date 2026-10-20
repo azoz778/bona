@@ -50,11 +50,11 @@ debug Chrome (CDP `http://localhost:9222`, started by `~/.claude/scripts/chrome-
 
 1. Outside the channel's window (or on a Friday/Saturday for LinkedIn) it does nothing.
 2. Lock `~/bona-data/<channel>/.publish.lock` — dry runs too, since a dry run discards drafts.
-   Created only with O_EXCL and holding `pid nonce time`. A live holder is never displaced; a dead
-   pid's lock (or a pid-less one older than 45 min, longer than the unit's 40 min) is taken over
-   only by whoever wins the O_EXCL `.publish.lock.takeover` mutex, who removes the lock only if it
-   is still the same stale file. release() unlinks only while the file carries its own token. Read the ledger strictly (see below). `published` today → "already
-   published", exit 0. Anything `intent`/`uncertain` without a later settling line → stop (exit 1).
+   It is a kernel lock: `flock(LOCK_EX|LOCK_NB)` held on an open file descriptor for the whole run
+   (taken with util-linux `flock` on our own fd; under the unit, ExecStart takes it on fd 9 and
+   node verifies `BONA_LOCK_FD=9` is that file and holds the lock). The kernel releases it when the
+   process ends or is killed, so there is no stale lock, takeover or token; the file's contents mean
+   nothing. Read the ledger strictly (see below).
 3. Choose, build the caption, render media into `~/bona-data/<channel>/assets/<date>/`, copy it to
    `C:\Users\ASUS\AppData\Local\bona-social-upload\<run>\` (the Windows Chrome cannot read WSL paths).
 4. Open **our own tab** (`PUT /json/new`), never touching other tabs; closed at the end.
@@ -75,7 +75,10 @@ debug Chrome (CDP `http://localhost:9222`, started by `~/.claude/scripts/chrome-
    caption mismatch at that point records `confirmed-not-published` (nothing was clicked). If TikTok
    answers with its "Post now" confirmation, that is pressed at most once too. Neither is ever
    pressed again.
-8. Confirm — a post counts only if it is new (not in the baseline) AND the post's OWN text node
+8. Confirm — only TOP-LEVEL posts are candidates (a reshared/quoted container never is), and each
+   new one is read in full first: LinkedIn from its own page `/feed/update/<urn>/` with "…see more"
+   expanded, TikTok from `/video/<id>` with the description's "more" expanded. A post counts only if
+   it is new (not in the baseline) AND the post's OWN text node
    contains the FULL submitted caption (normalised only for whitespace, emoji, LinkedIn's
    "hashtag#tag" link text and a trailing "…see more") AND the submission's evidence (the listing
    id, or the education topic line). TikTok reads each new video's own description element (not
@@ -125,6 +128,43 @@ for today and stops; settle that day as below.
    echo '{"channel":"tiktok","date":"2026-10-21","id":"bona-tiktok-2026-10-21","status":"confirmed-not-published","evidence":"checked Studio by hand","at":"'$(date -u +%FT%TZ)'"}' >> ~/bona-data/tiktok/published.jsonl
    ```
    The next tick (inside the window) posts again. Use the same `id` and `date` as the blocking line.
+
+## Voyager fields relied on
+
+The LinkedIn actor check reads LinkedIn's own record for the Page from the logged-in tab:
+`GET /voyager/api/organization/companies/145349037` (same-origin `fetch` with the page's cookies,
+`csrf-token` = the `JSESSIONID` cookie, `accept: application/vnd.linkedin.normalized+json+2.1`).
+Fields used, all under `data`:
+
+| field | must be |
+|---|---|
+| `entityUrn` | `urn:li:fs_normalized_company:145349037` |
+| `name` | `Bona \| بونا` (and equal to the composer actor's name) |
+| `logos.logo.digitalmediaAsset` (fallback `logo.image.digitalmediaAsset`) | `urn:li:digitalmediaAsset:<id>` where `<id>` is the asset in the composer actor's `…/dms/image/v2/<id>/company-logo…` picture |
+| `viewerPermissions.canUpdateOrganizationProfile` | `true` (the logged-in member administers the Page) |
+
+The record is fetched first; then ONE page evaluation reads the actor inside the share modal,
+compares it, and returns the Post button's position, and the only thing after it is the click.
+If LinkedIn renames or blocks this endpoint, every LinkedIn run stops before the click.
+
+## What a refusal looks like
+
+A refusal stops the run before anything is sent and lands in `~/bona-data/<channel>/alerts.jsonl`
+(and the journal of `systemctl --user status bona-browser@<channel>`), e.g.:
+
+```json
+{"channel":"linkedin","status":"needs-attention","kind":"wrong-actor","reason":"LinkedIn: composer actor logo C4E0AQ… is not the logo of company 145349037","at":"2026-10-21T06:31:12.004Z"}
+```
+
+```
+browser-publish linkedin: LinkedIn: composer actor logo C4E0AQ… is not the logo of company 145349037
+```
+
+If the refusal came after `intent` (the pre-click checks), the ledger also gets
+`{"status":"confirmed-not-published","evidence":"failed before Post was clicked: …"}` and the next
+tick retries; before `intent` nothing is written to the ledger at all. Only `status:"uncertain"`
+alerts (exit 2) need the reconciliation above. A busy lock exits 75 from the unit's `flock` (or
+`another run holds …` from a hand run) and writes nothing.
 
 ## Failure modes
 

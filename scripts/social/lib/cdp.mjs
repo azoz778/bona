@@ -128,6 +128,12 @@ export async function connect(target, { WebSocketImpl = globalThis.WebSocket, co
         await send('Input.dispatchMouseEvent', { type, x: p.x, y: p.y, button: 'left', clickCount: 1 });
       return p;
     },
+    /** A real mouse click at viewport coordinates (the caller computed them in the same evaluation that checked the page). */
+    async clickAt(x, y) {
+      for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased'])
+        await send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
+      return true;
+    },
     /** Focus the element, then type as the keyboard would (Input.insertText fires beforeinput/input, which rich editors need). */
     async typeInto(expr, value, { clear = true, lineDelayMs = 0 } = {}) {
       const ok = await ev(`(() => { const e = (${expr}); if (!e) return false; e.scrollIntoView({block:'center'}); e.focus(); return true; })()`);

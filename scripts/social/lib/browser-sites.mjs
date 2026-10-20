@@ -200,7 +200,13 @@ export async function tiktokPost(s, { handle, caption, polls = 20, every = 1500 
 async function tiktokVideoText(s, handle, id) {
   await s.navigate(`https://www.tiktok.com/@${handle}/video/${id}`);
   await s.waitFor(`document.querySelector(${q(SELECTORS.tiktok.videoDesc)})`, 15_000);
-  return s.ev(`([...document.querySelectorAll(${q(SELECTORS.tiktok.videoDesc)})].find(e => !e.closest('[data-e2e*="comment"], [class*="Comment"]'))?.innerText) || ''`);
+  const own = `[...document.querySelectorAll(${q(SELECTORS.tiktok.videoDesc)})].find(e => !e.closest('[data-e2e*="comment"], [class*="Comment"]'))`;
+  // A long description is collapsed behind a "more" toggle next to it: expand it before reading.
+  await s.ev(`/*expand*/(() => { const d = ${own}; const box = d?.parentElement; if (!box) return 0; let n = 0;
+    for (const b of box.querySelectorAll('button, [role="button"], span')) if (/^(…|\\.\\.\\.)?\\s*(more|المزيد)$/i.test((b.innerText || '').trim())) { b.click(); n++; }
+    return n; })()`);
+  await sleep(600);
+  return s.ev(`(${own}?.innerText) || ''`);
 }
 /** Poll the profile and Studio for a new video id whose own page shows the caption head. URL or null. */
 export async function tiktokConfirm(s, handle, before, { caption = '', evidence = '', timeoutMs = 6 * 60_000, every = 20_000, settleMs = 2000 } = {}) {
@@ -233,19 +239,38 @@ export async function tiktokDiscard(s) {
 
 // -------------------------------------------------------------------------------- LinkedIn
 /**
- * Every post element on the page that carries its own URN, with that element's text:
- * [{ key: 'activity:123', text }]. A URN in markup without its post (promo, overlay) is not a candidate.
+ * Every TOP-LEVEL post element on the page that carries its own URN, with its own commentary text:
+ * [{ key: 'activity:123', text }]. A URN in markup without its post (promo, overlay) and a post
+ * nested inside another (reshare / quote) are not candidates.
  */
 export const linkedinPostCandidates = s => s.ev(`(() => { const POST = '[data-urn], [data-id], [data-activity-urn]';
   return [...document.querySelectorAll(POST)].flatMap(e => {
     const v = [e.getAttribute('data-urn'), e.getAttribute('data-id'), e.getAttribute('data-activity-urn')].join(' ');
     const m = /urn:li:(activity|share|ugcPost):(\\d{10,25})/.exec(v);
     if (!m) return [];
+    // Only top-level posts: a container nested in another post (a reshare, a quoted post) is never a candidate.
+    if (e.parentElement && e.parentElement.closest(POST)) return [];
     // The post's OWN commentary: the first text block whose nearest post container is this one
     // (a reshared/quoted post has its own container; comments live outside the commentary block).
     const own = [...e.querySelectorAll(${q(SELECTORS.linkedin.commentary)})].find(t => t.closest(POST) === e && !t.closest('.comments-comments-list, .comments-comment-item'));
     return [{ key: m[1] + ':' + m[2], text: own?.innerText || '' }];
   }); })()`);
+/**
+ * The post's full own text from its detail page (/feed/update/<urn>/), with any "…see more" toggle
+ * inside that post expanded first, so a long caption is compared in full.
+ */
+async function linkedinFullText(s, key, { settleMs = 1500 } = {}) {
+  const [type, id] = String(key).split(':');
+  const urn = `urn:li:${type}:${id}`;
+  const sel = `[data-urn="${urn}"], [data-id="${urn}"], [data-activity-urn="${urn}"]`;
+  await s.navigate(linkedinUrl(key));
+  await s.waitFor(`!!document.querySelector(${q(sel)})`, 15_000);
+  await s.ev(`/*expand*/(() => { const e = document.querySelector(${q(sel)}); if (!e) return 0; let n = 0;
+    for (const b of e.querySelectorAll('button, [role="button"]')) if (/^(…|\\.\\.\\.)?\\s*(see more|more|المزيد)$/i.test((b.innerText || '').trim()) && !b.closest('.comments-comments-list')) { b.click(); n++; }
+    return n; })()`);
+  await sleep(settleMs);
+  return (await linkedinPostCandidates(s)).find(c => c.key === key)?.text ?? '';
+}
 export const linkedinUrl = key => { const [type, id] = String(key).split(':'); return `https://www.linkedin.com/feed/update/urn:li:${type}:${id}/`; };
 /** Admin post list: rendered once its feed has items (a promo card counts: the list has rendered). The "Start a post" box is not a signal. */
 export const postsSettled = `document.querySelectorAll('main .feed-shared-update-v2[data-urn], main [data-urn^="urn:li:activity"]').length > 0`;
@@ -287,6 +312,22 @@ async function assertLinkedinActor(s, opts) {
   const why = linkedinActorProblem(await linkedinActor(s), await linkedinCompany(s, opts.companyId), opts);
   if (why) throw notClicked(new BrowserError('wrong-actor', `LinkedIn: ${why}`));
 }
+/**
+ * ONE evaluation that reads the composer actor, compares it with the company record (fetched
+ * before, passed in), and returns the Post button's centre — so nothing can run between the actor
+ * check and the click except the click itself. { why } or { x, y }.
+ */
+const actorAndTarget = (company, opts) => `(() => { const norm = ${norm.toString()};
+  const linkedinActorProblem = ${linkedinActorProblem.toString()};
+  const a = document.querySelector(${q(SELECTORS.linkedin.actor)}); const src = a?.querySelector('img')?.src || '';
+  const m = /\\/dms\\/image\\/v2\\/([A-Za-z0-9_-]+)\\/company-logo/.exec(src);
+  const actor = { name: a?.querySelector('.text-body-large-bold, .artdeco-entity-lockup__title span')?.innerText?.trim() || '', asset: m ? m[1] : null };
+  const why = linkedinActorProblem(actor, ${JSON.stringify(company)}, ${JSON.stringify(opts)});
+  if (why) return { why };
+  const b = document.querySelector(${q(SELECTORS.linkedin.post)});
+  if (!b || b.disabled) return { why: 'Post button not enabled' };
+  b.scrollIntoView({ block: 'center' }); const r = b.getBoundingClientRect();
+  return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`;
 /** Admin access + baseline: post URNs on the admin list and on the public posts page, each after it settled. */
 export async function linkedinSession(s, companyId, { settleMs = 2500 } = {}) {
   const keys = new Set();
@@ -329,18 +370,27 @@ export async function linkedinFill(s, winFiles, caption, { pageName, companyId }
   checkCaptionHeld(held, caption);
   return held;
 }
-/** The checks made immediately before the Post click (also run by a dry run, which then discards). */
+/**
+ * The checks made immediately before the Post click: the company record is fetched FIRST, the
+ * caption box checked, then actorAndTarget() reads the actor and the button in one evaluation.
+ * Returns the click target; a dry run calls this and then discards instead of clicking.
+ */
 export async function linkedinPreClick(s, { companyId, pageName, caption } = {}) {
-  if (companyId) await assertLinkedinActor(s, { companyId, pageName });
+  const company = companyId ? await linkedinCompany(s, companyId) : null;
   if (caption != null) assertHeldBeforeClick(await s.ev(`document.querySelector(${q(SELECTORS.linkedin.editor)})?.innerText || ''`), caption);
+  if (!companyId) return null;
+  const t = await s.ev(actorAndTarget(company, { companyId, pageName }));
+  if (!t || t.why) throw notClicked(new BrowserError(t?.why === 'Post button not enabled' ? 'post-disabled' : 'wrong-actor', `LinkedIn: ${t?.why ?? 'actor check returned nothing'}`));
+  return t;
 }
 /** Re-validate the actor and the caption, then press Post once. Returns the toast href or a signal. */
 export async function linkedinPost(s, { companyId, pageName, caption } = {}) {
   const ready = await s.waitFor(`(() => { const b = document.querySelector(${q(SELECTORS.linkedin.post)}); return b && !b.disabled; })()`, 30_000);
   if (!ready) throw notClicked(new BrowserError('post-disabled', 'LinkedIn Post button stayed disabled'));
-  // After the last wait, immediately before the one click: still the Page, still our caption.
-  await linkedinPreClick(s, { companyId, pageName, caption });
-  if (!await s.clickEl(`document.querySelector(${q(SELECTORS.linkedin.post)})`)) throw notClicked(new BrowserError('page-changed', 'LinkedIn Post button vanished'));
+  // After the last wait: company record, caption, then actor + button in one evaluation, then the click.
+  const target = await linkedinPreClick(s, { companyId, pageName, caption });
+  if (target) await s.clickAt(target.x, target.y);
+  else if (!await s.clickEl(`document.querySelector(${q(SELECTORS.linkedin.post)})`)) throw notClicked(new BrowserError('page-changed', 'LinkedIn Post button vanished'));
   const link = await s.waitFor(`(() => { const a = document.querySelector(${q(SELECTORS.linkedin.toastLink)}); if (a) return a.href; return document.querySelector(${q(SELECTORS.linkedin.modal)}) ? null : 'modal-closed'; })()`, 60_000, 500);
   if (link === 'modal-closed') { await sleep(1500); return (await s.ev(`document.querySelector(${q(SELECTORS.linkedin.toastLink)})?.href || 'modal-closed'`)); }
   return link || 'no-signal';
@@ -356,7 +406,12 @@ export async function linkedinConfirm(s, companyId, before, { toast = null, capt
         await s.navigate(url);
         await s.waitFor(settled, 15_000);
         await sleep(settleMs);
-        const key = bindNewPost(await linkedinPostCandidates(s), before, { caption, evidence }, { prefer });
+        // Feed lists clamp long posts: each new top-level post is read in full from its own page first.
+        const fresh = (await linkedinPostCandidates(s)).filter(c => !before.includes(c.key)).map(c => c.key);
+        const order = prefer && fresh.includes(prefer) ? [prefer, ...fresh.filter(k => k !== prefer)] : fresh;
+        const full = [];
+        for (const k of order.slice(0, 5)) full.push({ key: k, text: await linkedinFullText(s, k, { settleMs }) });
+        const key = bindNewPost(full, before, { caption, evidence }, { prefer });
         if (key) return linkedinUrl(key);
       } catch { /* loading */ }
     }

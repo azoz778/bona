@@ -14,7 +14,10 @@ ExecStartPre=-/usr/bin/timeout 60 /usr/bin/env bash %h/bona-publish/ops/systemd/
 ExecStartPre=/usr/bin/env bash %h/bona-publish/ops/systemd/guard-main.sh %h/bona-publish
 # sharp (rendering) is the one dependency; reinstalled only when package-lock.json changes.
 ExecStartPre=/usr/bin/timeout 600 /usr/bin/env bash %h/bona-publish/ops/systemd/ensure-deps.sh %h/bona-publish
-ExecStart=/usr/bin/env node scripts/social/browser-publish.mjs %i
+# Kernel lock for the whole run: fd 9 holds flock(LOCK_EX|LOCK_NB) on the channel lock and is
+# inherited by node (BONA_LOCK_FD=9), which verifies it; the kernel frees it when the run ends or
+# is killed. Exit 75 = another run (live or dry) holds it.
+ExecStart=/usr/bin/env bash -c 'mkdir -p "$(dirname "$1")" && exec 9>>"$1" && /usr/bin/flock -n -E 75 9 && BONA_LOCK_FD=9 exec node scripts/social/browser-publish.mjs "$2"' bona-browser %h/bona-data/%i/.publish.lock %i
 # Render (make-reel ~2 min on a loaded box), upload, then up to ~6 min of confirmation polling.
 TimeoutStartSec=40min
 TimeoutStopSec=3min
