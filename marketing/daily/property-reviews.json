@@ -814,6 +814,74 @@
       }
     ]
   },
+  "BONA-046": {
+    "status": "approved",
+    "reviewedAt": "2026-10-20T23:54:47.778Z",
+    "reviewer": "Owner 2026-10-21 approved plot cards for land (cards: land-only). Claude visual review: card 1 the plot satellite still (ring on the plot, labelled approximate, Esri source), card 2 the facts (636 sqm x SAR 6,000/sqm net = SAR 3,816,000, matches the asking price; north-facing 21.25 m frontage, 16 m street), card 3 the area still with district, city and country; Arabic connected and right-to-left, nothing cut off, numbers match the listing.",
+    "factsSha256": "ad2aca6b4fa06778c811849727ec5196ce5bf70f3023e72f22f8fbb7b49066ae",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "64738d33779a33689afeb5ff5f7b897242d4cb409b6407e2dcd6f00a860fb156",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. تُؤكَّد التفاصيل والحالة والخدمات عند المعاينة.",
+      "en": "Prices shown are asking prices and may change. Details, condition and services are confirmed at viewing."
+    },
+    "photos": [
+      {
+        "url": "https://bona-real-estate.com/social/property/BONA-046/card-satellite-43077dc6d1e5.jpg",
+        "sha256": "43077dc6d1e5158e7c04e7a490e2d4048c199db4b13dee1aef254b8c848c5952",
+        "width": 1080,
+        "height": 1350,
+        "kind": "card",
+        "card": "satellite",
+        "source": {
+          "url": "https://bona-real-estate.com/land/LND-006.jpg",
+          "sha256": "21b81979adf3c189781b44db0bd6f3efeeb2bd4f258709864bf32d6e638d9cf9",
+          "width": 1024,
+          "height": 768
+        },
+        "visuallyApproved": true,
+        "alt": {
+          "ar": "صورة جوية، الموقع تقريبي — قطعة أرض رقم 285، الشاطئ",
+          "en": "Satellite view, approximate — Residential Plot 285, Al Shati"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/social/property/BONA-046/card-facts-c4398da8796b.jpg",
+        "sha256": "c4398da8796ba75b646acec550e0b74ccca01e8b2ce45b595ec6b25b9c2f4376",
+        "width": 1080,
+        "height": 1350,
+        "kind": "card",
+        "card": "facts",
+        "source": null,
+        "visuallyApproved": true,
+        "alt": {
+          "ar": "تفاصيل الأرض — قطعة أرض رقم 285، الشاطئ",
+          "en": "Plot facts — Residential Plot 285, Al Shati"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/social/property/BONA-046/card-location-6b47970c06c7.jpg",
+        "sha256": "6b47970c06c744ed4bceeabecb17eb542d3eed6422c4e850c67e51eb4754eb7a",
+        "width": 1080,
+        "height": 1350,
+        "kind": "card",
+        "card": "location",
+        "source": {
+          "url": "https://bona-real-estate.com/land/LND-006-z15.jpg",
+          "sha256": "0e1e0db8755866ad1effcf1f4e735a9b7d33317c534564f21bb3bc29bf6ad011",
+          "width": 1024,
+          "height": 768
+        },
+        "visuallyApproved": true,
+        "alt": {
+          "ar": "صورة جوية للمنطقة، الموقع تقريبي — قطعة أرض رقم 285، الشاطئ",
+          "en": "Satellite view of the area, approximate — Residential Plot 285, Al Shati"
+        }
+      }
+    ]
+  },
   "BONA-W002": {
     "status": "approved",
     "reviewedAt": "2026-10-06T03:12:05.702Z",
