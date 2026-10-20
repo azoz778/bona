@@ -1018,6 +1018,74 @@
       }
     ]
   },
+  "BONA-056": {
+    "status": "approved",
+    "reviewedAt": "2026-10-20T23:54:53.123Z",
+    "reviewer": "Owner 2026-10-21 approved plot cards for land (cards: land-only). Claude visual review: card 1 the plot satellite still (ring on the plot, labelled approximate, Esri source), card 2 the facts (980 sqm x SAR 8,500/sqm = SAR 8,330,000, matches; south-facing on a 16 m street), card 3 the area still with district, city and country; Arabic connected and right-to-left, nothing cut off, numbers match the listing.",
+    "factsSha256": "5088d3ef537b28b1acfa6a735e856d9e1be005e61d29c56acb744c9e19dc27d4",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "52cbbb9b5233f0cbb8469c6a348e6598793d673fddc5cf004d4bb07ed1c07444",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "الأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. تُؤكَّد التفاصيل والحالة والخدمات عند المعاينة.",
+      "en": "Prices shown are asking prices and may change. Details, condition and services are confirmed at viewing."
+    },
+    "photos": [
+      {
+        "url": "https://bona-real-estate.com/social/property/BONA-056/card-satellite-807fcbe6f61a.jpg",
+        "sha256": "807fcbe6f61ada9be9043341ec29baee41b1e8b77407227992bba46e4e2cf7ef",
+        "width": 1080,
+        "height": 1350,
+        "kind": "card",
+        "card": "satellite",
+        "source": {
+          "url": "https://bona-real-estate.com/land/LND-017.jpg",
+          "sha256": "386b80f3a9f26ea7cfcbdcb2ac3f885b618fc94d5c31ef935bcaf5de0d809891",
+          "width": 1024,
+          "height": 768
+        },
+        "visuallyApproved": true,
+        "alt": {
+          "ar": "صورة جوية، الموقع تقريبي — أرض بمساحة 980 متراً مربعاً، درة البساتين",
+          "en": "Satellite view, approximate — Plot of 980 sqm, Durrat Al Basateen"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/social/property/BONA-056/card-facts-e393cd0693ae.jpg",
+        "sha256": "e393cd0693ae0c545ebbd155b7636e22acd8f69075309dd515e9b2e4d3d04e79",
+        "width": 1080,
+        "height": 1350,
+        "kind": "card",
+        "card": "facts",
+        "source": null,
+        "visuallyApproved": true,
+        "alt": {
+          "ar": "تفاصيل الأرض — أرض بمساحة 980 متراً مربعاً، درة البساتين",
+          "en": "Plot facts — Plot of 980 sqm, Durrat Al Basateen"
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/social/property/BONA-056/card-location-af3d6239c174.jpg",
+        "sha256": "af3d6239c1744e842b753c4dbdd68258392c1cec5c798f72868bf97c65a686ad",
+        "width": 1080,
+        "height": 1350,
+        "kind": "card",
+        "card": "location",
+        "source": {
+          "url": "https://bona-real-estate.com/land/LND-017-z15.jpg",
+          "sha256": "d1bd7b3b518858692c6145d921fddcc8b2e9ff259abf9f28f21eeb8ff5f06514",
+          "width": 1024,
+          "height": 768
+        },
+        "visuallyApproved": true,
+        "alt": {
+          "ar": "صورة جوية للمنطقة، الموقع تقريبي — أرض بمساحة 980 متراً مربعاً، درة البساتين",
+          "en": "Satellite view of the area, approximate — Plot of 980 sqm, Durrat Al Basateen"
+        }
+      }
+    ]
+  },
   "BONA-W002": {
     "status": "approved",
     "reviewedAt": "2026-10-06T03:12:05.702Z",
