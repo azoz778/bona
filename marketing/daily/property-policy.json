@@ -3,7 +3,7 @@
   "mode": "property-photography",
   "time": "20:30",
   "timezone": "Asia/Riyadh",
-  "repeatDays": 30,
+  "repeatDays": 14,
   "catalogueUrl": "https://bona-real-estate.com/social-catalogue.json",
   "channels": ["instagram", "facebook"],
   "countries": ["SA"],
