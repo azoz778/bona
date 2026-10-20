@@ -29,18 +29,21 @@ export function realDate(s) {
 /**
  * Derived 4:5 media (owner, 2026-10-21). A frame with `fit: 'pad-4x5'` is published as its padded
  * variant (`media`): the source photo centred, whole, on a 1080x1350 brand canvas, rendered at
- * approval by lib/property-media.mjs and hosted with the site under /social/property/<id>/. The
- * source's and the padded variant's SHA-256 are both checked before anything is sent.
+ * approval by lib/property-media.mjs and hosted with the site under /social/property/<id>/. A
+ * frame of kind `card` (land only, policy `cards: "land-only"`) is a branded plot card hosted the
+ * same way; a satellite card names the listing still it was made from (`source`). The source's
+ * and the media's SHA-256 are both checked before anything is sent.
  */
 export const PAD_FIT = 'pad-4x5';
 export const MEDIA_SIZE = Object.freeze({ width: 1080, height: 1350 });
 /** A padded frame's source aspect bounds: nothing is cropped, so portrait sources below 0.8 are fine; past 9:16 or 1.91 the photo is too small on the canvas. */
 export const PAD_ASPECT = Object.freeze({ min: 0.56, max: 1.91 });
+export const CARD_KINDS = Object.freeze(['satellite', 'facts', 'location']);
 /** Where a listing's derived media is served (public/social/property/<id>/ in the repository). */
 export const mediaBase = id => `${SITE}/social/property/${encodeURIComponent(id)}/`;
 /** The size a frame is shown at: the padded variant's for a padded frame, else its own. */
 export const shownSize = x => (x?.fit === PAD_FIT && x.media ? x.media : x);
-/** The URL a frame is published from: the padded variant for a padded frame, else the frame itself. */
+/** The URL a frame is published from: the padded variant for a padded frame, else the frame (or card) itself. */
 export const mediaUrl = x => (x?.fit === PAD_FIT && x.media?.url ? x.media.url : x?.url);
 /** True when the derived media record is a hosted 1080x1350 JPEG of this listing with a SHA-256. */
 export function derivedMediaOk(m, id) {
@@ -48,6 +51,8 @@ export function derivedMediaOk(m, id) {
   try { imageUrl(m.url); } catch { return false; }
   return /^[a-f0-9]{64}$/.test(m.sha256 ?? '') && m.width === MEDIA_SIZE.width && m.height === MEDIA_SIZE.height;
 }
+/** True when a review carries plot cards. */
+export const hasCards = review => (review?.photos ?? []).some(x => x?.kind === 'card');
 /** Instagram crops every carousel frame to the first frame's aspect ratio; keep that crop small. Padded frames count at 4:5. */
 export function aspectConsistent(photos, tolerance = 0.15) {
   if (!photos.length) return false;
@@ -71,7 +76,7 @@ export const showsLicence = l => /^\d{8,15}$/.test(l?.adNumber ?? '') && realDat
 export const showsPrice = p => Boolean(p?.price?.amount && p.price.currency === 'SAR' && !p.price.onRequest);
 const CATEGORIES = ['buy', 'rent', 'off-plan'];
 /** What a policy without the 2026-10-05 fields means: licensed Saudi sale/rent stock, real photographs, 30-day reviews, 30-day repeats. */
-export const STRICT_RULES = Object.freeze({ licenceRequired: true, countries: Object.freeze(['SA']), categories: Object.freeze(['buy', 'rent']), renders: 'none', reviewValidDays: 30, repeatDays: 30 });
+export const STRICT_RULES = Object.freeze({ licenceRequired: true, countries: Object.freeze(['SA']), categories: Object.freeze(['buy', 'rent']), renders: 'none', cards: 'none', reviewValidDays: 30, repeatDays: 30 });
 /**
  * Bounds of the policy's repeatDays, the one repeat interval every daily channel reads (Instagram,
  * Facebook, TikTok, LinkedIn). What makes a repeat safe is its changed frame order (pickFrames()):
@@ -92,11 +97,13 @@ export function policyRules(policy = {}, now = new Date()) {
   if (!Array.isArray(categories) || !categories.length || categories.some(c => !CATEGORIES.includes(c))) throw new Error('Invalid categories in the property policy');
   const renders = policy.renders ?? STRICT_RULES.renders;
   if (!['none', 'off-plan-only'].includes(renders)) throw new Error('Invalid renders rule in the property policy');
+  const cards = policy.cards ?? STRICT_RULES.cards;
+  if (!['none', 'land-only'].includes(cards)) throw new Error('Invalid cards rule in the property policy');
   const reviewValidDays = policy.reviewValidDays ?? STRICT_RULES.reviewValidDays;
   if (!Number.isInteger(reviewValidDays) || reviewValidDays < 1 || reviewValidDays > 180) throw new Error('Invalid reviewValidDays in the property policy');
   const repeatDays = policy.repeatDays ?? STRICT_RULES.repeatDays;
   if (!Number.isInteger(repeatDays) || repeatDays < REPEAT_DAYS_MIN || repeatDays > REPEAT_DAYS_MAX) throw new Error('Invalid repeatDays in the property policy');
-  return Object.freeze({ licenceRequired: licence.requirement === 'required', countries: Object.freeze([...countries]), categories: Object.freeze([...categories]), renders, reviewValidDays, repeatDays });
+  return Object.freeze({ licenceRequired: licence.requirement === 'required', countries: Object.freeze([...countries]), categories: Object.freeze([...categories]), renders, cards, reviewValidDays, repeatDays });
 }
 export function eligibility(p, review, advertiser, now = new Date(), rules = STRICT_RULES) {
   const reasons = [];
@@ -125,7 +132,17 @@ export function eligibility(p, review, advertiser, now = new Date(), rules = STR
   if (photos.length < 3 || photos.length > 6 || new Set(photos.map(x=>x.url)).size !== photos.length) reasons.push('need_three_to_six_distinct_photos');
   const allowed = new Set((p.images ?? []).map(x=>{try{return imageUrl(x.src)}catch{return null}}));
   const rendersAllowed = rules.renders === 'off-plan-only' && p?.category === 'off-plan';
+  const cardsAllowed = rules.cards === 'land-only' && p?.type === 'land';
+  const sourceOk = s => { try { return allowed.has(imageUrl(s?.url)) && /^[a-f0-9]{64}$/.test(s.sha256 ?? '') && positive(s.width) && positive(s.height); } catch { return false; } };
   for (const photo of photos) {
+    if (photo?.kind === 'card') {
+      // A plot card: land only, a hosted 1080x1350 card of this listing; a satellite or location card names its listing still.
+      if (!cardsAllowed) reasons.push('card_not_allowed');
+      if (!CARD_KINDS.includes(photo.card) || !derivedMediaOk(photo, p?.id) || photo.visuallyApproved !== true || photo.fit != null ||
+          !photo.alt?.ar || !photo.alt?.en || (photo.source != null && !sourceOk(photo.source)) ||
+          (photo.card !== 'facts' && photo.source == null) || (photo.card === 'facts' && photo.source != null)) reasons.push('card_media_unverified');
+      continue;
+    }
     let url; try { url = imageUrl(photo.url); } catch { reasons.push('unapproved_photo_source'); continue; }
     if (photo.kind === 'render' && !rendersAllowed) reasons.push('render_not_allowed');
     // A padded frame is never cropped, so its source may be narrower than 0.8; the size floor still applies to the source.
@@ -156,6 +173,11 @@ export function renderShare(review) {
   const renders = kinds.filter(k => k === 'render').length;
   return renders === 0 ? 'none' : renders === kinds.length ? 'all' : 'some';
 }
+/** Said once in each language whenever a review carries plot cards: what the images are, and nothing they are not. */
+export const CARD_NOTE = Object.freeze({
+  ar: 'الصور الجوية تقريبية، والبطاقات معدّة من بيانات الإعلان.',
+  en: 'Satellite views are approximate; the cards are made from the listing details.',
+});
 const RENDER_NOTE = Object.freeze({
   all: { ar: 'الصور تصاميم تصوّرية من المطوّر.', en: "Images are the developer's artist's impressions." },
   some: { ar: 'بعض الصور تصاميم تصوّرية من المطوّر.', en: "Some images are the developer's artist's impressions." },
@@ -167,7 +189,7 @@ export function photoNoteText(p) {
   const count = (s, re) => (s.match(re) ?? []).length;
   return count(en, /[A-Za-z]/g) >= 3 && count(ar, /[\u0621-\u063A\u0641-\u064A\u0671-\u06D3]/g) >= 3 ? { ar, en } : {};
 }
-export function propertyCaption(p, advertiser, disclosures = {}, { renders = 'none' } = {}) {
+export function propertyCaption(p, advertiser, disclosures = {}, { renders = 'none', cards = false } = {}) {
   const n = x => Number(x).toLocaleString('en-US');
   const ar = [], en = [];
   if (p.specs?.beds) {
@@ -187,11 +209,12 @@ export function propertyCaption(p, advertiser, disclosures = {}, { renders = 'no
   // Off-plan units are not viewed before delivery: ask about the project, promise no viewing.
   const cta = p.category === 'off-plan'
     ? { ar: `تبحث عن وحدة في هذا المشروع؟ راسل بونا بالرقم ${p.id} لمعرفة التوفر والتفاصيل.`, en: `Interested? Message Bona with ${p.id} for availability and details.` }
-    : { ar: `تبحث عن منزل بهذه المواصفات؟ راسل بونا بالرقم ${p.id} لمعرفة التوفر وترتيب معاينة.`, en: `Interested? Message Bona with ${p.id} for current availability and a viewing.` };
+    // A plot is not a home: land asks about "a plot with these specifications" (no existing review is of land).
+    : { ar: `تبحث عن ${p.type === 'land' ? 'أرض' : 'منزل'} بهذه المواصفات؟ راسل بونا بالرقم ${p.id} لمعرفة التوفر وترتيب معاينة.`, en: `Interested? Message Bona with ${p.id} for current availability and a viewing.` };
   const place = l => [p.location?.district?.[l], p.location?.city?.[l]].filter(Boolean).join(l === 'ar' ? '، ' : ', ');
   const lines = (...xs) => xs.filter(Boolean).join('\n');
   const blocks = (...xs) => xs.filter(Boolean).join('\n\n');
-  const note = RENDER_NOTE[renders] ?? {};
+  const note = cards ? CARD_NOTE : RENDER_NOTE[renders] ?? {};
   // Photos of another project say so on the caption's first line, the only one a feed preview reliably shows.
   const photos = photoNoteText(p);
   const licence = showsLicence(p.licence)
@@ -211,7 +234,7 @@ export function propertyCaption(p, advertiser, disclosures = {}, { renders = 'no
   };
 }
 /** The caption a review binds: its disclosures and whether its photographs are renders. */
-export const captionFor = (p, advertiser, review) => propertyCaption(p, advertiser, review?.legalDisclosures ?? {}, { renders: renderShare(review) });
+export const captionFor = (p, advertiser, review) => propertyCaption(p, advertiser, review?.legalDisclosures ?? {}, { renders: renderShare(review), cards: hasCards(review) });
 /** Everything a review's captionSha256 binds: the caption and the generated hashtags, as they would be posted. */
 export const reviewedCopy = (p, advertiser, review) => ({ ...captionFor(p, advertiser, review), hashtags: propertyHashtags(p) });
 

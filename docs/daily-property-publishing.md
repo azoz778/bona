@@ -16,6 +16,21 @@ and `bona-daily@facebook` timers run it; there is no other timer.
   listings are out.
 - **Renders:** `renders: "off-plan-only"`. Developer renders may illustrate off-plan projects
   only, and the caption then says so in both languages. Ready stock needs real photographs.
+- **Plot cards:** `cards: "land-only"` (owner, 2026-10-21). A land listing has only two 1024x768
+  satellite stills, too small to post as photographs, so it may post a branded card set instead:
+  (a) the plot still fitted whole (scaled down, never up) and labelled «صورة جوية، الموقع تقريبي» /
+  "Satellite view, approximate" with the imagery source (Esri World Imagery), the title and place;
+  (b) a facts card: the plot area, the asking price when the caption shows one, then the listing's
+  highlights in both languages (frontage, street widths, orientation, a price per square metre
+  only when a highlight states it; nothing computed, missing fields simply absent); (c) the area
+  still with the district, city and country. Every word comes from the listing's public facts,
+  which `factsSha256` binds, so a changed fact invalidates the cards with the review. A card is a
+  frame of kind `card` (`card`: `satellite` | `facts` | `location`; a still-based card names its
+  `source` still and hash) hosted like a padded frame; any other listing type with a card is
+  refused (`card_not_allowed`). The caption then closes with «الصور الجوية تقريبية، والبطاقات معدّة
+  من بيانات الإعلان.» / "Satellite views are approximate; the cards are made from the listing
+  details." and never calls them photographs. TikTok's reel shows each card whole on 9:16 with no
+  motion and no hook or lower third (`make-reel.mjs --fit pad --plain`); LinkedIn re-encodes them.
 - **Reviews** stay valid for `reviewValidDays` (90) while the listing facts, the advertiser and
   the caption are unchanged; any change invalidates a review at once.
 - **Rotation:** one property per channel per day. Never-posted listings go first (a newly approved
@@ -63,6 +78,12 @@ and `bona-daily@facebook` timers run it; there is no other timer.
    ratio because Instagram crops a carousel to its first frame. The script re-reads the live
    catalogue, refuses anything changed since drafting or not eligible, and leaves an identical,
    still-valid review untouched; an expired one is renewed.
+   **Plot cards:** `--cards BONA-046:1,2` (the plot still, then the area still, by website index;
+   the draft lists a land listing's stills under `stills` and on its contact sheet) renders the
+   set with `lib/property-cards.mjs` and approves it without any `--select`. It is refused when
+   the plot area is missing, the highlights do not pair up in the two languages, a stated area or
+   price per square metre contradicts the listing (more than 1% from the asking price), or any
+   card text fails the caption refusal. Look at the three cards before committing them.
    **Padded frames (owner, 2026-10-21):** add `--pad BONA-014` to publish every selected frame of
    that listing padded to 4:5 instead (`"fit": "pad-4x5"` on each frame). The script renders each
    frame whole and centred on a 1080x1350 ink canvas above a small BONA mark (no crop, no stretch,

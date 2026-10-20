@@ -54,9 +54,11 @@ export async function defaultDeps() {
   return { cdp, sites, media, fal: FAL, catalogue, downloadReviewedPhotos };
 }
 
-/** How a review's frames are shown: `pad` when any frame is padded to 4:5. */
+/** How a review's frames are shown: `pad` when any frame is padded to 4:5 or is a plot card, `cards` when all are plot cards. */
 export function mediaStyle(review) {
-  return { pad: (review?.photos ?? []).some(x => x.fit === PAD_FIT) };
+  const photos = review?.photos ?? [];
+  const cards = photos.length > 0 && photos.every(x => x.kind === 'card');
+  return { pad: cards || photos.some(x => x.fit === PAD_FIT || x.kind === 'card'), cards };
 }
 
 /** Render this channel's own media for the choice. Returns local file paths. */
@@ -74,10 +76,11 @@ async function renderMedia(channel, choice, dir, deps, advertiser) {
     const style = mediaStyle(choice.frames ?? choice.review);
     items = items.map(x => (typeof x === 'string' ? { media: x, source: null } : x));
     const frames = items.map(x => x.media);
-    // Padded frames: the reel pads each frame's source photo to 9:16 instead of cover-cropping it.
+    // Padded frames and plot cards: the reel pads to 9:16 (from each padded frame's source photo, and the
+    // cards whole) instead of cover-cropping; plot cards carry their own text, so the reel adds no hook or lower third.
     if (channel === 'tiktok') return [media.propertyReel(choice.listing, style.pad ? items.map(x => x.source ?? x.media) : frames, reelLicenceLines(choice.listing, advertiser),
-      path.join(dir, `tiktok-${choice.listing.id}.mp4`), style.pad ? { fit: 'pad' } : {})];
-    // The padded frames already carry the BONA mark in their band: LinkedIn re-encodes them without a second one.
+      path.join(dir, `tiktok-${choice.listing.id}.mp4`), style.pad ? { fit: 'pad', plain: style.cards } : {})];
+    // The padded frames and cards already carry the BONA mark in their band: LinkedIn re-encodes them without a second one.
     return media.linkedinPropertyImages(frames, path.join(dir, 'linkedin'), style.pad ? { mark: false } : {});
   }
   if (channel === 'tiktok') return [await media.educationReel(choice.item, path.join(dir, `tiktok-${choice.item.id}.mp4`))];

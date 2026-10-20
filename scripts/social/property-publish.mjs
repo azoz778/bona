@@ -87,7 +87,8 @@ export async function catalogue(fetchImpl=fetch,now=new Date()) {
 /**
  * Downloads each reviewed frame and checks its SHA-256 against the review. A padded frame
  * (fit 'pad-4x5') is checked as its source photo AND as its hosted padded variant, and the padded
- * bytes are what is written and posted. Returns the local files to post, or with
+ * bytes are what is written and posted; a plot card is checked as the card and, for a satellite or
+ * location card, as the listing still it was made from. Returns the local files to post, or with
  * `{sources: true}` one {media, source, fit, kind} per frame (source: the photo a padded frame was
  * made from, for the TikTok reel's own 9:16 padding).
  */
@@ -102,6 +103,7 @@ export async function photos(review,dir,dry,fetchImpl=fetch,{sources=false}={}) 
   const out=[];
   for(const [i,p] of review.photos.entries()) {
     const bytes=await get(p.url,p.sha256);
+    if(p.kind==='card'&&p.source)await get(p.source.url,p.source.sha256);
     const padded=p.fit===PAD_FIT&&p.media;
     const media=padded?await get(p.media.url,p.media.sha256):bytes;
     const file=path.join(dir,`${i+1}.jpg`),source=padded?path.join(dir,`${i+1}-source.jpg`):null;
