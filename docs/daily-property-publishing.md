@@ -18,7 +18,29 @@ and `bona-daily@facebook` timers run it; there is no other timer.
   only, and the caption then says so in both languages. Ready stock needs real photographs.
 - **Reviews** stay valid for `reviewValidDays` (90) while the listing facts, the advertiser and
   the caption are unchanged; any change invalidates a review at once.
-- **Rotation:** one property per channel per day, oldest first, 30-day repeat interval. When no
+- **Rotation:** one property per channel per day. Never-posted listings go first (a newly approved
+  listing is next on every channel), then the one posted least recently on that channel. A listing
+  repeats on a channel after `repeatDays` (14) Riyadh calendar days: posted on the 6th, it may
+  return on the 20th. `repeatDays` is the one interval for Instagram, Facebook, TikTok and LinkedIn;
+  `policyRules()` refuses a value outside 14–90 (14 is the Instagram publisher's duplicate window).
+- **Repeats look different.** A repeat carries the same reviewed caption (its `captionSha256` still
+  binds it) and the same approved frames, under another cover and in another order: the reviewed
+  order the first time, then each approved frame as the cover in turn with the rest following,
+  then the same covers with the rest reversed. The sequence starts at how many times the listing
+  has been published on that channel and takes the first order whose image sequence differs from
+  the one it was last posted with there (the last `published` line's `images`, else its
+  `frameOrder`, else the reviewed order), so a re-review that adds or removes frames never repeats
+  the last post. Orders whose frames would not all sit within 15% of the new cover's aspect are
+  never used, so Instagram's crop stays small; the reviewed order always qualifies. No frame is
+  ever added. The order used is logged (`Frames for BONA-… on instagram: 2,3,1`) and written as
+  `frameOrder` (1-based review positions) and `images` (URLs) on the journal's `intent` and
+  `published` lines.
+- **Duplicate guard.** The same images in the same order with the same caption as a post published
+  in the last 14×24 hours never goes out. Instagram: publish.mjs's own content-hash check against
+  `ig/published.jsonl` (`skipped:duplicate`). Facebook: the same hash, kept on the `published`
+  lines of `fb/published.jsonl`. A live run that hits it records `confirmed-not-published` and fails
+  with an alert ("Instagram post not sent (… skipped:duplicate)" / "Facebook post not sent: same
+  images and caption as …"); a dry run says "would repeat …". When no
   property is eligible the run falls through to an approved reviewed pack in `marketing/daily/`
   if one is due; otherwise it records a skip. Runs before 20:30 or from 23:00 do nothing, and
   there is no backfill.
@@ -90,12 +112,14 @@ malformed note (`photo_note_malformed`) and a caption without the note
      `{"channel":"instagram","date":"YYYY-MM-DD","id":"bona-daily-ig-YYYY-MM-DD","listingId":"BONA-…","status":"published","mediaId":"…","permalink":"…","evidence":"<what was checked>","at":"<publication time, ISO>"}`
      or
      `{"channel":"facebook","date":"YYYY-MM-DD","id":"bona-daily-fb-YYYY-MM-DD","listingId":"BONA-…","status":"published","postId":"…","evidence":"<what was checked>","at":"<publication time, ISO>"}`.
-     Its `at` is the provider's publication time; the 30-day repeat interval counts from it. If
+     Its `at` is the provider's publication time; the repeat interval (`repeatDays`) counts from its Riyadh date. If
      the post is absent:
      `{"channel":"instagram","date":"YYYY-MM-DD","id":"bona-daily-ig-YYYY-MM-DD","listingId":"BONA-…","status":"confirmed-not-published","evidence":"<what was checked>","at":"<now, ISO>"}`
      or
      `{"channel":"facebook","date":"YYYY-MM-DD","id":"bona-daily-fb-YYYY-MM-DD","listingId":"BONA-…","status":"confirmed-not-published","evidence":"<what was checked>","at":"<now, ISO>"}`.
-     Only a line written after the attempt settles it.
+     Only a line written after the attempt settles it. A hand-written `published` line must carry
+     `listingId` (the repeat interval and rotation read it) and, if known, the `frameOrder` that
+     was posted (else the next repeat assumes the reviewed order).
   4. If the post exists, also append the same `published` line to `~/bona-data/ig/published.jsonl`
      or `~/bona-data/fb/published.jsonl`, unless that ledger already has a `published` line for
      the id; Instagram stays blocked without it. If it is absent and

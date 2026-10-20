@@ -3,7 +3,8 @@
 One TikTok video a day and one LinkedIn Page post each working day, fully automatic, posted
 through the Windows Chrome that is already logged in to both accounts. Owner decision
 2026-10-20: same approved Saudi property register as Instagram/Facebook (under the 2026-10-05
-ad-licence waiver), interleaved with licence-free education, no per-post approval.
+ad-licence waiver), no per-post approval. Since 2026-10-21 a property every day, with
+licence-free education only when no property is eligible.
 
 | | TikTok `@bonarealestatesa` | LinkedIn Page "Bona \| بونا" (company 145349037) |
 |---|---|---|
@@ -21,14 +22,15 @@ debug Chrome (CDP `http://localhost:9222`, started by `~/.claude/scripts/chrome-
 `scripts/social/browser-publish.mjs <tiktok|linkedin>` picks one item per channel per day
 (`lib/browser-daily.mjs`):
 
-- **Property on odd days, education on even days** (day number since the epoch, so it alternates
-  across month ends). If the preferred kind has nothing eligible, the other one is used; if
-  neither has anything, the run records `skipped-nothing-eligible` once and exits 0.
+- **Property every day** (owner, 2026-10-21: "posting properties all the time"; until then property
+  on odd days and education on even days). Education is only the fallback when no property is
+  eligible; if neither has anything, the run records `skipped-nothing-eligible` once and exits 0.
 - **Property:** the live `social-catalogue.json` and `marketing/daily/property-reviews.json`
   through the same `chooseProperty()` / `eligibility()` as the Instagram/Facebook daily posts:
   fingerprinted listing facts, the advertiser fingerprint, approved frames, the review's
-  `captionSha256`, the review age, the policy scope and the 30-day repeat interval, counted **per
-  channel** (TikTok and LinkedIn have their own ledgers). Oldest-unposted-first. The catalogue is
+  `captionSha256`, the review age, the policy scope and the policy's `repeatDays` (14 Riyadh calendar days, read through
+  `policyRules()`, the same value Instagram and Facebook use), counted **per channel** (TikTok and
+  LinkedIn have their own ledgers). Never-posted first, then least recently posted on that channel. The catalogue is
   read again just before upload; a changed listing stops the run before anything is sent. If the
   catalogue is unavailable or stale, property is off for that run and education is used.
 - **Captions** are built from the reviewed copy itself (`reviewedCopy()`, checked against the
@@ -40,11 +42,18 @@ debug Chrome (CDP `http://localhost:9222`, started by `~/.claude/scripts/chrome-
   education cards in `lib/editorial.mjs` (minus `edu-ad-licence`, which explains the per-ad licence
   the waiver does without). Oldest-unposted-first per channel; an item repeats after 28 days.
 - **Media, never the same file on two platforms:** TikTok property reels come from
-  `make-reel.mjs --listing-json … --frames …` with the approved frames in review order and the
+  `make-reel.mjs --listing-json … --frames …` with the approved frames in this post's order and the
   advertiser/FAL pair on the closing card (no placeholder); TikTok education is a slideshow of
   the 1080x1920 cards. LinkedIn property images are the approved frames re-encoded at 1200 px with
   a small BONA mark; LinkedIn education uses the dark 1080x1350 card variant (Instagram had the
   light 1080x1350, Facebook the 1080x1080). Reels are silent by design.
+- **Repeats look different:** a listing's second and later posts on a channel use another cover
+  and frame order of the same approved frames (`pickFrames()`, the rule in
+  docs/daily-property-publishing.md: never the sequence last posted on this channel),
+  so TikTok gets a freshly rendered reel and LinkedIn re-encodes the frames in that order. The
+  caption stays the reviewed one. The order is logged and written as `frameOrder` and `images` on
+  the `intent` / `published` lines. A hand-written `published` line (see below) must carry
+  `listingId`, and `frameOrder` if known.
 
 ## How a run goes
 
