@@ -5,12 +5,13 @@
 // What goes out (owner, 2026-10-20): the same owner-approved Saudi property register as the
 // Instagram/Facebook daily posts (marketing/daily/property-reviews.json under the 2026-10-05
 // ad-licence waiver: same eligibility, same fingerprints, same reviewed caption and disclosures),
-// interleaved with licence-free education. One post per channel per Riyadh day, fully automatic.
+// with licence-free education only as the fallback when no property is eligible (owner, 2026-10-21:
+// "posting properties all the time"). One post per channel per Riyadh day, fully automatic.
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { ksaNow } from './daily-pack.mjs';
-import { SITE, dayState, unsettled, chooseProperty, reviewedCopy, propertyHashtags, sha256, showsPrice, showsLicence, photoNoteText } from './property-daily.mjs';
+import { SITE, dayState, unsettled, chooseProperty, reviewedCopy, propertyHashtags, sha256, showsPrice, showsLicence, photoNoteText, repeatIndex, variedReview } from './property-daily.mjs';
 import { hookFor, subhookFor, typeLabel, placeLabel, specChips, priceText, t as tr, site } from './listing.mjs';
 import { refuseText } from './facebook.mjs';
 import { EDITORIAL } from './editorial.mjs';
@@ -131,8 +132,11 @@ export function inWindow(channel, now = new Date()) {
 
 /** Day number since the epoch for a YYYY-MM-DD: consecutive days alternate parity across month ends. */
 export const epochDay = date => Math.round(Date.parse(`${date}T00:00:00Z`) / 86_400_000);
-/** Property on odd days, education on even; each falls back to the other when its pool is empty. */
-export function preferredKind(date) { return epochDay(date) % 2 === 1 ? 'property' : 'education'; }
+/**
+ * Property every day (owner, 2026-10-21; until then property on odd days, education on even).
+ * Education is only the fallback when no property is eligible. `date` is kept for callers.
+ */
+export function preferredKind(_date) { return 'property'; }
 
 /** The licence-free education pool: the reviewed daily-pack notes (content.json), then the editorial education cards. */
 export function educationPool(content = [], editorial = EDITORIAL) {
@@ -151,14 +155,19 @@ export function chooseEducation(pool, events, channel, now = new Date(), repeatD
 }
 
 /**
- * Today's item: { kind: 'property', listing, review, rejected } | { kind: 'education', item } | null.
+ * Today's item: { kind: 'property', listing, review, frames, frameOrder, rejected } | { kind: 'education', item } | null.
  * `events` are this channel's ledger rows; property rows carry listingId so chooseProperty()'s
- * repeat interval applies per channel, exactly as on Instagram and Facebook.
+ * repeat interval (the policy's repeatDays, through `rules`) applies per channel, exactly as on
+ * Instagram and Facebook. `frames` is the review with its approved frames in this post's order
+ * (variedReview(): the reviewed order the first time, another cover and order on each repeat);
+ * `review` stays the review itself, which the caption and the re-check are bound to.
  */
-export function chooseToday({ channel, date, now = new Date(), listings = [], reviews = {}, advertiser = null, events = [], pool = [], repeatDays = 30, rules, only = null }) {
+export function chooseToday({ channel, date, now = new Date(), listings = [], reviews = {}, advertiser = null, events = [], pool = [], repeatDays, rules, only = null }) {
   const prop = () => {
     const sel = chooseProperty(listings, reviews, advertiser, events, channel, now, repeatDays, rules);
-    return sel.listing ? { kind: 'property', listing: sel.listing, review: reviews[sel.listing.id], rejected: sel.rejected } : null;
+    if (!sel.listing) return null;
+    const review = reviews[sel.listing.id], { review: frames, order } = variedReview(review, repeatIndex(events, channel, sel.listing.id));
+    return { kind: 'property', listing: sel.listing, review, frames, frameOrder: order.map(i => i + 1), rejected: sel.rejected };
   };
   const edu = () => { const item = chooseEducation(pool, events, channel, now); return item ? { kind: 'education', item } : null; };
   // `only` (a human's --kind) takes that kind or nothing, never the other.

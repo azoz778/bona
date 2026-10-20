@@ -38,18 +38,19 @@ const CONTENT = [{ key: 'k1', topic: { ar: 'موضوع', en: 'Topic one' }, capt
 const POOL = educationPool(CONTENT, []);
 const pub = (channel, extra) => ({ channel, status: 'published', ...extra });
 
-test('property and education alternate by day, across a month end, and each falls back to the other', () => {
+test('property every day (owner 2026-10-21): education only when no property is eligible', () => {
   assert.equal(epochDay('2026-10-31') + 1, epochDay('2026-11-01'));
-  assert.notEqual(preferredKind('2026-10-31'), preferredKind('2026-11-01'));
-  const odd = ['2026-10-20', '2026-10-21'].find(d => preferredKind(d) === 'property');
-  const even = ['2026-10-20', '2026-10-21'].find(d => preferredKind(d) === 'education');
   const base = { channel: 'tiktok', now: NOW, listings: [A, B], reviews: REVIEWS, advertiser, pool: POOL, rules: RULES };
-  assert.equal(chooseToday({ ...base, date: odd }).kind, 'property');
-  assert.equal(chooseToday({ ...base, date: even }).kind, 'education');
-  assert.equal(chooseToday({ ...base, date: odd, listings: [] }).kind, 'education', 'no property left → education');
-  assert.equal(chooseToday({ ...base, date: even, pool: [] }).kind, 'property', 'no education left → property');
-  assert.equal(chooseToday({ ...base, date: odd, listings: [], pool: [] }), null);
-  assert.equal(chooseToday({ ...base, date: odd, only: 'education' }).kind, 'education');
+  for (const date of ['2026-10-20', '2026-10-21', '2026-10-22', '2026-10-31', '2026-11-01']) {
+    assert.equal(preferredKind(date), 'property', date);
+    for (const channel of ['tiktok', 'linkedin']) assert.equal(chooseToday({ ...base, channel, date }).kind, 'property', `${channel} ${date}`);
+  }
+  const even = '2026-10-22';
+  assert.equal(epochDay(even) % 2, 0, 'an even day, which used to be education');
+  assert.equal(chooseToday({ ...base, date: even, listings: [] }).kind, 'education', 'no property left → education');
+  assert.equal(chooseToday({ ...base, date: even, pool: [] }).kind, 'property');
+  assert.equal(chooseToday({ ...base, date: even, listings: [], pool: [] }), null);
+  assert.equal(chooseToday({ ...base, date: even, only: 'education' }).kind, 'education');
   assert.equal(chooseToday({ ...base, date: even, only: 'property', listings: [] }), null, 'a forced kind never swaps');
 });
 
@@ -158,11 +159,11 @@ test('cdp client: evaluates by value and sets files by objectId; staging maps to
 });
 
 // ------------------------------------------------------------------ run(): ledger, idempotency, uncertain
-function sandbox() {
+function sandbox({ repeatDays = 30 } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-browser-'));
   const root = path.join(dir, 'repo'), data = path.join(dir, 'data');
   fs.mkdirSync(path.join(root, 'marketing/daily'), { recursive: true });
-  fs.writeFileSync(path.join(root, 'marketing/daily/property-policy.json'), JSON.stringify({ repeatDays: 30, countries: ['SA'], categories: ['buy', 'rent', 'off-plan'], renders: 'off-plan-only', reviewValidDays: 90, adLicence: { requirement: 'waived', by: 'owner', on: '2026-10-05' } }));
+  fs.writeFileSync(path.join(root, 'marketing/daily/property-policy.json'), JSON.stringify({ repeatDays, countries: ['SA'], categories: ['buy', 'rent', 'off-plan'], renders: 'off-plan-only', reviewValidDays: 90, adLicence: { requirement: 'waived', by: 'owner', on: '2026-10-05' } }));
   fs.writeFileSync(path.join(root, 'marketing/daily/property-reviews.json'), JSON.stringify(REVIEWS));
   fs.writeFileSync(path.join(root, 'marketing/daily/content.json'), JSON.stringify(CONTENT));
   return { root, data, env: { BONA_DATA: data } };
@@ -174,9 +175,9 @@ function deps({ confirm = 'https://www.tiktok.com/@bonarealestatesa/video/7', po
   return { calls, d: {
     fal: '1100313556',
     catalogue: catalogue ?? (async () => ({ listings: [A, B], advertiser })),
-    downloadReviewedPhotos: async (r, dir) => r.photos.map((_, i) => file(dir, `${i + 1}.jpg`)),
+    downloadReviewedPhotos: async (r, dir) => { calls.push(['download', r.photos.map(x => x.url)]); return r.photos.map((x, i) => file(dir, `${i + 1}-${path.basename(x.url)}`)); },
     media: {
-      propertyReel: (l, frames, lines, out) => { calls.push(['reel', l.id, lines.en]); return file(path.dirname(out), path.basename(out)); },
+      propertyReel: (l, frames, lines, out) => { calls.push(['reel', l.id, lines.en, frames.map(f => path.basename(f))]); return file(path.dirname(out), path.basename(out)); },
       linkedinPropertyImages: async (frames, dir) => frames.map((_, i) => file(dir, `li-${i + 1}.jpg`)),
       educationReel: async (item, out) => { calls.push(['edu-reel', item.id]); return file(path.dirname(out), path.basename(out)); },
       linkedinEducationImages: async (item, dir) => [file(dir, 'li-1.jpg')],
@@ -707,4 +708,50 @@ test('round 3 fix 5: the runbook names the Voyager fields relied on and shows wh
   assert.match(doc, /## What a refusal looks like/);
   assert.match(doc, /"status":"needs-attention"/);
   assert.match(doc, /wrong-actor/);
+});
+
+// ------------------------------------------------ 2026-10-21: property every day, 14-day repeats with varied frames
+test('run: an even day posts a property on TikTok and LinkedIn without --kind', async () => {
+  const even = new Date('2026-10-22T18:45:00Z'), evenLi = new Date('2026-10-22T06:30:00Z');
+  assert.equal(epochDay('2026-10-22') % 2, 0);
+  const sb = sandbox();
+  const tt = await run('tiktok', { env: sb.env, root: sb.root, now: even, clock: () => even, log: quiet }, deps().d);
+  assert.equal(tt.choice.kind, 'property');
+  const li = await run('linkedin', { env: sb.env, root: sb.root, now: evenLi, clock: () => evenLi, log: quiet }, deps().d);
+  assert.equal(li.choice.kind, 'property');
+});
+
+test('run: the policy repeatDays is the browser channels\' interval, and a repeat re-renders the reel from a varied order of the approved frames', async () => {
+  const sb = sandbox({ repeatDays: 14 });
+  const file = ledgerPath(sb.data, 'tiktok');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  // A posted on 10-07 (14 Riyadh days before NOW), B posted yesterday: A is due again, as a repeat.
+  fs.writeFileSync(file, [
+    { channel: 'tiktok', date: '2026-10-07', id: 'bona-tiktok-2026-10-07', kind: 'property', itemId: 'BONA-A', listingId: 'BONA-A', status: 'published', url: 'u1', at: '2026-10-07T19:00:00Z' },
+    { channel: 'tiktok', date: '2026-10-20', id: 'bona-tiktok-2026-10-20', kind: 'property', itemId: 'BONA-B', listingId: 'BONA-B', status: 'published', url: 'u2', at: '2026-10-20T19:00:00Z' },
+  ].map(x => JSON.stringify(x)).join('\n') + '\n');
+  const { d, calls } = deps();
+  const r = await run('tiktok', { env: sb.env, root: sb.root, now: NOW, clock: () => NOW, log: quiet }, d);
+  assert.equal(r.status, 'published');
+  assert.equal(r.choice.itemId, 'BONA-A');
+  assert.deepEqual(r.choice.frameOrder, [2, 3, 1], 'the second post has another cover');
+  const urls = REVIEWS[A.id].photos.map(x => x.url);
+  assert.deepEqual(calls.find(c => c[0] === 'download')[1], [urls[1], urls[2], urls[0]], 'only the approved frames, in the new order');
+  assert.deepEqual(calls.find(c => c[0] === 'reel')[3], [1, 2, 0].map((i, k) => `${k + 1}-${path.basename(urls[i])}`), 'the reel is rendered in that order');
+  assert.equal(r.caption, tiktokPropertyCaption(A, advertiser, REVIEWS[A.id]), 'the reviewed caption, unchanged');
+  const rows = readLedger(file);
+  assert.deepEqual(rows.at(-1).frameOrder, [2, 3, 1]);
+  // The first post of a listing keeps the reviewed order.
+  const first = deps();
+  const li = await run('linkedin', { env: sb.env, root: sb.root, now: new Date('2026-10-21T06:30:00Z'), clock: () => new Date('2026-10-21T06:30:00Z'), log: quiet }, first.d);
+  assert.deepEqual(li.choice.frameOrder, [1, 2, 3]);
+  assert.deepEqual(first.calls.find(c => c[0] === 'download')[1], urls);
+  // Inside the interval nothing repeats: with 30 days A (posted 14 days ago) is not due.
+  const sb30 = sandbox({ repeatDays: 30 });
+  fs.mkdirSync(path.dirname(ledgerPath(sb30.data, 'tiktok')), { recursive: true });
+  fs.copyFileSync(path.join(path.dirname(file), 'published.jsonl'), ledgerPath(sb30.data, 'tiktok'));
+  const lines = readLedger(ledgerPath(sb30.data, 'tiktok')).filter(x => x.date !== '2026-10-21');
+  fs.writeFileSync(ledgerPath(sb30.data, 'tiktok'), lines.map(x => JSON.stringify(x)).join('\n') + '\n');
+  const r30 = await run('tiktok', { env: sb30.env, root: sb30.root, now: NOW, clock: () => NOW, log: quiet }, deps().d);
+  assert.equal(r30.choice.kind, 'education');
 });

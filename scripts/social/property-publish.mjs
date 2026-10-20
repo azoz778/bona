@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT, ksaNow } from './lib/daily-pack.mjs';
-import { ACCOUNT, SITE, sha256, fingerprint, eligibility, chooseProperty, dayState, entryFor, policyRules, unsettled } from './lib/property-daily.mjs';
+import { ACCOUNT, SITE, sha256, fingerprint, eligibility, chooseProperty, dayState, entryFor, policyRules, unsettled, repeatIndex, variedReview } from './lib/property-daily.mjs';
 import { withLock, whoami, pageToken, publishEntry, appendLedger, refusal } from './lib/facebook.mjs';
 import { createGraph, checkCaption } from './lib/graph.mjs';
 import { run as publishInstagram, indexLedger, composeCaption, hasLicencePlaceholder, decide, normaliseEntry } from './publish.mjs';
@@ -126,8 +126,9 @@ function legacyTimersOff() {
 export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,env=process.env,fetchImpl=fetch,legacyTimersDisabled=legacyTimersOff,clock=()=>new Date()}={}) {
   const policy=read(path.join(root,'marketing/daily/property-policy.json'));
   if(policy.version!==1 || policy.mode!=='property-photography' || policy.time!=='20:30' || policy.timezone!=='Asia/Riyadh' ||
-     policy.catalogueUrl!==`${SITE}/social-catalogue.json` || policy.repeatDays<30 ||
+     policy.catalogueUrl!==`${SITE}/social-catalogue.json` ||
      policy.channels?.join(',')!=='instagram,facebook' || !policy.channels.includes(channel))throw new Error('Invalid property publishing policy');
+  // policyRules() also bounds repeatDays (14–90): the one repeat interval of every daily channel.
   const rules=policyRules(policy,now);
   const {date,time}=ksaNow(now);
   if(time<'20:30'||time>='23:00'){console.log('Outside daily slot; no catch-up or off-schedule post');return {status:'not-due'};}
@@ -144,7 +145,7 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
     if(channel==='instagram')assertNoPendingInstagram(rows(igLedger));
     if(unsettled(history,channel))throw new Error('Earlier property publication remains uncertain; reconcile it before retrying');
     const live=await catalogue(fetchImpl,now),reviews=read(path.join(root,'marketing/daily/property-reviews.json'));
-    const selected=chooseProperty(live.listings,reviews,live.advertiser,history,channel,now,policy.repeatDays,rules);
+    const selected=chooseProperty(live.listings,reviews,live.advertiser,history,channel,now,rules.repeatDays,rules);
     if(!selected.listing){
       const reasons={};for(const r of selected.rejected)for(const why of r.reasons)reasons[why]=(reasons[why]||0)+1;
       const row={channel,date,status:'skipped-no-eligible-property',catalogueCount:live.listings.length,reasons};
@@ -152,11 +153,15 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
       console.log(JSON.stringify(row));return row;
     }
     const p=selected.listing,review=reviews[p.id];
+    // A repeat of this listing on this channel gets another cover and frame order, from its approved frames only.
+    const {review:framed,order}=variedReview(review,repeatIndex(history,channel,p.id));
+    const frameOrder=order.map(i=>i+1);
+    console.log(`Frames for ${p.id} on ${channel}: ${frameOrder.join(',')} (reviewed order 1..${review.photos.length})`);
     await identity(channel,env,fetchImpl);
     const assetDir=path.join(dir,'property-assets',date,channel);
     if(!dry)fs.mkdirSync(assetDir,{recursive:true});
-    const assets=await photos(review,assetDir,dry,fetchImpl);
-    const entry=entryFor(p,review,live.advertiser,channel,date,assets);
+    const assets=await photos(framed,assetDir,dry,fetchImpl);
+    const entry=entryFor(p,framed,live.advertiser,channel,date,assets);
     if(checkCaption(composeCaption(entry)).problems.length)throw new Error('Reviewed caption does not fit platform limits');
     const refused=publisherRefusal(entry,channel,{igLedger:channel==='instagram'?rows(igLedger):[],now});
     if(refused)throw new Error(`The ${channel} publisher would refuse this post (${refused}); stopped before any record`);
@@ -164,14 +169,14 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
     // stock, expired licence and changed advertiser all stop this run.
     const current=await catalogue(fetchImpl,now),updated=current.listings.find(x=>x.id===p.id);
     if(!updated || fingerprint(updated)!==fingerprint(p) || eligibility(updated,review,current.advertiser,now,rules).length)throw new Error('Property changed during preflight');
-    if(dry){console.log(`Ready after read-only preflight: ${entry.id}, ${p.id}; no post`);return {status:'ready',entry};}
+    if(dry){console.log(`Ready after read-only preflight: ${entry.id}, ${p.id}; no post`);return {status:'ready',entry,frameOrder};}
     if(legacyTimersDisabled()!==true)throw new Error('Legacy publisher must remain disabled');
     // Before the intent record: failing to get the Page token sends nothing and leaves nothing to reconcile.
     const page=channel==='facebook'?await pageToken({fetch:fetchImpl,token:env.META_ACCESS_TOKEN,pageId:ACCOUNT.facebook}):null;
     // A slow preflight must not record intent or send after the slot: check it again on the real clock.
     const sendAt=ksaNow(clock());
     if(sendAt.date!==date||sendAt.time<'20:30'||sendAt.time>='23:00'){console.log('Outside daily slot at send time; no post');return {status:'not-due'};}
-    record(journal,{channel,date,id:entry.id,listingId:p.id,status:'intent'});
+    record(journal,{channel,date,id:entry.id,listingId:p.id,status:'intent',frameOrder});
     try {
       let receipt;
       if(channel==='instagram') {
@@ -185,7 +190,7 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
         appendLedger(path.join(data,'fb/published.jsonl'),{id:entry.id,date,listingId:p.id,status:'published',...receipt,at:new Date().toISOString()});
         record(path.join(dir,'facebook.jsonl'),{id:entry.id,date,status:'published',...receipt});
       }
-      record(journal,{channel,date,id:entry.id,listingId:p.id,status:'published',mediaId:receipt.mediaId,postId:receipt.postId,permalink:receipt.permalink});
+      record(journal,{channel,date,id:entry.id,listingId:p.id,status:'published',frameOrder,mediaId:receipt.mediaId,postId:receipt.postId,permalink:receipt.permalink});
       console.log(JSON.stringify({status:'published',channel,id:entry.id,listingId:p.id,mediaId:receipt.mediaId,postId:receipt.postId,permalink:receipt.permalink}));
       return {status:'published',receipt};
     } catch(e) {
