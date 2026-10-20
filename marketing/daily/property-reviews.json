@@ -951,6 +951,79 @@
       }
     ]
   },
+  "BONA-W004": {
+    "status": "approved",
+    "reviewedAt": "2026-10-20T23:50:34.540Z",
+    "reviewer": "Owner 2026-10-21 approved 4:5 padding for mixed-aspect listings. Claude visual review: frames 1 (Malfa facade), 2 (row of Malfa townhouses), 4 (living room) are clean developer renders, padded (aspects 1.78, 0.91, 0.89). Frame 3 dropped (two rendered people at the gate). Note: the same render files as BONA-W003 and BONA-W005.",
+    "factsSha256": "a7398f3fd77b83406f9364e714f9bdbfc99dc776c577141b23239cfe0be5fe2c",
+    "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
+    "captionSha256": "825ad4e2c5e64718b5c6b7b6c99448f6dc1d50ce307090cbfc104fca61a451c0",
+    "licenceEvidence": null,
+    "legalDisclosuresVerified": true,
+    "legalDisclosures": {
+      "ar": "مواعيد التسليم والمواصفات حسب المطوّر.",
+      "en": "Delivery dates and specifications are per the developer."
+    },
+    "photos": [
+      {
+        "url": "https://bona-real-estate.com/listings/wharf-destination-villas-jeddah/01.jpg",
+        "sha256": "b1186ace738648a4ed21f82b787566a14995934db0780dd2a726b6578dccc345",
+        "width": 1920,
+        "height": 1081,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Artist's impression of a Malfa Jeddah home facade — Malfa Jeddah, Saah Villa, Al-Wareef",
+          "ar": "تصور معماري لواجهة منزل في ملفى جدة — ملفى جدة، فيلا سعة، الوريف"
+        },
+        "fit": "pad-4x5",
+        "media": {
+          "url": "https://bona-real-estate.com/social/property/BONA-W004/pad-b1186ace-3fcb0ecd12fb.jpg",
+          "sha256": "3fcb0ecd12fb68d7c2266cdfdec846e9658c7e94cc5cd8617fc7e4bf06a7a2a9",
+          "width": 1080,
+          "height": 1350
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/wharf-destination-villas-jeddah/02.jpg",
+        "sha256": "c79e4b58920975c26ae94acf5d96c5fa673870ea056ebe4d233f22279ce74d9e",
+        "width": 1694,
+        "height": 1870,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Artist's impression of a row of Malfa Jeddah homes — Malfa Jeddah, Saah Villa, Al-Wareef",
+          "ar": "تصور معماري لصف من منازل ملفى جدة — ملفى جدة، فيلا سعة، الوريف"
+        },
+        "fit": "pad-4x5",
+        "media": {
+          "url": "https://bona-real-estate.com/social/property/BONA-W004/pad-c79e4b58-6f8381455863.jpg",
+          "sha256": "6f83814558636d216f78e39f34fe67e2e6cdb89b8d861552adc8b9b949a2d13c",
+          "width": 1080,
+          "height": 1350
+        }
+      },
+      {
+        "url": "https://bona-real-estate.com/listings/wharf-destination-villas-jeddah/04.jpg",
+        "sha256": "469d062b2b3f2092e2b37abda10783a7f307ace78b204bf51cc9f9e4d74264d6",
+        "width": 1710,
+        "height": 1920,
+        "kind": "render",
+        "visuallyApproved": true,
+        "alt": {
+          "en": "Artist's impression of a living room — Malfa Jeddah, Saah Villa, Al-Wareef",
+          "ar": "تصور معماري لغرفة المعيشة — ملفى جدة، فيلا سعة، الوريف"
+        },
+        "fit": "pad-4x5",
+        "media": {
+          "url": "https://bona-real-estate.com/social/property/BONA-W004/pad-469d062b-3667265f1251.jpg",
+          "sha256": "3667265f125131721f10bf5f09144ed9beae37b7f96bbe216c8391efaace393d",
+          "width": 1080,
+          "height": 1350
+        }
+      }
+    ]
+  },
   "BONA-W006": {
     "status": "approved",
     "reviewedAt": "2026-10-06T03:12:05.702Z",
