@@ -51,9 +51,10 @@ const CATEGORIES = ['buy', 'rent', 'off-plan'];
 export const STRICT_RULES = Object.freeze({ licenceRequired: true, countries: Object.freeze(['SA']), categories: Object.freeze(['buy', 'rent']), renders: 'none', reviewValidDays: 30, repeatDays: 30 });
 /**
  * Bounds of the policy's repeatDays, the one repeat interval every daily channel reads (Instagram,
- * Facebook, TikTok, LinkedIn). Never under 14: publish.mjs refuses an Instagram post with the same
- * images and caption as one published in the last 14 days (dedupeDays), and a repeat must never be
- * mistaken for, or be, a duplicate.
+ * Facebook, TikTok, LinkedIn). What makes a repeat safe is its changed frame order (pickFrames()):
+ * same caption, different image sequence, so a different content hash. The 14-day floor matches
+ * publish.mjs's duplicate window (dedupeDays: same images + caption within 14×24 h is skipped), so
+ * at most one earlier post of a listing can fall inside that window.
  */
 export const REPEAT_DAYS_MIN = 14, REPEAT_DAYS_MAX = 90;
 /** property-policy.json → eligibility rules. Anything unreadable throws: no run proceeds on a policy it cannot read. */
@@ -273,14 +274,46 @@ export function frameOrders(photos = []) {
 /**
  * The review with its approved frames in the order for this listing's `repeat`-th post on a channel
  * (repeatIndex()): the reviewed order on the first post, a different cover and order on each repeat,
- * deterministic. Only the order changes: same frames, hashes, kinds and alt texts, so the caption
- * (captionSha256), renderShare() and eligibility() are exactly the review's.
+ * deterministic. When `lastPosted` (the image URL sequence of the previous post) is given, the first
+ * order in the sequence starting at `repeat` whose URL sequence differs from it is taken, so a
+ * re-review that adds, removes or reorders frames never repeats the last post. Only the order
+ * changes: same frames, hashes, kinds and alt texts, so the caption (captionSha256), renderShare()
+ * and eligibility() are exactly the review's.
  */
-export function variedReview(review, repeat = 0) {
-  const orders = frameOrders(review?.photos ?? []);
+export function variedReview(review, repeat = 0, lastPosted = null) {
+  const photos = review?.photos ?? [], orders = frameOrders(photos);
   if (!orders.length) return { review, order: [] };
-  const order = orders[((repeat % orders.length) + orders.length) % orders.length];
+  const start = ((repeat % orders.length) + orders.length) % orders.length;
+  const same = order => Array.isArray(lastPosted) && order.length === lastPosted.length && order.every((i, k) => photos[i].url === lastPosted[k]);
+  let order = orders[start];
+  for (let k = 0; k < orders.length; k++) { const o = orders[(start + k) % orders.length]; if (!same(o)) { order = o; break; } }
   return { review: { ...review, photos: order.map(i => review.photos[i]) }, order };
+}
+/**
+ * The image URL sequence of this listing's last published post on this channel, or null if never.
+ * Rows written since 2026-10-21 carry `images`; older ones `frameOrder` (1-based positions in the
+ * review), mapped through the current review; rows with neither were the reviewed order.
+ */
+export function lastPostedSequence(events, channel, id, review) {
+  const rows = events.filter(x => x.channel === channel && x.listingId === id && x.status === 'published');
+  if (!rows.length) return null;
+  const last = rows.reduce((a, b) => ((Date.parse(b.at) || 0) >= (Date.parse(a.at) || 0) ? b : a));
+  const photos = review?.photos ?? [];
+  if (Array.isArray(last.images) && last.images.every(u => typeof u === 'string')) return last.images;
+  if (Array.isArray(last.frameOrder) && last.frameOrder.every(n => Number.isInteger(n) && photos[n - 1])) return last.frameOrder.map(n => photos[n - 1].url);
+  return photos.map(x => x.url);
+}
+/** This post's frames on this channel: variedReview() at repeatIndex(), never the last posted sequence. Returns { review, order, frameOrder, images }. */
+export function pickFrames(review, events, channel, id) {
+  const { review: framed, order } = variedReview(review, repeatIndex(events, channel, id), lastPostedSequence(events, channel, id, review));
+  return { review: framed, order, frameOrder: order.map(i => i + 1), images: (framed?.photos ?? []).map(x => x.url) };
+}
+/** publish.mjs's duplicate window: the same images + caption within this many 24-hour days is a duplicate. */
+export const DEDUPE_DAYS = 14;
+/** A `published` ledger row with this content hash inside the duplicate window (ms, like publish.mjs), or null. */
+export function recentDuplicate(rows, hash, now = new Date(), days = DEDUPE_DAYS) {
+  return rows.find(r => r.status === 'published' && r.contentHash === hash && Number.isFinite(Date.parse(r.ts ?? r.at)) &&
+    +now - Date.parse(r.ts ?? r.at) <= days * 86400000) ?? null;
 }
 export function entryFor(p, review, advertiser, channel, date, assets = []) {
   return {id:`bona-daily-${channel==='instagram'?'ig':'fb'}-${date}`,date,time:'20:30',platform:channel,

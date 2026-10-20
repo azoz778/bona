@@ -179,7 +179,7 @@ export async function run(channel, opts = {}, deps = null) {
         throw Object.assign(new Error(`${choice.listing.id} changed during preflight`), { beforeClick: true });
     };
     await recheck();
-    const base = { channel, date, id: entryId(channel, date), kind: choice.kind, itemId, ...(choice.kind === 'property' ? { listingId: itemId, frameOrder: choice.frameOrder } : {}) };
+    const base = { channel, date, id: entryId(channel, date), kind: choice.kind, itemId, ...(choice.kind === 'property' ? { listingId: itemId, frameOrder: choice.frameOrder, images: choice.images } : {}) };
     const runId = `${channel}-${date}-${process.pid}`;
     const winFiles = deps.cdp.stageForUpload(files, runId);
     const unstageNow = () => deps.cdp.unstage(runId);

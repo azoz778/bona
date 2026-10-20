@@ -175,10 +175,10 @@ function deps({ confirm = 'https://www.tiktok.com/@bonarealestatesa/video/7', po
   return { calls, d: {
     fal: '1100313556',
     catalogue: catalogue ?? (async () => ({ listings: [A, B], advertiser })),
-    downloadReviewedPhotos: async (r, dir) => { calls.push(['download', r.photos.map(x => x.url)]); return r.photos.map((x, i) => file(dir, `${i + 1}-${path.basename(x.url)}`)); },
+    downloadReviewedPhotos: async (r, dir) => { calls.push(['download', r.photos.map(x => x.url), r.photos]); return r.photos.map((x, i) => file(dir, `${i + 1}-${path.basename(x.url)}`)); },
     media: {
       propertyReel: (l, frames, lines, out) => { calls.push(['reel', l.id, lines.en, frames.map(f => path.basename(f))]); return file(path.dirname(out), path.basename(out)); },
-      linkedinPropertyImages: async (frames, dir) => frames.map((_, i) => file(dir, `li-${i + 1}.jpg`)),
+      linkedinPropertyImages: async (frames, dir) => { calls.push(['li-encode', frames.map(f => path.basename(f))]); return frames.map((_, i) => file(dir, `li-${i + 1}.jpg`)); },
       educationReel: async (item, out) => { calls.push(['edu-reel', item.id]); return file(path.dirname(out), path.basename(out)); },
       linkedinEducationImages: async (item, dir) => [file(dir, 'li-1.jpg')],
     },
@@ -754,4 +754,37 @@ test('run: the policy repeatDays is the browser channels\' interval, and a repea
   fs.writeFileSync(ledgerPath(sb30.data, 'tiktok'), lines.map(x => JSON.stringify(x)).join('\n') + '\n');
   const r30 = await run('tiktok', { env: sb30.env, root: sb30.root, now: NOW, clock: () => NOW, log: quiet }, deps().d);
   assert.equal(r30.choice.kind, 'education');
+});
+
+test('run: a LinkedIn repeat re-encodes the approved frames in a new order, never the last posted one, with the reviewed caption and frameOrder in the ledger', async () => {
+  const sb = sandbox({ repeatDays: 14 });
+  const file = ledgerPath(sb.data, 'linkedin');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const urls = REVIEWS[A.id].photos.map(x => x.url);
+  fs.writeFileSync(file, [
+    { channel: 'linkedin', date: '2026-10-07', id: 'bona-linkedin-2026-10-07', kind: 'property', itemId: 'BONA-A', listingId: 'BONA-A', status: 'published', url: 'u1', frameOrder: [1, 2, 3], at: '2026-10-07T06:40:00Z' },
+    { channel: 'linkedin', date: '2026-10-20', id: 'bona-linkedin-2026-10-20', kind: 'property', itemId: 'BONA-B', listingId: 'BONA-B', status: 'published', url: 'u2', at: '2026-10-20T06:40:00Z' },
+  ].map(x => JSON.stringify(x)).join('\n') + '\n');
+  const at = new Date('2026-10-21T06:30:00Z'), { d, calls } = deps();
+  const r = await run('linkedin', { env: sb.env, root: sb.root, now: at, clock: () => at, log: quiet }, d);
+  assert.equal(r.status, 'published');
+  assert.equal(r.choice.itemId, 'BONA-A');
+  assert.deepEqual(r.choice.frameOrder, [2, 3, 1]);
+  const [, got, photos] = calls.find(c => c[0] === 'download');
+  assert.deepEqual(got, [urls[1], urls[2], urls[0]]);
+  assert.deepEqual(new Set(photos.map(x => x.sha256)), new Set(REVIEWS[A.id].photos.map(x => x.sha256)), 'the approved frames and hashes, nothing added');
+  assert.ok(photos.every(x => x.visuallyApproved === true));
+  assert.deepEqual(calls.find(c => c[0] === 'li-encode')[1], [1, 2, 0].map((i, k) => `${k + 1}-${path.basename(urls[i])}`), 'encoded in that order');
+  assert.equal(r.caption, linkedinPropertyCaption(A, advertiser, REVIEWS[A.id]), 'the reviewed caption, unchanged');
+  const last = readLedger(file).at(-1);
+  assert.equal(last.status, 'published');
+  assert.deepEqual(last.frameOrder, [2, 3, 1]);
+  assert.deepEqual(last.images, [urls[1], urls[2], urls[0]]);
+  // The ledger says 2,3,1 was posted last (e.g. by hand): the next repeat avoids it even at the same count.
+  const sb2 = sandbox({ repeatDays: 14 });
+  fs.mkdirSync(path.dirname(ledgerPath(sb2.data, 'linkedin')), { recursive: true });
+  fs.writeFileSync(ledgerPath(sb2.data, 'linkedin'), JSON.stringify({ channel: 'linkedin', date: '2026-10-07', id: 'bona-linkedin-2026-10-07', kind: 'property', itemId: 'BONA-A', listingId: 'BONA-A', status: 'published', url: 'u1', manual: true, images: [urls[1], urls[2], urls[0]], at: '2026-10-07T06:40:00Z' }) + '\n'
+    + JSON.stringify({ channel: 'linkedin', date: '2026-10-20', id: 'bona-linkedin-2026-10-20', kind: 'property', itemId: 'BONA-B', listingId: 'BONA-B', status: 'published', url: 'u2', at: '2026-10-20T06:40:00Z' }) + '\n');
+  const r2 = await run('linkedin', { env: sb2.env, root: sb2.root, now: at, clock: () => at, log: quiet }, deps().d);
+  assert.deepEqual(r2.choice.frameOrder, [3, 1, 2]);
 });

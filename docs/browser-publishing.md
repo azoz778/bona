@@ -48,11 +48,12 @@ debug Chrome (CDP `http://localhost:9222`, started by `~/.claude/scripts/chrome-
   a small BONA mark; LinkedIn education uses the dark 1080x1350 card variant (Instagram had the
   light 1080x1350, Facebook the 1080x1080). Reels are silent by design.
 - **Repeats look different:** a listing's second and later posts on a channel use another cover
-  and frame order of the same approved frames (`variedReview()`, the rule in
-  docs/daily-property-publishing.md, chosen by how many times it was published on this channel),
+  and frame order of the same approved frames (`pickFrames()`, the rule in
+  docs/daily-property-publishing.md: never the sequence last posted on this channel),
   so TikTok gets a freshly rendered reel and LinkedIn re-encodes the frames in that order. The
-  caption stays the reviewed one. The order is logged and written as `frameOrder` on the
-  `intent` / `published` lines.
+  caption stays the reviewed one. The order is logged and written as `frameOrder` and `images` on
+  the `intent` / `published` lines. A hand-written `published` line (see below) must carry
+  `listingId`, and `frameOrder` if known.
 
 ## How a run goes
 
