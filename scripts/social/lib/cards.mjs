@@ -183,10 +183,11 @@ export async function ctaCard(w, h, { l = null, lines = null, licenceLines = nul
 
   const lic = l ? adLicence(l) : { basis: 'rega-pending', number: null };
   const foreign = lic.basis === 'developer-authorisation';
-  // licenceLines ({ar,en}) replaces the computed pair: the daily browser publisher passes the
-  // advertiser/FAL lines its reviewed caption carries (ad-licence waiver), never a placeholder.
-  const licAr = licenceLines ? await text({ text: licenceLines.ar, face: 'ar-body', size: 26, color: C.stone, align: 'centre', width: boxW }) : await text({ text: foreign ? 'عقار خارج المملكة — يُسوَّق بتفويض من المطوّر' : `رقم ترخيص الإعلان العقاري: ${iso(lic.number ?? AD_LICENCE_TOKEN)}`, face: 'ar-body', size: 26, color: C.stone, align: 'centre', width: boxW });
-  const licEn = licenceLines ? await text({ text: licenceLines.en, face: 'en-body', size: 24, color: C.stone, align: 'centre', width: boxW, dir: 'ltr', letterSpacing: 1.2 }) : await text({ text: foreign ? `Marketed under developer authorisation  ·  FAL ${FAL}` : `REGA ad licence ${lic.number ?? AD_LICENCE_TOKEN}  ·  FAL ${FAL}`, face: 'en-body', size: 24, color: C.stone, align: 'centre', width: boxW, dir: 'ltr', letterSpacing: 1.2 });
+  // licenceLines ({ar,en}) replaces the computed pair for Saudi stock: the daily browser publisher
+  // passes the advertiser/FAL lines its reviewed caption carries (ad-licence waiver), never a
+  // placeholder. Property outside the Kingdom keeps the developer-authorisation line regardless.
+  const licAr = licenceLines && !foreign ? await text({ text: licenceLines.ar, face: 'ar-body', size: 26, color: C.stone, align: 'centre', width: boxW }) : await text({ text: foreign ? 'عقار خارج المملكة — يُسوَّق بتفويض من المطوّر' : `رقم ترخيص الإعلان العقاري: ${iso(lic.number ?? AD_LICENCE_TOKEN)}`, face: 'ar-body', size: 26, color: C.stone, align: 'centre', width: boxW });
+  const licEn = licenceLines && !foreign ? await text({ text: licenceLines.en, face: 'en-body', size: 24, color: C.stone, align: 'centre', width: boxW, dir: 'ltr', letterSpacing: 1.2 }) : await text({ text: foreign ? `Marketed under developer authorisation  ·  FAL ${FAL}` : `REGA ad licence ${lic.number ?? AD_LICENCE_TOKEN}  ·  FAL ${FAL}`, face: 'en-body', size: 24, color: C.stone, align: 'centre', width: boxW, dir: 'ltr', letterSpacing: 1.2 });
   const ref = l ? await text({ text: `${l.id}`, face: 'en-body', size: 26, color: C.champagne, align: 'centre', width: boxW, dir: 'ltr', letterSpacing: 4 }) : null;
 
   const blocks = [

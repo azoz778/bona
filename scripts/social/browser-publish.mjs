@@ -25,18 +25,24 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { ROOT, ksaNow } from './lib/daily-pack.mjs';
 import { dataDir } from './lib/ledger.mjs';
-import { withLock } from './lib/facebook.mjs';
 import { fingerprint, eligibility, policyRules } from './lib/property-daily.mjs';
 import { catalogue, photos as downloadReviewedPhotos } from './property-publish.mjs';
 import {
-  CHANNELS, appendRecord, captionFor, channelState, chooseToday, educationPool, entryId, inWindow,
-  ledgerPath, lockPath, readLedger, reelLicenceLines,
+  CHANNELS, acquireLock, appendRecord, assertRenderable, captionFor, channelState, chooseToday, educationPool, entryId, inWindow,
+  ledgerPath, lockPath, readLedgerStrict, reelLicenceLines, REPAIR_REASON, renderedStrings,
 } from './lib/browser-daily.mjs';
 
 // IPv6 to Cloudflare from this WSL host resets ~1 in 4 connections (ops/systemd ipv4first drop-in);
 // a hand run gets the same preference as the unit.
 dns.setDefaultResultOrder('ipv4first');
 const read = f => JSON.parse(fs.readFileSync(f, 'utf8'));
+/**
+ * What must be undone if the process is told to stop (systemctl stop, the unit's timeout, Ctrl-C):
+ * close our tab, remove the staged copies, release the lock. An intent already written stays, so
+ * the next run treats the day as uncertain instead of posting twice.
+ */
+export const cleanups = new Set();
+export async function runCleanups() { for (const f of [...cleanups].reverse()) { try { await f(); } catch { /* best effort */ } cleanups.delete(f); } }
 const redact = s => String(s?.message ?? s).replace(/EAA[A-Za-z0-9]+/g, '[redacted]').slice(0, 800);
 
 /** The real browser + media implementations; tests replace them. */
@@ -53,7 +59,12 @@ async function renderMedia(channel, choice, dir, deps, advertiser) {
   fs.mkdirSync(dir, { recursive: true });
   const { media } = deps;
   if (choice.kind === 'property') {
-    const frames = await deps.downloadReviewedPhotos(choice.review, dir, false, deps.fetchImpl ?? fetch);
+    // The media host resets ~1 in 4 connections from this box; a network failure is retried, a hash mismatch is not.
+    let frames;
+    for (let attempt = 1; ; attempt++) {
+      try { frames = await deps.downloadReviewedPhotos(choice.review, dir, false, deps.fetchImpl ?? fetch); break; }
+      catch (e) { if (attempt >= 3 || /changed since visual review/.test(e.message)) throw e; await new Promise(r => setTimeout(r, 2000 * attempt)); }
+    }
     if (channel === 'tiktok') return [media.propertyReel(choice.listing, frames, reelLicenceLines(choice.listing, advertiser), path.join(dir, `tiktok-${choice.listing.id}.mp4`))];
     return media.linkedinPropertyImages(frames, path.join(dir, 'linkedin'));
   }
@@ -69,7 +80,7 @@ async function drive(channel, s, winFiles, caption, { dry, shots, date, commit, 
   try {
     before = channel === 'tiktok' ? await sites.tiktokSession(s, c.handle) : await sites.linkedinSession(s, c.companyId);
     if (channel === 'tiktok') await sites.tiktokFill(s, winFiles[0], caption);
-    else await sites.linkedinFill(s, winFiles, caption, { pageName: c.pageName });
+    else await sites.linkedinFill(s, winFiles, caption, { pageName: c.pageName, companyId: c.companyId });
   } catch (e) {
     await shot('failed-before-post');
     // Leave no half-filled draft behind for the next run (or a human) to trip over.
@@ -93,12 +104,13 @@ async function drive(channel, s, winFiles, caption, { dry, shots, date, commit, 
     return { status: 'not-due', reason: go };
   }
   let signal;
-  try { signal = channel === 'tiktok' ? await sites.tiktokPost(s) : await sites.linkedinPost(s); }
+  // The adapters re-check the account / Page actor and the caption box immediately before the click.
+  try { signal = channel === 'tiktok' ? await sites.tiktokPost(s, { handle: c.handle, caption }) : await sites.linkedinPost(s, { companyId: c.companyId, pageName: c.pageName, caption }); }
   catch (e) { await shot('post-click-failed'); throw e; } // e.beforeClick is set by the adapter only when no click was dispatched
   await shot('after-post');
   const url = channel === 'tiktok'
-    ? await sites.tiktokConfirm(s, c.handle, before)
-    : await sites.linkedinConfirm(s, c.companyId, before, { toast: signal, captionHead: caption.split('\n')[0] });
+    ? await sites.tiktokConfirm(s, c.handle, before, { caption })
+    : await sites.linkedinConfirm(s, c.companyId, before, { toast: signal, caption });
   await shot('confirm');
   return { status: url ? 'published' : 'unconfirmed', url, signal };
 }
@@ -115,7 +127,13 @@ export async function run(channel, opts = {}, deps = null) {
   if (!win.ok && !anyTime) { log(`${channel}: ${win.why}; nothing to do`); return { status: 'not-due' }; }
 
   const operation = async () => {
-    const events = readLedger(ledger);
+    const { rows: events, truncated } = readLedgerStrict(ledger);
+    if (truncated) {
+      // A crash mid-write: the last record is cut off. Newline-terminate it (appendRecord does) and
+      // mark today uncertain; a human decides what that record was.
+      if (!dry) appendRecord(ledger, { channel, date, id: entryId(channel, date), status: 'uncertain', reason: REPAIR_REASON });
+      throw Object.assign(new Error(`${channel}: ${ledger} ended in a truncated record; recorded uncertain — check the account and settle it (docs/browser-publishing.md)`), { uncertain: true });
+    }
     const state = channelState(events, channel, date);
     if (state === 'published') { log(`${channel}: already published today (${date})`); return { status: 'already-published' }; }
     if (state === 'uncertain') throw Object.assign(new Error(`${channel}: an earlier post is uncertain; check the account, then append a published or confirmed-not-published line to ${ledger} (docs/browser-publishing.md)`), { uncertain: true });
@@ -134,6 +152,8 @@ export async function run(channel, opts = {}, deps = null) {
       log(`${channel}: nothing eligible today`); return row;
     }
     const itemId = choice.kind === 'property' ? choice.listing.id : choice.item.id;
+    // Everything burned into the pixels gets the caption's refusal too.
+    assertRenderable(renderedStrings(choice, live?.advertiser));
     const caption = captionFor(channel, choice, { advertiser: live?.advertiser, fal: live?.advertiser?.fal ?? deps.fal });
     log(`${channel}: ${date} → ${choice.kind} ${itemId} (${caption.length} chars)`);
 
@@ -154,6 +174,11 @@ export async function run(channel, opts = {}, deps = null) {
     const base = { channel, date, id: entryId(channel, date), kind: choice.kind, itemId, ...(choice.kind === 'property' ? { listingId: itemId } : {}) };
     const runId = `${channel}-${date}-${process.pid}`;
     const winFiles = deps.cdp.stageForUpload(files, runId);
+    const unstageNow = () => deps.cdp.unstage(runId);
+    cleanups.add(unstageNow);
+    let tab = null;
+    const closeOpenTab = async () => { if (tab) await deps.cdp.closeTab?.(tab.id); };
+    cleanups.add(closeOpenTab);
     let intent = false;
     const commit = async () => {
       const at = inWindow(channel, clock());
@@ -163,7 +188,8 @@ export async function run(channel, opts = {}, deps = null) {
       return true;
     };
     try {
-      const result = await deps.cdp.withTab('about:blank', s => drive(channel, s, winFiles, caption, { dry, shots, date, commit, sites: deps.sites }));
+      const result = await deps.cdp.withTab('about:blank', s => drive(channel, s, winFiles, caption, { dry, shots, date, commit, sites: deps.sites }),
+        { onOpen: t => { tab = t; }, onClose: () => { tab = null; } });
       if (result.status === 'published') {
         appendRecord(ledger, { ...base, status: 'published', url: result.url });
         log(`${channel}: published ${result.url}`);
@@ -179,12 +205,16 @@ export async function run(channel, opts = {}, deps = null) {
       }
       throw e;
     } finally {
-      try { deps.cdp.unstage(runId); } catch { /* staging is best effort */ }
+      try { unstageNow(); } catch { /* staging is best effort */ }
+      cleanups.delete(unstageNow); cleanups.delete(closeOpenTab);
       if (dry) fs.rmSync(workRoot, { recursive: true, force: true });
     }
   };
-  if (dry) return operation();
-  return withLock(lockPath(data, channel), operation);
+  if (renderOnly) return operation();
+  // Dry runs take the same lock: they discard drafts, so they must never overlap a live run.
+  const release = acquireLock(lockPath(data, channel));
+  cleanups.add(release);
+  try { return await operation(); } finally { release(); cleanups.delete(release); }
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
@@ -197,6 +227,11 @@ if (isMain) {
   const dry = a['dry-run'] || a['render-only'];
   const now = dry && process.env.BONA_BROWSER_TEST_NOW ? new Date(process.env.BONA_BROWSER_TEST_NOW) : new Date();
   if (a.kind && !['property', 'education'].includes(a.kind)) { console.error('--kind property|education'); process.exit(1); }
+  for (const sig of ['SIGTERM', 'SIGINT']) process.once(sig, async () => {
+    console.error(`browser-publish ${channel}: ${sig}; closing the tab, removing staged files, releasing the lock`);
+    await runCleanups();
+    process.exit(143);
+  });
   try {
     const r = await run(channel, { dry, anyTime: a['any-time'], kind: a.kind ?? null, shots: a.shots ?? null, renderOnly: a['render-only'], now });
     if (dry) console.log(JSON.stringify({ status: r.status, choice: r.choice, files: r.files, screenshots: r.screenshots, caption: r.caption }, null, 1));

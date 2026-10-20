@@ -52,20 +52,42 @@ export async function closeTab(id, { base = CDP_BASE, fetchImpl = fetch } = {}) 
  * One session on one target. ev() evaluates in the page's main world and returns by value.
  * Every helper is small on purpose: the page adapters (lib/browser-sites.mjs) compose them.
  */
-export async function connect(target, { WebSocketImpl = globalThis.WebSocket } = {}) {
+export async function connect(target, { WebSocketImpl = globalThis.WebSocket, connectTimeoutMs = 10_000 } = {}) {
   const ws = new WebSocketImpl(target.webSocketDebuggerUrl);
-  await new Promise((res, rej) => { ws.onopen = res; ws.onerror = () => rej(new BrowserError('chrome-unreachable', 'DevTools websocket failed')); });
-  let seq = 0;
+  let closed = false;
   const pending = new Map();
+  const listeners = new Set();
+  // Every in-flight request fails the moment the socket goes away; nothing waits for a 60 s timer.
+  const failAll = why => { closed = true; for (const [, p] of pending) p({ error: { message: why }, closed: true }); pending.clear(); };
+  await new Promise((res, rej) => {
+    const timer = setTimeout(() => { failAll('handshake timeout'); try { ws.close(); } catch { /* never opened */ } rej(new BrowserError('chrome-unreachable', `DevTools websocket did not open within ${connectTimeoutMs} ms`)); }, connectTimeoutMs);
+    ws.onopen = () => { clearTimeout(timer); res(); };
+    ws.onerror = () => { clearTimeout(timer); failAll('websocket error'); rej(new BrowserError('chrome-unreachable', 'DevTools websocket failed')); };
+  });
+  ws.onerror = () => failAll('websocket error');
+  ws.onclose = () => failAll('websocket closed');
+  let seq = 0;
   ws.onmessage = m => {
-    const d = JSON.parse(typeof m.data === 'string' ? m.data : String(m.data));
+    let d; try { d = JSON.parse(typeof m.data === 'string' ? m.data : String(m.data)); } catch { return; }
     if (d.id && pending.has(d.id)) { pending.get(d.id)(d); pending.delete(d.id); }
+    else if (d.method) for (const l of listeners) l(d);
   };
   const send = (method, params = {}, timeoutMs = 60_000) => new Promise((res, rej) => {
+    if (closed) return rej(new BrowserError('chrome-unreachable', `${method}: DevTools connection is closed`));
     const id = ++seq;
     const timer = setTimeout(() => { pending.delete(id); rej(new BrowserError('timeout', `${method} timed out`)); }, timeoutMs);
-    pending.set(id, d => { clearTimeout(timer); d.error ? rej(new Error(`${method}: ${JSON.stringify(d.error)}`)) : res(d.result); });
-    ws.send(JSON.stringify({ id, method, params }));
+    pending.set(id, d => {
+      clearTimeout(timer);
+      if (d.closed) rej(new BrowserError('chrome-unreachable', `${method}: ${d.error.message}`));
+      else d.error ? rej(new Error(`${method}: ${JSON.stringify(d.error)}`)) : res(d.result);
+    });
+    try { ws.send(JSON.stringify({ id, method, params })); } catch (e) { pending.delete(id); clearTimeout(timer); rej(new BrowserError('chrome-unreachable', `${method}: ${e.message}`)); }
+  });
+  /** Resolve with the first event named `method` (or null after `ms`). */
+  const once = (method, ms) => new Promise(res => {
+    const l = d => { if (d.method === method) { listeners.delete(l); clearTimeout(t); res(d); } };
+    const t = setTimeout(() => { listeners.delete(l); res(null); }, ms);
+    listeners.add(l);
   });
   const ev = async expression => {
     const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
@@ -73,9 +95,20 @@ export async function connect(target, { WebSocketImpl = globalThis.WebSocket } =
     return r.result.value;
   };
   const s = {
-    send, ev,
+    send, ev, once,
+    get closed() { return closed; },
     close: () => { try { ws.close(); } catch { /* closed */ } },
-    async navigate(url) { await send('Page.enable'); await send('Page.navigate', { url }); await sleep(800); await s.waitFor('document.readyState === "complete"', 30_000); },
+    /** Navigate and wait for THIS navigation's load event (not a stale readyState from the previous page). */
+    async navigate(url, { timeoutMs = 30_000 } = {}) {
+      await send('Page.enable');
+      const loaded = once('Page.loadEventFired', timeoutMs);
+      const r = await send('Page.navigate', { url });
+      if (r?.errorText) throw new BrowserError('navigation', `Could not open ${url}: ${r.errorText}`);
+      // Same-document navigations fire no load event; the URL change is enough then.
+      const ev2 = await Promise.race([loaded, s.waitFor(`location.href.startsWith(${JSON.stringify(url.split('#')[0].replace(/\/$/, ''))}) && document.readyState === 'complete'`, timeoutMs).then(v => v && { url: true })]);
+      if (!ev2) throw new BrowserError('navigation', `Timed out loading ${url}`);
+      await s.waitFor('document.readyState === "complete"', 5_000);
+    },
     async waitFor(cond, ms = 15_000, every = 400) {
       const t0 = Date.now();
       while (Date.now() - t0 < ms) {
@@ -161,10 +194,11 @@ export function unstage(runId, { wslDir = UPLOAD_DIR_WSL } = {}) {
   fs.rmSync(path.join(wslDir, sub), { recursive: true, force: true });
 }
 
-/** Open our own tab, run fn(session), always close the tab. */
+/** Open our own tab, run fn(session), always close the tab — also when connecting fails. `onOpen(target)` lets a caller close it on SIGTERM. */
 export async function withTab(url, fn, opts = {}) {
   await ensureChrome(opts);
   const target = await openTab('about:blank', opts);
+  opts.onOpen?.(target);
   let s;
   try {
     s = await connect(target, opts);
@@ -174,5 +208,6 @@ export async function withTab(url, fn, opts = {}) {
   } finally {
     s?.close();
     if (!opts.keepTab) await closeTab(target.id, opts);
+    opts.onClose?.(target);
   }
 }

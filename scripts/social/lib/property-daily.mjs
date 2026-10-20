@@ -43,7 +43,7 @@ function fresh(ts, now, maxDays) {
  * without an expiry for the legacy queue: this caption always pairs the number with its expiry, as
  * the 2 October licence gate does, and a line that cannot be shown to be current is worse than none.
  */
-const showsLicence = l => /^\d{8,15}$/.test(l?.adNumber ?? '') && realDate(l?.adExpiry);
+export const showsLicence = l => /^\d{8,15}$/.test(l?.adNumber ?? '') && realDate(l?.adExpiry);
 /** Whether the caption prints a price: a SAR amount that is not "on request". disclosuresFor() follows the same test. */
 export const showsPrice = p => Boolean(p?.price?.amount && p.price.currency === 'SAR' && !p.price.onRequest);
 const CATEGORIES = ['buy', 'rent', 'off-plan'];
