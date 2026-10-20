@@ -36,7 +36,7 @@ export const SELECTORS = Object.freeze({
     post: '.share-box-v2__modal .share-actions__primary-action',
     dismiss: '.share-box-v2__modal button[aria-label="Dismiss"]',
     confirm: '.artdeco-modal--layer-confirmation button',
-    railLogo: 'img[src*="company-logo"]',
+    commentary: '.update-components-text, .feed-shared-update-v2__commentary, .feed-shared-inline-show-more-text, [data-test-id="main-feed-activity-card__commentary"]',
     toastLink: '.artdeco-toast-item a[href*="/feed/update/"], [data-test-artdeco-toast-item] a[href*="/feed/update/"]',
   }),
 });
@@ -66,23 +66,27 @@ const notClicked = e => Object.assign(e, { beforeClick: true });
 
 // ------------------------------------------------------------------------ confirmation binding
 /**
- * What a post must show to count as ours: the caption's first non-empty line, hashtags stripped,
- * whitespace and bidi marks normalised, first 40 characters.
+ * A post's text as compared for binding: bidi marks and emoji removed, "hashtag#tag" (LinkedIn's
+ * hashtag-link text) back to "#tag", a trailing "…more"/"see more" control dropped, whitespace
+ * collapsed. Nothing is truncated.
  */
-export function captionHead(caption) {
-  const line = String(caption ?? '').split('\n').map(l => norm(l.replace(/#[^\s#]+/g, ''))).find(Boolean) ?? '';
-  return line.slice(0, 40);
+export function bindText(x) {
+  return norm(String(x ?? '').replace(/\p{Extended_Pictographic}|\uFE0F/gu, '').replace(/\bhashtag\s*#/gi, '#')
+    .replace(/(?:…|\.\.\.)?\s*(?:see more|more|المزيد)\s*$/i, ''));
 }
 const newer = (a, b) => (a.length - b.length) || (a < b ? -1 : a > b ? 1 : 0);
 /**
- * The post that is ours: a key that was not in the baseline AND whose own element/page shows the
- * caption head. A new key without the caption (a promo, someone else's post, a processing video
- * with no description yet) is not proof. `prefer` (a toast's key) wins only when it qualifies too.
+ * The post that is ours: a key that was not in the baseline AND whose OWN text (the post's text
+ * node, not quoted posts or comments) contains the FULL submitted caption, normalised by
+ * bindText() only, AND the submission's evidence string (the listing id, or the education topic
+ * line). A new key without that (a promo, a reshare, a processing video) is not proof. `prefer`
+ * (the success toast's key) is taken first, but only when it qualifies the same way.
  */
-export function bindNewPost(candidates, before, head, { prefer = null } = {}) {
-  if (!head) return null;
+export function bindNewPost(candidates, before, { caption, evidence }, { prefer = null } = {}) {
+  const want = bindText(caption), must = bindText(evidence);
+  if (!want || !must) return null;
   const seen = new Set(before);
-  const ok = candidates.filter(c => !seen.has(c.key) && norm(c.text).includes(head));
+  const ok = candidates.filter(c => !seen.has(c.key) && bindText(c.text).includes(want) && bindText(c.text).includes(must));
   if (!ok.length) return null;
   if (prefer && ok.some(c => c.key === prefer)) return prefer;
   return ok.map(c => c.key).sort(newer).at(-1);
@@ -91,8 +95,9 @@ export function bindNewPost(candidates, before, head, { prefer = null } = {}) {
 // ---------------------------------------------------------------------------------- TikTok
 /** Video ids linked from the current page (profile grid / Studio list). */
 export const tiktokVideoIds = (s, handle) => s.ev(`[...new Set([...document.documentElement.innerHTML.matchAll(/@${handle}\\/video\\/(\\d{8,25})/g)].map(m => m[1]))]`);
-const profileSettled = `!!document.querySelector(${q(SELECTORS.tiktok.gridItem)}) || /Upload your first video|Your videos will appear here|No content/i.test(document.body?.innerText || '')`;
-const studioSettled = `/No posts yet/i.test(document.body?.innerText || '') || document.querySelectorAll('a[href*="/video/"]').length > 0`;
+/** Loaded = the grid rendered items; empty = TikTok's explicit empty state (both of its lines). Anything else is still loading. */
+export const profileSettled = `document.querySelectorAll(${q(SELECTORS.tiktok.gridItem)}).length > 0 || (() => { const t = document.querySelector('main, #main-content-others_homepage, body')?.innerText || ''; return /Upload your first video/.test(t) && /Your videos will appear here/.test(t); })()`;
+export const studioSettled = `document.querySelectorAll('a[href*="/video/"]').length > 0 || (() => { const t = document.body?.innerText || ''; return /No posts yet/.test(t) && /Your posted and scheduled videos will appear here/.test(t); })()`;
 /** The logged-in TikTok account, from TikTok's own session endpoint (same origin, the page's cookies). */
 export async function tiktokAccount(s) {
   return s.ev(`fetch('/passport/web/account/info/?aid=1988', { credentials: 'include' }).then(r => r.json()).then(j => j?.data?.username ?? null).catch(() => null)`);
@@ -148,7 +153,8 @@ export async function tiktokFill(s, winFile, caption, { uploadTimeoutMs = 10 * 6
   for (let attempt = 1; ; attempt++) {
     await sleep(3000);
     await tiktokDismissPopups(s);
-    if (!await s.typeInto(`document.querySelector(${q(SELECTORS.tiktok.caption)})`, caption)) throw new BrowserError('page-changed', 'TikTok caption editor not found');
+    // Later attempts type slower: a busy Draft.js editor (link detection, the post-upload content check) can drop fast input.
+    if (!await s.typeInto(`document.querySelector(${q(SELECTORS.tiktok.caption)})`, caption, { lineDelayMs: (attempt - 1) * 250 })) throw new BrowserError('page-changed', 'TikTok caption editor not found');
     await sleep(1200);
     await s.key('Escape', 'Escape', 27); // close a hashtag suggestion list if one is open
     await tiktokDismissPopups(s);
@@ -160,16 +166,23 @@ export async function tiktokFill(s, winFile, caption, { uploadTimeoutMs = 10 * 6
 export function checkCaptionHeld(held, caption) {
   if (norm(held) !== norm(caption)) throw new BrowserError('caption-mismatch', `Caption box does not hold the caption (have ${norm(held).length} chars, want ${norm(caption).length})`);
 }
+/** The same check right before Post: a mismatch there means nothing was clicked. */
+const assertHeldBeforeClick = (held, caption) => { try { checkCaptionHeld(held, caption); } catch (e) { throw notClicked(e); } };
+/** The checks made immediately before the Post click (also run by a dry run, which then discards). */
+export async function tiktokPreClick(s, { handle, caption } = {}) {
+  if (handle) await assertTiktokAccount(s, handle);
+  if (caption != null) assertHeldBeforeClick(await s.ev(`document.querySelector(${q(SELECTORS.tiktok.caption)})?.innerText || ''`), caption);
+}
 /**
  * Press Post — once. If TikTok answers with its "Post now" confirmation (content check still
  * running), that button is the one that publishes, and it too is pressed at most once. Neither is
  * ever pressed again: from here the outcome is confirmed or recorded uncertain, never retried.
  */
 export async function tiktokPost(s, { handle, caption, polls = 20, every = 1500 } = {}) {
-  if (handle) await assertTiktokAccount(s, handle);
-  if (caption != null) checkCaptionHeld(await s.ev(`document.querySelector(${q(SELECTORS.tiktok.caption)})?.innerText || ''`), caption);
   const ready = await s.waitFor(`(() => { const b = document.querySelector(${q(SELECTORS.tiktok.post)}); return b && !b.disabled && b.getAttribute('aria-disabled') !== 'true'; })()`, 60_000);
   if (!ready) throw notClicked(new BrowserError('post-disabled', 'TikTok Post button stayed disabled'));
+  // After the last wait, immediately before the one click: still our account, still our caption.
+  await tiktokPreClick(s, { handle, caption });
   const clicked = await s.clickEl(`document.querySelector(${q(SELECTORS.tiktok.post)})`);
   if (!clicked) throw notClicked(new BrowserError('page-changed', 'TikTok Post button vanished'));
   let postNow = false;
@@ -183,16 +196,14 @@ export async function tiktokPost(s, { handle, caption, polls = 20, every = 1500 
   }
   return postNow ? 'post-now-no-signal' : 'no-signal';
 }
-/** One video's own page: its description (and title/meta as fallbacks), for binding. */
+/** One video's own page: the video's own description element only (never comments, never truncated meta tags). */
 async function tiktokVideoText(s, handle, id) {
   await s.navigate(`https://www.tiktok.com/@${handle}/video/${id}`);
   await s.waitFor(`document.querySelector(${q(SELECTORS.tiktok.videoDesc)})`, 15_000);
-  return s.ev(`[...document.querySelectorAll(${q(SELECTORS.tiktok.videoDesc)})].map(e => e.innerText).join(' ') + ' ' +
-    (document.querySelector('meta[property="og:description"]')?.content || '') + ' ' + (document.querySelector('meta[name="description"]')?.content || '')`);
+  return s.ev(`([...document.querySelectorAll(${q(SELECTORS.tiktok.videoDesc)})].find(e => !e.closest('[data-e2e*="comment"], [class*="Comment"]'))?.innerText) || ''`);
 }
 /** Poll the profile and Studio for a new video id whose own page shows the caption head. URL or null. */
-export async function tiktokConfirm(s, handle, before, { caption = '', timeoutMs = 6 * 60_000, every = 20_000, settleMs = 2000 } = {}) {
-  const head = captionHead(caption);
+export async function tiktokConfirm(s, handle, before, { caption = '', evidence = '', timeoutMs = 6 * 60_000, every = 20_000, settleMs = 2000 } = {}) {
   const t0 = Date.now(), checked = new Map();
   while (Date.now() - t0 < timeoutMs) {
     for (const [url, settled] of [[URLS.tiktokProfile(handle), profileSettled], [URLS.tiktokContent, studioSettled]]) {
@@ -202,9 +213,9 @@ export async function tiktokConfirm(s, handle, before, { caption = '', timeoutMs
         await sleep(settleMs);
         for (const id of (await tiktokVideoIds(s, handle)).filter(x => !before.includes(x))) {
           if (!checked.get(id)) checked.set(id, await tiktokVideoText(s, handle, id).catch(() => ''));
-          const key = bindNewPost([...checked].map(([key, text]) => ({ key, text })), before, head);
+          const key = bindNewPost([...checked].map(([key, text]) => ({ key, text })), before, { caption, evidence });
           if (key) return `https://www.tiktok.com/@${handle}/video/${key}`;
-          if (!norm(checked.get(id)).includes(head)) checked.delete(id); // processing: no description yet, look again next round
+          checked.delete(id); // not (yet) ours: a processing video may show its description on the next round
         }
       } catch { /* page still loading; try again */ }
     }
@@ -225,37 +236,55 @@ export async function tiktokDiscard(s) {
  * Every post element on the page that carries its own URN, with that element's text:
  * [{ key: 'activity:123', text }]. A URN in markup without its post (promo, overlay) is not a candidate.
  */
-export const linkedinPostCandidates = s => s.ev(`[...document.querySelectorAll('[data-urn], [data-id], [data-activity-urn]')].flatMap(e => {
-  const v = [e.getAttribute('data-urn'), e.getAttribute('data-id'), e.getAttribute('data-activity-urn')].join(' ');
-  const m = /urn:li:(activity|share|ugcPost):(\\d{10,25})/.exec(v);
-  return m ? [{ key: m[1] + ':' + m[2], text: e.innerText || '' }] : [];
-})`);
+export const linkedinPostCandidates = s => s.ev(`(() => { const POST = '[data-urn], [data-id], [data-activity-urn]';
+  return [...document.querySelectorAll(POST)].flatMap(e => {
+    const v = [e.getAttribute('data-urn'), e.getAttribute('data-id'), e.getAttribute('data-activity-urn')].join(' ');
+    const m = /urn:li:(activity|share|ugcPost):(\\d{10,25})/.exec(v);
+    if (!m) return [];
+    // The post's OWN commentary: the first text block whose nearest post container is this one
+    // (a reshared/quoted post has its own container; comments live outside the commentary block).
+    const own = [...e.querySelectorAll(${q(SELECTORS.linkedin.commentary)})].find(t => t.closest(POST) === e && !t.closest('.comments-comments-list, .comments-comment-item'));
+    return [{ key: m[1] + ':' + m[2], text: own?.innerText || '' }];
+  }); })()`);
 export const linkedinUrl = key => { const [type, id] = String(key).split(':'); return `https://www.linkedin.com/feed/update/urn:li:${type}:${id}/`; };
-const postsSettled = `/Post highlights|No posts|Start a post/.test(document.querySelector('main')?.innerText || '')`;
-const publicSettled = `document.readyState === 'complete' && (document.querySelector('main')?.innerText || '').length > 100`;
+/** Admin post list: rendered once its feed has items (a promo card counts: the list has rendered). The "Start a post" box is not a signal. */
+export const postsSettled = `document.querySelectorAll('main .feed-shared-update-v2[data-urn], main [data-urn^="urn:li:activity"]').length > 0`;
+/** Public posts page: posts rendered, or LinkedIn's explicit empty state. */
+export const publicSettled = `document.querySelectorAll('main [data-urn^="urn:li:activity"], main [data-urn^="urn:li:share"], main [data-urn^="urn:li:ugcPost"]').length > 0 || /doesn.t have any posts/.test(document.querySelector('main')?.innerText || '')`;
+/** The image asset id in a LinkedIn media URL (…/dms/image/v2/<ASSET>/company-logo_…). */
+export const assetOf = url => /\/dms\/image\/v2\/([A-Za-z0-9_-]+)\/company-logo/.exec(String(url ?? ''))?.[1] ?? null;
 /**
- * Whether the composer posts as the configured Page, from what the page shows: the tab is that
- * company's admin (/company/<id>/admin/, with the admin-only Settings link for <id>), the actor is
- * named exactly as the Page, and its picture is that Page's company logo (the same image the admin
- * rail shows for <id>), not a member's photo. Returns null or the reason.
+ * Whether the composer posts as company <id> itself. The actor is read INSIDE the share modal
+ * (its name and its logo's asset id); the company is read from LinkedIn's own record for <id>
+ * (/voyager/api/organization/companies/<id>: entityUrn, name, logo asset, the viewer's admin
+ * permission). The two must agree: same name, same logo asset. Nothing elsewhere in the document
+ * is compared. Returns null or the reason.
  */
-export function linkedinActorProblem(info, { companyId, pageName }) {
-  if (!String(info?.path ?? '').startsWith(`/company/${companyId}/admin/`)) return `tab is ${info?.path}, not the admin of company ${companyId}`;
-  if (!info.adminSettings) return `no admin Settings link for company ${companyId}`;
-  if (norm(info.actorName) !== norm(pageName)) return `composer posts as "${info.actorName}", not "${pageName}"`;
-  if (!/company-logo/.test(info.actorImg ?? '')) return 'composer actor picture is not a company logo (a member profile?)';
-  if (!(info.railImgs ?? []).includes(info.actorImg)) return `composer actor logo is not the logo of company ${companyId}`;
+export function linkedinActorProblem(actor, company, { companyId, pageName }) {
+  if (!company || company.entityUrn !== `urn:li:fs_normalized_company:${companyId}`) return `LinkedIn's record for company ${companyId} could not be read (${company?.error ?? company?.entityUrn ?? 'none'})`;
+  if (company.canAdmin !== true) return `the logged-in member is not an admin of company ${companyId}`;
+  if (norm(company.name) !== norm(pageName)) return `company ${companyId} is "${company.name}", not "${pageName}"`;
+  if (norm(actor?.name) !== norm(company.name)) return `composer posts as "${actor?.name}", not "${company.name}"`;
+  if (!actor?.asset) return 'composer actor picture is not a company logo (a member profile?)';
+  if (`urn:li:digitalmediaAsset:${actor.asset}` !== company.logoAsset) return `composer actor logo ${actor.asset} is not the logo of company ${companyId}`;
   return null;
 }
-async function linkedinActorInfo(s, companyId, pageName) {
-  return s.ev(`(() => { const strip = u => String(u || '').split('?')[0]; const a = document.querySelector(${q(SELECTORS.linkedin.actor)});
-    return { path: location.pathname, adminSettings: !!document.querySelector('a[href*="/company/${companyId}/admin/settings"]'),
-      actorName: a?.querySelector('.text-body-large-bold, .artdeco-entity-lockup__title span')?.innerText?.trim() || '',
-      actorImg: strip(a?.querySelector('img')?.src),
-      railImgs: [...document.querySelectorAll(${q(SELECTORS.linkedin.railLogo)})].filter(i => !i.closest(${q(SELECTORS.linkedin.modal)}) && (i.alt || '').startsWith(${q(pageName)})).map(i => strip(i.src)) }; })()`);
+async function linkedinActor(s) {
+  return s.ev(`(() => { const a = document.querySelector(${q(SELECTORS.linkedin.actor)}); const src = a?.querySelector('img')?.src || '';
+    const m = /\\/dms\\/image\\/v2\\/([A-Za-z0-9_-]+)\\/company-logo/.exec(src);
+    return { name: a?.querySelector('.text-body-large-bold, .artdeco-entity-lockup__title span')?.innerText?.trim() || '', asset: m ? m[1] : null }; })()`);
+}
+async function linkedinCompany(s, companyId) {
+  return s.ev(`(async () => { try {
+    const csrf = (document.cookie.match(/JSESSIONID="?([^";]+)/) || [])[1] || '';
+    const r = await fetch('/voyager/api/organization/companies/${companyId}', { credentials: 'include', headers: { 'csrf-token': csrf, accept: 'application/vnd.linkedin.normalized+json+2.1' } });
+    if (!r.ok) return { error: 'HTTP ' + r.status };
+    const d = (await r.json()).data || {};
+    return { entityUrn: d.entityUrn, name: d.name, logoAsset: d.logos?.logo?.digitalmediaAsset || d.logo?.image?.digitalmediaAsset || null, canAdmin: d.viewerPermissions?.canUpdateOrganizationProfile === true };
+  } catch (e) { return { error: String(e.message || e) }; } })()`);
 }
 async function assertLinkedinActor(s, opts) {
-  const why = linkedinActorProblem(await linkedinActorInfo(s, opts.companyId, opts.pageName), opts);
+  const why = linkedinActorProblem(await linkedinActor(s), await linkedinCompany(s, opts.companyId), opts);
   if (why) throw notClicked(new BrowserError('wrong-actor', `LinkedIn: ${why}`));
 }
 /** Admin access + baseline: post URNs on the admin list and on the public posts page, each after it settled. */
@@ -300,20 +329,24 @@ export async function linkedinFill(s, winFiles, caption, { pageName, companyId }
   checkCaptionHeld(held, caption);
   return held;
 }
+/** The checks made immediately before the Post click (also run by a dry run, which then discards). */
+export async function linkedinPreClick(s, { companyId, pageName, caption } = {}) {
+  if (companyId) await assertLinkedinActor(s, { companyId, pageName });
+  if (caption != null) assertHeldBeforeClick(await s.ev(`document.querySelector(${q(SELECTORS.linkedin.editor)})?.innerText || ''`), caption);
+}
 /** Re-validate the actor and the caption, then press Post once. Returns the toast href or a signal. */
 export async function linkedinPost(s, { companyId, pageName, caption } = {}) {
-  if (companyId) await assertLinkedinActor(s, { companyId, pageName });
-  if (caption != null) checkCaptionHeld(await s.ev(`document.querySelector(${q(SELECTORS.linkedin.editor)})?.innerText || ''`), caption);
   const ready = await s.waitFor(`(() => { const b = document.querySelector(${q(SELECTORS.linkedin.post)}); return b && !b.disabled; })()`, 30_000);
   if (!ready) throw notClicked(new BrowserError('post-disabled', 'LinkedIn Post button stayed disabled'));
+  // After the last wait, immediately before the one click: still the Page, still our caption.
+  await linkedinPreClick(s, { companyId, pageName, caption });
   if (!await s.clickEl(`document.querySelector(${q(SELECTORS.linkedin.post)})`)) throw notClicked(new BrowserError('page-changed', 'LinkedIn Post button vanished'));
   const link = await s.waitFor(`(() => { const a = document.querySelector(${q(SELECTORS.linkedin.toastLink)}); if (a) return a.href; return document.querySelector(${q(SELECTORS.linkedin.modal)}) ? null : 'modal-closed'; })()`, 60_000, 500);
   if (link === 'modal-closed') { await sleep(1500); return (await s.ev(`document.querySelector(${q(SELECTORS.linkedin.toastLink)})?.href || 'modal-closed'`)); }
   return link || 'no-signal';
 }
 /** A new URN whose OWN post element shows the caption head, on the admin list or the public page. URL (of its real URN type) or null. */
-export async function linkedinConfirm(s, companyId, before, { toast = null, caption = '', timeoutMs = 4 * 60_000, every = 15_000, settleMs = 3000 } = {}) {
-  const head = captionHead(caption);
+export async function linkedinConfirm(s, companyId, before, { toast = null, caption = '', evidence = '', timeoutMs = 4 * 60_000, every = 15_000, settleMs = 3000 } = {}) {
   const m = /urn:li:(activity|share|ugcPost):(\d+)/.exec(decodeURIComponent(String(toast ?? '')));
   const prefer = m ? `${m[1]}:${m[2]}` : null;
   const t0 = Date.now();
@@ -323,7 +356,7 @@ export async function linkedinConfirm(s, companyId, before, { toast = null, capt
         await s.navigate(url);
         await s.waitFor(settled, 15_000);
         await sleep(settleMs);
-        const key = bindNewPost(await linkedinPostCandidates(s), before, head, { prefer });
+        const key = bindNewPost(await linkedinPostCandidates(s), before, { caption, evidence }, { prefer });
         if (key) return linkedinUrl(key);
       } catch { /* loading */ }
     }

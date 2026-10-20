@@ -73,7 +73,7 @@ async function renderMedia(channel, choice, dir, deps, advertiser) {
 }
 
 /** Drive the page. `commit(stage)` is called right before the irreversible click and must record intent. */
-async function drive(channel, s, winFiles, caption, { dry, shots, date, commit, sites }) {
+async function drive(channel, s, winFiles, caption, { dry, shots, date, commit, sites, evidence }) {
   const c = CHANNELS[channel];
   const shot = async name => { try { return await s.screenshot(path.join(shots, `${date}-${channel}-${name}.png`)); } catch { return null; } };
   let before;
@@ -94,9 +94,13 @@ async function drive(channel, s, winFiles, caption, { dry, shots, date, commit, 
     : `document.querySelectorAll('.share-box-v2__modal *').forEach(e => { if (e.scrollHeight > e.clientHeight + 40) e.scrollTop = e.scrollHeight; })`).catch(() => null);
   const filledBelow = await shot('filled-below');
   if (dry) {
+    // The exact pre-click checks a live run makes (account / Page actor, caption box), then discard.
+    let preClick = 'passed';
+    try { if (channel === 'tiktok') await sites.tiktokPreClick?.(s, { handle: c.handle, caption }); else await sites.linkedinPreClick?.(s, { companyId: c.companyId, pageName: c.pageName, caption }); }
+    catch (e) { preClick = `FAILED: ${e.message}`; }
     const discarded = channel === 'tiktok' ? await sites.tiktokDiscard(s) : await sites.linkedinDiscard(s);
     const after = await shot('discarded');
-    return { status: 'dry-run-filled', screenshots: [filled, filledBelow, after].filter(Boolean), discarded, existing: before.length };
+    return { status: 'dry-run-filled', screenshots: [filled, filledBelow, after].filter(Boolean), discarded, preClick, existing: before.length };
   }
   const go = await commit();
   if (go !== true) {
@@ -109,8 +113,8 @@ async function drive(channel, s, winFiles, caption, { dry, shots, date, commit, 
   catch (e) { await shot('post-click-failed'); throw e; } // e.beforeClick is set by the adapter only when no click was dispatched
   await shot('after-post');
   const url = channel === 'tiktok'
-    ? await sites.tiktokConfirm(s, c.handle, before, { caption })
-    : await sites.linkedinConfirm(s, c.companyId, before, { toast: signal, caption });
+    ? await sites.tiktokConfirm(s, c.handle, before, { caption, evidence })
+    : await sites.linkedinConfirm(s, c.companyId, before, { toast: signal, caption, evidence });
   await shot('confirm');
   return { status: url ? 'published' : 'unconfirmed', url, signal };
 }
@@ -155,6 +159,9 @@ export async function run(channel, opts = {}, deps = null) {
     // Everything burned into the pixels gets the caption's refusal too.
     assertRenderable(renderedStrings(choice, live?.advertiser));
     const caption = captionFor(channel, choice, { advertiser: live?.advertiser, fal: live?.advertiser?.fal ?? deps.fal });
+    // What a confirmed post must also show besides the full caption: the listing id, or the topic line.
+    const evidence = choice.kind === 'property' ? choice.listing.id : (channel === 'tiktok' ? choice.item.topic.ar : choice.item.topic.en);
+    if (!caption.includes(evidence)) throw new Error(`${channel}: caption does not carry its binding evidence "${evidence}"`);
     log(`${channel}: ${date} → ${choice.kind} ${itemId} (${caption.length} chars)`);
 
     const workRoot = dry ? fs.mkdtempSync(path.join(os.tmpdir(), `bona-${channel}-dry-`)) : path.join(data, channel, 'assets', date);
@@ -188,7 +195,7 @@ export async function run(channel, opts = {}, deps = null) {
       return true;
     };
     try {
-      const result = await deps.cdp.withTab('about:blank', s => drive(channel, s, winFiles, caption, { dry, shots, date, commit, sites: deps.sites }),
+      const result = await deps.cdp.withTab('about:blank', s => drive(channel, s, winFiles, caption, { dry, shots, date, commit, sites: deps.sites, evidence }),
         { onOpen: t => { tab = t; }, onClose: () => { tab = null; } });
       if (result.status === 'published') {
         appendRecord(ledger, { ...base, status: 'published', url: result.url });
@@ -196,7 +203,8 @@ export async function run(channel, opts = {}, deps = null) {
       } else if (result.status === 'unconfirmed') {
         appendRecord(ledger, { ...base, status: 'uncertain', signal: result.signal });
         throw Object.assign(new Error(`${channel}: Post was clicked (${result.signal}) but the new post was not seen on the account; recorded uncertain, the channel is blocked until reconciled`), { uncertain: true });
-      } else log(`${channel}: ${result.status}${result.screenshots ? ` — ${result.screenshots.join(', ')}` : ''}`);
+      } else log(`${channel}: ${result.status}${result.preClick ? ` (pre-click checks ${result.preClick}; baseline ${result.existing} existing)` : ''}${result.screenshots ? ` — ${result.screenshots.join(', ')}` : ''}`);
+      if (dry && result.preClick && result.preClick !== 'passed') throw new Error(`${channel}: dry run filled the form but the pre-click checks ${result.preClick}`);
       return { ...result, choice: { kind: choice.kind, itemId }, caption, files };
     } catch (e) {
       if (intent && !e.uncertain) {

@@ -6,6 +6,7 @@
 // Instagram/Facebook daily posts (marketing/daily/property-reviews.json under the 2026-10-05
 // ad-licence waiver: same eligibility, same fingerprints, same reviewed caption and disclosures),
 // interleaved with licence-free education. One post per channel per Riyadh day, fully automatic.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ksaNow } from './daily-pack.mjs';
@@ -77,28 +78,59 @@ export function appendRecord(file, row, now = () => new Date()) {
   } finally { fs.closeSync(fd); }
 }
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+const sleepSync = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+/** A lock file's holder: { raw, pid, age } or null when it vanished meanwhile. */
+function holderOf(file, now) {
+  try {
+    const raw = fs.readFileSync(file, 'utf8');
+    return { raw, pid: Number.parseInt(raw, 10), age: now() - fs.statSync(file).mtimeMs };
+  } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+}
+const staleHolder = (h, staleMs) => (Number.isInteger(h.pid) && h.pid > 0 ? !alive(h.pid) : h.age > staleMs);
+function createExclusive(file, body) {
+  const fd = fs.openSync(file, 'wx', 0o600);
+  try { fs.writeSync(fd, body); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+}
+/** Unlink only while the file still holds exactly `raw`: a lock is never removed on someone else's behalf. */
+function unlinkIfSame(file, raw) {
+  try { if (fs.readFileSync(file, 'utf8') === raw) fs.rmSync(file, { force: true }); } catch { /* gone */ }
+}
 /**
  * Exclusive per-channel lock, dry runs included (a dry run discards drafts, so it must never
- * overlap a live run). A live holder is never displaced; a dead holder's lock is taken over at
- * once; a lock with no readable pid falls back to age, staleMs (longer than the unit's 40 min).
- * Returns release().
+ * overlap a live run). Atomic by construction:
+ *   - the lock is only ever created with O_EXCL, holding "pid nonce time" (the ownership token);
+ *   - a live holder is never displaced; a dead pid's lock (or a pid-less one older than staleMs,
+ *     longer than the unit's 40 min) may be taken over, but only by whoever wins the O_EXCL
+ *     `<lock>.takeover` mutex, who re-reads the lock and removes it only if it is still the same
+ *     stale file — everyone else backs off and re-evaluates, then meets the new holder;
+ *   - release() unlinks only while the file still carries this run's token.
+ * A taker that crashed inside the takeover (milliseconds) leaves a mutex that is cleared the same
+ * way once its pid is dead. Returns release().
  */
-export function acquireLock(file, { staleMs = 45 * 60_000, now = () => Date.now() } = {}) {
+export function acquireLock(file, { staleMs = 45 * 60_000, now = () => Date.now(), attempts = 40 } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  for (let attempt = 0; attempt < 2; attempt++) {
+  const token = `${process.pid} ${crypto.randomBytes(12).toString('hex')}`;
+  const body = `${token} ${new Date(now()).toISOString()}\n`;
+  const mutex = `${file}.takeover`;
+  for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      const fd = fs.openSync(file, 'wx', 0o600);
-      fs.writeSync(fd, `${process.pid} ${new Date(now()).toISOString()}\n`); fs.closeSync(fd);
+      createExclusive(file, body);
       let released = false;
-      return () => { if (!released) { released = true; try { fs.rmSync(file, { force: true }); } catch { /* gone */ } } };
-    } catch (e) {
+      return () => { if (!released) { released = true; unlinkIfSame(file, body); } };
+    } catch (e) { if (e.code !== 'EEXIST') throw e; }
+    const h = holderOf(file, now);
+    if (!h) continue;
+    if (!staleHolder(h, staleMs)) throw new Error(`another run holds ${file} (pid ${Number.isInteger(h.pid) ? h.pid : '?'}, ${Math.round(h.age / 1000)} s old) — wait for it`);
+    try { createExclusive(mutex, body); }
+    catch (e) {
       if (e.code !== 'EEXIST') throw e;
-      let pid = NaN, age = 0;
-      try { pid = Number.parseInt(fs.readFileSync(file, 'utf8'), 10); age = now() - fs.statSync(file).mtimeMs; } catch { continue; }
-      const takeover = Number.isInteger(pid) && pid > 0 ? !alive(pid) : age > staleMs;
-      if (!takeover) throw new Error(`another run holds ${file} (pid ${Number.isInteger(pid) ? pid : '?'}, ${Math.round(age / 1000)} s old) — wait for it`);
-      fs.rmSync(file, { force: true });
+      const m = holderOf(mutex, now);
+      if (m && staleHolder(m, 60_000)) unlinkIfSame(mutex, m.raw);
+      sleepSync(20 + Math.floor(Math.random() * 30));
+      continue;
     }
+    try { const again = holderOf(file, now); if (again && again.raw === h.raw) fs.rmSync(file, { force: true }); }
+    finally { unlinkIfSame(mutex, body); }
   }
   throw new Error(`could not take ${file}`);
 }

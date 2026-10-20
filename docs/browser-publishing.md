@@ -49,29 +49,39 @@ debug Chrome (CDP `http://localhost:9222`, started by `~/.claude/scripts/chrome-
 ## How a run goes
 
 1. Outside the channel's window (or on a Friday/Saturday for LinkedIn) it does nothing.
-2. Lock `~/bona-data/<channel>/.publish.lock` — dry runs too, since a dry run discards drafts
-   (pid-checked: a live holder is never displaced, a dead one is taken over, a pid-less lock only
-   after 45 min, longer than the unit's 40 min). Read the ledger strictly (see below). `published` today → "already
+2. Lock `~/bona-data/<channel>/.publish.lock` — dry runs too, since a dry run discards drafts.
+   Created only with O_EXCL and holding `pid nonce time`. A live holder is never displaced; a dead
+   pid's lock (or a pid-less one older than 45 min, longer than the unit's 40 min) is taken over
+   only by whoever wins the O_EXCL `.publish.lock.takeover` mutex, who removes the lock only if it
+   is still the same stale file. release() unlinks only while the file carries its own token. Read the ledger strictly (see below). `published` today → "already
    published", exit 0. Anything `intent`/`uncertain` without a later settling line → stop (exit 1).
 3. Choose, build the caption, render media into `~/bona-data/<channel>/assets/<date>/`, copy it to
    `C:\Users\ASUS\AppData\Local\bona-social-upload\<run>\` (the Windows Chrome cannot read WSL paths).
 4. Open **our own tab** (`PUT /json/new`), never touching other tabs; closed at the end.
 5. Identity first. TikTok: *Edit profile* on `@bonarealestatesa` and TikTok's own session
-   endpoint (`/passport/web/account/info/`) must say `bonarealestatesa`. LinkedIn: the tab is
-   `/company/145349037/admin/…` with that company's admin-only Settings link, the composer actor is
-   named exactly **Bona | بونا** and its picture is that company's logo (the same image the admin
-   rail shows for 145349037), not a member photo. The baseline is then taken from BOTH places each
-   account lists posts, each only after it has loaded: TikTok profile grid + Studio `/content`;
-   LinkedIn admin post list + public `/posts/`. A page that does not load stops the run.
+   endpoint (`/passport/web/account/info/`) must say `bonarealestatesa`. LinkedIn: the composer
+   actor is read inside the share modal (its name and its logo's image asset id) and must match
+   LinkedIn's own record for company 145349037 (`/voyager/api/organization/companies/145349037`:
+   `entityUrn`, `name`, logo `digitalmediaAsset`, `viewerPermissions.canUpdateOrganizationProfile`).
+   The baseline is then taken from BOTH places each account lists posts, each only once it shows
+   rendered posts or the site's explicit empty state (TikTok profile grid items, or both lines of
+   "Upload your first video / Your videos will appear here"; Studio rows, or both lines of "No posts
+   yet"; LinkedIn admin feed items; LinkedIn public posts, or "doesn't have any posts"). The
+   "Start a post" box is not a signal. A page that does not settle stops the run before upload.
 6. Upload, type the caption, read the caption box back and compare (whitespace-normalised).
-7. Re-check the window on the real clock, append `intent` (fsync'd before the click), then
-   re-check the account / Page actor and the caption box, and click **Post** once. If TikTok
+7. Re-check the window on the real clock, append `intent` (fsync'd before the click), wait for
+   the Post button to be enabled, and only then re-check the account / Page actor and the caption
+   box and click **Post** once (a dry run runs these same pre-click checks, then discards). A
+   caption mismatch at that point records `confirmed-not-published` (nothing was clicked). If TikTok
    answers with its "Post now" confirmation, that is pressed at most once too. Neither is ever
    pressed again.
-8. Confirm — a post counts only if it is new (not in the baseline) AND its own page/element shows
-   the caption's first line (hashtags stripped): TikTok opens each new video's page and reads its
-   description; LinkedIn binds the URN to the post element carrying it (the toast's URN is only a
-   preference and must qualify the same way). The URL keeps the real URN type
+8. Confirm — a post counts only if it is new (not in the baseline) AND the post's OWN text node
+   contains the FULL submitted caption (normalised only for whitespace, emoji, LinkedIn's
+   "hashtag#tag" link text and a trailing "…see more") AND the submission's evidence (the listing
+   id, or the education topic line). TikTok reads each new video's own description element (not
+   comments, not meta tags); LinkedIn reads the commentary block whose nearest post container is
+   that post (not a reshared post, not comments). The success toast's URN is taken first when it
+   qualifies the same way. The URL keeps the real URN type
    (`urn:li:activity|share|ugcPost`). Anything less → `uncertain`. Append `published` with `url`.
 
 Everything burned into the media (reel hook, subhook, lower third, CTA lines, card slides) goes

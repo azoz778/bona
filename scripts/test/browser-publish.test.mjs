@@ -269,7 +269,7 @@ import * as SITES from '../social/lib/browser-sites.mjs';
 import * as CDP from '../social/lib/cdp.mjs';
 import * as DAILY from '../social/lib/browser-daily.mjs';
 import * as CLI from '../social/browser-publish.mjs';
-const { bindNewPost, captionHead, tiktokConfirm, tiktokPost, tiktokSession, tiktokDismissPopups, linkedinConfirm,
+const { bindNewPost, tiktokConfirm, tiktokPost, tiktokSession, tiktokDismissPopups, linkedinConfirm,
   linkedinActorProblem, linkedinPost, linkedinUrl, SELECTORS } = SITES;
 const { withTab } = CDP;
 const { readLedgerStrict, acquireLock, lockPath, renderedStrings, assertRenderable, appendRecord } = DAILY;
@@ -287,28 +287,25 @@ function fakeSession({ ev = () => null, clickEl = () => ({ w: 1 }), start = 'htt
 }
 const isIds = e => e.includes('matchAll(/@');
 const isAccount = e => e.includes('/passport/web/account/info/');
-const isVideoText = e => e.includes('og:description');
+const isVideoText = e => e.includes('browse-video-desc') && e.includes('closest');
 
-test('fix 1: a new post counts only when its own element/page shows the caption head', () => {
-  const head = captionHead('فيلا بشاطئ خاص، درة العروس\nدرة العروس، جدة\n\n#بونا');
-  assert.equal(head, 'فيلا بشاطئ خاص، درة العروس');
-  assert.equal(captionHead('#a #b\nTopic one'), 'Topic one');
-  assert.equal(bindNewPost([{ key: '5', text: 'a promo' }], [], head), null, 'new id, wrong text');
-  assert.equal(bindNewPost([{ key: '4', text: head }], ['4'], head), null, 'matching text but already in the baseline');
-  assert.equal(bindNewPost([{ key: '5', text: 'promo' }, { key: '6', text: `x ${head} y` }], [], head), '6');
-  assert.equal(bindNewPost([{ key: 'share:9', text: 'promo' }, { key: 'activity:7', text: head }], [], head, { prefer: 'share:9' }), 'activity:7', 'a toast id must qualify too');
+test('fix 1: a new post counts only when its own text holds the full caption and the evidence', () => {
+  const caption = 'فيلا بشاطئ خاص، درة العروس\nدرة العروس، جدة\n\nBONA-001\n\n#بونا #جدة';
+  const sub = { caption, evidence: 'BONA-001' };
+  assert.equal(bindNewPost([{ key: '5', text: 'a promo' }], [], sub), null, 'new id, wrong text');
+  assert.equal(bindNewPost([{ key: '4', text: caption }], ['4'], sub), null, 'matching text but already in the baseline');
+  assert.equal(bindNewPost([{ key: '5', text: 'promo' }, { key: '6', text: caption.replace(/\n+/g, ' ') + ' …more' }], [], sub), '6');
+  assert.equal(bindNewPost([{ key: 'share:9', text: 'promo' }, { key: 'activity:7', text: caption }], [], sub, { prefer: 'share:9' }), 'activity:7', 'a toast id must qualify too');
   assert.equal(linkedinUrl('ugcPost:123'), 'https://www.linkedin.com/feed/update/urn:li:ugcPost:123/');
-  assert.equal(bindNewPost([{ key: '6', text: head }], [], ''), null, 'no head, no binding');
+  assert.equal(bindNewPost([{ key: '6', text: caption }], [], { caption: '', evidence: 'BONA-001' }), null, 'no caption, no binding');
 });
-
-test('fix 1: TikTok confirm rejects an unrelated new video id; accepts one whose page shows the caption', async () => {
-  const caption = 'فيلا بشاطئ خاص\nmore';
+test('fix 1: TikTok confirm rejects an unrelated new video id; accepts one whose own description is the caption', async () => {
+  const caption = 'فيلا بشاطئ خاص\nBONA-001 more\n#بونا';
   const other = fakeSession({ ev: e => isIds(e) ? ['111'] : isVideoText(e) ? 'somebody else' : null });
-  assert.equal(await tiktokConfirm(other, 'bonarealestatesa', [], { caption, timeoutMs: 30, every: 0, settleMs: 0 }), null);
-  const ours = fakeSession({ ev: e => isIds(e) ? ['111', '222'] : isVideoText(e) ? 'فيلا بشاطئ خاص more #بونا' : null });
-  assert.equal(await tiktokConfirm(ours, 'bonarealestatesa', ['111'], { caption, timeoutMs: 30, every: 0, settleMs: 0 }), 'https://www.tiktok.com/@bonarealestatesa/video/222');
+  assert.equal(await tiktokConfirm(other, 'bonarealestatesa', [], { caption, evidence: 'BONA-001', timeoutMs: 30, every: 0, settleMs: 0 }), null);
+  const ours = fakeSession({ ev: e => isIds(e) ? ['111', '222'] : isVideoText(e) ? 'فيلا بشاطئ خاص BONA-001 more #بونا' : null });
+  assert.equal(await tiktokConfirm(ours, 'bonarealestatesa', ['111'], { caption, evidence: 'BONA-001', timeoutMs: 30, every: 0, settleMs: 0 }), 'https://www.tiktok.com/@bonarealestatesa/video/222');
 });
-
 test('fix 1: the TikTok baseline comes from the settled profile grid AND Studio /content', async () => {
   const s = fakeSession({ ev: (e, cur) => isAccount(e) ? 'bonarealestatesa' : isIds(e) ? (cur.includes('tiktokstudio') ? ['2'] : ['1']) : e.includes('edit-profile-entrance') ? true : null });
   assert.deepEqual((await tiktokSession(s, 'bonarealestatesa', { settleMs: 0 })).sort(), ['1', '2']);
@@ -322,11 +319,10 @@ test('fix 1: the TikTok baseline comes from the settled profile grid AND Studio 
 test('fix 1: LinkedIn confirm binds the URN to the post element with the caption and keeps the URN type', async () => {
   const caption = 'Villa BONA-A\nmore';
   const promo = fakeSession({ ev: e => e.includes("data-activity-urn") ? [{ key: 'activity:1000000001', text: 'Hiring Pro promo' }] : null });
-  assert.equal(await linkedinConfirm(promo, '145349037', [], { caption, timeoutMs: 30, every: 0, settleMs: 0 }), null);
+  assert.equal(await linkedinConfirm(promo, '145349037', [], { caption, evidence: 'BONA-A', timeoutMs: 30, every: 0, settleMs: 0 }), null);
   const ours = fakeSession({ ev: e => e.includes("data-activity-urn") ? [{ key: 'activity:1000000001', text: 'promo' }, { key: 'ugcPost:1000000002', text: 'Villa BONA-A more' }] : null });
-  assert.equal(await linkedinConfirm(ours, '145349037', [], { caption, timeoutMs: 30, every: 0, settleMs: 0 }), 'https://www.linkedin.com/feed/update/urn:li:ugcPost:1000000002/');
+  assert.equal(await linkedinConfirm(ours, '145349037', [], { caption, evidence: 'BONA-A', timeoutMs: 30, every: 0, settleMs: 0 }), 'https://www.linkedin.com/feed/update/urn:li:ugcPost:1000000002/');
 });
-
 test('fix 2: the TikTok Post and "Post now" buttons are each pressed at most once', async () => {
   const s = fakeSession({ ev: e => isAccount(e) ? 'bonarealestatesa' : e.includes('caption_container') ? 'cap' : '' });
   const signal = await tiktokPost(s, { handle: 'bonarealestatesa', caption: 'cap', polls: 8, every: 0 });
@@ -367,19 +363,19 @@ test('fix 3: a corrupt ledger line refuses; a truncated tail is repaired and the
 });
 
 test('fix 4: the LinkedIn actor must be company 145349037 itself, re-checked right before Post', async () => {
-  const good = { path: '/company/145349037/admin/page-posts/published/', adminSettings: true, actorName: 'Bona | بونا', actorImg: 'https://media.licdn.com/x/company-logo_100_100/a', railImgs: ['https://media.licdn.com/x/company-logo_100_100/a'] };
+  const company = { entityUrn: 'urn:li:fs_normalized_company:145349037', name: 'Bona | بونا', logoAsset: 'urn:li:digitalmediaAsset:D4D0BAQGFPaN0HRiiUw', canAdmin: true };
+  const actor = { name: 'Bona | بونا', asset: 'D4D0BAQGFPaN0HRiiUw' };
   const o = { companyId: '145349037', pageName: 'Bona | بونا' };
-  assert.equal(linkedinActorProblem(good, o), null);
-  assert.match(linkedinActorProblem({ ...good, path: '/company/999/admin/' }, o), /not the admin of company 145349037/);
-  assert.match(linkedinActorProblem({ ...good, adminSettings: false }, o), /no admin Settings/);
-  assert.match(linkedinActorProblem({ ...good, actorImg: 'https://media.licdn.com/x/profile-displayphoto/a' }, o), /not a company logo/);
-  assert.match(linkedinActorProblem({ ...good, railImgs: ['https://media.licdn.com/x/company-logo_100_100/OTHER'] }, o), /not the logo of company/);
-  assert.match(linkedinActorProblem({ ...good, actorName: 'Abdulaziz Zaidan' }, o), /posts as/);
-  const s = fakeSession({ ev: e => e.includes('adminSettings') ? { ...good, actorImg: 'https://media.licdn.com/x/profile-displayphoto/a' } : 'cap' });
+  assert.equal(linkedinActorProblem(actor, company, o), null);
+  assert.match(linkedinActorProblem(actor, { ...company, entityUrn: 'urn:li:fs_normalized_company:999' }, o), /could not be read/);
+  assert.match(linkedinActorProblem(actor, { ...company, canAdmin: false }, o), /not an admin/);
+  assert.match(linkedinActorProblem({ ...actor, asset: null }, company, o), /not a company logo/);
+  assert.match(linkedinActorProblem({ ...actor, asset: 'OTHERASSET' }, company, o), /not the logo of company/);
+  assert.match(linkedinActorProblem({ ...actor, name: 'Abdulaziz Zaidan' }, company, o), /posts as/);
+  const s = fakeSession({ ev: e => e.includes('/voyager/api/organization/companies/') ? company : e.includes('company-logo') ? { ...actor, asset: null } : 'cap' });
   await assert.rejects(linkedinPost(s, { ...o, caption: 'cap' }), e => e.kind === 'wrong-actor' && e.beforeClick === true);
   assert.equal(s.log.clicks.length, 0, 'Post never clicked');
 });
-
 test('fix 5: CDP connect has a handshake deadline, close rejects in-flight requests, and the tab is always closed', async () => {
   class Silent { constructor() { } send() {} close() {} }
   const t0 = Date.now();
@@ -518,4 +514,124 @@ test('fix 9: overseas property keeps the developer-authorisation CTA even when l
   const plain = await ctaCard(540, 960, { l: abroad });
   const withLines = await ctaCard(540, 960, { l: abroad, licenceLines: { ar: 'المعلن', en: 'Advertiser' } });
   assert.ok(plain.equals(withLines));
+});
+
+// ================================================================== review round 2 (Codex HOLD)
+import vm from 'node:vm';
+import { spawn } from 'node:child_process';
+
+// A DOM just big enough for the candidate extractor: attribute and class selectors, comma lists, closest().
+class El {
+  constructor(tag, attrs = {}, kids = [], text = '') { this.tag = tag; this.attrs = attrs; this.kids = kids; this.text = text; this.parent = null; for (const k of kids) k.parent = this; }
+  getAttribute(n) { return this.attrs[n] ?? null; }
+  get innerText() { return [this.text, ...this.kids.map(k => k.innerText)].filter(Boolean).join(' '); }
+  matches(sel) {
+    return sel.split(',').some(part => {
+      const p = part.trim();
+      return [...p.matchAll(/\.([\w-]+)|\[([\w-]+)(?:([\^*]?=)"([^"]*)")?\]/g)].every(([, cls, attr, op, val]) => {
+        if (cls) return String(this.attrs.class ?? '').split(/\s+/).includes(cls);
+        const v = this.attrs[attr];
+        if (v == null) return false;
+        return !op || (op === '=' ? v === val : op === '^=' ? v.startsWith(val) : v.includes(val));
+      });
+    });
+  }
+  closest(sel) { for (let e = this; e; e = e.parent) if (e.matches?.(sel)) return e; return null; }
+  querySelectorAll(sel) { const out = []; const walk = e => { for (const k of e.kids) { if (k.matches(sel)) out.push(k); walk(k); } }; walk(this); return out; }
+}
+const domSession = root => ({ ev: async expr => vm.runInNewContext(expr, { document: root }) });
+
+test('round 2 fix 2: binding uses the post\'s OWN text node — not a reshared post or a comment that quotes the caption', async () => {
+  const caption = 'Villa BONA-A\nFor sale\n\n#BonaRealEstate';
+  const ours = new El('div', { 'data-urn': 'urn:li:activity:2000000001' }, [new El('div', { class: 'update-components-text' }, [], 'Villa BONA-A For sale #BonaRealEstate')]);
+  const resharer = new El('div', { 'data-urn': 'urn:li:activity:2000000002' }, [
+    new El('div', { class: 'update-components-text' }, [], 'Look at this'),
+    new El('div', { 'data-urn': 'urn:li:share:2000000003' }, [new El('div', { class: 'update-components-text' }, [], 'old text')]),
+    new El('div', { class: 'comments-comments-list' }, [new El('div', { class: 'update-components-text' }, [], 'Villa BONA-A For sale #BonaRealEstate')]),
+  ]);
+  const root = new El('main', {}, [resharer]);
+  const c1 = await SITES.linkedinPostCandidates(domSession(root));
+  assert.equal(SITES.bindNewPost(c1, [], { caption, evidence: 'BONA-A' }), null, 'a comment quoting the caption does not make the outer post ours');
+  root.kids.push(ours); ours.parent = root;
+  const c2 = await SITES.linkedinPostCandidates(domSession(root));
+  assert.equal(SITES.bindNewPost(c2, [], { caption, evidence: 'BONA-A' }), 'activity:2000000001');
+});
+
+test('round 2 fix 2: the FULL caption must match (not a 40-char prefix) and the evidence must be there', () => {
+  const caption = 'فيلا بشاطئ خاص، درة العروس\nدرة العروس، جدة · للبيع\n\nBONA-001\n\n#بونا';
+  const sub = { caption, evidence: 'BONA-001' };
+  assert.equal(SITES.bindNewPost([{ key: '7', text: 'فيلا بشاطئ خاص، درة العروس — another listing BONA-009' }], [], sub), null, 'same first line, different post');
+  assert.equal(SITES.bindNewPost([{ key: '7', text: 'فيلا بشاطئ خاص، درة العروس درة العروس، جدة · للبيع BONA-001 hashtag#بونا ✨ …see more' }], [], sub), '7', 'only whitespace / hashtag-link / emoji / see-more differ');
+  assert.equal(SITES.bindNewPost([{ key: '7', text: 'Topic one Text' }], [], { caption: 'Topic one\nText', evidence: 'Topic two' }), null, 'the evidence line must be present');
+});
+
+test('round 2 fix 3: baselines settle on rendered posts or an explicit empty state — never on the Start-a-post box', () => {
+  const doc = ({ text = '', feed = 0, grid = 0, links = 0 }) => {
+    const box = { innerText: text };
+    return { body: box, querySelector: () => box,
+      querySelectorAll: sel => Array(/data-urn/.test(sel) ? feed : /user-post-item/.test(sel) ? grid : /\/video\//.test(sel) ? links : 0).fill({}) };
+  };
+  const on = (expr, d) => Boolean(vm.runInNewContext(expr, { document: d }));
+  const filler = 'Start a post Video Photo Write article '.repeat(5);
+  assert.equal(on(SITES.postsSettled, doc({ text: filler })), false, 'admin: only the composer box');
+  assert.equal(on(SITES.postsSettled, doc({ text: filler, feed: 1 })), true);
+  assert.equal(on(SITES.publicSettled, doc({ text: filler })), false, 'public: long text is not a loaded feed');
+  assert.equal(on(SITES.publicSettled, doc({ text: "Your page doesn’t have any posts from the last 90 days" })), true);
+  assert.equal(on(SITES.profileSettled, doc({ text: 'No content' })), false, 'TikTok: a generic word is not the empty state');
+  assert.equal(on(SITES.profileSettled, doc({ text: 'Upload your first video Your videos will appear here' })), true);
+  assert.equal(on(SITES.profileSettled, doc({ grid: 2 })), true);
+  assert.equal(on(SITES.studioSettled, doc({ text: 'No posts yet' })), false, 'Studio needs both empty-state lines');
+  assert.equal(on(SITES.studioSettled, doc({ text: 'No posts yet Your posted and scheduled videos will appear here' })), true);
+});
+
+test('round 2 fix 4: account and Page actor are re-checked AFTER the last readiness wait, right before the one click', async () => {
+  let ready = false;
+  const tt = fakeSession({ ev: e => isAccount(e) ? (ready ? 'someoneelse' : 'bonarealestatesa') : 'cap' });
+  tt.waitFor = async () => { ready = true; return true; };
+  await assert.rejects(SITES.tiktokPost(tt, { handle: 'bonarealestatesa', caption: 'cap', polls: 1, every: 0 }), e => e.kind === 'wrong-account' && e.beforeClick);
+  assert.equal(tt.log.clicks.length, 0);
+  const company = { entityUrn: 'urn:li:fs_normalized_company:145349037', name: 'Bona | بونا', logoAsset: 'urn:li:digitalmediaAsset:A1', canAdmin: true };
+  let waited = false;
+  const li = fakeSession({ ev: e => e.includes('/voyager/api/organization/companies/') ? (waited ? { ...company, canAdmin: false } : company) : e.includes('company-logo') ? { name: 'Bona | بونا', asset: 'A1' } : 'cap' });
+  li.waitFor = async () => { waited = true; return true; };
+  await assert.rejects(SITES.linkedinPost(li, { companyId: '145349037', pageName: 'Bona | بونا', caption: 'cap' }), e => e.kind === 'wrong-actor' && e.beforeClick);
+  assert.equal(li.log.clicks.length, 0);
+});
+
+test('round 2 fix 5: a caption mismatch found before the click is confirmed-not-published, not uncertain', async () => {
+  const s = fakeSession({ ev: e => isAccount(e) ? 'bonarealestatesa' : 'something else' });
+  await assert.rejects(SITES.tiktokPost(s, { handle: 'bonarealestatesa', caption: 'cap', polls: 1, every: 0 }), e => e.kind === 'caption-mismatch' && e.beforeClick === true);
+  const li = fakeSession({ ev: () => 'something else' });
+  await assert.rejects(SITES.linkedinPost(li, { caption: 'cap' }), e => e.kind === 'caption-mismatch' && e.beforeClick === true);
+  const sb = sandbox(), x = deps();
+  x.d.sites.tiktokPost = (_s, o) => SITES.tiktokPost(fakeSession({ ev: e => isAccount(e) ? 'bonarealestatesa' : 'drifted caption' }), { ...o, polls: 1, every: 0 });
+  await assert.rejects(run('tiktok', { env: sb.env, root: sb.root, now: NOW, clock: () => NOW, log: quiet, kind: 'property' }, x.d), e => !e.uncertain);
+  assert.deepEqual(readLedgerStrict(ledgerPath(sb.data, 'tiktok')).rows.map(r => r.status), ['intent', 'confirmed-not-published']);
+});
+
+test('round 2 fix 1: stale-lock takeover is atomic across real processes, and release honours the ownership token', async () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const mod = path.join(here, '../social/lib/browser-daily.mjs');
+  for (let round = 0; round < 3; round++) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-race-'));
+    const lock = path.join(dir, '.publish.lock'), go = path.join(dir, 'go');
+    fs.writeFileSync(lock, '999999999 deadbeef stale\n');
+    const child = `import { acquireLock } from ${JSON.stringify(mod)}; import fs from 'node:fs';
+      while (!fs.existsSync(${JSON.stringify(go)})) {}
+      let r; try { r = acquireLock(${JSON.stringify(lock)}); console.log('GOT'); } catch { console.log('NO'); }
+      setTimeout(() => r?.(), 1500);`;
+    const kids = Array.from({ length: 10 }, () => new Promise(res => {
+      let out = ''; const c = spawn(process.execPath, ['--input-type=module', '-e', child]);
+      c.stdout.on('data', d => { out += d; }); c.on('close', () => res(out.trim()));
+    }));
+    setTimeout(() => fs.writeFileSync(go, ''), 700);
+    const got = (await Promise.all(kids)).filter(x => x === 'GOT').length;
+    assert.equal(got, 1, `round ${round}: exactly one process may take a stale lock (got ${got})`);
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-token-'));
+  const lock = path.join(dir, '.publish.lock');
+  const release = DAILY.acquireLock(lock);
+  fs.writeFileSync(lock, `${process.pid} someone-elses-nonce\n`);
+  release();
+  assert.ok(fs.existsSync(lock), 'release() must not unlink a lock that is no longer ours');
 });
