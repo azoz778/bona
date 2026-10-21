@@ -1,0 +1,496 @@
+{
+  "version": 1,
+  "packageId": "bona-licence-free-fallback-20261005",
+  "reviewStatus": "pending-owner",
+  "approvalGate": "AWAITING APPROVAL — DO NOT PUBLISH OR SCHEDULE",
+  "start": "2026-10-05",
+  "end": "2026-10-11",
+  "postCountPerPlatform": 7,
+  "totalCandidatePosts": 14,
+  "time": "20:30",
+  "timezone": "Asia/Riyadh",
+  "platforms": [
+    "instagram",
+    "facebook"
+  ],
+  "contentPolicy": {
+    "pillar": "buyer/seller education",
+    "propertySpecific": false,
+    "listingClaims": false,
+    "priceClaims": false,
+    "forecastClaims": false,
+    "valuationOffers": false,
+    "staleEvents": false,
+    "adLicenceRequired": false
+  },
+  "rights": {
+    "type": "original-typographic-artwork",
+    "propertyPhotography": false,
+    "thirdPartyMedia": false,
+    "adLicenceRequired": false,
+    "provenance": "Original bilingual copy and typographic cards created for Bona; no external media."
+  },
+  "assets": [
+    {
+      "packageId": "bona-licence-free-fallback-20261005",
+      "platform": "instagram",
+      "path": "public/social/fallback-20261005/2026-10-05-ig-1.jpg",
+      "kind": "original-typographic-card",
+      "format": "jpeg",
+      "dimensions": {
+        "width": 1080,
+        "height": 1350
+      },
+      "aspect": "portrait-4:5",
+      "safeArea": {
+        "top": 48,
+        "right": 48,
+        "bottom": 48,
+        "left": 48
+      },
+      "contentBounds": {
+        "left": 82,
+        "top": 65,
+        "right": 998,
+        "bottom": 1277
+      },
+      "foregroundColor": "#f5f1ea",
+      "mutedColor": "#d9d0c1",
+      "backgroundColor": "#0f1214",
+      "sha256": "ee2c16c60c2cfc606fa31e774014d6cdc05fa725af826cf22be1352c59eeb344",
+      "rights": "Original Bona typographic artwork; no property photography or third-party media."
+    },
+    {
+      "packageId": "bona-licence-free-fallback-20261005",
+      "platform": "facebook",
+      "path": "public/social/fallback-20261005/2026-10-05-fb-1.jpg",
+      "kind": "original-typographic-card",
+      "format": "jpeg",
+      "dimensions": {
+        "width": 1080,
+        "height": 1080
+      },
+      "aspect": "square-1:1",
+      "safeArea": {
+        "top": 48,
+        "right": 48,
+        "bottom": 48,
+        "left": 48
+      },
+      "contentBounds": {
+        "left": 82,
+        "top": 65,
+        "right": 998,
+        "bottom": 1007
+      },
+      "foregroundColor": "#f5f1ea",
+      "mutedColor": "#d9d0c1",
+      "backgroundColor": "#0f1214",
+      "sha256": "eca9158478583b4cc11fa7328cd3ecc85bceda76b3eead1dfec4d7b80103fbea",
+      "rights": "Original Bona typographic artwork; no property photography or third-party media."
+    },
+    {
+      "packageId": "bona-licence-free-fallback-20261005",
+      "platform": "instagram",
+      "path": "public/social/fallback-20261005/2026-10-06-ig-1.jpg",
+      "kind": "original-typographic-card",
+      "format": "jpeg",
+      "dimensions": {
+        "width": 1080,
+        "height": 1350
+      },
+      "aspect": "portrait-4:5",
+      "safeArea": {
+        "top": 48,
+        "right": 48,
+        "bottom": 48,
+        "left": 48
+      },
+      "contentBounds": {
+        "left": 82,
+        "top": 65,
+        "right": 998,
+        "bottom": 1277
+      },
+      "foregroundColor": "#0f1214",
+      "mutedColor": "#2a2f33",
+      "backgroundColor": "#f5f1ea",
+      "sha256": "c9819eb945f1002bff077c72196ae18cec4816dc74f093dc32eb14b340a99387",
+      "rights": "Original Bona typographic artwork; no property photography or third-party media."
+    },
+    {
+      "packageId": "bona-licence-free-fallback-20261005",
+      "platform": "facebook",
+      "path": "public/social/fallback-20261005/2026-10-06-fb-1.jpg",
+      "kind": "original-typographic-card",
+      "format": "jpeg",
+      "dimensions": {
+        "width": 1080,
+        "height": 1080
+      },
+      "aspect": "square-1:1",
+      "safeArea": {
+        "top": 48,
+        "right": 48,
+        "bottom": 48,
+        "left": 48
+      },
+      "contentBounds": {
+        "left": 82,
+        "top": 65,
+        "right": 998,
+        "bottom": 1007
+      },
+      "foregroundColor": "#0f1214",
+      "mutedColor": "#2a2f33",
+      "backgroundColor": "#f5f1ea",
+      "sha256": "a63de9a4a2c58ec0d37f5011c1b43d6400390c4de9e8c85b54b2bffc33bd6971",
+      "rights": "Original Bona typographic artwork; no property photography or third-party media."
+    },
+    {
+      "packageId": "bona-licence-free-fallback-20261005",
+      "platform": "instagram",
+      "path": "public/social/fallback-20261005/2026-10-07-ig-1.jpg",
+      "kind": "original-typographic-card",
+      "format": "jpeg",
+      "dimensions": {
+        "width": 1080,
+        "height": 1350
+      },
+      "aspect": "portrait-4:5",
+      "safeArea": {
+        "top": 48,
+        "right": 48,
+        "bottom": 48,
+        "left": 48
+      },
+      "contentBounds": {
+        "left": 82,
+        "top": 65,
+        "right": 998,
+        "bottom": 1277
+      },
+      "foregroundColor": "#f5f1ea",
+      "mutedColor": "#d9d0c1",
+      "backgroundColor": "#0f1214",
+      "sha256": "1462e3fa833fb1c2ac866e06d287ab86d077894fc1f261b09989cd23b13f10ad",
+      "rights": "Original Bona typographic artwork; no property photography or third-party media."
+    },
+    {
+      "packageId": "bona-licence-free-fallback-20261005",
+      "platform": "facebook",
+      "path": "public/social/fallback-20261005/2026-10-07-fb-1.jpg",
+      "kind": "original-typographic-card",
+      "format": "jpeg",
+      "dimensions": {
+        "width": 1080,
+        "height": 1080
+      },
+      "aspect": "square-1:1",
+      "safeArea": {
+        "top": 48,
+        "right": 48,
+        "bottom": 48,
+        "left": 48
+      },
+      "contentBounds": {
+        "left": 82,
+        "top": 65,
+        "right": 998,
+        "bottom": 1007
+      },
+      "foregroundColor": "#f5f1ea",
+      "mutedColor": "#d9d0c1",
+      "backgroundColor": "#0f1214",
+      "sha256": "10fb2a6f8a73d2e5c91ce6f83a2b1164da80d159e4c2afe64604aab502f66e91",
+      "rights": "Original Bona typographic artwork; no property photography or third-party media."
+    },
+    {
+      "packageId": "bona-licence-free-fallback-20261005",
+      "platform": "instagram",
+      "path": "public/social/fallback-20261005/2026-10-08-ig-1.jpg",
+      "kind": "original-typographic-card",
+      "format": "jpeg",
+      "dimensions": {
+        "width": 1080,
+        "height": 1350
+      },
+      "aspect": "portrait-4:5",
+      "safeArea": {
+        "top": 48,
+        "right": 48,
+        "bottom": 48,
+        "left": 48
+      },
+      "contentBounds": {
+        "left": 82,
+        "top": 65,
+        "right": 998,
+        "bottom": 1277
+      },
+      "foregroundColor": "#0f1214",
+      "mutedColor": "#2a2f33",
+      "backgroundColor": "#f5f1ea",
+      "sha256": "32a2aa1940b47eb9a2b56d71dc5aa0c54575efabe0be568f53743740ceed5d2c",
+      "rights": "Original Bona typographic artwork; no property photography or third-party media."
+    },
+    {
+      "packageId": "bona-licence-free-fallback-20261005",
+      "platform": "facebook",
+      "path": "public/social/fallback-20261005/2026-10-08-fb-1.jpg",
+      "kind": "original-typographic-card",
+      "format": "jpeg",
+      "dimensions": {
+        "width": 1080,
+        "height": 1080
+      },
+      "aspect": "square-1:1",
+      "safeArea": {
+        "top": 48,
+        "right": 48,
+        "bottom": 48,
+        "left": 48
+      },
+      "contentBounds": {
+        "left": 82,
+        "top": 65,
+        "right": 998,
+        "bottom": 1007
+      },
+      "foregroundColor": "#0f1214",
+      "mutedColor": "#2a2f33",
+      "backgroundColor": "#f5f1ea",
+      "sha256": "33a42f20534416affab52b3638749aeaced0cabd1cbed903d7d83c552a1a58ff",
+      "rights": "Original Bona typographic artwork; no property photography or third-party media."
+    },
+    {
+      "packageId": "bona-licence-free-fallback-20261005",
+      "platform": "instagram",
+      "path": "public/social/fallback-20261005/2026-10-09-ig-1.jpg",
+      "kind": "original-typographic-card",
+      "format": "jpeg",
+      "dimensions": {
+        "width": 1080,
+        "height": 1350
+      },
+      "aspect": "portrait-4:5",
+      "safeArea": {
+        "top": 48,
+        "right": 48,
+        "bottom": 48,
+        "left": 48
+      },
+      "contentBounds": {
+        "left": 82,
+        "top": 65,
+        "right": 998,
+        "bottom": 1277
+      },
+      "foregroundColor": "#f5f1ea",
+      "mutedColor": "#d9d0c1",
+      "backgroundColor": "#0f1214",
+      "sha256": "3999c3fc7543d8e79f11a115cb51923464c8d337e56a308fa7311ec9d6609ed7",
+      "rights": "Original Bona typographic artwork; no property photography or third-party media."
+    },
+    {
+      "packageId": "bona-licence-free-fallback-20261005",
+      "platform": "facebook",
+      "path": "public/social/fallback-20261005/2026-10-09-fb-1.jpg",
+      "kind": "original-typographic-card",
+      "format": "jpeg",
+      "dimensions": {
+        "width": 1080,
+        "height": 1080
+      },
+      "aspect": "square-1:1",
+      "safeArea": {
+        "top": 48,
+        "right": 48,
+        "bottom": 48,
+        "left": 48
+      },
+      "contentBounds": {
+        "left": 82,
+        "top": 65,
+        "right": 998,
+        "bottom": 1007
+      },
+      "foregroundColor": "#f5f1ea",
+      "mutedColor": "#d9d0c1",
+      "backgroundColor": "#0f1214",
+      "sha256": "59513400a23570a8f8a07e77ca9374b56688cc9142dfb3704672296998433aee",
+      "rights": "Original Bona typographic artwork; no property photography or third-party media."
+    },
+    {
+      "packageId": "bona-licence-free-fallback-20261005",
+      "platform": "instagram",
+      "path": "public/social/fallback-20261005/2026-10-10-ig-1.jpg",
+      "kind": "original-typographic-card",
+      "format": "jpeg",
+      "dimensions": {
+        "width": 1080,
+        "height": 1350
+      },
+      "aspect": "portrait-4:5",
+      "safeArea": {
+        "top": 48,
+        "right": 48,
+        "bottom": 48,
+        "left": 48
+      },
+      "contentBounds": {
+        "left": 82,
+        "top": 65,
+        "right": 998,
+        "bottom": 1277
+      },
+      "foregroundColor": "#0f1214",
+      "mutedColor": "#2a2f33",
+      "backgroundColor": "#f5f1ea",
+      "sha256": "da3aaca4d6d59275de15849fb704b31f555c04057280cb809011bcdc679b7f96",
+      "rights": "Original Bona typographic artwork; no property photography or third-party media."
+    },
+    {
+      "packageId": "bona-licence-free-fallback-20261005",
+      "platform": "facebook",
+      "path": "public/social/fallback-20261005/2026-10-10-fb-1.jpg",
+      "kind": "original-typographic-card",
+      "format": "jpeg",
+      "dimensions": {
+        "width": 1080,
+        "height": 1080
+      },
+      "aspect": "square-1:1",
+      "safeArea": {
+        "top": 48,
+        "right": 48,
+        "bottom": 48,
+        "left": 48
+      },
+      "contentBounds": {
+        "left": 82,
+        "top": 65,
+        "right": 998,
+        "bottom": 1007
+      },
+      "foregroundColor": "#0f1214",
+      "mutedColor": "#2a2f33",
+      "backgroundColor": "#f5f1ea",
+      "sha256": "239e50e7f347676c2c943cb44ae261b1c0e7ebe2ed94f1a3c3c163a034a6a810",
+      "rights": "Original Bona typographic artwork; no property photography or third-party media."
+    },
+    {
+      "packageId": "bona-licence-free-fallback-20261005",
+      "platform": "instagram",
+      "path": "public/social/fallback-20261005/2026-10-11-ig-1.jpg",
+      "kind": "original-typographic-card",
+      "format": "jpeg",
+      "dimensions": {
+        "width": 1080,
+        "height": 1350
+      },
+      "aspect": "portrait-4:5",
+      "safeArea": {
+        "top": 48,
+        "right": 48,
+        "bottom": 48,
+        "left": 48
+      },
+      "contentBounds": {
+        "left": 82,
+        "top": 65,
+        "right": 998,
+        "bottom": 1277
+      },
+      "foregroundColor": "#f5f1ea",
+      "mutedColor": "#d9d0c1",
+      "backgroundColor": "#0f1214",
+      "sha256": "b288be2c5edc9029200daac4a4a66188f9df4ed48b251274cdd6d0f317123c77",
+      "rights": "Original Bona typographic artwork; no property photography or third-party media."
+    },
+    {
+      "packageId": "bona-licence-free-fallback-20261005",
+      "platform": "facebook",
+      "path": "public/social/fallback-20261005/2026-10-11-fb-1.jpg",
+      "kind": "original-typographic-card",
+      "format": "jpeg",
+      "dimensions": {
+        "width": 1080,
+        "height": 1080
+      },
+      "aspect": "square-1:1",
+      "safeArea": {
+        "top": 48,
+        "right": 48,
+        "bottom": 48,
+        "left": 48
+      },
+      "contentBounds": {
+        "left": 82,
+        "top": 65,
+        "right": 998,
+        "bottom": 1007
+      },
+      "foregroundColor": "#f5f1ea",
+      "mutedColor": "#d9d0c1",
+      "backgroundColor": "#0f1214",
+      "sha256": "dd5eb2130588104cc60bac82a0ba6be9bc10e7a221535260b324e04c45239a88",
+      "rights": "Original Bona typographic artwork; no property photography or third-party media."
+    }
+  ],
+  "captions": [
+    {
+      "date": "2026-10-05",
+      "path": "marketing/fallback-20261005/captions/2026-10-05.txt",
+      "sha256": "9892e841e68906103cc6da3c8e5a64f622a2273317033af28603120f8d1eee24"
+    },
+    {
+      "date": "2026-10-06",
+      "path": "marketing/fallback-20261005/captions/2026-10-06.txt",
+      "sha256": "8bb8367512f8e8b66163842a04f6c0a74b613f51443a9f7a7a735252aed7464e"
+    },
+    {
+      "date": "2026-10-07",
+      "path": "marketing/fallback-20261005/captions/2026-10-07.txt",
+      "sha256": "595fcc1e5cf594e15e23434b4a78eda8f46e80b6d360c73658474a75aa7b12e3"
+    },
+    {
+      "date": "2026-10-08",
+      "path": "marketing/fallback-20261005/captions/2026-10-08.txt",
+      "sha256": "29b8be9564088a2eac8affc12243e00a39a1a238c4dca55c6b7781c05b52cab1"
+    },
+    {
+      "date": "2026-10-09",
+      "path": "marketing/fallback-20261005/captions/2026-10-09.txt",
+      "sha256": "10bb64f66d158853ef9991551bd18b590101a194684bcc020b4dcd8b8f31e6da"
+    },
+    {
+      "date": "2026-10-10",
+      "path": "marketing/fallback-20261005/captions/2026-10-10.txt",
+      "sha256": "1998e80b08e10363bdd291319f70d01258507976321417fac60c8e9e339cff82"
+    },
+    {
+      "date": "2026-10-11",
+      "path": "marketing/fallback-20261005/captions/2026-10-11.txt",
+      "sha256": "855eed4796dda2bae2e3233570af6eeae316e10fbe4782f5ac162bcaedc271e0"
+    }
+  ],
+  "previews": [
+    "marketing/fallback-20261005/review/instagram-contact-sheet.jpg",
+    "marketing/fallback-20261005/review/facebook-contact-sheet.jpg"
+  ],
+  "supportingFiles": {
+    "marketing/fallback-20261005/content.json": "77bab992a0aed924e41596fbd5d8bbc7a3a696a189e27350149fc040c54c9e17",
+    "marketing/fallback-20261005/instagram.json": "4b30d2e673c27eda803cb0ad7df06d5ee51044bc7fdc6b06be059e62b980dd34",
+    "marketing/fallback-20261005/facebook.json": "d048bc3dab58858f40c28d4a050cde257da9a084a188affba81f40e65ee002e8",
+    "marketing/fallback-20261005/captions/2026-10-05.txt": "9892e841e68906103cc6da3c8e5a64f622a2273317033af28603120f8d1eee24",
+    "marketing/fallback-20261005/captions/2026-10-06.txt": "8bb8367512f8e8b66163842a04f6c0a74b613f51443a9f7a7a735252aed7464e",
+    "marketing/fallback-20261005/captions/2026-10-07.txt": "595fcc1e5cf594e15e23434b4a78eda8f46e80b6d360c73658474a75aa7b12e3",
+    "marketing/fallback-20261005/captions/2026-10-08.txt": "29b8be9564088a2eac8affc12243e00a39a1a238c4dca55c6b7781c05b52cab1",
+    "marketing/fallback-20261005/captions/2026-10-09.txt": "10bb64f66d158853ef9991551bd18b590101a194684bcc020b4dcd8b8f31e6da",
+    "marketing/fallback-20261005/captions/2026-10-10.txt": "1998e80b08e10363bdd291319f70d01258507976321417fac60c8e9e339cff82",
+    "marketing/fallback-20261005/captions/2026-10-11.txt": "855eed4796dda2bae2e3233570af6eeae316e10fbe4782f5ac162bcaedc271e0",
+    "marketing/fallback-20261005/review/instagram-contact-sheet.jpg": "488016f05e16b9cb15ba959d1ca5ae3af33b224e80e0eb1010f46ec3b2055555",
+    "marketing/fallback-20261005/review/facebook-contact-sheet.jpg": "49b1180a51e827e0fba4d329d7cd972ec758df84fe806e6ae4351ffbd45c859f"
+  }
+}
