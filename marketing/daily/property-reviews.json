@@ -1292,8 +1292,8 @@
   },
   "BONA-060": {
     "status": "approved",
-    "reviewedAt": "2026-10-20T23:55:00.497Z",
-    "reviewer": "Owner 2026-10-21 approved plot cards for land (cards: land-only). Claude visual review: card 1 the plot satellite still (ring on the plot, labelled approximate, Esri source), card 2 the facts (300 sqm per plot, SAR 2,150,000 per plot, about SAR 7,167/sqm (within 0.01%); 'twelve plots, ten remaining' is the listing's own availability line), card 3 the area still with district, city and country; Arabic connected and right-to-left, nothing cut off, numbers match the listing.",
+    "reviewedAt": "2026-10-21T00:14:19.949Z",
+    "reviewer": "Owner 2026-10-21 approved plot cards for land (cards: land-only). Claude visual review: card 1 the plot satellite still (ring on the plot, labelled approximate, Esri source), card 2 the facts (300 sqm per plot; price labelled 'Asking price per plot' / 'السعر للقطعة' SAR 2,150,000, about SAR 7,167/sqm (within 0.01%); 'twelve plots, ten remaining' is the listing's own availability line), card 3 the area still with district, city and country; Arabic connected and right-to-left, nothing cut off, numbers match the listing. Re-approved after the review fix that labels a per-plot price.",
     "factsSha256": "cd4bd5af3c0780a0a6db8458618b1196a52bf347cb2aa3da7f9a6c6b242f3cf1",
     "advertiserSha256": "71e69cc4a08cddcf97b23033fe2411d3f0545265ba5939fabc05b1236190be8b",
     "captionSha256": "d87e0b166847877dc9ed8384945c32489fed1e51e054b307a27749f0b428b793",
@@ -1324,8 +1324,8 @@
         }
       },
       {
-        "url": "https://bona-real-estate.com/social/property/BONA-060/card-facts-39c89df43db7.jpg",
-        "sha256": "39c89df43db7a71097e4d6125e8ccfd104a98c4b2abb0eb9fba3852bcfed9d51",
+        "url": "https://bona-real-estate.com/social/property/BONA-060/card-facts-bfdac06dfd54.jpg",
+        "sha256": "bfdac06dfd54a51f880f3ef918a42a64e28b66ba3858303a5ce0c25dab7c3b73",
         "width": 1080,
         "height": 1350,
         "kind": "card",
