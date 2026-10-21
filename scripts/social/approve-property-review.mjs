@@ -102,13 +102,15 @@ export async function main(argv = process.argv.slice(2), { fetchImpl = fetch, no
     register[sel.id] = review; written++;
   }
   for (const raw of args.cards) {
-    const m = /^([A-Z]+-[A-Z]?\d+):(\d+),(\d+)$/.exec(String(raw));
-    if (!m) { refused.push(`Bad --cards "${raw}" — use BONA-ID:P,A (plot still, area still)`); continue; }
+    const m = /^([A-Z]+-[A-Z]?\d+)(?::(\d+),(\d+))?$/.exec(String(raw));
+    if (!m) { refused.push(`Bad --cards "${raw}" — use BONA-ID:P,A (plot still, area still), or BONA-ID under policy satellite: false`); continue; }
+    if (rules.satellite !== (m[2] != null)) { refused.push(`${m[1]}: ${rules.satellite ? 'name the plot and area stills (BONA-ID:P,A)' : 'policy satellite is false: no stills (--cards BONA-ID)'}`); continue; }
     const id = m[1], p = live.listings.find(x => x.id === id), d = drafts.listings?.[id];
     if (advertiserChanged) { refused.push(`${id}: advertiser changed since drafting — draft again`); continue; }
     if (!p || !d) { refused.push(`${id}: not in the live catalogue or the drafts`); continue; }
     if (d.factsSha256 !== fingerprint(p)) { refused.push(`${id}: listing changed since drafting — draft it again`); continue; }
-    const stills = [m[2], m[3]].map(n => (d.stills ?? []).find(s => s.index === Number(n)));
+    if (args.select.some(x => String(x).startsWith(`${id}:`))) { refused.push(`${id}: --cards and --select for one listing: a set is all cards or all photographs`); continue; }
+    const stills = m[2] == null ? [] : [m[2], m[3]].map(n => (d.stills ?? []).find(s => s.index === Number(n)));
     if (stills.some(s => !s)) { refused.push(`${id}: still ${m[2]} or ${m[3]} is not a drafted listing still`); continue; }
     const fetched = await photoBytes(stills, fetchImpl);
     if (fetched.problem) { refused.push(`${id}: ${fetched.problem}`); continue; }
@@ -118,7 +120,7 @@ export async function main(argv = process.argv.slice(2), { fetchImpl = fetch, no
     try {
       const { cardSet } = await import('./lib/property-cards.mjs');
       const still = s => ({ bytes: fetched.bytes.get(s.index), url: s.url, sha256: s.sha256, width: s.width, height: s.height });
-      set = await cardSet(p, { plot: still(stills[0]), area: still(stills[1]) });
+      set = rules.satellite ? await cardSet(p, { plot: still(stills[0]), area: still(stills[1]) }) : await cardSet(p, { satellite: false });
     } catch (e) { refused.push(e.message); continue; }
     const { mediaTarget } = await import('./lib/property-media.mjs');
     const cards = set.map(c => { const t = mediaTarget(root, id, `card-${c.card}`, c.bytes); return { ...c, url: t.url, file: t.file, sha256: sha256(c.bytes), width: 1080, height: 1350 }; });

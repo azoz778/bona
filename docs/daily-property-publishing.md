@@ -31,6 +31,26 @@ and `bona-daily@facebook` timers run it; there is no other timer.
   من بيانات الإعلان.» / "Satellite views are approximate; the cards are made from the listing
   details." and never calls them photographs. TikTok's reel shows each card whole on 9:16 with no
   motion and no hook or lower third (`make-reel.mjs --fit pad --plain`); LinkedIn re-encodes them.
+  The facts card is refused when any Arabic and English pair (title, district, city, every
+  highlight) carries different numbers (Arabic-Indic digits and ٬/٫ are read as numbers), when a
+  numeric highlight is not one of the forms it can read (price per m²/sqm, price per plot, total
+  price, area, "A m by B m", a length in metres), or when a stated area, dimensions (2%), price per
+  m² (1%), total price or per-plot price contradicts the listing. The price line carries the
+  listing's own qualification: «ابتداءً من» / "From", a rental period (year or month; any other
+  period is refused), "per plot" when a highlight prices the plot; none when the price is on request.
+  A set is all cards or none (`mixed_cards_and_photos`).
+  **`satellite`** (default `true`): `false` drops the satellite imagery. Every card set with a still
+  is then refused (`satellite_imagery_off`) until re-approved with `--cards BONA-ID` (no stills),
+  which makes a two-card set: the facts card and a text-only location card, captioned «البطاقات
+  معدّة من بيانات الإعلان.» / "The cards are made from the listing details." Two cards are allowed
+  for that set only.
+- **Spacing:** listings whose reviews share an image (BONA-W003/W004/W005's Malfa renders) are one
+  family, and all plot-card listings are one family. A candidate whose family was published on that
+  channel the previous Riyadh day is passed over when another candidate is eligible.
+- **Media fallback, before intent only:** when the chosen listing's reviewed media is unavailable
+  (HTTP error, network, timeout) or its hash differs (a deploy not yet live, a re-cropped photo),
+  the run logs it, appends `{"status":"media-fallback",…}` to `~/bona-data/daily/alerts.jsonl` and
+  tries the next candidate, up to three. Nothing falls back once the intent record is written.
 - **Reviews** stay valid for `reviewValidDays` (90) while the listing facts, the advertiser and
   the caption are unchanged; any change invalidates a review at once.
 - **Rotation:** one property per channel per day. Never-posted listings go first (a newly approved

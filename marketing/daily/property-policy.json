@@ -10,7 +10,8 @@
   "categories": ["buy", "rent", "off-plan"],
   "renders": "off-plan-only",
   "cards": "land-only",
-  "cardsNote": "Owner 2026-10-21: land listings (two 1024x768 satellite stills each) may post a branded plot card set made from the listing data and stills: plot still, facts, area still. Cards are for land only.",
+  "satellite": true,
+  "cardsNote": "Owner 2026-10-21: land listings (two 1024x768 satellite stills each) may post a branded plot card set made from the listing data and stills: plot still, facts, area still. Cards are for land only. satellite: false drops the Esri satellite imagery: plot sets with a still then stop being eligible until re-approved as a facts + text-only location pair (approve --cards BONA-ID).",
   "reviewValidDays": 90,
   "adLicence": {
     "requirement": "waived",

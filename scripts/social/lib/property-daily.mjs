@@ -53,6 +53,8 @@ export function derivedMediaOk(m, id) {
 }
 /** True when a review carries plot cards. */
 export const hasCards = review => (review?.photos ?? []).some(x => x?.kind === 'card');
+/** 'satellite' when a review's cards show satellite imagery, 'text' when they are text-only, null without cards. */
+export const cardsKind = review => (!hasCards(review) ? null : review.photos.some(x => x?.kind === 'card' && x.source != null) ? 'satellite' : 'text');
 /** Instagram crops every carousel frame to the first frame's aspect ratio; keep that crop small. Padded frames count at 4:5. */
 export function aspectConsistent(photos, tolerance = 0.15) {
   if (!photos.length) return false;
@@ -76,7 +78,7 @@ export const showsLicence = l => /^\d{8,15}$/.test(l?.adNumber ?? '') && realDat
 export const showsPrice = p => Boolean(p?.price?.amount && p.price.currency === 'SAR' && !p.price.onRequest);
 const CATEGORIES = ['buy', 'rent', 'off-plan'];
 /** What a policy without the 2026-10-05 fields means: licensed Saudi sale/rent stock, real photographs, 30-day reviews, 30-day repeats. */
-export const STRICT_RULES = Object.freeze({ licenceRequired: true, countries: Object.freeze(['SA']), categories: Object.freeze(['buy', 'rent']), renders: 'none', cards: 'none', reviewValidDays: 30, repeatDays: 30 });
+export const STRICT_RULES = Object.freeze({ licenceRequired: true, countries: Object.freeze(['SA']), categories: Object.freeze(['buy', 'rent']), renders: 'none', cards: 'none', satellite: true, reviewValidDays: 30, repeatDays: 30 });
 /**
  * Bounds of the policy's repeatDays, the one repeat interval every daily channel reads (Instagram,
  * Facebook, TikTok, LinkedIn). What makes a repeat safe is its changed frame order (pickFrames()):
@@ -99,11 +101,14 @@ export function policyRules(policy = {}, now = new Date()) {
   if (!['none', 'off-plan-only'].includes(renders)) throw new Error('Invalid renders rule in the property policy');
   const cards = policy.cards ?? STRICT_RULES.cards;
   if (!['none', 'land-only'].includes(cards)) throw new Error('Invalid cards rule in the property policy');
+  // satellite: false (owner may drop the Esri imagery) refuses every card showing a satellite still.
+  const satellite = policy.satellite ?? STRICT_RULES.satellite;
+  if (typeof satellite !== 'boolean') throw new Error('Invalid satellite rule in the property policy');
   const reviewValidDays = policy.reviewValidDays ?? STRICT_RULES.reviewValidDays;
   if (!Number.isInteger(reviewValidDays) || reviewValidDays < 1 || reviewValidDays > 180) throw new Error('Invalid reviewValidDays in the property policy');
   const repeatDays = policy.repeatDays ?? STRICT_RULES.repeatDays;
   if (!Number.isInteger(repeatDays) || repeatDays < REPEAT_DAYS_MIN || repeatDays > REPEAT_DAYS_MAX) throw new Error('Invalid repeatDays in the property policy');
-  return Object.freeze({ licenceRequired: licence.requirement === 'required', countries: Object.freeze([...countries]), categories: Object.freeze([...categories]), renders, cards, reviewValidDays, repeatDays });
+  return Object.freeze({ licenceRequired: licence.requirement === 'required', countries: Object.freeze([...countries]), categories: Object.freeze([...categories]), renders, cards, satellite, reviewValidDays, repeatDays });
 }
 export function eligibility(p, review, advertiser, now = new Date(), rules = STRICT_RULES) {
   const reasons = [];
@@ -129,7 +134,11 @@ export function eligibility(p, review, advertiser, now = new Date(), rules = STR
   if (!advertiser?.name?.ar || !advertiser?.name?.en || !/^\d{8,15}$/.test(advertiser?.fal ?? '') ||
       !/^\+\d{8,15}$/.test(advertiser?.phone ?? '')) reasons.push('advertiser_details_incomplete');
   const photos = review.photos ?? [];
-  if (photos.length < 3 || photos.length > 6 || new Set(photos.map(x=>x.url)).size !== photos.length) reasons.push('need_three_to_six_distinct_photos');
+  // Plot cards stand alone: a set is all cards or none. A text-only land set (no satellite still, policy satellite: false) may be two cards.
+  const cardCount = photos.filter(x => x?.kind === 'card').length;
+  if (cardCount && cardCount !== photos.length) reasons.push('mixed_cards_and_photos');
+  const min = cardCount && cardCount === photos.length && !photos.some(x => x.source != null) ? 2 : 3;
+  if (photos.length < min || photos.length > 6 || new Set(photos.map(x=>x.url)).size !== photos.length) reasons.push('need_three_to_six_distinct_photos');
   const allowed = new Set((p.images ?? []).map(x=>{try{return imageUrl(x.src)}catch{return null}}));
   const rendersAllowed = rules.renders === 'off-plan-only' && p?.category === 'off-plan';
   const cardsAllowed = rules.cards === 'land-only' && p?.type === 'land';
@@ -138,9 +147,11 @@ export function eligibility(p, review, advertiser, now = new Date(), rules = STR
     if (photo?.kind === 'card') {
       // A plot card: land only, a hosted 1080x1350 card of this listing; a satellite or location card names its listing still.
       if (!cardsAllowed) reasons.push('card_not_allowed');
+      if (photo.source != null && !rules.satellite) reasons.push('satellite_imagery_off');
+      // The satellite card always shows its still; the location card may be text-only; the facts card never shows one.
       if (!CARD_KINDS.includes(photo.card) || !derivedMediaOk(photo, p?.id) || photo.visuallyApproved !== true || photo.fit != null ||
           !photo.alt?.ar || !photo.alt?.en || (photo.source != null && !sourceOk(photo.source)) ||
-          (photo.card !== 'facts' && photo.source == null) || (photo.card === 'facts' && photo.source != null)) reasons.push('card_media_unverified');
+          (photo.card === 'satellite' && photo.source == null) || (photo.card === 'facts' && photo.source != null)) reasons.push('card_media_unverified');
       continue;
     }
     let url; try { url = imageUrl(photo.url); } catch { reasons.push('unapproved_photo_source'); continue; }
@@ -178,6 +189,11 @@ export const CARD_NOTE = Object.freeze({
   ar: 'الصور الجوية تقريبية، والبطاقات معدّة من بيانات الإعلان.',
   en: 'Satellite views are approximate; the cards are made from the listing details.',
 });
+/** The same, for text-only cards (policy satellite: false). */
+export const CARD_NOTE_TEXT = Object.freeze({
+  ar: 'البطاقات معدّة من بيانات الإعلان.',
+  en: 'The cards are made from the listing details.',
+});
 const RENDER_NOTE = Object.freeze({
   all: { ar: 'الصور تصاميم تصوّرية من المطوّر.', en: "Images are the developer's artist's impressions." },
   some: { ar: 'بعض الصور تصاميم تصوّرية من المطوّر.', en: "Some images are the developer's artist's impressions." },
@@ -214,7 +230,7 @@ export function propertyCaption(p, advertiser, disclosures = {}, { renders = 'no
   const place = l => [p.location?.district?.[l], p.location?.city?.[l]].filter(Boolean).join(l === 'ar' ? '، ' : ', ');
   const lines = (...xs) => xs.filter(Boolean).join('\n');
   const blocks = (...xs) => xs.filter(Boolean).join('\n\n');
-  const note = cards ? CARD_NOTE : RENDER_NOTE[renders] ?? {};
+  const note = cards === 'text' ? CARD_NOTE_TEXT : cards ? CARD_NOTE : RENDER_NOTE[renders] ?? {};
   // Photos of another project say so on the caption's first line, the only one a feed preview reliably shows.
   const photos = photoNoteText(p);
   const licence = showsLicence(p.licence)
@@ -234,7 +250,7 @@ export function propertyCaption(p, advertiser, disclosures = {}, { renders = 'no
   };
 }
 /** The caption a review binds: its disclosures and whether its photographs are renders. */
-export const captionFor = (p, advertiser, review) => propertyCaption(p, advertiser, review?.legalDisclosures ?? {}, { renders: renderShare(review), cards: hasCards(review) });
+export const captionFor = (p, advertiser, review) => propertyCaption(p, advertiser, review?.legalDisclosures ?? {}, { renders: renderShare(review), cards: cardsKind(review) });
 /** Everything a review's captionSha256 binds: the caption and the generated hashtags, as they would be posted. */
 export const reviewedCopy = (p, advertiser, review) => ({ ...captionFor(p, advertiser, review), hashtags: propertyHashtags(p) });
 
@@ -288,6 +304,24 @@ export const lastPublished = (events, channel, id) =>
  * channel first, never-posted listings before all others (so a newly approved listing goes out
  * next), then by id.
  */
+/**
+ * Listing families for spacing (owner review 2026-10-21): listings whose reviews share an image
+ * (the same SHA-256, e.g. BONA-W003/W004/W005's common Malfa renders) are one family, and every
+ * plot-card review is one family ("land cards"). Returns id → family key (the smallest id in it).
+ */
+export function familyOf(reviews = {}) {
+  const ids = Object.keys(reviews).sort(), parent = new Map(ids.map(id => [id, id]));
+  const find = id => { while (parent.get(id) !== id) id = parent.get(id); return id; };
+  const join = (a, b) => { const x = find(a), y = find(b); if (x !== y) parent.set(x < y ? y : x, x < y ? x : y); };
+  const bySha = new Map();
+  for (const id of ids) {
+    const photos = reviews[id]?.photos ?? [];
+    const shas = photos.flatMap(x => [x.kind === 'card' ? null : x.sha256, x.media?.sha256, x.source?.sha256]).filter(Boolean);
+    if (photos.some(x => x.kind === 'card')) shas.push('family:land-cards');
+    for (const sha of shas) { if (bySha.has(sha)) join(id, bySha.get(sha)); else bySha.set(sha, id); }
+  }
+  return new Map(ids.map(id => [id, find(id)]));
+}
 export function chooseProperty(listings, reviews, advertiser, events, channel, now = new Date(), repeatDays = undefined, rules = STRICT_RULES) {
   repeatDays ??= rules?.repeatDays ?? STRICT_RULES.repeatDays;
   const rejected = [];
@@ -299,7 +333,13 @@ export function chooseProperty(listings, reviews, advertiser, events, channel, n
     if (why.length) { rejected.push({id:p.id,reasons:why}); return false; }
     return true;
   }).sort((a,b)=>last(a.id)-last(b.id)||a.id.localeCompare(b.id));
-  return {listing:candidates[0] ?? null,rejected};
+  // Spacing: skip a candidate whose family was published on this channel yesterday (Riyadh), when another candidate is not.
+  const family = familyOf(reviews), today = riyadhDay(+now);
+  const postedYesterday = new Set(events.filter(x => x.channel === channel && x.status === 'published' && Number.isFinite(Date.parse(x.at)) &&
+    riyadhDay(Date.parse(x.at)) === today - 1).map(x => family.get(x.listingId) ?? x.listingId));
+  const spaced = candidates.filter(p => !postedYesterday.has(family.get(p.id) ?? p.id));
+  const ordered = [...spaced, ...candidates.filter(p => !spaced.includes(p))];
+  return {listing:ordered[0] ?? null,rejected,candidates:ordered};
 }
 /** How many times this listing has been published on this channel (distinct post ids): 0 on its first post. */
 export function repeatIndex(events, channel, id) {

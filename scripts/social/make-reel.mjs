@@ -36,6 +36,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { runTool } from '../../services/intake/lib/video.mjs';
 import { C, REEL } from './lib/brand.mjs';
+import { segmentFilter } from './lib/reel-motion.mjs';
 import { ctaCard, hookLayer, lowerThird, markLayer } from './lib/cards.mjs';
 import { bestPhotos, containToFile, coverToFile } from './lib/photos.mjs';
 import { hookFor, loadListings, subhookFor } from './lib/listing.mjs';
@@ -82,38 +83,6 @@ const FF_TIMEOUT = 600000;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const nPhotos = clamp(parseInt(a.photos, 10) || 5, 4, 7);
 const target = clamp(parseFloat(a.seconds) || 20, MIN_TOTAL, MAX_TOTAL);
-
-/** Ken Burns move per segment: alternate zoom direction and drift axis so it never loops. */
-const MOVES = [
-  { zoom: 'in', x: 'centre', y: 'centre' },
-  { zoom: 'out', x: 'centre', y: 'down' },
-  { zoom: 'in', x: 'right', y: 'centre' },
-  { zoom: 'out', x: 'left', y: 'centre' },
-  { zoom: 'in', x: 'centre', y: 'up' },
-  { zoom: 'out', x: 'right', y: 'down' },
-  { zoom: 'in', x: 'left', y: 'up' },
-];
-
-/**
- * zoompan expressions for one segment.
- * `on` is the output frame index inside this segment, so every expression is a pure
- * function of time — no dependence on the previous frame's zoom, which is what makes
- * zoompan drift and stutter.
- */
-function kenBurns(move, frames, { amount = 0.16 } = {}) {
-  const n = Math.max(1, frames - 1);
-  const p = `(on/${n})`;
-  const z = move.zoom === 'in'
-    ? `min(${(1 + amount).toFixed(4)},1+${amount.toFixed(4)}*${p})`
-    : `max(1,${(1 + amount).toFixed(4)}-${amount.toFixed(4)}*${p})`;
-  const span = (dim) => `(i${dim}-i${dim}/zoom)`;
-  const axis = (kind, dim) => (
-    kind === 'centre' ? `${span(dim)}/2`
-      : kind === 'right' || kind === 'down' ? `${span(dim)}*(0.15+0.7*${p})`
-        : `${span(dim)}*(0.85-0.7*${p})`
-  );
-  return { z, x: axis(move.x, 'w'), y: axis(move.y, 'h') };
-}
 
 const l = a['listing-json'] ? JSON.parse(fs.readFileSync(a['listing-json'], 'utf8')) : findListing(loadListings(), a.listing);
 requireFfmpeg();
@@ -178,15 +147,9 @@ try {
   const segs = [];
   for (const [i, still] of stills.entries()) {
     const frames = Math.round(d * FPS);
-    const kb = kenBurns(MOVES[i % MOVES.length], frames, a.plain ? { amount: 0 } : {});
     const out = path.join(work, `seg-${String(i).padStart(2, '0')}.mp4`);
-    const vf = [
-      `scale=${W * SS}:${H * SS}:force_original_aspect_ratio=increase`,
-      `crop=${W * SS}:${H * SS}`,
-      `zoompan=z='${kb.z}':x='${kb.x}':y='${kb.y}':d=1:s=${W}x${H}:fps=${FPS}`,
-      'setsar=1',
-      'format=yuv420p',
-    ].join(',');
+    // Padded frames and plot cards stay whole: no Ken Burns move on them (segmentFilter, lib/reel-motion.mjs).
+    const vf = segmentFilter({ W, H, SS, FPS, index: i, frames, still: pad });
     const { code, err } = await runTool(FFMPEG, [
       '-y', '-hide_banner', '-loglevel', 'error',
       '-framerate', String(FPS), '-loop', '1', '-t', d.toFixed(3), '-i', still,

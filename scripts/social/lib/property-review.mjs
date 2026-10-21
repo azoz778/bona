@@ -81,6 +81,7 @@ export function buildReview(p, advertiser, draftFrames, selection, { reviewedAt,
  */
 export function buildCardReview(p, advertiser, cards, { reviewedAt, reviewer }) {
   if (p?.type !== 'land') throw new Error(`${p?.id}: plot cards are for land listings only`);
+  if (!cards.length || cards.some(c => !c.card)) throw new Error(`${p?.id}: a card review holds plot cards only`);
   const photos = cards.map(c => ({ url: c.url, sha256: c.sha256, width: c.width, height: c.height, kind: 'card', card: c.card,
     source: c.source ?? null, visuallyApproved: true, alt: c.alt }));
   const review = { status: 'approved', reviewedAt, reviewer, factsSha256: fingerprint(p), advertiserSha256: advertiserFingerprint(advertiser),
