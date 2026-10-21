@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT, ksaNow } from './lib/daily-pack.mjs';
-import { ACCOUNT, SITE, sha256, fingerprint, eligibility, chooseProperty, dayState, entryFor, policyRules, unsettled, pickFrames, recentDuplicate, DEDUPE_DAYS } from './lib/property-daily.mjs';
+import { ACCOUNT, SITE, sha256, fingerprint, eligibility, chooseProperty, dayState, entryFor, policyRules, unsettled, pickFrames, recentDuplicate, DEDUPE_DAYS, PAD_FIT } from './lib/property-daily.mjs';
 import { withLock, whoami, pageToken, publishEntry, appendLedger, refusal, captionFromEntry } from './lib/facebook.mjs';
 import { createGraph, checkCaption } from './lib/graph.mjs';
 import { run as publishInstagram, indexLedger, composeCaption, hasLicencePlaceholder, decide, normaliseEntry } from './publish.mjs';
@@ -35,6 +35,10 @@ export function assertNoPendingInstagram(events) {
   return events;
 }
 const IG_GRACE_HOURS=2.5;
+/** How many candidates a run tries when the picked listing's reviewed media is unavailable or changed (before intent only). */
+export const MEDIA_FALLBACK_CANDIDATES=3;
+/** Network errors and timeouts on one reviewed image are retried this many times (short backoff) before it counts as unavailable. */
+export const NETWORK_RETRIES=2;
 /** A failure's message for logs and alerts, anything shaped like a Meta token redacted. */
 const reasonOf=e=>String(e?.message??e).replace(/EAA[A-Za-z0-9]+/g,'[redacted]');
 /**
@@ -84,18 +88,45 @@ export async function catalogue(fetchImpl=fetch,now=new Date()) {
   if(!Number.isFinite(generated)||generated>+now||+now-generated>48*3600000)throw new Error('Live catalogue is stale; daily website refresh needs attention');
   return d;
 }
-export async function photos(review,dir,dry,fetchImpl=fetch) {
-  const paths=[];
+/**
+ * Downloads each reviewed frame and checks its SHA-256 against the review. A padded frame
+ * (fit 'pad-4x5') is checked as its source photo AND as its hosted padded variant, and the padded
+ * bytes are what is written and posted; a plot card is checked as the card and, for a satellite or
+ * location card, as the listing still it was made from. Returns the local files to post, or with
+ * `{sources: true}` one {media, source, fit, kind} per frame (source: the photo a padded frame was
+ * made from, for the TikTok reel's own 9:16 padding).
+ */
+export async function photos(review,dir,dry,fetchImpl=fetch,{sources=false,retries=NETWORK_RETRIES,backoffMs=400}={}) {
+  // Every failure here is marked `media`: the publishers may then try another candidate (before any intent record).
+  // A network error or timeout is retried first (the media host resets some connections from this box); an HTTP
+  // error or a hash mismatch is final at once.
+  const media=(msg,url)=>Object.assign(new Error(`${msg}: ${url}`),{media:true});
+  const once=async url=>{
+    const res=await fetchImpl(url,{redirect:'error',headers:{'User-Agent':'BonaPropertyPublisher/1.0'},signal:AbortSignal.timeout(20000)});
+    if(!res.ok || !res.headers.get('content-type')?.startsWith('image/jpeg'))return {res};
+    return {res,bytes:Buffer.from(await res.arrayBuffer())};
+  };
+  const get=async(url,digest)=>{
+    let got;
+    for(let attempt=0;;attempt++){
+      try{got=await once(url);break;}
+      catch{if(attempt>=retries)throw media('Reviewed source photo unavailable (network or timeout)',url);await new Promise(r=>setTimeout(r,backoffMs*(attempt+1)));}
+    }
+    if(!got.bytes) throw media(`Reviewed source photo unavailable (http ${got.res.status})`,url);
+    if(got.bytes.length>8000000 || sha256(got.bytes)!==digest)throw media('Source photo changed since visual review',url);
+    return got.bytes;
+  };
+  const out=[];
   for(const [i,p] of review.photos.entries()) {
-    const res=await fetchImpl(p.url,{redirect:'error',headers:{'User-Agent':'BonaPropertyPublisher/1.0'},signal:AbortSignal.timeout(20000)});
-    if(!res.ok || !res.headers.get('content-type')?.startsWith('image/jpeg')) throw new Error('Reviewed source photo unavailable');
-    const bytes=Buffer.from(await res.arrayBuffer());
-    if(bytes.length>8000000 || sha256(bytes)!==p.sha256)throw new Error('Source photo changed since visual review');
-    const file=path.join(dir,`${i+1}.jpg`);
-    if(!dry)fs.writeFileSync(file,bytes,{mode:0o600});
-    paths.push(file);
+    const bytes=await get(p.url,p.sha256);
+    if(p.kind==='card'&&p.source)await get(p.source.url,p.source.sha256);
+    const padded=p.fit===PAD_FIT&&p.media;
+    const media=padded?await get(p.media.url,p.media.sha256):bytes;
+    const file=path.join(dir,`${i+1}.jpg`),source=padded?path.join(dir,`${i+1}-source.jpg`):null;
+    if(!dry){fs.writeFileSync(file,media,{mode:0o600});if(source)fs.writeFileSync(source,bytes,{mode:0o600});}
+    out.push(sources?{media:file,source,fit:p.fit??null,kind:p.kind}:file);
   }
-  return paths;
+  return out;
 }
 async function identity(channel,env,fetchImpl=fetch) {
   if(!env.META_ACCESS_TOKEN)throw new Error('Existing Meta credential unavailable');
@@ -152,15 +183,32 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
       if(!dry && !history.some(e=>e.channel===channel&&e.date===date&&e.status===row.status&&JSON.stringify(e.reasons)===JSON.stringify(reasons)))record(journal,row);
       console.log(JSON.stringify(row));return row;
     }
-    const p=selected.listing,review=reviews[p.id];
-    // A repeat of this listing on this channel gets another cover and frame order, from its approved frames only,
-    // never the image sequence it was last posted with on this channel.
-    const {review:framed,frameOrder,images}=pickFrames(review,history,channel,p.id);
-    console.log(`Frames for ${p.id} on ${channel}: ${frameOrder.join(',')} (reviewed order 1..${review.photos.length})`);
     await identity(channel,env,fetchImpl);
     const assetDir=path.join(dir,'property-assets',date,channel);
-    if(!dry)fs.mkdirSync(assetDir,{recursive:true});
-    const assets=await photos(framed,assetDir,dry,fetchImpl);
+    // Media fallback (before any intent record only): a picked listing whose reviewed media is unavailable or changed
+    // (a site deploy still pending, a re-cropped photo) is logged and alerted, and the next candidate is tried, up to
+    // MEDIA_FALLBACK_CANDIDATES. Nothing after the intent record ever falls back.
+    let p,review,framed,frameOrder,images,assets;
+    const tried=[];
+    for(const candidate of selected.candidates.slice(0,MEDIA_FALLBACK_CANDIDATES)){
+      const r=reviews[candidate.id];
+      // A repeat of this listing on this channel gets another cover and frame order, from its approved frames only,
+      // never the image sequence it was last posted with on this channel.
+      const pick=pickFrames(r,history,channel,candidate.id);
+      console.log(`Frames for ${candidate.id} on ${channel}: ${pick.frameOrder.join(',')} (reviewed order 1..${r.photos.length})`);
+      if(!dry){fs.rmSync(assetDir,{recursive:true,force:true});fs.mkdirSync(assetDir,{recursive:true});}
+      try{assets=await photos(pick.review,assetDir,dry,fetchImpl);}
+      catch(e){
+        if(e?.media!==true)throw e;
+        const reason=reasonOf(e);
+        tried.push({listingId:candidate.id,reason});
+        console.error(`Media for ${candidate.id} on ${channel} unusable (${reason}); trying the next candidate`);
+        if(!dry)record(path.join(dir,'alerts.jsonl'),{channel,date,status:'media-fallback',listingId:candidate.id,reason});
+        continue;
+      }
+      p=candidate;review=r;({review:framed,frameOrder,images}=pick);break;
+    }
+    if(!p)throw new Error(`No candidate's reviewed media is usable on ${channel} (${tried.map(t=>`${t.listingId}: ${t.reason}`).join('; ')}); nothing recorded or sent`);
     const entry=entryFor(p,framed,live.advertiser,channel,date,assets);
     if(checkCaption(composeCaption(entry)).problems.length)throw new Error('Reviewed caption does not fit platform limits');
     const refused=publisherRefusal(entry,channel,{igLedger:channel==='instagram'?rows(igLedger):[],now});

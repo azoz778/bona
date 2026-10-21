@@ -45,7 +45,16 @@ debug Chrome (CDP `http://localhost:9222`, started by `~/.claude/scripts/chrome-
   `make-reel.mjs --listing-json … --frames …` with the approved frames in this post's order and the
   advertiser/FAL pair on the closing card (no placeholder); TikTok education is a slideshow of
   the 1080x1920 cards. LinkedIn property images are the approved frames re-encoded at 1200 px with
-  a small BONA mark; LinkedIn education uses the dark 1080x1350 card variant (Instagram had the
+  a small BONA mark. A listing approved padded to 4:5 (`"fit": "pad-4x5"`,
+  docs/daily-property-publishing.md) gets a reel rendered with `--fit pad` from the source photos
+  (each whole on a 9:16 ink canvas, no cover crop) and LinkedIn images re-encoded from the padded
+  files without a second mark; both hashes of every frame are checked first. A land listing's plot
+  cards go into the reel whole and still (`--fit pad --plain`: no Ken Burns move, no hook or lower
+  third, which would cover the card's own text) and to LinkedIn re-encoded. A padded reel has no Ken
+  Burns move either: each frame stays whole on its 9:16 canvas (`lib/reel-motion.mjs segmentFilter`).
+  If a property's reviewed media is unavailable or changed before the intent record, the run logs it
+  to `<channel>/alerts.jsonl` (`media-fallback`) and renders the next candidate, up to three; the
+  spacing rule (no same family on consecutive days) applies as on Instagram. LinkedIn education uses the dark 1080x1350 card variant (Instagram had the
   light 1080x1350, Facebook the 1080x1080). Reels are silent by design.
 - **Repeats look different:** a listing's second and later posts on a channel use another cover
   and frame order of the same approved frames (`pickFrames()`, the rule in
@@ -64,7 +73,7 @@ debug Chrome (CDP `http://localhost:9222`, started by `~/.claude/scripts/chrome-
    node verifies `BONA_LOCK_FD=9` is that file and holds the lock). The kernel releases it when the
    process ends or is killed, so there is no stale lock, takeover or token; the file's contents mean
    nothing. Read the ledger strictly (see below).
-3. Choose, build the caption, render media into `~/bona-data/<channel>/assets/<date>/`, copy it to
+3. Choose, build the caption, render media into `~/bona-data/<channel>/assets/<date>/<item id>/` (a fallback candidate gets its own, the failed one's is removed), copy it to
    `C:\Users\ASUS\AppData\Local\bona-social-upload\<run>\` (the Windows Chrome cannot read WSL paths).
 4. Open **our own tab** (`PUT /json/new`), never touching other tabs; closed at the end.
 5. Identity first. TikTok: *Edit profile* on `@bonarealestatesa` and TikTok's own session

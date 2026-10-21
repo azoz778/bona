@@ -35,9 +35,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { runTool } from '../../services/intake/lib/video.mjs';
-import { REEL } from './lib/brand.mjs';
+import { C, REEL } from './lib/brand.mjs';
+import { segmentFilter } from './lib/reel-motion.mjs';
 import { ctaCard, hookLayer, lowerThird, markLayer } from './lib/cards.mjs';
-import { bestPhotos, coverToFile } from './lib/photos.mjs';
+import { bestPhotos, containToFile, coverToFile } from './lib/photos.mjs';
 import { hookFor, loadListings, subhookFor } from './lib/listing.mjs';
 import { FFMPEG, OUT_ROOT, ensureDir, findListing, log, requireFfmpeg } from './lib/util.mjs';
 
@@ -51,6 +52,10 @@ const { values: a } = parseArgs({
     // review order (3-7, no re-ranking), --licence-ar/--licence-en the CTA card's licence pair.
     'listing-json': { type: 'string' }, frames: { type: 'string' },
     'licence-ar': { type: 'string' }, 'licence-en': { type: 'string' },
+    // --fit pad: contain each frame whole on a 9:16 ink canvas instead of cover-cropping it (padded 4:5
+    // property frames, owner 2026-10-21). --plain: plot cards, which carry their own text: no hook or
+    // lower third, and no Ken Burns move, so nothing on a card is ever pushed out of frame.
+    fit: { type: 'string' }, plain: { type: 'boolean', default: false },
     help: { type: 'boolean', default: false },
   },
 });
@@ -79,42 +84,12 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const nPhotos = clamp(parseInt(a.photos, 10) || 5, 4, 7);
 const target = clamp(parseFloat(a.seconds) || 20, MIN_TOTAL, MAX_TOTAL);
 
-/** Ken Burns move per segment: alternate zoom direction and drift axis so it never loops. */
-const MOVES = [
-  { zoom: 'in', x: 'centre', y: 'centre' },
-  { zoom: 'out', x: 'centre', y: 'down' },
-  { zoom: 'in', x: 'right', y: 'centre' },
-  { zoom: 'out', x: 'left', y: 'centre' },
-  { zoom: 'in', x: 'centre', y: 'up' },
-  { zoom: 'out', x: 'right', y: 'down' },
-  { zoom: 'in', x: 'left', y: 'up' },
-];
-
-/**
- * zoompan expressions for one segment.
- * `on` is the output frame index inside this segment, so every expression is a pure
- * function of time — no dependence on the previous frame's zoom, which is what makes
- * zoompan drift and stutter.
- */
-function kenBurns(move, frames, { amount = 0.16 } = {}) {
-  const n = Math.max(1, frames - 1);
-  const p = `(on/${n})`;
-  const z = move.zoom === 'in'
-    ? `min(${(1 + amount).toFixed(4)},1+${amount.toFixed(4)}*${p})`
-    : `max(1,${(1 + amount).toFixed(4)}-${amount.toFixed(4)}*${p})`;
-  const span = (dim) => `(i${dim}-i${dim}/zoom)`;
-  const axis = (kind, dim) => (
-    kind === 'centre' ? `${span(dim)}/2`
-      : kind === 'right' || kind === 'down' ? `${span(dim)}*(0.15+0.7*${p})`
-        : `${span(dim)}*(0.85-0.7*${p})`
-  );
-  return { z, x: axis(move.x, 'w'), y: axis(move.y, 'h') };
-}
-
 const l = a['listing-json'] ? JSON.parse(fs.readFileSync(a['listing-json'], 'utf8')) : findListing(loadListings(), a.listing);
 requireFfmpeg();
 if ((a['licence-ar'] == null) !== (a['licence-en'] == null)) { console.error('--licence-ar and --licence-en go together'); process.exit(1); }
 const licenceLines = a['licence-ar'] != null ? { ar: a['licence-ar'], en: a['licence-en'] } : null;
+if (a.fit != null && a.fit !== 'pad') { console.error('--fit: only "pad"'); process.exit(1); }
+const pad = a.fit === 'pad';
 
 let photos;
 if (a.frames) {
@@ -137,7 +112,8 @@ try {
   const stills = [];
   for (const [i, p] of photos.entries()) {
     const out = path.join(work, `bg-${String(i).padStart(2, '0')}.jpg`);
-    await coverToFile(p.file, out, W * SS, H * SS, { position, quality: 94 });
+    if (pad) await containToFile(p.file, out, W * SS, H * SS, { background: C.ink, quality: 94, trimBorder: !a.plain });
+    else await coverToFile(p.file, out, W * SS, H * SS, { position, quality: 94 });
     stills.push(out);
   }
 
@@ -171,15 +147,9 @@ try {
   const segs = [];
   for (const [i, still] of stills.entries()) {
     const frames = Math.round(d * FPS);
-    const kb = kenBurns(MOVES[i % MOVES.length], frames);
     const out = path.join(work, `seg-${String(i).padStart(2, '0')}.mp4`);
-    const vf = [
-      `scale=${W * SS}:${H * SS}:force_original_aspect_ratio=increase`,
-      `crop=${W * SS}:${H * SS}`,
-      `zoompan=z='${kb.z}':x='${kb.x}':y='${kb.y}':d=1:s=${W}x${H}:fps=${FPS}`,
-      'setsar=1',
-      'format=yuv420p',
-    ].join(',');
+    // Padded frames and plot cards stay whole: no Ken Burns move on them (segmentFilter, lib/reel-motion.mjs).
+    const vf = segmentFilter({ W, H, SS, FPS, index: i, frames, still: pad });
     const { code, err } = await runTool(FFMPEG, [
       '-y', '-hide_banner', '-loglevel', 'error',
       '-framerate', String(FPS), '-loop', '1', '-t', d.toFixed(3), '-i', still,
@@ -235,7 +205,8 @@ try {
   const hookIn = 0.30;
   const hookOut = Math.min(4.4, ctaStart - 0.5);
   const lowerIn = 1.90;
-  const wins = [
+  // Plot cards carry their own BONA mark and text: a plain reel overlays nothing on them.
+  const wins = a.plain ? [] : [
     { file: layerFiles.mark, in: 0.0, out: ctaStart, fadeIn: 0.6, fadeOut: 0.5 },
     { file: layerFiles.hook, in: hookIn, out: hookOut, fadeIn: 0.45, fadeOut: 0.5 },
     { file: layerFiles.lower, in: lowerIn, out: ctaStart, fadeIn: 0.7, fadeOut: 0.5 },
@@ -256,6 +227,7 @@ try {
     chain.push(`[${last}][ov${i}]overlay=0:0:eof_action=pass:enable='between(t,${wdw.in.toFixed(2)},${wdw.out.toFixed(2)})'[${next}]`);
     last = next;
   });
+  if (!wins.length) chain.push('[0:v]null[vout]');
 
   const out = a.out ? path.resolve(a.out) : path.join(OUT_ROOT, 'reels', `reel-${l.id}.mp4`);
   ensureDir(path.dirname(out));

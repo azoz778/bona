@@ -1,7 +1,9 @@
 // Helpers for drafting and approving property photo/caption reviews (docs/daily-property-publishing.md).
 // Nothing here publishes; the approve script is the only writer of marketing/daily/property-reviews.json.
+import fs from 'node:fs';
+import path from 'node:path';
 import sharp from 'sharp';
-import { SITE, sha256, fingerprint, advertiserFingerprint, reviewedCopy, aspectConsistent, showsPrice } from './property-daily.mjs';
+import { SITE, sha256, fingerprint, advertiserFingerprint, reviewedCopy, aspectConsistent, showsPrice, PAD_FIT, PAD_ASPECT } from './property-daily.mjs';
 
 /** Instagram crops a carousel to its first frame's aspect; eligibility() and buildReview() share the rule. */
 export { aspectConsistent };
@@ -28,13 +30,14 @@ export function disclosuresFor(p) {
 /** A frame's kind when the reviewer gives none: developer renders for off-plan, except when the listing's photoNote
     says its photos are photographs of another project. */
 export const defaultKind = p => (p?.category === 'off-plan' && p?.photoNote == null ? 'render' : 'photograph');
-/** Why a downloaded frame cannot be used, or null. */
-export function frameProblem({ contentType, bytes, width, height }) {
+/** Why a downloaded frame cannot be used, or null. `pad`: judged as a frame padded to 4:5 (wider aspect bounds, same size floor). */
+export function frameProblem({ contentType, bytes, width, height }, { pad = false } = {}) {
   if (!String(contentType ?? '').startsWith('image/jpeg')) return 'not_jpeg';
   if (bytes > FRAME_RULES.maxBytes) return 'too_large';
   if (!(width >= FRAME_RULES.minWidth) || !(height >= FRAME_RULES.minHeight)) return 'too_small';
   const aspect = width / height;
-  if (aspect < FRAME_RULES.minAspect || aspect > FRAME_RULES.maxAspect) return 'aspect';
+  const [lo, hi] = pad ? [PAD_ASPECT.min, PAD_ASPECT.max] : [FRAME_RULES.minAspect, FRAME_RULES.maxAspect];
+  if (aspect < lo || aspect > hi) return 'aspect';
   return null;
 }
 /** "BONA-022:1,2r,5p" → { id, frames: [{ index, kind }] }; kind null means the category default. */
@@ -45,15 +48,42 @@ export function parseSelection(s) {
   if (new Set(frames.map(f => f.index)).size !== frames.length) throw new Error(`Duplicate frame in "${s}"`);
   return { id: m[1], frames };
 }
-/** An approved review for frames a reviewer has looked at. Throws when a frame is unusable or the set would crop badly. */
-export function buildReview(p, advertiser, draftFrames, selection, { reviewedAt, reviewer }) {
+/**
+ * An approved review for frames a reviewer has looked at. Throws when a frame is unusable or the set would crop badly.
+ * `fit: 'pad-4x5'` with `media` (website index → the padded variant's {url, sha256, width, height}) approves every
+ * frame padded to 4:5; a frame outside the 0.8–1.91 aspect (a draft's `padOnly`) can only be approved that way.
+ */
+export function buildReview(p, advertiser, draftFrames, selection, { reviewedAt, reviewer, fit = null, media = null }) {
+  if (fit != null && fit !== PAD_FIT) throw new Error(`${p.id}: unknown frame fit "${fit}"`);
   const photos = selection.frames.map(({ index, kind }) => {
     const f = draftFrames.find(x => x.index === index);
     if (!f) throw new Error(`${p.id}: frame ${index} was not a usable draft frame`);
-    return { url: f.url, sha256: f.sha256, width: f.width, height: f.height,
+    if (f.padOnly && !fit) throw new Error(`${p.id}: frame ${index} (${f.width}x${f.height}) is outside the 0.8–1.91 aspect; approve the listing padded (--pad ${p.id})`);
+    const photo = { url: f.url, sha256: f.sha256, width: f.width, height: f.height,
       kind: kind ?? defaultKind(p), visuallyApproved: true, alt: f.alt };
+    if (fit) {
+      const m = media?.get?.(index) ?? media?.[index];
+      if (!m) throw new Error(`${p.id}: frame ${index} has no padded variant`);
+      photo.fit = fit;
+      photo.media = { url: m.url, sha256: m.sha256, width: m.width, height: m.height };
+    }
+    return photo;
   });
   if (!aspectConsistent(photos)) throw new Error(`${p.id}: selected frames differ in aspect ratio by more than 15% (Instagram crops a carousel to its first frame)`);
+  const review = { status: 'approved', reviewedAt, reviewer, factsSha256: fingerprint(p), advertiserSha256: advertiserFingerprint(advertiser),
+    captionSha256: null, licenceEvidence: null, legalDisclosuresVerified: true, legalDisclosures: disclosuresFor(p), photos };
+  review.captionSha256 = sha256(JSON.stringify(reviewedCopy(p, advertiser, review)));
+  return review;
+}
+/**
+ * An approved review of plot cards (land only, policy `cards: "land-only"`): `cards` are the rendered
+ * set's media records in carousel order ({card, url, sha256, width, height, source, alt}).
+ */
+export function buildCardReview(p, advertiser, cards, { reviewedAt, reviewer }) {
+  if (p?.type !== 'land') throw new Error(`${p?.id}: plot cards are for land listings only`);
+  if (!cards.length || cards.some(c => !c.card)) throw new Error(`${p?.id}: a card review holds plot cards only`);
+  const photos = cards.map(c => ({ url: c.url, sha256: c.sha256, width: c.width, height: c.height, kind: 'card', card: c.card,
+    source: c.source ?? null, visuallyApproved: true, alt: c.alt }));
   const review = { status: 'approved', reviewedAt, reviewer, factsSha256: fingerprint(p), advertiserSha256: advertiserFingerprint(advertiser),
     captionSha256: null, licenceEvidence: null, legalDisclosuresVerified: true, legalDisclosures: disclosuresFor(p), photos };
   review.captionSha256 = sha256(JSON.stringify(reviewedCopy(p, advertiser, review)));
@@ -63,6 +93,21 @@ export function buildReview(p, advertiser, draftFrames, selection, { reviewedAt,
 export function sameReview(a, b) {
   const strip = r => JSON.stringify({ ...r, reviewedAt: null, reviewer: null });
   return Boolean(a && b) && strip(a) === strip(b);
+}
+/**
+ * A fetch that serves the site's own images (https://bona-real-estate.com/…) from a local copy of
+ * public/ and passes everything else (the catalogue, the media host) to `fetchImpl`. Only for
+ * reviewing images that are committed but not yet deployed.
+ */
+export function localFetch(dir, fetchImpl = fetch) {
+  const base = path.resolve(dir);
+  return async (url, opts) => {
+    const u = new URL(url);
+    if (u.origin !== SITE || !/\.jpe?g$/i.test(u.pathname)) return fetchImpl(url, opts);
+    const file = path.resolve(base, '.' + decodeURIComponent(u.pathname));
+    if (!file.startsWith(base + path.sep) || !fs.existsSync(file)) return new Response('missing', { status: 404 });
+    return new Response(fs.readFileSync(file), { headers: { 'content-type': 'image/jpeg' } });
+  };
 }
 /** The live public catalogue, with the publisher's freshness and shape checks. */
 export async function liveCatalogue(fetchImpl = fetch, now = new Date()) {
@@ -84,7 +129,7 @@ export async function contactSheet(frames, { columns = 3, cell = 480, label = 44
   for (const [i, f] of frames.entries()) {
     const left = (i % columns) * cell, top = Math.floor(i / columns) * (cell + label);
     composites.push({ input: await sharp(f.buffer).resize(cell, cell, { fit: 'contain', background: '#111111' }).jpeg().toBuffer(), left, top });
-    const text = `#${f.index}  ${f.width}x${f.height}  ${(f.width / f.height).toFixed(2)}  ${String(f.alt?.en ?? '').slice(0, 34)}`;
+    const text = `#${f.index}  ${f.width}x${f.height}  ${(f.width / f.height).toFixed(2)}${f.padOnly ? '  PAD ONLY' : ''}  ${String(f.alt?.en ?? '').slice(0, f.padOnly ? 24 : 34)}`;
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${cell}" height="${label}"><rect width="100%" height="100%" fill="#f5f1ea"/><text x="8" y="28" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#111111">${esc(text)}</text></svg>`;
     composites.push({ input: Buffer.from(svg), left, top: top + cell });
   }
