@@ -16,6 +16,44 @@ and `bona-daily@facebook` timers run it; there is no other timer.
   listings are out.
 - **Renders:** `renders: "off-plan-only"`. Developer renders may illustrate off-plan projects
   only, and the caption then says so in both languages. Ready stock needs real photographs.
+- **Plot cards:** `cards: "land-only"` (owner, 2026-10-21). A land listing has only two 1024x768
+  satellite stills, too small to post as photographs, so it may post a branded card set instead:
+  (a) the plot still fitted whole (scaled down, never up) and labelled «صورة جوية، الموقع تقريبي» /
+  "Satellite view, approximate" with the imagery source (Esri World Imagery), the title and place;
+  (b) a facts card: the plot area, the asking price when the caption shows one, then the listing's
+  highlights in both languages (frontage, street widths, orientation, a price per square metre
+  only when a highlight states it; nothing computed, missing fields simply absent); (c) the area
+  still with the district, city and country. Every word comes from the listing's public facts,
+  which `factsSha256` binds, so a changed fact invalidates the cards with the review. A card is a
+  frame of kind `card` (`card`: `satellite` | `facts` | `location`; a still-based card names its
+  `source` still and hash) hosted like a padded frame; any other listing type with a card is
+  refused (`card_not_allowed`). The caption then closes with «الصور الجوية تقريبية، والبطاقات معدّة
+  من بيانات الإعلان.» / "Satellite views are approximate; the cards are made from the listing
+  details." and never calls them photographs. TikTok's reel shows each card whole on 9:16 with no
+  motion and no hook or lower third (`make-reel.mjs --fit pad --plain`); LinkedIn re-encodes them.
+  The facts card is refused when any Arabic and English pair (title, district, city, every
+  highlight) carries different numbers (Arabic-Indic digits and ٬/٫ are normalised before any
+  parsing), when an Arabic highlight states different typed facts from its English (a rate per m²
+  is not a per-plot price, an area is not a length) or cannot be read, when a
+  numeric highlight is not one of the forms it can read (price per m²/sqm, price per plot, total
+  price, area, "A m by B m", a length in metres), or when a stated area, dimensions (2%), price per
+  m² (1%), total price or per-plot price contradicts the listing. The price line carries the
+  listing's own qualification: «ابتداءً من» / "From", a rental period (year or month; any other
+  period is refused), "per plot" when a highlight prices the plot; none when the price is on request.
+  A set is all cards or none (`mixed_cards_and_photos`).
+  **`satellite`** (default `true`): `false` drops the satellite imagery. Every card set with a still
+  is then refused (`satellite_imagery_off`) until re-approved with `--cards BONA-ID` (no stills),
+  which makes a two-card set: the facts card and a text-only location card, captioned «البطاقات
+  معدّة من بيانات الإعلان.» / "The cards are made from the listing details." Two cards are allowed
+  for that set only.
+- **Spacing:** listings whose reviews share an image (BONA-W003/W004/W005's Malfa renders) are one
+  family, and all plot-card listings are one family. A candidate whose family was published on that
+  channel the previous Riyadh day is passed over when another candidate is eligible.
+- **Media fallback, before intent only:** network errors and timeouts on an image are retried twice
+  (short backoff, IPv4 first) first. When the chosen listing's reviewed media is still unavailable
+  (HTTP error, or the network after the retries) or its hash differs (a deploy not yet live, a re-cropped photo),
+  the run logs it, appends `{"status":"media-fallback",…}` to `~/bona-data/daily/alerts.jsonl` and
+  tries the next candidate, up to three. Nothing falls back once the intent record is written.
 - **Reviews** stay valid for `reviewValidDays` (90) while the listing facts, the advertiser and
   the caption are unchanged; any change invalidates a review at once.
 - **Rotation:** one property per channel per day. Never-posted listings go first (a newly approved
@@ -63,7 +101,32 @@ and `bona-daily@facebook` timers run it; there is no other timer.
    ratio because Instagram crops a carousel to its first frame. The script re-reads the live
    catalogue, refuses anything changed since drafting or not eligible, and leaves an identical,
    still-valid review untouched; an expired one is renewed.
-4. **Commit** the register through a PR. The publisher reads it from `origin/main`.
+   **Plot cards:** `--cards BONA-046:1,2` (the plot still, then the area still, by website index;
+   the draft lists a land listing's stills under `stills` and on its contact sheet) renders the
+   set with `lib/property-cards.mjs` and approves it without any `--select`. It is refused when
+   the plot area is missing, the highlights do not pair up in the two languages, a stated area or
+   price per square metre contradicts the listing (more than 1% from the asking price), or any
+   card text fails the caption refusal. Look at the three cards before committing them.
+   **Padded frames (owner, 2026-10-21):** add `--pad BONA-014` to publish every selected frame of
+   that listing padded to 4:5 instead (`"fit": "pad-4x5"` on each frame). The script renders each
+   frame whole and centred on a 1080x1350 ink canvas above a small BONA mark (no crop, no stretch,
+   a brochure's white margin trimmed; `lib/property-media.mjs padFrame()`, deterministic) and writes
+   it to `public/social/property/<id>/pad-<source sha8>-<sha12>.jpg`, which the site serves at
+   `https://bona-real-estate.com/social/property/<id>/…`: Instagram fetches carousel images from a
+   public URL and the publisher uploads nothing, the same path as the reviewed daily pack's cards.
+   The frame keeps its source `url`/`sha256`/size and gains `media` {url, sha256, 1080, 1350}. Every
+   slide is then 4:5, so frames of mixed aspect can share a carousel, and a portrait source down
+   to 9:16 (0.56) may be approved; the draft keeps such a frame and marks it `padOnly` (`PAD ONLY`
+   on the contact sheet), and approving it without `--pad` is refused. The size floor (1080x720)
+   and the 8 MB limit still apply to the source. Before publication every channel downloads the
+   source and the padded file and checks both hashes; Instagram and Facebook post the padded file,
+   TikTok's reel pads each source photo to 9:16 (`make-reel.mjs --fit pad`) and LinkedIn re-encodes
+   the padded files without a second mark. `--local-public public` (draft and approve) reads the
+   site's own images from the repository instead of the live site, for images committed but not yet
+   deployed; the publishers always check the live bytes.
+4. **Commit** the register through a PR, with any `public/social/property/` files it names. The
+   publisher reads the register from `origin/main`; until the site deploy has served the new files a
+   run stops before any record ("Reviewed source photo unavailable" or "changed since visual review").
 
 Disclosures written with every review: when the caption shows a price, that prices are asking
 prices and may change; for ready stock, that details, condition and services are confirmed at

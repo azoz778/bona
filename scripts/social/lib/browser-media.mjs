@@ -20,12 +20,14 @@ function ff(args, timeout = 600_000) {
 }
 
 /** TikTok, property: make-reel.mjs from the approved frames, in review order, with the advertiser/FAL CTA lines. */
-export function propertyReel(listing, frameFiles, licenceLines, out, { seconds = 20 } = {}) {
+/** `fit: 'pad'` contains each frame on a 9:16 brand canvas instead of cover-cropping it; `plain` (plot cards) also drops the hook and lower third and holds each card still. */
+export function propertyReel(listing, frameFiles, licenceLines, out, { seconds = 20, fit = null, plain = false } = {}) {
   fs.mkdirSync(path.dirname(out), { recursive: true });
   const listingJson = path.join(path.dirname(out), `${listing.id}.listing.json`);
   fs.writeFileSync(listingJson, JSON.stringify(listing));
   const r = spawnSync(process.execPath, [path.join(SOCIAL, 'make-reel.mjs'), '--listing-json', listingJson, '--frames', frameFiles.join(','),
-    '--licence-ar', licenceLines.ar, '--licence-en', licenceLines.en, '--seconds', String(seconds), '--out', out],
+    '--licence-ar', licenceLines.ar, '--licence-en', licenceLines.en, '--seconds', String(seconds), '--out', out,
+    ...(fit === 'pad' ? ['--fit', 'pad'] : []), ...(plain ? ['--plain'] : [])],
   { encoding: 'utf8', timeout: 20 * 60_000, env: process.env });
   if (r.status !== 0 || !fs.existsSync(out)) throw new Error(`make-reel failed (exit ${r.status}): ${String(r.stderr || '').trim().slice(-400)}`);
   return out;
@@ -67,17 +69,19 @@ export async function educationReel(item, out) {
   return out;
 }
 
-/** LinkedIn, property: each approved frame at 1200 px wide (aspect kept), the BONA wordmark bottom-left, its own JPEG. */
-export async function linkedinPropertyImages(frameFiles, dir) {
+/** LinkedIn, property: each approved frame at 1200 px wide (aspect kept), the BONA wordmark bottom-left, its own JPEG.
+    `mark: false` for padded frames and plot cards, which already carry the mark in their band. */
+export async function linkedinPropertyImages(frameFiles, dir, { mark: withMark = true } = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const out = [];
   for (const [i, f] of frameFiles.entries()) {
     const img = sharp(f).rotate().resize({ width: 1200, withoutEnlargement: false });
     const buf = await img.jpeg({ quality: 95 }).toBuffer();
+    const file = path.join(dir, `li-${i + 1}.jpg`);
+    if (!withMark) { await sharp(buf).jpeg({ quality: 88, mozjpeg: true }).toFile(file); out.push(file); continue; }
     const { width, height } = await sharp(buf).metadata();
     // markLayer centres the mark on a full canvas; crop its strip and put it bottom-left.
     const mark = await sharp(await markLayer(width, 140, { size: 30, top: 50 })).png().toBuffer();
-    const file = path.join(dir, `li-${i + 1}.jpg`);
     await sharp(buf).composite([{ input: mark, top: height - 140, left: 0 }]).jpeg({ quality: 88, mozjpeg: true }).toFile(file);
     out.push(file);
   }

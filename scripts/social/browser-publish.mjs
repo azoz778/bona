@@ -25,8 +25,8 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { ROOT, ksaNow } from './lib/daily-pack.mjs';
 import { dataDir } from './lib/ledger.mjs';
-import { fingerprint, eligibility, policyRules } from './lib/property-daily.mjs';
-import { catalogue, photos as downloadReviewedPhotos } from './property-publish.mjs';
+import { fingerprint, eligibility, policyRules, PAD_FIT } from './lib/property-daily.mjs';
+import { catalogue, photos as downloadReviewedPhotos, MEDIA_FALLBACK_CANDIDATES } from './property-publish.mjs';
 import {
   CHANNELS, acquireLock, appendRecord, assertRenderable, captionFor, channelState, chooseToday, educationPool, entryId, inWindow,
   ledgerPath, lockPath, readLedgerStrict, reelLicenceLines, REPAIR_REASON, renderedStrings,
@@ -54,6 +54,16 @@ export async function defaultDeps() {
   return { cdp, sites, media, fal: FAL, catalogue, downloadReviewedPhotos };
 }
 
+/** A live run's work directory for one candidate: <dataDir>/<channel>/assets/<date>/<item id>/. */
+export const candidateWorkRoot = (data, channel, date, itemId) => path.join(data, channel, 'assets', date, String(itemId).replace(/[^A-Za-z0-9_-]/g, '_'));
+
+/** How a review's frames are shown: `pad` when any frame is padded to 4:5 or is a plot card, `cards` when all are plot cards. */
+export function mediaStyle(review) {
+  const photos = review?.photos ?? [];
+  const cards = photos.length > 0 && photos.every(x => x.kind === 'card');
+  return { pad: cards || photos.some(x => x.fit === PAD_FIT || x.kind === 'card'), cards };
+}
+
 /** Render this channel's own media for the choice. Returns local file paths. */
 async function renderMedia(channel, choice, dir, deps, advertiser) {
   fs.mkdirSync(dir, { recursive: true });
@@ -61,13 +71,20 @@ async function renderMedia(channel, choice, dir, deps, advertiser) {
   if (choice.kind === 'property') {
     // The approved frames in this post's order (a repeat gets another cover and order; TikTok re-renders the reel from it).
     // The media host resets ~1 in 4 connections from this box; a network failure is retried, a hash mismatch is not.
-    let frames;
+    let items;
     for (let attempt = 1; ; attempt++) {
-      try { frames = await deps.downloadReviewedPhotos(choice.frames ?? choice.review, dir, false, deps.fetchImpl ?? fetch); break; }
-      catch (e) { if (attempt >= 3 || /changed since visual review/.test(e.message)) throw e; await new Promise(r => setTimeout(r, 2000 * attempt)); }
+      try { items = await deps.downloadReviewedPhotos(choice.frames ?? choice.review, dir, false, deps.fetchImpl ?? fetch, { sources: true }); break; }
+      catch (e) { if (attempt >= 3 || /changed since visual review|\(http \d+\)/.test(e.message)) throw e; await new Promise(r => setTimeout(r, 2000 * attempt)); }
     }
-    if (channel === 'tiktok') return [media.propertyReel(choice.listing, frames, reelLicenceLines(choice.listing, advertiser), path.join(dir, `tiktok-${choice.listing.id}.mp4`))];
-    return media.linkedinPropertyImages(frames, path.join(dir, 'linkedin'));
+    const style = mediaStyle(choice.frames ?? choice.review);
+    items = items.map(x => (typeof x === 'string' ? { media: x, source: null } : x));
+    const frames = items.map(x => x.media);
+    // Padded frames and plot cards: the reel pads to 9:16 (from each padded frame's source photo, and the
+    // cards whole) instead of cover-cropping; plot cards carry their own text, so the reel adds no hook or lower third.
+    if (channel === 'tiktok') return [media.propertyReel(choice.listing, style.pad ? items.map(x => x.source ?? x.media) : frames, reelLicenceLines(choice.listing, advertiser),
+      path.join(dir, `tiktok-${choice.listing.id}.mp4`), style.pad ? { fit: 'pad', plain: style.cards } : {})];
+    // The padded frames and cards already carry the BONA mark in their band: LinkedIn re-encodes them without a second one.
+    return media.linkedinPropertyImages(frames, path.join(dir, 'linkedin'), style.pad ? { mark: false } : {});
   }
   if (channel === 'tiktok') return [await media.educationReel(choice.item, path.join(dir, `tiktok-${choice.item.id}.mp4`))];
   return media.linkedinEducationImages(choice.item, path.join(dir, 'linkedin'));
@@ -150,23 +167,37 @@ export async function run(channel, opts = {}, deps = null) {
     catch (e) { log(`${channel}: live catalogue unavailable (${redact(e)}); property posts are off for this run`); }
     const reviews = read(path.join(root, 'marketing/daily/property-reviews.json'));
     const pool = educationPool(read(path.join(root, 'marketing/daily/content.json')));
-    const choice = chooseToday({ channel, date, now, listings: live?.listings ?? [], reviews, advertiser: live?.advertiser, events, pool, repeatDays: rules.repeatDays, rules, only: kind });
-    if (!choice) {
-      const row = { channel, date, id: entryId(channel, date), status: 'skipped-nothing-eligible' };
-      if (!dry && !events.some(e => e.channel === channel && e.date === date && e.status === row.status)) appendRecord(ledger, row);
-      log(`${channel}: nothing eligible today`); return row;
+    // Media fallback (before any intent record only): a property whose reviewed media is unavailable or changed
+    // is logged and alerted and the next candidate is tried, up to MEDIA_FALLBACK_CANDIDATES properties.
+    const skip = new Set();
+    let choice, itemId, caption, evidence, files, workRoot;
+    for (let attempt = 0; ; attempt++) {
+      choice = chooseToday({ channel, date, now, listings: (live?.listings ?? []).filter(l => !skip.has(l.id)), reviews, advertiser: live?.advertiser, events, pool, repeatDays: rules.repeatDays, rules, only: kind });
+      if (!choice) {
+        if (skip.size) throw new Error(`${channel}: no candidate's reviewed media is usable (${[...skip].join(', ')}); nothing recorded or sent`);
+        const row = { channel, date, id: entryId(channel, date), status: 'skipped-nothing-eligible' };
+        if (!dry && !events.some(e => e.channel === channel && e.date === date && e.status === row.status)) appendRecord(ledger, row);
+        log(`${channel}: nothing eligible today`); return row;
+      }
+      itemId = choice.kind === 'property' ? choice.listing.id : choice.item.id;
+      // Everything burned into the pixels gets the caption's refusal too.
+      assertRenderable(renderedStrings(choice, live?.advertiser));
+      caption = captionFor(channel, choice, { advertiser: live?.advertiser, fal: live?.advertiser?.fal ?? deps.fal });
+      // What a confirmed post must also show besides the full caption: the listing id, or the topic line.
+      evidence = choice.kind === 'property' ? choice.listing.id : (channel === 'tiktok' ? choice.item.topic.ar : choice.item.topic.en);
+      if (!caption.includes(evidence)) throw new Error(`${channel}: caption does not carry its binding evidence "${evidence}"`);
+      log(`${channel}: ${date} → ${choice.kind} ${itemId}${choice.frameOrder ? ` frames ${choice.frameOrder.join(',')}` : ''} (${caption.length} chars)`);
+      // Each candidate renders into its own directory; a failed candidate's files are removed before the next.
+      workRoot = dry ? fs.mkdtempSync(path.join(os.tmpdir(), `bona-${channel}-dry-`)) : candidateWorkRoot(data, channel, date, itemId);
+      try { files = await renderMedia(channel, choice, workRoot, deps, live?.advertiser); break; }
+      catch (e) {
+        if (choice.kind !== 'property' || e?.media !== true || attempt + 1 >= MEDIA_FALLBACK_CANDIDATES) throw e;
+        log(`${channel}: media for ${itemId} unusable (${redact(e)}); trying the next candidate`);
+        if (!dry) appendRecord(path.join(data, channel, 'alerts.jsonl'), { channel, date, status: 'media-fallback', listingId: itemId, reason: redact(e) });
+        fs.rmSync(workRoot, { recursive: true, force: true });
+        skip.add(itemId);
+      }
     }
-    const itemId = choice.kind === 'property' ? choice.listing.id : choice.item.id;
-    // Everything burned into the pixels gets the caption's refusal too.
-    assertRenderable(renderedStrings(choice, live?.advertiser));
-    const caption = captionFor(channel, choice, { advertiser: live?.advertiser, fal: live?.advertiser?.fal ?? deps.fal });
-    // What a confirmed post must also show besides the full caption: the listing id, or the topic line.
-    const evidence = choice.kind === 'property' ? choice.listing.id : (channel === 'tiktok' ? choice.item.topic.ar : choice.item.topic.en);
-    if (!caption.includes(evidence)) throw new Error(`${channel}: caption does not carry its binding evidence "${evidence}"`);
-    log(`${channel}: ${date} → ${choice.kind} ${itemId}${choice.frameOrder ? ` frames ${choice.frameOrder.join(',')}` : ''} (${caption.length} chars)`);
-
-    const workRoot = dry ? fs.mkdtempSync(path.join(os.tmpdir(), `bona-${channel}-dry-`)) : path.join(data, channel, 'assets', date);
-    const files = await renderMedia(channel, choice, workRoot, deps, live?.advertiser);
     log(`${channel}: media ${files.map(f => path.basename(f)).join(', ')}`);
     if (renderOnly) return { status: 'rendered', choice: { kind: choice.kind, itemId, frameOrder: choice.frameOrder }, caption, files };
 

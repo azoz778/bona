@@ -225,7 +225,15 @@ test('every entry in the repository review register is well-formed', () => {
     assert.ok(r.photos.length >= 3 && r.photos.length <= 6, id);
     for (const p of r.photos) {
       assert.match(p.url, /^https:\/\/(bona-real-estate\.com|tk-storage\.azoz\.uk)\/.+\.jpe?g$/i, id);
-      assert.ok(['photograph', 'render'].includes(p.kind) && p.visuallyApproved === true && /^[a-f0-9]{64}$/.test(p.sha256), id);
+      assert.ok(['photograph', 'render', 'card'].includes(p.kind) && p.visuallyApproved === true && /^[a-f0-9]{64}$/.test(p.sha256), id);
+      // Derived media (owner 2026-10-21): plot cards and padded frames are this listing's files under /social/property/<id>/, 1080x1350.
+      const own = m => m.url.startsWith(`https://bona-real-estate.com/social/property/${id}/`) && m.width === 1080 && m.height === 1350;
+      if (p.kind === 'card') assert.ok(own(p) && ['satellite', 'facts', 'location'].includes(p.card), id);
+      if (p.fit != null) assert.ok(p.fit === 'pad-4x5' && own(p.media) && /^[a-f0-9]{64}$/.test(p.media.sha256), id);
+      for (const m of [p.kind === 'card' ? p : null, p.media].filter(Boolean)) {
+        const file = new URL(`../../public${new URL(m.url).pathname}`, import.meta.url);
+        assert.ok(fs.existsSync(file), `${id}: ${m.url} is committed under public/`);
+      }
     }
   }
 });

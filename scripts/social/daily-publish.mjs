@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 // Daily dispatch: reviewed property posts first; a reviewed finite pack only when no property is eligible and a pack day is due. Never reads the legacy queue/calendar.
 import fs from "node:fs";
+import dns from "node:dns";
+// IPv6 to Cloudflare from this WSL host resets some connections; prefer IPv4 as browser-publish.mjs does.
+dns.setDefaultResultOrder("ipv4first");
 import path from "node:path";
 import {spawnSync} from "node:child_process";
 import {verifyPack,dueToday,ksaNow,verifyPublic,facebookState,ROOT} from "./lib/daily-pack.mjs";

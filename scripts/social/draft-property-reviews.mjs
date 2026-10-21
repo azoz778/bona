@@ -1,20 +1,25 @@
 #!/usr/bin/env node
 // Drafts photo/caption reviews for in-scope listings: usable frames, one contact sheet per listing,
 // drafts.json with caption previews. Never writes the review register, never uploads anything.
-// Usage: node scripts/social/draft-property-reviews.mjs --out NEW_DIR [--ids BONA-001,BONA-022]
+// Usage: node scripts/social/draft-property-reviews.mjs --out NEW_DIR [--ids BONA-001,BONA-022] [--local-public DIR]
+// A frame outside the 0.8–1.91 aspect that would be fine padded to 4:5 is kept, marked padOnly.
+// --local-public DIR reads the site's own images (bona-real-estate.com/…) from DIR (the repository's
+// public/) instead of the live site: for reviewing re-cropped images before they are deployed. The
+// publisher still checks the live bytes, so such a review is eligible only once they are live.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import { SITE, imageUrl, sha256, fingerprint, advertiserFingerprint, policyRules, eligibility, reviewedCopy } from './lib/property-daily.mjs';
-import { frameProblem, contactSheet, disclosuresFor, defaultKind, liveCatalogue } from './lib/property-review.mjs';
+import { frameProblem, contactSheet, disclosuresFor, defaultKind, liveCatalogue, localFetch } from './lib/property-review.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 function parseArgs(argv) {
-  const a = { out: null, ids: null };
+  const a = { out: null, ids: null, localPublic: null };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') a.out = argv[++i];
+    else if (argv[i] === '--local-public') a.localPublic = argv[++i];
     else if (argv[i] === '--ids') a.ids = String(argv[++i] ?? '').split(',').filter(Boolean);
     else throw new Error(`Unknown argument ${argv[i]}`);
   }
@@ -23,6 +28,7 @@ function parseArgs(argv) {
 }
 export async function main(argv = process.argv.slice(2), { fetchImpl = fetch, now = new Date(), root = ROOT, log = console.log } = {}) {
   const args = parseArgs(argv);
+  if (args.localPublic) fetchImpl = localFetch(args.localPublic, fetchImpl);
   const out = path.resolve(args.out);
   if (fs.existsSync(out)) throw new Error('Choose a new output directory; earlier drafts are preserved');
   const rules = policyRules(readJson(path.join(root, 'marketing/daily/property-policy.json')), now);
@@ -45,20 +51,41 @@ export async function main(argv = process.argv.slice(2), { fetchImpl = fetch, no
         if (!res.ok) { rejected.push({ index, why: `http_${res.status}` }); continue; }
         const buffer = Buffer.from(await res.arrayBuffer());
         const meta = await sharp(buffer).metadata();
-        const why = frameProblem({ contentType: res.headers.get('content-type'), bytes: buffer.length, width: meta.width, height: meta.height });
-        if (why) { rejected.push({ index, why, width: meta.width, height: meta.height }); continue; }
+        const facts = { contentType: res.headers.get('content-type'), bytes: buffer.length, width: meta.width, height: meta.height };
+        const why = frameProblem(facts);
+        // Usable only padded to 4:5 (owner, 2026-10-21): kept, marked, and refused unless approved with --pad.
+        const padOnly = why === 'aspect' && !frameProblem(facts, { pad: true });
+        if (why && !padOnly) { rejected.push({ index, why, width: meta.width, height: meta.height }); continue; }
         const file = path.join(p.id, `${index}.jpg`);
         fs.mkdirSync(path.join(out, p.id), { recursive: true });
         fs.writeFileSync(path.join(out, file), buffer);
-        frames.push({ index, url, sha256: sha256(buffer), width: meta.width, height: meta.height, alt: im.alt, file, buffer });
+        frames.push({ index, url, sha256: sha256(buffer), width: meta.width, height: meta.height, alt: im.alt, file, buffer, ...(padOnly ? { padOnly: true } : {}) });
       } catch (e) { rejected.push({ index, why: `fetch_failed: ${String(e.message).slice(0, 60)}` }); }
     }
+    // Land: the listing stills (1024x768 satellite views) are too small to post as photographs, but a plot card
+    // set is made from them (approve --cards). Kept here with their hashes; the contact sheet shows them.
+    const stills = [];
+    if (p.type === 'land') for (const [i, im] of (p.images ?? []).slice(0, 10).entries()) {
+      if (frames.some(f => f.index === i + 1)) continue;
+      try {
+        const url = imageUrl(im.src);
+        const res = await fetchImpl(url, { redirect: 'error', headers: { 'User-Agent': 'BonaPropertyPublisher/1.0' }, signal: AbortSignal.timeout(30_000) });
+        if (!res.ok || !String(res.headers.get('content-type')).startsWith('image/jpeg')) continue;
+        const buffer = Buffer.from(await res.arrayBuffer());
+        const meta = await sharp(buffer).metadata();
+        if (buffer.length > 8_000_000 || !(meta.width >= 640)) continue;
+        const file = path.join(p.id, `still-${i + 1}.jpg`);
+        fs.mkdirSync(path.join(out, p.id), { recursive: true });
+        fs.writeFileSync(path.join(out, file), buffer);
+        stills.push({ index: i + 1, url, sha256: sha256(buffer), width: meta.width, height: meta.height, alt: im.alt, file, buffer });
+      } catch { /* not a usable still */ }
+    }
     let sheet = null;
-    if (frames.length) { sheet = `${p.id}.jpg`; fs.writeFileSync(path.join(out, sheet), await contactSheet(frames)); }
+    if (frames.length || stills.length) { sheet = `${p.id}.jpg`; fs.writeFileSync(path.join(out, sheet), await contactSheet([...frames, ...stills])); }
     const preview = { legalDisclosures: disclosuresFor(p), photos: [{ kind: defaultKind(p) }] };
     drafts.listings[p.id] = { title: p.title, category: p.category, type: p.type ?? null, city: p.location?.city?.en ?? null,
       factsSha256: fingerprint(p), page: `${SITE}/properties/${p.slug}/`, sheet, usable: frames.length,
-      frames: frames.map(({ buffer, ...f }) => f), rejected, captionPreview: reviewedCopy(p, live.advertiser, preview) };
+      frames: frames.map(({ buffer, ...f }) => f), ...(stills.length ? { stills: stills.map(({ buffer, ...f }) => f) } : {}), rejected, captionPreview: reviewedCopy(p, live.advertiser, preview) };
     log(`${p.id.padEnd(10)} ${String(frames.length).padStart(2)} usable / ${(p.images ?? []).length}  ${p.title?.en ?? ''}`);
   }
   fs.writeFileSync(path.join(out, 'drafts.json'), JSON.stringify(drafts, null, 2) + '\n');

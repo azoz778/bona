@@ -156,6 +156,24 @@ export async function cover(file, w, h, { position = 'attention', quality = 92, 
     .toBuffer();
 }
 
+/**
+ * Fit a whole frame inside `w`x`h` on a flat background: nothing cropped, nothing stretched
+ * (`make-reel.mjs --fit pad`: padded 4:5 property frames and plot cards on a 9:16 reel).
+ * A brochure photo's baked-in white margin is trimmed first, as cover() does.
+ */
+export async function containToFile(file, out, w, h, { background = '#0f1214', quality = 92, trimBorder = true } = {}) {
+  const input = trimBorder ? await trimUniformBorder(file) : file;
+  const buf = await sharp(input, { limitInputPixels: MAX_INPUT_PIXELS })
+    .rotate()
+    .resize({ width: Math.round(w), height: Math.round(h), fit: 'contain', background, withoutEnlargement: false })
+    .flatten({ background })
+    .jpeg({ quality, mozjpeg: true })
+    .toBuffer();
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  fs.writeFileSync(out, buf);
+  return out;
+}
+
 /** Cover-crop straight to a file (used for the Ken Burns source stills). */
 export async function coverToFile(file, out, w, h, opts = {}) {
   const buf = await cover(file, w, h, opts);
