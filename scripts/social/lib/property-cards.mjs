@@ -45,7 +45,8 @@ export function parseHighlight(en) {
   take(new RegExp(String.raw`(${N})\s*m\s*(?:by|x|×)\s*(${N})\s*m\b`, 'gi'), m => out.dims.push([num(m[1]), num(m[2])]));
   take(new RegExp(String.raw`(${N})\s*${SQM}`, 'gi'), m => out.area.push(num(m[1])));
   take(new RegExp(String.raw`(${N})\s*-?\s*(?:m\b|metres?\b|meters?\b)`, 'gi'), m => out.lengths.push(num(m[1])));
-  out.unparsed = /\d/.test(rest);
+  // A unit qualifier the card does not model (a linear or running metre) would otherwise be read as m².
+  out.unparsed = /\d/.test(rest) || /\b(?:linear|running)\s*met(?:re|er)|\bper\s*lm\b/i.test(en);
   return out;
 }
 /**
@@ -67,7 +68,8 @@ export function parseHighlightAr(ar) {
   take(new RegExp(String.raw`(${N})\s*(?:في|×|x)\s*(${N})\s*(?:مترا?|م)${END}`, 'g'), m => out.dims.push([num(m[1]), num(m[2])]));
   take(new RegExp(String.raw`(${N})\s*${SQM}`, 'g'), m => out.area.push(num(m[1])));
   take(new RegExp(String.raw`(${N})\s*(?:مترا?|امتار|م)${END}`, 'g'), m => out.lengths.push(num(m[1])));
-  out.unparsed = /\d/.test(rest);
+  // «للمتر الطولي» (per linear metre) must not pass as a price per square metre.
+  out.unparsed = /\d/.test(rest) || /طولي|طولى/.test(ar);
   return out;
 }
 /** True when two parsed highlights state the same facts: same kinds, same numbers. */

@@ -293,6 +293,11 @@ test('round 2, fix 1: the Arabic must state the same typed facts as the English,
   assert.ok(landFactsProblems(plot({}, hl(['636 sqm plot'], ['شارع بعرض 636 متراً']))).includes('arabic_and_english_facts_differ'), 'an area is not a length');
   assert.deepEqual(landFactsProblems(plot({}, hl(['24 m by 26.5 m'], ['24 في 26.5 متراً']))), []);
 });
+test('round 3: a price per linear metre is never read as a price per square metre (Codex)', () => {
+  assert.ok(landFactsProblems(plot({}, hl(['SAR 6,000 per sqm'], ['٦٬٠٠٠ ريال للمتر الطولي']))).includes('highlight_unparseable'), 'Arabic per linear metre');
+  assert.ok(landFactsProblems(plot({}, hl(['SAR 6,000 per linear metre'], ['6,000 ريال للمتر']))).includes('highlight_unparseable'), 'English per linear metre');
+  assert.deepEqual(landFactsProblems(plot({}, hl(['North-facing, 21.25 m frontage'], ['واجهة شمالية بطول 21.25 متراً']))), [], 'a length (بطول) is still fine');
+});
 test('round 2, fix 2: a transient network error is retried; the same listing goes out and no fallback is alerted', async () => {
   const w = await world();
   try {
