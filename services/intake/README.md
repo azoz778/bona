@@ -279,7 +279,7 @@ default, so only the ones you want to change need to be present.
 | `BONA_REPO` | `~/bona-bot` | the clone that is written to and pushed |
 | `BONA_DATA` | `~/bona-data` | downloads, extraction scratch, state |
 | `BONA_POLL_MS` | `20000` | message poll interval |
-| `BONA_GROUP_SCAN_MS` | `300000` | group discovery interval |
+| `BONA_GROUP_SCAN_MS` | `0` when `BONA_WA_GROUP_JIDS` is set, else `300000` | group discovery (`/group/fetchAllGroups`) interval; `0` = one discovery per start (retried every 30 min until it succeeds, so groups found by `BONA_WA_GROUP_MATCH` come back after a restart), then off once every configured group is pollable (every 30 min only while one is not). Each scan costs one WhatsApp `groupMetadata` per group the number is in, so a 5-min scan tripped `rate-overlimit` ~670×/h on the personal number |
 | `BONA_CLAUDE_MODEL` | `sonnet` | the model for the extraction/curation step |
 | `BONA_CLAUDE_FALLBACK_MODEL` | `opus` | used for the last attempt if sonnet keeps failing the contract |
 | `BONA_SITE` | `https://bona-real-estate.com` | used for URLs and `brochureUrl` |

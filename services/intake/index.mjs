@@ -28,7 +28,7 @@ import { processPdf, RejectError, sha256File } from './lib/pipeline.mjs';
 import { assertCleanTree, gitCommitPush, gitPull, rebuild, resetTree, waitForLive } from './lib/publish.mjs';
 import { STOP_GRACE_MS, waitForIdle } from './lib/shutdown.mjs';
 import { createState } from './lib/state.mjs';
-import { seedGroups, pollableGroups } from './lib/groups.mjs';
+import { seedGroups, pollableGroups, scanDue, waitingConfigured, NO_GROUP_RESCAN_MS } from './lib/groups.mjs';
 
 const cfg = loadConfig();
 const state = createState(cfg.statePath);
@@ -107,7 +107,8 @@ async function discoverGroups() {
   }
   groups = pollableGroups(selected, state.isAnnounced);
   if (!selected.length) log.warn('group.none', { match: cfg.groupMatch, scanned: all.length });
-  return groups;
+  // how many selected groups are still not pollable (history seeding failed) -> retry later
+  return selected.length - groups.length;
 }
 
 // ---------------------------------------------------------------- polling
@@ -885,13 +886,16 @@ async function main() {
     if (groups.length) log.info('group.seeded_from_config', { jids: groups.map((g) => g.id) });
   }
   let lastScan = 0;
+  let discovered = false;
   while (!stopping) {
     try {
-      if (Date.now() - lastScan >= cfg.groupScanMs) {
+      if (scanDue({ now: Date.now(), lastScan, scanMs: cfg.groupScanMs, pollable: groups.length, waiting: waitingConfigured(cfg.groupJids, groups), discovered })) {
         try {
-          await discoverGroups();
+          // complete only when every selected group is pollable: a subject-matched group whose
+          // history seeding failed is not "waiting" (not configured) and would be lost otherwise
+          discovered = (await discoverGroups()) === 0;
         } catch (err) {
-          log.warn('group.scan_failed', { error: err.message, polling: groups.length, retryInMs: cfg.groupScanMs });
+          log.warn('group.scan_failed', { error: err.message, polling: groups.length, retryInMs: cfg.groupScanMs > 0 ? cfg.groupScanMs : NO_GROUP_RESCAN_MS });
         }
         lastScan = Date.now();
       }
