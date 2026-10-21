@@ -73,7 +73,7 @@ debug Chrome (CDP `http://localhost:9222`, started by `~/.claude/scripts/chrome-
    node verifies `BONA_LOCK_FD=9` is that file and holds the lock). The kernel releases it when the
    process ends or is killed, so there is no stale lock, takeover or token; the file's contents mean
    nothing. Read the ledger strictly (see below).
-3. Choose, build the caption, render media into `~/bona-data/<channel>/assets/<date>/`, copy it to
+3. Choose, build the caption, render media into `~/bona-data/<channel>/assets/<date>/<item id>/` (a fallback candidate gets its own, the failed one's is removed), copy it to
    `C:\Users\ASUS\AppData\Local\bona-social-upload\<run>\` (the Windows Chrome cannot read WSL paths).
 4. Open **our own tab** (`PUT /json/new`), never touching other tabs; closed at the end.
 5. Identity first. TikTok: *Edit profile* on `@bonarealestatesa` and TikTok's own session

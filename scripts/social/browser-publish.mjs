@@ -54,6 +54,9 @@ export async function defaultDeps() {
   return { cdp, sites, media, fal: FAL, catalogue, downloadReviewedPhotos };
 }
 
+/** A live run's work directory for one candidate: <dataDir>/<channel>/assets/<date>/<item id>/. */
+export const candidateWorkRoot = (data, channel, date, itemId) => path.join(data, channel, 'assets', date, String(itemId).replace(/[^A-Za-z0-9_-]/g, '_'));
+
 /** How a review's frames are shown: `pad` when any frame is padded to 4:5 or is a plot card, `cards` when all are plot cards. */
 export function mediaStyle(review) {
   const photos = review?.photos ?? [];
@@ -184,13 +187,14 @@ export async function run(channel, opts = {}, deps = null) {
       evidence = choice.kind === 'property' ? choice.listing.id : (channel === 'tiktok' ? choice.item.topic.ar : choice.item.topic.en);
       if (!caption.includes(evidence)) throw new Error(`${channel}: caption does not carry its binding evidence "${evidence}"`);
       log(`${channel}: ${date} → ${choice.kind} ${itemId}${choice.frameOrder ? ` frames ${choice.frameOrder.join(',')}` : ''} (${caption.length} chars)`);
-      workRoot = dry ? fs.mkdtempSync(path.join(os.tmpdir(), `bona-${channel}-dry-`)) : path.join(data, channel, 'assets', date);
+      // Each candidate renders into its own directory; a failed candidate's files are removed before the next.
+      workRoot = dry ? fs.mkdtempSync(path.join(os.tmpdir(), `bona-${channel}-dry-`)) : candidateWorkRoot(data, channel, date, itemId);
       try { files = await renderMedia(channel, choice, workRoot, deps, live?.advertiser); break; }
       catch (e) {
         if (choice.kind !== 'property' || e?.media !== true || attempt + 1 >= MEDIA_FALLBACK_CANDIDATES) throw e;
         log(`${channel}: media for ${itemId} unusable (${redact(e)}); trying the next candidate`);
         if (!dry) appendRecord(path.join(data, channel, 'alerts.jsonl'), { channel, date, status: 'media-fallback', listingId: itemId, reason: redact(e) });
-        if (dry) fs.rmSync(workRoot, { recursive: true, force: true });
+        fs.rmSync(workRoot, { recursive: true, force: true });
         skip.add(itemId);
       }
     }

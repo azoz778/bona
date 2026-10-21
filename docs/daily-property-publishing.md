@@ -32,7 +32,9 @@ and `bona-daily@facebook` timers run it; there is no other timer.
   details." and never calls them photographs. TikTok's reel shows each card whole on 9:16 with no
   motion and no hook or lower third (`make-reel.mjs --fit pad --plain`); LinkedIn re-encodes them.
   The facts card is refused when any Arabic and English pair (title, district, city, every
-  highlight) carries different numbers (Arabic-Indic digits and ٬/٫ are read as numbers), when a
+  highlight) carries different numbers (Arabic-Indic digits and ٬/٫ are normalised before any
+  parsing), when an Arabic highlight states different typed facts from its English (a rate per m²
+  is not a per-plot price, an area is not a length) or cannot be read, when a
   numeric highlight is not one of the forms it can read (price per m²/sqm, price per plot, total
   price, area, "A m by B m", a length in metres), or when a stated area, dimensions (2%), price per
   m² (1%), total price or per-plot price contradicts the listing. The price line carries the
@@ -47,8 +49,9 @@ and `bona-daily@facebook` timers run it; there is no other timer.
 - **Spacing:** listings whose reviews share an image (BONA-W003/W004/W005's Malfa renders) are one
   family, and all plot-card listings are one family. A candidate whose family was published on that
   channel the previous Riyadh day is passed over when another candidate is eligible.
-- **Media fallback, before intent only:** when the chosen listing's reviewed media is unavailable
-  (HTTP error, network, timeout) or its hash differs (a deploy not yet live, a re-cropped photo),
+- **Media fallback, before intent only:** network errors and timeouts on an image are retried twice
+  (short backoff, IPv4 first) first. When the chosen listing's reviewed media is still unavailable
+  (HTTP error, or the network after the retries) or its hash differs (a deploy not yet live, a re-cropped photo),
   the run logs it, appends `{"status":"media-fallback",…}` to `~/bona-data/daily/alerts.jsonl` and
   tries the next candidate, up to three. Nothing falls back once the intent record is written.
 - **Reviews** stay valid for `reviewValidDays` (90) while the listing facts, the advertiser and
