@@ -35,6 +35,8 @@ export function assertNoPendingInstagram(events) {
   return events;
 }
 const IG_GRACE_HOURS=2.5;
+/** How many candidates a run tries when the picked listing's reviewed media is unavailable or changed (before intent only). */
+export const MEDIA_FALLBACK_CANDIDATES=3;
 /** A failure's message for logs and alerts, anything shaped like a Meta token redacted. */
 const reasonOf=e=>String(e?.message??e).replace(/EAA[A-Za-z0-9]+/g,'[redacted]');
 /**
@@ -93,11 +95,15 @@ export async function catalogue(fetchImpl=fetch,now=new Date()) {
  * made from, for the TikTok reel's own 9:16 padding).
  */
 export async function photos(review,dir,dry,fetchImpl=fetch,{sources=false}={}) {
+  // Every failure here is marked `media`: the publishers may then try another candidate (before any intent record).
+  const media=(msg,url)=>Object.assign(new Error(`${msg}: ${url}`),{media:true});
   const get=async(url,digest)=>{
-    const res=await fetchImpl(url,{redirect:'error',headers:{'User-Agent':'BonaPropertyPublisher/1.0'},signal:AbortSignal.timeout(20000)});
-    if(!res.ok || !res.headers.get('content-type')?.startsWith('image/jpeg')) throw new Error('Reviewed source photo unavailable');
-    const bytes=Buffer.from(await res.arrayBuffer());
-    if(bytes.length>8000000 || sha256(bytes)!==digest)throw new Error('Source photo changed since visual review');
+    let res,bytes;
+    try{res=await fetchImpl(url,{redirect:'error',headers:{'User-Agent':'BonaPropertyPublisher/1.0'},signal:AbortSignal.timeout(20000)});}
+    catch{throw media('Reviewed source photo unavailable (network or timeout)',url);}
+    if(!res.ok || !res.headers.get('content-type')?.startsWith('image/jpeg')) throw media(`Reviewed source photo unavailable (http ${res.status})`,url);
+    try{bytes=Buffer.from(await res.arrayBuffer());}catch{throw media('Reviewed source photo unavailable (network or timeout)',url);}
+    if(bytes.length>8000000 || sha256(bytes)!==digest)throw media('Source photo changed since visual review',url);
     return bytes;
   };
   const out=[];
@@ -167,15 +173,32 @@ export async function propertyDaily(channel,{dry=false,now=new Date(),root=ROOT,
       if(!dry && !history.some(e=>e.channel===channel&&e.date===date&&e.status===row.status&&JSON.stringify(e.reasons)===JSON.stringify(reasons)))record(journal,row);
       console.log(JSON.stringify(row));return row;
     }
-    const p=selected.listing,review=reviews[p.id];
-    // A repeat of this listing on this channel gets another cover and frame order, from its approved frames only,
-    // never the image sequence it was last posted with on this channel.
-    const {review:framed,frameOrder,images}=pickFrames(review,history,channel,p.id);
-    console.log(`Frames for ${p.id} on ${channel}: ${frameOrder.join(',')} (reviewed order 1..${review.photos.length})`);
     await identity(channel,env,fetchImpl);
     const assetDir=path.join(dir,'property-assets',date,channel);
-    if(!dry)fs.mkdirSync(assetDir,{recursive:true});
-    const assets=await photos(framed,assetDir,dry,fetchImpl);
+    // Media fallback (before any intent record only): a picked listing whose reviewed media is unavailable or changed
+    // (a site deploy still pending, a re-cropped photo) is logged and alerted, and the next candidate is tried, up to
+    // MEDIA_FALLBACK_CANDIDATES. Nothing after the intent record ever falls back.
+    let p,review,framed,frameOrder,images,assets;
+    const tried=[];
+    for(const candidate of selected.candidates.slice(0,MEDIA_FALLBACK_CANDIDATES)){
+      const r=reviews[candidate.id];
+      // A repeat of this listing on this channel gets another cover and frame order, from its approved frames only,
+      // never the image sequence it was last posted with on this channel.
+      const pick=pickFrames(r,history,channel,candidate.id);
+      console.log(`Frames for ${candidate.id} on ${channel}: ${pick.frameOrder.join(',')} (reviewed order 1..${r.photos.length})`);
+      if(!dry){fs.rmSync(assetDir,{recursive:true,force:true});fs.mkdirSync(assetDir,{recursive:true});}
+      try{assets=await photos(pick.review,assetDir,dry,fetchImpl);}
+      catch(e){
+        if(e?.media!==true)throw e;
+        const reason=reasonOf(e);
+        tried.push({listingId:candidate.id,reason});
+        console.error(`Media for ${candidate.id} on ${channel} unusable (${reason}); trying the next candidate`);
+        if(!dry)record(path.join(dir,'alerts.jsonl'),{channel,date,status:'media-fallback',listingId:candidate.id,reason});
+        continue;
+      }
+      p=candidate;review=r;({review:framed,frameOrder,images}=pick);break;
+    }
+    if(!p)throw new Error(`No candidate's reviewed media is usable on ${channel} (${tried.map(t=>`${t.listingId}: ${t.reason}`).join('; ')}); nothing recorded or sent`);
     const entry=entryFor(p,framed,live.advertiser,channel,date,assets);
     if(checkCaption(composeCaption(entry)).problems.length)throw new Error('Reviewed caption does not fit platform limits');
     const refused=publisherRefusal(entry,channel,{igLedger:channel==='instagram'?rows(igLedger):[],now});

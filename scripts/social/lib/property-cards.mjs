@@ -17,14 +17,43 @@ const { width: W, height: H } = MEDIA_SIZE;
 const n = x => Number(x).toLocaleString('en-US', { maximumFractionDigits: 2 });
 
 // ------------------------------------------------------------------------------------- land facts
-const SQM = /([\d][\d,]*(?:\.\d+)?)\s*sqm/i;
-const PER_SQM = /SAR\s*([\d][\d,]*(?:\.\d+)?)\s*per\s*sqm/i;
+const N = String.raw`\d[\d,]*(?:\.\d+)?`;
 const num = s => Number(String(s).replace(/,/g, ''));
+/** Every number in a string, Arabic-Indic and Eastern Arabic digits and the Arabic separators (٬ thousands, ٫ decimal) read as Latin. */
+export function numbersIn(s) {
+  const latin = String(s ?? '').replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x0660)).replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x06F0))
+    .replace(/٬/g, ',').replace(/٫/g, '.');
+  return (latin.match(new RegExp(N, 'g')) ?? []).map(num).sort((x, y) => x - y);
+}
+const sameNumbers = (a, b) => { const x = numbersIn(a), y = numbersIn(b); return x.length === y.length && x.every((v, i) => v === y[i]); };
+/**
+ * One English highlight read as facts: every number in it must belong to a form this card knows
+ * (a price per square metre, a price per plot, a total price, an area, "A m by B m", a length in
+ * metres); a number left over makes the highlight unparseable, and the set is refused rather than
+ * printing a figure nobody checked.
+ */
+export function parseHighlight(en) {
+  let rest = ` ${String(en)} `;
+  const out = { perSqm: [], perPlot: [], total: [], area: [], dims: [], lengths: [] };
+  const take = (re, f) => { rest = rest.replace(re, (...m) => { f(m); return ' '; }); };
+  const SQM = String.raw`(?:sqm|m²|m2|sq\.?\s*m|square\s*met(?:re|er)s?)`;
+  take(new RegExp(String.raw`(?:about\s+)?SAR\s*(${N})\s*(?:per\s*${SQM}|\/\s*${SQM})(?:\s*net)?`, 'gi'), m => out.perSqm.push(num(m[1])));
+  take(new RegExp(String.raw`(${N})\s*SAR\s*(?:per\s*${SQM}|\/\s*${SQM})`, 'gi'), m => out.perSqm.push(num(m[1])));
+  take(new RegExp(String.raw`SAR\s*(${N})\s*per\s*plot`, 'gi'), m => out.perPlot.push(num(m[1])));
+  take(new RegExp(String.raw`SAR\s*(${N})`, 'gi'), m => out.total.push(num(m[1])));
+  take(new RegExp(String.raw`(${N})\s*m\s*(?:by|x|×)\s*(${N})\s*m\b`, 'gi'), m => out.dims.push([num(m[1]), num(m[2])]));
+  take(new RegExp(String.raw`(${N})\s*${SQM}`, 'gi'), m => out.area.push(num(m[1])));
+  take(new RegExp(String.raw`(${N})\s*-?\s*(?:m\b|metres?\b|meters?\b)`, 'gi'), m => out.lengths.push(num(m[1])));
+  out.unparsed = /\d/.test(rest);
+  return out;
+}
+const PERIOD = Object.freeze({ year: { ar: 'سنوياً', en: 'year' }, month: { ar: 'شهرياً', en: 'month' } });
 /**
  * Why this land listing's facts cannot carry a correct card set, as a list (empty when they can):
- * no plot area, highlights that do not pair up in the two languages, an area in the highlights
- * that is not the listing's, or a stated price per square metre that does not give the asking
- * price (more than 1% apart).
+ * no plot area; highlights that do not pair up, or whose Arabic and English numbers differ (the
+ * title, district and city too); a numeric highlight the card cannot read; a stated area, plot
+ * dimensions, price per square metre, total price or price per plot that contradicts the listing;
+ * a price the card cannot state exactly (a period other than a year or a month).
  */
 export function landFactsProblems(p) {
   const out = [];
@@ -34,25 +63,48 @@ export function landFactsProblems(p) {
   const en = p?.highlights?.en ?? [], ar = p?.highlights?.ar ?? [];
   if (en.length !== ar.length || en.some(x => !String(x).trim()) || ar.some(x => !String(x).trim())) out.push('highlights_do_not_pair');
   if (!p?.location?.district?.ar || !p?.location?.district?.en || !p?.location?.city?.ar || !p?.location?.city?.en) out.push('no_district_or_city');
-  const stated = en.map(x => SQM.exec(x)).filter(Boolean).map(m => num(m[1]));
-  if (area > 0 && stated.some(x => x !== area)) out.push('area_contradicts_highlights');
-  const per = en.map(x => PER_SQM.exec(x)).filter(Boolean).map(m => num(m[1]));
-  if (showsPrice(p) && area > 0 && per.some(x => Math.abs(x * area - p.price.amount) / p.price.amount > 0.01)) out.push('price_per_sqm_contradicts_price');
-  return out;
+  const pairs = [[p?.title?.en, p?.title?.ar], [p?.location?.district?.en, p?.location?.district?.ar], [p?.location?.city?.en, p?.location?.city?.ar],
+    ...en.map((x, i) => [x, ar[i]])];
+  if (pairs.some(([e, a]) => !sameNumbers(e, a))) out.push('arabic_and_english_numbers_differ');
+  const shown = showsPrice(p), price = shown ? Number(p.price.amount) : null;
+  const near = (x, y, tol) => Math.abs(x - y) / y <= tol;
+  for (const h of en.map(parseHighlight)) {
+    if (h.unparsed) out.push('highlight_unparseable');
+    if (area > 0 && h.area.some(x => x !== area)) out.push('area_contradicts_highlights');
+    if (area > 0 && h.dims.some(([x, y]) => !near(x * y, area, 0.02))) out.push('dimensions_contradict_area');
+    if (shown && area > 0 && h.perSqm.some(x => !near(x * area, price, 0.01))) out.push('price_per_sqm_contradicts_price');
+    if ([...h.total, ...h.perPlot].some(x => !shown || x !== price)) out.push('total_price_contradicts_price');
+  }
+  if (shown && p.price.period != null && !PERIOD[p.price.period]) out.push('unsupported_price_shape');
+  return [...new Set(out)];
 }
 /**
  * What the facts card says, from the listing only: the plot area, the asking price (when the
- * caption shows one), then the highlights in their two languages, leaving out the ones that only
- * repeat the area, the total price or the district name (the location card carries that).
+ * caption shows one) exactly as qualified there (from-price, rental period, per plot when a
+ * highlight says so), then the highlights in their two languages, leaving out the ones that only
+ * repeat the area, the price or the district name (the location card carries that).
  */
 export function landFacts(p) {
   const area = Number(p.specs.plotSqm);
-  const price = showsPrice(p) ? { ar: `${iso(n(p.price.amount))} ريال`, en: `SAR ${n(p.price.amount)}` } : null;
+  const parsed = (p.highlights?.en ?? []).map(parseHighlight);
+  let price = null;
+  if (showsPrice(p)) {
+    const perPlot = parsed.some(h => h.perPlot.includes(Number(p.price.amount)));
+    const period = p.price.period ? PERIOD[p.price.period] : null;
+    if (p.price.period && !period) throw new Error(`${p.id}: price period "${p.price.period}" cannot be stated on a card`);
+    const rent = p.category === 'rent';
+    price = {
+      label: { ar: rent ? 'الإيجار' : perPlot ? 'السعر للقطعة' : 'السعر', en: rent ? 'Rent' : perPlot ? 'Asking price per plot' : 'Asking price' },
+      ar: `${p.price.from ? 'ابتداءً من ' : ''}${iso(n(p.price.amount))} ريال${period ? ` ${period.ar}` : ''}`,
+      en: `${p.price.from ? 'From ' : ''}SAR ${n(p.price.amount)}${period ? ` / ${period.en}` : ''}`,
+    };
+  }
   const en = p.highlights?.en ?? [], ar = p.highlights?.ar ?? [];
   const district = String(p.location?.district?.en ?? '').trim().toLowerCase();
-  const rows = en.map((x, i) => ({ en: String(x).trim(), ar: String(ar[i]).trim() })).filter(({ en: x }) =>
-    !/^[\d,.]+\s*sqm$/i.test(x) &&
-    !(price && x.replace(/\s+/g, ' ') === price.en) && x.toLowerCase() !== district);
+  const amount = showsPrice(p) ? Number(p.price.amount) : null;
+  const rows = en.map((x, i) => ({ en: String(x).trim(), ar: String(ar[i]).trim(), h: parsed[i] })).filter(({ en: x, h }) =>
+    !/^[\d,.]+\s*sqm$/i.test(x) && x.toLowerCase() !== district &&
+    !(amount != null && /^(?:SAR\s*[\d,.]+(?:\s*per\s*plot)?)$/i.test(x) && [...h.total, ...h.perPlot].includes(amount))).map(({ h, ...r }) => r);
   return {
     area: { ar: `${iso(n(area))} م²`, en: `${n(area)} m²` },
     price, rows,
@@ -123,6 +175,33 @@ export async function satelliteCard(still, p, { variant = 'plot' } = {}) {
   ]));
 }
 
+/**
+ * Card (c) without imagery (policy satellite: false): the district large, then city and country and
+ * the title, on the ink, nothing that is not in the listing.
+ */
+export async function locationCard(p) {
+  const mark = await wordmark({ size: 34, color: C.ivory, arabic: false });
+  const country = p.location?.country ?? {};
+  const blocks = [
+    { ...await text({ text: 'الموقع', face: 'ar-body', size: 32, color: C.champagne2, align: 'centre', width: BOX }), gapBefore: 0 },
+    { ...await text({ text: 'LOCATION', face: 'en-body', size: 20, color: C.sand, align: 'centre', width: BOX, dir: 'ltr', letterSpacing: 4 }), gapBefore: 6 },
+    { ...await fitText({ text: p.location.district.ar, face: 'ar-display', size: 120, color: C.ivory, width: BOX, align: 'centre' }, { maxHeight: 200, minSize: 48 }), gapBefore: 40 },
+    { ...await fitText({ text: p.location.district.en, face: 'en-display', size: 64, color: C.sand, width: BOX, align: 'centre', dir: 'ltr', letterSpacing: 1 }, { maxHeight: 110, minSize: 28 }), gapBefore: 6 },
+    await ruleBlock(Math.round(BOX * 0.25), 40),
+    { ...await text({ text: [p.location.city.ar, country.ar].filter(Boolean).join('، '), face: 'ar-body', size: 36, color: C.sand, align: 'centre', width: BOX }), gapBefore: 36 },
+    { ...await text({ text: [p.location.city.en, country.en].filter(Boolean).join(', '), face: 'en-body', size: 24, color: C.stone, align: 'centre', width: BOX, dir: 'ltr', letterSpacing: 2 }), gapBefore: 6 },
+    { ...await fitText({ text: p.title.ar, face: 'ar-display', size: 44, color: C.ivory, width: BOX, align: 'centre', lineHeight: 1.25 }, { maxHeight: 130, minSize: 28 }), gapBefore: 60 },
+    { ...await fitText({ text: p.title.en, face: 'en-display', size: 30, color: C.sand, width: BOX, align: 'centre', dir: 'ltr' }, { maxHeight: 80, minSize: 20 }), gapBefore: 6 },
+  ];
+  const height = blocks.reduce((a, b) => a + (b.gapBefore ?? 0) + b.height, 0);
+  if (height > H - 300) throw new Error(`${p.id}: location card text does not fit`);
+  const { layers } = stack(blocks, Math.round((H - height) / 2));
+  const foot = await footer(p, C.stone);
+  return jpeg(sharp({ create: { width: W, height: H, channels: 3, background: C.ink } }).composite([
+    frameLine(C.champagne, 0.38), centred(mark, W, 72), ...layers, centred(foot, W, H - 92),
+  ]));
+}
+
 /** Card (b): the plot facts on ivory, every line from landFacts(). Shrinks the type until it fits; throws rather than cut a line off. */
 export async function factsCard(p) {
   const problems = landFactsProblems(p);
@@ -142,8 +221,8 @@ export async function factsCard(p) {
       { ...await text({ text: `Plot area  ${f.area.en}`, face: 'en-display', size: s(30), color: C.stone2, align: 'centre', width: BOX, dir: 'ltr' }), gapBefore: 2 },
     ];
     if (f.price) {
-      blocks.push({ ...await text({ text: `السعر  ${f.price.ar}`, face: 'ar-display', size: s(58), color: C.ink, align: 'centre', width: BOX }), gapBefore: s(20) });
-      blocks.push({ ...await text({ text: `Asking price  ${f.price.en}`, face: 'en-display', size: s(30), color: C.stone2, align: 'centre', width: BOX, dir: 'ltr' }), gapBefore: 2 });
+      blocks.push({ ...await fitText({ text: `${f.price.label.ar}  ${f.price.ar}`, face: 'ar-display', size: s(58), color: C.ink, align: 'centre', width: BOX }, { maxHeight: s(80), minSize: 30 }), gapBefore: s(20) });
+      blocks.push({ ...await fitText({ text: `${f.price.label.en}  ${f.price.en}`, face: 'en-display', size: s(30), color: C.stone2, align: 'centre', width: BOX, dir: 'ltr' }, { maxHeight: s(50), minSize: 20 }), gapBefore: 2 });
     }
     if (f.rows.length) blocks.push(await ruleBlock(Math.round(BOX * 0.25), s(28)));
     for (const [i, r] of f.rows.entries()) {
@@ -167,17 +246,24 @@ export async function factsCard(p) {
 export function cardStrings(p) {
   const f = landFacts(p);
   return [p.title.ar, p.title.en, p.location?.district?.ar, p.location?.district?.en, p.location?.city?.ar, p.location?.city?.en,
-    p.location?.country?.ar, p.location?.country?.en, f.area.ar, f.area.en, f.price?.ar, f.price?.en, f.deal.ar, f.deal.en,
+    p.location?.country?.ar, p.location?.country?.en, f.area.ar, f.area.en, f.price?.ar, f.price?.en, f.price?.label.ar, f.price?.label.en, f.deal.ar, f.deal.en,
     ...f.rows.flatMap(r => [r.ar, r.en]), p.id].filter(x => x != null).map(String);
 }
 /**
- * The plot card set, in carousel order: (a) the plot still, (b) the facts, (c) the area still.
+ * The plot card set, in carousel order: (a) the plot still, (b) the facts, (c) the area still;
+ * with `satellite: false`, only (b) and a text-only (c).
  * `plot` and `area` are the listing stills' bytes ({bytes, url, sha256, width, height}); each card
  * names the still it was made from. Throws when the facts cannot carry a correct set.
  */
-export async function cardSet(p, { plot, area }) {
+export async function cardSet(p, { plot, area, satellite = true } = {}) {
   const problems = landFactsProblems(p);
   if (problems.length) throw new Error(`${p.id}: no card set (${problems.join(', ')})`);
+  const t0 = p.title;
+  // Policy satellite: false: no satellite imagery at all, so the set is the facts card and a text-only location card.
+  if (!satellite) return [
+    { card: 'facts', bytes: await factsCard(p), source: null, alt: { ar: `تفاصيل الأرض — ${t0.ar}`, en: `Plot facts — ${t0.en}` } },
+    { card: 'location', bytes: await locationCard(p), source: null, alt: { ar: `الموقع — ${t0.ar}`, en: `Location — ${t0.en}` } },
+  ];
   if (!plot?.bytes || !area?.bytes) throw new Error(`${p.id}: a card set needs the plot still and the area still`);
   const src = s => ({ url: s.url, sha256: s.sha256, width: s.width, height: s.height });
   const t = p.title;

@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { ROOT, ksaNow } from './lib/daily-pack.mjs';
 import { dataDir } from './lib/ledger.mjs';
 import { fingerprint, eligibility, policyRules, PAD_FIT } from './lib/property-daily.mjs';
-import { catalogue, photos as downloadReviewedPhotos } from './property-publish.mjs';
+import { catalogue, photos as downloadReviewedPhotos, MEDIA_FALLBACK_CANDIDATES } from './property-publish.mjs';
 import {
   CHANNELS, acquireLock, appendRecord, assertRenderable, captionFor, channelState, chooseToday, educationPool, entryId, inWindow,
   ledgerPath, lockPath, readLedgerStrict, reelLicenceLines, REPAIR_REASON, renderedStrings,
@@ -71,7 +71,7 @@ async function renderMedia(channel, choice, dir, deps, advertiser) {
     let items;
     for (let attempt = 1; ; attempt++) {
       try { items = await deps.downloadReviewedPhotos(choice.frames ?? choice.review, dir, false, deps.fetchImpl ?? fetch, { sources: true }); break; }
-      catch (e) { if (attempt >= 3 || /changed since visual review/.test(e.message)) throw e; await new Promise(r => setTimeout(r, 2000 * attempt)); }
+      catch (e) { if (attempt >= 3 || /changed since visual review|\(http \d+\)/.test(e.message)) throw e; await new Promise(r => setTimeout(r, 2000 * attempt)); }
     }
     const style = mediaStyle(choice.frames ?? choice.review);
     items = items.map(x => (typeof x === 'string' ? { media: x, source: null } : x));
@@ -164,23 +164,36 @@ export async function run(channel, opts = {}, deps = null) {
     catch (e) { log(`${channel}: live catalogue unavailable (${redact(e)}); property posts are off for this run`); }
     const reviews = read(path.join(root, 'marketing/daily/property-reviews.json'));
     const pool = educationPool(read(path.join(root, 'marketing/daily/content.json')));
-    const choice = chooseToday({ channel, date, now, listings: live?.listings ?? [], reviews, advertiser: live?.advertiser, events, pool, repeatDays: rules.repeatDays, rules, only: kind });
-    if (!choice) {
-      const row = { channel, date, id: entryId(channel, date), status: 'skipped-nothing-eligible' };
-      if (!dry && !events.some(e => e.channel === channel && e.date === date && e.status === row.status)) appendRecord(ledger, row);
-      log(`${channel}: nothing eligible today`); return row;
+    // Media fallback (before any intent record only): a property whose reviewed media is unavailable or changed
+    // is logged and alerted and the next candidate is tried, up to MEDIA_FALLBACK_CANDIDATES properties.
+    const skip = new Set();
+    let choice, itemId, caption, evidence, files, workRoot;
+    for (let attempt = 0; ; attempt++) {
+      choice = chooseToday({ channel, date, now, listings: (live?.listings ?? []).filter(l => !skip.has(l.id)), reviews, advertiser: live?.advertiser, events, pool, repeatDays: rules.repeatDays, rules, only: kind });
+      if (!choice) {
+        if (skip.size) throw new Error(`${channel}: no candidate's reviewed media is usable (${[...skip].join(', ')}); nothing recorded or sent`);
+        const row = { channel, date, id: entryId(channel, date), status: 'skipped-nothing-eligible' };
+        if (!dry && !events.some(e => e.channel === channel && e.date === date && e.status === row.status)) appendRecord(ledger, row);
+        log(`${channel}: nothing eligible today`); return row;
+      }
+      itemId = choice.kind === 'property' ? choice.listing.id : choice.item.id;
+      // Everything burned into the pixels gets the caption's refusal too.
+      assertRenderable(renderedStrings(choice, live?.advertiser));
+      caption = captionFor(channel, choice, { advertiser: live?.advertiser, fal: live?.advertiser?.fal ?? deps.fal });
+      // What a confirmed post must also show besides the full caption: the listing id, or the topic line.
+      evidence = choice.kind === 'property' ? choice.listing.id : (channel === 'tiktok' ? choice.item.topic.ar : choice.item.topic.en);
+      if (!caption.includes(evidence)) throw new Error(`${channel}: caption does not carry its binding evidence "${evidence}"`);
+      log(`${channel}: ${date} → ${choice.kind} ${itemId}${choice.frameOrder ? ` frames ${choice.frameOrder.join(',')}` : ''} (${caption.length} chars)`);
+      workRoot = dry ? fs.mkdtempSync(path.join(os.tmpdir(), `bona-${channel}-dry-`)) : path.join(data, channel, 'assets', date);
+      try { files = await renderMedia(channel, choice, workRoot, deps, live?.advertiser); break; }
+      catch (e) {
+        if (choice.kind !== 'property' || e?.media !== true || attempt + 1 >= MEDIA_FALLBACK_CANDIDATES) throw e;
+        log(`${channel}: media for ${itemId} unusable (${redact(e)}); trying the next candidate`);
+        if (!dry) appendRecord(path.join(data, channel, 'alerts.jsonl'), { channel, date, status: 'media-fallback', listingId: itemId, reason: redact(e) });
+        if (dry) fs.rmSync(workRoot, { recursive: true, force: true });
+        skip.add(itemId);
+      }
     }
-    const itemId = choice.kind === 'property' ? choice.listing.id : choice.item.id;
-    // Everything burned into the pixels gets the caption's refusal too.
-    assertRenderable(renderedStrings(choice, live?.advertiser));
-    const caption = captionFor(channel, choice, { advertiser: live?.advertiser, fal: live?.advertiser?.fal ?? deps.fal });
-    // What a confirmed post must also show besides the full caption: the listing id, or the topic line.
-    const evidence = choice.kind === 'property' ? choice.listing.id : (channel === 'tiktok' ? choice.item.topic.ar : choice.item.topic.en);
-    if (!caption.includes(evidence)) throw new Error(`${channel}: caption does not carry its binding evidence "${evidence}"`);
-    log(`${channel}: ${date} → ${choice.kind} ${itemId}${choice.frameOrder ? ` frames ${choice.frameOrder.join(',')}` : ''} (${caption.length} chars)`);
-
-    const workRoot = dry ? fs.mkdtempSync(path.join(os.tmpdir(), `bona-${channel}-dry-`)) : path.join(data, channel, 'assets', date);
-    const files = await renderMedia(channel, choice, workRoot, deps, live?.advertiser);
     log(`${channel}: media ${files.map(f => path.basename(f)).join(', ')}`);
     if (renderOnly) return { status: 'rendered', choice: { kind: choice.kind, itemId, frameOrder: choice.frameOrder }, caption, files };
 

@@ -66,7 +66,7 @@ test('eligibility: every card is this listing\'s hosted 1080x1350 JPEG, and a st
   assert.ok(why((c, k) => (k === 'facts' ? { ...c, url: `${mediaBase('BONA-X')}facts.jpg` } : c)).includes('card_media_unverified'), 'another listing\'s folder');
   assert.ok(why((c, k) => (k === 'facts' ? { ...c, height: 1080 } : c)).includes('card_media_unverified'));
   assert.ok(why((c, k) => (k === 'satellite' ? { ...c, source: null } : c)).includes('card_media_unverified'), 'satellite card without its still');
-  assert.ok(why((c, k) => (k === 'location' ? { ...c, source: null } : c)).includes('card_media_unverified'), 'location card without its still');
+  assert.ok(!why((c, k) => (k === 'location' ? { ...c, source: null } : c)).includes('card_media_unverified'), 'a location card may be text-only');
   assert.ok(why((c, k) => (k === 'facts' ? { ...c, source: { url: SITE + p.images[0].src, sha256: sha256('x'), width: 1, height: 1 } } : c)).includes('card_media_unverified'));
   assert.ok(why((c, k) => (k === 'satellite' ? { ...c, source: { ...c.source, url: `${SITE}/land/OTHER.jpg` } } : c)).includes('card_media_unverified'), 'not one of this listing\'s images');
   assert.ok(why((c, k) => (k === 'facts' ? { ...c, card: 'photo' } : c)).includes('card_media_unverified'));
