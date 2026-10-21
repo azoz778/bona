@@ -20,10 +20,11 @@ const n = x => Number(x).toLocaleString('en-US', { maximumFractionDigits: 2 });
 const N = String.raw`\d[\d,]*(?:\.\d+)?`;
 const num = s => Number(String(s).replace(/,/g, ''));
 /** Every number in a string, Arabic-Indic and Eastern Arabic digits and the Arabic separators (٬ thousands, ٫ decimal) read as Latin. */
+/** Arabic-Indic and Eastern Arabic digits to Latin, ٬ to ',' and ٫ to '.': done before any parsing or digit test. */
+export const latinDigits = s => String(s ?? '').replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x0660)).replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x06F0))
+  .replace(/٬/g, ',').replace(/٫/g, '.');
 export function numbersIn(s) {
-  const latin = String(s ?? '').replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x0660)).replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x06F0))
-    .replace(/٬/g, ',').replace(/٫/g, '.');
-  return (latin.match(new RegExp(N, 'g')) ?? []).map(num).sort((x, y) => x - y);
+  return (latinDigits(s).match(new RegExp(N, 'g')) ?? []).map(num).sort((x, y) => x - y);
 }
 const sameNumbers = (a, b) => { const x = numbersIn(a), y = numbersIn(b); return x.length === y.length && x.every((v, i) => v === y[i]); };
 /**
@@ -33,7 +34,7 @@ const sameNumbers = (a, b) => { const x = numbersIn(a), y = numbersIn(b); return
  * printing a figure nobody checked.
  */
 export function parseHighlight(en) {
-  let rest = ` ${String(en)} `;
+  let rest = ` ${latinDigits(en)} `;
   const out = { perSqm: [], perPlot: [], total: [], area: [], dims: [], lengths: [] };
   const take = (re, f) => { rest = rest.replace(re, (...m) => { f(m); return ' '; }); };
   const SQM = String.raw`(?:sqm|m²|m2|sq\.?\s*m|square\s*met(?:re|er)s?)`;
@@ -46,6 +47,33 @@ export function parseHighlight(en) {
   take(new RegExp(String.raw`(${N})\s*-?\s*(?:m\b|metres?\b|meters?\b)`, 'gi'), m => out.lengths.push(num(m[1])));
   out.unparsed = /\d/.test(rest);
   return out;
+}
+/**
+ * The Arabic highlight read into the same typed facts as parseHighlight() (digits normalised
+ * first, diacritics and tatweel ignored): «ريال للمتر» / «ريال/م²» a price per square metre,
+ * «ريال للقطعة» per plot, «ريال» a total, «م²» / «متر مربع» an area, «A في B متراً» dimensions,
+ * «متراً» / «م» a length. A number left over makes it unparseable.
+ */
+export function parseHighlightAr(ar) {
+  let rest = ` ${latinDigits(ar).replace(/[\u064B-\u0652\u0670\u0640]/g, '')} `;
+  const out = { perSqm: [], perPlot: [], total: [], area: [], dims: [], lengths: [] };
+  const take = (re, f) => { rest = rest.replace(re, (...m) => { f(m); return ' '; }); };
+  const RIYAL = String.raw`(?:ريالا?(?:\s*سعودي)?|ر\.س)`;
+  const SQM = String.raw`(?:م²|م2|مترا?\s*مربعا?|م\s*مربع)`;
+  const END = String.raw`(?![\u0600-\u06FF²2])`;
+  take(new RegExp(String.raw`(?:نحو\s*)?(${N})\s*${RIYAL}\s*(?:\/\s*${SQM}|لل?متر(?:\s*المربع)?|للمتر\s*مربع)(?:\s*صافيا?)?`, 'g'), m => out.perSqm.push(num(m[1])));
+  take(new RegExp(String.raw`(${N})\s*${RIYAL}\s*لل?قطعة`, 'g'), m => out.perPlot.push(num(m[1])));
+  take(new RegExp(String.raw`(${N})\s*${RIYAL}`, 'g'), m => out.total.push(num(m[1])));
+  take(new RegExp(String.raw`(${N})\s*(?:في|×|x)\s*(${N})\s*(?:مترا?|م)${END}`, 'g'), m => out.dims.push([num(m[1]), num(m[2])]));
+  take(new RegExp(String.raw`(${N})\s*${SQM}`, 'g'), m => out.area.push(num(m[1])));
+  take(new RegExp(String.raw`(${N})\s*(?:مترا?|امتار|م)${END}`, 'g'), m => out.lengths.push(num(m[1])));
+  out.unparsed = /\d/.test(rest);
+  return out;
+}
+/** True when two parsed highlights state the same facts: same kinds, same numbers. */
+export function sameFacts(a, b) {
+  const key = h => JSON.stringify(['perSqm', 'perPlot', 'total', 'area', 'lengths'].map(k => [...h[k]].sort((x, y) => x - y)).concat([h.dims.map(d => d.join('x')).sort()]));
+  return key(a) === key(b);
 }
 const PERIOD = Object.freeze({ year: { ar: 'سنوياً', en: 'year' }, month: { ar: 'شهرياً', en: 'month' } });
 /**
@@ -63,9 +91,15 @@ export function landFactsProblems(p) {
   const en = p?.highlights?.en ?? [], ar = p?.highlights?.ar ?? [];
   if (en.length !== ar.length || en.some(x => !String(x).trim()) || ar.some(x => !String(x).trim())) out.push('highlights_do_not_pair');
   if (!p?.location?.district?.ar || !p?.location?.district?.en || !p?.location?.city?.ar || !p?.location?.city?.en) out.push('no_district_or_city');
-  const pairs = [[p?.title?.en, p?.title?.ar], [p?.location?.district?.en, p?.location?.district?.ar], [p?.location?.city?.en, p?.location?.city?.ar],
-    ...en.map((x, i) => [x, ar[i]])];
+  const pairs = [[p?.title?.en, p?.title?.ar], [p?.location?.district?.en, p?.location?.district?.ar], [p?.location?.city?.en, p?.location?.city?.ar]];
   if (pairs.some(([e, a]) => !sameNumbers(e, a))) out.push('arabic_and_english_numbers_differ');
+  // Highlights: the Arabic must state the same typed facts as the English (a rate is a rate, not a per-plot price).
+  for (const [i, x] of en.entries()) {
+    const he = parseHighlight(x), ha = parseHighlightAr(ar[i]);
+    if (ha.unparsed) out.push('highlight_unparseable');
+    if (!sameNumbers(x, ar[i])) out.push('arabic_and_english_numbers_differ');
+    else if (!he.unparsed && !ha.unparsed && !sameFacts(he, ha)) out.push('arabic_and_english_facts_differ');
+  }
   const shown = showsPrice(p), price = shown ? Number(p.price.amount) : null;
   const near = (x, y, tol) => Math.abs(x - y) / y <= tol;
   for (const h of en.map(parseHighlight)) {

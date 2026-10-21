@@ -37,6 +37,8 @@ export function assertNoPendingInstagram(events) {
 const IG_GRACE_HOURS=2.5;
 /** How many candidates a run tries when the picked listing's reviewed media is unavailable or changed (before intent only). */
 export const MEDIA_FALLBACK_CANDIDATES=3;
+/** Network errors and timeouts on one reviewed image are retried this many times (short backoff) before it counts as unavailable. */
+export const NETWORK_RETRIES=2;
 /** A failure's message for logs and alerts, anything shaped like a Meta token redacted. */
 const reasonOf=e=>String(e?.message??e).replace(/EAA[A-Za-z0-9]+/g,'[redacted]');
 /**
@@ -94,17 +96,25 @@ export async function catalogue(fetchImpl=fetch,now=new Date()) {
  * `{sources: true}` one {media, source, fit, kind} per frame (source: the photo a padded frame was
  * made from, for the TikTok reel's own 9:16 padding).
  */
-export async function photos(review,dir,dry,fetchImpl=fetch,{sources=false}={}) {
+export async function photos(review,dir,dry,fetchImpl=fetch,{sources=false,retries=NETWORK_RETRIES,backoffMs=400}={}) {
   // Every failure here is marked `media`: the publishers may then try another candidate (before any intent record).
+  // A network error or timeout is retried first (the media host resets some connections from this box); an HTTP
+  // error or a hash mismatch is final at once.
   const media=(msg,url)=>Object.assign(new Error(`${msg}: ${url}`),{media:true});
+  const once=async url=>{
+    const res=await fetchImpl(url,{redirect:'error',headers:{'User-Agent':'BonaPropertyPublisher/1.0'},signal:AbortSignal.timeout(20000)});
+    if(!res.ok || !res.headers.get('content-type')?.startsWith('image/jpeg'))return {res};
+    return {res,bytes:Buffer.from(await res.arrayBuffer())};
+  };
   const get=async(url,digest)=>{
-    let res,bytes;
-    try{res=await fetchImpl(url,{redirect:'error',headers:{'User-Agent':'BonaPropertyPublisher/1.0'},signal:AbortSignal.timeout(20000)});}
-    catch{throw media('Reviewed source photo unavailable (network or timeout)',url);}
-    if(!res.ok || !res.headers.get('content-type')?.startsWith('image/jpeg')) throw media(`Reviewed source photo unavailable (http ${res.status})`,url);
-    try{bytes=Buffer.from(await res.arrayBuffer());}catch{throw media('Reviewed source photo unavailable (network or timeout)',url);}
-    if(bytes.length>8000000 || sha256(bytes)!==digest)throw media('Source photo changed since visual review',url);
-    return bytes;
+    let got;
+    for(let attempt=0;;attempt++){
+      try{got=await once(url);break;}
+      catch{if(attempt>=retries)throw media('Reviewed source photo unavailable (network or timeout)',url);await new Promise(r=>setTimeout(r,backoffMs*(attempt+1)));}
+    }
+    if(!got.bytes) throw media(`Reviewed source photo unavailable (http ${got.res.status})`,url);
+    if(got.bytes.length>8000000 || sha256(got.bytes)!==digest)throw media('Source photo changed since visual review',url);
+    return got.bytes;
   };
   const out=[];
   for(const [i,p] of review.photos.entries()) {

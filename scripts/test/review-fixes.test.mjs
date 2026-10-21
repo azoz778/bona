@@ -281,3 +281,48 @@ test('fix 4: approval refuses --select and --cards for the same listing', async 
     assert.ok(r.refused.some(x => /a set is all cards or all photographs/.test(x)), r.refused.join(' | '));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------- round 2
+test('round 2, fix 1: Arabic-Indic digits are normalised before parsing, so an Arabic-digit rate is checked against the price', () => {
+  assert.ok(landFactsProblems(plot({}, hl(['SAR ٧٬٠٠٠/m²'], ['٧٬٠٠٠ ريال للمتر']))).includes('price_per_sqm_contradicts_price'));
+  assert.deepEqual(landFactsProblems(plot({}, hl(['SAR 6,000 per sqm net'], ['٦٬٠٠٠ ريال للمتر صافياً']))), [], 'the same rate in Arabic-Indic digits');
+});
+test('round 2, fix 1: the Arabic must state the same typed facts as the English, and an Arabic numeric highlight must be readable', () => {
+  assert.ok(landFactsProblems(plot({}, hl(['SAR 6,000 per sqm'], ['6,000 ريال للقطعة']))).includes('arabic_and_english_facts_differ'), 'a rate is not a per-plot price');
+  assert.ok(landFactsProblems(plot({}, hl(['16-metre street'], ['شارع رقم 16']))).includes('highlight_unparseable'), 'Arabic states a number the card cannot type');
+  assert.ok(landFactsProblems(plot({}, hl(['636 sqm plot'], ['شارع بعرض 636 متراً']))).includes('arabic_and_english_facts_differ'), 'an area is not a length');
+  assert.deepEqual(landFactsProblems(plot({}, hl(['24 m by 26.5 m'], ['24 في 26.5 متراً']))), []);
+});
+test('round 2, fix 2: a transient network error is retried; the same listing goes out and no fallback is alerted', async () => {
+  const w = await world();
+  try {
+    const url = w.reviews['BONA-A1'].photos[0].url;
+    let resets = 0;
+    const flaky = async (u, o) => { if (u === url && resets++ === 0) throw Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }); return w.fetchImpl(u, o); };
+    await assert.rejects(propertyDaily('instagram', { dry: false, now, root: w.root, env: w.env, fetchImpl: flaky, legacyTimersDisabled: () => false, clock: () => now }), /Legacy publisher must remain disabled/);
+    assert.equal(resets, 2, 'reset once, then fetched again');
+    assert.equal(fs.existsSync(path.join(w.env.BONA_DATA, 'daily/alerts.jsonl')), false, 'no fallback alert');
+    resets = 0;
+    assert.equal((await propertyDaily('instagram', { dry: true, now, root: w.root, env: w.env, fetchImpl: flaky })).entry.listingId, 'BONA-A1');
+    // A 404 is final at once: no retry, straight to the next candidate.
+    w.missing.add(url);
+    w.seen.length = 0;
+    assert.equal((await propertyDaily('instagram', { dry: true, now, root: w.root, env: w.env, fetchImpl: w.fetchImpl })).entry.listingId, 'BONA-B1');
+    assert.equal(w.seen.filter(u => u === url).length, 1);
+  } finally { w.cleanup(); }
+});
+test('round 2, fix 3: a live browser run renders each candidate in its own directory and removes the failed one', async () => {
+  const w = await world();
+  try {
+    w.missing.add(w.reviews['BONA-A1'].photos[0].media.url);
+    const touch = f => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, 'x'); return f; };
+    const deps = { fal: '1100000000', fetchImpl: w.fetchImpl, catalogue: async () => ({ listings: [w.A, w.B, w.C], advertiser }), downloadReviewedPhotos: photos,
+      media: { propertyReel: (l, fr, li, out) => touch(out), linkedinPropertyImages: async (fr, d) => fr.map((_, i) => touch(path.join(d, `li-${i}.jpg`))) } };
+    const at = new Date('2026-10-21T18:45:00Z'), data = path.join(w.root, 'bdata');
+    const r = await browserRun('tiktok', { renderOnly: true, dry: false, env: { BONA_DATA: data }, root: w.root, now: at, clock: () => at, log: quiet, kind: 'property' }, deps);
+    assert.equal(r.choice.itemId, 'BONA-B1');
+    const day = path.join(data, 'tiktok/assets/2026-10-21');
+    assert.deepEqual(fs.readdirSync(day), ['BONA-B1'], 'only the candidate that rendered keeps a directory');
+    assert.ok(r.files.every(f => f.startsWith(path.join(day, 'BONA-B1') + path.sep)));
+  } finally { w.cleanup(); }
+});
