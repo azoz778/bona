@@ -70,7 +70,10 @@ export function loadConfig(overrides = {}) {
     statePath: path.join(data, 'intake-state.json'),
     lockPath: path.join(data, 'intake.lock'),
     pollMs: num(raw.BONA_POLL_MS, 20000),
-    groupScanMs: num(raw.BONA_GROUP_SCAN_MS, 300000),
+    // 0 = discovery off. Default: off when BONA_WA_GROUP_JIDS names the group (each scan fans
+    // out to one groupMetadata query per group -> rate-overlimit, see lib/groups.mjs scanDue),
+    // every 5 min only when the group must be found by subject.
+    groupScanMs: num(raw.BONA_GROUP_SCAN_MS, String(raw.BONA_WA_GROUP_JIDS || '').trim() ? 0 : 300000),
     claudeModel: raw.BONA_CLAUDE_MODEL || 'sonnet',
     claudeFallbackModel: raw.BONA_CLAUDE_FALLBACK_MODEL || 'opus',
     claudeBin: raw.BONA_CLAUDE_BIN || 'claude',
