@@ -226,11 +226,11 @@ function videoJobFromState(job) {
 }
 
 /** Anything left `pending` in the state file is re-run when the daemon comes back. */
-function replayPendingJobs() {
-  const pending = state.pendingJobs();
+function replayPendingJobs(pending = state.pendingJobs()) {
   if (!pending.length) return;
   log.info('jobs.replay', { count: pending.length });
   for (const job of pending) {
+    if (job.retryAt) state.updateJob(job.id, { retryAt: null });
     if (job.kind === 'video') { enqueue(videoJobFromState(job)); continue; }
     if (job.kind === 'unsupported') {
       enqueue({
@@ -305,7 +305,14 @@ async function drain() {
         });
         state.setError(err.message);
         if ((job.kind === 'pdf' || job.kind === 'video' || job.kind === 'unsupported') && jobId) state.failJob(jobId, err.message);
-        await reply(job.group.id, msg.failed());
+        const failed = state.getJob(jobId);
+        if (failed?.retryAt) {
+          log.info('job.quota_deferred', { id: jobId, retryAt: failed.retryAt });
+          if (!failed.quotaNotified) {
+            await reply(job.group.id, 'Processing is paused by the AI provider’s usage limit. Your submission is saved and will retry automatically.');
+            state.updateJob(jobId, { quotaNotified: true });
+          }
+        } else await reply(job.group.id, msg.failed());
       }
     }
   } finally {
@@ -325,7 +332,7 @@ async function handlePdf({ group, record, doc, retryPath }) {
     return;
   }
   const caption = parseCaption(textOf(record) || doc.caption || '');
-  await reply(jid, msg.READING);
+  if (!state.getJob(messageId)?.quotaNotified) await reply(jid, msg.READING);
 
   const day = new Date().toISOString().slice(0, 10);
   const dir = path.join(cfg.intakeDir, day);
@@ -901,6 +908,9 @@ async function main() {
       }
       for (const g of groups) await pollGroup(g);
       requeueWaitingVideos();
+      replayPendingJobs(state.pendingJobs({
+        retriesOnly: true, activeIds: [currentJobId, ...queue.map((q) => q.record?.key?.id)],
+      }));
     } catch (err) {
       log.error('poll.failed', { error: err.message });
       state.setError(err.message);

@@ -32,7 +32,9 @@ Environment=PATH=%h/.nvm/versions/node/v24.19.0/bin:%h/.local/bin:/usr/local/sbi
 EnvironmentFile=-%h/.secrets/bona-services.env
 ExecStart=%h/.nvm/versions/node/v24.19.0/bin/node %h/bona/services/intake/index.mjs
 Restart=always
-RestartSec=10
+; Stay below 5 starts / 300 s even when startup fails immediately. A disk-full
+; outage must recover after space returns, not hit start-limit and stay down.
+RestartSec=75
 ; SIGTERM makes the daemon stop taking work and wait up to 40 s for the job in flight
 ; (lib/shutdown.mjs) — never a process.exit() in the middle of a git push or a sharp encode.
 KillSignal=SIGTERM
