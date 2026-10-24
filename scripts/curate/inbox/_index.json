@@ -1,5 +1,5 @@
 {
-  "nextSeq": 19,
+  "nextSeq": 20,
   "listings": {
     "kian-residence-apartments-al-nahda": "BONA-W001",
     "nuzul-khayala-residences-north-jeddah": "BONA-W002",
@@ -18,6 +18,7 @@
     "aseel-al-ghoroub-2-al-madinah": "BONA-W015",
     "durrat-al-basateen-villa-al-mohammadiyah": "BONA-W016",
     "katheeb-residences-laban-district": "BONA-W017",
-    "elemental-residences-al-rawabi": "BONA-W018"
+    "elemental-residences-al-rawabi": "BONA-W018",
+    "private-villa-al-khalidiyah": "BONA-W019"
   }
 }
