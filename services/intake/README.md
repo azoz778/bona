@@ -236,6 +236,18 @@ id is marked seen, so a crash between the two replays the job instead of losing 
 (`TimeoutStopSec=45`) — it never `process.exit()`s in the middle of a git push or a sharp
 encode.
 
+**Host storage failures.** The unit retries every 75 s, below its five-starts-per-300-s
+budget, so an extended disk-full/startup failure does not permanently disable intake.
+Atomic state writes keep the last saved jobs and PDF hashes intact. Before recovery,
+check free space and inodes, back up the state, and inspect pending jobs and unseen
+messages. Replay only the intended submissions; design supplements for one brochure
+must not become separate listings. If an older unit already hit its start limit, install
+the updated unit, run `systemctl --user daemon-reload`, then
+`systemctl --user reset-failed bona-intake` and start it after reviewing that queue.
+A model quota error is separate: the originals stay queued and retry hourly, including
+across restarts, without exhausting the three real-failure attempts. The group receives
+one quota notice rather than repeated failure replies. No provider limits are bypassed.
+
 ## Install
 
 The service runs from `~/bona` and writes to a **separate clone** so that a `git pull` during
@@ -394,7 +406,7 @@ live-list filter; intake listings are exempt from that filter because they are o
 | `✋ … not a property brochure` (AI gate) | a scan, certificate or site plan without property details | send the real brochure |
 | `✋ … not enough usable photos — 0 of 4` | the PDF has no extractable photographs (only page renders) or they are all plans/logos | send a brochure with real photos, or the photos themselves |
 | `✋ … not enough usable photos — 2 of 4 (even after cutting 3 photo region(s) out of its own pages)` | the pages were composites, the crops were made, and the ranking step still would not publish enough of them | look in the work dir: `regions/regions.json` is where the model said the photographs were, `images/cNNN.jpg` is what came out |
-| `⚠️ … You've hit your session limit` | Claude Code quota | wait for the reset; the PDF stays in `$BONA_DATA`, send `retry` |
+| `⚠️ … You've hit your session limit` | Claude Code quota | the saved job retries hourly; the PDF stays in `$BONA_DATA`, send `retry` |
 | `⚠️ Something went wrong …` | any failure: git, build, model | the reason is in the journal — the reply deliberately quotes none of it. The repo is rolled back. |
 | `⚠️ The page is still not answering …` | GitHub Pages did not deploy | the listing IS committed; check the Actions run |
 | `the publishing clone has N uncommitted path(s)` | something other than the intake wrote to `~/bona-bot` | look at `git status` there yourself; the intake refuses to throw away work that is not its own |

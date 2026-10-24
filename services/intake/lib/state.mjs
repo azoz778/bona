@@ -26,6 +26,9 @@ const MAX_SEEN = 2000;
 const MAX_JOBS = 200;
 /** After this many failed runs a job stops being replayed on startup. */
 export const MAX_JOB_ATTEMPTS = 3;
+// A provider quota is temporary, not a bad brochure. Retry conservatively without
+// consuming the three real-failure attempts or requiring a daemon restart.
+export const QUOTA_RETRY_MS = 60 * 60 * 1000;
 
 export function createState(file) {
   let data = EMPTY();
@@ -193,14 +196,20 @@ export function createState(file) {
      * completeVideo() ran and then the WhatsApp reply threw — stays closed. Reopening it
      * would replay a finished publish (Codex review, 2026-09-06).
      */
-    failJob(id, message) {
+    failJob(id, message, { now = Date.now() } = {}) {
       const job = data.jobs[id];
       if (!job) return null;
       if (job.status !== 'pending') return job;
+      if (/^claude -p failed: You've hit your (?:weekly|session) limit/i.test(String(message || ''))) {
+        data.jobs[id] = { ...job, lastError: String(message).slice(0, 300), retryAt: new Date(now + QUOTA_RETRY_MS).toISOString() };
+        save();
+        return data.jobs[id];
+      }
       const attempts = (job.attempts ?? 0) + 1;
       data.jobs[id] = {
         ...job,
         attempts,
+        retryAt: null,
         lastError: message ? String(message).slice(0, 300) : null,
         status: attempts >= MAX_JOB_ATTEMPTS ? 'failed' : 'pending',
       };
@@ -208,9 +217,12 @@ export function createState(file) {
       return data.jobs[id];
     },
     /** Oldest first, so a queue replayed on startup keeps its order. */
-    pendingJobs() {
+    pendingJobs({ now = Date.now(), retriesOnly = false, activeIds = [] } = {}) {
       return Object.values(data.jobs || {})
-        .filter((j) => j.status === 'pending')
+        .filter((j) => j.status === 'pending'
+          && (!j.retryAt || Date.parse(j.retryAt) <= now)
+          && (!retriesOnly || Boolean(j.retryAt))
+          && !activeIds.includes(j.id))
         .sort((a, b) => String(a.at).localeCompare(String(b.at)));
     },
     save,
