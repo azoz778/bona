@@ -1,0 +1,198 @@
+{
+  "id": "BONA-W019",
+  "slug": "private-villa-al-khalidiyah",
+  "sourceRef": "WA-20261025-AC7084",
+  "status": "available",
+  "category": "buy",
+  "type": "villa",
+  "kind": "house",
+  "featured": false,
+  "title": {
+    "en": "Private Villa in Al Khalidiyah",
+    "ar": "فيلا خاصة في حي الخالدية"
+  },
+  "location": {
+    "district": {
+      "en": "Al Khalidiyah",
+      "ar": "الخالدية"
+    },
+    "city": {
+      "en": "Jeddah",
+      "ar": "جدة"
+    },
+    "country": {
+      "en": "Saudi Arabia",
+      "ar": "المملكة العربية السعودية"
+    },
+    "countryCode": "SA"
+  },
+  "price": {
+    "amount": 6200000,
+    "currency": "SAR",
+    "from": false,
+    "period": null,
+    "onRequest": false
+  },
+  "specs": {
+    "beds": 4,
+    "baths": null,
+    "areaSqm": 490,
+    "plotSqm": 323,
+    "yearBuilt": null,
+    "floors": null
+  },
+  "images": [
+    {
+      "src": "/listings/private-villa-al-khalidiyah/01.jpg",
+      "thumb": "/listings/private-villa-al-khalidiyah/01-thumb.webp",
+      "alt": {
+        "en": "Swimming pool — Private Villa in Al Khalidiyah. Architectural visualisations supplied for this villa.",
+        "ar": "المسبح — فيلا خاصة في حي الخالدية. تصورات معمارية مقدمة لهذه الفيلا."
+      }
+    },
+    {
+      "src": "/listings/private-villa-al-khalidiyah/02.jpg",
+      "thumb": "/listings/private-villa-al-khalidiyah/02-thumb.webp",
+      "alt": {
+        "en": "Entrance — Private Villa in Al Khalidiyah. Architectural visualisations supplied for this villa.",
+        "ar": "المدخل — فيلا خاصة في حي الخالدية. تصورات معمارية مقدمة لهذه الفيلا."
+      }
+    },
+    {
+      "src": "/listings/private-villa-al-khalidiyah/03.jpg",
+      "thumb": "/listings/private-villa-al-khalidiyah/03-thumb.webp",
+      "alt": {
+        "en": "Living room — Private Villa in Al Khalidiyah. Architectural visualisations supplied for this villa.",
+        "ar": "غرفة المعيشة — فيلا خاصة في حي الخالدية. تصورات معمارية مقدمة لهذه الفيلا."
+      }
+    },
+    {
+      "src": "/listings/private-villa-al-khalidiyah/04.jpg",
+      "thumb": "/listings/private-villa-al-khalidiyah/04-thumb.webp",
+      "alt": {
+        "en": "Living room — Private Villa in Al Khalidiyah. Architectural visualisations supplied for this villa.",
+        "ar": "غرفة المعيشة — فيلا خاصة في حي الخالدية. تصورات معمارية مقدمة لهذه الفيلا."
+      }
+    },
+    {
+      "src": "/listings/private-villa-al-khalidiyah/05.jpg",
+      "thumb": "/listings/private-villa-al-khalidiyah/05-thumb.webp",
+      "alt": {
+        "en": "Dining room — Private Villa in Al Khalidiyah. Architectural visualisations supplied for this villa.",
+        "ar": "غرفة الطعام — فيلا خاصة في حي الخالدية. تصورات معمارية مقدمة لهذه الفيلا."
+      }
+    },
+    {
+      "src": "/listings/private-villa-al-khalidiyah/06.jpg",
+      "thumb": "/listings/private-villa-al-khalidiyah/06-thumb.webp",
+      "alt": {
+        "en": "Staircase — Private Villa in Al Khalidiyah. Architectural visualisations supplied for this villa.",
+        "ar": "الدرج — فيلا خاصة في حي الخالدية. تصورات معمارية مقدمة لهذه الفيلا."
+      }
+    },
+    {
+      "src": "/listings/private-villa-al-khalidiyah/07.jpg",
+      "thumb": "/listings/private-villa-al-khalidiyah/07-thumb.webp",
+      "alt": {
+        "en": "Garden — Private Villa in Al Khalidiyah. Architectural visualisations supplied for this villa.",
+        "ar": "الحديقة — فيلا خاصة في حي الخالدية. تصورات معمارية مقدمة لهذه الفيلا."
+      }
+    },
+    {
+      "src": "/listings/private-villa-al-khalidiyah/08.jpg",
+      "thumb": "/listings/private-villa-al-khalidiyah/08-thumb.webp",
+      "alt": {
+        "en": "Lounge — Private Villa in Al Khalidiyah. Architectural visualisations supplied for this villa.",
+        "ar": "الصالة — فيلا خاصة في حي الخالدية. تصورات معمارية مقدمة لهذه الفيلا."
+      }
+    }
+  ],
+  "videos": [],
+  "description": {
+    "en": "A private villa in Al Khalidiyah, Jeddah, on a 323-square-metre plot with approximately 490 square metres of built space. The sitting area and staircase have double-height ceilings, with marble floors and a marble feature wall. A complete smart-home system serves the residence.\n\nThree bedrooms occupy the first floor. The annex provides a guest bedroom, a private lounge and a separate maid's room. A Fuji passenger lift connects the levels, and the principal and service kitchens are fitted by Nobilia.\n\nThe courtyard includes a 4-by-2-metre pool. O General ducted split air conditioning and Spanish and Italian porcelain finishes complete the specification. The supplied gallery presents architectural visualisations of the interiors and landscaping.",
+    "ar": "فيلا خاصة في حي الخالدية بجدة، على أرض مساحتها ٣٢٣ متراً مربعاً وبمسطحات بناء تقارب ٤٩٠ متراً مربعاً. تتميز منطقة الجلوس والدرج بارتفاع مزدوج، مع أرضيات رخام وجدار رخامي، ويخدم المنزل نظام ذكي متكامل.\n\nيضم الدور الأول ثلاث غرف نوم، بينما يحتوي الملحق على غرفة نوم للضيوف وصالة خاصة وغرفة عاملة مستقلة. يربط مصعد فوجي للركاب بين الأدوار، وقد جُهّز المطبخ الرئيسي ومطبخ الخدمة من شركة نوبيليا.\n\nيحتوي الفناء على مسبح بمقاس ٤ × ٢ متر. وتشمل المواصفات تكييف دكت سبليت من أوجنرال وتشطيبات بورسلان إسباني وإيطالي. يعرض معرض الصور تصورات معمارية للتصميم الداخلي وتنسيق المساحات الخارجية."
+  },
+  "highlights": {
+    "en": [
+      "Four bedrooms",
+      "Smart-home system",
+      "Passenger lift",
+      "Two fitted kitchens",
+      "Private courtyard pool",
+      "Double-height living space"
+    ],
+    "ar": [
+      "أربع غرف نوم",
+      "نظام منزل ذكي",
+      "مصعد ركاب",
+      "مطبخان مجهزان",
+      "مسبح خاص في الفناء",
+      "معيشة بارتفاع مزدوج"
+    ]
+  },
+  "virtualTourUrl": null,
+  "brochureUrl": "https://bona-real-estate.com/listings/private-villa-al-khalidiyah/brochure.pdf",
+  "project": null,
+  "unit": null,
+  "map": null,
+  "mapPrecision": null,
+  "listedAt": "2026-10-25",
+  "hidden": false,
+  "_intake": {
+    "source": "whatsapp",
+    "pdfSha256": "0e55cb4a637b3dda2812b63ea774df1d8ac3c2a4f6318146dc828dba31bf7bcb",
+    "model": "codex-reviewed-recovery",
+    "confidence": 0.98,
+    "warnings": [
+      "photos-cropped"
+    ],
+    "images": [
+      {
+        "n": 1,
+        "candidate": 1,
+        "room": "pool"
+      },
+      {
+        "n": 2,
+        "candidate": 7,
+        "room": "entrance"
+      },
+      {
+        "n": 3,
+        "candidate": 0,
+        "room": "living"
+      },
+      {
+        "n": 4,
+        "candidate": 2,
+        "room": "living"
+      },
+      {
+        "n": 5,
+        "candidate": 3,
+        "room": "dining"
+      },
+      {
+        "n": 6,
+        "candidate": 4,
+        "room": "staircase"
+      },
+      {
+        "n": 7,
+        "candidate": 5,
+        "room": "garden"
+      },
+      {
+        "n": 8,
+        "candidate": 6,
+        "room": "lounge"
+      }
+    ],
+    "createdAt": "2026-10-24T23:54:48.373Z",
+    "site": "https://bona-real-estate.com"
+  },
+  "photoNote": {
+    "en": "Architectural visualisations supplied for this villa.",
+    "ar": "تصورات معمارية مقدمة لهذه الفيلا."
+  }
+}
