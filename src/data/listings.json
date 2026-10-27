@@ -4902,6 +4902,113 @@
     "licence": null
   },
   {
+    "id": "BONA-W020",
+    "slug": "baroque-palace-residence-hampstead",
+    "sourceRef": "WA-20261027-AC032F",
+    "status": "available",
+    "category": "international",
+    "type": "mansion",
+    "kind": "house",
+    "featured": false,
+    "title": {
+      "en": "Baroque Palace Residence, Hampstead",
+      "ar": "قصر باروكي خاص، هامبستيد"
+    },
+    "location": {
+      "district": {
+        "en": "Hampstead",
+        "ar": "هامبستيد"
+      },
+      "city": {
+        "en": "London",
+        "ar": "لندن"
+      },
+      "country": {
+        "en": "United Kingdom",
+        "ar": "المملكة المتحدة"
+      },
+      "countryCode": "GB"
+    },
+    "price": {
+      "amount": null,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": true
+    },
+    "specs": {
+      "beds": 10,
+      "baths": 10,
+      "areaSqm": 1270,
+      "plotSqm": null,
+      "yearBuilt": null,
+      "floors": 4
+    },
+    "images": [
+      {
+        "src": "/listings/baroque-palace-residence-hampstead/01.jpg",
+        "thumb": "/listings/baroque-palace-residence-hampstead/01-thumb.webp",
+        "alt": {
+          "en": "Exterior — Baroque Palace Residence, Hampstead",
+          "ar": "الواجهة الخارجية — قصر باروكي خاص، هامبستيد"
+        }
+      },
+      {
+        "src": "/listings/baroque-palace-residence-hampstead/02.jpg",
+        "thumb": "/listings/baroque-palace-residence-hampstead/02-thumb.webp",
+        "alt": {
+          "en": "Staircase — Baroque Palace Residence, Hampstead",
+          "ar": "الدرج — قصر باروكي خاص، هامبستيد"
+        }
+      },
+      {
+        "src": "/listings/baroque-palace-residence-hampstead/03.jpg",
+        "thumb": "/listings/baroque-palace-residence-hampstead/03-thumb.webp",
+        "alt": {
+          "en": "Indoor pool — Baroque Palace Residence, Hampstead",
+          "ar": "المسبح الداخلي — قصر باروكي خاص، هامبستيد"
+        }
+      },
+      {
+        "src": "/listings/baroque-palace-residence-hampstead/04.jpg",
+        "thumb": "/listings/baroque-palace-residence-hampstead/04-thumb.webp",
+        "alt": {
+          "en": "Master suite — Baroque Palace Residence, Hampstead",
+          "ar": "الجناح الرئيسي — قصر باروكي خاص، هامبستيد"
+        }
+      }
+    ],
+    "videos": [],
+    "description": {
+      "en": "An off-market private residence on Winnington Road, one of Hampstead's most discreet addresses. The house takes its inspiration from the Palace of Versailles and pairs bespoke Baroque interiors with contemporary engineering, climate control and full smart-home automation.\n\nThe residence is arranged over four levels and extends to approximately 1,270 sq m (13,673 sq ft). It has ten en-suite bedrooms, formal reception rooms, four kitchens and four offices, with a lift serving every floor.\n\nWellness facilities include an indoor pool with jacuzzi, a hammam and a sauna. The house was reconstructed between 2020 and 2025 with its original façade retained, and the private grounds provide parking for up to eight cars.",
+      "ar": "قصر خاص معروض خارج السوق في وينينغتون رود، أحد أكثر عناوين هامبستيد خصوصية. يستلهم تصميمه قصر فرساي، ويجمع بين ديكورات باروكية مصممة حسب الطلب وأنظمة هندسية حديثة للتحكم المناخي والتشغيل الذكي المتكامل.\n\nيمتد القصر على أربعة مستويات بمساحة تقارب 1,270 متراً مربعاً (13,673 قدماً مربعة). ويضم عشر غرف نوم بأجنحة خاصة، وصالات استقبال رسمية، وأربعة مطابخ وأربعة مكاتب، ويخدم المصعد جميع الطوابق.\n\nتشمل مرافق العافية مسبحاً داخلياً مع جاكوزي، وحماماً بخارياً، وساونا. أعيد بناء القصر بين عامي 2020 و2025 مع الحفاظ على واجهته الأصلية، وتوفر الأرض الخاصة مواقف لما يصل إلى ثماني سيارات."
+    },
+    "highlights": {
+      "en": [
+        "Ten en-suite bedrooms",
+        "Indoor pool and jacuzzi",
+        "Hammam and sauna",
+        "Lift serving all four levels",
+        "Crestron smart-home system"
+      ],
+      "ar": [
+        "عشر غرف نوم بأجنحة خاصة",
+        "مسبح داخلي وجاكوزي",
+        "حمام بخاري وساونا",
+        "مصعد يخدم المستويات الأربعة",
+        "نظام منزل ذكي كريسترون"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": "https://bona-real-estate.com/listings/baroque-palace-residence-hampstead/brochure.pdf",
+    "project": null,
+    "unit": null,
+    "map": null,
+    "mapPrecision": null,
+    "listedAt": "2026-10-27",
+    "licence": null
+  },
+  {
     "id": "BONA-W013",
     "slug": "danyah-villas-al-basateen",
     "sourceRef": "WA-20260906-AC4732",
