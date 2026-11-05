@@ -34,7 +34,8 @@ export interface ChatMessageResponse {
   actions?: ChatAction[];
   leadCaptured?: boolean;
 }
-export interface CallTokenResponse { accessToken: string; callId: string }
+/** `transport`/`url`/`iceServers` come from Retell's v3 create-web-call and go to the SDK's startCall() unchanged. */
+export interface CallTokenResponse { accessToken: string; callId: string; transport?: 'livekit' | 'gateway'; url?: string; iceServers?: RTCIceServer[] }
 export interface CallContextResponse { listings?: Card[]; updatedAt?: string }
 
 export const API_KEY = 'bona.concierge.api';

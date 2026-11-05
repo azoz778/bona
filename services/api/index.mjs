@@ -10,7 +10,7 @@
  *   POST /v1/chat/session          { locale, page? }         -> { sessionId, greeting }
  *   POST /v1/chat/message          { sessionId, text, … }    -> { messages, actions, leadCaptured? }
  *   POST /v1/chat/end              { sessionId }             -> { ok }
- *   POST /v1/call/token            { locale, page? }         -> { accessToken, callId }
+ *   POST /v1/call/token            { locale, page? }         -> { accessToken, callId, transport?, url?, iceServers? }
  *   GET  /v1/call/:callId/context                            -> { listings, updatedAt }
  *   POST /v1/tools/<name>?token=   (Retell custom tools)
  *   POST /v1/retell/webhook?token= (Retell agent events)
@@ -691,7 +691,16 @@ export function createApp(options = {}) {
     store.createCall({ callId: call.call_id, locale, page });
     log({ evt: 'call.token', callId: call.call_id, locale, visitorSession: metadata.session_id });
     recordConciergeStart('concierge_call_start', { attr: metadata, page, locale, conversationId: call.call_id, server });
-    return { accessToken: call.access_token, callId: call.call_id };
+    return { accessToken: call.access_token, callId: call.call_id, ...webCallConnection(call) };
+  }
+
+  /** The v3 connection details the browser SDK's startCall() takes, passed through only when well-formed. */
+  function webCallConnection(call) {
+    const out = {};
+    if (call.transport === 'livekit' || call.transport === 'gateway') out.transport = call.transport;
+    if (typeof call.url === 'string' && /^(wss|https):\/\//.test(call.url)) out.url = call.url;
+    if (Array.isArray(call.ice_servers)) out.iceServers = call.ice_servers.filter(s => s && typeof s === 'object');
+    return out;
   }
 
   function callContext(callId) {

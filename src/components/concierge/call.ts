@@ -1,4 +1,5 @@
-/* Browser voice call with Dana, over the Retell web SDK.
+/* Browser voice call with Dana, over the Retell web SDK (3.x, token mode: RetellWebClient + a server-minted v3 call;
+   RetellClient.createWebCall would need the Retell key in the browser).
    The SDK (and its LiveKit dependency) is imported lazily — nothing ships to visitors who never open the Call tab. */
 
 import type { RetellWebClient } from 'retell-client-js-sdk';
@@ -79,7 +80,7 @@ export class CallSession {
       this.set({ status: 'connecting' });
       let client: RetellWebClient | null = null;
       try {
-        const [{ accessToken, callId }, mod] = await Promise.all([
+        const [{ accessToken, callId, transport, url, iceServers }, mod] = await Promise.all([
           postJson<CallTokenResponse>(apiBase, '/v1/call/token', { locale, page, attr: visitorAttr() }, 15000),
           import('retell-client-js-sdk'),
         ]);
@@ -103,7 +104,8 @@ export class CallSession {
           if (mine()) this.finish('error', 'failed');
         });
 
-        await client.startCall({ accessToken });
+        // SDK 3.x token mode: the server mints the call (v3), the browser only joins it with these connection details.
+        await client.startCall({ accessToken, callId: callId || undefined, transport, url, iceServers });
         // Closed or navigated away while the SDK was connecting: take the call down instead of leaving it live.
         if (!this.live(id)) { try { client.stopCall(); } catch { /* already down */ } this.client = null; return; }
         this.startPolling(apiBase);
