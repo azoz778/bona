@@ -16,7 +16,7 @@
     "@astrojs/sitemap": "^3.7.4",
     "@tailwindcss/vite": "^4.3.3",
     "astro": "^7.3.1",
-    "retell-client-js-sdk": "2.0.8",
+    "retell-client-js-sdk": "3.0.3",
     "sharp": "^0.35.4",
     "tailwindcss": "^4.3.3"
   },

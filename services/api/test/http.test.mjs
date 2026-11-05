@@ -55,7 +55,7 @@ function fakeRetell({ failOn = null } = {}) {
     async createWebCall(body) {
       calls.push(['createWebCall', body]);
       if (failOn === 'createWebCall') throw new Error('retell down');
-      return { call_id: `call_${++n}`, access_token: 'tok_abc', agent_id: body.agent_id };
+      return { call_id: `call_${++n}`, access_token: 'tok_abc', transport: 'livekit', url: 'wss://lk.retellai.example', ice_servers: [{ urls: 'stun:stun.example:3478' }] };
     },
     async ping() { return { ok: true }; },
   };
@@ -255,6 +255,10 @@ test('POST /v1/call/token returns a web-call access token', async () => {
     const body = await res.json();
     assert.equal(body.accessToken, 'tok_abc');
     assert.match(body.callId, /^call_/);
+    // v3 connection details go to the browser SDK's startCall() unchanged.
+    assert.equal(body.transport, 'livekit');
+    assert.equal(body.url, 'wss://lk.retellai.example');
+    assert.deepEqual(body.iceServers, [{ urls: 'stun:stun.example:3478' }]);
     const [, sent] = retell.calls.find(([name]) => name === 'createWebCall');
     assert.equal(sent.agent_id, 'agent_voice');
     assert.equal(sent.metadata.locale, 'ar');

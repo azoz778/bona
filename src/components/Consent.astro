@@ -64,13 +64,26 @@ const privacyHref = `${localePath(locale, '/privacy/')}#cookies`;
   }
 
   const root = () => document.querySelector<HTMLElement>('[data-consent]');
+  /* On phones the sheet spans the full width and would sit on top of the concierge cluster (the Concierge pill +
+     WhatsApp), so a tap there hit the sheet instead. The sheet's height goes to --consent-lift on <html>;
+     global.css raises the cluster by it below 768px (wider screens leave the cluster a gutter instead). */
+  let lift: ResizeObserver | null = null;
+  function setLift(el: HTMLElement | null) {
+    const html = document.documentElement;
+    if (el && !el.hidden) html.style.setProperty('--consent-lift', `${Math.ceil(el.getBoundingClientRect().height)}px`);
+    else html.style.removeProperty('--consent-lift');
+  }
   function show() {
     const el = root(); if (!el) return;
     el.hidden = false;
+    setLift(el);
+    if (typeof ResizeObserver === 'function') { lift?.disconnect(); lift = new ResizeObserver(() => setLift(el)); lift.observe(el); }
     requestAnimationFrame(() => el.classList.add('is-open'));
   }
   function hide() {
     const el = root(); if (!el) return;
+    lift?.disconnect(); lift = null;
+    setLift(null);
     el.classList.remove('is-open');
     window.setTimeout(() => { el.hidden = true; }, 400);
   }
