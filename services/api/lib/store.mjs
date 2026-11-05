@@ -104,6 +104,17 @@ export function createStore({ ttlMs = TTL_MS, now = () => Date.now(), maxEntries
     return entry;
   }
 
+  /** Retell said the call is over (call_ended webhook). Only a call this API minted is marked; unknown ids are ignored.
+   *  An entry already expired (TTL from creation) or trimmed never reports `ended` — the browser SDK's own end
+   *  detection (peer connection closing, ~2 s when measured) still ends the call; this is the backstop. */
+  function endCall(callId) {
+    const entry = getCall(callId);
+    if (!entry) return null;
+    entry.ended = true;
+    entry.updatedAt = now();
+    return entry;
+  }
+
   /** Record a Card against a chat or call, newest first, de-duplicated by id. */
   function addCard(externalId, card) {
     if (!externalId || !card) return null;
@@ -131,7 +142,7 @@ export function createStore({ ttlMs = TTL_MS, now = () => Date.now(), maxEntries
 
   return {
     createSession, getSession, endSession,
-    createCall, getCall, addCard, markLead, sweep,
+    createCall, getCall, endCall, addCard, markLead, sweep,
     link: (externalId, sessionId) => byExternal.set(externalId, sessionId),
     stats: () => ({ sessions: sessions.size, calls: calls.size, external: byExternal.size }),
   };

@@ -10,7 +10,7 @@
  *   POST /v1/chat/session          { locale, page? }         -> { sessionId, greeting }
  *   POST /v1/chat/message          { sessionId, text, … }    -> { messages, actions, leadCaptured? }
  *   POST /v1/chat/end              { sessionId }             -> { ok }
- *   POST /v1/call/token            { locale, page? }         -> { accessToken, callId }
+ *   POST /v1/call/token            { locale, page? }         -> { accessToken, callId, transport?, url?, iceServers? }
  *   GET  /v1/call/:callId/context                            -> { listings, updatedAt }
  *   POST /v1/tools/<name>?token=   (Retell custom tools)
  *   POST /v1/retell/webhook?token= (Retell agent events)
@@ -691,13 +691,43 @@ export function createApp(options = {}) {
     store.createCall({ callId: call.call_id, locale, page });
     log({ evt: 'call.token', callId: call.call_id, locale, visitorSession: metadata.session_id });
     recordConciergeStart('concierge_call_start', { attr: metadata, page, locale, conversationId: call.call_id, server });
-    return { accessToken: call.access_token, callId: call.call_id };
+    return { accessToken: call.access_token, callId: call.call_id, ...webCallConnection(call) };
+  }
+
+  /** The v3 connection details the browser SDK's startCall() takes, passed through only when well-formed. */
+  function webCallConnection(call) {
+    const out = {};
+    if (call.transport === 'livekit' || call.transport === 'gateway') out.transport = call.transport;
+    if (typeof call.url === 'string' && /^(wss|https):\/\//.test(call.url)) out.url = call.url;
+    const ice = Array.isArray(call.ice_servers) ? call.ice_servers.map(iceServer).filter(Boolean) : [];
+    if (ice.length) out.iceServers = ice;   // none usable -> omitted, and the SDK keeps its default STUN
+    return out;
+  }
+
+  /** One RTCIceServer, or null: stun:/turn:/turns: urls with a host (string or list); TURN needs string credentials. */
+  function iceServer(s) {
+    if (!s || typeof s !== 'object' || Array.isArray(s)) return null;
+    const okUrl = (u) => typeof u === 'string' && u.length <= 512 && /^(stun|turns?):[A-Za-z0-9.\-[\]:]*[A-Za-z0-9\]](:\d{1,5})?(\?transport=(udp|tcp))?$/.test(u);
+    let urls;
+    if (typeof s.urls === 'string') urls = okUrl(s.urls) ? s.urls : null;
+    else if (Array.isArray(s.urls)) { const list = s.urls.filter(okUrl); urls = list.length ? list : null; }
+    if (!urls) return null;
+    const out = { urls };
+    for (const k of ['username', 'credential']) {
+      if (s[k] === undefined) continue;
+      if (typeof s[k] !== 'string') return null;
+      out[k] = s[k];
+    }
+    // RTCPeerConnection rejects a turn:/turns: entry without both credentials (InvalidAccessError) — the whole call would fail.
+    const turn = [].concat(urls).some(u => /^turns?:/.test(u));
+    if (turn && (typeof out.username !== 'string' || typeof out.credential !== 'string')) return null;
+    return out;
   }
 
   function callContext(callId) {
     const entry = store.getCall(callId);
-    if (!entry) return { listings: [], updatedAt: null };
-    return { listings: entry.cards, updatedAt: new Date(entry.updatedAt).toISOString() };
+    if (!entry) return { listings: [], updatedAt: null, ended: false };
+    return { listings: entry.cards, updatedAt: new Date(entry.updatedAt).toISOString(), ended: entry.ended === true };
   }
 
   /**
@@ -777,6 +807,8 @@ export function createApp(options = {}) {
       transcript: typeof call.transcript === 'string' ? call.transcript.slice(0, 20_000) : null,
     };
     try { appendJsonl(cfg.dataDir, file, record); } catch (err) { log({ level: 'error', evt: 'webhook.write_failed', error: String(err?.message ?? err) }); }
+    // The browser's gateway transport cannot see Dana hang up; the widget learns it from /v1/call/:id/context.
+    if (event === 'call_ended' && record.callId) store.endCall(String(record.callId));
     log({ evt: 'retell.webhook', event, callId: record.callId });
     return { ok: true };
   }

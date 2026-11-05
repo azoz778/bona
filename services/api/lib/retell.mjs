@@ -5,7 +5,9 @@
  *   POST   /create-chat                    { agent_id, retell_llm_dynamic_variables?, metadata? }
  *   POST   /create-chat-completion         { chat_id, content } -> { messages: [...] }
  *   PATCH  /end-chat/{chat_id}
- *   POST   /v2/create-web-call             { agent_id, retell_llm_dynamic_variables?, metadata? }
+ *   POST   /v3/create-web-call             { agent_id, retell_llm_dynamic_variables?, metadata? }
+ *          -> { call_id, access_token, transport?, url?, ice_servers? } — v2 was switched off 2026-10-18
+ *          (docs.retellai.com/deprecation-notice/2026/09-30_create_web_call_v2); call fields come from get-call
  *   POST   /create-retell-llm  PATCH /update-retell-llm/{llm_id}  GET /get-retell-llm/{llm_id}
  *   POST   /create-agent       PATCH /update-agent/{agent_id}
  *   POST   /create-chat-agent  PATCH /update-chat-agent/{agent_id}
@@ -105,7 +107,7 @@ export function createRetellClient({ apiKey, baseUrl = RETELL_BASE, fetchImpl = 
     },
     async endChat(chatId) { mockState.chats.delete(chatId); return null; },
     async createWebCall({ agent_id = 'agent_mock', metadata = {} } = {}) {
-      return { call_id: `call_mock_${++mockState.n}`, access_token: 'mock-access-token', agent_id, call_status: 'registered', metadata };
+      return { call_id: `call_mock_${++mockState.n}`, access_token: 'mock-access-token', transport: 'livekit' };
     },
     async listAgents() { return []; },
     async ping() { return { ok: true, mock: true }; },
@@ -119,7 +121,7 @@ export function createRetellClient({ apiKey, baseUrl = RETELL_BASE, fetchImpl = 
     createChatCompletion: (body) => request('POST', '/create-chat-completion', { body }),
     endChat: (chatId) => request('PATCH', `/end-chat/${encodeURIComponent(chatId)}`),
     getChat: (chatId) => request('GET', `/get-chat/${encodeURIComponent(chatId)}`),
-    createWebCall: (body) => request('POST', '/v2/create-web-call', { body }),
+    createWebCall: (body) => request('POST', '/v3/create-web-call', { body }),
     getCall: (callId) => request('GET', `/v2/get-call/${encodeURIComponent(callId)}`),
 
     listAgents: () => request('GET', '/list-agents'),
