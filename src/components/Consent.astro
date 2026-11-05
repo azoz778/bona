@@ -83,9 +83,10 @@ const privacyHref = `${localePath(locale, '/privacy/')}#cookies`;
   function hide() {
     const el = root(); if (!el) return;
     lift?.disconnect(); lift = null;
-    setLift(null);
     el.classList.remove('is-open');
-    window.setTimeout(() => { el.hidden = true; }, 400);
+    // The pill comes down only once the sheet has faded (it would slide under it), and a sheet reopened from the
+    // footer within those 400 ms is left alone.
+    window.setTimeout(() => { if (el.classList.contains('is-open')) return; el.hidden = true; setLift(null); }, 400);
   }
   function choose(analytics: boolean, ads: boolean) {
     const previous = read();

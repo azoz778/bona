@@ -699,14 +699,32 @@ export function createApp(options = {}) {
     const out = {};
     if (call.transport === 'livekit' || call.transport === 'gateway') out.transport = call.transport;
     if (typeof call.url === 'string' && /^(wss|https):\/\//.test(call.url)) out.url = call.url;
-    if (Array.isArray(call.ice_servers)) out.iceServers = call.ice_servers.filter(s => s && typeof s === 'object');
+    const ice = Array.isArray(call.ice_servers) ? call.ice_servers.map(iceServer).filter(Boolean) : [];
+    if (ice.length) out.iceServers = ice;   // none usable -> omitted, and the SDK keeps its default STUN
+    return out;
+  }
+
+  /** One RTCIceServer, or null: stun:/turn:/turns: urls (string or list), optional string username/credential. */
+  function iceServer(s) {
+    if (!s || typeof s !== 'object' || Array.isArray(s)) return null;
+    const okUrl = (u) => typeof u === 'string' && /^(stun|turns?):/.test(u);
+    let urls;
+    if (typeof s.urls === 'string') urls = okUrl(s.urls) ? s.urls : null;
+    else if (Array.isArray(s.urls)) { const list = s.urls.filter(okUrl); urls = list.length ? list : null; }
+    if (!urls) return null;
+    const out = { urls };
+    for (const k of ['username', 'credential']) {
+      if (s[k] === undefined) continue;
+      if (typeof s[k] !== 'string') return null;
+      out[k] = s[k];
+    }
     return out;
   }
 
   function callContext(callId) {
     const entry = store.getCall(callId);
-    if (!entry) return { listings: [], updatedAt: null };
-    return { listings: entry.cards, updatedAt: new Date(entry.updatedAt).toISOString() };
+    if (!entry) return { listings: [], updatedAt: null, ended: false };
+    return { listings: entry.cards, updatedAt: new Date(entry.updatedAt).toISOString(), ended: entry.ended === true };
   }
 
   /**
@@ -786,6 +804,8 @@ export function createApp(options = {}) {
       transcript: typeof call.transcript === 'string' ? call.transcript.slice(0, 20_000) : null,
     };
     try { appendJsonl(cfg.dataDir, file, record); } catch (err) { log({ level: 'error', evt: 'webhook.write_failed', error: String(err?.message ?? err) }); }
+    // The browser's gateway transport cannot see Dana hang up; the widget learns it from /v1/call/:id/context.
+    if (event === 'call_ended' && record.callId) store.endCall(String(record.callId));
     log({ evt: 'retell.webhook', event, callId: record.callId });
     return { ok: true };
   }
