@@ -108,6 +108,8 @@ export class CallSession {
         await client.startCall({ accessToken, callId: callId || undefined, transport, url, iceServers });
         // Closed or navigated away while the SDK was connecting: take the call down instead of leaving it live.
         if (!this.live(id)) { try { client.stopCall(); } catch { /* already down */ } this.client = null; return; }
+        // startCall() resolves even when it failed (the SDK emits 'error', whose handler already finished the call).
+        if (this.client !== client) return;
         this.startPolling(apiBase);
       } catch {
         try { client?.stopCall(); } catch { /* already down */ }
@@ -158,6 +160,13 @@ export class CallSession {
       if (!id || !this.active) return;
       try {
         const ctx = await getJson<CallContextResponse>(apiBase, `/v1/call/${encodeURIComponent(id)}/context`, 5000);
+        if (id !== this.state.callId || !this.active) return;
+        // Dana hung up: the gateway transport never tells the SDK, Retell's webhook told the API.
+        if (ctx?.ended === true) {
+          try { this.client?.stopCall(); } catch { /* already down */ }
+          if (this.active) this.finish('ended');   // stopCall's own call_ended may already have finished it
+          return;
+        }
         const cards = Array.isArray(ctx?.listings) ? ctx.listings.filter(c => c && c.id) : [];
         if (cards.length !== this.state.cards.length || cards.some((c, i) => c.id !== this.state.cards[i]?.id)) {
           this.set({ cards });

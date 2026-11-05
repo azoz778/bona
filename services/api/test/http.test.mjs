@@ -265,6 +265,46 @@ test('POST /v1/call/token returns a web-call access token', async () => {
   });
 });
 
+test('POST /v1/call/token forwards only well-formed v3 connection details', async () => {
+  const retell = fakeRetell();
+  retell.createWebCall = async () => ({
+    call_id: 'call_odd', access_token: 'tok_odd', transport: 'carrier-pigeon', url: 'javascript:alert(1)',
+    ice_servers: [{}, [], null, 'stun:x', { urls: 'http://evil.example' }, { urls: ['stun:ok.example:3478', 42] },
+      { urls: 'turns:turn.example:443', username: 'u', credential: 'c' }, { urls: 'turn:t.example', username: 7 }],
+  });
+  await withServer({ retell }, async ({ call }) => {
+    const body = await (await call('/v1/call/token', { method: 'POST', body: JSON.stringify({ locale: 'en' }) })).json();
+    assert.equal(body.accessToken, 'tok_odd');
+    assert.equal('transport' in body, false);
+    assert.equal('url' in body, false);
+    assert.deepEqual(body.iceServers, [
+      { urls: ['stun:ok.example:3478'] },
+      { urls: 'turns:turn.example:443', username: 'u', credential: 'c' },
+    ]);
+  });
+  retell.createWebCall = async () => ({ call_id: 'call_none', access_token: 't', ice_servers: [{}] });
+  await withServer({ retell }, async ({ call }) => {
+    const body = await (await call('/v1/call/token', { method: 'POST', body: JSON.stringify({ locale: 'en' }) })).json();
+    assert.equal('iceServers' in body, false, 'nothing usable -> the SDK keeps its default STUN');
+  });
+});
+
+// The gateway transport has no data channel, so the browser cannot see Dana hang up; Retell's call_ended webhook can.
+test('a call_ended webhook marks the call context ended; other events and unknown calls do not', async () => {
+  await withServer({}, async ({ call, tool }) => {
+    const { callId } = await (await call('/v1/call/token', { method: 'POST', body: JSON.stringify({ locale: 'en' }) })).json();
+    const ctx = async () => (await call(`/v1/call/${callId}/context`)).json();
+    assert.equal((await ctx()).ended, false);
+    await tool('/v1/retell/webhook', { event: 'call_started', call: { call_id: callId } });
+    assert.equal((await ctx()).ended, false);
+    await tool('/v1/retell/webhook', { event: 'call_ended', call: { call_id: callId, call_status: 'ended' } });
+    assert.equal((await ctx()).ended, true);
+    await tool('/v1/retell/webhook', { event: 'call_ended', call: { call_id: 'call_never_seen' } });
+    const unknown = await (await call('/v1/call/call_never_seen/context')).json();
+    assert.deepEqual(unknown, { listings: [], updatedAt: null, ended: false });
+  });
+});
+
 test('the call context fills as tools fire, and is empty for an unknown call', async () => {
   await withServer({}, async ({ call, tool }) => {
     const { callId } = await (await call('/v1/call/token', { method: 'POST', body: JSON.stringify({ locale: 'en' }) })).json();
@@ -278,7 +318,7 @@ test('the call context fills as tools fire, and is empty for an unknown call', a
     assert.ok(Date.parse(after.updatedAt) > 0);
 
     const missing = await (await call('/v1/call/call_nope/context')).json();
-    assert.deepEqual(missing, { listings: [], updatedAt: null });
+    assert.deepEqual(missing, { listings: [], updatedAt: null, ended: false });
   });
 });
 
