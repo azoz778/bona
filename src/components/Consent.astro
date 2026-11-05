@@ -64,15 +64,33 @@ const privacyHref = `${localePath(locale, '/privacy/')}#cookies`;
   }
 
   const root = () => document.querySelector<HTMLElement>('[data-consent]');
+  /* On phones the sheet spans the full width and would sit on top of the concierge cluster (the Concierge pill +
+     WhatsApp), so a tap there hit the sheet instead. The sheet's height goes to --consent-lift on <html>;
+     global.css raises the cluster by it below 768px (wider screens leave the cluster a gutter instead). */
+  let lift: ResizeObserver | null = null;
+  /** The one pending end-of-fade; a reopen or a second dismissal cancels it, so an old timer never acts late. */
+  let fading = 0;
+  function setLift(el: HTMLElement | null) {
+    const html = document.documentElement;
+    if (el && !el.hidden) html.style.setProperty('--consent-lift', `${Math.ceil(el.getBoundingClientRect().height)}px`);
+    else html.style.removeProperty('--consent-lift');
+  }
   function show() {
     const el = root(); if (!el) return;
+    window.clearTimeout(fading); fading = 0;
     el.hidden = false;
+    setLift(el);
+    if (typeof ResizeObserver === 'function') { lift?.disconnect(); lift = new ResizeObserver(() => setLift(el)); lift.observe(el); }
     requestAnimationFrame(() => el.classList.add('is-open'));
   }
   function hide() {
     const el = root(); if (!el) return;
+    lift?.disconnect(); lift = null;
     el.classList.remove('is-open');
-    window.setTimeout(() => { el.hidden = true; }, 400);
+    // The pill comes down only once the sheet has faded (it would slide under it), and a sheet reopened from the
+    // footer within those 400 ms is left alone.
+    window.clearTimeout(fading);
+    fading = window.setTimeout(() => { fading = 0; if (el.classList.contains('is-open') || !el.isConnected) return; el.hidden = true; setLift(null); }, 400);
   }
   function choose(analytics: boolean, ads: boolean) {
     const previous = read();

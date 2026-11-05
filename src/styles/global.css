@@ -315,7 +315,8 @@ html[dir="rtl"] .strip-progress i { transform-origin: right; }
 .cg-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
 
 /* ---- Cluster (bottom-end) ---- */
-.cg-cluster { position: fixed; inset-inline-end: 1.25rem; bottom: 1.25rem; z-index: 30; display: flex; flex-direction: column; align-items: flex-end; gap: .75rem; transition: opacity .3s var(--ease-luxe), transform .3s var(--ease-luxe); }
+/* --consent-lift: height of the open cookie sheet (Consent.astro), so the sheet never covers the pill on a phone. */
+.cg-cluster { position: fixed; inset-inline-end: 1.25rem; bottom: calc(1.25rem + var(--consent-lift, 0px)); z-index: 30; display: flex; flex-direction: column; align-items: flex-end; gap: .75rem; transition: opacity .3s var(--ease-luxe), transform .3s var(--ease-luxe), bottom .38s var(--ease-luxe); }
 html[dir="rtl"] .cg-cluster { align-items: flex-start; }
 @media (min-width: 768px) { .cg-cluster { inset-inline-end: 1.75rem; bottom: 1.75rem; } }
 .concierge.is-open .cg-cluster { opacity: 0; transform: translateY(.5rem); pointer-events: none; }
