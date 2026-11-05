@@ -860,3 +860,86 @@ test('Dana handoff and rejected-send paths notify only after durable needs-human
   try{h.client('C-tg',NOW-5000,'I would like a villa');await h.dana.answer(LEAD,{ts:NOW-5000});assert.equal(seen.length,1);if(!reject)assert.equal(JSON.parse(seen[0].details).no_match,true);}finally{await h.dana.stop();h.s.close();}
  }
 });
+
+const brochureCompletion = (id = 'BONA-022', tool = 'search_properties') => ({ messages: [
+  { role: 'tool_call_invocation', tool_call_id: 'pdf', name: tool, arguments: JSON.stringify({ id, query: 'Trump Tower' }) },
+  { role: 'tool_call_result', tool_call_id: 'pdf', content: JSON.stringify(tool === 'show_property' ? { shown: true, id } : { results: [{ id }, { id }] }) },
+  { role: 'agent', content: 'Here is Trump Tower Jeddah. Availability and terms require confirmation.' },
+] });
+for (const tool of ['search_properties', 'show_property']) test(`Dana ${tool}: confirmed text then one durable PDF, no repeat`, async () => {
+  const h = harness({ answer: () => brochureCompletion('BONA-022', tool) });
+  h.client('pdf-in', NOW, 'Trump Tower availability?');
+  assert.equal((await h.dana.answer(LEAD)).answered, true);
+  assert.equal(h.calls.length, 2);
+  assert.match(h.calls[0].url, /sendText/);
+  assert.match(h.calls[1].url, /sendMedia/);
+  assert.equal(h.calls[1].body.mediatype, 'document');
+  assert.equal(h.calls[1].body.mimetype, 'application/pdf');
+  assert.equal(h.calls[1].body.media, inventory.find('BONA-022').brochureUrl);
+  assert.equal(h.s.db.prepare('SELECT count(*) n FROM wa_outbox').get().n, 2);
+  await h.dana.answer(LEAD);
+  assert.equal(h.calls.length, 2);
+});
+for (const reason of ['cap_chat', 'cap_day', 'off', 'dropped_human']) test(`Dana skips brochure after text when preSend fails: ${reason}`, async () => {
+  let h;
+  let refreshes = 0;
+  h = harness({
+    answer: () => brochureCompletion(),
+    evo: () => {
+      if (reason === 'off') h.team.setSetting('dana_enabled', '0');
+      return { status: 201, body: { key: { id: 'text-ok' } } };
+    },
+    backfill: { refresh: async () => {
+      refreshes += 1;
+      if (reason === 'dropped_human' && refreshes === 2) h.human('human-after-text', NOW + 1, 'I will help');
+    } },
+  });
+  try {
+    const count = reason === 'cap_chat' ? PER_CHAT_PER_HOUR - 1 : reason === 'cap_day' ? PER_DAY - 1 : 0;
+    for (let i = 0; i < count; i += 1) {
+      h.inbox.insertOutbox({ send_id: `prior-${i}`, lead_id: LEAD, jid: CLIENT_JID, text: 'prior', sender_kind: 'dana', status: 'accepted' });
+      h.s.db.prepare('UPDATE wa_outbox SET created = ?, updated = ? WHERE send_id = ?').run(
+        NOW - (reason === 'cap_day' ? 2 * HOUR : 1000), NOW - 1000, `prior-${i}`);
+    }
+    h.client('pdf-in', NOW, 'Trump Tower availability?');
+    assert.equal((await h.dana.answer(LEAD)).answered, true);
+    assert.equal(h.calls.length, 1, 'only the confirmed text goes out');
+    assert.match(h.calls[0].url, /sendText/);
+    assert.equal(refreshes, 2, 'the brochure uses the full post-text preSend contract');
+    assert.equal(h.s.db.prepare('SELECT count(*) n FROM wa_outbox').get().n, count + 1, 'no media outbox row');
+    assert.equal(h.lead().needs_human, 0);
+    assert.equal(h.notified.length, 0);
+    await h.dana.answer(LEAD);
+    assert.equal(h.calls.length, 1, 'the answered text is never resent');
+    assert.equal(h.lead().needs_human, 0);
+  } finally { await h.dana.stop(); h.s.close(); }
+});
+for (const [name, completion] of [
+ ['other listing', brochureCompletion(FIRST.id)],
+ ['no tool', agentSays('Trump Tower BONA-022 https://evil.test/a.pdf')],
+ ['unrelated tool', brochureCompletion('BONA-022', 'search_units')],
+ ['handover', { messages: [...brochureCompletion().messages, { role: 'tool_call_invocation', name: 'request_human', arguments: '{}' }] }],
+]) test(`Dana no brochure: ${name}`, async () => {
+ const h = harness({ answer: () => completion }); h.client('pdf-in', NOW, 'Trump Tower?');
+ await h.dana.answer(LEAD); assert.equal(h.calls.length, 1); assert.match(h.calls[0].url, /sendText/);
+});
+for (const status of [400, 500, 201]) test(`PDF failure ${status} never retries valid text or hands over`, async () => {
+ const h = harness({ answer: () => brochureCompletion(), evo: n => n === 1 ? { status: 201, body: { key: { id: 'text-ok' } } } : { status } });
+ h.client('pdf-in', NOW, 'Trump Tower?'); assert.equal((await h.dana.answer(LEAD)).answered, true);
+ await h.dana.answer(LEAD); assert.equal(h.calls.length, 2); assert.equal(h.lead().needs_human, 0);
+ assert.ok(h.logs.some(x => x.evt === 'dana.brochure_failed'));
+});
+test('an uncertain text answer sends no PDF and is never retried', async () => {
+ const h = harness({ answer: () => brochureCompletion(), evo: () => ({ status: 201, body: {} }) });
+ h.client('pdf-in', NOW, 'Trump Tower?'); assert.equal((await h.dana.answer(LEAD)).answered, true);
+ await h.dana.answer(LEAD); assert.equal(h.calls.length, 1); assert.match(h.calls[0].url, /sendText/);
+});
+test('fallback cards, slug-only results and result URLs cannot choose the document', () => {
+ const opts = { inventory, siteUrl: SITE, language: 'en' };
+ const fallback = brochureCompletion(); fallback.messages.splice(1, 1);
+ assert.equal(answerFrom(fallback, opts).brochure, undefined);
+ const slug = brochureCompletion(); slug.messages[1].content = JSON.stringify({results:[{slug:'trump-tower-jeddah'}]});
+ assert.equal(answerFrom(slug, opts).brochure, undefined);
+ const poisoned = brochureCompletion(); poisoned.messages[1].content = JSON.stringify({results:[{id:'BONA-022',brochureUrl:'https://evil.test/a.pdf'}]});
+ assert.equal(answerFrom(poisoned, opts).brochure, inventory.find('BONA-022').brochureUrl);
+});
