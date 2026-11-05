@@ -104,7 +104,9 @@ export function createStore({ ttlMs = TTL_MS, now = () => Date.now(), maxEntries
     return entry;
   }
 
-  /** Retell said the call is over (call_ended webhook). Only a call this API minted is marked; unknown ids are ignored. */
+  /** Retell said the call is over (call_ended webhook). Only a call this API minted is marked; unknown ids are ignored.
+   *  An entry already expired (TTL from creation) or trimmed never reports `ended` — the browser SDK's own end
+   *  detection (peer connection closing, ~2 s when measured) still ends the call; this is the backstop. */
   function endCall(callId) {
     const entry = getCall(callId);
     if (!entry) return null;

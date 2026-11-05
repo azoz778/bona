@@ -68,6 +68,8 @@ const privacyHref = `${localePath(locale, '/privacy/')}#cookies`;
      WhatsApp), so a tap there hit the sheet instead. The sheet's height goes to --consent-lift on <html>;
      global.css raises the cluster by it below 768px (wider screens leave the cluster a gutter instead). */
   let lift: ResizeObserver | null = null;
+  /** The one pending end-of-fade; a reopen or a second dismissal cancels it, so an old timer never acts late. */
+  let fading = 0;
   function setLift(el: HTMLElement | null) {
     const html = document.documentElement;
     if (el && !el.hidden) html.style.setProperty('--consent-lift', `${Math.ceil(el.getBoundingClientRect().height)}px`);
@@ -75,6 +77,7 @@ const privacyHref = `${localePath(locale, '/privacy/')}#cookies`;
   }
   function show() {
     const el = root(); if (!el) return;
+    window.clearTimeout(fading); fading = 0;
     el.hidden = false;
     setLift(el);
     if (typeof ResizeObserver === 'function') { lift?.disconnect(); lift = new ResizeObserver(() => setLift(el)); lift.observe(el); }
@@ -86,7 +89,8 @@ const privacyHref = `${localePath(locale, '/privacy/')}#cookies`;
     el.classList.remove('is-open');
     // The pill comes down only once the sheet has faded (it would slide under it), and a sheet reopened from the
     // footer within those 400 ms is left alone.
-    window.setTimeout(() => { if (el.classList.contains('is-open')) return; el.hidden = true; setLift(null); }, 400);
+    window.clearTimeout(fading);
+    fading = window.setTimeout(() => { fading = 0; if (el.classList.contains('is-open') || !el.isConnected) return; el.hidden = true; setLift(null); }, 400);
   }
   function choose(analytics: boolean, ads: boolean) {
     const previous = read();

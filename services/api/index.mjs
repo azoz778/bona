@@ -704,10 +704,10 @@ export function createApp(options = {}) {
     return out;
   }
 
-  /** One RTCIceServer, or null: stun:/turn:/turns: urls (string or list), optional string username/credential. */
+  /** One RTCIceServer, or null: stun:/turn:/turns: urls with a host (string or list); TURN needs string credentials. */
   function iceServer(s) {
     if (!s || typeof s !== 'object' || Array.isArray(s)) return null;
-    const okUrl = (u) => typeof u === 'string' && /^(stun|turns?):/.test(u);
+    const okUrl = (u) => typeof u === 'string' && u.length <= 512 && /^(stun|turns?):[A-Za-z0-9.\-[\]:]*[A-Za-z0-9\]](:\d{1,5})?(\?transport=(udp|tcp))?$/.test(u);
     let urls;
     if (typeof s.urls === 'string') urls = okUrl(s.urls) ? s.urls : null;
     else if (Array.isArray(s.urls)) { const list = s.urls.filter(okUrl); urls = list.length ? list : null; }
@@ -718,6 +718,9 @@ export function createApp(options = {}) {
       if (typeof s[k] !== 'string') return null;
       out[k] = s[k];
     }
+    // RTCPeerConnection rejects a turn:/turns: entry without both credentials (InvalidAccessError) — the whole call would fail.
+    const turn = [].concat(urls).some(u => /^turns?:/.test(u));
+    if (turn && (typeof out.username !== 'string' || typeof out.credential !== 'string')) return null;
     return out;
   }
 

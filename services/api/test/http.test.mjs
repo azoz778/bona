@@ -270,7 +270,8 @@ test('POST /v1/call/token forwards only well-formed v3 connection details', asyn
   retell.createWebCall = async () => ({
     call_id: 'call_odd', access_token: 'tok_odd', transport: 'carrier-pigeon', url: 'javascript:alert(1)',
     ice_servers: [{}, [], null, 'stun:x', { urls: 'http://evil.example' }, { urls: ['stun:ok.example:3478', 42] },
-      { urls: 'turns:turn.example:443', username: 'u', credential: 'c' }, { urls: 'turn:t.example', username: 7 }],
+      { urls: 'turns:turn.example:443', username: 'u', credential: 'c' }, { urls: 'turn:t.example', username: 7 },
+      { urls: 'stun:' }, { urls: 'turn:nocreds.example:3478' }, { urls: 'stun:a b.example' }],
   });
   await withServer({ retell }, async ({ call }) => {
     const body = await (await call('/v1/call/token', { method: 'POST', body: JSON.stringify({ locale: 'en' }) })).json();
