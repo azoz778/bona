@@ -128,17 +128,20 @@ export function createSender({
   // the shared limit can never let one account alone send faster than this.
   const perUser = createLimiter({ capacity: limits.perUser ?? PER_USER_PER_MIN, perMs: 60_000, now });
 
+  // Retain a pending attempt even if writing its outcome fails: no in-process retry.
+  const documentAttempts = new Set();
+
   /** The HTTP call and nothing else: what came back, as honestly as we can tell. */
-  async function post(number, text, kind) {
+  async function post(number, text, kind, document) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       let res;
       try {
-        res = await fetchImpl(`${cfg.baseUrl}/message/sendText/${encodeURIComponent(cfg.instance)}`, {
+        res = await fetchImpl(`${cfg.baseUrl}/message/${document ? 'sendMedia' : 'sendText'}/${encodeURIComponent(cfg.instance)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', apikey: cfg.apiKey },
-          body: JSON.stringify({ number, text }),
+          body: JSON.stringify(document ? { number, mediatype: 'document', mimetype: 'application/pdf', media: document.url, fileName: 'Bona-Trump-Tower-Jeddah-Unit-1003.pdf', caption: text } : { number, text }),
           signal: controller.signal,
         });
       } catch (err) {
@@ -173,7 +176,7 @@ export function createSender({
         const body = JSON.parse(text2xx);
         keyId = typeof body?.key?.id === 'string' ? body.key.id : null;
       } catch { keyId = null; }
-      if (typeof keyId !== 'string') {
+      if (typeof keyId !== 'string' || !keyId.trim()) {
         log({ level: 'warn', evt: 'wa.send.no_key', kind });
         return { ok: false, error: 'no_ack', uncertain: true };
       }
@@ -186,7 +189,7 @@ export function createSender({
 
   /**
    * @param {{ jid: string, text: string, kind: 'code'|'staff'|'dana', userId?: string|null, bypassSwitch?: boolean,
-   *           leadId?: string|null, sendId?: string|null }} o
+   *           leadId?: string|null, sendId?: string|null, document?: { url: string }|null }} o
    * @returns {Promise<{ ok: true, keyId: string, status?: number, sendId: string }
    *                 | { ok: false, error: string, uncertain?: true, sendId?: string }>}
    *   `sendId` is there whenever an outbox row stands behind the answer. `status` here is
@@ -194,7 +197,7 @@ export function createSender({
    *   which is what `reply`'s `status` is. It is absent when the call itself failed but the
    *   poller had already seen the message go: then `keyId` is the one the poller recorded.
    */
-  async function sendTo({ jid, text, kind, userId = null, bypassSwitch = false, leadId = null, sendId = null } = {}) {
+  async function sendTo({ jid, text, kind, userId = null, bypassSwitch = false, leadId = null, sendId = null, document = null } = {}) {
     const given = sendId ? String(sendId) : null;
     const givenRow = given ? inbox.getOutbox(given) : null;
     // Decided once — accepted, failed, or perhaps delivered — so never sent a second time.
@@ -206,6 +209,9 @@ export function createSender({
       return givenRow ? { ok: false, error, sendId: given } : { ok: false, error };
     };
 
+    if (document && documentAttempts.has(given)) return { ok: false, error: 'duplicate', sendId: given };
+    if (document && givenRow && (givenRow.jid !== jid || givenRow.sender_kind !== 'dana' || givenRow.lead_id !== leadId || givenRow.text !== text)) return { ok: false, error: 'bad_send_id' };
+    if (document && (kind !== 'dana' || document.url !== 'https://bona-real-estate.com/listings/trump-tower-jeddah/brochure.pdf')) return refuse('bad_document');
     const m = PHONE_JID_RE.exec(String(jid ?? ''));
     if (!m || m[1].startsWith('0')) return refuse('bad_recipient');
     if (!VALID_KINDS.has(kind)) return refuse('bad_kind');
@@ -249,7 +255,8 @@ export function createSender({
       sender_kind: kind,
     }).row;
 
-    const out = await post(m[1], text, kind);
+    if (document) documentAttempts.add(row.send_id);
+    const out = await post(m[1], text, kind, document);
     try {
       // A 2xx with a key names this send exactly, so it is always written.
       if (out.ok) {
@@ -271,6 +278,9 @@ export function createSender({
       // until then a second submit of the same form is told it is on its way.
       log({ level: 'error', evt: 'wa.send.ledger_failed', kind, error: err?.code ?? err?.name ?? 'error' });
     }
+    try {
+      if (document && inbox.getOutbox(row.send_id)?.status !== 'pending') documentAttempts.delete(row.send_id);
+    } catch { /* keep the attempt blocked if the ledger cannot be read */ }
     return { ...out, sendId: row.send_id };
   }
 

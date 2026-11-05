@@ -130,7 +130,7 @@ export function createToolHandlers({
     if (!listing) return { shown: false, reason: 'not_found', note: 'That property is not in Bona inventory — do not describe it.' };
     const card = inventory.card(listing);
     store.addCard(ctx.conversationId, card);
-    return { shown: true, id: card.id, title: card.title, url: card.url[ctx.locale] ?? card.url.en };
+    return { shown: true, id: card.id, title: card.title, url: card.url[ctx.locale] ?? card.url.en, brochureUrl: card.brochureUrl };
   }
 
   /**
