@@ -115,6 +115,14 @@ export function listingCard(card: Card, cfg: ConciergeConfig): HTMLElement {
 
   link.append(body);
   article.append(link);
+  if (card.brochureUrl === 'https://bona-real-estate.com/listings/trump-tower-jeddah/brochure.pdf') {
+    const download = el('a', 'cg-card-link', loc === 'ar' ? 'تحميل الكتيب (PDF) — الوحدة 1003' : 'Download brochure (PDF) — Unit 1003');
+    download.href = card.brochureUrl;
+    download.setAttribute('download', 'Bona-Trump-Tower-Jeddah-Unit-1003.pdf');
+    download.target = '_blank';
+    download.rel = 'noopener';
+    article.append(download);
+  }
   return article;
 }
 

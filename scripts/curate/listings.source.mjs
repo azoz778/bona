@@ -551,6 +551,7 @@ export const LISTINGS = [
 
   // ───────────────────────────── OFF-PLAN ─────────────────────────────
   {
+    brochureUrl: 'https://bona-real-estate.com/listings/trump-tower-jeddah/brochure.pdf',
     slug: 'trump-tower-jeddah', sourceRef: 'APT-037', status: 'available', category: 'off-plan', type: 'apartment', featured: true,
     title: { en: 'Trump Tower Jeddah', ar: 'برج ترامب جدة' },
     location: loc({ en: 'Al Shati, Corniche', ar: 'الشاطئ، الكورنيش' }),
