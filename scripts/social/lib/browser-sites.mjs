@@ -45,19 +45,30 @@ const q = s => JSON.stringify(s);
 const byText = (sel, text) => `[...document.querySelectorAll(${q(sel)})].find(b => b.offsetParent !== null && (b.innerText || '').trim() === ${q(text)})`;
 const norm = s => String(s ?? '').replace(/[\s‎‏⁦-⁩]+/g, ' ').trim();
 
-/** Not logged in / captcha / verification — the run cannot go on and a human has to look. */
+/**
+ * A site refusing this browser outright: Chrome's own error page for TikTok's HTTP 403 ("Access to
+ * www.tiktok.com was denied", seen 2026-10-21 right after a Post) and Cloudflare's block page on
+ * LinkedIn ("Sorry, you have been blocked", seen 2026-11-08). Matched on the page's title + text.
+ */
+export const BLOCK_PAGE = /Access to [\w.-]+ was denied|HTTP ERROR 403|Sorry, you have been blocked|You are unable to access [\w.-]+|Attention Required! \| Cloudflare/i;
+const pageText = s => s.ev('(document.title + "\\n" + (document.body?.innerText || "")).slice(0, 3000)');
+const blockedHere = (url, text) => /^chrome-error:/.test(url) || BLOCK_PAGE.test(text);
+
+/** Not logged in / captcha / verification / blocked — the run cannot go on and a human has to look. */
 export async function tiktokBlocker(s) {
   const url = String(await s.url());
   if (/\/login(\/|\?|$)/.test(url)) return new BrowserError('not-logged-in', `TikTok is not logged in (redirected to ${url.split('?')[0]})`);
   if (await s.ev(`!!document.querySelector(${q(SELECTORS.tiktok.captcha)})`)) return new BrowserError('captcha', 'TikTok is showing a captcha / verification puzzle');
+  if (blockedHere(url, String(await pageText(s)))) return new BrowserError('blocked', `TikTok refused this browser (access denied / HTTP 403 at ${url.split('?')[0]})`);
   return null;
 }
 export async function linkedinBlocker(s) {
   const url = String(await s.url());
   if (/linkedin\.com\/(login|uas\/login|authwall|signup)/.test(url)) return new BrowserError('not-logged-in', 'LinkedIn is not logged in');
   if (/linkedin\.com\/checkpoint\//.test(url)) return new BrowserError('verification', 'LinkedIn is asking for a security verification (checkpoint)');
-  const t = String(await s.ev('(document.body?.innerText || "").slice(0, 3000)'));
+  const t = String(await pageText(s));
   if (/quick security check|let.s do a quick|verify you.re human/i.test(t)) return new BrowserError('captcha', 'LinkedIn is showing a security check');
+  if (blockedHere(url, t)) return new BrowserError('blocked', `LinkedIn refused this browser (Cloudflare block page at ${url.split('?')[0]})`);
   return null;
 }
 async function stop(s, check) { const b = await check(s); if (b) throw b; }
@@ -66,13 +77,22 @@ const notClicked = e => Object.assign(e, { beforeClick: true });
 
 // ------------------------------------------------------------------------ confirmation binding
 /**
+ * Every web address — `https://…`, or a bare `domain.tld/…` — is compared as this one token. LinkedIn
+ * replaces a link in a post with its own short link (2026-10-21: the BONA-001 post went live with
+ * `https://lnkd.in/dnG_C5SM` where the caption had the listing's bona-real-estate.com address, so the
+ * post was never bound and the channel blocked itself) and may link a bare domain. The rest of the
+ * caption and the evidence (listing id / topic line) must still match in full.
+ */
+export const LINK_TOKEN = '‹link›';
+const WEB_ADDRESS = /\bhttps?:\/\/\S+|\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?:\/\S*)?/gi;
+/**
  * A post's text as compared for binding: bidi marks and emoji removed, "hashtag#tag" (LinkedIn's
- * hashtag-link text) back to "#tag", a trailing "…more"/"see more" control dropped, whitespace
- * collapsed. Nothing is truncated.
+ * hashtag-link text) back to "#tag", a trailing "…more"/"see more" control dropped, every web address
+ * replaced by LINK_TOKEN, whitespace collapsed. Nothing is truncated.
  */
 export function bindText(x) {
   return norm(String(x ?? '').replace(/\p{Extended_Pictographic}|\uFE0F/gu, '').replace(/\bhashtag\s*#/gi, '#')
-    .replace(/(?:…|\.\.\.)?\s*(?:see more|more|المزيد)\s*$/i, ''));
+    .replace(/(?:…|\.\.\.)?\s*(?:see more|more|المزيد)\s*$/i, '').replace(WEB_ADDRESS, LINK_TOKEN));
 }
 const newer = (a, b) => (a.length - b.length) || (a < b ? -1 : a > b ? 1 : 0);
 /**
@@ -208,14 +228,22 @@ async function tiktokVideoText(s, handle, id) {
   await sleep(600);
   return s.ev(`(${own}?.innerText) || ''`);
 }
-/** Poll the profile and Studio for a new video id whose own page shows the caption head. URL or null. */
-export async function tiktokConfirm(s, handle, before, { caption = '', evidence = '', timeoutMs = 6 * 60_000, every = 20_000, settleMs = 2000 } = {}) {
+/**
+ * Poll the profile and Studio for a new video id whose own page shows the caption head. URL or null.
+ * `report.blocked` is set to the reason when a page the confirmation needed was a login, captcha or
+ * block page (2026-10-21: TikTok answered "Access denied / HTTP 403" right after a Post), so the
+ * uncertain record and the alert say why the post could not be seen.
+ */
+export async function tiktokConfirm(s, handle, before, { caption = '', evidence = '', timeoutMs = 6 * 60_000, every = 20_000, settleMs = 2000, report = null } = {}) {
   const t0 = Date.now(), checked = new Map();
   while (Date.now() - t0 < timeoutMs) {
     for (const [url, settled] of [[URLS.tiktokProfile(handle), profileSettled], [URLS.tiktokContent, studioSettled]]) {
       try {
         await s.navigate(url);
-        await s.waitFor(settled, 15_000);
+        if (!await s.waitFor(settled, 15_000)) {
+          const b = await tiktokBlocker(s).catch(() => null);
+          if (b) { if (report) report.blocked = b.message; continue; }
+        }
         await sleep(settleMs);
         for (const id of (await tiktokVideoIds(s, handle)).filter(x => !before.includes(x))) {
           if (!checked.get(id)) checked.set(id, await tiktokVideoText(s, handle, id).catch(() => ''));
@@ -396,7 +424,7 @@ export async function linkedinPost(s, { companyId, pageName, caption } = {}) {
   return link || 'no-signal';
 }
 /** A new URN whose OWN post element shows the caption head, on the admin list or the public page. URL (of its real URN type) or null. */
-export async function linkedinConfirm(s, companyId, before, { toast = null, caption = '', evidence = '', timeoutMs = 4 * 60_000, every = 15_000, settleMs = 3000 } = {}) {
+export async function linkedinConfirm(s, companyId, before, { toast = null, caption = '', evidence = '', timeoutMs = 4 * 60_000, every = 15_000, settleMs = 3000, report = null } = {}) {
   const m = /urn:li:(activity|share|ugcPost):(\d+)/.exec(decodeURIComponent(String(toast ?? '')));
   const prefer = m ? `${m[1]}:${m[2]}` : null;
   const t0 = Date.now();
@@ -404,7 +432,10 @@ export async function linkedinConfirm(s, companyId, before, { toast = null, capt
     for (const [url, settled] of [[URLS.linkedinPosts(companyId), postsSettled], [URLS.linkedinPublic(companyId), publicSettled]]) {
       try {
         await s.navigate(url);
-        await s.waitFor(settled, 15_000);
+        if (!await s.waitFor(settled, 15_000)) {
+          const b = await linkedinBlocker(s).catch(() => null);
+          if (b) { if (report) report.blocked = b.message; continue; }
+        }
         await sleep(settleMs);
         // Feed lists clamp long posts: each new top-level post is read in full from its own page first.
         const fresh = (await linkedinPostCandidates(s)).filter(c => !before.includes(c.key)).map(c => c.key);

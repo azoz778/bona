@@ -1,4 +1,5 @@
-// Raw Chrome DevTools Protocol client for the shared, already-logged-in Windows Chrome on :9222.
+// Raw Chrome DevTools Protocol client for Bona's own, already-logged-in Windows Chrome on :9230
+// (ops/systemd/bona-chrome.sh). Never the shared automation Chrome on :9222 (2026-11-08).
 //
 // Why raw CDP and not Playwright: connectOverCDP enumerates and attaches to every open target,
 // and on this Chrome (dozens of tabs owned by other sessions) it hangs. Here we talk to ONE tab
@@ -11,9 +12,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-export const CDP_BASE = process.env.BONA_CDP_URL || 'http://localhost:9222';
-export const ENSURE_SCRIPT = process.env.BONA_CHROME_ENSURE || path.join(os.homedir(), '.claude/scripts/chrome-debug.sh');
+// Bona's own Chrome by default, so a hand run never posts through the shared :9222 one (docs/browser-publishing.md).
+export const CDP_BASE = process.env.BONA_CDP_URL || 'http://localhost:9230';
+export const ENSURE_SCRIPT = process.env.BONA_CHROME_ENSURE || fileURLToPath(new URL('../../../ops/systemd/bona-chrome.sh', import.meta.url));
 /** WSL view and Windows view of the upload staging folder (the Windows Chrome reads the latter). */
 export const UPLOAD_DIR_WSL = process.env.BONA_UPLOAD_DIR_WSL || '/mnt/c/Users/ASUS/AppData/Local/bona-social-upload';
 export const UPLOAD_DIR_WIN = process.env.BONA_UPLOAD_DIR_WIN || 'C:\\Users\\ASUS\\AppData\\Local\\bona-social-upload';
@@ -30,14 +33,14 @@ async function version(base, fetchImpl) {
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
-/** Chrome reachable, else start it with chrome-debug.sh (idempotent) and try once more. */
+/** Chrome reachable, else start it with the ensure script (idempotent) and try once more. */
 export async function ensureChrome({ base = CDP_BASE, fetchImpl = fetch, ensureScript = ENSURE_SCRIPT, spawn = spawnSync } = {}) {
   try { return await version(base, fetchImpl); } catch { /* start it below */ }
   if (ensureScript && fs.existsSync(ensureScript)) spawn('bash', [ensureScript], { stdio: 'ignore', timeout: 40_000 });
   for (let i = 0; i < 10; i++) {
     try { return await version(base, fetchImpl); } catch { await sleep(1000); }
   }
-  throw new BrowserError('chrome-unreachable', `Chrome DevTools not reachable at ${base} (tried ${ensureScript}); start it with ~/.claude/scripts/chrome-debug.sh`);
+  throw new BrowserError('chrome-unreachable', `Chrome DevTools not reachable at ${base} (tried ${ensureScript}); start it with: bash ${ensureScript}`);
 }
 export async function openTab(url, { base = CDP_BASE, fetchImpl = fetch } = {}) {
   const r = await fetchImpl(`${base}/json/new?${encodeURIComponent(url)}`, { method: 'PUT', signal: AbortSignal.timeout(10_000) });

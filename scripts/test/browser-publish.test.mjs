@@ -788,3 +788,102 @@ test('run: a LinkedIn repeat re-encodes the approved frames in a new order, neve
   const r2 = await run('linkedin', { env: sb2.env, root: sb2.root, now: at, clock: () => at, log: quiet }, deps().d);
   assert.deepEqual(r2.choice.frameOrder, [3, 1, 2]);
 });
+
+// ------------------------------------------- 2026-11-08: unblock (lnkd.in binding, block pages, Kuma, own Chrome)
+// The real 2026-10-21 LinkedIn post: the caption as submitted (its `intent` line) and the text LinkedIn
+// published (the Page's public post, urn:li:activity:7518559300538146817). Only the link differs:
+// LinkedIn swapped the listing URL for its own short link, so the post was never bound and the channel
+// blocked itself for 18 days.
+const LI_1021_CAPTION = 'Private Beach Villa, Durrat Al Arous\nDurrat Al Arous, Jeddah · For sale\n\n5 bedrooms · 537 m² plot · SAR 8,000,000\n\nInterested? Message Bona with BONA-001 for current availability and a viewing.\nhttps://bona-real-estate.com/properties/private-beach-villa-durrat-al-arous/\n\nPrices shown are asking prices and may change. Details, condition and services are confirmed at viewing.\nAdvertiser: Abdulaziz Zaidan · FAL 1100313556 · +966593296933\n\nفيلا بشاطئ خاص، درة العروس — درة العروس، جدة · للبيع\nالمعلن: عبدالعزيز زيدان · فال 1100313556 · +966593296933\n\n#BonaRealEstate #JeddahRealEstate #JeddahVillas #DurratAlArous #SaudiRealEstate';
+const LI_1021_LIVE = LI_1021_CAPTION.replace('https://bona-real-estate.com/properties/private-beach-villa-durrat-al-arous/', 'https://lnkd.in/dnG_C5SM');
+
+test('2026-11-08: a post whose link LinkedIn shortened to lnkd.in still binds — and nothing else is loosened', () => {
+  const sub = { caption: LI_1021_CAPTION, evidence: 'BONA-001' };
+  const key = 'activity:7518559300538146817';
+  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE }], [], sub), key, 'the real 10-21 post');
+  // As the feed renders it: hashtag links, a clamp control, the link without its scheme.
+  const dom = LI_1021_LIVE.replace(/#(\w+)/g, 'hashtag#$1').replace('https://lnkd.in/dnG_C5SM', 'lnkd.in/dnG_C5SM') + ' …see more';
+  assert.equal(SITES.bindNewPost([{ key, text: dom }], [], sub), key, 'feed rendering of the same post');
+  // Still strict everywhere else.
+  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE }], [key], sub), null, 'already in the baseline');
+  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replace('SAR 8,000,000', 'SAR 9,000,000') }], [], sub), null, 'a changed price is another post');
+  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replaceAll('BONA-001', 'BONA-002') }], [], { caption: LI_1021_CAPTION.replaceAll('BONA-001', 'BONA-002'), evidence: 'BONA-001' }), null, 'the evidence must be there');
+  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replace('https://lnkd.in/dnG_C5SM\n', '') }], [], sub), null, 'a missing link is a difference too');
+  // Education captions carry a bare domain; LinkedIn may link or shorten it.
+  const edu = 'Topic one\n\nText\nBona · FAL 1100313556 · bona-real-estate.com\n#BonaRealEstate';
+  assert.equal(SITES.bindNewPost([{ key: 'share:1', text: edu.replace('bona-real-estate.com', 'https://lnkd.in/eXyZ12') }], [], { caption: edu, evidence: 'Topic one' }), 'share:1');
+  // The token never swallows the facts the binding relies on.
+  const t = SITES.bindText('BONA-001 · SAR 8,000,000 · 537 m² · FAL 1100313556 · +966593296933 · فال');
+  for (const kept of ['BONA-001', '8,000,000', '537 m²', '1100313556', '+966593296933', 'فال']) assert.ok(t.includes(kept), kept);
+  assert.equal(SITES.bindText('see https://bona-real-estate.com/x/ and www.bona-real-estate.com'), `see ${SITES.LINK_TOKEN} and ${SITES.LINK_TOKEN}`);
+});
+
+const pageFake = ({ url, text = '', captcha = false, settled = true }) => ({
+  navigate: async () => {}, waitFor: async () => settled, url: async () => url,
+  ev: async e => (e.includes('captcha') ? captcha : e.includes('document.title') ? text : e.includes('innerText') ? text : null),
+});
+
+test('2026-11-08: a site\'s own block page is named as such (TikTok 403, LinkedIn Cloudflare), not "not logged in"', async () => {
+  const tt = await SITES.tiktokBlocker(pageFake({ url: 'chrome-error://chromewebdata/', text: 'www.tiktok.com\nAccess to www.tiktok.com was denied\nYou don\'t have authorization to view this page.\nHTTP ERROR 403' }));
+  assert.equal(tt?.kind, 'blocked');
+  const li = await SITES.linkedinBlocker(pageFake({ url: 'https://www.linkedin.com/company/145349037/admin/page-posts/published/', text: 'Attention Required! | Cloudflare\nSorry, you have been blocked\nYou are unable to access linkedin.com' }));
+  assert.equal(li?.kind, 'blocked');
+  assert.match(li.message, /LinkedIn refused this browser/);
+  assert.equal(await SITES.tiktokBlocker(pageFake({ url: 'https://www.tiktok.com/@bonarealestatesa', text: 'Bona Real Estate' })), null);
+  assert.equal(await SITES.linkedinBlocker(pageFake({ url: 'https://www.linkedin.com/company/145349037/', text: 'Bona | بونا' })), null);
+  assert.equal((await SITES.tiktokBlocker(pageFake({ url: 'https://www.tiktok.com/@bonarealestatesa', captcha: true }))).kind, 'captcha', 'captcha still wins');
+});
+
+test('2026-11-08: confirmation pages that are block pages are reported, and the uncertain record says why', async () => {
+  const report = { blocked: null };
+  const s = pageFake({ url: 'chrome-error://chromewebdata/', text: 'Access to www.tiktok.com was denied HTTP ERROR 403', settled: false });
+  assert.equal(await SITES.tiktokConfirm(s, 'bonarealestatesa', [], { caption: 'x BONA-A', evidence: 'BONA-A', report, timeoutMs: 30, every: 0, settleMs: 0 }), null);
+  assert.match(report.blocked, /TikTok refused this browser/);
+  const liReport = { blocked: null };
+  const li = pageFake({ url: 'https://www.linkedin.com/company/145349037/posts/', text: 'Sorry, you have been blocked', settled: false });
+  assert.equal(await SITES.linkedinConfirm(li, '145349037', [], { caption: 'x BONA-A', evidence: 'BONA-A', report: liReport, timeoutMs: 30, every: 0, settleMs: 0 }), null);
+  assert.match(liReport.blocked, /LinkedIn refused this browser/);
+  // Through run(): the ledger's uncertain line and the error carry the reason.
+  const sb = sandbox(), x = deps({ confirm: null });
+  x.d.sites.tiktokConfirm = async (_s, _h, _b, opts) => { opts.report.blocked = 'TikTok refused this browser (access denied / HTTP 403 at chrome-error://chromewebdata/)'; return null; };
+  await assert.rejects(run('tiktok', { env: sb.env, root: sb.root, now: NOW, clock: () => NOW, log: quiet, kind: 'property' }, x.d), e => e.uncertain === true && /refused this browser/.test(e.message));
+  const rows = readLedger(ledgerPath(sb.data, 'tiktok'));
+  assert.deepEqual(rows.map(r => r.status), ['intent', 'uncertain']);
+  assert.match(rows[1].blocked, /HTTP 403/);
+});
+
+test('2026-11-08: Uptime Kuma hears every live browser run that matters (up / down at once when blocked / down at the last run)', () => {
+  const beat = CLI.browserBeat;
+  const tt = t => new Date(`2026-11-08T${t}:00+03:00`); // a Sunday: a TikTok day and a LinkedIn day
+  const blocked = Object.assign(new Error('tiktok: an earlier post is uncertain; check the account'), { uncertain: true });
+  assert.deepEqual(beat('tiktok', { result: { status: 'published' }, now: tt('21:45') }), { status: 'up', msg: 'published' });
+  assert.deepEqual(beat('tiktok', { result: { status: 'already-published' }, now: tt('22:15') }), { status: 'up', msg: 'already-published' });
+  assert.equal(beat('tiktok', { error: blocked, now: tt('21:45') }).status, 'down', 'blocked: down at the first run, no waiting');
+  const login = Object.assign(new Error('TikTok is not logged in'), { kind: 'not-logged-in' });
+  assert.equal(beat('tiktok', { error: login, now: tt('21:45') }), null, 'an early failure may still be retried');
+  assert.equal(beat('tiktok', { error: login, now: tt('22:15') }), null);
+  assert.deepEqual(beat('tiktok', { error: login, now: tt('22:45') }), { status: 'down', msg: 'TikTok is not logged in' });
+  assert.equal(beat('tiktok', { result: { status: 'skipped-nothing-eligible' }, now: tt('22:45') }).status, 'down');
+  assert.equal(beat('tiktok', { result: { status: 'not-due' }, now: tt('09:30') }), null, 'outside the window: nothing to say');
+  assert.equal(beat('tiktok', { result: { status: 'published' }, now: tt('21:45'), dry: true }), null);
+  assert.equal(beat('linkedin', { error: login, now: tt('09:30') }), null);
+  assert.equal(beat('linkedin', { error: login, now: tt('10:30') }).status, 'down', 'LinkedIn\'s last run is 10:30');
+  assert.equal(beat('linkedin', { error: blocked, now: tt('09:30') }).status, 'down');
+  const friday = new Date('2026-11-13T10:30:00+03:00');
+  assert.equal(beat('linkedin', { error: blocked, now: friday }), null, 'not a LinkedIn day');
+  assert.equal(beat('instagram', { result: { status: 'published' }, now: tt('21:45') }), null);
+});
+
+test('2026-11-08: the unit drives Bona\'s own Chrome (:9230), never the shared :9222 one, and that Chrome refuses web origins', () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const unit = fs.readFileSync(path.join(here, '../../ops/systemd/bona-browser@.service'), 'utf8');
+  assert.match(unit, /^Environment=BONA_CDP_URL=http:\/\/localhost:9230$/m);
+  assert.match(unit, /^Environment=BONA_CHROME_ENSURE=%h\/bona-publish\/ops\/systemd\/bona-chrome\.sh$/m);
+  const sh = fs.readFileSync(path.join(here, '../../ops/systemd/bona-chrome.sh'), 'utf8');
+  const code = sh.split('\n').filter(l => !/^\s*#/.test(l)).join('\n'); // the comments explain the flags; only code counts
+  assert.match(code, /PORT="\$\{BONA_CHROME_PORT:-9230\}"/);
+  assert.doesNotMatch(code, /remote-allow-origins/, 'no web page may open a DevTools socket to the Bona profile');
+  assert.doesNotMatch(code, /--headless/, 'a real window: headless announces itself as HeadlessChrome');
+  assert.match(sh, /bona-social-chrome/);
+  assert.equal(spawnSync('bash', ['-n', path.join(here, '../../ops/systemd/bona-chrome.sh')]).status, 0, 'shell syntax');
+});

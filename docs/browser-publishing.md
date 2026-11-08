@@ -1,7 +1,7 @@
 # Daily TikTok and LinkedIn posts (browser publisher)
 
 One TikTok video a day and one LinkedIn Page post each working day, fully automatic, posted
-through the Windows Chrome that is already logged in to both accounts. Owner decision
+through Bona's own Windows Chrome (CDP `:9230`), which is logged in to both accounts. Owner decision
 2026-10-20: same approved Saudi property register as Instagram/Facebook (under the 2026-10-05
 ad-licence waiver), no per-post approval. Since 2026-10-21 a property every day, with
 licence-free education only when no property is eligible.
@@ -14,8 +14,47 @@ licence-free education only when no property is eligible.
 | Ledger | `~/bona-data/tiktok/published.jsonl` | `~/bona-data/linkedin/published.jsonl` |
 
 Why a browser: TikTok's Content Posting API publishes private-only until an app audit, and
-LinkedIn's posting API needs partner approval. Both accounts are logged in in the shared
-debug Chrome (CDP `http://localhost:9222`, started by `~/.claude/scripts/chrome-debug.sh`).
+LinkedIn's posting API needs partner approval.
+
+## Bona's own Chrome (`:9230`)
+
+Both accounts are logged in in a Chrome that only this publisher drives:
+`ops/systemd/bona-chrome.sh` starts it (profile `C:\Users\ASUS\AppData\Local\bona-social-chrome`,
+CDP `http://localhost:9230`, a normal visible window started minimised, with the no-throttling
+switches so a minimised window keeps rendering). The unit sets `BONA_CDP_URL=http://localhost:9230`
+and `BONA_CHROME_ENSURE=…/ops/systemd/bona-chrome.sh`, so a run starts it when it is not running
+(after a reboot, say). DevTools listens on 127.0.0.1 without `--remote-allow-origins=*`, so no web
+page can open a DevTools socket to this profile.
+
+Until 2026-11-08 the publisher used the shared automation Chrome on `:9222`
+(`~/.claude/scripts/chrome-debug.sh`). Other bots browse with that one (LinkedIn job search and
+applications) and it runs headless (user agent `HeadlessChrome`). On 2026-11-08 LinkedIn served it
+a Cloudflare "Sorry, you have been blocked" page and TikTok had logged it out and showed a captcha.
+Never point the publisher back at it.
+
+Log in (once, and whenever a run reports `not logged in`):
+
+```bash
+bash ~/bona-publish/ops/systemd/bona-chrome.sh show https://www.tiktok.com/login     # @bonarealestatesa
+bash ~/bona-publish/ops/systemd/bona-chrome.sh show https://www.linkedin.com/login   # a Page admin of company 145349037
+```
+
+## Monitoring (Uptime Kuma → owner's Telegram)
+
+Push monitors "Bona daily post — tiktok" and "Bona daily post — linkedin" (next to — instagram /
+— facebook), created with `ops/systemd/add-browser-monitors.py`; their push URLs are secrets in
+`~/bona-data/daily/heartbeat-<channel>.url` (0600, never logged). Each live run reports
+(`browserBeat()` in `browser-publish.mjs`, same rules as `heartbeatFor()`):
+
+- **up** on a publication or "already published today";
+- **down at once** while the channel is blocked by an `uncertain` post (no retry can clear it);
+- **down from the last timer run** (TikTok 22:45, LinkedIn 10:30) when the day still has no post;
+- nothing for dry runs, or for a run started outside the channel's window or days.
+
+Backstops when no run reports at all: TikTok 26 h, LinkedIn 76 h (Thursday 09:30 → Sunday 10:30 is
+73 h). A missing URL file or a failed push is logged and never changes the run's outcome. Before
+2026-11-08 there were no monitors for these two channels: the 2026-10-21 posts went `uncertain` and
+both channels sat blocked for 18 days with the alerts only in `<channel>/alerts.jsonl`.
 
 ## What gets posted
 
@@ -98,12 +137,15 @@ debug Chrome (CDP `http://localhost:9222`, started by `~/.claude/scripts/chrome-
    expanded, TikTok from `/video/<id>` with the description's "more" expanded. A post counts only if
    it is new (not in the baseline) AND the post's OWN text node
    contains the FULL submitted caption (normalised only for whitespace, emoji, LinkedIn's
-   "hashtag#tag" link text and a trailing "…see more") AND the submission's evidence (the listing
+   "hashtag#tag" link text, a trailing "…see more", and web addresses, each compared as one token
+   because LinkedIn swaps a link for its own `lnkd.in` short link) AND the submission's evidence (the listing
    id, or the education topic line). TikTok reads each new video's own description element (not
    comments, not meta tags); LinkedIn reads the commentary block whose nearest post container is
    that post (not a reshared post, not comments). The success toast's URN is taken first when it
    qualifies the same way. The URL keeps the real URN type
    (`urn:li:activity|share|ugcPost`). Anything less → `uncertain`. Append `published` with `url`.
+   If a page the confirmation needed was a login, captcha or block page, the `uncertain` line and the
+   alert carry `blocked` with the reason (2026-10-21: TikTok answered "Access denied / HTTP 403").
 
 Everything burned into the media (reel hook, subhook, lower third, CTA lines, card slides) goes
 through the same refusal as the caption: no `{{…}}` placeholder, never «تقييم مجاني». The reel's
@@ -188,9 +230,10 @@ alerts (exit 2) need the reconciliation above. A busy lock exits 75 from the uni
 
 | Symptom (journal / alerts.jsonl) | Cause | Fix |
 |---|---|---|
-| `Chrome DevTools not reachable` | debug Chrome not running and `chrome-debug.sh` could not start it | `~/.claude/scripts/chrome-debug.sh`; then `systemctl --user start bona-browser@tiktok.service` |
-| `not logged in` / no "Edit profile" | the debug profile lost the session | log in again in that Chrome (`chrome-debug.sh headed`) |
-| `captcha` / `verification` / `checkpoint` | the site wants a human check | solve it once in the headed debug Chrome; the next tick retries (nothing was recorded) |
+| `Chrome DevTools not reachable` | Bona's Chrome not running and `bona-chrome.sh` could not start it | `bash ~/bona-publish/ops/systemd/bona-chrome.sh`; then `systemctl --user start bona-browser@tiktok.service` |
+| `not logged in` / no "Edit profile" | Bona's Chrome lost the session | log in again: `bona-chrome.sh show https://www.tiktok.com/login` (or the LinkedIn login) |
+| `captcha` / `verification` / `checkpoint` | the site wants a human check | solve it once in a `bona-chrome.sh show` window; the next tick retries (nothing was recorded) |
+| `refused this browser` (`blocked`) | the site served its block page (TikTok "Access denied / HTTP 403", Cloudflare "Sorry, you have been blocked") | look in a `bona-chrome.sh show` window; if the site keeps refusing, stop the timers and tell the owner — do not retry in a loop. Before a click nothing was sent; after one, settle the `uncertain` day as above |
 | `not an admin of this Page` / `posts as "…", not the Page` | LinkedIn member lost Page admin, or the composer defaulted to the person | fix the role / actor; nothing was sent |
 | `Caption box does not hold the caption` | a popup stole focus mid-typing (retried 3×) or the editor changed | look at `failed-before-post.png`; adjust `lib/browser-sites.mjs` |
 | `upload-timeout` | slow upload / processing | retries next tick |
@@ -245,7 +288,8 @@ node scripts/social/browser-publish.mjs tiktok                               # l
 `--dry-run` writes nothing to the ledger. `--any-time` ignores the window (a live run with it
 posts now). `--kind property|education` forces a kind (no fallback). `BONA_DATA` moves the data
 directory; `BONA_CDP_URL`, `BONA_UPLOAD_DIR_WSL` / `BONA_UPLOAD_DIR_WIN` override the browser
-endpoint and the staging folder.
+endpoint and the staging folder (defaults: Bona's own Chrome `http://localhost:9230`, started by
+`ops/systemd/bona-chrome.sh` of the same checkout).
 
 ## Install
 
