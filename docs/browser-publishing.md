@@ -46,10 +46,18 @@ Push monitors "Bona daily post — tiktok" and "Bona daily post — linkedin" (n
 `~/bona-data/daily/heartbeat-<channel>.url` (0600, never logged). Each live run reports
 (`browserBeat()` in `browser-publish.mjs`, same rules as `heartbeatFor()`):
 
-- **up** on a publication or "already published today";
-- **down at once** while the channel is blocked by an `uncertain` post (no retry can clear it);
-- **down from the last timer run** (TikTok 22:45, LinkedIn 10:30) when the day still has no post;
-- nothing for dry runs, or for a run started outside the channel's window or days.
+- **up** on a publication or "already published today" (also from an `--any-time` run);
+- **down at once** while the channel is blocked by an `uncertain` post (no retry can clear it; also
+  from an `--any-time` run);
+- **down when the day's last run has no post**: a run that ENDED at or after the last timer time
+  (`CHANNELS.<channel>.lastRun`: TikTok 22:45, LinkedIn 10:30 — the timers' last `OnCalendar`, a test
+  keeps them equal). A run still going at that time absorbs the timer's start, so it is the last
+  one; a missed earlier run caught up late (`Persistent=true`) that ends before it is not;
+- nothing for dry runs, or for any other outcome of a run started outside the channel's window or days.
+
+The monitors are created paused. Start them once the channel is posting:
+`uv run --exclude-newer 2026-10-09 --with uptime-kuma-api==1.2.1 python3 ops/systemd/add-browser-monitors.py --resume`
+(with `ssh -f -N -L 13010:127.0.0.1:3010 hermes-vps` open); re-running it only rewrites the URL files.
 
 Backstops when no run reports at all: TikTok 26 h, LinkedIn 76 h (Thursday 09:30 → Sunday 10:30 is
 73 h). A missing URL file or a failed push is logged and never changes the run's outcome. Before
@@ -137,15 +145,27 @@ both channels sat blocked for 18 days with the alerts only in `<channel>/alerts.
    expanded, TikTok from `/video/<id>` with the description's "more" expanded. A post counts only if
    it is new (not in the baseline) AND the post's OWN text node
    contains the FULL submitted caption (normalised only for whitespace, emoji, LinkedIn's
-   "hashtag#tag" link text, a trailing "…see more", and web addresses, each compared as one token
-   because LinkedIn swaps a link for its own `lnkd.in` short link) AND the submission's evidence (the listing
+   "hashtag#tag" link text, a trailing "…see more", and links: the caption's OWN web addresses
+   (with or without the scheme) and LinkedIn's `lnkd.in` short links compare as one token, because
+   LinkedIn swaps a link for its own short link; any other address stays literal, so a post linking
+   elsewhere never matches) AND the submission's evidence (the listing
    id, or the education topic line). TikTok reads each new video's own description element (not
    comments, not meta tags); LinkedIn reads the commentary block whose nearest post container is
    that post (not a reshared post, not comments). The success toast's URN is taken first when it
    qualifies the same way. The URL keeps the real URN type
-   (`urn:li:activity|share|ugcPost`). Anything less → `uncertain`. Append `published` with `url`.
-   If a page the confirmation needed was a login, captcha or block page, the `uncertain` line and the
-   alert carry `blocked` with the reason (2026-10-21: TikTok answered "Access denied / HTTP 403").
+   (`urn:li:activity|share|ugcPost`). A post whose id shows it was created before this run started
+   (10 min clock slack) is never ours either, even when the baseline missed it — a repeat of the same
+   listing carries the same caption: LinkedIn ids hold epoch ms (`id >> 22`), TikTok video ids epoch
+   seconds (`id >> 32`); an id that does not decode to a plausible time is judged by the baseline only.
+   Anything less → `uncertain`. Append `published` with `url`.
+   If the pages the confirmation needed stayed a login, captcha or block page to the end (one that
+   later loaded normally does not count), the `uncertain` line and the alert carry `blocked` with the
+   reason (2026-10-21: TikTok answered "Access denied / HTTP 403"). Block pages are recognised by
+   their structure only: TikTok's empty-body HTTP error fails the navigation itself
+   (`net::ERR_HTTP_RESPONSE_CODE_FAILURE` → kind `blocked`), Chrome's `chrome-error://` page with an
+   HTTP 4xx is `blocked` while one with a network error (`ERR_INTERNET_DISCONNECTED`, …) is
+   `navigation`, and Cloudflare's page is matched by its title / its fixed lines with the Ray ID — a
+   post or comment quoting those phrases is not a block page.
 
 Everything burned into the media (reel hook, subhook, lower third, CTA lines, card slides) goes
 through the same refusal as the caption: no `{{…}}` placeholder, never «تقييم مجاني». The reel's
@@ -233,7 +253,8 @@ alerts (exit 2) need the reconciliation above. A busy lock exits 75 from the uni
 | `Chrome DevTools not reachable` | Bona's Chrome not running and `bona-chrome.sh` could not start it | `bash ~/bona-publish/ops/systemd/bona-chrome.sh`; then `systemctl --user start bona-browser@tiktok.service` |
 | `not logged in` / no "Edit profile" | Bona's Chrome lost the session | log in again: `bona-chrome.sh show https://www.tiktok.com/login` (or the LinkedIn login) |
 | `captcha` / `verification` / `checkpoint` | the site wants a human check | solve it once in a `bona-chrome.sh show` window; the next tick retries (nothing was recorded) |
-| `refused this browser` (`blocked`) | the site served its block page (TikTok "Access denied / HTTP 403", Cloudflare "Sorry, you have been blocked") | look in a `bona-chrome.sh show` window; if the site keeps refusing, stop the timers and tell the owner — do not retry in a loop. Before a click nothing was sent; after one, settle the `uncertain` day as above |
+| `refused this browser` / `answered with an HTTP error` (`blocked`) | the site served its block page (TikTok "Access denied / HTTP 403", Cloudflare "Sorry, you have been blocked") | look in a `bona-chrome.sh show` window; if the site keeps refusing, stop the timers and tell the owner — do not retry in a loop. Before a click nothing was sent; after one, settle the `uncertain` day as above |
+| `did not load (Chrome error page: ERR_…)` (`navigation`) | a network error on this PC | retries next tick; nothing was sent |
 | `not an admin of this Page` / `posts as "…", not the Page` | LinkedIn member lost Page admin, or the composer defaulted to the person | fix the role / actor; nothing was sent |
 | `Caption box does not hold the caption` | a popup stole focus mid-typing (retried 3×) or the editor changed | look at `failed-before-post.png`; adjust `lib/browser-sites.mjs` |
 | `upload-timeout` | slow upload / processing | retries next tick |

@@ -18,7 +18,7 @@ set -u
 PORT="${BONA_CHROME_PORT:-9230}"
 CHROME="${BONA_CHROME_EXE:-C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe}"
 PROFILE="${BONA_CHROME_PROFILE:-C:\\Users\\ASUS\\AppData\\Local\\bona-social-chrome}"
-CMD=/mnt/c/Windows/System32/cmd.exe
+CMD="${BONA_CHROME_CMD:-/mnt/c/Windows/System32/cmd.exe}"   # tests point this at /bin/false
 FLAGS=(--remote-debugging-port="$PORT" --user-data-dir="$PROFILE"
   --no-first-run --no-default-browser-check
   --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding)
@@ -29,7 +29,9 @@ launch() { "$CMD" /c start "" "$@" </dev/null >/dev/null 2>&1 & }
 
 if [ "${1:-}" = "show" ]; then
   url="${2:-https://www.tiktok.com/login}"
-  case "$url" in *'&'*|*'^'*|*'|'*|*'<'*|*'>'*|*'"'*) echo "bona-chrome: URL has characters cmd.exe would mangle; open it from the window instead" >&2; exit 2 ;; esac
+  # The URL goes through cmd.exe's command line: & ^ | < > " split or redirect it and %…% expands
+  # environment variables (even inside quotes), e.g. a ?next=%2Fcompany%2F… redirect.
+  case "$url" in *'&'*|*'^'*|*'|'*|*'<'*|*'>'*|*'"'*|*'%'*) echo "bona-chrome: URL has characters cmd.exe would mangle (& ^ | < > \" %); open it from the window instead" >&2; exit 2 ;; esac
   # A running instance of this profile takes the request and opens a new window; otherwise it starts here.
   launch "$CHROME" "${FLAGS[@]}" --new-window "$url"
   if timeout 25 curl -s --retry 25 --retry-connrefused --retry-delay 1 "http://localhost:${PORT}/json/version" >/dev/null 2>&1; then

@@ -22,6 +22,7 @@ export const UPLOAD_DIR_WSL = process.env.BONA_UPLOAD_DIR_WSL || '/mnt/c/Users/A
 export const UPLOAD_DIR_WIN = process.env.BONA_UPLOAD_DIR_WIN || 'C:\\Users\\ASUS\\AppData\\Local\\bona-social-upload';
 
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
+const hostOf = url => { try { return new URL(url).host; } catch { return String(url); } };
 
 /** A stable error class so the publisher can tell "the browser is not there" from a page problem. */
 export class BrowserError extends Error {
@@ -106,7 +107,12 @@ export async function connect(target, { WebSocketImpl = globalThis.WebSocket, co
       await send('Page.enable');
       const loaded = once('Page.loadEventFired', timeoutMs);
       const r = await send('Page.navigate', { url });
-      if (r?.errorText) throw new BrowserError('navigation', `Could not open ${url}: ${r.errorText}`);
+      if (r?.errorText) {
+        // An HTTP error answered with no page fails the navigation itself, and Chrome shows its own error
+        // page: TikTok's "Access to www.tiktok.com was denied / HTTP ERROR 403" on 2026-10-21.
+        if (/ERR_HTTP_RESPONSE_CODE_FAILURE|ERR_BLOCKED_BY_RESPONSE/.test(r.errorText)) throw new BrowserError('blocked', `${hostOf(url)} answered with an HTTP error instead of the page (${r.errorText}): it refused this browser`);
+        throw new BrowserError('navigation', `Could not open ${url}: ${r.errorText}`);
+      }
       // Same-document navigations fire no load event; the URL change is enough then.
       const ev2 = await Promise.race([loaded, s.waitFor(`location.href.startsWith(${JSON.stringify(url.split('#')[0].replace(/\/$/, ''))}) && document.readyState === 'complete'`, timeoutMs).then(v => v && { url: true })]);
       if (!ev2) throw new BrowserError('navigation', `Timed out loading ${url}`);

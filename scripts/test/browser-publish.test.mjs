@@ -801,77 +801,159 @@ test('2026-11-08: a post whose link LinkedIn shortened to lnkd.in still binds �
   const sub = { caption: LI_1021_CAPTION, evidence: 'BONA-001' };
   const key = 'activity:7518559300538146817';
   assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE }], [], sub), key, 'the real 10-21 post');
-  // As the feed renders it: hashtag links, a clamp control, the link without its scheme.
+  // As the feed renders it: hashtag links, a clamp control, the short link without its scheme.
   const dom = LI_1021_LIVE.replace(/#(\w+)/g, 'hashtag#$1').replace('https://lnkd.in/dnG_C5SM', 'lnkd.in/dnG_C5SM') + ' …see more';
   assert.equal(SITES.bindNewPost([{ key, text: dom }], [], sub), key, 'feed rendering of the same post');
+  assert.equal(SITES.bindNewPost([{ key: '7500000000000000001', text: LI_1021_CAPTION }], [], sub), '7500000000000000001', 'a site that keeps the link as typed (TikTok)');
   // Still strict everywhere else.
   assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE }], [key], sub), null, 'already in the baseline');
   assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replace('SAR 8,000,000', 'SAR 9,000,000') }], [], sub), null, 'a changed price is another post');
   assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replaceAll('BONA-001', 'BONA-002') }], [], { caption: LI_1021_CAPTION.replaceAll('BONA-001', 'BONA-002'), evidence: 'BONA-001' }), null, 'the evidence must be there');
   assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replace('https://lnkd.in/dnG_C5SM\n', '') }], [], sub), null, 'a missing link is a difference too');
+  // Codex P0: only the caption's own addresses and lnkd.in short links are tokens; any other link stays literal.
+  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replace('https://lnkd.in/dnG_C5SM', 'https://example.org/elsewhere') }], [], sub), null, 'a post linking somewhere else');
+  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replace('https://lnkd.in/dnG_C5SM', SITES.LINK_TOKEN) }], [], sub), null, 'the token itself in a post means nothing');
+  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replace('https://lnkd.in/dnG_C5SM', '‹link›') }], [], sub), null);
   // Education captions carry a bare domain; LinkedIn may link or shorten it.
   const edu = 'Topic one\n\nText\nBona · FAL 1100313556 · bona-real-estate.com\n#BonaRealEstate';
   assert.equal(SITES.bindNewPost([{ key: 'share:1', text: edu.replace('bona-real-estate.com', 'https://lnkd.in/eXyZ12') }], [], { caption: edu, evidence: 'Topic one' }), 'share:1');
+  assert.equal(SITES.bindNewPost([{ key: 'share:1', text: edu }], [], { caption: edu, evidence: 'Topic one' }), 'share:1');
   // The token never swallows the facts the binding relies on.
-  const t = SITES.bindText('BONA-001 · SAR 8,000,000 · 537 m² · FAL 1100313556 · +966593296933 · فال');
+  const facts = 'BONA-001 · SAR 8,000,000 · 537 m² · FAL 1100313556 · +966593296933 · فال https://bona-real-estate.com/p/';
+  const t = SITES.bindText(facts, SITES.captionLinks(facts));
   for (const kept of ['BONA-001', '8,000,000', '537 m²', '1100313556', '+966593296933', 'فال']) assert.ok(t.includes(kept), kept);
-  assert.equal(SITES.bindText('see https://bona-real-estate.com/x/ and www.bona-real-estate.com'), `see ${SITES.LINK_TOKEN} and ${SITES.LINK_TOKEN}`);
+  assert.ok(!t.includes('bona-real-estate.com'));
 });
 
-const pageFake = ({ url, text = '', captcha = false, settled = true }) => ({
+test('2026-11-08: a post created before the run never binds, even when the baseline missed it (same listing 14 days later)', () => {
+  const sub = { caption: LI_1021_CAPTION, evidence: 'BONA-001' };
+  const old = 'activity:7518559300538146817'; // 2026-10-21T06:30:25Z
+  assert.equal(new Date(SITES.idTime(old)).toISOString(), '2026-10-21T06:30:25.325Z');
+  assert.equal(new Date(SITES.idTime('ugcPost:7518559299627921408')).toISOString(), '2026-10-21T06:30:25.108Z');
+  const runStart = Date.parse('2026-11-04T06:25:00Z');
+  assert.equal(SITES.bindNewPost([{ key: old, text: LI_1021_LIVE }], [], sub, { notBefore: runStart }), null, 'the 10-21 post is not the 11-04 post');
+  const fresh = `activity:${(BigInt(Date.parse('2026-11-04T06:30:40Z')) << 22n) + 123n}`;
+  assert.equal(SITES.bindNewPost([{ key: old, text: LI_1021_LIVE }, { key: fresh, text: LI_1021_LIVE }], [], sub, { notBefore: runStart }), fresh);
+  const ttNew = String((BigInt(Math.floor(Date.parse('2026-11-04T18:46:00Z') / 1000)) << 32n) + 77n);
+  assert.equal(SITES.bindNewPost([{ key: ttNew, text: LI_1021_CAPTION }], [], sub, { notBefore: Date.parse('2026-11-04T18:35:00Z') }), ttNew, 'TikTok ids carry seconds');
+  // An id that does not decode to a plausible time is judged by the baseline only (never rejected on time).
+  assert.equal(SITES.idTime('5'), null);
+  assert.equal(SITES.bindNewPost([{ key: '6', text: LI_1021_LIVE }], [], sub, { notBefore: runStart }), '6');
+});
+
+const pageFake = ({ url, title = '', body = '', captcha = false, settled = true }) => ({
   navigate: async () => {}, waitFor: async () => settled, url: async () => url,
-  ev: async e => (e.includes('captcha') ? captcha : e.includes('document.title') ? text : e.includes('innerText') ? text : null),
+  ev: async e => (e.includes('captcha') ? captcha : e.includes('document.title') ? { title, body } : null),
 });
 
-test('2026-11-08: a site\'s own block page is named as such (TikTok 403, LinkedIn Cloudflare), not "not logged in"', async () => {
-  const tt = await SITES.tiktokBlocker(pageFake({ url: 'chrome-error://chromewebdata/', text: 'www.tiktok.com\nAccess to www.tiktok.com was denied\nYou don\'t have authorization to view this page.\nHTTP ERROR 403' }));
+test('2026-11-08: block pages are recognised by their structure (TikTok 403 error page, Cloudflare), not by a phrase in a feed', async () => {
+  const tt = await SITES.tiktokBlocker(pageFake({ url: 'chrome-error://chromewebdata/', title: 'www.tiktok.com', body: 'Access to www.tiktok.com was denied\nYou don\'t have authorization to view this page.\nHTTP ERROR 403\nReload' }));
   assert.equal(tt?.kind, 'blocked');
-  const li = await SITES.linkedinBlocker(pageFake({ url: 'https://www.linkedin.com/company/145349037/admin/page-posts/published/', text: 'Attention Required! | Cloudflare\nSorry, you have been blocked\nYou are unable to access linkedin.com' }));
+  assert.match(tt.message, /TikTok refused this browser \(Chrome error page: HTTP ERROR 403\)/);
+  const offline = await SITES.tiktokBlocker(pageFake({ url: 'chrome-error://chromewebdata/', body: 'No internet\nERR_INTERNET_DISCONNECTED' }));
+  assert.equal(offline?.kind, 'navigation', 'a network error is not a refusal');
+  assert.match(offline.message, /ERR_INTERNET_DISCONNECTED/);
+  const li = await SITES.linkedinBlocker(pageFake({ url: 'https://www.linkedin.com/company/145349037/admin/page-posts/published/', title: 'Attention Required! | Cloudflare', body: 'Sorry, you have been blocked\nYou are unable to access linkedin.com\nCloudflare Ray ID: a571a1df3a0b809b' }));
   assert.equal(li?.kind, 'blocked');
   assert.match(li.message, /LinkedIn refused this browser/);
-  assert.equal(await SITES.tiktokBlocker(pageFake({ url: 'https://www.tiktok.com/@bonarealestatesa', text: 'Bona Real Estate' })), null);
-  assert.equal(await SITES.linkedinBlocker(pageFake({ url: 'https://www.linkedin.com/company/145349037/', text: 'Bona | بونا' })), null);
+  // Codex P1: a real page quoting those phrases (a post, a comment, a job ad) is not a block page.
+  const quoting = 'Bona | بونا\nOur post: if you see "HTTP ERROR 403" or "Sorry, you have been blocked", or are unable to access Ejar, call us. Access to ejar.sa was denied?';
+  assert.equal(await SITES.linkedinBlocker(pageFake({ url: 'https://www.linkedin.com/company/145349037/posts/', title: 'Bona | بونا: Posts | LinkedIn', body: quoting })), null);
+  assert.equal(await SITES.tiktokBlocker(pageFake({ url: 'https://www.tiktok.com/@bonarealestatesa', title: 'Bona Real Estate (@bonarealestatesa) | TikTok', body: quoting })), null);
   assert.equal((await SITES.tiktokBlocker(pageFake({ url: 'https://www.tiktok.com/@bonarealestatesa', captcha: true }))).kind, 'captcha', 'captcha still wins');
 });
 
-test('2026-11-08: confirmation pages that are block pages are reported, and the uncertain record says why', async () => {
+test('2026-11-08: TikTok\'s empty-body 403 fails the navigation itself; it is reported as blocked, also on a video\'s own page', async () => {
+  // cdp.navigate: Page.navigate answers errorText for an HTTP error without a body (the 10-21 case).
+  class FakeWS {
+    constructor() { setTimeout(() => this.onopen?.()); }
+    send(raw) { const d = JSON.parse(raw); const result = d.method === 'Page.navigate' ? { frameId: 'F', errorText: 'net::ERR_HTTP_RESPONSE_CODE_FAILURE' } : {}; setTimeout(() => this.onmessage({ data: JSON.stringify({ id: d.id, result }) })); }
+    close() {}
+  }
+  const cs = await connect({ webSocketDebuggerUrl: 'ws://fake/devtools/page/1' }, { WebSocketImpl: FakeWS });
+  await assert.rejects(cs.navigate('https://www.tiktok.com/@bonarealestatesa'), e => e.kind === 'blocked' && /www\.tiktok\.com answered with an HTTP error/.test(e.message));
+  cs.close();
+  const refused = () => Object.assign(new Error('www.tiktok.com answered with an HTTP error instead of the page (net::ERR_HTTP_RESPONSE_CODE_FAILURE): it refused this browser'), { kind: 'blocked' });
+  // The list pages themselves refuse.
+  const r1 = { blocked: null };
+  const s1 = { ...pageFake({ url: 'https://www.tiktok.com/@bonarealestatesa' }), navigate: async () => { throw refused(); } };
+  assert.equal(await SITES.tiktokConfirm(s1, 'bonarealestatesa', [], { caption: 'x BONA-A', evidence: 'BONA-A', report: r1, timeoutMs: 30, every: 0, settleMs: 0 }), null);
+  assert.match(r1.blocked, /refused this browser/);
+  // The lists load and show a new id, but the video's own page refuses.
+  const r2 = { blocked: null };
+  const s2 = { ...pageFake({ url: 'https://www.tiktok.com/@bonarealestatesa' }),
+    navigate: async u => { if (u.includes('/video/')) throw refused(); },
+    ev: async e => (isIds(e) ? ['555'] : e.includes('captcha') ? false : e.includes('document.title') ? { title: '', body: '' } : null) };
+  assert.equal(await SITES.tiktokConfirm(s2, 'bonarealestatesa', [], { caption: 'x BONA-A', evidence: 'BONA-A', report: r2, timeoutMs: 30, every: 0, settleMs: 0 }), null);
+  assert.match(r2.blocked, /refused this browser/);
+  // LinkedIn: a refused list page is reported the same way.
+  const r3 = { blocked: null };
+  const s3 = { ...pageFake({ url: 'https://www.linkedin.com/company/145349037/posts/' }), navigate: async () => { throw Object.assign(new Error('www.linkedin.com answered with an HTTP error'), { kind: 'blocked' }); } };
+  assert.equal(await SITES.linkedinConfirm(s3, '145349037', [], { caption: 'x BONA-A', evidence: 'BONA-A', report: r3, timeoutMs: 30, every: 0, settleMs: 0 }), null);
+  assert.match(r3.blocked, /HTTP error/);
+});
+
+test('2026-11-08: confirmation reports only a refusal that lasts; the uncertain record and error say why', async () => {
+  // A Cloudflare page on the first round, normal pages after: nothing is reported.
+  let n = 0;
   const report = { blocked: null };
-  const s = pageFake({ url: 'chrome-error://chromewebdata/', text: 'Access to www.tiktok.com was denied HTTP ERROR 403', settled: false });
-  assert.equal(await SITES.tiktokConfirm(s, 'bonarealestatesa', [], { caption: 'x BONA-A', evidence: 'BONA-A', report, timeoutMs: 30, every: 0, settleMs: 0 }), null);
-  assert.match(report.blocked, /TikTok refused this browser/);
-  const liReport = { blocked: null };
-  const li = pageFake({ url: 'https://www.linkedin.com/company/145349037/posts/', text: 'Sorry, you have been blocked', settled: false });
-  assert.equal(await SITES.linkedinConfirm(li, '145349037', [], { caption: 'x BONA-A', evidence: 'BONA-A', report: liReport, timeoutMs: 30, every: 0, settleMs: 0 }), null);
-  assert.match(liReport.blocked, /LinkedIn refused this browser/);
+  const s = { navigate: async () => { n++; }, waitFor: async () => n > 1, url: async () => 'https://www.linkedin.com/company/145349037/posts/',
+    ev: async e => (e.includes('document.title') ? { title: n > 1 ? 'Bona' : 'Attention Required! | Cloudflare', body: '' } : e.includes('flatMap') ? [] : null) };
+  assert.equal(await SITES.linkedinConfirm(s, '145349037', [], { caption: 'x BONA-A', evidence: 'BONA-A', report, timeoutMs: 40, every: 0, settleMs: 0 }), null);
+  assert.ok(n > 1);
+  assert.equal(report.blocked, null, 'a transient block is not the reason');
+  // A block that lasts is.
+  const lasting = { blocked: null };
+  const li = pageFake({ url: 'https://www.linkedin.com/company/145349037/posts/', title: 'Attention Required! | Cloudflare', settled: false });
+  assert.equal(await SITES.linkedinConfirm(li, '145349037', [], { caption: 'x BONA-A', evidence: 'BONA-A', report: lasting, timeoutMs: 30, every: 0, settleMs: 0 }), null);
+  assert.match(lasting.blocked, /LinkedIn refused this browser/);
   // Through run(): the ledger's uncertain line and the error carry the reason.
   const sb = sandbox(), x = deps({ confirm: null });
-  x.d.sites.tiktokConfirm = async (_s, _h, _b, opts) => { opts.report.blocked = 'TikTok refused this browser (access denied / HTTP 403 at chrome-error://chromewebdata/)'; return null; };
+  x.d.sites.tiktokConfirm = async (_s, _h, _b, opts) => { assert.equal(typeof opts.notBefore, 'number', 'drive passes notBefore'); opts.report.blocked = 'TikTok refused this browser (Chrome error page: HTTP ERROR 403)'; return null; };
   await assert.rejects(run('tiktok', { env: sb.env, root: sb.root, now: NOW, clock: () => NOW, log: quiet, kind: 'property' }, x.d), e => e.uncertain === true && /refused this browser/.test(e.message));
   const rows = readLedger(ledgerPath(sb.data, 'tiktok'));
   assert.deepEqual(rows.map(r => r.status), ['intent', 'uncertain']);
-  assert.match(rows[1].blocked, /HTTP 403/);
+  assert.match(rows[1].blocked, /HTTP ERROR 403/);
+  assert.equal(channelState(rows, 'tiktok', '2026-10-22'), 'uncertain', 'the line with `blocked` still blocks later days');
 });
 
-test('2026-11-08: Uptime Kuma hears every live browser run that matters (up / down at once when blocked / down at the last run)', () => {
+test('2026-11-08: Uptime Kuma hears up on a post, down at once when blocked, down when the day\'s LAST run (by its end) has no post', () => {
   const beat = CLI.browserBeat;
-  const tt = t => new Date(`2026-11-08T${t}:00+03:00`); // a Sunday: a TikTok day and a LinkedIn day
+  const at = t => new Date(`2026-11-08T${t}:00+03:00`); // a Sunday: a TikTok day and a LinkedIn day
+  const run = (s, e, x) => beat('tiktok', { now: at(s), end: at(e), ...x });
   const blocked = Object.assign(new Error('tiktok: an earlier post is uncertain; check the account'), { uncertain: true });
-  assert.deepEqual(beat('tiktok', { result: { status: 'published' }, now: tt('21:45') }), { status: 'up', msg: 'published' });
-  assert.deepEqual(beat('tiktok', { result: { status: 'already-published' }, now: tt('22:15') }), { status: 'up', msg: 'already-published' });
-  assert.equal(beat('tiktok', { error: blocked, now: tt('21:45') }).status, 'down', 'blocked: down at the first run, no waiting');
   const login = Object.assign(new Error('TikTok is not logged in'), { kind: 'not-logged-in' });
-  assert.equal(beat('tiktok', { error: login, now: tt('21:45') }), null, 'an early failure may still be retried');
-  assert.equal(beat('tiktok', { error: login, now: tt('22:15') }), null);
-  assert.deepEqual(beat('tiktok', { error: login, now: tt('22:45') }), { status: 'down', msg: 'TikTok is not logged in' });
-  assert.equal(beat('tiktok', { result: { status: 'skipped-nothing-eligible' }, now: tt('22:45') }).status, 'down');
-  assert.equal(beat('tiktok', { result: { status: 'not-due' }, now: tt('09:30') }), null, 'outside the window: nothing to say');
-  assert.equal(beat('tiktok', { result: { status: 'published' }, now: tt('21:45'), dry: true }), null);
-  assert.equal(beat('linkedin', { error: login, now: tt('09:30') }), null);
-  assert.equal(beat('linkedin', { error: login, now: tt('10:30') }).status, 'down', 'LinkedIn\'s last run is 10:30');
-  assert.equal(beat('linkedin', { error: blocked, now: tt('09:30') }).status, 'down');
-  const friday = new Date('2026-11-13T10:30:00+03:00');
-  assert.equal(beat('linkedin', { error: blocked, now: friday }), null, 'not a LinkedIn day');
-  assert.equal(beat('instagram', { result: { status: 'published' }, now: tt('21:45') }), null);
+  assert.deepEqual(run('21:45', '21:52', { result: { status: 'published' } }), { status: 'up', msg: 'published' });
+  assert.deepEqual(run('22:15', '22:15', { result: { status: 'already-published' } }), { status: 'up', msg: 'already-published' });
+  assert.equal(run('21:45', '21:45', { error: blocked }).status, 'down', 'blocked: down at the first run, no waiting');
+  assert.equal(run('21:45', '21:50', { error: login }), null, 'an early failure may still be retried');
+  assert.equal(run('22:35', '22:37', { error: login }), null, 'a missed 22:15 run caught up at 22:35 (Persistent=true) is not the last run');
+  assert.deepEqual(run('22:45', '22:47', { error: login }), { status: 'down', msg: 'TikTok is not logged in' });
+  assert.equal(run('22:15', '22:50', { error: login }).status, 'down', 'a run still going at 22:45 absorbed that timer start: it is the last');
+  assert.equal(run('22:45', '23:40', { error: login }).status, 'down', 'ending after the window still counts');
+  assert.equal(run('22:45', '22:46', { result: { status: 'skipped-nothing-eligible' } }).status, 'down');
+  assert.equal(run('09:30', '09:30', { result: { status: 'not-due' } }), null, 'outside the window: nothing to say');
+  assert.equal(run('21:45', '21:52', { result: { status: 'published' }, dry: true }), null);
+  const li = (s, e, x) => beat('linkedin', { now: at(s), end: at(e), ...x });
+  assert.equal(li('09:30', '09:35', { error: login }), null);
+  assert.equal(li('10:00', '10:29', { error: login }), null);
+  assert.equal(li('10:30', '10:33', { error: login }).status, 'down', 'LinkedIn\'s last run is 10:30');
+  assert.equal(li('09:30', '09:30', { error: blocked }).status, 'down');
+  // --any-time runs outside the window: a post is up and a block is down; anything else says nothing.
+  const fri = t => new Date(`2026-11-13T${t}:00+03:00`);
+  assert.deepEqual(beat('linkedin', { result: { status: 'published' }, now: fri('15:00'), end: fri('15:05') }), { status: 'up', msg: 'published' });
+  assert.equal(beat('linkedin', { error: blocked, now: fri('15:00'), end: fri('15:05') }).status, 'down');
+  assert.equal(beat('linkedin', { error: login, now: fri('15:00'), end: fri('15:05') }), null);
+  assert.equal(beat('instagram', { result: { status: 'published' }, now: at('21:45') }), null);
+  assert.equal(CHANNELS.tiktok.lastRun, '22:45');
+  assert.equal(CHANNELS.linkedin.lastRun, '10:30');
+  // The last-run times are the timers' last OnCalendar entries.
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  for (const ch of ['tiktok', 'linkedin']) {
+    const timer = fs.readFileSync(path.join(here, `../../ops/systemd/bona-browser@${ch}.timer`), 'utf8');
+    const times = [...timer.matchAll(/OnCalendar=.* (\d\d:\d\d) Asia\/Riyadh/g)].map(m => m[1]).sort();
+    assert.equal(times.at(-1), CHANNELS[ch].lastRun, `${ch} timer`);
+  }
 });
 
 test('2026-11-08: the unit drives Bona\'s own Chrome (:9230), never the shared :9222 one, and that Chrome refuses web origins', () => {
@@ -886,4 +968,10 @@ test('2026-11-08: the unit drives Bona\'s own Chrome (:9230), never the shared :
   assert.doesNotMatch(code, /--headless/, 'a real window: headless announces itself as HeadlessChrome');
   assert.match(sh, /bona-social-chrome/);
   assert.equal(spawnSync('bash', ['-n', path.join(here, '../../ops/systemd/bona-chrome.sh')]).status, 0, 'shell syntax');
+  // cmd.exe would expand %…% or split on & before Chrome sees the URL: refused before anything is launched.
+  for (const bad of ['https://www.linkedin.com/login?next=%2Fcompany%2F1', 'https://x/?a=1&b=2']) {
+    // BONA_CHROME_CMD=/bin/false: even a broken guard can never open a window in the real Bona Chrome.
+    const r = spawnSync('bash', [path.join(here, '../../ops/systemd/bona-chrome.sh'), 'show', bad], { encoding: 'utf8', timeout: 10_000, env: { ...process.env, BONA_CHROME_PORT: '1', BONA_CHROME_CMD: '/bin/false', BONA_CHROME_PROFILE: 'C:\\nowhere' } });
+    assert.equal(r.status, 2, bad);
+  }
 });

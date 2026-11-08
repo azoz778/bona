@@ -95,6 +95,8 @@ async function renderMedia(channel, choice, dir, deps, advertiser) {
 /** Drive the page. `commit(stage)` is called right before the irreversible click and must record intent. */
 async function drive(channel, s, winFiles, caption, { dry, shots, date, commit, sites, evidence }) {
   const c = CHANNELS[channel];
+  // Nothing created before this run can be its post (ids carry their creation time; 10 min of clock slack).
+  const notBefore = Date.now() - 10 * 60_000;
   const shot = async name => { try { return await s.screenshot(path.join(shots, `${date}-${channel}-${name}.png`)); } catch { return null; } };
   let before;
   try {
@@ -134,8 +136,8 @@ async function drive(channel, s, winFiles, caption, { dry, shots, date, commit, 
   await shot('after-post');
   const report = { blocked: null };
   const url = channel === 'tiktok'
-    ? await sites.tiktokConfirm(s, c.handle, before, { caption, evidence, report })
-    : await sites.linkedinConfirm(s, c.companyId, before, { toast: signal, caption, evidence, report });
+    ? await sites.tiktokConfirm(s, c.handle, before, { caption, evidence, report, notBefore })
+    : await sites.linkedinConfirm(s, c.companyId, before, { toast: signal, caption, evidence, report, notBefore });
   await shot('confirm');
   return { status: url ? 'published' : 'unconfirmed', url, signal, blocked: url ? null : report.blocked };
 }
@@ -261,15 +263,21 @@ export async function run(channel, opts = {}, deps = null) {
 }
 
 /**
- * What Uptime Kuma should hear about a live run (heartbeatFor's rules with this channel's last-run
- * time): up on a publication; down at once while the channel is blocked by an uncertain post; down
- * from the channel's last timer run when the day still has no post. A run started outside the
- * channel's window or days says nothing. The monitors' own interval catches a run that never happens.
+ * What Uptime Kuma should hear about a live run: up on a publication; down at once while the channel
+ * is blocked by an uncertain post (both also for an --any-time run outside the window); otherwise,
+ * for a run started inside the channel's window and days, down when it was the day's last run — it
+ * ENDED at or after the last timer time (`lastRun`; a run still going then absorbs that timer's
+ * start) — and the day still has no post. `now` = run start, `end` = when it finished. The monitors'
+ * own interval catches a run that never happens.
  */
-export function browserBeat(channel, { result = null, error = null, now = new Date(), dry = false } = {}) {
+export function browserBeat(channel, { result = null, error = null, now = new Date(), end = now, dry = false } = {}) {
   const c = CHANNELS[channel];
-  if (!c || dry || !inWindow(channel, now).ok) return null;
-  return heartbeatFor({ status: result?.status ?? null, error, now, downFrom: c.downFrom, downTo: c.window.to, uncertain: Boolean(error?.uncertain) });
+  if (!c || dry) return null;
+  const status = result?.status ?? null, uncertain = Boolean(error?.uncertain);
+  if (uncertain || status === 'published' || status === 'already-published') return heartbeatFor({ status, error, now, uncertain });
+  if (!inWindow(channel, now).ok) return null;
+  const start = ksaNow(now), fin = ksaNow(end);
+  return heartbeatFor({ status, error, now, last: fin.date !== start.date || fin.time >= c.lastRun });
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
@@ -301,7 +309,7 @@ if (isMain) {
   // Uptime Kuma (owner's Telegram): logged, never changes the exit code. 2026-10-21 → 11-08 the channels
   // sat blocked for 18 days with the alerts only in <channel>/alerts.jsonl.
   if (!dry && CHANNELS[channel]) {
-    try { await pushHeartbeat(channel, browserBeat(channel, { result, error, now }), { dataDir: dataDir(process.env) }); }
+    try { await pushHeartbeat(channel, browserBeat(channel, { result, error, now, end: new Date() }), { dataDir: dataDir(process.env) }); }
     catch { console.error(`browser-publish ${channel}: heartbeat push failed`); }
   }
 }

@@ -49,13 +49,15 @@ def main():
     api = Api(os.environ.get("KUMA_API_URL", "http://127.0.0.1:13010"), timeout=60)
     api.login(env["KUMA_USER"], env["KUMA_PASSWORD"])
     try:
-        notifications = api.get_notifications()
-        nid = next(n["id"] for n in notifications if n["name"] == NOTIFICATION)
         os.makedirs(os.path.join(DATA, "daily"), exist_ok=True)
         for channel, interval in MONITORS.items():
             name = f"Bona daily post — {channel}"
             monitor = next((m for m in api.get_monitors() if m["name"] == name), None)
             if monitor is None:
+                # Only a new monitor needs the notification; an existing one keeps its own.
+                nid = next((n["id"] for n in api.get_notifications() if n["name"] == NOTIFICATION), None)
+                if nid is None:
+                    sys.exit(f"Kuma has no notification named {NOTIFICATION!r}; {name!r} was not created (nothing else changed)")
                 created = api.add_monitor(type=MonitorType.PUSH, name=name, interval=interval, maxretries=0,
                                           notificationIDList={nid: True})
                 monitor = api.get_monitor(created["monitorID"])
