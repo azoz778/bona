@@ -1,0 +1,287 @@
+{
+  "packageId": "bona-licence-free-fallback-20261005",
+  "reviewStatus": "pending-owner",
+  "approvalGate": "AWAITING APPROVAL — DO NOT PUBLISH OR SCHEDULE",
+  "entries": [
+    {
+      "id": "bona-fallback-ig-2026-10-05",
+      "packageId": "bona-licence-free-fallback-20261005",
+      "date": "2026-10-05",
+      "time": "20:30",
+      "timezone": "Asia/Riyadh",
+      "platform": "instagram",
+      "format": "image",
+      "pillar": "buyer/seller education",
+      "audience": "buyer",
+      "topic": {
+        "ar": "قائمة أقصر، مقارنة أوضح",
+        "en": "A shorter list, a clearer comparison"
+      },
+      "caption": {
+        "ar": "قبل بدء البحث، اكتب ثلاثة احتياجات أساسية وثلاثة أمور تفضّلها إن توفرت. أضف وقت التنقل الذي يناسب يومك والمساحات التي ستستخدمها فعلياً. استخدم القائمة نفسها عند كل مقارنة، واترك أي معلومة غير مؤكدة كسؤال يحتاج إلى تحقق.",
+        "en": "Before you begin a home search, write down three essentials and three preferences. Add the commute that fits your routine and the spaces you will actually use. Apply the same list to every comparison, and leave any unconfirmed detail as a question to verify."
+      },
+      "hashtags": [
+        "#بونا",
+        "#نصائح_عقارية",
+        "#دليل_المشتري",
+        "#Bona",
+        "#HomeBuyingTips"
+      ],
+      "captionText": "قبل بدء البحث، اكتب ثلاثة احتياجات أساسية وثلاثة أمور تفضّلها إن توفرت. أضف وقت التنقل الذي يناسب يومك والمساحات التي ستستخدمها فعلياً. استخدم القائمة نفسها عند كل مقارنة، واترك أي معلومة غير مؤكدة كسؤال يحتاج إلى تحقق.\n\n—\n\nBefore you begin a home search, write down three essentials and three preferences. Add the commute that fits your routine and the spaces you will actually use. Apply the same list to every comparison, and leave any unconfirmed detail as a question to verify.\n\n#بونا #نصائح_عقارية #دليل_المشتري #Bona #HomeBuyingTips\n",
+      "captionPath": "marketing/fallback-20261005/captions/2026-10-05.txt",
+      "assets": [
+        "public/social/fallback-20261005/2026-10-05-ig-1.jpg"
+      ],
+      "alt": {
+        "ar": "قائمة أقصر، مقارنة أوضح",
+        "en": "A shorter list, a clearer comparison"
+      },
+      "adLicenceRequired": false,
+      "propertySpecific": false,
+      "reviewStatus": "pending-owner",
+      "status": "candidate",
+      "approvalGate": "AWAITING APPROVAL — DO NOT PUBLISH OR SCHEDULE"
+    },
+    {
+      "id": "bona-fallback-ig-2026-10-06",
+      "packageId": "bona-licence-free-fallback-20261005",
+      "date": "2026-10-06",
+      "time": "20:30",
+      "timezone": "Asia/Riyadh",
+      "platform": "instagram",
+      "format": "image",
+      "pillar": "buyer/seller education",
+      "audience": "seller",
+      "topic": {
+        "ar": "ملف أوضح قبل عرض المنزل",
+        "en": "A clearer file before presenting a home"
+      },
+      "caption": {
+        "ar": "قبل مناقشة بيع منزل، اجمع مستندات الملكية المتاحة، والمخططات أو القياسات الموجودة، وسجلات الصيانة والضمانات ذات الصلة. دوّن ما هو مؤكد وما يحتاج إلى تحديث. تنظيم الملف مبكراً يساعدك على الإجابة بدقة من دون افتراض أو مبالغة.",
+        "en": "Before discussing a home sale, gather the available ownership documents, existing plans or measurements, and relevant maintenance or warranty records. Mark what is current and what needs updating. An organised file helps you answer accurately without assumptions or exaggeration."
+      },
+      "hashtags": [
+        "#بونا",
+        "#نصائح_للبائع",
+        "#بيع_عقار",
+        "#Bona",
+        "#HomeSellingTips"
+      ],
+      "captionText": "قبل مناقشة بيع منزل، اجمع مستندات الملكية المتاحة، والمخططات أو القياسات الموجودة، وسجلات الصيانة والضمانات ذات الصلة. دوّن ما هو مؤكد وما يحتاج إلى تحديث. تنظيم الملف مبكراً يساعدك على الإجابة بدقة من دون افتراض أو مبالغة.\n\n—\n\nBefore discussing a home sale, gather the available ownership documents, existing plans or measurements, and relevant maintenance or warranty records. Mark what is current and what needs updating. An organised file helps you answer accurately without assumptions or exaggeration.\n\n#بونا #نصائح_للبائع #بيع_عقار #Bona #HomeSellingTips\n",
+      "captionPath": "marketing/fallback-20261005/captions/2026-10-06.txt",
+      "assets": [
+        "public/social/fallback-20261005/2026-10-06-ig-1.jpg"
+      ],
+      "alt": {
+        "ar": "ملف أوضح قبل عرض المنزل",
+        "en": "A clearer file before presenting a home"
+      },
+      "adLicenceRequired": false,
+      "propertySpecific": false,
+      "reviewStatus": "pending-owner",
+      "status": "candidate",
+      "approvalGate": "AWAITING APPROVAL — DO NOT PUBLISH OR SCHEDULE"
+    },
+    {
+      "id": "bona-fallback-ig-2026-10-07",
+      "packageId": "bona-licence-free-fallback-20261005",
+      "date": "2026-10-07",
+      "time": "20:30",
+      "timezone": "Asia/Riyadh",
+      "platform": "instagram",
+      "format": "image",
+      "pillar": "buyer/seller education",
+      "audience": "buyer",
+      "topic": {
+        "ar": "لماذا تستحق الزيارة الثانية؟",
+        "en": "Why make a second visit?"
+      },
+      "caption": {
+        "ar": "إذا كان المنزل ضمن قائمتك القصيرة، زره في وقت مختلف إن أمكن. راقب الضوء والضوضاء وسهولة الدخول والمواقف، وجرّب مسار تنقلك المعتاد. سجّل ما لاحظته بنفسك وافصل ذلك عن المعلومات التي ما زالت تحتاج إلى مستند أو توضيح.",
+        "en": "If a home reaches your shortlist, revisit at a different time if possible. Notice the light, noise, access and parking, and test your usual route. Record what you observed yourself and separate it from details that still need documents or clarification."
+      },
+      "hashtags": [
+        "#بونا",
+        "#معاينة_عقار",
+        "#دليل_المشتري",
+        "#Bona",
+        "#PropertyViewing"
+      ],
+      "captionText": "إذا كان المنزل ضمن قائمتك القصيرة، زره في وقت مختلف إن أمكن. راقب الضوء والضوضاء وسهولة الدخول والمواقف، وجرّب مسار تنقلك المعتاد. سجّل ما لاحظته بنفسك وافصل ذلك عن المعلومات التي ما زالت تحتاج إلى مستند أو توضيح.\n\n—\n\nIf a home reaches your shortlist, revisit at a different time if possible. Notice the light, noise, access and parking, and test your usual route. Record what you observed yourself and separate it from details that still need documents or clarification.\n\n#بونا #معاينة_عقار #دليل_المشتري #Bona #PropertyViewing\n",
+      "captionPath": "marketing/fallback-20261005/captions/2026-10-07.txt",
+      "assets": [
+        "public/social/fallback-20261005/2026-10-07-ig-1.jpg"
+      ],
+      "alt": {
+        "ar": "لماذا تستحق الزيارة الثانية؟",
+        "en": "Why make a second visit?"
+      },
+      "adLicenceRequired": false,
+      "propertySpecific": false,
+      "reviewStatus": "pending-owner",
+      "status": "candidate",
+      "approvalGate": "AWAITING APPROVAL — DO NOT PUBLISH OR SCHEDULE"
+    },
+    {
+      "id": "bona-fallback-ig-2026-10-08",
+      "packageId": "bona-licence-free-fallback-20261005",
+      "date": "2026-10-08",
+      "time": "20:30",
+      "timezone": "Asia/Riyadh",
+      "platform": "instagram",
+      "format": "image",
+      "pillar": "buyer/seller education",
+      "audience": "seller",
+      "topic": {
+        "ar": "وصف دقيق يبني الثقة",
+        "en": "An accurate description builds trust"
+      },
+      "caption": {
+        "ar": "عند إعداد وصف منزلك، ابدأ بما يمكن مشاهدته أو إثباته: توزيع المساحات، التجهيزات الموجودة، والحالة الظاهرة. افصل بين ما هو مشمول في البيع وما يحتاج إلى اتفاق مكتوب. تجنّب الأوصاف المطلقة أو الوعود التي لا يدعمها مستند.",
+        "en": "When preparing a description of your home, start with what can be observed or documented: the layout, existing fittings and visible condition. Separate what is included in the sale from anything that needs written agreement. Avoid absolute descriptions or promises that documents do not support."
+      },
+      "hashtags": [
+        "#بونا",
+        "#نصائح_للبائع",
+        "#تسويق_عقاري",
+        "#Bona",
+        "#PropertyMarketing"
+      ],
+      "captionText": "عند إعداد وصف منزلك، ابدأ بما يمكن مشاهدته أو إثباته: توزيع المساحات، التجهيزات الموجودة، والحالة الظاهرة. افصل بين ما هو مشمول في البيع وما يحتاج إلى اتفاق مكتوب. تجنّب الأوصاف المطلقة أو الوعود التي لا يدعمها مستند.\n\n—\n\nWhen preparing a description of your home, start with what can be observed or documented: the layout, existing fittings and visible condition. Separate what is included in the sale from anything that needs written agreement. Avoid absolute descriptions or promises that documents do not support.\n\n#بونا #نصائح_للبائع #تسويق_عقاري #Bona #PropertyMarketing\n",
+      "captionPath": "marketing/fallback-20261005/captions/2026-10-08.txt",
+      "assets": [
+        "public/social/fallback-20261005/2026-10-08-ig-1.jpg"
+      ],
+      "alt": {
+        "ar": "وصف دقيق يبني الثقة",
+        "en": "An accurate description builds trust"
+      },
+      "adLicenceRequired": false,
+      "propertySpecific": false,
+      "reviewStatus": "pending-owner",
+      "status": "candidate",
+      "approvalGate": "AWAITING APPROVAL — DO NOT PUBLISH OR SCHEDULE"
+    },
+    {
+      "id": "bona-fallback-ig-2026-10-09",
+      "packageId": "bona-licence-free-fallback-20261005",
+      "date": "2026-10-09",
+      "time": "20:30",
+      "timezone": "Asia/Riyadh",
+      "platform": "instagram",
+      "format": "image",
+      "pillar": "buyer/seller education",
+      "audience": "buyer",
+      "topic": {
+        "ar": "اسأل عن الالتزامات المستمرة",
+        "en": "Ask about ongoing commitments"
+      },
+      "caption": {
+        "ar": "لا تتوقف المقارنة عند شكل المنزل. اطلب تفاصيل مكتوبة عن أي رسوم دورية مذكورة، ومسؤوليات الصيانة، وقواعد استخدام الأجزاء المشتركة إن وجدت. تحقّق من الجهة التي أصدرت المعلومة وتاريخها، ولا تحوّل تقديراً عاماً إلى رقم مؤكد.",
+        "en": "A comparison should not stop at how a home looks. Request written details of any stated recurring charges, maintenance responsibilities and shared-area rules, where applicable. Check who issued the information and when, and do not turn a general estimate into a confirmed figure."
+      },
+      "hashtags": [
+        "#بونا",
+        "#نصائح_عقارية",
+        "#شراء_عقار",
+        "#Bona",
+        "#BuyerChecklist"
+      ],
+      "captionText": "لا تتوقف المقارنة عند شكل المنزل. اطلب تفاصيل مكتوبة عن أي رسوم دورية مذكورة، ومسؤوليات الصيانة، وقواعد استخدام الأجزاء المشتركة إن وجدت. تحقّق من الجهة التي أصدرت المعلومة وتاريخها، ولا تحوّل تقديراً عاماً إلى رقم مؤكد.\n\n—\n\nA comparison should not stop at how a home looks. Request written details of any stated recurring charges, maintenance responsibilities and shared-area rules, where applicable. Check who issued the information and when, and do not turn a general estimate into a confirmed figure.\n\n#بونا #نصائح_عقارية #شراء_عقار #Bona #BuyerChecklist\n",
+      "captionPath": "marketing/fallback-20261005/captions/2026-10-09.txt",
+      "assets": [
+        "public/social/fallback-20261005/2026-10-09-ig-1.jpg"
+      ],
+      "alt": {
+        "ar": "اسأل عن الالتزامات المستمرة",
+        "en": "Ask about ongoing commitments"
+      },
+      "adLicenceRequired": false,
+      "propertySpecific": false,
+      "reviewStatus": "pending-owner",
+      "status": "candidate",
+      "approvalGate": "AWAITING APPROVAL — DO NOT PUBLISH OR SCHEDULE"
+    },
+    {
+      "id": "bona-fallback-ig-2026-10-10",
+      "packageId": "bona-licence-free-fallback-20261005",
+      "date": "2026-10-10",
+      "time": "20:30",
+      "timezone": "Asia/Riyadh",
+      "platform": "instagram",
+      "format": "image",
+      "pillar": "buyer/seller education",
+      "audience": "seller",
+      "topic": {
+        "ar": "سجل واضح عند التسليم",
+        "en": "A clear handover record"
+      },
+      "caption": {
+        "ar": "قبل تسليم المنزل، جهّز قائمة بالمفاتيح والملحقات والمستندات التي ستنتقل إلى الطرف الآخر. سجّل قراءات العدادات المتاحة، وصوّر الحالة المتفق عليها، ودوّن أي بند مفتوح مع المسؤول والموعد. احتفظ بنسخة يتفق عليها الطرفان.",
+        "en": "Before handing over a home, prepare a list of the keys, accessories and documents that will pass to the other party. Record available meter readings, photograph the agreed condition and note any open item with an owner and date. Keep a copy agreed by both parties."
+      },
+      "hashtags": [
+        "#بونا",
+        "#تسليم_عقار",
+        "#نصائح_للبائع",
+        "#Bona",
+        "#HomeHandover"
+      ],
+      "captionText": "قبل تسليم المنزل، جهّز قائمة بالمفاتيح والملحقات والمستندات التي ستنتقل إلى الطرف الآخر. سجّل قراءات العدادات المتاحة، وصوّر الحالة المتفق عليها، ودوّن أي بند مفتوح مع المسؤول والموعد. احتفظ بنسخة يتفق عليها الطرفان.\n\n—\n\nBefore handing over a home, prepare a list of the keys, accessories and documents that will pass to the other party. Record available meter readings, photograph the agreed condition and note any open item with an owner and date. Keep a copy agreed by both parties.\n\n#بونا #تسليم_عقار #نصائح_للبائع #Bona #HomeHandover\n",
+      "captionPath": "marketing/fallback-20261005/captions/2026-10-10.txt",
+      "assets": [
+        "public/social/fallback-20261005/2026-10-10-ig-1.jpg"
+      ],
+      "alt": {
+        "ar": "سجل واضح عند التسليم",
+        "en": "A clear handover record"
+      },
+      "adLicenceRequired": false,
+      "propertySpecific": false,
+      "reviewStatus": "pending-owner",
+      "status": "candidate",
+      "approvalGate": "AWAITING APPROVAL — DO NOT PUBLISH OR SCHEDULE"
+    },
+    {
+      "id": "bona-fallback-ig-2026-10-11",
+      "packageId": "bona-licence-free-fallback-20261005",
+      "date": "2026-10-11",
+      "time": "20:30",
+      "timezone": "Asia/Riyadh",
+      "platform": "instagram",
+      "format": "image",
+      "pillar": "buyer/seller education",
+      "audience": "buyer",
+      "topic": {
+        "ar": "توقف للتحقق قبل التوقيع",
+        "en": "Pause to verify before signing"
+      },
+      "caption": {
+        "ar": "قبل توقيع أي مستند، راجع أسماء الأطراف ووصف العقار والبنود المشمولة والتواريخ وآلية الدفع كما هي مكتوبة. ضع علامة على أي خانة فارغة أو عبارة غير واضحة، واطلب توضيحها في المستند نفسه. وعند الحاجة، استعن بمختص مؤهل قبل الالتزام.",
+        "en": "Before signing any document, review the parties' names, property description, included items, dates and payment process exactly as written. Flag any blank field or unclear wording and ask for it to be clarified in the document itself. Where needed, consult a qualified adviser before committing."
+      },
+      "hashtags": [
+        "#بونا",
+        "#دليل_المشتري",
+        "#نصائح_عقارية",
+        "#Bona",
+        "#PropertyChecklist"
+      ],
+      "captionText": "قبل توقيع أي مستند، راجع أسماء الأطراف ووصف العقار والبنود المشمولة والتواريخ وآلية الدفع كما هي مكتوبة. ضع علامة على أي خانة فارغة أو عبارة غير واضحة، واطلب توضيحها في المستند نفسه. وعند الحاجة، استعن بمختص مؤهل قبل الالتزام.\n\n—\n\nBefore signing any document, review the parties' names, property description, included items, dates and payment process exactly as written. Flag any blank field or unclear wording and ask for it to be clarified in the document itself. Where needed, consult a qualified adviser before committing.\n\n#بونا #دليل_المشتري #نصائح_عقارية #Bona #PropertyChecklist\n",
+      "captionPath": "marketing/fallback-20261005/captions/2026-10-11.txt",
+      "assets": [
+        "public/social/fallback-20261005/2026-10-11-ig-1.jpg"
+      ],
+      "alt": {
+        "ar": "توقف للتحقق قبل التوقيع",
+        "en": "Pause to verify before signing"
+      },
+      "adLicenceRequired": false,
+      "propertySpecific": false,
+      "reviewStatus": "pending-owner",
+      "status": "candidate",
+      "approvalGate": "AWAITING APPROVAL — DO NOT PUBLISH OR SCHEDULE"
+    }
+  ]
+}
