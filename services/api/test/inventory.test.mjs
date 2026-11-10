@@ -112,7 +112,7 @@ test('Card has the exact shape the widget consumes, in both locales', () => {
   const l = all.find((x) => x.id === 'BONA-005') ?? all[0];
   const card = toCard(l, { siteUrl: 'https://bona.azoz.uk' });
   assert.deepEqual(Object.keys(card).sort(),
-    ['areaSqm', 'baths', 'beds', 'district', 'id', 'image', 'price', 'slug', 'title', 'url'].sort());
+    ['brochureUrl', 'areaSqm', 'baths', 'beds', 'district', 'id', 'image', 'price', 'slug', 'title', 'url'].sort());
   assert.equal(card.url.en, `https://bona.azoz.uk/properties/${l.slug}/`);
   assert.equal(card.url.ar, `https://bona.azoz.uk/ar/properties/${l.slug}/`);
   assert.equal(typeof card.price.en, 'string');
@@ -222,3 +222,11 @@ test('a healthy inventory says so, and recovers if the file arrives late', () =>
   t = 200;
   assert.equal(late.ok(), true, 'once the publisher finishes, health comes back on its own');
 });
+
+ test('Trump Tower canonical brochure reaches inventory cards and tool rows', () => {
+ const inv = createInventory({ file: WORKTREE_LISTINGS });
+ const listing = inv.find('BONA-022');
+ assert.equal(listing.brochureUrl, 'https://bona-real-estate.com/listings/trump-tower-jeddah/brochure.pdf');
+ assert.equal(inv.card(listing).brochureUrl, listing.brochureUrl);
+ assert.equal(toToolRow(listing).brochureUrl, listing.brochureUrl);
+ });

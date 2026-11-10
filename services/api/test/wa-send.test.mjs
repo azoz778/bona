@@ -1283,3 +1283,54 @@ test('a chat that leaves the inbox while the reply is on its way gets no human-c
   assert.equal(h.s.getLead('LEAD-R').inbox_state, 'unsure');
   assert.equal(h.s.getLead('LEAD-R').last_human_out_ts, null);
 });
+
+const PDF = 'https://bona-real-estate.com/listings/trump-tower-jeddah/brochure.pdf';
+function pdfArgs(h, url = PDF) {
+ h.inbox.insertOutbox({ send_id: SID, jid: CLIENT_JID, text: 'Bona Unit 1003', sender_kind: 'dana' });
+ return { sendId: SID, jid: CLIENT_JID, text: 'Bona Unit 1003', kind: 'dana', document: { url } };
+}
+for (const [name, setup, error] of [
+ ['switch', h => h.team.setSetting('sending_enabled', '0'), 'sending_disabled'],
+ ['recipient', (_h, a) => { a.jid = '123@g.us'; }, 'bad_send_id'],
+ ['URL', (_h, a) => { a.document.url = 'https://evil.test/a.pdf'; }, 'bad_document'],
+ ['missing row', (h, a) => { a.sendId = 'absent'; }, 'bad_send_id'],
+]) test(`document gate: ${name}`, async () => {
+ const h = harness(); const a = pdfArgs(h); setup(h, a);
+ assert.equal((await h.sender.sendTo(a)).error, error); assert.equal(h.calls.length, 0);
+});
+for (const [status, body, decided] of [[201, { key: { id: 'media-key' } }, 'accepted'], [201, {}, 'uncertain'], [201, {key:{id:''}}, 'uncertain'], [500, {}, 'uncertain'], [400, {}, 'failed']]) test(`document ack ${status}/${decided}/${JSON.stringify(body)} durable and once`, async () => {
+ const h = harness({ reply: () => ({ status, body }) }); const a = pdfArgs(h);
+ await h.sender.sendTo(a); assert.equal(h.calls.length, 1); assert.equal(h.calls[0].pending, 1);
+ assert.equal(h.inbox.getOutbox(SID).status, decided);
+ await h.sender.sendTo(a); h.sender.recoverInterrupted(); await h.sender.sendTo(a);
+ assert.equal(h.calls.length, 1);
+ assert.equal(h.calls[0].body.mimetype, 'application/pdf');
+});
+test('documents share notify and rate gates', async () => {
+ const off = harness({ env: { ...ENV, BONA_WA_NOTIFY: '0' } });
+ assert.equal((await off.sender.sendTo(pdfArgs(off))).error, 'disabled');
+ const h = harness({ limits: { perMinute: 1 } });
+ await h.sender.sendTo({ jid: CLIENT_JID, text: 'first', kind: 'staff' });
+ assert.equal((await h.sender.sendTo(pdfArgs(h))).error, 'rate_limited'); assert.equal(h.calls.length, 1);
+});
+test('document shares daily and per-recipient caps', async () => {
+ const day = harness(); seedOutbox(day, SEND_PER_DAY);
+ assert.equal((await day.sender.sendTo(pdfArgs(day))).error, 'rate_limited'); assert.equal(day.calls.length, 0);
+ const h = harness();
+ for (let i = 0; i < PER_RECIPIENT_PER_MIN; i++) await h.sender.sendTo({ jid: CLIENT_JID, text: 'budget', kind: 'staff' });
+ assert.equal((await h.sender.sendTo(pdfArgs(h))).error, 'rate_limited'); assert.equal(h.calls.length, PER_RECIPIENT_PER_MIN);
+});
+for (const err of [abortError(), netError('ECONNRESET'), netError('ECONNREFUSED')]) test(`document network ${err.name}/${err.cause?.code} never retries`, async () => {
+ const h = harness({ reply: () => ({ throws: err }) }); const args = pdfArgs(h);
+ const out = await h.sender.sendTo(args);
+ assert.equal(out.ok, false); assert.equal(h.inbox.getOutbox(SID).status, err.cause?.code === 'ECONNREFUSED' ? 'failed' : 'uncertain');
+ await h.sender.sendTo(args); assert.equal(h.calls.length, 1);
+});
+test('document pending id cannot be sent concurrently and recovery refuses interrupted media', async () => {
+ let done; const wait = new Promise(r => { done = r; });
+ const h = harness({ reply: async () => { await wait; return { status: 201, body: { key: { id: 'pdf' } } }; } });
+ const args = pdfArgs(h); const first = h.sender.sendTo(args);
+ assert.equal((await h.sender.sendTo(args)).error, 'duplicate'); done(); await first; assert.equal(h.calls.length, 1);
+ const crashed = harness(); const interrupted = pdfArgs(crashed); crashed.sender.recoverInterrupted();
+ assert.equal((await crashed.sender.sendTo(interrupted)).error, 'duplicate'); assert.equal(crashed.calls.length, 0);
+});
