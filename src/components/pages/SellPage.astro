@@ -3,13 +3,12 @@ import Base from '../../layouts/Base.astro';
 import EnquiryForm from '../EnquiryForm.astro';
 import site from '../../data/site.json';
 import { localePath, t, ui, type Locale } from '../../lib/i18n';
-import { editorialImage, ordered, listings, imageAlt } from '../../lib/listings';
+import { editorialImage, editorialListing, imageAlt } from '../../lib/listings';
 import { breadcrumbJsonLd } from '../../lib/seo';
 interface Props { locale: Locale }
 const { locale } = Astro.props;
 const path = localePath(locale, '/sell/');
-const pool = ordered(listings).filter(l => l.images?.length);
-const img = editorialImage(3, 1), imgL = pool[3 % Math.max(1, pool.length)];
+const img = editorialImage(3, 1), imgL = editorialListing(3);
 const c = {
   statement: { en: 'Selling a significant home is not a listing exercise. It is a matter of preparation, timing and the right introductions.',
                ar: 'بيع منزل مميّز ليس مجرد إعلان. إنه مسألة تجهيز وتوقيت وتعريفات صحيحة.' },
