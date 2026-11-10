@@ -158,7 +158,7 @@
   "unit": null,
   "map": null,
   "listedAt": "2026-09-06",
-  "hidden": false,
+  "hidden": true,
   "_intake": {
     "source": "whatsapp",
     "pdfSha256": "7f6e4e4a4410e714fd9d717e1cad53dcd40fa4ddad0293de6a0f01cae5d403ea",

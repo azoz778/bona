@@ -144,6 +144,17 @@ off-plan; the publisher refuses one marked as a render (`photo_note_conflicts_wi
 malformed note (`photo_note_malformed`) and a caption without the note
 (`photo_note_not_in_caption`).
 
+**Withdrawn advertising.** When a developer withdraws the permission to advertise a project, its
+register entry becomes a tombstone: `status: "withdrawn"`, a `withdrawnAdvertising` flag (`at`,
+`requestedBy`, `reason`, `channels`, `removed` posts; optionally `slug`, `names`, `pdfSha256` to
+catch a re-import), and no `photos`. `scripts/curate/rules.mjs` `WITHDRAWN_ADVERTISING` holds the
+permanent records (BONA-W009, Elvira Murjan, since 2026-10-20). Either one takes the listing off
+src/data/listings.json (build, validate, the deploy's sync) and off every channel:
+`eligibility()` answers `marketing_permission_withdrawn` and `chooseProperty()` (Instagram,
+Facebook, TikTok, LinkedIn) skips it, the draft script never drafts it, and the approve script
+refuses `--select` and `--cards` for it and leaves the tombstone alone. Putting one back needs an
+explicit owner decision that the developer's permission is renewed.
+
 ## Publication safety
 
 - Each channel re-checks the account identity, downloads the reviewed images and compares their

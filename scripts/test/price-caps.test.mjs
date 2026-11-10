@@ -50,7 +50,8 @@ test('all three routes enforce the land cap and the withheld list from the one s
   // reached listings.json (validate would then fail the deploy, but the build must not emit it).
   const build = src('scripts/curate/build.mjs');
   assert.match(build, /const candidates = \[\.\.\.live, \.\.\.inbox\];/, 'build.mjs forms the COMBINED curated + intake set');
-  assert.match(build, /candidates\.filter\(\(l\) => isPublishable\(l\) && isLandPublic\(l\)\)/, 'and publishes only what passes BOTH rules');
+  // isPublishable(l, WITHDRAWN): the withheld list plus withdrawn advertising (rules.mjs + the review register's flags).
+  assert.match(build, /candidates\.filter\(\(l\) => isPublishable\(l, WITHDRAWN\) && isLandPublic\(l\)\)/, 'and publishes only what passes BOTH rules');
   for (const route of ['scripts/sync-listings.mjs', 'scripts/curate/validate.mjs']) {
     assert.match(src(route), /isLandPublic/, `${route} enforces the land cap`);
     assert.match(src(route), /isPublishable/, `${route} enforces the withheld list`);

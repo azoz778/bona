@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isLandPublic, isPublishable, LAND_PRICE_CAP, sarAmount } from './curate/rules.mjs';
+import { isLandPublic, isPublishable, LAND_PRICE_CAP, loadRegisterWithdrawals, sarAmount, withdrawnAdvertising } from './curate/rules.mjs';
 
 const API = process.env.TK_PUBLIC_API || 'https://dashboard.azoz.uk/api/public/properties';
 const TIMEOUT_MS = 10_000;
@@ -111,14 +111,18 @@ async function main() {
   // (2026-09-08, replacing a blanket house price cap). A price rise from TK can push a plot
   // over its cap, and the daily deploy runs this script and then builds WITHOUT re-running
   // scripts/curate/build.mjs — so without this, a sync would quietly republish what the rule
-  // exists to hide. (Codex review 2026-09-08: land was missing.)
-  const overCap = listings.filter((l) => !isPublishable(l) || !isLandPublic(l));
+  // exists to hide. (Codex review 2026-09-08: land was missing.) The same goes for a listing whose
+  // advertising permission was withdrawn (rules.mjs, or a flag in the review register).
+  const withdrawals = loadRegisterWithdrawals(ROOT);
+  const overCap = listings.filter((l) => !isPublishable(l, withdrawals) || !isLandPublic(l));
   if (overCap.length) {
     for (const l of overCap) {
       const sar = sarAmount(l.price);
-      const which = !isPublishable(l)
-        ? 'withheld from the public site by owner decision'
-        : `land at/above the SAR ${LAND_PRICE_CAP.toLocaleString('en-US')} cap (${sar === null ? 'no published price' : `${Math.round(sar).toLocaleString('en-US')} SAR eq.`})`;
+      const which = withdrawnAdvertising(l, withdrawals)
+        ? 'advertising permission withdrawn'
+        : !isPublishable(l)
+          ? 'withheld from the public site by owner decision'
+          : `land at/above the SAR ${LAND_PRICE_CAP.toLocaleString('en-US')} cap (${sar === null ? 'no published price' : `${Math.round(sar).toLocaleString('en-US')} SAR eq.`})`;
       changes.push(`${l.id} REMOVED — ${which}`);
     }
     const drop = new Set(overCap.map((l) => l.id));
