@@ -818,6 +818,8 @@ test('2026-11-08: a post whose link LinkedIn shortened to lnkd.in still binds �
   const edu = 'Topic one\n\nText\nBona · FAL 1100313556 · bona-real-estate.com\n#BonaRealEstate';
   assert.equal(SITES.bindNewPost([{ key: 'share:1', text: edu.replace('bona-real-estate.com', 'https://lnkd.in/eXyZ12') }], [], { caption: edu, evidence: 'Topic one' }), 'share:1');
   assert.equal(SITES.bindNewPost([{ key: 'share:1', text: edu }], [], { caption: edu, evidence: 'Topic one' }), 'share:1');
+  assert.equal(SITES.bindNewPost([{ key: 'share:1', text: edu.replace('bona-real-estate.com', 'https://bona-real-estate.com') }], [], { caption: edu, evidence: 'Topic one' }), 'share:1', 'Codex R2: a scheme added to the bare domain');
+  assert.equal(SITES.bindNewPost([{ key: 'share:1', text: edu.replace('bona-real-estate.com', 'https://bona-real-estate.co') }], [], { caption: edu, evidence: 'Topic one' }), null, 'but not another domain');
   // The token never swallows the facts the binding relies on.
   const facts = 'BONA-001 · SAR 8,000,000 · 537 m² · FAL 1100313556 · +966593296933 · فال https://bona-real-estate.com/p/';
   const t = SITES.bindText(facts, SITES.captionLinks(facts));
@@ -860,20 +862,32 @@ test('2026-11-08: block pages are recognised by their structure (TikTok 403 erro
   const quoting = 'Bona | بونا\nOur post: if you see "HTTP ERROR 403" or "Sorry, you have been blocked", or are unable to access Ejar, call us. Access to ejar.sa was denied?';
   assert.equal(await SITES.linkedinBlocker(pageFake({ url: 'https://www.linkedin.com/company/145349037/posts/', title: 'Bona | بونا: Posts | LinkedIn', body: quoting })), null);
   assert.equal(await SITES.tiktokBlocker(pageFake({ url: 'https://www.tiktok.com/@bonarealestatesa', title: 'Bona Real Estate (@bonarealestatesa) | TikTok', body: quoting })), null);
+  // Codex R2: even both Cloudflare lines quoted inside a feed are not Cloudflare's page.
+  const both = 'Bona | بونا\nA reader wrote: "Sorry, you have been blocked … Cloudflare Ray ID: 1234" — here is how to fix it.';
+  assert.equal(await SITES.linkedinBlocker(pageFake({ url: 'https://www.linkedin.com/company/145349037/posts/', title: 'Bona | بونا: Posts | LinkedIn', body: both })), null);
+  assert.equal((await SITES.linkedinBlocker(pageFake({ url: 'https://www.linkedin.com/feed/', title: 'linkedin.com', body: '  Sorry, you have been blocked\nYou are unable to access linkedin.com\nCloudflare Ray ID: a571' }))).kind, 'blocked', 'the page itself, even with another title');
   assert.equal((await SITES.tiktokBlocker(pageFake({ url: 'https://www.tiktok.com/@bonarealestatesa', captcha: true }))).kind, 'captcha', 'captcha still wins');
 });
 
 test('2026-11-08: TikTok\'s empty-body 403 fails the navigation itself; it is reported as blocked, also on a video\'s own page', async () => {
   // cdp.navigate: Page.navigate answers errorText for an HTTP error without a body (the 10-21 case).
-  class FakeWS {
+  // Chrome then shows its own error page; its status says whether the site refused us (403) or just failed (503).
+  const errorPageWS = page => class {
     constructor() { setTimeout(() => this.onopen?.()); }
-    send(raw) { const d = JSON.parse(raw); const result = d.method === 'Page.navigate' ? { frameId: 'F', errorText: 'net::ERR_HTTP_RESPONSE_CODE_FAILURE' } : {}; setTimeout(() => this.onmessage({ data: JSON.stringify({ id: d.id, result }) })); }
+    send(raw) {
+      const d = JSON.parse(raw);
+      const result = d.method === 'Page.navigate' ? { frameId: 'F', errorText: 'net::ERR_HTTP_RESPONSE_CODE_FAILURE' } : d.method === 'Runtime.evaluate' ? { result: { value: page } } : {};
+      setTimeout(() => this.onmessage({ data: JSON.stringify({ id: d.id, result }) }));
+    }
     close() {}
-  }
-  const cs = await connect({ webSocketDebuggerUrl: 'ws://fake/devtools/page/1' }, { WebSocketImpl: FakeWS });
-  await assert.rejects(cs.navigate('https://www.tiktok.com/@bonarealestatesa'), e => e.kind === 'blocked' && /www\.tiktok\.com answered with an HTTP error/.test(e.message));
-  cs.close();
-  const refused = () => Object.assign(new Error('www.tiktok.com answered with an HTTP error instead of the page (net::ERR_HTTP_RESPONSE_CODE_FAILURE): it refused this browser'), { kind: 'blocked' });
+  };
+  const c403 = await connect({ webSocketDebuggerUrl: 'ws://fake/1' }, { WebSocketImpl: errorPageWS('www.tiktok.com\nAccess to www.tiktok.com was denied\nHTTP ERROR 403') });
+  await assert.rejects(c403.navigate('https://www.tiktok.com/@bonarealestatesa'), e => e.kind === 'blocked' && /www\.tiktok\.com refused this browser \(HTTP 403/.test(e.message));
+  c403.close();
+  const c503 = await connect({ webSocketDebuggerUrl: 'ws://fake/2' }, { WebSocketImpl: errorPageWS('This page isn’t working\nHTTP ERROR 503') });
+  await assert.rejects(c503.navigate('https://www.tiktok.com/@bonarealestatesa'), e => e.kind === 'navigation' && /answered HTTP 503/.test(e.message), 'a server failure is not a refusal (Codex R2)');
+  c503.close();
+  const refused = () => Object.assign(new Error('www.tiktok.com refused this browser (HTTP 403, net::ERR_HTTP_RESPONSE_CODE_FAILURE)'), { kind: 'blocked' });
   // The list pages themselves refuse.
   const r1 = { blocked: null };
   const s1 = { ...pageFake({ url: 'https://www.tiktok.com/@bonarealestatesa' }), navigate: async () => { throw refused(); } };
@@ -902,6 +916,13 @@ test('2026-11-08: confirmation reports only a refusal that lasts; the uncertain 
   assert.equal(await SITES.linkedinConfirm(s, '145349037', [], { caption: 'x BONA-A', evidence: 'BONA-A', report, timeoutMs: 40, every: 0, settleMs: 0 }), null);
   assert.ok(n > 1);
   assert.equal(report.blocked, null, 'a transient block is not the reason');
+  // Codex R2: a lasting refusal on one page is not hidden by ANOTHER page loading normally.
+  const one = { blocked: null };
+  let cur = '';
+  const half = { navigate: async u => { cur = u; }, url: async () => cur, waitFor: async () => !cur.includes('/admin/'),
+    ev: async e => (e.includes('document.title') ? { title: cur.includes('/admin/') ? 'Attention Required! | Cloudflare' : 'Bona', body: '' } : e.includes('flatMap') ? [] : null) };
+  assert.equal(await SITES.linkedinConfirm(half, '145349037', [], { caption: 'x BONA-A', evidence: 'BONA-A', report: one, timeoutMs: 40, every: 0, settleMs: 0 }), null);
+  assert.match(one.blocked, /LinkedIn refused this browser/, 'the admin list kept refusing while the public list loaded');
   // A block that lasts is.
   const lasting = { blocked: null };
   const li = pageFake({ url: 'https://www.linkedin.com/company/145349037/posts/', title: 'Attention Required! | Cloudflare', settled: false });
