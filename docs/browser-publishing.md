@@ -172,8 +172,8 @@ both channels sat blocked for 18 days with the alerts only in `<channel>/alerts.
    "answered HTTP nnn" and a network error (`ERR_INTERNET_DISCONNECTED`, …) "did not load", both
    `navigation` (one rule, `isRefusalStatus()` in `lib/cdp.mjs`). Cloudflare's page is matched by its
    title, or by text that BEGINS with "Sorry, you have been blocked" and carries a "Cloudflare Ray
-   ID"; LinkedIn's security check by its title ("Security Verification") or its first lines (it has
-   no site navigation above it), and its `/checkpoint/` URL — a post or comment quoting any of those
+   ID"; LinkedIn's security check by its `/checkpoint/` URL, its title ("Security Verification"),
+   or text that BEGINS with its heading (after at most the "LinkedIn" wordmark) — a post or comment quoting any of those
    lines inside a feed is not a block page.
 
 Everything burned into the media (reel hook, subhook, lower third, CTA lines, card slides) goes
@@ -260,8 +260,8 @@ alerts (exit 2) need the reconciliation above. A busy lock exits 75 from the uni
 | Symptom (journal / alerts.jsonl) | Cause | Fix |
 |---|---|---|
 | `Chrome DevTools not reachable` | Bona's Chrome not running and `bona-chrome.sh` could not start it | `bash ~/bona-publish/ops/systemd/bona-chrome.sh`; then `systemctl --user start bona-browser@tiktok.service` |
-| `not logged in` / no "Edit profile" | Bona's Chrome lost the session | log in again: `bona-chrome.sh show https://www.tiktok.com/login` (or the LinkedIn login) |
-| `captcha` / `verification` / `checkpoint` | the site wants a human check | solve it once in a `bona-chrome.sh show` window; the next tick retries (nothing was recorded) |
+| `not logged in` / no "Edit profile" | Bona's Chrome lost the session | log in again: `bona-chrome.sh show https://www.tiktok.com/login` (or the LinkedIn login). Before a click nothing was recorded and the next tick retries; if it is the `blocked` reason of an `uncertain` line (the session went during the confirmation), the channel stays blocked until that day is settled as above |
+| `captcha` / `verification` / `checkpoint` | the site wants a human check | solve it once in a `bona-chrome.sh show` window. Before a click nothing was recorded and the next tick retries; after one (it is the `blocked` reason of an `uncertain` line, e.g. a captcha on the new post's own page), also settle that day as above — the channel stays blocked until then |
 | `refused this browser` (`blocked`) | the site served its block page (TikTok "Access denied / HTTP 403", Cloudflare "Sorry, you have been blocked") | look in a `bona-chrome.sh show` window; if the site keeps refusing, stop the timers and tell the owner — do not retry in a loop. Before a click nothing was sent; after one, settle the `uncertain` day as above |
 | `did not load (Chrome error page: ERR_…)` / `answered HTTP nnn` (`navigation`: 404, 410, 5xx) | a network error on this PC, or the site failing | retries next tick; nothing was sent |
 | `not an admin of this Page` / `posts as "…", not the Page` | LinkedIn member lost Page admin, or the composer defaulted to the person | fix the role / actor; nothing was sent |

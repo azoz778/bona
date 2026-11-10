@@ -1126,3 +1126,13 @@ class UptimeKumaApi:
     assert.equal(fs.existsSync(path.join(tmp, 'data', 'daily', 'heartbeat-tiktok.url')), false, 'no URL file rewritten');
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
+
+test('R5 (Codex R3 P2): a short header plus a post quoting the phrase in the first lines is still not LinkedIn\'s security check', async () => {
+  const at = body => SITES.linkedinBlocker(pageFake({ url: 'https://www.linkedin.com/company/145349037/posts/', title: 'Bona | بونا: Posts | LinkedIn', body }));
+  assert.equal(await at('Home\nPost: please verify you’re human before you pay anyone'), null, 'second line quotes it');
+  assert.equal(await at('Bona | بونا\nverify you’re human — a scam alert'), null, 'a header that is not the LinkedIn wordmark');
+  assert.equal(await at('Scam alert: quick security check messages are fake'), null, 'the phrase inside the first line, not its start');
+  assert.equal((await at('LinkedIn\n\nLet’s do a quick security check'))?.kind, 'captcha', 'the wordmark, then the heading');
+  assert.equal((await at('  Please verify you’re human'))?.kind, 'captcha', 'the page begins with it');
+  assert.equal(SITES.linkedinCheckPage({ title: 'Security Verification | LinkedIn' }), true);
+});
