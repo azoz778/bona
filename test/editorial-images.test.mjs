@@ -3,7 +3,7 @@
  * editorialPool() / editorialListing() / editorialImage() in src/lib/listings.ts. The /about/ and /sell/ photo is
  * also the page's og:image and its JSON-LD primaryImageOfPage, so a listing whose photos show another project
  * (`photoNote`) must never supply one, wherever intake happens to put it in the newest-first order. Each page labels
- * the photo (alt text) with the listing the photo came from.
+ * the photo (alt text) with the listing the photo came from; the page-source test checks that pairing.
  *
  * BONA-W021 pushed BONA-W019 (photoNote) into slot 2, and /about/ published W019's photo as its link preview and
  * page image. These checks run every slot rather than the slots the pages use today, so the next intake cannot do it again.
@@ -129,7 +129,11 @@ const decode = (s) => s
   .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#x27;/g, "'").replace(/&amp;/g, '&');
 const attr = (tag, name) => { const m = tag.match(new RegExp(`\\s${name}="([^"]*)"`)); return m ? decode(m[1]) : null; };
 
-test('built pages: each editorial photo carries the alt text of the listing it came from', { skip: !existsSync(path.join(dist, 'index.html')) && 'dist/ missing: run `npm run build`' }, () => {
+// What the built HTML can show: the editorial photo is on the page with the alt text expected for it. It cannot show
+// which listing labelled it. Every listing photo carries its own alt.en and alt.ar, and imageAlt() returns that before
+// it looks at the listing, so a page labelled with the wrong listing still builds the same alt. The test above,
+// 'labels it with editorialListing() at the same slot', guards that pairing.
+test('built pages: each editorial photo is on the page with the alt text expected for it', { skip: !existsSync(path.join(dist, 'index.html')) && 'dist/ missing: run `npm run build`' }, () => {
   let checked = 0;
   for (const p of pages) {
     const routes = routesOf(p.file);
@@ -143,7 +147,7 @@ test('built pages: each editorial photo carries the alt text of the listing it c
         assert.ok(img && owner, `${p.file}: ${name} has a photo`);
         const shown = tags.filter((t) => attr(t, 'src') === img.src);
         assert.ok(shown.length > 0, `${route}: ${name} (${img.src}) is on the page`);
-        for (const t of shown) assert.equal(attr(t, 'alt'), imageAlt(img, owner, locale), `${route}: ${name} label`);
+        for (const t of shown) assert.equal(attr(t, 'alt'), imageAlt(img, owner, locale), `${route}: ${name} (${img.src}) alt text`);
         checked += 1;
       }
     }
