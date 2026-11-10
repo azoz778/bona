@@ -1,6 +1,6 @@
 # Bona (بونا) — full knowledge file
 
-Last generated: 2026-10-20. Canonical site: https://bona-real-estate.com/ (Arabic: https://bona-real-estate.com/ar/).
+Last generated: 2026-11-10. Canonical site: https://bona-real-estate.com/ (Arabic: https://bona-real-estate.com/ar/).
 
 ## What Bona is
 
@@ -45,7 +45,7 @@ Values:
 Team:
 - Abdulaziz Zaidan (عبدالعزيز زيدان) — Founder & Principal (المؤسس والشريك الرئيسي), REGA FAL licence 1100313556. Bona has no other agents; anyone else claiming to act for Bona should be verified on WhatsApp +966 59 329 6933.
 
-Key figures (as of 2026-10-20): Residences represented: 29 · Jeddah districts: 12 · Countries: 5 · Founded: 2026.
+Key figures (as of 2026-11-10): Residences represented: 29 · Jeddah districts: 12 · Countries: 5 · Founded: 2026.
 
 More: https://bona-real-estate.com/about/ · Arabic: https://bona-real-estate.com/ar/about/
 
@@ -277,11 +277,11 @@ Full FAQ: https://bona-real-estate.com/faq/ · Arabic: https://bona-real-estate.
 
 What Bona collects when you use this site or contact us, why, and your rights under the Saudi Personal Data Protection Law (PDPL) and its Implementing Regulations. Written to be read, not filed. The Arabic text is the authoritative version. Full policy (updated 2026-10-01): https://bona-real-estate.com/privacy/ · Arabic: https://bona-real-estate.com/ar/privacy/. In short: the site is static and sets no cookies; enquiry forms open WhatsApp and nothing is stored by the site; analytics (GA4 / Meta Pixel) are built in but currently disabled; data subjects have PDPL rights of access, correction, deletion and consent withdrawal via WhatsApp +966 59 329 6933.
 
-## Listings (48 live)
+## Listings (49 live)
 
-Grouped by kind: Houses 17 · Apartments 23 · Land 8.
+Grouped by kind: Houses 18 · Apartments 23 · Land 8.
 
-## Houses (17) — https://bona-real-estate.com/properties/houses/
+## Houses (18) — https://bona-real-estate.com/properties/houses/
 
 ### Private Beach Villa, Durrat Al Arous — فيلا بشاطئ خاص، درة العروس
 - ID: BONA-001 (ref VIL-013)
@@ -533,6 +533,33 @@ The build package carries warranties on the structural frame, waterproofing and 
 
 Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Aseel%20Al%20Ghoroub%202%2C%20Al%20Madinah%20(BONA-W015).
 
+### Baroque Palace Residence, Hampstead — قصر باروكي خاص، هامبستيد
+- ID: BONA-W020 (ref WA-20261027-AC032F)
+- URL: https://bona-real-estate.com/properties/baroque-palace-residence-hampstead/ · Arabic: https://bona-real-estate.com/ar/properties/baroque-palace-residence-hampstead/
+- Kind: House · Type: Mansion · Category: International · Status: available
+- Location: Hampstead, London, United Kingdom (هامبستيد، لندن)
+- Asking price: Price on request
+- Specs: 10 bed, 10 bath, 1270 m² built
+- Highlights: Ten en-suite bedrooms; Indoor pool and jacuzzi; Hammam and sauna; Lift serving all four levels; Crestron smart-home system
+- المميزات: عشر غرف نوم بأجنحة خاصة؛ مسبح داخلي وجاكوزي؛ حمام بخاري وساونا؛ مصعد يخدم المستويات الأربعة؛ نظام منزل ذكي كريسترون
+- Brochure: https://bona-real-estate.com/listings/baroque-palace-residence-hampstead/brochure.pdf
+- Listed: 2026-10-27
+- Images: /listings/baroque-palace-residence-hampstead/01.jpg , /listings/baroque-palace-residence-hampstead/02.jpg , /listings/baroque-palace-residence-hampstead/03.jpg , /listings/baroque-palace-residence-hampstead/04.jpg
+
+An off-market private residence on Winnington Road, one of Hampstead's most discreet addresses. The house takes its inspiration from the Palace of Versailles and pairs bespoke Baroque interiors with contemporary engineering, climate control and full smart-home automation.
+
+The residence is arranged over four levels and extends to approximately 1,270 sq m (13,673 sq ft). It has ten en-suite bedrooms, formal reception rooms, four kitchens and four offices, with a lift serving every floor.
+
+Wellness facilities include an indoor pool with jacuzzi, a hammam and a sauna. The house was reconstructed between 2020 and 2025 with its original façade retained, and the private grounds provide parking for up to eight cars.
+
+قصر خاص معروض خارج السوق في وينينغتون رود، أحد أكثر عناوين هامبستيد خصوصية. يستلهم تصميمه قصر فرساي، ويجمع بين ديكورات باروكية مصممة حسب الطلب وأنظمة هندسية حديثة للتحكم المناخي والتشغيل الذكي المتكامل.
+
+يمتد القصر على أربعة مستويات بمساحة تقارب 1,270 متراً مربعاً (13,673 قدماً مربعة). ويضم عشر غرف نوم بأجنحة خاصة، وصالات استقبال رسمية، وأربعة مطابخ وأربعة مكاتب، ويخدم المصعد جميع الطوابق.
+
+تشمل مرافق العافية مسبحاً داخلياً مع جاكوزي، وحماماً بخارياً، وساونا. أعيد بناء القصر بين عامي 2020 و2025 مع الحفاظ على واجهته الأصلية، وتوفر الأرض الخاصة مواقف لما يصل إلى ثماني سيارات.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Baroque%20Palace%20Residence%2C%20Hampstead%20(BONA-W020).
+
 ### Danyah Villas, Al Basateen — فلل دانية، البساتين
 - ID: BONA-W013 (ref WA-20260906-AC4732)
 - URL: https://bona-real-estate.com/properties/danyah-villas-al-basateen/ · Arabic: https://bona-real-estate.com/ar/properties/danyah-villas-al-basateen/
@@ -596,38 +623,6 @@ The house is fitted with a private lift, smart entry and central air conditionin
 
 Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Durrat%20Al%20Basateen%20Villa%2C%20Al%20Mohammadiyah%20(BONA-W016).
 
-### Elvira Murjan Townhouses in Al-Murjan — منازل إلفيرا مرجان في حي المرجان
-- ID: BONA-W009 (ref WA-20260906-ACA18E)
-- URL: https://bona-real-estate.com/properties/elvira-murjan-townhouses-in-al-murjan/ · Arabic: https://bona-real-estate.com/ar/properties/elvira-murjan-townhouses-in-al-murjan/
-- Kind: House · Type: Villa · Category: Off-plan · Status: available
-- Location: Al-Murjan, Jeddah, Saudi Arabia (المرجان، جدة)
-- Asking price: Price on request
-- Project: Elvira Murjan (إلفيرا مرجان) · Developer: TK Estate & Design
-- Specs: 5 bed, 8 bath, 630 m² built, 300 m² plot
-- Highlights: Private indoor courtyard pool; Five bedrooms, eight bathrooms; Two indoor parking spaces; Rooftop terrace; Ten-year structural warranty
-- المميزات: مسبح خاص في فناء داخلي؛ خمس غرف نوم وثماني حمامات؛ موقفان داخليان للسيارات؛ تراس على السطح؛ ضمان إنشائي لعشر سنوات
-- Brochure: https://bona-real-estate.com/listings/elvira-murjan-townhouses-in-al-murjan/brochure.pdf
-- Listed: 2026-09-06
-- Images: /listings/elvira-murjan-townhouses-in-al-murjan/01.jpg , /listings/elvira-murjan-townhouses-in-al-murjan/02.jpg , /listings/elvira-murjan-townhouses-in-al-murjan/03.jpg , /listings/elvira-murjan-townhouses-in-al-murjan/04.jpg , /listings/elvira-murjan-townhouses-in-al-murjan/05.jpg , /listings/elvira-murjan-townhouses-in-al-murjan/06.jpg
-
-Elvira Murjan is a boutique row of five-bedroom townhouses in the Al-Murjan neighbourhood of Jeddah, close to the King Abdulaziz branch road, Jeddah Yacht Club and the Red Sea coast. Each home rises over three floors around a private indoor courtyard and swimming pool, with a private entrance and two indoor parking spaces.
-
-The ground floor holds an open and a closed kitchen, separate guest and family living areas, a skylit indoor courtyard, a driver's room and a maid's room, and two guest bathrooms. Four en-suite bedrooms and two balconies occupy the first floor, while the second floor is given over to the master suite, an additional living area and a guest bathroom, opening onto a large rooftop terrace.
-
-The structural frame is reinforced concrete built to the Saudi Building Code, with double-glazed windows, insulated roofs and façades, and high-quality aluminium systems throughout. Interiors are finished in Italian and Omani marble, with high ceilings, a sound system in every room, smart-home wiring and central air conditioning.
-
-The build carries a ten-year structural warranty, a three-year warranty on electrical and plumbing work, and further cover on fit-out and hidden defects. Al-Murjan places residents minutes from Jeddah's marinas, malls and medical centres, with King Abdulaziz International Airport around fifteen minutes away.
-
-إلفيرا مرجان مشروع بوتيكي مؤلف من تاون هاوس بخمس غرف نوم في حي المرجان بجدة، على مقربة من طريق فرع الملك عبدالعزيز ونادي جدة للياخوت وساحل البحر الأحمر. يمتد كل منزل على ثلاثة طوابق حول فناء داخلي خاص ومسبح، مع مدخل خاص وموقفين داخليين للسيارات.
-
-يضم الدور الأرضي مطبخين مفتوحاً ومغلقاً، وصالتي معيشة منفصلتين للضيوف والعائلة، وفناءً داخلياً يعلوه سقف زجاجي، وغرفة للسائق وأخرى للخادمة، وحمامين للضيوف. ويحتوي الدور الأول على أربع غرف نوم بحمامات خاصة وشرفتين، بينما يُخصَّص الدور الثاني لجناح رئيسي وصالة معيشة إضافية وحمام ضيوف، يفتح على تراس واسع على السطح.
-
-الهيكل الإنشائي من الخرسانة المسلحة وفق كود البناء السعودي، مع نوافذ مزدوجة الزجاج وعزل للأسطح والواجهات وأنظمة ألمنيوم عالية الجودة. التشطيبات الداخلية من الرخام الإيطالي والعُماني، بأسقف مرتفعة ونظام صوت في كل غرفة وتمديدات جاهزة للمنزل الذكي وتكييف مركزي.
-
-يحمل المشروع ضماناً إنشائياً لعشر سنوات، وضماناً لثلاث سنوات على الأعمال الكهربائية والصحية، إضافة إلى ضمانات أخرى على التشطيبات والعيوب الخفية. يقع حي المرجان على بعد دقائق من مرافئ جدة ومراكزها التجارية والطبية، ومطار الملك عبدالعزيز الدولي على مسافة نحو خمس عشرة دقيقة.
-
-Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Elvira%20Murjan%20Townhouses%20in%20Al-Murjan%20(BONA-W009).
-
 ### Knightsbridge Villas, Meydan District 11 — فلل نايتسبريدج في المنطقة 11 بميدان
 - ID: BONA-W008 (ref WA-20260906-ACCF6C)
 - URL: https://bona-real-estate.com/properties/knightsbridge-villas-meydan-district-11/ · Arabic: https://bona-real-estate.com/ar/properties/knightsbridge-villas-meydan-district-11/
@@ -687,6 +682,35 @@ The build carries a ten-year structural warranty, ten-year waterproofing, two-ye
 يأتي البناء بضمان إنشائي لعشر سنوات، وضمان عزل مائي لعشر سنوات، وضمان سنتين على أعمال السباكة والكهرباء، وضمان خمس سنوات على القطع الميكانيكية للمصعد، إلى جانب ثلاثة أشهر صيانة بعد التسليم.
 
 Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Modern%20Villa%20in%20Al%20Shati%2C%20Jeddah%20(BONA-W012).
+
+### Private Villa in Al Khalidiyah — فيلا خاصة في حي الخالدية
+- ID: BONA-W019 (ref WA-20261025-AC7084)
+- URL: https://bona-real-estate.com/properties/private-villa-al-khalidiyah/ · Arabic: https://bona-real-estate.com/ar/properties/private-villa-al-khalidiyah/
+- Kind: House · Type: Villa · Category: For sale · Status: available
+- Location: Al Khalidiyah, Jeddah, Saudi Arabia (الخالدية، جدة)
+- Asking price: SAR 6,200,000
+- Specs: 4 bed, 490 m² built, 323 m² plot
+- Coordinates: 21.560194, 39.133472
+- Highlights: Four bedrooms; Smart-home system; Passenger lift; Two fitted kitchens; Private courtyard pool; Double-height living space
+- المميزات: أربع غرف نوم؛ نظام منزل ذكي؛ مصعد ركاب؛ مطبخان مجهزان؛ مسبح خاص في الفناء؛ معيشة بارتفاع مزدوج
+- Brochure: https://bona-real-estate.com/listings/private-villa-al-khalidiyah/brochure.pdf
+- Listed: 2026-10-25
+- Photo note: Architectural visualisations supplied for this villa. / تصورات معمارية مقدمة لهذه الفيلا.
+- Images: /listings/private-villa-al-khalidiyah/01.jpg , /listings/private-villa-al-khalidiyah/02.jpg , /listings/private-villa-al-khalidiyah/03.jpg , /listings/private-villa-al-khalidiyah/04.jpg , /listings/private-villa-al-khalidiyah/05.jpg , /listings/private-villa-al-khalidiyah/06.jpg
+
+A private villa in Al Khalidiyah, Jeddah, on a 323-square-metre plot with approximately 490 square metres of built space. The sitting area and staircase have double-height ceilings, with marble floors and a marble feature wall. A complete smart-home system serves the residence.
+
+Three bedrooms occupy the first floor. The annex provides a guest bedroom, a private lounge and a separate maid's room. A Fuji passenger lift connects the levels, and the principal and service kitchens are fitted by Nobilia.
+
+The courtyard includes a 4-by-2-metre pool. O General ducted split air conditioning and Spanish and Italian porcelain finishes complete the specification. The supplied gallery presents architectural visualisations of the interiors and landscaping.
+
+فيلا خاصة في حي الخالدية بجدة، على أرض مساحتها ٣٢٣ متراً مربعاً وبمسطحات بناء تقارب ٤٩٠ متراً مربعاً. تتميز منطقة الجلوس والدرج بارتفاع مزدوج، مع أرضيات رخام وجدار رخامي، ويخدم المنزل نظام ذكي متكامل.
+
+يضم الدور الأول ثلاث غرف نوم، بينما يحتوي الملحق على غرفة نوم للضيوف وصالة خاصة وغرفة عاملة مستقلة. يربط مصعد فوجي للركاب بين الأدوار، وقد جُهّز المطبخ الرئيسي ومطبخ الخدمة من شركة نوبيليا.
+
+يحتوي الفناء على مسبح بمقاس ٤ × ٢ متر. وتشمل المواصفات تكييف دكت سبليت من أوجنرال وتشطيبات بورسلان إسباني وإيطالي. يعرض معرض الصور تصورات معمارية للتصميم الداخلي وتنسيق المساحات الخارجية.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Private%20Villa%20in%20Al%20Khalidiyah%20(BONA-W019).
 
 ### Malfa Jeddah, Rihab Villa, Al-Wareef — ملفى جدة، فيلا رحاب، الوريف
 - ID: BONA-W005 (ref WA-20260906-AC7B92)

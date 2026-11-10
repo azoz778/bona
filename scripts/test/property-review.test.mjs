@@ -156,6 +156,33 @@ const quiet = () => {};
 const approveWith = (w, drafts, selects, at = now, fetchImpl = w.fetchImpl) =>
   approve(['--drafts', drafts, '--reviewer', 'test reviewer', ...selects.flatMap(s => ['--select', s])], { fetchImpl, now: at, root: w.root, log: quiet });
 const register = w => fs.readFileSync(path.join(w.root, 'marketing/daily/property-reviews.json'), 'utf8');
+// A withdrawal (BONA-W009, Elvira, 2026-10-20) is a tombstone in the register: the draft script must
+// not offer the listing again and the approve script must not write over the flag, whichever
+// path is used (--select or --cards), even with drafts made before the withdrawal.
+test('withdrawn marketing permission is neither drafted nor silently re-approved', async () => {
+  const w = await world();
+  try {
+    const first = path.join(w.root, 'before-withdrawal');
+    await draft(['--out', first], { fetchImpl: w.fetchImpl, now, root: w.root, log: quiet });
+    const registerPath = path.join(w.root, 'marketing/daily/property-reviews.json');
+    const tombstone = { status: 'withdrawn', reviewedAt: '2026-10-05T09:30:00Z', reviewer: 'developer withdrew permission',
+      withdrawnAdvertising: { at: '2026-10-05T09:30:00Z', requestedBy: 'test', reason: 'developer withdrew permission', channels: ['website', 'instagram', 'facebook', 'tiktok', 'linkedin'] } };
+    fs.writeFileSync(registerPath, JSON.stringify({ 'BONA-T1': tombstone }, null, 2) + '\n');
+    const before = register(w);
+    const explicit = await draft(['--out', path.join(w.root, 'after-explicit'), '--ids', 'BONA-T1'], { fetchImpl: w.fetchImpl, now, root: w.root, log: quiet });
+    assert.deepEqual(explicit.listings, {}, 'even an explicit draft id cannot bypass the withdrawal');
+    const sweep = await draft(['--out', path.join(w.root, 'after-sweep')], { fetchImpl: w.fetchImpl, now, root: w.root, log: quiet });
+    assert.ok(!('BONA-T1' in sweep.listings), 'nor the default sweep of listings that need a review');
+    const approval = await approveWith(w, path.join(first, 'drafts.json'), ['BONA-T1:1,2,3']);
+    assert.equal(approval.written, 0);
+    assert.match(approval.refused[0] ?? '', /marketing permission withdrawn/);
+    const cards = await approve(['--drafts', path.join(first, 'drafts.json'), '--reviewer', 'r', '--cards', 'BONA-T1:1,2'], { fetchImpl: w.fetchImpl, now, root: w.root, log: quiet });
+    assert.equal(cards.written, 0);
+    assert.match(cards.refused[0] ?? '', /marketing permission withdrawn/);
+    assert.equal(register(w), before, 'the tombstone is untouched');
+  } finally { w.cleanup(); }
+});
+
 test('approval refuses every selection when the advertiser changed since drafting', async () => {
   const w = await world();
   try {
@@ -214,11 +241,23 @@ test('an identical review that has expired is renewed rather than reported uncha
     assert.deepEqual(await approveWith(w, path.join(w.root, 'd2/drafts.json'), ['BONA-T1:1,2,3'], new Date(+later + 3_600_000)), { written: 0, unchanged: 1, refused: [] }, 'a still-valid identical review stays untouched');
   } finally { w.cleanup(); }
 });
-test('every entry in the repository review register is well-formed', () => {
+test('every entry in the repository review register is well-formed, withdrawn tombstones included', () => {
   const reg = JSON.parse(fs.readFileSync(new URL('../../marketing/daily/property-reviews.json', import.meta.url), 'utf8'));
+  assert.equal(reg['BONA-W009']?.status, 'withdrawn', 'Elvira: marketing permission withdrawn 2026-10-20');
   for (const [id, r] of Object.entries(reg)) {
     assert.match(id, /^BONA-[A-Z]?\d+$/);
-    assert.equal(r.status, 'approved', id);
+    assert.ok(['approved', 'withdrawn'].includes(r.status), `${id} has unsupported status ${r.status}`);
+    assert.equal(r.status === 'withdrawn', r.withdrawnAdvertising != null, `${id}: status withdrawn and the withdrawnAdvertising flag go together`);
+    if (r.status === 'withdrawn') {
+      const f = r.withdrawnAdvertising;
+      assert.ok(Number.isFinite(Date.parse(f.at)), `${id} withdrawnAdvertising.at`);
+      assert.ok(typeof f.requestedBy === 'string' && f.requestedBy.trim(), `${id} withdrawnAdvertising.requestedBy`);
+      assert.ok(typeof f.reason === 'string' && f.reason.trim(), `${id} withdrawnAdvertising.reason`);
+      assert.ok(Array.isArray(f.channels) && f.channels.length > 0, `${id} withdrawnAdvertising.channels`);
+      assert.ok(Number.isFinite(Date.parse(r.reviewedAt)) && typeof r.reviewer === 'string' && r.reviewer.trim(), id);
+      assert.equal(r.photos, undefined, `${id}: a tombstone keeps no frames to post`);
+      continue;
+    }
     for (const k of ['factsSha256', 'advertiserSha256', 'captionSha256']) assert.match(r[k], /^[a-f0-9]{64}$/, `${id} ${k}`);
     assert.ok(Number.isFinite(Date.parse(r.reviewedAt)) && typeof r.reviewer === 'string' && r.reviewer.trim(), id);
     assert.equal(r.legalDisclosuresVerified, true, id);

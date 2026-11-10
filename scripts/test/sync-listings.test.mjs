@@ -69,3 +69,34 @@ test('a withheld listing is removed and the file rewritten even when TK changed 
     assert.deepEqual(read(dir).map((l) => l.id), ['BONA-T4'], 'the only change is the removal, and it is written');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// BONA-W009 (Elvira): the developer withdrew permission to advertise it. The deploy's sync edits
+// listings.json in place without rebuilding, so it must drop a withdrawn listing on its own —
+// whether the permanent record in rules.mjs names it or only its review-register entry is flagged.
+test('a withdrawn listing (BONA-W009) is removed by the deploy sync', () => {
+  const dir = tree([
+    listing('BONA-W009', null, { slug: 'elvira-murjan-townhouses-in-al-murjan', type: 'villa', kind: 'house', category: 'off-plan' }),
+    listing('BONA-T5', 'APT-5', { type: 'apartment', kind: 'apartment' }),
+  ]);
+  try {
+    const out = sync(dir, [{ id: 'APT-5', status: 'available', price: 'SAR 1,000,000' }]);
+    assert.doesNotMatch(out, /sync skipped/, out);
+    assert.match(out, /BONA-W009 REMOVED — advertising permission withdrawn/);
+    assert.deepEqual(read(dir).map((l) => l.id), ['BONA-T5']);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a listing whose review-register entry carries the withdrawnAdvertising flag is removed by the deploy sync', () => {
+  const dir = tree([listing('BONA-T6', 'VIL-6', { type: 'villa', kind: 'house' }), listing('BONA-T7', 'APT-7', { type: 'apartment', kind: 'apartment' })]);
+  try {
+    fs.mkdirSync(path.join(dir, 'marketing/daily'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'marketing/daily/property-reviews.json'), JSON.stringify({
+      'BONA-T6': { status: 'withdrawn', reviewedAt: '2026-11-10T09:00:00Z', reviewer: 'test',
+        withdrawnAdvertising: { at: '2026-11-10T09:00:00Z', requestedBy: 'test', reason: 'fixture', channels: ['website'] } },
+    }));
+    const out = sync(dir, [{ id: 'VIL-6', status: 'available', price: 'SAR 1,000,000' }, { id: 'APT-7', status: 'available', price: 'SAR 1,000,000' }]);
+    assert.doesNotMatch(out, /sync skipped/, out);
+    assert.match(out, /BONA-T6 REMOVED — advertising permission withdrawn/);
+    assert.deepEqual(read(dir).map((l) => l.id), ['BONA-T7']);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

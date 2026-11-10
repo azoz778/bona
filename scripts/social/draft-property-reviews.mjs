@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import sharp from 'sharp';
-import { SITE, imageUrl, sha256, fingerprint, advertiserFingerprint, policyRules, eligibility, reviewedCopy } from './lib/property-daily.mjs';
+import { SITE, imageUrl, sha256, fingerprint, advertiserFingerprint, policyRules, eligibility, reviewedCopy, withdrawalOf } from './lib/property-daily.mjs';
 import { frameProblem, contactSheet, disclosuresFor, defaultKind, liveCatalogue, localFetch } from './lib/property-review.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -37,7 +37,8 @@ export async function main(argv = process.argv.slice(2), { fetchImpl = fetch, no
   const wanted = args.ids ? new Set(args.ids) : null;
   if (wanted) for (const id of wanted) if (!live.listings.some(p => p.id === id)) throw new Error(`${id} is not in the live catalogue`);
   const inScope = p => p.status === 'available' && rules.countries.includes(p.location?.countryCode) && rules.categories.includes(p.category);
-  const listings = live.listings.filter(p => inScope(p) && (wanted ? wanted.has(p.id) : eligibility(p, reviews[p.id], live.advertiser, now, rules).length > 0));
+  // A withdrawn listing (rules.mjs, or a `withdrawnAdvertising` flag in the register) is never drafted, not even by --ids.
+  const listings = live.listings.filter(p => inScope(p) && !withdrawalOf(p, reviews[p.id], reviews) && (wanted ? wanted.has(p.id) : eligibility(p, reviews[p.id], live.advertiser, now, rules).length > 0));
   fs.mkdirSync(out, { recursive: true });
   const drafts = { generatedAt: now.toISOString(), catalogueGeneratedAt: live.generatedAt, advertiserSha256: advertiserFingerprint(live.advertiser), listings: {} };
   for (const p of listings) {

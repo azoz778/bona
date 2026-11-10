@@ -193,6 +193,24 @@ Anything else in the group is ignored, silently.
 - **Real Arabic**, checked for Arabic script in every `ar` field.
 - **4–10 photos.** A PDF that yields fewer than four publishable photographs is rejected
   rather than published thin.
+- **A withdrawn project stays withdrawn.** When a developer withdraws the permission to
+  advertise a project (BONA-W009, Elvira Murjan, 2026-10-20), it is a full takedown, recorded in
+  `scripts/curate/rules.mjs` `WITHDRAWN_ADVERTISING` and as a `withdrawnAdvertising` flag on its
+  `marketing/daily/property-reviews.json` entry. The intake then refuses the same brochure (by
+  its SHA-256, before a page is read), a re-export of it (by the project's name: in the
+  brochure's own text layer, metadata, links, file name or caption before a model is asked, then
+  anywhere in what the model writes from it — a generic title, a fresh id or a fresh slug does not
+  help; a brochure that only mentions the project is refused too, since the intake republishes the
+  brochure itself), and `show`, `brochure` and `video` on the listing (and `hero` and `price`,
+  which have nothing left to edit, and `available`, `reserved`, `sold`, `licence` and `wafi`,
+  which would overwrite the tombstone's status or add to it); `hide` and `remove` still work. Its
+  inbox record is a **tombstone** (id, slug, names, brochure hash — no copy, photos or
+  brochure link: the repository is public). `build.mjs` and `validate.mjs` leave it out and refuse
+  to build while its `public/listings/<slug>/` files exist — `validate.mjs` also for a re-import
+  caught by name under a fresh slug — so even an intake that predates the gate cannot put it back.
+  Reinstating one needs an explicit owner decision that the developer's permission is renewed:
+  delete the rules.mjs record and the register flag by hand, `remove` the tombstone, then send the
+  brochure again (it gets a new id).
 - **Read-only on WhatsApp apart from replies.** The service never sets a webhook, websocket or
   RabbitMQ binding on the instance — another agent (Lisa) consumes its events and a webhook
   here would steal them.
@@ -275,6 +293,21 @@ loginctl enable-linger "$USER"        # keeps it running when no shell is logged
 systemctl --user status bona-intake
 journalctl --user -u bona-intake -f -o cat | jq .
 ```
+
+**After a merge that changes the intake.** The daemon rebases only its publishing clone
+(`~/bona-bot`) and loads its own code once, from `~/bona`, at start. Nothing updates `~/bona`
+by itself, so a change to `services/intake/` or to `scripts/curate/rules.mjs` (which the intake
+imports) is not live until both of these have run:
+
+```bash
+git -C ~/bona pull --ff-only                  # ~/bona must be clean apart from untracked files
+systemctl --user restart bona-intake
+journalctl --user -u bona-intake -n 30 -o cat # a clean start: a `start` line, no `fatal` or `config.*` error
+```
+
+Until then the old daemon keeps answering with the old rules. `build.mjs` and `validate.mjs` are
+the exception: `rebuild()` runs them from `~/bona-bot` after its rebase, so the site-side gates
+apply from the merge on.
 
 ## Configuration
 
