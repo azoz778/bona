@@ -15,13 +15,16 @@ import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { loadRegisterWithdrawals, withdrawnAdvertising, WITHDRAWN_ADVERTISING } from '../scripts/curate/rules.mjs';
+import { loadRegisterWithdrawals, withdrawnAdvertising, withdrawnInboxListings, WITHDRAWN_ADVERTISING } from '../scripts/curate/rules.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dist = path.join(root, 'dist');
 assert.ok(existsSync(path.join(dist, 'index.html')), `dist/ is missing — run \`npm run build\` first (looked in ${dist})`);
 
-const records = [...WITHDRAWN_ADVERTISING, ...loadRegisterWithdrawals(root)];
+const flagged = loadRegisterWithdrawals(root);
+// Plus every intake record a withdrawal catches: a re-import caught by name under a fresh slug, or a
+// listing withdrawn by a register flag that names no slug, is tied to its files only by that record.
+const records = [...WITHDRAWN_ADVERTISING, ...flagged, ...withdrawnInboxListings(root, flagged)];
 const TEXT = /\.(html?|xml|json|txt|js|mjs|css|svg|webmanifest|md)$/i;
 function* files(dir) {
   for (const name of readdirSync(dir)) {
@@ -60,6 +63,5 @@ test('no page, index, sitemap, feed, llms.txt or script in dist/ names a withdra
 
 test('the social catalogue the publishers read carries no withdrawn listing', () => {
   const catalogue = JSON.parse(readFileSync(path.join(dist, 'social-catalogue.json'), 'utf8'));
-  const flagged = loadRegisterWithdrawals(root);
   assert.deepEqual(catalogue.listings.filter((l) => withdrawnAdvertising(l, flagged)).map((l) => l.id), []);
 });

@@ -218,6 +218,40 @@ export function withdrawnAdvertising(l, extra = []) {
     || (w.names ?? []).some((name) => { const n = foldWords(name); return n.trim() !== '' && words.some((t) => t.includes(n)); })) ?? null;
 }
 
+/** Where the WhatsApp intake keeps its listing records, relative to the repository root. */
+export const INTAKE_INBOX = 'scripts/curate/inbox';
+
+/**
+ * The intake records in this checkout that a withdrawal catches (WITHDRAWN_ADVERTISING plus `extra`),
+ * as `{ id, slug, withdrawal }`. A re-import caught by NAME under a fresh slug, or a listing withdrawn
+ * by a register flag that carries no slug, is tied to its public/listings/<slug>/ files only by its
+ * inbox record — so this is what a check for leftover public files reads. No inbox directory means
+ * none; a record that cannot be read or parsed THROWS: it could be a withdrawn listing, and a takedown
+ * never fails open.
+ */
+export function withdrawnInboxListings(root, extra = []) {
+  const dir = path.join(root, INTAKE_INBOX);
+  let names;
+  try {
+    names = fs.readdirSync(dir);
+  } catch (err) {
+    if (err.code === 'ENOENT') return [];
+    throw err;
+  }
+  const out = [];
+  for (const name of names.filter((n) => n.endsWith('.json') && n !== '_index.json').sort()) {
+    let l;
+    try {
+      l = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
+    } catch (err) {
+      throw new Error(`${INTAKE_INBOX}/${name} cannot be read (${err.message}) — it could be a withdrawn listing`);
+    }
+    const withdrawal = withdrawnAdvertising(l, extra);
+    if (withdrawal) out.push({ id: l.id ?? name, slug: typeof l.slug === 'string' ? l.slug : null, withdrawal });
+  }
+  return out;
+}
+
 /** One line, for a WhatsApp reply, a build error or a refused approval. */
 export const withdrawnNotice = (w) => `marketing permission withdrawn for ${w.id}${w.withdrawnAt ? ` on ${String(w.withdrawnAt).slice(0, 10)}` : ''} (${w.reason}) — not advertised again without a new explicit owner approval`;
 
