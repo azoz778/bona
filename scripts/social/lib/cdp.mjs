@@ -28,6 +28,12 @@ const hostOf = url => { try { return new URL(url).host; } catch { return String(
 export class BrowserError extends Error {
   constructor(kind, message) { super(message); this.name = 'BrowserError'; this.kind = kind; }
 }
+/**
+ * The HTTP statuses that mean the site refused THIS browser (`blocked`): 401, 403, 429. Any other
+ * status (404, 410, an empty 500/503) is a failed load (`navigation`). One rule for cdp.navigate and
+ * for the chrome-error page check in browser-sites.mjs.
+ */
+export const isRefusalStatus = status => ['401', '403', '429'].includes(String(status ?? ''));
 
 async function version(base, fetchImpl) {
   const r = await fetchImpl(`${base}/json/version`, { signal: AbortSignal.timeout(3000) });
@@ -126,7 +132,7 @@ export async function connect(target, { WebSocketImpl = globalThis.WebSocket, co
         if (/ERR_BLOCKED_BY_RESPONSE/.test(r.errorText)) throw new BrowserError('blocked', `${hostOf(url)} refused this browser (${r.errorText})`);
         if (/ERR_HTTP_RESPONSE_CODE_FAILURE/.test(r.errorText)) {
           const status = await httpErrorStatus();
-          if (['401', '403', '429'].includes(status)) throw new BrowserError('blocked', `${hostOf(url)} refused this browser (HTTP ${status}, ${r.errorText})`);
+          if (isRefusalStatus(status)) throw new BrowserError('blocked', `${hostOf(url)} refused this browser (HTTP ${status}, ${r.errorText})`);
           throw new BrowserError('navigation', `${hostOf(url)} answered HTTP ${status ?? 'error (status unreadable)'} instead of the page (${r.errorText})`);
         }
         throw new BrowserError('navigation', `Could not open ${url}: ${r.errorText}`);

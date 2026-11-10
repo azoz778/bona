@@ -49,15 +49,22 @@ def main():
     api = Api(os.environ.get("KUMA_API_URL", "http://127.0.0.1:13010"), timeout=60)
     api.login(env["KUMA_USER"], env["KUMA_PASSWORD"])
     try:
+        names = {channel: f"Bona daily post — {channel}" for channel in MONITORS}
+        existing = {m["name"]: m for m in api.get_monitors()}
+        missing = [name for name in names.values() if name not in existing]
+        nid = None
+        if missing:
+            # Only a new monitor needs the notification; an existing one keeps its own. Looked up
+            # BEFORE anything is created, resumed or rewritten, so a missing one changes nothing.
+            nid = next((n["id"] for n in api.get_notifications() if n["name"] == NOTIFICATION), None)
+            if nid is None:
+                sys.exit(f"Kuma has no notification named {NOTIFICATION!r}, so {', '.join(map(repr, missing))} cannot be "
+                         "created; nothing was changed (no monitor created or resumed, no URL file written)")
         os.makedirs(os.path.join(DATA, "daily"), exist_ok=True)
         for channel, interval in MONITORS.items():
-            name = f"Bona daily post — {channel}"
-            monitor = next((m for m in api.get_monitors() if m["name"] == name), None)
+            name = names[channel]
+            monitor = existing.get(name)
             if monitor is None:
-                # Only a new monitor needs the notification; an existing one keeps its own.
-                nid = next((n["id"] for n in api.get_notifications() if n["name"] == NOTIFICATION), None)
-                if nid is None:
-                    sys.exit(f"Kuma has no notification named {NOTIFICATION!r}; {name!r} was not created (nothing else changed)")
                 created = api.add_monitor(type=MonitorType.PUSH, name=name, interval=interval, maxretries=0,
                                           notificationIDList={nid: True})
                 monitor = api.get_monitor(created["monitorID"])
