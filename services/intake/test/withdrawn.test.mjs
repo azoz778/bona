@@ -79,6 +79,25 @@ describe('intake commands on a withdrawn listing (the repository\'s own tombston
     assert.match(edits.setHero(tmp, 'BONA-W001', 2)?.error ?? '', /withdrawn/i);
   });
 
+  it('`available`, `reserved`, `sold`, `licence` and `wafi` are refused: the tombstone stays "withdrawn" and gains no field', () => {
+    const file = edits.locate(tmp, 'BONA-W009').file;
+    const before_ = fs.readFileSync(file, 'utf8');
+    for (const status of ['available', 'reserved', 'sold']) {
+      assert.match(edits.setStatus(tmp, 'BONA-W009', status)?.error ?? '', /marketing permission .*withdrawn/i, status);
+    }
+    assert.match(edits.setLicence(tmp, 'BONA-W009', { adNumber: '7200012345', adExpiry: '2099-01-01' })?.error ?? '', /marketing permission .*withdrawn/i);
+    assert.match(edits.setLicence(tmp, 'BONA-W009', { clear: true })?.error ?? '', /withdrawn/i);
+    assert.match(edits.setWafi(tmp, 'BONA-W009', { wafiNumber: '1234567890' })?.error ?? '', /withdrawn/i);
+    assert.match(edits.setWafi(tmp, 'bona-w009', { clear: true })?.error ?? '', /withdrawn/i, 'the id as the owner may type it');
+    assert.equal(fs.readFileSync(file, 'utf8'), before_, 'nothing rewritten');
+    assert.equal(edits.locate(tmp, 'BONA-W009').listing.status, 'withdrawn');
+    // and for a listing withdrawn only by its register flag, which still has a status to overwrite
+    const flagged = fs.readFileSync(edits.locate(tmp, 'BONA-W001').file, 'utf8');
+    assert.match(edits.setStatus(tmp, 'BONA-W001', 'available')?.error ?? '', /withdrawn/i);
+    assert.match(edits.setLicence(tmp, 'BONA-W001', { adNumber: '7200012345', adExpiry: '2099-01-01' })?.error ?? '', /withdrawn/i);
+    assert.equal(fs.readFileSync(edits.locate(tmp, 'BONA-W001').file, 'utf8'), flagged);
+  });
+
   it('`brochure` is refused before it writes a brochure.pdf back under public/', async () => {
     const res = await edits.rebuildBrochure(tmp, 'BONA-W009', { cfg: { intakeDir: tmp, site: 'https://bona-real-estate.com' }, workDir: path.join(tmp, 'work') });
     assert.match(res?.error ?? '', /withdrawn/i);
@@ -157,8 +176,9 @@ describe('a withdrawn project sent to the intake again', () => {
 });
 
 // ---------------------------------------------------------------- a re-export, end to end
-// A re-exported brochure has NEW bytes, so gate 0 cannot see it: only the model, having read it, can
-// say which project it is. These runs drive the real processPdf() through a fake extract_pdf.py
+// A re-exported brochure has NEW bytes, so gate 0 cannot see it: what it says about itself (its text
+// layer, metadata, links, file name — gate 2a) or what the model writes from it (3b) has to name the
+// project. These runs drive the real processPdf() through a fake extract_pdf.py
 // (cfg.pyCmd) and a fake `claude` (cfg.claudeBin), so every step between the PDF and the repository
 // is the production code. The fakes log each call to bin/calls.jsonl.
 
@@ -179,7 +199,7 @@ if (mode === 'extract') {
     return { index, file, abs: put(file), width: W, height: H, page: c.page, source: 'embedded', coverage: c.coverage };
   });
   out = { ok: true, pages: cfg.pages, pageSizes: Array.from({ length: cfg.pages }, (_, i) => ({ page: i + 1, width: 842, height: 595 })),
-    text: cfg.text, pageText: [cfg.text], candidates, rendered: false, embeddedImageCount: candidates.length, links: [], meta: {} };
+    text: cfg.text, pageText: [cfg.text], candidates, rendered: false, embeddedImageCount: candidates.length, links: [], meta: cfg.pdfMeta };
 } else if (mode === 'views') {
   const dir = opt('--view-dir') ?? 'views';
   out = { ok: true, views: pages.map((page, id) => ({ id, page, slice: 1, slices: 1, abs: put(dir + '/p' + page + '.jpg'), width: W, height: H, x0: 0, y0: 0, x1: 1, y1: 1 })) };
@@ -226,14 +246,14 @@ const modelAnswer = ({ title, project = null, keep, drop = [] }) => ({
 const ELVIRA = { en: 'Elvira Townhouses, Al-Murjan', ar: 'تاون هاوس إلفيرا، المرجان' };
 const ORDINARY = { en: 'Seaside Townhouses, Al-Murjan', ar: 'تاون هاوس على البحر، المرجان' };
 
-async function rig({ candidates, listings, regions = null, pages = 3 }) {
+async function rig({ candidates, listings, regions = null, pages = 3, text = TEXT, pdfMeta = {} }) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bona-withdrawn-run-')));
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
   const photo = path.join(bin, 'photo.jpg');
   const sharp = (await import('sharp')).default;
   await sharp({ create: { width: 1200, height: 900, channels: 3, background: '#4a6b8a' } }).jpeg().toFile(photo);
-  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, candidates, listings, regions, pages, text: TEXT }));
+  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, candidates, listings, regions, pages, text, pdfMeta }));
   fs.writeFileSync(path.join(bin, 'fake-py.mjs'), FAKE_PY);
   fs.writeFileSync(path.join(bin, 'fake-claude.mjs'), FAKE_CLAUDE);
   const claude = path.join(bin, 'claude');
@@ -312,6 +332,55 @@ describe('processPdf, end to end: a re-exported Elvira brochure (new bytes) is r
       assert.deepEqual(r.calls().filter((c) => c.startsWith('claude')), ['claude-listing', 'claude-regions', 'claude-listing'], 'the rescue round really ran');
       assert.ok(fs.readdirSync(path.join(r.workDir, 'images')).some((f) => /^c00[6-9]\.jpg$/.test(f)), 'the crops were cut');
       assert.equal(fs.existsSync(path.join(r.workDir, 'publish')), false, 'no photo or brochure staged');
+      assert.deepEqual(r.repoFiles(), before_);
+    } finally { r.cleanup(); }
+  });
+
+  // The model may title a re-export generically and leave `project` empty, so its answer alone is not
+  // enough: the brochure's own words are read for the name too, before the model is paid to read it.
+  for (const [what, extra] of [
+    ['its text layer (English, upper case)', { text: `${TEXT} ELVIRA TOWNHOUSES — handover 2027.` }],
+    ['its text layer (Arabic, another alef form)', { text: `${TEXT} مشروع ألفيرا في حي المرجان.` }],
+    ['only its PDF metadata (the document title)', { pdfMeta: { title: 'Elvira Murjan - sales brochure v2', producer: 'Adobe InDesign' } }],
+  ]) {
+    it(`a generic model answer cannot hide it: Elvira named in ${what} is refused before the model is asked`, async () => {
+      const r = await rig({ candidates: sixPhotos, listings: [modelAnswer({ title: ORDINARY, project: null, keep: [0, 1, 2, 3, 4] })], ...extra });
+      try {
+        assert.equal(rules.withdrawnAdvertising({ _intake: { pdfSha256: sha256File(r.pdfPath) } }), null, 'fresh bytes: gate 0 cannot see it');
+        const before_ = r.repoFiles();
+        await assert.rejects(processPdf({ pdfPath: r.pdfPath, cfg: r.cfg, caption: {}, workDir: r.workDir }), isWithdrawn);
+        assert.deepEqual(r.calls(), ['py-extract'], 'refused on the extraction: no model call');
+        assert.equal(fs.existsSync(path.join(r.workDir, 'publish')), false, 'no photo or brochure staged');
+        assert.deepEqual(r.repoFiles(), before_, 'no inbox record, no _index.json, no public/listings, no rebuild output');
+      } finally { r.cleanup(); }
+    });
+  }
+
+  it('…or in the file name it was sent under, or a dry run: refused all the same', async () => {
+    const r = await rig({ candidates: sixPhotos, listings: [modelAnswer({ title: ORDINARY, keep: [0, 1, 2, 3, 4] })] });
+    try {
+      const before_ = r.repoFiles();
+      await assert.rejects(
+        processPdf({ pdfPath: r.pdfPath, cfg: r.cfg, caption: {}, workDir: r.workDir, meta: { pdfFileName: 'elvira_murjan_brochure-v2.pdf' } }),
+        isWithdrawn,
+      );
+      await assert.rejects(
+        processPdf({ pdfPath: r.pdfPath, cfg: r.cfg, caption: { text: 'Elvira again, re-exported' }, workDir: r.workDir, dryRun: true }),
+        isWithdrawn,
+      );
+      assert.deepEqual(r.calls(), ['py-extract', 'py-extract'], 'no model call either time');
+      assert.deepEqual(r.repoFiles(), before_);
+    } finally { r.cleanup(); }
+  });
+
+  it('a brochure with no text layer: the model\'s generic title does not hide Elvira named in its own description', async () => {
+    const answer = modelAnswer({ title: ORDINARY, project: null, keep: [0, 1, 2, 3, 4] });
+    answer.listing.description.en = ['Elvira brings 24 townhouses to Al-Murjan.', 'Two.'];
+    const r = await rig({ candidates: sixPhotos, listings: [answer], text: '' });
+    try {
+      const before_ = r.repoFiles();
+      await assert.rejects(processPdf({ pdfPath: r.pdfPath, cfg: r.cfg, caption: {}, workDir: r.workDir }), isWithdrawn);
+      assert.equal(fs.existsSync(path.join(r.workDir, 'publish')), false);
       assert.deepEqual(r.repoFiles(), before_);
     } finally { r.cleanup(); }
   });

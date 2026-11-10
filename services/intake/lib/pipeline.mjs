@@ -5,9 +5,12 @@
 //   0. withdrawn advertising (the brochure's bytes — before anything else, rules.mjs)
 //   1. size/pages           (cheap, local)
 //   2. classifyPdf          (default-deny keyword gate — invoices/IDs/statements never reach the AI)
+//   2a. withdrawn advertising (the project's name in the brochure's own words: its text layer,
+//       metadata, links, the file name it was sent under, the caption — before a model is paid)
 //   2b. photo-region crop  (only when the pages ARE the pictures — see lib/photo-regions.mjs)
 //   3. AI contract          (validateAiResult + copyProblems)  <- the real brochure/not-brochure gate
-//   3b. withdrawn advertising (the project's name, as the model read it off the brochure)
+//   3b. withdrawn advertising (the project's name, as the model read it off the brochure — in the
+//       title, the project, or anywhere in the copy it wrote: a brochure with no text layer)
 //   4. TAQEEM cross-check   (a price is published only when the NUMBER is actually printed)
 //   5. checkListing         (mirror of scripts/curate/validate.mjs)
 //   5b. the Bona-branded brochure (rebrand_pdf.py) — best effort, never fatal
@@ -39,9 +42,21 @@ import { compositePages, cropPhotoRegions, modelFlagsComposites } from './photo-
 import { priceAppearsIn } from './price.mjs';
 import { pinFromLinks } from './geo.mjs';
 import { rebuild, resetTree } from './publish.mjs';
-import { loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
+import { loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNamedIn, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
 
 export const sha256File = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+
+/** Every string in a model answer's listing (title, project, copy, highlights, …), for the name check. */
+const stringsIn = (v) => (typeof v === 'string' ? [v] : v && typeof v === 'object' ? Object.values(v).flatMap(stringsIn) : []);
+
+/**
+ * The withdrawal a model's reading of the brochure falls under, or null: by the listing's own fields
+ * (rules.mjs withdrawnAdvertising: title, project name, slug) or by a withdrawn name anywhere in the
+ * copy it wrote — a model can title a re-export generically and leave `project` empty.
+ */
+const withdrawnInAnswer = (listing, sha256, withdrawals) =>
+  withdrawnAdvertising({ ...listing, _intake: { pdfSha256: sha256 } }, withdrawals)
+  ?? withdrawnNamedIn(stringsIn(listing), withdrawals);
 
 export class RejectError extends Error {
   constructor(reason, stage) {
@@ -75,7 +90,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // A brochure whose project the developer withdrew from advertising (rules.mjs
   // WITHDRAWN_ADVERTISING, or a flag in the clone's review register) is refused before a page of
   // it is read: no extraction, no model call, nothing staged. The same bytes are caught here; a
-  // re-export is caught by name once the model has read it (3b).
+  // re-export is caught by name in its own words (2a) or in the model's reading of it (3b).
   const withdrawals = loadRegisterWithdrawals(cfg.repo);
   const withdrawnPdf = withdrawnAdvertising({ _intake: { pdfSha256: report.sha256 } }, withdrawals);
   if (withdrawnPdf) throw new RejectError(withdrawnNotice(withdrawnPdf), 'withdrawn');
@@ -102,6 +117,21 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   report.classify = verdict;
   log.info('intake.classified', verdict);
   if (!verdict.ok) throw new RejectError(verdict.reason, 'classify');
+
+  // --- 2a. withdrawn advertising, by the brochure's own words ------------------------
+  // A re-export has new bytes, so gate 0 cannot see it, and the model can title it generically and
+  // leave `project` empty, so 3b alone is not enough. What the document says about itself is read
+  // here, before a model is paid to read it: its text layer, its metadata (title, subject, …), its
+  // links, the file name it was sent under and the caption. Any mention is refused — the intake
+  // republishes the brochure itself, so even a page that only names the project would advertise it.
+  // Refused in a dry run too. After the classify gate, so a private document keeps its own answer.
+  const namedInSource = withdrawnNamedIn([
+    extraction.text, ...(extraction.pageText ?? []), ...stringsIn(extraction.meta ?? {}),
+    ...(extraction.links ?? []).map((l) => l?.uri), meta.pdfFileName, caption.text,
+  ], withdrawals);
+  if (namedInSource) {
+    throw new RejectError(`${withdrawnNotice(namedInSource)}. The brochure (its text, metadata, links or file name) or its caption names the project`, 'withdrawn');
+  }
 
   // A brochure with no text layer is NOT accepted locally: every page is rendered and the
   // AI reads them. Default-deny still holds — it just happens one gate later.
@@ -204,9 +234,10 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   log.info('intake.ai_done', { round: 1, attempt, costUsd: aiMeta.costUsd, durationMs: aiMeta.durationMs, reject: ai.reject, confidence: ai.confidence });
   if (ai.reject) throw new RejectError(ai.rejectReason || 'not a publishable property brochure', 'ai');
   // --- 3b. withdrawn advertising, by name ----------------------------------------
-  // A re-exported brochure has new bytes but the same project: the title or project name the
-  // model read off it still matches. Refused in a dry run too — there is nothing to preview.
-  const withdrawnName = withdrawnAdvertising({ ...ai.listing, _intake: { pdfSha256: report.sha256 } }, withdrawals);
+  // A re-exported brochure has new bytes but the same project: the title, project name or copy the
+  // model wrote from it still names it — the one check that sees a brochure with no text layer.
+  // Refused in a dry run too — there is nothing to preview.
+  const withdrawnName = withdrawnInAnswer(ai.listing, report.sha256, withdrawals);
   if (withdrawnName) throw new RejectError(withdrawnNotice(withdrawnName), 'withdrawn');
 
   // The rescue round. The geometry did not think this brochure needed cropping, but the
@@ -225,7 +256,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       report.aiMeta = { ...aiMeta, attempt, model: cfg.claudeModel };
       log.info('intake.ai_done', { round: 2, attempt, costUsd: aiMeta.costUsd, durationMs: aiMeta.durationMs, reject: ai.reject, confidence: ai.confidence });
       if (ai.reject) throw new RejectError(ai.rejectReason || 'not a publishable property brochure', 'ai');
-      const withdrawnAgain = withdrawnAdvertising({ ...ai.listing, _intake: { pdfSha256: report.sha256 } }, withdrawals);
+      const withdrawnAgain = withdrawnInAnswer(ai.listing, report.sha256, withdrawals);
       if (withdrawnAgain) throw new RejectError(withdrawnNotice(withdrawnAgain), 'withdrawn');
       picks = orderedPicks(ai.images, { maxImages: cfg.maxImages });
     }

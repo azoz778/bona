@@ -215,7 +215,28 @@ export function withdrawnAdvertising(l, extra = []) {
     (w.id && id === String(w.id).toUpperCase())
     || (w.slug && l.slug === w.slug)
     || (w.pdfSha256 && sha === w.pdfSha256)
-    || (w.names ?? []).some((name) => { const n = foldWords(name); return n.trim() !== '' && words.some((t) => t.includes(n)); })) ?? null;
+    || namedIn(w, words)) ?? null;
+}
+
+/** Does one of `w`'s names occur, as whole words, in one of the folded texts? */
+function namedIn(w, folded) {
+  return (w.names ?? []).some((name) => {
+    const n = foldWords(name);
+    return n.trim() !== '' && folded.some((t) => t.includes(n));
+  });
+}
+
+/**
+ * The withdrawal record whose NAME occurs in any of `texts`, or null — the same whole-word, any-case,
+ * any-alef match as withdrawnAdvertising(), over free text instead of a listing's fields: a brochure's
+ * text layer, its PDF metadata, the file name it was sent under, the copy a model wrote about it.
+ * Anything that is not a string is skipped. A re-exported brochure has new bytes, and a model can
+ * title it generically and leave `project` empty; what the document itself says still names it.
+ */
+export function withdrawnNamedIn(texts, extra = []) {
+  const folded = (Array.isArray(texts) ? texts : [texts]).filter((t) => typeof t === 'string' && t.trim() !== '').map(foldWords);
+  if (!folded.length) return null;
+  return [...WITHDRAWN_ADVERTISING, ...extra].find((w) => namedIn(w, folded)) ?? null;
 }
 
 /** Where the WhatsApp intake keeps its listing records, relative to the repository root. */
