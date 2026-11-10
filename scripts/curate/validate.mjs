@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FORBIDDEN, HYPE, isLandPublic, isLocalSrc, isPublishable, LAND_PRICE_CAP, faqProblems, licenceProblems, LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, photoNoteProblems, projectFactsProblems, sarAmount, seoTitleProblems, unitsSheetProblems, videoEntryProblems } from './rules.mjs';
+import { FORBIDDEN, HYPE, isLandPublic, isLocalSrc, isPublishable, LAND_PRICE_CAP, faqProblems, licenceProblems, LISTING_ID_RE, loadRegisterWithdrawals, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, photoNoteProblems, projectFactsProblems, sarAmount, seoTitleProblems, unitsSheetProblems, videoEntryProblems, withdrawnAdvertising, withdrawnInboxListings, withdrawnNotice, WITHDRAWN_ADVERTISING } from './rules.mjs';
 
 function matterportIdOf(value) {
   if (typeof value !== 'string') return null;
@@ -41,6 +41,29 @@ const ARABIC = /[؀-ۿ]/;
 
 const errors = [];
 const err = (id, msg) => errors.push(`${id}: ${msg}`);
+
+// Withdrawn advertising (rules.mjs + the review register's flags). This is the deploy's last gate
+// before the build — the deploy never runs build.mjs — so it checks both halves of a takedown:
+// no withdrawn listing in listings.json (below) and none of its files left under public/. The
+// slugs come from the records AND from every intake record a withdrawal catches: a re-import
+// caught by name under a fresh slug, or a register flag that names no slug, is tied to its
+// public/listings/<slug>/ only by its inbox record.
+const WITHDRAWN = loadRegisterWithdrawals(ROOT);
+let inboxWithdrawn = [];
+try {
+  inboxWithdrawn = withdrawnInboxListings(ROOT, WITHDRAWN);
+} catch (e) {
+  err('inbox', e.message);
+}
+const withdrawnSlugs = new Map(); // slug -> id, each directory reported once
+for (const w of [...WITHDRAWN_ADVERTISING, ...WITHDRAWN, ...inboxWithdrawn]) {
+  if (w.slug && !withdrawnSlugs.has(w.slug)) withdrawnSlugs.set(w.slug, w.id);
+}
+for (const [slug, id] of withdrawnSlugs) {
+  if (fs.existsSync(path.join(ROOT, 'public', 'listings', slug))) {
+    err(id, `advertising permission withdrawn, but public/listings/${slug}/ is still committed — Pages would keep serving its photos and brochure; delete the directory`);
+  }
+}
 
 let data;
 try {
@@ -187,7 +210,10 @@ for (const l of data) {
   // build.mjs filters them out, but listings.json is also written by scripts/sync-listings.mjs
   // (which the daily deploy runs and which edits listings in place, without rebuilding).
   // Checking it here means a sync can never quietly republish a withheld home.
-  if (!isPublishable(l)) {
+  const withdrawn = withdrawnAdvertising(l, WITHDRAWN);
+  if (withdrawn) {
+    err(id, `${withdrawnNotice(withdrawn)} — re-run scripts/curate/build.mjs`);
+  } else if (!isPublishable(l)) {
     err(id, 'this listing is withheld from the public site by owner decision (scripts/curate/rules.mjs) — re-run scripts/curate/build.mjs');
   }
   // Same for land (owner rule 2026-09-06, cap SAR 50,000,000; a plot with no published price is

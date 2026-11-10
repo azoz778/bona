@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOMS } from '../../../scripts/curate/rooms.mjs';
-import { INTAKE_ID_RE, isPublishable, licenceProblems, LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, videoEntryProblems } from '../../../scripts/curate/rules.mjs';
+import { INTAKE_ID_RE, isPublishable, licenceProblems, LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, videoEntryProblems, withdrawnAdvertising, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
 
 export const INBOX_DIR = path.join('scripts', 'curate', 'inbox');
 export const INDEX_FILE = '_index.json';
@@ -254,7 +254,7 @@ export function buildListing({ ai, images, slug, id, repo, caption = {}, meta = 
  * BEFORE anything is written and the owner gets a one-line WhatsApp reason instead of a
  * broken build.
  */
-export function checkListing(listing, { minImages = 4, maxImages = 10 } = {}) {
+export function checkListing(listing, { minImages = 4, maxImages = 10, withdrawals = [] } = {}) {
   const e = [];
   const ARABIC = /[؀-ۿ]/;
   const isStr = (v) => typeof v === 'string' && v.trim().length > 0;
@@ -299,7 +299,12 @@ export function checkListing(listing, { minImages = 4, maxImages = 10 } = {}) {
   // because the intake commits public/listings/<slug>/ photos and brochure.pdf — GitHub
   // Pages serves those directly, so a listing that is only filtered downstream still leaks
   // its pictures and the owner's full brochure.
-  if (!isPublishable(listing)) {
+  // A project whose advertising permission was withdrawn (rules.mjs WITHDRAWN_ADVERTISING, or a
+  // flag in the review register passed as `withdrawals`) is refused however it comes back: a fresh
+  // id, a new slug, a re-exported brochure — the name in its title or project still matches.
+  const withdrawn = withdrawnAdvertising(listing, withdrawals);
+  if (withdrawn) e.push(withdrawnNotice(withdrawn));
+  else if (!isPublishable(listing)) {
     e.push('this listing is withheld from the public site by owner decision — share it on enquiry instead');
   }
   return e;

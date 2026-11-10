@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { fingerprint, advertiserFingerprint, imageUrl, sha256, policyRules, eligibility, PAD_FIT } from './lib/property-daily.mjs';
+import { fingerprint, advertiserFingerprint, imageUrl, sha256, policyRules, eligibility, withdrawalOf, PAD_FIT } from './lib/property-daily.mjs';
 import { buildReview, buildCardReview, liveCatalogue, localFetch, parseSelection, sameReview } from './lib/property-review.mjs';
 import { refuseText } from './lib/facebook.mjs';
 
@@ -76,9 +76,18 @@ export async function main(argv = process.argv.slice(2), { fetchImpl = fetch, no
   const advertiserChanged = advertiserFingerprint(live.advertiser) !== drafts.advertiserSha256;
   const refused = [], files = [];
   let written = 0, unchanged = 0;
+  // Withdrawn advertising (rules.mjs, or a `withdrawnAdvertising` flag in this register): never
+  // re-approved, whatever the drafts say — the tombstone in the register stays as it is. Putting
+  // one back takes an explicit owner decision, and removing the flag and the rules.mjs record by hand.
+  const withdrawnRefusal = (id) => {
+    const w = withdrawalOf(live.listings.find(x => x.id === id) ?? { id }, register[id], register);
+    return w ? `${id}: marketing permission withdrawn${w.reason ? ` (${w.reason})` : ''} — not re-approved without a new explicit owner approval` : null;
+  };
   for (const raw of args.select) {
     let sel;
     try { sel = parseSelection(raw); } catch (e) { refused.push(e.message); continue; }
+    const withdrawn = withdrawnRefusal(sel.id);
+    if (withdrawn) { refused.push(withdrawn); continue; }
     const p = live.listings.find(x => x.id === sel.id), d = drafts.listings?.[sel.id];
     if (advertiserChanged) { refused.push(`${sel.id}: advertiser changed since drafting — draft again`); continue; }
     if (!p || !d) { refused.push(`${sel.id}: not in the live catalogue or the drafts`); continue; }
@@ -104,6 +113,8 @@ export async function main(argv = process.argv.slice(2), { fetchImpl = fetch, no
   for (const raw of args.cards) {
     const m = /^([A-Z]+-[A-Z]?\d+)(?::(\d+),(\d+))?$/.exec(String(raw));
     if (!m) { refused.push(`Bad --cards "${raw}" — use BONA-ID:P,A (plot still, area still), or BONA-ID under policy satellite: false`); continue; }
+    const withdrawn = withdrawnRefusal(m[1]);
+    if (withdrawn) { refused.push(withdrawn); continue; }
     if (rules.satellite !== (m[2] != null)) { refused.push(`${m[1]}: ${rules.satellite ? 'name the plot and area stills (BONA-ID:P,A)' : 'policy satellite is false: no stills (--cards BONA-ID)'}`); continue; }
     const id = m[1], p = live.listings.find(x => x.id === id), d = drafts.listings?.[id];
     if (advertiserChanged) { refused.push(`${id}: advertiser changed since drafting — draft again`); continue; }
