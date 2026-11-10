@@ -158,14 +158,16 @@ both channels sat blocked for 18 days with the alerts only in `<channel>/alerts.
    listing carries the same caption: LinkedIn ids hold epoch ms (`id >> 22`), TikTok video ids epoch
    seconds (`id >> 32`); an id that does not decode to a plausible time is judged by the baseline only.
    Anything less → `uncertain`. Append `published` with `url`.
-   If the pages the confirmation needed stayed a login, captcha or block page to the end (one that
-   later loaded normally does not count), the `uncertain` line and the alert carry `blocked` with the
-   reason (2026-10-21: TikTok answered "Access denied / HTTP 403"). Block pages are recognised by
-   their structure only: TikTok's empty-body HTTP error fails the navigation itself
-   (`net::ERR_HTTP_RESPONSE_CODE_FAILURE` → kind `blocked`), Chrome's `chrome-error://` page with an
-   HTTP 4xx is `blocked` while one with a network error (`ERR_INTERNET_DISCONNECTED`, …) is
-   `navigation`, and Cloudflare's page is matched by its title / its fixed lines with the Ray ID — a
-   post or comment quoting those phrases is not a block page.
+   If a page the confirmation needed (a list, or a new post's own page) was still a login, captcha or
+   block page at the end — each page is tracked by its URL and forgotten only when THAT page later
+   loads normally — the `uncertain` line and the alert carry `blocked` with the reasons (2026-10-21:
+   TikTok answered "Access denied / HTTP 403"). Block pages are recognised by their structure only:
+   an empty-body HTTP error fails the navigation itself (`net::ERR_HTTP_RESPONSE_CODE_FAILURE`) and
+   Chrome's error page shows the status — 401/403/429 is `blocked`, anything else (an empty 500/503)
+   is `navigation`; Chrome's `chrome-error://` page with an HTTP 4xx is `blocked`, with a network error
+   (`ERR_INTERNET_DISCONNECTED`, …) `navigation`; Cloudflare's page is matched by its title, or by text
+   that BEGINS with "Sorry, you have been blocked" and carries a "Cloudflare Ray ID" — a post or
+   comment quoting those lines inside a feed is not a block page.
 
 Everything burned into the media (reel hook, subhook, lower third, CTA lines, card slides) goes
 through the same refusal as the caption: no `{{…}}` placeholder, never «تقييم مجاني». The reel's
@@ -253,8 +255,8 @@ alerts (exit 2) need the reconciliation above. A busy lock exits 75 from the uni
 | `Chrome DevTools not reachable` | Bona's Chrome not running and `bona-chrome.sh` could not start it | `bash ~/bona-publish/ops/systemd/bona-chrome.sh`; then `systemctl --user start bona-browser@tiktok.service` |
 | `not logged in` / no "Edit profile" | Bona's Chrome lost the session | log in again: `bona-chrome.sh show https://www.tiktok.com/login` (or the LinkedIn login) |
 | `captcha` / `verification` / `checkpoint` | the site wants a human check | solve it once in a `bona-chrome.sh show` window; the next tick retries (nothing was recorded) |
-| `refused this browser` / `answered with an HTTP error` (`blocked`) | the site served its block page (TikTok "Access denied / HTTP 403", Cloudflare "Sorry, you have been blocked") | look in a `bona-chrome.sh show` window; if the site keeps refusing, stop the timers and tell the owner — do not retry in a loop. Before a click nothing was sent; after one, settle the `uncertain` day as above |
-| `did not load (Chrome error page: ERR_…)` (`navigation`) | a network error on this PC | retries next tick; nothing was sent |
+| `refused this browser` (`blocked`) | the site served its block page (TikTok "Access denied / HTTP 403", Cloudflare "Sorry, you have been blocked") | look in a `bona-chrome.sh show` window; if the site keeps refusing, stop the timers and tell the owner — do not retry in a loop. Before a click nothing was sent; after one, settle the `uncertain` day as above |
+| `did not load (Chrome error page: ERR_…)` / `answered HTTP 5xx` (`navigation`) | a network error on this PC, or the site failing | retries next tick; nothing was sent |
 | `not an admin of this Page` / `posts as "…", not the Page` | LinkedIn member lost Page admin, or the composer defaulted to the person | fix the role / actor; nothing was sent |
 | `Caption box does not hold the caption` | a popup stole focus mid-typing (retried 3×) or the editor changed | look at `failed-before-post.png`; adjust `lib/browser-sites.mjs` |
 | `upload-timeout` | slow upload / processing | retries next tick |

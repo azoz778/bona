@@ -98,6 +98,17 @@ export async function connect(target, { WebSocketImpl = globalThis.WebSocket, co
     if (r.exceptionDetails) throw new Error('eval: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text));
     return r.result.value;
   };
+  /** The status on Chrome's own HTTP error page ("HTTP ERROR 403"), read for up to ~2 s while it commits; null if unreadable. */
+  async function httpErrorStatus() {
+    for (let i = 0; i < 8; i++) {
+      let t = '';
+      try { t = String(await ev('(document.body && document.body.innerText) || ""') ?? ''); } catch { /* error page still committing */ }
+      const m = /HTTP ERROR (\d{3})/.exec(t);
+      if (m) return m[1];
+      await sleep(250);
+    }
+    return null;
+  }
   const s = {
     send, ev, once,
     get closed() { return closed; },
@@ -109,8 +120,15 @@ export async function connect(target, { WebSocketImpl = globalThis.WebSocket, co
       const r = await send('Page.navigate', { url });
       if (r?.errorText) {
         // An HTTP error answered with no page fails the navigation itself, and Chrome shows its own error
-        // page: TikTok's "Access to www.tiktok.com was denied / HTTP ERROR 403" on 2026-10-21.
-        if (/ERR_HTTP_RESPONSE_CODE_FAILURE|ERR_BLOCKED_BY_RESPONSE/.test(r.errorText)) throw new BrowserError('blocked', `${hostOf(url)} answered with an HTTP error instead of the page (${r.errorText}): it refused this browser`);
+        // page with the status: TikTok's "Access to www.tiktok.com was denied / HTTP ERROR 403" on
+        // 2026-10-21. 401/403/429 (and ERR_BLOCKED_BY_RESPONSE) are the site refusing this browser; any
+        // other status (an empty-body 500/503) is only a failed load.
+        if (/ERR_BLOCKED_BY_RESPONSE/.test(r.errorText)) throw new BrowserError('blocked', `${hostOf(url)} refused this browser (${r.errorText})`);
+        if (/ERR_HTTP_RESPONSE_CODE_FAILURE/.test(r.errorText)) {
+          const status = await httpErrorStatus();
+          if (['401', '403', '429'].includes(status)) throw new BrowserError('blocked', `${hostOf(url)} refused this browser (HTTP ${status}, ${r.errorText})`);
+          throw new BrowserError('navigation', `${hostOf(url)} answered HTTP ${status ?? 'error (status unreadable)'} instead of the page (${r.errorText})`);
+        }
         throw new BrowserError('navigation', `Could not open ${url}: ${r.errorText}`);
       }
       // Same-document navigations fire no load event; the URL change is enough then.

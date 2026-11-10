@@ -64,7 +64,9 @@ export function blockPageProblem(site, url, { title = '', body = '' } = {}) {
       return new BrowserError('blocked', `${site} refused this browser (Chrome error page: ${/HTTP ERROR \d{3}/.exec(body)?.[0] ?? /ERR_[A-Z_]+/.exec(body)?.[0] ?? 'access denied'})`);
     return new BrowserError('navigation', `${site} did not load (Chrome error page: ${/ERR_[A-Z_]+/.exec(body)?.[0] ?? 'network error'})`);
   }
-  if (/^Attention Required! \| Cloudflare/.test(title) || (/Sorry, you have been blocked/.test(body) && /Cloudflare Ray ID/.test(body)))
+  // Cloudflare's own page: its title, or a page whose text BEGINS with its block line and carries its Ray ID
+  // (a post or comment quoting those lines sits inside a feed, never at the top of the page).
+  if (/^Attention Required! \| Cloudflare/.test(title) || (/^\s*Sorry, you have been blocked/.test(body) && /Cloudflare Ray ID/.test(body)))
     return new BrowserError('blocked', `${site} refused this browser (Cloudflare "Sorry, you have been blocked")`);
   return null;
 }
@@ -114,7 +116,8 @@ export function bindText(x, links = []) {
   let t = String(x ?? '').split(LINK_TOKEN).join('').replace(/\p{Extended_Pictographic}|\uFE0F/gu, '').replace(/\bhashtag\s*#/gi, '#')
     .replace(/(?:…|\.\.\.)?\s*(?:see more|more|المزيد)\s*$/i, '');
   for (const link of links) t = t.split(link).join(LINK_TOKEN);
-  return norm(t.replace(SHORT_LINK, LINK_TOKEN));
+  // A site may show a caption's bare domain with a scheme (or the reverse): the scheme is not compared.
+  return norm(t.replace(SHORT_LINK, LINK_TOKEN).replace(/\bhttps?:\/\/(?=\uE000)/gi, ''));
 }
 /**
  * When the platform created a post, from its id (epoch ms), or null. LinkedIn activity / share /
@@ -268,6 +271,20 @@ async function tiktokVideoText(s, handle, id) {
   return s.ev(`(${own}?.innerText) || ''`);
 }
 /**
+ * Why the confirmation could not see the post, per page: a page that refused (login, captcha, block
+ * page, an HTTP refusal) is remembered under its URL and forgotten only when THAT page later loads
+ * normally, so a transient refusal is not reported and another page loading does not hide a lasting
+ * one. `report.blocked` always holds the current lasting reasons (or null). Non-refusal errors are ignored.
+ */
+function trackRefusals(report) {
+  const by = new Map();
+  const sync = () => { if (report) report.blocked = by.size ? [...new Set(by.values())].join('; ') : null; };
+  return {
+    set(url, e) { if (e && (e.kind === 'blocked' || e.kind === 'captcha' || e.kind === 'not-logged-in' || e.kind === 'verification')) { by.set(url, e.message); sync(); } },
+    clear(url) { if (by.delete(url)) sync(); },
+  };
+}
+/**
  * Poll the profile and Studio for a new video id whose own page shows the caption head. URL or null.
  * `report.blocked` is set to the reason when a page the confirmation needed was a login, captcha or
  * block page (2026-10-21: TikTok answered "Access denied / HTTP 403" right after a Post), so the
@@ -275,24 +292,24 @@ async function tiktokVideoText(s, handle, id) {
  */
 export async function tiktokConfirm(s, handle, before, { caption = '', evidence = '', timeoutMs = 6 * 60_000, every = 20_000, settleMs = 2000, report = null, notBefore = null } = {}) {
   const t0 = Date.now(), checked = new Map();
-  // Only a refusal that lasts is reported: a page that loads normally clears an earlier one.
-  const refused = e => { if (report && e?.kind === 'blocked') report.blocked = e.message; };
+  const refusals = trackRefusals(report);
   while (Date.now() - t0 < timeoutMs) {
     for (const [url, settled] of [[URLS.tiktokProfile(handle), profileSettled], [URLS.tiktokContent, studioSettled]]) {
       try {
         await s.navigate(url);
         if (!await s.waitFor(settled, 15_000)) {
           const b = await tiktokBlocker(s).catch(() => null);
-          if (b) { if (report) report.blocked = b.message; continue; }
-        } else if (report) report.blocked = null;
+          if (b) { refusals.set(url, b); continue; }
+        } else refusals.clear(url);
         await sleep(settleMs);
         for (const id of (await tiktokVideoIds(s, handle)).filter(x => !before.includes(x))) {
-          if (!checked.get(id)) checked.set(id, await tiktokVideoText(s, handle, id).catch(e => { refused(e); return ''; }));
+          const page = `${URLS.tiktokProfile(handle)}/video/${id}`;
+          if (!checked.get(id)) checked.set(id, await tiktokVideoText(s, handle, id).then(t => { refusals.clear(page); return t; }, e => { refusals.set(page, e); return ''; }));
           const key = bindNewPost([...checked].map(([key, text]) => ({ key, text })), before, { caption, evidence }, { notBefore });
           if (key) return `https://www.tiktok.com/@${handle}/video/${key}`;
           checked.delete(id); // not (yet) ours: a processing video may show its description on the next round
         }
-      } catch (e) { refused(e); /* otherwise the page is still loading; try again */ }
+      } catch (e) { refusals.set(url, e); /* otherwise the page is still loading; try again */ }
     }
     await sleep(every);
   }
@@ -469,23 +486,25 @@ export async function linkedinConfirm(s, companyId, before, { toast = null, capt
   const m = /urn:li:(activity|share|ugcPost):(\d+)/.exec(decodeURIComponent(String(toast ?? '')));
   const prefer = m ? `${m[1]}:${m[2]}` : null;
   const t0 = Date.now();
+  const refusals = trackRefusals(report);
   while (Date.now() - t0 < timeoutMs) {
     for (const [url, settled] of [[URLS.linkedinPosts(companyId), postsSettled], [URLS.linkedinPublic(companyId), publicSettled]]) {
       try {
         await s.navigate(url);
         if (!await s.waitFor(settled, 15_000)) {
           const b = await linkedinBlocker(s).catch(() => null);
-          if (b) { if (report) report.blocked = b.message; continue; }
-        } else if (report) report.blocked = null; // only a refusal that lasts is reported
+          if (b) { refusals.set(url, b); continue; }
+        } else refusals.clear(url);
         await sleep(settleMs);
         // Feed lists clamp long posts: each new top-level post is read in full from its own page first.
         const fresh = (await linkedinPostCandidates(s)).filter(c => !before.includes(c.key)).map(c => c.key);
         const order = prefer && fresh.includes(prefer) ? [prefer, ...fresh.filter(k => k !== prefer)] : fresh;
         const full = [];
-        for (const k of order.slice(0, 5)) full.push({ key: k, text: await linkedinFullText(s, k, { settleMs }) });
+        // A post page that refuses (or fails) gives no text, so it cannot bind; its refusal is kept under its own URL.
+        for (const k of order.slice(0, 5)) full.push({ key: k, text: await linkedinFullText(s, k, { settleMs }).then(t => { refusals.clear(linkedinUrl(k)); return t; }, e => { refusals.set(linkedinUrl(k), e); return ''; }) });
         const key = bindNewPost(full, before, { caption, evidence }, { prefer, notBefore });
         if (key) return linkedinUrl(key);
-      } catch (e) { if (report && e?.kind === 'blocked') report.blocked = e.message; /* otherwise loading */ }
+      } catch (e) { refusals.set(url, e); /* otherwise loading */ }
     }
     await sleep(every);
   }
