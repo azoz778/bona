@@ -800,26 +800,27 @@ const LI_1021_LIVE = LI_1021_CAPTION.replace('https://bona-real-estate.com/prope
 test('2026-11-08: a post whose link LinkedIn shortened to lnkd.in still binds — and nothing else is loosened', () => {
   const sub = { caption: LI_1021_CAPTION, evidence: 'BONA-001' };
   const key = 'activity:7518559300538146817';
-  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE }], [], sub), key, 'the real 10-21 post');
+  const LI = { shortLinks: true }; // LinkedIn's confirm passes it; TikTok's never does (R4 item 3)
+  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE }], [], sub, LI), key, 'the real 10-21 post');
   // As the feed renders it: hashtag links, a clamp control, the short link without its scheme.
   const dom = LI_1021_LIVE.replace(/#(\w+)/g, 'hashtag#$1').replace('https://lnkd.in/dnG_C5SM', 'lnkd.in/dnG_C5SM') + ' …see more';
-  assert.equal(SITES.bindNewPost([{ key, text: dom }], [], sub), key, 'feed rendering of the same post');
+  assert.equal(SITES.bindNewPost([{ key, text: dom }], [], sub, LI), key, 'feed rendering of the same post');
   assert.equal(SITES.bindNewPost([{ key: '7500000000000000001', text: LI_1021_CAPTION }], [], sub), '7500000000000000001', 'a site that keeps the link as typed (TikTok)');
   // Still strict everywhere else.
-  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE }], [key], sub), null, 'already in the baseline');
-  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replace('SAR 8,000,000', 'SAR 9,000,000') }], [], sub), null, 'a changed price is another post');
-  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replaceAll('BONA-001', 'BONA-002') }], [], { caption: LI_1021_CAPTION.replaceAll('BONA-001', 'BONA-002'), evidence: 'BONA-001' }), null, 'the evidence must be there');
-  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replace('https://lnkd.in/dnG_C5SM\n', '') }], [], sub), null, 'a missing link is a difference too');
+  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE }], [key], sub, LI), null, 'already in the baseline');
+  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replace('SAR 8,000,000', 'SAR 9,000,000') }], [], sub, LI), null, 'a changed price is another post');
+  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replaceAll('BONA-001', 'BONA-002') }], [], { caption: LI_1021_CAPTION.replaceAll('BONA-001', 'BONA-002'), evidence: 'BONA-001' }, LI), null, 'the evidence must be there');
+  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replace('https://lnkd.in/dnG_C5SM\n', '') }], [], sub, LI), null, 'a missing link is a difference too');
   // Codex P0: only the caption's own addresses and lnkd.in short links are tokens; any other link stays literal.
-  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replace('https://lnkd.in/dnG_C5SM', 'https://example.org/elsewhere') }], [], sub), null, 'a post linking somewhere else');
-  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replace('https://lnkd.in/dnG_C5SM', SITES.LINK_TOKEN) }], [], sub), null, 'the token itself in a post means nothing');
-  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replace('https://lnkd.in/dnG_C5SM', '‹link›') }], [], sub), null);
+  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replace('https://lnkd.in/dnG_C5SM', 'https://example.org/elsewhere') }], [], sub, LI), null, 'a post linking somewhere else');
+  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replace('https://lnkd.in/dnG_C5SM', SITES.LINK_TOKEN) }], [], sub, LI), null, 'the token itself in a post means nothing');
+  assert.equal(SITES.bindNewPost([{ key, text: LI_1021_LIVE.replace('https://lnkd.in/dnG_C5SM', '‹link›') }], [], sub, LI), null);
   // Education captions carry a bare domain; LinkedIn may link or shorten it.
   const edu = 'Topic one\n\nText\nBona · FAL 1100313556 · bona-real-estate.com\n#BonaRealEstate';
-  assert.equal(SITES.bindNewPost([{ key: 'share:1', text: edu.replace('bona-real-estate.com', 'https://lnkd.in/eXyZ12') }], [], { caption: edu, evidence: 'Topic one' }), 'share:1');
-  assert.equal(SITES.bindNewPost([{ key: 'share:1', text: edu }], [], { caption: edu, evidence: 'Topic one' }), 'share:1');
-  assert.equal(SITES.bindNewPost([{ key: 'share:1', text: edu.replace('bona-real-estate.com', 'https://bona-real-estate.com') }], [], { caption: edu, evidence: 'Topic one' }), 'share:1', 'Codex R2: a scheme added to the bare domain');
-  assert.equal(SITES.bindNewPost([{ key: 'share:1', text: edu.replace('bona-real-estate.com', 'https://bona-real-estate.co') }], [], { caption: edu, evidence: 'Topic one' }), null, 'but not another domain');
+  assert.equal(SITES.bindNewPost([{ key: 'share:1', text: edu.replace('bona-real-estate.com', 'https://lnkd.in/eXyZ12') }], [], { caption: edu, evidence: 'Topic one' }, LI), 'share:1');
+  assert.equal(SITES.bindNewPost([{ key: 'share:1', text: edu }], [], { caption: edu, evidence: 'Topic one' }, LI), 'share:1');
+  assert.equal(SITES.bindNewPost([{ key: 'share:1', text: edu.replace('bona-real-estate.com', 'https://bona-real-estate.com') }], [], { caption: edu, evidence: 'Topic one' }, LI), 'share:1', 'Codex R2: a scheme added to the bare domain');
+  assert.equal(SITES.bindNewPost([{ key: 'share:1', text: edu.replace('bona-real-estate.com', 'https://bona-real-estate.co') }], [], { caption: edu, evidence: 'Topic one' }, LI), null, 'but not another domain');
   // The token never swallows the facts the binding relies on.
   const facts = 'BONA-001 · SAR 8,000,000 · 537 m² · FAL 1100313556 · +966593296933 · فال https://bona-real-estate.com/p/';
   const t = SITES.bindText(facts, SITES.captionLinks(facts));
@@ -833,14 +834,14 @@ test('2026-11-08: a post created before the run never binds, even when the basel
   assert.equal(new Date(SITES.idTime(old)).toISOString(), '2026-10-21T06:30:25.325Z');
   assert.equal(new Date(SITES.idTime('ugcPost:7518559299627921408')).toISOString(), '2026-10-21T06:30:25.108Z');
   const runStart = Date.parse('2026-11-04T06:25:00Z');
-  assert.equal(SITES.bindNewPost([{ key: old, text: LI_1021_LIVE }], [], sub, { notBefore: runStart }), null, 'the 10-21 post is not the 11-04 post');
+  assert.equal(SITES.bindNewPost([{ key: old, text: LI_1021_LIVE }], [], sub, { notBefore: runStart, shortLinks: true }), null, 'the 10-21 post is not the 11-04 post');
   const fresh = `activity:${(BigInt(Date.parse('2026-11-04T06:30:40Z')) << 22n) + 123n}`;
-  assert.equal(SITES.bindNewPost([{ key: old, text: LI_1021_LIVE }, { key: fresh, text: LI_1021_LIVE }], [], sub, { notBefore: runStart }), fresh);
+  assert.equal(SITES.bindNewPost([{ key: old, text: LI_1021_LIVE }, { key: fresh, text: LI_1021_LIVE }], [], sub, { notBefore: runStart, shortLinks: true }), fresh);
   const ttNew = String((BigInt(Math.floor(Date.parse('2026-11-04T18:46:00Z') / 1000)) << 32n) + 77n);
   assert.equal(SITES.bindNewPost([{ key: ttNew, text: LI_1021_CAPTION }], [], sub, { notBefore: Date.parse('2026-11-04T18:35:00Z') }), ttNew, 'TikTok ids carry seconds');
   // An id that does not decode to a plausible time is judged by the baseline only (never rejected on time).
   assert.equal(SITES.idTime('5'), null);
-  assert.equal(SITES.bindNewPost([{ key: '6', text: LI_1021_LIVE }], [], sub, { notBefore: runStart }), '6');
+  assert.equal(SITES.bindNewPost([{ key: '6', text: LI_1021_LIVE }], [], sub, { notBefore: runStart, shortLinks: true }), '6');
 });
 
 const pageFake = ({ url, title = '', body = '', captcha = false, settled = true }) => ({
@@ -995,4 +996,133 @@ test('2026-11-08: the unit drives Bona\'s own Chrome (:9230), never the shared :
     const r = spawnSync('bash', [path.join(here, '../../ops/systemd/bona-chrome.sh'), 'show', bad], { encoding: 'utf8', timeout: 10_000, env: { ...process.env, BONA_CHROME_PORT: '1', BONA_CHROME_CMD: '/bin/false', BONA_CHROME_PROFILE: 'C:\\nowhere' } });
     assert.equal(r.status, 2, bad);
   }
+});
+
+// ================================================================== round 4 (Claude round-2 items, 2026-11-11)
+test('R4 item 1: only 401/403/429 on Chrome\'s error page is a refusal; any other status is "answered HTTP nnn" (navigation)', async () => {
+  const err = body => SITES.blockPageProblem('TikTok', 'chrome-error://chromewebdata/', { title: 'www.tiktok.com', body });
+  for (const status of ['401', '403', '429']) {
+    const e = err(`This page isn’t working\nHTTP ERROR ${status}\nReload`);
+    assert.equal(e?.kind, 'blocked', status);
+    assert.match(e.message, new RegExp(`TikTok refused this browser \\(Chrome error page: HTTP ERROR ${status}\\)`));
+  }
+  for (const status of ['404', '410', '500', '503']) {
+    const e = err(`This page isn’t working\nHTTP ERROR ${status}\nReload`);
+    assert.equal(e?.kind, 'navigation', `${status} is not a refusal`);
+    assert.match(e.message, new RegExp(`TikTok answered HTTP ${status}`), status);
+    assert.doesNotMatch(e.message, /network error|refused/, status);
+  }
+  assert.equal(err('Access to www.tiktok.com was denied\nYou don\'t have authorization to view this page.\nHTTP ERROR 403').kind, 'blocked');
+  assert.equal(err('This site can’t be reached\nERR_BLOCKED_BY_RESPONSE').kind, 'blocked');
+  const offline = err('No internet\nERR_INTERNET_DISCONNECTED');
+  assert.equal(offline.kind, 'navigation');
+  assert.match(offline.message, /did not load \(Chrome error page: ERR_INTERNET_DISCONNECTED\)/);
+  // The same status rule as cdp.navigate's, from one place.
+  assert.deepEqual(['401', '403', '404', '429', '500', '503', null].map(CDP.isRefusalStatus), [true, true, false, true, false, false, false]);
+});
+
+test('R4 item 2: a post\'s own page that serves a block page WITH a body is checked and reported (LinkedIn Cloudflare, TikTok captcha)', async () => {
+  const CF = { title: 'Attention Required! | Cloudflare', body: 'Sorry, you have been blocked\nYou are unable to access linkedin.com\nCloudflare Ray ID: a571a1df3a0b809b' };
+  let cur = '';
+  const li = { navigate: async u => { cur = u; }, url: async () => cur,
+    waitFor: async cond => (cur.includes('/feed/update/') ? null : true), // the post element never appears on the block page
+    ev: async e => (e.includes('document.title') ? (cur.includes('/feed/update/') ? CF : { title: 'Bona | بونا: Posts | LinkedIn', body: '' })
+      : e.includes('flatMap') ? (cur.includes('/feed/update/') ? [] : [{ key: 'activity:1000000009', text: 'Villa BONA-A' }]) : null) };
+  const r1 = { blocked: null };
+  assert.equal(await SITES.linkedinConfirm(li, '145349037', [], { caption: 'Villa BONA-A', evidence: 'BONA-A', report: r1, timeoutMs: 30, every: 0, settleMs: 0 }), null);
+  assert.match(r1.blocked ?? '', /LinkedIn refused this browser \(Cloudflare/, 'the refused post page is the reason');
+  // TikTok: the lists load and show a new id; the video page loads TikTok's captcha instead of the video.
+  let tcur = '';
+  const tt = { navigate: async u => { tcur = u; }, url: async () => tcur,
+    waitFor: async () => (tcur.includes('/video/') ? null : true),
+    ev: async e => (isIds(e) ? ['555'] : e.includes('captcha_verify') ? tcur.includes('/video/') : e.includes('document.title') ? { title: '', body: '' } : isVideoText(e) ? '' : null) };
+  const r2 = { blocked: null };
+  assert.equal(await SITES.tiktokConfirm(tt, 'bonarealestatesa', [], { caption: 'x BONA-A', evidence: 'BONA-A', report: r2, timeoutMs: 30, every: 0, settleMs: 0 }), null);
+  assert.match(r2.blocked ?? '', /captcha/i);
+  // A post page that loads normally is not judged by a phrase in it, and binds as before.
+  let ocur = '';
+  const ok = { navigate: async u => { ocur = u; }, url: async () => ocur, waitFor: async () => true,
+    ev: async e => (e.includes('document.title') ? { title: 'Post | LinkedIn', body: 'Sorry, you have been blocked' } : e.includes('flatMap') ? [{ key: 'activity:1000000009', text: 'Villa BONA-A' }] : null) };
+  const r3 = { blocked: null };
+  assert.equal(await SITES.linkedinConfirm(ok, '145349037', [], { caption: 'Villa BONA-A', evidence: 'BONA-A', report: r3, timeoutMs: 30, every: 0, settleMs: 0 }), 'https://www.linkedin.com/feed/update/urn:li:activity:1000000009/');
+  assert.equal(r3.blocked, null);
+});
+
+test('R4 item 3: lnkd.in short links are a link token on LinkedIn only — TikTok never makes them', async () => {
+  const sub = { caption: LI_1021_CAPTION, evidence: 'BONA-001' };
+  const ttKey = '7500000000000000001';
+  assert.equal(SITES.bindNewPost([{ key: ttKey, text: LI_1021_LIVE }], [], sub), null, 'TikTok: a video whose link is lnkd.in/… is not ours');
+  assert.equal(SITES.bindNewPost([{ key: ttKey, text: LI_1021_CAPTION }], [], sub), ttKey, 'TikTok keeps the link as typed');
+  assert.equal(SITES.bindNewPost([{ key: 'activity:1', text: LI_1021_LIVE }], [], sub, { shortLinks: true }), 'activity:1', 'LinkedIn shortens it');
+  assert.ok(!SITES.bindText('a https://lnkd.in/x b').includes(SITES.LINK_TOKEN), 'off by default');
+  assert.ok(SITES.bindText('a https://lnkd.in/x b', [], { shortLinks: true }).includes(SITES.LINK_TOKEN));
+  // Wired: linkedinConfirm binds the lnkd.in post; tiktokConfirm does not bind the same text.
+  const liS = { navigate: async () => {}, url: async () => 'https://www.linkedin.com/x', waitFor: async () => true,
+    ev: async e => (e.includes('flatMap') ? [{ key: 'activity:1000000009', text: LI_1021_LIVE }] : null) };
+  assert.equal(await SITES.linkedinConfirm(liS, '145349037', [], { ...sub, timeoutMs: 30, every: 0, settleMs: 0 }), 'https://www.linkedin.com/feed/update/urn:li:activity:1000000009/');
+  const ttS = { navigate: async () => {}, url: async () => 'https://www.tiktok.com/x', waitFor: async () => true,
+    ev: async e => (isIds(e) ? ['555'] : isVideoText(e) ? LI_1021_LIVE : null) };
+  assert.equal(await SITES.tiktokConfirm(ttS, 'bonarealestatesa', [], { ...sub, timeoutMs: 30, every: 0, settleMs: 0 }), null);
+});
+
+test('R4 item 4: a caption link next to punctuation or an emoji is still one token (no false rejection)', () => {
+  const li = { shortLinks: true };
+  const dot = 'Villa BONA-A. See https://bona-real-estate.com/properties/x/. Call us';
+  assert.deepEqual(SITES.captionLinks(dot), ['https://bona-real-estate.com/properties/x/', 'bona-real-estate.com/properties/x/']);
+  assert.equal(SITES.bindNewPost([{ key: 'k', text: dot.replace('https://bona-real-estate.com/properties/x/', 'https://lnkd.in/abc') }], [], { caption: dot, evidence: 'BONA-A' }, li), 'k', 'trailing full stop');
+  assert.equal(SITES.bindNewPost([{ key: 'k', text: dot }], [], { caption: dot, evidence: 'BONA-A' }), 'k', 'kept as typed');
+  const ar = 'فيلا BONA-A شاهد https://bona-real-estate.com/properties/x، اتصل بنا';
+  assert.equal(SITES.bindNewPost([{ key: 'k', text: ar.replace('https://bona-real-estate.com/properties/x', 'https://lnkd.in/abc') }], [], { caption: ar, evidence: 'BONA-A' }, li), 'k', 'Arabic comma');
+  const emoji = 'Villa BONA-A https://bona-real-estate.com/properties/x🏡 call';
+  assert.equal(SITES.bindNewPost([{ key: 'k', text: emoji.replace('https://bona-real-estate.com/properties/x', 'https://lnkd.in/abc') }], [], { caption: emoji, evidence: 'BONA-A' }, li), 'k', 'glued emoji');
+  assert.equal(SITES.bindNewPost([{ key: 'k', text: emoji }], [], { caption: emoji, evidence: 'BONA-A' }), 'k', 'glued emoji, kept as typed');
+  const paren = 'Villa BONA-A (https://bona-real-estate.com/properties/x) call';
+  assert.equal(SITES.bindNewPost([{ key: 'k', text: paren.replace('https://bona-real-estate.com/properties/x', 'https://lnkd.in/abc') }], [], { caption: paren, evidence: 'BONA-A' }, li), 'k', 'closing bracket');
+  // Still strict: a longer address that only starts with ours is another link.
+  assert.equal(SITES.bindNewPost([{ key: 'k', text: dot.replace('/properties/x/', '/properties/x/y') }], [], { caption: dot, evidence: 'BONA-A' }, li), null);
+  assert.equal(SITES.bindNewPost([{ key: 'k', text: ar.replace('/properties/x', '/properties/xy') }], [], { caption: ar, evidence: 'BONA-A' }, li), null);
+});
+
+test('R4 item 5: LinkedIn\'s security check is recognised by the page itself, not by a phrase inside a feed', async () => {
+  const feed = 'Skip to main content\nHome\nMy Network\nJobs\nMessaging\nNotifications\nMe\nFor Business\n' + 'Bona | بونا\nReal estate · Jeddah\n'.repeat(6) + 'Post: scammers ask you to "verify you\'re human" or run a "quick security check" — never do it. Let\'s do a quick review of the rules.';
+  assert.equal(await SITES.linkedinBlocker(pageFake({ url: 'https://www.linkedin.com/company/145349037/posts/', title: 'Bona | بونا: Posts | LinkedIn', body: feed })), null, 'a post quoting the phrases');
+  assert.equal((await SITES.linkedinBlocker(pageFake({ url: 'https://www.linkedin.com/company/145349037/posts/', title: 'Security Verification | LinkedIn', body: '' })))?.kind, 'captcha', 'by title');
+  assert.equal((await SITES.linkedinBlocker(pageFake({ url: 'https://www.linkedin.com/feed/', title: 'LinkedIn', body: '\nLinkedIn\nLet’s do a quick security check\nPlease verify you’re human' })))?.kind, 'captcha', 'the page begins with it');
+  assert.equal((await SITES.linkedinBlocker(pageFake({ url: 'https://www.linkedin.com/checkpoint/challenge/AgF', title: 'LinkedIn', body: '' })))?.kind, 'verification', 'checkpoint URL kept');
+});
+
+test('R4 item 7: add-browser-monitors.py stops before touching anything when a monitor must be created and the notification is missing', () => {
+  const py = spawnSync('python3', ['--version']);
+  if (py.status !== 0) return; // no python3 on this box: the script is run by hand with uv
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kuma-mock-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'mod')); fs.mkdirSync(path.join(tmp, 'home', '.secrets'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'home', '.secrets', 'uptime-kuma.env'), 'KUMA_USER=u\nKUMA_PASSWORD=p\nKUMA_URL=https://kuma.example\n');
+    fs.writeFileSync(path.join(tmp, 'mod', 'uptime_kuma_api.py'), `
+import json, os
+LOG = os.environ["MOCK_LOG"]
+def log(*a):
+    with open(LOG, "a") as f: f.write(json.dumps(a) + "\\n")
+class MonitorType: PUSH = "push"
+class UptimeKumaApi:
+    def __init__(self, *a, **k): pass
+    def login(self, *a): pass
+    def disconnect(self): log("disconnect")
+    def get_monitors(self): return [{"id": 40, "name": "Bona daily post — tiktok", "active": False, "pushToken": "t" * 32, "interval": 93600}]
+    def get_notifications(self): return []
+    def resume_monitor(self, i): log("resume", i)
+    def add_monitor(self, **k): log("add"); return {"monitorID": 41}
+    def get_monitor(self, i): return {"id": i, "active": False, "pushToken": "x" * 32}
+`);
+    const r = spawnSync('python3', [path.join(here, '../../ops/systemd/add-browser-monitors.py'), '--resume'], { encoding: 'utf8',
+      env: { ...process.env, PYTHONPATH: path.join(tmp, 'mod'), HOME: path.join(tmp, 'home'), BONA_DATA: path.join(tmp, 'data'), MOCK_LOG: path.join(tmp, 'log') } });
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stderr, /no notification named .*Bona daily post — linkedin/s);
+    assert.doesNotMatch(r.stderr, /nothing else changed/);
+    assert.doesNotMatch(r.stderr, /Traceback/);
+    const calls = fs.existsSync(path.join(tmp, 'log')) ? fs.readFileSync(path.join(tmp, 'log'), 'utf8').trim().split('\n').map(l => JSON.parse(l)[0]) : [];
+    assert.deepEqual(calls, ['disconnect'], 'no resume, no create: nothing changed');
+    assert.equal(fs.existsSync(path.join(tmp, 'data', 'daily', 'heartbeat-tiktok.url')), false, 'no URL file rewritten');
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
