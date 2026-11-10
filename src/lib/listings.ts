@@ -118,11 +118,21 @@ export function similar(l: Listing, n = 3): Listing[] {
 /** The hero image of the home page = first featured listing's first image. */
 export function heroListing(): Listing | undefined { return featured()[0] ?? listings[0]; }
 
+/** Listings whose photographs may illustrate the brand pages (home, /about/, /sell/): newest first, with photos, and never
+    one whose photos show another project (`photoNote`). The /about/ and /sell/ photo is that page's og:image and JSON-LD image,
+    so a noted listing would present another project's photos as Bona's (BONA-W019 on /about/, 2026-11-10). */
+export function editorialPool(list: Listing[] = listings): Listing[] {
+  return ordered(list).filter(l => l.images?.length && !l.photoNote);
+}
+/** The listing behind editorial slot `index` (wraps round the pool). Pages label the photo with it: imageAlt(editorialImage(n), editorialListing(n)). */
+export function editorialListing(index = 0, list: Listing[] = listings): Listing | undefined {
+  const pool = editorialPool(list);
+  return pool.length ? pool[index % pool.length] : undefined;
+}
 /** Editorial images for brand pages, drawn from the portfolio (never hard-coded URLs). `pick` chooses which image of each listing. */
-export function editorialImage(index = 0, pick = 1): Listing['images'][number] | undefined {
-  const pool = ordered(listings).filter(l => l.images?.length);
-  if (!pool.length) return undefined;
-  const l = pool[index % pool.length];
+export function editorialImage(index = 0, pick = 1, list: Listing[] = listings): Listing['images'][number] | undefined {
+  const l = editorialListing(index, list);
+  if (!l) return undefined;
   return l.images[Math.min(pick, l.images.length - 1)] ?? l.images[0];
 }
 

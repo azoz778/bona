@@ -5,7 +5,7 @@ import SectionHead from '../SectionHead.astro';
 import Icon from '../Icon.astro';
 import site from '../../data/site.json';
 import { localePath, t, ui, waLink, type Locale } from '../../lib/i18n';
-import { heroListings, editorialImage, imageAlt, ordered, listings, featuredByKind, kindsPresent, kindSlug, kindLabelPlural, withTours, type Kind } from '../../lib/listings';
+import { heroListings, editorialImage, editorialListing, imageAlt, featuredByKind, kindsPresent, kindSlug, kindLabelPlural, withTours, type Kind } from '../../lib/listings';
 import { orgJsonLd } from '../../lib/seo';
 interface Props { locale: Locale }
 const { locale } = Astro.props;
@@ -19,9 +19,8 @@ const land = present.includes('land') ? featuredByKind('land', 3, 3) : [];
 const buildings = present.includes('building') ? featuredByKind('building', 3, 3) : [];
 const tours = withTours().length;
 const markets = site.markets[locale];
-const pool = ordered(listings).filter(l => l.images?.length);
 const aboutImg = editorialImage(1, 2);
-const aboutImgListing = pool[1 % Math.max(1, pool.length)];
+const aboutImgListing = editorialListing(1);
 const wa = waLink(site.whatsapp.wa, t(ui.formGreeting, locale));
 // Search title, not the hero. "bona" was still around position 43 in Search Console
 // (14 Sep–17 Oct 2026) while the tagline title never said the legal name or the city.
