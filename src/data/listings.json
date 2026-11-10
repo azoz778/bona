@@ -6658,6 +6658,149 @@
     "licence": null
   },
   {
+    "id": "BONA-W021",
+    "slug": "the-river-residences-al-salamah-jeddah",
+    "sourceRef": "WA-20261110-AC9993",
+    "status": "available",
+    "category": "off-plan",
+    "type": "apartment",
+    "kind": "apartment",
+    "featured": false,
+    "title": {
+      "en": "The River Residences, Al Salamah, Jeddah",
+      "ar": "ذا ريفر، حي السلامة، جدة"
+    },
+    "location": {
+      "district": {
+        "en": "Al Salamah",
+        "ar": "السلامة"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 650000,
+      "currency": "SAR",
+      "from": true,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": null,
+      "baths": null,
+      "areaSqm": null,
+      "plotSqm": null,
+      "yearBuilt": null,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "/listings/the-river-residences-al-salamah-jeddah/01.jpg",
+        "thumb": "/listings/the-river-residences-al-salamah-jeddah/01-thumb.webp",
+        "alt": {
+          "en": "Façade at night — The River Residences, Al Salamah, Jeddah",
+          "ar": "الواجهة ليلاً — ذا ريفر، حي السلامة، جدة"
+        }
+      },
+      {
+        "src": "/listings/the-river-residences-al-salamah-jeddah/02.jpg",
+        "thumb": "/listings/the-river-residences-al-salamah-jeddah/02-thumb.webp",
+        "alt": {
+          "en": "Courtyard — The River Residences, Al Salamah, Jeddah",
+          "ar": "الفناء الداخلي — ذا ريفر، حي السلامة، جدة"
+        }
+      },
+      {
+        "src": "/listings/the-river-residences-al-salamah-jeddah/03.jpg",
+        "thumb": "/listings/the-river-residences-al-salamah-jeddah/03-thumb.webp",
+        "alt": {
+          "en": "Lobby — The River Residences, Al Salamah, Jeddah",
+          "ar": "البهو — ذا ريفر، حي السلامة، جدة"
+        }
+      },
+      {
+        "src": "/listings/the-river-residences-al-salamah-jeddah/04.jpg",
+        "thumb": "/listings/the-river-residences-al-salamah-jeddah/04-thumb.webp",
+        "alt": {
+          "en": "Entrance — The River Residences, Al Salamah, Jeddah",
+          "ar": "المدخل — ذا ريفر، حي السلامة، جدة"
+        }
+      },
+      {
+        "src": "/listings/the-river-residences-al-salamah-jeddah/05.jpg",
+        "thumb": "/listings/the-river-residences-al-salamah-jeddah/05-thumb.webp",
+        "alt": {
+          "en": "Bedroom — The River Residences, Al Salamah, Jeddah",
+          "ar": "غرفة النوم — ذا ريفر، حي السلامة، جدة"
+        }
+      },
+      {
+        "src": "/listings/the-river-residences-al-salamah-jeddah/06.jpg",
+        "thumb": "/listings/the-river-residences-al-salamah-jeddah/06-thumb.webp",
+        "alt": {
+          "en": "Gym — The River Residences, Al Salamah, Jeddah",
+          "ar": "النادي الرياضي — ذا ريفر، حي السلامة، جدة"
+        }
+      },
+      {
+        "src": "/listings/the-river-residences-al-salamah-jeddah/07.jpg",
+        "thumb": "/listings/the-river-residences-al-salamah-jeddah/07-thumb.webp",
+        "alt": {
+          "en": "Lounge — The River Residences, Al Salamah, Jeddah",
+          "ar": "الصالة — ذا ريفر، حي السلامة، جدة"
+        }
+      }
+    ],
+    "videos": [],
+    "description": {
+      "en": "The River is a residential development in the Al Salamah district of Jeddah, offered as hotel-style studios. The building is set in two parallel blocks with a landscaped water channel running between them, and its façade is carved with arched windows and lit balconies.\n\nThe unit mix runs from studios of about 70 sqm to larger apartments of up to 171 sqm. There are also two-level loft units of roughly 83 to 95 sqm, and apartments on the seventh floor. Outlooks vary by unit: landscape, street, front-facing or with terraces.\n\nResidents share a men's and a women's wellness club with gym equipment and an indoor pool, a lounge, and a children's play area. Services include housekeeping, high-speed Wi-Fi, security cameras, smart entry and a resident app. The units are described with high ceilings and wide windows, in a hotel-style entrance.",
+      "ar": "ذا ريفر مشروع سكني في حي السلامة بجدة، يقدّم استوديوهات بطابع فندقي. يتألف المبنى من كتلتين متوازيتين تتوسطهما قناة مائية ومساحات خضراء، وتتميّز واجهته بنوافذ مقوّسة وشرفات مضاءة.\n\nتتنوع الوحدات بين استوديوهات تبدأ من نحو ٧٠ مترًا مربعًا وشقق أوسع تصل إلى ١٧١ مترًا مربعًا، إضافةً إلى وحدات لوفت من دورين بمساحات بين ٨٣ و٩٥ مترًا مربعًا تقريبًا، ووحدات في الدور السابع. وتختلف الإطلالة من وحدة إلى أخرى بين لاندسكيب وشارع وواجهة أمامية وتراسات.\n\nيشترك السكان في ناديين صحيين للرجال والنساء يضمان قاعة تمارين ومسبحًا داخليًا، إضافةً إلى لاونج ومنطقة لعب للأطفال. وتشمل الخدمات التدبير الفندقي وشبكة إنترنت عالية السرعة وكاميرات مراقبة ودخولًا ذكيًا وتطبيقًا خاصًا بالسكان. وتتميّز الوحدات بأسقف عالية ونوافذ واسعة ومدخل بطابع فندقي."
+    },
+    "highlights": {
+      "en": [
+        "Hotel-style studios",
+        "Landscaped water channel",
+        "Men's and women's wellness clubs",
+        "Children's play area",
+        "Smart entry and resident app"
+      ],
+      "ar": [
+        "استوديوهات بطابع فندقي",
+        "قناة مائية ومساحات خضراء",
+        "ناديان صحيان للرجال والنساء",
+        "منطقة لعب للأطفال",
+        "دخول ذكي وتطبيق للسكان"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": "https://bona-real-estate.com/listings/the-river-residences-al-salamah-jeddah/brochure.pdf",
+    "project": {
+      "name": {
+        "en": "The River",
+        "ar": "ذا ريفر"
+      },
+      "developer": {
+        "en": "Sodasyat Real Estate",
+        "ar": "سداسيات العقارية"
+      }
+    },
+    "unit": null,
+    "map": {
+      "lat": 21.593996,
+      "lng": 39.152355
+    },
+    "mapPrecision": "district",
+    "listedAt": "2026-11-10",
+    "licence": null
+  },
+  {
     "id": "BONA-W004",
     "slug": "wharf-destination-villas-jeddah",
     "sourceRef": "WA-20260906-ACBA8B",
