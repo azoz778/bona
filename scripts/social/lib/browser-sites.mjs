@@ -83,13 +83,16 @@ export async function tiktokBlocker(s) {
   return blockPageProblem('TikTok', url, await pageInfo(s));
 }
 /**
- * LinkedIn's own security-check page, by its structure: its title, or its first lines (it has no
- * site navigation above it). A logged-in LinkedIn page starts with the navigation bar, so a post
- * or comment quoting "verify you're human" further down is never taken for it.
+ * LinkedIn's own security-check page, by its structure: its title, or text that BEGINS with its
+ * heading, after at most the "LinkedIn" wordmark line (the page has no site navigation above it).
+ * Any other page starts with something else (navigation, a header), so a post or comment quoting
+ * "verify you're human" — even in its second line — is never taken for it. The /checkpoint/ URL
+ * (linkedinBlocker) is the main signal; a miss here only turns "security check" into a page that
+ * did not load, before any click.
  */
-const LINKEDIN_CHECK = /quick security check|verify you.re human/i;
+const LINKEDIN_CHECK = /^(?:LinkedIn[ \t]*\n\s*)?(?:Let.s do a )?(?:quick security check|(?:Please )?verify you.re human)/i;
 export const linkedinCheckPage = ({ title = '', body = '' } = {}) =>
-  /security verification|security check/i.test(title) || LINKEDIN_CHECK.test(body.trimStart().slice(0, 200));
+  /security verification|security check/i.test(title) || LINKEDIN_CHECK.test(body.trimStart());
 export async function linkedinBlocker(s) {
   const url = String(await s.url());
   if (/linkedin\.com\/(login|uas\/login|authwall|signup)/.test(url)) return new BrowserError('not-logged-in', 'LinkedIn is not logged in');
