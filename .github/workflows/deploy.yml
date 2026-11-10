@@ -29,6 +29,14 @@ jobs:
         with:
           enablement: true
       - run: npm ci
+      # The unit suites, on the tree as committed (before the TK sync below edits listings.json).
+      # They hold guarantees the site build cannot see — a withdrawn listing (rules.mjs
+      # WITHDRAWN_ADVERTISING) stays off every social channel's candidate list and out of the
+      # WhatsApp intake — so a change that breaks one fails the deploy instead of shipping green.
+      - name: Unit tests (site scripts + social publishers)
+        run: npm test
+      - name: Unit tests (WhatsApp intake)
+        run: node --test services/intake/test/*.test.mjs
       - name: Sync listings from TK (non-fatal)
         run: node scripts/sync-listings.mjs || echo "sync skipped"
       # The sync edits listings.json in place (status, price, tour URL) without going

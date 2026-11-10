@@ -66,6 +66,25 @@ test('withdrawnAdvertising() catches the project however it comes back, and noth
   }
 });
 
+test('withdrawnNamedIn() finds a withdrawn name in free text (a brochure\'s text layer, metadata, file name, copy)', () => {
+  const named = (texts, extra) => rules.withdrawnNamedIn(texts, extra)?.id ?? null;
+  assert.equal(named(['Townhouses in Al-Murjan. ELVIRA — handover 2027.']), W009.id, 'any case, inside a page of text');
+  assert.equal(named(['مشروع ألفيرا في حي المرجان']), W009.id, 'Arabic, another alef form');
+  assert.equal(named(['elvira_murjan_brochure-v2.pdf']), W009.id, 'a file name: _ and - separate words');
+  assert.equal(named(['https://developer.example/projects/elvira/']), W009.id, 'a link');
+  assert.equal(named('Elvira'), W009.id, 'one string is accepted too');
+  assert.equal(named([null, 42, { en: 'Elvira' }, '', 'Seaside Townhouses']), null, 'only strings are read');
+  assert.equal(named(['Elviraton Tower, Al-Murjan', 'Private villa in Al-Murjan', 'فيلا خاصة في حي المرجان']), null, 'whole words only; the district is not the project');
+  assert.equal(named([]), null);
+  assert.equal(named(['Septima Residences'], rules.registerWithdrawals({ 'BONA-T7': { status: 'withdrawn', withdrawnAdvertising: { ...FLAG, names: ['Septima'] } } })), 'BONA-T7', 'a register flag\'s names count');
+  // No listing the intake holds today names it anywhere in its copy — the model-copy check (3b) has
+  // no false positive on the real catalogue.
+  const strings = (v) => (typeof v === 'string' ? [v] : v && typeof v === 'object' ? Object.values(v).flatMap(strings) : []);
+  for (const name of fs.readdirSync(path.join(ROOT, 'scripts/curate/inbox')).filter((n) => n.endsWith('.json') && n !== '_index.json' && n !== `${W009.slug}.json`)) {
+    assert.equal(named(strings(json(`scripts/curate/inbox/${name}`))), null, name);
+  }
+});
+
 test('isPublishable() refuses a withdrawn listing; the named withheld list is unchanged and there is no price cap', () => {
   assert.equal(rules.isPublishable(w009Listing()), false);
   assert.equal(rules.isPublishable({ id: 'BONA-W031', title: { en: 'Elvira Townhouses', ar: 'منازل' } }), false);

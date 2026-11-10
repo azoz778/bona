@@ -23,8 +23,10 @@ function save(file, listing) {
  * `{ error }` when the listing's advertising permission was withdrawn (rules.mjs, or a flag in this
  * clone's review register), else null. Used by every command that could put a listing back on the
  * site or write files under public/listings/<slug>/ again: `show`, `brochure`, `video` — and by
- * `hero` and `price`, which edit the photos and the price of a listing that is not advertised any
- * more (a withdrawn intake record is a tombstone that carries neither).
+ * every other command that edits the record of a listing that is not advertised any more: `hero`
+ * and `price` (a withdrawn intake record is a tombstone that carries neither), `available` /
+ * `reserved` / `sold` (they would overwrite its status "withdrawn" and reply "Marked available"),
+ * and `licence` / `wafi` on an intake record (they would add a licence block to the tombstone).
  * `hide` and `remove` stay allowed — taking a withdrawn listing further down is always fine.
  */
 function withdrawnRefusal(repo, listing) {
@@ -187,6 +189,8 @@ function applyLicence(repo, id, patch, clearKeys) {
   const want = String(id).toUpperCase();
   const found = findInbox(repo, want);
   if (found) {
+    const refused = withdrawnRefusal(repo, found.listing);
+    if (refused) return refused;
     const licence = nextLicence(found.listing.licence, patch, clearKeys);
     const problems = licenceProblems(licence);
     if (problems.length) return { error: problems.join('; ') };
@@ -218,6 +222,8 @@ export function setWafi(repo, id, { wafiNumber, clear = false } = {}) {
 export function setStatus(repo, id, status) {
   const found = findInbox(repo, id);
   if (!found) return null;
+  const refused = withdrawnRefusal(repo, found.listing);
+  if (refused) return refused;
   if (!['available', 'reserved', 'sold'].includes(status)) return { error: `unknown status "${status}"` };
   found.listing.status = status;
   return { listing: save(found.file, found.listing) };
