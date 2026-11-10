@@ -6,15 +6,14 @@ import Icon from '../Icon.astro';
 import site from '../../data/site.json';
 import about from '../../data/about.json';
 import { localePath, t, ui, waLink, type Locale } from '../../lib/i18n';
-import { editorialImage, ordered, listings, imageAlt } from '../../lib/listings';
+import { editorialImage, editorialListing, listings, imageAlt } from '../../lib/listings';
 import { breadcrumbJsonLd, orgJsonLd } from '../../lib/seo';
 interface Props { locale: Locale }
 const { locale } = Astro.props;
 const path = localePath(locale, '/about/');
 const wa = waLink(site.whatsapp.wa, t(ui.formGreeting, locale));
-const pool = ordered(listings).filter(l => l.images?.length);
-const img1 = editorialImage(2, 1), img1L = pool[2 % Math.max(1, pool.length)];
-const img2 = editorialImage(4, 3), img2L = pool[4 % Math.max(1, pool.length)];
+const img1 = editorialImage(2, 1), img1L = editorialListing(2);
+const img2 = editorialImage(4, 3), img2L = editorialListing(4);
 const markets = site.markets[locale];
 
 type L = { en: string; ar: string };
