@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { ksaNow } from './daily-pack.mjs';
 import { CAPTION_MAX_CHARS, CAPTION_MAX_HASHTAGS, countHashtags } from './graph.mjs';
+import { registerWithdrawals, withdrawnAdvertising } from '../../curate/rules.mjs';
 
 export const SITE = 'https://bona-real-estate.com';
 export const ACCOUNT = Object.freeze({ instagram: '17841427688957180', facebook: '1245646955305748' });
@@ -110,7 +111,20 @@ export function policyRules(policy = {}, now = new Date()) {
   if (!Number.isInteger(repeatDays) || repeatDays < REPEAT_DAYS_MIN || repeatDays > REPEAT_DAYS_MAX) throw new Error('Invalid repeatDays in the property policy');
   return Object.freeze({ licenceRequired: licence.requirement === 'required', countries: Object.freeze([...countries]), categories: Object.freeze([...categories]), renders, cards, satellite, reviewValidDays, repeatDays });
 }
+/**
+ * The withdrawal that keeps this listing off every channel, or null: its own review-register entry
+ * flagged `withdrawnAdvertising` (or status "withdrawn"), a permanent record in rules.mjs
+ * WITHDRAWN_ADVERTISING, or — given the whole register as `reviews` — another entry's flag that
+ * names it (a re-import under a fresh id). Instagram, Facebook, TikTok and LinkedIn all choose
+ * through chooseProperty()/eligibility(), so this is the one gate for every channel.
+ */
+export function withdrawalOf(p, review, reviews = null) {
+  if (review && (review.withdrawnAdvertising || review.status === 'withdrawn')) return { id: p?.id ?? null, ...(review.withdrawnAdvertising ?? {}) };
+  return withdrawnAdvertising(p, reviews ? registerWithdrawals(reviews) : []);
+}
 export function eligibility(p, review, advertiser, now = new Date(), rules = STRICT_RULES) {
+  // A withdrawn listing has one reason that matters, whatever else its review says.
+  if (withdrawalOf(p, review)) return ['marketing_permission_withdrawn'];
   const reasons = [];
   if (p?.status !== 'available') reasons.push('not_available');
   if (!rules.countries.includes(p?.location?.countryCode) || !rules.categories.includes(p?.category)) reasons.push('outside_policy_scope');
@@ -327,8 +341,9 @@ export function chooseProperty(listings, reviews, advertiser, events, channel, n
   const rejected = [];
   const last = id => lastPublished(events, channel, id);
   const recent = id => { const t = last(id); return t > 0 && (t > +now || riyadhDay(+now) - riyadhDay(t) < repeatDays); };
+  const withdrawn = registerWithdrawals(reviews);
   const candidates = listings.filter(p=>{
-    const why = eligibility(p,reviews[p.id],advertiser,now,rules);
+    const why = withdrawnAdvertising(p,withdrawn) ? ['marketing_permission_withdrawn'] : eligibility(p,reviews[p.id],advertiser,now,rules);
     if (recent(p.id)) why.push('recently_published');
     if (why.length) { rejected.push({id:p.id,reasons:why}); return false; }
     return true;

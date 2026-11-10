@@ -2,6 +2,8 @@
 // builder and the WhatsApp intake (services/intake/lib/{claude,listing}.mjs). One
 // definition, so a listing the intake accepts can never fail the build afterwards.
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { FAQ_PLACEHOLDERS, isDeliveryDate, isSheetDate, MAX_SHEET_AGE_DAYS, sheetAgeDays } from '../../src/lib/units-summary.mjs';
 
 /** Words the house voice never uses. */
@@ -118,12 +120,114 @@ export function sarAmount(price) {
  * public/listings/<slug>/ — paths GitHub Pages serves directly — so naming it here would
  * hide the page and leave the brochure downloadable. Send `remove BONA-W###` in the group
  * instead; that deletes the files. build.mjs refuses to build if the two are confused.
+ *
+ * A listing whose developer WITHDREW permission to advertise it is not withheld but withdrawn
+ * (WITHDRAWN_ADVERTISING below): a full takedown, off the site and off every social channel.
  */
 export const WITHHELD_LISTINGS = new Set(['BONA-002', 'BONA-028']);
 
-/** May this listing be published on the public site? */
-export function isPublishable(l) {
-  return !WITHHELD_LISTINGS.has(l?.id);
+// ---- withdrawn advertising -----------------------------------------------------------------
+// A developer can withdraw the permission to advertise a project. That is not a hidden page: it
+// is a FULL takedown — off src/data/listings.json and so every page, index, sitemap, feed and
+// llms.txt; its photos and brochure deleted from public/listings/<slug>/ (Pages serves those
+// paths directly); off every social channel's candidate list; and no route may bring it back —
+// not the deploy's TK sync, not a WhatsApp `show`/`brochure`/`video`, not the same brochure (or a
+// re-export of it) sent to the intake again, not the approve script.
+//
+// Two places say a listing is withdrawn, and every route reads both:
+//   1. WITHDRAWN_ADVERTISING here — permanent records, matched by id, slug, the brochure's SHA-256
+//      and the project's NAME, so a re-import under a fresh BONA-W id is still caught;
+//   2. a `withdrawnAdvertising` flag on the listing's marketing/daily/property-reviews.json entry
+//      (status "withdrawn", the review's photos removed): registerWithdrawals() /
+//      loadRegisterWithdrawals(). The flag may carry `slug`, `names` and `pdfSha256` too.
+// Putting one back needs an explicit owner decision that the developer's permission is renewed:
+// delete the record here AND the register flag, then re-review it like a new listing.
+
+/**
+ * Permanent advertising withdrawals. `names` are matched as whole words, ignoring case, Arabic
+ * alef forms and diacritics, in the title, the project name and the slug.
+ */
+export const WITHDRAWN_ADVERTISING = Object.freeze([
+  Object.freeze({
+    id: 'BONA-W009',
+    slug: 'elvira-murjan-townhouses-in-al-murjan',
+    pdfSha256: '7f6e4e4a4410e714fd9d717e1cad53dcd40fa4ddad0293de6a0f01cae5d403ea',
+    names: Object.freeze(['Elvira', 'إلفيرا']),
+    requestedBy: 'Tarek',
+    withdrawnAt: '2026-10-20T18:00:00.000Z',
+    reason: 'the developer does not permit advertising Elvira Murjan',
+  }),
+]);
+
+/** Where the review register lives, relative to the repository root. */
+export const REVIEW_REGISTER = 'marketing/daily/property-reviews.json';
+
+/** Lower-case words separated by single spaces, padded with one space each side for whole-word search. */
+const foldWords = (v) => ` ${String(v ?? '').normalize('NFKC').toLowerCase()
+  .replace(/[ً-ٰٟـ]/g, '')            // Arabic diacritics, dagger alef, tatweel
+  .replace(/[آأإٱ]/g, 'ا')         // آ أ إ ٱ → ا
+  .replace(/[^\p{L}\p{N}]+/gu, ' ').trim()} `;
+
+/**
+ * The withdrawal records flagged in a review register (`{ [id]: review }`). An entry counts when it
+ * carries a `withdrawnAdvertising` object or has status "withdrawn" — either one is enough.
+ */
+export function registerWithdrawals(register) {
+  if (!register || typeof register !== 'object') return [];
+  return Object.entries(register)
+    .filter(([, r]) => r && (r.withdrawnAdvertising || r.status === 'withdrawn'))
+    .map(([id, r]) => {
+      const f = r.withdrawnAdvertising && typeof r.withdrawnAdvertising === 'object' ? r.withdrawnAdvertising : {};
+      return Object.freeze({
+        id, slug: f.slug ?? null, pdfSha256: f.pdfSha256 ?? null, names: Object.freeze([...(f.names ?? [])]),
+        requestedBy: f.requestedBy ?? null, withdrawnAt: f.at ?? null, reason: f.reason ?? 'flagged in the review register',
+      });
+    });
+}
+
+/**
+ * registerWithdrawals() of the register in this repository checkout. No register file means no
+ * flags; a register that cannot be read or parsed THROWS — a takedown never fails open.
+ */
+export function loadRegisterWithdrawals(root) {
+  let raw;
+  try {
+    raw = fs.readFileSync(path.join(root, REVIEW_REGISTER), 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT') return [];
+    throw err;
+  }
+  return registerWithdrawals(JSON.parse(raw));
+}
+
+/**
+ * The withdrawal record this listing falls under, or null. Checks WITHDRAWN_ADVERTISING and any
+ * `extra` records (registerWithdrawals()). A listing matches by id, by slug, by the SHA-256 of the
+ * brochure it was published from (`_intake.pdfSha256`), or by a name in its title, project name
+ * or slug.
+ */
+export function withdrawnAdvertising(l, extra = []) {
+  if (!l || typeof l !== 'object') return null;
+  const id = String(l.id ?? '').toUpperCase();
+  const sha = l._intake?.pdfSha256 ?? null;
+  const words = [l.title?.en, l.title?.ar, l.project?.name?.en, l.project?.name?.ar, l.slug].map(foldWords);
+  return [...WITHDRAWN_ADVERTISING, ...extra].find((w) =>
+    (w.id && id === String(w.id).toUpperCase())
+    || (w.slug && l.slug === w.slug)
+    || (w.pdfSha256 && sha === w.pdfSha256)
+    || (w.names ?? []).some((name) => { const n = foldWords(name); return n.trim() !== '' && words.some((t) => t.includes(n)); })) ?? null;
+}
+
+/** One line, for a WhatsApp reply, a build error or a refused approval. */
+export const withdrawnNotice = (w) => `marketing permission withdrawn for ${w.id}${w.withdrawnAt ? ` on ${String(w.withdrawnAt).slice(0, 10)}` : ''} (${w.reason}) — not advertised again without a new explicit owner approval`;
+
+/**
+ * May this listing be published on the public site? Not when the owner withheld it, and not when
+ * its advertising was withdrawn — pass loadRegisterWithdrawals(ROOT) as `withdrawals` so the review
+ * register's flags count as well as the permanent records.
+ */
+export function isPublishable(l, withdrawals = []) {
+  return !WITHHELD_LISTINGS.has(l?.id) && !withdrawnAdvertising(l, withdrawals);
 }
 
 /**

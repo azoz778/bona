@@ -25,6 +25,7 @@ import { withLock } from './lib/lock.mjs';
 import { log } from './lib/log.mjs';
 import * as msg from './lib/messages.mjs';
 import { processPdf, RejectError, sha256File } from './lib/pipeline.mjs';
+import { withdrawnAdvertising, withdrawnNotice } from '../../scripts/curate/rules.mjs';
 import { assertCleanTree, gitCommitPush, gitPull, rebuild, resetTree, waitForLive } from './lib/publish.mjs';
 import { STOP_GRACE_MS, waitForIdle } from './lib/shutdown.mjs';
 import { createState } from './lib/state.mjs';
@@ -353,6 +354,16 @@ async function handlePdf({ group, record, doc, retryPath }) {
   // published the same brochure again. It answers with the live URL instead, once: closing
   // the job here takes it out of `pendingJobs()` for good.
   const sha = sha256File(pdfPath);
+  // A brochure whose advertising permission was withdrawn (rules.mjs WITHDRAWN_ADVERTISING) is
+  // answered as that, BEFORE the duplicate guard would call it "already published" with a URL that
+  // no longer exists. processPdf() repeats the check with the review register's flags as well.
+  const withdrawn = withdrawnAdvertising({ _intake: { pdfSha256: sha } });
+  if (withdrawn) {
+    state.finishJob(messageId, 'rejected');
+    log.warn('pdf.withdrawn', { id: messageId, listing: withdrawn.id });
+    await reply(jid, msg.rejected(withdrawnNotice(withdrawn)));
+    return;
+  }
   const duplicate = state.duplicateGuard({ sha, messageId, dryRun: caption.dryRun });
   if (duplicate) {
     state.finishJob(messageId, duplicate.outcome);

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LISTINGS } from './listings.source.mjs';
 import { ROOMS } from './rooms.mjs';
-import { INTAKE_ID_RE, isLandPublic, isPublishable, LAND_PRICE_CAP, photoNoteProblems, sarAmount, WITHHELD_LISTINGS } from './rules.mjs';
+import { INTAKE_ID_RE, isLandPublic, isPublishable, LAND_PRICE_CAP, loadRegisterWithdrawals, photoNoteProblems, sarAmount, withdrawnAdvertising, WITHDRAWN_ADVERTISING, WITHHELD_LISTINGS } from './rules.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const GALLERY = path.join(ROOT, 'scripts', 'tk-gallery-data.json');
@@ -123,12 +123,18 @@ const INBOX = path.join(ROOT, 'scripts', 'curate', 'inbox');
 const inbox = [];
 const inboxIdsSeen = new Set(); // every id on disk, hidden ones included — for the stale-withheld check
 let inboxHidden = 0;
+// Withdrawn advertising (rules.mjs): the permanent records plus the review register's
+// `withdrawnAdvertising` flags. A withdrawn intake listing is skipped WHATEVER its `hidden` says,
+// so an intake that predates the gate cannot `show` it back onto the site.
+const WITHDRAWN = loadRegisterWithdrawals(ROOT);
+const inboxWithdrawn = [];
 if (fs.existsSync(INBOX)) {
   for (const name of fs.readdirSync(INBOX).filter((n) => n.endsWith('.json') && n !== '_index.json').sort()) {
     const file = path.join(INBOX, name);
     let l;
     try { l = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { throw new Error(`inbox/${name}: invalid JSON (${e.message})`); }
     if (l.id) inboxIdsSeen.add(l.id);
+    if (withdrawnAdvertising(l, WITHDRAWN)) { inboxWithdrawn.push({ id: l.id ?? name, slug: l.slug }); continue; }
     if (l.hidden === true) { inboxHidden++; continue; }
     const { hidden, _intake, ...clean } = l;
     if (!KIND_OF[clean.type]) throw new Error(`inbox/${name}: no kind mapping for type "${clean.type}"`);
@@ -163,6 +169,16 @@ if (fs.existsSync(INBOX)) {
   }
 }
 if (inbox.length || inboxHidden) console.log(`WhatsApp intake: appended ${inbox.length} listing(s), ${inboxHidden} hidden`);
+if (inboxWithdrawn.length) console.log(`WhatsApp intake: left out ${inboxWithdrawn.map((l) => l.id).join(', ')} — advertising permission withdrawn`);
+
+// A withdrawal is a FULL takedown. Pages serves public/listings/<slug>/ directly, so the photos,
+// the brochure.pdf and any walkthrough clip of a withdrawn listing would stay fetchable by anyone
+// who kept a link — refuse to build until they are deleted in the same change.
+const withdrawnSlugs = new Set([...WITHDRAWN_ADVERTISING, ...WITHDRAWN, ...inboxWithdrawn].map((w) => w.slug).filter(Boolean));
+const stillPublic = [...withdrawnSlugs].filter((slug) => fs.existsSync(path.join(ROOT, 'public', 'listings', slug)));
+if (stillPublic.length) {
+  throw new Error(`withdrawn listing(s) still have public assets: ${stillPublic.map((slug) => `public/listings/${slug}/`).join(', ')} — a withdrawal is a full takedown: delete the directory (photos, brochure.pdf, videos) in the same change`);
+}
 
 // Two rules decide what reaches the public site, both applied to the COMBINED curated +
 // intake set so a listing can never slip in by route (the land rule filtered only the
@@ -171,15 +187,19 @@ if (inbox.length || inboxHidden) console.log(`WhatsApp intake: appended ${inbox.
 //   withheld — specific homes the owner has named (scripts/curate/rules.mjs). This replaced
 //              a SAR 10,000,000 house cap on 2026-09-08: the owner meant to take two homes
 //              down once, not to hide every expensive house a luxury brand publishes.
+//   withdrawn — listings whose advertising permission was withdrawn (rules.mjs, and the
+//              review register's flags) — a curated one is dropped here, an intake one above.
 const candidates = [...live, ...inbox];
 const overLandCap = candidates.filter((l) => !isLandPublic(l));
 if (overLandCap.length) {
   console.log(`Land cap: excluded ${overLandCap.length} plot(s) at/above SAR ${LAND_PRICE_CAP.toLocaleString('en-US')} or without a published price — ${overLandCap.map((l) => `${l.id ?? l.slug} (${sarAmount(l.price) === null ? 'no price' : `${Math.round(sarAmount(l.price)).toLocaleString('en-US')} SAR eq.`})`).join(', ')}`);
 }
-const withheld = candidates.filter((l) => !isPublishable(l));
-if (withheld.length) {
-  console.log(`Withheld by owner decision: ${withheld.map((l) => l.id).join(', ')}`);
+const withheld = candidates.filter((l) => !isPublishable(l, WITHDRAWN));
+const withdrawnHere = withheld.filter((l) => withdrawnAdvertising(l, WITHDRAWN));
+if (withheld.length > withdrawnHere.length) {
+  console.log(`Withheld by owner decision: ${withheld.filter((l) => !withdrawnHere.includes(l)).map((l) => l.id).join(', ')}`);
 }
+if (withdrawnHere.length) console.log(`Advertising permission withdrawn: ${withdrawnHere.map((l) => l.id).join(', ')}`);
 // Withholding a BONA-W### is only half a takedown. The intake committed that listing's photos
 // and brochure.pdf under public/listings/<slug>/, and GitHub Pages serves those paths directly,
 // so dropping it from listings.json leaves the pictures and the owner's full brochure fetchable
@@ -197,7 +217,7 @@ if (leaking.length) {
 const known = new Set([...out.map((l) => l.id), ...inboxIdsSeen]);
 const stale = [...WITHHELD_LISTINGS].filter((id) => !known.has(id));
 if (stale.length) console.warn(`Withheld list mentions ${stale.join(', ')}, which no longer exist — prune scripts/curate/rules.mjs`);
-const published = candidates.filter((l) => isPublishable(l) && isLandPublic(l));
+const published = candidates.filter((l) => isPublishable(l, WITHDRAWN) && isLandPublic(l));
 
 // ---- approximate map pins --------------------------------------------------------------
 // Most listings have no exact pin: TK's API carries no coordinates and most brochures carry

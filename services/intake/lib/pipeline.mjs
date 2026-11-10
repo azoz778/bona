@@ -2,10 +2,12 @@
 //
 // Gates, in order — each one can stop the run with a one-line reason the owner reads on
 // WhatsApp, and nothing is written to the repo until every gate has passed:
+//   0. withdrawn advertising (the brochure's bytes — before anything else, rules.mjs)
 //   1. size/pages           (cheap, local)
 //   2. classifyPdf          (default-deny keyword gate — invoices/IDs/statements never reach the AI)
 //   2b. photo-region crop  (only when the pages ARE the pictures — see lib/photo-regions.mjs)
 //   3. AI contract          (validateAiResult + copyProblems)  <- the real brochure/not-brochure gate
+//   3b. withdrawn advertising (the project's name, as the model read it off the brochure)
 //   4. TAQEEM cross-check   (a price is published only when the NUMBER is actually printed)
 //   5. checkListing         (mirror of scripts/curate/validate.mjs)
 //   5b. the Bona-branded brochure (rebrand_pdf.py) — best effort, never fatal
@@ -37,6 +39,7 @@ import { compositePages, cropPhotoRegions, modelFlagsComposites } from './photo-
 import { priceAppearsIn } from './price.mjs';
 import { pinFromLinks } from './geo.mjs';
 import { rebuild, resetTree } from './publish.mjs';
+import { loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
 
 export const sha256File = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
@@ -67,6 +70,15 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   const stat = fs.statSync(pdfPath);
   report.bytes = stat.size;
   report.sha256 = sha256File(pdfPath);
+
+  // --- 0. withdrawn advertising -------------------------------------------------
+  // A brochure whose project the developer withdrew from advertising (rules.mjs
+  // WITHDRAWN_ADVERTISING, or a flag in the clone's review register) is refused before a page of
+  // it is read: no extraction, no model call, nothing staged. The same bytes are caught here; a
+  // re-export is caught by name once the model has read it (3b).
+  const withdrawals = loadRegisterWithdrawals(cfg.repo);
+  const withdrawnPdf = withdrawnAdvertising({ _intake: { pdfSha256: report.sha256 } }, withdrawals);
+  if (withdrawnPdf) throw new RejectError(withdrawnNotice(withdrawnPdf), 'withdrawn');
 
   if (stat.size > cfg.maxPdfMb * 1024 * 1024) {
     throw new RejectError(`PDF is ${(stat.size / 1048576).toFixed(1)} MB — the limit is ${cfg.maxPdfMb} MB`, 'size');
@@ -191,6 +203,11 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   report.aiMeta = { ...aiMeta, attempt, model: cfg.claudeModel };
   log.info('intake.ai_done', { round: 1, attempt, costUsd: aiMeta.costUsd, durationMs: aiMeta.durationMs, reject: ai.reject, confidence: ai.confidence });
   if (ai.reject) throw new RejectError(ai.rejectReason || 'not a publishable property brochure', 'ai');
+  // --- 3b. withdrawn advertising, by name ----------------------------------------
+  // A re-exported brochure has new bytes but the same project: the title or project name the
+  // model read off it still matches. Refused in a dry run too — there is nothing to preview.
+  const withdrawnName = withdrawnAdvertising({ ...ai.listing, _intake: { pdfSha256: report.sha256 } }, withdrawals);
+  if (withdrawnName) throw new RejectError(withdrawnNotice(withdrawnName), 'withdrawn');
 
   // The rescue round. The geometry did not think this brochure needed cropping, but the
   // ranking step has just said in its own words that the candidates it refused are collages
@@ -208,6 +225,8 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       report.aiMeta = { ...aiMeta, attempt, model: cfg.claudeModel };
       log.info('intake.ai_done', { round: 2, attempt, costUsd: aiMeta.costUsd, durationMs: aiMeta.durationMs, reject: ai.reject, confidence: ai.confidence });
       if (ai.reject) throw new RejectError(ai.rejectReason || 'not a publishable property brochure', 'ai');
+      const withdrawnAgain = withdrawnAdvertising({ ...ai.listing, _intake: { pdfSha256: report.sha256 } }, withdrawals);
+      if (withdrawnAgain) throw new RejectError(withdrawnNotice(withdrawnAgain), 'withdrawn');
       picks = orderedPicks(ai.images, { maxImages: cfg.maxImages });
     }
   }
@@ -327,7 +346,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       slug, id, repo: cfg.repo, caption, site: cfg.site,
       meta: { ...meta, sourceRef, pdfSha256: report.sha256, model: cfg.claudeModel, warningCodes: report.warningCodes, map: mapPin },
     });
-    const problems = checkListing(report.listingPreview, { minImages: cfg.minImages, maxImages: cfg.maxImages });
+    const problems = checkListing(report.listingPreview, { minImages: cfg.minImages, maxImages: cfg.maxImages, withdrawals });
     if (problems.length) report.warnings.push(...problems);
     report.durationMs = Date.now() - started;
     report.ok = true;
@@ -350,7 +369,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     ai, images, slug, id, repo: cfg.repo, caption, site: cfg.site,
     meta: { ...meta, sourceRef, brochureUrl: null, pdfSha256: report.sha256, model: cfg.claudeModel, hidden: caption.hidden, warningCodes: report.warningCodes, map: mapPin },
   });
-  const problems = checkListing(listing, { minImages: cfg.minImages, maxImages: cfg.maxImages });
+  const problems = checkListing(listing, { minImages: cfg.minImages, maxImages: cfg.maxImages, withdrawals });
   if (problems.length) {
     fs.rmSync(stageDir, { recursive: true, force: true });   // nothing reached the repo
     throw new RejectError(problems[0], 'validate');

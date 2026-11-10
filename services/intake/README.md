@@ -193,6 +193,16 @@ Anything else in the group is ignored, silently.
 - **Real Arabic**, checked for Arabic script in every `ar` field.
 - **4–10 photos.** A PDF that yields fewer than four publishable photographs is rejected
   rather than published thin.
+- **A withdrawn project stays withdrawn.** When a developer withdraws the permission to
+  advertise a project (BONA-W009, Elvira Murjan, 2026-10-20), it is a full takedown, recorded in
+  `scripts/curate/rules.mjs` `WITHDRAWN_ADVERTISING` and as a `withdrawnAdvertising` flag on its
+  `marketing/daily/property-reviews.json` entry. The intake then refuses the same brochure (by
+  its SHA-256, before a page is read), a re-export of it (by the project's name, as soon as the
+  model has read it — a fresh id or slug does not help), and `show`, `brochure` and `video` on the
+  listing; `hide` and `remove` still work. `build.mjs` and `validate.mjs` leave it out and refuse
+  to build while its `public/listings/<slug>/` files exist, so even an intake that predates the
+  gate cannot put it back. Reinstating one needs an explicit owner decision that the developer's
+  permission is renewed: delete the rules.mjs record and the register flag by hand.
 - **Read-only on WhatsApp apart from replies.** The service never sets a webhook, websocket or
   RabbitMQ binding on the instance — another agent (Lisa) consumes its events and a webhook
   here would steal them.

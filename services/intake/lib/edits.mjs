@@ -3,7 +3,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { licenceProblems } from '../../../scripts/curate/rules.mjs';
+import { licenceProblems, loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
 import { brochureFileIn, brochureUrlFor, buildBrandedBrochure, findSourcePdf } from './brochure.mjs';
 import { WARNING_CODES, findInbox } from './listing.mjs';
 import { removeListingImages } from './images.mjs';
@@ -17,6 +17,17 @@ export function locate(repo, id) {
 function save(file, listing) {
   fs.writeFileSync(file, `${JSON.stringify(listing, null, 2)}\n`);
   return listing;
+}
+
+/**
+ * `{ error }` when the listing's advertising permission was withdrawn (rules.mjs, or a flag in this
+ * clone's review register), else null. Used by every command that could put a listing back on the
+ * site or write files under public/listings/<slug>/ again: `show`, `brochure`, `video`.
+ * `hide` and `remove` stay allowed — taking a withdrawn listing further down is always fine.
+ */
+function withdrawnRefusal(repo, listing) {
+  const w = withdrawnAdvertising(listing, loadRegisterWithdrawals(repo));
+  return w ? { error: withdrawnNotice(w) } : null;
 }
 
 export function removeListing(repo, id) {
@@ -209,6 +220,10 @@ export function setStatus(repo, id, status) {
 export function setHidden(repo, id, hidden) {
   const found = findInbox(repo, id);
   if (!found) return null;
+  if (!hidden) {
+    const refused = withdrawnRefusal(repo, found.listing);
+    if (refused) return refused;
+  }
   found.listing.hidden = Boolean(hidden);
   return { listing: save(found.file, found.listing) };
 }
@@ -258,6 +273,8 @@ export const videoSrc = (v) => (typeof v === 'string' ? v : v?.src ?? '');
 export function addVideo(repo, id, media) {
   const found = findInbox(repo, id);
   if (!found) return null;
+  const refused = withdrawnRefusal(repo, found.listing);
+  if (refused) return refused;
   const { listing } = found;
   const source = typeof media === 'string' ? { file: media } : (media || {});
   if (!source.file || !fs.existsSync(source.file)) return { error: `the prepared video for ${id} is not on disk any more — send the clip again.` };
@@ -300,6 +317,8 @@ export function addVideo(repo, id, media) {
 export async function rebuildBrochure(repo, id, { cfg, workDir } = {}) {
   const found = findInbox(repo, id);
   if (!found) return null;
+  const refused = withdrawnRefusal(repo, found.listing);
+  if (refused) return refused;
   const { listing } = found;
   const sha = listing?._intake?.pdfSha256;
   const source = findSourcePdf(cfg?.intakeDir, sha);
