@@ -22,7 +22,9 @@ function save(file, listing) {
 /**
  * `{ error }` when the listing's advertising permission was withdrawn (rules.mjs, or a flag in this
  * clone's review register), else null. Used by every command that could put a listing back on the
- * site or write files under public/listings/<slug>/ again: `show`, `brochure`, `video`.
+ * site or write files under public/listings/<slug>/ again: `show`, `brochure`, `video` — and by
+ * `hero` and `price`, which edit the photos and the price of a listing that is not advertised any
+ * more (a withdrawn intake record is a tombstone that carries neither).
  * `hide` and `remove` stay allowed — taking a withdrawn listing further down is always fine.
  */
 function withdrawnRefusal(repo, listing) {
@@ -45,6 +47,8 @@ export function removeListing(repo, id) {
 export function setHero(repo, id, n) {
   const found = findInbox(repo, id);
   if (!found) return null;
+  const refused = withdrawnRefusal(repo, found.listing);
+  if (refused) return refused;
   const images = found.listing.images;
   if (!Number.isInteger(n) || n < 1 || n > images.length) {
     return { error: `photo ${n} does not exist — this listing has ${images.length}` };
@@ -62,6 +66,8 @@ export function setHero(repo, id, n) {
 export function setPrice(repo, id, { amount, currency, onRequest }) {
   const found = findInbox(repo, id);
   if (!found) return null;
+  const refused = withdrawnRefusal(repo, found.listing);
+  if (refused) return refused;
   const p = found.listing.price;
   if (onRequest) { p.onRequest = true; p.amount = null; p.from = false; }
   else { p.onRequest = false; p.amount = amount; if (currency) p.currency = currency; }

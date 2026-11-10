@@ -19,18 +19,15 @@ import { fileURLToPath } from 'node:url';
 import * as rules from '../curate/rules.mjs';
 import { advertiserFingerprint, chooseProperty, eligibility, fingerprint, policyRules, reviewedCopy, sha256 } from '../social/lib/property-daily.mjs';
 import { chooseToday } from '../social/lib/browser-daily.mjs';
+import { w009Inbox, w009Listing } from './w009-fixture.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const W009 = { id: 'BONA-W009', slug: 'elvira-murjan-townhouses-in-al-murjan', pdfSha256: '7f6e4e4a4410e714fd9d717e1cad53dcd40fa4ddad0293de6a0f01cae5d403ea' };
 const REGISTER = 'marketing/daily/property-reviews.json';
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 const json = (p) => JSON.parse(read(p));
+/** The repository's own W009 inbox record: a tombstone since the takedown. The whole listing is ./w009-fixture.mjs. */
 const inboxW009 = () => json(`scripts/curate/inbox/${W009.slug}.json`);
-/** W009 as build.mjs published it, and as the live social catalogue still served it on 2026-11-10. */
-function w009Listing() {
-  const { hidden, _intake, ...l } = inboxW009();
-  return { ...l, kind: 'house', featured: false, licence: l.licence ?? null, map: null, mapPrecision: null };
-}
 const scratch = (prefix) => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
 const FLAG = { at: '2026-11-10T09:00:00.000Z', requestedBy: 'test', reason: 'developer withdrew permission (fixture)', channels: ['website', 'instagram', 'facebook', 'tiktok', 'linkedin'] };
 
@@ -114,6 +111,15 @@ test('the repository carries the takedown: data, files, register, llms.txt', () 
   assert.equal(fs.existsSync(path.join(ROOT, 'public/social/property', W009.id)), false, 'no derived social media');
   const inbox = inboxW009();
   assert.equal(inbox.hidden, true, 'the intake record stays, hidden, so the id and the brochure hash stay known');
+  // The repository is public: the record is a tombstone, not a second copy of the withdrawn listing.
+  assert.deepEqual(Object.keys(inbox).sort(), ['_intake', '_withdrawn', 'hidden', 'id', 'project', 'slug', 'status', 'title'], 'tombstone fields only');
+  assert.deepEqual(Object.keys(inbox._intake).sort(), ['pdfSha256', 'source']);
+  assert.equal(inbox.status, 'withdrawn');
+  assert.deepEqual(Object.keys(inbox.project), ['name'], 'the project\'s name, not its developer');
+  assert.equal(rules.withdrawnAdvertising(inbox)?.id, W009.id);
+  for (const field of ['description', 'highlights', 'images', 'brochureUrl', 'price', 'specs', 'location', 'videos']) {
+    assert.equal(inbox[field], undefined, `no ${field} left in the public repository`);
+  }
   assert.equal(json('scripts/curate/inbox/_index.json').listings[W009.slug], W009.id, 'the id is never reused');
 
   const r = json(REGISTER)[W009.id];
@@ -251,6 +257,50 @@ test('validate.mjs (the deploy\'s last gate) fails a withdrawn listing, its publ
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('validate.mjs fails the public files of an intake listing caught by name, or by a register flag with no slug', () => {
+  // Both are committed by hand without build.mjs (the deploy never runs it): listings.json never names
+  // them, so only the inbox record says which public/listings/<slug>/ belongs to a withdrawn listing.
+  const files = ['scripts/curate/validate.mjs', 'scripts/curate/rules.mjs', 'src/lib/units-summary.mjs', 'src/data/kind-map.json', 'src/data/listings.json', 'scripts/curate/inbox', REGISTER];
+  const dir = tree(files, { publicListings: false });
+  const inbox = (l) => fs.writeFileSync(path.join(dir, 'scripts/curate/inbox', `${l.slug}.json`), JSON.stringify(l, null, 2));
+  const assets = (slug) => {
+    fs.mkdirSync(path.join(dir, 'public/listings', slug), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'public/listings', slug, 'brochure.pdf'), '%PDF');
+  };
+  const validate = () => node(dir, 'scripts/curate/validate.mjs');
+  try {
+    // A re-export of the Elvira brochure imported under a fresh id, slug and hash: caught by its name.
+    const reimport = { ...w009Inbox(), id: 'BONA-W099', slug: 'elvira-townhouses-al-murjan', _intake: { source: 'whatsapp', pdfSha256: 'e'.repeat(64) } };
+    inbox(reimport);
+    const control = validate();
+    assert.equal(control.status, 0, `control: the inbox record alone, with no public files, passes: ${control.stderr}`);
+    assets(reimport.slug);
+    const named = validate();
+    assert.equal(named.status, 1, 'its photos or brochure under public/ fail the deploy');
+    assert.match(named.stderr, /BONA-W099: .*public\/listings\/elvira-townhouses-al-murjan\//);
+    fs.rmSync(path.join(dir, 'public'), { recursive: true, force: true });
+
+    // An ordinary intake listing, then withdrawn by a register flag that carries no slug.
+    const ordinary = { ...w009Inbox(), id: 'BONA-W098', slug: 'fixture-villa-al-rawdah', title: { en: 'Fixture Villa, Al Rawdah', ar: 'فيلا تجريبية، الروضة' }, project: null, _intake: { source: 'whatsapp', pdfSha256: 'd'.repeat(64) } };
+    inbox(ordinary);
+    assets(ordinary.slug);
+    const unflagged = validate();
+    assert.equal(unflagged.status, 0, `control: an ordinary listing keeps its files: ${unflagged.stderr}`);
+    assert.equal(FLAG.slug, undefined, 'the flag names no slug');
+    flagIn(dir, ordinary.id);
+    const flagged = validate();
+    assert.equal(flagged.status, 1, 'the flag alone takes its files off the deploy');
+    assert.match(flagged.stderr, /BONA-W098: .*public\/listings\/fixture-villa-al-rawdah\//);
+
+    // An inbox record that cannot be read could be a withdrawn one: the gate fails closed.
+    fs.rmSync(path.join(dir, 'public'), { recursive: true, force: true });
+    fs.writeFileSync(path.join(dir, 'scripts/curate/inbox/broken.json'), '{ not json');
+    const broken = validate();
+    assert.equal(broken.status, 1);
+    assert.match(broken.stderr, /inbox\/broken\.json/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 const BUILD_FILES = [
   'scripts/curate/build.mjs', 'scripts/curate/listings.source.mjs', 'scripts/curate/rooms.mjs', 'scripts/curate/rules.mjs',
   'scripts/curate/licences.json', 'scripts/curate/inbox', 'scripts/tk-gallery-data.json', 'scripts/tk-public-properties.snapshot.json',
@@ -263,7 +313,7 @@ test('build.mjs leaves W009 out even un-hidden, and refuses to build while its p
   const inboxFile = path.join(dir, 'scripts/curate/inbox', `${W009.slug}.json`);
   try {
     // `show BONA-W009` through an intake that predates the gate: the build itself still says no.
-    fs.writeFileSync(inboxFile, JSON.stringify({ ...inboxW009(), hidden: false }, null, 2));
+    fs.writeFileSync(inboxFile, JSON.stringify({ ...w009Inbox(), hidden: false }, null, 2));
     const shown = node(dir, 'scripts/curate/build.mjs');
     assert.equal(shown.status, 0, shown.stderr);
     assert.match(shown.stdout, /BONA-W009/, 'the build says what it withdrew');

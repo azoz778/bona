@@ -199,10 +199,14 @@ Anything else in the group is ignored, silently.
   `marketing/daily/property-reviews.json` entry. The intake then refuses the same brochure (by
   its SHA-256, before a page is read), a re-export of it (by the project's name, as soon as the
   model has read it — a fresh id or slug does not help), and `show`, `brochure` and `video` on the
-  listing; `hide` and `remove` still work. `build.mjs` and `validate.mjs` leave it out and refuse
-  to build while its `public/listings/<slug>/` files exist, so even an intake that predates the
-  gate cannot put it back. Reinstating one needs an explicit owner decision that the developer's
-  permission is renewed: delete the rules.mjs record and the register flag by hand.
+  listing (and `hero` and `price`, which have nothing left to edit); `hide` and `remove` still
+  work. Its inbox record is a **tombstone** (id, slug, names, brochure hash — no copy, photos or
+  brochure link: the repository is public). `build.mjs` and `validate.mjs` leave it out and refuse
+  to build while its `public/listings/<slug>/` files exist — `validate.mjs` also for a re-import
+  caught by name under a fresh slug — so even an intake that predates the gate cannot put it back.
+  Reinstating one needs an explicit owner decision that the developer's permission is renewed:
+  delete the rules.mjs record and the register flag by hand, `remove` the tombstone, then send the
+  brochure again (it gets a new id).
 - **Read-only on WhatsApp apart from replies.** The service never sets a webhook, websocket or
   RabbitMQ binding on the instance — another agent (Lisa) consumes its events and a webhook
   here would steal them.
@@ -285,6 +289,21 @@ loginctl enable-linger "$USER"        # keeps it running when no shell is logged
 systemctl --user status bona-intake
 journalctl --user -u bona-intake -f -o cat | jq .
 ```
+
+**After a merge that changes the intake.** The daemon rebases only its publishing clone
+(`~/bona-bot`) and loads its own code once, from `~/bona`, at start. Nothing updates `~/bona`
+by itself, so a change to `services/intake/` or to `scripts/curate/rules.mjs` (which the intake
+imports) is not live until both of these have run:
+
+```bash
+git -C ~/bona pull --ff-only                  # ~/bona must be clean apart from untracked files
+systemctl --user restart bona-intake
+journalctl --user -u bona-intake -n 30 -o cat # a clean start: a `start` line, no `fatal` or `config.*` error
+```
+
+Until then the old daemon keeps answering with the old rules. `build.mjs` and `validate.mjs` are
+the exception: `rebuild()` runs them from `~/bona-bot` after its rebase, so the site-side gates
+apply from the merge on.
 
 ## Configuration
 
