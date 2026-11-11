@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Daily TikTok / LinkedIn publisher, through the shared logged-in Windows Chrome (CDP :9222).
+// Daily TikTok / LinkedIn publisher, through Bona's own logged-in Windows Chrome (CDP :9230,
+// ops/systemd/bona-chrome.sh; the unit sets BONA_CDP_URL). Each live run reports to Uptime Kuma.
 //
 //   node scripts/social/browser-publish.mjs tiktok   [--dry-run] [--any-time] [--kind property|education] [--shots DIR] [--render-only]
 //   node scripts/social/browser-publish.mjs linkedin [--dry-run] ...
@@ -25,6 +26,7 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { ROOT, ksaNow } from './lib/daily-pack.mjs';
 import { dataDir } from './lib/ledger.mjs';
+import { heartbeatFor, pushHeartbeat } from './lib/heartbeat.mjs';
 import { fingerprint, eligibility, policyRules, PAD_FIT } from './lib/property-daily.mjs';
 import { catalogue, photos as downloadReviewedPhotos, MEDIA_FALLBACK_CANDIDATES } from './property-publish.mjs';
 import {
@@ -93,6 +95,8 @@ async function renderMedia(channel, choice, dir, deps, advertiser) {
 /** Drive the page. `commit(stage)` is called right before the irreversible click and must record intent. */
 async function drive(channel, s, winFiles, caption, { dry, shots, date, commit, sites, evidence }) {
   const c = CHANNELS[channel];
+  // Nothing created before this run can be its post (ids carry their creation time; 10 min of clock slack).
+  const notBefore = Date.now() - 10 * 60_000;
   const shot = async name => { try { return await s.screenshot(path.join(shots, `${date}-${channel}-${name}.png`)); } catch { return null; } };
   let before;
   try {
@@ -130,11 +134,12 @@ async function drive(channel, s, winFiles, caption, { dry, shots, date, commit, 
   try { signal = channel === 'tiktok' ? await sites.tiktokPost(s, { handle: c.handle, caption }) : await sites.linkedinPost(s, { companyId: c.companyId, pageName: c.pageName, caption }); }
   catch (e) { await shot('post-click-failed'); throw e; } // e.beforeClick is set by the adapter only when no click was dispatched
   await shot('after-post');
+  const report = { blocked: null };
   const url = channel === 'tiktok'
-    ? await sites.tiktokConfirm(s, c.handle, before, { caption, evidence })
-    : await sites.linkedinConfirm(s, c.companyId, before, { toast: signal, caption, evidence });
+    ? await sites.tiktokConfirm(s, c.handle, before, { caption, evidence, report, notBefore })
+    : await sites.linkedinConfirm(s, c.companyId, before, { toast: signal, caption, evidence, report, notBefore });
   await shot('confirm');
-  return { status: url ? 'published' : 'unconfirmed', url, signal };
+  return { status: url ? 'published' : 'unconfirmed', url, signal, blocked: url ? null : report.blocked };
 }
 
 export async function run(channel, opts = {}, deps = null) {
@@ -233,8 +238,8 @@ export async function run(channel, opts = {}, deps = null) {
         appendRecord(ledger, { ...base, status: 'published', url: result.url });
         log(`${channel}: published ${result.url}`);
       } else if (result.status === 'unconfirmed') {
-        appendRecord(ledger, { ...base, status: 'uncertain', signal: result.signal });
-        throw Object.assign(new Error(`${channel}: Post was clicked (${result.signal}) but the new post was not seen on the account; recorded uncertain, the channel is blocked until reconciled`), { uncertain: true });
+        appendRecord(ledger, { ...base, status: 'uncertain', signal: result.signal, ...(result.blocked ? { blocked: result.blocked } : {}) });
+        throw Object.assign(new Error(`${channel}: Post was clicked (${result.signal}) but the new post was not seen on the account${result.blocked ? ` (${result.blocked})` : ''}; recorded uncertain, the channel is blocked until reconciled`), { uncertain: true });
       } else log(`${channel}: ${result.status}${result.preClick ? ` (pre-click checks ${result.preClick}; baseline ${result.existing} existing)` : ''}${result.screenshots ? ` — ${result.screenshots.join(', ')}` : ''}`);
       if (dry && result.preClick && result.preClick !== 'passed') throw new Error(`${channel}: dry run filled the form but the pre-click checks ${result.preClick}`);
       return { ...result, choice: { kind: choice.kind, itemId, frameOrder: choice.frameOrder }, caption, files };
@@ -257,6 +262,24 @@ export async function run(channel, opts = {}, deps = null) {
   try { return await operation(); } finally { release(); cleanups.delete(release); }
 }
 
+/**
+ * What Uptime Kuma should hear about a live run: up on a publication; down at once while the channel
+ * is blocked by an uncertain post (both also for an --any-time run outside the window); otherwise,
+ * for a run started inside the channel's window and days, down when it was the day's last run — it
+ * ENDED at or after the last timer time (`lastRun`; a run still going then absorbs that timer's
+ * start) — and the day still has no post. `now` = run start, `end` = when it finished. The monitors'
+ * own interval catches a run that never happens.
+ */
+export function browserBeat(channel, { result = null, error = null, now = new Date(), end = now, dry = false } = {}) {
+  const c = CHANNELS[channel];
+  if (!c || dry) return null;
+  const status = result?.status ?? null, uncertain = Boolean(error?.uncertain);
+  if (uncertain || status === 'published' || status === 'already-published') return heartbeatFor({ status, error, now, uncertain });
+  if (!inWindow(channel, now).ok) return null;
+  const start = ksaNow(now), fin = ksaNow(end);
+  return heartbeatFor({ status, error, now, last: fin.date !== start.date || fin.time >= c.lastRun });
+}
+
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
   const { values: a, positionals } = parseArgs({ allowPositionals: true, options: {
@@ -272,13 +295,21 @@ if (isMain) {
     await runCleanups();
     process.exit(143);
   });
+  let result = null, error = null;
   try {
-    const r = await run(channel, { dry, anyTime: a['any-time'], kind: a.kind ?? null, shots: a.shots ?? null, renderOnly: a['render-only'], now });
-    if (dry) console.log(JSON.stringify({ status: r.status, choice: r.choice, files: r.files, screenshots: r.screenshots, caption: r.caption }, null, 1));
+    result = await run(channel, { dry, anyTime: a['any-time'], kind: a.kind ?? null, shots: a.shots ?? null, renderOnly: a['render-only'], now });
+    if (dry) console.log(JSON.stringify({ status: result.status, choice: result.choice, files: result.files, screenshots: result.screenshots, caption: result.caption }, null, 1));
   } catch (e) {
+    error = e;
     const data = dataDir(process.env);
     if (!dry && CHANNELS[channel]) appendRecord(path.join(data, channel, 'alerts.jsonl'), { channel, status: e.uncertain ? 'uncertain' : 'needs-attention', kind: e.kind ?? null, reason: redact(e) });
     console.error(`browser-publish ${channel ?? ''}: ${redact(e)}`);
     process.exitCode = e.uncertain ? 2 : 1;
+  }
+  // Uptime Kuma (owner's Telegram): logged, never changes the exit code. 2026-10-21 → 11-08 the channels
+  // sat blocked for 18 days with the alerts only in <channel>/alerts.jsonl.
+  if (!dry && CHANNELS[channel]) {
+    try { await pushHeartbeat(channel, browserBeat(channel, { result, error, now, end: new Date() }), { dataDir: dataDir(process.env) }); }
+    catch { console.error(`browser-publish ${channel}: heartbeat push failed`); }
   }
 }

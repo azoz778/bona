@@ -1,5 +1,5 @@
 [Unit]
-Description=Bona daily %i post through the logged-in browser (CDP :9222)
+Description=Bona daily %i post through Bona's own logged-in browser (CDP :9230)
 After=network-online.target
 Wants=network-online.target
 [Service]
@@ -10,6 +10,11 @@ Environment=NODE_ENV=production
 # npm's cache must be writable under ProtectHome=read-only (ensure-deps.sh).
 Environment=npm_config_cache=%h/bona-data/.npm
 Environment=PATH=%h/.local/bin:%h/.nvm/versions/node/v24.19.0/bin:/usr/local/bin:/usr/bin:/bin
+# Bona's own Windows Chrome (own profile, visible window started minimised), NOT the shared :9222 one
+# other bots browse with (2026-11-08: LinkedIn blocked that one, TikTok logged it out). The publisher
+# starts it with BONA_CHROME_ENSURE when it is not running; log in once with `bona-chrome.sh show`.
+Environment=BONA_CDP_URL=http://localhost:9230
+Environment=BONA_CHROME_ENSURE=%h/bona-publish/ops/systemd/bona-chrome.sh
 ExecStartPre=-/usr/bin/timeout 60 /usr/bin/env bash %h/bona-publish/ops/systemd/sync-publish-tree.sh %h/bona-publish
 ExecStartPre=/usr/bin/env bash %h/bona-publish/ops/systemd/guard-main.sh %h/bona-publish
 # sharp (rendering) is the one dependency; reinstalled only when package-lock.json changes.

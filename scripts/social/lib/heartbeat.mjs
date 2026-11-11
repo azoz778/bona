@@ -11,16 +11,22 @@ const PUBLISHED = new Set(['published', 'already-published']);
 export const continueToPack = result => result?.status === 'skipped-no-eligible-property';
 /**
  * What Uptime Kuma should hear about this run: { status: 'up'|'down', msg } or null (say nothing).
- * Up on any confirmed publication. Down only from 22:30 to 22:59 Riyadh (the last two timer runs)
- * when the day still has no post, so earlier retries stay quiet. Dry runs never report.
+ * Up on any confirmed publication. Down only from 22:30 to 22:59 Riyadh (the last two
+ * Instagram/Facebook timer runs) when the day still has no post, so earlier retries stay quiet.
+ * Callers that know better pass `last` (true: this was the day's last run → down; false → quiet)
+ * instead of the clock window, and `uncertain` (a post that may have gone out and blocks the channel
+ * until a human settles it) is down at any time: no later retry can clear it. Dry runs never report.
  */
-export function heartbeatFor({ status = null, error = null, now = new Date(), dry = false } = {}) {
+export function heartbeatFor({ status = null, error = null, now = new Date(), dry = false, uncertain = false, last = null } = {}) {
   if (dry) return null;
   if (PUBLISHED.has(status)) return { status: 'up', msg: status };
+  const why = error ? (error.message ?? String(error)) : (status ?? 'no publication');
+  const down = { status: 'down', msg: String(why).replace(/EAA[A-Za-z0-9]+/g, '[redacted]').slice(0, 200) };
+  if (uncertain) return down;
+  if (last !== null) return last ? down : null;
   const { time } = ksaNow(now);
   if (time < '22:30' || time >= '23:00') return null;
-  const why = error ? (error.message ?? String(error)) : (status ?? 'no publication');
-  return { status: 'down', msg: String(why).replace(/EAA[A-Za-z0-9]+/g, '[redacted]').slice(0, 200) };
+  return down;
 }
 export async function pushHeartbeat(channel, beat, { dataDir, fetchImpl = fetch, log = console.log } = {}) {
   if (!beat) return { sent: false, reason: 'nothing-to-say' };
