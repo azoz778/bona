@@ -139,7 +139,7 @@ async function drive(channel, s, winFiles, caption, { dry, shots, date, commit, 
     ? await sites.tiktokConfirm(s, c.handle, before, { caption, evidence, report, notBefore })
     : await sites.linkedinConfirm(s, c.companyId, before, { toast: signal, caption, evidence, report, notBefore });
   await shot('confirm');
-  return { status: url ? 'published' : 'unconfirmed', url, signal, blocked: url ? null : report.blocked };
+  return { status: url ? 'published' : 'unconfirmed', url, signal, blocked: url ? null : report.blocked, studio: url ? report.studio ?? null : null };
 }
 
 export async function run(channel, opts = {}, deps = null) {
@@ -235,8 +235,9 @@ export async function run(channel, opts = {}, deps = null) {
       const result = await deps.cdp.withTab('about:blank', s => drive(channel, s, winFiles, caption, { dry, shots, date, commit, sites: deps.sites, evidence }),
         { onOpen: t => { tab = t; }, onClose: () => { tab = null; } });
       if (result.status === 'published') {
-        appendRecord(ledger, { ...base, status: 'published', url: result.url });
-        log(`${channel}: published ${result.url}`);
+        // TikTok: the Studio row's status words (privacy, processing / under review …) as seen when it was bound.
+        appendRecord(ledger, { ...base, status: 'published', url: result.url, ...(result.studio ? { studio: result.studio } : {}) });
+        log(`${channel}: published ${result.url}${result.studio ? ` (Studio: ${result.studio})` : ''}`);
       } else if (result.status === 'unconfirmed') {
         appendRecord(ledger, { ...base, status: 'uncertain', signal: result.signal, ...(result.blocked ? { blocked: result.blocked } : {}) });
         throw Object.assign(new Error(`${channel}: Post was clicked (${result.signal}) but the new post was not seen on the account${result.blocked ? ` (${result.blocked})` : ''}; recorded uncertain, the channel is blocked until reconciled`), { uncertain: true });

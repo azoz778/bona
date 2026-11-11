@@ -23,7 +23,6 @@ export const SELECTORS = Object.freeze({
     // Popups the upload page throws up after an upload; only buttons inside these are ever dismissed.
     popupButton: '[role="dialog"] button, [class*="popover" i] button, [class*="tooltip" i] button',
     gridItem: '[data-e2e="user-post-item"]',
-    videoDesc: '[data-e2e="browse-video-desc"], [data-e2e="video-desc"]',
     captcha: '#captcha-verify-container, .captcha-verify-container, #captcha_container, [class*="captcha_verify"], [id*="secsdk-captcha"], iframe[src*="captcha"]',
   }),
   linkedin: Object.freeze({
@@ -294,20 +293,42 @@ export async function tiktokPost(s, { handle, caption, polls = 20, every = 1500 
   return postNow ? 'post-now-no-signal' : 'no-signal';
 }
 /**
- * One video's own page: the video's own description element only (never comments, never truncated
- * meta tags). A page that never shows the description is checked for a login / captcha / block
- * page, which is thrown so the confirmation records it under this page's URL.
+ * Every @handle video in TikTok Studio's content list, once each, with its row's text: the largest
+ * block around the video's link that holds no link to a video with another id (never <body>).
+ * Studio lists only the account's own posts and shows each one's FULL description in its row
+ * (2026-11-11: the 579-char BONA-014 caption, whole), so a row is that video's own text. Another
+ * link to the same id (an analytics link in the row) does not end the row; a link to another id,
+ * another account's video, or a /video/ link without an id does. When the same id is linked from
+ * several places, each block is a candidate of its own (a longer sidebar block never hides the row).
+ * A list with ONE video has no neighbour to end its row, so its row would be the whole app: its
+ * text is left empty and it never binds (a hand settle).
  */
-async function tiktokVideoText(s, handle, id) {
-  await s.navigate(`https://www.tiktok.com/@${handle}/video/${id}`);
-  if (!await s.waitFor(`document.querySelector(${q(SELECTORS.tiktok.videoDesc)})`, 15_000)) await stop(s, tiktokBlocker);
-  const own = `[...document.querySelectorAll(${q(SELECTORS.tiktok.videoDesc)})].find(e => !e.closest('[data-e2e*="comment"], [class*="Comment"]'))`;
-  // A long description is collapsed behind a "more" toggle next to it: expand it before reading.
-  await s.ev(`/*expand*/(() => { const d = ${own}; const box = d?.parentElement; if (!box) return 0; let n = 0;
-    for (const b of box.querySelectorAll('button, [role="button"], span')) if (/^(…|\\.\\.\\.)?\\s*(more|المزيد)$/i.test((b.innerText || '').trim())) { b.click(); n++; }
-    return n; })()`);
-  await sleep(600);
-  return s.ev(`(${own}?.innerText) || ''`);
+export const studioRowsJs = handle => `/*studio-rows*/(() => {
+  const own = a => (/@${handle}\\/video\\/(\\d{8,25})(?!\\d)/.exec(a.href || '') || [])[1];
+  const anyId = a => (/\\/video\\/(\\d{8,25})(?!\\d)/.exec(a.href || '') || [])[1];
+  const links = [...document.querySelectorAll('a[href*="/video/"]')];
+  const many = new Set(links.map(own).filter(Boolean)).size > 1;
+  const rows = [], seen = new Set();
+  for (const a of links) {
+    const key = own(a);
+    if (!key) continue;
+    let row = a;
+    while (many && row.parentElement && row.parentElement !== document.body
+      && [...row.parentElement.querySelectorAll('a[href*="/video/"]')].every(x => anyId(x) === key)) row = row.parentElement;
+    if (seen.has(row)) continue; // two links in one row
+    seen.add(row);
+    rows.push({ key, text: many ? row.innerText || '' : '' });
+  }
+  return rows;
+})()`;
+/**
+ * A bound Studio row's own short lines (duration, date, privacy, processing / under-review label,
+ * counts), for the ledger: "00:20 · Nov 11, 9:47 PM · Everyone · 0 · 0 · 0". Lines of the caption
+ * itself are left out, so a caption Studio shows over several lines cannot crowd the status out.
+ */
+export function studioRowStatus(text, caption = '') {
+  const own = new Set(String(caption).split('\n').map(norm).filter(Boolean));
+  return String(text ?? '').split('\n').map(norm).filter(l => l && l.length <= 40 && !own.has(l)).join(' · ').slice(0, 200);
 }
 /**
  * Why the confirmation could not see the post, per page: a page that refused (login, captcha, block
@@ -324,32 +345,41 @@ function trackRefusals(report) {
   };
 }
 /**
- * Poll the profile and Studio for a new video id whose own page shows the caption head. URL or null.
- * `report.blocked` is set to the reason when a page the confirmation needed was a login, captcha or
- * block page (2026-10-21: TikTok answered "Access denied / HTTP 403" right after a Post), so the
- * uncertain record and the alert say why the post could not be seen.
+ * Poll TikTok Studio's content list for a new video (not in the baseline, created no earlier than
+ * `notBefore`) whose row holds the full caption and the evidence (bindNewPost). URL or null.
+ * Only Studio is opened: on 2026-10-21 and 2026-11-11 every visit to the new video's own page
+ * answered HTTP 403 to the publisher's browser while the profile and Studio loaded, so a
+ * confirmation that needed that page never bound a post that was live. `report.blocked` is set to
+ * the reason when Studio itself is a login, captcha or block page (that round reads no rows), so the
+ * uncertain record and the alert say why the post could not be seen. One Post click makes one
+ * video: when Studio shows TWO OR MORE new videos created since the run started, something else
+ * posted too and no row's text can say which one is ours, so nothing is bound (`uncertain`).
+ * On a bind, `report.studio` holds the row's status words (privacy, processing / under review …),
+ * which go into the `published` record: the click made that video whatever its status, so the day is done.
  */
 export async function tiktokConfirm(s, handle, before, { caption = '', evidence = '', timeoutMs = 6 * 60_000, every = 20_000, settleMs = 2000, report = null, notBefore = null } = {}) {
-  const t0 = Date.now(), checked = new Map();
+  const t0 = Date.now(), url = URLS.tiktokContent;
   const refusals = trackRefusals(report);
+  const seen = new Set(before);
+  const fresh = key => !seen.has(key) && !(notBefore != null && (idTime(key) ?? Infinity) < notBefore);
   while (Date.now() - t0 < timeoutMs) {
-    for (const [url, settled] of [[URLS.tiktokProfile(handle), profileSettled], [URLS.tiktokContent, studioSettled]]) {
-      try {
-        await s.navigate(url);
-        if (!await s.waitFor(settled, 15_000)) {
-          const b = await tiktokBlocker(s).catch(() => null);
-          if (b) { refusals.set(url, b); continue; }
-        } else refusals.clear(url);
+    try {
+      await s.navigate(url);
+      let blocked = null;
+      if (await s.waitFor(studioSettled, 15_000)) refusals.clear(url);
+      else if ((blocked = await tiktokBlocker(s).catch(() => null))) refusals.set(url, blocked);
+      if (!blocked) {
         await sleep(settleMs);
-        for (const id of (await tiktokVideoIds(s, handle)).filter(x => !before.includes(x))) {
-          const page = `${URLS.tiktokProfile(handle)}/video/${id}`;
-          if (!checked.get(id)) checked.set(id, await tiktokVideoText(s, handle, id).then(t => { refusals.clear(page); return t; }, e => { refusals.set(page, e); return ''; }));
-          const key = bindNewPost([...checked].map(([key, text]) => ({ key, text })), before, { caption, evidence }, { notBefore });
-          if (key) return `https://www.tiktok.com/@${handle}/video/${key}`;
-          checked.delete(id); // not (yet) ours: a processing video may show its description on the next round
+        const rows = (await s.ev(studioRowsJs(handle))) ?? [];
+        const sub = { caption, evidence };
+        const key = new Set(rows.map(r => r.key).filter(fresh)).size > 1 ? null : bindNewPost(rows, before, sub, { notBefore });
+        if (key) {
+          const row = rows.find(r => r.key === key && bindNewPost([r], before, sub, { notBefore }) === key);
+          if (report) report.studio = studioRowStatus(row?.text, caption);
+          return `https://www.tiktok.com/@${handle}/video/${key}`;
         }
-      } catch (e) { refusals.set(url, e); /* otherwise the page is still loading; try again */ }
-    }
+      }
+    } catch (e) { refusals.set(url, e); /* otherwise the list is still loading; try again */ }
     await sleep(every);
   }
   return null;
