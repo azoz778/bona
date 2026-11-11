@@ -978,7 +978,7 @@ test('2026-11-08: Uptime Kuma hears up on a post, down at once when blocked, dow
   }
 });
 
-test('2026-11-08: the unit drives Bona\'s own Chrome (:9230), never the shared :9222 one, and that Chrome refuses web origins', () => {
+test('2026-11-08: the unit drives Bona\'s own Chrome (:9230), never the shared :9222 one, and its launcher passes no --remote-allow-origins', () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const unit = fs.readFileSync(path.join(here, '../../ops/systemd/bona-browser@.service'), 'utf8');
   assert.match(unit, /^Environment=BONA_CDP_URL=http:\/\/localhost:9230$/m);
@@ -1135,4 +1135,125 @@ test('R5 (Codex R3 P2): a short header plus a post quoting the phrase in the fir
   assert.equal((await at('LinkedIn\n\nLet’s do a quick security check'))?.kind, 'captcha', 'the wordmark, then the heading');
   assert.equal((await at('  Please verify you’re human'))?.kind, 'captcha', 'the page begins with it');
   assert.equal(SITES.linkedinCheckPage({ title: 'Security Verification | LinkedIn' }), true);
+});
+
+// ================================================================== round 6 (Claude R3 reviewers A/B/C, 2026-11-11)
+test('R6: LinkedIn\'s security check is matched by a title that BEGINS with "Security Verification"; a post page whose title quotes the phrase still binds', async () => {
+  assert.equal(SITES.linkedinCheckPage({ title: 'Bona | بونا on LinkedIn: A quick security check before you sign a lease' }), false);
+  assert.equal(SITES.linkedinCheckPage({ title: 'Security Verification | LinkedIn' }), true);
+  assert.equal(SITES.linkedinCheckPage({ title: '(3) Security Verification | LinkedIn' }), true, 'a notification count before it');
+  // The post element's selector never matches (slow page, or the URN inside a longer attribute), but the post IS on the page.
+  const caption = 'Villa BONA-A — a quick security check of the title deed comes with every viewing';
+  let cur = '';
+  const s = { navigate: async u => { cur = u; }, url: async () => cur, waitFor: async () => (cur.includes('/feed/update/') ? null : true),
+    ev: async e => (e.includes('document.title') ? { title: `Bona | بونا on LinkedIn: ${caption}`, body: 'Skip to main content' }
+      : e.includes('flatMap') ? [{ key: 'activity:1000000009', text: caption }] : null) };
+  const report = { blocked: null };
+  assert.equal(await SITES.linkedinConfirm(s, '145349037', [], { caption, evidence: 'BONA-A', report, timeoutMs: 30, every: 0, settleMs: 0 }), 'https://www.linkedin.com/feed/update/urn:li:activity:1000000009/');
+  assert.equal(report.blocked, null);
+});
+
+test('R6: LinkedIn\'s 999 "Request denied" is a refusal; Cloudflare\'s "used Cloudflare to restrict access" page is a block page', () => {
+  assert.equal(CDP.isRefusalStatus('999'), true);
+  assert.equal(SITES.blockPageProblem('LinkedIn', 'chrome-error://chromewebdata/', { body: 'This page isn’t working\nHTTP ERROR 999' })?.kind, 'blocked');
+  const cf = SITES.blockPageProblem('LinkedIn', 'https://www.linkedin.com/feed/', { title: 'Access denied | www.linkedin.com used Cloudflare to restrict access', body: 'Error 1020' });
+  assert.equal(cf?.kind, 'blocked');
+  assert.equal(SITES.blockPageProblem('LinkedIn', 'https://www.linkedin.com/feed/', { title: 'Bona | بونا: Posts | LinkedIn', body: 'a post: "www.linkedin.com used Cloudflare to restrict access"' }), null, 'quoted in a feed');
+});
+
+test('R6: the HTTP status is read from Chrome\'s own error page only, never from the page that was there before', async () => {
+  // The first reads still see the previous document (a feed quoting "HTTP ERROR 403"); then the error page commits with 500.
+  let reads = 0;
+  const WS = class {
+    constructor() { setTimeout(() => this.onopen?.()); }
+    send(raw) {
+      const d = JSON.parse(raw);
+      let result = {};
+      if (d.method === 'Page.navigate') result = { frameId: 'F', errorText: 'net::ERR_HTTP_RESPONSE_CODE_FAILURE' };
+      else if (d.method === 'Runtime.evaluate') {
+        const old = reads++ < 2;
+        const ctx = { location: { href: old ? 'https://www.linkedin.com/feed/' : 'chrome-error://chromewebdata/', protocol: old ? 'https:' : 'chrome-error:' },
+          document: { body: { innerText: old ? 'Post: if you see HTTP ERROR 403, call us' : 'This page isn’t working\nHTTP ERROR 500' } } };
+        result = { result: { value: vm.runInNewContext(d.params.expression, ctx) } };
+      }
+      setTimeout(() => this.onmessage({ data: JSON.stringify({ id: d.id, result }) }));
+    }
+    close() {}
+  };
+  const c = await connect({ webSocketDebuggerUrl: 'ws://fake/r6' }, { WebSocketImpl: WS });
+  await assert.rejects(c.navigate('https://www.linkedin.com/company/145349037/posts/'), e => e.kind === 'navigation' && /answered HTTP 500/.test(e.message));
+  c.close();
+});
+
+test('R6: a caption link is ASCII only — text glued to it is not swallowed into the link token', () => {
+  const caption = 'Villa BONA-A https://bona-real-estate.com/properties/x/·SAR8,000,000 end';
+  assert.deepEqual(SITES.captionLinks(caption), ['https://bona-real-estate.com/properties/x/', 'bona-real-estate.com/properties/x/']);
+  assert.equal(SITES.bindNewPost([{ key: 'k', text: 'Villa BONA-A https://lnkd.in/abc end' }], [], { caption, evidence: 'BONA-A' }, { shortLinks: true }), null, 'the price is not part of the link');
+  assert.equal(SITES.bindNewPost([{ key: 'k', text: caption.replace('https://bona-real-estate.com/properties/x/', 'https://lnkd.in/abc') }], [], { caption, evidence: 'BONA-A' }, { shortLinks: true }), 'k');
+  const ar = 'فيلا BONA-A https://bona-real-estate.com/p/xجدة';
+  assert.equal(SITES.bindNewPost([{ key: 'k', text: ar.replace('https://bona-real-estate.com/p/x', 'https://lnkd.in/abc') }], [], { caption: ar, evidence: 'BONA-A' }, { shortLinks: true }), 'k', 'Arabic glued after the link');
+});
+
+test('R6: bona-chrome.sh show opens only an https:// URL (never a Chrome switch), and refuses every character cmd.exe would mangle', () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const sh = path.join(here, '../../ops/systemd/bona-chrome.sh');
+  const env = { ...process.env, BONA_CHROME_PORT: '1', BONA_CHROME_CMD: '/bin/false', BONA_CHROME_PROFILE: 'C:\\nowhere' };
+  const bad = ['--remote-allow-origins=*', '--headless', 'http://www.linkedin.com/login', 'file:///C:/x', 'javascript:alert(1)',
+    ...['&', '^', '|', '<', '>', '"', '%'].map(c => `https://www.linkedin.com/login?a=1${c}b`)];
+  for (const url of bad) assert.equal(spawnSync('bash', [sh, 'show', url], { encoding: 'utf8', timeout: 10_000, env }).status, 2, url);
+});
+
+function kumaMock(monitors, notifications) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kuma-mock-'));
+  fs.mkdirSync(path.join(tmp, 'mod')); fs.mkdirSync(path.join(tmp, 'home', '.secrets'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'home', '.secrets', 'uptime-kuma.env'), 'KUMA_USER=u\nKUMA_PASSWORD=p\nKUMA_URL=https://kuma.example\n');
+  fs.writeFileSync(path.join(tmp, 'mod', 'uptime_kuma_api.py'), `
+import json, os
+LOG = os.environ["MOCK_LOG"]
+def log(*a):
+    with open(LOG, "a") as f: f.write(json.dumps(a) + "\\n")
+class MonitorType: PUSH = "push"
+class UptimeKumaApi:
+    def __init__(self, *a, **k): self.mon = json.loads(os.environ["MOCK_MONITORS"])
+    def login(self, *a): pass
+    def disconnect(self): log("disconnect")
+    def get_monitors(self): return self.mon
+    def get_notifications(self): log("get_notifications"); return json.loads(os.environ["MOCK_NOTIFICATIONS"])
+    def resume_monitor(self, i): log("resume", i)
+    def add_monitor(self, **k): log("add", k["name"], k["interval"], sorted(k["notificationIDList"])); m = {"id": 70 + len(self.mon), "name": k["name"], "active": False, "pushToken": "n" * 32, "interval": k["interval"]}; self.mon.append(m); return {"monitorID": m["id"]}
+    def get_monitor(self, i): return next(m for m in self.mon if m["id"] == i)
+`);
+  const run = (...args) => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const r = spawnSync('python3', ['-B', path.join(here, '../../ops/systemd/add-browser-monitors.py'), ...args], { encoding: 'utf8',
+      env: { ...process.env, PYTHONPATH: path.join(tmp, 'mod'), HOME: path.join(tmp, 'home'), BONA_DATA: path.join(tmp, 'data'), MOCK_LOG: path.join(tmp, 'log'),
+        MOCK_MONITORS: JSON.stringify(monitors), MOCK_NOTIFICATIONS: JSON.stringify(notifications) } });
+    const calls = fs.existsSync(path.join(tmp, 'log')) ? fs.readFileSync(path.join(tmp, 'log'), 'utf8').trim().split('\n').map(l => JSON.parse(l)) : [];
+    fs.rmSync(path.join(tmp, 'log'), { force: true });
+    return { r, calls, url: ch => path.join(tmp, 'data', 'daily', `heartbeat-${ch}.url`) };
+  };
+  return { run, done: () => fs.rmSync(tmp, { recursive: true, force: true }) };
+}
+test('R6: add-browser-monitors.py — existing monitors are resumed without any notification; new ones are created paused with it', (t) => {
+  if (spawnSync('python3', ['--version']).status !== 0) { t.skip('no python3 on this box (the script is run by hand with uv)'); return; }
+  const have = [{ id: 58, name: 'Bona daily post — tiktok', active: false, pushToken: 't'.repeat(32), interval: 93600 },
+    { id: 59, name: 'Bona daily post — linkedin', active: false, pushToken: 'l'.repeat(32), interval: 273600 }];
+  const a = kumaMock(have, []);
+  try {
+    const { r, calls, url } = a.run('--resume');
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(calls, [['resume', 58], ['resume', 59], ['disconnect']], 'no notification lookup when nothing is created');
+    for (const ch of ['tiktok', 'linkedin']) {
+      assert.equal(fs.statSync(url(ch)).mode & 0o777, 0o600, ch);
+      assert.match(fs.readFileSync(url(ch), 'utf8'), /^https:\/\/kuma\.example\/api\/push\/[a-z]{32}\n$/);
+    }
+    assert.doesNotMatch(r.stdout, /kuma\.example\/api\/push/, 'push URLs are never printed');
+  } finally { a.done(); }
+  const b = kumaMock([], [{ id: 7, name: 'Telegram — Hermes bot → owner' }]);
+  try {
+    const { r, calls } = b.run();
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(calls.filter(c => c[0] === 'add'), [['add', 'Bona daily post — tiktok', 93600, [7]], ['add', 'Bona daily post — linkedin', 273600, [7]]]);
+    assert.equal(calls.some(c => c[0] === 'resume'), false, 'created paused, not resumed without --resume');
+  } finally { b.done(); }
 });

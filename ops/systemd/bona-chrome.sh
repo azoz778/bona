@@ -29,6 +29,8 @@ launch() { "$CMD" /c start "" "$@" </dev/null >/dev/null 2>&1 & }
 
 if [ "${1:-}" = "show" ]; then
   url="${2:-https://www.tiktok.com/login}"
+  # Only a web page: anything else (a "--switch", file:, javascript:) would reach Chrome's command line.
+  case "$url" in https://*) ;; *) echo "bona-chrome: only an https:// URL can be shown" >&2; exit 2 ;; esac
   # The URL goes through cmd.exe's command line: & ^ | < > " split or redirect it and %…% expands
   # environment variables (even inside quotes), e.g. a ?next=%2Fcompany%2F… redirect.
   case "$url" in *'&'*|*'^'*|*'|'*|*'<'*|*'>'*|*'"'*|*'%'*) echo "bona-chrome: URL has characters cmd.exe would mangle (& ^ | < > \" %); open it from the window instead" >&2; exit 2 ;; esac

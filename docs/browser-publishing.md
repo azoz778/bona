@@ -167,14 +167,17 @@ both channels sat blocked for 18 days with the alerts only in `<channel>/alerts.
    checked the same way, because a block page with a body (Cloudflare on `/feed/update/…`, a TikTok
    captcha) loads without any navigation error. Block pages are recognised by their structure only:
    an empty-body HTTP error fails the navigation itself (`net::ERR_HTTP_RESPONSE_CODE_FAILURE`) and
-   Chrome's error page shows the status. On it, and on any `chrome-error://` page, HTTP 401/403/429
-   (or `ERR_BLOCKED_BY_RESPONSE`) is `blocked`; any other status (404, 410, an empty 500/503) is
-   "answered HTTP nnn" and a network error (`ERR_INTERNET_DISCONNECTED`, …) "did not load", both
-   `navigation` (one rule, `isRefusalStatus()` in `lib/cdp.mjs`). Cloudflare's page is matched by its
-   title, or by text that BEGINS with "Sorry, you have been blocked" and carries a "Cloudflare Ray
-   ID"; LinkedIn's security check by its `/checkpoint/` URL, its title ("Security Verification"),
-   or text that BEGINS with its heading (after at most the "LinkedIn" wordmark) — a post or comment quoting any of those
-   lines inside a feed is not a block page.
+   Chrome's error page shows the status (read only once that error page is the document, never from
+   the page before it). On it, and on any `chrome-error://` page, HTTP 401/403/429 or 999 (LinkedIn's
+   "Request denied"), or `ERR_BLOCKED_BY_RESPONSE`, is `blocked`; any other status (404, 410, an empty
+   500/503) is "answered HTTP nnn" and a network error (`ERR_INTERNET_DISCONNECTED`, …) "did not
+   load", both `navigation` (one rule, `isRefusalStatus()` in `lib/cdp.mjs`). Cloudflare's page is
+   matched by its title ("Attention Required! | Cloudflare", or "… used Cloudflare to restrict
+   access"), or by text that BEGINS with "Sorry, you have been blocked" and carries a "Cloudflare Ray
+   ID"; LinkedIn's security check by its `/checkpoint/` URL, a title that BEGINS with "Security
+   Verification", or text that BEGINS with its heading (after at most the "LinkedIn" wordmark) — a
+   post or comment quoting any of those lines inside a feed (or a post page whose title is the post's
+   text) is not a block page. A new post's own page is checked only when the post is not on it at all.
 
 Everything burned into the media (reel hook, subhook, lower third, CTA lines, card slides) goes
 through the same refusal as the caption: no `{{…}}` placeholder, never «تقييم مجاني». The reel's
@@ -263,7 +266,7 @@ alerts (exit 2) need the reconciliation above. A busy lock exits 75 from the uni
 | `not logged in` / no "Edit profile" | Bona's Chrome lost the session | log in again: `bona-chrome.sh show https://www.tiktok.com/login` (or the LinkedIn login). Before a click nothing was recorded and the next tick retries; if it is the `blocked` reason of an `uncertain` line (the session went during the confirmation), the channel stays blocked until that day is settled as above |
 | `captcha` / `verification` / `checkpoint` | the site wants a human check | solve it once in a `bona-chrome.sh show` window. Before a click nothing was recorded and the next tick retries; after one (it is the `blocked` reason of an `uncertain` line, e.g. a captcha on the new post's own page), also settle that day as above — the channel stays blocked until then |
 | `refused this browser` (`blocked`) | the site served its block page (TikTok "Access denied / HTTP 403", Cloudflare "Sorry, you have been blocked") | look in a `bona-chrome.sh show` window; if the site keeps refusing, stop the timers and tell the owner — do not retry in a loop. Before a click nothing was sent; after one, settle the `uncertain` day as above |
-| `did not load (Chrome error page: ERR_…)` / `answered HTTP nnn` (`navigation`: 404, 410, 5xx) | a network error on this PC, or the site failing | retries next tick; nothing was sent |
+| `Could not open <url>: net::ERR_…` / `Timed out loading <url>` / `did not load (Chrome error page: ERR_…)` / `answered HTTP nnn` (`navigation`: 404, 410, 5xx) | a network error on this PC, or the site failing | retries next tick; nothing was sent |
 | `not an admin of this Page` / `posts as "…", not the Page` | LinkedIn member lost Page admin, or the composer defaulted to the person | fix the role / actor; nothing was sent |
 | `Caption box does not hold the caption` | a popup stole focus mid-typing (retried 3×) or the editor changed | look at `failed-before-post.png`; adjust `lib/browser-sites.mjs` |
 | `upload-timeout` | slow upload / processing | retries next tick |
@@ -348,19 +351,29 @@ the next run, because each run syncs `~/bona-publish` to `origin/main`.
 **Rolling out a change to the units** (e.g. the 2026-11-08 move to Bona's own Chrome, which added
 `BONA_CDP_URL` / `BONA_CHROME_ENSURE`), in this order, after the merge:
 
-1. `bash ~/bona-publish/ops/systemd/install-browser.sh` (without `--enable` when the timers are
-   already on), then `systemctl --user cat bona-browser@.service | grep BONA_` must show
-   `BONA_CDP_URL=http://localhost:9230`.
+1. Bring the publish tree to the merge first — `install-browser.sh` installs from `~/bona-publish`
+   as it stands, and its guard compares it with the LOCAL `origin/main` ref without fetching:
+   `bash ~/bona-publish/ops/systemd/sync-publish-tree.sh ~/bona-publish` must end "now at" (or
+   "already at") `origin/main (<the merge commit>)`. Then `bash ~/bona-publish/ops/systemd/install-browser.sh`
+   (without `--enable` when the timers are already on); `systemctl --user cat bona-browser@.service | grep BONA_`
+   must show `BONA_CDP_URL=http://localhost:9230`.
 2. `bash ~/bona-publish/ops/systemd/bona-chrome.sh`, and a human logs in to both accounts in it
    (see "Log in" above: `bona-chrome.sh show https://www.linkedin.com/login`, the same for TikTok).
    A fresh profile is logged out, so a dry run before this fails with `not logged in`.
-3. Settle any `uncertain` day (above), then a dry run per channel and a look at its screenshots.
+3. Settle any `uncertain` day (above) OUTSIDE both windows (TikTok 21:30–23:30, LinkedIn Sun–Thu
+   09:00–12:00), or with both timers stopped (`systemctl --user stop bona-browser@tiktok.timer
+   bona-browser@linkedin.timer`): once the blocking line is settled, the next in-window tick posts
+   live. Then a dry run per channel and a look at its screenshots; start stopped timers again after.
 4. Resume the Kuma monitors (`add-browser-monitors.py --resume`).
 
-**Rollback:** revert the merge on `main` and push, then run `install-browser.sh` AGAIN. Without the
-second step the installed unit keeps the new `Environment=` lines, and the reverted code still obeys
-them: it drives `:9230` with `BONA_CHROME_ENSURE` pointing at the `bona-chrome.sh` the revert
-removed, so after the next reboot no run can start a Chrome.
+**Rollback:** revert the merge on `main` and push; then `sync-publish-tree.sh` (as in step 1, it must
+end at the revert commit) and `install-browser.sh` AGAIN, and `systemctl --user cat
+bona-browser@.service | grep BONA_` must print nothing. Without the reinstall the installed unit keeps
+the new `Environment=` lines, and the reverted code still obeys them: it drives `:9230` with
+`BONA_CHROME_ENSURE` pointing at the `bona-chrome.sh` the revert removed, so after the next reboot no
+run can start a Chrome. With it, the reverted code goes back to the shared `:9222` Chrome that
+LinkedIn blocks and TikTok logged out (see above) — so also STOP both timers
+(`systemctl --user stop bona-browser@tiktok.timer bona-browser@linkedin.timer`) until a fix lands again.
 
 Note: `marketing/daily/property-policy.json` still lists `channels: ["instagram","facebook"]`
 because `property-publish.mjs` checks that list exactly; the TikTok/LinkedIn scope is this

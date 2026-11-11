@@ -54,7 +54,7 @@ const PAGE_INFO = '({ title: document.title || "", body: (document.body?.innerTe
 async function pageInfo(s) { const p = await s.ev(PAGE_INFO); return { title: String(p?.title ?? ''), body: String(p?.body ?? '') }; }
 /**
  * A page that is not the site at all: Chrome's error page or Cloudflare's block page. On Chrome's
- * error page HTTP 401/403/429 (TikTok's "Access to www.tiktok.com was denied / HTTP ERROR 403",
+ * error page HTTP 401/403/429/999 (TikTok's "Access to www.tiktok.com was denied / HTTP ERROR 403",
  * 2026-10-21) or ERR_BLOCKED_BY_RESPONSE is a refusal (`blocked`); any other HTTP status (404, 410,
  * 500, 503) is "answered HTTP nnn" and a network error (ERR_INTERNET_DISCONNECTED, …) "did not
  * load", both only `navigation` (isRefusalStatus, the same rule as cdp.navigate). Cloudflare's
@@ -72,6 +72,7 @@ export function blockPageProblem(site, url, { title = '', body = '' } = {}) {
   // (a post or comment quoting those lines sits inside a feed, never at the top of the page).
   if (/^Attention Required! \| Cloudflare/.test(title) || (/^\s*Sorry, you have been blocked/.test(body) && /Cloudflare Ray ID/.test(body)))
     return new BrowserError('blocked', `${site} refused this browser (Cloudflare "Sorry, you have been blocked")`);
+  if (/ used Cloudflare to restrict access$/.test(title)) return new BrowserError('blocked', `${site} refused this browser (Cloudflare "Access denied": ${title})`);
   return null;
 }
 
@@ -92,7 +93,7 @@ export async function tiktokBlocker(s) {
  */
 const LINKEDIN_CHECK = /^(?:LinkedIn[ \t]*\n\s*)?(?:Let.s do a )?(?:quick security check|(?:Please )?verify you.re human)/i;
 export const linkedinCheckPage = ({ title = '', body = '' } = {}) =>
-  /security verification|security check/i.test(title) || LINKEDIN_CHECK.test(body.trimStart());
+  /^(?:\(\d+\+?\)\s*)?Security Verification\b/i.test(title) || LINKEDIN_CHECK.test(body.trimStart());
 export async function linkedinBlocker(s) {
   const url = String(await s.url());
   if (/linkedin\.com\/(login|uas\/login|authwall|signup)/.test(url)) return new BrowserError('not-logged-in', 'LinkedIn is not logged in');
@@ -117,7 +118,7 @@ const notClicked = e => Object.assign(e, { beforeClick: true });
  * from every input first.
  */
 export const LINK_TOKEN = '\uE000';
-const WEB_ADDRESS = /\bhttps?:\/\/\S+|\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?:\/\S*)?/gi;
+const WEB_ADDRESS = /\bhttps?:\/\/[\x21-\x7E]+|\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?:\/[\x21-\x7E]*)?/gi;
 const SHORT_LINK = /\b(?:https?:\/\/)?lnkd\.in\/[A-Za-z0-9_-]+/gi;
 /** Punctuation right after a link is the sentence's, not the link's (a linkifier, LinkedIn's shortener too, stops before it). */
 const LINK_TAIL = /[.,;:!?)\]}>'"\u2019\u201D\u00BB\u060C\u061B\u061F]+$/u;
@@ -383,7 +384,8 @@ async function linkedinFullText(s, key, { settleMs = 1500 } = {}) {
   const urn = `urn:li:${type}:${id}`;
   const sel = `[data-urn="${urn}"], [data-id="${urn}"], [data-activity-urn="${urn}"]`;
   await s.navigate(linkedinUrl(key));
-  if (!await s.waitFor(`!!document.querySelector(${q(sel)})`, 15_000)) await stop(s, linkedinBlocker);
+  // The exact selector can miss a post whose URN sits inside a longer attribute; the candidate scan still finds it.
+  if (!await s.waitFor(`!!document.querySelector(${q(sel)})`, 15_000) && !(await linkedinPostCandidates(s)).some(c => c.key === key)) await stop(s, linkedinBlocker);
   await s.ev(`/*expand*/(() => { const e = document.querySelector(${q(sel)}); if (!e) return 0; let n = 0;
     for (const b of e.querySelectorAll('button, [role="button"]')) if (/^(…|\\.\\.\\.)?\\s*(see more|more|المزيد)$/i.test((b.innerText || '').trim()) && !b.closest('.comments-comments-list')) { b.click(); n++; }
     return n; })()`);
