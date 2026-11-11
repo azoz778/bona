@@ -297,7 +297,6 @@ const composer = (actor = { name: 'Bona | بونا', asset: 'A1' }) => expr => {
 const isActorRead = e => e.includes('const linkedinActorProblem');
 const isIds = e => e.includes('matchAll(/@');
 const isAccount = e => e.includes('/passport/web/account/info/');
-const isVideoText = e => e.includes('browse-video-desc') && e.includes('closest');
 
 test('fix 1: a new post counts only when its own text holds the full caption and the evidence', () => {
   const caption = 'فيلا بشاطئ خاص، درة العروس\nدرة العروس، جدة\n\nBONA-001\n\n#بونا #جدة';
@@ -311,9 +310,10 @@ test('fix 1: a new post counts only when its own text holds the full caption and
 });
 test('fix 1: TikTok confirm rejects an unrelated new video id; accepts one whose own description is the caption', async () => {
   const caption = 'فيلا بشاطئ خاص\nBONA-001 more\n#بونا';
-  const other = fakeSession({ ev: e => isIds(e) ? ['111'] : isVideoText(e) ? 'somebody else' : null });
+  const isRows = e => e.includes('/*studio-rows*/');
+  const other = fakeSession({ ev: e => isRows(e) ? [{ key: '111', text: 'somebody else' }] : null });
   assert.equal(await tiktokConfirm(other, 'bonarealestatesa', [], { caption, evidence: 'BONA-001', timeoutMs: 30, every: 0, settleMs: 0 }), null);
-  const ours = fakeSession({ ev: e => isIds(e) ? ['111', '222'] : isVideoText(e) ? 'فيلا بشاطئ خاص BONA-001 more #بونا' : null });
+  const ours = fakeSession({ ev: e => isRows(e) ? [{ key: '111', text: 'an older post' }, { key: '222', text: 'فيلا بشاطئ خاص BONA-001 more #بونا' }] : null });
   assert.equal(await tiktokConfirm(ours, 'bonarealestatesa', ['111'], { caption, evidence: 'BONA-001', timeoutMs: 30, every: 0, settleMs: 0 }), 'https://www.tiktok.com/@bonarealestatesa/video/222');
 });
 test('fix 1: the TikTok baseline comes from the settled profile grid AND Studio /content', async () => {
@@ -680,7 +680,7 @@ test('round 3 fix 3: LinkedIn — company record first, then actor read and butt
   assert.deepEqual(s.log.clicks, ['clickAt 12,23'], 'clicked at the button the same evaluation measured');
 });
 
-test('round 3 fix 4: long captions are read in full — LinkedIn from the post\'s own page with "see more" expanded, TikTok with "more" expanded', async () => {
+test('round 3 fix 4: long captions are read in full — LinkedIn from the post\'s own page with "see more" expanded, TikTok from Studio\'s full row (since 2026-11-11)', async () => {
   const caption = 'Villa BONA-A\n' + 'Long line of the property description. '.repeat(12) + '\n#BonaRealEstate';
   const full = caption.replace(/\n/g, ' '), clamped = full.slice(0, 120) + '…see more';
   let expanded = false;
@@ -690,13 +690,11 @@ test('round 3 fix 4: long captions are read in full — LinkedIn from the post\'
     return null; } });
   assert.equal(await linkedinConfirm(li, '145349037', [], { caption, evidence: 'BONA-A', timeoutMs: 30, every: 0, settleMs: 0 }), 'https://www.linkedin.com/feed/update/urn:li:activity:4000000001/');
   assert.ok(li.log.navs.includes('https://www.linkedin.com/feed/update/urn:li:activity:4000000001/'));
-  let ttExpanded = false;
-  const tt = fakeSession({ ev: e => {
-    if (e.startsWith('/*expand*/')) { ttExpanded = true; return 1; }
-    if (isIds(e)) return ['555'];
-    if (isVideoText(e)) return ttExpanded ? full : full.slice(0, 90) + '… more';
-    return null; } });
+  // TikTok (since 2026-11-11): Studio's list row shows the whole description; a shortened one never binds.
+  const tt = fakeSession({ ev: e => (e.includes('/*studio-rows*/') ? [{ key: '555', text: `00:20\n${full}\nNov 11, 9:47 PM` }] : null) });
   assert.equal(await tiktokConfirm(tt, 'bonarealestatesa', [], { caption, evidence: 'BONA-A', timeoutMs: 30, every: 0, settleMs: 0 }), 'https://www.tiktok.com/@bonarealestatesa/video/555');
+  const ttCut = fakeSession({ ev: e => (e.includes('/*studio-rows*/') ? [{ key: '555', text: full.slice(0, 90) + '… more' }] : null) });
+  assert.equal(await tiktokConfirm(ttCut, 'bonarealestatesa', [], { caption, evidence: 'BONA-A', timeoutMs: 30, every: 0, settleMs: 0 }), null);
   // Not loosened: a clamped text alone never binds.
   assert.equal(SITES.bindNewPost([{ key: 'k', text: clamped }], [], { caption, evidence: 'BONA-A' }), null);
 });
@@ -894,13 +892,14 @@ test('2026-11-08: TikTok\'s empty-body 403 fails the navigation itself; it is re
   const s1 = { ...pageFake({ url: 'https://www.tiktok.com/@bonarealestatesa' }), navigate: async () => { throw refused(); } };
   assert.equal(await SITES.tiktokConfirm(s1, 'bonarealestatesa', [], { caption: 'x BONA-A', evidence: 'BONA-A', report: r1, timeoutMs: 30, every: 0, settleMs: 0 }), null);
   assert.match(r1.blocked, /refused this browser/);
-  // The lists load and show a new id, but the video's own page refuses.
-  const r2 = { blocked: null };
-  const s2 = { ...pageFake({ url: 'https://www.tiktok.com/@bonarealestatesa' }),
-    navigate: async u => { if (u.includes('/video/')) throw refused(); },
-    ev: async e => (isIds(e) ? ['555'] : e.includes('captcha') ? false : e.includes('document.title') ? { title: '', body: '' } : null) };
+  // Since 2026-11-11 a video's own page (which refused us) is never opened: a new id whose row lacks the caption is just not ours.
+  const r2 = { blocked: null }, navs2 = [];
+  const s2 = { ...pageFake({ url: SITES.URLS.tiktokContent }),
+    navigate: async u => { navs2.push(u); if (u.includes('/video/')) throw refused(); },
+    ev: async e => (e.includes('/*studio-rows*/') ? [{ key: '555', text: 'another post' }] : e.includes('captcha') ? false : e.includes('document.title') ? { title: '', body: '' } : null) };
   assert.equal(await SITES.tiktokConfirm(s2, 'bonarealestatesa', [], { caption: 'x BONA-A', evidence: 'BONA-A', report: r2, timeoutMs: 30, every: 0, settleMs: 0 }), null);
-  assert.match(r2.blocked, /refused this browser/);
+  assert.equal(r2.blocked, null);
+  assert.ok(navs2.length > 0 && !navs2.some(u => u.includes('/video/')), 'no video page is opened');
   // LinkedIn: a refused list page is reported the same way.
   const r3 = { blocked: null };
   const s3 = { ...pageFake({ url: 'https://www.linkedin.com/company/145349037/posts/' }), navigate: async () => { throw Object.assign(new Error('www.linkedin.com answered with an HTTP error'), { kind: 'blocked' }); } };
@@ -1021,7 +1020,7 @@ test('R4 item 1: only 401/403/429 on Chrome\'s error page is a refusal; any othe
   assert.deepEqual(['401', '403', '404', '429', '500', '503', null].map(CDP.isRefusalStatus), [true, true, false, true, false, false, false]);
 });
 
-test('R4 item 2: a post\'s own page that serves a block page WITH a body is checked and reported (LinkedIn Cloudflare, TikTok captcha)', async () => {
+test('R4 item 2: a post\'s own page that serves a block page WITH a body is checked and reported (LinkedIn Cloudflare); TikTok: Studio\'s own captcha (since 2026-11-11 the only page read)', async () => {
   const CF = { title: 'Attention Required! | Cloudflare', body: 'Sorry, you have been blocked\nYou are unable to access linkedin.com\nCloudflare Ray ID: a571a1df3a0b809b' };
   let cur = '';
   const li = { navigate: async u => { cur = u; }, url: async () => cur,
@@ -1031,11 +1030,11 @@ test('R4 item 2: a post\'s own page that serves a block page WITH a body is chec
   const r1 = { blocked: null };
   assert.equal(await SITES.linkedinConfirm(li, '145349037', [], { caption: 'Villa BONA-A', evidence: 'BONA-A', report: r1, timeoutMs: 30, every: 0, settleMs: 0 }), null);
   assert.match(r1.blocked ?? '', /LinkedIn refused this browser \(Cloudflare/, 'the refused post page is the reason');
-  // TikTok: the lists load and show a new id; the video page loads TikTok's captcha instead of the video.
+  // TikTok (since 2026-11-11 only Studio's list is read): Studio loads TikTok's captcha instead of the list.
   let tcur = '';
   const tt = { navigate: async u => { tcur = u; }, url: async () => tcur,
-    waitFor: async () => (tcur.includes('/video/') ? null : true),
-    ev: async e => (isIds(e) ? ['555'] : e.includes('captcha_verify') ? tcur.includes('/video/') : e.includes('document.title') ? { title: '', body: '' } : isVideoText(e) ? '' : null) };
+    waitFor: async () => null,
+    ev: async e => (e.includes('/*studio-rows*/') ? [] : e.includes('captcha_verify') ? tcur.includes('tiktokstudio') : e.includes('document.title') ? { title: '', body: '' } : null) };
   const r2 = { blocked: null };
   assert.equal(await SITES.tiktokConfirm(tt, 'bonarealestatesa', [], { caption: 'x BONA-A', evidence: 'BONA-A', report: r2, timeoutMs: 30, every: 0, settleMs: 0 }), null);
   assert.match(r2.blocked ?? '', /captcha/i);
@@ -1061,7 +1060,7 @@ test('R4 item 3: lnkd.in short links are a link token on LinkedIn only — TikTo
     ev: async e => (e.includes('flatMap') ? [{ key: 'activity:1000000009', text: LI_1021_LIVE }] : null) };
   assert.equal(await SITES.linkedinConfirm(liS, '145349037', [], { ...sub, timeoutMs: 30, every: 0, settleMs: 0 }), 'https://www.linkedin.com/feed/update/urn:li:activity:1000000009/');
   const ttS = { navigate: async () => {}, url: async () => 'https://www.tiktok.com/x', waitFor: async () => true,
-    ev: async e => (isIds(e) ? ['555'] : isVideoText(e) ? LI_1021_LIVE : null) };
+    ev: async e => (e.includes('/*studio-rows*/') ? [{ key: '555', text: LI_1021_LIVE }] : null) };
   assert.equal(await SITES.tiktokConfirm(ttS, 'bonarealestatesa', [], { ...sub, timeoutMs: 30, every: 0, settleMs: 0 }), null);
 });
 
@@ -1309,4 +1308,87 @@ test('2026-11-11: a caption-box mismatch says WHERE the held text differs, so a 
     && /want "BonaRealEstate #AlRawdah"/.test(e.message));
   assert.throws(() => checkCaptionHeld(want.split('\n').slice(1).join('\n'), want), e => /first difference at char 0/.test(e.message) && e.message.includes('نوبال'), 'a dropped first line');
   assert.throws(() => checkCaptionHeld(want.slice(0, -9), want), e => /held text ends early|first difference at char/.test(e.message), 'a cut-off end');
+});
+
+// 2026-11-11 21:45 live run: Post went through (BONA-014, video 7706987328367119636, Studio "Nov 11, 9:47 PM, Everyone"),
+// but every visit to the video's own page answered HTTP 403 (the profile and Studio loaded each round, Chrome history),
+// so the run recorded `uncertain` — the 10-21 case again, now on Bona's own Chrome. Studio's list shows each video's
+// FULL description next to its id, so the confirmation binds from there and never opens a public page.
+const TT_1111_CAPTION = "نوبال 5، الروضة\nالروضة، جدة · للبيع\n\n3 غرف نوم · المساحة 307 م² · 1,800,000 ريال\n\nتبحث عن منزل بهذه المواصفات؟ راسل بونا بالرقم BONA-014 لمعرفة التوفر وترتيب معاينة.\nhttps://bona-real-estate.com/properties/nobal-five-al-rawdah/\n\nالأسعار المعروضة هي الأسعار المطلوبة وقابلة للتغيير. تُؤكَّد التفاصيل والحالة والخدمات عند المعاينة.\nالمعلن: عبدالعزيز زيدان · فال 1100313556 · +966593296933\n\nNOBAL 5, Al Rawdah · Al Rawdah, Jeddah · For sale Message Bona with BONA-014.\n\n#عقارات_جدة #جدة #بونا #BonaRealEstate #JeddahRealEstate #شقق_جدة #شقق_للبيع #JeddahApartments #الروضة #AlRawdah";
+const TT_1111_ROW = `00:20\n${TT_1111_CAPTION.replace(/\n+/g, ' ')}\nNov 11, 9:47 PM\nEveryone\n0\n0\n0`;
+const TT_1021_ROW = '00:20\nفيلا بشاطئ خاص، درة العروس درة العروس، جدة · للبيع BONA-001 #بونا\nOct 21, 9:46 PM\nEveryone\n105\n1\n0';
+const isRows = e => e.includes('/*studio-rows*/');
+/** A tiny DOM: each node has its own text, optional href, children; innerText = own text + children's, one per line. */
+function miniDom(tree) {
+  const mk = ([text, href, kids = []]) => {
+    const e = { text, href, kids: kids.map(mk), parentElement: null,
+      get innerText() { return [e.text, ...e.kids.map(k => k.innerText)].filter(Boolean).join('\n'); },
+      querySelectorAll(sel) {
+        assert.equal(sel, 'a[href*="/video/"]');
+        const out = []; const walk = n => { for (const k of n.kids) { if (k.href && k.href.includes('/video/')) out.push(k); walk(k); } }; walk(e); return out;
+      } };
+    for (const k of e.kids) k.parentElement = e;
+    return e;
+  };
+  const body = mk(tree);
+  return { body, querySelectorAll: sel => body.querySelectorAll(sel) };
+}
+const V = id => `https://www.tiktok.com/@bonarealestatesa/video/${id}`;
+
+test('2026-11-11: TikTok confirm reads only Studio\'s list — never the public profile or a video\'s own page (both refuse this browser)', async () => {
+  const s = fakeSession({ ev: e => (isRows(e) ? [{ key: '7706987328367119636', text: TT_1111_ROW }, { key: '7699194501109271829', text: TT_1021_ROW }] : null) });
+  const url = await SITES.tiktokConfirm(s, 'bonarealestatesa', ['7699194501109271829'],
+    { caption: TT_1111_CAPTION, evidence: 'BONA-014', notBefore: Date.parse('2026-11-11T18:45:01Z'), timeoutMs: 30, every: 0, settleMs: 0 });
+  assert.equal(url, V('7706987328367119636'));
+  assert.ok(s.log.navs.length > 0 && s.log.navs.every(u => u === SITES.URLS.tiktokContent), `only Studio /content is opened: ${s.log.navs}`);
+});
+
+test('2026-11-11: a Studio row binds only when the id is new, created after the run started, and its row holds the full caption + listing id', () => {
+  const rows = [{ key: '7706987328367119636', text: TT_1111_ROW }, { key: '7699194501109271829', text: TT_1021_ROW }];
+  const sub = { caption: TT_1111_CAPTION, evidence: 'BONA-014' };
+  const before = ['7699194501109271829'];
+  assert.equal(SITES.idTime('7706987328367119636'), Date.parse('2026-11-11T18:47:00Z'), 'video id time');
+  assert.equal(SITES.bindNewPost(rows, before, sub, { notBefore: Date.parse('2026-11-11T18:45:01Z') }), '7706987328367119636');
+  assert.equal(SITES.bindNewPost(rows, [...before, '7706987328367119636'], sub), null, 'already in the baseline');
+  assert.equal(SITES.bindNewPost(rows, before, sub, { notBefore: Date.parse('2026-11-11T18:48:00Z') }), null, 'created before this run');
+  const cut = [{ key: '7706987328367119636', text: TT_1111_ROW.slice(0, 200) + '…' }];
+  assert.equal(SITES.bindNewPost(cut, before, sub), null, 'a shortened description never binds');
+});
+
+test('2026-11-11: Studio rows — each video\'s text is the largest block around its link that holds no other video', () => {
+  const dom = miniDom(['', null, [['TikTok Studio\nUpload\nPosts', null], ['', null, [
+    ['Posts (Created on)\nPrivacy\nViews', null],
+    ['', null, [['00:20', V('7706987328367119636')], ['', null, [['', V('7706987328367119636'), [[TT_1111_ROW.split('\n')[1], null]]], ['Nov 11, 9:47 PM', null]]], ['Everyone', null]]],
+    ['', null, [['00:20', V('7699194501109271829')], ['فيلا BONA-001', null], ['Oct 21, 9:46 PM', null]]],
+    ['', 'https://www.tiktok.com/@someoneelse/video/7000000000000000001', [['not ours', null]]],
+  ]]]]);
+  const rows = JSON.parse(JSON.stringify(vm.runInNewContext(SITES.studioRowsJs('bonarealestatesa'), { document: dom }))); // out of the vm's realm
+  assert.deepEqual(rows.map(r => r.key), ['7706987328367119636', '7699194501109271829'], 'only @bonarealestatesa videos, once each');
+  assert.ok(rows[0].text.includes('BONA-014') && rows[0].text.includes('Nov 11, 9:47 PM') && !rows[0].text.includes('BONA-001'), rows[0].text);
+  assert.ok(rows[1].text.includes('BONA-001') && !rows[1].text.includes('BONA-014'), rows[1].text);
+  // A list with one video: the block grows up to (never including) <body>, still that one video only.
+  const one = miniDom(['', null, [['', null, [['Posts', null], ['', null, [['00:20', V('7706987328367119636')], ['BONA-014 caption', null]]]]]]]);
+  const r1 = JSON.parse(JSON.stringify(vm.runInNewContext(SITES.studioRowsJs('bonarealestatesa'), { document: one })));
+  assert.deepEqual(r1.map(r => r.key), ['7706987328367119636']);
+  assert.ok(r1[0].text.includes('BONA-014 caption'));
+});
+
+test('2026-11-11: a refused or captcha\'d Studio list is the confirmation\'s `blocked` reason', async () => {
+  const refused = () => Object.assign(new Error('www.tiktok.com refused this browser (HTTP 403, net::ERR_HTTP_RESPONSE_CODE_FAILURE)'), { kind: 'blocked' });
+  const r1 = { blocked: null };
+  const s1 = { ...pageFake({ url: SITES.URLS.tiktokContent }), navigate: async () => { throw refused(); } };
+  assert.equal(await SITES.tiktokConfirm(s1, 'bonarealestatesa', [], { caption: 'x BONA-A', evidence: 'BONA-A', report: r1, timeoutMs: 30, every: 0, settleMs: 0 }), null);
+  assert.match(r1.blocked ?? '', /refused this browser/);
+  const r2 = { blocked: null };
+  const s2 = pageFake({ url: SITES.URLS.tiktokContent, captcha: true, settled: false });
+  assert.equal(await SITES.tiktokConfirm(s2, 'bonarealestatesa', [], { caption: 'x BONA-A', evidence: 'BONA-A', report: r2, timeoutMs: 30, every: 0, settleMs: 0 }), null);
+  assert.match(r2.blocked ?? '', /captcha/i);
+  // The list loads again and shows the post: bound, and the earlier refusal is no longer the reason.
+  const r3 = { blocked: null };
+  let n = 0;
+  const s3 = { ...pageFake({ url: SITES.URLS.tiktokContent }),
+    navigate: async () => { if (n++ === 0) throw refused(); },
+    ev: async e => (isRows(e) ? [{ key: '7706987328367119636', text: TT_1111_ROW }] : e.includes('captcha') ? false : e.includes('document.title') ? { title: 'TikTok Studio', body: '' } : null) };
+  assert.equal(await SITES.tiktokConfirm(s3, 'bonarealestatesa', [], { caption: TT_1111_CAPTION, evidence: 'BONA-014', report: r3, timeoutMs: 1000, every: 0, settleMs: 0 }), V('7706987328367119636'));
+  assert.equal(r3.blocked, null);
 });
