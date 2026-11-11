@@ -26,8 +26,8 @@ and `BONA_CHROME_ENSURE=…/ops/systemd/bona-chrome.sh`, so a run starts it when
 (after a reboot, say). DevTools listens on 127.0.0.1 without `--remote-allow-origins=*`, so no web
 page can open a DevTools socket to this profile. Each tab the publisher opens turns on CDP focus
 emulation (`Emulation.setFocusEmulationEnabled`): in a real, minimised window `document.hasFocus()` is
-false, and TikTok's caption editor then dropped 16 of 574 characters (2026-11-11 dry run). The
-window is never raised.
+false, which most likely made TikTok's caption editor drop 16 of 574 characters in the 2026-11-11
+dry run. The window is never raised.
 
 Until 2026-11-08 the publisher used the shared automation Chrome on `:9222`
 (`~/.claude/scripts/chrome-debug.sh`). Other bots browse with that one (LinkedIn job search and

@@ -1275,11 +1275,11 @@ test('R7: when the candidate scan itself fails on a post page, the block page is
 test('2026-11-11: every tab the publisher opens behaves as focused (focus emulation), before the first navigation', async () => {
   // A tab in Bona's own visible Chrome reports document.hasFocus() === false (the old headless one
   // always counted as focused); TikTok's editor then lost 16 of 574 caption characters in the 11-11 dry run.
-  const methods = [];
+  const methods = [], calls = [];
   class Recorder {
     constructor() { setTimeout(() => this.onopen?.()); }
     send(raw) {
-      const d = JSON.parse(raw); methods.push(d.method);
+      const d = JSON.parse(raw); methods.push(d.method); calls.push(d);
       const result = d.method === 'Runtime.evaluate' ? { result: { value: true } } : {};
       setTimeout(() => {
         this.onmessage({ data: JSON.stringify({ id: d.id, result }) });
@@ -1296,7 +1296,8 @@ test('2026-11-11: every tab the publisher opens behaves as focused (focus emulat
   };
   assert.equal(await withTab('https://www.tiktok.com/tiktokstudio/upload', async () => 'ok', { fetchImpl, WebSocketImpl: Recorder, ensureScript: null }), 'ok');
   const focus = methods.indexOf('Emulation.setFocusEmulationEnabled');
-  assert.ok(focus >= 0, 'focus emulation is enabled');
+  assert.ok(focus >= 0, 'focus emulation is set');
+  assert.deepEqual(calls[focus].params, { enabled: true }, 'and turned ON');
   assert.ok(focus < methods.indexOf('Page.navigate'), 'before the first page loads');
   assert.ok(!methods.includes('Page.bringToFront'), 'the window is never raised on the owner\'s screen');
 });
