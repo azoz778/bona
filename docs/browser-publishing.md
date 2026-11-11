@@ -24,7 +24,10 @@ CDP `http://localhost:9230`, a normal visible window started minimised, with the
 switches so a minimised window keeps rendering). The unit sets `BONA_CDP_URL=http://localhost:9230`
 and `BONA_CHROME_ENSURE=…/ops/systemd/bona-chrome.sh`, so a run starts it when it is not running
 (after a reboot, say). DevTools listens on 127.0.0.1 without `--remote-allow-origins=*`, so no web
-page can open a DevTools socket to this profile.
+page can open a DevTools socket to this profile. Each tab the publisher opens turns on CDP focus
+emulation (`Emulation.setFocusEmulationEnabled`): in a real, minimised window `document.hasFocus()` is
+false, which most likely made TikTok's caption editor drop 16 of 574 characters in the 2026-11-11
+dry run. The window is never raised.
 
 Until 2026-11-08 the publisher used the shared automation Chrome on `:9222`
 (`~/.claude/scripts/chrome-debug.sh`). Other bots browse with that one (LinkedIn job search and
@@ -268,7 +271,7 @@ alerts (exit 2) need the reconciliation above. A busy lock exits 75 from the uni
 | `refused this browser` (`blocked`) | the site served its block page (TikTok "Access denied / HTTP 403", Cloudflare "Sorry, you have been blocked") | look in a `bona-chrome.sh show` window; if the site keeps refusing, stop the timers and tell the owner — do not retry in a loop. Before a click nothing was sent; after one, settle the `uncertain` day as above |
 | `Could not open <url>: net::ERR_…` / `Timed out loading <url>` / `did not load (Chrome error page: ERR_…)` / `answered HTTP nnn` (`navigation`: 404, 410, 5xx) | a network error on this PC, or the site failing | retries next tick; nothing was sent |
 | `not an admin of this Page` / `posts as "…", not the Page` | LinkedIn member lost Page admin, or the composer defaulted to the person | fix the role / actor; nothing was sent |
-| `Caption box does not hold the caption` | a popup stole focus mid-typing (retried 3×) or the editor changed | look at `failed-before-post.png`; adjust `lib/browser-sites.mjs` |
+| `Caption box does not hold the caption` | a popup stole focus mid-typing (retried 3×), the page was not focused, or the editor changed | the message names the first difference (`first difference at char N: have "…", want "…"`; N counts the whitespace-normalised text, not the raw caption); look at `failed-before-post.png`; adjust `lib/browser-sites.mjs` |
 | `upload-timeout` | slow upload / processing | retries next tick |
 | `caption refused` / `caption changed since review` | compliance stop | fix the review or the copy; nothing was sent |
 | `line N is not a ledger record` | hand edit or disk damage | fix that line (keep every real record); nothing runs until then |
