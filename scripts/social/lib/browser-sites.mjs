@@ -299,28 +299,37 @@ export async function tiktokPost(s, { handle, caption, polls = 20, every = 1500 
  * (2026-11-11: the 579-char BONA-014 caption, whole), so a row is that video's own text. Another
  * link to the same id (an analytics link in the row) does not end the row; a link to another id,
  * another account's video, or a /video/ link without an id does. When the same id is linked from
- * several places, its longest block is its row. A list with ONE video has no neighbour to end its
- * row, so its row would be the whole app: its text is left empty and it never binds (a hand settle).
+ * several places, each block is a candidate of its own (a longer sidebar block never hides the row).
+ * A list with ONE video has no neighbour to end its row, so its row would be the whole app: its
+ * text is left empty and it never binds (a hand settle).
  */
 export const studioRowsJs = handle => `/*studio-rows*/(() => {
   const own = a => (/@${handle}\\/video\\/(\\d{8,25})(?!\\d)/.exec(a.href || '') || [])[1];
   const anyId = a => (/\\/video\\/(\\d{8,25})(?!\\d)/.exec(a.href || '') || [])[1];
   const links = [...document.querySelectorAll('a[href*="/video/"]')];
   const many = new Set(links.map(own).filter(Boolean)).size > 1;
-  const rows = new Map();
+  const rows = [], seen = new Set();
   for (const a of links) {
     const key = own(a);
     if (!key) continue;
     let row = a;
     while (many && row.parentElement && row.parentElement !== document.body
       && [...row.parentElement.querySelectorAll('a[href*="/video/"]')].every(x => anyId(x) === key)) row = row.parentElement;
-    const text = many ? row.innerText || '' : '';
-    if (!rows.has(key) || text.length > rows.get(key).length) rows.set(key, text);
+    if (seen.has(row)) continue; // two links in one row
+    seen.add(row);
+    rows.push({ key, text: many ? row.innerText || '' : '' });
   }
-  return [...rows].map(([key, text]) => ({ key, text }));
+  return rows;
 })()`;
-/** A bound Studio row's own short lines (duration, date, privacy, counts), for the ledger: "00:20 · Nov 11, 9:47 PM · Everyone · 0 · 0 · 0". */
-export const studioRowStatus = text => String(text ?? '').split('\n').map(norm).filter(l => l && l.length <= 40).join(' · ').slice(0, 200);
+/**
+ * A bound Studio row's own short lines (duration, date, privacy, processing / under-review label,
+ * counts), for the ledger: "00:20 · Nov 11, 9:47 PM · Everyone · 0 · 0 · 0". Lines of the caption
+ * itself are left out, so a caption Studio shows over several lines cannot crowd the status out.
+ */
+export function studioRowStatus(text, caption = '') {
+  const own = new Set(String(caption).split('\n').map(norm).filter(Boolean));
+  return String(text ?? '').split('\n').map(norm).filter(l => l && l.length <= 40 && !own.has(l)).join(' · ').slice(0, 200);
+}
 /**
  * Why the confirmation could not see the post, per page: a page that refused (login, captcha, block
  * page, an HTTP refusal) is remembered under its URL and forgotten only when THAT page later loads
@@ -362,9 +371,11 @@ export async function tiktokConfirm(s, handle, before, { caption = '', evidence 
       if (!blocked) {
         await sleep(settleMs);
         const rows = (await s.ev(studioRowsJs(handle))) ?? [];
-        const key = rows.filter(r => fresh(r.key)).length > 1 ? null : bindNewPost(rows, before, { caption, evidence }, { notBefore });
+        const sub = { caption, evidence };
+        const key = new Set(rows.map(r => r.key).filter(fresh)).size > 1 ? null : bindNewPost(rows, before, sub, { notBefore });
         if (key) {
-          if (report) report.studio = studioRowStatus(rows.find(r => r.key === key)?.text);
+          const row = rows.find(r => r.key === key && bindNewPost([r], before, sub, { notBefore }) === key);
+          if (report) report.studio = studioRowStatus(row?.text, caption);
           return `https://www.tiktok.com/@${handle}/video/${key}`;
         }
       }
