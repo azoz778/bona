@@ -366,15 +366,18 @@ the next run, because each run syncs `~/bona-publish` to `origin/main`.
    `systemctl --user is-active bona-browser@tiktok.service bona-browser@linkedin.service` must print
    `inactive` (or `failed`) twice; stopping a timer does not stop a run it already started, and a run
    must never be killed mid-post. Once the blocking line is settled the next in-window tick posts live.
-   Then a dry run per channel and a look at its screenshots. Starting a stopped timer again INSIDE its
-   window fires the missed run at once (`Persistent=true`), so it posts live right then.
+   Then a dry run per channel and a look at its screenshots. Starting a timer again (or `enable --now`)
+   after one of its times has passed since its last trigger fires that run at once (`Persistent=true`):
+   inside the window it posts live right then; outside it, the run just exits `not-due`.
 4. Resume the Kuma monitors (`add-browser-monitors.py --resume`).
 
 **Rollback:** FIRST `systemctl --user disable --now bona-browser@tiktok.timer bona-browser@linkedin.timer`
 (`disable`, so a WSL restart or re-login does not start them again; once the revert is pushed the next
 tick would sync to the reverted code and run it under the still-new unit) and wait until
-`systemctl --user is-active bona-browser@tiktok.service bona-browser@linkedin.service` prints no
-`active`/`activating`. Then revert the merge on `main` and push; `sync-publish-tree.sh` (as in step 1,
+`systemctl --user is-active bona-browser@tiktok.service bona-browser@linkedin.service` prints
+`inactive` (or `failed`) twice — anything else (`activating`, `deactivating`, an error) means wait.
+Pause both Kuma monitors ("Bona daily post — tiktok" / "— linkedin"), or their 26 h / 76 h backstops
+alert while the timers are off; the revert also removes `add-browser-monitors.py`. Then revert the merge on `main` and push; `sync-publish-tree.sh` (as in step 1,
 it must end at the revert commit) and `install-browser.sh` AGAIN; `systemctl --user cat
 bona-browser@.service | grep '^Environment=BONA_'` must print nothing (the old unit still names
 `BONA_LOCK_FD` in its ExecStart, so a bare `grep BONA_` always prints). Without the reinstall the
