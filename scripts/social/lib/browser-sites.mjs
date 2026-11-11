@@ -385,7 +385,7 @@ async function linkedinFullText(s, key, { settleMs = 1500 } = {}) {
   const sel = `[data-urn="${urn}"], [data-id="${urn}"], [data-activity-urn="${urn}"]`;
   await s.navigate(linkedinUrl(key));
   // The exact selector can miss a post whose URN sits inside a longer attribute; the candidate scan still finds it.
-  if (!await s.waitFor(`!!document.querySelector(${q(sel)})`, 15_000) && !(await linkedinPostCandidates(s)).some(c => c.key === key)) await stop(s, linkedinBlocker);
+  if (!await s.waitFor(`!!document.querySelector(${q(sel)})`, 15_000) && !(await linkedinPostCandidates(s).catch(() => [])).some(c => c.key === key)) await stop(s, linkedinBlocker);
   await s.ev(`/*expand*/(() => { const e = document.querySelector(${q(sel)}); if (!e) return 0; let n = 0;
     for (const b of e.querySelectorAll('button, [role="button"]')) if (/^(…|\\.\\.\\.)?\\s*(see more|more|المزيد)$/i.test((b.innerText || '').trim()) && !b.closest('.comments-comments-list')) { b.click(); n++; }
     return n; })()`);
