@@ -159,8 +159,16 @@ both channels sat blocked for 18 days with the alerts only in `<channel>/alerts.
    links, so a video carrying one is not ours; any other address stays literal, so a post linking
    elsewhere never matches) AND the submission's evidence (the listing
    id, or the education topic line). TikTok reads each video's Studio row: the largest block around
-   the video's link that holds no link to another video (Studio lists only the account's own posts;
-   a description it shortened never binds); LinkedIn reads the commentary block whose nearest post container is
+   the video's link that holds no `/video/` link to another id, another account's video or a
+   `/video/` page without an id (a second link to the same id, e.g. its analytics link, does not end
+   the row; when one id is linked from several places its longest block counts). Studio lists only
+   the account's own posts; a description it shortened never binds; a list with only ONE video has
+   no neighbour to end the row, so it never binds (settle by hand); and when Studio shows two or
+   more new videos created since the run started, nothing binds (one Post click makes one video, so
+   something else posted too). A bound row's status words (e.g. `00:20 · Nov 11, 9:47 PM · Everyone
+   · 0 · 0 · 0`, or a processing / under-review label) go into the `published` line as `studio`:
+   the click made that video whatever its status, so the day is done and is never posted again.
+   LinkedIn reads the commentary block whose nearest post container is
    that post (not a reshared post, not comments). The success toast's URN is taken first when it
    qualifies the same way. The URL keeps the real URN type
    (`urn:li:activity|share|ugcPost`). A post whose id shows it was created before this run started
@@ -273,7 +281,7 @@ alerts (exit 2) need the reconciliation above. A busy lock exits 75 from the uni
 |---|---|---|
 | `Chrome DevTools not reachable` | Bona's Chrome not running and `bona-chrome.sh` could not start it | `bash ~/bona-publish/ops/systemd/bona-chrome.sh`; then `systemctl --user start bona-browser@tiktok.service` |
 | `not logged in` / no "Edit profile" | Bona's Chrome lost the session | log in again: `bona-chrome.sh show https://www.tiktok.com/login` (or the LinkedIn login). Before a click nothing was recorded and the next tick retries; if it is the `blocked` reason of an `uncertain` line (the session went during the confirmation), the channel stays blocked until that day is settled as above |
-| `captcha` / `verification` / `checkpoint` | the site wants a human check | solve it once in a `bona-chrome.sh show` window. Before a click nothing was recorded and the next tick retries; after one (it is the `blocked` reason of an `uncertain` line, e.g. a captcha on the new post's own page), also settle that day as above — the channel stays blocked until then |
+| `captcha` / `verification` / `checkpoint` | the site wants a human check | solve it once in a `bona-chrome.sh show` window. Before a click nothing was recorded and the next tick retries; after one (it is the `blocked` reason of an `uncertain` line, e.g. a captcha on Studio's list (TikTok) or on the new post's own page (LinkedIn)), also settle that day as above — the channel stays blocked until then |
 | `refused this browser` (`blocked`) | the site served its block page (TikTok "Access denied / HTTP 403", Cloudflare "Sorry, you have been blocked") | look in a `bona-chrome.sh show` window; if the site keeps refusing, stop the timers and tell the owner — do not retry in a loop. Before a click nothing was sent; after one, settle the `uncertain` day as above |
 | `Could not open <url>: net::ERR_…` / `Timed out loading <url>` / `did not load (Chrome error page: ERR_…)` / `answered HTTP nnn` (`navigation`: 404, 410, 5xx) | a network error on this PC, or the site failing | retries next tick; nothing was sent |
 | `not an admin of this Page` / `posts as "…", not the Page` | LinkedIn member lost Page admin, or the composer defaulted to the person | fix the role / actor; nothing was sent |
