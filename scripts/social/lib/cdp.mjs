@@ -29,11 +29,12 @@ export class BrowserError extends Error {
   constructor(kind, message) { super(message); this.name = 'BrowserError'; this.kind = kind; }
 }
 /**
- * The HTTP statuses that mean the site refused THIS browser (`blocked`): 401, 403, 429. Any other
+ * The HTTP statuses that mean the site refused THIS browser (`blocked`): 401, 403, 429, and 999
+ * (LinkedIn's own "Request denied" answer to automated clients). Any other
  * status (404, 410, an empty 500/503) is a failed load (`navigation`). One rule for cdp.navigate and
  * for the chrome-error page check in browser-sites.mjs.
  */
-export const isRefusalStatus = status => ['401', '403', '429'].includes(String(status ?? ''));
+export const isRefusalStatus = status => ['401', '403', '429', '999'].includes(String(status ?? ''));
 
 async function version(base, fetchImpl) {
   const r = await fetchImpl(`${base}/json/version`, { signal: AbortSignal.timeout(3000) });
@@ -108,7 +109,8 @@ export async function connect(target, { WebSocketImpl = globalThis.WebSocket, co
   async function httpErrorStatus() {
     for (let i = 0; i < 8; i++) {
       let t = '';
-      try { t = String(await ev('(document.body && document.body.innerText) || ""') ?? ''); } catch { /* error page still committing */ }
+      // Only Chrome's own error page: until it commits, the PREVIOUS page is still the document (a feed may quote "HTTP ERROR 403").
+      try { t = String(await ev('(location.protocol === "chrome-error:" && document.body && document.body.innerText) || ""') ?? ''); } catch { /* error page still committing */ }
       const m = /HTTP ERROR (\d{3})/.exec(t);
       if (m) return m[1];
       await sleep(250);
@@ -127,7 +129,7 @@ export async function connect(target, { WebSocketImpl = globalThis.WebSocket, co
       if (r?.errorText) {
         // An HTTP error answered with no page fails the navigation itself, and Chrome shows its own error
         // page with the status: TikTok's "Access to www.tiktok.com was denied / HTTP ERROR 403" on
-        // 2026-10-21. 401/403/429 (and ERR_BLOCKED_BY_RESPONSE) are the site refusing this browser; any
+        // 2026-10-21. 401/403/429/999 (and ERR_BLOCKED_BY_RESPONSE) are the site refusing this browser; any
         // other status (an empty-body 500/503) is only a failed load.
         if (/ERR_BLOCKED_BY_RESPONSE/.test(r.errorText)) throw new BrowserError('blocked', `${hostOf(url)} refused this browser (${r.errorText})`);
         if (/ERR_HTTP_RESPONSE_CODE_FAILURE/.test(r.errorText)) {
