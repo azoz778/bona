@@ -1404,10 +1404,10 @@ test('2026-11-11 R2: a Studio row ends only at a link to ANOTHER id; the longest
     ]],
   ]]);
   const rows = rowsOf(dom);
-  const by = Object.fromEntries(rows.map(r => [r.key, r.text]));
+  const by = Object.fromEntries(rows.filter(r => r.text.length > 10).map(r => [r.key, r.text]));
   assert.ok(by['7706987328367119636'].includes('older post text BONA-009') && by['7706987328367119636'].includes('Nov 11, 9:47 PM'), 'the same-id analytics link does not end the row');
-  assert.ok(by['7699194501109271829'].includes('فيلا BONA-001'), 'the row, not the shorter widget, is the text for that id');
-  for (const t of Object.values(by)) assert.ok(!t.includes('BONA-014'), 'the toast outside the rows is in no row');
+  assert.ok(rows.some(r => r.key === '7699194501109271829' && r.text.includes('فيلا BONA-001')), 'the row is a candidate for that id (the widget is another)');
+  for (const r of rows) assert.ok(!r.text.includes('BONA-014'), 'the toast outside the rows is in no row');
   assert.equal(SITES.bindNewPost(rows, ['7699194501109271829'], { caption: TT_1111_CAPTION, evidence: 'BONA-014' }), null, 'so it binds nothing');
   // A /video/ link without an id ends a row too (conservative: a missed bind, never a wider row).
   const odd = miniDom(['', null, [['', null, [['', null, [['00:20', V('7706987328367119636')], ['mine', null]]], ['', 'https://www.tiktok.com/creator-academy/video/intro', [['Learn', null]]]]],
@@ -1445,4 +1445,27 @@ test('2026-11-11 R2: the published line carries the Studio row\'s status words',
   assert.deepEqual(rows.map(r => r.status), ['intent', 'published']);
   assert.equal(rows[1].url, V('7706987328367119636'));
   assert.equal(rows[1].studio, '00:20 · Nov 11, 9:47 PM · Everyone · 0 · 0 · 0');
+});
+
+test('2026-11-11 R3: every block of an id is a candidate — a longer sidebar block for the same id never hides its row (Claude R2 probe D)', async () => {
+  const sidebar = 'Recent post\n' + 'Lots of sidebar text about the account and its growth. '.repeat(20);
+  const rowText = TT_1111_ROW;
+  const dom = miniDom(['', null, [
+    ['', null, [[sidebar, null], ['', V('7706987328367119636'), [['open', null]]]]],
+    ['', null, [
+      ['', null, [['00:20', V('7706987328367119636')], [rowText.split('\n').slice(1).join('\n'), null]]],
+      ['', null, [['00:20', V('7699194501109271829')], ['فيلا BONA-001', null]]],
+    ]],
+  ]]);
+  const rows = JSON.parse(JSON.stringify(vm.runInNewContext(SITES.studioRowsJs('bonarealestatesa'), { document: dom })));
+  assert.equal(rows.filter(r => r.key === '7706987328367119636').length, 2, 'the sidebar block and the row');
+  const report = { blocked: null };
+  const s = fakeSession({ ev: e => (isRows(e) ? rows : null) });
+  assert.equal(await SITES.tiktokConfirm(s, 'bonarealestatesa', ['7699194501109271829'], { caption: TT_1111_CAPTION, evidence: 'BONA-014', report, notBefore: Date.parse('2026-11-11T18:45:01Z'), timeoutMs: 30, every: 0, settleMs: 0 }), V('7706987328367119636'));
+  assert.equal(report.studio, '00:20 · Nov 11, 9:47 PM · Everyone · 0 · 0 · 0', 'status from the block that matched');
+});
+
+test('2026-11-11 R3: the status words leave out the caption\'s own lines (a multi-line caption cannot crowd them out — Codex R2)', () => {
+  const cap = 'Villa BONA-A\nJeddah\nFor sale\n#Bona #Jeddah';
+  assert.equal(SITES.studioRowStatus(`00:20\n${cap}\nNov 11, 9:47 PM\nUnder review\n0\n0\n0`, cap), '00:20 · Nov 11, 9:47 PM · Under review · 0 · 0 · 0');
 });

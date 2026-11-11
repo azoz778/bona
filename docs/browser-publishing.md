@@ -161,11 +161,14 @@ both channels sat blocked for 18 days with the alerts only in `<channel>/alerts.
    id, or the education topic line). TikTok reads each video's Studio row: the largest block around
    the video's link that holds no `/video/` link to another id, another account's video or a
    `/video/` page without an id (a second link to the same id, e.g. its analytics link, does not end
-   the row; when one id is linked from several places its longest block counts). Studio lists only
+   the row; when one id is linked from several places each block is a candidate). Studio lists only
    the account's own posts; a description it shortened never binds; a list with only ONE video has
    no neighbour to end the row, so it never binds (settle by hand); and when Studio shows two or
    more new videos created since the run started, nothing binds (one Post click makes one video, so
-   something else posted too). A bound row's status words (e.g. `00:20 · Nov 11, 9:47 PM · Everyone
+   something else posted too; the one case left: a second post made on the account DURING the run
+   whose Studio row appears while ours is still a card without a link — that video's row can then
+   take in our caption and be bound instead, so do not post to the TikTok account by hand during
+   21:30–23:30). A bound row's status words (e.g. `00:20 · Nov 11, 9:47 PM · Everyone
    · 0 · 0 · 0`, or a processing / under-review label) go into the `published` line as `studio`:
    the click made that video whatever its status, so the day is done and is never posted again.
    LinkedIn reads the commentary block whose nearest post container is
