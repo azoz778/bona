@@ -145,7 +145,11 @@ both channels sat blocked for 18 days with the alerts only in `<channel>/alerts.
    pressed again.
 8. Confirm — only TOP-LEVEL posts are candidates (a reshared/quoted container never is), and each
    new one is read in full first: LinkedIn from its own page `/feed/update/<urn>/` with "…see more"
-   expanded, TikTok from `/video/<id>` with the description's "more" expanded. A post counts only if
+   expanded, TikTok from its row in TikTok Studio's content list (`/tiktokstudio/content`), which
+   shows each video's whole description next to its id. TikTok's confirmation opens ONLY that list:
+   on 2026-10-21 and 2026-11-11 every visit to the new video's own page `/@…/video/<id>` answered
+   HTTP 403 to the publisher's browser while the profile and Studio loaded, so the post was live but
+   never bound (`uncertain`). A post counts only if
    it is new (not in the baseline) AND the post's OWN text node
    contains the FULL submitted caption (normalised only for whitespace, emoji, LinkedIn's
    "hashtag#tag" link text, a trailing "…see more", and links: the caption's OWN web addresses
@@ -154,8 +158,9 @@ both channels sat blocked for 18 days with the alerts only in `<channel>/alerts.
    as one token, because LinkedIn swaps a link for its own short link; TikTok never makes lnkd.in
    links, so a video carrying one is not ours; any other address stays literal, so a post linking
    elsewhere never matches) AND the submission's evidence (the listing
-   id, or the education topic line). TikTok reads each new video's own description element (not
-   comments, not meta tags); LinkedIn reads the commentary block whose nearest post container is
+   id, or the education topic line). TikTok reads each video's Studio row: the largest block around
+   the video's link that holds no link to another video (Studio lists only the account's own posts;
+   a description it shortened never binds); LinkedIn reads the commentary block whose nearest post container is
    that post (not a reshared post, not comments). The success toast's URN is taken first when it
    qualifies the same way. The URL keeps the real URN type
    (`urn:li:activity|share|ugcPost`). A post whose id shows it was created before this run started
@@ -166,9 +171,10 @@ both channels sat blocked for 18 days with the alerts only in `<channel>/alerts.
    If a page the confirmation needed (a list, or a new post's own page) was still a login, captcha or
    block page at the end — each page is tracked by its URL and forgotten only when THAT page later
    loads normally — the `uncertain` line and the alert carry `blocked` with the reasons (2026-10-21:
-   TikTok answered "Access denied / HTTP 403"). A new post's own page that never shows the post is
-   checked the same way, because a block page with a body (Cloudflare on `/feed/update/…`, a TikTok
-   captcha) loads without any navigation error. Block pages are recognised by their structure only:
+   TikTok answered "Access denied / HTTP 403"). On LinkedIn a new post's own page that never shows
+   the post is checked the same way, because a block page with a body (Cloudflare on
+   `/feed/update/…`) loads without any navigation error; on TikTok, Studio's list is checked the same
+   way (a TikTok captcha also loads without a navigation error). Block pages are recognised by their structure only:
    an empty-body HTTP error fails the navigation itself (`net::ERR_HTTP_RESPONSE_CODE_FAILURE`) and
    Chrome's error page shows the status (read only from a Chrome error page, not from an ordinary page
    still showing before it). On it, and on any `chrome-error://` page, HTTP 401/403/429 or 999 (LinkedIn's
@@ -289,8 +295,8 @@ TikTok draft is discarded before a new upload (never continued).
 TikTok Studio (`/tiktokstudio/upload`): `[data-e2e="edit-profile-entrance"]` (own-profile proof),
 `/passport/web/account/info/?aid=1988` → `data.username` (account, also right before Post),
 `[data-e2e="user-post-item"]` / "Upload your first video" (profile grid loaded), "No posts yet" or
-`a[href*="/video/"]` (Studio list loaded), `[data-e2e="browse-video-desc"], [data-e2e="video-desc"]`
-+ `og:description` (a video's description, for binding),
+`a[href*="/video/"]` (Studio list loaded; each `@bonarealestatesa/video/<id>` link's row is that
+video's text for binding — `studioRowsJs`, no class names),
 `input[type="file"][accept*="video"]`, `[data-e2e="upload_status_container"]` ("Uploaded"),
 `[data-e2e="caption_container"] [contenteditable="true"]` (Draft.js editor),
 `[data-e2e="post_video_button"]`, `[data-e2e="discard_post_button"]`, `[role="dialog"] button`
