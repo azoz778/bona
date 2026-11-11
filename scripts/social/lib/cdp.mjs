@@ -155,6 +155,15 @@ export async function connect(target, { WebSocketImpl = globalThis.WebSocket, co
     async viewport(width = 1400, height = 1000) {
       await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
     },
+    /**
+     * Make the page behave as focused although its window is not (Bona's Chrome is a real window,
+     * started minimised: document.hasFocus() is false there, while the old headless Chrome always
+     * counted as focused). Rich editors drop typed input in an unfocused page — TikTok's caption box
+     * lost 16 of 574 characters in the 2026-11-11 dry run. Never raises the window (no bringToFront).
+     */
+    async focus() {
+      await send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    },
     /** Click the centre of the element a JS expression returns (real mouse events, so React handlers fire). */
     async clickEl(expr) {
       const p = await ev(`(() => { const e = (${expr}); if (!e) return null; e.scrollIntoView({block:'center'}); const r = e.getBoundingClientRect(); return { x: r.x + r.width/2, y: r.y + r.height/2, w: r.width, h: r.height, text: (e.innerText||e.getAttribute('aria-label')||'').trim().slice(0,60) }; })()`);
@@ -245,6 +254,7 @@ export async function withTab(url, fn, opts = {}) {
   try {
     s = await connect(target, opts);
     await s.viewport();
+    await s.focus();
     await s.navigate(url);
     return await fn(s, target);
   } finally {
