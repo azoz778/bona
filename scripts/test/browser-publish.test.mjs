@@ -868,7 +868,7 @@ test('2026-11-08: block pages are recognised by their structure (TikTok 403 erro
   assert.equal((await SITES.tiktokBlocker(pageFake({ url: 'https://www.tiktok.com/@bonarealestatesa', captcha: true }))).kind, 'captcha', 'captcha still wins');
 });
 
-test('2026-11-08: TikTok\'s empty-body 403 fails the navigation itself; it is reported as blocked, also on a video\'s own page', async () => {
+test('2026-11-08: TikTok\'s empty-body 403 fails the navigation itself; it is reported as blocked (TikTok since 2026-11-11: only for Studio\'s list, a video\'s own page is never opened)', async () => {
   // cdp.navigate: Page.navigate answers errorText for an HTTP error without a body (the 10-21 case).
   // Chrome then shows its own error page; its status says whether the site refused us (403) or just failed (503).
   const errorPageWS = page => class {
@@ -896,7 +896,7 @@ test('2026-11-08: TikTok\'s empty-body 403 fails the navigation itself; it is re
   const r2 = { blocked: null }, navs2 = [];
   const s2 = { ...pageFake({ url: SITES.URLS.tiktokContent }),
     navigate: async u => { navs2.push(u); if (u.includes('/video/')) throw refused(); },
-    ev: async e => (e.includes('/*studio-rows*/') ? [{ key: '555', text: 'another post' }] : e.includes('captcha') ? false : e.includes('document.title') ? { title: '', body: '' } : null) };
+    ev: async e => (isIds(e) ? ['555'] : e.includes('/*studio-rows*/') ? [{ key: '555', text: 'another post' }] : e.includes('captcha') ? false : e.includes('document.title') ? { title: '', body: '' } : null) };
   assert.equal(await SITES.tiktokConfirm(s2, 'bonarealestatesa', [], { caption: 'x BONA-A', evidence: 'BONA-A', report: r2, timeoutMs: 30, every: 0, settleMs: 0 }), null);
   assert.equal(r2.blocked, null);
   assert.ok(navs2.length > 0 && !navs2.some(u => u.includes('/video/')), 'no video page is opened');
@@ -1366,11 +1366,10 @@ test('2026-11-11: Studio rows — each video\'s text is the largest block around
   assert.deepEqual(rows.map(r => r.key), ['7706987328367119636', '7699194501109271829'], 'only @bonarealestatesa videos, once each');
   assert.ok(rows[0].text.includes('BONA-014') && rows[0].text.includes('Nov 11, 9:47 PM') && !rows[0].text.includes('BONA-001'), rows[0].text);
   assert.ok(rows[1].text.includes('BONA-001') && !rows[1].text.includes('BONA-014'), rows[1].text);
-  // A list with one video: the block grows up to (never including) <body>, still that one video only.
-  const one = miniDom(['', null, [['', null, [['Posts', null], ['', null, [['00:20', V('7706987328367119636')], ['BONA-014 caption', null]]]]]]]);
+  // A list with ONE video: no neighbour ends its row (it would be the whole app, Codex R1), so it has no text and never binds.
+  const one = miniDom(['', null, [['Your post "BONA-014 caption" is being processed', null], ['', null, [['Posts', null], ['', null, [['00:20', V('7706987328367119636')], ['BONA-014 caption', null]]]]]]]);
   const r1 = JSON.parse(JSON.stringify(vm.runInNewContext(SITES.studioRowsJs('bonarealestatesa'), { document: one })));
-  assert.deepEqual(r1.map(r => r.key), ['7706987328367119636']);
-  assert.ok(r1[0].text.includes('BONA-014 caption'));
+  assert.deepEqual(r1, [{ key: '7706987328367119636', text: '' }]);
 });
 
 test('2026-11-11: a refused or captcha\'d Studio list is the confirmation\'s `blocked` reason', async () => {
@@ -1391,4 +1390,59 @@ test('2026-11-11: a refused or captcha\'d Studio list is the confirmation\'s `bl
     ev: async e => (isRows(e) ? [{ key: '7706987328367119636', text: TT_1111_ROW }] : e.includes('captcha') ? false : e.includes('document.title') ? { title: 'TikTok Studio', body: '' } : null) };
   assert.equal(await SITES.tiktokConfirm(s3, 'bonarealestatesa', [], { caption: TT_1111_CAPTION, evidence: 'BONA-014', report: r3, timeoutMs: 1000, every: 0, settleMs: 0 }), V('7706987328367119636'));
   assert.equal(r3.blocked, null);
+});
+
+test('2026-11-11 R2: a Studio row ends only at a link to ANOTHER id; the longest block per id wins; text outside the rows never joins one', () => {
+  const rowsOf = dom => JSON.parse(JSON.stringify(vm.runInNewContext(SITES.studioRowsJs('bonarealestatesa'), { document: dom })));
+  // Claude R1 probe B: an analytics link to the same id inside the row; probe A: a "latest post" widget for the same id earlier on the page.
+  const dom = miniDom(['', null, [
+    ['Your post "' + TT_1111_ROW.split('\n')[1] + '" is being processed', null], // a toast with our caption, outside every row
+    ['', null, [['Latest post', null], ['', V('7699194501109271829'), [['00:20', null]]]]],
+    ['', null, [
+      ['', null, [['00:20', V('7706987328367119636')], ['older post text BONA-009', null], ['', 'https://www.tiktok.com/tiktokstudio/analytics/video/7706987328367119636', [['Analytics', null]]], ['Nov 11, 9:47 PM', null]]],
+      ['', null, [['00:20', V('7699194501109271829')], ['فيلا BONA-001', null], ['Oct 21, 9:46 PM', null]]],
+    ]],
+  ]]);
+  const rows = rowsOf(dom);
+  const by = Object.fromEntries(rows.map(r => [r.key, r.text]));
+  assert.ok(by['7706987328367119636'].includes('older post text BONA-009') && by['7706987328367119636'].includes('Nov 11, 9:47 PM'), 'the same-id analytics link does not end the row');
+  assert.ok(by['7699194501109271829'].includes('فيلا BONA-001'), 'the row, not the shorter widget, is the text for that id');
+  for (const t of Object.values(by)) assert.ok(!t.includes('BONA-014'), 'the toast outside the rows is in no row');
+  assert.equal(SITES.bindNewPost(rows, ['7699194501109271829'], { caption: TT_1111_CAPTION, evidence: 'BONA-014' }), null, 'so it binds nothing');
+  // A /video/ link without an id ends a row too (conservative: a missed bind, never a wider row).
+  const odd = miniDom(['', null, [['', null, [['', null, [['00:20', V('7706987328367119636')], ['mine', null]]], ['', 'https://www.tiktok.com/creator-academy/video/intro', [['Learn', null]]]]],
+    ['', null, [['00:20', V('7699194501109271829')], ['old', null]]]]]);
+  assert.equal(Object.fromEntries(rowsOf(odd).map(r => [r.key, r.text]))['7706987328367119636'], '00:20\nmine');
+});
+
+test('2026-11-11 R2: two new videos since the run started → nothing is bound (one Post click makes one video)', async () => {
+  const notBefore = Date.parse('2026-11-11T18:45:01Z');
+  const other = { key: String((BigInt(Math.floor(Date.parse('2026-11-11T18:48:00Z') / 1000)) << 32n) + 1n), text: 'a video posted from a phone' };
+  const opts = { caption: TT_1111_CAPTION, evidence: 'BONA-014', notBefore, timeoutMs: 30, every: 0, settleMs: 0 };
+  const two = fakeSession({ ev: e => (isRows(e) ? [{ key: '7706987328367119636', text: TT_1111_ROW }, other, { key: '7699194501109271829', text: TT_1021_ROW }] : null) });
+  assert.equal(await SITES.tiktokConfirm(two, 'bonarealestatesa', ['7699194501109271829'], opts), null);
+  // An older new-to-the-baseline id (created before the run) is not a second post of this run: ours still binds.
+  const stale = { key: String((BigInt(Math.floor(Date.parse('2026-11-11T17:00:00Z') / 1000)) << 32n) + 1n), text: 'missed by the baseline' };
+  const one = fakeSession({ ev: e => (isRows(e) ? [{ key: '7706987328367119636', text: TT_1111_ROW }, stale] : null) });
+  const report = { blocked: null };
+  assert.equal(await SITES.tiktokConfirm(one, 'bonarealestatesa', [], { ...opts, report }), V('7706987328367119636'));
+  assert.equal(report.studio, '00:20 · Nov 11, 9:47 PM · Everyone · 0 · 0 · 0', 'the row\'s status words, without the caption');
+});
+
+test('2026-11-11 R2: a round that finds a captcha / block page on Studio reads no rows (Codex R1)', async () => {
+  const r = { blocked: null };
+  const s = { ...pageFake({ url: SITES.URLS.tiktokContent, captcha: true, settled: false }),
+    ev: async e => (isRows(e) ? [{ key: '7706987328367119636', text: TT_1111_ROW }] : e.includes('captcha') ? true : e.includes('document.title') ? { title: '', body: '' } : null) };
+  assert.equal(await SITES.tiktokConfirm(s, 'bonarealestatesa', [], { caption: TT_1111_CAPTION, evidence: 'BONA-014', report: r, timeoutMs: 30, every: 0, settleMs: 0 }), null);
+  assert.match(r.blocked ?? '', /captcha/i);
+});
+
+test('2026-11-11 R2: the published line carries the Studio row\'s status words', async () => {
+  const sb = sandbox(), x = deps({ confirm: null });
+  x.d.sites.tiktokConfirm = async (_s, _h, _b, opts) => { opts.report.studio = '00:20 · Nov 11, 9:47 PM · Everyone · 0 · 0 · 0'; return V('7706987328367119636'); };
+  await run('tiktok', { env: sb.env, root: sb.root, now: NOW, clock: () => NOW, log: quiet, kind: 'property' }, x.d);
+  const rows = readLedger(ledgerPath(sb.data, 'tiktok'));
+  assert.deepEqual(rows.map(r => r.status), ['intent', 'published']);
+  assert.equal(rows[1].url, V('7706987328367119636'));
+  assert.equal(rows[1].studio, '00:20 · Nov 11, 9:47 PM · Everyone · 0 · 0 · 0');
 });
