@@ -22,11 +22,16 @@ export const CHANNELS = Object.freeze({
     // Riyadh window in which a run may post (after Isha: Maghrib–Isha is avoided everywhere, see
     // scripts/social/README.md). The timer fires inside it; a run outside does nothing.
     window: Object.freeze({ from: '21:30', to: '23:30' }), days: null,
+    // The last timer run (bona-browser@tiktok.timer): Uptime Kuma hears "down" when a run ending at or
+    // after it still has no post for the day.
+    lastRun: '22:45',
   }),
   linkedin: Object.freeze({
     id: 'linkedin', companyId: '145349037', pageName: 'Bona | بونا', maxCaption: 3000,
     // LinkedIn is a working-hours network: Sunday–Thursday mornings only.
     window: Object.freeze({ from: '09:00', to: '12:00' }), days: Object.freeze([0, 1, 2, 3, 4]),
+    // The last timer run (bona-browser@linkedin.timer), as for TikTok.
+    lastRun: '10:30',
   }),
 });
 export const EDUCATION_REPEAT_DAYS = 28;

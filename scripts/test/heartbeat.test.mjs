@@ -78,3 +78,17 @@ test('the push URL is a secret: credentials are refused before any request, and 
     assert.ok(!lines.join('\n').includes(token));
   } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
 });
+
+test('heartbeatFor: `last` and `uncertain` from callers that know better (browser channels, 2026-11-08)', () => {
+  const at = t => new Date(`2026-11-08T${t}:00+03:00`);
+  assert.equal(heartbeatFor({ status: 'skipped', now: at('10:30'), last: false }), null, 'not the last run: quiet, whatever the clock');
+  assert.deepEqual(heartbeatFor({ status: 'skipped', now: at('10:30'), last: true }), { status: 'down', msg: 'skipped' });
+  assert.equal(heartbeatFor({ status: 'skipped', now: at('22:45'), last: false }), null, 'the Instagram clock window is not used when `last` is given');
+  assert.deepEqual(heartbeatFor({ error: new Error('an earlier post is uncertain'), now: at('09:30'), uncertain: true }), { status: 'down', msg: 'an earlier post is uncertain' });
+  assert.equal(heartbeatFor({ error: new Error('x'), now: at('09:30'), uncertain: true, dry: true }), null);
+  assert.deepEqual(heartbeatFor({ status: 'published', now: at('09:30'), uncertain: true }), { status: 'up', msg: 'published' });
+  // Instagram/Facebook (no `last`): unchanged 22:30–22:59 window.
+  assert.equal(heartbeatFor({ status: 'skipped', now: at('22:29') }), null);
+  assert.equal(heartbeatFor({ status: 'skipped', now: at('22:30') }).status, 'down');
+  assert.equal(heartbeatFor({ status: 'skipped', now: at('23:00') }), null);
+});

@@ -1,7 +1,7 @@
 # Daily TikTok and LinkedIn posts (browser publisher)
 
 One TikTok video a day and one LinkedIn Page post each working day, fully automatic, posted
-through the Windows Chrome that is already logged in to both accounts. Owner decision
+through Bona's own Windows Chrome (CDP `:9230`), which is logged in to both accounts. Owner decision
 2026-10-20: same approved Saudi property register as Instagram/Facebook (under the 2026-10-05
 ad-licence waiver), no per-post approval. Since 2026-10-21 a property every day, with
 licence-free education only when no property is eligible.
@@ -14,8 +14,55 @@ licence-free education only when no property is eligible.
 | Ledger | `~/bona-data/tiktok/published.jsonl` | `~/bona-data/linkedin/published.jsonl` |
 
 Why a browser: TikTok's Content Posting API publishes private-only until an app audit, and
-LinkedIn's posting API needs partner approval. Both accounts are logged in in the shared
-debug Chrome (CDP `http://localhost:9222`, started by `~/.claude/scripts/chrome-debug.sh`).
+LinkedIn's posting API needs partner approval.
+
+## Bona's own Chrome (`:9230`)
+
+Both accounts are logged in in a Chrome that only this publisher drives:
+`ops/systemd/bona-chrome.sh` starts it (profile `C:\Users\ASUS\AppData\Local\bona-social-chrome`,
+CDP `http://localhost:9230`, a normal visible window started minimised, with the no-throttling
+switches so a minimised window keeps rendering). The unit sets `BONA_CDP_URL=http://localhost:9230`
+and `BONA_CHROME_ENSURE=…/ops/systemd/bona-chrome.sh`, so a run starts it when it is not running
+(after a reboot, say). DevTools listens on 127.0.0.1 without `--remote-allow-origins=*`, so no web
+page can open a DevTools socket to this profile.
+
+Until 2026-11-08 the publisher used the shared automation Chrome on `:9222`
+(`~/.claude/scripts/chrome-debug.sh`). Other bots browse with that one (LinkedIn job search and
+applications) and it runs headless (user agent `HeadlessChrome`). On 2026-11-08 LinkedIn served it
+a Cloudflare "Sorry, you have been blocked" page and TikTok had logged it out and showed a captcha.
+Never point the publisher back at it.
+
+Log in (once, and whenever a run reports `not logged in`):
+
+```bash
+bash ~/bona-publish/ops/systemd/bona-chrome.sh show https://www.tiktok.com/login     # @bonarealestatesa
+bash ~/bona-publish/ops/systemd/bona-chrome.sh show https://www.linkedin.com/login   # a Page admin of company 145349037
+```
+
+## Monitoring (Uptime Kuma → owner's Telegram)
+
+Push monitors "Bona daily post — tiktok" and "Bona daily post — linkedin" (next to — instagram /
+— facebook), created with `ops/systemd/add-browser-monitors.py`; their push URLs are secrets in
+`~/bona-data/daily/heartbeat-<channel>.url` (0600, never logged). Each live run reports
+(`browserBeat()` in `browser-publish.mjs`, same rules as `heartbeatFor()`):
+
+- **up** on a publication or "already published today" (also from an `--any-time` run);
+- **down at once** while the channel is blocked by an `uncertain` post (no retry can clear it; also
+  from an `--any-time` run);
+- **down when the day's last run has no post**: a run that ENDED at or after the last timer time
+  (`CHANNELS.<channel>.lastRun`: TikTok 22:45, LinkedIn 10:30 — the timers' last `OnCalendar`, a test
+  keeps them equal). A run still going at that time absorbs the timer's start, so it is the last
+  one; a missed earlier run caught up late (`Persistent=true`) that ends before it is not;
+- nothing for dry runs, or for any other outcome of a run started outside the channel's window or days.
+
+The monitors are created paused. Start them once the channel is posting:
+`uv run --exclude-newer 2026-10-09 --with uptime-kuma-api==1.2.1 python3 ops/systemd/add-browser-monitors.py --resume`
+(with `ssh -f -N -L 13010:127.0.0.1:3010 hermes-vps` open); re-running it only rewrites the URL files.
+
+Backstops when no run reports at all: TikTok 26 h, LinkedIn 76 h (Thursday 09:30 → Sunday 10:30 is
+73 h). A missing URL file or a failed push is logged and never changes the run's outcome. Before
+2026-11-08 there were no monitors for these two channels: the 2026-10-21 posts went `uncertain` and
+both channels sat blocked for 18 days with the alerts only in `<channel>/alerts.jsonl`.
 
 ## What gets posted
 
@@ -98,12 +145,39 @@ debug Chrome (CDP `http://localhost:9222`, started by `~/.claude/scripts/chrome-
    expanded, TikTok from `/video/<id>` with the description's "more" expanded. A post counts only if
    it is new (not in the baseline) AND the post's OWN text node
    contains the FULL submitted caption (normalised only for whitespace, emoji, LinkedIn's
-   "hashtag#tag" link text and a trailing "…see more") AND the submission's evidence (the listing
+   "hashtag#tag" link text, a trailing "…see more", and links: the caption's OWN web addresses
+   (with or without the scheme, without punctuation right after them such as a full stop or «،»,
+   found after emoji are removed) and — on LinkedIn only — LinkedIn's `lnkd.in` short links compare
+   as one token, because LinkedIn swaps a link for its own short link; TikTok never makes lnkd.in
+   links, so a video carrying one is not ours; any other address stays literal, so a post linking
+   elsewhere never matches) AND the submission's evidence (the listing
    id, or the education topic line). TikTok reads each new video's own description element (not
    comments, not meta tags); LinkedIn reads the commentary block whose nearest post container is
    that post (not a reshared post, not comments). The success toast's URN is taken first when it
    qualifies the same way. The URL keeps the real URN type
-   (`urn:li:activity|share|ugcPost`). Anything less → `uncertain`. Append `published` with `url`.
+   (`urn:li:activity|share|ugcPost`). A post whose id shows it was created before this run started
+   (10 min clock slack) is never ours either, even when the baseline missed it — a repeat of the same
+   listing carries the same caption: LinkedIn ids hold epoch ms (`id >> 22`), TikTok video ids epoch
+   seconds (`id >> 32`); an id that does not decode to a plausible time is judged by the baseline only.
+   Anything less → `uncertain`. Append `published` with `url`.
+   If a page the confirmation needed (a list, or a new post's own page) was still a login, captcha or
+   block page at the end — each page is tracked by its URL and forgotten only when THAT page later
+   loads normally — the `uncertain` line and the alert carry `blocked` with the reasons (2026-10-21:
+   TikTok answered "Access denied / HTTP 403"). A new post's own page that never shows the post is
+   checked the same way, because a block page with a body (Cloudflare on `/feed/update/…`, a TikTok
+   captcha) loads without any navigation error. Block pages are recognised by their structure only:
+   an empty-body HTTP error fails the navigation itself (`net::ERR_HTTP_RESPONSE_CODE_FAILURE`) and
+   Chrome's error page shows the status (read only from a Chrome error page, not from an ordinary page
+   still showing before it). On it, and on any `chrome-error://` page, HTTP 401/403/429 or 999 (LinkedIn's
+   "Request denied"), or `ERR_BLOCKED_BY_RESPONSE`, is `blocked`; any other status (404, 410, an empty
+   500/503) is "answered HTTP nnn" and a network error (`ERR_INTERNET_DISCONNECTED`, …) "did not
+   load", both `navigation` (one rule, `isRefusalStatus()` in `lib/cdp.mjs`). Cloudflare's page is
+   matched by its title ("Attention Required! | Cloudflare", or "… used Cloudflare to restrict
+   access"), or by text that BEGINS with "Sorry, you have been blocked" and carries a "Cloudflare Ray
+   ID"; LinkedIn's security check by its `/checkpoint/` URL, a title that BEGINS with "Security
+   Verification", or text that BEGINS with its heading (after at most the "LinkedIn" wordmark) — a
+   post or comment quoting any of those lines inside a feed (or a post page whose title is the post's
+   text) is not a block page. A new post's own page is checked only when the post is not on it at all.
 
 Everything burned into the media (reel hook, subhook, lower third, CTA lines, card slides) goes
 through the same refusal as the caption: no `{{…}}` placeholder, never «تقييم مجاني». The reel's
@@ -188,9 +262,11 @@ alerts (exit 2) need the reconciliation above. A busy lock exits 75 from the uni
 
 | Symptom (journal / alerts.jsonl) | Cause | Fix |
 |---|---|---|
-| `Chrome DevTools not reachable` | debug Chrome not running and `chrome-debug.sh` could not start it | `~/.claude/scripts/chrome-debug.sh`; then `systemctl --user start bona-browser@tiktok.service` |
-| `not logged in` / no "Edit profile" | the debug profile lost the session | log in again in that Chrome (`chrome-debug.sh headed`) |
-| `captcha` / `verification` / `checkpoint` | the site wants a human check | solve it once in the headed debug Chrome; the next tick retries (nothing was recorded) |
+| `Chrome DevTools not reachable` | Bona's Chrome not running and `bona-chrome.sh` could not start it | `bash ~/bona-publish/ops/systemd/bona-chrome.sh`; then `systemctl --user start bona-browser@tiktok.service` |
+| `not logged in` / no "Edit profile" | Bona's Chrome lost the session | log in again: `bona-chrome.sh show https://www.tiktok.com/login` (or the LinkedIn login). Before a click nothing was recorded and the next tick retries; if it is the `blocked` reason of an `uncertain` line (the session went during the confirmation), the channel stays blocked until that day is settled as above |
+| `captcha` / `verification` / `checkpoint` | the site wants a human check | solve it once in a `bona-chrome.sh show` window. Before a click nothing was recorded and the next tick retries; after one (it is the `blocked` reason of an `uncertain` line, e.g. a captcha on the new post's own page), also settle that day as above — the channel stays blocked until then |
+| `refused this browser` (`blocked`) | the site served its block page (TikTok "Access denied / HTTP 403", Cloudflare "Sorry, you have been blocked") | look in a `bona-chrome.sh show` window; if the site keeps refusing, stop the timers and tell the owner — do not retry in a loop. Before a click nothing was sent; after one, settle the `uncertain` day as above |
+| `Could not open <url>: net::ERR_…` / `Timed out loading <url>` / `did not load (Chrome error page: ERR_…)` / `answered HTTP nnn` (`navigation`: 404, 410, 5xx) | a network error on this PC, or the site failing | retries next tick; nothing was sent |
 | `not an admin of this Page` / `posts as "…", not the Page` | LinkedIn member lost Page admin, or the composer defaulted to the person | fix the role / actor; nothing was sent |
 | `Caption box does not hold the caption` | a popup stole focus mid-typing (retried 3×) or the editor changed | look at `failed-before-post.png`; adjust `lib/browser-sites.mjs` |
 | `upload-timeout` | slow upload / processing | retries next tick |
@@ -245,7 +321,8 @@ node scripts/social/browser-publish.mjs tiktok                               # l
 `--dry-run` writes nothing to the ledger. `--any-time` ignores the window (a live run with it
 posts now). `--kind property|education` forces a kind (no fallback). `BONA_DATA` moves the data
 directory; `BONA_CDP_URL`, `BONA_UPLOAD_DIR_WSL` / `BONA_UPLOAD_DIR_WIN` override the browser
-endpoint and the staging folder.
+endpoint and the staging folder (defaults: Bona's own Chrome `http://localhost:9230`, started by
+`ops/systemd/bona-chrome.sh` of the same checkout).
 
 ## Install
 
@@ -266,6 +343,49 @@ systemctl --user list-timers 'bona-browser@*'
 journalctl --user -u 'bona-browser@*' -o cat -f
 systemctl --user stop bona-browser@tiktok.timer                 # pause one channel
 ```
+
+systemd runs its own COPY of the unit, so every change to `bona-browser@.service` (or its drop-in or
+timers) reaches the timers only when `install-browser.sh` is run again; the code itself goes live on
+the next run, because each run syncs `~/bona-publish` to `origin/main`.
+
+**Rolling out a change to the units** (e.g. the 2026-11-08 move to Bona's own Chrome, which added
+`BONA_CDP_URL` / `BONA_CHROME_ENSURE`), in this order, after the merge:
+
+1. Bring the publish tree to the merge first — `install-browser.sh` installs from `~/bona-publish`
+   as it stands, and its guard compares it with the LOCAL `origin/main` ref without fetching:
+   `bash ~/bona-publish/ops/systemd/sync-publish-tree.sh ~/bona-publish` must end "now at" (or
+   "already at") `origin/main (<the merge commit>)`. Then `bash ~/bona-publish/ops/systemd/install-browser.sh`
+   (without `--enable` when the timers are already on); `systemctl --user cat bona-browser@.service | grep '^Environment=BONA_'`
+   must show `BONA_CDP_URL=http://localhost:9230` (and `BONA_CHROME_ENSURE`).
+2. `bash ~/bona-publish/ops/systemd/bona-chrome.sh`, and a human logs in to both accounts in it
+   (see "Log in" above: `bona-chrome.sh show https://www.linkedin.com/login`, the same for TikTok).
+   A fresh profile is logged out, so a dry run before this fails with `not logged in`.
+3. Settle any `uncertain` day (above) OUTSIDE both windows (TikTok 21:30–23:30, LinkedIn Sun–Thu
+   09:00–12:00), or with both timers stopped (`systemctl --user stop bona-browser@tiktok.timer
+   bona-browser@linkedin.timer`) — and in both cases only once no run is in progress:
+   `systemctl --user is-active bona-browser@tiktok.service bona-browser@linkedin.service` must print
+   `inactive` (or `failed`) twice; stopping a timer does not stop a run it already started, and a run
+   must never be killed mid-post. Once the blocking line is settled the next in-window tick posts live.
+   Then a dry run per channel and a look at its screenshots. Starting a timer again (or `enable --now`)
+   after one of its times has passed since its last trigger fires that run at once (`Persistent=true`):
+   inside the window it posts live right then; outside it, the run just exits `not-due`.
+4. Resume the Kuma monitors (`add-browser-monitors.py --resume`).
+
+**Rollback:** FIRST `systemctl --user disable --now bona-browser@tiktok.timer bona-browser@linkedin.timer`
+(`disable`, so a WSL restart or re-login does not start them again; once the revert is pushed the next
+tick would sync to the reverted code and run it under the still-new unit) and wait until
+`systemctl --user is-active bona-browser@tiktok.service bona-browser@linkedin.service` prints
+`inactive` (or `failed`) twice — anything else (`activating`, `deactivating`, an error) means wait.
+Pause both Kuma monitors ("Bona daily post — tiktok" / "— linkedin"), or their 26 h / 76 h backstops
+alert while the timers are off; the revert also removes `add-browser-monitors.py`. Then revert the merge on `main` and push; `sync-publish-tree.sh` (as in step 1,
+it must end at the revert commit) and `install-browser.sh` AGAIN; `systemctl --user cat
+bona-browser@.service | grep '^Environment=BONA_'` must print nothing (the old unit still names
+`BONA_LOCK_FD` in its ExecStart, so a bare `grep BONA_` always prints). Without the reinstall the
+installed unit keeps the new `Environment=` lines, and the reverted code still obeys them: it drives
+`:9230` with `BONA_CHROME_ENSURE` pointing at the `bona-chrome.sh` the revert removed, so after the
+next reboot no run can start a Chrome. With it, the reverted code drives the shared `:9222` Chrome that
+LinkedIn blocks and TikTok logged out (see above) — so leave both timers disabled until a fix lands
+again (`systemctl --user enable --now …` then).
 
 Note: `marketing/daily/property-policy.json` still lists `channels: ["instagram","facebook"]`
 because `property-publish.mjs` checks that list exactly; the TikTok/LinkedIn scope is this

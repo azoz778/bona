@@ -1,7 +1,7 @@
 // Page adapters for TikTok Studio and the LinkedIn Page admin, over lib/cdp.mjs sessions.
 // Every selector the publisher relies on is in SELECTORS, so a site redesign is one edit here
 // (docs/browser-publishing.md lists them and what each one is for).
-import { BrowserError, sleep } from './cdp.mjs';
+import { BrowserError, isRefusalStatus, sleep } from './cdp.mjs';
 
 export const URLS = Object.freeze({
   tiktokProfile: handle => `https://www.tiktok.com/@${handle}`,
@@ -45,20 +45,62 @@ const q = s => JSON.stringify(s);
 const byText = (sel, text) => `[...document.querySelectorAll(${q(sel)})].find(b => b.offsetParent !== null && (b.innerText || '').trim() === ${q(text)})`;
 const norm = s => String(s ?? '').replace(/[\s‎‏⁦-⁩]+/g, ' ').trim();
 
-/** Not logged in / captcha / verification — the run cannot go on and a human has to look. */
+/**
+ * The page's title and the start of its text, read once per check. Block pages are recognised by
+ * their STRUCTURE (Chrome's own chrome-error:// page, Cloudflare's title / fixed lines), never by a
+ * phrase anywhere in a feed, so a post or comment quoting "HTTP ERROR 403" cannot stop a run.
+ */
+const PAGE_INFO = '({ title: document.title || "", body: (document.body?.innerText || "").slice(0, 3000) })';
+async function pageInfo(s) { const p = await s.ev(PAGE_INFO); return { title: String(p?.title ?? ''), body: String(p?.body ?? '') }; }
+/**
+ * A page that is not the site at all: Chrome's error page or Cloudflare's block page. On Chrome's
+ * error page HTTP 401/403/429/999 (TikTok's "Access to www.tiktok.com was denied / HTTP ERROR 403",
+ * 2026-10-21) or ERR_BLOCKED_BY_RESPONSE is a refusal (`blocked`); any other HTTP status (404, 410,
+ * 500, 503) is "answered HTTP nnn" and a network error (ERR_INTERNET_DISCONNECTED, …) "did not
+ * load", both only `navigation` (isRefusalStatus, the same rule as cdp.navigate). Cloudflare's
+ * "Sorry, you have been blocked" (LinkedIn, 2026-11-08) is `blocked`.
+ */
+export function blockPageProblem(site, url, { title = '', body = '' } = {}) {
+  if (/^chrome-error:/.test(url)) {
+    const status = /HTTP ERROR (\d{3})/.exec(body)?.[1] ?? null;
+    if (isRefusalStatus(status) || /ERR_BLOCKED_BY_RESPONSE|Access to [\w.-]+ was denied/.test(body))
+      return new BrowserError('blocked', `${site} refused this browser (Chrome error page: ${status ? `HTTP ERROR ${status}` : /ERR_[A-Z_]+/.exec(body)?.[0] ?? 'access denied'})`);
+    if (status) return new BrowserError('navigation', `${site} answered HTTP ${status} instead of the page (Chrome error page)`);
+    return new BrowserError('navigation', `${site} did not load (Chrome error page: ${/ERR_[A-Z_]+/.exec(body)?.[0] ?? 'network error'})`);
+  }
+  // Cloudflare's own page: its title, or a page whose text BEGINS with its block line and carries its Ray ID
+  // (a post or comment quoting those lines sits inside a feed, never at the top of the page).
+  if (/^Attention Required! \| Cloudflare/.test(title) || (/^\s*Sorry, you have been blocked/.test(body) && /Cloudflare Ray ID/.test(body)))
+    return new BrowserError('blocked', `${site} refused this browser (Cloudflare "Sorry, you have been blocked")`);
+  if (/ used Cloudflare to restrict access$/.test(title)) return new BrowserError('blocked', `${site} refused this browser (Cloudflare "Access denied": ${title})`);
+  return null;
+}
+
+/** Not logged in / captcha / verification / blocked — the run cannot go on and a human has to look. */
 export async function tiktokBlocker(s) {
   const url = String(await s.url());
   if (/\/login(\/|\?|$)/.test(url)) return new BrowserError('not-logged-in', `TikTok is not logged in (redirected to ${url.split('?')[0]})`);
   if (await s.ev(`!!document.querySelector(${q(SELECTORS.tiktok.captcha)})`)) return new BrowserError('captcha', 'TikTok is showing a captcha / verification puzzle');
-  return null;
+  return blockPageProblem('TikTok', url, await pageInfo(s));
 }
+/**
+ * LinkedIn's own security-check page, by its structure: its title, or text that BEGINS with its
+ * heading, after at most the "LinkedIn" wordmark line (the page has no site navigation above it).
+ * Any other page starts with something else (navigation, a header), so a post or comment quoting
+ * "verify you're human" — even in its second line — is never taken for it. The /checkpoint/ URL
+ * (linkedinBlocker) is the main signal; a miss here only turns "security check" into a page that
+ * did not load, before any click.
+ */
+const LINKEDIN_CHECK = /^(?:LinkedIn[ \t]*\n\s*)?(?:Let.s do a )?(?:quick security check|(?:Please )?verify you.re human)/i;
+export const linkedinCheckPage = ({ title = '', body = '' } = {}) =>
+  /^(?:\(\d+\+?\)\s*)?Security Verification\b/i.test(title) || LINKEDIN_CHECK.test(body.trimStart());
 export async function linkedinBlocker(s) {
   const url = String(await s.url());
   if (/linkedin\.com\/(login|uas\/login|authwall|signup)/.test(url)) return new BrowserError('not-logged-in', 'LinkedIn is not logged in');
   if (/linkedin\.com\/checkpoint\//.test(url)) return new BrowserError('verification', 'LinkedIn is asking for a security verification (checkpoint)');
-  const t = String(await s.ev('(document.body?.innerText || "").slice(0, 3000)'));
-  if (/quick security check|let.s do a quick|verify you.re human/i.test(t)) return new BrowserError('captcha', 'LinkedIn is showing a security check');
-  return null;
+  const page = await pageInfo(s);
+  if (linkedinCheckPage(page)) return new BrowserError('captcha', 'LinkedIn is showing a security check');
+  return blockPageProblem('LinkedIn', url, page);
 }
 async function stop(s, check) { const b = await check(s); if (b) throw b; }
 /** Marks an error raised before any click reached the Post button: provably nothing was sent. */
@@ -66,27 +108,74 @@ const notClicked = e => Object.assign(e, { beforeClick: true });
 
 // ------------------------------------------------------------------------ confirmation binding
 /**
- * A post's text as compared for binding: bidi marks and emoji removed, "hashtag#tag" (LinkedIn's
- * hashtag-link text) back to "#tag", a trailing "…more"/"see more" control dropped, whitespace
+ * Links, compared as one token — but only the caption's OWN web addresses (with or without their
+ * scheme) and, on LinkedIn only (`shortLinks`), LinkedIn's `lnkd.in` short links. LinkedIn replaces
+ * a link in a post with its own short link (2026-10-21: the BONA-001 post went live with
+ * `https://lnkd.in/dnG_C5SM` where the caption had the listing's bona-real-estate.com address, so the
+ * post was never bound and the channel blocked itself for 18 days). TikTok never makes lnkd.in
+ * links, so there a video carrying one is not ours. Any other address stays literal, so a post
+ * linking somewhere else never matches. The token is a private-use character that is stripped
+ * from every input first.
+ */
+export const LINK_TOKEN = '\uE000';
+const WEB_ADDRESS = /\bhttps?:\/\/[\x21-\x7E]+|\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?:\/[\x21-\x7E]*)?/gi;
+const SHORT_LINK = /\b(?:https?:\/\/)?lnkd\.in\/[A-Za-z0-9_-]+/gi;
+/** Punctuation right after a link is the sentence's, not the link's (a linkifier, LinkedIn's shortener too, stops before it). */
+const LINK_TAIL = /[.,;:!?)\]}>'"\u2019\u201D\u00BB\u060C\u061B\u061F]+$/u;
+/** Every text — caption and post alike — goes through this BEFORE links are found or replaced: the token itself, emoji, LinkedIn's "hashtag#tag" link text. */
+const prepBind = x => String(x ?? '').split(LINK_TOKEN).join('').replace(/\p{Extended_Pictographic}|\uFE0F/gu, '').replace(/\bhashtag\s*#/gi, '#');
+/**
+ * The caption's own web addresses, each also without its scheme, longest first. Found in the
+ * caption as bindText() sees it (emoji already gone) and without trailing punctuation, so each
+ * one is exactly the text a shortener replaces.
+ */
+export function captionLinks(caption) {
+  const found = (prepBind(caption).match(WEB_ADDRESS) ?? []).map(u => u.replace(LINK_TAIL, ''));
+  return [...new Set(found.flatMap(u => [u, u.replace(/^https?:\/\//i, '')]))].filter(Boolean).sort((a, b) => b.length - a.length);
+}
+/**
+ * A post's text as compared for binding: emoji removed, "hashtag#tag" (LinkedIn's hashtag-link
+ * text) back to "#tag", a trailing "…more"/"see more" control dropped, the given caption links
+ * (and, with `shortLinks`, lnkd.in short links) replaced by LINK_TOKEN, bidi marks and whitespace
  * collapsed. Nothing is truncated.
  */
-export function bindText(x) {
-  return norm(String(x ?? '').replace(/\p{Extended_Pictographic}|\uFE0F/gu, '').replace(/\bhashtag\s*#/gi, '#')
-    .replace(/(?:…|\.\.\.)?\s*(?:see more|more|المزيد)\s*$/i, ''));
+export function bindText(x, links = [], { shortLinks = false } = {}) {
+  let t = prepBind(x).replace(/(?:…|\.\.\.)?\s*(?:see more|more|المزيد)\s*$/i, '');
+  for (const link of links) t = t.split(link).join(LINK_TOKEN);
+  if (shortLinks) t = t.replace(SHORT_LINK, LINK_TOKEN);
+  // A site may show a caption's bare domain with a scheme (or the reverse): the scheme is not compared.
+  return norm(t.replace(/\bhttps?:\/\/(?=\uE000)/gi, ''));
+}
+/**
+ * When the platform created a post, from its id (epoch ms), or null. LinkedIn activity / share /
+ * ugcPost ids carry epoch ms in their top bits (id >> 22: urn:li:activity:7518559300538146817 →
+ * 2026-10-21T06:30:25.325Z, the 09:30 run); TikTok video ids carry epoch seconds (id >> 32). An id
+ * that does not decode to a plausible time (2016 → tomorrow) is not judged by its time.
+ */
+export function idTime(key, now = Date.now()) {
+  const m = /^(?:(activity|share|ugcPost):)?(\d{15,25})$/.exec(String(key));
+  if (!m) return null;
+  const id = BigInt(m[2]);
+  const ms = m[1] ? Number(id >> 22n) : Number(id >> 32n) * 1000;
+  return ms > Date.UTC(2016, 0, 1) && ms < now + 86_400_000 ? ms : null;
 }
 const newer = (a, b) => (a.length - b.length) || (a < b ? -1 : a > b ? 1 : 0);
 /**
- * The post that is ours: a key that was not in the baseline AND whose OWN text (the post's text
- * node, not quoted posts or comments) contains the FULL submitted caption, normalised by
- * bindText() only, AND the submission's evidence string (the listing id, or the education topic
- * line). A new key without that (a promo, a reshare, a processing video) is not proof. `prefer`
- * (the success toast's key) is taken first, but only when it qualifies the same way.
+ * The post that is ours: a key that was not in the baseline AND (when its id carries a time) was
+ * created no earlier than `notBefore` AND whose OWN text (the post's text node, not quoted posts or
+ * comments) contains the FULL submitted caption, normalised by bindText() only, AND the
+ * submission's evidence string (the listing id, or the education topic line). A new key without
+ * that (a promo, a reshare, a processing video, an older post of the same listing that the
+ * baseline missed) is not proof. `prefer` (the success toast's key) is taken first, but only when
+ * it qualifies the same way. `shortLinks` (LinkedIn only) lets an lnkd.in link stand for the caption's.
  */
-export function bindNewPost(candidates, before, { caption, evidence }, { prefer = null } = {}) {
-  const want = bindText(caption), must = bindText(evidence);
+export function bindNewPost(candidates, before, { caption, evidence }, { prefer = null, notBefore = null, shortLinks = false } = {}) {
+  const links = captionLinks(caption), opt = { shortLinks };
+  const want = bindText(caption, links, opt), must = bindText(evidence, links, opt);
   if (!want || !must) return null;
   const seen = new Set(before);
-  const ok = candidates.filter(c => !seen.has(c.key) && bindText(c.text).includes(want) && bindText(c.text).includes(must));
+  const tooOld = key => { if (notBefore == null) return false; const t = idTime(key); return t != null && t < notBefore; };
+  const ok = candidates.filter(c => { if (seen.has(c.key) || tooOld(c.key)) return false; const t = bindText(c.text, links, opt); return t.includes(want) && t.includes(must); });
   if (!ok.length) return null;
   if (prefer && ok.some(c => c.key === prefer)) return prefer;
   return ok.map(c => c.key).sort(newer).at(-1);
@@ -196,10 +285,14 @@ export async function tiktokPost(s, { handle, caption, polls = 20, every = 1500 
   }
   return postNow ? 'post-now-no-signal' : 'no-signal';
 }
-/** One video's own page: the video's own description element only (never comments, never truncated meta tags). */
+/**
+ * One video's own page: the video's own description element only (never comments, never truncated
+ * meta tags). A page that never shows the description is checked for a login / captcha / block
+ * page, which is thrown so the confirmation records it under this page's URL.
+ */
 async function tiktokVideoText(s, handle, id) {
   await s.navigate(`https://www.tiktok.com/@${handle}/video/${id}`);
-  await s.waitFor(`document.querySelector(${q(SELECTORS.tiktok.videoDesc)})`, 15_000);
+  if (!await s.waitFor(`document.querySelector(${q(SELECTORS.tiktok.videoDesc)})`, 15_000)) await stop(s, tiktokBlocker);
   const own = `[...document.querySelectorAll(${q(SELECTORS.tiktok.videoDesc)})].find(e => !e.closest('[data-e2e*="comment"], [class*="Comment"]'))`;
   // A long description is collapsed behind a "more" toggle next to it: expand it before reading.
   await s.ev(`/*expand*/(() => { const d = ${own}; const box = d?.parentElement; if (!box) return 0; let n = 0;
@@ -208,22 +301,46 @@ async function tiktokVideoText(s, handle, id) {
   await sleep(600);
   return s.ev(`(${own}?.innerText) || ''`);
 }
-/** Poll the profile and Studio for a new video id whose own page shows the caption head. URL or null. */
-export async function tiktokConfirm(s, handle, before, { caption = '', evidence = '', timeoutMs = 6 * 60_000, every = 20_000, settleMs = 2000 } = {}) {
+/**
+ * Why the confirmation could not see the post, per page: a page that refused (login, captcha, block
+ * page, an HTTP refusal) is remembered under its URL and forgotten only when THAT page later loads
+ * normally, so a transient refusal is not reported and another page loading does not hide a lasting
+ * one. `report.blocked` always holds the current lasting reasons (or null). Non-refusal errors are ignored.
+ */
+function trackRefusals(report) {
+  const by = new Map();
+  const sync = () => { if (report) report.blocked = by.size ? [...new Set(by.values())].join('; ') : null; };
+  return {
+    set(url, e) { if (e && (e.kind === 'blocked' || e.kind === 'captcha' || e.kind === 'not-logged-in' || e.kind === 'verification')) { by.set(url, e.message); sync(); } },
+    clear(url) { if (by.delete(url)) sync(); },
+  };
+}
+/**
+ * Poll the profile and Studio for a new video id whose own page shows the caption head. URL or null.
+ * `report.blocked` is set to the reason when a page the confirmation needed was a login, captcha or
+ * block page (2026-10-21: TikTok answered "Access denied / HTTP 403" right after a Post), so the
+ * uncertain record and the alert say why the post could not be seen.
+ */
+export async function tiktokConfirm(s, handle, before, { caption = '', evidence = '', timeoutMs = 6 * 60_000, every = 20_000, settleMs = 2000, report = null, notBefore = null } = {}) {
   const t0 = Date.now(), checked = new Map();
+  const refusals = trackRefusals(report);
   while (Date.now() - t0 < timeoutMs) {
     for (const [url, settled] of [[URLS.tiktokProfile(handle), profileSettled], [URLS.tiktokContent, studioSettled]]) {
       try {
         await s.navigate(url);
-        await s.waitFor(settled, 15_000);
+        if (!await s.waitFor(settled, 15_000)) {
+          const b = await tiktokBlocker(s).catch(() => null);
+          if (b) { refusals.set(url, b); continue; }
+        } else refusals.clear(url);
         await sleep(settleMs);
         for (const id of (await tiktokVideoIds(s, handle)).filter(x => !before.includes(x))) {
-          if (!checked.get(id)) checked.set(id, await tiktokVideoText(s, handle, id).catch(() => ''));
-          const key = bindNewPost([...checked].map(([key, text]) => ({ key, text })), before, { caption, evidence });
+          const page = `${URLS.tiktokProfile(handle)}/video/${id}`;
+          if (!checked.get(id)) checked.set(id, await tiktokVideoText(s, handle, id).then(t => { refusals.clear(page); return t; }, e => { refusals.set(page, e); return ''; }));
+          const key = bindNewPost([...checked].map(([key, text]) => ({ key, text })), before, { caption, evidence }, { notBefore });
           if (key) return `https://www.tiktok.com/@${handle}/video/${key}`;
           checked.delete(id); // not (yet) ours: a processing video may show its description on the next round
         }
-      } catch { /* page still loading; try again */ }
+      } catch (e) { refusals.set(url, e); /* otherwise the page is still loading; try again */ }
     }
     await sleep(every);
   }
@@ -257,14 +374,18 @@ export const linkedinPostCandidates = s => s.ev(`(() => { const POST = '[data-ur
   }); })()`);
 /**
  * The post's full own text from its detail page (/feed/update/<urn>/), with any "…see more" toggle
- * inside that post expanded first, so a long caption is compared in full.
+ * inside that post expanded first, so a long caption is compared in full. A page that never shows
+ * the post is checked for a login / security check / block page — a Cloudflare page loads with a
+ * body, so the navigation itself succeeds (2026-11-08) — which is thrown so the confirmation records
+ * it under this page's URL.
  */
 async function linkedinFullText(s, key, { settleMs = 1500 } = {}) {
   const [type, id] = String(key).split(':');
   const urn = `urn:li:${type}:${id}`;
   const sel = `[data-urn="${urn}"], [data-id="${urn}"], [data-activity-urn="${urn}"]`;
   await s.navigate(linkedinUrl(key));
-  await s.waitFor(`!!document.querySelector(${q(sel)})`, 15_000);
+  // The exact selector can miss a post whose URN sits inside a longer attribute; the candidate scan still finds it.
+  if (!await s.waitFor(`!!document.querySelector(${q(sel)})`, 15_000) && !(await linkedinPostCandidates(s).catch(() => [])).some(c => c.key === key)) await stop(s, linkedinBlocker);
   await s.ev(`/*expand*/(() => { const e = document.querySelector(${q(sel)}); if (!e) return 0; let n = 0;
     for (const b of e.querySelectorAll('button, [role="button"]')) if (/^(…|\\.\\.\\.)?\\s*(see more|more|المزيد)$/i.test((b.innerText || '').trim()) && !b.closest('.comments-comments-list')) { b.click(); n++; }
     return n; })()`);
@@ -396,24 +517,29 @@ export async function linkedinPost(s, { companyId, pageName, caption } = {}) {
   return link || 'no-signal';
 }
 /** A new URN whose OWN post element shows the caption head, on the admin list or the public page. URL (of its real URN type) or null. */
-export async function linkedinConfirm(s, companyId, before, { toast = null, caption = '', evidence = '', timeoutMs = 4 * 60_000, every = 15_000, settleMs = 3000 } = {}) {
+export async function linkedinConfirm(s, companyId, before, { toast = null, caption = '', evidence = '', timeoutMs = 4 * 60_000, every = 15_000, settleMs = 3000, report = null, notBefore = null } = {}) {
   const m = /urn:li:(activity|share|ugcPost):(\d+)/.exec(decodeURIComponent(String(toast ?? '')));
   const prefer = m ? `${m[1]}:${m[2]}` : null;
   const t0 = Date.now();
+  const refusals = trackRefusals(report);
   while (Date.now() - t0 < timeoutMs) {
     for (const [url, settled] of [[URLS.linkedinPosts(companyId), postsSettled], [URLS.linkedinPublic(companyId), publicSettled]]) {
       try {
         await s.navigate(url);
-        await s.waitFor(settled, 15_000);
+        if (!await s.waitFor(settled, 15_000)) {
+          const b = await linkedinBlocker(s).catch(() => null);
+          if (b) { refusals.set(url, b); continue; }
+        } else refusals.clear(url);
         await sleep(settleMs);
         // Feed lists clamp long posts: each new top-level post is read in full from its own page first.
         const fresh = (await linkedinPostCandidates(s)).filter(c => !before.includes(c.key)).map(c => c.key);
         const order = prefer && fresh.includes(prefer) ? [prefer, ...fresh.filter(k => k !== prefer)] : fresh;
         const full = [];
-        for (const k of order.slice(0, 5)) full.push({ key: k, text: await linkedinFullText(s, k, { settleMs }) });
-        const key = bindNewPost(full, before, { caption, evidence }, { prefer });
+        // A post page that refuses (or fails) gives no text, so it cannot bind; its refusal is kept under its own URL.
+        for (const k of order.slice(0, 5)) full.push({ key: k, text: await linkedinFullText(s, k, { settleMs }).then(t => { refusals.clear(linkedinUrl(k)); return t; }, e => { refusals.set(linkedinUrl(k), e); return ''; }) });
+        const key = bindNewPost(full, before, { caption, evidence }, { prefer, notBefore, shortLinks: true });
         if (key) return linkedinUrl(key);
-      } catch { /* loading */ }
+      } catch (e) { refusals.set(url, e); /* otherwise loading */ }
     }
     await sleep(every);
   }
