@@ -1270,3 +1270,42 @@ test('R7: when the candidate scan itself fails on a post page, the block page is
   assert.equal(await SITES.linkedinConfirm(s, '145349037', [], { caption: 'Villa BONA-A', evidence: 'BONA-A', report, timeoutMs: 30, every: 0, settleMs: 0 }), null);
   assert.match(report.blocked ?? '', /LinkedIn refused this browser \(Cloudflare/);
 });
+
+// ================================================================== 2026-11-11: Bona's own Chrome is a real (minimised) window
+test('2026-11-11: every tab the publisher opens behaves as focused (focus emulation), before the first navigation', async () => {
+  // A tab in Bona's own visible Chrome reports document.hasFocus() === false (the old headless one
+  // always counted as focused); TikTok's editor then lost 16 of 574 caption characters in the 11-11 dry run.
+  const methods = [];
+  class Recorder {
+    constructor() { setTimeout(() => this.onopen?.()); }
+    send(raw) {
+      const d = JSON.parse(raw); methods.push(d.method);
+      const result = d.method === 'Runtime.evaluate' ? { result: { value: true } } : {};
+      setTimeout(() => {
+        this.onmessage({ data: JSON.stringify({ id: d.id, result }) });
+        if (d.method === 'Page.navigate') this.onmessage({ data: JSON.stringify({ method: 'Page.loadEventFired', params: {} }) });
+      });
+    }
+    close() {}
+  }
+  const fetchImpl = async url => {
+    if (url.endsWith('/json/version')) return { ok: true, json: async () => ({}) };
+    if (url.includes('/json/new')) return { ok: true, json: async () => ({ id: 'TAB1', webSocketDebuggerUrl: 'ws://x' }) };
+    if (url.includes('/json/close/')) return { ok: true };
+    throw new Error(url);
+  };
+  assert.equal(await withTab('https://www.tiktok.com/tiktokstudio/upload', async () => 'ok', { fetchImpl, WebSocketImpl: Recorder, ensureScript: null }), 'ok');
+  const focus = methods.indexOf('Emulation.setFocusEmulationEnabled');
+  assert.ok(focus >= 0, 'focus emulation is enabled');
+  assert.ok(focus < methods.indexOf('Page.navigate'), 'before the first page loads');
+  assert.ok(!methods.includes('Page.bringToFront'), 'the window is never raised on the owner\'s screen');
+});
+
+test('2026-11-11: a caption-box mismatch says WHERE the held text differs, so a failed run can be diagnosed from its log', () => {
+  const want = 'نوبال 5، الروضة\nالروضة، جدة · للبيع\n\nBONA-014\n\n#عقارات_جدة #جدة #بونا #BonaRealEstate #AlRawdah';
+  assert.throws(() => checkCaptionHeld(want.replace('#BonaRealEstate ', ''), want), e =>
+    e.kind === 'caption-mismatch' && /have \d+ chars, want \d+/.test(e.message) && /first difference at char \d+/.test(e.message)
+    && /want "BonaRealEstate #AlRawdah"/.test(e.message));
+  assert.throws(() => checkCaptionHeld(want.split('\n').slice(1).join('\n'), want), e => /first difference at char 0/.test(e.message) && e.message.includes('نوبال'), 'a dropped first line');
+  assert.throws(() => checkCaptionHeld(want.slice(0, -9), want), e => /held text ends early|first difference at char/.test(e.message), 'a cut-off end');
+});

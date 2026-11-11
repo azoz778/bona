@@ -251,9 +251,17 @@ export async function tiktokFill(s, winFile, caption, { uploadTimeoutMs = 10 * 6
     try { checkCaptionHeld(held, caption); return held; } catch (e) { if (attempt >= 3) throw e; }
   }
 }
+/** Where two normalised texts first differ, with a short excerpt of each from there (captions are public text). */
+export function firstDifference(have, want, span = 40) {
+  let i = 0;
+  while (i < have.length && i < want.length && have[i] === want[i]) i++;
+  if (i === have.length && i < want.length) return `held text ends early at char ${i}; want "${want.slice(i, i + span)}"`;
+  return `first difference at char ${i}: have "${have.slice(i, i + span)}", want "${want.slice(i, i + span)}"`;
+}
 /** The editor must hold the caption: same text once whitespace is normalised (editors add blank blocks). */
 export function checkCaptionHeld(held, caption) {
-  if (norm(held) !== norm(caption)) throw new BrowserError('caption-mismatch', `Caption box does not hold the caption (have ${norm(held).length} chars, want ${norm(caption).length})`);
+  const have = norm(held), want = norm(caption);
+  if (have !== want) throw new BrowserError('caption-mismatch', `Caption box does not hold the caption (have ${have.length} chars, want ${want.length}; ${firstDifference(have, want)})`);
 }
 /** The same check right before Post: a mismatch there means nothing was clicked. */
 const assertHeldBeforeClick = (held, caption) => { try { checkCaptionHeld(held, caption); } catch (e) { throw notClicked(e); } };
