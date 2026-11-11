@@ -158,8 +158,9 @@ export async function connect(target, { WebSocketImpl = globalThis.WebSocket, co
     /**
      * Make the page behave as focused although its window is not (Bona's Chrome is a real window,
      * started minimised: document.hasFocus() is false there, while the old headless Chrome always
-     * counted as focused). Rich editors drop typed input in an unfocused page — TikTok's caption box
-     * lost 16 of 574 characters in the 2026-11-11 dry run. Never raises the window (no bringToFront).
+     * counted as focused). Rich editors can drop typed input in an unfocused page — most likely why
+     * TikTok's caption box lost 16 of 574 characters in the 2026-11-11 dry run. It lasts for this
+     * session across navigations (checked on Chrome 157). Never raises the window (no bringToFront).
      */
     async focus() {
       await send('Emulation.setFocusEmulationEnabled', { enabled: true });
