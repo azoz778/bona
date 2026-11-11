@@ -1257,3 +1257,16 @@ test('R6: add-browser-monitors.py — existing monitors are resumed without any 
     assert.equal(calls.some(c => c[0] === 'resume'), false, 'created paused, not resumed without --resume');
   } finally { b.done(); }
 });
+
+test('R7: when the candidate scan itself fails on a post page, the block page is still checked and reported', async () => {
+  let cur = '';
+  const s = { navigate: async u => { cur = u; }, url: async () => cur, waitFor: async () => (cur.includes('/feed/update/') ? null : true),
+    ev: async e => {
+      if (e.includes('document.title')) return cur.includes('/feed/update/') ? { title: 'Attention Required! | Cloudflare', body: '' } : { title: 'Bona', body: '' };
+      if (e.includes('flatMap')) { if (cur.includes('/feed/update/')) throw new Error('eval: Execution context was destroyed'); return [{ key: 'activity:1000000009', text: 'Villa BONA-A' }]; }
+      return null;
+    } };
+  const report = { blocked: null };
+  assert.equal(await SITES.linkedinConfirm(s, '145349037', [], { caption: 'Villa BONA-A', evidence: 'BONA-A', report, timeoutMs: 30, every: 0, settleMs: 0 }), null);
+  assert.match(report.blocked ?? '', /LinkedIn refused this browser \(Cloudflare/);
+});

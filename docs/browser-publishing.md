@@ -167,8 +167,8 @@ both channels sat blocked for 18 days with the alerts only in `<channel>/alerts.
    checked the same way, because a block page with a body (Cloudflare on `/feed/update/…`, a TikTok
    captcha) loads without any navigation error. Block pages are recognised by their structure only:
    an empty-body HTTP error fails the navigation itself (`net::ERR_HTTP_RESPONSE_CODE_FAILURE`) and
-   Chrome's error page shows the status (read only once that error page is the document, never from
-   the page before it). On it, and on any `chrome-error://` page, HTTP 401/403/429 or 999 (LinkedIn's
+   Chrome's error page shows the status (read only from a Chrome error page, not from an ordinary page
+   still showing before it). On it, and on any `chrome-error://` page, HTTP 401/403/429 or 999 (LinkedIn's
    "Request denied"), or `ERR_BLOCKED_BY_RESPONSE`, is `blocked`; any other status (404, 410, an empty
    500/503) is "answered HTTP nnn" and a network error (`ERR_INTERNET_DISCONNECTED`, …) "did not
    load", both `navigation` (one rule, `isRefusalStatus()` in `lib/cdp.mjs`). Cloudflare's page is
@@ -355,25 +355,34 @@ the next run, because each run syncs `~/bona-publish` to `origin/main`.
    as it stands, and its guard compares it with the LOCAL `origin/main` ref without fetching:
    `bash ~/bona-publish/ops/systemd/sync-publish-tree.sh ~/bona-publish` must end "now at" (or
    "already at") `origin/main (<the merge commit>)`. Then `bash ~/bona-publish/ops/systemd/install-browser.sh`
-   (without `--enable` when the timers are already on); `systemctl --user cat bona-browser@.service | grep BONA_`
-   must show `BONA_CDP_URL=http://localhost:9230`.
+   (without `--enable` when the timers are already on); `systemctl --user cat bona-browser@.service | grep '^Environment=BONA_'`
+   must show `BONA_CDP_URL=http://localhost:9230` (and `BONA_CHROME_ENSURE`).
 2. `bash ~/bona-publish/ops/systemd/bona-chrome.sh`, and a human logs in to both accounts in it
    (see "Log in" above: `bona-chrome.sh show https://www.linkedin.com/login`, the same for TikTok).
    A fresh profile is logged out, so a dry run before this fails with `not logged in`.
 3. Settle any `uncertain` day (above) OUTSIDE both windows (TikTok 21:30–23:30, LinkedIn Sun–Thu
    09:00–12:00), or with both timers stopped (`systemctl --user stop bona-browser@tiktok.timer
-   bona-browser@linkedin.timer`): once the blocking line is settled, the next in-window tick posts
-   live. Then a dry run per channel and a look at its screenshots; start stopped timers again after.
+   bona-browser@linkedin.timer`) — and in both cases only once no run is in progress:
+   `systemctl --user is-active bona-browser@tiktok.service bona-browser@linkedin.service` must print
+   `inactive` (or `failed`) twice; stopping a timer does not stop a run it already started, and a run
+   must never be killed mid-post. Once the blocking line is settled the next in-window tick posts live.
+   Then a dry run per channel and a look at its screenshots. Starting a stopped timer again INSIDE its
+   window fires the missed run at once (`Persistent=true`), so it posts live right then.
 4. Resume the Kuma monitors (`add-browser-monitors.py --resume`).
 
-**Rollback:** revert the merge on `main` and push; then `sync-publish-tree.sh` (as in step 1, it must
-end at the revert commit) and `install-browser.sh` AGAIN, and `systemctl --user cat
-bona-browser@.service | grep BONA_` must print nothing. Without the reinstall the installed unit keeps
-the new `Environment=` lines, and the reverted code still obeys them: it drives `:9230` with
-`BONA_CHROME_ENSURE` pointing at the `bona-chrome.sh` the revert removed, so after the next reboot no
-run can start a Chrome. With it, the reverted code goes back to the shared `:9222` Chrome that
-LinkedIn blocks and TikTok logged out (see above) — so also STOP both timers
-(`systemctl --user stop bona-browser@tiktok.timer bona-browser@linkedin.timer`) until a fix lands again.
+**Rollback:** FIRST `systemctl --user disable --now bona-browser@tiktok.timer bona-browser@linkedin.timer`
+(`disable`, so a WSL restart or re-login does not start them again; once the revert is pushed the next
+tick would sync to the reverted code and run it under the still-new unit) and wait until
+`systemctl --user is-active bona-browser@tiktok.service bona-browser@linkedin.service` prints no
+`active`/`activating`. Then revert the merge on `main` and push; `sync-publish-tree.sh` (as in step 1,
+it must end at the revert commit) and `install-browser.sh` AGAIN; `systemctl --user cat
+bona-browser@.service | grep '^Environment=BONA_'` must print nothing (the old unit still names
+`BONA_LOCK_FD` in its ExecStart, so a bare `grep BONA_` always prints). Without the reinstall the
+installed unit keeps the new `Environment=` lines, and the reverted code still obeys them: it drives
+`:9230` with `BONA_CHROME_ENSURE` pointing at the `bona-chrome.sh` the revert removed, so after the
+next reboot no run can start a Chrome. With it, the reverted code drives the shared `:9222` Chrome that
+LinkedIn blocks and TikTok logged out (see above) — so leave both timers disabled until a fix lands
+again (`systemctl --user enable --now …` then).
 
 Note: `marketing/daily/property-policy.json` still lists `channels: ["instagram","facebook"]`
 because `property-publish.mjs` checks that list exactly; the TikTok/LinkedIn scope is this
