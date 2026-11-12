@@ -6658,6 +6658,161 @@
     "licence": null
   },
   {
+    "id": "BONA-W022",
+    "slug": "seafront-villa-al-lulu-north-obhur",
+    "sourceRef": "WA-20261112-AC38FD",
+    "status": "available",
+    "category": "buy",
+    "type": "villa",
+    "kind": "house",
+    "featured": false,
+    "title": {
+      "en": "Seafront Villa, Al-Lulu', North Obhur",
+      "ar": "فيلا على البحر، حي اللؤلؤ، أبحر الشمالية"
+    },
+    "location": {
+      "district": {
+        "en": "Al-Lulu', North Obhur",
+        "ar": "حي اللؤلؤ، أبحر الشمالية"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 11000000,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": null,
+      "baths": null,
+      "areaSqm": null,
+      "plotSqm": null,
+      "yearBuilt": null,
+      "floors": 2
+    },
+    "images": [
+      {
+        "src": "/listings/seafront-villa-al-lulu-north-obhur/01.jpg",
+        "thumb": "/listings/seafront-villa-al-lulu-north-obhur/01-thumb.webp",
+        "alt": {
+          "en": "Pool and marina from the upper balcony — Seafront Villa, Al-Lulu', North Obhur",
+          "ar": "المسبح والمرسى من الشرفة العلوية — فيلا على البحر، حي اللؤلؤ، أبحر الشمالية"
+        }
+      },
+      {
+        "src": "/listings/seafront-villa-al-lulu-north-obhur/02.jpg",
+        "thumb": "/listings/seafront-villa-al-lulu-north-obhur/02-thumb.webp",
+        "alt": {
+          "en": "Villa façade and entrance — Seafront Villa, Al-Lulu', North Obhur",
+          "ar": "واجهة الفيلا والمدخل — فيلا على البحر، حي اللؤلؤ، أبحر الشمالية"
+        }
+      },
+      {
+        "src": "/listings/seafront-villa-al-lulu-north-obhur/03.jpg",
+        "thumb": "/listings/seafront-villa-al-lulu-north-obhur/03-thumb.webp",
+        "alt": {
+          "en": "View across the water — Seafront Villa, Al-Lulu', North Obhur",
+          "ar": "الإطلالة على البحر — فيلا على البحر، حي اللؤلؤ، أبحر الشمالية"
+        }
+      },
+      {
+        "src": "/listings/seafront-villa-al-lulu-north-obhur/04.jpg",
+        "thumb": "/listings/seafront-villa-al-lulu-north-obhur/04-thumb.webp",
+        "alt": {
+          "en": "Private swimming pool — Seafront Villa, Al-Lulu', North Obhur",
+          "ar": "المسبح الخاص — فيلا على البحر، حي اللؤلؤ، أبحر الشمالية"
+        }
+      },
+      {
+        "src": "/listings/seafront-villa-al-lulu-north-obhur/05.jpg",
+        "thumb": "/listings/seafront-villa-al-lulu-north-obhur/05-thumb.webp",
+        "alt": {
+          "en": "Garden and moorings — Seafront Villa, Al-Lulu', North Obhur",
+          "ar": "الحديقة والمرسى — فيلا على البحر، حي اللؤلؤ، أبحر الشمالية"
+        }
+      },
+      {
+        "src": "/listings/seafront-villa-al-lulu-north-obhur/06.jpg",
+        "thumb": "/listings/seafront-villa-al-lulu-north-obhur/06-thumb.webp",
+        "alt": {
+          "en": "Side garden and pool — Seafront Villa, Al-Lulu', North Obhur",
+          "ar": "الحديقة الجانبية والمسبح — فيلا على البحر، حي اللؤلؤ، أبحر الشمالية"
+        }
+      },
+      {
+        "src": "/listings/seafront-villa-al-lulu-north-obhur/07.jpg",
+        "thumb": "/listings/seafront-villa-al-lulu-north-obhur/07-thumb.webp",
+        "alt": {
+          "en": "Garden walk — Seafront Villa, Al-Lulu', North Obhur",
+          "ar": "ممرات الحديقة — فيلا على البحر، حي اللؤلؤ، أبحر الشمالية"
+        }
+      },
+      {
+        "src": "/listings/seafront-villa-al-lulu-north-obhur/08.jpg",
+        "thumb": "/listings/seafront-villa-al-lulu-north-obhur/08-thumb.webp",
+        "alt": {
+          "en": "Main entrance — Seafront Villa, Al-Lulu', North Obhur",
+          "ar": "المدخل الرئيسي — فيلا على البحر، حي اللؤلؤ، أبحر الشمالية"
+        }
+      },
+      {
+        "src": "/listings/seafront-villa-al-lulu-north-obhur/09.jpg",
+        "thumb": "/listings/seafront-villa-al-lulu-north-obhur/09-thumb.webp",
+        "alt": {
+          "en": "Sitting and dining rooms — Seafront Villa, Al-Lulu', North Obhur",
+          "ar": "المجلس وغرفة الطعام — فيلا على البحر، حي اللؤلؤ، أبحر الشمالية"
+        }
+      },
+      {
+        "src": "/listings/seafront-villa-al-lulu-north-obhur/10.jpg",
+        "thumb": "/listings/seafront-villa-al-lulu-north-obhur/10-thumb.webp",
+        "alt": {
+          "en": "Staircase — Seafront Villa, Al-Lulu', North Obhur",
+          "ar": "الدرج — فيلا على البحر، حي اللؤلؤ، أبحر الشمالية"
+        }
+      }
+    ],
+    "videos": [],
+    "description": {
+      "en": "A two-storey villa directly on the seafront in Al-Lulu', North Obhur, looking across the water to the moorings and the far shore. The house sits behind a landscaped garden of palms, lawns and bougainvillea, with a private swimming pool set between the villa and the sea.\n\nInside, the finish is Mediterranean in character: terracotta floors, exposed timber ceiling beams, wrought-iron balustrades and a staircase lit by a tall arched window. The ground floor holds the reception, a formal sitting room, a dining room and a kitchen whose window faces the pool and the water. Balconies and terraces on the upper floor take in the view.",
+      "ar": "فيلا من دورين تقع مباشرة على البحر في حي اللؤلؤ بأبحر الشمالية، وتطل على المرسى والضفة المقابلة. تحيط بها حديقة منسقة بالنخيل والمسطحات الخضراء والجهنمية، ويقع المسبح الخاص بين المنزل والبحر.\n\nيغلب على التصميم الداخلي الطابع المتوسطي، مع أرضيات من التيراكوتا وأسقف بجسور خشبية ظاهرة ودرابزين من الحديد المشغول ودرج تنيره نافذة مقوسة طويلة. يضم الدور الأرضي الاستقبال ومجلساً وغرفة طعام ومطبخاً تطل نافذته على المسبح والبحر، بينما تطل الشرفات والتراسات في الدور العلوي على الواجهة البحرية."
+    },
+    "highlights": {
+      "en": [
+        "Directly on the seafront",
+        "Private swimming pool",
+        "Landscaped garden with palms",
+        "Balconies and terraces",
+        "Terracotta floors, timber beams"
+      ],
+      "ar": [
+        "على البحر مباشرة",
+        "مسبح خاص",
+        "حديقة منسقة بالنخيل",
+        "شرفات وتراسات",
+        "أرضيات تيراكوتا وجسور خشبية"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": "https://bona-real-estate.com/listings/seafront-villa-al-lulu-north-obhur/brochure.pdf",
+    "project": null,
+    "unit": null,
+    "map": null,
+    "mapPrecision": null,
+    "listedAt": "2026-11-12",
+    "licence": null
+  },
+  {
     "id": "BONA-W021",
     "slug": "the-river-residences-al-salamah-jeddah",
     "sourceRef": "WA-20261110-AC9993",

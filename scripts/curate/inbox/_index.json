@@ -1,5 +1,5 @@
 {
-  "nextSeq": 22,
+  "nextSeq": 23,
   "listings": {
     "kian-residence-apartments-al-nahda": "BONA-W001",
     "nuzul-khayala-residences-north-jeddah": "BONA-W002",
@@ -21,6 +21,7 @@
     "elemental-residences-al-rawabi": "BONA-W018",
     "private-villa-al-khalidiyah": "BONA-W019",
     "baroque-palace-residence-hampstead": "BONA-W020",
-    "the-river-residences-al-salamah-jeddah": "BONA-W021"
+    "the-river-residences-al-salamah-jeddah": "BONA-W021",
+    "seafront-villa-al-lulu-north-obhur": "BONA-W022"
   }
 }

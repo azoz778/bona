@@ -1,6 +1,6 @@
 # Bona (بونا) — full knowledge file
 
-Last generated: 2026-11-10. Canonical site: https://bona-real-estate.com/ (Arabic: https://bona-real-estate.com/ar/).
+Last generated: 2026-11-12. Canonical site: https://bona-real-estate.com/ (Arabic: https://bona-real-estate.com/ar/).
 
 ## What Bona is
 
@@ -45,7 +45,7 @@ Values:
 Team:
 - Abdulaziz Zaidan (عبدالعزيز زيدان) — Founder & Principal (المؤسس والشريك الرئيسي), REGA FAL licence 1100313556. Bona has no other agents; anyone else claiming to act for Bona should be verified on WhatsApp +966 59 329 6933.
 
-Key figures (as of 2026-11-10): Residences represented: 29 · Jeddah districts: 12 · Countries: 5 · Founded: 2026.
+Key figures (as of 2026-11-12): Residences represented: 29 · Jeddah districts: 12 · Countries: 5 · Founded: 2026.
 
 More: https://bona-real-estate.com/about/ · Arabic: https://bona-real-estate.com/ar/about/
 
@@ -277,11 +277,11 @@ Full FAQ: https://bona-real-estate.com/faq/ · Arabic: https://bona-real-estate.
 
 What Bona collects when you use this site or contact us, why, and your rights under the Saudi Personal Data Protection Law (PDPL) and its Implementing Regulations. Written to be read, not filed. The Arabic text is the authoritative version. Full policy (updated 2026-10-01): https://bona-real-estate.com/privacy/ · Arabic: https://bona-real-estate.com/ar/privacy/. In short: the site is static and sets no cookies; enquiry forms open WhatsApp and nothing is stored by the site; analytics (GA4 / Meta Pixel) are built in but currently disabled; data subjects have PDPL rights of access, correction, deletion and consent withdrawal via WhatsApp +966 59 329 6933.
 
-## Listings (49 live)
+## Listings (51 live)
 
-Grouped by kind: Houses 18 · Apartments 23 · Land 8.
+Grouped by kind: Houses 19 · Apartments 24 · Land 8.
 
-## Houses (18) — https://bona-real-estate.com/properties/houses/
+## Houses (19) — https://bona-real-estate.com/properties/houses/
 
 ### Private Beach Villa, Durrat Al Arous — فيلا بشاطئ خاص، درة العروس
 - ID: BONA-001 (ref VIL-013)
@@ -773,6 +773,28 @@ Outdoor space includes a private garden and, on the roof level, a plunge pool wi
 
 Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Sadana%20Townhouse%2C%20Al%20Rawdah%20(BONA-W011).
 
+### Seafront Villa, Al-Lulu', North Obhur — فيلا على البحر، حي اللؤلؤ، أبحر الشمالية
+- ID: BONA-W022 (ref WA-20261112-AC38FD)
+- URL: https://bona-real-estate.com/properties/seafront-villa-al-lulu-north-obhur/ · Arabic: https://bona-real-estate.com/ar/properties/seafront-villa-al-lulu-north-obhur/
+- Kind: House · Type: Villa · Category: For sale · Status: available
+- Location: Al-Lulu', North Obhur, Jeddah, Saudi Arabia (حي اللؤلؤ، أبحر الشمالية، جدة)
+- Asking price: SAR 11,000,000
+- Highlights: Directly on the seafront; Private swimming pool; Landscaped garden with palms; Balconies and terraces; Terracotta floors, timber beams
+- المميزات: على البحر مباشرة؛ مسبح خاص؛ حديقة منسقة بالنخيل؛ شرفات وتراسات؛ أرضيات تيراكوتا وجسور خشبية
+- Brochure: https://bona-real-estate.com/listings/seafront-villa-al-lulu-north-obhur/brochure.pdf
+- Listed: 2026-11-12
+- Images: /listings/seafront-villa-al-lulu-north-obhur/01.jpg , /listings/seafront-villa-al-lulu-north-obhur/02.jpg , /listings/seafront-villa-al-lulu-north-obhur/03.jpg , /listings/seafront-villa-al-lulu-north-obhur/04.jpg , /listings/seafront-villa-al-lulu-north-obhur/05.jpg , /listings/seafront-villa-al-lulu-north-obhur/06.jpg
+
+A two-storey villa directly on the seafront in Al-Lulu', North Obhur, looking across the water to the moorings and the far shore. The house sits behind a landscaped garden of palms, lawns and bougainvillea, with a private swimming pool set between the villa and the sea.
+
+Inside, the finish is Mediterranean in character: terracotta floors, exposed timber ceiling beams, wrought-iron balustrades and a staircase lit by a tall arched window. The ground floor holds the reception, a formal sitting room, a dining room and a kitchen whose window faces the pool and the water. Balconies and terraces on the upper floor take in the view.
+
+فيلا من دورين تقع مباشرة على البحر في حي اللؤلؤ بأبحر الشمالية، وتطل على المرسى والضفة المقابلة. تحيط بها حديقة منسقة بالنخيل والمسطحات الخضراء والجهنمية، ويقع المسبح الخاص بين المنزل والبحر.
+
+يغلب على التصميم الداخلي الطابع المتوسطي، مع أرضيات من التيراكوتا وأسقف بجسور خشبية ظاهرة ودرابزين من الحديد المشغول ودرج تنيره نافذة مقوسة طويلة. يضم الدور الأرضي الاستقبال ومجلساً وغرفة طعام ومطبخاً تطل نافذته على المسبح والبحر، بينما تطل الشرفات والتراسات في الدور العلوي على الواجهة البحرية.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Seafront%20Villa%2C%20Al-Lulu'%2C%20North%20Obhur%20(BONA-W022).
+
 ### Malfa Jeddah, Saah Villa, Al-Wareef — ملفى جدة، فيلا سعة، الوريف
 - ID: BONA-W004 (ref WA-20260906-ACBA8B)
 - URL: https://bona-real-estate.com/properties/wharf-destination-villas-jeddah/ · Arabic: https://bona-real-estate.com/ar/properties/wharf-destination-villas-jeddah/
@@ -802,7 +824,7 @@ Construction follows the Saudi Building Code, with porcelain flooring, washable 
 
 Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Malfa%20Jeddah%2C%20Saah%20Villa%2C%20Al-Wareef%20(BONA-W004).
 
-## Apartments (23) — https://bona-real-estate.com/properties/apartments/
+## Apartments (24) — https://bona-real-estate.com/properties/apartments/
 
 ### NOBAL 5, Al Rawdah — نوبال 5، الروضة
 - ID: BONA-014 (ref APT-030)
@@ -1396,6 +1418,34 @@ The project is built under the direct supervision of the Ministry of Housing, wi
 يُنفَّذ المشروع تحت إشراف مباشر من وزارة الإسكان، وتخضع جميع المواد المستخدمة لمطابقة مواصفات الهيئة السعودية للمواصفات والمقاييس. يُضمَن الهيكل الإنشائي والأنابيب الحرارية والعوازل المائية لمدة 10 سنوات لكل منها، بينما تُضمَن لوحات الكهرباء لمدة 20 عاماً. تشمل التشطيبات نوافذ زجاج مزدوج عازلة للحرارة، وعوازل حرارية للأسطح والجدران الخارجية، وسيراميك ورخام مطابقين للمواصفات السعودية.
 
 Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20Nuzul%20Khayala%20Residences%2C%20North%20Jeddah%20(BONA-W002).
+
+### The River Residences, Al Salamah, Jeddah — ذا ريفر، حي السلامة، جدة
+- ID: BONA-W021 (ref WA-20261110-AC9993)
+- URL: https://bona-real-estate.com/properties/the-river-residences-al-salamah-jeddah/ · Arabic: https://bona-real-estate.com/ar/properties/the-river-residences-al-salamah-jeddah/
+- Kind: Apartment · Type: Apartment · Category: Off-plan · Status: available
+- Location: Al Salamah, Jeddah, Saudi Arabia (السلامة، جدة)
+- Asking price: From SAR 650,000
+- Project: The River (ذا ريفر) · Developer: Sodasyat Real Estate
+- Coordinates: 21.593996, 39.152355
+- Highlights: Hotel-style studios; Landscaped water channel; Men's and women's wellness clubs; Children's play area; Smart entry and resident app
+- المميزات: استوديوهات بطابع فندقي؛ قناة مائية ومساحات خضراء؛ ناديان صحيان للرجال والنساء؛ منطقة لعب للأطفال؛ دخول ذكي وتطبيق للسكان
+- Brochure: https://bona-real-estate.com/listings/the-river-residences-al-salamah-jeddah/brochure.pdf
+- Listed: 2026-11-10
+- Images: /listings/the-river-residences-al-salamah-jeddah/01.jpg , /listings/the-river-residences-al-salamah-jeddah/02.jpg , /listings/the-river-residences-al-salamah-jeddah/03.jpg , /listings/the-river-residences-al-salamah-jeddah/04.jpg , /listings/the-river-residences-al-salamah-jeddah/05.jpg , /listings/the-river-residences-al-salamah-jeddah/06.jpg
+
+The River is a residential development in the Al Salamah district of Jeddah, offered as hotel-style studios. The building is set in two parallel blocks with a landscaped water channel running between them, and its façade is carved with arched windows and lit balconies.
+
+The unit mix runs from studios of about 70 sqm to larger apartments of up to 171 sqm. There are also two-level loft units of roughly 83 to 95 sqm, and apartments on the seventh floor. Outlooks vary by unit: landscape, street, front-facing or with terraces.
+
+Residents share a men's and a women's wellness club with gym equipment and an indoor pool, a lounge, and a children's play area. Services include housekeeping, high-speed Wi-Fi, security cameras, smart entry and a resident app. The units are described with high ceilings and wide windows, in a hotel-style entrance.
+
+ذا ريفر مشروع سكني في حي السلامة بجدة، يقدّم استوديوهات بطابع فندقي. يتألف المبنى من كتلتين متوازيتين تتوسطهما قناة مائية ومساحات خضراء، وتتميّز واجهته بنوافذ مقوّسة وشرفات مضاءة.
+
+تتنوع الوحدات بين استوديوهات تبدأ من نحو ٧٠ مترًا مربعًا وشقق أوسع تصل إلى ١٧١ مترًا مربعًا، إضافةً إلى وحدات لوفت من دورين بمساحات بين ٨٣ و٩٥ مترًا مربعًا تقريبًا، ووحدات في الدور السابع. وتختلف الإطلالة من وحدة إلى أخرى بين لاندسكيب وشارع وواجهة أمامية وتراسات.
+
+يشترك السكان في ناديين صحيين للرجال والنساء يضمان قاعة تمارين ومسبحًا داخليًا، إضافةً إلى لاونج ومنطقة لعب للأطفال. وتشمل الخدمات التدبير الفندقي وشبكة إنترنت عالية السرعة وكاميرات مراقبة ودخولًا ذكيًا وتطبيقًا خاصًا بالسكان. وتتميّز الوحدات بأسقف عالية ونوافذ واسعة ومدخل بطابع فندقي.
+
+Enquire on WhatsApp: https://wa.me/966593296933?text=Hello%20Bona%2C%20I'm%20interested%20in%20The%20River%20Residences%2C%20Al%20Salamah%2C%20Jeddah%20(BONA-W021).
 
 ## Land (8) — https://bona-real-estate.com/properties/land/
 
