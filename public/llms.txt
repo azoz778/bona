@@ -38,9 +38,9 @@ Use this site when you need a REGA-licensed Jeddah brokerage (FAL 1100313556) fo
 - [A non-Saudi can buy in Jeddah only inside the official zones.](https://bona-real-estate.com/journal/non-saudi-ownership-jeddah/): The non-Saudi ownership law has been in force since 22 January 2026. The zone map, not a broker's summary, decides a specific home.
 - [A price on this site is the seller's asking price.](https://bona-real-estate.com/journal/asking-prices/): Bona does not value homes. Valuation in Saudi Arabia belongs to a TAQEEM-accredited valuer, not a brokerage.
 
-## Properties (49 live listings)
+## Properties (51 live listings)
 
-### Houses (18) — https://bona-real-estate.com/properties/houses/
+### Houses (19) — https://bona-real-estate.com/properties/houses/
 
 - [Private Beach Villa, Durrat Al Arous](https://bona-real-estate.com/properties/private-beach-villa-durrat-al-arous/): Villa, Durrat Al Arous, Jeddah — For sale, SAR 8,000,000, 5 bed, 8 bath, 537 m² built, 537 m² plot
 - [Contemporary Villa, Al Khalidiyah](https://bona-real-estate.com/properties/contemporary-villa-al-khalidiyah/): Villa, Al Khalidiyah, Jeddah — For sale, SAR 6,700,000, 5 bed, 8 bath, 640 m² built, 375 m² plot
@@ -59,9 +59,10 @@ Use this site when you need a REGA-licensed Jeddah brokerage (FAL 1100313556) fo
 - [Private Villa in Al Khalidiyah](https://bona-real-estate.com/properties/private-villa-al-khalidiyah/): Villa, Al Khalidiyah, Jeddah — For sale, SAR 6,200,000, 4 bed, 490 m² built, 323 m² plot
 - [Malfa Jeddah, Rihab Villa, Al-Wareef](https://bona-real-estate.com/properties/rihab-villas-wajhat-al-warf/): Villa, Al-Wareef, Jeddah — Off-plan, Price on request, in Malfa Jeddah, 4 bed, 6 bath, 271.47 m² built, 275 m² plot
 - [Sadana Townhouse, Al Rawdah](https://bona-real-estate.com/properties/sadana-townhouse-al-rawdah/): Duplex, Al Rawdah, Jeddah — Off-plan, Price on request, 3 bed, 364.7 m² built
+- [Seafront Villa, Al-Lulu', North Obhur](https://bona-real-estate.com/properties/seafront-villa-al-lulu-north-obhur/): Villa, Al-Lulu', North Obhur, Jeddah — For sale, SAR 11,000,000
 - [Malfa Jeddah, Saah Villa, Al-Wareef](https://bona-real-estate.com/properties/wharf-destination-villas-jeddah/): Villa, Al-Wareef, Jeddah — Off-plan, Price on request, in Malfa Jeddah, 4 bed, 5 bath, 224.3 m² built, 250 m² plot
 
-### Apartments (23) — https://bona-real-estate.com/properties/apartments/
+### Apartments (24) — https://bona-real-estate.com/properties/apartments/
 
 - [NOBAL 5, Al Rawdah](https://bona-real-estate.com/properties/nobal-five-al-rawdah/): Apartment, Al Rawdah, Jeddah — For sale, SAR 1,800,000, 3 bed, 5 bath, 307 m² built
 - [Apartments, Al Zahra](https://bona-real-estate.com/properties/al-zahra-residences/): Apartment, Al Zahra, Jeddah — For sale, From SAR 1,450,000, 3 bed, 200 m² built, 3D tour available
@@ -86,6 +87,7 @@ Use this site when you need a REGA-licensed Jeddah brokerage (FAL 1100313556) fo
 - [Elemental, Al Rehab](https://bona-real-estate.com/properties/elemental-residences-al-rawabi/): Apartment, Al Rehab, Jeddah — Off-plan, From SAR 850,000, in Elemental
 - [Katheeb Residences, Laban District](https://bona-real-estate.com/properties/katheeb-residences-laban-district/): Apartment, Laban District, Riyadh — Off-plan, Price on request, in Katheeb, 3 bed
 - [Nuzul Khayala Residences, North Jeddah](https://bona-real-estate.com/properties/nuzul-khayala-residences-north-jeddah/): Apartment, Khayala Suburb, Jeddah — Off-plan, Price on request, in Nuzul Khayala
+- [The River Residences, Al Salamah, Jeddah](https://bona-real-estate.com/properties/the-river-residences-al-salamah-jeddah/): Apartment, Al Salamah, Jeddah — Off-plan, From SAR 650,000, in The River
 
 ### Land (8) — https://bona-real-estate.com/properties/land/
 
@@ -110,4 +112,4 @@ Use this site when you need a REGA-licensed Jeddah brokerage (FAL 1100313556) fo
 - [Arabic site](https://bona-real-estate.com/ar/)
 - [WhatsApp](https://wa.me/966593296933)
 
-Last generated: 2026-11-10
+Last generated: 2026-11-12
