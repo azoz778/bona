@@ -172,7 +172,17 @@ both channels sat blocked for 18 days with the alerts only in `<channel>/alerts.
    · 0 · 0 · 0`, or a processing / under-review label) go into the `published` line as `studio`:
    the click made that video whatever its status, so the day is done and is never posted again.
    LinkedIn reads the commentary block whose nearest post container is
-   that post (not a reshared post, not comments). The success toast's URN is taken first when it
+   that post (not a reshared post, not comments). Since 2026-11-15 LinkedIn often serves the post's
+   page as a server-driven screen (`data-sdui-screen="com.linkedin.sdui.flagshipnav.feed.UpdateDetail"`,
+   title "Post | LinkedIn") on which no element carries the post's URN and the markup inside changes
+   between visits (`data-view-name` markers at 00:19, none at 00:5x on 11-16, generated class names
+   both times). The 11-15 BONA-015 post was live, but nothing on its page was read, so it went
+   `uncertain`. On that page the post is named by the page itself: its address (after any redirect)
+   is still `/feed/update/<that urn>` and it is the one update-detail screen. Its whole text is
+   compared, side rails and the post's comments included, and nothing is clicked there. Binding still
+   needs a key that is new on the Page's own list, created after the run started, whose page holds
+   the full caption and the evidence, so a wrong bind would take another new post on the Page within
+   the run that carries both. The success toast's URN is taken first when it
    qualifies the same way. The URL keeps the real URN type
    (`urn:li:activity|share|ugcPost`). A post whose id shows it was created before this run started
    (10 min clock slack) is never ours either, even when the baseline missed it — a repeat of the same
@@ -230,7 +240,12 @@ for today and stops; settle that day as below.
 **To unblock `uncertain`** (exit 2, `systemctl --user --failed` shows it):
 
 1. Look at the account: TikTok Studio → Posts (`https://www.tiktok.com/tiktokstudio/content`) or
-   the LinkedIn Page → Page posts. Check the screenshots in `~/bona-data/<channel>/shots/`.
+   the LinkedIn Page → Page posts. Check the screenshots in `~/bona-data/<channel>/shots/`. The
+   URLs the confirmation opened are in Bona Chrome's History: copy
+   `C:\Users\ASUS\AppData\Local\bona-social-chrome\Default\History` and read the copy with sqlite3
+   (`visits` joined to `urls`, times in µs since 1601 UTC). On LinkedIn the `/feed/update/urn:li:…/`
+   it kept opening after the click is the new post (11-15: `activity:7527619025451761664`). Pages
+   that failed to load are not recorded there.
 2. If the post **is live**, append the URL so it is never posted again:
    ```bash
    echo '{"channel":"tiktok","date":"2026-10-21","id":"bona-tiktok-2026-10-21","kind":"property","itemId":"BONA-001","listingId":"BONA-001","status":"published","url":"https://www.tiktok.com/@bonarealestatesa/video/…","manual":true,"at":"'$(date -u +%FT%TZ)'"}' >> ~/bona-data/tiktok/published.jsonl
@@ -322,7 +337,9 @@ modal button "Next", `.ql-editor` (Quill), `.share-actions__primary-action` (Pos
 `.share-unified-settings-entry-button` name + `img[src*="company-logo"]` matched against the admin
 rail's logo and `a[href*="/company/145349037/admin/settings"]`,
 `button[aria-label="Dismiss"]` + `.artdeco-modal--layer-confirmation` "Discard",
-toast `a[href*="/feed/update/"]`; post elements `[data-urn], [data-id], [data-activity-urn]`.
+toast `a[href*="/feed/update/"]`; post elements `[data-urn], [data-id], [data-activity-urn]`;
+the server-driven post page `[data-sdui-screen="com.linkedin.sdui.flagshipnav.feed.UpdateDetail"]`
+(one per page, read only on `/feed/update/<urn>`).
 
 Typing goes through `Input.insertText` line by line with Shift+Enter between lines (both editors
 make paragraphs; a plain Enter would pick a hashtag suggestion). Clicks are real mouse events at

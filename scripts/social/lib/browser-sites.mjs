@@ -37,6 +37,8 @@ export const SELECTORS = Object.freeze({
     confirm: '.artdeco-modal--layer-confirmation button',
     commentary: '.update-components-text, .feed-shared-update-v2__commentary, .feed-shared-inline-show-more-text, [data-test-id="main-feed-activity-card__commentary"]',
     toastLink: '.artdeco-toast-item a[href*="/feed/update/"], [data-test-artdeco-toast-item] a[href*="/feed/update/"]',
+    // The server-driven post page (since 2026-11-15, see sduiPostText): its update-detail screen.
+    sduiPostScreen: '[data-sdui-screen="com.linkedin.sdui.flagshipnav.feed.UpdateDetail"]',
   }),
 });
 
@@ -411,24 +413,54 @@ export const linkedinPostCandidates = s => s.ev(`(() => { const POST = '[data-ur
     return [{ key: m[1] + ':' + m[2], text: own?.innerText || '' }];
   }); })()`);
 /**
+ * LinkedIn's server-driven post page. Since 2026-11-15 /feed/update/<urn>/ answers with
+ * `data-sdui-screen="com.linkedin.sdui.flagshipnav.feed.UpdateDetail"` (title "Post | LinkedIn";
+ * on 11-12 the same address still served the old page), on which NO element carries the post's
+ * URN — no data-urn / data-id / data-activity-urn, the id in no attribute at all — so the candidate
+ * scan read nothing and BONA-015, live as the Page, was recorded `uncertain`. Nothing inside that
+ * screen can be relied on either: on 2026-11-16 the same post's page carried `data-view-name`
+ * markers (feed-full-update, feed-commentary) at 00:19 and none at all half an hour later, with
+ * generated class names both times. So the page itself names the post: its address (after any
+ * redirect; scheme, query, URL-encoding and an /m/ prefix aside) is still /feed/update/<that urn>,
+ * and it is that ONE update-detail screen. Its text is the post's text plus the page around it (the
+ * side rails, the post's comments), so a quoted caption inside it is not told apart: binding still
+ * needs a key that is new on the Page's own list, created after the run started, whose page holds
+ * the full caption and the evidence — another new post on the Page within the run carrying both.
+ * Returns the screen's text, or null when this is not that post's page in that layout (yet).
+ * Self-contained: linkedinFullText runs its source inside the page.
+ */
+export function sduiPostText(doc, href, urn, screen) {
+  let path;
+  try { path = decodeURIComponent(new URL(href).pathname).replace(/\/+$/, ''); } catch { return null; }
+  if (!path.endsWith(`/feed/update/${urn}`)) return null;
+  const screens = doc.querySelectorAll(screen);
+  return screens.length === 1 ? String(screens[0].innerText ?? '') : null;
+}
+/**
  * The post's full own text from its detail page (/feed/update/<urn>/), with any "…see more" toggle
- * inside that post expanded first, so a long caption is compared in full. A page that never shows
- * the post is checked for a login / security check / block page — a Cloudflare page loads with a
- * body, so the navigation itself succeeds (2026-11-08) — which is thrown so the confirmation records
- * it under this page's URL.
+ * inside that post expanded first, so a long caption is compared in full. The post is the element
+ * marked with its URN (the candidate scan) or, on the server-driven page that marks nothing, that
+ * page's update-detail screen (sduiPostText; nothing is clicked there: no element is known to be
+ * the post's own). A page that never shows the post is checked for a login / security check /
+ * block page — a Cloudflare page loads with a body, so the navigation itself succeeds (2026-11-08)
+ * — which is thrown so the confirmation records it under this page's URL.
  */
 async function linkedinFullText(s, key, { settleMs = 1500 } = {}) {
   const [type, id] = String(key).split(':');
   const urn = `urn:li:${type}:${id}`;
   const sel = `[data-urn="${urn}"], [data-id="${urn}"], [data-activity-urn="${urn}"]`;
+  const sdui = `(${sduiPostText.toString()})(document, location.href, ${q(urn)}, ${q(SELECTORS.linkedin.sduiPostScreen)})`;
   await s.navigate(linkedinUrl(key));
   // The exact selector can miss a post whose URN sits inside a longer attribute; the candidate scan still finds it.
-  if (!await s.waitFor(`!!document.querySelector(${q(sel)})`, 15_000) && !(await linkedinPostCandidates(s).catch(() => [])).some(c => c.key === key)) await stop(s, linkedinBlocker);
+  // The server-driven page counts once its screen shows text (on 11-15 each visit to it waited the full 15 s).
+  if (!await s.waitFor(`!!document.querySelector(${q(sel)}) || !!${sdui}`, 15_000) && !(await linkedinPostCandidates(s).catch(() => [])).some(c => c.key === key)) await stop(s, linkedinBlocker);
   await s.ev(`/*expand*/(() => { const e = document.querySelector(${q(sel)}); if (!e) return 0; let n = 0;
     for (const b of e.querySelectorAll('button, [role="button"]')) if (/^(…|\\.\\.\\.)?\\s*(see more|more|المزيد)$/i.test((b.innerText || '').trim()) && !b.closest('.comments-comments-list')) { b.click(); n++; }
     return n; })()`);
   await sleep(settleMs);
-  return (await linkedinPostCandidates(s)).find(c => c.key === key)?.text ?? '';
+  const marked = (await linkedinPostCandidates(s)).find(c => c.key === key)?.text;
+  if (marked) return marked;
+  return String((await s.ev(`/*sdui-text*/${sdui} ?? ''`)) ?? '');
 }
 export const linkedinUrl = key => { const [type, id] = String(key).split(':'); return `https://www.linkedin.com/feed/update/urn:li:${type}:${id}/`; };
 /** Admin post list: rendered once its feed has items (a promo card counts: the list has rendered). The "Start a post" box is not a signal. */

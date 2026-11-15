@@ -1469,3 +1469,103 @@ test('2026-11-11 R3: the status words leave out the caption\'s own lines (a mult
   const cap = 'Villa BONA-A\nJeddah\nFor sale\n#Bona #Jeddah';
   assert.equal(SITES.studioRowStatus(`00:20\n${cap}\nNov 11, 9:47 PM\nUnder review\n0\n0\n0`, cap), '00:20 · Nov 11, 9:47 PM · Under review · 0 · 0 · 0');
 });
+
+// ================================================================== LinkedIn's server-driven post page (2026-11-16)
+// 2026-11-15 09:30: BONA-015 went live as the Page (urn:li:activity:7527619025451761664, id time 06:30:32Z) but
+// was recorded `uncertain`. Bona Chrome's History shows the confirmation opening that post's own page five times,
+// each after a full 15 s wait: LinkedIn now serves /feed/update/<urn>/ as a server-driven page
+// (data-sdui-screen="com.linkedin.sdui.flagshipnav.feed.UpdateDetail", title "Post | LinkedIn") on which NO element
+// carries the URN (no data-urn / data-id / data-activity-urn, the id in no attribute at all), so the candidate scan
+// read nothing. Inside the screen nothing is stable: read-only looks on 2026-11-16 found data-view-name markers at
+// 00:19 and none at all at 00:5x on the same page. The fake page below is the 00:5x one: generated classes only.
+const LI_1115_ID = '7527619025451761664';
+const LI_1115_URL = `https://www.linkedin.com/feed/update/urn:li:activity:${LI_1115_ID}/`;
+const LI_1115_CAPTION = 'Apartments, Al Zahra\nAl Zahra, Jeddah · For sale\n\n3 bedrooms · 200 m² · From SAR 1,450,000\n\nInterested? Message Bona with BONA-015 for current availability and a viewing.\nhttps://bona-real-estate.com/properties/al-zahra-residences/\n\nPrices shown are asking prices and may change. Details, condition and services are confirmed at viewing.\nAdvertiser: Abdulaziz Zaidan · FAL 1100313556 · +966593296933\n\nشقق في الزهراء — الزهراء، جدة · للبيع\nالمعلن: عبدالعزيز زيدان · فال 1100313556 · +966593296933\n\n#BonaRealEstate #JeddahRealEstate #JeddahApartments #AlZahra #SaudiRealEstate';
+/** The post's text exactly as that page showed it: LinkedIn swapped the listing link for its own short link. */
+const LI_1115_PAGE = LI_1115_CAPTION.replace('https://bona-real-estate.com/properties/al-zahra-residences/', 'https://lnkd.in/dJh4h3N2');
+const SDUI_SCREEN = 'com.linkedin.sdui.flagshipnav.feed.UpdateDetail';
+/** A minimal DOM: attribute / class / tag selectors (comma lists), closest, querySelector(All), innerText, click. */
+class FakeEl {
+  constructor(attrs = {}, children = [], text = '') { this.attrs = attrs; this.children = children; this.text = text; this.parentElement = null; this.clicks = 0; for (const c of children) c.parentElement = this; }
+  getAttribute(n) { return this.attrs[n] ?? null; }
+  matches(sel) {
+    return sel.split(',').map(x => x.trim()).some(one => {
+      const a = /^\[([\w-]+)="([^"]*)"\]$/.exec(one);
+      if (a) return this.attrs[a[1]] === a[2];
+      if (one.startsWith('.')) return String(this.attrs.class ?? '').split(/\s+/).includes(one.slice(1));
+      return one === this.attrs.tag;
+    });
+  }
+  closest(sel) { for (let e = this; e; e = e.parentElement) if (e.matches(sel)) return e; return null; }
+  querySelectorAll(sel) { const out = []; const walk = e => { for (const c of e.children) { if (c.matches(sel)) out.push(c); walk(c); } }; walk(this); return out; }
+  querySelector(sel) { return this.querySelectorAll(sel)[0] ?? null; }
+  get innerText() { return this.text + this.children.map(c => c.innerText).join(''); }
+  click() { this.clicks++; }
+}
+/** The update-detail page as served at 00:5x: top bar (with its "More" menu button), member rail, the post, an ad — generated classes, no markers. */
+function sduiDoc(postText, { screens = 1 } = {}) {
+  const more = new FakeEl({ tag: 'button', class: 'k4dhn4' }, [], 'More\n');
+  const post = new FakeEl({ class: 'k4dl5v k4dayy' }, [
+    new FakeEl({}, [], 'Feed post\nThis post type can\'t be boosted.\nBona | بونا\n15h\nFollow\n'),
+    new FakeEl({ tag: 'p', class: 'k4dlje k4dles' }, [new FakeEl({ tag: 'span', class: 'k4dl3b' }, [
+      new FakeEl({}, [], postText.split('https://lnkd.in/')[0]),
+      ...(postText.includes('https://lnkd.in/') ? [new FakeEl({ tag: 'a', class: 'k4dhn4 k4dl6n' }, [], 'https://lnkd.in/' + postText.split('https://lnkd.in/')[1])] : []),
+    ])]),
+  ]);
+  const screen = () => new FakeEl({ 'data-sdui-screen': SDUI_SCREEN }, [
+    new FakeEl({ tag: 'header' }, [new FakeEl({}, [], 'Home\nNetwork\nJobs\nMessaging\nNotifications\n'), more]),
+    new FakeEl({}, [], 'Abdulaziz Zaidan\nProfile viewers\n160\n'), post, new FakeEl({}, [], '\nJob search smarter with Premium\n'),
+  ]);
+  const root = new FakeEl({ id: 'root' }, Array.from({ length: screens }, screen));
+  return { querySelectorAll: q => root.querySelectorAll(q), querySelector: q => root.querySelector(q), more };
+}
+const inPage = (expr, doc, href) => vm.runInNewContext(expr, { document: doc, location: { href }, URL });
+/** The Page's lists still mark posts with data-urn (the 11-15 run found the new key there every round); the post page marks nothing. */
+const sduiSession = (doc, listText) => {
+  const asked = [];
+  const s = fakeSession({ ev: (e, cur) => {
+    asked.push(e);
+    if (e.includes('flatMap')) return cur.includes('/feed/update/') ? [] : [{ key: `activity:${LI_1115_ID}`, text: listText }];
+    return cur.includes('/feed/update/') && /^\/\*(expand|sdui-text)\*\//.test(e) ? inPage(e, doc, cur) : null; } });
+  // On the post's page the wait is judged on that page: it must not run out (15 s per visit ate the 4 min budget on 11-15).
+  s.waits = [];
+  s.waitFor = async cond => { const at = s.log.navs.at(-1) ?? ''; if (!at.includes('/feed/update/')) return true; const v = Boolean(inPage(cond, doc, at)); s.waits.push(v); return v; };
+  s.asked = asked;
+  return s;
+};
+const LI_1115_SUB = { caption: LI_1115_CAPTION, evidence: 'BONA-015', notBefore: Date.parse('2026-11-15T06:30:02Z') - 10 * 60_000 };
+
+test('SDUI 2026-11-16: the 11-15 post binds from its own server-driven page, which marks no post at all', async () => {
+  const doc = sduiDoc(LI_1115_PAGE);
+  const s = sduiSession(doc, 'Apartments, Al Zahra\nAl Zahra, Jeddah · For sale …more');
+  assert.equal(await linkedinConfirm(s, '145349037', [], { ...LI_1115_SUB, timeoutMs: 30, every: 0, settleMs: 0 }), LI_1115_URL);
+  assert.deepEqual(s.waits, [true], 'the server-driven page counts as loaded at once');
+  assert.ok(!s.asked.some(e => e.includes('document.title')), 'no block-page check on a page that loaded');
+  assert.equal(doc.more.clicks, 0, 'nothing is clicked on that page (its top bar has a "More" button)');
+});
+
+test('SDUI 2026-11-16: sduiPostText reads the update-detail screen, and only on that post\'s own page', () => {
+  const urn = `urn:li:activity:${LI_1115_ID}`, scr = SELECTORS.linkedin.sduiPostScreen;
+  const read = (doc, href) => SITES.sduiPostText(doc, href, urn, scr);
+  const text = read(sduiDoc(LI_1115_PAGE), LI_1115_URL);
+  assert.ok(text.includes(LI_1115_PAGE), 'the screen\'s text holds the post\'s text');
+  assert.equal(read(sduiDoc(LI_1115_PAGE), `${LI_1115_URL}?skipRedirect=true`), text, 'a query string is still that page');
+  assert.equal(read(sduiDoc(LI_1115_PAGE), `https://www.linkedin.com/m/feed/update/urn%3Ali%3Aactivity%3A${LI_1115_ID}/`), text, 'an encoded URN behind /m/ is still that page');
+  assert.equal(read(sduiDoc(LI_1115_PAGE), 'https://www.linkedin.com/feed/update/urn:li:activity:7527619025451761665/'), null, 'another post\'s page');
+  assert.equal(read(sduiDoc(LI_1115_PAGE), `https://www.linkedin.com/feed/update/urn:li:activity:${LI_1115_ID}9/`), null, 'a longer id is another post');
+  assert.equal(read(sduiDoc(LI_1115_PAGE), `https://www.linkedin.com/feed/update/urn:li:share:${LI_1115_ID}/`), null, 'another URN type');
+  assert.equal(read(sduiDoc(LI_1115_PAGE), 'https://www.linkedin.com/feed/'), null, 'redirected away (to the feed)');
+  assert.equal(read(sduiDoc(LI_1115_PAGE), 'not a url'), null);
+  assert.equal(read(sduiDoc(LI_1115_PAGE, { screens: 0 }), LI_1115_URL), null, 'the old page, or not rendered yet');
+  assert.equal(read(sduiDoc(LI_1115_PAGE, { screens: 2 }), LI_1115_URL), null, 'two screens: not that page');
+  // That text binds the real 11-15 submission (on LinkedIn the short link stands for the caption's link).
+  assert.equal(SITES.bindNewPost([{ key: `activity:${LI_1115_ID}`, text }], [], LI_1115_SUB, { shortLinks: true, notBefore: LI_1115_SUB.notBefore }), `activity:${LI_1115_ID}`);
+});
+
+test('SDUI 2026-11-16: a server-driven post page without the full caption binds nothing (a promo, a clamped text, two screens)', async () => {
+  const clamped = LI_1115_PAGE.slice(0, 160) + '…more';
+  for (const doc of [sduiDoc('Hiring: a promo from LinkedIn'), sduiDoc(clamped), sduiDoc(LI_1115_PAGE, { screens: 2 })]) {
+    const s = sduiSession(doc, 'x');
+    assert.equal(await linkedinConfirm(s, '145349037', [], { ...LI_1115_SUB, timeoutMs: 30, every: 0, settleMs: 0 }), null);
+  }
+});
