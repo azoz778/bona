@@ -19,6 +19,7 @@ export interface Card {
   beds?: number | null;
   baths?: number | null;
   areaSqm?: number | null;
+  brochureUrl?: string | null;
   image?: { src?: string | null; thumb?: string | null } | null;
   url?: { en: string; ar: string } | null;
 }

@@ -141,20 +141,20 @@ export function clip(text, max = MAX_ANSWER_LEN) {
   return (at > max / 2 ? cut.slice(0, at) : cut).trim();
 }
 
-/** Ids and slugs the completion's tool results carried (the content is JSON, sometimes encoded twice). */
+/** Listing IDs the property tools' results carried (the content is JSON, sometimes encoded twice). */
 function resultIds(messages) {
   const ids = new Set();
+  const calls = new Map(messages.filter(m => m?.role === 'tool_call_invocation').map(m => [m.tool_call_id, m.name]));
   for (const m of messages) {
-    if (m?.role !== 'tool_call_result') continue;
+    if (m?.role !== 'tool_call_result' || !['search_properties', 'show_property'].includes(calls.get(m.tool_call_id))) continue;
     let payload = m.content;
     for (let i = 0; i < 2 && typeof payload === 'string'; i += 1) {
       try { payload = JSON.parse(payload); } catch { payload = null; }
     }
-    const rows = Array.isArray(payload) ? payload : payload?.results;
+    const rows = Array.isArray(payload) ? payload : payload?.results ?? (payload?.id ? [payload] : []);
     if (!Array.isArray(rows)) continue;
     for (const row of rows) {
       if (typeof row?.id === 'string' && row.id) ids.add(row.id);
-      if (typeof row?.slug === 'string' && row.slug) ids.add(row.slug);
     }
   }
   return ids;
@@ -179,9 +179,10 @@ export function answerFrom(completion, { inventory, siteUrl, language }) {
   // would link homes Dana never described.
   const returned = resultIds(messages);
   const cards = r.actions.filter((a) => a.type === 'show_listing').map((a) => a.listing)
-    .filter((c) => returned.has(c?.id) || returned.has(c?.slug));
+    .filter((c) => returned.has(c?.id));
   const { text, links } = withLinks(body, cards, language);
-  return { text, handover, links };
+  const brochure = !handover ? cards.find(c => c.id === 'BONA-022' && c.brochureUrl === 'https://bona-real-estate.com/listings/trump-tower-jeddah/brochure.pdf')?.brochureUrl : undefined;
+  return { text, handover, links, ...(brochure ? { brochure } : {}) };
 }
 
 /**
@@ -341,7 +342,7 @@ export function createDana({
       } catch (err) {
         say({ level: 'error', evt: 'dana.record_failed', leadId: lead.lead_id, name: typeof err?.name === 'string' && /^[A-Za-z]{1,40}$/.test(err.name) ? err.name : 'Error' });
       }
-      return { sent: true, chars: body.length };
+      return { sent: true, confirmed: true, sendId, chars: body.length };
     }
     if (out.uncertain) {
       db.transaction(() => {
@@ -420,7 +421,7 @@ export function createDana({
     const coversTs = batch[batch.length - 1].ts;
     const c = await complete(e.lead, batch, language);
     if (c.error) return handover(leadId, language, c.error, coversTs);
-    const { text, handover: asked, links } = answerFrom(c.completion, { inventory, siteUrl, language });
+    const { text, handover: asked, links, brochure } = answerFrom(c.completion, { inventory, siteUrl, language });
     if (asked) return handover(leadId, language, 'request_human', coversTs, { details: handoffDetails(c.completion) });
     if (!text) return handover(leadId, language, 'empty', coversTs);
     const pre = await preSend(leadId, coversTs);
@@ -439,6 +440,24 @@ export function createDana({
       await notifyHandoff(leadId);
       say({ evt: 'dana.handover', leadId, why: 'send_failed', sent: false });
       return { handover: 'send_failed', sent: false };
+    }
+    if (r.confirmed && brochure) {
+      // Separate durable decision: never retry the answer or the media after uncertainty.
+      const sendId = `${r.sendId}-pdf`;
+      const caption = 'Bona — Trump Tower Jeddah, Unit 1003. Availability and terms subject to confirmation.';
+      try {
+        // The text may have consumed the last slot or eligibility changed in flight.
+        // It already answered the client: skip only the brochure, without a hand-over.
+        const mediaPre = await preSend(leadId, coversTs);
+        if (mediaPre.ok) {
+          const jid = replyJidFor(mediaPre.lead);
+          const ins = inbox.insertOutbox({ send_id: sendId, lead_id: leadId, jid, text: caption, sender_kind: 'dana', covers_ts: coversTs });
+          if (ins.inserted) {
+            const media = await sender.sendTo({ jid, text: caption, kind: 'dana', leadId, sendId, document: { url: brochure } });
+            if (!media.ok) say({ evt: 'dana.brochure_failed', uncertain: Boolean(media.uncertain) });
+          }
+        }
+      } catch { say({ evt: 'dana.brochure_failed', uncertain: true }); }
     }
     say({ evt: 'dana.answered', leadId, batch: batch.length, chars: r.chars, links, newChat: c.newChat });
     return { answered: true, chars: r.chars, links, newChat: c.newChat };

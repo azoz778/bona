@@ -228,6 +228,7 @@ export function toCard(listing, { siteUrl = 'https://bona.azoz.uk' } = {}) {
     beds: listing.specs?.beds ?? null,
     baths: listing.specs?.baths ?? null,
     areaSqm: listing.specs?.areaSqm ?? null,
+    brochureUrl: listing.brochureUrl ?? null,
     image: {
       src: absoluteUrl(img?.src, site),
       thumb: absoluteUrl(img?.thumb ?? img?.src, site),
@@ -257,6 +258,7 @@ export function toToolRow(listing, { siteUrl = 'https://bona.azoz.uk' } = {}) {
     beds: card.beds,
     baths: card.baths,
     area_sqm: card.areaSqm,
+    brochureUrl: card.brochureUrl,
     url_en: card.url.en,
     url_ar: card.url.ar,
   };
