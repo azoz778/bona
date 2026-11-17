@@ -39,8 +39,10 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
    owner's own price is kept and model prices are cleared; a price on request adopts the models' lowest
    (`from`); an existing price must equal the models' lowest, else the run is refused (then it is marked
    `from: true` when equal). It never writes over a listing with less than it carries: an incomplete
-   price check is refused ("try again later"), and a reading with fewer models, fewer confirmed model
-   prices or a fact list fewer is refused unless `--force`. See "Enriching a published listing" below.
+   price check is refused ("try again later") when the listing already has model prices to lose (on a
+   first enrichment the models go up without the unchecked prices, with the same "try again later"),
+   and a reading with fewer models, fewer confirmed model prices or a fact list
+   fewer is refused unless `--force`. See "Enriching a published listing" below.
 8. **`backfill-enrich.mjs`**: runs `--enrich` over every older listing, one at a time; a listing that
    already carries unit models is skipped as "already enriched" unless `--include-enriched` (no
    `--force` is ever passed on). `--plan-only`
@@ -288,8 +290,10 @@ Anything else in the group is ignored, silently.
   Not with `--replace`, `--caption` or `--no-git` (except with `--dry-run`, which prints the models,
   their prices, the headline decision, the comparison with what the listing carries and the plan
   files, and writes nothing). A re-enrichment never degrades a listing: when the unit-model price
-  check could not be completed (a page that did not render, a failed call, a quota) nothing is written
-  ("try again later", `--force` or not); when the reading has fewer unit models, fewer confirmed model
+  check could not be completed (a page that did not render, a failed call, a quota) on a listing that
+  already carries model prices, nothing is written ("try again later", `--force` or not) — a listing
+  with no model price to lose gets the models without the unchecked ones, and the reply's "could not be
+  completed … try again later"; when the reading has fewer unit models, fewer confirmed model
   prices (regular + Sakani) or drops a fact list the listing carries, it is refused with the
   difference (`Compared   models 8 → 5 · …`) unless `--force` says the new reading is right.
 - **Nothing the model writes is trusted.** Only fields that pass `validateAiResult` +

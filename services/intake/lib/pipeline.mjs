@@ -966,11 +966,13 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
   const priceChanged = !isDeepStrictEqual(head.price, existing.price);
   const compare = compareEnrichment(existing, built);
   // Never write over a listing with less than it carries. An incomplete price check (a page that did
-  // not render, a failed call, a quota) is ours, not the brochure's: try again later. A reading with
-  // fewer models, fewer confirmed model prices or a fact list fewer is refused unless --force says it
-  // is right (the brochure really changed, or the old reading was wrong).
+  // not render, a failed call, a quota) is ours, not the brochure's: when the listing already carries
+  // model prices it could lose, nothing changes — try again later; a listing with none to lose gets the
+  // models without the unchecked prices (the warning above says "try again later"), as a publish would.
+  // A reading with fewer models, fewer confirmed model prices or a fact list fewer is refused unless
+  // --force says it is right (the brochure really changed, or the old reading was wrong).
   const mp = report.modelPrices;
-  const unchecked = mp && (mp.fatal || (mp.incomplete?.length ?? 0) > 0)
+  const unchecked = mp && compare.before.prices > 0 && (mp.fatal || (mp.incomplete?.length ?? 0) > 0)
     ? `${mp.fatal ? 'the AI quota ran out during the unit-model price check' : `the check of ${mp.incomplete.length} unit-model price(s) could not be completed (page${mp.incompletePages.length === 1 ? '' : 's'} ${mp.incompletePages.join(', ')})`} — nothing was changed; try again later`
     : null;
   const degraded = compare.losses.length && !force

@@ -2006,12 +2006,12 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
     } finally { r.cleanup(); }
   });
 
-  it('an incomplete unit-model price check refuses the enrichment — try again later — even with --force', async () => {
+  it('an incomplete unit-model price check refuses the enrichment of a listing with model prices to lose — try again later — even with --force', async () => {
     for (const [fail, re] of [[true, /^the check of 4 unit-model price\(s\) could not be completed \(page 3\) — nothing was changed; try again later$/],
       ['quota', /^the AI quota ran out during the unit-model price check — nothing was changed; try again later$/]]) {
       const r = await rig({ listing: reading(), modelConfirmFail: fail });
       try {
-        seed(r, { price: { ...ON_REQUEST } });
+        seed(r, { price: { ...ON_REQUEST }, extra: { models: prior(2) } });
         const raw = fs.readFileSync(inboxFile(r), 'utf8');
         await assert.rejects(enrich(r, { force: true }), (err) => err.stage === 'enrich' && re.test(err.reason), String(fail));
         assert.equal(fs.readFileSync(inboxFile(r), 'utf8'), raw);
@@ -2019,6 +2019,24 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
         assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '');
         const dry = await enrich(r, { dryRun: true });
         assert.match(dry.blocked, re);
+      } finally { r.cleanup(); }
+    }
+  });
+
+  it('P6b: a first-time enrichment with an incomplete price check loses nothing — the models go up without the unchecked prices, "try again later"', async () => {
+    for (const fail of [true, 'quota']) {
+      const r = await rig({ listing: reading(), modelConfirmFail: fail });
+      try {
+        const before = seed(r, { price: { ...ON_REQUEST } });
+        const report = await enrich(r, { force: false });
+        assert.equal(report.ok, true, String(fail));
+        assert.equal(report.enrich.refuse, null);
+        assert.equal(report.enrich.headline, 'no-model-prices');
+        const after = saved(r);
+        assert.deepEqual(after.price, before.price, 'still on request');
+        assert.deepEqual(after.models.map((m) => [m.name.en, m.price, m.subsidisedPrice]), [['Nawras', null, null], ['Lulu', null, null]]);
+        assert.ok(report.warnings.some((w) => /could not be completed \(page 3\), so they were left off for now — try again later/.test(w)), report.warnings.join(' | '));
+        assert.deepEqual(checkListing(after), []);
       } finally { r.cleanup(); }
     }
   });
