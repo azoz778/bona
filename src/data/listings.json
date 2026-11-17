@@ -6565,6 +6565,215 @@
     "licence": null
   },
   {
+    "id": "BONA-W024",
+    "slug": "raz-invest-3-al-rawdah-jeddah",
+    "sourceRef": "WA-20261117-AC51D2",
+    "status": "available",
+    "category": "off-plan",
+    "type": "apartment",
+    "kind": "apartment",
+    "featured": false,
+    "title": {
+      "en": "Raz Invest 3, Al Rawdah, Jeddah",
+      "ar": "راز إنفست 3، حي الروضة، جدة"
+    },
+    "location": {
+      "district": {
+        "en": "Al Rawdah",
+        "ar": "الروضة"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": 499000,
+      "currency": "SAR",
+      "from": true,
+      "period": null,
+      "onRequest": false
+    },
+    "specs": {
+      "beds": 2,
+      "baths": 2,
+      "areaSqm": 76,
+      "plotSqm": null,
+      "yearBuilt": null,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "/listings/raz-invest-3-al-rawdah-jeddah/01.jpg",
+        "thumb": "/listings/raz-invest-3-al-rawdah-jeddah/01-thumb.webp",
+        "alt": {
+          "en": "Exterior — Raz Invest 3, Al Rawdah, Jeddah",
+          "ar": "الواجهة الخارجية — راز إنفست 3، حي الروضة، جدة"
+        },
+        "focus": {
+          "x": 0.5,
+          "y": 0.6
+        }
+      },
+      {
+        "src": "/listings/raz-invest-3-al-rawdah-jeddah/02.jpg",
+        "thumb": "/listings/raz-invest-3-al-rawdah-jeddah/02-thumb.webp",
+        "alt": {
+          "en": "Exterior — Raz Invest 3, Al Rawdah, Jeddah",
+          "ar": "الواجهة الخارجية — راز إنفست 3، حي الروضة، جدة"
+        },
+        "focus": {
+          "x": 0.5,
+          "y": 0.72
+        }
+      },
+      {
+        "src": "/listings/raz-invest-3-al-rawdah-jeddah/03.jpg",
+        "thumb": "/listings/raz-invest-3-al-rawdah-jeddah/03-thumb.webp",
+        "alt": {
+          "en": "Entrance — Raz Invest 3, Al Rawdah, Jeddah",
+          "ar": "المدخل — راز إنفست 3، حي الروضة، جدة"
+        },
+        "focus": {
+          "x": 0.5,
+          "y": 0.66
+        }
+      },
+      {
+        "src": "/listings/raz-invest-3-al-rawdah-jeddah/04.jpg",
+        "thumb": "/listings/raz-invest-3-al-rawdah-jeddah/04-thumb.webp",
+        "alt": {
+          "en": "Courtyard — Raz Invest 3, Al Rawdah, Jeddah",
+          "ar": "الفناء الداخلي — راز إنفست 3، حي الروضة، جدة"
+        },
+        "focus": {
+          "x": 0.5,
+          "y": 0.55
+        }
+      },
+      {
+        "src": "/listings/raz-invest-3-al-rawdah-jeddah/05.jpg",
+        "thumb": "/listings/raz-invest-3-al-rawdah-jeddah/05-thumb.webp",
+        "alt": {
+          "en": "Lobby — Raz Invest 3, Al Rawdah, Jeddah",
+          "ar": "البهو — راز إنفست 3، حي الروضة، جدة"
+        },
+        "focus": {
+          "x": 0.55,
+          "y": 0.62
+        }
+      },
+      {
+        "src": "/listings/raz-invest-3-al-rawdah-jeddah/06.jpg",
+        "thumb": "/listings/raz-invest-3-al-rawdah-jeddah/06-thumb.webp",
+        "alt": {
+          "en": "Lounge — Raz Invest 3, Al Rawdah, Jeddah",
+          "ar": "الصالة — راز إنفست 3، حي الروضة، جدة"
+        },
+        "focus": {
+          "x": 0.5,
+          "y": 0.6
+        }
+      },
+      {
+        "src": "/listings/raz-invest-3-al-rawdah-jeddah/07.jpg",
+        "thumb": "/listings/raz-invest-3-al-rawdah-jeddah/07-thumb.webp",
+        "alt": {
+          "en": "Gym — Raz Invest 3, Al Rawdah, Jeddah",
+          "ar": "النادي الرياضي — راز إنفست 3، حي الروضة، جدة"
+        },
+        "focus": {
+          "x": 0.5,
+          "y": 0.55
+        }
+      },
+      {
+        "src": "/listings/raz-invest-3-al-rawdah-jeddah/08.jpg",
+        "thumb": "/listings/raz-invest-3-al-rawdah-jeddah/08-thumb.webp",
+        "alt": {
+          "en": "Great hall — Raz Invest 3, Al Rawdah, Jeddah",
+          "ar": "القاعة الكبرى — راز إنفست 3، حي الروضة، جدة"
+        },
+        "focus": {
+          "x": 0.5,
+          "y": 0.6
+        }
+      },
+      {
+        "src": "/listings/raz-invest-3-al-rawdah-jeddah/09.jpg",
+        "thumb": "/listings/raz-invest-3-al-rawdah-jeddah/09-thumb.webp",
+        "alt": {
+          "en": "Lounge — Raz Invest 3, Al Rawdah, Jeddah",
+          "ar": "الصالة — راز إنفست 3، حي الروضة، جدة"
+        },
+        "focus": {
+          "x": 0.5,
+          "y": 0.55
+        }
+      },
+      {
+        "src": "/listings/raz-invest-3-al-rawdah-jeddah/10.jpg",
+        "thumb": "/listings/raz-invest-3-al-rawdah-jeddah/10-thumb.webp",
+        "alt": {
+          "en": "Gym — Raz Invest 3, Al Rawdah, Jeddah",
+          "ar": "النادي الرياضي — راز إنفست 3، حي الروضة، جدة"
+        },
+        "focus": {
+          "x": 0.5,
+          "y": 0.55
+        }
+      }
+    ],
+    "videos": [],
+    "description": {
+      "en": "A residential building in Al Rawdah, one of Jeddah's well-established neighbourhoods, made up of two-bedroom apartments. The architecture is soft and modern: two wings of curved white floor bands, arched colonnades and tall glazing, joined by a central entrance at street level.\n\nThe apartment plans shown measure 76 square metres, each with two bedrooms, two bathrooms, a kitchen and a living room. Every unit has smart-home controls, independent water tanks and a private parking space. For owners who plan to let, the developer offers furnishing and operation services.\n\nShared facilities include a hotel-style entrance and lobby, a lounge, separate gyms for men and women, a games room, a children's play area, a prayer room and a smart laundry. The building sits within landscaped grounds with outdoor seating.\n\nSari Street, Saud Al Faisal Street, Al Kayyal Street, Prince Sultan Road, King Abdulaziz Road and Madinah Road are each a few minutes' drive away. King Faisal Specialist Hospital, private and international schools, shopping centres, the Jeddah Waterfront, Stars Avenue and The City Yard are all close by.",
+      "ar": "مبنى سكني في حي الروضة، أحد أحياء جدة الراسخة، يتكوّن من شقق بغرفتي نوم. يعتمد التصميم على طابع معاصر هادئ: جناحان بخطوط بيضاء منحنية وأروقة مقوّسة وواجهات زجاجية طويلة، يلتقيان عند مدخل رئيسي في الوسط على مستوى الشارع.\n\nتبلغ مساحة نماذج الشقق المعروضة 76 مترًا مربعًا، وتضم كلٌّ منها غرفتي نوم ودورتي مياه ومطبخًا وصالة معيشة. وتُزوَّد كل وحدة بنظام المنزل الذكي وخزانات مياه مستقلة وموقف سيارة خاص. ولمن ينوي تأجير وحدته، يقدّم المطوّر خدمات التأثيث والتشغيل.\n\nتشمل المرافق المشتركة مدخلًا بطابع فندقي وردهة استقبال، وصالة جلوس، ونادياً رياضياً منفصلاً لكلٍّ من الرجال والنساء، وصالة ألعاب، ومنطقة ألعاب للأطفال، ومصلى، ومغسلة ذكية. ويحيط بالمبنى تنسيق طبيعي للحدائق مع جلسات خارجية.\n\nيقع المشروع على بُعد دقائق بالسيارة من شارع صاري وشارع سعود الفيصل وشارع الكيال وطريق الأمير سلطان وطريق الملك عبدالعزيز وطريق المدينة المنورة. وبالقرب منه مستشفى الملك فيصل التخصصي، ومدارس أهلية وعالمية، ومراكز تسوّق، والواجهة البحرية، وستارز أفينيو، والسيتي يارد."
+    },
+    "highlights": {
+      "en": [
+        "Two-bedroom apartments",
+        "76 sqm floor plans",
+        "Smart-home controls",
+        "Private parking space",
+        "Separate men's and women's gyms",
+        "Hotel-style entrance lobby"
+      ],
+      "ar": [
+        "شقق بغرفتي نوم",
+        "مساحة 76 مترًا مربعًا",
+        "نظام المنزل الذكي",
+        "موقف سيارة خاص",
+        "ناديان رياضيان للرجال والنساء",
+        "مدخل بطابع فندقي"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": "https://bona-real-estate.com/listings/raz-invest-3-al-rawdah-jeddah/brochure.pdf",
+    "project": {
+      "name": {
+        "en": "Raz Invest 3",
+        "ar": "راز إنفست 3"
+      },
+      "developer": {
+        "en": "Raz Real Estate",
+        "ar": "راز العقارية"
+      }
+    },
+    "unit": null,
+    "map": {
+      "lat": 21.565901,
+      "lng": 39.15729
+    },
+    "mapPrecision": "district",
+    "listedAt": "2026-11-17",
+    "licence": null
+  },
+  {
     "id": "BONA-W005",
     "slug": "rihab-villas-wajhat-al-warf",
     "sourceRef": "WA-20260906-AC7B92",

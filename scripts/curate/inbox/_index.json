@@ -1,5 +1,5 @@
 {
-  "nextSeq": 24,
+  "nextSeq": 25,
   "listings": {
     "kian-residence-apartments-al-nahda": "BONA-W001",
     "nuzul-khayala-residences-north-jeddah": "BONA-W002",
@@ -23,6 +23,7 @@
     "baroque-palace-residence-hampstead": "BONA-W020",
     "the-river-residences-al-salamah-jeddah": "BONA-W021",
     "seafront-villa-al-lulu-north-obhur": "BONA-W022",
-    "jeddah-heights-residential-community-jeddah": "BONA-W023"
+    "jeddah-heights-residential-community-jeddah": "BONA-W023",
+    "raz-invest-3-al-rawdah-jeddah": "BONA-W024"
   }
 }
