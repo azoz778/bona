@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ROOMS } from '../../../scripts/curate/rooms.mjs';
 import {
-  FACT_LISTS, imageFocusProblems, INTAKE_ID_RE, isImageFocus as isFocus, isPublishable, licenceProblems, loadRegisterWithdrawals,
+  FACT_LISTS, headlineFollowsModels, imageFocusProblems, INTAKE_ID_RE, isImageFocus as isFocus, isPublishable, licenceProblems, loadRegisterWithdrawals,
   LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, modelsProblems, subsidisedPriceProblems, videoEntryProblems, withdrawnAdvertising, withdrawnNotice,
 } from '../../../scripts/curate/rules.mjs';
 import { isFigure } from './model-prices.mjs';
@@ -496,12 +496,15 @@ const sakani = (p, other) => (isFigure(p?.subsidisedAmount)
  *     price in the listing's `price.currency`;
  *   - one specific `unit`: its own price stays, and its models keep theirs (the validator exempts units);
  *   - no model kept a price: the price stays as it is, set or on request;
+ *   - not a whole development of several unit models (rules.mjs headlineFollowsModels: no `project`, or
+ *     fewer than two models — a single property, per-floor rows): its own price stays and its models
+ *     keep theirs, exactly as for a unit;
  *   - on request: the models' confirmed headline is adopted — a printed figure the old intake could not read;
  *   - set: kept when it IS the lowest model price with the same Sakani line (marked `from` if it was
  *     not — what the validator requires of a headline taken from models); otherwise REFUSED with both
  *     figures, and nothing changes.
  * @returns {{price:object, dropModelPrices:boolean, refuse:string|null,
- *            decision:'owner-price'|'currency-mismatch'|'unit'|'no-model-prices'|'adopted'|'kept'|'refused'}}
+ *            decision:'owner-price'|'currency-mismatch'|'unit'|'single-property'|'no-model-prices'|'adopted'|'kept'|'refused'}}
  */
 export function enrichHeadline(existing, models, alignedPrice, { currencyMismatch = false } = {}) {
   const current = existing?.price ?? null;
@@ -512,6 +515,7 @@ export function enrichHeadline(existing, models, alignedPrice, { currencyMismatc
   if (existing?.unit !== null && existing?.unit !== undefined) return keep('unit');
   const priced = (Array.isArray(models) ? models : []).some((m) => isFigure(m?.price));
   if (!priced || !alignedPrice || !isFigure(alignedPrice.amount)) return keep('no-model-prices');
+  if (!headlineFollowsModels({ project: existing?.project, unit: null, models })) return keep('single-property');
   if (!current || current.onRequest) return { price: alignedPrice, dropModelPrices: false, refuse: null, decision: 'adopted' };
   const sameSakani = (current.subsidisedAmount ?? null) === (alignedPrice.subsidisedAmount ?? null);
   if (current.amount === alignedPrice.amount && sameSakani) {

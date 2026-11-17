@@ -1009,6 +1009,37 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     } finally { r.cleanup(); }
   });
 
+  it('a single villa (no project) with one priced model: the model keeps its price, the headline is checked as its own — never "from"', async () => {
+    const own = { amount: 4500000, currency: 'SAR', from: false, period: null, onRequest: false };
+    const a = { ...answer({ price: own, priceEvidence: { page: 3, quote: '4,500,000' } }), models: [model('Villa', 4400000, null, 3)] };
+    a.listing.project = null;
+    const r = await rig({ listing: a, confirm: [4500000] });
+    try {
+      const report = await r.run();
+      assert.equal(modelCalls(r).length, 1, 'the model price is still confirmed on its page');
+      assert.deepEqual(report.listingPreview.models.map((m) => m.price), [4400000]);
+      assert.deepEqual(report.listingPreview.price, own, 'not aligned with the model: not "from", its own figure');
+      assert.equal(r.calls().filter((c) => c.tool === 'claude-confirm').length, 1, 'the headline is checked the ordinary way');
+      assert.equal(report.priceEvidence.fromModels, undefined);
+      assert.deepEqual(checkListing(report.listingPreview), [], 'the validator passes');
+    } finally { r.cleanup(); }
+  });
+
+  it('per-floor rows of a single villa, or a project with one model, are not aligned either', async () => {
+    const own = { amount: 4500000, currency: 'SAR', from: false, period: null, onRequest: false };
+    const floors = { ...answer({ price: own, priceEvidence: { page: 3, quote: '4,500,000' } }), models: [model('Ground floor', 2000000, null, 3), model('First floor', 2500000, null, 3)] };
+    floors.listing.project = null;
+    const one = { ...answer({ price: own, priceEvidence: { page: 3, quote: '4,500,000' } }), models: [model('Lulu', 319015, null, 3)] };
+    for (const [label, listing] of [['per-floor rows', floors], ['a project with one model', one]]) {
+      const r = await rig({ listing, confirm: [4500000] });
+      try {
+        const report = await r.run();
+        assert.deepEqual(report.listingPreview.price, own, label);
+        assert.deepEqual(checkListing(report.listingPreview), [], label);
+      } finally { r.cleanup(); }
+    }
+  });
+
   it('when every model price is refused, the headline falls back to its own checks', async () => {
     const r = await rig({
       listing: withModels([model('Lulu', 319015, 270425, 3)], { price: PRICE, priceEvidence: { page: 3, quote: '319,015' }, subsidisedPriceEvidence: { page: 3, quote: '270,425' } }),
@@ -1201,7 +1232,7 @@ describe('processPdf: unit-model prices — failures, bounds and the headline fa
   });
 
   it('the headline taken from the models keeps the period the model read (a monthly rent stays monthly)', async () => {
-    const a = withModels([model('Studio', 4500, null, 3)], { price: { amount: null, currency: 'SAR', from: false, period: 'month', onRequest: true } });
+    const a = withModels([model('Studio', 4500, null, 3), model('One-bed', 6000, null, 3)], { price: { amount: null, currency: 'SAR', from: false, period: 'month', onRequest: true } });
     a.listing.category = 'rent';
     const r = await rig({ listing: a });
     try {
@@ -1654,6 +1685,23 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       assert.equal(report.ok, true);
       assert.deepEqual(report.modelPrices.refused.sort(), [270425, 319015]);
       assert.equal(saved(r).price.amount, 419994);
+    } finally { r.cleanup(); }
+  });
+
+  it('a single property (no project) keeps its own price on --enrich; its models keep their confirmed prices (single-property)', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      const own = { amount: 350000, currency: 'SAR', from: false, period: null, onRequest: false };
+      const before = seed(r, { price: own });
+      const l = JSON.parse(fs.readFileSync(inboxFile(r), 'utf8'));
+      fs.writeFileSync(inboxFile(r), `${JSON.stringify({ ...l, project: null }, null, 2)}\n`);
+      git(r, 'commit', '-qam', 'not a project (BONA-W023)');
+      const report = await enrich(r);
+      assert.equal(report.enrich.headline, 'single-property');
+      const after = saved(r);
+      assert.deepEqual(after.price, before.price);
+      assert.deepEqual(after.models.map((m) => m.price), [419994, 319015]);
+      assert.deepEqual(checkListing(after), []);
     } finally { r.cleanup(); }
   });
 

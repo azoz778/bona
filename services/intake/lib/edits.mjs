@@ -91,7 +91,7 @@ export function setPrice(repo, id, { amount, currency, onRequest }) {
   // owner sets his own price it is stale (it could even be above the new one), so it goes.
   delete p.subsidisedAmount;
   // The same goes for the unit-model prices, as under a caption price at publish time: the headline
-  // must be the cheapest model whenever a model carries a price (rules.mjs modelsProblems), and the
+  // of a whole development must be its cheapest model whenever a model carries a price (rules.mjs modelsProblems), and the
   // owner's own figure replaces the brochure's. The models themselves (rooms, areas, plans) stay.
   let modelPricesCleared = 0;
   for (const m of Array.isArray(found.listing.models) ? found.listing.models : []) {

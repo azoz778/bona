@@ -259,6 +259,17 @@ function copyRuleHits(label, s) {
   return out;
 }
 
+/**
+ * Is a listing's headline its cheapest unit model, "from"? Only for a whole development sold as unit
+ * models: a `project`, no specific `unit`, and at least two unit models. A single property with one
+ * "model" — or per-floor rows — keeps its own headline, checked like any other price: it must never
+ * become "From SAR …". The ONE rule for the pipeline (which aligns the headline) and the validator.
+ */
+export function headlineFollowsModels(listing) {
+  const l = listing && typeof listing === 'object' ? listing : {};
+  return !absent(l.project) && absent(l.unit) && Array.isArray(l.models) && l.models.length >= 2;
+}
+
 /** `{ en, ar }`: both non-empty, Arabic script in `ar`, each at most `max` characters. */
 function bilingualTextProblems(v, field, max) {
   if (!v || typeof v !== 'object' || Array.isArray(v) || !nonEmpty(v.en) || !nonEmpty(v.ar) || !ARABIC_SCRIPT.test(v.ar)) {
@@ -277,7 +288,9 @@ function bilingualTextProblems(v, field, max) {
  * "from" (services/intake/lib/model-prices.mjs alignHeadline, applied by the pipeline), so the From
  * figure and the table never disagree: whenever a model has a price, `price.amount` is the lowest one,
  * `price.from` is true, and `price.subsidisedAmount` is the lowest model Sakani price when that is below
- * the amount, else absent. One specific unit (`unit` set) keeps its own price: the pipeline never aligns it.
+ * the amount, else absent. Only a whole development (headlineFollowsModels): a single property — one
+ * "model", or a villa whose brochure prints a row per floor — and one specific unit keep their own price,
+ * and the pipeline never aligns them.
  * @returns {string[]} problems (empty = good)
  */
 export function modelsProblems(listing) {
@@ -348,7 +361,7 @@ export function modelsProblems(listing) {
     }
   }
 
-  if (prices.length && absent(l.unit)) {
+  if (prices.length && headlineFollowsModels(l)) {
     const p = l.price && typeof l.price === 'object' ? l.price : {};
     const low = Math.min(...prices);
     if (p.onRequest || p.amount !== low) {

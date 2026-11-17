@@ -70,9 +70,10 @@ test('validate.mjs catches an ALL-CAPS domain, and names a leak as the copy writ
 });
 
 // ---- unit models, floor plans and the project fact lists (rules.mjs modelsProblems) ------------
-/** Give the first priced, whole-listing sale in listings.json two unit models, as the intake publishes them. */
+/** Make the first priced, whole-listing sale in listings.json a development with two unit models, as the intake publishes it. */
 function addModels(listings) {
   const l = listings.find((x) => x.category !== 'rent' && x.kind !== 'land' && !x.unit && !x.price?.onRequest && x.price?.amount > 0);
+  l.project = { name: { en: 'Test Heights', ar: 'تست هايتس' }, developer: { en: 'Example Developer', ar: 'المطور المثال' } };
   l.price = { ...l.price, amount: 319015, from: true, onRequest: false, period: null, subsidisedAmount: 270425 };
   l.models = [
     {
@@ -91,6 +92,20 @@ function addModels(listings) {
 test('validate.mjs accepts unit models with floor plans and the fact lists', () => {
   const res = validateWith((listings) => { addModels(listings); });
   assert.equal(res.status, 0, res.stderr);
+});
+
+test('validate.mjs: a single property (no project) or a project with one model keeps its own headline beside priced models', () => {
+  for (const [label, mutate] of [
+    ['no project', (l) => { l.project = null; }],
+    ['one model', (l) => { l.models = l.models.slice(0, 1); }],
+  ]) {
+    const res = validateWith((listings) => {
+      const l = addModels(listings);
+      mutate(l);
+      l.price = { ...l.price, amount: 4500000, from: false };
+    });
+    assert.equal(res.status, 0, `${label}: ${res.stderr}`);
+  }
 });
 
 test('validate.mjs refuses a bad unit model, a headline that disagrees with the models, and a leak in the new fields', () => {

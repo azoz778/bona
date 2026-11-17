@@ -47,7 +47,7 @@ import { priceAppearsIn, westernise } from './price.mjs';
 import { isSubsidyPricePage, pricePagesToRender } from './price-pages.mjs';
 import { pinFromLinks } from './geo.mjs';
 import { changedSincePublished, committedUnchanged, rebuild, resetTree } from './publish.mjs';
-import { FACT_LISTS, loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNamedIn, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
+import { FACT_LISTS, headlineFollowsModels, loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNamedIn, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
 
 /** Words that make a figure in the copy a price: a currency, "price", "from"-style openers. */
 const PRICE_CONTEXT_RE = /سعر|أسعار|اسعار|ريال|ر\.\s?س|ثمن|قيمة(?!\s*المضافة)|ابتداء|تبدأ|يبدأ|\b(?:SAR|SR|AED|USD|EUR|GBP|riyals?|prices?|priced|costs?|starting|starts)\b|[$€£﷼\u20c1]/i;
@@ -584,9 +584,12 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
         }
       }
     }
-    // "From the cheapest model" is the price of a whole development: one specific unit keeps its
-    // own price and the headline checks below. (An enrichment decides its headline from the listing.)
-    if (!enrich && price && !ai.listing?.unit && ai.models.some((m) => isFigure(m?.price))) {
+    // "From the cheapest model" is the price of a whole development (rules.mjs headlineFollowsModels: a
+    // project, no specific unit, two models or more): a single property — one "model", per-floor rows —
+    // and one specific unit keep their own price and the headline checks below; their models keep the
+    // prices confirmed above. (An enrichment decides its headline from the listing.)
+    if (!enrich && price && headlineFollowsModels({ project: ai.listing?.project, unit: ai.listing?.unit, models: ai.models })
+        && ai.models.some((m) => isFigure(m?.price))) {
       const before = { amount: price.amount, subsidised: price.subsidisedAmount };
       alignHeadline(price, ai.models);
       headlineFromModels = true;

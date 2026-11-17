@@ -80,7 +80,9 @@ The WhatsApp intake publishes them; all four keys are optional and left out when
   needs the model's own `price`, is lower than it, and is for sales only. When any model has a price, the
   headline of a whole development is the cheapest model: `price.amount` = the lowest model `price`,
   `price.from` = true, and `price.subsidisedAmount` = the lowest model `subsidisedPrice` when that is below
-  the amount, otherwise absent. One specific unit (`unit` set) keeps its own price. The owner's own price
+  the amount, otherwise absent. A whole development is a `project` with no `unit` and two models or more
+  (`headlineFollowsModels`): one specific unit, and a single property with one "model" or per-floor rows,
+  keep their own price (never "From …"). Every model price is in `price.currency`. The owner's own price
   (caption at publish, or `price <id> …` on WhatsApp) clears every model price.
 - **Floor plans**: `public/listings/<slug>/plan-NN.jpg` (white ground, ≤ 1600 px, q85) + `plan-NN-thumb.webp`
   (≤ 480 px), NN = the model's 1-based position when the intake wrote it; the path's slug must be the

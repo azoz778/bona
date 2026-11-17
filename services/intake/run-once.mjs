@@ -80,6 +80,7 @@ function printEnrichReport(r) {
     'currency-mismatch': `${cur?.established ? `the brochure prices its models in ${cur.reading}` : `the reading established no currency (${cur?.reading ?? 'none'} is only its default)`}, `
       + `the listing is in ${cur?.listing ?? 'no currency'}: the models are published without prices`,
     unit: 'one specific unit: its own price stays',
+    'single-property': 'not a development of two or more unit models: its own price stays, its models keep theirs',
     'no-model-prices': 'no model price was confirmed: the price stays as it is',
     adopted: 'was on request: the models\' confirmed headline is adopted',
     kept: 'equals the lowest model price: kept',

@@ -227,8 +227,10 @@ Anything else in the group is ignored, silently.
   call failed. After a quota error no further call is made for the brochure — not for the headline
   or its Sakani price either, which then say "could not be checked … try again later". When any model keeps a price, the headline of a whole
   development becomes the cheapest one, `from` (its period untouched), with the cheapest confirmed
-  subsidised price as its Sakani line; a listing for one specific `unit` keeps its own headline
-  checks; the owner's caption price drops every model price, and so does `price <id> …` later (its
+  subsidised price as its Sakani line. A whole development is a `project`, no `unit`, two models or
+  more (`rules.mjs headlineFollowsModels`, the same rule the validator applies): a listing for one
+  specific `unit`, and a single property with one "model" or per-floor rows, keep their own headline
+  checks (never "From …") while their models keep their confirmed prices; the owner's caption price drops every model price, and so does `price <id> …` later (its
   reply says how many models lost their price: the table then shows "On request").
   **Currency**: model prices are written and confirmed in the reading's `price.currency`, which counts
   only beside a headline price the model read, or — on request — when it is the home currency of the
@@ -259,7 +261,8 @@ Anything else in the group is ignored, silently.
   owner's own price (`_intake.edits` has `price`) stays and the models publish without prices; model
   prices in another currency than the listing's — or in none the reading established (see Currency
   above) — are not published or checked and the headline stays (`currency-mismatch`); one
-  specific `unit` keeps its price; a price on request adopts the models' lowest confirmed price
+  specific `unit` keeps its price, and so does a listing that is not a whole development
+  (`single-property`: no `project`, or fewer than two models), its models keeping theirs; a price on request adopts the models' lowest confirmed price
   (`from`, with its Sakani line); a set price is kept only when it IS that price (marked `from`),
   otherwise the run is refused with both figures and nothing changes — send `price <id> …` first, or
   use `--replace`. It must be the very PDF the listing was published from (`_intake.pdfSha256`), the

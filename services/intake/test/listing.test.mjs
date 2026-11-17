@@ -14,7 +14,7 @@ import { PLAN_JPEG_QUALITY, THUMB_QUALITY, writeFloorPlans } from '../lib/images
 import * as msg from '../lib/messages.mjs';
 import { alignHeadline } from '../lib/model-prices.mjs';
 import {
-  isLocalSrc, licenceProblems, LOCAL_LISTING_SRC, LOCAL_PLAN_SRC, LOCAL_PLAN_THUMB, modelsProblems, WITHHELD_LISTINGS,
+  headlineFollowsModels, isLocalSrc, licenceProblems, LOCAL_LISTING_SRC, LOCAL_PLAN_SRC, LOCAL_PLAN_THUMB, modelsProblems, WITHHELD_LISTINGS,
 } from '../../../scripts/curate/rules.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -410,6 +410,38 @@ describe('buildListing + checkListing — unit models, floor plans, amenities / 
     unit.listing.unit = { floor: 3, block: null, unitRef: 'A-12' };
     unit.listing.price = { amount: 350000, currency: 'SAR', from: false, period: null, onRequest: false };
     assert.deepEqual(checkListing(build(unit)), []);
+  });
+
+  it('a single villa (no project) with one priced model keeps its own headline: not "from", and the validator agrees', () => {
+    const ai = structuredClone(AI);   // a single villa: project null, SAR 4,500,000, not "from"
+    ai.models = [{ ...models()[1], name: { en: 'Villa', ar: 'فيلا' }, price: 4400000, subsidisedPrice: null }];
+    const l = build(ai, []);
+    assert.deepEqual(l.price, { amount: 4500000, currency: 'SAR', from: false, period: null, onRequest: false });
+    assert.equal(l.models[0].price, 4400000);
+    assert.deepEqual(checkListing(l), []);
+    assert.deepEqual(modelsProblems(l), []);
+  });
+
+  it('per-floor rows of a single property, and a project with ONE model, are not a development: the headline rule does not apply', () => {
+    const floors = structuredClone(AI);
+    floors.models = [{ ...models()[1], name: { en: 'Ground floor', ar: 'الدور الأرضي' }, price: 2000000, subsidisedPrice: null },
+      { ...models()[1], name: { en: 'First floor', ar: 'الدور الأول' }, price: 2500000, subsidisedPrice: null }];
+    assert.deepEqual(checkListing(build(floors, [])), []);
+    const one = projectAi();
+    one.models = [{ ...models()[0], floorPlan: null }];
+    one.listing.price = { amount: 450000, currency: 'SAR', from: false, period: null, onRequest: false };
+    assert.deepEqual(checkListing(build(one, [])), []);
+  });
+
+  it('headlineFollowsModels: a project, no unit, two models or more', () => {
+    const base = { project: { name: { en: 'P', ar: 'م' } }, unit: null, models: [{}, {}] };
+    assert.equal(headlineFollowsModels(base), true);
+    assert.equal(headlineFollowsModels({ ...base, models: [{}, {}, {}] }), true);
+    for (const [label, over] of [['no project', { project: null }], ['a unit', { unit: { floor: 3 } }], ['one model', { models: [{}] }],
+      ['no models', { models: undefined }], ['models not a list', { models: { 0: {}, 1: {} } }]]) {
+      assert.equal(headlineFollowsModels({ ...base, ...over }), false, label);
+    }
+    assert.equal(headlineFollowsModels(null), false);
   });
 
   it('the headline rule is alignHeadline\'s: a lowest Sakani price at or above the lowest price leaves none on the headline', () => {
@@ -1349,6 +1381,18 @@ describe('run-once --enrich: enrichMetaFor, mergeEnrichment, enrichHeadline', ()
       const l = existing({ price: { amount: 350000, currency: 'SAR', from: false, period: null, onRequest: false }, unit: { floor: 3, block: 'H', unitRef: null } });
       const h = enrichHeadline(l, models, aligned());
       assert.deepEqual(h, { price: l.price, dropModelPrices: false, refuse: null, decision: 'unit' });
+    });
+
+    it('a single property (no project, or one model) keeps its own price and its models keep theirs (single-property)', () => {
+      const own = { amount: 350000, currency: 'SAR', from: false, period: null, onRequest: false };
+      for (const [label, l, m] of [['no project', existing({ price: own, project: null }), models], ['one model', existing({ price: own }), [models[1]]]]) {
+        const one = m.length === 1 ? alignHeadline({ ...ON_REQUEST }, m) : aligned();
+        assert.deepEqual(enrichHeadline(l, m, one), { price: own, dropModelPrices: false, refuse: null, decision: 'single-property' }, label);
+      }
+      // On request too: nothing is adopted from a single property's models.
+      const onReq = existing({ project: null });
+      assert.equal(enrichHeadline(onReq, models, aligned()).decision, 'single-property');
+      assert.equal(enrichHeadline(onReq, [model('Lulu', null)], null).decision, 'no-model-prices');
     });
 
     it('model prices in another currency than the listing\'s: the price stays and the models lose theirs (currency-mismatch)', () => {
