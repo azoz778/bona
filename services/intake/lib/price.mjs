@@ -72,11 +72,12 @@ const ABBR = '(?<![\\u0600-\\u06ff])';
  */
 const WORD_GOES_ON = '[\\u0620-\\u065f\\u066e-\\u06d3\\u06d5-\\u06ff]';
 /**
+ * A spaced dotted form ("ر. س") is a mark only where the word ends, like the undotted ones: "د. إبراهيم" is a doctor.
  * ر.س / ر.ع / ر.ق / د.ك / د.إ — the letters `a` and `b` standing on their own. Dotted ("ر.س", "ر. س") they are
  * the mark whatever follows: "ر.س،", "ر.سـ", even "ر.سشاملة" with the space lost. Undotted ("رس", "ر س") only
  * when the word ends there: "رسوم" (fees), "رسمي", "رعاية", "رقم" are words, not marks.
  */
-const abbr = (a, b) => `${ABBR}${a}(?:\\.\\s?${b}\\.?|\\s?${b}(?:\\.|(?!${WORD_GOES_ON})))`;
+const abbr = (a, b) => `${ABBR}${a}(?:\\.${b}\\.?|\\.\\s${b}(?:\\.|(?!${WORD_GOES_ON}))|\\s?${b}(?:\\.|(?!${WORD_GOES_ON})))`;
 const MARKS = [
   ['ر[يی]ال\\s*(?:عماني|عُماني)|omani\\s+(?:riyals?|rials?)', ['OMR']],
   ['ر[يی]ال\\s*قطري|qatari\\s+riyals?', ['QAR']],
@@ -89,7 +90,7 @@ const MARKS = [
   // Other dollars, named by their prefix: Australian, Canadian, Hong Kong, New Zealand, Singapore, Taiwan dollars,
   // the Brazilian real (R$), the Mexican peso (MX$). Before USD, which takes every other "$" — "US$", "$" alone,
   // and a "$" written straight after a word ("price$1,250,000", "from$…": final review M1).
-  ['(?<![A-Za-z])(?:A|AU|C|CA|HK|NZ|S|SG|NT|R|MX)\\$', ['OTHER']],
+  ['(?<![A-Za-z])(?:A|AU|C|CA|CAD|AUD|HK|HKD|NZ|NZD|S|SG|SGD|NT|TWD|R|MX|MXN)\\$', ['OTHER']],
   ['US\\$|\\bUSD\\b|\\$|dollars?|دولار', ['USD']],
   ['\\bEUR\\b|€|euros?|يورو', ['EUR']],
   ['\\bOMR\\b', ['OMR']],
@@ -100,7 +101,7 @@ const MARKS = [
   // counts after a figure, "1,250,000 XY$": before one, USD above has already taken the "$".)
   // Bulgarian leva (лв) and Croatian kuna (kn, a word of its own): a euro-area property's old-currency price (final review M7).
   ['\\b(?:QAR|KWD|BHD|EGP|JOD|TRY|CHF|CAD|AUD|INR|PKR|CNY|JPY|RUB|BGN|HRK)\\b|(?<![A-Za-z])[A-Z]{1,3}\\$|\\bTL\\b|₺|دينار|لير[ةه]'
-    + `|${abbr('د', 'ك')}|(?<![\\u0400-\\u04ff])лв(?![\\u0400-\\u04ff])|\\bkn\\b`, ['OTHER']],
+    + `|${abbr('د', 'ك')}|(?<![\\u0400-\\u04ff])лв(?![\\u0400-\\u04ff])|(?-i:\\bkn\\b)`, ['OTHER']],
 ];
 const GAP = '[\\s:：\\-–—=]*';
 const MARK_BEFORE = MARKS.map(([src, cs]) => [new RegExp(`(?:${src})${GAP}$`, 'i'), cs]);

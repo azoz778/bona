@@ -366,8 +366,33 @@ describe('TAQEEM currency — a figure printed in another currency is not that p
     }
   });
 
+  it('AUD$ / CAD$ / HKD$ / SGD$ / NZD$ / TWD$ / MXN$ before a figure are other dollars, not USD (fix review 4)', () => {
+    for (const p of ['AUD', 'CAD', 'HKD', 'SGD', 'NZD', 'TWD', 'MXN']) {
+      for (const t of [`${p}$1,250,000`, `${p}$ 1,250,000`, `price ${p}$1,250,000`]) {
+        assert.equal(printedInCurrency(t, 1250000, 'USD', { bareCounts: false }), false, `${t} is not USD`);
+        assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: true }), false, `${t} is not bare`);
+      }
+    }
+    assert.equal(printedInCurrency('$1,250,000', 1250000, 'USD', { bareCounts: false }), true);
+  });
+
+  it('a spaced dotted Arabic abbreviation is a mark only where the word ends; the unspaced forms keep whatever follows (fix review 4)', () => {
+    for (const t of ['1,250,000 د. إبراهيم', '1,250,000 د. كمال', '1,250,000 د. كريم', '1,250,000 ر. قطعة', '1,250,000 ر. عبدالله']) {
+      assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: true, home: 'SAR' }), true, `${t} is a bare figure, not another currency`);
+      assert.equal(printedInCurrency(t, 1250000, 'AED', { bareCounts: false }), false, `${t} is not AED`);
+    }
+    for (const t of ['1,250,000 ر. س،', '1,250,000 ر. س', '1,250,000 ر.س،', '1,250,000 ر.سشاملة']) {
+      assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: false }), true, `${t} is SAR`);
+    }
+  });
+
+  it('KN Group is not a currency; lowercase kn and HRK still are (fix review 4)', () => {
+    assert.equal(printedInCurrency('1,250,000\nKN Group', 1250000, 'SAR', { bareCounts: true, home: 'SAR' }), true);
+    assert.equal(printedInCurrency('125,000 kn', 125000, 'EUR', { bareCounts: true, home: 'EUR' }), false);
+  });
+
   it('Bulgarian leva and Croatian kuna are other currencies: a euro-area property\'s old-currency price is never a bare euro figure (final review M7)', () => {
-    for (const t of ['125,000 лв.', '125,000 лв', '125 000 лв', 'Цена: 125,000лв.', 'BGN 125,000', '125,000 BGN', '125,000 kn', '125,000 KN', 'HRK 125,000', '125,000 HRK']) {
+    for (const t of ['125,000 лв.', '125,000 лв', '125 000 лв', 'Цена: 125,000лв.', 'BGN 125,000', '125,000 BGN', '125,000 kn', 'HRK 125,000', '125,000 HRK']) {
       assert.equal(printedInCurrency(t, 125000, 'EUR', { bareCounts: true, home: 'EUR' }), false, `${t} is not euros`);
       assert.equal(printedInCurrency(t, 125000, 'SAR', { bareCounts: true, home: 'SAR' }), false, `${t} is not bare`);
     }
