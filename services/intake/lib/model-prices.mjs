@@ -25,7 +25,7 @@ import { priceAppearsIn } from './price.mjs';
 /** A price figure: a positive finite number. ONE definition, in scripts/curate/rules.mjs. */
 export { isFigure };
 
-const EURO_AREA = ['AT', 'BE', 'CY', 'DE', 'EE', 'ES', 'FI', 'FR', 'GR', 'HR', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PT', 'SI', 'SK'];
+const EURO_AREA = ['AT', 'BE', 'BG', 'CY', 'DE', 'EE', 'ES', 'FI', 'FR', 'GR', 'HR', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PT', 'SI', 'SK'];
 /** The currency prices are quoted in at home, for the countries whose currency the site takes (CURRENCIES). */
 const HOME_CURRENCY = Object.freeze({ SA: 'SAR', AE: 'AED', OM: 'OMR', US: 'USD', ...Object.fromEntries(EURO_AREA.map((c) => [c, 'EUR'])) });
 

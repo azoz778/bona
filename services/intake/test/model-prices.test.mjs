@@ -226,6 +226,12 @@ describe('modelPriceCurrency — the currency a reading\'s unit-model prices are
     for (const cc of ['GB', 'QA', 'EG', 'TR', 'CH', '', null, undefined, 42]) assert.equal(homeCurrency(cc), null, String(cc));
   });
 
+  it('Bulgaria prices in euros: it joined the euro area on 1 January 2026 (final review M5)', () => {
+    assert.equal(homeCurrency('BG'), 'EUR');
+    assert.equal(homeCurrency('bg'), 'EUR');
+    assert.equal(modelPriceCurrency({ amount: null, currency: 'EUR', from: false, period: null, onRequest: true }, 'BG'), 'EUR');
+  });
+
   it('countryCurrency: homeCurrency\'s, plus the riyal countries the site does not print — a bare ريال there is theirs (OM1/QA1)', () => {
     assert.deepEqual(['SA', 'AE', 'om', 'US', 'FR', 'QA', 'qa', 'YE', 'IR'].map(countryCurrency), ['SAR', 'AED', 'OMR', 'USD', 'EUR', 'QAR', 'QAR', 'YER', 'IRR']);
     for (const cc of ['GB', 'EG', 'TR', '', null, undefined, 42]) assert.equal(countryCurrency(cc), null, String(cc));
