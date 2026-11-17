@@ -40,7 +40,7 @@ import {
   writeInboxListing,
 } from './listing.mjs';
 import { log } from './log.mjs';
-import { alignHeadline, checkModelPrices, countryCurrency, homeCurrency, isFigure, modelPriceCurrency } from './model-prices.mjs';
+import { ABROAD_CURRENCIES, alignHeadline, checkModelPrices, countryCurrency, homeCurrency, isFigure, modelPriceCurrency } from './model-prices.mjs';
 import { extractPdf, renderPdfPages } from './pdf.mjs';
 import { compositePages, cropPhotoRegions, modelFlagsComposites } from './photo-regions.mjs';
 import { priceAppearsIn, printedInCurrency, westernise } from './price.mjs';
@@ -560,9 +560,9 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   const readModelPrices = Array.isArray(ai.models) ? ai.models.map((m) => m?.price).filter(isFigure) : [];
   const readLowest = readModelPrices.length ? Math.min(...readModelPrices) : null;
   // The currency: the model prices are written and confirmed IN the reading's `price.currency`, which
-  // counts only when model-prices.mjs modelPriceCurrency establishes it — never for a property abroad
-  // (a country whose currency the site does not print), beside a price elsewhere, on request only in the
-  // country's own currency. When it is not established — or, on an enrichment, it is not the listing's
+  // counts only when model-prices.mjs modelPriceCurrency establishes it — for a property abroad (a country
+  // whose currency the site does not print) only USD or EUR beside a price, elsewhere any beside a price,
+  // on request only the country's own currency. When it is not established — or, on an enrichment, it is not the listing's
   // own currency (the site prints every model price in `price.currency`) — the models keep no price, and
   // none is checked: no figure is checked that will not be published. A figure the copy states is then
   // an unconfirmed one (the guard below).
@@ -590,13 +590,16 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       report.modelPrices = { models: ai.models.length, calls: 0, refused: [], incomplete: [], incompletePages: [], fatal: false, tooMany: null, decision, currency, dropped: modelFigures };
       log.info('intake.model_prices_dropped', { decision, ...currency, figures: modelFigures.length });
       report.warningCodes.push('model-price-not-printed');
+      // Why the reading's currency does not count (model-prices.mjs modelPriceCurrency), as it is: abroad only
+      // USD or EUR beside a price the reading read itself; at home a currency with no price of its own counts
+      // only when it is the country's own. A USD reading abroad is not called "the default" (final review C2).
+      const ownAmount = price?.onRequest === false && isFigure(price?.amount);
+      const why = home === null
+        ? `the property is in ${country ?? 'no recorded country'}, whose own currency the site does not print: there the models are priced only in ${ABROAD_CURRENCIES.join(' or ')}, beside a price the reading read itself — this reading has ${currency.reading ?? 'no currency'}${ownAmount ? '' : ' and no price of its own'}`
+        : `${currency.reading ?? 'none'} is only the default — the reading has no price of its own, and it is not the currency of the country the property is in`;
       report.warnings.push(decision === 'currency-mismatch'
-        ? `the brochure's unit-model prices are not in the listing's currency (${currency.listing ?? 'none'}): ${currency.established ? `they read as ${currency.reading}`
-          : home === null ? `the reading established no currency (the property is in ${country ?? 'no recorded country'}, whose currency the site does not print — its ${currency.reading ?? 'none'} is the contract's default or a conversion)`
-            : `the reading established no currency (${currency.reading ?? 'none'} is only the default — it read no price of its own)`}, so the models were published without prices`
-        : home === null
-          ? `the unit-model prices were left off: their currency could not be established from the brochure (the property is in ${country ?? 'no recorded country'}, whose currency the site does not print — the reading's ${currency.reading ?? 'none'} is the contract's default or a conversion, not the brochure's) — the models show without them`
-          : `the unit-model prices were left off: their currency could not be established from the brochure (${currency.reading ?? 'none'} is only the default — the reading has no price of its own, and it is not the currency of the country the property is in) — the models show without them`);
+        ? `the brochure's unit-model prices are not in the listing's currency (${currency.listing ?? 'none'}): ${currency.established ? `they read as ${currency.reading}` : `the reading established no currency (${why})`}, so the models were published without prices`
+        : `the unit-model prices were left off: their currency could not be established from the brochure (${why}) — the models show without them`);
     }
   } else if (modelFigures.length) {
     const mp = await checkModelPrices(ai.models, {

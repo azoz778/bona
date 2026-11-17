@@ -1419,6 +1419,65 @@ describe('processPdf: TAQEEM currency — a figure printed in another currency i
       assert.equal(report.listingPreview.price.amount, 319015);
     } finally { r.cleanup(); }
   });
+
+  // C2 (final review 2026-11-17): abroad, in a country whose own currency the site does not print, a reading in
+  // USD or EUR beside its own headline price establishes the models' currency — every figure is then confirmed
+  // IN it on its page by a second model that follows its prompt (rig `facts`), a bare figure never counting there.
+  const ISTANBUL = { district: { en: 'Besiktas', ar: 'بشيكتاش' }, city: { en: 'Istanbul', ar: 'إسطنبول' }, country: { en: 'Turkey', ar: 'تركيا' }, countryCode: 'TR' };
+  const istanbul = (currency) => {
+    const a = byThePrompt([model('1+1', 250000, 3), model('2+1', 400000, 3)], currency, '$250,000');
+    a.listing.location = ISTANBUL;
+    a.listing.category = 'international';
+    return a;
+  };
+  const rows = (mark) => ({ 3: [{ fig: 250000, mark, kind: 'model', model: '1+1' }, { fig: 400000, mark, kind: 'model', model: '2+1' }] });
+
+  it('C2: an Istanbul development printing "$" beside every row, read in USD: the model prices are checked IN USD and published', async () => {
+    const r = await rig({ listing: istanbul('USD'), pageText: ['Istanbul', 'x', '1+1 apartments $250,000\n2+1 apartments $400,000', 'y', 'z'], facts: rows('$') });
+    try {
+      const report = await r.run();
+      assert.equal(report.modelPrices.decision, undefined, 'established: no currency drop');
+      assert.deepEqual(modelCalls(r).map((c) => [c.page, c.currency, c.bare]), [[3, 'USD', false]], 'IN USD; a bare figure does not count abroad');
+      assert.deepEqual(report.ai.models.map((m) => m.price), [250000, 400000]);
+      assert.deepEqual(report.listingPreview.price, { amount: 250000, currency: 'USD', from: true, period: null, onRequest: false });
+      assert.deepEqual(checkListing(report.listingPreview), []);
+    } finally { r.cleanup(); }
+  });
+
+  it('C2: …but the same reading over rows printed in Turkish lira, or with no currency at all, publishes no model price', async () => {
+    for (const mark of ['TL', '₺', null]) {
+      const r = await rig({ listing: istanbul('USD'), pageText: ['Istanbul', 'x', 'y', 'z', 'w'], facts: rows(mark) });
+      try {
+        const report = await r.run();
+        assert.deepEqual(modelCalls(r).map((c) => [c.currency, c.bare]), [['USD', false]], String(mark));
+        assert.deepEqual(report.ai.models.map((m) => m.price), [null, null], String(mark));
+        assert.deepEqual(report.listingPreview.price, { ...ON_REQUEST, currency: 'USD' }, String(mark));
+      } finally { r.cleanup(); }
+    }
+  });
+
+  it('C2: abroad, SAR (the contract\'s default) or a reading with no price of its own still establishes nothing — and the warning says why, truthfully', async () => {
+    const sar = await rig({ listing: istanbul('SAR'), pageText: ['Istanbul', 'x', 'y', 'z', 'w'], facts: rows('$') });
+    try {
+      const report = await sar.run();
+      assert.equal(report.modelPrices.decision, 'currency-unconfirmed');
+      assert.equal(modelCalls(sar).length, 0);
+      const w = report.warnings.find((x) => /their currency could not be established/.test(x)) ?? '';
+      assert.match(w, /TR/);
+      assert.match(w, /only in USD or EUR/);
+      assert.match(w, /this reading has SAR/);
+    } finally { sar.cleanup(); }
+    const onRequest = istanbul('USD');
+    onRequest.listing.price = { amount: null, currency: 'USD', from: false, period: null, onRequest: true };
+    const none = await rig({ listing: onRequest, pageText: ['Istanbul', 'x', 'y', 'z', 'w'], facts: rows('$') });
+    try {
+      const report = await none.run();
+      assert.equal(report.modelPrices.decision, 'currency-unconfirmed');
+      const w = report.warnings.find((x) => /their currency could not be established/.test(x)) ?? '';
+      assert.match(w, /this reading has USD and no price of its own/);
+      assert.doesNotMatch(w, /contract's default or a conversion/, 'a USD reading is not called the default');
+    } finally { none.cleanup(); }
+  });
 });
 
 // OM1 / QA1 (final review 2026-11-17): a bare "ريال" / ﷼ is the riyal of the country the property is in — the

@@ -59,10 +59,14 @@ export function countryCurrency(countryCode) {
  * independent one: prompt.md also has it set the headline amount FROM the model prices, so an amount
  * beside it proves nothing about the currency. So:
  *   - a currency outside CURRENCIES never counts;
- *   - a property in a country whose own currency the site does not print (homeCurrency null: GB, …)
- *     never establishes one, amount or not — its brochure prints £ or another currency the contract
- *     cannot hold, and the model writes the contract's default "SAR" or another it can (W020's Hampstead
- *     brochure printed GBP and came back in "SAR"; read by the prompt it is "from 1,250,000 SAR");
+ *   - a property in a country whose own currency the site does not print (homeCurrency null: GB, TR,
+ *     GE, …) establishes only USD or EUR, and only beside a headline amount (ABROAD_CURRENCIES; final
+ *     review C2: an Istanbul development printing "$250,000" beside every row). Never SAR, AED or OMR
+ *     there: its brochure prints £, TL or another currency the contract cannot hold, and the model writes
+ *     the contract's default "SAR" or another it can (W020's Hampstead brochure printed GBP and came back
+ *     in "SAR"; read by the prompt it is "from 1,250,000 SAR"). A USD or EUR reading of a £ or TL brochure
+ *     is refused figure by figure on its page: the check asks for every figure IN that currency, and a bare
+ *     figure never counts abroad (pipeline.mjs passes bareCounts only in the currency's own country);
  *   - beside a headline amount, the reading's currency counts — the page check then confirms every
  *     figure IN that currency, so a figure printed in another one is refused there;
  *   - on request it counts only when it is that country's own currency (a Saudi brochure is priced in
@@ -71,10 +75,14 @@ export function countryCurrency(countryCode) {
 export function modelPriceCurrency(price, countryCode) {
   if (!price || typeof price !== 'object' || !CURRENCIES.includes(price.currency)) return null;
   const home = homeCurrency(countryCode);
-  if (home === null) return null;
-  if (price.onRequest === false && isFigure(price.amount)) return price.currency;
+  const amount = price.onRequest === false && isFigure(price.amount);
+  if (home === null) return amount && ABROAD_CURRENCIES.includes(price.currency) ? price.currency : null;
+  if (amount) return price.currency;
   return home === price.currency ? price.currency : null;
 }
+
+/** The currencies a reading abroad (a country whose own currency the site does not print) can establish. */
+export const ABROAD_CURRENCIES = Object.freeze(['USD', 'EUR']);
 
 /** At most this many pages are checked for one brochure (cfg.maxModelPricePages overrides it). */
 export const MAX_MODEL_PRICE_PAGES = 12;

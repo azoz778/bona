@@ -186,15 +186,28 @@ describe('modelPriceCurrency — the currency a reading\'s unit-model prices are
     assert.equal(modelPriceCurrency(P('OMR', 90000), 'OM'), 'OMR');
   });
 
-  it('never for a property in a country whose currency the site does not print — even beside a headline amount (prompt.md has the model set that amount FROM the model prices, so it is no independent reading)', () => {
+  it('for a property in a country whose currency the site does not print: only USD or EUR beside a headline amount — never SAR, AED or OMR there (prompt.md has the model set that amount FROM the model prices, so it is no independent reading of those)', () => {
     // P1: a Hampstead brochure printing £1,250,000 / £2,000,000, read per the prompt as "from 1,250,000 SAR".
     assert.equal(modelPriceCurrency(P('SAR', 1250000), 'GB'), null);
-    assert.equal(modelPriceCurrency(P('EUR', 900000), 'GB'), null);
-    assert.equal(modelPriceCurrency(P('USD', 900000), 'GB'), null);
+    assert.equal(modelPriceCurrency(P('AED', 1250000), 'TR'), null);
+    assert.equal(modelPriceCurrency(P('OMR', 125000), 'GB'), null);
     assert.equal(modelPriceCurrency(P('SAR', 1250000), 'QA'), null);
     assert.equal(modelPriceCurrency(P('SAR', 1250000), 'EG'), null);
-    assert.equal(modelPriceCurrency(P('SAR', 1250000), null), null, 'no country, no currency');
+    assert.equal(modelPriceCurrency(P('SAR', 1250000), null), null, 'no country: never the contract\'s default');
     assert.equal(modelPriceCurrency(P('SAR', 1250000), undefined), null);
+    // C2 (final review 2026-11-17): a development abroad priced in dollars or euros — "$250,000" beside every
+    // row of an Istanbul brochure. The page check then confirms every figure IN that currency, a bare one
+    // never counting there (pipeline.mjs: bareCounts only in the currency's own country), so a figure the
+    // brochure prints in £ or TL is refused on its page.
+    assert.equal(modelPriceCurrency(P('USD', 250000), 'TR'), 'USD');
+    assert.equal(modelPriceCurrency(P('EUR', 900000), 'GB'), 'EUR');
+    assert.equal(modelPriceCurrency(P('USD', 900000), 'GB'), 'USD');
+    assert.equal(modelPriceCurrency(P('USD', 900000), 'GE'), 'USD');
+    assert.equal(modelPriceCurrency(P('USD', 900000), null), 'USD');
+    // …but only beside an amount the reading read: on request, abroad, nothing establishes a currency.
+    assert.equal(modelPriceCurrency(P('USD', null), 'TR'), null);
+    assert.equal(modelPriceCurrency(P('EUR', null), 'GB'), null);
+    assert.equal(modelPriceCurrency({ ...P('USD', 250000), onRequest: true }, 'TR'), null);
   });
 
   it('on request: only the home currency of the country the property is in (the contract\'s "SAR" default is not a reading)', () => {
