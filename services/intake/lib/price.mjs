@@ -52,22 +52,30 @@ export function priceAppearsIn(text, amount) {
  * "riyal" is RIYAL — the riyal of the country the property is in (riyalOf).
  */
 const RIYAL = 'RIYAL';
+/** An Arabic abbreviation's letters stand alone: no Arabic letter before the first, a dot or no Arabic letter after the last. */
+const ABBR = '(?<![\\u0600-\\u06ff])';
+const ABBR_END = '(?:\\.|(?![\\u0600-\\u06ff]))';
 const MARKS = [
   ['ر[يی]ال\\s*(?:عماني|عُماني)|omani\\s+(?:riyals?|rials?)', ['OMR']],
   ['ر[يی]ال\\s*قطري|qatari\\s+riyals?', ['QAR']],
   ['ر[يی]ال\\s*سعودي|saudi\\s+riyals?', ['SAR']],
   ['ر[يی]الا?ت?|riyals?|rials?', [RIYAL]],
-  // ر.س / ر.ع — not the end of a word ("مدارس", "شارع").
-  ['(?<![\\u0600-\\u06ff])ر\\.?\\s?س\\.?', ['SAR']],
-  ['(?<![\\u0600-\\u06ff])ر\\.?\\s?ع\\.?', ['OMR']],
+  // ر.س / ر.ع / ر.ق / د.ك / د.إ — letters standing on their own: not the end of a word ("مدارس", "شارع"),
+  // nor its start ("رسوم" fees, "رسمي", "رعاية", "رقم"): after the last letter a dot or no Arabic letter.
+  [`${ABBR}ر\\.?\\s?س${ABBR_END}`, ['SAR']],
+  [`${ABBR}ر\\.?\\s?ع${ABBR_END}`, ['OMR']],
   ['\\bSAR\\b|\\bS\\.?R\\b\\.?|\u20c1', ['SAR']],
-  ['\\bAED\\b|\\bDhs?\\b\\.?|dirhams?|درهم|د\\.?\\s?إ', ['AED']],
-  ['US\\$|\\bUSD\\b|\\$|dollars?|دولار', ['USD']],
+  [`\\bAED\\b|\\bDhs?\\b\\.?|dirhams?|درهم|${ABBR}د\\.?\\s?إ${ABBR_END}`, ['AED']],
+  // "$" alone, or "US$" — not "A$", "C$", "HK$", "NZ$", "S$" (other dollars, below).
+  ['US\\$|\\bUSD\\b|(?<![A-Za-z])\\$|dollars?|دولار', ['USD']],
   ['\\bEUR\\b|€|euros?|يورو', ['EUR']],
   ['\\bOMR\\b', ['OMR']],
   ['\\bGBP\\b|£|pounds?(?:\\s+sterling)?|sterling|إسترليني|استرليني', ['GBP']],
   ['جنيه', ['GBP', 'EGP']],
-  ['\\b(?:QAR|KWD|BHD|EGP|JOD|TRY|CHF|CAD|AUD|INR|PKR|CNY|JPY|RUB)\\b', ['OTHER']],
+  [`${ABBR}ر\\.?\\s?ق${ABBR_END}`, ['QAR']],
+  // Currencies the site does not print: never this price's, and never a bare figure either.
+  ['\\b(?:QAR|KWD|BHD|EGP|JOD|TRY|CHF|CAD|AUD|INR|PKR|CNY|JPY|RUB)\\b|(?<![A-Za-z])[A-Z]{1,3}\\$|\\bTL\\b|₺|دينار|لير[ةه]'
+    + `|${ABBR}د\\.?\\s?ك${ABBR_END}`, ['OTHER']],
 ];
 const GAP = '[\\s:：\\-–—=]*';
 const MARK_BEFORE = MARKS.map(([src, cs]) => [new RegExp(`(?:${src})${GAP}$`, 'i'), cs]);

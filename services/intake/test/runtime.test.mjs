@@ -289,6 +289,36 @@ describe('TAQEEM currency — a figure printed in another currency is not that p
     assert.equal(printedInCurrency('190,000 Qatari riyals', 190000, 'SAR', { bareCounts: true }), false);
   });
 
+  it('the mark table (final review M4): A$/C$/HK$ are not USD, dinars/lira/TL/₺/ر.ق/د.ك are never bare, "رسوم" is not ر.س, "د.إ." before a figure is AED', () => {
+    for (const t of ['A$1,250,000', 'HK$ 1,250,000', 'C$1,250,000', 'NZ$1,250,000', 'S$ 1,250,000', '1,250,000 A$']) {
+      assert.equal(printedInCurrency(t, 1250000, 'USD', { bareCounts: false }), false, `${t} is not USD`);
+      assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: true }), false, `${t} is not bare`);
+    }
+    for (const t of ['$1,250,000', 'US$1,250,000', '1,250,000$', 'Price: $ 1,250,000', '1,250,000 USD']) {
+      assert.equal(printedInCurrency(t, 1250000, 'USD', { bareCounts: false }), true, `${t} is USD`);
+    }
+    for (const t of ['1,250,000 دينار', '1,250,000 دينار كويتي', '1,250,000 د.ك', 'د.ك 1,250,000', '1,250,000 ر.ق', 'ر.ق. 1,250,000',
+      '1,250,000 TL', '₺1,250,000', '1,250,000 ₺', '1,250,000 ليرة تركية']) {
+      assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: true }), false, `${t} is another currency, never bare`);
+      assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: true, home: 'SAR' }), false, `${t} (home SAR)`);
+    }
+    // ر.س / ر.ع are a mark only on their own: not the start of a word ("رسوم" fees, "رسمي", "رعاية") nor its end ("مدارس").
+    for (const t of ['السعر 1,250,000 رسوم التسجيل', '1,250,000 رسمي', 'مدارس 1,250,000']) {
+      assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: false }), false, `${t}: no SAR mark`);
+      assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: true }), true, `${t}: bare`);
+    }
+    assert.equal(printedInCurrency('1,250,000 رعاية', 1250000, 'OMR', { bareCounts: false }), false);
+    assert.equal(printedInCurrency('1,250,000 رعاية', 1250000, 'SAR', { bareCounts: true }), true);
+    for (const t of ['ر.س 1,250,000', 'ر.س. 1,250,000', 'ر.س.1,250,000', '1,250,000 ر.س', '1,250,000 ر.س.', '1,250,000 ر س']) {
+      assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: false }), true, t);
+    }
+    for (const t of ['ر.ع 190,000', '190,000 ر.ع.']) assert.equal(printedInCurrency(t, 190000, 'OMR', { bareCounts: false }), true, t);
+    for (const t of ['د.إ. 1,250,000', 'د.إ 1,250,000', '1,250,000 د.إ.', '1,250,000 د.إ']) {
+      assert.equal(printedInCurrency(t, 1250000, 'AED', { bareCounts: false }), true, t);
+      assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: true }), false, `${t} is not SAR`);
+    }
+  });
+
   it('the figure rules are priceAppearsIn\'s: no figure inside a longer one, nothing that is not a price', () => {
     assert.equal(printedInCurrency('SAR 1,450,000', 450000, 'SAR'), false);
     assert.equal(printedInCurrency('', 1250000, 'SAR'), false);
