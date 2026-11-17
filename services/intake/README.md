@@ -295,7 +295,9 @@ Anything else in the group is ignored, silently.
   `brochure_pdf.py` (TK design system, Bona branded) out of the published listing, its photos
   and floor plans, and `src/data/site.json` — nothing of the developer's PDF is re-published.
   It only ever prints fields the listing already passed the validators with; the developer is
-  named as text only. `#nobrochure` publishes the listing with no PDF at all.
+  named as text only. `#nobrochure` publishes the listing with no PDF at all. A rent keeps its
+  period wherever a price is printed — the units table, each model page, the "From" headline:
+  "SAR 50,000 / year", with the Arabic line "ابتداءً من 50,000 ر.س / سنوياً" (the site's own wording).
 - **Real Arabic**, checked for Arabic script in every `ar` field.
 - **4–10 photos.** A PDF that yields fewer than four publishable photographs is rejected
   rather than published thin.

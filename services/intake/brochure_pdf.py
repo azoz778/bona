@@ -355,8 +355,20 @@ def fmt_range(values) -> str:
     return fmt_count(lo) if lo == hi else f"{fmt_plain(lo)}–{fmt_plain(hi)}"
 
 
-def money_en(amount, cur) -> str:
-    return f"{cur} {fmt_money(amount)}"
+# The site's wording (src/lib/i18n.ts formatPrice): "SAR 50,000 / year" and "50,000 ر.س / سنوياً".
+PERIOD_EN = {"year": " / year", "month": " / month"}
+PERIOD_AR = {"year": " / سنوياً", "month": " / شهرياً"}
+CURRENCY_AR = {"SAR": "ر.س", "AED": "د.إ", "EUR": "€", "USD": "$", "OMR": "ر.ع"}
+
+
+def money_en(amount, cur, period=None) -> str:
+    """"SAR 50,000", and for a rent its period: "SAR 50,000 / year"."""
+    return f"{cur} {fmt_money(amount)}{PERIOD_EN.get(period, '')}"
+
+
+def money_ar(amount, cur, period=None) -> str:
+    """The Arabic of money_en, as the site prints it: "50,000 ر.س / سنوياً" (Western digits)."""
+    return f"{fmt_money(amount)} {CURRENCY_AR.get(cur, cur)}{PERIOD_AR.get(period, '')}"
 
 
 def dedupe(parts):
@@ -622,8 +634,7 @@ class Listing:
     def price_en(self) -> str:
         if self.on_request:
             return "Price on request"
-        s = ("From " if self.price_from else "") + money_en(self.amount, self.currency)
-        return s + (f" / {self.period}" if self.period else "")
+        return ("From " if self.price_from else "") + money_en(self.amount, self.currency, self.period)
 
     def type_label(self, plural=False) -> str:
         pair = TYPE_LABELS.get(self.type)
@@ -888,6 +899,13 @@ class Brochure:
             i += k
         return "".join('<div class="ledger-row">' + "".join(self.cell(*c) for c in row) + "</div>" for row in rows)
 
+    def price_ar(self, label_ar: str, amount, period) -> str:
+        """The Arabic line under a price: its label — and, for a rent, the price itself with its period in
+        the site's Arabic ("ابتداءً من 50,000 ر.س / سنوياً"), so an Arabic reader sees the rent is yearly."""
+        if not period or amount is None:
+            return label_ar
+        return f"{label_ar} {money_ar(amount, self.L.currency, period)}"
+
     @staticmethod
     def term(label_en: str, value: str, label_ar: str, long=False) -> str:
         cls = "v long" if long else "v"
@@ -1028,7 +1046,7 @@ class Brochure:
         return any(m.sakani is not None for m in self.L.models)
 
     def units_table(self, models, keyed=False) -> str:
-        cur, sak = self.L.currency, self.sakani_col()
+        cur, per, sak = self.L.currency, self.L.period, self.sakani_col()
         widths = [34, 8, 8, 14, 18, 18] if sak else [40, 9, 9, 16, 26]
         heads = [("Layout", "النموذج"), ("Bed", "نوم"), ("Bath", "مياه"), ("Area", "المساحة"), ("Price", "السعر")]
         if sak:
@@ -1045,7 +1063,7 @@ class Brochure:
                    f"<td>{fmt_plain(m.beds) if m.beds is not None else dash}</td>",
                    f"<td>{fmt_plain(m.baths) if m.baths is not None else dash}</td>",
                    f"<td>{fmt_area(m.area) + ' m²' if m.area is not None else dash}</td>",
-                   f"<td>{esc(money_en(m.price, cur)) if m.price is not None else 'On request'}</td>"]
+                   f"<td>{esc(money_en(m.price, cur, per)) if m.price is not None else 'On request'}</td>"]
             if sak:
                 tds.append(f"<td>{esc(money_en(m.sakani, cur)) if m.sakani is not None else dash}</td>")
             rows.append(f"<tr{k}>" + "".join(tds) + "</tr>")
@@ -1086,7 +1104,9 @@ class Brochure:
             cells.append((fmt_count(m.beds), "Bedrooms", "غرف النوم", ""))
         if m.baths is not None:
             cells.append((fmt_count(m.baths), "Bathrooms", "دورات المياه", ""))
-        terms = [self.term("Price", money_en(m.price, cur) if m.price is not None else "On request", "السعر")]
+        per = self.L.period
+        terms = [self.term("Price", money_en(m.price, cur, per) if m.price is not None else "On request",
+                           self.price_ar("السعر", m.price, per))]
         if m.sakani is not None:
             terms.append(self.term("Sakani beneficiaries", money_en(m.sakani, cur), "لمستفيدي الدعم"))
         if m.avail_en or m.avail_ar:
@@ -1174,9 +1194,9 @@ class Brochure:
         if L.on_request:
             cells.append(self.term("Price", "On request", "السعر"))
         elif L.price_from:
-            cells.append(self.term("From", money_en(L.amount, L.currency), "ابتداءً من"))
+            cells.append(self.term("From", money_en(L.amount, L.currency, L.period), self.price_ar("ابتداءً من", L.amount, L.period)))
         else:
-            cells.append(self.term("Price", money_en(L.amount, L.currency) + (f" / {L.period}" if L.period else ""), "السعر"))
+            cells.append(self.term("Price", money_en(L.amount, L.currency, L.period), self.price_ar("السعر", L.amount, L.period)))
         if L.sakani is not None:
             cells.append(self.term("Sakani from" if L.price_from else "Sakani price", money_en(L.sakani, L.currency),
                                    "لمستفيدي الدعم"))

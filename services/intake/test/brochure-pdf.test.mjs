@@ -89,6 +89,8 @@ def version_gate():
     return {'code': code, 'line': buf.getvalue().strip()}
 check('version', version_gate)
 check('groups', lambda: {n: b.photo_groups(n) for n in range(0, 11)})
+check('money', lambda: [b.money_en(50000, 'SAR', 'year'), b.money_ar(50000, 'SAR', 'year'), b.money_en(4500, 'SAR', 'month'),
+                        b.money_ar(4500, 'SAR', 'month'), b.money_en(900000, 'SAR'), b.money_ar(1250000, 'AED'), b.money_en(900000, 'SAR', None)])
 check('rooms', lambda: [list(v) for v in b.ROOM_LABELS.values()])
 check('captions', lambda: [list(b.room_caption(*c)) for c in [
     ("Illustrative — developer's finished unit at Test Heights: Garden — Test Heights Residences, Jeddah",
@@ -318,6 +320,19 @@ function offPlanSakaniListing() {
   return l;
 }
 
+// A development let by the year: a "From" headline and two priced models, all of them yearly rents.
+function rentalListing() {
+  const l = projectListing();
+  l.id = 'BONA-W905';
+  l.category = 'rent';
+  l.price = { amount: 50000, currency: 'SAR', from: true, period: 'year', onRequest: false };
+  l.models[0].price = 50000;
+  l.models[0].subsidisedPrice = null;
+  l.models[1].price = 65000;
+  l.models[1].subsidisedPrice = null;
+  return l;
+}
+
 function decimalListing() {
   const l = singleListing();
   l.price = { amount: 185000.5, currency: 'SAR', from: false, period: 'year', onRequest: false };
@@ -402,6 +417,7 @@ describe('brochure_pdf.py — the TK-system Bona brochure', { skip: !UV && 'uv n
       prepare('notjson', '{ nope'),
       prepare('missing', (() => { const l = singleListing(); l.images.push(img(l.slug, '09', 'Pool', 'المسبح', null)); return l; })()),
       prepare('decimal', decimalListing()),
+      prepare('rental', rentalListing()),
       prepare('traverse', (() => { const l = projectListing(); l.images[1].src = '/listings/x/../../etc/passwd'; return l; })()),
       prepare('traverse2', (() => { const l = projectListing(); l.images[1].src = `/listings/${l.slug}/../../secret.jpg`; return l; })(),
         { setup: ({ dir }) => fs.copyFileSync(path.join(imagesDir, '02.jpg'), path.join(dir, 'secret.jpg')) }),
@@ -693,6 +709,28 @@ describe('brochure_pdf.py — the TK-system Bona brochure', { skip: !UV && 'uv n
       assert.equal(v.dotdot, 'refused');
       assert.equal(v.http, 'refused');
       assert.equal(v.refused, 3);
+    });
+  });
+
+  describe('a development let by the year', () => {
+    it('keeps the rent period on every model price and on the "From" headline', () => {
+      const text = textOf('rental');
+      for (const p of ['SAR 50,000 / year', 'SAR 65,000 / year']) assert.ok(text.includes(p), p);
+      assert.ok(!/SAR (50|65),000(?! \/ year)/.test(text), 'no rent printed without its period');
+      const [res] = pagesOfKind('rental', 'residences');
+      assert.ok(res.text.includes('SAR 50,000 / year') && res.text.includes('SAR 65,000 / year'), 'units table');
+      const [model] = pagesOfKind('rental', 'model');
+      assert.ok(model.text.includes('SAR 50,000 / year'), 'model page');
+      const terms = pagesOfKind('rental', 'amenities').map((p) => p.text).join('\n');
+      assert.ok(flat(terms).includes('from') && terms.includes('SAR 50,000 / year'), 'the "From" headline');
+      assert.ok(/سنوي/.test(terms), 'the Arabic line says yearly too');
+      assert.ok(flat(textOf('rental')).includes('fromsar50,000/year'), 'cover');
+    });
+
+    it('money_en / money_ar: the site\'s wording (src/lib/i18n.ts formatPrice)', () => {
+      assert.deepEqual(unitValue('money'), [
+        'SAR 50,000 / year', '50,000 ر.س / سنوياً', 'SAR 4,500 / month', '4,500 ر.س / شهرياً', 'SAR 900,000', '1,250,000 د.إ', 'SAR 900,000',
+      ]);
     });
   });
 
