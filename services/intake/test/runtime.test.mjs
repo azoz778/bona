@@ -359,6 +359,15 @@ describe('TAQEEM currency — a figure printed in another currency is not that p
     }
   });
 
+  it('Bulgarian leva and Croatian kuna are other currencies: a euro-area property\'s old-currency price is never a bare euro figure (final review M7)', () => {
+    for (const t of ['125,000 лв.', '125,000 лв', '125 000 лв', 'Цена: 125,000лв.', 'BGN 125,000', '125,000 BGN', '125,000 kn', '125,000 KN', 'HRK 125,000', '125,000 HRK']) {
+      assert.equal(printedInCurrency(t, 125000, 'EUR', { bareCounts: true, home: 'EUR' }), false, `${t} is not euros`);
+      assert.equal(printedInCurrency(t, 125000, 'SAR', { bareCounts: true, home: 'SAR' }), false, `${t} is not bare`);
+    }
+    // "kn" only as a word of its own; a euro price stays one.
+    for (const t of ['125,000 knots', '€125,000', '125,000 EUR']) assert.equal(printedInCurrency(t, 125000, 'EUR', { bareCounts: true, home: 'EUR' }), true, t);
+  });
+
   it('the figure rules are priceAppearsIn\'s: no figure inside a longer one, nothing that is not a price', () => {
     assert.equal(printedInCurrency('SAR 1,450,000', 450000, 'SAR'), false);
     assert.equal(printedInCurrency('', 1250000, 'SAR'), false);

@@ -1478,6 +1478,31 @@ describe('processPdf: TAQEEM currency — a figure printed in another currency i
       assert.doesNotMatch(w, /contract's default or a conversion/, 'a USD reading is not called the default');
     } finally { none.cleanup(); }
   });
+
+  it('M7: a Bulgarian villa printing "125,000 лв.", read as 125,000 EUR, is on request — leva are not euros, though Bulgaria now prices in EUR', async () => {
+    const long = (s) => `${s}\nA residential villa for sale. This page of the brochure describes the property in detail: its location, finishes, amenities, parking, security and the neighbourhood around it.`;
+    const sofia = (text) => {
+      const a = { ...answer({ price: { amount: 125000, currency: 'EUR', from: false, period: null, onRequest: false }, priceEvidence: { page: 3, quote: text } }), models: [] };
+      a.listing.project = null;
+      a.listing.type = 'villa';
+      a.listing.category = 'international';
+      a.listing.location = { district: { en: 'Lozenets', ar: 'لوزينتس' }, city: { en: 'Sofia', ar: 'صوفيا' }, country: { en: 'Bulgaria', ar: 'بلغاريا' }, countryCode: 'BG' };
+      return a;
+    };
+    for (const [text, mark] of [['Цена 125,000 лв.', 'лв.'], ['Price 125,000 BGN', 'BGN']]) {
+      const r = await rig({ listing: sofia(text), pageText: [long('Sofia'), long('x'), long(text), long('y'), long('z')], facts: { 3: [{ fig: 125000, mark, kind: 'whole' }] } });
+      try {
+        const report = await r.run();
+        assert.equal(report.priceEvidence.inText, false, text);
+        assert.deepEqual(report.listingPreview.price, { amount: null, currency: 'EUR', from: false, period: null, onRequest: true }, text);
+      } finally { r.cleanup(); }
+    }
+    // The same villa printing its price in euros is published as such.
+    const ok = await rig({ listing: sofia('Price €125,000'), pageText: [long('Sofia'), long('x'), long('Price €125,000'), long('y'), long('z')] });
+    try {
+      assert.deepEqual((await ok.run()).listingPreview.price, { amount: 125000, currency: 'EUR', from: false, period: null, onRequest: false });
+    } finally { ok.cleanup(); }
+  });
 });
 
 // OM1 / QA1 (final review 2026-11-17): a bare "ريال" / ﷼ is the riyal of the country the property is in — the

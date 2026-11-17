@@ -86,8 +86,9 @@ const MARKS = [
   [abbr('ر', 'ق'), ['QAR']],
   // Currencies the site does not print: never this price's, and never a bare figure either. ("XY$" here only
   // counts after a figure, "1,250,000 XY$": before one, USD above has already taken the "$".)
-  ['\\b(?:QAR|KWD|BHD|EGP|JOD|TRY|CHF|CAD|AUD|INR|PKR|CNY|JPY|RUB)\\b|(?<![A-Za-z])[A-Z]{1,3}\\$|\\bTL\\b|₺|دينار|لير[ةه]'
-    + `|${abbr('د', 'ك')}`, ['OTHER']],
+  // Bulgarian leva (лв) and Croatian kuna (kn, a word of its own): a euro-area property's old-currency price (final review M7).
+  ['\\b(?:QAR|KWD|BHD|EGP|JOD|TRY|CHF|CAD|AUD|INR|PKR|CNY|JPY|RUB|BGN|HRK)\\b|(?<![A-Za-z])[A-Z]{1,3}\\$|\\bTL\\b|₺|دينار|لير[ةه]'
+    + `|${abbr('د', 'ك')}|(?<![\\u0400-\\u04ff])лв(?![\\u0400-\\u04ff])|\\bkn\\b`, ['OTHER']],
 ];
 const GAP = '[\\s:：\\-–—=]*';
 const MARK_BEFORE = MARKS.map(([src, cs]) => [new RegExp(`(?:${src})${GAP}$`, 'i'), cs]);
