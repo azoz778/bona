@@ -1616,6 +1616,66 @@ describe('processPdf: a single property is never "From" its cheapest model', { t
       assert.deepEqual(report.listingPreview.price, { amount: 3900000, currency: 'SAR', from: true, period: null, onRequest: false });
     } finally { r.cleanup(); }
   });
+
+  // Final review 2026-11-17 (the second model follows its prompt: rig `facts`; the text layer is a readable one).
+  const long = (s) => `${s}\nA residential villa for sale (فيلا سكنية للبيع). This page of the brochure describes the property in detail: its location, finishes, amenities, parking, security and the neighbourhood around it.`;
+  const textPages = (p3) => [long('Overview'), long('Location'), long(p3), long('Specification'), long('Contact the sales team')];
+  const floorText = 'Ground floor SAR 2,000,000\nFirst floor SAR 2,500,000\nTotal SAR 4,500,000';
+  const floorFacts = (whole = 4500000) => ({ 3: [
+    { fig: 2000000, mark: 'SAR', kind: 'floor', model: 'Ground floor' }, { fig: 2500000, mark: 'SAR', kind: 'floor', model: 'First floor' },
+    { fig: whole, mark: 'SAR', kind: 'whole' },
+  ] });
+
+  it('S1g: floors as models, `from` NOT set, the headline = the cheaper floor — still checked as the whole villa\'s price, never off the text layer', async () => {
+    const floors = () => [model('Ground floor', 2000000, 3), model('First floor', 2500000, 3)];
+    const r = await rig({ listing: villa({ amount: 2000000, from: false, quote: 'SAR 2,000,000', models: floors() }), pageText: textPages(floorText), facts: floorFacts() });
+    try {
+      const report = await r.run();
+      assert.equal(report.priceEvidence.inText, false, '"SAR 2,000,000" in the text layer is the ground floor\'s, as far as anything local can tell');
+      assert.deepEqual(headlineCalls(r).map((c) => [c.amount, c.whole]), [[2000000, true]]);
+      assert.deepEqual(report.listingPreview.price, ON_REQUEST, 'never "SAR 2,000,000" for the whole villa');
+      assert.deepEqual(report.listingPreview.models.map((m) => m.price), [2000000, 2500000], 'the floors keep their confirmed prices');
+      assert.ok(report.warningCodes.includes('price-not-printed'));
+    } finally { r.cleanup(); }
+    // When the page does print that figure as the whole property's price, it is published — as its own price.
+    const ok = await rig({ listing: villa({ amount: 2000000, from: false, quote: 'SAR 2,000,000', models: floors() }), pageText: textPages(floorText), facts: floorFacts(2000000) });
+    try {
+      const report = await ok.run();
+      assert.deepEqual(report.listingPreview.price, { amount: 2000000, currency: 'SAR', from: false, period: null, onRequest: false });
+      assert.deepEqual(checkListing(report.listingPreview), []);
+    } finally { ok.cleanup(); }
+  });
+
+  it('S1g: the guard is for a single property with two priced models or more — not one model, not one specific unit, not a figure no model has', async () => {
+    // One priced model, `from` not set: its own price, settled as before (here off the text layer).
+    const one = await rig({ listing: villa({ amount: 4400000, from: false, quote: 'SAR 4,400,000', models: [model('Villa', 4400000, 3)] }),
+      pageText: textPages('Villa price SAR 4,400,000'), facts: { 3: [{ fig: 4400000, mark: 'SAR', kind: 'whole', model: 'Villa' }] } });
+    try {
+      const report = await one.run();
+      assert.equal(report.priceEvidence.inText, true);
+      assert.equal(headlineCalls(one).length, 0);
+      assert.deepEqual(report.listingPreview.price, { amount: 4400000, currency: 'SAR', from: false, period: null, onRequest: false });
+    } finally { one.cleanup(); }
+    // One specific unit of a project, `from` not set, priced like its model: the unit's own price, as before.
+    const unit = villa({ amount: 2000000, from: false, quote: 'SAR 2,000,000', models: [model('A', 2000000, 3), model('B', 2500000, 3)] });
+    unit.listing.project = { name: { en: 'Palm Compound', ar: 'مجمع النخيل' }, developer: { en: 'Palm', ar: 'النخيل' } };
+    unit.listing.unit = { unitRef: '12', block: null, floor: null };
+    const u = await rig({ listing: unit, pageText: textPages('A SAR 2,000,000\nB SAR 2,500,000'), facts: { 3: [{ fig: 2000000, mark: 'SAR', kind: 'model', model: 'A' }, { fig: 2500000, mark: 'SAR', kind: 'model', model: 'B' }] } });
+    try {
+      const report = await u.run();
+      assert.equal(report.priceEvidence.inText, true);
+      assert.deepEqual(headlineCalls(u).length, 0);
+      assert.deepEqual(report.listingPreview.price, { amount: 2000000, currency: 'SAR', from: false, period: null, onRequest: false });
+    } finally { u.cleanup(); }
+    // The printed total, no `from`, floors as models: not the lowest model price, so its own check, off the text layer.
+    const total = await rig({ listing: villa({ amount: 4500000, from: false, quote: 'Total SAR 4,500,000', models: [model('Ground floor', 2000000, 3), model('First floor', 2500000, 3)] }),
+      pageText: textPages(floorText), facts: floorFacts() });
+    try {
+      const report = await total.run();
+      assert.equal(report.priceEvidence.inText, true);
+      assert.deepEqual(report.listingPreview.price, { amount: 4500000, currency: 'SAR', from: false, period: null, onRequest: false });
+    } finally { total.cleanup(); }
+  });
 });
 
 describe('processPdf: unit models and their floor plans reach the repo', { timeout: 120000 }, () => {

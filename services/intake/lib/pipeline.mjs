@@ -638,12 +638,19 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // model (`whole`: never by the text layer, which cannot tell a floor's price from the villa's), else
   // the listing is on request. A figure the brochure itself prints "starting from" that no model carries
   // keeps its `from`. (A project with one model is left to its own headline check, `from` and all.)
+  // A single property (no project) with two priced models or more whose headline IS the lowest of them
+  // takes the same path whatever `from` says (final review S1g): a villa read per floor with its headline
+  // = the ground floor and `from` not set would otherwise pass the text layer on the floor's own line.
+  // One specific unit is left out of that: priced like one of its project's models, `from` not set, the
+  // figure is as likely the unit's own price, and its check asks for the unit's price on the page anyway.
   let ownPriceOnly = false;
-  if (!enrich && !caption.price && !headlineFromModels && price && !price.onRequest && price.from === true
-      && isFigure(price.amount) && price.amount === readLowest && (!ai.listing?.project || ai.listing?.unit)) {
+  const fromLowestModel = price?.from === true && (!ai.listing?.project || Boolean(ai.listing?.unit));
+  const lowestOfSeveral = !ai.listing?.project && readModelPrices.length >= 2;
+  if (!enrich && !caption.price && !headlineFromModels && price && !price.onRequest
+      && isFigure(price.amount) && price.amount === readLowest && (fromLowestModel || lowestOfSeveral)) {
     price.from = false;
     ownPriceOnly = true;
-    log.info('intake.headline_not_from_models', { amount: price.amount, project: Boolean(ai.listing?.project), unit: Boolean(ai.listing?.unit), models: readModelPrices.length });
+    log.info('intake.headline_not_from_models', { amount: price.amount, from: fromLowestModel, project: Boolean(ai.listing?.project), unit: Boolean(ai.listing?.unit), models: readModelPrices.length });
   }
   // An enrichment publishes none of the model's copy, map pin or photos, and decides its headline from
   // the listing (enrichHeadline): the model's own headline and Sakani checks, the copy guard, the map
