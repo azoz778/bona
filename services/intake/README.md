@@ -38,8 +38,12 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
    brochure to an already published listing, leaving every other field untouched. Headline rules: the
    owner's own price is kept and model prices are cleared; a price on request adopts the models' lowest
    (`from`); an existing price must equal the models' lowest, else the run is refused (then it is marked
-   `from: true` when equal). See "Enriching a published listing" below.
-8. **`backfill-enrich.mjs`**: runs `--enrich` over every older listing, one at a time. `--plan-only`
+   `from: true` when equal). It never writes over a listing with less than it carries: an incomplete
+   price check is refused ("try again later"), and a reading with fewer models, fewer confirmed model
+   prices or a fact list fewer is refused unless `--force`. See "Enriching a published listing" below.
+8. **`backfill-enrich.mjs`**: runs `--enrich` over every older listing, one at a time; a listing that
+   already carries unit models is skipped as "already enriched" unless `--include-enriched` (no
+   `--force` is ever passed on). `--plan-only`
    prints the plan and stops, `--dry-run` runs each job without writing, a live run commits and pushes.
    It stops at the first FAILED job or a quota/usage limit and prints the `--only <ids>` that resumes it.
 
@@ -263,7 +267,12 @@ Anything else in the group is ignored, silently.
   and hidden listings are refused. A brochure that cannot be built keeps the enrichment and the old
   brochure (`brochure-failed`). The commit is `intake: enrich <title> (<id>) — unit models + brochure`.
   Not with `--replace`, `--caption` or `--no-git` (except with `--dry-run`, which prints the models,
-  their prices, the headline decision and the plan files, and writes nothing).
+  their prices, the headline decision, the comparison with what the listing carries and the plan
+  files, and writes nothing). A re-enrichment never degrades a listing: when the unit-model price
+  check could not be completed (a page that did not render, a failed call, a quota) nothing is written
+  ("try again later", `--force` or not); when the reading has fewer unit models, fewer confirmed model
+  prices (regular + Sakani) or drops a fact list the listing carries, it is refused with the
+  difference (`Compared   models 8 → 5 · …`) unless `--force` says the new reading is right.
 - **Nothing the model writes is trusted.** Only fields that pass `validateAiResult` +
   `copyProblems` + `checkListing` are written or sent on. The model's free-text `warnings`
   stay in the run's `ai.json`; `_intake.warnings` in the committed listing holds codes from a

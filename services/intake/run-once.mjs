@@ -16,7 +16,11 @@
 //                          warranties and a new brochure to a listing published from this very PDF;
 //                          its copy, photos, price and hand corrections stay as they are (the
 //                          headline is adopted from the models only when it was on request).
-//                          Not with --replace or --caption.
+//                          Not with --replace or --caption. Refused when the unit-model price check
+//                          could not be completed (try again later), and — unless --force — when
+//                          the reading has fewer models, fewer confirmed model prices or drops a fact
+//                          list the listing already carries.
+//     --force              with --enrich: accept a reading with less than the listing carries
 //
 // Without --dry-run and without --no-git this commits and pushes, exactly like the daemon.
 import fs from 'node:fs';
@@ -34,7 +38,7 @@ function parseArgs(argv) {
   const out = { flags: new Set(), opts: {}, positional: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
-    if (a === '--dry-run' || a === '--no-git' || a === '--json') out.flags.add(a.slice(2));
+    if (a === '--dry-run' || a === '--no-git' || a === '--json' || a === '--force') out.flags.add(a.slice(2));
     else if (a.startsWith('--')) { out.opts[a.slice(2)] = argv[i + 1]; i += 1; }
     else out.positional.push(a);
   }
@@ -64,6 +68,12 @@ function printEnrichReport(r) {
     say(`           ${m.name.en.padEnd(24)} ${m.price ? m.price.toLocaleString('en-US') : 'on request'}${m.subsidisedPrice ? ` · Sakani ${m.subsidisedPrice.toLocaleString('en-US')}` : ''}${m.floorPlan ? `  ${m.floorPlan.src}` : ''}`);
   }
   if (e.facts.length) say(`Facts      ${e.facts.map((k) => `${k} ${l[k].en.length}`).join(' · ')}`);
+  const c = e.compare;
+  if (c) {
+    const lists = (f) => (f.length ? f.join(', ') : 'none');
+    say(`Compared   models ${c.before.models} → ${c.after.models} · model prices ${c.before.prices} → ${c.after.prices} · fact lists ${lists(c.before.facts)} → ${lists(c.after.facts)}`
+      + `${c.losses.length ? (c.forced ? '  (LESS than the listing carries — accepted with --force)' : '  (LESS than the listing carries)') : ''}`);
+  }
   const cur = e.currency;
   const why = {
     'owner-price': 'the owner\'s own price stays; the models are published without prices',
@@ -160,7 +170,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const pdf = args.positional[0];
   if (!pdf) {
-    say('usage: run-once.mjs <file.pdf> [--dry-run] [--no-git] [--repo <path>] [--caption "…"] [--model <name>] [--replace <id> | --enrich <id>] [--json]');
+    say('usage: run-once.mjs <file.pdf> [--dry-run] [--no-git] [--repo <path>] [--caption "…"] [--model <name>] [--replace <id> | --enrich <id> [--force]] [--json]');
     process.exit(2);
   }
   const pdfPath = path.resolve(pdf);
@@ -188,6 +198,7 @@ async function main() {
     say('--enrich needs git (it rolls a failed run back from the last commit): drop --no-git, or add --dry-run to preview');
     process.exit(2);
   }
+  if (args.flags.has('force') && !enrich) { say('--force goes with --enrich only (it accepts a reading with less than the listing carries)'); process.exit(2); }
   if (enrich && args.opts.caption !== undefined) {
     say('--enrich takes no --caption: its price is decided from the listing (send `price <id> …` to change it)');
     process.exit(2);
@@ -222,7 +233,10 @@ async function main() {
       }
       const meta = { pdfFileName: path.basename(pdfPath) };
       if (args.opts.replace) Object.assign(meta, replaceMetaFor(cfg.repo, args.opts.replace));
-      if (enrich) Object.assign(meta, enrichMetaFor(cfg.repo, args.opts.enrich));
+      if (enrich) {
+        Object.assign(meta, enrichMetaFor(cfg.repo, args.opts.enrich));
+        if (args.flags.has('force')) meta.enrich.force = true;
+      }
       const r = await processPdf({
         pdfPath,
         cfg,

@@ -177,7 +177,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // in it (enrichListing below). Hand corrections are kept, so there is no history rule; but it must be
   // the very PDF the listing was published from, and the listing must be in git, unchanged, because a
   // failed run is rolled back from the commit.
-  const enrich = meta.enrich ? { id: meta.enrich.id, slug: meta.enrich.slug } : null;
+  const enrich = meta.enrich ? { id: meta.enrich.id, slug: meta.enrich.slug, force: meta.enrich.force === true } : null;
   let enrichTarget = null;
   if (enrich) {
     if (meta.replace) throw new Error('--enrich and --replace do not go together');
@@ -615,7 +615,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       throw new RejectError(`${stated.where} states the price ${stated.n.toLocaleString('en-US')}, which could not be confirmed on the brochure — `
         + `nothing was changed; run --enrich again later, the next reading may leave it out`, 'enrich');
     }
-    return enrichListing({ report, ai, extraction, cfg, caption, workDir, dryRun, withdrawals, target: enrichTarget, started, currencyDrop });
+    return enrichListing({ report, ai, extraction, cfg, caption, workDir, dryRun, withdrawals, target: enrichTarget, started, currencyDrop, force: enrich.force });
   }
 
   // Under the owner's caption price the model's own figure is not published as the price — but if
@@ -852,6 +852,26 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   return report;
 }
 
+/**
+ * What an enrichment would take away from the listing as it stands: `built` (modelsAndFacts() of the new
+ * reading, its model prices as they will be published) against `existing`. `before` / `after` count the
+ * unit models, their published price figures (regular and Sakani) and name the fact lists carried;
+ * `losses` says, in words, every count that would go down and every fact list that would go.
+ */
+export function compareEnrichment(existing, built) {
+  const figures = (models) => (Array.isArray(models) ? models : []).flatMap((m) => [m?.price, m?.subsidisedPrice]).filter(isFigure).length;
+  const facts = (l) => Object.keys(FACT_LISTS).filter((k) => ['en', 'ar'].some((lang) => Array.isArray(l?.[k]?.[lang]) && l[k][lang].length > 0));
+  const side = (l) => ({ models: Array.isArray(l?.models) ? l.models.length : 0, prices: figures(l?.models), facts: facts(l) });
+  const before = side(existing);
+  const after = side(built);
+  const losses = [];
+  if (after.models < before.models) losses.push(`unit models ${before.models} → ${after.models}`);
+  if (after.prices < before.prices) losses.push(`confirmed model prices ${before.prices} → ${after.prices}`);
+  const dropped = before.facts.filter((k) => !after.facts.includes(k));
+  if (dropped.length) losses.push(`fact list${dropped.length === 1 ? '' : 's'} dropped: ${dropped.join(', ')}`);
+  return { before, after, losses };
+}
+
 /** A floor-plan file in a listing's folder (rules.mjs LOCAL_PLAN_SRC / LOCAL_PLAN_THUMB). */
 const PLAN_FILE_RE = /^plan-\d{2,3}(?:\.jpg|-thumb\.webp)$/;
 
@@ -865,7 +885,7 @@ const PLAN_FILE_RE = /^plan-\d{2,3}(?:\.jpg|-thumb\.webp)$/;
  * rolled back from git (resetTree), so the listing is exactly as it was. A dry run reports what would
  * change and writes nothing.
  */
-async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dryRun, withdrawals, target, started, currencyDrop = null }) {
+async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dryRun, withdrawals, target, started, currencyDrop = null, force = false }) {
   report.stage = 'enrich';
   const existing = target.listing;
   const { id, slug } = existing;
@@ -902,6 +922,19 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
   const head = enrichHeadline(existing, models, aligned, { currencyMismatch: currencyDrop?.decision === 'currency-mismatch' });
   if (head.dropModelPrices) for (const m of models) { m.price = null; m.subsidisedPrice = null; }
   const priceChanged = !isDeepStrictEqual(head.price, existing.price);
+  const compare = compareEnrichment(existing, built);
+  // Never write over a listing with less than it carries. An incomplete price check (a page that did
+  // not render, a failed call, a quota) is ours, not the brochure's: try again later. A reading with
+  // fewer models, fewer confirmed model prices or a fact list fewer is refused unless --force says it
+  // is right (the brochure really changed, or the old reading was wrong).
+  const mp = report.modelPrices;
+  const unchecked = mp && (mp.fatal || (mp.incomplete?.length ?? 0) > 0)
+    ? `${mp.fatal ? 'the AI quota ran out during the unit-model price check' : `the check of ${mp.incomplete.length} unit-model price(s) could not be completed (page${mp.incompletePages.length === 1 ? '' : 's'} ${mp.incompletePages.join(', ')})`} — nothing was changed; try again later`
+    : null;
+  const degraded = compare.losses.length && !force
+    ? `${id} already carries more than this reading: ${compare.losses.join('; ')} — nothing was changed; re-run with --force if the new reading is right`
+    : null;
+  const refuse = unchecked ?? head.refuse ?? degraded;
   report.enrich = {
     models: models.length,
     pricedModels: models.filter((m) => isFigure(m.price)).length,
@@ -911,8 +944,9 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
     price: head.price,
     previousPrice: existing.price,
     priceChanged,
-    refuse: head.refuse,
+    refuse,
     currency: currencyDrop?.currency ?? null,
+    compare: { ...compare, forced: compare.losses.length > 0 && force },
     facts: Object.keys(built).filter((k) => k !== 'models'),
     plans: floorPlans.map((p) => p.src),
     removedPlans: oldPlans,
@@ -920,11 +954,12 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
   log.info('intake.enrich', {
     id, models: models.length, kept: report.enrich.keptPrices, refused: report.enrich.refusedPrices.length,
     headline: head.decision, priceChanged, plans: floorPlans.length, removedPlans: oldPlans.length,
+    losses: compare.losses, forced: report.enrich.compare.forced, unchecked: Boolean(unchecked),
   });
-  if (head.refuse) {
+  if (refuse) {
     fs.rmSync(stageDir, { recursive: true, force: true });
-    if (!dryRun) throw new RejectError(head.refuse, 'enrich');
-    report.blocked = head.refuse;
+    if (!dryRun) throw new RejectError(refuse, 'enrich');
+    report.blocked = refuse;
   }
 
   const merged = mergeEnrichment(existing, built, priceChanged ? { price: head.price } : {});

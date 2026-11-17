@@ -88,8 +88,19 @@ describe('planBackfill', () => {
     assert.equal(by['BONA-W002'].pdf, null);
     assert.equal(by['BONA-W004'].action, 'brochure-only');
     assert.match(by['BONA-W004'].reason, /no source PDF recorded/);
-    assert.match(by['BONA-W001'].reason, /already has 2 unit model/);
+    assert.match(by['BONA-W001'].reason, /^already enriched \(2 unit model\(s\)\) — --include-enriched to enrich it again$/);
+    assert.equal(by['BONA-W001'].action, 'skip');
+    assert.equal(by['BONA-W001'].pdf, null);
+  });
+
+  it('a listing that already carries unit models is enriched again only with includeEnriched', () => {
+    const by = Object.fromEntries(planBackfill(listings, { findPdf, withdrawals, includeEnriched: true }).map((r) => [r.id, r]));
     assert.equal(by['BONA-W001'].action, 'enrich');
+    assert.match(by['BONA-W001'].reason, /source PDF found \(already has 2 unit model\(s\) — enriched again\)/);
+    assert.equal(by['BONA-W010'].action, 'enrich', 'the others are planned as before');
+    // An empty models list is not an enrichment.
+    const empty = planBackfill([listing('BONA-W010', { models: [] })], { findPdf });
+    assert.equal(empty[0].action, 'enrich');
   });
 
   it('skips hidden, withdrawn (rules.mjs, the register, the record, the name), non-intake and slug-less listings', () => {
@@ -118,7 +129,7 @@ describe('planBackfill', () => {
     planBackfill(listings, { findPdf, withdrawals });
     const skipped = ['BONA-W005', 'BONA-W009', 'BONA-W011', 'BONA-W012', 'BONA-W013', 'BONA-015', 'BONA-W100'];
     for (const id of skipped) assert.ok(!asked.includes(sha(`pdf of ${id}`)), `${id} was not hashed for`);
-    assert.equal(asked.length, 4, 'W001, W002, W003 and W010 — nothing for W004, which records no sha');
+    assert.equal(asked.length, 3, 'W002, W003 and W010 — nothing for W004, which records no sha, nor W001, already enriched');
   });
 
   it('`only` narrows the plan, case-insensitively, and keeps the id order', () => {
@@ -148,7 +159,7 @@ describe('planBackfill', () => {
     const table = formatPlanTable(plan, { intakeDir: '/data/intake' });
     for (const r of plan) assert.match(table, new RegExp(r.id));
     assert.match(table, /yes 2026-09-06\/w3\.pdf/);
-    assert.match(table, /12 listing\(s\): 3 enrich · 2 brochure-only · 7 skip/);
+    assert.match(table, /12 listing\(s\): 2 enrich · 2 brochure-only · 8 skip/);
   });
 });
 
@@ -306,6 +317,8 @@ describe('classifyRun / summarizeRun', () => {
     for (const o of ['ok', 'rejected', 'refused', 'listed']) assert.equal(stopsBackfill(o), false, o);
     assert.equal(resumeCommand(['BONA-W003', 'BONA-W004'], { repo: '/r', dryRun: true, model: 'opus' }),
       'node services/intake/backfill-enrich.mjs --repo /r --dry-run --model opus --only BONA-W003,BONA-W004');
+    assert.equal(resumeCommand(['BONA-W003'], { repo: '/r', includeEnriched: true }),
+      'node services/intake/backfill-enrich.mjs --repo /r --include-enriched --only BONA-W003');
   });
 });
 
@@ -434,6 +447,25 @@ describe('backfill-enrich.mjs (stand-in run-once)', () => {
     assert.match(res.out, /6 listing\(s\): 3 enrich · 1 brochure-only · 2 skip/);
     assert.deepEqual(res.calls, []);
     assert.equal(lastLogDir(r), null, 'no log folder');
+  });
+
+  it('a listing that already carries unit models is skipped as "already enriched" unless --include-enriched', () => {
+    const r = rig();
+    const file = path.join(r.repo, 'scripts', 'curate', 'inbox', 'slug-bona-w003.json');
+    const l = JSON.parse(fs.readFileSync(file, 'utf8'));
+    fs.writeFileSync(file, `${JSON.stringify({ ...l, models: [{ name: { en: 'A', ar: 'أ' } }] }, null, 2)}\n`);
+    git(r.repo, 'commit', '-qam', 'intake: enrich W003');
+    const plain = cli(r, ['--plan-only']);
+    assert.equal(plain.code, 0, plain.out);
+    assert.match(plain.out, /BONA-W003\s+.*skip\s+—\s+already enriched \(1 unit model\(s\)\)/);
+    assert.match(plain.out, /6 listing\(s\): 2 enrich · 1 brochure-only · 3 skip/);
+    const again = cli(r, ['--plan-only', '--include-enriched']);
+    assert.equal(again.code, 0, again.out);
+    assert.match(again.out, /BONA-W003\s+.*enrich\s+yes 2026-09-06\/w3\.pdf\s+source PDF found \(already has 1 unit model\(s\) — enriched again\)/);
+    const dry = cli(r, ['--dry-run', '--include-enriched', '--only', 'BONA-W003']);
+    assert.equal(dry.code, 0, dry.out);
+    assert.deepEqual(dry.calls.map((c) => c.id), ['BONA-W003']);
+    assert.ok(!dry.calls[0].args.includes('--force'), 'run-once still refuses a reading with less than the listing carries');
   });
 
   it('--dry-run runs run-once once per enrich listing, in id order, one at a time, with the right argv, and logs each', () => {

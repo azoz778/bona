@@ -1382,7 +1382,7 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
    * photos, licence, video, photo note, FAQ, SEO title, featured flag — and an old floor plan file
    * and brochure that the new run must replace. Committed, like the publishing clone holds it.
    */
-  const seed = (r, { price = PRICED, sha = null, intake = {}, unit = null, location = null } = {}) => {
+  const seed = (r, { price = PRICED, sha = null, intake = {}, unit = null, location = null, extra = {} } = {}) => {
     const pdfSha256 = sha ?? crypto.createHash('sha256').update(fs.readFileSync(r.pdfPath)).digest('hex');
     const img = (n) => ({ src: `/listings/${SLUG}/0${n}.jpg`, thumb: `/listings/${SLUG}/0${n}-thumb.webp`, alt: { en: `Photo ${n}`, ar: `صورة ${n}` } });
     const listing = {
@@ -1400,6 +1400,7 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       photoNote: { en: 'Photos show the sister project', ar: 'الصور للمشروع الشقيق' },
       faq: [{ q: { en: 'Q1', ar: 'س١' }, a: { en: 'A1', ar: 'ج١' } }], seoTitle: { en: 'SEO', ar: 'عنوان' },
       _intake: { source: 'whatsapp', pdfSha256, model: 'opus', confidence: 0.8, warnings: ['map-unconfirmed'], images: [], createdAt: '2026-11-01T10:00:00.000Z', site: 'https://bona-real-estate.com', ...intake },
+      ...extra,
     };
     fs.mkdirSync(path.dirname(inboxFile(r)), { recursive: true });
     fs.writeFileSync(inboxFile(r), `${JSON.stringify(listing, null, 2)}\n`);
@@ -1416,7 +1417,9 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
   };
   const without = (l, keys) => Object.fromEntries(Object.entries(l).filter(([k]) => !keys.includes(k)));
   const saved = (r) => JSON.parse(fs.readFileSync(inboxFile(r), 'utf8'));
-  const enrich = (r, { dryRun = false, caption = {} } = {}) => processPdf({ pdfPath: r.pdfPath, cfg: r.cfg, caption, workDir: path.join(r.repo, '..', 'work'), dryRun, meta: { ...META } });
+  const enrich = (r, { dryRun = false, caption = {}, force = false } = {}) => processPdf({
+    pdfPath: r.pdfPath, cfg: r.cfg, caption, workDir: path.join(r.repo, '..', 'work'), dryRun, meta: { enrich: { ...META.enrich, ...(force ? { force } : {}) } },
+  });
 
   it('(a) adds the models, plan and brochure to a hand-corrected listing; its photos, copy and every other key stay byte for byte', async () => {
     const r = await rig({ listing: reading() });
@@ -1654,6 +1657,71 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
     } finally { r.cleanup(); }
   });
 
+  /** Unit models a listing already carries (an earlier enrichment). */
+  const prior = (n, { priced = true, sakani = false } = {}) => Array.from({ length: n }, (_, i) => ({
+    name: { en: `Old ${i + 1}`, ar: `نموذج قديم ${i + 1}` }, bedrooms: 2, bathrooms: 2, areaSqm: 90, rooms: null, availability: null,
+    price: priced ? 319015 + i * 1000 : null, subsidisedPrice: priced && sakani ? 270425 + i * 1000 : null, floorPlan: null,
+  }));
+
+  it('re-enrich: a reading with fewer models or a fact list fewer is refused, with what it would take away, and nothing is changed', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      seed(r, { price: { ...ON_REQUEST }, extra: { models: prior(3), nearby: { en: ['Airport'], ar: ['المطار'] } } });
+      const raw = fs.readFileSync(inboxFile(r), 'utf8');
+      await assert.rejects(enrich(r), (err) => err.stage === 'enrich'
+        && /^BONA-W023 already carries more than this reading: unit models 3 → 2; fact list dropped: nearby — nothing was changed; re-run with --force if the new reading is right$/.test(err.reason));
+      assert.equal(fs.readFileSync(inboxFile(r), 'utf8'), raw);
+      assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '');
+      assert.equal(r.calls().filter((c) => c.tool === 'brochure').length, 0);
+      // A dry run says the same and writes nothing.
+      const dry = await enrich(r, { dryRun: true });
+      assert.match(dry.blocked, /already carries more than this reading: unit models 3 → 2/);
+      assert.deepEqual(dry.enrich.compare, {
+        before: { models: 3, prices: 3, facts: ['nearby'] }, after: { models: 2, prices: 4, facts: ['amenities', 'warranties'] },
+        losses: ['unit models 3 → 2', 'fact list dropped: nearby'], forced: false,
+      });
+    } finally { r.cleanup(); }
+  });
+
+  it('re-enrich: --force accepts a reading with less than the listing carries', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      seed(r, { price: { ...ON_REQUEST }, extra: { models: prior(3), nearby: { en: ['Airport'], ar: ['المطار'] } } });
+      const report = await enrich(r, { force: true });
+      assert.equal(report.ok, true);
+      assert.equal(report.enrich.compare.forced, true);
+      const after = saved(r);
+      assert.deepEqual(after.models.map((m) => m.name.en), ['Nawras', 'Lulu']);
+      assert.equal('nearby' in after, false);
+    } finally { r.cleanup(); }
+  });
+
+  it('re-enrich: fewer confirmed model prices than the listing carries is refused', async () => {
+    const r = await rig({ listing: reading(), modelConfirm: [419994, 356024] });
+    try {
+      seed(r, { price: { ...ON_REQUEST }, extra: { models: prior(2, { sakani: true }) } });
+      await assert.rejects(enrich(r), (err) => err.stage === 'enrich' && /already carries more than this reading: confirmed model prices 4 → 2 —/.test(err.reason));
+      assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '');
+    } finally { r.cleanup(); }
+  });
+
+  it('an incomplete unit-model price check refuses the enrichment — try again later — even with --force', async () => {
+    for (const [fail, re] of [[true, /^the check of 4 unit-model price\(s\) could not be completed \(page 3\) — nothing was changed; try again later$/],
+      ['quota', /^the AI quota ran out during the unit-model price check — nothing was changed; try again later$/]]) {
+      const r = await rig({ listing: reading(), modelConfirmFail: fail });
+      try {
+        seed(r, { price: { ...ON_REQUEST } });
+        const raw = fs.readFileSync(inboxFile(r), 'utf8');
+        await assert.rejects(enrich(r, { force: true }), (err) => err.stage === 'enrich' && re.test(err.reason), String(fail));
+        assert.equal(fs.readFileSync(inboxFile(r), 'utf8'), raw);
+        assert.equal(fs.readFileSync(path.join(pubDir(r), 'plan-03.jpg'), 'utf8'), 'old plan');
+        assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '');
+        const dry = await enrich(r, { dryRun: true });
+        assert.match(dry.blocked, re);
+      } finally { r.cleanup(); }
+    }
+  });
+
   const ABROAD = {
     district: { en: 'Hampstead', ar: 'هامبستيد' }, city: { en: 'London', ar: 'لندن' },
     country: { en: 'United Kingdom', ar: 'المملكة المتحدة' }, countryCode: 'GB',
@@ -1755,6 +1823,21 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
     } finally { r.cleanup(); }
   });
 
+  it('run-once --enrich --dry-run compares with what the listing carries; --force accepts less', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      seed(r, { price: { ...ON_REQUEST }, extra: { models: prior(3), nearby: { en: ['Airport'], ar: ['المطار'] } } });
+      const refused = runOnce(r, '--enrich', 'BONA-W023', '--dry-run');
+      assert.equal(refused.status, 0, refused.out);
+      assert.match(refused.out, /Compared {3}models 3 → 2 · model prices 3 → 4 · fact lists nearby → amenities, warranties {2}\(LESS than the listing carries\)/);
+      assert.match(refused.out, /WOULD BE REJECTED — BONA-W023 already carries more than this reading: unit models 3 → 2; fact list dropped: nearby/);
+      const forced = runOnce(r, '--enrich', 'BONA-W023', '--dry-run', '--force');
+      assert.equal(forced.status, 0, forced.out);
+      assert.match(forced.out, /\(LESS than the listing carries — accepted with --force\)/);
+      assert.doesNotMatch(forced.out, /WOULD BE REJECTED/);
+    } finally { r.cleanup(); }
+  });
+
   it('run-once --enrich commits "intake: enrich <title> (<id>) — unit models + brochure" with the listing\'s own paths, and pushes', async () => {
     const r = await rig({ listing: reading() });
     try {
@@ -1844,6 +1927,12 @@ describe('run-once --enrich: the CLI guards', () => {
     const r = cli('--no-git', '--enrich', 'BONA-W023');
     assert.equal(r.status, 2);
     assert.match(r.out, /--enrich needs git/);
+  });
+
+  it('--force without --enrich is a usage error', () => {
+    const r = cli('--force', '--dry-run');
+    assert.equal(r.status, 2);
+    assert.match(r.out, /--force goes with --enrich only/);
   });
 
   it('--enrich takes no caption: the price comes from the listing', () => {

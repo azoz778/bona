@@ -9,8 +9,12 @@
 //     --only <ids>            BONA-W002,BONA-W010 — just these (comma or space separated)
 //     --model <name>          passed on to run-once (--model)
 //     --continue-on-error     go on after a FAILED job (a quota/usage limit or a killed job always stops)
+//     --include-enriched      also enrich again the listings that already carry unit models (skipped
+//                             by default as "already enriched"; run-once still refuses a reading with
+//                             less than the listing carries — no --force is passed)
 //
-// The plan (lib/backfill.mjs planBackfill): hidden, withdrawn and non-intake listings are skipped;
+// The plan (lib/backfill.mjs planBackfill): hidden, withdrawn and non-intake listings are skipped, and
+// so are listings that already carry unit models (unless --include-enriched);
 // a listing whose source PDF is still under $BONA_DATA/intake (found by content hash) is ENRICHED
 // by run-once — unit models, amenities, nearby, warranties, floor plans and the new brochure, its
 // copy untouched; one without gets only its Bona brochure rebuilt from what the repo holds
@@ -46,8 +50,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(HERE, '..', '..');
 const DEFAULT_RUN_ONCE = path.join(HERE, 'run-once.mjs');
 
-const USAGE = 'usage: backfill-enrich.mjs [--repo <clone>] [--plan-only | --dry-run] [--only BONA-W002,BONA-W010] [--model <name>] [--continue-on-error]';
-const FLAGS = new Set(['dry-run', 'plan-only', 'continue-on-error', 'help']);
+const USAGE = 'usage: backfill-enrich.mjs [--repo <clone>] [--plan-only | --dry-run] [--only BONA-W002,BONA-W010] [--model <name>] [--continue-on-error] [--include-enriched]';
+const FLAGS = new Set(['dry-run', 'plan-only', 'continue-on-error', 'include-enriched', 'help']);
 // `run-once` is not in the usage on purpose: it points the backfill at a stand-in for the tests.
 const OPTS = new Set(['repo', 'only', 'model', 'run-once']);
 
@@ -179,6 +183,7 @@ async function main() {
   const planOnly = args.flags.has('plan-only');
   const dryRun = args.flags.has('dry-run');
   const continueOnError = args.flags.has('continue-on-error');
+  const includeEnriched = args.flags.has('include-enriched');
   const model = args.opts.model || null;
   const runOnce = path.resolve(args.opts['run-once'] || DEFAULT_RUN_ONCE);
 
@@ -201,7 +206,7 @@ async function main() {
   // Throws on a register that cannot be read: a takedown never fails open.
   const withdrawals = loadRegisterWithdrawals(cfg.repo);
   const finder = makePdfFinder(cfg.intakeDir);
-  const plan = planBackfill(listings, { findPdf: finder, withdrawals, only });
+  const plan = planBackfill(listings, { findPdf: finder, withdrawals, only, includeEnriched });
 
   say('');
   say(`══ Bona backfill ${planOnly ? '(plan only)' : dryRun ? '(dry run)' : '(LIVE — commits and pushes)'} ══`);
@@ -232,7 +237,7 @@ async function main() {
   fs.writeFileSync(path.join(logDir, 'plan.txt'), `${table}\n`);
 
   const results = [];
-  const resumeOpts = { repo: cfg.repo, dryRun, model, continueOnError };
+  const resumeOpts = { repo: cfg.repo, dryRun, model, continueOnError, includeEnriched };
   let stopped = null;
   for (let i = 0; i < queue.length; i += 1) {
     const item = queue[i];
@@ -288,7 +293,7 @@ async function main() {
   }
   say(`logs:    ${logDir}`);
   fs.writeFileSync(path.join(logDir, 'summary.json'), `${JSON.stringify({
-    startedAt: stamp, repo: cfg.repo, dryRun, model, continueOnError, plan, results, counts, stopped, remaining,
+    startedAt: stamp, repo: cfg.repo, dryRun, model, continueOnError, includeEnriched, plan, results, counts, stopped, remaining,
   }, null, 2)}\n`);
   process.exit(stopped || counts.failed ? 1 : 0);
 }

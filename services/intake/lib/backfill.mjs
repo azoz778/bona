@@ -35,14 +35,17 @@ const byId = (a, b) => String(a.id).localeCompare(String(b.id), 'en', { numeric:
  * Skipped, in this order: an id that is not an intake id (BONA-W###); a listing whose advertising
  * was withdrawn (rules.mjs WITHDRAWN_ADVERTISING, plus the review register's flags passed as
  * `withdrawals` — the same test edits.mjs withdrawnRefusal() applies) or whose record says
- * "withdrawn"; a hidden listing; a record without a slug. Everything else is `enrich` when its
- * source PDF is found by content hash, else `brochure-only`. `findPdf` is called only for the
- * listings that are not skipped — every call can mean hashing PDFs.
+ * "withdrawn"; a hidden listing; a record without a slug; a listing that already carries unit models
+ * ("already enriched" — the backfill is for listings published before the intake read them; with
+ * `includeEnriched` it is enriched again, and run-once still refuses a reading with less than it
+ * carries). Everything else is `enrich` when its source PDF is found by content hash, else
+ * `brochure-only`. `findPdf` is called only for the listings that are not skipped — every call can
+ * mean hashing PDFs.
  *
  * @param {object[]} listings  inbox listing objects
- * @param {{findPdf:(sha:string)=>string|null, withdrawals?:object[], only?:string[]|null}} opts
+ * @param {{findPdf:(sha:string)=>string|null, withdrawals?:object[], only?:string[]|null, includeEnriched?:boolean}} opts
  */
-export function planBackfill(listings, { findPdf, withdrawals = [], only = null } = {}) {
+export function planBackfill(listings, { findPdf, withdrawals = [], only = null, includeEnriched = false } = {}) {
   if (typeof findPdf !== 'function') throw new TypeError('planBackfill needs findPdf(sha) → path|null');
   const want = only?.length ? new Set(only.map((s) => String(s).toUpperCase())) : null;
   const rows = [];
@@ -59,11 +62,13 @@ export function planBackfill(listings, { findPdf, withdrawals = [], only = null 
       pdf: null,
     };
     const withdrawn = INTAKE_ID_RE.test(id) ? withdrawnAdvertising(l, withdrawals) : null;
+    const enriched = Array.isArray(l.models) && l.models.length > 0;
     if (!INTAKE_ID_RE.test(id)) row.reason = 'not an intake listing (BONA-W###)';
     else if (withdrawn) row.reason = `advertising withdrawn (${withdrawn.reason})`;
     else if (l.status === 'withdrawn') row.reason = 'its record says withdrawn';
     else if (l.hidden) row.reason = 'hidden — not on the site';
     else if (!row.slug) row.reason = 'the record has no slug';
+    else if (enriched && !includeEnriched) row.reason = `already enriched (${l.models.length} unit model(s)) — --include-enriched to enrich it again`;
     else {
       const sha = typeof l._intake?.pdfSha256 === 'string' && l._intake.pdfSha256 ? l._intake.pdfSha256 : null;
       const pdf = sha ? findPdf(sha) : null;
@@ -73,7 +78,7 @@ export function planBackfill(listings, { findPdf, withdrawals = [], only = null 
         ? 'source PDF found'
         : sha ? 'source PDF not in the intake folder — brochure rebuilt from the listing only'
           : 'no source PDF recorded — brochure rebuilt from the listing only';
-      if (pdf && Array.isArray(l.models) && l.models.length) row.reason += ` (already has ${l.models.length} unit model(s) — enriched again)`;
+      if (pdf && enriched) row.reason += ` (already has ${l.models.length} unit model(s) — enriched again)`;
     }
     rows.push(row);
   }
@@ -269,12 +274,13 @@ export function stopsBackfill(outcome, { continueOnError = false } = {}) {
 }
 
 /** The command that picks the backfill up again with exactly `ids`. */
-export function resumeCommand(ids, { repo, dryRun = false, model = null, continueOnError = false } = {}) {
+export function resumeCommand(ids, { repo, dryRun = false, model = null, continueOnError = false, includeEnriched = false } = {}) {
   const parts = ['node services/intake/backfill-enrich.mjs'];
   if (repo) parts.push('--repo', repo);
   if (dryRun) parts.push('--dry-run');
   if (model) parts.push('--model', model);
   if (continueOnError) parts.push('--continue-on-error');
+  if (includeEnriched) parts.push('--include-enriched');
   parts.push('--only', ids.join(','));
   return parts.join(' ');
 }
