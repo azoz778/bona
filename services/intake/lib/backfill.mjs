@@ -6,7 +6,7 @@
 // intake folder. backfill-enrich.mjs is the CLI that spawns the jobs and commits.
 import fs from 'node:fs';
 import path from 'node:path';
-import { FACT_LISTS, INTAKE_ID_RE, withdrawnAdvertising } from '../../../scripts/curate/rules.mjs';
+import { FACT_LISTS, INTAKE_ID_RE, isFigure, withdrawnAdvertising } from '../../../scripts/curate/rules.mjs';
 import { sha256File } from './edits.mjs';
 
 /** What a plan row can say. `enrich` needs the developer's PDF; `brochure-only` does not. */
@@ -28,16 +28,32 @@ export function unknownIds(listings, only) {
 
 const byId = (a, b) => String(a.id).localeCompare(String(b.id), 'en', { numeric: true });
 
+/** A unit model that carries something an enrichment read off the brochure: a price, a Sakani price or a floor plan. */
+const carriesSomething = (m) => Boolean(m) && typeof m === 'object'
+  && (isFigure(m.price) || isFigure(m.subsidisedPrice) || (Boolean(m.floorPlan) && typeof m.floorPlan === 'object'));
+
 /**
  * What an enrichment already put on a listing, in words — its unit models and every fact list it
  * carries (`amenities`, `nearby`, `warranties`) — or '' when it carries none. A listing published by
  * the new intake can carry fact lists and no models (a brochure that prints no unit types): it is
  * enriched all the same, and a re-read that drops one of its lists would be refused by run-once.
+ * Its unit models count only when at least one carries a price or a floor plan (final review M8): models
+ * with neither are what an enrichment leaves when its price check could not be completed (a quota, a
+ * render that failed) — or a brochure that really prints none. Either way a re-read loses nothing
+ * (run-once still refuses a reading with less than the listing carries), and it is the only way to fill
+ * them, so such a listing is planned again; the cost is one more reading of a brochure that prints none.
  */
 function enrichedWith(l) {
-  const models = Array.isArray(l.models) && l.models.length > 0 ? [`${l.models.length} unit model(s)`] : [];
+  const list = Array.isArray(l.models) ? l.models : [];
+  const models = list.some(carriesSomething) ? [`${list.length} unit model(s)`] : [];
   const facts = Object.keys(FACT_LISTS).filter((k) => ['en', 'ar'].some((lang) => Array.isArray(l[k]?.[lang]) && l[k][lang].length > 0));
   return [...models, ...facts].join(', ');
+}
+
+/** Unit models that carry no price and no floor plan, on a listing whose models do not count as an enrichment: how many, else 0. */
+function bareModels(l) {
+  const list = Array.isArray(l.models) ? l.models : [];
+  return list.length > 0 && !list.some(carriesSomething) ? list.length : 0;
 }
 
 /**
@@ -48,7 +64,8 @@ function enrichedWith(l) {
  * was withdrawn (rules.mjs WITHDRAWN_ADVERTISING, plus the review register's flags passed as
  * `withdrawals` — the same test edits.mjs withdrawnRefusal() applies) or whose record says
  * "withdrawn"; a hidden listing; a record without a slug; a listing that already carries unit models
- * or a fact list (amenities / nearby / warranties: "already enriched" — the backfill is for listings
+ * with a price or a floor plan, or a fact list (amenities / nearby / warranties: "already enriched",
+ * enrichedWith — unit models with neither are planned again; the backfill is for listings
  * published before the intake read them; with `includeEnriched` it is enriched again, and run-once
  * still refuses a reading with less than it carries). Everything else is `enrich` when its source PDF is found by content hash, else
  * `brochure-only`. `findPdf` is called only for the listings that are not skipped — every call can
@@ -91,6 +108,7 @@ export function planBackfill(listings, { findPdf, withdrawals = [], only = null,
         : sha ? 'source PDF not in the intake folder — brochure rebuilt from the listing only'
           : 'no source PDF recorded — brochure rebuilt from the listing only';
       if (pdf && enriched) row.reason += ` (already has ${enriched} — enriched again)`;
+      else if (pdf && bareModels(l)) row.reason += ` (its ${bareModels(l)} unit model(s) carry no price or floor plan — enriched again)`;
     }
     rows.push(row);
   }

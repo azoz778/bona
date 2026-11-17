@@ -63,7 +63,7 @@ describe('planBackfill', () => {
     listing('BONA-W013', { title: { en: 'Elvira Murjan Phase 2', ar: 'x' } }),      // the withdrawn project by NAME
     listing('BONA-015'),                                                            // a curated id
     listing('BONA-W100', { slug: '' }),
-    listing('BONA-W001', { models: [{ name: 'A' }, { name: 'B' }], _intake: { pdfSha256: sha('pdf of BONA-W010') } }),
+    listing('BONA-W001', { models: [{ name: 'A', price: 319015 }, { name: 'B', price: null }], _intake: { pdfSha256: sha('pdf of BONA-W010') } }),
   ];
 
   it('orders by id and gives every listing one action and a reason', () => {
@@ -108,7 +108,7 @@ describe('planBackfill', () => {
     const list = [
       listing('BONA-W010', facts('amenities')),
       listing('BONA-W003', { ...facts('nearby', ['Airport'], ['المطار']), ...facts('warranties', ['Structure — 10 years'], ['الهيكل — 10 سنوات']) }),
-      listing('BONA-W002', { models: [{ name: 'A' }], ...facts('warranties', ['Structure — 10 years'], ['الهيكل — 10 سنوات']) }),
+      listing('BONA-W002', { models: [{ name: 'A', price: 319015 }], ...facts('warranties', ['Structure — 10 years'], ['الهيكل — 10 سنوات']) }),
       listing('BONA-W004', { amenities: { en: [], ar: [] }, nearby: { en: [], ar: [] }, models: [] }),   // empty lists are not an enrichment
     ];
     asked.length = 0;
@@ -123,6 +123,28 @@ describe('planBackfill', () => {
     assert.equal(again['BONA-W010'].action, 'enrich');
     assert.match(again['BONA-W010'].reason, /^source PDF found \(already has amenities — enriched again\)$/);
     assert.match(again['BONA-W003'].reason, /^source PDF found \(already has nearby, warranties — enriched again\)$/);
+  });
+
+  it('M8: unit models that carry no price and no floor plan are not an enrichment — the listing is planned again (an earlier read may have been cut short)', () => {
+    const bare = (n) => Array.from({ length: n }, (_, i) => ({ name: { en: `M${i}`, ar: 'م' }, price: null, subsidisedPrice: null, floorPlan: null }));
+    const plan = { src: '/listings/slug-bona-w003/plan-01.jpg', thumb: '/listings/slug-bona-w003/plan-01-thumb.webp' };
+    const list = [
+      listing('BONA-W010', { models: bare(2) }),                                                               // nothing kept: planned
+      listing('BONA-W002', { models: bare(1) }),                                                               // no PDF: brochure-only
+      listing('BONA-W003', { models: [...bare(1), { ...bare(1)[0], floorPlan: plan }] }),                     // a plan: enriched
+      listing('BONA-W004', { models: [{ ...bare(1)[0], subsidisedPrice: 270425 }], _intake: { pdfSha256: sha('pdf of BONA-W010') } }), // a Sakani price: enriched
+      listing('BONA-W005', { models: bare(3), amenities: { en: ['Gym'], ar: ['نادٍ رياضي'] }, _intake: { pdfSha256: sha('pdf of BONA-W003') } }), // a fact list: enriched
+    ];
+    const by = Object.fromEntries(planBackfill(list, { findPdf }).map((r) => [r.id, r]));
+    assert.equal(by['BONA-W010'].action, 'enrich');
+    assert.equal(by['BONA-W010'].reason, 'source PDF found (its 2 unit model(s) carry no price or floor plan — enriched again)');
+    assert.equal(by['BONA-W002'].action, 'brochure-only');
+    assert.equal(by['BONA-W003'].action, 'skip');
+    assert.match(by['BONA-W003'].reason, /^already enriched \(2 unit model\(s\)\) — /);
+    assert.equal(by['BONA-W004'].action, 'skip');
+    assert.match(by['BONA-W004'].reason, /^already enriched \(1 unit model\(s\)\) — /);
+    assert.equal(by['BONA-W005'].action, 'skip');
+    assert.match(by['BONA-W005'].reason, /^already enriched \(amenities\) — /, 'the bare models are not counted, the fact list is');
   });
 
   it('skips hidden, withdrawn (rules.mjs, the register, the record, the name), non-intake and slug-less listings', () => {
@@ -475,7 +497,7 @@ describe('backfill-enrich.mjs (stand-in run-once)', () => {
     const r = rig();
     const file = path.join(r.repo, 'scripts', 'curate', 'inbox', 'slug-bona-w003.json');
     const l = JSON.parse(fs.readFileSync(file, 'utf8'));
-    fs.writeFileSync(file, `${JSON.stringify({ ...l, models: [{ name: { en: 'A', ar: 'أ' } }] }, null, 2)}\n`);
+    fs.writeFileSync(file, `${JSON.stringify({ ...l, models: [{ name: { en: 'A', ar: 'أ' }, price: 319015 }] }, null, 2)}\n`);
     git(r.repo, 'commit', '-qam', 'intake: enrich W003');
     const plain = cli(r, ['--plan-only']);
     assert.equal(plain.code, 0, plain.out);
