@@ -1,54 +1,68 @@
 #!/usr/bin/env python3
 """Bona intake — the listing brochure, rebuilt from scratch in the TK brochure design system.
 
-Run through uv so nothing has to be installed on the box:
+Run through uv so nothing has to be installed on the box (WeasyPrint is PINNED, see below):
 
-    uv run --with weasyprint --with segno --with pillow --with pymupdf python -I \\
+    uv run --with weasyprint==70.0 --with segno --with pillow --with pymupdf python -I \\
         services/intake/brochure_pdf.py <listing.json> <files-dir> <site.json> <out.pdf> \\
         [--max-mb 25] [--work <dir>]
 
   <listing.json>  the final site listing (src/data/LISTING-SCHEMA.md). `_intake` and `hidden` are
                   never read, so nothing the intake keeps for itself can reach the page.
   <files-dir>     the listing's folder, staged or published: 01.jpg… photos and plan-NN.jpg floor
-                  plans. Any listing path (`/listings/<slug>/02.jpg`) is read as <files-dir>/<basename>.
+                  plans. Any listing path (`/listings/<slug>/02.jpg`) is read as <files-dir>/<basename>;
+                  a path with `..` in it, or a file that resolves outside files-dir (a symlink), is
+                  refused.
   <site.json>     src/data/site.json: url, phone, WhatsApp, email, hours, tagline, FAL licence.
   --work          keep the prepared images, logos and QR there (default: a temporary folder under
-                  ~/.cache that is removed afterwards).
+                  ~/.cache that is removed afterwards). Prepared images are named after their
+                  source's path, size and mtime, so a reused --work never serves a stale image.
 
 ONE bilingual A4 PDF, English left and Arabic right on every page, in the TK system (black and
 white, Cormorant Garamond / Montserrat / Amiri / Tajawal, 0.4pt hairlines, 20mm margins), branded
-Bona. Fixed 210 x 297mm canvases, in this order (spec §5):
+Bona. The stylesheet is assets/brochure.css (the TK block verbatim, then the approved sample's
+components, then Bona's additions). Fixed 210 x 297mm canvases, in this order (spec §5):
 
   1 flysheet · 2 cover · 3 the project / the property (+ continuation pages) · 4 residences & prices
-  · 5 one page per model with a floor plan · 6 photo pages · 7 amenities & terms · 8 location &
-  enquiries.
+  · 5 one page per model with a floor plan · 6 photo pages (3s and 2s, balanced) · 7 amenities &
+  terms · 8 location & enquiries.
 
 What is printed comes from the listing's own fields, its photos and floor plans, and site.json —
 nothing else. The developer is named as text only; there is no developer logo, phone, email,
 URL or address anywhere. Every number is a printed figure from the listing (ranges are min–max of
-those figures), digits are Western throughout, every string is HTML-escaped.
+those figures; a price that is not a whole number is refused, never rounded), digits are Western
+throughout, every string is HTML-escaped, and WeasyPrint may load files from the font folder and
+the work folder only.
 
-Layout never relies on guesswork. Before the brochure is drawn, the text blocks that can grow
-(narrative paragraphs, table rows, amenity rows) are measured with WeasyPrint at their real
-column widths, and the pages are cut from those heights; the finished render is then checked box
-by box (no text block may run into the ledger, the footer, the enquiry block or off the page) and
-re-cut tighter if it does. A layout that still does not fit fails the run rather than printing
-overlapping text.
+Layout never relies on guesswork. Before the brochure is drawn, the text that can grow is laid out
+with WeasyPrint at its real column width: each description paragraph once (the page breaks are cut
+between its laid-out lines), table rows, amenity rows, and every photo caption (a caption that
+would not fit one line at its plate width is shortened, its room label first, the "Illustrative"
+marker never). The finished render is then checked box by box (no text block may run into the
+ledger, the footer, the enquiry block or off the page) and re-cut tighter if it does. A layout
+that still does not fit fails the run rather than printing overlapping text.
+
+WeasyPrint is pinned to 70.x: the measuring reads its laid-out box tree, which has no public API.
+Every such use is in ONE marked section below, next to the version check that refuses any other
+WeasyPrint at startup.
 
 Images are downsampled to ~300dpi of their printed box (cover 2400px long side, hero 2100, half
 1400, plan 1800; JPEG q86). Over --max-mb the brochure is re-rendered with images at 0.75 and
-then 0.55 of that; still over, the output is deleted and the result is too-large.
+then 0.55 of that; still over, the result is too-large. The PDF is written to a temporary file
+beside <out.pdf> and renamed over it only on success: on ANY failure an existing <out.pdf> is
+left untouched.
 
 Result (ONE JSON line on stdout; exit 1 on failure, never a bare traceback):
 
     {"ok": true, "out": "…/brochure.pdf", "bytes": 2345678, "pages": 13, "maxBytes": 26214400,
      "steps": ["measure", "render", "write"], "kinds": ["flysheet", "cover", "narrative", …],
-     "id": "BONA-W023"}
+     "photoPages": [2, 2], "id": "BONA-W023"}
     {"ok": false, "reason": "too-large" | "error", "error": "…"}
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import json
 import math
@@ -59,10 +73,14 @@ import shutil
 import sys
 import tempfile
 import traceback
+import urllib.parse
+import urllib.request
+from typing import NamedTuple
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 FONT_DIR = HERE / "assets" / "fonts"
+CSS_PATH = HERE / "assets" / "brochure.css"
 LOGO_SVG = REPO / "public" / "logo.svg"
 
 DEFAULT_MAX_MB = 25.0
@@ -70,13 +88,18 @@ MB = 1024 * 1024
 SCALES = (1.0, 0.75, 0.55)                       # image scale per size pass
 ROLE_PX = {"cover": 2400, "hero": 2100, "half": 1400, "plan": 1800}   # long side at scale 1
 JPEG_Q = 86
+PREP_VERSION = 1                                 # bump when Images changes how a file is prepared
 PX_MM = 25.4 / 96.0                              # CSS px -> mm
 SAFE_BOTTOM = 289.0                              # no text block may run below this (mm from the top)
 CHECK_GAP = 3.0                                  # render check: clearance between a text block and what is under it
 TEXT_GAP = 7.0                                   # pagination: clearance kept above the ledger / footer / note
 MAX_TABLE_ROWS = 10
 COL_W = 79.5                                     # a .cols column: (170mm text width - 11mm gap) / 2
-MAX_SENTENCE_UNITS = 16                          # a longer paragraph is cut in this many pieces at most
+MEASURE_PAGE_MM = 20000                          # height of a measuring page (blocks never split across two)
+PLATE_W = {"hero": 170.0, "half": 82.0}          # printed plate widths: the text width, and (170 - 6mm gap) / 2
+PLATE_H = {"hero": 100.0, "half": 96.0}          # plate heights at refit factor 1
+CAP_GAP = 5.0                                    # .cap gap between the English and the Arabic caption
+CAP_SLACK = 0.5                                  # a caption must fit its plate with this much to spare
 
 FONT_FACES = [
     ("Cormorant Garamond", "CormorantGaramond-300.ttf", 300),
@@ -92,212 +115,6 @@ FONT_FACES = [
     ("Tajawal", "Tajawal-Medium.ttf", 500),
 ]
 
-# ---- TK brochure CSS, verbatim from tk-property-brochure/scripts/build_brochure.py ---------------
-CSS = """
-@page { size: A4; margin: 0; }
-* { margin:0; padding:0; box-sizing:border-box; }
-body { background:#fff; color:#000; }
-.page { width:210mm; height:297mm; position:relative; overflow:hidden;
-        page-break-after:always; background:#fff; }
-.page:last-child { page-break-after:auto; }
-.pad { padding:0 20mm; }
-
-.eyebrow { font-family:'Montserrat'; font-weight:500; font-size:6.6pt;
-           letter-spacing:.32em; text-transform:uppercase; }
-.eyebrow.muted { color:#767676; }
-.ar-lab { font-family:'Tajawal'; font-weight:400; font-size:7.4pt;
-          direction:rtl; color:#767676; }
-.display { font-family:'Cormorant Garamond'; font-weight:300; line-height:1.03;
-           letter-spacing:-.005em; }
-.ar-display { font-family:'Amiri'; font-weight:400; direction:rtl; }
-.body-en { font-family:'Montserrat'; font-weight:300; font-size:8.4pt;
-           line-height:1.85; color:#1c1c1c; }
-.body-ar { font-family:'Tajawal'; font-weight:300; font-size:9pt; line-height:2.0;
-           direction:rtl; text-align:right; color:#1c1c1c; }
-
-.runhead { position:absolute; top:14mm; left:20mm; right:20mm;
-           display:flex; justify-content:space-between; align-items:baseline; }
-.footer { position:absolute; bottom:11mm; left:20mm; right:20mm;
-          display:flex; justify-content:space-between; align-items:center;
-          font-family:'Montserrat'; font-weight:400; font-size:6pt;
-          letter-spacing:.26em; text-transform:uppercase; color:#8a8a8a; }
-
-/* flysheet */
-.title-page { background:#000; }
-.tp-mark { position:absolute; top:0; left:0; right:0; height:168mm; }
-.tp-mark img { position:absolute; bottom:0; left:50%; margin-left:-30.5mm; height:68mm; }
-.tp-rule { position:absolute; top:180mm; left:50%; margin-left:-18mm; width:36mm;
-           height:.4pt; background:#5a5a5a; }
-.tp-line { position:absolute; top:189mm; left:0; right:0; text-align:center;
-           font-family:'Montserrat'; font-weight:400; font-size:6.4pt;
-           letter-spacing:.42em; text-indent:.42em; text-transform:uppercase; color:#c9c9c9; }
-.tp-ar { position:absolute; top:197mm; left:0; right:0; text-align:center;
-         font-family:'Tajawal'; font-weight:300; font-size:8pt; direction:rtl; color:#8a8a8a; }
-.tp-foot { position:absolute; bottom:16mm; left:0; right:0; text-align:center;
-           font-family:'Montserrat'; font-weight:400; font-size:5.8pt;
-           letter-spacing:.3em; text-indent:.3em; text-transform:uppercase; color:#6a6a6a; }
-
-/* cover */
-.cover-img { position:absolute; top:0; left:0; width:210mm; height:178mm;
-             background-size:cover; background-position:center 58%; }
-.cover-body { position:absolute; top:200mm; left:20mm; right:20mm; }
-.cover-title { font-family:'Cormorant Garamond'; font-weight:300; font-size:41pt;
-               line-height:1.02; margin-top:7mm; }
-.cover-title-ar { font-family:'Amiri'; direction:rtl; font-size:23pt; margin-top:4mm;
-                  line-height:1.5; }
-.cover-meta { margin-top:9mm; padding-top:4.5mm; border-top:.4pt solid #000;
-              display:flex; justify-content:space-between; align-items:baseline; }
-
-/* overview */
-.lead { position:absolute; top:42mm; left:20mm; right:20mm; }
-.lead h1 { font-family:'Cormorant Garamond'; font-weight:300; font-size:34pt; line-height:1.04; }
-.lead .ar-h { font-family:'Amiri'; direction:rtl; font-size:19pt; margin-top:4mm; }
-.cols { display:flex; gap:11mm; margin-top:11mm; }
-.cols > div { flex:1; }
-
-/* specification ledger */
-.ledger { position:absolute; left:20mm; right:20mm; bottom:32mm; }
-.ledger-head { display:flex; justify-content:space-between; align-items:baseline;
-               padding-bottom:3mm; border-bottom:.4pt solid #000; }
-.ledger-row { display:flex; border-bottom:.4pt solid #c9c9c9; }
-.cell { flex:1; padding:6.5mm 0 5.5mm 0; border-right:.4pt solid #c9c9c9; text-align:center; }
-.cell:last-child { border-right:none; }
-.cell .fig { font-family:'Cormorant Garamond'; font-weight:300; font-size:34pt; line-height:1;
-             font-variant-numeric:lining-nums; font-feature-settings:'lnum' 1,'onum' 0; }
-.cell .fig sup { font-family:'Montserrat'; font-weight:400; font-size:8pt;
-                 letter-spacing:.1em; vertical-align:super; }
-.cell .lab { font-family:'Montserrat'; font-weight:500; font-size:5.8pt;
-             letter-spacing:.26em; text-transform:uppercase; margin-top:4mm; }
-.cell .lab-ar { font-family:'Tajawal'; font-weight:400; font-size:7pt;
-                direction:rtl; color:#8a8a8a; margin-top:1.4mm; }
-
-/* plates */
-.plate { background-size:cover; }
-.grid2 { display:flex; gap:6mm; }
-.grid2 > div { flex:1; }
-.cap { display:flex; justify-content:space-between; align-items:baseline;
-       margin-top:3mm; padding-top:2.6mm; border-top:.4pt solid #c9c9c9; }
-.cap .en { font-family:'Montserrat'; font-weight:500; font-size:6.2pt;
-           letter-spacing:.26em; text-transform:uppercase; }
-.cap .ar { font-family:'Tajawal'; font-weight:400; font-size:7.4pt;
-           direction:rtl; color:#767676; }
-
-/* inclusions */
-.spec-item { display:flex; justify-content:space-between; align-items:baseline;
-             padding:3.1mm 0; border-bottom:.4pt solid #dcdcdc; }
-.spec-item .en { font-family:'Montserrat'; font-weight:400; font-size:7.8pt; color:#111; }
-.spec-item .ar { font-family:'Tajawal'; font-weight:400; font-size:8.4pt;
-                 direction:rtl; color:#111; }
-.spec-group { display:flex; justify-content:space-between; align-items:baseline;
-              padding:0 0 2.2mm; margin-top:7mm; border-bottom:.4pt solid #000; }
-.spec-group:first-child { margin-top:0; }
-.spec-group .en { font-family:'Montserrat'; font-weight:500; font-size:6.2pt;
-                  letter-spacing:.34em; text-transform:uppercase; color:#111; }
-.spec-group .ar { font-family:'Tajawal'; font-weight:400; font-size:7.4pt;
-                  direction:rtl; color:#767676; }
-.terms { display:flex; gap:11mm; margin-top:12mm; }
-.terms > div { flex:1; border-top:.4pt solid #000; padding-top:3.5mm; }
-.terms .v { font-family:'Cormorant Garamond'; font-weight:300; font-size:17pt; margin-top:2mm;
-            font-variant-numeric:lining-nums; font-feature-settings:'lnum' 1,'onum' 0; }
-.terms .v-ar { font-family:'Tajawal'; font-weight:400; font-size:7.4pt;
-               direction:rtl; color:#767676; margin-top:1.5mm; }
-
-/* location */
-.loc { position:absolute; top:42mm; left:20mm; right:20mm; }
-.loc h1 { font-family:'Cormorant Garamond'; font-weight:300; font-size:32pt; line-height:1.05; }
-.loc .ar-h { font-family:'Amiri'; direction:rtl; font-size:18pt; margin-top:3mm; }
-.qr-block { display:flex; gap:12mm; margin-top:14mm; align-items:flex-start; }
-.qr-tile { width:48mm; }
-.qr-tile img { width:48mm; height:48mm; display:block; border:.4pt solid #000; }
-.qr-tile .cta { font-family:'Montserrat'; font-weight:500; font-size:5.8pt;
-                letter-spacing:.26em; text-transform:uppercase; margin-top:3.5mm;
-                text-align:center; }
-.qr-tile .cta-ar { font-family:'Tajawal'; font-weight:400; font-size:7pt; direction:rtl;
-                   color:#767676; margin-top:1.5mm; text-align:center; }
-.loc-facts { flex:1; padding-top:1mm; }
-.loc-fact { border-top:.4pt solid #c9c9c9; padding:3.5mm 0 4.5mm 0; }
-.loc-fact:first-child { border-top:.4pt solid #000; }
-.loc-fact .k { font-family:'Montserrat'; font-weight:500; font-size:5.8pt;
-               letter-spacing:.26em; text-transform:uppercase; color:#767676; }
-.loc-fact .k .sep { letter-spacing:0; margin:0 1.4mm 0 .4mm; color:#b8b8b8; }
-.loc-fact .k .k-ar { font-family:'Tajawal'; font-weight:400; font-size:7pt;
-                     letter-spacing:0; text-transform:none; direction:rtl;
-                     unicode-bidi:isolate; }
-.loc-fact .v { font-family:'Montserrat'; font-weight:300; font-size:8.4pt; margin-top:1.8mm;
-               color:#111; }
-.map-btn { display:flex; justify-content:space-between; align-items:center;
-           background:#000; color:#fff; text-decoration:none; padding:6.5mm 8mm;
-           margin-top:11mm; }
-.map-btn .l { font-family:'Montserrat'; font-weight:500; font-size:7.4pt;
-              letter-spacing:.26em; text-transform:uppercase; color:#fff; }
-.map-btn .r { font-family:'Tajawal'; font-weight:400; font-size:8.4pt;
-              direction:rtl; color:#c4c4c4; }
-
-/* enquiry */
-.enquiry { position:absolute; left:0; right:0; bottom:0; background:#000; color:#fff;
-           padding:13mm 20mm; }
-.enquiry .k { font-family:'Montserrat'; font-weight:500; font-size:6pt;
-              letter-spacing:.32em; text-transform:uppercase; color:#9a9a9a; }
-.enquiry h2 { font-family:'Cormorant Garamond'; font-weight:300; font-size:23pt;
-              color:#fff; margin-top:3.5mm; line-height:1.1; }
-.enquiry .ar { font-family:'Tajawal'; font-weight:300; font-size:8pt; direction:rtl;
-               color:#c4c4c4; margin-top:3mm; max-width:104mm; text-align:left; }
-.enquiry .lines { display:flex; gap:7mm; margin-top:9mm; }
-.enquiry .lines > div { flex:1; border-top:.4pt solid #4a4a4a; padding-top:3mm; }
-.enquiry .lines .k2 { font-family:'Montserrat'; font-weight:500; font-size:5.6pt;
-                      letter-spacing:.26em; text-transform:uppercase; color:#8a8a8a;
-                      min-height:5.6mm; }
-.enquiry .lines .v2 { font-family:'Montserrat'; font-weight:300; font-size:7.6pt;
-                      color:#fff; margin-top:2mm; line-height:1.6; }
-.enquiry .lines .v2 a { color:#fff; text-decoration:none; }
-.enq-logo { position:absolute; top:11mm; right:20mm; height:19mm; }
-"""
-
-# ---- the approved Bona sample's extra components (bona-debug-w023/dirs/tk_style.py) --------------
-EXTRA = """
-.tp-mark img.wide { height:auto; width:112mm; margin-left:-56mm; }
-.units { width:100%; border-collapse:collapse; margin-top:12mm; }
-.units th { font-family:'Montserrat'; font-weight:500; font-size:5.8pt; letter-spacing:.26em; text-transform:uppercase;
-            text-align:right; padding:0 0 1.2mm; vertical-align:bottom; }
-.units th span { display:block; font-family:'Tajawal'; font-weight:400; font-size:7pt; letter-spacing:0; color:#8a8a8a; margin-top:1mm; }
-.units th:first-child, .units td:first-child { text-align:left; }
-.units thead tr { border-bottom:.4pt solid #000; }
-.units td { padding:4mm 0 3.6mm; border-bottom:.4pt solid #c9c9c9; text-align:right; font-family:'Montserrat'; font-weight:300; font-size:8.2pt;
-            font-variant-numeric:lining-nums tabular-nums; }
-.units td .nm { font-family:'Cormorant Garamond'; font-weight:400; font-size:14pt; }
-.units td .nm-ar { font-family:'Tajawal'; font-weight:400; font-size:7.6pt; color:#767676; margin-left:2mm; }
-.note { font-family:'Montserrat'; font-weight:300; font-size:6.6pt; line-height:1.7; color:#767676; margin-top:6mm; }
-.note-ar { font-family:'Tajawal'; font-weight:300; font-size:7.4pt; line-height:1.8; color:#767676; direction:rtl; text-align:right; margin-top:1.5mm; }
-.planbox { margin-top:10mm; height:118mm; display:flex; align-items:center; justify-content:center; }
-.planbox img { max-width:170mm; max-height:118mm; }
-.ledger.small .cell .fig { font-size:26pt; }
-.floors { font-family:'Montserrat'; font-weight:300; font-size:7.6pt; color:#111; margin-top:2mm; }
-"""
-
-# ---- Bona additions: fixed column widths (so measuring = printing), paragraph rhythm, small fixes --
-BONA_CSS = """
-.cols > div { flex:0 0 79.5mm; width:79.5mm; min-width:0; }
-.cols.cont { margin-top:0; }
-.body-en p + p { margin-top:1.85em; }
-.body-ar p + p { margin-top:2em; }
-.units { table-layout:fixed; }
-.units td { vertical-align:baseline; }
-.units td.nmc { padding-right:3mm; }
-.cap { gap:5mm; }
-.cap .ar { text-align:right; }
-.spec-item { gap:5mm; }
-.spec-item .ar { text-align:right; }
-.spec-group { gap:5mm; }
-.terms .v.long { font-size:13pt; line-height:1.2; }
-.terms .floors-ar { font-family:'Tajawal'; font-weight:400; font-size:7.4pt; direction:rtl; color:#767676; margin-top:1.5mm; }
-.loc-fact .v-ar { font-family:'Tajawal'; font-weight:300; font-size:8.4pt; direction:rtl; text-align:left; color:#767676; margin-top:1mm; }
-.enquiry { left:-.6mm; right:-.6mm; bottom:-.6mm; padding:13mm 20.6mm 13.6mm; }
-.enquiry .lines .v2 .v2-ar { display:block; font-family:'Tajawal'; font-weight:300; font-size:7.6pt;
-                             direction:rtl; text-align:left; color:#c4c4c4; margin-top:1mm; }
-.cover-img { left:-.6mm; top:-.6mm; width:211.2mm; height:178.6mm; }
-.title-page { background:#000; }
-"""
-
 # ---- vocabulary ---------------------------------------------------------------------------------
 TYPE_LABELS = {  # src/lib/listings.ts typeLabels, plus English plurals for a project of several layouts
     "villa": ("Villa", "Villas"), "apartment": ("Apartment", "Apartments"),
@@ -308,8 +125,6 @@ TYPE_LABELS = {  # src/lib/listings.ts typeLabels, plus English plurals for a pr
 }
 CATEGORY_LABELS = {"buy": "For Sale", "rent": "For Rent", "off-plan": "Off-Plan",
                    "international": "International"}
-CURRENCY_AR = {"SAR": "ر.س", "AED": "د.إ", "USD": "دولار", "EUR": "يورو", "OMR": "ر.ع",
-               "GBP": "جنيه إسترليني"}
 EN_NUMBER = {1: "One", 2: "Two", 3: "Three", 4: "Four", 5: "Five", 6: "Six", 7: "Seven",
              8: "Eight", 9: "Nine", 10: "Ten", 11: "Eleven", 12: "Twelve"}
 AR_NUMBER = {3: "ثلاثة", 4: "أربعة", 5: "خمسة", 6: "ستة", 7: "سبعة", 8: "ثمانية", 9: "تسعة",
@@ -319,6 +134,28 @@ PRICE_NOTE = ("Prices as printed in the developer's brochure.",
 SAKANI_NOTE = ("Prices as printed in the developer's brochure. The Sakani price applies to "
                "housing-support beneficiaries.",
                "الأسعار كما وردت في كتيب المطوّر، وسعر مستفيدي الدعم لمستفيدي برنامج سكني.")
+ILLUSTRATIVE = ("Illustrative", "صورة توضيحية")
+
+# The photo room labels, copied from scripts/curate/rooms.mjs (ROOMS, in its order) and keyed by the
+# English label, which is how it appears in an image's alt text. The test suite checks the two match.
+ROOM_LABELS = {en: (en, ar) for en, ar in [
+    ("Exterior", "الواجهة الخارجية"), ("Façade at night", "الواجهة ليلاً"), ("Entrance", "المدخل"),
+    ("Swimming pool", "المسبح"), ("Pool at night", "المسبح ليلاً"), ("Indoor pool", "المسبح الداخلي"),
+    ("Rooftop pool", "مسبح السطح"), ("Sea view", "إطلالة على البحر"), ("Private beach", "الشاطئ الخاص"),
+    ("Aerial view", "منظر جوي"), ("Living room", "غرفة المعيشة"), ("Reception salon", "المجلس"),
+    ("Dining room", "غرفة الطعام"), ("Kitchen", "المطبخ"), ("Bedroom", "غرفة النوم"),
+    ("Master suite", "الجناح الرئيسي"), ("Bathroom", "الحمام"), ("Roof terrace", "التراس العلوي"),
+    ("Balcony", "الشرفة"), ("Staircase", "الدرج"), ("Garden", "الحديقة"),
+    ("Courtyard", "الفناء الداخلي"), ("Grounds", "الحدائق المحيطة"), ("View", "الإطلالة"),
+    ("City skyline", "أفق المدينة"), ("Lobby", "البهو"), ("Lounge", "الصالة"),
+    ("Bar lounge", "صالة البار"), ("Gym", "النادي الرياضي"), ("Spa", "السبا"),
+    ("Private cinema", "السينما الخاصة"), ("Tennis court", "ملعب التنس"), ("Golf course", "ملعب الجولف"),
+    ("Sky car lift", "مصعد السيارات"), ("Café terrace", "تراس المقهى"), ("Event hall", "قاعة المناسبات"),
+    ("Study", "المكتب"), ("Gallery", "الرواق"), ("Winter garden", "الحديقة الشتوية"),
+    ("Great hall", "القاعة الكبرى"), ("The tower", "البرج"), ("Artist's impression", "تصور معماري"),
+    ("Covered parking", "المواقف المغطاة"), ("Satellite view of the plot", "صورة جوية للقطعة"),
+    ("Satellite view of the surrounding area", "صورة جوية للمنطقة المحيطة"),
+]}
 
 
 class BrochureError(Exception):
@@ -327,6 +164,128 @@ class BrochureError(Exception):
 
 class TooLarge(Exception):
     pass
+
+
+# ==================================================================================================
+# WeasyPrint 70.x: the version gate, and EVERY use of WeasyPrint's private internals.
+#
+# The layout is read back from WeasyPrint's laid-out box tree, which has no public API. This section
+# is the only code that touches it:
+#   Page._page_box                       the root box of a rendered page
+#   AbsolutePlaceholder._box             the real box behind an absolutely positioned element
+#   box.children, box.element            the box tree, and the HTML element a box was made for
+#   box.position_x / position_y / margin_left / margin_top / border_width() / border_height()
+#   formatting_structure.boxes.LineBox (position_y, height) and TextBox (text)
+# They hold within 70.x; any other version is refused at startup. The docstring command and the
+# test suite pin weasyprint==70.0. Moving to another WeasyPrint = re-check every line of this section.
+# ==================================================================================================
+WEASYPRINT_SERIES = "70."
+
+# Characters that print no ink and that WeasyPrint may keep in, or drop from, a laid-out line.
+_NO_INK = set("­​‌‍‎‏؜﻿‪‫‬‭‮"
+              "⁦⁧⁨⁩")
+
+
+def ink(s: str) -> int:
+    """How many printing characters `s` has (what a line of laid-out text is counted in)."""
+    return sum(1 for ch in s if not ch.isspace() and ch not in _NO_INK)
+
+
+def load_weasyprint():
+    """Import WeasyPrint, or fail with a clear error when it is not the pinned 70.x."""
+    try:
+        import weasyprint
+    except ImportError as e:
+        raise BrochureError(f"WeasyPrint is not installed ({e})")
+    version = str(getattr(weasyprint, "__version__", "unknown"))
+    if not version.startswith(WEASYPRINT_SERIES):
+        raise BrochureError(f"unsupported WeasyPrint {version} (the layout check reads its internals; "
+                            f"run with weasyprint=={WEASYPRINT_SERIES}0)")
+    return weasyprint
+
+
+class Extent(NamedTuple):
+    top: float
+    bottom: float
+    left: float
+    right: float
+
+
+def wp_walk(box):
+    """Every laid-out box under `box`, entering absolutely positioned ones (WeasyPrint keeps those
+    behind an AbsolutePlaceholder that `descendants()` does not open)."""
+    stack = [box]
+    while stack:
+        b = stack.pop()
+        yield b
+        inner = getattr(b, "_box", None)
+        kids = getattr(inner if inner is not None else b, "children", None) or ()
+        stack.extend(reversed(list(kids)))
+
+
+def wp_extent(box) -> Extent:
+    """A box's border box on its page, in mm."""
+    top, left = box.position_y + box.margin_top, box.position_x + box.margin_left
+    return Extent(top * PX_MM, (top + box.border_height()) * PX_MM,
+                  left * PX_MM, (left + box.border_width()) * PX_MM)
+
+
+def wp_tagged(doc, attrs=("data-m", "data-k")):
+    """Per page: [(tag, element, box)] for the first box of every element carrying one of `attrs`."""
+    pages = []
+    for page in doc.pages:
+        found, seen = [], set()
+        for box in wp_walk(page._page_box):
+            el = getattr(box, "element", None)
+            if el is None or id(el) in seen:
+                continue
+            tag = next((el.get(a) for a in attrs if el.get(a) is not None), None)
+            if tag is None:
+                continue
+            seen.add(id(el))
+            found.append((tag, el, box))
+        pages.append(found)
+    return pages
+
+
+def wp_lines(box):
+    """The line boxes laid out inside `box`: [(top_mm, bottom_mm, printing characters)]."""
+    from weasyprint.formatting_structure.boxes import LineBox, TextBox
+    out = []
+    for b in wp_walk(box):
+        if isinstance(b, LineBox):
+            n = sum(ink(t.text) for t in wp_walk(b) if isinstance(t, TextBox))
+            out.append((b.position_y * PX_MM, (b.position_y + b.height) * PX_MM, n))
+    return out
+# ==== end of the WeasyPrint internals ==============================================================
+
+
+def LocalFetcher(roots):
+    """A WeasyPrint URL fetcher (public API: weasyprint.URLFetcher) that serves existing local files
+    under `roots` and refuses everything else — any other path, `..` out of a root, http(s), data:.
+    Refused URLs are kept in `.refused`; a render that refused anything fails (Brochure.render)."""
+    weasyprint = load_weasyprint()
+    allowed = [pathlib.Path(r).resolve() for r in roots]
+
+    class _LocalFetcher(weasyprint.URLFetcher):
+        def __init__(self):
+            super().__init__(allowed_protocols=("file",))
+            self.refused = []
+
+        def fetch(self, url, headers=None):
+            try:
+                parts = urllib.parse.urlsplit(url)
+                if parts.scheme.lower() != "file" or parts.netloc not in ("", "localhost"):
+                    raise ValueError("not a local file")
+                p = pathlib.Path(urllib.request.url2pathname(parts.path)).resolve()
+                if not any(p.is_relative_to(r) for r in allowed) or not p.is_file():
+                    raise ValueError("outside the brochure's folders")
+            except (ValueError, OSError) as e:
+                self.refused.append(url)
+                raise ValueError(f"refused {url[:200]}: {e}") from None
+            return super().fetch(url, headers)
+
+    return _LocalFetcher()
 
 
 # ---- text helpers -------------------------------------------------------------------------------
@@ -364,8 +323,18 @@ def num(v):
     return None
 
 
+def whole(v, field: str):
+    """A price as stored: whole numbers only. The brochure prints the stored figure, so a fraction
+    is refused rather than rounded."""
+    if v is not None and not float(v).is_integer():
+        raise BrochureError(f"{field} is not a whole number ({v}); prices are printed exactly as stored")
+    return v
+
+
 def fmt_money(v) -> str:
-    return f"{round(v):,}"
+    if not float(v).is_integer():
+        raise BrochureError(f"price {v} is not a whole number")
+    return f"{int(v):,}"
 
 
 def fmt_area(v) -> str:
@@ -390,10 +359,6 @@ def money_en(amount, cur) -> str:
     return f"{cur} {fmt_money(amount)}"
 
 
-def money_ar(amount, cur) -> str:
-    return f"{fmt_money(amount)} {CURRENCY_AR.get(cur, cur)}"
-
-
 def dedupe(parts):
     out = []
     for p in parts:
@@ -402,20 +367,33 @@ def dedupe(parts):
     return out
 
 
+def keep_digits(s: str) -> str:
+    """'لؤلؤ 2' never breaks between the name and its number (the spaces next to digits go unbreakable)."""
+    return re.sub(r"(?<=\S) (?=\d)|(?<=\d) (?=\S)", " ", s)
+
+
 def paragraphs(s: str):
     return [re.sub(r"\s+", " ", p).strip() for p in re.split(r"\n\s*\n", s or "") if p.strip()]
 
 
-def sentences(p: str, lang: str):
-    if lang == "ar":
-        parts = re.split(r"(?<=[.!?؟])\s+", p)
-    else:
-        parts = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9\"“‘(\[])", p)
-    parts = [x for x in (q.strip() for q in parts) if x]
-    if len(parts) > MAX_SENTENCE_UNITS:          # bound the measuring work: merge into at most N pieces
-        size = math.ceil(len(parts) / MAX_SENTENCE_UNITS)
-        parts = [" ".join(parts[i:i + size]) for i in range(0, len(parts), size)]
-    return parts
+def cut_offsets(s: str, counts) -> list:
+    """Where each laid-out line of paragraph `s` ends: `counts` are the printing characters per line
+    (wp_lines). Returns len(counts) + 1 offsets into `s`, so line i is s[offs[i]:offs[i + 1]]."""
+    offs, i = [0], 0
+    for n in counts:
+        seen = 0
+        while i < len(s) and seen < n:
+            if not s[i].isspace() and s[i] not in _NO_INK:
+                seen += 1
+            i += 1
+        if seen < n:
+            break
+        offs.append(i)
+    if len(offs) != len(counts) + 1 or ink(s[i:]):
+        raise BrochureError("measuring failed: a description paragraph did not lay out as measured "
+                            f"({ink(s)} characters, {sum(counts)} in its lines)")
+    offs[-1] = len(s)
+    return offs
 
 
 def strip_title(alt: str, title: str) -> str:
@@ -439,6 +417,86 @@ def strip_title(alt: str, title: str) -> str:
     return alt
 
 
+# A project unit's photos are the developer's finished unit; the intake (listing.mjs altFor) writes
+# their alt as "Illustrative — developer's finished unit at <project>: <room> — <title>".
+_ALT_PREFIX = {
+    "en": ("Illustrative — developer's finished unit at {}: ",
+           re.compile(r"^Illustrative\s*[—–-]\s*developer['’]s finished unit at .*?:\s+", re.I)),
+    "ar": ("صورة توضيحية — وحدة منجزة من المطوّر في {}: ",
+           re.compile(r"^صورة توضيحية\s*[—–-]\s*وحدة منجزة من المطوّر في .*?:\s+")),
+}
+_MARKER = {"en": re.compile(r"\billustrative\b", re.I), "ar": re.compile(r"صورة توضيحية|توضيحية")}
+
+
+def _strip_marker(s: str, lang: str) -> str:
+    """An 'Illustrative' already in the text goes, so the caption carries the marker exactly once."""
+    s = re.sub(r"\s+", " ", _MARKER[lang].sub(" ", s))
+    s = re.sub(r"(?:\s*[·•|—–-]\s*){2,}", " · ", s)
+    return s.strip(" ·•|—–-:،,")
+
+
+def room_caption(alt_en, alt_ar, title_en, title_ar, project_en="", project_ar=""):
+    """The caption for a gallery photo, without the Illustrative marker: (en, ar).
+
+    The alt's room segment (after the unit prefix, before ' — <title>') is looked up in ROOM_LABELS,
+    which gives both languages. An alt the intake did not write falls back to its own text with the
+    prefix, the title suffix and any 'Illustrative' taken off."""
+    en, ar = alt_en or "", alt_ar or ""
+    for lang, project in (("en", project_en), ("ar", project_ar)):
+        known, pattern = _ALT_PREFIX[lang]
+        s = en if lang == "en" else ar
+        if project and s.startswith(known.format(project)):
+            s = s[len(known.format(project)):]
+        else:
+            s = pattern.sub("", s, count=1)
+        if lang == "en":
+            en = s.strip()
+        else:
+            ar = s.strip()
+    room = re.split(r"\s+[—–|]\s+", en, maxsplit=1)[0].strip()
+    if room in ROOM_LABELS:
+        return ROOM_LABELS[room]
+    return _strip_marker(strip_title(en, title_en), "en"), _strip_marker(strip_title(ar, title_ar), "ar")
+
+
+def caption_candidates(label: str, marker: str):
+    """The caption at every length, longest first: [(text, share of the label kept)]. Only the
+    label is shortened (whole words, then '…'); the marker always stays."""
+    words, out = label.split(), []
+    for k in range(len(words), -1, -1):
+        base = " ".join(words[:k])
+        if 0 < k < len(words):
+            base = base.rstrip(",;:·—–-،") + "…"
+        t = f"{base} · {marker}" if base and marker else (base or marker)
+        if t not in [o[0] for o in out]:
+            out.append((t, k / len(words) if words else 1.0))
+    return out
+
+
+def fit_caption(en, ar, width: float):
+    """en / ar: [(text, width_mm, share kept)], longest first -> the pair that fits one line of a
+    plate `width` mm wide keeping the most of BOTH labels (the shorter-kept side first, so one
+    language is never cut to nothing while the other prints whole)."""
+    best = None
+    for te, we, fe in en:
+        for ta, wa, fa in ar:
+            if we + wa + (CAP_GAP if te and ta else 0.0) <= width - CAP_SLACK:
+                score = (min(fe, fa), fe + fa, we + wa)
+                if best is None or score > best[0]:
+                    best = (score, te, ta)
+    return (best[1], best[2]) if best else (en[-1][0], ar[-1][0])
+
+
+def photo_groups(n: int):
+    """How many photos go on each gallery page: as few pages as 3 a page allows, as even as possible
+    (4 -> 2+2, 7 -> 3+2+2); a page with one photo only when there is only one."""
+    if n <= 0:
+        return []
+    pages = math.ceil(n / 3)
+    size, extra = divmod(n, pages)
+    return [size + 1] * extra + [size] * (pages - extra)
+
+
 # ---- the listing, normalised and checked --------------------------------------------------------
 class Model:
     def __init__(self, raw: dict, i: int):
@@ -450,7 +508,8 @@ class Model:
         self.area = num(raw.get("areaSqm"))
         av = raw.get("availability")
         self.avail_en, self.avail_ar = loc(av, "en"), loc(av, "ar")
-        self.price, self.sakani = num(raw.get("price")), num(raw.get("subsidisedPrice"))
+        self.price = whole(num(raw.get("price")), f"models[{i}].price")
+        self.sakani = whole(num(raw.get("subsidisedPrice")), f"models[{i}].subsidisedPrice")
         fp = raw.get("floorPlan")
         self.plan = text(fp.get("src")) if isinstance(fp, dict) else ""
 
@@ -483,11 +542,11 @@ class Listing:
             raise BrochureError("listing.price is not an object")
         pr = pr or {}
         self.currency = text(pr.get("currency")) or "SAR"
-        self.amount = num(pr.get("amount"))
+        self.amount = whole(num(pr.get("amount")), "listing.price.amount")
         self.on_request = bool(pr.get("onRequest")) or self.amount is None
         self.price_from = bool(pr.get("from"))
         self.period = pr.get("period") if pr.get("period") in ("year", "month") else None
-        self.sakani = None if self.on_request else num(pr.get("subsidisedAmount"))
+        self.sakani = None if self.on_request else whole(num(pr.get("subsidisedAmount")), "listing.price.subsidisedAmount")
         sp = raw.get("specs") if isinstance(raw.get("specs"), dict) else {}
         self.specs = {k: num(sp.get(k)) for k in ("beds", "baths", "areaSqm", "plotSqm", "yearBuilt", "floors")}
         imgs = raw.get("images")
@@ -499,7 +558,7 @@ class Listing:
                 raise BrochureError(f"listing.images[{i}].src is missing")
             f = im.get("focus") if isinstance(im.get("focus"), dict) else None
             fx, fy = (num(f.get("x")), num(f.get("y"))) if f else (None, None)
-            self.images.append({"src": text(im.get("src")), "alt_en": loc(im.get("alt"), "en"),
+            self.images.append({"i": i, "src": text(im.get("src")), "alt_en": loc(im.get("alt"), "en"),
                                 "alt_ar": loc(im.get("alt"), "ar"),
                                 "focus": (fx, fy) if fx is not None and fy is not None else None})
         d = raw.get("description")
@@ -580,49 +639,72 @@ class Listing:
 # ---- images -------------------------------------------------------------------------------------
 class Images:
     """Prepares each photo / plan once per role at scale 1, then derives the smaller passes from that
-    file (so every source is read exactly once)."""
+    file (so every source is read exactly once per run). Prepared files are named after the source's
+    resolved path, size and mtime, so a --work folder reused across runs never serves a stale image."""
 
     def __init__(self, files_dir: pathlib.Path, work: pathlib.Path):
-        self.files_dir, self.work = files_dir, work
+        self.files_dir, self.work = pathlib.Path(files_dir), pathlib.Path(work)
+        self.root = self.files_dir.resolve()
         self.base = {}
 
     def source(self, src: str) -> pathlib.Path:
-        name = os.path.basename(src.split("?")[0].split("#")[0])
+        """The file a listing path names: <files-dir>/<basename>, which must resolve inside files-dir."""
+        path_part = src.split("?")[0].split("#")[0]
+        if "\\" in path_part or "\x00" in path_part or ".." in path_part.split("/"):
+            raise BrochureError(f"unusable image path: {src}")
+        name = path_part.rsplit("/", 1)[-1]
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*\.(?:jpe?g|png|webp)", name, re.I):
             raise BrochureError(f"unusable image path: {src}")
         p = self.files_dir / name
-        if not p.is_file():
+        if not p.exists() and not p.is_symlink():
             raise BrochureError(f"image not found in files-dir: {name}")
-        return p
+        real = p.resolve()
+        if not real.is_relative_to(self.root):
+            raise BrochureError(f"image outside files-dir: {name}")
+        if not real.is_file():
+            raise BrochureError(f"image not found in files-dir: {name}")
+        return real
 
     def path(self, src: str, role: str, scale: float) -> pathlib.Path:
         from PIL import Image, ImageOps
         key = (src, role)
         if key not in self.base:
             p = self.source(src)
-            dst = self.work / f"{re.sub(r'[^A-Za-z0-9]+', '-', p.stem)}-{role}.jpg"
-            with Image.open(p) as im:
-                try:
-                    im.draft(im.mode, (ROLE_PX[role], ROLE_PX[role]))  # JPEG: decode at a reduced scale when far larger
-                except (OSError, ValueError):
-                    pass
-                im = self._flat(ImageOps.exif_transpose(im))
-                if role != "plan":                                   # plans are white-ground drawings
-                    im = self._trim_white(im)
-                im = self._fit(im, ROLE_PX[role])
-                im.save(dst, "JPEG", quality=JPEG_Q, optimize=True)
+            st = p.stat()
+            tag = hashlib.sha256(f"{PREP_VERSION}|{p}|{st.st_size}|{st.st_mtime_ns}|{ROLE_PX[role]}|{JPEG_Q}"
+                                 .encode()).hexdigest()[:12]
+            dst = self.work / f"{re.sub(r'[^A-Za-z0-9]+', '-', p.stem)}-{role}-{tag}.jpg"
+            if not dst.is_file():
+                with Image.open(p) as im:
+                    try:
+                        im.draft(im.mode, (ROLE_PX[role], ROLE_PX[role]))  # JPEG: decode at a reduced scale when far larger
+                    except (OSError, ValueError):
+                        pass
+                    im = self._flat(ImageOps.exif_transpose(im))
+                    if role != "plan":                                   # plans are white-ground drawings
+                        im = self._trim_white(im)
+                    self._save(self._fit(im, ROLE_PX[role]), dst)
             self.base[key] = dst
         base = self.base[key]
         if scale >= 1.0:
             return base
         dst = base.with_name(f"{base.stem}-{int(scale * 100)}.jpg")
-        if not dst.exists():
+        if not dst.is_file():
             with Image.open(base) as im:
                 target = round(ROLE_PX[role] * scale)
                 if max(im.size) <= target:
                     return base
-                self._fit(im.convert("RGB"), target).save(dst, "JPEG", quality=JPEG_Q, optimize=True)
+                self._save(self._fit(im.convert("RGB"), target), dst)
         return dst
+
+    @staticmethod
+    def _save(im, dst: pathlib.Path):
+        tmp = dst.with_name(f".{dst.name}.tmp-{os.getpid()}")
+        try:
+            im.save(tmp, "JPEG", quality=JPEG_Q, optimize=True)
+            os.replace(tmp, dst)
+        finally:
+            tmp.unlink(missing_ok=True)
 
     @staticmethod
     def _flat(im):
@@ -678,15 +760,18 @@ def uri(p: pathlib.Path) -> str:
 
 # ---- the brochure -------------------------------------------------------------------------------
 class Section:
-    def __init__(self, kind: str, fn):
-        self.kind, self.fn = kind, fn
+    def __init__(self, kind: str, fn, content: bool = True, key=None):
+        self.kind, self.fn, self.content, self.key = kind, fn, content, key   # key: per-page refit
 
 
 class Brochure:
-    def __init__(self, L: Listing, files_dir: pathlib.Path, work: pathlib.Path):
-        self.L, self.work = L, work
+    def __init__(self, L: Listing, files_dir: pathlib.Path, work: pathlib.Path, weasyprint):
+        self.L, self.work, self.wp = L, work, weasyprint
         self.images = Images(files_dir, work)
         self.scale = 1.0
+        if not CSS_PATH.is_file():
+            raise BrochureError(f"stylesheet missing: {CSS_PATH}")
+        self.css = CSS_PATH.read_text(encoding="utf-8")
         self.fonts = self._font_css()
         logo = LOGO_SVG.read_text(encoding="utf-8") if LOGO_SVG.is_file() else None
         if not logo:
@@ -703,8 +788,14 @@ class Brochure:
         for m in L.models:
             if m.plan:
                 self.images.source(m.plan)
-        self.illustrative = L.project
-        self.tune = {"factor": 1.0, "plan_h": 118.0, "cover": 0, "loc": 0}
+        # developer renders are labelled: a project's photos, and an off-plan listing's
+        self.illustrative = L.project or L.category == "off-plan"
+        self.gallery = self._gallery()
+        self.captions = {}
+        # refit state: text capacity factor, cover / location tiers, and per page the plan height
+        # (model idx -> mm) and the plate factor (gallery page -> factor), so one tight page never
+        # shrinks the others
+        self.tune = {"factor": 1.0, "cover": 0, "loc": 0, "plan_h": {}, "plates": {}}
 
     # -- plumbing -------------------------------------------------------------------------------
     @staticmethod
@@ -722,60 +813,55 @@ class Brochure:
         return ('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
                 f'<title>{esc(L.title_en)} — Bona</title><meta name="author" content="Bona">'
                 f'<meta name="description" content="{esc(L.id)} · {esc(L.url)}">'
-                f'<style>{self.fonts}{CSS}{EXTRA}{BONA_CSS}{extra_css}</style></head><body>{body}</body></html>')
+                f'<style>{self.fonts}{self.css}{extra_css}</style></head><body>{body}</body></html>')
 
     def render(self, html_text: str):
-        import weasyprint
-        return weasyprint.HTML(string=html_text, base_url=str(self.work)).render()
+        fetcher = LocalFetcher([FONT_DIR, self.work])
+        doc = self.wp.HTML(string=html_text, base_url=str(self.work), url_fetcher=fetcher).render()
+        if fetcher.refused:
+            raise BrochureError(f"the page asked for a file outside the brochure's folders: {fetcher.refused[0][:200]}")
+        return doc
 
     def img(self, src: str, role: str) -> str:
         return uri(self.images.path(src, role, self.scale))
 
     @staticmethod
-    def walk(box):
-        """Every laid-out box under `box`, entering absolutely positioned ones (WeasyPrint keeps those
-        behind an AbsolutePlaceholder that `descendants()` does not open)."""
-        stack = [box]
-        while stack:
-            b = stack.pop()
-            yield b
-            inner = getattr(b, "_box", None)
-            kids = getattr(inner if inner is not None else b, "children", None) or ()
-            stack.extend(reversed(list(kids)))
-
-    @classmethod
-    def marks(cls, doc):
-        """Per page: {'content': [(top, bottom)], 'floor': [...], keys...} in mm, from the laid-out boxes."""
+    def marks(doc):
+        """Per page: {'content': [Extent], 'floor': [...], ...} from the laid-out boxes."""
         out = []
-        for page in doc.pages:
-            found, seen = {}, set()
-            for box in cls.walk(page._page_box):
-                el = getattr(box, "element", None)
-                if el is None or id(el) in seen:
-                    continue
-                tag = el.get("data-m") or el.get("data-k")
-                if tag is None:
-                    continue
-                seen.add(id(el))
-                top = box.position_y + box.margin_top
-                found.setdefault(tag, []).append((top * PX_MM, (top + box.border_height()) * PX_MM))
+        for page in wp_tagged(doc):
+            found = {}
+            for tag, _el, box in page:
+                found.setdefault(tag, []).append(wp_extent(box))
             out.append(found)
         return out
 
-    def measure_blocks(self, blocks: dict, expect=()) -> dict:
-        """{key: (html, width_mm)} -> {key: height_mm}, laid out on one very tall page. Elements
-        inside a block that carry their own data-k (table rows) are measured too; `expect` lists them."""
+    def measure_blocks(self, blocks: dict, expect=(), lines=()) -> dict:
+        """{key: (html, width_mm)} -> {key: {'h', 'w', 'lines'}} in mm, laid out at their widths on
+        measuring pages (as many as needed; a block is never split across two). Elements inside a
+        block that carry their own data-k (table rows, caption spans) are measured too; `expect`
+        lists them. For the keys in `lines` the laid-out lines are kept, relative to the block top."""
         if not blocks:
             return {}
-        body = "".join(f'<div data-k="{esc(k)}" style="width:{w}mm">{h}</div>' for k, (h, w) in blocks.items())
-        doc = self.render(self.doc_html(body, "@page { size:400mm 20000mm; margin:0 }"))
-        got = {}
-        for page in self.marks(doc):
-            for k, boxes in page.items():
-                got.setdefault(k, boxes[0][1] - boxes[0][0])
+        body = "".join(f'<div data-k="{esc(k)}" style="width:{w}mm;break-inside:avoid">{h}</div>'
+                       for k, (h, w) in blocks.items())
+        doc = self.render(self.doc_html(body, f"@page {{ size:400mm {MEASURE_PAGE_MM}mm; margin:0 }}"))
+        got, page_of, split, want = {}, {}, [], set(lines)
+        for pno, page in enumerate(wp_tagged(doc, ("data-k",))):
+            for tag, _el, box in page:
+                if tag in page_of:
+                    split.append(tag)
+                    continue
+                page_of[tag] = pno
+                e = wp_extent(box)
+                got[tag] = {"h": e.bottom - e.top, "w": e.right - e.left,
+                            "lines": [(t - e.top, b - e.top, n) for t, b, n in wp_lines(box)] if tag in want else None}
+        if split:
+            raise BrochureError(f"measuring failed: block {split[0]} is taller than a {MEASURE_PAGE_MM}mm measuring page")
         missing = [k for k in list(blocks) + list(expect) if k not in got]
-        if missing or len(doc.pages) != 1:
-            raise BrochureError(f"measuring failed ({len(missing)} blocks unplaced)")
+        if missing:
+            raise BrochureError(f"measuring failed: {len(missing)} of {len(blocks) + len(expect)} blocks were not "
+                                f"laid out (first: {missing[0]})")
         return got
 
     # -- shared pieces -------------------------------------------------------------------------
@@ -823,7 +909,7 @@ class Brochure:
             return (f'<section class="page title-page"><div class="tp-mark"><img class="wide" src="{uri(self.logo_white)}"></div>'
                     f'<div class="tp-rule"></div><div class="tp-line">{esc(L.tag_en)}</div><div class="tp-ar">{esc(L.tag_ar)}</div>'
                     f'<div class="tp-foot">{esc(foot).replace(" · ", " &nbsp;·&nbsp; ")}</div></section>')
-        return Section("flysheet", fn)
+        return Section("flysheet", fn, content=False)
 
     # -- 2 cover -------------------------------------------------------------------------------
     def cover(self):
@@ -953,7 +1039,9 @@ class Brochure:
         rows = []
         for i, m in enumerate(models):
             k = f' data-k="row:{i}"' if keyed else ""
-            tds = [f'<td class="nmc"><span class="nm">{esc(m.name_en)}</span><span class="nm-ar">{esc(m.name_ar)}</span></td>',
+            # U+200B between the names: a line may break there (the spans touch, so it otherwise could not)
+            tds = [f'<td class="nmc"><span class="nm">{esc(keep_digits(m.name_en))}</span>\u200b'
+                   f'<span class="nm-ar">{esc(keep_digits(m.name_ar))}</span></td>',
                    f"<td>{fmt_plain(m.beds) if m.beds is not None else dash}</td>",
                    f"<td>{fmt_plain(m.baths) if m.baths is not None else dash}</td>",
                    f"<td>{fmt_area(m.area) + ' m²' if m.area is not None else dash}</td>",
@@ -975,7 +1063,7 @@ class Brochure:
                 f'<div class="ar-h">{esc(h_ar)}</div>')
         return head, note
 
-    def residences_section(self, models, first: bool, last: bool, note_always=False):
+    def residences_section(self, models, first: bool, last: bool):
         head, note = self.residences_head()
 
         def fn(n):
@@ -983,7 +1071,7 @@ class Brochure:
             if not first:
                 table = table.replace('<table class="units">', '<table class="units" style="margin-top:0">', 1)
             return (f'<section class="page">{self.runhead("Residences & Prices", "النماذج والأسعار")}'
-                    f'<div class="lead" data-m="content">{head if first else ""}{table}{note if (last or note_always) else ""}</div>'
+                    f'<div class="lead" data-m="content">{head if first else ""}{table}{note if last else ""}</div>'
                     f'{self.footer(n)}</section>')
         return Section("residences", fn)
 
@@ -1011,40 +1099,51 @@ class Brochure:
         name_en = m.name_en or m.name_ar
 
         def fn(n):
-            ph = self.tune["plan_h"]
+            ph = self.tune["plan_h"].get(idx, 118.0)
             plan = self.img(m.plan, "plan")
             return (f'<section class="page">{self.runhead(f"Residence {idx:02d} of {total:02d}", f"النموذج {idx} من {total}")}'
                     f'<div class="lead" data-m="content"><h1>{esc(name_en)}</h1><div class="ar-h">{esc(name_ar)}</div>'
                     f'<div class="planbox" style="height:{ph}mm"><img src="{plan}" style="max-height:{ph}mm"></div></div>'
                     f'{ledger}{self.footer(n)}</section>')
-        return Section("model", fn)
+        return Section("model", fn, key=idx)
 
     # -- 6 photo pages -------------------------------------------------------------------------
-    def caption(self, im):
-        L = self.L
-        en, ar = strip_title(im["alt_en"], L.title_en), strip_title(im["alt_ar"], L.title_ar)
-        if self.illustrative:
-            en = f"{en} · Illustrative" if en else "Illustrative"
-            ar = f"{ar} · صورة توضيحية" if ar else "صورة توضيحية"
-        return en, ar
+    def _gallery(self):
+        """The gallery pages: [[(image, role), …], …] — photo_groups() sizes; a page leads with a
+        full-width plate, a third photo pairs with the second as two halves."""
+        rest, pages, i = self.L.images[1:], [], 0
+        for size in photo_groups(len(rest)):
+            group = rest[i:i + size]
+            i += size
+            roles = ["hero", "half", "half"] if size == 3 else ["hero"] * size
+            pages.append(list(zip(group, roles)))
+        return pages
 
-    def plate(self, im, role: str, height: int) -> str:
-        en, ar = self.caption(im)
+    def caption_label(self, im):
+        L = self.L
+        return room_caption(im["alt_en"], im["alt_ar"], L.title_en, L.title_ar, L.project_en, L.project_ar)
+
+    def plate(self, im, role: str, height: float) -> str:
+        en, ar = self.captions[im["i"]]
         return (f'<div><div class="plate" style="height:{height}mm;background-image:url(\'{self.img(im["src"], role)}\');'
                 f'background-position:{self.focus_pos(im, "center")}"></div>'
                 f'<div class="cap"><div class="en">{esc(en)}</div><div class="ar">{esc(ar)}</div></div></div>')
 
-    def photo_section(self, group):
+    def photo_section(self, gi: int, group):
         def fn(n):
-            body = self.plate(group[0], "hero", 100)
-            if len(group) == 3:
-                body += f'<div class="grid2" style="margin-top:7mm">{self.plate(group[1], "half", 96)}{self.plate(group[2], "half", 96)}</div>'
-            elif len(group) == 2:
-                body += f'<div style="margin-top:7mm">{self.plate(group[1], "hero", 100)}</div>'
+            f = self.tune["plates"].get(gi, 1.0)
+            h = {r: round(PLATE_H[r] * f, 1) for r in PLATE_H}
+            (im0, r0), others = group[0], group[1:]
+            body = self.plate(im0, r0, h[r0])
+            if len(others) == 2:
+                body += (f'<div class="grid2" style="margin-top:7mm">{self.plate(others[0][0], "half", h["half"])}'
+                         f'{self.plate(others[1][0], "half", h["half"])}</div>')
+            elif len(others) == 1:
+                body += f'<div style="margin-top:7mm">{self.plate(others[0][0], "hero", h["hero"])}</div>'
             return (f'<section class="page">{self.runhead("Gallery", "معرض الصور")}'
                     f'<div class="pad" data-m="content" style="position:absolute;top:30mm;left:0;right:0">{body}</div>'
                     f'{self.footer(n)}</section>')
-        return Section("photos", fn)
+        return Section("photos", fn, key=gi)
 
     # -- 7 amenities & terms -------------------------------------------------------------------
     def amenity_groups(self):
@@ -1097,7 +1196,9 @@ class Brochure:
         return Section("amenities", fn)
 
     # -- 8 location & enquiries ----------------------------------------------------------------
-    def location_section(self, with_developer: bool):
+    def location_section(self, without_terms: bool):
+        """`without_terms`: there is no amenities page, so its terms row (developer, Sakani price) is
+        not printed anywhere else and its facts come here."""
         L = self.L
 
         def fact(en, ar, v, v_ar=""):
@@ -1114,8 +1215,11 @@ class Brochure:
             facts = [fact("District", "الحي", ", ".join(dedupe([L.district_en, L.city_en])))]
             if L.nearby and compact < 2:
                 facts.append(fact("Nearby", "بالقرب", " · ".join(e for e, _ in L.nearby[:3] if e)))
-            if with_developer and (L.dev_en or L.dev_ar):
+            if without_terms and (L.dev_en or L.dev_ar):
                 facts.append(fact("Developer", "المطوّر", L.dev_en or L.dev_ar, L.dev_ar if L.dev_en else ""))
+            if without_terms and L.sakani is not None and not self.sakani_col():
+                facts.append(fact("Sakani from" if L.price_from else "Sakani price", "لمستفيدي الدعم",
+                                  money_en(L.sakani, L.currency)))
             facts.append(fact("Reference", "المرجع", f"{L.id} · FAL {L.fal}" if L.fal else L.id))
             if L.exact_pin:
                 lat, lng = L.exact_pin
@@ -1145,8 +1249,9 @@ class Brochure:
 
     # -- measuring & pagination ----------------------------------------------------------------
     def measure(self):
-        """Two renders: the page skeletons (how much room each flowing page has) and every block that
-        can flow (paragraph pieces, table rows, amenity rows) at its printed width."""
+        """Two renders: the page skeletons (how much room each flowing page has), then every block
+        that can flow or wrap at its printed width — each description paragraph once (its lines are
+        kept), the table rows, the amenity rows, and every photo caption at every length."""
         L = self.L
         skel = [self.narrative_section(True, [], []), self.narrative_section(False, [], [])]
         if L.models:
@@ -1157,12 +1262,12 @@ class Brochure:
         doc = self.render(self.doc_html("".join(s.fn(i + 1) for i, s in enumerate(skel))))
         marks = self.marks(doc)
         if len(marks) != len(skel):
-            raise BrochureError("measuring failed (skeleton pages)")
+            raise BrochureError(f"measuring failed: {len(marks)} skeleton pages rendered for {len(skel)}")
 
         def slack(i):
             m = marks[i]
-            floor = min([t for t, _ in m.get("floor", [])] + [SAFE_BOTTOM])
-            bottom = max(b for _, b in m["content"])
+            floor = min([e.top for e in m.get("floor", [])] + [SAFE_BOTTOM])
+            bottom = max((e.bottom for e in m.get("content", [])), default=math.inf)   # none: it ran off the page
             return floor - TEXT_GAP - bottom
 
         cap = {"narr": (slack(0), slack(1))}
@@ -1171,51 +1276,83 @@ class Brochure:
         if groups:
             cap["amen"] = (slack(-2), slack(-1))
 
-        blocks, self.units = {}, {}
-        for lang, paras in (("en", L.desc_en), ("ar", L.desc_ar)):
-            units = [sentences(p, lang) for p in paras]
-            self.units[lang] = units
-            for pi, ss in enumerate(units):
-                for i in range(len(ss)):
-                    for j in range(i + 1, len(ss) + 1):
-                        blocks[f"{lang}:{pi}:{i}:{j}"] = (f'<div class="body-{lang}"><p>{esc(" ".join(ss[i:j]))}</p></div>', COL_W)
+        blocks, expect, with_lines = {}, [], []
+        self.paras = {"en": L.desc_en, "ar": L.desc_ar}
+        for lang, paras in self.paras.items():
+            for pi, p in enumerate(paras):
+                blocks[f"p:{lang}:{pi}"] = (f'<div class="body-{lang}"><p>{esc(p)}</p></div>', COL_W)
+                with_lines.append(f"p:{lang}:{pi}")
+            probe = "x" if lang == "en" else "س"
+            blocks[f"one:{lang}"] = (f'<div class="body-{lang}"><p>{probe}</p></div>', COL_W)
+            blocks[f"two:{lang}"] = (f'<div class="body-{lang}"><p>{probe}</p><p>{probe}</p></div>', COL_W)
         if L.models:
             blocks["table"] = (self.units_table(L.models, keyed=True), 170)
+            expect += [f"row:{i}" for i in range(len(L.models))]
         for gi, (en, ar, items) in enumerate(groups):
             blocks[f"ghead:{gi}"] = (self.spec_group(en, ar), COL_W)
             for ii, (a, b) in enumerate(items):
                 blocks[f"item:{gi}:{ii}"] = (self.spec_item(a, b), COL_W)
-        got = self.measure_blocks(blocks, expect=[f"row:{i}" for i in range(len(L.models))])
+        cands = {}
+        marker = ILLUSTRATIVE if self.illustrative else ("", "")
+        for page in self.gallery:
+            for im, role in page:
+                label = self.caption_label(im)
+                c = {lang: caption_candidates(label[j], marker[j]) for j, lang in enumerate(("en", "ar"))}
+                spans = "".join(f'<div><span class="{lang} mw" data-k="cw:{im["i"]}:{lang}:{ci}">{esc(t)}</span></div>'
+                                for lang in ("en", "ar") for ci, (t, _share) in enumerate(c[lang]))
+                blocks[f"cap:{im['i']}"] = (f'<div class="cap" style="display:block">{spans}</div>', 390)
+                expect += [f"cw:{im['i']}:{lang}:{ci}" for lang in ("en", "ar") for ci in range(len(c[lang]))]
+                cands[im["i"]] = (c, role)
+        got = self.measure_blocks(blocks, expect, with_lines)
+
+        self.lines = {lang: [got[f"p:{lang}:{pi}"]["lines"] for pi in range(len(self.paras[lang]))] for lang in self.paras}
+        self.offsets = {lang: [cut_offsets(p, [n for _t, _b, n in self.lines[lang][pi]]) for pi, p in enumerate(self.paras[lang])]
+                        for lang in self.paras}
+        self.gap = {lang: got[f"two:{lang}"]["h"] - 2 * got[f"one:{lang}"]["h"] for lang in self.paras}
+        for i, (c, role) in cands.items():
+            sized = {lang: [(t, got[f"cw:{i}:{lang}:{ci}"]["w"], share) for ci, (t, share) in enumerate(c[lang])]
+                     for lang in ("en", "ar")}
+            self.captions[i] = fit_caption(sized["en"], sized["ar"], PLATE_W[role])
         self.cap, self.h = cap, got
 
     def paginate_text(self, lang: str, caps):
-        units, H = self.units[lang], self.h
-        gap = (8.4 * 1.85 if lang == "en" else 9 * 2.0) * 25.4 / 72      # one line: the p + p margin
+        """Cut one column's paragraphs into pages between their laid-out lines. A paragraph that
+        does not fit goes on overleaf from the next line; no page ends on a paragraph's first line
+        alone and no paragraph ends overleaf with one line alone, where that can be avoided."""
+        gap = self.gap[lang]
         pages, used = [[]], 0.0
-        for pi, ss in enumerate(units):
-            i = 0
-            while i < len(ss):
+        for pi, para in enumerate(self.paras[lang]):
+            lines, offs = self.lines[lang][pi], self.offsets[lang][pi]
+            s = 0
+            while s < len(lines):
                 c = caps[0] if len(pages) == 1 else caps[1]
-                extra = gap if pages[-1] else 0.0
-                j = len(ss)
-                while j > i and used + extra + H[f"{lang}:{pi}:{i}:{j}"] > c:
-                    j -= 1
-                if j == i:
-                    if pages[-1] or (len(pages) == 1 and caps[1] > caps[0]):
+                empty = not pages[-1]
+                extra = 0.0 if empty else gap
+                top, rest = lines[s][0], len(lines) - s
+                k = 0
+                while k < rest and used + extra + (lines[s + k][1] - top) <= c + 1e-6:
+                    k += 1
+                if k < rest:
+                    if k >= 2 and rest - k == 1:
+                        k -= 1                          # carry two lines over, not one
+                    if not empty and k < 2:
+                        k = 0                           # never one line alone at the foot of a page
+                if k == 0:
+                    if not empty or (len(pages) == 1 and caps[1] > c):
                         pages.append([])
                         used = 0.0
                         continue
-                    j = i + 1                       # one sentence taller than an empty page: the render check decides
-                pages[-1].append(" ".join(ss[i:j]))
-                used += extra + H[f"{lang}:{pi}:{i}:{j}"]
-                i = j
-                if i < len(ss):                     # the paragraph goes on overleaf
+                    raise BrochureError(f"layout does not fit: a line of the {lang} description is taller than an empty page")
+                pages[-1].append(para[offs[s]:offs[s + k]].strip())
+                used += extra + (lines[s + k - 1][1] - top)
+                s += k
+                if s < len(lines):                      # the paragraph goes on overleaf
                     pages.append([])
                     used = 0.0
         return pages
 
     def paginate_rows(self, caps):
-        heights = [self.h[f"row:{i}"] for i in range(len(self.L.models))]
+        heights = [self.h[f"row:{i}"]["h"] for i in range(len(self.L.models))]
         pages, i = [], 0
         while i < len(heights):
             c = caps[0] if not pages else caps[1]
@@ -1229,7 +1366,8 @@ class Brochure:
         return pages
 
     def paginate_amenities(self, caps):
-        groups, H = self.amenity_groups(), self.h
+        groups = self.amenity_groups()
+        H = {k: v["h"] for k, v in self.h.items()}
         head_gap = 7.0
 
         def build(order, cap_of):
@@ -1304,16 +1442,14 @@ class Brochure:
             for idx, m in enumerate(L.models, 1):
                 if m.plan:
                     secs.append(self.model_section(idx, total, m))
-        rest = L.images[1:]
-        groups = [rest[i:i + 3] for i in range(0, len(rest), 3)]
-        for g in groups:
-            secs.append(self.photo_section(g))
+        for gi, group in enumerate(self.gallery):
+            secs.append(self.photo_section(gi, group))
         amen = self.amenity_groups()
         if amen:
             pages = self.paginate_amenities(tuple(c * t for c in self.cap["amen"]))
             for i, cols in enumerate(pages):
                 secs.append(self.amenities_section(cols, i == 0, i == len(pages) - 1))
-        secs.append(self.location_section(with_developer=not amen))
+        secs.append(self.location_section(without_terms=not amen))
         return secs
 
     def check(self, doc, secs):
@@ -1321,12 +1457,12 @@ class Brochure:
             raise BrochureError(f"{len(doc.pages)} pages rendered for {len(secs)} sections")
         bad = []
         for i, (m, s) in enumerate(zip(self.marks(doc), secs)):
-            if "content" not in m:
+            if not s.content:
                 continue
-            bottom = max(b for _, b in m["content"])
-            floor = min([t for t, _ in m.get("floor", [])] + [SAFE_BOTTOM])
+            bottom = max((e.bottom for e in m.get("content", [])), default=math.inf)   # none: it ran off the page
+            floor = min([e.top for e in m.get("floor", [])] + [SAFE_BOTTOM])
             if bottom > floor - CHECK_GAP:
-                bad.append((i + 1, s.kind, round(bottom, 1), round(floor, 1)))
+                bad.append((i + 1, s.kind, bottom, floor))
         return bad
 
     def compose(self, secs) -> str:
@@ -1334,7 +1470,7 @@ class Brochure:
 
     def layout(self, steps):
         """Cut the pages, render, check every page; re-cut tighter until nothing overlaps (or give up)."""
-        for attempt in range(5):
+        for _attempt in range(5):
             secs = self.plan_sections()
             doc = self.render(self.compose(secs))
             bad = self.check(doc, secs)
@@ -1342,18 +1478,21 @@ class Brochure:
                 return secs, doc
             steps.append("refit:" + ",".join(f"p{p}-{k}" for p, k, _, _ in bad))
             kinds = {k for _, k, _, _ in bad}
-            if kinds & {"flysheet", "photos"}:
-                break
             if kinds & {"narrative", "residences", "amenities"}:
                 self.tune["factor"] *= 0.9
-            if "model" in kinds:
-                self.tune["plan_h"] = max(70.0, self.tune["plan_h"] - 16.0)
+            for p, k, _, _ in bad:
+                key = secs[p - 1].key
+                if k == "model":
+                    self.tune["plan_h"][key] = max(70.0, self.tune["plan_h"].get(key, 118.0) - 16.0)
+                elif k == "photos":
+                    self.tune["plates"][key] = max(0.6, self.tune["plates"].get(key, 1.0) * 0.9)
             if "cover" in kinds:
                 self.tune["cover"] += 1
             if "location" in kinds:
                 self.tune["loc"] += 1
         p, k, bottom, floor = bad[0]
-        raise BrochureError(f"layout does not fit: page {p} ({k}) text ends at {bottom}mm, limit {floor}mm")
+        where = "runs off the page" if math.isinf(bottom) else f"ends at {bottom:.1f}mm"
+        raise BrochureError(f"layout does not fit: page {p} ({k}) text {where}, limit {floor:.1f}mm")
 
 
 # ---- entry point --------------------------------------------------------------------------------
@@ -1379,6 +1518,7 @@ def default_work() -> pathlib.Path:
 
 
 def build(argv):
+    weasyprint = load_weasyprint()          # first: an unsupported WeasyPrint fails before anything is read
     ap = _Args(prog="brochure_pdf.py", add_help=False)
     ap.add_argument("listing")
     ap.add_argument("files_dir")
@@ -1398,10 +1538,10 @@ def build(argv):
     max_bytes = int(a.max_mb * MB)
     work = pathlib.Path(a.work).resolve() if a.work else default_work()
     work.mkdir(parents=True, exist_ok=True)
-    tmp = out.with_name(f".{out.name}.tmp-{os.getpid()}")
+    tmp = out.with_name(f".{out.name}.tmp-{os.getpid()}")    # same folder, so the rename is atomic
     steps = []
     try:
-        b = Brochure(L, files_dir, work)
+        b = Brochure(L, files_dir, work, weasyprint)
         b.measure()
         steps.append("measure")
         secs, doc = b.layout(steps)
@@ -1414,12 +1554,12 @@ def build(argv):
             doc.write_pdf(str(tmp))
             size = tmp.stat().st_size
             if size <= max_bytes:
-                os.replace(tmp, out)
+                os.replace(tmp, out)            # the only write to `out`: a failed run never touches it
                 steps.append("write")
                 return {"ok": True, "out": str(out), "bytes": size, "pages": len(doc.pages),
-                        "maxBytes": max_bytes, "steps": steps, "kinds": [s.kind for s in secs], "id": L.id}
+                        "maxBytes": max_bytes, "steps": steps, "kinds": [s.kind for s in secs],
+                        "photoPages": [len(g) for g in b.gallery], "id": L.id}
             tmp.unlink()
-        out.unlink(missing_ok=True)
         raise TooLarge(f"{size} bytes after scaling images to {SCALES[-1]}, cap {max_bytes}")
     finally:
         tmp.unlink(missing_ok=True)
