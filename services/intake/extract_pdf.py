@@ -3,7 +3,7 @@
 
 Run through uv so no system install is needed:
 
-    uv run --with pymupdf python services/intake/extract_pdf.py <in.pdf> <outdir> [--json]
+    uv run --with pymupdf --with pillow python services/intake/extract_pdf.py <in.pdf> <outdir> [--json]
 
 Writes candidate images to <outdir>/images/NNN.<ext> and prints one JSON object on
 stdout:
@@ -22,7 +22,8 @@ stdout:
       "candidates": [
         { "index": 0, "file": "images/000.jpg", "abs": "/…/000.jpg",
           "width": 1600, "height": 1067, "page": 2, "source": "embedded",
-          "sha256": "…", "bytes": 412233 }
+          "sha256": "…", "bytes": 412233,
+          "flattened": true }               # only present when a soft mask was composited onto white
       ]
     }
 
@@ -53,7 +54,9 @@ it is dropped the moment the file is on disk, and MuPDF's own object store — w
 decoded source bitmap of a flattened page, 76 MB for the Sadana cover alone — is emptied after
 every page (`TOOLS.store_shrink(100)`). On top of that RENDER_MAX_PIXELS is a hard per-render
 pixel budget (12 MP): a 1080x10449 pt "story" page renders 1114x10776 instead of 1600x15481.
-Measured on the Sadana brochure: peak RSS 374 MB -> 233 MB.
+Measured on the Sadana brochure: peak RSS 374 MB -> 233 MB. Flattening a soft-masked image
+onto white (flatten_on_white) costs about 10 bytes per pixel at its peak (RGB + mask + output)
+and each intermediate is released as soon as it is used, so only one image's worth is live.
 
 Never raises for a bad PDF: prints {"ok": false, "error": "..."} and exits 1.
 The caller (lib/pdf.mjs) is responsible for the default-deny classification.
@@ -116,11 +119,14 @@ def save_pixmap(pix, path: str, quality: int = 90) -> None:
     pix.save(path, jpg_quality=quality)
 
 
-def flatten_on_white(doc, image_bytes: bytes, smask_xref: int):
+def flatten_on_white(doc, image_bytes: bytes, smask_xref: int) -> bytes | None:
     """PNG bytes of an image (its raw stream) composited over white using its soft mask, or None.
 
-    Pillow does the per-pixel work at C speed; `samples` is read exactly once. Pillow is
-    imported lazily so a pyCmd without it keeps the old behaviour (raw stream).
+    Straight alpha (rgb*a + white*(1-a)) via Pillow's paste with an "L" mask: MuPDF's
+    Pixmap(base, mask) is PREMULTIPLIED, which Pillow would treat as straight and darken every
+    semi-transparent pixel. Gray / CMYK bases go through RGB first, a mask of another size is
+    resized, and every intermediate is released as soon as it has been used. Pillow is imported
+    lazily so a pyCmd without it keeps the old behaviour (raw stream).
     """
     try:
         import pymupdf  # noqa: PLC0415
@@ -129,17 +135,25 @@ def flatten_on_white(doc, image_bytes: bytes, smask_xref: int):
         # cached pixmap in place, which then no longer matches the mask's size.
         base = pymupdf.Pixmap(image_bytes)
         if base.alpha:
-            base = pymupdf.Pixmap(base, 0)            # drop alpha; the mask supplies it
-        if base.colorspace is None or base.n - base.alpha >= 4:
-            base = pymupdf.Pixmap(pymupdf.csRGB, base)  # CMYK/other -> RGB
-        mask = pymupdf.Pixmap(doc, smask_xref)
-        rgba = pymupdf.Pixmap(base, mask)  # size mismatch raises -> None -> raw stream kept
-        raw = rgba.samples                              # read ONCE
-        im = Image.frombytes("RGBA", (rgba.width, rgba.height), raw)
-        white = Image.new("RGBA", im.size, (255, 255, 255, 255))
-        white.alpha_composite(im)
+            base = pymupdf.Pixmap(base, 0)                # drop alpha; the mask supplies it
+        if base.n != 3:                                   # gray / CMYK / other -> RGB
+            base = pymupdf.Pixmap(pymupdf.csRGB, base)
+        size = (base.width, base.height)
+        rgb = Image.frombytes("RGB", size, base.samples)  # samples read once
+        base = None
+        m = pymupdf.Pixmap(doc, smask_xref)
+        if m.n != 1:
+            return None
+        alpha = Image.frombytes("L", (m.width, m.height), m.samples)
+        m = None
+        if alpha.size != size:                            # PDF allows a differently sized SMask
+            alpha = alpha.resize(size)
+        out = Image.new("RGB", size, (255, 255, 255))
+        out.paste(rgb, (0, 0), alpha)                     # straight alpha: rgb*a + white*(1-a)
+        rgb = alpha = None
         buf = io.BytesIO()
-        white.convert("RGB").save(buf, "PNG")
+        out.save(buf, "PNG")
+        out = None
         return buf.getvalue()
     except Exception:
         return None
@@ -454,7 +468,8 @@ def main() -> int:
     embedded_total = 0
 
     def add(data: bytes, ext: str, width: int, height: int, page: int, source: str,
-            colours: int | None = None, coverage: float | None = None) -> None:
+            colours: int | None = None, coverage: float | None = None,
+            flattened: bool = False) -> None:
         digest = hashlib.sha256(data).hexdigest()
         if digest in seen:
             return
@@ -478,6 +493,7 @@ def main() -> int:
             # Fraction of its page this bitmap is drawn over. 1.0 = the page IS this
             # picture, which is what a designed deck exported page-by-page looks like.
             "coverage": coverage,
+            **({"flattened": True} if flattened else {}),
         })
 
     for i in range(pages):
@@ -512,8 +528,8 @@ def main() -> int:
                 if flat:
                     data, ext = flat, "png"
             add(data, ext, w, h, i + 1, "embedded", stats[0] if stats else None,
-                placement_coverage(doc[i], xref))
-            ext_img = data = None
+                placement_coverage(doc[i], xref), flattened=bool(flat))
+            ext_img = data = flat = None
         # colour_ratio() builds a Pixmap per candidate and MuPDF keeps every one of them in
         # its store; a 40-image brochure would otherwise carry all of them to the end.
         free_store()

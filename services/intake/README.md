@@ -498,7 +498,7 @@ services/intake/
   index.mjs             the daemon: group discovery, polling, single-worker queue
   run-once.mjs          the same pipeline on one local PDF, no WhatsApp
   extract_pdf.py        PyMuPDF: page text + candidate photos, whole-page renders (--mode pages)
-                        and sliced page views (--mode views); run via `uv run --with pymupdf`
+                        and sliced page views (--mode views); run via `uv run --with pymupdf --with pillow`
   rebrand_pdf.py        PyMuPDF + segno: the Bona cover, the footer strip, the Enquire page, the shrink
   rebrand-once.mjs      the brochure step alone, on one local PDF — the loop for changing rebrand_pdf.py
   lib/

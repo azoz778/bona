@@ -47,7 +47,7 @@
 
 **Files:** Modify `services/intake/extract_pdf.py` (the `for info in images:` loop, ~line 455); Test: `services/intake/test/extract-smask.test.mjs` (create)
 
-- [ ] **Step 1: Write the failing test.** It builds a PDF whose only image is a transparent PNG (black RGB with an alpha mask), runs `extract_pdf.py`, and checks the extracted candidate's corner pixel is white.
+- [ ] **Step 1: Write the failing test.** It builds a PDF with 3 images (RENDER_THRESHOLD: fewer usable images makes the extractor rasterise pages instead), among them a 50 % alpha image, a grayscale JPEG with a mask and a CMYK JPEG with a mask, runs `extract_pdf.py`, and checks per candidate that the corner is white AND an opaque interior pixel keeps its source colour (50 % alpha gives about 227,177,152 = straight alpha).
 
 ```js
 // services/intake/test/extract-smask.test.mjs
@@ -103,25 +103,38 @@ describe('extract_pdf.py — transparent images', { skip: !UV && 'uv not install
 
 - [ ] **Step 2: Run it — expect FAIL** (`(0, 0, 0)` instead of white): `cd services/intake && run-capped node --test test/extract-smask.test.mjs`
 
-- [ ] **Step 3: Implement.** In the image loop, after `ext_img = doc.extract_image(xref)` and the usable/colour checks, when `info[1]` (the smask xref) is non-zero, composite the image over white with Pillow (C speed — never a Python per-pixel loop on a 9 MP image) and write PNG bytes instead of the raw stream:
+- [ ] **Step 3: Implement.** In the image loop, after `ext_img = doc.extract_image(xref)` and the usable/colour checks, when `info[1]` (the smask xref) is non-zero, composite the image over white with Pillow (C speed — never a Python per-pixel loop on a 9 MP image) and write PNG bytes instead of the raw stream (call `flatten_on_white(doc, data, info[1])`, mark the candidate `flattened: true`, release `flat` after `add`):
 
 ```python
-            smask = info[1]
-            data, ext = ext_img["image"], (ext_img.get("ext") or "png").lower()
-            if smask:
-                try:
-                    base = fitz.Pixmap(doc, xref)
-                    if base.n - base.alpha >= 4:          # CMYK -> RGB first
-                        base = fitz.Pixmap(fitz.csRGB, base)
-                    rgba = fitz.Pixmap(base, fitz.Pixmap(doc, smask))   # RGB + alpha from the mask
-                    im = Image.frombytes("RGBA", (rgba.width, rgba.height), rgba.samples)  # samples read ONCE
-                    white = Image.new("RGBA", im.size, (255, 255, 255, 255))
-                    white.alpha_composite(im)
-                    buf = io.BytesIO(); white.convert("RGB").save(buf, "PNG")
-                    data, ext = buf.getvalue(), "png"
-                    base = rgba = im = white = None
-                except Exception:
-                    pass  # keep the raw stream: a black ground is better than no candidate
+def flatten_on_white(doc, image_bytes: bytes, smask_xref: int):
+    """PNG bytes of an image (its raw stream) composited over white using its soft mask, or None.
+
+    Pillow does the per-pixel work at C speed; `samples` is read exactly once. Pillow is
+    imported lazily so a pyCmd without it keeps the old behaviour (raw stream).
+    """
+    try:
+        import pymupdf  # noqa: PLC0415
+        from PIL import Image  # noqa: PLC0415
+        # Decoded from the stream, NOT Pixmap(doc, xref): colour_ratio() shrinks the doc's
+        # cached pixmap in place, which then no longer matches the mask's size.
+        base = pymupdf.Pixmap(image_bytes)
+        if base.alpha:
+            base = pymupdf.Pixmap(base, 0)            # drop alpha; the mask supplies it
+        if base.colorspace is None or base.n - base.alpha >= 4:
+            base = pymupdf.Pixmap(pymupdf.csRGB, base)  # CMYK/other -> RGB
+        mask = pymupdf.Pixmap(doc, smask_xref)
+        rgba = pymupdf.Pixmap(base, mask)  # size mismatch raises -> None -> raw stream kept
+        raw = rgba.samples                              # read ONCE
+        im = Image.frombytes("RGBA", (rgba.width, rgba.height), raw)
+        white = Image.new("RGBA", im.size, (255, 255, 255, 255))
+        white.alpha_composite(im)
+        buf = io.BytesIO()
+        white.convert("RGB").save(buf, "PNG")
+        return buf.getvalue()
+    except Exception:
+        return None
+    finally:
+        free_store()
 ```
 
 Add `from PIL import Image` and `import io` at the top of `extract_pdf.py`, and add Pillow to the extraction command default in `services/intake/lib/env.mjs` (`pyCmd`: `['uv','run','--with','pymupdf','--with','pillow','python']`) and to the test's `run` argv.
