@@ -44,7 +44,7 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
    and a reading with fewer models, fewer confirmed model prices or a fact list
    fewer is refused unless `--force`. See "Enriching a published listing" below.
 8. **`backfill-enrich.mjs`**: runs `--enrich` over every older listing, one at a time; a listing that
-   already carries unit models is skipped as "already enriched" unless `--include-enriched` (no
+   already carries unit models or a fact list (amenities / nearby / warranties) is skipped as "already enriched" unless `--include-enriched` (no
    `--force` is ever passed on). `--plan-only`
    prints the plan and stops, `--dry-run` runs each job without writing, a live run commits and pushes.
    It stops at the first FAILED job or a quota/usage limit and prints the `--only <ids>` that resumes it.

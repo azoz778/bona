@@ -9,12 +9,13 @@
 //     --only <ids>            BONA-W002,BONA-W010 — just these (comma or space separated)
 //     --model <name>          passed on to run-once (--model)
 //     --continue-on-error     go on after a FAILED job (a quota/usage limit or a killed job always stops)
-//     --include-enriched      also enrich again the listings that already carry unit models (skipped
-//                             by default as "already enriched"; run-once still refuses a reading with
-//                             less than the listing carries — no --force is passed)
+//     --include-enriched      also enrich again the listings that already carry unit models or a fact
+//                             list — amenities / nearby / warranties (skipped by default as "already
+//                             enriched"; run-once still refuses a reading with less than the listing
+//                             carries — no --force is passed)
 //
 // The plan (lib/backfill.mjs planBackfill): hidden, withdrawn and non-intake listings are skipped, and
-// so are listings that already carry unit models (unless --include-enriched);
+// so are listings that already carry unit models or a fact list (unless --include-enriched);
 // a listing whose source PDF is still under $BONA_DATA/intake (found by content hash) is ENRICHED
 // by run-once — unit models, amenities, nearby, warranties, floor plans and the new brochure, its
 // copy untouched; one without gets only its Bona brochure rebuilt from what the repo holds

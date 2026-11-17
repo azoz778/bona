@@ -103,6 +103,28 @@ describe('planBackfill', () => {
     assert.equal(empty[0].action, 'enrich');
   });
 
+  it('P6c: a listing that carries amenities, nearby or warranties (and no models) is already enriched too', () => {
+    const facts = (k, en = ['Gym'], ar = ['نادٍ رياضي']) => ({ [k]: { en, ar } });
+    const list = [
+      listing('BONA-W010', facts('amenities')),
+      listing('BONA-W003', { ...facts('nearby', ['Airport'], ['المطار']), ...facts('warranties', ['Structure — 10 years'], ['الهيكل — 10 سنوات']) }),
+      listing('BONA-W002', { models: [{ name: 'A' }], ...facts('warranties', ['Structure — 10 years'], ['الهيكل — 10 سنوات']) }),
+      listing('BONA-W004', { amenities: { en: [], ar: [] }, nearby: { en: [], ar: [] }, models: [] }),   // empty lists are not an enrichment
+    ];
+    asked.length = 0;
+    const by = Object.fromEntries(planBackfill(list, { findPdf }).map((r) => [r.id, r]));
+    assert.equal(by['BONA-W010'].action, 'skip');
+    assert.match(by['BONA-W010'].reason, /^already enriched \(amenities\) — --include-enriched to enrich it again$/);
+    assert.match(by['BONA-W003'].reason, /^already enriched \(nearby, warranties\) — /);
+    assert.match(by['BONA-W002'].reason, /^already enriched \(1 unit model\(s\), warranties\) — /);
+    assert.equal(by['BONA-W004'].action, 'brochure-only', 'empty lists: not enriched');
+    assert.ok(!asked.includes(sha('pdf of BONA-W010')) && !asked.includes(sha('pdf of BONA-W003')), 'a skipped listing is not hashed for');
+    const again = Object.fromEntries(planBackfill(list, { findPdf, includeEnriched: true }).map((r) => [r.id, r]));
+    assert.equal(again['BONA-W010'].action, 'enrich');
+    assert.match(again['BONA-W010'].reason, /^source PDF found \(already has amenities — enriched again\)$/);
+    assert.match(again['BONA-W003'].reason, /^source PDF found \(already has nearby, warranties — enriched again\)$/);
+  });
+
   it('skips hidden, withdrawn (rules.mjs, the register, the record, the name), non-intake and slug-less listings', () => {
     const by = Object.fromEntries(planBackfill(listings, { findPdf, withdrawals }).map((r) => [r.id, r]));
     const skip = (id, re) => {

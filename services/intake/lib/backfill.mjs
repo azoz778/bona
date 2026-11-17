@@ -6,7 +6,7 @@
 // intake folder. backfill-enrich.mjs is the CLI that spawns the jobs and commits.
 import fs from 'node:fs';
 import path from 'node:path';
-import { INTAKE_ID_RE, withdrawnAdvertising } from '../../../scripts/curate/rules.mjs';
+import { FACT_LISTS, INTAKE_ID_RE, withdrawnAdvertising } from '../../../scripts/curate/rules.mjs';
 import { sha256File } from './edits.mjs';
 
 /** What a plan row can say. `enrich` needs the developer's PDF; `brochure-only` does not. */
@@ -29,6 +29,18 @@ export function unknownIds(listings, only) {
 const byId = (a, b) => String(a.id).localeCompare(String(b.id), 'en', { numeric: true });
 
 /**
+ * What an enrichment already put on a listing, in words — its unit models and every fact list it
+ * carries (`amenities`, `nearby`, `warranties`) — or '' when it carries none. A listing published by
+ * the new intake can carry fact lists and no models (a brochure that prints no unit types): it is
+ * enriched all the same, and a re-read that drops one of its lists would be refused by run-once.
+ */
+function enrichedWith(l) {
+  const models = Array.isArray(l.models) && l.models.length > 0 ? [`${l.models.length} unit model(s)`] : [];
+  const facts = Object.keys(FACT_LISTS).filter((k) => ['en', 'ar'].some((lang) => Array.isArray(l[k]?.[lang]) && l[k][lang].length > 0));
+  return [...models, ...facts].join(', ');
+}
+
+/**
  * One row per inbox listing (narrowed by `only`), ordered by id:
  * `{ id, slug, title, action: 'enrich' | 'brochure-only' | 'skip', reason, pdf }`.
  *
@@ -36,9 +48,9 @@ const byId = (a, b) => String(a.id).localeCompare(String(b.id), 'en', { numeric:
  * was withdrawn (rules.mjs WITHDRAWN_ADVERTISING, plus the review register's flags passed as
  * `withdrawals` — the same test edits.mjs withdrawnRefusal() applies) or whose record says
  * "withdrawn"; a hidden listing; a record without a slug; a listing that already carries unit models
- * ("already enriched" — the backfill is for listings published before the intake read them; with
- * `includeEnriched` it is enriched again, and run-once still refuses a reading with less than it
- * carries). Everything else is `enrich` when its source PDF is found by content hash, else
+ * or a fact list (amenities / nearby / warranties: "already enriched" — the backfill is for listings
+ * published before the intake read them; with `includeEnriched` it is enriched again, and run-once
+ * still refuses a reading with less than it carries). Everything else is `enrich` when its source PDF is found by content hash, else
  * `brochure-only`. `findPdf` is called only for the listings that are not skipped — every call can
  * mean hashing PDFs.
  *
@@ -62,13 +74,13 @@ export function planBackfill(listings, { findPdf, withdrawals = [], only = null,
       pdf: null,
     };
     const withdrawn = INTAKE_ID_RE.test(id) ? withdrawnAdvertising(l, withdrawals) : null;
-    const enriched = Array.isArray(l.models) && l.models.length > 0;
+    const enriched = enrichedWith(l);
     if (!INTAKE_ID_RE.test(id)) row.reason = 'not an intake listing (BONA-W###)';
     else if (withdrawn) row.reason = `advertising withdrawn (${withdrawn.reason})`;
     else if (l.status === 'withdrawn') row.reason = 'its record says withdrawn';
     else if (l.hidden) row.reason = 'hidden — not on the site';
     else if (!row.slug) row.reason = 'the record has no slug';
-    else if (enriched && !includeEnriched) row.reason = `already enriched (${l.models.length} unit model(s)) — --include-enriched to enrich it again`;
+    else if (enriched && !includeEnriched) row.reason = `already enriched (${enriched}) — --include-enriched to enrich it again`;
     else {
       const sha = typeof l._intake?.pdfSha256 === 'string' && l._intake.pdfSha256 ? l._intake.pdfSha256 : null;
       const pdf = sha ? findPdf(sha) : null;
@@ -78,7 +90,7 @@ export function planBackfill(listings, { findPdf, withdrawals = [], only = null,
         ? 'source PDF found'
         : sha ? 'source PDF not in the intake folder — brochure rebuilt from the listing only'
           : 'no source PDF recorded — brochure rebuilt from the listing only';
-      if (pdf && enriched) row.reason += ` (already has ${l.models.length} unit model(s) — enriched again)`;
+      if (pdf && enriched) row.reason += ` (already has ${enriched} — enriched again)`;
     }
     rows.push(row);
   }
