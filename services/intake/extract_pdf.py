@@ -44,8 +44,9 @@ back onto the page:
                                          x0, y0, x1, y1}]}
 
 Decompression-bomb caps: an embedded bitmap over MAX_PIXELS (50 MP) is dropped in usable()
-BEFORE any Pixmap is built, and every page render is clamped to a long side in pixels
-(RENDER_LONG_SIDE) whatever DPI is asked for.
+BEFORE any Pixmap is built, its soft mask is flattened only when the mask's own dictionary says it
+is within the same cap (mask_fits — otherwise the raw stream is kept), and every page render is
+clamped to a long side in pixels (RENDER_LONG_SIDE) whatever DPI is asked for.
 
 Memory discipline (2026-09-06, after bona-intake was OOM-killed inside its 1 GB cgroup on the
 Sadana and Al Shati brochures): ONE page is rendered at a time, every Pixmap is written
@@ -119,6 +120,25 @@ def save_pixmap(pix, path: str, quality: int = 90) -> None:
     pix.save(path, jpg_quality=quality)
 
 
+def xref_int(doc, xref: int, key: str) -> int | None:
+    """An integer entry of a PDF object's dictionary, read without decoding its stream, or None."""
+    try:
+        kind, value = doc.xref_get_key(xref, key)
+        return int(value) if kind == "int" else None
+    except Exception:
+        return None
+
+
+def mask_fits(doc, smask_xref: int, max_pixels: int = MAX_PIXELS) -> bool:
+    """May this soft mask be decoded? Only when its dictionary declares a Width and a Height whose
+    product is within `max_pixels` — the cap usable() puts on the image itself. The image is checked
+    before it is decoded, but its mask is a separate object with its own size: a small picture can
+    carry a 60000x60000 mask, and Pixmap(doc, xref) would build all of it. No readable size = no
+    decode (the image keeps its raw stream)."""
+    w, h = xref_int(doc, smask_xref, "Width"), xref_int(doc, smask_xref, "Height")
+    return w is not None and h is not None and w > 0 and h > 0 and w * h <= max_pixels
+
+
 def flatten_on_white(doc, image_bytes: bytes, smask_xref: int) -> bytes | None:
     """PNG bytes of an image (its raw stream) composited over white using its soft mask, or None.
 
@@ -126,8 +146,11 @@ def flatten_on_white(doc, image_bytes: bytes, smask_xref: int) -> bytes | None:
     Pixmap(base, mask) is PREMULTIPLIED, which Pillow would treat as straight and darken every
     semi-transparent pixel. Gray / CMYK bases go through RGB first, a mask of another size is
     resized, and every intermediate is released as soon as it has been used. Pillow is imported
-    lazily so a pyCmd without it keeps the old behaviour (raw stream).
+    lazily so a pyCmd without it keeps the old behaviour (raw stream). A mask over MAX_PIXELS (by its
+    own dictionary, mask_fits) is never decoded: None, and the raw stream is kept.
     """
+    if not mask_fits(doc, smask_xref):
+        return None
     try:
         import pymupdf  # noqa: PLC0415
         from PIL import Image  # noqa: PLC0415

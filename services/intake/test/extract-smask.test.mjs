@@ -68,6 +68,68 @@ put(enc(noisy('RGB', (30, 60, 200)), 'PNG'), b.getvalue())
 doc.save(sys.argv[1])
 `;
 
+// A soft mask whose dictionary says it is bigger than MAX_PIXELS (50 MP) is never decoded: its size is
+// read from its dictionary first, and the image keeps its raw stream (no `flattened` key). The honest
+// 8000x8000 mask here (64 MP, a few KB compressed) WOULD be decoded and flattened without the guard.
+// Three usable images, so the extractor does not fall back to page renders.
+const MAKE_BOMB = `
+import sys, io, json, pymupdf
+from PIL import Image
+w, h = 900, 700
+def noisy(block):
+    im = Image.new('RGB', (w, h))
+    px = im.load()
+    for x in range(w):
+        for y in range(h):
+            px[x, y] = (x * 7 % 256, y * 9 % 256, (x + y) * 5 % 256)
+    im.paste(Image.new('RGB', (500, 300), block), (200, 200))
+    return im
+def png(im):
+    b = io.BytesIO(); im.save(b, 'PNG'); return b.getvalue()
+doc = pymupdf.open()
+big = png(Image.new('L', (8000, 8000), 255))
+for i in range(3):
+    page = doc.new_page(width=842, height=595)
+    stream = png(noisy((200, 100 + i * 40, 50)))
+    if i == 0:
+        page.insert_image(page.rect, stream=stream, mask=big)
+    else:
+        page.insert_image(page.rect, stream=stream)
+    page.insert_text((40, 40), 'Floor plan 105.02 m2 apartment bedroom')
+doc.save(sys.argv[1])
+doc = pymupdf.open(sys.argv[1])
+smask = doc[0].get_images(full=True)[0][1]
+print(json.dumps([doc.xref_get_key(smask, 'Width')[1], doc.xref_get_key(smask, 'Height')[1]]))
+`;
+
+// mask_fits() reads the size from the dictionary and never decodes: a dictionary that lies about it is
+// judged by what it says, and one without a size is not decoded at all.
+const MASK_FITS = `
+import sys, io, json, pymupdf
+sys.path.insert(0, sys.argv[1])
+import extract_pdf as x
+from PIL import Image
+def png(im):
+    b = io.BytesIO(); im.save(b, 'PNG'); return b.getvalue()
+doc = pymupdf.open()
+page = doc.new_page(width=200, height=200)
+page.insert_image(page.rect, stream=png(Image.new('RGB', (90, 70), (10, 20, 30))), mask=png(Image.new('L', (90, 70), 128)))
+smask = doc[0].get_images(full=True)[0][1]
+out = {'honest': x.mask_fits(doc, smask)}
+doc.xref_set_key(smask, 'Width', '100000'); doc.xref_set_key(smask, 'Height', '100000')
+out['lying'] = x.mask_fits(doc, smask)
+doc.xref_set_key(smask, 'Width', '7071'); doc.xref_set_key(smask, 'Height', '7071')
+out['at_cap'] = x.mask_fits(doc, smask)            # 49,999,041 px
+doc.xref_set_key(smask, 'Width', '7072'); doc.xref_set_key(smask, 'Height', '7071')
+out['over_cap'] = x.mask_fits(doc, smask)          # 50,006,112 px
+doc.xref_set_key(smask, 'Width', 'null')
+out['no_width'] = x.mask_fits(doc, smask)
+doc.xref_set_key(smask, 'Width', '/Big')
+out['not_a_number'] = x.mask_fits(doc, smask)
+out['cap'] = x.MAX_PIXELS
+print(json.dumps(out))
+`;
+
 describe('extract_pdf.py - transparent images', { skip: !UV && 'uv not installed' }, () => {
   it('flattens soft-masked images onto white with straight alpha (rgba, 50 %, gray, cmyk, half-size mask), and leaves a plain one alone', () => {
     // Under ~/.cache, never straight in $HOME (and not /tmp, which is RAM on this host).
@@ -108,5 +170,31 @@ describe('extract_pdf.py - transparent images', { skip: !UV && 'uv not installed
       assert.ok(px[2][1][0] === px[2][1][1] && Math.abs(px[2][1][0] - 120) <= 3, `gray interior ${px[2][1]}`);
       assert.ok(px[3][1][0] > 200 && px[3][1][1] < 130 && px[3][1][2] < 100, `cmyk interior ${px[3][1]}`);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('never decodes a soft mask over MAX_PIXELS: its size comes from its dictionary, and the image keeps its raw stream', () => {
+    const base = path.join(os.homedir(), '.cache', 'bona-tests');
+    fs.mkdirSync(base, { recursive: true });
+    const dir = fs.mkdtempSync(path.join(base, 'smask-bomb-'));
+    try {
+      const pdf = path.join(dir, 'bomb.pdf');
+      const mk = spawnSync('uv', ['run', ...WITH, 'python', '-I', '-c', MAKE_BOMB, pdf], { encoding: 'utf8' });
+      assert.equal(mk.status, 0, mk.stderr);
+      assert.deepEqual(JSON.parse(mk.stdout.trim().split('\n').pop()), ['8000', '8000'], 'the fixture mask really is 64 MP');
+      const out = path.join(dir, 'out');
+      const run = spawnSync('uv', ['run', ...WITH, 'python', '-I', SCRIPT, pdf, out, '--min-side', '300'], { encoding: 'utf8' });
+      assert.equal(run.status, 0, run.stderr);
+      const res = JSON.parse(run.stdout.trim().split('\n').pop());
+      assert.deepEqual(res.candidates.map((c) => c.page), [1, 2, 3]);
+      assert.equal('flattened' in res.candidates[0], false, 'the oversized mask was not decoded: raw stream kept');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('mask_fits(): Width x Height from the dictionary against MAX_PIXELS; no readable size, no decode', () => {
+    const r = spawnSync('uv', ['run', ...WITH, 'python', '-I', '-c', MASK_FITS, path.join(HERE, '..')], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout.trim().split('\n').pop()), {
+      honest: true, lying: false, at_cap: true, over_cap: false, no_width: false, not_a_number: false, cap: 50000000,
+    });
   });
 });
