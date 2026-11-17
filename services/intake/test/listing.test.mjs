@@ -5,8 +5,9 @@ import path from 'node:path';
 import { after, afterEach, before, beforeEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  buildListing, checkListing, inboxIds, nextListingId, orderedPicks, readIndex, replaceMetaFor, seqAfter, slugify,
-  takenSlugs, todayRiyadh, uniqueSlug, writeIndex, writeInboxListing, findInbox, findByPdfSha, listInbox,
+  buildListing, checkListing, enrichHeadline, enrichMetaFor, ENRICH_KEYS, inboxIds, mergeEnrichment, nextListingId, orderedPicks,
+  readIndex, replaceMetaFor, seqAfter, slugify, takenSlugs, todayRiyadh, uniqueSlug, writeIndex, writeInboxListing, findInbox,
+  findByPdfSha, listInbox,
 } from '../lib/listing.mjs';
 import * as edits from '../lib/edits.mjs';
 import { PLAN_JPEG_QUALITY, THUMB_QUALITY, writeFloorPlans } from '../lib/images.mjs';
@@ -1176,5 +1177,178 @@ describe('replaceMetaFor (run-once --replace)', () => {
       amenities: { en: ['Gym'], ar: ['نادٍ رياضي'] }, nearby: { en: ['Airport'], ar: ['المطار'] }, warranties: { en: ['Structure — 10 years'], ar: ['الهيكل — 10 سنوات'] },
     }));
     assert.equal(replaceMetaFor(tmp, 'BONA-W023').replace, true);
+  });
+});
+
+describe('run-once --enrich: enrichMetaFor, mergeEnrichment, enrichHeadline', () => {
+  let tmp;
+  const SHA = 'a'.repeat(64);
+  const PRICED = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
+  const ON_REQUEST = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true };
+  /** A published listing that was corrected by hand afterwards: every key a hand edit can add. */
+  const existing = (over = {}) => ({
+    id: 'BONA-W023', slug: 'jeddah-heights', sourceRef: 'WA-20261117-AC7D06', status: 'reserved', category: 'off-plan', type: 'apartment',
+    kind: 'apartment', featured: true, title: { en: 'Jeddah Heights (hand-fixed)', ar: 'جدة هايتس' },
+    location: { district: { en: 'Al Rehab', ar: 'الرحاب' }, city: { en: 'Jeddah', ar: 'جدة' } },
+    price: { ...ON_REQUEST }, specs: { beds: 2 }, images: [{ src: '/listings/jeddah-heights/01.jpg', thumb: null, alt: { en: 'a', ar: 'ب' } }],
+    videos: [{ src: '/listings/jeddah-heights/v-01.mp4', poster: null }], description: { en: 'One.\n\nTwo.', ar: 'واحد.\n\nاثنان.' },
+    highlights: { en: ['A', 'B', 'C', 'D'], ar: ['أ', 'ب', 'ج', 'د'] }, virtualTourUrl: null,
+    brochureUrl: 'https://bona-real-estate.com/listings/jeddah-heights/brochure.pdf',
+    project: { name: { en: 'Jeddah Heights', ar: 'جدة هايتس' } }, unit: null, map: null, mapPrecision: null, listedAt: '2026-11-01', hidden: false,
+    licence: { adNumber: '7200123', adExpiry: null, wafiNumber: null, escrowAccount: null },
+    photoNote: { en: 'Photos show the sister project', ar: 'الصور للمشروع الشقيق' }, faq: [{ q: 'x' }], seoTitle: { en: 'S', ar: 'س' },
+    _intake: { source: 'whatsapp', pdfSha256: SHA, warnings: ['map-unconfirmed'], edits: ['hero'] },
+    ...over,
+  });
+  const model = (en, price, subsidisedPrice = null) => ({
+    name: { en, ar: `نموذج ${en}` }, bedrooms: 2, bathrooms: 2, areaSqm: 88, rooms: null, availability: null, price, subsidisedPrice, floorPlan: null,
+  });
+  const put = (l) => { fs.rmSync(path.join(tmp, 'scripts', 'curate', 'inbox'), { recursive: true, force: true }); writeInboxListing(tmp, l); };
+  before(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-enrich-')); });
+  after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+  it('names the listing to enrich: id, slug and the listing as it stands — hand-added fields are no obstacle', () => {
+    put(existing());
+    const meta = enrichMetaFor(tmp, 'bona-w023');
+    assert.deepEqual(Object.keys(meta), ['enrich']);
+    assert.equal(meta.enrich.id, 'BONA-W023');
+    assert.equal(meta.enrich.slug, 'jeddah-heights');
+    assert.deepEqual(meta.enrich.existing, existing());
+  });
+
+  const refused = [
+    ['an id that is not in the inbox', null, 'BONA-W999', /--enrich BONA-W999: no inbox listing/],
+    ['a withdrawn listing (its record)', { status: 'withdrawn' }, 'BONA-W023', /--enrich BONA-W023: .*withdrawn/],
+    ['a withdrawn project (rules.mjs)', { id: 'BONA-W009', slug: 'elvira-murjan-townhouses-in-al-murjan' }, 'BONA-W009', /--enrich BONA-W009: marketing permission withdrawn/],
+    ['a hidden listing', { hidden: true }, 'BONA-W023', /--enrich BONA-W023: it is hidden/],
+    ['a listing that records no source PDF', { _intake: { source: 'whatsapp' } }, 'BONA-W023', /--enrich BONA-W023: .*no source PDF/],
+  ];
+  for (const [label, over, id, re] of refused) {
+    it(`refuses ${label}`, () => {
+      put(existing(over ?? {}));
+      assert.throws(() => enrichMetaFor(tmp, id), re);
+    });
+  }
+
+  it('ENRICH_KEYS: the unit models and the three fact lists, nothing else', () => {
+    assert.deepEqual(ENRICH_KEYS, ['models', 'amenities', 'nearby', 'warranties']);
+  });
+
+  describe('mergeEnrichment', () => {
+    /** A buildListing() result for the same brochure: its copy, photos and price all differ from the listing's. */
+    const built = () => buildListing({
+      ai: {
+        ...AI,
+        listing: { ...AI.listing, category: 'off-plan', type: 'apartment', price: { ...PRICED } },
+        models: [model('Lulu', 319015, 270425)],
+        amenities: { en: ['Gym'], ar: ['نادٍ رياضي'] }, nearby: { en: [], ar: [] }, warranties: { en: ['Structure — 10 years'], ar: ['الهيكل — 10 سنوات'] },
+      },
+      images: imagesFor('jeddah-heights', [{ rank: 1, index: 4, room: 'pool' }]), slug: 'jeddah-heights', id: 'BONA-W023', repo: REPO, site: 'https://x',
+    });
+
+    it('changes ONLY the unit models and the fact lists; every other key is the listing\'s own, unchanged', () => {
+      const before = existing();
+      const b = built();
+      const merged = mergeEnrichment(before, b);
+      assert.deepEqual(before, existing(), 'the listing passed in is not changed');
+      assert.deepEqual(merged.models, b.models);
+      assert.deepEqual(merged.amenities, { en: ['Gym'], ar: ['نادٍ رياضي'] });
+      assert.deepEqual(merged.warranties, b.warranties);
+      assert.equal('nearby' in merged, false, 'an empty fact list is left out');
+      for (const k of Object.keys(before)) assert.deepEqual(merged[k], before[k], k);
+      assert.deepEqual(Object.keys(merged).filter((k) => !ENRICH_KEYS.includes(k)), Object.keys(before), 'same keys, same order');
+      merged.models[0].name.en = 'changed';
+      assert.equal(b.models[0].name.en, 'Lulu', 'nothing is shared with the built listing');
+      merged.title.en = 'changed';
+      assert.equal(before.title.en, 'Jeddah Heights (hand-fixed)', 'nothing is shared with the listing either');
+    });
+
+    it('puts new keys after the highlights, where a publish puts them, so the file keeps its shape', () => {
+      const keys = Object.keys(mergeEnrichment(existing(), built()));
+      const at = keys.indexOf('highlights');
+      assert.deepEqual(keys.slice(at, at + 4), ['highlights', 'models', 'amenities', 'warranties']);
+    });
+
+    it('replaces models and fact lists already there in their own place, and removes those the new run does not have', () => {
+      const before = existing({ nearby: { en: ['Airport'], ar: ['المطار'] }, models: [model('Old', null)] });
+      const merged = mergeEnrichment(before, built());
+      assert.equal('nearby' in merged, false);
+      assert.deepEqual(merged.models.map((m) => m.name.en), ['Lulu']);
+      const none = mergeEnrichment(before, { ...built(), models: undefined, amenities: undefined, warranties: undefined });
+      for (const k of ENRICH_KEYS) assert.equal(k in none, false, k);
+    });
+
+    it('takes the price only when told to, and never the built listing\'s brochureUrl', () => {
+      const b = built();
+      assert.deepEqual(mergeEnrichment(existing(), b).price, ON_REQUEST);
+      const adopted = mergeEnrichment(existing(), b, { price: { ...PRICED } });
+      assert.deepEqual(adopted.price, PRICED);
+      assert.equal(adopted.brochureUrl, existing().brochureUrl);
+      assert.deepEqual(adopted._intake, existing()._intake);
+    });
+  });
+
+  describe('enrichHeadline', () => {
+    const models = [model('Nawras', 419994, 356024), model('Lulu', 319015, 270425)];
+    const aligned = () => alignHeadline({ ...ON_REQUEST }, models);
+
+    it('the owner set the price by WhatsApp: his price stays and the models lose theirs', () => {
+      const l = existing({ price: { amount: 300000, currency: 'SAR', from: false, period: null, onRequest: false }, _intake: { pdfSha256: SHA, edits: ['hero', 'price'] } });
+      const h = enrichHeadline(l, models, aligned());
+      assert.equal(h.refuse, null);
+      assert.equal(h.dropModelPrices, true);
+      assert.deepEqual(h.price, l.price);
+    });
+
+    it('a listing on request adopts the models\' confirmed headline', () => {
+      const h = enrichHeadline(existing(), models, aligned());
+      assert.deepEqual(h, { price: PRICED, dropModelPrices: false, refuse: null, decision: 'adopted' });
+    });
+
+    it('a price that equals the lowest model price (and its Sakani line) is kept', () => {
+      const l = existing({ price: { ...PRICED } });
+      const h = enrichHeadline(l, models, aligned());
+      assert.deepEqual(h, { price: PRICED, dropModelPrices: false, refuse: null, decision: 'kept' });
+    });
+
+    it('the same figure not yet marked "from" is kept and marked "from" (the validator\'s rule)', () => {
+      const l = existing({ price: { ...PRICED, from: false } });
+      const h = enrichHeadline(l, models, aligned());
+      assert.equal(h.refuse, null);
+      assert.deepEqual(h.price, PRICED);
+    });
+
+    it('a different price is refused with both figures', () => {
+      const l = existing({ price: { amount: 350000, currency: 'SAR', from: false, period: null, onRequest: false } });
+      const h = enrichHeadline(l, models, aligned());
+      assert.equal(h.decision, 'refused');
+      assert.match(h.refuse, /BONA-W023 shows SAR 350,000 but the brochure's lowest model price is SAR 319,015/);
+      assert.match(h.refuse, /send `price BONA-W023 …` or re-run with --replace/);
+      assert.deepEqual(h.price, l.price, 'nothing changes');
+    });
+
+    it('the same price with a different Sakani line is refused too', () => {
+      for (const sub of [undefined, 280000]) {
+        const price = { ...PRICED };
+        if (sub === undefined) delete price.subsidisedAmount; else price.subsidisedAmount = sub;
+        const h = enrichHeadline(existing({ price }), models, aligned());
+        assert.equal(h.decision, 'refused', String(sub));
+        assert.match(h.refuse, /Sakani SAR 270,425/);
+      }
+    });
+
+    it('no model kept a price: the listing\'s price stays as it is, set or on request', () => {
+      const unpriced = [model('Lulu', null)];
+      for (const price of [{ ...ON_REQUEST }, { amount: 350000, currency: 'SAR', from: false, period: null, onRequest: false }]) {
+        const h = enrichHeadline(existing({ price }), unpriced, null);
+        assert.deepEqual(h, { price, dropModelPrices: false, refuse: null, decision: 'no-model-prices' });
+      }
+    });
+
+    it('one specific unit keeps its own price, and its models keep theirs (the validator exempts units)', () => {
+      const l = existing({ price: { amount: 350000, currency: 'SAR', from: false, period: null, onRequest: false }, unit: { floor: 3, block: 'H', unitRef: null } });
+      const h = enrichHeadline(l, models, aligned());
+      assert.deepEqual(h, { price: l.price, dropModelPrices: false, refuse: null, decision: 'unit' });
+    });
   });
 });

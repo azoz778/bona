@@ -1260,3 +1260,396 @@ describe('processPdf: unit models and their floor plans reach the repo', { timeo
     } finally { r.cleanup(); }
   });
 });
+
+describe('processPdf --enrich: unit models + brochure on a published listing, nothing else touched', { timeout: 120000 }, () => {
+  const SLUG = 'jeddah-heights-residential-community-jeddah';
+  const ON_REQUEST = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true };
+  const PRICED = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
+  const git = (r, ...args) => execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.com', ...args], { cwd: r.repo, stdio: 'pipe' }).toString();
+  const inboxFile = (r) => path.join(r.repo, 'scripts', 'curate', 'inbox', `${SLUG}.json`);
+  const pubDir = (r) => path.join(r.repo, 'public', 'listings', SLUG);
+  const META = { enrich: { id: 'BONA-W023', slug: SLUG } };
+  const ENRICHED = ['models', 'amenities', 'nearby', 'warranties', 'brochureUrl'];
+  const PHOTOS = [1, 2, 3, 4].flatMap((n) => [`0${n}.jpg`, `0${n}-thumb.webp`]);
+  /** Two models priced on page 3 (Lulu is the cheaper), Nawras's floor plan = candidate 5 — the brochure as read today. */
+  const reading = () => {
+    const a = {
+      ...answer({ price: { amount: 999999, currency: 'SAR', from: false, period: null, onRequest: false } }),
+      models: [
+        { name: { en: 'Nawras', ar: 'نموذج نورس' }, bedrooms: 3, bathrooms: 2, areaSqm: 105, rooms: null, availability: null, price: 419994, subsidisedPrice: 356024, evidence: { page: 3, quote: '419994' }, floorPlan: 5 },
+        { name: { en: 'Lulu', ar: 'نموذج لؤلؤ' }, bedrooms: 2, bathrooms: 2, areaSqm: 88, rooms: null, availability: null, price: 319015, subsidisedPrice: 270425, evidence: { page: 3, quote: '319015' }, floorPlan: null },
+      ],
+      amenities: { en: ['Health club'], ar: ['نادٍ صحي'] },
+      nearby: { en: [], ar: [] },
+      warranties: { en: ['Structure — 10 years'], ar: ['الهيكل الإنشائي — 10 سنوات'] },
+    };
+    a.listing.title = { en: 'A brand new title the model wrote', ar: 'عنوان جديد' };
+    a.images[5] = { ...a.images[5], rank: null, hero: false, exclude: true, reason: 'floor plan', focus: null };
+    return a;
+  };
+  /**
+   * The listing as published by the first run and then corrected by hand: its own title, district,
+   * photos, licence, video, photo note, FAQ, SEO title, featured flag — and an old floor plan file
+   * and brochure that the new run must replace. Committed, like the publishing clone holds it.
+   */
+  const seed = (r, { price = PRICED, sha = null, intake = {}, unit = null } = {}) => {
+    const pdfSha256 = sha ?? crypto.createHash('sha256').update(fs.readFileSync(r.pdfPath)).digest('hex');
+    const img = (n) => ({ src: `/listings/${SLUG}/0${n}.jpg`, thumb: `/listings/${SLUG}/0${n}-thumb.webp`, alt: { en: `Photo ${n}`, ar: `صورة ${n}` } });
+    const listing = {
+      id: 'BONA-W023', slug: SLUG, sourceRef: 'WA-20261101-AC7D06', status: 'reserved', category: 'off-plan', type: 'apartment', kind: 'apartment',
+      featured: true, title: { en: 'Jeddah Heights — corrected by hand', ar: 'جدة هايتس — تصحيح يدوي' },
+      location: { ...PLACE, district: { en: 'Al Rehab', ar: 'الرحاب' } }, price,
+      specs: { beds: 2, baths: 2, areaSqm: 88, plotSqm: null, yearBuilt: null, floors: null },
+      images: [1, 2, 3, 4].map(img), videos: [{ src: `/listings/${SLUG}/v-01.mp4`, poster: null }],
+      description: { en: 'Hand-written one.\n\nHand-written two.', ar: 'فقرة أولى.\n\nفقرة ثانية.' },
+      highlights: { en: ['A', 'B', 'C', 'D'], ar: ['أ', 'ب', 'ج', 'د'] }, virtualTourUrl: null,
+      brochureUrl: `https://bona-real-estate.com/listings/${SLUG}/brochure.pdf`,
+      project: { name: { en: 'Jeddah Heights', ar: 'جدة هايتس' }, developer: { en: 'NHC', ar: 'الوطنية للإسكان' } }, unit,
+      map: null, mapPrecision: null, listedAt: '2026-11-01', hidden: false,
+      licence: { adNumber: '7200123', adExpiry: null, wafiNumber: null, escrowAccount: null },
+      photoNote: { en: 'Photos show the sister project', ar: 'الصور للمشروع الشقيق' },
+      faq: [{ q: { en: 'Q1', ar: 'س١' }, a: { en: 'A1', ar: 'ج١' } }], seoTitle: { en: 'SEO', ar: 'عنوان' },
+      _intake: { source: 'whatsapp', pdfSha256, model: 'opus', confidence: 0.8, warnings: ['map-unconfirmed'], images: [], createdAt: '2026-11-01T10:00:00.000Z', site: 'https://bona-real-estate.com', ...intake },
+    };
+    fs.mkdirSync(path.dirname(inboxFile(r)), { recursive: true });
+    fs.writeFileSync(inboxFile(r), `${JSON.stringify(listing, null, 2)}\n`);
+    fs.writeFileSync(path.join(r.repo, 'scripts', 'curate', 'inbox', '_index.json'), `${JSON.stringify({ nextSeq: 30, listings: { [SLUG]: 'BONA-W023' } }, null, 2)}\n`);
+    fs.mkdirSync(pubDir(r), { recursive: true });
+    for (const f of [...PHOTOS, 'v-01.mp4']) fs.writeFileSync(path.join(pubDir(r), f), `first run ${f}`);
+    for (const f of ['plan-03.jpg', 'plan-03-thumb.webp']) fs.writeFileSync(path.join(pubDir(r), f), 'old plan');
+    fs.writeFileSync(path.join(pubDir(r), 'brochure.pdf'), 'old brochure');
+    git(r, 'init', '-q'); git(r, 'add', '-A'); git(r, 'commit', '-qm', 'intake: Jeddah Heights (BONA-W023)');
+    // Corrected by hand afterwards — exactly what --replace refuses to undo.
+    for (const f of [...PHOTOS, 'v-01.mp4']) fs.writeFileSync(path.join(pubDir(r), f), `hand-made ${f}`);
+    git(r, 'commit', '-qam', 'photos re-cropped by hand');
+    return listing;
+  };
+  const without = (l, keys) => Object.fromEntries(Object.entries(l).filter(([k]) => !keys.includes(k)));
+  const saved = (r) => JSON.parse(fs.readFileSync(inboxFile(r), 'utf8'));
+  const enrich = (r, { dryRun = false, caption = {} } = {}) => processPdf({ pdfPath: r.pdfPath, cfg: r.cfg, caption, workDir: path.join(r.repo, '..', 'work'), dryRun, meta: { ...META } });
+
+  it('(a) adds the models, plan and brochure to a hand-corrected listing; its photos, copy and every other key stay byte for byte', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      const before = seed(r);
+      const rawBefore = fs.readFileSync(inboxFile(r), 'utf8');
+      const report = await enrich(r);
+      assert.equal(report.ok, true);
+      assert.equal(report.id, 'BONA-W023');
+      assert.equal(report.enrich.headline, 'kept');
+      // Photos, video: the same bytes.
+      for (const f of [...PHOTOS, 'v-01.mp4']) assert.equal(fs.readFileSync(path.join(pubDir(r), f), 'utf8'), `hand-made ${f}`, f);
+      // The old plan is gone, the new one is a real JPEG + WebP; the brochure is the new one.
+      const files = fs.readdirSync(pubDir(r)).sort();
+      assert.deepEqual(files.filter((f) => f.startsWith('plan-')), ['plan-01-thumb.webp', 'plan-01.jpg']);
+      const sharp = (await import('sharp')).default;
+      assert.equal((await sharp(path.join(pubDir(r), 'plan-01.jpg')).metadata()).format, 'jpeg');
+      assert.equal(fs.readFileSync(path.join(pubDir(r), 'brochure.pdf'), 'utf8'), '%PDF-1.7 fake brochure\n');
+      assert.ok(!files.some((f) => f.includes('.tmp')), files.join(' '));
+      // The brochure was drawn from the MERGED listing, out of the repo's own folder.
+      const call = r.calls().find((c) => c.tool === 'brochure');
+      assert.equal(call.filesDir, pubDir(r));
+      assert.equal(call.listing.title.en, 'Jeddah Heights — corrected by hand');
+      assert.ok(call.files.includes('plan-01.jpg') && !call.files.includes('plan-03.jpg'), call.files.join(' '));
+      assert.equal(call.listing.models.length, 2);
+      // The inbox JSON: models, fact lists, brochureUrl — and nothing else.
+      const after = saved(r);
+      assert.deepEqual(after.models.map((m) => [m.name.en, m.price, m.subsidisedPrice, m.floorPlan?.src ?? null]),
+        [['Nawras', 419994, 356024, `/listings/${SLUG}/plan-01.jpg`], ['Lulu', 319015, 270425, null]]);
+      assert.deepEqual(after.amenities, { en: ['Health club'], ar: ['نادٍ صحي'] });
+      assert.equal('nearby' in after, false);
+      assert.equal(after.brochureUrl, `https://bona-real-estate.com/listings/${SLUG}/brochure.pdf`);
+      assert.equal(JSON.stringify(without(after, ENRICHED), null, 2), JSON.stringify(without(before, ENRICHED), null, 2), 'every other key, in order, unchanged');
+      const lines = (s) => new Set(s.split('\n'));
+      const kept = [...lines(rawBefore)].filter((l) => !lines(fs.readFileSync(inboxFile(r), 'utf8')).has(l));
+      assert.deepEqual(kept, [], 'every line of the old file is still in the new one');
+      assert.deepEqual(checkListing(after), []);
+      // Commit-ready: only the intake's own paths changed, the index untouched.
+      const status = git(r, 'status', '--porcelain', '--untracked-files=all').split('\n').filter(Boolean).map((l) => l.slice(3));
+      assert.ok(status.length > 0);
+      for (const p of status) assert.match(p, new RegExp(`^(public/listings/${SLUG}/|scripts/curate/inbox/${SLUG}\\.json$)`), p);
+      // No headline check and no photo-region call: the copy and photos are not published.
+      assert.deepEqual(r.calls().filter((c) => c.tool.startsWith('claude')).map((c) => c.tool), ['claude-listing', 'claude-model-confirm']);
+    } finally { r.cleanup(); }
+  });
+
+  it('(b) a price that is not the models\' lowest is refused with both figures, and nothing is changed', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      seed(r, { price: { amount: 350000, currency: 'SAR', from: false, period: null, onRequest: false } });
+      await assert.rejects(enrich(r), (err) => err.stage === 'enrich'
+        && /BONA-W023 shows SAR 350,000 but the brochure's lowest model price is SAR 319,015/.test(err.reason)
+        && /send `price BONA-W023 …` or re-run with --replace/.test(err.reason));
+      assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '');
+      assert.equal(fs.readFileSync(path.join(pubDir(r), 'plan-03.jpg'), 'utf8'), 'old plan');
+      assert.equal(r.calls().filter((c) => c.tool === 'brochure').length, 0);
+    } finally { r.cleanup(); }
+  });
+
+  it('(c) a listing on request adopts the models\' confirmed headline', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      const before = seed(r, { price: { ...ON_REQUEST } });
+      const report = await enrich(r);
+      assert.equal(report.enrich.headline, 'adopted');
+      const after = saved(r);
+      assert.deepEqual(after.price, PRICED);
+      assert.equal(JSON.stringify(without(after, [...ENRICHED, 'price'])), JSON.stringify(without(before, [...ENRICHED, 'price'])));
+      assert.deepEqual(checkListing(after), []);
+    } finally { r.cleanup(); }
+  });
+
+  it('(d) the owner\'s own price stays; the models are published without prices and never checked', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      const own = { amount: 300000, currency: 'SAR', from: false, period: null, onRequest: false };
+      seed(r, { price: own, intake: { edits: ['price'] } });
+      const report = await enrich(r);
+      assert.equal(report.enrich.headline, 'owner-price');
+      const after = saved(r);
+      assert.deepEqual(after.price, own);
+      assert.deepEqual(after.models.map((m) => [m.price, m.subsidisedPrice]), [[null, null], [null, null]]);
+      assert.equal(r.calls().filter((c) => c.tool === 'claude-model-confirm').length, 0, 'no figure is checked that will not be published');
+      assert.deepEqual(after._intake.edits, ['price']);
+      assert.deepEqual(checkListing(after), []);
+    } finally { r.cleanup(); }
+  });
+
+  it('(e) a PDF that is not the one the listing was published from is refused before anything is read', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      seed(r, { sha: 'b'.repeat(64) });
+      await assert.rejects(enrich(r), /this PDF is not the one BONA-W023 was published from/);
+      assert.equal(fs.existsSync(path.join(r.repo, '..', 'bin', 'calls.jsonl')), false, 'no extraction, no model call');
+      assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '');
+    } finally { r.cleanup(); }
+  });
+
+  it('(f) a failed rebuild rolls everything back: the old plan and brochure return, the new plan goes', async () => {
+    const r = await rig({ listing: reading(), build: 'process.exit(1);\n' });
+    try {
+      seed(r);
+      const raw = fs.readFileSync(inboxFile(r), 'utf8');
+      await assert.rejects(enrich(r), (err) => err.rolledBack === true);
+      assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '', 'the clone is back to the commit');
+      assert.equal(fs.readFileSync(path.join(pubDir(r), 'plan-03.jpg'), 'utf8'), 'old plan');
+      assert.equal(fs.readFileSync(path.join(pubDir(r), 'brochure.pdf'), 'utf8'), 'old brochure');
+      assert.equal(fs.existsSync(path.join(pubDir(r), 'plan-01.jpg')), false);
+      assert.equal(fs.readFileSync(inboxFile(r), 'utf8'), raw);
+    } finally { r.cleanup(); }
+  });
+
+  it('a brochure that cannot be built keeps the enrichment, the old brochure, and says so', async () => {
+    const r = await rig({ listing: reading(), brochureFail: true });
+    try {
+      const before = seed(r);
+      const report = await enrich(r);
+      assert.equal(report.brochure.ok, false);
+      assert.ok(report.warnings.some((w) => /brochure could not be built/.test(w)), report.warnings.join(' | '));
+      const after = saved(r);
+      assert.equal(after.models.length, 2);
+      assert.equal(after.brochureUrl, before.brochureUrl);
+      assert.deepEqual(after._intake.warnings, ['map-unconfirmed', 'brochure-failed']);
+      assert.equal(fs.readFileSync(path.join(pubDir(r), 'brochure.pdf'), 'utf8'), 'old brochure');
+    } finally { r.cleanup(); }
+  });
+
+  it('a dry run says what would change and writes nothing', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      seed(r, { price: { ...ON_REQUEST } });
+      const report = await enrich(r, { dryRun: true });
+      assert.equal(report.dryRun, true);
+      assert.equal(report.enrich.models, 2);
+      assert.equal(report.enrich.headline, 'adopted');
+      assert.deepEqual(report.enrich.price, PRICED);
+      assert.deepEqual(report.enrich.plans, [`/listings/${SLUG}/plan-01.jpg`]);
+      assert.deepEqual(report.enrich.removedPlans, ['plan-03-thumb.webp', 'plan-03.jpg']);
+      assert.deepEqual(report.listingPreview.price, PRICED);
+      assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '');
+      assert.equal(r.calls().filter((c) => c.tool === 'brochure').length, 0);
+    } finally { r.cleanup(); }
+  });
+
+  it('a dry run of a refused headline shows the refusal instead of throwing', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      seed(r, { price: { amount: 350000, currency: 'SAR', from: false, period: null, onRequest: false } });
+      const report = await enrich(r, { dryRun: true });
+      assert.equal(report.enrich.headline, 'refused');
+      assert.match(report.blocked, /shows SAR 350,000/);
+    } finally { r.cleanup(); }
+  });
+
+  it('a listing with local edits is refused before the model is paid', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      seed(r);
+      fs.writeFileSync(path.join(pubDir(r), '01.jpg'), 'edited, not committed');
+      await assert.rejects(enrich(r), /uncommitted changes \(or is not in git\)/);
+      assert.equal(fs.existsSync(path.join(r.repo, '..', 'bin', 'calls.jsonl')), false);
+    } finally { r.cleanup(); }
+  });
+
+  it('a hidden listing is refused', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      seed(r, { intake: {} });
+      const l = JSON.parse(fs.readFileSync(inboxFile(r), 'utf8'));
+      fs.writeFileSync(inboxFile(r), `${JSON.stringify({ ...l, hidden: true }, null, 2)}\n`);
+      git(r, 'commit', '-qam', 'hide (BONA-W023)');
+      await assert.rejects(enrich(r), /it is hidden/);
+    } finally { r.cleanup(); }
+  });
+
+  it('one specific unit keeps its own price while its models keep theirs', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      const own = { amount: 350000, currency: 'SAR', from: false, period: null, onRequest: false };
+      seed(r, { price: own, unit: { floor: 3, block: 'H', unitRef: null } });
+      await enrich(r);
+      const after = saved(r);
+      assert.deepEqual(after.price, own);
+      assert.deepEqual(after.models.map((m) => m.price), [419994, 319015]);
+      assert.deepEqual(checkListing(after), []);
+    } finally { r.cleanup(); }
+  });
+
+  /** run-once.mjs itself, pointed at the rig's fake extractor, `claude` and brochure renderer. */
+  const runOnce = (r, ...args) => {
+    const bin = path.join(r.repo, '..', 'bin');
+    const data = path.join(r.repo, '..', 'data');
+    fs.mkdirSync(data, { recursive: true });
+    const env = {
+      ...process.env, BONA_DATA: data, BONA_REPO: r.repo, BONA_CLAUDE_BIN: r.cfg.claudeBin, BONA_MIN_IMAGE_SIDE: '100',
+      BONA_PY_CMD: r.cfg.pyCmd.join(' '), BONA_BROCHURE_PY_CMD: r.cfg.brochurePyCmd.join(' '), BONA_SITE: 'https://bona-real-estate.com',
+      // The rig's own bare remote, whatever ~/.secrets/bona-services.env says.
+      BONA_GIT_REMOTE: 'origin', BONA_GIT_BRANCH: 'main',
+    };
+    assert.ok(fs.existsSync(bin));
+    try {
+      const out = execFileSync(process.execPath, [path.join(REPO, 'services', 'intake', 'run-once.mjs'), r.pdfPath, '--repo', r.repo, '--work', path.join(data, 'work'), ...args], { env, stdio: 'pipe' });
+      return { status: 0, out: out.toString() };
+    } catch (err) { return { status: err.status, out: `${err.stdout}${err.stderr}` }; }
+  };
+
+  it('run-once --enrich --dry-run prints the models, the headline decision and the plan files, and writes nothing', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      seed(r, { price: { ...ON_REQUEST } });
+      const { status, out } = runOnce(r, '--enrich', 'BONA-W023', '--dry-run');
+      assert.equal(status, 0, out);
+      assert.match(out, /Models {5}2 — 2 priced · prices kept 4 \/ refused 0/);
+      assert.match(out, /Headline {3}adopted — was on request: the models' confirmed headline is adopted/);
+      assert.match(out, /after {2}SAR 319,015 \(from\) · Sakani beneficiaries SAR 270,425/);
+      assert.match(out, new RegExp(`Plans {6}/listings/${SLUG}/plan-01\\.jpg {2}\\(removing plan-03-thumb\\.webp plan-03\\.jpg\\)`));
+      assert.match(out, /DRY RUN — nothing written/);
+      assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '');
+    } finally { r.cleanup(); }
+  });
+
+  it('run-once --enrich commits "intake: enrich <title> (<id>) — unit models + brochure" with the listing\'s own paths, and pushes', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      seed(r);
+      const remote = path.join(r.repo, '..', 'remote.git');
+      execFileSync('git', ['init', '-q', '--bare', remote]);
+      git(r, 'branch', '-M', 'main');
+      git(r, 'remote', 'add', 'origin', remote);
+      git(r, 'push', '-q', 'origin', 'main');
+      const { status, out } = runOnce(r, '--enrich', 'BONA-W023');
+      assert.equal(status, 0, out);
+      assert.match(out, /Headline {3}kept — equals the lowest model price: kept/);
+      const line = out.split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).find((j) => j?.event === 'intake.enrich');
+      assert.deepEqual([line.models, line.kept, line.refused, line.headline], [2, 4, 0, 'kept'], 'one JSON log line says what the run did');
+      assert.match(out, /brochure rebuilt/);
+      assert.match(out, /Pushed [0-9a-f]+/);
+      const log = execFileSync('git', ['log', '-1', '--format=%s', 'main'], { cwd: remote }).toString().trim();
+      assert.equal(log, 'intake: enrich Jeddah Heights — corrected by hand (BONA-W023) — unit models + brochure');
+      const files = execFileSync('git', ['show', '--name-only', '--format=', 'main'], { cwd: remote }).toString().split('\n').filter(Boolean).sort();
+      assert.deepEqual(files, [
+        `public/listings/${SLUG}/brochure.pdf`, `public/listings/${SLUG}/plan-01-thumb.webp`, `public/listings/${SLUG}/plan-01.jpg`,
+        `public/listings/${SLUG}/plan-03-thumb.webp`, `public/listings/${SLUG}/plan-03.jpg`, `scripts/curate/inbox/${SLUG}.json`,
+      ]);
+      assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '');
+    } finally { r.cleanup(); }
+  });
+
+  it('run-once --enrich: a refused headline is "WOULD BE REJECTED" in a dry run and "REJECTED at enrich" for real, with nothing written', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      seed(r, { price: { amount: 350000, currency: 'SAR', from: false, period: null, onRequest: false } });
+      const dry = runOnce(r, '--enrich', 'BONA-W023', '--dry-run');
+      assert.equal(dry.status, 0, dry.out);
+      assert.match(dry.out, /Headline {3}refused — REFUSED/);
+      assert.match(dry.out, /WOULD BE REJECTED — BONA-W023 shows SAR 350,000 but the brochure's lowest model price is SAR 319,015/);
+      const remote = path.join(r.repo, '..', 'remote.git');
+      execFileSync('git', ['init', '-q', '--bare', remote]);
+      git(r, 'branch', '-M', 'main'); git(r, 'remote', 'add', 'origin', remote); git(r, 'push', '-q', 'origin', 'main');
+      const real = runOnce(r, '--enrich', 'BONA-W023');
+      assert.equal(real.status, 1);
+      assert.match(real.out, /REJECTED at "enrich": BONA-W023 shows SAR 350,000/);
+      assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '');
+      assert.equal(git(r, 'rev-parse', 'HEAD'), execFileSync('git', ['rev-parse', 'main'], { cwd: remote }).toString(), 'nothing committed or pushed');
+    } finally { r.cleanup(); }
+  });
+
+  it('run-once --enrich refuses a dirty publishing clone instead of discarding its changes', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      seed(r);
+      fs.writeFileSync(path.join(r.repo, 'scripts', 'curate', 'inbox', '_index.json'), '{"unsaved": true}\n');
+      const { status, out } = runOnce(r, '--enrich', 'BONA-W023');
+      assert.equal(status, 1);
+      assert.match(out, /has uncommitted changes, which --enrich will not discard/);
+      assert.match(fs.readFileSync(path.join(r.repo, 'scripts', 'curate', 'inbox', '_index.json'), 'utf8'), /unsaved/);
+    } finally { r.cleanup(); }
+  });
+
+  it('a listing the intake enriched can still be replaced later (an enrich commit is the intake\'s own)', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      seed(r);
+      git(r, 'reset', '-q', '--hard', 'HEAD~1'); // drop the hand-fix commit: a listing only the intake ever touched
+      await enrich(r);
+      git(r, 'add', '-A'); git(r, 'commit', '-qm', 'intake: enrich Jeddah Heights (BONA-W023) — unit models + brochure');
+      const { changedSincePublished } = await import('../lib/publish.mjs');
+      assert.equal(await changedSincePublished(r.repo, [path.join('scripts', 'curate', 'inbox', `${SLUG}.json`), path.join('public', 'listings', SLUG)]), null);
+    } finally { r.cleanup(); }
+  });
+});
+
+describe('run-once --enrich: the CLI guards', () => {
+  const cli = (...args) => {
+    try {
+      execFileSync(process.execPath, [path.join(REPO, 'services', 'intake', 'run-once.mjs'), path.join(REPO, 'package.json'), ...args], { stdio: 'pipe' });
+      return { status: 0, out: '' };
+    } catch (err) { return { status: err.status, out: `${err.stdout}${err.stderr}` }; }
+  };
+
+  it('--enrich and --replace together: exit 2', () => {
+    const r = cli('--enrich', 'BONA-W023', '--replace', 'BONA-W023', '--dry-run');
+    assert.equal(r.status, 2);
+    assert.match(r.out, /--enrich and --replace do not go together/);
+  });
+
+  it('--enrich with --no-git (and no --dry-run) is refused', () => {
+    const r = cli('--no-git', '--enrich', 'BONA-W023');
+    assert.equal(r.status, 2);
+    assert.match(r.out, /--enrich needs git/);
+  });
+
+  it('--enrich takes no caption: the price comes from the listing', () => {
+    const r = cli('--enrich', 'BONA-W023', '--caption', 'SAR 300000', '--dry-run');
+    assert.equal(r.status, 2);
+    assert.match(r.out, /--enrich takes no --caption/);
+  });
+
+  it('--enrich with no id is a usage error — also when the next word is another flag', () => {
+    for (const args of [['--dry-run', '--enrich'], ['--enrich', '--dry-run']]) {
+      const r = cli(...args);
+      assert.equal(r.status, 2, args.join(' '));
+      assert.match(r.out, /--enrich needs a listing id/);
+    }
+  });
+});

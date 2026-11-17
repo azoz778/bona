@@ -69,9 +69,10 @@ export async function committedUnchanged(repo, paths) {
 
 /**
  * Why a published listing may NOT be rebuilt from its brochure, or null when it may: every commit
- * touching `paths` must be the one that published it or a later `intake: replace …` run. Anything
- * else (a hand fix, a re-crop, an edit) is reported. A shallow clone cannot show the history, so
- * it is refused rather than trusted.
+ * touching `paths` must be the one that published it or a later `intake: replace …` or
+ * `intake: enrich …` run (an enrichment adds only what a re-run rebuilds anyway: unit models, floor
+ * plans, fact lists, the brochure). Anything else (a hand fix, a re-crop, an edit) is reported. A
+ * shallow clone cannot show the history, so it is refused rather than trusted.
  */
 export async function changedSincePublished(repo, paths) {
   const shallow = await run('git', ['rev-parse', '--is-shallow-repository'], { cwd: repo });
@@ -85,9 +86,9 @@ export async function changedSincePublished(repo, paths) {
   // If it is not — a hand rename moved the files, so their history starts at the rename — the real
   // history cannot be read from these paths, and the listing is refused.
   const origin = commits[commits.length - 1];
-  if (!/^intake: (?!replace )/.test(origin)) return `its history starts at "${origin.slice(0, 60)}", not at the intake's publish commit`;
+  if (!/^intake: (?!replace |enrich )/.test(origin)) return `its history starts at "${origin.slice(0, 60)}", not at the intake's publish commit`;
   const later = commits.slice(0, -1);
-  const others = later.filter((subject) => !subject.startsWith('intake: replace '));
+  const others = later.filter((subject) => !subject.startsWith('intake: replace ') && !subject.startsWith('intake: enrich '));
   return others.length ? `${others.length} later commit(s), e.g. "${others[0].slice(0, 60)}"` : null;
 }
 

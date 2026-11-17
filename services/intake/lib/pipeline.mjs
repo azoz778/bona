@@ -27,15 +27,17 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { brochureFileIn, brochureUrlFor, buildBrandedBrochure } from './brochure.mjs';
+import { isDeepStrictEqual } from 'node:util';
+import { BROCHURE_FILE, brochureFileIn, brochureUrlFor, buildBrandedBrochure } from './brochure.mjs';
 import { classifyPdf } from './classify.mjs';
 import { writeConfinement } from './confine.mjs';
 import { buildContactSheets } from './contact-sheet.mjs';
 import { buildPrompt, confirmModelPrices, confirmPriceEvidence, runListingAi } from './claude.mjs';
 import { floorPlanTargets, removeListingImages, writeFloorPlans, writeListingImages } from './images.mjs';
 import {
-  addWarningCode, buildListing, checkListing, findByPdfSha, findInbox, inboxIds, nextListingId, orderedPicks,
-  readIndex, seqAfter, slugify, takenSlugs, todayRiyadh, uniqueSlug, writeIndex, writeInboxListing,
+  addWarningCode, buildListing, checkListing, enrichHeadline, enrichMetaFor, findByPdfSha, findInbox, inboxIds, mergeEnrichment,
+  modelsAndFacts, nextListingId, orderedPicks, readIndex, seqAfter, slugify, takenSlugs, todayRiyadh, uniqueSlug, writeIndex,
+  writeInboxListing,
 } from './listing.mjs';
 import { log } from './log.mjs';
 import { alignHeadline, checkModelPrices, isFigure } from './model-prices.mjs';
@@ -95,7 +97,9 @@ export class RejectError extends Error {
  * @param {string} opts.workDir      scratch dir for extraction + sheets + staging
  * @param {boolean} [opts.dryRun]    stop before writing to the repo
  * @param {object} [opts.meta]       messageId / groupJid / pdfFileName; or, for run-once --replace,
- *                                   { replace: true, id, slug, listedAt, sourceRef } of the listing to rewrite
+ *                                   { replace: true, id, slug, listedAt, sourceRef } of the listing to rewrite;
+ *                                   or, for run-once --enrich, { enrich: { id, slug } } of the listing to
+ *                                   add unit models, floor plans, fact lists and a new brochure to
  * @returns {Promise<object>} run report
  */
 export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun = false, meta = {} }) {
@@ -127,6 +131,30 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     if (!dryRun) {
       const changed = await changedSincePublished(cfg.repo, [path.relative(cfg.repo, current.file), path.join('public', 'listings', meta.slug)]);
       if (changed) throw new Error(`${meta.id} has been changed since it was published (${changed}) — a re-run would undo that; do it by hand`);
+    }
+  }
+
+  // --- enrich: checked first too, before a page is read or a model is paid ------------
+  // `meta.enrich` (run-once --enrich <id>): add the unit models, their floor plans, the fact lists and
+  // a new brochure to a listing published before the intake could read them — and change nothing else
+  // in it (enrichListing below). Hand corrections are kept, so there is no history rule; but it must be
+  // the very PDF the listing was published from, and the listing must be in git, unchanged, because a
+  // failed run is rolled back from the commit.
+  const enrich = meta.enrich ? { id: meta.enrich.id, slug: meta.enrich.slug } : null;
+  let enrichTarget = null;
+  if (enrich) {
+    if (meta.replace) throw new Error('--enrich and --replace do not go together');
+    if (!enrich.id || !enrich.slug) throw new Error('enrich needs the id and slug of the listing it enriches');
+    if (caption.price) throw new Error('--enrich takes no caption price: the headline is decided from the listing (`price <id> …` changes it)');
+    // enrichMetaFor()'s refusals again, on the listing as it stands now: unknown, withdrawn, withheld, hidden, no PDF hash.
+    const { existing } = enrichMetaFor(cfg.repo, enrich.id).enrich;
+    enrichTarget = findInbox(cfg.repo, enrich.id);
+    if (!enrichTarget || existing.slug !== enrich.slug) throw new Error(`${enrich.id} is not in the inbox under ${enrich.slug} — nothing to enrich`);
+    if (existing._intake.pdfSha256 !== report.sha256) {
+      throw new RejectError(`this PDF is not the one ${existing.id} was published from (it has sha ${report.sha256.slice(0, 12)}…, the listing records ${existing._intake.pdfSha256.slice(0, 12)}…) — nothing was changed`, 'enrich');
+    }
+    if (!dryRun && !(await committedUnchanged(cfg.repo, [path.join('public', 'listings', enrich.slug), path.relative(cfg.repo, enrichTarget.file)]))) {
+      throw new Error(`${enrich.id} has uncommitted changes (or is not in git) — commit or discard them before --enrich`);
     }
   }
 
@@ -267,8 +295,9 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   };
 
   // Only when the brochure could not pass the photo gate on its own candidates: an ordinary
-  // brochure with real photographs in it never pays for this call.
-  if (composites.pages.length && ordinaryCandidates < cfg.minImages) {
+  // brochure with real photographs in it never pays for this call. Never for an enrichment, which
+  // publishes no photograph (and so has no photo gate to pass).
+  if (!enrich && composites.pages.length && ordinaryCandidates < cfg.minImages) {
     cropped = await runCrop(composites.reason);
   }
 
@@ -312,7 +341,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // and text pages — which is the same finding, arrived at by reading them. Crop and ask
   // once more, but only when the run would otherwise be rejected for want of photographs.
   let picks = orderedPicks(ai.images, { maxImages: cfg.maxImages });
-  if (picks.length < cfg.minImages && !cropped && composites.pages.length
+  if (!enrich && picks.length < cfg.minImages && !cropped && composites.pages.length
       && modelFlagsComposites(ai.images, composites.indices)) {
     cropped = await runCrop('the ranking step called the page-sized candidates collages');
     if (cropped.crops.length) {
@@ -413,14 +442,17 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // model on it, at most 3 at once and at most cfg.maxModelPricePages pages — and never by the text
   // layer, which cannot tell which model a figure belongs to (model-prices.mjs). When any model keeps
   // a price, the headline of a whole development becomes the cheapest one, "from", and its own checks
-  // below are skipped: its figures ARE confirmed model figures. The owner's caption price replaces them all.
+  // below are skipped: its figures ARE confirmed model figures. The owner's caption price replaces them all,
+  // and so does the price he set by WhatsApp on a listing being enriched (enrichHeadline): no figure is
+  // checked that will not be published.
   const figuresOf = (m) => [m?.price, m?.subsidisedPrice].filter(isFigure);
+  const ownerPriceEdit = Boolean(enrichTarget) && Array.isArray(enrichTarget.listing._intake?.edits) && enrichTarget.listing._intake.edits.includes('price');
   let headlineFromModels = false;
-  if (Array.isArray(ai.models) && ai.models.length && caption.price) {
+  if (Array.isArray(ai.models) && ai.models.length && (caption.price || ownerPriceEdit)) {
     for (const m of ai.models) {
       // Same rule as the model's own headline figure under a caption price: dropped, and refused
       // outright only if the copy states it (the owner's own figure excepted).
-      for (const n of figuresOf(m)) if (n !== caption.price.amount && inCopy(n)) rejectedPrices.push(n);
+      for (const n of figuresOf(m)) if (caption.price && n !== caption.price.amount && inCopy(n)) rejectedPrices.push(n);
       if (m && typeof m === 'object') { m.price = null; m.subsidisedPrice = null; }
     }
   } else if (Array.isArray(ai.models) && ai.models.some((m) => figuresOf(m).length)) {
@@ -489,8 +521,8 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       }
     }
     // "From the cheapest model" is the price of a whole development: one specific unit keeps its
-    // own price and the headline checks below.
-    if (price && !ai.listing?.unit && ai.models.some((m) => isFigure(m?.price))) {
+    // own price and the headline checks below. (An enrichment decides its headline from the listing.)
+    if (!enrich && price && !ai.listing?.unit && ai.models.some((m) => isFigure(m?.price))) {
       const before = { amount: price.amount, subsidised: price.subsidisedAmount };
       alignHeadline(price, ai.models);
       headlineFromModels = true;
@@ -505,6 +537,13 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       }
     }
   }
+  // An enrichment publishes none of the model's copy, map pin or photos, and decides its headline from
+  // the listing (enrichHeadline): the model's own headline and Sakani checks, the copy guard, the map
+  // and the photo steps below are for a publish only. Its unit-model prices are checked above, the same.
+  if (enrich) {
+    return enrichListing({ report, ai, extraction, cfg, caption, workDir, dryRun, withdrawals, target: enrichTarget, started });
+  }
+
   // Under the owner's caption price the model's own figure is not published as the price — but if
   // it also wrote it into the copy, that figure must be printed in the brochure too.
   if (caption.price && price && typeof price.amount === 'number' && price.amount > 0
@@ -734,6 +773,166 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   } catch (err) {
     // Anything from here on leaves the clone dirty; put it back so the NEXT job can pull.
     const clean = await resetTree(cfg.repo, { dirs: listingDirs });
+    log.error('intake.rolled_back', { slug, stage: report.stage, clean, error: err.message, detail: err.detail });
+    err.rolledBack = true;
+    throw err;
+  }
+  report.durationMs = Date.now() - started;
+  report.ok = true;
+  report.stage = 'done';
+  return report;
+}
+
+/** A floor-plan file in a listing's folder (rules.mjs LOCAL_PLAN_SRC / LOCAL_PLAN_THUMB). */
+const PLAN_FILE_RE = /^plan-\d{2,3}(?:\.jpg|-thumb\.webp)$/;
+
+/**
+ * The rest of `run-once --enrich <id>`, once the brochure has been read and its unit-model prices
+ * checked: build the models (with their floor plans) and the fact lists exactly as a publish would,
+ * decide the headline from the EXISTING listing (enrichHeadline — a refusal changes nothing), merge
+ * ONLY those into the listing (mergeEnrichment), check it like a publish (checkListing), then: replace
+ * the floor-plan files in public/listings/<slug>/, draw the brochure from the merged listing and that
+ * folder, write the inbox JSON and rebuild. Anything that fails after the first file is touched is
+ * rolled back from git (resetTree), so the listing is exactly as it was. A dry run reports what would
+ * change and writes nothing.
+ */
+async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dryRun, withdrawals, target, started }) {
+  report.stage = 'enrich';
+  const existing = target.listing;
+  const { id, slug } = existing;
+  report.id = id;
+  report.slug = slug;
+  report.url = `${cfg.site}/properties/${slug}/`;
+  const publicDir = path.join(cfg.repo, 'public', 'listings', slug);
+  const oldPlans = (fs.existsSync(publicDir) ? fs.readdirSync(publicDir) : []).filter((f) => PLAN_FILE_RE.test(f)).sort();
+
+  // The floor plans, staged in the work dir (a dry run only names them), so nothing reaches the repo
+  // before checkListing() has passed. A plan that cannot be decoded costs that model its plan.
+  const stageDir = path.join(workDir, 'enrich', slug);
+  fs.rmSync(stageDir, { recursive: true, force: true });
+  let floorPlans;
+  if (dryRun) {
+    floorPlans = floorPlanTargets(extraction.candidates, ai.models ?? [], slug).filter((t) => t.cand)
+      .map(({ model, index, src, thumb }) => ({ model, index, src, thumb }));
+  } else {
+    floorPlans = await writeFloorPlans(extraction.candidates, ai.models ?? [], stageDir, slug);
+    if (floorPlans.skipped?.length) {
+      report.warningCodes.push('images-skipped');
+      report.warnings.push(`${floorPlans.skipped.length} floor plan(s) could not be processed and were left out`);
+      log.warn('intake.floor_plans_skipped', { skipped: floorPlans.skipped });
+    }
+  }
+  report.floorPlans = floorPlans.map((p) => ({ model: p.model, candidate: p.index, src: p.src }));
+
+  // What a publish writes for the models and the facts — under the listing's OWN category (a rental's
+  // models keep no Sakani price), whatever the model read this time.
+  const built = modelsAndFacts(ai, floorPlans, { rent: existing.category === 'rent' });
+  const models = built.models ?? [];
+  const aligned = models.some((m) => isFigure(m.price)) && existing.price && typeof existing.price === 'object'
+    ? alignHeadline(structuredClone(existing.price), models) : null;
+  const head = enrichHeadline(existing, models, aligned);
+  if (head.dropModelPrices) for (const m of models) { m.price = null; m.subsidisedPrice = null; }
+  const priceChanged = !isDeepStrictEqual(head.price, existing.price);
+  report.enrich = {
+    models: models.length,
+    pricedModels: models.filter((m) => isFigure(m.price)).length,
+    keptPrices: models.flatMap((m) => [m.price, m.subsidisedPrice]).filter(isFigure).length,
+    refusedPrices: report.modelPrices?.refused ?? [],
+    headline: head.decision,
+    price: head.price,
+    previousPrice: existing.price,
+    priceChanged,
+    refuse: head.refuse,
+    facts: Object.keys(built).filter((k) => k !== 'models'),
+    plans: floorPlans.map((p) => p.src),
+    removedPlans: oldPlans,
+  };
+  log.info('intake.enrich', {
+    id, models: models.length, kept: report.enrich.keptPrices, refused: report.enrich.refusedPrices.length,
+    headline: head.decision, priceChanged, plans: floorPlans.length, removedPlans: oldPlans.length,
+  });
+  if (head.refuse) {
+    fs.rmSync(stageDir, { recursive: true, force: true });
+    if (!dryRun) throw new RejectError(head.refuse, 'enrich');
+    report.blocked = head.refuse;
+  }
+
+  const merged = mergeEnrichment(existing, built, priceChanged ? { price: head.price } : {});
+  const problems = checkListing(merged, { minImages: cfg.minImages, maxImages: cfg.maxImages, withdrawals });
+  if (dryRun) {
+    report.stage = 'dry-run';
+    report.listingPreview = merged;
+    if (problems.length) {
+      report.warnings.push(...problems);
+      report.blocked ??= problems[0];
+    }
+    report.durationMs = Date.now() - started;
+    report.ok = true;
+    return report;
+  }
+  if (problems.length) {
+    fs.rmSync(stageDir, { recursive: true, force: true });   // nothing reached the repo
+    throw new RejectError(problems[0], 'validate');
+  }
+  // Every other key is written back exactly as it was read; a file the intake did not write itself
+  // (other indentation, escaped Arabic) comes back in the intake's own JSON layout, values unchanged.
+  if (fs.readFileSync(target.file, 'utf8') !== `${JSON.stringify(existing, null, 2)}\n`) {
+    report.warnings.push(`${path.basename(target.file)} was not in the intake's own JSON layout; it is rewritten in it (no value other than the enrichment changes)`);
+  }
+
+  try {
+    report.stage = 'promote';
+    fs.mkdirSync(publicDir, { recursive: true });
+    // Every old plan goes first: a model the new reading numbers differently must not leave a plan
+    // reachable by URL. The rollback below brings them back from git.
+    for (const f of oldPlans) fs.rmSync(path.join(publicDir, f), { force: true });
+    if (fs.existsSync(stageDir)) fs.cpSync(stageDir, publicDir, { recursive: true });
+
+    // The brochure prints the merged listing, out of the listing's own folder (its photos as they are
+    // now, the new plans). Drawn in the work dir and moved in whole, so a half-written file is never
+    // served. A failure keeps the enrichment and the old brochure, and says so (as on a publish).
+    report.stage = 'brochure';
+    if (caption.noBrochure) {
+      report.brochure = { skipped: 'nobrochure' };
+      log.info('intake.brochure_skipped', { slug, reason: 'nobrochure' });
+    } else {
+      const out = path.join(workDir, 'enrich-brochure', BROCHURE_FILE);
+      fs.rmSync(path.dirname(out), { recursive: true, force: true });
+      fs.mkdirSync(path.dirname(out), { recursive: true });
+      const brochure = await buildBrandedBrochure({ listing: merged, filesDir: publicDir, outPath: out, workDir, cfg });
+      report.brochure = brochure;
+      if (brochure.ok) {
+        const tmp = path.join(publicDir, `.${BROCHURE_FILE}.tmp`);
+        fs.copyFileSync(out, tmp);
+        fs.renameSync(tmp, brochureFileIn(publicDir));
+        merged.brochureUrl = brochureUrlFor(cfg.site, slug);
+        // As `brochure <id>`: a stale "could not build" note does not outlive a brochure that built.
+        const w = merged._intake?.warnings;
+        if (Array.isArray(w) && w.some((c) => c === 'brochure-failed' || c === 'brochure-too-large')) {
+          merged._intake.warnings = w.filter((c) => c !== 'brochure-failed' && c !== 'brochure-too-large');
+        }
+        log.info('intake.brochure_built', { slug, bytes: brochure.bytes, pages: brochure.pages, steps: brochure.steps });
+      } else {
+        const code = brochure.reason === 'too-large' ? 'brochure-too-large' : 'brochure-failed';
+        report.warningCodes.push(code);
+        addWarningCode(merged, code);
+        report.warnings.push(brochure.reason === 'too-large'
+          ? `${brochure.error} — the listing keeps its old brochure`
+          : 'the Bona-branded brochure could not be built, so the listing keeps its old one (the reason is in the journal)');
+        log.warn('intake.brochure_failed', { slug, reason: brochure.reason, error: brochure.error, detail: brochure.detail });
+      }
+    }
+
+    report.stage = 'write';
+    fs.writeFileSync(target.file, `${JSON.stringify(merged, null, 2)}\n`);
+    report.file = target.file;
+    report.listing = merged;
+
+    report.stage = 'rebuild';
+    report.rebuild = await rebuild(cfg.repo);
+  } catch (err) {
+    // The listing was committed and unchanged (checked first), so git puts every file back as it was.
+    const clean = await resetTree(cfg.repo);
     log.error('intake.rolled_back', { slug, stage: report.stage, clean, error: err.message, detail: err.detail });
     err.rolledBack = true;
     throw err;

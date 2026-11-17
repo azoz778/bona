@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ROOMS } from '../../../scripts/curate/rooms.mjs';
 import {
-  FACT_LISTS, imageFocusProblems, INTAKE_ID_RE, isImageFocus as isFocus, isPublishable, licenceProblems, LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB,
-  modelsProblems, subsidisedPriceProblems, videoEntryProblems, withdrawnAdvertising, withdrawnNotice,
+  FACT_LISTS, imageFocusProblems, INTAKE_ID_RE, isImageFocus as isFocus, isPublishable, licenceProblems, loadRegisterWithdrawals,
+  LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, modelsProblems, subsidisedPriceProblems, videoEntryProblems, withdrawnAdvertising, withdrawnNotice,
 } from '../../../scripts/curate/rules.mjs';
 import { isFigure } from './model-prices.mjs';
 
@@ -213,6 +213,17 @@ function publicModels(aiModels, floorPlans, { rent }) {
 }
 
 /**
+ * The unit models and the fact lists (amenities / nearby / warranties) a brochure reading publishes,
+ * each left out when empty — the part of buildListing() that `run-once --enrich` adds to a listing
+ * that is already live. `rent` = the listing is a rental (its models keep no Sakani price).
+ */
+export function modelsAndFacts(ai, floorPlans, { rent = false } = {}) {
+  const models = publicModels(ai?.models, floorPlans, { rent });
+  const facts = Object.fromEntries(Object.keys(FACT_LISTS).filter((k) => hasItems(ai?.[k])).map((k) => [k, copyList(ai[k])]));
+  return { ...(models.length ? { models } : {}), ...facts };
+}
+
+/**
  * Assemble the listing JSON written to scripts/curate/inbox/<slug>.json.
  * Intake-only fields live under `_intake` and in `hidden`; build.mjs strips both.
  * `floorPlans` = writeFloorPlans()'s result (or, on a dry run, floorPlanTargets()'s paths):
@@ -241,8 +252,7 @@ export function buildListing({ ai, images, slug, id, repo, caption = {}, meta = 
     price.subsidisedAmount = subsidised;
   }
   // Optional, and left out entirely when empty: a listing without unit models or facts keeps its shape.
-  const models = publicModels(ai.models, floorPlans, { rent: l.category === 'rent' });
-  const facts = Object.fromEntries(Object.keys(FACT_LISTS).filter((k) => hasItems(ai[k])).map((k) => [k, copyList(ai[k])]));
+  const enrichment = modelsAndFacts(ai, floorPlans, { rent: l.category === 'rent' });
 
   const listing = {
     id,
@@ -271,8 +281,7 @@ export function buildListing({ ai, images, slug, id, repo, caption = {}, meta = 
     videos: [],
     description: { en: l.description.en.join('\n\n'), ar: l.description.ar.join('\n\n') },
     highlights: l.highlights,
-    ...(models.length ? { models } : {}),
-    ...facts,
+    ...enrichment,
     virtualTourUrl: null,
     brochureUrl: meta.brochureUrl ?? null,
     project: l.project ?? null,
@@ -408,6 +417,109 @@ export function replaceMetaFor(repo, id) {
   if (Array.isArray(edits) && edits.length) blockers.push(`the owner's own ${edits.join(' and ')} edit(s)`);
   if (blockers.length) throw new Error(`--replace ${id}: it has ${blockers.join('; ')}, which a re-run would not keep — do it by hand`);
   return { replace: true, id: l.id, slug: l.slug, listedAt: l.listedAt, sourceRef: l.sourceRef ?? null, status: l.status };
+}
+
+// ---- run-once --enrich <id> -------------------------------------------------------------------
+// ~20 listings went live from WhatsApp PDFs before the intake read unit models; several were
+// corrected by hand since (titles, districts, photos), so --replace refuses them. --enrich adds ONLY
+// what the old intake could not read — the unit models with their floor plans, the fact lists, the
+// headline those models prove when the listing had none — and rebuilds the brochure. Everything
+// else in the listing stays exactly as it is.
+
+/** The keys `--enrich` adds, replaces or removes (besides `price` and `brochureUrl`), in publish order. */
+export const ENRICH_KEYS = Object.freeze(['models', ...Object.keys(FACT_LISTS)]);
+
+/**
+ * Which listing `run-once --enrich <id>` adds to — or why it must not. Refused: an unknown id, a
+ * withdrawn listing (its own record or rules.mjs / the review register: nothing is published for it
+ * again), one withheld by owner decision, a hidden one, and one that records no source PDF (the
+ * brochure could not be matched to it). Hand-added fields, videos, a licence, the owner's own edits
+ * do NOT block it: enrichment never rewrites them.
+ * @returns {{enrich:{id:string, slug:string, existing:object}}}
+ */
+export function enrichMetaFor(repo, id) {
+  const found = findInbox(repo, id);
+  if (!found) throw new Error(`--enrich ${id}: no inbox listing with that id`);
+  const l = found.listing;
+  const withdrawn = withdrawnAdvertising(l, loadRegisterWithdrawals(repo));
+  if (withdrawn) throw new Error(`--enrich ${l.id}: ${withdrawnNotice(withdrawn)}`);
+  if (l.status === 'withdrawn') throw new Error(`--enrich ${l.id}: it was withdrawn (status "withdrawn") — nothing is published for it again`);
+  if (!isPublishable(l)) throw new Error(`--enrich ${l.id}: it is withheld from the public site by owner decision`);
+  if (l.hidden) throw new Error(`--enrich ${l.id}: it is hidden — \`show ${l.id}\` first if it should go back on the site`);
+  if (typeof l._intake?.pdfSha256 !== 'string' || !l._intake.pdfSha256) {
+    throw new Error(`--enrich ${l.id}: it records no source PDF (_intake.pdfSha256), so no brochure can be matched to it`);
+  }
+  return { enrich: { id: l.id, slug: l.slug, existing: l } };
+}
+
+const hasEnrichment = (k, v) => (k === 'models' ? Array.isArray(v) && v.length > 0 : hasItems(v));
+
+/**
+ * The listing `--enrich` writes: `existing` with ONLY the new run's enrichment taken from `built` (a
+ * buildListing() / modelsAndFacts() result for the same brochure) — `models` and each fact list,
+ * replaced by the new run's or REMOVED when it has none (an empty one counts as none) — and `price`
+ * only when one is passed. Every other key is the listing's own, unchanged and in its own place, so
+ * the file differs from the old one only by those keys. New keys go where the first enrichment key
+ * was, else after `highlights` (where buildListing() puts them), else at the end. `brochureUrl` is the
+ * caller's to set once the brochure is built. Pure: nothing passed in is changed or shared.
+ */
+export function mergeEnrichment(existing, built, { price } = {}) {
+  const fresh = Object.fromEntries(ENRICH_KEYS.filter((k) => hasEnrichment(k, built?.[k])).map((k) => [k, structuredClone(built[k])]));
+  const keys = Object.keys(existing ?? {});
+  const firstEnrich = keys.findIndex((k) => ENRICH_KEYS.includes(k));
+  const at = firstEnrich !== -1 ? firstEnrich : keys.includes('highlights') ? keys.indexOf('highlights') + 1 : keys.length;
+  const own = keys.filter((k) => !ENRICH_KEYS.includes(k));
+  const cut = keys.slice(0, at).filter((k) => !ENRICH_KEYS.includes(k)).length;
+  const out = {};
+  for (const k of own.slice(0, cut)) out[k] = structuredClone(existing[k]);
+  Object.assign(out, fresh);
+  for (const k of own.slice(cut)) out[k] = structuredClone(existing[k]);
+  if (price !== undefined) out.price = structuredClone(price);
+  return out;
+}
+
+const money = (p) => `${p?.currency ?? 'SAR'} ${Number(p?.amount).toLocaleString('en-US')}`;
+/** A price's Sakani line for a refusal; "(no Sakani price)" only where that line is the whole difference. */
+const sakani = (p, other) => (isFigure(p?.subsidisedAmount)
+  ? ` (Sakani ${p.currency ?? 'SAR'} ${p.subsidisedAmount.toLocaleString('en-US')})`
+  : p?.amount === other?.amount && isFigure(other?.subsidisedAmount) ? ' (no Sakani price)' : '');
+
+/**
+ * The headline `--enrich` publishes beside the unit models, decided from the EXISTING listing.
+ * `alignedPrice` = alignHeadline() over the models as they will be published (null when none of them
+ * kept a confirmed price). In order:
+ *   - the owner set the price by WhatsApp (`_intake.edits` has 'price'): his price stays and the
+ *     models lose theirs — the same rule as a caption price or a later `price <id>`;
+ *   - one specific `unit`: its own price stays, and its models keep theirs (the validator exempts units);
+ *   - no model kept a price: the price stays as it is, set or on request;
+ *   - on request: the models' confirmed headline is adopted — a printed figure the old intake could not read;
+ *   - set: kept when it IS the lowest model price with the same Sakani line (marked `from` if it was
+ *     not — what the validator requires of a headline taken from models); otherwise REFUSED with both
+ *     figures, and nothing changes.
+ * @returns {{price:object, dropModelPrices:boolean, refuse:string|null,
+ *            decision:'owner-price'|'unit'|'no-model-prices'|'adopted'|'kept'|'refused'}}
+ */
+export function enrichHeadline(existing, models, alignedPrice) {
+  const current = existing?.price ?? null;
+  const keep = (decision, dropModelPrices = false) => ({ price: current, dropModelPrices, refuse: null, decision });
+  const edits = existing?._intake?.edits;
+  if (Array.isArray(edits) && edits.includes('price')) return keep('owner-price', true);
+  if (existing?.unit !== null && existing?.unit !== undefined) return keep('unit');
+  const priced = (Array.isArray(models) ? models : []).some((m) => isFigure(m?.price));
+  if (!priced || !alignedPrice || !isFigure(alignedPrice.amount)) return keep('no-model-prices');
+  if (!current || current.onRequest) return { price: alignedPrice, dropModelPrices: false, refuse: null, decision: 'adopted' };
+  const sameSakani = (current.subsidisedAmount ?? null) === (alignedPrice.subsidisedAmount ?? null);
+  if (current.amount === alignedPrice.amount && sameSakani) {
+    return { price: current.from === true ? current : { ...current, from: true }, dropModelPrices: false, refuse: null, decision: 'kept' };
+  }
+  const id = existing?.id ?? 'the listing';
+  return {
+    price: current,
+    dropModelPrices: false,
+    refuse: `${id} shows ${money(current)}${sakani(current, alignedPrice)} but the brochure's lowest model price is `
+      + `${money(alignedPrice)}${sakani(alignedPrice, current)} — send \`price ${id} …\` or re-run with --replace`,
+    decision: 'refused',
+  };
 }
 
 /** Pick the images to publish from the model's ranking. */

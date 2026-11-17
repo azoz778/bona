@@ -212,6 +212,25 @@ Anything else in the group is ignored, silently.
   has been committed to again since it was published (a hand correction, a WhatsApp edit), or that
   carries anything a re-run would not keep — a hand-added field (`photoNote`, `faq`, `seoTitle`, …),
   videos, a licence, a virtual tour, `hidden`, `featured`, or `_intake.edits` (`price`/`hero`).
+  Later `intake: enrich …` commits do not count as changes (an enrichment is rebuilt by a re-run).
+- **Enriching a published listing** (listings published before the intake read unit models):
+  `node services/intake/run-once.mjs <pdf> --enrich BONA-W014 [--dry-run]` reads the brochure again
+  and adds ONLY the unit models (every model price confirmed on its page, as on a publish), their
+  floor plans (`plan-NN.jpg`, the old plan files are removed), `amenities` / `nearby` / `warranties`
+  (a list the new reading does not have is removed) and a new brochure drawn from the merged listing
+  and its own folder. Every other key of the inbox JSON — title, copy, photos, location, licence,
+  videos, `photoNote`, `faq`, `seoTitle`, `featured`, `_intake` — stays byte for byte, so it works on
+  a listing corrected by hand (no history rule). The headline is decided from the listing: the
+  owner's own price (`_intake.edits` has `price`) stays and the models publish without prices; one
+  specific `unit` keeps its price; a price on request adopts the models' lowest confirmed price
+  (`from`, with its Sakani line); a set price is kept only when it IS that price (marked `from`),
+  otherwise the run is refused with both figures and nothing changes — send `price <id> …` first, or
+  use `--replace`. It must be the very PDF the listing was published from (`_intake.pdfSha256`), the
+  clone clean and the listing committed (a failed run is rolled back from git); withdrawn, withheld
+  and hidden listings are refused. A brochure that cannot be built keeps the enrichment and the old
+  brochure (`brochure-failed`). The commit is `intake: enrich <title> (<id>) — unit models + brochure`.
+  Not with `--replace`, `--caption` or `--no-git` (except with `--dry-run`, which prints the models,
+  their prices, the headline decision and the plan files, and writes nothing).
 - **Nothing the model writes is trusted.** Only fields that pass `validateAiResult` +
   `copyProblems` + `checkListing` are written or sent on. The model's free-text `warnings`
   stay in the run's `ai.json`; `_intake.warnings` in the committed listing holds codes from a
