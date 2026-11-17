@@ -14,9 +14,13 @@ import { ORDINARY_COPY } from './ordinary-copy-fixture.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const FILES = ['scripts/curate/validate.mjs', 'scripts/curate/rules.mjs', 'src/lib/units-summary.mjs', 'src/data/kind-map.json', 'src/data/listings.json'];
 
+// Under ~/.cache, not os.tmpdir(): /tmp is RAM on this host.
+const TMP_BASE = path.join(os.homedir(), '.cache', 'bona-tests');
+
 /** A copy of just what validate.mjs reads, with listings.json rewritten by `edit`. */
 function validateWith(edit) {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bona-validate-copy-')));
+  fs.mkdirSync(TMP_BASE, { recursive: true });
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(TMP_BASE, 'validate-copy-')));
   try {
     for (const f of FILES) {
       fs.mkdirSync(path.join(dir, path.dirname(f)), { recursive: true });
@@ -49,6 +53,19 @@ test('validate.mjs catches a contact number written in Arabic-Indic or Persian d
     });
     assert.equal(res.status, 1, `${leak} must fail the deploy`);
     assert.match(res.stderr, new RegExp(`${id}: description\\.ar mentions a contact detail or another brand: `), res.stderr);
+  }
+});
+
+test('validate.mjs catches an ALL-CAPS domain, and names a leak as the copy writes it', () => {
+  for (const [leak, shown] of [['Sales: ACME-HOMES.SA', 'ACME-HOMES.SA'], ['جوال ٠٥٥١٢٣٤٥٦٧', '٠٥٥١٢٣٤٥٦٧']]) {
+    let id;
+    const res = validateWith((listings) => {
+      const l = listings[0];
+      id = l.id;
+      l.description.en = `${l.description.en}\n\n${leak}`;
+    });
+    assert.equal(res.status, 1, `${leak} must fail the deploy`);
+    assert.ok(res.stderr.includes(`${id}: description.en mentions a contact detail or another brand: ${shown}`), res.stderr);
   }
 });
 

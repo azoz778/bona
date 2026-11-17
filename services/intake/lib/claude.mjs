@@ -28,7 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOMS } from '../../../scripts/curate/rooms.mjs';
-import { bilingualListProblems, FORBIDDEN as COPY_FORBIDDEN, forbiddenHits, HYPE_WORDS as SHARED_HYPE_WORDS, isImageFocus as isFocus } from '../../../scripts/curate/rules.mjs';
+import { bilingualListProblems, FORBIDDEN as COPY_FORBIDDEN, forbiddenHits, HYPE_WORDS as SHARED_HYPE_WORDS, isImageFocus as isFocus, MODEL_LIMITS } from '../../../scripts/curate/rules.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PROMPT_TEMPLATE = path.join(HERE, 'prompt.md');
@@ -292,30 +292,33 @@ export function validateAiResult(result, { candidateCount = 0, candidates = null
     e.push('listing.project must be null or { name:{en,ar}, developer:{en,ar} }');
   }
 
-  // Optional unit models + bilingual fact lists (absent or null is fine).
+  // Optional unit models + bilingual fact lists (absent or null is fine). The limits are the site's
+  // own (rules.mjs MODEL_LIMITS), the numbers prompt.md states.
+  const L = MODEL_LIMITS;
   if (result.models !== null && result.models !== undefined) {
     if (!Array.isArray(result.models)) e.push('models must be an array');
-    else if (result.models.length > 24) e.push(`models has more than 24 entries (${result.models.length})`);
+    else if (result.models.length > L.maxModels) e.push(`models has more than ${L.maxModels} entries (${result.models.length})`);
     else {
       const plans = new Set();
       result.models.forEach((m, i) => {
         const at = `models[${i}]`;
         if (!m || typeof m !== 'object') { e.push(`${at} must be an object`); return; }
         if (!isPair(m.name)) e.push(`${at}.name.en/ar required (ar must be Arabic script)`);
+        const { roomCount: rc, areaSqm: area } = L;
         for (const k of ['bedrooms', 'bathrooms']) {
           const v = m[k];
-          if (v !== null && v !== undefined && !(Number.isInteger(v) && v >= 0 && v <= 20)) e.push(`${at}.${k} must be null or an integer 0-20`);
+          if (v !== null && v !== undefined && !(Number.isInteger(v) && v >= rc.min && v <= rc.max)) e.push(`${at}.${k} must be null or an integer ${rc.min}-${rc.max}`);
         }
-        if (m.areaSqm !== null && m.areaSqm !== undefined && !(typeof m.areaSqm === 'number' && Number.isFinite(m.areaSqm) && m.areaSqm >= 10 && m.areaSqm <= 100000)) {
-          e.push(`${at}.areaSqm must be null or a number between 10 and 100000`);
+        if (m.areaSqm !== null && m.areaSqm !== undefined && !(typeof m.areaSqm === 'number' && Number.isFinite(m.areaSqm) && m.areaSqm >= area.min && m.areaSqm <= area.max)) {
+          e.push(`${at}.areaSqm must be null or a number between ${area.min} and ${area.max}`);
         }
         for (const lang of ['en', 'ar']) {
-          if (isStr(m.name?.[lang]) && m.name[lang].length > 60) e.push(`${at}.name.${lang} is ${m.name[lang].length} characters — at most 60`);
+          if (isStr(m.name?.[lang]) && m.name[lang].length > L.nameMax) e.push(`${at}.name.${lang} is ${m.name[lang].length} characters — at most ${L.nameMax}`);
         }
-        e.push(...bilingualListProblems(m.rooms, `${at}.rooms`, { max: 12, maxItemLength: 40 }));
+        e.push(...bilingualListProblems(m.rooms, `${at}.rooms`, { max: L.roomsMax, maxItemLength: L.roomItemMax }));
         if (m.availability !== null && m.availability !== undefined) {
           if (!isPair(m.availability)) e.push(`${at}.availability must be null or { en, ar } (ar Arabic script)`);
-          else for (const lang of ['en', 'ar']) if (m.availability[lang].length > 160) e.push(`${at}.availability.${lang} is ${m.availability[lang].length} characters — at most 160`);
+          else for (const lang of ['en', 'ar']) if (m.availability[lang].length > L.availabilityMax) e.push(`${at}.availability.${lang} is ${m.availability[lang].length} characters — at most ${L.availabilityMax}`);
         }
         const okPrice = (v) => v === null || v === undefined || (typeof v === 'number' && Number.isFinite(v) && v > 0);
         if (!okPrice(m.price)) e.push(`${at}.price must be null or a number above 0`);
@@ -342,8 +345,8 @@ export function validateAiResult(result, { candidateCount = 0, candidates = null
       });
     }
   }
-  for (const [k, max] of [['amenities', 16], ['nearby', 8], ['warranties', 8]]) {
-    e.push(...bilingualListProblems(result[k], k, { max, maxItemLength: 80 }));
+  for (const [k, max] of Object.entries(L.factLists)) {
+    e.push(...bilingualListProblems(result[k], k, { max, maxItemLength: L.factItemMax }));
   }
 
   if (!Array.isArray(result.images)) e.push('images must be an array');

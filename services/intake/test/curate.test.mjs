@@ -250,6 +250,39 @@ describe('copy rules', () => {
     assert.ok(forbiddenHits('see WWW.ACME.COM').length > 0);
   });
 
+  it('domains: an ALL-CAPS TLD counts too; a mixed-case one is a missing space', () => {
+    for (const s of ['EXAMPLE.COM', 'call ACME-HOMES.SA', 'visit Acme.COM.SA', 'ACME.AE', 'sales.ACME.NET', 'acme.CO']) {
+      assert.ok(DOMAIN_RE.test(s), `${s} must be caught`);
+    }
+    for (const s of ['3 bedrooms.Net area 180 m²', 'Pool.Com munal', 'K.S.A', 'U.S.A', 'A.COM']) assert.ok(!DOMAIN_RE.test(s), `${s} is not a domain`);
+  });
+
+  it('domains: the label before the dot starts with a letter and has 2+ characters', () => {
+    for (const s of ['Building 2.co-working', 'Tower 9.com', 'Phase 2.CO', 'x.com']) assert.ok(!DOMAIN_RE.test(s), `${s} is not a domain`);
+    for (const s of ['b2.com', 'acme2.sa', 'ab.io']) assert.ok(DOMAIN_RE.test(s), `${s} must be caught`);
+  });
+
+  it('domains: a word glued to a lower-case TLD is caught, even when it was only a missing space (decided 2026-11-17)', () => {
+    // "more.info", "Bldg.me", "apt.io" read as addresses, and a listing never needs them: the copy
+    // is rewritten with the space. Recorded here so the choice is deliberate, not an accident.
+    for (const s of ['for more.info call us', 'Bldg.me', 'apt.io']) assert.ok(DOMAIN_RE.test(s), `${s} is treated as a domain`);
+  });
+
+  it('forbiddenHits reports the text as written, not the ASCII digits it tested', () => {
+    assert.deepEqual(forbiddenHits('جوال ٠٥٥١٢٣٤٥٦٧'), ['٠٥٥١٢٣٤٥٦٧']);
+    assert.deepEqual(forbiddenHits('هاتف ۰۱۲۶۶۰۱۲۳۴ للحجز'), ['۰۱۲۶۶۰۱۲۳۴']);
+    assert.deepEqual(forbiddenHits('ring 0551234567'), ['0551234567']);
+  });
+
+  it('forbiddenHits never throws: odd text is clean, odd rules fall back to FORBIDDEN', () => {
+    for (const t of [null, undefined, {}, [], Object.create(null), Symbol('x'), () => 1, true]) assert.deepEqual(forbiddenHits(t), [], String(typeof t));
+    assert.deepEqual(forbiddenHits(966551234567).length > 0, true, 'a number is read as its digits');
+    for (const rules of [null, undefined, 'FORBIDDEN', {}, 3]) assert.ok(forbiddenHits('ring 0551234567', rules).length > 0, `rules=${String(rules)} still tests FORBIDDEN`);
+    assert.deepEqual(forbiddenHits('a 0551234567', [null, 'x', { test: () => true }, /\d{10}/]), ['0551234567'], 'entries that are not a RegExp are skipped');
+    const g = /\d{10}/g;
+    assert.deepEqual([forbiddenHits('a 0551234567', [g]), forbiddenHits('a 0551234567', [g])], [['0551234567'], ['0551234567']], 'a global rule gives the same answer every time');
+  });
+
   it('still catch the old brand', () => {
     assert.ok(FORBIDDEN.some((re) => re.test('Marketed by TK Estates')));
     assert.ok(FORBIDDEN.some((re) => re.test('see tk-estates.com')));

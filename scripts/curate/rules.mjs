@@ -22,14 +22,18 @@ export const PHONE_RE = /(?:\+?966[\s.-]?5\d(?:[\s.-]?\d){7}|(?<![\d+])0[\s.-]?5
  * Other contact details that leak from a developer's brochure: Saudi unified numbers (9200 +
  * 5 digits), toll-free 800 numbers, Saudi landlines (01x + 6-7 digits), URLs, bare domains,
  * e-mail addresses and social handles. The site renders its own contact block.
- * A bare domain needs a lower-case TLD ("acme.com", "ACME.com"): "3 bedrooms.Net area" is a missing
- * space, not an address. An upper-case address is still caught by its "www." (URL_RE).
+ * A bare domain needs a TLD written all lower-case ("acme.com", "ACME.com") or all upper-case
+ * ("ACME.COM", "Acme.COM.SA"): "3 bedrooms.Net area" is a missing space, not an address. The label
+ * before the dot starts with a letter and has 2+ characters, so "Building 2.co-working" and "K.S.A"
+ * are not addresses. A word glued to a lower-case TLD ("more.info", "apt.io") IS treated as one —
+ * decided 2026-11-17 (curate.test.mjs): a listing never needs it, and the copy gets its space back.
  */
 export const UNIFIED_NUMBER_RE = /(?<![\d+])9200(?:[\s-]?\d){5}(?!\d)/;
 export const TOLL_FREE_RE = /(?<![\d+])800(?:[\s-]?\d){7}(?!\d)/;
 export const LANDLINE_RE = /(?<![\d+])0[\s-]?1[1-9](?:[\s-]?\d){6,7}(?!\d)/;
 export const URL_RE = /https?:\/\/|\bwww\./i;
-export const DOMAIN_RE = /\b[A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)*\.(?:sa|com|net|org|ae|co|io|info|me)\b/;
+const DOMAIN_TLDS = ['sa', 'com', 'net', 'org', 'ae', 'co', 'io', 'info', 'me'];
+export const DOMAIN_RE = new RegExp(`\\b[A-Za-z][A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.(?:${[...DOMAIN_TLDS, ...DOMAIN_TLDS.map((t) => t.toUpperCase())].join('|')})\\b`);
 export const EMAIL_RE = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/;
 export const HANDLE_RE = /(?<![\w@])@\w{3,}/;
 export const CONTACT_RES = [UNIFIED_NUMBER_RE, TOLL_FREE_RE, LANDLINE_RE, URL_RE, DOMAIN_RE, EMAIL_RE, HANDLE_RE];
@@ -57,13 +61,27 @@ export function asciiDigits(text) {
 
 /**
  * What a FORBIDDEN rule finds in `text` once its digits are ASCII: one match per rule that hits
- * (empty = clean). The ONE way both the site validator and the WhatsApp intake test copy.
+ * (empty = clean), reported as the ORIGINAL text — "٠٥٥١٢٣٤٥٦٧", not "0551234567" (asciiDigits maps
+ * one character to one, so the match's place in the ASCII text is its place in the original). The
+ * ONE way both the site validator and the WhatsApp intake test copy. Never throws: text that is not
+ * a string (or a number, read as its digits) is clean; `rules` that is not an array means FORBIDDEN
+ * (a broken call must not turn the check off), and an entry that is not a RegExp is skipped.
  * @param {string} text
- * @param {RegExp[]} [rules]  FORBIDDEN, or FORBIDDEN plus a caller's own (non-global) extras
+ * @param {RegExp[]} [rules]  FORBIDDEN, or FORBIDDEN plus a caller's own extras
  */
 export function forbiddenHits(text, rules = FORBIDDEN) {
-  const t = asciiDigits(text);
-  return rules.map((re) => t.match(re)?.[0]).filter((m) => m !== undefined);
+  if (typeof text !== 'string' && typeof text !== 'number') return [];
+  const original = String(text);
+  const t = asciiDigits(original);
+  const out = [];
+  for (const re of Array.isArray(rules) ? rules : FORBIDDEN) {
+    if (!(re instanceof RegExp)) continue;
+    // A global or sticky rule keeps state in lastIndex; a fresh copy without those flags never does.
+    const once = re.global || re.sticky ? new RegExp(re.source, re.flags.replace(/[gy]/g, '')) : re;
+    const m = once.exec(t);
+    if (m) out.push(original.slice(m.index, m.index + m[0].length));
+  }
+  return out;
 }
 
 // ---- bilingual fact lists --------------------------------------------------------------
@@ -183,10 +201,26 @@ export function subsidisedPriceProblems(price, category) {
 // these names, so a floor plan can never stand in for a gallery photo.
 export const LOCAL_PLAN_SRC = /^\/listings\/[a-z0-9]+(?:-[a-z0-9]+)*\/plan-\d{2,3}\.jpg$/;
 export const LOCAL_PLAN_THUMB = /^\/listings\/[a-z0-9]+(?:-[a-z0-9]+)*\/plan-\d{2,3}-thumb\.webp$/;
-export const MAX_MODELS = 24;
+/**
+ * Every limit on a unit model and the fact lists, ONE set of numbers for the AI contract
+ * (services/intake/lib/claude.mjs validateAiResult), this rule (modelsProblems) and the prompt that
+ * states them (services/intake/lib/prompt.md, pinned by claude.test.mjs).
+ */
+export const MODEL_LIMITS = Object.freeze({
+  maxModels: 24,             // models per listing
+  nameMax: 60,               // characters, each language
+  roomsMax: 12,              // items in `rooms`
+  roomItemMax: 40,           // characters per room
+  availabilityMax: 160,      // characters, each language
+  factLists: Object.freeze({ amenities: 16, nearby: 8, warranties: 8 }), // items per list
+  factItemMax: 80,           // characters per fact item
+  roomCount: Object.freeze({ min: 0, max: 20 }),       // bedrooms, bathrooms (whole numbers)
+  areaSqm: Object.freeze({ min: 10, max: 100000 }),
+});
+export const MAX_MODELS = MODEL_LIMITS.maxModels;
 /** The three fact lists and how many items each may hold; every item is at most FACT_ITEM_MAX characters. */
-export const FACT_LISTS = Object.freeze({ amenities: 16, nearby: 8, warranties: 8 });
-export const FACT_ITEM_MAX = 80;
+export const FACT_LISTS = MODEL_LIMITS.factLists;
+export const FACT_ITEM_MAX = MODEL_LIMITS.factItemMax;
 /** Every field a published model may carry. Anything else — the AI's internal `evidence` above all — is refused. */
 export const MODEL_FIELDS = Object.freeze(['name', 'bedrooms', 'bathrooms', 'areaSqm', 'rooms', 'availability', 'price', 'subsidisedPrice', 'floorPlan']);
 
@@ -215,11 +249,12 @@ function bilingualTextProblems(v, field, max) {
 }
 
 /**
- * `models`, `amenities`, `nearby` and `warranties` of a listing. Each model: a bilingual name (≤ 60),
- * bedrooms/bathrooms null or 0–20, areaSqm null or 10–100000, rooms a bilingual list (≤ 12 × 40),
- * availability null or bilingual (≤ 160), price/subsidisedPrice null or > 0 with the Sakani price below
- * the model's own price (sales only), floorPlan null or `{ src, thumb }` in this listing's own folder,
- * each plan used once, and no other field. The headline of a whole development is its cheapest model,
+ * `models`, `amenities`, `nearby` and `warranties` of a listing (limits: MODEL_LIMITS). Each model: a
+ * bilingual name (≤ 60), bedrooms/bathrooms null or 0–20, areaSqm null or 10–100000, rooms a bilingual
+ * list (≤ 12 × 40), availability null or bilingual (≤ 160), price/subsidisedPrice null or > 0 with the
+ * Sakani price below the model's own price (sales only), floorPlan null or `{ src, thumb }` in this
+ * listing's own folder, the thumb the one of its own plan (plan-NN.jpg -> plan-NN-thumb.webp), each
+ * plan and thumb used once, and no other field. The headline of a whole development is its cheapest model,
  * "from" (services/intake/lib/model-prices.mjs alignHeadline, applied by the pipeline), so the From
  * figure and the table never disagree: whenever a model has a price, `price.amount` is the lowest one,
  * `price.from` is true, and `price.subsidisedAmount` is the lowest model Sakani price when that is below
@@ -234,21 +269,24 @@ export function modelsProblems(listing) {
   if (!absent(l.models)) {
     if (!Array.isArray(l.models)) out.push('models must be an array of unit models when present');
     else {
-      if (l.models.length > MAX_MODELS) out.push(`models has ${l.models.length} entries — at most ${MAX_MODELS}`);
+      const L = MODEL_LIMITS;
+      if (l.models.length > L.maxModels) out.push(`models has ${l.models.length} entries — at most ${L.maxModels}`);
       const plans = new Set();
       l.models.forEach((m, i) => {
         const at = `models[${i}]`;
         if (!m || typeof m !== 'object' || Array.isArray(m)) { out.push(`${at} must be an object`); return; }
         for (const k of Object.keys(m)) if (!MODEL_FIELDS.includes(k)) out.push(`${at} has an unknown field "${k}"`);
-        out.push(...bilingualTextProblems(m.name, `${at}.name`, 60));
+        out.push(...bilingualTextProblems(m.name, `${at}.name`, L.nameMax));
+        const { min: rMin, max: rMax } = L.roomCount;
         for (const k of ['bedrooms', 'bathrooms']) {
-          if (!absent(m[k]) && !(Number.isInteger(m[k]) && m[k] >= 0 && m[k] <= 20)) out.push(`${at}.${k} must be null or a whole number 0–20`);
+          if (!absent(m[k]) && !(Number.isInteger(m[k]) && m[k] >= rMin && m[k] <= rMax)) out.push(`${at}.${k} must be null or a whole number ${rMin}–${rMax}`);
         }
-        if (!absent(m.areaSqm) && !(typeof m.areaSqm === 'number' && Number.isFinite(m.areaSqm) && m.areaSqm >= 10 && m.areaSqm <= 100000)) {
-          out.push(`${at}.areaSqm must be null or a number between 10 and 100000`);
+        const { min: aMin, max: aMax } = L.areaSqm;
+        if (!absent(m.areaSqm) && !(typeof m.areaSqm === 'number' && Number.isFinite(m.areaSqm) && m.areaSqm >= aMin && m.areaSqm <= aMax)) {
+          out.push(`${at}.areaSqm must be null or a number between ${aMin} and ${aMax}`);
         }
-        out.push(...bilingualListProblems(m.rooms, `${at}.rooms`, { max: 12, maxItemLength: 40 }));
-        if (!absent(m.availability)) out.push(...bilingualTextProblems(m.availability, `${at}.availability`, 160));
+        out.push(...bilingualListProblems(m.rooms, `${at}.rooms`, { max: L.roomsMax, maxItemLength: L.roomItemMax }));
+        if (!absent(m.availability)) out.push(...bilingualTextProblems(m.availability, `${at}.availability`, L.availabilityMax));
 
         if (!absent(m.price) && !isFigure(m.price)) out.push(`${at}.price must be null or a number above 0`);
         if (!absent(m.subsidisedPrice)) {
@@ -258,7 +296,9 @@ export function modelsProblems(listing) {
           if (l.category === 'rent') out.push(`${at}.subsidisedPrice is for sales only`);
         }
         if (isFigure(m.price)) prices.push(m.price);
-        if (isFigure(m.subsidisedPrice)) subs.push(m.subsidisedPrice);
+        // Only a Sakani price valid against its own model's price counts for the headline (as in
+        // alignHeadline): an invalid one is reported above, once, not again as a headline mismatch.
+        if (isFigure(m.price) && isFigure(m.subsidisedPrice) && m.subsidisedPrice < m.price) subs.push(m.subsidisedPrice);
 
         if (!absent(m.floorPlan)) {
           const fp = m.floorPlan;
@@ -270,10 +310,14 @@ export function modelsProblems(listing) {
                 out.push(`${at}.floorPlan.${k} is not /listings/${l.slug}/${shape}: ${fp[k]}`);
               }
             }
-            if (typeof fp.src === 'string') {
-              if (plans.has(fp.src)) out.push(`${at}.floorPlan ${fp.src} is already used by another model`);
-              plans.add(fp.src);
+            if (LOCAL_PLAN_SRC.test(fp.src ?? '') && LOCAL_PLAN_THUMB.test(fp.thumb ?? '')) {
+              const own = fp.src.replace(/\.jpg$/, '-thumb.webp');
+              if (fp.thumb !== own) out.push(`${at}.floorPlan.thumb ${fp.thumb} is not the thumbnail of ${fp.src} (${own})`);
             }
+            const files = [fp.src, fp.thumb].filter((f) => typeof f === 'string');
+            const taken = files.find((f) => plans.has(f));
+            if (taken) out.push(`${at}.floorPlan ${taken} is already used by another model`);
+            for (const f of files) plans.add(f);
           }
         }
 
@@ -289,7 +333,7 @@ export function modelsProblems(listing) {
     const p = l.price && typeof l.price === 'object' ? l.price : {};
     const low = Math.min(...prices);
     if (p.onRequest || p.amount !== low) {
-      out.push(`price.amount must be the lowest unit-model price (${fmt(low)}) when the models carry prices, not ${p.onRequest ? 'on request' : fmt(p.amount)}`);
+      out.push(`price.amount must be the lowest unit-model price (${fmt(low)}) when the models carry prices, not ${p.onRequest ? 'on request' : absent(p.amount) ? 'absent' : fmt(p.amount)}`);
     }
     if (p.from !== true) out.push('price.from must be true when the headline is the lowest unit-model price');
     // A rental's headline never has a Sakani price at all (subsidisedPriceProblems); nothing to align.
@@ -307,8 +351,8 @@ export function modelsProblems(listing) {
     }
   }
 
-  for (const [k, max] of Object.entries(FACT_LISTS)) {
-    out.push(...bilingualListProblems(l[k], k, { max, maxItemLength: FACT_ITEM_MAX }));
+  for (const [k, max] of Object.entries(MODEL_LIMITS.factLists)) {
+    out.push(...bilingualListProblems(l[k], k, { max, maxItemLength: MODEL_LIMITS.factItemMax }));
     for (const lang of ['en', 'ar']) (Array.isArray(l[k]?.[lang]) ? l[k][lang] : []).forEach((x, j) => out.push(...copyRuleHits(`${k}.${lang}[${j}]`, x)));
   }
   return out;

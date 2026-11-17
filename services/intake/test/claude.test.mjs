@@ -10,6 +10,7 @@ import {
   buildPrompt, confirmModelPrices, confirmPriceEvidence, copyProblems, FENCE, HYPE_WORDS, PROMPT_TEMPLATE, ROOM_KEYS, runListingAi, validateAiResult,
 } from '../lib/claude.mjs';
 import { ORDINARY_COPY } from '../../../scripts/test/ordinary-copy-fixture.mjs';
+import { MODEL_LIMITS } from '../../../scripts/curate/rules.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -127,6 +128,32 @@ describe('validateAiResult', () => {
     const edge = structuredClone(MODEL); edge.name.en = long(60); edge.rooms = { en: [long(40)], ar: ['غرفة'] }; edge.availability = { en: long(160), ar: 'المباني' };
     assert.deepEqual(V(withModels(edge)), []);
   });
+  it('takes every model limit from MODEL_LIMITS (scripts/curate/rules.mjs), the numbers the prompt states', () => {
+    const L = MODEL_LIMITS;
+    assert.deepEqual(L, {
+      maxModels: 24, nameMax: 60, roomsMax: 12, roomItemMax: 40, availabilityMax: 160,
+      factLists: { amenities: 16, nearby: 8, warranties: 8 }, factItemMax: 80,
+      roomCount: { min: 0, max: 20 }, areaSqm: { min: 10, max: 100000 },
+    });
+    const src = validateAiResult.toString();
+    for (const n of [24, 60, 160, 12, 40, 16, 80, 20, 100000]) assert.doesNotMatch(src, new RegExp(`\\b${n}\\b`), `validateAiResult hard-codes ${n}`);
+    const p = fs.readFileSync(PROMPT_TEMPLATE, 'utf8');
+    assert.match(p, new RegExp(`\`models\` has at most ${L.maxModels} entries`));
+    assert.match(p, new RegExp(`Names at most ${L.nameMax} characters`));
+    assert.match(p, new RegExp(`at most ${L.roomsMax} items of at most ${L.roomItemMax} characters`));
+    assert.match(p, new RegExp(`\\(at most ${L.availabilityMax} characters\\)`));
+    const f = L.factLists;
+    assert.match(p, new RegExp(`At most ${f.amenities}, ${f.nearby} and ${f.warranties} items, each at most ${L.factItemMax} characters`));
+    // The edges, both sides, so the shared numbers are the ones enforced.
+    const m = structuredClone(MODEL);
+    m.name.en = 'x'.repeat(L.nameMax); m.bedrooms = L.roomCount.max; m.areaSqm = L.areaSqm.min;
+    m.rooms = { en: Array(L.roomsMax).fill('x'.repeat(L.roomItemMax)), ar: Array(L.roomsMax).fill('غرفة') };
+    assert.deepEqual(V(withModels(m)), []);
+    for (const [k, v] of [['bedrooms', L.roomCount.max + 1], ['bathrooms', L.roomCount.min - 1], ['areaSqm', L.areaSqm.min - 1], ['areaSqm', L.areaSqm.max + 1]]) {
+      assert.ok(V(withModels({ ...structuredClone(MODEL), [k]: v })).some((x) => new RegExp(`models\\[0\\]\\.${k}`).test(x)), `${k} ${v}`);
+    }
+  });
+
   it('names the item index of every bad list item', () => {
     const r = clone();
     r.amenities = { en: ['Gym', '', 'Pool', 'Spa'], ar: ['نادٍ', 'مسبح', 'Pool', 'منتجع'] };

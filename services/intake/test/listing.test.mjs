@@ -434,6 +434,8 @@ describe('buildListing + checkListing — unit models, floor plans, amenities / 
     ['a floor-plan thumb of another listing', (l) => { l.models[0].floorPlan.thumb = '/listings/other-listing/plan-01-thumb.webp'; }, /models\[0\]\.floorPlan\.thumb/],
     ['a floor plan that is still a candidate index', (l) => { l.models[1].floorPlan = 3; }, /models\[1\]\.floorPlan must be null or \{ src, thumb \}/],
     ['one floor plan shared by two models', (l) => { l.models[1].floorPlan = { ...l.models[0].floorPlan }; }, /models\[1\]\.floorPlan .*plan-01\.jpg is already used by another model/],
+    ['a floor-plan thumb of another plan', (l) => { l.models[0].floorPlan.thumb = `/listings/${slug}/plan-02-thumb.webp`; }, /models\[0\]\.floorPlan\.thumb \/listings\/jeddah-heights-al-hamdaniyah\/plan-02-thumb\.webp is not the thumbnail of \/listings\/jeddah-heights-al-hamdaniyah\/plan-01\.jpg/],
+    ['one floor-plan thumb shared by two models', (l) => { l.models[1].floorPlan = { src: `/listings/${slug}/plan-02.jpg`, thumb: l.models[0].floorPlan.thumb }; }, /models\[1\]\.floorPlan .*plan-01-thumb\.webp is already used by another model/],
     ['the model\'s evidence, published', (l) => { l.models[0].evidence = { page: 10, quote: '419,994' }; }, /models\[0\] has an unknown field "evidence"/],
     ['a headline that is not the lowest model price', (l) => { l.price.amount = 300000; }, /price\.amount must be the lowest unit-model price \(319,015\)/],
     ['a headline on request beside model prices', (l) => { l.price = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true }; }, /price\.amount must be the lowest unit-model price \(319,015\).*on request/],
@@ -464,6 +466,31 @@ describe('buildListing + checkListing — unit models, floor plans, amenities / 
       assert.ok(problems.some((p) => re.test(p)), problems.join(' | ') || '(no problems)');
     });
   }
+
+  it('a Sakani price that is not valid against its own model price is ONE problem: it never sets the headline\'s Sakani price', () => {
+    const l = build();
+    l.models[0].price = null;
+    l.models[0].subsidisedPrice = 200000; // below the headline, but it has no price of its own
+    const problems = modelsProblems(l);
+    assert.ok(problems.some((p) => /models\[0\]\.subsidisedPrice needs the model's regular price/.test(p)), problems.join(' | '));
+    assert.ok(!problems.some((p) => /price\.subsidisedAmount/.test(p)), problems.join(' | '));
+    const above = build();
+    above.models[1].subsidisedPrice = 400000; // above its own 319,015
+    above.models[0].subsidisedPrice = null;
+    above.price.subsidisedAmount = undefined;
+    delete above.price.subsidisedAmount;
+    const p2 = modelsProblems(above);
+    assert.ok(p2.some((p) => /models\[1\]\.subsidisedPrice must be lower than its price/.test(p)), p2.join(' | '));
+    assert.ok(!p2.some((p) => /price\.subsidisedAmount/.test(p)), p2.join(' | '));
+  });
+
+  it('a headline with no amount beside model prices says "absent", never "undefined"', () => {
+    const l = build();
+    delete l.price.amount;
+    const problems = modelsProblems(l);
+    assert.ok(problems.some((p) => /price\.amount must be the lowest unit-model price \(319,015\) when the models carry prices, not absent/.test(p)), problems.join(' | '));
+    assert.ok(!problems.some((p) => /undefined/.test(p)), problems.join(' | '));
+  });
 
   // Hand edits and the backfill never pass the AI step's copyProblems(), so the shared rule checks
   // every model string and list item itself.
