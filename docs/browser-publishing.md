@@ -145,12 +145,16 @@ both channels sat blocked for 18 days with the alerts only in `<channel>/alerts.
    pressed again.
 8. Confirm — only TOP-LEVEL posts are candidates (a reshared/quoted container never is), and each
    new one is read in full first: LinkedIn from the Page's own list (admin posts list, public posts
-   page), whose post elements carry the URN and hold the post's whole own text (clamped on screen
-   only; read 2026-11-16), and only when a list cuts that text short, from the post's own page
-   `/feed/update/<urn>/` with "…see more" expanded. Since 2026-11-15 LinkedIn often serves that page
-   as a server-driven screen (`data-sdui-screen="com.linkedin.sdui.flagshipnav.feed.UpdateDetail"`)
-   on which no element carries the URN and whose markup changes between visits. Nothing is read
-   there, so the 11-15 BONA-015 post, live, went `uncertain` before the list was read. TikTok from its row in TikTok Studio's content list (`/tiktokstudio/content`), which
+   page), whose post elements carry the URN. So far the list has held each post's whole own text,
+   clamped on screen only: OBSERVED on 2026-11-16 and 11-17 for four posts of 584–629 characters,
+   not guaranteed. A longer text may be cut in the list itself; only then is the post read from its
+   own page `/feed/update/<urn>/` with "…see more" expanded. Since 2026-11-15 LinkedIn often serves
+   that page as a server-driven screen
+   (`data-sdui-screen="com.linkedin.sdui.flagshipnav.feed.UpdateDetail"`) on which no element
+   carries the URN and whose markup changes between visits. Nothing is read there, so on such a day
+   a post whose list text is cut short stays `uncertain` (as the 11-15 BONA-015 post, live, did
+   before the list was read).
+   TikTok from its row in TikTok Studio's content list (`/tiktokstudio/content`), which
    shows each video's whole description next to its id. TikTok's confirmation opens ONLY that list:
    on 2026-10-21 and 2026-11-11 every visit to the new video's own page `/@…/video/<id>` answered
    HTTP 403 to the publisher's browser while the profile and Studio loaded, so the post was live but
@@ -177,11 +181,13 @@ both channels sat blocked for 18 days with the alerts only in `<channel>/alerts.
    · 0 · 0 · 0`, or a processing / under-review label) go into the `published` line as `studio`:
    the click made that video whatever its status, so the day is done and is never posted again.
    LinkedIn reads the commentary block whose nearest post container is
-   that post (not a reshared post, not comments), in the list as on the post's page. The one case
-   left is the same as on TikTok: a post made on the Page BY HAND during the run with the same
-   caption could be bound instead, so do not post to the LinkedIn Page by hand during 09:00–12:00
-   Sunday–Thursday. The success toast's URN is taken first when it
-   qualifies the same way (a list post is not bound over it while the toast's own post is listed). The URL keeps the real URN type
+   that post (not a reshared post, not comments), in the list as on the post's page. Unlike TikTok,
+   two new qualifying posts do not stop the bind: LinkedIn takes the success toast's post when it
+   qualifies the same way, otherwise the newest qualifying post. On one list read, another list post
+   is not bound over the toast's post while that post is listed; the post-page step and the other
+   list can still bind another one. So a post, repost or quote made on the Page BY HAND during the
+   run with the same caption could be bound instead: do not post, repost or quote on the LinkedIn
+   Page by hand during 09:00–12:00 Sunday–Thursday. The URL keeps the real URN type
    (`urn:li:activity|share|ugcPost`). A post whose id shows it was created before this run started
    (10 min clock slack) is never ours either, even when the baseline missed it — a repeat of the same
    listing carries the same caption: LinkedIn ids hold epoch ms (`id >> 22`), TikTok video ids epoch
@@ -242,7 +248,8 @@ for today and stops; settle that day as below.
    Chrome's History lists the post pages the confirmation opened. Copy
    `C:\Users\ASUS\AppData\Local\bona-social-chrome\Default\History` and read the copy with sqlite3
    (`visits` joined to `urls`, times in µs since 1601 UTC). Those are only CANDIDATES (every post
-   not in the baseline, up to five per round, plus any hand visit). Settle with one only after it
+   not in the baseline, opened only on a list visit that did not bind: up to five per list visit,
+   two list visits per round, plus any hand visit). Settle with one only after it
    shows the Page as author, today's full caption with the listing id, and an id time after the run
    started (`id >> 22` = epoch ms).
 2. If the post **is live**, append the URL so it is never posted again:

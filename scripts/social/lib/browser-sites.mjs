@@ -570,9 +570,11 @@ export async function linkedinConfirm(s, companyId, before, { toast = null, capt
         } else refusals.clear(url);
         await sleep(settleMs);
         // Each new top-level post's OWN text as this list holds it (linkedinPostCandidates: never a reshared or quoted
-        // post's text, never comments). LinkedIn puts the whole text there and clamps it on screen only (read 2026-11-16:
-        // the 11-12 BONA-014 and 11-15 BONA-015 posts both bind from it), so it is tried first. A toast's post is only
-        // passed over for another when the toast's own post is not in the list.
+        // post's text, never comments). So far LinkedIn has put the whole text there and clamped it on screen only
+        // (OBSERVED 2026-11-16/17 on four posts of 584-629 chars, e.g. 11-12 BONA-014, 11-15 BONA-015 and 11-16 BONA-022
+        // bind from it; not guaranteed for longer text), so it is tried first. In this list bind another post is never
+        // taken over the toast's post while that post is listed; the post-page step below and the other list can still
+        // bind another qualifying post (a hand post, repost or quote: docs/browser-publishing.md step 8).
         const listed = (await linkedinPostCandidates(s)).filter(c => !before.includes(c.key));
         const fromList = bindNewPost(listed, before, { caption, evidence }, { prefer, notBefore, shortLinks: true });
         if (fromList && (!prefer || fromList === prefer || !listed.some(c => c.key === prefer))) return linkedinUrl(fromList);
