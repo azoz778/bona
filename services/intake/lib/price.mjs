@@ -33,7 +33,9 @@ export function priceAppearsIn(text, amount) {
     if (!(v >= 1 && v < 1000)) continue;
     const s = Number(v.toFixed(3)).toString().replace('.', '[.,٫]');
     for (const w of words) {
-      if (new RegExp(`(?<![\\d.,٫])${s}\\s*${w}(?![a-z\\u0600-\\u06ff])`, 'i').test(t)) return true;
+      // "4.5m" / "990k" only written solid: "20 m" is twenty metres, not twenty million.
+      const gap = w === 'm' || w === 'k' ? '' : '\\s*';
+      if (new RegExp(`(?<![\\d.,٫])${s}${gap}${w}(?![a-z\\u0600-\\u06ff])`, 'i').test(t)) return true;
     }
   }
   return false;

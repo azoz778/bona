@@ -208,6 +208,8 @@ describe('TAQEEM cross-check — a price must actually be printed', () => {
     assert.equal(priceAppearsIn('250 آلاف', 250000), true);
     assert.equal(priceAppearsIn('SAR 1,250,000.00', 1250000), true, 'a decimal tail is not more digits');
     assert.equal(priceAppearsIn('ر.س.1,250,000', 1250000), true, 'nor is a dot before the figure');
+    assert.equal(priceAppearsIn('a 20 m street', 20000000), false, '"20 m" is metres; only "20m" is a million');
+    assert.equal(priceAppearsIn('990 k', 990000), false);
     assert.ok(priceAppearsIn('٤٫٥ مليون ريال', 4500000));
     assert.ok(priceAppearsIn('990k', 990000));
   });

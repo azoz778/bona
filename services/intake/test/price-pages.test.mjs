@@ -730,3 +730,47 @@ describe('processPdf: round-4 review cases', { timeout: 120000 }, () => {
     } finally { r.cleanup(); }
   });
 });
+
+describe('processPdf: round-6 review cases', { timeout: 120000 }, () => {
+  const PAD = ' — شقة سكنية بمساحة واسعة وتشطيبات حديثة في موقع مميز قريب من الخدمات';
+  const pageText = [`مشروع سكني${PAD}`, `غرفتا نوم ودورتا مياه${PAD}`];
+  const withLine = (amount, line) => {
+    const a = answer({ price: { amount, currency: 'SAR', from: true, period: null, onRequest: false } });
+    a.listing.description.en = [line, 'Two.'];
+    return a;
+  };
+
+  for (const [line, amount] of [
+    ['The asking figure is 1,250,000 for a 120 m² apartment', 1250000],
+    ['Two-bedroom apartments of 120 m² from 319,015', 319015],
+    ['1,710 units from 319,015 each', 319015],
+    ['Villas of 400 m² from 1.2 million', 1200000],
+  ]) {
+    it(`an area elsewhere in the sentence does not excuse a refused price: ${line}`, async () => {
+      const r = await rig({ pageText, listing: withLine(amount, line), confirm: [] });
+      try {
+        await assert.rejects(r.run(), (err) => err.stage === 'price');
+      } finally { r.cleanup(); }
+    });
+  }
+
+  for (const [line, amount] of [['يمتد المخطط على ٣ ملايين متر مربع', 3000000], ['The project plants 1 million trees', 1000000]]) {
+    it(`a measurement that equals the refused price is not the price: ${line}`, async () => {
+      const r = await rig({ pageText, listing: withLine(amount, line), confirm: [] });
+      try {
+        const report = await r.run();
+        assert.equal(report.listingPreview.price.onRequest, true);
+      } finally { r.cleanup(); }
+    });
+  }
+
+  it('under the owner\'s caption price, the model\'s own unprinted figure in the copy is refused', async () => {
+    const r = await rig({ pageText, listing: withLine(319015, 'Two-bedroom apartments from 319,015 in phase one.'), confirm: [] });
+    try {
+      await assert.rejects(
+        processPdf({ pdfPath: r.pdfPath, cfg: r.cfg, caption: { price: { amount: 300000, currency: 'SAR' }, text: '300000' }, workDir: path.join(r.repo, '..', 'work'), dryRun: true }),
+        (err) => err.stage === 'price' && /319,015/.test(err.reason),
+      );
+    } finally { r.cleanup(); }
+  });
+});

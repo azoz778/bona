@@ -39,7 +39,7 @@ import {
 import { log } from './log.mjs';
 import { extractPdf, renderPdfPages } from './pdf.mjs';
 import { compositePages, cropPhotoRegions, modelFlagsComposites } from './photo-regions.mjs';
-import { priceAppearsIn } from './price.mjs';
+import { priceAppearsIn, westernise } from './price.mjs';
 import { isSubsidyPricePage, pricePagesToRender } from './price-pages.mjs';
 import { pinFromLinks } from './geo.mjs';
 import { changedSincePublished, committedUnchanged, rebuild, resetTree } from './publish.mjs';
@@ -48,8 +48,17 @@ import { loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNamedIn, withdr
 /** Words that make a figure in the copy a price: a currency, "price", "from"-style openers. */
 const PRICE_CONTEXT_RE = /سعر|أسعار|اسعار|ريال|ر\.\s?س|ثمن|قيمة(?!\s*المضافة)|ابتداء|تبدأ|يبدأ|\b(?:SAR|SR|AED|USD|EUR|GBP|riyals?|prices?|priced|costs?|starting|starts)\b|[$€£﷼\u20c1]/i;
 
-/** A figure followed straight away by a unit of measure or count: "3 million square metres", "1,710 units". */
-const MEASURE_CONTEXT_RE = /\d[\d.,٫٬\s]*(?:(?:million|thousand|mn|m|k|مليون|ملايين|ألف|آلاف|الف)\s*)?(?:m²|m2\b|sq\.?\s?m|square\s+met|met(?:re|er)s?\b|hectares?\b|km\b|units?\b|buildings?\b|residents?\b|visitors?\b|م²|م2|متر|هكتار|كم\b|وحد(?:ة|ات)|مبن[ىي]|مباني|ساكن|سكان|زائر)/i;
+/**
+ * A measurement or a count: ONE figure followed straight away by its unit — "3 million square
+ * metres", "120 m²", "1,710 units", "a 20 m street", "٣ ملايين متر مربع" (after westernise). These
+ * are cut out of a sentence before a refused price is looked for in it, so only the mention that IS
+ * the figure is excused, never a sentence that merely has an area in it somewhere. The digit run has
+ * no spaces, so "from 319,015, 1,710 units" cannot swallow the price into the measurement.
+ */
+const MEASURE_G = new RegExp(String.raw`(?<![\d.,٫٬])\d+(?:[.,٫٬]\d{3})*(?:[.٫]\d+)?\s*(?:(?:million|thousand|mn|m|k|مليون|ملايين|ألف|آلاف|الف)\s*)?`
+  + String.raw`(?:m²|m2(?!\d)|sq\.?\s?(?:m|ft)\b|square\s+(?:met|feet|foot)|met(?:re|er)s?\b|m(?![a-z²\d])|ft\b|feet\b|hectares?\b|km\b|units?\b|buildings?\b|residents?\b|visitors?\b|trees?\b|`
+  + String.raw`م²|م2|متر|هكتار|كم(?![\u0600-\u06ff])|م(?![\u0600-\u06ff])|وحد(?:ة|ات)|مبن[ىي]|مباني|ساكن|سكان|زائر|شجر)`, 'gi');
+const withoutMeasures = (seg) => westernise(seg).replace(MEASURE_G, ' ');
 
 export const sha256File = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
@@ -375,6 +384,17 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     return out;
   };
   const rejectedPrices = [];
+  const copySegments = [ai.listing?.title?.en, ai.listing?.title?.ar, ...(ai.listing?.description?.en ?? []), ...(ai.listing?.description?.ar ?? []),
+    ...(ai.listing?.highlights?.en ?? []), ...(ai.listing?.highlights?.ar ?? [])].filter(Boolean)
+    .flatMap((x) => String(x).split(/[.!?؟؛;\n]+(?=\s|$)/));
+  const inCopy = (n) => copySegments.some((seg) => priceAppearsIn(seg, n));
+  // Under the owner's caption price the model's own figure is not published as the price — but if
+  // it also wrote it into the copy, that figure must be printed in the brochure too.
+  if (caption.price && price && typeof price.amount === 'number' && price.amount > 0
+      && price.amount !== caption.price.amount && inCopy(price.amount)) {
+    const check = await printed(price.amount, ai.priceEvidence);
+    if (!check.inText && !check.confirmed) rejectedPrices.push(price.amount);
+  }
   if (!caption.price && price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0) {
     report.priceEvidence = await printed(price.amount, ai.priceEvidence);
     if (!report.priceEvidence.inText && !report.priceEvidence.confirmed) {
@@ -394,7 +414,8 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     const headline = !caption.price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0;
     // Checked even under the owner's caption price: the price field drops the figure then (the
     // caption replaces both), but if the model also wrote it into the copy it must be a printed one.
-    const evidence = (headline || caption.price) ? await printed(price.subsidisedAmount, ai.subsidisedPriceEvidence, { subsidised: true }) : null;
+    const evidence = (headline || (caption.price && inCopy(price.subsidisedAmount)))
+      ? await printed(price.subsidisedAmount, ai.subsidisedPriceEvidence, { subsidised: true }) : null;
     report.subsidisedPriceEvidence = evidence;
     if (!evidence?.confirmed) {
       if (headline) {
@@ -409,15 +430,12 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
 
   // A price the check took away must not survive in the words: the site prints `price`, but a
   // figure in the title, description or highlights would still be read as the asking price. The
-  // same matcher that looks for the number in the brochure looks for it in the copy.
-  // Every mention counts unless the sentence is plainly a measurement with no price wording:
-  // "3 million square metres" is an area, not a refused asking price of 3,000,000 — but "the asking
-  // figure is 1,250,000" is the refused price, whatever word the model chose.
-  const copySegments = [ai.listing?.title?.en, ai.listing?.title?.ar, ...(ai.listing?.description?.en ?? []), ...(ai.listing?.description?.ar ?? []),
-    ...(ai.listing?.highlights?.en ?? []), ...(ai.listing?.highlights?.ar ?? [])].filter(Boolean)
-    .flatMap((x) => String(x).split(/[.!?؟؛;\n]+(?=\s|$)/));
+  // same matcher that looks for the number in the brochure looks for it in the copy, mention by
+  // mention: a sentence with price wording counts whole; otherwise only what is left once the
+  // measurements are cut out — "3 million square metres" is an area, "the asking figure is
+  // 1,250,000 for a 120 m² flat" is still the refused price.
   for (const n of rejectedPrices) {
-    if (copySegments.some((seg) => priceAppearsIn(seg, n) && (PRICE_CONTEXT_RE.test(seg) || !MEASURE_CONTEXT_RE.test(seg)))) {
+    if (copySegments.some((seg) => priceAppearsIn(seg, n) && (PRICE_CONTEXT_RE.test(seg) || priceAppearsIn(withoutMeasures(seg), n)))) {
       throw new RejectError(caption.price
         ? `the copy states the price ${n.toLocaleString('en-US')}, which could not be confirmed on the brochure — send it again; the next reading may leave it out`
         : `the copy states the price ${n.toLocaleString('en-US')}, which could not be confirmed on the brochure — resend with the price in the caption, or without it`, 'price');
