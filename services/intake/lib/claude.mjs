@@ -437,11 +437,24 @@ function currencyRule(currency, bareCounts, home = null) {
 }
 
 /**
- * Second opinion on ONE page render: is the price the model claimed actually printed there?
- * Used only for brochures with no text layer, where nothing local can corroborate a number
- * and TAQEEM says we may not publish one we cannot see. The figure must be printed IN `currency`
- * (currencyRule; `bareCounts` when the property is in that currency's own country). `whole`: the
- * listing is one property whose headline came from its models — only a price for the whole property counts.
+ * Second opinion on ONE page render: is the price the model claimed actually printed there, AS this
+ * price? pipeline.mjs printed() asks it whenever the text layer cannot settle a figure and a page image
+ * can be looked at: a brochure with no text layer (every page rendered); a page whose digits are
+ * scrambled in the text layer (price-pages.mjs renders it); every subsidised (Sakani) price, and any
+ * price found only on a page that prints two prices per unit — text cannot say which one it is; a
+ * single property's own price (`whole`), which the text layer is never asked about (it cannot tell a
+ * floor's or a model's price from the property's), its page rendered for the check when it was not; and
+ * a figure the copy states that was not otherwise published. TAQEEM: nothing is published that nothing
+ * local corroborates and no second model has seen printed.
+ *   - The figure must be printed IN `currency` (currencyRule): `bareCounts` when the property is in
+ *     that currency's own country; `home` = the currency of the country it is in, which settles whose
+ *     riyal a bare ريال / ﷼ is.
+ *   - `subsidised`: the beneficiaries' price, never the price for everyone else; otherwise the reverse.
+ *   - `project`: a whole development quoted "from" its cheapest model — a price printed for one of its
+ *     unit models counts as the property's.
+ *   - `whole`: ONE property (a single property, or one unit, whose headline was its lowest model price) —
+ *     only a price printed for the whole property counts, not a floor's, a part's or a layout's.
+ *   - `unit`: one specific unit — a price printed for another unit or model does not count.
  * @returns {Promise<{confirmed:boolean, error?:string, fatal?:boolean}>} on a failed call: not
  *   confirmed, the error message, and `fatal` when it was a quota or session limit (runClaudeOnce) —
  *   the pipeline then makes no more calls for this brochure
