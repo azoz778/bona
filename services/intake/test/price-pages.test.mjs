@@ -1214,7 +1214,7 @@ describe('processPdf: unit-model prices — failures, bounds and the headline fa
       assert.equal(report.modelPrices.fatal, true);
       assert.equal(report.listingPreview.price.onRequest, true);
       assert.equal(report.listingPreview.price.amount, null);
-      assert.deepEqual(report.priceEvidence, { inText: false, confirmed: null, unchecked: true });
+      assert.deepEqual(report.priceEvidence, { inText: false, confirmed: null, unchecked: true, uncheckedWhy: 'quota' });
       assert.ok(report.warnings.some((w) => /^the price could not be checked/.test(w) && /try again later/.test(w)), report.warnings.join(' | '));
       assert.ok(!report.warnings.some((w) => /was not printed in the brochure/.test(w)), 'the brochure is not blamed');
     } finally { r.cleanup(); }
@@ -1675,6 +1675,42 @@ describe('processPdf: a single property is never "From" its cheapest model', { t
       assert.equal(report.priceEvidence.inText, true);
       assert.deepEqual(report.listingPreview.price, { amount: 4500000, currency: 'SAR', from: false, period: null, onRequest: false });
     } finally { total.cleanup(); }
+  });
+
+  it('S2r: a whole-property check whose page was not rendered renders it, like the model check; a render that fails is "try again later", not "not printed"', async () => {
+    const reading = () => villa({ amount: 4400000, from: true, quote: 'SAR 4,400,000', models: [model('Villa', 4400000, 3)] });
+    const facts = { 3: [{ fig: 4400000, mark: 'SAR', kind: 'whole' }] };
+    const pageText = textPages('Villa price SAR 4,400,000');
+    const renders = (r) => r.calls().filter((c) => c.tool === 'py-pages').map((c) => [c.dir, c.pages]);
+    // The model check's render fails; the headline's own render of the cited page works: confirmed there.
+    const r = await rig({ listing: reading(), pageText, facts, failPageDir: 'model-pages' });
+    try {
+      const report = await r.run();
+      assert.deepEqual(renders(r), [['model-pages', [3]], ['headline-pages', [3]]]);
+      assert.deepEqual(headlineCalls(r).map((c) => [c.amount, c.whole, c.page]), [[4400000, true, 3]]);
+      assert.deepEqual(report.listingPreview.price, { amount: 4400000, currency: 'SAR', from: false, period: null, onRequest: false });
+      assert.ok(report.warnings.some((w) => /unit-model price\(s\) could not be completed/.test(w)), report.warnings.join(' | '));
+    } finally { r.cleanup(); }
+    // Both renders fail: nothing was looked at — "could not be checked, try again later", never "the brochure does not print it".
+    const no = await rig({ listing: reading(), pageText, facts, failPageDir: ['model-pages', 'headline-pages'] });
+    try {
+      const report = await no.run();
+      assert.deepEqual(renders(no), [['model-pages', [3]], ['headline-pages', [3]]]);
+      assert.equal(headlineCalls(no).length, 0);
+      assert.deepEqual(report.listingPreview.price, ON_REQUEST);
+      assert.equal(report.priceEvidence.unchecked, true);
+      const w = report.warnings.find((x) => /price on request/.test(x)) ?? '';
+      assert.match(w, /could not be checked/);
+      assert.match(w, /try again later/);
+      assert.doesNotMatch(w, /does not print|not printed|quota/);
+    } finally { no.cleanup(); }
+    // A page rendered for the reading is used as it is: no extra render.
+    const image = await rig({ listing: reading(), pageText: ['Villa', 'x', 'Villa price SAR 4,400,000', 'y', 'z'], facts });
+    try {
+      const report = await image.run();
+      assert.ok(!renders(image).some(([dir]) => dir === 'headline-pages'), JSON.stringify(renders(image)));
+      assert.equal(report.listingPreview.price.amount, 4400000);
+    } finally { image.cleanup(); }
   });
 });
 

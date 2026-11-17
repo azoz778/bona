@@ -434,14 +434,23 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
    * Is `amount` printed as THIS price? In the plain text layer (headline only), or — confirmed by a
    * second model — on a rendered page. Evidence the model forgot is looked for in the rendered
    * pages' text, so a price it read from the text layer is still checked on its page. After a quota
-   * error no call is made: `unchecked: true`, never confirmed.
+   * error no call is made: `unchecked: true`, never confirmed. `uncheckedWhy` says why: 'quota', or
+   * 'render' — a whole-property check whose page could not be rendered (wholeCheckPage).
    */
   const printed = async (amount, evidence, { subsidised = false, whole = false } = {}) => {
     // In the text: printed IN the price's currency, or bare where bare figures are in it (printedInCurrency).
     // "£1,250,000" is a price in pounds, never "1,250,000 SAR". `whole`: the figure must be the whole
     // property's price — which the text layer cannot tell from a floor's or a model's, so only a page can.
     const out = { inText: subsidised || whole ? false : printedInCurrency(haystack, amount, price.currency, { bareCounts: home === price.currency, home: local }), confirmed: null };
-    if (out.inText || !pageImages.length) return out;
+    if (out.inText) return out;
+    // Only a page can settle a whole-property check, so its page is rendered when it was not, as the
+    // model check renders a model's cited page (final review S2r). A render that fails means nothing was
+    // looked at: unchecked ("try again later"), never "the brochure does not print it".
+    if (whole && !quotaHit && !(await wholeCheckPage(amount, evidence))) {
+      log.info('intake.price_evidence_skipped', { page: evidence?.page ?? null, subsidised, whole, reason: 'render' });
+      return { ...out, unchecked: true, uncheckedWhy: 'render' };
+    }
+    if (!pageImages.length) return out;
     // The model's citation when it names a rendered page; otherwise the rendered page whose text
     // carries the number. Either way the second model looks at the page before anything counts.
     const citedRendered = evidence && pageImages.some((p) => p.page === evidence.page) ? evidence : null;
@@ -453,7 +462,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     if (!page) return out;
     if (quotaHit) {
       log.info('intake.price_evidence_skipped', { page: cited.page, subsidised, reason: 'quota' });
-      return { ...out, unchecked: true };
+      return { ...out, unchecked: true, uncheckedWhy: 'quota' };
     }
     const check = await confirmPriceEvidence({
       pageImage: page.abs,
@@ -477,9 +486,52 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     log.info('intake.price_evidence', { page: cited.page, subsidised, whole, inferred: cited !== evidence, confirmed: check.confirmed, error: check.error ?? null, fatal: check.fatal === true });
     if (check.fatal) {
       quotaHit = true;
-      return { ...out, unchecked: true };
+      return { ...out, unchecked: true, uncheckedWhy: 'quota' };
     }
     return out;
+  };
+  /** Why printed() could not check a figure, in words for the owner. */
+  const uncheckedWhy = (ev) => (ev?.uncheckedWhy === 'render' ? 'its page could not be rendered for the check' : 'the AI quota ran out');
+  // Pages rendered for a whole-property check that failed: not tried twice in one run.
+  const unrenderable = new Set();
+  /**
+   * Makes sure the page a whole-property check needs is among the rendered pages: the evidence's page
+   * when it cites one of the PDF's pages, else — no usable citation — a rendered page whose text carries
+   * the figure, else the first page whose text does. Renders it (into `headline-pages`) when it is not
+   * there yet. false only when that render failed; true otherwise, including when there is no page to
+   * look at (printed() then finds none: nothing printed it).
+   */
+  const wholeCheckPage = async (amount, evidence) => {
+    const pageCount = Number(extraction.pages);
+    const inPdf = (n) => Number.isInteger(n) && n >= 1 && (!Number.isInteger(pageCount) || pageCount < 1 || n <= pageCount);
+    const have = (n) => pageImages.some((p) => p.page === n);
+    let want = inPdf(evidence?.page) ? evidence.page : null;
+    if (want === null) {
+      if (pageImages.some((p) => priceAppearsIn(pageText[p.page - 1] ?? '', amount))) return true;
+      const i = pageText.findIndex((t) => priceAppearsIn(t ?? '', amount));
+      want = i === -1 ? null : i + 1;
+    }
+    if (want === null || have(want)) return true;
+    if (unrenderable.has(want)) return false;
+    try {
+      const more = await renderPdfPages(pdfPath, workDir, {
+        pyCmd: cfg.pyCmd, maxPages: cfg.maxPdfPages, longSide: cfg.pageReadLongSide, pages: [want], dir: 'headline-pages',
+      });
+      const added = more.ok === false ? [] : (more.pageImages || []).filter((p) => p && p.page === want && typeof p.abs === 'string');
+      if (!added.length) {
+        log.warn('intake.headline_pages_failed', { pages: [want], error: more.ok === false ? more.error : 'page not returned' });
+        unrenderable.add(want);
+        return false;
+      }
+      pageImages.push(...added);
+      report.headlinePages = [...(report.headlinePages ?? []), want];
+      log.info('intake.headline_pages', { pages: [want], longSide: cfg.pageReadLongSide });
+      return true;
+    } catch (e) {
+      log.warn('intake.headline_pages_failed', { pages: [want], error: String(e?.message || e) });
+      unrenderable.add(want);
+      return false;
+    }
   };
   const rejectedPrices = [];
   // Every text the run publishes, sentence by sentence, each with where it comes from: the listing's
@@ -679,14 +731,14 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   if (!headlineFromModels && !caption.price && price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0) {
     report.priceEvidence = await printed(price.amount, ai.priceEvidence, { whole: ownPriceOnly });
     if (!report.priceEvidence.inText && !report.priceEvidence.confirmed) {
-      log.warn('intake.price_unevidenced', { amount: price.amount, currency: price.currency, unchecked: report.priceEvidence.unchecked === true, whole: ownPriceOnly });
+      log.warn('intake.price_unevidenced', { amount: price.amount, currency: price.currency, unchecked: report.priceEvidence.unchecked === true, why: report.priceEvidence.uncheckedWhy ?? null, whole: ownPriceOnly });
       rejectedPrices.push(price.amount);
       price.amount = null;
       price.onRequest = true;
       price.from = false;
       report.warningCodes.push('price-not-printed');
       report.warnings.push(report.priceEvidence.unchecked
-        ? 'the price could not be checked on the brochure (the AI quota ran out), so the listing says "price on request" for now — try again later, or send `price <id> <amount>` to set one'
+        ? `the price could not be checked on the brochure (${uncheckedWhy(report.priceEvidence)}), so the listing says "price on request" for now — try again later, or send \`price <id> <amount>\` to set one`
         : ownPriceOnly
           ? 'the price read was the lowest unit-model price, which the brochure does not print as this single property\'s own price (a property is not "From" its cheapest model), so the listing says "price on request" — send `price <id> <amount>` to set one'
           : 'the price was not printed in the brochure, so the listing says "price on request" — send `price <id> <amount>` to set one');
@@ -709,7 +761,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
         log.warn('intake.subsidised_price_unevidenced', { amount: price.subsidisedAmount, currency: price.currency, unchecked: evidence?.unchecked === true });
         report.warningCodes.push('subsidised-price-not-printed');
         report.warnings.push(evidence?.unchecked
-          ? 'the subsidised (Sakani) price could not be checked on the brochure (the AI quota ran out), so only the regular price is shown for now — try again later'
+          ? `the subsidised (Sakani) price could not be checked on the brochure (${uncheckedWhy(evidence)}), so only the regular price is shown for now — try again later`
           : 'the subsidised (Sakani) price could not be confirmed on the brochure, so only the regular price is shown');
       }
       if (price.subsidisedAmount > 0) rejectedPrices.push(price.subsidisedAmount);
