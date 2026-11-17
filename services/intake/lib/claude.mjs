@@ -224,6 +224,16 @@ export function runClaudeOnce({ prompt, cwd, model, bin = 'claude', addDirs = []
 const isStr = (v) => typeof v === 'string' && v.trim().length > 0;
 const ARABIC = /[؀-ۿ]/;
 const isPair = (v) => v && typeof v === 'object' && isStr(v.en) && isStr(v.ar) && ARABIC.test(v.ar);
+const isArr = (v) => Array.isArray(v) && v.every(isStr);
+/** `{en:[…], ar:[…]}`: equal length, non-empty strings, Arabic script in `ar`. Returns a problem or null. */
+function bilingualListProblem(path, v, max) {
+  if (v === null || v === undefined) return null;
+  if (!v || typeof v !== 'object' || !isArr(v.en) || !isArr(v.ar)) return `${path} must be { en:[strings], ar:[strings] }`;
+  if (v.en.length !== v.ar.length) return `${path}.en and .ar must have the same length`;
+  if (max && v.en.length > max) return `${path} has more than ${max} items`;
+  if (!v.ar.every((x) => ARABIC.test(x))) return `${path}.ar must be Arabic script`;
+  return null;
+}
 const isNumOrNull = (v) => v === null || (typeof v === 'number' && Number.isFinite(v));
 
 /**
@@ -285,6 +295,53 @@ export function validateAiResult(result, { candidateCount = 0 } = {}) {
   }
   if (l.project !== null && l.project !== undefined && !(isPair(l.project?.name) && isPair(l.project?.developer))) {
     e.push('listing.project must be null or { name:{en,ar}, developer:{en,ar} }');
+  }
+
+  // Optional unit models + bilingual fact lists (absent or null is fine).
+  if (result.models !== null && result.models !== undefined) {
+    if (!Array.isArray(result.models)) e.push('models must be an array');
+    else if (result.models.length > 24) e.push('models has more than 24 entries');
+    else {
+      const plans = new Set();
+      result.models.forEach((m, i) => {
+        const p = `models[${i}]`;
+        if (!m || typeof m !== 'object') { e.push(`${p} must be an object`); return; }
+        if (!isPair(m.name)) e.push(`${p}.name.en/ar required (ar must be Arabic script)`);
+        for (const k of ['bedrooms', 'bathrooms']) {
+          const v = m[k];
+          if (v !== null && v !== undefined && !(Number.isInteger(v) && v >= 0 && v <= 20)) e.push(`${p}.${k} must be null or an integer 0-20`);
+        }
+        if (m.areaSqm !== null && m.areaSqm !== undefined && !(typeof m.areaSqm === 'number' && Number.isFinite(m.areaSqm) && m.areaSqm >= 10 && m.areaSqm <= 100000)) {
+          e.push(`${p}.areaSqm must be null or a number between 10 and 100000`);
+        }
+        const rp = bilingualListProblem(`${p}.rooms`, m.rooms);
+        if (rp) e.push(rp);
+        if (m.availability !== null && m.availability !== undefined && !isPair(m.availability)) e.push(`${p}.availability must be null or { en, ar } (ar Arabic script)`);
+        const okPrice = (v) => v === null || v === undefined || (typeof v === 'number' && Number.isFinite(v) && v > 0);
+        if (!okPrice(m.price)) e.push(`${p}.price must be null or a number above 0`);
+        if (!okPrice(m.subsidisedPrice)) e.push(`${p}.subsidisedPrice must be null or a number above 0`);
+        const hasPrice = (m.price ?? null) !== null, hasSub = (m.subsidisedPrice ?? null) !== null;
+        if (hasPrice && hasSub && okPrice(m.price) && okPrice(m.subsidisedPrice) && !(m.subsidisedPrice < m.price)) {
+          e.push(`${p}.subsidisedPrice must be lower than price`);
+        }
+        if (hasPrice || hasSub) {
+          const ev = m.evidence;
+          if (!(ev && typeof ev === 'object' && Number.isInteger(ev.page) && ev.page >= 1 && isStr(ev.quote))) {
+            e.push(`${p}.evidence must be { page (integer >= 1), quote } when a price is set`);
+          }
+        }
+        if (m.floorPlan !== null && m.floorPlan !== undefined) {
+          const img = Number.isInteger(m.floorPlan) && Array.isArray(result.images) ? result.images.find((x) => x?.index === m.floorPlan) : null;
+          if (!img || img.exclude !== true) e.push(`${p}.floorPlan must be the index of a candidate image marked exclude: true`);
+          else if (plans.has(m.floorPlan)) e.push(`${p}.floorPlan ${m.floorPlan} is already used by another model`);
+          else plans.add(m.floorPlan);
+        }
+      });
+    }
+  }
+  for (const [k, max] of [['amenities', 16], ['nearby', 8], ['warranties', 8]]) {
+    const p = bilingualListProblem(k, result[k], max);
+    if (p) e.push(p);
   }
 
   if (!Array.isArray(result.images)) e.push('images must be an array');
@@ -393,7 +450,7 @@ const PRICE_IN_COPY_RE = new RegExp([
 ].join('|'), 'i');
 
 /** Copy hygiene: no other agency's brand, no phone numbers, no hype, no prices. */
-export function copyProblems(listing) {
+export function copyProblems(listing, ai = {}) {
   const bad = [];
   const FORBIDDEN = [...COPY_FORBIDDEN, /\bwhatsapp\b/i];
   const fields = [
@@ -404,6 +461,12 @@ export function copyProblems(listing) {
     ...(listing?.highlights?.en || []).map((x, i) => [`highlights.en[${i}]`, x]),
     ...(listing?.highlights?.ar || []).map((x, i) => [`highlights.ar[${i}]`, x]),
   ];
+  const pair = (label, v) => ['en', 'ar'].map((l) => [`${label}.${l}`, v?.[l]]);
+  const list = (label, v) => ['en', 'ar'].flatMap((l) => (Array.isArray(v?.[l]) ? v[l] : []).map((x, i) => [`${label}.${l}[${i}]`, x]));
+  (Array.isArray(ai?.models) ? ai.models : []).forEach((m, i) => {
+    fields.push(...pair(`models[${i}].name`, m?.name), ...list(`models[${i}].rooms`, m?.rooms), ...pair(`models[${i}].availability`, m?.availability));
+  });
+  for (const k of ['amenities', 'nearby', 'warranties']) fields.push(...list(k, ai?.[k]));
   for (const [label, value] of fields) {
     if (!isStr(value)) continue;
     for (const re of FORBIDDEN) if (re.test(value)) bad.push(`${label} mentions "${value.match(re)[0]}"`);
@@ -427,7 +490,7 @@ export async function runListingAi({ prompt, cwd, model, fallbackModel, bin, add
     try {
       const { result, meta } = await runClaudeOnce({ prompt: text, cwd, model: m, bin, addDirs, settingsPath, timeoutMs, spawnImpl });
       const problems = validateAiResult(result, { candidateCount });
-      if (!result.reject) problems.push(...copyProblems(result.listing));
+      if (!result.reject) problems.push(...copyProblems(result.listing, result));
       if (!problems.length) return { result, meta, attempt: i + 1 };
       attempts.push(problems);
       logger?.warn('ai.contract_failed', { attempt: i + 1, model: m, problems });

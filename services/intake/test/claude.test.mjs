@@ -43,6 +43,53 @@ const GOOD = {
 const clone = () => structuredClone(GOOD);
 
 describe('validateAiResult', () => {
+  const MODEL = {
+    name: { en: 'Nawras 2', ar: 'نورس 2' }, bedrooms: 3, bathrooms: 2, areaSqm: 105.02,
+    rooms: { en: ['Laundry'], ar: ['غرفة غسيل'] },
+    availability: { en: 'Buildings G–P, first to seventh floor', ar: 'المباني G–P، من الأول إلى السابع' },
+    price: 419994, subsidisedPrice: 356024, evidence: { page: 10, quote: '419,994' }, floorPlan: 1,
+  };
+  const withModels = (...ms) => {
+    const r = clone();
+    r.images[1].exclude = true; r.images[1].rank = null; r.images[1].room = 'render';
+    r.models = ms;
+    return r;
+  };
+  it('accepts unit models and bilingual fact lists', () => {
+    const r = withModels(MODEL);
+    r.amenities = { en: ['Health club'], ar: ['نادٍ صحي'] };
+    r.nearby = { en: ['King Abdulaziz International Airport'], ar: ['مطار الملك عبدالعزيز الدولي'] };
+    r.warranties = { en: ['Structure — 10 years'], ar: ['الهيكل الإنشائي — 10 سنوات'] };
+    assert.deepEqual(validateAiResult(r, { candidateCount: 2 }), []);
+  });
+  it('still validates a result without any of the new fields', () => {
+    assert.deepEqual(validateAiResult(clone(), { candidateCount: 2 }), []);
+  });
+  for (const [label, mutate, re] of [
+    ['a model with no Arabic name', (m) => { m.name.ar = 'Nawras'; }, /models\[0\]\.name/],
+    ['a model price with no evidence', (m) => { m.evidence = null; }, /models\[0\]\.evidence/],
+    ['a negative area', (m) => { m.areaSqm = -1; }, /models\[0\]\.areaSqm/],
+    ['a subsidised price above the price', (m) => { m.subsidisedPrice = 500000; }, /models\[0\]\.subsidisedPrice/],
+    ['rooms lists of different lengths', (m) => { m.rooms.ar = []; }, /models\[0\]\.rooms/],
+    ['a floor plan that is a gallery photo', (m) => { m.floorPlan = 0; }, /models\[0\]\.floorPlan/],
+  ]) {
+    it(`refuses ${label}`, () => {
+      const m = structuredClone(MODEL); mutate(m);
+      assert.ok(validateAiResult(withModels(m), { candidateCount: 2 }).some((p) => re.test(p)));
+    });
+  }
+  it('refuses two models sharing one floor plan', () => {
+    const b = structuredClone(MODEL); b.name = { en: 'Nawras 3', ar: 'نورس 3' };
+    assert.ok(validateAiResult(withModels(MODEL, b), { candidateCount: 2 }).some((p) => /models\[1\]\.floorPlan/.test(p)));
+  });
+  it('refuses more than 24 models', () => {
+    const ms = Array.from({ length: 25 }, () => ({ ...structuredClone(MODEL), floorPlan: null }));
+    assert.ok(validateAiResult(withModels(...ms), { candidateCount: 2 }).some((p) => /models/.test(p)));
+  });
+  it('refuses fact lists of different lengths', () => {
+    const r = clone(); r.amenities = { en: ['Gym', 'Pool'], ar: ['نادٍ'] };
+    assert.ok(validateAiResult(r, { candidateCount: 2 }).some((p) => /amenities/.test(p)));
+  });
   it('accepts a well-formed result', () => {
     assert.deepEqual(validateAiResult(clone(), { candidateCount: 2 }), []);
   });
@@ -119,6 +166,15 @@ describe('validateAiResult', () => {
 });
 
 describe('copyProblems — owner rules', () => {
+  it('checks unit models and fact lists for phone numbers and prices', () => {
+    const ai = {
+      models: [{ name: { en: 'Call +966 55 123 4567', ar: 'نورس' }, rooms: null, availability: null }],
+      amenities: { en: ['Gym', 'Pool', 'SAR 319,015 clubhouse'], ar: ['أ', 'ب', 'ج'] },
+    };
+    const bad = copyProblems(GOOD.listing, ai);
+    assert.ok(bad.some((p) => /^models\[0\]\.name\.en/.test(p)), bad.join('|'));
+    assert.ok(bad.some((p) => /^amenities\.en\[2\]/.test(p)), bad.join('|'));
+  });
   it('is clean for good copy', () => {
     assert.deepEqual(copyProblems(GOOD.listing), []);
   });
