@@ -1026,7 +1026,8 @@ test('R4 item 2: a post\'s own page that serves a block page WITH a body is chec
   const li = { navigate: async u => { cur = u; }, url: async () => cur,
     waitFor: async cond => (cur.includes('/feed/update/') ? null : true), // the post element never appears on the block page
     ev: async e => (e.includes('document.title') ? (cur.includes('/feed/update/') ? CF : { title: 'Bona | بونا: Posts | LinkedIn', body: '' })
-      : e.includes('flatMap') ? (cur.includes('/feed/update/') ? [] : [{ key: 'activity:1000000009', text: 'Villa BONA-A' }]) : null) };
+      // The list cuts the text short (else it binds from the list and the post page is never opened, since 2026-11-16).
+      : e.includes('flatMap') ? (cur.includes('/feed/update/') ? [] : [{ key: 'activity:1000000009', text: 'Villa …more' }]) : null) };
   const r1 = { blocked: null };
   assert.equal(await SITES.linkedinConfirm(li, '145349037', [], { caption: 'Villa BONA-A', evidence: 'BONA-A', report: r1, timeoutMs: 30, every: 0, settleMs: 0 }), null);
   assert.match(r1.blocked ?? '', /LinkedIn refused this browser \(Cloudflare/, 'the refused post page is the reason');
@@ -1041,7 +1042,7 @@ test('R4 item 2: a post\'s own page that serves a block page WITH a body is chec
   // A post page that loads normally is not judged by a phrase in it, and binds as before.
   let ocur = '';
   const ok = { navigate: async u => { ocur = u; }, url: async () => ocur, waitFor: async () => true,
-    ev: async e => (e.includes('document.title') ? { title: 'Post | LinkedIn', body: 'Sorry, you have been blocked' } : e.includes('flatMap') ? [{ key: 'activity:1000000009', text: 'Villa BONA-A' }] : null) };
+    ev: async e => (e.includes('document.title') ? { title: 'Post | LinkedIn', body: 'Sorry, you have been blocked' } : e.includes('flatMap') ? [{ key: 'activity:1000000009', text: ocur.includes('/feed/update/') ? 'Villa BONA-A' : 'Villa …more' }] : null) };
   const r3 = { blocked: null };
   assert.equal(await SITES.linkedinConfirm(ok, '145349037', [], { caption: 'Villa BONA-A', evidence: 'BONA-A', report: r3, timeoutMs: 30, every: 0, settleMs: 0 }), 'https://www.linkedin.com/feed/update/urn:li:activity:1000000009/');
   assert.equal(r3.blocked, null);
@@ -1146,7 +1147,7 @@ test('R6: LinkedIn\'s security check is matched by a title that BEGINS with "Sec
   let cur = '';
   const s = { navigate: async u => { cur = u; }, url: async () => cur, waitFor: async () => (cur.includes('/feed/update/') ? null : true),
     ev: async e => (e.includes('document.title') ? { title: `Bona | بونا on LinkedIn: ${caption}`, body: 'Skip to main content' }
-      : e.includes('flatMap') ? [{ key: 'activity:1000000009', text: caption }] : null) };
+      : e.includes('flatMap') ? [{ key: 'activity:1000000009', text: cur.includes('/feed/update/') ? caption : 'Villa …more' }] : null) }; // the list cuts it short: the post page is read
   const report = { blocked: null };
   assert.equal(await SITES.linkedinConfirm(s, '145349037', [], { caption, evidence: 'BONA-A', report, timeoutMs: 30, every: 0, settleMs: 0 }), 'https://www.linkedin.com/feed/update/urn:li:activity:1000000009/');
   assert.equal(report.blocked, null);
@@ -1262,7 +1263,8 @@ test('R7: when the candidate scan itself fails on a post page, the block page is
   const s = { navigate: async u => { cur = u; }, url: async () => cur, waitFor: async () => (cur.includes('/feed/update/') ? null : true),
     ev: async e => {
       if (e.includes('document.title')) return cur.includes('/feed/update/') ? { title: 'Attention Required! | Cloudflare', body: '' } : { title: 'Bona', body: '' };
-      if (e.includes('flatMap')) { if (cur.includes('/feed/update/')) throw new Error('eval: Execution context was destroyed'); return [{ key: 'activity:1000000009', text: 'Villa BONA-A' }]; }
+      // The list cuts the text short (else it binds from the list and the post page is never opened, since 2026-11-16).
+      if (e.includes('flatMap')) { if (cur.includes('/feed/update/')) throw new Error('eval: Execution context was destroyed'); return [{ key: 'activity:1000000009', text: 'Villa …more' }]; }
       return null;
     } };
   const report = { blocked: null };
@@ -1468,4 +1470,61 @@ test('2026-11-11 R3: every block of an id is a candidate — a longer sidebar bl
 test('2026-11-11 R3: the status words leave out the caption\'s own lines (a multi-line caption cannot crowd them out — Codex R2)', () => {
   const cap = 'Villa BONA-A\nJeddah\nFor sale\n#Bona #Jeddah';
   assert.equal(SITES.studioRowStatus(`00:20\n${cap}\nNov 11, 9:47 PM\nUnder review\n0\n0\n0`, cap), '00:20 · Nov 11, 9:47 PM · Under review · 0 · 0 · 0');
+});
+
+// ================================================================== LinkedIn: bind from the Page's own list (2026-11-16)
+// 2026-11-15 09:30: BONA-015 went live as the Page (urn:li:activity:7527619025451761664, id time 06:30:32Z) but was
+// recorded `uncertain`. Bona Chrome's History shows the confirmation opening that post's own page five times, each after
+// the full 15 s wait: LinkedIn now often serves /feed/update/<urn>/ as a server-driven screen
+// (data-sdui-screen="com.linkedin.sdui.flagshipnav.feed.UpdateDetail") on which NO element carries the URN, and whose
+// inner markup changes between visits, so the post-page read gave nothing. The Page's admin list still marks each post
+// with its URN and holds its whole own text (clamped on screen only). LI_1115_LIST is that text exactly as the
+// production candidate scan read it on 2026-11-16 (one read-only look).
+const LI_1115_ID = '7527619025451761664';
+const LI_1112_KEY = 'activity:7526531837465083904', LI_1021_KEY = 'activity:7518559300538146817';
+const LI_1115_URL = `https://www.linkedin.com/feed/update/urn:li:activity:${LI_1115_ID}/`;
+const LI_1115_CAPTION = 'Apartments, Al Zahra\nAl Zahra, Jeddah · For sale\n\n3 bedrooms · 200 m² · From SAR 1,450,000\n\nInterested? Message Bona with BONA-015 for current availability and a viewing.\nhttps://bona-real-estate.com/properties/al-zahra-residences/\n\nPrices shown are asking prices and may change. Details, condition and services are confirmed at viewing.\nAdvertiser: Abdulaziz Zaidan · FAL 1100313556 · +966593296933\n\nشقق في الزهراء — الزهراء، جدة · للبيع\nالمعلن: عبدالعزيز زيدان · فال 1100313556 · +966593296933\n\n#BonaRealEstate #JeddahRealEstate #JeddahApartments #AlZahra #SaudiRealEstate';
+const LI_1115_LIST = "Apartments, Al Zahra\nAl Zahra, Jeddah · For sale\n\n3 bedrooms · 200 m² · From SAR 1,450,000\n\nInterested? Message Bona with BONA-015 for current availability and a viewing.\nhttps://lnkd.in/dJh4h3N2\n\nPrices shown are asking prices and may change. Details, condition and services are confirmed at viewing.\nAdvertiser: Abdulaziz Zaidan · FAL 1100313556 · +966593296933\n\nشقق في الزهراء — الزهراء، جدة · للبيع\nالمعلن: عبدالعزيز زيدان · فال 1100313556 · +966593296933\n\n\nhashtag\n#BonaRealEstate \nhashtag\n#JeddahRealEstate \nhashtag\n#JeddahApartments \nhashtag\n#AlZahra \nhashtag\n#SaudiRealEstate\n…more";
+const LI_1115_SUB = { caption: LI_1115_CAPTION, evidence: 'BONA-015', notBefore: Date.parse('2026-11-15T06:30:02Z') - 10 * 60_000 };
+/**
+ * The Page's lists return `listed`; a post's own page is LinkedIn's server-driven screen: the candidate scan finds
+ * nothing there, and any other read of it would see `screenText` (the whole page, which may quote our caption).
+ */
+const listSession = (listed, { screenText = '' } = {}) => fakeSession({ ev: (e, cur) => {
+  if (e.includes('flatMap')) return cur.includes('/feed/update/') ? [] : listed;
+  return cur.includes('/feed/update/') ? screenText : null; } });
+
+test('2026-11-16: the 11-15 post binds from its own text on the Page\'s list; its server-driven post page is never needed', async () => {
+  const s = listSession([{ key: `activity:${LI_1115_ID}`, text: LI_1115_LIST }, { key: LI_1112_KEY, text: 'NOBAL 5, Al Rawdah …more' }, { key: LI_1021_KEY, text: 'Private Beach Villa …more' }]);
+  assert.equal(await linkedinConfirm(s, '145349037', [LI_1112_KEY, LI_1021_KEY], { ...LI_1115_SUB, timeoutMs: 30, every: 0, settleMs: 0 }), LI_1115_URL);
+  assert.ok(!s.log.navs.some(u => u.includes('/feed/update/')), 'bound from the list: no post page opened');
+  // The list text as read: "hashtag\n#Tag" link text and a trailing "…more" (the on-screen clamp's control) are normalised away.
+  assert.ok(LI_1115_LIST.includes('hashtag\n#SaudiRealEstate') && LI_1115_LIST.endsWith('…more'));
+});
+
+test('2026-11-16: an older list post carrying the same caption never binds (a 14-day repeat the baseline missed)', async () => {
+  // Same caption, an id created before the run (11-12): not ours, whatever the baseline says.
+  const s = listSession([{ key: LI_1112_KEY, text: LI_1115_LIST }]);
+  assert.equal(await linkedinConfirm(s, '145349037', [], { ...LI_1115_SUB, timeoutMs: 30, every: 0, settleMs: 0 }), null);
+});
+
+test('2026-11-16: a new reshare or quote on the Page binds nothing, even when its post page shows our whole caption (Codex R1 P1)', async () => {
+  // A plain reshare has no own text in the list; a quote's own text is the quote. Their post page quotes our caption whole.
+  for (const own of ['', 'Worth another look this week']) {
+    const s = listSession([{ key: 'activity:7527619925451761664', text: own }], { screenText: `Bona | بونا reposted this\n${LI_1115_CAPTION}` });
+    assert.equal(await linkedinConfirm(s, '145349037', [], { ...LI_1115_SUB, timeoutMs: 30, every: 0, settleMs: 0 }), null, `own text ${JSON.stringify(own)}`);
+  }
+});
+
+test('2026-11-16: the toast\'s post is not passed over for another list post that binds first', async () => {
+  const P = 'activity:7527619025451761664', Q = 'activity:7527619125451761664';
+  // P (the toast's) is cut short in the list but whole on its own (old-layout) page; Q is whole in the list.
+  const s = fakeSession({ ev: (e, cur) => {
+    if (!e.includes('flatMap')) return e.startsWith('/*expand*/') ? 1 : null;
+    if (!cur.includes('/feed/update/')) return [{ key: P, text: 'Apartments, Al Zahra …more' }, { key: Q, text: LI_1115_LIST }];
+    return [{ key: cur.includes(P.split(':')[1]) ? P : Q, text: LI_1115_LIST }]; } });
+  assert.equal(await linkedinConfirm(s, '145349037', [], { ...LI_1115_SUB, toast: `https://www.linkedin.com/feed/update/urn:li:${P}/`, timeoutMs: 30, every: 0, settleMs: 0 }), `https://www.linkedin.com/feed/update/urn:li:${P}/`);
+  // Without a toast the list binds at once (the newer of the two qualifying posts).
+  const t = fakeSession({ ev: (e, cur) => (e.includes('flatMap') && !cur.includes('/feed/update/') ? [{ key: P, text: LI_1115_LIST }, { key: Q, text: LI_1115_LIST }] : null) });
+  assert.equal(await linkedinConfirm(t, '145349037', [], { ...LI_1115_SUB, timeoutMs: 30, every: 0, settleMs: 0 }), `https://www.linkedin.com/feed/update/urn:li:${Q}/`);
 });

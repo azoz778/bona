@@ -554,7 +554,7 @@ export async function linkedinPost(s, { companyId, pageName, caption } = {}) {
   if (link === 'modal-closed') { await sleep(1500); return (await s.ev(`document.querySelector(${q(SELECTORS.linkedin.toastLink)})?.href || 'modal-closed'`)); }
   return link || 'no-signal';
 }
-/** A new URN whose OWN post element shows the caption head, on the admin list or the public page. URL (of its real URN type) or null. */
+/** A new URN whose OWN post element holds the full caption, on the admin list or the public page (else on its own page). URL (of its real URN type) or null. */
 export async function linkedinConfirm(s, companyId, before, { toast = null, caption = '', evidence = '', timeoutMs = 4 * 60_000, every = 15_000, settleMs = 3000, report = null, notBefore = null } = {}) {
   const m = /urn:li:(activity|share|ugcPost):(\d+)/.exec(decodeURIComponent(String(toast ?? '')));
   const prefer = m ? `${m[1]}:${m[2]}` : null;
@@ -569,8 +569,20 @@ export async function linkedinConfirm(s, companyId, before, { toast = null, capt
           if (b) { refusals.set(url, b); continue; }
         } else refusals.clear(url);
         await sleep(settleMs);
-        // Feed lists clamp long posts: each new top-level post is read in full from its own page first.
-        const fresh = (await linkedinPostCandidates(s)).filter(c => !before.includes(c.key)).map(c => c.key);
+        // Each new top-level post's OWN text as this list holds it (linkedinPostCandidates: never a reshared or quoted
+        // post's text, never comments). So far LinkedIn has put the whole text there and clamped it on screen only
+        // (OBSERVED 2026-11-16/17 on four posts of 584-629 chars, e.g. 11-12 BONA-014, 11-15 BONA-015 and 11-16 BONA-022
+        // bind from it; not guaranteed for longer text), so it is tried first. In this list bind another post is never
+        // taken over the toast's post while that post is listed; the post-page step below and the other list can still
+        // bind another qualifying post (a hand post, repost or quote: docs/browser-publishing.md step 8).
+        const listed = (await linkedinPostCandidates(s)).filter(c => !before.includes(c.key));
+        const fromList = bindNewPost(listed, before, { caption, evidence }, { prefer, notBefore, shortLinks: true });
+        if (fromList && (!prefer || fromList === prefer || !listed.some(c => c.key === prefer))) return linkedinUrl(fromList);
+        // This list bound nothing (a text cut short, no match, or a match held back by the toast rule): the first five
+        // new posts (the toast's post first) are read in full from their own pages. Since 2026-11-15 LinkedIn often
+        // serves that page as a server-driven screen on which no element carries the URN; nothing is read there, so a
+        // post seen only that way stays `uncertain` (11-15 BONA-015 and 11-16 BONA-022, before the list was read first).
+        const fresh = listed.map(c => c.key);
         const order = prefer && fresh.includes(prefer) ? [prefer, ...fresh.filter(k => k !== prefer)] : fresh;
         const full = [];
         // A post page that refuses (or fails) gives no text, so it cannot bind; its refusal is kept under its own URL.
