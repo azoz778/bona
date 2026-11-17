@@ -520,6 +520,7 @@ def main() -> int:
             if ext not in ("jpg", "jpeg", "png", "webp", "tiff", "bmp"):
                 ext = "png"
             data = ext_img["image"]
+            flat = None  # set only for an image with a soft mask; read for every image below
             if info[1]:
                 # The image has a soft mask (transparency). extract_image() returns only the
                 # colour stream, which shows as BLACK where the picture is transparent: floor
