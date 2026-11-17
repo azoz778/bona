@@ -52,6 +52,9 @@ import { FACT_LISTS, headlineFollowsModels, loadRegisterWithdrawals, withdrawnAd
 /** Words that make a figure in the copy a price: a currency, "price", "from"-style openers. */
 const PRICE_CONTEXT_RE = /سعر|أسعار|اسعار|ريال|ر\.\s?س|ثمن|قيمة(?!\s*المضافة)|ابتداء|تبدأ|يبدأ|\b(?:SAR|SR|AED|USD|EUR|GBP|riyals?|prices?|priced|costs?|starting|starts)\b|[$€£﷼\u20c1]/i;
 
+/** "Starting from" wording in a price's evidence: from / starting / starts at, ابتداءً من / إبتداء, يبدأ / تبدأ من. */
+const FROM_WORDING_RE = /\b(?:from|starting|starts)\b|بتداء|[يت]بد[أا]/i;
+
 /**
  * A measurement or a count: ONE figure followed straight away by its unit — "3 million square
  * metres", "120 m²", "1,710 units", "a 20 m street", "٣ ملايين متر مربع" (after westernise). These
@@ -696,7 +699,8 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // One specific unit is left out of that: priced like one of its project's models, `from` not set, the
   // figure is as likely the unit's own price, and its check asks for the unit's price on the page anyway.
   let ownPriceOnly = false;
-  const fromLowestModel = price?.from === true && (!ai.listing?.project || Boolean(ai.listing?.unit));
+  const readFrom = price?.from === true;
+  const fromLowestModel = readFrom && (!ai.listing?.project || Boolean(ai.listing?.unit));
   const lowestOfSeveral = !ai.listing?.project && readModelPrices.length >= 2;
   if (!enrich && !caption.price && !headlineFromModels && price && !price.onRequest
       && isFigure(price.amount) && price.amount === readLowest && (fromLowestModel || lowestOfSeveral)) {
@@ -704,6 +708,15 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     ownPriceOnly = true;
     log.info('intake.headline_not_from_models', { amount: price.amount, from: fromLowestModel, project: Boolean(ai.listing?.project), unit: Boolean(ai.listing?.unit), models: readModelPrices.length });
   }
+  // A single property (no project) with exactly ONE unit model whose price the brochure itself words
+  // "starting from" (final review S2m) gets its `from` back — but only after a second model has
+  // confirmed the figure on its page as the whole property's price, and only when the reading's own
+  // evidence for it carries the from-wording. With one model there is no cheaper row to be "From", so the
+  // from-wording is the brochure's; with two or more (floors, parts, layouts) `from` stays cleared,
+  // whatever the evidence says. The least risky of the reviewer's two options: the evidence quote is the
+  // model's, so it may only ADD the "From" a confirmed own price already earned, never a price.
+  const keepsStartingFrom = () => readFrom && !ai.listing?.project && Array.isArray(ai.models) && ai.models.length === 1
+    && report.priceEvidence?.confirmed === true && FROM_WORDING_RE.test(String(ai.priceEvidence?.quote ?? '').normalize('NFKC'));
   // An enrichment publishes none of the model's copy, map pin or photos, and decides its headline from
   // the listing (enrichHeadline): the model's own headline and Sakani checks, the copy guard, the map
   // and the photo steps below are for a publish only. Its unit-model prices are checked above, the same.
@@ -742,6 +755,9 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
         : ownPriceOnly
           ? 'the price read was the lowest unit-model price, which the brochure does not print as this single property\'s own price (a property is not "From" its cheapest model), so the listing says "price on request" — send `price <id> <amount>` to set one'
           : 'the price was not printed in the brochure, so the listing says "price on request" — send `price <id> <amount>` to set one');
+    } else if (ownPriceOnly && keepsStartingFrom()) {
+      price.from = true;
+      report.warnings.push('the price read was its one unit model\'s; confirmed on its page as the property\'s own price, and shown "From" as the brochure words it (its evidence: "starting from")');
     } else if (ownPriceOnly) {
       report.warnings.push('the price read was the lowest unit-model price; a single property is not "From" its cheapest model, so it is shown as the property\'s own price (confirmed on its page)');
     }

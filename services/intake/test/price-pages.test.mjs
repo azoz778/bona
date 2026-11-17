@@ -1712,6 +1712,37 @@ describe('processPdf: a single property is never "From" its cheapest model', { t
       assert.equal(report.listingPreview.price.amount, 4400000);
     } finally { image.cleanup(); }
   });
+
+  it('S2m: ONE model carrying a price the brochure words "starting from" keeps `from` once confirmed as the whole property\'s price', async () => {
+    const one = (quote) => villa({ amount: 4400000, from: true, quote, models: [model('Villa', 4400000, 3)] });
+    const facts = { 3: [{ fig: 4400000, mark: 'SAR', kind: 'whole', model: 'Villa' }] };
+    for (const [quote, text] of [['Starting from SAR 4,400,000', 'Starting from SAR 4,400,000'], ['ابتداءً من 4,400,000 ريال', 'السعر ابتداءً من 4,400,000 ريال'],
+      ['الأسعار تبدأ من 4,400,000 ر.س', 'الأسعار تبدأ من 4,400,000 ر.س'], ['Prices from SAR 4,400,000', 'Prices from SAR 4,400,000']]) {
+      const r = await rig({ listing: one(quote), pageText: textPages(text), facts });
+      try {
+        const report = await r.run();
+        assert.deepEqual(headlineCalls(r).map((c) => [c.amount, c.whole]), [[4400000, true]], quote);
+        assert.deepEqual(report.listingPreview.price, { amount: 4400000, currency: 'SAR', from: true, period: null, onRequest: false }, quote);
+        assert.deepEqual(checkListing(report.listingPreview), []);
+      } finally { r.cleanup(); }
+    }
+    // No from-wording in the evidence (the old habit's "from" its one model): its own price, no `from` (P3e).
+    const plain = await rig({ listing: one('Villa price SAR 4,400,000'), pageText: textPages('Villa price SAR 4,400,000'), facts });
+    try {
+      assert.deepEqual((await plain.run()).listingPreview.price, { amount: 4400000, currency: 'SAR', from: false, period: null, onRequest: false });
+    } finally { plain.cleanup(); }
+    // Not confirmed as the whole property's price: on request, from-wording or not.
+    const unconfirmed = await rig({ listing: one('Starting from SAR 4,400,000'), pageText: textPages('Starting from SAR 4,400,000'), facts: { 3: [{ fig: 4400000, mark: 'SAR', kind: 'floor', model: 'Villa' }] } });
+    try {
+      assert.deepEqual((await unconfirmed.run()).listingPreview.price, ON_REQUEST);
+    } finally { unconfirmed.cleanup(); }
+    // Two models or more (floors, parts): never "From" its cheapest one, whatever the evidence says.
+    const floors = villa({ amount: 2000000, from: true, quote: 'from SAR 2,000,000', models: [model('Ground floor', 2000000, 3), model('First floor', 2500000, 3)] });
+    const two = await rig({ listing: floors, pageText: textPages(floorText), facts: floorFacts(2000000) });
+    try {
+      assert.deepEqual((await two.run()).listingPreview.price, { amount: 2000000, currency: 'SAR', from: false, period: null, onRequest: false });
+    } finally { two.cleanup(); }
+  });
 });
 
 describe('processPdf: unit models and their floor plans reach the repo', { timeout: 120000 }, () => {
