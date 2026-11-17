@@ -4,9 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ROOMS } from '../../../scripts/curate/rooms.mjs';
 import {
-  imageFocusProblems, INTAKE_ID_RE, isImageFocus as isFocus, isPublishable, licenceProblems, LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB,
-  subsidisedPriceProblems, videoEntryProblems, withdrawnAdvertising, withdrawnNotice,
+  FACT_LISTS, imageFocusProblems, INTAKE_ID_RE, isImageFocus as isFocus, isPublishable, licenceProblems, LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB,
+  modelsProblems, subsidisedPriceProblems, videoEntryProblems, withdrawnAdvertising, withdrawnNotice,
 } from '../../../scripts/curate/rules.mjs';
+import { isFigure } from './model-prices.mjs';
 
 export const INBOX_DIR = path.join('scripts', 'curate', 'inbox');
 export const INDEX_FILE = '_index.json';
@@ -180,11 +181,44 @@ function altFor(room, listing) {
   return base;
 }
 
+const copyPair = (v) => (v && typeof v === 'object' ? { en: v.en, ar: v.ar } : null);
+const copyList = (v) => ({ en: [...v.en], ar: [...v.ar] });
+const hasItems = (v) => Boolean(v) && Array.isArray(v.en) && Array.isArray(v.ar) && (v.en.length > 0 || v.ar.length > 0);
+
+/**
+ * The unit models as the site publishes them: only the fields validateAiResult() checked, copied
+ * (never the AI's objects themselves), the floor plan as the `{ src, thumb }` writeFloorPlans() wrote
+ * for that model position or null. Never the model's `evidence` (an internal citation) and never the
+ * candidate index in `floorPlan`. Prices are copied as the price step left them (under the owner's
+ * caption price it has already nulled them); a rental keeps no Sakani price, as on the headline.
+ */
+function publicModels(aiModels, floorPlans, { rent }) {
+  const plans = new Map((Array.isArray(floorPlans) ? floorPlans : [])
+    .filter((p) => Number.isInteger(p?.model)).map((p) => [p.model, { src: p.src, thumb: p.thumb }]));
+  return (Array.isArray(aiModels) ? aiModels : []).flatMap((m, i) => {
+    if (!m || typeof m !== 'object') return [];
+    const price = isFigure(m.price) ? m.price : null;
+    return [{
+      name: copyPair(m.name),
+      bedrooms: m.bedrooms ?? null,
+      bathrooms: m.bathrooms ?? null,
+      areaSqm: m.areaSqm ?? null,
+      rooms: hasItems(m.rooms) ? copyList(m.rooms) : null,
+      availability: copyPair(m.availability),
+      price,
+      subsidisedPrice: !rent && price !== null && isFigure(m.subsidisedPrice) && m.subsidisedPrice < price ? m.subsidisedPrice : null,
+      floorPlan: plans.get(i) ?? null,
+    }];
+  });
+}
+
 /**
  * Assemble the listing JSON written to scripts/curate/inbox/<slug>.json.
  * Intake-only fields live under `_intake` and in `hidden`; build.mjs strips both.
+ * `floorPlans` = writeFloorPlans()'s result (or, on a dry run, floorPlanTargets()'s paths):
+ * `[{ model, src, thumb }]`, `model` being the position in `ai.models`.
  */
-export function buildListing({ ai, images, slug, id, repo, caption = {}, meta = {}, site, now = new Date() }) {
+export function buildListing({ ai, images, slug, id, repo, caption = {}, meta = {}, site, now = new Date(), floorPlans = [] }) {
   const l = ai.listing;
   const kind = kindMap(repo)[l.type];
   if (!kind) throw new Error(`no kind mapping for type "${l.type}"`);
@@ -206,6 +240,9 @@ export function buildListing({ ai, images, slug, id, repo, caption = {}, meta = 
       && typeof subsidised === 'number' && Number.isFinite(subsidised) && subsidised > 0 && subsidised < price.amount) {
     price.subsidisedAmount = subsidised;
   }
+  // Optional, and left out entirely when empty: a listing without unit models or facts keeps its shape.
+  const models = publicModels(ai.models, floorPlans, { rent: l.category === 'rent' });
+  const facts = Object.fromEntries(Object.keys(FACT_LISTS).filter((k) => hasItems(ai[k])).map((k) => [k, copyList(ai[k])]));
 
   const listing = {
     id,
@@ -234,6 +271,8 @@ export function buildListing({ ai, images, slug, id, repo, caption = {}, meta = 
     videos: [],
     description: { en: l.description.en.join('\n\n'), ar: l.description.ar.join('\n\n') },
     highlights: l.highlights,
+    ...(models.length ? { models } : {}),
+    ...facts,
     virtualTourUrl: null,
     brochureUrl: meta.brochureUrl ?? null,
     project: l.project ?? null,
@@ -294,6 +333,8 @@ export function checkListing(listing, { minImages = 4, maxImages = 10, withdrawa
     e.push('price.amount must be > 0 unless onRequest');
   }
   e.push(...subsidisedPriceProblems(listing.price, listing.category));
+  // Unit models, their floor plans and the fact lists — and the headline that must agree with them.
+  e.push(...modelsProblems(listing));
   // Optional, like project/unit/map — but when present every entry is `{ src, poster }` in
   // the same site-local shapes the site validator demands (scripts/curate/rules.mjs), so a
   // listing this accepts can never fail the build afterwards.
@@ -341,7 +382,7 @@ export function writeInboxListing(repo, listing) {
 const REBUILT_KEYS = new Set([
   'id', 'slug', 'sourceRef', 'status', 'category', 'type', 'kind', 'featured', 'title', 'location', 'price', 'specs',
   'images', 'videos', 'description', 'highlights', 'virtualTourUrl', 'brochureUrl', 'project', 'unit', 'map',
-  'mapPrecision', 'listedAt', 'hidden', 'licence', '_intake',
+  'mapPrecision', 'listedAt', 'hidden', 'licence', '_intake', 'models', 'amenities', 'nearby', 'warranties',
 ]);
 
 /**

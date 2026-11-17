@@ -170,6 +170,149 @@ export function subsidisedPriceProblems(price, category) {
   return e;
 }
 
+// ---- unit models and the project fact lists (2026-11-17) ------------------------------------
+// A development brochure prints several unit models, each with its own area, rooms, floor plan and
+// (often two) prices. The WhatsApp intake publishes them as `models[]`, beside three short bilingual
+// fact lists (`amenities`, `nearby`, `warranties`). All four are optional. ONE rule for the intake's
+// checkListing() and the site validator; it also applies the copy rules (FORBIDDEN through
+// forbiddenHits, and HYPE) to every model string and list item, because a hand edit or the backfill
+// never passes the intake's AI-step copy check (services/intake/lib/claude.mjs copyProblems).
+//   /listings/<slug>/plan-<nn>.jpg          a model's floor plan on white (services/intake images.mjs)
+//   /listings/<slug>/plan-<nn>-thumb.webp   …and its thumbnail
+// <nn> is the model's 1-based position when the intake wrote it. LOCAL_LISTING_SRC does not match
+// these names, so a floor plan can never stand in for a gallery photo.
+export const LOCAL_PLAN_SRC = /^\/listings\/[a-z0-9]+(?:-[a-z0-9]+)*\/plan-\d{2,3}\.jpg$/;
+export const LOCAL_PLAN_THUMB = /^\/listings\/[a-z0-9]+(?:-[a-z0-9]+)*\/plan-\d{2,3}-thumb\.webp$/;
+export const MAX_MODELS = 24;
+/** The three fact lists and how many items each may hold; every item is at most FACT_ITEM_MAX characters. */
+export const FACT_LISTS = Object.freeze({ amenities: 16, nearby: 8, warranties: 8 });
+export const FACT_ITEM_MAX = 80;
+/** Every field a published model may carry. Anything else — the AI's internal `evidence` above all — is refused. */
+export const MODEL_FIELDS = Object.freeze(['name', 'bedrooms', 'bathrooms', 'areaSqm', 'rooms', 'availability', 'price', 'subsidisedPrice', 'floorPlan']);
+
+const isFigure = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0;
+const absent = (v) => v === null || v === undefined;
+const fmt = (n) => (typeof n === 'number' ? n.toLocaleString('en-US') : String(n));
+/** The <slug> of a site-local /listings/<slug>/… path. */
+const slugOfPath = (p) => /^\/listings\/([^/]+)\//.exec(p)?.[1] ?? null;
+
+/** The copy rules for one string, worded as validate.mjs words them for the rest of the listing. */
+function copyRuleHits(label, s) {
+  if (!nonEmpty(s)) return [];
+  const out = forbiddenHits(s).map((hit) => `${label} mentions a contact detail or another brand: ${hit}`);
+  const hype = s.match(HYPE);
+  if (hype) out.push(`${label} uses hype wording: "${hype[0]}"`);
+  return out;
+}
+
+/** `{ en, ar }`: both non-empty, Arabic script in `ar`, each at most `max` characters. */
+function bilingualTextProblems(v, field, max) {
+  if (!v || typeof v !== 'object' || Array.isArray(v) || !nonEmpty(v.en) || !nonEmpty(v.ar) || !ARABIC_SCRIPT.test(v.ar)) {
+    return [`${field} must be { en, ar } (ar in Arabic script)`];
+  }
+  return ['en', 'ar'].filter((k) => v[k].length > max).map((k) => `${field}.${k} is ${v[k].length} characters — at most ${max}`);
+}
+
+/**
+ * `models`, `amenities`, `nearby` and `warranties` of a listing. Each model: a bilingual name (≤ 60),
+ * bedrooms/bathrooms null or 0–20, areaSqm null or 10–100000, rooms a bilingual list (≤ 12 × 40),
+ * availability null or bilingual (≤ 160), price/subsidisedPrice null or > 0 with the Sakani price below
+ * the model's own price (sales only), floorPlan null or `{ src, thumb }` in this listing's own folder,
+ * each plan used once, and no other field. The headline of a whole development is its cheapest model,
+ * "from" (services/intake/lib/model-prices.mjs alignHeadline, applied by the pipeline), so the From
+ * figure and the table never disagree: whenever a model has a price, `price.amount` is the lowest one,
+ * `price.from` is true, and `price.subsidisedAmount` is the lowest model Sakani price when that is below
+ * the amount, else absent. One specific unit (`unit` set) keeps its own price: the pipeline never aligns it.
+ * @returns {string[]} problems (empty = good)
+ */
+export function modelsProblems(listing) {
+  const l = listing && typeof listing === 'object' ? listing : {};
+  const out = [];
+  const prices = [];
+  const subs = [];
+  if (!absent(l.models)) {
+    if (!Array.isArray(l.models)) out.push('models must be an array of unit models when present');
+    else {
+      if (l.models.length > MAX_MODELS) out.push(`models has ${l.models.length} entries — at most ${MAX_MODELS}`);
+      const plans = new Set();
+      l.models.forEach((m, i) => {
+        const at = `models[${i}]`;
+        if (!m || typeof m !== 'object' || Array.isArray(m)) { out.push(`${at} must be an object`); return; }
+        for (const k of Object.keys(m)) if (!MODEL_FIELDS.includes(k)) out.push(`${at} has an unknown field "${k}"`);
+        out.push(...bilingualTextProblems(m.name, `${at}.name`, 60));
+        for (const k of ['bedrooms', 'bathrooms']) {
+          if (!absent(m[k]) && !(Number.isInteger(m[k]) && m[k] >= 0 && m[k] <= 20)) out.push(`${at}.${k} must be null or a whole number 0–20`);
+        }
+        if (!absent(m.areaSqm) && !(typeof m.areaSqm === 'number' && Number.isFinite(m.areaSqm) && m.areaSqm >= 10 && m.areaSqm <= 100000)) {
+          out.push(`${at}.areaSqm must be null or a number between 10 and 100000`);
+        }
+        out.push(...bilingualListProblems(m.rooms, `${at}.rooms`, { max: 12, maxItemLength: 40 }));
+        if (!absent(m.availability)) out.push(...bilingualTextProblems(m.availability, `${at}.availability`, 160));
+
+        if (!absent(m.price) && !isFigure(m.price)) out.push(`${at}.price must be null or a number above 0`);
+        if (!absent(m.subsidisedPrice)) {
+          if (!isFigure(m.subsidisedPrice)) out.push(`${at}.subsidisedPrice must be null or a number above 0`);
+          else if (!isFigure(m.price)) out.push(`${at}.subsidisedPrice needs the model's regular price`);
+          else if (m.subsidisedPrice >= m.price) out.push(`${at}.subsidisedPrice must be lower than its price`);
+          if (l.category === 'rent') out.push(`${at}.subsidisedPrice is for sales only`);
+        }
+        if (isFigure(m.price)) prices.push(m.price);
+        if (isFigure(m.subsidisedPrice)) subs.push(m.subsidisedPrice);
+
+        if (!absent(m.floorPlan)) {
+          const fp = m.floorPlan;
+          if (!fp || typeof fp !== 'object' || Array.isArray(fp)) out.push(`${at}.floorPlan must be null or { src, thumb }`);
+          else {
+            for (const k of Object.keys(fp)) if (!['src', 'thumb'].includes(k)) out.push(`${at}.floorPlan has an unknown field "${k}"`);
+            for (const [k, re, shape] of [['src', LOCAL_PLAN_SRC, 'plan-nn.jpg'], ['thumb', LOCAL_PLAN_THUMB, 'plan-nn-thumb.webp']]) {
+              if (!(typeof fp[k] === 'string' && re.test(fp[k]) && slugOfPath(fp[k]) === l.slug)) {
+                out.push(`${at}.floorPlan.${k} is not /listings/${l.slug}/${shape}: ${fp[k]}`);
+              }
+            }
+            if (typeof fp.src === 'string') {
+              if (plans.has(fp.src)) out.push(`${at}.floorPlan ${fp.src} is already used by another model`);
+              plans.add(fp.src);
+            }
+          }
+        }
+
+        for (const lang of ['en', 'ar']) {
+          out.push(...copyRuleHits(`${at}.name.${lang}`, m.name?.[lang]), ...copyRuleHits(`${at}.availability.${lang}`, m.availability?.[lang]));
+          (Array.isArray(m.rooms?.[lang]) ? m.rooms[lang] : []).forEach((x, j) => out.push(...copyRuleHits(`${at}.rooms.${lang}[${j}]`, x)));
+        }
+      });
+    }
+  }
+
+  if (prices.length && absent(l.unit)) {
+    const p = l.price && typeof l.price === 'object' ? l.price : {};
+    const low = Math.min(...prices);
+    if (p.onRequest || p.amount !== low) {
+      out.push(`price.amount must be the lowest unit-model price (${fmt(low)}) when the models carry prices, not ${p.onRequest ? 'on request' : fmt(p.amount)}`);
+    }
+    if (p.from !== true) out.push('price.from must be true when the headline is the lowest unit-model price');
+    // A rental's headline never has a Sakani price at all (subsidisedPriceProblems); nothing to align.
+    if (l.category !== 'rent') {
+      const lowSub = subs.length ? Math.min(...subs) : null;
+      if (lowSub !== null && lowSub < low) {
+        if (p.subsidisedAmount !== lowSub) {
+          out.push(`price.subsidisedAmount must be the lowest unit-model Sakani price (${fmt(lowSub)}), not ${absent(p.subsidisedAmount) ? 'absent' : fmt(p.subsidisedAmount)}`);
+        }
+      } else if (!absent(p.subsidisedAmount)) {
+        out.push(`price.subsidisedAmount must be absent: ${lowSub === null
+          ? 'no unit model has a Sakani price'
+          : `the lowest unit-model Sakani price (${fmt(lowSub)}) is not below the lowest price (${fmt(low)})`}`);
+      }
+    }
+  }
+
+  for (const [k, max] of Object.entries(FACT_LISTS)) {
+    out.push(...bilingualListProblems(l[k], k, { max, maxItemLength: FACT_ITEM_MAX }));
+    for (const lang of ['en', 'ar']) (Array.isArray(l[k]?.[lang]) ? l[k][lang] : []).forEach((x, j) => out.push(...copyRuleHits(`${k}.${lang}[${j}]`, x)));
+  }
+  return out;
+}
+
 // ---- withholding listings from the public site --------------------------------------
 // Two separate owner rules, deliberately not merged:
 //   land   — a SAR 50,000,000 cap (2026-09-06, in build.mjs): exact plot locations are

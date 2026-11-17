@@ -11,6 +11,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { hasSubsidyWording, pageNeedsPriceRender, pricePagesToRender, MAX_PRICE_PAGES } from '../lib/price-pages.mjs';
 import { execFileSync } from 'node:child_process';
+import { checkListing } from '../lib/listing.mjs';
 import { processPdf } from '../lib/pipeline.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -116,7 +117,9 @@ let out;
 if (mode === 'extract') {
   const candidates = Array.from({ length: 6 }, (_, index) => {
     const file = 'images/c' + String(index).padStart(3, '0') + '.jpg';
-    return { index, file, abs: put(file), width: 1200, height: 900, page: 1 + index, source: 'embedded', coverage: 0.5 };
+    // cfg.broken: candidates written as bytes no decoder reads (a truncated or hostile image).
+    const abs = (cfg.broken ?? []).includes(index) ? (put(file), fs.writeFileSync(path.join(outDir, file), 'not an image'), path.join(outDir, file)) : put(file);
+    return { index, file, abs, width: 1200, height: 900, page: 1 + index, source: 'embedded', coverage: 0.5 };
   });
   out = { ok: true, pages: cfg.pageText.length, text: cfg.pageText.join('\\n'), pageText: cfg.pageText, candidates,
     rendered: false, embeddedImageCount: candidates.length, links: [], meta: {} };
@@ -192,14 +195,14 @@ const answer = ({ price, priceEvidence = null, subsidisedPriceEvidence = null, u
 const PRICE = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
 const BROCHURE = ['مشروع سكني — شقق بغرفتي نوم وثلاث غرف نوم في حي الحمدانية', LOCATION_PAGE, PRICE_PAGE, 'غرفة نوم 03', PRICE_PAGE];
 
-async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, modelConfirm = null, modelConfirmFail = null, failPageDir = null, cfgExtra = {}, build = '' }) {
+async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, modelConfirm = null, modelConfirmFail = null, failPageDir = null, broken = [], cfgExtra = {}, build = '' }) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bona-price-pages-')));
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
   const photo = path.join(bin, 'photo.jpg');
   const sharp = (await import('sharp')).default;
   await sharp({ create: { width: 1200, height: 900, channels: 3, background: '#4a6b8a' } }).jpeg().toFile(photo);
-  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, modelConfirm, modelConfirmFail, failPageDir }));
+  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, modelConfirm, modelConfirmFail, failPageDir, broken }));
   fs.writeFileSync(path.join(bin, 'fake-py.mjs'), FAKE_PY);
   fs.writeFileSync(path.join(bin, 'fake-claude.mjs'), FAKE_CLAUDE);
   const claude = path.join(bin, 'claude');
@@ -1025,6 +1028,101 @@ describe('processPdf: unit-model prices — failures, bounds and the headline fa
       assert.equal(report.listingPreview.price.amount, 4500);
       assert.equal(report.listingPreview.price.from, true);
       assert.equal(report.listingPreview.price.period, 'month', 'not reset, and so not turned into a yearly rent');
+    } finally { r.cleanup(); }
+  });
+});
+
+describe('processPdf: unit models and their floor plans reach the repo', { timeout: 120000 }, () => {
+  const ON_REQUEST = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true };
+  const SLUG = 'jeddah-heights-al-hamdaniyah';
+  const PLAN = { src: `/listings/${SLUG}/plan-01.jpg`, thumb: `/listings/${SLUG}/plan-01-thumb.webp` };
+  const git = (r, ...args) => execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.com', ...args], { cwd: r.repo, stdio: 'pipe' }).toString();
+  const seedGit = (r) => { git(r, 'init', '-q'); git(r, 'add', '-A'); git(r, 'commit', '-qm', 'seed'); };
+  const inboxJson = (r) => JSON.parse(fs.readFileSync(path.join(r.repo, 'scripts', 'curate', 'inbox', `${SLUG}.json`), 'utf8'));
+  /** Two priced models on page 3; Nawras's floor plan is candidate 5, which the ranking excluded from the gallery. */
+  const withPlans = () => {
+    const a = {
+      ...answer({ price: ON_REQUEST }),
+      models: [
+        {
+          name: { en: 'Nawras', ar: 'نموذج Nawras' }, bedrooms: 3, bathrooms: 2, areaSqm: 105.02, rooms: { en: ['Laundry'], ar: ['غرفة غسيل'] }, availability: null,
+          price: 419994, subsidisedPrice: 356024, evidence: { page: 3, quote: '419994' }, floorPlan: 5,
+        },
+        {
+          name: { en: 'Lulu', ar: 'نموذج Lulu' }, bedrooms: 2, bathrooms: 2, areaSqm: 88, rooms: null, availability: null,
+          price: 319015, subsidisedPrice: 270425, evidence: { page: 3, quote: '319015' }, floorPlan: null,
+        },
+      ],
+      amenities: { en: ['Health club'], ar: ['نادٍ صحي'] },
+      nearby: { en: [], ar: [] },
+      warranties: { en: ['Structure — 10 years'], ar: ['الهيكل الإنشائي — 10 سنوات'] },
+    };
+    a.images[5] = { ...a.images[5], rank: null, hero: false, exclude: true, reason: 'floor plan', focus: null };
+    return a;
+  };
+
+  it('publishes plan-01.jpg + its thumbnail beside the photos, and the inbox JSON carries both models', async () => {
+    const r = await rig({ listing: withPlans() });
+    try {
+      seedGit(r);
+      const report = await r.publish();
+      assert.equal(report.slug, SLUG);
+      const pub = path.join(r.repo, 'public', 'listings', SLUG);
+      assert.deepEqual(fs.readdirSync(pub).sort(), [...[1, 2, 3, 4, 5].flatMap((n) => [`0${n}-thumb.webp`, `0${n}.jpg`]), 'plan-01-thumb.webp', 'plan-01.jpg']);
+      const sharp = (await import('sharp')).default;
+      assert.equal((await sharp(path.join(pub, 'plan-01.jpg')).metadata()).format, 'jpeg');
+      assert.equal((await sharp(path.join(pub, 'plan-01-thumb.webp')).metadata()).format, 'webp');
+      assert.deepEqual(report.floorPlans, [{ model: 0, candidate: 5, src: PLAN.src }]);
+
+      const saved = inboxJson(r);
+      assert.deepEqual(saved.models.map((m) => m.floorPlan), [PLAN, null]);
+      assert.deepEqual(saved.models.map((m) => [m.name.en, m.price, m.subsidisedPrice]), [['Nawras', 419994, 356024], ['Lulu', 319015, 270425]]);
+      assert.deepEqual(saved.price, { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 });
+      assert.deepEqual(saved.amenities, { en: ['Health club'], ar: ['نادٍ صحي'] });
+      assert.deepEqual(saved.warranties, { en: ['Structure — 10 years'], ar: ['الهيكل الإنشائي — 10 سنوات'] });
+      assert.equal('nearby' in saved, false);
+      assert.ok(!JSON.stringify(saved).includes('evidence'), 'the model\'s citation is never committed');
+      assert.deepEqual(saved._intake.images.map((im) => im.candidate), [0, 1, 2, 3, 4], 'the floor plan never enters the gallery');
+      assert.deepEqual(checkListing(saved), [], 'the committed listing passes the shared rules');
+      // New files under the allowlisted public/listings, so the intake's own commit carries them.
+      const status = git(r, 'status', '--porcelain', '--untracked-files=all', '--', 'public/listings');
+      assert.match(status, new RegExp(`^\\?\\? public/listings/${SLUG}/plan-01\\.jpg$`, 'm'));
+      assert.match(status, new RegExp(`^\\?\\? public/listings/${SLUG}/plan-01-thumb\\.webp$`, 'm'));
+    } finally { r.cleanup(); }
+  });
+
+  it('a dry run previews the plan paths without writing a file', async () => {
+    const r = await rig({ listing: withPlans() });
+    try {
+      const report = await r.run();
+      assert.deepEqual(report.listingPreview.models.map((m) => m.floorPlan), [PLAN, null]);
+      assert.deepEqual(checkListing(report.listingPreview), []);
+      assert.equal(fs.existsSync(path.join(r.repo, 'public', 'listings')), false);
+      assert.equal(fs.existsSync(path.join(r.repo, '..', 'work', 'publish')), false, 'nothing staged either');
+    } finally { r.cleanup(); }
+  });
+
+  it('a floor plan that cannot be decoded is left out with a warning; the listing still publishes', async () => {
+    const r = await rig({ listing: withPlans(), broken: [5] });
+    try {
+      seedGit(r);
+      const report = await r.publish();
+      const pub = path.join(r.repo, 'public', 'listings', SLUG);
+      assert.equal(fs.readdirSync(pub).some((f) => f.startsWith('plan-')), false);
+      const saved = inboxJson(r);
+      assert.deepEqual(saved.models.map((m) => m.floorPlan), [null, null]);
+      assert.ok(report.warnings.some((w) => /1 floor plan\(s\) could not be processed/.test(w)), report.warnings.join(' | '));
+      assert.ok(saved._intake.warnings.includes('images-skipped'));
+    } finally { r.cleanup(); }
+  });
+
+  it('a failed rebuild takes the plan files away with the photos', async () => {
+    const r = await rig({ listing: withPlans(), build: 'process.exit(1);\n' });
+    try {
+      seedGit(r);
+      await assert.rejects(r.publish());
+      assert.equal(fs.existsSync(path.join(r.repo, 'public', 'listings', SLUG)), false);
+      assert.equal(git(r, 'status', '--porcelain'), '', 'the clone is back to the commit');
     } finally { r.cleanup(); }
   });
 });

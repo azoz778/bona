@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { forbiddenHits, HYPE, imageFocusProblems, isLandPublic, isLocalSrc, isPublishable, LAND_PRICE_CAP, faqProblems, licenceProblems, LISTING_ID_RE, loadRegisterWithdrawals, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, photoNoteProblems, projectFactsProblems, sarAmount, seoTitleProblems, subsidisedPriceProblems, unitsSheetProblems, videoEntryProblems, withdrawnAdvertising, withdrawnInboxListings, withdrawnNotice, WITHDRAWN_ADVERTISING } from './rules.mjs';
+import { forbiddenHits, HYPE, imageFocusProblems, isLandPublic, isLocalSrc, isPublishable, LAND_PRICE_CAP, faqProblems, licenceProblems, LISTING_ID_RE, loadRegisterWithdrawals, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, modelsProblems, photoNoteProblems, projectFactsProblems, sarAmount, seoTitleProblems, subsidisedPriceProblems, unitsSheetProblems, videoEntryProblems, withdrawnAdvertising, withdrawnInboxListings, withdrawnNotice, WITHDRAWN_ADVERTISING } from './rules.mjs';
 
 function matterportIdOf(value) {
   if (typeof value !== 'string') return null;
@@ -229,6 +229,9 @@ for (const l of data) {
 
   // Project-page extras (rules.mjs): optional, but whole when present.
   for (const p of [...faqProblems(l.faq), ...seoTitleProblems(l.seoTitle), ...projectFactsProblems(l.projectFacts), ...photoNoteProblems(l.photoNote)]) err(id, p);
+  // Unit models + their floor plans, the amenities / nearby / warranties lists, the copy rules over
+  // every string in them, and the headline price that must be the cheapest model (rules.mjs).
+  for (const m of modelsProblems(l)) err(id, m);
   // A photo note is repeated in every image label, so no label can still present the photos as this listing.
   if (l.photoNote && isLoc(l.photoNote)) for (const [i, im] of (l.images ?? []).entries()) {
     if (!String(im.alt?.en ?? '').includes(l.photoNote.en) || !String(im.alt?.ar ?? '').includes(l.photoNote.ar)) err(id, `images[${i}].alt does not carry the listing's photoNote`);

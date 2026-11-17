@@ -85,6 +85,12 @@ export function setPrice(repo, id, { amount, currency, onRequest }) {
   // A Sakani price read from the brochure belonged to the brochure's headline price; once the
   // owner sets his own price it is stale (it could even be above the new one), so it goes.
   delete p.subsidisedAmount;
+  // The same goes for the unit-model prices, as under a caption price at publish time: the headline
+  // must be the cheapest model whenever a model carries a price (rules.mjs modelsProblems), and the
+  // owner's own figure replaces the brochure's. The models themselves (rooms, areas, plans) stay.
+  for (const m of Array.isArray(found.listing.models) ? found.listing.models : []) {
+    if (m && typeof m === 'object') { m.price = null; m.subsidisedPrice = null; }
+  }
   markEdited(found.listing, 'price');
   return { listing: save(found.file, found.listing) };
 }

@@ -33,6 +33,7 @@ Array of listing objects:
   ],                                // images[0] is the hero; 4–10 images
   "description": { "en": "2–4 short paragraphs", "ar": "..." },
   "highlights": { "en": ["Private beach", "..."], "ar": ["شاطئ خاص", "..."] },
+  "models": [],                     // OPTIONAL — unit models; with "amenities", "nearby", "warranties": see "Unit models" below
   "virtualTourUrl": null,
   "brochureUrl": null,
   "videos": [],                     // optional; [{ src, poster }] walkthrough clips — see "Videos" below
@@ -54,6 +55,39 @@ Rules: prices are asking prices from TK only (never an estimate — TAQEEM rule)
   (`object-fit: cover`) uses it as `object-position` (`focusStyle()` in `src/lib/listings.ts`), so a tall
   façade shot in a wide frame keeps the building instead of the sky. Written by the intake's model; absent =
   centred, as before (`imageFocusProblems` in `scripts/curate/rules.mjs`).
+
+## Unit models and the project fact lists (2026-11-17)
+A development brochure prints several unit models, each with its own area, rooms, floor plan and prices.
+The WhatsApp intake publishes them; all four keys are optional and left out when there is nothing to say.
+
+```jsonc
+"models": [ { "name": { "en": "Nawras 2", "ar": "نورس 2" },          // ≤ 60 characters each; at most 24 models
+              "bedrooms": 3, "bathrooms": 2,                        // null, or a whole number 0–20
+              "areaSqm": 105.02,                                    // null, or 10–100000 (built-up / net, not the plot)
+              "rooms": { "en": ["Laundry"], "ar": ["غرفة غسيل"] },  // or null; ≤ 12 items of ≤ 40 characters
+              "availability": { "en": "Buildings G–P", "ar": "المباني G–P" }, // or null; ≤ 160 characters
+              "price": 419994, "subsidisedPrice": 356024,           // null = on request; in price.currency
+              "floorPlan": { "src": "/listings/<slug>/plan-01.jpg", "thumb": "/listings/<slug>/plan-01-thumb.webp" } } ], // or null
+"amenities":  { "en": ["Health club"], "ar": ["نادٍ صحي"] },          // ≤ 16 items
+"nearby":     { "en": ["King Abdulaziz International Airport"], "ar": ["مطار الملك عبدالعزيز الدولي"] }, // ≤ 8
+"warranties": { "en": ["Structure — 10 years"], "ar": ["الهيكل الإنشائي — 10 سنوات"] }      // ≤ 8
+```
+
+- One rule, `modelsProblems` in `scripts/curate/rules.mjs`, for the intake's `checkListing` and `validate.mjs`.
+  Lists are bilingual with equal lengths (`bilingualListProblems`); fact-list items are at most 80 characters.
+  A model carries only the fields above: the intake model's `evidence` citation is never published.
+- **Prices**: printed figures only (the TAQEEM check confirms each on its page). `subsidisedPrice` (Sakani)
+  needs the model's own `price`, is lower than it, and is for sales only. When any model has a price, the
+  headline of a whole development is the cheapest model: `price.amount` = the lowest model `price`,
+  `price.from` = true, and `price.subsidisedAmount` = the lowest model `subsidisedPrice` when that is below
+  the amount, otherwise absent. One specific unit (`unit` set) keeps its own price. The owner's own price
+  (caption at publish, or `price <id> …` on WhatsApp) clears every model price.
+- **Floor plans**: `public/listings/<slug>/plan-NN.jpg` (white ground, ≤ 1600 px, q85) + `plan-NN-thumb.webp`
+  (≤ 480 px), NN = the model's 1-based position when the intake wrote it; the path's slug must be the
+  listing's own (`LOCAL_PLAN_SRC` / `LOCAL_PLAN_THUMB`), and one plan belongs to one model. A floor plan is
+  never a gallery photo.
+- Every string (model names, rooms, availability, list items) passes the same copy rules as the rest of the
+  listing: no contact detail, no other agency's brand (`forbiddenHits`), no hype (`HYPE`).
 
 ## Round 2 additions (2026-09-05 17:00)
 - `kind`: `"house" | "apartment" | "land" | "building"` — REQUIRED on every listing. Derived from `type`: villa/mansion/duplex/palais → house; apartment/penthouse → apartment; land → land; building → building. The site has separate Houses and Apartments sections driven by this field.

@@ -51,3 +51,48 @@ test('validate.mjs catches a contact number written in Arabic-Indic or Persian d
     assert.match(res.stderr, new RegExp(`${id}: description\\.ar mentions a contact detail or another brand: `), res.stderr);
   }
 });
+
+// ---- unit models, floor plans and the project fact lists (rules.mjs modelsProblems) ------------
+/** Give the first priced, whole-listing sale in listings.json two unit models, as the intake publishes them. */
+function addModels(listings) {
+  const l = listings.find((x) => x.category !== 'rent' && x.kind !== 'land' && !x.unit && !x.price?.onRequest && x.price?.amount > 0);
+  l.price = { ...l.price, amount: 319015, from: true, onRequest: false, period: null, subsidisedAmount: 270425 };
+  l.models = [
+    {
+      name: { en: 'Nawras 2', ar: 'نورس 2' }, bedrooms: 3, bathrooms: 2, areaSqm: 105.02,
+      rooms: { en: ['Laundry'], ar: ['غرفة غسيل'] }, availability: { en: 'Buildings G–P', ar: 'المباني G–P' },
+      price: 419994, subsidisedPrice: 356024,
+      floorPlan: { src: `/listings/${l.slug}/plan-01.jpg`, thumb: `/listings/${l.slug}/plan-01-thumb.webp` },
+    },
+    { name: { en: 'Lulu', ar: 'لؤلؤ' }, bedrooms: 2, bathrooms: 2, areaSqm: 88, rooms: null, availability: null, price: 319015, subsidisedPrice: 270425, floorPlan: null },
+  ];
+  l.amenities = { en: ['Health club'], ar: ['نادٍ صحي'] };
+  l.warranties = { en: ['Structure — 10 years'], ar: ['الهيكل الإنشائي — 10 سنوات'] };
+  return l;
+}
+
+test('validate.mjs accepts unit models with floor plans and the fact lists', () => {
+  const res = validateWith((listings) => { addModels(listings); });
+  assert.equal(res.status, 0, res.stderr);
+});
+
+test('validate.mjs refuses a bad unit model, a headline that disagrees with the models, and a leak in the new fields', () => {
+  const cases = [
+    ['a Sakani price not below the price', (l) => { l.models[0].subsidisedPrice = 419994; }, 'models\\[0\\]\\.subsidisedPrice must be lower than its price'],
+    ['a floor plan of another listing', (l) => { l.models[0].floorPlan.src = '/listings/someone-else/plan-01.jpg'; }, 'models\\[0\\]\\.floorPlan\\.src is not /listings/'],
+    ['a headline that is not the cheapest model', (l) => { l.price.amount = 300000; }, 'price\\.amount must be the lowest unit-model price \\(319,015\\)'],
+    ['the model\'s evidence', (l) => { l.models[1].evidence = { page: 3, quote: '319,015' }; }, 'models\\[1\\] has an unknown field "evidence"'],
+    ['a phone number in a model name', (l) => { l.models[1].name.ar = 'لؤلؤ ٠٥٥١٢٣٤٥٦٧'; }, 'models\\[1\\]\\.name\\.ar mentions a contact detail or another brand'],
+    ['amenities of unequal length', (l) => { l.amenities.ar.push('مسبح'); }, 'amenities\\.en and \\.ar must have the same length'],
+  ];
+  for (const [label, mutate, message] of cases) {
+    let id;
+    const res = validateWith((listings) => {
+      const l = addModels(listings);
+      id = l.id;
+      mutate(l);
+    });
+    assert.equal(res.status, 1, `${label} must fail the deploy`);
+    assert.match(res.stderr, new RegExp(`${id}: ${message}`), `${label}: ${res.stderr}`);
+  }
+});

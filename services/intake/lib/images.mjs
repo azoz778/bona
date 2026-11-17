@@ -71,6 +71,67 @@ export async function writeListingImages(candidates, picks, outDir, slug) {
   return out;
 }
 
+// Floor plans: line drawings, published beside the photos as plan-NN.jpg (NN = the model's 1-based
+// position in `models`) + plan-NN-thumb.webp — the shapes LOCAL_PLAN_SRC / LOCAL_PLAN_THUMB in
+// scripts/curate/rules.mjs accept. A plan never enters the gallery: the ranking excluded it.
+export const PLAN_SIDE = 1600;
+export const PLAN_THUMB_SIDE = 480;
+export const PLAN_JPEG_QUALITY = 85;
+
+/**
+ * Where each model's floor plan goes, without touching a file: one entry per model whose `floorPlan`
+ * is a candidate index, in model order. `cand` is undefined when no candidate has that index. The dry
+ * run previews these paths; writeFloorPlans() writes them.
+ * @returns {Array<{model:number,index:number,cand:object|undefined,base:string,src:string,thumb:string}>}
+ */
+export function floorPlanTargets(candidates, models, slug) {
+  const byIndex = new Map((candidates || []).map((c) => [c.index, c]));
+  return (Array.isArray(models) ? models : []).flatMap((m, i) => {
+    if (!Number.isInteger(m?.floorPlan)) return [];
+    const base = `plan-${pad(i + 1)}`;
+    return [{ model: i, index: m.floorPlan, cand: byIndex.get(m.floorPlan), base, src: `/listings/${slug}/${base}.jpg`, thumb: `/listings/${slug}/${base}-thumb.webp` }];
+  });
+}
+
+/**
+ * Write every model's floor plan into `outDir` (the staging dir, promoted with the photos): flattened
+ * onto white (a transparent plan would otherwise turn black in a JPEG), inside PLAN_SIDE without
+ * enlarging, JPEG q85; thumbnail inside PLAN_THUMB_SIDE, WebP q78. A candidate sharp cannot decode
+ * (truncated, hostile, over the pixel cap) or that does not exist is skipped, never fatal: that model
+ * publishes without a plan. The array carries `.skipped` ({ model, index, error }) for the caller to log.
+ * @returns {Promise<Array<{model:number,index:number,src:string,thumb:string,file:string,thumbFile:string}>>}
+ */
+export async function writeFloorPlans(candidates, models, outDir, slug) {
+  const out = [];
+  const skipped = [];
+  for (const t of floorPlanTargets(candidates, models, slug)) {
+    if (!t.cand) { skipped.push({ model: t.model, index: t.index, error: `no candidate #${t.index}` }); continue; }
+    fs.mkdirSync(outDir, { recursive: true });
+    const file = path.join(outDir, `${t.base}.jpg`);
+    const thumbFile = path.join(outDir, `${t.base}-thumb.webp`);
+    try {
+      await sharp(t.cand.abs, { limitInputPixels: MAX_INPUT_PIXELS })
+        .rotate()
+        .flatten({ background: '#ffffff' })
+        .resize({ width: PLAN_SIDE, height: PLAN_SIDE, fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: PLAN_JPEG_QUALITY, mozjpeg: true })
+        .toFile(file);
+      await sharp(file, { limitInputPixels: MAX_INPUT_PIXELS })
+        .resize({ width: PLAN_THUMB_SIDE, height: PLAN_THUMB_SIDE, fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 78 })
+        .toFile(thumbFile);
+    } catch (err) {
+      fs.rmSync(file, { force: true });
+      fs.rmSync(thumbFile, { force: true });
+      skipped.push({ model: t.model, index: t.index, error: err.message });
+      continue;
+    }
+    out.push({ model: t.model, index: t.index, src: t.src, thumb: t.thumb, file, thumbFile });
+  }
+  out.skipped = skipped;
+  return out;
+}
+
 /** Remove a listing's whole image directory (used by `remove <id>`). */
 export function removeListingImages(publicRoot, slug) {
   const dir = path.join(publicRoot, 'listings', slug);

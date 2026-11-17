@@ -32,7 +32,7 @@ import { classifyPdf } from './classify.mjs';
 import { writeConfinement } from './confine.mjs';
 import { buildContactSheets } from './contact-sheet.mjs';
 import { buildPrompt, confirmModelPrices, confirmPriceEvidence, runListingAi } from './claude.mjs';
-import { removeListingImages, writeListingImages } from './images.mjs';
+import { floorPlanTargets, removeListingImages, writeFloorPlans, writeListingImages } from './images.mjs';
 import {
   addWarningCode, buildListing, checkListing, findByPdfSha, findInbox, inboxIds, nextListingId, orderedPicks,
   readIndex, seqAfter, slugify, takenSlugs, todayRiyadh, uniqueSlug, writeIndex, writeInboxListing,
@@ -609,9 +609,14 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
 
   if (dryRun) {
     report.stage = 'dry-run';
+    // The paths writeFloorPlans() would write, for every plan whose candidate exists — no file is made.
+    const floorPlans = floorPlanTargets(extraction.candidates, ai.models ?? [], slug).filter((t) => t.cand)
+      .map(({ model, index, src, thumb }) => ({ model, index, src, thumb }));
+    report.floorPlans = floorPlans.map((p) => ({ model: p.model, candidate: p.index, src: p.src }));
     report.listingPreview = buildListing({
       ai,
       images: picks.map((p) => ({ ...p, n: p.rank, src: `/listings/${slug}/${String(p.rank).padStart(2, '0')}.jpg`, thumb: `/listings/${slug}/${String(p.rank).padStart(2, '0')}-thumb.webp` })),
+      floorPlans,
       slug, id, repo: cfg.repo, caption, site: cfg.site,
       meta: { ...meta, sourceRef, pdfSha256: report.sha256, model: cfg.claudeModel, warningCodes: report.warningCodes, map: mapPin },
     });
@@ -633,9 +638,19 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     log.warn('intake.images_skipped', { skipped: images.skipped });
   }
   report.images = images.map((im) => ({ n: im.n, candidate: im.index, room: im.room, src: im.src, w: im.width, h: im.height, reason: im.reason }));
+  // Each unit model's floor plan, staged beside the photos (plan-NN.jpg, NN = the model's position),
+  // so it is promoted — and rolled back — with them. One that cannot be decoded costs that model its
+  // plan, never the listing.
+  const floorPlans = await writeFloorPlans(extraction.candidates, ai.models ?? [], stageDir, slug);
+  if (floorPlans.skipped?.length) {
+    if (!report.warningCodes.includes('images-skipped')) report.warningCodes.push('images-skipped');
+    report.warnings.push(`${floorPlans.skipped.length} floor plan(s) could not be processed and were left out`);
+    log.warn('intake.floor_plans_skipped', { skipped: floorPlans.skipped });
+  }
+  report.floorPlans = floorPlans.map((p) => ({ model: p.model, candidate: p.index, src: p.src }));
 
   const listing = buildListing({
-    ai, images, slug, id, repo: cfg.repo, caption, site: cfg.site,
+    ai, images, floorPlans, slug, id, repo: cfg.repo, caption, site: cfg.site,
     meta: { ...meta, sourceRef, brochureUrl: null, pdfSha256: report.sha256, model: cfg.claudeModel, hidden: caption.hidden, warningCodes: report.warningCodes, map: mapPin },
   });
   const problems = checkListing(listing, { minImages: cfg.minImages, maxImages: cfg.maxImages, withdrawals });
