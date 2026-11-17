@@ -1978,7 +1978,7 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       const dry = await enrich(r, { dryRun: true });
       assert.match(dry.blocked, /already carries more than this reading: unit models 3 → 2/);
       assert.deepEqual(dry.enrich.compare, {
-        before: { models: 3, prices: 3, facts: ['nearby'] }, after: { models: 2, prices: 4, facts: ['amenities', 'warranties'] },
+        before: { models: 3, prices: 3, plans: 0, facts: ['nearby'] }, after: { models: 2, prices: 4, plans: 1, facts: ['amenities', 'warranties'] },
         losses: ['unit models 3 → 2', 'fact list dropped: nearby'], forced: false,
       });
     } finally { r.cleanup(); }
@@ -2003,6 +2003,32 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       seed(r, { price: { ...ON_REQUEST }, extra: { models: prior(2, { sakani: true }) } });
       await assert.rejects(enrich(r), (err) => err.stage === 'enrich' && /already carries more than this reading: confirmed model prices 4 → 2 —/.test(err.reason));
       assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '');
+    } finally { r.cleanup(); }
+  });
+
+  it('P6d: re-enrich — the same models but a floor plan fewer is a loss: refused, --force accepts it', async () => {
+    const a = reading();
+    a.models[0].floorPlan = null; // this reading found no plan for Nawras
+    const withPlan = () => {
+      const m = prior(2);
+      m[0].floorPlan = { src: `/listings/${SLUG}/plan-03.jpg`, thumb: `/listings/${SLUG}/plan-03-thumb.webp` };
+      return m;
+    };
+    const r = await rig({ listing: a });
+    try {
+      seed(r, { price: { ...ON_REQUEST }, extra: { models: withPlan() } });
+      const raw = fs.readFileSync(inboxFile(r), 'utf8');
+      await assert.rejects(enrich(r), (err) => err.stage === 'enrich'
+        && /^BONA-W023 already carries more than this reading: floor plans 1 → 0 — nothing was changed; re-run with --force if the new reading is right$/.test(err.reason), 'refused');
+      assert.equal(fs.readFileSync(inboxFile(r), 'utf8'), raw);
+      assert.equal(fs.readFileSync(path.join(pubDir(r), 'plan-03.jpg'), 'utf8'), 'old plan', 'the plan file is still there');
+      const dry = await enrich(r, { dryRun: true });
+      assert.deepEqual(dry.enrich.compare.before, { models: 2, prices: 2, plans: 1, facts: [] });
+      assert.deepEqual(dry.enrich.compare.after, { models: 2, prices: 4, plans: 0, facts: ['amenities', 'warranties'] });
+      assert.deepEqual(dry.enrich.compare.losses, ['floor plans 1 → 0']);
+      const forced = await enrich(r, { force: true });
+      assert.equal(forced.ok, true);
+      assert.equal(saved(r).models.filter((m) => m.floorPlan).length, 0);
     } finally { r.cleanup(); }
   });
 
@@ -2167,7 +2193,7 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       seed(r, { price: { ...ON_REQUEST }, extra: { models: prior(3), nearby: { en: ['Airport'], ar: ['المطار'] } } });
       const refused = runOnce(r, '--enrich', 'BONA-W023', '--dry-run');
       assert.equal(refused.status, 0, refused.out);
-      assert.match(refused.out, /Compared {3}models 3 → 2 · model prices 3 → 4 · fact lists nearby → amenities, warranties {2}\(LESS than the listing carries\)/);
+      assert.match(refused.out, /Compared {3}models 3 → 2 · model prices 3 → 4 · floor plans 0 → 1 · fact lists nearby → amenities, warranties {2}\(LESS than the listing carries\)/);
       assert.match(refused.out, /WOULD BE REJECTED — BONA-W023 already carries more than this reading: unit models 3 → 2; fact list dropped: nearby/);
       const forced = runOnce(r, '--enrich', 'BONA-W023', '--dry-run', '--force');
       assert.equal(forced.status, 0, forced.out);

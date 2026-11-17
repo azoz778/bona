@@ -896,19 +896,23 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
 
 /**
  * What an enrichment would take away from the listing as it stands: `built` (modelsAndFacts() of the new
- * reading, its model prices as they will be published) against `existing`. `before` / `after` count the
- * unit models, their published price figures (regular and Sakani) and name the fact lists carried;
- * `losses` says, in words, every count that would go down and every fact list that would go.
+ * reading, its model prices and floor plans as they will be published) against `existing`. `before` /
+ * `after` count the unit models, their published price figures (regular and Sakani) and their floor
+ * plans, and name the fact lists carried; `losses` says, in words, every count that would go down and
+ * every fact list that would go.
  */
 export function compareEnrichment(existing, built) {
-  const figures = (models) => (Array.isArray(models) ? models : []).flatMap((m) => [m?.price, m?.subsidisedPrice]).filter(isFigure).length;
+  const list = (models) => (Array.isArray(models) ? models : []);
+  const figures = (models) => list(models).flatMap((m) => [m?.price, m?.subsidisedPrice]).filter(isFigure).length;
+  const plans = (models) => list(models).filter((m) => m?.floorPlan && typeof m.floorPlan === 'object' && typeof m.floorPlan.src === 'string').length;
   const facts = (l) => Object.keys(FACT_LISTS).filter((k) => ['en', 'ar'].some((lang) => Array.isArray(l?.[k]?.[lang]) && l[k][lang].length > 0));
-  const side = (l) => ({ models: Array.isArray(l?.models) ? l.models.length : 0, prices: figures(l?.models), facts: facts(l) });
+  const side = (l) => ({ models: list(l?.models).length, prices: figures(l?.models), plans: plans(l?.models), facts: facts(l) });
   const before = side(existing);
   const after = side(built);
   const losses = [];
   if (after.models < before.models) losses.push(`unit models ${before.models} → ${after.models}`);
   if (after.prices < before.prices) losses.push(`confirmed model prices ${before.prices} → ${after.prices}`);
+  if (after.plans < before.plans) losses.push(`floor plans ${before.plans} → ${after.plans}`);
   const dropped = before.facts.filter((k) => !after.facts.includes(k));
   if (dropped.length) losses.push(`fact list${dropped.length === 1 ? '' : 's'} dropped: ${dropped.join(', ')}`);
   return { before, after, losses };
@@ -969,8 +973,8 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
   // not render, a failed call, a quota) is ours, not the brochure's: when the listing already carries
   // model prices it could lose, nothing changes — try again later; a listing with none to lose gets the
   // models without the unchecked prices (the warning above says "try again later"), as a publish would.
-  // A reading with fewer models, fewer confirmed model prices or a fact list fewer is refused unless
-  // --force says it is right (the brochure really changed, or the old reading was wrong).
+  // A reading with fewer models, fewer confirmed model prices, fewer floor plans or a fact list fewer is
+  // refused unless --force says it is right (the brochure really changed, or the old reading was wrong).
   const mp = report.modelPrices;
   const unchecked = mp && compare.before.prices > 0 && (mp.fatal || (mp.incomplete?.length ?? 0) > 0)
     ? `${mp.fatal ? 'the AI quota ran out during the unit-model price check' : `the check of ${mp.incomplete.length} unit-model price(s) could not be completed (page${mp.incompletePages.length === 1 ? '' : 's'} ${mp.incompletePages.join(', ')})`} — nothing was changed; try again later`

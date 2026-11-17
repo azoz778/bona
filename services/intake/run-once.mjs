@@ -71,7 +71,7 @@ function printEnrichReport(r) {
   const c = e.compare;
   if (c) {
     const lists = (f) => (f.length ? f.join(', ') : 'none');
-    say(`Compared   models ${c.before.models} → ${c.after.models} · model prices ${c.before.prices} → ${c.after.prices} · fact lists ${lists(c.before.facts)} → ${lists(c.after.facts)}`
+    say(`Compared   models ${c.before.models} → ${c.after.models} · model prices ${c.before.prices} → ${c.after.prices} · floor plans ${c.before.plans} → ${c.after.plans} · fact lists ${lists(c.before.facts)} → ${lists(c.after.facts)}`
       + `${c.losses.length ? (c.forced ? '  (LESS than the listing carries — accepted with --force)' : '  (LESS than the listing carries)') : ''}`);
   }
   const cur = e.currency;

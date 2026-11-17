@@ -41,7 +41,7 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
    `from: true` when equal). It never writes over a listing with less than it carries: an incomplete
    price check is refused ("try again later") when the listing already has model prices to lose (on a
    first enrichment the models go up without the unchecked prices, with the same "try again later"),
-   and a reading with fewer models, fewer confirmed model prices or a fact list
+   and a reading with fewer models, fewer confirmed model prices, fewer floor plans or a fact list
    fewer is refused unless `--force`. See "Enriching a published listing" below.
 8. **`backfill-enrich.mjs`**: runs `--enrich` over every older listing, one at a time; a listing that
    already carries unit models or a fact list (amenities / nearby / warranties) is skipped as "already enriched" unless `--include-enriched` (no
@@ -294,8 +294,8 @@ Anything else in the group is ignored, silently.
   already carries model prices, nothing is written ("try again later", `--force` or not) — a listing
   with no model price to lose gets the models without the unchecked ones, and the reply's "could not be
   completed … try again later"; when the reading has fewer unit models, fewer confirmed model
-  prices (regular + Sakani) or drops a fact list the listing carries, it is refused with the
-  difference (`Compared   models 8 → 5 · …`) unless `--force` says the new reading is right.
+  prices (regular + Sakani), fewer floor plans or drops a fact list the listing carries, it is refused
+  with the difference (`Compared   models 8 → 5 · …`) unless `--force` says the new reading is right.
 - **Nothing the model writes is trusted.** Only fields that pass `validateAiResult` +
   `copyProblems` + `checkListing` are written or sent on. The model's free-text `warnings`
   stay in the run's `ai.json`; `_intake.warnings` in the committed listing holds codes from a
