@@ -84,7 +84,67 @@ describe('validateAiResult', () => {
   });
   it('refuses more than 24 models', () => {
     const ms = Array.from({ length: 25 }, () => ({ ...structuredClone(MODEL), floorPlan: null }));
-    assert.ok(validateAiResult(withModels(...ms), { candidateCount: 2 }).some((p) => /models/.test(p)));
+    assert.ok(validateAiResult(withModels(...ms), { candidateCount: 2 }).some((p) => /models has more than 24/.test(p)));
+  });
+  const V = (r) => validateAiResult(r, { candidateCount: 2 });
+  it("accepts the prompt's default empty answer", () => {
+    const r = clone(); r.models = []; r.amenities = { en: [], ar: [] }; r.nearby = { en: [], ar: [] }; r.warranties = { en: [], ar: [] };
+    assert.deepEqual(V(r), []);
+  });
+  it('accepts a model with no price and null evidence, availability, rooms', () => {
+    const m = { name: { en: 'A1', ar: 'نموذج A1' }, bedrooms: null, bathrooms: null, areaSqm: null, rooms: null, availability: null, price: null, subsidisedPrice: null, evidence: null, floorPlan: null };
+    assert.deepEqual(V(withModels(m)), []);
+  });
+  it('refuses a subsidised price without a price', () => {
+    const m = { ...structuredClone(MODEL), price: null };
+    assert.ok(V(withModels(m)).some((p) => /models\[0\]\.subsidisedPrice needs price/.test(p)));
+  });
+  it('enforces the list caps 16/8/8', () => {
+    for (const [k, n] of [['amenities', 17], ['nearby', 9], ['warranties', 9]]) {
+      const r = clone(); r[k] = { en: Array(n).fill('Gym'), ar: Array(n).fill('نادٍ') };
+      assert.ok(V(r).some((p) => new RegExp(`${k} has ${n} items`).test(p)), k);
+      const ok = clone(); ok[k] = { en: Array(n - 1).fill('Gym'), ar: Array(n - 1).fill('نادٍ') };
+      assert.deepEqual(V(ok), [], k);
+    }
+  });
+  it('enforces the length caps', () => {
+    const long = (n) => 'x'.repeat(n);
+    const arLong = (n) => 'ن'.repeat(n);
+    const cases = [
+      ['name.en 61', (m) => { m.name.en = long(61); }, /models\[0\]\.name\.en/],
+      ['name.ar 61', (m) => { m.name.ar = arLong(61); }, /models\[0\]\.name\.ar/],
+      ['rooms item 41', (m) => { m.rooms = { en: [long(41)], ar: ['غرفة'] }; }, /models\[0\]\.rooms\.en\[0\]/],
+      ['availability 161', (m) => { m.availability = { en: long(161), ar: 'المباني' }; }, /models\[0\]\.availability\.en/],
+      ['13 rooms', (m) => { m.rooms = { en: Array(13).fill('Hall'), ar: Array(13).fill('صالة') }; }, /models\[0\]\.rooms has 13 items/],
+    ];
+    for (const [label, mutate, re] of cases) {
+      const m = structuredClone(MODEL); mutate(m);
+      assert.ok(V(withModels(m)).some((p) => re.test(p)), label);
+    }
+    const r = clone(); r.amenities = { en: [long(81)], ar: ['نادٍ'] };
+    assert.ok(V(r).some((p) => /amenities\.en\[0\]/.test(p)));
+    const edge = structuredClone(MODEL); edge.name.en = long(60); edge.rooms = { en: [long(40)], ar: ['غرفة'] }; edge.availability = { en: long(160), ar: 'المباني' };
+    assert.deepEqual(V(withModels(edge)), []);
+  });
+  it('names the item index of every bad list item', () => {
+    const r = clone();
+    r.amenities = { en: ['Gym', '', 'Pool', 'Spa'], ar: ['نادٍ', 'مسبح', 'Pool', 'منتجع'] };
+    const bad = V(r).join('|');
+    assert.match(bad, /amenities\.en\[1\] must be a non-empty string/);
+    assert.match(bad, /amenities\.ar\[2\] must be Arabic script/);
+  });
+  it('refuses a floor plan that is a rendered page', () => {
+    const r = withModels(MODEL);
+    const candidates = [{ index: 0, source: 'embedded' }, { index: 1, source: 'render' }];
+    assert.ok(validateAiResult(r, { candidateCount: 2, candidates }).some((p) => /models\[0\]\.floorPlan.*render/.test(p)));
+    candidates[1].source = 'embedded';
+    assert.deepEqual(validateAiResult(r, { candidateCount: 2, candidates }), []);
+  });
+  it('points prices to the right field', () => {
+    const ai = { models: [{ name: { en: 'A, SAR 419,994', ar: 'نورس' } }], amenities: { en: ['SAR 319,015 club'], ar: ['نادٍ'] } };
+    const bad = copyProblems(GOOD.listing, ai);
+    assert.ok(bad.some((p) => /^models\[0\]\.name\.en.*models\[i\]\.price/.test(p)), bad.join('|'));
+    assert.ok(bad.some((p) => /^amenities\.en\[0\].*no price/.test(p) && !/listing\.price/.test(p)), bad.join('|'));
   });
   it('refuses fact lists of different lengths', () => {
     const r = clone(); r.amenities = { en: ['Gym', 'Pool'], ar: ['نادٍ'] };
@@ -174,6 +234,36 @@ describe('copyProblems — owner rules', () => {
     const bad = copyProblems(GOOD.listing, ai);
     assert.ok(bad.some((p) => /^models\[0\]\.name\.en/.test(p)), bad.join('|'));
     assert.ok(bad.some((p) => /^amenities\.en\[2\]/.test(p)), bad.join('|'));
+  });
+  const LEAKS = ['Call 0551234567', 'Call 920012345', 'Call 9200 12345', 'Call 800 1234567', 'Tel 012 345 6789', 'Tel 0112345678', 'see https://x.example/y', 'see www.example', 'visit acme.sa', 'visit acme.com', 'a@b.org', 'follow @acme_dev'];
+  it('catches contact details in every field, both languages', () => {
+    for (const leak of LEAKS) {
+      const ai = {
+        models: [{ name: { en: 'A', ar: 'نموذج' }, rooms: { en: [leak], ar: [leak] }, availability: { en: leak, ar: leak } }],
+        amenities: { en: [leak], ar: [leak] }, nearby: { en: [leak], ar: [leak] }, warranties: { en: [leak], ar: [leak] },
+      };
+      const bad = copyProblems(GOOD.listing, ai).join('|');
+      for (const f of ['models[0].rooms.en[0]', 'models[0].rooms.ar[0]', 'models[0].availability.en', 'models[0].availability.ar', 'amenities.en[0]', 'amenities.ar[0]', 'nearby.ar[0]', 'warranties.en[0]']) {
+        assert.ok(bad.includes(`${f} mentions`), `${leak} in ${f}`);
+      }
+      for (const key of ['title', 'description', 'highlights']) {
+        const l = structuredClone(GOOD.listing);
+        if (key === 'title') l.title.en = leak; else if (key === 'description') l.description.ar = [leak, 'x']; else l.highlights.en[0] = leak;
+        assert.ok(copyProblems(l).length, `${leak} in ${key}`);
+      }
+    }
+  });
+  it('catches hype in rooms, availability, nearby, warranties and the Arabic side', () => {
+    const ai = {
+      models: [{ name: { en: 'A', ar: 'ن' }, rooms: { en: ['amazing hall'], ar: ['x'] }, availability: { en: 'stunning views', ar: 'x' } }],
+      nearby: { en: ['dream home area'], ar: ['x'] }, warranties: { en: ['unparalleled cover'], ar: ['breathtaking'] },
+    };
+    const bad = copyProblems(GOOD.listing, ai).join('|');
+    for (const f of ['models[0].rooms.en[0]', 'models[0].availability.en', 'nearby.en[0]', 'warranties.en[0]', 'warranties.ar[0]']) assert.ok(bad.includes(`${f} uses hype`), f);
+  });
+  it('does not flag ordinary copy', () => {
+    const ai = { amenities: { en: ['Health club', 'Kids play area 24/7'], ar: ['نادٍ صحي', 'منطقة ألعاب'] } };
+    assert.deepEqual(copyProblems(GOOD.listing, ai), []);
   });
   it('is clean for good copy', () => {
     assert.deepEqual(copyProblems(GOOD.listing), []);
@@ -400,6 +490,23 @@ describe('runListingAi', () => {
     const { attempt } = await runListingAi({ ...opts, spawnImpl: f.spawnImpl });
     assert.equal(attempt, 3);
     assert.deepEqual(f.calls.map((c) => c.model), ['sonnet', 'sonnet', 'opus']);
+  });
+
+  it('repairs a phone number in a model name on the second answer', async () => {
+    const bad = clone(); bad.models = [{ name: { en: 'Call 0551234567', ar: 'نورس' } }];
+    const fixed = clone(); fixed.models = [{ name: { en: 'Nawras', ar: 'نورس' } }];
+    const f = fakeSpawn([{ envelope: envelope(bad) }, { envelope: envelope(fixed) }]);
+    const { attempt, result } = await runListingAi({ ...opts, spawnImpl: f.spawnImpl });
+    assert.equal(attempt, 2);
+    assert.equal(result.models[0].name.en, 'Nawras');
+    assert.deepEqual(f.calls.map((c) => c.model), ['sonnet', 'sonnet']);
+  });
+
+  it('refuses a render page as a floor plan when candidates are given', async () => {
+    const r = clone(); r.images[1].exclude = true; r.images[1].rank = null; r.images[1].room = 'render';
+    r.models = [{ name: { en: 'A', ar: 'نموذج A' }, floorPlan: 1 }];
+    const f = fakeSpawn([{ envelope: envelope(r) }]);
+    await assert.rejects(() => runListingAi({ ...opts, candidates: [{ index: 0, source: 'embedded' }, { index: 1, source: 'render' }], spawnImpl: f.spawnImpl }), /render/);
   });
 
   it('refuses copy that breaks the owner rules even when the shape is valid', async () => {

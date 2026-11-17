@@ -18,8 +18,48 @@ export const HYPE = new RegExp(`\\b(${HYPE_WORDS.map((w) => w.replace(/[.*+?^${}
  */
 export const PHONE_RE = /(?:\+?966[\s.-]?5\d(?:[\s.-]?\d){7}|(?<![\d+])0[\s.-]?5(?:[\s.-]?\d){8}(?!\d)|\+\d{1,3}[\s.-]?\d(?:[\s.-]?\d){6,13})/;
 
+/**
+ * Other contact details that leak from a developer's brochure: Saudi unified numbers (9200 +
+ * 5 digits), toll-free 800 numbers, Saudi landlines (01x + 6-7 digits), URLs, bare domains,
+ * e-mail addresses and social handles. The site renders its own contact block.
+ */
+export const UNIFIED_NUMBER_RE = /(?<![\d+])9200(?:[\s-]?\d){5}(?!\d)/;
+export const TOLL_FREE_RE = /(?<![\d+])800(?:[\s-]?\d){7}(?!\d)/;
+export const LANDLINE_RE = /(?<![\d+])0[\s-]?1[1-9](?:[\s-]?\d){6,7}(?!\d)/;
+export const URL_RE = /https?:\/\/|\bwww\./i;
+export const DOMAIN_RE = /\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:sa|com|net|org)\b/i;
+export const EMAIL_RE = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/;
+export const HANDLE_RE = /(?<![\w@])@\w{3,}/;
+export const CONTACT_RES = [UNIFIED_NUMBER_RE, TOLL_FREE_RE, LANDLINE_RE, URL_RE, DOMAIN_RE, EMAIL_RE, HANDLE_RE];
+
 /** The old brand, other agencies, and contact details. */
-export const FORBIDDEN = [/\bTK\b/i, /tk[- ]?estates?/i, /tk-estates\.com/i, PHONE_RE];
+export const FORBIDDEN = [/\bTK\b/i, /tk[- ]?estates?/i, /tk-estates\.com/i, PHONE_RE, ...CONTACT_RES];
+
+// ---- bilingual fact lists --------------------------------------------------------------
+const ARABIC_SCRIPT = /[\u0600-\u06FF]/;
+const nonEmpty = (v) => typeof v === 'string' && v.trim().length > 0;
+/**
+ * `{en:[…], ar:[…]}` — equal length, non-empty strings, Arabic script in `ar`, optional caps.
+ * Returns EVERY problem (empty array = fine), each naming the item index. null/undefined is fine.
+ */
+export function bilingualListProblems(value, field, { max = 0, maxItemLength = 0 } = {}) {
+  if (value === null || value === undefined) return [];
+  if (!value || typeof value !== 'object' || !Array.isArray(value.en) || !Array.isArray(value.ar)) {
+    return [`${field} must be { en:[strings], ar:[strings] }`];
+  }
+  const out = [];
+  for (const lang of ['en', 'ar']) {
+    value[lang].forEach((x, i) => {
+      if (!nonEmpty(x)) { out.push(`${field}.${lang}[${i}] must be a non-empty string`); return; }
+      if (lang === 'ar' && !ARABIC_SCRIPT.test(x)) out.push(`${field}.ar[${i}] must be Arabic script`);
+      if (maxItemLength && x.length > maxItemLength) out.push(`${field}.${lang}[${i}] is ${x.length} characters — at most ${maxItemLength}`);
+    });
+  }
+  if (value.en.length !== value.ar.length) out.push(`${field}.en and .ar must have the same length (${value.en.length} vs ${value.ar.length})`);
+  const n = Math.max(value.en.length, value.ar.length);
+  if (max && n > max) out.push(`${field} has ${n} items — at most ${max}`);
+  return out;
+}
 
 // ---- identifiers ---------------------------------------------------------------------
 // BONA-### is a curated listing (positional, from listings.source.mjs); BONA-W### is one
@@ -402,7 +442,6 @@ export function licenceProblems(lc) {
 // because the page renders whichever locale it is building and a blank half would ship silently.
 
 const AR_RE = /[؀-ۿ]/;
-const nonEmpty = (v) => typeof v === 'string' && v.trim().length > 0;
 
 export function faqProblems(faq) {
   if (faq === undefined || faq === null) return [];

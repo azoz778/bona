@@ -288,6 +288,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       settingsPath: confinement.file,
       timeoutMs: cfg.claudeTimeoutMs,
       candidateCount: extraction.candidates.length,
+      candidates: extraction.candidates,
       logger: log,
     });
   };

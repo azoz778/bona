@@ -28,7 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOMS } from '../../../scripts/curate/rooms.mjs';
-import { FORBIDDEN as COPY_FORBIDDEN, HYPE_WORDS as SHARED_HYPE_WORDS, isImageFocus as isFocus } from '../../../scripts/curate/rules.mjs';
+import { bilingualListProblems, FORBIDDEN as COPY_FORBIDDEN, HYPE_WORDS as SHARED_HYPE_WORDS, isImageFocus as isFocus } from '../../../scripts/curate/rules.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PROMPT_TEMPLATE = path.join(HERE, 'prompt.md');
@@ -224,23 +224,13 @@ export function runClaudeOnce({ prompt, cwd, model, bin = 'claude', addDirs = []
 const isStr = (v) => typeof v === 'string' && v.trim().length > 0;
 const ARABIC = /[؀-ۿ]/;
 const isPair = (v) => v && typeof v === 'object' && isStr(v.en) && isStr(v.ar) && ARABIC.test(v.ar);
-const isArr = (v) => Array.isArray(v) && v.every(isStr);
-/** `{en:[…], ar:[…]}`: equal length, non-empty strings, Arabic script in `ar`. Returns a problem or null. */
-function bilingualListProblem(path, v, max) {
-  if (v === null || v === undefined) return null;
-  if (!v || typeof v !== 'object' || !isArr(v.en) || !isArr(v.ar)) return `${path} must be { en:[strings], ar:[strings] }`;
-  if (v.en.length !== v.ar.length) return `${path}.en and .ar must have the same length`;
-  if (max && v.en.length > max) return `${path} has more than ${max} items`;
-  if (!v.ar.every((x) => ARABIC.test(x))) return `${path}.ar must be Arabic script`;
-  return null;
-}
 const isNumOrNull = (v) => v === null || (typeof v === 'number' && Number.isFinite(v));
 
 /**
  * Contract check for the model's output. Returns the list of problems (empty = good).
  * This is deliberately strict: the pipeline writes to a public website.
  */
-export function validateAiResult(result, { candidateCount = 0 } = {}) {
+export function validateAiResult(result, { candidateCount = 0, candidates = null } = {}) {
   const e = [];
   if (!result || typeof result !== 'object') return ['output is not an object'];
   if (typeof result.reject !== 'boolean') e.push('reject must be a boolean');
@@ -257,21 +247,21 @@ export function validateAiResult(result, { candidateCount = 0 } = {}) {
   for (const k of ['district', 'city', 'country']) if (!isPair(loc[k])) e.push(`listing.location.${k}.en/ar required`);
   if (!/^[A-Z]{2}$/.test(loc.countryCode || '')) e.push('listing.location.countryCode must be ISO-2');
 
-  const p = l.price || {};
-  if (!CURRENCIES.includes(p.currency)) e.push(`listing.price.currency must be one of ${CURRENCIES.join('|')}`);
-  if (typeof p.onRequest !== 'boolean') e.push('listing.price.onRequest must be boolean');
-  if (typeof p.from !== 'boolean') e.push('listing.price.from must be boolean');
-  if (!isNumOrNull(p.amount)) e.push('listing.price.amount must be a number or null');
-  if (!p.onRequest && !(typeof p.amount === 'number' && p.amount > 0)) e.push('listing.price: amount must be > 0 unless onRequest is true');
-  if (![null, undefined, 'year', 'month'].includes(p.period)) e.push('listing.price.period must be null, "year" or "month"');
-  if (l.category === 'rent' && !p.period && !p.onRequest) e.push('rent listings need price.period');
+  const price = l.price || {};
+  if (!CURRENCIES.includes(price.currency)) e.push(`listing.price.currency must be one of ${CURRENCIES.join('|')}`);
+  if (typeof price.onRequest !== 'boolean') e.push('listing.price.onRequest must be boolean');
+  if (typeof price.from !== 'boolean') e.push('listing.price.from must be boolean');
+  if (!isNumOrNull(price.amount)) e.push('listing.price.amount must be a number or null');
+  if (!price.onRequest && !(typeof price.amount === 'number' && price.amount > 0)) e.push('listing.price: amount must be > 0 unless onRequest is true');
+  if (![null, undefined, 'year', 'month'].includes(price.period)) e.push('listing.price.period must be null, "year" or "month"');
+  if (l.category === 'rent' && !price.period && !price.onRequest) e.push('rent listings need price.period');
   // A second, lower price for housing-subsidy (Sakani) beneficiaries, printed beside the regular one.
-  if (p.subsidisedAmount !== null && p.subsidisedAmount !== undefined) {
-    if (!(typeof p.subsidisedAmount === 'number' && Number.isFinite(p.subsidisedAmount) && p.subsidisedAmount > 0)) {
+  if (price.subsidisedAmount !== null && price.subsidisedAmount !== undefined) {
+    if (!(typeof price.subsidisedAmount === 'number' && Number.isFinite(price.subsidisedAmount) && price.subsidisedAmount > 0)) {
       e.push('listing.price.subsidisedAmount must be null or a number > 0');
-    } else if (p.onRequest || !(typeof p.amount === 'number' && p.amount > 0)) {
+    } else if (price.onRequest || !(typeof price.amount === 'number' && price.amount > 0)) {
       e.push('listing.price.subsidisedAmount needs a published amount (it is null when onRequest is true)');
-    } else if (p.subsidisedAmount >= p.amount) {
+    } else if (price.subsidisedAmount >= price.amount) {
       e.push('listing.price.subsidisedAmount must be lower than amount (amount = the regular, non-subsidised price)');
     } else if (l.category === 'rent') {
       e.push('listing.price.subsidisedAmount is for sales only — null on a rental');
@@ -300,48 +290,55 @@ export function validateAiResult(result, { candidateCount = 0 } = {}) {
   // Optional unit models + bilingual fact lists (absent or null is fine).
   if (result.models !== null && result.models !== undefined) {
     if (!Array.isArray(result.models)) e.push('models must be an array');
-    else if (result.models.length > 24) e.push('models has more than 24 entries');
+    else if (result.models.length > 24) e.push(`models has more than 24 entries (${result.models.length})`);
     else {
       const plans = new Set();
       result.models.forEach((m, i) => {
-        const p = `models[${i}]`;
-        if (!m || typeof m !== 'object') { e.push(`${p} must be an object`); return; }
-        if (!isPair(m.name)) e.push(`${p}.name.en/ar required (ar must be Arabic script)`);
+        const at = `models[${i}]`;
+        if (!m || typeof m !== 'object') { e.push(`${at} must be an object`); return; }
+        if (!isPair(m.name)) e.push(`${at}.name.en/ar required (ar must be Arabic script)`);
         for (const k of ['bedrooms', 'bathrooms']) {
           const v = m[k];
-          if (v !== null && v !== undefined && !(Number.isInteger(v) && v >= 0 && v <= 20)) e.push(`${p}.${k} must be null or an integer 0-20`);
+          if (v !== null && v !== undefined && !(Number.isInteger(v) && v >= 0 && v <= 20)) e.push(`${at}.${k} must be null or an integer 0-20`);
         }
         if (m.areaSqm !== null && m.areaSqm !== undefined && !(typeof m.areaSqm === 'number' && Number.isFinite(m.areaSqm) && m.areaSqm >= 10 && m.areaSqm <= 100000)) {
-          e.push(`${p}.areaSqm must be null or a number between 10 and 100000`);
+          e.push(`${at}.areaSqm must be null or a number between 10 and 100000`);
         }
-        const rp = bilingualListProblem(`${p}.rooms`, m.rooms);
-        if (rp) e.push(rp);
-        if (m.availability !== null && m.availability !== undefined && !isPair(m.availability)) e.push(`${p}.availability must be null or { en, ar } (ar Arabic script)`);
+        for (const lang of ['en', 'ar']) {
+          if (isStr(m.name?.[lang]) && m.name[lang].length > 60) e.push(`${at}.name.${lang} is ${m.name[lang].length} characters — at most 60`);
+        }
+        e.push(...bilingualListProblems(m.rooms, `${at}.rooms`, { max: 12, maxItemLength: 40 }));
+        if (m.availability !== null && m.availability !== undefined) {
+          if (!isPair(m.availability)) e.push(`${at}.availability must be null or { en, ar } (ar Arabic script)`);
+          else for (const lang of ['en', 'ar']) if (m.availability[lang].length > 160) e.push(`${at}.availability.${lang} is ${m.availability[lang].length} characters — at most 160`);
+        }
         const okPrice = (v) => v === null || v === undefined || (typeof v === 'number' && Number.isFinite(v) && v > 0);
-        if (!okPrice(m.price)) e.push(`${p}.price must be null or a number above 0`);
-        if (!okPrice(m.subsidisedPrice)) e.push(`${p}.subsidisedPrice must be null or a number above 0`);
+        if (!okPrice(m.price)) e.push(`${at}.price must be null or a number above 0`);
+        if (!okPrice(m.subsidisedPrice)) e.push(`${at}.subsidisedPrice must be null or a number above 0`);
         const hasPrice = (m.price ?? null) !== null, hasSub = (m.subsidisedPrice ?? null) !== null;
+        if (hasSub && !hasPrice) e.push(`${at}.subsidisedPrice needs price (the regular, non-subsidised price)`);
         if (hasPrice && hasSub && okPrice(m.price) && okPrice(m.subsidisedPrice) && !(m.subsidisedPrice < m.price)) {
-          e.push(`${p}.subsidisedPrice must be lower than price`);
+          e.push(`${at}.subsidisedPrice must be lower than price`);
         }
         if (hasPrice || hasSub) {
           const ev = m.evidence;
           if (!(ev && typeof ev === 'object' && Number.isInteger(ev.page) && ev.page >= 1 && isStr(ev.quote))) {
-            e.push(`${p}.evidence must be { page (integer >= 1), quote } when a price is set`);
+            e.push(`${at}.evidence must be { page (integer >= 1), quote } when a price is set`);
           }
         }
         if (m.floorPlan !== null && m.floorPlan !== undefined) {
           const img = Number.isInteger(m.floorPlan) && Array.isArray(result.images) ? result.images.find((x) => x?.index === m.floorPlan) : null;
-          if (!img || img.exclude !== true) e.push(`${p}.floorPlan must be the index of a candidate image marked exclude: true`);
-          else if (plans.has(m.floorPlan)) e.push(`${p}.floorPlan ${m.floorPlan} is already used by another model`);
+          if (!img || img.exclude !== true) e.push(`${at}.floorPlan must be the index of a candidate image marked exclude: true`);
+          else if (Array.isArray(candidates) && candidates.find((c) => c?.index === m.floorPlan)?.source === 'render') {
+            e.push(`${at}.floorPlan #${m.floorPlan} is a rendered whole page, not a floor-plan image — use null`);
+          } else if (plans.has(m.floorPlan)) e.push(`${at}.floorPlan ${m.floorPlan} is already used by another model`);
           else plans.add(m.floorPlan);
         }
       });
     }
   }
   for (const [k, max] of [['amenities', 16], ['nearby', 8], ['warranties', 8]]) {
-    const p = bilingualListProblem(k, result[k], max);
-    if (p) e.push(p);
+    e.push(...bilingualListProblems(result[k], k, { max, maxItemLength: 80 }));
   }
 
   if (!Array.isArray(result.images)) e.push('images must be an array');
@@ -471,7 +468,10 @@ export function copyProblems(listing, ai = {}) {
     if (!isStr(value)) continue;
     for (const re of FORBIDDEN) if (re.test(value)) bad.push(`${label} mentions "${value.match(re)[0]}"`);
     if (PRICE_IN_COPY_RE.test(value)) {
-      bad.push(`${label} states a price ("${value.match(PRICE_IN_COPY_RE)[0].trim()}") — prices go in listing.price only`);
+      const where = /^models\[/.test(label) ? 'prices go in models[i].price / subsidisedPrice only'
+        : /^(amenities|nearby|warranties)\./.test(label) ? 'state no price in this list'
+          : 'prices go in listing.price only';
+      bad.push(`${label} states a price ("${value.match(PRICE_IN_COPY_RE)[0].trim()}") — ${where}`);
     }
     for (const w of HYPE_WORDS) if (new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(value)) bad.push(`${label} uses hype word "${w}"`);
   }
@@ -479,7 +479,7 @@ export function copyProblems(listing, ai = {}) {
 }
 
 /** Run the AI step with one repair retry, then one model fallback. */
-export async function runListingAi({ prompt, cwd, model, fallbackModel, bin, addDirs, settingsPath, timeoutMs, candidateCount, spawnImpl, logger }) {
+export async function runListingAi({ prompt, cwd, model, fallbackModel, bin, addDirs, settingsPath, timeoutMs, candidateCount, candidates, spawnImpl, logger }) {
   const attempts = [];
   const models = fallbackModel && fallbackModel !== model ? [model, model, fallbackModel] : [model, model];
   let lastErr;
@@ -489,7 +489,7 @@ export async function runListingAi({ prompt, cwd, model, fallbackModel, bin, add
       : `${prompt}\n\n---\nYour previous answer was rejected. Fix EXACTLY these problems and answer again with the complete JSON object only:\n${attempts[attempts.length - 1].join('\n')}`;
     try {
       const { result, meta } = await runClaudeOnce({ prompt: text, cwd, model: m, bin, addDirs, settingsPath, timeoutMs, spawnImpl });
-      const problems = validateAiResult(result, { candidateCount });
+      const problems = validateAiResult(result, { candidateCount, candidates });
       if (!result.reject) problems.push(...copyProblems(result.listing, result));
       if (!problems.length) return { result, meta, attempt: i + 1 };
       attempts.push(problems);
