@@ -1838,6 +1838,30 @@ describe('processPdf: a single property is never "From" its cheapest model', { t
     } finally { image.cleanup(); }
   });
 
+  it('S2r (final review M5): a whole-property check after a quota error, its page not rendered — "could not be checked, try again later", never "not printed"', async () => {
+    const a = villa({ amount: 2000000, from: false, quote: 'SAR 2,000,000', models: [model('Ground floor', 2000000, 3), model('First floor', 2500000, 3)] });
+    a.priceEvidence = { page: 4, quote: 'SAR 2,000,000' };
+    // Page 3 (a price table the text layer cannot read) is rendered for the reading; page 4 is not.
+    const pageText = [long('Overview'), long('Location'), long('Floor price table'), long('Ground floor SAR 2,000,000'), long('Contact the sales team')];
+    const facts = { 3: [{ fig: 2000000, mark: 'SAR', kind: 'floor', model: 'Ground floor' }, { fig: 2500000, mark: 'SAR', kind: 'floor', model: 'First floor' }],
+      4: [{ fig: 2000000, mark: 'SAR', kind: 'whole' }] };
+    const r = await rig({ listing: a, pageText, facts, modelConfirmFail: 'quota' });
+    try {
+      const report = await r.run();
+      assert.ok(report.modelPrices.fatal, 'the model check hit the quota');
+      assert.equal(headlineCalls(r).length, 0, 'no call after a quota error');
+      assert.ok(!r.calls().some((c) => c.tool === 'py-pages' && c.dir === 'headline-pages'), 'nothing rendered that cannot be looked at');
+      assert.deepEqual(report.listingPreview.price, ON_REQUEST);
+      assert.equal(report.priceEvidence.unchecked, true);
+      assert.equal(report.priceEvidence.uncheckedWhy, 'quota');
+      const w = report.warnings.find((x) => /price on request/.test(x)) ?? '';
+      assert.match(w, /could not be checked/);
+      assert.match(w, /quota/);
+      assert.match(w, /try again later/);
+      assert.doesNotMatch(w, /does not print|not printed/);
+    } finally { r.cleanup(); }
+  });
+
   it('S2m: ONE model carrying a price the brochure words "starting from" keeps `from` once confirmed as the whole property\'s price', async () => {
     const one = (quote) => villa({ amount: 4400000, from: true, quote, models: [model('Villa', 4400000, 3)] });
     const facts = { 3: [{ fig: 4400000, mark: 'SAR', kind: 'whole', model: 'Villa' }] };
