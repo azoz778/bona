@@ -9,7 +9,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { pageNeedsPriceRender, pricePagesToRender, MAX_PRICE_PAGES } from '../lib/price-pages.mjs';
+import { hasSubsidyWording, pageNeedsPriceRender, pricePagesToRender, MAX_PRICE_PAGES } from '../lib/price-pages.mjs';
+import { execFileSync } from 'node:child_process';
 import { processPdf } from '../lib/pipeline.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -45,6 +46,24 @@ describe('pageNeedsPriceRender', () => {
   });
   it('a scrambled price wins over an unrelated readable number on the same page', () => {
     assert.equal(pageNeedsPriceRender(`${PRICE_PAGE}\n920032546`), true);
+  });
+  it('a phone number next to the price word does not make an unseparated scrambled price readable', () => {
+    assert.equal(pageNeedsPriceRender('السعر\nDIBFDG\nللتواصل 920032546'), true);
+  });
+  it('a figure far from the price word does not count for it', () => {
+    assert.equal(pageNeedsPriceRender('السعر\nDIBFDG\n.\n.\n.\n.\nالمساحة 1,250 م²'), true);
+  });
+  it('knows other ways a price is labelled', () => {
+    assert.equal(pageNeedsPriceRender('قيمة الوحدة DIB,FDG'), true);
+    assert.equal(pageNeedsPriceRender('SR DIB,FDG'), true);
+  });
+  it('every price line needs its own readable figure', () => {
+    assert.equal(pageNeedsPriceRender('السعر 1,250,000 ريال\n.\n.\n.\n.\n.\nسعر الدفعة الأولى\nKLMNOP'), true);
+  });
+  it('always renders a page that prints prices for subsidy beneficiaries, readable or not', () => {
+    assert.equal(pageNeedsPriceRender('السعر لمستفيدي الدعم 270,425 ريال\nالسعر لغير مستفيدي الدعم 319,015 ريال'), true);
+    assert.equal(hasSubsidyWording('Price for Sakani beneficiaries'), true);
+    assert.equal(hasSubsidyWording('مجمع سكني متكامل'), false, '"residential" alone is not subsidy wording');
   });
 });
 
@@ -96,8 +115,9 @@ const prompt = fs.readFileSync(0, 'utf8');
 let answer;
 if (prompt.includes('VISIBLY PRINT')) {
   const amount = Number((prompt.match(/VISIBLY PRINT[^\\d]*(\\d+)/) || [])[1]);
-  fs.appendFileSync(log, JSON.stringify({ tool: 'claude-confirm', amount, subsidised: /subsidy/i.test(prompt), project: /unit models/.test(prompt) }) + '\\n');
-  answer = { confirmed: (cfg.confirm || []).includes(amount) };
+  const subsidised = /VISIBLY PRINT the price for housing-subsidy/.test(prompt);
+  fs.appendFileSync(log, JSON.stringify({ tool: 'claude-confirm', amount, subsidised, project: /unit models/.test(prompt), mirror: /only the price for everyone else counts/.test(prompt) }) + '\\n');
+  answer = { confirmed: ((subsidised ? cfg.confirmSub : null) ?? cfg.confirm ?? []).includes(amount) };
 } else {
   fs.appendFileSync(log, JSON.stringify({ tool: 'claude-listing', prompt }) + '\\n');
   answer = cfg.listing;
@@ -109,7 +129,7 @@ const PLACE = {
   district: { en: 'Al Hamdaniyah', ar: 'الحمدانية' }, city: { en: 'Jeddah', ar: 'جدة' },
   country: { en: 'Saudi Arabia', ar: 'المملكة العربية السعودية' }, countryCode: 'SA',
 };
-const answer = ({ price, priceEvidence = null, subsidisedPriceEvidence = null }) => ({
+const answer = ({ price, priceEvidence = null, subsidisedPriceEvidence = null, unit = null }) => ({
   reject: false, rejectReason: null, confidence: 0.8, warnings: [],
   listing: {
     title: { en: 'Jeddah Heights, Al Hamdaniyah', ar: 'جدة هايتس، الحمدانية' }, type: 'apartment', category: 'off-plan', location: PLACE,
@@ -118,7 +138,7 @@ const answer = ({ price, priceEvidence = null, subsidisedPriceEvidence = null })
     description: { en: ['One.', 'Two.'], ar: ['واحد.', 'اثنان.'] },
     highlights: { en: ['A', 'B', 'C', 'D'], ar: ['أ', 'ب', 'ج', 'د'] },
     project: { name: { en: 'Jeddah Heights', ar: 'جدة هايتس' }, developer: { en: 'NHC', ar: 'الوطنية للإسكان' } },
-    unit: null,
+    unit,
   },
   images: Array.from({ length: 6 }, (_, index) => ({
     index, room: ['exterior', 'living', 'kitchen', 'master', 'garden', 'gym'][index], rank: index + 1, hero: index === 0, exclude: false,
@@ -131,14 +151,14 @@ const answer = ({ price, priceEvidence = null, subsidisedPriceEvidence = null })
 const PRICE = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
 const BROCHURE = ['مشروع سكني — شقق بغرفتي نوم وثلاث غرف نوم في حي الحمدانية', LOCATION_PAGE, PRICE_PAGE, 'غرفة نوم 03', PRICE_PAGE];
 
-async function rig({ pageText = BROCHURE, listing, confirm = [] }) {
+async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, build = '' }) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bona-price-pages-')));
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
   const photo = path.join(bin, 'photo.jpg');
   const sharp = (await import('sharp')).default;
   await sharp({ create: { width: 1200, height: 900, channels: 3, background: '#4a6b8a' } }).jpeg().toFile(photo);
-  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm }));
+  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub }));
   fs.writeFileSync(path.join(bin, 'fake-py.mjs'), FAKE_PY);
   fs.writeFileSync(path.join(bin, 'fake-claude.mjs'), FAKE_CLAUDE);
   const claude = path.join(bin, 'claude');
@@ -149,7 +169,7 @@ async function rig({ pageText = BROCHURE, listing, confirm = [] }) {
   fs.copyFileSync(path.join(REPO, 'src', 'data', 'kind-map.json'), path.join(repo, 'src', 'data', 'kind-map.json'));
   for (const f of ['build.mjs', 'validate.mjs']) {
     fs.mkdirSync(path.join(repo, 'scripts', 'curate'), { recursive: true });
-    fs.writeFileSync(path.join(repo, 'scripts', 'curate', f), '// stand-in: the real build is not under test here\n');
+    fs.writeFileSync(path.join(repo, 'scripts', 'curate', f), f === 'build.mjs' && build ? build : '// stand-in: the real build is not under test here\n');
   }
   const pdfPath = path.join(dir, 'brochure.pdf');
   fs.writeFileSync(pdfPath, `%PDF-1.4 jeddah heights ${crypto.randomUUID()}`);
@@ -253,22 +273,75 @@ describe('processPdf: prices on pages whose digits are scrambled', { timeout: 12
     } finally { r.cleanup(); }
   });
 
-  it('a brochure whose prices are readable renders nothing extra', async () => {
-    const pageText = ['مشروع سكني — شقق بغرفتي نوم', 'السعر لغير مستفيدي الدعم 319,015 ريال\nالسعر لمستفيدي الدعم 270,425 ريال'];
-    const r = await rig({ pageText, listing: answer({ price: PRICE }), confirm: [] });
+  it('a brochure whose single price is readable renders nothing extra and needs no second model', async () => {
+    const pageText = ['مشروع سكني — شقق بغرفتي نوم — شقة سكنية بمساحة واسعة وتشطيبات حديثة في موقع مميز قريب من الخدمات', 'السعر 319,015 ريال\nشقة سكنية بمساحة واسعة وتشطيبات حديثة في موقع مميز قريب من الخدمات'];
+    const price = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false };
+    const r = await rig({ pageText, listing: answer({ price }), confirm: [] });
     try {
       const report = await r.run();
       assert.equal(r.calls().filter((c) => c.tool === 'py-pages').length, 0);
-      assert.deepEqual(report.listingPreview.price, { ...PRICE }); // both found in the text layer, no second model needed
+      assert.deepEqual(report.listingPreview.price, price);
       assert.equal(r.calls().filter((c) => c.tool === 'claude-confirm').length, 0);
     } finally { r.cleanup(); }
+  });
+
+  it('readable prices beside subsidy wording are still confirmed on the page, evidence or not', async () => {
+    const pageText = ['مشروع سكني — شقق بغرفتي نوم', 'السعر لمستفيدي الدعم 270,425 ريال\nالسعر لغير مستفيدي الدعم 319,015 ريال'];
+    const r = await rig({ pageText, listing: answer({ price: PRICE }), confirm: [319015, 270425] });
+    try {
+      const report = await r.run();
+      assert.deepEqual(r.calls().filter((c) => c.tool === 'py-pages').map((c) => c.pages), [[2]]);
+      assert.deepEqual(report.listingPreview.price, PRICE);
+      const confirms = r.calls().filter((c) => c.tool === 'claude-confirm');
+      assert.deepEqual(confirms.map((c) => [c.amount, c.subsidised, c.mirror]), [[319015, false, true], [270425, true, false]]);
+    } finally { r.cleanup(); }
+  });
+
+  it('a Sakani figure taken as the headline price is refused by the page check', async () => {
+    const pageText = ['مشروع سكني — شقق بغرفتي نوم', 'السعر لمستفيدي الدعم 270,425 ريال\nالسعر لغير مستفيدي الدعم 319,015 ريال'];
+    const price = { amount: 270425, currency: 'SAR', from: true, period: null, onRequest: false };
+    const r = await rig({ pageText, listing: answer({ price }), confirm: [319015] });
+    try {
+      const report = await r.run();
+      assert.equal(report.listingPreview.price.onRequest, true, 'the number is printed, but not as the price everyone pays');
+      assert.ok(report.warningCodes.includes('price-not-printed'));
+    } finally { r.cleanup(); }
+  });
+
+  it('a printed number that is not labelled as the subsidised price is not published as one', async () => {
+    // Reviewer repro: a down payment the model mistook for the Sakani price, in a readable brochure.
+    const pageText = ['فيلا للبيع في حي الشاطئ — شقة سكنية بمساحة واسعة وتشطيبات حديثة في موقع مميز قريب من الخدمات', 'السعر 1,500,000 ريال\nالدفعة الأولى 300,000 ريال\nشقة سكنية بمساحة واسعة وتشطيبات حديثة في موقع مميز قريب من الخدمات'];
+    const price = { amount: 1500000, currency: 'SAR', from: false, period: null, onRequest: false, subsidisedAmount: 300000 };
+    const r = await rig({ pageText, listing: answer({ price }), confirm: [1500000, 300000] });
+    try {
+      const report = await r.run();
+      assert.equal(report.listingPreview.price.amount, 1500000);
+      assert.equal('subsidisedAmount' in report.listingPreview.price, false);
+      assert.ok(report.warningCodes.includes('subsidised-price-not-printed'));
+    } finally { r.cleanup(); }
+  });
+
+  it('the "any unit model counts" allowance is only for a whole development quoted "from"', async () => {
+    for (const [label, opts, project] of [
+      ['whole development, from', { price: PRICE }, true],
+      ['one unit of it', { price: PRICE, unit: { floor: 3, block: 'H', unitRef: null } }, false],
+      ['not marked from', { price: { ...PRICE, from: false } }, false],
+    ]) {
+      const r = await rig({ listing: answer({ ...opts, priceEvidence: { page: 3, quote: '319,015' } }), confirm: [319015, 270425] });
+      try {
+        await r.run();
+        const first = r.calls().find((c) => c.tool === 'claude-confirm');
+        assert.equal(first.project, project, label);
+      } finally { r.cleanup(); }
+    }
   });
 });
 
 describe('processPdf: replacing a published listing in place (run-once --replace)', { timeout: 120000 }, () => {
   const SLUG = 'jeddah-heights-residential-community-jeddah';
-  /** Seed the repo with the listing as the first run published it: same PDF, six photos and a stray seventh. */
-  const seed = (r, { nextSeq = 30 } = {}) => {
+  const git = (r, ...args) => execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.com', ...args], { cwd: r.repo, stdio: 'pipe' }).toString();
+  /** Seed the repo with the listing as the first run published it (same PDF, six photos and a stray seventh), committed. */
+  const seed = (r, { nextSeq = 30, commit = true } = {}) => {
     const sha = crypto.createHash('sha256').update(fs.readFileSync(r.pdfPath)).digest('hex');
     const inbox = path.join(r.repo, 'scripts', 'curate', 'inbox');
     fs.mkdirSync(inbox, { recursive: true });
@@ -281,6 +354,7 @@ describe('processPdf: replacing a published listing in place (run-once --replace
     const pub = path.join(r.repo, 'public', 'listings', SLUG);
     fs.mkdirSync(pub, { recursive: true });
     for (const f of ['01.jpg', '06.jpg', '07.jpg', '07-thumb.webp', 'brochure.pdf']) fs.writeFileSync(path.join(pub, f), 'old');
+    if (commit) { git(r, 'init', '-q'); git(r, 'add', '-A'); git(r, 'commit', '-qm', 'published'); }
     return pub;
   };
   const META = { id: 'BONA-W023', slug: SLUG, listedAt: '2026-11-17', sourceRef: 'WA-20261117-AC7D06', replace: true };
@@ -318,6 +392,58 @@ describe('processPdf: replacing a published listing in place (run-once --replace
     const r = await rig({ listing: answer({ price: PRICE, priceEvidence: { page: 3, quote: '319,015' } }), confirm: [319015] });
     try {
       await assert.rejects(r.publish(META), /BONA-W023.*not in the inbox|no inbox listing/i);
+    } finally { r.cleanup(); }
+  });
+});
+
+describe('processPdf --replace: what it refuses and how it rolls back', { timeout: 120000 }, () => {
+  const SLUG = 'jeddah-heights-residential-community-jeddah';
+  const META = { id: 'BONA-W023', slug: SLUG, listedAt: '2026-11-17', sourceRef: 'WA-20261117-AC7D06', replace: true };
+  const git = (r, ...args) => execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.com', ...args], { cwd: r.repo, stdio: 'pipe' }).toString();
+  const seed = (r, { commit = true } = {}) => {
+    const sha = crypto.createHash('sha256').update(fs.readFileSync(r.pdfPath)).digest('hex');
+    const inbox = path.join(r.repo, 'scripts', 'curate', 'inbox');
+    fs.mkdirSync(inbox, { recursive: true });
+    fs.writeFileSync(path.join(inbox, `${SLUG}.json`), JSON.stringify({ id: 'BONA-W023', slug: SLUG, listedAt: '2026-11-17', _intake: { pdfSha256: sha } }));
+    fs.writeFileSync(path.join(inbox, '_index.json'), JSON.stringify({ nextSeq: 24, listings: { [SLUG]: 'BONA-W023' } }));
+    const pub = path.join(r.repo, 'public', 'listings', SLUG);
+    fs.mkdirSync(pub, { recursive: true });
+    for (const f of ['01.jpg', '07.jpg', 'brochure.pdf']) fs.writeFileSync(path.join(pub, f), 'old');
+    if (commit) { git(r, 'init', '-q'); git(r, 'add', '-A'); git(r, 'commit', '-qm', 'published'); }
+    return pub;
+  };
+  const listing = () => answer({ price: PRICE, priceEvidence: { page: 3, quote: '319,015' }, subsidisedPriceEvidence: { page: 3, quote: '270,425' } });
+
+  it('refuses when the listing is not committed, before the model is paid', async () => {
+    const r = await rig({ listing: listing(), confirm: [319015, 270425] });
+    try {
+      const pub = seed(r, { commit: false });
+      git(r, 'init', '-q');
+      await assert.rejects(r.publish(META), /uncommitted changes \(or is not in git\)/);
+      assert.equal(fs.readFileSync(path.join(pub, '07.jpg'), 'utf8'), 'old', 'nothing was deleted');
+      assert.equal(fs.existsSync(path.join(r.repo, '..', 'bin', 'calls.jsonl')), false, 'no extraction, no model call');
+    } finally { r.cleanup(); }
+  });
+
+  it('refuses when the committed listing has local edits', async () => {
+    const r = await rig({ listing: listing(), confirm: [319015, 270425] });
+    try {
+      const pub = seed(r);
+      fs.writeFileSync(path.join(pub, '01.jpg'), 'edited by hand');
+      await assert.rejects(r.publish(META), /uncommitted changes/);
+    } finally { r.cleanup(); }
+  });
+
+  it('a failed rebuild puts the old listing back exactly', async () => {
+    const r = await rig({ listing: listing(), confirm: [319015, 270425], build: 'process.exit(1);\n' });
+    try {
+      const pub = seed(r);
+      const before = git(r, 'status', '--porcelain');
+      await assert.rejects(r.publish(META));
+      assert.equal(git(r, 'status', '--porcelain'), before, 'the clone is back to the commit');
+      assert.equal(fs.readFileSync(path.join(pub, '07.jpg'), 'utf8'), 'old');
+      assert.equal(fs.readFileSync(path.join(pub, 'brochure.pdf'), 'utf8'), 'old');
+      assert.equal(fs.existsSync(path.join(pub, '02.jpg')), false, 'none of the new photos stayed');
     } finally { r.cleanup(); }
   });
 });

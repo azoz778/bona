@@ -75,7 +75,9 @@ export function loadConfig(overrides = {}) {
     // every 5 min only when the group must be found by subject.
     groupScanMs: num(raw.BONA_GROUP_SCAN_MS, String(raw.BONA_WA_GROUP_JIDS || '').trim() ? 0 : 300000),
     claudeModel: raw.BONA_CLAUDE_MODEL || 'opus',
-    claudeFallbackModel: raw.BONA_CLAUDE_FALLBACK_MODEL || 'sonnet',
+    // The last-attempt rescue must be a DIFFERENT model, or a contract the main model keeps
+    // failing is simply asked of it a third time.
+    claudeFallbackModel: raw.BONA_CLAUDE_FALLBACK_MODEL || ((raw.BONA_CLAUDE_MODEL || 'opus') === 'opus' ? 'sonnet' : 'opus'),
     claudeBin: raw.BONA_CLAUDE_BIN || 'claude',
     claudeTimeoutMs: num(raw.BONA_CLAUDE_TIMEOUT_MS, 600000),
     // argv ARRAY, never a shell string: nothing here is ever handed to a shell.

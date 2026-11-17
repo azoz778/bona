@@ -21,26 +21,9 @@ import { loadConfig } from './lib/env.mjs';
 import { parseCaption } from './lib/commands.mjs';
 import { withLock } from './lib/lock.mjs';
 import { say } from './lib/log.mjs';
-import { findInbox } from './lib/listing.mjs';
+import { replaceMetaFor } from './lib/listing.mjs';
 import { processPdf, RejectError } from './lib/pipeline.mjs';
 import { assertCleanTree, gitCommitPush, gitPull, resetTree } from './lib/publish.mjs';
-
-/**
- * The fields a replacement keeps from the listing it rewrites. Anything the owner added after
- * publishing that lives in other files (video clips) or matters legally (a REGA licence) is not
- * carried over by a re-run, so such a listing is refused rather than silently stripped.
- */
-function replaceMeta(repo, id) {
-  const found = findInbox(repo, id);
-  if (!found) throw new Error(`--replace ${id}: no inbox listing with that id`);
-  const l = found.listing;
-  const blockers = [];
-  if (Array.isArray(l.videos) && l.videos.length) blockers.push(`${l.videos.length} video(s)`);
-  if (l.licence && Object.values(l.licence).some((v) => v !== null && v !== undefined && v !== '')) blockers.push('a licence');
-  if (l.hidden) blockers.push('hidden: true');
-  if (blockers.length) throw new Error(`--replace ${id}: it has ${blockers.join(', ')}, which a re-run would not keep — do it by hand`);
-  return { replace: true, id: l.id, slug: l.slug, listedAt: l.listedAt, sourceRef: l.sourceRef ?? null, status: l.status };
-}
 
 function parseArgs(argv) {
   const out = { flags: new Set(), opts: {}, positional: [] };
@@ -53,7 +36,7 @@ function parseArgs(argv) {
   return out;
 }
 
-const money = (p) => (p.onRequest || !p.amount ? 'Price on request' : `${p.currency} ${p.amount.toLocaleString('en-US')}${p.period ? ` / ${p.period}` : ''}${p.from ? ' (from)' : ''}`);
+const money = (p) => (p.onRequest || !p.amount ? 'Price on request' : `${p.currency} ${p.amount.toLocaleString('en-US')}${p.period ? ` / ${p.period}` : ''}${p.from ? ' (from)' : ''}${typeof p.subsidisedAmount === 'number' ? ` · Sakani beneficiaries ${p.currency} ${p.subsidisedAmount.toLocaleString('en-US')}` : ''}`);
 
 function printReport(r) {
   const l = r.listing || r.listingPreview;
@@ -131,6 +114,11 @@ async function main() {
   const cfg = loadConfig(overrides);
   const dryRun = args.flags.has('dry-run');
   const noGit = args.flags.has('no-git') || dryRun;
+  // A replacement deletes the old files and relies on git to bring them back if the run fails.
+  if (args.opts.replace && args.flags.has('no-git') && !dryRun) {
+    say('--replace needs git (it rolls a failed run back from the last commit): drop --no-git, or add --dry-run to preview');
+    process.exit(2);
+  }
 
   if (!fs.existsSync(path.join(cfg.repo, 'scripts', 'curate', 'build.mjs'))) {
     say(`--repo ${cfg.repo} does not look like the Bona repo (no scripts/curate/build.mjs)`);
@@ -153,7 +141,7 @@ async function main() {
         await gitPull(cfg.repo, { remote: cfg.gitRemote, branch: cfg.gitBranch });
       }
       const meta = { pdfFileName: path.basename(pdfPath) };
-      if (args.opts.replace) Object.assign(meta, replaceMeta(cfg.repo, args.opts.replace));
+      if (args.opts.replace) Object.assign(meta, replaceMetaFor(cfg.repo, args.opts.replace));
       const r = await processPdf({
         pdfPath,
         cfg,

@@ -336,6 +336,37 @@ export function writeInboxListing(repo, listing) {
   return file;
 }
 
+/** Every key buildListing() writes (plus `licence`, which the pipeline leaves null): what a re-run rewrites. */
+const REBUILT_KEYS = new Set([
+  'id', 'slug', 'sourceRef', 'status', 'category', 'type', 'kind', 'featured', 'title', 'location', 'price', 'specs',
+  'images', 'videos', 'description', 'highlights', 'virtualTourUrl', 'brochureUrl', 'project', 'unit', 'map',
+  'mapPrecision', 'listedAt', 'hidden', 'licence', '_intake',
+]);
+
+/**
+ * What `run-once --replace <id>` keeps from the listing it rewrites — or why it must not run.
+ * A re-run rebuilds the listing from the brochure alone, so anything added to it since (a photo
+ * note, an FAQ, an SEO title, video clips, a REGA licence, the owner's own price or cover photo,
+ * featured or hidden) would be lost silently. Such a listing is refused rather than stripped.
+ * @returns {{replace:true, id:string, slug:string, listedAt:string, sourceRef:string|null, status:string}}
+ */
+export function replaceMetaFor(repo, id) {
+  const found = findInbox(repo, id);
+  if (!found) throw new Error(`--replace ${id}: no inbox listing with that id`);
+  const l = found.listing;
+  const blockers = [];
+  const extra = Object.keys(l).filter((k) => !REBUILT_KEYS.has(k));
+  if (extra.length) blockers.push(`hand-added field(s) ${extra.join(', ')}`);
+  if (Array.isArray(l.videos) && l.videos.length) blockers.push(`${l.videos.length} video(s)`);
+  if (l.licence && Object.values(l.licence).some((v) => v !== null && v !== undefined && v !== '')) blockers.push('a licence');
+  if (l.hidden) blockers.push('hidden: true');
+  if (l.featured) blockers.push('featured: true');
+  const edits = l._intake?.edits;
+  if (Array.isArray(edits) && edits.length) blockers.push(`the owner's own ${edits.join(' and ')} edit(s)`);
+  if (blockers.length) throw new Error(`--replace ${id}: it has ${blockers.join('; ')}, which a re-run would not keep — do it by hand`);
+  return { replace: true, id: l.id, slug: l.slug, listedAt: l.listedAt, sourceRef: l.sourceRef ?? null, status: l.status };
+}
+
 /** Pick the images to publish from the model's ranking. */
 export function orderedPicks(aiImages, { maxImages = 10 } = {}) {
   return (aiImages || [])

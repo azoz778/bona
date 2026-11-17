@@ -73,7 +73,7 @@ Everything between `<<<BONA-UNTRUSTED-DATA: …>>>` and `<<<END BONA-UNTRUSTED-D
       "focus": { "x": 0.5, "y": 0.62 } }
   ],
 
-  "priceEvidence": null,            // REQUIRED when you read the price off a page image:
+  "priceEvidence": null,            // REQUIRED when the price is printed on a rendered page:
                                     // { "page": 7, "quote": "990,000 SAR" } — the exact
                                     // printed text. null when the price came from the text
                                     // layer or the caption, or when there is no price.

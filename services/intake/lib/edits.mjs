@@ -14,6 +14,14 @@ export function locate(repo, id) {
   return findInbox(repo, id);
 }
 
+/** Remember that the owner changed this by hand, so `run-once --replace` refuses to overwrite it. */
+function markEdited(listing, what) {
+  if (!listing._intake || typeof listing._intake !== 'object') return;
+  const edits = new Set(Array.isArray(listing._intake.edits) ? listing._intake.edits : []);
+  edits.add(what);
+  listing._intake.edits = [...edits];
+}
+
 function save(file, listing) {
   fs.writeFileSync(file, `${JSON.stringify(listing, null, 2)}\n`);
   return listing;
@@ -57,6 +65,7 @@ export function setHero(repo, id, n) {
   }
   const [moved] = images.splice(n - 1, 1);
   images.unshift(moved);
+  markEdited(found.listing, 'hero');
   const order = found.listing._intake?.images;
   if (Array.isArray(order) && order.length === images.length) {
     const [m] = order.splice(n - 1, 1);
@@ -76,6 +85,7 @@ export function setPrice(repo, id, { amount, currency, onRequest }) {
   // A Sakani price read from the brochure belonged to the brochure's headline price; once the
   // owner sets his own price it is stale (it could even be above the new one), so it goes.
   delete p.subsidisedAmount;
+  markEdited(found.listing, 'price');
   return { listing: save(found.file, found.listing) };
 }
 

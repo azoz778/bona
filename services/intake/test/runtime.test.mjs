@@ -281,4 +281,20 @@ describe('pdf.mjs — the python command is argv, not a shell line', () => {
     const { loadConfig } = await import('../lib/env.mjs');
     assert.ok(Array.isArray(loadConfig().pyCmd));
   });
+
+  it('the rescue attempt always uses a different model from the main one', async () => {
+    const { loadConfig } = await import('../lib/env.mjs');
+    const saved = { m: process.env.BONA_CLAUDE_MODEL, f: process.env.BONA_CLAUDE_FALLBACK_MODEL };
+    try {
+      delete process.env.BONA_CLAUDE_FALLBACK_MODEL;
+      process.env.BONA_CLAUDE_MODEL = 'sonnet';
+      assert.deepEqual([loadConfig().claudeModel, loadConfig().claudeFallbackModel], ['sonnet', 'opus']);
+      process.env.BONA_CLAUDE_MODEL = 'opus';
+      assert.deepEqual([loadConfig().claudeModel, loadConfig().claudeFallbackModel], ['opus', 'sonnet']);
+    } finally {
+      for (const [k, v] of [['BONA_CLAUDE_MODEL', saved.m], ['BONA_CLAUDE_FALLBACK_MODEL', saved.f]]) {
+        if (v === undefined) delete process.env[k]; else process.env[k] = v;
+      }
+    }
+  });
 });

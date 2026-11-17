@@ -40,9 +40,9 @@ import { log } from './log.mjs';
 import { extractPdf, renderPdfPages } from './pdf.mjs';
 import { compositePages, cropPhotoRegions, modelFlagsComposites } from './photo-regions.mjs';
 import { priceAppearsIn } from './price.mjs';
-import { pricePagesToRender } from './price-pages.mjs';
+import { hasSubsidyWording, pricePagesToRender } from './price-pages.mjs';
 import { pinFromLinks } from './geo.mjs';
-import { rebuild, resetTree } from './publish.mjs';
+import { committedUnchanged, rebuild, resetTree } from './publish.mjs';
 import { loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNamedIn, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
 
 export const sha256File = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -96,6 +96,11 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     if (!meta.id || !meta.slug) throw new Error('replace needs the id and slug of the listing it replaces');
     const current = findInbox(cfg.repo, meta.id);
     if (!current || current.listing.slug !== meta.slug) throw new Error(`${meta.id} is not in the inbox under ${meta.slug} — nothing to replace`);
+    // The old photos are deleted before the new ones are copied in, and a failed run is rolled
+    // back from git: so the listing as it stands must BE in git, unchanged, or it is lost.
+    if (!dryRun && !(await committedUnchanged(cfg.repo, [path.join('public', 'listings', meta.slug), path.relative(cfg.repo, current.file)]))) {
+      throw new Error(`${meta.id} has uncommitted changes (or is not in git) — commit or discard them before --replace`);
+    }
   }
 
   // --- 0. withdrawn advertising -------------------------------------------------
@@ -309,20 +314,37 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // brochure with no text layer make a second `claude -p` look at the page it cited.
   report.stage = 'price';
   const price = ai.listing?.price;
-  const haystack = `${extraction.text || ''}\n${caption.text || ''}`;
-  /** Is `amount` printed? In the text layer, or — confirmed by a second model — on the page image the model cited. */
+  const pageText = extraction.pageText ?? [];
+  // A page that mentions subsidy beneficiaries prints TWO prices per unit. A number found in its
+  // text layer proves the number is printed, not WHICH price it is — so text found only on such
+  // pages never settles a price; the page image does (those pages are always rendered, see
+  // price-pages.mjs). The caption is the owner's own words and always counts.
+  const plainText = pageText.length ? pageText.filter((t) => !hasSubsidyWording(t)).join('\n') : (extraction.text || '');
+  const haystack = `${plainText}\n${caption.text || ''}`;
+  // The "a price for one of its unit models counts" allowance is for a whole development quoted
+  // "from" its cheapest model — never for one specific unit, and never for a price not marked `from`.
+  const wholeDevelopment = Boolean(ai.listing?.project) && !ai.listing?.unit && price?.from === true;
+  /**
+   * Is `amount` printed as THIS price? In the plain text layer (headline only), or — confirmed by a
+   * second model — on a rendered page. Evidence the model forgot is looked for in the rendered
+   * pages' text, so a price it read from the text layer is still checked on its page.
+   */
   const printed = async (amount, evidence, { subsidised = false } = {}) => {
-    const out = { inText: priceAppearsIn(haystack, amount), confirmed: null };
-    if (out.inText || !pageImages.length || !evidence) return out;
-    const page = pageImages.find((p) => p.page === evidence.page);
+    const out = { inText: subsidised ? false : priceAppearsIn(haystack, amount), confirmed: null };
+    if (out.inText || !pageImages.length) return out;
+    const cited = evidence ?? (() => {
+      const hit = pageImages.find((p) => priceAppearsIn(pageText[p.page - 1] ?? '', amount));
+      return hit ? { page: hit.page, quote: String(amount) } : null;
+    })();
+    const page = cited && pageImages.find((p) => p.page === cited.page);
     if (!page) return out;
     const check = await confirmPriceEvidence({
       pageImage: page.abs,
       amount,
       currency: price.currency,
-      quote: evidence.quote,
+      quote: cited.quote,
       subsidised,
-      project: Boolean(ai.listing?.project),
+      project: wholeDevelopment,
       bin: cfg.claudeBin,
       model: cfg.claudeModel,
       cwd: workDir,
@@ -330,7 +352,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       settingsPath: confinement.file,
     });
     out.confirmed = check.confirmed;
-    log.info('intake.price_evidence', { page: evidence.page, subsidised, confirmed: check.confirmed, error: check.error ?? null });
+    log.info('intake.price_evidence', { page: cited.page, subsidised, inferred: !evidence, confirmed: check.confirmed, error: check.error ?? null });
     return out;
   };
   if (!caption.price && price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0) {
@@ -345,13 +367,13 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     }
   }
   // The subsidised (Sakani) price rides on the headline price: it is published only beside a
-  // published brochure price, and only when it is printed too. The owner's caption price replaces
-  // both — buildListing drops it then.
+  // published brochure price, and only when a second model has seen it printed AS the subsidy
+  // beneficiaries' price on a page image. The owner's caption price replaces both.
   if (price && typeof price.subsidisedAmount === 'number') {
     const headline = !caption.price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0;
     const evidence = headline ? await printed(price.subsidisedAmount, ai.subsidisedPriceEvidence, { subsidised: true }) : null;
     report.subsidisedPriceEvidence = evidence;
-    if (!evidence?.inText && !evidence?.confirmed) {
+    if (!evidence?.confirmed) {
       if (headline) {
         log.warn('intake.subsidised_price_unevidenced', { amount: price.subsidisedAmount, currency: price.currency });
         report.warningCodes.push('subsidised-price-not-printed');

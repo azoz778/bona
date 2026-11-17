@@ -54,6 +54,19 @@ const must = async (label, res) => {
   return res;
 };
 
+/**
+ * True when every path is tracked by git and unchanged from HEAD — the condition for deleting
+ * it, because a rollback (resetTree) can only bring back what HEAD holds.
+ */
+export async function committedUnchanged(repo, paths) {
+  for (const p of paths) {
+    const tracked = await run('git', ['ls-files', '--error-unmatch', '--', p], { cwd: repo });
+    if (tracked.code !== 0) return false;
+  }
+  const status = await run('git', ['status', '--porcelain', '--', ...paths], { cwd: repo });
+  return status.code === 0 && status.out === '';
+}
+
 export async function gitStatus(repo) {
   return (await run('git', ['status', '--porcelain'], { cwd: repo })).out;
 }

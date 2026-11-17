@@ -170,19 +170,30 @@ Anything else in the group is ignored, silently.
   page image. Otherwise the listing is published as *price on request* and the reply says so.
 - **Prices the text layer cannot read** (2026-11-17, Jeddah Heights / BONA-W023): a PDF can have a
   good text layer and still scramble its digits — the font maps them to letters, so the page shows
-  270,425 and the text says `DIB,FDG`. `lib/price-pages.mjs` picks the pages that mention a price
-  without a readable one (or with a scrambled one), at most 12; they are rendered and handed to the
-  model as page images, and the same `priceEvidence` + second-model check applies.
+  270,425 and the text says `DIB,FDG`. `lib/price-pages.mjs` picks the pages where a line that
+  mentions a price has no readable figure within a few lines (or the page has a scrambled one), plus
+  every page that mentions subsidy beneficiaries, at most 12; they are rendered and handed to the
+  model as page images, and the same `priceEvidence` + second-model check applies (a missing
+  `priceEvidence` is looked up in the rendered pages' text).
 - **Two printed prices**: NHC-style brochures print a regular price and a lower one for
   housing-subsidy (Sakani) beneficiaries. `amount` = the regular price; `price.subsidisedAmount` =
-  the subsidised one, checked the same way (`subsidisedPriceEvidence`), shown on the site as a
-  second line. Dropped when it cannot be confirmed (`subsidised-price-not-printed`), when the
-  headline price is not published, and by `price <id> …`.
+  the subsidised one, shown on the site as a second line. It is published ONLY after the second
+  model has seen it printed as the subsidy beneficiaries' price on a page image — a number found in
+  the text layer proves it is printed, not which price it is. A headline price found only on pages
+  with subsidy wording is confirmed on the page the same way, with the rule that a price printed
+  only for beneficiaries does not count. Dropped when it cannot be confirmed
+  (`subsidised-price-not-printed`), when the headline price is not published, and by `price <id> …`.
+  The "a price for one of its unit models counts" allowance in that check is only for a whole
+  development quoted `from` its cheapest model, never for one unit.
 - **Photo focus points**: the model gives every kept photo a `focus` `{x, y}` (the centre of its
   subject); the site uses it as the crop position, so a tall façade is not cut down to sky.
 - **Re-running a published brochure**: `node services/intake/run-once.mjs <pdf> --replace BONA-W023`
   rewrites that listing in place (same id, slug, date and reference; new copy, price, photos and
-  brochure). It is refused for a listing with videos, a licence or `hidden`, which it would not keep.
+  brochure). It needs git (no `--no-git`): the listing must be committed and unchanged, because the
+  old files are deleted first and a failed run is rolled back from the commit. It is refused for a
+  listing that carries anything a re-run would not keep — a hand-added field (`photoNote`, `faq`,
+  `seoTitle`, …), videos, a licence, `hidden`, `featured`, or the owner's own `price`/`hero` edits
+  (recorded in `_intake.edits` by those commands).
 - **Nothing the model writes is trusted.** Only fields that pass `validateAiResult` +
   `copyProblems` + `checkListing` are written or sent on. The model's free-text `warnings`
   stay in the run's `ai.json`; `_intake.warnings` in the committed listing holds codes from a

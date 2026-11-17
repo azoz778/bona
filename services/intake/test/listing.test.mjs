@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, afterEach, before, beforeEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  buildListing, checkListing, inboxIds, nextListingId, orderedPicks, readIndex, seqAfter, slugify,
+  buildListing, checkListing, inboxIds, nextListingId, orderedPicks, readIndex, replaceMetaFor, seqAfter, slugify,
   takenSlugs, todayRiyadh, uniqueSlug, writeIndex, writeInboxListing, findInbox, findByPdfSha, listInbox,
 } from '../lib/listing.mjs';
 import * as edits from '../lib/edits.mjs';
@@ -386,6 +386,17 @@ describe('inbox + edits', () => {
     const onReq = edits.setPrice(tmp, 'BONA-W001', { onRequest: true }).listing.price;
     assert.equal(onReq.onRequest, true);
     assert.equal(onReq.amount, null);
+  });
+
+  it('price and hero record that the owner edited the listing by hand', () => {
+    const fresh = listing();
+    fresh.id = 'BONA-W005'; fresh.slug = 'edit-marker-test';
+    writeInboxListing(tmp, fresh);
+    edits.setPrice(tmp, 'BONA-W005', { amount: 900000, currency: 'SAR' });
+    edits.setHero(tmp, 'BONA-W005', 2);
+    edits.setPrice(tmp, 'BONA-W005', { onRequest: true });
+    assert.deepEqual(findInbox(tmp, 'BONA-W005').listing._intake.edits, ['price', 'hero']);
+    edits.removeListing(tmp, 'BONA-W005'); // the suite below counts the inbox
   });
 
   it('price clears a subsidised price read from the brochure', () => {
@@ -785,5 +796,47 @@ describe('findByPdfSha — the repo remembers which PDF made which listing', () 
   it('is quiet on a repo with no inbox at all', () => {
     const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-pdfsha-empty-'));
     try { assert.equal(findByPdfSha(empty, SHA), null); } finally { fs.rmSync(empty, { recursive: true, force: true }); }
+  });
+});
+
+describe('replaceMetaFor (run-once --replace)', () => {
+  let tmp;
+  const base = (over = {}) => ({
+    id: 'BONA-W023', slug: 'jeddah-heights', status: 'available', category: 'off-plan', type: 'apartment', kind: 'apartment',
+    featured: false, title: { en: 'X', ar: 'س' }, location: {}, price: { amount: null, currency: 'SAR', from: false, period: null, onRequest: true },
+    specs: {}, images: [], videos: [], description: {}, highlights: {}, virtualTourUrl: null, brochureUrl: null, project: null, unit: null,
+    map: null, mapPrecision: null, listedAt: '2026-11-17', hidden: false, licence: null, sourceRef: 'WA-20261117-AC7D06',
+    _intake: { source: 'whatsapp' }, ...over,
+  });
+  const put = (l) => { fs.rmSync(path.join(tmp, 'scripts', 'curate', 'inbox'), { recursive: true, force: true }); writeInboxListing(tmp, l); };
+  before(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-replace-')); });
+  after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+  it('keeps the id, slug, date, reference and status of a listing the intake built', () => {
+    put(base({ status: 'reserved' }));
+    assert.deepEqual(replaceMetaFor(tmp, 'BONA-W023'), {
+      replace: true, id: 'BONA-W023', slug: 'jeddah-heights', listedAt: '2026-11-17', sourceRef: 'WA-20261117-AC7D06', status: 'reserved',
+    });
+  });
+
+  const refused = [
+    ['a photo note', { photoNote: { en: 'Photos show the sister project', ar: 'الصور للمشروع الشقيق' } }, /hand-added field\(s\) photoNote/],
+    ['an FAQ, SEO title and project facts', { faq: [], seoTitle: { en: 'a', ar: 'ب' }, projectFacts: { buildings: 2 } }, /faq, seoTitle, projectFacts/],
+    ['videos', { videos: [{ src: '/listings/jeddah-heights/v-01.mp4', poster: null }] }, /1 video/],
+    ['a licence', { licence: { adNumber: '7200123', adExpiry: null, wafiNumber: null, escrowAccount: null } }, /a licence/],
+    ['hidden', { hidden: true }, /hidden: true/],
+    ['featured', { featured: true }, /featured: true/],
+    ['the owner\'s own price', { _intake: { edits: ['price'] } }, /owner's own price/],
+  ];
+  for (const [label, over, re] of refused) {
+    it(`refuses a listing with ${label}`, () => {
+      put(base(over));
+      assert.throws(() => replaceMetaFor(tmp, 'BONA-W023'), re);
+    });
+  }
+
+  it('refuses an id that is not in the inbox', () => {
+    put(base());
+    assert.throws(() => replaceMetaFor(tmp, 'BONA-W999'), /no inbox listing/);
   });
 });

@@ -377,7 +377,7 @@ export function ensureEnvFile({ home = os.homedir(), env = process.env } = {}) {
     BONA_REPO: path.join(home, 'bona-bot'),
     BONA_DATA: path.join(home, 'bona-data'),
     BONA_POLL_MS: '20000',
-    BONA_CLAUDE_MODEL: 'sonnet',
+    BONA_CLAUDE_MODEL: 'opus', // owner 2026-11-17: Opus picks the intake's photos
     BONA_SITE: DEFAULT_SITE,
     BONA_API_PORT: '4102',
     BONA_PUBLIC_API: DEFAULT_PUBLIC_API,

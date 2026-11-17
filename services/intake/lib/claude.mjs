@@ -113,9 +113,9 @@ export function buildPrompt({ extraction, sheets, caption, pageImages = [], page
     .slice(0, 60000);
 
   const evidenceRule = [
-    'A price you take from a page image MUST come with `priceEvidence: { "page": <n>, "quote": "<the',
-    'exact printed text>" }`, and a subsidised price with `subsidisedPriceEvidence` in the same shape.',
-    'Without it that price is not published.',
+    'A price printed on one of these pages MUST come with `priceEvidence: { "page": <n>, "quote": "<the',
+    'exact printed text>" }` — even when the text layer seems to show it too — and a subsidised price',
+    'with `subsidisedPriceEvidence` in the same shape. Without it that price is not published.',
   ];
   const pageBlock = pageImages.length && pageReason === 'price-pages'
     ? [
@@ -123,7 +123,9 @@ export function buildPrompt({ extraction, sheets, caption, pageImages = [], page
       'text layer below — the PDF\'s font maps its digits to other characters, so a price printed as',
       '270,425 can read "DIB,FDG" in the text. Those pages were rendered as images. **Read every one of them',
       'with the Read tool** and take every price, area and unit figure on them from the image, never from the',
-      'scrambled text. The rest of the text layer is reliable.',
+      'text layer. Other figures in the text layer may be scrambled the same way (capital letters where digits',
+      'should be): leave out any figure you cannot read on a page image. A page is also rendered when it prints',
+      'separate prices for housing-subsidy beneficiaries, so that the two prices are told apart by looking.',
       '',
       ...pageImages.map((p) => `  - page ${p.page}: ${p.abs}  (${p.width}x${p.height})`),
       '',
@@ -348,7 +350,9 @@ export async function confirmPriceEvidence({
     ...(subsidised
       ? ['It must be printed as the price for subsidy beneficiaries (for example "السعر لمستفيدي الدعم");',
         'the regular price for everyone else does not count here.']
-      : []),
+      : ['If the page prints separate prices for housing-subsidy beneficiaries ("لمستفيدي الدعم") and for',
+        'everyone else ("لغير مستفيدي الدعم"), only the price for everyone else counts here: a price printed',
+        'only for subsidy beneficiaries does NOT count.']),
     '',
     fence('what the first pass claimed it saw', quote ?? '(nothing quoted)'),
     '',
