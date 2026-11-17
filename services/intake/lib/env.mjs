@@ -126,6 +126,9 @@ export function loadConfig(overrides = {}) {
     liveCheckMs: num(raw.BONA_LIVE_CHECK_MS, 600000),
     lockWaitMs: num(raw.BONA_LOCK_WAIT_MS, 900000),
     pageReadLongSide: num(raw.BONA_PAGE_READ_LONG_SIDE, 1600),
+    // The unit-model price check (lib/model-prices.mjs) pays one confirmation call per page: a
+    // brochure whose model prices would need more pages checked than this gets none of them.
+    maxModelPricePages: num(raw.BONA_MAX_MODEL_PRICE_PAGES, 12),
     sendReplies: bool(raw.BONA_SEND_REPLIES, true),
     ...overrides,
   };

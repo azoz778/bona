@@ -4,7 +4,7 @@
 // model a figure belongs to.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { alignHeadline, checkModelPrices } from '../lib/model-prices.mjs';
+import { alignHeadline, checkModelPrices, isFigure, MAX_MODEL_PRICE_PAGES, pagesToRenderFor } from '../lib/model-prices.mjs';
 
 const pages = [{ page: 9, abs: '/x/p9.jpg' }, { page: 10, abs: '/x/p10.jpg' }];
 const M = (name, price, sub, page) => ({
@@ -119,7 +119,8 @@ describe('checkModelPrices', () => {
     const res = await checkModelPrices([M('A', null, null, null)], { pageImages: pages, pageText: [], confirm: async () => { throw new Error('must not be called'); } });
     assert.equal(res.calls, 0);
     assert.deepEqual(res.models, [M('A', null, null, null)]);
-    assert.deepEqual(await checkModelPrices(undefined, { pageImages: pages, pageText: [], confirm: async () => [] }), { models: [], refused: [], calls: 0 });
+    const none = await checkModelPrices(undefined, { pageImages: pages, pageText: [], confirm: async () => [] });
+    assert.deepEqual([none.models, none.refused, none.calls, none.rendered, none.unrendered, none.failed, none.skipped, none.tooMany], [[], [], 0, [], [], [], [], null]);
   });
 
   it('never mutates its input', async () => {
@@ -133,11 +134,11 @@ describe('checkModelPrices', () => {
 });
 
 describe('alignHeadline', () => {
-  it('sets the headline from the lowest kept model prices', () => {
+  it('sets the headline from the lowest kept model prices, and never touches the period', () => {
     const price = { amount: 1, currency: 'SAR', from: false, period: 'year', onRequest: true };
     const out = alignHeadline(price, [M('A', 419994, 356024), M('B', 319015, 270425), M('C', null, null)]);
     assert.equal(out, price, 'mutated in place and returned');
-    assert.deepEqual(price, { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 });
+    assert.deepEqual(price, { amount: 319015, currency: 'SAR', from: true, period: 'year', onRequest: false, subsidisedAmount: 270425 });
   });
 
   it('takes the lowest subsidised price from any model, and drops a stale one when none is lower', () => {
@@ -157,5 +158,171 @@ describe('alignHeadline', () => {
     assert.deepEqual(price, before);
     alignHeadline(price, undefined);
     assert.deepEqual(price, before);
+  });
+});
+
+describe('isFigure', () => {
+  it('is a positive finite number, nothing else', () => {
+    for (const v of [1, 319015, 0.5]) assert.equal(isFigure(v), true, String(v));
+    for (const v of [0, -1, NaN, Infinity, '319015', null, undefined, {}]) assert.equal(isFigure(v), false, String(v));
+  });
+});
+
+describe('pagesToRenderFor', () => {
+  it('lists the cited pages of priced models that are not rendered yet, once each, in order', () => {
+    const models = [M('A', 319015, null, 9), M('B', 349000, null, 4), M('C', null, 270425, 2), M('D', 419994, null, 4), M('E', 1, null, 10)];
+    assert.deepEqual(pagesToRenderFor(models, [9, 10], 12), [2, 4]);
+  });
+  it('ignores models with no figure, and citations that are not a page of the PDF', () => {
+    const models = [
+      M('A', null, null, 3), // no figure: nothing to check
+      M('B', 319015, null, 13), M('C', 319015, null, 0), M('D', 319015, null, -1), { ...M('E', 319015, null, null), evidence: { page: 2.5 } },
+      { ...M('F', 319015, null, null), evidence: { page: '5' } }, M('G', 319015, null, null), null, 'x',
+    ];
+    assert.deepEqual(pagesToRenderFor(models, [], 12), []);
+  });
+  it('without a page count, any positive page may be asked for', () => {
+    assert.deepEqual(pagesToRenderFor([M('A', 319015, null, 40)], [], undefined), [40]);
+    assert.deepEqual(pagesToRenderFor([M('A', 319015, null, 40)], [], 0), [40]);
+    assert.deepEqual(pagesToRenderFor(undefined, [], 5), []);
+  });
+});
+
+describe('checkModelPrices: rendering cited pages', () => {
+  it('renders the cited pages that are missing and checks each model on its own page', async () => {
+    const calls = [];
+    const renders = [];
+    const render = async (wanted) => { renders.push(wanted); return wanted.map((page) => ({ page, abs: `/x/model-pages/p${page}.jpg` })); };
+    const res = await checkModelPrices([M('A', 319015, null, 9), M('B', 299000, null, 2)], { pageImages: pages, pageText: [], pageCount: 12, render, confirm: allBut(calls) });
+    assert.deepEqual(renders, [[2]]);
+    assert.deepEqual(res.rendered, [2]);
+    assert.deepEqual(res.unrendered, []);
+    assert.deepEqual(calls.map((c) => [c.page, c.abs]).sort(), [[2, '/x/model-pages/p2.jpg'], [9, '/x/p9.jpg']]);
+    assert.deepEqual(res.models.map((m) => m.price), [319015, 299000]);
+  });
+
+  it('a render that throws or returns nothing costs only the models on those pages', async () => {
+    for (const render of [async () => { throw new Error('extract_pdf.py timed out'); }, async () => [], async () => null]) {
+      const calls = [];
+      const res = await checkModelPrices([M('A', 319015, null, 9), M('B', 299000, null, 2)], { pageImages: pages, pageText: [], pageCount: 12, render, confirm: allBut(calls) });
+      assert.deepEqual(calls.map((c) => c.page), [9]);
+      assert.deepEqual(res.models.map((m) => m.price), [319015, null]);
+      assert.deepEqual(res.refused, [299000]);
+      assert.deepEqual(res.rendered, []);
+      assert.deepEqual(res.unrendered, [2], 'reported: the check could not look at it');
+    }
+  });
+
+  it('a page the render did not ask for is not used', async () => {
+    const calls = [];
+    const render = async () => [{ page: 2, abs: '/x/p2.jpg' }, { page: 7, abs: '/x/p7.jpg' }];
+    const res = await checkModelPrices([M('A', 319015, null, 7)], { pageImages: pages, pageText: [], pageCount: 12, render: async (w) => (w.includes(7) ? render() : []), confirm: allBut(calls) });
+    assert.deepEqual(res.rendered, [7]);
+    assert.deepEqual(calls.map((c) => c.page), [7]);
+  });
+
+  it('a citation beyond the PDF is never rendered and, with no page to look at, refused without a call', async () => {
+    const calls = [];
+    const renders = [];
+    const res = await checkModelPrices([M('A', 319015, 270425, 99)], { pageImages: pages, pageText: [], pageCount: 12, render: async (w) => { renders.push(w); return []; }, confirm: allBut(calls) });
+    assert.deepEqual(renders, []);
+    assert.equal(res.calls, 0);
+    assert.deepEqual(res.refused.sort(), [270425, 319015]);
+  });
+});
+
+describe('checkModelPrices: cost bounds', () => {
+  const many = (n) => Array.from({ length: n }, (_, k) => M(`M${k}`, 300000 + k, null, k + 1));
+  const rendered = (n) => Array.from({ length: n }, (_, k) => ({ page: k + 1, abs: `/x/p${k + 1}.jpg` }));
+
+  it('defaults to 12 pages', () => {
+    assert.equal(MAX_MODEL_PRICE_PAGES, 12);
+  });
+
+  it('more pages than allowed: every model price refused, no render, no call', async () => {
+    const calls = [];
+    const renders = [];
+    const res = await checkModelPrices(many(4), {
+      pageImages: rendered(2), pageText: [], pageCount: 12, maxPages: 3,
+      render: async (w) => { renders.push(w); return w.map((page) => ({ page, abs: `/x/p${page}.jpg` })); }, confirm: allBut(calls),
+    });
+    assert.deepEqual(res.tooMany, { pages: 4, max: 3 }, 'the pages rendering would add count too');
+    assert.equal(res.calls, 0);
+    assert.equal(calls.length, 0);
+    assert.deepEqual(renders, []);
+    assert.deepEqual(res.models.map((m) => m.price), [null, null, null, null]);
+    assert.deepEqual(res.refused.sort(), [300000, 300001, 300002, 300003]);
+  });
+
+  it('exactly the limit is fine', async () => {
+    const calls = [];
+    const res = await checkModelPrices(many(3), { pageImages: rendered(3), pageText: [], maxPages: 3, confirm: allBut(calls) });
+    assert.equal(res.tooMany, null);
+    assert.equal(res.calls, 3);
+    assert.deepEqual(res.refused, []);
+  });
+
+  it('runs at most 3 page checks at once and keeps every page\'s answers with its own models', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const started = [];
+    // Later pages answer first: the results must still land on the right models.
+    const confirm = async ({ page, items }) => {
+      started.push(page);
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 30 - page * 3));
+      inFlight -= 1;
+      return items.map((it) => ({ i: it.i, price: page % 2 === 1, subsidisedPrice: false }));
+    };
+    const res = await checkModelPrices(many(7), { pageImages: rendered(7), pageText: [], confirm });
+    assert.equal(peak, 3);
+    assert.equal(res.calls, 7);
+    assert.deepEqual(started.sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 7]);
+    assert.deepEqual(res.models.map((m) => m.price), [300000, null, 300002, null, 300004, null, 300006]);
+  });
+
+  it('stops launching page checks after a fatal error (quota, session limit); the rest are refused', async () => {
+    const started = [];
+    const confirm = async ({ page, items }) => {
+      started.push(page);
+      if (page === 1) { const e = new Error("claude -p failed: You've hit your session limit"); e.fatal = true; throw e; }
+      await new Promise((r) => setTimeout(r, 20));
+      return items.map((it) => ({ i: it.i, price: true, subsidisedPrice: false }));
+    };
+    const res = await checkModelPrices(many(6), { pageImages: rendered(6), pageText: [], confirm });
+    assert.deepEqual(started, [1, 2, 3], 'the two already running finish; nothing new starts');
+    assert.equal(res.calls, 3);
+    assert.deepEqual(res.models.map((m) => m.price), [null, 300001, 300002, null, null, null]);
+    assert.deepEqual(res.failed, [{ page: 1, error: "claude -p failed: You've hit your session limit" }]);
+    assert.deepEqual(res.skipped, [4, 5, 6]);
+  });
+
+  it('a fatal error reported as { answers, error, fatal } stops it the same way', async () => {
+    const started = [];
+    // Two at a time: page 1 ends at 10 ms and page 3 starts in its place; page 2 fails at 20 ms,
+    // while page 3 is still running — it finishes, but neither page 4 nor 5 is started.
+    const confirm = async ({ page, items }) => {
+      started.push(page);
+      await new Promise((r) => setTimeout(r, { 1: 10, 2: 20 }[page] ?? 30));
+      if (page === 2) return { answers: [], error: 'claude -p failed: rate limit', fatal: true };
+      return { answers: items.map((it) => ({ i: it.i, price: true, subsidisedPrice: false })), error: null };
+    };
+    const res = await checkModelPrices(many(5), { pageImages: rendered(5), pageText: [], confirm, concurrency: 2 });
+    assert.deepEqual(started, [1, 2, 3]);
+    assert.deepEqual(res.skipped, [4, 5]);
+    assert.deepEqual(res.failed, [{ page: 2, error: 'claude -p failed: rate limit' }]);
+    assert.deepEqual(res.models.map((m) => m.price), [300000, null, 300002, null, null]);
+  });
+
+  it('an ordinary failed check is recorded and refuses its page, and the rest go on', async () => {
+    const confirm = async ({ page, items }) => (page === 1
+      ? { answers: [], error: 'claude -p exited 1: boom' }
+      : { answers: items.map((it) => ({ i: it.i, price: true, subsidisedPrice: false })), error: null });
+    const res = await checkModelPrices(many(4), { pageImages: rendered(4), pageText: [], confirm });
+    assert.equal(res.calls, 4);
+    assert.deepEqual(res.failed, [{ page: 1, error: 'claude -p exited 1: boom' }]);
+    assert.deepEqual(res.skipped, []);
+    assert.deepEqual(res.models.map((m) => m.price), [null, 300001, 300002, 300003]);
   });
 });

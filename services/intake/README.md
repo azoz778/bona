@@ -188,11 +188,15 @@ Anything else in the group is ignored, silently.
 - **Unit-model prices** (`ai.models[].price` / `subsidisedPrice`, `lib/model-prices.mjs`): every
   figure is confirmed on its page image by a second model, never by the text layer (a price table
   puts every model's figures in the text; a match cannot tell whose figure it is). One call per page
-  covers every model on it; a cited page that was not rendered for the reading is rendered for this
-  check. A figure not confirmed is dropped (`model-price-not-printed`) and, like a refused headline,
-  may not stay in the copy. When any model keeps a price, the headline becomes the cheapest one,
-  `from`, with the cheapest confirmed subsidised price as its Sakani line; the owner's caption price
-  drops every model price.
+  covers every model on it (at most 3 at once, none started after a quota error); a cited page
+  that was not rendered for the reading is rendered for this check (never one past the end of the
+  PDF). A brochure that would need more than `BONA_MAX_MODEL_PRICE_PAGES` pages checked gets no
+  model price at all and no call. A figure not confirmed is dropped (`model-price-not-printed`; the
+  reply says "try again later" when a render or a call failed rather than the brochure) and, like a
+  refused headline, may not stay in the copy. When any model keeps a price, the headline of a whole
+  development becomes the cheapest one, `from` (its period untouched), with the cheapest confirmed
+  subsidised price as its Sakani line; a listing for one specific `unit` keeps its own headline
+  checks; the owner's caption price drops every model price.
 - **Photo focus points**: the model gives every kept photo a `focus` `{x, y}` (the centre of its
   subject); the site uses it as the crop position, so a tall façade is not cut down to sky.
 - **Re-running a published brochure**: `node services/intake/run-once.mjs <pdf> --replace BONA-W023`
@@ -374,6 +378,7 @@ default, so only the ones you want to change need to be present.
 | `BONA_VIDEO_MATCH_FRAMES` | `4` | frames pulled out of the clip for it to look at |
 | `BONA_VIDEO_MATCH_LISTINGS` | `15` | how many recent intake listings the clip is compared against |
 | `BONA_PAGE_READ_LONG_SIDE` | `1600` | long side of the page renders the AI reads (text-free PDFs) |
+| `BONA_MAX_MODEL_PRICE_PAGES` | `12` | most pages the unit-model price check may confirm on (one call each); more = no model prices |
 | `BONA_LOCK_WAIT_MS` | `900000` | how long a job waits for `$BONA_DATA/intake.lock` |
 | `BONA_PY_CMD` | `uv run --with pymupdf --with pillow python` | argv for the extractor; split on spaces, never shelled |
 | `BONA_BROCHURE_PY_CMD` | `uv run --with pymupdf --with segno --with fonttools --with brotli python` | argv for the brochure step (segno draws the QR, fontTools+brotli turn `public/fonts/*.woff2` into TTF) |

@@ -84,6 +84,18 @@ describe('env parsing', () => {
     assert.equal(cfg.maxImages, 10);
     assert.match(cfg.site, /^https:\/\//);
   });
+
+  it('bounds the unit-model price check: 12 pages unless BONA_MAX_MODEL_PRICE_PAGES says otherwise', () => {
+    const before = process.env.BONA_MAX_MODEL_PRICE_PAGES;
+    try {
+      delete process.env.BONA_MAX_MODEL_PRICE_PAGES;
+      assert.equal(loadConfig({ repo: '/tmp/repo' }).maxModelPricePages, 12);
+      process.env.BONA_MAX_MODEL_PRICE_PAGES = '4';
+      assert.equal(loadConfig({ repo: '/tmp/repo' }).maxModelPricePages, 4);
+    } finally {
+      if (before === undefined) delete process.env.BONA_MAX_MODEL_PRICE_PAGES; else process.env.BONA_MAX_MODEL_PRICE_PAGES = before;
+    }
+  });
 });
 
 describe('log redaction', () => {

@@ -38,7 +38,7 @@ import {
   readIndex, seqAfter, slugify, takenSlugs, todayRiyadh, uniqueSlug, writeIndex, writeInboxListing,
 } from './listing.mjs';
 import { log } from './log.mjs';
-import { alignHeadline, checkModelPrices } from './model-prices.mjs';
+import { alignHeadline, checkModelPrices, isFigure } from './model-prices.mjs';
 import { extractPdf, renderPdfPages } from './pdf.mjs';
 import { compositePages, cropPhotoRegions, modelFlagsComposites } from './photo-regions.mjs';
 import { priceAppearsIn, westernise } from './price.mjs';
@@ -397,11 +397,11 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // --- 4a. unit-model prices ------------------------------------------------------
   // A development sold as unit models prints a price (and often a Sakani price) per model. Each
   // figure is confirmed ON ITS PAGE IMAGE by a second model — one call per page, covering every
-  // model on it — and never by the text layer, which cannot tell which model a figure belongs to
-  // (model-prices.mjs). When any model keeps a price, the headline becomes the cheapest one, "from",
-  // and its own checks below are skipped: its figures ARE confirmed model figures. The owner's
-  // caption price replaces them all.
-  const figuresOf = (m) => [m?.price, m?.subsidisedPrice].filter((n) => typeof n === 'number' && n > 0);
+  // model on it, at most 3 at once and at most cfg.maxModelPricePages pages — and never by the text
+  // layer, which cannot tell which model a figure belongs to (model-prices.mjs). When any model keeps
+  // a price, the headline of a whole development becomes the cheapest one, "from", and its own checks
+  // below are skipped: its figures ARE confirmed model figures. The owner's caption price replaces them all.
+  const figuresOf = (m) => [m?.price, m?.subsidisedPrice].filter(isFigure);
   let headlineFromModels = false;
   if (Array.isArray(ai.models) && ai.models.length && caption.price) {
     for (const m of ai.models) {
@@ -411,55 +411,75 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       if (m && typeof m === 'object') { m.price = null; m.subsidisedPrice = null; }
     }
   } else if (Array.isArray(ai.models) && ai.models.some((m) => figuresOf(m).length)) {
-    // A page a model's evidence cites that was not rendered for the reading is rendered now, so
-    // the second model can look at it. A failed render costs those models their prices, not the run.
-    const rendered = new Set(pageImages.map((p) => p.page));
-    const lastPage = Number(extraction.pages) > 0 ? Number(extraction.pages) : Infinity;
-    const missing = [...new Set(ai.models.filter((m) => figuresOf(m).length).map((m) => m?.evidence?.page)
-      .filter((n) => Number.isInteger(n) && n >= 1 && n <= lastPage && !rendered.has(n)))].sort((a, b) => a - b);
-    if (missing.length) {
-      const more = await renderPdfPages(pdfPath, workDir, {
-        pyCmd: cfg.pyCmd, maxPages: cfg.maxPdfPages, longSide: cfg.pageReadLongSide, pages: missing, dir: 'model-pages',
-      });
-      if (more.ok === false) {
-        log.warn('intake.model_pages_failed', { pages: missing, error: more.error });
-      } else {
-        const added = (more.pageImages || []).filter((p) => !rendered.has(p.page));
-        pageImages.push(...added);
-        report.modelPages = added.map((p) => p.page);
-        log.info('intake.model_pages', { pages: report.modelPages, longSide: cfg.pageReadLongSide });
-      }
-    }
     const mp = await checkModelPrices(ai.models, {
       pageImages,
       pageText,
+      pageCount: Number(extraction.pages),
+      maxPages: cfg.maxModelPricePages,
+      // A page a model's evidence cites that was not rendered for the reading is rendered now, so
+      // the second model can look at it. A failed render — or a throw — costs those models their
+      // prices, not the run.
+      render: async (pages) => {
+        try {
+          const more = await renderPdfPages(pdfPath, workDir, {
+            pyCmd: cfg.pyCmd, maxPages: cfg.maxPdfPages, longSide: cfg.pageReadLongSide, pages, dir: 'model-pages',
+          });
+          if (more.ok === false) {
+            log.warn('intake.model_pages_failed', { pages, error: more.error });
+            return [];
+          }
+          const have = new Set(pageImages.map((p) => p.page));
+          const added = (more.pageImages || []).filter((p) => !have.has(p.page));
+          // Kept in pageImages on purpose: when every model price is refused, the headline's own
+          // check below may confirm its figure on one of these pages — a second model still has to
+          // see it printed there, exactly as on a page rendered for the reading.
+          pageImages.push(...added);
+          report.modelPages = added.map((p) => p.page);
+          log.info('intake.model_pages', { pages: report.modelPages, longSide: cfg.pageReadLongSide });
+          return added;
+        } catch (e) {
+          log.warn('intake.model_pages_failed', { pages, error: String(e?.message || e) });
+          return [];
+        }
+      },
       confirm: async ({ page, abs, items }) => {
-        const answers = await confirmModelPrices({
+        const res = await confirmModelPrices({
           pageImage: abs, items, currency: price?.currency, bin: cfg.claudeBin, model: cfg.claudeModel,
           cwd: workDir, addDirs: [workDir], settingsPath: confinement.file,
         });
-        log.info('intake.model_price_evidence', { page, models: items.length, answers: answers.length });
-        return answers;
+        log.info('intake.model_price_evidence', { page, models: items.length, answers: res.answers.length, error: res.error, fatal: res.fatal });
+        return res;
       },
     });
     ai.models = mp.models;
     rejectedPrices.push(...mp.refused);
-    report.modelPrices = { models: ai.models.length, calls: mp.calls, refused: mp.refused };
-    log.info('intake.model_prices', { models: ai.models.length, calls: mp.calls, refused: mp.refused.length });
+    // Pages whose models could not be checked for a reason that is ours, not the brochure's: the
+    // render failed, the second model's call failed, or nothing more was sent after a quota error.
+    const incompletePages = [...new Set([...mp.unrendered, ...mp.failed.map((f) => f.page), ...mp.skipped])].sort((a, b) => a - b);
+    report.modelPrices = { models: ai.models.length, calls: mp.calls, refused: mp.refused, incompletePages, tooMany: mp.tooMany };
+    log.info('intake.model_prices', { models: ai.models.length, calls: mp.calls, refused: mp.refused.length, incompletePages, tooMany: mp.tooMany });
     if (mp.refused.length) {
       report.warningCodes.push('model-price-not-printed');
-      report.warnings.push(`${mp.refused.length} unit-model price(s) could not be confirmed on the brochure's own pages, so they were left off — the models show without them`);
+      if (mp.tooMany) {
+        report.warnings.push(`the brochure prices its unit models on too many pages to check (${mp.tooMany.pages}; at most ${mp.tooMany.max} are looked at), so no unit-model price was published — the models show without them`);
+      } else if (incompletePages.length) {
+        report.warnings.push(`the check of the unit-model prices could not be completed (page${incompletePages.length === 1 ? '' : 's'} ${incompletePages.join(', ')}), so ${mp.refused.length} price(s) were left off for now — try again later`);
+      } else {
+        report.warnings.push(`${mp.refused.length} unit-model price(s) could not be confirmed on the brochure's own pages, so they were left off — the models show without them`);
+      }
     }
-    if (price && ai.models.some((m) => typeof m?.price === 'number' && m.price > 0)) {
+    // "From the cheapest model" is the price of a whole development: one specific unit keeps its
+    // own price and the headline checks below.
+    if (price && !ai.listing?.unit && ai.models.some((m) => isFigure(m?.price))) {
       const before = { amount: price.amount, subsidised: price.subsidisedAmount };
       alignHeadline(price, ai.models);
       headlineFromModels = true;
-      report.priceEvidence = { fromModels: true };
+      report.priceEvidence = { inText: priceAppearsIn(haystack, price.amount), confirmed: true, fromModels: true };
       // The model's own headline figures are replaced here, not checked. One that is not a
       // confirmed model figure but is stated in the copy must still be printed (the copy guard).
       const kept = new Set(ai.models.flatMap(figuresOf));
       for (const [n, evidence, subsidised] of [[before.amount, ai.priceEvidence, false], [before.subsidised, ai.subsidisedPriceEvidence, true]]) {
-        if (!(typeof n === 'number' && n > 0) || kept.has(n) || mp.refused.includes(n) || !inCopy(n)) continue;
+        if (!isFigure(n) || kept.has(n) || mp.refused.includes(n) || !inCopy(n)) continue;
         const check = await printed(n, evidence, { subsidised });
         if (!check.inText && !check.confirmed) rejectedPrices.push(n);
       }

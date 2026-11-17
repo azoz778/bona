@@ -120,6 +120,8 @@ if (mode === 'extract') {
   });
   out = { ok: true, pages: cfg.pageText.length, text: cfg.pageText.join('\\n'), pageText: cfg.pageText, candidates,
     rendered: false, embeddedImageCount: candidates.length, links: [], meta: {} };
+} else if (cfg.failPageDir && opt('--page-dir') === cfg.failPageDir) {
+  out = { ok: false, error: 'extract_pdf.py failed (exit 1): cannot render' };
 } else {
   const dir = opt('--page-dir') ?? 'pages';
   const want = pages.length ? pages : cfg.pageText.map((_, i) => i + 1);
@@ -134,12 +136,18 @@ const log = new URL('./calls.jsonl', import.meta.url);
 const prompt = fs.readFileSync(0, 'utf8');
 let answer;
 if (prompt.includes('For each numbered model')) {
-  // The unit-model check (claude.mjs confirmModelPrices): one call per page, every model on it.
+  // The unit-model check (claude.mjs confirmModelPrices): one call per page, every model on it,
+  // one JSON line per model inside the fence.
   const page = Number((prompt.match(/\\/p(\\d+)\\.jpg/) || [])[1]);
-  const fig = (s) => (s === 'none' ? null : Number(s.replace(/,/g, '')));
-  const items = [...prompt.matchAll(/^#(\\d+) .* — regular price: ([\\d,]+|none)\\b.* — subsidised price: ([\\d,]+|none)/gm)]
-    .map((m) => ({ i: Number(m[1]), price: fig(m[2]), subsidisedPrice: fig(m[3]) }));
+  const fenced = prompt.split('<<<BONA-UNTRUSTED-DATA: the models and figures to check>>>')[1].split('<<<END ')[0];
+  const items = fenced.split('\\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l))
+    .map(({ i, price, subsidisedPrice }) => ({ i, price, subsidisedPrice }));
   fs.appendFileSync(log, JSON.stringify({ tool: 'claude-model-confirm', page, items }) + '\\n');
+  if (cfg.modelConfirmFail) {
+    const quota = cfg.modelConfirmFail === 'quota';
+    process.stdout.write(JSON.stringify({ is_error: true, api_error_status: quota ? 429 : null, result: quota ? "You've hit your session limit" : 'boom' }));
+    process.exit(1);
+  }
   // modelConfirm: null = every figure confirmed; [figures] = only those; { i: {price, subsidisedPrice} } = per model.
   const mc = cfg.modelConfirm ?? null;
   answer = items.map((it) => (Array.isArray(mc)
@@ -148,7 +156,7 @@ if (prompt.includes('For each numbered model')) {
 } else if (prompt.includes('VISIBLY PRINT')) {
   const amount = Number((prompt.match(/VISIBLY PRINT[^\\d]*(\\d+)/) || [])[1]);
   const subsidised = /VISIBLY PRINT the price for housing-subsidy/.test(prompt);
-  fs.appendFileSync(log, JSON.stringify({ tool: 'claude-confirm', amount, subsidised, project: /unit models/.test(prompt), mirror: /only the price for everyone else counts/.test(prompt),
+  fs.appendFileSync(log, JSON.stringify({ tool: 'claude-confirm', amount, subsidised, page: Number((prompt.match(/\\/p(\\d+)\\.jpg/) || [])[1]), project: /unit models/.test(prompt), mirror: /only the price for everyone else counts/.test(prompt),
     subject: (prompt.match(/listing this price is for[^\\n]*\\n([^\\n]*)/) || [])[1] ?? null }) + '\\n');
   answer = { confirmed: ((subsidised ? cfg.confirmSub : null) ?? cfg.confirm ?? []).includes(amount) };
 } else {
@@ -184,14 +192,14 @@ const answer = ({ price, priceEvidence = null, subsidisedPriceEvidence = null, u
 const PRICE = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
 const BROCHURE = ['مشروع سكني — شقق بغرفتي نوم وثلاث غرف نوم في حي الحمدانية', LOCATION_PAGE, PRICE_PAGE, 'غرفة نوم 03', PRICE_PAGE];
 
-async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, modelConfirm = null, build = '' }) {
+async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, modelConfirm = null, modelConfirmFail = null, failPageDir = null, cfgExtra = {}, build = '' }) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bona-price-pages-')));
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
   const photo = path.join(bin, 'photo.jpg');
   const sharp = (await import('sharp')).default;
   await sharp({ create: { width: 1200, height: 900, channels: 3, background: '#4a6b8a' } }).jpeg().toFile(photo);
-  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, modelConfirm }));
+  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, modelConfirm, modelConfirmFail, failPageDir }));
   fs.writeFileSync(path.join(bin, 'fake-py.mjs'), FAKE_PY);
   fs.writeFileSync(path.join(bin, 'fake-claude.mjs'), FAKE_CLAUDE);
   const claude = path.join(bin, 'claude');
@@ -209,7 +217,7 @@ async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = nu
   const cfg = {
     repo, site: 'https://bona-real-estate.com', maxPdfMb: 50, maxPdfPages: 60, minImageSide: 100, minImages: 4, maxImages: 10,
     pageReadLongSide: 1600, pyCmd: [process.execPath, path.join(bin, 'fake-py.mjs')], claudeBin: claude,
-    claudeModel: 'opus', claudeFallbackModel: null, claudeTimeoutMs: 60000,
+    claudeModel: 'opus', claudeFallbackModel: null, claudeTimeoutMs: 60000, ...cfgExtra,
   };
   const calls = () => fs.readFileSync(path.join(bin, 'calls.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const run = () => processPdf({ pdfPath, cfg, caption: {}, workDir: path.join(dir, 'work'), dryRun: true });
@@ -810,7 +818,8 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       assert.deepEqual(report.ai.models.map((m) => [m.price, m.subsidisedPrice]), [[419994, 356024], [319015, 270425]]);
       assert.equal(r.calls().filter((c) => c.tool === 'claude-confirm').length, 0, 'the headline is the confirmed model figure: no second check');
       assert.ok(!report.warningCodes.includes('model-price-not-printed'));
-      assert.deepEqual(report.modelPrices, { models: 2, calls: 1, refused: [] });
+      assert.deepEqual(report.modelPrices, { models: 2, calls: 1, refused: [], incompletePages: [], tooMany: null });
+      assert.deepEqual(report.priceEvidence, { inText: false, confirmed: true, fromModels: true }, 'the { inText, confirmed } shape stays');
     } finally { r.cleanup(); }
   });
 
@@ -893,6 +902,129 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       assert.deepEqual(report.ai.models.map((m) => [m.price, m.subsidisedPrice]), [[null, null]]);
       assert.equal(r.calls().filter((c) => c.tool === 'claude-confirm').length, 2, 'headline + Sakani checked the old way');
       assert.deepEqual(report.listingPreview.price, PRICE);
+    } finally { r.cleanup(); }
+  });
+});
+
+describe('processPdf: unit-model prices — failures, bounds and the headline fallback', { timeout: 120000 }, () => {
+  const ON_REQUEST = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true };
+  const model = (en, price, subsidisedPrice, page) => ({
+    name: { en, ar: `نموذج ${en}` }, bedrooms: 2, bathrooms: 2, areaSqm: 105, rooms: null, availability: null,
+    price, subsidisedPrice, evidence: page ? { page, quote: String(price) } : null, floorPlan: null,
+  });
+  const withModels = (models, opts = {}) => ({ ...answer({ price: ON_REQUEST, ...opts }), models });
+  const modelCalls = (r) => r.calls().filter((c) => c.tool === 'claude-model-confirm');
+  const renders = (r) => r.calls().filter((c) => c.tool === 'py-pages').map((c) => c.pages);
+
+  it('(a) a model page that fails to render costs only the models on it; the run goes on', async () => {
+    const r = await rig({ listing: withModels([model('Lulu', 319015, 270425, 3), model('Corner', 299000, null, 2)]), failPageDir: 'model-pages' });
+    try {
+      const report = await r.run();
+      assert.deepEqual(renders(r), [[3, 5], [2]], 'the cited page was asked for');
+      assert.equal(report.modelPages, undefined);
+      assert.deepEqual(modelCalls(r).map((c) => c.page), [3], 'nothing to look at for Corner: no call');
+      assert.deepEqual(report.ai.models.map((m) => [m.price, m.subsidisedPrice]), [[319015, 270425], [null, null]]);
+      assert.deepEqual(report.listingPreview.price, { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 });
+      assert.ok(report.warningCodes.includes('model-price-not-printed'));
+      assert.deepEqual(report.modelPrices.incompletePages, [2]);
+      assert.ok(report.warnings.some((w) => /could not be completed/.test(w) && /try again later/.test(w)), report.warnings.join(' | '));
+    } finally { r.cleanup(); }
+  });
+
+  it('(b) the model check failing (claude -p exits non-zero): refused, and the warning says the check could not be completed', async () => {
+    const r = await rig({ listing: withModels([model('Nawras', 419994, 356024, 3), model('Lulu', 319015, 270425, 3)]), modelConfirmFail: true });
+    try {
+      const report = await r.run();
+      assert.equal(modelCalls(r).length, 1);
+      assert.deepEqual(report.ai.models.map((m) => [m.price, m.subsidisedPrice]), [[null, null], [null, null]]);
+      assert.deepEqual(report.listingPreview.price, ON_REQUEST, 'no model price kept and no headline figure of its own');
+      assert.ok(report.warningCodes.includes('model-price-not-printed'));
+      assert.ok(report.warnings.some((w) => /could not be completed/.test(w) && /try again later/.test(w)), report.warnings.join(' | '));
+      assert.ok(!report.warnings.some((w) => /could not be confirmed on the brochure's own pages/.test(w)), 'the brochure is not blamed');
+      assert.deepEqual(report.modelPrices.incompletePages, [3]);
+    } finally { r.cleanup(); }
+  });
+
+  it('(b) a quota error (fatal): refused, and the same warning (the stop after a fatal error is pinned in model-prices.test.mjs)', async () => {
+    const r = await rig({ listing: withModels([model('Nawras', 419994, null, 3), model('Lulu', 319015, null, 5)]), modelConfirmFail: 'quota', cfgExtra: { maxModelPricePages: 12 } });
+    try {
+      const report = await r.run();
+      assert.ok(modelCalls(r).length <= 2);
+      assert.deepEqual(report.ai.models.map((m) => m.price), [null, null]);
+      assert.deepEqual(report.modelPrices.incompletePages, [3, 5]);
+      assert.ok(report.warnings.some((w) => /could not be completed/.test(w)));
+    } finally { r.cleanup(); }
+  });
+
+  it('(c) a cited page past the end of the PDF: refused without a render or a call', async () => {
+    const r = await rig({ listing: withModels([model('Lulu', 319015, null, 3), model('Ghost', 288000, null, 9)]) });
+    try {
+      const report = await r.run();
+      assert.deepEqual(renders(r), [[3, 5]], 'page 9 of a 5-page PDF is never rendered');
+      assert.deepEqual(modelCalls(r).map((c) => c.page), [3]);
+      assert.deepEqual(modelCalls(r)[0].items.map((it) => it.i), [0]);
+      assert.deepEqual(report.ai.models.map((m) => m.price), [319015, null]);
+      assert.deepEqual(report.modelPrices.refused, [288000]);
+      assert.ok(report.warnings.some((w) => /could not be confirmed on the brochure's own pages/.test(w)));
+    } finally { r.cleanup(); }
+  });
+
+  it('(d) every model price refused: the headline\'s own check may confirm it on a page rendered for the models', async () => {
+    const r = await rig({
+      listing: withModels([model('Corner', 319015, null, 2)], { price: { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false }, priceEvidence: { page: 2, quote: '319,015' } }),
+      modelConfirm: [], confirm: [319015],
+    });
+    try {
+      const report = await r.run();
+      assert.deepEqual(report.modelPages, [2]);
+      assert.deepEqual(report.ai.models.map((m) => m.price), [null]);
+      const headline = r.calls().filter((c) => c.tool === 'claude-confirm');
+      assert.deepEqual(headline.map((c) => [c.amount, c.page]), [[319015, 2]], 'the second model looked at the model page');
+      assert.deepEqual(report.priceEvidence, { inText: false, confirmed: true });
+      assert.deepEqual(report.listingPreview.price, { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false });
+    } finally { r.cleanup(); }
+  });
+
+  it('more priced pages than BONA_MAX_MODEL_PRICE_PAGES: every model price refused, nothing rendered, no call', async () => {
+    const r = await rig({
+      listing: withModels([model('Nawras', 419994, null, 3), model('Lulu', 319015, null, 5), model('Corner', 299000, null, 2)]),
+      cfgExtra: { maxModelPricePages: 2 },
+    });
+    try {
+      const report = await r.run();
+      assert.deepEqual(renders(r), [[3, 5]], 'page 2 is not rendered for the models');
+      assert.equal(modelCalls(r).length, 0);
+      assert.deepEqual(report.ai.models.map((m) => m.price), [null, null, null]);
+      assert.deepEqual(report.modelPrices.tooMany, { pages: 3, max: 2 });
+      assert.ok(report.warningCodes.includes('model-price-not-printed'));
+      assert.ok(report.warnings.some((w) => /too many pages/.test(w) && /3/.test(w) && /2/.test(w)), report.warnings.join(' | '));
+    } finally { r.cleanup(); }
+  });
+
+  it('one specific unit is not "from the cheapest model": the headline keeps its own checks', async () => {
+    const a = withModels([model('Lulu', 319015, null, 3)], {
+      price: { amount: 350000, currency: 'SAR', from: false, period: null, onRequest: false }, priceEvidence: { page: 3, quote: '350,000' },
+      unit: { unitRef: 'A-12', block: null, floor: 3 },
+    });
+    const r = await rig({ listing: a, confirm: [350000] });
+    try {
+      const report = await r.run();
+      assert.deepEqual(report.ai.models.map((m) => m.price), [319015], 'the model price is still checked and kept');
+      assert.deepEqual(r.calls().filter((c) => c.tool === 'claude-confirm').map((c) => c.amount), [350000], 'the unit\'s own price is checked the old way');
+      assert.deepEqual(report.listingPreview.price, { amount: 350000, currency: 'SAR', from: false, period: null, onRequest: false });
+      assert.deepEqual(report.priceEvidence, { inText: false, confirmed: true });
+    } finally { r.cleanup(); }
+  });
+
+  it('the headline taken from the models keeps the period the model read (a monthly rent stays monthly)', async () => {
+    const a = withModels([model('Studio', 4500, null, 3)], { price: { amount: null, currency: 'SAR', from: false, period: 'month', onRequest: true } });
+    a.listing.category = 'rent';
+    const r = await rig({ listing: a });
+    try {
+      const report = await r.run();
+      assert.equal(report.listingPreview.price.amount, 4500);
+      assert.equal(report.listingPreview.price.from, true);
+      assert.equal(report.listingPreview.price.period, 'month', 'not reset, and so not turned into a yearly rent');
     } finally { r.cleanup(); }
   });
 });
