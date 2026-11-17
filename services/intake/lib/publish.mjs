@@ -67,16 +67,20 @@ export async function committedUnchanged(repo, paths) {
   return status.code === 0 && status.out === '';
 }
 
-/** Commits the intake makes over a published listing that a re-run rebuilds anyway (never its publish commit). */
-const INTAKE_REBUILDS = ['intake: replace ', 'intake: enrich ', 'intake: rebuild brochure '];
+/**
+ * Commits the intake makes over a published listing that a re-run rebuilds anyway (never its publish
+ * commit): `--replace`, `--enrich`, the backfill's brochure rebuild (backfill-enrich.mjs) and the
+ * WhatsApp `brochure <id>` command (index.mjs: "intake: branded brochure (<id>)").
+ */
+const INTAKE_REBUILDS = ['intake: replace ', 'intake: enrich ', 'intake: rebuild brochure ', 'intake: branded brochure ('];
 
 /**
  * Why a published listing may NOT be rebuilt from its brochure, or null when it may: every commit
- * touching `paths` must be the one that published it or a later `intake: replace …`, `intake: enrich …`
- * or `intake: rebuild brochure …` (backfill-enrich.mjs) run — an enrichment or a brochure rebuild adds
- * only what a re-run rebuilds anyway: unit models, floor plans, fact lists, the brochure. Anything else
- * (a hand fix, a re-crop, an edit) is reported. A shallow clone cannot show the history, so it is
- * refused rather than trusted.
+ * touching `paths` must be the one that published it or a later `intake: replace …`, `intake: enrich …`,
+ * `intake: rebuild brochure …` (backfill-enrich.mjs) or `intake: branded brochure (<id>)` (the WhatsApp
+ * `brochure <id>` command) run — an enrichment or a brochure rebuild adds only what a re-run rebuilds
+ * anyway: unit models, floor plans, fact lists, the brochure. Anything else (a hand fix, a re-crop, an
+ * edit) is reported. A shallow clone cannot show the history, so it is refused rather than trusted.
  */
 export async function changedSincePublished(repo, paths) {
   const shallow = await run('git', ['rev-parse', '--is-shallow-repository'], { cwd: repo });
