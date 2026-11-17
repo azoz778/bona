@@ -126,8 +126,52 @@ doc.xref_set_key(smask, 'Width', 'null')
 out['no_width'] = x.mask_fits(doc, smask)
 doc.xref_set_key(smask, 'Width', '/Big')
 out['not_a_number'] = x.mask_fits(doc, smask)
+doc.xref_set_key(smask, 'Width', '90'); doc.xref_set_key(smask, 'Height', '70')
+out['flate'] = x.mask_fits(doc, smask)
+doc.xref_set_key(smask, 'Filter', '/JPXDecode')
+out['jpx'] = x.mask_fits(doc, smask)              # a JPX stream decodes to ITS OWN size, whatever Width/Height say
+doc.xref_set_key(smask, 'Filter', '[/FlateDecode /JPXDecode]')
+out['jpx_in_array'] = x.mask_fits(doc, smask)
 out['cap'] = x.MAX_PIXELS
 print(json.dumps(out))
+`;
+
+// A JPXDecode soft mask decodes to the size in its own codestream — the dictionary's Width/Height are
+// ignored — so mask_fits() cannot bound it: a 3000x3000 JPEG 2000 mask that declares 90x70 is never
+// decoded, and its image keeps its raw stream. (Three usable images, so no page-render fallback.)
+const MAKE_JPX = `
+import sys, io, pymupdf
+from PIL import Image
+w, h = 900, 700
+def noisy(block):
+    im = Image.new('RGB', (w, h))
+    px = im.load()
+    for x in range(w):
+        for y in range(h):
+            px[x, y] = (x * 7 % 256, y * 9 % 256, (x + y) * 5 % 256)
+    im.paste(Image.new('RGB', (500, 300), block), (200, 200))
+    return im
+def png(im):
+    b = io.BytesIO(); im.save(b, 'PNG'); return b.getvalue()
+doc = pymupdf.open()
+for i in range(3):
+    page = doc.new_page(width=842, height=595)
+    stream = png(noisy((200, 100 + i * 40, 50)))
+    if i == 0:
+        page.insert_image(page.rect, stream=stream, mask=png(Image.new('L', (w, h), 128)))
+    else:
+        page.insert_image(page.rect, stream=stream)
+    page.insert_text((40, 40), 'Floor plan 105.02 m2 apartment bedroom')
+smask = doc[0].get_images(full=True)[0][1]
+big = io.BytesIO(); Image.new('L', (3000, 3000), 128).save(big, 'JPEG2000'); big = big.getvalue()
+doc.update_stream(smask, big, compress=False)
+doc.xref_set_key(smask, 'Filter', '/JPXDecode')
+doc.xref_set_key(smask, 'DecodeParms', 'null')
+doc.xref_set_key(smask, 'Width', '%d' % w); doc.xref_set_key(smask, 'Height', '%d' % h)
+doc.save(sys.argv[1])
+doc = pymupdf.open(sys.argv[1])
+m = pymupdf.Pixmap(doc, smask)
+print('decoded', m.width, m.height, doc.xref_get_key(smask, 'Filter')[1], doc.xref_get_key(smask, 'Width')[1])
 `;
 
 describe('extract_pdf.py - transparent images', { skip: !UV && 'uv not installed' }, () => {
@@ -194,7 +238,26 @@ describe('extract_pdf.py - transparent images', { skip: !UV && 'uv not installed
     const r = spawnSync('uv', ['run', ...WITH, 'python', '-I', '-c', MASK_FITS, path.join(HERE, '..')], { encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(JSON.parse(r.stdout.trim().split('\n').pop()), {
-      honest: true, lying: false, at_cap: true, over_cap: false, no_width: false, not_a_number: false, cap: 50000000,
+      honest: true, lying: false, at_cap: true, over_cap: false, no_width: false, not_a_number: false,
+      flate: true, jpx: false, jpx_in_array: false, cap: 50000000,
     });
+  });
+
+  it('never decodes a JPXDecode soft mask (its codestream, not its dictionary, sets its size): the image keeps its raw stream', () => {
+    const base = path.join(os.homedir(), '.cache', 'bona-tests');
+    fs.mkdirSync(base, { recursive: true });
+    const dir = fs.mkdtempSync(path.join(base, 'smask-jpx-'));
+    try {
+      const pdf = path.join(dir, 'jpx.pdf');
+      const mk = spawnSync('uv', ['run', ...WITH, 'python', '-I', '-c', MAKE_JPX, pdf], { encoding: 'utf8' });
+      assert.equal(mk.status, 0, mk.stderr);
+      assert.equal(mk.stdout.trim().split('\n').pop(), 'decoded 3000 3000 /JPXDecode 900', 'the fixture: a 3000x3000 JPX mask that declares 900x700');
+      const out = path.join(dir, 'out');
+      const run = spawnSync('uv', ['run', ...WITH, 'python', '-I', SCRIPT, pdf, out, '--min-side', '300'], { encoding: 'utf8' });
+      assert.equal(run.status, 0, run.stderr);
+      const res = JSON.parse(run.stdout.trim().split('\n').pop());
+      assert.deepEqual(res.candidates.map((c) => c.page), [1, 2, 3]);
+      assert.equal('flattened' in res.candidates[0], false, 'the JPX mask was not decoded: raw stream kept');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });

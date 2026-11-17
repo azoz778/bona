@@ -45,7 +45,8 @@ back onto the page:
 
 Decompression-bomb caps: an embedded bitmap over MAX_PIXELS (50 MP) is dropped in usable()
 BEFORE any Pixmap is built, its soft mask is flattened only when the mask's own dictionary says it
-is within the same cap (mask_fits — otherwise the raw stream is kept), and every page render is
+is within the same cap and it is not JPEG 2000, whose codestream sets its own size (mask_fits —
+otherwise the raw stream is kept), and every page render is
 clamped to a long side in pixels (RENDER_LONG_SIDE) whatever DPI is asked for.
 
 Memory discipline (2026-09-06, after bona-intake was OOM-killed inside its 1 GB cgroup on the
@@ -129,12 +130,26 @@ def xref_int(doc, xref: int, key: str) -> int | None:
         return None
 
 
+def jpx_filtered(doc, xref: int) -> bool:
+    """Is this stream JPEG 2000 (a /JPXDecode filter, alone or in a filter array)? An unreadable
+    Filter counts as one: the caller then does not decode."""
+    try:
+        kind, value = doc.xref_get_key(xref, "Filter")
+    except Exception:
+        return True
+    return kind in ("name", "array") and "JPXDecode" in str(value)
+
+
 def mask_fits(doc, smask_xref: int, max_pixels: int = MAX_PIXELS) -> bool:
     """May this soft mask be decoded? Only when its dictionary declares a Width and a Height whose
     product is within `max_pixels` — the cap usable() puts on the image itself. The image is checked
     before it is decoded, but its mask is a separate object with its own size: a small picture can
     carry a 60000x60000 mask, and Pixmap(doc, xref) would build all of it. No readable size = no
-    decode (the image keeps its raw stream)."""
+    decode (the image keeps its raw stream). Never a JPXDecode mask: a JPEG 2000 stream decodes to the
+    size in its own codestream and ignores the declared Width/Height, so the dictionary cannot bound it
+    (a mask declaring 900x700 decoded 3000x3000)."""
+    if jpx_filtered(doc, smask_xref):
+        return False
     w, h = xref_int(doc, smask_xref, "Width"), xref_int(doc, smask_xref, "Height")
     return w is not None and h is not None and w > 0 and h > 0 and w * h <= max_pixels
 
