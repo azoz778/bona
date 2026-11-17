@@ -67,11 +67,23 @@ export async function committedUnchanged(repo, paths) {
   return status.code === 0 && status.out === '';
 }
 
-/** How many commits touched `file` (-1 when git cannot say): 1 = only the commit that created it. */
-export async function commitsTouching(repo, file) {
-  const r = await run('git', ['log', '--follow', '--format=%H', '--', file], { cwd: repo });
-  if (r.code !== 0) return -1;
-  return r.out ? r.out.split('\n').filter(Boolean).length : 0;
+/**
+ * Why a published listing may NOT be rebuilt from its brochure, or null when it may: every commit
+ * touching `paths` must be the one that published it or a later `intake: replace …` run. Anything
+ * else (a hand fix, a re-crop, an edit) is reported. A shallow clone cannot show the history, so
+ * it is refused rather than trusted.
+ */
+export async function changedSincePublished(repo, paths) {
+  const shallow = await run('git', ['rev-parse', '--is-shallow-repository'], { cwd: repo });
+  if (shallow.code !== 0 || shallow.out !== 'false') return 'its git history could not be read in full';
+  // One log over all the paths, so the commits come back in history order (newest first).
+  const r = await run('git', ['log', '--format=%H%x09%s', '--', ...paths], { cwd: repo });
+  if (r.code !== 0) return 'its git history could not be read';
+  const commits = r.out.split('\n').filter(Boolean).map((line) => line.split('\t').slice(1).join('\t'));
+  if (!commits.length) return 'it is not in git';
+  const later = commits.slice(0, -1); // the oldest commit published it
+  const others = later.filter((subject) => !subject.startsWith('intake: replace '));
+  return others.length ? `${others.length} later commit(s), e.g. "${others[0].slice(0, 60)}"` : null;
 }
 
 export async function gitStatus(repo) {

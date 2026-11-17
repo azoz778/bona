@@ -342,7 +342,8 @@ export async function confirmPriceEvidence({
     `  ${pageImage}`,
     '',
     `Question: does that page VISIBLY PRINT ${which} ${amount} ${currency} for the property?`,
-    ...(subject || unit ? [fence('the listing this price is for', [subject, unitLabel(unit)].filter(Boolean).join(' — '))] : []),
+    ...(subject || unitLabel(unit) ? [fence('the listing this price is for', [subject, unitLabel(unit)].filter(Boolean).join(' — '))] : []),
+    ...(unitLabel(unit) ? ['It is ONE unit: a price printed for a different unit or model does not count.'] : []),
     'A number you have to compute, infer or assume does not count. A price for a different unit',
     'on the same page does not count unless the page makes clear it is this property\'s price.',
     ...(project
@@ -371,14 +372,20 @@ export async function confirmPriceEvidence({
 const unitLabel = (u) => {
   if (!u || typeof u !== 'object') return '';
   const parts = [u.unitRef && `unit ${u.unitRef}`, u.block && `block ${u.block}`, u.floor !== null && u.floor !== undefined && `floor ${u.floor}`].filter(Boolean);
-  return parts.length ? `${parts.join(', ')} — a price printed for a different unit does not count` : '';
+  return parts.join(', ');
 };
 
 /**
  * A price inside the copy: a price-sized figure next to a currency. The site prints the price from
  * `price` (which the TAQEEM check may have cleared), so a figure in the prose could outlive it.
  */
-const PRICE_IN_COPY_RE = /(?:\b(?:SAR|SR|AED|USD|EUR|GBP|OMR)\b|ريال|ر\.\s?س|[$€£﷼])\s*[\d٠-٩][\d٠-٩,.٬\s]{3,}|[\d٠-٩]{1,3}(?:[,٬.][\d٠-٩]{3})+\s*(?:\b(?:SAR|SR|AED|USD|EUR|GBP|OMR)\b|ريال|ر\.\s?س|[$€£﷼])|\b\d+(?:\.\d+)?\s*(?:million|m)\s*(?:SAR|riyals?)\b|مليون\s*(?:ريال|ر\.\s?س)/i;
+const CUR = '(?:\\b(?:SAR|SR|AED|USD|EUR|GBP|OMR)\\b|riyals?|ريال|ر\\.\\s?س|[$€£﷼])';
+const PRICE_IN_COPY_RE = new RegExp([
+  `${CUR}\\s*[\\d٠-٩][\\d٠-٩,.٬\\s]{2,}(?:\\s*(?:k|m|million|bn|billion|ألف|مليون))?`,
+  `[\\d٠-٩]{1,3}(?:[,٬.][\\d٠-٩]{3})+\\s*(?:(?:saudi|ريال سعودي)\\s*)?${CUR}`,
+  `[\\d٠-٩]{5,}\\s*${CUR}`,
+  `[\\d٠-٩]+(?:[.,٫][\\d٠-٩]+)?\\s*(?:k|m|million|bn|billion|ألف|مليون|مليار)\\s*(?:saudi\\s*)?${CUR}`,
+].join('|'), 'i');
 
 /** Copy hygiene: no other agency's brand, no phone numbers, no hype, no prices. */
 export function copyProblems(listing) {

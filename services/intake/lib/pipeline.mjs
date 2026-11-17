@@ -42,7 +42,7 @@ import { compositePages, cropPhotoRegions, modelFlagsComposites } from './photo-
 import { priceAppearsIn } from './price.mjs';
 import { isSubsidyPricePage, pricePagesToRender } from './price-pages.mjs';
 import { pinFromLinks } from './geo.mjs';
-import { commitsTouching, committedUnchanged, rebuild, resetTree } from './publish.mjs';
+import { changedSincePublished, committedUnchanged, rebuild, resetTree } from './publish.mjs';
 import { loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNamedIn, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
 
 export const sha256File = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -101,13 +101,13 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     if (!dryRun && !(await committedUnchanged(cfg.repo, [path.join('public', 'listings', meta.slug), path.relative(cfg.repo, current.file)]))) {
       throw new Error(`${meta.id} has uncommitted changes (or is not in git) — commit or discard them before --replace`);
     }
-    // A re-run rebuilds title, place, copy and photo labels from the brochure, so any later commit
-    // to the listing — a district corrected by hand, an Arabic name fixed, a WhatsApp edit made
-    // before edits were recorded — would be undone silently. Only a listing untouched since the
-    // commit that published it may be replaced.
-    const commits = await commitsTouching(cfg.repo, path.relative(cfg.repo, current.file));
-    if (commits !== 1) {
-      throw new Error(`${meta.id} has been changed since it was published (${commits < 0 ? 'its git history could not be read' : `${commits} commits`}) — a re-run would undo that; do it by hand`);
+    // A re-run rebuilds title, place, copy, photos and labels from the brochure, so any later
+    // commit to the listing or its photos — a district corrected by hand, an Arabic name fixed, a
+    // photo re-cropped, a WhatsApp edit made before edits were recorded — would be undone
+    // silently. Only the commit that published it, and earlier replacements, may be in its history.
+    if (!dryRun) {
+      const changed = await changedSincePublished(cfg.repo, [path.relative(cfg.repo, current.file), path.join('public', 'listings', meta.slug)]);
+      if (changed) throw new Error(`${meta.id} has been changed since it was published (${changed}) — a re-run would undo that; do it by hand`);
     }
   }
 
@@ -345,7 +345,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     const citedRendered = evidence && pageImages.some((p) => p.page === evidence.page) ? evidence : null;
     const cited = citedRendered ?? (() => {
       const hit = pageImages.find((p) => priceAppearsIn(pageText[p.page - 1] ?? '', amount));
-      return hit ? { page: hit.page, quote: evidence?.quote ?? String(amount) } : null;
+      return hit ? { page: hit.page, quote: String(amount) } : null; // the model's quote was about another page
     })();
     const page = cited && pageImages.find((p) => p.page === cited.page);
     if (!page) return out;
@@ -368,10 +368,12 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     log.info('intake.price_evidence', { page: cited.page, subsidised, inferred: cited !== evidence, confirmed: check.confirmed, error: check.error ?? null });
     return out;
   };
+  const rejectedPrices = [];
   if (!caption.price && price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0) {
     report.priceEvidence = await printed(price.amount, ai.priceEvidence);
     if (!report.priceEvidence.inText && !report.priceEvidence.confirmed) {
       log.warn('intake.price_unevidenced', { amount: price.amount, currency: price.currency });
+      rejectedPrices.push(price.amount);
       price.amount = null;
       price.onRequest = true;
       price.from = false;
@@ -392,7 +394,19 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
         report.warningCodes.push('subsidised-price-not-printed');
         report.warnings.push('the subsidised (Sakani) price could not be confirmed on the brochure, so only the regular price is shown');
       }
+      if (price.subsidisedAmount > 0) rejectedPrices.push(price.subsidisedAmount);
       price.subsidisedAmount = null;
+    }
+  }
+
+  // A price the check took away must not survive in the words: the site prints `price`, but a
+  // figure in the title, description or highlights would still be read as the asking price. The
+  // same matcher that looks for the number in the brochure looks for it in the copy.
+  const copy = [ai.listing?.title?.en, ai.listing?.title?.ar, ...(ai.listing?.description?.en ?? []), ...(ai.listing?.description?.ar ?? []),
+    ...(ai.listing?.highlights?.en ?? []), ...(ai.listing?.highlights?.ar ?? [])].filter(Boolean).join('\n');
+  for (const n of rejectedPrices) {
+    if (priceAppearsIn(copy, n)) {
+      throw new RejectError(`the copy states the price ${n.toLocaleString('en-US')}, which could not be confirmed on the brochure — resend with the price in the caption, or without it`, 'price');
     }
   }
 

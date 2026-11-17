@@ -68,6 +68,14 @@ describe('pageNeedsPriceRender', () => {
   it('a Sakani logo with no price on the page is not a price page', () => {
     assert.equal(pageNeedsPriceRender('بالشراكة مع منصة سكني\nIn partnership with Sakani'), false);
   });
+  it('round-3 cases: tables without a price word, wrapped labels, decimals, other labels', () => {
+    assert.equal(pageNeedsPriceRender('لمستفيدي الدعم\n270,425\nلغير مستفيدي الدعم\n319,015'), true, 'a subsidy table needs no price word');
+    assert.equal(pageNeedsPriceRender('قيمة\nالوحدة\nDIB,FDG'), true, 'a label wrapped over two lines');
+    assert.equal(pageNeedsPriceRender('السعر\nDIBFDG\nالمساحة 123.456 م²'), true, 'a three-decimal area is not a price');
+    assert.equal(pageNeedsPriceRender('القيمة البيعية DIB,FDG'), true);
+    assert.equal(pageNeedsPriceRender('ثمن الوحدة\nDIBFDG'), true);
+    assert.equal(pageNeedsPriceRender('المستحقين للدعم السكني 270,425'), true);
+  });
   it('a VAT line is not a price word, and a spaced phone number is not a readable price', () => {
     assert.equal(pageNeedsPriceRender('ضريبة القيمة المضافة 15%'), false);
     assert.equal(pageNeedsPriceRender('السعر\nDIBFDG\nجوال 0555 123 456'), true);
@@ -194,7 +202,7 @@ async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = nu
   const calls = () => fs.readFileSync(path.join(bin, 'calls.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const run = () => processPdf({ pdfPath, cfg, caption: {}, workDir: path.join(dir, 'work'), dryRun: true });
   const publish = (meta = {}) => processPdf({ pdfPath, cfg, caption: { noBrochure: true }, workDir: path.join(dir, 'work'), meta });
-  return { run, publish, calls, repo, pdfPath, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+  return { run, publish, calls, repo, pdfPath, cfg, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 
 describe('processPdf: prices on pages whose digits are scrambled', { timeout: 120000 }, () => {
@@ -503,7 +511,7 @@ describe('processPdf: round-2 review cases', { timeout: 120000 }, () => {
     try {
       await r.run();
       const first = r.calls().find((c) => c.tool === 'claude-confirm');
-      assert.match(first.subject, /Jeddah Heights, Al Hamdaniyah — unit H-12, block H, floor 3 — a price printed for a different unit does not count/);
+      assert.equal(first.subject, 'Jeddah Heights, Al Hamdaniyah — unit H-12, block H, floor 3');
     } finally { r.cleanup(); }
   });
 });
@@ -531,7 +539,7 @@ describe('processPdf --replace: history and the CLI', { timeout: 120000 }, () =>
       const file = seed(r);
       fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('Al Rawabi', 'Al Rehab'));
       git(r, 'commit', '-qam', 'district fix by hand');
-      await assert.rejects(r.publish(META), /changed since it was published \(2 commits\)/);
+      await assert.rejects(r.publish(META), /changed since it was published \(1 later commit\(s\), e\.g\. "district fix by hand"\)/);
     } finally { r.cleanup(); }
   });
 
@@ -559,5 +567,75 @@ describe('processPdf --replace: history and the CLI', { timeout: 120000 }, () =>
       execFileSync(process.execPath, [path.join(REPO, 'services', 'intake', 'run-once.mjs'), path.join(REPO, 'package.json'), '--no-git', '--replace', 'BONA-W023'], { stdio: 'pipe' });
     } catch (err) { out = `${err.stdout}${err.stderr}`; }
     assert.match(out, /--replace needs git/);
+  });
+});
+
+describe('processPdf: round-3 review cases', { timeout: 120000 }, () => {
+  const PAD = ' — شقة سكنية بمساحة واسعة وتشطيبات حديثة في موقع مميز قريب من الخدمات';
+  const SLUG = 'jeddah-heights-residential-community-jeddah';
+  const META = { id: 'BONA-W023', slug: SLUG, listedAt: '2026-11-17', sourceRef: 'WA-20261117-AC7D06', replace: true };
+  const git = (r, ...args) => execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.com', ...args], { cwd: r.repo, stdio: 'pipe' }).toString();
+  const seed = (r, { init = true } = {}) => {
+    const sha = crypto.createHash('sha256').update(fs.readFileSync(r.pdfPath)).digest('hex');
+    const inbox = path.join(r.repo, 'scripts', 'curate', 'inbox');
+    fs.mkdirSync(inbox, { recursive: true });
+    fs.writeFileSync(path.join(inbox, `${SLUG}.json`), JSON.stringify({ id: 'BONA-W023', slug: SLUG, listedAt: '2026-11-17', _intake: { pdfSha256: sha } }));
+    fs.writeFileSync(path.join(inbox, '_index.json'), JSON.stringify({ nextSeq: 24, listings: { [SLUG]: 'BONA-W023' } }));
+    const pub = path.join(r.repo, 'public', 'listings', SLUG);
+    fs.mkdirSync(pub, { recursive: true });
+    fs.writeFileSync(path.join(pub, '01.jpg'), 'old');
+    if (init) { git(r, 'init', '-q'); git(r, 'add', '-A'); git(r, 'commit', '-qm', 'intake: Jeddah Heights (BONA-W023)'); }
+    return pub;
+  };
+  const listing = () => answer({ price: PRICE, priceEvidence: { page: 3, quote: '319,015' }, subsidisedPriceEvidence: { page: 3, quote: '270,425' } });
+
+  it('a subsidy table with no price word: the subsidised figure as headline is refused on the page', async () => {
+    const pageText = [`مشروع سكني${PAD}`, `لمستفيدي الدعم\n270,425\nلغير مستفيدي الدعم\n319,015\n${PAD}`];
+    const r = await rig({ pageText, listing: answer({ price: { amount: 270425, currency: 'SAR', from: true, period: null, onRequest: false } }), confirm: [319015] });
+    try {
+      const report = await r.run();
+      assert.deepEqual(r.calls().filter((c) => c.tool === 'py-pages').map((c) => c.pages), [[2]]);
+      assert.equal(report.listingPreview.price.onRequest, true);
+    } finally { r.cleanup(); }
+  });
+
+  it('a price the check took away cannot stay in the copy', async () => {
+    const pageText = [`مشروع سكني${PAD}`, `غرفتا نوم ودورتا مياه${PAD}`];
+    const a = answer({ price: { amount: 1250000, currency: 'SAR', from: false, period: null, onRequest: false } });
+    a.listing.description.en = ['The asking figure is 1,250,000 for this unit.', 'Two.'];
+    const r = await rig({ pageText, listing: a, confirm: [] });
+    try {
+      await assert.rejects(r.run(), (err) => err.stage === 'price' && /copy states the price 1,250,000/.test(err.reason));
+    } finally { r.cleanup(); }
+  });
+
+  it('refuses a listing whose photos were fixed by hand after it was published', async () => {
+    const r = await rig({ listing: listing(), confirm: [319015, 270425] });
+    try {
+      const pub = seed(r);
+      fs.writeFileSync(path.join(pub, '01.jpg'), 're-cropped');
+      git(r, 'commit', '-qam', 'W023 re-crop');
+      await assert.rejects(r.publish(META), /1 later commit\(s\), e\.g\. "W023 re-crop"/);
+    } finally { r.cleanup(); }
+  });
+
+  it('a listing that was only ever replaced by the intake can be replaced again', async () => {
+    const r = await rig({ listing: listing(), confirm: [319015, 270425] });
+    try {
+      const pub = seed(r);
+      fs.writeFileSync(path.join(pub, '01.jpg'), 'first replacement');
+      git(r, 'commit', '-qam', 'intake: replace Jeddah Heights (BONA-W023)');
+      const report = await r.publish(META);
+      assert.equal(report.id, 'BONA-W023');
+    } finally { r.cleanup(); }
+  });
+
+  it('a --replace dry run does not need git', async () => {
+    const r = await rig({ listing: listing(), confirm: [319015, 270425] });
+    try {
+      seed(r, { init: false });
+      const report = await processPdf({ pdfPath: r.pdfPath, cfg: { ...JSON.parse('{}'), ...r.cfg }, caption: {}, workDir: path.join(r.repo, '..', 'work'), dryRun: true, meta: META });
+      assert.equal(report.id, 'BONA-W023');
+    } finally { r.cleanup(); }
   });
 });

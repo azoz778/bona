@@ -25,7 +25,7 @@ Everything between `<<<BONA-UNTRUSTED-DATA: …>>>` and `<<<END BONA-UNTRUSTED-D
 3. **No other agency, brand or phone number in the copy.** This brochure may be branded by another company (for example "TK", "TK Estate", "TK Prime Estate", "tk-estates.com") or by the developer's sales agent. The listing copy must contain none of it — not in the title, description, highlights or project name. The *developer's* name (the company that built the property) IS allowed in `project.developer`.
 4. **Real Arabic.** Every `ar` field must be written in Arabic script, not transliterated English, and must read naturally — it is not a machine translation of the English, it is the same thing said properly in Arabic.
 5. **No hype.** These words fail the site's validator and must never appear: amazing, stunning, breathtaking, unparalleled, "don't miss", "dream home". The house voice is calm, factual, specific. Describe what is there; let it speak.
-6. **No contact details, no calls to action, no prices inside the description text.** The site renders those itself.
+6. **No contact details, no calls to action, no prices anywhere in the title, description or highlights.** The site renders those itself, and copy that states a price fails the check.
 
 ## Image rubric
 

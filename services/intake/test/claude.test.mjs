@@ -135,7 +135,8 @@ describe('copyProblems — owner rules', () => {
     }
   });
   it('catches a price written into the copy, in either language', () => {
-    for (const text of ['Apartments from SAR 319,015 in phase one.', 'شقق ابتداءً من 319,015 ريال.', 'Priced at 2.5 million SAR.', 'السعر 2.5 مليون ريال']) {
+    for (const text of ['Apartments from SAR 319,015 in phase one.', 'شقق ابتداءً من 319,015 ريال.', 'Priced at 2.5 million SAR.', 'السعر 2.5 مليون ريال',
+      '270,425 riyals', '270 ألف ريال', 'SAR 2.5m', 'SAR 990k', '£2.5m', '319015 SAR', 'السعر 319015 ريال']) {
       const l = structuredClone(GOOD.listing);
       l.description.en = [text, 'Two.'];
       assert.ok(copyProblems(l).some((p) => /states a price/.test(p)), text);
