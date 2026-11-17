@@ -745,6 +745,8 @@ describe('processPdf: round-6 review cases', { timeout: 120000 }, () => {
     ['Two-bedroom apartments of 120 m² from 319,015', 319015],
     ['1,710 units from 319,015 each', 319015],
     ['Villas of 400 m² from 1.2 million', 1200000],
+    ['Four-bedroom villas from 4.5m.', 4500000],
+    ['Townhouses from 2.8M, ready in 2027.', 2800000],
   ]) {
     it(`an area elsewhere in the sentence does not excuse a refused price: ${line}`, async () => {
       const r = await rig({ pageText, listing: withLine(amount, line), confirm: [] });
@@ -754,7 +756,7 @@ describe('processPdf: round-6 review cases', { timeout: 120000 }, () => {
     });
   }
 
-  for (const [line, amount] of [['يمتد المخطط على ٣ ملايين متر مربع', 3000000], ['The project plants 1 million trees', 1000000]]) {
+  for (const [line, amount] of [['يمتد المخطط على ٣ ملايين متر مربع', 3000000], ['The project plants 1 million trees', 1000000], ['Every plot faces a 20 m street', 20000000]]) {
     it(`a measurement that equals the refused price is not the price: ${line}`, async () => {
       const r = await rig({ pageText, listing: withLine(amount, line), confirm: [] });
       try {

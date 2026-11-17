@@ -53,10 +53,12 @@ const PRICE_CONTEXT_RE = /سعر|أسعار|اسعار|ريال|ر\.\s?س|ثمن
  * metres", "120 m²", "1,710 units", "a 20 m street", "٣ ملايين متر مربع" (after westernise). These
  * are cut out of a sentence before a refused price is looked for in it, so only the mention that IS
  * the figure is excused, never a sentence that merely has an area in it somewhere. The digit run has
- * no spaces, so "from 319,015, 1,710 units" cannot swallow the price into the measurement.
+ * no spaces, so "from 319,015, 1,710 units" cannot swallow the price into the measurement. A bare
+ * "m" is metres only with a space before it ("20 m"): written solid ("4.5m") it is millions, the
+ * same rule priceAppearsIn applies.
  */
 const MEASURE_G = new RegExp(String.raw`(?<![\d.,٫٬])\d+(?:[.,٫٬]\d{3})*(?:[.٫]\d+)?\s*(?:(?:million|thousand|mn|m|k|مليون|ملايين|ألف|آلاف|الف)\s*)?`
-  + String.raw`(?:m²|m2(?!\d)|sq\.?\s?(?:m|ft)\b|square\s+(?:met|feet|foot)|met(?:re|er)s?\b|m(?![a-z²\d])|ft\b|feet\b|hectares?\b|km\b|units?\b|buildings?\b|residents?\b|visitors?\b|trees?\b|`
+  + String.raw`(?:m²|m2(?!\d)|sq\.?\s?(?:m|ft)\b|square\s+(?:met|feet|foot)|met(?:re|er)s?\b|(?<=\s)m(?![a-z²\d])|ft\b|feet\b|hectares?\b|km\b|units?\b|buildings?\b|residents?\b|visitors?\b|trees?\b|`
   + String.raw`م²|م2|متر|هكتار|كم(?![\u0600-\u06ff])|م(?![\u0600-\u06ff])|وحد(?:ة|ات)|مبن[ىي]|مباني|ساكن|سكان|زائر|شجر)`, 'gi');
 const withoutMeasures = (seg) => westernise(seg).replace(MEASURE_G, ' ');
 
