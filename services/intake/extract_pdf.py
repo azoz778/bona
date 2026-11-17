@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import re
@@ -113,6 +114,37 @@ def save_pixmap(pix, path: str, quality: int = 90) -> None:
     streams it out instead.
     """
     pix.save(path, jpg_quality=quality)
+
+
+def flatten_on_white(doc, image_bytes: bytes, smask_xref: int):
+    """PNG bytes of an image (its raw stream) composited over white using its soft mask, or None.
+
+    Pillow does the per-pixel work at C speed; `samples` is read exactly once. Pillow is
+    imported lazily so a pyCmd without it keeps the old behaviour (raw stream).
+    """
+    try:
+        import pymupdf  # noqa: PLC0415
+        from PIL import Image  # noqa: PLC0415
+        # Decoded from the stream, NOT Pixmap(doc, xref): colour_ratio() shrinks the doc's
+        # cached pixmap in place, which then no longer matches the mask's size.
+        base = pymupdf.Pixmap(image_bytes)
+        if base.alpha:
+            base = pymupdf.Pixmap(base, 0)            # drop alpha; the mask supplies it
+        if base.colorspace is None or base.n - base.alpha >= 4:
+            base = pymupdf.Pixmap(pymupdf.csRGB, base)  # CMYK/other -> RGB
+        mask = pymupdf.Pixmap(doc, smask_xref)
+        rgba = pymupdf.Pixmap(base, mask)  # size mismatch raises -> None -> raw stream kept
+        raw = rgba.samples                              # read ONCE
+        im = Image.frombytes("RGBA", (rgba.width, rgba.height), raw)
+        white = Image.new("RGBA", im.size, (255, 255, 255, 255))
+        white.alpha_composite(im)
+        buf = io.BytesIO()
+        white.convert("RGB").save(buf, "PNG")
+        return buf.getvalue()
+    except Exception:
+        return None
+    finally:
+        free_store()
 
 
 def collapse(s: str) -> str:
@@ -471,9 +503,17 @@ def main() -> int:
             ext = (ext_img.get("ext") or "png").lower()
             if ext not in ("jpg", "jpeg", "png", "webp", "tiff", "bmp"):
                 ext = "png"
-            add(ext_img["image"], ext, w, h, i + 1, "embedded", stats[0] if stats else None,
+            data = ext_img["image"]
+            if info[1]:
+                # The image has a soft mask (transparency). extract_image() returns only the
+                # colour stream, which shows as BLACK where the picture is transparent: floor
+                # plans came out as black boxes. Composite onto white instead.
+                flat = flatten_on_white(doc, data, info[1])
+                if flat:
+                    data, ext = flat, "png"
+            add(data, ext, w, h, i + 1, "embedded", stats[0] if stats else None,
                 placement_coverage(doc[i], xref))
-            ext_img = None
+            ext_img = data = None
         # colour_ratio() builds a Pixmap per candidate and MuPDF keeps every one of them in
         # its store; a 40-image brochure would otherwise carry all of them to the end.
         free_store()

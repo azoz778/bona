@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'extract_pdf.py');
-export const DEFAULT_PY_CMD = ['uv', 'run', '--with', 'pymupdf', 'python'];
+export const DEFAULT_PY_CMD = ['uv', 'run', '--with', 'pymupdf', '--with', 'pillow', 'python'];
 
 /** `pyCmd` is an argv ARRAY. A string is accepted for old configs and split on whitespace. */
 export function pyArgv(pyCmd) {

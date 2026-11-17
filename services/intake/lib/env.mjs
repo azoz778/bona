@@ -81,7 +81,7 @@ export function loadConfig(overrides = {}) {
     // argv ARRAY, never a shell string: nothing here is ever handed to a shell.
     pyCmd: String(raw.BONA_PY_CMD || '').trim()
       ? String(raw.BONA_PY_CMD).trim().split(/\s+/)
-      : ['uv', 'run', '--with', 'pymupdf', 'python'],
+      : ['uv', 'run', '--with', 'pymupdf', '--with', 'pillow', 'python'],
     // The brochure step needs more than the extractor does: segno draws the QR and
     // fontTools+brotli decompress public/fonts/*.woff2 into the TTFs PyMuPDF can embed.
     brochurePyCmd: String(raw.BONA_BROCHURE_PY_CMD || '').trim()
