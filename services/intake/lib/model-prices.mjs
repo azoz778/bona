@@ -12,7 +12,9 @@
 // that failed — so its prices are refused as "could not be checked".
 //
 // One confirmation call per page, covering every model on it: a 12-model price table is one call,
-// not twelve; at most 3 run at once, none start after a quota error, and a brochure that would need
+// not twelve; at most MODEL_PRICE_CONCURRENCY (2, cfg.modelPriceConcurrency) run at once — each is a
+// `claude -p`, a node process of its own, inside the daemon's MemoryMax — none start after a quota
+// error, and a brochure that would need
 // more than `maxPages` pages checked has every model price refused without a call. The render and
 // confirm functions are injected (pipeline.mjs passes renderPdfPages and claude.mjs
 // confirmModelPrices), so this module is pure logic and tested without a model.
@@ -45,6 +47,9 @@ export function modelPriceCurrency(price, countryCode) {
 
 /** At most this many pages are checked for one brochure (cfg.maxModelPricePages overrides it). */
 export const MAX_MODEL_PRICE_PAGES = 12;
+
+/** Page checks running at once (cfg.modelPriceConcurrency, BONA_MODEL_PRICE_CONCURRENCY, overrides it). */
+export const MODEL_PRICE_CONCURRENCY = 2;
 
 const priced = (m) => Boolean(m) && typeof m === 'object' && (isFigure(m.price) || isFigure(m.subsidisedPrice));
 
@@ -158,7 +163,7 @@ async function pool(jobs, limit, worker) {
  *   so the caller's own checks would fail the same way.
  */
 export async function checkModelPrices(models, {
-  pageImages = [], pageText = [], pageCount = Infinity, render = null, confirm, maxPages = MAX_MODEL_PRICE_PAGES, concurrency = 3,
+  pageImages = [], pageText = [], pageCount = Infinity, render = null, confirm, maxPages = MAX_MODEL_PRICE_PAGES, concurrency = MODEL_PRICE_CONCURRENCY,
 } = {}) {
   const out = structuredClone(Array.isArray(models) ? models : []);
   const refused = [];

@@ -130,6 +130,9 @@ export function loadConfig(overrides = {}) {
     // The unit-model price check (lib/model-prices.mjs) pays one confirmation call per page: a
     // brochure whose model prices would need more pages checked than this gets none of them.
     maxModelPricePages: num(raw.BONA_MAX_MODEL_PRICE_PAGES, 12),
+    // ...and runs this many of those calls at once. Each is a `claude -p` — a node process of its own —
+    // inside the daemon unit's MemoryMax (2G), beside the extractor and the daemon itself.
+    modelPriceConcurrency: num(raw.BONA_MODEL_PRICE_CONCURRENCY, 2),
     sendReplies: bool(raw.BONA_SEND_REPLIES, true),
     ...overrides,
   };

@@ -85,6 +85,18 @@ describe('env parsing', () => {
     assert.match(cfg.site, /^https:\/\//);
   });
 
+  it('runs at most 2 unit-model page checks at once unless BONA_MODEL_PRICE_CONCURRENCY says otherwise (each is a node process; the unit has MemoryMax 2G)', () => {
+    const before = process.env.BONA_MODEL_PRICE_CONCURRENCY;
+    try {
+      delete process.env.BONA_MODEL_PRICE_CONCURRENCY;
+      assert.equal(loadConfig({ repo: '/tmp/repo' }).modelPriceConcurrency, 2);
+      process.env.BONA_MODEL_PRICE_CONCURRENCY = '1';
+      assert.equal(loadConfig({ repo: '/tmp/repo' }).modelPriceConcurrency, 1);
+    } finally {
+      if (before === undefined) delete process.env.BONA_MODEL_PRICE_CONCURRENCY; else process.env.BONA_MODEL_PRICE_CONCURRENCY = before;
+    }
+  });
+
   it('bounds the unit-model price check: 12 pages unless BONA_MAX_MODEL_PRICE_PAGES says otherwise', () => {
     const before = process.env.BONA_MAX_MODEL_PRICE_PAGES;
     try {

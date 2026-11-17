@@ -5,7 +5,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { isFigure as rulesIsFigure } from '../../../scripts/curate/rules.mjs';
-import { alignHeadline, checkModelPrices, isFigure, MAX_MODEL_PRICE_PAGES, modelPriceCurrency, pagesToRenderFor } from '../lib/model-prices.mjs';
+import {
+  alignHeadline, checkModelPrices, isFigure, MAX_MODEL_PRICE_PAGES, MODEL_PRICE_CONCURRENCY, modelPriceCurrency, pagesToRenderFor,
+} from '../lib/model-prices.mjs';
 
 const pages = [{ page: 9, abs: '/x/p9.jpg' }, { page: 10, abs: '/x/p10.jpg' }];
 const M = (name, price, sub, page) => ({
@@ -340,7 +342,25 @@ describe('checkModelPrices: cost bounds', () => {
     assert.deepEqual(res.refused, []);
   });
 
-  it('runs at most 3 page checks at once and keeps every page\'s answers with its own models', async () => {
+  it('runs at most 2 page checks at once by default (MODEL_PRICE_CONCURRENCY), and `concurrency` changes it', async () => {
+    assert.equal(MODEL_PRICE_CONCURRENCY, 2);
+    for (const [opts, want] of [[{}, 2], [{ concurrency: 1 }, 1], [{ concurrency: 4 }, 4]]) {
+      let inFlight = 0;
+      let peak = 0;
+      const confirm = async ({ items }) => {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await new Promise((r) => setTimeout(r, 15));
+        inFlight -= 1;
+        return items.map((it) => ({ i: it.i, price: true, subsidisedPrice: false }));
+      };
+      const res = await checkModelPrices(many(6), { pageImages: rendered(6), pageText: [], confirm, ...opts });
+      assert.equal(peak, want, JSON.stringify(opts));
+      assert.equal(res.calls, 6);
+    }
+  });
+
+  it('runs at most 3 page checks at once when asked to, and keeps every page\'s answers with its own models', async () => {
     let inFlight = 0;
     let peak = 0;
     const started = [];
@@ -353,7 +373,7 @@ describe('checkModelPrices: cost bounds', () => {
       inFlight -= 1;
       return items.map((it) => ({ i: it.i, price: page % 2 === 1, subsidisedPrice: false }));
     };
-    const res = await checkModelPrices(many(7), { pageImages: rendered(7), pageText: [], confirm });
+    const res = await checkModelPrices(many(7), { pageImages: rendered(7), pageText: [], confirm, concurrency: 3 });
     assert.equal(peak, 3);
     assert.equal(res.calls, 7);
     assert.deepEqual(started.sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 7]);
@@ -368,7 +388,7 @@ describe('checkModelPrices: cost bounds', () => {
       await new Promise((r) => setTimeout(r, 20));
       return items.map((it) => ({ i: it.i, price: true, subsidisedPrice: false }));
     };
-    const res = await checkModelPrices(many(6), { pageImages: rendered(6), pageText: [], confirm });
+    const res = await checkModelPrices(many(6), { pageImages: rendered(6), pageText: [], confirm, concurrency: 3 });
     assert.deepEqual(started, [1, 2, 3], 'the two already running finish; nothing new starts');
     assert.equal(res.calls, 3);
     assert.deepEqual(res.models.map((m) => m.price), [null, 300001, 300002, null, null, null]);

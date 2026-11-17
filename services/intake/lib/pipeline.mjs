@@ -477,7 +477,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // --- 4a. unit-model prices ------------------------------------------------------
   // A development sold as unit models prints a price (and often a Sakani price) per model. Each
   // figure is confirmed ON ITS PAGE IMAGE by a second model — one call per page, covering every
-  // model on it, at most 3 at once and at most cfg.maxModelPricePages pages — and never by the text
+  // model on it, at most cfg.modelPriceConcurrency at once and at most cfg.maxModelPricePages pages — and never by the text
   // layer, which cannot tell which model a figure belongs to (model-prices.mjs). When any model keeps
   // a price, the headline of a whole development becomes the cheapest one, "from", and its own checks
   // below are skipped: its figures ARE confirmed model figures. The owner's caption price replaces them all,
@@ -525,6 +525,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       pageText,
       pageCount: Number(extraction.pages),
       maxPages: cfg.maxModelPricePages,
+      concurrency: cfg.modelPriceConcurrency,
       // A page a model's evidence cites that was not rendered for the reading is rendered now, so
       // the second model can look at it. A failed render — or a throw — costs the models citing
       // those pages their prices ("try again later"), not the run: they are not moved to another page.

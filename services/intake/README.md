@@ -26,7 +26,7 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
 1. **Models extraction**: the model reads the PDF and returns the listing plus its unit models
    (type, beds, areas, prices as printed).
 2. **Per-page price confirmation** (`lib/model-prices.mjs`): every model price is confirmed on its
-   page image by a second model, one call per page (3 at a time), at most `BONA_MAX_MODEL_PRICE_PAGES`
+   page image by a second model, one call per page (2 at a time, `BONA_MODEL_PRICE_CONCURRENCY`), at most `BONA_MAX_MODEL_PRICE_PAGES`
    pages (12); a price that is not confirmed is dropped, never taken from the text layer.
 3. **Floor plans**: each model's plan is cut from the PDF and saved as `plan-NN.jpg` (flattened on white).
 4. **Site section**: the listing page shows "Residences & prices" from `models`.
@@ -214,7 +214,7 @@ Anything else in the group is ignored, silently.
 - **Unit-model prices** (`ai.models[].price` / `subsidisedPrice`, `lib/model-prices.mjs`): every
   figure is confirmed on its page image by a second model, never by the text layer (a price table
   puts every model's figures in the text; a match cannot tell whose figure it is). One call per page
-  covers every model on it (at most 3 at once, none started after a quota error); a cited page
+  covers every model on it (at most `BONA_MODEL_PRICE_CONCURRENCY` at once, 2 by default; none started after a quota error); a cited page
   that was not rendered for the reading is rendered for this check (never one past the end of the
   PDF), and when that render fails its models are refused — never moved to another page by their
   text, so the page cap holds. A brochure that would need more than `BONA_MAX_MODEL_PRICE_PAGES`
@@ -446,6 +446,7 @@ default, so only the ones you want to change need to be present.
 | `BONA_VIDEO_MATCH_LISTINGS` | `15` | how many recent intake listings the clip is compared against |
 | `BONA_PAGE_READ_LONG_SIDE` | `1600` | long side of the page renders the AI reads (text-free PDFs) |
 | `BONA_MAX_MODEL_PRICE_PAGES` | `12` | most pages the unit-model price check may confirm on (one call each); more = no model prices |
+| `BONA_MODEL_PRICE_CONCURRENCY` | `2` | unit-model page checks running at once; each is a `claude -p` node process inside the daemon unit's `MemoryMax=2G`, so raise it with care |
 | `BONA_LOCK_WAIT_MS` | `900000` | how long a job waits for `$BONA_DATA/intake.lock` |
 | `BONA_PY_CMD` | `uv run --with pymupdf --with pillow python` | argv for the extractor; split on spaces, never shelled |
 | `BONA_BROCHURE_PY_CMD` | `uv run --with weasyprint==70.0 --with segno --with pillow --with pymupdf python` | argv for the brochure step (WeasyPrint is pinned — the layout checks were tuned on it; it needs the system Pango libraries) |

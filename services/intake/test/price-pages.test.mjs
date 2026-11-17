@@ -146,6 +146,12 @@ if (prompt.includes('For each numbered model')) {
   const items = fenced.split('\\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l))
     .map(({ i, price, subsidisedPrice }) => ({ i, price, subsidisedPrice }));
   fs.appendFileSync(log, JSON.stringify({ tool: 'claude-model-confirm', page, items }) + '\\n');
+  // modelConfirmDelayMs: the call takes this long, and records when it ran (the concurrency test).
+  if (cfg.modelConfirmDelayMs) {
+    const t0 = Date.now();
+    await new Promise((r) => setTimeout(r, cfg.modelConfirmDelayMs));
+    fs.appendFileSync(log, JSON.stringify({ tool: 'model-confirm-span', page, t0, t1: Date.now() }) + '\\n');
+  }
   if (cfg.modelConfirmFail) {
     const quota = cfg.modelConfirmFail === 'quota';
     process.stdout.write(JSON.stringify({ is_error: true, api_error_status: quota ? 429 : null, result: quota ? "You've hit your session limit" : 'boom' }));
@@ -217,14 +223,14 @@ const answer = ({ price, priceEvidence = null, subsidisedPriceEvidence = null, u
 const PRICE = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
 const BROCHURE = ['مشروع سكني — شقق بغرفتي نوم وثلاث غرف نوم في حي الحمدانية', LOCATION_PAGE, PRICE_PAGE, 'غرفة نوم 03', PRICE_PAGE];
 
-async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, confirmFail = null, modelConfirm = null, modelConfirmFail = null, failPageDir = null, broken = [], brochureFail = false, cfgExtra = {}, build = '' }) {
+async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, confirmFail = null, modelConfirm = null, modelConfirmFail = null, modelConfirmDelayMs = 0, failPageDir = null, broken = [], brochureFail = false, cfgExtra = {}, build = '' }) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bona-price-pages-')));
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
   const photo = path.join(bin, 'photo.jpg');
   const sharp = (await import('sharp')).default;
   await sharp({ create: { width: 1200, height: 900, channels: 3, background: '#4a6b8a' } }).jpeg().toFile(photo);
-  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, confirmFail, modelConfirm, modelConfirmFail, failPageDir, broken, brochureFail }));
+  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, confirmFail, modelConfirm, modelConfirmFail, modelConfirmDelayMs, failPageDir, broken, brochureFail }));
   fs.writeFileSync(path.join(bin, 'fake-py.mjs'), FAKE_PY);
   fs.writeFileSync(path.join(bin, 'fake-claude.mjs'), FAKE_CLAUDE);
   fs.writeFileSync(path.join(bin, 'fake-brochure.mjs'), FAKE_BROCHURE);
@@ -1102,6 +1108,23 @@ describe('processPdf: unit-model prices — failures, bounds and the headline fa
       assert.deepEqual(report.modelPrices.incompletePages, [3, 5]);
       assert.ok(report.warnings.some((w) => /could not be completed/.test(w)));
     } finally { r.cleanup(); }
+  });
+
+  it('the page checks run at most cfg.modelPriceConcurrency at once (BONA_MODEL_PRICE_CONCURRENCY)', async () => {
+    const five = () => withModels([1, 2, 3, 4, 5].map((p) => model(`M${p}`, 300000 + p, null, p)));
+    const peakOf = (r) => {
+      const spans = r.calls().filter((c) => c.tool === 'model-confirm-span');
+      assert.equal(spans.length, 5);
+      return Math.max(...spans.map((a) => spans.filter((b) => b.t0 < a.t1 && a.t0 < b.t1).length));
+    };
+    for (const [limit, check] of [[1, (peak) => assert.equal(peak, 1)], [2, (peak) => assert.ok(peak <= 2, String(peak))]]) {
+      const r = await rig({ listing: five(), modelConfirmDelayMs: 400, cfgExtra: { modelPriceConcurrency: limit } });
+      try {
+        const report = await r.run();
+        assert.equal(report.modelPrices.calls, 5);
+        check(peakOf(r));
+      } finally { r.cleanup(); }
+    }
   });
 
   it('a refusal and a check that could not be done get separate warnings', async () => {
