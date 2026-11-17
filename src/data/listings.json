@@ -5645,6 +5645,140 @@
     "licence": null
   },
   {
+    "id": "BONA-W023",
+    "slug": "jeddah-heights-residential-community-jeddah",
+    "sourceRef": "WA-20261117-AC7D06",
+    "status": "available",
+    "category": "off-plan",
+    "type": "apartment",
+    "kind": "apartment",
+    "featured": false,
+    "title": {
+      "en": "Jeddah Heights Residential Community, Jeddah",
+      "ar": "مجتمع جدة هايتس السكني، جدة"
+    },
+    "location": {
+      "district": {
+        "en": "Jeddah Heights",
+        "ar": "جدة هايتس"
+      },
+      "city": {
+        "en": "Jeddah",
+        "ar": "جدة"
+      },
+      "country": {
+        "en": "Saudi Arabia",
+        "ar": "المملكة العربية السعودية"
+      },
+      "countryCode": "SA"
+    },
+    "price": {
+      "amount": null,
+      "currency": "SAR",
+      "from": false,
+      "period": null,
+      "onRequest": true
+    },
+    "specs": {
+      "beds": null,
+      "baths": null,
+      "areaSqm": null,
+      "plotSqm": null,
+      "yearBuilt": null,
+      "floors": null
+    },
+    "images": [
+      {
+        "src": "/listings/jeddah-heights-residential-community-jeddah/01.jpg",
+        "thumb": "/listings/jeddah-heights-residential-community-jeddah/01-thumb.webp",
+        "alt": {
+          "en": "Garden — Jeddah Heights Residential Community, Jeddah",
+          "ar": "الحديقة — مجتمع جدة هايتس السكني، جدة"
+        }
+      },
+      {
+        "src": "/listings/jeddah-heights-residential-community-jeddah/02.jpg",
+        "thumb": "/listings/jeddah-heights-residential-community-jeddah/02-thumb.webp",
+        "alt": {
+          "en": "Façade at night — Jeddah Heights Residential Community, Jeddah",
+          "ar": "الواجهة ليلاً — مجتمع جدة هايتس السكني، جدة"
+        }
+      },
+      {
+        "src": "/listings/jeddah-heights-residential-community-jeddah/03.jpg",
+        "thumb": "/listings/jeddah-heights-residential-community-jeddah/03-thumb.webp",
+        "alt": {
+          "en": "Grounds — Jeddah Heights Residential Community, Jeddah",
+          "ar": "الحدائق المحيطة — مجتمع جدة هايتس السكني، جدة"
+        }
+      },
+      {
+        "src": "/listings/jeddah-heights-residential-community-jeddah/04.jpg",
+        "thumb": "/listings/jeddah-heights-residential-community-jeddah/04-thumb.webp",
+        "alt": {
+          "en": "Gym — Jeddah Heights Residential Community, Jeddah",
+          "ar": "النادي الرياضي — مجتمع جدة هايتس السكني، جدة"
+        }
+      },
+      {
+        "src": "/listings/jeddah-heights-residential-community-jeddah/05.jpg",
+        "thumb": "/listings/jeddah-heights-residential-community-jeddah/05-thumb.webp",
+        "alt": {
+          "en": "Artist's impression — Jeddah Heights Residential Community, Jeddah",
+          "ar": "تصور معماري — مجتمع جدة هايتس السكني، جدة"
+        }
+      },
+      {
+        "src": "/listings/jeddah-heights-residential-community-jeddah/06.jpg",
+        "thumb": "/listings/jeddah-heights-residential-community-jeddah/06-thumb.webp",
+        "alt": {
+          "en": "Aerial view — Jeddah Heights Residential Community, Jeddah",
+          "ar": "منظر جوي — مجتمع جدة هايتس السكني، جدة"
+        }
+      }
+    ],
+    "videos": [],
+    "description": {
+      "en": "Jeddah Heights is a residential community of apartment buildings in Jeddah, planned around shared green space and everyday services. The master plan groups the buildings into residential clusters, each with its own model of apartment.\n\nThe brochure presents several apartment models in two- and three-bedroom layouts. Each has a living room, a majlis in some models, a kitchen, a laundry room and one bathroom per bedroom. Some models add a dining room, a terrace or a maid's room.\n\nThe community includes mosques and larger congregational mosques, gardens, educational facilities, a health centre and commercial facilities. A health club, a children's nursery, diwaniyas and outdoor seating areas are also shown. The project lists a ten-year warranty on the structural frame and on waterproofing and insulation.",
+      "ar": "جدة هايتس مجتمع سكني من المباني السكنية في مدينة جدة، صُمّم حول مساحات خضراء وخدمات يومية قريبة من السكان. يوزّع المخطط العام المباني على مجموعات سكنية، ولكل مجموعة نماذج شقق خاصة بها.\n\nيعرض الكتيّب عدة نماذج من الشقق بتوزيعات من غرفتي نوم وثلاث غرف نوم. تضم الشقق صالة معيشة ومطبخاً وغرفة غسيل ودورة مياه لكل غرفة نوم، ويضيف بعضها مجلساً أو غرفة طعام أو شرفة أو غرفة خادمة.\n\nيشمل المجتمع مساجد وجوامع وحدائق ومرافق تعليمية ومركزاً صحياً ومرافق تجارية. كما تظهر في المشروع نادٍ صحي وحضانة أطفال وديوانيات وجلسات خارجية. ويذكر المشروع ضمان عشر سنوات على الهيكل الإنشائي وعلى العزل المائي والحراري."
+    },
+    "highlights": {
+      "en": [
+        "Two- and three-bedroom apartments",
+        "Landscaped gardens",
+        "Mosques within the community",
+        "Health club and nursery",
+        "Commercial and education facilities",
+        "Ten-year structural warranty"
+      ],
+      "ar": [
+        "شقق من غرفتين وثلاث غرف نوم",
+        "حدائق مهيأة",
+        "مساجد داخل المجتمع",
+        "نادٍ صحي وحضانة أطفال",
+        "مرافق تجارية وتعليمية",
+        "ضمان الهيكل الإنشائي عشر سنوات"
+      ]
+    },
+    "virtualTourUrl": null,
+    "brochureUrl": "https://bona-real-estate.com/listings/jeddah-heights-residential-community-jeddah/brochure.pdf",
+    "project": {
+      "name": {
+        "en": "Jeddah Heights",
+        "ar": "جدة هايتس"
+      },
+      "developer": {
+        "en": "NHC",
+        "ar": "الشركة الوطنية للإسكان (NHC)"
+      }
+    },
+    "unit": null,
+    "map": null,
+    "mapPrecision": null,
+    "listedAt": "2026-11-17",
+    "licence": null
+  },
+  {
     "id": "BONA-W017",
     "slug": "katheeb-residences-laban-district",
     "sourceRef": "WA-20260916-AC0AEC",
