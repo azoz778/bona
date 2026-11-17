@@ -1753,7 +1753,25 @@ describe('processPdf: a single property is never "From" its cheapest model', { t
     } finally { ok.cleanup(); }
   });
 
-  it('S1g: the guard is for a single property with two priced models or more — not one model, not one specific unit, not a figure no model has', async () => {
+  it('S1g (final review M3): two floors as models, only ONE priced, `from` not set, the headline = that floor — still checked as the whole villa\'s price', async () => {
+    const floors = () => [model('Ground floor', 2000000, 3), { ...model('First floor', 2500000, 3), price: null, evidence: null }];
+    const text = 'Ground floor SAR 2,000,000\nFirst floor (price on request)\nTotal SAR 4,500,000';
+    const facts = (whole) => ({ 3: [{ fig: 2000000, mark: 'SAR', kind: 'floor', model: 'Ground floor' }, { fig: whole, mark: 'SAR', kind: 'whole' }] });
+    const r = await rig({ listing: villa({ amount: 2000000, from: false, quote: 'SAR 2,000,000', models: floors() }), pageText: textPages(text), facts: facts(4500000) });
+    try {
+      const report = await r.run();
+      assert.equal(report.priceEvidence.inText, false, '"SAR 2,000,000" in the text layer is the ground floor\'s');
+      assert.deepEqual(headlineCalls(r).map((c) => [c.amount, c.whole]), [[2000000, true]]);
+      assert.deepEqual(report.listingPreview.price, ON_REQUEST, 'never "SAR 2,000,000" for the whole villa');
+      assert.deepEqual(report.listingPreview.models.map((m) => m.price), [2000000, null]);
+    } finally { r.cleanup(); }
+    const ok = await rig({ listing: villa({ amount: 2000000, from: false, quote: 'SAR 2,000,000', models: floors() }), pageText: textPages(text), facts: facts(2000000) });
+    try {
+      assert.deepEqual((await ok.run()).listingPreview.price, { amount: 2000000, currency: 'SAR', from: false, period: null, onRequest: false });
+    } finally { ok.cleanup(); }
+  });
+
+  it('S1g: the guard is for a single property with two models or more — not one model, not one specific unit, not a figure no model has', async () => {
     // One priced model, `from` not set: its own price, settled as before (here off the text layer).
     const one = await rig({ listing: villa({ amount: 4400000, from: false, quote: 'SAR 4,400,000', models: [model('Villa', 4400000, 3)] }),
       pageText: textPages('Villa price SAR 4,400,000'), facts: { 3: [{ fig: 4400000, mark: 'SAR', kind: 'whole', model: 'Villa' }] } });

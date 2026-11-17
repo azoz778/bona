@@ -696,15 +696,17 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // model (`whole`: never by the text layer, which cannot tell a floor's price from the villa's), else
   // the listing is on request. A figure the brochure itself prints "starting from" that no model carries
   // keeps its `from`. (A project with one model is left to its own headline check, `from` and all.)
-  // A single property (no project) with two priced models or more whose headline IS the lowest of them
-  // takes the same path whatever `from` says (final review S1g): a villa read per floor with its headline
-  // = the ground floor and `from` not set would otherwise pass the text layer on the floor's own line.
+  // A single property (no project) with two models or more whose headline IS the lowest model price takes
+  // the same path whatever `from` says (final review S1g): a villa read per floor with its headline = the
+  // ground floor and `from` not set would otherwise pass the text layer on the floor's own line. Two
+  // models, not two priced ones (final review M3): with the first floor "on request" the ground floor is
+  // the only priced row, and still a floor's price, not the villa's.
   // One specific unit is left out of that: priced like one of its project's models, `from` not set, the
   // figure is as likely the unit's own price, and its check asks for the unit's price on the page anyway.
   let ownPriceOnly = false;
   const readFrom = price?.from === true;
   const fromLowestModel = readFrom && (!ai.listing?.project || Boolean(ai.listing?.unit));
-  const lowestOfSeveral = !ai.listing?.project && readModelPrices.length >= 2;
+  const lowestOfSeveral = !ai.listing?.project && Array.isArray(ai.models) && ai.models.length >= 2;
   if (!enrich && !caption.price && !headlineFromModels && price && !price.onRequest
       && isFigure(price.amount) && price.amount === readLowest && (fromLowestModel || lowestOfSeveral)) {
     price.from = false;
