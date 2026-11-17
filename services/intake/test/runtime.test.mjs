@@ -345,6 +345,20 @@ describe('TAQEEM currency — a figure printed in another currency is not that p
     }
   });
 
+  it('a "$" straight after a word is still USD; only the named prefixes make another dollar (final review M1)', () => {
+    for (const t of ['price$1,250,000', 'from$1,250,000', 'only$ 1,250,000', 'Price:$1,250,000', 'us$1,250,000']) {
+      assert.equal(printedInCurrency(t, 1250000, 'USD', { bareCounts: false }), true, `${t} is USD`);
+      assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: true, home: 'SAR' }), false, `${t} is not a bare Saudi figure`);
+      assert.equal(printedInCurrency(t, 1250000, 'EUR', { bareCounts: true, home: 'EUR' }), false, `${t} is not a bare euro figure`);
+    }
+    for (const p of ['A', 'AU', 'C', 'CA', 'HK', 'NZ', 'S', 'SG', 'NT', 'R', 'MX']) {
+      for (const t of [`${p}$1,250,000`, `${p}$ 1,250,000`, `1,250,000 ${p}$`, `price ${p}$1,250,000`]) {
+        assert.equal(printedInCurrency(t, 1250000, 'USD', { bareCounts: false }), false, `${t} is not USD`);
+        assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: true }), false, `${t} is not bare`);
+      }
+    }
+  });
+
   it('the figure rules are priceAppearsIn\'s: no figure inside a longer one, nothing that is not a price', () => {
     assert.equal(printedInCurrency('SAR 1,450,000', 450000, 'SAR'), false);
     assert.equal(printedInCurrency('', 1250000, 'SAR'), false);
