@@ -17,10 +17,31 @@
 // confirm functions are injected (pipeline.mjs passes renderPdfPages and claude.mjs
 // confirmModelPrices), so this module is pure logic and tested without a model.
 import { isFigure } from '../../../scripts/curate/rules.mjs';
+import { CURRENCIES } from './claude.mjs';
 import { priceAppearsIn } from './price.mjs';
 
 /** A price figure: a positive finite number. ONE definition, in scripts/curate/rules.mjs. */
 export { isFigure };
+
+const EURO_AREA = ['AT', 'BE', 'CY', 'DE', 'EE', 'ES', 'FI', 'FR', 'GR', 'HR', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PT', 'SI', 'SK'];
+/** The currency prices are quoted in at home, for the countries whose currency the site takes (CURRENCIES). */
+const HOME_CURRENCY = Object.freeze({ SA: 'SAR', AE: 'AED', OM: 'OMR', US: 'USD', ...Object.fromEntries(EURO_AREA.map((c) => [c, 'EUR'])) });
+
+/**
+ * The currency a reading's unit-model prices are in, or null when the reading does not establish one.
+ * prompt.md has the model write every model price in `listing.price.currency`, and the page check asks
+ * about the figures in it (confirmModelPrices) — but that field is the model's own claim only beside a
+ * price it read. A reading on request carries the contract's default, "SAR", whatever the brochure
+ * prints: W020's Hampstead brochure printed GBP, which the site does not take, and came back on request
+ * in "SAR". So: a currency outside CURRENCIES never counts; beside a headline amount it counts; on request
+ * it counts only when it is the home currency of the country the property is in (`countryCode`) — a
+ * Saudi brochure is priced in SAR whether or not the model settled a headline.
+ */
+export function modelPriceCurrency(price, countryCode) {
+  if (!price || typeof price !== 'object' || !CURRENCIES.includes(price.currency)) return null;
+  if (price.onRequest === false && isFigure(price.amount)) return price.currency;
+  return HOME_CURRENCY[String(countryCode ?? '').toUpperCase()] === price.currency ? price.currency : null;
+}
 
 /** At most this many pages are checked for one brochure (cfg.maxModelPricePages overrides it). */
 export const MAX_MODEL_PRICE_PAGES = 12;

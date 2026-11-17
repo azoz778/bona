@@ -931,6 +931,45 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     } finally { r.cleanup(); }
   });
 
+  it('a reading on request whose currency is only the default (a property abroad): no model price, no page check, decision logged', async () => {
+    const a = withModels([model('Nawras', 419994, null, 3), model('Lulu', 319015, null, 3)]);
+    a.listing.location = {
+      district: { en: 'Hampstead', ar: 'هامبستيد' }, city: { en: 'London', ar: 'لندن' },
+      country: { en: 'United Kingdom', ar: 'المملكة المتحدة' }, countryCode: 'GB',
+    };
+    const r = await rig({ listing: a });
+    try {
+      const report = await r.run();
+      assert.equal(modelCalls(r).length, 0, 'no figure is checked that will not be published');
+      assert.deepEqual(report.ai.models.map((m) => [m.price, m.subsidisedPrice]), [[null, null], [null, null]]);
+      assert.deepEqual(report.listingPreview.price, ON_REQUEST, 'the headline is not aligned with the models');
+      assert.equal(report.modelPrices.decision, 'currency-unconfirmed');
+      assert.deepEqual(report.modelPrices.currency, { reading: 'SAR', established: false, listing: null });
+      assert.ok(report.warningCodes.includes('model-price-not-printed'));
+      assert.ok(report.warnings.some((w) => /their currency could not be established/.test(w)), report.warnings.join(' | '));
+    } finally { r.cleanup(); }
+  });
+
+  it('…and a copy that states one of those figures refuses the run (it was never confirmed)', async () => {
+    const a = withModels([model('Nawras', 419994, null, 3), model('Lulu', 319015, null, 3)]);
+    a.listing.location = { ...a.listing.location, countryCode: 'GB' };
+    a.listing.description.en = ['Two-bedroom apartments from 319,015 in phase one.', 'Two.'];
+    const r = await rig({ listing: a });
+    try {
+      await assert.rejects(r.run(), (err) => err.stage === 'price' && /copy states the price 319,015/.test(err.reason));
+    } finally { r.cleanup(); }
+  });
+
+  it('a reading with a headline price in its own currency keeps that currency for the models (AED)', async () => {
+    const r = await rig({ listing: withModels([model('Nawras', 419994, null, 3), model('Lulu', 319015, null, 3)], { price: { amount: 999999, currency: 'AED', from: true, period: null, onRequest: false } }) });
+    try {
+      const report = await r.run();
+      assert.equal(modelCalls(r).length, 1);
+      assert.deepEqual(report.listingPreview.price, { amount: 319015, currency: 'AED', from: true, period: null, onRequest: false });
+      assert.equal(report.modelPrices.decision, undefined);
+    } finally { r.cleanup(); }
+  });
+
   it('when every model price is refused, the headline falls back to its own checks', async () => {
     const r = await rig({
       listing: withModels([model('Lulu', 319015, 270425, 3)], { price: PRICE, priceEvidence: { page: 3, quote: '319,015' }, subsidisedPriceEvidence: { page: 3, quote: '270,425' } }),
@@ -1304,13 +1343,13 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
    * photos, licence, video, photo note, FAQ, SEO title, featured flag — and an old floor plan file
    * and brochure that the new run must replace. Committed, like the publishing clone holds it.
    */
-  const seed = (r, { price = PRICED, sha = null, intake = {}, unit = null } = {}) => {
+  const seed = (r, { price = PRICED, sha = null, intake = {}, unit = null, location = null } = {}) => {
     const pdfSha256 = sha ?? crypto.createHash('sha256').update(fs.readFileSync(r.pdfPath)).digest('hex');
     const img = (n) => ({ src: `/listings/${SLUG}/0${n}.jpg`, thumb: `/listings/${SLUG}/0${n}-thumb.webp`, alt: { en: `Photo ${n}`, ar: `صورة ${n}` } });
     const listing = {
       id: 'BONA-W023', slug: SLUG, sourceRef: 'WA-20261101-AC7D06', status: 'reserved', category: 'off-plan', type: 'apartment', kind: 'apartment',
       featured: true, title: { en: 'Jeddah Heights — corrected by hand', ar: 'جدة هايتس — تصحيح يدوي' },
-      location: { ...PLACE, district: { en: 'Al Rehab', ar: 'الرحاب' } }, price,
+      location: location ?? { ...PLACE, district: { en: 'Al Rehab', ar: 'الرحاب' } }, price,
       specs: { beds: 2, baths: 2, areaSqm: 88, plotSqm: null, yearBuilt: null, floors: null },
       images: [1, 2, 3, 4].map(img), videos: [{ src: `/listings/${SLUG}/v-01.mp4`, poster: null }],
       description: { en: 'Hand-written one.\n\nHand-written two.', ar: 'فقرة أولى.\n\nفقرة ثانية.' },
@@ -1527,6 +1566,61 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
     } finally { r.cleanup(); }
   });
 
+  const ABROAD = {
+    district: { en: 'Hampstead', ar: 'هامبستيد' }, city: { en: 'London', ar: 'لندن' },
+    country: { en: 'United Kingdom', ar: 'المملكة المتحدة' }, countryCode: 'GB',
+  };
+
+  it('model prices read in another currency (AED on a SAR listing on request): published without prices, currency-mismatch, no page check', async () => {
+    const a = reading();
+    a.listing.price = { amount: 1250000, currency: 'AED', from: true, period: null, onRequest: false };
+    const r = await rig({ listing: a });
+    try {
+      const before = seed(r, { price: { ...ON_REQUEST } });
+      const report = await enrich(r);
+      assert.equal(report.enrich.headline, 'currency-mismatch');
+      assert.deepEqual(report.enrich.currency, { reading: 'AED', established: true, listing: 'SAR' });
+      assert.equal(report.modelPrices.decision, 'currency-mismatch');
+      assert.equal(r.calls().filter((c) => c.tool === 'claude-model-confirm').length, 0, 'no figure is checked that will not be published');
+      const after = saved(r);
+      assert.deepEqual(after.price, before.price, 'the headline is not adopted');
+      assert.deepEqual(after.models.map((m) => [m.name.en, m.price, m.subsidisedPrice]), [['Nawras', null, null], ['Lulu', null, null]]);
+      assert.ok(report.warnings.some((w) => /not in the listing's currency \(SAR\): they read as AED/.test(w)), report.warnings.join(' | '));
+      assert.deepEqual(checkListing(after), []);
+    } finally { r.cleanup(); }
+  });
+
+  it('a reading on request whose "SAR" is only the default (W020: a brochure abroad priced in GBP): currency-mismatch, no prices', async () => {
+    const a = reading();
+    a.listing.price = { ...ON_REQUEST };
+    a.listing.location = ABROAD;
+    const r = await rig({ listing: a });
+    try {
+      const before = seed(r, { price: { ...ON_REQUEST }, location: ABROAD });
+      const report = await enrich(r);
+      assert.equal(report.enrich.headline, 'currency-mismatch');
+      assert.deepEqual(report.enrich.currency, { reading: 'SAR', established: false, listing: 'SAR' });
+      assert.equal(r.calls().filter((c) => c.tool === 'claude-model-confirm').length, 0);
+      const after = saved(r);
+      assert.deepEqual(after.price, before.price);
+      assert.deepEqual(after.models.map((m) => m.price), [null, null]);
+      assert.ok(report.warnings.some((w) => /the reading established no currency/.test(w)), report.warnings.join(' | '));
+    } finally { r.cleanup(); }
+  });
+
+  it('a reading on request in the listing\'s home currency (a Saudi brochure) still adopts the models\' headline', async () => {
+    const a = reading();
+    a.listing.price = { ...ON_REQUEST };
+    const r = await rig({ listing: a });
+    try {
+      seed(r, { price: { ...ON_REQUEST } });
+      const report = await enrich(r);
+      assert.equal(report.enrich.headline, 'adopted');
+      assert.equal(report.enrich.currency, null);
+      assert.deepEqual(saved(r).price, PRICED);
+    } finally { r.cleanup(); }
+  });
+
   /** run-once.mjs itself, pointed at the rig's fake extractor, `claude` and brochure renderer. */
   const runOnce = (r, ...args) => {
     const bin = path.join(r.repo, '..', 'bin');
@@ -1557,6 +1651,19 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       assert.match(out, new RegExp(`Plans {6}/listings/${SLUG}/plan-01\\.jpg {2}\\(removing plan-03-thumb\\.webp plan-03\\.jpg\\)`));
       assert.match(out, /DRY RUN — nothing written/);
       assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '');
+    } finally { r.cleanup(); }
+  });
+
+  it('run-once --enrich --dry-run names a currency mismatch and both currencies', async () => {
+    const a = reading();
+    a.listing.price = { amount: 1250000, currency: 'AED', from: true, period: null, onRequest: false };
+    const r = await rig({ listing: a });
+    try {
+      seed(r, { price: { ...ON_REQUEST } });
+      const { status, out } = runOnce(r, '--enrich', 'BONA-W023', '--dry-run');
+      assert.equal(status, 0, out);
+      assert.match(out, /Headline {3}currency-mismatch — the brochure prices its models in AED, the listing is in SAR: the models are published without prices/);
+      assert.match(out, /Nawras {18} on request/);
     } finally { r.cleanup(); }
   });
 

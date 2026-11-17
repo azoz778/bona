@@ -490,6 +490,10 @@ const sakani = (p, other) => (isFigure(p?.subsidisedAmount)
  * kept a confirmed price). In order:
  *   - the owner set the price by WhatsApp (`_intake.edits` has 'price'): his price stays and the
  *     models lose theirs — the same rule as a caption price or a later `price <id>`;
+ *   - `currencyMismatch` (the caller's finding, pipeline.mjs: the reading's model prices are in another
+ *     currency than the listing's, or in one the reading did not establish — model-prices.mjs
+ *     modelPriceCurrency): the price stays and the models lose theirs — the site prints every model
+ *     price in the listing's `price.currency`;
  *   - one specific `unit`: its own price stays, and its models keep theirs (the validator exempts units);
  *   - no model kept a price: the price stays as it is, set or on request;
  *   - on request: the models' confirmed headline is adopted — a printed figure the old intake could not read;
@@ -497,13 +501,14 @@ const sakani = (p, other) => (isFigure(p?.subsidisedAmount)
  *     not — what the validator requires of a headline taken from models); otherwise REFUSED with both
  *     figures, and nothing changes.
  * @returns {{price:object, dropModelPrices:boolean, refuse:string|null,
- *            decision:'owner-price'|'unit'|'no-model-prices'|'adopted'|'kept'|'refused'}}
+ *            decision:'owner-price'|'currency-mismatch'|'unit'|'no-model-prices'|'adopted'|'kept'|'refused'}}
  */
-export function enrichHeadline(existing, models, alignedPrice) {
+export function enrichHeadline(existing, models, alignedPrice, { currencyMismatch = false } = {}) {
   const current = existing?.price ?? null;
   const keep = (decision, dropModelPrices = false) => ({ price: current, dropModelPrices, refuse: null, decision });
   const edits = existing?._intake?.edits;
   if (Array.isArray(edits) && edits.includes('price')) return keep('owner-price', true);
+  if (currencyMismatch) return keep('currency-mismatch', true);
   if (existing?.unit !== null && existing?.unit !== undefined) return keep('unit');
   const priced = (Array.isArray(models) ? models : []).some((m) => isFigure(m?.price));
   if (!priced || !alignedPrice || !isFigure(alignedPrice.amount)) return keep('no-model-prices');

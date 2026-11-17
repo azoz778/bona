@@ -1350,5 +1350,15 @@ describe('run-once --enrich: enrichMetaFor, mergeEnrichment, enrichHeadline', ()
       const h = enrichHeadline(l, models, aligned());
       assert.deepEqual(h, { price: l.price, dropModelPrices: false, refuse: null, decision: 'unit' });
     });
+
+    it('model prices in another currency than the listing\'s: the price stays and the models lose theirs (currency-mismatch)', () => {
+      for (const l of [existing(), existing({ price: { ...PRICED } }), existing({ price: { ...PRICED }, unit: { floor: 3, block: 'H', unitRef: null } })]) {
+        const h = enrichHeadline(l, models, aligned(), { currencyMismatch: true });
+        assert.deepEqual(h, { price: l.price, dropModelPrices: true, refuse: null, decision: 'currency-mismatch' });
+      }
+      // The owner's own price says more: his price stays, the models lose theirs, whatever their currency.
+      const own = existing({ price: { amount: 300000, currency: 'SAR', from: false, period: null, onRequest: false }, _intake: { pdfSha256: SHA, edits: ['price'] } });
+      assert.equal(enrichHeadline(own, models, aligned(), { currencyMismatch: true }).decision, 'owner-price');
+    });
   });
 });

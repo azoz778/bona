@@ -40,7 +40,7 @@ import {
   writeInboxListing,
 } from './listing.mjs';
 import { log } from './log.mjs';
-import { alignHeadline, checkModelPrices, isFigure } from './model-prices.mjs';
+import { alignHeadline, checkModelPrices, isFigure, modelPriceCurrency } from './model-prices.mjs';
 import { extractPdf, renderPdfPages } from './pdf.mjs';
 import { compositePages, cropPhotoRegions, modelFlagsComposites } from './photo-regions.mjs';
 import { priceAppearsIn, westernise } from './price.mjs';
@@ -447,15 +447,39 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // checked that will not be published.
   const figuresOf = (m) => [m?.price, m?.subsidisedPrice].filter(isFigure);
   const ownerPriceEdit = Boolean(enrichTarget) && Array.isArray(enrichTarget.listing._intake?.edits) && enrichTarget.listing._intake.edits.includes('price');
+  const modelFigures = Array.isArray(ai.models) ? ai.models.flatMap(figuresOf) : [];
+  // The currency: the model prices are written and confirmed in the reading's `price.currency`, which
+  // is a reading only beside a price it read (model-prices.mjs modelPriceCurrency). When it is not one —
+  // or, on an enrichment, it is not the listing's own currency (the site prints every model price in
+  // `price.currency`) — the models keep no price, and none is checked: no figure is checked that will
+  // not be published. A figure the copy states is then an unconfirmed one (the guard below).
+  let currencyDrop = null;
+  if (modelFigures.length && !caption.price && !ownerPriceEdit) {
+    const listingCurrency = enrichTarget ? (enrichTarget.listing.price?.currency ?? null) : null;
+    const country = (enrichTarget ? enrichTarget.listing.location : ai.listing?.location)?.countryCode ?? ai.listing?.location?.countryCode;
+    const readingCurrency = modelPriceCurrency(price, country);
+    const currency = { reading: price?.currency ?? null, established: readingCurrency !== null, listing: listingCurrency };
+    if (enrich && (readingCurrency === null || readingCurrency !== listingCurrency)) currencyDrop = { decision: 'currency-mismatch', currency };
+    else if (!enrich && readingCurrency === null) currencyDrop = { decision: 'currency-unconfirmed', currency };
+  }
   let headlineFromModels = false;
-  if (Array.isArray(ai.models) && ai.models.length && (caption.price || ownerPriceEdit)) {
+  if (Array.isArray(ai.models) && ai.models.length && (caption.price || ownerPriceEdit || currencyDrop)) {
     for (const m of ai.models) {
       // Same rule as the model's own headline figure under a caption price: dropped, and refused
       // outright only if the copy states it (the owner's own figure excepted).
-      for (const n of figuresOf(m)) if (caption.price && n !== caption.price.amount && inCopy(n)) rejectedPrices.push(n);
+      for (const n of figuresOf(m)) if (currencyDrop || (caption.price && n !== caption.price.amount && inCopy(n))) rejectedPrices.push(n);
       if (m && typeof m === 'object') { m.price = null; m.subsidisedPrice = null; }
     }
-  } else if (Array.isArray(ai.models) && ai.models.some((m) => figuresOf(m).length)) {
+    if (currencyDrop) {
+      const { decision, currency } = currencyDrop;
+      report.modelPrices = { models: ai.models.length, calls: 0, refused: [], incomplete: [], incompletePages: [], fatal: false, tooMany: null, decision, currency, dropped: modelFigures };
+      log.info('intake.model_prices_dropped', { decision, ...currency, figures: modelFigures.length });
+      report.warningCodes.push('model-price-not-printed');
+      report.warnings.push(decision === 'currency-mismatch'
+        ? `the brochure's unit-model prices are not in the listing's currency (${currency.listing ?? 'none'}): ${currency.established ? `they read as ${currency.reading}` : `the reading established no currency (${currency.reading ?? 'none'} is only the default — it read no price of its own)`}, so the models were published without prices`
+        : `the unit-model prices were left off: their currency could not be established from the brochure (${currency.reading ?? 'none'} is only the default — the reading has no price of its own, and it is not the currency of the country the property is in) — the models show without them`);
+    }
+  } else if (modelFigures.length) {
     const mp = await checkModelPrices(ai.models, {
       pageImages,
       pageText,
@@ -541,7 +565,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // the listing (enrichHeadline): the model's own headline and Sakani checks, the copy guard, the map
   // and the photo steps below are for a publish only. Its unit-model prices are checked above, the same.
   if (enrich) {
-    return enrichListing({ report, ai, extraction, cfg, caption, workDir, dryRun, withdrawals, target: enrichTarget, started });
+    return enrichListing({ report, ai, extraction, cfg, caption, workDir, dryRun, withdrawals, target: enrichTarget, started, currencyDrop });
   }
 
   // Under the owner's caption price the model's own figure is not published as the price — but if
@@ -796,7 +820,7 @@ const PLAN_FILE_RE = /^plan-\d{2,3}(?:\.jpg|-thumb\.webp)$/;
  * rolled back from git (resetTree), so the listing is exactly as it was. A dry run reports what would
  * change and writes nothing.
  */
-async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dryRun, withdrawals, target, started }) {
+async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dryRun, withdrawals, target, started, currencyDrop = null }) {
   report.stage = 'enrich';
   const existing = target.listing;
   const { id, slug } = existing;
@@ -830,7 +854,7 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
   const models = built.models ?? [];
   const aligned = models.some((m) => isFigure(m.price)) && existing.price && typeof existing.price === 'object'
     ? alignHeadline(structuredClone(existing.price), models) : null;
-  const head = enrichHeadline(existing, models, aligned);
+  const head = enrichHeadline(existing, models, aligned, { currencyMismatch: currencyDrop?.decision === 'currency-mismatch' });
   if (head.dropModelPrices) for (const m of models) { m.price = null; m.subsidisedPrice = null; }
   const priceChanged = !isDeepStrictEqual(head.price, existing.price);
   report.enrich = {
@@ -843,6 +867,7 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
     previousPrice: existing.price,
     priceChanged,
     refuse: head.refuse,
+    currency: currencyDrop?.currency ?? null,
     facts: Object.keys(built).filter((k) => k !== 'models'),
     plans: floorPlans.map((p) => p.src),
     removedPlans: oldPlans,

@@ -276,6 +276,8 @@ describe('classifyRun / summarizeRun', () => {
     assert.deepEqual(classifyRun({ code: 0, output: enrichReport() }), { outcome: 'ok', line: 'models 8 · prices kept 6 / refused 2 · headline adopted · plans 3' });
     assert.match(classifyRun({ code: 0, output: enrichReport({ headline: 'owner-price — the owner\'s own price stays; the models are published without prices' }) }).line, /headline owner-price/);
     assert.match(classifyRun({ code: 0, output: enrichReport({ headline: 'no-model-prices — no model price was confirmed: the price stays as it is' }) }).line, /headline no-model-prices/);
+    assert.match(classifyRun({ code: 0, output: enrichReport({ headline: 'currency-mismatch — the brochure prices its models in AED, the listing is in SAR: the models are published without prices' }) }).line, /headline currency-mismatch/);
+    assert.equal(summarizeRun('{"ts":"x","level":"info","event":"intake.enrich","models":2,"kept":0,"refused":0,"headline":"currency-mismatch"}'), 'models 2 · prices kept 0 / refused 0 · headline currency-mismatch');
     const logged = [
       '{"ts":"x","level":"info","event":"intake.model_prices","models":5,"calls":2,"refused":1,"incomplete":0,"fatal":false}',
       '{"ts":"x","level":"info","event":"intake.enrich_headline","decision":"kept"}',

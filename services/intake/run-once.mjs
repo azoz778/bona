@@ -64,8 +64,11 @@ function printEnrichReport(r) {
     say(`           ${m.name.en.padEnd(24)} ${m.price ? m.price.toLocaleString('en-US') : 'on request'}${m.subsidisedPrice ? ` · Sakani ${m.subsidisedPrice.toLocaleString('en-US')}` : ''}${m.floorPlan ? `  ${m.floorPlan.src}` : ''}`);
   }
   if (e.facts.length) say(`Facts      ${e.facts.map((k) => `${k} ${l[k].en.length}`).join(' · ')}`);
+  const cur = e.currency;
   const why = {
     'owner-price': 'the owner\'s own price stays; the models are published without prices',
+    'currency-mismatch': `${cur?.established ? `the brochure prices its models in ${cur.reading}` : `the reading established no currency (${cur?.reading ?? 'none'} is only its default)`}, `
+      + `the listing is in ${cur?.listing ?? 'no currency'}: the models are published without prices`,
     unit: 'one specific unit: its own price stays',
     'no-model-prices': 'no model price was confirmed: the price stays as it is',
     adopted: 'was on request: the models\' confirmed headline is adopted',

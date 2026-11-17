@@ -184,7 +184,7 @@ export function classifyRun({ code, signal = null, output = '' }) {
   return { outcome: 'ok', line: summary ?? lastLines(text).join(' | ') };
 }
 
-const HEADLINE_DECISIONS = /\b(adopted|kept|refused|no-model-prices|unit|owner-price|owner)\b/i;
+const HEADLINE_DECISIONS = /\b(adopted|kept|refused|no-model-prices|currency-mismatch|unit|owner-price|owner)\b/i;
 
 /**
  * One line out of a successful run's output: unit models found, model prices kept/refused, the

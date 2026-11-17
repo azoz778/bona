@@ -224,6 +224,13 @@ Anything else in the group is ignored, silently.
   subsidised price as its Sakani line; a listing for one specific `unit` keeps its own headline
   checks; the owner's caption price drops every model price, and so does `price <id> …` later (its
   reply says how many models lost their price: the table then shows "On request").
+  **Currency**: model prices are written and confirmed in the reading's `price.currency`, which counts
+  only beside a headline price the model read, or — on request — when it is the home currency of the
+  country the property is in (`modelPriceCurrency`: a Saudi brochure is priced in SAR; W020's Hampstead
+  brochure printed GBP, which the site does not take, and came back on request in a default "SAR").
+  Otherwise no model price is published or checked (`currency-unconfirmed` in the report and the
+  journal, `model-price-not-printed`), the headline is not aligned, and a figure the copy states refuses
+  the run.
 - **Photo focus points**: the model gives every kept photo a `focus` `{x, y}` (the centre of its
   subject); the site uses it as the crop position, so a tall façade is not cut down to sky.
 - **Re-running a published brochure**: `node services/intake/run-once.mjs <pdf> --replace BONA-W023`
@@ -243,7 +250,9 @@ Anything else in the group is ignored, silently.
   and its own folder. Every other key of the inbox JSON — title, copy, photos, location, licence,
   videos, `photoNote`, `faq`, `seoTitle`, `featured`, `_intake` — stays byte for byte, so it works on
   a listing corrected by hand (no history rule). The headline is decided from the listing: the
-  owner's own price (`_intake.edits` has `price`) stays and the models publish without prices; one
+  owner's own price (`_intake.edits` has `price`) stays and the models publish without prices; model
+  prices in another currency than the listing's — or in none the reading established (see Currency
+  above) — are not published or checked and the headline stays (`currency-mismatch`); one
   specific `unit` keeps its price; a price on request adopts the models' lowest confirmed price
   (`from`, with its Sakani line); a set price is kept only when it IS that price (marked `from`),
   otherwise the run is refused with both figures and nothing changes — send `price <id> …` first, or
