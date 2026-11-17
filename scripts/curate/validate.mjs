@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FORBIDDEN, HYPE, imageFocusProblems, isLandPublic, isLocalSrc, isPublishable, LAND_PRICE_CAP, faqProblems, licenceProblems, LISTING_ID_RE, loadRegisterWithdrawals, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, photoNoteProblems, projectFactsProblems, sarAmount, seoTitleProblems, subsidisedPriceProblems, unitsSheetProblems, videoEntryProblems, withdrawnAdvertising, withdrawnInboxListings, withdrawnNotice, WITHDRAWN_ADVERTISING } from './rules.mjs';
+import { forbiddenHits, HYPE, imageFocusProblems, isLandPublic, isLocalSrc, isPublishable, LAND_PRICE_CAP, faqProblems, licenceProblems, LISTING_ID_RE, loadRegisterWithdrawals, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, photoNoteProblems, projectFactsProblems, sarAmount, seoTitleProblems, subsidisedPriceProblems, unitsSheetProblems, videoEntryProblems, withdrawnAdvertising, withdrawnInboxListings, withdrawnNotice, WITHDRAWN_ADVERTISING } from './rules.mjs';
 
 function matterportIdOf(value) {
   if (typeof value !== 'string') return null;
@@ -35,7 +35,9 @@ const PERIOD = new Set([null, 'year', 'month']);
 const MEDIA = /^https:\/\/tk-storage\.azoz\.uk\/tk-estate-media\/media\/[^/]+\/[^/]+$/;
 const THUMB = /^https:\/\/tk-storage\.azoz\.uk\/tk-estate-media\/website-thumbs\/[^/]+\.webp$/;
 const ARABIC = /[؀-ۿ]/;
-// The id, site-local image path, FORBIDDEN (old brand + any telephone number) and HYPE
+// The id, site-local image path, FORBIDDEN (the old brand, another agency, or a contact
+// detail: phone, unified/toll-free/landline number, URL, domain, e-mail, social handle — tested
+// through forbiddenHits(), which turns Arabic-Indic and Persian digits into ASCII first) and HYPE
 // rules all come from ./rules.mjs, which services/intake also uses — one definition, so
 // the intake can never publish something this validator would then reject.
 
@@ -79,7 +81,7 @@ const isStr = (v) => typeof v === 'string' && v.trim().length > 0;
 const isNumOrNull = (v) => v === null || (typeof v === 'number' && Number.isFinite(v));
 const isLoc = (v) => v && isStr(v.en) && isStr(v.ar) && ARABIC.test(v.ar);
 const checkCopy = (id, label, s) => {
-  for (const re of FORBIDDEN) if (re.test(s)) err(id, `${label} mentions the old brand/phone: ${s.match(re)[0]}`);
+  for (const hit of forbiddenHits(s)) err(id, `${label} mentions a contact detail or another brand: ${hit}`);
   if (HYPE.test(s)) err(id, `${label} uses hype wording: "${s.match(HYPE)[0]}"`);
 };
 // Listings may share images only when they are units/pages of the same developer's project

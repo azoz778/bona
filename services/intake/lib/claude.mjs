@@ -28,7 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOMS } from '../../../scripts/curate/rooms.mjs';
-import { bilingualListProblems, FORBIDDEN as COPY_FORBIDDEN, HYPE_WORDS as SHARED_HYPE_WORDS, isImageFocus as isFocus } from '../../../scripts/curate/rules.mjs';
+import { bilingualListProblems, FORBIDDEN as COPY_FORBIDDEN, forbiddenHits, HYPE_WORDS as SHARED_HYPE_WORDS, isImageFocus as isFocus } from '../../../scripts/curate/rules.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PROMPT_TEMPLATE = path.join(HERE, 'prompt.md');
@@ -538,7 +538,7 @@ export function copyProblems(listing, ai = {}) {
   for (const k of ['amenities', 'nearby', 'warranties']) fields.push(...list(k, ai?.[k]));
   for (const [label, value] of fields) {
     if (!isStr(value)) continue;
-    for (const re of FORBIDDEN) if (re.test(value)) bad.push(`${label} mentions "${value.match(re)[0]}"`);
+    for (const hit of forbiddenHits(value, FORBIDDEN)) bad.push(`${label} mentions "${hit}"`);
     if (PRICE_IN_COPY_RE.test(value)) {
       const where = /^models\[/.test(label) ? 'prices go in models[i].price / subsidisedPrice only'
         : /^(amenities|nearby|warranties)\./.test(label) ? 'state no price in this list'

@@ -22,20 +22,52 @@ export const PHONE_RE = /(?:\+?966[\s.-]?5\d(?:[\s.-]?\d){7}|(?<![\d+])0[\s.-]?5
  * Other contact details that leak from a developer's brochure: Saudi unified numbers (9200 +
  * 5 digits), toll-free 800 numbers, Saudi landlines (01x + 6-7 digits), URLs, bare domains,
  * e-mail addresses and social handles. The site renders its own contact block.
+ * A bare domain needs a lower-case TLD ("acme.com", "ACME.com"): "3 bedrooms.Net area" is a missing
+ * space, not an address. An upper-case address is still caught by its "www." (URL_RE).
  */
 export const UNIFIED_NUMBER_RE = /(?<![\d+])9200(?:[\s-]?\d){5}(?!\d)/;
 export const TOLL_FREE_RE = /(?<![\d+])800(?:[\s-]?\d){7}(?!\d)/;
 export const LANDLINE_RE = /(?<![\d+])0[\s-]?1[1-9](?:[\s-]?\d){6,7}(?!\d)/;
 export const URL_RE = /https?:\/\/|\bwww\./i;
-export const DOMAIN_RE = /\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:sa|com|net|org)\b/i;
+export const DOMAIN_RE = /\b[A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)*\.(?:sa|com|net|org|ae|co|io|info|me)\b/;
 export const EMAIL_RE = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/;
 export const HANDLE_RE = /(?<![\w@])@\w{3,}/;
 export const CONTACT_RES = [UNIFIED_NUMBER_RE, TOLL_FREE_RE, LANDLINE_RE, URL_RE, DOMAIN_RE, EMAIL_RE, HANDLE_RE];
 
-/** The old brand, other agencies, and contact details. */
+/**
+ * The old brand, other agencies, and contact details. The number rules read ASCII digits only:
+ * test text through forbiddenHits(), which normalises it first (asciiDigits), never directly.
+ */
 export const FORBIDDEN = [/\bTK\b/i, /tk[- ]?estates?/i, /tk-estates\.com/i, PHONE_RE, ...CONTACT_RES];
 
+/**
+ * Arabic-Indic (U+0660–0669) and Persian (U+06F0–06F9) digits -> ASCII, and the Arabic decimal
+ * (٫ U+066B) and thousands (٬ U+066C) separators -> "." and ",". A brochure that prints its
+ * number as ٠٥٥١٢٣٤٥٦٧ is the same leak as 0551234567. The Arabic comma (، U+060C) separates
+ * words, not digits, and is left alone.
+ */
+export function asciiDigits(text) {
+  return String(text ?? '').replace(/[\u0660-\u0669\u06F0-\u06F9\u066B\u066C]/g, (c) => {
+    const n = c.charCodeAt(0);
+    if (n === 0x066B) return '.';
+    if (n === 0x066C) return ',';
+    return String(n - (n >= 0x06F0 ? 0x06F0 : 0x0660));
+  });
+}
+
+/**
+ * What a FORBIDDEN rule finds in `text` once its digits are ASCII: one match per rule that hits
+ * (empty = clean). The ONE way both the site validator and the WhatsApp intake test copy.
+ * @param {string} text
+ * @param {RegExp[]} [rules]  FORBIDDEN, or FORBIDDEN plus a caller's own (non-global) extras
+ */
+export function forbiddenHits(text, rules = FORBIDDEN) {
+  const t = asciiDigits(text);
+  return rules.map((re) => t.match(re)?.[0]).filter((m) => m !== undefined);
+}
+
 // ---- bilingual fact lists --------------------------------------------------------------
+/** Any character of the Arabic block (U+0600–U+06FF): the "is this the Arabic side" test, here and for faq / seoTitle. */
 const ARABIC_SCRIPT = /[\u0600-\u06FF]/;
 const nonEmpty = (v) => typeof v === 'string' && v.trim().length > 0;
 /**
@@ -440,8 +472,7 @@ export function licenceProblems(lc) {
 // ---- Optional listing fields for project pages (2026-10-02, SEO audit rec. 1) --------------------
 // faq / seoTitle / projectFacts are optional on any listing; when present both languages are required,
 // because the page renders whichever locale it is building and a blank half would ship silently.
-
-const AR_RE = /[؀-ۿ]/;
+// "Arabic" = ARABIC_SCRIPT, the one Arabic-block test in this file (bilingual fact lists, above).
 
 export function faqProblems(faq) {
   if (faq === undefined || faq === null) return [];
@@ -455,11 +486,11 @@ export function faqProblems(faq) {
     else if (seen.has(it.id)) out.push(`${at}.id "${it.id}" is a duplicate`);
     seen.add(it?.id);
     if (!nonEmpty(it?.q?.en)) out.push(`${at}.q.en required`);
-    if (!nonEmpty(it?.q?.ar) || !AR_RE.test(it.q.ar)) out.push(`${at}.q.ar required (Arabic)`);
+    if (!nonEmpty(it?.q?.ar) || !ARABIC_SCRIPT.test(it.q.ar)) out.push(`${at}.q.ar required (Arabic)`);
     for (const lang of ['en', 'ar']) {
       const a = it?.a?.[lang];
       if (!Array.isArray(a) || !a.length || !a.every(nonEmpty)) out.push(`${at}.a.${lang} must be a non-empty array of paragraphs`);
-      else if (lang === 'ar' && !a.every((p) => AR_RE.test(p))) out.push(`${at}.a.ar must be Arabic`);
+      else if (lang === 'ar' && !a.every((p) => ARABIC_SCRIPT.test(p))) out.push(`${at}.a.ar must be Arabic`);
       for (const p of Array.isArray(a) ? a : []) {
         for (const [, k] of String(p).matchAll(/\{([^{}]*)\}/g)) if (!FAQ_PLACEHOLDERS.includes(k)) out.push(`${at}.a.${lang} uses unknown placeholder {${k}} (allowed: ${FAQ_PLACEHOLDERS.join(', ')})`);
         if (/[{}]/.test(String(p).replace(/\{[^{}]*\}/g, ''))) out.push(`${at}.a.${lang} has an unbalanced { or }`);
@@ -493,7 +524,7 @@ export function seoTitleProblems(t) {
   if (typeof t !== 'object' || Array.isArray(t)) return ['seoTitle must be { en, ar }'];
   const out = [];
   if (!nonEmpty(t.en)) out.push('seoTitle.en required');
-  if (!nonEmpty(t.ar) || !AR_RE.test(t.ar)) out.push('seoTitle.ar required (Arabic)');
+  if (!nonEmpty(t.ar) || !ARABIC_SCRIPT.test(t.ar)) out.push('seoTitle.ar required (Arabic)');
   for (const lang of ['en', 'ar']) if (nonEmpty(t[lang]) && t[lang].length > 70) out.push(`seoTitle.${lang} is ${t[lang].length} characters, keep it to 70 (the brand is appended)`);
   return out;
 }

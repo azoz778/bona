@@ -7,10 +7,11 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  FORBIDDEN, HYPE, INTAKE_ID_RE, isCalendarDate, isLocalSrc, licenceProblems, LICENCE_NUMBER_RE,
+  asciiDigits, DOMAIN_RE, FORBIDDEN, forbiddenHits, HYPE, INTAKE_ID_RE, isCalendarDate, isLocalSrc, licenceProblems, LICENCE_NUMBER_RE,
   LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, LOCAL_LISTING_VIDEO,
-  LOCAL_LISTING_VIDEO_POSTER, PHONE_RE, videoEntryProblems,
+  LOCAL_LISTING_VIDEO_POSTER, PHONE_RE, URL_RE, videoEntryProblems,
 } from '../../../scripts/curate/rules.mjs';
+import { ORDINARY_COPY } from '../../../scripts/test/ordinary-copy-fixture.mjs';
 import { checkListing } from '../lib/listing.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -219,11 +220,34 @@ describe('copy rules', () => {
     }
   });
 
-  it('leave real listing copy alone', () => {
-    for (const s of ['SAR 4,500,000', '537 sqm of built-up area', 'built in 2019', 'five bedrooms and 05 parking bays'.replace('05', 'five'), 'Jeddah 21589']) {
-      assert.ok(!PHONE_RE.test(s), `${s} must not look like a phone number`);
-      assert.ok(!HYPE.test(s));
+  it('leave real listing copy alone (the shared ORDINARY_COPY list)', () => {
+    for (const s of ORDINARY_COPY) {
+      assert.deepEqual(forbiddenHits(s), [], `${s} is not a contact detail or another brand`);
+      assert.ok(!HYPE.test(s), s);
     }
+  });
+
+  it('catch contact numbers written in Arabic-Indic or Persian digits', () => {
+    for (const s of ['الرقم الموحد ٩٢٠٠٠١٢٣٤', 'جوال ٠٥٥١٢٣٤٥٦٧', 'هاتف ٠١٢٦٦٠١٢٣٤', 'الرقم المجاني ٨٠٠١٢٤٤٤٤٤', '۰۵۵۱۲۳۴۵۶۷']) {
+      assert.ok(forbiddenHits(s).length > 0, `${s} must be caught`);
+    }
+  });
+
+  it('asciiDigits: one normaliser for Arabic-Indic and Persian digits and the Arabic number separators', () => {
+    assert.equal(asciiDigits('٠١٢٣٤٥٦٧٨٩ ۰۱۲۳۴۵۶۷۸۹'), '0123456789 0123456789');
+    assert.equal(asciiDigits('١٬٢٥٠٬٠٠٠ و ٤٫٥'), '1,250,000 و 4.5');
+    assert.equal(asciiDigits('No digits، here'), 'No digits، here', 'the Arabic comma between words is punctuation, not a number separator');
+    assert.equal(asciiDigits(null), '');
+    assert.equal(asciiDigits(905), '905');
+  });
+
+  it('domains: the TLD is lowercase, and .ae .co .io .info .me count too', () => {
+    for (const s of ['visit acme.sa', 'acme.com', 'ACME.com', 'acme.ae', 'acme.co', 'acme.io', 'acme.info', 'acme.me', 'sales.acme.com.sa']) {
+      assert.ok(DOMAIN_RE.test(s), `${s} must be caught`);
+    }
+    for (const s of ['3 bedrooms.Net area 180 m²', 'St.Regis', 'K.S.A', 'Phase 2.0', 'the co-op']) assert.ok(!DOMAIN_RE.test(s), `${s} is not a domain`);
+    assert.ok(URL_RE.test('WWW.ACME.COM'), 'an upper-case address is still caught by the www. rule');
+    assert.ok(forbiddenHits('see WWW.ACME.COM').length > 0);
   });
 
   it('still catch the old brand', () => {

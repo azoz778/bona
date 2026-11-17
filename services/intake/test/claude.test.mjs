@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   buildPrompt, confirmModelPrices, copyProblems, FENCE, HYPE_WORDS, PROMPT_TEMPLATE, ROOM_KEYS, runListingAi, validateAiResult,
 } from '../lib/claude.mjs';
+import { ORDINARY_COPY } from '../../../scripts/test/ordinary-copy-fixture.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -235,7 +236,9 @@ describe('copyProblems — owner rules', () => {
     assert.ok(bad.some((p) => /^models\[0\]\.name\.en/.test(p)), bad.join('|'));
     assert.ok(bad.some((p) => /^amenities\.en\[2\]/.test(p)), bad.join('|'));
   });
-  const LEAKS = ['Call 0551234567', 'Call 920012345', 'Call 9200 12345', 'Call 800 1234567', 'Tel 012 345 6789', 'Tel 0112345678', 'see https://x.example/y', 'see www.example', 'visit acme.sa', 'visit acme.com', 'a@b.org', 'follow @acme_dev'];
+  const LEAKS = ['Call 0551234567', 'Call 920012345', 'Call 9200 12345', 'Call 800 1234567', 'Tel 012 345 6789', 'Tel 0112345678', 'see https://x.example/y', 'see www.example', 'visit acme.sa', 'visit acme.com', 'a@b.org', 'follow @acme_dev',
+    // The same numbers in Arabic-Indic and Persian digits (rules.mjs asciiDigits runs before every rule).
+    'الرقم الموحد ٩٢٠٠٠١٢٣٤', 'جوال ٠٥٥١٢٣٤٥٦٧', 'هاتف ٠١٢٦٦٠١٢٣٤', 'الرقم المجاني ٨٠٠١٢٤٤٤٤٤', '۰۵۵۱۲۳۴۵۶۷', 'visit acme.ae'];
   it('catches contact details in every field, both languages', () => {
     for (const leak of LEAKS) {
       const ai = {
@@ -264,6 +267,17 @@ describe('copyProblems — owner rules', () => {
   it('does not flag ordinary copy', () => {
     const ai = { amenities: { en: ['Health club', 'Kids play area 24/7'], ar: ['نادٍ صحي', 'منطقة ألعاب'] } };
     assert.deepEqual(copyProblems(GOOD.listing, ai), []);
+  });
+  it('finds no contact detail or brand in the shared ordinary copy, in any field', () => {
+    // Contact/brand rules only: some of these lines are prices in prose, which the price rule may flag.
+    const ai = {
+      models: [{ name: { en: 'A', ar: 'نموذج' }, rooms: { en: ORDINARY_COPY, ar: ORDINARY_COPY }, availability: null }],
+      amenities: { en: ORDINARY_COPY, ar: ORDINARY_COPY }, nearby: { en: ORDINARY_COPY, ar: ORDINARY_COPY }, warranties: { en: ORDINARY_COPY, ar: ORDINARY_COPY },
+    };
+    const l = structuredClone(GOOD.listing);
+    l.description.en = [...ORDINARY_COPY];
+    l.description.ar = [...ORDINARY_COPY];
+    assert.deepEqual(copyProblems(l, ai).filter((p) => / mentions "/.test(p)), []);
   });
   it('is clean for good copy', () => {
     assert.deepEqual(copyProblems(GOOD.listing), []);
