@@ -198,6 +198,24 @@ export const ui = {
   factUnitsOfTotal: s('{n} of {total}', '{n} من {total}'),
   factBuildings: s('Buildings', 'المباني'),
   faqSectionTitle: s('Questions', 'أسئلة شائعة'),
+  // Unit models from a development brochure (UnitModels.astro)
+  residencesPrices: s('Residences & prices', 'النماذج والأسعار'),
+  layoutCol: s('Layout', 'النموذج'),
+  bedroomsCol: s('Bedrooms', 'غرف النوم'),
+  bathroomsCol: s('Bathrooms', 'دورات المياه'),
+  areaCol: s('Area', 'المساحة'),
+  priceCol: s('Price', 'السعر'),
+  sakaniCol: s('Sakani price', 'سعر مستفيدي الدعم'),
+  planCol: s('Plan', 'المخطط'),
+  viewPlan: s('View plan', 'عرض المخطط'),
+  onRequestShort: s('On request', 'عند الطلب'),
+  modelsNote: s(
+    'Prices as printed in the developer’s brochure. The Sakani price applies to housing-support beneficiaries.',
+    'الأسعار كما وردت في كتيب المطوّر، وسعر مستفيدي الدعم لمستفيدي برنامج سكني.'
+  ),
+  amenitiesHeading: s('Amenities', 'المرافق'),
+  nearbyHeading: s('Nearby', 'بالقرب'),
+  warrantiesHeading: s('Warranties', 'الضمانات'),
   listingWaMessage: s('Hello Bona, I’m interested in {title} ({id}) — {url}', 'مرحباً بونا، أرغب في الاستفسار عن {title} ({id}) — {url}'),
 
   // About
