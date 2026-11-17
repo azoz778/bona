@@ -185,6 +185,14 @@ Anything else in the group is ignored, silently.
   (`subsidised-price-not-printed`), when the headline price is not published, and by `price <id> …`.
   The "a price for one of its unit models counts" allowance in that check is only for a whole
   development quoted `from` its cheapest model, never for one unit.
+- **Unit-model prices** (`ai.models[].price` / `subsidisedPrice`, `lib/model-prices.mjs`): every
+  figure is confirmed on its page image by a second model, never by the text layer (a price table
+  puts every model's figures in the text; a match cannot tell whose figure it is). One call per page
+  covers every model on it; a cited page that was not rendered for the reading is rendered for this
+  check. A figure not confirmed is dropped (`model-price-not-printed`) and, like a refused headline,
+  may not stay in the copy. When any model keeps a price, the headline becomes the cheapest one,
+  `from`, with the cheapest confirmed subsidised price as its Sakani line; the owner's caption price
+  drops every model price.
 - **Photo focus points**: the model gives every kept photo a `focus` `{x, y}` (the centre of its
   subject); the site uses it as the crop position, so a tall façade is not cut down to sky.
 - **Re-running a published brochure**: `node services/intake/run-once.mjs <pdf> --replace BONA-W023`

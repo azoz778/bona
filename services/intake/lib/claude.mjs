@@ -159,18 +159,23 @@ export function buildPrompt({ extraction, sheets, caption, pageImages = [], page
   });
 }
 
-function extractJson(text) {
+/** The JSON object (or, with `array`, the JSON array) in a model's answer, fenced or bare. */
+function extractJson(text, { array = false } = {}) {
   const s = String(text ?? '').trim();
   const fenced = /```(?:json|jsonc)?\s*([\s\S]*?)```/.exec(s);
   const body = fenced ? fenced[1] : s;
-  const start = body.indexOf('{');
-  const end = body.lastIndexOf('}');
-  if (start === -1 || end <= start) throw new Error('no JSON object in the model output');
+  const [open, close] = array ? ['[', ']'] : ['{', '}'];
+  const start = body.indexOf(open);
+  const end = body.lastIndexOf(close);
+  if (start === -1 || end <= start) throw new Error(`no JSON ${array ? 'array' : 'object'} in the model output`);
   return JSON.parse(body.slice(start, end + 1));
 }
 
-/** Run one `claude -p` and return the parsed contract object. */
-export function runClaudeOnce({ prompt, cwd, model, bin = 'claude', addDirs = [], settingsPath = null, timeoutMs = 600000, spawnImpl = spawn }) {
+/**
+ * Run one `claude -p` and return the parsed contract object — or, with `expect: 'array'`, the
+ * parsed JSON array the prompt asked for.
+ */
+export function runClaudeOnce({ prompt, cwd, model, bin = 'claude', addDirs = [], settingsPath = null, timeoutMs = 600000, spawnImpl = spawn, expect = 'object' }) {
   const args = [
     '-p',
     '--model', model,
@@ -212,7 +217,7 @@ export function runClaudeOnce({ prompt, cwd, model, bin = 'claude', addDirs = []
       if (code !== 0) return reject(new Error(`claude -p exited ${code}: ${(err || out).trim().slice(-300)}`));
       if (!envelope) return reject(new Error(`claude -p returned non-JSON: ${out.slice(0, 300)}`));
       try {
-        resolve({ result: extractJson(envelope.result), meta: { costUsd: envelope.total_cost_usd, durationMs: envelope.duration_ms, numTurns: envelope.num_turns, sessionId: envelope.session_id } });
+        resolve({ result: extractJson(envelope.result, { array: expect === 'array' }), meta: { costUsd: envelope.total_cost_usd, durationMs: envelope.duration_ms, numTurns: envelope.num_turns, sessionId: envelope.session_id } });
       } catch (e) {
         reject(new Error(`${e.message}: ${String(envelope.result).slice(0, 300)}`));
       }
@@ -420,6 +425,60 @@ export async function confirmPriceEvidence({
     return { confirmed: result?.confirmed === true };
   } catch (err) {
     return { confirmed: false, error: err.message };
+  }
+}
+
+/** One line of model-written text: no line breaks a name could use to pose as another numbered model. */
+const oneLine = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
+
+/**
+ * Second opinion on the UNIT-MODEL prices printed on ONE page render (model-prices.mjs): for every
+ * model listed, is its regular price, and its subsidised (Sakani) price, printed on that page FOR
+ * THAT MODEL? One call covers every model on the page. The model names and figures were written by
+ * the first model from an untrusted document, so they go inside a fence.
+ * @param {{pageImage:string, items:Array<{i:number,name:{en?:string,ar?:string},price:number|null,subsidisedPrice:number|null}>,
+ *          currency:string}} input
+ * @returns {Promise<Array<{i:number,price:boolean,subsidisedPrice:boolean}>>} well-formed answers only; [] on any error
+ */
+export async function confirmModelPrices({
+  pageImage, items = [], currency, bin = 'claude', model = 'sonnet', cwd, addDirs = [], settingsPath = null,
+  timeoutMs = 300000, spawnImpl = spawn,
+}) {
+  const fig = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? `${v.toLocaleString('en-US')} ${currency ?? ''}`.trim() : 'none');
+  const list = items.map((it) => {
+    const name = [oneLine(it.name?.en), oneLine(it.name?.ar)].filter(Boolean).join(' / ') || '(no name)';
+    return `#${it.i}  ${name} — regular price: ${fig(it.price)} — subsidised price: ${fig(it.subsidisedPrice)}`;
+  }).join('\n');
+  const prompt = [
+    'Read the image file below with the Read tool. It is one page of a property brochure that sells a',
+    'development as several unit models.',
+    '',
+    `  ${pageImage}`,
+    '',
+    'For each numbered model in the list below, say whether that page VISIBLY PRINTS:',
+    '  - "price": the given regular price — the price for everyone — FOR THAT MODEL;',
+    '  - "subsidisedPrice": the given subsidised price — the price for housing-subsidy (Sakani)',
+    '    beneficiaries, for example "السعر لمستفيدي الدعم" — FOR THAT MODEL.',
+    'A figure printed for another model does not count. A figure you have to compute, infer or assume',
+    'does not count. When the page prints separate prices for subsidy beneficiaries ("لمستفيدي الدعم")',
+    'and for everyone else ("لغير مستفيدي الدعم"), the regular price must be the one for everyone else',
+    'and the subsidised price the one for beneficiaries: the same figure under the other label does',
+    'not count. Where a figure is "none", answer false for it.',
+    '',
+    fence('the models and figures to check', list),
+    '',
+    'Answer with one JSON array and nothing else, one entry per numbered model:',
+    '[{"i":0,"price":true|false,"subsidisedPrice":true|false}, …]',
+  ].join('\n');
+  const asked = new Set(items.map((it) => it.i));
+  try {
+    const { result } = await runClaudeOnce({ prompt, cwd, model, bin, addDirs, settingsPath, timeoutMs, spawnImpl, expect: 'array' });
+    if (!Array.isArray(result)) return [];
+    return result.filter((a) => a && typeof a === 'object' && Number.isInteger(a.i) && asked.has(a.i)
+      && typeof a.price === 'boolean' && typeof a.subsidisedPrice === 'boolean')
+      .map((a) => ({ i: a.i, price: a.price, subsidisedPrice: a.subsidisedPrice }));
+  } catch {
+    return [];
   }
 }
 

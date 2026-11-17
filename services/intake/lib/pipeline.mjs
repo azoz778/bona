@@ -11,7 +11,8 @@
 //   3. AI contract          (validateAiResult + copyProblems)  <- the real brochure/not-brochure gate
 //   3b. withdrawn advertising (the project's name, as the model read it off the brochure — in the
 //       title, the project, or anywhere in the copy it wrote: a brochure with no text layer)
-//   4. TAQEEM cross-check   (a price is published only when the NUMBER is actually printed)
+//   4. TAQEEM cross-check   (a price is published only when the NUMBER is actually printed;
+//                            every unit-model price is confirmed on its page image, model-prices.mjs)
 //   5. checkListing         (mirror of scripts/curate/validate.mjs)
 //   5b. the Bona-branded brochure (rebrand_pdf.py) — best effort, never fatal
 //   6. build.mjs + validate.mjs in the repo (the real thing)
@@ -30,13 +31,14 @@ import { brochureFileIn, brochureUrlFor, buildBrandedBrochure } from './brochure
 import { classifyPdf } from './classify.mjs';
 import { writeConfinement } from './confine.mjs';
 import { buildContactSheets } from './contact-sheet.mjs';
-import { buildPrompt, confirmPriceEvidence, runListingAi } from './claude.mjs';
+import { buildPrompt, confirmModelPrices, confirmPriceEvidence, runListingAi } from './claude.mjs';
 import { removeListingImages, writeListingImages } from './images.mjs';
 import {
   addWarningCode, buildListing, checkListing, findByPdfSha, findInbox, inboxIds, nextListingId, orderedPicks,
   readIndex, seqAfter, slugify, takenSlugs, todayRiyadh, uniqueSlug, writeIndex, writeInboxListing,
 } from './listing.mjs';
 import { log } from './log.mjs';
+import { alignHeadline, checkModelPrices } from './model-prices.mjs';
 import { extractPdf, renderPdfPages } from './pdf.mjs';
 import { compositePages, cropPhotoRegions, modelFlagsComposites } from './photo-regions.mjs';
 import { priceAppearsIn, westernise } from './price.mjs';
@@ -391,6 +393,78 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     ...(ai.listing?.highlights?.en ?? []), ...(ai.listing?.highlights?.ar ?? [])].filter(Boolean)
     .flatMap((x) => String(x).split(/[.!?؟؛;\n]+(?=\s|$)/));
   const inCopy = (n) => copySegments.some((seg) => priceAppearsIn(seg, n));
+
+  // --- 4a. unit-model prices ------------------------------------------------------
+  // A development sold as unit models prints a price (and often a Sakani price) per model. Each
+  // figure is confirmed ON ITS PAGE IMAGE by a second model — one call per page, covering every
+  // model on it — and never by the text layer, which cannot tell which model a figure belongs to
+  // (model-prices.mjs). When any model keeps a price, the headline becomes the cheapest one, "from",
+  // and its own checks below are skipped: its figures ARE confirmed model figures. The owner's
+  // caption price replaces them all.
+  const figuresOf = (m) => [m?.price, m?.subsidisedPrice].filter((n) => typeof n === 'number' && n > 0);
+  let headlineFromModels = false;
+  if (Array.isArray(ai.models) && ai.models.length && caption.price) {
+    for (const m of ai.models) {
+      // Same rule as the model's own headline figure under a caption price: dropped, and refused
+      // outright only if the copy states it (the owner's own figure excepted).
+      for (const n of figuresOf(m)) if (n !== caption.price.amount && inCopy(n)) rejectedPrices.push(n);
+      if (m && typeof m === 'object') { m.price = null; m.subsidisedPrice = null; }
+    }
+  } else if (Array.isArray(ai.models) && ai.models.some((m) => figuresOf(m).length)) {
+    // A page a model's evidence cites that was not rendered for the reading is rendered now, so
+    // the second model can look at it. A failed render costs those models their prices, not the run.
+    const rendered = new Set(pageImages.map((p) => p.page));
+    const lastPage = Number(extraction.pages) > 0 ? Number(extraction.pages) : Infinity;
+    const missing = [...new Set(ai.models.filter((m) => figuresOf(m).length).map((m) => m?.evidence?.page)
+      .filter((n) => Number.isInteger(n) && n >= 1 && n <= lastPage && !rendered.has(n)))].sort((a, b) => a - b);
+    if (missing.length) {
+      const more = await renderPdfPages(pdfPath, workDir, {
+        pyCmd: cfg.pyCmd, maxPages: cfg.maxPdfPages, longSide: cfg.pageReadLongSide, pages: missing, dir: 'model-pages',
+      });
+      if (more.ok === false) {
+        log.warn('intake.model_pages_failed', { pages: missing, error: more.error });
+      } else {
+        const added = (more.pageImages || []).filter((p) => !rendered.has(p.page));
+        pageImages.push(...added);
+        report.modelPages = added.map((p) => p.page);
+        log.info('intake.model_pages', { pages: report.modelPages, longSide: cfg.pageReadLongSide });
+      }
+    }
+    const mp = await checkModelPrices(ai.models, {
+      pageImages,
+      pageText,
+      confirm: async ({ page, abs, items }) => {
+        const answers = await confirmModelPrices({
+          pageImage: abs, items, currency: price?.currency, bin: cfg.claudeBin, model: cfg.claudeModel,
+          cwd: workDir, addDirs: [workDir], settingsPath: confinement.file,
+        });
+        log.info('intake.model_price_evidence', { page, models: items.length, answers: answers.length });
+        return answers;
+      },
+    });
+    ai.models = mp.models;
+    rejectedPrices.push(...mp.refused);
+    report.modelPrices = { models: ai.models.length, calls: mp.calls, refused: mp.refused };
+    log.info('intake.model_prices', { models: ai.models.length, calls: mp.calls, refused: mp.refused.length });
+    if (mp.refused.length) {
+      report.warningCodes.push('model-price-not-printed');
+      report.warnings.push(`${mp.refused.length} unit-model price(s) could not be confirmed on the brochure's own pages, so they were left off — the models show without them`);
+    }
+    if (price && ai.models.some((m) => typeof m?.price === 'number' && m.price > 0)) {
+      const before = { amount: price.amount, subsidised: price.subsidisedAmount };
+      alignHeadline(price, ai.models);
+      headlineFromModels = true;
+      report.priceEvidence = { fromModels: true };
+      // The model's own headline figures are replaced here, not checked. One that is not a
+      // confirmed model figure but is stated in the copy must still be printed (the copy guard).
+      const kept = new Set(ai.models.flatMap(figuresOf));
+      for (const [n, evidence, subsidised] of [[before.amount, ai.priceEvidence, false], [before.subsidised, ai.subsidisedPriceEvidence, true]]) {
+        if (!(typeof n === 'number' && n > 0) || kept.has(n) || mp.refused.includes(n) || !inCopy(n)) continue;
+        const check = await printed(n, evidence, { subsidised });
+        if (!check.inText && !check.confirmed) rejectedPrices.push(n);
+      }
+    }
+  }
   // Under the owner's caption price the model's own figure is not published as the price — but if
   // it also wrote it into the copy, that figure must be printed in the brochure too.
   if (caption.price && price && typeof price.amount === 'number' && price.amount > 0
@@ -398,7 +472,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     const check = await printed(price.amount, ai.priceEvidence);
     if (!check.inText && !check.confirmed) rejectedPrices.push(price.amount);
   }
-  if (!caption.price && price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0) {
+  if (!headlineFromModels && !caption.price && price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0) {
     report.priceEvidence = await printed(price.amount, ai.priceEvidence);
     if (!report.priceEvidence.inText && !report.priceEvidence.confirmed) {
       log.warn('intake.price_unevidenced', { amount: price.amount, currency: price.currency });
@@ -413,7 +487,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // The subsidised (Sakani) price rides on the headline price: it is published only beside a
   // published brochure price, and only when a second model has seen it printed AS the subsidy
   // beneficiaries' price on a page image. The owner's caption price replaces both.
-  if (price && typeof price.subsidisedAmount === 'number') {
+  if (!headlineFromModels && price && typeof price.subsidisedAmount === 'number') {
     const headline = !caption.price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0;
     // Checked even under the owner's caption price: the price field drops the figure then (the
     // caption replaces both), but if the model also wrote it into the copy it must be a printed one.
@@ -437,7 +511,14 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // mention: a sentence with price wording counts whole; otherwise only what is left once the
   // measurements are cut out — "3 million square metres" is an area, "the asking figure is
   // 1,250,000 for a 120 m² flat" is still the refused price.
+  // A figure that IS published — the headline, its Sakani price, a model price a second model saw
+  // printed — is not a refused one, even when the same figure was refused for another model.
+  const published = new Set((caption.price
+    ? [caption.price.amount]
+    : [price && !price.onRequest ? price.amount : null, price?.subsidisedAmount, ...(Array.isArray(ai.models) ? ai.models : []).flatMap(figuresOf)]
+  ).filter((n) => typeof n === 'number' && n > 0));
   for (const n of rejectedPrices) {
+    if (published.has(n)) continue;
     if (copySegments.some((seg) => priceAppearsIn(seg, n) && (PRICE_CONTEXT_RE.test(seg) || priceAppearsIn(withoutMeasures(seg), n)))) {
       throw new RejectError(caption.price
         ? `the copy states the price ${n.toLocaleString('en-US')}, which could not be confirmed on the brochure — send it again; the next reading may leave it out`

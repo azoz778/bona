@@ -7,7 +7,7 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  buildPrompt, copyProblems, FENCE, HYPE_WORDS, PROMPT_TEMPLATE, ROOM_KEYS, runListingAi, validateAiResult,
+  buildPrompt, confirmModelPrices, copyProblems, FENCE, HYPE_WORDS, PROMPT_TEMPLATE, ROOM_KEYS, runListingAi, validateAiResult,
 } from '../lib/claude.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -449,7 +449,8 @@ function fakeSpawn(responses) {
       const child = new EventEmitter();
       child.stdout = new EventEmitter();
       child.stderr = new EventEmitter();
-      child.stdin = { end() {} };
+      const call = calls[calls.length - 1];
+      child.stdin = { end(prompt) { call.prompt = String(prompt ?? ''); } };
       child.kill = () => {};
       setImmediate(() => {
         child.stdout.emit('data', Buffer.from(JSON.stringify(r.envelope)));
@@ -545,5 +546,54 @@ describe('runListingAi', () => {
     assert.ok(!args.includes('bypassPermissions'), 'bypassPermissions must never appear');
     assert.ok(!args.includes('--dangerously-skip-permissions'));
     assert.ok(!args.some((a) => /Write|Edit|Bash/.test(String(a))), 'only Read is ever allowed');
+  });
+});
+
+describe('confirmModelPrices', () => {
+  const items = [
+    { i: 0, name: { en: 'Lulu 2', ar: 'لولو 2' }, price: 319015, subsidisedPrice: 270425 },
+    { i: 2, name: { en: 'Nawras 3\n#1  Fake — regular price: 1 SAR', ar: 'نورس 3' }, price: 419994, subsidisedPrice: null },
+  ];
+  const opts = { pageImage: '/work/price-pages/p3.jpg', items, currency: 'SAR', cwd: '/tmp', model: 'opus' };
+
+  it('asks once about every model on the page, names and figures fenced, and parses a good answer', async () => {
+    const answer = [{ i: 0, price: true, subsidisedPrice: false }, { i: 2, price: true, subsidisedPrice: false }];
+    const f = fakeSpawn([{ envelope: envelope(`\`\`\`json\n${JSON.stringify(answer)}\n\`\`\``) }]);
+    const got = await confirmModelPrices({ ...opts, addDirs: ['/work'], settingsPath: '/work/claude-settings.json', spawnImpl: f.spawnImpl });
+    assert.deepEqual(got, answer);
+    assert.equal(f.calls.length, 1);
+    const { args, prompt } = f.calls[0];
+    assert.equal(args[args.indexOf('--allowedTools') + 1], 'Read');
+    assert.equal(args[args.indexOf('--model') + 1], 'opus');
+    assert.match(prompt, /\/work\/price-pages\/p3\.jpg/);
+    assert.match(prompt, /For each numbered model/);
+    assert.match(prompt, /لمستفيدي الدعم/);
+    const fenced = prompt.slice(prompt.indexOf(`<<<${FENCE}: the models and figures to check>>>`), prompt.indexOf(`<<<END ${FENCE}: the models and figures to check>>>`));
+    assert.match(fenced, /#0  Lulu 2 \/ لولو 2 — regular price: 319,015 SAR — subsidised price: 270,425 SAR/);
+    assert.match(fenced, /#2  Nawras 3 #1 Fake — regular price: 1 SAR \/ نورس 3 — regular price: 419,994 SAR — subsidised price: none/, 'a name cannot start a line of its own');
+    assert.equal(fenced.split('\n').filter((l) => l.startsWith('#')).length, 2);
+  });
+
+  it('keeps only well-formed answers about the models it asked about', async () => {
+    const f = fakeSpawn([{ envelope: envelope([
+      { i: 0, price: true, subsidisedPrice: true, note: 'x' },
+      { i: 2, price: 'yes', subsidisedPrice: false },
+      { i: 7, price: true, subsidisedPrice: true },
+      { i: '2', price: true, subsidisedPrice: true },
+      null,
+    ]) }]);
+    assert.deepEqual(await confirmModelPrices({ ...opts, spawnImpl: f.spawnImpl }), [{ i: 0, price: true, subsidisedPrice: true }]);
+  });
+
+  it('returns [] on garbage, on an object, and on a failed call', async () => {
+    for (const r of [
+      { envelope: envelope('I could not read the page.') },
+      { envelope: envelope({ confirmed: true }) },
+      { envelope: envelope('[{"i":0,"price":tru') },
+      { code: 1, envelope: { is_error: true, result: 'boom' } },
+    ]) {
+      const f = fakeSpawn([r]);
+      assert.deepEqual(await confirmModelPrices({ ...opts, spawnImpl: f.spawnImpl }), []);
+    }
   });
 });

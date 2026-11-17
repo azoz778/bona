@@ -133,7 +133,7 @@ this repo. Nothing else in the pipeline changes.
   - `_intake: { source, messageId, groupJid, pdfSha256, pdfFileName, caption, model, confidence,
     warnings, images[], createdAt, site }` — provenance, so a listing can always be traced back to
     the WhatsApp message and the PDF that produced it. `warnings` is an array of **codes** from a
-    fixed vocabulary (`not-enough-photos`, `price-not-printed`, `subsidised-price-not-printed`, `brochure-too-large`,
+    fixed vocabulary (`not-enough-photos`, `price-not-printed`, `subsidised-price-not-printed`, `model-price-not-printed`, `brochure-too-large`,
     `brochure-failed`, `images-skipped`, `model-flagged`) and never free text: the model's own
     `warnings` are model output about an untrusted document, so they stay in the run's `ai.json`
     and are not committed.

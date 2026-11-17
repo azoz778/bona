@@ -133,7 +133,19 @@ const cfg = JSON.parse(fs.readFileSync(new URL('./fake.json', import.meta.url), 
 const log = new URL('./calls.jsonl', import.meta.url);
 const prompt = fs.readFileSync(0, 'utf8');
 let answer;
-if (prompt.includes('VISIBLY PRINT')) {
+if (prompt.includes('For each numbered model')) {
+  // The unit-model check (claude.mjs confirmModelPrices): one call per page, every model on it.
+  const page = Number((prompt.match(/\\/p(\\d+)\\.jpg/) || [])[1]);
+  const fig = (s) => (s === 'none' ? null : Number(s.replace(/,/g, '')));
+  const items = [...prompt.matchAll(/^#(\\d+) .* — regular price: ([\\d,]+|none)\\b.* — subsidised price: ([\\d,]+|none)/gm)]
+    .map((m) => ({ i: Number(m[1]), price: fig(m[2]), subsidisedPrice: fig(m[3]) }));
+  fs.appendFileSync(log, JSON.stringify({ tool: 'claude-model-confirm', page, items }) + '\\n');
+  // modelConfirm: null = every figure confirmed; [figures] = only those; { i: {price, subsidisedPrice} } = per model.
+  const mc = cfg.modelConfirm ?? null;
+  answer = items.map((it) => (Array.isArray(mc)
+    ? { i: it.i, price: mc.includes(it.price), subsidisedPrice: mc.includes(it.subsidisedPrice) }
+    : { i: it.i, price: true, subsidisedPrice: true, ...((mc ?? {})[it.i] ?? {}) }));
+} else if (prompt.includes('VISIBLY PRINT')) {
   const amount = Number((prompt.match(/VISIBLY PRINT[^\\d]*(\\d+)/) || [])[1]);
   const subsidised = /VISIBLY PRINT the price for housing-subsidy/.test(prompt);
   fs.appendFileSync(log, JSON.stringify({ tool: 'claude-confirm', amount, subsidised, project: /unit models/.test(prompt), mirror: /only the price for everyone else counts/.test(prompt),
@@ -172,14 +184,14 @@ const answer = ({ price, priceEvidence = null, subsidisedPriceEvidence = null, u
 const PRICE = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
 const BROCHURE = ['مشروع سكني — شقق بغرفتي نوم وثلاث غرف نوم في حي الحمدانية', LOCATION_PAGE, PRICE_PAGE, 'غرفة نوم 03', PRICE_PAGE];
 
-async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, build = '' }) {
+async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, modelConfirm = null, build = '' }) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bona-price-pages-')));
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
   const photo = path.join(bin, 'photo.jpg');
   const sharp = (await import('sharp')).default;
   await sharp({ create: { width: 1200, height: 900, channels: 3, background: '#4a6b8a' } }).jpeg().toFile(photo);
-  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub }));
+  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, modelConfirm }));
   fs.writeFileSync(path.join(bin, 'fake-py.mjs'), FAKE_PY);
   fs.writeFileSync(path.join(bin, 'fake-claude.mjs'), FAKE_CLAUDE);
   const claude = path.join(bin, 'claude');
@@ -773,6 +785,114 @@ describe('processPdf: round-6 review cases', { timeout: 120000 }, () => {
         processPdf({ pdfPath: r.pdfPath, cfg: r.cfg, caption: { price: { amount: 300000, currency: 'SAR' }, text: '300000' }, workDir: path.join(r.repo, '..', 'work'), dryRun: true }),
         (err) => err.stage === 'price' && /319,015/.test(err.reason),
       );
+    } finally { r.cleanup(); }
+  });
+});
+
+describe('processPdf: unit-model prices (every figure confirmed on its page, one call per page)', { timeout: 120000 }, () => {
+  const ON_REQUEST = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true };
+  const model = (en, price, subsidisedPrice, page) => ({
+    name: { en, ar: `نموذج ${en}` }, bedrooms: 2, bathrooms: 2, areaSqm: 105, rooms: null, availability: null,
+    price, subsidisedPrice, evidence: page ? { page, quote: String(price) } : null, floorPlan: null,
+  });
+  const withModels = (models, opts = {}) => ({ ...answer({ price: ON_REQUEST, ...opts }), models });
+  const modelCalls = (r) => r.calls().filter((c) => c.tool === 'claude-model-confirm');
+
+  it('two models on the scrambled price page: ONE check, headline = the cheaper model, from', async () => {
+    const r = await rig({ listing: withModels([model('Nawras', 419994, 356024, 3), model('Lulu', 319015, 270425, 3)]) });
+    try {
+      const report = await r.run();
+      const checks = modelCalls(r);
+      assert.equal(checks.length, 1, 'one call for the page, however many models are on it');
+      assert.equal(checks[0].page, 3);
+      assert.deepEqual(checks[0].items, [{ i: 0, price: 419994, subsidisedPrice: 356024 }, { i: 1, price: 319015, subsidisedPrice: 270425 }]);
+      assert.deepEqual(report.listingPreview.price, { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 });
+      assert.deepEqual(report.ai.models.map((m) => [m.price, m.subsidisedPrice]), [[419994, 356024], [319015, 270425]]);
+      assert.equal(r.calls().filter((c) => c.tool === 'claude-confirm').length, 0, 'the headline is the confirmed model figure: no second check');
+      assert.ok(!report.warningCodes.includes('model-price-not-printed'));
+      assert.deepEqual(report.modelPrices, { models: 2, calls: 1, refused: [] });
+    } finally { r.cleanup(); }
+  });
+
+  it('a model price the page check refuses is dropped, and the headline comes from the other model', async () => {
+    const r = await rig({
+      listing: withModels([model('Nawras', 419994, 356024, 3), model('Lulu', 319015, 270425, 3)]),
+      modelConfirm: [419994, 356024, 270425],
+    });
+    try {
+      const report = await r.run();
+      assert.deepEqual(report.ai.models.map((m) => [m.price, m.subsidisedPrice]), [[419994, 356024], [null, null]], 'a Sakani price never outlives its model\'s price');
+      assert.deepEqual(report.listingPreview.price, { amount: 419994, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 356024 });
+      assert.ok(report.warningCodes.includes('model-price-not-printed'));
+      assert.ok(report.listingPreview._intake.warnings.includes('model-price-not-printed'));
+      assert.deepEqual(report.modelPrices.refused.sort(), [270425, 319015]);
+    } finally { r.cleanup(); }
+  });
+
+  it('evidence citing a page that was not rendered (no price on it in the text) renders that page and checks it', async () => {
+    const r = await rig({ listing: withModels([model('Lulu', 319015, 270425, 3), model('Corner', 299000, null, 2)]) });
+    try {
+      const report = await r.run();
+      assert.deepEqual(r.calls().filter((c) => c.tool === 'py-pages').map((c) => c.pages), [[3, 5], [2]]);
+      assert.deepEqual(report.modelPages, [2]);
+      assert.deepEqual(modelCalls(r).map((c) => c.page).sort(), [2, 3]);
+      assert.deepEqual(modelCalls(r).find((c) => c.page === 2).items, [{ i: 1, price: 299000, subsidisedPrice: null }]);
+      assert.equal(report.listingPreview.price.amount, 299000);
+      assert.equal(report.listingPreview.price.subsidisedAmount, 270425);
+    } finally { r.cleanup(); }
+  });
+
+  it('the owner\'s caption price drops every model price, with no page check', async () => {
+    const r = await rig({ listing: withModels([model('Nawras', 419994, 356024, 3), model('Lulu', 319015, 270425, 3)]) });
+    try {
+      const report = await processPdf({ pdfPath: r.pdfPath, cfg: r.cfg, caption: { price: { amount: 300000, currency: 'SAR' }, text: '300000' }, workDir: path.join(r.repo, '..', 'work'), dryRun: true });
+      assert.equal(modelCalls(r).length, 0);
+      assert.deepEqual(report.ai.models.map((m) => [m.price, m.subsidisedPrice]), [[null, null], [null, null]]);
+      assert.equal(report.listingPreview.price.amount, 300000);
+      assert.ok(!report.warningCodes.includes('model-price-not-printed'));
+    } finally { r.cleanup(); }
+  });
+
+  it('a refused model price stated in the copy refuses the run', async () => {
+    const a = withModels([model('Nawras', 419994, null, 3), model('Lulu', 319015, null, 3)]);
+    a.listing.description.en = ['Two-bedroom apartments from 319,015 in phase one.', 'Two.'];
+    const r = await rig({ listing: a, modelConfirm: [419994] });
+    try {
+      await assert.rejects(r.run(), (err) => err.stage === 'price' && /copy states the price 319,015/.test(err.reason));
+    } finally { r.cleanup(); }
+  });
+
+  it('a figure refused for one model but confirmed for another may stay in the copy', async () => {
+    const a = withModels([model('Lulu', 319015, null, 3), model('Lulu corner', 319015, null, 3)]);
+    a.listing.description.en = ['Two-bedroom apartments from 319,015 in phase one.', 'Two.'];
+    const r = await rig({ listing: a, modelConfirm: { 1: { price: false } } });
+    try {
+      const report = await r.run();
+      assert.deepEqual(report.ai.models.map((m) => m.price), [319015, null]);
+      assert.equal(report.listingPreview.price.amount, 319015);
+      assert.ok(report.warningCodes.includes('model-price-not-printed'));
+    } finally { r.cleanup(); }
+  });
+
+  it('the model\'s own headline figure, replaced by the models, must still be printed if the copy states it', async () => {
+    const a = withModels([model('Lulu', 319015, null, 3)], { price: { amount: 300000, currency: 'SAR', from: true, period: null, onRequest: false } });
+    a.listing.description.en = ['Two-bedroom apartments from 300,000 in phase one.', 'Two.'];
+    const r = await rig({ listing: a });
+    try {
+      await assert.rejects(r.run(), (err) => err.stage === 'price' && /copy states the price 300,000/.test(err.reason));
+    } finally { r.cleanup(); }
+  });
+
+  it('when every model price is refused, the headline falls back to its own checks', async () => {
+    const r = await rig({
+      listing: withModels([model('Lulu', 319015, 270425, 3)], { price: PRICE, priceEvidence: { page: 3, quote: '319,015' }, subsidisedPriceEvidence: { page: 3, quote: '270,425' } }),
+      modelConfirm: [], confirm: [319015, 270425],
+    });
+    try {
+      const report = await r.run();
+      assert.deepEqual(report.ai.models.map((m) => [m.price, m.subsidisedPrice]), [[null, null]]);
+      assert.equal(r.calls().filter((c) => c.tool === 'claude-confirm').length, 2, 'headline + Sakani checked the old way');
+      assert.deepEqual(report.listingPreview.price, PRICE);
     } finally { r.cleanup(); }
   });
 });
