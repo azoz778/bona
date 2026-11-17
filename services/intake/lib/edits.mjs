@@ -74,6 +74,10 @@ export function setHero(repo, id, n) {
   return { listing: save(found.file, found.listing) };
 }
 
+/**
+ * The `price` command. `{ listing, modelPricesCleared }`: how many unit models lost their price to
+ * the owner's figure (the reply says so; 0 when none carried one), or `{ error }` / null.
+ */
 export function setPrice(repo, id, { amount, currency, onRequest }) {
   const found = findInbox(repo, id);
   if (!found) return null;
@@ -88,11 +92,14 @@ export function setPrice(repo, id, { amount, currency, onRequest }) {
   // The same goes for the unit-model prices, as under a caption price at publish time: the headline
   // must be the cheapest model whenever a model carries a price (rules.mjs modelsProblems), and the
   // owner's own figure replaces the brochure's. The models themselves (rooms, areas, plans) stay.
+  let modelPricesCleared = 0;
   for (const m of Array.isArray(found.listing.models) ? found.listing.models : []) {
-    if (m && typeof m === 'object') { m.price = null; m.subsidisedPrice = null; }
+    if (!m || typeof m !== 'object') continue;
+    if ((m.price ?? null) !== null || (m.subsidisedPrice ?? null) !== null) modelPricesCleared += 1;
+    m.price = null; m.subsidisedPrice = null;
   }
   markEdited(found.listing, 'price');
-  return { listing: save(found.file, found.listing) };
+  return { listing: save(found.file, found.listing), modelPricesCleared };
 }
 
 // ---- REGA advertising licences ------------------------------------------------------------

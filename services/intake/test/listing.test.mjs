@@ -9,7 +9,7 @@ import {
   takenSlugs, todayRiyadh, uniqueSlug, writeIndex, writeInboxListing, findInbox, findByPdfSha, listInbox,
 } from '../lib/listing.mjs';
 import * as edits from '../lib/edits.mjs';
-import { writeFloorPlans } from '../lib/images.mjs';
+import { PLAN_JPEG_QUALITY, THUMB_QUALITY, writeFloorPlans } from '../lib/images.mjs';
 import * as msg from '../lib/messages.mjs';
 import { alignHeadline } from '../lib/model-prices.mjs';
 import {
@@ -559,11 +559,18 @@ describe('writeFloorPlans', () => {
     assert.deepEqual(fs.readdirSync(out).sort(), ['plan-02-thumb.webp', 'plan-02.jpg', 'plan-03-thumb.webp', 'plan-03.jpg']);
     const big = await sharp(path.join(out, 'plan-02.jpg')).metadata();
     assert.deepEqual([big.format, big.width, big.height, big.hasAlpha], ['jpeg', 1600, 800, false], 'inside 1600, no alpha');
+    assert.equal(big.chromaSubsampling, '4:4:4', 'full-resolution colour: thin coloured lines and small text stay sharp');
     const { data } = await sharp(path.join(out, 'plan-02.jpg')).raw().toBuffer({ resolveWithObject: true });
     assert.ok(data[0] > 245 && data[1] > 245 && data[2] > 245, `the transparent ground is white, not black (got ${data[0]},${data[1]},${data[2]})`);
     const thumb = await sharp(path.join(out, 'plan-02-thumb.webp')).metadata();
     assert.deepEqual([thumb.format, thumb.width], ['webp', 480]);
     assert.equal((await sharp(path.join(out, 'plan-03.jpg')).metadata()).width, 800, 'never enlarged');
+  });
+
+  it('names its qualities: plans JPEG q85, every thumbnail WebP q78', () => {
+    assert.deepEqual([PLAN_JPEG_QUALITY, THUMB_QUALITY], [85, 78]);
+    const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'images.mjs'), 'utf8');
+    assert.doesNotMatch(src, /quality: \d/, 'no bare quality number left in a sharp call');
   });
 
   it('skips a candidate it cannot decode, or that does not exist, and still writes the rest', async () => {
@@ -705,15 +712,29 @@ describe('inbox + edits', () => {
     ];
     fs.writeFileSync(found.file, `${JSON.stringify(found.listing, null, 2)}\n`);
     try {
-      for (const args of [{ amount: 330000, currency: 'SAR' }, { onRequest: true }]) {
-        const l = edits.setPrice(tmp, 'BONA-W001', args).listing;
+      for (const [args, cleared] of [[{ amount: 330000, currency: 'SAR' }, 2], [{ onRequest: true }, 0]]) {
+        const r = edits.setPrice(tmp, 'BONA-W001', args);
+        const l = r.listing;
         assert.deepEqual(l.models.map((m) => [m.price, m.subsidisedPrice]), [[null, null], [null, null]]);
         assert.deepEqual(l.models.map((m) => m.name.en), ['Lulu', 'Nawras'], 'the models themselves stay');
         assert.deepEqual(modelsProblems(l), [], 'the shared rule accepts the edited listing (no headline left to align)');
+        assert.equal(r.modelPricesCleared, cleared, 'how many models lost their price (the second call finds none left)');
       }
     } finally {
       fs.writeFileSync(found.file, `${JSON.stringify(before, null, 2)}\n`);
     }
+  });
+
+  it('the price reply says when it took the unit-model prices off, and is unchanged otherwise', () => {
+    const sar = { currency: 'SAR', amount: 330000 };
+    assert.equal(msg.priceChange(sar), 'Price set to SAR 330,000');
+    assert.equal(msg.priceChange(sar, { modelPricesCleared: 0 }), 'Price set to SAR 330,000');
+    assert.equal(msg.priceChange(sar, { modelPricesCleared: 8 }), 'Price set to SAR 330,000 — 8 unit-model prices removed; the table now shows On request');
+    assert.equal(msg.priceChange(sar, { modelPricesCleared: 1 }), 'Price set to SAR 330,000 — 1 unit-model price removed; the table now shows On request');
+    assert.equal(msg.priceChange({ currency: 'SAR', amount: null }, { onRequest: true, modelPricesCleared: 2 }), 'Price on request — 2 unit-model prices removed; the table now shows On request');
+    const index = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'index.mjs'), 'utf8');
+    const priceCase = index.slice(index.indexOf("case 'price': {"), index.indexOf("case 'brochure': {"));
+    assert.match(priceCase, /msg\.priceChange\(r\.listing\.price, \{ onRequest: command\.onRequest, modelPricesCleared: r\.modelPricesCleared \}\)/, 'index.mjs replies with it');
   });
 
   it('status and hidden are persisted', () => {

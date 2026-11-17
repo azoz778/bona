@@ -135,6 +135,25 @@ export const LOCAL_LISTING_VIDEO = /^\/listings\/[a-z0-9]+(?:-[a-z0-9]+)*\/v-\d{
 export const LOCAL_LISTING_VIDEO_POSTER = /^\/listings\/[a-z0-9]+(?:-[a-z0-9]+)*\/v-\d{2,3}-poster\.jpg$/;
 
 /**
+ * Every site-local file a listing points at, with the field that names it: each image's src and
+ * thumb, each video's src and poster, each unit model's floor plan and its thumbnail. Only paths
+ * served out of public/ ("/…") are listed; a remote URL or an empty value is not. ONE list for
+ * build.mjs (both its loops) and validate.mjs --head, so a new kind of file cannot be stat-checked by
+ * one and forgotten by the other.
+ * @returns {Array<{field:string, path:string}>}
+ */
+export function localFilesOf(listing) {
+  const l = listing && typeof listing === 'object' ? listing : {};
+  const each = (v) => (Array.isArray(v) ? v : []);
+  const out = [];
+  const add = (field, p) => { if (typeof p === 'string' && p.startsWith('/')) out.push({ field, path: p }); };
+  each(l.images).forEach((im, i) => { add(`images[${i}].src`, im?.src); add(`images[${i}].thumb`, im?.thumb); });
+  each(l.videos).forEach((v, i) => { add(`videos[${i}].src`, v?.src); add(`videos[${i}].poster`, v?.poster); });
+  each(l.models).forEach((m, i) => { add(`models[${i}].floorPlan.src`, m?.floorPlan?.src); add(`models[${i}].floorPlan.thumb`, m?.floorPlan?.thumb); });
+  return out;
+}
+
+/**
  * One entry of `videos[]`: `{ src, poster }`. `src` is a site-local clip or a full https URL
  * (for a future non-intake source); `poster` is the site-local poster frame beside it, an
  * https URL, or null when ffmpeg could not cut one (the page then falls back to the hero

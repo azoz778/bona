@@ -8,6 +8,8 @@ import sharp from 'sharp';
 export const MAX_SIDE = 1920;
 export const THUMB_SIDE = 640;
 export const JPEG_QUALITY = 82;
+/** WebP quality of every thumbnail: the photos' card thumbs and the floor plans' alike. */
+export const THUMB_QUALITY = 78;
 // Decompression-bomb cap, matching MAX_PIXELS in extract_pdf.py. sharp's own default is
 // ~268 MP, which is enough to exhaust this box's RAM from a hostile PDF.
 export const MAX_INPUT_PIXELS = 50_000_000;
@@ -44,7 +46,7 @@ export async function writeListingImages(candidates, picks, outDir, slug) {
         .toFile(file); // sharp drops EXIF/ICC unless withMetadata() is called
       await sharp(file, { limitInputPixels: MAX_INPUT_PIXELS })
         .resize({ width: THUMB_SIDE, height: THUMB_SIDE, fit: 'inside', withoutEnlargement: true })
-        .webp({ quality: 78 })
+        .webp({ quality: THUMB_QUALITY })
         .toFile(thumbFile);
     } catch (err) {
       fs.rmSync(file, { force: true });
@@ -77,6 +79,9 @@ export async function writeListingImages(candidates, picks, outDir, slug) {
 export const PLAN_SIDE = 1600;
 export const PLAN_THUMB_SIDE = 480;
 export const PLAN_JPEG_QUALITY = 85;
+// A floor plan is thin coloured lines and small room labels on white: 4:2:0 (sharp's default, fine
+// on photos) halves the colour resolution and smears them, so plans keep full-resolution colour.
+export const PLAN_CHROMA_SUBSAMPLING = '4:4:4';
 
 /**
  * Where each model's floor plan goes, without touching a file: one entry per model whose `floorPlan`
@@ -96,7 +101,7 @@ export function floorPlanTargets(candidates, models, slug) {
 /**
  * Write every model's floor plan into `outDir` (the staging dir, promoted with the photos): flattened
  * onto white (a transparent plan would otherwise turn black in a JPEG), inside PLAN_SIDE without
- * enlarging, JPEG q85; thumbnail inside PLAN_THUMB_SIDE, WebP q78. A candidate sharp cannot decode
+ * enlarging, JPEG q85 with 4:4:4 colour; thumbnail inside PLAN_THUMB_SIDE, WebP q78 (THUMB_QUALITY). A candidate sharp cannot decode
  * (truncated, hostile, over the pixel cap) or that does not exist is skipped, never fatal: that model
  * publishes without a plan. The array carries `.skipped` ({ model, index, error }) for the caller to log.
  * @returns {Promise<Array<{model:number,index:number,src:string,thumb:string,file:string,thumbFile:string}>>}
@@ -114,11 +119,11 @@ export async function writeFloorPlans(candidates, models, outDir, slug) {
         .rotate()
         .flatten({ background: '#ffffff' })
         .resize({ width: PLAN_SIDE, height: PLAN_SIDE, fit: 'inside', withoutEnlargement: true })
-        .jpeg({ quality: PLAN_JPEG_QUALITY, mozjpeg: true })
+        .jpeg({ quality: PLAN_JPEG_QUALITY, mozjpeg: true, chromaSubsampling: PLAN_CHROMA_SUBSAMPLING })
         .toFile(file);
       await sharp(file, { limitInputPixels: MAX_INPUT_PIXELS })
         .resize({ width: PLAN_THUMB_SIDE, height: PLAN_THUMB_SIDE, fit: 'inside', withoutEnlargement: true })
-        .webp({ quality: 78 })
+        .webp({ quality: THUMB_QUALITY })
         .toFile(thumbFile);
     } catch (err) {
       fs.rmSync(file, { force: true });

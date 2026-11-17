@@ -289,11 +289,40 @@ describe('copy rules', () => {
   });
 });
 
+describe('localFilesOf', () => {
+  it('lists every site-local file a listing points at, with the field that names it', () => {
+    const l = {
+      images: [{ src: '/listings/a/01.jpg', thumb: '/listings/a/01-thumb.webp' }, { src: 'https://cdn.example/x.jpg', thumb: null }],
+      videos: [{ src: '/listings/a/v-01.mp4', poster: '/listings/a/v-01-poster.jpg' }, { src: 'https://cdn.example/v.mp4', poster: null }],
+      models: [
+        { floorPlan: { src: '/listings/a/plan-01.jpg', thumb: '/listings/a/plan-01-thumb.webp' } },
+        { floorPlan: null }, null, {},
+      ],
+    };
+    assert.deepEqual(localFilesOf(l), [
+      { field: 'images[0].src', path: '/listings/a/01.jpg' },
+      { field: 'images[0].thumb', path: '/listings/a/01-thumb.webp' },
+      { field: 'videos[0].src', path: '/listings/a/v-01.mp4' },
+      { field: 'videos[0].poster', path: '/listings/a/v-01-poster.jpg' },
+      { field: 'models[0].floorPlan.src', path: '/listings/a/plan-01.jpg' },
+      { field: 'models[0].floorPlan.thumb', path: '/listings/a/plan-01-thumb.webp' },
+    ]);
+  });
+  it('copes with a listing that has none of them, or is not one', () => {
+    for (const l of [{}, null, undefined, { images: 'x', videos: {}, models: 3 }]) assert.deepEqual(localFilesOf(l), []);
+  });
+});
+
 describe('build.mjs', () => {
   const src = fs.readFileSync(path.join(REPO, 'scripts', 'curate', 'build.mjs'), 'utf8');
-  it('stats BOTH src and thumb for every site-local image', () => {
-    assert.match(src, /for \(const field of \['src', 'thumb'\]\)/);
-    assert.equal((src.match(/for \(const field of \['src', 'thumb'\]\)/g) || []).length, 2, 'the inbox loop and the published loop');
+  it('stats every site-local file (image src + thumb, video + poster, floor plan + thumb) in BOTH loops', () => {
+    assert.equal((src.match(/for \(const f of localFilesOf\((?:clean|l)\)\)/g) || []).length, 2, 'the inbox loop and the published loop');
+    assert.doesNotMatch(src, /for \(const field of \['src', 'thumb'\]\)/, 'no hand-written per-field loop left to fall out of step with localFilesOf');
+  });
+  it('validate.mjs --head stats the same files', () => {
+    const v = fs.readFileSync(path.join(REPO, 'scripts', 'curate', 'validate.mjs'), 'utf8');
+    const head = v.slice(v.indexOf('async function headCheck()'), v.indexOf('if (HEAD) await headCheck();'));
+    assert.match(head, /localFilesOf\(/);
   });
   it('reports the published set, not the pre-filter candidate list', () => {
     const line = /console\.log\(`wrote \$\{[^`]*`\)/.exec(src);
@@ -307,7 +336,7 @@ describe('build.mjs', () => {
 // Owner decision 2026-09-08: two named homes are off the public site. This replaced a
 // SAR 10,000,000 house cap the same day — the owner meant to remove two listings once, not
 // to install a standing rule that would hide every future luxury home.
-import { WITHHELD_LISTINGS, sarAmount, isPublishable } from '../../../scripts/curate/rules.mjs';
+import { localFilesOf, WITHHELD_LISTINGS, sarAmount, isPublishable } from '../../../scripts/curate/rules.mjs';
 
 describe('sarAmount', () => {
   it('passes a SAR price straight through', () => {

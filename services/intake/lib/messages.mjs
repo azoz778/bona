@@ -161,6 +161,15 @@ export function wafiRecorded(id, licence, lang = 'en') {
 
 export const removed = (id, title) => `🗑️ Removed *${title}* (${id}). It comes off the site with the next deploy.`;
 export const updated = (id, what, listing) => `✏️ ${what} — *${listing.title.en}* (${id})\n${commandsFor(id)}`;
+/**
+ * What the `price` command did, for updated(): the new price, and — when the listing's unit models
+ * carried prices — that the owner's figure took them off (edits.mjs setPrice `modelPricesCleared`).
+ */
+export function priceChange(price, { onRequest = false, modelPricesCleared = 0 } = {}) {
+  const head = onRequest ? 'Price on request' : `Price set to ${price.currency} ${price.amount.toLocaleString('en-US')}`;
+  if (!(modelPricesCleared > 0)) return head;
+  return `${head} — ${modelPricesCleared} unit-model price${modelPricesCleared === 1 ? '' : 's'} removed; the table now shows On request`;
+}
 
 /** A clip with no id in its caption and no brochure near it in time — recognized, not silently dropped. */
 export const videoNoId = () => '✋ Which listing is this video for? Send it right after its brochure, or caption it with the id, e.g. `video BONA-W001`.';

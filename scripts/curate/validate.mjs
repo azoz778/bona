@@ -2,12 +2,13 @@
 // Validates src/data/listings.json against src/data/LISTING-SCHEMA.md.
 // Usage: node scripts/curate/validate.mjs [--head]
 //   --head  also HEAD-request every remote image src/thumb (HTTP 200 required) and stat every
-//           site-local still under public/; network, ~1 min.
+//           site-local file under public/ (photos, videos and posters, floor plans and their
+//           thumbnails: rules.mjs localFilesOf); network, ~1 min.
 // Exits 1 on any failure.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { forbiddenHits, HYPE, imageFocusProblems, isLandPublic, isLocalSrc, isPublishable, LAND_PRICE_CAP, faqProblems, licenceProblems, LISTING_ID_RE, loadRegisterWithdrawals, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, modelsProblems, photoNoteProblems, projectFactsProblems, sarAmount, seoTitleProblems, subsidisedPriceProblems, unitsSheetProblems, videoEntryProblems, withdrawnAdvertising, withdrawnInboxListings, withdrawnNotice, WITHDRAWN_ADVERTISING } from './rules.mjs';
+import { forbiddenHits, HYPE, imageFocusProblems, isLandPublic, isLocalSrc, isPublishable, LAND_PRICE_CAP, faqProblems, licenceProblems, LISTING_ID_RE, loadRegisterWithdrawals, localFilesOf, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, modelsProblems, photoNoteProblems, projectFactsProblems, sarAmount, seoTitleProblems, subsidisedPriceProblems, unitsSheetProblems, videoEntryProblems, withdrawnAdvertising, withdrawnInboxListings, withdrawnNotice, WITHDRAWN_ADVERTISING } from './rules.mjs';
 
 function matterportIdOf(value) {
   if (typeof value !== 'string') return null;
@@ -258,9 +259,11 @@ if (featured < 6 || featured > 9) err('file', `expected 6–9 featured listings,
 
 async function headCheck() {
   const all = [...new Set(data.flatMap((l) => l.images.flatMap((im) => [im.src, im.thumb].filter(Boolean))))];
-  const local = all.filter((u) => u.startsWith('/'));
   const urls = all.filter((u) => !u.startsWith('/'));
-  for (const u of local) if (!fs.existsSync(path.join(ROOT, 'public', u))) err('head', `missing site-local still public${u}`);
+  // Every site-local file, not only the photos: a floor plan or a poster missing from public/ is the
+  // same broken page (rules.mjs localFilesOf — the list build.mjs checks too).
+  const local = [...new Set(data.flatMap((l) => localFilesOf(l).map((f) => f.path)))];
+  for (const u of local) if (!fs.existsSync(path.join(ROOT, 'public', u))) err('head', `missing site-local file public${u}`);
   let i = 0; const bad = [];
   async function worker() {
     while (i < urls.length) {
@@ -278,7 +281,7 @@ async function headCheck() {
   }
   await Promise.all(Array.from({ length: 12 }, worker));
   for (const u of bad) err('head', `not HTTP 200: ${u}`);
-  console.log(`HEAD-checked ${urls.length} URLs (${bad.length} failures), stat-checked ${local.length} local stills`);
+  console.log(`HEAD-checked ${urls.length} URLs (${bad.length} failures), stat-checked ${local.length} local files`);
 }
 
 if (HEAD) await headCheck();

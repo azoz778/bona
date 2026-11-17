@@ -794,7 +794,7 @@ async function handleCommand({ group, command }) {
         jid, command.id,
         () => edits.setPrice(cfg.repo, command.id, command),
         () => `intake: price (${command.id})`,
-        (r) => msg.updated(command.id, command.onRequest ? 'Price on request' : `Price set to ${r.listing.price.currency} ${r.listing.price.amount.toLocaleString('en-US')}`, r.listing),
+        (r) => msg.updated(command.id, msg.priceChange(r.listing.price, { onRequest: command.onRequest, modelPricesCleared: r.modelPricesCleared }), r.listing),
       );
       if (res?.error) return reply(jid, `✋ ${res.error}`);
       return undefined;

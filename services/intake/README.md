@@ -200,7 +200,8 @@ Anything else in the group is ignored, silently.
   or its Sakani price either, which then say "could not be checked … try again later". When any model keeps a price, the headline of a whole
   development becomes the cheapest one, `from` (its period untouched), with the cheapest confirmed
   subsidised price as its Sakani line; a listing for one specific `unit` keeps its own headline
-  checks; the owner's caption price drops every model price.
+  checks; the owner's caption price drops every model price, and so does `price <id> …` later (its
+  reply says how many models lost their price: the table then shows "On request").
 - **Photo focus points**: the model gives every kept photo a `focus` `{x, y}` (the centre of its
   subject); the site uses it as the crop position, so a tall façade is not cut down to sky.
 - **Re-running a published brochure**: `node services/intake/run-once.mjs <pdf> --replace BONA-W023`
@@ -461,6 +462,8 @@ so pointing `--repo` at a working checkout with uncommitted changes in it is saf
 | `scripts/curate/inbox/_index.json` | the `BONA-W###` counter |
 | `public/listings/<slug>/NN.jpg` | photo, max 1920 px, q82, EXIF stripped |
 | `public/listings/<slug>/NN-thumb.webp` | 640 px thumbnail |
+| `public/listings/<slug>/plan-NN.jpg` | a unit model's floor plan (NN = the model's 1-based position in `models`), flattened on white, max 1600 px, q85, 4:4:4 colour |
+| `public/listings/<slug>/plan-NN-thumb.webp` | its 480 px thumbnail |
 | `public/listings/<slug>/v-NN.mp4` | a walkthrough clip, re-encoded (H.264/AAC, ≤1080p, faststart, ≤ `BONA_MAX_VIDEO_MB`) |
 | `public/listings/<slug>/v-NN-poster.jpg` | its poster frame, 1600 px |
 | `public/listings/<slug>/brochure.pdf` | the Bona-branded brochure — by default, unless `#nobrochure`, and only up to `BONA_MAX_BROCHURE_MB` |
@@ -474,6 +477,9 @@ so pointing `--repo` at a working checkout with uncommitted changes in it is saf
 
 `scripts/curate/build.mjs` appends the inbox files to `src/data/listings.json` after the TK
 live-list filter; intake listings are exempt from that filter because they are owner-authored.
+It refuses to build while any site-local file a listing names is missing from `public/` — photos
+and thumbnails, clips and posters, floor plans and their thumbnails (`rules.mjs` `localFilesOf`,
+which `validate.mjs --head` stat-checks too).
 
 ## Failure modes
 
