@@ -375,7 +375,7 @@ describe('processPdf: replacing a published listing in place (run-once --replace
     const pub = path.join(r.repo, 'public', 'listings', SLUG);
     fs.mkdirSync(pub, { recursive: true });
     for (const f of ['01.jpg', '06.jpg', '07.jpg', '07-thumb.webp', 'brochure.pdf']) fs.writeFileSync(path.join(pub, f), 'old');
-    if (commit) { git(r, 'init', '-q'); git(r, 'add', '-A'); git(r, 'commit', '-qm', 'published'); }
+    if (commit) { git(r, 'init', '-q'); git(r, 'add', '-A'); git(r, 'commit', '-qm', 'intake: Jeddah Heights (BONA-W023)'); }
     return pub;
   };
   const META = { id: 'BONA-W023', slug: SLUG, listedAt: '2026-11-17', sourceRef: 'WA-20261117-AC7D06', replace: true };
@@ -430,7 +430,7 @@ describe('processPdf --replace: what it refuses and how it rolls back', { timeou
     const pub = path.join(r.repo, 'public', 'listings', SLUG);
     fs.mkdirSync(pub, { recursive: true });
     for (const f of ['01.jpg', '07.jpg', 'brochure.pdf']) fs.writeFileSync(path.join(pub, f), 'old');
-    if (commit) { git(r, 'init', '-q'); git(r, 'add', '-A'); git(r, 'commit', '-qm', 'published'); }
+    if (commit) { git(r, 'init', '-q'); git(r, 'add', '-A'); git(r, 'commit', '-qm', 'intake: Jeddah Heights (BONA-W023)'); }
     return pub;
   };
   const listing = () => answer({ price: PRICE, priceEvidence: { page: 3, quote: '319,015' }, subsidisedPriceEvidence: { page: 3, quote: '270,425' } });
@@ -529,7 +529,7 @@ describe('processPdf --replace: history and the CLI', { timeout: 120000 }, () =>
     fs.writeFileSync(path.join(inbox, '_index.json'), JSON.stringify({ nextSeq: 24, listings: { [SLUG]: 'BONA-W023' } }));
     fs.mkdirSync(path.join(r.repo, 'public', 'listings', SLUG), { recursive: true });
     fs.writeFileSync(path.join(r.repo, 'public', 'listings', SLUG, '01.jpg'), 'old');
-    git(r, 'init', '-q'); git(r, 'add', '-A'); git(r, 'commit', '-qm', 'published');
+    git(r, 'init', '-q'); git(r, 'add', '-A'); git(r, 'commit', '-qm', 'intake: Jeddah Heights (BONA-W023)');
     return file;
   };
 
@@ -602,7 +602,7 @@ describe('processPdf: round-3 review cases', { timeout: 120000 }, () => {
   it('a price the check took away cannot stay in the copy', async () => {
     const pageText = [`مشروع سكني${PAD}`, `غرفتا نوم ودورتا مياه${PAD}`];
     const a = answer({ price: { amount: 1250000, currency: 'SAR', from: false, period: null, onRequest: false } });
-    a.listing.description.en = ['The asking figure is 1,250,000 for this unit.', 'Two.'];
+    a.listing.description.en = ['The asking price is 1,250,000 for this unit.', 'Two.'];
     const r = await rig({ pageText, listing: a, confirm: [] });
     try {
       await assert.rejects(r.run(), (err) => err.stage === 'price' && /copy states the price 1,250,000/.test(err.reason));
@@ -636,6 +636,61 @@ describe('processPdf: round-3 review cases', { timeout: 120000 }, () => {
       seed(r, { init: false });
       const report = await processPdf({ pdfPath: r.pdfPath, cfg: { ...JSON.parse('{}'), ...r.cfg }, caption: {}, workDir: path.join(r.repo, '..', 'work'), dryRun: true, meta: META });
       assert.equal(report.id, 'BONA-W023');
+    } finally { r.cleanup(); }
+  });
+});
+
+describe('processPdf: round-4 review cases', { timeout: 120000 }, () => {
+  const PAD = ' — شقة سكنية بمساحة واسعة وتشطيبات حديثة في موقع مميز قريب من الخدمات';
+  const SLUG = 'jeddah-heights-residential-community-jeddah';
+  const META = { id: 'BONA-W023', slug: SLUG, listedAt: '2026-11-17', sourceRef: 'WA-20261117-AC7D06', replace: true };
+  const git = (r, ...args) => execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.com', ...args], { cwd: r.repo, stdio: 'pipe' }).toString();
+
+  for (const [form, a, b] of [['space', '270 425', '319 015'], ['dot', '270.425', '319.015'], ['decimals', '270,425.00', '319,015.00']]) {
+    it(`a subsidy table written with ${form} grouping is still checked on the page`, async () => {
+      const pageText = [`مشروع سكني${PAD}`, `لمستفيدي الدعم\n${a}\nلغير مستفيدي الدعم\n${b}\n${PAD}`];
+      const r = await rig({ pageText, listing: answer({ price: { amount: 270425, currency: 'SAR', from: true, period: null, onRequest: false } }), confirm: [319015] });
+      try {
+        const report = await r.run();
+        assert.deepEqual(r.calls().filter((c) => c.tool === 'py-pages').map((c) => c.pages), [[2]]);
+        assert.equal(report.listingPreview.price.onRequest, true);
+      } finally { r.cleanup(); }
+    });
+  }
+
+  it('a refused price that only matches an area in the copy does not reject the run', async () => {
+    const pageText = [`مشروع سكني${PAD}`, `غرفتا نوم ودورتا مياه${PAD}`];
+    const a = answer({ price: { amount: 3000000, currency: 'SAR', from: false, period: null, onRequest: false } });
+    a.listing.description.en = ['The master plan spans more than 3 million square metres.', 'Two.'];
+    const r = await rig({ pageText, listing: a, confirm: [] });
+    try {
+      const report = await r.run();
+      assert.equal(report.listingPreview.price.onRequest, true);
+    } finally { r.cleanup(); }
+  });
+
+  it('with the owner\'s caption price, a Sakani figure in the copy is not treated as refused', async () => {
+    const r = await rig({ listing: answer({ price: PRICE }), confirm: [] });
+    try {
+      const a = JSON.parse(fs.readFileSync(path.join(r.repo, '..', 'bin', 'fake.json'), 'utf8'));
+      a.listing.listing.highlights.en[0] = 'Lower price 270,425 for beneficiaries';
+      fs.writeFileSync(path.join(r.repo, '..', 'bin', 'fake.json'), JSON.stringify(a));
+      const report = await processPdf({ pdfPath: r.pdfPath, cfg: r.cfg, caption: { price: { amount: 300000, currency: 'SAR' }, text: '300000' }, workDir: path.join(r.repo, '..', 'work'), dryRun: true });
+      assert.equal(report.listingPreview.price.amount, 300000);
+    } finally { r.cleanup(); }
+  });
+
+  it('refuses a listing whose history does not start at the intake\'s publish commit (a hand rename)', async () => {
+    const r = await rig({ listing: answer({ price: PRICE, priceEvidence: { page: 3, quote: '319,015' } }), confirm: [319015, 270425] });
+    try {
+      const sha = crypto.createHash('sha256').update(fs.readFileSync(r.pdfPath)).digest('hex');
+      const inbox = path.join(r.repo, 'scripts', 'curate', 'inbox');
+      fs.mkdirSync(inbox, { recursive: true });
+      fs.writeFileSync(path.join(inbox, `${SLUG}.json`), JSON.stringify({ id: 'BONA-W023', slug: SLUG, listedAt: '2026-11-17', _intake: { pdfSha256: sha } }));
+      fs.mkdirSync(path.join(r.repo, 'public', 'listings', SLUG), { recursive: true });
+      fs.writeFileSync(path.join(r.repo, 'public', 'listings', SLUG, '01.jpg'), 'old');
+      git(r, 'init', '-q'); git(r, 'add', '-A'); git(r, 'commit', '-qm', 'Rename W023 and fix its district by hand');
+      await assert.rejects(r.publish(META), /history starts at "Rename W023/);
     } finally { r.cleanup(); }
   });
 });

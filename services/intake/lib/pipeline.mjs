@@ -45,6 +45,9 @@ import { pinFromLinks } from './geo.mjs';
 import { changedSincePublished, committedUnchanged, rebuild, resetTree } from './publish.mjs';
 import { loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNamedIn, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
 
+/** Words that make a figure in the copy a price: a currency, "price", "from"-style openers. */
+const PRICE_CONTEXT_RE = /سعر|أسعار|اسعار|ريال|ر\.\s?س|ثمن|قيمة(?!\s*المضافة)|ابتداء|تبدأ|يبدأ|\b(?:SAR|SR|AED|USD|EUR|GBP|riyals?|prices?|priced|costs?|starting|starts)\b|[$€£﷼\u20c1]/i;
+
 export const sha256File = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
 /** Every string in a model answer's listing (title, project, copy, highlights, …), for the name check. */
@@ -394,7 +397,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
         report.warningCodes.push('subsidised-price-not-printed');
         report.warnings.push('the subsidised (Sakani) price could not be confirmed on the brochure, so only the regular price is shown');
       }
-      if (price.subsidisedAmount > 0) rejectedPrices.push(price.subsidisedAmount);
+      if (price.subsidisedAmount > 0 && !caption.price) rejectedPrices.push(price.subsidisedAmount); // the owner's caption price replaced it, it was not refused
       price.subsidisedAmount = null;
     }
   }
@@ -402,10 +405,13 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // A price the check took away must not survive in the words: the site prints `price`, but a
   // figure in the title, description or highlights would still be read as the asking price. The
   // same matcher that looks for the number in the brochure looks for it in the copy.
-  const copy = [ai.listing?.title?.en, ai.listing?.title?.ar, ...(ai.listing?.description?.en ?? []), ...(ai.listing?.description?.ar ?? []),
-    ...(ai.listing?.highlights?.en ?? []), ...(ai.listing?.highlights?.ar ?? [])].filter(Boolean).join('\n');
+  // Only where the copy talks about a price: "3 million square metres" is an area, not a refused
+  // asking price of 3,000,000.
+  const copySegments = [ai.listing?.title?.en, ai.listing?.title?.ar, ...(ai.listing?.description?.en ?? []), ...(ai.listing?.description?.ar ?? []),
+    ...(ai.listing?.highlights?.en ?? []), ...(ai.listing?.highlights?.ar ?? [])].filter(Boolean)
+    .flatMap((x) => String(x).split(/[.!?؟؛;\n]+(?=\s|$)/));
   for (const n of rejectedPrices) {
-    if (priceAppearsIn(copy, n)) {
+    if (copySegments.some((seg) => PRICE_CONTEXT_RE.test(seg) && priceAppearsIn(seg, n))) {
       throw new RejectError(`the copy states the price ${n.toLocaleString('en-US')}, which could not be confirmed on the brochure — resend with the price in the caption, or without it`, 'price');
     }
   }

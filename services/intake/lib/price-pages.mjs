@@ -10,9 +10,10 @@
 // The fix is to let the model LOOK at those pages. A page is rendered when
 //   - a line that talks about a price has no readable price-sized number near it (or the page
 //     carries a scrambled one), or
-//   - it mentions housing-subsidy (Sakani) beneficiaries: such a page prints two prices per unit,
-//     and which one is which can only be settled by looking (pipeline.mjs accepts neither the
-//     subsidised price nor a headline price that appears only on such pages from text alone).
+//   - it mentions housing-subsidy (Sakani) beneficiaries AND carries a price word or a price-sized
+//     figure: such a page prints two prices per unit, and which one is which can only be settled
+//     by looking (pipeline.mjs accepts neither the subsidised price nor a headline price that
+//     appears only on such pages from text alone).
 // A price read off a page image still has to pass the TAQEEM check in pipeline.mjs (evidence +
 // a second model confirming the number and its label on that page), so this widens what the
 // model can see, not what it may publish. A needless render costs one page image; a missed one
@@ -24,7 +25,7 @@ import { westernise } from './price.mjs';
 const PRICE_WORD_RE = new RegExp([
   'سعر', 'سعار', 'ريال', 'ر\\.\\s?س', 'ریال', // ﷼ folds to ریال (Farsi yeh) under NFKC
   'قيمة(?!\\s*المضافة)', 'ثمن', // "قيمة الوحدة", "القيمة البيعية" — but not VAT, "ضريبة القيمة المضافة"
-  '\\bprices?\\b', '\\bsar\\b', '\\bsr\\b', '\\baed\\b', '\\busd\\b', '\\beur\\b', '\\bgbp\\b', '€', '£',
+  '\\bprices?\\b', '\\bsar\\b', '\\bsr\\b', '\\baed\\b', '\\busd\\b', '\\beur\\b', '\\bgbp\\b', '€', '£', '\u20c1', // ⃁ the Saudi riyal sign
 ].join('|'), 'i');
 
 /**
@@ -43,12 +44,15 @@ export const SUBSIDY_RE = /مستفيد|لدعم|دعم سكني|مدعوم|(?:�
  */
 const READABLE_PRICE_RE = /(?<![\d.,])(?:\d{1,3}(?:[,٬'’]\d{3})+|\d{5,8})(?![\d.,])/;
 
+/** Any figure of 5+ digits with whatever separators priceAppearsIn would accept between them. */
+const ANY_FIGURE_RE = /\d(?:[\s.,،'’٫٬]*\d){4,}/;
+
 /** The scrambled form: capital letters standing in for digits, grouped like a price ("DIB,FDG"). */
 const SCRAMBLED_PRICE_RE = /(?<![A-Za-z])[A-Z]{1,3}[,٬][A-Z]{3}(?![A-Za-z])/;
 
 /** How far from a price word (in lines of the text layer) its number may sit: labels and values are often split. */
-const WINDOW_BEFORE = 2;
-const WINDOW_AFTER = 3;
+const WINDOW_BEFORE = 3;
+const WINDOW_AFTER = 5;
 
 /** Upper bound on extra page renders per brochure — each is one more image the model reads. */
 export const MAX_PRICE_PAGES = 12;
@@ -67,7 +71,10 @@ export function isSubsidyPricePage(text) {
   const raw = String(text ?? '');
   const folded = normaliseArabic(raw);
   if (!SUBSIDY_RE.test(folded)) return false;
-  return PRICE_WORD_RE.test(folded) || READABLE_PRICE_RE.test(westernise(folded)) || SCRAMBLED_PRICE_RE.test(raw);
+  // ANY figure of five or more digits, however it is grouped (270,425 / 270 425 / 270.425 /
+  // 270,425.00) — here a figure is the unsafe thing to miss, so this is far looser than
+  // READABLE_PRICE_RE, which errs the other way.
+  return PRICE_WORD_RE.test(folded) || ANY_FIGURE_RE.test(westernise(folded)) || SCRAMBLED_PRICE_RE.test(raw);
 }
 
 /**

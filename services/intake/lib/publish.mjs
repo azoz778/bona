@@ -81,7 +81,12 @@ export async function changedSincePublished(repo, paths) {
   if (r.code !== 0) return 'its git history could not be read';
   const commits = r.out.split('\n').filter(Boolean).map((line) => line.split('\t').slice(1).join('\t'));
   if (!commits.length) return 'it is not in git';
-  const later = commits.slice(0, -1); // the oldest commit published it
+  // The oldest commit on these paths must be the intake's own publish commit ("intake: <title> (<id>)").
+  // If it is not — a hand rename moved the files, so their history starts at the rename — the real
+  // history cannot be read from these paths, and the listing is refused.
+  const origin = commits[commits.length - 1];
+  if (!/^intake: (?!replace )/.test(origin)) return `its history starts at "${origin.slice(0, 60)}", not at the intake's publish commit`;
+  const later = commits.slice(0, -1);
   const others = later.filter((subject) => !subject.startsWith('intake: replace '));
   return others.length ? `${others.length} later commit(s), e.g. "${others[0].slice(0, 60)}"` : null;
 }

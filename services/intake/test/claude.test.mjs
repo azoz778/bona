@@ -136,13 +136,14 @@ describe('copyProblems — owner rules', () => {
   });
   it('catches a price written into the copy, in either language', () => {
     for (const text of ['Apartments from SAR 319,015 in phase one.', 'شقق ابتداءً من 319,015 ريال.', 'Priced at 2.5 million SAR.', 'السعر 2.5 مليون ريال',
-      '270,425 riyals', '270 ألف ريال', 'SAR 2.5m', 'SAR 990k', '£2.5m', '319015 SAR', 'السعر 319015 ريال']) {
+      '270,425 riyals', '270 ألف ريال', 'SAR 2.5m', 'SAR 990k', '£2.5m', '319015 SAR', 'السعر 319015 ريال',
+      'السعر مليون ريال', 'بسعر 3 ملايين ريال', 'ابتداءً من 5 ملايين', 'SAR 5m', 'SAR 3 million', '250 الف ريال', '\u20c1 319,015']) {
       const l = structuredClone(GOOD.listing);
       l.description.en = [text, 'Two.'];
       assert.ok(copyProblems(l).some((p) => /states a price/.test(p)), text);
     }
     const ok = structuredClone(GOOD.listing);
-    ok.description.en = ['Eight layouts from 79.77 to 175.40 m², ten-year warranty, 1,710 units.', 'Two.'];
+    ok.description.en = ['Eight layouts from 79.77 to 175.40 m², ten-year warranty, 1,710 units, 1.3 million m² of master plan.', 'Off the SR 15 road.'];
     assert.deepEqual(copyProblems(ok), []);
   });
 

@@ -196,6 +196,16 @@ describe('TAQEEM cross-check — a price must actually be printed', () => {
   it('reads the "4.5m" and "مليون" forms', () => {
     assert.ok(priceAppearsIn('from 4.5m SAR', 4500000));
     assert.ok(priceAppearsIn('4.5 million', 4500000));
+  });
+
+  it('a figure inside a longer one is not "printed" (review 2026-11-17)', () => {
+    assert.equal(priceAppearsIn('السعر 1,450,000 ريال', 450000), false);
+    assert.equal(priceAppearsIn('2,319,015', 319015), false);
+    assert.equal(priceAppearsIn('319,015,000', 319015), false);
+    assert.equal(priceAppearsIn('spans 1.3 million square metres', 3000000), false);
+    assert.equal(priceAppearsIn('السعر 319,015 ريال.', 319015), true);
+    assert.equal(priceAppearsIn('بسعر 3 ملايين ريال', 3000000), true);
+    assert.equal(priceAppearsIn('250 آلاف', 250000), true);
     assert.ok(priceAppearsIn('٤٫٥ مليون ريال', 4500000));
     assert.ok(priceAppearsIn('990k', 990000));
   });
