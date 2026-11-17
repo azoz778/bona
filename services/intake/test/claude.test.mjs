@@ -621,6 +621,14 @@ async function riyalRules(call) {
   const qaSar = await ask('SAR', 'QAR');
   for (const bare of ['ريال', '﷼']) assert.ok(!listsMark(promptMarks(qaSar, 'SAR'), bare), `SAR in Qatar does not list a bare ${bare}`);
   assert.match(qaSar, /Qatar: a bare ريال[^\n]*is the Qatari riyal/);
+  // M6: a Qatari (or Yemeni, Iranian) property read in OMR — a bare riyal there is that country's, never the Omani
+  // rial: OMR lists only its own marks, so the prompt does not contradict itself.
+  for (const [home, where] of [['QAR', /Qatar: a bare ريال[^\n]*is the Qatari riyal/], ['YER', /Yemen: a bare ريال[^\n]*is the Yemeni rial/], ['IRR', /Iran: a bare ريال[^\n]*is the Iranian rial/]]) {
+    const omr = await ask('OMR', home);
+    for (const bare of ['ريال', '﷼']) assert.ok(!listsMark(promptMarks(omr, 'OMR'), bare), `OMR with home ${home} does not list a bare ${bare}`);
+    for (const mark of ['OMR', 'ر.ع.', 'ريال عماني']) assert.ok(listsMark(promptMarks(omr, 'OMR'), mark), `OMR with home ${home} lists ${mark}`);
+    assert.match(omr, where);
+  }
   // Anywhere else a bare riyal is the Saudi riyal — and never the Omani rial.
   for (const home of ['SAR', null, undefined, 'USD']) {
     const sar = await ask('SAR', home);

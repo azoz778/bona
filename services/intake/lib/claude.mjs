@@ -397,11 +397,16 @@ export const CURRENCY_MARKS = Object.freeze({
   EUR: 'EUR, €, يورو',
   OMR: 'OMR, ر.ع., ريال عماني',
 });
-/** Where a bare riyal is another country's (OM, QA, …): SAR is only the Saudi riyal marked as such; in Oman a bare one is OMR. */
+/** Where a bare riyal is another country's (OM, QA, …): SAR is only the Saudi riyal marked as such. */
 const RIYAL_MARKS = Object.freeze({
   SAR: 'SAR, SR, ر.س, ريال سعودي or the Saudi riyal sign \u20c1',
-  OMR: 'OMR, ر.ع., ريال عماني, ريال or ﷼',
 });
+/**
+ * In Oman, and only there, a bare riyal is the Omani rial: OMR's marks take in ريال / ﷼. On a Qatari, Yemeni or
+ * Iranian property a bare one is that country's riyal, so OMR keeps its own marks (final review M6: a Qatari
+ * property read in OMR was told a bare ريال is OMR and, two lines on, that it is the Qatari riyal).
+ */
+const OMR_IN_OMAN = 'OMR, ر.ع., ريال عماني, ريال or ﷼';
 /** The countries where a bare riyal is not the Saudi one, and whose riyal it is there (price.mjs riyalOf). */
 const RIYAL_ABROAD = Object.freeze({ OMR: ['Oman', 'the Omani rial'], QAR: ['Qatar', 'the Qatari riyal'], YER: ['Yemen', 'the Yemeni rial'], IRR: ['Iran', 'the Iranian rial'] });
 const OTHER_CURRENCIES = [['GBP', '£/GBP'], ['USD', '$/USD'], ['EUR', '€/EUR'], ['AED', 'AED/درهم'], ['SAR', 'SAR/ريال سعودي'], ['OMR', 'OMR/ريال عماني']];
@@ -420,7 +425,7 @@ const OTHER_CURRENCIES = [['GBP', '£/GBP'], ['USD', '$/USD'], ['EUR', '€/EUR'
 function currencyRule(currency, bareCounts, home = null) {
   const riyal = riyalOf(home);
   const abroad = RIYAL_ABROAD[riyal] ?? null;
-  const marks = (abroad && RIYAL_MARKS[currency]) || CURRENCY_MARKS[currency];
+  const marks = currency === 'OMR' && riyal === 'OMR' ? OMR_IN_OMAN : (abroad && RIYAL_MARKS[currency]) || CURRENCY_MARKS[currency];
   const others = OTHER_CURRENCIES.filter(([c]) => c !== currency).map(([, label]) => label).join(', ');
   return [
     `A figure counts only when that page shows it printed IN ${currency} — ${currency}'s code, symbol or name`,
