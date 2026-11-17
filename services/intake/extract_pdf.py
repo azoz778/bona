@@ -3,7 +3,7 @@
 
 Run through uv so no system install is needed:
 
-    uv run --with pymupdf --with pillow python services/intake/extract_pdf.py <in.pdf> <outdir> [--json]
+    uv run --with pymupdf --with pillow python services/intake/extract_pdf.py <in.pdf> <outdir>
 
 Writes candidate images to <outdir>/images/NNN.<ext> and prints one JSON object on
 stdout:
