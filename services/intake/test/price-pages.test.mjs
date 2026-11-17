@@ -970,6 +970,45 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     } finally { r.cleanup(); }
   });
 
+  it('a refused model price left bare in a model\'s availability refuses the run (probe: "Buildings G–P, 419,994 / 356,024")', async () => {
+    const a = withModels([model('Nawras', 419994, 356024, 3), model('Lulu', 319015, 270425, 3)]);
+    a.models[0].availability = { en: 'Buildings G–P, 419,994 / 356,024', ar: 'المباني G–P، 419,994' };
+    const r = await rig({ listing: a, modelConfirm: [319015, 270425, 356024] });
+    try {
+      await assert.rejects(r.run(), (err) => err.stage === 'price' && /^a unit model's text states the price 419,994, which could not be confirmed/.test(err.reason));
+    } finally { r.cleanup(); }
+  });
+
+  it('a refused figure in a model name or its rooms refuses the run too', async () => {
+    for (const put of [(m) => { m.name = { en: 'Nawras 419,994', ar: 'نورس' }; }, (m) => { m.rooms = { en: ['Maid room', 'Paid 419,994'], ar: ['غرفة خادمة', 'غرفة'] }; }]) {
+      const a = withModels([model('Nawras', 419994, null, 3), model('Lulu', 319015, null, 3)]);
+      put(a.models[0]);
+      const r = await rig({ listing: a, modelConfirm: [319015] });
+      try {
+        await assert.rejects(r.run(), (err) => err.stage === 'price' && /a unit model's text states the price 419,994/.test(err.reason));
+      } finally { r.cleanup(); }
+    }
+  });
+
+  it('a refused headline figure left bare in a fact list refuses the run (probe: "Down payment 50,000")', async () => {
+    const a = answer({ price: { amount: 50000, currency: 'SAR', from: false, period: null, onRequest: false } });
+    a.amenities = { en: ['Down payment 50,000'], ar: ['دفعة أولى 50,000'] };
+    const r = await rig({ listing: a });
+    try {
+      await assert.rejects(r.run(), (err) => err.stage === 'price' && /^a fact list states the price 50,000, which could not be confirmed/.test(err.reason));
+    } finally { r.cleanup(); }
+  });
+
+  it('a CONFIRMED model figure in its availability is published, not refused', async () => {
+    const a = withModels([model('Nawras', 419994, 356024, 3), model('Lulu', 319015, 270425, 3)]);
+    a.models[0].availability = { en: 'Buildings G–P, 419,994 / 356,024', ar: 'المباني G–P، 419,994' };
+    const r = await rig({ listing: a });
+    try {
+      const report = await r.run();
+      assert.equal(report.listingPreview.models[0].availability.en, 'Buildings G–P, 419,994 / 356,024');
+    } finally { r.cleanup(); }
+  });
+
   it('when every model price is refused, the headline falls back to its own checks', async () => {
     const r = await rig({
       listing: withModels([model('Lulu', 319015, 270425, 3)], { price: PRICE, priceEvidence: { page: 3, quote: '319,015' }, subsidisedPriceEvidence: { page: 3, quote: '270,425' } }),
@@ -1563,6 +1602,55 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       assert.deepEqual(after.price, own);
       assert.deepEqual(after.models.map((m) => m.price), [419994, 319015]);
       assert.deepEqual(checkListing(after), []);
+    } finally { r.cleanup(); }
+  });
+
+  it('a refused model price left bare in a model\'s availability refuses the enrichment, and nothing is changed', async () => {
+    const a = reading();
+    a.models[0].availability = { en: 'Buildings G–P, 419,994 / 356,024', ar: 'المباني G–P، 419,994' };
+    const r = await rig({ listing: a, modelConfirm: [319015, 270425, 356024] });
+    try {
+      seed(r);
+      await assert.rejects(enrich(r), (err) => err.stage === 'enrich'
+        && /^a unit model's text states the price 419,994, which could not be confirmed on the brochure — nothing was changed/.test(err.reason));
+      assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '');
+      assert.equal(r.calls().filter((c) => c.tool === 'brochure').length, 0);
+    } finally { r.cleanup(); }
+  });
+
+  it('a refused model price left bare in a fact list refuses the enrichment (probe: "Down payment 50,000")', async () => {
+    const a = reading();
+    a.models.push({ name: { en: 'Studio', ar: 'نموذج استوديو' }, bedrooms: 0, bathrooms: 1, areaSqm: 40, rooms: null, availability: null, price: 50000, subsidisedPrice: null, evidence: { page: 3, quote: '50000' }, floorPlan: null });
+    a.amenities = { en: ['Down payment 50,000'], ar: ['دفعة أولى 50,000'] };
+    const r = await rig({ listing: a, modelConfirm: { 2: { price: false } } });
+    try {
+      seed(r, { price: { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 } });
+      await assert.rejects(enrich(r), (err) => err.stage === 'enrich' && /^a fact list states the price 50,000/.test(err.reason));
+      assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '');
+    } finally { r.cleanup(); }
+  });
+
+  it('under the owner\'s own price the model figures are never checked, so one left in a model\'s text refuses the enrichment', async () => {
+    const a = reading();
+    a.models[0].availability = { en: 'Buildings G–P, 419,994', ar: 'المباني G–P، 419,994' };
+    const r = await rig({ listing: a });
+    try {
+      seed(r, { price: { amount: 300000, currency: 'SAR', from: false, period: null, onRequest: false }, intake: { edits: ['price'] } });
+      await assert.rejects(enrich(r), (err) => err.stage === 'enrich' && /a unit model's text states the price 419,994/.test(err.reason));
+      assert.equal(r.calls().filter((c) => c.tool === 'claude-model-confirm').length, 0);
+    } finally { r.cleanup(); }
+  });
+
+  it('the reading\'s own copy is not looked at by an enrichment (it publishes none of it)', async () => {
+    const a = reading();
+    a.listing.description.en = ['Two-bedroom apartments from 319,015 in phase one.', 'Two.'];
+    const r = await rig({ listing: a, modelConfirm: [419994, 356024] });
+    try {
+      seed(r, { price: { ...ON_REQUEST } });
+      const report = await enrich(r);
+      assert.equal(report.ok, true);
+      assert.deepEqual(report.modelPrices.refused.sort(), [270425, 319015]);
+      assert.equal(saved(r).price.amount, 419994);
     } finally { r.cleanup(); }
   });
 

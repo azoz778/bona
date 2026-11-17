@@ -215,7 +215,9 @@ Anything else in the group is ignored, silently.
   PDF), and when that render fails its models are refused — never moved to another page by their
   text, so the page cap holds. A brochure that would need more than `BONA_MAX_MODEL_PRICE_PAGES`
   pages checked gets no model price at all and no call. A figure not confirmed is dropped
-  (`model-price-not-printed`) and, like a refused headline, may not stay in the copy. The reply
+  (`model-price-not-printed`) and, like a refused headline, may not stay in the copy — nor in any
+  text the run publishes: a model's name, rooms or availability, or a fact list (a bare
+  "Buildings G–P, 419,994" counts), on a publish and on `--enrich` alike (which then changes nothing). The reply
   words the two cases apart: "could not be confirmed on the brochure's own pages" for a figure the
   check did not find, "could not be completed (pages …) — try again later" for one whose render or
   call failed. After a quota error no further call is made for the brochure — not for the headline

@@ -47,7 +47,7 @@ import { priceAppearsIn, westernise } from './price.mjs';
 import { isSubsidyPricePage, pricePagesToRender } from './price-pages.mjs';
 import { pinFromLinks } from './geo.mjs';
 import { changedSincePublished, committedUnchanged, rebuild, resetTree } from './publish.mjs';
-import { loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNamedIn, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
+import { FACT_LISTS, loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNamedIn, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
 
 /** Words that make a figure in the copy a price: a currency, "price", "from"-style openers. */
 const PRICE_CONTEXT_RE = /سعر|أسعار|اسعار|ريال|ر\.\s?س|ثمن|قيمة(?!\s*المضافة)|ابتداء|تبدأ|يبدأ|\b(?:SAR|SR|AED|USD|EUR|GBP|riyals?|prices?|priced|costs?|starting|starts)\b|[$€£﷼\u20c1]/i;
@@ -70,6 +70,43 @@ export const sha256File = (file) => crypto.createHash('sha256').update(fs.readFi
 
 /** Every string in a model answer's listing (title, project, copy, highlights, …), for the name check. */
 const stringsIn = (v) => (typeof v === 'string' ? [v] : v && typeof v === 'object' ? Object.values(v).flatMap(stringsIn) : []);
+
+const SENTENCE_END = /[.!?؟؛;\n]+(?=\s|$)/;
+const pairText = (v) => [v?.en, v?.ar];
+const listText = (v) => ['en', 'ar'].flatMap((k) => (Array.isArray(v?.[k]) ? v[k] : []));
+
+/**
+ * Every text a run publishes from the reading, cut into sentences, each `{ seg, where }`: the listing's
+ * title, description and highlights (`listingCopy`, a publish — "the copy"), every unit model's name,
+ * rooms and availability, and the fact lists (FACT_LISTS: amenities / nearby / warranties).
+ */
+function publishedText(ai, { listingCopy = true } = {}) {
+  const l = ai?.listing;
+  const groups = [
+    ['the copy', listingCopy ? [...pairText(l?.title), ...listText(l?.description), ...listText(l?.highlights)] : []],
+    ["a unit model's text", (Array.isArray(ai?.models) ? ai.models : []).flatMap((m) => [...pairText(m?.name), ...listText(m?.rooms), ...pairText(m?.availability)])],
+    ['a fact list', Object.keys(FACT_LISTS).flatMap((k) => listText(ai?.[k]))],
+  ];
+  return groups.flatMap(([where, texts]) => texts.filter((x) => typeof x === 'string' && x)
+    .flatMap((x) => x.split(SENTENCE_END)).map((seg) => ({ seg, where })));
+}
+
+/**
+ * The copy guard: the first refused figure (`refused`, not among `published`) that a published text
+ * still states as a price — `{ n, where }` — or null. A sentence with price wording counts whole;
+ * otherwise only what is left once the measurements are cut out ("3 million square metres" is an area,
+ * "the asking figure is 1,250,000 for a 120 m² flat" is still the refused price). A bare figure counts:
+ * "Buildings G–P, 419,994 / 356,024" states 419,994.
+ */
+function refusedFigureIn(segments, refused, published) {
+  const shown = new Set(published.filter((n) => typeof n === 'number' && n > 0));
+  for (const n of refused) {
+    if (shown.has(n)) continue;
+    const hit = segments.find(({ seg }) => priceAppearsIn(seg, n) && (PRICE_CONTEXT_RE.test(seg) || priceAppearsIn(withoutMeasures(seg), n)));
+    if (hit) return { n, where: hit.where };
+  }
+  return null;
+}
 
 /**
  * The withdrawal a model's reading of the brochure falls under, or null: by the listing's own fields
@@ -431,10 +468,11 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     return out;
   };
   const rejectedPrices = [];
-  const copySegments = [ai.listing?.title?.en, ai.listing?.title?.ar, ...(ai.listing?.description?.en ?? []), ...(ai.listing?.description?.ar ?? []),
-    ...(ai.listing?.highlights?.en ?? []), ...(ai.listing?.highlights?.ar ?? [])].filter(Boolean)
-    .flatMap((x) => String(x).split(/[.!?؟؛;\n]+(?=\s|$)/));
-  const inCopy = (n) => copySegments.some((seg) => priceAppearsIn(seg, n));
+  // Every text the run publishes, sentence by sentence, each with where it comes from: the listing's
+  // copy (a publish only — an enrichment keeps the listing's own), and the unit models' names, rooms
+  // and availability and the fact lists, which both publish. A refused figure is looked for in all of it.
+  const copySegments = publishedText(ai, { listingCopy: !enrich });
+  const inCopy = (n) => copySegments.some(({ seg }) => priceAppearsIn(seg, n));
 
   // --- 4a. unit-model prices ------------------------------------------------------
   // A development sold as unit models prints a price (and often a Sakani price) per model. Each
@@ -462,12 +500,14 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     if (enrich && (readingCurrency === null || readingCurrency !== listingCurrency)) currencyDrop = { decision: 'currency-mismatch', currency };
     else if (!enrich && readingCurrency === null) currencyDrop = { decision: 'currency-unconfirmed', currency };
   }
+  // The owner's own figure — his caption price, or the price he set by WhatsApp on a listing being enriched.
+  const ownerAmount = caption.price ? caption.price.amount : ownerPriceEdit ? (enrichTarget.listing.price?.amount ?? null) : null;
   let headlineFromModels = false;
   if (Array.isArray(ai.models) && ai.models.length && (caption.price || ownerPriceEdit || currencyDrop)) {
     for (const m of ai.models) {
       // Same rule as the model's own headline figure under a caption price: dropped, and refused
       // outright only if the copy states it (the owner's own figure excepted).
-      for (const n of figuresOf(m)) if (currencyDrop || (caption.price && n !== caption.price.amount && inCopy(n))) rejectedPrices.push(n);
+      for (const n of figuresOf(m)) if (currencyDrop || (n !== ownerAmount && inCopy(n))) rejectedPrices.push(n);
       if (m && typeof m === 'object') { m.price = null; m.subsidisedPrice = null; }
     }
     if (currencyDrop) {
@@ -565,6 +605,16 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // the listing (enrichHeadline): the model's own headline and Sakani checks, the copy guard, the map
   // and the photo steps below are for a publish only. Its unit-model prices are checked above, the same.
   if (enrich) {
+    // The copy guard, over what an enrichment publishes: a figure taken away may not stay in a model's
+    // name, rooms or availability or in a fact list. What the listing shows as its price, and every
+    // model figure a second model confirmed, is published, not refused.
+    const shown = enrichTarget.listing.price;
+    const kept = [shown && !shown.onRequest ? shown.amount : null, shown?.subsidisedAmount, ...(Array.isArray(ai.models) ? ai.models : []).flatMap(figuresOf)];
+    const stated = refusedFigureIn(copySegments, rejectedPrices, kept);
+    if (stated) {
+      throw new RejectError(`${stated.where} states the price ${stated.n.toLocaleString('en-US')}, which could not be confirmed on the brochure — `
+        + `nothing was changed; run --enrich again later, the next reading may leave it out`, 'enrich');
+    }
     return enrichListing({ report, ai, extraction, cfg, caption, workDir, dryRun, withdrawals, target: enrichTarget, started, currencyDrop });
   }
 
@@ -613,24 +663,19 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   }
 
   // A price the check took away must not survive in the words: the site prints `price`, but a
-  // figure in the title, description or highlights would still be read as the asking price. The
-  // same matcher that looks for the number in the brochure looks for it in the copy, mention by
-  // mention: a sentence with price wording counts whole; otherwise only what is left once the
-  // measurements are cut out — "3 million square metres" is an area, "the asking figure is
-  // 1,250,000 for a 120 m² flat" is still the refused price.
+  // figure in the title, description or highlights — or in a unit model's name, rooms or availability,
+  // or a fact list — would still be read as a price. The same matcher that looks for the number in the
+  // brochure looks for it in every published text, mention by mention (refusedFigureIn).
   // A figure that IS published — the headline, its Sakani price, a model price a second model saw
   // printed — is not a refused one, even when the same figure was refused for another model.
-  const published = new Set((caption.price
+  const stated = refusedFigureIn(copySegments, rejectedPrices, caption.price
     ? [caption.price.amount]
-    : [price && !price.onRequest ? price.amount : null, price?.subsidisedAmount, ...(Array.isArray(ai.models) ? ai.models : []).flatMap(figuresOf)]
-  ).filter((n) => typeof n === 'number' && n > 0));
-  for (const n of rejectedPrices) {
-    if (published.has(n)) continue;
-    if (copySegments.some((seg) => priceAppearsIn(seg, n) && (PRICE_CONTEXT_RE.test(seg) || priceAppearsIn(withoutMeasures(seg), n)))) {
-      throw new RejectError(caption.price
-        ? `the copy states the price ${n.toLocaleString('en-US')}, which could not be confirmed on the brochure — send it again; the next reading may leave it out`
-        : `the copy states the price ${n.toLocaleString('en-US')}, which could not be confirmed on the brochure — resend with the price in the caption, or without it`, 'price');
-    }
+    : [price && !price.onRequest ? price.amount : null, price?.subsidisedAmount, ...(Array.isArray(ai.models) ? ai.models : []).flatMap(figuresOf)]);
+  if (stated) {
+    const n = stated.n.toLocaleString('en-US');
+    throw new RejectError(caption.price
+      ? `${stated.where} states the price ${n}, which could not be confirmed on the brochure — send it again; the next reading may leave it out`
+      : `${stated.where} states the price ${n}, which could not be confirmed on the brochure — resend with the price in the caption, or without it`, 'price');
   }
 
   // --- 4b. map pin --------------------------------------------------------------
