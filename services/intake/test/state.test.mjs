@@ -127,6 +127,19 @@ describe('reply messages', () => {
     },
   };
 
+  it('names the new bilingual brochure and the unit models', () => {
+    const withBrochure = {
+      ...report,
+      brochure: { pages: 12, bytes: 3 * 1048576 },
+      listing: { ...report.listing, brochureUrl: '/brochures/x.pdf', models: [{}, {}, {}] },
+    };
+    const text = msg.published(withBrochure);
+    assert.match(text, /📄 Bona brochure \(English \+ Arabic, 12 pages\) \(3\.0 MB\): \/brochures\/x\.pdf/);
+    assert.match(text, /🏢 3 unit models with floor plans/);
+    assert.doesNotMatch(text, /re-published/);
+    assert.doesNotMatch(msg.published(report), /unit model/);
+  });
+
   it('the success reply carries the URL, the count, the cover and the commands', () => {
     const text = msg.published(report, { live: true });
     assert.match(text, /Five-Bedroom Villa/);

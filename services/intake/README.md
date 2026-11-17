@@ -21,6 +21,28 @@ owner's phone ──WhatsApp group "Bona …"──▶ Evolution API (wa-api.azo
 
 Nothing about this service is exposed to the internet: it makes outbound calls only.
 
+### The publish pipeline at a glance (unit models, brochure, enrich)
+
+1. **Models extraction**: the model reads the PDF and returns the listing plus its unit models
+   (type, beds, areas, prices as printed).
+2. **Per-page price confirmation** (`lib/model-prices.mjs`): every model price is confirmed on its
+   page image by a second model, one call per page (3 at a time), at most `BONA_MAX_MODEL_PRICE_PAGES`
+   pages (12); a price that is not confirmed is dropped, never taken from the text layer.
+3. **Floor plans**: each model's plan is cut from the PDF and saved as `plan-NN.jpg` (flattened on white).
+4. **Site section**: the listing page shows "Residences & prices" from `models`.
+5. **Brochure** (`brochure_pdf.py`): one bilingual (English + Arabic) A4 PDF drawn from scratch in the
+   TK design system, from the published listing, its photos and plans. WeasyPrint is pinned to 70.0 and
+   needs the system Pango libraries. A failed build never deletes an existing brochure.
+6. **`brochure <id>`** (WhatsApp command): rebuilds that brochure from the listing alone, no source PDF needed.
+7. **`run-once.mjs <pdf> --enrich <id>`**: adds models, plans, amenities / nearby / warranties and a new
+   brochure to an already published listing, leaving every other field untouched. Headline rules: the
+   owner's own price is kept and model prices are cleared; a price on request adopts the models' lowest
+   (`from`); an existing price must equal the models' lowest, else the run is refused (then it is marked
+   `from: true` when equal). See "Enriching a published listing" below.
+8. **`backfill-enrich.mjs`**: runs `--enrich` over every older listing, one at a time. `--plan-only`
+   prints the plan and stops, `--dry-run` runs each job without writing, a live run commits and pushes.
+   It stops at the first FAILED job or a quota/usage limit and prints the `--only <ids>` that resumes it.
+
 ## How the owner uses it
 
 1. Make (or rename) any WhatsApp group whose **subject contains "Bona"** — e.g. "Bona

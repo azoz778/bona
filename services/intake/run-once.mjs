@@ -177,6 +177,8 @@ async function main() {
   const enrich = 'enrich' in args.opts;
   // `--enrich --dry-run` would otherwise take "--dry-run" as the id and run for real.
   if (enrich && (!args.opts.enrich || args.opts.enrich.startsWith('--'))) { say('--enrich needs a listing id (--enrich BONA-W023)'); process.exit(2); }
+  // Same for `--replace --dry-run`.
+  if ('replace' in args.opts && (!args.opts.replace || args.opts.replace.startsWith('--'))) { say('--replace needs a listing id (--replace BONA-W023)'); process.exit(2); }
   if (enrich && args.opts.replace) { say('--enrich and --replace do not go together: --enrich adds unit models to the listing as it stands, --replace rewrites it'); process.exit(2); }
   // An enrichment replaces the plan files and the brochure and, like a replacement, is rolled back from git.
   if (enrich && args.flags.has('no-git') && !dryRun) {

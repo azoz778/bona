@@ -162,3 +162,14 @@ and one single-property brochure. Two-model review (Claude + Codex) until both s
 PR → owner merges → pull `~/bona`, restart `bona-intake` → `run-once --enrich BONA-W023` → check live →
 backfill the rest → check a sample live. Rollback: revert the PR; listings keep their old fields (the new
 ones are optional) and the old brochures can be rebuilt with the previous code.
+
+## 10. Decisions made during the build (2026-11-17)
+
+- **One bilingual PDF** (the owner revised the earlier two-file idea): English and Arabic in the same brochure.
+- **Model prices are always confirmed on the page image**: no text-layer shortcut, since a price table puts every model's figures in the text.
+- **Page cap 12, concurrency 3** for the per-page confirmation (`BONA_MAX_MODEL_PRICE_PAGES`).
+- **Enrich headline rules**: the owner-set price is kept and model prices are cleared; a price on request adopts the models' lowest; an existing price must match the models' lowest or the run is refused; `from: true` is set when they are equal.
+- **Floor plans are flattened on white** (the SMask fix), so transparent plans do not print black.
+- **Arabic bracket font fix**: Amiri is restricted with `unicode-range` so brackets and digits do not fall into the wrong font.
+- **Copy rules extended**: Saudi phone formats (including Arabic-Indic digits), URLs, emails, handles and domains are all rejected from generated copy.
+- **Off-plan photos are labelled "Illustrative"**.

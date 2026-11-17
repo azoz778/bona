@@ -615,6 +615,18 @@ describe('processPdf --replace: history and the CLI', { timeout: 120000 }, () =>
     } catch (err) { out = `${err.stdout}${err.stderr}`; }
     assert.match(out, /--replace needs git/);
   });
+
+  it('run-once treats `--replace --dry-run` as a usage error, not as the id', () => {
+    for (const flag of ['--replace', '--enrich']) {
+      let out = '';
+      let code = 0;
+      try {
+        execFileSync(process.execPath, [path.join(REPO, 'services', 'intake', 'run-once.mjs'), path.join(REPO, 'package.json'), flag, '--dry-run'], { stdio: 'pipe' });
+      } catch (err) { out = `${err.stdout}${err.stderr}`; code = err.status; }
+      assert.equal(code, 2, flag);
+      assert.match(out, new RegExp(`${flag} needs a listing id`));
+    }
+  });
 });
 
 describe('processPdf: round-3 review cases', { timeout: 120000 }, () => {
