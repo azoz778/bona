@@ -4,7 +4,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { licenceProblems, loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
-import { brochureFileIn, brochureUrlFor, buildBrandedBrochure, findSourcePdf } from './brochure.mjs';
+import { brochureFileIn, brochureUrlFor, buildBrandedBrochure } from './brochure.mjs';
+import { log } from './log.mjs';
 import { WARNING_CODES, findInbox } from './listing.mjs';
 import { removeListingImages } from './images.mjs';
 import { MAX_VIDEOS, writeListingVideo } from './video.mjs';
@@ -340,34 +341,31 @@ export function addVideo(repo, id, media) {
 }
 
 /**
- * `brochure <id>` — rebuild the Bona-branded PDF for a listing that is already live, from
- * the developer's original still sitting in `$BONA_DATA/intake/…`.
+ * `brochure <id>` — rebuild the Bona brochure for a listing that is already live, from what the
+ * repo itself holds: the inbox listing and the photos and floor plans in
+ * `public/listings/<slug>/`. The developer's original PDF is not needed, so this works long after
+ * the download was cleaned out of `$BONA_DATA`.
  *
- * The original is found by CONTENT HASH (`_intake.pdfSha256`), not by a path in the state
- * file: a listing published by `run-once.mjs` never wrote a state record, and a state file
- * can be lost, while the repo always remembers the sha of the PDF it came from.
- *
- * This is the command to reach for after `price` or a title fix — the brochure prints those
- * facts on its cover, so it goes stale when they change.
+ * This is the command to reach for after `price`, `hero` or a title fix — the brochure prints
+ * those, so it goes stale when they change.
  *
  * @returns {Promise<{listing:object,brochure:object}|{error:string}|null>}
  */
-export async function rebuildBrochure(repo, id, { cfg, workDir } = {}) {
+export async function rebuildBrochure(repo, id, { cfg = {}, workDir, spawnImpl } = {}) {
   const found = findInbox(repo, id);
   if (!found) return null;
   const refused = withdrawnRefusal(repo, found.listing);
   if (refused) return refused;
   const { listing } = found;
-  const sha = listing?._intake?.pdfSha256;
-  const source = findSourcePdf(cfg?.intakeDir, sha);
-  if (!source) {
-    return { error: `the original PDF for ${id} is not in ${cfg?.data ?? 'the data dir'} any more — send the brochure again to replace the listing` };
-  }
-  const outDir = path.join(repo, 'public', 'listings', listing.slug);
+  const filesDir = path.join(repo, 'public', 'listings', listing.slug);
   const built = await buildBrandedBrochure({
-    pdfPath: source, listing, outPath: brochureFileIn(outDir), workDir, cfg,
+    listing, filesDir, outPath: brochureFileIn(filesDir), workDir,
+    // The site.json printed is the one in the repo being published, whatever cfg.repo says.
+    cfg: { ...cfg, repo },
+    spawnImpl,   // undefined -> the real spawn (buildBrandedBrochure's default)
   });
   if (!built.ok) {
+    log.warn('edit.brochure_failed', { id, reason: built.reason, error: built.error, detail: built.detail });
     return { error: built.reason === 'too-large' ? built.error : `the branded brochure could not be built for ${id} — the reason is in the journal` };
   }
   listing.brochureUrl = brochureUrlFor(cfg.site, listing.slug);
@@ -376,5 +374,5 @@ export async function rebuildBrochure(repo, id, { cfg, workDir } = {}) {
     listing._intake.warnings = listing._intake.warnings
       .filter((c) => WARNING_CODES.has(c) && c !== 'brochure-too-large' && c !== 'brochure-failed');
   }
-  return { listing: save(found.file, listing), brochure: built, source };
+  return { listing: save(found.file, listing), brochure: built };
 }

@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DEFAULT_BROCHURE_PY_CMD } from './brochure.mjs';
 
 /** Parse a dotenv-style file body. Supports `export K=v`, quotes and `#` comments. */
 export function parseEnv(text) {
@@ -82,11 +83,11 @@ export function loadConfig(overrides = {}) {
     pyCmd: String(raw.BONA_PY_CMD || '').trim()
       ? String(raw.BONA_PY_CMD).trim().split(/\s+/)
       : ['uv', 'run', '--with', 'pymupdf', '--with', 'pillow', 'python'],
-    // The brochure step needs more than the extractor does: segno draws the QR and
-    // fontTools+brotli decompress public/fonts/*.woff2 into the TTFs PyMuPDF can embed.
+    // The brochure step needs more than the extractor does: WeasyPrint (pinned) lays the pages
+    // out, segno draws the QR — see DEFAULT_BROCHURE_PY_CMD in lib/brochure.mjs.
     brochurePyCmd: String(raw.BONA_BROCHURE_PY_CMD || '').trim()
       ? String(raw.BONA_BROCHURE_PY_CMD).trim().split(/\s+/)
-      : ['uv', 'run', '--with', 'pymupdf', '--with', 'segno', '--with', 'fonttools', '--with', 'brotli', 'python'],
+      : [...DEFAULT_BROCHURE_PY_CMD],
     brochureTimeoutMs: num(raw.BONA_BROCHURE_TIMEOUT_MS, 600000),
     site: (raw.BONA_SITE || 'https://bona-real-estate.com').replace(/\/+$/, ''),
     maxPdfMb: num(raw.BONA_MAX_PDF_MB, 150), // real developer brochures are 50–80 MB (owner's files 2026-09-06)
@@ -115,8 +116,8 @@ export function loadConfig(overrides = {}) {
     // brochure to finish publishing before it gives up and asks for an id.
     videoWindowMin: num(raw.BONA_VIDEO_WINDOW_MIN, 15),
     videoWaitMin: num(raw.BONA_VIDEO_WAIT_MIN, 30),
-    // The cap on the BRANDED output, not on the developer's original: rebrand_pdf.py
-    // downsamples until it fits and refuses to write anything larger.
+    // The cap on the brochure the intake writes, not on the developer's original: brochure_pdf.py
+    // scales its images down until it fits and refuses to write anything larger.
     maxBrochureMb: num(raw.BONA_MAX_BROCHURE_MB, 25),
     minImages: num(raw.BONA_MIN_IMAGES, 4),
     maxImages: num(raw.BONA_MAX_IMAGES, 10),

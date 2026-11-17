@@ -14,7 +14,7 @@
 //   4. TAQEEM cross-check   (a price is published only when the NUMBER is actually printed;
 //                            every unit-model price is confirmed on its page image, model-prices.mjs)
 //   5. checkListing         (mirror of scripts/curate/validate.mjs)
-//   5b. the Bona-branded brochure (rebrand_pdf.py) — best effort, never fatal
+//   5b. the Bona brochure (brochure_pdf.py, from the staged listing) — best effort, never fatal
 //   6. build.mjs + validate.mjs in the repo (the real thing)
 //
 // The caller is responsible for the git side and MUST have brought the clone up to date
@@ -683,10 +683,11 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     throw new RejectError(problems[0], 'validate');
   }
 
-  // --- 5b. the Bona-branded brochure -------------------------------------------
+  // --- 5b. the Bona brochure ---------------------------------------------------
   // Default ON: the owner's whole point is that a brochure he is sent comes back out under
-  // his own brand. It is built from the FINAL listing (title, place, price as published),
-  // into the staging dir, so it is promoted with the photos and rolled back with them.
+  // his own brand. It is drawn from scratch (brochure_pdf.py) out of the FINAL listing and the
+  // photos and floor plans just staged, into the staging dir, so it is promoted with them and
+  // rolled back with them. Nothing of the developer's PDF is re-published.
   // A failure here never costs the listing — it publishes without a downloadable document.
   report.stage = 'brochure';
   if (caption.noBrochure) {
@@ -694,18 +695,12 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     log.info('intake.brochure_skipped', { slug, reason: 'nobrochure' });
   } else {
     const built = await buildBrandedBrochure({
-      pdfPath, listing, outPath: brochureFileIn(stageDir), workDir, cfg,
+      listing, filesDir: stageDir, outPath: brochureFileIn(stageDir), workDir, cfg,
     });
     report.brochure = built;
     if (built.ok) {
       listing.brochureUrl = brochureUrlFor(cfg.site, slug);
-      log.info('intake.brochure_built', {
-        slug, bytes: built.bytes, srcBytes: built.srcBytes, pages: built.pages,
-        steps: built.steps, scrubbed: built.scrubbed,
-      });
-      if (built.scrubbed?.length) {
-        report.warnings.push(`${built.scrubbed.length} fact(s) were left off the branded brochure because they carried a contact detail or another agency: ${built.scrubbed.join(', ')}`);
-      }
+      log.info('intake.brochure_built', { slug, bytes: built.bytes, pages: built.pages, steps: built.steps });
     } else {
       const code = built.reason === 'too-large' ? 'brochure-too-large' : 'brochure-failed';
       report.warningCodes.push(code);
@@ -713,7 +708,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       report.warnings.push(built.reason === 'too-large'
         ? `${built.error} — the listing was published without a downloadable brochure`
         : 'the Bona-branded brochure could not be built, so the listing was published without one (the reason is in the journal)');
-      log.warn('intake.brochure_failed', { slug, reason: built.reason, error: built.error });
+      log.warn('intake.brochure_failed', { slug, reason: built.reason, error: built.error, detail: built.detail });
     }
   }
 

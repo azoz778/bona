@@ -1,31 +1,26 @@
-// The Bona-branded brochure: the facts that go on the page, where the file lands, and the
-// Python that draws it.
+// The Bona brochure: where the file lands, how lib/brochure.mjs calls brochure_pdf.py, and the
+// `brochure <id>` rebuild.
 //
-// The rebrand_pdf.py tests below build a REAL fixture PDF with PyMuPDF and run the real
-// script over it. They are the only place the drawing is exercised, and they exist because
-// the two failures that actually happen are invisible to a mock:
-//   - a downsample pass that silently empties every page (re-saving an already-saved
-//     Document; see shrink_to_fit's docstring), and
-//   - another agency's name reaching a page Bona added.
-// They are skipped, not failed, when `uv` is not on PATH.
+// The drawing itself is exercised for real in brochure-pdf.test.mjs (WeasyPrint, real photos).
+// Here the Python is replaced by an injected spawn that records its argv and answers with the
+// JSON line the script prints, so these run in milliseconds and test the WIRING: which listing
+// reaches the page (never `_intake`), which folder the photos are read from, which site.json,
+// and what a failure turns into for the caller.
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import {
-  DEFAULT_BROCHURE_PY_CMD, SCRIPT, brochureFacts, brochureFileIn, brochurePyArgv,
-  brochureRepoPath, brochureUrlFor, buildBrandedBrochure, findSourcePdf, priceText,
+  DEFAULT_BROCHURE_PY_CMD, SCRIPT, brochureFileIn, brochurePyArgv, brochureRepoPath, brochureUrlFor,
+  buildBrandedBrochure, findSourcePdf, publicListing,
 } from '../lib/brochure.mjs';
-import { ALLOWED_PATHS } from '../lib/publish.mjs';
+import * as edits from '../lib/edits.mjs';
 import { loadConfig } from '../lib/env.mjs';
-
-// The footer strip carries the host from src/data/site.json (rebrand_pdf.py's load_brand),
-// so this follows the configured domain instead of pinning one that a cutover would break.
-const SITE_HOST = JSON.parse(fs.readFileSync(new URL('../../../src/data/site.json', import.meta.url), 'utf8'))
-  .url.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+import { writeInboxListing } from '../lib/listing.mjs';
+import { ALLOWED_PATHS } from '../lib/publish.mjs';
 
 const LISTING = {
   id: 'BONA-W007',
@@ -37,65 +32,47 @@ const LISTING = {
   },
   price: { amount: 4500000, currency: 'SAR', from: false, period: null, onRequest: false },
   project: { name: { en: 'Rawdah Gardens', ar: 'حدائق الروضة' }, developer: { en: 'Anwar Development', ar: 'أنوار للتطوير' } },
+  images: [{ src: '/listings/garden-villa-al-rawdah/01.jpg', alt: { en: 'Front', ar: 'الواجهة' } }],
   brochureUrl: null,
-  _intake: { pdfSha256: null, site: 'https://bona.azoz.uk', warnings: [] },
+  hidden: false,
+  _intake: { pdfSha256: 'abc', site: 'https://bona.azoz.uk', warnings: ['brochure-failed'], caption: 'call 0500000000' },
+  _note: 'scratch',
 };
 
-describe('priceText — exactly what the listing says, never a computed number', () => {
-  it('formats an asking price', () => {
-    assert.equal(priceText({ amount: 4500000, currency: 'SAR' }), 'SAR 4,500,000');
-  });
+/**
+ * A stand-in for child_process.spawn: records every call and answers the way brochure_pdf.py
+ * does — noise on stdout first (a stray print), the JSON result as the LAST line.
+ */
+function fakeSpawn({ result = { ok: true, bytes: 3041976, pages: 17, steps: ['measure', 'render', 'write'] }, code = 0, stdout = null, stderr = '', error = null, hang = false, writeOut = true } = {}) {
+  const calls = [];
+  const spawnImpl = (cmd, args, opts) => {
+    calls.push({ cmd, args, opts });
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.killed = null;
+    child.kill = (sig) => { child.killed = sig; setImmediate(() => child.emit('close', null, sig)); return true; };
+    setImmediate(() => {
+      if (error) { child.emit('error', error); return; }
+      if (hang) return;
+      const out = args[args.indexOf(SCRIPT) + 4];
+      if (writeOut && result?.ok) fs.writeFileSync(out, '%PDF-1.7 fake brochure\n');
+      if (stderr) child.stderr.emit('data', Buffer.from(stderr));
+      child.stdout.emit('data', Buffer.from(stdout ?? `a stray line\n${JSON.stringify(result)}\n`));
+      child.emit('close', code);
+    });
+    return child;
+  };
+  return { spawnImpl, calls };
+}
 
-  it('keeps the "from" of a project starting price', () => {
-    assert.equal(priceText({ amount: 888000, currency: 'SAR', from: true }), 'From SAR 888,000');
-  });
-
-  it('prints the period on a rental', () => {
-    assert.equal(priceText({ amount: 250000, currency: 'SAR', period: 'year' }), 'SAR 250,000 / year');
-  });
-
-  // TAQEEM: a listing with no printed price says so on the cover rather than showing a
-  // number nobody printed.
-  it('says price on request rather than inventing one', () => {
-    assert.equal(priceText({ onRequest: true, amount: null }), 'Price on request');
-    assert.equal(priceText(null), 'Price on request');
-    assert.equal(priceText({ amount: 0, currency: 'SAR' }), 'Price on request');
-  });
-});
-
-describe('brochureFacts — only fields the listing already validated', () => {
-  it('takes the title, place, price, project and URL off the listing', () => {
-    const f = brochureFacts(LISTING, { site: 'https://bona.azoz.uk' });
-    assert.equal(f.id, 'BONA-W007');
-    assert.equal(f.titleEn, 'Garden Villa, Al Rawdah');
-    assert.equal(f.titleAr, 'فيلا الحديقة، حي الروضة');
-    assert.equal(f.place, 'Al Rawdah, Jeddah');
-    assert.equal(f.priceEn, 'SAR 4,500,000');
-    assert.equal(f.project, 'Rawdah Gardens');
-    assert.equal(f.developer, 'Anwar Development');
-    assert.equal(f.url, 'https://bona.azoz.uk/properties/garden-villa-al-rawdah/');
-  });
-
-  it('never carries the description, the highlights or anything the model wrote free-form', () => {
-    const f = brochureFacts({ ...LISTING, description: { en: 'x', ar: 'ص' }, highlights: { en: ['a'], ar: ['ب'] } }, {});
-    assert.deepEqual(
-      Object.keys(f).sort(),
-      ['developer', 'id', 'place', 'priceEn', 'project', 'slug', 'titleAr', 'titleEn', 'url'],
-    );
-  });
-
-  it('survives a listing with no project and no district', () => {
-    const f = brochureFacts({ ...LISTING, project: null, location: { city: { en: 'Jeddah' } } }, {});
-    assert.equal(f.project, null);
-    assert.equal(f.developer, null);
-    assert.equal(f.place, 'Jeddah');
-  });
-
-  it('trims the trailing slash off the site so the URL is never doubled', () => {
-    assert.equal(brochureFacts(LISTING, { site: 'https://bona.azoz.uk/' }).url,
-      'https://bona.azoz.uk/properties/garden-villa-al-rawdah/');
-  });
-});
+/** The positional arguments after SCRIPT, by name. */
+const argsOf = (call) => {
+  const i = call.args.indexOf(SCRIPT);
+  const [listingJson, filesDir, siteJson, out] = call.args.slice(i + 1, i + 5);
+  const flag = (name) => { const j = call.args.indexOf(name); return j < 0 ? null : call.args[j + 1]; };
+  return { listingJson, filesDir, siteJson, out, maxMb: flag('--max-mb'), work: flag('--work') };
+};
 
 describe('where the brochure lands', () => {
   it('is one file per listing, named for the site button that links to it', () => {
@@ -114,14 +91,26 @@ describe('where the brochure lands', () => {
     assert.ok(!ALLOWED_PATHS.some((a) => 'public/brochures/x.pdf'.startsWith(`${a}/`)),
       'a brochure written anywhere else must still be refused');
   });
+
+  it('is drawn by brochure_pdf.py, which sits where lib/brochure.mjs says it is', () => {
+    assert.equal(path.basename(SCRIPT), 'brochure_pdf.py');
+    assert.ok(fs.existsSync(SCRIPT), SCRIPT);
+  });
+
+  it('the old developer-PDF rebrand is gone', () => {
+    for (const f of ['rebrand_pdf.py', 'rebrand-once.mjs']) {
+      assert.equal(fs.existsSync(path.join(path.dirname(SCRIPT), f)), false, f);
+    }
+  });
 });
 
 describe('brochurePyArgv — an argv array, never a shell string', () => {
-  it('defaults to the four packages the script needs', () => {
+  // WeasyPrint is PINNED: the layout checks in brochure_pdf.py were tuned on its line breaking,
+  // and a new release that wraps one line differently is a brochure that fails to build.
+  it('defaults to a pinned WeasyPrint plus the three packages the script needs', () => {
     assert.deepEqual(brochurePyArgv(undefined), DEFAULT_BROCHURE_PY_CMD);
-    for (const pkg of ['pymupdf', 'segno', 'fonttools', 'brotli']) {
-      assert.ok(DEFAULT_BROCHURE_PY_CMD.includes(pkg), pkg);
-    }
+    assert.deepEqual(DEFAULT_BROCHURE_PY_CMD,
+      ['uv', 'run', '--with', 'weasyprint==70.0', '--with', 'segno', '--with', 'pillow', '--with', 'pymupdf', 'python']);
   });
 
   it('accepts an array, and splits a legacy string on whitespace', () => {
@@ -129,14 +118,224 @@ describe('brochurePyArgv — an argv array, never a shell string', () => {
     assert.deepEqual(brochurePyArgv('  uv run  python '), ['uv', 'run', 'python']);
   });
 
-  it('is what loadConfig hands the pipeline', () => {
-    const cfg = loadConfig({ });
-    assert.ok(Array.isArray(cfg.brochurePyCmd));
-    assert.ok(cfg.brochurePyCmd.includes('segno'));
-    assert.equal(cfg.maxBrochureMb, 25, 'the default cap is the branded output, not the original');
+  it('is what loadConfig hands the pipeline, unless BONA_BROCHURE_PY_CMD says otherwise', () => {
+    const saved = process.env.BONA_BROCHURE_PY_CMD;
+    try {
+      delete process.env.BONA_BROCHURE_PY_CMD;
+      const cfg = loadConfig({});
+      assert.deepEqual(cfg.brochurePyCmd, DEFAULT_BROCHURE_PY_CMD);
+      assert.equal(cfg.maxBrochureMb, 25);
+      process.env.BONA_BROCHURE_PY_CMD = '/opt/py/bin/python3  ';
+      assert.deepEqual(loadConfig({}).brochurePyCmd, ['/opt/py/bin/python3']);
+    } finally {
+      if (saved === undefined) delete process.env.BONA_BROCHURE_PY_CMD;
+      else process.env.BONA_BROCHURE_PY_CMD = saved;
+    }
   });
 });
 
+describe('publicListing — nothing the intake keeps for itself reaches the page', () => {
+  it('drops _intake, every other _ key and hidden; keeps the published fields', () => {
+    const pub = publicListing(LISTING);
+    assert.equal('_intake' in pub, false);
+    assert.equal('_note' in pub, false);
+    assert.equal('hidden' in pub, false);
+    assert.deepEqual(pub.title, LISTING.title);
+    assert.deepEqual(pub.images, LISTING.images);
+    assert.equal(LISTING._intake.pdfSha256, 'abc', 'the caller\'s object is not touched');
+  });
+});
+
+describe('buildBrandedBrochure — the call into brochure_pdf.py', () => {
+  let dir;
+  let filesDir;
+  let repo;
+  const cfg = () => ({ repo, maxBrochureMb: 25, brochureTimeoutMs: 5000 });
+
+  before(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-brochure-'));
+    filesDir = path.join(dir, 'stage', LISTING.slug);
+    fs.mkdirSync(filesDir, { recursive: true });
+    fs.writeFileSync(path.join(filesDir, '01.jpg'), 'jpg');
+    repo = path.join(dir, 'repo');
+  });
+  after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('runs the pinned interpreter in isolated mode on the listing JSON, the files dir, site.json and the output', async () => {
+    const { spawnImpl, calls } = fakeSpawn();
+    const workDir = path.join(dir, 'work-argv');
+    const outPath = brochureFileIn(filesDir);
+    const res = await buildBrandedBrochure({ listing: LISTING, filesDir, outPath, workDir, cfg: cfg(), spawnImpl });
+    assert.ok(res.ok, res.error);
+    assert.equal(calls.length, 1);
+    const [call] = calls;
+    assert.equal(call.cmd, 'uv');
+    assert.deepEqual(call.args, [
+      ...DEFAULT_BROCHURE_PY_CMD.slice(1), '-I', SCRIPT,
+      path.join(workDir, 'brochure-listing.json'), filesDir, path.join(repo, 'src', 'data', 'site.json'), outPath,
+      '--max-mb', '25', '--work', path.join(workDir, 'brochure-work'),
+    ]);
+    assert.ok(!call.opts?.shell, 'never through a shell');
+  });
+
+  it('writes the PUBLIC listing to workDir/brochure-listing.json — no _intake, no hidden', async () => {
+    const { spawnImpl, calls } = fakeSpawn();
+    const workDir = path.join(dir, 'work-json');
+    await buildBrandedBrochure({ listing: LISTING, filesDir, outPath: path.join(dir, 'json.pdf'), workDir, cfg: cfg(), spawnImpl });
+    const written = JSON.parse(fs.readFileSync(argsOf(calls[0]).listingJson, 'utf8'));
+    assert.equal(argsOf(calls[0]).listingJson, path.join(workDir, 'brochure-listing.json'));
+    assert.deepEqual(written, publicListing(LISTING));
+    assert.ok(!JSON.stringify(written).includes('0500000000'), 'nothing from _intake');
+  });
+
+  it('honours BONA_BROCHURE_PY_CMD and BONA_MAX_BROCHURE_MB', async () => {
+    const { spawnImpl, calls } = fakeSpawn();
+    await buildBrandedBrochure({
+      listing: LISTING, filesDir, outPath: path.join(dir, 'custom.pdf'), workDir: path.join(dir, 'work-custom'),
+      cfg: { ...cfg(), brochurePyCmd: ['/opt/py/bin/python3'], maxBrochureMb: 12.5 }, spawnImpl,
+    });
+    assert.equal(calls[0].cmd, '/opt/py/bin/python3');
+    assert.deepEqual(calls[0].args.slice(0, 2), ['-I', SCRIPT]);
+    assert.equal(argsOf(calls[0]).maxMb, '12.5');
+  });
+
+  it('answers with what the script printed on its last line', async () => {
+    const { spawnImpl } = fakeSpawn({ result: { ok: true, out: 'x', bytes: 1234, pages: 13, steps: ['measure', 'render', 'scale-0.75', 'write'], kinds: ['cover'] } });
+    const res = await buildBrandedBrochure({ listing: LISTING, filesDir, outPath: path.join(dir, 'last.pdf'), workDir: path.join(dir, 'work-last'), cfg: cfg(), spawnImpl });
+    assert.equal(res.ok, true);
+    assert.equal(res.bytes, 1234);
+    assert.equal(res.pages, 13);
+    assert.deepEqual(res.steps, ['measure', 'render', 'scale-0.75', 'write']);
+  });
+
+  it('a failure line comes back as { ok: false } and an existing brochure is left where it is', async () => {
+    const outPath = path.join(dir, 'kept.pdf');
+    fs.writeFileSync(outPath, '%PDF the brochure already live');
+    const { spawnImpl } = fakeSpawn({ result: { ok: false, reason: 'error', error: 'layout does not fit: page 4' }, code: 1 });
+    const res = await buildBrandedBrochure({ listing: LISTING, filesDir, outPath, workDir: path.join(dir, 'work-fail'), cfg: cfg(), spawnImpl });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'error');
+    assert.match(res.error, /layout does not fit/);
+    assert.equal(fs.readFileSync(outPath, 'utf8'), '%PDF the brochure already live');
+  });
+
+  it('too-large says so in words the owner can act on, and keeps the script\'s figures for the journal', async () => {
+    const { spawnImpl } = fakeSpawn({ result: { ok: false, reason: 'too-large', error: '30000000 bytes after scaling images to 0.55, cap 26214400' }, code: 1 });
+    const res = await buildBrandedBrochure({ listing: LISTING, filesDir, outPath: path.join(dir, 'big.pdf'), workDir: path.join(dir, 'work-big'), cfg: cfg(), spawnImpl });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'too-large');
+    assert.match(res.error, /over the 25 MB limit/);
+    assert.match(res.detail, /30000000 bytes/);
+  });
+
+  it('a crash with no JSON line is a render failure carrying the tail of stderr', async () => {
+    const { spawnImpl } = fakeSpawn({ stdout: '', stderr: 'Traceback …\nOSError: cannot load library libpango-1.0-0', code: 1 });
+    const res = await buildBrandedBrochure({ listing: LISTING, filesDir, outPath: path.join(dir, 'crash.pdf'), workDir: path.join(dir, 'work-crash'), cfg: cfg(), spawnImpl });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'render');
+    assert.match(res.error, /libpango/);
+  });
+
+  it('"ok" with no file on disk is not a brochure', async () => {
+    const { spawnImpl } = fakeSpawn({ writeOut: false });
+    const res = await buildBrandedBrochure({ listing: LISTING, filesDir, outPath: path.join(dir, 'ghost.pdf'), workDir: path.join(dir, 'work-ghost'), cfg: cfg(), spawnImpl });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'render');
+  });
+
+  it('a missing interpreter is a spawn failure, not a throw', async () => {
+    const { spawnImpl } = fakeSpawn({ error: Object.assign(new Error('spawn uv ENOENT'), { code: 'ENOENT' }) });
+    const res = await buildBrandedBrochure({ listing: LISTING, filesDir, outPath: path.join(dir, 'enoent.pdf'), workDir: path.join(dir, 'work-enoent'), cfg: cfg(), spawnImpl });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'spawn');
+    assert.match(res.error, /ENOENT/);
+  });
+
+  it('a render that runs past BONA_BROCHURE_TIMEOUT_MS is killed and reported', async () => {
+    const { spawnImpl, calls } = fakeSpawn({ hang: true });
+    const res = await buildBrandedBrochure({
+      listing: LISTING, filesDir, outPath: path.join(dir, 'slow.pdf'), workDir: path.join(dir, 'work-slow'),
+      cfg: { ...cfg(), brochureTimeoutMs: 30 }, spawnImpl,
+    });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'timeout');
+    assert.match(res.error, /timed out after 30ms/);
+    assert.equal(calls.length, 1);
+  });
+
+  it('a files folder that is not there is answered before anything is spawned', async () => {
+    const { spawnImpl, calls } = fakeSpawn();
+    const res = await buildBrandedBrochure({ listing: LISTING, filesDir: path.join(dir, 'nope'), outPath: path.join(dir, 'nope.pdf'), workDir: path.join(dir, 'work-nope'), cfg: cfg(), spawnImpl });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'input');
+    assert.equal(calls.length, 0);
+  });
+});
+
+describe('rebuildBrochure (`brochure <id>`) — from the repo\'s own files, no source PDF', () => {
+  let repo;
+  let slugDir;
+  let inboxFile;
+  const build = (spawnImpl, extra = {}) => edits.rebuildBrochure(repo, 'BONA-W007', {
+    cfg: { repo: '/somewhere/else', intakeDir: path.join(repo, '..', 'empty-intake'), site: 'https://bona.azoz.uk', maxBrochureMb: 25, ...extra },
+    workDir: path.join(repo, '..', 'work'),
+    spawnImpl,
+  });
+
+  before(() => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-rebuild-'));
+    repo = path.join(dir, 'repo');
+    // The PDF the listing came from is long gone: no file anywhere hashes to _intake.pdfSha256.
+    fs.mkdirSync(path.join(dir, 'empty-intake'), { recursive: true });
+    inboxFile = writeInboxListing(repo, LISTING);
+    slugDir = path.join(repo, 'public', 'listings', LISTING.slug);
+    fs.mkdirSync(slugDir, { recursive: true });
+    fs.writeFileSync(path.join(slugDir, '01.jpg'), 'jpg');
+    fs.writeFileSync(path.join(slugDir, 'plan-01.jpg'), 'plan');
+  });
+  after(() => fs.rmSync(path.dirname(repo), { recursive: true, force: true }));
+
+  it('the source PDF really is gone (the case this used to refuse)', () => {
+    assert.equal(findSourcePdf(path.join(repo, '..', 'empty-intake'), LISTING._intake.pdfSha256), null);
+  });
+
+  it('a failed build changes nothing on the listing', async () => {
+    const before_ = fs.readFileSync(inboxFile, 'utf8');
+    const { spawnImpl } = fakeSpawn({ result: { ok: false, reason: 'error', error: 'layout does not fit' }, code: 1 });
+    const res = await build(spawnImpl);
+    assert.match(res.error, /could not be built for BONA-W007/);
+    assert.equal(fs.readFileSync(inboxFile, 'utf8'), before_);
+  });
+
+  it('too-large is answered with the reason', async () => {
+    const { spawnImpl } = fakeSpawn({ result: { ok: false, reason: 'too-large', error: '1 bytes, cap 0' }, code: 1 });
+    const res = await build(spawnImpl, { maxBrochureMb: 3 });
+    assert.match(res.error, /over the 3 MB limit/);
+  });
+
+  it('builds into public/listings/<slug> from the photos and plans already there, with this repo\'s site.json', async () => {
+    const { spawnImpl, calls } = fakeSpawn();
+    const res = await build(spawnImpl);
+    assert.ok(res && !res.error, res?.error);
+    const a = argsOf(calls[0]);
+    assert.equal(a.filesDir, slugDir);
+    assert.equal(a.out, path.join(slugDir, 'brochure.pdf'));
+    assert.equal(a.siteJson, path.join(repo, 'src', 'data', 'site.json'), 'the repo being published, not whatever cfg.repo says');
+    assert.ok(fs.existsSync(path.join(slugDir, 'brochure.pdf')));
+    const sent = JSON.parse(fs.readFileSync(a.listingJson, 'utf8'));
+    assert.equal('_intake' in sent, false);
+
+    assert.equal(res.listing.brochureUrl, 'https://bona.azoz.uk/listings/garden-villa-al-rawdah/brochure.pdf');
+    assert.equal(res.brochure.pages, 17);
+    const saved = JSON.parse(fs.readFileSync(inboxFile, 'utf8'));
+    assert.equal(saved.brochureUrl, res.listing.brochureUrl);
+    assert.deepEqual(saved._intake.warnings, [], 'the stale brochure-failed note is cleared');
+    assert.equal(saved._intake.pdfSha256, 'abc', 'the bookkeeping stays in the repo');
+  });
+});
+
+// The sha lookup stays: the backfill (plan Task 9) uses it to find which listings can be re-run
+// from their original PDF.
 describe('findSourcePdf — the original is found by content hash, not by a stored path', () => {
   let dir;
   const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
@@ -160,311 +359,5 @@ describe('findSourcePdf — the original is found by content hash, not by a stor
     assert.equal(findSourcePdf(dir, sha('a brochure nobody kept')), null);
     assert.equal(findSourcePdf(dir, null), null);
     assert.equal(findSourcePdf(path.join(dir, 'nope'), sha('x')), null);
-  });
-});
-
-// ---------------------------------------------------------------------------------------
-// The Python. Real PyMuPDF, a real fixture, the real script.
-// ---------------------------------------------------------------------------------------
-const uvAvailable = spawnSync('uv', ['--version'], { stdio: 'ignore' }).status === 0;
-
-describe('rebrand_pdf.py', { skip: uvAvailable ? false : 'uv is not on PATH' }, () => {
-  let dir;
-  let fixture;
-  const cfg = { ...loadConfig({}), site: 'https://bona.azoz.uk' };
-
-  /** A three-page brochure with a photo on each page, built the way a designer's export is. */
-  const makeFixture = (file, pages = 3, side = 900) => {
-    const py = `
-import pymupdf, random
-doc = pymupdf.open()
-random.seed(7)
-for i in range(${pages}):
-    page = doc.new_page(width=595, height=842)
-    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, ${side}, ${side}), False)
-    for _ in range(4000):
-        x, y = random.randrange(${side}), random.randrange(${side})
-        pix.set_pixel(x, y, (random.randrange(256), random.randrange(256), random.randrange(256)))
-    page.insert_image(pymupdf.Rect(40, 40, 555, 560), stream=pix.tobytes("jpg"))
-    page.insert_text(pymupdf.Point(50, 640), "Marina Tower - developer page %d" % (i + 1), fontsize=13)
-doc.save(${JSON.stringify(file)}, garbage=3, deflate=True)
-print("ok")
-`;
-    execFileSync('uv', ['run', '--with', 'pymupdf', 'python', '-c', py], { encoding: 'utf8' });
-  };
-
-  /** A brochure whose first page is the odd size out, as several of the owner's are. */
-  const makeMixedFixture = (file) => {
-    const py = `
-import pymupdf
-doc = pymupdf.open()
-doc.new_page(width=400, height=300).insert_text(pymupdf.Point(30, 40), "half spread", fontsize=11)
-for i in range(3):
-    doc.new_page(width=1920, height=1080).insert_text(pymupdf.Point(60, 90), "deck page %d" % (i + 1), fontsize=24)
-doc.save(${JSON.stringify(file)}, garbage=3, deflate=True)
-print("ok")
-`;
-    execFileSync('uv', ['run', '--with', 'pymupdf', 'python', '-c', py], { encoding: 'utf8' });
-  };
-
-  /**
-   * Page text, image count and — for the overlap check — the bounding box of every text
-   * block on the page, in reading order.
-   */
-  const pageOf = (pdf, pageIndex) => {
-    const py = `
-import pymupdf, json
-doc = pymupdf.open(${JSON.stringify(pdf)})
-page = doc[${pageIndex} if ${pageIndex} >= 0 else doc.page_count + ${pageIndex}]
-blocks = [
-    {"x0": b[0], "y0": b[1], "x1": b[2], "y1": b[3], "text": " ".join(b[4].split())}
-    for b in page.get_text("blocks") if b[4].strip()
-]
-print(json.dumps({
-    "pages": doc.page_count,
-    "text": page.get_text(),
-    "images": len(page.get_images(full=True)),
-    "width": page.rect.width,
-    "height": page.rect.height,
-    "sizes": sorted({(round(p.rect.width), round(p.rect.height)) for p in doc}),
-    "blocks": blocks,
-}))
-`;
-    const out = execFileSync('uv', ['run', '--with', 'pymupdf', 'python', '-c', py], { encoding: 'utf8' });
-    return JSON.parse(out.trim().split('\n').pop());
-  };
-  const textOf = pageOf;
-
-  /**
-   * Every pair of text blocks drawn on top of one another.
-   *
-   * Measured as a FRACTION of the shorter block, not in absolute points: two wrapped lines
-   * of the same Arabic paragraph share a couple of points where the ascenders of one line
-   * reach into the box of the next, and calling that a collision would only teach the test
-   * to be ignored. A line actually drawn over another overlaps it almost entirely — the bug
-   * this guards against had the Arabic strapline sitting on top of the English title.
-   */
-  const overlaps = (blocks, fraction = 0.45) => {
-    const bad = [];
-    for (let i = 0; i < blocks.length; i += 1) {
-      for (let j = i + 1; j < blocks.length; j += 1) {
-        const a = blocks[i];
-        const b = blocks[j];
-        const vertical = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
-        const horizontal = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
-        const shortest = Math.min(a.y1 - a.y0, b.y1 - b.y0);
-        const narrowest = Math.min(a.x1 - a.x0, b.x1 - b.x0);
-        if (vertical > shortest * fraction && horizontal > narrowest * 0.25) {
-          bad.push(`"${a.text}" x "${b.text}" (${vertical.toFixed(1)}pt of ${shortest.toFixed(1)}pt)`);
-        }
-      }
-    }
-    return bad;
-  };
-
-  before(() => {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-brochure-'));
-    fixture = path.join(dir, 'developer.pdf');
-    makeFixture(fixture);
-  });
-
-  after(() => fs.rmSync(dir, { recursive: true, force: true }));
-
-  it('the script is where lib/brochure.mjs says it is', () => {
-    assert.ok(fs.existsSync(SCRIPT), SCRIPT);
-  });
-
-  it('adds exactly two pages — a Bona cover in front and an Enquire page at the back', async () => {
-    const out = path.join(dir, 'out-basic.pdf');
-    const res = await buildBrandedBrochure({ pdfPath: fixture, listing: LISTING, outPath: out, workDir: dir, cfg });
-    assert.ok(res.ok, res.error);
-    assert.equal(res.srcPages, 3);
-    assert.equal(res.pages, 5);
-    assert.ok(fs.existsSync(out));
-
-    const cover = textOf(out, 0);
-    assert.match(cover.text, /BONA/);
-    assert.match(cover.text, /Garden Villa, Al Rawdah/);
-    assert.match(cover.text, /SAR 4,500,000/);
-    assert.match(cover.text, /FAL 1100313556/);
-    assert.match(cover.text, /[؀-ۿ]/, 'the Arabic title must be on the cover');
-  });
-
-  it('leaves the developer\'s own page alone apart from the footer strip', async () => {
-    const out = path.join(dir, 'out-footer.pdf');
-    const res = await buildBrandedBrochure({ pdfPath: fixture, listing: LISTING, outPath: out, workDir: dir, cfg });
-    assert.ok(res.ok, res.error);
-    const inner = textOf(out, 1);            // page 1 = the developer's first page
-    assert.match(inner.text, /Marina Tower - developer page 1/, 'their copy is untouched');
-    assert.equal(inner.images, 1, 'their photo is untouched');
-    assert.ok(inner.text.includes(SITE_HOST), `the footer carries ${SITE_HOST}`);
-    assert.match(inner.text, /\+966 59 329 6933/);
-    assert.match(inner.text, /FAL 1100313556/);
-    assert.match(inner.text, /BONA-W007/, 'the footer carries the listing id');
-  });
-
-  it('closes with the listing URL, the WhatsApp link, the hours and the licence', async () => {
-    const out = path.join(dir, 'out-enquire.pdf');
-    const res = await buildBrandedBrochure({ pdfPath: fixture, listing: LISTING, outPath: out, workDir: dir, cfg });
-    assert.ok(res.ok, res.error);
-    const last = textOf(out, -1);
-    assert.match(last.text, /bona\.azoz\.uk\/properties\/garden-villa-al-rawdah/);
-    assert.match(last.text, /wa\.me\/966593296933/);
-    assert.match(last.text, /10:00/);
-    assert.match(last.text, /Bona Real Estate/);
-    assert.match(last.text, /FAL 1100313556/);
-    assert.equal(last.images, 1, 'the QR code is drawn on the Enquire page');
-  });
-
-  // The one rule that has teeth: the developer's brand stays on the developer's pages, and
-  // no OTHER agency reaches a page Bona added.
-  it('drops a fact that carries another agency or a contact detail rather than printing it', async () => {
-    const out = path.join(dir, 'out-scrub.pdf');
-    const listing = {
-      ...LISTING,
-      project: {
-        name: { en: 'Marketed by TK Estates', ar: 'تي كيه' },
-        developer: { en: 'Call +971 50 111 2233', ar: 'اتصل' },
-      },
-    };
-    const res = await buildBrandedBrochure({ pdfPath: fixture, listing, outPath: out, workDir: dir, cfg });
-    assert.ok(res.ok, res.error);
-    assert.deepEqual(res.scrubbed.sort(), ['developer', 'project']);
-    const cover = textOf(out, 0);
-    assert.doesNotMatch(cover.text, /TK/);
-    assert.doesNotMatch(cover.text, /971/);
-    assert.match(cover.text, /Garden Villa, Al Rawdah/, 'the listing itself still publishes');
-  });
-
-  it('writes nothing at all when the output cannot be squeezed under the cap', async () => {
-    const out = path.join(dir, 'out-toobig.pdf');
-    const res = await buildBrandedBrochure({
-      pdfPath: fixture, listing: LISTING, outPath: out, workDir: dir,
-      cfg: { ...cfg, maxBrochureMb: 0.25 },
-    });
-    assert.equal(res.ok, false);
-    assert.equal(res.reason, 'too-large');
-    assert.match(res.error, /over the/);
-    assert.ok(!fs.existsSync(out), 'a rejected brochure must never be left on disk to be committed');
-    assert.ok(!fs.existsSync(`${out}.shrink`), 'no scratch file is left behind either');
-  });
-
-  // The failure that produced a 0.17 MB file of blank pages from a 70 MB brochure: shrinking
-  // must never cost the pages their images.
-  it('keeps the images when it has to downsample', async () => {
-    const big = path.join(dir, 'big.pdf');
-    makeFixture(big, 4, 1500);
-    const out = path.join(dir, 'out-shrunk.pdf');
-    const res = await buildBrandedBrochure({
-      pdfPath: big, listing: LISTING, outPath: out, workDir: dir,
-      cfg: { ...cfg, maxBrochureMb: 0.9 },
-    });
-    if (!res.ok) {
-      assert.equal(res.reason, 'too-large', res.error);
-      return;                                  // fine: it refused rather than shipping junk
-    }
-    assert.ok(res.bytes <= 0.9 * 1024 * 1024, `${res.bytes} bytes`);
-    assert.ok(res.steps.length > 1, `expected a downsample pass, got ${res.steps.join(' → ')}`);
-    const inner = textOf(out, 1);
-    assert.equal(inner.images, 1, 'a downsample pass that empties the pages is worse than a big file');
-    assert.match(inner.text, /developer page 1/);
-  });
-
-  // The brochures the owner is really sent are 16:9 decks, and one of them opens on a
-  // half-spread. Laying the cover out by fractions of the page height put the wordmark off
-  // the page on a 1080pt-high deck and stacked the Enquire page's lines on top of one
-  // another; both are measured now, and these two tests are what keep them measured.
-  describe('any page shape', () => {
-    let mixed;
-    let landscapeOut;
-
-    before(() => {
-      mixed = path.join(dir, 'deck.pdf');
-      makeMixedFixture(mixed);
-      landscapeOut = path.join(dir, 'out-deck.pdf');
-    });
-
-    it('gives the pages it adds the brochure\'s DOMINANT size, not page 1\'s', async () => {
-      const res = await buildBrandedBrochure({ pdfPath: mixed, listing: LISTING, outPath: landscapeOut, workDir: dir, cfg });
-      assert.ok(res.ok, res.error);
-      const cover = pageOf(landscapeOut, 0);
-      assert.equal(cover.width, 1920);
-      assert.equal(cover.height, 1080);
-      const enquire = pageOf(landscapeOut, -1);
-      assert.equal(enquire.width, 1920);
-      // the developer's own half-spread is left at its own size, untouched
-      assert.deepEqual(cover.sizes, [[400, 300], [1920, 1080]]);
-    });
-
-    // The detector has to fire on the real bug, or the test below proves nothing.
-    it('the overlap detector catches a line drawn on top of another', () => {
-      const stacked = [
-        { x0: 100, y0: 200, x1: 500, y1: 230, text: 'Al-Wareef Townhouse, Jeddah' },
-        { x0: 120, y0: 202, x1: 480, y1: 232, text: 'للاستفسار والمعاينة' },
-      ];
-      assert.equal(overlaps(stacked).length, 1);
-      const stackedLines = [
-        { x0: 100, y0: 200, x1: 500, y1: 230, text: 'line one' },
-        { x0: 100, y0: 228, x1: 500, y1: 258, text: 'line two, tight leading' },
-      ];
-      assert.deepEqual(overlaps(stackedLines), [], 'tight leading is not a collision');
-    });
-
-    it('never overlaps two lines, on the cover or the Enquire page, at any title length', async () => {
-      const longTitle = {
-        ...LISTING,
-        title: {
-          en: 'Nuzul Khayala Residences at Wajhat Al-Wareef, North Jeddah Waterfront District',
-          ar: 'نزل خيالة ريزيدنسز في واجهة الوريف، حي الواجهة البحرية شمال جدة الجديدة',
-        },
-        project: {
-          name: { en: 'Wajhat Al-Wareef Masterplan', ar: 'واجهة الوريف' },
-          developer: { en: 'National Housing Company and Faisal Bin Saedan Real Estate Development', ar: 'الوطنية للإسكان' },
-        },
-      };
-      for (const [label, listing, src] of [
-        ['short title, portrait', LISTING, fixture],
-        ['long title, portrait', longTitle, fixture],
-        ['short title, 16:9 deck', LISTING, mixed],
-        ['long title, 16:9 deck', longTitle, mixed],
-      ]) {
-        const out = path.join(dir, `out-overlap-${label.replace(/\W+/g, '-')}.pdf`);
-        const res = await buildBrandedBrochure({ pdfPath: src, listing, outPath: out, workDir: dir, cfg });
-        assert.ok(res.ok, `${label}: ${res.error}`);
-        for (const [page, name] of [[0, 'cover'], [-1, 'enquire']]) {
-          const bad = overlaps(pageOf(out, page).blocks);
-          assert.deepEqual(bad, [], `${label} — ${name} overlaps: ${bad.join(', ')}`);
-        }
-      }
-    });
-
-    it('puts the wordmark on the cover whatever the page shape', async () => {
-      for (const src of [fixture, mixed]) {
-        const out = path.join(dir, `out-wordmark-${path.basename(src)}`);
-        const res = await buildBrandedBrochure({ pdfPath: src, listing: LISTING, outPath: out, workDir: dir, cfg });
-        assert.ok(res.ok, res.error);
-        const cover = pageOf(out, 0);
-        assert.match(cover.text, /B\s*O\s*N\s*A/, `no wordmark on the ${cover.width}x${cover.height} cover`);
-        // …and inside the page, not off the top of it
-        const mark = cover.blocks.find((b) => /^B\s*O?\s*N?\s*A?/.test(b.text));
-        assert.ok(mark && mark.y0 > 0 && mark.y1 < cover.height, JSON.stringify(mark));
-      }
-    });
-  });
-
-  it('answers with a reason instead of throwing on a file that is not a PDF', async () => {
-    const junk = path.join(dir, 'not.pdf');
-    fs.writeFileSync(junk, 'this is not a pdf');
-    const res = await buildBrandedBrochure({ pdfPath: junk, listing: LISTING, outPath: path.join(dir, 'x.pdf'), workDir: dir, cfg });
-    assert.equal(res.ok, false);
-    assert.equal(res.reason, 'input');
-  });
-
-  it('answers with a reason instead of throwing on a file that is not there', async () => {
-    const res = await buildBrandedBrochure({
-      pdfPath: path.join(dir, 'missing.pdf'), listing: LISTING, outPath: path.join(dir, 'y.pdf'), workDir: dir, cfg,
-    });
-    assert.equal(res.ok, false);
-    assert.equal(res.reason, 'input');
   });
 });

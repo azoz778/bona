@@ -112,7 +112,7 @@ export const notLive = (url, minutes) => `⚠️ The page is still not answering
 export const alreadyLive = (info) => `Already published: ${info.url}\n(${info.id})`;
 export const notFound = (id) => `No listing called ${id}. Send \`status\` to see what is live.`;
 
-/** `brochure <id>` — the branded PDF was rebuilt from the developer's original. */
+/** `brochure <id>` — the Bona brochure was rebuilt from the listing and its files in the repo. */
 export function brochureRebuilt(id, listing, brochure = {}) {
   const mb = brochure.bytes ? `${(brochure.bytes / 1048576).toFixed(1)} MB` : null;
   const shrunk = brochure.srcBytes && brochure.bytes && brochure.srcBytes > brochure.bytes * 1.05

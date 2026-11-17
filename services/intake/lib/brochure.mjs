@@ -1,15 +1,20 @@
-// The Bona-branded brochure: the developer's PDF, re-published under Bona's cover, footer
-// and enquiry page (services/intake/rebrand_pdf.py does the drawing).
+// The Bona brochure: one bilingual A4 PDF built from scratch out of the published listing — its
+// own fields, its photos and floor plans, and src/data/site.json — in the TK design system
+// (services/intake/brochure_pdf.py does the drawing, with WeasyPrint).
 //
-// Why this exists: the owner is sent someone else's brochure and wants the property on the
-// site with his brand on the document — not a raw copy of a competitor's PDF sitting on
-// the Bona site. The developer's own pages are left exactly as they are (their brand belongs
-// on their pages); what Bona adds is a cover, a footer strip and a closing "Enquire" page.
+// Why this exists: the owner is sent someone else's brochure and wants the property on the site
+// with his brand on the document. Nothing of the developer's PDF is re-published: the brochure
+// is drawn from the listing that already passed copyProblems() and checkListing(), so no model
+// free text the validators did not see and no untrusted PDF text ever reaches a page, and the
+// developer is named as text only.
 //
-// Size is the reason this file has a cap at all: developer brochures run 50–80 MB, the repo
-// is public and CI clones it on every build. The Python downsamples the images until the
-// output fits `BONA_MAX_BROCHURE_MB` (25 by default) and refuses to write anything bigger —
-// the listing is then published without a brochure and the owner is told why.
+// It needs only what the repo already holds (the listing JSON and `public/listings/<slug>/`), so
+// `brochure <id>` can rebuild it long after the developer's original was cleaned out of
+// $BONA_DATA.
+//
+// Size: the repo is public and CI clones it on every build. The Python scales the images down
+// until the output fits `BONA_MAX_BROCHURE_MB` (25 by default) and refuses to write anything
+// bigger — the listing is then published without a brochure and the owner is told why.
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -17,12 +22,17 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-export const SCRIPT = path.join(HERE, '..', 'rebrand_pdf.py');
+export const SCRIPT = path.join(HERE, '..', 'brochure_pdf.py');
 export const REPO_ROOT = path.join(HERE, '..', '..', '..');
 
-/** PyMuPDF draws, segno makes the QR, fontTools+brotli turn public/fonts/*.woff2 into TTF. */
+/**
+ * WeasyPrint lays the pages out — PINNED, because brochure_pdf.py measures its text blocks and
+ * checks the finished render box by box: a release that breaks one line differently is a
+ * brochure that no longer fits. segno draws the QR, Pillow prepares the photos, PyMuPDF is used
+ * by the script's own checks.
+ */
 export const DEFAULT_BROCHURE_PY_CMD = [
-  'uv', 'run', '--with', 'pymupdf', '--with', 'segno', '--with', 'fonttools', '--with', 'brotli', 'python',
+  'uv', 'run', '--with', 'weasyprint==70.0', '--with', 'segno', '--with', 'pillow', '--with', 'pymupdf', 'python',
 ];
 
 /** The one name the site's "Download brochure" button points at. */
@@ -41,101 +51,108 @@ export const brochureRepoPath = (slug) => path.posix.join('public', 'listings', 
 export const brochureFileIn = (dir) => path.join(dir, BROCHURE_FILE);
 export const brochureUrlFor = (site, slug) => `${String(site).replace(/\/+$/, '')}/listings/${slug}/${BROCHURE_FILE}`;
 
-/** The price exactly as the listing states it — never a computed or rounded one. */
-export function priceText(price) {
-  if (!price || price.onRequest || !(typeof price.amount === 'number' && price.amount > 0)) return 'Price on request';
-  const amount = Number(price.amount).toLocaleString('en-US');
-  const period = price.period ? ` / ${price.period}` : '';
-  return `${price.from ? 'From ' : ''}${price.currency || 'SAR'} ${amount}${period}`;
-}
-
 /**
- * The facts the cover and the closing page print. Everything comes from the FINAL listing
- * object — the one that already passed copyProblems() and checkListing() — so no model free
- * text and no untrusted PDF text ever reaches the page. rebrand_pdf.py scrubs them again.
+ * The listing as the site publishes it: no `_intake` (the caption, the source hash, the model's
+ * bookkeeping), no other `_` key and no `hidden`. brochure_pdf.py ignores them too; this makes
+ * sure they never reach its input file at all.
  */
-export function brochureFacts(listing, { site } = {}) {
-  const base = String(site || listing?._intake?.site || 'https://bona-real-estate.com').replace(/\/+$/, '');
-  const district = listing?.location?.district?.en || '';
-  const city = listing?.location?.city?.en || '';
-  return {
-    id: listing?.id ?? null,
-    slug: listing?.slug ?? null,
-    titleEn: listing?.title?.en ?? null,
-    titleAr: listing?.title?.ar ?? null,
-    place: [district, city].filter(Boolean).join(', ') || null,
-    priceEn: priceText(listing?.price),
-    project: listing?.project?.name?.en ?? null,
-    developer: listing?.project?.developer?.en ?? null,
-    url: listing?.slug ? `${base}/properties/${listing.slug}/` : base,
-  };
+export function publicListing(listing) {
+  return Object.fromEntries(Object.entries(listing ?? {}).filter(([k]) => k !== 'hidden' && !k.startsWith('_')));
 }
 
-function run(cmd, args, { cwd, timeoutMs = 600000 } = {}) {
+const TAIL = 16384;   // keep the end of each stream: the result line is last, a traceback ends there
+
+function run(spawnImpl, cmd, args, { timeoutMs }) {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    let child;
+    try {
+      // Its own process group, so a timeout kills `uv` AND the python under it: a renderer left
+      // running would write brochure.pdf after the caller had already given up on it.
+      child = spawnImpl(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    } catch (err) {
+      reject(err);
+      return;
+    }
     let out = '';
     let err = '';
-    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`${cmd} timed out after ${timeoutMs}ms`)); }, timeoutMs);
-    child.stdout.on('data', (d) => { out += d; });
-    child.stderr.on('data', (d) => { err += d; });
+    const timer = setTimeout(() => {
+      try {
+        if (child.pid > 0) process.kill(-child.pid, 'SIGKILL');
+        else child.kill('SIGKILL');
+      } catch { child.kill('SIGKILL'); }
+      reject(Object.assign(new Error(`${cmd} timed out after ${timeoutMs}ms`), { timeout: true }));
+    }, timeoutMs);
+    child.stdout?.on('data', (d) => { out = (out + d).slice(-TAIL); });
+    child.stderr?.on('data', (d) => { err = (err + d).slice(-TAIL); });
     child.on('error', (e) => { clearTimeout(timer); reject(e); });
     child.on('close', (code) => { clearTimeout(timer); resolve({ code, out, err }); });
   });
 }
 
 /**
- * Build `<outPath>` from `<pdfPath>` with Bona's cover, footers and enquiry page.
+ * Draw the brochure for `listing` into `outPath`, from the photos (`01.jpg…`) and floor plans
+ * (`plan-NN.jpg`) in `filesDir`.
  *
- * Never throws for a bad PDF or a failed render: returns `{ ok: false, error, reason }` so
- * the caller can publish the listing without a brochure instead of losing the whole run.
+ * Never throws: a failure is `{ ok: false, reason, error }` so the caller publishes the listing
+ * without a brochure instead of losing the whole run. Nothing is deleted on failure — the script
+ * writes through a temporary file, so an existing brochure at `outPath` stays as it was.
  *
  * @param {object} opts
- * @param {string}  opts.pdfPath    the developer's PDF (outside the repo)
- * @param {object}  opts.listing    the final listing object
- * @param {string}  opts.outPath    where to write the branded PDF
- * @param {string}  opts.workDir    scratch dir for the facts JSON
- * @param {object}  opts.cfg        loadConfig() result
- * @returns {Promise<{ok:boolean, bytes?:number, srcBytes?:number, pages?:number, steps?:string[],
- *                    scrubbed?:string[], error?:string, reason?:string}>}
+ * @param {object}  opts.listing    the final listing object (its `_intake` is never passed on)
+ * @param {string}  opts.filesDir   the listing's folder: the staging dir, or public/listings/<slug>
+ * @param {string}  opts.outPath    where to write the PDF
+ * @param {string}  opts.workDir    scratch: brochure-listing.json and the prepared images
+ * @param {object}  opts.cfg        loadConfig() result; `cfg.repo` is the repo whose site.json is printed
+ * @param {Function} [opts.spawnImpl] child_process.spawn, injectable for tests
+ * @returns {Promise<{ok:boolean, bytes?:number, pages?:number, steps?:string[],
+ *                    reason?:string, error?:string, detail?:string}>}
  */
-export async function buildBrandedBrochure({ pdfPath, listing, outPath, workDir, cfg = {} }) {
-  if (!fs.existsSync(pdfPath)) return { ok: false, error: `no such file: ${pdfPath}`, reason: 'input' };
-  const facts = brochureFacts(listing, { site: cfg.site });
+export async function buildBrandedBrochure({ listing, filesDir, outPath, workDir, cfg = {}, spawnImpl = spawn }) {
+  let isDir = false;
+  try { isDir = fs.statSync(filesDir).isDirectory(); } catch { /* answered below */ }
+  if (!isDir) return { ok: false, reason: 'input', error: `no such folder: ${filesDir}` };
+
   const scratch = workDir || path.dirname(outPath);
   fs.mkdirSync(scratch, { recursive: true });
-  const factsFile = path.join(scratch, 'brochure-facts.json');
-  fs.writeFileSync(factsFile, `${JSON.stringify(facts, null, 2)}\n`);
-  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  const listingJson = path.join(scratch, 'brochure-listing.json');
+  fs.writeFileSync(listingJson, `${JSON.stringify(publicListing(listing), null, 2)}\n`);
+  const siteJson = path.join(cfg.repo || REPO_ROOT, 'src', 'data', 'site.json');
+  const maxMb = cfg.maxBrochureMb ?? 25;
 
   const argv = brochurePyArgv(cfg.brochurePyCmd);
   const args = [
-    ...argv.slice(1), SCRIPT, pdfPath, factsFile, outPath,
-    '--max-mb', String(cfg.maxBrochureMb ?? 25),
-    '--repo', cfg.assetRepo || REPO_ROOT,
+    ...argv.slice(1), '-I', SCRIPT, listingJson, filesDir, siteJson, outPath,
+    '--max-mb', String(maxMb), '--work', path.join(scratch, 'brochure-work'),
   ];
   let res;
   try {
-    res = await run(argv[0], args, { timeoutMs: cfg.brochureTimeoutMs ?? 600000 });
+    res = await run(spawnImpl, argv[0], args, { timeoutMs: cfg.brochureTimeoutMs ?? 600000 });
   } catch (err) {
-    return { ok: false, error: err.message, reason: 'spawn' };
+    return { ok: false, reason: err.timeout ? 'timeout' : 'spawn', error: err.message };
   }
+  const failed = () => ({
+    ok: false,
+    reason: 'render',
+    error: `brochure_pdf.py failed (exit ${res.code}): ${(res.err || res.out).trim().slice(-400) || 'no output'}`,
+  });
   const line = res.out.trim().split('\n').filter(Boolean).pop();
   let parsed;
-  try {
-    parsed = JSON.parse(line);
-  } catch {
-    return {
-      ok: false,
-      reason: 'render',
-      error: `rebrand_pdf.py failed (exit ${res.code}): ${(res.err || res.out).trim().slice(-400) || 'no output'}`,
-    };
+  try { parsed = JSON.parse(line); } catch { return failed(); }
+  if (!parsed || typeof parsed !== 'object') return failed();
+  if (parsed.ok !== true) {
+    if (parsed.reason === 'too-large') {
+      return {
+        ok: false,
+        reason: 'too-large',
+        error: `the brochure is over the ${maxMb} MB limit even with its photos scaled down`,
+        detail: parsed.error || null,
+      };
+    }
+    return { ok: false, reason: parsed.reason || 'render', error: parsed.error || 'the brochure could not be built' };
   }
-  if (!parsed.ok) {
-    fs.rmSync(outPath, { force: true });
-    return { ok: false, reason: parsed.reason || 'render', error: parsed.error || 'the branded brochure could not be built' };
-  }
-  return { ...parsed, facts };
+  // A result line that says ok over a missing file would publish a button to a 404.
+  if (res.code !== 0 || !fs.existsSync(outPath)) return failed();
+  return { ok: true, bytes: parsed.bytes, pages: parsed.pages, steps: parsed.steps };
 }
 
 const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');

@@ -173,6 +173,24 @@ if (prompt.includes('For each numbered model')) {
 process.stdout.write(JSON.stringify({ is_error: false, result: JSON.stringify(answer), total_cost_usd: 0, duration_ms: 1, num_turns: 1, session_id: 'fake' }));
 `;
 
+// A stand-in for brochure_pdf.py, run through the real spawn (cfg.brochurePyCmd = [node, this]):
+// records what it was handed — the listing JSON, the files folder AS IT WAS at that moment, the
+// site.json path — and answers with the script's JSON line.
+const FAKE_BROCHURE = `import fs from 'node:fs';
+const cfg = JSON.parse(fs.readFileSync(new URL('./fake.json', import.meta.url), 'utf8'));
+const args = process.argv.slice(2);
+const i = args.findIndex((a) => a.endsWith('brochure_pdf.py'));
+const [listingJson, filesDir, siteJson, out] = args.slice(i + 1, i + 5);
+fs.appendFileSync(new URL('./calls.jsonl', import.meta.url), JSON.stringify({ tool: 'brochure', args, filesDir, siteJson, out,
+  listing: JSON.parse(fs.readFileSync(listingJson, 'utf8')), files: fs.readdirSync(filesDir).sort() }) + '\\n');
+if (cfg.brochureFail) {
+  process.stdout.write(JSON.stringify({ ok: false, reason: 'error', error: 'layout does not fit: page 4' }) + '\\n');
+  process.exit(1);
+}
+fs.writeFileSync(out, '%PDF-1.7 fake brochure\\n');
+process.stdout.write(JSON.stringify({ ok: true, out, bytes: 23, pages: 12, steps: ['measure', 'render', 'write'] }) + '\\n');
+`;
+
 const PLACE = {
   district: { en: 'Al Hamdaniyah', ar: 'الحمدانية' }, city: { en: 'Jeddah', ar: 'جدة' },
   country: { en: 'Saudi Arabia', ar: 'المملكة العربية السعودية' }, countryCode: 'SA',
@@ -199,16 +217,17 @@ const answer = ({ price, priceEvidence = null, subsidisedPriceEvidence = null, u
 const PRICE = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
 const BROCHURE = ['مشروع سكني — شقق بغرفتي نوم وثلاث غرف نوم في حي الحمدانية', LOCATION_PAGE, PRICE_PAGE, 'غرفة نوم 03', PRICE_PAGE];
 
-async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, confirmFail = null, modelConfirm = null, modelConfirmFail = null, failPageDir = null, broken = [], cfgExtra = {}, build = '' }) {
+async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, confirmFail = null, modelConfirm = null, modelConfirmFail = null, failPageDir = null, broken = [], brochureFail = false, cfgExtra = {}, build = '' }) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bona-price-pages-')));
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
   const photo = path.join(bin, 'photo.jpg');
   const sharp = (await import('sharp')).default;
   await sharp({ create: { width: 1200, height: 900, channels: 3, background: '#4a6b8a' } }).jpeg().toFile(photo);
-  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, confirmFail, modelConfirm, modelConfirmFail, failPageDir, broken }));
+  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, confirmFail, modelConfirm, modelConfirmFail, failPageDir, broken, brochureFail }));
   fs.writeFileSync(path.join(bin, 'fake-py.mjs'), FAKE_PY);
   fs.writeFileSync(path.join(bin, 'fake-claude.mjs'), FAKE_CLAUDE);
+  fs.writeFileSync(path.join(bin, 'fake-brochure.mjs'), FAKE_BROCHURE);
   const claude = path.join(bin, 'claude');
   fs.writeFileSync(claude, `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, 'fake-claude.mjs')}" "$@"\n`);
   fs.chmodSync(claude, 0o755);
@@ -224,11 +243,12 @@ async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = nu
   const cfg = {
     repo, site: 'https://bona-real-estate.com', maxPdfMb: 50, maxPdfPages: 60, minImageSide: 100, minImages: 4, maxImages: 10,
     pageReadLongSide: 1600, pyCmd: [process.execPath, path.join(bin, 'fake-py.mjs')], claudeBin: claude,
+    brochurePyCmd: [process.execPath, path.join(bin, 'fake-brochure.mjs')], maxBrochureMb: 25,
     claudeModel: 'opus', claudeFallbackModel: null, claudeTimeoutMs: 60000, ...cfgExtra,
   };
   const calls = () => fs.readFileSync(path.join(bin, 'calls.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const run = () => processPdf({ pdfPath, cfg, caption: {}, workDir: path.join(dir, 'work'), dryRun: true });
-  const publish = (meta = {}) => processPdf({ pdfPath, cfg, caption: { noBrochure: true }, workDir: path.join(dir, 'work'), meta });
+  const publish = (meta = {}, caption = { noBrochure: true }) => processPdf({ pdfPath, cfg, caption, workDir: path.join(dir, 'work'), meta });
   return { run, publish, calls, repo, pdfPath, cfg, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 
@@ -1184,6 +1204,49 @@ describe('processPdf: unit models and their floor plans reach the repo', { timeo
       assert.deepEqual(saved.models.map((m) => m.floorPlan), [null, null]);
       assert.ok(report.warnings.some((w) => /1 floor plan\(s\) could not be processed/.test(w)), report.warnings.join(' | '));
       assert.ok(saved._intake.warnings.includes('images-skipped'));
+    } finally { r.cleanup(); }
+  });
+
+  // The new brochure is drawn from the STAGED folder (photos + floor plans), after both are
+  // written and before anything is promoted, so it lands in the repo with them in one commit.
+  it('builds the brochure from the staged photos and plans and publishes it beside them', async () => {
+    const r = await rig({ listing: withPlans() });
+    try {
+      seedGit(r);
+      const report = await r.publish({}, {});
+      const [call, ...more] = r.calls().filter((c) => c.tool === 'brochure');
+      assert.equal(more.length, 0, 'one brochure build');
+      assert.equal(call.filesDir, path.join(r.repo, '..', 'work', 'publish', SLUG), 'the staging folder, not the repo');
+      assert.ok(call.files.includes('plan-01.jpg') && call.files.includes('01.jpg'), call.files.join(' '));
+      assert.equal(call.siteJson, path.join(r.repo, 'src', 'data', 'site.json'));
+      assert.equal(call.out, path.join(call.filesDir, 'brochure.pdf'));
+      assert.equal('_intake' in call.listing, false, 'the intake\'s bookkeeping never reaches the page');
+      assert.equal('hidden' in call.listing, false);
+      assert.deepEqual(call.listing.models.map((m) => m.floorPlan?.src ?? null), [PLAN.src, null]);
+      assert.equal(call.args[call.args.indexOf('--max-mb') + 1], '25');
+
+      assert.deepEqual({ ok: report.brochure.ok, pages: report.brochure.pages, bytes: report.brochure.bytes }, { ok: true, pages: 12, bytes: 23 });
+      const pub = path.join(r.repo, 'public', 'listings', SLUG, 'brochure.pdf');
+      assert.equal(fs.readFileSync(pub, 'utf8'), '%PDF-1.7 fake brochure\n');
+      const saved = inboxJson(r);
+      assert.equal(saved.brochureUrl, `https://bona-real-estate.com/listings/${SLUG}/brochure.pdf`);
+      assert.ok(!saved._intake.warnings.some((w) => w.startsWith('brochure-')), saved._intake.warnings.join(' '));
+    } finally { r.cleanup(); }
+  });
+
+  it('a brochure that cannot be built costs the listing nothing but the download button', async () => {
+    const r = await rig({ listing: withPlans(), brochureFail: true });
+    try {
+      seedGit(r);
+      const report = await r.publish({}, {});
+      assert.equal(report.ok, true);
+      assert.equal(report.brochure.ok, false);
+      assert.equal(fs.existsSync(path.join(r.repo, 'public', 'listings', SLUG, 'brochure.pdf')), false);
+      assert.ok(fs.existsSync(path.join(r.repo, 'public', 'listings', SLUG, 'plan-01.jpg')), 'the rest still publishes');
+      const saved = inboxJson(r);
+      assert.equal(saved.brochureUrl, null);
+      assert.ok(saved._intake.warnings.includes('brochure-failed'));
+      assert.ok(report.warnings.some((w) => /brochure could not be built/.test(w)), report.warnings.join(' | '));
     } finally { r.cleanup(); }
   });
 

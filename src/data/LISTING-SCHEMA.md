@@ -183,13 +183,11 @@ this repo. Nothing else in the pipeline changes.
 - **`sourceRef`**: `WA-<yyyymmdd>-<6 chars of the WhatsApp message id>`. It is deliberately NOT a
   TK reference, and `build.mjs` never looks it up in the TK API.
 - **`brochureUrl`**: `https://bona-real-estate.com/listings/<slug>/brochure.pdf` — the **default** for an
-  intake listing, not an opt-in. The brochure at that path is not the developer's file: it is
-  their document re-published under Bona's branding by `services/intake/rebrand_pdf.py`, with a
-  Bona cover in front of it, a footer strip (`bona-real-estate.com · +966 59 329 6933 · FAL 1100313556 ·
-  <id>`) on every one of their pages and a closing *Enquire* page carrying the listing URL, a QR
-  of it, the WhatsApp link, the opening hours and the licence line. Their own pages and branding
-  are left exactly as they are; nothing Bona adds may carry another agency, and any listing fact
-  that holds a rival broker, a phone number, an email or a link is dropped rather than printed.
+  intake listing, not an opt-in. The brochure at that path is not the developer's file: it is a
+  bilingual A4 brochure drawn from scratch by `services/intake/brochure_pdf.py` (TK design system,
+  Bona branded) out of this listing's own fields, its photos and floor plans, and `site.json` —
+  closing on the listing URL, a QR of it, the enquiry details and the licence line. Nothing of the
+  developer's PDF is re-published; the developer is named as text only.
   It is `null` when the owner captioned the PDF `#nobrochure`, or when the branded file could not
   be built or could not be squeezed under `BONA_MAX_BROCHURE_MB` (25 MB) — the listing then also
   carries `brochure-failed` or `brochure-too-large` in `_intake.warnings`, and `brochure <id>` in

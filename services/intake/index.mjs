@@ -702,7 +702,7 @@ async function publishEdit(jid, id, apply, commitMessage, replyText, { onPushed 
     let res;
     try {
       // `await`: most edits are synchronous file writes, but `brochure <id>` shells out to
-      // rebrand_pdf.py and must finish before the rebuild and the commit.
+      // brochure_pdf.py and must finish before the rebuild and the commit.
       res = await apply();
       // `duplicate`: the edit found its work already done (a replayed video) — nothing to commit.
       if (!res || res.error || res.duplicate) return res;

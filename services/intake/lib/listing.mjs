@@ -140,8 +140,8 @@ export const WARNING_CODES = new Set([
   'price-not-printed',      // the model's price was not in the PDF or the caption -> on request
   'subsidised-price-not-printed', // the model's Sakani price could not be confirmed -> regular price only
   'model-price-not-printed', // a unit model's price was not confirmed on its page -> that model shows no price
-  'brochure-too-large',     // the branded brochure is still over BONA_MAX_BROCHURE_MB after downsampling
-  'brochure-failed',        // rebrand_pdf.py could not build the branded brochure at all
+  'brochure-too-large',     // the brochure is still over BONA_MAX_BROCHURE_MB with its images scaled down
+  'brochure-failed',        // brochure_pdf.py could not build the brochure at all
   'images-skipped',         // sharp could not decode one or more candidates
   'model-flagged',          // the model returned warnings; read them in the work dir's ai.json
   'photos-cropped',         // one or more photographs were cut out of a page that was one flattened picture

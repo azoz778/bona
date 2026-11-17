@@ -46,7 +46,7 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
    remove BONA-W001          take the listing off the site (deletes the JSON and the photos)
    hero BONA-W001 4          make photo 4 the cover
    price BONA-W001 4500000   set the asking price   (price BONA-W001 onrequest clears it)
-   brochure BONA-W001        rebuild the Bona-branded PDF from the developer's original
+   brochure BONA-W001        rebuild the Bona brochure from the listing and its photos (no PDF needed)
    sold BONA-W001            mark it sold           (also: reserved / available)
    hide BONA-W001            keep it off the site   (show BONA-W001 puts it back)
    licence BONA-W001 7200012345 2027-03-01
@@ -227,13 +227,11 @@ Anything else in the group is ignored, silently.
   someone else; the generated copy is checked for `TK`, `tk-estates`, phone numbers and the
   hype words the site validator bans, and is rejected if any appear.
 - **The brochure comes back out under Bona's brand.** The owner is sent someone else's
-  brochure; what goes on the site is that document with a Bona cover in front of it, a
-  discreet footer strip on every one of the developer's pages and a closing *Enquire* page
-  with a QR of the listing URL. The developer's own pages are never re-rendered and their
-  branding is never removed — it is their document, and their brand on it is legitimate —
-  but nothing Bona *adds* may carry another agency: `rebrand_pdf.py` scrubs every listing
-  fact it is about to print and drops any that holds a rival broker, a phone number, an
-  email or a link. `#nobrochure` publishes the listing with no PDF at all.
+  brochure; what goes on the site is a NEW bilingual A4 brochure drawn from scratch by
+  `brochure_pdf.py` (TK design system, Bona branded) out of the published listing, its photos
+  and floor plans, and `src/data/site.json` — nothing of the developer's PDF is re-published.
+  It only ever prints fields the listing already passed the validators with; the developer is
+  named as text only. `#nobrochure` publishes the listing with no PDF at all.
 - **Real Arabic**, checked for Arabic script in every `ar` field.
 - **4–10 photos.** A PDF that yields fewer than four publishable photographs is rejected
   rather than published thin.
@@ -386,9 +384,9 @@ default, so only the ones you want to change need to be present.
 | `BONA_MAX_MODEL_PRICE_PAGES` | `12` | most pages the unit-model price check may confirm on (one call each); more = no model prices |
 | `BONA_LOCK_WAIT_MS` | `900000` | how long a job waits for `$BONA_DATA/intake.lock` |
 | `BONA_PY_CMD` | `uv run --with pymupdf --with pillow python` | argv for the extractor; split on spaces, never shelled |
-| `BONA_BROCHURE_PY_CMD` | `uv run --with pymupdf --with segno --with fonttools --with brotli python` | argv for the brochure step (segno draws the QR, fontTools+brotli turn `public/fonts/*.woff2` into TTF) |
-| `BONA_BROCHURE_TIMEOUT_MS` | `600000` | how long `rebrand_pdf.py` may take |
-| `BONA_MAX_BROCHURE_MB` | `25` | largest **branded** PDF committed into the repo; over it the images are downsampled, and if it still does not fit the listing publishes without one |
+| `BONA_BROCHURE_PY_CMD` | `uv run --with weasyprint==70.0 --with segno --with pillow --with pymupdf python` | argv for the brochure step (WeasyPrint is pinned — the layout checks were tuned on it; it needs the system Pango libraries) |
+| `BONA_BROCHURE_TIMEOUT_MS` | `600000` | how long `brochure_pdf.py` may take |
+| `BONA_MAX_BROCHURE_MB` | `25` | largest brochure committed into the repo; over it the images are scaled down, and if it still does not fit the listing publishes without one |
 | `BONA_SEND_REPLIES` | `true` | set `false` to run completely silent |
 | `BONA_DEBUG` | — | any value adds debug logs and stack traces |
 
@@ -406,9 +404,10 @@ node services/intake/run-once.mjs ~/brochures/villa.pdf --no-git --repo ~/bona -
 # the real thing (commits and pushes, exactly like the daemon)
 node services/intake/run-once.mjs ~/brochures/villa.pdf
 
-# the brochure step on its own: rebrand a local PDF and print what went on the Bona pages
-node services/intake/rebrand-once.mjs ~/brochures/villa.pdf ~/bona-bot/scripts/curate/inbox/villa.json /tmp/out.pdf
-node services/intake/rebrand-once.mjs ~/brochures/villa.pdf ~/facts.json /tmp/out.pdf --max-mb 12 --json
+# the brochure step on its own: a listing JSON + its folder of photos/plans + site.json
+uv run --with weasyprint==70.0 --with segno --with pillow --with pymupdf python -I \
+  services/intake/brochure_pdf.py ~/bona-bot/scripts/curate/inbox/villa.json \
+  ~/bona-bot/public/listings/villa ~/bona-bot/src/data/site.json ~/out/brochure.pdf --work ~/out/work
 
 # unit tests — note the glob: node v24.19.0 on this box does not accept a bare directory
 node --test 'services/intake/test/*.test.mjs'
@@ -426,12 +425,9 @@ node --input-type=module -e '
 ' ~/clips/walkthrough.mp4
 ```
 
-`rebrand-once.mjs` takes either a full listing (`scripts/curate/inbox/<slug>.json`) or a bare
-facts object `{ id, titleEn, titleAr, place, priceEn, project, developer, url }`. It writes no
-state, takes no lock and never touches git, so it is safe to run while the daemon is up — it is
-the loop to use when changing anything in `rebrand_pdf.py`. Rasterise a page or two afterwards
-and look at them; `docs/qa/brochure/` holds the reference renders (portrait, 16:9 deck, and the
-709x510 half-spread the owner's Nuzul Khayala brochure opens on).
+`brochure_pdf.py` reads only the files it is given and writes only `<out.pdf>` and `--work`, so
+it is safe to run while the daemon is up — it is the loop to use when changing the brochure.
+Rasterise the pages afterwards and look at every one of them.
 
 Every run leaves its scratch directory behind (`--work`, else `$BONA_DATA/intake/manual/…`)
 containing `prompt.txt` (exactly what the model was asked), `ai.json` (exactly what it
@@ -495,8 +491,7 @@ which `validate.mjs --head` stat-checks too).
 | `the publishing clone has N uncommitted path(s)` | something other than the intake wrote to `~/bona-bot` | look at `git status` there yourself; the intake refuses to throw away work that is not its own |
 | `another intake job holds intake.lock` | a `run-once.mjs` is still running | wait, or remove the file if its pid is gone |
 | `⚠️ … spawn claude ENOENT` | the unit's PATH is missing `~/.local/bin` | fix `PATH=` in the unit, `daemon-reload`, restart |
-| listing live but no *Download brochure* button | the branded PDF was over `BONA_MAX_BROCHURE_MB` even after downsampling, or `rebrand_pdf.py` failed | the reply says which; `_intake.warnings` holds `brochure-too-large` / `brochure-failed`. Raise the cap and send `brochure <id>`, or leave it — the listing itself is fine |
-| `✋ the original PDF for BONA-W00x is not in …` | `brochure <id>` after the download was cleaned out of `$BONA_DATA` | send the brochure again |
+| listing live but no *Download brochure* button | the brochure was over `BONA_MAX_BROCHURE_MB` even with its images scaled down, or `brochure_pdf.py` failed (`intake.brochure_failed` / `edit.brochure_failed` in the journal) | the reply says which; `_intake.warnings` holds `brochure-too-large` / `brochure-failed`. Raise the cap and send `brochure <id>`, or leave it — the listing itself is fine |
 | `✋ Which listing is this video for? …` | a video with no `BONA-W###` in its caption and no brochure within `BONA_VIDEO_WINDOW_MIN` of it (or the nearest brochure was rejected / never finished within `BONA_VIDEO_WAIT_MIN`), and there was nothing published to compare it against | send it again right after the brochure, or captioned `video BONA-W001` |
 | `✋ I watched the clip and still cannot tell which property it is …` | the content matcher ran and came back under `BONA_VIDEO_MATCH_CONFIDENCE` | caption it with the id. `video.content_match` in the journal says what it saw and how sure it was; the frames, the contact sheets and `match.json` are in `<msgid>-match/` |
 | `✋ Two brochures were sent just as close to this video …` | two different listings were published from brochures within 60 s of each other around the clip | send it again captioned with the id you mean |
@@ -522,15 +517,14 @@ services/intake/
   run-once.mjs          the same pipeline on one local PDF, no WhatsApp
   extract_pdf.py        PyMuPDF: page text + candidate photos, whole-page renders (--mode pages)
                         and sliced page views (--mode views); run via `uv run --with pymupdf --with pillow`
-  rebrand_pdf.py        PyMuPDF + segno: the Bona cover, the footer strip, the Enquire page, the shrink
-  rebrand-once.mjs      the brochure step alone, on one local PDF — the loop for changing rebrand_pdf.py
+  brochure_pdf.py       WeasyPrint + segno: the Bona brochure, drawn from the listing, its photos and plans
   lib/
     env.mjs             config; reads ~/.secrets/*.env inside Node, never through a shell
     log.mjs             one JSON line per event, with secret redaction
     evolution.mjs       Evolution API client (+ the verified response shapes, in comments)
     classify.mjs        the default-deny gate
     pdf.mjs             wrapper around extract_pdf.py
-    brochure.mjs        wrapper around rebrand_pdf.py: the facts it prints, where the file lands
+    brochure.mjs        wrapper around brochure_pdf.py: the public listing it is handed, where the file lands
     contact-sheet.mjs   labelled sheets of the candidates, for the model to look at
     photo-regions.mjs   the photographs cut out of pages that are single flattened pictures
     prompt.md           the prompt template (the contract the model must answer with)
