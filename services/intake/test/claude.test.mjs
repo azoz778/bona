@@ -134,6 +134,17 @@ describe('copyProblems — owner rules', () => {
       assert.ok(copyProblems(l).length > 0, `${field} should be caught`);
     }
   });
+  it('catches a price written into the copy, in either language', () => {
+    for (const text of ['Apartments from SAR 319,015 in phase one.', 'شقق ابتداءً من 319,015 ريال.', 'Priced at 2.5 million SAR.', 'السعر 2.5 مليون ريال']) {
+      const l = structuredClone(GOOD.listing);
+      l.description.en = [text, 'Two.'];
+      assert.ok(copyProblems(l).some((p) => /states a price/.test(p)), text);
+    }
+    const ok = structuredClone(GOOD.listing);
+    ok.description.en = ['Eight layouts from 79.77 to 175.40 m², ten-year warranty, 1,710 units.', 'Two.'];
+    assert.deepEqual(copyProblems(ok), []);
+  });
+
   it('catches a phone number', () => {
     const l = structuredClone(GOOD.listing);
     l.description.en = ['Call +966 59 329 6933.', 'Two.'];

@@ -23,7 +23,7 @@ import { withLock } from './lib/lock.mjs';
 import { say } from './lib/log.mjs';
 import { replaceMetaFor } from './lib/listing.mjs';
 import { processPdf, RejectError } from './lib/pipeline.mjs';
-import { assertCleanTree, gitCommitPush, gitPull, resetTree } from './lib/publish.mjs';
+import { assertCleanTree, gitCommitPush, gitPull, gitStatus, resetTree } from './lib/publish.mjs';
 
 function parseArgs(argv) {
   const out = { flags: new Set(), opts: {}, positional: [] };
@@ -137,6 +137,12 @@ async function main() {
     // people's uncommitted changes in it is safe to point at.
     const report = await withLock(cfg.lockPath, async () => {
       if (!noGit) {
+        // assertCleanTree() RECOVERS a dirty clone by discarding its changes — right for a crashed
+        // job, wrong for a replacement, whose guard must see the listing as it stands. Refuse instead.
+        if (args.opts.replace) {
+          const dirty = await gitStatus(cfg.repo);
+          if (dirty) throw new Error(`--replace: ${cfg.repo} has uncommitted changes, which --replace will not discard — commit or clean them first (run it in the publishing clone)`);
+        }
         await assertCleanTree(cfg.repo);
         await gitPull(cfg.repo, { remote: cfg.gitRemote, branch: cfg.gitBranch });
       }

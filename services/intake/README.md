@@ -189,11 +189,12 @@ Anything else in the group is ignored, silently.
   subject); the site uses it as the crop position, so a tall façade is not cut down to sky.
 - **Re-running a published brochure**: `node services/intake/run-once.mjs <pdf> --replace BONA-W023`
   rewrites that listing in place (same id, slug, date and reference; new copy, price, photos and
-  brochure). It needs git (no `--no-git`): the listing must be committed and unchanged, because the
-  old files are deleted first and a failed run is rolled back from the commit. It is refused for a
-  listing that carries anything a re-run would not keep — a hand-added field (`photoNote`, `faq`,
-  `seoTitle`, …), videos, a licence, `hidden`, `featured`, or the owner's own `price`/`hero` edits
-  (recorded in `_intake.edits` by those commands).
+  brochure). Run it in the publishing clone (`--repo ~/bona-bot`, the default) with git: the clone
+  must be clean (it refuses rather than discards) and the listing committed, because the old files
+  are deleted first and a failed run is rolled back from the commit. It is refused for a listing that
+  has been committed to again since it was published (a hand correction, a WhatsApp edit), or that
+  carries anything a re-run would not keep — a hand-added field (`photoNote`, `faq`, `seoTitle`, …),
+  videos, a licence, a virtual tour, `hidden`, `featured`, or `_intake.edits` (`price`/`hero`).
 - **Nothing the model writes is trusted.** Only fields that pass `validateAiResult` +
   `copyProblems` + `checkListing` are written or sent on. The model's free-text `warnings`
   stay in the run's `ai.json`; `_intake.warnings` in the committed listing holds codes from a
@@ -352,7 +353,7 @@ default, so only the ones you want to change need to be present.
 | `BONA_POLL_MS` | `20000` | message poll interval |
 | `BONA_GROUP_SCAN_MS` | `0` when `BONA_WA_GROUP_JIDS` is set, else `300000` | group discovery (`/group/fetchAllGroups`) interval; `0` = one discovery per start (retried every 30 min until it succeeds, so groups found by `BONA_WA_GROUP_MATCH` come back after a restart), then off once every configured group is pollable (every 30 min only while one is not). Each scan costs one WhatsApp `groupMetadata` per group the number is in, so a 5-min scan tripped `rate-overlimit` ~670×/h on the personal number |
 | `BONA_CLAUDE_MODEL` | `opus` | the model for the extraction/curation step (owner 2026-11-17: Opus picks the photos; was `sonnet`) |
-| `BONA_CLAUDE_FALLBACK_MODEL` | `sonnet` | used for the last attempt if the main model keeps failing the contract |
+| `BONA_CLAUDE_FALLBACK_MODEL` | the other one of `opus`/`sonnet` | used for the last attempt if the main model keeps failing the contract (always a different model from the main one unless set explicitly) |
 | `BONA_SITE` | `https://bona-real-estate.com` | used for URLs and `brochureUrl` |
 | `BONA_MIN_IMAGES` / `BONA_MAX_IMAGES` | `4` / `10` | publishable photo count |
 | `BONA_MIN_IMAGE_SIDE` | `700` | smallest long side of a candidate photo |

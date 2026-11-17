@@ -826,6 +826,7 @@ describe('replaceMetaFor (run-once --replace)', () => {
     ['a licence', { licence: { adNumber: '7200123', adExpiry: null, wafiNumber: null, escrowAccount: null } }, /a licence/],
     ['hidden', { hidden: true }, /hidden: true/],
     ['featured', { featured: true }, /featured: true/],
+    ['a virtual tour', { virtualTourUrl: 'https://my.matterport.com/show/?m=abc' }, /a virtual tour/],
     ['the owner\'s own price', { _intake: { edits: ['price'] } }, /owner's own price/],
   ];
   for (const [label, over, re] of refused) {

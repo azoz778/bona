@@ -40,9 +40,9 @@ import { log } from './log.mjs';
 import { extractPdf, renderPdfPages } from './pdf.mjs';
 import { compositePages, cropPhotoRegions, modelFlagsComposites } from './photo-regions.mjs';
 import { priceAppearsIn } from './price.mjs';
-import { hasSubsidyWording, pricePagesToRender } from './price-pages.mjs';
+import { isSubsidyPricePage, pricePagesToRender } from './price-pages.mjs';
 import { pinFromLinks } from './geo.mjs';
-import { committedUnchanged, rebuild, resetTree } from './publish.mjs';
+import { commitsTouching, committedUnchanged, rebuild, resetTree } from './publish.mjs';
 import { loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNamedIn, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
 
 export const sha256File = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -100,6 +100,14 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     // back from git: so the listing as it stands must BE in git, unchanged, or it is lost.
     if (!dryRun && !(await committedUnchanged(cfg.repo, [path.join('public', 'listings', meta.slug), path.relative(cfg.repo, current.file)]))) {
       throw new Error(`${meta.id} has uncommitted changes (or is not in git) — commit or discard them before --replace`);
+    }
+    // A re-run rebuilds title, place, copy and photo labels from the brochure, so any later commit
+    // to the listing — a district corrected by hand, an Arabic name fixed, a WhatsApp edit made
+    // before edits were recorded — would be undone silently. Only a listing untouched since the
+    // commit that published it may be replaced.
+    const commits = await commitsTouching(cfg.repo, path.relative(cfg.repo, current.file));
+    if (commits !== 1) {
+      throw new Error(`${meta.id} has been changed since it was published (${commits < 0 ? 'its git history could not be read' : `${commits} commits`}) — a re-run would undo that; do it by hand`);
     }
   }
 
@@ -319,7 +327,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // text layer proves the number is printed, not WHICH price it is — so text found only on such
   // pages never settles a price; the page image does (those pages are always rendered, see
   // price-pages.mjs). The caption is the owner's own words and always counts.
-  const plainText = pageText.length ? pageText.filter((t) => !hasSubsidyWording(t)).join('\n') : (extraction.text || '');
+  const plainText = pageText.length ? pageText.filter((t) => !isSubsidyPricePage(t)).join('\n') : (extraction.text || '');
   const haystack = `${plainText}\n${caption.text || ''}`;
   // The "a price for one of its unit models counts" allowance is for a whole development quoted
   // "from" its cheapest model — never for one specific unit, and never for a price not marked `from`.
@@ -332,9 +340,12 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   const printed = async (amount, evidence, { subsidised = false } = {}) => {
     const out = { inText: subsidised ? false : priceAppearsIn(haystack, amount), confirmed: null };
     if (out.inText || !pageImages.length) return out;
-    const cited = evidence ?? (() => {
+    // The model's citation when it names a rendered page; otherwise the rendered page whose text
+    // carries the number. Either way the second model looks at the page before anything counts.
+    const citedRendered = evidence && pageImages.some((p) => p.page === evidence.page) ? evidence : null;
+    const cited = citedRendered ?? (() => {
       const hit = pageImages.find((p) => priceAppearsIn(pageText[p.page - 1] ?? '', amount));
-      return hit ? { page: hit.page, quote: String(amount) } : null;
+      return hit ? { page: hit.page, quote: evidence?.quote ?? String(amount) } : null;
     })();
     const page = cited && pageImages.find((p) => p.page === cited.page);
     if (!page) return out;
@@ -345,6 +356,8 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       quote: cited.quote,
       subsidised,
       project: wholeDevelopment,
+      subject: ai.listing?.title?.en,
+      unit: ai.listing?.unit ?? null,
       bin: cfg.claudeBin,
       model: cfg.claudeModel,
       cwd: workDir,
@@ -352,7 +365,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       settingsPath: confinement.file,
     });
     out.confirmed = check.confirmed;
-    log.info('intake.price_evidence', { page: cited.page, subsidised, inferred: !evidence, confirmed: check.confirmed, error: check.error ?? null });
+    log.info('intake.price_evidence', { page: cited.page, subsidised, inferred: cited !== evidence, confirmed: check.confirmed, error: check.error ?? null });
     return out;
   };
   if (!caption.price && price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0) {

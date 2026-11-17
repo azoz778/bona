@@ -123,9 +123,10 @@ export function buildPrompt({ extraction, sheets, caption, pageImages = [], page
       'text layer below — the PDF\'s font maps its digits to other characters, so a price printed as',
       '270,425 can read "DIB,FDG" in the text. Those pages were rendered as images. **Read every one of them',
       'with the Read tool** and take every price, area and unit figure on them from the image, never from the',
-      'text layer. Other figures in the text layer may be scrambled the same way (capital letters where digits',
-      'should be): leave out any figure you cannot read on a page image. A page is also rendered when it prints',
-      'separate prices for housing-subsidy beneficiaries, so that the two prices are told apart by looking.',
+      'text layer. Elsewhere in the text layer, a figure scrambled the same way (capital letters where digits',
+      'should be) cannot be trusted: leave it out unless you can read it on a page image. Readable figures stay',
+      'usable. Some of these pages were rendered for another reason: they print separate prices for',
+      'housing-subsidy beneficiaries, and the two prices must be told apart by looking.',
       '',
       ...pageImages.map((p) => `  - page ${p.page}: ${p.abs}  (${p.width}x${p.height})`),
       '',
@@ -329,7 +330,7 @@ export function validateAiResult(result, { candidateCount = 0 } = {}) {
  * @returns {Promise<{confirmed:boolean, error?:string}>}
  */
 export async function confirmPriceEvidence({
-  pageImage, amount, currency, quote, subsidised = false, project = false, bin = 'claude', model = 'sonnet', cwd,
+  pageImage, amount, currency, quote, subsidised = false, project = false, subject = null, unit = null, bin = 'claude', model = 'sonnet', cwd,
   addDirs = [], settingsPath = null, timeoutMs = 300000, spawnImpl = spawn,
 }) {
   const which = subsidised
@@ -341,6 +342,7 @@ export async function confirmPriceEvidence({
     `  ${pageImage}`,
     '',
     `Question: does that page VISIBLY PRINT ${which} ${amount} ${currency} for the property?`,
+    ...(subject || unit ? [fence('the listing this price is for', [subject, unitLabel(unit)].filter(Boolean).join(' — '))] : []),
     'A number you have to compute, infer or assume does not count. A price for a different unit',
     'on the same page does not count unless the page makes clear it is this property\'s price.',
     ...(project
@@ -366,7 +368,19 @@ export async function confirmPriceEvidence({
   }
 }
 
-/** Copy hygiene: no other agency's brand, no phone numbers, no hype. */
+const unitLabel = (u) => {
+  if (!u || typeof u !== 'object') return '';
+  const parts = [u.unitRef && `unit ${u.unitRef}`, u.block && `block ${u.block}`, u.floor !== null && u.floor !== undefined && `floor ${u.floor}`].filter(Boolean);
+  return parts.length ? `${parts.join(', ')} — a price printed for a different unit does not count` : '';
+};
+
+/**
+ * A price inside the copy: a price-sized figure next to a currency. The site prints the price from
+ * `price` (which the TAQEEM check may have cleared), so a figure in the prose could outlive it.
+ */
+const PRICE_IN_COPY_RE = /(?:\b(?:SAR|SR|AED|USD|EUR|GBP|OMR)\b|ريال|ر\.\s?س|[$€£﷼])\s*[\d٠-٩][\d٠-٩,.٬\s]{3,}|[\d٠-٩]{1,3}(?:[,٬.][\d٠-٩]{3})+\s*(?:\b(?:SAR|SR|AED|USD|EUR|GBP|OMR)\b|ريال|ر\.\s?س|[$€£﷼])|\b\d+(?:\.\d+)?\s*(?:million|m)\s*(?:SAR|riyals?)\b|مليون\s*(?:ريال|ر\.\s?س)/i;
+
+/** Copy hygiene: no other agency's brand, no phone numbers, no hype, no prices. */
 export function copyProblems(listing) {
   const bad = [];
   const FORBIDDEN = [...COPY_FORBIDDEN, /\bwhatsapp\b/i];
@@ -381,6 +395,9 @@ export function copyProblems(listing) {
   for (const [label, value] of fields) {
     if (!isStr(value)) continue;
     for (const re of FORBIDDEN) if (re.test(value)) bad.push(`${label} mentions "${value.match(re)[0]}"`);
+    if (PRICE_IN_COPY_RE.test(value)) {
+      bad.push(`${label} states a price ("${value.match(PRICE_IN_COPY_RE)[0].trim()}") — prices go in listing.price only`);
+    }
     for (const w of HYPE_WORDS) if (new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(value)) bad.push(`${label} uses hype word "${w}"`);
   }
   return bad;

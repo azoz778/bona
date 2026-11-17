@@ -67,6 +67,13 @@ export async function committedUnchanged(repo, paths) {
   return status.code === 0 && status.out === '';
 }
 
+/** How many commits touched `file` (-1 when git cannot say): 1 = only the commit that created it. */
+export async function commitsTouching(repo, file) {
+  const r = await run('git', ['log', '--follow', '--format=%H', '--', file], { cwd: repo });
+  if (r.code !== 0) return -1;
+  return r.out ? r.out.split('\n').filter(Boolean).length : 0;
+}
+
 export async function gitStatus(repo) {
   return (await run('git', ['status', '--porcelain'], { cwd: repo })).out;
 }

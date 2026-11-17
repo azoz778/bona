@@ -361,6 +361,7 @@ export function replaceMetaFor(repo, id) {
   if (l.licence && Object.values(l.licence).some((v) => v !== null && v !== undefined && v !== '')) blockers.push('a licence');
   if (l.hidden) blockers.push('hidden: true');
   if (l.featured) blockers.push('featured: true');
+  if (l.virtualTourUrl) blockers.push('a virtual tour'); // the intake always writes null: any value was added by hand
   const edits = l._intake?.edits;
   if (Array.isArray(edits) && edits.length) blockers.push(`the owner's own ${edits.join(' and ')} edit(s)`);
   if (blockers.length) throw new Error(`--replace ${id}: it has ${blockers.join('; ')}, which a re-run would not keep — do it by hand`);

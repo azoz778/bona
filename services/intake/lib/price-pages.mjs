@@ -23,19 +23,24 @@ import { westernise } from './price.mjs';
 /** Words that say "a price is on this line". Matched on NFKC-folded text (presentation forms -> letters). */
 const PRICE_WORD_RE = new RegExp([
   'سعر', 'سعار', 'ريال', 'ر\\.\\s?س', 'ریال', // ﷼ folds to ریال (Farsi yeh) under NFKC
-  'قيمة', // "قيمة الوحدة" — the unit's value, a common way to print a price
+  'قيمة (?:ال)?(?:وحدة|عقار|فيلا|شقة|إجمالية)', 'القيمة الإجمالية', // "قيمة الوحدة" — not "ضريبة القيمة المضافة" (VAT)
   '\\bprices?\\b', '\\bsar\\b', '\\bsr\\b', '\\baed\\b', '\\busd\\b', '\\beur\\b', '\\bgbp\\b', '€', '£',
 ].join('|'), 'i');
 
-/** Housing-subsidy wording: "السعر لمستفيدي الدعم" / "غير مستفيدي الدعم" / "منصة سكني" / "Sakani". */
-export const SUBSIDY_RE = /مستفيد|الدعم السكني|(?:منصة|برنامج|مستفيدي)\s+سكني|\bsakani\b|subsid/i;
+/**
+ * Housing-subsidy wording: "السعر لمستفيدي الدعم", "قبل الدعم / بعد الدعم", "مع الدعم", "مدعوم",
+ * "منصة سكني", "Sakani", "beneficiaries", "after support". Deliberately broad: a false match costs
+ * one page render and one check; a miss lets a subsidised figure pass as the regular price.
+ */
+export const SUBSIDY_RE = /مستفيد|الدعم|مدعوم|(?:منصة|برنامج|مستفيدي)\s+سكني|\bsakani\b|subsid|beneficiar|(?:before|after|with)\s+support/i;
 
 /**
- * A number the size of a price: 10,000 or more, grouped in thousands, or 5–8 digits written
- * solid. A solid run of 9+ digits is a phone, CR or licence number (920032546, 05xxxxxxxx,
- * 70xxxxxxxx), not a price a brochure prints.
+ * A number the size of a price: 10,000 or more, grouped in thousands by , ٬ . or ' — or 5–8 digits
+ * written solid. A solid run of 9+ digits is a phone, CR or licence number (920032546, 05xxxxxxxx),
+ * and space-grouped digits are as often a phone ("0555 123 456", "920 032 546") as a price, so
+ * neither makes a price line readable (the page is rendered instead — a cost, never a wrong price).
  */
-const READABLE_PRICE_RE = /(?<![\d.,])(?:\d{1,3}(?:[,٬'’  ]\d{3})+|\d{5,8})(?![\d])/;
+const READABLE_PRICE_RE = /(?<![\d.,])(?:\d{1,3}(?:[,٬.'’]\d{3})+|\d{5,8})(?![\d])/;
 
 /** The scrambled form: capital letters standing in for digits, grouped like a price ("DIB,FDG"). */
 const SCRAMBLED_PRICE_RE = /(?<![A-Za-z])[A-Z]{1,3}[,٬][A-Z]{3}(?![A-Za-z])/;
@@ -53,13 +58,23 @@ export function hasSubsidyWording(text) {
 }
 
 /**
+ * A page that prints prices AND mentions subsidy: it may carry two prices per unit, so a number in
+ * its text proves only that the number is printed, not which price it is. A Sakani logo in a footer
+ * with no price on the page is not one.
+ */
+export function isSubsidyPricePage(text) {
+  const folded = normaliseArabic(text);
+  return SUBSIDY_RE.test(folded) && PRICE_WORD_RE.test(folded);
+}
+
+/**
  * @param {string} text  the text layer of ONE page
  * @returns {boolean} true when the page should be rendered for the model to read its prices
  */
 export function pageNeedsPriceRender(text) {
   const raw = String(text ?? '');
   const folded = normaliseArabic(raw);
-  if (SUBSIDY_RE.test(folded)) return true;
+  if (isSubsidyPricePage(raw)) return true;
   const lines = westernise(folded).split('\n');
   const priceLines = lines.map((l, i) => (PRICE_WORD_RE.test(l) ? i : -1)).filter((i) => i >= 0);
   if (!priceLines.length) return false;
