@@ -43,7 +43,7 @@ import { log } from './log.mjs';
 import { ABROAD_CURRENCIES, alignHeadline, checkModelPrices, countryCurrency, homeCurrency, isFigure, modelPriceCurrency } from './model-prices.mjs';
 import { extractPdf, renderPdfPages } from './pdf.mjs';
 import { compositePages, cropPhotoRegions, modelFlagsComposites } from './photo-regions.mjs';
-import { priceAppearsIn, printedInCurrency, westernise } from './price.mjs';
+import { figureMatches, priceAppearsIn, printedInCurrency, westernise } from './price.mjs';
 import { isSubsidyPricePage, pricePagesToRender } from './price-pages.mjs';
 import { pinFromLinks } from './geo.mjs';
 import { changedSincePublished, committedUnchanged, rebuild, resetTree } from './publish.mjs';
@@ -52,8 +52,31 @@ import { FACT_LISTS, headlineFollowsModels, loadRegisterWithdrawals, withdrawnAd
 /** Words that make a figure in the copy a price: a currency, "price", "from"-style openers. */
 const PRICE_CONTEXT_RE = /سعر|أسعار|اسعار|ريال|ر\.\s?س|ثمن|قيمة(?!\s*المضافة)|ابتداء|تبدأ|يبدأ|\b(?:SAR|SR|AED|USD|EUR|GBP|riyals?|prices?|priced|costs?|starting|starts)\b|[$€£﷼\u20c1]/i;
 
-/** "Starting from" wording in a price's evidence: from / starting / starts at, ابتداءً من / إبتداء, يبدأ / تبدأ من. */
-const FROM_WORDING_RE = /\b(?:from|starting|starts)\b|بتداء|[يت]بد[أا]/i;
+/** A "starting from" word: from / starting / starts, ابتداءً من / إبتداء, يبدأ / تبدأ من. */
+const FROM_WORD = String.raw`\b(?:from|starting|starts)\b|بتداء|[يت]بد[أا]`;
+/** …leading to what follows it: at most 25 characters on, none of them a digit (final review M2). */
+const FROM_LEADS_RE = new RegExp(`(?:${FROM_WORD})\\D{0,25}$`, 'i');
+const LETTER_RE = /[A-Za-z\u0620-\u065f\u066e-\u06d3\u06d5-\u06ff]/;
+/** Characters a quote is not shown with: controls, zero-width and direction marks. */
+const UNSHOWN_G = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g;
+
+/**
+ * The "starting from" wording a price's evidence ties to `amount`: the words from a from-word through the figure
+ * ("Starting from SAR 4,400,000", "تبدأ من 4,400,000"), or null. The from-word must lead to the figure — at most
+ * 25 characters before it, no other figure between — so "10 minutes from the airport", "(from the developer)" or
+ * the other end of "from 3,900,000 to 4,400,000" is not this price's (final review M2).
+ */
+function fromWordingOf(quote, amount) {
+  const q = westernise(String(quote ?? '').normalize('NFKC'));
+  for (const { index, end } of figureMatches(q, amount)) {
+    const hit = FROM_LEADS_RE.exec(q.slice(0, index));
+    if (!hit) continue;
+    let start = hit.index;
+    while (start > 0 && LETTER_RE.test(q[start - 1])) start -= 1; // the whole word: "ابتداءً", not "بتداءً"
+    return q.slice(start, end).replace(UNSHOWN_G, ' ').replace(/\s+/g, ' ').trim();
+  }
+  return null;
+}
 
 /**
  * A measurement or a count: ONE figure followed straight away by its unit — "3 million square
@@ -719,9 +742,11 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // evidence for it carries the from-wording. With one model there is no cheaper row to be "From", so the
   // from-wording is the brochure's; with two or more (floors, parts, layouts) `from` stays cleared,
   // whatever the evidence says. The least risky of the reviewer's two options: the evidence quote is the
-  // model's, so it may only ADD the "From" a confirmed own price already earned, never a price.
-  const keepsStartingFrom = () => readFrom && !ai.listing?.project && Array.isArray(ai.models) && ai.models.length === 1
-    && report.priceEvidence?.confirmed === true && FROM_WORDING_RE.test(String(ai.priceEvidence?.quote ?? '').normalize('NFKC'));
+  // model's, so it may only ADD the "From" a confirmed own price already earned, never a price. The from-word
+  // must lead to the figure in that quote (fromWordingOf): "10 minutes from the airport" is not price wording.
+  // Returns the words that earned it, for the warning — or null.
+  const startingFromWords = () => (readFrom && !ai.listing?.project && Array.isArray(ai.models) && ai.models.length === 1
+    && report.priceEvidence?.confirmed === true ? fromWordingOf(ai.priceEvidence?.quote, price.amount) : null);
   // An enrichment publishes none of the model's copy, map pin or photos, and decides its headline from
   // the listing (enrichHeadline): the model's own headline and Sakani checks, the copy guard, the map
   // and the photo steps below are for a publish only. Its unit-model prices are checked above, the same.
@@ -748,6 +773,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   }
   if (!headlineFromModels && !caption.price && price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0) {
     report.priceEvidence = await printed(price.amount, ai.priceEvidence, { whole: ownPriceOnly });
+    const fromWords = ownPriceOnly ? startingFromWords() : null;
     if (!report.priceEvidence.inText && !report.priceEvidence.confirmed) {
       log.warn('intake.price_unevidenced', { amount: price.amount, currency: price.currency, unchecked: report.priceEvidence.unchecked === true, why: report.priceEvidence.uncheckedWhy ?? null, whole: ownPriceOnly });
       rejectedPrices.push(price.amount);
@@ -760,9 +786,9 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
         : ownPriceOnly
           ? 'the price read was the lowest unit-model price, which the brochure does not print as this single property\'s own price (a property is not "From" its cheapest model), so the listing says "price on request" — send `price <id> <amount>` to set one'
           : 'the price was not printed in the brochure, so the listing says "price on request" — send `price <id> <amount>` to set one');
-    } else if (ownPriceOnly && keepsStartingFrom()) {
+    } else if (fromWords) {
       price.from = true;
-      report.warnings.push('the price read was its one unit model\'s; confirmed on its page as the property\'s own price, and shown "From" as the brochure words it (its evidence: "starting from")');
+      report.warnings.push(`the price read was its one unit model's; confirmed on its page as the property's own price, and shown "From" as the brochure words it (its evidence: "${fromWords}")`);
     } else if (ownPriceOnly) {
       report.warnings.push('the price read was the lowest unit-model price; a single property is not "From" its cheapest model, so it is shown as the property\'s own price (confirmed on its page)');
     }

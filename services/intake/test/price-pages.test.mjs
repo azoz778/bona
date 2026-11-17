@@ -1841,14 +1841,29 @@ describe('processPdf: a single property is never "From" its cheapest model', { t
   it('S2m: ONE model carrying a price the brochure words "starting from" keeps `from` once confirmed as the whole property\'s price', async () => {
     const one = (quote) => villa({ amount: 4400000, from: true, quote, models: [model('Villa', 4400000, 3)] });
     const facts = { 3: [{ fig: 4400000, mark: 'SAR', kind: 'whole', model: 'Villa' }] };
-    for (const [quote, text] of [['Starting from SAR 4,400,000', 'Starting from SAR 4,400,000'], ['ابتداءً من 4,400,000 ريال', 'السعر ابتداءً من 4,400,000 ريال'],
-      ['الأسعار تبدأ من 4,400,000 ر.س', 'الأسعار تبدأ من 4,400,000 ر.س'], ['Prices from SAR 4,400,000', 'Prices from SAR 4,400,000']]) {
+    // The warning quotes the words that made it "From": the from-word through the figure (final review M2).
+    for (const [quote, text, words] of [['Starting from SAR 4,400,000', 'Starting from SAR 4,400,000', 'Starting from SAR 4,400,000'],
+      ['ابتداءً من 4,400,000 ريال', 'السعر ابتداءً من 4,400,000 ريال', 'ابتداءً من 4,400,000'],
+      ['الأسعار تبدأ من 4,400,000 ر.س', 'الأسعار تبدأ من 4,400,000 ر.س', 'تبدأ من 4,400,000'], ['Prices from SAR 4,400,000', 'Prices from SAR 4,400,000', 'from SAR 4,400,000'],
+      ['Villa — starting from SAR 4,400,000 incl. VAT', 'Villa — starting from SAR 4,400,000 incl. VAT', 'starting from SAR 4,400,000']]) {
       const r = await rig({ listing: one(quote), pageText: textPages(text), facts });
       try {
         const report = await r.run();
         assert.deepEqual(headlineCalls(r).map((c) => [c.amount, c.whole]), [[4400000, true]], quote);
         assert.deepEqual(report.listingPreview.price, { amount: 4400000, currency: 'SAR', from: true, period: null, onRequest: false }, quote);
         assert.deepEqual(checkListing(report.listingPreview), []);
+        const w = report.warnings.find((x) => /shown "From"/.test(x)) ?? '';
+        assert.ok(w.includes(`(its evidence: "${words}")`), `${quote}: ${w}`);
+      } finally { r.cleanup(); }
+    }
+    // M2: a from-word that is not the figure's — after it, far before it, or before another figure — is no "From".
+    for (const quote of ['Villa price SAR 4,400,000 — 10 minutes from the airport', 'SAR 4,400,000 (from the developer)',
+      'From the developer: villa price SAR 4,400,000', 'from SAR 3,900,000 to SAR 4,400,000', 'السعر 4,400,000 ريال، يبعد 10 دقائق ابتداءً من المطار', 'Starting from']) {
+      const r = await rig({ listing: one(quote), pageText: textPages('Villa price SAR 4,400,000'), facts });
+      try {
+        const report = await r.run();
+        assert.deepEqual(report.listingPreview.price, { amount: 4400000, currency: 'SAR', from: false, period: null, onRequest: false }, quote);
+        assert.ok(!report.warnings.some((x) => /shown "From"/.test(x)), quote);
       } finally { r.cleanup(); }
     }
     // No from-wording in the evidence (the old habit's "from" its one model): its own price, no `from` (P3e).

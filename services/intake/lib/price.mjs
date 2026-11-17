@@ -46,6 +46,18 @@ export function priceAppearsIn(text, amount) {
 }
 
 /**
+ * Every place `amount` is printed in `text`, by priceAppearsIn's figure rules: `{ index, end }` offsets into
+ * the text (westernise turns one digit into one digit, so they hold for the text as given), leftmost first.
+ */
+export function figureMatches(text, amount) {
+  if (!Number.isFinite(amount) || amount <= 0) return [];
+  const t = westernise(text || '');
+  const out = [];
+  for (const re of figurePatterns(amount, 'g')) for (const m of t.matchAll(re)) out.push({ index: m.index, end: m.index + m[0].length });
+  return out.sort((x, y) => x.index - y.index);
+}
+
+/**
  * The currency marks a brochure prints beside a price, and the currencies each can stand for —
  * matched on NFKC-folded text (Arabic presentation forms -> letters; ﷼ folds to "ریال", Farsi yeh).
  * The specific ones come first: "ريال عماني" is Omani, "ريال سعودي" Saudi; a bare "ريال", ﷼ or

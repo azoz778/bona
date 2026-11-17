@@ -8,7 +8,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { acquireLock, withLock, LOCK_CEILING_MS, LOCK_ORPHAN_MS } from '../lib/lock.mjs';
 import { outsideDenyRules, writeConfinement } from '../lib/confine.mjs';
-import { priceAppearsIn, printedInCurrency, westernise } from '../lib/price.mjs';
+import { figureMatches, priceAppearsIn, printedInCurrency, westernise } from '../lib/price.mjs';
 import { STOP_GRACE_MS, waitForIdle } from '../lib/shutdown.mjs';
 
 let dir;
@@ -223,6 +223,13 @@ describe('TAQEEM cross-check — a price must actually be printed', () => {
   it('does not match a longer number that merely contains it', () => {
     assert.equal(priceAppearsIn('reference 19900001', 990000), false);
     assert.equal(priceAppearsIn('unit 4500000A', 450000), false);
+  });
+
+  it('figureMatches: where the figure is printed, by the same rules, leftmost first', () => {
+    assert.deepEqual(figureMatches('from SAR 4,400,000 — 4.4m', 4400000), [{ index: 9, end: 18 }, { index: 21, end: 25 }]);
+    assert.deepEqual(figureMatches('تبدأ من ٤٬٤٠٠٬٠٠٠ ريال', 4400000), [{ index: 8, end: 17 }], 'Arabic-Indic digits keep their offsets');
+    assert.deepEqual(figureMatches('14,400,000', 4400000), []);
+    assert.deepEqual(figureMatches('4,400,000', 0), []);
   });
 
   it('accepts a price the owner typed in the caption', () => {
