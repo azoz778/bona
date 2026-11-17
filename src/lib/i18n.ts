@@ -205,14 +205,16 @@ export const ui = {
   bathroomsCol: s('Bathrooms', 'دورات المياه'),
   areaCol: s('Area', 'المساحة'),
   priceCol: s('Price', 'السعر'),
+  rentCol: s('Rent', 'الإيجار'),
   sakaniCol: s('Sakani price', 'سعر مستفيدي الدعم'),
   planCol: s('Plan', 'المخطط'),
   viewPlan: s('View plan', 'عرض المخطط'),
+  planAlt: s('{name} floor plan', 'مخطط {name}'),
+  studio: s('Studio', 'استوديو'),
+  modelsTableLabel: s('Residences & prices table', 'جدول النماذج والأسعار'),
   onRequestShort: s('On request', 'عند الطلب'),
-  modelsNote: s(
-    'Prices as printed in the developer’s brochure. The Sakani price applies to housing-support beneficiaries.',
-    'الأسعار كما وردت في كتيب المطوّر، وسعر مستفيدي الدعم لمستفيدي برنامج سكني.'
-  ),
+  modelsPricesNote: s('Prices as printed in the developer’s brochure.', 'الأسعار كما وردت في كتيب المطوّر.'),
+  modelsSakaniNote: s('The Sakani price applies to housing-support beneficiaries.', 'سعر مستفيدي الدعم مخصص لمستفيدي برنامج سكني.'),
   amenitiesHeading: s('Amenities', 'المرافق'),
   nearbyHeading: s('Nearby', 'بالقرب'),
   warrantiesHeading: s('Warranties', 'الضمانات'),
@@ -458,6 +460,9 @@ const countForms: Record<string, { en: [string, string]; ar: { zero: string; one
   bed: { en: ['bd', 'bd'], ar: { zero: 'بلا غرف', one: 'غرفة واحدة', two: 'غرفتان', few: '{n} غرف', many: '{n} غرفة', other: '{n} غرفة' } },
   bath: { en: ['ba', 'ba'], ar: { zero: 'بلا حمّامات', one: 'حمّام واحد', two: 'حمّامان', few: '{n} حمّامات', many: '{n} حمّاماً', other: '{n} حمّام' } },
   photo: { en: ['photo', 'photos'], ar: { zero: 'لا توجد صور', one: 'صورة واحدة', two: 'صورتان', few: '{n} صور', many: '{n} صورة', other: '{n} صورة' } },
+  // Unit models (UnitModels.astro). Zero bedrooms reads as ui.studio there, so the zero forms are not shown.
+  bedroom: { en: ['bedroom', 'bedrooms'], ar: { zero: 'استوديو', one: 'غرفة نوم واحدة', two: 'غرفتا نوم', few: '{n} غرف نوم', many: '{n} غرفة نوم', other: '{n} غرفة نوم' } },
+  bathroom: { en: ['bathroom', 'bathrooms'], ar: { zero: 'بلا دورات مياه', one: 'دورة مياه واحدة', two: 'دورتا مياه', few: '{n} دورات مياه', many: '{n} دورة مياه', other: '{n} دورة مياه' } },
 };
 export function count(n: number, unit: keyof typeof countForms, locale: Locale): string {
   const f = countForms[unit];
