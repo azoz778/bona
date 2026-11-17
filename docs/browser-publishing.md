@@ -147,13 +147,14 @@ both channels sat blocked for 18 days with the alerts only in `<channel>/alerts.
    new one is read in full first: LinkedIn from the Page's own list (admin posts list, public posts
    page), whose post elements carry the URN. So far the list has held each post's whole own text,
    clamped on screen only: OBSERVED on 2026-11-16 and 11-17 for four posts of 584–629 characters,
-   not guaranteed. A longer text may be cut in the list itself; only then is the post read from its
-   own page `/feed/update/<urn>/` with "…see more" expanded. Since 2026-11-15 LinkedIn often serves
-   that page as a server-driven screen
-   (`data-sdui-screen="com.linkedin.sdui.flagshipnav.feed.UpdateDetail"`) on which no element
-   carries the URN and whose markup changes between visits. Nothing is read there, so on such a day
-   a post whose list text is cut short stays `uncertain` (as the 11-15 BONA-015 post, live, did
-   before the list was read).
+   not guaranteed (a longer text may be cut in the list itself). When a list visit binds nothing (a
+   text cut short, no match, or a match held back by the toast rule below), the first five new
+   posts on that list (the toast's post first) are read from their own pages `/feed/update/<urn>/`
+   with "…see more" expanded. Since 2026-11-15 LinkedIn often serves that page as a server-driven
+   screen (`data-sdui-screen="com.linkedin.sdui.flagshipnav.feed.UpdateDetail"`) on which no
+   element carries the URN and whose markup changes between visits. Nothing is read there, so on
+   such a day a post whose list text is cut short stays `uncertain`. (Before the list was read
+   first, that is how the live 11-15 BONA-015 and 11-16 BONA-022 posts went `uncertain`.)
    TikTok from its row in TikTok Studio's content list (`/tiktokstudio/content`), which
    shows each video's whole description next to its id. TikTok's confirmation opens ONLY that list:
    on 2026-10-21 and 2026-11-11 every visit to the new video's own page `/@…/video/<id>` answered
@@ -247,9 +248,12 @@ for today and stops; settle that day as below.
    the LinkedIn Page → Page posts. Check the screenshots in `~/bona-data/<channel>/shots/`. Bona
    Chrome's History lists the post pages the confirmation opened. Copy
    `C:\Users\ASUS\AppData\Local\bona-social-chrome\Default\History` and read the copy with sqlite3
-   (`visits` joined to `urls`, times in µs since 1601 UTC). Those are only CANDIDATES (every post
-   not in the baseline, opened only on a list visit that did not bind: up to five per list visit,
-   two list visits per round, plus any hand visit). Settle with one only after it
+   (`visits` joined to `urls`, times in µs since 1601 UTC). Those are only CANDIDATES: after each
+   list visit that did not bind, the first five posts on that list that are not in the baseline
+   (the toast's post first; older posts the baseline missed can be among them), plus any hand
+   visit. A round visits the admin list and then the public page and waits 15 s; rounds repeat
+   until the 4-minute confirm timeout, so one run can leave many visits, often to the same post.
+   Settle with one only after it
    shows the Page as author, today's full caption with the listing id, and an id time after the run
    started (`id >> 22` = epoch ms).
 2. If the post **is live**, append the URL so it is never posted again:

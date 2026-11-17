@@ -578,9 +578,10 @@ export async function linkedinConfirm(s, companyId, before, { toast = null, capt
         const listed = (await linkedinPostCandidates(s)).filter(c => !before.includes(c.key));
         const fromList = bindNewPost(listed, before, { caption, evidence }, { prefer, notBefore, shortLinks: true });
         if (fromList && (!prefer || fromList === prefer || !listed.some(c => c.key === prefer))) return linkedinUrl(fromList);
-        // A list that cuts the text short: each new post is read in full from its own page. Since 2026-11-15 LinkedIn
-        // often serves that page as a server-driven screen on which no element carries the URN; nothing is read there,
-        // so a post seen only that way stays `uncertain` (BONA-015 on 11-15, before the list was read).
+        // This list bound nothing (a text cut short, no match, or a match held back by the toast rule): the first five
+        // new posts (the toast's post first) are read in full from their own pages. Since 2026-11-15 LinkedIn often
+        // serves that page as a server-driven screen on which no element carries the URN; nothing is read there, so a
+        // post seen only that way stays `uncertain` (11-15 BONA-015 and 11-16 BONA-022, before the list was read first).
         const fresh = listed.map(c => c.key);
         const order = prefer && fresh.includes(prefer) ? [prefer, ...fresh.filter(k => k !== prefer)] : fresh;
         const full = [];
