@@ -94,7 +94,7 @@ non-empty, placed after the description, EN + AR:
 | Layout | Bedrooms | Bathrooms | Area | Price | Sakani price | Plan |
 
 - One row per model; "Price on request" for a null figure; the Sakani column only when any model has one.
-- The plan thumbnail opens the existing lightbox (full size).
+- The plan thumbnail links to the full-size plan image (opens in a new tab).
 - Mobile: rows become stacked cards (name, area, rooms line, prices, "View plan").
 - The headline price and Sakani line stay as they are (they equal the table's lowest figures).
 - `rules.mjs` gets `modelsProblems(listing)` used by `checkListing` and `validate.mjs`; `listings.ts` types.
