@@ -389,7 +389,7 @@ const PRICE_IN_COPY_RE = new RegExp([
   `[\\d٠-٩]{5,}\\s*${CUR}`,                                             // 319015 SAR
   `[\\d٠-٩]+(?:[.,٫][\\d٠-٩]+)?\\s*${SCALE}\\s*(?:saudi\\s*)?${CUR}`,       // 2.5 million SAR / 3 ملايين ريال
   `(?:^|[^\\d٠-٩\\s.,])\\s*(?:مليون|ملايين|ألف|آلاف|الف|الاف)\\s*(?:ريال|ر\\.\\s?س)`, // مليون ريال (no figure)
-  `(?:بسعر|السعر|ابتداء[ًا]? من|تبدأ من|يبدأ من|starting (?:at|from)|priced at)\\s*[\\d٠-٩]+(?:[.,٫][\\d٠-٩]+)?\\s*${SCALE}`, // ابتداءً من 5 ملايين
+  `(?:بسعر|السعر|ابتداء[ًا]? من|تبدأ من|يبدأ من|starting (?:at|from)|priced at)\\s*[\\d٠-٩]+(?:[.,٫][\\d٠-٩]+)?\\s*${SCALE}(?![a-z²³2])(?!\\s*(?:m²|m2|sq|square|met|متر|م²|م2|km|كم|min|دقيق|دقائق|هكتار))`, // ابتداءً من 5 ملايين — not "from 120 m²"
 ].join('|'), 'i');
 
 /** Copy hygiene: no other agency's brand, no phone numbers, no hype, no prices. */

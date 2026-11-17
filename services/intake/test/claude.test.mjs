@@ -143,7 +143,8 @@ describe('copyProblems — owner rules', () => {
       assert.ok(copyProblems(l).some((p) => /states a price/.test(p)), text);
     }
     const ok = structuredClone(GOOD.listing);
-    ok.description.en = ['Eight layouts from 79.77 to 175.40 m², ten-year warranty, 1,710 units, 1.3 million m² of master plan.', 'Off the SR 15 road.'];
+    ok.description.en = ['Eight layouts from 79.77 to 175.40 m², ten-year warranty, 1,710 units, 1.3 million m² of master plan.', 'Off the SR 15 road; plots starting from 1,000 m², starting from 5 minutes away.'];
+    ok.description.ar = ['تبدأ من 3 آلاف متر مربع.', 'اثنان.'];
     assert.deepEqual(copyProblems(ok), []);
   });
 

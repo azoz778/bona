@@ -602,7 +602,7 @@ describe('processPdf: round-3 review cases', { timeout: 120000 }, () => {
   it('a price the check took away cannot stay in the copy', async () => {
     const pageText = [`مشروع سكني${PAD}`, `غرفتا نوم ودورتا مياه${PAD}`];
     const a = answer({ price: { amount: 1250000, currency: 'SAR', from: false, period: null, onRequest: false } });
-    a.listing.description.en = ['The asking price is 1,250,000 for this unit.', 'Two.'];
+    a.listing.description.en = ['The asking figure is 1,250,000 for this unit.', 'Two.']; // no price word: still the refused price
     const r = await rig({ pageText, listing: a, confirm: [] });
     try {
       await assert.rejects(r.run(), (err) => err.stage === 'price' && /copy states the price 1,250,000/.test(err.reason));
@@ -658,6 +658,16 @@ describe('processPdf: round-4 review cases', { timeout: 120000 }, () => {
     });
   }
 
+  it('a refused price stated with a price word is caught too', async () => {
+    const pageText = [`مشروع سكني${PAD}`, `غرفتا نوم ودورتا مياه${PAD}`];
+    const a = answer({ price: { amount: 1250000, currency: 'SAR', from: false, period: null, onRequest: false } });
+    a.listing.description.ar = ['قيمة الوحدة 1,250,000 فقط.', 'اثنان.'];
+    const r = await rig({ pageText, listing: a, confirm: [] });
+    try {
+      await assert.rejects(r.run(), (err) => err.stage === 'price');
+    } finally { r.cleanup(); }
+  });
+
   it('a refused price that only matches an area in the copy does not reject the run', async () => {
     const pageText = [`مشروع سكني${PAD}`, `غرفتا نوم ودورتا مياه${PAD}`];
     const a = answer({ price: { amount: 3000000, currency: 'SAR', from: false, period: null, onRequest: false } });
@@ -669,16 +679,42 @@ describe('processPdf: round-4 review cases', { timeout: 120000 }, () => {
     } finally { r.cleanup(); }
   });
 
-  it('with the owner\'s caption price, a Sakani figure in the copy is not treated as refused', async () => {
+  const withCopy = async (r, line) => {
+    const f = path.join(r.repo, '..', 'bin', 'fake.json');
+    const a = JSON.parse(fs.readFileSync(f, 'utf8'));
+    a.listing.listing.highlights.en[0] = line;
+    fs.writeFileSync(f, JSON.stringify(a));
+  };
+  const captioned = (r) => processPdf({ pdfPath: r.pdfPath, cfg: r.cfg, caption: { price: { amount: 300000, currency: 'SAR' }, text: '300000' }, workDir: path.join(r.repo, '..', 'work'), dryRun: true });
+
+  it('under the owner\'s caption price, an unconfirmed Sakani figure in the copy is still refused', async () => {
     const r = await rig({ listing: answer({ price: PRICE }), confirm: [] });
     try {
-      const a = JSON.parse(fs.readFileSync(path.join(r.repo, '..', 'bin', 'fake.json'), 'utf8'));
-      a.listing.listing.highlights.en[0] = 'Lower price 270,425 for beneficiaries';
-      fs.writeFileSync(path.join(r.repo, '..', 'bin', 'fake.json'), JSON.stringify(a));
-      const report = await processPdf({ pdfPath: r.pdfPath, cfg: r.cfg, caption: { price: { amount: 300000, currency: 'SAR' }, text: '300000' }, workDir: path.join(r.repo, '..', 'work'), dryRun: true });
-      assert.equal(report.listingPreview.price.amount, 300000);
+      await withCopy(r, 'Sakani beneficiaries: 270,425');
+      await assert.rejects(captioned(r), (err) => err.stage === 'price' && /270,425.*send it again/.test(err.reason));
     } finally { r.cleanup(); }
   });
+
+  it('under the owner\'s caption price, a Sakani figure confirmed on the page may stay in the copy', async () => {
+    const r = await rig({ listing: answer({ price: PRICE, subsidisedPriceEvidence: { page: 3, quote: '270,425' } }), confirm: [], confirmSub: [270425] });
+    try {
+      await withCopy(r, 'Sakani beneficiaries: 270,425');
+      const report = await captioned(r);
+      assert.equal(report.listingPreview.price.amount, 300000);
+      assert.equal('subsidisedAmount' in report.listingPreview.price, false, 'the caption price replaces both');
+    } finally { r.cleanup(); }
+  });
+
+  for (const line of ['Two-bedroom apartments from 319,015 in phase one.', 'Villas from 1.2 million in phase one.', 'فلل من 1.2 مليون في المرحلة الأولى.', 'Units go for 319,015 each']) {
+    it(`a refused price in the copy is caught however it is worded: ${line}`, async () => {
+      const amount = /1\.2/.test(line) ? 1200000 : 319015;
+      const r = await rig({ listing: answer({ price: { amount, currency: 'SAR', from: true, period: null, onRequest: false } }), confirm: [] });
+      try {
+        await withCopy(r, line);
+        await assert.rejects(r.run(), (err) => err.stage === 'price');
+      } finally { r.cleanup(); }
+    });
+  }
 
   it('refuses a listing whose history does not start at the intake\'s publish commit (a hand rename)', async () => {
     const r = await rig({ listing: answer({ price: PRICE, priceEvidence: { page: 3, quote: '319,015' } }), confirm: [319015, 270425] });

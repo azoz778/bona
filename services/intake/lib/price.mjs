@@ -13,7 +13,8 @@ function digitsAppear(text, digits) {
   const body = digits.split('').join(SEP);
   // Not part of a longer figure on either side: 450,000 is not "printed" inside 1,450,000, nor
   // 319,015 inside 319,015,000.
-  return new RegExp(`(?<![\\d.,٫٬'’])${body}(?![\\d]|[.,٫٬'’]\\d)`).test(text);
+  // ("SAR 1,250,000.00" and "ر.س.1,250,000" still count: a decimal tail or a dot before the figure is not more digits.)
+  return new RegExp(`(?<!\\d[.,٫٬'’]?)${body}(?![\\d]|[,٬'’]\\d|[.٫]\\d{3})`).test(text);
 }
 
 /**

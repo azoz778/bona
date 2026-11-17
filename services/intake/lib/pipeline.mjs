@@ -48,6 +48,9 @@ import { loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNamedIn, withdr
 /** Words that make a figure in the copy a price: a currency, "price", "from"-style openers. */
 const PRICE_CONTEXT_RE = /سعر|أسعار|اسعار|ريال|ر\.\s?س|ثمن|قيمة(?!\s*المضافة)|ابتداء|تبدأ|يبدأ|\b(?:SAR|SR|AED|USD|EUR|GBP|riyals?|prices?|priced|costs?|starting|starts)\b|[$€£﷼\u20c1]/i;
 
+/** A figure followed straight away by a unit of measure or count: "3 million square metres", "1,710 units". */
+const MEASURE_CONTEXT_RE = /\d[\d.,٫٬\s]*(?:(?:million|thousand|mn|m|k|مليون|ملايين|ألف|آلاف|الف)\s*)?(?:m²|m2\b|sq\.?\s?m|square\s+met|met(?:re|er)s?\b|hectares?\b|km\b|units?\b|buildings?\b|residents?\b|visitors?\b|م²|م2|متر|هكتار|كم\b|وحد(?:ة|ات)|مبن[ىي]|مباني|ساكن|سكان|زائر)/i;
+
 export const sha256File = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
 /** Every string in a model answer's listing (title, project, copy, highlights, …), for the name check. */
@@ -389,7 +392,9 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // beneficiaries' price on a page image. The owner's caption price replaces both.
   if (price && typeof price.subsidisedAmount === 'number') {
     const headline = !caption.price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0;
-    const evidence = headline ? await printed(price.subsidisedAmount, ai.subsidisedPriceEvidence, { subsidised: true }) : null;
+    // Checked even under the owner's caption price: the price field drops the figure then (the
+    // caption replaces both), but if the model also wrote it into the copy it must be a printed one.
+    const evidence = (headline || caption.price) ? await printed(price.subsidisedAmount, ai.subsidisedPriceEvidence, { subsidised: true }) : null;
     report.subsidisedPriceEvidence = evidence;
     if (!evidence?.confirmed) {
       if (headline) {
@@ -397,7 +402,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
         report.warningCodes.push('subsidised-price-not-printed');
         report.warnings.push('the subsidised (Sakani) price could not be confirmed on the brochure, so only the regular price is shown');
       }
-      if (price.subsidisedAmount > 0 && !caption.price) rejectedPrices.push(price.subsidisedAmount); // the owner's caption price replaced it, it was not refused
+      if (price.subsidisedAmount > 0) rejectedPrices.push(price.subsidisedAmount);
       price.subsidisedAmount = null;
     }
   }
@@ -405,14 +410,17 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // A price the check took away must not survive in the words: the site prints `price`, but a
   // figure in the title, description or highlights would still be read as the asking price. The
   // same matcher that looks for the number in the brochure looks for it in the copy.
-  // Only where the copy talks about a price: "3 million square metres" is an area, not a refused
-  // asking price of 3,000,000.
+  // Every mention counts unless the sentence is plainly a measurement with no price wording:
+  // "3 million square metres" is an area, not a refused asking price of 3,000,000 — but "the asking
+  // figure is 1,250,000" is the refused price, whatever word the model chose.
   const copySegments = [ai.listing?.title?.en, ai.listing?.title?.ar, ...(ai.listing?.description?.en ?? []), ...(ai.listing?.description?.ar ?? []),
     ...(ai.listing?.highlights?.en ?? []), ...(ai.listing?.highlights?.ar ?? [])].filter(Boolean)
     .flatMap((x) => String(x).split(/[.!?؟؛;\n]+(?=\s|$)/));
   for (const n of rejectedPrices) {
-    if (copySegments.some((seg) => PRICE_CONTEXT_RE.test(seg) && priceAppearsIn(seg, n))) {
-      throw new RejectError(`the copy states the price ${n.toLocaleString('en-US')}, which could not be confirmed on the brochure — resend with the price in the caption, or without it`, 'price');
+    if (copySegments.some((seg) => priceAppearsIn(seg, n) && (PRICE_CONTEXT_RE.test(seg) || !MEASURE_CONTEXT_RE.test(seg)))) {
+      throw new RejectError(caption.price
+        ? `the copy states the price ${n.toLocaleString('en-US')}, which could not be confirmed on the brochure — send it again; the next reading may leave it out`
+        : `the copy states the price ${n.toLocaleString('en-US')}, which could not be confirmed on the brochure — resend with the price in the caption, or without it`, 'price');
     }
   }
 
