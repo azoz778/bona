@@ -30,19 +30,35 @@ const EURO_AREA = ['AT', 'BE', 'CY', 'DE', 'EE', 'ES', 'FI', 'FR', 'GR', 'HR', '
 const HOME_CURRENCY = Object.freeze({ SA: 'SAR', AE: 'AED', OM: 'OMR', US: 'USD', ...Object.fromEntries(EURO_AREA.map((c) => [c, 'EUR'])) });
 
 /**
+ * The currency a property's own country prices in, when it is one the site prints (CURRENCIES): SA, AE,
+ * OM, US and the euro area. null for any other country (GB, QA, EG, …) and for no country at all.
+ */
+export function homeCurrency(countryCode) {
+  return typeof countryCode === 'string' ? HOME_CURRENCY[countryCode.toUpperCase()] ?? null : null;
+}
+
+/**
  * The currency a reading's unit-model prices are in, or null when the reading does not establish one.
  * prompt.md has the model write every model price in `listing.price.currency`, and the page check asks
- * about the figures in it (confirmModelPrices) — but that field is the model's own claim only beside a
- * price it read. A reading on request carries the contract's default, "SAR", whatever the brochure
- * prints: W020's Hampstead brochure printed GBP, which the site does not take, and came back on request
- * in "SAR". So: a currency outside CURRENCIES never counts; beside a headline amount it counts; on request
- * it counts only when it is the home currency of the country the property is in (`countryCode`) — a
- * Saudi brochure is priced in SAR whether or not the model settled a headline.
+ * for the figures IN it (confirmModelPrices). That field is the model's own claim, and not an
+ * independent one: prompt.md also has it set the headline amount FROM the model prices, so an amount
+ * beside it proves nothing about the currency. So:
+ *   - a currency outside CURRENCIES never counts;
+ *   - a property in a country whose own currency the site does not print (homeCurrency null: GB, …)
+ *     never establishes one, amount or not — its brochure prints £ or another currency the contract
+ *     cannot hold, and the model writes the contract's default "SAR" or another it can (W020's Hampstead
+ *     brochure printed GBP and came back in "SAR"; read by the prompt it is "from 1,250,000 SAR");
+ *   - beside a headline amount, the reading's currency counts — the page check then confirms every
+ *     figure IN that currency, so a figure printed in another one is refused there;
+ *   - on request it counts only when it is that country's own currency (a Saudi brochure is priced in
+ *     SAR whether or not the model settled a headline).
  */
 export function modelPriceCurrency(price, countryCode) {
   if (!price || typeof price !== 'object' || !CURRENCIES.includes(price.currency)) return null;
+  const home = homeCurrency(countryCode);
+  if (home === null) return null;
   if (price.onRequest === false && isFigure(price.amount)) return price.currency;
-  return HOME_CURRENCY[String(countryCode ?? '').toUpperCase()] === price.currency ? price.currency : null;
+  return home === price.currency ? price.currency : null;
 }
 
 /** At most this many pages are checked for one brochure (cfg.maxModelPricePages overrides it). */

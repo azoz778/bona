@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { isFigure as rulesIsFigure } from '../../../scripts/curate/rules.mjs';
 import {
-  alignHeadline, checkModelPrices, isFigure, MAX_MODEL_PRICE_PAGES, MODEL_PRICE_CONCURRENCY, modelPriceCurrency, pagesToRenderFor,
+  alignHeadline, checkModelPrices, homeCurrency, isFigure, MAX_MODEL_PRICE_PAGES, MODEL_PRICE_CONCURRENCY, modelPriceCurrency, pagesToRenderFor,
 } from '../lib/model-prices.mjs';
 
 const pages = [{ page: 9, abs: '/x/p9.jpg' }, { page: 10, abs: '/x/p10.jpg' }];
@@ -178,10 +178,23 @@ describe('alignHeadline', () => {
 describe('modelPriceCurrency — the currency a reading\'s unit-model prices are in', () => {
   const P = (currency, amount, onRequest = amount === null) => ({ amount, currency, from: !onRequest, period: null, onRequest });
 
-  it('beside a headline amount: the reading\'s own currency, wherever the property is', () => {
+  it('beside a headline amount: the reading\'s own currency, when the property is in a country whose currency the site prints', () => {
     assert.equal(modelPriceCurrency(P('SAR', 319015), 'SA'), 'SAR');
-    assert.equal(modelPriceCurrency(P('AED', 1250000), 'SA'), 'AED');
-    assert.equal(modelPriceCurrency(P('EUR', 900000), 'GB'), 'EUR');
+    assert.equal(modelPriceCurrency(P('AED', 1250000), 'SA'), 'AED', 'the page check then asks for the figures IN AED');
+    assert.equal(modelPriceCurrency(P('USD', 900000), 'AE'), 'USD');
+    assert.equal(modelPriceCurrency(P('EUR', 900000), 'ES'), 'EUR');
+    assert.equal(modelPriceCurrency(P('OMR', 90000), 'OM'), 'OMR');
+  });
+
+  it('never for a property in a country whose currency the site does not print — even beside a headline amount (prompt.md has the model set that amount FROM the model prices, so it is no independent reading)', () => {
+    // P1: a Hampstead brochure printing £1,250,000 / £2,000,000, read per the prompt as "from 1,250,000 SAR".
+    assert.equal(modelPriceCurrency(P('SAR', 1250000), 'GB'), null);
+    assert.equal(modelPriceCurrency(P('EUR', 900000), 'GB'), null);
+    assert.equal(modelPriceCurrency(P('USD', 900000), 'GB'), null);
+    assert.equal(modelPriceCurrency(P('SAR', 1250000), 'QA'), null);
+    assert.equal(modelPriceCurrency(P('SAR', 1250000), 'EG'), null);
+    assert.equal(modelPriceCurrency(P('SAR', 1250000), null), null, 'no country, no currency');
+    assert.equal(modelPriceCurrency(P('SAR', 1250000), undefined), null);
   });
 
   it('on request: only the home currency of the country the property is in (the contract\'s "SAR" default is not a reading)', () => {
@@ -193,6 +206,11 @@ describe('modelPriceCurrency — the currency a reading\'s unit-model prices are
     assert.equal(modelPriceCurrency(P('EUR', null), 'ES'), 'EUR');
     assert.equal(modelPriceCurrency(P('SAR', null), undefined), null);
     assert.equal(modelPriceCurrency({ ...P('SAR', 319015), onRequest: true }, 'GB'), null, 'an amount marked on request is not a reading');
+  });
+
+  it('homeCurrency: the currency a country prices in, when the site prints it (SA, AE, OM, US, the euro area) — else null', () => {
+    assert.deepEqual(['SA', 'sa', 'AE', 'OM', 'US', 'FR', 'DE', 'ES', 'IE'].map(homeCurrency), ['SAR', 'SAR', 'AED', 'OMR', 'USD', 'EUR', 'EUR', 'EUR', 'EUR']);
+    for (const cc of ['GB', 'QA', 'EG', 'TR', 'CH', '', null, undefined, 42]) assert.equal(homeCurrency(cc), null, String(cc));
   });
 
   it('a currency the site does not take never counts, and nothing is not a price', () => {

@@ -137,15 +137,28 @@ const FAKE_CLAUDE = `import fs from 'node:fs';
 const cfg = JSON.parse(fs.readFileSync(new URL('./fake.json', import.meta.url), 'utf8'));
 const log = new URL('./calls.jsonl', import.meta.url);
 const prompt = fs.readFileSync(0, 'utf8');
+// The currency each page prints its figures in, as the page shows it (cfg.printedIn: a code, null =
+// no currency shown at all, or { page: code|null }; 'SAR' by default). A second model that follows its
+// prompt (claude.mjs currencyRule) says yes only to a figure printed IN the currency it was asked about —
+// or, when the prompt allows it, to a figure printed with no currency at all.
+const printedOn = (page) => {
+  const p = cfg.printedIn === undefined ? 'SAR' : cfg.printedIn;
+  return p !== null && typeof p === 'object' ? (String(page) in p ? p[page] : 'SAR') : p;
+};
+const inCurrency = (page, asked) => {
+  const printed = printedOn(page);
+  return asked !== null && (printed === asked || (printed === null && /may be taken as/.test(prompt)));
+};
 let answer;
 if (prompt.includes('For each numbered model')) {
   // The unit-model check (claude.mjs confirmModelPrices): one call per page, every model on it,
   // one JSON line per model inside the fence.
   const page = Number((prompt.match(/\\/p(\\d+)\\.jpg/) || [])[1]);
+  const currency = (prompt.match(/figures to check, in ([A-Z]{3})/) || [])[1] ?? null;
   const fenced = prompt.split('<<<BONA-UNTRUSTED-DATA: the models and figures to check>>>')[1].split('<<<END ')[0];
   const items = fenced.split('\\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l))
     .map(({ i, price, subsidisedPrice }) => ({ i, price, subsidisedPrice }));
-  fs.appendFileSync(log, JSON.stringify({ tool: 'claude-model-confirm', page, items }) + '\\n');
+  fs.appendFileSync(log, JSON.stringify({ tool: 'claude-model-confirm', page, items, currency, bare: /may be taken as/.test(prompt) }) + '\\n');
   // modelConfirmDelayMs: the call takes this long, and records when it ran (the concurrency test).
   if (cfg.modelConfirmDelayMs) {
     const t0 = Date.now();
@@ -162,16 +175,19 @@ if (prompt.includes('For each numbered model')) {
   answer = items.map((it) => (Array.isArray(mc)
     ? { i: it.i, price: mc.includes(it.price), subsidisedPrice: mc.includes(it.subsidisedPrice) }
     : { i: it.i, price: true, subsidisedPrice: true, ...((mc ?? {})[it.i] ?? {}) }));
+  if (!inCurrency(page, currency)) answer = answer.map((a) => ({ ...a, price: false, subsidisedPrice: false }));
 } else if (prompt.includes('VISIBLY PRINT')) {
-  const amount = Number((prompt.match(/VISIBLY PRINT[^\\d]*(\\d+)/) || [])[1]);
+  const [, amountText, currency = null] = prompt.match(/VISIBLY PRINT[^\\d]*(\\d+)(?: ([A-Z]{3}))?/) || [];
+  const amount = Number(amountText);
+  const page = Number((prompt.match(/\\/p(\\d+)\\.jpg/) || [])[1]);
   const subsidised = /VISIBLY PRINT the price for housing-subsidy/.test(prompt);
-  fs.appendFileSync(log, JSON.stringify({ tool: 'claude-confirm', amount, subsidised, page: Number((prompt.match(/\\/p(\\d+)\\.jpg/) || [])[1]), project: /unit models/.test(prompt), mirror: /only the price for everyone else counts/.test(prompt),
+  fs.appendFileSync(log, JSON.stringify({ tool: 'claude-confirm', amount, currency, bare: /may be taken as/.test(prompt), subsidised, page, project: /unit models/.test(prompt), mirror: /only the price for everyone else counts/.test(prompt),
     subject: (prompt.match(/listing this price is for[^\\n]*\\n([^\\n]*)/) || [])[1] ?? null }) + '\\n');
   if (cfg.confirmFail === 'quota') {
     process.stdout.write(JSON.stringify({ is_error: true, api_error_status: 429, result: "You've hit your session limit" }));
     process.exit(1);
   }
-  answer = { confirmed: ((subsidised ? cfg.confirmSub : null) ?? cfg.confirm ?? []).includes(amount) };
+  answer = { confirmed: ((subsidised ? cfg.confirmSub : null) ?? cfg.confirm ?? []).includes(amount) && inCurrency(page, currency) };
 } else {
   fs.appendFileSync(log, JSON.stringify({ tool: 'claude-listing', prompt }) + '\\n');
   answer = cfg.listing;
@@ -223,14 +239,14 @@ const answer = ({ price, priceEvidence = null, subsidisedPriceEvidence = null, u
 const PRICE = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
 const BROCHURE = ['مشروع سكني — شقق بغرفتي نوم وثلاث غرف نوم في حي الحمدانية', LOCATION_PAGE, PRICE_PAGE, 'غرفة نوم 03', PRICE_PAGE];
 
-async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, confirmFail = null, modelConfirm = null, modelConfirmFail = null, modelConfirmDelayMs = 0, failPageDir = null, broken = [], brochureFail = false, cfgExtra = {}, build = '' }) {
+async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, confirmFail = null, modelConfirm = null, modelConfirmFail = null, modelConfirmDelayMs = 0, failPageDir = null, broken = [], brochureFail = false, printedIn = 'SAR', cfgExtra = {}, build = '' }) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bona-price-pages-')));
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
   const photo = path.join(bin, 'photo.jpg');
   const sharp = (await import('sharp')).default;
   await sharp({ create: { width: 1200, height: 900, channels: 3, background: '#4a6b8a' } }).jpeg().toFile(photo);
-  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, confirmFail, modelConfirm, modelConfirmFail, modelConfirmDelayMs, failPageDir, broken, brochureFail }));
+  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, confirmFail, modelConfirm, modelConfirmFail, modelConfirmDelayMs, failPageDir, broken, brochureFail, printedIn }));
   fs.writeFileSync(path.join(bin, 'fake-py.mjs'), FAKE_PY);
   fs.writeFileSync(path.join(bin, 'fake-claude.mjs'), FAKE_CLAUDE);
   fs.writeFileSync(path.join(bin, 'fake-brochure.mjs'), FAKE_BROCHURE);
@@ -966,14 +982,25 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     } finally { r.cleanup(); }
   });
 
-  it('a reading with a headline price in its own currency keeps that currency for the models (AED)', async () => {
-    const r = await rig({ listing: withModels([model('Nawras', 419994, null, 3), model('Lulu', 319015, null, 3)], { price: { amount: 999999, currency: 'AED', from: true, period: null, onRequest: false } }) });
+  it('a reading with a headline price in its own currency keeps that currency for the models (AED), confirmed IN AED', async () => {
+    // By the prompt: the headline is the cheapest model, from, in the brochure's currency.
+    const reading = () => withModels([model('Nawras', 419994, null, 3), model('Lulu', 319015, null, 3)], { price: { amount: 319015, currency: 'AED', from: true, period: null, onRequest: false } });
+    const r = await rig({ listing: reading(), printedIn: 'AED' });
     try {
       const report = await r.run();
       assert.equal(modelCalls(r).length, 1);
+      assert.equal(modelCalls(r)[0].currency, 'AED');
+      assert.equal(modelCalls(r)[0].bare, false, 'a bare figure is not AED on a Saudi listing');
       assert.deepEqual(report.listingPreview.price, { amount: 319015, currency: 'AED', from: true, period: null, onRequest: false });
       assert.equal(report.modelPrices.decision, undefined);
     } finally { r.cleanup(); }
+    // The same reading of a brochure that prints riyals: no figure is an AED price.
+    const sar = await rig({ listing: reading(), printedIn: 'SAR' });
+    try {
+      const report = await sar.run();
+      assert.deepEqual(report.ai.models.map((m) => m.price), [null, null]);
+      assert.equal(report.listingPreview.price.onRequest, true);
+    } finally { sar.cleanup(); }
   });
 
   it('a refused model price left bare in a model\'s availability refuses the run (probe: "Buildings G–P, 419,994 / 356,024")', async () => {
@@ -1263,6 +1290,102 @@ describe('processPdf: unit-model prices — failures, bounds and the headline fa
       assert.equal(report.listingPreview.price.amount, 4500);
       assert.equal(report.listingPreview.price.from, true);
       assert.equal(report.listingPreview.price.period, 'month', 'not reset, and so not turned into a yearly rent');
+    } finally { r.cleanup(); }
+  });
+});
+
+// The currency is part of the price (review 2026-11-17). Every reading here FOLLOWS THE PROMPT
+// (prompt.md, unit models): when the models carry prices, the headline is the lowest model price,
+// `from: true`, in `price.currency` — so the headline amount is not an independent reading of the
+// currency, and a brochure priced in £ comes back "from 1,250,000 SAR". The second model follows its
+// prompt too: it confirms a figure only when the page prints it IN the currency asked (rig printedIn).
+describe('processPdf: TAQEEM currency — a figure printed in another currency is never published as the reading\'s', { timeout: 120000 }, () => {
+  const model = (en, price, page) => ({
+    name: { en, ar: `نموذج ${en}` }, bedrooms: 2, bathrooms: 2, areaSqm: 105, rooms: null, availability: null,
+    price, subsidisedPrice: null, evidence: { page, quote: String(price) }, floorPlan: null,
+  });
+  const modelCalls = (r) => r.calls().filter((c) => c.tool === 'claude-model-confirm');
+  const headlineCalls = (r) => r.calls().filter((c) => c.tool === 'claude-confirm');
+  const ON_REQUEST = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true };
+  const ABROAD = {
+    district: { en: 'Hampstead', ar: 'هامبستيد' }, city: { en: 'London', ar: 'لندن' },
+    country: { en: 'United Kingdom', ar: 'المملكة المتحدة' }, countryCode: 'GB',
+  };
+  /** A reading that follows prompt.md: the headline IS the lowest model price, from, in `currency`. */
+  const byThePrompt = (models, currency, quote) => {
+    const low = Math.min(...models.map((m) => m.price));
+    return { ...answer({ price: { amount: low, currency, from: true, period: null, onRequest: false }, priceEvidence: { page: 3, quote } }), models };
+  };
+  const london = () => {
+    const a = byThePrompt([model('Flat A', 1250000, 3), model('Flat B', 2000000, 3)], 'SAR', '£1,250,000');
+    a.listing.location = ABROAD;
+    a.listing.category = 'international';
+    return a;
+  };
+
+  it('P1: a Hampstead brochure printing £1,250,000 / £2,000,000, read "from 1,250,000 SAR" — no SAR price anywhere (image-only pages)', async () => {
+    // Image-only: every page is rendered, so the headline goes to the second model — which sees £, not SAR.
+    const r = await rig({ listing: london(), pageText: ['Hampstead', 'x', 'Flat A £1,250,000\nFlat B £2,000,000', 'y', 'z'], printedIn: 'GBP', confirm: [1250000, 2000000] });
+    try {
+      const report = await r.run();
+      assert.equal(modelCalls(r).length, 0, 'GB prices in a currency the site does not print: no model figure is checked');
+      assert.equal(report.modelPrices.decision, 'currency-unconfirmed');
+      assert.deepEqual(report.listingPreview.models.map((m) => [m.price, m.subsidisedPrice]), [[null, null], [null, null]]);
+      assert.deepEqual(headlineCalls(r).map((c) => [c.amount, c.currency, c.page, c.bare]), [[1250000, 'SAR', 3, false]], 'asked IN SAR, a bare figure not allowed abroad');
+      assert.deepEqual(report.listingPreview.price, ON_REQUEST, 'no SAR price published');
+      assert.ok(report.warningCodes.includes('price-not-printed') && report.warningCodes.includes('model-price-not-printed'));
+      assert.ok(report.warnings.some((w) => /their currency could not be established/.test(w) && /GB/.test(w)), report.warnings.join(' | '));
+    } finally { r.cleanup(); }
+  });
+
+  it('P1 with a readable text layer: "£1,250,000" is a price in pounds, not "1,250,000 SAR" — and no bare figure counts abroad', async () => {
+    const text = (rows) => ['Hampstead Residences — a development of two and three bedroom flats in Hampstead, London, with a concierge, gym and gardens',
+      'Location — minutes from Hampstead Heath, the Underground and the village high street, with schools and parks nearby', rows,
+      'Specification — oak floors, underfloor heating, comfort cooling and a private terrace or balcony for every apartment',
+      'Completion — the second quarter of 2027; viewings by appointment with the sales team on site'];
+    for (const rows of ['Flat A two bedrooms £1,250,000\nFlat B three bedrooms £2,000,000', 'Prices in pounds sterling\nFlat A two bedrooms 1,250,000\nFlat B three bedrooms 2,000,000']) {
+      const r = await rig({ listing: london(), pageText: text(rows), printedIn: 'GBP', confirm: [1250000, 2000000] });
+      try {
+        const report = await r.run();
+        assert.equal(report.priceEvidence.inText, false, rows);
+        assert.deepEqual(report.listingPreview.price, ON_REQUEST, rows);
+        assert.deepEqual(report.listingPreview.models.map((m) => m.price), [null, null]);
+      } finally { r.cleanup(); }
+    }
+  });
+
+  it('a Saudi brochure priced in USD that the reading reports as SAR: the page check refuses every figure, and the headline too', async () => {
+    const pageText = [BROCHURE[0], LOCATION_PAGE, 'نموذج نورس $419,994\nنموذج لؤلؤ $319,015', 'غرفة نوم 03', 'x'];
+    const reading = () => byThePrompt([model('Nawras', 419994, 3), model('Lulu', 319015, 3)], 'SAR', '$319,015');
+    const r = await rig({ listing: reading(), pageText, printedIn: 'USD', confirm: [419994, 319015] });
+    try {
+      const report = await r.run();
+      assert.deepEqual(modelCalls(r).map((c) => [c.page, c.currency, c.bare]), [[3, 'SAR', true]], 'checked IN SAR (a bare figure would do in Saudi Arabia)');
+      assert.deepEqual(report.ai.models.map((m) => m.price), [null, null], 'printed in $, so not SAR prices');
+      assert.equal(report.priceEvidence.inText, false, '"$319,015" in the text layer is not 319,015 SAR');
+      assert.deepEqual(headlineCalls(r).map((c) => [c.amount, c.currency]), [[319015, 'SAR']]);
+      assert.deepEqual(report.listingPreview.price, ON_REQUEST);
+      assert.deepEqual(report.modelPrices.refused.sort(), [319015, 419994]);
+    } finally { r.cleanup(); }
+    // The same brochure read truthfully, in USD: every figure is confirmed IN USD and the headline is "from" the cheaper one.
+    const usd = reading();
+    usd.listing.price.currency = 'USD';
+    usd.priceEvidence.quote = '$319,015';
+    const ok = await rig({ listing: usd, pageText, printedIn: 'USD' });
+    try {
+      const report = await ok.run();
+      assert.deepEqual(modelCalls(ok).map((c) => [c.currency, c.bare]), [['USD', false]]);
+      assert.deepEqual(report.ai.models.map((m) => m.price), [419994, 319015]);
+      assert.deepEqual(report.listingPreview.price, { amount: 319015, currency: 'USD', from: true, period: null, onRequest: false });
+    } finally { ok.cleanup(); }
+  });
+
+  it('a Saudi price table that shows no currency at all is in riyals: confirmed IN SAR', async () => {
+    const r = await rig({ listing: byThePrompt([model('Nawras', 419994, 3), model('Lulu', 319015, 3)], 'SAR', '319,015'), printedIn: null });
+    try {
+      const report = await r.run();
+      assert.deepEqual(report.ai.models.map((m) => m.price), [419994, 319015]);
+      assert.equal(report.listingPreview.price.amount, 319015);
     } finally { r.cleanup(); }
   });
 });
@@ -1832,6 +1955,25 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       assert.deepEqual(after.price, before.price);
       assert.deepEqual(after.models.map((m) => m.price), [null, null]);
       assert.ok(report.warnings.some((w) => /the reading established no currency/.test(w)), report.warnings.join(' | '));
+    } finally { r.cleanup(); }
+  });
+
+  it('P2: W020-shaped — the reading follows the prompt (headline = its cheapest model, from, "SAR"): an amount abroad establishes no currency, nothing adopted', async () => {
+    const a = reading();
+    a.listing.location = ABROAD;
+    a.listing.price = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
+    a.priceEvidence = { page: 3, quote: '£319,015' };
+    const r = await rig({ listing: a, printedIn: 'GBP' });
+    try {
+      const before = seed(r, { price: { ...ON_REQUEST }, location: ABROAD });
+      const report = await enrich(r);
+      assert.equal(report.enrich.headline, 'currency-mismatch');
+      assert.deepEqual(report.enrich.currency, { reading: 'SAR', established: false, listing: 'SAR' });
+      assert.equal(r.calls().filter((c) => c.tool === 'claude-model-confirm').length, 0, 'no figure checked that will not be published');
+      const after = saved(r);
+      assert.deepEqual(after.price, before.price, 'still on request: no "From SAR 319,015" for a brochure priced in pounds');
+      assert.deepEqual(after.models.map((m) => [m.price, m.subsidisedPrice]), [[null, null], [null, null]]);
+      assert.ok(report.warnings.some((w) => /the reading established no currency/.test(w) && /GB/.test(w)), report.warnings.join(' | '));
     } finally { r.cleanup(); }
   });
 

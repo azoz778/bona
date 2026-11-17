@@ -40,10 +40,10 @@ import {
   writeInboxListing,
 } from './listing.mjs';
 import { log } from './log.mjs';
-import { alignHeadline, checkModelPrices, isFigure, modelPriceCurrency } from './model-prices.mjs';
+import { alignHeadline, checkModelPrices, homeCurrency, isFigure, modelPriceCurrency } from './model-prices.mjs';
 import { extractPdf, renderPdfPages } from './pdf.mjs';
 import { compositePages, cropPhotoRegions, modelFlagsComposites } from './photo-regions.mjs';
-import { priceAppearsIn, westernise } from './price.mjs';
+import { priceAppearsIn, printedInCurrency, westernise } from './price.mjs';
 import { isSubsidyPricePage, pricePagesToRender } from './price-pages.mjs';
 import { pinFromLinks } from './geo.mjs';
 import { changedSincePublished, committedUnchanged, rebuild, resetTree } from './publish.mjs';
@@ -415,6 +415,11 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // price-pages.mjs). The caption is the owner's own words and always counts.
   const plainText = pageText.length ? pageText.filter((t) => !isSubsidyPricePage(t)).join('\n') : (extraction.text || '');
   const haystack = `${plainText}\n${caption.text || ''}`;
+  // The country the property is in — the listing's own on an enrichment — and the currency it prices in,
+  // when the site prints that one (model-prices.mjs homeCurrency). A figure printed with no currency at all
+  // is taken for that currency only; a property abroad needs its currency printed beside the figure.
+  const country = (enrichTarget ? enrichTarget.listing.location : ai.listing?.location)?.countryCode ?? ai.listing?.location?.countryCode;
+  const home = homeCurrency(country);
   // The "a price for one of its unit models counts" allowance is for a whole development quoted
   // "from" its cheapest model — never for one specific unit, and never for a price not marked `from`.
   const wholeDevelopment = Boolean(ai.listing?.project) && !ai.listing?.unit && price?.from === true;
@@ -429,7 +434,9 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
    * error no call is made: `unchecked: true`, never confirmed.
    */
   const printed = async (amount, evidence, { subsidised = false } = {}) => {
-    const out = { inText: subsidised ? false : priceAppearsIn(haystack, amount), confirmed: null };
+    // In the text: printed IN the price's currency, or bare where bare figures are in it (printedInCurrency).
+    // "£1,250,000" is a price in pounds, never "1,250,000 SAR".
+    const out = { inText: subsidised ? false : printedInCurrency(haystack, amount, price.currency, { bareCounts: home === price.currency }), confirmed: null };
     if (out.inText || !pageImages.length) return out;
     // The model's citation when it names a rendered page; otherwise the rendered page whose text
     // carries the number. Either way the second model looks at the page before anything counts.
@@ -450,6 +457,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       currency: price.currency,
       quote: cited.quote,
       subsidised,
+      bareCounts: home === price.currency,
       project: wholeDevelopment,
       subject: ai.listing?.title?.en,
       unit: ai.listing?.unit ?? null,
@@ -492,10 +500,10 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // `price.currency`) — the models keep no price, and none is checked: no figure is checked that will
   // not be published. A figure the copy states is then an unconfirmed one (the guard below).
   let currencyDrop = null;
+  let readingCurrency = null;
   if (modelFigures.length && !caption.price && !ownerPriceEdit) {
     const listingCurrency = enrichTarget ? (enrichTarget.listing.price?.currency ?? null) : null;
-    const country = (enrichTarget ? enrichTarget.listing.location : ai.listing?.location)?.countryCode ?? ai.listing?.location?.countryCode;
-    const readingCurrency = modelPriceCurrency(price, country);
+    readingCurrency = modelPriceCurrency(price, country);
     const currency = { reading: price?.currency ?? null, established: readingCurrency !== null, listing: listingCurrency };
     if (enrich && (readingCurrency === null || readingCurrency !== listingCurrency)) currencyDrop = { decision: 'currency-mismatch', currency };
     else if (!enrich && readingCurrency === null) currencyDrop = { decision: 'currency-unconfirmed', currency };
@@ -516,8 +524,12 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       log.info('intake.model_prices_dropped', { decision, ...currency, figures: modelFigures.length });
       report.warningCodes.push('model-price-not-printed');
       report.warnings.push(decision === 'currency-mismatch'
-        ? `the brochure's unit-model prices are not in the listing's currency (${currency.listing ?? 'none'}): ${currency.established ? `they read as ${currency.reading}` : `the reading established no currency (${currency.reading ?? 'none'} is only the default — it read no price of its own)`}, so the models were published without prices`
-        : `the unit-model prices were left off: their currency could not be established from the brochure (${currency.reading ?? 'none'} is only the default — the reading has no price of its own, and it is not the currency of the country the property is in) — the models show without them`);
+        ? `the brochure's unit-model prices are not in the listing's currency (${currency.listing ?? 'none'}): ${currency.established ? `they read as ${currency.reading}`
+          : home === null ? `the reading established no currency (the property is in ${country ?? 'no recorded country'}, whose currency the site does not print — its ${currency.reading ?? 'none'} is the contract's default or a conversion)`
+            : `the reading established no currency (${currency.reading ?? 'none'} is only the default — it read no price of its own)`}, so the models were published without prices`
+        : home === null
+          ? `the unit-model prices were left off: their currency could not be established from the brochure (the property is in ${country ?? 'no recorded country'}, whose currency the site does not print — the reading's ${currency.reading ?? 'none'} is the contract's default or a conversion, not the brochure's) — the models show without them`
+          : `the unit-model prices were left off: their currency could not be established from the brochure (${currency.reading ?? 'none'} is only the default — the reading has no price of its own, and it is not the currency of the country the property is in) — the models show without them`);
     }
   } else if (modelFigures.length) {
     const mp = await checkModelPrices(ai.models, {
@@ -553,8 +565,10 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
         }
       },
       confirm: async ({ page, abs, items }) => {
+        // IN the currency the reading established, the figures printed in another one refused; a bare
+        // figure counts only in the property's own country's currency.
         const res = await confirmModelPrices({
-          pageImage: abs, items, currency: price?.currency, bin: cfg.claudeBin, model: cfg.claudeModel,
+          pageImage: abs, items, currency: readingCurrency, bareCounts: readingCurrency !== null && readingCurrency === home, bin: cfg.claudeBin, model: cfg.claudeModel,
           cwd: workDir, addDirs: [workDir], settingsPath: confinement.file,
         });
         log.info('intake.model_price_evidence', { page, models: items.length, answers: res.answers.length, error: res.error, fatal: res.fatal });

@@ -232,13 +232,21 @@ Anything else in the group is ignored, silently.
   specific `unit`, and a single property with one "model" or per-floor rows, keep their own headline
   checks (never "From …") while their models keep their confirmed prices; the owner's caption price drops every model price, and so does `price <id> …` later (its
   reply says how many models lost their price: the table then shows "On request").
-  **Currency**: model prices are written and confirmed in the reading's `price.currency`, which counts
-  only beside a headline price the model read, or — on request — when it is the home currency of the
-  country the property is in (`modelPriceCurrency`: a Saudi brochure is priced in SAR; W020's Hampstead
-  brochure printed GBP, which the site does not take, and came back on request in a default "SAR").
-  Otherwise no model price is published or checked (`currency-unconfirmed` in the report and the
-  journal, `model-price-not-printed`), the headline is not aligned, and a figure the copy states refuses
-  the run.
+  **Currency** (TAQEEM covers it: a figure printed in £ is not a price in SAR): model prices are written
+  and confirmed in the reading's `price.currency` (`modelPriceCurrency`). It never counts for a property
+  in a country whose own currency the site does not print (`homeCurrency`: only SA, AE, OM, US and the
+  euro area have one) — amount or not, because the prompt has the model set the headline amount FROM
+  the model prices, so that amount is no independent reading: W020's Hampstead brochure printed GBP and a
+  reading by the prompt says "from 1,250,000 SAR". Elsewhere it counts beside a headline amount, or — on
+  request — when it is that country's own currency (a Saudi brochure is priced in SAR). Otherwise no
+  model price is published or checked (`currency-unconfirmed` on a publish, `currency-mismatch` on
+  `--enrich`; `model-price-not-printed`), the headline is not aligned, and a figure the copy states
+  refuses the run. Every second-model check (unit-model prices and the headline) asks for the figure
+  printed IN that currency — its code, symbol or Arabic name (SAR / ر.س / ريال / ﷼ / ⃁ for SAR), beside it
+  or heading its table: the same figure in £, $ or any other currency does not count, and a figure with
+  no currency shown counts only in the property's own country's currency. The headline's text-layer
+  check applies the same rule (`printedInCurrency`): "£1,250,000" is never "1,250,000 SAR", and abroad a
+  bare figure in the text does not settle the price.
 - **Photo focus points**: the model gives every kept photo a `focus` `{x, y}` (the centre of its
   subject); the site uses it as the crop position, so a tall façade is not cut down to sky.
 - **Re-running a published brochure**: `node services/intake/run-once.mjs <pdf> --replace BONA-W023`

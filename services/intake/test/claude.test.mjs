@@ -623,6 +623,30 @@ describe('confirmModelPrices', () => {
     assert.equal(lines[0], '{"i":0,"name":"Lulu 2 / لولو 2","price":319015,"subsidisedPrice":270425}');
   });
 
+  it('the figures count only when the page prints them IN the currency asked: its code, symbol or Arabic name — another currency does not count (review 2026-11-17)', async () => {
+    const f = fakeSpawn([{ envelope: envelope([]) }, { envelope: envelope([]) }]);
+    await confirmModelPrices({ ...opts, spawnImpl: f.spawnImpl });
+    const { prompt } = f.calls[0];
+    assert.match(prompt, /printed IN SAR/);
+    for (const mark of ['SAR', 'ر.س', 'ريال', '\ufdfc', '\u20c1']) assert.ok(prompt.includes(mark), mark);
+    assert.match(prompt, /£\/GBP, \$\/USD/);
+    assert.match(prompt, /does NOT count/);
+    await confirmModelPrices({ ...opts, currency: 'AED', spawnImpl: f.spawnImpl });
+    assert.match(f.calls[1].prompt, /printed IN AED/);
+    assert.ok(f.calls[1].prompt.includes('درهم'));
+  });
+
+  it('without a currency the site prints there is nothing to check the figures in: no call, an error', async () => {
+    for (const currency of [undefined, null, 'GBP', 'sar', '']) {
+      const f = fakeSpawn([{ envelope: envelope([{ i: 0, price: true, subsidisedPrice: true }]) }]);
+      const got = await confirmModelPrices({ ...opts, currency, spawnImpl: f.spawnImpl });
+      assert.equal(f.calls.length, 0, String(currency));
+      assert.deepEqual(got.answers, []);
+      assert.match(got.error, /no currency/);
+      assert.equal(got.fatal, false);
+    }
+  });
+
   it('a name cannot break out of its JSON line: quotes, braces, Unicode line breaks, the fence marker', async () => {
     const f = fakeSpawn([{ envelope: envelope([]) }]);
     const evil = [
@@ -680,6 +704,19 @@ describe('confirmPriceEvidence', () => {
   it('confirms only a well-formed true', async () => {
     assert.deepEqual(await confirmPriceEvidence({ ...opts, spawnImpl: fakeSpawn([{ envelope: envelope({ confirmed: true }) }]).spawnImpl }), { confirmed: true });
     assert.deepEqual(await confirmPriceEvidence({ ...opts, spawnImpl: fakeSpawn([{ envelope: envelope({ confirmed: 'yes' }) }]).spawnImpl }), { confirmed: false });
+  });
+
+  it('the price counts only when printed IN its currency: the same figure in £/GBP, $/USD or any other does not (review 2026-11-17)', async () => {
+    const f = fakeSpawn([{ envelope: envelope({ confirmed: false }) }, { envelope: envelope({ confirmed: false }) }]);
+    await confirmPriceEvidence({ ...opts, spawnImpl: f.spawnImpl });
+    const { prompt } = f.calls[0];
+    assert.match(prompt, /VISIBLY PRINT the price 319015 SAR/);
+    assert.match(prompt, /printed IN SAR/);
+    for (const mark of ['ر.س', 'ريال', '\ufdfc', '\u20c1']) assert.ok(prompt.includes(mark), mark);
+    assert.match(prompt, /£\/GBP, \$\/USD/);
+    assert.match(prompt, /does NOT count/);
+    await confirmPriceEvidence({ ...opts, currency: 'USD', spawnImpl: f.spawnImpl });
+    assert.match(f.calls[1].prompt, /printed IN USD/);
   });
 
   it('says when the error is a quota or session limit, so the pipeline makes no more calls', async () => {

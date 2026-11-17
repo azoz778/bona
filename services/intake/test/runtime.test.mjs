@@ -8,7 +8,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { acquireLock, withLock, LOCK_CEILING_MS, LOCK_ORPHAN_MS } from '../lib/lock.mjs';
 import { outsideDenyRules, writeConfinement } from '../lib/confine.mjs';
-import { priceAppearsIn, westernise } from '../lib/price.mjs';
+import { priceAppearsIn, printedInCurrency, westernise } from '../lib/price.mjs';
 import { STOP_GRACE_MS, waitForIdle } from '../lib/shutdown.mjs';
 
 let dir;
@@ -227,6 +227,44 @@ describe('TAQEEM cross-check — a price must actually be printed', () => {
 
   it('accepts a price the owner typed in the caption', () => {
     assert.ok(priceAppearsIn('brochure text with no price\nSAR 4,500,000', 4500000));
+  });
+});
+
+describe('TAQEEM currency — a figure printed in another currency is not that price (review 2026-11-17)', () => {
+  it('a figure marked with the currency counts — code, symbol or Arabic name, before or after it', () => {
+    for (const t of ['SAR 1,250,000', '1,250,000 SAR', 'SR 1,250,000', '1,250,000 ريال', '1,250,000 ريال سعودي', 'ر.س 1,250,000',
+      'ر.س.1,250,000', '\u20c1 1,250,000', '1,250,000 \ufdfc', 'SAR 1,250,000.00', 'السعر ١٬٢٥٠٬٠٠٠ ريال', 'from 1.25m SAR', '1.25 مليون ريال',
+      'Riyals 1,250,000', 'ﺭﻳﺎﻝ 1,250,000']) {
+      assert.equal(printedInCurrency(t, 1250000, 'SAR'), true, t);
+      assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: false }), true, `${t} (marked)`);
+    }
+    for (const [t, c] of [['£1,250,000', 'GBP'], ['$1,250,000', 'USD'], ['US$ 1,250,000', 'USD'], ['1,250,000 AED', 'AED'], ['€1,250,000', 'EUR'],
+      ['1,250,000 درهم', 'AED'], ['1,250,000 ريال عماني', 'OMR'], ['1,250,000 دولار', 'USD']]) {
+      assert.equal(printedInCurrency(t, 1250000, c), true, `${t} in ${c}`);
+    }
+  });
+
+  it('the same figure in £ / GBP / $ / USD / AED / € or any other currency does NOT count', () => {
+    for (const t of ['£1,250,000', '1,250,000 GBP', 'GBP 1,250,000', '£ 1.25m', '1.25 million pounds', '$1,250,000', 'USD 1,250,000',
+      '1,250,000 AED', '€1,250,000', '1,250,000 EUR', 'QAR 1,250,000', '1,250,000 جنيه إسترليني', '1,250,000 دولار', '1,250,000 ريال عماني']) {
+      assert.equal(printedInCurrency(t, 1250000, 'SAR'), false, t);
+    }
+    assert.equal(printedInCurrency('Flat A £1,250,000\nFlat B £2,000,000', 1250000, 'SAR'), false, 'P1: a Hampstead price table');
+  });
+
+  it('a bare figure counts only when bare figures may (a property in the country of that currency) — and one marked occurrence is enough', () => {
+    assert.equal(printedInCurrency('Price 1,250,000', 1250000, 'SAR'), true);
+    assert.equal(printedInCurrency('Price 1,250,000', 1250000, 'SAR', { bareCounts: false }), false);
+    assert.equal(printedInCurrency('£1,250,000 (about SAR 1,250,000 on the cover)', 1250000, 'SAR', { bareCounts: false }), true);
+    assert.equal(printedInCurrency('£1,250,000 … total 1,250,000', 1250000, 'SAR'), true, 'the bare occurrence');
+    assert.equal(printedInCurrency('£1,250,000 … total 1,250,000', 1250000, 'SAR', { bareCounts: false }), false);
+  });
+
+  it('the figure rules are priceAppearsIn\'s: no figure inside a longer one, nothing that is not a price', () => {
+    assert.equal(printedInCurrency('SAR 1,450,000', 450000, 'SAR'), false);
+    assert.equal(printedInCurrency('', 1250000, 'SAR'), false);
+    assert.equal(printedInCurrency('SAR 1,250,000', 0, 'SAR'), false);
+    assert.equal(printedInCurrency('SAR 1,250,000', 1250000, null), false, 'no currency to check against');
   });
 });
 

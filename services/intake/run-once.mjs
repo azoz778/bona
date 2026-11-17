@@ -77,7 +77,7 @@ function printEnrichReport(r) {
   const cur = e.currency;
   const why = {
     'owner-price': 'the owner\'s own price stays; the models are published without prices',
-    'currency-mismatch': `${cur?.established ? `the brochure prices its models in ${cur.reading}` : `the reading established no currency (${cur?.reading ?? 'none'} is only its default)`}, `
+    'currency-mismatch': `${cur?.established ? `the brochure prices its models in ${cur.reading}` : `the reading established no currency (its ${cur?.reading ?? 'none'} is a default, or the property is abroad)`}, `
       + `the listing is in ${cur?.listing ?? 'no currency'}: the models are published without prices`,
     unit: 'one specific unit: its own price stays',
     'single-property': 'not a development of two or more unit models: its own price stays, its models keep theirs',
