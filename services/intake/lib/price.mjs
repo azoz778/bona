@@ -52,30 +52,38 @@ export function priceAppearsIn(text, amount) {
  * "riyal" is RIYAL — the riyal of the country the property is in (riyalOf).
  */
 const RIYAL = 'RIYAL';
-/** An Arabic abbreviation's letters stand alone: no Arabic letter before the first, a dot or no Arabic letter after the last. */
+/** An Arabic abbreviation's letters stand alone: nothing of the Arabic block right before the first ("مدارس", "شارع"). */
 const ABBR = '(?<![\\u0600-\\u06ff])';
-const ABBR_END = '(?:\\.|(?![\\u0600-\\u06ff]))';
+/**
+ * The word goes on: an Arabic letter, a vowel mark or a tatweel follows — not Arabic punctuation (، ؛ ؟ ٪ ۔),
+ * which ends a word like a space does (final review I1: the whole Arabic block here lost "ر.س،" its mark).
+ */
+const WORD_GOES_ON = '[\\u0620-\\u065f\\u066e-\\u06d3\\u06d5-\\u06ff]';
+/**
+ * ر.س / ر.ع / ر.ق / د.ك / د.إ — the letters `a` and `b` standing on their own. Dotted ("ر.س", "ر. س") they are
+ * the mark whatever follows: "ر.س،", "ر.سـ", even "ر.سشاملة" with the space lost. Undotted ("رس", "ر س") only
+ * when the word ends there: "رسوم" (fees), "رسمي", "رعاية", "رقم" are words, not marks.
+ */
+const abbr = (a, b) => `${ABBR}${a}(?:\\.\\s?${b}\\.?|\\s?${b}(?:\\.|(?!${WORD_GOES_ON})))`;
 const MARKS = [
   ['ر[يی]ال\\s*(?:عماني|عُماني)|omani\\s+(?:riyals?|rials?)', ['OMR']],
   ['ر[يی]ال\\s*قطري|qatari\\s+riyals?', ['QAR']],
   ['ر[يی]ال\\s*سعودي|saudi\\s+riyals?', ['SAR']],
   ['ر[يی]الا?ت?|riyals?|rials?', [RIYAL]],
-  // ر.س / ر.ع / ر.ق / د.ك / د.إ — letters standing on their own: not the end of a word ("مدارس", "شارع"),
-  // nor its start ("رسوم" fees, "رسمي", "رعاية", "رقم"): after the last letter a dot or no Arabic letter.
-  [`${ABBR}ر\\.?\\s?س${ABBR_END}`, ['SAR']],
-  [`${ABBR}ر\\.?\\s?ع${ABBR_END}`, ['OMR']],
+  [abbr('ر', 'س'), ['SAR']],
+  [abbr('ر', 'ع'), ['OMR']],
   ['\\bSAR\\b|\\bS\\.?R\\b\\.?|\u20c1', ['SAR']],
-  [`\\bAED\\b|\\bDhs?\\b\\.?|dirhams?|درهم|${ABBR}د\\.?\\s?إ${ABBR_END}`, ['AED']],
+  [`\\bAED\\b|\\bDhs?\\b\\.?|dirhams?|درهم|${abbr('د', 'إ')}`, ['AED']],
   // "$" alone, or "US$" — not "A$", "C$", "HK$", "NZ$", "S$" (other dollars, below).
   ['US\\$|\\bUSD\\b|(?<![A-Za-z])\\$|dollars?|دولار', ['USD']],
   ['\\bEUR\\b|€|euros?|يورو', ['EUR']],
   ['\\bOMR\\b', ['OMR']],
   ['\\bGBP\\b|£|pounds?(?:\\s+sterling)?|sterling|إسترليني|استرليني', ['GBP']],
   ['جنيه', ['GBP', 'EGP']],
-  [`${ABBR}ر\\.?\\s?ق${ABBR_END}`, ['QAR']],
+  [abbr('ر', 'ق'), ['QAR']],
   // Currencies the site does not print: never this price's, and never a bare figure either.
   ['\\b(?:QAR|KWD|BHD|EGP|JOD|TRY|CHF|CAD|AUD|INR|PKR|CNY|JPY|RUB)\\b|(?<![A-Za-z])[A-Z]{1,3}\\$|\\bTL\\b|₺|دينار|لير[ةه]'
-    + `|${ABBR}د\\.?\\s?ك${ABBR_END}`, ['OTHER']],
+    + `|${abbr('د', 'ك')}`, ['OTHER']],
 ];
 const GAP = '[\\s:：\\-–—=]*';
 const MARK_BEFORE = MARKS.map(([src, cs]) => [new RegExp(`(?:${src})${GAP}$`, 'i'), cs]);

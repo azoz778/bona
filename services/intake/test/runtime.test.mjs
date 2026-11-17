@@ -319,6 +319,32 @@ describe('TAQEEM currency — a figure printed in another currency is not that p
     }
   });
 
+  it('a dotted abbreviation stays the mark when Arabic punctuation, a tatweel or a word follows with no space (final review I1)', () => {
+    // An Omani villa whose page prints the Saudi price: "850,000 ر.س،" is 850,000 SAR — never a bare figure,
+    // which on an Omani property's pages would be 850,000 Omani rials (about ten times as much).
+    for (const t of ['850,000 ر.س،', '850,000 ر.س؛ شاملة', '850,000 ر.س؟', '850,000 ر.سـ', '850,000 ر.سشاملة', '850,000 ر. س،',
+      'تبدأ الأسعار من 850,000 ر.س، شاملة الضريبة', '850,000 ﺭ.ﺱ،']) {
+      assert.equal(printedInCurrency(t, 850000, 'OMR', { bareCounts: true, home: 'OMR' }), false, `${t} is SAR, not a bare Omani figure`);
+      assert.equal(printedInCurrency(t, 850000, 'SAR', { bareCounts: false, home: 'OMR' }), true, `${t} is SAR`);
+      assert.equal(printedInCurrency(t, 850000, 'SAR', { bareCounts: false }), true, `${t} is SAR anywhere`);
+    }
+    // The other way round: a Saudi villa whose page prints a dirham / Omani rial / Qatari riyal / Kuwaiti dinar figure.
+    for (const [t, c] of [['1,250,000 د.إ،', 'AED'], ['1,250,000 د.إ؛', 'AED'], ['1,250,000 د.إشامل', 'AED'], ['1,250,000 د. إ،', 'AED'],
+      ['1,250,000 ر.ع،', 'OMR'], ['1,250,000 ر.ع؟', 'OMR'], ['1,250,000 ر.عـ', 'OMR'], ['1,250,000 ر.ق،', null], ['1,250,000 د.ك،', null]]) {
+      assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: true, home: 'SAR' }), false, `${t} is not a bare Saudi figure`);
+      if (c) assert.equal(printedInCurrency(t, 1250000, c, { bareCounts: false }), true, `${t} is ${c}`);
+    }
+    // Undotted, the letters are a mark only when the word ends there — punctuation ends it, a letter, a vowel mark or a tatweel does not.
+    assert.equal(printedInCurrency('1,250,000 رس،', 1250000, 'SAR', { bareCounts: false }), true);
+    for (const t of ['1,250,000 رسوم', '1,250,000 رسـوم', '1,250,000 رسُوم', '1,250,000 رسمي', '1,250,000 ر سوم']) {
+      assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: false }), false, `${t}: a word, not ر.س`);
+      assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: true, home: 'SAR' }), true, `${t}: bare`);
+    }
+    for (const t of ['1,250,000 رعاية', '1,250,000 رعـاية', '1,250,000 رقم', '1,250,000 دكان']) {
+      assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: true, home: 'SAR' }), true, `${t}: bare`);
+    }
+  });
+
   it('the figure rules are priceAppearsIn\'s: no figure inside a longer one, nothing that is not a price', () => {
     assert.equal(printedInCurrency('SAR 1,450,000', 450000, 'SAR'), false);
     assert.equal(printedInCurrency('', 1250000, 'SAR'), false);

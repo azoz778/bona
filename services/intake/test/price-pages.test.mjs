@@ -1530,6 +1530,29 @@ describe('processPdf: a bare riyal is the riyal of the country the property is i
     } finally { r.cleanup(); }
   });
 
+  it('I1: an abbreviation with an Arabic comma or a word straight after it is still its currency — never a bare figure taken for the reading\'s', async () => {
+    for (const [amount, currency, location, text, mark] of [
+      [850000, 'OMR', OMAN, 'تبدأ الأسعار من 850,000 ر.س، شاملة الضريبة', 'ر.س'],
+      [850000, 'OMR', OMAN, 'تبدأ الأسعار من 850,000 ر.سشاملة الضريبة', 'ر.س'],
+      [1250000, 'SAR', SAUDI, 'السعر 1,250,000 د.إ، شامل', 'د.إ'],
+      [125000, 'SAR', SAUDI, 'السعر 125,000 ر.ع، شامل', 'ر.ع.'],
+    ]) {
+      const r = await rig({ listing: villa(amount, currency, location), pageText: textPages(text), facts: { 3: [{ fig: amount, mark, kind: 'whole' }] } });
+      try {
+        const report = await r.run();
+        assert.equal(report.priceEvidence.inText, false, text);
+        assert.deepEqual(report.listingPreview.price, ON_REQUEST(currency), `${text} is not ${amount} ${currency}`);
+      } finally { r.cleanup(); }
+    }
+    // Read truthfully, in SAR, the Omani villa's Saudi price is published as such.
+    const ok = await rig({ listing: villa(850000, 'SAR', OMAN), pageText: textPages('تبدأ الأسعار من 850,000 ر.س، شاملة الضريبة') });
+    try {
+      const report = await ok.run();
+      assert.equal(report.priceEvidence.inText, true);
+      assert.deepEqual(report.listingPreview.price, { amount: 850000, currency: 'SAR', from: false, period: null, onRequest: false });
+    } finally { ok.cleanup(); }
+  });
+
   it('a Saudi villa printing "1,250,000 ريال" is still 1,250,000 SAR off the text layer', async () => {
     const r = await rig({ listing: villa(1250000, 'SAR', SAUDI), pageText: textPages('السعر 1,250,000 ريال') });
     try {
