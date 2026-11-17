@@ -1978,6 +1978,31 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       assert.equal(await changedSincePublished(r.repo, [path.join('scripts', 'curate', 'inbox', `${SLUG}.json`), path.join('public', 'listings', SLUG)]), null);
     } finally { r.cleanup(); }
   });
+
+  it('a backfill brochure rebuild ("intake: rebuild brochure <id>") is the intake\'s own too; it is never the publish commit', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      seed(r);
+      git(r, 'reset', '-q', '--hard', 'HEAD~1'); // a listing only the intake ever touched
+      fs.writeFileSync(path.join(pubDir(r), 'brochure.pdf'), 'rebuilt by the backfill');
+      git(r, 'commit', '-qam', 'intake: rebuild brochure BONA-W023');
+      const { changedSincePublished } = await import('../lib/publish.mjs');
+      const paths = [path.join('scripts', 'curate', 'inbox', `${SLUG}.json`), path.join('public', 'listings', SLUG)];
+      assert.equal(await changedSincePublished(r.repo, paths), null);
+      // A hand fix after it still counts.
+      fs.writeFileSync(path.join(pubDir(r), '01.jpg'), 're-cropped by hand');
+      git(r, 'commit', '-qam', 'W023 re-crop');
+      assert.match(await changedSincePublished(r.repo, paths), /1 later commit\(s\), e\.g\. "W023 re-crop"/);
+      // History that starts at a rebuild is not a publish commit.
+      const fresh = await rig({ listing: reading() });
+      try {
+        seed(fresh);
+        git(fresh, 'reset', '-q', '--hard', 'HEAD~1');
+        git(fresh, 'commit', '-q', '--amend', '-m', 'intake: rebuild brochure BONA-W023');
+        assert.match(await changedSincePublished(fresh.repo, paths), /its history starts at "intake: rebuild brochure BONA-W023"/);
+      } finally { fresh.cleanup(); }
+    } finally { r.cleanup(); }
+  });
 });
 
 describe('run-once --enrich: the CLI guards', () => {

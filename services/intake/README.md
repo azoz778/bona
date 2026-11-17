@@ -249,7 +249,8 @@ Anything else in the group is ignored, silently.
   has been committed to again since it was published (a hand correction, a WhatsApp edit), or that
   carries anything a re-run would not keep — a hand-added field (`photoNote`, `faq`, `seoTitle`, …),
   videos, a licence, a virtual tour, `hidden`, `featured`, or `_intake.edits` (`price`/`hero`).
-  Later `intake: enrich …` commits do not count as changes (an enrichment is rebuilt by a re-run).
+  Later `intake: enrich …` and `intake: rebuild brochure …` (backfill) commits do not count as changes
+  (a re-run rebuilds both); neither is ever taken for the publish commit.
 - **Enriching a published listing** (listings published before the intake read unit models):
   `node services/intake/run-once.mjs <pdf> --enrich BONA-W014 [--dry-run]` reads the brochure again
   and adds ONLY the unit models (every model price confirmed on its page, as on a publish), their
@@ -416,6 +417,12 @@ journalctl --user -u bona-intake -n 30 -o cat # a clean start: a `start` line, n
 Until then the old daemon keeps answering with the old rules. `build.mjs` and `validate.mjs` are
 the exception: `rebuild()` runs them from `~/bona-bot` after its rebase, so the site-side gates
 apply from the merge on.
+
+**Rolling back the unit-models branch** (`feat/intake-brochure-models`): after a revert, the older
+`changedSincePublished` knows neither `intake: enrich …` nor `intake: rebuild brochure …`, so
+`run-once --replace` treats a listing enriched or brochure-rebuilt since as hand-edited and refuses it
+("changed since it was published"). That is by design — the older code cannot rebuild what those
+commits added — so redo such a listing by hand, or roll the listing back too.
 
 ## Configuration
 
