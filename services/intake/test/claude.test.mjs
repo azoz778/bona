@@ -72,6 +72,15 @@ describe('validateAiResult', () => {
     ['a missing confidence', (r) => { delete r.confidence; }, /confidence/],
     ['a rent listing with no period', (r) => { r.listing.category = 'rent'; r.listing.price.period = null; }, /price.period/],
     ['a bad project shape', (r) => { r.listing.project = { name: 'Kian' }; }, /project must be null/],
+    ['a subsidised price that is not a number', (r) => { r.listing.price.subsidisedAmount = '270,425'; }, /subsidisedAmount/],
+    ['a subsidised price at or above the headline price', (r) => { r.listing.price.subsidisedAmount = 4500000; }, /subsidisedAmount/],
+    ['a subsidised price on a price-on-request listing', (r) => {
+      r.listing.price = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true, subsidisedAmount: 270425 };
+    }, /subsidisedAmount/],
+    ['a subsidised price on a rental', (r) => { r.listing.category = 'rent'; r.listing.price.period = 'year'; r.listing.price.subsidisedAmount = 100; }, /subsidisedAmount/],
+    ['bad subsidised-price evidence', (r) => { r.subsidisedPriceEvidence = { page: 0, quote: '' }; }, /subsidisedPriceEvidence/],
+    ['a focus point outside the photo', (r) => { r.images[0].focus = { x: 0.5, y: 1.4 }; }, /focus/],
+    ['a focus point that is not two numbers', (r) => { r.images[0].focus = { x: '50%', y: 0.5 }; }, /focus/],
   ];
   for (const [label, mutate, re] of bad) {
     it(`refuses ${label}`, () => {
@@ -85,6 +94,26 @@ describe('validateAiResult', () => {
   it('accepts price on request with a null amount', () => {
     const r = clone();
     r.listing.price = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true };
+    assert.deepEqual(validateAiResult(r, { candidateCount: 2 }), []);
+  });
+
+  it('accepts a subsidised price below the headline price, with its evidence', () => {
+    const r = clone();
+    r.listing.price.subsidisedAmount = 3800000;
+    r.priceEvidence = { page: 9, quote: '4,500,000' };
+    r.subsidisedPriceEvidence = { page: 9, quote: '3,800,000' };
+    assert.deepEqual(validateAiResult(r, { candidateCount: 2 }), []);
+    r.listing.price.subsidisedAmount = null;
+    r.subsidisedPriceEvidence = null;
+    assert.deepEqual(validateAiResult(r, { candidateCount: 2 }), []);
+  });
+
+  it('accepts a focus point on a kept photo, and none at all', () => {
+    const r = clone();
+    r.images[0].focus = { x: 0.5, y: 0.82 };
+    r.images[1].focus = null;
+    assert.deepEqual(validateAiResult(r, { candidateCount: 2 }), []);
+    delete r.images[0].focus;
     assert.deepEqual(validateAiResult(r, { candidateCount: 2 }), []);
   });
 });
@@ -224,6 +253,23 @@ describe('buildPrompt', () => {
     assert.match(p, /reject: true/);
     // and says nothing about page renders when there is a text layer
     assert.ok(!/no usable text layer/.test(buildPrompt({ extraction, sheets, caption: {} })));
+  });
+
+  it('explains price-page renders differently from a PDF with no text layer', () => {
+    const pageImages = [{ page: 9, abs: '/tmp/x/pages/p9.jpg', width: 1600, height: 1131 }];
+    const p = buildPrompt({ extraction, sheets, caption: {}, pageImages, pageReason: 'price-pages' });
+    assert.match(p, /digits are missing or scrambled/);
+    assert.ok(p.includes('page 9: /tmp/x/pages/p9.jpg'));
+    assert.match(p, /priceEvidence/);
+    assert.match(p, /subsidisedPriceEvidence/);
+    assert.doesNotMatch(p, /no usable text layer/);
+  });
+
+  it('asks for a focus point and a subsidised price', () => {
+    const p = buildPrompt({ extraction, sheets, caption: {} });
+    assert.match(p, /"focus"/);
+    assert.match(p, /subsidisedAmount/);
+    assert.match(p, /مستفيدي الدعم/);
   });
 
   it('the template file is the one the code documents', () => {

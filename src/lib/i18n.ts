@@ -41,6 +41,18 @@ export function formatPrice(price: { amount: number | null; currency: string; fr
   return `${from}${core}${period}`;
 }
 
+/**
+ * The second line under a price when the brochure also prints one for housing-subsidy (Sakani)
+ * beneficiaries ("السعر لمستفيدي الدعم"). Empty string when the listing has none, so callers can
+ * render it conditionally. `amount` is the regular price; this is the lower, subsidised one.
+ */
+export function formatSubsidisedPrice(price: { amount: number | null; currency: string; from?: boolean; onRequest?: boolean; subsidisedAmount?: number | null }, locale: Locale): string {
+  const s = price?.subsidisedAmount;
+  if (!price || price.onRequest || price.amount == null || typeof s !== 'number' || !(s > 0)) return '';
+  const value = formatPrice({ amount: s, currency: price.currency, from: price.from }, locale);
+  return locale === 'ar' ? `لمستفيدي الدعم (سكني): ${value}` : `Sakani beneficiaries: ${value}`;
+}
+
 /** Western-digit number (e.g. 1,250) in both locales. */
 export function formatNumber(n: number): string { return new Intl.NumberFormat('en-US').format(n); }
 

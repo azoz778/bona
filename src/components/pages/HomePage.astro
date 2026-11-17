@@ -5,7 +5,7 @@ import SectionHead from '../SectionHead.astro';
 import Icon from '../Icon.astro';
 import site from '../../data/site.json';
 import { localePath, t, ui, waLink, type Locale } from '../../lib/i18n';
-import { heroListings, editorialImage, editorialListing, imageAlt, featuredByKind, kindsPresent, kindSlug, kindLabelPlural, withTours, type Kind } from '../../lib/listings';
+import { heroListings, focusStyle, editorialImage, editorialListing, imageAlt, featuredByKind, kindsPresent, kindSlug, kindLabelPlural, withTours, type Kind } from '../../lib/listings';
 import { orgJsonLd } from '../../lib/seo';
 interface Props { locale: Locale }
 const { locale } = Astro.props;
@@ -41,7 +41,7 @@ const strips = ([{ kind: 'land', items: land }, { kind: 'building', items: build
         const img = h.images[0];
         return (
           <div class:list={['hero-slide', i === 0 && 'is-active']} data-slide aria-hidden={i === 0 ? undefined : 'true'}>
-            <img src={i === 0 ? img.src : undefined} data-src={i === 0 ? undefined : img.src} srcset={i === 0 && img.thumb ? `${img.thumb} 400w, ${img.src} 1920w` : undefined} data-srcset={i !== 0 && img.thumb ? `${img.thumb} 400w, ${img.src} 1920w` : undefined} sizes="100vw" alt={imageAlt(img, h, locale)} fetchpriority={i === 0 ? 'high' : undefined} decoding="async" class="h-full w-full object-cover" />
+            <img src={i === 0 ? img.src : undefined} data-src={i === 0 ? undefined : img.src} srcset={i === 0 && img.thumb ? `${img.thumb} 400w, ${img.src} 1920w` : undefined} data-srcset={i !== 0 && img.thumb ? `${img.thumb} 400w, ${img.src} 1920w` : undefined} sizes="100vw" alt={imageAlt(img, h, locale)} fetchpriority={i === 0 ? 'high' : undefined} decoding="async" style={focusStyle(img)} class="h-full w-full object-cover" />
           </div>
         );
       })}
@@ -132,7 +132,7 @@ const strips = ([{ kind: 'land', items: land }, { kind: 'building', items: build
       {aboutImg && aboutImgListing && (
         <div class="lg:col-span-5 lg:col-start-8" data-reveal data-reveal-delay="1">
           <div class="parallax aspect-[4/5]">
-            <img src={aboutImg.src} alt={imageAlt(aboutImg, aboutImgListing, locale)} loading="lazy" decoding="async" class="h-full w-full object-cover" />
+            <img src={aboutImg.src} alt={imageAlt(aboutImg, aboutImgListing, locale)} loading="lazy" decoding="async" style={focusStyle(aboutImg)} class="h-full w-full object-cover" />
           </div>
         </div>
       )}

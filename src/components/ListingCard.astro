@@ -1,7 +1,7 @@
 ---
 import Icon from './Icon.astro';
 import { localePath, formatPrice, formatNumber, t, ui, count, type Locale } from '../lib/i18n';
-import { localeTitle, imageAlt, sortablePrice, typeLabel, kindOf, kindLabel, hasTour, type Listing } from '../lib/listings';
+import { localeTitle, focusStyle, imageAlt, sortablePrice, typeLabel, kindOf, kindLabel, hasTour, type Listing } from '../lib/listings';
 interface Props { listing: Listing; locale: Locale; index?: number; ratio?: '4/3' | '3/2'; eager?: boolean; headingLevel?: 'h2' | 'h3' }
 const { listing: l, locale, index = 0, ratio = '4/3', eager = false, headingLevel: H = 'h3' } = Astro.props;
 const img = l.images?.[0];
@@ -24,7 +24,7 @@ const kindText = t(kindLabel[kind], locale);
     <div class:list={['img-zoom relative', ratio === '3/2' ? 'aspect-[3/2]' : 'aspect-[4/3]']}>
       {img && (
         <img src={img.thumb ?? img.src} srcset={img.thumb ? `${img.thumb} 400w, ${img.src} 1920w` : undefined} sizes={ratio === '3/2' ? '(min-width: 768px) 50vw, 100vw' : '(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw'} alt={imageAlt(img, l, locale)} loading={eager ? 'eager' : 'lazy'} decoding="async" fetchpriority={eager ? 'high' : undefined}
-             transition:name={`listing-${l.slug}`} class:list={['h-full w-full object-cover', l.status === 'sold' && 'opacity-80 saturate-50']} />
+             transition:name={`listing-${l.slug}`} style={focusStyle(img)} class:list={['h-full w-full object-cover', l.status === 'sold' && 'opacity-80 saturate-50']} />
       )}
       {badge && <span class="badge absolute start-3 top-3">{badge}</span>}
       {tour && <span class="badge badge-3d absolute end-3 top-3"><Icon name="cube" size={12} />{t(ui.badge3d, locale)}</span>}

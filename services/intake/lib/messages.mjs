@@ -19,7 +19,10 @@ const commandsFor = (id) => `Reply \`remove ${id}\` / \`hero ${id} 4\` / \`price
 
 const priceText = (p) => {
   if (p.onRequest || !p.amount) return 'Price on request';
-  return `${p.currency} ${Number(p.amount).toLocaleString('en-US')}${p.period ? ` / ${p.period}` : ''}${p.from ? ' (from)' : ''}`;
+  const sakani = typeof p.subsidisedAmount === 'number' && p.subsidisedAmount > 0
+    ? ` · Sakani ${p.currency} ${Number(p.subsidisedAmount).toLocaleString('en-US')}`
+    : '';
+  return `${p.currency} ${Number(p.amount).toLocaleString('en-US')}${p.period ? ` / ${p.period}` : ''}${p.from ? ' (from)' : ''}${sakani}`;
 };
 
 const coverOf = (listing) => {

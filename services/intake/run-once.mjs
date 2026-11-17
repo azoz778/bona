@@ -9,6 +9,9 @@
 //     --model <name>       override BONA_CLAUDE_MODEL
 //     --work <path>        scratch dir (default $BONA_DATA/intake/manual/<timestamp>)
 //     --json               print the whole report as JSON instead of the human summary
+//     --replace <id>       re-run the brochure over the listing it already published (same id,
+//                          slug, date and reference; new copy, price and photos). Refused for a
+//                          listing with videos, a licence, or `hidden` — those are not carried over.
 //
 // Without --dry-run and without --no-git this commits and pushes, exactly like the daemon.
 import fs from 'node:fs';
@@ -18,8 +21,26 @@ import { loadConfig } from './lib/env.mjs';
 import { parseCaption } from './lib/commands.mjs';
 import { withLock } from './lib/lock.mjs';
 import { say } from './lib/log.mjs';
+import { findInbox } from './lib/listing.mjs';
 import { processPdf, RejectError } from './lib/pipeline.mjs';
 import { assertCleanTree, gitCommitPush, gitPull, resetTree } from './lib/publish.mjs';
+
+/**
+ * The fields a replacement keeps from the listing it rewrites. Anything the owner added after
+ * publishing that lives in other files (video clips) or matters legally (a REGA licence) is not
+ * carried over by a re-run, so such a listing is refused rather than silently stripped.
+ */
+function replaceMeta(repo, id) {
+  const found = findInbox(repo, id);
+  if (!found) throw new Error(`--replace ${id}: no inbox listing with that id`);
+  const l = found.listing;
+  const blockers = [];
+  if (Array.isArray(l.videos) && l.videos.length) blockers.push(`${l.videos.length} video(s)`);
+  if (l.licence && Object.values(l.licence).some((v) => v !== null && v !== undefined && v !== '')) blockers.push('a licence');
+  if (l.hidden) blockers.push('hidden: true');
+  if (blockers.length) throw new Error(`--replace ${id}: it has ${blockers.join(', ')}, which a re-run would not keep — do it by hand`);
+  return { replace: true, id: l.id, slug: l.slug, listedAt: l.listedAt, sourceRef: l.sourceRef ?? null, status: l.status };
+}
 
 function parseArgs(argv) {
   const out = { flags: new Set(), opts: {}, positional: [] };
@@ -98,7 +119,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const pdf = args.positional[0];
   if (!pdf) {
-    say('usage: run-once.mjs <file.pdf> [--dry-run] [--no-git] [--repo <path>] [--caption "…"] [--model <name>] [--json]');
+    say('usage: run-once.mjs <file.pdf> [--dry-run] [--no-git] [--repo <path>] [--caption "…"] [--model <name>] [--replace <id>] [--json]');
     process.exit(2);
   }
   const pdfPath = path.resolve(pdf);
@@ -131,17 +152,19 @@ async function main() {
         await assertCleanTree(cfg.repo);
         await gitPull(cfg.repo, { remote: cfg.gitRemote, branch: cfg.gitBranch });
       }
+      const meta = { pdfFileName: path.basename(pdfPath) };
+      if (args.opts.replace) Object.assign(meta, replaceMeta(cfg.repo, args.opts.replace));
       const r = await processPdf({
         pdfPath,
         cfg,
         caption,
         workDir: work,
         dryRun: dryRun || caption.dryRun,
-        meta: { pdfFileName: path.basename(pdfPath) },
+        meta,
       });
       if (r.dryRun || noGit) return r;
       try {
-        r.push = await gitCommitPush(cfg.repo, `intake: ${r.listing.title.en} (${r.id})`, {
+        r.push = await gitCommitPush(cfg.repo, `intake: ${meta.replace ? 'replace ' : ''}${r.listing.title.en} (${r.id})`, {
           remote: cfg.gitRemote, branch: cfg.gitBranch,
           paths: [`public/listings/${r.slug}`, 'scripts/curate/inbox', 'src/data/listings.json'],
         });

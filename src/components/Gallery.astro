@@ -4,7 +4,7 @@
    The first image carries the shared-element transition name from the listing cards. */
 import Icon from './Icon.astro';
 import { t, ui, fill, type Locale, count } from '../lib/i18n';
-import { imageAlt, type Listing } from '../lib/listings';
+import { focusStyle, imageAlt, type Listing } from '../lib/listings';
 interface Props { listing: Listing; locale: Locale }
 const { listing: l, locale } = Astro.props;
 const images = l.images ?? [];
@@ -19,8 +19,8 @@ const rtl = locale === 'ar';
               transition, but it needs the same srcset/sizes as its siblings: without them a phone downloads
               the full-size 1920px JPEG (~400 KB) where a 15 KB WebP would do. */}
           {i === 0
-            ? <img src={img.src} srcset={img.thumb ? `${img.thumb} 400w, ${img.src} 1920w` : undefined} sizes="(min-width: 1024px) 60vw, 88vw" alt={imageAlt(img, l, locale)} fetchpriority="high" decoding="async" transition:name={`listing-${l.slug}`} class="h-full w-full object-cover" />
-            : <img src={img.thumb ?? img.src} srcset={img.thumb ? `${img.thumb} 400w, ${img.src} 1920w` : undefined} sizes="(min-width: 1024px) 60vw, 88vw" alt={imageAlt(img, l, locale)} loading="lazy" decoding="async" class="h-full w-full object-cover" />}
+            ? <img src={img.src} srcset={img.thumb ? `${img.thumb} 400w, ${img.src} 1920w` : undefined} sizes="(min-width: 1024px) 60vw, 88vw" alt={imageAlt(img, l, locale)} fetchpriority="high" decoding="async" transition:name={`listing-${l.slug}`} style={focusStyle(img)} class="h-full w-full object-cover" />
+            : <img src={img.thumb ?? img.src} srcset={img.thumb ? `${img.thumb} 400w, ${img.src} 1920w` : undefined} sizes="(min-width: 1024px) 60vw, 88vw" alt={imageAlt(img, l, locale)} loading="lazy" decoding="async" style={focusStyle(img)} class="h-full w-full object-cover" />}
         </button>
       ))}
     </div>
@@ -57,7 +57,7 @@ const rtl = locale === 'ar';
       <div class="lb-rail no-scrollbar" data-lb-rail role="group" aria-label={t(ui.thumbnails, locale)}>
         {images.map((img, i) => (
           <button type="button" class="lb-thumb" data-lb-go={i} aria-label={fill(t(ui.goToImage, locale), { n: i + 1 })} aria-current={i === 0 ? 'true' : undefined}>
-            <img src={img.thumb ?? img.src} alt="" loading="lazy" decoding="async" />
+            <img src={img.thumb ?? img.src} alt="" loading="lazy" decoding="async" style={focusStyle(img)} />
           </button>
         ))}
       </div>

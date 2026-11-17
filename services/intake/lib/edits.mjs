@@ -73,6 +73,9 @@ export function setPrice(repo, id, { amount, currency, onRequest }) {
   const p = found.listing.price;
   if (onRequest) { p.onRequest = true; p.amount = null; p.from = false; }
   else { p.onRequest = false; p.amount = amount; if (currency) p.currency = currency; }
+  // A Sakani price read from the brochure belonged to the brochure's headline price; once the
+  // owner sets his own price it is stale (it could even be above the new one), so it goes.
+  delete p.subsidisedAmount;
   return { listing: save(found.file, found.listing) };
 }
 

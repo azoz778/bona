@@ -58,6 +58,7 @@ export async function writeListingImages(candidates, picks, outDir, slug) {
       index: pick.index,
       room: pick.room,
       reason: pick.reason ?? null,
+      focus: pick.focus ?? null,
       file,
       thumbFile,
       src: `/listings/${slug}/${base}.jpg`,

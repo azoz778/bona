@@ -112,6 +112,14 @@ describe('orderedPicks', () => {
     const picks = orderedPicks([{ index: 0, room: 'not-a-room', rank: 1, exclude: false }]);
     assert.equal(picks[0].room, 'view');
   });
+  it('carries a valid focus point, rounded, and nothing else', () => {
+    const picks = orderedPicks([
+      { index: 0, room: 'exterior', rank: 1, exclude: false, focus: { x: 0.5, y: 0.8234 } },
+      { index: 1, room: 'living', rank: 2, exclude: false, focus: { x: 2, y: 0.5 } },
+      { index: 2, room: 'kitchen', rank: 3, exclude: false },
+    ]);
+    assert.deepEqual(picks.map((p) => p.focus), [{ x: 0.5, y: 0.82 }, null, null]);
+  });
 });
 
 describe('buildListing', () => {
@@ -125,6 +133,40 @@ describe('buildListing', () => {
 
   it('produces a listing that passes the local checks', () => {
     assert.deepEqual(checkListing(base()), []);
+  });
+
+  it('writes a photo\'s focus point, and leaves the key out when there is none', () => {
+    const images = imagesFor(slug, picks).map((im, i) => (i === 0 ? { ...im, focus: { x: 0.5, y: 0.8 } } : im));
+    const l = buildListing({ ai: structuredClone(AI), images, slug, id: 'BONA-W007', repo: REPO, caption: {}, meta: {} });
+    assert.deepEqual(l.images[0].focus, { x: 0.5, y: 0.8 });
+    assert.equal('focus' in l.images[1], false);
+    assert.deepEqual(checkListing(l), []);
+    l.images[1].focus = { x: -0.1, y: 0.5 };
+    assert.ok(checkListing(l).some((p) => /images\[1\]\.focus/.test(p)));
+  });
+
+  it('keeps a subsidised price only under a published headline price', () => {
+    const ai = structuredClone(AI);
+    ai.listing.price = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
+    const l = buildListing({ ai, images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: {}, meta: {} });
+    assert.equal(l.price.subsidisedAmount, 270425);
+    assert.deepEqual(checkListing(l), []);
+
+    const onReq = structuredClone(AI);
+    onReq.listing.price = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true, subsidisedAmount: 270425 };
+    assert.equal('subsidisedAmount' in buildListing({ ai: onReq, images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: {}, meta: {} }).price, false);
+
+    const owner = buildListing({ ai: structuredClone(ai), images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: { price: { amount: 300000, currency: 'SAR' } }, meta: {} });
+    assert.equal('subsidisedAmount' in owner.price, false, 'the owner\'s own price replaces both brochure prices');
+
+    const plain = base();
+    assert.equal('subsidisedAmount' in plain.price, false, 'an ordinary listing gets no new key');
+  });
+
+  it('the local checks refuse a subsidised price that is not below the headline price', () => {
+    const l = base();
+    l.price.subsidisedAmount = l.price.amount;
+    assert.ok(checkListing(l).some((p) => /subsidisedAmount/.test(p)));
   });
 
   it('derives kind from type and never features itself', () => {
@@ -344,6 +386,15 @@ describe('inbox + edits', () => {
     const onReq = edits.setPrice(tmp, 'BONA-W001', { onRequest: true }).listing.price;
     assert.equal(onReq.onRequest, true);
     assert.equal(onReq.amount, null);
+  });
+
+  it('price clears a subsidised price read from the brochure', () => {
+    const found = findInbox(tmp, 'BONA-W001');
+    found.listing.price = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
+    fs.writeFileSync(found.file, `${JSON.stringify(found.listing, null, 2)}\n`);
+    const p = edits.setPrice(tmp, 'BONA-W001', { amount: 330000, currency: 'SAR' }).listing.price;
+    assert.equal(p.amount, 330000);
+    assert.equal('subsidisedAmount' in p, false);
   });
 
   it('status and hidden are persisted', () => {

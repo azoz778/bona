@@ -28,7 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOMS } from '../../../scripts/curate/rooms.mjs';
-import { FORBIDDEN as COPY_FORBIDDEN, HYPE_WORDS as SHARED_HYPE_WORDS } from '../../../scripts/curate/rules.mjs';
+import { FORBIDDEN as COPY_FORBIDDEN, HYPE_WORDS as SHARED_HYPE_WORDS, isImageFocus as isFocus } from '../../../scripts/curate/rules.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PROMPT_TEMPLATE = path.join(HERE, 'prompt.md');
@@ -85,9 +85,12 @@ export function fence(label, body) {
 /**
  * @param {{extraction:object, sheets:Array<{file:string,from:number,to:number}>, caption:object,
  *          pageImages?:Array<{page:number,abs:string,width:number,height:number}>,
- *          rubricPath?:string}} input
+ *          pageReason?:'no-text'|'price-pages', rubricPath?:string}} input
+ *   `pageReason` says why `pageImages` exist: 'no-text' = the PDF has no text layer, so EVERY page
+ *   was rendered; 'price-pages' = the text layer is fine except that the pages listed print prices
+ *   whose digits it cannot read (see price-pages.mjs), so only those were rendered.
  */
-export function buildPrompt({ extraction, sheets, caption, pageImages = [], rubricPath }) {
+export function buildPrompt({ extraction, sheets, caption, pageImages = [], pageReason = 'no-text', rubricPath }) {
   let rubric = DEFAULT_RUBRIC;
   if (rubricPath) {
     try { rubric = fs.readFileSync(rubricPath, 'utf8').trim() || DEFAULT_RUBRIC; } catch { /* default */ }
@@ -109,7 +112,24 @@ export function buildPrompt({ extraction, sheets, caption, pageImages = [], rubr
     .join('\n\n')
     .slice(0, 60000);
 
-  const pageBlock = pageImages.length
+  const evidenceRule = [
+    'A price you take from a page image MUST come with `priceEvidence: { "page": <n>, "quote": "<the',
+    'exact printed text>" }`, and a subsidised price with `subsidisedPriceEvidence` in the same shape.',
+    'Without it that price is not published.',
+  ];
+  const pageBlock = pageImages.length && pageReason === 'price-pages'
+    ? [
+      `${pageImages.length} page(s) of this PDF print prices whose digits are missing or scrambled in the`,
+      'text layer below — the PDF\'s font maps its digits to other characters, so a price printed as',
+      '270,425 can read "DIB,FDG" in the text. Those pages were rendered as images. **Read every one of them',
+      'with the Read tool** and take every price, area and unit figure on them from the image, never from the',
+      'scrambled text. The rest of the text layer is reliable.',
+      '',
+      ...pageImages.map((p) => `  - page ${p.page}: ${p.abs}  (${p.width}x${p.height})`),
+      '',
+      ...evidenceRule,
+    ].join('\n')
+    : pageImages.length
     ? [
       `This PDF has **no usable text layer**, so all ${pageImages.length} of its pages were rendered as images.`,
       '**Read every one of them with the Read tool** and take the specs, the price, the district, the',
@@ -119,8 +139,7 @@ export function buildPrompt({ extraction, sheets, caption, pageImages = [], rubr
       '',
       ...pageImages.map((p) => `  - page ${p.page}: ${p.abs}  (${p.width}x${p.height})`),
       '',
-      'A price you take from a page image MUST come with `priceEvidence: { "page": <n>, "quote": "<the',
-      'exact printed text>" }`. Without it the listing is published as "price on request".',
+      ...evidenceRule,
     ].join('\n')
     : '(the PDF has a readable text layer — it is reproduced below)';
 
@@ -233,6 +252,18 @@ export function validateAiResult(result, { candidateCount = 0 } = {}) {
   if (!p.onRequest && !(typeof p.amount === 'number' && p.amount > 0)) e.push('listing.price: amount must be > 0 unless onRequest is true');
   if (![null, undefined, 'year', 'month'].includes(p.period)) e.push('listing.price.period must be null, "year" or "month"');
   if (l.category === 'rent' && !p.period && !p.onRequest) e.push('rent listings need price.period');
+  // A second, lower price for housing-subsidy (Sakani) beneficiaries, printed beside the regular one.
+  if (p.subsidisedAmount !== null && p.subsidisedAmount !== undefined) {
+    if (!(typeof p.subsidisedAmount === 'number' && Number.isFinite(p.subsidisedAmount) && p.subsidisedAmount > 0)) {
+      e.push('listing.price.subsidisedAmount must be null or a number > 0');
+    } else if (p.onRequest || !(typeof p.amount === 'number' && p.amount > 0)) {
+      e.push('listing.price.subsidisedAmount needs a published amount (it is null when onRequest is true)');
+    } else if (p.subsidisedAmount >= p.amount) {
+      e.push('listing.price.subsidisedAmount must be lower than amount (amount = the regular, non-subsidised price)');
+    } else if (l.category === 'rent') {
+      e.push('listing.price.subsidisedAmount is for sales only — null on a rental');
+    }
+  }
 
   const s = l.specs || {};
   for (const k of ['beds', 'baths', 'areaSqm', 'plotSqm', 'yearBuilt', 'floors']) {
@@ -262,6 +293,9 @@ export function validateAiResult(result, { candidateCount = 0 } = {}) {
       else if (seen.has(im.index)) e.push(`images: duplicate index ${im.index}`);
       else seen.add(im.index);
       if (!ROOM_KEYS.includes(im?.room) && !im?.exclude) e.push(`images[#${im?.index}]: unknown room key "${im?.room}"`);
+      if (im?.focus !== null && im?.focus !== undefined && !isFocus(im.focus)) {
+        e.push(`images[#${im?.index}]: focus must be null or { x, y } with both numbers between 0 and 1`);
+      }
       if (im?.hero) heroes += 1;
     }
     if (heroes > 1) e.push('images: more than one hero');
@@ -274,14 +308,17 @@ export function validateAiResult(result, { candidateCount = 0 } = {}) {
   if (typeof result.confidence !== 'number' || result.confidence < 0 || result.confidence > 1) e.push('confidence must be a number between 0 and 1');
   // Optional, and only meaningful for a PDF with no text layer. Shape-checked here; whether
   // the evidence is TRUE is decided by pipeline.mjs, which looks at the page itself.
-  const ev = result.priceEvidence;
-  if (ev !== null && ev !== undefined) {
-    if (!(typeof ev === 'object' && Number.isInteger(ev.page) && ev.page >= 1 && isStr(ev.quote))) {
-      e.push('priceEvidence must be null or { page: <1-based page number>, quote: "<printed text>" }');
+  for (const key of ['priceEvidence', 'subsidisedPriceEvidence']) {
+    const ev = result[key];
+    if (ev !== null && ev !== undefined) {
+      if (!(typeof ev === 'object' && Number.isInteger(ev.page) && ev.page >= 1 && isStr(ev.quote))) {
+        e.push(`${key} must be null or { page: <1-based page number>, quote: "<printed text>" }`);
+      }
     }
   }
   return e;
 }
+
 
 /**
  * Second opinion on ONE page render: is the price the model claimed actually printed there?
@@ -290,17 +327,28 @@ export function validateAiResult(result, { candidateCount = 0 } = {}) {
  * @returns {Promise<{confirmed:boolean, error?:string}>}
  */
 export async function confirmPriceEvidence({
-  pageImage, amount, currency, quote, bin = 'claude', model = 'sonnet', cwd,
+  pageImage, amount, currency, quote, subsidised = false, project = false, bin = 'claude', model = 'sonnet', cwd,
   addDirs = [], settingsPath = null, timeoutMs = 300000, spawnImpl = spawn,
 }) {
+  const which = subsidised
+    ? 'the price for housing-subsidy (Sakani) beneficiaries'
+    : 'the price';
   const prompt = [
     'Read the image file below with the Read tool. It is one page of a property brochure.',
     '',
     `  ${pageImage}`,
     '',
-    `Question: does that page VISIBLY PRINT the price ${amount} ${currency} for the property?`,
+    `Question: does that page VISIBLY PRINT ${which} ${amount} ${currency} for the property?`,
     'A number you have to compute, infer or assume does not count. A price for a different unit',
     'on the same page does not count unless the page makes clear it is this property\'s price.',
+    ...(project
+      ? ['The listing is a whole development sold as several unit models: a price printed for one of its',
+        'unit models counts as the property\'s price.']
+      : []),
+    ...(subsidised
+      ? ['It must be printed as the price for subsidy beneficiaries (for example "السعر لمستفيدي الدعم");',
+        'the regular price for everyone else does not count here.']
+      : []),
     '',
     fence('what the first pass claimed it saw', quote ?? '(nothing quoted)'),
     '',

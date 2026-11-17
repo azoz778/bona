@@ -3,7 +3,7 @@
    embed never loads unless asked for. Data-driven from listing.virtualTourUrl. */
 import Icon from './Icon.astro';
 import { t, ui, fill, type Locale } from '../lib/i18n';
-import { localeTitle, imageAlt, matterportId, tourEmbedUrl, type Listing } from '../lib/listings';
+import { localeTitle, focusStyle, imageAlt, matterportId, tourEmbedUrl, type Listing } from '../lib/listings';
 interface Props { listing: Listing; locale: Locale; class?: string }
 const { listing: l, locale, class: cls = '' } = Astro.props;
 const id = matterportId(l.virtualTourUrl);
@@ -21,7 +21,7 @@ const title = localeTitle(l, locale);
     </div>
     <div class="tour-frame mt-6" data-tour-frame>
       <button type="button" class="tour-facade" data-tour-play data-track="tour_open" data-cta="tour_facade" aria-label={t(ui.playTour, locale)}>
-        {poster && <img src={poster.src} alt={imageAlt(poster, l, locale)} loading="lazy" decoding="async" class="h-full w-full object-cover" />}
+        {poster && <img src={poster.src} alt={imageAlt(poster, l, locale)} loading="lazy" decoding="async" style={focusStyle(poster)} class="h-full w-full object-cover" />}
         <span class="tour-shade" aria-hidden="true"></span>
         <span class="badge badge-3d absolute start-4 top-4" aria-hidden="true"><Icon name="cube" size={12} />3D</span>
         <span class="tour-play" aria-hidden="true"><Icon name="play" size={26} /></span>

@@ -3,7 +3,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOMS } from '../../../scripts/curate/rooms.mjs';
-import { INTAKE_ID_RE, isPublishable, licenceProblems, LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, videoEntryProblems, withdrawnAdvertising, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
+import {
+  imageFocusProblems, INTAKE_ID_RE, isImageFocus as isFocus, isPublishable, licenceProblems, LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB,
+  subsidisedPriceProblems, videoEntryProblems, withdrawnAdvertising, withdrawnNotice,
+} from '../../../scripts/curate/rules.mjs';
 
 export const INBOX_DIR = path.join('scripts', 'curate', 'inbox');
 export const INDEX_FILE = '_index.json';
@@ -134,6 +137,7 @@ export function seqAfter(id) {
 export const WARNING_CODES = new Set([
   'not-enough-photos',      // fewer publishable photographs than BONA_MIN_IMAGES (dry run only)
   'price-not-printed',      // the model's price was not in the PDF or the caption -> on request
+  'subsidised-price-not-printed', // the model's Sakani price could not be confirmed -> regular price only
   'brochure-too-large',     // the branded brochure is still over BONA_MAX_BROCHURE_MB after downsampling
   'brochure-failed',        // rebrand_pdf.py could not build the branded brochure at all
   'images-skipped',         // sharp could not decode one or more candidates
@@ -192,6 +196,15 @@ export function buildListing({ ai, images, slug, id, repo, caption = {}, meta = 
   if (price.onRequest) price.amount = price.amount ?? null;
   price.from = Boolean(price.from);
   price.onRequest = Boolean(price.onRequest);
+  // The Sakani (housing-subsidy) price is the brochure's second figure: kept only beside the
+  // brochure's own published, higher price on a sale. The key is left OFF every other listing.
+  const subsidised = price.subsidisedAmount;
+  delete price.subsidisedAmount;
+  if (!caption.price && !price.onRequest && l.category !== 'rent'
+      && typeof price.amount === 'number' && price.amount > 0
+      && typeof subsidised === 'number' && Number.isFinite(subsidised) && subsidised > 0 && subsidised < price.amount) {
+    price.subsidisedAmount = subsidised;
+  }
 
   const listing = {
     id,
@@ -245,7 +258,10 @@ export function buildListing({ ai, images, slug, id, repo, caption = {}, meta = 
       site: site ?? null,
     },
   };
-  listing.images = images.map((im) => ({ src: im.src, thumb: im.thumb, alt: altFor(im.room, listing) }));
+  listing.images = images.map((im) => ({
+    src: im.src, thumb: im.thumb, alt: altFor(im.room, listing),
+    ...(isFocus(im.focus) ? { focus: { x: im.focus.x, y: im.focus.y } } : {}),
+  }));
   return listing;
 }
 
@@ -271,10 +287,12 @@ export function checkListing(listing, { minImages = 4, maxImages = 10, withdrawa
     if (!LOCAL_LISTING_SRC.test(im.src || '')) e.push(`images[${i}].src is not /listings/<slug>/<nn>.jpg`);
     if (!(im.thumb === null || LOCAL_LISTING_THUMB.test(im.thumb || ''))) e.push(`images[${i}].thumb is not /listings/<slug>/<nn>-thumb.webp`);
     if (!isPair(im.alt)) e.push(`images[${i}].alt.en/ar required`);
+    e.push(...imageFocusProblems(im.focus, i));
   }
   if (!listing.price?.onRequest && !(typeof listing.price?.amount === 'number' && listing.price.amount > 0)) {
     e.push('price.amount must be > 0 unless onRequest');
   }
+  e.push(...subsidisedPriceProblems(listing.price, listing.category));
   // Optional, like project/unit/map — but when present every entry is `{ src, poster }` in
   // the same site-local shapes the site validator demands (scripts/curate/rules.mjs), so a
   // listing this accepts can never fail the build afterwards.
@@ -325,5 +343,9 @@ export function orderedPicks(aiImages, { maxImages = 10 } = {}) {
     .map((im) => ({ ...im, rank: Number.isFinite(im.rank) ? im.rank : 99 }))
     .sort((a, b) => a.rank - b.rank || a.index - b.index)
     .slice(0, maxImages)
-    .map((im, i) => ({ index: im.index, room: ROOMS[im.room] ? im.room : 'view', rank: i + 1, reason: im.reason ?? null }));
+    .map((im, i) => ({
+      index: im.index, room: ROOMS[im.room] ? im.room : 'view', rank: i + 1, reason: im.reason ?? null,
+      // Two decimals is a 1% step — finer than any crop can show. Anything malformed is dropped (= centred).
+      focus: isFocus(im.focus) ? { x: Math.round(im.focus.x * 100) / 100, y: Math.round(im.focus.y * 100) / 100 } : null,
+    }));
 }

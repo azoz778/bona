@@ -31,15 +31,16 @@ import { classifyPdf } from './classify.mjs';
 import { writeConfinement } from './confine.mjs';
 import { buildContactSheets } from './contact-sheet.mjs';
 import { buildPrompt, confirmPriceEvidence, runListingAi } from './claude.mjs';
-import { writeListingImages } from './images.mjs';
+import { removeListingImages, writeListingImages } from './images.mjs';
 import {
-  addWarningCode, buildListing, checkListing, findByPdfSha, inboxIds, nextListingId, orderedPicks,
+  addWarningCode, buildListing, checkListing, findByPdfSha, findInbox, inboxIds, nextListingId, orderedPicks,
   readIndex, seqAfter, slugify, takenSlugs, todayRiyadh, uniqueSlug, writeIndex, writeInboxListing,
 } from './listing.mjs';
 import { log } from './log.mjs';
 import { extractPdf, renderPdfPages } from './pdf.mjs';
 import { compositePages, cropPhotoRegions, modelFlagsComposites } from './photo-regions.mjs';
 import { priceAppearsIn } from './price.mjs';
+import { pricePagesToRender } from './price-pages.mjs';
 import { pinFromLinks } from './geo.mjs';
 import { rebuild, resetTree } from './publish.mjs';
 import { loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNamedIn, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
@@ -74,7 +75,8 @@ export class RejectError extends Error {
  * @param {object} opts.caption      parseCaption() result
  * @param {string} opts.workDir      scratch dir for extraction + sheets + staging
  * @param {boolean} [opts.dryRun]    stop before writing to the repo
- * @param {object} [opts.meta]       messageId / groupJid / pdfFileName
+ * @param {object} [opts.meta]       messageId / groupJid / pdfFileName; or, for run-once --replace,
+ *                                   { replace: true, id, slug, listedAt, sourceRef } of the listing to rewrite
  * @returns {Promise<object>} run report
  */
 export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun = false, meta = {} }) {
@@ -85,6 +87,16 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   const stat = fs.statSync(pdfPath);
   report.bytes = stat.size;
   report.sha256 = sha256File(pdfPath);
+
+  // --- replace: checked first, before a page is read or a model is paid ------------
+  // `meta.replace` (run-once --replace <id>): re-run a brochure over the listing it already
+  // published — same id, slug, date and reference, new copy, price and photos. Used after a fix to
+  // the intake itself (2026-11-17: W023's prices were on pages the first run could not read).
+  if (meta.replace) {
+    if (!meta.id || !meta.slug) throw new Error('replace needs the id and slug of the listing it replaces');
+    const current = findInbox(cfg.repo, meta.id);
+    if (!current || current.listing.slug !== meta.slug) throw new Error(`${meta.id} is not in the inbox under ${meta.slug} — nothing to replace`);
+  }
 
   // --- 0. withdrawn advertising -------------------------------------------------
   // A brochure whose project the developer withdrew from advertising (rules.mjs
@@ -136,6 +148,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // A brochure with no text layer is NOT accepted locally: every page is rendered and the
   // AI reads them. Default-deny still holds — it just happens one gate later.
   let pageImages = [];
+  let pageReason = 'no-text';
   if (verdict.imageOnly) {
     report.stage = 'page-renders';
     const pages = await renderPdfPages(pdfPath, workDir, {
@@ -145,6 +158,27 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     pageImages = pages.pageImages || [];
     report.pageImages = pageImages.length;
     log.info('intake.page_renders', { pages: pageImages.length, longSide: cfg.pageReadLongSide });
+  } else {
+    // A readable text layer can still be unreadable exactly where it matters: a font that maps
+    // its digits to letters prints 270,425 on the page and "DIB,FDG" in the text. The pages that
+    // talk about a price without a readable one are rendered so the model can look (price-pages.mjs).
+    // A failed render costs only the price (it stays on request), never the listing.
+    const pricePages = pricePagesToRender(extraction.pageText, { maxPages: cfg.maxPricePages });
+    if (pricePages.length) {
+      report.stage = 'page-renders';
+      const pages = await renderPdfPages(pdfPath, workDir, {
+        pyCmd: cfg.pyCmd, maxPages: cfg.maxPdfPages, longSide: cfg.pageReadLongSide,
+        pages: pricePages, dir: 'price-pages',
+      });
+      if (pages.ok === false) {
+        log.warn('intake.price_pages_failed', { pages: pricePages, error: pages.error });
+      } else {
+        pageImages = pages.pageImages || [];
+        pageReason = 'price-pages';
+        report.pricePages = pageImages.map((p) => p.page);
+        log.info('intake.price_pages', { pages: report.pricePages, longSide: cfg.pageReadLongSide });
+      }
+    }
   }
 
   const confinement = writeConfinement(workDir);
@@ -212,7 +246,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   const askModel = async () => {
     const sheets = await buildContactSheets(extraction.candidates, path.join(workDir, 'sheets'));
     report.sheets = sheets.map((s) => s.file);
-    const prompt = buildPrompt({ extraction, sheets, caption, pageImages, rubricPath: fs.existsSync(rubricPath) ? rubricPath : null });
+    const prompt = buildPrompt({ extraction, sheets, caption, pageImages, pageReason, rubricPath: fs.existsSync(rubricPath) ? rubricPath : null });
     fs.writeFileSync(path.join(workDir, 'prompt.txt'), prompt);
     return runListingAi({
       prompt,
@@ -275,36 +309,55 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // brochure with no text layer make a second `claude -p` look at the page it cited.
   report.stage = 'price';
   const price = ai.listing?.price;
+  const haystack = `${extraction.text || ''}\n${caption.text || ''}`;
+  /** Is `amount` printed? In the text layer, or — confirmed by a second model — on the page image the model cited. */
+  const printed = async (amount, evidence, { subsidised = false } = {}) => {
+    const out = { inText: priceAppearsIn(haystack, amount), confirmed: null };
+    if (out.inText || !pageImages.length || !evidence) return out;
+    const page = pageImages.find((p) => p.page === evidence.page);
+    if (!page) return out;
+    const check = await confirmPriceEvidence({
+      pageImage: page.abs,
+      amount,
+      currency: price.currency,
+      quote: evidence.quote,
+      subsidised,
+      project: Boolean(ai.listing?.project),
+      bin: cfg.claudeBin,
+      model: cfg.claudeModel,
+      cwd: workDir,
+      addDirs: [workDir],
+      settingsPath: confinement.file,
+    });
+    out.confirmed = check.confirmed;
+    log.info('intake.price_evidence', { page: evidence.page, subsidised, confirmed: check.confirmed, error: check.error ?? null });
+    return out;
+  };
   if (!caption.price && price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0) {
-    const haystack = `${extraction.text || ''}\n${caption.text || ''}`;
-    let evidenced = priceAppearsIn(haystack, price.amount);
-    report.priceEvidence = { inText: evidenced, confirmed: null };
-    if (!evidenced && pageImages.length && ai.priceEvidence) {
-      const page = pageImages.find((p) => p.page === ai.priceEvidence.page);
-      if (page) {
-        const check = await confirmPriceEvidence({
-          pageImage: page.abs,
-          amount: price.amount,
-          currency: price.currency,
-          quote: ai.priceEvidence.quote,
-          bin: cfg.claudeBin,
-          model: cfg.claudeModel,
-          cwd: workDir,
-          addDirs: [workDir],
-          settingsPath: confinement.file,
-        });
-        evidenced = check.confirmed;
-        report.priceEvidence.confirmed = check.confirmed;
-        log.info('intake.price_evidence', { page: ai.priceEvidence.page, confirmed: check.confirmed, error: check.error ?? null });
-      }
-    }
-    if (!evidenced) {
+    report.priceEvidence = await printed(price.amount, ai.priceEvidence);
+    if (!report.priceEvidence.inText && !report.priceEvidence.confirmed) {
       log.warn('intake.price_unevidenced', { amount: price.amount, currency: price.currency });
       price.amount = null;
       price.onRequest = true;
       price.from = false;
       report.warningCodes.push('price-not-printed');
       report.warnings.push('the price was not printed in the brochure, so the listing says "price on request" — send `price <id> <amount>` to set one');
+    }
+  }
+  // The subsidised (Sakani) price rides on the headline price: it is published only beside a
+  // published brochure price, and only when it is printed too. The owner's caption price replaces
+  // both — buildListing drops it then.
+  if (price && typeof price.subsidisedAmount === 'number') {
+    const headline = !caption.price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0;
+    const evidence = headline ? await printed(price.subsidisedAmount, ai.subsidisedPriceEvidence, { subsidised: true }) : null;
+    report.subsidisedPriceEvidence = evidence;
+    if (!evidence?.inText && !evidence?.confirmed) {
+      if (headline) {
+        log.warn('intake.subsidised_price_unevidenced', { amount: price.subsidisedAmount, currency: price.currency });
+        report.warningCodes.push('subsidised-price-not-printed');
+        report.warnings.push('the subsidised (Sakani) price could not be confirmed on the brochure, so only the regular price is shown');
+      }
+      price.subsidisedAmount = null;
     }
   }
 
@@ -350,7 +403,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // that stands between a replay and a second listing id.
   if (!dryRun) {
     const twin = findByPdfSha(cfg.repo, report.sha256);
-    if (twin) {
+    if (twin && !(meta.replace && twin.id === meta.id)) {
       const err = new RejectError(`this brochure is already published as ${twin.id} — ${cfg.site}/properties/${twin.slug}/`, 'duplicate');
       err.published = { id: twin.id, slug: twin.slug, url: `${cfg.site}/properties/${twin.slug}/` };
       throw err;
@@ -367,7 +420,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
 
   const day = (meta.listedAt || todayRiyadh()).replace(/-/g, '');
   const tail = meta.messageId ? String(meta.messageId).replace(/[^A-Za-z0-9]/g, '').slice(0, 6) : report.sha256.slice(0, 6);
-  const sourceRef = `WA-${day}-${tail.toUpperCase()}`;
+  const sourceRef = (meta.replace && meta.sourceRef) || `WA-${day}-${tail.toUpperCase()}`;
 
   if (dryRun) {
     report.stage = 'dry-run';
@@ -446,11 +499,15 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   const listingDirs = [path.join('public', 'listings', slug)];
   try {
     fs.mkdirSync(path.dirname(publicDir), { recursive: true });
+    // A replacement starts from an empty folder: a photo (or brochure) the new run did not
+    // publish must not stay reachable by URL. The rollback below restores the old files from git.
+    if (meta.replace) removeListingImages(path.join(cfg.repo, 'public'), slug);
     // The branded brochure was staged alongside the photos, so it is promoted — and rolled
     // back — with them; nothing is copied into the repo out of band.
     fs.cpSync(stageDir, publicDir, { recursive: true });
     report.file = writeInboxListing(cfg.repo, listing);
-    writeIndex(cfg.repo, { ...index, nextSeq: seqAfter(id), listings: { ...index.listings, [slug]: id } });
+    // Never wind the counter back: a replacement re-uses an id older than the newest one.
+    writeIndex(cfg.repo, { ...index, nextSeq: Math.max(Number(index.nextSeq) || 0, seqAfter(id)), listings: { ...index.listings, [slug]: id } });
     report.listing = listing;
 
     report.stage = 'rebuild';
