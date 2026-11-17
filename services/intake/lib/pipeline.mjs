@@ -500,11 +500,13 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // it (prompt.md: a whole development is "from" its cheapest model) carries exactly this figure, `from`.
   const readModelPrices = Array.isArray(ai.models) ? ai.models.map((m) => m?.price).filter(isFigure) : [];
   const readLowest = readModelPrices.length ? Math.min(...readModelPrices) : null;
-  // The currency: the model prices are written and confirmed in the reading's `price.currency`, which
-  // is a reading only beside a price it read (model-prices.mjs modelPriceCurrency). When it is not one —
-  // or, on an enrichment, it is not the listing's own currency (the site prints every model price in
-  // `price.currency`) — the models keep no price, and none is checked: no figure is checked that will
-  // not be published. A figure the copy states is then an unconfirmed one (the guard below).
+  // The currency: the model prices are written and confirmed IN the reading's `price.currency`, which
+  // counts only when model-prices.mjs modelPriceCurrency establishes it — never for a property abroad
+  // (a country whose currency the site does not print), beside a price elsewhere, on request only in the
+  // country's own currency. When it is not established — or, on an enrichment, it is not the listing's
+  // own currency (the site prints every model price in `price.currency`) — the models keep no price, and
+  // none is checked: no figure is checked that will not be published. A figure the copy states is then
+  // an unconfirmed one (the guard below).
   let currencyDrop = null;
   let readingCurrency = null;
   if (modelFigures.length && !caption.price && !ownerPriceEdit) {
