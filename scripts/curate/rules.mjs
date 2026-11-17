@@ -190,7 +190,8 @@ export const FACT_ITEM_MAX = 80;
 /** Every field a published model may carry. Anything else — the AI's internal `evidence` above all — is refused. */
 export const MODEL_FIELDS = Object.freeze(['name', 'bedrooms', 'bathrooms', 'areaSqm', 'rooms', 'availability', 'price', 'subsidisedPrice', 'floorPlan']);
 
-const isFigure = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0;
+/** A price figure: a positive finite number. The ONE definition (services/intake/lib/model-prices.mjs imports it). */
+export const isFigure = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0;
 const absent = (v) => v === null || v === undefined;
 const fmt = (n) => (typeof n === 'number' ? n.toLocaleString('en-US') : String(n));
 /** The <slug> of a site-local /listings/<slug>/… path. */

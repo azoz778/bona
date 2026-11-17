@@ -190,10 +190,14 @@ Anything else in the group is ignored, silently.
   puts every model's figures in the text; a match cannot tell whose figure it is). One call per page
   covers every model on it (at most 3 at once, none started after a quota error); a cited page
   that was not rendered for the reading is rendered for this check (never one past the end of the
-  PDF). A brochure that would need more than `BONA_MAX_MODEL_PRICE_PAGES` pages checked gets no
-  model price at all and no call. A figure not confirmed is dropped (`model-price-not-printed`; the
-  reply says "try again later" when a render or a call failed rather than the brochure) and, like a
-  refused headline, may not stay in the copy. When any model keeps a price, the headline of a whole
+  PDF), and when that render fails its models are refused — never moved to another page by their
+  text, so the page cap holds. A brochure that would need more than `BONA_MAX_MODEL_PRICE_PAGES`
+  pages checked gets no model price at all and no call. A figure not confirmed is dropped
+  (`model-price-not-printed`) and, like a refused headline, may not stay in the copy. The reply
+  words the two cases apart: "could not be confirmed on the brochure's own pages" for a figure the
+  check did not find, "could not be completed (pages …) — try again later" for one whose render or
+  call failed. After a quota error no further call is made for the brochure — not for the headline
+  or its Sakani price either, which then say "could not be checked … try again later". When any model keeps a price, the headline of a whole
   development becomes the cheapest one, `from` (its period untouched), with the cheapest confirmed
   subsidised price as its Sakani line; a listing for one specific `unit` keeps its own headline
   checks; the owner's caption price drops every model price.

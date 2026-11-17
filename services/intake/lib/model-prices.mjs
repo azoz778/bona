@@ -6,17 +6,21 @@
 // brochure that prints a table of models carries every model's figures in its text layer, and a
 // match there cannot tell which model a figure belongs to — nor, on a Sakani page, which of the
 // two prices it is. The text is used only to find a page to look at when the model's own citation
-// names a page that was not rendered.
+// cannot be looked at and was never asked for (no citation, a page past the end of the PDF, or no
+// renderer): a model whose cited page was asked for and NOT delivered is not moved to another page
+// by its text — that could add pages past the cost bound, and the page its figure is on is the one
+// that failed — so its prices are refused as "could not be checked".
 //
 // One confirmation call per page, covering every model on it: a 12-model price table is one call,
 // not twelve; at most 3 run at once, none start after a quota error, and a brochure that would need
 // more than `maxPages` pages checked has every model price refused without a call. The render and
 // confirm functions are injected (pipeline.mjs passes renderPdfPages and claude.mjs
 // confirmModelPrices), so this module is pure logic and tested without a model.
+import { isFigure } from '../../../scripts/curate/rules.mjs';
 import { priceAppearsIn } from './price.mjs';
 
-/** A price figure: a positive finite number. */
-export const isFigure = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0;
+/** A price figure: a positive finite number. ONE definition, in scripts/curate/rules.mjs. */
+export { isFigure };
 
 /** At most this many pages are checked for one brochure (cfg.maxModelPricePages overrides it). */
 export const MAX_MODEL_PRICE_PAGES = 12;
@@ -48,30 +52,39 @@ function confirmed(answers, i, key) {
 /**
  * Which page each priced model is checked on, given the pages that can be looked at: its own
  * citation when that page is one of them, otherwise the first of them whose text carries one of
- * its figures. `byPage` maps a page to the items checked on it; `none` = indices with no page.
+ * its figures — unless its citation is one of the `lost` pages (asked for, not delivered): those
+ * models go to `lost`, never to another page. `byPage` maps a page to the items checked on it;
+ * `none` = indices with no page to look at; `lost` = indices whose cited page failed to render.
  */
-function assignPages(models, pages, texts) {
+function assignPages(models, pages, texts, lostPages = new Set()) {
   const have = new Set(pages);
   const byPage = new Map();
   const none = [];
+  const lost = [];
   for (const [i, m] of models.entries()) {
     if (!priced(m)) continue;
     const price = isFigure(m.price) ? m.price : null;
     const subsidisedPrice = isFigure(m.subsidisedPrice) ? m.subsidisedPrice : null;
-    const cited = Number.isInteger(m.evidence?.page) && have.has(m.evidence.page) ? m.evidence.page : null;
+    const citation = Number.isInteger(m.evidence?.page) ? m.evidence.page : null;
+    if (citation !== null && lostPages.has(citation)) { lost.push(i); continue; }
+    const cited = citation !== null && have.has(citation) ? citation : null;
     const page = cited ?? pages.find((p) => [price, subsidisedPrice].some((v) => v !== null && priceAppearsIn(texts[p - 1] ?? '', v)));
     if (page === undefined) { none.push(i); continue; }
     if (!byPage.has(page)) byPage.set(page, []);
     byPage.get(page).push({ i, name: m.name, price, subsidisedPrice });
   }
-  return { byPage, none };
+  return { byPage, none, lost };
 }
 
-/** What a confirm call said: an array of answers, or `{ answers, error, fatal }`. Anything else = no answers. */
+/**
+ * What a confirm call said: an array of answers, or `{ answers, error, fatal }`. Anything else = no
+ * answers. A call that reports an error has no answers, whatever it sent beside the error.
+ */
 function settle(got) {
   if (Array.isArray(got)) return { answers: got, error: null, fatal: false };
   if (got && typeof got === 'object' && Array.isArray(got.answers)) {
-    return { answers: got.answers, error: got.error ? String(got.error) : null, fatal: got.fatal === true };
+    const error = got.error ? String(got.error) : null;
+    return { answers: error ? [] : got.answers, error, fatal: got.fatal === true };
   }
   return { answers: [], error: null, fatal: false };
 }
@@ -106,34 +119,48 @@ async function pool(jobs, limit, worker) {
  * @param {number} [ctx.pageCount]                           pages in the PDF (a citation past it is never rendered)
  * @param {(pages:number[]) => Promise<Array<{page:number,abs:string}>>} [ctx.render]
  *   renders cited pages that are not in `pageImages` yet; a throw or a page it did not return costs
- *   only the models on those pages
+ *   only the models citing those pages — they are refused, never moved to another page by their text
  * @param {(arg:{page:number, abs:string, items:Array<{i:number,name:object,price:number|null,subsidisedPrice:number|null}>})
  *   => Promise<Array<{i:number,price:boolean,subsidisedPrice:boolean}> | {answers:Array, error?:string|null, fatal?:boolean}>} ctx.confirm
- *   one call per page; a throw counts as an error (fatal when the error says so)
+ *   one call per page; a throw counts as an error (fatal when the error says so); an error drops its answers
  * @param {number} [ctx.maxPages]     more pages to check than this -> every model price refused, nothing rendered, no call
  * @param {number} [ctx.concurrency]  page checks running at once
- * @returns {Promise<{models:Array<object>, refused:number[], calls:number, rendered:number[], unrendered:number[],
- *   failed:Array<{page:number,error:string}>, skipped:number[], tooMany:{pages:number,max:number}|null}>}
- *   `refused` lists every figure taken away (for the copy guard); `calls` = confirm calls made;
- *   `rendered` / `unrendered` = cited pages the render did / did not deliver; `failed` = pages whose
- *   check errored; `skipped` = pages never checked after a fatal error.
+ * @returns {Promise<{models:Array<object>, refused:number[], incomplete:number[], incompletePages:number[], calls:number,
+ *   rendered:number[], unrendered:number[], failed:Array<{page:number,error:string}>, skipped:number[], fatal:boolean,
+ *   tooMany:{pages:number,max:number}|null}>}
+ *   `refused` lists every figure taken away (for the copy guard); `incomplete` = the refused figures
+ *   whose check could not be done (their page did not render, its call failed, or it was never sent
+ *   after a quota error) — the rest of `refused` were looked at and not found, or had no page to look
+ *   at; `incompletePages` = the pages of those figures; `calls` = confirm calls made; `rendered` /
+ *   `unrendered` = cited pages the render did / did not deliver; `failed` = pages whose check errored;
+ *   `skipped` = pages never checked after a fatal error; `fatal` = a call hit a quota or session limit,
+ *   so the caller's own checks would fail the same way.
  */
 export async function checkModelPrices(models, {
   pageImages = [], pageText = [], pageCount = Infinity, render = null, confirm, maxPages = MAX_MODEL_PRICE_PAGES, concurrency = 3,
 } = {}) {
   const out = structuredClone(Array.isArray(models) ? models : []);
   const refused = [];
-  const refuse = (m, key) => {
-    if (isFigure(m[key])) refused.push(m[key]);
+  const incomplete = [];
+  const incompletePages = new Set();
+  const refuse = (m, key, unchecked = null) => {
+    if (isFigure(m[key])) {
+      refused.push(m[key]);
+      if (unchecked !== null) { incomplete.push(m[key]); incompletePages.add(unchecked); }
+    }
     m[key] = null;
   };
-  const refuseModel = (i) => { refuse(out[i], 'price'); refuse(out[i], 'subsidisedPrice'); };
+  const refuseModel = (i, unchecked = null) => { refuse(out[i], 'price', unchecked); refuse(out[i], 'subsidisedPrice', unchecked); };
   const images = (Array.isArray(pageImages) ? pageImages : []).filter((p) => p && Number.isInteger(p.page));
   const texts = Array.isArray(pageText) ? pageText : [];
-  const res = { models: out, refused, calls: 0, rendered: [], unrendered: [], failed: [], skipped: [], tooMany: null };
+  const res = {
+    models: out, refused, incomplete, incompletePages: [], calls: 0, rendered: [], unrendered: [], failed: [], skipped: [], fatal: false, tooMany: null,
+  };
 
   // The cost bound comes first, counting the pages rendering would add: past it, nothing is
-  // rendered and no model is paid to look — every model price is refused.
+  // rendered and no model is paid to look — every model price is refused. The pages checked below
+  // are always among the pages counted here: a cited page that does not render takes its models
+  // out (assignPages `lost`), it never sends them to a page the count did not include.
   const toRender = typeof render === 'function' ? pagesToRenderFor(out, images.map((p) => p.page), pageCount) : [];
   const planned = assignPages(out, [...images.map((p) => p.page), ...toRender], texts).byPage.size;
   if (planned > maxPages) {
@@ -156,8 +183,9 @@ export async function checkModelPrices(models, {
     res.unrendered = toRender.filter((n) => !res.rendered.includes(n));
   }
 
-  const { byPage, none } = assignPages(out, images.map((p) => p.page), texts);
+  const { byPage, none, lost } = assignPages(out, images.map((p) => p.page), texts, new Set(res.unrendered));
   for (const i of none) refuseModel(i);
+  for (const i of lost) refuseModel(i, out[i].evidence.page);
   const jobs = [...byPage].map(([page, items]) => ({ page, abs: images.find((p) => p.page === page).abs, items }));
   const settled = await pool(jobs, concurrency, async (job) => {
     res.calls += 1;
@@ -171,11 +199,14 @@ export async function checkModelPrices(models, {
     const s = settled[k];
     if (!s) res.skipped.push(job.page);
     else if (s.error) res.failed.push({ page: job.page, error: s.error });
+    if (s?.fatal) res.fatal = true;
+    // A page never checked, or whose check failed, refuses its figures as "could not be checked".
+    const unchecked = !s || s.error ? job.page : null;
     const answers = s?.answers ?? [];
     for (const it of job.items) {
       const m = out[it.i];
-      if (it.price !== null && !confirmed(answers, it.i, 'price')) refuse(m, 'price');
-      if (it.subsidisedPrice !== null && !confirmed(answers, it.i, 'subsidisedPrice')) refuse(m, 'subsidisedPrice');
+      if (it.price !== null && !confirmed(answers, it.i, 'price')) refuse(m, 'price', unchecked);
+      if (it.subsidisedPrice !== null && !confirmed(answers, it.i, 'subsidisedPrice')) refuse(m, 'subsidisedPrice', unchecked);
     }
   });
 
@@ -184,12 +215,14 @@ export async function checkModelPrices(models, {
     if (!m || typeof m !== 'object' || (m.subsidisedPrice ?? null) === null) continue;
     if (!isFigure(m.price) || !isFigure(m.subsidisedPrice) || m.subsidisedPrice >= m.price) refuse(m, 'subsidisedPrice');
   }
+  res.incompletePages = [...incompletePages].sort((a, b) => a - b);
   return res;
 }
 
 /**
  * The headline price of a development sold as unit models = its cheapest confirmed model, quoted
- * "from"; its Sakani price = the cheapest confirmed subsidised model price, when below that.
+ * "from"; its Sakani price = the cheapest confirmed subsidised model price, when below that. Only a
+ * subsidised price below its OWN model's price counts (the rule rules.mjs modelsProblems applies).
  * Mutates and returns `price`. When no model kept a price, `price` is left exactly as it was. The
  * period is never touched: a rent read "per month" stays monthly. For a whole development only —
  * the caller skips this for one specific unit (`listing.unit`).
@@ -198,7 +231,7 @@ export function alignHeadline(price, models) {
   const list = Array.isArray(models) ? models : [];
   const prices = list.map((m) => m?.price).filter(isFigure);
   if (!price || !prices.length) return price;
-  const subs = list.map((m) => m?.subsidisedPrice).filter(isFigure);
+  const subs = list.filter((m) => isFigure(m?.price) && isFigure(m?.subsidisedPrice) && m.subsidisedPrice < m.price).map((m) => m.subsidisedPrice);
   price.amount = Math.min(...prices);
   price.from = true;
   price.onRequest = false;

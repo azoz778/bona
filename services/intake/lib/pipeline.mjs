@@ -352,10 +352,15 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // The "a price for one of its unit models counts" allowance is for a whole development quoted
   // "from" its cheapest model — never for one specific unit, and never for a price not marked `from`.
   const wholeDevelopment = Boolean(ai.listing?.project) && !ai.listing?.unit && price?.from === true;
+  // Set by the first second-model call that hits a quota or session limit (the unit-model check, or
+  // a printed() call below): every later call would fail the same way, so none is made, and what
+  // could not be checked is worded "try again later" — the brochure is not blamed for our quota.
+  let quotaHit = false;
   /**
    * Is `amount` printed as THIS price? In the plain text layer (headline only), or — confirmed by a
    * second model — on a rendered page. Evidence the model forgot is looked for in the rendered
-   * pages' text, so a price it read from the text layer is still checked on its page.
+   * pages' text, so a price it read from the text layer is still checked on its page. After a quota
+   * error no call is made: `unchecked: true`, never confirmed.
    */
   const printed = async (amount, evidence, { subsidised = false } = {}) => {
     const out = { inText: subsidised ? false : priceAppearsIn(haystack, amount), confirmed: null };
@@ -369,6 +374,10 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     })();
     const page = cited && pageImages.find((p) => p.page === cited.page);
     if (!page) return out;
+    if (quotaHit) {
+      log.info('intake.price_evidence_skipped', { page: cited.page, subsidised, reason: 'quota' });
+      return { ...out, unchecked: true };
+    }
     const check = await confirmPriceEvidence({
       pageImage: page.abs,
       amount,
@@ -385,7 +394,11 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       settingsPath: confinement.file,
     });
     out.confirmed = check.confirmed;
-    log.info('intake.price_evidence', { page: cited.page, subsidised, inferred: cited !== evidence, confirmed: check.confirmed, error: check.error ?? null });
+    log.info('intake.price_evidence', { page: cited.page, subsidised, inferred: cited !== evidence, confirmed: check.confirmed, error: check.error ?? null, fatal: check.fatal === true });
+    if (check.fatal) {
+      quotaHit = true;
+      return { ...out, unchecked: true };
+    }
     return out;
   };
   const rejectedPrices = [];
@@ -417,8 +430,8 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       pageCount: Number(extraction.pages),
       maxPages: cfg.maxModelPricePages,
       // A page a model's evidence cites that was not rendered for the reading is rendered now, so
-      // the second model can look at it. A failed render — or a throw — costs those models their
-      // prices, not the run.
+      // the second model can look at it. A failed render — or a throw — costs the models citing
+      // those pages their prices ("try again later"), not the run: they are not moved to another page.
       render: async (pages) => {
         try {
           const more = await renderPdfPages(pdfPath, workDir, {
@@ -453,19 +466,26 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     });
     ai.models = mp.models;
     rejectedPrices.push(...mp.refused);
-    // Pages whose models could not be checked for a reason that is ours, not the brochure's: the
-    // render failed, the second model's call failed, or nothing more was sent after a quota error.
-    const incompletePages = [...new Set([...mp.unrendered, ...mp.failed.map((f) => f.page), ...mp.skipped])].sort((a, b) => a - b);
-    report.modelPrices = { models: ai.models.length, calls: mp.calls, refused: mp.refused, incompletePages, tooMany: mp.tooMany };
-    log.info('intake.model_prices', { models: ai.models.length, calls: mp.calls, refused: mp.refused.length, incompletePages, tooMany: mp.tooMany });
+    if (mp.fatal) quotaHit = true;
+    // Two kinds of refusal, two warnings. `mp.incomplete`: figures whose check could not be done for
+    // a reason that is ours, not the brochure's — their page did not render, the second model's call
+    // failed, or nothing more was sent after a quota error ("try again later"). The rest of
+    // `mp.refused` were looked at and not found printed, or had no page to look at.
+    const { incomplete, incompletePages } = mp;
+    const notPrinted = mp.refused.length - incomplete.length;
+    report.modelPrices = { models: ai.models.length, calls: mp.calls, refused: mp.refused, incomplete, incompletePages, fatal: mp.fatal, tooMany: mp.tooMany };
+    log.info('intake.model_prices', { models: ai.models.length, calls: mp.calls, refused: mp.refused.length, incomplete: incomplete.length, incompletePages, fatal: mp.fatal, tooMany: mp.tooMany });
     if (mp.refused.length) {
       report.warningCodes.push('model-price-not-printed');
       if (mp.tooMany) {
         report.warnings.push(`the brochure prices its unit models on too many pages to check (${mp.tooMany.pages}; at most ${mp.tooMany.max} are looked at), so no unit-model price was published — the models show without them`);
-      } else if (incompletePages.length) {
-        report.warnings.push(`the check of the unit-model prices could not be completed (page${incompletePages.length === 1 ? '' : 's'} ${incompletePages.join(', ')}), so ${mp.refused.length} price(s) were left off for now — try again later`);
       } else {
-        report.warnings.push(`${mp.refused.length} unit-model price(s) could not be confirmed on the brochure's own pages, so they were left off — the models show without them`);
+        if (notPrinted > 0) {
+          report.warnings.push(`${notPrinted} unit-model price(s) could not be confirmed on the brochure's own pages, so they were left off — the models show without them`);
+        }
+        if (incomplete.length) {
+          report.warnings.push(`the check of ${incomplete.length} unit-model price(s) could not be completed (page${incompletePages.length === 1 ? '' : 's'} ${incompletePages.join(', ')}), so they were left off for now — try again later`);
+        }
       }
     }
     // "From the cheapest model" is the price of a whole development: one specific unit keeps its
@@ -495,13 +515,15 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   if (!headlineFromModels && !caption.price && price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0) {
     report.priceEvidence = await printed(price.amount, ai.priceEvidence);
     if (!report.priceEvidence.inText && !report.priceEvidence.confirmed) {
-      log.warn('intake.price_unevidenced', { amount: price.amount, currency: price.currency });
+      log.warn('intake.price_unevidenced', { amount: price.amount, currency: price.currency, unchecked: report.priceEvidence.unchecked === true });
       rejectedPrices.push(price.amount);
       price.amount = null;
       price.onRequest = true;
       price.from = false;
       report.warningCodes.push('price-not-printed');
-      report.warnings.push('the price was not printed in the brochure, so the listing says "price on request" — send `price <id> <amount>` to set one');
+      report.warnings.push(report.priceEvidence.unchecked
+        ? 'the price could not be checked on the brochure (the AI quota ran out), so the listing says "price on request" for now — try again later, or send `price <id> <amount>` to set one'
+        : 'the price was not printed in the brochure, so the listing says "price on request" — send `price <id> <amount>` to set one');
     }
   }
   // The subsidised (Sakani) price rides on the headline price: it is published only beside a
@@ -516,9 +538,11 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     report.subsidisedPriceEvidence = evidence;
     if (!evidence?.confirmed) {
       if (headline) {
-        log.warn('intake.subsidised_price_unevidenced', { amount: price.subsidisedAmount, currency: price.currency });
+        log.warn('intake.subsidised_price_unevidenced', { amount: price.subsidisedAmount, currency: price.currency, unchecked: evidence?.unchecked === true });
         report.warningCodes.push('subsidised-price-not-printed');
-        report.warnings.push('the subsidised (Sakani) price could not be confirmed on the brochure, so only the regular price is shown');
+        report.warnings.push(evidence?.unchecked
+          ? 'the subsidised (Sakani) price could not be checked on the brochure (the AI quota ran out), so only the regular price is shown for now — try again later'
+          : 'the subsidised (Sakani) price could not be confirmed on the brochure, so only the regular price is shown');
       }
       if (price.subsidisedAmount > 0) rejectedPrices.push(price.subsidisedAmount);
       price.subsidisedAmount = null;

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  buildPrompt, confirmModelPrices, copyProblems, FENCE, HYPE_WORDS, PROMPT_TEMPLATE, ROOM_KEYS, runListingAi, validateAiResult,
+  buildPrompt, confirmModelPrices, confirmPriceEvidence, copyProblems, FENCE, HYPE_WORDS, PROMPT_TEMPLATE, ROOM_KEYS, runListingAi, validateAiResult,
 } from '../lib/claude.mjs';
 import { ORDINARY_COPY } from '../../../scripts/test/ordinary-copy-fixture.mjs';
 
@@ -647,3 +647,26 @@ describe('confirmModelPrices', () => {
   });
 });
 
+describe('confirmPriceEvidence', () => {
+  const opts = { pageImage: '/work/price-pages/p3.jpg', amount: 319015, currency: 'SAR', quote: '319,015', cwd: '/tmp', model: 'opus' };
+
+  it('confirms only a well-formed true', async () => {
+    assert.deepEqual(await confirmPriceEvidence({ ...opts, spawnImpl: fakeSpawn([{ envelope: envelope({ confirmed: true }) }]).spawnImpl }), { confirmed: true });
+    assert.deepEqual(await confirmPriceEvidence({ ...opts, spawnImpl: fakeSpawn([{ envelope: envelope({ confirmed: 'yes' }) }]).spawnImpl }), { confirmed: false });
+  });
+
+  it('says when the error is a quota or session limit, so the pipeline makes no more calls', async () => {
+    const f = fakeSpawn([{ code: 1, envelope: { is_error: true, api_error_status: 429, result: "You've hit your session limit · resets 1am" } }]);
+    const got = await confirmPriceEvidence({ ...opts, spawnImpl: f.spawnImpl });
+    assert.equal(got.confirmed, false);
+    assert.match(got.error, /session limit/);
+    assert.equal(got.fatal, true);
+  });
+
+  it('an ordinary failure is not fatal', async () => {
+    const got = await confirmPriceEvidence({ ...opts, spawnImpl: fakeSpawn([{ code: 1, envelope: { is_error: true, result: 'boom' } }]).spawnImpl });
+    assert.equal(got.confirmed, false);
+    assert.match(got.error, /boom/);
+    assert.equal(got.fatal, false);
+  });
+});

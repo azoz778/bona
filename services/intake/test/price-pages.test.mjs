@@ -161,6 +161,10 @@ if (prompt.includes('For each numbered model')) {
   const subsidised = /VISIBLY PRINT the price for housing-subsidy/.test(prompt);
   fs.appendFileSync(log, JSON.stringify({ tool: 'claude-confirm', amount, subsidised, page: Number((prompt.match(/\\/p(\\d+)\\.jpg/) || [])[1]), project: /unit models/.test(prompt), mirror: /only the price for everyone else counts/.test(prompt),
     subject: (prompt.match(/listing this price is for[^\\n]*\\n([^\\n]*)/) || [])[1] ?? null }) + '\\n');
+  if (cfg.confirmFail === 'quota') {
+    process.stdout.write(JSON.stringify({ is_error: true, api_error_status: 429, result: "You've hit your session limit" }));
+    process.exit(1);
+  }
   answer = { confirmed: ((subsidised ? cfg.confirmSub : null) ?? cfg.confirm ?? []).includes(amount) };
 } else {
   fs.appendFileSync(log, JSON.stringify({ tool: 'claude-listing', prompt }) + '\\n');
@@ -195,14 +199,14 @@ const answer = ({ price, priceEvidence = null, subsidisedPriceEvidence = null, u
 const PRICE = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
 const BROCHURE = ['مشروع سكني — شقق بغرفتي نوم وثلاث غرف نوم في حي الحمدانية', LOCATION_PAGE, PRICE_PAGE, 'غرفة نوم 03', PRICE_PAGE];
 
-async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, modelConfirm = null, modelConfirmFail = null, failPageDir = null, broken = [], cfgExtra = {}, build = '' }) {
+async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, confirmFail = null, modelConfirm = null, modelConfirmFail = null, failPageDir = null, broken = [], cfgExtra = {}, build = '' }) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bona-price-pages-')));
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
   const photo = path.join(bin, 'photo.jpg');
   const sharp = (await import('sharp')).default;
   await sharp({ create: { width: 1200, height: 900, channels: 3, background: '#4a6b8a' } }).jpeg().toFile(photo);
-  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, modelConfirm, modelConfirmFail, failPageDir, broken }));
+  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, confirmFail, modelConfirm, modelConfirmFail, failPageDir, broken }));
   fs.writeFileSync(path.join(bin, 'fake-py.mjs'), FAKE_PY);
   fs.writeFileSync(path.join(bin, 'fake-claude.mjs'), FAKE_CLAUDE);
   const claude = path.join(bin, 'claude');
@@ -821,7 +825,7 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       assert.deepEqual(report.ai.models.map((m) => [m.price, m.subsidisedPrice]), [[419994, 356024], [319015, 270425]]);
       assert.equal(r.calls().filter((c) => c.tool === 'claude-confirm').length, 0, 'the headline is the confirmed model figure: no second check');
       assert.ok(!report.warningCodes.includes('model-price-not-printed'));
-      assert.deepEqual(report.modelPrices, { models: 2, calls: 1, refused: [], incompletePages: [], tooMany: null });
+      assert.deepEqual(report.modelPrices, { models: 2, calls: 1, refused: [], incomplete: [], incompletePages: [], fatal: false, tooMany: null });
       assert.deepEqual(report.priceEvidence, { inText: false, confirmed: true, fromModels: true }, 'the { inText, confirmed } shape stays');
     } finally { r.cleanup(); }
   });
@@ -956,6 +960,73 @@ describe('processPdf: unit-model prices — failures, bounds and the headline fa
       assert.deepEqual(report.ai.models.map((m) => m.price), [null, null]);
       assert.deepEqual(report.modelPrices.incompletePages, [3, 5]);
       assert.ok(report.warnings.some((w) => /could not be completed/.test(w)));
+    } finally { r.cleanup(); }
+  });
+
+  it('a refusal and a check that could not be done get separate warnings', async () => {
+    const r = await rig({
+      listing: withModels([model('Nawras', 419994, null, 3), model('Lulu', 319015, null, 3), model('Corner', 299000, null, 2)]),
+      modelConfirm: [319015], failPageDir: 'model-pages',
+    });
+    try {
+      const report = await r.run();
+      assert.deepEqual(report.ai.models.map((m) => m.price), [null, 319015, null]);
+      assert.deepEqual(report.modelPrices.incompletePages, [2]);
+      assert.deepEqual(report.modelPrices.incomplete, [299000]);
+      assert.ok(report.warnings.some((w) => /^1 unit-model price\(s\) could not be confirmed on the brochure's own pages/.test(w)), report.warnings.join(' | '));
+      const later = report.warnings.filter((w) => /try again later/.test(w));
+      assert.equal(later.length, 1, report.warnings.join(' | '));
+      assert.match(later[0], /the check of 1 unit-model price\(s\) could not be completed \(page 2\)/);
+    } finally { r.cleanup(); }
+  });
+
+  it('after a quota error in the model check, the headline and Sakani checks make no call and say "try again later"', async () => {
+    const r = await rig({
+      listing: withModels([model('Lulu', 319015, 270425, 3)], { price: PRICE, priceEvidence: { page: 3, quote: '319,015' }, subsidisedPriceEvidence: { page: 3, quote: '270,425' } }),
+      modelConfirmFail: 'quota', confirm: [319015, 270425],
+    });
+    try {
+      const report = await r.run();
+      assert.equal(modelCalls(r).length, 1);
+      assert.equal(r.calls().filter((c) => c.tool === 'claude-confirm').length, 0, 'no call after a quota error');
+      assert.equal(report.modelPrices.fatal, true);
+      assert.equal(report.listingPreview.price.onRequest, true);
+      assert.equal(report.listingPreview.price.amount, null);
+      assert.deepEqual(report.priceEvidence, { inText: false, confirmed: null, unchecked: true });
+      assert.ok(report.warnings.some((w) => /^the price could not be checked/.test(w) && /try again later/.test(w)), report.warnings.join(' | '));
+      assert.ok(!report.warnings.some((w) => /was not printed in the brochure/.test(w)), 'the brochure is not blamed');
+    } finally { r.cleanup(); }
+  });
+
+  it('a quota error on the headline check stops the Sakani check too', async () => {
+    const r = await rig({
+      listing: answer({ price: PRICE, priceEvidence: { page: 3, quote: '319,015' }, subsidisedPriceEvidence: { page: 3, quote: '270,425' } }),
+      confirmFail: 'quota',
+    });
+    try {
+      const report = await r.run();
+      assert.deepEqual(r.calls().filter((c) => c.tool === 'claude-confirm').map((c) => c.amount), [319015], 'the Sakani check is never sent');
+      assert.equal(report.listingPreview.price.onRequest, true);
+      assert.ok(report.warnings.some((w) => /^the price could not be checked/.test(w) && /try again later/.test(w)), report.warnings.join(' | '));
+      assert.ok(!report.warnings.some((w) => /was not printed in the brochure/.test(w)));
+    } finally { r.cleanup(); }
+  });
+
+  it('after a quota error, a headline found in the text layer stays and the Sakani price says "try again later"', async () => {
+    const PAD = ' — شقة سكنية بمساحة واسعة وتشطيبات حديثة في موقع مميز قريب من الخدمات';
+    const pageText = [`مشروع سكني من 319,015 ريال${PAD}`, `السعر لمستفيدي الدعم 270,425 ريال\nالسعر لغير مستفيدي الدعم 319,015 ريال\n${PAD}`];
+    const r = await rig({
+      pageText,
+      listing: withModels([model('Lulu', 319015, 270425, 2)], { price: PRICE, subsidisedPriceEvidence: { page: 2, quote: '270,425' } }),
+      modelConfirmFail: 'quota', confirm: [319015, 270425],
+    });
+    try {
+      const report = await r.run();
+      assert.equal(r.calls().filter((c) => c.tool === 'claude-confirm').length, 0);
+      assert.equal(report.listingPreview.price.amount, 319015, 'printed in the text layer: no call needed');
+      assert.equal(report.listingPreview.price.subsidisedAmount ?? null, null);
+      assert.ok(report.warningCodes.includes('subsidised-price-not-printed'));
+      assert.ok(report.warnings.some((w) => /Sakani\) price could not be checked/.test(w) && /try again later/.test(w)), report.warnings.join(' | '));
     } finally { r.cleanup(); }
   });
 

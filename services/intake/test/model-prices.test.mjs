@@ -4,6 +4,7 @@
 // model a figure belongs to.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { isFigure as rulesIsFigure } from '../../../scripts/curate/rules.mjs';
 import { alignHeadline, checkModelPrices, isFigure, MAX_MODEL_PRICE_PAGES, pagesToRenderFor } from '../lib/model-prices.mjs';
 
 const pages = [{ page: 9, abs: '/x/p9.jpg' }, { page: 10, abs: '/x/p10.jpg' }];
@@ -121,6 +122,7 @@ describe('checkModelPrices', () => {
     assert.deepEqual(res.models, [M('A', null, null, null)]);
     const none = await checkModelPrices(undefined, { pageImages: pages, pageText: [], confirm: async () => [] });
     assert.deepEqual([none.models, none.refused, none.calls, none.rendered, none.unrendered, none.failed, none.skipped, none.tooMany], [[], [], 0, [], [], [], [], null]);
+    assert.deepEqual([none.incomplete, none.incompletePages, none.fatal], [[], [], false]);
   });
 
   it('never mutates its input', async () => {
@@ -151,6 +153,16 @@ describe('alignHeadline', () => {
     assert.equal('subsidisedAmount' in b, false);
   });
 
+  it('takes a Sakani price only from a model whose own price it is below', () => {
+    const a = { amount: 1, currency: 'SAR', from: false, period: null, onRequest: false };
+    alignHeadline(a, [{ ...M('A', null, 250000) }, M('B', 300000, null), { ...M('C', 400000, 420000) }]);
+    assert.equal(a.amount, 300000);
+    assert.equal('subsidisedAmount' in a, false, 'A has no price of its own, C\'s is above its own price');
+    const b = { amount: 1, currency: 'SAR', from: false, period: null, onRequest: false };
+    alignHeadline(b, [{ ...M('A', null, 250000) }, M('B', 300000, 270000)]);
+    assert.equal(b.subsidisedAmount, 270000);
+  });
+
   it('leaves the headline alone when no model kept a price', () => {
     const price = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true, subsidisedAmount: 270425 };
     const before = structuredClone(price);
@@ -162,6 +174,9 @@ describe('alignHeadline', () => {
 });
 
 describe('isFigure', () => {
+  it('is the one definition in scripts/curate/rules.mjs', () => {
+    assert.equal(isFigure, rulesIsFigure);
+  });
   it('is a positive finite number, nothing else', () => {
     for (const v of [1, 319015, 0.5]) assert.equal(isFigure(v), true, String(v));
     for (const v of [0, -1, NaN, Infinity, '319015', null, undefined, {}]) assert.equal(isFigure(v), false, String(v));
@@ -210,7 +225,42 @@ describe('checkModelPrices: rendering cited pages', () => {
       assert.deepEqual(res.refused, [299000]);
       assert.deepEqual(res.rendered, []);
       assert.deepEqual(res.unrendered, [2], 'reported: the check could not look at it');
+      assert.deepEqual(res.incomplete, [299000], 'refused because the check could not be done, not because the page said no');
+      assert.deepEqual(res.incompletePages, [2]);
     }
+  });
+
+  it('a model whose cited page did not render is never moved to another page by its text (the page cap holds)', async () => {
+    // The reviewer's probe: one page allowed, three models cite page 7, the render throws, and pages
+    // 1-3 (rendered for the reading) carry the three figures in their text. Falling back to them
+    // would check three pages under a cap of one.
+    const pageImages = [1, 2, 3].map((page) => ({ page, abs: `/x/p${page}.jpg` }));
+    const pageText = ['A — 300,000', 'B — 310,000', 'C — 320,000', '', '', '', '', ''];
+    for (const render of [async () => { throw new Error('extract_pdf.py timed out'); }, async () => [], async () => null]) {
+      const calls = [];
+      const res = await checkModelPrices([M('A', 300000, null, 7), M('B', 310000, null, 7), M('C', 320000, null, 7)], {
+        pageImages, pageText, pageCount: 8, maxPages: 1, render, confirm: allBut(calls),
+      });
+      assert.equal(res.tooMany, null, 'one page planned: within the cap');
+      assert.equal(calls.length, 0, 'no confirm call at all');
+      assert.equal(res.calls, 0);
+      assert.deepEqual(res.models.map((m) => m.price), [null, null, null]);
+      assert.deepEqual(res.refused, [300000, 310000, 320000]);
+      assert.deepEqual(res.incomplete, [300000, 310000, 320000]);
+      assert.deepEqual(res.incompletePages, [7]);
+      assert.deepEqual(res.unrendered, [7]);
+    }
+  });
+
+  it('a model with no usable citation may still be checked on a rendered page whose text carries its figure', async () => {
+    const calls = [];
+    const pageText = ['', 'B — 310,000'];
+    const res = await checkModelPrices([M('A', 300000, null, 7), M('B', 310000, null, null)], {
+      pageImages: [{ page: 2, abs: '/x/p2.jpg' }], pageText, pageCount: 8, render: async () => [], confirm: allBut(calls),
+    });
+    assert.deepEqual(calls.map((c) => [c.page, c.items.map((it) => it.i)]), [[2, [1]]]);
+    assert.deepEqual(res.models.map((m) => m.price), [null, 310000]);
+    assert.deepEqual(res.incomplete, [300000]);
   });
 
   it('a page the render did not ask for is not used', async () => {
@@ -296,6 +346,9 @@ describe('checkModelPrices: cost bounds', () => {
     assert.deepEqual(res.models.map((m) => m.price), [null, 300001, 300002, null, null, null]);
     assert.deepEqual(res.failed, [{ page: 1, error: "claude -p failed: You've hit your session limit" }]);
     assert.deepEqual(res.skipped, [4, 5, 6]);
+    assert.equal(res.fatal, true, 'carried out, so the caller makes no more calls either');
+    assert.deepEqual(res.incomplete, [300000, 300003, 300004, 300005]);
+    assert.deepEqual(res.incompletePages, [1, 4, 5, 6]);
   });
 
   it('a fatal error reported as { answers, error, fatal } stops it the same way', async () => {
@@ -324,5 +377,34 @@ describe('checkModelPrices: cost bounds', () => {
     assert.deepEqual(res.failed, [{ page: 1, error: 'claude -p exited 1: boom' }]);
     assert.deepEqual(res.skipped, []);
     assert.deepEqual(res.models.map((m) => m.price), [null, 300001, 300002, 300003]);
+    assert.equal(res.fatal, false);
+    assert.deepEqual(res.incomplete, [300000]);
+    assert.deepEqual(res.incompletePages, [1]);
+  });
+
+  it('answers sent beside an error are dropped: a failed call confirms nothing', async () => {
+    const confirm = async ({ items }) => ({ answers: items.map((it) => ({ i: it.i, price: true, subsidisedPrice: true })), error: 'claude -p exited 1: half an answer' });
+    const res = await checkModelPrices([M('A', 319015, 270425, 9)], { pageImages: pages, pageText: [], confirm });
+    assert.deepEqual(res.models.map((m) => [m.price, m.subsidisedPrice]), [[null, null]]);
+    assert.deepEqual(res.failed, [{ page: 9, error: 'claude -p exited 1: half an answer' }]);
+    assert.deepEqual(res.incomplete.sort(), [270425, 319015]);
+  });
+
+  it('a page that said no, or a model with no page at all, is a genuine refusal, not an incomplete check', async () => {
+    const res = await checkModelPrices([M('A', 319015, null, 9), M('B', 999999, null, 9), M('C', 288000, null, 99)], {
+      pageImages: pages, pageText: [], pageCount: 12, render: async () => [], confirm: allBut([], 999999),
+    });
+    assert.deepEqual(res.models.map((m) => m.price), [319015, null, null]);
+    assert.deepEqual(res.refused.sort(), [288000, 999999]);
+    assert.deepEqual(res.incomplete, []);
+    assert.deepEqual(res.incompletePages, []);
+    assert.equal(res.fatal, false);
+  });
+
+  it('too many pages is a refusal by rule, not an incomplete check', async () => {
+    const res = await checkModelPrices(many(4), { pageImages: rendered(4), pageText: [], maxPages: 3, confirm: allBut([]) });
+    assert.ok(res.tooMany);
+    assert.equal(res.refused.length, 4);
+    assert.deepEqual(res.incomplete, []);
   });
 });

@@ -386,7 +386,9 @@ export function validateAiResult(result, { candidateCount = 0, candidates = null
  * Second opinion on ONE page render: is the price the model claimed actually printed there?
  * Used only for brochures with no text layer, where nothing local can corroborate a number
  * and TAQEEM says we may not publish one we cannot see.
- * @returns {Promise<{confirmed:boolean, error?:string}>}
+ * @returns {Promise<{confirmed:boolean, error?:string, fatal?:boolean}>} on a failed call: not
+ *   confirmed, the error message, and `fatal` when it was a quota or session limit (runClaudeOnce) —
+ *   the pipeline then makes no more calls for this brochure
  */
 export async function confirmPriceEvidence({
   pageImage, amount, currency, quote, subsidised = false, project = false, subject = null, unit = null, bin = 'claude', model = 'sonnet', cwd,
@@ -424,7 +426,7 @@ export async function confirmPriceEvidence({
     const { result } = await runClaudeOnce({ prompt, cwd, model, bin, addDirs, settingsPath, timeoutMs, spawnImpl });
     return { confirmed: result?.confirmed === true };
   } catch (err) {
-    return { confirmed: false, error: err.message };
+    return { confirmed: false, error: String(err?.message || err), fatal: err?.fatal === true };
   }
 }
 

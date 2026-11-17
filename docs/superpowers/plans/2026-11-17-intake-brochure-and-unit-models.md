@@ -214,125 +214,92 @@ and in `describe('copyProblems')`: a model name containing a phone number and an
 
 **Files:** Create `services/intake/lib/model-prices.mjs`; Modify `services/intake/lib/claude.mjs` (add `confirmModelPrices`), `services/intake/lib/pipeline.mjs` (call it in stage `price`, before the existing headline checks); Test: `services/intake/test/model-prices.test.mjs` (create), plus 2 end-to-end cases in `test/price-pages.test.mjs`.
 
-- [ ] **Step 1: Failing unit tests** (pure logic, confirm function injected):
+- [ ] **Step 1: Failing unit tests** (pure logic, render and confirm functions injected). As shipped
+  (the first draft of this step had a text-layer shortcut and a `period` reset; both were dropped in
+  review — a price table puts every model's figures in the text layer, so a match there cannot tell
+  whose figure it is):
 
 ```js
-// services/intake/test/model-prices.test.mjs
-import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
-import { checkModelPrices, alignHeadline } from '../lib/model-prices.mjs';
+// services/intake/test/model-prices.test.mjs (excerpt; the file has the full set)
+import { alignHeadline, checkModelPrices, isFigure, MAX_MODEL_PRICE_PAGES, pagesToRenderFor } from '../lib/model-prices.mjs';
 
 const pages = [{ page: 9, abs: '/x/p9.jpg' }, { page: 10, abs: '/x/p10.jpg' }];
-const M = (name, price, sub, page) => ({ name: { en: name, ar: name }, price, subsidisedPrice: sub, evidence: page ? { page, quote: String(price) } : null });
+const M = (name, price, sub, page) => ({ name: { en: name, ar: `نموذج ${name}` }, price, subsidisedPrice: sub, evidence: page ? { page, quote: String(price) } : null });
+const allBut = (calls, ...no) => async ({ page, abs, items }) => {
+  calls.push({ page, abs, items });
+  return items.map((it) => ({ i: it.i, price: !no.includes(it.price), subsidisedPrice: !no.includes(it.subsidisedPrice) }));
+};
 
-describe('checkModelPrices', () => {
-  it('confirms all figures of one page in ONE call and nulls the refused ones', async () => {
-    const calls = [];
-    const confirm = async ({ page, items }) => { calls.push(page); return items.map((it) => ({ ...it, price: it.price !== 999, subsidisedPrice: true })); };
-    const models = [M('A', 319015, 270425, 9), M('B', 999, null, 9), M('C', 419994, 356024, 10)];
-    const res = await checkModelPrices(models, { plainText: '', pageImages: pages, pageText: [], confirm });
-    assert.deepEqual(calls.sort(), [10, 9].sort());                  // one call per page
-    assert.equal(res.models[1].price, null);                          // refused -> null
-    assert.equal(res.models[0].price, 319015);
-    assert.deepEqual(res.refused, [999]);
-  });
-  it('accepts a headline-type figure from the plain text without a call; never a subsidised one', async () => {
-    let n = 0; const confirm = async ({ items }) => { n += 1; return items.map((it) => ({ ...it, price: false, subsidisedPrice: false })); };
-    const res = await checkModelPrices([M('A', 319015, 270425, 9)], { plainText: 'Lulu 2 319,015 SAR', pageImages: pages, pageText: [], confirm });
-    assert.equal(res.models[0].price, 319015);
-    assert.equal(res.models[0].subsidisedPrice, null);
-    assert.equal(n, 1);
-  });
-  it('a figure whose page was not rendered and is not in the text is refused', async () => {
-    const res = await checkModelPrices([M('A', 319015, null, 4)], { plainText: '', pageImages: pages, pageText: [], confirm: async () => [] });
-    assert.equal(res.models[0].price, null);
-  });
+it('checks every model on one page in ONE call (3 models over 2 pages -> 2 calls)', async () => { /* … */ });
+it('a text-layer match alone does NOT confirm: the page check still runs and a "no" refuses', async () => { /* … */ });
+it('renders the cited pages that are missing and checks each model on its own page', async () => { /* … */ });
+it('a model whose cited page did not render is never moved to another page by its text (the page cap holds)', async () => {
+  // maxPages 1; three models cite page 7; the render throws; pages 1-3 carry the figures in their text.
+  // -> no confirm call, every figure refused, res.incomplete = all three, res.incompletePages = [7].
 });
-
-describe('alignHeadline', () => {
-  it('sets the headline from the lowest confirmed model prices', () => {
-    const price = { amount: 1, currency: 'SAR', from: false, period: null, onRequest: true };
-    alignHeadline(price, [M('A', 419994, 356024), M('B', 319015, 270425), M('C', null, null)]);
-    assert.deepEqual(price, { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 });
-  });
-  it('leaves the headline alone when no model kept a price', () => {
-    const price = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true };
-    alignHeadline(price, [M('A', null, null)]);
-    assert.equal(price.onRequest, true);
-  });
-});
+it('more pages than allowed: every model price refused, no render, no call', async () => { /* res.tooMany = { pages, max } */ });
+it('runs at most 3 page checks at once and keeps every page\'s answers with its own models', async () => { /* … */ });
+it('stops launching page checks after a fatal error (quota, session limit); the rest are refused', async () => { /* res.fatal, res.skipped */ });
+it('answers sent beside an error are dropped: a failed call confirms nothing', async () => { /* … */ });
+it('takes a Sakani price only from a model whose own price it is below', () => { /* alignHeadline */ });
 ```
 
 - [ ] **Step 2: Run — expect FAIL** (module missing).
-- [ ] **Step 3: Implement `model-prices.mjs`:**
+- [ ] **Step 3: Implement `model-prices.mjs`** (as shipped, condensed — the file carries the full comments):
 
 ```js
-// The TAQEEM rule for unit-model prices: a figure is published only when it is printed — in the
-// plain (non-subsidy) text layer for a regular price, or confirmed on its page image by a second
-// model. One confirmation call per page, whatever the number of models on it.
+// TAQEEM for unit-model prices: a figure is published only when a second model, looking at the page
+// image, confirms that the page prints THAT figure FOR THAT model. No text-layer shortcut.
+import { isFigure } from '../../../scripts/curate/rules.mjs'; // the one definition
 import { priceAppearsIn } from './price.mjs';
 
-/**
- * @param {Array} models  ai.models (mutated copy returned)
- * @param {{plainText:string, pageImages:Array<{page:number,abs:string}>, pageText:string[],
- *          confirm:(arg:{page:number, abs:string, items:Array<{i:number,name:object,price:number|null,subsidisedPrice:number|null}>})=>Promise<Array<{i:number,price:boolean,subsidisedPrice:boolean}>>}} ctx
- * @returns {Promise<{models:Array, refused:number[], calls:number}>}
- */
-export async function checkModelPrices(models, { plainText, pageImages, pageText, confirm }) {
-  const out = structuredClone(models ?? []);
-  const refused = [];
-  const byPage = new Map();
-  for (const [i, m] of out.entries()) {
-    const wantsPrice = typeof m.price === 'number' && m.price > 0;
-    const wantsSub = typeof m.subsidisedPrice === 'number' && m.subsidisedPrice > 0;
-    if (!wantsPrice && !wantsSub) continue;
-    const priceInText = wantsPrice && priceAppearsIn(plainText, m.price);
-    const needs = { i, name: m.name, price: wantsPrice && !priceInText ? m.price : null, subsidisedPrice: wantsSub ? m.subsidisedPrice : null };
-    if (needs.price === null && needs.subsidisedPrice === null) continue;
-    const cited = m.evidence && pageImages.some((p) => p.page === m.evidence.page) ? m.evidence.page
-      : (pageImages.find((p) => [needs.price, needs.subsidisedPrice].some((v) => v && priceAppearsIn(pageText[p.page - 1] ?? '', v)))?.page ?? null);
-    if (cited === null) {
-      if (needs.price !== null) { refused.push(m.price); m.price = null; }
-      if (needs.subsidisedPrice !== null) { refused.push(m.subsidisedPrice); m.subsidisedPrice = null; }
-      continue;
-    }
-    if (!byPage.has(cited)) byPage.set(cited, []);
-    byPage.get(cited).push(needs);
-  }
-  let calls = 0;
-  for (const [page, items] of byPage) {
-    const abs = pageImages.find((p) => p.page === page).abs;
-    calls += 1;
-    let answers = [];
-    try { answers = await confirm({ page, abs, items }); } catch { answers = []; }
-    for (const it of items) {
-      const a = answers.find((x) => x.i === it.i) ?? { price: false, subsidisedPrice: false };
-      const m = out[it.i];
-      if (it.price !== null && a.price !== true) { refused.push(m.price); m.price = null; }
-      if (it.subsidisedPrice !== null && a.subsidisedPrice !== true) { refused.push(m.subsidisedPrice); m.subsidisedPrice = null; }
-    }
-  }
-  for (const m of out) if (m.subsidisedPrice !== null && (m.price === null || m.subsidisedPrice >= m.price)) { refused.push(m.subsidisedPrice); m.subsidisedPrice = null; }
-  return { models: out, refused, calls };
+export { isFigure };
+export const MAX_MODEL_PRICE_PAGES = 12; // cfg.maxModelPricePages (BONA_MAX_MODEL_PRICE_PAGES) overrides it
+
+/** Cited pages of priced models that are not rendered yet and are pages of the PDF (1..pageCount). */
+export function pagesToRenderFor(models, renderedPages = [], pageCount = Infinity) { /* sorted, each once */ }
+
+// assignPages(models, pages, texts, lostPages): a model is checked on its own cited page when that page
+// can be looked at; otherwise on the first page whose TEXT carries one of its figures (only to find a
+// page to look at — the text never confirms). A model whose cited page was asked for and not delivered
+// (`lostPages`) is NOT moved: it lands in `lost` and is refused as "could not be checked".
+// settle(got): an array of answers, or { answers, error, fatal }; an error drops the answers.
+// pool(jobs, limit, worker): at most `limit` at once; nothing new starts after a `fatal` result.
+
+export async function checkModelPrices(models, {
+  pageImages = [], pageText = [], pageCount = Infinity, render = null, confirm, maxPages = MAX_MODEL_PRICE_PAGES, concurrency = 3,
+} = {}) {
+  const out = structuredClone(Array.isArray(models) ? models : []);
+  // refuse(m, key, uncheckedPage?): figure -> null, pushed to `refused`; with a page, also to
+  // `incomplete` / `incompletePages` (the check could not be done: our failure, not the brochure's).
+  const res = { models: out, refused, incomplete, incompletePages: [], calls: 0, rendered: [], unrendered: [], failed: [], skipped: [], fatal: false, tooMany: null };
+
+  // 1. The cost bound first, counting the pages rendering would add. Past it: every model price
+  //    refused, nothing rendered, no call.
+  const toRender = typeof render === 'function' ? pagesToRenderFor(out, images.map((p) => p.page), pageCount) : [];
+  const planned = assignPages(out, [...images.map((p) => p.page), ...toRender], texts).byPage.size;
+  if (planned > maxPages) { /* refuse every priced model */ res.tooMany = { pages: planned, max: maxPages }; return res; }
+
+  // 2. Render the cited pages that are missing; a throw or a page not returned -> `unrendered`.
+  // 3. Assign again over what can be looked at, with the unrendered pages as `lost`: `none` (no page
+  //    at all) is a genuine refusal, `lost` an incomplete one. The pages checked are always among
+  //    the pages counted in step 1, so the cap holds.
+  const { byPage, none, lost } = assignPages(out, images.map((p) => p.page), texts, new Set(res.unrendered));
+  // 4. One confirm call per page (every model on it), at most `concurrency` at once, none after a
+  //    fatal (quota) error. A page skipped or whose call failed refuses its figures as incomplete;
+  //    a "no" (or a missing / malformed / contradictory answer) refuses them as not printed.
+  // 5. A Sakani price is kept only beside its model's own price, and only below it.
+  return res; // + res.fatal when any call hit a quota or session limit
 }
 
-/** Headline = the lowest confirmed model figures (both printed). Mutates `price`. */
-export function alignHeadline(price, models) {
-  const prices = (models ?? []).map((m) => m.price).filter((v) => typeof v === 'number' && v > 0);
-  if (!prices.length) return price;
-  const subs = (models ?? []).map((m) => m.subsidisedPrice).filter((v) => typeof v === 'number' && v > 0);
-  price.amount = Math.min(...prices);
-  price.from = true;
-  price.onRequest = false;
-  price.period = null;
-  if (subs.length && Math.min(...subs) < price.amount) price.subsidisedAmount = Math.min(...subs);
-  else delete price.subsidisedAmount;
-  return price;
-}
+/** Headline of a whole development = the cheapest confirmed model price, "from"; its Sakani price =
+ *  the cheapest confirmed subsidised price below its own model's price, when below the headline.
+ *  The period is never touched. Unchanged when no model kept a price. */
+export function alignHeadline(price, models) { /* … */ }
 ```
 
-  - `claude.mjs` `confirmModelPrices({ pageImage, items, currency, bin, model, cwd, addDirs, settingsPath })`: one `runClaudeOnce` prompt: "Read the page image … For each numbered model below, answer whether the page VISIBLY PRINTS its price (the regular price, for everyone) and its subsidised price (for housing-subsidy beneficiaries, 'لمستفيدي الدعم'), for THAT model. A figure for another model does not count. Answer `[{\"i\":0,\"price\":true|false,\"subsidisedPrice\":true|false}, …]` and nothing else." The model names go inside `fence('the models and figures to check', …)`. Returns the parsed array, or `[]` on error.
-  - `pipeline.mjs` stage `price`: when `ai.models?.length` and no `caption.price`: `const mp = await checkModelPrices(ai.models, { plainText, pageImages, pageText, confirm: ({abs, items}) => confirmModelPrices({ pageImage: abs, items, currency: price.currency, bin: cfg.claudeBin, model: cfg.claudeModel, cwd: workDir, addDirs: [workDir], settingsPath: confinement.file }) })`; `ai.models = mp.models`; push `mp.refused` into `rejectedPrices`; if any model kept a price → `alignHeadline(price, ai.models)` and mark the headline (and Sakani) as already evidenced (skip their own checks); log `intake.model_prices` `{models, calls, refused: mp.refused.length}`; add warning code `model-price-not-printed` when anything was refused. Under `caption.price`: set every model `price/subsidisedPrice` to null and push the non-null ones into `rejectedPrices` only if they appear in the copy (existing `inCopy` rule). Add `'model-price-not-printed'` to `WARNING_CODES`.
+  - `claude.mjs` `confirmModelPrices({ pageImage, items, currency, bin, model, cwd, addDirs, settingsPath })`: one `runClaudeOnce` prompt: "Read the page image … For each numbered model, say whether that page VISIBLY PRINTS its regular price (for everyone) and its subsidised price (for housing-subsidy beneficiaries, 'لمستفيدي الدعم'), FOR THAT MODEL …". One JSON line per model (JSON.stringify, one line) inside `fence('the models and figures to check', …)`. Returns `{ answers, error, fatal }`: well-formed answers about the models asked only; on a failed call no answers, the error, and `fatal` for a quota or session limit. `confirmPriceEvidence` surfaces `fatal` the same way.
+  - `pipeline.mjs` stage `price` (4a): when `ai.models` carry figures and there is no `caption.price`: `checkModelPrices(ai.models, { pageImages, pageText, pageCount, maxPages: cfg.maxModelPricePages, render: (pages) => renderPdfPages(… dir: 'model-pages'), confirm: (job) => confirmModelPrices(…) })`; `ai.models = mp.models`; `mp.refused` -> `rejectedPrices`; `report.modelPrices = { models, calls, refused, incomplete, incompletePages, fatal, tooMany }`; warning code `model-price-not-printed`, with separate warnings for genuine refusals ("could not be confirmed on the brochure's own pages") and incomplete checks ("could not be completed (pages …) — try again later"), or the too-many-pages one. `mp.fatal` stops every later second-model call: `printed()` returns `unchecked: true` without a call, and the headline / Sakani warnings then say "could not be checked … try again later" instead of "not printed". When any model keeps a price (and the listing is not one `unit`): `alignHeadline(price, ai.models)`, and the headline's own checks are skipped (its figures ARE confirmed model figures). Under `caption.price`: every model `price/subsidisedPrice` -> null, refused outright only when the copy states it. `'model-price-not-printed'` is in `WARNING_CODES`.
 - [ ] **Step 4: E2E cases** in `test/price-pages.test.mjs` (reuse `rig`; extend `FAKE_CLAUDE` to answer the model-confirm prompt — detect `'For each numbered model'` and return `cfg.modelConfirm` (default all true)): (a) two models on scrambled page 3 → one model-confirm call → listingPreview.models has both prices and `price` = lowest; (b) `modelConfirm` refuses one model's price → that model's `price` null, headline from the other.
 - [ ] **Step 5: Run — expect PASS. Commit** `intake: TAQEEM for unit-model prices (one check per page), headline from the lowest model`.
 
