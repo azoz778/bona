@@ -228,9 +228,16 @@ Anything else in the group is ignored, silently.
   or its Sakani price either, which then say "could not be checked … try again later". When any model keeps a price, the headline of a whole
   development becomes the cheapest one, `from` (its period untouched), with the cheapest confirmed
   subsidised price as its Sakani line. A whole development is a `project`, no `unit`, two models or
-  more (`rules.mjs headlineFollowsModels`, the same rule the validator applies): a listing for one
-  specific `unit`, and a single property with one "model" or per-floor rows, keep their own headline
-  checks (never "From …") while their models keep their confirmed prices; the owner's caption price drops every model price, and so does `price <id> …` later (its
+  more (`rules.mjs headlineFollowsModels`, the same rule the validator applies). A listing for one
+  specific `unit`, and a single property (no `project`) with one "model" or per-floor rows, is never
+  published "From" its cheapest model: the prompt has its headline be the property's own printed price
+  (a villa priced per floor: its printed total) with `models` normally empty, and when a reading still
+  takes the headline from the models (the lowest model price as read, `from`), the pipeline clears
+  `from` and publishes the figure only once a second model has seen it printed on its page AS THE WHOLE
+  PROPERTY'S price (`whole`; the text layer cannot tell a floor's price from the villa's) — otherwise
+  "price on request". Its models keep their confirmed prices. "From …" can still appear on a listing
+  that is not a whole development in two cases only: a price the brochure itself prints as "starting
+  from" that is no model's, and a project with a single model (its own headline check decides). The owner's caption price drops every model price, and so does `price <id> …` later (its
   reply says how many models lost their price: the table then shows "On request").
   **Currency** (TAQEEM covers it: a figure printed in £ is not a price in SAR): model prices are written
   and confirmed in the reading's `price.currency` (`modelPriceCurrency`). It never counts for a property

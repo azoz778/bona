@@ -433,10 +433,11 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
    * pages' text, so a price it read from the text layer is still checked on its page. After a quota
    * error no call is made: `unchecked: true`, never confirmed.
    */
-  const printed = async (amount, evidence, { subsidised = false } = {}) => {
+  const printed = async (amount, evidence, { subsidised = false, whole = false } = {}) => {
     // In the text: printed IN the price's currency, or bare where bare figures are in it (printedInCurrency).
-    // "£1,250,000" is a price in pounds, never "1,250,000 SAR".
-    const out = { inText: subsidised ? false : printedInCurrency(haystack, amount, price.currency, { bareCounts: home === price.currency }), confirmed: null };
+    // "£1,250,000" is a price in pounds, never "1,250,000 SAR". `whole`: the figure must be the whole
+    // property's price — which the text layer cannot tell from a floor's or a model's, so only a page can.
+    const out = { inText: subsidised || whole ? false : printedInCurrency(haystack, amount, price.currency, { bareCounts: home === price.currency }), confirmed: null };
     if (out.inText || !pageImages.length) return out;
     // The model's citation when it names a rendered page; otherwise the rendered page whose text
     // carries the number. Either way the second model looks at the page before anything counts.
@@ -459,6 +460,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       subsidised,
       bareCounts: home === price.currency,
       project: wholeDevelopment,
+      whole,
       subject: ai.listing?.title?.en,
       unit: ai.listing?.unit ?? null,
       bin: cfg.claudeBin,
@@ -468,7 +470,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       settingsPath: confinement.file,
     });
     out.confirmed = check.confirmed;
-    log.info('intake.price_evidence', { page: cited.page, subsidised, inferred: cited !== evidence, confirmed: check.confirmed, error: check.error ?? null, fatal: check.fatal === true });
+    log.info('intake.price_evidence', { page: cited.page, subsidised, whole, inferred: cited !== evidence, confirmed: check.confirmed, error: check.error ?? null, fatal: check.fatal === true });
     if (check.fatal) {
       quotaHit = true;
       return { ...out, unchecked: true };
@@ -494,6 +496,10 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   const figuresOf = (m) => [m?.price, m?.subsidisedPrice].filter(isFigure);
   const ownerPriceEdit = Boolean(enrichTarget) && Array.isArray(enrichTarget.listing._intake?.edits) && enrichTarget.listing._intake.edits.includes('price');
   const modelFigures = Array.isArray(ai.models) ? ai.models.flatMap(figuresOf) : [];
+  // The lowest model price AS READ, before any check takes one away: a reading that set its headline from
+  // it (prompt.md: a whole development is "from" its cheapest model) carries exactly this figure, `from`.
+  const readModelPrices = Array.isArray(ai.models) ? ai.models.map((m) => m?.price).filter(isFigure) : [];
+  const readLowest = readModelPrices.length ? Math.min(...readModelPrices) : null;
   // The currency: the model prices are written and confirmed in the reading's `price.currency`, which
   // is a reading only beside a price it read (model-prices.mjs modelPriceCurrency). When it is not one —
   // or, on an enrichment, it is not the listing's own currency (the site prints every model price in
@@ -619,6 +625,20 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       }
     }
   }
+  // "From the cheapest model" is for a whole development only. A single property (no project) or one
+  // specific unit whose reading took its headline from its models — the lowest model price as read,
+  // `from` — is not published "From …" (a villa priced per floor is not "From" its ground floor): `from`
+  // is cleared, and the figure must be confirmed on its page AS THE WHOLE PROPERTY'S PRICE by a second
+  // model (`whole`: never by the text layer, which cannot tell a floor's price from the villa's), else
+  // the listing is on request. A figure the brochure itself prints "starting from" that no model carries
+  // keeps its `from`. (A project with one model is left to its own headline check, `from` and all.)
+  let ownPriceOnly = false;
+  if (!enrich && !caption.price && !headlineFromModels && price && !price.onRequest && price.from === true
+      && isFigure(price.amount) && price.amount === readLowest && (!ai.listing?.project || ai.listing?.unit)) {
+    price.from = false;
+    ownPriceOnly = true;
+    log.info('intake.headline_not_from_models', { amount: price.amount, project: Boolean(ai.listing?.project), unit: Boolean(ai.listing?.unit), models: readModelPrices.length });
+  }
   // An enrichment publishes none of the model's copy, map pin or photos, and decides its headline from
   // the listing (enrichHeadline): the model's own headline and Sakani checks, the copy guard, the map
   // and the photo steps below are for a publish only. Its unit-model prices are checked above, the same.
@@ -644,9 +664,9 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     if (!check.inText && !check.confirmed) rejectedPrices.push(price.amount);
   }
   if (!headlineFromModels && !caption.price && price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0) {
-    report.priceEvidence = await printed(price.amount, ai.priceEvidence);
+    report.priceEvidence = await printed(price.amount, ai.priceEvidence, { whole: ownPriceOnly });
     if (!report.priceEvidence.inText && !report.priceEvidence.confirmed) {
-      log.warn('intake.price_unevidenced', { amount: price.amount, currency: price.currency, unchecked: report.priceEvidence.unchecked === true });
+      log.warn('intake.price_unevidenced', { amount: price.amount, currency: price.currency, unchecked: report.priceEvidence.unchecked === true, whole: ownPriceOnly });
       rejectedPrices.push(price.amount);
       price.amount = null;
       price.onRequest = true;
@@ -654,7 +674,11 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       report.warningCodes.push('price-not-printed');
       report.warnings.push(report.priceEvidence.unchecked
         ? 'the price could not be checked on the brochure (the AI quota ran out), so the listing says "price on request" for now — try again later, or send `price <id> <amount>` to set one'
-        : 'the price was not printed in the brochure, so the listing says "price on request" — send `price <id> <amount>` to set one');
+        : ownPriceOnly
+          ? 'the price read was the lowest unit-model price, which the brochure does not print as this single property\'s own price (a property is not "From" its cheapest model), so the listing says "price on request" — send `price <id> <amount>` to set one'
+          : 'the price was not printed in the brochure, so the listing says "price on request" — send `price <id> <amount>` to set one');
+    } else if (ownPriceOnly) {
+      report.warnings.push('the price read was the lowest unit-model price; a single property is not "From" its cheapest model, so it is shown as the property\'s own price (confirmed on its page)');
     }
   }
   // The subsidised (Sakani) price rides on the headline price: it is published only beside a
@@ -665,7 +689,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     // Checked even under the owner's caption price: the price field drops the figure then (the
     // caption replaces both), but if the model also wrote it into the copy it must be a printed one.
     const evidence = (headline || (caption.price && inCopy(price.subsidisedAmount)))
-      ? await printed(price.subsidisedAmount, ai.subsidisedPriceEvidence, { subsidised: true }) : null;
+      ? await printed(price.subsidisedAmount, ai.subsidisedPriceEvidence, { subsidised: true, whole: ownPriceOnly }) : null;
     report.subsidisedPriceEvidence = evidence;
     if (!evidence?.confirmed) {
       if (headline) {

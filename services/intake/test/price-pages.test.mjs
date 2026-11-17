@@ -182,6 +182,7 @@ if (prompt.includes('For each numbered model')) {
   const page = Number((prompt.match(/\\/p(\\d+)\\.jpg/) || [])[1]);
   const subsidised = /VISIBLY PRINT the price for housing-subsidy/.test(prompt);
   fs.appendFileSync(log, JSON.stringify({ tool: 'claude-confirm', amount, currency, bare: /may be taken as/.test(prompt), subsidised, page, project: /unit models/.test(prompt), mirror: /only the price for everyone else counts/.test(prompt),
+    whole: /only a price printed for the whole property counts/.test(prompt),
     subject: (prompt.match(/listing this price is for[^\\n]*\\n([^\\n]*)/) || [])[1] ?? null }) + '\\n');
   if (cfg.confirmFail === 'quota') {
     process.stdout.write(JSON.stringify({ is_error: true, api_error_status: 429, result: "You've hit your session limit" }));
@@ -1386,6 +1387,112 @@ describe('processPdf: TAQEEM currency — a figure printed in another currency i
       const report = await r.run();
       assert.deepEqual(report.ai.models.map((m) => m.price), [419994, 319015]);
       assert.equal(report.listingPreview.price.amount, 319015);
+    } finally { r.cleanup(); }
+  });
+});
+
+// A single property is never "From" its cheapest model (review 2026-11-17, P3 / P3e). prompt.md keeps
+// "headline = the lowest model price, from" for a whole development (a project, no unit, two models or
+// more); a single property's headline is its own printed price, and its models are normally none. The
+// readings below follow that prompt — and the ones marked "old habit" still take the headline from the
+// models, which the pipeline must not publish as "From …": `from` is cleared and the figure must be
+// confirmed on its page AS THE WHOLE PROPERTY'S price (never by the text layer, which cannot tell a
+// floor's price from the villa's), else "price on request".
+describe('processPdf: a single property is never "From" its cheapest model', { timeout: 120000 }, () => {
+  const model = (en, price, page) => ({
+    name: { en, ar: `نموذج ${en}` }, bedrooms: 5, bathrooms: 6, areaSqm: 450, rooms: null, availability: null,
+    price, subsidisedPrice: null, evidence: { page, quote: `SAR ${price.toLocaleString('en-US')}` }, floorPlan: null,
+  });
+  const ON_REQUEST = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true };
+  const headlineCalls = (r) => r.calls().filter((c) => c.tool === 'claude-confirm');
+  const villa = ({ amount, from, quote, models = [] }) => {
+    const a = { ...answer({ price: { amount, currency: 'SAR', from, period: null, onRequest: false }, priceEvidence: { page: 3, quote } }), models };
+    a.listing.project = null;
+    a.listing.type = 'villa';
+    a.listing.category = 'buy';
+    return a;
+  };
+
+  it('P3e: one villa, one priced "model" — by the prompt its own price; by the old habit never "From SAR 4,400,000"', async () => {
+    const pageText = ['Villa', 'x', 'Villa SAR 4,400,000', 'y', 'z'];
+    // By the prompt: the villa's own printed price, no `from`, no models.
+    const ok = await rig({ listing: villa({ amount: 4400000, from: false, quote: 'SAR 4,400,000' }), pageText, confirm: [4400000] });
+    try {
+      const report = await ok.run();
+      assert.deepEqual(report.listingPreview.price, { amount: 4400000, currency: 'SAR', from: false, period: null, onRequest: false });
+      assert.deepEqual(checkListing(report.listingPreview), []);
+    } finally { ok.cleanup(); }
+    // The old habit: headline = its one model, from. Published as the villa's own price once a second model
+    // has seen it printed AS the villa's price — never "From".
+    const old = await rig({ listing: villa({ amount: 4400000, from: true, quote: 'SAR 4,400,000', models: [model('Villa', 4400000, 3)] }), pageText, confirm: [4400000] });
+    try {
+      const report = await old.run();
+      assert.deepEqual(report.listingPreview.price, { amount: 4400000, currency: 'SAR', from: false, period: null, onRequest: false });
+      assert.deepEqual(headlineCalls(old).map((c) => [c.amount, c.whole, c.project]), [[4400000, true, false]], 'asked as the whole property\'s price');
+      assert.deepEqual(report.listingPreview.models.map((m) => m.price), [4400000]);
+      assert.ok(report.warnings.some((w) => /not "From"/.test(w)), report.warnings.join(' | '));
+      assert.deepEqual(checkListing(report.listingPreview), []);
+    } finally { old.cleanup(); }
+    // …and when the page does not print it as the villa's price: on request, still never "From".
+    const no = await rig({ listing: villa({ amount: 4400000, from: true, quote: 'SAR 4,400,000', models: [model('Villa', 4400000, 3)] }), pageText });
+    try {
+      const report = await no.run();
+      assert.deepEqual(report.listingPreview.price, ON_REQUEST);
+      assert.equal(report.priceEvidence.inText, false, 'the text layer cannot say whose price "SAR 4,400,000" is');
+      assert.ok(report.warningCodes.includes('price-not-printed'));
+    } finally { no.cleanup(); }
+  });
+
+  it('P3: a villa priced per floor (2,000,000 + 2,500,000, total 4,500,000) — the printed total, never "From 2,000,000"', async () => {
+    const pageText = ['Villa', 'x', 'Ground floor SAR 2,000,000\nFirst floor SAR 2,500,000\nTotal SAR 4,500,000', 'y', 'z'];
+    // By the prompt: the headline is the villa's printed total, and its floors are not models.
+    const ok = await rig({ listing: villa({ amount: 4500000, from: false, quote: 'Total SAR 4,500,000' }), pageText, confirm: [4500000] });
+    try {
+      const report = await ok.run();
+      assert.deepEqual(report.listingPreview.price, { amount: 4500000, currency: 'SAR', from: false, period: null, onRequest: false });
+      assert.equal('models' in report.listingPreview, false);
+    } finally { ok.cleanup(); }
+    // The old habit: the floors as models, the headline "from" the cheaper floor. The second model, asked
+    // for the whole villa's price, does not take a floor's for it: on request — never "From SAR 2,000,000",
+    // nor "SAR 2,000,000" off the text layer.
+    const floors = () => [model('Ground floor', 2000000, 3), model('First floor', 2500000, 3)];
+    const old = await rig({ listing: villa({ amount: 2000000, from: true, quote: 'SAR 2,000,000', models: floors() }), pageText, confirm: [4500000] });
+    try {
+      const report = await old.run();
+      assert.deepEqual(report.listingPreview.price, ON_REQUEST);
+      assert.deepEqual(headlineCalls(old).map((c) => [c.amount, c.whole]), [[2000000, true]]);
+      assert.deepEqual(report.listingPreview.models.map((m) => m.price), [2000000, 2500000], 'the floors keep their confirmed prices');
+      assert.deepEqual(checkListing(report.listingPreview), []);
+    } finally { old.cleanup(); }
+  });
+
+  it('one specific unit is not "From" its models either; a project of two models or more still is', async () => {
+    const unit = villa({ amount: 2000000, from: true, quote: 'SAR 2,000,000', models: [model('A', 2000000, 3), model('B', 2500000, 3)] });
+    unit.listing.project = { name: { en: 'Palm Compound', ar: 'مجمع النخيل' }, developer: { en: 'Palm', ar: 'النخيل' } };
+    unit.listing.unit = { unitRef: '12', block: null, floor: null };
+    const pageText = ['Villa', 'x', 'A SAR 2,000,000\nB SAR 2,500,000', 'y', 'z'];
+    const r = await rig({ listing: unit, pageText });
+    try {
+      const report = await r.run();
+      assert.deepEqual(report.listingPreview.price, ON_REQUEST);
+      assert.deepEqual(headlineCalls(r).map((c) => [c.amount, c.whole]), [[2000000, true]]);
+    } finally { r.cleanup(); }
+    const project = villa({ amount: 2000000, from: true, quote: 'SAR 2,000,000', models: [model('A', 2000000, 3), model('B', 2500000, 3)] });
+    project.listing.project = unit.listing.project;
+    const p = await rig({ listing: project, pageText });
+    try {
+      const report = await p.run();
+      assert.deepEqual(report.listingPreview.price, { amount: 2000000, currency: 'SAR', from: true, period: null, onRequest: false });
+      assert.equal(headlineCalls(p).length, 0, 'a whole development\'s headline IS its confirmed cheapest model');
+    } finally { p.cleanup(); }
+  });
+
+  it('a single property whose brochure itself says "starting from" a figure no model has keeps `from`', async () => {
+    const a = villa({ amount: 3900000, from: true, quote: 'starting from SAR 3,900,000', models: [model('Ground floor', 2000000, 3), model('First floor', 2500000, 3)] });
+    const r = await rig({ listing: a, pageText: ['Villa', 'x', 'starting from SAR 3,900,000', 'y', 'z'], confirm: [3900000] });
+    try {
+      const report = await r.run();
+      assert.deepEqual(report.listingPreview.price, { amount: 3900000, currency: 'SAR', from: true, period: null, onRequest: false });
     } finally { r.cleanup(); }
   });
 });

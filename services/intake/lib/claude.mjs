@@ -418,13 +418,14 @@ function currencyRule(currency, bareCounts) {
  * Second opinion on ONE page render: is the price the model claimed actually printed there?
  * Used only for brochures with no text layer, where nothing local can corroborate a number
  * and TAQEEM says we may not publish one we cannot see. The figure must be printed IN `currency`
- * (currencyRule; `bareCounts` when the property is in that currency's own country).
+ * (currencyRule; `bareCounts` when the property is in that currency's own country). `whole`: the
+ * listing is one property whose headline came from its models — only a price for the whole property counts.
  * @returns {Promise<{confirmed:boolean, error?:string, fatal?:boolean}>} on a failed call: not
  *   confirmed, the error message, and `fatal` when it was a quota or session limit (runClaudeOnce) —
  *   the pipeline then makes no more calls for this brochure
  */
 export async function confirmPriceEvidence({
-  pageImage, amount, currency, quote, subsidised = false, project = false, subject = null, unit = null, bareCounts = false, bin = 'claude', model = 'sonnet', cwd,
+  pageImage, amount, currency, quote, subsidised = false, project = false, whole = false, subject = null, unit = null, bareCounts = false, bin = 'claude', model = 'sonnet', cwd,
   addDirs = [], settingsPath = null, timeoutMs = 300000, spawnImpl = spawn,
 }) {
   const which = subsidised
@@ -444,6 +445,10 @@ export async function confirmPriceEvidence({
     ...(project
       ? ['The listing is a whole development sold as several unit models: a price printed for one of its',
         'unit models counts as the property\'s price.']
+      : []),
+    ...(whole
+      ? ['The listing is ONE property, not a whole development: only a price printed for the whole property counts.',
+        'A price printed for one of its floors, parts, phases or layouts does NOT count, and neither does a total you have to add up.']
       : []),
     ...(subsidised
       ? ['It must be printed as the price for subsidy beneficiaries (for example "السعر لمستفيدي الدعم");',

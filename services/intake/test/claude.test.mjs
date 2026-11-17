@@ -719,6 +719,15 @@ describe('confirmPriceEvidence', () => {
     assert.match(f.calls[1].prompt, /printed IN USD/);
   });
 
+  it('`whole`: only a price printed for the whole property counts — not a floor\'s, a part\'s or a layout\'s (a single property, review 2026-11-17)', async () => {
+    const f = fakeSpawn([{ envelope: envelope({ confirmed: false }) }, { envelope: envelope({ confirmed: false }) }]);
+    await confirmPriceEvidence({ ...opts, whole: true, spawnImpl: f.spawnImpl });
+    assert.match(f.calls[0].prompt, /ONE property, not a whole development: only a price printed for the whole property counts/);
+    assert.match(f.calls[0].prompt, /floors, parts, phases or layouts does NOT count/);
+    await confirmPriceEvidence({ ...opts, spawnImpl: f.spawnImpl });
+    assert.doesNotMatch(f.calls[1].prompt, /whole property counts/);
+  });
+
   it('says when the error is a quota or session limit, so the pipeline makes no more calls', async () => {
     const f = fakeSpawn([{ code: 1, envelope: { is_error: true, api_error_status: 429, result: "You've hit your session limit · resets 1am" } }]);
     const got = await confirmPriceEvidence({ ...opts, spawnImpl: f.spawnImpl });
